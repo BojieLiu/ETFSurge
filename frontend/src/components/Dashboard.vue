@@ -21,10 +21,11 @@
           class="core-action-btn"
           @click="enterDesignMode"
           :disabled="designing"
+          aria-label="AI 组合设计：基于当前行情生成三种风格的 ETF 组合方案"
         >
           <span class="action-icon" aria-hidden="true">✨</span>
           <div class="action-content">
-            <span class="action-title">AI 智能组合设计</span>
+            <span class="action-title">AI 组合设计</span>
             <span class="action-desc">基于当前行情生成三种风格的 ETF 组合方案</span>
           </div>
           <span v-if="designing" class="action-loading" aria-hidden="true">⏳</span>
@@ -37,8 +38,8 @@
         >
           <span class="action-icon" aria-hidden="true">🎯</span>
           <div class="action-content">
-            <span class="action-title">策略检查与调仓建议</span>
-            <span class="action-desc" v-if="store.etfs.length">分析当前组合，给出权重调整/替换建议</span>
+            <span class="action-title">策略检查</span>
+            <span class="action-desc" v-if="store.etfs.length">分析当前组合，给出权重调整与替换建议</span>
             <span class="action-desc empty" v-else>请先在组合管理中添加 ETF</span>
           </div>
           <span v-if="checkingStrategy" class="action-loading" aria-hidden="true">⏳</span>
@@ -251,7 +252,7 @@
           <span class="index-name-compact">{{ idx.name }}</span>
           <span class="index-price-compact" v-if="idx.available">{{ formatPrice(idx.price) }}</span>
           <span class="index-price-compact muted" v-else>—</span>
-          <span class="index-change-compact" v-if="idx.available" :class="getChangeClass(idx.change_pct)">
+          <span class="index-change-compact" v-if="idx.available" :class="changeClass(idx.change_pct)">
             {{ formatChange(idx.change_pct) }}
           </span>
           <span class="index-change-compact muted" v-else>暂无</span>
@@ -358,7 +359,7 @@
         </div>
         <div class="summary-content">
           <p class="summary-label">场内当日盈亏</p>
-          <p class="summary-value" :class="[loading ? 'skeleton' : '', pnlOn >= 0 ? 'text-success' : 'text-danger']" aria-live="polite">
+          <p class="summary-value" :class="[loading ? 'skeleton' : '', pnlOn >= 0 ? 'text-up' : 'text-down']" aria-live="polite">
             <Skeleton v-if="loading" type="text" width="120" />
             <span v-else>¥{{ formatNum(pnlOn) }}</span>
           </p>
@@ -371,7 +372,7 @@
         </div>
         <div class="summary-content">
           <p class="summary-label">场外当日盈亏</p>
-          <p class="summary-value" :class="[loading ? 'skeleton' : '', pnlOff >= 0 ? 'text-success' : 'text-danger']" aria-live="polite">
+          <p class="summary-value" :class="[loading ? 'skeleton' : '', pnlOff >= 0 ? 'text-up' : 'text-down']" aria-live="polite">
             <Skeleton v-if="loading" type="text" width="120" />
             <span v-else>¥{{ formatNum(pnlOff) }}</span>
           </p>
@@ -436,9 +437,9 @@
                   <td><code>{{ item.symbol }}</code></td>
                   <td><strong>{{ item.name }}</strong></td>
                   <td><span class="weight-badge">{{ (item.target_weight * 100).toFixed(1) }}%</span></td>
-                  <td>¥{{ formatNum(item.target_amount) }}</td>
+                  <td class="amount-cell">¥{{ formatNum(item.target_amount) }}</td>
                   <td>¥{{ formatPrice(item.current_price) }}</td>
-                  <td :class="getChangeClass(item.change_pct)">
+                  <td :class="changeClass(item.change_pct)">
                     <span class="change-value">{{ formatChange(item.change_pct) }}</span>
                   </td>
                 </tr>
@@ -447,7 +448,7 @@
                 <tr class="footer-row">
                   <td colspan="2"><strong>现金仓位</strong></td>
                   <td><span class="weight-badge">{{ (cashPctOn * 100).toFixed(1) }}%</span></td>
-                  <td><strong>¥{{ formatNum(cashOn) }}</strong></td>
+                  <td class="amount-cell"><strong>¥{{ formatNum(cashOn) }}</strong></td>
                   <td colspan="2">—</td>
                 </tr>
               </tfoot>
@@ -501,9 +502,9 @@
                   <td><code>{{ item.symbol }}</code></td>
                   <td><strong>{{ item.name }}</strong></td>
                   <td><span class="weight-badge">{{ (item.target_weight * 100).toFixed(1) }}%</span></td>
-                  <td>¥{{ formatNum(item.target_amount) }}</td>
+                  <td class="amount-cell">¥{{ formatNum(item.target_amount) }}</td>
                   <td>¥{{ formatPrice(item.current_price) }}</td>
-                  <td :class="getChangeClass(item.change_pct)">
+                  <td :class="changeClass(item.change_pct)">
                     <span class="change-value">{{ formatChange(item.change_pct) }}</span>
                   </td>
                 </tr>
@@ -512,7 +513,7 @@
                 <tr class="footer-row">
                   <td colspan="2"><strong>现金仓位</strong></td>
                   <td><span class="weight-badge">{{ (cashPctOff * 100).toFixed(1) }}%</span></td>
-                  <td><strong>¥{{ formatNum(cashOff) }}</strong></td>
+                  <td class="amount-cell"><strong>¥{{ formatNum(cashOff) }}</strong></td>
                   <td colspan="2">—</td>
                 </tr>
               </tfoot>
@@ -559,18 +560,18 @@
               <tr v-for="item in pnlItems" :key="item.symbol">
                 <td><strong>{{ item.short_name || item.name }}</strong></td>
                 <td><span class="type-badge" :class="item.portfolio_type">{{ item.portfolio_type === 'on_exchange' ? '场内' : '场外' }}</span></td>
-                <td :class="getChangeClass(item.change_pct)">{{ formatChange(item.change_pct) }}</td>
-                <td>¥{{ formatNum(item.target_amount) }}</td>
-                <td :class="getChangeClass(item.daily_pnl)">{{ formatChange(item.daily_pnl, true) }}</td>
+                <td :class="changeClass(item.change_pct)">{{ formatChange(item.change_pct) }}</td>
+                <td class="amount-cell">¥{{ formatNum(item.target_amount) }}</td>
+                <td :class="changeClass(item.daily_pnl)">{{ formatChange(item.daily_pnl, true) }}</td>
                 <td v-if="activeTab === 'off_exchange' || activeTab === 'combined'">{{ item.tracked_index || '—' }}</td>
               </tr>
             </tbody>
             <tfoot>
               <tr class="footer-row summary-row">
                 <td colspan="2"><strong>合计</strong></td>
-                <td :class="pnlWeightedChange >= 0 ? 'text-success' : 'text-danger'">{{ formatChange(pnlWeightedChange) }}</td>
-                <td><strong>¥{{ formatNum(pnlTotalAmount) }}</strong></td>
-                <td :class="pnlTotal >= 0 ? 'text-success' : 'text-danger'"><strong>¥{{ formatNum(pnlTotal) }}</strong></td>
+                <td :class="pnlWeightedChange >= 0 ? 'text-up' : 'text-down'">{{ formatChange(pnlWeightedChange) }}</td>
+                <td class="amount-cell"><strong>¥{{ formatNum(pnlTotalAmount) }}</strong></td>
+                <td class="amount-cell" :class="pnlTotal >= 0 ? 'text-up' : 'text-down'"><strong>¥{{ formatNum(pnlTotal) }}</strong></td>
                 <td v-if="activeTab === 'off_exchange' || activeTab === 'combined'"></td>
               </tr>
             </tfoot>
@@ -602,6 +603,7 @@ import { TitleComponent, TooltipComponent, LegendComponent, GridComponent } from
 import VChart from 'vue-echarts'
 import { usePortfolioStore } from '../stores/portfolio'
 import { portfolioApi, analysisApi, marketApi } from '../api'
+import { changeClass } from '../utils/changeClass'
 import { useToast } from '../stores/toast'
 import { useMarketWS } from '../composables/useMarketWS'
 import AppButton from './ui/AppButton.vue'
@@ -631,13 +633,13 @@ const marketLoading = ref(false)
 const marketTimer = ref(null)
 
 // Core Feature Panel State
-const activeCoreFeature = ref<'design' | 'strategy' | null>(null)
-const designStep = ref<'wizard' | 'result'>('wizard')
+const activeCoreFeature = ref(null)
+const designStep = ref('wizard')
 const designParams = ref({
   riskProfile: 'balanced',
   capital: 500000
 })
-const applyingPlan = ref<string | null>(null)
+const applyingPlan = ref(null)
 
 // Computed
 const hasGlobalIndices = computed(() => Object.values(globalIndices.value).flat().length > 0)
@@ -698,7 +700,7 @@ const formatChange = (n, isAmount = false) => {
   return `${prefix}${val.toFixed(2)}${suffix}`
 }
 
-const getChangeClass = (val) => val >= 0 ? 'text-success' : 'text-danger'
+const getChangeClass = (val) => changeClass(val)
 const getActionLabel = (action) => ({ adjust_weight: '调整权重', replace: '替换', no_change: '不变' }[action] || action )
 
 const fetchGlobalIndices = async () => {
@@ -875,7 +877,7 @@ const pnlBarOption = computed(() => ({
     type: 'bar',
     data: pnlItems.value.map(i => i.daily_pnl || 0),
     itemStyle: {
-      color: (params) => params.value >= 0 ? '#22c55e' : '#ef4444'
+      color: (params) => params.value >= 0 ? '#ef4444' : '#22c55e'
     },
     emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.3)' } }
   }]
@@ -1090,13 +1092,13 @@ watch(() => route.path, () => {
   border-radius: var(--radius-full);
   width: fit-content;
 }
-.index-change.text-success {
-  color: var(--color-success-700);
-  background: var(--color-success-50);
-}
-.index-change.text-danger {
+.index-change.text-up {
   color: var(--color-danger-700);
   background: var(--color-danger-50);
+}
+.index-change.text-down {
+  color: var(--color-success-700);
+  background: var(--color-success-50);
 }
 .index-change.muted {
   color: var(--color-text-tertiary);
@@ -1192,13 +1194,13 @@ watch(() => route.path, () => {
   border-radius: var(--radius-full);
   white-space: nowrap;
 }
-.index-card-compact .index-change-compact.text-success {
-  color: var(--color-success-700);
-  background: var(--color-bg-success-subtle);
-}
-.index-card-compact .index-change-compact.text-danger {
+.index-card-compact .index-change-compact.text-up {
   color: var(--color-danger-700);
   background: var(--color-bg-danger-subtle);
+}
+.index-card-compact .index-change-compact.text-down {
+  color: var(--color-success-700);
+  background: var(--color-bg-success-subtle);
 }
 .index-card-compact .index-change-compact.muted {
   color: var(--color-text-tertiary);
@@ -1334,6 +1336,10 @@ watch(() => route.path, () => {
   color: var(--color-text-secondary);
 }
 
+.summary-content {
+  min-width: 0;
+}
+
 .summary-value {
   margin: 0;
   font-family: var(--font-family-mono);
@@ -1341,13 +1347,16 @@ watch(() => route.path, () => {
   font-weight: var(--font-weight-bold);
   color: var(--color-text-primary);
   line-height: var(--line-height-tight);
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .summary-value.skeleton { color: transparent; }
 
 .text-success { color: var(--color-text-success) !important; }
 .text-danger { color: var(--color-text-danger) !important; }
+.text-up { color: var(--color-text-up) !important; }
+.text-down { color: var(--color-text-down) !important; }
 .text-warning { color: var(--color-text-warning) !important; }
 
 /* Content Grid */
@@ -1460,6 +1469,11 @@ watch(() => route.path, () => {
 .data-table .change-value {
   font-family: var(--font-family-mono);
   font-weight: var(--font-weight-semibold);
+}
+
+.data-table .amount-cell {
+  white-space: nowrap;
+  font-family: var(--font-family-mono);
 }
 
 .data-table .footer-row {

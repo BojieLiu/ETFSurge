@@ -25,3 +25,12 @@ backend/.env
 
 # Test files with secrets
 backend/test_deepseek.py
+
+# Logs
+*.log
+*.err
+logs/
+uvicorn*
+
+# Agent session artifacts
+.sisyphus/

@@ -3,7 +3,7 @@
     <!-- Page Header -->
     <header class="page-header">
       <h1 class="page-title">行情分析</h1>
-      <p class="page-description">市场宏观研判、板块轮动分析与个股深度解读</p>
+      <p class="page-description">市场宏观研判、板块轮动分析与标的深度解读</p>
     </header>
 
     <!-- Section 1: Market Overview -->
@@ -153,7 +153,7 @@
           <span class="section-icon" aria-hidden="true">📈</span>
           个股/ETF 分析
         </h2>
-        <p class="section-desc">技术图表、指标叠加与 AI 个股研报</p>
+        <p class="section-desc">技术图表、指标叠加与 AI 标的研报</p>
       </div>
 
       <div class="card analysis-controls">
@@ -199,8 +199,22 @@
             <AppButton variant="ghost" size="xs" @click="clearSearchItem" aria-label="清除选择">×</AppButton>
           </div>
 
+          <div class="action-row">
+            <AppButton
+              variant="primary"
+              @click="analyzeSymbol"
+              :loading="symbolLoading"
+              :disabled="symbolLoading || !selectedSearchItem"
+            >
+              <span class="btn-icon" aria-hidden="true" v-if="!symbolLoading">🧠</span>
+              <span class="animate-spin" v-else aria-hidden="true">⏳</span>
+              {{ symbolLoading ? '分析中...' : 'AI 标的分析' }}
+            </AppButton>
+          </div>
+
           <!-- Chart Controls -->
-          <div v-if="selectedSearchItem" class="chart-controls">
+          <div class="chart-controls">
+            <div v-if="selectedSearchItem">
             <div class="form-group form-group--small">
               <label class="form-label" for="fa-period">周期</label>
               <AppSelect
@@ -243,6 +257,7 @@
                 {{ faLoading ? '加载中...' : '刷新' }}
               </AppButton>
             </div>
+            </div>
           </div>
 
           <!-- Indicator Toggles -->
@@ -256,7 +271,7 @@
             </div>
           </div>
         </div>
-      </div>
+        </div>
 
       <!-- Chart -->
       <div class="card chart-card" v-if="faChartData && !faLoading">
@@ -269,7 +284,6 @@
         <div class="loading-spinner" aria-hidden="true"></div>
         <p>正在获取图表数据...</p>
       </div>
-    </section>
 
     <!-- Indicators Grid -->
       <section class="card indicators-section" v-if="faIndicatorData && !faLoading">
@@ -316,23 +330,10 @@
         <div class="card-header">
           <h2 class="card-title">
             <span class="card-title-icon" aria-hidden="true">🤖</span>
-            AI 个股深度分析
+            AI 标的深度分析
           </h2>
         </div>
         <div class="card-body">
-          <div class="action-row">
-            <AppButton
-              variant="primary"
-              @click="analyzeSymbol"
-              :loading="symbolLoading"
-              :disabled="symbolLoading || !selectedSearchItem"
-            >
-              <span class="btn-icon" aria-hidden="true" v-if="!symbolLoading">🧠</span>
-              <span class="animate-spin" v-else aria-hidden="true">⏳</span>
-              {{ symbolLoading ? '分析中...' : 'AI 分析标的' }}
-            </AppButton>
-          </div>
-
           <div v-if="symbolLoading" class="loading-state">
             <div class="loading-spinner" aria-hidden="true"></div>
             <p>正在生成深度分析报告...</p>
@@ -348,6 +349,7 @@
           </div>
         </div>
       </section>
+    </section>
 
     <!-- Section 4: Index Analysis -->
     <section class="section-card">
@@ -502,7 +504,9 @@ function renderMarkdown(md) {
     if ((m = line.match(/^(#{1,3})\s+(.*)$/))) {
       closeLists()
       const lvl = m[1].length
-      html += `<h${lvl} class="md-h md-h${lvl}">${inline(m[2])}</h${lvl}>`
+      const htxt = m[2]
+      const riskCls = /风险/.test(htxt) ? ' md-h--risk' : ''
+      html += `<h${lvl} class="md-h md-h${lvl}${riskCls}">${inline(htxt)}</h${lvl}>`
     } else if ((m = line.match(/^[-*]\s+(.*)$/))) {
       if (!inUl) { closeLists(); html += '<ul class="md-ul">'; inUl = true }
       html += `<li>${inline(m[1])}</li>`
@@ -842,10 +846,11 @@ async function fetchFAChart() {
   faLoading.value = true
   try {
     const sym = selectedSearchItem.value.symbol
+    const at = selectedSearchItem.value?.type === 'index' ? 'index' : 'A'
     const [chartRes, indRes, sigRes] = await Promise.all([
-      fetchJson(`/api/v1/market/chart/${sym}?asset_type=A&period=${faPeriod.value}`),
-      fetchJson(`/api/v1/market/indicators/${sym}?asset_type=A`),
-      fetchJson(`/api/v1/market/signal/${sym}?asset_type=A`)
+      fetchJson(`/api/v1/market/chart/${sym}?asset_type=${at}&period=${faPeriod.value}`),
+      fetchJson(`/api/v1/market/indicators/${sym}?asset_type=${at}`),
+      fetchJson(`/api/v1/market/signal/${sym}?asset_type=${at}`)
     ])
     faChartData.value = chartRes.data || chartRes
     faIndicatorData.value = indRes.data || indRes
@@ -1042,9 +1047,6 @@ const faChartOption = computed(() => {
   }
 })
 
-symbolLoading.value = false
-}
-
 // ── Section 4: Index Analysis ──
 const indexQuery = ref('')
 const indexDropdownOpen = ref(false)
@@ -1160,6 +1162,8 @@ onMounted(() => {
   loadIndexMeta()
 })
 
+</script>
+
 <style scoped>
 /* ==========================================
    Market Analysis Styles
@@ -1191,7 +1195,7 @@ onMounted(() => {
 .section-desc { margin: 0; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
 
 /* Card */
-.card { background: var(--color-surface-primary); border: 1px solid var(--color-border-light); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); overflow: hidden; }
+.card { background: var(--color-surface-primary); border: 1px solid var(--color-border-light); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); overflow: visible; }
 .card-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--color-border-light); flex-wrap: wrap; }
 .card-title { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); margin: 0; }
 .card-title-icon { font-size: var(--font-size-xl); line-height: 1; }
@@ -1217,11 +1221,14 @@ onMounted(() => {
 .dropdown-enter-active, .dropdown-leave-active { transition: all var(--duration-fast) var(--ease-out); }
 .dropdown-enter-from, .dropdown-leave-to { opacity: 0; transform: translateY(-8px); }
 
-.search-dropdown { position: absolute; top: calc(100% + var(--space-1)); left: 0; right: 0; max-height: 280px; overflow-y: auto; background: var(--color-surface-primary); border: 1px solid var(--color-border-medium); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); z-index: var(--z-index-dropdown); list-style: none; padding: var(--space-1); }
+.search-dropdown { position: absolute; top: calc(100% + var(--space-1)); left: 0; right: auto; min-width: 340px; max-width: min(480px, 92vw); max-height: 420px; overflow-y: auto; background: var(--color-surface-primary); border: 1px solid var(--color-border-medium); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); z-index: var(--z-index-dropdown); list-style: none; padding: var(--space-1); }
 .search-dropdown > div { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); cursor: pointer; transition: var(--transition-fast); }
 .search-dropdown > div:hover, .search-dropdown > div.active { background: var(--color-surface-hover); }
 .search-dropdown li { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); cursor: pointer; transition: var(--transition-fast); }
 .search-dropdown li:hover, .search-dropdown li.active { background: var(--color-surface-hover); }
+.search-dropdown .si-name { flex: 1; font-size: var(--font-size-sm); color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.search-dropdown .si-code { font-family: var(--font-family-mono); font-size: var(--font-size-xs); font-weight: var(--font-weight-semibold); color: var(--color-brand-600); flex-shrink: 0; }
+.search-dropdown .si-meta { font-size: var(--font-size-xs); color: var(--color-text-tertiary); flex-shrink: 0; }
 .si-name { flex: 1; font-size: var(--font-size-sm); color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .si-code { font-family: var(--font-family-mono); font-size: var(--font-size-xs); font-weight: var(--font-weight-semibold); color: var(--color-brand-600); min-width: 70px; }
 .si-meta { font-size: var(--font-size-xs); font-weight: var(--font-weight-medium); padding: var(--space-0.5) var(--space-1.5); border-radius: var(--radius-full); background: var(--color-surface-tertiary); color: var(--color-text-tertiary); white-space: nowrap; }
@@ -1255,25 +1262,27 @@ onMounted(() => {
 .report-content {
   font-family: var(--font-family-sans);
   font-size: var(--font-size-sm);
-  line-height: 1.7;
-  padding: var(--space-4);
+  line-height: 1.75;
+  padding: var(--space-5) var(--space-6);
   background: var(--color-surface-secondary);
   border: 1px solid var(--color-border-light);
-  border-radius: var(--radius-lg);
-  max-height: 600px;
+  border-radius: var(--radius-xl);
+  max-height: 640px;
   overflow-y: auto;
   color: var(--color-text-primary);
 }
 .report-content .md-h { margin: var(--space-4) 0 var(--space-2); line-height: 1.3; color: var(--color-text-primary); }
 .report-content .md-h1 { font-size: var(--font-size-lg); border-bottom: 1px solid var(--color-border-light); padding-bottom: var(--space-2); }
-.report-content .md-h2 { font-size: var(--font-size-base); }
-.report-content .md-h3 { font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.report-content .md-h2 { font-size: var(--font-size-base); font-weight: 600; margin: var(--space-5) 0 var(--space-2); padding: var(--space-2) var(--space-3); background: var(--color-surface-tertiary); border-left: 4px solid var(--color-brand-600); border-radius: var(--radius-md); }
+.report-content .md-h3 { font-size: var(--font-size-sm); font-weight: 600; color: var(--color-text-secondary); }
+.report-content .md-h--risk { background: var(--color-bg-danger-subtle); border-left-color: var(--color-text-danger); color: var(--color-text-danger); }
+.report-content strong { color: var(--color-text-primary); font-weight: 700; }
 .report-content .md-p { margin: var(--space-2) 0; }
 .report-content .md-ul, .report-content .md-ol { margin: var(--space-2) 0; padding-left: var(--space-6); }
 .report-content .md-ul { list-style: disc; }
 .report-content .md-ol { list-style: decimal; }
 .report-content .md-ul li, .report-content .md-ol li { margin: var(--space-1) 0; }
-.report-content .md-hr { border: none; border-top: 1px solid var(--color-border-light); margin: var(--space-4) 0; }
+.report-content .md-hr { border: none; border-top: 1px dashed var(--color-border-light); margin: var(--space-5) 0; }
 .report-content code { background: var(--color-surface-tertiary); padding: 1px var(--space-1); border-radius: var(--radius-xs); font-family: var(--font-family-mono); font-size: var(--font-size-xs); }
 
 /* Empty Prompt */

@@ -1,11 +1,12 @@
 import asyncio
+import json
 from fastapi import APIRouter, Query, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Any
 
 from ..analysis.llm import (
-    generate_market_report, generate_advice, analyze_news,
+    generate_market_report, generate_advice, analyze_news, analyze_news_impact,
     generate_portfolio_design, generate_sector_analysis, generate_symbol_analysis,
     generate_portfolio_review,
 )
@@ -23,6 +24,26 @@ from ..database import get_db
 
 router = APIRouter(prefix="/api/v1/analysis", tags=["analysis"])
 
+
+def _extract_json(text: str):
+    """从 LLM 返回文本中稳健提取 JSON 对象（兼容 ```json 代码块或前后缀文本）。"""
+    if text is None:
+        raise ValueError("empty LLM response")
+    s = text.strip()
+    if s.startswith("```"):
+        # 去掉 ```json ... ``` 围栏
+        s = s.split("```", 2)[1]
+        if s.lstrip().startswith("json"):
+            s = s.lstrip()[4:]
+        s = s.strip()
+        if s.endswith("```"):
+            s = s[:-3].strip()
+    start = s.find("{")
+    end = s.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        s = s[start:end + 1]
+    return json.loads(s)
+
 FETCH_TIMEOUT = 45
 
 
@@ -36,6 +57,11 @@ class SymbolAnalysisRequest(BaseModel):
     symbol: str
     name: str = ""
     asset_type: str = "A"
+
+
+class NewsImpactRequest(BaseModel):
+    news: dict[str, Any]
+    portfolio: list[dict[str, Any]] = []
 
 
 class LLMReportRequest(BaseModel):
@@ -129,6 +155,13 @@ async def llm_news_analysis():
     return {"analysis": analysis, "news_count": len(news)}
 
 
+@router.post("/news-impact")
+async def news_impact(req: NewsImpactRequest):
+    """分析单条新闻对当前组合内各标的的具体影响。"""
+    result = await analyze_news_impact(req.news, req.portfolio)
+    return result
+
+
 @router.post("/portfolio-design")
 async def portfolio_design(db: AsyncSession = Depends(get_db)):
     market_data, indices, commodities = await _fetch_all_market()
@@ -195,27 +228,9 @@ async def portfolio_review(req: PortfolioReviewRequest):
     # 使用专用系统提示词
     from ..analysis.llm import llm_complete_with_system, REVIEW_SYSTEM_PROMPT
     
-    # JSON Schema 用于强制校验输出格式
-    response_format = {
-        "type": "json_schema",
-        "json_schema": {
-            "name": "portfolio_review_result",
-            "strict": True,
-            "schema": {
-                "type": "object",
-                "required": ["decision", "trigger_rule_id", "signals", "rebalance_plan", "type_adaptation", "compliance_pass", "timestamp"],
-                "properties": {
-                    "decision": {"type": "string", "enum": ["REBALANCE", "HOLD"]},
-                    "trigger_rule_id": {"type": ["string", "null"], "enum": ["TR_DEV_EXCEED", "TR_TREND_REV", "TR_RISK_ALERT", "TR_RP_DRIFT", "CB_VOL", "CB_FREQ", None]},
-                    "signals": {"type": "array", "maxItems": 3, "items": {"type": "object", "required": ["signal_id", "source", "direction", "strength", "horizon", "affected_tickers"], "properties": {"signal_id": {"type": "string"}, "source": {"type": "string"}, "direction": {"type": "string"}, "strength": {"type": "string", "enum": ["强", "中", "弱"]}, "horizon": {"type": "string", "enum": ["噪音(≤1周)", "趋势(1-3月)", "逻辑(≥1年)"]}, "affected_tickers": {"type": "array", "items": {"type": "string"}}}}},
-                    "rebalance_plan": {"type": ["object", "null"], "properties": {"rebalance_date": {"type": "string"}, "sell": {"type": "array", "items": {"type": "object", "required": ["ticker", "target_weight_pct", "reason"], "properties": {"ticker": {"type": "string"}, "target_weight_pct": {"type": "number"}, "reason": {"type": "string"}}}}, "buy": {"type": "array", "items": {"type": "object", "required": ["ticker", "target_weight_pct", "reason"], "properties": {"ticker": {"type": "string"}, "target_weight_pct": {"type": "number"}, "reason": {"type": "string"}}}}, "post_check": {"type": "object"}, "compliance_table": {"type": "array"}, "est_turnover_pct": {"type": "number"}, "est_cost_bps": {"type": "number"}}},
-                    "type_adaptation": {"type": "object", "required": ["type", "thresholds_used"], "properties": {"type": {"type": "string", "enum": ["进攻型", "防御型", "平衡型"]}, "thresholds_used": {"type": "object"}}},
-                    "compliance_pass": {"type": "boolean"},
-                    "timestamp": {"type": "string", "format": "date-time"}
-                }
-            }
-        }
-    }
+    # DeepSeek 当前不支持 response_format=json_schema，改用 json_object 强制 JSON 输出；
+    # 具体字段结构由 REVIEW_SYSTEM_PROMPT 中的输出契约约束（含 hold_reason）。
+    response_format = {"type": "json_object"}
     
     result_text = await llm_complete_with_system(
         REVIEW_SYSTEM_PROMPT,
@@ -223,8 +238,7 @@ async def portfolio_review(req: PortfolioReviewRequest):
         response_format
     )
     
-    import json as _json
-    return _json.loads(result_text)
+    return _extract_json(result_text)
 
 
 @router.post("/sector-analysis")
@@ -254,7 +268,14 @@ async def sector_analysis(req: SectorAnalysisRequest):
     except Exception:
         pass
 
-    report = await generate_sector_analysis(name, sector_data or {}, constituents, news)
+    report = await generate_sector_analysis(
+        sector_code=sector_code,
+        sector_name=name,
+        sector_stocks=constituents,
+        indices=[],
+        commodities=[],
+        market_data=news,
+    )
     return {"sector_name": name, "sector_code": sector_code, "report": report, "constituents_count": len(constituents)}
 
 
@@ -284,5 +305,13 @@ async def symbol_analysis(req: SymbolAnalysisRequest):
         pass
 
     display_name = name or (realtime.get("name", "") if realtime else symbol)
-    report = await generate_symbol_analysis(symbol, display_name, realtime or {}, indicators, news)
+    report = await generate_symbol_analysis(
+        symbol=symbol,
+        name=display_name,
+        asset_type=asset_type,
+        realtime=realtime or {},
+        history=hist,
+        indicators=indicators,
+        news=news,
+    )
     return {"symbol": symbol, "name": display_name, "report": report}
