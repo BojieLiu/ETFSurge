@@ -1,14 +1,14 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import Dashboard from '../components/Dashboard.vue'
-import PortfolioManager from '../components/PortfolioManager.vue'
-import AnalysisView from '../components/AnalysisView.vue'
+import PortfolioAnalysis from '../components/PortfolioAnalysis.vue'
 import MarketAnalysis from '../components/MarketAnalysis.vue'
+import NewsView from '../components/NewsView.vue'
 
 const routes = [
   { path: '/', name: 'dashboard', component: Dashboard },
-  { path: '/portfolio', name: 'portfolio', component: PortfolioManager },
-  { path: '/analysis', name: 'analysis', component: AnalysisView },
+  { path: '/portfolio-analysis', name: 'portfolio-analysis', component: PortfolioAnalysis },
   { path: '/market-analysis', name: 'market-analysis', component: MarketAnalysis },
+  { path: '/news', name: 'news', component: NewsView },
 ]
 
 export default createRouter({ history: createWebHistory(), routes })

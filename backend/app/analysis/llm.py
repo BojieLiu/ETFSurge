@@ -168,7 +168,7 @@ REVIEW_SYSTEM_PROMPT = """# 角色：ETF 组合动态风控官（Strategy Review
 
 ### STEP 2️⃣ 触发决策（二选一，必须二选一）
 - **结论 A：触发调仓** → 填入 `trigger_rule_id`（如 `TR_DEV_EXCEED` / `TR_TREND_REV` / `TR_RISK_ALERT` / `TR_RP_DRIFT`）并列出命中阈值对比
-- **结论 B：按兵不动** → 逐条列出每个信号 `strength < 阈值` 或 `horizon == 噪音` 的具体数值证据
+- **结论 B：按兵不动** → **必须**逐条列出每个信号 `strength < 阈值` 或 `horizon == 噪音` 的具体数值证据，并在输出中包含 `hold_reason` 字段（字符串），说明“为何当前不调仓”的核心理由（如：动量因子 -0.3 未达进攻型入场阈值 0.8；最大回撤 -2.1% 未触发防御型熔断线 -4.0%；风险平价偏移 4.2% 在平衡型容忍带 10% 内；距上次调仓仅 12 天，未达最小再平衡间隔 30 天）
 
 **显式规则表（必须逐条核对）：**
 - TR_TREND_REV: |momentum| > type_thresholds.进攻型.momentum_zscore_entry
@@ -228,7 +228,8 @@ REVIEW_SYSTEM_PROMPT = """# 角色：ETF 组合动态风控官（Strategy Review
   "rebalance_plan": { /* STEP3 结构或 null */ },
   "type_adaptation": {"type": "进攻型", "thresholds_used": {"momentum_zscore_entry": 0.8, "stop_loss_drawdown_pct": -12.0, "max_sector_deviation_pct": 5.0, "min_trend_strength_rsi": 55, "trend_confirmation_weeks": 4}},
   "compliance_pass": true,
-  "timestamp": "ISO8601"
+  "timestamp": "ISO8601",
+  "hold_reason": "当 decision=HOLD 时必填，如：momentum=-0.3 < 阈值0.8，回撤-2.1% > 熔断线-8.0%，距上次调仓仅 12 天 < 最小间隔 30 天"
 }
 ```
 
@@ -242,7 +243,7 @@ REVIEW_SYSTEM_PROMPT = """# 角色：ETF 组合动态风控官（Strategy Review
 5. 给出“建议关注”“可酌情考虑”等模糊表述  
 
 ---
-
+ 
 ## 🎯 输出 JSON Schema（用于 response_format 校验）
 ```json
 {
@@ -255,7 +256,8 @@ REVIEW_SYSTEM_PROMPT = """# 角色：ETF 组合动态风控官（Strategy Review
     "rebalance_plan": {"type": ["object", "null"], "properties": {"rebalance_date": {"type": "string"}, "sell": {"type": "array", "items": {"type": "object", "required": ["ticker", "target_weight_pct", "reason"], "properties": {"ticker": {"type": "string"}, "target_weight_pct": {"type": "number"}, "reason": {"type": "string"}}}}, "buy": {"type": "array", "items": {"type": "object", "required": ["ticker", "target_weight_pct", "reason"], "properties": {"ticker": {"type": "string"}, "target_weight_pct": {"type": "number"}, "reason": {"type": "string"}}}}, "post_check": {"type": "object"}, "compliance_table": {"type": "array"}, "est_turnover_pct": {"type": "number"}, "est_cost_bps": {"type": "number"}}},
     "type_adaptation": {"type": "object", "required": ["type", "thresholds_used"], "properties": {"type": {"type": "string", "enum": ["进攻型", "防御型", "平衡型"]}, "thresholds_used": {"type": "object"}}},
     "compliance_pass": {"type": "boolean"},
-    "timestamp": {"type": "string", "format": "date-time"}
+    "timestamp": {"type": "string", "format": "date-time"},
+    "hold_reason": {"type": ["string", "null"], "description": "当 decision=HOLD 时，必须填写未触发调仓的具体理由（如：momentum=-0.3 < 阈值0.8，回撤-2.1% > 熔断线-8.0%，距上次调仓仅 12 天 < 最小间隔 30 天）"}
   }
 }
 ```"""
@@ -290,7 +292,12 @@ async def llm_complete(prompt: str, response_format: dict | None = None) -> str:
         )
         resp.raise_for_status()
         data = resp.json()
-        return data["choices"][0]["message"]["content"]
+        message = data["choices"][0]["message"]
+        content = message.get("content", "")
+        # Some models (e.g., DeepSeek) put reasoning in reasoning_content and leave content empty
+        if not content:
+            content = message.get("reasoning_content", "")
+        return content
 
 
 async def llm_complete_with_system(system_prompt: str, prompt: str, response_format: dict | None = None) -> str:
@@ -319,7 +326,11 @@ async def llm_complete_with_system(system_prompt: str, prompt: str, response_for
         )
         resp.raise_for_status()
         data = resp.json()
-        return data["choices"][0]["message"]["content"]
+        message = data["choices"][0]["message"]
+        content = message.get("content", "")
+        if not content:
+            content = message.get("reasoning_content", "")
+        return content
 
 
 def _format_indices(indices: list[dict]) -> str:
@@ -396,9 +407,8 @@ async def generate_market_report(
     indicators: dict[str, Any],
     news: list[dict],
     macro_news: list[dict],
-    portfolio: dict | None = None,
 ) -> str:
-    prompt = _build_report_prompt(indices, commodities, market_data, indicators, news, macro_news, portfolio)
+    prompt = _build_report_prompt(indices, commodities, market_data, indicators, news, macro_news)
     return await llm_complete(prompt)
 
 
@@ -424,6 +434,54 @@ async def analyze_news(news_list: list[dict]) -> str:
     return await llm_complete(prompt)
 
 
+NEWS_IMPACT_SYSTEM_PROMPT = """你是专业的 ETF 投资组合策略分析师，擅长评估单条新闻事件对投资组合的影响。
+你必须只返回一个 JSON 对象，不要包含任何额外解释文字。JSON 结构固定为：
+{
+  "impact_scope": "影响范围描述（如：A股宽基指数 / 黄金商品 / 美股科技）",
+  "affected_holdings": [
+    {"symbol": "标的代码", "name": "标的名称", "impact_reason": "该新闻对其的具体影响与逻辑"}
+  ],
+  "summary": "一句话总结该新闻对组合的整体影响"
+}"""
+
+
+async def analyze_news_impact(news_item: dict, holdings: list[dict]) -> dict:
+    """分析单条新闻对当前组合内各标的的具体影响。
+
+    返回 {"impact_scope": str, "affected_holdings": [...], "summary": str}。
+    """
+    from ..routers.analysis import _extract_json
+
+    holdings_text = "\n".join(
+        f"- {h.get('symbol', '')} {h.get('name', '')} "
+        f"({h.get('asset_type', '')}) 目标权重 {h.get('target_weight', '')}"
+        for h in holdings
+    ) or "（组合为空）"
+
+    prompt = f"""新闻标题：{news_item.get('title', '')}
+新闻内容：{news_item.get('content', '')}
+
+当前组合持仓：
+{holdings_text}
+
+请分析这条新闻对组合的影响，重点回答：
+(a) 影响范围（市场/板块）；
+(b) 组合内哪些标的会受到影响、具体如何受影响。
+只返回约定结构的 JSON。"""
+
+    try:
+        text = await llm_complete_with_system(NEWS_IMPACT_SYSTEM_PROMPT, prompt)
+        data = _extract_json(text)
+    except Exception:
+        data = {}
+
+    return {
+        "impact_scope": data.get("impact_scope", "") if isinstance(data, dict) else "",
+        "affected_holdings": (data.get("affected_holdings") or []) if isinstance(data, dict) else [],
+        "summary": data.get("summary", "") if isinstance(data, dict) else "",
+    }
+
+
 def _build_report_prompt(
     indices: list[dict],
     commodities: list[dict],
@@ -431,22 +489,38 @@ def _build_report_prompt(
     indicators: dict[str, Any],
     news: list[dict],
     macro_news: list[dict],
-    portfolio: dict | None = None,
 ) -> str:
     overview = _build_market_overview(indices, commodities, market_data, news, macro_news)
 
     prompt = f"""{overview}
 
-请生成一份专业的市场分析报告，包含：
-1. 市场整体走势研判
-2. 关键风格/板块轮动信号
-3. 宏观流动性与政策解读
-4. 组合层面的操作建议（如有持仓）
-5. 核心风险提示
+请生成一份纯粹的市场环境研判报告。
+重要约束：本报告只做市场研判，严禁给出任何具体组合（进攻型 / 平衡型 / 防御型）的仓位配置、买卖清单或调仓指令——组合层面的操作请使用「检视策略」功能。
 
-要求：专业、客观、可执行，控制在 800 字以内。"""
-    if portfolio:
-        prompt += f"\n\n当前组合：{json.dumps(portfolio, ensure_ascii=False)}"
+报告须使用 Markdown，包含以下 4 个一级章节（以 `##` 作为章节标题），章节之间用 `---` 分隔：
+
+## 1. 市场阶段与核心矛盾
+- 市场阶段：趋势延续 / 横盘消化 / 趋势终结（须给出明确判断与依据）
+- 风格特征：单一主线 / 风格扩散 / 均衡
+- 资金行为：增量与存量资金在买什么、卖什么
+- 核心矛盾：当前最大的不确定性来源
+
+## 2. 宏观流动性与政策解读
+- 国内流动性：货币与利率信号
+- 海外流动性与地缘：美债、美元、油价、地缘冲突的传导
+- 政策信号：有无稳增长或行业政策出台
+
+## 3. 板块与风格轮动信号
+- 强势板块 / 弱势板块及幅度
+- 风格切换迹象（价值 / 成长、大 / 小盘）
+
+## 4. 核心风险提示
+- 按风险等级列出 2~4 条关键风险，并给出可观测的触发条件
+
+格式要求：
+- 关键结论与数字用 `**加粗**` 标注，数字必须引用上方输入数据
+- 要点用 `-` 列表，语言专业、客观、可执行
+- 全程控制在 900 字以内"""
     return prompt
 
 
@@ -500,39 +574,124 @@ async def generate_portfolio_design(
 
 ---
 
-## 任务要求
+## 硬性约束（必须遵守）
 
-设计一份 ETF 组合，满足：
-1. 覆盖 A股宽基、行业主题、跨境、商品四大类
-2. 共 8-12 只 ETF，单只权重 5%-15%
-3. 同一行业不超过 2 只
-4. 成长与价值均衡
-5. 推荐 ETF 必须为主流品种（规模≥10亿，日均成交额≥5000万）
-6. **不包含债券类 ETF**
+1. **每个组合 8-12 只 ETF（含现金）**，超过 12 只判定无效
+2. 单只 ETF 权重 5%-15%，同一行业 ≤ 2 只，前 5 大权重 ≤ 50%
+3. **不包含债券类 ETF**（债券投资由用户独立管理）
+4. 成长:价值 ≈ 1:1，单一风格 ≤ 60%
+5. **三档风险梯度（不含债券）**：
+   - 进攻型：权益 ≥ 85%，现金 ≤ 10%
+   - 平衡型：权益 65-75%，现金 10-15%
+   - 防御型：权益 50-60%，现金 15-20%，黄金 ≤ 8%
 
-请输出 JSON 格式：
+## 推荐参考（灵活取舍）
+
+**宽基指数**：中证A500、沪深300、中证500、中证1000、创业板、科创50、上证50、沪深300成长/价值
+**行业主题**：半导体/设备/芯片、AI/机器人/工业母机、新能车/光伏/锂电/储能、医药/创新药/器械、军工/航天、消费/白酒/家电、红利/银行/高股息、通信/云/软件、电力/公用事业
+**跨境 ETF**：纳指100、标普500、恒生科技、恒生互联网、日经225、MSCI中国、港股通消费/医药
+**商品 ETF**：黄金、原油、有色
+**策略指数**：红利低波动100、自由现金流、质量、价值、成长、低波动、ESG、央企、国企
+
+## 输出要求（JSON 格式）
+
+请输出完整的组合设计，包含以下维度的深度分析：
+
 ```json
 {{
   "portfolio_name": "组合名称",
   "portfolio_type": "进攻型|平衡型|防御型",
+  "market_analysis": {{
+    "macro_environment": "宏观环境分析（货币政策、财政政策、经济周期位置）",
+    "liquidity_condition": "流动性环境分析（利率、信用利差、融资余额、北向资金）",
+    "style_preference": "风格偏好判断（成长/价值、大盘/小盘、顺势/逆势）",
+    "sector_opportunity": "板块机会识别（景气度上行、政策催化、估值修复）",
+    "risk_assessment": "核心风险点评估（系统性/非系统性/流动性/政策）"
+  }},
+  "allocation_rationale": {{
+    "asset_class_allocation": "大类资产配置理由（权益/商品/跨境比例及理由）",
+    "equity_style_tilt": "权益风格倾斜（成长/价值/红利/低波/质量）",
+    "geographic_allocation": "地域配置理由（A股/港股/美股/其他）",
+    "sector_allocation": "行业配置逻辑（核心配置/卫星配置/对冲配置）"
+  }},
   "etfs": [
     {{
       "symbol": "ETF代码",
       "name": "ETF名称",
       "asset_class": "资产类别",
       "target_weight": 0.15,
-      "reason": "配置理由（引用具体市场数据）",
-      "tracked_index": "跟踪指数代码（场外基金必填）"
+      "selection_rationale": "选入理由：基本面/估值/动量/政策/流动性等多维支撑",
+      "weight_rationale": "仓位设置理由：核心/卫星/对冲定位、风险预算分配、流动性考量",
+      "tracked_index": "跟踪指数代码（场外基金必填）",
+      "key_metrics": {{
+        "scale_billion": "规模(亿)",
+        "avg_volume_million": "日均成交额(百万)",
+        "pe_ttm": "PE-TTM",
+        "pb": "PB",
+        "ytd_return": "年内涨幅%"
+      }}
     }}
   ],
-  "expected_return": "预期年化收益",
-  "expected_volatility": "预期年化波动",
-  "max_drawdown_estimate": "预估最大回撤",
-  "risk_factors": ["风险因子1", "风险因子2"]
+  "portfolio_metrics": {{
+    "expected_return": "预期年化收益",
+    "expected_volatility": "预期年化波动",
+    "max_drawdown_estimate": "预估最大回撤",
+    "sharpe_estimate": "预估夏普比率",
+    "turnover_estimate": "预估年换手率"
+  }},
+  "risk_factors": ["风险因子1", "风险因子2", "风险因子3"],
+  "rebalance_rules": "再平衡规则（触发条件/频率/方式）"
 }}
 ```"""
-    response = await llm_complete(prompt, response_format={"type": "json_object"})
-    return json.loads(response)
+    # Call LLM and handle response with fallback JSON parsing
+    try:
+        response = await llm_complete(prompt)
+    except Exception as e:
+        import logging as _lg
+        _lg.warning(f"LLM call failed: {e}")
+        return _empty_portfolio_response()
+
+    if not response or not response.strip():
+        return _empty_portfolio_response()
+
+    # Try direct JSON parse
+    try:
+        import json as _json
+        parsed = _json.loads(response)
+        if parsed and parsed.get("portfolios"):
+            return parsed
+    except Exception:
+        pass
+
+    # Try to extract JSON from ``` blocks
+    try:
+        cleaned = response.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        import json as _json
+        data = _json.loads(cleaned) if cleaned else {}
+        if data.get("portfolios"):
+            return data
+    except Exception:
+        pass
+
+    # Last resort: extract JSON from between first { and last }
+    try:
+        start = response.index("{")
+        end = response.rindex("}")
+        inner = response[start:end+1]
+        import json as _json
+        data = _json.loads(inner)
+        if data.get("portfolios"):
+            return data
+    except Exception:
+        pass
+
+    return {"market_environment": "分析异常", "portfolios": [], "raw": response[:500]}
+
+
+def _empty_portfolio_response() -> dict:
+    return {"market_environment": "数据获取异常", "portfolios": []}
 
 
 # 新增：组合检视/再平衡

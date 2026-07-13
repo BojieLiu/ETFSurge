@@ -32,20 +32,56 @@ def _cached(key: str, producer, ttl: int | None = None):
     return data
 
 
+def classify_news_level(title: str) -> int:
+    """关键词法将快讯标题归类为 1~5 级重要性。
+
+    5=重大/紧急, 4=利好, 3=利空, 2=提醒/关注, 1=其他。
+    """
+    t = (title or "").lower()
+    if any(k in t for k in ("重大", "紧急", "突发", "重磅", "urgent", "特急")):
+        return 5
+    if any(k in t for k in ("利好", "上调", "降准", "降息", "positive", "超预期")):
+        return 4
+    if any(k in t for k in ("利空", "下调", "暴跌", "negative")):
+        return 3
+    if any(k in t for k in ("提醒", "关注", "注意", "风险", "watch")):
+        return 2
+    return 1
+
+
+def _level_of(row: dict[str, Any], title: str) -> int:
+    """优先使用数据源自带的 level/rank/importance 字段，否则关键词归类。"""
+    for key in ("level", "rank", "importance", "level_num"):
+        v = row.get(key)
+        if isinstance(v, int) and 1 <= v <= 5:
+            return v
+        if isinstance(v, str) and v.isdigit():
+            iv = int(v)
+            if 1 <= iv <= 5:
+                return iv
+    return classify_news_level(title)
+
+
 def fetch_cailian_telegraph(limit: int = 30) -> list[dict[str, Any]]:
-    """财联社实时电报(快讯)。levistock 已封装财联社签名接口。"""
+    """财联社实时电报(快讯)。levistock 已封装财联社签名接口。
+
+    每条快讯附加 level(1~5) 与 stars(=level) 重要性标识。
+    """
 
     def _p() -> list[dict[str, Any]]:
         rows = _safe(lv.news_telegraph_cls, 6) or []
-        out = [
-            {
-                "title": r.get("title", ""),
+        out = []
+        for r in rows:
+            title = r.get("title", "")
+            level = _level_of(r, title)
+            out.append({
+                "title": title,
                 "content": r.get("content", ""),
                 "time": r.get("time", ""),
                 "source": "财联社",
-            }
-            for r in rows
-        ]
+                "level": level,
+                "stars": level,
+            })
         return out[:limit]
 
     return _cached("telegraph", _p)

@@ -7,6 +7,7 @@ from .config import settings
 from .database import init_db
 from .services.cache_service import redis_cache
 from .tasks.market_refresh import refresh_market_cache
+from .tasks.news_refresh import refresh_news_cache
 from .routers import market, portfolio, analysis, news, ws
 
 
@@ -22,9 +23,15 @@ async def lifespan(app: FastAPI):
                 await asyncio.wait_for(refresh_market_cache(), timeout=12)
             except (asyncio.TimeoutError, Exception):
                 pass
+        async def _news_scheduler_wrapper():
+            try:
+                await asyncio.wait_for(refresh_news_cache(), timeout=30)
+            except (asyncio.TimeoutError, Exception):
+                pass
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
         scheduler = AsyncIOScheduler()
         scheduler.add_job(_scheduler_wrapper, "interval", seconds=15, id="refresh_market_cache", max_instances=1, coalesce=True)
+        scheduler.add_job(_news_scheduler_wrapper, "interval", seconds=30, id="refresh_news_cache", max_instances=1, coalesce=True)
         scheduler.start()
         app.state.scheduler = scheduler
     except Exception:

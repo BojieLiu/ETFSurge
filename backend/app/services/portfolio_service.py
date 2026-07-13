@@ -1,4 +1,4 @@
-from sqlalchemy import select
+﻿from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Any
 
@@ -76,7 +76,9 @@ async def remove_etf(db: AsyncSession, symbol: str) -> bool:
 
 def _build_price_map(etfs: list[PortfolioETF]) -> dict[str, tuple[float, float]]:
     """批量获取一次行情数据，构建 {symbol: (price, change_pct)} 映射。"""
-    from ..fetchers.akshare_fetcher import fetch_a_stock_batch, fetch_hk_stock_realtime, fetch_index_realtime
+    from ..fetchers.akshare_fetcher import (
+        fetch_a_stock_batch, fetch_fund_nav, fetch_hk_stock_realtime, fetch_index_realtime,
+    )
 
     a_symbols = [e.symbol for e in etfs if e.asset_type == "A" and e.symbol[:1] in ("1", "5", "6")]
     hk_symbols = [e.symbol for e in etfs if e.asset_type == "HK"]
@@ -137,21 +139,45 @@ def _build_price_map(etfs: list[PortfolioETF]) -> dict[str, tuple[float, float]]
             except Exception:
                 pass
 
+    # 场外 OTC 联接基金：A股实时行情无法获取其代码，改用基金单位净值(NAV)。
+    for e in etfs:
+        if getattr(e, "portfolio_type", None) != "off_exchange":
+            continue
+        if e.symbol in m:
+            continue
+        nav = None
+        try:
+            nav = fetch_fund_nav(e.symbol)
+        except Exception:
+            nav = None
+        if nav:
+            m[e.symbol] = nav
+        elif e.tracked_index and e.tracked_index in m:
+            # 退而求其次：净值跟随跟踪指数的涨跌幅
+            m[e.symbol] = m[e.tracked_index]
+
     return m
 
 
 async def calculate_allocation(
-    db: AsyncSession, total_capital: float, portfolio_type: str | None = None
+    db: AsyncSession | None = None,
+    total_capital: float = 0.0,
+    portfolio_type: str | None = None,
+    etfs: list[PortfolioETF] | None = None,
 ) -> dict[str, Any]:
-    etfs = await list_etfs(db, portfolio_type)
+    if etfs is None:
+        etfs = await list_etfs(db, portfolio_type)
     weight_sum = sum(e.target_weight for e in etfs)
     if weight_sum <= 0:
         return {"total_capital": total_capital, "allocations": []}
 
     price_map = _build_price_map(etfs)
     allocations = []
+    total_amount = 0.0
     for e in etfs:
-        target_amount = total_capital * (e.target_weight / weight_sum)
+        # 注意：使用原始权重（不按 weight_sum 归一化），使 cash 权重 = 1 - weight_sum 有意义
+        target_amount = total_capital * e.target_weight
+        total_amount += target_amount
         price, change_pct = price_map.get(e.symbol, (0, 0))
         # For off-exchange with tracked index, use tracked_index change
         if e.portfolio_type == "off_exchange" and e.tracked_index:
@@ -175,6 +201,7 @@ async def calculate_allocation(
     return {
         "total_capital": total_capital,
         "allocations": allocations,
+        "total_amount": round(total_amount, 2),
         "cash_weight": cash_weight,
         "cash_amount": cash_amount,
     }
@@ -212,11 +239,16 @@ async def calculate_allocation(
 
 
 async def calculate_daily_pnl(
-    db: AsyncSession, total_capital: float, portfolio_type: str | None = None
+    db: AsyncSession | None = None,
+    total_capital: float = 0.0,
+    portfolio_type: str | None = None,
+    etfs: list[PortfolioETF] | None = None,
 ) -> dict[str, Any]:
     """返回每只基金的当日盈亏和汇总。场外基金使用跟踪指数的涨跌幅作为预估收益。"""
-    allocation = await calculate_allocation(db, total_capital, portfolio_type)
-    etfs = await list_etfs(db, portfolio_type)
+    if etfs is None:
+        etfs = await list_etfs(db, portfolio_type)
+    allocation = await calculate_allocation(db, total_capital, portfolio_type, etfs)
+    etf_map = {e.symbol: e for e in etfs}
     etf_map = {e.symbol: e for e in etfs}
     price_map = _build_price_map(etfs)
     pnl_items = []
@@ -306,3 +338,77 @@ async def strategy_check(db: AsyncSession, total_capital: float) -> dict[str, An
         "suggestions": llm_result.get("suggestions", []),
         "raw_llm": str(llm_result),
     }
+
+# 应用策略
+async def apply_strategy_suggestions(db: AsyncSession, suggestions: list) -> dict[str, Any]:
+    """应用策略建议到持仓"""
+    try:
+        # 获取所有持仓
+        etfs = await list_etfs(db)
+        if not etfs:
+            return {"symbols": [], "applied_suggestions": suggestions, "message": "无持仓可应用策略"}
+
+        etf_dict = {etf.symbol: etf for etf in etfs}
+
+        applied = []
+        for s in suggestions:
+            symbol = s.get("symbol")
+            action = s.get("action")
+            weight = s.get("weight")
+            if not symbol or symbol not in etf_dict:
+                applied.append({"symbol": symbol, "action": action, "status": "error", "message": f"ETF {symbol} 不存在"})
+                continue
+            etf = etf_dict[symbol]
+            if action == "adjust_weight" and weight is not None:
+                etf.target_weight = max(0, min(0.5, etf.target_weight + weight))
+                applied.append({"symbol": symbol, "action": action, "status": "success", "message": f"已调整 {symbol} 权重"})
+            elif action == "replace" and weight is not None:
+                etf.target_weight = max(0, min(0.5, weight))
+                applied.append({"symbol": symbol, "action": action, "status": "success", "message": f"已替换 {symbol} 权重"})
+            elif action == "add" and weight is not None:
+                etf.target_weight = max(0, min(0.5, weight))
+                etf.is_active = True
+                applied.append({"symbol": symbol, "action": action, "status": "success", "message": f"已添加 {symbol}"})
+            else:
+                applied.append({"symbol": symbol, "action": action, "status": "error", "message": f"不支持的操作 {action}"})
+
+        await db.commit()
+        updated = await list_etfs(db)
+        return {"symbols": [{"symbol": e.symbol, "name": e.name, "target_weight": e.target_weight} for e in updated], "applied": applied}
+    except Exception as e:
+        await db.rollback()
+        raise e
+
+
+# 应用组合设计
+async def apply_portfolio_design(db: AsyncSession, design: dict) -> dict[str, Any]:
+    """根据组合设计应用持仓"""
+    try:
+        portfolio_type = design.get("portfolio_type", "on_exchange")
+        symbols = design.get("symbols", [])
+        weights = design.get("weights", {})
+        if not symbols:
+            return {"symbols": [], "message": "组合设计中没有指定持仓"}
+
+        etfs = await list_etfs(db)
+        etf_dict = {e.symbol: e for e in etfs}
+        applied = []
+        for symbol in symbols:
+            w = max(0, min(0.5, weights.get(symbol, 0.1)))
+            if symbol in etf_dict:
+                e = etf_dict[symbol]
+                e.target_weight = w
+                e.portfolio_type = portfolio_type
+                applied.append({"symbol": symbol, "name": e.name, "target_weight": w, "portfolio_type": portfolio_type, "action": "updated"})
+            else:
+                new_etf = PortfolioETF(symbol=symbol, name=f"{symbol} ETF", short_name=symbol, asset_type="ETF",
+                    target_weight=w, portfolio_type=portfolio_type, tracked_index=None, is_active=True)
+                db.add(new_etf)
+                applied.append({"symbol": symbol, "name": new_etf.name, "target_weight": w, "portfolio_type": portfolio_type, "action": "added"})
+
+        await db.commit()
+        updated = await list_etfs(db)
+        return {"symbols": [{"symbol": e.symbol, "name": e.name, "target_weight": e.target_weight, "portfolio_type": e.portfolio_type} for e in updated], "applied": applied}
+    except Exception as e:
+        await db.rollback()
+        raise e

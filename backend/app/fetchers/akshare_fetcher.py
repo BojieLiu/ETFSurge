@@ -341,6 +341,28 @@ def fetch_index_realtime() -> list[dict[str, Any]]:
         return _tencent_realtime(codes, "index")
 
 
+def fetch_fund_nav(symbol: str) -> tuple[float, float] | None:
+    """获取场外开放式基金的单位净值与日涨跌幅（用于 OTC 联接基金）。
+
+    返回 (unit_net_value, daily_growth_pct)，取最新一条记录；不可用返回 None。
+    """
+    try:
+        with no_proxy():
+            import akshare as ak
+            df = ak.fund_open_fund_info_em(symbol=symbol, indicator="单位净值")
+        _decode_df(df)
+        if df is None or len(df) == 0:
+            return None
+        last = df.iloc[-1]
+        nav = float(last.get("单位净值") or last.get("unit_net_value") or 0)
+        chg = float(last.get("日增长率") or last.get("daily_growth_rate") or 0)
+        if nav:
+            return (nav, round(chg, 2))
+        return None
+    except Exception:
+        return None
+
+
 def fetch_index_history(symbol: str, period: str = "daily") -> list[dict[str, Any]]:
     """获取指数历史 K 线（日线/周线/月线），使用 akshare stock_zh_index_daily。
     akshare 返回格式: 日期,开盘,最高,最低,收盘,成交量,成交额。"""

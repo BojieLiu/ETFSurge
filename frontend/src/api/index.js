@@ -22,7 +22,11 @@ export const portfolioApi = {
   remove: (symbol) => api.delete(`/portfolio/etfs/${symbol}`),
   calculate: (totalCapital, type) => api.post('/portfolio/calculate', { total_capital: totalCapital }, { params: type ? { portfolio_type: type } : {} }),
   dailyPnl: (totalCapital, type) => api.post('/portfolio/daily-pnl', { total_capital: totalCapital }, { params: type ? { portfolio_type: type } : {} }),
+  getAllocation: (type, totalCapital) => api.post('/portfolio/calculate', { total_capital: totalCapital }, { params: type ? { portfolio_type: type } : {} }),
+  getPnl: (type, totalCapital) => api.post('/portfolio/daily-pnl', { total_capital: totalCapital }, { params: type ? { portfolio_type: type } : {} }),
   strategyCheck: (totalCapital) => api.post('/portfolio/strategy-check', { total_capital: totalCapital }),
+  applyStrategy: (suggestions) => api.post('/portfolio/apply-strategy', suggestions),
+  applyPortfolioDesign: (design) => api.post('/portfolio/apply-design', design),
 }
 
 export const analysisApi = {
@@ -38,4 +42,5 @@ export const newsApi = {
   global: () => api.get('/news/global'),
   stockNews: (symbol) => api.get(`/news/stock/${symbol}`),
   research: (symbol) => api.get(`/news/research/${symbol}`),
+  newsImpact: (payload) => api.post('/analysis/news-impact', payload),
 }

@@ -89,6 +89,9 @@
   --color-text-link-hover: var(--color-brand-700);
   --color-text-success: var(--color-success-700);
   --color-text-danger: var(--color-danger-700);
+  /* 红涨绿跌 (Chinese P&L convention): up/gain = red, down/loss = green */
+  --color-text-up: var(--color-danger-700);
+  --color-text-down: var(--color-success-700);
   --color-text-warning: var(--color-warning-700);
   --color-text-info: var(--color-info-700);
 
@@ -390,6 +393,9 @@
 .text-brand-hover:hover { color: var(--color-brand-700); }
 .text-success { color: var(--color-text-success); }
 .text-danger { color: var(--color-text-danger); }
+/* 红涨绿跌 (Chinese P&L convention): up/gain = red, down/loss = green */
+.text-up { color: var(--color-text-up); }
+.text-down { color: var(--color-text-down); }
 .text-warning { color: var(--color-text-warning); }
 .text-info { color: var(--color-text-info); }
 

@@ -87,11 +87,12 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
             item["asset_type"] = "index"
             regions.setdefault(region, []).append(item)
 
-    # 海外指数（yfinance，失败则降级为占位）
+    # 海外指数（yfinance，失败则降级为占位）。每个源独立 try/except，
+    # 单一地区失败（如美股闭市/网络抖动）不影响其他地区返回真实数据。
     async def _foreign(sym: str, name: str, region: str):
         d = None
         try:
-            d = await _sync(yfinance_fetcher.fetch_us_etf_realtime, sym, timeout=15)
+            d = await _sync(yfinance_fetcher.fetch_index_realtime, sym, timeout=15)
         except Exception:
             d = None
         if d and d.get("price") is not None:

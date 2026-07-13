@@ -11,7 +11,7 @@ from typing import Any
 
 from ..utils.proxy import no_proxy
 from .akshare_fetcher import _decode_df
-from .levistock_fetcher import fetch_cailian_telegraph
+from .levistock_fetcher import classify_news_level, fetch_cailian_telegraph
 
 _CACHE: dict[str, tuple[float, Any]] = {}
 _TTL = {"headlines": 120, "macro": 300, "global": 300, "stock": 300}
@@ -78,6 +78,17 @@ def fetch_news_headlines() -> list[dict[str, Any]]:
     return _cached("headlines", _p)
 
 
+def _attach_level(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """为缺少 level 的资讯条目补充 level/stars（财联社来源已在源头附加）。"""
+    for it in items:
+        if "level" not in it:
+            title = it.get("title", "")
+            level = classify_news_level(title)
+            it["level"] = level
+            it["stars"] = level
+    return items
+
+
 def fetch_macro_news() -> list[dict[str, Any]]:
     def _p() -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
@@ -86,7 +97,7 @@ def fetch_macro_news() -> list[dict[str, Any]]:
         items += _ak(lambda ak: ak.news_economic_cls())      # 东方财富宏观
         if not items:
             items = fetch_news_headlines()
-        return _dedupe(items)[:25]
+        return _attach_level(_dedupe(items)[:25])
 
     return _cached("macro", _p)
 
@@ -111,7 +122,7 @@ def fetch_global_news() -> list[dict[str, Any]]:
                     )
         if not items:
             items += _ak(lambda ak: ak.stock_info_global_cls())
-        return _dedupe(items)[:25]
+        return _attach_level(_dedupe(items)[:25])
 
     return _cached("global", _p)
 
@@ -122,7 +133,7 @@ def fetch_stock_news(symbol: str) -> list[dict[str, Any]]:
         items += _ak(lambda ak: ak.stock_news_em(symbol=symbol))  # 东方财富个股(主源)
         if not items:
             items += fetch_cailian_telegraph(20)                   # 财联社兜底
-        return _dedupe(items)[:25]
+        return _attach_level(_dedupe(items)[:25])
 
     return _cached("stock:" + symbol, _p)
 

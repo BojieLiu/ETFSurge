@@ -175,11 +175,23 @@
             </tr>
           </thead>
           <tbody>
-            <template v-for="etf in currentEtfs" :key="etf.symbol">
-              <tr>
-              <td><code>{{ etf.symbol }}</code></td>
-              <td><strong>{{ etf.name }}</strong></td>
-              <td><span class="type-badge" :class="etf.asset_type.toLowerCase()">{{ etf.asset_type }}</span></td>
+             <template v-for="etf in currentEtfs" :key="etf.symbol">
+               <tr
+                 :class="{ 'etf-row--selected': etf.symbol === props.selectedSymbol }"
+                 :aria-selected="etf.symbol === props.selectedSymbol"
+                 @click="emit('select', etf)"
+               >
+               <td>
+                 <span v-if="etf.symbol === props.selectedSymbol" class="row-check" aria-hidden="true">✓</span>
+                 <code>{{ etf.symbol }}</code>
+               </td>
+               <td>
+                 <strong>{{ etf.name }}</strong>
+                 <span class="exchange-badge" :class="etf.portfolio_type === 'on_exchange' ? 'on' : 'off'">
+                   {{ etf.portfolio_type === 'on_exchange' ? '场内' : '场外' }}
+                 </span>
+               </td>
+               <td><span class="type-badge" :class="etf.asset_type.toLowerCase()">{{ etf.asset_type }}</span></td>
               <td class="weight-cell">
                 <div class="weight-control">
                   <input
@@ -207,20 +219,20 @@
                 <span v-else class="text-muted">—</span>
               </td>
               <td>
-                <div class="action-buttons">
-                  <AppButton size="sm" variant="secondary" @click="onUpdate(etf)" :disabled="etf.editWeight == null">
-                    更新
-                  </AppButton>
-                  <AppButton size="sm" variant="danger" @click="onRemove(etf.symbol)">
-                    删除
-                  </AppButton>
-                </div>
+                 <div class="action-buttons">
+                   <AppButton size="sm" variant="secondary" @click.stop="onUpdate(etf)" :disabled="etf.editWeight == null">
+                     更新
+                   </AppButton>
+                   <AppButton size="sm" variant="danger" @click.stop="onRemove(etf.symbol)">
+                     删除
+                   </AppButton>
+                 </div>
               </td>
             </tr>
             <tr v-if="etf.portfolio_type === 'off_exchange'" class="ta-expand">
               <td :colspan="8">
-                <div class="off-ta">
-                  <button class="ta-toggle" @click="toggleTa(etf)">
+                 <div class="off-ta">
+                   <button class="ta-toggle" @click.stop="toggleTa(etf)">
                     {{ taOpen[etf.symbol] ? '收起技术分析 ▲' : '查看技术分析 ▼' }}
                     <span class="ta-tracked">{{ taTarget(etf).assetType === 'index' ? '跟踪指数 ' + etf.tracked_index : '标的 ' + etf.symbol }}</span>
                   </button>
@@ -270,6 +282,12 @@ import AppSelect from './ui/AppSelect.vue'
 
 const store = usePortfolioStore()
 const { toast } = useToast()
+
+// Props / emits (selection indicator driven by a parent, e.g. the merged view)
+const props = defineProps({
+  selectedSymbol: { type: String, default: '' },
+})
+const emit = defineEmits(['select'])
 
 // State
 const activeTab = ref('on_exchange')
@@ -593,6 +611,19 @@ onMounted(loadTab)
 .type-badge.a { color: var(--color-info-700); background: var(--color-bg-info-subtle); }
 .type-badge.hk { color: var(--color-warning-700); background: var(--color-bg-warning-subtle); }
 .type-badge.us { color: var(--color-success-700); background: var(--color-bg-success-subtle); }
+
+/* --- Selection indicator (Feature 3) --- */
+.data-table tbody tr { cursor: pointer; transition: background var(--transition-fast), box-shadow var(--transition-fast); border-left: 3px solid transparent; }
+.data-table tbody tr:hover { background: var(--color-surface-tertiary); }
+.etf-row--selected {
+  background: var(--color-bg-brand-subtle) !important;
+  border-left: 3px solid var(--color-brand-600);
+  box-shadow: inset 0 0 0 1px var(--color-brand-200);
+}
+.row-check { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; margin-right: 4px; border-radius: 50%; background: var(--color-brand-600); color: #fff; font-size: 11px; font-weight: 700; }
+.exchange-badge { display: inline-flex; align-items: center; margin-left: var(--space-2); padding: 2px var(--space-2); font-size: var(--font-size-xs); font-weight: var(--font-weight-semibold); border-radius: var(--radius-full); vertical-align: middle; }
+.exchange-badge.on { color: #1d6fe0; background: rgba(29, 111, 224, 0.12); }
+.exchange-badge.off { color: #b8860b; background: rgba(184, 134, 11, 0.14); }
 
 .weight-cell { min-width: 120px; }
 .weight-control { width: 100%; }

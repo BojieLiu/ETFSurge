@@ -6,7 +6,10 @@ const WS_BASE = (() => {
   return `${proto}://${host}/api/v1/ws`
 })()
 
-export function useMarketWS(handler) {
+// Connects to the `/ws/news` WebSocket stream and forwards incoming news
+// messages to the supplied handler. Mirrors useMarketWS: auto-reconnect with
+// exponential backoff + jitter, heartbeat ping, and a stop guard on unmount.
+export function useNewsWS(handler) {
   const connected = ref(false)
   let ws = null
   let reconnectTimer = null
@@ -18,7 +21,7 @@ export function useMarketWS(handler) {
   function connect() {
     if (stopped) return
     try {
-      ws = new WebSocket(`${WS_BASE}/portfolio`)
+      ws = new WebSocket(`${WS_BASE}/news`)
     } catch (e) {
       scheduleReconnect()
       return
@@ -70,11 +73,12 @@ export function useMarketWS(handler) {
     if (ws) ws.close()
   }
 
-  function onMarketData(fn) {
-    msgHandler = fn
+  // Register (or replace) the news message handler.
+  function onNews(fn) {
+    msgHandler = typeof fn === 'function' ? fn : null
   }
 
   onUnmounted(disconnect)
 
-  return { connected, connect, disconnect, onMarketData, stop: disconnect }
+  return { connected, connect, disconnect, onNews, stop: disconnect }
 }

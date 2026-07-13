@@ -101,9 +101,9 @@ const { toasts, dismiss } = useToast()
 // Navigation items
 const navItems = [
   { path: '/', label: 'Dashboard', icon: '📊' },
-  { path: '/portfolio', label: '组合管理', icon: '📁' },
-  { path: '/analysis', label: '技术分析', icon: '🔍' },
-  { path: '/market-analysis', label: '行情分析', icon: '📰' }
+  { path: '/portfolio-analysis', label: '组合与分析', icon: '📁' },
+  { path: '/market-analysis', label: '行情分析', icon: '📰' },
+  { path: '/news', label: '资讯', icon: '🗞️' }
 ]
 
 const isActiveRoute = (path) => {

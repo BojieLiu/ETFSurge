@@ -9,6 +9,7 @@ from ..models.schemas import (
 from ..services.portfolio_service import (
     list_etfs, add_etf, update_etf, remove_etf,
     calculate_allocation, calculate_daily_pnl, strategy_check,
+    apply_strategy_suggestions, apply_portfolio_design,
 )
 
 router = APIRouter(prefix="/api/v1/portfolio", tags=["portfolio"])
@@ -63,3 +64,11 @@ async def daily_pnl(
 @router.post("/strategy-check", response_model=StrategyCheckResponse)
 async def check_strategy(req: CalculateRequest, db: AsyncSession = Depends(get_db)):
     return await strategy_check(db, req.total_capital)
+
+@router.post("/apply-strategy")
+async def apply_strategy(suggestions: list, db: AsyncSession = Depends(get_db)):
+    return await apply_strategy_suggestions(db, suggestions)
+
+@router.post("/apply-design")
+async def apply_design(design: dict, db: AsyncSession = Depends(get_db)):
+    return await apply_portfolio_design(db, design)

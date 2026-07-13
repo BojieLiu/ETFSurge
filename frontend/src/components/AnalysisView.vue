@@ -153,7 +153,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { CandlestickChart, BarChart, LineChart } from 'echarts/charts'
@@ -167,6 +167,13 @@ import AppSelect from './ui/AppSelect.vue'
 use([CanvasRenderer, CandlestickChart, BarChart, LineChart, TitleComponent, TooltipComponent, GridComponent, LegendComponent, DataZoomComponent])
 
 const store = usePortfolioStore()
+
+// Allow a parent (e.g. the merged PortfolioAnalysis view) to drive the
+// analyzed symbol. When selectedSymbol changes, the chart/indicators/signal
+// for that holding are auto-loaded.
+const props = defineProps({
+  selectedSymbol: { type: String, default: '' },
+})
 
 // State
 const selected = ref('')
@@ -520,6 +527,17 @@ async function fetchChart() {
   loading.value = false
 }
 
+// Parent-driven selection (merged view)
+watch(
+  () => props.selectedSymbol,
+  (sym) => {
+    if (sym && etfInfoMap.value[sym]) {
+      selected.value = sym
+      fetchChart()
+    }
+  },
+)
+
 // Lifecycle
 onMounted(async () => {
   try {
@@ -537,7 +555,11 @@ onMounted(async () => {
   } catch {
     etfs.value = []
   }
-  if (etfs.value.length) { selected.value = etfs.value[0].symbol; fetchChart() }
+  // Honor a parent-provided selection; otherwise default to the first ETF.
+  const initial = props.selectedSymbol && etfInfoMap.value[props.selectedSymbol]
+    ? props.selectedSymbol
+    : (etfs.value[0]?.symbol || '')
+  if (initial) { selected.value = initial; fetchChart() }
 })
 </script>
 
