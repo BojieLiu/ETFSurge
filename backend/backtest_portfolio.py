@@ -1,3 +1,4 @@
+﻿import os
 """
 Backtest portfolio designs against CSI 300.
 Fetches historical weekly returns for recommended ETFs and calculates
@@ -8,7 +9,7 @@ from typing import Any
 import httpx
 
 LLM_API_URL = "https://api.deepseek.com/chat/completions"
-API_KEY = "REDACTED"
+API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 
 # ── Current market data (same as optimizer) ──────────────────────
 

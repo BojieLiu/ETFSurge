@@ -1,3 +1,4 @@
+﻿import os
 """
 Prompt optimization test harness for portfolio design.
 Collects weekly market snapshots → calls LLM with prompt → evaluates output quality.
@@ -9,7 +10,7 @@ from typing import Any
 import httpx
 
 LLM_API_URL = "https://api.deepseek.com/chat/completions"
-API_KEY = "REDACTED"
+API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 
 # ── Historical data (weeks) ──────────────────────────────────────
 # We'll collect weekly snapshots of A-share indices using mootdx

@@ -35,7 +35,7 @@ async def test():
                     {"role": "user", "content": user},
                 ],
                 "temperature": 0.3,
-                "max_tokens": 2048,
+                "max_tokens": 4096,
             },
         )
         resp.raise_for_status()
@@ -44,7 +44,7 @@ async def test():
         print(f"Time: {time.time()-t0:.1f}s")
         print(f"Response length: {len(content) if content else 0}")
         if content:
-            print(f"Response: {content[:1000]}")
+            print(f"Response: {content[:2000]}")
         else:
             print("EMPTY!")
 

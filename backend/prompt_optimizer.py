@@ -1,3 +1,4 @@
+﻿import os
 """
 Prompt optimizer for portfolio design.
 Strategy: For each prompt variant, call the LLM with REAL current market data,
@@ -9,7 +10,7 @@ from typing import Any
 import httpx
 
 LLM_API_URL = "https://api.deepseek.com/chat/completions"
-API_KEY = "REDACTED"
+API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 
 CURRENT_SYSTEM_PROMPT = """# 角色设定
 你是一名专业的ETF投资组合策略分析师，拥有10年以上资产配置经验。

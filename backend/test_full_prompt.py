@@ -1,3 +1,4 @@
+﻿import os
 import asyncio
 import httpx
 import time
@@ -98,14 +99,14 @@ async def test():
     import httpx
     import time
 
-    API_KEY = "REDACTED"
+    API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
     MODEL = "deepseek-v4-flash"
 
     t0 = time.time()
     async with httpx.AsyncClient(timeout=180.0, trust_env=False) as client:
         resp = await client.post(
             "https://api.deepseek.com/chat/completions",
-            headers={"Authorization": f"Bearer REDACTED", "Content-Type": "application/json"},
+            headers={"Authorization": f'Bearer {os.getenv("DEEPSEEK_API_KEY")}', "Content-Type": "application/json"},
             json={
                 "model": "deepseek-v4-flash",
                 "messages": [

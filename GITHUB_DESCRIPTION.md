@@ -1,4 +1,4 @@
-# ETF Surge — Multi-Asset Real-Time Market Analysis & ETF Portfolio Management System
+﻿# ETF Surge — Multi-Asset Real-Time Market Analysis & ETF Portfolio Management System
 
 > **中文文档**: [README.md](./README.md) | **English Documentation**: [README_EN.md](./README_EN.md)
 
@@ -209,7 +209,7 @@ ETF_Surge/
 ### Backend `.env` (required for LLM features)
 ```bash
 # DeepSeek API (get from https://platform.deepseek.com)
-DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxx
+DEEPSEEK_API_KEY=<DEEPSEEK_API_KEY>
 
 # Optional: Redis (default localhost:6379)
 REDIS_URL=redis://localhost:6379/0

@@ -1,3 +1,4 @@
+﻿import os
 """
 ETF Portfolio Prompt Optimizer — Clean prompts without embedded targets.
 Targets are used as evaluation criteria in backtest/scoring, NOT in the prompt.
@@ -7,7 +8,7 @@ from typing import Any
 
 # ── Config ──────────────────────────────────────────────────────
 LLM_API_URL = "https://api.deepseek.com/chat/completions"
-API_KEY = "REDACTED"
+API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 MODEL = "deepseek-v4-flash"
 
 # ── System Prompt (no targets, only principles) ─────────────────
@@ -109,7 +110,7 @@ import json, asyncio, time, sys, httpx
 from typing import Any
 
 LLM_API_URL = "https://api.deepseek.com/chat/completions"
-API_KEY = "REDACTED"
+API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 MODEL = "deepseek-v4-flash"
 
 async def call_llm(system: str, user: str) -> tuple[str, float]:
