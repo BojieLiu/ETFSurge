@@ -1,0 +1,1186 @@
+[
+  {
+    "round": 1,
+    "name": "V1: Baseline",
+    "analysis": {
+      "total_etf_count": 26,
+      "per_portfolio": {
+        "aggressive": {
+          "count": 9,
+          "cash": 0.1
+        },
+        "balanced": {
+          "count": 9,
+          "cash": 0.15
+        },
+        "defensive": {
+          "count": 8,
+          "cash": 0.36
+        }
+      },
+      "style_breakdown": {
+        "growth": 9,
+        "value": 9,
+        "balanced": 0,
+        "bond": 0,
+        "commodity": 6,
+        "cross_border": 2
+      },
+      "asset_categories": {
+        "broad_index": 6,
+        "sector": 9,
+        "cross_border": 5,
+        "bond": 0,
+        "commodity": 6
+      },
+      "warnings": [
+        "defensive: cash 36% > 20% (may hurt returns)"
+      ]
+    },
+    "score": {
+      "total_score": 70.0
+    }
+  },
+  {
+    "round": 2,
+    "name": "V2: With examples",
+    "analysis": {
+      "total_etf_count": 27,
+      "per_portfolio": {
+        "aggressive": {
+          "count": 9,
+          "cash": 0.05
+        },
+        "balanced": {
+          "count": 9,
+          "cash": 0.15
+        },
+        "defensive": {
+          "count": 9,
+          "cash": 0.3
+        }
+      },
+      "style_breakdown": {
+        "growth": 15,
+        "value": 3,
+        "balanced": 6,
+        "bond": 0,
+        "commodity": 3,
+        "cross_border": 0
+      },
+      "asset_categories": {
+        "broad_index": 8,
+        "sector": 13,
+        "cross_border": 3,
+        "bond": 0,
+        "commodity": 3
+      },
+      "warnings": [
+        "defensive: cash 30% > 20% (may hurt returns)"
+      ]
+    },
+    "score": {
+      "total_score": 70.0
+    }
+  },
+  {
+    "round": 3,
+    "name": "V3: Structured",
+    "analysis": {
+      "total_etf_count": 0,
+      "warnings": [
+        "JSON parse failed"
+      ]
+    },
+    "score": {
+      "details": {},
+      "total_score": 0
+    }
+  },
+  {
+    "round": 4,
+    "name": "V4: Fix defensive equity",
+    "analysis": {
+      "total_etf_count": 26,
+      "per_portfolio": {
+        "aggressive": {
+          "count": 9,
+          "cash": 0.1
+        },
+        "balanced": {
+          "count": 9,
+          "cash": 0.2
+        },
+        "defensive": {
+          "count": 8,
+          "cash": 0.22
+        }
+      },
+      "style_breakdown": {
+        "growth": 9,
+        "value": 6,
+        "balanced": 4,
+        "bond": 0,
+        "commodity": 5,
+        "cross_border": 2
+      },
+      "asset_categories": {
+        "broad_index": 5,
+        "sector": 12,
+        "cross_border": 4,
+        "bond": 0,
+        "commodity": 5
+      },
+      "warnings": [
+        "defensive: cash 22% > 20% (may hurt returns)"
+      ]
+    },
+    "score": {
+      "total_score": 70.0
+    }
+  },
+  {
+    "round": 5,
+    "name": "V5: Detailed",
+    "analysis": {
+      "total_etf_count": 30,
+      "per_portfolio": {
+        "aggressive": {
+          "count": 10,
+          "cash": 0.1
+        },
+        "balanced": {
+          "count": 10,
+          "cash": 0.15
+        },
+        "defensive": {
+          "count": 10,
+          "cash": 0.14
+        }
+      },
+      "style_breakdown": {
+        "growth": 8,
+        "value": 8,
+        "balanced": 8,
+        "bond": 0,
+        "commodity": 5,
+        "cross_border": 1
+      },
+      "asset_categories": {
+        "broad_index": 6,
+        "sector": 18,
+        "cross_border": 1,
+        "bond": 0,
+        "commodity": 5
+      },
+      "warnings": []
+    },
+    "score": {
+      "total_score": 70.0
+    }
+  },
+  {
+    "round": 6,
+    "name": "V6: Refined",
+    "analysis": {
+      "total_etf_count": 0,
+      "warnings": [
+        "JSON parse failed"
+      ]
+    },
+    "score": {
+      "details": {},
+      "total_score": 0
+    }
+  },
+  {
+    "round": 7,
+    "name": "V7: Precise equity",
+    "analysis": {
+      "total_etf_count": 26,
+      "per_portfolio": {
+        "aggressive": {
+          "count": 8,
+          "cash": 0.05
+        },
+        "balanced": {
+          "count": 9,
+          "cash": 0.05
+        },
+        "defensive": {
+          "count": 9,
+          "cash": 0.05
+        }
+      },
+      "style_breakdown": {
+        "growth": 14,
+        "value": 6,
+        "balanced": 3,
+        "bond": 0,
+        "commodity": 3,
+        "cross_border": 0
+      },
+      "asset_categories": {
+        "broad_index": 7,
+        "sector": 15,
+        "cross_border": 1,
+        "bond": 0,
+        "commodity": 3
+      },
+      "warnings": [
+        "balanced: cash 5% outside target 10-20%",
+        "defensive: cash 5% < 8% (may increase vol)"
+      ]
+    },
+    "score": {
+      "total_score": 70.0
+    }
+  },
+  {
+    "round": 8,
+    "name": "V8: Precise v2",
+    "analysis": {
+      "total_etf_count": 30,
+      "per_portfolio": {
+        "aggressive": {
+          "count": 10,
+          "cash": 0.05
+        },
+        "balanced": {
+          "count": 10,
+          "cash": 0.1
+        },
+        "defensive": {
+          "count": 10,
+          "cash": 0.13
+        }
+      },
+      "style_breakdown": {
+        "growth": 11,
+        "value": 9,
+        "balanced": 5,
+        "bond": 0,
+        "commodity": 3,
+        "cross_border": 2
+      },
+      "asset_categories": {
+        "broad_index": 7,
+        "sector": 14,
+        "cross_border": 6,
+        "bond": 0,
+        "commodity": 3
+      },
+      "warnings": []
+    },
+    "score": {
+      "total_score": 70.0
+    }
+  },
+  {
+    "round": 9,
+    "name": "V9: Precise v3",
+    "analysis": {
+      "total_etf_count": 0,
+      "warnings": [
+        "JSON parse failed"
+      ]
+    },
+    "score": {
+      "details": {},
+      "total_score": 0
+    }
+  },
+  {
+    "round": 10,
+    "name": "V10: Precise v4",
+    "analysis": {
+      "total_etf_count": 29,
+      "per_portfolio": {
+        "aggressive": {
+          "count": 10,
+          "cash": 0.0
+        },
+        "balanced": {
+          "count": 10,
+          "cash": 0.05
+        },
+        "defensive": {
+          "count": 9,
+          "cash": 0.14
+        }
+      },
+      "style_breakdown": {
+        "growth": 13,
+        "value": 7,
+        "balanced": 6,
+        "bond": 0,
+        "commodity": 3,
+        "cross_border": 0
+      },
+      "asset_categories": {
+        "broad_index": 8,
+        "sector": 16,
+        "cross_border": 2,
+        "bond": 0,
+        "commodity": 3
+      },
+      "warnings": [
+        "balanced: cash 5% outside target 10-20%"
+      ]
+    }
+  },
+  {
+    "round": 11,
+    "name": "V11: Precise v5",
+    "analysis": {
+      "total_etf_count": 30,
+      "per_portfolio": {
+        "aggressive": {
+          "count": 10,
+          "cash": 0.05
+        },
+        "balanced": {
+          "count": 10,
+          "cash": 0.1
+        },
+        "defensive": {
+          "count": 10,
+          "cash": 0.15
+        }
+      },
+      "style_breakdown": {
+        "growth": 15,
+        "value": 3,
+        "balanced": 9,
+        "bond": 0,
+        "commodity": 3,
+        "cross_border": 0
+      },
+      "asset_categories": {
+        "broad_index": 11,
+        "sector": 13,
+        "cross_border": 3,
+        "bond": 0,
+        "commodity": 3
+      },
+      "warnings": []
+    }
+  },
+  {
+    "round": 12,
+    "name": "V22: Detailed defensive",
+    "analysis": {
+      "total_etf_count": 29,
+      "per_portfolio": {
+        "aggressive": {
+          "count": 10,
+          "cash": 0.05
+        },
+        "balanced": {
+          "count": 10,
+          "cash": 0.13
+        },
+        "defensive": {
+          "count": 9,
+          "cash": 0.15
+        }
+      },
+      "style_breakdown": {
+        "growth": 12,
+        "value": 3,
+        "balanced": 9,
+        "bond": 0,
+        "commodity": 3,
+        "cross_border": 2
+      },
+      "asset_categories": {
+        "broad_index": 8,
+        "sector": 12,
+        "cross_border": 6,
+        "bond": 0,
+        "commodity": 3
+      },
+      "warnings": []
+    }
+  },
+  {
+    "round": 13,
+    "name": "V23: Balanced defensive",
+    "analysis": {
+      "total_etf_count": 26,
+      "per_portfolio": {
+        "aggressive": {
+          "count": 9,
+          "cash": 0.0
+        },
+        "balanced": {
+          "count": 9,
+          "cash": 0.19
+        },
+        "defensive": {
+          "count": 8,
+          "cash": 0.22
+        }
+      },
+      "style_breakdown": {
+        "growth": 9,
+        "value": 5,
+        "balanced": 7,
+        "bond": 0,
+        "commodity": 3,
+        "cross_border": 2
+      },
+      "asset_categories": {
+        "broad_index": 6,
+        "sector": 14,
+        "cross_border": 3,
+        "bond": 0,
+        "commodity": 3
+      },
+      "warnings": [
+        "defensive: cash 22% > 20% (may hurt returns)"
+      ]
+    }
+  },
+  {
+    "round": 14,
+    "name": "V24: More equity",
+    "analysis": {
+      "total_etf_count": 27,
+      "per_portfolio": {
+        "aggressive": {
+          "count": 9,
+          "cash": 0.1
+        },
+        "balanced": {
+          "count": 10,
+          "cash": 0.12
+        },
+        "defensive": {
+          "count": 8,
+          "cash": 0.12
+        }
+      },
+      "style_breakdown": {
+        "growth": 12,
+        "value": 8,
+        "balanced": 4,
+        "bond": 0,
+        "commodity": 3,
+        "cross_border": 0
+      },
+      "asset_categories": {
+        "broad_index": 9,
+        "sector": 13,
+        "cross_border": 2,
+        "bond": 0,
+        "commodity": 3
+      },
+      "warnings": []
+    }
+  },
+  {
+    "round": 15,
+    "name": "V25: Low gold",
+    "analysis": {
+      "total_etf_count": 28,
+      "per_portfolio": {
+        "aggressive": {
+          "count": 9,
+          "cash": 0.05
+        },
+        "balanced": {
+          "count": 10,
+          "cash": 0.1
+        },
+        "defensive": {
+          "count": 9,
+          "cash": 0.18
+        }
+      },
+      "style_breakdown": {
+        "growth": 13,
+        "value": 5,
+        "balanced": 8,
+        "bond": 0,
+        "commodity": 2,
+        "cross_border": 0
+      },
+      "asset_categories": {
+        "broad_index": 8,
+        "sector": 15,
+        "cross_border": 3,
+        "bond": 0,
+        "commodity": 2
+      },
+      "warnings": []
+    }
+  },
+  {
+    "round": 16,
+    "name": "V26: Sharpe focus",
+    "analysis": {
+      "total_etf_count": 29,
+      "per_portfolio": {
+        "aggressive": {
+          "count": 9,
+          "cash": 0.1
+        },
+        "balanced": {
+          "count": 10,
+          "cash": 0.15
+        },
+        "defensive": {
+          "count": 10,
+          "cash": 0.15
+        }
+      },
+      "style_breakdown": {
+        "growth": 13,
+        "value": 9,
+        "balanced": 5,
+        "bond": 0,
+        "commodity": 2,
+        "cross_border": 0
+      },
+      "asset_categories": {
+        "broad_index": 8,
+        "sector": 15,
+        "cross_border": 4,
+        "bond": 0,
+        "commodity": 2
+      },
+      "warnings": []
+    }
+  },
+  {
+    "round": 17,
+    "name": "V27: Fixed equity structure",
+    "analysis": {
+      "total_etf_count": 28,
+      "per_portfolio": {
+        "aggressive": {
+          "count": 9,
+          "cash": 0.02
+        },
+        "balanced": {
+          "count": 10,
+          "cash": 0.1
+        },
+        "defensive": {
+          "count": 9,
+          "cash": 0.15
+        }
+      },
+      "style_breakdown": {
+        "growth": 10,
+        "value": 7,
+        "balanced": 8,
+        "bond": 0,
+        "commodity": 3,
+        "cross_border": 0
+      },
+      "asset_categories": {
+        "broad_index": 4,
+        "sector": 21,
+        "cross_border": 0,
+        "bond": 0,
+        "commodity": 3
+      },
+      "warnings": []
+    }
+  },
+  {
+    "round": 18,
+    "name": "V28: Gold <=5% tight",
+    "analysis": {
+      "total_etf_count": 0,
+      "warnings": [
+        "JSON parse failed"
+      ]
+    }
+  },
+  {
+    "round": 19,
+    "name": "V29: Low-vol equity clean",
+    "analysis": {
+      "total_etf_count": 27,
+      "per_portfolio": {
+        "aggressive": {
+          "count": 8,
+          "cash": 0.0
+        },
+        "balanced": {
+          "count": 9,
+          "cash": 0.2
+        },
+        "defensive": {
+          "count": 10,
+          "cash": 0.15
+        }
+      },
+      "style_breakdown": {
+        "growth": 9,
+        "value": 6,
+        "balanced": 7,
+        "bond": 0,
+        "commodity": 2,
+        "cross_border": 3
+      },
+      "asset_categories": {
+        "broad_index": 6,
+        "sector": 16,
+        "cross_border": 3,
+        "bond": 0,
+        "commodity": 2
+      },
+      "warnings": []
+    }
+  },
+  {
+    "round": 20,
+    "name": "V30: Clear targets clean",
+    "analysis": {
+      "total_etf_count": 24,
+      "per_portfolio": {
+        "aggressive": {
+          "count": 8,
+          "cash": 0.1
+        },
+        "balanced": {
+          "count": 8,
+          "cash": 0.1
+        },
+        "defensive": {
+          "count": 8,
+          "cash": 0.15
+        }
+      },
+      "style_breakdown": {
+        "growth": 8,
+        "value": 7,
+        "balanced": 4,
+        "bond": 0,
+        "commodity": 4,
+        "cross_border": 1
+      },
+      "asset_categories": {
+        "broad_index": 6,
+        "sector": 13,
+        "cross_border": 1,
+        "bond": 0,
+        "commodity": 4
+      },
+      "warnings": []
+    }
+  },
+  {
+    "round": 21,
+    "name": "V31: Example defensive",
+    "analysis": {
+      "total_etf_count": 27,
+      "per_portfolio": {
+        "aggressive": {
+          "count": 9,
+          "cash": 0.1
+        },
+        "balanced": {
+          "count": 9,
+          "cash": 0.1
+        },
+        "defensive": {
+          "count": 9,
+          "cash": 0.15
+        }
+      },
+      "style_breakdown": {
+        "growth": 9,
+        "value": 10,
+        "balanced": 4,
+        "bond": 0,
+        "commodity": 3,
+        "cross_border": 1
+      },
+      "asset_categories": {
+        "broad_index": 6,
+        "sector": 16,
+        "cross_border": 2,
+        "bond": 0,
+        "commodity": 3
+      },
+      "warnings": []
+    }
+  },
+  {
+    "round": 22,
+    "name": "V32: Low-vol equity replacement",
+    "analysis": {
+      "total_etf_count": 0,
+      "warnings": [
+        "JSON parse failed"
+      ]
+    }
+  },
+  {
+    "round": 23,
+    "name": "V33: Final consolidated",
+    "analysis": {
+      "total_etf_count": 0,
+      "warnings": [
+        "JSON parse failed"
+      ]
+    }
+  },
+  {
+    "round": 24,
+    "name": "V34: A500+Strategy indices + strategy indices + A500 core",
+    "analysis": {
+      "total_etf_count": 30,
+      "per_portfolio": {
+        "aggressive": {
+          "count": 10,
+          "cash": 0.08
+        },
+        "balanced": {
+          "count": 10,
+          "cash": 0.05
+        },
+        "defensive": {
+          "count": 10,
+          "cash": 0.07
+        }
+      },
+      "style_breakdown": {
+        "growth": 9,
+        "value": 8,
+        "balanced": 8,
+        "bond": 0,
+        "commodity": 3,
+        "cross_border": 2
+      },
+      "asset_categories": {
+        "broad_index": 6,
+        "sector": 18,
+        "cross_border": 3,
+        "bond": 0,
+        "commodity": 3
+      },
+      "warnings": [
+        "balanced: cash 5% outside target 10-20%",
+        "defensive: cash 7% < 8% (may increase vol)"
+      ]
+    }
+  },
+  {
+    "round": 25,
+    "name": "V35: Full SW industry + strategy indices",
+    "analysis": {
+      "total_etf_count": 0,
+      "warnings": [
+        "JSON parse failed"
+      ]
+    }
+  },
+  {
+    "round": 26,
+    "name": "V36: Three-tier explicit allocation",
+    "analysis": {
+      "total_etf_count": 0,
+      "warnings": [
+        "JSON parse failed"
+      ]
+    }
+  },
+  {
+    "round": 27,
+    "name": "V37: Strategy indices full coverage",
+    "analysis": {
+      "total_etf_count": 0,
+      "warnings": [
+        "JSON parse failed"
+      ]
+    }
+  },
+  {
+    "round": 28,
+    "name": "V38: Allocation matrix with strategy indices",
+    "analysis": {
+      "total_etf_count": 30,
+      "per_portfolio": {
+        "aggressive": {
+          "count": 10,
+          "cash": 0.05
+        },
+        "balanced": {
+          "count": 10,
+          "cash": 0.12
+        },
+        "defensive": {
+          "count": 10,
+          "cash": 0.14
+        }
+      },
+      "style_breakdown": {
+        "growth": 8,
+        "value": 9,
+        "balanced": 9,
+        "bond": 0,
+        "commodity": 4,
+        "cross_border": 0
+      },
+      "asset_categories": {
+        "broad_index": 8,
+        "sector": 17,
+        "cross_border": 1,
+        "bond": 0,
+        "commodity": 4
+      },
+      "warnings": []
+    }
+  },
+  {
+    "round": 29,
+    "name": "V39: SW L2/L3 industry granular",
+    "analysis": {
+      "total_etf_count": 0,
+      "warnings": [
+        "JSON parse failed"
+      ]
+    }
+  },
+  {
+    "round": 30,
+    "name": "V39: A500 new core with explicit weights",
+    "analysis": {
+      "total_etf_count": 0,
+      "warnings": [
+        "JSON parse failed"
+      ]
+    }
+  },
+  {
+    "round": 31,
+    "name": "V40: Free cash flow as quality core",
+    "analysis": {
+      "total_etf_count": 34,
+      "per_portfolio": {
+        "aggressive": {
+          "count": 10,
+          "cash": 0.1
+        },
+        "balanced": {
+          "count": 12,
+          "cash": 0.12
+        },
+        "defensive": {
+          "count": 12,
+          "cash": 0.2
+        }
+      },
+      "style_breakdown": {
+        "growth": 12,
+        "value": 9,
+        "balanced": 10,
+        "bond": 0,
+        "commodity": 3,
+        "cross_border": 0
+      },
+      "asset_categories": {
+        "broad_index": 7,
+        "sector": 21,
+        "cross_border": 3,
+        "bond": 0,
+        "commodity": 3
+      },
+      "warnings": []
+    }
+  },
+  {
+    "round": 32,
+    "name": "V41: Dividend lowvol 100 + value/growth",
+    "analysis": {
+      "total_etf_count": 33,
+      "per_portfolio": {
+        "aggressive": {
+          "count": 11,
+          "cash": 0.06
+        },
+        "balanced": {
+          "count": 11,
+          "cash": 0.15
+        },
+        "defensive": {
+          "count": 11,
+          "cash": 0.18
+        }
+      },
+      "style_breakdown": {
+        "growth": 14,
+        "value": 6,
+        "balanced": 8,
+        "bond": 0,
+        "commodity": 3,
+        "cross_border": 2
+      },
+      "asset_categories": {
+        "broad_index": 5,
+        "sector": 19,
+        "cross_border": 6,
+        "bond": 0,
+        "commodity": 3
+      },
+      "warnings": []
+    }
+  },
+  {
+    "round": 33,
+    "name": "V43: Full dimension matrix",
+    "analysis": {
+      "total_etf_count": 41,
+      "per_portfolio": {
+        "aggressive": {
+          "count": 15,
+          "cash": 0.1
+        },
+        "balanced": {
+          "count": 14,
+          "cash": 0.15
+        },
+        "defensive": {
+          "count": 12,
+          "cash": 0.37
+        }
+      },
+      "style_breakdown": {
+        "growth": 16,
+        "value": 6,
+        "balanced": 16,
+        "bond": 0,
+        "commodity": 3,
+        "cross_border": 0
+      },
+      "asset_categories": {
+        "broad_index": 10,
+        "sector": 23,
+        "cross_border": 5,
+        "bond": 0,
+        "commodity": 3
+      },
+      "warnings": [
+        "defensive: cash 37% > 20% (may hurt returns)"
+      ]
+    }
+  },
+  {
+    "round": 34,
+    "name": "V44: CSI/CNII/HSI official index pool",
+    "analysis": {
+      "total_etf_count": 0,
+      "warnings": [
+        "JSON parse failed"
+      ]
+    }
+  },
+  {
+    "round": 35,
+    "name": "V45: ESG + SOE reform themes",
+    "analysis": {
+      "total_etf_count": 34,
+      "per_portfolio": {
+        "aggressive": {
+          "count": 12,
+          "cash": 0.05
+        },
+        "balanced": {
+          "count": 11,
+          "cash": 0.12
+        },
+        "defensive": {
+          "count": 11,
+          "cash": 0.2
+        }
+      },
+      "style_breakdown": {
+        "growth": 12,
+        "value": 5,
+        "balanced": 14,
+        "bond": 0,
+        "commodity": 3,
+        "cross_border": 0
+      },
+      "asset_categories": {
+        "broad_index": 11,
+        "sector": 16,
+        "cross_border": 4,
+        "bond": 0,
+        "commodity": 3
+      },
+      "warnings": []
+    }
+  },
+  {
+    "round": 36,
+    "name": "V46: CSI 2000 microcap for aggressive",
+    "analysis": {
+      "total_etf_count": 0,
+      "warnings": [
+        "JSON parse failed"
+      ]
+    }
+  },
+  {
+    "round": 37,
+    "name": "V47: Dividend lowvol 100 + FCF dual core",
+    "analysis": {
+      "total_etf_count": 0,
+      "warnings": [
+        "JSON parse failed"
+      ]
+    }
+  },
+  {
+    "round": 38,
+    "name": "V48: HSI strategy indices cross-border",
+    "analysis": {
+      "total_etf_count": 30,
+      "per_portfolio": {
+        "aggressive": {
+          "count": 10,
+          "cash": 0.15
+        },
+        "balanced": {
+          "count": 10,
+          "cash": 0.3
+        },
+        "defensive": {
+          "count": 10,
+          "cash": 0.24
+        }
+      },
+      "style_breakdown": {
+        "growth": 12,
+        "value": 8,
+        "balanced": 7,
+        "bond": 0,
+        "commodity": 3,
+        "cross_border": 0
+      },
+      "asset_categories": {
+        "broad_index": 6,
+        "sector": 16,
+        "cross_border": 5,
+        "bond": 0,
+        "commodity": 3
+      },
+      "warnings": [
+        "aggressive: cash 15% > 10% (max 10%)",
+        "balanced: cash 30% outside target 10-20%",
+        "defensive: cash 24% > 20% (may hurt returns)"
+      ]
+    }
+  },
+  {
+    "round": 39,
+    "name": "V49: Short-term bonds for defensive",
+    "analysis": {
+      "total_etf_count": 0,
+      "warnings": [
+        "JSON parse failed"
+      ]
+    }
+  },
+  {
+    "round": 40,
+    "name": "V50: All strategy indices comprehensive",
+    "analysis": {
+      "total_etf_count": 32,
+      "per_portfolio": {
+        "aggressive": {
+          "count": 11,
+          "cash": 0.05
+        },
+        "balanced": {
+          "count": 11,
+          "cash": 0.12
+        },
+        "defensive": {
+          "count": 10,
+          "cash": 0.2
+        }
+      },
+      "style_breakdown": {
+        "growth": 13,
+        "value": 6,
+        "balanced": 10,
+        "bond": 0,
+        "commodity": 3,
+        "cross_border": 0
+      },
+      "asset_categories": {
+        "broad_index": 10,
+        "sector": 16,
+        "cross_border": 3,
+        "bond": 0,
+        "commodity": 3
+      },
+      "warnings": []
+    }
+  },
+  {
+    "round": 41,
+    "name": "V51: Lowvol/minvar as defensive stabilizer",
+    "analysis": {
+      "total_etf_count": 0,
+      "warnings": [
+        "JSON parse failed"
+      ]
+    }
+  },
+  {
+    "round": 42,
+    "name": "V50: CSI/CNII/HSI full strategy coverage",
+    "analysis": {
+      "total_etf_count": 41,
+      "per_portfolio": {
+        "aggressive": {
+          "count": 14,
+          "cash": 0.05
+        },
+        "balanced": {
+          "count": 13,
+          "cash": 0.12
+        },
+        "defensive": {
+          "count": 14,
+          "cash": 0.2
+        }
+      },
+      "style_breakdown": {
+        "growth": 17,
+        "value": 7,
+        "balanced": 14,
+        "bond": 0,
+        "commodity": 3,
+        "cross_border": 0
+      },
+      "asset_categories": {
+        "broad_index": 11,
+        "sector": 25,
+        "cross_border": 2,
+        "bond": 0,
+        "commodity": 3
+      },
+      "warnings": []
+    }
+  },
+  {
+    "round": 43,
+    "name": "V51: Final grand unified version",
+    "analysis": {
+      "total_etf_count": 0,
+      "warnings": [
+        "JSON parse failed"
+      ]
+    }
+  }
+]

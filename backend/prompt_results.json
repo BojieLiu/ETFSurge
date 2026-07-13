@@ -1,0 +1,114 @@
+[
+  {
+    "round": 1,
+    "name": "V10: Defensive target close to CSI300",
+    "instructions": "# 优化指令\n【重要】组合中**不包含任何债券类ETF**，债券投资由用户独立规划。\n【ETF数量】每个组合推荐8-10只ETF\n【资产类别】覆盖宽基指数2-3只、行业主题2-3只、跨境ETF1-2只、商品ETF0-1只（不含债券）\n【风格要求】成长型与价值型ETF数量比接近1:1，单一风格不超过60%\n【权重要求】单只ETF 5%-15%，同一行业≤2只，前5大权重合计≤60%\n【风险梯度】\n  进攻型：权益≥85%，现金≤10%，目标收益超过沪深300\n  平衡型：权益65%-75%，现金10%-15%，目标收益超过沪深300\n  防御型：权益45%-60%，现金≥20%，商品ETF对冲波动，**目标：收益接近沪深300，波动率低于沪深300**\n【配置逻辑】防御型组合以低波动权益为主（宽基+红利+消费），高仓位现金+黄金降低波动，减少对成长风格暴露",
+    "analysis": {
+      "total_etf_count": 27,
+      "per_portfolio": {
+        "aggressive": {
+          "count": 9,
+          "cash": 0.05
+        },
+        "balanced": {
+          "count": 9,
+          "cash": 0.18
+        },
+        "defensive": {
+          "count": 9,
+          "cash": 0.17
+        }
+      },
+      "style_breakdown": {
+        "growth": 10,
+        "value": 8,
+        "balanced": 5,
+        "bond": 0,
+        "commodity": 2,
+        "cross_border": 2
+      },
+      "asset_categories": {
+        "broad_index": 8,
+        "sector": 12,
+        "cross_border": 4,
+        "bond": 0,
+        "commodity": 3
+      },
+      "warnings": [
+        "defensive: cash+commodity 17% < 20% (need ≥20%)"
+      ]
+    },
+    "raw_output_preview": "{\n  \"market_analysis\": {\n    \"a_share\": \"A股整体下跌，深证成指跌2.29%，创业板指重挫4.37%，成长风格大幅回调；个股分化：科技成长股（国城矿业-4.49%）领跌，银行（平安银行-0.38%）相对抗跌，防御板块（厦门港务+2.07%、石化机械+1.63%）逆势走强，资金从成长流向周期与价值。\",\n    \"us\": \"无当日数据，假设外围市场平稳，美股"
+  },
+  {
+    "round": 2,
+    "name": "V11: Clear 3-tier targets",
+    "instructions": "# 优化指令\n【重要】无债券ETF，债券独立管理\n【ETF数量】每个组合推荐8-10只\n【资产类别】宽基指数2-3只 + 行业主题2-3只 + 跨境ETF1-2只 + 商品ETF0-1只\n【风格均衡】成长型与价值型ETF数量比尽量1:1，单一风格≤60%\n【权重要求】单只ETF 5%-15%，同行业≤2只\n【三档目标】\n  🎯 进攻型（权益≥85%，现金≤10%）：目标收益**显著超过**沪深300\n  🎯 平衡型（权益65%-75%，现金10%-15%）：目标收益**超过**沪深300\n  🎯 防御型（权益45%-60%，现金+商品≥25%）：目标收益**接近**沪深300，波动率**低于**沪深300\n【防御型策略】以宽基+红利+消费为核心，降低成长股敞口，高现金+黄金降低波动，不追求超额收益",
+    "analysis": {
+      "total_etf_count": 0,
+      "per_portfolio": {},
+      "style_breakdown": {},
+      "asset_categories": {},
+      "warnings": [
+        "JSON parse failed"
+      ]
+    },
+    "raw_output_preview": ""
+  },
+  {
+    "round": 3,
+    "name": "V12: Detailed with defensive strategy",
+    "instructions": "# 优化指令\n【ETF数量】每个组合推荐8-10只ETF\n【资产类别覆盖】宽基指数2-3只 + 行业主题2-3只 + 跨境ETF1-2只 + 商品ETF0-1只（不含债券）\n【风格平衡】成长型与价值型ETF数量比3:3至5:3，单一风格不超过60%\n【权重约束】单只ETF 5%-15%，同一行业≤2只，前5大权重≤60%\n【三档风险收益目标】\n  🔴 进攻型：权益≥85%，现金≤10% → 目标：显著跑赢沪深300\n  🟡 平衡型：权益65%-75%，现金10%-15% → 目标：跑赢沪深300\n  🟢 防御型：权益45%-60%，现金≥20%（含商品ETF）→ 目标：收益接近沪深300但波动率低于沪深300\n【防御型配置要点】\n  - 以宽基指数+红利ETF+消费ETF为核心权益底仓\n  - 减少高弹性行业主题（半导体、军工等）的配置\n  - 黄金ETF作为波动对冲工具\n  - 高现金比例降低组合波动",
+    "analysis": {
+      "total_etf_count": 30,
+      "per_portfolio": {
+        "aggressive": {
+          "count": 10,
+          "cash": 0.1
+        },
+        "balanced": {
+          "count": 10,
+          "cash": 0.15
+        },
+        "defensive": {
+          "count": 10,
+          "cash": 0.2
+        }
+      },
+      "style_breakdown": {
+        "growth": 11,
+        "value": 11,
+        "balanced": 7,
+        "bond": 0,
+        "commodity": 0,
+        "cross_border": 1
+      },
+      "asset_categories": {
+        "broad_index": 8,
+        "sector": 18,
+        "cross_border": 1,
+        "bond": 0,
+        "commodity": 3
+      },
+      "warnings": [
+        "No commodity ETFs - consider adding gold for hedging"
+      ]
+    },
+    "raw_output_preview": "{\n  \"market_analysis\": {\n    \"a_share\": \"A股市场呈现显著分化：创业板指重挫4.37%，深证成指下跌2.29%，成长风格承压；平安银行仅微跌0.38%，厦门港务、石化机械分别上涨2.07%和1.63%，银行与港口、机械等价值板块相对抗跌，*ST康佳A逆势微涨0.81%，显示部分资金向低估值防御品种切换。整体风险偏好下降，市场处于横盘消化阶段，风格可能从单一主"
+  },
+  {
+    "round": 4,
+    "name": "V13: Compact version",
+    "instructions": "# 优化指令\n【ETF数量】8-10只/组合\n【资产类别】宽基指数+行业主题+跨境ETF+商品ETF（无债券）\n【风格】成长:价值≈1:1，单一风格≤60%\n【权重】单只5%-15%，同行业≤2只\n【目标】\n  进攻型：权益≥85%，现金≤10% → 跑赢沪深300\n  平衡型：权益65%-75%，现金10%-15% → 跑赢沪深300\n  防御型：权益45%-60%，现金+商品≥25% → 收益接近沪深300、波动低于沪深300\n防御型以低波权益为主（宽基+红利+消费），黄金对冲，高现金降低波动",
+    "analysis": {
+      "total_etf_count": 0,
+      "per_portfolio": {},
+      "style_breakdown": {},
+      "asset_categories": {},
+      "warnings": [
+        "JSON parse failed"
+      ]
+    },
+    "raw_output_preview": "{\n  \"market_analysis\": {\n    \"a_share\": \"A股市场整体偏弱，深证成指跌2.29%，创业板指重挫4.37%，显示成长风格承压。个股分化：平安银行微跌0.38%，银行业相对抗跌；国城矿业跌4.49%与创业板同步；*ST康佳A涨0.81%、厦门港务涨2.07%、石化机械涨1.63%，部分周期与低价股逆势走强，反映资金避险与风格切换迹象。\",\n    \"us\": \""
+  }
+]

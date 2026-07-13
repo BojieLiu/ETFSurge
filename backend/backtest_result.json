@@ -1,0 +1,35 @@
+{
+  "csi300": {
+    "return": -0.37,
+    "vol": 1.74
+  },
+  "portfolios": [
+    {
+      "type": "aggressive",
+      "name": "进攻型组合",
+      "return": -4.6464,
+      "vol": 10.27030173266589,
+      "etf_count": 10,
+      "cash": 0.05,
+      "target_met": "True"
+    },
+    {
+      "type": "balanced",
+      "name": "平衡型组合",
+      "return": -12.051599999999999,
+      "vol": 7.885513402436141,
+      "etf_count": 10,
+      "cash": 0.15,
+      "target_met": "True"
+    },
+    {
+      "type": "defensive",
+      "name": "防御型组合",
+      "return": -27.5638,
+      "vol": 8.103302291041597,
+      "etf_count": 8,
+      "cash": 0.2,
+      "target_met": "ret=OK, vol=LOW"
+    }
+  ]
+}

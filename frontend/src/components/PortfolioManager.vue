@@ -1,0 +1,681 @@
+<template>
+  <div class="portfolio-manager">
+    <!-- Page Header -->
+    <header class="page-header">
+      <h1 class="page-title">组合管理</h1>
+      <p class="page-description">管理场内/场外 ETF 组合，设置目标权重，实时监控收益</p>
+    </header>
+
+    <!-- Tabs -->
+    <div class="tabs" role="tablist" aria-label="组合类型">
+      <button
+        v-for="tab in tabs"
+        :key="tab.value"
+        :class="['tab', { 'tab--active': activeTab === tab.value }]"
+        @click="activeTab = tab.value"
+        role="tab"
+        :aria-selected="activeTab === tab.value"
+        :aria-controls="`panel-${tab.value}`"
+        :id="`tab-${tab.value}`"
+      >
+        {{ tab.label }}
+      </button>
+    </div>
+
+    <!-- Add ETF Form -->
+    <section class="card add-form">
+      <div class="card-header">
+        <h2 class="card-title">
+          <span class="card-title-icon" aria-hidden="true">➕</span>
+          添加 ETF 到 {{ activeTab === 'on_exchange' ? '场内' : '场外' }}
+        </h2>
+      </div>
+
+      <form class="form" @submit.prevent="onAdd">
+        <div class="form-row">
+          <label class="form-field form-field--search">
+            <span class="form-label">搜索 ETF</span>
+            <div class="search-wrap" ref="searchRef">
+              <AppInput
+                v-model="searchQuery"
+                placeholder="输入代码或名称搜索..."
+                :loading="searchLoading"
+                :clearable="true"
+                @input="onSearch"
+                @keydown="onSearchKeydown"
+                @focus="showDropdown = true"
+                @blur="onSearchBlur"
+              />
+              <Transition name="dropdown">
+                <ul v-if="showDropdown && searchResults.length" class="search-dropdown" @mousedown.prevent>
+                  <li
+                    v-for="(r, i) in searchResults"
+                    :key="r.symbol"
+                    :class="{ active: i === searchIndex }"
+                    @click="selectSearch(r)"
+                    @mouseenter="searchIndex = i"
+                  >
+                    <span class="result-symbol">{{ r.symbol }}</span>
+                    <span class="result-name">{{ r.name }}</span>
+                    <span class="result-tag">{{ r.asset_type }}</span>
+                  </li>
+                </ul>
+              </Transition>
+            </div>
+          </label>
+
+          <div class="form-field">
+            <span class="form-label">市场</span>
+            <AppSelect
+              v-model="form.asset_type"
+              :options="assetTypeOptions"
+              size="md"
+            />
+          </div>
+
+          <div v-if="activeTab === 'off_exchange'" class="form-field">
+            <span class="form-label">跟踪指数</span>
+            <AppInput
+              v-model="form.tracked_index"
+              placeholder="e.g. 000300"
+              size="md"
+            />
+          </div>
+
+          <div class="form-field form-field--weight">
+            <div class="weight-control">
+              <label class="weight-label">
+                权重 {{ form.weight }}%
+                <input type="range" v-model.number="form.weight" min="0" max="100" step="5" class="slider" />
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <AppButton type="submit" variant="primary" :disabled="!form.symbol" :loading="adding">
+            <span class="btn-icon" aria-hidden="true">➕</span>
+            {{ adding ? '添加中...' : '添加' }}
+          </AppButton>
+        </div>
+      </form>
+    </section>
+
+    <!-- Capital & PnL Bar -->
+    <section class="card capital-bar" v-if="currentEtfs.length">
+      <div class="capital-inputs">
+        <label class="input-group">
+          <span class="input-label">估算仓位</span>
+          <AppInput
+            type="number"
+            v-model.number="pnlCapital"
+            placeholder="输入金额"
+            :min="0"
+            :step="10000"
+            size="md"
+            aria-label="估算仓位金额"
+          />
+        </label>
+        <AppButton variant="secondary" @click="refreshPnl" :loading="pnlLoading">
+          <span class="btn-icon" aria-hidden="true">↻</span>
+          刷新收益
+        </AppButton>
+      </div>
+
+      <div class="pnl-summary" v-if="pnlSummary.total_amount > 0">
+        <span class="pnl-label">合计</span>
+        <span class="pnl-amount" :class="pnlSummary.total_pnl >= 0 ? 'text-success' : 'text-danger'">
+          ¥{{ formatNum(pnlSummary.total_pnl) }}
+        </span>
+        <span class="pnl-pct" :class="pnlSummary.weighted_change_pct >= 0 ? 'text-success' : 'text-danger'">
+          ({{ pnlSummary.weighted_change_pct >= 0 ? '+' : '' }}{{ pnlSummary.weighted_change_pct.toFixed(2) }}%)
+        </span>
+      </div>
+    </section>
+
+    <!-- ETF List -->
+    <section class="card etf-list-card">
+      <div class="card-header">
+        <h2 class="card-title">
+          <span class="card-title-icon" aria-hidden="true">{{ activeTab === 'on_exchange' ? '🏢' : '🏦' }}</span>
+          {{ activeTab === 'on_exchange' ? '场内' : '场外' }} ETF 列表
+        </h2>
+        <div class="card-meta" v-if="currentWeightSum !== 1">
+          <span class="weight-sum" :class="Math.abs(currentWeightSum - 1) > 0.01 ? 'warn' : ''">
+            权重合计: {{ (currentWeightSum * 100).toFixed(1) }}%
+            <span v-if="Math.abs(currentWeightSum - 1) > 0.01" class="warn-text"> (不等于 100%)</span>
+          </span>
+        </div>
+      </div>
+
+      <!-- Empty State -->
+      <div v-if="!currentEtfs.length" class="empty-state">
+        <div class="empty-icon" aria-hidden="true">📦</div>
+        <h3 class="empty-title">还没有 ETF</h3>
+        <p class="empty-description">在上方搜索并添加 ETF 到组合</p>
+        <AppButton variant="secondary" @click="loadSampleData">
+          <span class="btn-icon" aria-hidden="true">🧪</span>
+          填充示例数据
+        </AppButton>
+      </div>
+
+      <!-- Table -->
+      <div v-else class="table-responsive">
+        <table class="data-table" role="grid">
+          <thead>
+            <tr>
+              <th scope="col">代码</th>
+              <th scope="col">名称</th>
+              <th scope="col">市场</th>
+              <th scope="col">权重</th>
+              <th scope="col">现价</th>
+              <th scope="col">涨跌幅</th>
+              <th scope="col">当日盈亏</th>
+              <th scope="col">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template v-for="etf in currentEtfs" :key="etf.symbol">
+              <tr>
+              <td><code>{{ etf.symbol }}</code></td>
+              <td><strong>{{ etf.name }}</strong></td>
+              <td><span class="type-badge" :class="etf.asset_type.toLowerCase()">{{ etf.asset_type }}</span></td>
+              <td class="weight-cell">
+                <div class="weight-control">
+                  <input
+                    type="range"
+                    v-model.number="etf.editWeight"
+                    :min="0"
+                    :max="100"
+                    step="5"
+                    class="slider"
+                    @input="etf.editWeight = Math.min(100, Math.max(0, etf.editWeight))"
+                  />
+                  <span class="weight-val">{{ etf.editWeight != null ? etf.editWeight : (etf.target_weight * 100).toFixed(0) }}%</span>
+                </div>
+              </td>
+              <td class="price-cell">
+                <span v-if="pnlMap[etf.symbol]?.current_price" class="text-mono">¥{{ pnlMap[etf.symbol].current_price.toFixed(2) }}</span>
+                <span v-else class="text-muted">—</span>
+              </td>
+              <td class="change-cell" :class="getChangeClass(pnlMap[etf.symbol]?.change_pct)">
+                <span v-if="pnlMap[etf.symbol]" class="change-value">{{ formatChange(pnlMap[etf.symbol].change_pct) }}</span>
+                <span v-else class="text-muted">—</span>
+              </td>
+              <td class="pnl-cell" :class="getChangeClass(pnlMap[etf.symbol]?.daily_pnl)">
+                <span v-if="pnlMap[etf.symbol]" class="text-mono-lg">{{ formatChange(pnlMap[etf.symbol].daily_pnl, true) }}</span>
+                <span v-else class="text-muted">—</span>
+              </td>
+              <td>
+                <div class="action-buttons">
+                  <AppButton size="sm" variant="secondary" @click="onUpdate(etf)" :disabled="etf.editWeight == null">
+                    更新
+                  </AppButton>
+                  <AppButton size="sm" variant="danger" @click="onRemove(etf.symbol)">
+                    删除
+                  </AppButton>
+                </div>
+              </td>
+            </tr>
+            <tr v-if="etf.portfolio_type === 'off_exchange'" class="ta-expand">
+              <td :colspan="8">
+                <div class="off-ta">
+                  <button class="ta-toggle" @click="toggleTa(etf)">
+                    {{ taOpen[etf.symbol] ? '收起技术分析 ▲' : '查看技术分析 ▼' }}
+                    <span class="ta-tracked">{{ taTarget(etf).assetType === 'index' ? '跟踪指数 ' + etf.tracked_index : '标的 ' + etf.symbol }}</span>
+                  </button>
+                  <div v-if="taOpen[etf.symbol]" class="ta-body">
+                    <div v-if="taLoading[etf.symbol]" class="loading">加载技术指标...</div>
+                    <template v-else-if="taData[etf.symbol]">
+                      <div class="ind-grid">
+                        <div class="ind-item"><span class="label">MA5</span><span>{{ fmt(taData[etf.symbol].indicators.ma5) }}</span></div>
+                        <div class="ind-item"><span class="label">MA10</span><span>{{ fmt(taData[etf.symbol].indicators.ma10) }}</span></div>
+                        <div class="ind-item"><span class="label">MA20</span><span>{{ fmt(taData[etf.symbol].indicators.ma20) }}</span></div>
+                        <div class="ind-item"><span class="label">MA60</span><span>{{ fmt(taData[etf.symbol].indicators.ma60) }}</span></div>
+                        <div class="ind-item"><span class="label">RSI(14)</span><span>{{ fmt(taData[etf.symbol].indicators.rsi) }}</span></div>
+                        <div class="ind-item"><span class="label">MACD</span><span>{{ fmt(taData[etf.symbol].indicators.macd?.macd) }}</span></div>
+                        <div class="ind-item"><span class="label">KDJ-K</span><span>{{ fmt(taData[etf.symbol].indicators.kdj?.k) }}</span></div>
+                        <div class="ind-item"><span class="label">BOLL上</span><span>{{ fmt(taData[etf.symbol].indicators.bollinger?.upper) }}</span></div>
+                        <div class="ind-item"><span class="label">BOLL下</span><span>{{ fmt(taData[etf.symbol].indicators.bollinger?.lower) }}</span></div>
+                      </div>
+                      <div class="signal-row" v-if="taData[etf.symbol].signal">
+                        <span class="signal-badge" :class="taData[etf.symbol].signal.signal">{{ sigText(taData[etf.symbol].signal.signal) }}</span>
+                        <span class="score">评分: {{ taData[etf.symbol].signal.score }}</span>
+                      </div>
+                      <ul class="reasons" v-if="taData[etf.symbol].signal?.reasons?.length">
+                        <li v-for="(r, i) in taData[etf.symbol].signal.reasons" :key="i">{{ r }}</li>
+                      </ul>
+                    </template>
+                    <div v-else class="text-muted">暂无数据（该跟踪指数暂不支持技术分析）</div>
+                  </div>
+                </div>
+              </td>
+            </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</template>
+
+<script setup>
+import { ref, computed, watch, onMounted } from 'vue'
+import { usePortfolioStore } from '../stores/portfolio'
+import { portfolioApi, marketApi } from '../api'
+import { useToast } from '../stores/toast'
+import AppButton from './ui/AppButton.vue'
+import AppInput from './ui/AppInput.vue'
+import AppSelect from './ui/AppSelect.vue'
+
+const store = usePortfolioStore()
+const { toast } = useToast()
+
+// State
+const activeTab = ref('on_exchange')
+const searchQuery = ref('')
+const searchResults = ref([])
+const searchIndex = ref(-1)
+const showDropdown = ref(false)
+const searchLoading = ref(false)
+const searchRef = ref(null)
+const form = ref({ symbol: '', name: '', asset_type: 'A', weight: 20, tracked_index: '' })
+const pnlCapital = ref(500000)
+const pnlData = ref({ items: [] })
+const pnlLoading = ref(false)
+const adding = ref(false)
+
+const tabs = [
+  { value: 'on_exchange', label: '场内 ETF' },
+  { value: 'off_exchange', label: '场外 ETF' }
+]
+
+const assetTypeOptions = [
+  { value: 'A', label: 'A股' },
+  { value: 'HK', label: '港股' },
+  { value: 'US', label: '美股' }
+]
+
+const currentEtfs = computed(() => activeTab.value === 'on_exchange' ? store.onExchange : store.offExchange)
+
+const pnlMap = computed(() => {
+  const m = {}
+  for (const item of pnlData.value.items || []) {
+    m[item.symbol] = item
+  }
+  return m
+})
+
+const pnlSummary = computed(() => ({
+  total_pnl: (pnlData.value.items || []).reduce((s, i) => s + (i.daily_pnl || 0), 0),
+  total_amount: (pnlData.value.items || []).reduce((s, i) => s + (i.target_amount || 0), 0),
+  weighted_change_pct: (() => {
+    const items = pnlData.value.items || []
+    const total = items.reduce((s, i) => s + (i.target_amount || 0), 0)
+    if (!total) return 0
+    return items.reduce((s, i) => s + (i.target_amount || 0) * (i.change_pct || 0), 0) / total
+  })()
+}))
+
+const currentWeightSum = computed(() => currentEtfs.value.reduce((s, e) => s + e.target_weight, 0))
+
+const formatNum = (v) => Number(v).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const formatChange = (n, isAmount = false) => {
+  const val = n || 0
+  const prefix = val >= 0 && !isAmount ? '+' : ''
+  const suffix = isAmount ? '' : '%'
+  return `${prefix}${val.toFixed(2)}${suffix}`
+}
+
+const getChangeClass = (val) => val >= 0 ? 'text-success' : 'text-danger'
+
+// Search
+let searchTimer = null
+function onSearch() {
+  clearTimeout(searchTimer)
+  searchIndex.value = -1
+  if (!searchQuery.value) { searchResults.value = []; return }
+  searchLoading.value = true
+  searchTimer = setTimeout(async () => {
+    try {
+      const res = await marketApi.search(searchQuery.value)
+      searchResults.value = res.data.slice(0, 10)
+    } catch { searchResults.value = [] }
+    finally { searchLoading.value = false }
+  }, 300)
+}
+
+function onSearchKeydown(e) {
+  if (!searchResults.value.length) return
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    searchIndex.value = Math.min(searchIndex.value + 1, searchResults.value.length - 1)
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    searchIndex.value = Math.max(searchIndex.value - 1, 0)
+  } else if (e.key === 'Enter' && searchIndex.value >= 0) {
+    e.preventDefault()
+    selectSearch(searchResults.value[searchIndex.value])
+  } else if (e.key === 'Escape') {
+    searchResults.value = []
+    showDropdown.value = false
+  }
+}
+
+function onSearchBlur() {
+  setTimeout(() => { showDropdown.value = false }, 200)
+}
+
+function selectSearch(r) {
+  form.value = { symbol: r.symbol, name: r.name, asset_type: r.asset_type, weight: form.value.weight, tracked_index: form.value.tracked_index }
+  searchQuery.value = `${r.symbol} ${r.name}`
+  searchResults.value = []
+  showDropdown.value = false
+}
+
+// Actions
+async function onAdd() {
+  if (!form.value.symbol || adding.value) return
+  adding.value = true
+  try {
+    await store.addEtf({
+      symbol: form.value.symbol, name: form.value.name,
+      asset_type: form.value.asset_type, target_weight: form.value.weight / 100,
+      portfolio_type: activeTab.value, tracked_index: form.value.tracked_index || undefined,
+    })
+    toast(`已添加 ${form.value.name}`, 'success')
+    form.value = { symbol: '', name: '', asset_type: 'A', weight: 20, tracked_index: form.value.tracked_index }
+    searchQuery.value = ''
+  } finally {
+    adding.value = false
+  }
+}
+
+async function onUpdate(etf) {
+  const w = etf.editWeight != null ? etf.editWeight / 100 : etf.target_weight
+  await store.updateEtf(etf.symbol, { target_weight: w })
+  toast(`${etf.name} 权重已更新`, 'success')
+  etf.editWeight = null
+  await loadTab()
+}
+
+async function onRemove(symbol) {
+  await store.removeEtf(symbol)
+  toast('ETF 已删除', 'info')
+}
+
+// 场外标的技术分析：通过 tracked_index（跟踪指数）复用行情接口（日线及以上）
+const taOpen = ref({})
+const taLoading = ref({})
+const taData = ref({})
+
+function sigText(s) {
+  return ({ buy: '买入', sell: '卖出', hold: '持有' })[s] || s || '—'
+}
+function fmt(v) {
+  if (v == null || (typeof v === 'number' && Number.isNaN(v))) return '--'
+  return typeof v === 'number' ? v.toFixed(2) : v
+}
+function taTarget(etf) {
+  if (etf.tracked_index) return { sym: etf.tracked_index, assetType: 'index' }
+  return { sym: etf.symbol, assetType: 'A' }
+}
+async function loadTa(etf) {
+  const t = taTarget(etf)
+  if (!t.sym) return
+  taLoading.value[etf.symbol] = true
+  try {
+    const [indRes, sigRes] = await Promise.all([
+      marketApi.indicators(t.sym, t.assetType),
+      marketApi.signal(t.sym, t.assetType),
+    ])
+    taData.value[etf.symbol] = {
+      indicators: indRes.data || indRes,
+      signal: sigRes.data || sigRes,
+    }
+  } catch {
+    taData.value[etf.symbol] = null
+  } finally {
+    taLoading.value[etf.symbol] = false
+  }
+}
+function toggleTa(etf) {
+  const open = !taOpen.value[etf.symbol]
+  taOpen.value[etf.symbol] = open
+  if (open && !taData.value[etf.symbol] && !taLoading.value[etf.symbol]) loadTa(etf)
+}
+
+async function refreshPnl() {
+  pnlLoading.value = true
+  try {
+    const res = await portfolioApi.dailyPnl(pnlCapital.value, activeTab.value)
+    pnlData.value = res.data || { items: [] }
+  } catch { pnlData.value = { items: [] } }
+  finally { pnlLoading.value = false }
+}
+
+async function loadTab() {
+  await store.fetchEtfs(activeTab.value)
+  await refreshPnl()
+}
+
+async function loadSampleData() {
+  const samples = [
+    { symbol: '510050', name: '上证50ETF', asset_type: 'A', target_weight: 0.25, portfolio_type: 'on_exchange' },
+    { symbol: '510300', name: '沪深300ETF', asset_type: 'A', target_weight: 0.25, portfolio_type: 'on_exchange' },
+    { symbol: '159915', name: '创业板ETF', asset_type: 'A', target_weight: 0.2, portfolio_type: 'on_exchange' },
+    { symbol: '518880', name: '黄金ETF', asset_type: 'A', target_weight: 0.15, portfolio_type: 'on_exchange' },
+    { symbol: '511880', name: '银华日利ETF', asset_type: 'A', target_weight: 0.15, portfolio_type: 'on_exchange' },
+  ]
+  let count = 0
+  for (const s of samples) {
+    try { await store.addEtf(s); count++ } catch {}
+  }
+  toast(`已填充 ${count} 只示例 ETF`, 'success')
+}
+
+watch(activeTab, loadTab)
+onMounted(loadTab)
+</script>
+
+<style scoped>
+/* ==========================================
+   Portfolio Manager Styles
+   ========================================== */
+.portfolio-manager {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+/* Page Header */
+.page-header { margin-bottom: var(--space-2); }
+.page-title { font-size: var(--font-size-2xl); font-weight: var(--font-weight-bold); line-height: var(--line-height-tight); color: var(--color-text-primary); letter-spacing: var(--letter-spacing-tight); }
+.page-description { margin-top: var(--space-1); font-size: var(--font-size-base); color: var(--color-text-secondary); line-height: var(--line-height-relaxed); }
+
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: var(--space-1);
+  background: var(--color-surface-tertiary);
+  padding: var(--space-1);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border-light);
+}
+.tab {
+  flex: 1;
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-md);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: var(--transition-fast);
+  white-space: nowrap;
+}
+.tab:hover { color: var(--color-text-primary); background: var(--color-surface-hover); }
+.tab--active { color: var(--color-brand-600); background: var(--color-bg-brand-subtle); }
+.tab:focus-visible { outline: none; box-shadow: var(--shadow-focus); }
+
+/* Card */
+.card { background: var(--color-surface-primary); border: 1px solid var(--color-border-light); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); overflow: hidden; }
+.card-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--color-border-light); flex-wrap: wrap; }
+.card-title { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); margin: 0; }
+.card-title-icon { font-size: var(--font-size-xl); line-height: 1; }
+.card-meta { display: flex; align-items: center; gap: var(--space-4); margin-left: auto; }
+
+/* Add Form */
+.add-form { }
+.add-form .card-header { padding-bottom: var(--space-3); }
+
+.form { padding: var(--space-5); }
+.form-row { display: flex; gap: var(--space-4); align-items: flex-end; flex-wrap: wrap; margin-top: var(--space-4); }
+.form-field { display: flex; flex-direction: column; gap: var(--space-1); font-size: var(--font-size-xs); color: var(--color-text-tertiary); min-width: 0; }
+.form-field--search { flex: 1; min-width: 280px; }
+.form-field--weight { flex: 0 0 180px; }
+.form-label { font-weight: var(--font-weight-medium); color: var(--color-text-secondary); }
+
+.search-wrap { position: relative; width: 100%; }
+.search-dropdown { position: absolute; top: calc(100% + var(--space-1)); left: 0; right: 0; max-height: 280px; overflow-y: auto; background: var(--color-surface-primary); border: 1px solid var(--color-border-medium); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); z-index: var(--z-index-dropdown); list-style: none; padding: var(--space-1); }
+.search-dropdown li { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); cursor: pointer; transition: var(--transition-fast); }
+.search-dropdown li:hover, .search-dropdown li.active { background: var(--color-surface-hover); }
+.result-symbol { font-family: var(--font-family-mono); font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); min-width: 80px; }
+.result-name { flex: 1; font-size: var(--font-size-sm); color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.result-tag { font-size: var(--font-size-xs); font-weight: var(--font-weight-medium); padding: var(--space-0.5) var(--space-1.5); border-radius: var(--radius-full); background: var(--color-surface-tertiary); color: var(--color-text-tertiary); }
+
+.weight-control { width: 100%; }
+.weight-label { display: block; font-size: var(--font-size-xs); font-weight: var(--font-weight-medium); color: var(--color-text-secondary); margin-bottom: var(--space-1); }
+.slider { width: 100%; height: 6px; -webkit-appearance: none; appearance: none; background: var(--color-border-medium); border-radius: var(--radius-full); outline: none; cursor: pointer; }
+.slider::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: var(--radius-full); background: var(--color-brand-600); box-shadow: var(--shadow-sm); transition: var(--transition-fast); }
+.slider::-webkit-slider-thumb:hover { background: var(--color-brand-700); transform: scale(1.1); }
+.slider::-moz-range-thumb { width: 18px; height: 18px; border-radius: var(--radius-full); background: var(--color-brand-600); border: none; box-shadow: var(--shadow-sm); }
+.weight-val { display: inline-block; margin-left: var(--space-2); font-family: var(--font-family-mono); font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); color: var(--color-brand-600); min-width: 48px; text-align: right; }
+
+.form-actions { display: flex; justify-content: flex-end; padding-top: var(--space-4); margin-top: var(--space-4); border-top: 1px solid var(--color-border-light); }
+
+/* Capital Bar */
+.capital-bar { padding: var(--space-4) var(--space-5); }
+.capital-inputs { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; margin-bottom: var(--space-3); }
+.capital-inputs .input-group { display: inline-flex; align-items: center; gap: var(--space-2); flex: 1; min-width: 200px; }
+.input-label { font-size: var(--font-size-sm); font-weight: var(--font-weight-medium); color: var(--color-text-secondary); white-space: nowrap; }
+
+.pnl-summary { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); background: var(--color-surface-secondary); border-radius: var(--radius-lg); }
+.pnl-label { font-size: var(--font-size-sm); font-weight: var(--font-weight-medium); color: var(--color-text-secondary); }
+.pnl-amount { font-family: var(--font-family-mono); font-size: var(--font-size-lg); font-weight: var(--font-weight-bold); }
+.pnl-pct { font-family: var(--font-family-mono); font-size: var(--font-size-base); font-weight: var(--font-weight-semibold); }
+
+/* ETF List Card */
+.etf-list-card { }
+.etf-list-card .card-header { flex-wrap: wrap; }
+
+.weight-sum { display: inline-flex; align-items: center; gap: var(--space-1); font-family: var(--font-family-mono); font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); color: var(--color-brand-700); background: var(--color-bg-brand-subtle); padding: var(--space-1) var(--space-3); border-radius: var(--radius-full); }
+.weight-sum.warn { color: var(--color-warning-700); background: var(--color-bg-warning-subtle); }
+.warn-text { font-weight: var(--font-weight-bold); color: var(--color-warning-800); }
+
+/* Empty State */
+.empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: var(--space-12) var(--space-6); text-align: center; background: var(--color-surface-secondary); border: 2px dashed var(--color-border-medium); border-radius: var(--radius-xl); }
+.empty-icon { font-size: var(--font-size-5xl); line-height: 1; margin-bottom: var(--space-4); }
+.empty-title { margin: 0 0 var(--space-2); font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
+.empty-description { margin: 0 0 var(--space-6); font-size: var(--font-size-base); color: var(--color-text-secondary); max-width: 300px; }
+
+/* Table */
+.table-responsive { overflow-x: auto; padding: var(--space-4) var(--space-5); -webkit-overflow-scrolling: touch; }
+.data-table { width: 100%; border-collapse: collapse; font-size: var(--font-size-sm); }
+.data-table th, .data-table td { padding: var(--space-3) var(--space-4); text-align: left; vertical-align: middle; border-bottom: 1px solid var(--color-border-light); }
+.data-table th { font-weight: var(--font-weight-semibold); color: var(--color-text-secondary); background: var(--color-surface-secondary); white-space: nowrap; position: sticky; top: 0; z-index: 1; }
+.data-table tbody tr { transition: var(--transition-fast); }
+.data-table tbody tr:hover { background: var(--color-surface-hover); }
+.data-table td code { font-family: var(--font-family-mono); font-size: var(--font-size-xs); background: var(--color-surface-tertiary); padding: var(--space-0.5) var(--space-1); border-radius: var(--radius-sm); }
+
+.type-badge { display: inline-flex; align-items: center; padding: var(--space-0.5) var(--space-2); font-size: var(--font-size-xs); font-weight: var(--font-weight-medium); border-radius: var(--radius-full); text-transform: uppercase; }
+.type-badge.a { color: var(--color-info-700); background: var(--color-bg-info-subtle); }
+.type-badge.hk { color: var(--color-warning-700); background: var(--color-bg-warning-subtle); }
+.type-badge.us { color: var(--color-success-700); background: var(--color-bg-success-subtle); }
+
+.weight-cell { min-width: 120px; }
+.weight-control { width: 100%; }
+.slider { width: 100%; height: 6px; -webkit-appearance: none; appearance: none; background: var(--color-border-medium); border-radius: var(--radius-full); outline: none; cursor: pointer; }
+.slider::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: var(--radius-full); background: var(--color-brand-600); box-shadow: var(--shadow-sm); transition: var(--transition-fast); }
+.slider::-webkit-slider-thumb:hover { background: var(--color-brand-700); transform: scale(1.1); }
+.slider::-moz-range-thumb { width: 18px; height: 18px; border-radius: var(--radius-full); background: var(--color-brand-600); border: none; box-shadow: var(--shadow-sm); }
+.weight-val { display: inline-block; margin-left: var(--space-2); font-family: var(--font-family-mono); font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); color: var(--color-brand-600); min-width: 48px; text-align: right; }
+
+.price-cell { font-family: var(--font-family-mono); font-weight: var(--font-weight-medium); }
+.change-cell, .pnl-cell { font-family: var(--font-family-mono); font-weight: var(--font-weight-semibold); white-space: nowrap; }
+.change-value { }
+.text-mono-lg { font-family: var(--font-family-mono); font-size: var(--font-size-base); font-weight: var(--font-weight-medium); }
+.text-muted { color: var(--color-text-tertiary); }
+
+.action-buttons { display: flex; gap: var(--space-2); }
+
+/* Animations */
+.dropdown-enter-active, .dropdown-leave-active { transition: all var(--duration-fast) var(--ease-out); }
+.dropdown-enter-from, .dropdown-leave-to { opacity: 0; transform: translateY(-8px); }
+
+/* Text Color Utilities */
+.text-success { color: var(--color-text-success) !important; }
+.text-danger { color: var(--color-text-danger) !important; }
+.text-warning { color: var(--color-text-warning) !important; }
+
+/* Focus Visible */
+*:focus-visible { outline: none; box-shadow: var(--shadow-focus); }
+
+/* Responsive */
+@media (max-width: 768px) {
+  .form-row { flex-direction: column; align-items: stretch; }
+  .form-field--search { min-width: 0; }
+  .form-field--weight { width: 100%; }
+  .capital-inputs { flex-direction: column; align-items: stretch; }
+  .capital-inputs .input-group { width: 100%; }
+  .table-responsive { padding: var(--space-3); }
+  .data-table th, .data-table td { padding: var(--space-2) var(--space-3); }
+  .card-header { flex-direction: column; align-items: flex-start; gap: var(--space-3); }
+  .card-meta { margin-left: 0; width: 100%; justify-content: space-between; }
+}
+
+@media (max-width: 480px) {
+  .tabs { flex-direction: column; }
+  .tab { text-align: center; }
+  .action-buttons { flex-direction: column; }
+  .action-buttons .btn { width: 100%; justify-content: center; }
+}
+
+/* 场外标的展开式技术分析 */
+.ta-expand td { background: var(--bg-tertiary); padding: var(--space-3) var(--space-4) !important; }
+.off-ta { display: flex; flex-direction: column; gap: var(--space-3); }
+.ta-toggle {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  background: var(--bg-card); color: var(--text-primary);
+  border: 1px solid var(--border-color); border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-3); font-size: var(--text-sm); cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+.ta-toggle:hover { border-color: var(--accent); background: var(--bg-hover); }
+.ta-tracked { color: var(--text-secondary); font-size: var(--text-xs); }
+.ta-body { border-top: 1px dashed var(--border-color); padding-top: var(--space-3); }
+.ind-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: var(--space-2); margin-bottom: var(--space-3);
+}
+.ind-item {
+  display: flex; flex-direction: column; gap: 2px;
+  background: var(--bg-card); border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm); padding: var(--space-2) var(--space-3);
+}
+.ind-item .label { font-size: var(--text-xs); color: var(--text-secondary); }
+.ind-item span:last-child { font-size: var(--text-sm); font-weight: 600; font-family: var(--font-mono); }
+.signal-row { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-2); }
+.signal-badge {
+  display: inline-block; padding: 2px var(--space-3); border-radius: var(--radius-sm);
+  font-size: var(--text-sm); font-weight: 700; color: #fff;
+}
+.signal-badge.buy { background: var(--up-color); }
+.signal-badge.sell { background: var(--down-color); }
+.signal-badge.hold { background: var(--text-muted); }
+.score { font-size: var(--text-sm); color: var(--text-secondary); }
+.reasons { margin: 0; padding-left: var(--space-5); display: flex; flex-direction: column; gap: 4px; }
+.reasons li { font-size: var(--text-sm); color: var(--text-secondary); list-style: disc; }
+.loading { font-size: var(--text-sm); color: var(--text-muted); }
+</style>

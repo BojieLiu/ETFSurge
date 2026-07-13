@@ -1,0 +1,914 @@
+[
+  {
+    "round": 1,
+    "best_score": 86.16666666666667,
+    "global_best": 86.16666666666667,
+    "mutations": [
+      "OUTPUT_JSON_SCHEMA",
+      "TRIGGER_EVIDENCE",
+      "CIRCUIT_BREAKER",
+      "COMPLIANCE_TABLE"
+    ],
+    "detail": {
+      "by_type": {
+        "attack": 86.0,
+        "balance": 100.0,
+        "defend": 72.5
+      },
+      "details": [
+        {
+          "case": "attack_case1",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 86.0
+        },
+        {
+          "case": "attack_case2",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 86.0
+        },
+        {
+          "case": "balance_case1",
+          "scores": {
+            "signal": 100,
+            "trigger": 100,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 100,
+            "adaptation": 100
+          },
+          "total": 100.0
+        },
+        {
+          "case": "balance_case2",
+          "scores": {
+            "signal": 100,
+            "trigger": 100,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 100,
+            "adaptation": 100
+          },
+          "total": 100.0
+        },
+        {
+          "case": "defend_case1",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 72.5
+        },
+        {
+          "case": "defend_case2",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 72.5
+        }
+      ]
+    }
+  },
+  {
+    "round": 2,
+    "best_score": 86.16666666666667,
+    "global_best": 86.16666666666667,
+    "mutations": [
+      "CIRCUIT_BREAKER",
+      "COMPLIANCE_TABLE",
+      "EXECUTION_KIT",
+      "TRIGGER_EVIDENCE"
+    ],
+    "detail": {
+      "by_type": {
+        "attack": 86.0,
+        "balance": 100.0,
+        "defend": 72.5
+      },
+      "details": [
+        {
+          "case": "attack_case1",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 86.0
+        },
+        {
+          "case": "attack_case2",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 86.0
+        },
+        {
+          "case": "balance_case1",
+          "scores": {
+            "signal": 100,
+            "trigger": 100,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 100,
+            "adaptation": 100
+          },
+          "total": 100.0
+        },
+        {
+          "case": "balance_case2",
+          "scores": {
+            "signal": 100,
+            "trigger": 100,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 100,
+            "adaptation": 100
+          },
+          "total": 100.0
+        },
+        {
+          "case": "defend_case1",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 72.5
+        },
+        {
+          "case": "defend_case2",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 72.5
+        }
+      ]
+    }
+  },
+  {
+    "round": 3,
+    "best_score": 86.16666666666667,
+    "global_best": 86.16666666666667,
+    "mutations": [
+      "EXEC_SPEC",
+      "EXECUTION_KIT"
+    ],
+    "detail": {
+      "by_type": {
+        "attack": 86.0,
+        "balance": 100.0,
+        "defend": 72.5
+      },
+      "details": [
+        {
+          "case": "attack_case1",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 86.0
+        },
+        {
+          "case": "attack_case2",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 86.0
+        },
+        {
+          "case": "balance_case1",
+          "scores": {
+            "signal": 100,
+            "trigger": 100,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 100,
+            "adaptation": 100
+          },
+          "total": 100.0
+        },
+        {
+          "case": "balance_case2",
+          "scores": {
+            "signal": 100,
+            "trigger": 100,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 100,
+            "adaptation": 100
+          },
+          "total": 100.0
+        },
+        {
+          "case": "defend_case1",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 72.5
+        },
+        {
+          "case": "defend_case2",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 72.5
+        }
+      ]
+    }
+  },
+  {
+    "round": 4,
+    "best_score": 86.16666666666667,
+    "global_best": 86.16666666666667,
+    "mutations": [
+      "TYPE_THRESHOLDS",
+      "EXEC_SPEC"
+    ],
+    "detail": {
+      "by_type": {
+        "attack": 86.0,
+        "balance": 100.0,
+        "defend": 72.5
+      },
+      "details": [
+        {
+          "case": "attack_case1",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 86.0
+        },
+        {
+          "case": "attack_case2",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 86.0
+        },
+        {
+          "case": "balance_case1",
+          "scores": {
+            "signal": 100,
+            "trigger": 100,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 100,
+            "adaptation": 100
+          },
+          "total": 100.0
+        },
+        {
+          "case": "balance_case2",
+          "scores": {
+            "signal": 100,
+            "trigger": 100,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 100,
+            "adaptation": 100
+          },
+          "total": 100.0
+        },
+        {
+          "case": "defend_case1",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 72.5
+        },
+        {
+          "case": "defend_case2",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 72.5
+        }
+      ]
+    }
+  },
+  {
+    "round": 5,
+    "best_score": 86.16666666666667,
+    "global_best": 86.16666666666667,
+    "mutations": [
+      "SIGNAL_HORIZON",
+      "TYPE_LOGIC",
+      "TRIGGER_RULES"
+    ],
+    "detail": {
+      "by_type": {
+        "attack": 86.0,
+        "balance": 100.0,
+        "defend": 72.5
+      },
+      "details": [
+        {
+          "case": "attack_case1",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 86.0
+        },
+        {
+          "case": "attack_case2",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 86.0
+        },
+        {
+          "case": "balance_case1",
+          "scores": {
+            "signal": 100,
+            "trigger": 100,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 100,
+            "adaptation": 100
+          },
+          "total": 100.0
+        },
+        {
+          "case": "balance_case2",
+          "scores": {
+            "signal": 100,
+            "trigger": 100,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 100,
+            "adaptation": 100
+          },
+          "total": 100.0
+        },
+        {
+          "case": "defend_case1",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 72.5
+        },
+        {
+          "case": "defend_case2",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 72.5
+        }
+      ]
+    }
+  },
+  {
+    "round": 6,
+    "best_score": 86.16666666666667,
+    "global_best": 86.16666666666667,
+    "mutations": [
+      "EXECUTION_KIT",
+      "SIGNAL_HORIZON"
+    ],
+    "detail": {
+      "by_type": {
+        "attack": 86.0,
+        "balance": 100.0,
+        "defend": 72.5
+      },
+      "details": [
+        {
+          "case": "attack_case1",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 86.0
+        },
+        {
+          "case": "attack_case2",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 86.0
+        },
+        {
+          "case": "balance_case1",
+          "scores": {
+            "signal": 100,
+            "trigger": 100,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 100,
+            "adaptation": 100
+          },
+          "total": 100.0
+        },
+        {
+          "case": "balance_case2",
+          "scores": {
+            "signal": 100,
+            "trigger": 100,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 100,
+            "adaptation": 100
+          },
+          "total": 100.0
+        },
+        {
+          "case": "defend_case1",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 72.5
+        },
+        {
+          "case": "defend_case2",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 72.5
+        }
+      ]
+    }
+  },
+  {
+    "round": 7,
+    "best_score": 86.16666666666667,
+    "global_best": 86.16666666666667,
+    "mutations": [
+      "TRIGGER_EVIDENCE",
+      "OUTPUT_JSON_SCHEMA",
+      "COMPLIANCE_TABLE"
+    ],
+    "detail": {
+      "by_type": {
+        "attack": 86.0,
+        "balance": 100.0,
+        "defend": 72.5
+      },
+      "details": [
+        {
+          "case": "attack_case1",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 86.0
+        },
+        {
+          "case": "attack_case2",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 86.0
+        },
+        {
+          "case": "balance_case1",
+          "scores": {
+            "signal": 100,
+            "trigger": 100,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 100,
+            "adaptation": 100
+          },
+          "total": 100.0
+        },
+        {
+          "case": "balance_case2",
+          "scores": {
+            "signal": 100,
+            "trigger": 100,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 100,
+            "adaptation": 100
+          },
+          "total": 100.0
+        },
+        {
+          "case": "defend_case1",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 72.5
+        },
+        {
+          "case": "defend_case2",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 72.5
+        }
+      ]
+    }
+  },
+  {
+    "round": 8,
+    "best_score": 86.16666666666667,
+    "global_best": 86.16666666666667,
+    "mutations": [
+      "TYPE_LOGIC",
+      "EXEC_SPEC",
+      "TYPE_THRESHOLDS",
+      "SIGNAL_HORIZON"
+    ],
+    "detail": {
+      "by_type": {
+        "attack": 86.0,
+        "balance": 100.0,
+        "defend": 72.5
+      },
+      "details": [
+        {
+          "case": "attack_case1",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 86.0
+        },
+        {
+          "case": "attack_case2",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 86.0
+        },
+        {
+          "case": "balance_case1",
+          "scores": {
+            "signal": 100,
+            "trigger": 100,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 100,
+            "adaptation": 100
+          },
+          "total": 100.0
+        },
+        {
+          "case": "balance_case2",
+          "scores": {
+            "signal": 100,
+            "trigger": 100,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 100,
+            "adaptation": 100
+          },
+          "total": 100.0
+        },
+        {
+          "case": "defend_case1",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 72.5
+        },
+        {
+          "case": "defend_case2",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 72.5
+        }
+      ]
+    }
+  },
+  {
+    "round": 9,
+    "best_score": 86.16666666666667,
+    "global_best": 86.16666666666667,
+    "mutations": [
+      "CIRCUIT_BREAKER",
+      "LIQUIDITY_ORDER",
+      "SIGNAL_SPEC",
+      "COMPLIANCE_TABLE"
+    ],
+    "detail": {
+      "by_type": {
+        "attack": 86.0,
+        "balance": 100.0,
+        "defend": 72.5
+      },
+      "details": [
+        {
+          "case": "attack_case1",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 86.0
+        },
+        {
+          "case": "attack_case2",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 86.0
+        },
+        {
+          "case": "balance_case1",
+          "scores": {
+            "signal": 100,
+            "trigger": 100,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 100,
+            "adaptation": 100
+          },
+          "total": 100.0
+        },
+        {
+          "case": "balance_case2",
+          "scores": {
+            "signal": 100,
+            "trigger": 100,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 100,
+            "adaptation": 100
+          },
+          "total": 100.0
+        },
+        {
+          "case": "defend_case1",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 72.5
+        },
+        {
+          "case": "defend_case2",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 72.5
+        }
+      ]
+    }
+  },
+  {
+    "round": 10,
+    "best_score": 86.16666666666667,
+    "global_best": 86.16666666666667,
+    "mutations": [
+      "TYPE_THRESHOLDS",
+      "OUTPUT_JSON_SCHEMA",
+      "LIQUIDITY_ORDER",
+      "EXEC_SPEC"
+    ],
+    "detail": {
+      "by_type": {
+        "attack": 86.0,
+        "balance": 100.0,
+        "defend": 72.5
+      },
+      "details": [
+        {
+          "case": "attack_case1",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 86.0
+        },
+        {
+          "case": "attack_case2",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 86.0
+        },
+        {
+          "case": "balance_case1",
+          "scores": {
+            "signal": 100,
+            "trigger": 100,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 100,
+            "adaptation": 100
+          },
+          "total": 100.0
+        },
+        {
+          "case": "balance_case2",
+          "scores": {
+            "signal": 100,
+            "trigger": 100,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 100,
+            "adaptation": 100
+          },
+          "total": 100.0
+        },
+        {
+          "case": "defend_case1",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 72.5
+        },
+        {
+          "case": "defend_case2",
+          "scores": {
+            "signal": 100,
+            "trigger": 70,
+            "execution": 100,
+            "horizon": 100,
+            "compliance": 0,
+            "adaptation": 100
+          },
+          "total": 72.5
+        }
+      ]
+    }
+  }
+]

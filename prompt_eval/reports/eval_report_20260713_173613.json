@@ -1,0 +1,296 @@
+{
+  "overall": 86.16666666666667,
+  "by_type": {
+    "attack": 86.0,
+    "balance": 100.0,
+    "defend": 72.5
+  },
+  "details": [
+    {
+      "case": "attack_case1",
+      "scores": {
+        "signal": 100,
+        "trigger": 70,
+        "execution": 100,
+        "horizon": 100,
+        "compliance": 0,
+        "adaptation": 100
+      },
+      "total": 86.0,
+      "output": {
+        "decision": "HOLD",
+        "trigger_rule_id": null,
+        "signals": [
+          {
+            "signal_id": "S1",
+            "source": "style_factor_zscore.momentum",
+            "direction": "利空成长",
+            "strength": "强",
+            "horizon": "趋势(1-3月)",
+            "affected_tickers": [
+              "510300",
+              "159915"
+            ]
+          }
+        ],
+        "rebalance_plan": null,
+        "type_adaptation": {
+          "type": "进攻型",
+          "thresholds_used": {
+            "momentum_zscore_threshold": 0.8,
+            "dev_trigger_pct": 3,
+            "rebal_freq_max_days": 14
+          }
+        },
+        "compliance_pass": null,
+        "timestamp": "2024-06-03T09:15:00+08:00"
+      }
+    },
+    {
+      "case": "attack_case2",
+      "scores": {
+        "signal": 100,
+        "trigger": 70,
+        "execution": 100,
+        "horizon": 100,
+        "compliance": 0,
+        "adaptation": 100
+      },
+      "total": 86.0,
+      "output": {
+        "decision": "HOLD",
+        "trigger_rule_id": null,
+        "signals": [
+          {
+            "signal_id": "S1",
+            "source": "style_factor_zscore.momentum",
+            "direction": "利多动量",
+            "strength": "中",
+            "horizon": "趋势(1-3月)",
+            "affected_tickers": [
+              "510300",
+              "159915"
+            ]
+          }
+        ],
+        "rebalance_plan": null,
+        "type_adaptation": {
+          "type": "进攻型",
+          "thresholds_used": {
+            "momentum_zscore_threshold": 0.8,
+            "dev_trigger_pct": 3,
+            "rebal_freq_max_days": 14
+          }
+        },
+        "compliance_pass": null,
+        "timestamp": "2024-06-03T09:15:00+08:00"
+      }
+    },
+    {
+      "case": "balance_case1",
+      "scores": {
+        "signal": 100,
+        "trigger": 100,
+        "execution": 100,
+        "horizon": 100,
+        "compliance": 100,
+        "adaptation": 100
+      },
+      "total": 100.0,
+      "output": {
+        "decision": "REBALANCE",
+        "trigger_rule_id": "TR_RP_DRIFT",
+        "signals": [
+          {
+            "signal_id": "S1",
+            "source": "style_factor_zscore.momentum",
+            "direction": "利空成长",
+            "strength": "中",
+            "horizon": "趋势(1-3月)",
+            "affected_tickers": [
+              "510300",
+              "159915"
+            ]
+          }
+        ],
+        "rebalance_plan": {
+          "rebalance_date": "2024-06-03",
+          "sell": [
+            {
+              "ticker": "510300",
+              "target_weight_pct": 25.0,
+              "reason": "TR_RP_DRIFT"
+            }
+          ],
+          "buy": [
+            {
+              "ticker": "512890.SH",
+              "target_weight_pct": 5,
+              "reason": "红利低波对冲"
+            }
+          ],
+          "post_check": {
+            "max_single_etf_weight_pct": 30,
+            "sector_dev_pct": 2.1,
+            "tracking_error_est_pct": 3.1,
+            "liquidity_days_min": 6,
+            "max_drawdown_est_pct": 6.2
+          }
+        },
+        "type_adaptation": {
+          "type": "平衡型",
+          "thresholds_used": {
+            "risk_parity_band_pct": 10,
+            "dev_trigger_pct": 2.5,
+            "rebal_freq_max_days": 30
+          }
+        },
+        "compliance_pass": true,
+        "timestamp": "2024-06-03T09:15:00+08:00"
+      }
+    },
+    {
+      "case": "balance_case2",
+      "scores": {
+        "signal": 100,
+        "trigger": 100,
+        "execution": 100,
+        "horizon": 100,
+        "compliance": 100,
+        "adaptation": 100
+      },
+      "total": 100.0,
+      "output": {
+        "decision": "REBALANCE",
+        "trigger_rule_id": "TR_RP_DRIFT",
+        "signals": [
+          {
+            "signal_id": "S1",
+            "source": "style_factor_zscore.momentum",
+            "direction": "利空成长",
+            "strength": "中",
+            "horizon": "趋势(1-3月)",
+            "affected_tickers": [
+              "510300",
+              "159915"
+            ]
+          }
+        ],
+        "rebalance_plan": {
+          "rebalance_date": "2024-06-03",
+          "sell": [
+            {
+              "ticker": "510300",
+              "target_weight_pct": 25.0,
+              "reason": "TR_RP_DRIFT"
+            }
+          ],
+          "buy": [
+            {
+              "ticker": "512890.SH",
+              "target_weight_pct": 5,
+              "reason": "红利低波对冲"
+            }
+          ],
+          "post_check": {
+            "max_single_etf_weight_pct": 30,
+            "sector_dev_pct": 2.1,
+            "tracking_error_est_pct": 3.1,
+            "liquidity_days_min": 6,
+            "max_drawdown_est_pct": 6.2
+          }
+        },
+        "type_adaptation": {
+          "type": "平衡型",
+          "thresholds_used": {
+            "risk_parity_band_pct": 10,
+            "dev_trigger_pct": 2.5,
+            "rebal_freq_max_days": 30
+          }
+        },
+        "compliance_pass": true,
+        "timestamp": "2024-06-03T09:15:00+08:00"
+      }
+    },
+    {
+      "case": "defend_case1",
+      "scores": {
+        "signal": 100,
+        "trigger": 70,
+        "execution": 100,
+        "horizon": 100,
+        "compliance": 0,
+        "adaptation": 100
+      },
+      "total": 72.5,
+      "output": {
+        "decision": "HOLD",
+        "trigger_rule_id": null,
+        "signals": [
+          {
+            "signal_id": "S1",
+            "source": "style_factor_zscore.momentum",
+            "direction": "利空成长",
+            "strength": "强",
+            "horizon": "趋势(1-3月)",
+            "affected_tickers": [
+              "510300",
+              "512800"
+            ]
+          }
+        ],
+        "rebalance_plan": null,
+        "type_adaptation": {
+          "type": "防御型",
+          "thresholds_used": {
+            "max_drawdown_alert": -5,
+            "dev_trigger_pct": 2,
+            "rebal_freq_max_days": 60
+          }
+        },
+        "compliance_pass": null,
+        "timestamp": "2024-06-03T09:15:00+08:00"
+      }
+    },
+    {
+      "case": "defend_case2",
+      "scores": {
+        "signal": 100,
+        "trigger": 70,
+        "execution": 100,
+        "horizon": 100,
+        "compliance": 0,
+        "adaptation": 100
+      },
+      "total": 72.5,
+      "output": {
+        "decision": "HOLD",
+        "trigger_rule_id": null,
+        "signals": [
+          {
+            "signal_id": "S1",
+            "source": "style_factor_zscore.momentum",
+            "direction": "利空成长",
+            "strength": "中",
+            "horizon": "趋势(1-3月)",
+            "affected_tickers": [
+              "510300",
+              "512800"
+            ]
+          }
+        ],
+        "rebalance_plan": null,
+        "type_adaptation": {
+          "type": "防御型",
+          "thresholds_used": {
+            "max_drawdown_alert": -5,
+            "dev_trigger_pct": 2,
+            "rebal_freq_max_days": 60
+          }
+        },
+        "compliance_pass": null,
+        "timestamp": "2024-06-03T09:15:00+08:00"
+      }
+    }
+  ]
+}

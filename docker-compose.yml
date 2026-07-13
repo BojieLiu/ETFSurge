@@ -1,0 +1,84 @@
+# ETF Surge — 单文件双模式编排
+#
+# 开发态 (源码挂载 + 热更新):
+#   docker-compose up --build --profile dev
+#     后端: uvicorn --reload  (源码 ./backend 挂载, 改 Python 即生效)
+#     前端: vite dev server   (源码 ./frontend 挂载, 改 Vue 即生效, 暴露 5173)
+#     访问: http://localhost:5173
+#
+# 生产态 (镜像烘焙 + nginx):
+#   docker-compose up --build --profile prod
+#     backend + redis + nginx(前端构建产物) 打包, 暴露 80
+#     访问: http://localhost
+#
+# 默认不带 profile 只会启动 redis, 请务必指定 --profile。
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  # ---------- 生产态 ----------
+  backend:
+    build:
+      context: ./backend
+    profiles: ["prod"]
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+    profiles: ["prod"]
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # ---------- 开发态 (热更新) ----------
+  backend-dev:
+    build:
+      context: ./backend
+    profiles: ["dev"]
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - ./backend:/app
+      - ./data:/app/data
+    depends_on:
+      - redis
+
+  frontend-dev:
+    build:
+      context: ./frontend
+      target: dev
+    profiles: ["dev"]
+    command: npm run dev -- --host 0.0.0.0
+    ports:
+      - "5173:5173"
+    environment:
+      # dev 模式下 Vite 代理指向容器内的 backend-dev, 而非 localhost
+      - VITE_PROXY_TARGET=http://backend-dev:8000
+      - VITE_WS_TARGET=ws://backend-dev:8000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules   # 保留镜像内已安装的依赖, 不被挂载覆盖
+    depends_on:
+      - backend-dev
