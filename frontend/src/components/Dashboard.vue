@@ -10,8 +10,8 @@
     <section class="card core-actions">
       <div class="card-header">
         <h2 class="card-title">
-          <span class="card-title-icon" aria-hidden="true">🤖</span>
-          核心功能
+          <span class="card-title-icon" aria-hidden="true">⚡</span>
+          AI智能工具
         </h2>
       </div>
 
@@ -20,27 +20,26 @@
         <button
           class="core-action-btn"
           @click="enterDesignMode"
-          :disabled="designing"
-          aria-label="AI 组合设计：基于当前行情生成三种风格的 ETF 组合方案"
+          :disabled="designStep === 'loading'"
+          aria-label="智能设计 ETF 组合方案：基于当前行情生成三种风格的 ETF 组合方案"
         >
           <span class="action-icon" aria-hidden="true">✨</span>
           <div class="action-content">
-            <span class="action-title">AI 组合设计</span>
-            <span class="action-desc">基于当前行情生成三种风格的 ETF 组合方案</span>
+            <span class="action-title">智能设计ETF组合方案</span>
+            <span class="action-desc">输入资金，一键生成进攻/平衡/防御三种风格组合</span>
           </div>
-          <span v-if="designing" class="action-loading" aria-hidden="true">⏳</span>
+          <span v-if="designStep === 'loading'" class="action-loading" aria-hidden="true">⏳</span>
         </button>
 
         <button
           class="core-action-btn"
           @click="enterStrategyMode"
-          :disabled="checkingStrategy || !store.etfs.length"
+          :disabled="checkingStrategy"
         >
           <span class="action-icon" aria-hidden="true">🎯</span>
           <div class="action-content">
-            <span class="action-title">策略检查</span>
-            <span class="action-desc" v-if="store.etfs.length">分析当前组合，给出权重调整与替换建议</span>
-            <span class="action-desc empty" v-else>请先在组合管理中添加 ETF</span>
+            <span class="action-title">策略检查分析</span>
+            <span class="action-desc">策略检查分析当前组合，优化权重与持仓</span>
           </div>
           <span v-if="checkingStrategy" class="action-loading" aria-hidden="true">⏳</span>
         </button>
@@ -57,18 +56,9 @@
 
         <!-- Wizard Step -->
         <div v-if="designStep === 'wizard'" class="panel-body design-wizard">
-          <p class="wizard-hint">选择生成参数，点击生成三种风格的组合方案</p>
+          <p class="wizard-hint">输入投资金额，一键生成三种风格的组合方案</p>
 
           <div class="wizard-fields">
-            <label class="wizard-field">
-              <span class="field-label">风险偏好</span>
-              <select v-model="designParams.riskProfile" class="wizard-select">
-                <option value="balanced">均衡型</option>
-                <option value="growth">成长型</option>
-                <option value="conservative">稳健型</option>
-              </select>
-            </label>
-
             <label class="wizard-field">
               <span class="field-label">投资金额（元）</span>
               <AppInput
@@ -85,70 +75,160 @@
             variant="primary"
             class="wizard-generate"
             @click="generateDesign"
-            :loading="designing"
-            :disabled="designing"
+            :loading="designStep === 'loading'"
+            :disabled="designStep === 'loading'"
           >
             生成组合方案
           </AppButton>
         </div>
 
+        <!-- Loading Step -->
+        <div v-else-if="designStep === 'loading'" class="panel-body design-loading">
+          <div class="loading-spinner-wrapper">
+            <div class="spinner-ring"></div>
+            <div class="spinner-ring reverse"></div>
+            <div class="spinner-ring"></div>
+            <p class="loading-text">正在生成组合方案...</p>
+            <p class="loading-subtext" v-if="designGenerationStage">{{ designGenerationStage }}</p>
+            <div class="loading-progress">
+              <div class="progress-bar">
+                <div class="progress-fill" :style="{ width: loadingProgress + '%' }"></div>
+              </div>
+              <span class="progress-percent">{{ loadingProgress }}%</span>
+            </div>
+          </div>
+        </div>
+
         <!-- Result Step -->
         <div v-else-if="designStep === 'result' && designResult?.plans?.length" class="panel-body design-result">
-          <p class="result-hint">共生成 {{ designResult.plans.length }} 个方案，点击卡片查看详情并应用</p>
+          
+          <!-- Tab navigation: 完整报告 / 方案卡片 -->
+          <div class="design-tabs">
+            <button 
+              class="design-tab" 
+              :class="{ active: designTab === 'report' }"
+              @click="designTab = 'report'"
+            >📄 完整报告</button>
+            <button 
+              class="design-tab" 
+              :class="{ active: designTab === 'cards' }"
+              @click="designTab = 'cards'"
+            >📊 方案卡片</button>
+          </div>
 
-          <div class="design-plans-grid">
-            <article
-              v-for="pf in designResult.plans"
-              :key="pf.style"
-              class="design-plan-card"
-              @click="selectPlan(pf)"
-            >
-              <div class="plan-header">
-                <span class="plan-style-badge">{{ pf.style_label || pf.style }}</span>
-                <span class="plan-score" v-if="pf.score !== undefined">评分 {{ pf.score }}</span>
-              </div>
+          <!-- Tab 1: 完整 Markdown 报告 -->
+          <div v-if="designTab === 'report'" class="design-report">
+            <div class="markdown-body" v-html="designReportHtml"></div>
+            
+            <div class="panel-footer-actions">
+              <AppButton variant="ghost" @click="resetDesign">重新生成</AppButton>
+              <AppButton variant="ghost" @click="exitCoreFeature">完成</AppButton>
+            </div>
+          </div>
 
-              <div class="plan-meta">
-                <span class="plan-meta-item">
-                  <span class="meta-label">预期年化</span>
-                  <span class="meta-value">{{ (pf.expected_return * 100).toFixed(1) }}%</span>
-                </span>
-                <span class="plan-meta-item">
-                  <span class="meta-label">最大回撤</span>
-                  <span class="meta-value">{{ (pf.max_drawdown * 100).toFixed(1) }}%</span>
-                </span>
-                <span class="plan-meta-item">
-                  <span class="meta-label">夏普比率</span>
-                  <span class="meta-value">{{ pf.sharpe_ratio?.toFixed(2) || '—' }}</span>
-                </span>
-              </div>
+          <!-- Tab 2: 方案卡片（原有逻辑） -->
+          <div v-if="designTab === 'cards'" class="design-cards">
+            <p class="result-hint">共生成 {{ designResult.plans.length }} 个方案，点击卡片展开详情，再次点击收起</p>
 
-              <div class="plan-allocation-preview">
-                <span class="alloc-label">配置预览</span>
-                <div class="alloc-bars">
-                  <div
-                    v-for="item in pf.allocations?.slice(0, 5) || []"
-                    :key="item.symbol"
-                    class="alloc-bar"
-                    :style="{ width: (item.target_weight * 100) + '%' }"
-                    :title="`${item.symbol} ${(item.target_weight * 100).toFixed(1)}%`"
-                  ></div>
+            <div class="design-plans-grid">
+              <article
+                v-for="pf in designResult.plans"
+                :key="pf.style"
+                :class="['design-plan-card', { expanded: expandedPlan === pf.style }]"
+                @click="togglePlanExpand(pf)"
+              >
+                <div class="plan-allocation-preview">
+                  <span class="alloc-label">配置预览</span>
+                  <div class="alloc-bars">
+                    <div
+                      v-for="item in pf.allocations?.slice(0, 5) || []"
+                      :key="item.symbol"
+                      class="alloc-bar"
+                      :style="{ width: (item.target_weight * 100) + '%' }"
+                      :title="`${item.symbol} ${(item.target_weight * 100).toFixed(1)}%`"
+                    ></div>
+                    <span v-if="pf.allocations && pf.allocations.length > 5" class="alloc-more">+{{ pf.allocations.length - 5 }} 只</span>
+                  </div>
                 </div>
-              </div>
 
-              <div v-if="pf.risk_warnings" class="plan-risk-warn">
-                ⚠️ {{ pf.risk_warnings }}
-              </div>
+                <div v-if="pf.risk_warnings" class="plan-risk-warn">
+                  ⚠️ {{ pf.risk_warnings }}
+                </div>
 
-              <div class="plan-action">
-                <AppButton
-                  variant="primary"
-                  size="sm"
-                  @click.stop="applyPortfolioDesign(pf)"
-                  :disabled="applyingPlan === pf.style"
-                >
-                  {{ applyingPlan === pf.style ? '应用中...' : '应用此组合' }}
-                </AppButton>
+                <div class="plan-action">
+                  <AppButton
+                    variant="primary"
+                    size="sm"
+                    @click.stop="applyPortfolioDesign(pf)"
+                    :disabled="applyingPlan === pf.style"
+                  >
+                    {{ applyingPlan === pf.style ? '应用中...' : '一键应用' }}
+                  </AppButton>
+                </div>
+
+                <!-- Expanded Detail View -->
+                <div v-if="expandedPlan === pf.style" class="plan-expanded-detail">
+                <div class="detail-section">
+                  <h4 class="detail-title">📊 完整持仓明细 ({{ pf.allocations?.length || 0 }} 只 ETF)</h4>
+                  <div class="holdings-table-wrapper">
+                    <table class="holdings-table">
+                      <thead>
+                        <tr>
+                          <th>代码</th>
+                          <th>名称</th>
+                          <th>资产类别</th>
+                          <th>目标权重</th>
+                          <th>选入理由</th>
+                          <th>仓位设置理由</th>
+                          <th v-if="pf.allocations?.[0]?.tracked_index">跟踪指数</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr v-for="item in pf.allocations" :key="item.symbol">
+                          <td><code>{{ item.symbol }}</code></td>
+                          <td>{{ item.name }}</td>
+                          <td><span class="asset-badge" :class="item.asset_class">{{ getAssetClassLabel(item.asset_class) }}</span></td>
+                          <td class="weight-cell">{{ (item.target_weight * 100).toFixed(1) }}%</td>
+                          <td class="rationale-cell">{{ item.selection_rationale || '—' }}</td>
+                          <td class="rationale-cell">{{ item.weight_rationale || '—' }}</td>
+                          <td v-if="pf.allocations?.[0]?.tracked_index">{{ item.tracked_index || '—' }}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div class="detail-section" v-if="pf.market_analysis">
+                  <h4 class="detail-title">📈 市场分析</h4>
+                  <div class="analysis-grid">
+                    <div class="analysis-item" v-for="(val, key) in pf.market_analysis" :key="key" v-if="val">
+                      <span class="analysis-label">{{ getMarketAnalysisLabel(key) }}</span>
+                      <span class="analysis-value">{{ val }}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="detail-section" v-if="pf.allocation_rationale">
+                  <h4 class="detail-title">🎯 配置逻辑</h4>
+                  <div class="analysis-grid">
+                    <div class="analysis-item" v-for="(val, key) in pf.allocation_rationale" :key="key" v-if="val">
+                      <span class="analysis-label">{{ getAllocationRationaleLabel(key) }}</span>
+                      <span class="analysis-value">{{ val }}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="detail-section" v-if="pf.risk_factors?.length">
+                  <h4 class="detail-title">⚠️ 风险因子</h4>
+                  <ul class="risk-factors-list">
+                    <li v-for="(risk, i) in pf.risk_factors" :key="i">{{ risk }}</li>
+                  </ul>
+                </div>
+
+                <div class="detail-section" v-if="pf.rebalance_rules">
+                  <h4 class="detail-title">🔄 再平衡规则</h4>
+                  <p class="rebalance-rules">{{ pf.rebalance_rules }}</p>
+                </div>
               </div>
             </article>
           </div>
@@ -158,10 +238,16 @@
             <AppButton variant="ghost" @click="exitCoreFeature">完成</AppButton>
           </div>
         </div>
+      </div>
 
-        <!-- Loading / Empty -->
-        <div v-else class="panel-body design-loading">
-          <div class="loading-spinner" v-if="designing">⏳ 正在生成方案...</div>
+        <!-- Empty / Error State -->
+        <div v-else class="panel-body design-empty">
+          <div class="empty-hint" v-if="designStep === 'result'">
+            <p>{{ designResult?.market_environment || '生成失败，请稍后重试' }}</p>
+            <AppButton variant="primary" @click="resetDesign" class="retry-btn" style="margin-top: 12px;">
+              重新生成
+            </AppButton>
+          </div>
           <div class="empty-hint" v-else>暂无方案，请点击生成</div>
         </div>
       </div>
@@ -215,10 +301,10 @@
         <div v-else class="panel-body strategy-loading">
           <div class="loading-spinner" v-if="checkingStrategy">🔍 正在分析组合...</div>
           <div class="empty-hint" v-else>
-            <AppButton variant="primary" @click="checkStrategy" :loading="checkingStrategy" :disabled="!store.etfs.length">
+            <AppButton variant="primary" @click="checkStrategy" :loading="checkingStrategy" :disabled="!((allocationOn.value.allocations?.length || allocationOff.value.allocations?.length) > 0 || (designResult.value?.plans?.some(p => p.allocations?.length)))">
               开始检查
             </AppButton>
-            <p v-if="!store.etfs.length" class="empty-note">请先在组合管理中添加 ETF</p>
+            <p v-if="!((allocationOn.value.allocations?.length || allocationOff.value.allocations?.length) > 0 || (designResult.value?.plans?.some(p => p.allocations?.length)))" class="empty-note">请先添加 ETF 或生成组合方案</p>
           </div>
         </div>
       </div>
@@ -333,10 +419,6 @@
           <span class="btn-icon" aria-hidden="true">↻</span>
           刷新
         </AppButton>
-        <AppButton variant="primary" @click="checkStrategy" :loading="checkingStrategy">
-          <span class="btn-icon" aria-hidden="true">🔍</span>
-          检查策略
-        </AppButton>
       </div>
     </section>
 
@@ -420,16 +502,16 @@
               场内 ETF 目标分配
             </h2>
           </div>
-          <div class="table-responsive">
-            <table class="data-table">
+            <div class="table-responsive">
+            <table class="data-table alloc-table">
               <thead>
                 <tr>
                   <th scope="col">代码</th>
                   <th scope="col">名称</th>
                   <th scope="col">权重</th>
-                  <th scope="col">目标金额</th>
-                  <th scope="col">现价</th>
-                  <th scope="col">实时涨跌幅</th>
+                  <th scope="col" class="amount-header">目标金额</th>
+                  <th scope="col" class="amount-header">现价</th>
+                  <th scope="col">涨跌幅</th>
                 </tr>
               </thead>
               <tbody>
@@ -486,15 +568,15 @@
             </h2>
           </div>
           <div class="table-responsive">
-            <table class="data-table">
+            <table class="data-table alloc-table">
               <thead>
                 <tr>
                   <th scope="col">代码</th>
                   <th scope="col">名称</th>
                   <th scope="col">权重</th>
-                  <th scope="col">目标金额</th>
-                  <th scope="col">现价</th>
-                  <th scope="col">实时涨跌幅</th>
+                  <th scope="col" class="amount-header">目标金额</th>
+                  <th scope="col" class="amount-header">现价</th>
+                  <th scope="col">涨跌幅</th>
                 </tr>
               </thead>
               <tbody>
@@ -606,9 +688,11 @@ import { portfolioApi, analysisApi, marketApi } from '../api'
 import { changeClass } from '../utils/changeClass'
 import { useToast } from '../stores/toast'
 import { useMarketWS } from '../composables/useMarketWS'
+import logger from '../utils/logger'
 import AppButton from './ui/AppButton.vue'
 import AppInput from './ui/AppInput.vue'
 import Skeleton from './ui/Skeleton.vue'
+import MarkdownIt from 'markdown-it'
 
 use([CanvasRenderer, PieChart, BarChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent])
 
@@ -627,7 +711,6 @@ const pnlOffData = ref({ items: [] })
 const strategyResult = ref(null)
 const checkingStrategy = ref(false)
 const designResult = ref(null)
-const designing = ref(false)
 const globalIndices = ref({})
 const marketLoading = ref(false)
 const marketTimer = ref(null)
@@ -636,18 +719,28 @@ const marketTimer = ref(null)
 const activeCoreFeature = ref(null)
 const designStep = ref('wizard')
 const designParams = ref({
-  riskProfile: 'balanced',
   capital: 500000
 })
 const applyingPlan = ref(null)
+const expandedPlan = ref(null) // Track which plan card is expanded
+const designGenerationStage = ref('') // Track generation progress for better UX
+const designTab = ref('report') // 'report' | 'cards'
 
-// Computed
-const hasGlobalIndices = computed(() => Object.values(globalIndices.value).flat().length > 0)
+// Markdown renderer for design report
+const md = new MarkdownIt({ html: false, linkify: true, typographer: true })
+
+const designReportHtml = computed(() => {
+  if (!designResult.value?.design_text) return ''
+  return md.render(designResult.value.design_text)
+})
+
 const tabs = [
   { value: 'combined', label: '综合' },
   { value: 'on_exchange', label: '场内' },
   { value: 'off_exchange', label: '场外' }
 ]
+
+const hasGlobalIndices = computed(() => Object.values(globalIndices.value).flat().length > 0)
 
 const loading = computed(() => allocationOn.value.allocations.length === 0 && allocationOff.value.allocations.length === 0)
 
@@ -668,10 +761,19 @@ const pnlOff = computed(() => pnlOffData.value.total_pnl || 0)
 
 const pnlTotal = computed(() => pnlItems.value.reduce((sum, item) => sum + (item.daily_pnl || 0), 0))
 const pnlTotalAmount = computed(() => pnlItems.value.reduce((sum, item) => sum + (item.target_amount || 0), 0))
+
 const pnlWeightedChange = computed(() => {
   const total = pnlTotalAmount.value
   if (!total) return 0
   return pnlItems.value.reduce((sum, item) => sum + ((item.daily_pnl || 0) / total) * 100, 0)
+})
+
+const loadingProgress = computed(() => {
+  if (designStep.value !== 'loading') return 0
+  const stages = ['正在获取市场行情...', '正在分析财经资讯...', '正在调用 AI 生成组合方案...']
+  const idx = stages.indexOf(designGenerationStage.value)
+  if (idx === -1) return 10
+  return Math.min(90, 10 + idx * 30)
 })
 
 const cashPctOn = computed(() => {
@@ -691,7 +793,14 @@ const cashPctOff = computed(() => {
 const cashOff = computed(() => capitalOff.value - (allocationOff.value.total_amount || 0))
 
 // Methods
-const formatNum = (n) => (n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const formatNum = (n) => {
+  const v = n || 0
+  try {
+    return v.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  } catch {
+    return v.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+  }
+}
 const formatPrice = (n) => (n || 0).toFixed(2)
 const formatChange = (n, isAmount = false) => {
   const val = n || 0
@@ -703,13 +812,37 @@ const formatChange = (n, isAmount = false) => {
 const getChangeClass = (val) => changeClass(val)
 const getActionLabel = (action) => ({ adjust_weight: '调整权重', replace: '替换', no_change: '不变' }[action] || action )
 
+const getAssetClassLabel = (cls) => ({
+  equity: '权益',
+  commodity: '商品',
+  bond: '债券',
+  money: '货币',
+  cross_border: '跨境',
+  other: '其他'
+}[cls] || cls)
+
+const getMarketAnalysisLabel = (key) => ({
+  macro_environment: '宏观环境',
+  liquidity_condition: '流动性环境',
+  style_preference: '风格偏好',
+  sector_opportunity: '板块机会',
+  risk_assessment: '风险评估'
+}[key] || key)
+
+const getAllocationRationaleLabel = (key) => ({
+  asset_class_allocation: '大类资产配置',
+  equity_style_tilt: '权益风格倾斜',
+  geographic_allocation: '地域配置',
+  sector_allocation: '行业配置'
+}[key] || key)
+
 const fetchGlobalIndices = async () => {
   marketLoading.value = true
   try {
     const res = await marketApi.indicesGlobal()
     globalIndices.value = res.data?.indices || res.indices || {}
   } catch (e) {
-    console.error('Failed to fetch global indices:', e)
+    logger.error('Failed to fetch global indices:', e)
   } finally {
     marketLoading.value = false
   }
@@ -756,7 +889,8 @@ const enterDesignMode = () => {
 }
 
 const enterStrategyMode = () => {
-  if (!store.etfs.length) return toast('请先添加 ETF', 'warning')
+  const hasPortfolio = (allocationOn.value.allocations?.length || allocationOff.value.allocations?.length) > 0 || (designResult.value?.plans?.some(p => p.allocations?.length))
+  if (!hasPortfolio) return toast('请先添加 ETF 或生成组合方案', 'warning')
   activeCoreFeature.value = 'strategy'
   checkStrategy()
 }
@@ -766,13 +900,20 @@ const exitCoreFeature = () => {
   designStep.value = 'wizard'
   designResult.value = null
   strategyResult.value = null
+  expandedPlan.value = null
 }
 
 const generateDesign = async () => {
-  designing.value = true
+  designStep.value = 'loading'
+  designGenerationStage.value = '正在获取市场行情...'
   try {
+    // Stage 1: Fetch market data (backend does this)
+    designGenerationStage.value = '正在分析财经资讯...'
+    // Small delay to show stage
+    await new Promise(r => setTimeout(r, 300))
+    
+    designGenerationStage.value = '正在调用 AI 生成组合方案...'
     const res = await analysisApi.portfolioDesign({
-      risk_profile: designParams.value.riskProfile,
       capital: designParams.value.capital
     })
     designResult.value = res.data
@@ -780,25 +921,41 @@ const generateDesign = async () => {
     toast('组合方案生成完成', 'success')
   } catch (e) {
     toast('生成失败', 'error')
+    designStep.value = 'wizard'
   } finally {
-    designing.value = false
+    designGenerationStage.value = ''
   }
 }
 
 const resetDesign = () => {
   designResult.value = null
   designStep.value = 'wizard'
+  expandedPlan.value = null
 }
 
-const selectPlan = (pf) => {
-  // Card click handler - could expand details, but Apply button handles action
+const togglePlanExpand = (pf) => {
+  expandedPlan.value = expandedPlan.value === pf.style ? null : pf.style
 }
 
 const checkStrategy = async () => {
-  if (!store.etfs.length) return toast('请先添加 ETF', 'warning')
+  const hasPortfolio = (allocationOn.value.allocations?.length || allocationOff.value.allocations?.length) > 0 || (designResult.value?.plans?.some(p => p.allocations?.length))
+  if (!hasPortfolio) return toast('请先添加 ETF 或生成组合方案', 'warning')
   checkingStrategy.value = true
   try {
-    const res = await analysisApi.checkStrategy()
+    // Prepare design data if AI portfolio exists
+    let designData = null
+    if (designResult.value?.plans?.some(p => p.allocations?.length)) {
+      designData = {
+        plans: designResult.value.plans.map(p => ({
+          style: p.style,
+          style_label: p.style_label,
+          allocations: p.allocations,
+          portfolio_name: p.portfolio_name,
+        }))
+      }
+    }
+    const totalCapital = capitalOn.value + capitalOff.value
+    const res = await portfolioApi.strategyCheck({ total_capital: totalCapital, design_data: designData })
     strategyResult.value = res.data
     toast('策略检查完成')
   } catch (e) {
@@ -1434,6 +1591,14 @@ watch(() => route.path, () => {
   border-radius: var(--radius-sm);
 }
 
+/* Compact table for allocation views */
+.data-table.alloc-table { font-size: var(--font-size-xs); }
+.data-table.alloc-table th,
+.data-table.alloc-table td { padding: var(--space-2) var(--space-3); }
+.data-table.alloc-table td:first-child { width: 85px; }
+.data-table.alloc-table td:nth-child(2) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px; }
+.data-table.alloc-table .amount-cell { min-width: 100px; }
+
 .data-table .weight-badge {
   display: inline-flex;
   align-items: center;
@@ -1474,6 +1639,12 @@ watch(() => route.path, () => {
 .data-table .amount-cell {
   white-space: nowrap;
   font-family: var(--font-family-mono);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.data-table th.amount-header {
+  text-align: right;
 }
 
 .data-table .footer-row {
@@ -2225,6 +2396,29 @@ watch(() => route.path, () => {
   opacity: 0.5;
 }
 
+/* Core Action Button Content */
+.core-action-btn .action-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1;
+  min-width: 0;
+}
+
+.core-action-btn .action-title {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  line-height: var(--line-height-tight);
+}
+
+.core-action-btn .action-desc {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  line-height: var(--line-height-normal);
+  white-space: normal;
+}
+
 .design-wizard {
   animation: slideDown 0.2s ease-out;
 }
@@ -2302,5 +2496,394 @@ watch(() => route.path, () => {
   .chip-name { max-width: 80px; }
   .tabs { padding: var(--space-0.5); }
   .tab { padding: var(--space-1.5) var(--space-2); font-size: var(--font-size-xs); }
+}
+
+/* Expanded Plan Card */
+.design-plan-card.expanded {
+  grid-column: 1 / -1;
+  z-index: 10;
+}
+
+.expand-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.expand-toggle:hover {
+  background: var(--color-primary);
+  color: white;
+}
+
+.expand-toggle.rotated .expand-icon {
+  transform: rotate(180deg);
+}
+
+.expand-icon {
+  display: inline-block;
+  transition: transform var(--transition-fast);
+  font-size: var(--font-size-xs);
+}
+
+.alloc-more {
+  margin-left: var(--space-2);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  font-weight: var(--font-weight-medium);
+}
+
+.plan-expanded-detail {
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border-light);
+  animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.detail-section {
+  margin-bottom: var(--space-5);
+}
+
+.detail-section:last-child {
+  margin-bottom: 0;
+}
+
+.detail-title {
+  margin: 0 0 var(--space-3);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.holdings-table-wrapper {
+  overflow-x: auto;
+}
+
+.holdings-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-sm);
+}
+
+.holdings-table th,
+.holdings-table td {
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.holdings-table th {
+  background: var(--color-bg-secondary);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.holdings-table td {
+  color: var(--color-text-primary);
+}
+
+.holdings-table tr:last-child td {
+  border-bottom: none;
+}
+
+.holdings-table code {
+  font-family: var(--font-family-mono);
+  background: var(--color-bg-tertiary);
+  padding: 1px 4px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+}
+
+.asset-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  text-transform: capitalize;
+}
+
+.asset-badge.equity { background: var(--color-bg-success-subtle); color: var(--color-success-800); }
+.asset-badge.commodity { background: var(--color-bg-warning-subtle); color: var(--color-warning-800); }
+.asset-badge.bond { background: var(--color-bg-info-subtle); color: var(--color-info-800); }
+.asset-badge.money { background: var(--color-bg-purple-subtle); color: var(--color-purple-800); }
+.asset-badge.cross_border { background: var(--color-bg-primary-subtle); color: var(--color-primary-800); }
+.asset-badge.other { background: var(--color-bg-tertiary); color: var(--color-text-tertiary); }
+
+.weight-cell {
+  font-family: var(--font-family-mono);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-primary);
+}
+
+.rationale-cell {
+  max-width: 280px;
+  white-space: normal;
+  word-wrap: break-word;
+  word-break: break-word;
+  line-height: 1.5;
+}
+
+.analysis-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-3);
+}
+
+.analysis-item {
+  padding: var(--space-3);
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-light);
+}
+
+.analysis-label {
+  display: block;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: var(--space-1);
+}
+
+.analysis-value {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  line-height: 1.5;
+}
+
+.risk-factors-list {
+  margin: 0;
+  padding-left: var(--space-5);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.7;
+}
+
+.rebalance-rules {
+  margin: 0;
+  padding: var(--space-3);
+  background: var(--color-bg-info-subtle);
+  border-radius: var(--radius-md);
+  border-left: 3px solid var(--color-info);
+  font-size: var(--font-size-sm);
+  color: var(--color-info-800);
+  line-height: 1.6;
+}
+
+/* Loading Spinner Animation */
+.loading-spinner-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-8) var(--space-4);
+  gap: var(--space-4);
+}
+
+.spinner-ring {
+  width: 48px;
+  height: 48px;
+  border: 3px solid var(--color-border-light);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.spinner-ring.reverse {
+  animation-direction: reverse;
+  border-top-color: var(--color-warning);
+  width: 36px;
+  height: 36px;
+  margin-top: -36px;
+}
+
+.spinner-ring:nth-child(3) {
+  animation-duration: 0.6s;
+  border-top-color: var(--color-success);
+  width: 24px;
+  height: 24px;
+  margin-top: -24px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.loading-text {
+  margin: 0;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+}
+
+.loading-subtext {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+  min-height: 1.5em;
+  transition: opacity var(--transition-normal);
+}
+
+.loading-progress {
+  width: 100%;
+  max-width: 300px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.progress-bar {
+  flex: 1;
+  height: 6px;
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--color-primary), var(--color-success));
+  border-radius: var(--radius-full);
+  transition: width var(--transition-normal);
+  animation: progressPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes progressPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.progress-percent {
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-primary);
+  min-width: 3.5ch;
+  text-align: right;
+}
+
+/* Card hover effects */
+.design-plan-card {
+  transition: all var(--transition-normal);
+}
+
+.design-plan-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+}
+
+.design-plan-card.expanded:hover {
+  transform: none;
+  box-shadow: var(--shadow-xl);
+}
+
+/* Design Result Tabs */
+.design-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: var(--space-4);
+}
+
+.design-tab {
+  padding: var(--space-2) var(--space-4);
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  border-bottom: 2px solid transparent;
+  transition: all var(--transition-fast);
+}
+
+.design-tab:hover {
+  color: var(--color-text-primary);
+}
+
+.design-tab.active {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+  font-weight: var(--font-weight-medium);
+}
+
+/* Markdown report body */
+.design-report {
+  max-height: 70vh;
+  overflow-y: auto;
+  padding-right: var(--space-2);
+}
+
+.markdown-body {
+  font-size: var(--font-size-sm);
+  line-height: 1.7;
+  color: var(--color-text);
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3 {
+  margin: var(--space-4) 0 var(--space-2);
+  font-weight: var(--font-weight-semibold);
+}
+
+.markdown-body h1 { font-size: var(--font-size-lg); }
+.markdown-body h2 { font-size: var(--font-size-base); }
+.markdown-body h3 { font-size: var(--font-size-sm); }
+
+.markdown-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: var(--space-3) 0;
+  font-size: var(--font-size-sm);
+}
+
+.markdown-body th,
+.markdown-body td {
+  border: 1px solid var(--color-border);
+  padding: var(--space-1) var(--space-3);
+  text-align: left;
+}
+
+.markdown-body th {
+  background: var(--color-bg-muted);
+  font-weight: var(--font-weight-semibold);
+}
+
+.markdown-body strong {
+  font-weight: var(--font-weight-semibold);
+}
+
+.markdown-body p {
+  margin: var(--space-2) 0;
+}
+
+/* Cards tab */
+.design-cards .result-hint {
+  margin-bottom: var(--space-3);
 }
 </style>

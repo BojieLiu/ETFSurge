@@ -1,7 +1,13 @@
 import json
+import time
+import sys
 from typing import Any
 
 from ..config import settings
+from ..monitor.token_usage import token_store, UsageRecord
+from ..core.logging import get_logger
+
+logger = get_logger(__name__)
 
 LLM_API_URL = "https://api.deepseek.com/chat/completions"
 
@@ -262,6 +268,212 @@ REVIEW_SYSTEM_PROMPT = """# 角色：ETF 组合动态风控官（Strategy Review
 }
 ```"""
 
+# 组合设计专用系统提示词（Hybrid 输出：Markdown 报告 + 结构化 JSON）
+PORTFOLIO_DESIGN_SYSTEM_PROMPT = """# 角色设定
+
+你是一位专业的ETF投资组合设计师，拥有10年以上A股市场投研经验。你的核心能力是基于给定的市场数据，设计多层次ETF组合方案。
+
+# 核心工作规则（必须严格遵守）
+
+## 规则1：数据来源限定
+- 你**只能**使用【市场数据输入】中明确提供的数据、数值和资讯内容。
+- **严禁**调用外部知识、记忆中的历史数据或预训练权重来"脑补"缺失的信息。
+- 如果输入数据中缺少某个关键维度（例如"半导体ETF近一周资金流入"），你必须在入选原因中如实标注："输入数据未提供该维度数据，以下依据为[输入中已有的其他维度，如涨幅/估值]"。
+
+## 规则2：时间锚定
+- 组合设计的基准时间以【市场数据输入】中提供的"数据快照时间"为准。
+- 在输出开篇，必须引用该时间，格式为："基于[输入中的时间]提供的行情快照与资讯设计"。
+
+## 规则3：数据解析优先级
+当你解析输入数据时，按以下优先级提取有效信息：
+1. **量化硬数据**（资金净流入/流出额、涨跌幅、成交额、估值分位数）—— 作为入选原因的**核心论据**。
+2. **事件/政策资讯**（新闻标题、政策摘要）—— 作为判断**市场主线与催化因素**的依据。
+3. **指数表现**（各大指数收盘价、涨跌幅）—— 用于判断**整体市场环境**（强市/震荡/弱市）。
+
+## 规则4：面对数据缺失的策略
+- 若输入数据不足以支撑完整的3个组合（进攻/平衡/防御），则**能出几个出几个**，但需在开头说明"因数据维度限制，本次仅设计X个组合"。
+- 若输入数据缺少某只ETF的估值，原因写"估值数据待查"或引用输入中已有的同类指数估值作为近似参考（需明确标注是近似）。
+- **降级推理规则**：若输入数据缺少资金流向，允许基于"涨跌幅+估值分位+资讯催化"进行逻辑推导，但需明确标注"基于涨幅与估值数据推断，未获取资金面数据"。
+
+## 规则5：禁止行为清单
+- ❌ 禁止使用模糊时间词（如"近期""近日""最近"），必须改写为"输入数据显示[具体日期]……"
+- ❌ 禁止编造任何输入中不存在的数字（流入额、涨幅、分位等）
+- ❌ 禁止推荐输入数据中未提及的ETF（若名称已知但代码缺失，需标注"代码待核实"）
+- ❌ 禁止输出"可能""或许""大概"等不确定性词汇，所有判断须有输入数据支撑
+
+# 工作流程
+
+收到【市场数据输入】后，请严格按以下步骤执行：
+
+**第一步：数据快照解析**
+- 提取大盘指数表现，定性判断今日市场情绪（如：普涨、分化、普跌）。
+- 提取资金流向TOP榜（如有），识别资金共识最强的方向（宽基/行业/跨境）。
+- 提取资讯关键词，识别潜在催化主线（如：业绩预增、政策利好、地缘事件）。
+
+**第二步：组合框架映射**
+- 根据解析出的主线方向，设计三个组合：
+  - **进攻型**（高风险承受）：重仓主线，科技/成长仓位占比60%以上，标的8-12只，权益仓位90-95%
+  - **平衡型**（中等风险）：主线与防御均衡配置，主线仓位40-50%，防御仓位20-30%，标的10-14只，权益仓位85-92%
+  - **防御型**（低风险）：高股息/低波动资产占比50%以上，标的10-14只，权益仓位60-75%
+- 权重分配必须基于输入数据中体现的"资金共识强度"和"估值安全边际"。
+
+**第三步：生成输出**
+- 严格按照下方输出格式生成方案。
+- 每个入选原因的括号内，必须引用输入数据中的具体数字或资讯摘要。
+
+# Hybrid 输出格式说明
+
+你必须输出一个 **JSON 对象**，包含以下顶层字段：
+
+1. **design_text**: string —— 完整的 Markdown 格式设计报告，严格按下方【Markdown 输出模板】生成
+2. **data_snapshot_time**: string —— 引用输入中的"数据快照时间"
+3. **market_environment**: string —— 简要市场环境描述
+4. **plans**: array —— 三个组合的结构化数据，每个对象包含：
+   - style: "进攻型" | "平衡型" | "防御型"
+   - style_label: string
+   - portfolio_name: string
+   - positioning: string（一句话定位描述）
+   - expected_return: number（小数，如 0.15）
+   - max_drawdown: number
+   - sharpe_ratio: number
+   - expected_characteristics: string（预期特征：波动率区间、回撤区间等）
+   - weight_logic: array[{group: string, total_weight_pct: number, rationale: string}]
+   - allocations: array[{symbol, name, asset_class, target_weight, selection_rationale, weight_rationale, tracked_index, key_metrics}]
+   - market_analysis: object
+   - allocation_rationale: object
+   - risk_factors: array
+   - rebalance_rules: string
+5. **comparison_table**: object —— 三组合核心差异速览，键为风格，值为维度→取值的对象
+
+# Markdown 输出模板（用于 design_text 字段，必须严格遵循）
+
+以下[X]个组合均基于【市场数据输入】中提供的[数据快照时间]行情快照与资讯设计，按风险承受能力从高到低排列。
+
+一、[组合名称]（[风险定位]）
+定位：[一句话定位描述]
+
+序号	标的	代码	权重	入选原因
+1	[名称]	[代码]	[权重]%	[引用输入数据中的具体数值/资讯]
+2	[名称]	[代码]	[权重]%	[引用输入数据中的具体数值/资讯]
+...	...	...	...	...
+权重设置逻辑：
+
+[逻辑线1]（合计X%）：[基于输入数据的推导逻辑]
+
+[逻辑线2]（合计X%）：[基于输入数据的推导逻辑]
+
+[逻辑线3]（合计X%）：[基于输入数据的推导逻辑]
+
+预期特征：[基于市场环境做定性+定量描述，含预期波动和回撤区间]
+
+二、[组合名称]（[风险定位]）
+[同上结构]
+
+三、[组合名称]（[风险定位]）
+[同上结构]
+
+[最后一章] 三组合核心差异速览
+对比维度	进攻型	平衡型	防御型
+标的数量	X只	X只	X只
+权益仓位	X%	X%	X%
+科技/弹性占比	X%+	X-X%	X%
+高股息/防御占比	X%	X%	X%+
+现金/流动性	X%	X%	X%
+预期年化波动	X%+	X-X%	X-X%
+核心品种	[列举2-3个]	[列举2-3个]	[列举2-3个]
+一句话总结：[基于当前市场环境给出组合适配建议]
+
+备注：本方案完全基于输入的市场数据生成，部分缺失数据已在原因中标注，仅供参考，不构成投资建议。
+
+# 数据引用话术示例（Few-shot 参考）
+
+> **注意**：以下仅为展示"数据引用话术"和"逻辑分层话术"的写法示例，其中的具体数字（如吸金XX亿、PE分位XX%）仅为演示占位符。**实际输出时，必须替换为你输入的【市场数据输入】中的真实数值。**
+
+## 入选原因的"标准话术"示例（需模仿此句式）：
+
+✅ **正确写法（强烈推荐模仿）**：
+> 输入数据显示7月以来该方向ETF合计吸金131.84亿元，宽基中资金共识最强。
+
+✅ **正确写法（若缺少资金流数据时的降级写法）**：
+> 输入数据显示该板块今日涨幅居前（+3.2%），叠加输入资讯中提到的政策利好催化，未获取资金面数据，暂以涨幅与估值作为主要依据。
+
+❌ **错误写法（禁止模仿）**：
+> 这只ETF近期受到资金追捧。（模糊时间词，且未引用输入数据的具体数字）
+
+## 权重设置逻辑的"分层话术"示例（需模仿此结构）：
+
+✅ **推荐的结构写法**：
+> - **科技三层穿透（合计45%）** ：宽基β（科创50）+设备龙头（半导体设备）+高弹性芯片（科创芯片），形成"底层β+两层α"的核心仓位。
+> - **防御缓冲垫（合计22%）** ：红利+黄金+银行，对冲成长板块波动。
+
+**核心记忆点**：你的每一句推荐理由，都必须让用户能直接对应回【市场数据输入】中的某一行文字或数字。没有任何输入依据的推荐理由，一律视为违规。
+
+# 约束条件
+
+1. 权重加总须为100%（含现金部分）。
+2. ETF代码须为6位数字，若输入中未提供代码，标注"代码待核实"。
+3. **组合中不得包含任何债券类 ETF**（债券投资由用户独立管理）。
+4. 输出内容为"设计方案"而非"投资建议"，须在末尾注明仅供参考。
+5. 语言风格：专业、精炼、数据密集，短段落为主，关键数字加粗。
+
+# JSON 输出格式示例（结构化部分）
+
+```json
+{
+  "design_text": "完整的Markdown报告...",
+  "data_snapshot_time": "2026-07-14 20:28（北京时间）",
+  "market_environment": "简要市场环境描述",
+  "plans": [
+    {
+      "style": "进攻型",
+      "style_label": "进攻型",
+      "portfolio_name": "锐意进取组合",
+      "positioning": "捕捉科技主线高弹性机会，承受较大回撤",
+      "expected_return": 0.15,
+      "max_drawdown": 0.25,
+      "sharpe_ratio": 0.8,
+      "expected_characteristics": "预期年化波动20-25%，最大回撤区间22-28%",
+      "weight_logic": [
+        {"group": "科技三层穿透", "total_weight_pct": 45, "rationale": "宽基β（科创50）+设备龙头（半导体设备）+高弹性芯片（科创芯片）"},
+        {"group": "防御缓冲垫", "total_weight_pct": 22, "rationale": "红利+黄金+银行，对冲成长板块波动"}
+      ],
+      "allocations": [
+        {
+          "symbol": "588000",
+          "name": "科创50ETF",
+          "asset_class": "equity",
+          "target_weight": 0.15,
+          "selection_rationale": "输入数据显示科创50当日涨幅+3.2%，近一周资金净流入45.6亿",
+          "weight_rationale": "进攻核心仓位，上限15%",
+          "tracked_index": "000688",
+          "key_metrics": {"scale_billion": 250, "avg_volume_million": 1500, "pe_ttm": 45.0, "pb": 4.2, "ytd_return": -5.3}
+        }
+      ],
+      "market_analysis": {
+        "macro_environment": "...",
+        "liquidity_condition": "...",
+        "style_preference": "成长+科技",
+        "sector_opportunity": "半导体、AI、新能源",
+        "risk_assessment": "外部风险可控"
+      },
+      "allocation_rationale": {
+        "asset_class_allocation": "权益92%，现金5%，商品3%",
+        "equity_style_tilt": "成长+动量",
+        "geographic_allocation": "A股80%，港股15%，美股5%",
+        "sector_allocation": "核心配置半导体+AI+新能源"
+      },
+      "risk_factors": ["经济复苏不及预期", "地缘政治风险"],
+      "rebalance_rules": "月度检视，偏离超过5%触发再平衡"
+    }
+  ],
+  "comparison_table": {
+    "进攻型": {"标的数量": "10只", "权益仓位": "92%", "科技/弹性占比": "65%+", "高股息/防御占比": "5%", "现金/流动性": "8%", "预期年化波动": "25%+", "核心品种": "科创50、半导体、AI"},
+    "平衡型": {"标的数量": "12只", "权益仓位": "85%", "科技/弹性占比": "45%", "高股息/防御占比": "25%", "现金/流动性": "12%", "预期年化波动": "15-18%", "核心品种": "沪深300、红利、黄金"},
+    "防御型": {"标的数量": "14只", "权益仓位": "65%", "科技/弹性占比": "20%", "高股息/防御占比": "50%+", "现金/流动性": "20%", "预期年化波动": "10-12%", "核心品种": "红利低波、银行、黄金"}
+  }
+}
+```"""
+
 async def _check_key():
     if not settings.deepseek_api_key:
         raise ValueError("DEEPSEEK_API_KEY not configured in .env")
@@ -281,26 +493,57 @@ async def llm_complete(prompt: str, response_format: dict | None = None) -> str:
     }
     if response_format:
         body["response_format"] = response_format
-    async with httpx.AsyncClient(timeout=120, trust_env=False) as client:
-        resp = await client.post(
-            LLM_API_URL,
-            headers={
-                "Authorization": f"Bearer {settings.deepseek_api_key}",
-                "Content-Type": "application/json",
-            },
-            json=body,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        message = data["choices"][0]["message"]
-        content = message.get("content", "")
-        # Some models (e.g., DeepSeek) put reasoning in reasoning_content and leave content empty
-        if not content:
-            content = message.get("reasoning_content", "")
-        return content
+
+    _start = time.monotonic()
+    _caller = sys._getframe(1).f_code.co_name  # caller function name
+    try:
+        async with httpx.AsyncClient(timeout=120, trust_env=False) as client:
+            resp = await client.post(
+                LLM_API_URL,
+                headers={
+                    "Authorization": f"Bearer {settings.deepseek_api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=body,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            message = data["choices"][0]["message"]
+            content = message.get("content", "")
+            # Some models (e.g., DeepSeek) put reasoning in reasoning_content and leave content empty
+            if not content:
+                content = message.get("reasoning_content", "")
+
+            usage = data.get("usage", {})
+            _duration = (time.monotonic() - _start) * 1000
+            await token_store.record(UsageRecord(
+                function_name=_caller,
+                prompt_tokens=usage.get("prompt_tokens", 0),
+                completion_tokens=usage.get("completion_tokens", 0),
+                total_tokens=usage.get("total_tokens", 0),
+                model=settings.llm_model,
+                timestamp=time.time(),
+                success=True,
+                duration_ms=round(_duration, 1),
+            ))
+            return content
+    except Exception as _exc:
+        _duration = (time.monotonic() - _start) * 1000
+        await token_store.record(UsageRecord(
+            function_name=_caller,
+            prompt_tokens=0,
+            completion_tokens=0,
+            total_tokens=0,
+            model=settings.llm_model,
+            timestamp=time.time(),
+            success=False,
+            duration_ms=round(_duration, 1),
+            error_message=str(_exc),
+        ))
+        raise
 
 
-async def llm_complete_with_system(system_prompt: str, prompt: str, response_format: dict | None = None) -> str:
+async def llm_complete_with_system(system_prompt: str, prompt: str, response_format: dict | None = None, force_json: bool = False) -> str:
     """使用自定义系统提示词调用 LLM"""
     import httpx
     await _check_key()
@@ -315,22 +558,55 @@ async def llm_complete_with_system(system_prompt: str, prompt: str, response_for
     }
     if response_format:
         body["response_format"] = response_format
-    async with httpx.AsyncClient(timeout=120, trust_env=False) as client:
-        resp = await client.post(
-            LLM_API_URL,
-            headers={
-                "Authorization": f"Bearer {settings.deepseek_api_key}",
-                "Content-Type": "application/json",
-            },
-            json=body,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        message = data["choices"][0]["message"]
-        content = message.get("content", "")
-        if not content:
-            content = message.get("reasoning_content", "")
-        return content
+    elif force_json:
+        body["response_format"] = {"type": "json_object"}
+
+    _start = time.monotonic()
+    _caller = sys._getframe(1).f_code.co_name
+    try:
+        async with httpx.AsyncClient(timeout=120, trust_env=False) as client:
+            resp = await client.post(
+                LLM_API_URL,
+                headers={
+                    "Authorization": f"Bearer {settings.deepseek_api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=body,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            message = data["choices"][0]["message"]
+            content = message.get("content", "")
+            if not content:
+                content = message.get("reasoning_content", "")
+
+            usage = data.get("usage", {})
+            _duration = (time.monotonic() - _start) * 1000
+            await token_store.record(UsageRecord(
+                function_name=_caller,
+                prompt_tokens=usage.get("prompt_tokens", 0),
+                completion_tokens=usage.get("completion_tokens", 0),
+                total_tokens=usage.get("total_tokens", 0),
+                model=settings.llm_model,
+                timestamp=time.time(),
+                success=True,
+                duration_ms=round(_duration, 1),
+            ))
+            return content
+    except Exception as _exc:
+        _duration = (time.monotonic() - _start) * 1000
+        await token_store.record(UsageRecord(
+            function_name=_caller,
+            prompt_tokens=0,
+            completion_tokens=0,
+            total_tokens=0,
+            model=settings.llm_model,
+            timestamp=time.time(),
+            success=False,
+            duration_ms=round(_duration, 1),
+            error_message=str(_exc),
+        ))
+        raise
 
 
 def _format_indices(indices: list[dict]) -> str:
@@ -530,6 +806,7 @@ async def generate_portfolio_design(
     market_data: list[dict],
     news: list[dict],
     macro_news: list[dict],
+    capital: float = 500000,
 ) -> dict[str, Any]:
     def _val(d, key, fmt="{}"):
         v = d.get(key, "")
@@ -547,118 +824,79 @@ async def generate_portfolio_design(
     oil = comm_map.get("原油", {})
     silver = comm_map.get("白银", {})
 
+    # 数据快照时间（当前请求时间）
+    from datetime import datetime
+    snapshot_time = datetime.now().strftime("%Y-%m-%d %H:%M（北京时间）")
+
+    # 市场成交额估算
+    turnover = ""
+    for m in market_data:
+        if m.get("name") in ("上证指数", "深证成指", "创业板指", "科创50"):
+            if m.get("turnover"):
+                turnover = f"{m['turnover']:.0f}"
+                break
+
+    # 资讯文本
     news_text = "\n".join([f"- {n.get('title', n.get('summary', ''))[:120]}" for n in news[:8]])
     macro_text = "\n".join([f"- {n.get('title', n.get('summary', ''))[:120]}" for n in macro_news[:5]])
 
-    prompt = f"""请根据以下市场数据，设计一份 ETF 组合配置方案。
+    # 新的用户提示词：按输入模板结构化
+    prompt = f"""# 【市场数据输入】
 
-## 市场数据
+数据快照时间：{snapshot_time}
 
-### 主要指数
-- 上证指数: {_val(sh, 'price')} ({_val(sh, 'change_pct', '{:+.2f}%')})
-- 深证成指: {_val(sz, 'price')} ({_val(sz, 'change_pct', '{:+.2f}%')})
-- 创业板指: {_val(cyb, 'price')} ({_val(cyb, 'change_pct', '{:+.2f}%')})
-- 科创50: {_val(kc, 'price')} ({_val(kc, 'change_pct', '{:+.2f}%')})
-- 沪深300: {_val(hs300, 'price')} ({_val(hs300, 'change_pct', '{:+.2f}%')})
 
-### 大宗商品
-- 黄金: {_val(gold, 'price')} ({_val(gold, 'change_pct', '{:+.2f}%')})
-- 原油: {_val(oil, 'price')} ({_val(oil, 'change_pct', '{:+.2f}%')})
-- 白银: {_val(silver, 'price')} ({_val(silver, 'change_pct', '{:+.2f}%')})
+## 1. 大盘概览
+- 上证指数：{_val(sh, 'price')}点（{_val(sh, 'change_pct', '{:+.2f}%')}） 
+- 深证成指：{_val(sz, 'price')}点（{_val(sz, 'change_pct', '{:+.2f}%')}） 
+- 创业板指：{_val(cyb, 'price')}点（{_val(cyb, 'change_pct', '{:+.2f}%')}） 
+- 科创50：{_val(kc, 'price')}点（{_val(kc, 'change_pct', '{:+.2f}%')}） 
+- 沪深300：{_val(hs300, 'price')}点（{_val(hs300, 'change_pct', '{:+.2f}%')}） 
+- 市场成交额：{turnover or '未获取'}亿元
 
-### 财经资讯
+## 2. 行业/板块表现
+（当前输入未提供该维度数据）
+
+## 3. ETF资金流向数据
+（当前输入未提供该维度数据）
+
+## 4. 关键资讯/催化剂
 {news_text}
 
-### 宏观政策
 {macro_text}
 
+## 5. 重点ETF估值数据
+（当前输入未提供该维度数据）
+
+## 6. 流动性/避险指标
+- 黄金价格：{_val(gold, 'price')}美元/盎司（{_val(gold, 'change_pct', '{:+.2f}%')}） 
+- 原油价格：{_val(oil, 'price')}美元/桶（{_val(oil, 'change_pct', '{:+.2f}%')}） 
+- 白银价格：{_val(silver, 'price')}美元/盎司（{_val(silver, 'change_pct', '{:+.2f}%')}） 
+
 ---
-
-## 硬性约束（必须遵守）
-
-1. **每个组合 8-12 只 ETF（含现金）**，超过 12 只判定无效
-2. 单只 ETF 权重 5%-15%，同一行业 ≤ 2 只，前 5 大权重 ≤ 50%
-3. **不包含债券类 ETF**（债券投资由用户独立管理）
-4. 成长:价值 ≈ 1:1，单一风格 ≤ 60%
-5. **三档风险梯度（不含债券）**：
-   - 进攻型：权益 ≥ 85%，现金 ≤ 10%
-   - 平衡型：权益 65-75%，现金 10-15%
-   - 防御型：权益 50-60%，现金 15-20%，黄金 ≤ 8%
-
-## 推荐参考（灵活取舍）
-
-**宽基指数**：中证A500、沪深300、中证500、中证1000、创业板、科创50、上证50、沪深300成长/价值
-**行业主题**：半导体/设备/芯片、AI/机器人/工业母机、新能车/光伏/锂电/储能、医药/创新药/器械、军工/航天、消费/白酒/家电、红利/银行/高股息、通信/云/软件、电力/公用事业
-**跨境 ETF**：纳指100、标普500、恒生科技、恒生互联网、日经225、MSCI中国、港股通消费/医药
-**商品 ETF**：黄金、原油、有色
-**策略指数**：红利低波动100、自由现金流、质量、价值、成长、低波动、ESG、央企、国企
-
-## 输出要求（JSON 格式）
-
-请输出完整的组合设计，包含以下维度的深度分析：
-
-```json
-{{
-  "portfolio_name": "组合名称",
-  "portfolio_type": "进攻型|平衡型|防御型",
-  "market_analysis": {{
-    "macro_environment": "宏观环境分析（货币政策、财政政策、经济周期位置）",
-    "liquidity_condition": "流动性环境分析（利率、信用利差、融资余额、北向资金）",
-    "style_preference": "风格偏好判断（成长/价值、大盘/小盘、顺势/逆势）",
-    "sector_opportunity": "板块机会识别（景气度上行、政策催化、估值修复）",
-    "risk_assessment": "核心风险点评估（系统性/非系统性/流动性/政策）"
-  }},
-  "allocation_rationale": {{
-    "asset_class_allocation": "大类资产配置理由（权益/商品/跨境比例及理由）",
-    "equity_style_tilt": "权益风格倾斜（成长/价值/红利/低波/质量）",
-    "geographic_allocation": "地域配置理由（A股/港股/美股/其他）",
-    "sector_allocation": "行业配置逻辑（核心配置/卫星配置/对冲配置）"
-  }},
-  "etfs": [
-    {{
-      "symbol": "ETF代码",
-      "name": "ETF名称",
-      "asset_class": "资产类别",
-      "target_weight": 0.15,
-      "selection_rationale": "选入理由：基本面/估值/动量/政策/流动性等多维支撑",
-      "weight_rationale": "仓位设置理由：核心/卫星/对冲定位、风险预算分配、流动性考量",
-      "tracked_index": "跟踪指数代码（场外基金必填）",
-      "key_metrics": {{
-        "scale_billion": "规模(亿)",
-        "avg_volume_million": "日均成交额(百万)",
-        "pe_ttm": "PE-TTM",
-        "pb": "PB",
-        "ytd_return": "年内涨幅%"
-      }}
-    }}
-  ],
-  "portfolio_metrics": {{
-    "expected_return": "预期年化收益",
-    "expected_volatility": "预期年化波动",
-    "max_drawdown_estimate": "预估最大回撤",
-    "sharpe_estimate": "预估夏普比率",
-    "turnover_estimate": "预估年换手率"
-  }},
-  "risk_factors": ["风险因子1", "风险因子2", "风险因子3"],
-  "rebalance_rules": "再平衡规则（触发条件/频率/方式）"
-}}
-```"""
-    # Call LLM and handle response with fallback JSON parsing
+请基于以上输入的实时数据，设计进攻、平衡、防御三档ETF组合方案。
+"""
+    # Call LLM with dedicated system prompt, forcing JSON output
     try:
-        response = await llm_complete(prompt)
+        response = await llm_complete_with_system(PORTFOLIO_DESIGN_SYSTEM_PROMPT, prompt, force_json=True)
     except Exception as e:
-        import logging as _lg
-        _lg.warning(f"LLM call failed: {e}")
-        return _empty_portfolio_response()
+        logger.warning("LLM call failed: %s", e)
+        return _fallback_portfolio_plans(capital, f"LLM 调用失败: {e}")
 
     if not response or not response.strip():
-        return _empty_portfolio_response()
+        return _fallback_portfolio_plans(capital, "LLM 返回为空")
 
     # Try direct JSON parse
     try:
         import json as _json
         parsed = _json.loads(response)
-        if parsed and parsed.get("portfolios"):
+        if parsed and parsed.get("plans"):
+            # Ensure new fields exist
+            if "design_text" not in parsed:
+                parsed["design_text"] = "（LLM 未生成完整报告文本）"
+            if "comparison_table" not in parsed:
+                parsed["comparison_table"] = {}
+            parsed["data_snapshot_time"] = snapshot_time
             return parsed
     except Exception:
         pass
@@ -670,7 +908,12 @@ async def generate_portfolio_design(
             cleaned = cleaned.split("\n", 1)[1].rsplit("```", 1)[0].strip()
         import json as _json
         data = _json.loads(cleaned) if cleaned else {}
-        if data.get("portfolios"):
+        if data.get("plans"):
+            if "design_text" not in data:
+                data["design_text"] = "（LLM 未生成完整报告文本）"
+            if "comparison_table" not in data:
+                data["comparison_table"] = {}
+            data["data_snapshot_time"] = snapshot_time
             return data
     except Exception:
         pass
@@ -682,12 +925,97 @@ async def generate_portfolio_design(
         inner = response[start:end+1]
         import json as _json
         data = _json.loads(inner)
-        if data.get("portfolios"):
+        if data.get("plans"):
+            if "design_text" not in data:
+                data["design_text"] = "（LLM 未生成完整报告文本）"
+            if "comparison_table" not in data:
+                data["comparison_table"] = {}
+            data["data_snapshot_time"] = snapshot_time
             return data
     except Exception:
         pass
 
-    return {"market_environment": "分析异常", "portfolios": [], "raw": response[:500]}
+    # Fallback when all parsing fails
+    return _fallback_portfolio_plans(capital, "LLM 返回格式异常")
+
+
+def _fallback_portfolio_plans(capital: float = 500000, reason: str = "LLM 暂不可用") -> dict[str, Any]:
+    """LLM 不可用时生成简版组合方案（三条风格各一组默认标的）。"""
+    base_etfs = [
+        {"symbol": "510300", "name": "沪深300ETF", "asset_class": "equity", "target_weight": 0.0,
+         "selection_rationale": "核心宽基，覆盖A股大盘", "weight_rationale": "作为底仓配置",
+         "tracked_index": "000300", "key_metrics": {"scale_billion": 1200, "avg_volume_million": 2500, "pe_ttm": 12.5, "pb": 1.3, "ytd_return": 8.5}},
+        {"symbol": "510500", "name": "中证500ETF", "asset_class": "equity", "target_weight": 0.0,
+         "selection_rationale": "中盘成长代表", "weight_rationale": "补充中盘暴露",
+         "tracked_index": "000905", "key_metrics": {"scale_billion": 600, "avg_volume_million": 1800, "pe_ttm": 18.0, "pb": 1.8, "ytd_return": 6.2}},
+        {"symbol": "159915", "name": "创业板ETF", "asset_class": "equity", "target_weight": 0.0,
+         "selection_rationale": "成长风格核心标的", "weight_rationale": "增强组合弹性",
+         "tracked_index": "399006", "key_metrics": {"scale_billion": 400, "avg_volume_million": 2200, "pe_ttm": 32.0, "pb": 3.5, "ytd_return": -2.1}},
+        {"symbol": "588000", "name": "科创50ETF", "asset_class": "equity", "target_weight": 0.0,
+         "selection_rationale": "科技创新方向", "weight_rationale": "布局硬科技赛道",
+         "tracked_index": "000688", "key_metrics": {"scale_billion": 250, "avg_volume_million": 1500, "pe_ttm": 45.0, "pb": 4.2, "ytd_return": -5.3}},
+        {"symbol": "513100", "name": "纳指ETF", "asset_class": "equity", "target_weight": 0.0,
+         "selection_rationale": "美股科技龙头", "weight_rationale": "跨境分散配置",
+         "tracked_index": "NDX", "key_metrics": {"scale_billion": 180, "avg_volume_million": 800, "pe_ttm": 28.0, "pb": 6.5, "ytd_return": 15.2}},
+        {"symbol": "518880", "name": "黄金ETF", "asset_class": "commodity", "target_weight": 0.0,
+         "selection_rationale": "避险资产", "weight_rationale": "对冲尾部风险",
+         "tracked_index": "AU9999", "key_metrics": {"scale_billion": 300, "avg_volume_million": 1200, "pe_ttm": 0, "pb": 0, "ytd_return": 12.8}},
+        {"symbol": "512880", "name": "证券ETF", "asset_class": "equity", "target_weight": 0.0,
+         "selection_rationale": "券商板块弹性标的", "weight_rationale": "博弈市场情绪修复",
+         "tracked_index": "399975", "key_metrics": {"scale_billion": 350, "avg_volume_million": 2000, "pe_ttm": 20.0, "pb": 1.5, "ytd_return": 3.5}},
+        {"symbol": "159865", "name": "养殖ETF", "asset_class": "equity", "target_weight": 0.0,
+         "selection_rationale": "农业周期板块", "weight_rationale": "分散行业集中度",
+         "tracked_index": "399812", "key_metrics": {"scale_billion": 60, "avg_volume_million": 300, "pe_ttm": 25.0, "pb": 2.1, "ytd_return": -1.8}},
+        {"symbol": "513050", "name": "中概互联ETF", "asset_class": "equity", "target_weight": 0.0,
+         "selection_rationale": "中概互联网龙头", "weight_rationale": "布局港股科技核心资产",
+         "tracked_index": "H30533", "key_metrics": {"scale_billion": 400, "avg_volume_million": 1800, "pe_ttm": 22.0, "pb": 3.8, "ytd_return": 10.2}},
+    ]
+
+    def _make_plan(style: str, label: str, etf_weights: list[float], expected_return: float, max_dd: float, sharpe: float) -> dict:
+        etfs = []
+        for i, etf in enumerate(base_etfs):
+            w = etf_weights[i] if i < len(etf_weights) else 0.05
+            e = dict(etf)
+            e["target_weight"] = w
+            etfs.append(e)
+        return {
+            "style": style, "style_label": label,
+            "portfolio_name": f"{label}组合",
+            "expected_return": expected_return,
+            "max_drawdown": max_dd,
+            "sharpe_ratio": sharpe,
+            "allocations": etfs,
+            "market_analysis": {
+                "macro_environment": "当前宏观环境复杂多变，建议均衡配置",
+                "liquidity_condition": "市场流动性充裕",
+                "style_preference": "大盘价值为主，小盘成长为辅",
+                "sector_opportunity": "关注科技、消费、黄金板块机会",
+                "risk_assessment": "关注海外加息尾部风险"
+            },
+            "allocation_rationale": {
+                "asset_class_allocation": f"总仓位 {capital:,.0f} 元，按风险梯度分配权益与商品比例",
+                "equity_style_tilt": "均衡配置成长与价值风格",
+                "geographic_allocation": "A股为主，跨境分散",
+                "sector_allocation": "宽基打底，行业卫星配置"
+            },
+            "risk_factors": ["市场系统性风险", "风格轮动风险"],
+            "rebalance_rules": "季度再平衡，偏离超5%触发调仓",
+        }
+
+    return {
+        "market_environment": f"{reason}，以下为参考组合方案",
+        "plans": [
+            _make_plan("进攻型", "进攻型",
+                       [0.14, 0.12, 0.14, 0.12, 0.10, 0.05, 0.12, 0.10],
+                       0.12, 0.25, 0.75),
+            _make_plan("平衡型", "平衡型",
+                       [0.12, 0.10, 0.12, 0.08, 0.08, 0.05, 0.08, 0.08],
+                       0.08, 0.18, 0.85),
+            _make_plan("防御型", "防御型",
+                       [0.10, 0.08, 0.08, 0.06, 0.06, 0.08, 0.06, 0.05],
+                       0.05, 0.12, 0.90),
+        ]
+    }
 
 
 def _empty_portfolio_response() -> dict:

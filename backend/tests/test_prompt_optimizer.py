@@ -12,7 +12,7 @@ from prompt_optimizer_clean import (
     get_csi300_weekly,
     estimate_portfolio_return,
 )
-from app.analysis.llm import SYSTEM_PROMPT, generate_portfolio_design
+from app.analysis.llm import SYSTEM_PROMPT, PORTFOLIO_DESIGN_SYSTEM_PROMPT, generate_portfolio_design
 
 
 class TestParseJson:
@@ -217,51 +217,42 @@ class TestSystemPrompt:
 class TestV8Instructions:
     """Verify V50 instructions are present in generate_portfolio_design() prompt."""
 
-    @patch("app.analysis.llm.llm_complete")
+    @patch("app.analysis.llm.llm_complete_with_system")
     def test_risk_gradients_in_prompt(self, mock_llm):
-        mock_llm.return_value = '{"portfolios": []}'
+        mock_llm.return_value = '{"plans": []}'
         result = asyncio.run(generate_portfolio_design(
             indices=[{"name": "上证指数", "price": 3200, "change_pct": -1.0}],
             commodities=[{"name": "黄金", "price": 580, "change_pct": 0.5}],
             market_data=[{"name": "标普500", "price": 5500, "change_pct": 0.8}],
             news=[{"title": "新闻"}], macro_news=[]
         ))
-        # We verify via the call args that llm_complete received
-        call_args = mock_llm.call_args[0][0]
-        assert "权益 ≥85%" in call_args or "权益 ≥ 85%" in call_args
-        assert "权益 65-75%" in call_args or "权益65-75%" in call_args
-        assert "权益 50-60%" in call_args or "权益50-60%" in call_args
+        # We verify via the call args that llm_complete_with_system received
+        # system prompt is first arg, user prompt is second
+        system_prompt = mock_llm.call_args[0][0]
+        assert "权益仓位90-95%" in system_prompt
+        assert "权益仓位85-92%" in system_prompt
+        assert "权益仓位60-75%" in system_prompt
 
-    @patch("app.analysis.llm.llm_complete")
-    def test_etf_count_8_12_in_prompt(self, mock_llm):
-        mock_llm.return_value = '{"portfolios": []}'
-        result = asyncio.run(generate_portfolio_design(
-            indices=[{"name": "上证指数", "price": 3200, "change_pct": -1.0}],
-            commodities=[], market_data=[], news=[], macro_news=[]
-        ))
-        call_args = mock_llm.call_args[0][0]
-        assert "8-12" in call_args
-
-    @patch("app.analysis.llm.llm_complete")
+    @patch("app.analysis.llm.llm_complete_with_system")
     def test_no_bonds_in_prompt(self, mock_llm):
-        mock_llm.return_value = '{"portfolios": []}'
+        mock_llm.return_value = '{"plans": []}'
         result = asyncio.run(generate_portfolio_design(
             indices=[], commodities=[], market_data=[],
             news=[{"title": "新闻"}], macro_news=[]
         ))
-        call_args = mock_llm.call_args[0][0]
-        assert "不含债券" in call_args or "无债券" in call_args or "不包含债券" in call_args
+        system_prompt = mock_llm.call_args[0][0]
+        assert "不得包含任何债券" in system_prompt or "不含债券" in system_prompt or "无债券" in system_prompt or "不包含债券" in system_prompt
 
-    @patch("app.analysis.llm.llm_complete")
+    @patch("app.analysis.llm.llm_complete_with_system")
     def test_defensive_composition_in_prompt(self, mock_llm):
-        mock_llm.return_value = '{"portfolios": []}'
+        mock_llm.return_value = '{"plans": []}'
         result = asyncio.run(generate_portfolio_design(
             indices=[{"name": "上证指数", "price": 3200, "change_pct": -1.0}],
             commodities=[{"name": "黄金", "price": 580, "change_pct": 0.5}],
             market_data=[], news=[{"title": "新闻"}], macro_news=[]
         ))
-        call_args = mock_llm.call_args[0][0]
-        assert "公用事业" in call_args or "宽基" in call_args or "资产类别" in call_args
+        system_prompt = mock_llm.call_args[0][0]
+        assert "公用事业" in system_prompt or "宽基" in system_prompt or "资产类别" in system_prompt
 
 
 class TestGetCsi300:
@@ -340,39 +331,51 @@ class TestEstimatePortfolioReturn:
 
 
 class TestGeneratePortfolioDesign:
-    @patch("app.analysis.llm.llm_complete")
+    @patch("app.analysis.llm.llm_complete_with_system")
     def test_successful_design(self, mock_llm):
         mock_llm.return_value = json.dumps({
-            "market_analysis": {"a_share": "分析", "us": "分析", "hk": "分析", "commodity": "分析", "core_risk": "风险"},
-            "portfolios": [
+            "plans": [
                 {
-                    "type": "aggressive",
-                    "name": "进攻型组合",
-                    "etfs": [{"name": "沪深300ETF", "symbol": "510300", "weight": 0.15, "logic": "test", "data_type": "硬数据"}],
-                    "cash_weight": 0.1,
-                    "tips": ["操作要点"],
-                    "risks": ["风险提示"],
+                    "style": "进攻型",
+                    "style_label": "进攻型",
+                    "portfolio_name": "进攻型组合",
+                    "positioning": "捕捉主线高弹性机会",
+                    "expected_return": 0.15,
+                    "max_drawdown": 0.25,
+                    "sharpe_ratio": 0.8,
+                    "expected_characteristics": "预期年化波动20-25%，最大回撤区间22-28%",
+                    "weight_logic": [
+                        {"group": "科技三层穿透", "total_weight_pct": 45, "rationale": "宽基β+设备龙头+高弹性芯片"}
+                    ],
+                    "allocations": [
+                        {"name": "沪深300ETF", "symbol": "510300", "target_weight": 0.15, "selection_rationale": "test", "weight_rationale": "test", "asset_class": "equity", "tracked_index": "000300", "key_metrics": {}}
+                    ],
+                    "market_analysis": {},
+                    "allocation_rationale": {},
+                    "risk_factors": [],
+                    "rebalance_rules": "月度检视"
                 }
             ],
-            "risk_return_comparison": {},
-            "stress_test": [],
-            "observation_indicators": [],
-            "summary": "总结",
+            "market_environment": "测试环境",
+            "design_text": "测试报告",
+            "data_snapshot_time": "2026-07-14 20:28（北京时间）",
+            "comparison_table": {}
         })
         result = asyncio.run(generate_portfolio_design([], [], [], [], []))
-        assert "portfolios" in result
-        assert result["portfolios"][0]["type"] == "aggressive"
+        assert "plans" in result
+        assert result["plans"][0]["style"] == "进攻型"
 
-    @patch("app.analysis.llm.llm_complete")
+    @patch("app.analysis.llm.llm_complete_with_system")
     def test_broken_json_fallback(self, mock_llm):
-        mock_llm.return_value = 'Some text {"portfolios": [{"type": "balanced", "name": "平衡型", "etfs": [], "cash_weight": 0.15, "tips": [], "risks": []}], "market_analysis": {}, "risk_return_comparison": {}, "stress_test": [], "observation_indicators": [], "summary": ""} trailing'
+        mock_llm.return_value = 'Some text {"plans": [{"style": "平衡型", "style_label": "平衡型", "portfolio_name": "平衡型", "allocations": []}], "market_environment": "", "design_text": "", "data_snapshot_time": "", "comparison_table": {}} trailing'
         result = asyncio.run(generate_portfolio_design([], [], [], [], []))
-        assert "portfolios" in result
+        assert "plans" in result
 
-    @patch("app.analysis.llm.llm_complete")
+    @patch("app.analysis.llm.llm_complete_with_system")
     def test_complete_failure(self, mock_llm):
         mock_llm.return_value = "Totally invalid response without JSON"
         result = asyncio.run(generate_portfolio_design([], [], [], [], []))
         assert "market_environment" in result
-        assert result["portfolios"] == []
-        assert "raw" in result
+        # Fallback returns default plans, not empty
+        assert isinstance(result["plans"], list)
+        assert len(result["plans"]) == 3

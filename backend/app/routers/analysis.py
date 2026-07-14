@@ -1,6 +1,10 @@
 import asyncio
 import json
 from fastapi import APIRouter, Query, Depends
+
+from ..core.logging import get_logger
+
+logger = get_logger(__name__)
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Any
@@ -21,6 +25,7 @@ from ..fetchers.sector_fetcher import (
     fetch_industry_sectors, fetch_concept_sectors, fetch_sector_stocks,
 )
 from ..database import get_db
+from fastapi import HTTPException
 
 router = APIRouter(prefix="/api/v1/analysis", tags=["analysis"])
 
@@ -117,13 +122,16 @@ def _collect_news():
 
 @router.post("/llm-report")
 async def llm_report(req: LLMReportRequest):
-    market_data, indices, commodities = await _fetch_all_market()
+    try:
+        market_data, indices, commodities = await _fetch_all_market()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Market data fetch failed: {e}")
 
     if req.symbols:
-        market_data = [m for m in market_data if m["symbol"] in req.symbols]
+        market_data = [m for m in market_data if m.get("symbol") in req.symbols]
     else:
         major_symbols = {"000001", "399001", "399006", "000688", "000300", "510050", "510300", "510500", "159915"}
-        market_data = [m for m in market_data if m.get("symbol", "") in major_symbols or m["asset_type"] in ("index", "futures")]
+        market_data = [m for m in market_data if m.get("symbol", "") in major_symbols or m.get("asset_type", "") in ("index", "futures")]
 
     indicators = {}
     for item in market_data[:5]:
@@ -138,20 +146,29 @@ async def llm_report(req: LLMReportRequest):
             continue
 
     news = _collect_news()
-    report = await generate_market_report(indices, commodities, market_data, indicators, news, [])
+    try:
+        report = await generate_market_report(indices, commodities, market_data, indicators, news, [])
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"LLM analysis failed: {e}")
     return {"report": report, "market_data": market_data[:10], "indices": indices[:10], "commodities": commodities[:6]}
 
 
 @router.post("/llm-advice")
 async def llm_advice(query: str = Query(...), context: dict | None = None):
-    advice = await generate_advice(query, context)
+    try:
+        advice = await generate_advice(query, context)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"LLM advice failed: {e}")
     return {"advice": advice}
 
 
 @router.post("/llm-news-analysis")
 async def llm_news_analysis():
     news = _collect_news()
-    analysis = await analyze_news(news)
+    try:
+        analysis = await analyze_news(news)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"LLM news analysis failed: {e}")
     return {"analysis": analysis, "news_count": len(news)}
 
 
@@ -162,10 +179,16 @@ async def news_impact(req: NewsImpactRequest):
     return result
 
 
+class PortfolioDesignRequest(BaseModel):
+    """组合设计请求体"""
+    capital: float = 500000
+
+
 @router.post("/portfolio-design")
-async def portfolio_design(db: AsyncSession = Depends(get_db)):
+async def portfolio_design(req: PortfolioDesignRequest | None = None, db: AsyncSession = Depends(get_db)):
     market_data, indices, commodities = await _fetch_all_market()
     news = _collect_news()
+    capital = req.capital if req else 500000
 
     # Also fetch portfolio ETF prices
     try:
@@ -181,7 +204,7 @@ async def portfolio_design(db: AsyncSession = Depends(get_db)):
                     "asset_type": e.asset_type, "portfolio_type": e.portfolio_type,
                 })
     except Exception as exc:
-        print(f"[portfolio-design] ETF price fetch error: {exc}")
+        logger.warning(f"[portfolio-design] ETF price fetch error: {exc}")
 
     major_symbols = {"000001", "399001", "399006", "000688", "000300", "000016", "000905",
                      "510050", "510300", "510500", "159915", "588000", "513100", "518880", "511880"}
@@ -189,7 +212,10 @@ async def portfolio_design(db: AsyncSession = Depends(get_db)):
     if len(filtered) < 20 and market_data:
         filtered = market_data[:50]
 
-    result = await generate_portfolio_design(indices, commodities, filtered, news, [])
+    try:
+        result = await generate_portfolio_design(indices, commodities, filtered, news, [], capital=capital)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"LLM portfolio design failed: {e}")
     result["indices"] = indices[:8]
     result["commodities"] = commodities[:6]
     return result
@@ -231,13 +257,16 @@ async def portfolio_review(req: PortfolioReviewRequest):
     # DeepSeek 当前不支持 response_format=json_schema，改用 json_object 强制 JSON 输出；
     # 具体字段结构由 REVIEW_SYSTEM_PROMPT 中的输出契约约束（含 hold_reason）。
     response_format = {"type": "json_object"}
-    
-    result_text = await llm_complete_with_system(
-        REVIEW_SYSTEM_PROMPT,
-        json.dumps(input_data, ensure_ascii=False),
-        response_format
-    )
-    
+
+    try:
+        result_text = await llm_complete_with_system(
+            REVIEW_SYSTEM_PROMPT,
+            json.dumps(input_data, ensure_ascii=False),
+            response_format
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"LLM portfolio review failed: {e}")
+
     return _extract_json(result_text)
 
 
@@ -268,14 +297,17 @@ async def sector_analysis(req: SectorAnalysisRequest):
     except Exception:
         pass
 
-    report = await generate_sector_analysis(
-        sector_code=sector_code,
-        sector_name=name,
-        sector_stocks=constituents,
-        indices=[],
-        commodities=[],
-        market_data=news,
-    )
+    try:
+        report = await generate_sector_analysis(
+            sector_code=sector_code,
+            sector_name=name,
+            sector_stocks=constituents,
+            indices=[],
+            commodities=[],
+            market_data=news,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"LLM sector analysis failed: {e}")
     return {"sector_name": name, "sector_code": sector_code, "report": report, "constituents_count": len(constituents)}
 
 
@@ -305,13 +337,16 @@ async def symbol_analysis(req: SymbolAnalysisRequest):
         pass
 
     display_name = name or (realtime.get("name", "") if realtime else symbol)
-    report = await generate_symbol_analysis(
-        symbol=symbol,
-        name=display_name,
-        asset_type=asset_type,
-        realtime=realtime or {},
-        history=hist,
-        indicators=indicators,
-        news=news,
-    )
+    try:
+        report = await generate_symbol_analysis(
+            symbol=symbol,
+            name=display_name,
+            asset_type=asset_type,
+            realtime=realtime or {},
+            history=hist,
+            indicators=indicators,
+            news=news,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"LLM symbol analysis failed: {e}")
     return {"symbol": symbol, "name": display_name, "report": report}
