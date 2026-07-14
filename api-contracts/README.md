@@ -45,7 +45,8 @@ api-contracts/
 │   ├── llm-report.md
 │   ├── llm-advice.md
 │   ├── news-analysis.md
-│   └── portfolio-design.md
+│   ├── portfolio-design.md
+│   └── agents.md               ← 9 条 agent 链路 + Agent Registry 架构说明
 ├── news/                      ← 资讯模块
 │   ├── headlines.md
 │   ├── macro.md

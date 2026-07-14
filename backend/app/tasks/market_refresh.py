@@ -5,17 +5,21 @@
 """
 import json
 
+from ..core.logging import get_logger
 from ..services.market_service import get_portfolio_realtime
 from ..routers.ws import manager
+
+logger = get_logger(__name__)
 
 
 async def refresh_market_cache() -> None:
     try:
         quotes = await get_portfolio_realtime()
     except Exception:
+        logger.exception("刷新行情缓存失败：get_portfolio_realtime 异常")
         return
     if quotes:
         try:
             await manager.broadcast("portfolio", {"type": "realtime", "data": quotes})
         except Exception:
-            pass
+            logger.exception("行情缓存广播失败")

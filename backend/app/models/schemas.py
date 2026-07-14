@@ -37,6 +37,11 @@ class CalculateRequest(BaseModel):
     total_capital: float = Field(gt=0)
 
 
+class StrategyCheckRequest(BaseModel):
+    total_capital: float = Field(gt=0)
+    design_data: Optional[dict] = None  # AI portfolio design to check instead of DB ETFs
+
+
 class AllocationItem(BaseModel):
     symbol: str
     name: str

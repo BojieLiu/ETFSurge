@@ -251,23 +251,17 @@ async def portfolio_review(req: PortfolioReviewRequest):
         "meta_context": req.meta_context,
     }
     
-    # 使用专用系统提示词
-    from ..analysis.llm import llm_complete_with_system, REVIEW_SYSTEM_PROMPT
-    
-    # DeepSeek 当前不支持 response_format=json_schema，改用 json_object 强制 JSON 输出；
-    # 具体字段结构由 REVIEW_SYSTEM_PROMPT 中的输出契约约束（含 hold_reason）。
-    response_format = {"type": "json_object"}
+    # 使用 registry 中的 portfolio_review agent（risk_officer.md 提示词），强制 JSON 输出
+    from ..analysis.registry import get_agent
 
     try:
-        result_text = await llm_complete_with_system(
-            REVIEW_SYSTEM_PROMPT,
-            json.dumps(input_data, ensure_ascii=False),
-            response_format
+        result = await get_agent("portfolio_review").run_json(
+            json.dumps(input_data, ensure_ascii=False)
         )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM portfolio review failed: {e}")
 
-    return _extract_json(result_text)
+    return result
 
 
 @router.post("/sector-analysis")

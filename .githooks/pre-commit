@@ -1,0 +1,91 @@
+#!/bin/sh
+#
+# pre-commit — 检测将要提交的代码中是否包含明文 API Key / token / secret
+# 如果发现疑似泄露，阻止本次 commit。
+#
+# 跳过检查: SKIP_SECRET_CHECK=1 git commit ...
+#
+
+set -e
+
+if [ "${SKIP_SECRET_CHECK:-}" = "1" ]; then
+    echo "[pre-commit] SKIP_SECRET_CHECK=1, 跳过 secret 扫描"
+    exit 0
+fi
+
+# 收集暂存的文件（增/改/重命名）
+STAGED=$(git diff --cached --name-only --diff-filter=ACM -- '*.py' '*.md' '*.json' '*.yml' '*.yaml' '*.txt' '*.cfg' '*.ini' '*.conf' 'Dockerfile' 2>/dev/null || true)
+
+if [ -z "$STAGED" ]; then
+    exit 0
+fi
+
+HAS_LEAK=0
+
+check_file() {
+    file="$1"
+    # 跳过已知安全的文件
+    case "$file" in
+        .env|backend/.env|.env.example|backend/.env.example|.gitignore|*.sample)
+            return
+            ;;
+        *.md)
+            # .md 文件只检查非文档的（跳过 README, AGENTS 等）
+            case "$file" in
+                README.md|README_EN.md|AGENTS.md|GITHUB_DESCRIPTION.md|api-contracts/*)
+                    return
+                    ;;
+            esac
+            ;;
+    esac
+
+    # 如果文件不存在（可能已删除）跳过
+    [ -f "$file" ] || return
+
+    # 模式1: sk- 开头后跟 20+ 字母数字 (API Keys)
+    PATTERN1='sk-[a-zA-Z0-9]\{20,\}'
+    
+    # 模式2: 赋值语句中疑似 token/secret/password 的字面量
+    PATTERN2='[Aa][Pp][Ii]_[Kk][Ee][Yy]\s*[=:]\s*['\''"][a-zA-Z0-9_\-]\{16,\}['\''"]'
+    PATTERN3='[Tt][Oo][Kk][Ee][Nn]\s*[=:]\s*['\''"][a-zA-Z0-9_\-]\{16,\}['\''"]'
+    PATTERN4='[Ss][Ee][Cc][Rr][Ee][Tt]\s*[=:]\s*['\''"][a-zA-Z0-9_\-]\{16,\}['\''"]'
+    PATTERN5='[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]\s*[=:]\s*['\''"][a-zA-Z0-9_\-]\{16,\}['\''"]'
+
+    # 用 grep 逐文件扫描
+    for pat in "$PATTERN1" "$PATTERN2" "$PATTERN3" "$PATTERN4" "$PATTERN5"; do
+        MATCHES=$(grep -Hin "$pat" "$file" 2>/dev/null || true)
+        if [ -n "$MATCHES" ]; then
+            # 过滤已知占位符
+            CLEAN=1
+            echo "$MATCHES" | while IFS= read -r line; do
+                # 忽略包含占位符的行
+                case "$line" in
+                    *sk-xxx*|*sk-xxxxxxxx*|*your_*|*YOUR_*|*_here*|*REDACTED*|*placeholder*)
+                        continue
+                        ;;
+                esac
+                echo "! [secret-leak] $file: $line"
+                CLEAN=0
+            done
+            if [ "$CLEAN" -eq 0 ]; then
+                HAS_LEAK=1
+            fi
+        fi
+    done
+}
+
+for FILE in $STAGED; do
+    check_file "$FILE"
+done
+
+if [ "$HAS_LEAK" -ne 0 ]; then
+    echo ""
+    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    echo "!  检测到疑似 API Key / Token / Secret 明文泄露              !"
+    echo "!  请移除上述文件中的敏感信息后重试 commit。                  !"
+    echo "!  如需强制提交: SKIP_SECRET_CHECK=1 git commit ...           !"
+    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    exit 1
+fi
+
+exit 0

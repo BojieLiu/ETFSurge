@@ -6,17 +6,35 @@
       <p class="page-description">实时推送重要资讯，按重要程度着色与评星；支持 AI 智能分析对组合的影响</p>
     </header>
 
-    <div class="news-status" aria-live="polite">
-      <span class="status-dot" :class="{ 'status-dot--on': connected }" aria-hidden="true"></span>
-      <span>{{ connected ? '实时推送已连接' : '未连接' }}</span>
+    <div class="news-toolbar">
+      <div class="news-status" aria-live="polite">
+        <span class="status-dot" :class="{ 'status-dot--on': connected }" aria-hidden="true"></span>
+        <span>{{ connected ? '实时推送已连接' : '未连接' }}</span>
+      </div>
+
+      <div class="level-filter" role="group" aria-label="重要性筛选">
+        <span class="filter-label">最低重要性：</span>
+        <button
+          v-for="lvl in [1,2,3,4,5]"
+          :key="lvl"
+          type="button"
+          class="filter-btn"
+          :class="{ active: minLevel === lvl }"
+          @click="minLevel = lvl"
+          :aria-pressed="minLevel === lvl"
+          :title="mapNewsLevel(lvl).label"
+        >
+          {{ mapNewsLevel(lvl).stars }} {{ mapNewsLevel(lvl).label }}
+        </button>
+      </div>
     </div>
 
     <!-- News List -->
     <section class="card news-card">
-      <div v-if="loading && !news.length" class="news-empty">加载中...</div>
+      <div v-if="loading && !filteredNews.length" class="news-empty">加载中...</div>
       <ul v-else class="news-list">
         <li
-          v-for="item in news"
+          v-for="item in filteredNews"
           :key="item.id"
           class="news-item"
           :class="[`news-item--${mapNewsLevel(item.level).color}`, { 'news-item--important': isImportant(item.level) }]"
@@ -74,7 +92,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { newsApi } from '../api'
 import { useNewsWS } from '../composables/useNewsWS'
 import { useToast } from '../stores/toast'
@@ -87,9 +105,9 @@ const store = usePortfolioStore()
 const news = ref([])
 const loading = ref(false)
 const seenIds = ref(new Set())
-const connected = ref(false)
 const impactPanel = ref(null)
 const analyzing = ref(false)
+const minLevel = ref(1) // 1-5, minimum importance level to show
 
 const LEVEL_COLORS = {
   red: '#e5484d',
@@ -101,6 +119,10 @@ const LEVEL_COLORS = {
 function levelColor(level) {
   return LEVEL_COLORS[mapNewsLevel(level).color] || LEVEL_COLORS.gray
 }
+
+const filteredNews = computed(() => {
+  return news.value.filter((it) => (Number(it.level) || 1) >= minLevel.value)
+})
 
 async function loadNews() {
   loading.value = true
@@ -129,12 +151,12 @@ function handleNews(msg) {
 }
 
 const ws = useNewsWS()
+const { connected } = ws
 ws.onNews(handleNews)
 
 onMounted(() => {
   loadNews()
   ws.connect()
-  connected.value = ws.connected.value
 })
 
 async function analyze(item) {
@@ -157,9 +179,16 @@ async function analyze(item) {
 
 <style scoped>
 .news-view { display: flex; flex-direction: column; gap: var(--space-6); }
+.news-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-3); padding: var(--space-3); background: var(--color-surface-secondary); border-radius: var(--radius-lg); border: 1px solid var(--color-border-light); }
 .news-status { display: flex; align-items: center; gap: var(--space-2); color: var(--color-text-secondary); font-size: var(--font-size-sm); }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-text-muted); }
 .status-dot--on { background: #2ecc71; box-shadow: 0 0 0 3px rgba(46, 204, 113, 0.2); }
+.level-filter { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.filter-label { font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.filter-btn { display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; border: 1px solid var(--color-border); background: var(--color-surface-primary); border-radius: var(--radius-md); font-size: var(--font-size-xs); cursor: pointer; transition: all 0.15s ease; white-space: nowrap; }
+.filter-btn:hover { border-color: var(--color-primary); color: var(--color-primary); }
+.filter-btn.active { background: var(--color-primary); border-color: var(--color-primary); color: white; }
+.filter-btn.active:hover { background: var(--color-primary-dark); }
 .news-card { padding: var(--space-4); }
 .news-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-3); }
 .news-empty { color: var(--color-text-muted); padding: var(--space-4); text-align: center; }

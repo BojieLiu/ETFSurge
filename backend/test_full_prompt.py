@@ -97,16 +97,20 @@ user = (
 async def test():
     import asyncio
     import httpx
+    import sys
     import time
 
     API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+    if not API_KEY:
+        print("FATAL: DEEPSEEK_API_KEY not set. Create backend/.env with DEEPSEEK_API_KEY=sk-...")
+        sys.exit(1)
     MODEL = "deepseek-v4-flash"
 
     t0 = time.time()
     async with httpx.AsyncClient(timeout=180.0, trust_env=False) as client:
         resp = await client.post(
             "https://api.deepseek.com/chat/completions",
-            headers={"Authorization": f'Bearer {os.getenv("DEEPSEEK_API_KEY")}', "Content-Type": "application/json"},
+            headers={"Authorization": f'Bearer {API_KEY}', "Content-Type": "application/json"},
             json={
                 "model": "deepseek-v4-flash",
                 "messages": [

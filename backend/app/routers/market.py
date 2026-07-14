@@ -1,6 +1,9 @@
 import asyncio
 
 from fastapi import APIRouter, Query
+from ..core.logging import get_logger
+
+logger = get_logger(__name__)
 from typing import Any
 
 from ..database import async_session
@@ -93,7 +96,7 @@ async def search_stocks(keyword: str = Query("")) -> list[dict[str, Any]]:
             if rows:
                 return [{"symbol": r.symbol, "name": r.name} for r in rows]
     except Exception as e:
-        print(f"[search_stocks] local table failed: {e}")
+        logger.warning(f"[search_stocks] local table failed: {e}")
 
     # 降级：levistock 全量
     full = await asyncio.to_thread(fetch_all_stocks)

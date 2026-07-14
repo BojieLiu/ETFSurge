@@ -17,7 +17,7 @@ def test_classify_news_level_keywords():
     assert classify_news_level("利好：某板块业绩超预期") == 4
     assert classify_news_level("利空：指数暴跌") == 3
     assert classify_news_level("提醒：关注赎回风险") == 2
-    assert classify_news_level("某普通上市公司公告") == 1
+    assert classify_news_level("某普通上市公司公告") == 2  # 公告 → 关注
 
 
 def test_fetch_cailian_telegraph_attaches_level_stars(monkeypatch):

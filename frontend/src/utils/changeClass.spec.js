@@ -63,15 +63,15 @@ describe('core-actions buttons', () => {
     const strategyDesc = strategyBtn.find('.action-desc').text()
 
     // Concise titles (no long explanatory sentence inside the title)
-    expect(designTitle).toBe('AI 组合设计')
-    expect(strategyTitle).toBe('策略检查')
+    expect(designTitle).toBe('智能设计ETF组合方案')
+    expect(strategyTitle).toBe('策略检查分析')
 
     // Helper descriptions remain present and clearly separated
     expect(designDesc.length).toBeGreaterThan(0)
     expect(strategyDesc.length).toBeGreaterThan(0)
 
     // Title must not contain the explanatory sentence (separation enforced)
-    expect(designTitle).not.toContain('ETF')
-    expect(strategyTitle).not.toContain('权重')
+    expect(designTitle).not.toContain('输入资金')
+    expect(strategyTitle).not.toContain('优化')
   })
 })

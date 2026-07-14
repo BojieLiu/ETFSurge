@@ -1,0 +1,62 @@
+<!-- Result Step -->
+        <div v-else-if="designStep === 'result' && designResult?.plans?.length" class="panel-body design-result">
+          <p class="result-hint">共生成 {{ designResult.plans.length }} 个方案，点击卡片查看详情并应用</p>
+
+          <div class="design-plans-grid">
+            <article
+              v-for="pf in designResult.plans"
+              :key="pf.style"
+              class="design-plan-card"
+              @click="selectPlan(pf)"
+            >
+              <div class="plan-header">
+                <span class="plan-style-badge">{{ pf.style_label || pf.style }}</span>
+                <span class="plan-score" v-if="pf.score !== undefined">评分 {{ pf.score }}</span>
+              </div>
+
+              <div class="plan-meta">
+                <span class="plan-meta-item">
+                  <span class="meta-label">预期年化</span>
+                  <span class="meta-value">{{ (pf.expected_return * 100).toFixed(1) }}%</span>
+                </span>
+                <span class="plan-meta-item">
+                  <span class="meta-label">最大回撤</span>
+                  <span class="meta-value">{{ (pf.max_drawdown * 100).toFixed(1) }}%</span>
+                </span>
+                <span class="plan-meta-item">
+                  <span class="meta-label">夏普比率</span>
+                  <span class="meta-value">{{ pf.sharpe_ratio?.toFixed(2) || '—' }}</span>
+                </span>
+              </div>
+
+              <div class="plan-allocation-preview">
+                <span class="alloc-label">配置预览</span>
+                <div class="alloc-bars">
+                  <div
+                    v-for="item in pf.allocations?.slice(0, 5) || []"
+                    :key="item.symbol"
+                    class="alloc-bar"
+                    :style="{ width: (item.target_weight * 100) + '%' }"
+                    :title="`${item.symbol} ${(item.target_weight * 100).toFixed(1)}%`"
+                  ></div>
+                </div>
+              </div>
+
+              <div v-if="pf.risk_warnings" class="plan-risk-warn">
+                ⚠️ {{ pf.risk_warnings }}
+              </div>
+
+              <div class="plan-action">
+                <AppButton
+                  variant="primary"
+                  size="sm"
+                  @click.stop="applyPortfolioDesign(pf)"
+                  :disabled="applyingPlan === pf.style"
+                >
+                  {{ applyingPlan === pf.style ? '应用中...' : '应用此组合' }}
+                </AppButton>
+              </div>
+            </article>
+          </div>
+
+          <div class="panel-footer-actions">

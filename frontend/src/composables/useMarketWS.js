@@ -1,4 +1,5 @@
 import { ref, onUnmounted } from 'vue'
+import logger from '../utils/logger'
 
 const WS_BASE = (() => {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
@@ -20,6 +21,7 @@ export function useMarketWS(handler) {
     try {
       ws = new WebSocket(`${WS_BASE}/portfolio`)
     } catch (e) {
+      logger.error('Market WS 连接创建失败，准备重连:', e)
       scheduleReconnect()
       return
     }
@@ -39,7 +41,9 @@ export function useMarketWS(handler) {
         const msg = JSON.parse(ev.data)
         if (msg.type === 'pong') return
         if (msgHandler) msgHandler(msg)
-      } catch (e) {}
+      } catch (e) {
+        logger.error('Market WS 消息解析失败:', e)
+      }
     }
 
     ws.onclose = () => {
@@ -49,6 +53,7 @@ export function useMarketWS(handler) {
     }
 
     ws.onerror = () => {
+      logger.error('Market WS 发生错误')
       if (ws) ws.close()
     }
   }

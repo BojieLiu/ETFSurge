@@ -4,6 +4,9 @@ from ..fetchers import akshare_fetcher, yfinance_fetcher
 from ..database import async_session
 from .cache_service import cache_get, cache_mget, cache_set
 from . import source_registry
+from ..core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 _SYNC_TIMEOUT = 8
@@ -131,7 +134,7 @@ async def _global_index_defs() -> list[tuple[str, str, str]]:
             if rows:
                 return [(r.symbol, r.name, r.region) for r in rows]
     except Exception as e:
-        print(f"[_global_index_defs] failed, fallback to hardcoded: {e}")
+        logger.warning(f"[_global_index_defs] failed, fallback to hardcoded: {e}")
     return [(s, n, r) for s, n, r in _GLOBAL_INDEX_DEFS]
 
 
@@ -147,7 +150,7 @@ async def get_sectors_local(sector_type: str) -> list[dict[str, Any]]:
             )).scalars().all()
             return [{"sector_code": r.code, "sector_name": r.name} for r in rows]
     except Exception as e:
-        print(f"[get_sectors_local] failed ({sector_type}): {e}")
+        logger.warning(f"[get_sectors_local] failed ({sector_type}): {e}")
         return []
 
 
@@ -182,7 +185,7 @@ async def search_etf(keyword: str) -> list[dict[str, Any]]:
                     for r in rows
                 ]
     except Exception as e:
-        print(f"[search_etf] local table failed, fallback to akshare: {e}", flush=True)
+        logger.warning(f"[search_etf] local table failed, fallback to akshare: {e}")
 
     # 降级：akshare 全量缓存（仅首次/表空时）
     full = await cache_get("etf:list")
@@ -217,7 +220,7 @@ async def get_indices_meta() -> list[dict[str, Any]]:
                 for r in rows
             ]
     except Exception as e:
-        print(f"[get_indices_meta] failed: {e}", flush=True)
+        logger.warning(f"[get_indices_meta] failed: {e}")
         return []
 
 
@@ -251,7 +254,7 @@ async def search_indices(keyword: str) -> list[dict[str, Any]]:
                 for r in rows
             ]
     except Exception as e:
-        print(f"[search_indices] failed: {e}", flush=True)
+        logger.warning(f"[search_indices] failed: {e}")
         return []
 
 

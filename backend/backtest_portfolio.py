@@ -9,7 +9,11 @@ from typing import Any
 import httpx
 
 LLM_API_URL = "https://api.deepseek.com/chat/completions"
+import sys
 API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+if not API_KEY:
+    print("FATAL: DEEPSEEK_API_KEY not set. Create backend/.env with DEEPSEEK_API_KEY=sk-...")
+    sys.exit(1)
 
 # ── Current market data (same as optimizer) ──────────────────────
 

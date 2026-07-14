@@ -1,6 +1,9 @@
 from typing import Any
 
+from ..core.logging import get_logger
 from ..config import settings
+
+logger = get_logger(__name__)
 
 
 def _to_ts_code(symbol: str) -> str:
@@ -22,6 +25,7 @@ def _to_ts_code(symbol: str) -> str:
 def _pro():
     """惰性获取 Tushare pro 客户端;无 token 或导入失败返回 None。"""
     if not settings.tushare_token:
+        logger.warning("[tushare_fetcher] TUSHARE_TOKEN not configured in .env - Tushare data source disabled")
         return None
     try:
         import tushare as ts

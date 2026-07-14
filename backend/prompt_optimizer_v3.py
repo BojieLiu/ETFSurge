@@ -9,6 +9,9 @@ from typing import Any
 # ── Config ──────────────────────────────────────────────────────
 LLM_API_URL = "https://api.deepseek.com/chat/completions"
 API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+if not API_KEY:
+    print("FATAL: DEEPSEEK_API_KEY not set. Create backend/.env with DEEPSEEK_API_KEY=sk-...")
+    sys.exit(1)
 MODEL = "deepseek-v4-flash"
 
 # ── System Prompt (no targets, only principles) ─────────────────
@@ -111,6 +114,9 @@ from typing import Any
 
 LLM_API_URL = "https://api.deepseek.com/chat/completions"
 API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+if not API_KEY:
+    print("FATAL: DEEPSEEK_API_KEY not set. Create backend/.env with DEEPSEEK_API_KEY=sk-...")
+    sys.exit(1)
 
 async def call_llm(system: str, user: str) -> tuple[str, float]:
     t0 = time.time()

@@ -8,6 +8,9 @@ from typing import Any
 # ── Config ──────────────────────────────────────────────────────
 LLM_API_URL = "https://api.deepseek.com/chat/completions"
 API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+if not API_KEY:
+    print("FATAL: DEEPSEEK_API_KEY not set. Create backend/.env with DEEPSEEK_API_KEY=sk-...")
+    sys.exit(1)
 MODEL = "deepseek-v4-flash"
 
 # ── System Prompt (精准约束，目标在后台评估) ─────────────────
@@ -111,6 +114,9 @@ from typing import Any
 
 LLM_API_URL = "https://api.deepseek.com/chat/completions"
 API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+if not API_KEY:
+    print("FATAL: DEEPSEEK_API_KEY not set. Create backend/.env with DEEPSEEK_API_KEY=sk-...")
+    sys.exit(1)
 MODEL = "deepseek-v4-flash"
 
 async def call_llm(system: str, user: str) -> tuple[str, float]:
@@ -289,7 +295,7 @@ async def call_llm(system: str, user: str) -> tuple[str, float]:
     async with httpx.AsyncClient(timeout=90, trust_env=False) as client:
         resp = await client.post(
             "https://api.deepseek.com/chat/completions",
-            headers={"Authorization": f'Bearer {os.getenv("DEEPSEEK_API_KEY")}', "Content-Type": "application/json"},
+            headers={"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"},
             json={"model": "deepseek-v4-flash", "messages": [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": user}], "temperature": 0.3, "max_tokens": 8192},
         )
         resp.raise_for_status()
@@ -534,7 +540,7 @@ async def call_llm(system: str, user: str) -> tuple[str, float]:
     async with httpx.AsyncClient(timeout=90, trust_env=False) as client:
         resp = await client.post(
             "https://api.deepseek.com/chat/completions",
-            headers={"Authorization": f'Bearer {os.getenv("DEEPSEEK_API_KEY")}', "Content-Type": "application/json"},
+            headers={"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"},
             json={"model": "deepseek-v4-flash", "messages": [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": user}], "temperature": 0.3, "max_tokens": 8192},
         )
         resp.raise_for_status()

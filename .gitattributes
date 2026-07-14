@@ -1,0 +1,13 @@
+# Normalize all text files to LF on checkout and in the repo.
+# Prevents the CRLF<->LF churn that previously made `git diff` noisy on Windows.
+* text=auto eol=lf
+
+# Build/config artifacts that must stay untouched
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary

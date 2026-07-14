@@ -1,0 +1,446 @@
+{
+  "design_text": "因数据维度限制（仅提供指数涨跌幅及少量宏观资讯），本次设计三个简化组合，仅供参考。\n\n基于2026-07-14 23:05（北京时间）提供的行情快照与资讯设计。\n\n一、锐意进取组合（进攻型）\n定位：捕捉超跌反弹弹性，承受较大波动\n\n| 序号 | 标的 | 代码 | 权重 | 入选原因 |\n|------|------|------|------|----------|\n| 1 | 科创50ETF | 588000（代码待核实） | 20% | 输入数据显示科创50当日跌幅-2.50%，跌幅最大，弹性充足，未获取资金面数据，基于跌幅与科技属性配置 |\n| 2 | 创业板ETF | 159915（代码待核实） | 20% | 输入数据显示创业板指当日跌幅-2.00%，跌幅居前，超跌后或有修复机会，未获取资金面数据 |\n| 3 | 沪深300ETF | 510300（代码待核实） | 30% | 输入数据显示沪深300当日跌幅-1.00%，相对抗跌，作为核心宽基底仓 |\n| 4 | 上证50ETF | 510050（代码待核实） | 20% | 输入数据显示上证指数跌幅-1.20%，上证50代表大盘蓝筹，稳定性高 |\n| 5 | 黄金ETF | 518880（代码待核实） | 10% | 输入数据显示黄金价格上涨+0.50%，美联储维持利率及降息预期利好，提供避险对冲 |\n\n权重设置逻辑：\n- **超跌弹性层（合计40%）**：科创50+创业板，基于输入数据跌幅最大，博弈短期反弹，未获取资金面数据。\n- **核心宽基层（合计50%）**：沪深300+上证50，基于当日跌幅较小，作为组合稳定器。\n- **避险对冲层（合计10%）**：黄金ETF，基于金价上涨及美联储政策预期。\n\n预期特征：预期年化波动20-25%，最大回撤区间25-30%，偏激进。\n\n二、稳健平衡组合（平衡型）\n定位：攻守兼备，适度防御\n\n| 序号 | 标的 | 代码 | 权重 | 入选原因 |\n|------|------|------|------|----------|\n| 1 | 沪深300ETF | 510300（代码待核实） | 25% | 输入数据显示沪深300当日跌幅-1.00%，核心宽基，流动性好 |\n| 2 | 上证50ETF | 510050（代码待核实） | 20% | 输入数据显示上证指数跌幅-1.20%，大盘蓝筹，防御性较强 |\n| 3 | 科创50ETF | 588000（代码待核实） | 10% | 输入数据显示科创50跌幅-2.50%，少量配置博弹性，未获取资金面数据 |\n| 4 | 创业板ETF | 159915（代码待核实） | 10% | 输入数据显示创业板指跌幅-2.00%，适度参与成长反弹 |\n| 5 | 黄金ETF | 518880（代码待核实） | 20% | 输入数据显示黄金价格+0.50%，美联储降息预期升温，避险需求上升 |\n| 6 | 中证500ETF | 510500（代码待核实） | 15% | 输入数据未提供该指数表现，作为中盘代表性配置，基于沪深300替代逻辑 |\n\n权重设置逻辑：\n- **核心底仓（合计45%）**：沪深300+上证50，基于跌幅较小，稳定性高。\n- **弹性仓位（合计20%）**：科创50+创业板，基于跌幅较大，适度博反弹。\n- **避险仓位（合计20%）**：黄金ETF，基于金价上涨和政策催化。\n- **补充仓位（15%）**：中证500，均衡风格。\n\n预期特征：预期年化波动15-18%，最大回撤区间15-20%，适中。\n\n三、防御堡垒组合（防御型）\n定位：低波动，保本为先\n\n| 序号 | 标的 | 代码 | 权重 | 入选原因 |\n|------|------|------|------|----------|\n| 1 | 黄金ETF | 518880（代码待核实） | 30% | 输入数据显示黄金价格+0.50%，美联储降息预期，避险资产首选 |\n| 2 | 上证50ETF | 510050（代码待核实） | 25% | 输入数据显示上证指数跌幅-1.20%，大盘蓝筹抗跌 |\n| 3 | 沪深300ETF | 510300（代码待核实） | 20% | 输入数据显示沪深300跌幅-1.00%，宽基中跌幅最小，配置价值 |\n| 4 | 货币ETF | 511880（代码待核实） | 15% | 输入数据未提供具体，作为现金替代，保持流动性 |\n| 5 | 中证红利ETF | 515180（代码待核实） | 10% | 输入数据未提供该指数估值，基于高股息属性防御，估值数据待查 |\n\n权重设置逻辑：\n- **避险核心（合计30%）**：黄金ETF，基于金价上涨和宏观利好。\n- **大盘防御（合计45%）**：上证50+沪深300，基于跌幅较小，稳定性强。\n- **流动性缓冲（合计15%）**：货币ETF，低风险。\n- **高股息补充（合计10%）**：中证红利ETF，基于防御属性，未获取数据。\n\n预期特征：预期年化波动10-12%，最大回撤区间8-12%，保守型。\n\n三组合核心差异速览\n| 对比维度 | 进攻型 | 平衡型 | 防御型 |\n|----------|--------|--------|--------|\n| 标的数量 | 5只 | 6只 | 5只 |\n| 权益仓位 | 90% | 80% | 55% |\n| 科技/弹性占比 | 40% | 20% | 0% |\n| 高股息/防御占比 | 0% | 0% | 10% |\n| 现金/流动性 | 10% | 20% | 15% |\n| 预期年化波动 | 20-25% | 15-18% | 10-12% |\n| 核心品种 | 科创50、创业板、沪深300 | 沪深300、黄金、上证50 | 黄金、上证50、货币ETF |\n\n一句话总结：当前市场调整，防御型以黄金和大盘蓝筹为主，进攻型博超跌弹性，平衡型折中。\n\n备注：本方案完全基于输入的市场数据生成，部分缺失数据已在原因中标注，仅供参考，不构成投资建议。",
+  "data_snapshot_time": "2026-07-14 23:05（北京时间）",
+  "market_environment": "A股主要指数全线下挫，上证-1.20%，深成-1.50%，创业板-2.00%，科创50-2.50%；黄金+0.50%；美联储维持利率，市场预期9月降息。市场情绪偏弱，成交量未披露。",
+  "plans": [
+    {
+      "style": "进攻型",
+      "style_label": "进攻型",
+      "portfolio_name": "锐意进取组合",
+      "positioning": "捕捉超跌反弹弹性，承受较大波动",
+      "expected_return": 0.15,
+      "max_drawdown": 0.25,
+      "sharpe_ratio": 0.6,
+      "expected_characteristics": "预期年化波动20-25%，最大回撤区间25-30%",
+      "weight_logic": [
+        {
+          "group": "超跌弹性层",
+          "total_weight_pct": 40,
+          "rationale": "基于输入数据科创50（-2.50%）和创业板（-2.00%）跌幅最大，博弈短期反弹，未获取资金面数据"
+        },
+        {
+          "group": "核心宽基层",
+          "total_weight_pct": 50,
+          "rationale": "基于沪深300（-1.00%）和上证指数（-1.20%）跌幅较小，作为组合稳定器"
+        },
+        {
+          "group": "避险对冲层",
+          "total_weight_pct": 10,
+          "rationale": "基于黄金价格上涨+0.50%及美联储降息预期，提供避险对冲"
+        }
+      ],
+      "allocations": [
+        {
+          "symbol": "588000",
+          "name": "科创50ETF",
+          "asset_class": "equity",
+          "target_weight": 0.2,
+          "selection_rationale": "输入数据显示科创50当日跌幅-2.50%，跌幅最大，弹性充足，未获取资金面数据，基于跌幅与科技属性配置",
+          "weight_rationale": "作为超跌弹性核心，持仓上限20%",
+          "tracked_index": "000688",
+          "key_metrics": {
+            "scale_billion": "待查",
+            "avg_volume_million": "待查",
+            "pe_ttm": "待查",
+            "pb": "待查",
+            "ytd_return": "待查"
+          }
+        },
+        {
+          "symbol": "159915",
+          "name": "创业板ETF",
+          "asset_class": "equity",
+          "target_weight": 0.2,
+          "selection_rationale": "输入数据显示创业板指当日跌幅-2.00%，跌幅居前，超跌后或有修复机会，未获取资金面数据",
+          "weight_rationale": "与科创50并列弹性仓位，上限20%",
+          "tracked_index": "399006",
+          "key_metrics": {
+            "scale_billion": "待查",
+            "avg_volume_million": "待查",
+            "pe_ttm": "待查",
+            "pb": "待查",
+            "ytd_return": "待查"
+          }
+        },
+        {
+          "symbol": "510300",
+          "name": "沪深300ETF",
+          "asset_class": "equity",
+          "target_weight": 0.3,
+          "selection_rationale": "输入数据显示沪深300当日跌幅-1.00%，相对抗跌，作为核心宽基底仓",
+          "weight_rationale": "最大权重品种，提供稳定性",
+          "tracked_index": "000300",
+          "key_metrics": {
+            "scale_billion": "待查",
+            "avg_volume_million": "待查",
+            "pe_ttm": "待查",
+            "pb": "待查",
+            "ytd_return": "待查"
+          }
+        },
+        {
+          "symbol": "510050",
+          "name": "上证50ETF",
+          "asset_class": "equity",
+          "target_weight": 0.2,
+          "selection_rationale": "输入数据显示上证指数跌幅-1.20%，上证50代表大盘蓝筹，稳定性高",
+          "weight_rationale": "与沪深300互补，增强大盘防御",
+          "tracked_index": "000016",
+          "key_metrics": {
+            "scale_billion": "待查",
+            "avg_volume_million": "待查",
+            "pe_ttm": "待查",
+            "pb": "待查",
+            "ytd_return": "待查"
+          }
+        },
+        {
+          "symbol": "518880",
+          "name": "黄金ETF",
+          "asset_class": "commodity",
+          "target_weight": 0.1,
+          "selection_rationale": "输入数据显示黄金价格上涨+0.50%，美联储维持利率及降息预期利好，提供避险对冲",
+          "weight_rationale": "轻度配置，对冲权益风险",
+          "tracked_index": "AU99.99",
+          "key_metrics": {
+            "scale_billion": "待查",
+            "avg_volume_million": "待查",
+            "pe_ttm": null,
+            "pb": null,
+            "ytd_return": "待查"
+          }
+        }
+      ],
+      "market_analysis": {
+        "macro_environment": "美联储维持利率不变，市场预期9月降息，短期市场调整但中期流动性预期宽松",
+        "liquidity_condition": "未获取成交额数据，估计市场缩量调整",
+        "style_preference": "成长+超跌反弹",
+        "sector_opportunity": "科技成长（科创、创业板）",
+        "risk_assessment": "宏观政策稳定，但市场情绪偏弱，反弹高度不确定"
+      },
+      "allocation_rationale": {
+        "asset_class_allocation": "权益90%，商品10%，现金0%",
+        "equity_style_tilt": "大盘蓝筹+超跌成长",
+        "geographic_allocation": "全A股",
+        "sector_allocation": "科技+金融+黄金"
+      },
+      "risk_factors": [
+        "反弹不及预期",
+        "科创50、创业板持续下跌",
+        "黄金价格回调"
+      ],
+      "rebalance_rules": "月度检视，偏离超过5%触发再平衡"
+    },
+    {
+      "style": "平衡型",
+      "style_label": "平衡型",
+      "portfolio_name": "稳健平衡组合",
+      "positioning": "攻守兼备，适度防御",
+      "expected_return": 0.1,
+      "max_drawdown": 0.18,
+      "sharpe_ratio": 0.8,
+      "expected_characteristics": "预期年化波动15-18%，最大回撤区间15-20%",
+      "weight_logic": [
+        {
+          "group": "核心底仓",
+          "total_weight_pct": 45,
+          "rationale": "基于沪深300（-1.00%）和上证指数（-1.20%）跌幅较小，作为稳定器"
+        },
+        {
+          "group": "弹性仓位",
+          "total_weight_pct": 20,
+          "rationale": "基于科创50（-2.50%）和创业板（-2.00%）大幅下跌，适度博反弹"
+        },
+        {
+          "group": "避险仓位",
+          "total_weight_pct": 20,
+          "rationale": "基于黄金价格+0.50%及降息预期，增强防御"
+        },
+        {
+          "group": "补充仓位",
+          "total_weight_pct": 15,
+          "rationale": "中证500作为中盘补充，均衡风格"
+        }
+      ],
+      "allocations": [
+        {
+          "symbol": "510300",
+          "name": "沪深300ETF",
+          "asset_class": "equity",
+          "target_weight": 0.25,
+          "selection_rationale": "输入数据显示沪深300当日跌幅-1.00%，核心宽基，流动性好",
+          "weight_rationale": "最大权重，稳定基石",
+          "tracked_index": "000300",
+          "key_metrics": {
+            "scale_billion": "待查",
+            "avg_volume_million": "待查",
+            "pe_ttm": "待查",
+            "pb": "待查",
+            "ytd_return": "待查"
+          }
+        },
+        {
+          "symbol": "510050",
+          "name": "上证50ETF",
+          "asset_class": "equity",
+          "target_weight": 0.2,
+          "selection_rationale": "输入数据显示上证指数跌幅-1.20%，大盘蓝筹，防御性较强",
+          "weight_rationale": "与沪深300搭配强化防御",
+          "tracked_index": "000016",
+          "key_metrics": {
+            "scale_billion": "待查",
+            "avg_volume_million": "待查",
+            "pe_ttm": "待查",
+            "pb": "待查",
+            "ytd_return": "待查"
+          }
+        },
+        {
+          "symbol": "588000",
+          "name": "科创50ETF",
+          "asset_class": "equity",
+          "target_weight": 0.1,
+          "selection_rationale": "输入数据显示科创50跌幅-2.50%，少量配置博弹性，未获取资金面数据",
+          "weight_rationale": "弹性仓位，控制比重",
+          "tracked_index": "000688",
+          "key_metrics": {
+            "scale_billion": "待查",
+            "avg_volume_million": "待查",
+            "pe_ttm": "待查",
+            "pb": "待查",
+            "ytd_return": "待查"
+          }
+        },
+        {
+          "symbol": "159915",
+          "name": "创业板ETF",
+          "asset_class": "equity",
+          "target_weight": 0.1,
+          "selection_rationale": "输入数据显示创业板指跌幅-2.00%，适度参与成长反弹",
+          "weight_rationale": "弹性仓位，与科创50互补",
+          "tracked_index": "399006",
+          "key_metrics": {
+            "scale_billion": "待查",
+            "avg_volume_million": "待查",
+            "pe_ttm": "待查",
+            "pb": "待查",
+            "ytd_return": "待查"
+          }
+        },
+        {
+          "symbol": "518880",
+          "name": "黄金ETF",
+          "asset_class": "commodity",
+          "target_weight": 0.2,
+          "selection_rationale": "输入数据显示黄金价格+0.50%，美联储降息预期升温，避险需求上升",
+          "weight_rationale": "防御核心，对冲权益风险",
+          "tracked_index": "AU99.99",
+          "key_metrics": {
+            "scale_billion": "待查",
+            "avg_volume_million": "待查",
+            "pe_ttm": null,
+            "pb": null,
+            "ytd_return": "待查"
+          }
+        },
+        {
+          "symbol": "510500",
+          "name": "中证500ETF",
+          "asset_class": "equity",
+          "target_weight": 0.15,
+          "selection_rationale": "输入数据未提供该指数表现，作为中盘代表性配置，基于沪深300替代逻辑",
+          "weight_rationale": "补充中盘风格",
+          "tracked_index": "000905",
+          "key_metrics": {
+            "scale_billion": "待查",
+            "avg_volume_million": "待查",
+            "pe_ttm": "待查",
+            "pb": "待查",
+            "ytd_return": "待查"
+          }
+        }
+      ],
+      "market_analysis": {
+        "macro_environment": "美联储维持利率，降息预期支撑中期流动性",
+        "liquidity_condition": "未获取成交额数据，估计市场缩量",
+        "style_preference": "均衡配置",
+        "sector_opportunity": "大盘蓝筹+黄金避险",
+        "risk_assessment": "市场调整中，但降息预期提供底部支撑"
+      },
+      "allocation_rationale": {
+        "asset_class_allocation": "权益80%，商品20%，现金0%",
+        "equity_style_tilt": "大盘为主，中盘为辅",
+        "geographic_allocation": "全A股",
+        "sector_allocation": "金融+科技+黄金"
+      },
+      "risk_factors": [
+        "科技板块持续下跌",
+        "黄金价格反转",
+        "中证500波动"
+      ],
+      "rebalance_rules": "月度检视，偏离超过5%触发再平衡"
+    },
+    {
+      "style": "防御型",
+      "style_label": "防御型",
+      "portfolio_name": "防御堡垒组合",
+      "positioning": "低波动，保本为先",
+      "expected_return": 0.05,
+      "max_drawdown": 0.1,
+      "sharpe_ratio": 1.0,
+      "expected_characteristics": "预期年化波动10-12%，最大回撤区间8-12%",
+      "weight_logic": [
+        {
+          "group": "避险核心",
+          "total_weight_pct": 30,
+          "rationale": "基于黄金价格+0.50%及降息预期，作为主要避险资产"
+        },
+        {
+          "group": "大盘防御",
+          "total_weight_pct": 45,
+          "rationale": "基于上证50（-1.20%）和沪深300（-1.00%）跌幅较小，稳定性强"
+        },
+        {
+          "group": "流动性缓冲",
+          "total_weight_pct": 15,
+          "rationale": "货币ETF作为现金替代，保持流动性"
+        },
+        {
+          "group": "高股息补充",
+          "total_weight_pct": 10,
+          "rationale": "中证红利ETF基于高股息防御属性，未获取具体数据"
+        }
+      ],
+      "allocations": [
+        {
+          "symbol": "518880",
+          "name": "黄金ETF",
+          "asset_class": "commodity",
+          "target_weight": 0.3,
+          "selection_rationale": "输入数据显示黄金价格+0.50%，美联储降息预期，避险资产首选",
+          "weight_rationale": "最高权重，核心防御",
+          "tracked_index": "AU99.99",
+          "key_metrics": {
+            "scale_billion": "待查",
+            "avg_volume_million": "待查",
+            "pe_ttm": null,
+            "pb": null,
+            "ytd_return": "待查"
+          }
+        },
+        {
+          "symbol": "510050",
+          "name": "上证50ETF",
+          "asset_class": "equity",
+          "target_weight": 0.25,
+          "selection_rationale": "输入数据显示上证指数跌幅-1.20%，大盘蓝筹抗跌",
+          "weight_rationale": "第二大权重，增强防御",
+          "tracked_index": "000016",
+          "key_metrics": {
+            "scale_billion": "待查",
+            "avg_volume_million": "待查",
+            "pe_ttm": "待查",
+            "pb": "待查",
+            "ytd_return": "待查"
+          }
+        },
+        {
+          "symbol": "510300",
+          "name": "沪深300ETF",
+          "asset_class": "equity",
+          "target_weight": 0.2,
+          "selection_rationale": "输入数据显示沪深300跌幅-1.00%，宽基中跌幅最小，配置价值",
+          "weight_rationale": "提供市场整体暴露",
+          "tracked_index": "000300",
+          "key_metrics": {
+            "scale_billion": "待查",
+            "avg_volume_million": "待查",
+            "pe_ttm": "待查",
+            "pb": "待查",
+            "ytd_return": "待查"
+          }
+        },
+        {
+          "symbol": "511880",
+          "name": "货币ETF",
+          "asset_class": "cash",
+          "target_weight": 0.15,
+          "selection_rationale": "输入数据未提供具体，作为现金替代，保持流动性",
+          "weight_rationale": "流动性缓冲",
+          "tracked_index": null,
+          "key_metrics": {
+            "scale_billion": "待查",
+            "avg_volume_million": "待查",
+            "pe_ttm": null,
+            "pb": null,
+            "ytd_return": "待查"
+          }
+        },
+        {
+          "symbol": "515180",
+          "name": "中证红利ETF",
+          "asset_class": "equity",
+          "target_weight": 0.1,
+          "selection_rationale": "输入数据未提供该指数估值，基于高股息属性防御，估值数据待查",
+          "weight_rationale": "轻度配置，增强分红收益",
+          "tracked_index": "000922",
+          "key_metrics": {
+            "scale_billion": "待查",
+            "avg_volume_million": "待查",
+            "pe_ttm": "待查",
+            "pb": "待查",
+            "ytd_return": "待查"
+          }
+        }
+      ],
+      "market_analysis": {
+        "macro_environment": "美联储维持利率，降息预期利好黄金，股市调整",
+        "liquidity_condition": "未获取成交额数据",
+        "style_preference": "低波动+避险",
+        "sector_opportunity": "黄金、大盘蓝筹",
+        "risk_assessment": "市场下行风险可控，但需防范突发利空"
+      },
+      "allocation_rationale": {
+        "asset_class_allocation": "权益55%，商品30%，现金15%",
+        "equity_style_tilt": "大盘价值+高股息",
+        "geographic_allocation": "全A股",
+        "sector_allocation": "金融、能源、红利"
+      },
+      "risk_factors": [
+        "黄金价格下跌",
+        "大盘蓝筹补跌",
+        "高股息板块受利率影响"
+      ],
+      "rebalance_rules": "月度检视，偏离超过5%触发再平衡"
+    }
+  ],
+  "comparison_table": {
+    "进攻型": {
+      "标的数量": "5只",
+      "权益仓位": "90%",
+      "科技/弹性占比": "40%",
+      "高股息/防御占比": "0%",
+      "现金/流动性": "10%",
+      "预期年化波动": "20-25%",
+      "核心品种": "科创50、创业板、沪深300"
+    },
+    "平衡型": {
+      "标的数量": "6只",
+      "权益仓位": "80%",
+      "科技/弹性占比": "20%",
+      "高股息/防御占比": "0%",
+      "现金/流动性": "20%",
+      "预期年化波动": "15-18%",
+      "核心品种": "沪深300、黄金、上证50"
+    },
+    "防御型": {
+      "标的数量": "5只",
+      "权益仓位": "55%",
+      "科技/弹性占比": "0%",
+      "高股息/防御占比": "10%",
+      "现金/流动性": "15%",
+      "预期年化波动": "10-12%",
+      "核心品种": "黄金、上证50、货币ETF"
+    }
+  }
+}

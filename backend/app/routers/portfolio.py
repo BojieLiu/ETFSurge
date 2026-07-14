@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..database import get_db
 from ..models.schemas import (
     PortfolioETFCreate, PortfolioETFUpdate, PortfolioETFResponse,
-    CalculateRequest, StrategyCheckResponse,
+    CalculateRequest, StrategyCheckRequest, StrategyCheckResponse,
 )
 from ..services.portfolio_service import (
     list_etfs, add_etf, update_etf, remove_etf,
@@ -62,8 +62,8 @@ async def daily_pnl(
 
 
 @router.post("/strategy-check", response_model=StrategyCheckResponse)
-async def check_strategy(req: CalculateRequest, db: AsyncSession = Depends(get_db)):
-    return await strategy_check(db, req.total_capital)
+async def check_strategy(req: StrategyCheckRequest, db: AsyncSession = Depends(get_db)):
+    return await strategy_check(db, req.total_capital, req.design_data)
 
 @router.post("/apply-strategy")
 async def apply_strategy(suggestions: list, db: AsyncSession = Depends(get_db)):

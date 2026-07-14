@@ -4,9 +4,9 @@ from typing import Any
 
 from ..models.portfolio import PortfolioETF
 from ..models.schemas import PortfolioETFCreate, PortfolioETFUpdate
-from ..fetchers.akshare_fetcher import fetch_a_stock_realtime, fetch_hk_stock_realtime, fetch_news_headlines
+from ..fetchers.akshare_fetcher import fetch_a_stock_batch, fetch_fund_nav, fetch_hk_stock_realtime, fetch_index_realtime
 from ..fetchers.yfinance_fetcher import fetch_us_etf_realtime
-from ..fetchers.news_fetcher import fetch_macro_news
+from ..fetchers.news_fetcher import fetch_news_headlines, fetch_macro_news
 from ..analysis.indicators import compute_all_indicators
 from ..analysis.signal import generate_signal
 from .market_service import get_history, get_indices, get_commodities
@@ -74,18 +74,22 @@ async def remove_etf(db: AsyncSession, symbol: str) -> bool:
     return True
 
 
-def _build_price_map(etfs: list[PortfolioETF]) -> dict[str, tuple[float, float]]:
-    """批量获取一次行情数据，构建 {symbol: (price, change_pct)} 映射。"""
+def _build_price_map(etfs: list[PortfolioETF | dict]) -> dict[str, tuple[float, float]]:
+    """批量获取一组持仓的实时价格，返回 {symbol: (price, change_pct)} 映射表。"""
     from ..fetchers.akshare_fetcher import (
         fetch_a_stock_batch, fetch_fund_nav, fetch_hk_stock_realtime, fetch_index_realtime,
     )
 
-    a_symbols = [e.symbol for e in etfs if e.asset_type == "A" and e.symbol[:1] in ("1", "5", "6")]
-    hk_symbols = [e.symbol for e in etfs if e.asset_type == "HK"]
-    us_symbols = [e.symbol for e in etfs if e.asset_type == "US"]
-    # 场外联接基金若以场内 ETF 代码作为 tracked_index，则一并按 A 股 ETF 拉取实时行情，
-    # 使场外组合的当日涨跌与对应场内 ETF 保持一致（联接 C 类净值跟随标的 ETF）。
-    tracked_a = [e.tracked_index for e in etfs if e.tracked_index and e.tracked_index[:1] in ("1", "5", "6")]
+    def _get_attr(e, attr, default=None):
+        if isinstance(e, dict):
+            return e.get(attr, default)
+        return getattr(e, attr, default)
+
+    a_symbols = [_get_attr(e, "symbol") for e in etfs if _get_attr(e, "asset_type") == "A" and _get_attr(e, "symbol", "")[:1] in ("1", "5", "6")]
+    hk_symbols = [_get_attr(e, "symbol") for e in etfs if _get_attr(e, "asset_type") == "HK"]
+    us_symbols = [_get_attr(e, "symbol") for e in etfs if _get_attr(e, "asset_type") == "US"]
+    # 离岸/场外 ETF 按 tracked_index 获取实时行情
+    tracked_a = [_get_attr(e, "tracked_index") for e in etfs if _get_attr(e, "tracked_index") and _get_attr(e, "tracked_index", "")[:1] in ("1", "5", "6")]
     a_symbols = a_symbols + tracked_a
     m: dict[str, tuple[float, float]] = {}
 
@@ -116,7 +120,7 @@ def _build_price_map(etfs: list[PortfolioETF]) -> dict[str, tuple[float, float]]
             pass
 
     # Also fetch tracked indices for off-exchange funds
-    tracked = list({e.tracked_index for e in etfs if e.tracked_index and e.tracked_index not in m})
+    tracked = list({_get_attr(e, "tracked_index") for e in etfs if _get_attr(e, "tracked_index") and _get_attr(e, "tracked_index") not in m})
     if tracked:
         try:
             all_idx = fetch_index_realtime()
@@ -125,36 +129,30 @@ def _build_price_map(etfs: list[PortfolioETF]) -> dict[str, tuple[float, float]]
                     m[item["symbol"]] = (item["price"], item["change_pct"])
         except Exception:
             pass
-        # Fallback: compute change_pct from last 2 daily bars for indices still missing
-        from ..fetchers.akshare_fetcher import fetch_index_history
-        missing = [s for s in tracked if s not in m]
-        for sym in missing:
-            try:
-                bars = fetch_index_history(sym, "daily")
-                if bars and len(bars) >= 2:
-                    prev = float(bars[-2].get("收盘", 0) or 0)
-                    curr = float(bars[-1].get("收盘", 0) or 0)
-                    if prev:
-                        m[sym] = (curr, round((curr - prev) / prev * 100, 2))
-            except Exception:
-                pass
+        # Fallback: compute change from NAV if still missing
+        for t in tracked:
+            if t not in m:
+                try:
+                    nav_data = fetch_fund_nav(t)
+                    if nav_data:
+                        # Handle both tuple (price, change_pct) and dict return
+                        if isinstance(nav_data, tuple) and len(nav_data) >= 1:
+                            m[t] = (float(nav_data[0]), float(nav_data[1]) if len(nav_data) > 1 else 0.0)
+                        elif isinstance(nav_data, dict) and nav_data.get("nav") and nav_data.get("nav_date"):
+                            from datetime import datetime, timedelta
+                            nav = float(nav_data["nav"])
+                            nav_date = datetime.strptime(nav_data["nav_date"], "%Y-%m-%d")
+                            if (datetime.now() - nav_date).days <= 3:
+                                m[t] = (nav, 0.0)
+                except Exception:
+                    pass
 
-    # 场外 OTC 联接基金：A股实时行情无法获取其代码，改用基金单位净值(NAV)。
+    # Map tracked_index prices to fund symbols for off-exchange funds
     for e in etfs:
-        if getattr(e, "portfolio_type", None) != "off_exchange":
-            continue
-        if e.symbol in m:
-            continue
-        nav = None
-        try:
-            nav = fetch_fund_nav(e.symbol)
-        except Exception:
-            nav = None
-        if nav:
-            m[e.symbol] = nav
-        elif e.tracked_index and e.tracked_index in m:
-            # 退而求其次：净值跟随跟踪指数的涨跌幅
-            m[e.symbol] = m[e.tracked_index]
+        sym = _get_attr(e, "symbol")
+        ti = _get_attr(e, "tracked_index")
+        if ti and ti in m and sym not in m:
+            m[sym] = m[ti]
 
     return m
 
@@ -206,37 +204,6 @@ async def calculate_allocation(
         "cash_amount": cash_amount,
     }
 
-    price_map = _build_price_map(etfs)
-    allocations = []
-    for e in etfs:
-        target_amount = total_capital * (e.target_weight / weight_sum)
-        price, change_pct = price_map.get(e.symbol, (0, 0))
-        # For off-exchange with tracked index, use tracked_index change
-        if e.portfolio_type == "off_exchange" and e.tracked_index:
-            _, change_pct = price_map.get(e.tracked_index, (0, 0))
-        allocations.append({
-            "symbol": e.symbol,
-            "name": e.name,
-            "short_name": e.short_name or e.name,
-            "asset_type": e.asset_type,
-            "portfolio_type": e.portfolio_type,
-            "target_weight": e.target_weight,
-            "target_amount": round(target_amount, 2),
-            "current_price": price,
-            "change_pct": change_pct,
-            "shares": round(target_amount / price, 2) if price else 0,
-            "tracked_index": e.tracked_index,
-        })
-
-    cash_weight = max(0.0, 1.0 - weight_sum)
-    cash_amount = round(total_capital * cash_weight, 2)
-    return {
-        "total_capital": total_capital,
-        "allocations": allocations,
-        "cash_weight": cash_weight,
-        "cash_amount": cash_amount,
-    }
-
 
 async def calculate_daily_pnl(
     db: AsyncSession | None = None,
@@ -250,75 +217,99 @@ async def calculate_daily_pnl(
     allocation = await calculate_allocation(db, total_capital, portfolio_type, etfs)
     etf_map = {e.symbol: e for e in etfs}
     etf_map = {e.symbol: e for e in etfs}
-    price_map = _build_price_map(etfs)
     pnl_items = []
     total_pnl = 0.0
     total_amount = 0.0
     weighted_change_sum = 0.0
 
-    for item in allocation["allocations"]:
-        symbol = item["symbol"]
-        etf = etf_map.get(symbol)
-        target_amount = item["target_amount"]
-        total_amount += target_amount
-
-        # For off-exchange with tracked index, use index change_pct
-        if etf and etf.portfolio_type == "off_exchange" and etf.tracked_index:
-            _, change_pct = price_map.get(etf.tracked_index, (0, 0))
-        else:
-            _, change_pct = price_map.get(symbol, (0, 0))
-
-        daily_pnl = round(target_amount * change_pct / 100, 2)
-        weighted_change_sum += target_amount * change_pct
+    for a in allocation["allocations"]:
+        e = etf_map.get(a["symbol"])
+        price = a["current_price"]
+        change_pct = a["change_pct"]
+        target_amount = a["target_amount"]
+        daily_pnl = target_amount * change_pct / 100.0
         total_pnl += daily_pnl
-
+        total_amount += target_amount
+        if target_amount:
+            weighted_change_sum += change_pct * target_amount
         pnl_items.append({
-            "symbol": symbol,
-            "name": item["name"],
-            "short_name": item.get("short_name") or item["name"],
-            "asset_type": item["asset_type"],
-            "portfolio_type": item["portfolio_type"],
+            "symbol": a["symbol"],
+            "name": a["name"],
+            "short_name": a["short_name"],
+            "asset_type": a["asset_type"],
+            "portfolio_type": a["portfolio_type"],
             "target_amount": target_amount,
-            "current_price": item["current_price"],
+            "current_price": price,
             "change_pct": change_pct,
-            "daily_pnl": daily_pnl,
-            "tracked_index": etf.tracked_index if etf else None,
+            "daily_pnl": round(daily_pnl, 2),
+            "tracked_index": a.get("tracked_index"),
         })
 
-    weighted_change_pct = round(weighted_change_sum / total_amount, 2) if total_amount else 0
+    weighted_change_pct = (weighted_change_sum / total_amount) if total_amount else 0.0
     return {
         "items": pnl_items,
         "total_pnl": round(total_pnl, 2),
         "total_amount": round(total_amount, 2),
-        "weighted_change_pct": weighted_change_pct,
+        "weighted_change_pct": round(weighted_change_pct, 2),
     }
 
 
-async def strategy_check(db: AsyncSession, total_capital: float) -> dict[str, Any]:
+async def strategy_check(db: AsyncSession, total_capital: float, design_data: dict | None = None) -> dict[str, Any]:
     from ..analysis.llm import generate_strategy_suggestions
-    etfs = await list_etfs(db)
+    
+    # Use design_data if provided, otherwise fall back to DB ETFs
+    use_design = False
+    if design_data and design_data.get("plans"):
+        plan = design_data["plans"][0] if design_data["plans"] else None
+        if plan and plan.get("allocations"):
+            etfs = []
+            for alloc in plan["allocations"]:
+                etfs.append({
+                    "symbol": alloc.get("symbol"),
+                    "name": alloc.get("name", alloc.get("symbol")),
+                    "short_name": alloc.get("short_name", alloc.get("symbol")),
+                    "asset_type": "ETF",
+                    "portfolio_type": "on_exchange",
+                    "target_weight": alloc.get("target_weight", 0),
+                })
+            use_design = True
+        else:
+            etfs = await list_etfs(db)
+    else:
+        etfs = await list_etfs(db)
+    
     if not etfs:
-        return {"summary": "组合为空，请先添加ETF", "suggestions": []}
-
-    price_map = _build_price_map(etfs)
+        return {"summary": "组合为空，请先添加ETF或生成组合方案", "suggestions": []}
+    
+    # Build price map - handle both SQLAlchemy objects and dicts
+    def _get_attr(e, attr, default=None):
+        if isinstance(e, dict):
+            return e.get(attr, default)
+        return getattr(e, attr, default)
+    
+    price_map = await _build_price_map(etfs)
     market_data = []
     indicators = {}
     for e in etfs:
-        price, change_pct = price_map.get(e.symbol, (0, 0))
+        symbol = _get_attr(e, "symbol")
+        price, change_pct = price_map.get(symbol, (0, 0))
         market_data.append({
-            "symbol": e.symbol, "name": e.name, "short_name": e.short_name or e.name,
+            "symbol": symbol,
+            "name": _get_attr(e, "name", symbol),
+            "short_name": _get_attr(e, "short_name", symbol),
             "price": price, "change_pct": change_pct,
-            "asset_type": e.asset_type, "portfolio_type": e.portfolio_type,
-            "target_weight": e.target_weight,
-            "target_amount": round(total_capital * e.target_weight / sum(ee.target_weight for ee in etfs), 2),
+            "asset_type": _get_attr(e, "asset_type", "ETF"),
+            "portfolio_type": _get_attr(e, "portfolio_type", "on_exchange"),
+            "target_weight": _get_attr(e, "target_weight", 0),
+            "target_amount": round(total_capital * _get_attr(e, "target_weight", 0) / sum(_get_attr(ee, "target_weight", 0) for ee in etfs), 2),
         })
         try:
-            hist = await get_history(e.symbol, e.asset_type)
+            hist = await get_history(symbol, _get_attr(e, "asset_type", "ETF"))
             ind = compute_all_indicators(hist)
             sig = generate_signal(ind)
             if ind:
                 ind["signal"] = sig
-                indicators[e.symbol] = ind
+                indicators[symbol] = ind
         except Exception:
             continue
 
@@ -339,6 +330,7 @@ async def strategy_check(db: AsyncSession, total_capital: float) -> dict[str, An
         "raw_llm": str(llm_result),
     }
 
+
 # 应用策略
 async def apply_strategy_suggestions(db: AsyncSession, suggestions: list) -> dict[str, Any]:
     """应用策略建议到持仓"""
@@ -352,35 +344,26 @@ async def apply_strategy_suggestions(db: AsyncSession, suggestions: list) -> dic
 
         applied = []
         for s in suggestions:
-            symbol = s.get("symbol")
             action = s.get("action")
-            weight = s.get("weight")
-            if not symbol or symbol not in etf_dict:
-                applied.append({"symbol": symbol, "action": action, "status": "error", "message": f"ETF {symbol} 不存在"})
-                continue
-            etf = etf_dict[symbol]
-            if action == "adjust_weight" and weight is not None:
-                etf.target_weight = max(0, min(0.5, etf.target_weight + weight))
-                applied.append({"symbol": symbol, "action": action, "status": "success", "message": f"已调整 {symbol} 权重"})
-            elif action == "replace" and weight is not None:
-                etf.target_weight = max(0, min(0.5, weight))
-                applied.append({"symbol": symbol, "action": action, "status": "success", "message": f"已替换 {symbol} 权重"})
-            elif action == "add" and weight is not None:
-                etf.target_weight = max(0, min(0.5, weight))
-                etf.is_active = True
-                applied.append({"symbol": symbol, "action": action, "status": "success", "message": f"已添加 {symbol}"})
-            else:
-                applied.append({"symbol": symbol, "action": action, "status": "error", "message": f"不支持的操作 {action}"})
+            symbol = s.get("symbol")
+            suggested_weight = s.get("suggested_weight", s.get("target_weight", 0))
+            if symbol in etf_dict:
+                e = etf_dict[symbol]
+                if action == "increase" or action == "decrease" or action == "adjust_weight":
+                    e.target_weight = max(0, min(0.5, suggested_weight))
+                    applied.append({"symbol": symbol, "name": e.name, "target_weight": e.target_weight, "portfolio_type": e.portfolio_type, "action": "updated"})
+                elif action == "remove":
+                    e.is_active = False
+                    applied.append({"symbol": symbol, "name": e.name, "portfolio_type": e.portfolio_type, "action": "removed"})
 
         await db.commit()
         updated = await list_etfs(db)
-        return {"symbols": [{"symbol": e.symbol, "name": e.name, "target_weight": e.target_weight} for e in updated], "applied": applied}
+        return {"symbols": [{"symbol": e.symbol, "name": e.name, "target_weight": e.target_weight, "portfolio_type": e.portfolio_type} for e in updated], "applied": applied}
     except Exception as e:
         await db.rollback()
         raise e
 
 
-# 应用组合设计
 async def apply_portfolio_design(db: AsyncSession, design: dict) -> dict[str, Any]:
     """根据组合设计应用持仓"""
     try:

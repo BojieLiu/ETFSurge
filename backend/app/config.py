@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     tushare_token: str = ""
     llm_provider: str = "deepseek"
     llm_model: str = "deepseek-v4-flash"
+    # 日志：级别（DEBUG/INFO/WARNING/ERROR）与可选日志文件路径
+    log_level: str = "INFO"
+    log_file: str = ""
 
     class Config:
         env_file = str(_ENV_FILE)

@@ -4,8 +4,11 @@
 """
 import asyncio
 
+from ..core.logging import get_logger
 from ..fetchers.news_fetcher import fetch_news_headlines
 from ..routers.ws import manager
+
+logger = get_logger(__name__)
 
 _last_titles: set = set()
 
@@ -22,6 +25,7 @@ async def refresh_news_cache() -> None:
     try:
         items = await asyncio.to_thread(fetch_news_headlines)
     except Exception:
+        logger.exception("刷新资讯缓存失败：fetch_news_headlines 异常")
         return
 
     seen: set = set()
@@ -33,9 +37,9 @@ async def refresh_news_cache() -> None:
         # 跳过已广播过的条目
         if title in _last_titles:
             continue
-        if _level_of(it) >= 3:
-            try:
-                await manager.broadcast("news", {"type": "news", "item": it})
-            except Exception:
-                pass
+            if _level_of(it) >= 3:
+                try:
+                    await manager.broadcast("news", {"type": "news", "data": it})
+                except Exception:
+                    logger.exception("资讯广播失败")
     _last_titles = seen

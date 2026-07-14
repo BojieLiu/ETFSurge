@@ -26,6 +26,7 @@ async def init_db():
     async with engine.begin() as conn:
         from .models.portfolio import PortfolioETF
         from .models.search import Instrument, Sector, Index
+        from .models.token_usage import TokenUsageRecord
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_migrate)
 

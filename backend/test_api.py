@@ -5,7 +5,11 @@ import time
 
 async def test():
     LLM_API_URL = "https://api.deepseek.com/chat/completions"
+    import sys
     API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+    if not API_KEY:
+        print("FATAL: DEEPSEEK_API_KEY not set. Create backend/.env with DEEPSEEK_API_KEY=sk-...")
+        sys.exit(1)
     MODEL = "deepseek-v4-flash"
     
     system = "Test system prompt"
@@ -15,7 +19,7 @@ async def test():
     async with httpx.AsyncClient(timeout=120, trust_env=False) as client:
         resp = await client.post(
             "https://api.deepseek.com/chat/completions",
-            headers={"Authorization": f'Bearer {os.getenv("DEEPSEEK_API_KEY")}', "Content-Type": "application/json"},
+            headers={"Authorization": f'Bearer {API_KEY}', "Content-Type": "application/json"},
             json={
                 "model": "deepseek-v4-flash",
                 "messages": [

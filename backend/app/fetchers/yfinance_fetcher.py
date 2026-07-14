@@ -1,3 +1,4 @@
+import os
 from typing import Any
 
 from ..utils.proxy import no_proxy
@@ -5,11 +6,18 @@ from ..utils.proxy import no_proxy
 
 def fetch_us_etf_realtime(symbol: str) -> dict[str, Any] | None:
     try:
-        with no_proxy():
+        proxy = os.environ.get("YFINANCE_PROXY", "")
+        if proxy:
             import yfinance as yf
             ticker = yf.Ticker(symbol)
             info = ticker.info or {}
             fast = ticker.fast_info
+        else:
+            with no_proxy():
+                import yfinance as yf
+                ticker = yf.Ticker(symbol)
+                info = ticker.info or {}
+                fast = ticker.fast_info
         price = getattr(fast, "last_price", None) or info.get("currentPrice") or info.get("regularMarketPrice", 0)
         prev_close = info.get("regularMarketPreviousClose", price)
         change_pct = ((price - prev_close) / prev_close * 100) if prev_close else 0
@@ -29,10 +37,16 @@ def fetch_us_etf_realtime(symbol: str) -> dict[str, Any] | None:
 
 def fetch_history(symbol: str, period: str = "1mo") -> list[dict[str, Any]]:
     try:
-        with no_proxy():
+        proxy = os.environ.get("YFINANCE_PROXY", "")
+        if proxy:
             import yfinance as yf
             ticker = yf.Ticker(symbol)
-            df = ticker.history(period=period)
+            df = ticker.history(period=period, proxy=proxy)
+        else:
+            with no_proxy():
+                import yfinance as yf
+                ticker = yf.Ticker(symbol)
+                df = ticker.history(period=period)
         df = df.reset_index()
         return df.to_dict(orient="records")
     except Exception:
@@ -43,12 +57,20 @@ def fetch_index_realtime(symbol: str) -> dict[str, Any] | None:
     """获取全球指数(港股/美股/日经/韩国)实时点位与涨跌幅。
 
     优先使用近期历史 K 线计算(比 ticker.info 对指数更可靠)，失败返回 None。
+    如需代理，设置环境变量 YFINANCE_PROXY（如 http://127.0.0.1:7890）。
     """
     try:
-        with no_proxy():
+        proxy = os.environ.get("YFINANCE_PROXY", "")
+        if proxy:
+            # 使用代理时不走 no_proxy
             import yfinance as yf
             ticker = yf.Ticker(symbol)
-            df = ticker.history(period="5d")
+            df = ticker.history(period="5d", proxy=proxy)
+        else:
+            with no_proxy():
+                import yfinance as yf
+                ticker = yf.Ticker(symbol)
+                df = ticker.history(period="5d")
         if df is None or len(df) == 0:
             return None
         closes = df["Close"].dropna()

@@ -1,4 +1,5 @@
 import { ref, onUnmounted } from 'vue'
+import logger from '../utils/logger'
 
 const WS_BASE = (() => {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
@@ -23,6 +24,7 @@ export function useNewsWS(handler) {
     try {
       ws = new WebSocket(`${WS_BASE}/news`)
     } catch (e) {
+      logger.error('News WS 连接创建失败，准备重连:', e)
       scheduleReconnect()
       return
     }
@@ -42,7 +44,9 @@ export function useNewsWS(handler) {
         const msg = JSON.parse(ev.data)
         if (msg.type === 'pong') return
         if (msgHandler) msgHandler(msg)
-      } catch (e) {}
+      } catch (e) {
+        logger.error('News WS 消息解析失败:', e)
+      }
     }
 
     ws.onclose = () => {
@@ -52,6 +56,7 @@ export function useNewsWS(handler) {
     }
 
     ws.onerror = () => {
+      logger.error('News WS 发生错误')
       if (ws) ws.close()
     }
   }
