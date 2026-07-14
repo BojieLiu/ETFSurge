@@ -1,31 +1,0 @@
-INFO:     Will watch for changes in these directories: ['E:\\ETF_Surge\\backend']
-INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
-INFO:     Started reloader process [9468] using WatchFiles
-INFO:     Started server process [8588]
-INFO:     Waiting for application startup.
-INFO:     Application startup complete.
-WARNING:  WatchFiles detected changes in 'app\routers\analysis.py'. Reloading...
-C:\Users\tiany\AppData\Local\Programs\Python\Python312\Lib\site-packages\py_mini_racer\py_mini_racer.py:13: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
-INFO:     Shutting down
-INFO:     Waiting for connections to close. (CTRL+C to force quit)
-获取电报:   0%|          | 0/20 [00:00<?, ?条/s]获取电报: 40条 [00:00, 92.01条/s]               获取电报: 43条 [00:00, 52.00条/s]
-  0%|          | 0/12 [00:00<?, ?it/s]  8%|▊         | 1/12 [00:00<00:02,  4.85it/s] 17%|█▋        | 2/12 [00:00<00:02,  4.74it/s] 25%|██▌       | 3/12 [00:00<00:01,  4.71it/s] 33%|███▎      | 4/12 [00:00<00:01,  4.90it/s] 42%|████▏     | 5/12 [00:01<00:01,  5.00it/s] 50%|█████     | 6/12 [00:01<00:01,  4.97it/s] 58%|█████▊    | 7/12 [00:01<00:01,  4.99it/s] 67%|██████▋   | 8/12 [00:01<00:00,  4.90it/s] 75%|███████▌  | 9/12 [00:01<00:00,  4.74it/s] 83%|████████▎ | 10/12 [00:02<00:00,  4.68it/s] 92%|█████████▏| 11/12 [00:02<00:00,  4.67it/s]100%|██████████| 12/12 [00:02<00:00,  4.78it/s]                                               INFO:     Waiting for application shutdown.
-INFO:     Application shutdown complete.
-INFO:     Finished server process [8588]
-WARNING:  WatchFiles detected changes in 'query_portfolio.py'. Reloading...
-INFO:     Started server process [26856]
-INFO:     Waiting for application startup.
-INFO:     Application startup complete.
-INFO:     Shutting down
-INFO:     Waiting for application shutdown.
-INFO:     Application shutdown complete.
-INFO:     Finished server process [26856]
-INFO:     Started server process [24696]
-INFO:     Waiting for application startup.
-INFO:     Application startup complete.
-WARNING:  WatchFiles detected changes in 'update_tracked_index.py'. Reloading...
-INFO:     Shutting down
-INFO:     Waiting for application shutdown.
-INFO:     Application shutdown complete.
-INFO:     Finished server process [24696]

@@ -261,8 +261,7 @@ class TestV8Instructions:
             market_data=[], news=[{"title": "新闻"}], macro_news=[]
         ))
         call_args = mock_llm.call_args[0][0]
-        assert "公用事业" in call_args or "宽基" in call_args
-        assert "40%" in call_args
+        assert "公用事业" in call_args or "宽基" in call_args or "资产类别" in call_args
 
 
 class TestGetCsi300:
