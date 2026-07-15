@@ -53,7 +53,140 @@
       </div>
     </section>
 
-    <!-- Section 2: Sector Analysis -->
+    <!-- Section 1.5: Watchlist / 自选列表 -->
+    <section class="section-card">
+      <div class="section-header">
+        <h2 class="section-title">
+          <span class="section-icon" aria-hidden="true">⭐</span>
+          自选/关注列表
+        </h2>
+        <p class="section-desc">快速查看自选标的的实时行情，支持添加/移除/备注</p>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title">
+            <span class="card-title-icon" aria-hidden="true">📋</span>
+            自选标的
+          </h3>
+          <div class="card-actions">
+            <AppButton variant="ghost" size="sm" @click="showAddWatchlist = true">
+              <span class="btn-icon" aria-hidden="true">➕</span>
+              添加自选
+            </AppButton>
+          </div>
+        </div>
+
+        <div class="card-body">
+          <!-- Add Watchlist Modal -->
+          <div v-if="showAddWatchlist" class="modal-overlay" @click.self="showAddWatchlist = false">
+            <div class="modal-dialog">
+              <div class="modal-header">
+                <h4>添加自选标的</h4>
+                <button class="modal-close" @click="showAddWatchlist = false" aria-label="关闭">×</button>
+              </div>
+              <div class="modal-body">
+                <div class="form-group">
+                  <label class="form-label" for="wl-symbol">标的代码</label>
+                  <AppInput
+                    id="wl-symbol"
+                    v-model="watchlistForm.symbol"
+                    placeholder="如: 510050, 000001"
+                    @keydown.enter="addWatchlist"
+                  />
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="wl-asset-type">资产类型</label>
+                  <AppSelect
+                    id="wl-asset-type"
+                    v-model="watchlistForm.asset_type"
+                    :options="watchlistAssetTypes"
+                    placeholder="选择类型"
+                  />
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="wl-notes">备注 (可选)</label>
+                  <AppInput
+                    id="wl-notes"
+                    v-model="watchlistForm.notes"
+                    placeholder="如: 长期跟踪, 短线关注"
+                    type="textarea"
+                    :rows="2"
+                  />
+                </div>
+              </div>
+              <div class="modal-footer">
+                <AppButton variant="ghost" @click="showAddWatchlist = false">取消</AppButton>
+                <AppButton variant="primary" @click="addWatchlist" :loading="watchlistAdding">{{ watchlistAdding ? '添加中...' : '添加' }}</AppButton>
+              </div>
+            </div>
+          </div>
+
+          <!-- Watchlist Loading/Empty -->
+          <div v-if="watchlistLoading" class="loading-state">
+            <div class="loading-spinner" aria-hidden="true"></div>
+            <p>加载自选列表中...</p>
+          </div>
+
+          <div v-else-if="!watchlist.length" class="empty-state">
+            <div class="empty-icon" aria-hidden="true">⭐</div>
+            <p class="empty-title">暂无自选标的</p>
+            <p class="empty-desc">点击"添加自选"开始关注您感兴趣的标的</p>
+            <AppButton variant="primary" @click="showAddWatchlist = true" class="mt-3">
+              <span class="btn-icon" aria-hidden="true">➕</span>
+              添加第一个自选
+            </AppButton>
+          </div>
+
+          <!-- Watchlist Table -->
+          <div v-else class="watchlist-table-wrapper">
+            <table class="data-table watchlist-table" role="grid">
+              <thead>
+                <tr>
+                  <th scope="col">代码</th>
+                  <th scope="col">名称</th>
+                  <th scope="col">类型</th>
+                  <th scope="col">最新价</th>
+                  <th scope="col">涨跌幅</th>
+                  <th scope="col">成交量</th>
+                  <th scope="col">备注</th>
+                  <th scope="col">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in watchlist" :key="item.id" class="watchlist-row">
+                  <td><code>{{ item.symbol }}</code></td>
+                  <td><strong>{{ item.name }}</strong></td>
+                  <td><span class="type-badge" :class="item.asset_type.toLowerCase()">{{ item.asset_type }}</span></td>
+                  <td v-if="item.realtime" class="price-cell text-mono">
+                    ¥{{ item.realtime.price?.toFixed(2) }}
+                  </td>
+                  <td v-else class="text-muted">—</td>
+                  <td v-if="item.realtime" class="change-cell" :class="getChangeClass(item.realtime.change_pct)">
+                    <span class="change-value">{{ formatChange(item.realtime.change_pct) }}</span>
+                  </td>
+                  <td v-else class="text-muted">—</td>
+                  <td v-if="item.realtime" class="volume-cell text-mono">
+                    {{ formatVolume(item.realtime.volume) }}
+                  </td>
+                  <td v-else class="text-muted">—</td>
+                  <td class="notes-cell">
+                    <span v-if="item.notes" class="notes-text">{{ item.notes }}</span>
+                    <span v-else class="text-muted">—</span>
+                  </td>
+                  <td>
+                    <div class="action-buttons">
+                      <AppButton size="xs" variant="ghost" @click.stop="editWatchlist(item)" title="编辑备注">✏️</AppButton>
+                      <AppButton size="xs" variant="danger" @click.stop="removeWatchlist(item.id)" title="移除">🗑️</AppButton>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
     <section class="section-card">
       <div class="section-header">
         <h2 class="section-title">
@@ -453,6 +586,7 @@ import AppButton from './ui/AppButton.vue'
 import AppInput from './ui/AppInput.vue'
 import AppSelect from './ui/AppSelect.vue'
 import { useLLMStream } from '@/composables/useLLMStream'
+import { useMarketStore } from '@/stores/market'
 
 use([CanvasRenderer, CandlestickChart, BarChart, LineChart, TitleComponent, TooltipComponent, GridComponent, LegendComponent, DataZoomComponent])
 
@@ -533,6 +667,73 @@ const marketError = ref('')
 
 // Streaming hook for LLM
 const { streaming: marketStreaming, fullText: marketStreamText, error: marketStreamError, start: startMarketStream, stop: stopMarketStream } = useLLMStream()
+
+// Watchlist state
+const watchlist = ref([])
+const watchlistLoading = ref(false)
+const showAddWatchlist = ref(false)
+const watchlistForm = ref({
+  symbol: '',
+  asset_type: 'A',
+  notes: '',
+})
+const watchlistAdding = ref(false)
+const watchlistAssetTypes = [
+  { value: 'A', label: 'A股 ETF/股票' },
+  { value: 'HK', label: '港股 ETF/股票' },
+  { value: 'US', label: '美股 ETF/股票' },
+  { value: 'index', label: '指数' },
+]
+
+async function fetchWatchlist() {
+  watchlistLoading.value = true
+  try {
+    const { watchlist: storeWatchlist, fetchWatchlist } = useMarketStore()
+    await storeWatchlist()
+    watchlist.value = storeWatchlist.value
+  } catch (e) {
+    console.error('Failed to fetch watchlist:', e)
+  } finally {
+    watchlistLoading.value = false
+  }
+}
+
+async function addWatchlist() {
+  if (!watchlistForm.value.symbol || watchlistAdding.value) return
+  watchlistAdding.value = true
+  try {
+    const { addWatchlist } = useMarketStore()
+    await addWatchlist(watchlistForm.value.symbol, watchlistForm.value.asset_type, watchlistForm.value.notes)
+    showAddWatchlist.value = false
+    watchlistForm.value = { symbol: '', asset_type: 'A', notes: '' }
+    await fetchWatchlist()
+  } catch (e) {
+    console.error('Add watchlist failed:', e)
+  } finally {
+    watchlistAdding.value = false
+  }
+}
+
+async function removeWatchlist(id) {
+  if (!confirm('确定要移除该自选吗？')) return
+  try {
+    const { removeWatchlist } = useMarketStore()
+    await removeWatchlist(id)
+    await fetchWatchlist()
+  } catch (e) {
+    console.error('Remove watchlist failed:', e)
+  }
+}
+
+async function editWatchlist(item) {
+  // For now, just show a prompt to edit notes
+  const newNotes = prompt('编辑备注:', item.notes || '')
+  if (newNotes !== null && newNotes !== item.notes) {
+    const { updateWatchlist } = useMarketStore()
+    updateWatchlist(item.id, { notes: newNotes })
+    await fetchWatchlist()
+  }
+}
 
 async function generateMarketReport() {
   marketLoading.value = true
@@ -1162,6 +1363,9 @@ async function analyzeIndex() {
 onMounted(() => {
   onSectorTypeChange()
   loadIndexMeta()
+  // Fetch watchlist
+  const marketStore = useMarketStore()
+  marketStore.fetchWatchlist()
 })
 
 </script>
