@@ -1,15 +1,16 @@
+import numpy as np
+import pandas as pd
+
+
 def compute_ma(close, window: int):
-    import pandas as pd
     return close.rolling(window=window).mean()
 
 
 def compute_ema(close, window: int):
-    import pandas as pd
     return close.ewm(span=window, adjust=False).mean()
 
 
 def compute_macd(close, fast=12, slow=26, signal=9) -> dict:
-    import pandas as pd
     ema_fast = compute_ema(close, fast)
     ema_slow = compute_ema(close, slow)
     dif = ema_fast - ema_slow
@@ -24,8 +25,8 @@ def compute_macd(close, fast=12, slow=26, signal=9) -> dict:
 
 
 def compute_rsi(close, window=14) -> float:
-    import numpy as np
-    import pandas as pd
+
+
     delta = close.diff()
     gain = delta.where(delta > 0, 0).rolling(window=window).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
@@ -35,8 +36,8 @@ def compute_rsi(close, window=14) -> float:
 
 
 def compute_kdj(high, low, close, window=9) -> dict:
-    import numpy as np
-    import pandas as pd
+
+
     low_min = low.rolling(window=window).min()
     high_max = high.rolling(window=window).max()
     rsv = (close - low_min) / (high_max - low_min).replace(0, np.nan) * 100
@@ -51,7 +52,7 @@ def compute_kdj(high, low, close, window=9) -> dict:
 
 
 def compute_bollinger(close, window=20, num_std=2) -> dict:
-    import pandas as pd
+
     ma = compute_ma(close, window)
     std = close.rolling(window=window).std()
     upper = ma + num_std * std
@@ -77,7 +78,7 @@ def _resolve_col(data, aliases):
 
 
 def compute_all_indicators(df: list[dict]) -> dict:
-    import pandas as pd
+
     if not df:
         return {}
     data = pd.DataFrame(df)
@@ -102,13 +103,13 @@ def compute_all_indicators(df: list[dict]) -> dict:
 
 
 def _to_list(s):
-    import pandas as pd
+
     return [None if pd.isna(v) else float(v) for v in s]
 
 
 def compute_chart_data(df: list[dict]) -> dict:
     """返回 K 线图所需全部数据（含指标序列）。"""
-    import pandas as pd
+
     if not df:
         return {
             "dates": [], "opens": [], "highs": [], "lows": [], "closes": [], "volumes": [],

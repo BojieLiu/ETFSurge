@@ -37,9 +37,9 @@ async def refresh_news_cache() -> None:
         # 跳过已广播过的条目
         if title in _last_titles:
             continue
-            if _level_of(it) >= 3:
-                try:
-                    await manager.broadcast("news", {"type": "news", "data": it})
-                except Exception:
-                    logger.exception("资讯广播失败")
+        if _level_of(it) >= 3:
+            try:
+                await manager.broadcast("news", {"type": "news", "data": it})
+            except Exception:
+                logger.exception("资讯广播失败")
     _last_titles = seen

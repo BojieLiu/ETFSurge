@@ -8,21 +8,25 @@ router = APIRouter()
 class ConnectionManager:
     def __init__(self):
         self.active_connections: dict[str, list[WebSocket]] = {}
+        self._lock = asyncio.Lock()
 
     async def connect(self, websocket: WebSocket, channel: str = "market"):
         await websocket.accept()
-        if channel not in self.active_connections:
-            self.active_connections[channel] = []
-        self.active_connections[channel].append(websocket)
+        async with self._lock:
+            self.active_connections.setdefault(channel, []).append(websocket)
 
-    def disconnect(self, websocket: WebSocket, channel: str = "market"):
-        if channel in self.active_connections:
-            self.active_connections[channel].remove(websocket)
+    async def disconnect(self, websocket: WebSocket, channel: str = "market"):
+        async with self._lock:
+            try:
+                self.active_connections.get(channel, []).remove(websocket)
+            except ValueError:
+                pass
 
     async def broadcast(self, channel: str, message: dict):
-        if channel not in self.active_connections:
-            return
-        for conn in self.active_connections[channel]:
+        # 锁内快照，锁外逐个发送以避免持有锁期间 send_text 阻塞
+        async with self._lock:
+            targets = list(self.active_connections.get(channel, []))
+        for conn in targets:
             try:
                 await conn.send_text(json.dumps(message, ensure_ascii=False))
             except Exception:
@@ -38,8 +42,12 @@ async def market_ws(websocket: WebSocket, symbol: str):
     try:
         while True:
             data = await websocket.receive_text()
+            if data.strip().lower() in ("ping", "heartbeat"):
+                await websocket.send_text(json.dumps({"type": "pong"}, ensure_ascii=False))
     except WebSocketDisconnect:
-        manager.disconnect(websocket, f"market:{symbol}")
+        await manager.disconnect(websocket, f"market:{symbol}")
+    except Exception:
+        await manager.disconnect(websocket, f"market:{symbol}")
 
 
 @router.websocket("/api/v1/ws/news")
@@ -47,9 +55,13 @@ async def news_ws(websocket: WebSocket):
     await manager.connect(websocket, "news")
     try:
         while True:
-            await websocket.receive_text()
+            data = await websocket.receive_text()
+            if data.strip().lower() in ("ping", "heartbeat"):
+                await websocket.send_text(json.dumps({"type": "pong"}, ensure_ascii=False))
     except WebSocketDisconnect:
-        manager.disconnect(websocket, "news")
+        await manager.disconnect(websocket, "news")
+    except Exception:
+        await manager.disconnect(websocket, "news")
 
 
 @router.websocket("/api/v1/ws/portfolio")
@@ -62,6 +74,6 @@ async def portfolio_ws(websocket: WebSocket):
             if data.strip().lower() in ("ping", "heartbeat"):
                 await websocket.send_text(json.dumps({"type": "pong"}, ensure_ascii=False))
     except WebSocketDisconnect:
-        manager.disconnect(websocket, "portfolio")
+        await manager.disconnect(websocket, "portfolio")
     except Exception:
-        manager.disconnect(websocket, "portfolio")
+        await manager.disconnect(websocket, "portfolio")

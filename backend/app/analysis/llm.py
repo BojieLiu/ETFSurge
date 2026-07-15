@@ -24,13 +24,7 @@ def load_prompt(name: str) -> str:
 # System prompts are loaded from markdown files (prompts/v1/*.md)
 SYSTEM_PROMPT = load_prompt("general_analyst.md")
 
-# REVIEW_SYSTEM_PROMPT and NEWS_IMPACT_SYSTEM_PROMPT are loaded further below.
-
-# 组合检视/再平衡专用系统提示词（动态风控官模式）
-REVIEW_SYSTEM_PROMPT = load_prompt("risk_officer.md")
-
-# 组合设计专用系统提示词（Hybrid 输出：Markdown 报告 + 结构化 JSON）
-PORTFOLIO_DESIGN_SYSTEM_PROMPT = load_prompt("portfolio_design.md")
+# System prompts are loaded per-agent via AgentRuntime (registry.py).
 
 async def _check_key():
     if not settings.deepseek_api_key:
@@ -423,67 +417,19 @@ async def generate_portfolio_design(
 ---
 请基于以上输入的实时数据，设计进攻、平衡、防御三档ETF组合方案。
 """
-    # Call LLM with dedicated system prompt, forcing JSON output
     try:
-        response = await get_agent("portfolio_design").run(prompt)
+        result = await get_agent("portfolio_design").run_json(prompt)
     except Exception as e:
         logger.warning("LLM call failed: %s", e)
         return _fallback_portfolio_plans(capital, f"LLM 调用失败: {e}")
 
-    if not response or not response.strip():
-        return _fallback_portfolio_plans(capital, "LLM 返回为空")
+    if not result or not result.get("plans"):
+        return _fallback_portfolio_plans(capital, "LLM 返回格式异常")
 
-    # Try direct JSON parse
-    try:
-        import json as _json
-        parsed = _json.loads(response)
-        if parsed and parsed.get("plans"):
-            # Ensure new fields exist
-            if "design_text" not in parsed:
-                parsed["design_text"] = "（LLM 未生成完整报告文本）"
-            if "comparison_table" not in parsed:
-                parsed["comparison_table"] = {}
-            parsed["data_snapshot_time"] = snapshot_time
-            return parsed
-    except Exception:
-        pass
-
-    # Try to extract JSON from ``` blocks
-    try:
-        cleaned = response.strip()
-        if cleaned.startswith("```"):
-            cleaned = cleaned.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-        import json as _json
-        data = _json.loads(cleaned) if cleaned else {}
-        if data.get("plans"):
-            if "design_text" not in data:
-                data["design_text"] = "（LLM 未生成完整报告文本）"
-            if "comparison_table" not in data:
-                data["comparison_table"] = {}
-            data["data_snapshot_time"] = snapshot_time
-            return data
-    except Exception:
-        pass
-
-    # Last resort: extract JSON from between first { and last }
-    try:
-        start = response.index("{")
-        end = response.rindex("}")
-        inner = response[start:end+1]
-        import json as _json
-        data = _json.loads(inner)
-        if data.get("plans"):
-            if "design_text" not in data:
-                data["design_text"] = "（LLM 未生成完整报告文本）"
-            if "comparison_table" not in data:
-                data["comparison_table"] = {}
-            data["data_snapshot_time"] = snapshot_time
-            return data
-    except Exception:
-        pass
-
-    # Fallback when all parsing fails
-    return _fallback_portfolio_plans(capital, "LLM 返回格式异常")
+    result.setdefault("design_text", "（LLM 未生成完整报告文本）")
+    result.setdefault("comparison_table", {})
+    result["data_snapshot_time"] = snapshot_time
+    return result
 
 
 def _fallback_portfolio_plans(capital: float = 500000, reason: str = "LLM 暂不可用") -> dict[str, Any]:
@@ -570,48 +516,6 @@ def _empty_portfolio_response() -> dict:
 
 
 # 新增：组合检视/再平衡
-async def generate_portfolio_review(
-    portfolio_type: str,
-    last_rebalance_date: str,
-    current_holdings: list[dict],
-    market_snapshot: dict,
-    risk_budget: dict,
-    type_thresholds: dict,
-    meta_context: dict,
-) -> dict[str, Any]:
-    """
-    组合动态检视：根据最新行情判断是否需要调仓
-    
-    Args:
-        portfolio_type: 组合类型（进攻型/防御型/平衡型）
-        last_rebalance_date: 上次调仓日期
-        current_holdings: 当前持仓列表
-        market_snapshot: 最新行情快照
-        risk_budget: 风控预算/红线
-        type_thresholds: 三型差异化阈值
-        meta_context: 元信息（benchmark、days_since_rebalance 等）
-    
-    Returns:
-        标准化决策 JSON（REBALANCE/HOLD + 详细方案）
-    """
-    # 构建输入 JSON
-    input_data = {
-        "portfolio_type": portfolio_type,
-        "last_rebalance_date": last_rebalance_date,
-        "current_portfolio_holdings_example": current_holdings,
-        "new_market_snapshot_example": market_snapshot,
-        "risk_budget": risk_budget,
-        "type_thresholds": type_thresholds,
-        "meta_context": meta_context,
-    }
-    
-    prompt = json.dumps(input_data, ensure_ascii=False)
-
-    # 使用组合检视专用系统提示词（risk_officer.md），强制 JSON 输出
-    response = await get_agent("portfolio_review").run(prompt)
-    return json.loads(response)
-
-
 async def generate_strategy_suggestions(
     market_data: list[dict],
     indicators: dict[str, Any],

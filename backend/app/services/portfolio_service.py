@@ -75,6 +75,13 @@ async def remove_etf(db: AsyncSession, symbol: str) -> bool:
     return True
 
 
+async def build_price_map(etfs: list[PortfolioETF | dict]) -> dict[str, tuple[float, float]]:
+    """公开包装器，将同步 _build_price_map 放入线程池执行。"""
+    import asyncio
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _build_price_map, etfs)
+
+
 def _build_price_map(etfs: list[PortfolioETF | dict]) -> dict[str, tuple[float, float]]:
     """批量获取一组持仓的实时价格，返回 {symbol: (price, change_pct)} 映射表。"""
     from ..fetchers.china_market import (

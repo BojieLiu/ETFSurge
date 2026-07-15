@@ -15,23 +15,38 @@ class MemoryCache:
         self._lock = asyncio.Lock()
 
     async def get(self, key: str) -> Optional[Any]:
+        now = time.time()
         async with self._lock:
             item = self._store.get(key)
-        if not item:
-            return None
-        ts, value = item
-        if ts < time.time():
-            async with self._lock:
+            if not item:
+                return None
+            ts, value = item
+            if ts < now:
                 self._store.pop(key, None)
-            return None
-        return value
+                return None
+            return value
 
     async def set(self, key: str, value: Any, ttl: int) -> None:
         async with self._lock:
             self._store[key] = (time.time() + ttl, value)
 
     async def mget(self, keys: list[str]) -> list[Optional[Any]]:
-        return [await self.get(k) for k in keys]
+        """批量读取，单次锁获取，避免 mget 退化成 N 次独立 lock acquire。"""
+        now = time.time()
+        async with self._lock:
+            results = []
+            for k in keys:
+                item = self._store.get(k)
+                if not item:
+                    results.append(None)
+                else:
+                    ts, value = item
+                    if ts < now:
+                        self._store.pop(k, None)
+                        results.append(None)
+                    else:
+                        results.append(value)
+            return results
 
     async def mset(self, mapping: dict[str, Any], ttl: int) -> None:
         async with self._lock:

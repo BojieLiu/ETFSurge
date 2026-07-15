@@ -5,9 +5,28 @@
 """
 
 import asyncio
+import concurrent.futures
 
 # 默认超时阈值（秒），大部分同步数据源调用应在该时间内完成
 DEFAULT_SYNC_TIMEOUT = 8
+
+# 全局共享线程池，替代各 fetcher 中频繁创建/销毁的 ThreadPoolExecutor
+_shared_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+
+
+def run_in_thread(fn, *args, timeout: int = DEFAULT_SYNC_TIMEOUT):
+    """同步函数版：在全局共享线程池中执行 fn，带超时保护。
+
+    供同步 fetcher 函数内部使用（替代在每个函数内新建 ThreadPoolExecutor）。
+    用法: run_in_thread(fn) 或 run_in_thread(fn, arg1, arg2, timeout=5)
+    """
+    try:
+        future = _shared_executor.submit(fn, *args)
+        return future.result(timeout=timeout)
+    except concurrent.futures.TimeoutError:
+        return None
+    except Exception:
+        return None
 
 
 async def run_sync(call, *args, timeout: int = DEFAULT_SYNC_TIMEOUT):

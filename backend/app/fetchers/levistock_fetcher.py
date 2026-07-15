@@ -7,6 +7,7 @@ from typing import Any
 import levistock as lv
 
 from ..core.ttl import CACHE_TTL
+from ..core.async_utils import run_in_thread
 from ..services.cache_service import sync_memory_cache
 
 _TIMEOUT = 8
@@ -14,13 +15,7 @@ _TIMEOUT = 8
 
 def _safe(fn, timeout: int = _TIMEOUT):
     """在线程中执行 fn,超时/异常均返回 None,绝不挂起。"""
-    import concurrent.futures as cf
-
-    try:
-        with cf.ThreadPoolExecutor(max_workers=1) as ex:
-            return ex.submit(fn).result(timeout=timeout)
-    except Exception:
-        return None
+    return run_in_thread(fn, timeout=timeout)
 
 
 def _cached(key: str, producer, ttl_key: str = "news_telegraph"):

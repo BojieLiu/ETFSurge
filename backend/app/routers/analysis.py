@@ -12,13 +12,12 @@ from typing import Any
 from ..analysis.llm import (
     generate_market_report, generate_advice, analyze_news, analyze_news_impact,
     generate_portfolio_design, generate_sector_analysis, generate_symbol_analysis,
-    generate_portfolio_review,
 )
 from ..services.market_service import (
     get_all_realtime, get_history, get_indices, get_commodities,
     get_asset_realtime, get_realtime_batch,
 )
-from ..services.portfolio_service import list_etfs, _build_price_map
+from ..services.portfolio_service import list_etfs, build_price_map
 from ..analysis.indicators import compute_all_indicators
 from ..fetchers.news_fetcher import fetch_news_headlines, fetch_macro_news
 from ..fetchers.sector_fetcher import (
@@ -29,25 +28,6 @@ from fastapi import HTTPException
 
 router = APIRouter(prefix="/api/v1/analysis", tags=["analysis"])
 
-
-def _extract_json(text: str):
-    """从 LLM 返回文本中稳健提取 JSON 对象（兼容 ```json 代码块或前后缀文本）。"""
-    if text is None:
-        raise ValueError("empty LLM response")
-    s = text.strip()
-    if s.startswith("```"):
-        # 去掉 ```json ... ``` 围栏
-        s = s.split("```", 2)[1]
-        if s.lstrip().startswith("json"):
-            s = s.lstrip()[4:]
-        s = s.strip()
-        if s.endswith("```"):
-            s = s[:-3].strip()
-    start = s.find("{")
-    end = s.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        s = s[start:end + 1]
-    return json.loads(s)
 
 FETCH_TIMEOUT = 45
 
@@ -194,8 +174,7 @@ async def portfolio_design(req: PortfolioDesignRequest | None = None, db: AsyncS
     try:
         etfs = await list_etfs(db)
         if etfs:
-            loop = asyncio.get_running_loop()
-            pm = await loop.run_in_executor(None, _build_price_map, etfs)
+            pm = await build_price_map(etfs)
             for e in etfs:
                 price, change_pct = pm.get(e.symbol, (0, 0))
                 market_data.append({

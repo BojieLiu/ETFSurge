@@ -20,13 +20,8 @@ _TIMEOUT = 10
 
 def _exec(fn, timeout: int = _TIMEOUT):
     """在线程中执行 fn, 超时 / 异常返回 None。"""
-    import concurrent.futures as cf
-
-    try:
-        with cf.ThreadPoolExecutor(max_workers=1) as ex:
-            return ex.submit(fn).result(timeout=timeout)
-    except Exception:
-        return None
+    from ..core.async_utils import run_in_thread
+    return run_in_thread(fn, timeout=timeout)
 
 
 def _cached(key: str, producer, ttl_key: str = "sector_industry"):

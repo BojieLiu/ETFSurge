@@ -6,6 +6,8 @@
 这样多个免费数据源可以互相补充、自动隔离不稳定的源,提升整体稳定性。
 """
 
+import threading
+import time
 from typing import Any, Callable, Optional
 
 
@@ -15,21 +17,23 @@ class SourceHealth:
         self.failure_threshold = failure_threshold
         self._failures = 0
         self._cool_until = 0.0
+        self._lock = threading.Lock()
 
     def available(self, now: float) -> bool:
-        if now >= self._cool_until:
-            return True
-        return False
+        with self._lock:
+            return now >= self._cool_until
 
     def record_success(self) -> None:
-        self._failures = 0
-        self._cool_until = 0.0
+        with self._lock:
+            self._failures = 0
+            self._cool_until = 0.0
 
     def record_failure(self, now: float) -> None:
-        self._failures += 1
-        if self._failures >= self.failure_threshold:
-            self._cool_until = now + self.cooldown
-            self._failures = 0
+        with self._lock:
+            self._failures += 1
+            if self._failures >= self.failure_threshold:
+                self._cool_until = now + self.cooldown
+                self._failures = 0
 
 
 class SourceRegistry:
@@ -47,8 +51,6 @@ class SourceRegistry:
         返回第一个成功(非 None 且非异常)的结果;全部失败返回 None。
         熔断中的源会被直接跳过。
         """
-        import time
-
         now = now if now is not None else time.time()
         last_exc: Optional[BaseException] = None
         for name, fn in providers:

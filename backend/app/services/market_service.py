@@ -6,11 +6,14 @@
 
 from typing import Any
 
+from sqlalchemy import select
+
 from ..database import async_session
 from ..core.async_utils import run_sync
 from ..core.market_calendar import is_trading_time
 from ..core.ttl import CACHE_TTL
 from ..services.source_registry import registry
+from ..models.search import Index
 from .cache_service import cache_get, cache_mget, cache_set
 from ..core.logging import get_logger
 
@@ -140,9 +143,6 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
 
 async def _global_index_defs() -> list[tuple[str, str, str]]:
     """从 indices 表读取，表为空降级到硬编码。"""
-    from ..models.search import Index
-    from sqlalchemy import select
-
     try:
         async with async_session() as session:
             rows = (

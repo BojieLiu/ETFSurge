@@ -8,7 +8,6 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
-import concurrent.futures as cf
 import feedparser
 from typing import Any
 
@@ -16,17 +15,14 @@ from ..utils.proxy import no_proxy
 from ..utils.decode import decode_df as _decode_df
 from ..services.cache_service import sync_memory_cache
 from ..core.ttl import CACHE_TTL
+from ..core.async_utils import run_in_thread
 from .levistock_fetcher import classify_news_level, fetch_cailian_telegraph
 
 _SRC_TIMEOUT = 5
 
 
 def _safe(fn, timeout: int = _SRC_TIMEOUT):
-    try:
-        with cf.ThreadPoolExecutor(max_workers=1) as ex:
-            return ex.submit(fn).result(timeout=timeout)
-    except Exception:
-        return None
+    return run_in_thread(fn, timeout=timeout)
 
 
 def _ak(fn) -> list[dict[str, Any]]:
@@ -163,15 +159,29 @@ def _filter_fresh(items: list[dict[str, Any]], max_age_hours: int = 48) -> list[
     return out
 
 
+def _normalize_title(title: str) -> str:
+    """归一化标题用于去重：去空白/常见前缀/标点，忽略大小写。"""
+    import re
+    t = title.strip()
+    # 去除常见前缀
+    t = re.sub(r'^(快讯|最新|速报|播报|早报|晚报|盘前|盘中|盘后)[:：\s]*', '', t)
+    # 统一空格
+    t = re.sub(r'\s+', ' ', t)
+    # 去除尾部标点
+    t = t.rstrip('，。,。！？…:：;；')
+    return t.lower()
+
+
 def _dedupe(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     seen: set[str] = set()
     out: list[dict[str, Any]] = []
     for it in items:
         t = _title_of(it)
-        if t and t in seen:
-            continue
         if t:
-            seen.add(t)
+            norm = _normalize_title(t)
+            if norm in seen:
+                continue
+            seen.add(norm)
         out.append(it)
     return out
 
