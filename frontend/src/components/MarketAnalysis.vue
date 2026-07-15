@@ -452,6 +452,7 @@ import VChart from 'vue-echarts'
 import AppButton from './ui/AppButton.vue'
 import AppInput from './ui/AppInput.vue'
 import AppSelect from './ui/AppSelect.vue'
+import { useLLMStream } from '@/composables/useLLMStream'
 
 use([CanvasRenderer, CandlestickChart, BarChart, LineChart, TitleComponent, TooltipComponent, GridComponent, LegendComponent, DataZoomComponent])
 
@@ -530,21 +531,22 @@ const marketReport = ref('')
 const marketLoading = ref(false)
 const marketError = ref('')
 
+// Streaming hook for LLM
+const { streaming: marketStreaming, fullText: marketStreamText, error: marketStreamError, start: startMarketStream, stop: stopMarketStream } = useLLMStream()
+
 async function generateMarketReport() {
   marketLoading.value = true
   marketReport.value = ''
   marketError.value = ''
   try {
-    const data = await fetchJson('/api/v1/analysis/llm-report', {
-      method: 'POST',
-      body: JSON.stringify({ symbols: null })
+    await startMarketStream('/llm-report/stream', { symbols: null }, (token) => {
+      marketReport.value += token
     })
-    marketReport.value = data.report || ''
-    if (!marketReport.value) marketError.value = '分析返回为空，请稍后重试'
   } catch (e) {
-    marketError.value = '分析失败：' + (e?.message || '网络错误')
+    marketError.value = '生成失败：' + (e?.message || '网络错误')
+  } finally {
+    marketLoading.value = false
   }
-  marketLoading.value = false
 }
 
 // ── Section 2: Sector Analysis ──
@@ -644,26 +646,26 @@ function onSectorKeydown(e) {
   }
 }
 
+const { streaming: sectorStreaming, fullText: sectorStreamText, start: startSectorStream } = useLLMStream()
+
 async function analyzeSector() {
   if (!selectedSectorCode.value) return
   sectorLoading.value = true
   sectorReport.value = ''
   sectorError.value = ''
   try {
-    const data = await fetchJson('/api/v1/analysis/sector-analysis', {
-      method: 'POST',
-      body: JSON.stringify({
-        sector_code: selectedSectorCode.value,
-        sector_type: sectorType.value,
-        sector_name: selectedSectorName.value,
-      }),
+    await startSectorStream('/sector-analysis/stream', {
+      sector_code: selectedSectorCode.value,
+      sector_type: sectorType.value,
+      sector_name: selectedSectorName.value,
+    }, (token) => {
+      sectorReport.value += token
     })
-    sectorReport.value = data.report || ''
-    if (!sectorReport.value) sectorError.value = '分析返回为空，请稍后重试'
   } catch (e) {
     sectorError.value = '分析失败：' + (e?.message || '网络错误')
+  } finally {
+    sectorLoading.value = false
   }
-  sectorLoading.value = false
 }
 
 // ── Section 3: Symbol Analysis ──
@@ -863,26 +865,26 @@ async function fetchFAChart() {
   faLoading.value = false
 }
 
+const { streaming: symbolStreaming, fullText: symbolStreamText, start: startSymbolStream } = useLLMStream()
+
 async function analyzeSymbol() {
   if (!selectedSearchItem.value) return
   symbolLoading.value = true
   symbolReport.value = ''
   symbolError.value = ''
   try {
-    const data = await fetchJson('/api/v1/analysis/symbol-analysis', {
-      method: 'POST',
-      body: JSON.stringify({
-        symbol: selectedSearchItem.value.symbol,
-        name: selectedSearchItem.value.name,
-        asset_type: 'A',
-      }),
+    await startSymbolStream('/symbol-analysis/stream', {
+      symbol: selectedSearchItem.value.symbol,
+      name: selectedSearchItem.value.name,
+      asset_type: 'A',
+    }, (token) => {
+      symbolReport.value += token
     })
-    symbolReport.value = data.report || ''
-    if (!symbolReport.value) symbolError.value = '分析返回为空，请稍后重试'
   } catch (e) {
     symbolError.value = '分析失败：' + (e?.message || '网络错误')
+  } finally {
+    symbolLoading.value = false
   }
-  symbolLoading.value = false
 }
 
 // ── Chart Option ──
@@ -1134,26 +1136,26 @@ function onIndexKeydown(e) {
   }
 }
 
+const { streaming: indexStreaming, fullText: indexStreamText, start: startIndexStream } = useLLMStream()
+
 async function analyzeIndex() {
   if (!selectedIndexCode.value) return
   indexLoading.value = true
   indexReport.value = ''
   indexError.value = ''
   try {
-    const data = await fetchJson('/api/v1/analysis/symbol-analysis', {
-      method: 'POST',
-      body: JSON.stringify({
-        symbol: selectedIndexCode.value,
-        name: selectedIndexName.value,
-        asset_type: 'index',
-      }),
+    await startIndexStream('/symbol-analysis/stream', {
+      symbol: selectedIndexCode.value,
+      name: selectedIndexName.value,
+      asset_type: 'index',
+    }, (token) => {
+      indexReport.value += token
     })
-    indexReport.value = data.report || ''
-    if (!indexReport.value) indexError.value = '分析返回为空，请稍后重试'
   } catch (e) {
     indexError.value = '分析失败：' + (e?.message || '网络错误')
+  } finally {
+    indexLoading.value = false
   }
-  indexLoading.value = false
 }
 
 // Load index meta on mount

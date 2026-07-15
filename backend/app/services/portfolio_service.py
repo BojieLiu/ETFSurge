@@ -201,6 +201,11 @@ async def calculate_allocation(
             except Exception:
                 pass
 
+        # Cost basis fields - use getattr for compatibility with test mocks
+        avg_cost = getattr(e, 'avg_cost', None)
+        shares_held = getattr(e, 'shares_held', None)
+        cost_basis = round(avg_cost * shares_held, 2) if (avg_cost is not None and shares_held is not None) else None
+        
         alloc = {
             "symbol": e.symbol,
             "name": e.name,
@@ -215,6 +220,12 @@ async def calculate_allocation(
             "tracked_index": e.tracked_index,
             "is_estimated": is_estimated,
             "estimate_source": estimate_source,
+            # Cost basis fields
+            "avg_cost": avg_cost,
+            "shares_held": shares_held,
+            "cost_basis": cost_basis,
+            "first_buy_date": getattr(e, 'first_buy_date', None).isoformat() if getattr(e, 'first_buy_date', None) else None,
+            "last_trade_date": getattr(e, 'last_trade_date', None).isoformat() if getattr(e, 'last_trade_date', None) else None,
             **fundamentals,
         }
         allocations.append(alloc)
@@ -428,3 +439,336 @@ async def apply_portfolio_design(db: AsyncSession, design: dict) -> dict[str, An
     except Exception as e:
         await db.rollback()
         raise e
+
+
+# ── Cumulative P&L History / 累计盈亏历史 ──────────────────────────
+
+async def calculate_cumulative_pnl(
+    db: AsyncSession,
+    portfolio_type: str | None = None,
+    period: str = "all",
+) -> dict[str, Any]:
+    """
+    Calculate cumulative P&L based on cost basis and shares held.
+    """
+    etfs = await list_etfs(db, portfolio_type)
+    if not etfs:
+        return {"summary": {}, "holdings": [], "daily_series": []}
+    
+    price_map = await _build_price_map(etfs)
+    
+    holdings_pnl = []
+    total_cost_basis = 0.0
+    total_market_value = 0.0
+    
+    for e in etfs:
+        price, _ = price_map.get(e.symbol, (0.0, 0.0))
+        
+        # Only calculate if we have cost basis data
+        if e.avg_cost is not None and e.shares_held is not None and e.shares_held > 0:
+            cost_basis = e.cost_basis or (e.avg_cost * e.shares_held)
+            market_value = e.shares_held * price
+            cumulative_pnl = market_value - cost_basis
+            cumulative_pnl_pct = (cumulative_pnl / cost_basis * 100) if cost_basis > 0 else 0.0
+            
+            total_cost_basis += cost_basis
+            total_market_value += market_value
+            
+            holdings_pnl.append({
+                "symbol": e.symbol,
+                "name": e.name,
+                "short_name": e.short_name,
+                "asset_type": e.asset_type,
+                "portfolio_type": e.portfolio_type,
+                "shares_held": e.shares_held,
+                "avg_cost": e.avg_cost,
+                "cost_basis": round(cost_basis, 2),
+                "current_price": price,
+                "market_value": round(market_value, 2),
+                "cumulative_pnl": round(cumulative_pnl, 2),
+                "cumulative_pnl_pct": round(cumulative_pnl_pct, 2),
+                "first_buy_date": e.first_buy_date.isoformat() if e.first_buy_date else None,
+                "last_trade_date": e.last_trade_date.isoformat() if e.last_trade_date else None,
+            })
+    
+    total_cumulative_pnl = total_market_value - total_cost_basis
+    total_cumulative_pnl_pct = (total_cumulative_pnl / total_cost_basis * 100) if total_cost_basis > 0 else 0.0
+    
+    # TODO: For daily_series, we would need historical price data
+    # For now, return empty array - can be enhanced with historical price fetching
+    daily_series = []
+    
+    return {
+        "summary": {
+            "total_cost_basis": round(total_cost_basis, 2),
+            "total_market_value": round(total_market_value, 2),
+            "total_cumulative_pnl": round(total_cumulative_pnl, 2),
+            "total_cumulative_pnl_pct": round(total_cumulative_pnl_pct, 2),
+            "annualized_return": None,  # Requires historical data
+            "max_drawdown": None,        # Requires historical data
+            "sharpe_ratio": None,        # Requires historical data
+        },
+        "holdings": holdings_pnl,
+        "daily_series": daily_series,
+    }
+
+
+# ── Portfolio Export / Import / 组合导出导入 ──────────────────────────
+
+async def export_portfolio(
+    db: AsyncSession,
+    portfolio_type: str | None = None,
+    format: str = "csv",
+) -> str | list[dict]:
+    """
+    Export portfolio holdings to CSV or JSON format.
+    """
+    etfs = await list_etfs(db, portfolio_type)
+    
+    if format == "json":
+        return [
+            {
+                "symbol": e.symbol,
+                "name": e.name,
+                "short_name": e.short_name,
+                "asset_type": e.asset_type,
+                "portfolio_type": e.portfolio_type,
+                "target_weight": e.target_weight,
+                "tracked_index": e.tracked_index,
+                "avg_cost": e.avg_cost,
+                "shares_held": e.shares_held,
+                "cost_basis": e.cost_basis,
+                "first_buy_date": e.first_buy_date.isoformat() if e.first_buy_date else None,
+                "last_trade_date": e.last_trade_date.isoformat() if e.last_trade_date else None,
+            }
+            for e in etfs
+        ]
+    
+    # CSV format
+    import csv
+    import io
+    output = io.StringIO()
+    writer = csv.writer(output)
+    
+    # Header
+    writer.writerow([
+        "symbol", "name", "short_name", "asset_type", "portfolio_type",
+        "target_weight", "tracked_index", "avg_cost", "shares_held",
+        "cost_basis", "first_buy_date", "last_trade_date"
+    ])
+    
+    for e in etfs:
+        writer.writerow([
+            e.symbol,
+            e.name,
+            e.short_name or "",
+            e.asset_type,
+            e.portfolio_type,
+            e.target_weight,
+            e.tracked_index or "",
+            e.avg_cost if e.avg_cost is not None else "",
+            e.shares_held if e.shares_held is not None else "",
+            e.cost_basis if e.cost_basis is not None else "",
+            e.first_buy_date.isoformat() if e.first_buy_date else "",
+            e.last_trade_date.isoformat() if e.last_trade_date else "",
+        ])
+    
+    return output.getvalue()
+
+
+async def import_portfolio(
+    db: AsyncSession,
+    csv_content: str,
+    portfolio_type: str = "on_exchange",
+    mode: str = "merge",
+    skip_invalid: bool = True,
+) -> dict[str, Any]:
+    """
+    Import portfolio holdings from CSV content.
+    """
+    import csv
+    import io
+    from datetime import date
+    
+    reader = csv.DictReader(io.StringIO(csv_content))
+    required_fields = {"symbol", "name", "asset_type", "portfolio_type"}
+    
+    # Check headers
+    headers = reader.fieldnames or []
+    missing = required_fields - set(headers)
+    if missing:
+        raise ValueError(f"Missing required columns: {missing}")
+    
+    imported = 0
+    skipped = 0
+    errors = []
+    holdings = []
+    
+    for row_num, row in enumerate(reader, start=2):  # 1-based, +1 for header
+        try:
+            # Validate required fields
+            if not row.get("symbol") or not row.get("name"):
+                raise ValueError("Missing required field: symbol or name")
+            
+            symbol = row["symbol"].strip()
+            name = row["name"].strip()
+            asset_type = row.get("asset_type", "ETF").strip()
+            pt = row.get("portfolio_type", portfolio_type).strip()
+            short_name = row.get("short_name") or name
+            tracked_index = row.get("tracked_index") or None
+            
+            # Parse numeric fields
+            target_weight = float(row["target_weight"]) if row.get("target_weight") else 0.1
+            avg_cost = float(row["avg_cost"]) if row.get("avg_cost") else None
+            shares_held = float(row["shares_held"]) if row.get("shares_held") else None
+            first_buy_date = None
+            last_trade_date = None
+            
+            if row.get("first_buy_date"):
+                try:
+                    first_buy_date = date.fromisoformat(row["first_buy_date"])
+                except ValueError:
+                    pass
+            if row.get("last_trade_date"):
+                try:
+                    last_trade_date = date.fromisoformat(row["last_trade_date"])
+                except ValueError:
+                    pass
+            
+            if mode == "replace" and imported == 0:
+                # Soft delete all existing of this type
+                existing = await list_etfs(db, pt)
+                for e in existing:
+                    e.is_active = False
+            
+            # Upsert
+            existing_etfs = await list_etfs(db, pt)
+            existing_dict = {e.symbol: e for e in existing_etfs}
+            
+            if symbol in existing_dict:
+                e = existing_dict[symbol]
+                e.name = name
+                e.short_name = short_name
+                e.asset_type = asset_type
+                e.target_weight = target_weight
+                e.tracked_index = tracked_index
+                e.avg_cost = avg_cost
+                e.shares_held = shares_held
+                e.first_buy_date = first_buy_date
+                e.last_trade_date = last_trade_date
+                e.is_active = True
+            else:
+                e = PortfolioETF(
+                    symbol=symbol,
+                    name=name,
+                    short_name=short_name,
+                    asset_type=asset_type,
+                    target_weight=target_weight,
+                    portfolio_type=pt,
+                    tracked_index=tracked_index,
+                    avg_cost=avg_cost,
+                    shares_held=shares_held,
+                    first_buy_date=first_buy_date,
+                    last_trade_date=last_trade_date,
+                    is_active=True,
+                )
+                db.add(e)
+            
+            await db.flush()
+            
+            holdings.append({
+                "id": e.id,
+                "symbol": e.symbol,
+                "name": e.name,
+                "short_name": e.short_name,
+                "asset_type": e.asset_type,
+                "target_weight": e.target_weight,
+                "portfolio_type": e.portfolio_type,
+                "tracked_index": e.tracked_index,
+                "avg_cost": e.avg_cost,
+                "shares_held": e.shares_held,
+                "first_buy_date": e.first_buy_date.isoformat() if e.first_buy_date else None,
+                "last_trade_date": e.last_trade_date.isoformat() if e.last_trade_date else None,
+                "is_active": e.is_active,
+            })
+            imported += 1
+            
+        except Exception as exc:
+            skipped += 1
+            errors.append({
+                "row": row_num,
+                "symbol": row.get("symbol", "UNKNOWN"),
+                "error": str(exc)
+            })
+            if not skip_invalid:
+                await db.rollback()
+                raise
+    
+    await db.commit()
+    
+    return {
+        "imported": imported,
+        "skipped": skipped,
+        "errors": errors,
+        "holdings": holdings,
+    }
+
+
+# ── Weight Drift Check / 权重偏离检查 ────────────────────────────────
+
+async def calculate_weight_drift(
+    db: AsyncSession,
+    portfolio_type: str | None = None,
+) -> dict[str, Any]:
+    """
+    Calculate actual vs target weight deviation for each holding.
+    """
+    etfs = await list_etfs(db, portfolio_type)
+    if not etfs:
+        return {"items": [], "alerts": []}
+    
+    price_map = await _build_price_map(etfs)
+    
+    # Calculate total portfolio value
+    total_value = 0.0
+    for e in etfs:
+        price, _ = price_map.get(e.symbol, (0.0, 0.0))
+        if e.shares_held and e.shares_held > 0:
+            total_value += e.shares_held * price
+        else:
+            # Use target_amount as fallback
+            total_value += total_value * e.target_weight if total_value > 0 else 0
+    
+    items = []
+    alerts = []
+    
+    for e in etfs:
+        price, change_pct = price_map.get(e.symbol, (0.0, 0.0))
+        shares = e.shares_held or 0
+        market_value = shares * price
+        actual_weight = (market_value / total_value) if total_value > 0 else 0
+        target_weight = e.target_weight
+        deviation = actual_weight - target_weight
+        deviation_pct = (deviation / target_weight * 100) if target_weight > 0 else 0
+        
+        item = {
+            "symbol": e.symbol,
+            "name": e.name,
+            "target_weight": target_weight,
+            "actual_weight": round(actual_weight, 4),
+            "deviation": round(deviation, 4),
+            "deviation_pct": round(deviation_pct, 2),
+            "market_value": round(market_value, 2),
+            "needs_rebalance": abs(deviation_pct) > 20,  # Alert threshold: 20%
+        }
+        items.append(item)
+        
+        if abs(deviation_pct) > 20:
+            alerts.append({
+                "symbol": e.symbol,
+                "name": e.name,
+                "message": f"权重偏离 {deviation_pct:.1f}% (目标 {target_weight:.1%}, 实际 {actual_weight:.1%})",
+                "severity": "warning" if abs(deviation_pct) < 50 else "critical",
+            })
+    
+    return {"items": items, "alerts": alerts}

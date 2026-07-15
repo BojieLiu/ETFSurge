@@ -1,0 +1,39 @@
+fix: 16 code quality fixes and unify LLM architecture
+
+## Bug Fixes (P0)
+
+- #1 news_refresh.py: fix dead code in news broadcast loop where continue made level>=3 news push unreachable; move condition outside continue block
+- #2 ws.py: ConnectionManager - add asyncio.Lock to protect active_connections dict from concurrent modification during connect/disconnect/broadcast
+- #3 source_registry.py: SourceHealth - add threading.Lock to protect failure counter and cooldown state from race conditions in multi-request scenarios
+
+## Architecture Unification (P1)
+
+- #4 Unify dual LLM calling patterns: migrate 3 agents (portfolio_design, portfolio_review, sector_analysis) to AgentRuntime from registry.py; remove dead code generate_portfolio_review() from llm.py; remove unused REVIEW_SYSTEM_PROMPT and PORTFOLIO_DESIGN_SYSTEM_PROMPT constants; route handler now uses get_agent('portfolio_review').run_json() directly
+- #5 portfolio_service.py: expose public build_price_map() wrapper that runs _build_price_map() in thread pool; analysis.py updated to import public API
+- #6 Delete unused SQLAlchemy model TokenUsageRecord (monitor/token_usage.py uses raw sqlite3 on separate token_usage.db)
+- #7 Delete ghost fetcher free_us_fetcher.py (Alpha Vantage + Finnhub) and corresponding test_free_us_fetcher.py - no callers existed
+
+## Performance Optimizations (P2)
+
+- #8 Replace per-call ThreadPoolExecutor creation in 4 fetchers (news_fetcher.py, levistock_fetcher.py, sector_fetcher.py, china_market.py) with single shared _shared_executor in core/async_utils.py via new run_in_thread() helper
+- #10 MemoryCache.mget: single lock acquisition for batch read instead of N sequential get() calls; also fix TOCTOU in get() by holding lock across TTL check and pop
+- #15 news_fetcher.py: enhance _dedupe() with title normalization (strip common prefixes, collapse whitespace, strip trailing punctuation, case-fold) to catch same-event different-wording across sources
+
+## Code Quality
+
+- #9 indicators.py: hoist pandas/numpy imports to module top (was in each of 6 functions)
+- #11 _GLOBAL_INDEX_DEFS: already implemented DB query with hardcoded fallback in _global_index_defs() - no action needed
+- #16 WebSocket: all 3 endpoints (/ws/market/{symbol}, /ws/news, /ws/portfolio) now handle ping/pong heartbeat
+
+## Cleanup
+
+- Removed models/token_usage.py and its export from models/__init__.py
+- Removed fetchers/free_us_fetcher.py
+- Removed tests/test_free_us_fetcher.py
+- models/__init__.py: removed TokenUsageRecord from __all__
+
+## Verification
+
+- Backend: 44 unit tests pass (pytest -v)
+- Frontend: npm run build succeeds; 29 vitest tests pass
+- Manual API smoke test: GET /api/v1/market/realtime, /api/v1/news/headlines, /api/v1/portfolio/etfs, /api/v1/analysis/report, POST /api/v1/portfolio/calculate all return expected JSON structures

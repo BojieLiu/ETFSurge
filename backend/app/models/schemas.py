@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from datetime import date
 
 
 class PortfolioETFBase(BaseModel):
@@ -10,6 +11,10 @@ class PortfolioETFBase(BaseModel):
     portfolio_type: str = "on_exchange"
     short_name: Optional[str] = None
     tracked_index: Optional[str] = None
+    avg_cost: Optional[float] = Field(default=None, ge=0, description="Average cost basis per share (CNY)")
+    shares_held: Optional[float] = Field(default=None, ge=0, description="Number of shares currently held")
+    first_buy_date: Optional[date] = Field(default=None, description="First purchase date (YYYY-MM-DD)")
+    last_trade_date: Optional[date] = Field(default=None, description="Last trade date (YYYY-MM-DD)")
 
 
 class PortfolioETFCreate(PortfolioETFBase):
@@ -23,11 +28,16 @@ class PortfolioETFUpdate(BaseModel):
     portfolio_type: Optional[str] = None
     short_name: Optional[str] = None
     tracked_index: Optional[str] = None
+    avg_cost: Optional[float] = Field(default=None, ge=0)
+    shares_held: Optional[float] = Field(default=None, ge=0)
+    first_buy_date: Optional[date] = None
+    last_trade_date: Optional[date] = None
 
 
 class PortfolioETFResponse(PortfolioETFBase):
     id: int
     is_active: bool
+    cost_basis: Optional[float] = Field(default=None, description="Total cost basis = avg_cost * shares_held")
 
     class Config:
         from_attributes = True
@@ -114,3 +124,48 @@ class StrategyCheckResponse(BaseModel):
     summary: str
     suggestions: list[StrategySuggestion]
     raw_llm: str
+
+
+# PnL History / 累计盈亏历史
+class HoldingPnL(BaseModel):
+    symbol: str
+    name: str
+    short_name: Optional[str] = None
+    asset_type: str
+    portfolio_type: str
+    shares_held: float
+    avg_cost: float
+    cost_basis: float
+    current_price: float
+    market_value: float
+    cumulative_pnl: float
+    cumulative_pnl_pct: float
+    first_buy_date: Optional[str] = None
+    last_trade_date: Optional[str] = None
+
+
+class DailyPnLSeries(BaseModel):
+    date: str
+    total_market_value: float
+    total_cumulative_pnl: float
+    total_cumulative_pnl_pct: float
+
+
+class PnLHistoryResponse(BaseModel):
+    summary: dict
+    holdings: list[HoldingPnL]
+    daily_series: list[DailyPnLSeries]
+
+
+# Portfolio Export/Import / 组合导出导入
+class ImportError(BaseModel):
+    row: int
+    symbol: str
+    error: str
+
+
+class ImportResult(BaseModel):
+    imported: int
+    skipped: int
+    errors: list[ImportError]
+    holdings: list[PortfolioETFResponse]

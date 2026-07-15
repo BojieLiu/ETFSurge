@@ -8,8 +8,9 @@ from ..models.schemas import (
 )
 from ..services.portfolio_service import (
     list_etfs, add_etf, update_etf, remove_etf,
-    calculate_allocation, calculate_daily_pnl, strategy_check,
-    apply_strategy_suggestions, apply_portfolio_design,
+    calculate_allocation, calculate_daily_pnl, calculate_cumulative_pnl,
+    export_portfolio, import_portfolio, calculate_weight_drift,
+    strategy_check, apply_strategy_suggestions, apply_portfolio_design,
 )
 
 router = APIRouter(prefix="/api/v1/portfolio", tags=["portfolio"])
@@ -72,3 +73,68 @@ async def apply_strategy(suggestions: list, db: AsyncSession = Depends(get_db)):
 @router.post("/apply-design")
 async def apply_design(design: dict, db: AsyncSession = Depends(get_db)):
     return await apply_portfolio_design(db, design)
+
+
+@router.get("/pnl-history")
+async def pnl_history(
+    portfolio_type: str | None = None,
+    period: str = "all",
+    db: AsyncSession = Depends(get_db),
+):
+    """获取累计盈亏历史"""
+    return await calculate_cumulative_pnl(db, portfolio_type, period)
+
+
+@router.get("/export")
+async def export_portfolio_endpoint(
+    portfolio_type: str | None = None,
+    format: str = "csv",
+    db: AsyncSession = Depends(get_db),
+):
+    """导出组合持仓"""
+    result = await export_portfolio(db, portfolio_type, format)
+    if format == "json":
+        return {"holdings": result}
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse(content=result, media_type="text/csv")
+
+
+@router.post("/import")
+async def import_portfolio_endpoint(
+    file: str,  # Will be multipart form data
+    portfolio_type: str = "on_exchange",
+    mode: str = "merge",
+    skip_invalid: bool = True,
+    db: AsyncSession = Depends(get_db),
+):
+    """导入组合持仓"""
+    # Note: This endpoint expects multipart/form-data
+    # The actual file handling is done in the service
+    from fastapi import File, UploadFile
+    pass
+
+
+# Proper import endpoint with file upload
+from fastapi import File, UploadFile
+
+@router.post("/import", response_model=dict)
+async def import_portfolio_file(
+    file: UploadFile = File(...),
+    portfolio_type: str = "on_exchange",
+    mode: str = "merge",
+    skip_invalid: bool = True,
+    db: AsyncSession = Depends(get_db),
+):
+    """导入组合持仓 CSV 文件"""
+    content = await file.read()
+    csv_content = content.decode("utf-8")
+    return await import_portfolio(db, csv_content, portfolio_type, mode, skip_invalid)
+
+
+@router.get("/drift-check")
+async def drift_check(
+    portfolio_type: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """权重偏离检查"""
+    return await calculate_weight_drift(db, portfolio_type)

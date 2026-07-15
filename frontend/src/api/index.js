@@ -51,6 +51,20 @@ export const portfolioApi = {
   strategyCheck: (data) => api.post('/portfolio/strategy-check', data),
   applyStrategy: (suggestions) => api.post('/portfolio/apply-strategy', suggestions),
   applyPortfolioDesign: (design) => api.post('/portfolio/apply-design', design),
+  // PnL History
+  getPnLHistory: (type, period = 'all') => api.get('/portfolio/pnl-history', { params: { portfolio_type: type, period } }),
+  // Export/Import
+  export: (type, format = 'csv') => api.get('/portfolio/export', { params: { portfolio_type: type, format }, responseType: format === 'csv' ? 'text' : 'json' }),
+  import: (file, type = 'on_exchange', mode = 'merge', skipInvalid = true) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('portfolio_type', type)
+    formData.append('mode', mode)
+    formData.append('skip_invalid', String(skipInvalid))
+    return api.post('/portfolio/import', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
+  },
+  // Drift Check
+  getDriftCheck: (type) => api.get('/portfolio/drift-check', { params: type ? { portfolio_type: type } : {} }),
 }
 
 export const analysisApi = {
@@ -58,6 +72,63 @@ export const analysisApi = {
   llmAdvice: (query, context) => api.post('/analysis/llm-advice', context, { params: { query }, timeout: 180000 }),
   llmNewsAnalysis: () => api.post('/analysis/llm-news-analysis', {}, { timeout: 180000 }),
   portfolioDesign: (params) => api.post('/analysis/portfolio-design', params, { timeout: 180000 }),
+  // Streaming endpoints
+  llmReportStream: (symbols, onToken) => streamPost('/analysis/llm-report/stream', symbols, onToken),
+  llmAdviceStream: (query, context, onToken) => streamPost('/analysis/llm-advice/stream', context, onToken, { query }),
+  portfolioDesignStream: (params, onToken) => streamPost('/analysis/portfolio-design/stream', params, onToken),
+  sectorAnalysisStream: (params, onToken) => streamPost('/analysis/sector-analysis/stream', params, onToken),
+  symbolAnalysisStream: (params, onToken) => streamPost('/analysis/symbol-analysis/stream', params, onToken),
+  newsImpactStream: (params, onToken) => streamPost('/analysis/news-impact/stream', params, onToken),
+}
+
+// Helper for streaming POST requests
+async function streamPost(endpoint, body, onToken, params = {}) {
+  const url = new URL(`${api.defaults.baseURL}${endpoint}`, window.location.origin)
+  Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v))
+  
+  const response = await fetch(url.toString(), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: `HTTP ${response.status}` }))
+    throw new Error(err.detail || `HTTP ${response.status}`)
+  }
+  
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n\n')
+    buffer = lines.pop() || ''
+    
+    for (const line of lines) {
+      if (!line.trim()) continue
+      const [eventLine, dataLine] = line.split('\n')
+      const event = eventLine?.replace('event: ', '').trim()
+      const data = dataLine?.replace('data: ', '').trim()
+      
+      if (!data) continue
+      
+      try {
+        const parsed = JSON.parse(data)
+        if (event === 'token' && onToken) {
+          onToken(parsed.token)
+        } else if (event === 'error') {
+          throw new Error(parsed.message || 'Stream error')
+        }
+      } catch (e) {
+        console.error('SSE parse error:', e, 'data:', data)
+      }
+    }
+  }
 }
 
 export const newsApi = {

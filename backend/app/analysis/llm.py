@@ -1,7 +1,7 @@
 import json
 import time
 import sys
-from typing import Any
+from typing import Any, AsyncGenerator
 
 from ..config import settings
 from ..monitor.token_usage import token_store, UsageRecord
@@ -93,6 +93,125 @@ async def llm_complete(prompt: str, response_format: dict | None = None) -> str:
             error_message=str(_exc),
         ))
         raise
+
+
+async def llm_complete_stream(
+    system_prompt: str,
+    prompt: str,
+    response_format: dict | None = None,
+    temperature: float = 0.3,
+    max_tokens: int = 8192,
+) -> AsyncGenerator[dict, None]:
+    """
+    Streaming LLM completion using DeepSeek API with SSE.
+    
+    Yields:
+        {"type": "token", "token": "..."} - incremental token
+        {"type": "done", "full_text": "...", "usage": {...}} - completion with full text
+        {"type": "error", "error": "..."} - error occurred
+    """
+    import httpx
+    await _check_key()
+    
+    body = {
+        "model": settings.llm_model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": True,
+    }
+    if response_format:
+        body["response_format"] = response_format
+
+    _start = time.monotonic()
+    _caller = sys._getframe(1).f_code.co_name
+    
+    full_text = ""
+    prompt_tokens = 0
+    completion_tokens = 0
+    total_tokens = 0
+    
+    try:
+        async with httpx.AsyncClient(timeout=180, trust_env=False) as client:
+            async with client.stream(
+                "POST",
+                LLM_API_URL,
+                headers={
+                    "Authorization": f"Bearer {settings.deepseek_api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=body,
+            ) as resp:
+                resp.raise_for_status()
+                
+                async for line in resp.aiter_lines():
+                    if not line:
+                        continue
+                    if line.startswith("data: "):
+                        data_str = line[6:]
+                        if data_str == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data_str)
+                            if chunk.get("choices"):
+                                delta = chunk["choices"][0].get("delta", {})
+                                # Handle reasoning_content (DeepSeek specific)
+                                token = delta.get("content") or delta.get("reasoning_content", "")
+                                if token:
+                                    full_text += token
+                                    yield {"type": "token", "token": token}
+                            
+                            # Capture usage from final chunk
+                            if chunk.get("usage"):
+                                usage = chunk["usage"]
+                                prompt_tokens = usage.get("prompt_tokens", 0)
+                                completion_tokens = usage.get("completion_tokens", 0)
+                                total_tokens = usage.get("total_tokens", 0)
+                        except json.JSONDecodeError:
+                            continue
+                        
+    except Exception as _exc:
+        _duration = (time.monotonic() - _start) * 1000
+        await token_store.record(UsageRecord(
+            function_name=_caller,
+            prompt_tokens=0,
+            completion_tokens=0,
+            total_tokens=0,
+            model=settings.llm_model,
+            timestamp=time.time(),
+            success=False,
+            duration_ms=round(_duration, 1),
+            error_message=str(_exc),
+        ))
+        yield {"type": "error", "error": str(_exc)}
+        return
+    
+    _duration = (time.monotonic() - _start) * 1000
+    await token_store.record(UsageRecord(
+        function_name=_caller,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=total_tokens,
+        model=settings.llm_model,
+        timestamp=time.time(),
+        success=True,
+        duration_ms=round(_duration, 1),
+    ))
+    
+    yield {
+        "type": "done",
+        "full_text": full_text,
+        "usage": {
+            "model": settings.llm_model,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+            "latency_ms": round(_duration, 1),
+        }
+    }
 
 
 async def llm_complete_with_system(system_prompt: str, prompt: str, response_format: dict | None = None, force_json: bool = False) -> str:

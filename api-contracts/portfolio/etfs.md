@@ -53,6 +53,11 @@ GET /api/v1/portfolio/etfs
 | portfolio_type | string | `on_exchange` (场内) \| `off_exchange` (场外) |
 | tracked_index | string \| null | Underlying index symbol for off-exchange funds |
 | is_active | boolean | Soft-delete flag |
+| avg_cost | float \| null | Average cost basis per share (CNY) |
+| shares_held | float \| null | Number of shares currently held |
+| cost_basis | float \| null | Total cost basis = avg_cost * shares_held (CNY) |
+| first_buy_date | string \| null | ISO date of first purchase (YYYY-MM-DD) |
+| last_trade_date | string \| null | ISO date of last trade (YYYY-MM-DD) |
 
 ---
 
@@ -72,7 +77,10 @@ POST /api/v1/portfolio/etfs
   "asset_type": "A",
   "target_weight": 0.10,
   "portfolio_type": "on_exchange",
-  "tracked_index": null
+  "tracked_index": null,
+  "avg_cost": 2.45,
+  "shares_held": 10000,
+  "first_buy_date": "2024-01-15"
 }
 ```
 
@@ -115,7 +123,11 @@ PUT /api/v1/portfolio/etfs/{symbol}
   "is_active": true,
   "portfolio_type": "on_exchange",
   "short_name": "简称",
-  "tracked_index": null
+  "tracked_index": null,
+  "avg_cost": 2.45,
+  "shares_held": 12000,
+  "first_buy_date": "2024-01-15",
+  "last_trade_date": "2024-06-20"
 }
 ```
 

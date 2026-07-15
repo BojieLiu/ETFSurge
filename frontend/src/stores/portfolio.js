@@ -7,6 +7,8 @@ export const usePortfolioStore = defineStore('portfolio', () => {
   const onExchange = ref([])
   const offExchange = ref([])
   const strategyResult = ref(null)
+  const pnlHistory = ref(null)
+  const driftCheck = ref(null)
 
   async function fetchEtfs(type) {
     const res = await portfolioApi.list(type)
@@ -40,6 +42,31 @@ export const usePortfolioStore = defineStore('portfolio', () => {
     return res.data
   }
 
+  async function fetchPnLHistory(type, period = 'all') {
+    const res = await portfolioApi.getPnLHistory(type, period)
+    pnlHistory.value = res.data
+    return res.data
+  }
+
+  async function fetchDriftCheck(type) {
+    const res = await portfolioApi.getDriftCheck(type)
+    driftCheck.value = res.data
+    return res.data
+  }
+
+  async function exportPortfolio(type, format = 'csv') {
+    const res = await portfolioApi.export(type, format)
+    return res
+  }
+
+  async function importPortfolio(file, type, mode = 'merge', skipInvalid = true) {
+    const res = await portfolioApi.import(file, type, mode, skipInvalid)
+    if (res.data) {
+      await Promise.all([fetchEtfs(), fetchEtfs('on_exchange'), fetchEtfs('off_exchange')])
+    }
+    return res.data
+  }
+
   async function runStrategyCheck(capital) {
     const res = await portfolioApi.strategyCheck(capital)
     strategyResult.value = res.data
@@ -48,7 +75,9 @@ export const usePortfolioStore = defineStore('portfolio', () => {
 
   return {
     etfs, onExchange, offExchange, strategyResult,
+    pnlHistory, driftCheck,
     fetchEtfs, addEtf, updateEtf, removeEtf,
-    fetchDailyPnl, runStrategyCheck,
+    fetchDailyPnl, fetchPnLHistory, fetchDriftCheck,
+    exportPortfolio, importPortfolio, runStrategyCheck,
   }
 })

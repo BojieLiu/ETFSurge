@@ -13,6 +13,7 @@ from ..analysis.llm import (
     generate_market_report, generate_advice, analyze_news, analyze_news_impact,
     generate_portfolio_design, generate_sector_analysis, generate_symbol_analysis,
 )
+from ..analysis.registry import get_agent
 from ..services.market_service import (
     get_all_realtime, get_history, get_indices, get_commodities,
     get_asset_realtime, get_realtime_batch,
@@ -25,11 +26,35 @@ from ..fetchers.sector_fetcher import (
 )
 from ..database import get_db
 from fastapi import HTTPException
+from fastapi.responses import StreamingResponse
 
 router = APIRouter(prefix="/api/v1/analysis", tags=["analysis"])
 
 
 FETCH_TIMEOUT = 45
+
+
+def _sse_stream(agent_generator):
+    """Convert AgentRuntime async generator to SSE StreamingResponse."""
+    async def event_generator():
+        async for item in agent_generator:
+            event = item.get("event")
+            data = item.get("data")
+            if event == "token":
+                yield f"event: token\ndata: {json.dumps({'token': data.get('token', '')})}\n\n"
+            elif event == "done":
+                yield f"event: done\ndata: {json.dumps({'full_text': data.get('full_text', ''), 'metadata': data.get('usage', {})})}\n\n"
+            elif event == "error":
+                yield f"event: error\ndata: {json.dumps({'code': 'STREAM_ERROR', 'message': data})}\n\n"
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+    )
 
 
 class SectorAnalysisRequest(BaseModel):
@@ -323,3 +348,210 @@ async def symbol_analysis(req: SymbolAnalysisRequest):
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM symbol analysis failed: {e}")
     return {"symbol": symbol, "name": display_name, "report": report}
+
+
+# ── SSE Streaming Endpoints ──────────────────────────────────────────────
+
+
+@router.post("/llm-report/stream")
+async def llm_report_stream(req: LLMReportRequest):
+    """流式市场研判报告"""
+    try:
+        # Fetch market data (same as non-streaming)
+        market_data, indices, commodities = await _fetch_all_market()
+        news = _collect_news()
+        
+        # Get indicators for portfolio ETFs
+        indicators = {}
+        try:
+            etfs = await list_etfs(None)
+            for e in etfs:
+                hist = await asyncio.wait_for(get_history(e.symbol, e.asset_type), timeout=30)
+                ind = compute_all_indicators(hist) if hist else {}
+                if ind:
+                    indicators[e.symbol] = ind
+        except Exception:
+            pass
+        
+        # Build prompt
+        prompt = _build_report_prompt(indices, commodities, market_data, indicators, news, [])
+        
+        # Stream from agent
+        agent = get_agent("market_report")
+        return _sse_stream(agent.run_stream(prompt))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"LLM streaming failed: {e}")
+
+
+@router.post("/llm-advice/stream")
+async def llm_advice_stream(query: str = Query(...), context: dict | None = None):
+    """流式投资建议问答"""
+    try:
+        prompt = f"用户提问: {query}\n\n"
+        if context:
+            prompt += f"上下文信息: {json.dumps(context, ensure_ascii=False)}\n\n"
+        prompt += "请给出专业、简洁的回答，控制在 500 字以内，使用 Markdown 格式"
+        
+        agent = get_agent("advice")
+        return _sse_stream(agent.run_stream(prompt))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"LLM streaming failed: {e}")
+
+
+@router.post("/portfolio-design/stream")
+async def portfolio_design_stream(req: PortfolioDesignRequest | None = None, db: AsyncSession = Depends(get_db)):
+    """流式组合设计"""
+    try:
+        market_data, indices, commodities = await _fetch_all_market()
+        news = _collect_news()
+        capital = req.capital if req else 500000
+        
+        # Also fetch portfolio ETF prices
+        try:
+            etfs = await list_etfs(db)
+            if etfs:
+                pm = await build_price_map(etfs)
+                for e in etfs:
+                    price, change_pct = pm.get(e.symbol, (0, 0))
+                    market_data.append({
+                        "symbol": e.symbol, "name": e.name,
+                        "price": price, "change_pct": change_pct,
+                        "asset_type": e.asset_type, "portfolio_type": e.portfolio_type,
+                    })
+        except Exception as exc:
+            logger.warning(f"[portfolio-design] ETF price fetch error: {exc}")
+        
+        major_symbols = {"000001", "399001", "399006", "000688", "000300", "000016", "000905",
+                         "510050", "510300", "510500", "588000", "159915", "512880", "515790"}
+        major_data = [d for d in market_data if d.get("symbol") in major_symbols]
+        
+        prompt = f"""基于以下实时数据，为投资金额 {capital:,.0f} 元设计三种风险偏好的 ETF 组合方案：
+进攻型（≥90% 权益，科技/成长为主）、平衡型（65-85% 权益，混合）、防御型（50-75% 权益，高股息/低波为主）。
+
+## A股主要指数
+{_format_indices(indices)}
+
+## 全球指数
+{_format_major_etfs(major_data)}
+
+## 大宗商品
+{_format_commodities(commodities)}
+
+## 重要资讯
+{_format_news(news)}
+
+请按以下结构输出 JSON：
+{{
+  "design_text": "完整 Markdown 报告",
+  "data_snapshot_time": "北京时间",
+  "market_environment": "宏观环境描述",
+  "portfolios": [
+    {{"style": "进攻型", "portfolio_name": "...", "positioning": "...", "expected_return": 0.15, "max_drawdown": 0.25, "sharpe_ratio": 0.8, "expected_characteristics": "...", "weight_logic": [...], "market_analysis": {{}}, "allocation_rationale": {{}}, "etfs": [...]}}
+  ]
+}}"""
+        
+        agent = get_agent("portfolio_design")
+        return _sse_stream(agent.run_stream(prompt))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"LLM streaming failed: {e}")
+
+
+@router.post("/sector-analysis/stream")
+async def sector_analysis_stream(req: SectorAnalysisRequest):
+    """流式板块分析"""
+    try:
+        sector_code = req.sector_code
+        sector_type = req.sector_type
+        sector_name = req.sector_name
+        
+        if sector_type == "concept":
+            sectors = await asyncio.to_thread(fetch_concept_sectors, 200)
+        else:
+            sectors = await asyncio.to_thread(fetch_industry_sectors, 200)
+        sector_data = next((s for s in sectors if s.get("sector_code") == sector_code), None)
+        name = sector_name or (sector_data.get("sector_name", "") if sector_data else sector_code)
+        
+        constituents = await asyncio.to_thread(fetch_sector_stocks, sector_code)
+        news = fetch_news_headlines() or []
+        try:
+            macro = fetch_macro_news() or []
+            news.extend(macro)
+        except Exception:
+            pass
+        
+        prompt = f"""分析板块 {name} ({sector_code})：
+成分股：{json.dumps(constituents[:15], ensure_ascii=False)}
+资讯：{json.dumps(news[:10], ensure_ascii=False)}
+
+请输出：板块概况、资金面、技术面、催化因素、风险提示、核心标的推荐"""
+        
+        agent = get_agent("sector_analysis")
+        return _sse_stream(agent.run_stream(prompt))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"LLM streaming failed: {e}")
+
+
+@router.post("/symbol-analysis/stream")
+async def symbol_analysis_stream(req: SymbolAnalysisRequest):
+    """流式标的深度解读"""
+    try:
+        symbol = req.symbol
+        name = req.name
+        asset_type = req.asset_type
+        
+        realtime = await get_asset_realtime(symbol, asset_type) or {}
+        hist = []
+        try:
+            hist = await asyncio.wait_for(get_history(symbol, asset_type, "daily"), timeout=30)
+        except Exception:
+            pass
+        indicators = compute_all_indicators(hist) if hist else {}
+        
+        news = fetch_news_headlines() or []
+        try:
+            macro = fetch_macro_news() or []
+            news.extend(macro)
+        except Exception:
+            pass
+        
+        display_name = name or (realtime.get("name", "") if realtime else symbol)
+        
+        prompt = f"""深度分析标的 {display_name} ({symbol})：
+实时行情：{json.dumps(realtime, ensure_ascii=False)}
+技术指标：{json.dumps(indicators, ensure_ascii=False)}
+历史K线(最近30条)：{json.dumps(hist[-30:], ensure_ascii=False) if hist else '无'}
+资讯催化：{json.dumps(news[:10], ensure_ascii=False)}
+
+请输出：基本面概览、技术面分析、资讯催化、风险提示、操作建议"""
+        
+        agent = get_agent("symbol_analysis")
+        return _sse_stream(agent.run_stream(prompt))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"LLM streaming failed: {e}")
+
+
+@router.post("/news-impact/stream")
+async def news_impact_stream(req: NewsImpactRequest):
+    """流式单条新闻影响分析"""
+    try:
+        holdings_text = "\n".join(
+            f"- {h.get('symbol', '')} {h.get('name', '')} "
+            f"({h.get('asset_type', '')}) 目标权重 {h.get('target_weight', '')}"
+            for h in req.portfolio
+        ) or "（组合为空）"
+        
+        prompt = f"""新闻标题：{req.news.get('title', '')}
+新闻内容：{req.news.get('content', '')}
+
+当前组合持仓：
+{holdings_text}
+
+请分析这条新闻对组合的影响，重点回答：
+(a) 影响范围（市场/板块）；
+(b) 组合内哪些标的会受到影响、具体如何受影响。
+只返回约定结构的 JSON。"""
+        
+        agent = get_agent("news_impact")
+        return _sse_stream(agent.run_stream(prompt))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"LLM streaming failed: {e}")

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean
+from sqlalchemy import Column, Integer, String, Float, Boolean, Date
 from ..database import Base
 
 
@@ -14,3 +14,15 @@ class PortfolioETF(Base):
     short_name = Column(String(60), nullable=True)
     is_active = Column(Boolean, default=True)
     tracked_index = Column(String(20), nullable=True, default=None, comment="场外基金跟踪的指数代码，用于预估收益")
+    # Cost basis fields for cumulative P&L
+    avg_cost = Column(Float, nullable=True, default=None, comment="平均持仓成本价 (CNY/份)")
+    shares_held = Column(Float, nullable=True, default=None, comment="当前持有份额/股数")
+    first_buy_date = Column(Date, nullable=True, default=None, comment="首次买入日期")
+    last_trade_date = Column(Date, nullable=True, default=None, comment="最近交易日期")
+
+    @property
+    def cost_basis(self) -> float | None:
+        """Total cost basis = avg_cost * shares_held"""
+        if self.avg_cost is not None and self.shares_held is not None:
+            return round(self.avg_cost * self.shares_held, 2)
+        return None

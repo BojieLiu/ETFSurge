@@ -9,13 +9,14 @@ functions:
 * performing the LLM call with the agent's model/temperature/response_format
 * retrying on transient failures (``max_retries``)
 * parsing JSON responses (``run_json``)
+* streaming responses (``run_stream``)
 """
 import json
-from typing import Any
+from typing import Any, AsyncGenerator
 
 from ..core.logging import get_logger
 from .prompts import load_prompt
-from .llm import llm_complete_with_system
+from .llm import llm_complete_with_system, llm_complete_stream
 
 logger = get_logger(__name__)
 
@@ -73,6 +74,27 @@ class AgentRuntime:
         if last_exc is None:
             raise RuntimeError(f"Agent[{self.config.name}] produced no result")
         raise last_exc
+
+    async def run_stream(self, prompt: str, **kwargs) -> AsyncGenerator[dict, None]:
+        """Run the agent and yield SSE events (token, done, error)."""
+        try:
+            async for event in llm_complete_stream(
+                system_prompt=self.system_prompt,
+                prompt=prompt,
+                response_format=self._response_format(),
+                temperature=self.config.temperature,
+            ):
+                if event["type"] == "token":
+                    yield {"event": "token", "data": {"token": event["token"]}}
+                elif event["type"] == "done":
+                    yield {"event": "done", "data": event}
+                    return
+                elif event["type"] == "error":
+                    yield {"event": "error", "data": event["error"]}
+                    return
+        except Exception as exc:
+            logger.error("Agent[%s] stream failed: %s", self.config.name, exc)
+            yield {"event": "error", "data": {"code": "STREAM_ERROR", "message": str(exc)}}
 
     async def run_json(self, prompt: str, **kwargs) -> dict:
         """Run the agent and parse the response as a JSON object."""
