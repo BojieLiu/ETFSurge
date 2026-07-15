@@ -63,7 +63,14 @@ POST /api/v1/portfolio/calculate
       "shares": 281081.08,
       "tracked_index": null,
       "is_estimated": false,
-      "estimate_source": null
+      "estimate_source": null,
+      "shares_outstanding": 5200000000,
+      "fund_scale": 4810000000,
+      "pe_ttm": 12.5,
+      "pb": 1.3,
+      "avg_volume_20d": 185000000,
+      "main_net_inflow": 12500000,
+      "main_net_inflow_pct": 4.7
     }
   ],
   "cash_weight": 0.04,
@@ -83,6 +90,13 @@ POST /api/v1/portfolio/calculate
 | allocations[].shares | float | `target_amount / current_price` |
 | allocations[].is_estimated | bool | Off-exchange fund price estimated via tracked index |
 | allocations[].estimate_source | string \| null | `tracked_index` \| `nav` \| `null` |
+| allocations[].shares_outstanding | float \| null | Latest total shares outstanding |
+| allocations[].fund_scale | float \| null | Latest fund AUM in CNY |
+| allocations[].pe_ttm | float \| null | TTM P/E ratio |
+| allocations[].pb | float \| null | P/B ratio |
+| allocations[].avg_volume_20d | float \| null | 20-day average turnover (CNY) |
+| allocations[].main_net_inflow | float \| null | Main force net inflow (CNY) |
+| allocations[].main_net_inflow_pct | float \| null | Main force net inflow % of turnover |
 | cash_weight | float | Remaining weight after summing all ETF weights |
 | cash_amount | float | `total_capital * cash_weight` |
 

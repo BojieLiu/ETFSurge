@@ -49,7 +49,13 @@ POST /api/v1/portfolio/daily-pnl
       "daily_pnl": 1404.00,
       "tracked_index": null,
       "is_estimated": false,
-      "estimate_source": null
+      "estimate_source": null,
+      "shares_outstanding": 5200000000,
+      "fund_scale": 4810000000,
+      "pe_ttm": 12.5,
+      "pb": 1.3,
+      "main_net_inflow": 12500000,
+      "main_net_inflow_pct": 4.7
     }
   ],
   "total_pnl": 3200.50,
@@ -66,6 +72,12 @@ POST /api/v1/portfolio/daily-pnl
 | items[].daily_pnl | float | `target_amount * change_pct / 100` |
 | items[].is_estimated | bool | Off-exchange fund price estimated via tracked index |
 | items[].estimate_source | string \| null | `tracked_index` \| `nav` \| `null` |
+| items[].shares_outstanding | float \| null | Latest total shares outstanding |
+| items[].fund_scale | float \| null | Latest fund AUM in CNY |
+| items[].pe_ttm | float \| null | TTM P/E ratio |
+| items[].pb | float \| null | P/B ratio |
+| items[].main_net_inflow | float \| null | Main force net inflow (CNY) |
+| items[].main_net_inflow_pct | float \| null | Main force net inflow % |
 | total_pnl | float | Sum of all `daily_pnl` values |
 | total_amount | float | Sum of all `target_amount` values |
 | weighted_change_pct | float | `sum(target_amount * change_pct) / total_amount` |

@@ -51,12 +51,26 @@ class AllocationItem(BaseModel):
     target_weight: float
     target_amount: float
     current_price: float
+    change_pct: float = 0
     shares: float = 0
+    tracked_index: Optional[str] = None
+    is_estimated: bool = False
+    estimate_source: Optional[str] = None
+    shares_outstanding: Optional[float] = None
+    fund_scale: Optional[float] = None
+    pe_ttm: Optional[float] = None
+    pb: Optional[float] = None
+    avg_volume_20d: Optional[float] = None
+    main_net_inflow: Optional[float] = None
+    main_net_inflow_pct: Optional[float] = None
 
 
 class CalculateResponse(BaseModel):
     total_capital: float
     allocations: list[AllocationItem]
+    total_amount: Optional[float] = None
+    cash_weight: Optional[float] = None
+    cash_amount: Optional[float] = None
 
 
 class PNLItem(BaseModel):
@@ -70,6 +84,14 @@ class PNLItem(BaseModel):
     change_pct: float
     daily_pnl: float
     tracked_index: Optional[str] = None
+    is_estimated: bool = False
+    estimate_source: Optional[str] = None
+    shares_outstanding: Optional[float] = None
+    fund_scale: Optional[float] = None
+    pe_ttm: Optional[float] = None
+    pb: Optional[float] = None
+    main_net_inflow: Optional[float] = None
+    main_net_inflow_pct: Optional[float] = None
 
 
 class PNLSummary(BaseModel):

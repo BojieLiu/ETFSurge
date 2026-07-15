@@ -6,6 +6,7 @@ from ..models.portfolio import PortfolioETF
 from ..models.schemas import PortfolioETFCreate, PortfolioETFUpdate
 from ..fetchers.china_market import fetch_a_stock_batch, fetch_fund_nav, fetch_hk_stock_realtime, fetch_index_realtime
 from ..fetchers.yfinance_fetcher import fetch_us_etf_realtime
+from ..fetchers.fundamental_fetcher import fetch_fundamentals
 from ..fetchers.news_fetcher import fetch_news_headlines, fetch_macro_news
 from ..analysis.indicators import compute_all_indicators
 from ..analysis.signal import generate_signal
@@ -177,10 +178,23 @@ async def calculate_allocation(
         target_amount = total_capital * e.target_weight
         total_amount += target_amount
         price, change_pct = price_map.get(e.symbol, (0, 0))
+        is_estimated = False
+        estimate_source = None
         # For off-exchange with tracked index, use tracked_index change
         if e.portfolio_type == "off_exchange" and e.tracked_index:
             _, change_pct = price_map.get(e.tracked_index, (0, 0))
-        allocations.append({
+            is_estimated = True
+            estimate_source = "tracked_index"
+
+        # 基本面数据（A 股 ETF）
+        fundamentals = {}
+        if e.asset_type == "A":
+            try:
+                fundamentals = fetch_fundamentals(e.symbol)
+            except Exception:
+                pass
+
+        alloc = {
             "symbol": e.symbol,
             "name": e.name,
             "short_name": e.short_name or e.name,
@@ -192,7 +206,11 @@ async def calculate_allocation(
             "change_pct": change_pct,
             "shares": round(target_amount / price, 2) if price else 0,
             "tracked_index": e.tracked_index,
-        })
+            "is_estimated": is_estimated,
+            "estimate_source": estimate_source,
+            **fundamentals,
+        }
+        allocations.append(alloc)
 
     cash_weight = max(0.0, 1.0 - weight_sum)
     cash_amount = round(total_capital * cash_weight, 2)
@@ -243,6 +261,14 @@ async def calculate_daily_pnl(
             "change_pct": change_pct,
             "daily_pnl": round(daily_pnl, 2),
             "tracked_index": a.get("tracked_index"),
+            "is_estimated": a.get("is_estimated", False),
+            "estimate_source": a.get("estimate_source"),
+            "shares_outstanding": a.get("shares_outstanding"),
+            "fund_scale": a.get("fund_scale"),
+            "pe_ttm": a.get("pe_ttm"),
+            "pb": a.get("pb"),
+            "main_net_inflow": a.get("main_net_inflow"),
+            "main_net_inflow_pct": a.get("main_net_inflow_pct"),
         })
 
     weighted_change_pct = (weighted_change_sum / total_amount) if total_amount else 0.0
