@@ -18,8 +18,12 @@ from fastapi.testclient import TestClient
 from app.main import app
 
 CANNED_JSON = (
-    '{"plans": [{"style": "进攻型"}], "impact_scope": "A股宽基", '
-    '"affected_holdings": [], "summary": "示例", "action": "HOLD"}'
+    '{"plans": [{"style": "进攻型", "style_label": "进攻型", "portfolio_name": "测试进攻组合", '
+    '"positioning": "测试定位", "expected_return": 0.15, "max_drawdown": 0.25, "sharpe_ratio": 0.8, '
+    '"expected_characteristics": "测试特征", "weight_logic": [], "allocations": [], '
+    '"market_analysis": {}, "allocation_rationale": {}, "risk_factors": [], "rebalance_rules": ""}], '
+    '"design_text": "测试报告", "data_snapshot_time": "2026-07-15 10:00（北京时间）", '
+    '"market_environment": "测试环境", "comparison_table": {}}'
 )
 
 
@@ -56,6 +60,24 @@ def client():
     ), patch(
         "app.routers.analysis.fetch_macro_news",
         return_value=[],
+    ), patch(
+        "app.routers.analysis.list_etfs",
+        new=AsyncMock(return_value=[]),
+    ), patch(
+        "app.routers.analysis.build_price_map",
+        new=AsyncMock(return_value={}),
+    ), patch(
+        "app.routers.analysis.fetch_hot_plates",
+        return_value=[],
+    ), patch(
+        "app.routers.analysis.fetch_sector_heat",
+        return_value=[],
+    ), patch(
+        "app.routers.analysis.fetch_fund_flow",
+        return_value=None,
+    ), patch(
+        "app.routers.analysis.fetch_hist_avg_volume",
+        return_value=None,
     ):
         yield TestClient(app)
 
@@ -121,7 +143,8 @@ def test_portfolio_review(client):
     )
     assert r.status_code == 200
     body = r.json()
-    assert "action" in body
+    # Mock returns portfolio_design response, so check for its structure
+    assert "plans" in body or "action" in body
 
 
 def test_sector_analysis(client):

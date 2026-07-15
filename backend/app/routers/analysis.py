@@ -12,6 +12,7 @@ from typing import Any
 from ..analysis.llm import (
     generate_market_report, generate_advice, analyze_news, analyze_news_impact,
     generate_portfolio_design, generate_sector_analysis, generate_symbol_analysis,
+    _build_portfolio_design_prompt,
 )
 from ..analysis.registry import get_agent
 from ..services.market_service import (
@@ -23,8 +24,11 @@ from ..analysis.indicators import compute_all_indicators
 from ..fetchers.news_fetcher import fetch_news_headlines, fetch_macro_news
 from ..fetchers.sector_fetcher import (
     fetch_industry_sectors, fetch_concept_sectors, fetch_sector_stocks,
+    fetch_hot_plates, fetch_sector_heat,
 )
+from ..fetchers.fundamental_fetcher import fetch_fund_flow, fetch_hist_avg_volume
 from ..database import get_db
+from ..models.schemas import PortfolioDesignResponse
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
@@ -210,6 +214,38 @@ async def portfolio_design(req: PortfolioDesignRequest | None = None, db: AsyncS
     except Exception as exc:
         logger.warning(f"[portfolio-design] ETF price fetch error: {exc}")
 
+    # Fetch additional data for enhanced LLM prompt
+    sector_data = {"industry_sectors": [], "concept_sectors": [], "hot_plates": [], "sector_heat": []}
+    fund_flows = {}
+    valuations = {}
+    try:
+        # Fetch sector/industry data (top 15 by change_pct)
+        industry_sectors = fetch_industry_sectors(15)
+        concept_sectors = fetch_concept_sectors(15)
+        hot_plates = fetch_hot_plates(10)
+        sector_heat = fetch_sector_heat(10)
+        sector_data = {
+            "industry_sectors": industry_sectors,
+            "concept_sectors": concept_sectors,
+            "hot_plates": hot_plates,
+            "sector_heat": sector_heat,
+        }
+    except Exception as exc:
+        logger.warning(f"[portfolio-design] Sector data fetch error: {exc}")
+
+    # Fetch fund flows and valuations for major ETF symbols
+    major_etf_symbols = ["510050", "510300", "510500", "159915", "588000", "513100", "518880", "512880", "159865", "513050"]
+    try:
+        for sym in major_etf_symbols:
+            flow = fetch_fund_flow(sym)
+            if flow:
+                fund_flows[sym] = flow
+            hist = fetch_hist_avg_volume(sym, 20)
+            if hist:
+                valuations[sym] = hist
+    except Exception as exc:
+        logger.warning(f"[portfolio-design] Fund flow/valuation fetch error: {exc}")
+
     major_symbols = {"000001", "399001", "399006", "000688", "000300", "000016", "000905",
                      "510050", "510300", "510500", "159915", "588000", "513100", "518880", "511880"}
     filtered = [m for m in market_data if m.get("symbol", "") in major_symbols or m.get("asset_type", "") in ("index", "futures")]
@@ -217,9 +253,25 @@ async def portfolio_design(req: PortfolioDesignRequest | None = None, db: AsyncS
         filtered = market_data[:50]
 
     try:
-        result = await generate_portfolio_design(indices, commodities, filtered, news, [], capital=capital)
+        result = await generate_portfolio_design(
+            indices, commodities, filtered, news, [],
+            capital=capital,
+            sector_data=sector_data,
+            fund_flows=fund_flows,
+            valuations=valuations,
+        )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM portfolio design failed: {e}")
+
+    # Validate response with Pydantic model
+    try:
+        validated = PortfolioDesignResponse(**result)
+        result = validated.model_dump()
+    except Exception as e:
+        logger.warning(f"[portfolio-design] Response validation failed: {e}")
+        # Return raw result if validation fails (backward compatibility)
+        pass
+
     result["indices"] = indices[:8]
     result["commodities"] = commodities[:6]
     return result
@@ -405,7 +457,7 @@ async def portfolio_design_stream(req: PortfolioDesignRequest | None = None, db:
         market_data, indices, commodities = await _fetch_all_market()
         news = _collect_news()
         capital = req.capital if req else 500000
-        
+
         # Also fetch portfolio ETF prices
         try:
             etfs = await list_etfs(db)
@@ -420,36 +472,46 @@ async def portfolio_design_stream(req: PortfolioDesignRequest | None = None, db:
                     })
         except Exception as exc:
             logger.warning(f"[portfolio-design] ETF price fetch error: {exc}")
-        
-        major_symbols = {"000001", "399001", "399006", "000688", "000300", "000016", "000905",
-                         "510050", "510300", "510500", "588000", "159915", "512880", "515790"}
-        major_data = [d for d in market_data if d.get("symbol") in major_symbols]
-        
-        prompt = f"""基于以下实时数据，为投资金额 {capital:,.0f} 元设计三种风险偏好的 ETF 组合方案：
-进攻型（≥90% 权益，科技/成长为主）、平衡型（65-85% 权益，混合）、防御型（50-75% 权益，高股息/低波为主）。
 
-## A股主要指数
-{_format_indices(indices)}
+        # Fetch additional data for enhanced LLM prompt
+        sector_data = {"industry_sectors": [], "concept_sectors": [], "hot_plates": [], "sector_heat": []}
+        fund_flows = {}
+        valuations = {}
+        try:
+            industry_sectors = fetch_industry_sectors(15)
+            concept_sectors = fetch_concept_sectors(15)
+            hot_plates = fetch_hot_plates(10)
+            sector_heat = fetch_sector_heat(10)
+            sector_data = {
+                "industry_sectors": industry_sectors,
+                "concept_sectors": concept_sectors,
+                "hot_plates": hot_plates,
+                "sector_heat": sector_heat,
+            }
+        except Exception as exc:
+            logger.warning(f"[portfolio-design] Sector data fetch error: {exc}")
 
-## 全球指数
-{_format_major_etfs(major_data)}
+        major_etf_symbols = ["510050", "510300", "510500", "159915", "588000", "513100", "518880", "512880", "159865", "513050"]
+        try:
+            for sym in major_etf_symbols:
+                flow = fetch_fund_flow(sym)
+                if flow:
+                    fund_flows[sym] = flow
+                hist = fetch_hist_avg_volume(sym, 20)
+                if hist:
+                    valuations[sym] = hist
+        except Exception as exc:
+            logger.warning(f"[portfolio-design] Fund flow/valuation fetch error: {exc}")
 
-## 大宗商品
-{_format_commodities(commodities)}
+        # Build the enhanced prompt using the same logic as generate_portfolio_design
+        prompt = _build_portfolio_design_prompt(
+            indices, commodities, market_data, news, [],
+            capital=capital,
+            sector_data=sector_data,
+            fund_flows=fund_flows,
+            valuations=valuations,
+        )
 
-## 重要资讯
-{_format_news(news)}
-
-请按以下结构输出 JSON：
-{{
-  "design_text": "完整 Markdown 报告",
-  "data_snapshot_time": "北京时间",
-  "market_environment": "宏观环境描述",
-  "portfolios": [
-    {{"style": "进攻型", "portfolio_name": "...", "positioning": "...", "expected_return": 0.15, "max_drawdown": 0.25, "sharpe_ratio": 0.8, "expected_characteristics": "...", "weight_logic": [...], "market_analysis": {{}}, "allocation_rationale": {{}}, "etfs": [...]}}
-  ]
-}}"""
-        
         agent = get_agent("portfolio_design")
         return _sse_stream(agent.run_stream(prompt))
     except Exception as e:

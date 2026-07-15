@@ -78,17 +78,16 @@ export const analysisApi = {
   llmAdvice: (query, context) => api.post('/analysis/llm-advice', context, { params: { query }, timeout: 180000 }),
   llmNewsAnalysis: () => api.post('/analysis/llm-news-analysis', {}, { timeout: 180000 }),
   portfolioDesign: (params) => api.post('/analysis/portfolio-design', params, { timeout: 180000 }),
-  // Streaming endpoints
-  llmReportStream: (symbols, onToken) => streamPost('/analysis/llm-report/stream', symbols, onToken),
-  llmAdviceStream: (query, context, onToken) => streamPost('/analysis/llm-advice/stream', context, onToken, { query }),
-  portfolioDesignStream: (params, onToken) => streamPost('/analysis/portfolio-design/stream', params, onToken),
-  sectorAnalysisStream: (params, onToken) => streamPost('/analysis/sector-analysis/stream', params, onToken),
-  symbolAnalysisStream: (params, onToken) => streamPost('/analysis/symbol-analysis/stream', params, onToken),
-  newsImpactStream: (params, onToken) => streamPost('/analysis/news-impact/stream', params, onToken),
+  portfolioDesignStream: (params, onToken, onDone) => streamPost('/analysis/portfolio-design/stream', params, onToken, onDone),
+  llmReportStream: (symbols, onToken, onDone) => streamPost('/analysis/llm-report/stream', symbols, onToken, onDone),
+  llmAdviceStream: (query, context, onToken, onDone) => streamPost('/analysis/llm-advice/stream', context, onToken, onDone, { query }),
+  sectorAnalysisStream: (params, onToken, onDone) => streamPost('/analysis/sector-analysis/stream', params, onToken, onDone),
+  symbolAnalysisStream: (params, onToken, onDone) => streamPost('/analysis/symbol-analysis/stream', params, onToken, onDone),
+  newsImpactStream: (params, onToken, onDone) => streamPost('/analysis/news-impact/stream', params, onToken, onDone),
 }
 
 // Helper for streaming POST requests
-async function streamPost(endpoint, body, onToken, params = {}) {
+async function streamPost(endpoint, body, onToken, onDone, params = {}) {
   const url = new URL(`${api.defaults.baseURL}${endpoint}`, window.location.origin)
   Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v))
   
@@ -127,6 +126,8 @@ async function streamPost(endpoint, body, onToken, params = {}) {
         const parsed = JSON.parse(data)
         if (event === 'token' && onToken) {
           onToken(parsed.token)
+        } else if (event === 'done' && onDone) {
+          onDone(parsed)
         } else if (event === 'error') {
           throw new Error(parsed.message || 'Stream error')
         }

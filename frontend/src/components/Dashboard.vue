@@ -758,7 +758,7 @@ const designParams = ref({
 const applyingPlan = ref(null)
 const expandedPlan = ref(null) // Track which plan card is expanded
 const designGenerationStage = ref('') // Track generation progress for better UX
-const designTab = ref('report') // 'report' | 'cards'
+const designTab = ref('cards') // 'report' | 'cards'
 
 // Markdown renderer for design report
 const md = new MarkdownIt({ html: false, linkify: true, typographer: true })
@@ -956,21 +956,49 @@ const exitCoreFeature = () => {
 
 const generateDesign = async () => {
   designStep.value = 'loading'
-  designGenerationStage.value = '正在获取市场行情...'
+  designGenerationStage.value = '正在连接 AI 服务...'
   try {
-    // Stage 1: Fetch market data (backend does this)
-    designGenerationStage.value = '正在分析财经资讯...'
-    // Small delay to show stage
-    await new Promise(r => setTimeout(r, 300))
+    // Use SSE streaming for real-time progress
+    let fullText = ''
+    await analysisApi.portfolioDesignStream(
+      { capital: designParams.value.capital },
+      (token) => {
+        fullText += token
+        // Update progress based on token count
+        if (fullText.length < 2000) {
+          designGenerationStage.value = `正在生成组合方案... (${fullText.length} 字符)`
+        } else if (fullText.length < 5000) {
+          designGenerationStage.value = `正在生成详细配置... (${fullText.length} 字符)`
+        } else {
+          designGenerationStage.value = `正在完成报告... (${fullText.length} 字符)`
+        }
+      },
+      (doneData) => {
+        // Handle the done event with full text and metadata
+        fullText = doneData.full_text || fullText
+        if (doneData.metadata) {
+          designGenerationStage.value = `生成完成 (${doneData.metadata.total_tokens} tokens, ${doneData.metadata.latency_ms}ms)`
+        }
+      }
+    )
     
-    designGenerationStage.value = '正在调用 AI 生成组合方案...'
-    const res = await analysisApi.portfolioDesign({
-      capital: designParams.value.capital
-    })
-    designResult.value = res.data
+    // Parse the complete JSON response
+    try {
+      const parsed = JSON.parse(fullText)
+      designResult.value = parsed
+    } catch (e) {
+      console.error('Failed to parse streaming response:', e)
+      // Fallback to non-streaming
+      const res = await analysisApi.portfolioDesign({
+        capital: designParams.value.capital
+      })
+      designResult.value = res.data
+    }
+    
     designStep.value = 'result'
     toast('组合方案生成完成', 'success')
   } catch (e) {
+    console.error('Streaming generation failed:', e)
     toast('生成失败', 'error')
     designStep.value = 'wizard'
   } finally {
@@ -1034,7 +1062,16 @@ const fetchPortfolioDesign = () => generateDesign()
 
 const applyPortfolioDesign = async (pf) => {
   try {
-    await portfolioApi.applyPortfolioDesign(pf)
+    // Extract symbols and weights from the plan's allocations
+    const symbols = pf.allocations?.map(a => a.symbol) || []
+    const weights = {}
+    pf.allocations?.forEach(a => { weights[a.symbol] = a.target_weight })
+    
+    await portfolioApi.applyPortfolioDesign({
+      portfolio_type: 'on_exchange',
+      symbols,
+      weights
+    })
     toast('组合已应用', 'success')
     designResult.value = null
     exitCoreFeature()
