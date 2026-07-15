@@ -472,9 +472,17 @@ async def get_asset_realtime(symbol: str, asset_type: str) -> dict | None:
 
 
 async def _route_us(symbol: str) -> dict | None:
-    """美股/ETF: Stooq(主) → yfinance(兜底)，通过 SourceRegistry 熔断路由。"""
+    """美股/ETF: Stooq → Alpha Vantage → Finnhub → yfinance，通过 SourceRegistry 熔断路由。
+
+    Alpha Vantage 和 Finnhub 需要 API key（分别从 ALPHAVANTAGE_API_KEY、
+    FINNHUB_API_KEY 环境变量读取）；key 未设置时自动跳过对应源。
+    """
     from ..fetchers import stooq_fetcher
     from ..fetchers.yfinance_fetcher import fetch_us_etf_realtime
+    from ..fetchers.free_us_fetcher import (
+        fetch_alphav_realtime,
+        fetch_finnhub_realtime,
+    )
 
     def _stooq():
         rows = stooq_fetcher.fetch_us_etf_realtime(symbol)
@@ -483,8 +491,16 @@ async def _route_us(symbol: str) -> dict | None:
     def _yf():
         return fetch_us_etf_realtime(symbol)
 
+    def _alphav():
+        return fetch_alphav_realtime(symbol)
+
+    def _finnhub():
+        return fetch_finnhub_realtime(symbol)
+
     return registry.route([
         ("stooq", _stooq),
+        ("alphav", _alphav),
+        ("finnhub", _finnhub),
         ("yfinance", _yf),
     ])
 
