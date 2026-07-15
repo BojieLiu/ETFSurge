@@ -6,7 +6,7 @@
 - indices_meta: 所有指数元数据（A股/港股/行业/概念/宽基/策略等），供搜索/下拉/分析入口
 """
 
-from sqlalchemy import Column, String, Boolean, DateTime, Integer
+from sqlalchemy import Column, String, Boolean, DateTime, Integer, Text
 from ..database import Base
 
 from datetime import datetime
@@ -67,3 +67,17 @@ class IndexMeta(Base):
     first_letter = Column(String(5), index=True)       # 拼音首字母（如 'P'，'PA'）
     is_active = Column(Boolean, default=True)
     updated_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Watchlist(Base):
+    """用户自选/关注列表。"""
+
+    __tablename__ = "watchlist"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    symbol = Column(String(20), nullable=False, index=True, unique=True)
+    name = Column(String(100), nullable=False)
+    asset_type = Column(String(10), nullable=False, default="A")
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

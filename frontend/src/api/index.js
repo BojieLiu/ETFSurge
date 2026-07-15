@@ -37,6 +37,12 @@ export const marketApi = {
   signal: (symbol, assetType = 'A') => api.get(`/market/signal/${symbol}`, { params: { asset_type: assetType } }),
   chart: (symbol, assetType = 'A', period = 'daily') => api.get(`/market/chart/${symbol}`, { params: { asset_type: assetType, period } }),
   indicesGlobal: () => api.get('/market/indices/global'),
+  // Watchlist
+  getWatchlist: (params = {}) => api.get('/market/watchlist', { params }),
+  addWatchlist: (data) => api.post('/market/watchlist', data),
+  updateWatchlist: (id, data) => api.put(`/market/watchlist/${id}`, data),
+  removeWatchlist: (id) => api.delete(`/market/watchlist/${id}`),
+  batchRemoveWatchlist: (ids) => api.delete('/market/watchlist', { data: { ids } }),
 }
 
 export const portfolioApi = {

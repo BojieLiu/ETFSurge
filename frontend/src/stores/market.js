@@ -16,6 +16,11 @@ export const useMarketStore = defineStore('market', () => {
   const wsConnected = ref(false)
   const wsData = ref(null)
 
+  // Watchlist
+  const watchlist = ref([])
+  const watchlistLoading = ref(false)
+  const watchlistTotal = ref(0)
+
   let ws = null
   let reconnectTimer = null
   let heartbeatTimer = null
@@ -95,10 +100,14 @@ export const useMarketStore = defineStore('market', () => {
     stopped = true
     wsConnected.value = false
     clearInterval(heartbeatTimer)
-    if (reconnectTimer) clearTimeout(reconnectTimer)
-    if (ws) ws.close()
-    ws = null
-    onMessageCallback = null
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
+    if (ws) {
+      ws.close()
+      ws = null
+    }
   }
 
   async function fetchRealtime() {
@@ -121,9 +130,56 @@ export const useMarketStore = defineStore('market', () => {
     history.value = res.data
   }
 
+  // Watchlist actions
+  async function fetchWatchlist(limit = 100, offset = 0) {
+    watchlistLoading.value = true
+    try {
+      const res = await marketApi.getWatchlist({ limit, offset })
+      watchlist.value = res.data.items
+      watchlistTotal.value = res.data.total
+    } catch (e) {
+      logger.error('获取自选列表失败:', e)
+      throw e
+    } finally {
+      watchlistLoading.value = false
+    }
+  }
+
+  async function addWatchlist(symbol, assetType = 'A', notes = '') {
+    const res = await marketApi.addWatchlist({ symbol, asset_type: assetType, notes })
+    watchlist.value.unshift(res.data)
+    watchlistTotal.value += 1
+    return res.data
+  }
+
+  async function updateWatchlist(id, data) {
+    const res = await marketApi.updateWatchlist(id, data)
+    const idx = watchlist.value.findIndex(item => item.id === id)
+    if (idx >= 0) watchlist.value[idx] = res.data
+    return res.data
+  }
+
+  async function removeWatchlist(id) {
+    await marketApi.removeWatchlist(id)
+    watchlist.value = watchlist.value.filter(item => item.id !== id)
+    watchlistTotal.value -= 1
+  }
+
+  async function batchRemoveWatchlist(ids) {
+    await marketApi.batchRemoveWatchlist(ids)
+    watchlist.value = watchlist.value.filter(item => !ids.includes(item.id))
+    watchlistTotal.value -= ids.length
+  }
+
   function getQuote(symbol) {
     return realtimeData.value.find(item => item.symbol === symbol)
   }
 
-  return { realtimeData, indicators, signal, history, wsConnected, wsData, connectWS, disconnectWS, fetchRealtime, fetchIndicators, fetchSignal, fetchHistory, getQuote }
+  return { 
+    realtimeData, indicators, signal, history, wsConnected, wsData, 
+    connectWS, disconnectWS, fetchRealtime, fetchIndicators, fetchSignal, fetchHistory, getQuote,
+    // Watchlist
+    watchlist, watchlistLoading, watchlistTotal,
+    fetchWatchlist, addWatchlist, updateWatchlist, removeWatchlist, batchRemoveWatchlist,
+  }
 })

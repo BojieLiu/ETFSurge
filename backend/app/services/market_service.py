@@ -523,3 +523,145 @@ async def get_fundamentals(symbol: str) -> dict[str, Any] | None:
     except Exception:
         pass
     return None
+
+
+# ── Watchlist / 自选列表 ──────────────────────────────────────────
+
+async def get_watchlist(limit: int = 100, offset: int = 0) -> dict[str, Any]:
+    from ..models.search import Watchlist
+    from sqlalchemy import select, func
+
+    async with async_session() as session:
+        # Get total count
+        total_result = await session.execute(select(func.count(Watchlist.id)))
+        total = total_result.scalar() or 0
+
+        # Get items
+        result = await session.execute(
+            select(Watchlist)
+            .order_by(Watchlist.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        items = result.scalars().all()
+
+        # Enrich with realtime data
+        enriched = []
+        for item in items:
+            realtime = await get_asset_realtime(item.symbol, item.asset_type)
+            enriched.append({
+                "id": item.id,
+                "symbol": item.symbol,
+                "name": item.name,
+                "asset_type": item.asset_type,
+                "notes": item.notes,
+                "created_at": item.created_at.isoformat() if item.created_at else None,
+                "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+                "realtime": realtime,
+            })
+
+        return {
+            "items": enriched,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+
+
+async def add_watchlist(symbol: str, asset_type: str, notes: str | None = None) -> dict[str, Any]:
+    from ..models.search import Watchlist
+    from sqlalchemy import select
+
+    async with async_session() as session:
+        # Check if already exists
+        existing = await session.execute(
+            select(Watchlist).where(Watchlist.symbol == symbol)
+        )
+        if existing.scalar_one_or_none():
+            raise ValueError(f"Symbol {symbol} already in watchlist")
+
+        # Get name from realtime
+        realtime = await get_asset_realtime(symbol, asset_type)
+        name = realtime.get("name", symbol) if realtime else symbol
+
+        item = Watchlist(
+            symbol=symbol,
+            name=name,
+            asset_type=asset_type,
+            notes=notes,
+        )
+        session.add(item)
+        await session.commit()
+        await session.refresh(item)
+
+        realtime = await get_asset_realtime(symbol, asset_type)
+        return {
+            "id": item.id,
+            "symbol": item.symbol,
+            "name": item.name,
+            "asset_type": item.asset_type,
+            "notes": item.notes,
+            "created_at": item.created_at.isoformat() if item.created_at else None,
+            "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+            "realtime": realtime,
+        }
+
+
+async def update_watchlist(item_id: int, notes: str | None = None, asset_type: str | None = None) -> dict[str, Any] | None:
+    from ..models.search import Watchlist
+    from sqlalchemy import select
+
+    async with async_session() as session:
+        result = await session.execute(select(Watchlist).where(Watchlist.id == item_id))
+        item = result.scalar_one_or_none()
+        if not item:
+            return None
+
+        if notes is not None:
+            item.notes = notes
+        if asset_type is not None:
+            item.asset_type = asset_type
+
+        await session.commit()
+        await session.refresh(item)
+
+        realtime = await get_asset_realtime(item.symbol, item.asset_type)
+        return {
+            "id": item.id,
+            "symbol": item.symbol,
+            "name": item.name,
+            "asset_type": item.asset_type,
+            "notes": item.notes,
+            "created_at": item.created_at.isoformat() if item.created_at else None,
+            "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+            "realtime": realtime,
+        }
+
+
+async def remove_watchlist(item_id: int) -> bool:
+    from ..models.search import Watchlist
+    from sqlalchemy import select
+
+    async with async_session() as session:
+        result = await session.execute(select(Watchlist).where(Watchlist.id == item_id))
+        item = result.scalar_one_or_none()
+        if not item:
+            return False
+
+        await session.delete(item)
+        await session.commit()
+        return True
+
+
+async def batch_remove_watchlist(ids: list[int]) -> int:
+    from ..models.search import Watchlist
+    from sqlalchemy import select
+
+    async with async_session() as session:
+        result = await session.execute(select(Watchlist).where(Watchlist.id.in_(ids)))
+        items = result.scalars().all()
+        count = len(items)
+        for item in items:
+            await session.delete(item)
+        await session.commit()
+        return count

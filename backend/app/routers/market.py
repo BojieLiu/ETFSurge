@@ -11,6 +11,7 @@ from ..services.market_service import (
     get_all_realtime, get_asset_realtime, get_history, search_etf,
     get_realtime_batch, get_portfolio_realtime, get_fundamentals,
     get_global_indices, get_sectors_local, get_indices_meta, search_indices,
+    get_watchlist, add_watchlist, update_watchlist, remove_watchlist, batch_remove_watchlist,
 )
 from ..analysis.indicators import compute_all_indicators, compute_chart_data
 from ..analysis.signal import generate_signal
@@ -22,6 +23,10 @@ from ..fetchers.sector_fetcher import (
     fetch_hot_plates, fetch_stock_hot_rank, fetch_sector_popular_stocks,
     fetch_all_stocks, fetch_sector_history, fetch_sector_industry_cls,
 )
+from ..models.search import Watchlist
+from ..models.schemas import WatchlistCreate, WatchlistUpdate, WatchlistResponse
+from sqlalchemy import select
+from fastapi import HTTPException
 
 router = APIRouter(prefix="/api/v1/market", tags=["market"])
 
@@ -224,3 +229,144 @@ async def stock_hot_rank(limit: int = Query(50)) -> list[dict[str, Any]]:
 async def wind() -> list[dict[str, Any]]:
     """今日风口/主线板块(财联社)。"""
     return await asyncio.to_thread(fetch_market_wind)
+
+
+# ── Watchlist / 自选列表 ──────────────────────────────────────────────
+
+
+@router.get("/watchlist", response_model=dict)
+async def watchlist_list(
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+) -> dict[str, Any]:
+    """获取自选列表（含实时行情快照）"""
+    async with async_session() as session:
+        # Get total count
+        total_stmt = select(Watchlist.id)
+        total_result = await session.execute(total_stmt)
+        total = len(total_result.scalars().all())
+
+        # Get paginated items
+        stmt = select(Watchlist).order_by(Watchlist.created_at.desc()).offset(offset).limit(limit)
+        result = await session.execute(stmt)
+        items = result.scalars().all()
+
+        # Enrich with realtime data
+        enriched = []
+        for item in items:
+            realtime = await get_asset_realtime(item.symbol, item.asset_type)
+            item_dict = {
+                "id": item.id,
+                "symbol": item.symbol,
+                "name": item.name,
+                "asset_type": item.asset_type,
+                "notes": item.notes,
+                "created_at": item.created_at.isoformat() if item.created_at else None,
+                "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+            }
+            if realtime:
+                item_dict["realtime"] = {
+                    "price": realtime.get("price"),
+                    "change_pct": realtime.get("change_pct"),
+                    "volume": realtime.get("volume"),
+                }
+            enriched.append(item_dict)
+
+        return {
+            "items": enriched,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+
+
+@router.post("/watchlist", response_model=dict, status_code=201)
+async def watchlist_add(data: WatchlistCreate) -> dict[str, Any]:
+    """添加自选"""
+    async with async_session() as session:
+        # Check if already exists
+        stmt = select(Watchlist).where(Watchlist.symbol == data.symbol)
+        result = await session.execute(stmt)
+        existing = result.scalar_one_or_none()
+        if existing:
+            raise HTTPException(status_code=409, detail="该标的已在自选列表中")
+
+        # Get name from market data
+        realtime = await get_asset_realtime(data.symbol, data.asset_type)
+        name = realtime.get("name", data.symbol) if realtime else data.symbol
+
+        item = Watchlist(
+            symbol=data.symbol,
+            name=name,
+            asset_type=data.asset_type,
+            notes=data.notes,
+        )
+        session.add(item)
+        await session.commit()
+        await session.refresh(item)
+
+        return {
+            "id": item.id,
+            "symbol": item.symbol,
+            "name": item.name,
+            "asset_type": item.asset_type,
+            "notes": item.notes,
+            "created_at": item.created_at.isoformat() if item.created_at else None,
+            "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+        }
+
+
+@router.put("/watchlist/{item_id}", response_model=dict)
+async def watchlist_update(item_id: int, data: WatchlistUpdate) -> dict[str, Any]:
+    """更新自选"""
+    async with async_session() as session:
+        stmt = select(Watchlist).where(Watchlist.id == item_id)
+        result = await session.execute(stmt)
+        item = result.scalar_one_or_none()
+        if not item:
+            raise HTTPException(status_code=404, detail="自选项不存在")
+
+        if data.notes is not None:
+            item.notes = data.notes
+        if data.asset_type is not None:
+            item.asset_type = data.asset_type
+
+        await session.commit()
+        await session.refresh(item)
+
+        return {
+            "id": item.id,
+            "symbol": item.symbol,
+            "name": item.name,
+            "asset_type": item.asset_type,
+            "notes": item.notes,
+            "created_at": item.created_at.isoformat() if item.created_at else None,
+            "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+        }
+
+
+@router.delete("/watchlist/{item_id}", status_code=204)
+async def watchlist_remove(item_id: int):
+    """删除自选"""
+    async with async_session() as session:
+        stmt = select(Watchlist).where(Watchlist.id == item_id)
+        result = await session.execute(stmt)
+        item = result.scalar_one_or_none()
+        if not item:
+            raise HTTPException(status_code=404, detail="自选项不存在")
+        await session.delete(item)
+        await session.commit()
+
+
+@router.delete("/watchlist", response_model=dict)
+async def watchlist_batch_remove(ids: list[int]) -> dict[str, int]:
+    """批量删除自选"""
+    async with async_session() as session:
+        stmt = select(Watchlist).where(Watchlist.id.in_(ids))
+        result = await session.execute(stmt)
+        items = result.scalars().all()
+        count = len(items)
+        for item in items:
+            await session.delete(item)
+        await session.commit()
+        return {"deleted": count}

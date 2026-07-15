@@ -169,3 +169,38 @@ class ImportResult(BaseModel):
     skipped: int
     errors: list[ImportError]
     holdings: list[PortfolioETFResponse]
+
+
+# Watchlist / 自选列表
+class WatchlistBase(BaseModel):
+    symbol: str
+    asset_type: str = "etf"
+    notes: Optional[str] = None
+
+
+class WatchlistCreate(WatchlistBase):
+    pass
+
+
+class WatchlistUpdate(BaseModel):
+    notes: Optional[str] = None
+    asset_type: Optional[str] = None
+
+
+class WatchlistResponse(WatchlistBase):
+    id: int
+    name: str
+    asset_type: str
+    created_at: str
+    updated_at: str
+    realtime: Optional[dict] = None
+
+    class Config:
+        from_attributes = True
+
+
+class WatchlistListResponse(BaseModel):
+    items: list[WatchlistResponse]
+    total: int
+    limit: int
+    offset: int
