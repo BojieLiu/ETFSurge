@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { createPinia } from 'pinia'
 import { changeClass } from './changeClass'
 
 // --- Issue 1: P&L color convention (红涨绿跌) ---
@@ -37,7 +38,7 @@ vi.mock('../composables/useMarketWS', () => ({
   useMarketWS: () => ({ connect: vi.fn(), disconnect: vi.fn(), onMarketData: vi.fn() }),
 }))
 
-vi.mock('../stores/toast', () => ({ useToast: () => ({ toast: vi.fn() }) }))
+vi.mock('../stores/toast', () => ({ useToastStore: () => ({ show: vi.fn() }) }))
 vi.mock('../stores/portfolio', () => ({ usePortfolioStore: () => ({ etfs: [] }) }))
 vi.mock('vue-router', () => ({ useRoute: () => ({}), useRouter: () => ({ push: vi.fn() }) }))
 
@@ -47,6 +48,7 @@ describe('core-actions buttons', () => {
   it('renders a concise title plus a separate helper description for each action', () => {
     const wrapper = mount(Dashboard, {
       global: {
+        plugins: [createPinia()],
         stubs: { VChart: true, AppButton: true, AppInput: true, Skeleton: true },
       },
     })

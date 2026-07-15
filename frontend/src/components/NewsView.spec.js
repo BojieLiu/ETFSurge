@@ -22,7 +22,7 @@ vi.mock('../composables/useNewsWS', () => ({
 
 const toastSpy = vi.hoisted(() => vi.fn())
 vi.mock('../stores/toast', () => ({
-  useToast: () => ({ toast: (...args) => toastSpy(...args) }),
+  useToastStore: () => ({ show: (...args) => toastSpy(...args) }),
 }))
 
 vi.mock('../stores/portfolio', () => ({

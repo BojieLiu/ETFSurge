@@ -56,7 +56,7 @@
     <div class="toast-container" role="region" aria-label="通知" aria-live="polite" aria-atomic="true">
       <TransitionGroup name="toast" tag="div" class="toast-list">
         <div
-          v-for="toast in toasts"
+          v-for="toast in toastStore.toasts"
           :key="toast.id"
           :class="['toast', `toast--${toast.type}`]"
           role="alert"
@@ -81,22 +81,24 @@
 
     <!-- Global Loading Overlay -->
     <Transition name="fade">
-      <div v-if="globalLoading" class="loading-overlay" role="status" aria-live="polite" aria-busy="true">
+      <div v-if="loadingStore.active" class="loading-overlay" role="status" aria-live="polite" aria-busy="true">
         <div class="loading-spinner" aria-hidden="true"></div>
-        <p class="loading-text">{{ loadingMessage }}</p>
+        <p class="loading-text">{{ loadingStore.message }}</p>
       </div>
     </Transition>
   </div>
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { useToast } from './stores/toast'
+import { useToastStore } from './stores/toast'
+import { useLoadingStore } from './stores/loading'
 
 const router = useRouter()
 const route = useRoute()
-const { toasts, dismiss } = useToast()
+const toastStore = useToastStore()
+const loadingStore = useLoadingStore()
 
 // Navigation items
 const navItems = [
@@ -123,10 +125,6 @@ const connectionStatusText = computed(() => {
   }
 })
 
-// Global loading state
-const globalLoading = ref(false)
-const loadingMessage = ref('加载中...')
-
 // Toast icons
 const toastIcons = {
   success: {
@@ -144,18 +142,7 @@ const toastIcons = {
 }
 
 const dismissToast = (id) => {
-  dismiss(id)
-}
-
-// Expose global loading control
-window.$loading = {
-  show: (msg = '加载中...') => {
-    loadingMessage.value = msg
-    globalLoading.value = true
-  },
-  hide: () => {
-    globalLoading.value = false
-  }
+  toastStore.dismiss(id)
 }
 </script>
 

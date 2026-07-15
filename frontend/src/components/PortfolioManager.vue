@@ -124,10 +124,10 @@
 
       <div class="pnl-summary" v-if="pnlSummary.total_amount > 0">
         <span class="pnl-label">合计</span>
-        <span class="pnl-amount" :class="pnlSummary.total_pnl >= 0 ? 'text-success' : 'text-danger'">
+        <span class="pnl-amount" :class="changeClass(pnlSummary.total_pnl)">
           ¥{{ formatNum(pnlSummary.total_pnl) }}
         </span>
-        <span class="pnl-pct" :class="pnlSummary.weighted_change_pct >= 0 ? 'text-success' : 'text-danger'">
+        <span class="pnl-pct" :class="changeClass(pnlSummary.weighted_change_pct)">
           ({{ pnlSummary.weighted_change_pct >= 0 ? '+' : '' }}{{ pnlSummary.weighted_change_pct.toFixed(2) }}%)
         </span>
       </div>
@@ -275,13 +275,13 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { usePortfolioStore } from '../stores/portfolio'
 import { portfolioApi, marketApi } from '../api'
-import { useToast } from '../stores/toast'
+import { useToastStore } from '../stores/toast'
 import AppButton from './ui/AppButton.vue'
 import AppInput from './ui/AppInput.vue'
 import AppSelect from './ui/AppSelect.vue'
 
 const store = usePortfolioStore()
-const { toast } = useToast()
+const { show: toast } = useToastStore()
 
 // Props / emits (selection indicator driven by a parent, e.g. the merged view)
 const props = defineProps({
@@ -345,7 +345,7 @@ const formatChange = (n, isAmount = false) => {
   return `${prefix}${val.toFixed(2)}${suffix}`
 }
 
-const getChangeClass = (val) => val >= 0 ? 'text-success' : 'text-danger'
+const getChangeClass = (val) => val >= 0 ? 'text-up' : 'text-down'
 
 // Search
 let searchTimer = null
@@ -473,7 +473,11 @@ async function refreshPnl() {
 }
 
 async function loadTab() {
-  await store.fetchEtfs(activeTab.value)
+  try {
+    await store.fetchEtfs(activeTab.value)
+  } catch (e) {
+    toast('加载持仓失败', 'error')
+  }
   await refreshPnl()
 }
 
@@ -645,9 +649,9 @@ onMounted(loadTab)
 .dropdown-enter-active, .dropdown-leave-active { transition: all var(--duration-fast) var(--ease-out); }
 .dropdown-enter-from, .dropdown-leave-to { opacity: 0; transform: translateY(-8px); }
 
-/* Text Color Utilities */
-.text-success { color: var(--color-text-success) !important; }
-.text-danger { color: var(--color-text-danger) !important; }
+/* Text Color Utilities — uses Chinese convention: red = up/gain, green = down/loss */
+.text-up { color: var(--color-text-up) !important; }
+.text-down { color: var(--color-text-down) !important; }
 .text-warning { color: var(--color-text-warning) !important; }
 
 /* Focus Visible */

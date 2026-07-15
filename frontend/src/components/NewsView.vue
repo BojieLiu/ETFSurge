@@ -95,11 +95,11 @@
 import { ref, computed, onMounted } from 'vue'
 import { newsApi } from '../api'
 import { useNewsWS } from '../composables/useNewsWS'
-import { useToast } from '../stores/toast'
+import { useToastStore } from '../stores/toast'
 import { usePortfolioStore } from '../stores/portfolio'
 import { mapNewsLevel, isImportant } from '../utils/newsLevel'
 
-const { toast } = useToast()
+const { show: toast } = useToastStore()
 const store = usePortfolioStore()
 
 const news = ref([])

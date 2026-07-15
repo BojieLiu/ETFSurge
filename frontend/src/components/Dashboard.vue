@@ -686,8 +686,8 @@ import VChart from 'vue-echarts'
 import { usePortfolioStore } from '../stores/portfolio'
 import { portfolioApi, analysisApi, marketApi } from '../api'
 import { changeClass } from '../utils/changeClass'
-import { useToast } from '../stores/toast'
-import { useMarketWS } from '../composables/useMarketWS'
+import { useToastStore } from '../stores/toast'
+import { useMarketStore } from '../stores/market'
 import logger from '../utils/logger'
 import AppButton from './ui/AppButton.vue'
 import AppInput from './ui/AppInput.vue'
@@ -698,7 +698,7 @@ use([CanvasRenderer, PieChart, BarChart, TitleComponent, TooltipComponent, Legen
 
 const store = usePortfolioStore()
 const route = useRoute()
-const { toast } = useToast()
+const { show: toast } = useToastStore()
 
 // State
 const activeTab = ref('combined')
@@ -1040,13 +1040,11 @@ const pnlBarOption = computed(() => ({
   }]
 }))
 
-// WebSocket
-const { connect, disconnect, onMarketData } = useMarketWS()
+const marketStore = useMarketStore()
 
 onMounted(async () => {
   await Promise.all([fetchGlobalIndices(), fetchAllocations(), fetchPnl()])
-  connect()
-  onMarketData((data) => {
+  marketStore.connectWS((data) => {
     // Update matching global index in real-time (A-share indices pushed via WS)
     for (const region of Object.keys(globalIndices.value)) {
       const list = globalIndices.value[region]
@@ -1060,7 +1058,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  disconnect()
+  marketStore.disconnectWS()
   if (marketTimer.value) clearInterval(marketTimer.value)
 })
 

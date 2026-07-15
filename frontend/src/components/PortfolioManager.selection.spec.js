@@ -15,7 +15,7 @@ const storeMock = vi.hoisted(() => ({
 }))
 
 vi.mock('../stores/portfolio', () => ({ usePortfolioStore: () => storeMock }))
-vi.mock('../stores/toast', () => ({ useToast: () => ({ toast: vi.fn() }) }))
+vi.mock('../stores/toast', () => ({ useToastStore: () => ({ show: vi.fn() }) }))
 vi.mock('../api', () => ({
   portfolioApi: {
     dailyPnl: vi.fn(() => Promise.resolve({ data: { items: [] } })),
