@@ -1,11 +1,5 @@
 <template>
   <div class="news-view">
-    <!-- Page Header -->
-    <header class="page-header">
-      <h1 class="page-title">资讯监控</h1>
-      <p class="page-description">实时推送重要资讯，按重要程度着色与评星；支持 AI 智能分析对组合的影响</p>
-    </header>
-
     <div class="news-toolbar">
       <div class="news-status" aria-live="polite">
         <span class="status-dot" :class="{ 'status-dot--on': connected }" aria-hidden="true"></span>

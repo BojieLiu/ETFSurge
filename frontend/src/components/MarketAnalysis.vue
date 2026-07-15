@@ -1,11 +1,5 @@
 <template>
   <div class="market-analysis">
-    <!-- Page Header -->
-    <header class="page-header">
-      <h1 class="page-title">行情分析</h1>
-      <p class="page-description">市场宏观研判、板块轮动分析与标的深度解读</p>
-    </header>
-
     <!-- Section 1: Market Overview -->
     <section class="section-card">
       <div class="section-header">

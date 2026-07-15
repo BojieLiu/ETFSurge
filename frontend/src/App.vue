@@ -90,7 +90,7 @@
 </template>
 
 <script setup>
-import { computed, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useToastStore } from './stores/toast'
 import { useLoadingStore } from './stores/loading'

@@ -1,11 +1,5 @@
 <template>
   <div class="dashboard">
-    <!-- Page Header -->
-    <header class="page-header">
-      <h1 class="page-title">Dashboard</h1>
-      <p class="page-description">实时行情监控、组合概览与智能策略分析</p>
-    </header>
-
     <!-- Core Actions: AI Portfolio Design & Strategy Check (Interactive Panel) -->
     <section class="card core-actions">
       <div class="card-header">

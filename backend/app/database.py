@@ -38,3 +38,12 @@ def _migrate(conn):
         conn.execute(text("ALTER TABLE portfolio_etfs ADD COLUMN portfolio_type VARCHAR(20) NOT NULL DEFAULT 'on_exchange'"))
     if "short_name" not in columns:
         conn.execute(text("ALTER TABLE portfolio_etfs ADD COLUMN short_name VARCHAR(60)"))
+    # Cost basis columns (for cumulative P&L tracking)
+    if "avg_cost" not in columns:
+        conn.execute(text("ALTER TABLE portfolio_etfs ADD COLUMN avg_cost FLOAT"))
+    if "shares_held" not in columns:
+        conn.execute(text("ALTER TABLE portfolio_etfs ADD COLUMN shares_held FLOAT"))
+    if "first_buy_date" not in columns:
+        conn.execute(text("ALTER TABLE portfolio_etfs ADD COLUMN first_buy_date DATE"))
+    if "last_trade_date" not in columns:
+        conn.execute(text("ALTER TABLE portfolio_etfs ADD COLUMN last_trade_date DATE"))

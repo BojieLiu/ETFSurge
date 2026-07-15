@@ -1,10 +1,5 @@
 <template>
   <div class="token-monitor">
-    <header class="page-header">
-      <h1 class="page-title">Token 用量监控</h1>
-      <p class="page-description">DeepSeek API Token 使用统计与趋势变化</p>
-    </header>
-
     <!-- Loading -->
     <div v-if="loading" class="loading-state">
       <div class="loading-spinner" aria-hidden="true"></div>

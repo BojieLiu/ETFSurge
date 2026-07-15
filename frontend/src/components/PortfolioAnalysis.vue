@@ -1,11 +1,5 @@
 <template>
   <div class="portfolio-analysis">
-    <!-- Page Header -->
-    <header class="page-header">
-      <h1 class="page-title">组合与分析</h1>
-      <p class="page-description">左侧管理场内/场外 ETF 组合，点击持仓即可在右侧查看其 K 线、技术指标与买卖信号</p>
-    </header>
-
     <div class="pa-layout">
       <!-- Left: holdings list (reuses PortfolioManager) -->
       <aside class="pa-holdings" aria-label="持仓列表">
