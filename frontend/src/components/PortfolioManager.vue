@@ -82,6 +82,30 @@
             />
           </div>
 
+          <div class="form-field">
+            <span class="form-label">成本价 (元/份)</span>
+            <AppInput
+              type="number"
+              v-model.number="form.avg_cost"
+              placeholder="可选"
+              :min="0"
+              :step="0.001"
+              size="md"
+            />
+          </div>
+
+          <div class="form-field">
+            <span class="form-label">持有份额/股数</span>
+            <AppInput
+              type="number"
+              v-model.number="form.shares_held"
+              placeholder="可选"
+              :min="0"
+              :step="1"
+              size="md"
+            />
+          </div>
+
           <div class="form-field form-field--weight">
             <div class="weight-control">
               <label class="weight-label">
@@ -146,6 +170,21 @@
             <span v-if="Math.abs(currentWeightSum - 1) > 0.01" class="warn-text"> (不等于 100%)</span>
           </span>
         </div>
+        <div class="card-actions">
+          <AppButton variant="ghost" size="sm" @click="exportPortfolio" :loading="exportLoading">
+            <span class="btn-icon" aria-hidden="true">📤</span>
+            导出
+          </AppButton>
+          <AppButton variant="ghost" size="sm" @click="importFileClick">
+            <span class="btn-icon" aria-hidden="true">📥</span>
+            导入
+          </AppButton>
+          <AppButton variant="ghost" size="sm" @click="checkDrift" :loading="driftLoading">
+            <span class="btn-icon" aria-hidden="true">⚖️</span>
+            偏离检查
+          </AppButton>
+          <input type="file" ref="fileInput" accept=".csv" style="display: none" @change="onFileChange" />
+        </div>
       </div>
 
       <!-- Empty State -->
@@ -168,6 +207,9 @@
               <th scope="col">名称</th>
               <th scope="col">市场</th>
               <th scope="col">权重</th>
+              <th scope="col">成本价</th>
+              <th scope="col">份额</th>
+              <th scope="col">成本</th>
               <th scope="col">现价</th>
               <th scope="col">涨跌幅</th>
               <th scope="col">当日盈亏</th>
@@ -206,6 +248,39 @@
                   <span class="weight-val">{{ etf.editWeight != null ? etf.editWeight : (etf.target_weight * 100).toFixed(0) }}%</span>
                 </div>
               </td>
+              <td class="cost-cell">
+                <AppInput
+                  v-if="etf.editCost !== undefined"
+                  v-model.number="etf.editCost"
+                  size="sm"
+                  type="number"
+                  :step="0.01"
+                  :min="0"
+                  @blur="saveCostBasis(etf)"
+                  @keydown.enter="saveCostBasis(etf)"
+                />
+                <span v-else class="cost-value text-mono" @dblclick="startEditCost(etf)">
+                  {{ etf.avg_cost != null ? '¥' + etf.avg_cost.toFixed(3) : '—' }}
+                </span>
+              </td>
+              <td class="shares-cell">
+                <AppInput
+                  v-if="etf.editShares !== undefined"
+                  v-model.number="etf.editShares"
+                  size="sm"
+                  type="number"
+                  :step="1"
+                  :min="0"
+                  @blur="saveCostBasis(etf)"
+                  @keydown.enter="saveCostBasis(etf)"
+                />
+                <span v-else class="shares-value text-mono" @dblclick="startEditShares(etf)">
+                  {{ etf.shares_held != null ? etf.shares_held.toLocaleString() : '—' }}
+                </span>
+              </td>
+              <td class="cost-basis-cell text-mono">
+                {{ etf.cost_basis != null ? '¥' + formatNum(etf.cost_basis) : '—' }}
+              </td>
               <td class="price-cell">
                 <span v-if="pnlMap[etf.symbol]?.current_price" class="text-mono">¥{{ pnlMap[etf.symbol].current_price.toFixed(2) }}</span>
                 <span v-else class="text-muted">—</span>
@@ -230,7 +305,7 @@
               </td>
             </tr>
             <tr v-if="etf.portfolio_type === 'off_exchange'" class="ta-expand">
-              <td :colspan="8">
+              <td :colspan="11">
                  <div class="off-ta">
                    <button class="ta-toggle" @click.stop="toggleTa(etf)">
                     {{ taOpen[etf.symbol] ? '收起技术分析 ▲' : '查看技术分析 ▼' }}
@@ -400,9 +475,11 @@ async function onAdd() {
       symbol: form.value.symbol, name: form.value.name,
       asset_type: form.value.asset_type, target_weight: form.value.weight / 100,
       portfolio_type: activeTab.value, tracked_index: form.value.tracked_index || undefined,
+      avg_cost: form.value.avg_cost || undefined,
+      shares_held: form.value.shares_held || undefined,
     })
     toast(`已添加 ${form.value.name}`, 'success')
-    form.value = { symbol: '', name: '', asset_type: 'A', weight: 20, tracked_index: form.value.tracked_index }
+    form.value = { symbol: '', name: '', asset_type: 'A', weight: 20, tracked_index: form.value.tracked_index, avg_cost: null, shares_held: null }
     searchQuery.value = ''
   } finally {
     adding.value = false
@@ -411,7 +488,11 @@ async function onAdd() {
 
 async function onUpdate(etf) {
   const w = etf.editWeight != null ? etf.editWeight / 100 : etf.target_weight
-  await store.updateEtf(etf.symbol, { target_weight: w })
+  await store.updateEtf(etf.symbol, { 
+    target_weight: w,
+    avg_cost: etf.avg_cost,
+    shares_held: etf.shares_held,
+  })
   toast(`${etf.name} 权重已更新`, 'success')
   etf.editWeight = null
   await loadTab()
@@ -494,6 +575,112 @@ async function loadSampleData() {
     try { await store.addEtf(s); count++ } catch {}
   }
   toast(`已填充 ${count} 只示例 ETF`, 'success')
+}
+
+// Export/Import
+const exportLoading = ref(false)
+const importFile = ref(null)
+const importLoading = ref(false)
+
+async function exportPortfolio() {
+  exportLoading.value = true
+  try {
+    const res = await portfolioApi.export(activeTab.value, 'csv')
+    // Create download
+    const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `portfolio_${activeTab.value}_${new Date().toISOString().split('T')[0]}.csv`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+    toast('导出成功', 'success')
+  } catch (e) {
+    toast('导出失败', 'error')
+  } finally {
+    exportLoading.value = false
+  }
+}
+
+function onFileChange(e) {
+  importFile.value = e.target.files[0]
+}
+
+async function importPortfolio() {
+  if (!importFile.value) return
+  importLoading.value = true
+  try {
+    const formData = new FormData()
+    formData.append('file', importFile.value)
+    formData.append('portfolio_type', activeTab.value)
+    formData.append('mode', 'merge')
+    formData.append('skip_invalid', 'true')
+    
+    const res = await portfolioApi.import(importFile.value, activeTab.value, 'merge', true)
+    toast(`已导入 ${res.data.imported} 只，跳过 ${res.data.skipped} 只`, 'success')
+    if (res.data.errors?.length) {
+      console.warn('Import errors:', res.data.errors)
+    }
+    importFile.value = null
+    await loadTab()
+  } catch (e) {
+    toast('导入失败', 'error')
+  } finally {
+    importLoading.value = false
+  }
+}
+
+// Drift Check
+const driftCheck = ref(null)
+const driftLoading = ref(false)
+
+async function checkDrift() {
+  driftLoading.value = true
+  try {
+    const res = await portfolioApi.getDriftCheck(activeTab.value)
+    driftCheck.value = res.data
+    toast('偏离检查完成', 'success')
+  } catch (e) {
+    toast('偏离检查失败', 'error')
+  } finally {
+    driftLoading.value = false
+  }
+}
+
+// Cost basis inline editing
+function startEditCost(etf) {
+  etf.editCost = etf.avg_cost
+}
+
+function startEditShares(etf) {
+  etf.editShares = etf.shares_held
+}
+
+async function saveCostBasis(etf) {
+  const updates = {}
+  if (etf.editCost !== undefined) updates.avg_cost = etf.editCost
+  if (etf.editShares !== undefined) updates.shares_held = etf.editShares
+  
+  if (Object.keys(updates).length === 0) {
+    // Just cancel editing
+    delete etf.editCost
+    delete etf.editShares
+    return
+  }
+  
+  try {
+    await store.updateEtf(etf.symbol, updates)
+    toast('成本基数已更新', 'success')
+    etf.avg_cost = updates.avg_cost ?? etf.avg_cost
+    etf.shares_held = updates.shares_held ?? etf.shares_held
+  } catch (e) {
+    toast('更新失败', 'error')
+  } finally {
+    delete etf.editCost
+    delete etf.editShares
+  }
 }
 
 watch(activeTab, loadTab)

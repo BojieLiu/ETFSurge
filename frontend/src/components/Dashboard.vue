@@ -460,6 +460,40 @@
           </p>
         </div>
       </article>
+
+      <!-- Cumulative P&L Summary Cards -->
+      <article class="card summary-card" v-if="activeTab !== 'off_exchange' && pnlHistory?.summary">
+        <div class="summary-icon positive" aria-hidden="true">📊</div>
+        <div class="summary-content">
+          <p class="summary-label">场内累计盈亏</p>
+          <p class="summary-value text-up" aria-live="polite">
+            ¥{{ formatNum(pnlHistory.holdings.find(h => h.portfolio_type === 'on_exchange')?.cumulative_pnl || 0) }}
+            <span class="pnl-pct">({{ (pnlHistory.holdings.find(h => h.portfolio_type === 'on_exchange')?.cumulative_pnl_pct || 0).toFixed(2) }}%)</span>
+          </p>
+        </div>
+      </article>
+
+      <article class="card summary-card" v-if="activeTab !== 'on_exchange' && pnlHistory?.summary">
+        <div class="summary-icon positive" aria-hidden="true">📊</div>
+        <div class="summary-content">
+          <p class="summary-label">场外累计盈亏</p>
+          <p class="summary-value text-up" aria-live="polite">
+            ¥{{ formatNum(pnlHistory.holdings.find(h => h.portfolio_type === 'off_exchange')?.cumulative_pnl || 0) }}
+            <span class="pnl-pct">({{ (pnlHistory.holdings.find(h => h.portfolio_type === 'off_exchange')?.cumulative_pnl_pct || 0).toFixed(2) }}%)</span>
+          </p>
+        </div>
+      </article>
+
+      <article class="card summary-card" v-if="activeTab === 'combined' && pnlHistory?.summary">
+        <div class="summary-icon positive" aria-hidden="true">📊</div>
+        <div class="summary-content">
+          <p class="summary-label">总累计盈亏</p>
+          <p class="summary-value text-up" aria-live="polite">
+            ¥{{ formatNum(pnlHistory.summary.total_cumulative_pnl) }}
+            <span class="pnl-pct">({{ pnlHistory.summary.total_cumulative_pnl_pct.toFixed(2) }}%)</span>
+          </p>
+        </div>
+      </article>
     </div>
 
     <!-- Loading Skeletons -->
@@ -878,6 +912,23 @@ const fetchPnl = async () => {
     pnlOffData.value = offRes.data || { items: [] }
   } catch (e) {
     toast('获取盈亏数据失败', 'error')
+  }
+}
+
+// Cumulative P&L History
+const pnlHistory = ref(null)
+const pnlHistoryLoading = ref(false)
+
+const fetchPnlHistory = async (type = 'combined') => {
+  const portfolioType = type === 'combined' ? null : type
+  pnlHistoryLoading.value = true
+  try {
+    const res = await portfolioApi.getPnLHistory(portfolioType, '3m')
+    pnlHistory.value = res.data
+  } catch (e) {
+    toast('获取累计盈亏历史失败', 'error')
+  } finally {
+    pnlHistoryLoading.value = false
   }
 }
 
