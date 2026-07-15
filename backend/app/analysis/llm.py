@@ -763,37 +763,63 @@ async def generate_portfolio_design(
     return result
 
 
-def _fallback_portfolio_plans(capital: float = 500000, reason: str = "LLM 暂不可用") -> dict[str, Any]:
-    """LLM 不可用时生成简版组合方案（三条风格各一组默认标的）。"""
+def _fallback_portfolio_plans(
+    capital: float = 500000,
+    reason: str = "LLM 暂不可用",
+    market_data: list[dict] | None = None,
+    indices: list[dict] | None = None,
+) -> dict[str, Any]:
+    """LLM 不可用时生成简版组合方案（三条风格各一组默认标的）。
+    
+    Falls back to hardcoded ETFs but enriches key_metrics with real market data
+    when available from the passed market_data and indices parameters.
+    """
     base_etfs = [
         {"symbol": "510300", "name": "沪深300ETF", "asset_class": "equity", "target_weight": 0.0,
          "selection_rationale": "核心宽基，覆盖A股大盘", "weight_rationale": "作为底仓配置",
-         "tracked_index": "000300", "key_metrics": {"scale_billion": 1200, "avg_volume_million": 2500, "pe_ttm": 12.5, "pb": 1.3, "ytd_return": 8.5}},
+         "tracked_index": "000300"},
         {"symbol": "510500", "name": "中证500ETF", "asset_class": "equity", "target_weight": 0.0,
          "selection_rationale": "中盘成长代表", "weight_rationale": "补充中盘暴露",
-         "tracked_index": "000905", "key_metrics": {"scale_billion": 600, "avg_volume_million": 1800, "pe_ttm": 18.0, "pb": 1.8, "ytd_return": 6.2}},
+         "tracked_index": "000905"},
         {"symbol": "159915", "name": "创业板ETF", "asset_class": "equity", "target_weight": 0.0,
          "selection_rationale": "成长风格核心标的", "weight_rationale": "增强组合弹性",
-         "tracked_index": "399006", "key_metrics": {"scale_billion": 400, "avg_volume_million": 2200, "pe_ttm": 32.0, "pb": 3.5, "ytd_return": -2.1}},
+         "tracked_index": "399006"},
         {"symbol": "588000", "name": "科创50ETF", "asset_class": "equity", "target_weight": 0.0,
          "selection_rationale": "科技创新方向", "weight_rationale": "布局硬科技赛道",
-         "tracked_index": "000688", "key_metrics": {"scale_billion": 250, "avg_volume_million": 1500, "pe_ttm": 45.0, "pb": 4.2, "ytd_return": -5.3}},
+         "tracked_index": "000688"},
         {"symbol": "513100", "name": "纳指ETF", "asset_class": "equity", "target_weight": 0.0,
          "selection_rationale": "美股科技龙头", "weight_rationale": "跨境分散配置",
-         "tracked_index": "NDX", "key_metrics": {"scale_billion": 180, "avg_volume_million": 800, "pe_ttm": 28.0, "pb": 6.5, "ytd_return": 15.2}},
+         "tracked_index": "NDX"},
         {"symbol": "518880", "name": "黄金ETF", "asset_class": "commodity", "target_weight": 0.0,
          "selection_rationale": "避险资产", "weight_rationale": "对冲尾部风险",
-         "tracked_index": "AU9999", "key_metrics": {"scale_billion": 300, "avg_volume_million": 1200, "pe_ttm": 0, "pb": 0, "ytd_return": 12.8}},
+         "tracked_index": "AU9999"},
         {"symbol": "512880", "name": "证券ETF", "asset_class": "equity", "target_weight": 0.0,
          "selection_rationale": "券商板块弹性标的", "weight_rationale": "博弈市场情绪修复",
-         "tracked_index": "399975", "key_metrics": {"scale_billion": 350, "avg_volume_million": 2000, "pe_ttm": 20.0, "pb": 1.5, "ytd_return": 3.5}},
+         "tracked_index": "399975"},
         {"symbol": "159865", "name": "养殖ETF", "asset_class": "equity", "target_weight": 0.0,
          "selection_rationale": "农业周期板块", "weight_rationale": "分散行业集中度",
-         "tracked_index": "399812", "key_metrics": {"scale_billion": 60, "avg_volume_million": 300, "pe_ttm": 25.0, "pb": 2.1, "ytd_return": -1.8}},
+         "tracked_index": "399812"},
         {"symbol": "513050", "name": "中概互联ETF", "asset_class": "equity", "target_weight": 0.0,
          "selection_rationale": "中概互联网龙头", "weight_rationale": "布局港股科技核心资产",
-         "tracked_index": "H30533", "key_metrics": {"scale_billion": 400, "avg_volume_million": 1800, "pe_ttm": 22.0, "pb": 3.8, "ytd_return": 10.2}},
+         "tracked_index": "H30533"},
     ]
+
+    # Build lookup for real market data (price, change_pct) to enrich key_metrics
+    def _get_price_change(sym: str) -> tuple[float | None, float | None]:
+        if not market_data:
+            return None, None
+        for m in market_data:
+            if m.get("symbol") == sym:
+                return m.get("price"), m.get("change_pct")
+        return None, None
+
+    def _get_index_change(sym: str) -> float | None:
+        if not indices:
+            return None
+        for idx in indices:
+            if idx.get("symbol") == sym:
+                return idx.get("change_pct")
+        return None
 
     def _make_plan(style: str, label: str, etf_weights: list[float], expected_return: float, max_dd: float, sharpe: float) -> dict:
         etfs = []
@@ -801,6 +827,26 @@ def _fallback_portfolio_plans(capital: float = 500000, reason: str = "LLM 暂不
             w = etf_weights[i] if i < len(etf_weights) else 0.05
             e = dict(etf)
             e["target_weight"] = w
+            
+            # Enrich with real market data if available
+            tracked_idx = e.get("tracked_index")
+            price, change_pct = _get_price_change(e["symbol"])
+            idx_change = _get_index_change(tracked_idx) if tracked_idx else None
+            
+            e["key_metrics"] = {}
+            if price is not None:
+                e["key_metrics"]["current_price"] = price
+            if change_pct is not None:
+                e["key_metrics"]["change_pct"] = change_pct
+            if idx_change is not None:
+                e["key_metrics"]["index_change_pct"] = idx_change
+            
+            # For commodity ETFs (gold), try to get from indices if tracked
+            if e["asset_class"] == "commodity" and tracked_idx:
+                idx_price = _get_index_change(tracked_idx)
+                if idx_price is not None:
+                    e["key_metrics"]["index_change_pct"] = idx_price
+            
             etfs.append(e)
         return {
             "style": style, "style_label": label,

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 from fastapi import APIRouter, Query, Depends
 
 from ..core.logging import get_logger
@@ -36,6 +37,24 @@ router = APIRouter(prefix="/api/v1/analysis", tags=["analysis"])
 
 
 FETCH_TIMEOUT = 45
+
+# Simple in-memory cache for market overview text (TTL: 30 seconds)
+_MARKET_OVERVIEW_CACHE = {"text": None, "timestamp": 0}
+_MARKET_OVERVIEW_TTL = 30  # seconds
+
+
+def _get_cached_market_overview():
+    """Get cached market overview text if still valid."""
+    now = time.time()
+    if _MARKET_OVERVIEW_CACHE["text"] and (now - _MARKET_OVERVIEW_CACHE["timestamp"]) < _MARKET_OVERVIEW_TTL:
+        return _MARKET_OVERVIEW_CACHE["text"]
+    return None
+
+
+def _set_cached_market_overview(text: str):
+    """Set market overview text in cache."""
+    _MARKET_OVERVIEW_CACHE["text"] = text
+    _MARKET_OVERVIEW_CACHE["timestamp"] = time.time()
 
 
 def _sse_stream(agent_generator):
@@ -119,14 +138,64 @@ async def _fetch_all_market():
     return market_data, indices, commodities
 
 
-def _collect_news():
-    news = fetch_news_headlines() or []
+# --- Market Overview Caching (TTL: 30 seconds) ---
+_MARKET_OVERVIEW_CACHE = {"text": None, "timestamp": 0}
+_MARKET_OVERVIEW_TTL = 30  # seconds
+
+
+def _get_cached_market_overview():
+    """Get cached market overview text if still valid."""
+    now = time.time()
+    if _MARKET_OVERVIEW_CACHE["text"] and (now - _MARKET_OVERVIEW_CACHE["timestamp"]) < _MARKET_OVERVIEW_TTL:
+        return _MARKET_OVERVIEW_CACHE["text"]
+    return None
+
+
+def _set_cached_market_overview(text: str):
+    """Set market overview text in cache."""
+    _MARKET_OVERVIEW_CACHE["text"] = text
+    _MARKET_OVERVIEW_CACHE["timestamp"] = time.time()
+
+
+async def _collect_news():
+    """Collect news headlines and macro news asynchronously."""
+    loop = asyncio.get_running_loop()
+    news = await loop.run_in_executor(None, fetch_news_headlines)
+    if not news:
+        news = []
     try:
-        macro = fetch_macro_news() or []
-        news.extend(macro)
+        macro = await loop.run_in_executor(None, fetch_macro_news)
+        if macro:
+            news.extend(macro)
     except Exception:
         pass
     return news
+
+
+async def get_cached_market_overview() -> str:
+    """Get market overview text with 30-second TTL caching.
+    
+    Fetches market data and builds the overview text, caching for 30 seconds
+    to avoid redundant LLM prompts with identical data.
+    """
+    import time
+    now = time.time()
+    if _MARKET_OVERVIEW_CACHE["text"] and (now - _MARKET_OVERVIEW_CACHE["timestamp"]) < _MARKET_OVERVIEW_TTL:
+        return _MARKET_OVERVIEW_CACHE["text"]
+    
+    # Fetch fresh data
+    market_data, indices, commodities = await _fetch_all_market()
+    news = await _collect_news()
+    
+    # Build overview using the same logic as _build_market_overview
+    from ..analysis.llm import _build_market_overview
+    overview_text = _build_market_overview(indices, commodities, market_data, news, [])
+    
+    # Cache it
+    _MARKET_OVERVIEW_CACHE["text"] = overview_text
+    _MARKET_OVERVIEW_CACHE["timestamp"] = now
+    
+    return overview_text
 
 
 @router.post("/llm-report")
@@ -154,7 +223,7 @@ async def llm_report(req: LLMReportRequest):
         except Exception:
             continue
 
-    news = _collect_news()
+    news = await _collect_news()
     try:
         report = await generate_market_report(indices, commodities, market_data, indicators, news, [])
     except Exception as e:
@@ -173,7 +242,7 @@ async def llm_advice(query: str = Query(...), context: dict | None = None):
 
 @router.post("/llm-news-analysis")
 async def llm_news_analysis():
-    news = _collect_news()
+    news = await _collect_news()
     try:
         analysis = await analyze_news(news)
     except Exception as e:
@@ -196,7 +265,7 @@ class PortfolioDesignRequest(BaseModel):
 @router.post("/portfolio-design")
 async def portfolio_design(req: PortfolioDesignRequest | None = None, db: AsyncSession = Depends(get_db)):
     market_data, indices, commodities = await _fetch_all_market()
-    news = _collect_news()
+    news = await _collect_news()
     capital = req.capital if req else 500000
 
     # Also fetch portfolio ETF prices
@@ -411,7 +480,7 @@ async def llm_report_stream(req: LLMReportRequest):
     try:
         # Fetch market data (same as non-streaming)
         market_data, indices, commodities = await _fetch_all_market()
-        news = _collect_news()
+        news = await _collect_news()
         
         # Get indicators for portfolio ETFs
         indicators = {}
@@ -455,7 +524,7 @@ async def portfolio_design_stream(req: PortfolioDesignRequest | None = None, db:
     """流式组合设计"""
     try:
         market_data, indices, commodities = await _fetch_all_market()
-        news = _collect_news()
+        news = await _collect_news()
         capital = req.capital if req else 500000
 
         # Also fetch portfolio ETF prices
