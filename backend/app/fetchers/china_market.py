@@ -267,11 +267,58 @@ def fetch_a_stock_batch(symbols: list[str]) -> list[dict[str, Any]]:
         return _sina_realtime(symbols, "A")
 
 
-def fetch_hk_stock_realtime(symbol: str | None = None) -> list[dict[str, Any]]:
-    with no_proxy():
-        if not symbol:
+def _em_hk_realtime(symbols: list[str]) -> list[dict[str, Any]]:
+    """东方财富港股实时行情（akshare stock_hk_spot_em），按 symbols 过滤。"""
+    try:
+        with no_proxy():
+            import akshare as ak
+            df = ak.stock_hk_spot_em()
+        _decode_df(df)
+        if df is None or df.empty:
             return []
-        return _sina_realtime([symbol], "HK")
+        sym_set = set(symbols)
+        results = []
+        for _, row in df.iterrows():
+            code = str(row.get("代码", row.get("symbol", "")))
+            if code not in sym_set:
+                continue
+            try:
+                price = float(row.get("最新价", 0) or 0)
+            except (ValueError, TypeError):
+                price = 0
+            try:
+                chg = float(row.get("涨跌幅", 0) or 0)
+            except (ValueError, TypeError):
+                chg = 0
+            results.append({
+                "symbol": code,
+                "name": str(row.get("名称", row.get("name", ""))),
+                "price": price,
+                "change_pct": round(chg, 2),
+                "change_amount": round(price * chg / 100, 2) if chg else 0,
+                "volume": float(row.get("成交量", 0) or 0),
+                "turnover": float(row.get("成交额", 0) or 0),
+                "asset_type": "HK",
+            })
+        return results
+    except Exception:
+        return []
+
+
+def fetch_hk_stock_realtime(symbol: str | None = None) -> list[dict[str, Any]]:
+    """港股实时行情：Sina → Tencent(QQ) → 东方财富三级降级。"""
+    if not symbol:
+        return []
+    with no_proxy():
+        items = _sina_realtime([symbol], "HK")
+        if items and items[0].get("price"):
+            return items
+        items = _tencent_realtime([symbol], "HK")
+        if items and items[0].get("price"):
+            return items
+        # EM HK spot 是全量接口，本地过滤
+        items = _em_hk_realtime([symbol])
+        return items
 
 
 def fetch_futures_realtime() -> list[dict[str, Any]]:
