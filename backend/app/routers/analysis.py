@@ -66,7 +66,11 @@ def _sse_stream(agent_generator):
             if event == "token":
                 yield f"event: token\ndata: {json.dumps({'token': data.get('token', '')})}\n\n"
             elif event == "done":
-                yield f"event: done\ndata: {json.dumps({'full_text': data.get('full_text', ''), 'metadata': data.get('usage', {})})}\n\n"
+                full_text = data.get('full_text', '')
+                # Append disclaimer to the final response
+                disclaimer = "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
+                full_text_with_disclaimer = f"{full_text}\n\n---\n*{disclaimer}*"
+                yield f"event: done\ndata: {json.dumps({'full_text': full_text_with_disclaimer, 'metadata': data.get('usage', {}), 'disclaimer': disclaimer})}\n\n"
             elif event == "error":
                 yield f"event: error\ndata: {json.dumps({'code': 'STREAM_ERROR', 'message': data})}\n\n"
     return StreamingResponse(
@@ -228,7 +232,7 @@ async def llm_report(req: LLMReportRequest):
         report = await generate_market_report(indices, commodities, market_data, indicators, news, [])
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM analysis failed: {e}")
-    return {"report": report, "market_data": market_data[:10], "indices": indices[:10], "commodities": commodities[:6]}
+    return {"report": report, "market_data": market_data[:10], "indices": indices[:10], "commodities": commodities[:6], "disclaimer": "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"}
 
 
 @router.post("/llm-advice")
@@ -237,7 +241,7 @@ async def llm_advice(query: str = Query(...), context: dict | None = None):
         advice = await generate_advice(query, context)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM advice failed: {e}")
-    return {"advice": advice}
+    return {"advice": advice, "disclaimer": "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"}
 
 
 @router.post("/llm-news-analysis")
@@ -247,13 +251,14 @@ async def llm_news_analysis():
         analysis = await analyze_news(news)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM news analysis failed: {e}")
-    return {"analysis": analysis, "news_count": len(news)}
+    return {"analysis": analysis, "news_count": len(news), "disclaimer": "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"}
 
 
 @router.post("/news-impact")
 async def news_impact(req: NewsImpactRequest):
     """分析单条新闻对当前组合内各标的的具体影响。"""
     result = await analyze_news_impact(req.news, req.portfolio)
+    result["disclaimer"] = "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
     return result
 
 
@@ -343,6 +348,7 @@ async def portfolio_design(req: PortfolioDesignRequest | None = None, db: AsyncS
 
     result["indices"] = indices[:8]
     result["commodities"] = commodities[:6]
+    result["disclaimer"] = "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
     return result
 
 
@@ -386,6 +392,7 @@ async def portfolio_review(req: PortfolioReviewRequest):
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM portfolio review failed: {e}")
 
+    result["disclaimer"] = "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
     return result
 
 
@@ -427,7 +434,7 @@ async def sector_analysis(req: SectorAnalysisRequest):
         )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM sector analysis failed: {e}")
-    return {"sector_name": name, "sector_code": sector_code, "report": report, "constituents_count": len(constituents)}
+    return {"sector_name": name, "sector_code": sector_code, "report": report, "constituents_count": len(constituents), "disclaimer": "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"}
 
 
 @router.post("/symbol-analysis")
@@ -468,7 +475,7 @@ async def symbol_analysis(req: SymbolAnalysisRequest):
         )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM symbol analysis failed: {e}")
-    return {"symbol": symbol, "name": display_name, "report": report}
+    return {"symbol": symbol, "name": display_name, "report": report, "disclaimer": "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"}
 
 
 # ── SSE Streaming Endpoints ──────────────────────────────────────────────

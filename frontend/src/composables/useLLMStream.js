@@ -10,6 +10,7 @@ export function useLLMStream() {
   const fullText = ref('')
   const error = ref(null)
   const metadata = ref(null)
+  const disclaimer = ref('')
 
   let abortController = null
 
@@ -18,6 +19,7 @@ export function useLLMStream() {
     fullText.value = ''
     error.value = null
     metadata.value = null
+    disclaimer.value = ''
 
     abortController = new AbortController()
     const signal = abortController.signal
@@ -66,8 +68,9 @@ export function useLLMStream() {
             } else if (event === 'done') {
               fullText.value = parsed.full_text || fullText.value
               metadata.value = parsed.metadata || {}
+              disclaimer.value = parsed.disclaimer || ''
               streaming.value = false
-              return { fullText: fullText.value, metadata: metadata.value }
+              return { fullText: fullText.value, metadata: metadata.value, disclaimer: disclaimer.value }
             } else if (event === 'error') {
               throw new Error(parsed.message || 'Stream error')
             }
@@ -78,14 +81,10 @@ export function useLLMStream() {
       }
 
       streaming.value = false
-      return { fullText: fullText.value, metadata: metadata.value }
+      return { fullText: fullText.value, metadata: metadata.value, disclaimer: disclaimer.value }
     } catch (e) {
-      if (e.name === 'AbortError') {
-        logger.info('LLM stream aborted')
-      } else {
-        error.value = e.message
-        logger.error('LLM stream error:', e)
-      }
+      if (e.name === 'AbortError') return
+      error.value = e.message
       streaming.value = false
       throw e
     }
@@ -94,7 +93,6 @@ export function useLLMStream() {
   function stop() {
     if (abortController) {
       abortController.abort()
-      abortController = null
     }
     streaming.value = false
   }
@@ -104,6 +102,7 @@ export function useLLMStream() {
     fullText,
     error,
     metadata,
+    disclaimer,
     start,
     stop,
   }

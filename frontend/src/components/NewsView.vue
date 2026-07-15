@@ -64,7 +64,7 @@
       </ul>
     </section>
 
-    <!-- AI Impact Panel -->
+<!-- AI Impact Panel -->
     <section v-if="impactPanel" class="card impact-panel" aria-live="polite">
       <div class="card-header">
         <h2 class="card-title"><span aria-hidden="true">🤖</span> AI 智能分析</h2>
@@ -86,6 +86,11 @@
             <span class="holding-reason">{{ h.impact_reason }}</span>
           </li>
         </ul>
+      </div>
+
+      <div class="impact-disclaimer">
+        <span class="disclaimer-icon" aria-hidden="true">⚠️</span>
+        <span>{{ impactPanel.disclaimer || '本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负' }}</span>
       </div>
     </section>
   </div>
@@ -216,4 +221,6 @@ async function analyze(item) {
 .impact-holding { display: flex; flex-direction: column; gap: 2px; border-bottom: 1px dashed var(--color-border-light); padding-bottom: var(--space-2); }
 .holding-symbol { font-weight: 600; }
 .holding-reason { color: var(--color-text-secondary); font-size: var(--font-size-sm); }
+.impact-disclaimer { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-3); padding: var(--space-2) var(--space-3); background: var(--color-surface-tertiary); border: 1px solid var(--color-border); border-radius: var(--radius-md); font-size: var(--font-size-xs); color: var(--color-text-muted); }
+.disclaimer-icon { flex-shrink: 0; }
 </style>

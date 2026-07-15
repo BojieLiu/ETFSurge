@@ -43,6 +43,10 @@
 
           <div v-if="marketReport" class="report-container">
             <div class="report-content" v-html="renderMarkdown(marketReport)"></div>
+            <div class="report-disclaimer">
+              <span class="disclaimer-icon" aria-hidden="true">⚠️</span>
+              <span>本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负</span>
+            </div>
           </div>
 
           <div v-if="!marketReport && !marketLoading && !marketError" class="empty-prompt">
@@ -329,6 +333,10 @@
 
           <div v-if="sectorReport" class="report-container">
             <div class="report-content" v-html="renderMarkdown(sectorReport)"></div>
+            <div class="report-disclaimer">
+              <span class="disclaimer-icon" aria-hidden="true">⚠️</span>
+              <span>本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负</span>
+            </div>
           </div>
         </div>
       </div>
@@ -534,6 +542,10 @@
 
           <div v-if="symbolReport" class="report-container">
             <div class="report-content" v-html="renderMarkdown(symbolReport)"></div>
+            <div class="report-disclaimer">
+              <span class="disclaimer-icon" aria-hidden="true">⚠️</span>
+              <span>本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负</span>
+            </div>
           </div>
         </div>
       </section>
@@ -622,9 +634,13 @@
           <span>{{ indexError }}</span>
         </div>
 
-        <div v-if="indexReport" class="report-container">
-          <div class="report-content" v-html="renderMarkdown(indexReport)"></div>
-        </div>
+<div v-if="indexReport" class="report-container">
+            <div class="report-content" v-html="renderMarkdown(indexReport)"></div>
+            <div class="report-disclaimer">
+              <span class="disclaimer-icon" aria-hidden="true">⚠️</span>
+              <span>本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负</span>
+            </div>
+          </div>
       </div>
     </section>
   </div>
@@ -721,7 +737,7 @@ const marketLoading = ref(false)
 const marketError = ref('')
 
 // Streaming hook for LLM
-const { streaming: marketStreaming, fullText: marketStreamText, error: marketStreamError, start: startMarketStream, stop: stopMarketStream } = useLLMStream()
+const { streaming: marketStreaming, fullText: marketStreamText, error: marketStreamError, disclaimer: marketStreamDisclaimer, start: startMarketStream, stop: stopMarketStream } = useLLMStream()
 
 // Watchlist state
 const watchlist = ref([])
@@ -824,9 +840,12 @@ async function generateMarketReport() {
   marketReport.value = ''
   marketError.value = ''
   try {
-    await startMarketStream('/llm-report/stream', { symbols: null }, (token) => {
+    const result = await startMarketStream('/llm-report/stream', { symbols: null }, (token) => {
       marketReport.value += token
     })
+    if (result?.disclaimer) {
+      marketStreamDisclaimer.value = result.disclaimer
+    }
   } catch (e) {
     marketError.value = '生成失败：' + (e?.message || '网络错误')
   } finally {
@@ -931,21 +950,25 @@ function onSectorKeydown(e) {
   }
 }
 
-const { streaming: sectorStreaming, fullText: sectorStreamText, start: startSectorStream } = useLLMStream()
+const { streaming: sectorStreaming, fullText: sectorStreamText, error: sectorStreamError, disclaimer: sectorStreamDisclaimer, start: startSectorStream } = useLLMStream()
 
 async function analyzeSector() {
   if (!selectedSectorCode.value) return
   sectorLoading.value = true
   sectorReport.value = ''
   sectorError.value = ''
+  sectorStreamDisclaimer.value = ''
   try {
-    await startSectorStream('/sector-analysis/stream', {
+    const result = await startSectorStream('/sector-analysis/stream', {
       sector_code: selectedSectorCode.value,
       sector_type: sectorType.value,
       sector_name: selectedSectorName.value,
     }, (token) => {
       sectorReport.value += token
     })
+    if (result?.disclaimer) {
+      sectorStreamDisclaimer.value = result.disclaimer
+    }
   } catch (e) {
     sectorError.value = '分析失败：' + (e?.message || '网络错误')
   } finally {
@@ -1150,21 +1173,25 @@ async function fetchFAChart() {
   faLoading.value = false
 }
 
-const { streaming: symbolStreaming, fullText: symbolStreamText, start: startSymbolStream } = useLLMStream()
+const { streaming: symbolStreaming, fullText: symbolStreamText, start: startSymbolStream, disclaimer: symbolStreamDisclaimer } = useLLMStream()
 
 async function analyzeSymbol() {
   if (!selectedSearchItem.value) return
   symbolLoading.value = true
   symbolReport.value = ''
   symbolError.value = ''
+  symbolStreamDisclaimer.value = ''
   try {
-    await startSymbolStream('/symbol-analysis/stream', {
+    const result = await startSymbolStream('/symbol-analysis/stream', {
       symbol: selectedSearchItem.value.symbol,
       name: selectedSearchItem.value.name,
       asset_type: 'A',
     }, (token) => {
       symbolReport.value += token
     })
+    if (result?.disclaimer) {
+      symbolStreamDisclaimer.value = result.disclaimer
+    }
   } catch (e) {
     symbolError.value = '分析失败：' + (e?.message || '网络错误')
   } finally {
@@ -1574,6 +1601,21 @@ onMounted(() => {
 .report-content .md-ul li, .report-content .md-ol li { margin: var(--space-1) 0; }
 .report-content .md-hr { border: none; border-top: 1px dashed var(--color-border-light); margin: var(--space-5) 0; }
 .report-content code { background: var(--color-surface-tertiary); padding: 1px var(--space-1); border-radius: var(--radius-xs); font-family: var(--font-family-mono); font-size: var(--font-size-xs); }
+
+/* Report Disclaimer */
+.report-disclaimer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-bg-warning-subtle);
+  border: 1px solid var(--color-warning-200);
+  border-radius: var(--radius-lg);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-warning);
+}
+.disclaimer-icon { font-size: var(--font-size-sm); flex-shrink: 0; }
 
 /* Empty Prompt */
 .empty-prompt { display: flex; align-items: center; justify-content: center; gap: var(--space-2); padding: var(--space-8); color: var(--color-text-tertiary); text-align: center; }

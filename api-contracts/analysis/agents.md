@@ -66,7 +66,8 @@ POST /api/v1/analysis/llm-report
   "report": "## 1. 市场阶段与核心矛盾 ...",
   "market_data": [ { "symbol": "...", "name": "...", "price": 3.91, "change_pct": 1.2 } ],
   "indices": [ { "symbol": "...", "name": "...", "price": 3200, "change_pct": -0.5 } ],
-  "commodities": [ { "symbol": "...", "name": "黄金", "price": 550, "change_pct": 0.8 } ]
+  "commodities": [ { "symbol": "...", "name": "黄金", "price": 550, "change_pct": 0.8 } ],
+  "disclaimer": "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
 }
 ```
 
@@ -89,7 +90,7 @@ POST /api/v1/analysis/llm-advice?query=<question>
 **成功响应 / `200 OK`:**
 
 ```json
-{ "advice": "LLM 生成的投资建议..." }
+{ "advice": "LLM 生成的投资建议...", "disclaimer": "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负" }
 ```
 
 ---
@@ -105,7 +106,7 @@ POST /api/v1/analysis/llm-news-analysis
 **成功响应 / `200 OK`:**
 
 ```json
-{ "analysis": "新闻影响分析...", "news_count": 12 }
+{ "analysis": "新闻影响分析...", "news_count": 12, "disclaimer": "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负" }
 ```
 
 ---
@@ -131,7 +132,8 @@ POST /api/v1/analysis/news-impact
 {
   "impact_scope": "A股宽基指数",
   "affected_holdings": [ { "symbol": "510300", "name": "沪深300ETF", "impact_reason": "..." } ],
-  "summary": "一句话总结..."
+  "summary": "一句话总结...",
+  "disclaimer": "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
 }
 ```
 
@@ -163,7 +165,8 @@ POST /api/v1/analysis/portfolio-design
   "plans": [ { "style": "进攻型", "portfolio_name": "...", "allocations": [...] } ],
   "comparison_table": { "进攻型": {...}, "平衡型": {...}, "防御型": {...} },
   "indices": [...],
-  "commodities": [...]
+  "commodities": [...],
+  "disclaimer": "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
 }
 ```
 
@@ -202,7 +205,8 @@ POST /api/v1/analysis/portfolio-review
   "sell": [ { "ticker": "...", "target_weight_pct": 15.0, "reason": "..." } ],
   "buy": [ { "ticker": "...", "target_weight_pct": 10.0, "reason": "..." } ],
   "post_check": { "compliance_table": [...] },
-  "thresholds_used": { "进攻型": {...} }
+  "thresholds_used": { "进攻型": {...} },
+  "disclaimer": "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
 }
 ```
 
@@ -220,7 +224,7 @@ POST /api/v1/analysis/sector-analysis
 { "sector_code": "881001", "sector_type": "industry", "sector_name": "银行" }
 ```
 
-**成功响应 / `200 OK`:** `{ "analysis": "行业深度分析..." }`
+**成功响应 / `200 OK`:** `{ "analysis": "行业深度分析...", "disclaimer": "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负" }`
 
 ---
 
@@ -236,7 +240,7 @@ POST /api/v1/analysis/symbol-analysis
 { "symbol": "600519", "name": "贵州茅台", "asset_type": "A" }
 ```
 
-**成功响应 / `200 OK`:** `{ "analysis": "个股/ETF 深度分析..." }`
+**成功响应 / `200 OK`:** `{ "analysis": "个股/ETF 深度分析...", "disclaimer": "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负" }`
 
 ---
 
@@ -263,3 +267,5 @@ POST /api/v1/analysis/symbol-analysis
 | 空态 | ☐ | N/A | no-data |
 | 错误态 | ☐ | N/A | error toast |
 | 新增 agent 仅需 registry 配置 + prompt 文件 | N/A | ☐ | 架构约束 |
+| 所有 AI 响应包含 disclaimer 字段 | ☐ | ☐ | "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负" |
+| 前端在 AI 输出下方显示免责声明 | ☐ | N/A | |

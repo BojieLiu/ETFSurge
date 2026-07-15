@@ -88,12 +88,17 @@ def test_llm_report(client):
     body = r.json()
     assert "report" in body
     assert "market_data" in body and "indices" in body and "commodities" in body
+    assert "disclaimer" in body
+    assert body["disclaimer"] == "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
 
 
 def test_llm_advice(client):
     r = client.post("/api/v1/analysis/llm-advice?query=现在该加仓吗")
     assert r.status_code == 200
-    assert "advice" in r.json()
+    body = r.json()
+    assert "advice" in body
+    assert "disclaimer" in body
+    assert body["disclaimer"] == "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
 
 
 def test_llm_news_analysis(client):
@@ -101,6 +106,8 @@ def test_llm_news_analysis(client):
     assert r.status_code == 200
     body = r.json()
     assert "analysis" in body and "news_count" in body
+    assert "disclaimer" in body
+    assert body["disclaimer"] == "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
 
 
 def test_news_impact(client):
@@ -114,6 +121,8 @@ def test_news_impact(client):
     assert r.status_code == 200
     body = r.json()
     assert "impact_scope" in body and "affected_holdings" in body and "summary" in body
+    assert "disclaimer" in body
+    assert body["disclaimer"] == "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
 
 
 def test_portfolio_design(client):
@@ -122,6 +131,8 @@ def test_portfolio_design(client):
     body = r.json()
     assert "plans" in body
     assert "indices" in body and "commodities" in body
+    assert "disclaimer" in body
+    assert body["disclaimer"] == "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
 
 
 def test_portfolio_review(client):
@@ -145,6 +156,8 @@ def test_portfolio_review(client):
     body = r.json()
     # Mock returns portfolio_design response, so check for its structure
     assert "plans" in body or "action" in body
+    assert "disclaimer" in body
+    assert body["disclaimer"] == "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
 
 
 def test_sector_analysis(client):
@@ -155,6 +168,8 @@ def test_sector_analysis(client):
     assert r.status_code == 200
     body = r.json()
     assert "report" in body and "sector_name" in body
+    assert "disclaimer" in body
+    assert body["disclaimer"] == "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
 
 
 def test_symbol_analysis(client):
@@ -165,3 +180,5 @@ def test_symbol_analysis(client):
     assert r.status_code == 200
     body = r.json()
     assert "report" in body and "symbol" in body
+    assert "disclaimer" in body
+    assert body["disclaimer"] == "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"

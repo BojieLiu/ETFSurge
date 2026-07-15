@@ -34,7 +34,8 @@ POST /api/v1/analysis/llm-report
 ```json
 {
   "report": "Detailed LLM-generated analysis...",
-  "symbols": ["510050", "510880"]
+  "symbols": ["510050", "510880"],
+  "disclaimer": "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
 }
 ```
 
@@ -59,7 +60,8 @@ POST /api/v1/analysis/llm-advice?query=<question>
 ```json
 {
   "advice": "LLM-generated advice...",
-  "query": "当前应该加仓还是减仓？"
+  "query": "当前应该加仓还是减仓？",
+  "disclaimer": "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
 }
 ```
 
@@ -78,7 +80,8 @@ POST /api/v1/analysis/llm-news-analysis
 ```json
 {
   "analysis": "News impact analysis...",
-  "key_events": ["event1", "event2"]
+  "key_events": ["event1", "event2"],
+  "disclaimer": "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
 }
 ```
 
@@ -104,3 +107,5 @@ POST /api/v1/analysis/llm-news-analysis
 | All endpoints handle LLM timeout gracefully | ☐ | ☐ | |
 | Loading state for all 3 endpoints | ☐ | N/A | |
 | Error state on 502 (LLM failure) | ☐ | N/A | |
+| All AI responses include disclaimer field | ☐ | ☐ | "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负" |
+| Frontend displays disclaimer below AI output | ☐ | N/A | |
