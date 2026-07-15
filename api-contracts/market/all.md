@@ -50,6 +50,13 @@ GET /api/v1/market/realtime/{symbol}?asset_type=A
 }
 ```
 
+**Portfolio realtime 特殊字段 (Phase 4):** For off-exchange funds, additional fields indicate whether the price is estimated via tracked index:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| is_estimated | bool | `false` | Whether price is estimated (off-exchange during trading hours) |
+| estimate_source | string | `null` | `tracked_index` \| `nav` \| `last_close` — source of the estimate |
+
 Batch returns array, single returns object, realtime/portfolio returns array of portfolio ETFs.
 
 ---

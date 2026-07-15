@@ -2,19 +2,20 @@
 
 所有对外函数均带 TTL 缓存,且底层调用经线程 + 超时包裹,任一源挂起都不会拖垮接口。
 """
-import time
-import concurrent.futures as cf
 from typing import Any
 
 import levistock as lv
 
-_TTL = {"telegraph": 120, "emotion": 60, "sectors": 120, "wind": 120}
-_CACHE: dict[str, tuple[float, Any]] = {}
+from ..core.ttl import CACHE_TTL
+from ..services.cache_service import sync_memory_cache
+
 _TIMEOUT = 8
 
 
 def _safe(fn, timeout: int = _TIMEOUT):
     """在线程中执行 fn,超时/异常均返回 None,绝不挂起。"""
+    import concurrent.futures as cf
+
     try:
         with cf.ThreadPoolExecutor(max_workers=1) as ex:
             return ex.submit(fn).result(timeout=timeout)
@@ -22,13 +23,14 @@ def _safe(fn, timeout: int = _TIMEOUT):
         return None
 
 
-def _cached(key: str, producer, ttl: int | None = None):
-    now = time.time()
-    hit = _CACHE.get(key)
-    if hit and hit[0] > now:
-        return hit[1]
+def _cached(key: str, producer, ttl_key: str = "news_telegraph"):
+    """统一缓存包装，使用 sync_memory_cache 替代本地 _CACHE。"""
+    ttl = CACHE_TTL.get(ttl_key, 120)
+    hit = sync_memory_cache.get(key)
+    if hit is not None:
+        return hit
     data = producer()
-    _CACHE[key] = (now + (ttl or _TTL.get(key, 120)), data)
+    sync_memory_cache.set(key, data, ttl)
     return data
 
 
@@ -140,7 +142,7 @@ def fetch_cailian_telegraph(limit: int = 30) -> list[dict[str, Any]]:
             })
         return out[:limit]
 
-    return _cached("telegraph", _p)
+    return _cached("telegraph", _p, "news_telegraph")
 
 
 def fetch_market_emotion() -> dict[str, Any]:
@@ -149,7 +151,7 @@ def fetch_market_emotion() -> dict[str, Any]:
     def _p() -> dict[str, Any]:
         return _safe(lv.market_emotion_cls, 8) or {}
 
-    return _cached("emotion", _p)
+    return _cached("emotion", _p, "news_emotion")
 
 
 def fetch_sector_heat(limit: int = 20) -> list[dict[str, Any]]:
@@ -159,7 +161,7 @@ def fetch_sector_heat(limit: int = 20) -> list[dict[str, Any]]:
         rows = _safe(lv.get_sector_heat, 8) or []
         return rows[:limit]
 
-    return _cached("sectors", _p)
+    return _cached("sectors", _p, "sector_heat")
 
 
 def fetch_market_wind() -> list[dict[str, Any]]:
@@ -168,4 +170,4 @@ def fetch_market_wind() -> list[dict[str, Any]]:
     def _p() -> list[dict[str, Any]]:
         return _safe(lv.market_wind_cls, 8) or []
 
-    return _cached("wind", _p)
+    return _cached("wind", _p, "news_wind")

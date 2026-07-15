@@ -47,7 +47,9 @@ POST /api/v1/portfolio/daily-pnl
       "current_price": 0.925,
       "change_pct": 0.54,
       "daily_pnl": 1404.00,
-      "tracked_index": null
+      "tracked_index": null,
+      "is_estimated": false,
+      "estimate_source": null
     }
   ],
   "total_pnl": 3200.50,
@@ -62,6 +64,8 @@ POST /api/v1/portfolio/daily-pnl
 |-------|------|-------------|
 | items | array | Per-ETF P&L details |
 | items[].daily_pnl | float | `target_amount * change_pct / 100` |
+| items[].is_estimated | bool | Off-exchange fund price estimated via tracked index |
+| items[].estimate_source | string \| null | `tracked_index` \| `nav` \| `null` |
 | total_pnl | float | Sum of all `daily_pnl` values |
 | total_amount | float | Sum of all `target_amount` values |
 | weighted_change_pct | float | `sum(target_amount * change_pct) / total_amount` |

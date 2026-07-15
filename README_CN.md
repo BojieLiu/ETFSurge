@@ -60,12 +60,14 @@
                     │ registry  │ └────────────┘ └───────────────┘
                     └─────┬──────┘
                           │ route() 带熔断器
-            ┌─────────────┼──────────────────────────────┐
-            ▼             ▼             ▼                 ▼
-      akshare       yfinance       tushare          stooq / levistock
-      (A/港/商品)   (美股)        (需 token)        (备用源)
-            │
-            ▼  news_fetcher → 财新 / 宏观 / 国际
+             ┌─────────────┼──────────────────────────────┐
+             ▼             ▼             ▼                 ▼
+       china_market  yfinance       tushare          stooq / levistock
+       (A/港/商品)   (美股)        (需 token)        (备用源)
+       (akshare+
+        sina+qq)
+             │
+             ▼  news_fetcher → 财新 / 宏观 / 国际
                          ┌──────────────┐      ┌──────────────┐
                          │ 缓存 L1 内存  │◄────►│ 缓存 L2 Redis │
                          │ (始终可用)    │      │ (可选, 自动降级)│
@@ -83,10 +85,12 @@
 | 入口 | `app/main.py` | FastAPI 生命周期：初始化 DB、Redis、启动行情调度器；注册路由与 CORS；`/health` 探针 |
 | 配置 | `app/config.py` | `pydantic-settings` 读取 `.env`（DB / Redis / CORS / LLM 等） |
 | 数据 | `app/database.py` | 异步 SQLAlchemy（`aiosqlite`），SQLite 落盘 `data/portfolio.db` |
-| 采集 | `app/fetchers/*` | akshare、yfinance、tushare、stooq、levistock、news 多源采集 |
+| 采集 | `app/fetchers/*` | china_market（A 股/港股/商品，基于 akshare+sina+qq）、yfinance（美股）、tushare、stooq、levistock、news、sector 多源采集 |
 | 路由 | `app/services/source_registry.py` | 数据源健康度 + 熔断器 + 优先级路由（失败自动切换备用源） |
-| 缓存 | `app/services/cache_service.py` | L1 进程内 `MemoryCache`（始终可用）+ L2 `RedisCache`（不可用时自动降级） |
-| 业务 | `app/services/market_service.py`、`portfolio_service.py` | 行情聚合、组合与仓位计算 |
+| 缓存 | `app/services/cache_service.py` | L1 进程内 `MemoryCache`（异步，始终可用）+ `SyncMemoryCache`（同步 fetcher 的线程安全缓存封装）+ L2 `RedisCache`（不可用时自动降级） |
+| 业务 | `app/services/market_service.py`、`portfolio_service.py` | 行情聚合、组合与仓位计算，场外 ETF 净值估算 |
+| 核心 | `app/core/ttl.py`、`async_utils.py`、`market_calendar.py` | 统一 `CACHE_TTL` 字典、`run_sync()` 同步→异步桥接、A 股交易时间判断 |
+| 工具 | `app/utils/decode.py` | `decode_df()` 拉丁编码列名与列值解码器（用于 akshare 乱码修复） |
 | 分析 | `app/analysis/indicators.py`、`signal.py`、`llm.py` | 技术指标、买卖信号聚合、DeepSeek 解读（httpx） |
 | 调度 | `app/tasks/market_refresh.py` | APScheduler 每 15s 刷新行情缓存，保持热点数据新鲜 |
 | 接口 | `app/routers/*` | REST + WebSocket 路由 |
@@ -110,7 +114,19 @@
 4. **WebSocket 实时推送**
    行情、资讯、组合变更通过 `/ws/market/{symbol}`、`/ws/news`、`/ws/portfolio` 主动推送；前端 `composables/useMarketWS.js` 订阅，避免轮询。
 
-5. **LLM 集成**
+5. **统一 TTL 与 SyncMemoryCache**
+   所有缓存 TTL 集中在 `core/ttl.py` 的 `CACHE_TTL` 字典，消除散落在各模块的魔法数字。新增 `SyncMemoryCache` 以线程安全的方式封装 `MemoryCache`，供 levistock、news_fetcher、sector_fetcher 等同步 fetcher 使用，替代原有的 `_CACHE` 私有字典。
+
+6. **场外 ETF 净值估算**
+   对于不在交易时间的交易所，`market_service.get_portfolio_realtime()` 回退到 ETF 的最新净值（NAV），并在返回中标记 `is_estimated: true` 和 `estimate_source`（如 `"nav"`、`"prev_close"`）。前端可据此展示为估算值而非过时价。
+
+7. **同步→异步桥接（`run_sync`）**
+   `core/async_utils.run_sync()` 标准化地将同步 fetcher 用 `asyncio.to_thread()` + 超时封装，替代散落在 routers 中的 `asyncio.to_thread` 直接调用。
+
+8. **交易日历**
+   `core/market_calendar.is_trading_time()` 判断 A 股 / 港股是否处于交易时段，供业务层决定获取实时行情还是返回估算值。
+
+9. **LLM 集成**
    `analysis/llm.py` 通过 `httpx` 调用 DeepSeek（OpenAI 兼容协议），生成市场报告与投资建议，模型 / key 走配置。
 
 ---
@@ -138,12 +154,13 @@ ETF_Surge/
 │   │   ├── config.py            # pydantic-settings 配置
 │   │   ├── database.py          # 异步 SQLAlchemy / SQLite
 │   │   ├── models/              # ORM 模型 + Pydantic schemas
-│   │   ├── fetchers/            # 多数据源 (akshare, yfinance, tushare, stooq, levistock, news)
+│   │   ├── fetchers/            # 多源采集：china_market、yfinance、tushare、stooq、levistock、news、sector
 │   │   ├── services/            # source_registry(熔断器) / cache_service / market·portfolio_service
 │   │   ├── analysis/            # indicators / signal / llm(DeepSeek)
 │   │   ├── routers/             # market / portfolio / analysis / news / ws
 │   │   ├── tasks/               # market_refresh (APScheduler 15s)
-│   │   └── utils/               # proxy 等工具
+│   │   ├── core/                # ttl / async_utils / market_calendar
+│   │   └── utils/               # decode（拉丁编码解码器）/ proxy 等工具
 │   ├── requirements.txt
 │   ├── Dockerfile
 │   └── .env.example

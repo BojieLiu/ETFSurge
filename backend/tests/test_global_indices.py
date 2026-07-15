@@ -21,7 +21,7 @@ async def test_global_indices_foreign_non_null():
         return {"symbol": symbol, "price": 12345.0, "change_pct": 1.25}
 
     with patch.object(ms, "_global_index_defs", new=AsyncMock(return_value=defs)), \
-         patch("app.fetchers.akshare_fetcher.fetch_index_realtime",
+         patch("app.fetchers.china_market.fetch_index_realtime",
                return_value=[{"symbol": "000001", "price": 3000.0, "change_pct": 0.5}]), \
          patch("app.fetchers.yfinance_fetcher.fetch_index_realtime",
                side_effect=fake_yf):
@@ -47,7 +47,7 @@ async def test_global_indices_one_region_failure_isolated():
         return {"symbol": symbol, "price": 18000.0, "change_pct": -0.3}
 
     with patch.object(ms, "_global_index_defs", new=AsyncMock(return_value=defs)), \
-         patch("app.fetchers.akshare_fetcher.fetch_index_realtime", return_value=[]), \
+         patch("app.fetchers.china_market.fetch_index_realtime", return_value=[]), \
          patch("app.fetchers.yfinance_fetcher.fetch_index_realtime", side_effect=fake_yf):
         regions = await ms.get_global_indices()
 

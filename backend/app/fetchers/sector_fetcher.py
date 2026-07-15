@@ -2,26 +2,16 @@
 
 每个对外函数都有两条数据链路,一条挂起另一条自动接管,绝不阻塞接口。
 """
-import time
-import concurrent.futures as cf
 from typing import Any
 
 import levistock as lv
 
+from ..core.ttl import CACHE_TTL
+from ..services.cache_service import sync_memory_cache
+from ..services.source_registry import registry
+
 _TRY = ["levistock", "akshare"]
 _TIMEOUT = 10
-_TTL: dict[str, int] = {
-    "industry_sectors": 60,
-    "concept_sectors": 60,
-    "sector_stocks": 60,
-    "sector_hist": 120,
-    "all_stocks": 3600,
-    "stock_hot_rank": 120,
-    "hot_plates": 120,
-    "sector_heat": 120,
-    "sector_popular": 60,
-}
-_CACHE: dict[str, tuple[float, Any]] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -30,6 +20,8 @@ _CACHE: dict[str, tuple[float, Any]] = {}
 
 def _exec(fn, timeout: int = _TIMEOUT):
     """在线程中执行 fn, 超时 / 异常返回 None。"""
+    import concurrent.futures as cf
+
     try:
         with cf.ThreadPoolExecutor(max_workers=1) as ex:
             return ex.submit(fn).result(timeout=timeout)
@@ -37,25 +29,25 @@ def _exec(fn, timeout: int = _TIMEOUT):
         return None
 
 
-def _cached(key: str, producer, ttl: int | None = None):
-    now = time.time()
-    hit = _CACHE.get(key)
-    if hit and hit[0] > now:
-        return hit[1]
+def _cached(key: str, producer, ttl_key: str = "sector_industry"):
+    """统一缓存包装，使用 sync_memory_cache 替代本地 _CACHE。"""
+    ttl = CACHE_TTL.get(ttl_key, 60)
+    hit = sync_memory_cache.get(key)
+    if hit is not None:
+        return hit
     data = producer()
-    _CACHE[key] = (now + (ttl or _TTL.get(key, 60)), data)
+    sync_memory_cache.set(key, data, ttl)
     return data
 
 
-def _try_two(lv_fn, ak_fn, default=None):
-    """依次尝试 levistock → akshare, 返回第一个非空结果。"""
-    for fn in (lv_fn, ak_fn):
-        r = _exec(fn, _TIMEOUT)
-        if r is not None:
-            # 对 list / dict 判空
-            if isinstance(r, (list, dict)) and len(r) == 0:
-                continue
-            return r
+def _try_two(name_lv, lv_fn, name_ak, ak_fn, default=None):
+    """通过 SourceRegistry 熔断路由依次尝试 levistock → akshare。"""
+    result = registry.route([
+        (name_lv, lambda: _exec(lv_fn, _TIMEOUT)),
+        (name_ak, lambda: _exec(ak_fn, _TIMEOUT)),
+    ])
+    if result:
+        return result
     return default if default is not None else []
 
 
@@ -184,7 +176,7 @@ def fetch_industry_sectors(limit: int = 80) -> list[dict[str, Any]]:
     def _ak():
         return _ak_industry_sectors()
     key = "industry_sectors"
-    rows = _cached(key, lambda: _try_two(_lv, _ak), _TTL.get(key))
+    rows = _cached(key, lambda: _try_two("sector_lv", _lv, "sector_ak", _ak), "sector_industry")
     return rows[:limit]
 
 
@@ -195,7 +187,7 @@ def fetch_concept_sectors(limit: int = 80) -> list[dict[str, Any]]:
     def _ak():
         return _ak_concept_sectors()
     key = "concept_sectors"
-    rows = _cached(key, lambda: _try_two(_lv, _ak), _TTL.get(key))
+    rows = _cached(key, lambda: _try_two("concept_lv", _lv, "concept_ak", _ak), "sector_concept")
     return rows[:limit]
 
 
@@ -206,7 +198,7 @@ def fetch_sector_stocks(sector_code: str) -> list[dict[str, Any]]:
     def _ak():
         return _ak_sector_stocks(sector_code)
     key = f"sector_stocks:{sector_code}"
-    return _cached(key, lambda: _try_two(_lv, _ak), _TTL.get("sector_stocks"))
+    return _cached(key, lambda: _try_two("sector_stocks_lv", _lv, "sector_stocks_ak", _ak), "sector_stocks")
 
 
 # ---------------------------------------------------------------------------
@@ -247,7 +239,7 @@ def fetch_sector_history(sector_code: str) -> list[dict[str, Any]]:
         # levistock sector k-line not available, fallback to None
         return None
     key = f"sector_hist:{sector_code}"
-    return _cached(key, lambda: _try_two(_lv, _ak), _TTL.get("sector_hist"))
+    return _cached(key, lambda: _try_two("sector_hist_lv", _lv, "sector_hist_ak", _ak), "sector_history")
 
 
 # ---------------------------------------------------------------------------
@@ -261,7 +253,7 @@ def fetch_all_stocks() -> list[dict[str, Any]]:
     def _ak():
         return _ak_all_stocks()
     key = "all_stocks"
-    return _cached(key, lambda: _try_two(_lv, _ak), _TTL.get("all_stocks"))
+    return _cached(key, lambda: _try_two("all_stocks_lv", _lv, "all_stocks_ak", _ak), "all_stocks")
 
 
 # ---------------------------------------------------------------------------
@@ -273,14 +265,14 @@ def fetch_sector_industry_cls(limit: int = 80) -> list[dict[str, Any]]:
     def _p():
         rows = lv.sector_industry_cls() or []
         return rows[:limit]
-    return _cached("industry_cls", _p, _TTL.get("industry_sectors"))
+    return _cached("industry_cls", _p, "sector_industry")
 
 
 def fetch_stock_hot_rank(limit: int = 50) -> list[dict[str, Any]]:
     """A 股热门个股排名 (同花顺)。"""
     def _p():
         return lv.stock_hot_rank_ths(limit)
-    return _cached("stock_hot_rank", _p, _TTL.get("stock_hot_rank"))
+    return _cached("stock_hot_rank", _p, "sector_heat")
 
 
 def fetch_hot_plates(limit: int = 15) -> list[dict[str, Any]]:
@@ -288,7 +280,7 @@ def fetch_hot_plates(limit: int = 15) -> list[dict[str, Any]]:
     def _p():
         rows = lv.get_sector_hot_plates() or []
         return rows[:limit]
-    return _cached("hot_plates", _p, _TTL.get("hot_plates"))
+    return _cached("hot_plates", _p, "sector_hot_plates")
 
 
 def fetch_sector_heat(limit: int = 20) -> list[dict[str, Any]]:
@@ -296,7 +288,7 @@ def fetch_sector_heat(limit: int = 20) -> list[dict[str, Any]]:
     def _p():
         rows = lv.get_sector_heat() or []
         return rows[:limit]
-    return _cached("sector_heat", _p, _TTL.get("sector_heat"))
+    return _cached("sector_heat", _p, "sector_heat")
 
 
 def fetch_sector_popular_stocks(plate_code: str) -> list[dict[str, Any]]:
@@ -304,4 +296,4 @@ def fetch_sector_popular_stocks(plate_code: str) -> list[dict[str, Any]]:
     def _p():
         return lv.get_sector_popular_stocks(plate_code) or []
     key = f"sector_popular:{plate_code}"
-    return _cached(key, _p, _TTL.get("sector_popular"))
+    return _cached(key, _p, "sector_popular")

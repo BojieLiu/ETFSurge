@@ -4,7 +4,7 @@ from typing import Any
 
 from ..models.portfolio import PortfolioETF
 from ..models.schemas import PortfolioETFCreate, PortfolioETFUpdate
-from ..fetchers.akshare_fetcher import fetch_a_stock_batch, fetch_fund_nav, fetch_hk_stock_realtime, fetch_index_realtime
+from ..fetchers.china_market import fetch_a_stock_batch, fetch_fund_nav, fetch_hk_stock_realtime, fetch_index_realtime
 from ..fetchers.yfinance_fetcher import fetch_us_etf_realtime
 from ..fetchers.news_fetcher import fetch_news_headlines, fetch_macro_news
 from ..analysis.indicators import compute_all_indicators
@@ -76,7 +76,7 @@ async def remove_etf(db: AsyncSession, symbol: str) -> bool:
 
 def _build_price_map(etfs: list[PortfolioETF | dict]) -> dict[str, tuple[float, float]]:
     """批量获取一组持仓的实时价格，返回 {symbol: (price, change_pct)} 映射表。"""
-    from ..fetchers.akshare_fetcher import (
+    from ..fetchers.china_market import (
         fetch_a_stock_batch, fetch_fund_nav, fetch_hk_stock_realtime, fetch_index_realtime,
     )
 

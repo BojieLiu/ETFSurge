@@ -60,12 +60,14 @@ The system now includes an **AI Portfolio Designer** that generates three risk-p
                     │ registry  │ └────────────┘ └───────────────┘
                     └─────┬──────┘
                           │ route() w/ circuit breaker
-            ┌─────────────┼──────────────────────────────┐
-            ▼             ▼             ▼                 ▼
-      akshare       yfinance       tushare          stooq / levistock
-      (A/HK/cmd)    (US)          (token)          (fallback)
-            │
-            ▼  news_fetcher → Caixin / macro / global
+             ┌─────────────┼──────────────────────────────┐
+             ▼             ▼             ▼                 ▼
+       china_market  yfinance       tushare          stooq / levistock
+       (A/HK/cmd)    (US)          (token)          (fallback)
+       (akshare+     └─── sector_fetcher (sector+ak)
+        sina+qq)
+             │
+             ▼  news_fetcher → Caixin / macro / global
                          ┌──────────────┐      ┌──────────────┐
                          │ Cache L1 mem  │◄────►│ Cache L2 Redis│
                          │ (always on)   │      │ (optional,    │
@@ -84,10 +86,12 @@ The system now includes an **AI Portfolio Designer** that generates three risk-p
 | Entry | `app/main.py` | FastAPI lifespan: init DB, Redis, start market scheduler; register routers & CORS; `/health` probe |
 | Config | `app/config.py` | `pydantic-settings` reads `.env` (DB / Redis / CORS / LLM …) |
 | Data | `app/database.py` | async SQLAlchemy (`aiosqlite`), SQLite at `data/portfolio.db` |
-| Fetch | `app/fetchers/*` | akshare, yfinance, tushare, stooq, levistock, news collectors |
+| Fetch | `app/fetchers/*` | china_market (A/HK/commodity via akshare+sina+qq), yfinance (US), tushare, stooq, levistock, news, sector collectors |
 | Route | `app/services/source_registry.py` | source health + circuit breaker + priority routing (auto-failover) |
-| Cache | `app/services/cache_service.py` | L1 in-process `MemoryCache` (always on) + L2 `RedisCache` (auto-degrade if unavailable) |
-| Biz | `app/services/market_service.py`, `portfolio_service.py` | quote aggregation, portfolio & position calculation |
+| Cache | `app/services/cache_service.py` | L1 in-process `MemoryCache` (async, always on) + `SyncMemoryCache` (sync fetcher wrapper) + L2 `RedisCache` (auto-degrade) |
+| Biz | `app/services/market_service.py`, `portfolio_service.py` | quote aggregation, portfolio & position calculation, off-exchange ETF NAV estimation |
+| Core | `app/core/ttl.py`, `async_utils.py`, `market_calendar.py` | unified `CACHE_TTL` dict, `run_sync()` sync→async bridge, A-share trading hours check |
+| Util | `app/utils/decode.py` | `decode_df()` latin1 column-name + column-value decoder for akshare |
 | Analysis | `app/analysis/indicators.py`, `signal.py`, `llm.py` | indicators, signal aggregation, DeepSeek (httpx) |
 | Scheduler | `app/tasks/market_refresh.py` | APScheduler refreshes quote cache every 15s to keep hot data fresh |
 | API | `app/routers/*` | REST + WebSocket routes |
@@ -111,7 +115,19 @@ The system now includes an **AI Portfolio Designer** that generates three risk-p
 4. **WebSocket real-time push**
    Quotes, news, and portfolio changes are pushed via `/ws/market/{symbol}`, `/ws/news`, `/ws/portfolio`; the frontend subscribes through `composables/useMarketWS.js` instead of polling.
 
-5. **LLM integration**
+5. **Unified TTL & SyncMemoryCache**
+   All cache TTL values are centralized in `core/ttl.py` (`CACHE_TTL` dict) eliminating magic-number sprinkling. A `SyncMemoryCache` (in `cache_service.py`) wraps the same `MemoryCache` with a thread-safe locking interface for synchronous fetchers (levistock, news, sector), replacing ad-hoc `_CACHE` dicts scattered across modules.
+
+6. **Off-exchange ETF NAV estimation**
+   For ETFs traded on exhanges not currently open, `market_service.get_portfolio_realtime()` falls back to the ETF's latest NAV and marks the quote with `is_estimated: true` and `estimate_source` (e.g. `"nav"`, `"prev_close"`). The frontend can then display these as estimated values rather than stale prices.
+
+7. **Sync→async bridge (`run_sync`)**
+   `core/async_utils.run_sync()` standardises wrapping synchronous fetchers with `asyncio.to_thread()` + timeout, replacing `asyncio.to_thread` calls scattered in routers.
+
+8. **Market calendar**
+   `core/market_calendar.is_trading_time()` checks whether A-share / Hong Kong markets are currently open, used by the service layer to decide whether to fetch real-time data or return estimated values.
+
+9. **LLM integration**
    `analysis/llm.py` calls DeepSeek (OpenAI-compatible) via `httpx` to generate market reports and investment advice; model / key come from config.
 
 ---
@@ -139,12 +155,13 @@ ETF_Surge/
 │   │   ├── config.py            # pydantic-settings config
 │   │   ├── database.py          # async SQLAlchemy / SQLite
 │   │   ├── models/              # ORM models + Pydantic schemas
-│   │   ├── fetchers/            # multi-source (akshare, yfinance, tushare, stooq, levistock, news)
+│   │   ├── fetchers/            # multi-source (china_market, yfinance, tushare, stooq, levistock, news, sector)
 │   │   ├── services/            # source_registry(circuit breaker) / cache_service / market·portfolio_service
 │   │   ├── analysis/            # indicators / signal / llm(DeepSeek)
 │   │   ├── routers/             # market / portfolio / analysis / news / ws
 │   │   ├── tasks/               # market_refresh (APScheduler 15s)
-│   │   └── utils/               # proxy utils
+│   │   ├── core/                # ttl / async_utils / market_calendar
+│   │   └── utils/               # decode (latin1 decoder) / proxy utils
 │   ├── requirements.txt
 │   ├── Dockerfile
 │   └── .env.example

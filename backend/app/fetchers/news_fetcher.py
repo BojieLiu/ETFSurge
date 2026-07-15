@@ -13,11 +13,11 @@ import feedparser
 from typing import Any
 
 from ..utils.proxy import no_proxy
-from .akshare_fetcher import _decode_df
+from ..utils.decode import decode_df as _decode_df
+from ..services.cache_service import sync_memory_cache
+from ..core.ttl import CACHE_TTL
 from .levistock_fetcher import classify_news_level, fetch_cailian_telegraph
 
-_CACHE: dict[str, tuple[float, Any]] = {}
-_TTL = {"headlines": 120, "macro": 300, "global": 300, "stock": 300}
 _SRC_TIMEOUT = 5
 
 
@@ -42,13 +42,14 @@ def _ak(fn) -> list[dict[str, Any]]:
         return []
 
 
-def _cached(key: str, producer) -> list[dict[str, Any]]:
-    now = time.time()
-    hit = _CACHE.get(key)
-    if hit and hit[0] > now:
-        return hit[1]
+def _cached(key: str, producer, ttl_key: str = "news_headlines") -> list[dict[str, Any]]:
+    """统一缓存包装，使用 sync_memory_cache 替代本地 _CACHE。"""
+    ttl = CACHE_TTL.get(ttl_key, 120)
+    hit = sync_memory_cache.get(key)
+    if hit is not None:
+        return hit
     data = producer()
-    _CACHE[key] = (now + _TTL.get(key, 120), data)
+    sync_memory_cache.set(key, data, ttl)
     return data
 
 
@@ -210,7 +211,7 @@ def fetch_macro_news() -> list[dict[str, Any]]:
             items = fetch_cailian_telegraph(10)  # 避免与 fetch_news_headlines 循环依赖
         return _attach_level(_dedupe(items)[:25])
 
-    return _cached("macro", _p)
+    return _cached("macro", _p, "news_macro")
 
 
 def fetch_global_news() -> list[dict[str, Any]]:
@@ -235,7 +236,7 @@ def fetch_global_news() -> list[dict[str, Any]]:
             items += _ak(lambda ak: ak.stock_info_global_cls())
         return _attach_level(_dedupe(items)[:25])
 
-    return _cached("global", _p)
+    return _cached("global", _p, "news_global")
 
 
 def fetch_stock_news(symbol: str) -> list[dict[str, Any]]:
@@ -246,11 +247,11 @@ def fetch_stock_news(symbol: str) -> list[dict[str, Any]]:
             items += fetch_cailian_telegraph(20)                   # 财联社兜底
         return _attach_level(_dedupe(items)[:25])
 
-    return _cached("stock:" + symbol, _p)
+    return _cached("stock:" + symbol, _p, "news_stock")
 
 
 def fetch_research_reports(symbol: str) -> list[dict[str, Any]]:
     def _p() -> list[dict[str, Any]]:
         return _ak(lambda ak: ak.stock_research_report_em(symbol=symbol))
 
-    return _cached("research:" + symbol, _p)
+    return _cached("research:" + symbol, _p, "news_stock")

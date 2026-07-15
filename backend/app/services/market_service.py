@@ -1,49 +1,64 @@
-import asyncio
+"""行情 Service 层。
+
+编排 china_mater / yfinance_fetcher / stooq_fetcher 等数据源，
+提供统一的异步行情接口（实时 / 历史 / 搜索 / 全球指数）。
+"""
+
 from typing import Any
-from ..fetchers import akshare_fetcher, yfinance_fetcher
+
 from ..database import async_session
+from ..core.async_utils import run_sync
+from ..core.market_calendar import is_trading_time
+from ..core.ttl import CACHE_TTL
+from ..services.source_registry import registry
 from .cache_service import cache_get, cache_mget, cache_set
-from . import source_registry
 from ..core.logging import get_logger
 
 logger = get_logger(__name__)
 
 
-_SYNC_TIMEOUT = 8
+# ── 同步调用桥接 ───────────────────────────────────────────────
 
 
-async def _sync(call, *args, timeout: int = _SYNC_TIMEOUT):
-    """在默认线程池中执行同步调用，避免阻塞事件循环。"""
-    loop = asyncio.get_event_loop()
-    return await asyncio.wait_for(
-        loop.run_in_executor(None, call, *args), timeout=timeout
-    )
+async def _call(fn, *args, timeout: int = 8):
+    """包一层 run_sync，统一异常处理为返回 None。"""
+    try:
+        return await run_sync(fn, *args, timeout=timeout)
+    except Exception:
+        return None
+
+
+# ── 基础行情接口 ──────────────────────────────────────────────
 
 
 async def get_all_realtime() -> list[dict[str, Any]]:
     results = []
     try:
-        results.extend(await _sync(akshare_fetcher.fetch_index_realtime))
+        from ..fetchers.china_market import fetch_index_realtime
+
+        data = await _call(fetch_index_realtime)
+        if data:
+            results.extend(data)
     except Exception:
         pass
     return results
 
 
 async def get_indices() -> list[dict[str, Any]]:
-    try:
-        return await _sync(akshare_fetcher.fetch_index_realtime)
-    except Exception:
-        return []
+    from ..fetchers.china_market import fetch_index_realtime
+
+    return await _call(fetch_index_realtime) or []
 
 
 async def get_commodities() -> list[dict[str, Any]]:
-    try:
-        return await _sync(akshare_fetcher.fetch_futures_realtime)
-    except Exception:
-        return []
+    from ..fetchers.china_market import fetch_futures_realtime
+
+    return await _call(fetch_futures_realtime) or []
 
 
-# 主流全球指数定义：(symbol, name, region)
+# ── 全球指数 ──────────────────────────────────────────────────
+
+
 _GLOBAL_INDEX_DEFS = [
     ("000001", "上证指数", "A股"),
     ("399001", "深证成指", "A股"),
@@ -62,19 +77,20 @@ _GLOBAL_INDEX_DEFS = [
 
 
 async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
-    """返回分组的主流全球指数行情：A股(akshare) + 港股/日经/韩国/美股(yfinance)。
+    """返回分组的主流全球指数行情。
 
-    指数定义从本地 indices 表读取（替代硬编码 _GLOBAL_INDEX_DEFS）。
-    表为空时降级使用 _GLOBAL_INDEX_DEFS。
+    A 股 → china_market (mootdx)
+    海外 → yfinance (熔断降级为占位)
     """
-    # 读取指数定义
     defs = await _global_index_defs()
     regions: dict[str, list[dict[str, Any]]] = {}
 
-    # A 股指数（akshare）
+    # A 股指数
+    from ..fetchers.china_market import fetch_index_realtime
+
     a_map: dict[str, dict[str, Any]] = {}
     try:
-        a_list = await _sync(akshare_fetcher.fetch_index_realtime)
+        a_list = await _call(fetch_index_realtime)
         for it in a_list or []:
             a_map[it.get("symbol")] = it
     except Exception:
@@ -90,14 +106,11 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
             item["asset_type"] = "index"
             regions.setdefault(region, []).append(item)
 
-    # 海外指数（yfinance，失败则降级为占位）。每个源独立 try/except，
-    # 单一地区失败（如美股闭市/网络抖动）不影响其他地区返回真实数据。
+    # 海外指数（yfinance）
+    from ..fetchers.yfinance_fetcher import fetch_index_realtime as yf_index
+
     async def _foreign(sym: str, name: str, region: str):
-        d = None
-        try:
-            d = await _sync(yfinance_fetcher.fetch_index_realtime, sym, timeout=15)
-        except Exception:
-            d = None
+        d = await _call(yf_index, sym, timeout=15)
         if d and d.get("price") is not None:
             d = dict(d)
             d["name"] = name
@@ -111,8 +124,12 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
             "available": False,
         }
 
+    import asyncio
+
     f_defs = [(s, n, r) for s, n, r in defs if r != "A股"]
-    outs = await asyncio.gather(*[_foreign(s, n, r) for s, n, r in f_defs], return_exceptions=True)
+    outs = await asyncio.gather(
+        *[_foreign(s, n, r) for s, n, r in f_defs], return_exceptions=True
+    )
     for o in outs:
         if isinstance(o, tuple) and len(o) == 2:
             region, d = o
@@ -122,32 +139,38 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
 
 
 async def _global_index_defs() -> list[tuple[str, str, str]]:
-    """从 indices 表读取 (symbol, name, region)，表为空降级到硬编码。"""
+    """从 indices 表读取，表为空降级到硬编码。"""
     from ..models.search import Index
     from sqlalchemy import select
 
     try:
         async with async_session() as session:
-            rows = (await session.execute(
-                select(Index).where(Index.is_active == True)  # noqa: E712
-            )).scalars().all()
+            rows = (
+                await session.execute(
+                    select(Index).where(Index.is_active == True)  # noqa: E712
+                )
+            ).scalars().all()
             if rows:
                 return [(r.symbol, r.name, r.region) for r in rows]
     except Exception as e:
-        logger.warning(f"[_global_index_defs] failed, fallback to hardcoded: {e}")
+        logger.warning(f"[_global_index_defs] fallback to hardcoded: {e}")
     return [(s, n, r) for s, n, r in _GLOBAL_INDEX_DEFS]
 
 
+# ── 板块 / 搜索 ───────────────────────────────────────────────
+
+
 async def get_sectors_local(sector_type: str) -> list[dict[str, Any]]:
-    """从本地 sectors 表读取板块列表。表为空时返回 []（触发调用方降级）。"""
     from ..models.search import Sector
     from sqlalchemy import select
 
     try:
         async with async_session() as session:
-            rows = (await session.execute(
-                select(Sector).where(Sector.type == sector_type)
-            )).scalars().all()
+            rows = (
+                await session.execute(
+                    select(Sector).where(Sector.type == sector_type)
+                )
+            ).scalars().all()
             return [{"sector_code": r.code, "sector_name": r.name} for r in rows]
     except Exception as e:
         logger.warning(f"[get_sectors_local] failed ({sector_type}): {e}")
@@ -155,7 +178,6 @@ async def get_sectors_local(sector_type: str) -> list[dict[str, Any]]:
 
 
 async def search_etf(keyword: str) -> list[dict[str, Any]]:
-    """搜索标的：优先查本地 instruments 表（毫秒级），表为空时降级到 akshare。"""
     from ..models.search import Instrument
     from sqlalchemy import select, or_
 
@@ -185,13 +207,17 @@ async def search_etf(keyword: str) -> list[dict[str, Any]]:
                     for r in rows
                 ]
     except Exception as e:
-        logger.warning(f"[search_etf] local table failed, fallback to akshare: {e}")
+        logger.warning(f"[search_etf] local table failed, fallback: {e}")
 
-    # 降级：akshare 全量缓存（仅首次/表空时）
+    # 降级：akshare 全量缓存
+    from ..fetchers.china_market import fetch_etf_list
+
     full = await cache_get("etf:list")
     if full is None:
-        full = await _sync(akshare_fetcher.fetch_etf_list, timeout=30)
-        await cache_set("etf:list", full, 3600)
+        full = await _call(fetch_etf_list, timeout=30)
+        await cache_set("etf:list", full or [], CACHE_TTL["etf_list"])
+    if not full:
+        return []
     if not keyword:
         return full[:20]
     kw = keyword.lower()
@@ -199,15 +225,16 @@ async def search_etf(keyword: str) -> list[dict[str, Any]]:
 
 
 async def get_indices_meta() -> list[dict[str, Any]]:
-    """获取所有指数元数据（用于下拉/分组展示）。"""
     from ..models.search import IndexMeta
     from sqlalchemy import select
 
     try:
         async with async_session() as session:
-            rows = (await session.execute(
-                select(IndexMeta).where(IndexMeta.is_active == True)  # noqa: E712
-            )).scalars().all()
+            rows = (
+                await session.execute(
+                    select(IndexMeta).where(IndexMeta.is_active == True)  # noqa: E712
+                )
+            ).scalars().all()
             return [
                 {
                     "symbol": r.symbol,
@@ -225,7 +252,6 @@ async def get_indices_meta() -> list[dict[str, Any]]:
 
 
 async def search_indices(keyword: str) -> list[dict[str, Any]]:
-    """搜索指数（毫秒级），支持代码/名称/拼音/首字母模糊匹配。"""
     from ..models.search import IndexMeta
     from sqlalchemy import select, or_
 
@@ -258,17 +284,28 @@ async def search_indices(keyword: str) -> list[dict[str, Any]]:
         return []
 
 
-_QUOTE_TTL = {"A": 5, "HK": 10, "US": 15, "index": 3}
+# ── 实时行情 (含缓存) ─────────────────────────────────────────
+
+_QUOTE_TTL = {
+    "A": CACHE_TTL["quote_a"],
+    "HK": CACHE_TTL["quote_hk"],
+    "US": CACHE_TTL["quote_us"],
+    "index": CACHE_TTL["quote_index"],
+}
 
 
 def quote_key(symbol: str, asset_type: str = "A") -> str:
     return f"quote:{asset_type}:{symbol}"
 
 
-async def get_realtime_batch(symbols: list[str], asset_type: str = "A") -> list[dict[str, Any]]:
+async def get_realtime_batch(
+    symbols: list[str], asset_type: str = "A"
+) -> list[dict[str, Any]]:
     if not symbols:
         return []
     if asset_type == "A":
+        from ..fetchers.china_market import fetch_a_stock_batch
+
         keys = [quote_key(s, "A") for s in symbols]
         cached = await cache_mget(keys)
         hits: dict[str, dict] = {}
@@ -280,9 +317,9 @@ async def get_realtime_batch(symbols: list[str], asset_type: str = "A") -> list[
                 misses.append(sym)
         results = list(hits.values())
         if misses:
-            fetched = await _sync(akshare_fetcher.fetch_a_stock_batch, misses)
+            fetched = await _call(fetch_a_stock_batch, misses, timeout=10)
             ttl = _QUOTE_TTL.get("A", 5)
-            for item in fetched:
+            for item in fetched or []:
                 await cache_set(quote_key(item["symbol"], "A"), item, ttl)
                 results.append(item)
         return results
@@ -295,6 +332,11 @@ async def get_realtime_batch(symbols: list[str], asset_type: str = "A") -> list[
 
 
 async def get_portfolio_realtime() -> list[dict[str, Any]]:
+    """获取组合实时行情。
+
+    场内 ETF → 实时价
+    场外 ETF → 盘中估算（tracked_index）/ 盘后净值
+    """
     from .portfolio_service import list_etfs
 
     async with async_session() as db:
@@ -303,51 +345,123 @@ async def get_portfolio_realtime() -> list[dict[str, Any]]:
     all_etfs = on_exchange + off_exchange
     name_map = {etf.symbol: etf.name for etf in all_etfs}
     short_name_map = {etf.symbol: (etf.short_name or etf.name) for etf in all_etfs}
+    tracked_index_map = {etf.symbol: etf.tracked_index for etf in all_etfs}
 
     symbols = list({str(etf.symbol) for etf in all_etfs})
     if not symbols:
         return []
 
-    a_symbols = [s for s in symbols if s.isdigit() and (s.startswith("5") or s.startswith("1") or s.startswith("6"))]
+    a_symbols = [
+        s
+        for s in symbols
+        if s.isdigit() and (s.startswith("5") or s.startswith("1") or s.startswith("6"))
+    ]
     quotes: list[dict[str, Any]] = []
     if a_symbols:
         quotes.extend(await get_realtime_batch(a_symbols, "A"))
 
-    index_symbols = {"000001", "399001", "399006", "000688", "000300", "000016", "000905", "000852"}
+    # 指数行情（供场外 ETF 估值用）
+    from ..fetchers.china_market import fetch_index_realtime
+
+    index_symbols = {
+        "000001", "399001", "399006", "000688",
+        "000300", "000016", "000905", "000852",
+    }
     try:
-        index_quotes = await _sync(akshare_fetcher.fetch_index_realtime)
+        index_quotes = await _call(fetch_index_realtime)
     except Exception:
         index_quotes = []
-    for q in index_quotes:
+    index_price_map: dict[str, dict] = {}
+    for q in index_quotes or []:
         if q["symbol"] in index_symbols:
+            index_price_map[q["symbol"]] = q
             quotes.append(q)
-            await cache_set(quote_key(q["symbol"], "index"), q, _QUOTE_TTL.get("index", 3))
+            await cache_set(
+                quote_key(q["symbol"], "index"), q, _QUOTE_TTL.get("index", 3)
+            )
 
-    # Enrich quotes with portfolio names (overwrite empty/missing names)
+    # 场外 ETF：填充 is_estimated 信息
+    now_trading = is_trading_time()
+    from ..fetchers.china_market import fetch_fund_nav
+
+    for etf in off_exchange:
+        sym = etf.symbol
+        ti = etf.tracked_index
+        if not ti:
+            continue
+        # 检查是否已有数据（通过 tracked_index 映射）
+        existing = next((q for q in quotes if q.get("symbol") == sym), None)
+        if existing:
+            existing["portfolio_type"] = "off_exchange"
+            existing["is_estimated"] = now_trading
+            existing["estimate_source"] = "tracked_index" if now_trading else "nav"
+            continue
+
+        if now_trading and ti in index_price_map:
+            idx = index_price_map[ti]
+            quotes.append({
+                "symbol": sym,
+                "name": name_map.get(sym, sym),
+                "short_name": short_name_map.get(sym, name_map.get(sym, sym)),
+                "price": idx.get("price"),
+                "change_pct": idx.get("change_pct"),
+                "change_amount": idx.get("change_amount", 0),
+                "volume": 0,
+                "asset_type": "A",
+                "portfolio_type": "off_exchange",
+                "is_estimated": True,
+                "estimate_source": "tracked_index",
+            })
+        else:
+            # 盘后：尝试净值
+            nav_data = await _call(fetch_fund_nav, sym, timeout=8)
+            nav_price = None
+            if nav_data and isinstance(nav_data, tuple) and len(nav_data) >= 1:
+                nav_price = float(nav_data[0])
+            quotes.append({
+                "symbol": sym,
+                "name": name_map.get(sym, sym),
+                "short_name": short_name_map.get(sym, name_map.get(sym, sym)),
+                "price": nav_price or (index_price_map.get(ti, {}).get("price")),
+                "change_pct": 0,
+                "change_amount": 0,
+                "volume": 0,
+                "asset_type": "A",
+                "portfolio_type": "off_exchange",
+                "is_estimated": True,
+                "estimate_source": "nav" if nav_data else "last_close",
+            })
+
+    # 补全名称
     for q in quotes:
         sym = q["symbol"]
         if not q.get("name") or q["name"] == sym:
             q["name"] = name_map.get(sym, q.get("name", sym))
         if not q.get("short_name"):
             q["short_name"] = short_name_map.get(sym, q.get("name", sym))
+        if "is_estimated" not in q:
+            q["is_estimated"] = False
+            q["estimate_source"] = None
 
     return quotes
 
 
 async def get_asset_realtime(symbol: str, asset_type: str) -> dict | None:
+    from ..fetchers.china_market import fetch_a_stock_realtime, fetch_hk_stock_realtime
+
     try:
         if asset_type == "US":
             return await _route_us(symbol)
         try:
-            all_a = await _sync(akshare_fetcher.fetch_a_stock_realtime, symbol)
-            for item in all_a:
+            all_a = await _call(fetch_a_stock_realtime, symbol)
+            for item in all_a or []:
                 if item["symbol"] == symbol:
                     return item
         except Exception:
             pass
         try:
-            all_hk = await _sync(akshare_fetcher.fetch_hk_stock_realtime, symbol)
-            for item in all_hk:
+            all_hk = await _call(fetch_hk_stock_realtime, symbol)
+            for item in all_hk or []:
                 if item["symbol"] == symbol:
                     return item
         except Exception:
@@ -358,59 +472,38 @@ async def get_asset_realtime(symbol: str, asset_type: str) -> dict | None:
 
 
 async def _route_us(symbol: str) -> dict | None:
-    """美股/ETF:Stooq(主,免费稳定) → yfinance(兜底)。各自独立超时,避免单源阻塞。"""
+    """美股/ETF: Stooq(主) → yfinance(兜底)，通过 SourceRegistry 熔断路由。"""
     from ..fetchers import stooq_fetcher
+    from ..fetchers.yfinance_fetcher import fetch_us_etf_realtime
+
+    def _stooq():
+        rows = stooq_fetcher.fetch_us_etf_realtime(symbol)
+        return rows[0] if rows else None
+
+    def _yf():
+        return fetch_us_etf_realtime(symbol)
+
+    return registry.route([
+        ("stooq", _stooq),
+        ("yfinance", _yf),
+    ])
+
+
+async def get_history(
+    symbol: str, asset_type: str = "A", period: str = "daily"
+) -> list[dict[str, Any]]:
+    from ..fetchers.china_market import fetch_history
+
+    return await _call(fetch_history, symbol, asset_type, period) or []
+
+
+async def get_fundamentals(symbol: str) -> dict[str, Any] | None:
+    from ..fetchers.tushare_fetcher import fetch_daily
 
     try:
-        rows = await _sync(stooq_fetcher.fetch_us_etf_realtime, symbol, timeout=5)
-        if rows:
-            return rows[0]
+        data = await _call(fetch_daily, symbol, "20260101", "20261231", timeout=10)
+        if data:
+            return {"symbol": symbol, "daily": data}
     except Exception:
         pass
-    try:
-        result = await _sync(yfinance_fetcher.fetch_us_etf_realtime, symbol, timeout=8)
-        return result or None
-    except Exception:
-        return None
-
-
-_HISTORY_TTL = {"daily": 86400, "weekly": 604800, "monthly": 2592000,
-                 "4h": 300, "1h": 300, "30m": 300, "15m": 300}
-
-
-async def get_history(symbol: str, asset_type: str = "A", period: str = "daily") -> list[dict[str, Any]]:
-    key = f"kline:{asset_type}:{symbol}:{period}"
-    cached = await cache_get(key)
-    if cached is not None:
-        return cached
-    result = await _sync(akshare_fetcher.fetch_history, symbol, asset_type, period)
-    ttl = _HISTORY_TTL.get(period, 300)
-    if result:
-        await cache_set(key, result, ttl)
-    return result
-
-
-_TUSHARE_TTL = 86400
-
-
-def _yyyymmdd(days_ago: int = 0) -> str:
-    from datetime import datetime, timedelta
-
-    return (datetime.now() - timedelta(days=days_ago)).strftime("%Y%m%d")
-
-
-async def get_fundamentals(symbol: str) -> dict[str, Any]:
-    """Tushare 增强数据(日线 + 主力资金流),长缓存、稀疏调用(免费 token 有积分限制)。"""
-    from ..fetchers import tushare_fetcher
-
-    key = f"tushare:fund:{symbol}"
-    cached = await cache_get(key)
-    if cached is not None:
-        return cached
-    end = _yyyymmdd(0)
-    start = _yyyymmdd(120)
-    daily = await _sync(tushare_fetcher.fetch_daily, symbol, start, end)
-    moneyflow = await _sync(tushare_fetcher.fetch_moneyflow, symbol, start, end)
-    result = {"symbol": symbol, "daily": daily, "moneyflow": moneyflow}
-    await cache_set(key, result, _TUSHARE_TTL)
-    return result
+    return None

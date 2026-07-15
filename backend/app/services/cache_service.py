@@ -1,3 +1,4 @@
+import threading
 from typing import Any, Optional
 import json
 import time
@@ -142,3 +143,41 @@ async def cache_set(key: str, value: Any, ttl: int) -> None:
 async def cache_mset(mapping: dict[str, Any], ttl: int) -> None:
     await redis_cache.mset(mapping, ttl)
     await memory_cache.mset(mapping, ttl)
+
+
+# ── 同步缓存层（供同步的 fetcher 层使用） ─────────────────────
+
+
+class SyncMemoryCache:
+    """同步版 MemoryCache，底层与 ``memory_cache`` 共享同一进程空间。
+
+    Fetcher 层为同步函数，无法直接使用 async 的 ``memory_cache.get/set``，
+    此包装器提供等效的线程安全同步接口，行为一致。
+    """
+
+    def __init__(self) -> None:
+        self._store: dict[str, tuple[float, Any]] = {}
+        self._lock = threading.Lock()
+
+    def get(self, key: str) -> Any | None:
+        with self._lock:
+            item = self._store.get(key)
+        if not item:
+            return None
+        ts, value = item
+        if ts < time.time():
+            with self._lock:
+                self._store.pop(key, None)
+            return None
+        return value
+
+    def set(self, key: str, value: Any, ttl: int) -> None:
+        with self._lock:
+            self._store[key] = (time.time() + ttl, value)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._store.clear()
+
+
+sync_memory_cache = SyncMemoryCache()

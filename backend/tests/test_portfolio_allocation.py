@@ -17,8 +17,8 @@ def _etf(**kw):
 
 async def test_calculate_allocation_total_amount_non_normalized(dummy_portfolio_rows):
     """total_amount = sum(target_amounts); weights NOT normalized by weight_sum."""
-    with patch("app.fetchers.akshare_fetcher.fetch_a_stock_batch", return_value=[]), \
-         patch("app.fetchers.akshare_fetcher.fetch_fund_nav", return_value=None), \
+    with patch("app.fetchers.china_market.fetch_a_stock_batch", return_value=[]), \
+         patch("app.fetchers.china_market.fetch_fund_nav", return_value=None), \
          patch("app.fetchers.yfinance_fetcher.fetch_us_etf_realtime", return_value=None):
         result = await calculate_allocation(etfs=dummy_portfolio_rows, total_capital=500000)
 
@@ -44,8 +44,8 @@ async def test_calculate_allocation_cash_when_underweight():
         _etf(symbol="518880", name="B", short_name="B", asset_type="A",
              portfolio_type="on_exchange", target_weight=0.3, tracked_index=None),
     ]
-    with patch("app.fetchers.akshare_fetcher.fetch_a_stock_batch", return_value=[]), \
-         patch("app.fetchers.akshare_fetcher.fetch_fund_nav", return_value=None), \
+    with patch("app.fetchers.china_market.fetch_a_stock_batch", return_value=[]), \
+         patch("app.fetchers.china_market.fetch_fund_nav", return_value=None), \
          patch("app.fetchers.yfinance_fetcher.fetch_us_etf_realtime", return_value=None):
         result = await calculate_allocation(etfs=etfs, total_capital=500000)
 
@@ -55,8 +55,8 @@ async def test_calculate_allocation_cash_when_underweight():
 
 
 async def test_calculate_daily_pnl_total_amount(dummy_portfolio_rows):
-    with patch("app.fetchers.akshare_fetcher.fetch_a_stock_batch", return_value=[]), \
-         patch("app.fetchers.akshare_fetcher.fetch_fund_nav", return_value=None), \
+    with patch("app.fetchers.china_market.fetch_a_stock_batch", return_value=[]), \
+         patch("app.fetchers.china_market.fetch_fund_nav", return_value=None), \
          patch("app.fetchers.yfinance_fetcher.fetch_us_etf_realtime", return_value=None):
         result = await calculate_daily_pnl(etfs=dummy_portfolio_rows, total_capital=500000)
 
@@ -72,8 +72,8 @@ async def test_off_exchange_price_gt_zero_via_nav():
              target_weight=0.3, tracked_index="159338"),
     ]
     nav = (1.2345, 0.56)
-    with patch("app.fetchers.akshare_fetcher.fetch_fund_nav", return_value=nav), \
-         patch("app.fetchers.akshare_fetcher.fetch_a_stock_batch", return_value=[]), \
+    with patch("app.fetchers.china_market.fetch_fund_nav", return_value=nav), \
+         patch("app.fetchers.china_market.fetch_a_stock_batch", return_value=[]), \
          patch("app.fetchers.yfinance_fetcher.fetch_us_etf_realtime", return_value=None):
         price_map = ps._build_price_map(etfs)
 

@@ -61,7 +61,9 @@ POST /api/v1/portfolio/calculate
       "current_price": 0.925,
       "change_pct": 0.54,
       "shares": 281081.08,
-      "tracked_index": null
+      "tracked_index": null,
+      "is_estimated": false,
+      "estimate_source": null
     }
   ],
   "cash_weight": 0.04,
@@ -75,10 +77,12 @@ POST /api/v1/portfolio/calculate
 |-------|------|-------------|
 | total_capital | float | Input total capital |
 | allocations | array | Per-ETF allocation details |
-| allocations[].target_amount | float | `total_capital * target_weight / weight_sum` |
+| allocations[].target_amount | float | `total_capital * target_weight` (not normalized) |
 | allocations[].current_price | float | Real-time price (0 if unavailable) |
 | allocations[].change_pct | float | Real-time change % (0 if unavailable) |
 | allocations[].shares | float | `target_amount / current_price` |
+| allocations[].is_estimated | bool | Off-exchange fund price estimated via tracked index |
+| allocations[].estimate_source | string \| null | `tracked_index` \| `nav` \| `null` |
 | cash_weight | float | Remaining weight after summing all ETF weights |
 | cash_amount | float | `total_capital * cash_weight` |
 
