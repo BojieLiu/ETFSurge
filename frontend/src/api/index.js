@@ -76,6 +76,14 @@ export const portfolioApi = {
     formData.append('skip_invalid', String(skipInvalid))
     return api.post('/portfolio/import', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
   },
+  // Design
+  design: (params) => {
+    const { capital = 500000, mode = 'standard', session_id, constraints } = params || {}
+    return api.post('/portfolio/design', constraints || {}, {
+      params: { capital, mode, ...(session_id ? { session_id } : {}) },
+      timeout: 180000,
+    })
+  },
   // Drift Check
   getDriftCheck: (type) => api.get('/portfolio/drift-check', { params: type ? { portfolio_type: type } : {} }),
 }

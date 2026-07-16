@@ -511,9 +511,13 @@ async function startDesign() {
     loadingProgress.value = 70
     loadingText.value = '正在生成方案...'
 
+    // 生成 session_id 用于 WS 接收 LLM 报告
+    const wsSessionId = 'design_' + Date.now()
+
     const res = await portfolioApi.design({
       capital: designCapital.value,
       mode: 'standard',
+      session_id: wsSessionId,
       constraints: { min_names: 8, max_names: 15 }
     })
     // Map backend response (strategies/etfs) to frontend format (plans/allocations)
@@ -552,9 +556,75 @@ async function startDesign() {
     loadingProgress.value = 100
     designStep.value = 'result'
     designTab.value = 'cards'
+
+    // 连接 WebSocket 接收 LLM 报告
+    designWsConnect(wsSessionId)
   } catch (e) {
     toast(e?.response?.data?.detail || '生成失败，请重试', 'error')
     designStep.value = 'wizard'
+  }
+}
+
+let designWs = null
+
+function designWsConnect(designId) {
+  // 关闭旧连接
+  if (designWs) { designWs.close(); designWs = null }
+
+  const sessionId = 'design_' + (designId || Date.now())
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const wsUrl = protocol + '//' + window.location.host + '/api/v1/ws/design-report/' + sessionId
+
+  try {
+    designWs = new WebSocket(wsUrl)
+
+    designWs.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data)
+        if (msg.type !== 'design_report') return
+
+        if (msg.status === 'generating' && msg.progress != null) {
+          // 更新后台 LLM 报告的进度
+          loadingProgress.value = msg.progress || loadingProgress.value
+        }
+
+        if (msg.status === 'streaming' && msg.chunk) {
+          // 拼接 LLM 报告片段
+          if (!designResult.value) return
+          const current = designResult.value.design_text || ''
+          designResult.value = {
+            ...designResult.value,
+            design_text: current + msg.chunk,
+          }
+        }
+
+        if (msg.status === 'complete' && msg.report_text) {
+          // LLM 报告完成，替换为完整文本
+          if (designResult.value) {
+            designResult.value = {
+              ...designResult.value,
+              design_text: msg.report_text,
+            }
+          }
+        }
+
+        if (msg.status === 'error') {
+          console.warn('[design_report] WS error:', msg.message)
+        }
+      } catch (e) {
+        // ignore parse errors
+      }
+    }
+
+    designWs.onerror = () => {
+      // 静默处理，不打断用户体验
+    }
+
+    designWs.onclose = () => {
+      designWs = null
+    }
+  } catch (e) {
+    // WS 连接失败不影响卡片展示
   }
 }
 

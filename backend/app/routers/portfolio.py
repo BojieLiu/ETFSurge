@@ -151,6 +151,7 @@ async def portfolio_design(
     risk_profile: str = "balanced",
     capital: float = 500000,
     mode: str = "standard",
+    session_id: str | None = Query(None),
     constraints: dict | None = None,
     db: AsyncSession = Depends(get_db)
 ):
@@ -202,6 +203,19 @@ async def portfolio_design(
         design_id = design_record.id
     except Exception as e:
         logger.warning("[portfolio] failed to save design history: %s", e)
+
+    # 如果传入 session_id，启动后台 LLM 报告推送
+    if session_id:
+        try:
+            from ..tasks.design_report import compose_and_push_report
+            asyncio.create_task(compose_and_push_report(
+                session_id=session_id,
+                strategies=strategies,
+                market_sentiment=market_context.get("market_sentiment", {}),
+                benchmark_stocks=market_context.get("benchmark_stocks", []),
+            ))
+        except Exception as e:
+            logger.warning("[portfolio] failed to schedule design report: %s", e)
 
     return {
         "strategies": strategies,
