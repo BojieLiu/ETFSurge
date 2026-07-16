@@ -338,31 +338,125 @@ const calcLayerWeight = (allocations, layer) => {
   return Math.round(total * 100)
 }
 
-function generateDesignReport(plans) {
+function generateDesignReport(plans, marketContext) {
   if (!plans || !plans.length) return ''
   const ml = (v) => (v != null ? (v * 100).toFixed(0) + '%' : '—')
-  let md = '# ETF 组合设计方案\n\n'
-  md += '## 三方案概览\n\n'
-  md += '| 维度 | ' + plans.map(p => p.style).join(' | ') + ' |\n'
-  md += '|------|' + plans.map(() => '---|').join('') + '\n'
-  md += '| 标的数量 | ' + plans.map(p => (p.allocations || []).length + '只').join(' | ') + ' |\n'
-  md += '| 预期年化 | ' + plans.map(p => ml(p.expected_return)).join(' | ') + ' |\n'
-  md += '| 最大回撤 | ' + plans.map(p => ml(p.max_drawdown)).join(' | ') + ' |\n'
-  md += '| 夏普比率 | ' + plans.map(p => (p.sharpe_ratio != null ? p.sharpe_ratio.toFixed(2) : '—')).join(' | ') + ' |\n\n'
-  plans.forEach(p => {
-    md += '---\n\n'
-    md += '## ' + p.style + '：' + (p.portfolio_name || '') + '\n\n'
-    md += '**定位：**' + (p.positioning || '—') + '\n\n'
-    md += '| 标的 | 代码 | 层级 | 权重 | 选择理由 |\n'
-    md += '|------|------|------|------|---------|\n'
-    ;(p.allocations || []).forEach(a => {
-      md += '| ' + (a.name || '—') + ' | ' + a.symbol + ' | ' + layerLabel(a.layer) + ' | '
-        + (a.target_weight != null ? (a.target_weight * 100).toFixed(1) + '%' : '—') + ' | '
-        + (a.selection_rationale || '—') + ' |\n'
+  const mt = (v) => (v != null ? (v * 100).toFixed(1) + '%' : '—')
+  const mk = (v) => (v != null ? v.toFixed(2) : '—')
+
+  // 层颜色映射
+  const lc = (l) => ({ core: '#1976D2', satellite: '#FF9800', defense: '#43A047' })[l] || '#888'
+  const ll = (l) => ({ core: '核心层', satellite: '卫星层', defense: '防御层' })[l] || l
+
+  // 市场情绪
+  const sent = marketContext?.market_sentiment || {}
+  const sentimentLine = sent.sentiment_label
+    ? `当前市场情绪：**${sent.sentiment_label}**（指数 ${sent.sentiment_index}）`
+    : ''
+
+  // 方案概览表
+  const compareHeaders = '| 维度 | ' + plans.map(p => p.style).join(' | ') + ' |'
+  const compareDivider = '|------|' + plans.map(() => '---|').join('')
+  const compareRows = [
+    '标的数量', '预期年化收益', '最大回撤', '夏普比率',
+  ].map(label => {
+    const vals = plans.map(p => {
+      if (label === '标的数量') return (p.allocations || []).length + ' 只'
+      if (label === '预期年化收益') return mt(p.expected_return)
+      if (label === '最大回撤') return mt(p.max_drawdown)
+      if (label === '夏普比率') return mk(p.sharpe_ratio)
+      return '—'
     })
+    return '| ' + label + ' | ' + vals.join(' | ') + ' |'
+  }).join('\n')
+
+  let md = '# ETF 组合设计方案\n\n'
+  md += '---\n\n'
+
+  // ── 第一部分：市场环境概览 ──
+  md += '## 一、市场环境概览\n\n'
+  md += sentimentLine + '\n\n'
+  md += '> 注：完整市场分析需结合实时指数行情、行业板块热点及资金流向综合判断。\n\n'
+
+  md += '---\n\n'
+
+  // ── 第二部分：三层设计框架说明 ──
+  md += '## 二、三层设计框架\n\n'
+  md += '本方案采用 **核心+卫星+防御** 三层结构进行组合设计：\n\n'
+  md += '| 层级 | 颜色 | 定位 | 典型配置方向 |\n'
+  md += '|------|------|------|-------------|\n'
+  md += '| **核心层** | <span style="color:#1976D2">●</span> 蓝色 | 组合压舱石，决定组合长期收益方向 | 沪深300、中证A500、中证500等宽基指数 |\n'
+  md += '| **卫星层** | <span style="color:#FF9800">●</span> 橙色 | 弹性来源，捕捉行业/主题机会 | 半导体、AI、新能源、医药等行业ETF |\n'
+  md += '| **防御层** | <span style="color:#43A047">●</span> 绿色 | 风险缓冲，降低组合波动 | 黄金、国债、跨境ETF等低相关性资产 |\n\n'
+
+  md += '---\n\n'
+
+  // ── 第三部分：三方案概览 ──
+  md += '## 三、三方案概览\n\n'
+  md += compareHeaders + '\n'
+  md += compareDivider + '\n'
+  md += compareRows + '\n\n'
+
+  md += '| 定位 | ' + plans.map(p => (p.positioning || '—')).join(' | ') + ' |\n'
+
+  // 按层预算
+  md += '| 核心层占比 | ' + plans.map(p => Math.round(calcLayerWeight(p.allocations, 'core')) + '%').join(' | ') + ' |\n'
+  md += '| 卫星层占比 | ' + plans.map(p => Math.round(calcLayerWeight(p.allocations, 'satellite')) + '%').join(' | ') + ' |\n'
+  md += '| 防御层占比 | ' + plans.map(p => Math.round(calcLayerWeight(p.allocations, 'defense')) + '%').join(' | ') + ' |\n\n'
+
+  md += '---\n\n'
+
+  // ── 第四部分：各方案详解 ──
+  md += '## 四、各方案详解\n\n'
+  plans.forEach((p, pi) => {
+    md += '### ' + (pi + 1) + '. ' + p.style + '：' + (p.portfolio_name || '') + '\n\n'
+    md += '**风格定位：**' + (p.positioning || '—') + '\n\n'
+
+    // 层预算
+    const cw = Math.round(calcLayerWeight(p.allocations, 'core'))
+    const sw = Math.round(calcLayerWeight(p.allocations, 'satellite'))
+    const dw = Math.round(calcLayerWeight(p.allocations, 'defense'))
+    md += '**资产结构：**'
+    md += '<span style="color:#1976D2">核心 ' + cw + '%</span> · '
+    md += '<span style="color:#FF9800">卫星 ' + sw + '%</span> · '
+    md += '<span style="color:#43A047">防御 ' + dw + '%</span>\n\n'
+
+    // 分层展示
+    const layerOrder = ['core', 'satellite', 'defense']
+    layerOrder.forEach(layer => {
+      const layerItems = (p.allocations || []).filter(a => a.layer === layer)
+      if (!layerItems.length) return
+      md += '**' + ll(layer) + '**（' + Math.round(calcLayerWeight(p.allocations, layer)) + '%）\n\n'
+      md += '| 标的 | 代码 | 权重 | 入选理由 |\n'
+      md += '|------|------|------|---------|\n'
+      layerItems.forEach(a => {
+        md += '| ' + (a.name || '—') + ' | `' + a.symbol + '` | '
+          + (a.target_weight != null ? (a.target_weight * 100).toFixed(1) + '%' : '—') + ' | '
+          + (a.selection_rationale || '—') + ' |\n'
+      })
+      md += '\n'
+    })
+
+    // 风险提示
+    md += '**风险提示：**\n\n'
+    if (p.risk_factors && p.risk_factors.length) {
+      p.risk_factors.forEach(rf => { md += '- ' + rf + '\n' })
+    } else {
+      md += '- 市场整体下行风险\n'
+      md += '- 行业/主题集中度风险\n'
+      md += '- 流动性风险\n'
+    }
     md += '\n'
   })
-  md += '\n---\n*本报告由 ETF Surge 组合设计引擎自动生成*\n'
+
+  md += '---\n\n'
+  md += '## 五、配置逻辑总结\n\n'
+  md += '三个方案的核心差异在于 **卫星层的配置权重和激进程度**：\n\n'
+  md += '- **防御型**：卫星层占比较低（' + Math.round(calcLayerWeight(plans.find(p => p.style === '防御型')?.allocations || [], 'satellite')) + '%），重点配置宽基和避险资产，追求稳健\n'
+  md += '- **平衡型**：卫星层适度参与（' + Math.round(calcLayerWeight(plans.find(p => p.style === '平衡型')?.allocations || [], 'satellite')) + '%），兼顾收益与风险\n'
+  md += '- **进攻型**：卫星层占比最高（' + Math.round(calcLayerWeight(plans.find(p => p.style === '进攻型')?.allocations || [], 'satellite')) + '%），聚焦高弹性行业，追求超额收益\n\n'
+  md += '> **免责声明：** 本报告由 ETF Surge 组合设计引擎基于当前市场数据自动生成，仅供个人研究参考，不构成任何投资建议。基金有风险，投资需谨慎。\n'
+
   return md
 }
 
@@ -451,7 +545,7 @@ async function startDesign() {
       : []
     designResult.value = {
       plans,
-      design_text: generateDesignReport(plans),
+      design_text: generateDesignReport(plans, data.market_context),
       market_context: data.market_context || {},
       generated_at: data.generated_at,
     }
@@ -1118,5 +1212,100 @@ async function checkStrategy() {
   gap: var(--space-3);
   margin-top: var(--space-4);
   justify-content: center;
+}
+
+/* Markdown Report Styles */
+.markdown-body {
+  font-size: var(--font-size-sm);
+  line-height: 1.7;
+  color: var(--color-text-primary);
+  padding: var(--space-4) 0;
+}
+
+.markdown-body h1 {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  margin: var(--space-6) 0 var(--space-4);
+  padding-bottom: var(--space-2);
+  border-bottom: 2px solid var(--color-primary);
+}
+
+.markdown-body h2 {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  margin: var(--space-5) 0 var(--space-3);
+  padding-bottom: var(--space-1);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.markdown-body h3 {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  margin: var(--space-4) 0 var(--space-2);
+  color: var(--color-primary);
+}
+
+.markdown-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: var(--space-3) 0 var(--space-4);
+  font-size: var(--font-size-sm);
+}
+
+.markdown-body th {
+  background: var(--color-bg-tertiary);
+  font-weight: var(--font-weight-semibold);
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  border: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.markdown-body td {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  vertical-align: top;
+}
+
+.markdown-body tr:nth-child(even) {
+  background: var(--color-bg-secondary);
+}
+
+.markdown-body blockquote {
+  margin: var(--space-3) 0;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-bg-tertiary);
+  border-left: 4px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.markdown-body ul {
+  padding-left: var(--space-5);
+  margin: var(--space-2) 0;
+}
+
+.markdown-body li {
+  margin-bottom: var(--space-1);
+}
+
+.markdown-body strong {
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+}
+
+.markdown-body code {
+  background: var(--color-bg-tertiary);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-family: monospace;
+  font-size: 0.9em;
+}
+
+.markdown-body hr {
+  border: none;
+  border-top: 1px solid var(--color-border);
+  margin: var(--space-5) 0;
 }
 </style>
