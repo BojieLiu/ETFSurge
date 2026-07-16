@@ -99,6 +99,81 @@ def fetch_fund_flow(symbol: str) -> dict | None:
         return None
 
 
+def fetch_fund_flow_detailed(symbol: str) -> dict | None:
+    """获取个股/ETF 四类分单资金流向（超大单/大单/中单/小单）。
+
+    返回:
+      {
+        "super_large": {"inflow": float, "direction": str},
+        "large": {"inflow": float, "direction": str},
+        "medium": {"inflow": float, "direction": str},
+        "small": {"inflow": float, "direction": str},
+        "main_net_inflow": float,
+        "main_net_inflow_pct": float,
+      } 或 None
+    direction: "净流入" / "净流出" / ""
+    """
+    if not _is_a_stock(symbol):
+        return None
+    try:
+        import akshare as ak
+        market = _get_market(symbol)
+        df = ak.stock_individual_fund_flow(stock=symbol, market=market)
+        if df is None or df.empty:
+            return None
+        df = _decode_df(df)
+        row = df.iloc[0]
+
+        # 列名匹配模式: 前缀 + "净流入-净额" 或 "净流入-净占比"
+        categories = {
+            "super_large": ("超大单",),       # ≥500万
+            "large": ("大单",),               # 100~500万
+            "medium": ("中单",),              # 20~100万
+            "small": ("小单",),               # <20万
+        }
+
+        result = {}
+        main_inflow = None
+        main_pct = None
+
+        for key, prefixes in categories.items():
+            inflow_val = None
+            for col in df.columns:
+                cl = col.lower()
+                for prefix in prefixes:
+                    p_lower = prefix.lower()
+                    if p_lower in cl and "净流入" in cl and ("净额" in cl or "金额" in cl):
+                        # 主力列单独处理
+                        if "主力" in cl:
+                            continue
+                        try:
+                            inflow_val = float(row[col])
+                        except (ValueError, TypeError):
+                            pass
+            direction = "净流入" if (inflow_val or 0) >= 0 else "净流出"
+            result[key] = {"inflow": inflow_val or 0, "direction": direction}
+
+        # 主力净流入
+        for col in df.columns:
+            cl = col.lower()
+            if "主力净流入" in cl and ("净额" in cl or "金额" in cl):
+                try:
+                    main_inflow = float(row[col])
+                except (ValueError, TypeError):
+                    pass
+            if "主力净流入" in cl and "占比" in cl:
+                try:
+                    main_pct = float(row[col])
+                except (ValueError, TypeError):
+                    pass
+
+        result["main_net_inflow"] = main_inflow
+        result["main_net_inflow_pct"] = main_pct
+        return result
+    except Exception:
+        return None
+
+
 def fetch_hist_avg_volume(symbol: str, days: int = 20) -> dict | None:
     """获取近 N 日历史行情，返回日均成交额、最新 PE/PB。
 

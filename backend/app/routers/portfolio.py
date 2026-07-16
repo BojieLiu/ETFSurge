@@ -138,3 +138,39 @@ async def drift_check(
 ):
     """权重偏离检查"""
     return await calculate_weight_drift(db, portfolio_type)
+
+
+@router.post("/design")
+async def portfolio_design(
+    risk_profile: str = "balanced",
+    capital: float = 500000,
+    mode: str = "standard",
+    constraints: dict | None = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    生成核心+卫星+防御三层结构的ETF组合方案
+    Generate ETF portfolio with core+satellite+defense structure
+    """
+    from ..services.strategy_design import generate_design
+    from datetime import datetime
+    
+    # 参数校验
+    if risk_profile not in ["defensive", "balanced", "aggressive"]:
+        raise HTTPException(status_code=400, detail="risk_profile must be 'defensive', 'balanced', or 'aggressive'")
+    if mode not in ["standard", "fast"]:
+        raise HTTPException(status_code=400, detail="mode must be 'standard' or 'fast'")
+    
+    # 生成组合方案
+    design = await generate_design(risk_profile, capital, mode, constraints, db)
+    
+    return {
+        "strategies": design,
+        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "market_context": {
+            "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M"),
+            "indices": [],
+            "fund_flow": [],
+            "valuation_metrics": []
+        }
+    }
