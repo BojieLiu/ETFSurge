@@ -1,21 +1,17 @@
 """
-智能组合设计 - 核心+卫星+防御 三层结构生成引擎
+智能组合设计 - 核心+卫星+防御 三层结构生成引擎 (v3.0)
 
 Generate ETF portfolio plans with a core + satellite + defense three-layer structure.
+Core and defense layers are fixed-weight. Satellite uses dual-pool matching,
+z-score multi-factor scoring, tilt ratios, and power-law weight distribution.
 This module is the orchestration layer that ties together:
-  - enrich_market_context: 补全大盘指数/ETF资金流向/估值等缺失数据维度
-  - classify_assets:       将候选标的按三层结构分类
-  - build_candidates:      使用 etf_scanner 全市场扫描替代固定 CANDIDATE_POOL
-  - satellite_two_round_scoring: 卫星层两轮评分 (轻量→深度, 含资讯匹配)
   - allocate_layer_budget: 按风险偏好(防御/平衡/进攻)分配层预算
-  - optimize_layer:        层内权重优化(1%~30%约束, scipy SLSQP)
   - generate_design:       对外主入口, 生成三套方案
 """
 
 from __future__ import annotations
 
 import asyncio
-import random
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -61,8 +57,6 @@ STRATEGY_META = {
     },
 }
 
-# 每层单只标的上限
-LAYER_WEIGHT_CAP = {"core": 0.20, "satellite": 0.12, "defense": 0.08}
 
 # 全局单只约束
 MIN_WEIGHT = 0.01
@@ -167,7 +161,7 @@ async def enrich_market_context() -> MarketContext:
     val_map = {v.get("code"): v for v in valuation}
     idx_map = {i.get("code"): i for i in indices}
 
-    for code, meta in CANDIDATE_POOL.items():
+    # removed: CANDIDATE_POOL reference
         price = 1.0
         change = 0.0
         # 优先从指数行情取(宽基本身是指数)
@@ -266,134 +260,6 @@ def allocate_layer_budget(risk_profile: str) -> dict[str, float]:
 
 
 # ── 4. optimize_layer: 层内权重优化 ──────────────────────────
-def optimize_layer(
-    layer: str,
-    assets: list[Asset],
-    budget: float,
-    strategy: str = "balanced",
-    constraints: dict | None = None,
-) -> list[dict[str, Any]]:
-    """
-    层内权重优化：目标=最大化(收益打分 - 风险惩罚)，约束=单只1%~层上限，层内加总=budget。
-    收益打分综合考虑: beta(预期收益代理), 资金流入, 估值分位(低估值加分), 流动性。
-    使用 scipy SLSQP 求解；失败回退到启发式按比例分配。
-    """
-    if not assets:
-        return []
-
-    # 候选数过多时, 按评分选子集, 使能在 [min_w, cap] 内填满 budget
-    min_w = MIN_WEIGHT
-    max_w = min(MAX_WEIGHT, LAYER_WEIGHT_CAP.get(layer, MAX_WEIGHT))
-    # 如果候选数*min_w > budget，则放宽下限
-    if len(assets) * min_w > budget:
-        min_w = budget / len(assets) * 0.9
-
-    def score(a: Asset) -> float:
-        liq = min(a.liquidity / 20.0, 1.0) * 0.15
-        flow = (a.net_inflow / 1e8) * 0.05
-        val = (0.5 - a.valuation_pct) * 0.3
-        mom = max(0, a.change_pct) * 2.0  # 动量: +1%涨跌贡献+0.02
-
-        if strategy == "defensive":
-            # 反beta, 高估值权重
-            ret = max(0, 1.5 - a.beta) * 0.6
-            return ret + val * 1.5 + liq + flow
-        elif strategy == "aggressive":
-            # 正beta, 动量驱动
-            ret = a.beta * 0.5
-            return ret + mom + liq + flow * 0.5
-        else:  # balanced
-            ret = a.beta * 0.35
-            return ret + val + liq + flow + mom * 0.3
-
-    scored = sorted(assets, key=lambda a: score(a), reverse=True)
-    # 核心层: 宽基指数全部保留(分散度优先)
-    # 卫星/防御层: 按评分选子集, 使能在 [min_w, cap] 内填满 budget
-    if layer == "core":
-        selected = scored
-    else:
-        selected = []
-        for a in scored:
-            selected.append(a)
-            max_fill = len(selected) * max_w
-            min_fill = len(selected) * min_w
-            if min_fill <= budget <= max_fill:
-                break
-        if not selected:
-            selected = scored
-    assets = selected
-
-    n = len(assets)
-
-    # 打分函数 (已在上面定义 score, 这里复用)
-    scores = [max(score(a), 0.01) for a in assets]
-    total_score = sum(scores)
-
-    # 初始权重: 按评分归一化到 budget
-    x0 = [budget * s / total_score for s in scores]
-
-    def objective(w):
-        # 最小化负夏普近似: -sum(w_i * score_i) + 0.1*sum(w_i^2)(分散化惩罚)
-        ret = sum(w[i] * scores[i] for i in range(n))
-        penalty = 0.1 * sum(wi * wi for wi in w)
-        return -(ret - penalty)
-
-    # 约束
-    cons = [{"type": "eq", "fun": lambda w: sum(w) - budget}]
-    # 核心层必须含沪深300与中证A500各>=CORE_MIN_EACH
-    bounds = [(min_w, max_w) for _ in range(n)]
-    fixed_idx = []
-    if layer == "core":
-        for req in CORE_REQUIRED:
-            for i, a in enumerate(assets):
-                if a.code == req:
-                    fixed_idx.append(i)
-                    cons.append({"type": "ineq", "fun": lambda w, i=i: w[i] - CORE_MIN_EACH})
-
-    try:
-        from scipy.optimize import minimize
-        res = minimize(
-            objective, x0, method="SLSQP", bounds=bounds, constraints=cons,
-            options={"maxiter": 200, "ftol": 1e-9},
-        )
-        if res.success:
-            weights = [max(0.0, w) for w in res.x]
-        else:
-            weights = x0
-    except Exception:
-        weights = x0
-
-    # 硬性约束后处理: 截断到 [min_w, max_w]
-    weights = [min(max(w, min_w), max_w) for w in weights]
-
-    # 确保核心层必备标的下限
-    if layer == "core":
-        for i in fixed_idx:
-            weights[i] = max(weights[i], CORE_MIN_EACH)
-
-    # 缩放至精确等于 budget (保持比例, 优先保证核心下限)
-    s = sum(weights)
-    if s > 0:
-        weights = [w / s * budget for w in weights]
-    # 二次截断(缩放后可能微超)
-    weights = [min(max(w, min_w), max_w) for w in weights]
-
-    out = []
-    for a, w in zip(assets, weights):
-        out.append({
-            "symbol": a.code,
-            "name": a.name,
-            "layer": layer,
-            "weight": round(w, 4),
-            "price": round(a.price, 4),
-            "change_pct": round(a.change_pct, 4),
-            "selection_rationale": a.reason,
-        })
-    # 按权重降序
-    out.sort(key=lambda x: x["weight"], reverse=True)
-    return out
-
-
 # ── 5. generate_design: 主入口 ───────────────────────────────
 async def generate_design(
     risk_profile: str = "balanced",
@@ -512,7 +378,7 @@ def _enforce_name_count(
     elif len(holdings) < min_names:
         # 从候选池补充(若还有未入选的)
         existing = {h["symbol"] for h in holdings}
-        for code, meta in CANDIDATE_POOL.items():
+        # removed: CANDIDATE_POOL reference
             if code in existing:
                 continue
             if len(holdings) >= min_names:
@@ -532,7 +398,7 @@ def _enforce_name_count(
 def _build_default_context() -> MarketContext:
     """fast 模式: 不拉外部数据, 用候选池默认值"""
     ctx = MarketContext()
-    for code, meta in CANDIDATE_POOL.items():
+    # removed: CANDIDATE_POOL reference
         ctx.assets[code] = Asset(
             code=code, name=meta["name"], layer=meta["layer"], beta=meta["beta"],
             liquidity=meta["liquidity"], price=1.0, change_pct=0.0,
