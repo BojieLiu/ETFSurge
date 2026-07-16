@@ -174,9 +174,9 @@ async def fetch_market_sentiment() -> dict[str, Any]:
     import asyncio
 
     advance, north, margin = await asyncio.gather(
-        asyncio.wait_for(asyncio.to_thread(fetch_advance_decline_ratio), timeout=8),
-        asyncio.wait_for(asyncio.to_thread(fetch_north_flow), timeout=8),
-        asyncio.wait_for(asyncio.to_thread(fetch_margin_change), timeout=8),
+        asyncio.wait_for(asyncio.to_thread(fetch_advance_decline_ratio), timeout=15),
+        asyncio.wait_for(asyncio.to_thread(fetch_north_flow), timeout=15),
+        asyncio.wait_for(asyncio.to_thread(fetch_margin_change), timeout=15),
         return_exceptions=True,
     )
 

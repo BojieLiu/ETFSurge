@@ -404,15 +404,18 @@ async def generate_design(
     if mode == "fast":
         ctx = _build_default_context()
     else:
-        ctx = await enrich_market_context()
-
-    # 1b. standard 模式: 使用全市场扫描扩展候选池
+        ctx = _build_default_context()
     if mode == "standard":
+        # standard 模式: 全市场扫描 (含数据采集), 跳过 enrich_market_context 的重复采集
         from ..fetchers.etf_scanner import full_pipeline as scan_full_pipeline
 
-        scanned = scan_full_pipeline()
+        try:
+            scanned = await asyncio.to_thread(scan_full_pipeline)
+        except Exception as e:
+            logger.warning("[generate_design] scan_full_pipeline failed: %s, falling back to default pool", e)
+            scanned = {"core": [], "satellite": [], "defense": []}
+
         if scanned.get("core") or scanned.get("satellite") or scanned.get("defense"):
-            # 用扫描结果重建 ctx.assets
             ctx = MarketContext()
             for layer_name, items in scanned.items():
                 for item in items:
@@ -547,13 +550,13 @@ async def generate_full_design(
     # 并行: 生成方案 + 情绪指数 + 指标股 (各带超时保护)
     strategies_task = asyncio.wait_for(
         generate_design("balanced", capital, mode="standard", constraints=constraints),
-        timeout=20,
+        timeout=90,
     )
     sentiment_task = asyncio.wait_for(
-        fetch_market_sentiment(), timeout=10,
+        fetch_market_sentiment(), timeout=20,
     )
     benchmark_task = asyncio.wait_for(
-        fetch_benchmark_stocks(), timeout=10,
+        fetch_benchmark_stocks(), timeout=20,
     )
 
     strategies, sentiment, benchmark = await asyncio.gather(
