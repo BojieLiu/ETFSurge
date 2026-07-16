@@ -229,7 +229,24 @@
 
           <div class="design-cards-actions">
             <AppButton variant="ghost" @click="resetDesign">重新生成</AppButton>
+            <AppButton variant="ghost" @click="toggleHistory">历史记录</AppButton>
             <AppButton variant="ghost" @click="exitCoreFeature">完成</AppButton>
+          </div>
+        </div>
+
+        <!-- History Drawer -->
+        <div v-if="showHistory" class="history-panel">
+          <div class="history-header">
+            <h4>历史方案</h4>
+            <button class="history-close" @click="showHistory = false">X</button>
+          </div>
+          <div v-if="designHistoryList.length === 0" class="history-empty">暂无历史记录</div>
+          <div v-else class="history-list">
+            <div v-for="h in designHistoryList" :key="h.id" class="history-item" @click="loadHistoryDetail(h.id)">
+              <span class="history-date">{{ formatDate(h.created_at) }}</span>
+              <span class="history-capital">{{ (h.capital / 10000).toFixed(0) }}万</span>
+              <span class="history-style">{{ h.risk_profile }}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -489,6 +506,67 @@ function resetDesign() {
   designResult.value = null
   designStep.value = 'wizard'
   designCapital.value = 500000
+}
+
+// History
+const showHistory = ref(false)
+const designHistoryList = ref([])
+
+function formatDate(dateStr) {
+  if (!dateStr) return ''
+  try { return dateStr.slice(0, 10) + ' ' + dateStr.slice(11, 16) } catch (e) { return dateStr }
+}
+
+async function toggleHistory() {
+  showHistory.value = !showHistory.value
+  if (showHistory.value && designHistoryList.value.length === 0) {
+    try {
+      const res = await portfolioApi.listDesigns(20, 0)
+      designHistoryList.value = res.data || []
+    } catch (e) {
+      toast('加载历史记录失败', 'error')
+    }
+  }
+}
+
+async function loadHistoryDetail(id) {
+  try {
+    const res = await portfolioApi.getDesign(id)
+    const data = res.data
+    if (!data || !data.strategies) return
+
+    const plans = data.strategies.map(s => ({
+      style: s.label,
+      style_label: s.label,
+      portfolio_name: s.portfolio_name,
+      positioning: s.positioning,
+      expected_return: s.expected_return,
+      max_drawdown: s.max_drawdown,
+      sharpe_ratio: s.sharpe_ratio,
+      risk_factors: s.risk_factors || [],
+      allocations: Array.isArray(s.etfs)
+        ? s.etfs.map(e => ({
+            symbol: e.symbol,
+            name: e.name,
+            layer: e.layer,
+            target_weight: e.weight,
+            selection_rationale: e.selection_rationale || '',
+          }))
+        : [],
+    }))
+
+    designResult.value = {
+      plans,
+      design_text: generateDesignReport(plans, data.market_context),
+      market_context: data.market_context || {},
+      generated_at: data.created_at,
+    }
+    designStep.value = 'result'
+    designTab.value = 'cards'
+    showHistory.value = false
+  } catch (e) {
+    toast('加载方案详情失败', 'error')
+  }
 }
 
 function togglePlanExpand(pf) {
@@ -1377,5 +1455,90 @@ async function checkStrategy() {
   border: none;
   border-top: 1px solid var(--color-border);
   margin: var(--space-5) 0;
+}
+
+/* History Panel */
+.history-panel {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  margin-top: var(--space-4);
+  overflow: hidden;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.history-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-tertiary);
+}
+
+.history-header h4 {
+  margin: 0;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+}
+
+.history-close {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: var(--font-size-base);
+  color: var(--color-text-secondary);
+  padding: var(--space-1);
+}
+
+.history-empty {
+  padding: var(--space-8);
+  text-align: center;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-sm);
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.history-item {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.history-item:hover {
+  background: var(--color-bg-secondary);
+}
+
+.history-item:last-child {
+  border-bottom: none;
+}
+
+.history-date {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  min-width: 100px;
+}
+
+.history-capital {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+  min-width: 60px;
+}
+
+.history-style {
+  font-size: var(--font-size-2xs);
+  padding: var(--space-0) var(--space-2);
+  border-radius: var(--radius-full);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
 }
 </style>
