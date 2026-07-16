@@ -289,11 +289,22 @@ def optimize_layer(
         min_w = budget / len(assets) * 0.9
 
     def score(a: Asset) -> float:
-        ret = a.beta * (1.0 if strategy == "aggressive" else 0.7)
+        liq = min(a.liquidity / 20.0, 1.0) * 0.15
         flow = (a.net_inflow / 1e8) * 0.05
         val = (0.5 - a.valuation_pct) * 0.3
-        liq = min(a.liquidity / 20.0, 1.0) * 0.1
-        return ret + flow + val + liq
+        mom = max(0, a.change_pct) * 2.0  # 动量: +1%涨跌贡献+0.02
+
+        if strategy == "defensive":
+            # 反beta, 高估值权重
+            ret = max(0, 1.5 - a.beta) * 0.6
+            return ret + val * 1.5 + liq + flow
+        elif strategy == "aggressive":
+            # 正beta, 动量驱动
+            ret = a.beta * 0.5
+            return ret + mom + liq + flow * 0.5
+        else:  # balanced
+            ret = a.beta * 0.35
+            return ret + val + liq + flow + mom * 0.3
 
     scored = sorted(assets, key=lambda a: score(a), reverse=True)
     # 核心层: 宽基指数全部保留(分散度优先)
