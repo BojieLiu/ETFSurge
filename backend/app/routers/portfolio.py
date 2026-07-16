@@ -1,3 +1,5 @@
+import asyncio
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -149,28 +151,40 @@ async def portfolio_design(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    生成核心+卫星+防御三层结构的ETF组合方案
-    Generate ETF portfolio with core+satellite+defense structure
+    生成全市场ETF组合方案（核心+卫星+防御三层结构）。
+    mode='standard': 全市场扫描+卫星层两轮评分+情绪+指标股 (~15s)
+    mode='fast': 固定候选池快速生成 (~2s)
     """
-    from ..services.strategy_design import generate_design
+    await asyncio.to_thread(asyncio.sleep, 0)  # yield control
     from datetime import datetime
     
-    # 参数校验
     if risk_profile not in ["defensive", "balanced", "aggressive"]:
         raise HTTPException(status_code=400, detail="risk_profile must be 'defensive', 'balanced', or 'aggressive'")
     if mode not in ["standard", "fast"]:
         raise HTTPException(status_code=400, detail="mode must be 'standard' or 'fast'")
     
-    # 生成组合方案
-    design = await generate_design(risk_profile, capital, mode, constraints, db)
-    
-    return {
-        "strategies": design,
-        "generated_at": datetime.utcnow().isoformat() + "Z",
-        "market_context": {
+    if mode == "standard":
+        # 全量管道: 全市场扫描 + 情绪 + 指标股
+        from ..services.strategy_design import generate_full_design
+        result = await generate_full_design(capital=capital, constraints=constraints)
+        strategies = result["strategies"]
+        market_context = result["market_context"]
+    else:
+        # 快速管道: 固定候选池
+        from ..services.strategy_design import generate_design
+        design = await generate_design(risk_profile, capital, mode, constraints, db)
+        strategies = design
+        market_context = {
             "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M"),
             "indices": [],
             "fund_flow": [],
-            "valuation_metrics": []
+            "valuation_metrics": [],
+            "market_sentiment": {"sentiment_index": 50, "sentiment_label": "\u4e2d\u6027"},
+            "benchmark_stocks": []
         }
+    
+    return {
+        "strategies": strategies,
+        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "market_context": market_context
     }

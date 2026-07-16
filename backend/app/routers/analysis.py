@@ -349,6 +349,21 @@ async def portfolio_design(req: PortfolioDesignRequest | None = None, db: AsyncS
     result["indices"] = indices[:8]
     result["commodities"] = commodities[:6]
     result["disclaimer"] = "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
+
+    # 添加市场情绪与指标股数据
+    try:
+        from ..fetchers.sentiment_fetcher import fetch_market_sentiment
+        result["market_sentiment"] = await fetch_market_sentiment()
+    except Exception as e:
+        logger.warning(f"[portfolio-design] sentiment fetch error: {e}")
+        result["market_sentiment"] = {"sentiment_index": 50, "sentiment_label": "\u4e2d\u6027"}
+    try:
+        from ..fetchers.benchmark_stocks import fetch_benchmark_stocks
+        result["benchmark_stocks"] = await fetch_benchmark_stocks()
+    except Exception as e:
+        logger.warning(f"[portfolio-design] benchmark stocks fetch error: {e}")
+        result["benchmark_stocks"] = []
+
     return result
 
 

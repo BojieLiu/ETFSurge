@@ -100,8 +100,19 @@ def fetch_north_flow() -> float:
     try:
         import akshare as ak
 
-        df = ak.stock_hsgt_north_net_flow_in_em(symbol="北上")
-        if df is None or df.empty:
+        # Try multiple akshare north-bound API names (version-dependent)
+        df = None
+        for func_name in ["stock_hsgt_north_net_flow_in_em",
+                          "stock_hsgt_north_flow_in_em",
+                          "stock_hsgt_north_net_flow"]:
+            try:
+                func = getattr(ak, func_name, None)
+                if func:
+                    df = func(symbol="北上")
+                    break
+            except Exception:
+                continue
+        if df is None or (hasattr(df, "empty") and df.empty):
             return 0.0
         # 取最近一条的净流入
         latest = df.iloc[0]
@@ -123,7 +134,7 @@ def fetch_margin_change() -> float:
     try:
         import akshare as ak
 
-        df = ak.stock_margin_szse(start_date="20200101")
+        df = ak.stock_margin_szse()
         if df is None or df.empty:
             return 0.0
         if len(df) >= 2:
@@ -163,9 +174,9 @@ async def fetch_market_sentiment() -> dict[str, Any]:
     import asyncio
 
     advance, north, margin = await asyncio.gather(
-        asyncio.to_thread(fetch_advance_decline_ratio),
-        asyncio.to_thread(fetch_north_flow),
-        asyncio.to_thread(fetch_margin_change),
+        asyncio.wait_for(asyncio.to_thread(fetch_advance_decline_ratio), timeout=8),
+        asyncio.wait_for(asyncio.to_thread(fetch_north_flow), timeout=8),
+        asyncio.wait_for(asyncio.to_thread(fetch_margin_change), timeout=8),
         return_exceptions=True,
     )
 

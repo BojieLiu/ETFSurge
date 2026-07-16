@@ -544,22 +544,30 @@ async def generate_full_design(
     from ..fetchers.sentiment_fetcher import fetch_market_sentiment
     from ..fetchers.benchmark_stocks import fetch_benchmark_stocks
 
-    # 并行: 生成方案 + 情绪指数 + 指标股
-    strategies_task = generate_design(
-        "balanced", capital, mode="standard", constraints=constraints
+    # 并行: 生成方案 + 情绪指数 + 指标股 (各带超时保护)
+    strategies_task = asyncio.wait_for(
+        generate_design("balanced", capital, mode="standard", constraints=constraints),
+        timeout=20,
     )
-    sentiment_task = fetch_market_sentiment()
-    benchmark_task = fetch_benchmark_stocks()
+    sentiment_task = asyncio.wait_for(
+        fetch_market_sentiment(), timeout=10,
+    )
+    benchmark_task = asyncio.wait_for(
+        fetch_benchmark_stocks(), timeout=10,
+    )
 
     strategies, sentiment, benchmark = await asyncio.gather(
         strategies_task, sentiment_task, benchmark_task, return_exceptions=True
     )
 
-    if isinstance(strategies, Exception):
-        strategies = await generate_design("balanced", capital, mode="fast", constraints=constraints)
-    if isinstance(sentiment, Exception):
+    if isinstance(strategies, (Exception, type(None))) or not strategies:
+        try:
+            strategies = await generate_design("balanced", capital, mode="fast", constraints=constraints)
+        except Exception:
+            strategies = []
+    if isinstance(sentiment, (Exception, type(None))):
         sentiment = {"sentiment_index": 50, "sentiment_label": "中性"}
-    if isinstance(benchmark, Exception):
+    if isinstance(benchmark, (Exception, type(None))):
         benchmark = []
 
     return {
