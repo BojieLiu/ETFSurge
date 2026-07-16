@@ -41,12 +41,12 @@ import { usePortfolioStore } from '../stores/portfolio'
 
 const store = usePortfolioStore()
 const selectedHolding = ref('')
-const activeTab = ref('holdings')
+const activeTab = ref('tools')
 
 const tabs = [
+  { value: 'tools', label: 'AI工具', icon: '⚡' },
   { value: 'holdings', label: '持仓', icon: '📋' },
   { value: 'analysis', label: '技术分析', icon: '📊' },
-  { value: 'tools', label: 'AI工具', icon: '⚡' },
 ]
 
 function onSelect(etf) {

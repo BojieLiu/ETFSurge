@@ -39,27 +39,74 @@
 
       <!-- Design Wizard -->
       <div v-else-if="activeCoreFeature === 'design' && designStep === 'wizard'" class="panel-body design-wizard">
-        <h3 class="panel-title">输入投资资金</h3>
-        <div class="capital-input-row">
-          <label>资金（元）：</label>
-          <AppInput type="number" v-model="designCapital" min="10000" step="10000" />
-          <span class="capital-hint">建议 10 万以上</span>
-        </div>
-        <div class="wizard-actions">
-          <AppButton variant="primary" @click="startDesign" :disabled="!designCapital || designCapital < 10000">开始设计</AppButton>
-          <AppButton variant="ghost" @click="exitCoreFeature">取消</AppButton>
+        <div class="feature-card">
+          <div class="feature-card-header">
+            <span class="feature-card-icon" aria-hidden="true">&#10024;</span>
+            <div>
+              <h3 class="feature-card-title">智能组合设计</h3>
+              <p class="feature-card-subtitle">输入资金，一键生成进攻/平衡/防御三种风格的 ETF 组合方案</p>
+            </div>
+          </div>
+
+          <div class="feature-card-body">
+            <div class="capital-input-section">
+              <label class="capital-label">
+                <span class="capital-currency">&#165;</span>
+                <span>投资金额</span>
+              </label>
+              <div class="capital-input-wrapper">
+                <AppInput type="number" v-model="designCapital" min="10000" step="10000" />
+              </div>
+              <p class="capital-hint">建议 10 万元以上以获得更好的分散效果</p>
+
+              <div class="capital-presets">
+                <button
+                  v-for="amt in [100000, 500000, 1000000]"
+                  :key="amt"
+                  class="preset-btn"
+                  :class="{ active: Number(designCapital) === amt }"
+                  @click="designCapital = amt"
+                >{{ (amt / 10000).toFixed(0) }}万</button>
+              </div>
+            </div>
+
+            <div class="wizard-actions-center">
+              <AppButton variant="primary" size="lg" @click="startDesign" :disabled="!designCapital || designCapital < 10000">
+                &#10024; 开始设计
+              </AppButton>
+              <AppButton variant="ghost" @click="exitCoreFeature">取消</AppButton>
+            </div>
+          </div>
+
+          <div class="feature-card-footer">
+            <span>流程：扫描全市场 ETF &#8594; 三层筛选 &#8594; LLM 精选 &#8594; 三套方案</span>
+          </div>
         </div>
       </div>
 
       <!-- Loading State -->
       <div v-else-if="designStep === 'loading'" class="panel-body design-loading">
-        <div class="loading-spinner"></div>
-        <p class="loading-text">{{ loadingText }}</p>
-        <div class="loading-progress">
-          <div class="progress-bar">
-            <div class="progress-fill" :style="{ width: loadingProgress + '%' }"></div>
+        <div class="feature-card loading-card">
+          <div class="loading-spinner"></div>
+          <h3 class="loading-title">正在生成组合方案</h3>
+          <p class="loading-text">{{ loadingText }}</p>
+          <div class="loading-progress">
+            <div class="progress-bar">
+              <div class="progress-fill" :style="{ width: loadingProgress + '%' }"></div>
+            </div>
+            <span class="progress-percent">{{ loadingProgress }}%</span>
           </div>
-          <span class="progress-percent">{{ loadingProgress }}%</span>
+          <div class="loading-steps">
+            <div class="loading-step" :class="{ done: loadingProgress >= 30 }">
+              <span class="step-dot"></span> 采集全市场数据
+            </div>
+            <div class="loading-step" :class="{ done: loadingProgress >= 60 }">
+              <span class="step-dot"></span> 筛选候选标的
+            </div>
+            <div class="loading-step" :class="{ done: loadingProgress >= 90 }">
+              <span class="step-dot"></span> 生成组合方案
+            </div>
+          </div>
         </div>
       </div>
 
@@ -189,10 +236,36 @@
 
       <!-- Strategy Check -->
       <div v-else-if="activeCoreFeature === 'strategy' && !checkingStrategy && !strategyResult" class="panel-body">
-        <p>检查分析当前组合的权重偏离、行业集中度等...</p>
-        <div class="wizard-actions">
-          <AppButton variant="primary" @click="checkStrategy">开始检查</AppButton>
-          <AppButton variant="ghost" @click="exitCoreFeature">取消</AppButton>
+        <div class="feature-card">
+          <div class="feature-card-header">
+            <span class="feature-card-icon" aria-hidden="true">&#127919;</span>
+            <div>
+              <h3 class="feature-card-title">策略检查分析</h3>
+              <p class="feature-card-subtitle">分析当前组合的权重偏离、行业集中度、风险暴露，提供优化建议</p>
+            </div>
+          </div>
+          <div class="feature-card-body">
+            <div class="strategy-check-info">
+              <div class="info-row">
+                <span class="info-icon">&#128200;</span>
+                <span>权重偏离度检查 - 发现偏离目标权重的标的</span>
+              </div>
+              <div class="info-row">
+                <span class="info-icon">&#128202;</span>
+                <span>行业集中度分析 - 评估组合是否过度集中在某行业</span>
+              </div>
+              <div class="info-row">
+                <span class="info-icon">&#9888;&#65039;</span>
+                <span>风险暴露评估 - 识别潜在风险点</span>
+              </div>
+            </div>
+            <div class="wizard-actions-center">
+              <AppButton variant="primary" size="lg" @click="checkStrategy">
+                &#127919; 开始检查
+              </AppButton>
+              <AppButton variant="ghost" @click="exitCoreFeature">取消</AppButton>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -213,7 +286,7 @@ const store = usePortfolioStore()
 const toast = useToastStore()
 
 // State
-const collapsed = ref(true)
+const collapsed = ref(false)
 const activeCoreFeature = ref(null)
 const designStep = ref('wizard')
 const designCapital = ref(500000)
@@ -287,7 +360,7 @@ function enterStrategyMode() {
 
 function exitCoreFeature() {
   activeCoreFeature.value = null
-  collapsed.value = true
+  // 取消时不收起工具区，直接返回工具列表
 }
 
 function resetDesign() {
@@ -601,16 +674,16 @@ async function checkStrategy() {
 }
 
 .core-actions-grid {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--space-4);
 }
 
 .core-action-btn {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-4);
+  gap: var(--space-4);
+  padding: var(--space-6);
   background: var(--color-surface-secondary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
@@ -618,17 +691,37 @@ async function checkStrategy() {
   transition: all var(--transition-normal);
   text-align: left;
   width: 100%;
+  position: relative;
+  overflow: hidden;
+}
+
+.core-action-btn::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--color-primary);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  opacity: 0;
+  transition: opacity var(--transition-normal);
 }
 
 .core-action-btn:hover {
   border-color: var(--color-primary);
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--shadow-lg);
+  transform: translateY(-1px);
+}
+
+.core-action-btn:hover::before {
+  opacity: 1;
 }
 
 .action-icon {
-  font-size: 1.5em;
-  width: 40px;
-  height: 40px;
+  font-size: 2em;
+  width: 56px;
+  height: 56px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -646,17 +739,213 @@ async function checkStrategy() {
   font-size: var(--font-size-base);
   font-weight: var(--font-weight-semibold);
   color: var(--color-text-primary);
+  margin-bottom: 4px;
 }
 
 .action-desc {
   display: block;
   font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
-  margin-top: 2px;
+  line-height: 1.4;
 }
 
 .panel-body {
   padding: var(--space-4) 0;
+}
+
+/* Feature Card (Wizard / Loading / Strategy Check) */
+.feature-card {
+  max-width: 520px;
+  margin: 0 auto;
+  background: var(--color-surface-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.feature-card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-5) var(--space-3);
+}
+
+.feature-card-icon {
+  font-size: 2em;
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary);
+  flex-shrink: 0;
+}
+
+.feature-card-title {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  margin: 0 0 var(--space-1);
+}
+
+.feature-card-subtitle {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.feature-card-body {
+  padding: var(--space-3) var(--space-5) var(--space-5);
+}
+
+.capital-input-section {
+  text-align: center;
+  padding: var(--space-4) 0;
+}
+
+.capital-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  margin-bottom: var(--space-4);
+}
+
+.capital-currency {
+  font-size: 1.5em;
+  color: var(--color-primary);
+}
+
+.capital-input-wrapper {
+  max-width: 240px;
+  margin: 0 auto var(--space-3);
+}
+
+.capital-input-wrapper :deep(input) {
+  text-align: center;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  padding: var(--space-3);
+}
+
+.capital-hint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  margin: 0 0 var(--space-4);
+  text-align: center;
+}
+
+.capital-presets {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+}
+
+.preset-btn {
+  padding: var(--space-1) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.preset-btn:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.preset-btn.active {
+  background: var(--color-primary);
+  color: white;
+  border-color: var(--color-primary);
+}
+
+.wizard-actions-center {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-3);
+}
+
+.feature-card-footer {
+  padding: var(--space-3) var(--space-5);
+  border-top: 1px solid var(--color-border);
+  font-size: var(--font-size-2xs);
+  color: var(--color-text-tertiary);
+  text-align: center;
+}
+
+/* Loading Card */
+.loading-card {
+  text-align: center;
+  padding: var(--space-8);
+}
+
+.loading-title {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  margin: var(--space-4) 0 var(--space-2);
+}
+
+.loading-steps {
+  margin-top: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.loading-step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+}
+
+.loading-step.done {
+  color: var(--color-primary);
+  font-weight: var(--font-weight-medium);
+}
+
+.step-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-border);
+}
+
+.loading-step.done .step-dot {
+  background: var(--color-primary);
+}
+
+/* Strategy Check Info */
+.strategy-check-info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4) 0;
+}
+
+.info-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.info-icon {
+  font-size: 1.2em;
+  width: 28px;
+  text-align: center;
+  flex-shrink: 0;
 }
 
 .panel-title {
