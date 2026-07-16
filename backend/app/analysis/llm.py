@@ -1009,5 +1009,82 @@ async def generate_symbol_analysis(
 5. 止损位
 6. 风险提示
 
- 控制在 500 字以内。"""
-    return await get_agent("symbol_analysis").run(prompt)
+  控制在 500 字以内。"""
+
+
+# ── 设计报告 LLM 生成 ────────────────────────────────────
+
+
+async def generate_design_report(
+    strategies: list[dict],
+    market_sentiment: dict | None = None,
+    benchmark_stocks: list[dict] | None = None,
+) -> str:
+    """基于系统算法生成的组合方案，调用 LLM 撰写市场分析报告。
+
+    Args:
+        strategies: 三个方案数据（来自战略设计管道）
+        market_sentiment: 市场情绪数据（可选）
+        benchmark_stocks: 核心指标股数据（可选）
+
+    Returns:
+        Markdown 格式的分析报告
+    """
+    prompt = _build_design_report_prompt(
+        strategies, market_sentiment or {},
+        benchmark_stocks or [],
+    )
+    try:
+        # 使用"symbol_analysis" agent 的通用上下文，但传入设计报告 prompt
+        result = await get_agent("symbol_analysis").run(
+            prompt,
+            system_override=load_prompt("design_report.md"),
+        )
+        return result or "报告生成失败"
+    except Exception as e:
+        logger.warning("[generate_design_report] LLM call failed: %s", e)
+        return ""
+
+
+def _build_design_report_prompt(
+    strategies: list[dict],
+    market_sentiment: dict,
+    benchmark_stocks: list[dict],
+) -> str:
+    """构建设计报告 prompt。"""
+    def _fmt_pct(v):
+        if v is None:
+            return "—"
+        if isinstance(v, float):
+            return f"{v * 100:.1f}%"
+        return str(v)
+
+    lines = ["## 输入数据", ""]
+    lines.append("### 市场情绪")
+    lines.append(f"- 情绪指数: {market_sentiment.get('sentiment_index', 'N/A')}")
+    lines.append(f"- 情绪标签: {market_sentiment.get('sentiment_label', 'N/A')}")
+    lines.append("")
+
+    if benchmark_stocks:
+        lines.append("### 核心指标股")
+        for s in benchmark_stocks[:5]:
+            lines.append(f"- {s.get('name', '')}({s.get('symbol', '')}): "
+                         f"涨跌{_fmt_pct(s.get('change_pct', 0))}, "
+                         f"信号: {s.get('signal', '')}")
+        lines.append("")
+
+    lines.append("### 组合方案")
+    for s in strategies:
+        style = s.get("style", s.get("style_label", ""))
+        lines.append(f"- {style}: {s.get('portfolio_name', '')}")
+        lines.append(f"  定位: {s.get('positioning', '')}")
+        lines.append(f"  预期年化: {_fmt_pct(s.get('expected_return'))}, "
+                     f"最大回撤: {_fmt_pct(s.get('max_drawdown'))}, "
+                     f"夏普: {s.get('sharpe_ratio', 'N/A')}")
+        for a in s.get("allocations", []):
+            weight = a.get("target_weight", 0) * 100
+            lines.append(f"  - {a.get('name', '')}({a.get('symbol', '')}) "
+                         f"[{a.get('layer', '')}] {weight:.1f}% - {a.get('selection_rationale', '')}")
+        lines.append("")
+
+    return "\n".join(lines)

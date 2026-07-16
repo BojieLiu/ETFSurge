@@ -179,13 +179,14 @@
                 </div>
               </div>
 
-              <!-- Top Holdings (collapsed only, expanded shows full table) -->
+              <!-- Top Holdings (collapsed: 前5只+N只更多; expanded: 隐藏, 显示下面完整表格) -->
               <div class="plan-holdings-preview" v-if="pf.allocations?.length && expandedPlan !== pf.style">
                 <div v-for="a in pf.allocations.slice(0, 5)" :key="a.symbol" class="holding-row">
                   <span class="holding-layer-dot" :class="'layer-dot--' + (a.layer || 'satellite')"></span>
                   <span class="holding-name">{{ a.name || a.symbol }}</span>
                   <span class="holding-weight">{{ (a.target_weight * 100).toFixed(1) }}%</span>
                 </div>
+                <div v-if="pf.allocations.length > 5" class="holding-row holding-more">+{{ pf.allocations.length - 5 }} 只更多，点击展开详情</div>
               </div>
 
               <div class="plan-action">
