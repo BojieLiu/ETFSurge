@@ -338,6 +338,34 @@ const calcLayerWeight = (allocations, layer) => {
   return Math.round(total * 100)
 }
 
+function generateDesignReport(plans) {
+  if (!plans || !plans.length) return ''
+  const ml = (v) => (v != null ? (v * 100).toFixed(0) + '%' : '—')
+  let md = '# ETF 组合设计方案\n\n'
+  md += '## 三方案概览\n\n'
+  md += '| 维度 | ' + plans.map(p => p.style).join(' | ') + ' |\n'
+  md += '|------|' + plans.map(() => '---|').join('') + '\n'
+  md += '| 标的数量 | ' + plans.map(p => (p.allocations || []).length + '只').join(' | ') + ' |\n'
+  md += '| 预期年化 | ' + plans.map(p => ml(p.expected_return)).join(' | ') + ' |\n'
+  md += '| 最大回撤 | ' + plans.map(p => ml(p.max_drawdown)).join(' | ') + ' |\n'
+  md += '| 夏普比率 | ' + plans.map(p => (p.sharpe_ratio != null ? p.sharpe_ratio.toFixed(2) : '—')).join(' | ') + ' |\n\n'
+  plans.forEach(p => {
+    md += '---\n\n'
+    md += '## ' + p.style + '：' + (p.portfolio_name || '') + '\n\n'
+    md += '**定位：**' + (p.positioning || '—') + '\n\n'
+    md += '| 标的 | 代码 | 层级 | 权重 | 选择理由 |\n'
+    md += '|------|------|------|------|---------|\n'
+    ;(p.allocations || []).forEach(a => {
+      md += '| ' + (a.name || '—') + ' | ' + a.symbol + ' | ' + layerLabel(a.layer) + ' | '
+        + (a.target_weight != null ? (a.target_weight * 100).toFixed(1) + '%' : '—') + ' | '
+        + (a.selection_rationale || '—') + ' |\n'
+    })
+    md += '\n'
+  })
+  md += '\n---\n*本报告由 ETF Surge 组合设计引擎自动生成*\n'
+  return md
+}
+
 // Actions
 function toggleCollapse() {
   collapsed.value = !collapsed.value
@@ -396,32 +424,34 @@ async function startDesign() {
     })
     // Map backend response (strategies/etfs) to frontend format (plans/allocations)
     const data = res.data
+    const plans = Array.isArray(data.strategies)
+      ? data.strategies.map(s => ({
+          style: s.label,
+          style_label: s.label,
+          portfolio_name: s.portfolio_name,
+          positioning: s.positioning,
+          expected_return: s.expected_return,
+          max_drawdown: s.max_drawdown,
+          sharpe_ratio: s.sharpe_ratio,
+          risk_factors: [],
+          rebalance_rules: '月度检视',
+          allocations: Array.isArray(s.etfs)
+            ? s.etfs.map(e => ({
+                symbol: e.symbol,
+                name: e.name,
+                layer: e.layer,
+                target_weight: e.weight,
+                selection_rationale: e.selection_rationale || '',
+                tracked_index: e.tracked_index || '',
+                price: e.price,
+                change_pct: e.change_pct,
+              }))
+            : [],
+        }))
+      : []
     designResult.value = {
-      plans: Array.isArray(data.strategies)
-        ? data.strategies.map(s => ({
-            style: s.label,
-            style_label: s.label,
-            portfolio_name: s.portfolio_name,
-            positioning: s.positioning,
-            expected_return: s.expected_return,
-            max_drawdown: s.max_drawdown,
-            sharpe_ratio: s.sharpe_ratio,
-            risk_factors: [],
-            rebalance_rules: '月度检视',
-            allocations: Array.isArray(s.etfs)
-              ? s.etfs.map(e => ({
-                  symbol: e.symbol,
-                  name: e.name,
-                  layer: e.layer,
-                  target_weight: e.weight,
-                  selection_rationale: e.selection_rationale || '',
-                  tracked_index: e.tracked_index || '',
-                  price: e.price,
-                  change_pct: e.change_pct,
-                }))
-              : [],
-          }))
-        : [],
+      plans,
+      design_text: generateDesignReport(plans),
       market_context: data.market_context || {},
       generated_at: data.generated_at,
     }
