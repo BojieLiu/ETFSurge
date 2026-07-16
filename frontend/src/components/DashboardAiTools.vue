@@ -630,69 +630,93 @@ function togglePlanExpand(pf) {
 async function startDesign() {
   designStep.value = 'loading'
   designResult.value = null
-  loadingProgress.value = 10
-  loadingText.value = '正在采集全市场数据...'
+  loadingProgress.value = 0
+  loadingText.value = '正在提交任务...'
 
   try {
-    loadingProgress.value = 30
-    loadingText.value = '正在筛选候选标的...'
+    loadingProgress.value = 10
+    loadingText.value = '任务已提交，后台正在生成...'
 
-    loadingProgress.value = 50
-    loadingText.value = '正在分析市场情绪...'
+    // 1. 异步提交任务
+    const submitRes = await portfolioApi.designAsync({
+      capital: designCapital.value,
+      constraints: { min_names: 8, max_names: 15 },
+    })
+    const taskId = submitRes.data.task_id
 
-    loadingProgress.value = 70
+    loadingProgress.value = 20
     loadingText.value = '正在生成方案...'
 
-    // 生成 session_id 用于 WS 接收 LLM 报告
-    const wsSessionId = 'design_' + Date.now()
+    // 2. 轮询任务状态 (max 60 rounds * 3s = 180s)
+    const maxPolls = 60
+    for (let i = 0; i < maxPolls; i++) {
+      await new Promise(r => setTimeout(r, 3000))
+      try {
+        const statusRes = await portfolioApi.getTask(taskId)
+        const task = statusRes.data
+        loadingProgress.value = task.progress || loadingProgress.value
 
-    const res = await portfolioApi.design({
-      capital: designCapital.value,
-      mode: 'standard',
-      session_id: wsSessionId,
-      constraints: { min_names: 8, max_names: 15 }
-    })
-    // Map backend response (strategies/etfs) to frontend format (plans/allocations)
-    const data = res.data
-    const plans = Array.isArray(data.strategies)
-      ? data.strategies.map(s => ({
-          style: s.label,
-          style_label: s.label,
-          portfolio_name: s.portfolio_name,
-          positioning: s.positioning,
-          expected_return: s.expected_return,
-          max_drawdown: s.max_drawdown,
-          sharpe_ratio: s.sharpe_ratio,
-          risk_factors: [],
-          rebalance_rules: '月度检视',
-          allocations: Array.isArray(s.etfs)
-            ? s.etfs.map(e => ({
-                symbol: e.symbol,
-                name: e.name,
-                layer: e.layer,
-                target_weight: e.weight,
-                selection_rationale: e.selection_rationale || '',
-                tracked_index: e.tracked_index || '',
-                price: e.price,
-                change_pct: e.change_pct,
-              }))
-            : [],
-        }))
-      : []
-    designResult.value = {
-      plans,
-      design_text: generateDesignReport(plans, data.market_context),
-      market_context: data.market_context || {},
-      generated_at: data.generated_at,
+        if (task.status === 'completed') {
+          loadingText.value = '方案已生成，正在加载...'
+          loadingProgress.value = 95
+          // 加载最新设计列表，找到本次的设计
+          const listRes = await portfolioApi.listDesigns(1, 0)
+          const designs = listRes.data || []
+          if (designs.length > 0) {
+            const detailRes = await portfolioApi.getDesign(designs[0].id)
+            const data = detailRes.data
+            const plans = Array.isArray(data.strategies)
+              ? data.strategies.map(s => ({
+                  style: s.label,
+                  style_label: s.label,
+                  portfolio_name: s.portfolio_name,
+                  positioning: s.positioning,
+                  expected_return: s.expected_return,
+                  max_drawdown: s.max_drawdown,
+                  sharpe_ratio: s.sharpe_ratio,
+                  risk_factors: [],
+                  rebalance_rules: '月度检视',
+                  allocations: Array.isArray(s.etfs)
+                    ? s.etfs.map(e => ({
+                        symbol: e.symbol,
+                        name: e.name,
+                        layer: e.layer,
+                        target_weight: e.weight,
+                        selection_rationale: e.selection_rationale || '',
+                      }))
+                    : [],
+                }))
+              : []
+            designResult.value = {
+              plans,
+              design_text: generateDesignReport(plans, data.market_context),
+              market_context: data.market_context || {},
+              generated_at: data.created_at,
+            }
+          }
+          loadingProgress.value = 100
+          designStep.value = 'result'
+          designTab.value = 'cards'
+          return
+        }
+
+        if (task.status === 'failed') {
+          throw new Error(task.error_message || '生成失败')
+        }
+
+        loadingText.value = task.progress < 50 ? '正在扫描全市场 ETF...'
+          : '正在优化组合权重...'
+      } catch (pollErr) {
+        if (pollErr.message && pollErr.message.includes('404')) {
+          continue // 任务还未就绪，继续轮询
+        }
+        throw pollErr
+      }
     }
-    loadingProgress.value = 100
-    designStep.value = 'result'
-    designTab.value = 'cards'
 
-    // 连接 WebSocket 接收 LLM 报告
-    designWsConnect(wsSessionId)
+    throw new Error('生成超时，请稍后到历史记录中查看')
   } catch (e) {
-    toast(e?.response?.data?.detail || '生成失败，请重试', 'error')
+    toast(e?.response?.data?.detail || e.message || '生成失败，请重试', 'error')
     designStep.value = 'wizard'
   }
 }

@@ -84,6 +84,12 @@ export const portfolioApi = {
       timeout: 180000,
     })
   },
+  designAsync: (params) => {
+    const { capital = 500000, constraints } = params || {}
+    return api.post('/portfolio/design-async', { capital, constraints })
+  },
+  getTask: (taskId) => api.get(`/portfolio/tasks/${taskId}`),
+  listTasks: (limit = 10, offset = 0) => api.get('/portfolio/tasks', { params: { limit, offset } }),
   // Drift Check
   getDriftCheck: (type) => api.get('/portfolio/drift-check', { params: type ? { portfolio_type: type } : {} }),
 }
