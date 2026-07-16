@@ -2,7 +2,7 @@
 全市场 ETF 数据采集与筛选引擎 (Full-Market ETF Scanner)
 
 数据流:
-  1. fetch_all_etfs_base(): 全量 ETF 基础数据
+  1. fetch_all_etfs_base(): 全量 ETF 基础数据 (带 TTL 缓存 60s)
   2. filter_etfs(): 硬性过滤
   3. classify_etf(): 三层自动分类
   4. layer_ranking(): 层内排序取 TOP N
@@ -12,9 +12,14 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# TTL cache
+_CACHE: dict[str, tuple[float, list]] = {}
+_CACHE_TTL = 60
 
 
 # ── 核心层关键词 ─────────────────────────────────────────────
@@ -51,6 +56,12 @@ def fetch_all_etfs_base() -> list[dict[str, Any]]:
     数据源: fund_etf_spot_em (东方财富)
     返回: 每只 ETF 包含 代码/名称/最新价/涨跌幅/成交额/换手率/PE/PB/基金规模
     """
+    now = time.time()
+    cached = _CACHE.get("all_etfs")
+    if cached and now - cached[0] < _CACHE_TTL:
+        logger.debug("[etf_scanner] cache hit for all_etfs")
+        return cached[1]
+
     try:
         import akshare as ak
         from ..utils.decode import decode_df as _decode_df
@@ -61,9 +72,14 @@ def fetch_all_etfs_base() -> list[dict[str, Any]]:
             return []
 
         _decode_df(df)
-        return df.to_dict(orient="records")
+        result = df.to_dict(orient="records")
+        _CACHE["all_etfs"] = (now, result)
+        return result
     except Exception as e:
         logger.warning("[etf_scanner] fund_etf_spot_em failed: %s", e)
+        if cached:
+            logger.info("[etf_scanner] using stale cache")
+            return cached[1]
         return []
 
 

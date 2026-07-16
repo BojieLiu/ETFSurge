@@ -58,6 +58,12 @@ export const portfolioApi = {
   strategyCheck: (data) => api.post('/portfolio/strategy-check', data),
   applyStrategy: (suggestions) => api.post('/portfolio/apply-strategy', suggestions),
   applyPortfolioDesign: (design) => api.post('/portfolio/apply-design', design),
+
+  // Design History
+  listDesigns: (limit = 10, offset = 0) => api.get('/portfolio/designs', { params: { limit, offset } }),
+  getDesign: (id) => api.get(`/portfolio/designs/${id}`),
+  deleteDesign: (id) => api.delete(`/portfolio/designs/${id}`),
+
   // PnL History
   getPnLHistory: (type, period = 'all') => api.get('/portfolio/pnl-history', { params: { portfolio_type: type, period } }),
   // Export/Import

@@ -1,4 +1,6 @@
 import asyncio
+import json
+import logging
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +16,8 @@ from ..services.portfolio_service import (
     export_portfolio, import_portfolio, calculate_weight_drift,
     strategy_check, apply_strategy_suggestions, apply_portfolio_design,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/portfolio", tags=["portfolio"])
 
@@ -183,8 +187,105 @@ async def portfolio_design(
             "benchmark_stocks": []
         }
     
+    # 保存到历史记录
+    design_id = None
+    try:
+        from ..models.portfolio_design import PortfolioDesign
+        design_record = PortfolioDesign(
+            capital=capital,
+            risk_profile=risk_profile,
+            strategies_json=json.dumps(strategies, ensure_ascii=False, default=str),
+            market_snapshot_json=json.dumps(market_context, ensure_ascii=False, default=str),
+        )
+        db.add(design_record)
+        await db.commit()
+        design_id = design_record.id
+    except Exception as e:
+        logger.warning("[portfolio] failed to save design history: %s", e)
+
     return {
         "strategies": strategies,
+        "id": design_id,
         "generated_at": datetime.utcnow().isoformat() + "Z",
         "market_context": market_context
     }
+
+
+# ── 设计历史记录 ──────────────────────────────────────────
+
+
+@router.get("/designs")
+async def list_designs(
+    limit: int = Query(10, ge=1, le=50),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    """列出历史方案记录"""
+    from sqlalchemy import select, desc
+    from ..models.portfolio_design import PortfolioDesign
+
+    stmt = (
+        select(PortfolioDesign)
+        .order_by(desc(PortfolioDesign.created_at))
+        .offset(offset)
+        .limit(limit)
+    )
+    result = await db.execute(stmt)
+    records = result.scalars().all()
+
+    return [
+        {
+            "id": r.id,
+            "created_at": r.created_at.isoformat() if r.created_at else "",
+            "capital": r.capital,
+            "risk_profile": r.risk_profile,
+        }
+        for r in records
+    ]
+
+
+@router.get("/designs/{design_id}")
+async def get_design(
+    design_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """查看某次设计的完整详情"""
+    from sqlalchemy import select
+    from ..models.portfolio_design import PortfolioDesign
+
+    stmt = select(PortfolioDesign).where(PortfolioDesign.id == design_id)
+    result = await db.execute(stmt)
+    record = result.scalar_one_or_none()
+
+    if not record:
+        raise HTTPException(status_code=404, detail="Design not found")
+
+    return {
+        "id": record.id,
+        "created_at": record.created_at.isoformat() if record.created_at else "",
+        "capital": record.capital,
+        "risk_profile": record.risk_profile,
+        "strategies": json.loads(record.strategies_json) if record.strategies_json else [],
+        "market_context": json.loads(record.market_snapshot_json) if record.market_snapshot_json else {},
+    }
+
+
+@router.delete("/designs/{design_id}")
+async def delete_design(
+    design_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """删除某次方案记录"""
+    from sqlalchemy import select
+    from ..models.portfolio_design import PortfolioDesign
+
+    stmt = select(PortfolioDesign).where(PortfolioDesign.id == design_id)
+    result = await db.execute(stmt)
+    record = result.scalar_one_or_none()
+
+    if not record:
+        raise HTTPException(status_code=404, detail="Design not found")
+
+    await db.delete(record)
+    await db.commit()
+    return {"detail": "deleted"}
