@@ -54,6 +54,7 @@ export const portfolioApi = {
   dailyPnl: (totalCapital, type) => api.post('/portfolio/daily-pnl', { total_capital: totalCapital }, { params: type ? { portfolio_type: type } : {} }),
   getAllocation: (type, totalCapital) => api.post('/portfolio/calculate', { total_capital: totalCapital }, { params: type ? { portfolio_type: type } : {} }),
   getPnl: (type, totalCapital) => api.post('/portfolio/daily-pnl', { total_capital: totalCapital }, { params: type ? { portfolio_type: type } : {} }),
+  design: (params) => api.post('/portfolio/design', params, { timeout: 60000 }),
   strategyCheck: (data) => api.post('/portfolio/strategy-check', data),
   applyStrategy: (suggestions) => api.post('/portfolio/apply-strategy', suggestions),
   applyPortfolioDesign: (design) => api.post('/portfolio/apply-design', design),

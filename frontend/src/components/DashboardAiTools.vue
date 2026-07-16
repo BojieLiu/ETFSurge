@@ -275,7 +275,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { marked } from 'marked'
-import { portfolioApi, analysisApi } from '../api'
+import { portfolioApi } from '../api'
 import { usePortfolioStore } from '../stores/portfolio'
 import { useToastStore } from '../stores/toast'
 import AppButton from './ui/AppButton.vue'
@@ -389,12 +389,42 @@ async function startDesign() {
     loadingProgress.value = 70
     loadingText.value = '正在生成方案...'
 
-    const res = await analysisApi.portfolioDesign({
+    const res = await portfolioApi.design({
       capital: designCapital.value,
       mode: 'standard',
       constraints: { min_names: 8, max_names: 15 }
     })
-    designResult.value = res.data
+    // Map backend response (strategies/etfs) to frontend format (plans/allocations)
+    const data = res.data
+    designResult.value = {
+      plans: Array.isArray(data.strategies)
+        ? data.strategies.map(s => ({
+            style: s.label,
+            style_label: s.label,
+            portfolio_name: s.portfolio_name,
+            positioning: s.positioning,
+            expected_return: s.expected_return,
+            max_drawdown: s.max_drawdown,
+            sharpe_ratio: s.sharpe_ratio,
+            risk_factors: [],
+            rebalance_rules: '月度检视',
+            allocations: Array.isArray(s.etfs)
+              ? s.etfs.map(e => ({
+                  symbol: e.symbol,
+                  name: e.name,
+                  layer: e.layer,
+                  target_weight: e.weight,
+                  selection_rationale: e.selection_rationale || '',
+                  tracked_index: e.tracked_index || '',
+                  price: e.price,
+                  change_pct: e.change_pct,
+                }))
+              : [],
+          }))
+        : [],
+      market_context: data.market_context || {},
+      generated_at: data.generated_at,
+    }
     loadingProgress.value = 100
     designStep.value = 'result'
     designTab.value = 'cards'
