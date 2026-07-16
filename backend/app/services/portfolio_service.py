@@ -1,6 +1,7 @@
 ﻿from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Any
+import asyncio
 
 from ..models.portfolio import PortfolioETF
 from ..models.schemas import PortfolioETFCreate, PortfolioETFUpdate
@@ -79,7 +80,13 @@ async def build_price_map(etfs: list[PortfolioETF | dict]) -> dict[str, tuple[fl
     """公开包装器，将同步 _build_price_map 放入线程池执行。"""
     import asyncio
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _build_price_map, etfs)
+    try:
+        return await asyncio.wait_for(
+            loop.run_in_executor(None, _build_price_map, etfs),
+            timeout=30.0
+        )
+    except (asyncio.TimeoutError, Exception):
+        return {}
 
 
 def _build_price_map(etfs: list[PortfolioETF | dict]) -> dict[str, tuple[float, float]]:
@@ -177,36 +184,27 @@ async def calculate_allocation(
     if weight_sum <= 0:
         return {"total_capital": total_capital, "allocations": []}
 
-    price_map = _build_price_map(etfs)
+    price_map = await build_price_map(etfs)
     allocations = []
     total_amount = 0.0
+
+    # 第一遍：构建不含基本面的 allocation 字典
     for e in etfs:
-        # 注意：使用原始权重（不按 weight_sum 归一化），使 cash 权重 = 1 - weight_sum 有意义
         target_amount = total_capital * e.target_weight
         total_amount += target_amount
         price, change_pct = price_map.get(e.symbol, (0, 0))
         is_estimated = False
         estimate_source = None
-        # For off-exchange with tracked index, use tracked_index change
         if e.portfolio_type == "off_exchange" and e.tracked_index:
             _, change_pct = price_map.get(e.tracked_index, (0, 0))
             is_estimated = True
             estimate_source = "tracked_index"
 
-        # 基本面数据（A 股 ETF）
-        fundamentals = {}
-        if e.asset_type == "A":
-            try:
-                fundamentals = fetch_fundamentals(e.symbol)
-            except Exception:
-                pass
-
-        # Cost basis fields - use getattr for compatibility with test mocks
         avg_cost = getattr(e, 'avg_cost', None)
         shares_held = getattr(e, 'shares_held', None)
         cost_basis = round(avg_cost * shares_held, 2) if (avg_cost is not None and shares_held is not None) else None
-        
-        alloc = {
+
+        allocations.append({
             "symbol": e.symbol,
             "name": e.name,
             "short_name": e.short_name or e.name,
@@ -220,15 +218,38 @@ async def calculate_allocation(
             "tracked_index": e.tracked_index,
             "is_estimated": is_estimated,
             "estimate_source": estimate_source,
-            # Cost basis fields
             "avg_cost": avg_cost,
             "shares_held": shares_held,
             "cost_basis": cost_basis,
             "first_buy_date": getattr(e, 'first_buy_date', None).isoformat() if getattr(e, 'first_buy_date', None) else None,
             "last_trade_date": getattr(e, 'last_trade_date', None).isoformat() if getattr(e, 'last_trade_date', None) else None,
-            **fundamentals,
-        }
-        allocations.append(alloc)
+        })
+
+    # 第二遍：并行获取 A 股 ETF 基本面数据（在线程池运行，总超时 15 秒）
+    a_etf_indices = [i for i, e in enumerate(etfs) if e.asset_type == "A"]
+    if a_etf_indices:
+        loop = asyncio.get_event_loop()
+        async def _fetch_all_fundamentals():
+            tasks = {}
+            for idx in a_etf_indices:
+                sym = etfs[idx].symbol
+                fut = loop.run_in_executor(None, fetch_fundamentals, sym)
+                tasks[sym] = fut
+            done, _ = await asyncio.wait(tasks.values(), timeout=12.0)
+            for idx in a_etf_indices:
+                sym = etfs[idx].symbol
+                fut = tasks[sym]
+                if fut in done:
+                    try:
+                        result = fut.result()
+                        if result:
+                            allocations[idx].update(result)
+                    except Exception:
+                        pass
+        try:
+            await asyncio.wait_for(_fetch_all_fundamentals(), timeout=15.0)
+        except Exception:
+            pass
 
     cash_weight = max(0.0, 1.0 - weight_sum)
     cash_amount = round(total_capital * cash_weight, 2)
@@ -331,7 +352,7 @@ async def strategy_check(db: AsyncSession, total_capital: float, design_data: di
             return e.get(attr, default)
         return getattr(e, attr, default)
     
-    price_map = await _build_price_map(etfs)
+    price_map = await build_price_map(etfs)
     market_data = []
     indicators = {}
     for e in etfs:
@@ -455,7 +476,7 @@ async def calculate_cumulative_pnl(
     if not etfs:
         return {"summary": {}, "holdings": [], "daily_series": []}
     
-    price_map = await _build_price_map(etfs)
+    price_map = await build_price_map(etfs)
     
     holdings_pnl = []
     total_cost_basis = 0.0
@@ -727,7 +748,7 @@ async def calculate_weight_drift(
     if not etfs:
         return {"items": [], "alerts": []}
     
-    price_map = await _build_price_map(etfs)
+    price_map = await build_price_map(etfs)
     
     # Calculate total portfolio value
     total_value = 0.0

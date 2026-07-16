@@ -5,13 +5,13 @@ const routes = [
     path: '/',
     name: 'dashboard',
     component: () => import('../components/Dashboard.vue'),
-    meta: { title: 'Dashboard', description: '实时行情监控、组合概览与智能策略分析' },
+    meta: { title: 'Dashboard', description: '实时行情监控、组合概览与盈亏明细' },
   },
   {
     path: '/portfolio-analysis',
     name: 'portfolio-analysis',
     component: () => import('../components/PortfolioAnalysis.vue'),
-    meta: { title: '组合与分析', description: '管理场内/场外 ETF 组合，查看技术分析与买卖信号' },
+    meta: { title: '', description: '' },
   },
   {
     path: '/market-analysis',

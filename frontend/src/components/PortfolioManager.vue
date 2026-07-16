@@ -38,7 +38,7 @@
             <div class="search-wrap" ref="searchRef">
               <AppInput
                 v-model="searchQuery"
-                placeholder="输入代码或名称搜索..."
+                placeholder="输入ETF代码或名称（如：510300）"
                 :loading="searchLoading"
                 :clearable="true"
                 @input="onSearch"
@@ -60,6 +60,19 @@
                     <span class="result-tag">{{ r.asset_type }}</span>
                   </li>
                 </ul>
+                <div v-else-if="showDropdown && !searchQuery" class="search-dropdown hot-etfs" @mousedown.prevent>
+                  <div class="hot-header">热门 ETF</div>
+                  <button
+                    v-for="h in hotEtfs"
+                    :key="h.symbol"
+                    class="hot-etf-item"
+                    @click="selectHotEtf(h)"
+                  >
+                    <span class="result-symbol">{{ h.symbol }}</span>
+                    <span class="result-name">{{ h.name }}</span>
+                    <span class="result-tag">{{ h.tag }}</span>
+                  </button>
+                </div>
               </Transition>
             </div>
           </label>
@@ -117,6 +130,7 @@
         </div>
 
         <div class="form-actions">
+          <div v-if="formError" class="form-error">{{ formError }}</div>
           <AppButton type="submit" variant="primary" :disabled="!form.symbol" :loading="adding">
             <span class="btn-icon" aria-hidden="true">➕</span>
             {{ adding ? '添加中...' : '添加' }}
@@ -171,6 +185,10 @@
           </span>
         </div>
         <div class="card-actions">
+          <AppButton variant="ghost" size="sm" class="btn-auto-weight" @click="autoDistributeWeights">
+            <span class="btn-icon" aria-hidden="true">⚖️</span>
+            均分权重
+          </AppButton>
           <AppButton variant="ghost" size="sm" @click="exportPortfolio" :loading="exportLoading">
             <span class="btn-icon" aria-hidden="true">📤</span>
             导出
@@ -373,6 +391,7 @@ const showDropdown = ref(false)
 const searchLoading = ref(false)
 const searchRef = ref(null)
 const form = ref({ symbol: '', name: '', asset_type: 'A', weight: 20, tracked_index: '' })
+const formError = ref('')
 const pnlCapital = ref(500000)
 const pnlData = ref({ items: [] })
 const pnlLoading = ref(false)
@@ -387,6 +406,17 @@ const assetTypeOptions = [
   { value: 'A', label: 'A股' },
   { value: 'HK', label: '港股' },
   { value: 'US', label: '美股' }
+]
+
+const hotEtfs = [
+  { symbol: '510050', name: '上证50ETF', tag: 'A股' },
+  { symbol: '510300', name: '沪深300ETF', tag: 'A股' },
+  { symbol: '159915', name: '创业板ETF', tag: 'A股' },
+  { symbol: '159338', name: '国泰A500ETF', tag: 'A股' },
+  { symbol: '518880', name: '黄金ETF', tag: 'A股' },
+  { symbol: '513100', name: '纳指ETF', tag: '美股' },
+  { symbol: '513050', name: '中概互联ETF', tag: '港股' },
+  { symbol: '511880', name: '银华日利ETF', tag: 'A股' },
 ]
 
 const currentEtfs = computed(() => activeTab.value === 'on_exchange' ? store.onExchange : store.offExchange)
@@ -464,11 +494,33 @@ function selectSearch(r) {
   searchQuery.value = `${r.symbol} ${r.name}`
   searchResults.value = []
   showDropdown.value = false
+  formError.value = ''
+}
+
+function selectHotEtf(h) {
+  form.value = { symbol: h.symbol, name: h.name, asset_type: h.tag === '美股' ? 'US' : h.tag === '港股' ? 'HK' : 'A', weight: form.value.weight, tracked_index: form.value.tracked_index }
+  searchQuery.value = `${h.symbol} ${h.name}`
+  showDropdown.value = false
+  formError.value = ''
 }
 
 // Actions
 async function onAdd() {
-  if (!form.value.symbol || adding.value) return
+  if (adding.value) return
+  // Form validation
+  if (!form.value.symbol) {
+    formError.value = '请搜索并选择一只 ETF'
+    return
+  }
+  if (!form.value.name) {
+    formError.value = '请从搜索结果中选择 ETF（名称不能为空）'
+    return
+  }
+  if (form.value.weight <= 0 || form.value.weight > 100) {
+    formError.value = '权重必须在 1%–100% 之间'
+    return
+  }
+  formError.value = ''
   adding.value = true
   try {
     await store.addEtf({
@@ -501,6 +553,19 @@ async function onUpdate(etf) {
 async function onRemove(symbol) {
   await store.removeEtf(symbol)
   toast('ETF 已删除', 'info')
+}
+
+async function autoDistributeWeights() {
+  const list = currentEtfs.value
+  if (!list.length) return
+  const equalWeight = 1 / list.length
+  for (const etf of list) {
+    try {
+      await store.updateEtf(etf.symbol, { target_weight: equalWeight })
+    } catch { /* skip */ }
+  }
+  toast(`已均分 ${list.length} 只 ETF 权重`, 'success')
+  await loadTab()
 }
 
 // 场外标的技术分析：通过 tracked_index（跟踪指数）复用行情接口（日线及以上）
@@ -754,6 +819,15 @@ onMounted(loadTab)
 .result-name { flex: 1; font-size: var(--font-size-sm); color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .result-tag { font-size: var(--font-size-xs); font-weight: var(--font-weight-medium); padding: var(--space-0.5) var(--space-1.5); border-radius: var(--radius-full); background: var(--color-surface-tertiary); color: var(--color-text-tertiary); }
 
+/* Hot ETFs */
+.hot-header { padding: var(--space-2) var(--space-3); font-size: var(--font-size-xs); font-weight: var(--font-weight-semibold); color: var(--color-text-tertiary); border-bottom: 1px solid var(--color-border-light); }
+.hot-etf-item { display: flex; align-items: center; gap: var(--space-2); width: 100%; padding: var(--space-2) var(--space-3); border: none; background: transparent; font-family: inherit; font-size: inherit; text-align: left; cursor: pointer; transition: var(--transition-fast); border-radius: var(--radius-md); }
+.hot-etf-item:hover { background: var(--color-surface-hover); }
+.hot-etf-item:focus-visible { outline: none; box-shadow: var(--shadow-focus); }
+
+/* Form error */
+.form-error { font-size: var(--font-size-xs); font-weight: var(--font-weight-medium); color: var(--color-danger-700); background: var(--color-bg-danger-subtle); padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); }
+
 .weight-control { width: 100%; }
 .weight-label { display: block; font-size: var(--font-size-xs); font-weight: var(--font-weight-medium); color: var(--color-text-secondary); margin-bottom: var(--space-1); }
 .slider { width: 100%; height: 6px; -webkit-appearance: none; appearance: none; background: var(--color-border-medium); border-radius: var(--radius-full); outline: none; cursor: pointer; }
@@ -762,7 +836,7 @@ onMounted(loadTab)
 .slider::-moz-range-thumb { width: 18px; height: 18px; border-radius: var(--radius-full); background: var(--color-brand-600); border: none; box-shadow: var(--shadow-sm); }
 .weight-val { display: inline-block; margin-left: var(--space-2); font-family: var(--font-family-mono); font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); color: var(--color-brand-600); min-width: 48px; text-align: right; }
 
-.form-actions { display: flex; justify-content: flex-end; padding-top: var(--space-4); margin-top: var(--space-4); border-top: 1px solid var(--color-border-light); }
+.form-actions { display: flex; justify-content: flex-end; align-items: center; gap: var(--space-3); padding-top: var(--space-4); margin-top: var(--space-4); border-top: 1px solid var(--color-border-light); }
 
 /* Capital Bar */
 .capital-bar { padding: var(--space-4) var(--space-5); }

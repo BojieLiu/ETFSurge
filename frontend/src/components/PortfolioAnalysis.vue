@@ -1,34 +1,66 @@
 <template>
   <div class="portfolio-analysis">
-    <div class="pa-layout">
-      <!-- Left: holdings list (reuses PortfolioManager) -->
-      <aside class="pa-holdings" aria-label="持仓列表">
-        <PortfolioManager :selected-symbol="selectedHolding" @select="onSelect" />
-      </aside>
+    <!-- Tab Navigation -->
+    <div class="pa-tabs" role="tablist" aria-label="功能切换">
+      <button
+        v-for="tab in tabs"
+        :key="tab.value"
+        :class="['pa-tab', { 'pa-tab--active': activeTab === tab.value }]"
+        @click="activeTab = tab.value"
+        role="tab"
+        :aria-selected="activeTab === tab.value"
+      >
+        <span class="pa-tab-icon" aria-hidden="true">{{ tab.icon }}</span>
+        <span class="pa-tab-label">{{ tab.label }}</span>
+      </button>
+    </div>
 
-      <!-- Right: technical analysis (reuses AnalysisView, driven by selection) -->
-      <section class="pa-analysis" aria-label="技术分析">
-        <AnalysisView :selected-symbol="selectedHolding" />
-      </section>
+    <!-- Tab: 持仓 -->
+    <div v-if="activeTab === 'holdings'" class="tab-panel" role="tabpanel" aria-label="持仓列表">
+      <PortfolioManager :selected-symbol="selectedHolding" @select="onSelect" />
+    </div>
+
+    <!-- Tab: 技术分析 -->
+    <div v-if="activeTab === 'analysis'" class="tab-panel" role="tabpanel" aria-label="技术分析">
+      <AnalysisView :selected-symbol="selectedHolding" />
+    </div>
+
+    <!-- Tab: AI 工具 -->
+    <div v-if="activeTab === 'tools'" class="tab-panel" role="tabpanel" aria-label="AI 智能工具">
+      <DashboardAiTools @applied="refreshData" />
     </div>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import DashboardAiTools from './DashboardAiTools.vue'
 import PortfolioManager from './PortfolioManager.vue'
 import AnalysisView from './AnalysisView.vue'
 import { usePortfolioStore } from '../stores/portfolio'
 
 const store = usePortfolioStore()
 const selectedHolding = ref('')
+const activeTab = ref('holdings')
+
+const tabs = [
+  { value: 'holdings', label: '持仓', icon: '📋' },
+  { value: 'analysis', label: '技术分析', icon: '📊' },
+  { value: 'tools', label: 'AI工具', icon: '⚡' },
+]
 
 function onSelect(etf) {
   selectedHolding.value = etf.symbol
 }
 
+function refreshData() {
+  store.fetchEtfs()
+  store.fetchEtfs('on_exchange')
+  store.fetchEtfs('off_exchange')
+}
+
 // Auto-select the first on-exchange holding so the analysis panel is populated
-// as soon as the user lands on the merged view.
+// when the user switches to the analysis tab.
 onMounted(async () => {
   try {
     await store.fetchEtfs('on_exchange')
@@ -43,31 +75,62 @@ onMounted(async () => {
 .portfolio-analysis {
   display: flex;
   flex-direction: column;
-  gap: var(--space-6);
+  gap: 0;
   height: calc(100vh - 60px - 2 * var(--space-6));
   min-height: 0;
 }
-.pa-layout {
-  display: grid;
-  grid-template-columns: minmax(420px, 1fr) minmax(520px, 1.4fr);
-  gap: var(--space-6);
-  align-items: stretch;
+
+/* Tab Navigation */
+.pa-tabs {
+  display: flex;
+  gap: var(--space-1);
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: var(--space-5);
+  flex-shrink: 0;
+}
+
+.pa-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-family: inherit;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all var(--transition-fast);
+  margin-bottom: -1px;
+  white-space: nowrap;
+}
+
+.pa-tab:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+
+.pa-tab--active {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+  font-weight: var(--font-weight-medium);
+}
+
+.pa-tab-icon {
+  font-size: var(--font-size-base);
+  line-height: 1;
+}
+
+.pa-tab-label {
+  line-height: 1;
+}
+
+/* Tab Panels */
+.tab-panel {
   flex: 1 1 auto;
   min-height: 0;
-  overflow: hidden;
-}
-.pa-holdings, .pa-analysis { min-width: 0; min-height: 0; overflow-y: auto; }
-/* Keep each column's header (tabs / analysis title) pinned while that column scrolls */
-.pa-holdings :deep(.page-header),
-.pa-analysis :deep(.page-header) {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: var(--color-surface-primary);
-}
-@media (max-width: 1024px) {
-  .portfolio-analysis { height: auto; }
-  .pa-layout { grid-template-columns: 1fr; overflow: visible; }
-  .pa-holdings, .pa-analysis { overflow-y: visible; }
+  overflow-y: auto;
 }
 </style>

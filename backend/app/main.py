@@ -24,6 +24,16 @@ async def lifespan(app: FastAPI):
     await init_db()
     await redis_cache.init()
 
+    # 启动时后台预热行情缓存（不阻塞启动，12s 超时）
+    async def _warmup_market_cache():
+        try:
+            await asyncio.wait_for(refresh_market_cache(), timeout=12)
+            logger.info("行情缓存预热完成")
+        except Exception:
+            logger.exception("行情缓存预热失败（不影响启动）")
+
+    asyncio.create_task(_warmup_market_cache())
+
     try:
         async def _scheduler_wrapper():
             try:
@@ -84,7 +94,7 @@ async def log_requests(request: Request, call_next):
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins.split(","),
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

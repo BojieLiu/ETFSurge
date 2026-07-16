@@ -24,32 +24,32 @@ describe('changeClass (红涨绿跌)', () => {
   })
 })
 
-// --- Issue 2: core-actions button text (concise title + helper desc) ---
+// --- Issue 2: AI tool buttons (moved to DashboardAiTools) ---
 vi.mock('../api', () => ({
   portfolioApi: {
-    getAllocation: vi.fn(() => Promise.resolve({ data: { allocations: [] } })),
-    getDailyPnl: vi.fn(() => Promise.resolve({ data: { items: [] } })),
+    list: vi.fn(() => Promise.resolve({ data: [] })),
+    strategyCheck: vi.fn(() => Promise.resolve({ data: {} })),
+    applyStrategy: vi.fn(() => Promise.resolve({ data: {} })),
+    applyPortfolioDesign: vi.fn(() => Promise.resolve({ data: {} })),
   },
-  analysisApi: { designPortfolio: vi.fn(), checkStrategy: vi.fn() },
-  marketApi: { indicesGlobal: vi.fn(() => Promise.resolve({ data: { indices: {} } })) },
-}))
-
-vi.mock('../composables/useMarketWS', () => ({
-  useMarketWS: () => ({ connect: vi.fn(), disconnect: vi.fn(), onMarketData: vi.fn() }),
+  analysisApi: {
+    portfolioDesignStream: vi.fn(() => Promise.resolve({ data: {} })),
+    portfolioDesign: vi.fn(() => Promise.resolve({ data: {} })),
+  },
+  marketApi: {},
 }))
 
 vi.mock('../stores/toast', () => ({ useToastStore: () => ({ show: vi.fn() }) }))
 vi.mock('../stores/portfolio', () => ({ usePortfolioStore: () => ({ etfs: [] }) }))
-vi.mock('vue-router', () => ({ useRoute: () => ({}), useRouter: () => ({ push: vi.fn() }) }))
 
-const Dashboard = (await import('../components/Dashboard.vue')).default
+const DashboardAiTools = (await import('../components/DashboardAiTools.vue')).default
 
 describe('core-actions buttons', () => {
   it('renders a concise title plus a separate helper description for each action', () => {
-    const wrapper = mount(Dashboard, {
+    const wrapper = mount(DashboardAiTools, {
       global: {
         plugins: [createPinia()],
-        stubs: { VChart: true, AppButton: true, AppInput: true, Skeleton: true },
+        stubs: { AppButton: true, AppInput: true },
       },
     })
 

@@ -1,13 +1,11 @@
 import { describe, it, expect, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
+import { createPinia } from 'pinia'
 
-// Stub the two heavy child components so we test the WIRING of the merged view
-// (PortfolioManager select -> AnalysisView selectedSymbol) without echarts.
 vi.mock('../components/PortfolioManager.vue', () => ({
   default: {
     name: 'PortfolioManager',
     props: ['selectedSymbol'],
-    emits: ['select'],
     template: '<div class="pm"><button class="sel" @click="$emit(\'select\', { symbol: \'510300\' })">sel</button></div>',
   },
 }))
@@ -18,33 +16,77 @@ vi.mock('../components/AnalysisView.vue', () => ({
     template: '<div class="av">{{ selectedSymbol }}</div>',
   },
 }))
+vi.mock('../components/DashboardAiTools.vue', () => ({
+  default: {
+    name: 'DashboardAiTools',
+    template: '<div class="ai-tools"></div>',
+  },
+}))
 vi.mock('../stores/portfolio', () => ({
   usePortfolioStore: () => ({
     onExchange: [],
     fetchEtfs: vi.fn(() => Promise.resolve()),
   }),
 }))
+vi.mock('../stores/toast', () => ({ useToastStore: () => ({ show: vi.fn() }) }))
 
 const PortfolioAnalysis = (await import('../components/PortfolioAnalysis.vue')).default
 
-describe('PortfolioAnalysis merged view', () => {
-  it('renders the two-pane layout', () => {
-    const wrapper = mount(PortfolioAnalysis)
-    expect(wrapper.find('.pa-layout').exists()).toBe(true)
-    expect(wrapper.find('.pm').exists()).toBe(true)
-    expect(wrapper.find('.av').exists()).toBe(true)
+describe('PortfolioAnalysis tabbed view', () => {
+  it('renders three tab buttons', () => {
+    const wrapper = mount(PortfolioAnalysis, {
+      global: { plugins: [createPinia()] },
+    })
+    const tabs = wrapper.findAll('.pa-tab')
+    expect(tabs.length).toBe(3)
+    expect(tabs[0].text()).toContain('持仓')
+    expect(tabs[1].text()).toContain('技术分析')
+    expect(tabs[2].text()).toContain('AI工具')
   })
 
-  it('drives AnalysisView selection from the selected holding', async () => {
-    const wrapper = mount(PortfolioAnalysis)
-    // AnalysisView starts with no selection
-    expect(wrapper.find('.av').text()).toBe('')
+  it('shows holdings tab by default', () => {
+    const wrapper = mount(PortfolioAnalysis, {
+      global: { plugins: [createPinia()] },
+    })
+    // Holdings panel is visible
+    expect(wrapper.find('.pm').exists()).toBe(true)
+    // Other panels are hidden
+    expect(wrapper.find('.av').exists()).toBe(false)
+    expect(wrapper.find('.ai-tools').exists()).toBe(false)
+  })
 
-    // User clicks a holding in the PortfolioManager list
+  it('switches to analysis tab on click', async () => {
+    const wrapper = mount(PortfolioAnalysis, {
+      global: { plugins: [createPinia()] },
+    })
+    // Click the analysis tab
+    await wrapper.findAll('.pa-tab')[1].trigger('click')
+    expect(wrapper.find('.av').exists()).toBe(true)
+    expect(wrapper.find('.pm').exists()).toBe(false)
+  })
+
+  it('switches to AI tools tab on click', async () => {
+    const wrapper = mount(PortfolioAnalysis, {
+      global: { plugins: [createPinia()] },
+    })
+    // Click the tools tab
+    await wrapper.findAll('.pa-tab')[2].trigger('click')
+    expect(wrapper.find('.ai-tools').exists()).toBe(true)
+    expect(wrapper.find('.pm').exists()).toBe(false)
+  })
+
+  it('drives AnalysisView selection from the selected holding across tabs', async () => {
+    const wrapper = mount(PortfolioAnalysis, {
+      global: { plugins: [createPinia()] },
+    })
+    // Click a holding in the PortfolioManager
     await wrapper.find('.sel').trigger('click')
     await wrapper.vm.$nextTick()
 
-    // The same symbol is now passed down to AnalysisView
+    // Switch to analysis tab
+    await wrapper.findAll('.pa-tab')[1].trigger('click')
+
+    // The same symbol is passed down to AnalysisView
     expect(wrapper.find('.av').text()).toBe('510300')
   })
 })
