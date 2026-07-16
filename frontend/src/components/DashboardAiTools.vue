@@ -186,7 +186,7 @@
                   <span class="holding-name">{{ a.name || a.symbol }}</span>
                   <span class="holding-weight">{{ (a.target_weight * 100).toFixed(1) }}%</span>
                 </div>
-                <div v-if="pf.allocations.length > 5" class="holding-row holding-more">+{{ pf.allocations.length - 5 }} 只更多</div>
+                <div v-if="pf.allocations.length > 5 && expandedPlan !== pf.style" class="holding-row holding-more">+{{ pf.allocations.length - 5 }} 只更多</div>
               </div>
 
               <div class="plan-action">
