@@ -100,3 +100,22 @@ async def design_report_ws(websocket: WebSocket, session_id: str):
         logger.warning("[design_report_ws] error: %s", e)
     finally:
         report_manager.unregister(session_id, websocket)
+
+@router.websocket("/api/v1/ws/task-notifications")
+async def task_notifications_ws(websocket: WebSocket):
+    """任务状态变更通知 WebSocket。"""
+    from ..tasks.design_tasks import notify_manager
+
+    await websocket.accept()
+    notify_manager.register(websocket)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            if data.strip().lower() in ("ping", "heartbeat"):
+                await websocket.send_text(json.dumps({"type": "pong"}, ensure_ascii=False))
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        notify_manager.unregister(websocket)

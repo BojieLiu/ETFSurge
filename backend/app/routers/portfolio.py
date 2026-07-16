@@ -303,3 +303,48 @@ async def delete_design(
     await db.delete(record)
     await db.commit()
     return {"detail": "deleted"}
+
+# ── 异步任务 ──────────────────────────────────
+@router.get("/tasks/{task_id}")
+async def get_task_status(task_id: int):
+    """查询异步任务状态。"""
+    from ..tasks.design_tasks import task_manager
+    task = task_manager.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return {
+        "task_id": task["task_id"],
+        "status": task["status"],
+        "progress": task["progress"],
+        "design_id": task.get("design_id"),
+        "error_message": task.get("error_message"),
+        "created_at": task.get("created_at"),
+        "completed_at": task.get("completed_at"),
+    }
+
+
+@router.get("/tasks")
+async def list_tasks(limit: int = Query(10, ge=1, le=50), offset: int = Query(0, ge=0)):
+    """列出最近的任务。"""
+    from ..tasks.design_tasks import task_manager
+    return task_manager.list_tasks(limit=limit, offset=offset)
+
+
+@router.post("/design-async")
+async def portfolio_design_async(
+    task: dict,
+):
+    """异步提交设计任务，立即返回 task_id。
+
+    请求体: {capital: 500000, constraints: {...}}
+    """
+    from ..tasks.design_tasks import task_manager, design_worker
+    capital = task.get("capital", 500000)
+    constraints = task.get("constraints")
+    t = task_manager.create_task(capital=capital, constraints=constraints)
+    asyncio.create_task(design_worker(task_manager, t["task_id"]))
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        status_code=202,
+        content={"task_id": t["task_id"], "status": "pending", "created_at": t["created_at"]},
+    )

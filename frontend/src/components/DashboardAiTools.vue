@@ -35,6 +35,37 @@
             <span class="action-desc">分析当前组合，优化权重与持仓</span>
           </div>
         </button>
+
+        <button class="core-action-btn" @click="enterHistoryMode">
+          <span class="action-icon" aria-hidden="true">&#128214;</span>
+          <div class="action-content">
+            <span class="action-title">历史记录</span>
+            <span class="action-desc">查看之前生成的组合设计方案</span>
+          </div>
+        </button>
+      </div>
+
+      <!-- History Panel (accessible from main page) -->
+      <div v-if="activeCoreFeature === 'history'" class="panel-body">
+        <div class="history-panel" v-if="designHistoryList.length > 0 || !historyLoaded">
+          <div class="history-header">
+            <h4>历史方案</h4>
+            <button class="history-close" @click="exitCoreFeature">X</button>
+          </div>
+          <div v-if="historyLoading" class="history-empty">加载中...</div>
+          <div v-else-if="designHistoryList.length === 0" class="history-empty">暂无历史记录，先生成一个方案吧</div>
+          <div v-else class="history-list">
+            <div v-for="h in designHistoryList" :key="h.id" class="history-item" @click="loadHistoryDetail(h.id)">
+              <span class="history-date">{{ formatDate(h.created_at) }}</span>
+              <span class="history-capital">{{ (h.capital / 10000).toFixed(0) }}万</span>
+              <span class="history-style">{{ h.risk_profile }}</span>
+              <span class="history-arrow">&#8594;</span>
+            </div>
+          </div>
+        </div>
+        <div class="wizard-actions-center" style="margin-top: var(--space-4);">
+          <AppButton variant="ghost" @click="exitCoreFeature">返回</AppButton>
+        </div>
       </div>
 
       <!-- Design Wizard -->
@@ -497,6 +528,27 @@ function enterStrategyMode() {
   collapsed.value = false
 }
 
+function enterHistoryMode() {
+  activeCoreFeature.value = 'history'
+  collapsed.value = false
+  if (!historyLoaded.value) {
+    loadHistoryList()
+  }
+}
+
+async function loadHistoryList() {
+  historyLoading.value = true
+  try {
+    const res = await portfolioApi.listDesigns(20, 0)
+    designHistoryList.value = res.data || []
+    historyLoaded.value = true
+  } catch (e) {
+    toast('加载历史记录失败', 'error')
+  } finally {
+    historyLoading.value = false
+  }
+}
+
 function exitCoreFeature() {
   activeCoreFeature.value = null
   // 取消时不收起工具区，直接返回工具列表
@@ -511,6 +563,8 @@ function resetDesign() {
 // History
 const showHistory = ref(false)
 const designHistoryList = ref([])
+const historyLoaded = ref(false)
+const historyLoading = ref(false)
 
 function formatDate(dateStr) {
   if (!dateStr) return ''
@@ -1540,5 +1594,11 @@ async function checkStrategy() {
   border-radius: var(--radius-full);
   background: var(--color-bg-tertiary);
   color: var(--color-text-secondary);
+}
+
+.history-arrow {
+  margin-left: auto;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-sm);
 }
 </style>

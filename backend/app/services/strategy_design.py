@@ -161,22 +161,6 @@ async def enrich_market_context() -> MarketContext:
     val_map = {v.get("code"): v for v in valuation}
     idx_map = {i.get("code"): i for i in indices}
 
-    # removed: CANDIDATE_POOL reference
-        price = 1.0
-        change = 0.0
-        # 优先从指数行情取(宽基本身是指数)
-        if code in idx_map:
-            price = idx_map[code].get("price", 1.0) or 1.0
-            change = (idx_map[code].get("change_pct", 0.0) or 0.0) / 100.0
-        f = flow_map.get(code)
-        net_inflow = f.get("net_inflow", 0.0) if f else 0.0
-        v = val_map.get(code)
-        val_pct = v.get("valuation_percentile", 0.5) if v else 0.5
-        ctx.assets[code] = Asset(
-            code=code, name=meta["name"], layer=meta["layer"], beta=meta["beta"],
-            liquidity=meta["liquidity"], price=price, change_pct=change,
-            net_inflow=net_inflow, valuation_pct=val_pct, reason=meta["reason"],
-        )
     return ctx
 
 
@@ -378,32 +362,12 @@ def _enforce_name_count(
     elif len(holdings) < min_names:
         # 从候选池补充(若还有未入选的)
         existing = {h["symbol"] for h in holdings}
-        # removed: CANDIDATE_POOL reference
-            if code in existing:
-                continue
-            if len(holdings) >= min_names:
-                break
-            holdings.append({
-                "symbol": code,
-                "name": meta["name"],
-                "layer": meta["layer"],
-                "weight": MIN_WEIGHT,
-                "price": 1.0,
-                "change_pct": 0.0,
-                "selection_rationale": meta["reason"],
-            })
     return holdings
 
 
 def _build_default_context() -> MarketContext:
     """fast 模式: 不拉外部数据, 用候选池默认值"""
     ctx = MarketContext()
-    # removed: CANDIDATE_POOL reference
-        ctx.assets[code] = Asset(
-            code=code, name=meta["name"], layer=meta["layer"], beta=meta["beta"],
-            liquidity=meta["liquidity"], price=1.0, change_pct=0.0,
-            net_inflow=0.0, valuation_pct=0.5, reason=meta["reason"],
-        )
     return ctx
 
 

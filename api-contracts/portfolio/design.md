@@ -160,7 +160,96 @@ POST /api/v1/analysis/portfolio-design
 }
 ```
 
-### 2.3 WebSocket 异步报告推送
+### 2.3 异步任务提交 / Submit Async Design Task
+
+```
+POST /api/v1/portfolio/design?async=true
+```
+
+**请求体同 2.1。**
+
+**成功响应 — `202 Accepted`:**
+
+```json
+{
+  "task_id": "uuid-string",
+  "status": "pending",
+  "created_at": "2026-07-17T15:00:00Z"
+}
+```
+
+### 2.4 查询任务状态 / Get Task Status
+
+```
+GET /api/v1/portfolio/tasks/{task_id}
+```
+
+**成功响应 — `200 OK`:**
+
+```json
+{
+  "task_id": "uuid-string",
+  "status": "running",
+  "progress": 45,
+  "design_id": null,
+  "error_message": null,
+  "created_at": "2026-07-17T15:00:00Z",
+  "completed_at": null
+}
+```
+
+**status 取值:** `pending` / `running` / `completed` / `failed`
+
+### 2.5 任务列表 / List Tasks
+
+```
+GET /api/v1/portfolio/tasks?limit=10&offset=0
+```
+
+**成功响应 — `200 OK`:**
+
+```json
+[
+  {
+    "task_id": "uuid-1",
+    "status": "completed",
+    "progress": 100,
+    "design_id": 1,
+    "created_at": "...",
+    "completed_at": "..."
+  },
+  {
+    "task_id": "uuid-2",
+    "status": "running",
+    "progress": 60,
+    "design_id": null,
+    "created_at": "...",
+    "completed_at": null
+  }
+]
+```
+
+### 2.6 WebSocket 异步任务通知
+
+```
+WS /api/v1/ws/task-notifications
+```
+
+**服务端推送消息格式：**
+
+```json
+{
+  "type": "task_update",
+  "task_id": "uuid-string",
+  "status": "completed",
+  "progress": 100,
+  "design_id": 1
+}
+```
+
+status 变化时推送一次，前端不需要轮询。
+
+### 2.7 WebSocket 异步报告推送
 
 ```
 WS /api/v1/ws/design-report/{session_id}
