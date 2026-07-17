@@ -54,7 +54,7 @@ describe('core-actions buttons', () => {
     })
 
     const buttons = wrapper.findAll('button.core-action-btn')
-    expect(buttons.length).toBe(2)
+    expect(buttons.length).toBe(3)
 
     const designBtn = buttons[0]
     const strategyBtn = buttons[1]

@@ -37,3 +37,6 @@ uvicorn*
 
 # Playwright MCP cache
 .playwright-mcp/
+
+# OpenCode config with API keys
+opencode.json
