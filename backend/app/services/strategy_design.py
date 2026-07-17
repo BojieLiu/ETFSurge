@@ -981,6 +981,145 @@ def compute_portfolio_risk(
 
 # ── 增强型主入口 ──────────────────────────────────────────────
 
+def build_rationale(
+    code: str,
+    layer: str,
+    strategy: str,
+    meta: dict | None = None,
+    trend: dict | None = None,
+    macro_state: dict | None = None,
+    regime: str | None = None,
+    sentiment: dict | None = None,
+    news_info: dict | None = None,
+    fund_flow: float | None = None,
+    valuation: dict | None = None,
+    sector_momentum: list | None = None,
+    industry: str | None = None,
+) -> str:
+    """为指定层级的 ETF 生成数据驱动的入选理由。数据维度为 None 时自动跳过。"""
+    parts = []
+    meta = meta or {}
+    trend = trend or {}
+    macro_state = macro_state or {}
+    sentiment = sentiment or {}
+    news_info = news_info or {}
+    asset_name = meta.get("name", code)
+
+    # 1. 资产定位
+    if layer == "core":
+        if "沪深300" in asset_name:
+            parts.append(asset_name + " — A股核心宽基，覆盖沪深两市龙头")
+        elif "中证A" in asset_name:
+            parts.append(asset_name + " — 行业均衡宽基，分散度优于沪深300")
+        elif "红利" in asset_name:
+            parts.append(asset_name + " — 高股息低波动，适合防御底仓")
+        else:
+            parts.append(asset_name + " — 核心层宽基配置")
+    elif layer == "satellite":
+        ind = industry or meta.get("reason", "行业主题")
+        parts.append(asset_name + " — " + ind + "方向，高弹性卫星品种")
+    elif layer == "defense":
+        if "黄金" in asset_name:
+            parts.append(asset_name + " — 贵金属避险资产，与权益低相关")
+        elif "国债" in asset_name:
+            parts.append(asset_name + " — 利率债，货币宽松周期受益")
+        else:
+            parts.append(asset_name + " — 防御层避险配置")
+
+    # 2. 走势
+    ret_3m = trend.get("return_3m")
+    if ret_3m is not None:
+        d = "涨" if ret_3m >= 0 else "跌"
+        parts.append("近3月" + d + str(round(abs(ret_3m) * 100, 1)) + "%")
+    ret_1m = trend.get("return_1m")
+    if ret_1m is not None:
+        d = "涨" if ret_1m >= 0 else "跌"
+        parts.append("近1月" + d + str(round(abs(ret_1m) * 100, 1)) + "%")
+    ma_bias = trend.get("ma_bias_20")
+    if ma_bias is not None:
+        pos = "上方" if ma_bias >= 0 else "下方"
+        sig = "+" if ma_bias >= 0 else ""
+        parts.append("20日均线" + pos + "(孬离率" + sig + str(round(ma_bias * 100, 1)) + "%)")
+
+    # 3. 资金流向(卫星)
+    if layer == "satellite" and fund_flow is not None and abs(fund_flow) > 0:
+        d = "净流入" if fund_flow > 0 else "净流出"
+        parts.append("主力资金" + d + str(round(abs(fund_flow) / 1e8, 1)) + "亿")
+
+    # 4. 估值
+    pe = (valuation or {}).get("pe_ttm")
+    if pe is not None:
+        s = "PE " + str(round(pe, 1)) + "x"
+        pb = (valuation or {}).get("pb", 0)
+        if pb:
+            s += " PB " + str(round(pb, 1)) + "x"
+        parts.append(s)
+
+    # 5. 市场状态
+    regime_desc = {
+        "bull_strong": "当前市场强势",
+        "bull_weakening": "牛市趋弱",
+        "range_bound": "市场震荡",
+        "correction": "市场回调中",
+        "bear": "熊市环境",
+        "defensive_rotate": "防御轮动阶段",
+        "panic": "市场恐慌",
+    }
+    if regime and regime in regime_desc:
+        parts.append(regime_desc[regime])
+
+    # 6. 宏观环境
+    economic = macro_state.get("economic_phase")
+    monetary = macro_state.get("monetary_stance")
+    if economic:
+        parts.append("宏观" + economic + ("·" + monetary if monetary else ""))
+
+    # 7. 市场情绪
+    si = sentiment.get("sentiment_index")
+    if si is not None:
+        if si >= 60:
+            parts.append("市场情绪偏积极")
+        elif si <= 40:
+            parts.append("市场情绪偏谨慎")
+        else:
+            parts.append("市场情绪中性")
+
+    # 8. 资讯
+    mentions = news_info.get("total_mentions", 0)
+    if mentions > 0:
+        ns = news_info.get("sentiment_score", 0)
+        st = "偏正面" if ns > 0.3 else ("偏负面" if ns < -0.3 else "中性")
+        parts.append("相关资讯" + str(mentions) + "条·" + st)
+
+    # 9. 行业动量(卫星)
+    if layer == "satellite" and industry and sector_momentum:
+        for item in sector_momentum:
+            if industry in item.get("sector_name", ""):
+                rk = item.get("rank", 0)
+                tl = max(item.get("total", 1), 1)
+                if 0 < rk <= tl:
+                    parts.append("行业动量排名" + str(rk) + "/" + str(tl))
+                break
+
+    # 10. 层角色
+    sl = {"defensive": "防御型", "balanced": "平衡型", "aggressive": "进攻型"}
+    label = sl.get(strategy, strategy)
+    if layer == "core":
+        parts.append("在" + label + "方案中作为核心底仓")
+    elif layer == "satellite":
+        if strategy == "aggressive":
+            parts.append("在" + label + "方案中高权重配置提供弹性")
+        elif strategy == "defensive":
+            parts.append("在" + label + "方案中低权重参与控制回护")
+        else:
+            parts.append("在" + label + "方案中适度配置增强收益")
+    elif layer == "defense":
+        parts.append("在" + label + "方案中提供下行保护")
+
+    return "；".join(parts)
+
+
+
 async def generate_enhanced_design(
     capital: float = 500000,
     constraints: dict | None = None,
@@ -1132,6 +1271,19 @@ async def generate_enhanced_design(
         defense = dynamic_defense_allocation(regime, macro_state)
         holdings.extend(defense)
 
+        # 核心/防御层: 用 build_rationale 替换硬编码理由
+        for h in holdings:
+            code = h["symbol"]
+            h["selection_rationale"] = build_rationale(
+                code=code, layer=h.get("layer", "core"), strategy=key,
+                meta=CANDIDATE_POOL.get(code, {}),
+                trend=trend_data.get(code, {}),
+                macro_state=macro_state, regime=regime,
+                sentiment=sentiment, news_info=news_map.get(code, {}),
+                fund_flow=fund_flow_map.get(code),
+                valuation=valuation_map.get(code),
+            )
+
         # 卫星层: 评分排序 + 行业去重 + 幂律分配
         s_budget = budgets.get("satellite", 0.0)
         if s_budget > 0.02 and scanned_satellite:
@@ -1165,23 +1317,21 @@ async def generate_enhanced_design(
                     news_info = news_map.get(code, {})
                     fund_flow_val = fund_flow_map.get(code)
                     pe_val = valuation_map.get(code, {}).get("pe_ttm") if code in valuation_map else None
-                    rationale_parts = []
-                    ret_3m = trend.get("return_3m")
-                    if ret_3m is not None:
-                        rationale_parts.append(f"近3月{'涨' if ret_3m>=0 else '跌'}{ret_3m*100:.1f}%")
-                    if fund_flow_val is not None and fund_flow_val > 0:
-                        rationale_parts.append(f"主力净流入{fund_flow_val/1e8:.1f}亿")
-                    if news_info.get("total_mentions", 0) > 0:
-                        rationale_parts.append(f"近期相关资讯{news_info['total_mentions']}条")
-                    if not rationale_parts:
-                        rationale_parts.append(f"评分{round(a.get('composite_score', 0.5), 3)}")
-
                     holdings.append({
                         "symbol": code,
                         "name": a["name"],
                         "layer": "satellite",
                         "weight": round(weights[i], 4),
-                        "selection_rationale": "，".join(rationale_parts),
+                        "selection_rationale": build_rationale(
+                            code=code, layer="satellite", strategy=key,
+                            meta=a,
+                            trend=trend_data.get(code, {}),
+                            macro_state=macro_state, regime=regime,
+                            sentiment=sentiment, news_info=news_map.get(code, {}),
+                            fund_flow=fund_flow_map.get(code),
+                            valuation=valuation_map.get(code),
+                            industry=a.get("industry", ""),
+                        ),
                         "industry": a.get("industry", ""),
                         "concepts": a.get("concepts", []),
                         "factor_score": round(a.get("composite_score", 0.5), 3),
