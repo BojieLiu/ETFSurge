@@ -65,7 +65,7 @@ class TestDesignTaskManager:
 class TestDesignWorker:
     """测试 design_worker 异步任务"""
 
-    @patch("app.tasks.design_tasks.generate_full_design", new_callable=AsyncMock)
+    @patch("app.tasks.design_tasks.generate_enhanced_design", new_callable=AsyncMock)
     async def test_worker_runs_full_pipeline(self, mock_gen):
         """验证 worker 调用 generate_full_design"""
         from app.tasks.design_tasks import DesignTaskManager, design_worker
@@ -85,7 +85,7 @@ class TestDesignWorker:
         assert t["status"] == "completed"
         assert t["progress"] == 100
 
-    @patch("app.tasks.design_tasks.generate_full_design", new_callable=AsyncMock)
+    @patch("app.tasks.design_tasks.generate_enhanced_design", new_callable=AsyncMock)
     async def test_worker_failure_sets_failed_status(self, mock_gen):
         """验证 worker 出错时标记为 failed"""
         from app.tasks.design_tasks import DesignTaskManager, design_worker
@@ -101,7 +101,7 @@ class TestDesignWorker:
         assert t["status"] == "failed"
         assert "API timeout" in t["error_message"]
 
-    @patch("app.tasks.design_tasks.generate_full_design", new_callable=AsyncMock)
+    @patch("app.tasks.design_tasks.generate_enhanced_design", new_callable=AsyncMock)
     async def test_worker_saves_design_id(self, mock_gen):
         """验证 worker 完成后关联 design_id"""
         from app.tasks.design_tasks import DesignTaskManager, design_worker

@@ -15,7 +15,7 @@ import logging
 import time
 from typing import Any
 
-from ..services.strategy_design import generate_full_design
+from ..services.strategy_design import generate_enhanced_design
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +122,7 @@ async def design_worker(mgr: DesignTaskManager, task_id: int) -> None:
         mgr.update_task(task_id, progress=30)
         await _notify(task_id, "running", progress=30)
 
-        result = await generate_full_design(
+        result = await generate_enhanced_design(
             capital=task["capital"],
             constraints=task.get("constraints"),
         )
@@ -133,13 +133,30 @@ async def design_worker(mgr: DesignTaskManager, task_id: int) -> None:
         mgr.update_task(task_id, progress=70)
         await _notify(task_id, "running", progress=70)
 
-        # 保存 strategies 到 task 中（方便 history API 读取）
-        mgr.update_task(task_id, progress=90, _strategies=strategies,
-                        _market_context=market_context)
-        await _notify(task_id, "running", progress=90)
+        # 保存到数据库设计历史
+        from app.models.portfolio_design import PortfolioDesign
+        from app.database import async_session
+        design_id = None
+        try:
+            async with async_session() as db:
+                record = PortfolioDesign(
+                    capital=task["capital"],
+                    risk_profile=task.get("risk_profile", "balanced"),
+                    strategies_json=json.dumps(strategies, ensure_ascii=False, default=str),
+                    market_snapshot_json=json.dumps(market_context, ensure_ascii=False, default=str),
+                )
+                db.add(record)
+                await db.commit()
+                await db.refresh(record)
+                design_id = record.id
+        except Exception as e:
+            logger.warning("[design_worker] failed to save design history: %s", e)
 
-        # 完成
-        mgr.update_task(task_id, status="completed", progress=100)
+        # 保存完成状态与 design_id
+        mgr.update_task(task_id, progress=100, status="completed",
+                        design_id=design_id,
+                        _strategies=strategies,
+                        _market_context=market_context)
         await _notify(task_id, "completed", progress=100)
 
         logger.info("[design_worker] task %d completed with %d strategies",

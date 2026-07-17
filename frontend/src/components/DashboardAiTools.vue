@@ -653,11 +653,10 @@ async function startDesign() {
         if (task.status === 'completed') {
           loadingText.value = '方案已生成，正在加载...'
           loadingProgress.value = 95
-          // 加载最新设计列表，找到本次的设计
-          const listRes = await portfolioApi.listDesigns(1, 0)
-          const designs = listRes.data || []
-          if (designs.length > 0) {
-            const detailRes = await portfolioApi.getDesign(designs[0].id)
+          // 从任务结果中直接获取 design_id，不再 listDesigns+getDesign 两跳
+          const designId = task.design_id
+          if (designId) {
+            const detailRes = await portfolioApi.getDesign(designId)
             const data = detailRes.data
             const plans = Array.isArray(data.strategies)
               ? data.strategies.map(s => ({
@@ -687,6 +686,8 @@ async function startDesign() {
               market_context: data.market_context || {},
               generated_at: data.created_at,
             }
+            // 自动刷新历史列表
+            await loadHistoryList()
           }
           loadingProgress.value = 100
           designStep.value = 'result'
