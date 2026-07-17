@@ -20,6 +20,7 @@ from typing import Any
 from datetime import datetime
 
 from ..fetchers import etf_scanner
+from ..factors.factor_registry import registry as factor_registry
 from .etf_classifier import classifier as etf_classifier
 
 logger = logging.getLogger(__name__)
@@ -72,6 +73,8 @@ class PoolManager:
         self._version: int = 0
         self.scanner = etf_scanner
         self.classifier = etf_classifier
+        self.factor_registry = factor_registry
+        self._opportunistic_signals: dict[str, dict] = {}
 
     async def refresh(self) -> PoolDiff:
         """全量刷新候选池。
@@ -112,8 +115,37 @@ class PoolManager:
                 item["concepts"] = info.get("concepts", [])
                 item["classify_confidence"] = info.get("confidence", 0.0)
 
-        # 4. 分配到 5 层
+        # 3b. FactorRegistry 计算因子得分
+        if flat:
+            symbols = [e["symbol"] for e in flat if e.get("symbol")]
+            try:
+                factor_scores = await self.factor_registry.compute(symbols)
+                for item in flat:
+                    sym = item["symbol"]
+                    item["factor_scores"] = factor_scores.get(sym, {})
+            except Exception as e:
+                logger.warning("FactorRegistry compute failed: %s", e)
+                for item in flat:
+                    item["factor_scores"] = {}
+
+        # 4. 分配到 5 层（含 opportunistic 信号注入）
         new_pool: dict[str, list[dict[str, Any]]] = {layer: [] for layer in ALL_LAYERS}
+
+        # 4a. 注入 opportunistic 信号
+        if self._opportunistic_signals:
+            for sym, signal in self._opportunistic_signals.items():
+                new_pool[LAYER_OPPORTUNISTIC].append({
+                    "symbol": sym,
+                    "name": signal.get("name", sym),
+                    "layer": LAYER_OPPORTUNISTIC,
+                    "industry": signal.get("industry", "unknown"),
+                    "concepts": signal.get("concepts", []),
+                    "factor_scores": {},
+                    "composite_score": signal.get("heat_score", 0.5),
+                    "opp_signal": signal.get("signal", ""),
+                    "opp_reason": signal.get("reason", ""),
+                })
+
         for item in flat:
             base_layer = item.get("layer", LAYER_SATELLITE)
             industry = item.get("industry", "unknown")
@@ -131,20 +163,18 @@ class PoolManager:
                 target = LAYER_SATELLITE
 
             item["layer"] = target
+            item["composite_score"] = 0.0
             new_pool[target].append(item)
 
         # 5. 强制保底
         self._ensure_mandatory(new_pool, flat)
 
-        # 6. 层内截断
+        # 6. 层内复合评分 + 截断
         for layer in ALL_LAYERS:
+            for item in new_pool[layer]:
+                item["composite_score"] = self._compute_composite(item, layer)
             max_n = MAX_PER_LAYER.get(layer, 10)
-            scored = sorted(
-                new_pool[layer],
-                key=lambda x: float(x.get("amount", 0) or 0) * 0.5
-                              + float(x.get("fund_scale", 0) or 0) * 0.5,
-                reverse=True,
-            )
+            scored = sorted(new_pool[layer], key=lambda x: x.get("composite_score", 0), reverse=True)
             new_pool[layer] = scored[:max_n]
 
         # 7. 重建索引
@@ -190,6 +220,42 @@ class PoolManager:
                     found["layer"] = target
                     pool[target].append(found)
                     logger.info("PoolManager: enforced mandatory %s -> %s", code, target)
+
+    def _compute_composite(self, item: dict[str, Any], layer: str) -> float:
+        """按层计算综合得分。
+
+        各层加权：
+          core:      因子 50%, liquidity 25%, scale 25%
+          satellite: 因子 40%, liquidity 15%, scale 10%, flow 15%, text 20%
+          defense:   因子 30%, liquidity 20%, scale 20%, text 30%
+          opp:       text 50%, factor 30%, flow 20%
+          research:  仅 liquidity
+        """
+        factor_scores = item.get("factor_scores", {})
+        factor_sum = sum(factor_scores.values()) if factor_scores else 0
+        amount = float(item.get("amount", 0) or 0)
+        scale = float(item.get("fund_scale", 0) or 0)
+        opp_score = float(item.get("composite_score", 0.5))
+
+        if layer == LAYER_CORE:
+            return 0.50 * factor_sum + 0.25 * amount * 1e-9 + 0.25 * scale * 1e-9
+        elif layer == LAYER_SATELLITE:
+            return 0.40 * factor_sum + 0.15 * amount * 1e-9 + 0.10 * scale * 1e-9 + 0.35 * opp_score
+        elif layer == LAYER_DEFENSE:
+            return 0.30 * factor_sum + 0.20 * amount * 1e-9 + 0.20 * scale * 1e-9 + 0.30 * opp_score
+        elif layer == LAYER_OPPORTUNISTIC:
+            return 0.50 * opp_score + 0.30 * factor_sum + 0.20 * amount * 1e-9
+        else:
+            return amount * 1e-9  # research: liquidity only
+
+    def set_opportunistic_signals(self, signals: dict[str, dict]) -> None:
+        """设置外部机会信号（用于 Layer 4）。
+
+        Args:
+            signals: {symbol: {"signal": str, "heat_score": float, ...}}
+        """
+        self._opportunistic_signals = signals
+        logger.info("PoolManager: set %d opportunistic signals", len(signals))
 
     def _rebuild_index(self) -> None:
         """重建 symbol → entry 索引。"""
