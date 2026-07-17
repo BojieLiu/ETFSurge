@@ -49,7 +49,7 @@
             <div v-for="h in designHistoryList" :key="h.id" class="history-item" @click="loadHistoryDetail(h.id)">
               <span class="history-date">{{ formatDate(h.created_at) }}</span>
               <span class="history-capital">{{ (h.capital / 10000).toFixed(0) }}万</span>
-              <span class="history-style">{{ h.risk_profile }}</span>
+              <span class="history-style">3 套方案</span>
               <span class="history-detail-link">查看详情</span>
             </div>
           </div>
@@ -272,7 +272,7 @@
             <div v-for="h in designHistoryList" :key="h.id" class="history-item" @click="loadHistoryDetail(h.id)">
               <span class="history-date">{{ formatDate(h.created_at) }}</span>
               <span class="history-capital">{{ (h.capital / 10000).toFixed(0) }}万</span>
-              <span class="history-style">{{ h.risk_profile }}</span>
+              <span class="history-style">3 套方案</span>
             </div>
           </div>
         </div>
@@ -1484,25 +1484,26 @@ async function checkStrategy() {
   color: var(--color-primary);
 }
 
-/* Responsive table wrapper */
+/* Report tables — fixed layout with visible borders */
 .markdown-body table {
-  display: block;
   width: 100%;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
   border-collapse: collapse;
   margin: var(--space-3) 0 var(--space-4);
   font-size: var(--font-size-sm);
-  /* Prevent table blowout by allowing smaller cells */
-  text-size-adjust: 100%;
+  table-layout: fixed;
 }
 
-.markdown-body thead,
+.markdown-body thead {
+  display: table-header-group;
+}
+
 .markdown-body tbody {
-  /* Ensure proper table rendering inside scroll wrapper */
-  display: table;
-  width: 100%;
-  table-layout: auto;
+  display: table-row-group;
+}
+
+.markdown-body tr {
+  display: table-row;
 }
 
 .markdown-body th {
@@ -1511,17 +1512,18 @@ async function checkStrategy() {
   padding: var(--space-2) var(--space-3);
   text-align: left;
   border: 1px solid var(--color-border);
-  white-space: nowrap;
   color: var(--color-text-primary);
-  font-size: var(--font-size-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
+  font-size: var(--font-size-sm);
+  word-break: break-word;
+  hyphens: auto;
 }
 
 .markdown-body td {
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--color-border);
   vertical-align: top;
+  word-break: break-word;
+  hyphens: auto;
 }
 
 .markdown-body tr:nth-child(even) {
@@ -1532,7 +1534,13 @@ async function checkStrategy() {
   background: var(--color-bg-tertiary);
 }
 
-/* Metric highlights in report tables */
+/* Let the container scroll if table is too wide */
+.design-report {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Keep numeric metrics aligned */
 .markdown-body td:last-child,
 .markdown-body td:nth-last-child(2) {
   white-space: nowrap;
