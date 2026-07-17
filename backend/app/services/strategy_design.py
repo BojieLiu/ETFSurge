@@ -28,7 +28,8 @@ STRATEGY_META = {
         "expected_return": 0.08,
         "max_drawdown": -0.12,
         "sharpe_ratio": 1.2,
-        "layer_budget": {"core": 0.55, "satellite": 0.25, "defense": 0.20},
+        "layer_budget": {"core": 0.50, "satellite": 0.15, "defense": 0.05}, # cash=30%,
+
         "expected_characteristics": "预期年化波动10-12%，最大回撤区间10-12%",
     },
     "balanced": {
@@ -40,7 +41,8 @@ STRATEGY_META = {
         "expected_return": 0.11,
         "max_drawdown": -0.18,
         "sharpe_ratio": 1.0,
-        "layer_budget": {"core": 0.55, "satellite": 0.30, "defense": 0.15},
+        "layer_budget": {"core": 0.50, "satellite": 0.25, "defense": 0.05}, # cash=20%,
+
         "expected_characteristics": "预期年化波动15-18%，最大回撤区间15-18%",
     },
     "aggressive": {
@@ -52,7 +54,8 @@ STRATEGY_META = {
         "expected_return": 0.16,
         "max_drawdown": -0.28,
         "sharpe_ratio": 0.8,
-        "layer_budget": {"core": 0.50, "satellite": 0.40, "defense": 0.10},
+        "layer_budget": {"core": 0.50, "satellite": 0.35, "defense": 0.05}, # cash=10%,
+
         "expected_characteristics": "预期年化波动20-25%，最大回撤区间22-28%",
     },
 }
@@ -79,9 +82,9 @@ CANDIDATE_POOL: dict[str, dict[str, Any]] = {
                "reason": "A股核心宽基，覆盖大盘龙头，基准配置首选"},
     "560600": {"name": "中证A500ETF", "layer": "core", "beta": 1.02, "liquidity": 12.0,
                "reason": "A股行业均衡龙头宽基，补足核心层分散度"},
-    "510500": {"name": "中证500ETF", "layer": "core", "beta": 1.1, "liquidity": 15.0,
+    "510500": {"name": "中证500ETF", "layer": "satellite", "beta": 1.1, "liquidity": 15.0,
                "reason": "中盘成长宽基，提升核心层弹性"},
-    "159915": {"name": "创业板ETF", "layer": "core", "beta": 1.25, "liquidity": 18.0,
+    "159915": {"name": "创业板ETF", "layer": "satellite", "beta": 1.25, "liquidity": 18.0,
                "reason": "成长风格宽基，核心层弹性来源"},
     "510880": {"name": "红利低波ETF", "layer": "core", "beta": 0.75, "liquidity": 9.0,
                "reason": "高股息低波动，核心层压舱石"},
