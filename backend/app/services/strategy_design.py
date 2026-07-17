@@ -275,17 +275,6 @@ DEFENSE_FIXED = [
     {"symbol": "518880", "name": "黄金ETF", "layer": "defense", "weight": 0.05},
 ]
 
-
-def _extract_factor(values: list[float]) -> list[float]:
-    if not values:
-        return []
-    mean = sum(values) / len(values)
-    std = (sum((v - mean)**2 for v in values) / len(values))**0.5
-    if std == 0:
-        return [0.0] * len(values)
-    return [max(-3.0, min(3.0, (v - mean) / std)) for v in values]
-
-
 def power_law_weights(scores: list[float], budget: float) -> list[float]:
     import math
     if not scores:
@@ -303,137 +292,7 @@ def power_law_weights(scores: list[float], budget: float) -> list[float]:
 
 
 # ── 5. generate_design: 主入口 (v3.0) ───────────────────────
-async def generate_design(
-    risk_profile: str = "balanced",
-    capital: float = 500000,
-    mode: str = "standard",
-    constraints: dict | None = None,
-    db=None,
-) -> list[dict[str, Any]]:
-    """
-    v3.0: 生成三套组合方案（防御/平衡/进攻）。
-    核心+防御层固定比例，卫星层用幂律分配。
-    """
-    constraints = constraints or {}
-
-    # 1. 扫描全市场 ETF（若 standard 模式）
-    scanned_satellite: list = []
-    if mode == "standard":
-        try:
-            from ..fetchers.etf_scanner import full_pipeline as scan_full_pipeline
-            scanned = await asyncio.to_thread(scan_full_pipeline)
-            sat_items = scanned.get("satellite") or []
-            # 取前15只作为卫星候选
-            scanned_satellite = [
-                {
-                    "symbol": item["symbol"],
-                    "name": item.get("name", ""),
-                    "liquidity": item.get("amount", 0) / 1e8,
-                }
-                for item in sat_items[:15]
-            ]
-            logger.info("scan: %d satellite candidates found", len(scanned_satellite))
-        except Exception as e:
-            logger.warning("scan failed: %s", e)
-
-    # 若扫描失败或卫星为空，用硬编码候选补充
-    if not scanned_satellite:
-        scanned_satellite = [
-            {"symbol": "512480", "name": "半导体ETF", "liquidity": 17.0},
-            {"symbol": "561300", "name": "AI人工智能ETF", "liquidity": 10.0},
-            {"symbol": "515030", "name": "新能源ETF", "liquidity": 13.0},
-            {"symbol": "512010", "name": "医药ETF", "liquidity": 8.0},
-            {"symbol": "159766", "name": "旅游ETF", "liquidity": 5.0},
-        ]
-
-    # 2. 为三套策略分别生成
-    strategies = []
-    for key in ["defensive", "balanced", "aggressive"]:
-        meta = STRATEGY_META[key]
-        budgets = allocate_layer_budget(key)
-
-        # 核心层: 固定比例
-        holdings = [dict(h) for h in CORE_FIXED]
-
-        # 防御层: 固定比例
-        holdings.extend(dict(h) for h in DEFENSE_FIXED)
-
-        # 卫星层: 幂律分配
-        s_budget = budgets.get("satellite", 0.0)
-        if s_budget > 0 and scanned_satellite:
-            sat_assets = scanned_satellite[:10]
-            liquidity = [a["liquidity"] for a in sat_assets]
-            scores = _extract_factor(liquidity) if len(set(liquidity)) > 1 else [0.5] * len(liquidity)
-            weights = power_law_weights(scores, s_budget)
-            for i, a in enumerate(sat_assets):
-                if i < len(weights):
-                    holdings.append({
-                        "symbol": a["symbol"],
-                        "name": a["name"],
-                        "layer": "satellite",
-                        "weight": round(weights[i], 4),
-                        "selection_rationale": f"卫星候选 #{i+1}",
-                    })
-
-        # 归一化: 核心+卫星+防御 = 预算值，现金=余额
-        total_w = sum(h["weight"] for h in holdings)
-        if total_w > 0 and abs(total_w - 1.0) > 0.001:
-            # 按比例缩放到实际总预算
-            actual_budget = sum(budgets.get(l, 0) for l in ["core", "satellite", "defense"])
-            if actual_budget > 0:
-                scale = actual_budget / total_w
-                for h in holdings:
-                    h["weight"] = round(h["weight"] * scale, 4)
-            # 添加现金条目
-            cash = round(1.0 - actual_budget, 4)
-            holdings.append({
-                "symbol": "CASH",
-                "name": "现金",
-                "layer": "cash",
-                "weight": cash,
-                "selection_rationale": "流动性管理",
-            })
-        for h in holdings:
-            h["target_amount"] = round(capital * h.get("weight", 0), 2)
-
-        strategies.append({
-            "id": meta["id"],
-            "label": meta["label"],
-            "color": meta["color"],
-            "portfolio_name": meta["portfolio_name"],
-            "positioning": meta["positioning"],
-            "expected_return": meta["expected_return"],
-            "max_drawdown": meta["max_drawdown"],
-            "sharpe_ratio": meta["sharpe_ratio"],
-            "expected_characteristics": meta["expected_characteristics"],
-            "layer_budget": meta["layer_budget"],
-            "etfs": holdings,
-        })
-
-    return strategies
-
-def _enforce_name_count(
-    holdings: list[dict], min_names: int, max_names: int, budgets: dict
-) -> list[dict]:
-    """确保标的总数在 [min_names, max_names] 之间"""
-    # 按层排序: 核心优先保留
-    layer_priority = {"core": 0, "satellite": 1, "defense": 2}
-    holdings.sort(key=lambda h: (layer_priority.get(h["layer"], 9), -h["weight"]))
-
-    if len(holdings) > max_names:
-        holdings = holdings[:max_names]
-    elif len(holdings) < min_names:
-        # 从候选池补充(若还有未入选的)
-        existing = {h["symbol"] for h in holdings}
-    return holdings
-
-
-def _build_default_context() -> MarketContext:
-    """fast 模式: 不拉外部数据, 用候选池默认值"""
-    ctx = MarketContext()
-    return ctx
-
-
+# DEPRECATED: use generate_enhanced_design instead
 async def generate_full_design(
     capital: float = 500000,
     constraints: dict | None = None,
@@ -453,7 +312,7 @@ async def generate_full_design(
 
     # 并行: 生成方案 + 情绪指数 + 指标股 (各带超时保护)
     strategies_task = asyncio.wait_for(
-        generate_design("balanced", capital, mode="standard", constraints=constraints),
+        generate_enhanced_design(capital=capital, constraints=constraints),
         timeout=90,
     )
     sentiment_task = asyncio.wait_for(
@@ -469,7 +328,7 @@ async def generate_full_design(
 
     if isinstance(strategies, (Exception, type(None))) or not strategies:
         try:
-            strategies = await generate_design("balanced", capital, mode="fast", constraints=constraints)
+            strategies = await generate_enhanced_design(capital=capital, constraints=constraints)
         except Exception:
             strategies = []
     if isinstance(sentiment, (Exception, type(None))):
@@ -492,201 +351,6 @@ async def generate_full_design(
 # ═══════════════════════════════════════════════════════════════
 
 # ── 多因子评分配置 ─────────────────────────────────────────────
-FACTOR_CONFIG: dict[str, dict[str, Any]] = {
-    "momentum_3m": {
-        "weight": 0.30,
-        "ascending": True,      # 越高越好
-        "normalize": "minmax",
-    },
-    "fund_flow_20d": {
-        "weight": 0.20,
-        "ascending": True,
-        "normalize": "minmax",
-    },
-    "valuation": {
-        "weight": 0.20,
-        "ascending": False,     # 越低越好（低估值优先）
-        "normalize": "minmax",
-    },
-    "liquidity": {
-        "weight": 0.15,
-        "ascending": True,
-        "normalize": "minmax",
-    },
-    "volatility_20d": {
-        "weight": 0.15,
-        "ascending": False,     # 低波动优先
-        "normalize": "minmax",
-    },
-}
-
-# 市场状态 → 因子权重覆盖
-REGIME_FACTOR_OVERRIDES: dict[str, dict[str, float]] = {
-    "bull_strong": {
-        "momentum_3m": 0.40, "fund_flow_20d": 0.15,
-        "valuation": 0.10, "liquidity": 0.20, "volatility_20d": 0.15,
-    },
-    "bull_weakening": {
-        "momentum_3m": 0.25, "fund_flow_20d": 0.20,
-        "valuation": 0.20, "liquidity": 0.20, "volatility_20d": 0.15,
-    },
-    "defensive_rotate": {
-        "momentum_3m": 0.15, "fund_flow_20d": 0.25,
-        "valuation": 0.30, "liquidity": 0.15, "volatility_20d": 0.15,
-    },
-    "correction": {
-        "momentum_3m": 0.10, "fund_flow_20d": 0.30,
-        "valuation": 0.30, "liquidity": 0.15, "volatility_20d": 0.15,
-    },
-    "bear": {
-        "momentum_3m": 0.05, "fund_flow_20d": 0.35,
-        "valuation": 0.35, "liquidity": 0.10, "volatility_20d": 0.15,
-    },
-}
-
-
-def _normalize_minmax(values: list[float], ascending: bool = True) -> list[float]:
-    """Min-Max 归一化到 [0, 1]"""
-    if not values:
-        return []
-    mn, mx = min(values), max(values)
-    if mx == mn:
-        return [0.5] * len(values)
-    if ascending:
-        return [(v - mn) / (mx - mn) for v in values]
-    else:
-        return [(mx - v) / (mx - mn) for v in values]
-
-
-def _normalize_zscore(values: list[float], ascending: bool = True) -> list[float]:
-    """Z-score 归一化到 [0, 1]"""
-    if not values or len(values) < 2:
-        return [0.5] * len(values)
-    mean = sum(values) / len(values)
-    std = (sum((v - mean) ** 2 for v in values) / len(values)) ** 0.5
-    if std == 0:
-        return [0.5] * len(values)
-    zs = [(v - mean) / std for v in values]
-    # 将 z-score 映射到 [0, 1]
-    zs = [max(-3.0, min(3.0, z)) for z in zs]
-    if ascending:
-        return [(z + 3.0) / 6.0 for z in zs]
-    else:
-        return [(3.0 - z) / 6.0 for z in zs]
-
-
-def _get_factor_values(
-    assets: list[dict],
-    factor_key: str,
-    trends: dict[str, dict[str, float]] | None,
-    fund_flows: dict[str, float] | None,
-) -> list[float]:
-    """根据因子名称从趋势/资金流数据中取值。"""
-    values = []
-    for a in assets:
-        code = a.get("symbol") or a.get("code", "")
-        val = 0.0
-
-        if factor_key == "momentum_3m":
-            t = (trends or {}).get(code, {})
-            val = t.get("return_3m", t.get("return_1m", 0.0))
-        elif factor_key == "fund_flow_20d":
-            val = (fund_flows or {}).get(code, 0.0)
-            # 取绝对值归一化
-        elif factor_key == "liquidity":
-            val = a.get("liquidity", 0.0) if isinstance(a.get("liquidity"), (int, float)) else float(a.get("liquidity", 0))
-        elif factor_key == "volatility_20d":
-            t = (trends or {}).get(code, {})
-            val = t.get("volatility_20d", 0.0)
-        elif factor_key == "valuation":
-            # 估值分位越低越好
-            t = (trends or {}).get(code, {})
-            # 如果有PE估值，用PE倒数（越高越好）
-            # 若无，用波动率作为风险代理
-            val = -t.get("volatility_20d", -0.5)  # 低波动 proxy
-        else:
-            val = 0.0
-
-        values.append(val if val is not None else 0.0)
-    return values
-
-
-def score_satellite_assets(
-    assets: list[dict],
-    regime: str = "range_bound",
-    trends: dict[str, dict[str, float]] | None = None,
-    fund_flows: dict[str, float] | None = None,
-) -> list[dict[str, Any]]:
-    """
-    多因子加权评分卫星层候选标的。
-
-    Args:
-        assets: 卫星层候选标的列表
-        regime: 当前市场状态
-        trends: 趋势数据
-        fund_flows: 资金流数据
-
-    Returns:
-        每只标的添加 `factor_scores` 和 `composite_score` 字段
-    """
-    # 选择因子权重
-    weights = REGIME_FACTOR_OVERRIDES.get(regime, {})
-    if not weights:
-        weights = {k: v["weight"] for k, v in FACTOR_CONFIG.items()}
-
-    # 计算各因子得分
-    factor_scores: dict[str, list[float]] = {}
-    for factor_key in weights:
-        config = FACTOR_CONFIG.get(factor_key)
-        if not config:
-            continue
-        raw = _get_factor_values(assets, factor_key, trends, fund_flows)
-        if config["normalize"] == "zscore":
-            norm = _normalize_zscore(raw, config["ascending"])
-        else:
-            norm = _normalize_minmax(raw, config["ascending"])
-        factor_scores[factor_key] = norm
-
-    # 综合加权
-    for i, a in enumerate(assets):
-        composite = 0.0
-        details = {}
-        for fk, w in weights.items():
-            if i < len(factor_scores.get(fk, [])):
-                score = factor_scores[fk][i]
-                composite += score * w
-                details[fk] = round(score, 3)
-        a["factor_scores"] = details
-        a["composite_score"] = round(composite, 4)
-
-    # 按综合评分排序
-    assets.sort(key=lambda x: x.get("composite_score", 0), reverse=True)
-    return assets
-
-
-# ── 资讯-ETF映射 ──────────────────────────────────────────────
-
-# ETF 关键词映射表 (标题关键词 → ETF 代码)
-_NEWS_KEYWORD_MAP: list[tuple[list[str], str]] = [
-    (["半导体", "芯片", "集成电路", "存储", "HBM", "光刻", "AI芯片", "先进封装"], "512480"),
-    (["AI", "人工智能", "大模型", "算力", "GPT", "深度学习", "智能体"], "561300"),
-    (["新能源", "光伏", "锂电池", "电动汽车", "新能源车", "充电桩", "储能"], "515030"),
-    (["医药", "医疗", "创新药", "生物医药", "医疗器械", "CXO", "制药"], "512010"),
-    (["旅游", "酒店", "航空", "免税", "景区", "出行"], "159766"),
-    (["黄金", "金价", "贵金属", "避险"], "518880"),
-    (["国债", "利率债", "债券", "债市", "信用债"], "511090"),
-    (["军工", "国防", "航天", "卫星", "船舶", "装备"], "512660"),
-    (["消费", "食品饮料", "白酒", "家电", "零售", "社零"], "159766"),
-    (["红利", "股息", "分红", "高股息", "低波"], "510880"),
-    (["创业板", "成长", "中小盘"], "159915"),
-    (["科创", "科创板", "硬科技"], "588000"),
-    (["证券", "券商", "保险", "金融"], "512880"),
-    (["机器人", "自动化", "工业母机", "智能制造"], "516360"),
-    (["有色", "煤炭", "钢铁", "大宗商品", "资源"], "159980"),
-    (["沪深300", "大盘", "蓝筹", "权重"], "510300"),
-    (["中证A500", "A500", "行业龙头"], "560600"),
-]
-
 
 def map_news_to_etfs(
     news: list[dict],
@@ -886,17 +550,6 @@ def dynamic_layer_budget(
 
 # ── 组合风控 ──────────────────────────────────────────────────
 
-# 行业板块与ETF的映射（用于集中度计算）
-_SECTOR_ETF_MAP: dict[str, str] = {
-    "510300": "大盘价值", "560600": "大盘均衡", "510500": "中盘成长",
-    "159915": "成长", "510880": "红利低波",
-    "512480": "半导体", "515030": "新能源", "512010": "医药",
-    "515080": "红利", "512890": "低波", "561300": "AI",
-    "516160": "新能源电池", "518880": "贵金属",
-    "511090": "债券", "511990": "货币", "513500": "美股",
-    "159980": "商品", "588000": "科创板", "512880": "证券",
-    "512660": "军工", "159766": "消费",
-}
 
 
 def compute_portfolio_risk(
@@ -928,7 +581,7 @@ def compute_portfolio_risk(
     sector_weights: dict[str, float] = {}
     for h in holdings:
         code = h.get("symbol", "")
-        sector = _SECTOR_ETF_MAP.get(code, "其他")
+        sector = h.get("industry", "") or h.get("layer", "其他")
         sector_weights[sector] = sector_weights.get(sector, 0.0) + h.get("weight", 0)
 
     hhi = sum(w ** 2 for w in sector_weights.values())
@@ -1414,7 +1067,7 @@ async def generate_enhanced_design(
         "generated_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
         "design_metadata": {
             "version": "v4-enhanced",
-            "factors_used": list(FACTOR_CONFIG.keys()),
+            "factors_used": ["momentum", "fund_flow", "valuation", "liquidity", "volatility"],
             "trend_data_collected": len(trend_data),
             "news_mapped": len(news_map),
             "generation_time_ms": round(elapsed, 1),

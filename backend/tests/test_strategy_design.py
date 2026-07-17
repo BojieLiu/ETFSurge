@@ -5,7 +5,7 @@ Covers:
 - enrich_market_context builds assets from candidate pool
 - classify_assets groups by layer
 - allocate_layer_budget returns strategy-specific budgets
-- generate_design returns 3 strategies with 8~15 holdings each, weights sum to 1.0
+- generate_enhanced_design returns 3 strategies with 8~15 holdings each, weights sum to 1.0
 - fast mode works without external network
 - power_law_weights produces reasonable weight distribution
 - v3.0 fixed core/defense weights and satellite dual-pool behavior
@@ -15,7 +15,7 @@ import pytest
 from app.services import strategy_design as sd
 from app.services.strategy_design import (
     Asset, MarketContext, enrich_market_context, classify_assets,
-    allocate_layer_budget, generate_design, power_law_weights,
+    allocate_layer_budget, generate_full_design, power_law_weights,
     STRATEGY_META, CORE_REQUIRED, CORE_FIXED, DEFENSE_FIXED,
     MIN_WEIGHT, MAX_WEIGHT,
 )
@@ -96,23 +96,23 @@ def test_power_law_weights_empty():
     assert power_law_weights([], 0.30) == []
 
 
-# ── generate_design (v3.0) ──────────────────────────────────
+# ── generate_enhanced_design(v3.0) ──────────────────────────────────
 async def test_generate_design_three_strategies():
-    designs = await generate_design("balanced", 500000, mode="fast")
+    designs = await generate_full_design("balanced", 500000)
     assert len(designs) == 3
     ids = {d["id"] for d in designs}
     assert ids == {"defensive", "balanced", "aggressive"}
 
 
 async def test_generate_design_holding_count_8_15():
-    designs = await generate_design("balanced", 500000, mode="fast")
+    designs = await generate_full_design("balanced", 500000)
     for d in designs:
         n = len(d["etfs"])
         assert 8 <= n <= 15, f"{d['id']} has {n} holdings (need 8~15)"
 
 
 async def test_generate_design_weights_sum_to_one():
-    designs = await generate_design("balanced", 500000, mode="fast")
+    designs = await generate_full_design("balanced", 500000)
     for d in designs:
         total = sum(e["weight"] for e in d["etfs"])
         assert abs(total - 1.0) < 1e-6
@@ -120,7 +120,7 @@ async def test_generate_design_weights_sum_to_one():
 
 async def test_generate_design_weight_range():
     """v3.0: 每只权重在 1%~30% 之间（不含现金）"""
-    designs = await generate_design("balanced", 500000, mode="fast")
+    designs = await generate_full_design("balanced", 500000)
     for d in designs:
         for e in d["etfs"]:
             if e.get("layer") == "cash":
@@ -131,7 +131,7 @@ async def test_generate_design_weight_range():
 
 async def test_generate_design_core_has_broad_indices():
     """每个方案核心层必须含沪深300+中证A500+红利低波 (v3.0 fixed)"""
-    designs = await generate_design("balanced", 500000, mode="fast")
+    designs = await generate_full_design("balanced", 500000)
     for d in designs:
         core = [e for e in d["etfs"] if e["layer"] == "core"]
         core_codes = {e["symbol"] for e in core}
@@ -141,7 +141,7 @@ async def test_generate_design_core_has_broad_indices():
 
 async def test_generate_design_fixed_core_weights():
     """v3.0: 核心层固定权重 510300=25%, 560600=15%, 510880=10%"""
-    designs = await generate_design("balanced", 500000, mode="fast")
+    designs = await generate_full_design("balanced", 500000)
     for d in designs:
         core = {e["symbol"]: e["weight"] for e in d["etfs"] if e["layer"] == "core"}
         assert abs(core.get("510300", 0) - 0.25) < 0.02, f"{d['id']} 510300 weight off"
@@ -151,7 +151,7 @@ async def test_generate_design_fixed_core_weights():
 
 async def test_generate_design_fixed_defense():
     """v3.0: 防御层固定 518880(黄金ETF)=5%"""
-    designs = await generate_design("balanced", 500000, mode="fast")
+    designs = await generate_full_design("balanced", 500000)
     for d in designs:
         defense = {e["symbol"]: e["weight"] for e in d["etfs"] if e["layer"] == "defense"}
         assert abs(defense.get("518880", 0) - 0.05) < 0.01, f"{d['id']} 518880 weight off"
@@ -159,7 +159,7 @@ async def test_generate_design_fixed_defense():
 
 async def test_generate_design_layer_budget_distribution():
     """进攻型卫星占比应高于防御型"""
-    designs = await generate_design("aggressive", 500000, mode="fast")
+    designs = await generate_full_design("aggressive", 500000)
     # designs 顺序: [defensive, balanced, aggressive]
     agg = designs[2]  # aggressive
     assert agg["id"] == "aggressive"
@@ -170,7 +170,7 @@ async def test_generate_design_layer_budget_distribution():
 
 async def test_generate_design_target_amount():
     """target_amount = capital * weight"""
-    designs = await generate_design("balanced", 1000000, mode="fast")
+    designs = await generate_full_design("balanced", 1000000)
     for d in designs:
         for e in d["etfs"]:
             if e.get("layer") == "cash":
@@ -180,7 +180,7 @@ async def test_generate_design_target_amount():
 
 async def test_generate_design_strategies_differ():
     """三个方案的持仓和权重分布不同（各策略现金/卫星预算比例不同）"""
-    designs = await generate_design("balanced", 500000, mode="fast")
+    designs = await generate_full_design("balanced", 500000)
     # 三个策略的卫星预算不同，因此总权重分布应有所不同
     core_weights = set()
     for d in designs:
