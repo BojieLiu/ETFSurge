@@ -298,139 +298,8 @@ def _format_commodities(commodities: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _build_portfolio_design_prompt(
-    indices: list[dict],
-    commodities: list[dict],
-    market_data: list[dict],
-    news: list[dict],
-    macro_news: list[dict],
-    capital: float,
-    sector_data: dict | None = None,
-    fund_flows: dict | None = None,
-    valuations: dict | None = None,
-) -> str:
-    """Build the structured prompt for portfolio design LLM call."""
-    def _val(d, key, fmt="{}"):
-        v = d.get(key, "")
-        return fmt.format(v) if v != "" and v is not None else "数据缺失"
-
-    idx_map = {idx.get("name", ""): idx for idx in indices}
-    sh = idx_map.get("上证指数", {})
-    sz = idx_map.get("深证成指", {})
-    cyb = idx_map.get("创业板指", {})
-    kc = idx_map.get("科创50", {})
-    hs300 = idx_map.get("沪深300", {})
-
-    comm_map = {c.get("name", ""): c for c in commodities}
-    gold = comm_map.get("黄金", {})
-    oil = comm_map.get("原油", {})
-    silver = comm_map.get("白银", {})
-
-    # 数据快照时间（当前请求时间）
-    from datetime import datetime
-    snapshot_time = datetime.now().strftime("%Y-%m-%d %H:%M（北京时间）")
-
-    # 市场成交额估算
-    turnover = ""
-    for m in market_data:
-        if m.get("name") in ("上证指数", "深证成指", "创业板指", "科创50"):
-            if m.get("turnover"):
-                turnover = f"{m['turnover']:.0f}"
-                break
-
-    # 资讯文本
-    news_text = "\n".join([f"- {n.get('title', n.get('summary', ''))[:120]}" for n in news[:8]])
-    macro_text = "\n".join([f"- {n.get('title', n.get('summary', ''))[:120]}" for n in macro_news[:5]])
-
-    # --- NEW: Build sector/industry performance section ---
-    sector_lines = []
-    if sector_data:
-        # Top industry sectors by change_pct
-        industry = sector_data.get("industry_sectors", [])
-        if industry:
-            top_industry = sorted(
-                [s for s in industry if s.get("change_pct") is not None],
-                key=lambda x: x.get("change_pct", 0),
-                reverse=True
-            )[:10]
-            for s in top_industry:
-                sector_lines.append(f"- {s.get('sector_name', '')}({s.get('sector_code', '')}): 涨跌幅 {s.get('change_pct', 0):+.2f}%, 主力净流入 {s.get('main_inflow', 0):.0f}万, 领涨 {s.get('lead_stock_name', '')}")
-
-        # Hot plates
-        hot_plates = sector_data.get("hot_plates", [])
-        if hot_plates:
-            for p in hot_plates[:5]:
-                sector_lines.append(f"- 概念热点: {p.get('sector_name', '')}({p.get('sector_code', '')}): 涨跌幅 {p.get('change_pct', 0):+.2f}%, 上涨家数 {p.get('up_count', 0)}, 下跌家数 {p.get('down_count', 0)}")
-
-    sector_text = "\n".join(sector_lines) if sector_lines else "（当前输入未提供该维度数据）"
-
-    # --- NEW: Build ETF fund flow section ---
-    flow_lines = []
-    if fund_flows:
-        for sym, flow in fund_flows.items():
-            inflow = flow.get("main_net_inflow")
-            inflow_pct = flow.get("main_net_inflow_pct")
-            if inflow is not None:
-                flow_lines.append(f"- {sym}: 主力净流入 {inflow:.0f}万 ({inflow_pct:+.2f}%)" if inflow_pct else f"- {sym}: 主力净流入 {inflow:.0f}万")
-    flow_text = "\n".join(flow_lines) if flow_lines else "（当前输入未提供该维度数据）"
-
-    # --- NEW: Build ETF valuation section ---
-    val_lines = []
-    if valuations:
-        for sym, val in valuations.items():
-            pe = val.get("pe_ttm")
-            pb = val.get("pb")
-            avg_vol = val.get("avg_volume_20d")
-            parts = []
-            if pe is not None:
-                parts.append(f"PE {pe:.1f}")
-            if pb is not None:
-                parts.append(f"PB {pb:.2f}")
-            if avg_vol is not None:
-                parts.append(f"20日均额 {avg_vol:.0f}万")
-            if parts:
-                val_lines.append(f"- {sym}: {', '.join(parts)}")
-    val_text = "\n".join(val_lines) if val_lines else "（当前输入未提供该维度数据）"
-
-    # 新的用户提示词：按输入模板结构化
-    prompt = f"""# 【市场数据输入】
-
-数据快照时间：{snapshot_time}
-投资资金：{capital:,.0f} 元
-
-
-## 1. 大盘概览
-- 上证指数：{_val(sh, 'price')}点（{_val(sh, 'change_pct', '{:+.2f}%')}） 
-- 深证成指：{_val(sz, 'price')}点（{_val(sz, 'change_pct', '{:+.2f}%')}） 
-- 创业板指：{_val(cyb, 'price')}点（{_val(cyb, 'change_pct', '{:+.2f}%')}) 
-- 科创50：{_val(kc, 'price')}点（{_val(kc, 'change_pct', '{:+.2f}%')}) 
-- 沪深300：{_val(hs300, 'price')}点（{_val(hs300, 'change_pct', '{:+.2f}%')}) 
-- 市场成交额：{turnover or '未获取'}亿元
-
-## 2. 行业/板块表现
-{sector_text}
-
-## 3. ETF资金流向数据
-{flow_text}
-
-## 4. 关键资讯/催化剂
-{news_text}
-
-{macro_text}
-
-## 5. 重点ETF估值数据
-{val_text}
-
-## 6. 流动性/避险指标
-- 黄金价格：{_val(gold, 'price')}美元/盎司（{_val(gold, 'change_pct', '{:+.2f}%')}) 
-- 原油价格：{_val(oil, 'price')}美元/桶（{_val(oil, 'change_pct', '{:+.2f}%')}) 
-- 白银价格：{_val(silver, 'price')}美元/盎司（{_val(silver, 'change_pct', '{:+.2f}%')}) 
-
----
-请基于以上输入的实时数据，设计进攻、平衡、防御三档ETF组合方案。总资金 {capital:,.0f} 元。
-"""
-    return prompt
-
+# NOTE: _build_portfolio_design_prompt is defined below
+# with extended signature supporting trend_data, macro_state, etc.
 
 def _build_market_overview(
     indices: list[dict],
@@ -604,10 +473,16 @@ def _build_portfolio_design_prompt(
     sector_data: dict | None = None,
     fund_flows: dict | None = None,
     valuations: dict | None = None,
+    trend_data: dict | None = None,
+    macro_state: dict | None = None,
+    market_regime: str | None = None,
+    base_plan: list[dict] | None = None,
 ) -> str:
     """Build the structured prompt for portfolio design LLM call.
     
     Shared by both streaming and non-streaming endpoints.
+    When trend_data / macro_state / market_regime are provided,
+    the LLM receives trend and regime context for more informed decisions.
     """
     def _val(d, key, fmt="{}"):
         v = d.get(key, "")
@@ -691,6 +566,56 @@ def _build_portfolio_design_prompt(
                 val_lines.append(f"- {sym}: {', '.join(parts)}")
     val_text = "\n".join(val_lines) if val_lines else "（当前输入未提供该维度数据）"
 
+    # 构建趋势数据章节
+    trend_section = ""
+    if trend_data:
+        lines = []
+        for sym, t in list(trend_data.items())[:15]:
+            parts = [f"- {sym}:"]
+            ret_3m = t.get("return_3m")
+            if ret_3m is not None:
+                parts.append(f"近3月{ret_3m*100:+.1f}%")
+            ret_1m = t.get("return_1m")
+            if ret_1m is not None:
+                parts.append(f"近1月{ret_1m*100:+.1f}%")
+            ma20 = t.get("ma_bias_20")
+            if ma20 is not None:
+                parts.append(f"距MA20{ma20*100:+.1f}%")
+            vol = t.get("volatility_20d")
+            if vol:
+                parts.append(f"波动率{vol*100:.1f}%")
+            lines.append(" ".join(parts))
+        trend_section = "\n## 7. 趋势数据（过去1月/3月）\n" + "\n".join(lines) + "\n"
+
+    # 构建宏观状态章节
+    macro_section = ""
+    if macro_state:
+        lines = [
+            "## 8. 宏观状态判断",
+            f"- 经济阶段：{macro_state.get('economic_phase', '未知')}",
+            f"- 货币取向：{macro_state.get('monetary_stance', '未知')}",
+            f"- 利率方向：{macro_state.get('rate_direction', '未知')}",
+            f"- 债市状态：{'债牛' if macro_state.get('bond_bull') else '债市震荡/调整'}",
+        ]
+        if market_regime:
+            regime_labels = {
+                "bull_strong": "强牛市", "bull_weakening": "牛市趋弱",
+                "range_bound": "震荡市", "correction": "回调期",
+                "bear": "熊市", "defensive_rotate": "防御轮动",
+            }
+            lines.append(f"- 市场状态：{regime_labels.get(market_regime, market_regime)}")
+        macro_section = "\n".join(lines) + "\n"
+
+    # 构建规则引擎基准方案章节（如果传入）
+    base_plan_section = ""
+    if base_plan:
+        lines = ["## 9. 规则引擎基准方案（供参考）"]
+        for i, plan in enumerate(base_plan):
+            lines.append(f"### 方案{i+1}: {plan.get('label', '')}")
+            for etf in plan.get("etfs", [])[:5]:
+                lines.append(f"- {etf.get('symbol','')} {etf.get('name','')}: {etf.get('weight',0)*100:.1f}%")
+        base_plan_section = "\n".join(lines) + "\n"
+
     # 新的用户提示词：按输入模板结构化
     prompt = f"""# 【市场数据输入】
 
@@ -725,6 +650,12 @@ def _build_portfolio_design_prompt(
 - 原油价格：{_val(oil, 'price')}美元/桶（{_val(oil, 'change_pct', '{:+.2f}%')}) 
 - 白银价格：{_val(silver, 'price')}美元/盎司（{_val(silver, 'change_pct', '{:+.2f}%')}) 
 
+{trend_section}
+
+{macro_section}
+
+{base_plan_section}
+
 ---
 请基于以上输入的实时数据，设计进攻、平衡、防御三档ETF组合方案。总资金 {capital:,.0f} 元。
 """
@@ -741,12 +672,18 @@ async def generate_portfolio_design(
     sector_data: dict | None = None,
     fund_flows: dict | None = None,
     valuations: dict | None = None,
+    trend_data: dict | None = None,
+    macro_state: dict | None = None,
+    market_regime: str | None = None,
+    base_plan: list[dict] | None = None,
 ) -> dict[str, Any]:
     from datetime import datetime
     prompt = _build_portfolio_design_prompt(
         indices, commodities, market_data, news, macro_news,
         capital=capital, sector_data=sector_data,
         fund_flows=fund_flows, valuations=valuations,
+        trend_data=trend_data, macro_state=macro_state,
+        market_regime=market_regime, base_plan=base_plan,
     )
     try:
         result = await get_agent("portfolio_design").run_json(prompt)

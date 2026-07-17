@@ -238,7 +238,7 @@ def test_strategies_scoring_order_reversed():
     """防御型和进攻型对红利的排序应相反（防御=红利>创业板, 进攻=创业板>红利）"""
     # 直接用 optimize_layer 的 score 内部函数验证
     # 防御型: 低β(510880)在 scored 列表中排在 高β(159915)之前
-    from app.services.strategy_design import Asset, MIN_WEIGHT, MAX_WEIGHT,
+    from app.services.strategy_design import Asset, MIN_WEIGHT, MAX_WEIGHT
     assets = _make_known_beta_assets()
 
     def get_top_by_strategy(strategy):

@@ -225,6 +225,34 @@ async def portfolio_design(
     }
 
 
+@router.post("/design-enhanced")
+async def portfolio_design_enhanced(
+    risk_profile: str = "balanced",
+    capital: float = 500000,
+    mode: str = "enhanced",
+    constraints: dict | None = None,
+):
+    """
+    增强型组合设计 v4: 趋势数据 + 多因子评分 + 宏观状态感知 + 动态配置 + 风控。
+
+    mode='enhanced': 全链路增强设计（趋势+多因子+宏观+资讯映射+动态配置）
+    mode='standard': 回退到标准规则引擎
+    """
+    await asyncio.to_thread(asyncio.sleep, 0)
+    from datetime import datetime
+
+    if mode == "enhanced":
+        from ..services.strategy_design import generate_enhanced_design
+        result = await generate_enhanced_design(capital=capital, constraints=constraints)
+    else:
+        # fallback to standard
+        from ..services.strategy_design import generate_full_design
+        result = await generate_full_design(capital=capital, constraints=constraints)
+        result["design_metadata"] = {"version": "v3-standard", "note": "enhanced mode unavailable, fell back to standard"}
+
+    return result
+
+
 # ── 设计历史记录 ──────────────────────────────────────────
 
 

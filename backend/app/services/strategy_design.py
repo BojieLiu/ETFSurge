@@ -299,21 +299,34 @@ async def generate_design(
     constraints = constraints or {}
 
     # 1. 扫描全市场 ETF（若 standard 模式）
-    scanned_satellite: list[Asset] = []
+    scanned_satellite: list = []
     if mode == "standard":
         try:
             from ..fetchers.etf_scanner import full_pipeline as scan_full_pipeline
             scanned = await asyncio.to_thread(scan_full_pipeline)
+            sat_items = scanned.get("satellite") or []
+            # 取前15只作为卫星候选
             scanned_satellite = [
-                Asset(code=item["symbol"], name=item.get("name", ""),
-                      layer=item.get("layer", "satellite"), beta=1.0,
-                      liquidity=item.get("amount", 0) / 1e8, price=item.get("price", 1.0),
-                      change_pct=item.get("change_pct", 0) / 100.0,
-                      net_inflow=0.0, valuation_pct=0.5, reason=item.get("name", ""))
-                for item in (scanned.get("satellite") or [])
+                {
+                    "symbol": item["symbol"],
+                    "name": item.get("name", ""),
+                    "liquidity": item.get("amount", 0) / 1e8,
+                }
+                for item in sat_items[:15]
             ]
+            logger.info("scan: %d satellite candidates found", len(scanned_satellite))
         except Exception as e:
             logger.warning("scan failed: %s", e)
+
+    # 若扫描失败或卫星为空，用硬编码候选补充
+    if not scanned_satellite:
+        scanned_satellite = [
+            {"symbol": "512480", "name": "半导体ETF", "liquidity": 17.0},
+            {"symbol": "561300", "name": "AI人工智能ETF", "liquidity": 10.0},
+            {"symbol": "515030", "name": "新能源ETF", "liquidity": 13.0},
+            {"symbol": "512010", "name": "医药ETF", "liquidity": 8.0},
+            {"symbol": "159766", "name": "旅游ETF", "liquidity": 5.0},
+        ]
 
     # 2. 为三套策略分别生成
     strategies = []
@@ -331,32 +344,39 @@ async def generate_design(
         s_budget = budgets.get("satellite", 0.0)
         if s_budget > 0 and scanned_satellite:
             sat_assets = scanned_satellite[:10]
-            liquidity = [a.liquidity for a in sat_assets]
-            scores = _extract_factor(liquidity)
+            liquidity = [a["liquidity"] for a in sat_assets]
+            scores = _extract_factor(liquidity) if len(set(liquidity)) > 1 else [0.5] * len(liquidity)
             weights = power_law_weights(scores, s_budget)
             for i, a in enumerate(sat_assets):
                 if i < len(weights):
                     holdings.append({
-                        "symbol": a.code,
-                        "name": a.name,
+                        "symbol": a["symbol"],
+                        "name": a["name"],
                         "layer": "satellite",
                         "weight": round(weights[i], 4),
                         "selection_rationale": f"卫星候选 #{i+1}",
                     })
 
-        # 归一化权重到 100%
-        total = sum(h["weight"] for h in holdings)
-        if total > 0:
-            holdings = [dict(h) for h in holdings]
-            raw = [h["weight"] / total for h in holdings]
-            rounded = [round(w, 4) for w in raw]
-            diff = round(1.0 - sum(rounded), 4)
-            if diff != 0.0:
-                max_i = max(range(len(rounded)), key=lambda i: rounded[i])
-                rounded[max_i] = round(rounded[max_i] + diff, 4)
-            for h, w in zip(holdings, rounded):
-                h["weight"] = w
-                h["target_amount"] = round(capital * w, 2)
+        # 归一化: 核心+卫星+防御 = 预算值，现金=余额
+        total_w = sum(h["weight"] for h in holdings)
+        if total_w > 0 and abs(total_w - 1.0) > 0.001:
+            # 按比例缩放到实际总预算
+            actual_budget = sum(budgets.get(l, 0) for l in ["core", "satellite", "defense"])
+            if actual_budget > 0:
+                scale = actual_budget / total_w
+                for h in holdings:
+                    h["weight"] = round(h["weight"] * scale, 4)
+            # 添加现金条目
+            cash = round(1.0 - actual_budget, 4)
+            holdings.append({
+                "symbol": "CASH",
+                "name": "现金",
+                "layer": "cash",
+                "weight": cash,
+                "selection_rationale": "流动性管理",
+            })
+        for h in holdings:
+            h["target_amount"] = round(capital * h.get("weight", 0), 2)
 
         strategies.append({
             "id": meta["id"],
@@ -446,4 +466,736 @@ async def generate_full_design(
             "benchmark_stocks": benchmark,
         },
         "generated_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════
+# v4 增强功能: 多因子评分 / 资讯映射 / 动态配置 / 风控
+# ═══════════════════════════════════════════════════════════════
+
+# ── 多因子评分配置 ─────────────────────────────────────────────
+FACTOR_CONFIG: dict[str, dict[str, Any]] = {
+    "momentum_3m": {
+        "weight": 0.30,
+        "ascending": True,      # 越高越好
+        "normalize": "minmax",
+    },
+    "fund_flow_20d": {
+        "weight": 0.20,
+        "ascending": True,
+        "normalize": "minmax",
+    },
+    "valuation": {
+        "weight": 0.20,
+        "ascending": False,     # 越低越好（低估值优先）
+        "normalize": "minmax",
+    },
+    "liquidity": {
+        "weight": 0.15,
+        "ascending": True,
+        "normalize": "minmax",
+    },
+    "volatility_20d": {
+        "weight": 0.15,
+        "ascending": False,     # 低波动优先
+        "normalize": "minmax",
+    },
+}
+
+# 市场状态 → 因子权重覆盖
+REGIME_FACTOR_OVERRIDES: dict[str, dict[str, float]] = {
+    "bull_strong": {
+        "momentum_3m": 0.40, "fund_flow_20d": 0.15,
+        "valuation": 0.10, "liquidity": 0.20, "volatility_20d": 0.15,
+    },
+    "bull_weakening": {
+        "momentum_3m": 0.25, "fund_flow_20d": 0.20,
+        "valuation": 0.20, "liquidity": 0.20, "volatility_20d": 0.15,
+    },
+    "defensive_rotate": {
+        "momentum_3m": 0.15, "fund_flow_20d": 0.25,
+        "valuation": 0.30, "liquidity": 0.15, "volatility_20d": 0.15,
+    },
+    "correction": {
+        "momentum_3m": 0.10, "fund_flow_20d": 0.30,
+        "valuation": 0.30, "liquidity": 0.15, "volatility_20d": 0.15,
+    },
+    "bear": {
+        "momentum_3m": 0.05, "fund_flow_20d": 0.35,
+        "valuation": 0.35, "liquidity": 0.10, "volatility_20d": 0.15,
+    },
+}
+
+
+def _normalize_minmax(values: list[float], ascending: bool = True) -> list[float]:
+    """Min-Max 归一化到 [0, 1]"""
+    if not values:
+        return []
+    mn, mx = min(values), max(values)
+    if mx == mn:
+        return [0.5] * len(values)
+    if ascending:
+        return [(v - mn) / (mx - mn) for v in values]
+    else:
+        return [(mx - v) / (mx - mn) for v in values]
+
+
+def _normalize_zscore(values: list[float], ascending: bool = True) -> list[float]:
+    """Z-score 归一化到 [0, 1]"""
+    if not values or len(values) < 2:
+        return [0.5] * len(values)
+    mean = sum(values) / len(values)
+    std = (sum((v - mean) ** 2 for v in values) / len(values)) ** 0.5
+    if std == 0:
+        return [0.5] * len(values)
+    zs = [(v - mean) / std for v in values]
+    # 将 z-score 映射到 [0, 1]
+    zs = [max(-3.0, min(3.0, z)) for z in zs]
+    if ascending:
+        return [(z + 3.0) / 6.0 for z in zs]
+    else:
+        return [(3.0 - z) / 6.0 for z in zs]
+
+
+def _get_factor_values(
+    assets: list[dict],
+    factor_key: str,
+    trends: dict[str, dict[str, float]] | None,
+    fund_flows: dict[str, float] | None,
+) -> list[float]:
+    """根据因子名称从趋势/资金流数据中取值。"""
+    values = []
+    for a in assets:
+        code = a.get("symbol") or a.get("code", "")
+        val = 0.0
+
+        if factor_key == "momentum_3m":
+            t = (trends or {}).get(code, {})
+            val = t.get("return_3m", t.get("return_1m", 0.0))
+        elif factor_key == "fund_flow_20d":
+            val = (fund_flows or {}).get(code, 0.0)
+            # 取绝对值归一化
+        elif factor_key == "liquidity":
+            val = a.get("liquidity", 0.0) if isinstance(a.get("liquidity"), (int, float)) else float(a.get("liquidity", 0))
+        elif factor_key == "volatility_20d":
+            t = (trends or {}).get(code, {})
+            val = t.get("volatility_20d", 0.0)
+        elif factor_key == "valuation":
+            # 估值分位越低越好
+            t = (trends or {}).get(code, {})
+            # 如果有PE估值，用PE倒数（越高越好）
+            # 若无，用波动率作为风险代理
+            val = -t.get("volatility_20d", -0.5)  # 低波动 proxy
+        else:
+            val = 0.0
+
+        values.append(val if val is not None else 0.0)
+    return values
+
+
+def score_satellite_assets(
+    assets: list[dict],
+    regime: str = "range_bound",
+    trends: dict[str, dict[str, float]] | None = None,
+    fund_flows: dict[str, float] | None = None,
+) -> list[dict[str, Any]]:
+    """
+    多因子加权评分卫星层候选标的。
+
+    Args:
+        assets: 卫星层候选标的列表
+        regime: 当前市场状态
+        trends: 趋势数据
+        fund_flows: 资金流数据
+
+    Returns:
+        每只标的添加 `factor_scores` 和 `composite_score` 字段
+    """
+    # 选择因子权重
+    weights = REGIME_FACTOR_OVERRIDES.get(regime, {})
+    if not weights:
+        weights = {k: v["weight"] for k, v in FACTOR_CONFIG.items()}
+
+    # 计算各因子得分
+    factor_scores: dict[str, list[float]] = {}
+    for factor_key in weights:
+        config = FACTOR_CONFIG.get(factor_key)
+        if not config:
+            continue
+        raw = _get_factor_values(assets, factor_key, trends, fund_flows)
+        if config["normalize"] == "zscore":
+            norm = _normalize_zscore(raw, config["ascending"])
+        else:
+            norm = _normalize_minmax(raw, config["ascending"])
+        factor_scores[factor_key] = norm
+
+    # 综合加权
+    for i, a in enumerate(assets):
+        composite = 0.0
+        details = {}
+        for fk, w in weights.items():
+            if i < len(factor_scores.get(fk, [])):
+                score = factor_scores[fk][i]
+                composite += score * w
+                details[fk] = round(score, 3)
+        a["factor_scores"] = details
+        a["composite_score"] = round(composite, 4)
+
+    # 按综合评分排序
+    assets.sort(key=lambda x: x.get("composite_score", 0), reverse=True)
+    return assets
+
+
+# ── 资讯-ETF映射 ──────────────────────────────────────────────
+
+# ETF 关键词映射表 (标题关键词 → ETF 代码)
+_NEWS_KEYWORD_MAP: list[tuple[list[str], str]] = [
+    (["半导体", "芯片", "集成电路", "存储", "HBM", "光刻", "AI芯片", "先进封装"], "512480"),
+    (["AI", "人工智能", "大模型", "算力", "GPT", "深度学习", "智能体"], "561300"),
+    (["新能源", "光伏", "锂电池", "电动汽车", "新能源车", "充电桩", "储能"], "515030"),
+    (["医药", "医疗", "创新药", "生物医药", "医疗器械", "CXO", "制药"], "512010"),
+    (["旅游", "酒店", "航空", "免税", "景区", "出行"], "159766"),
+    (["黄金", "金价", "贵金属", "避险"], "518880"),
+    (["国债", "利率债", "债券", "债市", "信用债"], "511090"),
+    (["军工", "国防", "航天", "卫星", "船舶", "装备"], "512660"),
+    (["消费", "食品饮料", "白酒", "家电", "零售", "社零"], "159766"),
+    (["红利", "股息", "分红", "高股息", "低波"], "510880"),
+    (["创业板", "成长", "中小盘"], "159915"),
+    (["科创", "科创板", "硬科技"], "588000"),
+    (["证券", "券商", "保险", "金融"], "512880"),
+    (["机器人", "自动化", "工业母机", "智能制造"], "516360"),
+    (["有色", "煤炭", "钢铁", "大宗商品", "资源"], "159980"),
+    (["沪深300", "大盘", "蓝筹", "权重"], "510300"),
+    (["中证A500", "A500", "行业龙头"], "560600"),
+]
+
+
+def map_news_to_etfs(
+    news: list[dict],
+    max_items: int = 20,
+) -> dict[str, dict[str, Any]]:
+    """
+    将新闻标题映射到相关ETF，计算情感得分。
+
+    Args:
+        news: 资讯列表（含 title 字段）
+
+    Returns:
+        {etf_code: {
+            "positive_mentions": int,
+            "negative_mentions": int,
+            "total_mentions": int,
+            "sentiment_score": float,  # -1~1
+            "recent_titles": list[str],
+        }}
+    """
+    result: dict[str, dict[str, Any]] = {}
+
+    for item in news[:max_items]:
+        title = str(item.get("title", item.get("summary", "")))
+        if not title:
+            continue
+
+        # 判断情感（简单关键词）
+        title_lower = title.lower()
+        negative_keywords = ["下跌", "大跌", "暴跌", "利空", "流出", "减持",
+                             "制裁", "风险", "回调", "下降", "亏损"]
+        is_negative = any(kw in title_lower for kw in negative_keywords)
+
+        # 匹配ETF
+        matched_codes = set()
+        for keywords, code in _NEWS_KEYWORD_MAP:
+            if any(kw in title for kw in keywords):
+                matched_codes.add(code)
+
+        for code in matched_codes:
+            if code not in result:
+                result[code] = {
+                    "positive_mentions": 0,
+                    "negative_mentions": 0,
+                    "total_mentions": 0,
+                    "sentiment_score": 0.0,
+                    "recent_titles": [],
+                }
+            result[code]["total_mentions"] += 1
+            result[code]["recent_titles"].append(title[:60])
+            if is_negative:
+                result[code]["negative_mentions"] += 1
+            else:
+                result[code]["positive_mentions"] += 1
+
+    # 计算情感得分
+    for code, data in result.items():
+        total = data["total_mentions"]
+        if total > 0:
+            data["sentiment_score"] = round(
+                (data["positive_mentions"] - data["negative_mentions"]) / total, 3
+            )
+        data["recent_titles"] = data["recent_titles"][:5]
+
+    return result
+
+
+# ── 动态配置: 核心层 + 防御层 ────────────────────────────────
+
+def dynamic_core_allocation(
+    regime: str,
+    macro: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """
+    根据市场状态动态确定核心层标的和权重。
+    """
+    if macro is None:
+        macro = {}
+
+    style = macro.get("style_preference", "balanced")
+    bond_bull = macro.get("bond_bull", False)
+
+    # 基准配置
+    if regime in ("bear", "correction", "defensive_rotate") or style == "defensive_value":
+        # 熊市/回调/防御轮动: 降低大盘宽基，增配红利/防御
+        core = [
+            {"symbol": "510300", "name": "沪深300ETF", "layer": "core", "weight": 0.15,
+             "selection_rationale": "核心底仓压舱石"},
+            {"symbol": "560600", "name": "中证A500ETF", "layer": "core", "weight": 0.12,
+             "selection_rationale": "行业均衡龙头，补足核心层分散度"},
+            {"symbol": "510880", "name": "红利低波ETF", "layer": "core", "weight": 0.15,
+             "selection_rationale": "高股息低波动，增强核心层防御性"},
+        ]
+        if bond_bull:
+            core.append({
+                "symbol": "511090", "name": "30年国债ETF", "layer": "defense",
+                "weight": 0.05,
+                "selection_rationale": "利率下行环境，债券牛市配置长久期国债",
+            })
+    elif regime in ("bull_strong",) or style == "growth":
+        # 强牛市: 加大弹性宽基
+        core = [
+            {"symbol": "510300", "name": "沪深300ETF", "layer": "core", "weight": 0.20,
+             "selection_rationale": "核心宽基基准配置"},
+            {"symbol": "560600", "name": "中证A500ETF", "layer": "core", "weight": 0.15,
+             "selection_rationale": "行业均衡龙头，增强分散度"},
+            {"symbol": "159915", "name": "创业板ETF", "layer": "satellite", "weight": 0.08,
+             "selection_rationale": "成长风格增强组合弹性"},
+            {"symbol": "510880", "name": "红利低波ETF", "layer": "core", "weight": 0.05,
+             "selection_rationale": "辅助防御配置"},
+        ]
+    else:
+        # 震荡/默认: 均衡配置
+        core = [
+            {"symbol": "510300", "name": "沪深300ETF", "layer": "core", "weight": 0.20,
+             "selection_rationale": "核心宽基基准配置"},
+            {"symbol": "560600", "name": "中证A500ETF", "layer": "core", "weight": 0.15,
+             "selection_rationale": "行业均衡龙头"},
+            {"symbol": "510880", "name": "红利低波ETF", "layer": "core", "weight": 0.10,
+             "selection_rationale": "红利低波防御压舱"},
+        ]
+
+    return core
+
+
+def dynamic_defense_allocation(
+    regime: str,
+    macro: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """
+    根据市场状态和宏观环境动态确定防御层标的和权重。
+    """
+    if macro is None:
+        macro = {}
+
+    bond_bull = macro.get("bond_bull", False)
+    external_risk = macro.get("external_risk", "moderate")
+    rate_direction = macro.get("rate_direction", "flat")
+
+    defense = []
+
+    # 黄金：总是保留
+    gold_weight = 0.05
+    if external_risk == "elevated":
+        gold_weight = 0.08
+    defense.append({
+        "symbol": "518880", "name": "黄金ETF", "layer": "defense",
+        "weight": gold_weight,
+        "selection_rationale": "避险资产，低相关配置",
+    })
+
+    # 债券：利率下行时加入
+    if bond_bull or rate_direction == "down":
+        defense.append({
+            "symbol": "511090", "name": "30年国债ETF", "layer": "defense",
+            "weight": 0.05,
+            "selection_rationale": "利率下行，长久期国债受益",
+        })
+
+    # 防御轮动/熊市时加大防御
+    if regime in ("defensive_rotate", "bear", "correction"):
+        # 增加现有防御权重的 scaling
+        for d in defense:
+            d["weight"] = round(d["weight"] * 1.5, 2)
+
+    return defense
+
+
+def dynamic_layer_budget(
+    risk_profile: str,
+    regime: str,
+) -> dict[str, float]:
+    """
+    根据市场状态动态调整层预算。
+
+    Returns:
+        {"core": float, "satellite": float, "defense": float}  # 现金 = 1 - sum
+    """
+    base = dict(STRATEGY_META[risk_profile]["layer_budget"])
+
+    # 防御轮动/熊市: 加大防御预算
+    if regime in ("defensive_rotate", "bear", "correction"):
+        shift = {"defensive": 0.10, "balanced": 0.08, "aggressive": 0.05}.get(risk_profile, 0.05)
+        base["defense"] = min(base.get("defense", 0.05) + shift, 0.30)
+        base["satellite"] = max(base.get("satellite", 0.20) - shift * 0.5, 0.10)
+        base["core"] = max(base.get("core", 0.50) - shift * 0.5, 0.35)
+
+    # 强牛市: 加大卫星预算（进攻端）
+    elif regime in ("bull_strong",):
+        shift = {"defensive": 0.05, "balanced": 0.08, "aggressive": 0.10}.get(risk_profile, 0.05)
+        base["satellite"] = min(base.get("satellite", 0.20) + shift, 0.50)
+        base["core"] = max(base.get("core", 0.50) - shift * 0.5, 0.35)
+        base["defense"] = max(base.get("defense", 0.05) - shift * 0.3, 0.03)
+
+    return base
+
+
+# ── 组合风控 ──────────────────────────────────────────────────
+
+# 行业板块与ETF的映射（用于集中度计算）
+_SECTOR_ETF_MAP: dict[str, str] = {
+    "510300": "大盘价值", "560600": "大盘均衡", "510500": "中盘成长",
+    "159915": "成长", "510880": "红利低波",
+    "512480": "半导体", "515030": "新能源", "512010": "医药",
+    "515080": "红利", "512890": "低波", "561300": "AI",
+    "516160": "新能源电池", "518880": "贵金属",
+    "511090": "债券", "511990": "货币", "513500": "美股",
+    "159980": "商品", "588000": "科创板", "512880": "证券",
+    "512660": "军工", "159766": "消费",
+}
+
+
+def compute_portfolio_risk(
+    holdings: list[dict],
+    trends: dict[str, dict[str, float]] | None = None,
+) -> dict[str, Any]:
+    """
+    计算组合层面的风险指标。
+
+    Returns:
+        {
+            "sector_concentration": float,    # HHI 0~1
+            "sector_breakdown": dict,         # {sector: total_weight}
+            "volatility_est": float,          # 预估年化波动率
+            "max_drawdown_est": float,        # 预估最大回撤
+            "correlation_warning": str | None, # 相关性预警
+        }
+    """
+    if not holdings:
+        return {
+            "sector_concentration": 0.0,
+            "sector_breakdown": {},
+            "volatility_est": 0.0,
+            "max_drawdown_est": 0.0,
+            "correlation_warning": None,
+        }
+
+    # 1. 行业集中度 (HHI)
+    sector_weights: dict[str, float] = {}
+    for h in holdings:
+        code = h.get("symbol", "")
+        sector = _SECTOR_ETF_MAP.get(code, "其他")
+        sector_weights[sector] = sector_weights.get(sector, 0.0) + h.get("weight", 0)
+
+    hhi = sum(w ** 2 for w in sector_weights.values())
+
+    # 2. 相关性预警：检查是否有多个标的属于同一高相关性板块
+    high_corr_groups: list[str] = []
+    # 半导体 + AI 高度相关
+    semicon_ai_weight = (
+        sector_weights.get("半导体", 0) + sector_weights.get("AI", 0)
+    )
+    if semicon_ai_weight > 0.20:
+        high_corr_groups.append(
+            f"半导体+AI合计 {semicon_ai_weight:.0%}，高度相关板块集中度偏高"
+        )
+    # 新能源相关
+    new_energy_weight = (
+        sector_weights.get("新能源", 0) + sector_weights.get("新能源电池", 0)
+    )
+    if new_energy_weight > 0.15:
+        high_corr_groups.append(
+            f"新能源合计 {new_energy_weight:.0%}，板块集中度偏高"
+        )
+
+    corr_warning = "；".join(high_corr_groups) if high_corr_groups else None
+
+    # 3. 预估波动率（基于趋势数据）
+    if trends:
+        vols = []
+        for h in holdings:
+            code = h.get("symbol", "")
+            t = trends.get(code, {})
+            vol = t.get("volatility_20d")
+            if vol and vol > 0:
+                vols.append(vol * h.get("weight", 0))
+        volatility_est = sum(vols) if vols else 0.15
+    else:
+        volatility_est = 0.15
+
+    # 4. 预估最大回撤（基于波动率简算）
+    max_drawdown_est = -min(volatility_est * 1.5, 0.40)
+
+    return {
+        "sector_concentration": round(hhi, 4),
+        "sector_breakdown": {k: round(v, 4) for k, v in sector_weights.items()},
+        "volatility_est": round(volatility_est, 4),
+        "max_drawdown_est": round(max_drawdown_est, 4),
+        "correlation_warning": corr_warning,
+    }
+
+
+# ── 增强型主入口 ──────────────────────────────────────────────
+
+async def generate_enhanced_design(
+    capital: float = 500000,
+    constraints: dict | None = None,
+) -> dict:
+    """
+    v4 增强管道: 趋势数据 + 多因子评分 + 宏观感知 + 动态配置 + 风控。
+
+    返回:
+      {
+        "strategies": [...],
+        "market_context": {市场情绪, 大盘指数, 市场状态, 宏观状态},
+        "generated_at": "...",
+        "design_metadata": {版本, 使用因子, 耗时等},
+      }
+    """
+    import time
+    from datetime import datetime
+
+    start_time = time.monotonic()
+    constraints = constraints or {}
+
+    # 1. 并行采集趋势数据、宏观状态、市场情绪
+    from .market_trends import compute_etf_trends, compute_sector_momentum, detect_market_regime
+    from .macro_state import detect_macro_regime
+    from ..fetchers.sentiment_fetcher import fetch_market_sentiment
+    from ..fetchers.benchmark_stocks import fetch_benchmark_stocks
+    from ..fetchers.news_fetcher import fetch_news_headlines, fetch_macro_news
+    from ..fetchers.etf_scanner import full_pipeline as scan_full_pipeline
+
+    all_symbols = list(CANDIDATE_POOL.keys())
+
+    trend_data, macro_state, sentiment, benchmark, news_tasks = await asyncio.gather(
+        asyncio.wait_for(compute_etf_trends(all_symbols), timeout=45),
+        asyncio.wait_for(detect_macro_regime(), timeout=20),
+        asyncio.wait_for(fetch_market_sentiment(), timeout=20),
+        asyncio.wait_for(fetch_benchmark_stocks(), timeout=20),
+        asyncio.wait_for(
+            asyncio.gather(
+                asyncio.to_thread(fetch_news_headlines),
+                asyncio.to_thread(fetch_macro_news),
+                return_exceptions=True,
+            ),
+            timeout=15,
+        ),
+        return_exceptions=True,
+    )
+
+    # 处理异常
+    trend_data = trend_data if isinstance(trend_data, dict) else {}
+    macro_state = macro_state if isinstance(macro_state, dict) else {}
+    sentiment = sentiment if isinstance(sentiment, dict) else {"sentiment_index": 50, "sentiment_label": "中性"}
+    benchmark = benchmark if isinstance(benchmark, list) else []
+    news_list = (news_tasks[0] if isinstance(news_tasks, tuple) and news_tasks[0] and not isinstance(news_tasks[0], Exception) else [])
+    macro_news = (news_tasks[1] if isinstance(news_tasks, tuple) and news_tasks[1] and not isinstance(news_tasks[1], Exception) else [])
+
+    # 2. 判断市场状态
+    sentiment_index = float(sentiment.get("sentiment_index", 50))
+    adv_ratio = float(sentiment.get("advance_ratio", 0.5))
+    regime = detect_market_regime(
+        trends=trend_data,
+        broad_index_code="000001",
+        sentiment_index=sentiment_index,
+        adv_ratio=adv_ratio,
+    )
+
+    # 3. 资讯-ETF映射
+    news_map = map_news_to_etfs(news_list + macro_news)
+
+    # 4. 扫描全市场 ETF 获取卫星候选
+    scanned_satellite: list = []
+    try:
+        scanned = await asyncio.to_thread(scan_full_pipeline)
+        sat_items = scanned.get("satellite") or []
+        scanned_satellite = [
+            {
+                "symbol": item["symbol"],
+                "name": item.get("name", ""),
+                "liquidity": float(item.get("amount", 0)) / 1e8 if item.get("amount") else 10.0,
+            }
+            for item in sat_items[:20]
+        ]
+    except Exception as e:
+        logger.warning("enhanced scan failed: %s", e)
+
+    if not scanned_satellite:
+        scanned_satellite = [
+            {"symbol": "512480", "name": "半导体ETF", "liquidity": 17.0},
+            {"symbol": "561300", "name": "AI人工智能ETF", "liquidity": 10.0},
+            {"symbol": "515030", "name": "新能源ETF", "liquidity": 13.0},
+            {"symbol": "512010", "name": "医药ETF", "liquidity": 8.0},
+            {"symbol": "159766", "name": "旅游ETF", "liquidity": 5.0},
+            {"symbol": "512660", "name": "军工ETF", "liquidity": 6.0},
+            {"symbol": "588000", "name": "科创50ETF", "liquidity": 15.0},
+        ]
+
+    # 5. 多因子评分卫星候选
+    flow_20d = {}
+    for code, m in news_map.items():
+        flow_20d[code] = m.get("sentiment_score", 0) * 1e8  # sentiment proxy
+
+    scored_satellite = score_satellite_assets(
+        scanned_satellite,
+        regime=regime,
+        trends=trend_data,
+        fund_flows=flow_20d,
+    )
+
+    # 6. 为三种风险偏好生成方案
+    strategies = []
+    for key in ["defensive", "balanced", "aggressive"]:
+        meta = STRATEGY_META[key]
+        budgets = dynamic_layer_budget(key, regime)
+
+        # 核心层: 动态配置
+        holdings = dynamic_core_allocation(regime, macro_state)
+
+        # 防御层: 动态配置
+        defense = dynamic_defense_allocation(regime, macro_state)
+        holdings.extend(defense)
+
+        # 卫星层: 取多因子评分 TOP N 按幂律分配
+        s_budget = budgets.get("satellite", 0.0)
+        if s_budget > 0.02 and scored_satellite:
+            sat_count = max(3, min(8, int(s_budget / 0.04)))
+            top_sat = scored_satellite[:sat_count]
+
+            scores = [s.get("composite_score", 0.5) for s in top_sat]
+            weights = power_law_weights(scores, s_budget)
+
+            for i, a in enumerate(top_sat):
+                if i < len(weights):
+                    code = a["symbol"]
+                    trend = trend_data.get(code, {})
+                    news_info = news_map.get(code, {})
+                    rationale_parts = []
+                    ret_3m = trend.get("return_3m")
+                    if ret_3m is not None:
+                        rationale_parts.append(f"近3月{'涨' if ret_3m>=0 else '跌'}{ret_3m*100:.1f}%")
+                    flow_20d_val = flow_20d.get(code)
+                    if flow_20d_val and flow_20d_val > 0:
+                        rationale_parts.append(f"情绪偏正")
+                    if news_info.get("total_mentions", 0) > 0:
+                        rationale_parts.append(f"近期相关资讯{news_info['total_mentions']}条")
+                    if not rationale_parts:
+                        rationale_parts.append(f"多因子评分{round(a.get('composite_score', 0.5), 3)}")
+
+                    holdings.append({
+                        "symbol": code,
+                        "name": a["name"],
+                        "layer": "satellite",
+                        "weight": round(weights[i], 4),
+                        "selection_rationale": "，".join(rationale_parts),
+                        "factor_score": round(a.get("composite_score", 0.5), 3),
+                        "trend_1m": trend.get("return_1m"),
+                        "trend_3m": trend.get("return_3m"),
+                        "ma_bias_20": trend.get("ma_bias_20"),
+                    })
+
+        # 归一化权重
+        total_w = sum(h["weight"] for h in holdings)
+        actual_budget = sum(budgets.get(l, 0) for l in ["core", "satellite", "defense"])
+        if total_w > 0 and abs(total_w - 1.0) > 0.001 and actual_budget > 0:
+            scale = min(actual_budget / total_w, 1.5)
+            for h in holdings:
+                h["weight"] = round(h["weight"] * scale, 4)
+
+        # 现金
+        cash = round(1.0 - actual_budget, 4)
+        holdings.append({
+            "symbol": "CASH", "name": "现金", "layer": "cash",
+            "weight": cash, "selection_rationale": "流动性管理",
+        })
+        for h in holdings:
+            h["target_amount"] = round(capital * h.get("weight", 0), 2)
+
+        # 组合风控
+        risk_metrics = compute_portfolio_risk(holdings, trend_data)
+
+        # 市场状态描述
+        regime_desc_map = {
+            "bull_strong": "当前市场处于强牛市，资金情绪积极",
+            "bull_weakening": "当前市场牛市趋弱，短期有回调压力",
+            "range_bound": "当前市场处于震荡格局",
+            "correction": "当前市场处于回调阶段，建议控制仓位",
+            "bear": "当前市场处于熊市，建议以防御为主",
+            "defensive_rotate": "当前市场处于防御轮动阶段，资金从高估值流向低估值",
+            "panic": "当前市场情绪恐慌，建议保持现金为主",
+        }
+
+        strategies.append({
+            "id": meta["id"],
+            "label": meta["label"],
+            "color": meta["color"],
+            "portfolio_name": meta["portfolio_name"],
+            "positioning": meta["positioning"],
+            "expected_return": meta["expected_return"],
+            "max_drawdown": min(meta["max_drawdown"], risk_metrics.get("max_drawdown_est", meta["max_drawdown"])),
+            "sharpe_ratio": meta["sharpe_ratio"],
+            "expected_characteristics": meta["expected_characteristics"],
+            "market_regime_note": regime_desc_map.get(regime, ""),
+            "layer_budget": budgets,
+            "etfs": [h for h in holdings if h.get("symbol") != "CASH"],
+            "risk_metrics": risk_metrics,
+        })
+
+    # 填充现金后的完整 holdings
+    for s in strategies:
+        cash_item = next((h for h in holdings if h.get("symbol") == "CASH"), None)
+        if cash_item:
+            s["etfs"].append(cash_item)
+
+    # 7. 构建 sector momentum
+    sector_momentum = await compute_sector_momentum()
+
+    elapsed = (time.monotonic() - start_time) * 1000
+
+    return {
+        "strategies": strategies,
+        "market_context": {
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "market_sentiment": sentiment,
+            "market_regime": regime,
+            "macro_regime": macro_state,
+            "benchmark_stocks": benchmark,
+            "sector_momentum": sector_momentum,
+            "news_sentiment_map": news_map,
+        },
+        "generated_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "design_metadata": {
+            "version": "v4-enhanced",
+            "factors_used": list(FACTOR_CONFIG.keys()),
+            "trend_data_collected": len(trend_data),
+            "news_mapped": len(news_map),
+            "generation_time_ms": round(elapsed, 1),
+        },
     }
