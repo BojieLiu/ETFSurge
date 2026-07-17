@@ -1,0 +1,2243 @@
+# =============================================================================
+# 因子标准化定义配置文件
+# 版本: v1.0
+# 更新日期: 2025-01-17
+# 因子总数: 128
+# 兼容: 华证标准化因子 / 中证因子系列 / 申万因子体系 / MSCI Barra China
+# =============================================================================
+
+factor_definitions:
+
+# =============================================================================
+# STYLE 风格因子 (21个) - 对标华证7大类
+# =============================================================================
+# --- Size 规模 (3个) ---
+- code: "style.size.ln_mcap"
+  name: "对数市值"
+  category: "style"
+  subcategory: "size"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "自然对数(总市值)，规模因子核心代理"
+  tags: ["size", "baseline"]
+  dependencies: ["total_mv"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "style.size.ln_float_mcap"
+  name: "对数流通市值"
+  category: "style"
+  subcategory: "size"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "自然对数(流通市值)，剔除限售股影响"
+  tags: ["size", "free_float"]
+  dependencies: ["float_mv"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "style.size.total_mv_rank"
+  name: "总市值排名"
+  category: "style"
+  subcategory: "size"
+  frequency: "daily"
+  standardization: "rank"
+  lookback_window: 1
+  description: "全市场总市值百分位排名"
+  tags: ["size", "rank"]
+  dependencies: ["total_mv"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# --- Value 价值 (6个) ---
+- code: "style.value.ep_ttm"
+  name: "盈利收益率(E/P)"
+  category: "style"
+  subcategory: "value"
+  frequency: "monthly"
+  standardization: "industry_neutral"
+  lookback_window: 1
+  description: "滚动TTM净利润/总市值，价值因子核心指标"
+  tags: ["value", "earnings_yield"]
+  dependencies: ["net_profit_ttm", "total_mv"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "style.value.bp"
+  name: "市净率倒数(B/P)"
+  category: "style"
+  subcategory: "value"
+  frequency: "monthly"
+  standardization: "industry_neutral"
+  lookback_window: 1
+  description: "净资产/总市值，传统价值因子"
+  tags: ["value", "book_to_price"]
+  dependencies: ["net_asset", "total_mv"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "style.value.sp"
+  name: "市销率倒数(S/P)"
+  category: "style"
+  subcategory: "value"
+  frequency: "monthly"
+  standardization: "industry_neutral"
+  lookback_window: 1
+  description: "销售收入/总市值，适用于亏损企业估值"
+  tags: ["value", "sales_to_price"]
+  dependencies: ["revenue_ttm", "total_mv"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "style.value.dply"
+  name: "股息率"
+  category: "style"
+  subcategory: "value"
+  frequency: "monthly"
+  standardization: "industry_neutral"
+  lookback_window: 1
+  description: "现金分红/总市值，红利因子核心"
+  tags: ["value", "dividend", "income"]
+  dependencies: ["dividend_ttm", "total_mv"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "style.value.ep_lyr"
+  name: "去年盈利收益率"
+  category: "style"
+  subcategory: "value"
+  frequency: "monthly"
+  standardization: "industry_neutral"
+  lookback_window: 1
+  description: "上一年度净利润/总市值，剔除TTM滞后性"
+  tags: ["value", "earnings_yield", "lyr"]
+  dependencies: ["net_profit_lyr", "total_mv"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "style.value.dividend_yield"
+  name: "股息率"
+  category: "style"
+  subcategory: "value"
+  frequency: "monthly"
+  standardization: "industry_neutral"
+  lookback_window: 1
+  description: "最近12月现金分红/总市值，红利因子核心"
+  tags: ["value", "dividend", "income"]
+  dependencies: ["dividend_ttm", "total_mv"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# --- Growth 成长 (5个) ---
+- code: "style.growth.revenue_yoy"
+  name: "营收同比增速"
+  category: "style"
+  subcategory: "growth"
+  frequency: "monthly"
+  standardization: "industry_neutral"
+  lookback_window: 1
+  description: "营收同比增长率，成长因子核心"
+  tags: ["growth", "revenue", "yoy"]
+  dependencies: ["revenue_yoy"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "style.growth.profit_yoy"
+  name: "净利同比增速"
+  category: "style"
+  subcategory: "growth"
+  frequency: "monthly"
+  standardization: "industry_neutral"
+  lookback_window: 1
+  description: "净利润同比增长率，盈利成长核心"
+  tags: ["growth", "profit", "yoy"]
+  dependencies: ["profit_yoy"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "style.growth.revenue_qoq"
+  name: "营收环比增速"
+  category: "style"
+  subcategory: "growth"
+  frequency: "monthly"
+  standardization: "industry_neutral"
+  lookback_window: 1
+  description: "营收环比增长率，捕捉拐点"
+  tags: ["growth", "revenue", "qoq"]
+  dependencies: ["revenue_qoq"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "style.growth.profit_qoq"
+  name: "净利环比增速"
+  category: "style"
+  subcategory: "growth"
+  frequency: "monthly"
+  standardization: "industry_neutral"
+  lookback_window: 1
+  description: "净利润环比增长率，捕捉盈利拐点"
+  tags: ["growth", "profit", "qoq"]
+  dependencies: ["profit_qoq"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "style.growth.roe_3y_cagr"
+  name: "ROE 3年复合增速"
+  category: "style"
+  subcategory: "growth"
+  frequency: "quarterly"
+  standardization: "industry_neutral"
+  lookback_window: 12
+  description: "近3年ROE复合年化增长率，质量成长核心"
+  tags: ["growth", "roe", "cagr", "quality"]
+  dependencies: ["roe_3y_cagr"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# --- Quality 质量 (6个) ---
+- code: "style.quality.roe_ttm"
+  name: "ROE TTM"
+  category: "style"
+  subcategory: "quality"
+  frequency: "monthly"
+  standardization: "industry_neutral"
+  lookback_window: 1
+  description: "滚动TTM净资产收益率，盈利质量核心"
+  tags: ["quality", "roe", "profitability"]
+  dependencies: ["roe_ttm"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "style.quality.roa_ttm"
+  name: "ROA TTM"
+  category: "style"
+  subcategory: "quality"
+  frequency: "monthly"
+  standardization: "industry_neutral"
+  lookback_window: 1
+  description: "滚动TTM总资产收益率，资产运营效率"
+  tags: ["quality", "roa", "profitability"]
+  dependencies: ["roa_ttm"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "style.quality.gross_margin"
+  name: "毛利率"
+  category: "style"
+  subcategory: "quality"
+  frequency: "quarterly"
+  standardization: "industry_neutral"
+  lookback_window: 1
+  description: "毛利/营收，核心竞争力代理"
+  tags: ["quality", "margin", "profitability"]
+  dependencies: ["gross_margin"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "style.quality.net_margin"
+  name: "净利率"
+  category: "style"
+  subcategory: "quality"
+  frequency: "quarterly"
+  standardization: "industry_neutral"
+  lookback_window: 1
+  description: "净利润/营收，盈利质量核心"
+  tags: ["quality", "margin", "profitability"]
+  dependencies: ["net_margin"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "style.quality.fcf_yield"
+  name: "自由现金流收益率"
+  category: "style"
+  subcategory: "quality"
+  frequency: "quarterly"
+  standardization: "industry_neutral"
+  lookback_window: 1
+  description: "自由现金流/市值，现金创造能力"
+  tags: ["quality", "fcf", "cash_flow"]
+  dependencies: ["fcf_ttm", "total_mv"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "style.quality.accrual"
+  name: "应计项目"
+  category: "style"
+  subcategory: "quality"
+  frequency: "quarterly"
+  standardization: "industry_neutral"
+  lookback_window: 1
+  description: "(净利润-经营现金流)/总资产，盈利质量预警"
+  tags: ["quality", "accrual", "earnings_quality"]
+  dependencies: ["net_profit", "operating_cash_flow", "total_asset"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# --- Momentum 动量 (5个) ---
+- code: "style.momentum.mom_1m"
+  name: "1月动量"
+  category: "style"
+  subcategory: "momentum"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 21
+  description: "过去20个交易日收益率，短期动量"
+  tags: ["momentum", "short_term"]
+  dependencies: ["close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "style.momentum.mom_3m"
+  name: "3月动量"
+  category: "style"
+  subcategory: "momentum"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 63
+  description: "过去63个交易日收益率，中短期动量"
+  tags: ["momentum", "medium_term"]
+  dependencies: ["close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "style.momentum.mom_6m"
+  name: "6月动量"
+  category: "style"
+  subcategory: "momentum"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 126
+  description: "过去126个交易日收益率，中期动量"
+  tags: ["momentum", "medium_term"]
+  dependencies: ["close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "style.momentum.mom_12m"
+  name: "12月动量"
+  category: "style"
+  subcategory: "momentum"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 252
+  description: "过去252个交易日收益率，经典动量因子"
+  tags: ["momentum", "long_term", "classic"]
+  dependencies: ["close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "style.momentum.mom_36m_12m"
+  name: "36-12月动量"
+  category: "style"
+  subcategory: "momentum"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 756
+  description: "过去36个月剔除最近12个月动量，剔除短期反转"
+  tags: ["momentum", "long_term", "intermediate"]
+  dependencies: ["close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# --- Volatility 波动 (5个) ---
+- code: "style.volatility.ivol_20d"
+  name: "20日特异波动"
+  category: "style"
+  subcategory: "volatility"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 20
+  description: "市场模型残差标准差*sqrt(252)，特异风险"
+  tags: ["volatility", "idiovol", "risk"]
+  dependencies: ["close", "market_index"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "style.volatility.ivol_60d"
+  name: "60日特异波动"
+  category: "style"
+  subcategory: "volatility"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 60
+  description: "60日特异波动率，中短期特异风险"
+  tags: ["volatility", "idiovol", "risk"]
+  dependencies: ["close", "market_index"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "style.volatility.beta_60d"
+  name: "60日Beta"
+  category: "style"
+  subcategory: "volatility"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 60
+  description: "60日滚动市场Beta，系统性风险"
+  tags: ["volatility", "beta", "systematic_risk"]
+  dependencies: ["close", "market_index"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "style.volatility.beta_250d"
+  name: "250日Beta"
+  category: "style"
+  subcategory: "volatility"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 250
+  description: "250日滚动市场Beta，长期系统性风险"
+  tags: ["volatility", "beta", "systematic_risk"]
+  dependencies: ["close", "market_index"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "style.volatility.max_dd_1y"
+  name: "近1年最大回撤"
+  category: "style"
+  subcategory: "volatility"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 252
+  description: "过去252日峰值到谷值最大跌幅，尾部风险"
+  tags: ["volatility", "drawdown", "tail_risk"]
+  dependencies: ["close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# --- Liquidity 流动性 (4个) ---
+- code: "style.liquidity.turnover_20d"
+  name: "20日换手率"
+  category: "style"
+  subcategory: "liquidity"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 20
+  description: "20日平均换手率，流动性核心指标"
+  tags: ["liquidity", "turnover", "trading"]
+  dependencies: ["turnover"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "style.liquidity.turnover_60d"
+  name: "60日换手率"
+  category: "style"
+  subcategory: "liquidity"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 60
+  description: "60日平均换手率，中长期流动性"
+  tags: ["liquidity", "turnover", "trading"]
+  dependencies: ["turnover"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "style.liquidity.amt_20d"
+  name: "20日日均成交额"
+  category: "style"
+  subcategory: "liquidity"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 20
+  description: "20日日均成交额(亿)，绝对流动性"
+  tags: ["liquidity", "amount", "trading"]
+  dependencies: ["amount"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "style.liquidity.amihud_illiq"
+  name: "Amihud非流动性"
+  category: "style"
+  subcategory: "liquidity"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 20
+  description: "|收益率|/成交额 平均值，交易成本代理"
+  tags: ["liquidity", "amihud", "market_impact"]
+  dependencies: ["close", "amount"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# --- Leverage 杠杆 (3个) ---
+- code: "style.leverage.debt_to_asset"
+  name: "资产负债率"
+  category: "style"
+  subcategory: "leverage"
+  frequency: "quarterly"
+  standardization: "industry_neutral"
+  lookback_window: 1
+  description: "总负债/总资产，偿债风险"
+  tags: ["leverage", "solvency", "risk"]
+  dependencies: ["total_liability", "total_asset"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "style.leverage.debt_to_equity"
+  name: "权益乘数"
+  category: "style"
+  subcategory: "leverage"
+  frequency: "quarterly"
+  standardization: "industry_neutral"
+  lookback_window: 1
+  description: "总负债/净资产，财务杠杆"
+  tags: ["leverage", "gearing", "risk"]
+  dependencies: ["total_liability", "net_asset"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "style.leverage.interest_coverage"
+  name: "利息保障倍数"
+  category: "style"
+  subcategory: "leverage"
+  frequency: "quarterly"
+  standardization: "industry_neutral"
+  lookback_window: 1
+  description: "EBIT/利息费用，偿债能力"
+  tags: ["leverage", "coverage", "solvency"]
+  dependencies: ["ebit", "interest_expense"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# =============================================================================
+# CHINA_SPECIFIC 中国特色因子 (10个)
+# =============================================================================
+# --- SOE Ownership 国企持股 ---
+- code: "china.soe.soe_ratio"
+  name: "国企持股比例"
+  category: "china_specific"
+  subcategory: "soe_ownership"
+  frequency: "quarterly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "国有股东持股比例，国企属性代理变量"
+  tags: ["china_specific", "soe", "ownership"]
+  dependencies: ["soe_share_ratio"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "china.soe.central_soe"
+  name: "央企标识"
+  category: "china_specific"
+  subcategory: "soe_ownership"
+  frequency: "quarterly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "央企控股标识(0/1)，央企改革受益"
+  tags: ["china_specific", "soe", "central_enterprise"]
+  dependencies: ["is_central_soe"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "china.soe.local_soe"
+  name: "地方国企标识"
+  category: "china_specific"
+  subcategory: "soe_ownership"
+  frequency: "quarterly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "地方国企控股标识(0/1)"
+  tags: ["china_specific", "soe", "local_government"]
+  dependencies: ["is_local_soe"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "china.soe.mixed_ownership"
+  name: "混改标识"
+  category: "china_specific"
+  subcategory: "soe_ownership"
+  frequency: "quarterly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "混合所有制改革推进标识"
+  tags: ["china_specific", "soe", "mixed_reform"]
+  dependencies: ["is_mixed_ownership"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# --- State Ownership 国家持股 ---
+- code: "china.state.state_owned_ratio"
+  name: "国有股比例"
+  category: "china_specific"
+  subcategory: "state_ownership"
+  frequency: "quarterly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "国家持股比例(含社保/国家队)"
+  tags: ["china_specific", "state_ownership", "national_team"]
+  dependencies: ["state_owned_ratio"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "china.state.central_control"
+  name: "央企控股"
+  category: "china_specific"
+  subcategory: "state_ownership"
+  frequency: "quarterly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "中央企业直接控股标识"
+  tags: ["china_specific", "state_ownership", "central_control"]
+  dependencies: ["is_central_control"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "china.state.mixed_reform"
+  name: "混改推进"
+  category: "china_specific"
+  subcategory: "state_ownership"
+  frequency: "quarterly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "混合所有制改革推进进度"
+  tags: ["china_specific", "mixed_reform", "reform"]
+  dependencies: ["mixed_reform_progress"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# --- Dividend Quality 红利质量 ---
+- code: "china.dividend.payout_ratio"
+  name: "分红支付率"
+  category: "china_specific"
+  subcategory: "dividend_quality"
+  frequency: "quarterly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "现金分红/净利润，分红慷慨度"
+  tags: ["china_specific", "dividend", "payout"]
+  dependencies: ["dividend_payout_ratio"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "china.dividend.consistency"
+  name: "分红连续性"
+  category: "china_specific"
+  subcategory: "dividend_quality"
+  frequency: "quarterly"
+  standardization: "zscore"
+  lookback_window: 5
+  description: "近5年连续分红年数/5"
+  tags: ["china_specific", "dividend", "consistency"]
+  dependencies: ["dividend_history"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "china.dividend.growth"
+  name: "分红增长率"
+  category: "china_specific"
+  subcategory: "dividend_quality"
+  frequency: "quarterly"
+  standardization: "zscore"
+  lookback_window: 3
+  description: "近3年分红复合增长率"
+  tags: ["china_specific", "dividend", "growth"]
+  dependencies: ["dividend_history"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# --- Policy Alignment 政策契合 ---
+- code: "china.policy.five_year_plan"
+  name: "五年规划契合度"
+  category: "china_specific"
+  subcategory: "policy_alignment"
+  frequency: "quarterly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "业务与国家五年规划契合度(0-1)"
+  tags: ["china_specific", "policy", "five_year_plan"]
+  dependencies: ["policy_alignment_score"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "china.policy.strategic_emerging"
+  name: "战略新兴产业"
+  category: "china_specific"
+  subcategory: "policy_alignment"
+  frequency: "quarterly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "属于战略新兴产业目录标识"
+  tags: ["china_specific", "policy", "strategic_emerging"]
+  dependencies: ["is_strategic_emerging"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "china.policy.dual_circulation"
+  name: "双循环受益"
+  category: "china_specific"
+  subcategory: "policy_alignment"
+  frequency: "quarterly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "受益于国内大循环/双循环格局"
+  tags: ["china_specific", "policy", "dual_circulation"]
+  dependencies: ["dual_circulation_score"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# =============================================================================
+# MICROSTRUCTURE 微观结构/交易因子 (10个)
+# =============================================================================
+# --- Intraday 日内 ---
+- code: "micro.intraday.open_close_return"
+  name: "开盘-收盘收益"
+  category: "microstructure"
+  subcategory: "intraday"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "(收盘-开盘)/开盘，日内趋势"
+  tags: ["microstructure", "intraday", "trend"]
+  dependencies: ["open", "close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "micro.intraday.overnight_return"
+  name: "隔夜收益"
+  category: "microstructure"
+  subcategory: "intraday"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "(开盘-前收盘)/前收盘，隔夜信息消化"
+  tags: ["microstructure", "overnight", "gap"]
+  dependencies: ["open", "pre_close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "micro.intraday.intraday_vol"
+  name: "日内波动"
+  category: "microstructure"
+  subcategory: "intraday"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "(最高-最低)/开盘，日内波动率"
+  tags: ["microstructure", "volatility", "range"]
+  dependencies: ["high", "low", "open"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "micro.intraday.vwap_dev"
+  name: "VWAP偏离"
+  category: "microstructure"
+  subcategory: "intraday"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "(收盘-VWAP)/VWAP，机构交易偏好"
+  tags: ["microstructure", "vwap", "institutional"]
+  dependencies: ["close", "vwap"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# --- Order Flow 订单流 ---
+- code: "micro.order_flow.buy_sell_imbalance"
+  name: "买卖不平衡"
+  category: "microstructure"
+  subcategory: "order_flow"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "(主动买入-主动卖出)/总成交量"
+  tags: ["microstructure", "order_flow", "imbalance"]
+  dependencies: ["buy_volume", "sell_volume"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "micro.order_flow.large_order_ratio"
+  name: "大单比例"
+  category: "microstructure"
+  subcategory: "order_flow"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "大单成交额/总成交额，机构参与度"
+  tags: ["microstructure", "large_order", "institutional"]
+  dependencies: ["large_order_amount", "total_amount"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "micro.order_flow.retail_ratio"
+  name: "散户比例"
+  category: "microstructure"
+  subcategory: "order_flow"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "小单成交额/总成交额，散户情绪"
+  tags: ["microstructure", "retail", "sentiment"]
+  dependencies: ["small_order_amount", "total_amount"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# --- Short-term Reversal 短期反转 ---
+- code: "micro.reversal.reversal_1d"
+  name: "1日反转"
+  category: "microstructure"
+  subcategory: "reversal"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "昨日收益率取反，极短期反转"
+  tags: ["microstructure", "reversal", "short_term"]
+  dependencies: ["close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "micro.reversal.reversal_5d"
+  name: "5日反转"
+  category: "microstructure"
+  subcategory: "reversal"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 5
+  description: "5日累计收益率取反，短期反转"
+  tags: ["microstructure", "reversal", "short_term"]
+  dependencies: ["close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "micro.reversal.reversal_20d"
+  name: "20日反转"
+  category: "microstructure"
+  subcategory: "reversal"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 20
+  description: "20日累计收益率取反，中短期反转"
+  tags: ["microstructure", "reversal", "medium_term"]
+  dependencies: ["close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# =============================================================================
+# ALTERNATIVE 另类数据因子 (25个)
+# =============================================================================
+# --- Patent 专利 ---
+- code: "alt.patent.core_patent_ratio"
+  name: "核心专利占比"
+  category: "alternative"
+  subcategory: "patent"
+  frequency: "quarterly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "核心专利数/总专利数，技术核心竞争力"
+  tags: ["alternative", "patent", "innovation", "core"]
+  dependencies: ["patent_data"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "alt.patent.citation_impact"
+  name: "被引影响力"
+  category: "alternative"
+  subcategory: "patent"
+  frequency: "quarterly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "专利被引用次数加权平均，技术影响力"
+  tags: ["alternative", "patent", "citation", "impact"]
+  dependencies: ["patent_data"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "alt.patent.tech_diffusion"
+  name: "技术扩散速度"
+  category: "alternative"
+  subcategory: "patent"
+  frequency: "quarterly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "专利被引用扩散速度，技术扩散力"
+  tags: ["alternative", "patent", "diffusion", "technology"]
+  dependencies: ["patent_data"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "alt.patent.protection_strength"
+  name: "专利保护力度"
+  category: "alternative"
+  subcategory: "patent"
+  frequency: "quarterly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "专利授权率*维权记录，保护力度"
+  tags: ["alternative", "patent", "protection", "legal"]
+  dependencies: ["patent_data"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# --- Recruitment 招聘 ---
+- code: "alt.recruitment.core_talent_inflow"
+  name: "核心人才流入"
+  category: "alternative"
+  subcategory: "recruitment"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 3
+  description: "核心岗位招聘增速，人才吸引力"
+  tags: ["alternative", "recruitment", "talent", "hr"]
+  dependencies: ["recruitment_data"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "alt.recruitment.key_position_gap"
+  name: "关键岗位缺口"
+  category: "alternative"
+  subcategory: "recruitment"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 3
+  description: "核心岗位空缺时长/数量，人才瓶颈"
+  tags: ["alternative", "recruitment", "gap", "bottleneck"]
+  dependencies: ["recruitment_data"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "alt.recruitment.tech_stack_shift"
+  name: "技术栈变化"
+  category: "alternative"
+  subcategory: "recruitment"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 6
+  description: "招聘技术栈关键词变化，技术转型信号"
+  tags: ["alternative", "recruitment", "tech_stack", "transformation"]
+  dependencies: ["recruitment_data"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# --- Supply Chain 供应链 ---
+- code: "alt.supply_chain.upstream_irreplaceability"
+  name: "上游不可替代性"
+  category: "alternative"
+  subcategory: "supply_chain"
+  frequency: "quarterly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "核心供应商不可替代性指数"
+  tags: ["alternative", "supply_chain", "upstream", "moat"]
+  dependencies: ["supply_chain_data"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "alt.supply_chain.downstream_stickiness"
+  name: "下游粘性"
+  category: "alternative"
+  subcategory: "supply_chain"
+  frequency: "quarterly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "核心客户粘性/转移成本"
+  tags: ["alternative", "supply_chain", "downstream", "stickiness"]
+  dependencies: ["supply_chain_data"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "alt.supply_chain.concentration_risk"
+  name: "集中度风险"
+  category: "alternative"
+  subcategory: "supply_chain"
+  frequency: "quarterly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "客户/供应商集中度HHI，供应链风险"
+  tags: ["alternative", "supply_chain", "concentration", "risk"]
+  dependencies: ["supply_chain_data"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# --- ESG ---
+- code: "alt.esg.carbon_intensity"
+  name: "碳强度"
+  category: "alternative"
+  subcategory: "esg"
+  frequency: "quarterly"
+  standardization: "industry_neutral"
+  lookback_window: 1
+  description: "单位营收碳排放，碳效率"
+  tags: ["alternative", "esg", "carbon", "climate"]
+  dependencies: ["esg_data"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "alt.esg.green_revenue_ratio"
+  name: "绿色收入占比"
+  category: "alternative"
+  subcategory: "esg"
+  frequency: "quarterly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "绿色营收/总营收，绿色转型进度"
+  tags: ["alternative", "esg", "green", "taxonomy"]
+  dependencies: ["esg_data"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "alt.esg.env_compliance"
+  name: "环保合规"
+  category: "alternative"
+  subcategory: "esg"
+  frequency: "quarterly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "环保处罚/违规记录扣分"
+  tags: ["alternative", "esg", "compliance", "environment"]
+  dependencies: ["esg_data"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "alt.esg.governance_score"
+  name: "治理评分"
+  category: "alternative"
+  subcategory: "esg"
+  frequency: "quarterly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "公司治理综合评分"
+  tags: ["alternative", "esg", "governance"]
+  dependencies: ["esg_data"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# --- Web Traffic 网络流量 ---
+- code: "alt.web_traffic.app_dau_growth"
+  name: "APP DAU增长"
+  category: "alternative"
+  subcategory: "web_traffic"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 3
+  description: "核心APP日活用户同比增长"
+  tags: ["alternative", "web_traffic", "app", "dau"]
+  dependencies: ["web_traffic_data"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "alt.web_traffic.web_traffic_share"
+  name: "网页流量份额"
+  category: "alternative"
+  subcategory: "web_traffic"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 3
+  description: "行业内网页流量市场份额"
+  tags: ["alternative", "web_traffic", "market_share"]
+  dependencies: ["web_traffic_data"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "alt.web_traffic.user_retention"
+  name: "用户留存"
+  category: "alternative"
+  subcategory: "web_traffic"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 3
+  description: "核心产品用户留存率"
+  tags: ["alternative", "web_traffic", "retention", "engagement"]
+  dependencies: ["web_traffic_data"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# --- Credit Card 信用卡/消费 ---
+- code: "alt.credit_card.market_share"
+  name: "市场份额"
+  category: "alternative"
+  subcategory: "credit_card"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 3
+  description: "信用卡消费/行业总消费，市场份额"
+  tags: ["alternative", "credit_card", "market_share", "consumer"]
+  dependencies: ["credit_card_data"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "alt.credit_card.spend_per_user"
+  name: "人均消费"
+  category: "alternative"
+  subcategory: "credit_card"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 3
+  description: "单用户平均消费额"
+  tags: ["alternative", "credit_card", "spend", "consumer"]
+  dependencies: ["credit_card_data"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "alt.credit_card.repeat_rate"
+  name: "复购率"
+  category: "alternative"
+  subcategory: "credit_card"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 3
+  description: "30/90日复购用户占比"
+  tags: ["alternative", "credit_card", "repeat", "loyalty"]
+  dependencies: ["credit_card_data"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# =============================================================================
+# THEME 主题/赛道因子 (52个)
+# =============================================================================
+# --- AI Computing AI算力 ---
+- code: "theme.ai_computing.gpu_exposure"
+  name: "GPU暴露度"
+  category: "theme"
+  subcategory: "ai_computing"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "GPU相关营收/市值占比，AI算力核心"
+  tags: ["theme", "ai", "gpu", "computing"]
+  dependencies: ["revenue_breakdown", "supply_chain_position"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "theme.ai_computing.hbm_exposure"
+  name: "HBM暴露度"
+  category: "theme"
+  subcategory: "ai_computing"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "高带宽存储(HBM)产业链暴露度"
+  tags: ["theme", "ai", "hbm", "memory"]
+  dependencies: ["revenue_breakdown", "supply_chain_position"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "theme.ai_computing.optical_module"
+  name: "光模块"
+  category: "theme"
+  subcategory: "ai_computing"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "光模块/光互连产业链暴露度"
+  tags: ["theme", "ai", "optical", "communication"]
+  dependencies: ["revenue_breakdown", "supply_chain_position"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "theme.ai_computing.liquid_cooling"
+  name: "液冷"
+  category: "theme"
+  subcategory: "ai_computing"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "液冷散热产业链暴露度"
+  tags: ["theme", "ai", "cooling", "thermal"]
+  dependencies: ["revenue_breakdown", "supply_chain_position"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "theme.ai_computing.server"
+  name: "服务器"
+  category: "theme"
+  subcategory: "ai_computing"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "AI服务器整机/组装暴露度"
+  tags: ["theme", "ai", "server", "hardware"]
+  dependencies: ["revenue_breakdown", "supply_chain_position"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# --- Innovative Drug 创新药 ---
+- code: "theme.innovative_drug.adc_pipeline"
+  name: "ADC管线"
+  category: "theme"
+  subcategory: "innovative_drug"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "ADC(抗体偶联药物)管线进度/数量"
+  tags: ["theme", "biotech", "adc", "pipeline"]
+  dependencies: ["pipeline_data"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "theme.innovative_drug.bispecific"
+  name: "双抗/多抗"
+  category: "theme"
+  subcategory: "innovative_drug"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "双特异性/多特异性抗体管线"
+  tags: ["theme", "biotech", "bispecific", "antibody"]
+  dependencies: ["pipeline_data"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "theme.innovative_drug.car_t"
+  name: "CAR-T/细胞治疗"
+  category: "theme"
+  subcategory: "innovative_drug"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "CAR-T/细胞治疗管线进度"
+  tags: ["theme", "biotech", "car_t", "cell_therapy"]
+  dependencies: ["pipeline_data"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "theme.innovative_drug.rna_therapy"
+  name: "RNA疗法"
+  category: "theme"
+  subcategory: "innovative_drug"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "mRNA/siRNA/ASO等RNA疗法管线"
+  tags: ["theme", "biotech", "rna", "gene_therapy"]
+  dependencies: ["pipeline_data"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "theme.innovative_drug.novel_target"
+  name: "新靶点"
+  category: "theme"
+  subcategory: "innovative_drug"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "首创新靶点/First-in-class管线"
+  tags: ["theme", "biotech", "novel_target", "first_in_class"]
+  dependencies: ["pipeline_data"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# --- Semiconductor 半导体 ---
+- code: "theme.semiconductor.lithography"
+  name: "光刻"
+  category: "theme"
+  subcategory: "semiconductor"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "光刻机/光刻胶/掩模版产业链"
+  tags: ["theme", "semiconductor", "lithography", "equipment"]
+  dependencies: ["revenue_breakdown", "supply_chain_position"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "theme.semiconductor.etching"
+  name: "刻蚀"
+  category: "theme"
+  subcategory: "semiconductor"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "刻蚀机/刻蚀气体/硬掩模产业链"
+  tags: ["theme", "semiconductor", "etching", "process"]
+  dependencies: ["revenue_breakdown", "supply_chain_position"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "theme.semiconductor.deposition"
+  name: "薄膜沉积"
+  category: "theme"
+  subcategory: "semiconductor"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "CVD/ALD/PVD等沉积设备/材料"
+  tags: ["theme", "semiconductor", "deposition", "cvd", "ald"]
+  dependencies: ["revenue_breakdown", "supply_chain_position"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "theme.semiconductor.inspection"
+  name: "检测/量测"
+  category: "theme"
+  subcategory: "semiconductor"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "缺陷检测/关键尺寸量测/薄膜测厚"
+  tags: ["theme", "semiconductor", "inspection", "metrology"]
+  dependencies: ["revenue_breakdown", "supply_chain_position"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "theme.semiconductor.packaging"
+  name: "封测/先进封装"
+  category: "theme"
+  subcategory: "semiconductor"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "Chiplet/2.5D/3D/FC-BGA先进封装"
+  tags: ["theme", "semiconductor", "packaging", "advanced_packaging"]
+  dependencies: ["revenue_breakdown", "supply_chain_position"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# --- New Energy 新能源 ---
+- code: "theme.new_energy.battery"
+  name: "电池"
+  category: "theme"
+  subcategory: "new_energy"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "锂电/固态/钠电池全产业链"
+  tags: ["theme", "new_energy", "battery", "energy_storage"]
+  dependencies: ["revenue_breakdown", "supply_chain_position"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "theme.new_energy.pv"
+  name: "光伏"
+  category: "theme"
+  subcategory: "new_energy"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "硅料/硅片/电池片/组件/逆变器"
+  tags: ["theme", "new_energy", "pv", "solar"]
+  dependencies: ["revenue_breakdown", "supply_chain_position"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "theme.new_energy.ev"
+  name: "电动车"
+  category: "theme"
+  subcategory: "new_energy"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "整车/电驱/电控/热管理"
+  tags: ["theme", "new_energy", "ev", "auto"]
+  dependencies: ["revenue_breakdown", "supply_chain_position"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "theme.new_energy.charging"
+  name: "充电桩"
+  category: "theme"
+  subcategory: "new_energy"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "充电桩/充电网络/换电"
+  tags: ["theme", "new_energy", "charging", "infrastructure"]
+  dependencies: ["revenue_breakdown", "supply_chain_position"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "theme.new_energy.energy_storage"
+  name: "储能"
+  category: "theme"
+  subcategory: "new_energy"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "工商业/户用/电网侧储能"
+  tags: ["theme", "new_energy", "storage", "ess"]
+  dependencies: ["revenue_breakdown", "supply_chain_position"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# --- Low Altitude 低空经济 ---
+- code: "theme.low_altitude.evtol"
+  name: "eVTOL"
+  category: "theme"
+  subcategory: "low_altitude"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "电动垂直起降飞行器整机/部件"
+  tags: ["theme", "low_altitude", "evtol", "aviation"]
+  dependencies: ["revenue_breakdown", "supply_chain_position"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "theme.low_altitude.flight_control"
+  name: "飞控"
+  category: "theme"
+  subcategory: "low_altitude"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "飞控系统/自主飞行/感知避障"
+  tags: ["theme", "low_altitude", "flight_control", "autonomy"]
+  dependencies: ["revenue_breakdown", "supply_chain_position"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "theme.low_altitude.motor"
+  name: "电机"
+  category: "theme"
+  subcategory: "low_altitude"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "高功率密度电机/电控"
+  tags: ["theme", "low_altitude", "motor", "propulsion"]
+  dependencies: ["revenue_breakdown", "supply_chain_position"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "theme.low_altitude.battery"
+  name: "电池"
+  category: "theme"
+  subcategory: "low_altitude"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "高能量密度/高倍率电池"
+  tags: ["theme", "low_altitude", "battery", "energy_density"]
+  dependencies: ["revenue_breakdown", "supply_chain_position"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "theme.low_altitude.comms"
+  name: "通感一体"
+  category: "theme"
+  subcategory: "low_altitude"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "低空通信/导航/监视融合"
+  tags: ["theme", "low_altitude", "comms", "cnc"]
+  dependencies: ["revenue_breakdown", "supply_chain_position"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# --- Data Element 数据要素 ---
+- code: "theme.data_element.data_provider"
+  name: "数据供给"
+  category: "theme"
+  subcategory: "data_element"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "基础数据/标注数据/合规数据供给商"
+  tags: ["theme", "data_element", "provider", "supply"]
+  dependencies: ["revenue_breakdown", "business_model"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "theme.data_element.data_trading"
+  name: "数据流通"
+  category: "theme"
+  subcategory: "data_element"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "数据交易/定价/确权/清结算平台"
+  tags: ["theme", "data_element", "trading", "marketplace"]
+  dependencies: ["revenue_breakdown", "business_model"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "theme.data_element.data_security"
+  name: "数据安全"
+  category: "theme"
+  subcategory: "data_element"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "数据加密/隐私计算/合规/主权"
+  tags: ["theme", "data_element", "security", "privacy"]
+  dependencies: ["revenue_breakdown", "business_model"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "theme.data_element.data_application"
+  name: "数据应用"
+  category: "theme"
+  subcategory: "data_element"
+  frequency: "monthly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "行业数据应用/数据产品/数据服务"
+  tags: ["theme", "data_element", "application", "service"]
+  dependencies: ["revenue_breakdown", "business_model"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# =============================================================================
+# TECHNICAL 技术分析因子 (60个) - 核心技术分析指标体系
+# =============================================================================
+# --- Moving Average 移动平均 (6个) ---
+- code: "technical.ma.sma_5"
+  name: "5日均线"
+  category: "technical"
+  subcategory: "ma"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 5
+  description: "5日简单移动平均，短期趋势"
+  tags: ["technical", "ma", "trend", "short_term"]
+  dependencies: ["close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.ma.sma_10"
+  name: "10日均线"
+  category: "technical"
+  subcategory: "ma"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 10
+  description: "10日简单移动平均，短期趋势"
+  tags: ["technical", "ma", "trend", "short_term"]
+  dependencies: ["close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.ma.sma_20"
+  name: "20日均线"
+  category: "technical"
+  subcategory: "ma"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 20
+  description: "20日简单移动平均，短中期趋势"
+  tags: ["technical", "ma", "trend", "medium_term"]
+  dependencies: ["close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.ma.sma_60"
+  name: "60日均线"
+  category: "technical"
+  subcategory: "ma"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 60
+  description: "60日简单移动平均，中期趋势"
+  tags: ["technical", "ma", "trend", "medium_term"]
+  dependencies: ["close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.ma.ema_12"
+  name: "12日指数均线"
+  category: "technical"
+  subcategory: "ma"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 12
+  description: "12日指数移动平均，MACD快线"
+  tags: ["technical", "ema", "trend", "macd"]
+  dependencies: ["close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.ma.ema_26"
+  name: "26日指数均线"
+  category: "technical"
+  subcategory: "ma"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 26
+  description: "26日指数移动平均，MACD慢线"
+  tags: ["technical", "ema", "trend", "macd"]
+  dependencies: ["close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# --- MACD (3个) ---
+- code: "technical.macd.macd"
+  name: "MACD主线"
+  category: "technical"
+  subcategory: "macd"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 26
+  description: "EMA12-EMA26，趋势动量"
+  tags: ["technical", "macd", "momentum", "trend"]
+  dependencies: ["close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.macd.signal"
+  name: "MACD信号线"
+  category: "technical"
+  subcategory: "macd"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 9
+  description: "MACD 9日EMA信号线"
+  tags: ["technical", "macd", "signal"]
+  dependencies: ["close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.macd.histogram"
+  name: "MACD柱状图"
+  category: "technical"
+  subcategory: "macd"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 9
+  description: "MACD主线-信号线，动量加速度"
+  tags: ["technical", "macd", "histogram", "momentum"]
+  dependencies: ["close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# --- RSI/KDJ/Stoch (6个) ---
+- code: "technical.rsi.rsi_6"
+  name: "RSI 6日"
+  category: "technical"
+  subcategory: "rsi"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 6
+  description: "6日相对强弱指标，超买超卖"
+  tags: ["technical", "rsi", "oscillator", "overbought_oversold"]
+  dependencies: ["close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.rsi.rsi_14"
+  name: "RSI 14日"
+  category: "technical"
+  subcategory: "rsi"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 14
+  description: "14日相对强弱指标，标准RSI"
+  tags: ["technical", "rsi", "oscillator", "standard"]
+  dependencies: ["close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.rsi.rsi_24"
+  name: "RSI 24日"
+  category: "technical"
+  subcategory: "rsi"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 24
+  description: "24日相对强弱指标，中长期强弱"
+  tags: ["technical", "rsi", "oscillator", "medium_term"]
+  dependencies: ["close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.kdj.k"
+  name: "KDJ K值"
+  category: "technical"
+  subcategory: "kdj"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 9
+  description: "KDJ随机指标K值"
+  tags: ["technical", "kdj", "stochastic", "oscillator"]
+  dependencies: ["high", "low", "close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.kdj.d"
+  name: "KDJ D值"
+  category: "technical"
+  subcategory: "kdj"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 9
+  description: "KDJ随机指标D值"
+  tags: ["technical", "kdj", "stochastic", "oscillator"]
+  dependencies: ["high", "low", "close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.kdj.j"
+  name: "KDJ J值"
+  category: "technical"
+  subcategory: "kdj"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 9
+  description: "KDJ随机指标J值(3K-2D)，超买超卖更敏感"
+  tags: ["technical", "kdj", "stochastic", "j_value"]
+  dependencies: ["high", "low", "close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# --- Stochastic/WR (3个) ---
+- code: "technical.stoch.k"
+  name: "Stochastic %K"
+  category: "technical"
+  subcategory: "stochastic"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 14
+  description: "随机指标%K，超买超卖"
+  tags: ["technical", "stochastic", "oscillator"]
+  dependencies: ["high", "low", "close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.stoch.d"
+  name: "Stochastic %D"
+  category: "technical"
+  subcategory: "stochastic"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 14
+  description: "随机指标%D，%K的平滑"
+  tags: ["technical", "stochastic", "oscillator"]
+  dependencies: ["high", "low", "close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.wr.wr_14"
+  name: "Williams %R 14日"
+  category: "technical"
+  subcategory: "williams_r"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 14
+  description: "威廉指标，超买超卖"
+  tags: ["technical", "williams_r", "oscillator"]
+  dependencies: ["high", "low", "close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# --- DMI/ADX/AROON (7个) ---
+- code: "technical.dmi.pdi"
+  name: "PDI (+DI)"
+  category: "technical"
+  subcategory: "dmi"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 14
+  description: "正向动向指标，上涨趋势强度"
+  tags: ["technical", "dmi", "trend", "directional"]
+  dependencies: ["high", "low", "close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.dmi.mdi"
+  name: "MDI (-DI)"
+  category: "technical"
+  subcategory: "dmi"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 14
+  description: "负向动向指标，下跌趋势强度"
+  tags: ["technical", "dmi", "trend", "directional"]
+  dependencies: ["high", "low", "close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.dmi.adx"
+  name: "ADX"
+  category: "technical"
+  subcategory: "dmi"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 14
+  description: "平均动向指数，趋势强度(不分方向)"
+  tags: ["technical", "adx", "trend_strength"]
+  dependencies: ["high", "low", "close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.dmi.adxr"
+  name: "ADXR"
+  category: "technical"
+  subcategory: "dmi"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 14
+  description: "ADX平滑，趋势持续性"
+  tags: ["technical", "adxr", "trend_persistence"]
+  dependencies: ["high", "low", "close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.aroon.up"
+  name: "Aroon Up"
+  category: "technical"
+  subcategory: "aroon"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 25
+  description: "Aroon上升线，新高频率"
+  tags: ["technical", "aroon", "trend", "new_high"]
+  dependencies: ["high", "low"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.aroon.down"
+  name: "Aroon Down"
+  category: "technical"
+  subcategory: "aroon"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 25
+  description: "Aroon下降线，新低频率"
+  tags: ["technical", "aroon", "trend", "new_low"]
+  dependencies: ["high", "low"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.aroon.oscillator"
+  name: "Aroon Oscillator"
+  category: "technical"
+  subcategory: "aroon"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 25
+  description: "Aroon Up - Aroon Down，趋势方向强度"
+  tags: ["technical", "aroon", "oscillator", "trend"]
+  dependencies: ["high", "low"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# --- Bollinger Bands/Envelope/Keltner/Donchian (8个) ---
+- code: "technical.bb.upper"
+  name: "布林带上轨"
+  category: "technical"
+  subcategory: "bollinger"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 20
+  description: "布林带上轨(MA20+2σ)，压力位"
+  tags: ["technical", "bollinger", "band", "resistance"]
+  dependencies: ["close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.bb.middle"
+  name: "布林带中轨"
+  category: "technical"
+  subcategory: "bollinger"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 20
+  description: "布林带中轨(MA20)，趋势中枢"
+  tags: ["technical", "bollinger", "ma", "trend"]
+  dependencies: ["close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.bb.lower"
+  name: "布林带下轨"
+  category: "technical"
+  subcategory: "bollinger"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 20
+  description: "布林带下轨(MA20-2σ)，支撑位"
+  tags: ["technical", "bollinger", "band", "support"]
+  dependencies: ["close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.bb.width"
+  name: "布林带宽度"
+  category: "technical"
+  subcategory: "bollinger"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 20
+  description: "(上轨-下轨)/中轨，波动率收缩/扩张"
+  tags: ["technical", "bollinger", "width", "volatility", "squeeze"]
+  dependencies: ["close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.bb.percent_b"
+  name: "%B指标"
+  category: "technical"
+  subcategory: "bollinger"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 20
+  description: "(价格-下轨)/(上轨-下轨)，价格在带内位置"
+  tags: ["technical", "bollinger", "percent_b", "position"]
+  dependencies: ["close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.keltner.upper"
+  name: "肯特纳上轨"
+  category: "technical"
+  subcategory: "keltner"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 20
+  description: "EMA20 + 2*ATR，动态压力位"
+  tags: ["technical", "keltner", "channel", "atr"]
+  dependencies: ["high", "low", "close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.keltner.lower"
+  name: "肯特纳下轨"
+  category: "technical"
+  subcategory: "keltner"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 20
+  description: "EMA20 - 2*ATR，动态支撑位"
+  tags: ["technical", "keltner", "channel", "atr"]
+  dependencies: ["high", "low", "close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.donchian.upper"
+  name: "唐奇安上轨"
+  category: "technical"
+  subcategory: "donchian"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 20
+  description: "过去N日最高价，突破系统"
+  tags: ["technical", "donchian", "channel", "breakout"]
+  dependencies: ["high", "low"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# --- CCI/ATR/Standard Deviation (5个) ---
+- code: "technical.cci.cci_20"
+  name: "CCI 20日"
+  category: "technical"
+  subcategory: "cci"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 20
+  description: "顺势指标，超买超卖/趋势强度"
+  tags: ["technical", "cci", "trend", "oscillator"]
+  dependencies: ["high", "low", "close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.atr.atr_14"
+  name: "ATR 14日"
+  category: "technical"
+  subcategory: "atr"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 14
+  description: "平均真实波幅，波动率/止损"
+  tags: ["technical", "atr", "volatility", "risk"]
+  dependencies: ["high", "low", "close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.atr.atr_20"
+  name: "ATR 20日"
+  category: "technical"
+  subcategory: "atr"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 20
+  description: "20日平均真实波幅"
+  tags: ["technical", "atr", "volatility"]
+  dependencies: ["high", "low", "close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.std.std_20"
+  name: "标准差 20日"
+  category: "technical"
+  subcategory: "std"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 20
+  description: "收盘价20日滚动标准差"
+  tags: ["technical", "std", "volatility", "statistical"]
+  dependencies: ["close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.std.std_60"
+  name: "标准差 60日"
+  category: "technical"
+  subcategory: "std"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 60
+  description: "收盘价60日滚动标准差"
+  tags: ["technical", "std", "volatility", "medium_term"]
+  dependencies: ["close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# --- OBV/PVT/MFI/CMF (6个) ---
+- code: "technical.volume.obv"
+  name: "OBV 能量潮"
+  category: "technical"
+  subcategory: "volume"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "累积成交量，资金流向"
+  tags: ["technical", "obv", "volume", "accumulation"]
+  dependencies: ["close", "volume"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.volume.pvt"
+  name: "PVT 价量趋势"
+  category: "technical"
+  subcategory: "volume"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "价量趋势指标，价格变化加权成交量"
+  tags: ["technical", "pvt", "volume", "trend"]
+  dependencies: ["close", "volume"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.volume.mfi"
+  name: "MFI 资金流指标"
+  category: "technical"
+  subcategory: "volume"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 14
+  description: "资金流量指标，量价结合RSI"
+  tags: ["technical", "mfi", "volume", "mfi", "rsi"]
+  dependencies: ["high", "low", "close", "volume"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.volume.cmf"
+  name: "CMF 蔡金资金流"
+  category: "technical"
+  subcategory: "volume"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 20
+  description: "蔡金资金流，资金流向强度"
+  tags: ["technical", "cmf", "volume", "chaikin"]
+  dependencies: ["high", "low", "close", "volume"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.volume.nvi"
+  name: "NVI 负成交量指标"
+  category: "technical"
+  subcategory: "volume"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "只在成交量萎缩时变动，聪明资金"
+  tags: ["technical", "nvi", "volume", "smart_money"]
+  dependencies: ["close", "volume"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.volume.pvi"
+  name: "PVI 正成交量指标"
+  category: "technical"
+  subcategory: "volume"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "只在成交量放大时变动，散户情绪"
+  tags: ["technical", "pvi", "volume", "retail"]
+  dependencies: ["close", "volume"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# --- PSAR/Ichimoku/Support-Resistance (8个) ---
+- code: "technical.psar.psar"
+  name: "Parabolic SAR"
+  category: "technical"
+  subcategory: "psar"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "抛物线转向，止损/反转点"
+  tags: ["technical", "psar", "stop_loss", "reversal"]
+  dependencies: ["high", "low", "close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.ichimoku.tenkan"
+  name: "一目均衡表转换线"
+  category: "technical"
+  subcategory: "ichimoku"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 9
+  description: "(9日高+9日低)/2，短期趋势"
+  tags: ["technical", "ichimoku", "tenkan", "trend"]
+  dependencies: ["high", "low", "close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.ichimoku.kijun"
+  name: "一目均衡表基准线"
+  category: "technical"
+  subcategory: "ichimoku"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 26
+  description: "(26日高+26日低)/2，中期趋势"
+  tags: ["technical", "ichimoku", "kijun", "trend"]
+  dependencies: ["high", "low", "close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.ichimoku.senkou_a"
+  name: "一目均衡表先行带A"
+  category: "technical"
+  subcategory: "ichimoku"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 26
+  description: "(转换线+基准线)/2 前移26期"
+  tags: ["technical", "ichimoku", "senkou_a", "cloud"]
+  dependencies: ["high", "low", "close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.ichimoku.senkou_b"
+  name: "一目均衡表先行带B"
+  category: "technical"
+  subcategory: "ichimoku"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 52
+  description: "(52日高+52日低)/2 前移26期"
+  tags: ["technical", "ichimoku", "senkou_b", "cloud"]
+  dependencies: ["high", "low", "close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.ichimoku.chikou"
+  name: "一目均衡表延迟线"
+  category: "technical"
+  subcategory: "ichimoku"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 26
+  description: "收盘价后移26期，确认趋势"
+  tags: ["technical", "ichimoku", "chikou", "lagging"]
+  dependencies: ["close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.pivot.classic"
+  name: "经典枢轴点"
+  category: "technical"
+  subcategory: "pivot"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "(H+L+C)/3，支撑阻力基准"
+  tags: ["technical", "pivot", "support", "resistance"]
+  dependencies: ["high", "low", "close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.pivot.fib"
+  name: "斐波那契枢轴点"
+  category: "technical"
+  subcategory: "pivot"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "斐波那契回撤/扩展支撑阻力"
+  tags: ["technical", "pivot", "fibonacci", "support", "resistance"]
+  dependencies: ["high", "low", "close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# --- ZigZag/形态识别/缺口 (6个) ---
+- code: "technical.zigzag.zigzag"
+  name: "ZigZag转折点"
+  category: "technical"
+  subcategory: "zigzag"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "过滤噪音，识别转折点"
+  tags: ["technical", "zigzag", "swing", "turning_point"]
+  dependencies: ["high", "low", "close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.pattern.double_top"
+  name: "双顶形态"
+  category: "technical"
+  subcategory: "pattern"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 20
+  description: "M头形态识别，反转信号"
+  tags: ["technical", "pattern", "double_top", "reversal"]
+  dependencies: ["high", "low", "close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.pattern.double_bottom"
+  name: "双底形态"
+  category: "technical"
+  subcategory: "pattern"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 20
+  description: "W底形态识别，反转信号"
+  tags: ["technical", "pattern", "double_bottom", "reversal"]
+  dependencies: ["high", "low", "close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.pattern.head_shoulders"
+  name: "头肩顶形态"
+  category: "technical"
+  subcategory: "pattern"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 30
+  description: "头肩顶形态识别，强反转信号"
+  tags: ["technical", "pattern", "head_shoulders", "reversal"]
+  dependencies: ["high", "low", "close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.pattern.cup_handle"
+  name: "杯柄形态"
+  category: "technical"
+  subcategory: "pattern"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 60
+  description: "杯柄续涨形态，突破买入"
+  tags: ["technical", "pattern", "cup_handle", "continuation"]
+  dependencies: ["high", "low", "close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.gap.up"
+  name: "向上跳空缺口"
+  category: "technical"
+  subcategory: "gap"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "开盘价>前日最高，缺口向上"
+  tags: ["technical", "gap", "breakout", "bullish"]
+  dependencies: ["open", "high", "low", "close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# =============================================================================
+# 统计摘要
+# =============================================================================
+# 总计: 128 个因子
+# 版本: v1.0
+# 最后更新: 2025-01-17
+# =============================================================================

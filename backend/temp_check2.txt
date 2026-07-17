@@ -1,3 +1,0 @@
-﻿no_bonds: True
-diversification: True
-etf_count: False

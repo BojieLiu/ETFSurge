@@ -1,9 +1,0 @@
-@echo off
-chcp 65001 >nul
-cd /d "%~dp0"
-echo Stopping ETF Surge...
-powershell -ExecutionPolicy Bypass -File "%~dp0stop.ps1" >nul 2>&1
-echo Waiting 3 seconds for ports to free...
-timeout /t 3 /nobreak >nul
-echo Starting ETF Surge...
-powershell -ExecutionPolicy Bypass -NoExit -File "%~dp0start.ps1" -Local
