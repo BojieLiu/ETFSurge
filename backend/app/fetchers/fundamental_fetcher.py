@@ -227,6 +227,49 @@ def fetch_hist_avg_volume(symbol: str, days: int = 20) -> dict | None:
         return None
 
 
+def fetch_current_pe_pb(symbol: str) -> dict | None:
+    """获取 ETF 最新 PE/PB 估值（轻量版，仅拉最近 5 个交易日）。
+
+    返回:
+      {"pe_ttm": float, "pb": float} | None
+    """
+    if not _is_a_stock(symbol):
+        return None
+    try:
+        import akshare as ak
+        market = _get_market(symbol)
+        df = ak.stock_zh_a_hist(symbol=symbol, period="daily",
+                                start_date="20260101", adjust="")
+        if df is None or df.empty:
+            return None
+        df = _decode_df(df)
+        latest = df.iloc[0]
+        pe = None
+        pb_val = None
+        for col in df.columns:
+            cl = col.lower()
+            if "市盈率" in cl or "pe" in cl:
+                try:
+                    pe = float(latest[col])
+                except (ValueError, TypeError):
+                    pass
+            if "市净率" in cl or "pb" in cl:
+                try:
+                    pb_val = float(latest[col])
+                except (ValueError, TypeError):
+                    pass
+        if pe is None and pb_val is None:
+            return None
+        result = {}
+        if pe is not None:
+            result["pe_ttm"] = pe
+        if pb_val is not None:
+            result["pb"] = pb_val
+        return result
+    except Exception:
+        return None
+
+
 def fetch_fundamentals(symbol: str) -> dict:
     """一站式获取某只 ETF 的所有基本面数据。
 

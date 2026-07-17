@@ -1008,7 +1008,9 @@ async def generate_enhanced_design(
     from ..fetchers.sentiment_fetcher import fetch_market_sentiment
     from ..fetchers.benchmark_stocks import fetch_benchmark_stocks
     from ..fetchers.news_fetcher import fetch_news_headlines, fetch_macro_news
+    from ..fetchers.fundamental_fetcher import fetch_fund_flow, fetch_current_pe_pb
     from ..fetchers.etf_scanner import full_pipeline as scan_full_pipeline
+    from ..services.pool_manager import pool_manager
 
     all_symbols = list(CANDIDATE_POOL.keys())
 
@@ -1027,12 +1029,40 @@ async def generate_enhanced_design(
         ),
         return_exceptions=True,
     )
+    # 新增并行: 资金流 + 估值
+    fund_flow_results, valuation_results = await asyncio.gather(
+        asyncio.wait_for(
+            asyncio.gather(
+                *[asyncio.to_thread(fetch_fund_flow, sym) for sym in all_symbols],
+                return_exceptions=True,
+            ), timeout=15,
+        ),
+        asyncio.wait_for(
+            asyncio.gather(
+                *[asyncio.to_thread(fetch_current_pe_pb, sym) for sym in all_symbols],
+                return_exceptions=True,
+            ), timeout=15,
+        ),
+        return_exceptions=True,
+    )
 
     # 处理异常
     trend_data = trend_data if isinstance(trend_data, dict) else {}
     macro_state = macro_state if isinstance(macro_state, dict) else {}
     sentiment = sentiment if isinstance(sentiment, dict) else {"sentiment_index": 50, "sentiment_label": "中性"}
     benchmark = benchmark if isinstance(benchmark, list) else []
+    # 处理 fund_flow / pe_pb
+    fund_flow_map = {}
+    valuation_map = {}
+    if isinstance(fund_flow_results, (list, tuple)):
+        for sym, result in zip(all_symbols, fund_flow_results):
+            if isinstance(result, dict) and result.get("main_net_inflow") is not None:
+                fund_flow_map[sym] = result["main_net_inflow"]
+    if isinstance(valuation_results, (list, tuple)):
+        for sym, result in zip(all_symbols, valuation_results):
+            if isinstance(result, dict):
+                valuation_map[sym] = result
+
     news_list = (news_tasks[0] if isinstance(news_tasks, tuple) and news_tasks[0] and not isinstance(news_tasks[0], Exception) else [])
     macro_news = (news_tasks[1] if isinstance(news_tasks, tuple) and news_tasks[1] and not isinstance(news_tasks[1], Exception) else [])
 
@@ -1050,45 +1080,46 @@ async def generate_enhanced_design(
     news_map = map_news_to_etfs(news_list + macro_news)
 
     # 4. 扫描全市场 ETF 获取卫星候选
+    # 优先使用 pool_manager（含分类+因子评分），降级到直接 scanner
     scanned_satellite: list = []
+    pool_ready = False
     try:
-        scanned = await asyncio.to_thread(scan_full_pipeline)
-        sat_items = scanned.get("satellite") or []
-        scanned_satellite = [
-            {
-                "symbol": item["symbol"],
-                "name": item.get("name", ""),
-                "liquidity": float(item.get("amount", 0)) / 1e8 if item.get("amount") else 10.0,
-            }
-            for item in sat_items[:20]
-        ]
+        await asyncio.wait_for(pool_manager.refresh(), timeout=20)
+        sat_pool = pool_manager.get_pool("satellite") or []
+        if sat_pool:
+            scanned_satellite = sorted(sat_pool, key=lambda x: x.get("composite_score", 0), reverse=True)
+            pool_ready = True
+            logger.info("pool_manager: %d satellite candidates", len(scanned_satellite))
     except Exception as e:
-        logger.warning("enhanced scan failed: %s", e)
+        logger.warning("pool_manager refresh failed: %s", e)
 
-    if not scanned_satellite:
-        scanned_satellite = [
-            {"symbol": "512480", "name": "半导体ETF", "liquidity": 17.0},
-            {"symbol": "561300", "name": "AI人工智能ETF", "liquidity": 10.0},
-            {"symbol": "515030", "name": "新能源ETF", "liquidity": 13.0},
-            {"symbol": "512010", "name": "医药ETF", "liquidity": 8.0},
-            {"symbol": "159766", "name": "旅游ETF", "liquidity": 5.0},
-            {"symbol": "512660", "name": "军工ETF", "liquidity": 6.0},
-            {"symbol": "588000", "name": "科创50ETF", "liquidity": 15.0},
-        ]
+    if not pool_ready:
+        try:
+            scanned = await asyncio.to_thread(scan_full_pipeline)
+            sat_items = scanned.get("satellite") or []
+            scanned_satellite = [
+                {
+                    "symbol": item["symbol"],
+                    "name": item.get("name", ""),
+                    "liquidity": float(item.get("amount", 0)) / 1e8 if item.get("amount") else 10.0,
+                }
+                for item in sat_items[:20]
+            ]
+        except Exception as e:
+            logger.warning("enhanced scan failed: %s", e)
 
-    # 5. 多因子评分卫星候选
-    flow_20d = {}
-    for code, m in news_map.items():
-        flow_20d[code] = m.get("sentiment_score", 0) * 1e8  # sentiment proxy
+        if not scanned_satellite:
+            scanned_satellite = [
+                {"symbol": "512480", "name": "半导体ETF", "liquidity": 17.0},
+                {"symbol": "561300", "name": "AI人工智能ETF", "liquidity": 10.0},
+                {"symbol": "515030", "name": "新能源ETF", "liquidity": 13.0},
+                {"symbol": "512010", "name": "医药ETF", "liquidity": 8.0},
+                {"symbol": "159766", "name": "旅游ETF", "liquidity": 5.0},
+                {"symbol": "512660", "name": "军工ETF", "liquidity": 6.0},
+                {"symbol": "588000", "name": "科创50ETF", "liquidity": 15.0},
+            ]
 
-    scored_satellite = score_satellite_assets(
-        scanned_satellite,
-        regime=regime,
-        trends=trend_data,
-        fund_flows=flow_20d,
-    )
-
-    # 6. 为三种风险偏好生成方案
+    # 5. 为三种风险偏好生成方案
     strategies = []
     for key in ["defensive", "balanced", "aggressive"]:
         meta = STRATEGY_META[key]
@@ -1101,11 +1132,28 @@ async def generate_enhanced_design(
         defense = dynamic_defense_allocation(regime, macro_state)
         holdings.extend(defense)
 
-        # 卫星层: 取多因子评分 TOP N 按幂律分配
+        # 卫星层: 评分排序 + 行业去重 + 幂律分配
         s_budget = budgets.get("satellite", 0.0)
-        if s_budget > 0.02 and scored_satellite:
+        if s_budget > 0.02 and scanned_satellite:
             sat_count = max(3, min(8, int(s_budget / 0.04)))
-            top_sat = scored_satellite[:sat_count]
+            # 行业去重贪婪选择
+            top_sat = []
+            seen_industries = set()
+            for item in scanned_satellite:
+                if len(top_sat) >= sat_count:
+                    break
+                industry = item.get("industry", "unknown")
+                if industry in seen_industries:
+                    continue
+                seen_industries.add(industry)
+                top_sat.append(item)
+            # 去重后数量不足时放宽
+            if len(top_sat) < 3:
+                for item in scanned_satellite:
+                    if len(top_sat) >= sat_count:
+                        break
+                    if item not in top_sat:
+                        top_sat.append(item)
 
             scores = [s.get("composite_score", 0.5) for s in top_sat]
             weights = power_law_weights(scores, s_budget)
@@ -1115,17 +1163,18 @@ async def generate_enhanced_design(
                     code = a["symbol"]
                     trend = trend_data.get(code, {})
                     news_info = news_map.get(code, {})
+                    fund_flow_val = fund_flow_map.get(code)
+                    pe_val = valuation_map.get(code, {}).get("pe_ttm") if code in valuation_map else None
                     rationale_parts = []
                     ret_3m = trend.get("return_3m")
                     if ret_3m is not None:
                         rationale_parts.append(f"近3月{'涨' if ret_3m>=0 else '跌'}{ret_3m*100:.1f}%")
-                    flow_20d_val = flow_20d.get(code)
-                    if flow_20d_val and flow_20d_val > 0:
-                        rationale_parts.append(f"情绪偏正")
+                    if fund_flow_val is not None and fund_flow_val > 0:
+                        rationale_parts.append(f"主力净流入{fund_flow_val/1e8:.1f}亿")
                     if news_info.get("total_mentions", 0) > 0:
                         rationale_parts.append(f"近期相关资讯{news_info['total_mentions']}条")
                     if not rationale_parts:
-                        rationale_parts.append(f"多因子评分{round(a.get('composite_score', 0.5), 3)}")
+                        rationale_parts.append(f"评分{round(a.get('composite_score', 0.5), 3)}")
 
                     holdings.append({
                         "symbol": code,
@@ -1133,7 +1182,11 @@ async def generate_enhanced_design(
                         "layer": "satellite",
                         "weight": round(weights[i], 4),
                         "selection_rationale": "，".join(rationale_parts),
+                        "industry": a.get("industry", ""),
+                        "concepts": a.get("concepts", []),
                         "factor_score": round(a.get("composite_score", 0.5), 3),
+                        "fund_flow_20d": fund_flow_val,
+                        "pe_ttm": pe_val,
                         "trend_1m": trend.get("return_1m"),
                         "trend_3m": trend.get("return_3m"),
                         "ma_bias_20": trend.get("ma_bias_20"),

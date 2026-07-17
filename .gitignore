@@ -40,3 +40,6 @@ uvicorn*
 
 # OpenCode config with API keys
 opencode.json
+
+# CodeWhale agent artifacts
+.codewhale/

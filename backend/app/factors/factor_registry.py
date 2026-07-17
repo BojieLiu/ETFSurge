@@ -302,12 +302,14 @@ class FactorRegistry:
         self,
         symbols: list[str],
         codes: list[str] | None = None,
+        market_data: dict[str, dict[str, Any]] | None = None,
     ) -> dict[str, dict[str, float]]:
         """Compute factor values for given symbols.
 
         Args:
             symbols: List of ETF/code symbols to compute for.
             codes:   Specific factor codes to compute (None = all with computers).
+            market_data: Optional pre-fetched market data. If None, uses mock/placeholder.
 
         Returns:
             {symbol: {factor_code: standardized_value}}
@@ -315,7 +317,11 @@ class FactorRegistry:
         if codes is None:
             codes = [c for c in _CORE_FACTORS if c in self._computers]
 
-        market_data = await self._fetch_market_data(symbols)
+        if market_data is not None:
+            # 使用外部注入的真实数据
+            pass
+        else:
+            market_data = await self._fetch_market_data(symbols)
 
         result: dict[str, dict[str, float]] = {}
         for sym in symbols:
