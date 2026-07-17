@@ -165,6 +165,23 @@ async def enrich_market_context() -> MarketContext:
     val_map = {v.get("code"): v for v in valuation}
     idx_map = {i.get("code"): i for i in indices}
 
+    # 从 CANDIDATE_POOL 构建 Asset 对象填充 ctx.assets
+    for code, meta in CANDIDATE_POOL.items():
+        flow = flow_map.get(code, {})
+        val = val_map.get(code, {})
+        ctx.assets[code] = Asset(
+            code=code,
+            name=meta["name"],
+            layer=meta["layer"],
+            beta=meta["beta"],
+            liquidity=meta["liquidity"],
+            price=1.0,
+            change_pct=0.0,
+            net_inflow=float(flow.get("net_inflow", 0) or 0),
+            valuation_pct=float(val.get("valuation_percentile", 0.5) or 0.5),
+            reason=meta.get("reason", ""),
+        )
+
     return ctx
 
 

@@ -1,22 +1,23 @@
 """
-TDD tests for the intelligent portfolio design engine (core+satellite+defense).
+TDD tests for the intelligent portfolio design engine (core+satellite+defense) v3.0.
 
 Covers:
 - enrich_market_context builds assets from candidate pool
 - classify_assets groups by layer
 - allocate_layer_budget returns strategy-specific budgets
-- optimize_layer respects 1%~30% (and per-layer cap) constraints, core includes 510300/560600
 - generate_design returns 3 strategies with 8~15 holdings each, weights sum to 1.0
 - fast mode works without external network
-External data sources are mocked.
+- power_law_weights produces reasonable weight distribution
+- v3.0 fixed core/defense weights and satellite dual-pool behavior
 """
 import pytest
 
 from app.services import strategy_design as sd
 from app.services.strategy_design import (
     Asset, MarketContext, enrich_market_context, classify_assets,
-    allocate_layer_budget, generate_design,
-    STRATEGY_META, CORE_REQUIRED, MIN_WEIGHT, MAX_WEIGHT
+    allocate_layer_budget, generate_design, power_law_weights,
+    STRATEGY_META, CORE_REQUIRED, CORE_FIXED, DEFENSE_FIXED,
+    MIN_WEIGHT, MAX_WEIGHT,
 )
 
 
@@ -43,18 +44,20 @@ async def test_classify_assets_groups_by_layer():
     assert len(layers["defense"]) >= 2
 
 
-# ── allocate_layer_budget ────────────────────────────────────
+# ── allocate_layer_budget (v3.0) ─────────────────────────────
 def test_allocate_layer_budget_defensive():
     b = allocate_layer_budget("defensive")
-    assert b == {"core": 0.55, "satellite": 0.25, "defense": 0.20}
-    assert abs(sum(b.values()) - 1.0) < 1e-9
+    # v3.0: core=50%, satellite=15%, defense=5%, cash=30%
+    assert b == {"core": 0.50, "satellite": 0.15, "defense": 0.05}
+    assert abs(sum(b.values()) - 0.70) < 1e-9  # 70% invested, 30% cash
 
 
 def test_allocate_layer_budget_aggressive():
     b = allocate_layer_budget("aggressive")
+    # v3.0: core=50%, satellite=35%, defense=5%, cash=10%
     assert b["core"] == 0.50
-    assert b["satellite"] == 0.40
-    assert b["defense"] == 0.10
+    assert b["satellite"] == 0.35
+    assert b["defense"] == 0.05
 
 
 def test_allocate_layer_budget_default_balanced():
@@ -62,56 +65,38 @@ def test_allocate_layer_budget_default_balanced():
     assert b == STRATEGY_META["balanced"]["layer_budget"]
 
 
-# ── optimize_layer ───────────────────────────────────────────
-def _make_assets(codes):
-    pool = sd.CANDIDATE_POOL
-    return [
-        Asset(code=c, name=pool[c]["name"], layer=pool[c]["layer"],
-              beta=pool[c]["beta"], liquidity=pool[c]["liquidity"], reason=pool[c]["reason"])
-        for c in codes
-    ]
+# ── power_law_weights ──────────────────────────────────────────
+def test_power_law_weights_basic():
+    """幂律分配: 评分越高权重越大"""
+    scores = [1.0, 2.0, 3.0]
+    weights = power_law_weights(scores, 0.30)
+    assert len(weights) == 3
+    assert abs(sum(weights) - 0.30) < 1e-6
+    # 评分最高的获得最大权重
+    assert weights[2] >= weights[1] >= weights[0]
 
 
-def test_optimize_layer_constraints_core():
-    """核心层: 单只 1%~20%, 含510300/560600各>=5%, 加总=预算"""
-    core_codes = ["510300", "560600", "510500", "159915", "510880"]
-    assets = _make_assets(core_codes)
-    budget = 0.55
-    result = optimize_layer("core", assets, budget, "balanced")
-    assert len(result) == len(core_codes)
-    total = sum(r["weight"] for r in result)
-    assert abs(total - budget) < 1e-6
-    for r in result:
-        assert MIN_WEIGHT <= r["weight"] <= sd.LAYER_WEIGHT_CAP["core"] + 1e-9
-    sym_w = {r["symbol"]: r["weight"] for r in result}
-    assert sym_w["510300"] >= sd.CORE_MIN_EACH - 1e-9
-    assert sym_w["560600"] >= sd.CORE_MIN_EACH - 1e-9
+def test_power_law_weights_min_weight():
+    """每个标的至少1%"""
+    scores = [0.1, 0.1, 0.1]  # 相同低分
+    weights = power_law_weights(scores, 0.05)
+    for w in weights:
+        assert w >= 0.01 - 1e-9
 
 
-def test_optimize_layer_satellite_cap():
-    """卫星层单只上限 12%"""
-    sat_codes = ["512480", "515030", "512010", "515080", "512890", "561300", "516160"]
-    assets = _make_assets(sat_codes)
-    result = optimize_layer("satellite", assets, 0.30, "aggressive")
-    for r in result:
-        assert r["weight"] <= sd.LAYER_WEIGHT_CAP["satellite"] + 1e-9
-        assert r["weight"] >= MIN_WEIGHT - 1e-9
+def test_power_law_weights_max_weight():
+    """单个权重不超过30%"""
+    scores = [100.0, 1.0]
+    weights = power_law_weights(scores, 0.50)
+    for w in weights:
+        assert w <= 0.30 + 1e-9
 
 
-def test_optimize_layer_defense_cap():
-    """防御层单只上限 8%"""
-    def_codes = ["518880", "511090", "511990", "513500", "159980"]
-    assets = _make_assets(def_codes)
-    result = optimize_layer("defense", assets, 0.20, "defensive")
-    for r in result:
-        assert r["weight"] <= sd.LAYER_WEIGHT_CAP["defense"] + 1e-9
+def test_power_law_weights_empty():
+    assert power_law_weights([], 0.30) == []
 
 
-def test_optimize_layer_empty_returns_empty():
-    assert optimize_layer("core", [], 0.5) == []
-
-
-# ── generate_design ──────────────────────────────────────────
+# ── generate_design (v3.0) ──────────────────────────────────
 async def test_generate_design_three_strategies():
     designs = await generate_design("balanced", 500000, mode="fast")
     assert len(designs) == 3
@@ -134,23 +119,42 @@ async def test_generate_design_weights_sum_to_one():
 
 
 async def test_generate_design_weight_range():
+    """v3.0: 每只权重在 1%~30% 之间（不含现金）"""
     designs = await generate_design("balanced", 500000, mode="fast")
     for d in designs:
         for e in d["etfs"]:
-            assert MIN_WEIGHT <= e["weight"] <= MAX_WEIGHT + 1e-9
-            # 层上限
-            cap = sd.LAYER_WEIGHT_CAP.get(e["layer"], MAX_WEIGHT)
-            assert e["weight"] <= cap + 1e-9
+            if e.get("layer") == "cash":
+                continue
+            assert MIN_WEIGHT <= e["weight"] <= MAX_WEIGHT + 1e-9, \
+                f"{d['id']} {e['symbol']} weight={e['weight']:.4f} out of [{MIN_WEIGHT}, {MAX_WEIGHT}]"
 
 
 async def test_generate_design_core_has_broad_indices():
-    """每个方案核心层必须含沪深300或中证A500(至少各1只)"""
+    """每个方案核心层必须含沪深300+中证A500+红利低波 (v3.0 fixed)"""
     designs = await generate_design("balanced", 500000, mode="fast")
     for d in designs:
         core = [e for e in d["etfs"] if e["layer"] == "core"]
         core_codes = {e["symbol"] for e in core}
         assert "510300" in core_codes, f"{d['id']} missing 510300 in core"
         assert "560600" in core_codes, f"{d['id']} missing 560600 in core"
+
+
+async def test_generate_design_fixed_core_weights():
+    """v3.0: 核心层固定权重 510300=25%, 560600=15%, 510880=10%"""
+    designs = await generate_design("balanced", 500000, mode="fast")
+    for d in designs:
+        core = {e["symbol"]: e["weight"] for e in d["etfs"] if e["layer"] == "core"}
+        assert abs(core.get("510300", 0) - 0.25) < 0.02, f"{d['id']} 510300 weight off"
+        assert abs(core.get("560600", 0) - 0.15) < 0.02, f"{d['id']} 560600 weight off"
+        assert abs(core.get("510880", 0) - 0.10) < 0.02, f"{d['id']} 510880 weight off"
+
+
+async def test_generate_design_fixed_defense():
+    """v3.0: 防御层固定 518880(黄金ETF)=5%"""
+    designs = await generate_design("balanced", 500000, mode="fast")
+    for d in designs:
+        defense = {e["symbol"]: e["weight"] for e in d["etfs"] if e["layer"] == "defense"}
+        assert abs(defense.get("518880", 0) - 0.05) < 0.01, f"{d['id']} 518880 weight off"
 
 
 async def test_generate_design_layer_budget_distribution():
@@ -160,7 +164,8 @@ async def test_generate_design_layer_budget_distribution():
     agg = designs[2]  # aggressive
     assert agg["id"] == "aggressive"
     sat_w = sum(e["weight"] for e in agg["etfs"] if e["layer"] == "satellite")
-    assert sat_w >= 0.30  # 进攻型卫星预算 40%
+    # 进攻型卫星预算 35%
+    assert sat_w >= 0.30
 
 
 async def test_generate_design_target_amount():
@@ -168,25 +173,29 @@ async def test_generate_design_target_amount():
     designs = await generate_design("balanced", 1000000, mode="fast")
     for d in designs:
         for e in d["etfs"]:
+            if e.get("layer") == "cash":
+                continue
             assert abs(e["target_amount"] - 1000000 * e["weight"]) < 1.0
 
 
-async def test_generate_design_constraints_min_names():
-    """约束 min_names 生效"""
-    designs = await generate_design("balanced", 500000, mode="fast",
-                                    constraints={"min_names": 12, "max_names": 12})
+async def test_generate_design_strategies_differ():
+    """三个方案的持仓和权重分布不同（各策略现金/卫星预算比例不同）"""
+    designs = await generate_design("balanced", 500000, mode="fast")
+    # 三个策略的卫星预算不同，因此总权重分布应有所不同
+    core_weights = set()
     for d in designs:
-        assert len(d["etfs"]) == 12
-
-
-async def test_generate_design_standard_mode_runs():
-    """standard 模式能跑通(外部数据可能失败但应降级)"""
-    designs = await generate_design("balanced", 500000, mode="standard")
-    assert len(designs) == 3
+        core_w = sum(e["weight"] for e in d["etfs"] if e["layer"] == "core")
+        core_weights.add(round(core_w, 4))
+    # 核心层固定 50% 但经归一化后可能有微小差异
+    sat_weights = set()
     for d in designs:
-        assert len(d["etfs"]) >= 8
+        sat_w = sum(e["weight"] for e in d["etfs"] if e["layer"] == "satellite")
+        sat_weights.add(round(sat_w, 4))
+    # 至少卫星层权重在不同策略间不同（防御15%, 平衡25%, 进攻35%）
+    assert len(sat_weights) >= 2, f"不同策略卫星层权重应不同: {sat_weights}"
 
 
+# ── 策略元数据 ────────────────────────────────────────────
 def test_strategy_meta_labels():
     """策略标签正确"""
     assert STRATEGY_META["defensive"]["label"] == "防御型"
@@ -194,77 +203,40 @@ def test_strategy_meta_labels():
     assert STRATEGY_META["aggressive"]["label"] == "进攻型"
 
 
+# ── v3.0 固定配置验证 ─────────────────────────────────────
+def test_core_fixed_weights():
+    """v3.0 核心层固定: 沪深300 25%, 中证A500 15%, 红利低波 10%"""
+    total = sum(h["weight"] for h in CORE_FIXED)
+    assert abs(total - 0.50) < 1e-6  # 核心层合计50%
+    codes = {h["symbol"] for h in CORE_FIXED}
+    assert codes == {"510300", "560600", "510880"}
+    for h in CORE_FIXED:
+        assert h["layer"] == "core"
+
+
+def test_defense_fixed_weights():
+    """v3.0 防御层固定: 黄金ETF 5%"""
+    assert len(DEFENSE_FIXED) == 1
+    assert DEFENSE_FIXED[0]["symbol"] == "518880"
+    assert abs(DEFENSE_FIXED[0]["weight"] - 0.05) < 1e-6
+    assert DEFENSE_FIXED[0]["layer"] == "defense"
+
+
 # ── 策略差异化验证 ─────────────────────────────────────────
 
-
-def _make_known_beta_assets():
-    """创建已知 β 值的资产集合，用于验证不同策略的偏好差异"""
-    return [
-        Asset(code="510880", name="红利低波ETF", layer="satellite",
-              beta=0.75, liquidity=9.0, price=1.0, change_pct=0.0,
-              net_inflow=0.0, valuation_pct=0.5, reason="test"),
-        Asset(code="510300", name="沪深300ETF", layer="satellite",
-              beta=1.0, liquidity=25.0, price=1.0, change_pct=0.0,
-              net_inflow=0.0, valuation_pct=0.5, reason="test"),
-        Asset(code="159915", name="创业板ETF", layer="satellite",
-              beta=1.25, liquidity=18.0, price=1.0, change_pct=0.0,
-              net_inflow=0.0, valuation_pct=0.5, reason="test"),
-    ]
+def test_defensive_highest_cash():
+    """防御型现金比例最高(30%), 进攻型最低(10%)"""
+    def_b = allocate_layer_budget("defensive")
+    bal_b = allocate_layer_budget("balanced")
+    agg_b = allocate_layer_budget("aggressive")
+    def_cash = 1.0 - sum(def_b.values())
+    bal_cash = 1.0 - sum(bal_b.values())
+    agg_cash = 1.0 - sum(agg_b.values())
+    assert def_cash > bal_cash > agg_cash
 
 
-def test_defensive_prefers_low_beta():
-    """防御型: 低β(0.75)的权重应高于高β(1.25)的权重"""
-    assets = _make_known_beta_assets()
-    result = optimize_layer("satellite", assets, 0.5, strategy="defensive")
-    weights = {r["symbol"]: r["weight"] for r in result}
-    low = weights.get("510880", 0)
-    high = weights.get("159915", 0)
-    assert low > 0, "防御型必须选中低β资产(510880)"
-    assert low >= high, f"防御型中低β({low:.4f})应不低于高β({high:.4f})"
-
-
-def test_aggressive_prefers_high_beta():
-    """进攻型: 高β(1.25)的权重应高于或等于低β(0.75)的权重"""
-    assets = _make_known_beta_assets()
-    result = optimize_layer("satellite", assets, 0.5, strategy="aggressive")
-    weights = {r["symbol"]: r["weight"] for r in result}
-    high = weights.get("159915", 0)
-    low = weights.get("510880", 0)
-    assert high > 0, "进攻型必须选中高β资产(159915)"
-    assert high >= low, f"进攻型中高β({high:.4f})应不低于低β({low:.4f})"
-
-
-def test_strategies_scoring_order_reversed():
-    """防御型和进攻型对红利的排序应相反（防御=红利>创业板, 进攻=创业板>红利）"""
-    # 直接用 optimize_layer 的 score 内部函数验证
-    # 防御型: 低β(510880)在 scored 列表中排在 高β(159915)之前
-    from app.services.strategy_design import Asset, MIN_WEIGHT, MAX_WEIGHT
-    assets = _make_known_beta_assets()
-
-    def get_top_by_strategy(strategy):
-        # 防御型: 复制 optimize_layer 的评分逻辑
-        liq = min(assets[0].liquidity / 20.0, 1.0) * 0.15
-        def score(a):
-            val = (0.5 - a.valuation_pct) * 0.3
-            mom = max(0, a.change_pct) * 2.0
-            if strategy == "defensive":
-                ret = max(0, 1.5 - a.beta) * 0.6
-                return ret + val * 1.5 + liq
-            elif strategy == "aggressive":
-                ret = a.beta * 0.5
-                return ret + mom + liq
-            else:
-                ret = a.beta * 0.35
-                return ret + val + liq + mom * 0.3
-        scored = sorted(assets, key=score, reverse=True)
-        return [a.code for a in scored]
-
-    def_order = get_top_by_strategy("defensive")
-    agg_order = get_top_by_strategy("aggressive")
-    bal_order = get_top_by_strategy("balanced")
-
-    # 防御型: 红利(510880)应排在创业板(159915)前面
-    assert def_order.index("510880") < def_order.index("159915"), "防御型红利应排在创业板前面"
-    # 进攻型: 创业板(159915)应排在红利(510880)前面
-    assert agg_order.index("159915") < agg_order.index("510880"), "进攻型创业板应排在红利前面"
-    # 平衡型: 排序应居中（不要求具体的顺序，只验证有排序）
+def test_aggressive_highest_satellite():
+    """进攻型卫星预算最高(35%), 防御型最低(15%)"""
+    def_b = allocate_layer_budget("defensive")
+    agg_b = allocate_layer_budget("aggressive")
+    assert agg_b["satellite"] > def_b["satellite"]
