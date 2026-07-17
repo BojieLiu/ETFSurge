@@ -6,6 +6,8 @@
 
 from typing import Any
 
+import asyncio
+
 from sqlalchemy import select
 
 from ..database import async_session
@@ -24,10 +26,15 @@ logger = get_logger(__name__)
 
 
 async def _call(fn, *args, timeout: int = 8):
-    """包一层 run_sync，统一异常处理为返回 None。"""
+    """包一层 run_sync，统一异常处理为返回 None。
+
+    显式捕获 CancelledError —— 在 Python 3.8+ 中它继承自
+    BaseException 而非 Exception，外层 wait_for 超时会触发它，
+    漏接会导致异常冒泡到 APScheduler 任务边界。
+    """
     try:
         return await run_sync(fn, *args, timeout=timeout)
-    except Exception:
+    except (Exception, asyncio.CancelledError):
         return None
 
 

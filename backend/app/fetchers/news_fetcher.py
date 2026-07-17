@@ -25,17 +25,23 @@ def _safe(fn, timeout: int = _SRC_TIMEOUT):
     return run_in_thread(fn, timeout=timeout)
 
 
-def _ak(fn) -> list[dict[str, Any]]:
-    """调用一个 akshare 新闻函数,失败返回空。"""
-    try:
+_AK_TIMEOUT = 8
+
+
+def _ak(fn, timeout: int = _AK_TIMEOUT) -> list[dict[str, Any]]:
+    """调用一个 akshare 新闻函数, 带超时保护, 失败返回空。
+
+    将 akshare 调用通过 run_in_thread 提交到全局线程池,
+    避免个别 akshare 接口挂死导致整个工作线程阻塞。
+    """
+    def _p():
         with no_proxy():
             import akshare as ak
-
             df = fn(ak)
         _decode_df(df)
         return df.to_dict(orient="records")
-    except Exception:
-        return []
+    result = run_in_thread(_p, timeout=timeout)
+    return result or []
 
 
 def _cached(key: str, producer, ttl_key: str = "news_headlines") -> list[dict[str, Any]]:

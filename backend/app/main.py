@@ -24,12 +24,12 @@ async def lifespan(app: FastAPI):
     await init_db()
     await redis_cache.init()
 
-    # 启动时后台预热行情缓存（不阻塞启动，12s 超时）
+    # 启动时后台预热行情缓存（不阻塞启动，25s 超时）
     async def _warmup_market_cache():
         try:
-            await asyncio.wait_for(refresh_market_cache(), timeout=12)
+            await asyncio.wait_for(refresh_market_cache(), timeout=25)
             logger.info("行情缓存预热完成")
-        except Exception:
+        except (Exception, asyncio.CancelledError):
             logger.exception("行情缓存预热失败（不影响启动）")
 
     asyncio.create_task(_warmup_market_cache())
@@ -37,14 +37,14 @@ async def lifespan(app: FastAPI):
     try:
         async def _scheduler_wrapper():
             try:
-                await asyncio.wait_for(refresh_market_cache(), timeout=12)
-            except Exception:
+                await asyncio.wait_for(refresh_market_cache(), timeout=25)
+            except (Exception, asyncio.CancelledError):
                 logger.exception("定时刷新行情缓存失败")
 
         async def _news_scheduler_wrapper():
             try:
                 await asyncio.wait_for(refresh_news_cache(), timeout=30)
-            except Exception:
+            except (Exception, asyncio.CancelledError):
                 logger.exception("定时刷新资讯缓存失败")
 
         from apscheduler.schedulers.asyncio import AsyncIOScheduler

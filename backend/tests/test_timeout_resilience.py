@@ -1,0 +1,162 @@
+"""TDD tests for timeout & cancellation resilience fixes.
+
+All external calls (mootdx, akshare, feedparser) are mocked;
+no network needed.
+"""
+import asyncio
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from app.core.async_utils import run_sync
+from app.services.market_service import _call
+
+
+# ── Fix 3: _call catches CancelledError ──────────────────────────
+
+
+async def test_call_returns_none_on_cancelled_error():
+    """_call must return None when CancelledError escapes run_sync.
+
+    In Python 3.8+ CancelledError inherits from BaseException,
+    not Exception — a bare ``except Exception`` would miss it.
+    """
+    with patch("app.services.market_service.run_sync",
+               side_effect=asyncio.CancelledError()):
+        result = await _call(lambda: None)
+    assert result is None
+
+
+async def test_call_returns_none_on_timeout():
+    """_call must return None when run_sync raises TimeoutError."""
+    with patch("app.services.market_service.run_sync",
+               side_effect=asyncio.TimeoutError()):
+        result = await _call(lambda: None)
+    assert result is None
+
+
+async def test_call_passthrough_on_success():
+    """_call must return the normal result on success."""
+    result = await _call(lambda: 42)
+    assert result == 42
+
+
+# ── Fix 1: mootdx socket timeout ─────────────────────────────────
+
+
+def test_mootdx_has_socket_timeout(monkeypatch):
+    """_mootdx() must pass timeout to Quotes.factory.
+
+    The timeout (default 6 s) must be less than the async
+    _call timeout (8 s) so mootdx errors out before asyncio
+    cancels the future.
+    """
+    import app.fetchers.china_market as cm
+    from app.fetchers.china_market import _mootdx, _MOOTDX_TIMEOUT
+
+    # Reset singleton so a fresh client is created
+    monkeypatch.setattr(cm, "_MOOTDX_CLIENT", None)
+    # Quotes is lazy-imported inside _mootdx() → patch at source
+    mock_factory = MagicMock(return_value=MagicMock())
+    monkeypatch.setattr("mootdx.quotes.Quotes.factory", mock_factory)
+
+    _mootdx()
+    mock_factory.assert_called_once_with(market='std', timeout=_MOOTDX_TIMEOUT)
+    assert _MOOTDX_TIMEOUT < 8, "mootdx timeout must be less than _call timeout (8 s)"
+
+
+# ── Fix 2: _MOOTDX_LOCK non-blocking acquire ────────────────────
+
+
+def test_mootdx_locked_raises_on_timeout(monkeypatch):
+    """_mootdx_locked() must raise TimeoutError when lock is held.
+
+    Prevents cascading thread blockage when a previous mootdx
+    call hangs while holding the lock.
+    """
+    import app.fetchers.china_market as cm
+    from app.fetchers.china_market import _mootdx_locked
+
+    # Pre-acquire the real lock so the context manager times out
+    acquired = cm._MOOTDX_LOCK.acquire(timeout=2)
+    assert acquired, "should have acquired the test lock"
+
+    with pytest.raises(TimeoutError):
+        with _mootdx_locked():
+            pass
+
+    cm._MOOTDX_LOCK.release()
+
+
+def test_mootdx_locked_releases_on_success():
+    """_mootdx_locked() must release the lock after the critical section."""
+    from app.fetchers.china_market import _MOOTDX_LOCK, _mootdx_locked
+
+    with _mootdx_locked():
+        assert _MOOTDX_LOCK.locked()
+    assert not _MOOTDX_LOCK.locked()
+
+
+# ── Fix 4: _ak() timeout wrapping ────────────────────────────────
+
+
+def test_ak_returns_empty_on_run_in_thread_timeout(monkeypatch):
+    """_ak() must return [] when run_in_thread times out.
+
+    See news_fetcher._ak — akshare calls are now wrapped in
+    run_in_thread to prevent hanging worker threads.
+    """
+    from app.fetchers.news_fetcher import _ak
+
+    monkeypatch.setattr(
+        "app.fetchers.news_fetcher.run_in_thread",
+        lambda fn, timeout=8: None,  # simulate timeout → None
+    )
+    assert _ak(lambda ak: [{"title": "test"}]) == []
+
+
+def test_ak_returns_data_on_success(monkeypatch):
+    """_ak() must return akshare data when run_in_thread succeeds."""
+    from app.fetchers.news_fetcher import _ak
+    fake_data = [{"title": "news", "content": "body"}]
+
+    monkeypatch.setattr(
+        "app.fetchers.news_fetcher.run_in_thread",
+        lambda fn, timeout=8: fake_data,
+    )
+    assert _ak(lambda ak: fake_data) == fake_data
+
+
+def test_ak_calls_run_in_thread_with_timeout(monkeypatch):
+    """_ak() must pass its timeout to run_in_thread."""
+    from app.fetchers.news_fetcher import _ak
+
+    captured = {}
+
+    def _fake_run_in_thread(fn, timeout=8):
+        captured["timeout"] = timeout
+        return []
+
+    monkeypatch.setattr(
+        "app.fetchers.news_fetcher.run_in_thread",
+        _fake_run_in_thread,
+    )
+    _ak(lambda ak: [], timeout=5)
+    assert captured["timeout"] == 5
+
+
+# ── async_utils: run_sync timeout behavior ──────────────────────
+
+
+async def test_run_sync_timeout_raises_timeout_error():
+    """run_sync must raise asyncio.TimeoutError when fn exceeds timeout."""
+    def _slow():
+        import time
+        time.sleep(10)
+
+    start = asyncio.get_event_loop().time()
+    with pytest.raises(asyncio.TimeoutError):
+        await run_sync(_slow, timeout=0.5)
+    elapsed = asyncio.get_event_loop().time() - start
+    # Should return near the timeout, not the full 10 s
+    assert elapsed < 5, f"run_sync blocked for {elapsed:.1f}s instead of timing out"

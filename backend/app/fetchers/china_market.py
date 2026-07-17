@@ -36,25 +36,49 @@ def _session():
 
 # ── mootdx helper ────────────────────────────────────────────────
 
+import contextlib
 import threading
 
 _MOOTDX_CLIENT = None
 _MOOTDX_LOCK = threading.Lock()
+
+# mootdx socket read/write timeout (must be less than the async
+# _call timeout=8 so mootdx errors out before asyncio cancels)
+_MOOTDX_TIMEOUT = 6
+# max seconds to wait for the mootdx lock before falling back
+_MOOTDX_LOCK_TIMEOUT = 10
 
 
 def _mootdx():
     global _MOOTDX_CLIENT
     if _MOOTDX_CLIENT is None:
         from mootdx.quotes import Quotes
-        _MOOTDX_CLIENT = Quotes.factory(market='std')
+        _MOOTDX_CLIENT = Quotes.factory(market='std', timeout=_MOOTDX_TIMEOUT)
     return _MOOTDX_CLIENT
+
+
+@contextlib.contextmanager
+def _mootdx_locked():
+    """Acquire _MOOTDX_LOCK with timeout to prevent cascading blockage.
+
+    When a previous mootdx call hangs (holding the lock), this will
+    time out after _MOOTDX_LOCK_TIMEOUT seconds and let the caller
+    fall through to the next data-source tier instead of blocking
+    the entire worker thread indefinitely.
+    """
+    if not _MOOTDX_LOCK.acquire(timeout=_MOOTDX_LOCK_TIMEOUT):
+        raise TimeoutError("mootdx lock acquisition timed out")
+    try:
+        yield
+    finally:
+        _MOOTDX_LOCK.release()
 
 
 def _mootdx_realtime(symbols: list[str]) -> list[dict[str, Any]]:
     if not symbols:
         return []
     try:
-        with _MOOTDX_LOCK:
+        with _mootdx_locked():
             client = _mootdx()
             df = client.quotes(symbol=symbols)
         if df is None or df.empty:
@@ -85,7 +109,7 @@ def _mootdx_history(symbol: str, period: str = "daily") -> list[dict[str, Any]]:
     freq = freq_map.get(period, 9)
     count = 500
     try:
-        with _MOOTDX_LOCK:
+        with _mootdx_locked():
             client = _mootdx()
             df = client.bars(symbol=symbol, frequency=freq, start=0, count=count)
         if df is None or df.empty:
@@ -360,7 +384,7 @@ def fetch_index_realtime() -> list[dict[str, Any]]:
                    "000905": "中证500", "000852": "中证1000"}
         codes = list(indices.keys())
         try:
-            with _MOOTDX_LOCK:
+            with _mootdx_locked():
                 client = _mootdx()
                 df = client.index(symbol=codes)
             if df is not None and not df.empty:
