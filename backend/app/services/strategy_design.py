@@ -76,6 +76,7 @@ CORE_MIN_EACH = 0.05  # 各自最小权重
 
 # ── 候选标的池 (code -> 元数据) ─────────────────────────────
 # layer: 默认归属层; beta: 相对贝塔(用于优化器打分); liquidity: 日均成交额(亿)
+# DEPRECATED: 已被PoolManager取代(S3). 保留仅供向后兼容.
 CANDIDATE_POOL: dict[str, dict[str, Any]] = {
     # ── 核心层：宽基指数 ──
     "510300": {"name": "沪深300ETF", "layer": "core", "beta": 1.0, "liquidity": 25.0,

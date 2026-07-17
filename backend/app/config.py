@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     
     deepseek_api_key: str = ""
     tushare_token: str = ""
+    fred_api_key: str = ""
     llm_provider: str = "deepseek"
     llm_model: str = "deepseek-v4-flash"
     # 日志：级别（DEBUG/INFO/WARNING/ERROR）与可选日志文件路径

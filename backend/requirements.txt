@@ -15,3 +15,5 @@ requests>=2.28
 levistock>=0.1.0
 pypinyin>=0.53
 
+
+scipy>=1.14.0
