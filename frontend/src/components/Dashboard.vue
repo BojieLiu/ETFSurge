@@ -1,44 +1,7 @@
 <template>
   <div class="dashboard">
-    <!-- Global Indices - Ultra Compact -->
-    <section class="card global-indices-compact">
-      <div class="card-header-compact">
-        <h2 class="card-title">
-          <span class="card-title-icon" aria-hidden="true">🌐</span>
-          全球主流指数
-        </h2>
-        <div class="card-actions-compact">
-          <span class="status-badge" v-if="marketTimer" aria-live="polite">
-            <span class="status-dot" aria-hidden="true"></span>
-            自动刷新
-          </span>
-          <AppButton variant="ghost" size="xs" @click="fetchGlobalIndices" :loading="marketLoading">
-            刷新
-          </AppButton>
-        </div>
-      </div>
+    <GlobalIndicesStrip />
 
-      <div v-if="hasGlobalIndices" class="indices-scroll">
-        <div
-          class="index-card-compact"
-          v-for="idx in Object.values(globalIndices).flat()"
-          :key="idx.symbol"
-          :class="{ unavailable: !idx.available }"
-        >
-          <span class="index-name-compact">{{ idx.name }}</span>
-          <span class="index-price-compact" v-if="idx.available">{{ formatPrice(idx.price) }}</span>
-          <span class="index-price-compact muted" v-else>—</span>
-          <span class="index-change-compact" v-if="idx.available" :class="changeClass(idx.change_pct)">
-            {{ formatChange(idx.change_pct) }}
-          </span>
-          <span class="index-change-compact muted" v-else>暂无</span>
-        </div>
-      </div>
-      
-      <div v-else class="indices-empty-compact">
-        暂无数据，点击刷新获取
-      </div>
-    </section>
 
     <!-- Portfolio Type Tabs -->
     <div class="tabs" role="tablist" aria-label="组合类型">
@@ -413,6 +376,7 @@ import { changeClass } from '../utils/changeClass'
 import { useToastStore } from '../stores/toast'
 import { useMarketStore } from '../stores/market'
 import logger from '../utils/logger'
+import GlobalIndicesStrip from './GlobalIndicesStrip.vue'
 import AppButton from './ui/AppButton.vue'
 import AppInput from './ui/AppInput.vue'
 import Skeleton from './ui/Skeleton.vue'
@@ -430,17 +394,12 @@ const allocationOn = ref({ allocations: [] })
 const allocationOff = ref({ allocations: [] })
 const pnlOnData = ref({ items: [] })
 const pnlOffData = ref({ items: [] })
-const globalIndices = ref({})
-const marketLoading = ref(false)
-const marketTimer = ref(null)
 
 const tabs = [
   { value: 'combined', label: '综合' },
   { value: 'on_exchange', label: '场内' },
   { value: 'off_exchange', label: '场外' }
 ]
-
-const hasGlobalIndices = computed(() => Object.values(globalIndices.value).flat().length > 0)
 
 const loading = computed(() => allocationOn.value.allocations.length === 0 && allocationOff.value.allocations.length === 0)
 
@@ -492,26 +451,7 @@ const formatNum = (n) => {
   } catch {
     return v.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
   }
-}
-const formatPrice = (n) => (n || 0).toFixed(2)
-const formatChange = (n, isAmount = false) => {
-  const val = n || 0
-  const prefix = val >= 0 && !isAmount ? '+' : ''
-  const suffix = isAmount ? '' : '%'
-  return `${prefix}${val.toFixed(2)}${suffix}`
-}
 
-const fetchGlobalIndices = async () => {
-  marketLoading.value = true
-  try {
-    const res = await marketApi.indicesGlobal()
-    globalIndices.value = res.data?.indices || res.indices || {}
-  } catch (e) {
-    logger.error('Failed to fetch global indices:', e)
-  } finally {
-    marketLoading.value = false
-  }
-}
 
 const refreshAll = async () => {
   await Promise.all([
