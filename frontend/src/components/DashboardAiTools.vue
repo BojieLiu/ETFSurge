@@ -1449,155 +1449,7 @@ async function checkStrategy() {
   justify-content: center;
 }
 
-/* Markdown Report Styles */
-.markdown-body {
-  font-size: var(--font-size-sm);
-  line-height: 1.7;
-  color: var(--color-text-primary);
-  padding: var(--space-3) 0;
-}
 
-.markdown-body h1 {
-  font-size: var(--font-size-xl);
-  font-weight: var(--font-weight-bold);
-  margin: var(--space-6) 0 var(--space-3);
-  padding-bottom: var(--space-2);
-  border-bottom: 2px solid var(--color-primary);
-  color: var(--color-text-primary);
-}
-
-.markdown-body h2 {
-  font-size: var(--font-size-lg);
-  font-weight: var(--font-weight-semibold);
-  margin: var(--space-5) 0 var(--space-3);
-  padding: var(--space-2) var(--space-3);
-  background: var(--color-bg-tertiary);
-  border-left: 3px solid var(--color-primary);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  color: var(--color-text-primary);
-}
-
-.markdown-body h3 {
-  font-size: var(--font-size-base);
-  font-weight: var(--font-weight-semibold);
-  margin: var(--space-4) 0 var(--space-2);
-  color: var(--color-primary);
-}
-
-/* Report tables — fixed layout with visible borders */
-.markdown-body table {
-  width: 100%;
-  max-width: 100%;
-  border-collapse: collapse;
-  margin: var(--space-3) 0 var(--space-4);
-  font-size: var(--font-size-sm);
-  table-layout: fixed;
-}
-
-.markdown-body thead {
-  display: table-header-group;
-}
-
-.markdown-body tbody {
-  display: table-row-group;
-}
-
-.markdown-body tr {
-  display: table-row;
-}
-
-.markdown-body th {
-  background: var(--color-bg-tertiary);
-  font-weight: var(--font-weight-semibold);
-  padding: var(--space-2) var(--space-3);
-  text-align: left;
-  border: 1px solid var(--color-border);
-  color: var(--color-text-primary);
-  font-size: var(--font-size-sm);
-  word-break: break-word;
-  hyphens: auto;
-}
-
-.markdown-body td {
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--color-border);
-  vertical-align: top;
-  word-break: break-word;
-  hyphens: auto;
-}
-
-.markdown-body tr:nth-child(even) {
-  background: var(--color-bg-secondary);
-}
-
-.markdown-body tr:hover {
-  background: var(--color-bg-tertiary);
-}
-
-/* Let the container scroll if table is too wide */
-.design-report {
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-}
-
-/* Keep numeric metrics aligned */
-.markdown-body td:last-child,
-.markdown-body td:nth-last-child(2) {
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-
-.markdown-body blockquote {
-  margin: var(--space-3) 0;
-  padding: var(--space-3) var(--space-4);
-  background: var(--color-bg-tertiary);
-  border-left: 4px solid var(--color-primary);
-  border-radius: var(--radius-sm);
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-sm);
-  line-height: 1.6;
-}
-
-.markdown-body ul {
-  padding-left: var(--space-5);
-  margin: var(--space-2) 0;
-}
-
-.markdown-body li {
-  margin-bottom: var(--space-1);
-  line-height: 1.6;
-}
-
-.markdown-body strong {
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text);
-}
-
-.markdown-body code {
-  background: var(--color-bg-tertiary);
-  padding: 1px 4px;
-  border-radius: 3px;
-  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
-  font-size: 0.9em;
-  color: var(--color-primary);
-}
-
-.markdown-body hr {
-  border: none;
-  border-top: 1px solid var(--color-border);
-  margin: var(--space-5) 0;
-}
-
-/* Better paragraph spacing */
-.markdown-body p {
-  margin: var(--space-2) 0;
-  line-height: 1.7;
-}
-
-/* Compact spacing for report content */
-.markdown-body > *:first-child {
-  margin-top: 0;
-}
 
 /* History Panel */
 .history-panel {
@@ -1719,5 +1571,131 @@ async function checkStrategy() {
 
 .history-item:hover .history-detail-link {
   opacity: 1;
+}
+</style>
+
+<!-- Non-scoped: styles for v-html rendered markdown content must be non-scoped -->
+<style>
+/* Markdown Report Styles */
+.markdown-body {
+  font-size: var(--font-size-sm);
+  line-height: 1.7;
+  color: var(--color-text-primary);
+  padding: var(--space-3) 0;
+}
+
+.markdown-body h1 {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  margin: var(--space-6) 0 var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: 2px solid var(--color-primary);
+  color: var(--color-text-primary);
+}
+
+.markdown-body h2 {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  margin: var(--space-5) 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-tertiary);
+  border-left: 3px solid var(--color-primary);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: var(--color-text-primary);
+}
+
+.markdown-body h3 {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  margin: var(--space-4) 0 var(--space-2);
+  color: var(--color-primary);
+}
+
+/* Report tables */
+.markdown-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: var(--space-3) 0 var(--space-4);
+  font-size: var(--font-size-sm);
+}
+
+.markdown-body th {
+  background: var(--color-bg-tertiary);
+  font-weight: var(--font-weight-semibold);
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.markdown-body td {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  vertical-align: top;
+}
+
+.markdown-body tr:nth-child(even) {
+  background: var(--color-bg-secondary);
+}
+
+.markdown-body tr:hover {
+  background: var(--color-bg-tertiary);
+}
+
+/* Let the container scroll if table is too wide */
+.design-report {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.markdown-body blockquote {
+  margin: var(--space-3) 0;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-bg-tertiary);
+  border-left: 4px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.6;
+}
+
+.markdown-body ul {
+  padding-left: var(--space-5);
+  margin: var(--space-2) 0;
+}
+
+.markdown-body li {
+  margin-bottom: var(--space-1);
+  line-height: 1.6;
+}
+
+.markdown-body strong {
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+}
+
+.markdown-body code {
+  background: var(--color-bg-tertiary);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  font-size: 0.9em;
+  color: var(--color-primary);
+}
+
+.markdown-body hr {
+  border: none;
+  border-top: 1px solid var(--color-border);
+  margin: var(--space-5) 0;
+}
+
+.markdown-body p {
+  margin: var(--space-2) 0;
+  line-height: 1.7;
+}
+
+.markdown-body > *:first-child {
+  margin-top: 0;
 }
 </style>
