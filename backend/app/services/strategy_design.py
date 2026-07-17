@@ -246,8 +246,45 @@ def allocate_layer_budget(risk_profile: str) -> dict[str, float]:
     return dict(meta["layer_budget"])
 
 
-# ── 4. optimize_layer: 层内权重优化 ──────────────────────────
-# ── 5. generate_design: 主入口 ───────────────────────────────
+# ── 4. v3.0: 核心+防御固定, 卫星幂律分配 ───────────────────────
+CORE_FIXED = [
+    {"symbol": "510300", "name": "沪深300ETF", "layer": "core", "weight": 0.25},
+    {"symbol": "560600", "name": "中证A500ETF", "layer": "core", "weight": 0.15},
+    {"symbol": "510880", "name": "红利低波ETF", "layer": "core", "weight": 0.10},
+]
+
+DEFENSE_FIXED = [
+    {"symbol": "518880", "name": "黄金ETF", "layer": "defense", "weight": 0.05},
+]
+
+
+def _extract_factor(values: list[float]) -> list[float]:
+    if not values:
+        return []
+    mean = sum(values) / len(values)
+    std = (sum((v - mean)**2 for v in values) / len(values))**0.5
+    if std == 0:
+        return [0.0] * len(values)
+    return [max(-3.0, min(3.0, (v - mean) / std)) for v in values]
+
+
+def power_law_weights(scores: list[float], budget: float) -> list[float]:
+    import math
+    if not scores:
+        return []
+    max_s = max(scores)
+    exps = [math.exp((s - max_s) * 0.08) for s in scores]
+    total_exp = sum(exps)
+    result = [(e / total_exp) * budget for e in exps]
+    result = [max(w, 0.01) for w in result]
+    total_r = sum(result)
+    if total_r > 0:
+        result = [w * budget / total_r for w in result]
+    result = [min(w, 0.30) for w in result]
+    return result
+
+
+# ── 5. generate_design: 主入口 (v3.0) ───────────────────────
 async def generate_design(
     risk_profile: str = "balanced",
     capital: float = 500000,
@@ -256,77 +293,64 @@ async def generate_design(
     db=None,
 ) -> list[dict[str, Any]]:
     """
-    生成三套组合方案（防御/平衡/进攻）。
-    mode='fast' 使用固定候选池 (<2s)。
-    mode='standard' 使用全市场扫描 + 卫星层两轮评分 (~10s)。
+    v3.0: 生成三套组合方案（防御/平衡/进攻）。
+    核心+防御层固定比例，卫星层用幂律分配。
     """
     constraints = constraints or {}
-    min_names = constraints.get("min_names", MIN_NAMES)
-    max_names = constraints.get("max_names", MAX_NAMES)
 
-    # 1. 数据补全
-    if mode == "fast":
-        ctx = _build_default_context()
-    else:
-        ctx = _build_default_context()
+    # 1. 扫描全市场 ETF（若 standard 模式）
+    scanned_satellite: list[Asset] = []
     if mode == "standard":
-        # standard 模式: 全市场扫描 (含数据采集), 跳过 enrich_market_context 的重复采集
-        from ..fetchers.etf_scanner import full_pipeline as scan_full_pipeline
-
         try:
+            from ..fetchers.etf_scanner import full_pipeline as scan_full_pipeline
             scanned = await asyncio.to_thread(scan_full_pipeline)
+            scanned_satellite = [
+                Asset(code=item["symbol"], name=item.get("name", ""),
+                      layer=item.get("layer", "satellite"), beta=1.0,
+                      liquidity=item.get("amount", 0) / 1e8, price=item.get("price", 1.0),
+                      change_pct=item.get("change_pct", 0) / 100.0,
+                      net_inflow=0.0, valuation_pct=0.5, reason=item.get("name", ""))
+                for item in (scanned.get("satellite") or [])
+            ]
         except Exception as e:
-            logger.warning("[generate_design] scan_full_pipeline failed: %s, falling back to default pool", e)
-            scanned = {"core": [], "satellite": [], "defense": []}
+            logger.warning("scan failed: %s", e)
 
-        if scanned.get("core") or scanned.get("satellite") or scanned.get("defense"):
-            ctx = MarketContext()
-            for layer_name, items in scanned.items():
-                for item in items:
-                    ctx.assets[item["symbol"]] = Asset(
-                        code=item["symbol"],
-                        name=item.get("name", ""),
-                        layer=layer_name,
-                        beta=1.0,
-                        liquidity=item.get("amount", 0) / 1e8,
-                        price=item.get("price", 1.0),
-                        change_pct=item.get("change_pct", 0) / 100.0,
-                        net_inflow=0.0,
-                        valuation_pct=0.5,
-                        reason=item.get("name", ""),
-                    )
-
-    # 2. 分类
-    layers = classify_assets(ctx)
-
-    # 3. 为三套策略分别生成
+    # 2. 为三套策略分别生成
     strategies = []
     for key in ["defensive", "balanced", "aggressive"]:
         meta = STRATEGY_META[key]
         budgets = allocate_layer_budget(key)
 
-        holdings: list[dict] = []
-        # 层内优化
-        for layer in ["core", "satellite", "defense"]:
-            assets = layers.get(layer, [])
-            if not assets:
-                continue
-            # 为该层按比例选标的: 核心全选, 卫星/防御按预算截顶
-            budget = budgets.get(layer, 0.0)
-            layer_holdings = optimize_layer(layer, assets, budget, key, constraints)
-            holdings.extend(layer_holdings)
+        # 核心层: 固定比例
+        holdings = [dict(h) for h in CORE_FIXED]
 
-        # 4. 校验标的总数 8~15
-        holdings = _enforce_name_count(holdings, min_names, max_names, budgets)
+        # 防御层: 固定比例
+        holdings.extend(dict(h) for h in DEFENSE_FIXED)
 
-        # 5. 归一化权重到 100% (用高精度计算, 最后修正舍入误差)
-        total_w = sum(h["weight"] for h in holdings)
-        if total_w > 0:
-            raw = [h["weight"] / total_w for h in holdings]
-            # 四舍五入到 4 位
+        # 卫星层: 幂律分配
+        s_budget = budgets.get("satellite", 0.0)
+        if s_budget > 0 and scanned_satellite:
+            sat_assets = scanned_satellite[:10]
+            liquidity = [a.liquidity for a in sat_assets]
+            scores = _extract_factor(liquidity)
+            weights = power_law_weights(scores, s_budget)
+            for i, a in enumerate(sat_assets):
+                if i < len(weights):
+                    holdings.append({
+                        "symbol": a.code,
+                        "name": a.name,
+                        "layer": "satellite",
+                        "weight": round(weights[i], 4),
+                        "selection_rationale": f"卫星候选 #{i+1}",
+                    })
+
+        # 归一化权重到 100%
+        total = sum(h["weight"] for h in holdings)
+        if total > 0:
+            holdings = [dict(h) for h in holdings]
+            raw = [h["weight"] / total for h in holdings]
             rounded = [round(w, 4) for w in raw]
             diff = round(1.0 - sum(rounded), 4)
-            # 把误差补到权重最大的那一项, 保证加总恰好=1.0
             if diff != 0.0:
                 max_i = max(range(len(rounded)), key=lambda i: rounded[i])
                 rounded[max_i] = round(rounded[max_i] + diff, 4)
@@ -334,7 +358,7 @@ async def generate_design(
                 h["weight"] = w
                 h["target_amount"] = round(capital * w, 2)
 
-        strategy = {
+        strategies.append({
             "id": meta["id"],
             "label": meta["label"],
             "color": meta["color"],
@@ -346,11 +370,9 @@ async def generate_design(
             "expected_characteristics": meta["expected_characteristics"],
             "layer_budget": meta["layer_budget"],
             "etfs": holdings,
-        }
-        strategies.append(strategy)
+        })
 
     return strategies
-
 
 def _enforce_name_count(
     holdings: list[dict], min_names: int, max_names: int, budgets: dict
