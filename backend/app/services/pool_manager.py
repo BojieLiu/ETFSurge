@@ -22,6 +22,7 @@ from datetime import datetime
 from ..fetchers import etf_scanner
 from ..factors.factor_registry import registry as factor_registry
 from .etf_classifier import classifier as etf_classifier
+from .pool_audit import pool_audit
 
 logger = logging.getLogger(__name__)
 
@@ -186,6 +187,9 @@ class PoolManager:
         diff = self._compute_diff(old_by_code)
         diff.version = self._version
         diff.timestamp = datetime.now().isoformat()
+
+        # 9. 审计日志
+        pool_audit.log_refresh(diff)
 
         logger.info("PoolManager: refresh complete (v%d, %d total)",
                      self._version,
