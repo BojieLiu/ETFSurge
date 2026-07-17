@@ -1,4 +1,4 @@
-﻿# ETF Surge 启动脚本
+# ETF Surge 启动脚本
 #  无参数 / -Local  -> 本地开发:后端 uvicorn --reload + 前端 npm run dev
 #  -Docker          -> docker compose up -d --build
 #  -NoOpen          -> 不自动打开浏览器
