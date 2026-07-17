@@ -1,22 +1,13 @@
 <template>
-  <section class="card core-actions" :class="{ 'core-actions--collapsed': collapsed }">
-    <div class="card-header" @click="toggleCollapse">
+  <section class="card core-actions">
+    <div class="card-header">
       <h2 class="card-title">
         <span class="card-title-icon" aria-hidden="true">&#9889;</span>
         AI 智能工具
       </h2>
-      <div class="card-header-right">
-        <span v-if="collapsed && activeCoreFeature" class="header-hint">
-          {{ activeCoreFeature === 'design' ? '智能设计 - 点击展开' : '策略检查 - 点击展开' }}
-        </span>
-        <span v-else-if="collapsed" class="header-hint">点击展开工具</span>
-        <button class="collapse-toggle" @click.stop="toggleCollapse" :aria-label="collapsed ? '展开AI工具' : '收起AI工具'" :title="collapsed ? '展开' : '收起'">
-          <span class="collapse-icon" :class="{ 'collapse-icon--open': !collapsed }" aria-hidden="true">&#9662;</span>
-        </button>
-      </div>
     </div>
 
-    <div v-show="!collapsed" class="core-actions-body">
+    <div class="core-actions-body">
       <!-- Feature Entrances -->
       <div v-if="!activeCoreFeature" class="core-actions-grid">
         <button class="core-action-btn" @click="enterDesignMode" :disabled="designStep === 'loading'" aria-label="智能设计 ETF 组合方案">
@@ -59,7 +50,7 @@
               <span class="history-date">{{ formatDate(h.created_at) }}</span>
               <span class="history-capital">{{ (h.capital / 10000).toFixed(0) }}万</span>
               <span class="history-style">{{ h.risk_profile }}</span>
-              <span class="history-arrow">&#8594;</span>
+              <span class="history-detail-link">查看详情</span>
             </div>
           </div>
         </div>
@@ -148,11 +139,16 @@
           <button class="design-tab" :class="{ active: designTab === 'cards' }" @click="designTab = 'cards'">&#128202; 方案卡片</button>
         </div>
 
+        <!-- History badge -->
+        <div v-if="designResult?.is_history" class="history-badge">
+          &#128214; 历史方案（{{ formatDate(designResult.generated_at) }}）
+        </div>
+
         <!-- Tab: Report -->
         <div v-if="designTab === 'report'" class="design-report">
           <div class="markdown-body" v-html="designReportHtml"></div>
           <div class="panel-footer-actions">
-            <AppButton variant="ghost" @click="resetDesign">重新生成</AppButton>
+            <AppButton variant="ghost" @click="regenerateDesign">重新生成</AppButton>
             <AppButton variant="ghost" @click="exitCoreFeature">完成</AppButton>
           </div>
         </div>
@@ -259,7 +255,7 @@
           </div>
 
           <div class="design-cards-actions">
-            <AppButton variant="ghost" @click="resetDesign">重新生成</AppButton>
+            <AppButton variant="ghost" @click="regenerateDesign">重新生成</AppButton>
             <AppButton variant="ghost" @click="toggleHistory">历史记录</AppButton>
             <AppButton variant="ghost" @click="exitCoreFeature">完成</AppButton>
           </div>
@@ -326,6 +322,7 @@ import { marked } from 'marked'
 import { portfolioApi } from '../api'
 import { usePortfolioStore } from '../stores/portfolio'
 import { useToastStore } from '../stores/toast'
+import { formatDate } from '../utils/formatDate'
 import AppButton from './ui/AppButton.vue'
 import AppInput from './ui/AppInput.vue'
 
@@ -334,7 +331,6 @@ const store = usePortfolioStore()
 const toast = useToastStore()
 
 // State
-const collapsed = ref(false)
 const activeCoreFeature = ref(null)
 const designStep = ref('wizard')
 const designCapital = ref(500000)
@@ -509,28 +505,18 @@ function generateDesignReport(plans, marketContext) {
 }
 
 // Actions
-function toggleCollapse() {
-  collapsed.value = !collapsed.value
-  if (collapsed.value) {
-    activeCoreFeature.value = null
-  }
-}
-
 function enterDesignMode() {
   activeCoreFeature.value = 'design'
   designStep.value = 'wizard'
   designCapital.value = 500000
-  collapsed.value = false
 }
 
 function enterStrategyMode() {
   activeCoreFeature.value = 'strategy'
-  collapsed.value = false
 }
 
 function enterHistoryMode() {
   activeCoreFeature.value = 'history'
-  collapsed.value = false
   if (!historyLoaded.value) {
     loadHistoryList()
   }
@@ -551,7 +537,9 @@ async function loadHistoryList() {
 
 function exitCoreFeature() {
   activeCoreFeature.value = null
-  // 取消时不收起工具区，直接返回工具列表
+  designResult.value = null
+  designStep.value = 'wizard'
+  designCapital.value = 500000
 }
 
 function resetDesign() {
@@ -560,16 +548,20 @@ function resetDesign() {
   designCapital.value = 500000
 }
 
+function regenerateDesign() {
+  // 直接用当前本金重新执行生成，不回到向导页
+  designResult.value = null
+  startDesign()
+}
+
 // History
 const showHistory = ref(false)
 const designHistoryList = ref([])
 const historyLoaded = ref(false)
 const historyLoading = ref(false)
 
-function formatDate(dateStr) {
-  if (!dateStr) return ''
-  try { return dateStr.slice(0, 10) + ' ' + dateStr.slice(11, 16) } catch (e) { return dateStr }
-}
+// formatDate is now imported from ../utils/formatDate
+// It converts UTC ISO strings to Asia/Shanghai (Beijing time) display
 
 async function toggleHistory() {
   showHistory.value = !showHistory.value
@@ -614,9 +606,11 @@ async function loadHistoryDetail(id) {
       design_text: generateDesignReport(plans, data.market_context),
       market_context: data.market_context || {},
       generated_at: data.created_at,
+      is_history: true,  // 标记为历史记录
     }
     designStep.value = 'result'
     designTab.value = 'cards'
+    activeCoreFeature.value = 'design'  // 切换到设计结果视图
     showHistory.value = false
   } catch (e) {
     toast('加载方案详情失败', 'error')
@@ -1432,6 +1426,21 @@ async function checkStrategy() {
 .text-up { color: #E53935; }
 .text-down { color: #43A047; }
 
+/* History badge on result view */
+.history-badge {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-3);
+  background: #fff3e0;
+  border: 1px solid #ffcc80;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  color: #e65100;
+  font-weight: var(--font-weight-medium);
+}
+
 .panel-footer-actions,
 .design-cards-actions {
   display: flex;
@@ -1445,23 +1454,27 @@ async function checkStrategy() {
   font-size: var(--font-size-sm);
   line-height: 1.7;
   color: var(--color-text-primary);
-  padding: var(--space-4) 0;
+  padding: var(--space-3) 0;
 }
 
 .markdown-body h1 {
   font-size: var(--font-size-xl);
   font-weight: var(--font-weight-bold);
-  margin: var(--space-6) 0 var(--space-4);
+  margin: var(--space-6) 0 var(--space-3);
   padding-bottom: var(--space-2);
   border-bottom: 2px solid var(--color-primary);
+  color: var(--color-text-primary);
 }
 
 .markdown-body h2 {
   font-size: var(--font-size-lg);
   font-weight: var(--font-weight-semibold);
   margin: var(--space-5) 0 var(--space-3);
-  padding-bottom: var(--space-1);
-  border-bottom: 1px solid var(--color-border);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-tertiary);
+  border-left: 3px solid var(--color-primary);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: var(--color-text-primary);
 }
 
 .markdown-body h3 {
@@ -1471,11 +1484,25 @@ async function checkStrategy() {
   color: var(--color-primary);
 }
 
+/* Responsive table wrapper */
 .markdown-body table {
+  display: block;
   width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
   border-collapse: collapse;
   margin: var(--space-3) 0 var(--space-4);
   font-size: var(--font-size-sm);
+  /* Prevent table blowout by allowing smaller cells */
+  text-size-adjust: 100%;
+}
+
+.markdown-body thead,
+.markdown-body tbody {
+  /* Ensure proper table rendering inside scroll wrapper */
+  display: table;
+  width: 100%;
+  table-layout: auto;
 }
 
 .markdown-body th {
@@ -1485,6 +1512,10 @@ async function checkStrategy() {
   text-align: left;
   border: 1px solid var(--color-border);
   white-space: nowrap;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
 }
 
 .markdown-body td {
@@ -1497,6 +1528,17 @@ async function checkStrategy() {
   background: var(--color-bg-secondary);
 }
 
+.markdown-body tr:hover {
+  background: var(--color-bg-tertiary);
+}
+
+/* Metric highlights in report tables */
+.markdown-body td:last-child,
+.markdown-body td:nth-last-child(2) {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
 .markdown-body blockquote {
   margin: var(--space-3) 0;
   padding: var(--space-3) var(--space-4);
@@ -1505,6 +1547,7 @@ async function checkStrategy() {
   border-radius: var(--radius-sm);
   color: var(--color-text-secondary);
   font-size: var(--font-size-sm);
+  line-height: 1.6;
 }
 
 .markdown-body ul {
@@ -1514,6 +1557,7 @@ async function checkStrategy() {
 
 .markdown-body li {
   margin-bottom: var(--space-1);
+  line-height: 1.6;
 }
 
 .markdown-body strong {
@@ -1525,8 +1569,9 @@ async function checkStrategy() {
   background: var(--color-bg-tertiary);
   padding: 1px 4px;
   border-radius: 3px;
-  font-family: monospace;
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
   font-size: 0.9em;
+  color: var(--color-primary);
 }
 
 .markdown-body hr {
@@ -1535,14 +1580,27 @@ async function checkStrategy() {
   margin: var(--space-5) 0;
 }
 
+/* Better paragraph spacing */
+.markdown-body p {
+  margin: var(--space-2) 0;
+  line-height: 1.7;
+}
+
+/* Compact spacing for report content */
+.markdown-body > *:first-child {
+  margin-top: 0;
+}
+
 /* History Panel */
 .history-panel {
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   margin-top: var(--space-4);
   overflow: hidden;
-  max-height: 360px;
+  max-height: 420px;
   overflow-y: auto;
+  background: var(--color-surface-secondary);
+  box-shadow: var(--shadow-sm);
 }
 
 .history-header {
@@ -1552,25 +1610,37 @@ async function checkStrategy() {
   padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--color-border);
   background: var(--color-bg-tertiary);
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }
 
 .history-header h4 {
   margin: 0;
   font-size: var(--font-size-base);
   font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
 }
 
 .history-close {
   border: none;
   background: none;
   cursor: pointer;
-  font-size: var(--font-size-base);
+  font-size: var(--font-size-lg);
   color: var(--color-text-secondary);
-  padding: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+  line-height: 1;
+}
+
+.history-close:hover {
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
 }
 
 .history-empty {
-  padding: var(--space-8);
+  padding: var(--space-10) var(--space-4);
   text-align: center;
   color: var(--color-text-tertiary);
   font-size: var(--font-size-sm);
@@ -1583,26 +1653,33 @@ async function checkStrategy() {
 
 .history-item {
   display: flex;
-  gap: var(--space-4);
+  gap: var(--space-3);
   align-items: center;
   padding: var(--space-3) var(--space-4);
   cursor: pointer;
-  transition: background var(--transition-fast);
+  transition: all var(--transition-fast);
   border-bottom: 1px solid var(--color-border);
 }
 
 .history-item:hover {
   background: var(--color-bg-secondary);
+  transform: translateX(4px);
 }
 
 .history-item:last-child {
   border-bottom: none;
 }
 
+.history-item:active {
+  background: var(--color-bg-tertiary);
+  transform: translateX(2px);
+}
+
 .history-date {
   font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
-  min-width: 100px;
+  min-width: 110px;
+  white-space: nowrap;
 }
 
 .history-capital {
@@ -1610,6 +1687,7 @@ async function checkStrategy() {
   font-weight: var(--font-weight-semibold);
   color: var(--color-text);
   min-width: 60px;
+  white-space: nowrap;
 }
 
 .history-style {
@@ -1618,11 +1696,20 @@ async function checkStrategy() {
   border-radius: var(--radius-full);
   background: var(--color-bg-tertiary);
   color: var(--color-text-secondary);
+  white-space: nowrap;
 }
 
-.history-arrow {
+.history-detail-link {
   margin-left: auto;
-  color: var(--color-text-tertiary);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-2xs);
+  color: var(--color-primary);
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+  white-space: nowrap;
+  font-weight: var(--font-weight-medium);
+}
+
+.history-item:hover .history-detail-link {
+  opacity: 1;
 }
 </style>
