@@ -2,12 +2,22 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { useToastStore } from './toast'
 
+const LS_KEYS = { tasks: 'etf_surge_tasks', design: 'etf_surge_design' }
+
+function _load(key, fallback) {
+  try { const r = localStorage.getItem(key); return r ? JSON.parse(r) : fallback }
+  catch { return fallback }
+}
+function _save(key, val) {
+  try { localStorage.setItem(key, JSON.stringify(val)) } catch { /* quota */ }
+}
+
 /**
- * Global task store for long-running async jobs (e.g. intelligent portfolio design).
- * Driven by the backend /ws/task-notifications WebSocket broadcast.
+ * Global task store persisted to localStorage (survives F5 / tab close).
+ * Driven by back-end /ws/task-notifications WebSocket broadcast.
  */
 export const useTaskStore = defineStore('task', () => {
-  const tasks = ref([])
+  const tasks = ref(_load(LS_KEYS.tasks, []))
 
   function getTask(taskId) {
     return tasks.value.find((t) => t.taskId === taskId) || null
@@ -19,6 +29,7 @@ export const useTaskStore = defineStore('task', () => {
       existing.status = 'running'
       existing.progress = existing.progress || 0
       existing.label = label
+      _save(LS_KEYS.tasks, tasks.value)
       return existing
     }
     tasks.value.push({
@@ -30,6 +41,7 @@ export const useTaskStore = defineStore('task', () => {
       designId: null,
       createdAt: Date.now(),
     })
+    _save(LS_KEYS.tasks, tasks.value)
     return getTask(taskId)
   }
 
@@ -37,6 +49,7 @@ export const useTaskStore = defineStore('task', () => {
     const task = getTask(taskId)
     if (!task) return
     Object.assign(task, changes)
+    _save(LS_KEYS.tasks, tasks.value)
 
     // Side effects on terminal transitions
     const toast = useToastStore()
@@ -51,6 +64,7 @@ export const useTaskStore = defineStore('task', () => {
 
   function removeTask(taskId) {
     tasks.value = tasks.value.filter((t) => t.taskId !== taskId)
+    _save(LS_KEYS.tasks, tasks.value)
   }
 
   function clearCompleted(delay = 30000) {
@@ -58,15 +72,18 @@ export const useTaskStore = defineStore('task', () => {
       tasks.value = tasks.value.filter(
         (t) => t.status !== 'completed' && t.status !== 'failed'
       )
+      _save(LS_KEYS.tasks, tasks.value)
     }, delay)
   }
 
   // ── UX2: 设计面板状态持久化 ──────────────────────────────────
   // 当用户导航离开设计面板时保存状态，返回时恢复
-  const designState = ref(null)  // { designStep, designResult, loadingProgress, selectedPlan, ... }
+  // UX2: 设计面板状态，同样持久化到 localStorage
+  const designState = ref(_load(LS_KEYS.design, null))
 
   function persistDesignState(state) {
     designState.value = state ? { ...state, _savedAt: Date.now() } : null
+    _save(LS_KEYS.design, designState.value)
   }
 
   function getDesignState() {
@@ -75,6 +92,7 @@ export const useTaskStore = defineStore('task', () => {
 
   function clearDesignState() {
     designState.value = null
+    _save(LS_KEYS.design, null)
   }
 
   return {
