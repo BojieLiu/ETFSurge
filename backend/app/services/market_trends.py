@@ -113,15 +113,18 @@ def detect_market_regime(
     broad_index_code: str = "000001",
     sentiment_index: float = 50.0,
     adv_ratio: float = 0.5,
+    index_realtime: list[dict] | None = None,  # P0.5: 实时指数兜底
 ) -> str:
     """
     基于趋势数据和情绪指标判断当前市场状态。
+    当趋势数据为空（外部数据源超时）时，自动降级使用 index_realtime 做判断。
 
     Args:
         trends: compute_etf_trends() 的输出（含主要宽基）
         broad_index_code: 主要宽基代码（默认上证指数）
         sentiment_index: 情绪指数 0~100
         adv_ratio: 上涨家数占比 0~1
+        index_realtime: 实时指数行情快照（P0.5 fallback）
 
     Returns:
         "bull_strong" / "bull_weakening" / "range_bound" /
@@ -160,6 +163,17 @@ def detect_market_regime(
     # 6. 熊市: 3m显著下跌
     if ret_3m < -0.10:
         return "bear"
+
+    # 7. P0.5: 趋势数据为空时的 fallback — 用 index_realtime 当日涨跌幅判定
+    if regime == "range_bound" and index_realtime:
+        for idx in index_realtime:
+            chg = idx.get("change_pct", 0) or 0
+            if chg < -0.05:
+                return "correction"
+            if chg < -0.03 and sentiment_index < 50:
+                return "defensive_rotate"
+            if chg > 0.03 and sentiment_index > 60:
+                return "bull_weakening"
 
     return regime
 

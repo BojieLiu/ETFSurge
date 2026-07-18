@@ -174,6 +174,15 @@ POST /api/v1/portfolio/design-enhanced
 | `defensive_rotate` | 防御轮动 |
 | `panic` | 恐慌 |
 
+**Fallback 逻辑（v1.1+）**：当 `compute_etf_trends` 依赖的 akshare 历史数据超时/失败，导致 `trend_data` 为空时，`detect_market_regime` 自动降级使用 `index_realtime`（实时指数行情）的当日涨跌幅做判断：
+
+| 触发条件 | 判定结果 |
+|---------|:--------:|
+| 任一主要指数当日 < -5% | `correction` |
+| 任一主要指数 -3% ~ -5% 且情绪指数 < 50 | `defensive_rotate` |
+| 任一主要指数 > +3% 且情绪指数 > 60 | `bull_weakening` |
+| 上述均不满足 | `range_bound`（默认） |
+
 #### `market_context.index_realtime`
 
 实时大盘指数行情快照（由 `china_market.fetch_index_realtime()` 采集），用于 LLM 报告「市场行情快照」章节引用实际指数点位与涨跌幅。

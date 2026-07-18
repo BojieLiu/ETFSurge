@@ -745,9 +745,10 @@ async def generate_enhanced_design(
     adv_ratio = float(sentiment.get("advance_ratio", 0.5))
     regime = detect_market_regime(
         trends=trend_data,
-        broad_index_code="510300",  # 沪深300ETF — 在 trend_data 中存在（P0 修复：原 "000001" 不在候选池，导致 regime 永远回退 range_bound）
+        broad_index_code="510300",  # 沪深300ETF — 在 trend_data 中存在（P0 修复）
         sentiment_index=sentiment_index,
         adv_ratio=adv_ratio,
+        index_realtime=index_realtime,  # P0.5: 趋势数据为空时降级使用
     )
 
     # 3. 资讯-ETF映射

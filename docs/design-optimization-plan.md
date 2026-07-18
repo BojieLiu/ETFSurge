@@ -69,6 +69,26 @@ regime = detect_market_regime(
 
 ---
 
+### P0.5 — 趋势数据本身的可用性问题（P0 修复的补充）
+
+**发现场景**：P0 修复后验证时，`regime` 仍返回 `"range_bound"`。
+
+**原因**：P0 将 key 改对后（`510300` 在 trend_data 中），但 `compute_etf_trends` 依赖 akshare 拉取历史日线，**当 akshare 超时/断连时**，返回的 `trend_data["510300"]` 仍是 `{}`。`detect_market_regime` 在函数签名中**没有接收 `index_realtime` 的选项**，即使 `fetch_index_realtime()` 成功返回了深证成指 -5.40% 的数据，也无法作为 fallback。
+
+**影响**：外部数据源不稳定时，P0 修复正确但无效。
+
+**修复**：
+1. `detect_market_regime` 增加 `index_realtime` 可选参数
+2. 函数尾部（当前行 164 `return regime` 之前）添加 fallback: 若 `regime == "range_bound"` 且 `index_realtime` 非空，用当日涨跌幅判定:
+   - 某主要指数当日 < -5% → `"correction"`
+   - 某主要指数 -3% ~ -5% 且情绪 < 50 → `"defensive_rotate"`
+   - 某主要指数 > +3% 且情绪 > 60 → `"bull_weakening"`
+3. 调用处（`strategy_design.py`）传 `index_realtime=index_realtime`
+
+**改动的文件**：`market_trends.py`（~15 行）+ `strategy_design.py`（1 行参数）
+
+---
+
 ### P1 — 数据断层：LLM 报告 prompt 缺乏实时行情
 
 **位置**：`llm.py` 第 986-1027 行（`_build_design_report_prompt`）
@@ -319,6 +339,72 @@ if chg is not None:
 | 完成通知 | 无 | toast + 铃铛 |
 | 前端断开后的韧性 | 丢失 | WS 重连后查一次状态 |
 
+### 4.6 当前实现仍存在的 3 个 UX 问题
+
+方案 A + B 代码已落地（`e54c1ff`），但前端流程仍有三个显性漏洞：
+
+#### 漏洞 1：页面卡住 — 加载态无出路
+
+**现象**：点击「开始设计」→ loading 界面显示 → 用户无法做任何其他操作。
+
+**根因**：`startDesign()` 调用 `portfolioApi.designAsync()` 是 `await` 阻塞的。虽然 `designStep.value='loading'` 立即生效，但用户在加载期间：
+- 点击导航链接时 `exitCoreFeature()` 销毁设计面板 → 回退到首页
+- 无法查看 task 进度详情（loading 界面只有进度条和文字，没有「后台运行中，可切换到其他页面」的提示）
+
+**修复**：
+1. 加载界面增加提示文字「方案生成中，您可以切换到其他页面，完成后会通知您」
+2. `exitCoreFeature()` 不销毁运行中的设计任务：保留 `taskStore` 中注册的 task，允许通过 TaskIndicator 重新进入
+
+#### 漏洞 2：切换页面后无法回来查看进度和结果
+
+**现象**：用户在加载/结果界面点击导航链接 → 回到 Dashboard → 再点「AI 工具」→ 回到初始 wizard 页面，看不到运行中的任务。
+
+**根因**：
+- `exitCoreFeature()` 设置 `designStep.value='wizard'`、`designResult.value=null`
+- `DashboardAiTools.vue` 是 route 页面内的组件，导航出去后被 unmount → 返回时重新 mount → 所有 local state 丢失
+
+**修复**：
+1. **state 持久化**：将 `designStep`、`designResult`、`loadingProgress` 存入 Pinia store（`taskStore` 或新建 `designStore`），替代组件内 `ref`。导航出去再回来时恢复状态
+2. **TaskIndicator → 快速回入**：点击 TaskIndicator 中的「查看」按钮 → 导航到包含设计面板的 route → 触发 `restoreDesignState()` 恢复上一次的设计状态
+
+#### 漏洞 3：历史记录加载慢
+
+**现象**：点击「历史记录」/「历史方案」→ 等 2-5 秒才显示列表。
+
+**根因**：
+- 后端 `GET /portfolio/designs` 用 `select(PortfolioDesign)` 全对象加载 → SQLAlchemy ORM 读取 `strategies_json` + `market_snapshot_json`（每个 ~50-200KB）
+- 20 条记录 = 1-4MB 数据从 SQLite 读入内存 + JSON 反序列化
+
+**修复**（后端）：
+```python
+from sqlalchemy.orm import load_only
+
+stmt = (
+    select(PortfolioDesign)
+    .options(load_only(
+        PortfolioDesign.id,
+        PortfolioDesign.created_at,
+        PortfolioDesign.capital,
+        PortfolioDesign.risk_profile,
+    ))
+    .order_by(desc(PortfolioDesign.created_at))
+    .offset(offset)
+    .limit(limit)
+)
+```
+
+**修复**（前端）：
+- 列表加载期间显示 skeleton 占位动画
+- 首次加载后缓存列表（`sessionStorage`），下次直接显示缓存 + 后台静默刷新
+
+#### 漏洞 4：TaskIndicator 不可点击回设计面板
+
+**现象**：导航栏铃铛显示任务数，但点击后无法回到设计生成页面。
+
+**根因**：`TaskIndicator.vue` 未实现「点击已完成任务→跳转设计面板」的路由导航
+
+**修复**：在 `TaskIndicator` 的已完成任务项上加 `@click` → `router.push({ name: 'portfolio-analysis', query: { restoreDesign: taskId } })`。`DashboardAiTools.vue` 在 `onMounted` 中检测 `$route.query.restoreDesign` → 调用 `restoreDesignState()`
+
 ---
 
 ## 五、改动清单
@@ -334,7 +420,10 @@ if chg is not None:
 | `backend/app/analysis/prompts/v1/design_report.md` | 更新系统 prompt | ~15 | P1 |
 | `backend/app/routers/portfolio.py` | 更新调用参数 | ~3 | P1 |
 
-**小计**：6 个后端文件，~111 行净改动。
+| `backend/app/routers/portfolio.py` | `GET /designs` 加 `load_only` 只查元数据，避免加载大 JSON 字段 | ~3 | UX3 |
+| `backend/app/services/market_trends.py` | `detect_market_regime` 新增 `index_realtime` fallback 参数 | ~15 | **P0.5** |
+
+**小计**：8 个后端文件，~130 行净改动。
 
 ### 5.2 前端任务感知（方案 A + B）
 
@@ -345,26 +434,32 @@ if chg is not None:
 | `frontend/src/App.vue` | 修改 | ~25（引入 store + WS 连接 + 插入组件） |
 | `frontend/src/components/DashboardAiTools.vue` | 修改 | ~25（去掉轮询改用 WS） |
 
-**小计**：2 个新建 + 2 个修改，~180 行前端改动，**0 后端改动**（WS 端点已存在）。
+| `frontend/src/stores/task.js` | **已有**，UX2 需加 `persistDesignState` 方法 | +20 |
+| `frontend/src/components/TaskIndicator.vue` | **已有**，UX4 需加点击导航回设计面板 | +15 |
+| `frontend/src/App.vue` | **已有** | — |
+| `frontend/src/components/DashboardAiTools.vue` | UX1 加载提示 + UX2 state 持久化 + `restoreDesignState` | +40 |
+
+**小计**：4 个前端文件共 +75 行增量改动。
 
 ### 5.3 总计
 
 | | 文件数 | 行数 | 新依赖 |
 |:--|:-----:|:----:|:-----:|
-| 后端修复 | 6 | ~111 | 0 |
-| 前端任务感知 | 4（2 新建 + 2 修改） | ~180 | 0 |
-| **合计** | **10** | **~291** | **0** |
+| 后端修复（含 P0.5） | 8 | ~130 | 0 |
+| 前端任务感知（原始 + UX 修复） | 6（2 新建 + 4 修改） | ~255 | 0 |
+| **合计** | **14** | **~385** | **0** |
 
 ---
 
 ## 六、验证计划
 
-1. **单元测试（P0）**：mock `trend_data = {"510300": {"return_1m": -0.15, ...}}`，`sentiment_index=35` → 断言 `detect_market_regime` 返回 `"correction"` 而非 `"range_bound"`
+1. **单元测试（P0 + P0.5）**：mock `trend_data={"510300": {}}`（空结果模拟 akshare 超时）+ `index_realtime` 含深证成指 -5.40% → 断言 `detect_market_regime` 返回 `"correction"`
 2. **单元测试（P3 数据）**：mock `_fetch_single_trend` 返回含 `change_pct`；断言 `build_rationale` 输出以「今日跌 X%」开头
 3. **Prompt 验证（P1）**：检查 `_build_design_report_prompt` 输出包含「市场行情快照」「行业板块动量」两节
 4. **端到端**：调用 `/portfolio/design-enhanced`，检查 `market_context` 含 `index_realtime` 与 `sector_momentum` 新字段
 5. **LLM 报告**：触发设计 + WS 推送，验证报告中引用了实际指数涨跌幅
 6. **前端 A/B**：收到 `task_update` 的 `completed` 后，验证前端经 `getTask` 取得 `design_id` 并拉取详情；导航栏铃铛与 toast 正常触发
+7. **UX 回归（手动）**：点击「开始设计」→ 切换到其他页面 → 通过 TaskIndicator 回入设计面板 → 验证状态恢复；点击历史记录 → 骨架屏显示 + 列表加载 <1s
 
 ---
 

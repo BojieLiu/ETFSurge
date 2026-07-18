@@ -129,6 +129,10 @@
               <span class="step-dot"></span> 生成组合方案
             </div>
           </div>
+          <!-- UX1: 加载提示 — 允许用户切换页面 -->
+          <p class="loading-hint" v-if="loadingProgress > 0">
+            💡 方案生成中，您可以切换到其他页面，完成后会通过通知栏提醒您
+          </p>
         </div>
       </div>
 
@@ -317,7 +321,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { marked } from 'marked'
 import { portfolioApi } from '../api'
 import { usePortfolioStore } from '../stores/portfolio'
@@ -348,6 +352,33 @@ const strategyResult = ref(null)
 const designReportHtml = computed(() => {
   if (!designResult.value?.design_text) return ''
   return marked(designResult.value.design_text)
+})
+
+// UX2: 组件挂载时恢复之前持久化的设计面板状态
+onMounted(() => {
+  const saved = taskStore.getDesignState()
+  if (saved) {
+    const task = taskStore.tasks.find(
+      (t) => t.type === 'design' && t.status === 'running'
+    )
+    if (task) {
+      // 仍有运行中的任务 → 恢复 loading 状态
+      designStep.value = 'loading'
+      designCapital.value = saved.designCapital || 500000
+      loadingProgress.value = task.progress || saved.loadingProgress || 0
+      activeCoreFeature.value = 'design'
+    } else if (saved.designStep === 'result' && saved.designResult) {
+      // 已完成的结果 → 恢复结果页
+      designStep.value = 'result'
+      designCapital.value = saved.designCapital || 500000
+      designResult.value = saved.designResult
+      designTab.value = saved.designTab || 'cards'
+      expandedPlan.value = saved.expandedPlan || null
+      activeCoreFeature.value = 'design'
+    }
+    // 清除已恢复的状态
+    taskStore.clearDesignState()
+  }
 })
 
 // Helpers
@@ -538,10 +569,18 @@ async function loadHistoryList() {
 }
 
 function exitCoreFeature() {
+  // UX2: 离开设计面板前持久化当前状态，允许返回时恢复
+  if (designStep.value === 'loading' || designStep.value === 'result') {
+    taskStore.persistDesignState({
+      designStep: designStep.value,
+      designResult: designResult.value,
+      designCapital: designCapital.value,
+      loadingProgress: loadingProgress.value,
+      designTab: designTab.value,
+      expandedPlan: expandedPlan.value,
+    })
+  }
   activeCoreFeature.value = null
-  designResult.value = null
-  designStep.value = 'wizard'
-  designCapital.value = 500000
 }
 
 function resetDesign() {

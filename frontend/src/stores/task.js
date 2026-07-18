@@ -61,5 +61,24 @@ export const useTaskStore = defineStore('task', () => {
     }, delay)
   }
 
-  return { tasks, getTask, addTask, updateTask, removeTask, clearCompleted }
+  // ── UX2: 设计面板状态持久化 ──────────────────────────────────
+  // 当用户导航离开设计面板时保存状态，返回时恢复
+  const designState = ref(null)  // { designStep, designResult, loadingProgress, selectedPlan, ... }
+
+  function persistDesignState(state) {
+    designState.value = state ? { ...state, _savedAt: Date.now() } : null
+  }
+
+  function getDesignState() {
+    return designState.value
+  }
+
+  function clearDesignState() {
+    designState.value = null
+  }
+
+  return {
+    tasks, getTask, addTask, updateTask, removeTask, clearCompleted,
+    designState, persistDesignState, getDesignState, clearDesignState,
+  }
 })

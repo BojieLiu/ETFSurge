@@ -250,10 +250,18 @@ async def list_designs(
 ):
     """列出历史方案记录"""
     from sqlalchemy import select, desc
+    from sqlalchemy.orm import load_only
     from ..models.portfolio_design import PortfolioDesign
 
+    # UX3: 只加载元数据字段，避免 strategies_json / market_snapshot_json 大字段拖慢查询
     stmt = (
         select(PortfolioDesign)
+        .options(load_only(
+            PortfolioDesign.id,
+            PortfolioDesign.created_at,
+            PortfolioDesign.capital,
+            PortfolioDesign.risk_profile,
+        ))
         .order_by(desc(PortfolioDesign.created_at))
         .offset(offset)
         .limit(limit)
