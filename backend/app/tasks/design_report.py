@@ -70,6 +70,10 @@ def _validate_report_consistency(report_text: str, strategies: list[dict]) -> st
     # 差集：LLM 写了哪些引擎没有的标的
     extra_symbols = report_symbols - engine_symbols
     if extra_symbols:
+        logger.error(
+            "[design_report] LLM introduced %d symbols outside engine pool: %s",
+            len(extra_symbols), sorted(extra_symbols)
+        )
         extra_note = (
             "\n\n> **⚠️ 一致性说明**：以下代码在报告中出现但不在引擎方案中："
             + ", ".join(sorted(extra_symbols))

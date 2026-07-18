@@ -411,7 +411,8 @@ async def analyze_news_impact(news_item: dict, holdings: list[dict]) -> dict:
 
     try:
         data = await get_agent("news_impact").run_json(prompt)
-    except Exception:
+    except Exception as e:
+        logger.warning("[news_impact] LLM analysis failed: %s", e)
         data = {}
 
     return {
@@ -1016,6 +1017,10 @@ def _build_design_report_prompt(
         if v is None:
             return "—"
         if isinstance(v, float):
+            # P3.5: 如果已是原始百分比（abs > 1），不再 ×100
+            # 指数数据 (change_pct=-5.4) 和 benchmark 数据 (change_pct=-0.054) 单位不一致
+            if abs(v) > 1:
+                return f"{v:.1f}%"
             return f"{v * 100:.1f}%"
         return str(v)
 

@@ -193,7 +193,8 @@ async def generate_full_design(
     if isinstance(strategies, (Exception, type(None))) or not strategies:
         try:
             strategies = await generate_enhanced_design(capital=capital, constraints=constraints)
-        except Exception:
+        except Exception as e:
+            logger.error("[generate_full_design] generate_enhanced_design failed: %s", e)
             strategies = []
     if isinstance(sentiment, (Exception, type(None))):
         sentiment = {"sentiment_index": 50, "sentiment_label": "中性"}
@@ -766,7 +767,7 @@ async def generate_enhanced_design(
             pool_ready = True
             logger.info("pool_manager: %d satellite candidates", len(scanned_satellite))
     except Exception as e:
-        logger.warning("pool_manager refresh failed: %s", e)
+        logger.error("pool_manager refresh failed: %s (will fallback to hardcoded pool)", e)
 
     if not pool_ready:
         try:
@@ -781,7 +782,7 @@ async def generate_enhanced_design(
                 for item in sat_items[:20]
             ]
         except Exception as e:
-            logger.warning("enhanced scan failed: %s", e)
+            logger.error("enhanced scan failed: %s (will fallback to hardcoded satellite pool)", e)
 
         if not scanned_satellite:
             scanned_satellite = [

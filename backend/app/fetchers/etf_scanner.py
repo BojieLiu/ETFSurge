@@ -83,6 +83,28 @@ def fetch_all_etfs_base() -> list[dict[str, Any]]:
         return []
 
 
+def _normalize_columns(df: pd.DataFrame) -> None:
+    """P4-a: 列名归一化——将 akshare 乱码列名映射为标准中文名。"""
+    if df.empty:
+        return
+    STANDARD_KEYS = ["代码", "名称", "最新价", "涨跌幅", "成交额", "成交量", "换手率",
+                      "最高价", "最低价", "今开", "昨收", "基金规模", "市盈率", "市净率"]
+    renamed = {}
+    for col in df.columns:
+        col_s = str(col)
+        if col_s in STANDARD_KEYS:
+            continue
+        for sk in STANDARD_KEYS:
+            try:
+                if col_s == sk.encode("utf-8").decode("latin1", errors="replace"):
+                    renamed[col_s] = sk
+                    break
+            except (UnicodeEncodeError, UnicodeDecodeError):
+                pass
+    if renamed:
+        df.rename(columns=renamed, inplace=True)
+
+
 def _get_col(row: dict, *names: str, default=0.0):
     """从行数据中取第一个存在的列名。"""
     for n in names:
@@ -162,6 +184,13 @@ def filter_etfs(raw_list: list[dict] | Any) -> list[dict[str, Any]]:
         })
 
     logger.info("[etf_scanner] filter_etfs: %d -> %d", len(raw_list), len(results))
+    # P4-b: 候选池为空时输出 ERROR 日志
+    if len(results) == 0 and len(raw_list) > 0:
+        logger.error(
+            "[etf_scanner] filter_etfs: ALL %d ETFs filtered out! "
+            "Check column name matching (garbled keys). First raw keys: %s",
+            len(raw_list), list(raw_list[0].keys()) if raw_list else "N/A"
+        )
     return results
 
 
