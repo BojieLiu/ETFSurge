@@ -124,7 +124,7 @@ def test_p1_prompt_contains_market_snapshot_and_sector_momentum():
     }
 
     prompt = _build_design_report_prompt(
-        strategies, market_sentiment, [], market_context=market_context
+        strategies, market_sentiment, [], market_context=market_context, plan_tables=""
     )
     assert "市场行情快照" in prompt, "prompt missing 市场行情快照 section (P1)"
     assert "行业板块动量" in prompt, "prompt missing 行业板块动量 section (P1)"
@@ -240,3 +240,46 @@ async def test_ux3_list_designs_loads_only_metadata():
     )
     # Column names should be present (table alias is portfolio_designs)
     assert "portfolio_designs.created_at" in compiled or "portfolio_designs.capital" in compiled
+
+
+# ─── P5-a: _build_plan_tables ──────────────────────────────────
+
+def test_p5a_build_plan_tables_has_structure():
+    """_build_plan_tables must emit 方案详解, plan labels, ETF symbols, and layer labels."""
+    from app.tasks.design_report import _build_plan_tables
+
+    strategies = [
+        {
+            "label": "稳健增值方案",
+            "layer_budget": {"core": 0.50, "satellite": 0.30, "defense": 0.20},
+            "allocations": [
+                {"symbol": "510300", "name": "HS300ETF", "layer": "core",
+                 "target_weight": 0.30, "selection_rationale": "大盘宽基"},
+                {"symbol": "513100", "name": "纳指ETF", "layer": "satellite",
+                 "target_weight": 0.20, "selection_rationale": "海外科技"},
+            ],
+        },
+        {
+            "label": "积极成长方案",
+            "layer_budget": {"core": 0.40, "satellite": 0.40, "defense": 0.20},
+            "allocations": [
+                {"symbol": "512480", "name": "半导体ETF", "layer": "satellite",
+                 "target_weight": 0.25, "selection_rationale": "国产替代"},
+                {"symbol": "511880", "name": "银华日利", "layer": "defense",
+                 "target_weight": 0.15, "selection_rationale": "流动性管理"},
+            ],
+        },
+    ]
+
+    result = _build_plan_tables(strategies)
+
+    assert "方案详解" in result, "result missing 方案详解 header"
+    assert "稳健增值方案" in result, "result missing first plan label"
+    assert "积极成长方案" in result, "result missing second plan label"
+    assert "510300" in result, "result missing ETF symbol 510300"
+    assert "512480" in result, "result missing ETF symbol 512480"
+    assert "513100" in result, "result missing ETF symbol 513100"
+    assert "511880" in result, "result missing ETF symbol 511880"
+    assert "核心" in result, "result missing 核心 layer"
+    assert "卫星" in result, "result missing 卫星 layer"
+    assert "防御" in result, "result missing 防御 layer"

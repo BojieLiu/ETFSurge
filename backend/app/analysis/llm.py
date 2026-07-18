@@ -958,6 +958,7 @@ async def generate_design_report(
     market_sentiment: dict | None = None,
     benchmark_stocks: list[dict] | None = None,
     market_context: dict | None = None,
+    plan_tables: str = "",
 ) -> str:
     """基于系统算法生成的组合方案，调用 LLM 撰写市场分析报告。
 
@@ -982,7 +983,7 @@ async def generate_design_report(
         strategies,
         ctx.get("market_sentiment", market_sentiment or {}),
         ctx.get("benchmark_stocks", benchmark_stocks or []),
-        market_context=ctx,
+        market_context=ctx, plan_tables=plan_tables,
     )
     try:
         # 使用"symbol_analysis" agent 的通用上下文，但传入设计报告 prompt
@@ -1001,6 +1002,7 @@ def _build_design_report_prompt(
     market_sentiment: dict,
     benchmark_stocks: list[dict],
     market_context: dict | None = None,
+    plan_tables: str = "",
 ) -> str:
     """构建设计报告 prompt。
 
@@ -1024,7 +1026,32 @@ def _build_design_report_prompt(
             return f"{v * 100:.1f}%"
         return str(v)
 
-    lines = ["## 输入数据", ""]
+    # ── P5-a: 注入预生成的方案表格（引擎直接渲染，确保与方案卡片一致） ──
+    if plan_tables:
+        lines = [
+            "## 注意：报告撰写范围说明",
+            "",
+            f"以下为引擎算法直接生成的方案详解表格，与前端「方案卡片」的数据来源完全一致。",
+            "你**不需要**在报告正文中重新描述各方案的 ETF 标的、权重和入选理由。",
+            "你的任务是：",
+            "1. 基于「市场行情快照」「行业板块动量」「市场情绪」等输入数据，撰写「市场环境分析」；",
+            "2. 说明三层设计框架（核心/卫星/防御）；",
+            "3. 横向对比三种方案的特点和适用场景；",
+            "4. 给出配置建议和风险提示。",
+            "",
+            "引擎预生成的方案表格如下（将自动嵌入报告第三部分）：",
+            "",
+            plan_tables,
+            "",
+            "---",
+            "",
+            "## 输入数据",
+            "",
+            "### 市场情绪",
+        ]
+    else:
+        lines = ["## 输入数据", ""]
+    lines.append(f"- 情绪指数: {market_sentiment.get('sentiment_index', 'N/A')}")
     lines.append("### 市场情绪")
     lines.append(f"- 情绪指数: {market_sentiment.get('sentiment_index', 'N/A')}")
     lines.append(f"- 情绪标签: {market_sentiment.get('sentiment_label', 'N/A')}")

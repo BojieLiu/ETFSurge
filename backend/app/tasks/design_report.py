@@ -50,6 +50,36 @@ class DesignReportManager:
 report_manager = DesignReportManager()
 
 
+def _build_plan_tables(strategies: list[dict]) -> str:
+    """P5-a: 从引擎 strategies 数据直接渲染方案详解 Markdown 表格。
+    确保报告中的数据与方案卡片完全一致，杜绝 LLM 篡改标的。
+    """
+    lines = ["\n\n## 三、三种方案详解"]
+    for s in strategies:
+        label = s.get("label", "")
+        lb = s.get("layer_budget", {})
+        core_pct = lb.get("core", 0) * 100
+        sat_pct = lb.get("satellite", 0) * 100
+        def_pct = lb.get("defense", 0) * 100
+        lines.append(f"\n### {label}")
+        lines.append(f"资产结构：核心 {core_pct:.0f}% · 卫星 {sat_pct:.0f}% · 防御 {def_pct:.0f}%\n")
+        lines.append("| 资产类别 | 代码 | 名称 | 权重 | 入选理由 |")
+        lines.append("|---------|------|------|:----:|---------|")
+
+        allocs = s.get("allocations") or s.get("etfs") or []
+        for e in allocs:
+            if e.get("symbol") == "CASH":
+                continue
+            code = e.get("symbol", "")
+            name = e.get("name", "")[:12]
+            w = (e.get("weight") or e.get("target_weight") or 0) * 100
+            rationale = (e.get("selection_rationale") or "")[:60]
+            layer = e.get("layer", "—")
+            lines.append(f"| {layer} | {code} | {name} | {w:.0f}% | {rationale} |")
+
+    return "\n".join(lines)
+
+
 def _validate_report_consistency(report_text: str, strategies: list[dict]) -> str:
     """校验 LLM 报告中的 ETF 代码是否与引擎策略数据一致。
     如 LLM 引入了引擎方案以外的标的，追加修正脚注。
@@ -143,20 +173,30 @@ async def compose_and_push_report(
             "stage": "正在分析市场环境...",
         })
 
-        # 调用 LLM（P1: 透传完整 market_context），加 90 秒超时防止挂起
+        # P5-a: 先生成策略表格（引擎直接渲染，确保与方案卡片一致）
+        plan_tables = _build_plan_tables(strategies)
+
+        # 调用 LLM，注入预生成的策略表格，让 LLM 只写分析部分
         try:
-            report_text = await asyncio.wait_for(
+            llm_analysis = await asyncio.wait_for(
                 generate_design_report(
                     strategies=strategies,
                     market_sentiment=market_sentiment,
                     benchmark_stocks=benchmark_stocks,
                     market_context=market_context,
+                    plan_tables=plan_tables,
                 ),
                 timeout=90,
             )
         except (asyncio.TimeoutError, TimeoutError):
             logger.error("[design_report] LLM generation timed out after 90s, using fallback summary")
-            report_text = None
+            llm_analysis = None
+
+        if llm_analysis:
+            report_text = llm_analysis + "\n\n---\n\n" + plan_tables
+        else:
+            logger.warning("[design_report] LLM empty, using engine tables only")
+            report_text = "# ETF 组合设计方案（数据摘要）\n" + plan_tables
 
         if not report_text:
             logger.warning("[design_report] LLM returned empty, generating fallback summary")
