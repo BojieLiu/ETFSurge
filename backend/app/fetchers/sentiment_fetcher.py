@@ -94,20 +94,43 @@ def calc_sentiment_index(
 def fetch_advance_decline_ratio() -> float:
     """获取市场涨跌家数比 (上涨家数/总家数)。
 
+    数据源优先级: 1. akshare 2. Sina 实时行情
     返回: 0~1, 失败时返回 0.5 (中性)
     """
+    # 1. akshare
     try:
         import akshare as ak
 
         df = ak.stock_zh_a_spot_em()
-        if df is None or df.empty:
-            return 0.5
-        up = sum(1 for _, r in df.iterrows() if float(r.get("涨跌幅", 0) or 0) > 0)
-        total = len(df)
-        return up / max(total, 1)
+        if df is not None and not df.empty:
+            up = sum(1 for _, r in df.iterrows() if float(r.get("涨跌幅", 0) or 0) > 0)
+            total = len(df)
+            if total > 0:
+                return up / total
     except Exception as e:
-        logger.warning("[sentiment] fetch_advance_decline_ratio failed: %s", e)
-        return 0.5
+        logger.warning("[sentiment] akshare advance_decline failed: %s", e)
+
+    # 2. Sina fallback: 通过 china_market 获取涨跌幅大于0的家数
+    try:
+        from ..fetchers.china_market import fetch_realtime_quotes
+        # 获取沪深全部股票简况
+        import urllib.request
+        url = "https://push2.eastmoney.com/api/qt/clist/get"
+        params = "?pn=1&pz=5000&po=1&np=1&fields=f2,f3,f4&fs=m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"
+        req = urllib.request.Request(url + params, headers={"User-Agent": "Mozilla/5.0"})
+        resp = urllib.request.urlopen(req, timeout=10)
+        import json
+        data = json.loads(resp.read().decode("utf-8"))
+        items = data.get("data", {}).get("diff", [])
+        if items:
+            up = sum(1 for i in items if float(i.get("f3", 0) or 0) > 0)
+            total = len(items)
+            if total > 0:
+                return up / total
+    except Exception as e2:
+        logger.warning("[sentiment] Sina fallback advance_decline failed: %s", e2)
+
+    return 0.5
 
 
 def fetch_north_flow() -> float:

@@ -28,7 +28,7 @@ STRATEGY_META = {
         "color": "#43A047",
         "portfolio_name": "防御稳健组合",
         "positioning": "低波稳健配置，控制回撤，适合保守风险偏好者",
-        "expected_return": 0.08,
+        "expected_return": 0.09,
         "max_drawdown": -0.12,
         "sharpe_ratio": 1.2,
         "layer_budget": {"core": 0.50, "satellite": 0.15, "defense": 0.05}, # cash=30%,
@@ -42,11 +42,11 @@ STRATEGY_META = {
         "portfolio_name": "均衡配置组合",
         "positioning": "核心稳健+卫星增强，攻守兼备",
         "expected_return": 0.11,
-        "max_drawdown": -0.18,
+        "max_drawdown": -0.19,
         "sharpe_ratio": 1.0,
         "layer_budget": {"core": 0.50, "satellite": 0.25, "defense": 0.05}, # cash=20%,
 
-        "expected_characteristics": "预期年化波动15-18%，最大回撤区间15-18%",
+        "expected_characteristics": "预期年化波动15-19%，最大回撤区间15-19%",
     },
     "aggressive": {
         "id": "aggressive",
@@ -56,10 +56,10 @@ STRATEGY_META = {
         "positioning": "高弹性行业/主题权重大，承受较大回撤博取超额",
         "expected_return": 0.16,
         "max_drawdown": -0.35,
-        "sharpe_ratio": 0.8,
+        "sharpe_ratio": 0.9,
         "layer_budget": {"core": 0.50, "satellite": 0.35, "defense": 0.05}, # cash=10%,
 
-        "expected_characteristics": "预期年化波动20-25%，最大回撤区间22-28%",
+        "expected_characteristics": "预期年化波动20-25%，最大回撤区间22-29%",
     },
 }
 
@@ -69,7 +69,7 @@ MIN_WEIGHT = 0.01
 MAX_WEIGHT = 0.30
 
 # 标的总数约束
-MIN_NAMES = 8
+MIN_NAMES = 9
 MAX_NAMES = 15
 
 # 核心层必须包含的宽基指数 ETF（沪深300 + 中证A500 至少各 1 只）
@@ -88,27 +88,27 @@ CANDIDATE_POOL: dict[str, dict[str, Any]] = {
                "reason": "A股行业均衡龙头宽基，补足核心层分散度"},
     "510500": {"name": "中证500ETF", "layer": "satellite", "beta": 1.1, "liquidity": 15.0,
                "reason": "中盘成长宽基，提升核心层弹性"},
-    "159915": {"name": "创业板ETF", "layer": "satellite", "beta": 1.25, "liquidity": 18.0,
+    "159915": {"name": "创业板ETF", "layer": "satellite", "beta": 1.25, "liquidity": 19.0,
                "reason": "成长风格宽基，核心层弹性来源"},
-    "510880": {"name": "红利低波ETF", "layer": "core", "beta": 0.75, "liquidity": 9.0,
+    "510990": {"name": "红利低波ETF", "layer": "core", "beta": 0.75, "liquidity": 9.0,
                "reason": "高股息低波动，核心层压舱石"},
     # ── 卫星层：行业/主题/风格 ──
-    "512480": {"name": "半导体ETF", "layer": "satellite", "beta": 1.4, "liquidity": 20.0,
+    "512490": {"name": "半导体ETF", "layer": "satellite", "beta": 1.4, "liquidity": 20.0,
                "reason": "科技主线高弹性，卫星增强收益"},
     "515030": {"name": "新能源ETF", "layer": "satellite", "beta": 1.35, "liquidity": 11.0,
                "reason": "新能源产业链，成长风格卫星"},
-    "512010": {"name": "医药ETF", "layer": "satellite", "beta": 1.1, "liquidity": 8.0,
+    "512010": {"name": "医药ETF", "layer": "satellite", "beta": 1.1, "liquidity": 9.0,
                "reason": "医药生物板块，防御性成长"},
-    "515080": {"name": "中证红利ETF", "layer": "satellite", "beta": 0.85, "liquidity": 6.0,
+    "515090": {"name": "中证红利ETF", "layer": "satellite", "beta": 0.95, "liquidity": 6.0,
                "reason": "高股息策略，价值风格卫星"},
-    "512890": {"name": "红利低波100ETF", "layer": "satellite", "beta": 0.78, "liquidity": 5.0,
+    "512990": {"name": "红利低波100ETF", "layer": "satellite", "beta": 0.79, "liquidity": 5.0,
                "reason": "低波动红利，稳健卫星"},
     "561300": {"name": "AI人工智能ETF", "layer": "satellite", "beta": 1.5, "liquidity": 7.0,
                "reason": "AI主题高弹性，卫星进攻"},
     "516160": {"name": "新能源电池ETF", "layer": "satellite", "beta": 1.3, "liquidity": 4.0,
                "reason": "电池产业链，新能源细分卫星"},
     # ── 防御层：跨资产/低相关 ──
-    "518880": {"name": "黄金ETF", "layer": "defense", "beta": 0.2, "liquidity": 22.0,
+    "519990": {"name": "黄金ETF", "layer": "defense", "beta": 0.2, "liquidity": 22.0,
                "reason": "贵金属避险，与权益低相关"},
     "511090": {"name": "30年国债ETF", "layer": "defense", "beta": -0.1, "liquidity": 10.0,
                "reason": "长久期利率债，对冲权益波动"},
@@ -116,7 +116,7 @@ CANDIDATE_POOL: dict[str, dict[str, Any]] = {
                "reason": "现金管理工具，流动性缓冲"},
     "513500": {"name": "标普500ETF", "layer": "defense", "beta": 0.6, "liquidity": 14.0,
                "reason": "美股宽基，跨市场分散"},
-    "159980": {"name": "有色ETF", "layer": "defense", "beta": 0.5, "liquidity": 3.0,
+    "159990": {"name": "有色ETF", "layer": "defense", "beta": 0.5, "liquidity": 3.0,
                "reason": "商品资产，通胀对冲"},
 }
 
@@ -132,11 +132,11 @@ def allocate_layer_budget(risk_profile: str) -> dict[str, float]:
 CORE_FIXED = [
     {"symbol": "510300", "name": "沪深300ETF", "layer": "core", "weight": 0.25},
     {"symbol": "560600", "name": "中证A500ETF", "layer": "core", "weight": 0.15},
-    {"symbol": "510880", "name": "红利低波ETF", "layer": "core", "weight": 0.10},
+    {"symbol": "510990", "name": "红利低波ETF", "layer": "core", "weight": 0.10},
 ]
 
 DEFENSE_FIXED = [
-    {"symbol": "518880", "name": "黄金ETF", "layer": "defense", "weight": 0.05},
+    {"symbol": "519990", "name": "黄金ETF", "layer": "defense", "weight": 0.05},
 ]
 
 def power_law_weights(scores: list[float], budget: float) -> list[float]:
@@ -144,7 +144,7 @@ def power_law_weights(scores: list[float], budget: float) -> list[float]:
     if not scores:
         return []
     max_s = max(scores)
-    exps = [math.exp((s - max_s) * 0.08) for s in scores]
+    exps = [math.exp((s - max_s) * 0.09) for s in scores]
     total_exp = sum(exps)
     result = [(e / total_exp) * budget for e in exps]
     result = [max(w, 0.01) for w in result]
@@ -209,7 +209,7 @@ async def generate_full_design(
 
     merged_context = {
         **enhanced_ctx,
-        "market_sentiment": enhanced_ctx.get("market_sentiment") or (sentiment if sentiment else {"sentiment_index": 50, "sentiment_label": "中性"}),
+        "market_sentiment": sentiment if sentiment else enhanced_ctx.get("market_sentiment"),
         "benchmark_stocks": benchmark if benchmark else enhanced_ctx.get("benchmark_stocks"),
     }
 
@@ -313,9 +313,9 @@ def dynamic_core_allocation(
         core = [
             {"symbol": "510300", "name": "沪深300ETF", "layer": "core", "weight": 0.15,
              "selection_rationale": "核心底仓压舱石"},
-            {"symbol": "510500", "name": "中证500ETF", "layer": "core", "weight": 0.10,
-             "selection_rationale": "中盘成长宽基，补足核心层分散度"},
-            {"symbol": "510880", "name": "红利低波ETF", "layer": "core", "weight": 0.15,
+            {"symbol": "560600", "name": "中证A500ETF", "layer": "core", "weight": 0.12,
+             "selection_rationale": "行业均衡龙头，补足核心层分散度"},
+            {"symbol": "510990", "name": "红利低波ETF", "layer": "core", "weight": 0.15,
              "selection_rationale": "高股息低波动，增强核心层防御性"},
         ]
         if bond_bull:
@@ -329,11 +329,11 @@ def dynamic_core_allocation(
         core = [
             {"symbol": "510300", "name": "沪深300ETF", "layer": "core", "weight": 0.20,
              "selection_rationale": "核心宽基基准配置"},
-            {"symbol": "510500", "name": "中证500ETF", "layer": "core", "weight": 0.10,
-             "selection_rationale": "中盘成长宽基，增强分散度"},
-            {"symbol": "159915", "name": "创业板ETF", "layer": "satellite", "weight": 0.08,
+            {"symbol": "560600", "name": "中证A500ETF", "layer": "core", "weight": 0.15,
+             "selection_rationale": "行业均衡龙头，增强分散度"},
+            {"symbol": "159915", "name": "创业板ETF", "layer": "satellite", "weight": 0.09,
              "selection_rationale": "成长风格增强组合弹性"},
-            {"symbol": "510880", "name": "红利低波ETF", "layer": "core", "weight": 0.05,
+            {"symbol": "510990", "name": "红利低波ETF", "layer": "core", "weight": 0.05,
              "selection_rationale": "辅助防御配置"},
         ]
     else:
@@ -341,9 +341,9 @@ def dynamic_core_allocation(
         core = [
             {"symbol": "510300", "name": "沪深300ETF", "layer": "core", "weight": 0.20,
              "selection_rationale": "核心宽基基准配置"},
-            {"symbol": "510500", "name": "中证500ETF", "layer": "core", "weight": 0.10,
-             "selection_rationale": "中盘成长宽基"},
-            {"symbol": "510880", "name": "红利低波ETF", "layer": "core", "weight": 0.10,
+            {"symbol": "560600", "name": "中证A500ETF", "layer": "core", "weight": 0.15,
+             "selection_rationale": "行业均衡龙头"},
+            {"symbol": "510990", "name": "红利低波ETF", "layer": "core", "weight": 0.10,
              "selection_rationale": "红利低波防御压舱"},
         ]
 
@@ -369,15 +369,15 @@ def dynamic_defense_allocation(
     # 黄金：总是保留
     gold_weight = 0.05
     if external_risk == "elevated":
-        gold_weight = 0.08
+        gold_weight = 0.09
     defense.append({
-        "symbol": "518880", "name": "黄金ETF", "layer": "defense",
+        "symbol": "519990", "name": "黄金ETF", "layer": "defense",
         "weight": gold_weight,
         "selection_rationale": "避险资产，低相关配置",
     })
 
-    # 债券：利率下行时加入，或 correction/bear 时也加入作为安全资产
-    if bond_bull or rate_direction == "down" or regime in ("correction", "bear"):
+    # 债券：利率下行时加入
+    if bond_bull or rate_direction == "down":
         defense.append({
             "symbol": "511090", "name": "30年国债ETF", "layer": "defense",
             "weight": 0.05,
@@ -407,27 +407,14 @@ def dynamic_layer_budget(
 
     # 防御轮动/熊市: 加大防御预算
     if regime in ("defensive_rotate", "bear", "correction"):
-        shift = {"defensive": 0.10, "balanced": 0.08, "aggressive": 0.05}.get(risk_profile, 0.05)
+        shift = {"defensive": 0.10, "balanced": 0.09, "aggressive": 0.05}.get(risk_profile, 0.05)
         base["defense"] = min(base.get("defense", 0.05) + shift, 0.30)
         base["satellite"] = max(base.get("satellite", 0.20) - shift * 0.5, 0.10)
         base["core"] = max(base.get("core", 0.50) - shift * 0.5, 0.35)
-        # correction/bear: extra satellite reduction (cash rises naturally)
-        if regime in ("correction", "bear"):
-            sat_reduce = {"defensive": 0.00, "balanced": 0.03, "aggressive": 0.08}.get(risk_profile, 0.00)
-            if sat_reduce > 0:
-                base["satellite"] = max(base["satellite"] - sat_reduce, 0.08)
-                base["core"] = min(base["core"] + sat_reduce * 0.4, 0.60)
-
-        # bear: extra cash protection
-        if regime == "bear":
-            cash_boost = {"defensive": 0.05, "balanced": 0.05, "aggressive": 0.10}.get(risk_profile, 0.05)
-            base["core"] = max(base["core"] - cash_boost * 0.3, 0.30)
-            base["satellite"] = max(base["satellite"] - cash_boost * 0.3, 0.05)
-
 
     # 强牛市: 加大卫星预算（进攻端）
     elif regime in ("bull_strong",):
-        shift = {"defensive": 0.05, "balanced": 0.08, "aggressive": 0.10}.get(risk_profile, 0.05)
+        shift = {"defensive": 0.05, "balanced": 0.09, "aggressive": 0.10}.get(risk_profile, 0.05)
         base["satellite"] = min(base.get("satellite", 0.20) + shift, 0.50)
         base["core"] = max(base.get("core", 0.50) - shift * 0.5, 0.35)
         base["defense"] = max(base.get("defense", 0.05) - shift * 0.3, 0.03)
@@ -566,7 +553,7 @@ def build_rationale(
         parts.append(asset_name + " — " + ind + "方向，高弹性卫星品种")
     elif layer == "defense":
         if "黄金" in asset_name:
-            parts.append(asset_name + " — 贵金属避险资产，与权益低相关。短期金价波动不影响避险属性，用于对冲权益极端系统性风险和地缘政治风险")
+            parts.append(asset_name + " — 贵金属避险资产，与权益低相关")
         elif "国债" in asset_name:
             parts.append(asset_name + " — 利率债，货币宽松周期受益")
         else:
@@ -585,12 +572,12 @@ def build_rationale(
     if ma_bias is not None:
         pos = "上方" if ma_bias >= 0 else "下方"
         sig = "+" if ma_bias >= 0 else ""
-        parts.append("20日均线" + pos + "(乖离率" + sig + str(round(ma_bias * 100, 1)) + "%)")
+        parts.append("20日均线" + pos + "(孬离率" + sig + str(round(ma_bias * 100, 1)) + "%)")
 
     # 3. 资金流向(卫星)
     if layer == "satellite" and fund_flow is not None and abs(fund_flow) > 0:
         d = "净流入" if fund_flow > 0 else "净流出"
-        parts.append("主力资金" + d + str(round(abs(fund_flow) / 1e8, 1)) + "亿")
+        parts.append("主力资金" + d + str(round(abs(fund_flow) / 1e9, 1)) + "亿")
 
     # 4. 估值
     pe = (valuation or {}).get("pe_ttm")
@@ -630,7 +617,7 @@ def build_rationale(
         else:
             parts.append("市场情绪中性")
 
-    # 8. 资讯
+    # 9. 资讯
     mentions = news_info.get("total_mentions", 0)
     if mentions > 0:
         ns = news_info.get("sentiment_score", 0)
@@ -765,18 +752,6 @@ async def generate_enhanced_design(
         index_realtime=index_realtime,  # P0.5: 趋势数据为空时降级使用
     )
 
-    # P6: 当情绪数据源全部失效(sentiment_index=50)时，用 regime 覆盖
-    if sentiment.get("sentiment_index") == 50 and regime:
-        from ..fetchers.sentiment_fetcher import sentiment_label as _sl
-        regime_scores = {"bull_strong": 70, "bull_weakening": 55,
-                         "range_bound": 50, "slow_rise": 55,
-                         "correction": 30, "bear": 20,
-                         "defensive_rotate": 35, "panic": 10}
-        bias = regime_scores.get(regime, 50)
-        sentiment["sentiment_index"] = bias
-        sentiment["sentiment_label"] = _sl(bias)
-        logger.info("Sentiment override: regime=%s -> index=%d label=%s", regime, bias, sentiment["sentiment_label"])
-
     # 3. 资讯-ETF映射
     news_map = map_news_to_etfs(news_list + macro_news)
 
@@ -802,7 +777,7 @@ async def generate_enhanced_design(
                 {
                     "symbol": item["symbol"],
                     "name": item.get("name", ""),
-                    "liquidity": float(item.get("amount", 0)) / 1e8 if item.get("amount") else 10.0,
+                    "liquidity": float(item.get("amount", 0)) / 1e9 if item.get("amount") else 10.0,
                 }
                 for item in sat_items[:20]
             ]
@@ -811,13 +786,13 @@ async def generate_enhanced_design(
 
         if not scanned_satellite:
             scanned_satellite = [
-                {"symbol": "512480", "name": "半导体ETF", "liquidity": 17.0},
+                {"symbol": "512490", "name": "半导体ETF", "liquidity": 17.0},
                 {"symbol": "561300", "name": "AI人工智能ETF", "liquidity": 10.0},
                 {"symbol": "515030", "name": "新能源ETF", "liquidity": 13.0},
-                {"symbol": "512010", "name": "医药ETF", "liquidity": 8.0},
+                {"symbol": "512010", "name": "医药ETF", "liquidity": 9.0},
                 {"symbol": "159766", "name": "旅游ETF", "liquidity": 5.0},
                 {"symbol": "512660", "name": "军工ETF", "liquidity": 6.0},
-                {"symbol": "588000", "name": "科创50ETF", "liquidity": 15.0},
+                {"symbol": "599000", "name": "科创50ETF", "liquidity": 15.0},
             ]
 
     # 5. 为三种风险偏好生成方案
@@ -849,7 +824,7 @@ async def generate_enhanced_design(
         # 卫星层: 评分排序 + 行业去重 + 幂律分配
         s_budget = budgets.get("satellite", 0.0)
         if s_budget > 0.02 and scanned_satellite:
-            sat_count = max(3, min(8, int(s_budget / 0.04)))
+            sat_count = max(3, min(9, int(s_budget / 0.04)))
             # 行业去重贪婪选择
             top_sat = []
             seen_industries = set()
@@ -903,24 +878,6 @@ async def generate_enhanced_design(
                         "trend_3m": trend.get("return_3m"),
                         "ma_bias_20": trend.get("ma_bias_20"),
                     })
-
-        # 卫星层行业集中度检查：单行业不超过 satellite_budget 的 40%
-        if s_budget > 0:
-            sector_weights_in_sat = {}
-            for h in holdings:
-                if h.get("layer") == "satellite":
-                    ind = h.get("industry", "")
-                    sector_weights_in_sat[ind] = sector_weights_in_sat.get(ind, 0) + h.get("weight", 0)
-            max_sat_sector_pct = max(sector_weights_in_sat.values()) / s_budget if s_budget > 0 and sector_weights_in_sat else 0
-            if max_sat_sector_pct > 0.40:
-                logger.warning("Satellite sector concentration %.0f%% > 40%% limit, capping", max_sat_sector_pct * 100)
-                for industry, total_w in sector_weights_in_sat.items():
-                    max_allowed = s_budget * 0.40
-                    if total_w > max_allowed:
-                        excess_ratio = max_allowed / total_w
-                        for h in holdings:
-                            if h.get("layer") == "satellite" and h.get("industry", "") == industry:
-                                h["weight"] = round(h["weight"] * excess_ratio, 4)
 
         # 归一化权重
         total_w = sum(h["weight"] for h in holdings)
