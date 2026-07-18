@@ -113,7 +113,8 @@ def _build_plan_tables(strategies: list[dict]) -> str:
             code = e.get("symbol", "")
             name = e.get("name", "")[:12]
             w = (e.get("weight") or e.get("target_weight") or 0) * 100
-            rationale = (e.get("selection_rationale") or "")[:60]
+            raw = e.get("selection_rationale") or ""
+            rationale = raw.replace("\n", " ").replace("\r", "")[:100]
             layer_en = e.get("layer", "—")
             layer_cn = {"core": "核心", "satellite": "卫星", "sat": "卫星", "defense": "防御", "defence": "防御", "cash": "现金"}.get(layer_en, layer_en)
             lines.append(f"| {layer_cn} | {code} | {name} | {w:.0f}% | {rationale} |")
