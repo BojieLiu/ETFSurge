@@ -232,6 +232,7 @@ class FactorRegistry:
     def __init__(self):
         self._factors: dict[str, FactorDefinition] = {}
         self._computers: dict[str, Callable[[dict], float]] = dict(_BUILTIN_COMPUTERS)
+        self.load_definitions()
 
     def load_definitions(self, yaml_path: str | None = None) -> None:
         """Load factor definitions from YAML file."""
@@ -241,7 +242,11 @@ class FactorRegistry:
             return
         with open(path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f)
-        raw_list = data.get("factor_definitions", [])
+        # YAML 根结构是列表（`- code:`），不是 dict（兼容两种格式）
+        if isinstance(data, list):
+            raw_list = data
+        else:
+            raw_list = data.get("factor_definitions", [])
         for item in raw_list:
             code = item.get("code", "")
             if not code:
@@ -280,23 +285,49 @@ class FactorRegistry:
         self._computers[code] = fn
 
     async def _fetch_market_data(self, symbols: list[str]) -> dict[str, dict[str, Any]]:
-        """Fetch market data needed for factor computation.
+        """Fetch real market data for factor computation.
 
-        In S1, this returns mock/placeholder data.
-        In later sprints, this pulls from data sources (akshare, FRED, etc.).
+        Uses china_market.fetch_history() (mootdx->Sina) to get OHLCV for each symbol.
+        Falls back to placeholder data when fetch fails.
         """
-        # Placeholder: subclasses/replace with actual data fetch in later sprints
-        result = {}
-        for sym in symbols:
-            result[sym] = {
-                "total_mv": 100e9,
-                "float_mv": 80e9,
-                "close": [4.0 + i * 0.01 for i in range(60)],
-                "high": [4.0 + i * 0.02 for i in range(60)],
-                "low": [4.0 - i * 0.01 for i in range(60)],
-                "volume": [1000000 + i * 1000 for i in range(60)],
-            }
-        return result
+        from ..fetchers.china_market import fetch_history
+        import asyncio
+
+        async def fetch_one(sym: str) -> tuple[str, dict[str, Any]]:
+            try:
+                rows = await asyncio.wait_for(
+                    fetch_history(sym, "A", "daily"), timeout=10
+                )
+                if not rows:
+                    raise ValueError("empty data")
+                closes = [r.get("close", 0) for r in rows if r.get("close")]
+                highs = [r.get("high", 0) for r in rows if r.get("high")]
+                lows = [r.get("low", 0) for r in rows if r.get("low")]
+                vols = [r.get("volume", 0) for r in rows if r.get("volume")]
+                if len(closes) < 5:
+                    raise ValueError(f"too few data points: {len(closes)}")
+                return sym, {
+                    "total_mv": float(rows[-1].get("total_mv", 100e9) or 100e9),
+                    "float_mv": float(rows[-1].get("float_mv", 80e9) or 80e9),
+                    "close": closes[-60:],
+                    "high": highs[-60:],
+                    "low": lows[-60:],
+                    "volume": vols[-60:],
+                }
+            except Exception as e:
+                logger.warning("[factor] fetch_history failed for %s: %s", sym, e)
+                return sym, {
+                    "total_mv": 100e9,
+                    "float_mv": 80e9,
+                    "close": [4.0 + i * 0.01 for i in range(60)],
+                    "high": [4.0 + i * 0.02 for i in range(60)],
+                    "low": [4.0 - i * 0.01 for i in range(60)],
+                    "volume": [1000000 + i * 1000 for i in range(60)],
+                }
+
+        tasks = [fetch_one(sym) for sym in symbols]
+        results = await asyncio.gather(*tasks)
+        return dict(results)
 
     async def compute(
         self,
@@ -326,7 +357,7 @@ class FactorRegistry:
         result: dict[str, dict[str, float]] = {}
         for sym in symbols:
             row: dict[str, float] = {}
-            data = market_data.get(sym, {})
+            data = market_data.get(sym, {}) if market_data else {}
             for code in codes:
                 computer = self._computers.get(code)
                 if computer is None:
@@ -334,15 +365,41 @@ class FactorRegistry:
                 try:
                     raw_value = computer(data)
                     definition = self._factors.get(code)
-                    if definition and definition.standardization != "none":
-                        # Note: full standardization across symbols requires
-                        # batch processing. For S1, per-symbol normalization only.
-                        pass
                     row[code] = raw_value if raw_value is not None else 0.0
                 except Exception as e:
                     logger.debug("Factor %s failed for %s: %s", code, sym, e)
                     row[code] = 0.0
             result[sym] = row
+
+        # ── 跨符号 z-score 标准化（用临时 dict 存储原始值） ──
+        import statistics
+        _raw: dict[str, list[tuple[str, float]]] = {}
+        for code in codes:
+            definition = self._factors.get(code)
+            if not definition or definition.standardization not in ("zscore", "zscore_large"):
+                continue
+            _raw[code] = []
+            for sym in symbols:
+                val = result.get(sym, {}).get(code, 0.0)
+                _raw[code].append((sym, val))
+            all_v = [v for _, v in _raw[code]]
+            if len(all_v) < 2:
+                continue
+            mean_v = statistics.mean(all_v)
+            std_v = statistics.stdev(all_v)
+            if std_v < 1e-10:
+                continue
+            for sym, val in _raw[code]:
+                z = (val - mean_v) / std_v
+                result[sym][code] = z
+            # zscore_large: 二次映射到 (0~1)
+            if definition.standardization == "zscore_large":
+                z_vals = [result[sym][code] for sym, _ in _raw[code]]
+                min_z, max_z = min(z_vals), max(z_vals)
+                if max_z - min_z > 1e-10:
+                    for sym, _ in _raw[code]:
+                        result[sym][code] = (result[sym][code] - min_z) / (max_z - min_z)
+
         return result
 
 

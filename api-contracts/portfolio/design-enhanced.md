@@ -216,7 +216,7 @@ POST /api/v1/portfolio/design-enhanced
 | `mode=enhanced` triggers trend data collection | N/A | ☐ | |
 | Market regime detection implemented | N/A | ☐ | `detect_market_regime()` |
 | Macro regime detection implemented | N/A | ☐ | `detect_macro_regime()` |
-| Multi-factor satellite scoring | N/A | ☐ | |
+| Multi-factor satellite scoring | N/A | ✅ | compute() + z-score + _fetch_market_data |
 | Dynamic core/defense allocation | N/A | ☐ | |
 | ETF-level trend data in response | N/A | ☐ | `trend_1m`, `trend_3m`, etc. |
 | Risk metrics computed | N/A | ☐ | `risk_metrics` field |
