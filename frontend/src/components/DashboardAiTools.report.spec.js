@@ -93,6 +93,7 @@ describe('DashboardAiTools - Design Report Tab', () => {
 
   it('should show waiting state when design_text is empty and no error', async () => {
     // Simulate result state with empty design_text
+    wrapper.vm.activeCoreFeature = 'design'
     wrapper.vm.designResult = { plans: [{ style: 'balanced' }], design_text: '' }
     wrapper.vm.designStep = 'result'
     wrapper.vm.designTab = 'report'
@@ -106,6 +107,7 @@ describe('DashboardAiTools - Design Report Tab', () => {
   })
 
   it('should show error state when reportError is set', async () => {
+    wrapper.vm.activeCoreFeature = 'design'
     wrapper.vm.designResult = { plans: [{ style: 'balanced' }], design_text: '' }
     wrapper.vm.designStep = 'result'
     wrapper.vm.designTab = 'report'
@@ -117,6 +119,7 @@ describe('DashboardAiTools - Design Report Tab', () => {
   })
 
   it('should render markdown when design_text is populated by WS', async () => {
+    wrapper.vm.activeCoreFeature = 'design'
     wrapper.vm.designResult = {
       plans: [{ style: 'balanced' }],
       design_text: '## 市场环境\n深证成指今日跌 5.4%',

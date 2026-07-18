@@ -107,7 +107,7 @@
       </div>
 
       <!-- Loading State -->
-      <div v-else-if="designStep === 'loading'" class="panel-body design-loading">
+      <div v-else-if="activeCoreFeature === 'design' && designStep === 'loading'" class="panel-body design-loading">
         <div v-if="designFailed" class="feature-card loading-card error">
           <div class="error-icon">❌</div>
           <h3 class="loading-title">生成失败</h3>
@@ -143,7 +143,7 @@
       </div>
 
       <!-- Result Step -->
-      <div v-else-if="designStep === 'result' && designResult?.plans?.length" class="panel-body design-result">
+      <div v-else-if="activeCoreFeature === 'design' && designStep === 'result' && designResult?.plans?.length" class="panel-body design-result">
         <div class="design-tabs">
           <button class="design-tab" :class="{ active: designTab === 'report' }" @click="designTab = 'report'">&#128196; 完整报告</button>
           <button class="design-tab" :class="{ active: designTab === 'cards' }" @click="designTab = 'cards'">&#128202; 方案卡片</button>
