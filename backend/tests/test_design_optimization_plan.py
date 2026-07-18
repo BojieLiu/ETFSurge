@@ -283,3 +283,69 @@ def test_p5a_build_plan_tables_has_structure():
     assert "核心" in result, "result missing 核心 layer"
     assert "卫星" in result, "result missing 卫星 layer"
     assert "防御" in result, "result missing 防御 layer"
+
+
+# ─── P6: dynamic_layer_budget 参数调优 ─────────────────────────
+
+async def test_p6_correction_satellite_reduction():
+    """correction 模式下 aggressive 卫星层应降至 ~25%，防御型现金 > 进攻型现金。"""
+    from app.services.strategy_design import generate_enhanced_design, dynamic_layer_budget
+
+    delta = dynamic_layer_budget("aggressive", "correction")
+    aggressive_sat = delta.get("satellite", 0)
+    assert aggressive_sat < 0.28, (
+        f"correction aggressive satellite should be ~0.25, got {aggressive_sat:.3f}"
+    )
+
+    # 防御型现金 > 进攻型现金
+    def_budget = dynamic_layer_budget("defensive", "correction")
+    agg_budget = dynamic_layer_budget("aggressive", "correction")
+    def_cash = 1.0 - sum(def_budget.values())
+    agg_cash = 1.0 - sum(agg_budget.values())
+    assert def_cash > agg_cash, (
+        f"defensive cash ({def_cash:.2f}) should be > aggressive cash ({agg_cash:.2f})"
+    )
+
+
+# ─── P7: sentiment regime bias ──────────────────────────────────
+
+async def test_p7_sentiment_regime_bias():
+    """数据源故障(sentiment_index=50)时，regime 应覆盖情绪指数。"""
+    from app.services.strategy_design import generate_enhanced_design
+
+    fake_trend = {
+        "510300": {"return_1m": -0.15, "return_3m": -0.12, "ma_bias_20": 0.0},
+    }
+    fake_sentiment = {"sentiment_index": 50, "sentiment_label": "neutral"}
+    fake_macro = {"economic_phase": "recovery", "monetary_stance": "loose"}
+    fake_benchmark = [{"symbol": "600519", "name": "Moutai", "change_pct": -0.8, "signal": "sell"}]
+    fake_sector = []
+    fake_index_realtime = [
+        {"name": "上证指数", "symbol": "000001", "price": 3764, "change_pct": -3.05},
+    ]
+
+    with patch("app.services.market_trends.compute_etf_trends", new=AsyncMock(return_value=fake_trend)), \
+         patch("app.services.macro_state.detect_macro_regime", new=AsyncMock(return_value=fake_macro)), \
+         patch("app.fetchers.sentiment_fetcher.fetch_market_sentiment", new=AsyncMock(return_value=fake_sentiment)), \
+         patch("app.fetchers.benchmark_stocks.fetch_benchmark_stocks", new=AsyncMock(return_value=fake_benchmark)), \
+         patch("app.fetchers.news_fetcher.fetch_news_headlines", new=AsyncMock(return_value=[])), \
+         patch("app.fetchers.news_fetcher.fetch_macro_news", new=AsyncMock(return_value=[])), \
+         patch("app.fetchers.fundamental_fetcher.fetch_fund_flow", new=AsyncMock(return_value=None)), \
+         patch("app.fetchers.fundamental_fetcher.fetch_current_pe_pb", new=AsyncMock(return_value=None)), \
+         patch("app.fetchers.china_market.fetch_index_realtime", new=Mock(return_value=fake_index_realtime)), \
+         patch("app.services.market_trends.compute_sector_momentum", new=AsyncMock(return_value=fake_sector)), \
+         patch("app.services.pool_manager.pool_manager") as mp:
+        mp.refresh = AsyncMock()
+        mp.get_pool = lambda *a, **k: _fake_pool()
+        result = await generate_enhanced_design(capital=500000)
+
+    ctx = result.get("market_context", {})
+    sent = ctx.get("market_sentiment", {})
+    idx = sent.get("sentiment_index", 50)
+    label = sent.get("sentiment_label", "")
+    assert idx < 50, (
+        f"P7 failed: sentiment_index should be <50 (regime overridden), got {idx}"
+    )
+    assert label in ("谨慎", "恐慌", "悲观"), (
+        f"P7 failed: label should reflect negative bias, got {label!r}"
+    )

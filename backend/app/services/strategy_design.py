@@ -969,11 +969,11 @@ async def generate_enhanced_design(
             "risk_metrics": risk_metrics,
         })
 
-    # 填充现金后的完整 holdings
+    # 现金追加：按各自 layer_budget 独立计算
     for s in strategies:
-        cash_item = next((h for h in holdings if h.get("symbol") == "CASH"), None)
-        if cash_item:
-            s["etfs"].append(cash_item)
+        lb = s.get("layer_budget", {})
+        implied_cash = round(1.0 - sum(lb.get(k, 0) for k in ("core", "satellite", "defense")), 4)
+        s["etfs"].append({"symbol": "CASH", "name": "现金", "layer": "cash", "weight": max(implied_cash, 0.05), "selection_rationale": "流动性管理"})
 
     # 7. 构建 sector momentum
     sector_momentum = await compute_sector_momentum()
