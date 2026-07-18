@@ -143,13 +143,20 @@ async def compose_and_push_report(
             "stage": "正在分析市场环境...",
         })
 
-        # 调用 LLM（P1: 透传完整 market_context）
-        report_text = await generate_design_report(
-            strategies=strategies,
-            market_sentiment=market_sentiment,
-            benchmark_stocks=benchmark_stocks,
-            market_context=market_context,
-        )
+        # 调用 LLM（P1: 透传完整 market_context），加 90 秒超时防止挂起
+        try:
+            report_text = await asyncio.wait_for(
+                generate_design_report(
+                    strategies=strategies,
+                    market_sentiment=market_sentiment,
+                    benchmark_stocks=benchmark_stocks,
+                    market_context=market_context,
+                ),
+                timeout=90,
+            )
+        except (asyncio.TimeoutError, TimeoutError):
+            logger.error("[design_report] LLM generation timed out after 90s, using fallback summary")
+            report_text = None
 
         if not report_text:
             logger.warning("[design_report] LLM returned empty, generating fallback summary")
