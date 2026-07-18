@@ -68,14 +68,6 @@ STRATEGY_META = {
 MIN_WEIGHT = 0.01
 MAX_WEIGHT = 0.30
 
-# 标的总数约束
-MIN_NAMES = 8
-MAX_NAMES = 15
-
-# 核心层必须包含的宽基指数 ETF（沪深300 + 中证A500 至少各 1 只）
-CORE_REQUIRED = ["510300", "560600"]
-CORE_MIN_EACH = 0.05  # 各自最小权重
-
 
 # ── 候选标的池 (code -> 元数据) ─────────────────────────────
 # layer: 默认归属层; beta: 相对贝塔(用于优化器打分); liquidity: 日均成交额(亿)
@@ -121,23 +113,6 @@ CANDIDATE_POOL: dict[str, dict[str, Any]] = {
 }
 
 
-# ── 3. allocate_layer_budget: 层预算分配 ─────────────────────
-def allocate_layer_budget(risk_profile: str) -> dict[str, float]:
-    """返回 {core, satellite, defense} 预算比例"""
-    meta = STRATEGY_META.get(risk_profile, STRATEGY_META["balanced"])
-    return dict(meta["layer_budget"])
-
-
-# ── 4. v3.0: 核心+防御固定, 卫星幂律分配 ───────────────────────
-CORE_FIXED = [
-    {"symbol": "510300", "name": "沪深300ETF", "layer": "core", "weight": 0.25},
-    {"symbol": "560600", "name": "中证A500ETF", "layer": "core", "weight": 0.15},
-    {"symbol": "510880", "name": "红利低波ETF", "layer": "core", "weight": 0.10},
-]
-
-DEFENSE_FIXED = [
-    {"symbol": "518880", "name": "黄金ETF", "layer": "defense", "weight": 0.05},
-]
 
 def power_law_weights(scores: list[float], budget: float) -> list[float]:
     import math

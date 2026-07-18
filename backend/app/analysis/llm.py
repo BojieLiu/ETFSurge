@@ -1062,7 +1062,6 @@ def _build_design_report_prompt(
         ]
     else:
         lines = ["## 输入数据", ""]
-    lines.append(f"- 情绪指数: {market_sentiment.get('sentiment_index', 'N/A')}")
     lines.append("### 市场情绪")
     lines.append(f"- 情绪指数: {market_sentiment.get('sentiment_index', 'N/A')}")
     lines.append(f"- 情绪标签: {market_sentiment.get('sentiment_label', 'N/A')}")
@@ -1113,17 +1112,18 @@ def _build_design_report_prompt(
         lines.append("")
 
     lines.append("### 组合方案")
-    for s in strategies:
-        style = s.get("style", s.get("style_label", ""))
-        lines.append(f"- {style}: {s.get('portfolio_name', '')}")
-        lines.append(f"  定位: {s.get('positioning', '')}")
-        lines.append(f"  预期年化: {_fmt_pct(s.get('expected_return'))}, "
-                     f"最大回撤: {_fmt_pct(s.get('max_drawdown'))}, "
-                     f"夏普: {s.get('sharpe_ratio', 'N/A')}")
-        for a in s.get("allocations", []):
-            weight = a.get("target_weight", 0) * 100
-            lines.append(f"  - {a.get('name', '')}({a.get('symbol', '')}) "
-                         f"[{a.get('layer', '')}] {weight:.1f}% - {a.get('selection_rationale', '')}")
-        lines.append("")
+    if not plan_tables:
+        for s in strategies:
+            style = s.get("style", s.get("style_label", ""))
+            lines.append(f"- {style}: {s.get('portfolio_name', '')}")
+            lines.append(f"  定位: {s.get('positioning', '')}")
+            lines.append(f"  预期年化: {_fmt_pct(s.get('expected_return'))}, "
+                         f"最大回撤: {_fmt_pct(s.get('max_drawdown'))}, "
+                         f"夏普: {s.get('sharpe_ratio', 'N/A')}")
+            for a in s.get("allocations", []):
+                weight = a.get("target_weight", 0) * 100
+                lines.append(f"  - {a.get('name', '')}({a.get('symbol', '')}) "
+                             f"[{a.get('layer', '')}] {weight:.1f}% - {a.get('selection_rationale', '')}")
+            lines.append("")
 
     return "\n".join(lines)

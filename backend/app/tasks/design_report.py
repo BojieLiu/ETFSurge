@@ -304,6 +304,12 @@ async def compose_and_push_report(
             })
             await asyncio.sleep(0.05)  # 模拟流式延时
 
+        # 一致性校验：对比 LLM 报告的 ETF 代码与引擎策略数据
+        try:
+            report_text = _validate_report_consistency(report_text, strategies)
+        except Exception as ve:
+            logger.warning("[design_report] consistency check failed (non-blocking): %s", ve)
+
         # 推送完成
         await report_manager.broadcast(session_id, {
             "type": "design_report",
@@ -328,11 +334,7 @@ async def compose_and_push_report(
             except Exception as persist_e:
                 logger.error("[design_report] failed to persist design_text: %s", persist_e)
 
-        # 一致性校验：对比 LLM 报告的 ETF 代码与引擎策略数据
-        try:
-            report_text = _validate_report_consistency(report_text, strategies)
-        except Exception as ve:
-            logger.warning("[design_report] consistency check failed (non-blocking): %s", ve)
+
 
     except Exception as e:
         logger.error("[design_report] error for session %s: %s", session_id, e)

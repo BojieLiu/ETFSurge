@@ -105,20 +105,6 @@ async def export_portfolio_endpoint(
     return PlainTextResponse(content=result, media_type="text/csv")
 
 
-@router.post("/import")
-async def import_portfolio_endpoint(
-    file: str,  # Will be multipart form data
-    portfolio_type: str = "on_exchange",
-    mode: str = "merge",
-    skip_invalid: bool = True,
-    db: AsyncSession = Depends(get_db),
-):
-    """导入组合持仓"""
-    # Note: This endpoint expects multipart/form-data
-    # The actual file handling is done in the service
-    from fastapi import File, UploadFile
-    pass
-
 
 # Proper import endpoint with file upload
 from fastapi import File, UploadFile
@@ -164,8 +150,8 @@ async def portfolio_design(
 
     if risk_profile not in ["defensive", "balanced", "aggressive"]:
         raise HTTPException(status_code=400, detail="risk_profile must be 'defensive', 'balanced', or 'aggressive'")
-    if mode not in ["standard", "fast"]:
-        raise HTTPException(status_code=400, detail="mode must be 'standard' or 'fast'")
+    if mode not in ["standard"]:
+        raise HTTPException(status_code=400, detail="mode must be 'standard'")
 
     # 全量管道: 全市场扫描 + 情绪 + 指标股（generate_design 已废弃，统一走 generate_full_design）
     from ..services.strategy_design import generate_full_design

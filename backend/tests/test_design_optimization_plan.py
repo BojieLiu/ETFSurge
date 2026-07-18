@@ -349,3 +349,54 @@ async def test_p7_sentiment_regime_bias():
     assert label in ("谨慎", "恐慌", "悲观"), (
         f"P7 failed: label should reflect negative bias, got {label!r}"
     )
+
+
+# ─── P8: import 路由无死桩 ────────────────────────────────────
+
+def test_p8_import_route_not_stub():
+    """POST /import 路由不能是 pass 桩，须有真实响应体。"""
+    from app.routers.portfolio import router
+    for route in router.routes:
+        if route.path == "/api/v1/portfolio/import" and "POST" in route.methods:
+            # 确认路由绑定了真实函数，未使用 pass 桩
+            assert route.endpoint.__name__ != "import_portfolio_endpoint", (
+                "import route is still the dead stub! "
+                "Remove the first @router.post('/import') with pass body."
+            )
+            return
+    # 如果没找到 import 路由，也视为失败
+    assert False, "POST /api/v1/portfolio/import route not found"
+
+
+# ─── P9: consistency check runs before broadcast ───────────────
+
+def test_p9_consistency_check_before_broadcast():
+    """_validate_report_consistency 必须在 WS broadcast 之前调用。"""
+    import ast, inspect
+    from app.tasks import design_report as dr
+
+    source = inspect.getsource(dr.compose_and_push_report)
+    tree = ast.parse(source)
+
+    # Walk AST: find broadcast call and consistency check call
+    broadcast_lineno = None
+    check_lineno = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Attribute) and node.func.attr == "broadcast":
+                broadcast_lineno = node.lineno
+            if isinstance(node.func, ast.Attribute) and node.func.attr == "_validate_report_consistency":
+                check_lineno = node.lineno
+            if isinstance(node.func, ast.Name) and node.func.id == "_validate_report_consistency":
+                check_lineno = node.lineno
+
+    assert check_lineno is not None, (
+        "_validate_report_consistency call not found in compose_and_push_report"
+    )
+    assert broadcast_lineno is not None, (
+        "broadcast call not found in compose_and_push_report"
+    )
+    assert check_lineno < broadcast_lineno, (
+        f"consistency check at line {check_lineno} must run before "
+        f"broadcast at line {broadcast_lineno}"
+    )
