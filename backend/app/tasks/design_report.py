@@ -54,7 +54,7 @@ def _build_plan_tables(strategies: list[dict]) -> str:
     """P5-a: 从引擎 strategies 数据直接渲染方案详解 Markdown 表格。
     确保报告中的数据与方案卡片完全一致，杜绝 LLM 篡改标的。
     """
-    lines = ["\n\n## 二、三种方案详解（方案数据由引擎生成，与前端方案卡片完全一致）"]
+    lines = ["\n\n## 一、三种方案详解（引擎生成，与前端方案卡片完全一致）"]
 
     # ── 对比表：引擎直接渲染，LLM 不得篡改 ──
     labels = [s.get("label", "") for s in strategies]
@@ -233,7 +233,7 @@ async def compose_and_push_report(
             llm_analysis = None
 
         if llm_analysis:
-            report_text = plan_tables + "\n\n## 一、市场环境分析\n\n" + llm_analysis
+            report_text = plan_tables + "\n\n## 二、市场环境与配置建议\n\n" + llm_analysis
         else:
             logger.warning("[design_report] LLM empty, using engine tables only")
             report_text = "# ETF 组合设计方案（数据摘要）\n" + plan_tables
