@@ -124,6 +124,7 @@ def filter_etfs(raw_list: list[dict] | Any) -> list[dict[str, Any]]:
     """
     # 统一为 list[dict]
     if hasattr(raw_list, "to_dict"):
+        _normalize_columns(raw_list)
         raw_list = raw_list.to_dict(orient="records")
 
     CODE_NAMES = ["代码", "symbol", "code", "证券代码"]
