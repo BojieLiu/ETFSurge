@@ -25,10 +25,9 @@ if ($Local -or -not $Docker) {
         Start-Process -FilePath "cmd.exe" -ArgumentList "/c","cd /d $PSScriptRoot\backend && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload" -WindowStyle Hidden
         Write-Host "  后端已后台启动" -ForegroundColor Green
     } else {
-        # 普通:新建可见窗口运行 run_backend.bat
-        $r = wmic process call create "cmd /c $PSScriptRoot\run_backend.bat" 2>$null
-        if ($r -match "ReturnValue = 0") { Write-Host "  后端 OK" -ForegroundColor Green }
-        else { Write-Host "  后端启动失败!" -ForegroundColor Red; exit 1 }
+        # 普通:启动可见窗口
+        Start-Process cmd -ArgumentList "/c", "cd /d $PSScriptRoot\backend && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+        Write-Host "  后端已启动 (uvicorn --reload)" -ForegroundColor Yellow
     }
 
     Start-Sleep 3
@@ -43,11 +42,41 @@ if ($Local -or -not $Docker) {
 
     Start-Sleep 2
 
+    Write-Host "`n=== 检查服务状态 ===" -ForegroundColor Cyan
+
+    # 健康检查：等待后端就绪（最多 10 秒）
+    $backendOk = $false
+    for ($i = 0; $i -lt 10; $i++) {
+        try {
+            $resp = Invoke-WebRequest -Uri "http://127.0.0.1:8000/docs" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+            if ($resp.StatusCode -eq 200) { $backendOk = $true; break }
+        } catch {}
+        Start-Sleep 1
+    }
+    if ($backendOk) {
+        Write-Host "  后端 http://localhost:8000  ✅" -ForegroundColor Green
+    } else {
+        Write-Host "  后端 http://localhost:8000  ❌ 无法连接" -ForegroundColor Red
+        Write-Host "  可能原因：端口被占用或 uvicorn 启动异常。尝试手动运行:" -ForegroundColor Yellow
+        Write-Host "  cd $PSScriptRoot\backend && python -m uvicorn app.main:app --port 8000 --reload" -ForegroundColor Gray
+    }
+
+    $frontendOk = $false
+    for ($i = 0; $i -lt 10; $i++) {
+        try {
+            $resp = Invoke-WebRequest -Uri "http://127.0.0.1:5173" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+            if ($resp.StatusCode -eq 200) { $frontendOk = $true; break }
+        } catch {}
+        Start-Sleep 1
+    }
+    if ($frontendOk) {
+        Write-Host "  前端 http://localhost:5173  ✅" -ForegroundColor Green
+    } else {
+        Write-Host "  前端 http://localhost:5173  ❌ 无法连接" -ForegroundColor Red
+    }
+
     Write-Host "`n=== 已就绪 ===" -ForegroundColor Cyan
-    Write-Host "  前端: http://localhost:5173  (热更新)" -ForegroundColor Green
-    Write-Host "  后端: http://localhost:8000" -ForegroundColor Green
-    Write-Host "  文档: http://localhost:8000/docs" -ForegroundColor Green
-    if (-not $NoOpen) { Start-Process http://localhost:5173 }
+    if (-not $NoOpen -and $frontendOk) { Start-Process http://localhost:5173 }
     if ($Silent) { return }
     return
 }

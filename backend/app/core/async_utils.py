@@ -11,7 +11,8 @@ import concurrent.futures
 DEFAULT_SYNC_TIMEOUT = 8
 
 # 全局共享线程池，替代各 fetcher 中频繁创建/销毁的 ThreadPoolExecutor
-_shared_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+# P4-b: 8 个 worker 预留余量，避免 akshare 阻塞耗尽线程池
+_shared_executor = concurrent.futures.ThreadPoolExecutor(max_workers=8)
 
 
 def run_in_thread(fn, *args, timeout: int = DEFAULT_SYNC_TIMEOUT):
