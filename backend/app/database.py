@@ -48,3 +48,7 @@ def _migrate(conn):
         conn.execute(text("ALTER TABLE portfolio_etfs ADD COLUMN first_buy_date DATE"))
     if "last_trade_date" not in columns:
         conn.execute(text("ALTER TABLE portfolio_etfs ADD COLUMN last_trade_date DATE"))
+    # PortfolioDesign.design_text (LLM 报告持久化)
+    columns_design = [c["name"] for c in inspector.get_columns("portfolio_designs")]
+    if "design_text" not in columns_design:
+        conn.execute(text("ALTER TABLE portfolio_designs ADD COLUMN design_text TEXT"))

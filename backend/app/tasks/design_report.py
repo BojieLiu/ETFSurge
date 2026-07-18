@@ -56,6 +56,7 @@ async def compose_and_push_report(
     market_sentiment: dict | None = None,
     benchmark_stocks: list[dict] | None = None,
     market_context: dict | None = None,
+    design_id: int | None = None,  # 传 design_id 时，报告完成后写回数据库
 ) -> None:
     """生成 LLM 报告并通过 WS 推送。
 
@@ -94,12 +95,39 @@ async def compose_and_push_report(
         )
 
         if not report_text:
+            logger.warning("[design_report] LLM returned empty, generating fallback summary")
+            fallback_parts = [
+                "# ETF 组合设计方案（数据摘要）\n",
+                f"市场状态：{market_context.get('market_regime', '—')}\n",
+            ]
+            for s in strategies:
+                label = s.get("label", "")
+                lb = s.get("layer_budget", {})
+                fallback_parts.append(f"\n## {label}\n")
+                fallback_parts.append(f"核心 {lb.get('core',0)*100:.0f}% · 卫星 {lb.get('satellite',0)*100:.0f}% · 防御 {lb.get('defense',0)*100:.0f}%\n\n")
+                for e in (s.get("allocations") or s.get("etfs") or []):
+                    if e.get("symbol") == "CASH": continue
+                    w = (e.get("weight") or e.get("target_weight") or 0) * 100
+                    fallback_parts.append(f"- {e.get('name','')} ({e.get('symbol')}) {w:.0f}% — {e.get('selection_rationale','')[:80]}\n")
+            report_text = "".join(fallback_parts)
             await report_manager.broadcast(session_id, {
                 "type": "design_report",
                 "session_id": session_id,
-                "status": "error",
-                "message": "报告生成失败",
+                "status": "complete",
+                "report_text": report_text,
             })
+            # 写库
+            if design_id is not None:
+                try:
+                    from ..database import async_session_factory
+                    from ..models.portfolio_design import PortfolioDesign
+                    async with async_session_factory() as db:
+                        d = await db.get(PortfolioDesign, design_id)
+                        if d:
+                            d.design_text = report_text
+                            await db.commit()
+                except Exception as pe:
+                    logger.error("[design_report] fallback persist error: %s", pe)
             return
 
         # 推送进度: 撰写完成
@@ -137,6 +165,23 @@ async def compose_and_push_report(
             "status": "complete",
             "report_text": report_text,
         })
+
+        # 持久化：将报告文本写入数据库（如果传了 design_id）
+        if design_id is not None and report_text:
+            try:
+                from sqlalchemy import select
+                from ..database import async_session_factory
+                from ..models.portfolio_design import PortfolioDesign
+                async with async_session_factory() as db:
+                    design = await db.get(PortfolioDesign, design_id)
+                    if design:
+                        design.design_text = report_text
+                        await db.commit()
+                        logger.info("[design_report] persisted design_text for design %s", design_id)
+                    else:
+                        logger.warning("[design_report] design %s not found for persist", design_id)
+            except Exception as persist_e:
+                logger.error("[design_report] failed to persist design_text: %s", persist_e)
 
     except Exception as e:
         logger.error("[design_report] error for session %s: %s", session_id, e)

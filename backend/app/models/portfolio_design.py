@@ -20,3 +20,6 @@ class PortfolioDesign(Base):
 
     # 生成时的市场快照 JSON
     market_snapshot_json = Column(Text, nullable=True)
+
+    # LLM 生成的完整设计报告（Markdown 文本）
+    design_text = Column(Text, nullable=True)

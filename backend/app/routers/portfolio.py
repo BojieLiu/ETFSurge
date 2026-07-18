@@ -199,6 +199,7 @@ async def portfolio_design(
                 market_sentiment=market_context.get("market_sentiment", {}),
                 benchmark_stocks=market_context.get("benchmark_stocks", []),
                 market_context=market_context,
+                design_id=design_id,  # 报告完成后写回数据库
             ))
         except Exception as e:
             logger.warning("[portfolio] failed to schedule design report: %s", e)

@@ -151,10 +151,16 @@
         <!-- Tab: Report -->
         <div v-if="designTab === 'report'" class="design-report">
           <!-- LLM 报告到达前显示加载状态，不再输出误导性的硬编码假报告 -->
-          <div v-if="!designResult?.design_text && !reportError" class="report-waiting">
+          <div v-if="!designResult?.design_text && !reportError && !designReportStale" class="report-waiting">
             <div class="waiting-spinner"></div>
             <p class="waiting-text">⏳ AI 报告生成中...</p>
             <p class="waiting-hint">报告由 DeepSeek 根据实时行情撰写，预计 10-30 秒完成</p>
+          </div>
+          <!-- 历史记录中超时未收到报告 -->
+          <div v-else-if="!designResult?.design_text && !reportError && designReportStale" class="report-stale">
+            <p class="error-text">📄 完整报告暂不可用</p>
+            <p class="error-detail">该方案生成时 LLM 报告未能完成（可能因接口超时或连接异常），但方案数据和入选理由已保存，您仍可参考策略分配。</p>
+            <AppButton variant="ghost" size="sm" @click="retryReport">重新生成报告</AppButton>
           </div>
           <div v-else-if="reportError" class="report-error">
             <p class="error-text">❌ 报告生成失败</p>
@@ -364,6 +370,14 @@ const reportError = ref('')  // LLM 报告错误信息
 const designReportHtml = computed(() => {
   if (!designResult.value?.design_text) return ''
   return marked(designResult.value.design_text)
+})
+
+// 历史记录中超过 60 秒仍未收到 LLM 报告 → 标记为失效，不再显示"等待中"
+const designReportStale = computed(() => {
+  if (!designResult.value?.created_at) return false
+  const created = new Date(designResult.value.created_at).getTime()
+  if (!created || isNaN(created)) return false
+  return Date.now() - created > 60_000
 })
 
 // UX2: 组件挂载时恢复之前持久化的设计面板状态
