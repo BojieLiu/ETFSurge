@@ -108,7 +108,13 @@
 
       <!-- Loading State -->
       <div v-else-if="designStep === 'loading'" class="panel-body design-loading">
-        <div class="feature-card loading-card">
+        <div v-if="designFailed" class="feature-card loading-card error">
+          <div class="error-icon">❌</div>
+          <h3 class="loading-title">生成失败</h3>
+          <p class="loading-text">{{ designFailed }}</p>
+          <p class="loading-hint">3 秒后将返回设置页，请检查后端服务是否正常运行</p>
+        </div>
+        <div v-else class="feature-card loading-card">
           <div class="loading-spinner"></div>
           <h3 class="loading-title">正在生成组合方案</h3>
           <p class="loading-text">{{ loadingText }}</p>
@@ -356,6 +362,7 @@ const taskStore = useTaskStore()
 // State
 const activeCoreFeature = ref(null)
 const designStep = ref('wizard')
+const designFailed = ref('')
 const designCapital = ref(500000)
 const designResult = ref(null)
 const designTab = ref('cards')
@@ -798,8 +805,16 @@ async function startDesign() {
       }
     }, 5000)
   } catch (e) {
-    toast(e?.response?.data?.detail || e.message || '生成失败，请重试', 'error')
-    designStep.value = 'wizard'
+    const errMsg = e?.response?.data?.detail || e.message || '后端服务异常'
+    // 显示错误而非静默返回 wizard，用户可看清是后端挂了还是 API 异常
+    loadingText.value = '❌ ' + errMsg
+    toast(errMsg, 'error')
+    designFailed.value = errMsg
+    // 3s 后返回 wizard 可重新尝试
+    setTimeout(() => {
+      designStep.value = 'wizard'
+      designFailed.value = ''
+    }, 3000)
   }
 }
 
