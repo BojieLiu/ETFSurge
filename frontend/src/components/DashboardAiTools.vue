@@ -176,7 +176,7 @@
           <div v-else class="markdown-body" v-html="designReportHtml"></div>
           <div class="panel-footer-actions">
             <AppButton variant="ghost" @click="regenerateDesign">重新生成方案</AppButton>
-            <AppButton variant="ghost" @click="exitCoreFeature">完成</AppButton>
+            <AppButton variant="ghost" @click="exitCoreFeature">返回</AppButton>
           </div>
         </div>
 
@@ -283,7 +283,7 @@
 
           <div class="design-cards-actions">
             <AppButton variant="ghost" @click="regenerateDesign">重新生成</AppButton>
-            <AppButton variant="ghost" @click="exitCoreFeature">完成</AppButton>
+            <AppButton variant="ghost" @click="exitCoreFeature">返回</AppButton>
           </div>
         </div>
 
