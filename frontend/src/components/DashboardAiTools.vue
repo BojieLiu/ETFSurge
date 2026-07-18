@@ -174,7 +174,7 @@
             <AppButton variant="primary" size="sm" @click="retryReport">重新生成报告</AppButton>
           </div>
           <div v-else class="markdown-body" v-html="designReportHtml"></div>
-          <div class="panel-footer-actions" v-if="designResult?.design_text || reportError">
+          <div class="panel-footer-actions">
             <AppButton variant="ghost" @click="regenerateDesign">重新生成方案</AppButton>
             <AppButton variant="ghost" @click="exitCoreFeature">完成</AppButton>
           </div>
@@ -283,8 +283,7 @@
 
           <div class="design-cards-actions">
             <AppButton variant="ghost" @click="regenerateDesign">重新生成</AppButton>
-            <AppButton variant="ghost" @click="toggleHistory">历史记录</AppButton>
-            <AppButton variant="ghost" @click="showHistory = true">返回</AppButton>
+            <AppButton variant="ghost" @click="exitCoreFeature">完成</AppButton>
           </div>
         </div>
 
@@ -701,6 +700,8 @@ async function loadHistoryDetail(id) {
 }
 
 function togglePlanExpand(pf) {
+  // Bug 2: 选中文字时不收起卡片，避免右键复制被干扰
+  if (window.getSelection().toString().trim()) return
   expandedPlan.value = expandedPlan.value === pf.style ? null : pf.style
 }
 

@@ -54,13 +54,53 @@ def _build_plan_tables(strategies: list[dict]) -> str:
     """P5-a: 从引擎 strategies 数据直接渲染方案详解 Markdown 表格。
     确保报告中的数据与方案卡片完全一致，杜绝 LLM 篡改标的。
     """
-    lines = ["\n\n## 三、三种方案详解"]
+    lines = ["\n\n## 二、三种方案详解（方案数据由引擎生成，与前端方案卡片完全一致）"]
+
+    # ── 对比表：引擎直接渲染，LLM 不得篡改 ──
+    labels = [s.get("label", "") for s in strategies]
+    lines.append("\n### 方案对比总览\n")
+    lines.append("| 维度 | " + " | ".join(labels) + " |")
+    lines.append("|------|" + "|".join([":---:"] * len(strategies)) + "|")
+
+    # 风格定位
+    pos = [s.get("positioning", "—")[:20] for s in strategies]
+    lines.append("| 风格定位 | " + " | ".join(pos) + " |")
+
+    # ETF 数量/层结构
+    cnts, cores, sats, defs = [], [], [], []
+    for s in strategies:
+        allocs = s.get("allocations") or s.get("etfs") or []
+        core_w = sum(e.get("weight") or e.get("target_weight") or 0 for e in allocs if e.get("layer") in ("core",))
+        sat_w  = sum(e.get("weight") or e.get("target_weight") or 0 for e in allocs if e.get("layer") in ("satellite", "sat"))
+        def_w  = sum(e.get("weight") or e.get("target_weight") or 0 for e in allocs if e.get("layer") in ("defense", "defence"))
+        cores.append(f"{core_w * 100:.0f}%")
+        sats.append(f"{sat_w * 100:.0f}%")
+        defs.append(f"{def_w * 100:.0f}%")
+        etf_cnt = sum(1 for e in allocs if e.get("symbol") != "CASH")
+        cnts.append(str(etf_cnt) + " 只")
+    lines.append("| ETF 数量 | " + " | ".join(cnts) + " |")
+    lines.append("| 核心层 | " + " | ".join(cores) + " |")
+    lines.append("| 卫星层 | " + " | ".join(sats) + " |")
+    lines.append("| 防御层 | " + " | ".join(defs) + " |")
+
+    # 现金 / 预期回报
+    cashes, rets = [], []
+    for s in strategies:
+        allocs = s.get("allocations") or s.get("etfs") or []
+        cash = next((e for e in allocs if e.get("symbol") == "CASH"), None)
+        w = (cash.get("weight") or cash.get("target_weight") or 0) * 100 if cash else 10
+        cashes.append(f"{w:.0f}%")
+        r = s.get("expected_return")
+        rets.append(f"{r * 100:.0f}%" if r is not None else "—")
+    lines.append("| 现金仓位 | " + " | ".join(cashes) + " |")
+    lines.append("| 预期年化 | " + " | ".join(rets) + " |")
+
     for s in strategies:
         label = s.get("label", "")
-        lb = s.get("layer_budget", {})
-        core_pct = lb.get("core", 0) * 100
-        sat_pct = lb.get("satellite", 0) * 100
-        def_pct = lb.get("defense", 0) * 100
+        allocs = s.get("allocations") or s.get("etfs") or []
+        core_pct = sum(e.get("weight") or e.get("target_weight") or 0 for e in allocs if e.get("layer") in ("core",)) * 100
+        sat_pct = sum(e.get("weight") or e.get("target_weight") or 0 for e in allocs if e.get("layer") in ("satellite", "sat")) * 100
+        def_pct = sum(e.get("weight") or e.get("target_weight") or 0 for e in allocs if e.get("layer") in ("defense", "defence")) * 100
         lines.append(f"\n### {label}")
         lines.append(f"资产结构：核心 {core_pct:.0f}% · 卫星 {sat_pct:.0f}% · 防御 {def_pct:.0f}%\n")
         lines.append("| 资产类别 | 代码 | 名称 | 权重 | 入选理由 |")
@@ -193,7 +233,7 @@ async def compose_and_push_report(
             llm_analysis = None
 
         if llm_analysis:
-            report_text = llm_analysis + "\n\n---\n\n" + plan_tables
+            report_text = plan_tables + "\n\n## 一、市场环境分析\n\n" + llm_analysis
         else:
             logger.warning("[design_report] LLM empty, using engine tables only")
             report_text = "# ETF 组合设计方案（数据摘要）\n" + plan_tables
