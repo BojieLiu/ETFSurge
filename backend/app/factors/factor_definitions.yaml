@@ -2235,9 +2235,145 @@ factor_definitions:
   ic_ir_threshold: 0.5
 
 # =============================================================================
+# --- ETF-specific (6 factors) ---
+# =============================================================================
+- code: "etf.premium_discount"
+  name: "折溢价率"
+  category: "etf_specific"
+  subcategory: "etf"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "(ETF价格-NAV)/NAV，大幅溢价(>3%)扣分"
+  tags: ["etf", "pricing"]
+  dependencies: ["nav", "price"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "etf.tracking_error"
+  name: "跟踪误差"
+  category: "etf_specific"
+  subcategory: "etf"
+  frequency: "daily"
+  standardization: "zscore_large"
+  lookback_window: 20
+  description: "ETF与基准日收益差的标准差(20日)，越大越差"
+  tags: ["etf", "quality"]
+  dependencies: ["etf_return", "benchmark_return"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "etf.shares_change"
+  name: "规模变化率"
+  category: "etf_specific"
+  subcategory: "etf"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 20
+  description: "(当前份额-20日前份额)/20日前份额，捕捉聪明钱"
+  tags: ["etf", "flow"]
+  dependencies: ["shares"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "etf.amount_stability"
+  name: "成交额稳定性"
+  category: "etf_specific"
+  subcategory: "etf"
+  frequency: "daily"
+  standardization: "zscore_large"
+  lookback_window: 20
+  description: "20日成交额变异系数(CV=std/mean)，稳定=高分"
+  tags: ["etf", "liquidity"]
+  dependencies: ["amount"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "etf.industry_diversification"
+  name: "行业分散度"
+  category: "etf_specific"
+  subcategory: "etf"
+  frequency: "weekly"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "前3行业占比之和，分散=高分"
+  tags: ["etf", "composition"]
+  dependencies: ["industry_weights"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "etf.institutional_holdings_change"
+  name: "机构占比变化"
+  category: "etf_specific"
+  subcategory: "etf"
+  frequency: "weekly"
+  standardization: "zscore"
+  lookback_window: 20
+  description: "机构持有份额环比变化，正数=加分"
+  tags: ["etf", "smart_money"]
+  dependencies: ["institutional_shares"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# =============================================================================
+# --- Market Environment (5 factors) ---
+# =============================================================================
+- code: "sentiment.panic_greed_diff"
+  name: "恐慌-贪婪差值"
+  category: "sentiment"
+  subcategory: "news"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 20
+  description: "当日情绪指数 - 20日均值，骤降触发预警"
+  tags: ["sentiment", "regime"]
+  dependencies: ["sentiment_index"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "sentiment.stock_divergence"
+  name: "个股情绪离散度"
+  category: "sentiment"
+  subcategory: "news"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "ETF成分股涨跌幅的标准差，离散大->减卫星"
+  tags: ["sentiment", "risk"]
+  dependencies: ["constituent_returns"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "sentiment.news_heat"
+  name: "资讯热度"
+  category: "sentiment"
+  subcategory: "news"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 3
+  description: "ETF关联资讯近3日stars加权和，热度骤增加分"
+  tags: ["sentiment", "news"]
+  dependencies: ["news_items"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "sentiment.news_direction"
+  name: "资讯情绪方向"
+  category: "sentiment"
+  subcategory: "news"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 5
+  description: "近5日利好资讯占比，持续利好加分"
+  tags: ["sentiment", "news"]
+  dependencies: ["news_items"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+# =============================================================================
 # 统计摘要
 # =============================================================================
-# 总计: 128 个因子
+# 总计: 139 个因子
 # 版本: v1.0
 # 最后更新: 2025-01-17
 # =============================================================================

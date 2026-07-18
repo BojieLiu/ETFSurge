@@ -177,6 +177,82 @@ def _compute_vwap(data: dict[str, Any]) -> float:
     return float(np.sum(c * v) / total_vol) if total_vol > 0 else float(c[-1])
 
 
+def _compute_amount_stability(data: dict) -> float:
+    """Amount stability: 20-day CV of turnover amount, negated so stable = high score."""
+    amounts = data.get("amount") or data.get("volume") or []
+    if len(amounts) < 5:
+        return 0.0
+    import statistics
+    mean_a = statistics.mean(amounts)
+    if mean_a < 1e-6:
+        return 0.0
+    cv = statistics.stdev(amounts) / mean_a
+    return -min(cv, 10.0)
+
+
+def _compute_panic_greed_diff(data: dict) -> float:
+    """Panic-greed diff: current sentiment index minus 20-day mean."""
+    idx = data.get("sentiment_index")
+    hist = data.get("sentiment_history", [])
+    if idx is None or len(hist) < 5:
+        return 0.0
+    import statistics
+    return idx - statistics.mean(hist[-20:])
+
+
+def _compute_news_heat(data: dict) -> float:
+    """News heat: weighted sum of stars over recent items."""
+    items = data.get("news_items", [])
+    if not items:
+        return 0.0
+    total = 0.0
+    for it in items[-30:]:
+        s = float(it.get("stars", 0) or 0)
+        total += s
+    return total
+
+
+def _compute_news_direction(data: dict) -> float:
+    """News sentiment direction: ratio of positive news in recent items."""
+    items = data.get("news_items", [])
+    if len(items) < 3:
+        return 0.0
+    positive = sum(1 for it in items if it.get("level") in ("利好", "重大"))
+    total = len(items)
+    return positive / max(total, 1)
+
+
+# --- Scaffolding functions (return 0, data source integration later) ---
+def _compute_premium_discount(data: dict) -> float:
+    """Premium/discount ratio -- NAV data source TBD."""
+    return 0.0
+
+
+def _compute_tracking_error(data: dict) -> float:
+    """Tracking error -- benchmark data source TBD."""
+    return 0.0
+
+
+def _compute_shares_change(data: dict) -> float:
+    """Shares outstanding change -- shares data source TBD."""
+    return 0.0
+
+
+def _compute_industry_diversification(data: dict) -> float:
+    """Industry diversification -- holdings data source TBD."""
+    return 0.0
+
+
+def _compute_institutional_holdings_change(data: dict) -> float:
+    """Institutional holdings change -- institutional data source TBD."""
+    return 0.0
+
+
+def _compute_stock_divergence(data: dict) -> float:
+    """Stock return divergence -- constituent return data TBD."""
+    return 0.0
+
+
 # ── Mapping of factor code → compute function ─────────────────────
 
 _BUILTIN_COMPUTERS: dict[str, Callable[[dict], float]] = {
@@ -192,6 +268,16 @@ _BUILTIN_COMPUTERS: dict[str, Callable[[dict], float]] = {
     "technical.volume.vol_ratio": _compute_volume_ratio,
     "technical.atr.atr_14": _compute_atr_14,
     "technical.volume.vwap": _compute_vwap,
+    "etf.amount_stability": _compute_amount_stability,
+    "etf.premium_discount": _compute_premium_discount,  # scaffolding
+    "etf.tracking_error": _compute_tracking_error,       # scaffolding
+    "etf.shares_change": _compute_shares_change,          # scaffolding
+    "etf.industry_diversification": _compute_industry_diversification,  # scaffolding
+    "etf.institutional_holdings_change": _compute_institutional_holdings_change,  # scaffolding
+    "sentiment.panic_greed_diff": _compute_panic_greed_diff,
+    "sentiment.stock_divergence": _compute_stock_divergence,  # scaffolding
+    "sentiment.news_heat": _compute_news_heat,
+    "sentiment.news_direction": _compute_news_direction,
 }
 
 # 30 core factors for S1 (extend this list as implementation progresses)
@@ -216,6 +302,18 @@ _CORE_FACTORS = [
     "technical.atr.atr_14",
     # Technical: VWAP
     "technical.volume.vwap",
+    # ETF-specific
+    "etf.premium_discount",
+    "etf.tracking_error",
+    "etf.shares_change",
+    "etf.amount_stability",
+    "etf.industry_diversification",
+    "etf.institutional_holdings_change",
+    # Sentiment
+    "sentiment.panic_greed_diff",
+    "sentiment.stock_divergence",
+    "sentiment.news_heat",
+    "sentiment.news_direction",
 ]
 
 
