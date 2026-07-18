@@ -79,7 +79,19 @@ def _validate_report_consistency(report_text: str, strategies: list[dict]) -> st
 
     # 检查是否覆盖了三种方案
     plan_names = [s.get("label", "") or s.get("style", "") for s in strategies]
-    missing = [n for n in plan_names if n and n not in report_text]
+    missing = []
+    for n in plan_names:
+        if not n:
+            continue
+        if n in report_text:
+            continue
+        # 容忍别名匹配：LLM 可能用 positioning/portfolio_name 而非 label
+        s_match = [s for s in strategies if (s.get("label") == n or s.get("style") == n)]
+        if s_match:
+            pos = s_match[0].get("positioning", "") or s_match[0].get("portfolio_name", "")
+            if pos and pos in report_text:
+                continue
+        missing.append(n)
     if missing:
         miss_note = (
             "\n\n> **📋 方案说明**：系统共生成 "
