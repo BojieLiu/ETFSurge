@@ -119,9 +119,9 @@ async def compose_and_push_report(
             # 写库
             if design_id is not None:
                 try:
-                    from ..database import async_session_factory
+                    from ..database import async_session
                     from ..models.portfolio_design import PortfolioDesign
-                    async with async_session_factory() as db:
+                    async with async_session() as db:
                         d = await db.get(PortfolioDesign, design_id)
                         if d:
                             d.design_text = report_text
@@ -169,10 +169,9 @@ async def compose_and_push_report(
         # 持久化：将报告文本写入数据库（如果传了 design_id）
         if design_id is not None and report_text:
             try:
-                from sqlalchemy import select
-                from ..database import async_session_factory
+                from ..database import async_session
                 from ..models.portfolio_design import PortfolioDesign
-                async with async_session_factory() as db:
+                async with async_session() as db:
                     design = await db.get(PortfolioDesign, design_id)
                     if design:
                         design.design_text = report_text
