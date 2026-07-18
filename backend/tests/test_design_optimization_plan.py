@@ -131,6 +131,52 @@ def test_p1_prompt_contains_market_snapshot_and_sector_momentum():
     assert "-5.4%" in prompt or "5.4%" in prompt, "prompt should cite actual index change_pct"
 
 
+def test_p5a_prompt_contains_factor_data():
+    """Prompt for design report must include factor_score and breakdown."""
+    from app.analysis.llm import _build_design_report_prompt
+
+    strategies = [
+        {
+            "label": "防御型", "id": "defensive",
+            "layer_budget": {"core": 0.50, "satellite": 0.15, "defense": 0.05},
+            "allocations": [
+                {"symbol": "510300", "name": "沪深300ETF", "weight": 0.18,
+                 "layer": "core", "factor_score": 0.72,
+                 "factor_scores": {"style.size.ln_mcap": 0.8, "etf.amount_stability": 0.6,
+                                   "sentiment.news_heat": 0.3},
+                 "selection_rationale": "核心底仓"},
+                {"symbol": "518880", "name": "黄金ETF", "weight": 0.08,
+                 "layer": "defense", "factor_score": 0.65,
+                 "factor_scores": {"etf.premium_discount": -0.2, "style.size.ln_mcap": 0.5},
+                 "selection_rationale": "避险配置"},
+                {"symbol": "CASH", "name": "现金", "weight": 0.10,
+                 "layer": "cash", "factor_score": 0.5, "factor_scores": {},
+                 "selection_rationale": "流动性管理"},
+            ],
+        }
+    ]
+    market_sentiment = {"sentiment_index": 30, "sentiment_label": "谨慎"}
+    market_context = {
+        "index_realtime": [],
+        "market_regime": "correction",
+        "macro_regime": {"economic_phase": "recovery", "monetary_stance": "loose"},
+        "sector_momentum": [],
+    }
+
+    prompt = _build_design_report_prompt(
+        strategies, market_sentiment, [], market_context=market_context, plan_tables=""
+    )
+
+    # 因子评分 section 必须出现
+    assert "各标的因子评分" in prompt, "prompt missing factor scoring section (P5a)"
+    # 因子分值必须出现
+    assert "0.72" in prompt, "prompt should contain factor_score 0.72 for 510300"
+    # 因子分解子项必须出现
+    assert "ln_mcap" in prompt or "amount_stability" in prompt, (
+        "prompt should contain individual factor breakdown items"
+    )
+
+
 # ─── P3: change_pct in trend + build_rationale ──────────────────────
 
 async def test_p3_fetch_single_trend_has_change_pct():

@@ -103,8 +103,8 @@ def _build_plan_tables(strategies: list[dict]) -> str:
         def_pct = sum(e.get("weight") or e.get("target_weight") or 0 for e in allocs if e.get("layer") in ("defense", "defence")) * 100
         lines.append(f"\n### {label}")
         lines.append(f"资产结构：核心 {core_pct:.0f}% · 卫星 {sat_pct:.0f}% · 防御 {def_pct:.0f}%\n")
-        lines.append("| 资产类别 | 代码 | 名称 | 权重 | 入选理由 |")
-        lines.append("|---------|------|------|:----:|---------|")
+        lines.append("| 资产类别 | 代码 | 名称 | 权重 | 因子 | 入选理由 |")
+        lines.append("|---------|------|------|:----:|:----:|---------|")
 
         allocs = s.get("allocations") or s.get("etfs") or []
         for e in allocs:
@@ -117,7 +117,9 @@ def _build_plan_tables(strategies: list[dict]) -> str:
             rationale = raw.replace("\n", " ").replace("\r", "")[:100]
             layer_en = e.get("layer", "—")
             layer_cn = {"core": "核心", "satellite": "卫星", "sat": "卫星", "defense": "防御", "defence": "防御", "cash": "现金"}.get(layer_en, layer_en)
-            lines.append(f"| {layer_cn} | {code} | {name} | {w:.0f}% | {rationale} |")
+            fs = e.get("factor_score", None)
+            fs_txt = f"{fs:.2f}" if fs is not None else ""
+            lines.append(f"| {layer_cn} | {code} | {name} | {w:.0f}% | {fs_txt} | {rationale} |")
 
     return "\n".join(lines)
 

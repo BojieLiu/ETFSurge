@@ -905,6 +905,12 @@ async def generate_enhanced_design(
             for h in holdings:
                 h["weight"] = round(h["weight"] * scale, 4)
 
+        # factor_score 覆盖：确保核心/防御层也有评分
+        _pool_by_sym = {p.get("symbol"): p for p in (sat_pool or [])}
+        for h in holdings:
+            if h.get("factor_score") is None and h.get("symbol") in _pool_by_sym:
+                h["factor_score"] = round(_pool_by_sym[h["symbol"]].get("composite_score", 0.5), 3)
+
         # 现金
         cash = round(1.0 - actual_budget, 4)
         holdings.append({

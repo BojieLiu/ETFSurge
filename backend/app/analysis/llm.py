@@ -1111,6 +1111,27 @@ def _build_design_report_prompt(
             lines.append(f"- {name}: {rank_txt} 当日{chg_txt}".rstrip())
         lines.append("")
 
+    # ── 因子评分（5.0+ 新增） ──
+    if strategies:
+        lines.append("### 各标的因子评分")
+        lines.append("（多因子模型综合评分，0~1）")
+        for s in strategies:
+            label = s.get("label", "")
+            lines.append(f"- {label}:")
+            for e in (s.get("allocations") or s.get("etfs") or [])[:5]:
+                code = e.get("symbol", "")
+                name = e.get("name", "")[:10]
+                fs = e.get("factor_score", None)
+                if fs is not None:
+                    lines.append(f"  - {name}({code}) 评分: {fs:.2f}")
+                    # 取 top-3 factor_scores 子项（如有 breakdown）
+                    fs_detail = e.get("factor_scores", {})
+                    if isinstance(fs_detail, dict) and fs_detail:
+                        top_3 = sorted(fs_detail.items(), key=lambda x: abs(x[1]), reverse=True)[:3]
+                        for f_code, f_val in top_3:
+                            lines.append(f"    {f_code}: {f_val:.2f}")
+        lines.append("")
+
     lines.append("### 组合方案")
     if not plan_tables:
         for s in strategies:
