@@ -50,6 +50,47 @@ class DesignReportManager:
 report_manager = DesignReportManager()
 
 
+def _validate_report_consistency(report_text: str, strategies: list[dict]) -> str:
+    """校验 LLM 报告中的 ETF 代码是否与引擎策略数据一致。
+    如 LLM 引入了引擎方案以外的标的，追加修正脚注。
+    如 LLM 遗漏了三个方案中的某个，追加提醒段落。"""
+    import re
+
+    # 提取引擎策略中的所有 ETF 代码
+    engine_symbols: set[str] = set()
+    for s in strategies:
+        for a in s.get("allocations") or s.get("etfs") or []:
+            sym = a.get("symbol", "")
+            if sym and sym != "CASH":
+                engine_symbols.add(sym)
+
+    # 提取报告中所有 ETF 代码（6 位纯数字）
+    report_symbols: set[str] = set(re.findall(r"\b(\d{6})\b", report_text))
+
+    # 差集：LLM 写了哪些引擎没有的标的
+    extra_symbols = report_symbols - engine_symbols
+    if extra_symbols:
+        extra_note = (
+            "\n\n> **⚠️ 一致性说明**：以下代码在报告中出现但不在引擎方案中："
+            + ", ".join(sorted(extra_symbols))
+            + "。以上分析仅供参考，实际配置以方案卡片中的 ETF 标的和权重为准。"
+        )
+        report_text += extra_note
+
+    # 检查是否覆盖了三种方案
+    plan_names = [s.get("label", "") or s.get("style", "") for s in strategies]
+    missing = [n for n in plan_names if n and n not in report_text]
+    if missing:
+        miss_note = (
+            "\n\n> **📋 方案说明**：系统共生成 "
+            + "、".join(plan_names)
+            + " 三个方案，报告未完整展开的方案请参考「方案卡片」Tab 查看完整明细。"
+        )
+        report_text += miss_note
+
+    return report_text
+
+
 async def compose_and_push_report(
     session_id: str,
     strategies: list[dict],
@@ -181,6 +222,12 @@ async def compose_and_push_report(
                         logger.warning("[design_report] design %s not found for persist", design_id)
             except Exception as persist_e:
                 logger.error("[design_report] failed to persist design_text: %s", persist_e)
+
+        # 一致性校验：对比 LLM 报告的 ETF 代码与引擎策略数据
+        try:
+            report_text = _validate_report_consistency(report_text, strategies)
+        except Exception as ve:
+            logger.warning("[design_report] consistency check failed (non-blocking): %s", ve)
 
     except Exception as e:
         logger.error("[design_report] error for session %s: %s", session_id, e)
