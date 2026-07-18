@@ -284,7 +284,7 @@
           <div class="design-cards-actions">
             <AppButton variant="ghost" @click="regenerateDesign">重新生成</AppButton>
             <AppButton variant="ghost" @click="toggleHistory">历史记录</AppButton>
-            <AppButton variant="ghost" @click="exitCoreFeature">完成</AppButton>
+            <AppButton variant="ghost" @click="showHistory = true">返回</AppButton>
           </div>
         </div>
 
