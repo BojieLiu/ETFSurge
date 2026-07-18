@@ -258,7 +258,7 @@
                       <thead><tr><th>层</th><th>代码</th><th>名称</th><th>权重</th><th>配置逻辑</th></tr></thead>
                       <tbody>
                         <tr v-for="a in pf.allocations" :key="a.symbol">
-                          <td><span class="layer-dot" :class="'layer-dot--' + (a.layer || 'satellite')"></span></td>
+                          <td><span class="layer-dot" :class="'layer-dot--' + (a.layer || 'satellite')"></span><span class="layer-label-text">{{ layerLabel(a.layer || 'satellite') }}</span></td>
                           <td><code>{{ a.symbol }}</code></td>
                           <td>{{ a.name || '&mdash;' }}</td>
                           <td><span class="weight-badge">{{ (a.target_weight * 100).toFixed(1) }}%</span></td>
