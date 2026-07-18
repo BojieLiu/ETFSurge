@@ -224,17 +224,40 @@ def _compute_news_direction(data: dict) -> float:
 
 # --- Scaffolding functions (return 0, data source integration later) ---
 def _compute_premium_discount(data: dict) -> float:
-    """Premium/discount ratio -- NAV data source TBD."""
+    """折溢价率：(ETF价格 - IOPV) / IOPV。正常范围 -0.03 ~ 0.03。"""
+    nav = data.get("nav")
+    price = data.get("price")
+    if nav and price and nav > 0:
+        return (price - nav) / nav
     return 0.0
 
 
 def _compute_tracking_error(data: dict) -> float:
-    """Tracking error -- benchmark data source TBD."""
-    return 0.0
+    """跟踪误差：ETF与基准指数日收益差的标准差（20日）。
+    使用 data["close"] 和 data["benchmark_close"] 计算。
+    正常范围 0~0.05，越小越好。
+    """
+    closes = data.get("close", [])
+    bench_closes = data.get("benchmark_close", [])
+    if len(closes) < 5 or len(bench_closes) < 5:
+        return 0.0
+    n = min(len(closes), len(bench_closes))
+    diff = []
+    for i in range(1, n):
+        etf_ret = (closes[i] - closes[i-1]) / closes[i-1] if closes[i-1] > 0 else 0
+        bench_ret = (bench_closes[i] - bench_closes[i-1]) / bench_closes[i-1] if bench_closes[i-1] > 0 else 0
+        diff.append((etf_ret - bench_ret) ** 2)
+    if len(diff) < 4:
+        return 0.0
+    import statistics, math
+    return math.sqrt(statistics.mean(diff))
 
 
 def _compute_shares_change(data: dict) -> float:
-    """Shares outstanding change -- shares data source TBD."""
+    """规模变化率：(当前份额 - 20日前份额) / 20日前份额。"""
+    shares_change = data.get("shares_change_20d")
+    if shares_change is not None:
+        return float(shares_change)
     return 0.0
 
 

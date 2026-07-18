@@ -264,6 +264,70 @@ def _tencent_realtime(symbols: list[str], asset_type: str) -> list[dict[str, Any
         return []
 
 
+# ── New ETF data source functions ──────────────────────────
+
+
+def fetch_etf_net_value(symbol: str) -> dict | None:
+    """获取ETF实时IOPV（参考净值）和折溢价。
+
+    从Sina ETF行情中解析最新价与IOPV计算折溢价率。
+    返回: { "nav": float, "price": float, "premium_discount": float }
+    失败返回 None。
+    """
+    try:
+        import urllib.request
+        url = f"http://hq.sinajs.cn/list=sh{symbol}"
+        req = urllib.request.Request(url, headers={"Referer": "http://finance.sina.com.cn"})
+        resp = urllib.request.urlopen(req, timeout=5)
+        text = resp.read().decode("gbk")
+        # Sina ETF format, fields include IOPV data
+        if not text or '"' not in text:
+            return None
+        parts = text.split('"')[1].split(",")
+        if len(parts) < 10:
+            return None
+        # parts[3] = current price, parts[8] = IOPV (reference NAV)
+        price = float(parts[3]) if parts[3] else None
+        nav = float(parts[8]) if parts[8] else None
+        if price and nav and nav > 0:
+            return {
+                "nav": nav,
+                "price": price,
+                "premium_discount": (price - nav) / nav,
+            }
+    except Exception:
+        pass
+    return None
+
+
+def fetch_etf_shares_outstanding(symbol: str) -> dict | None:
+    """获取ETF份额数据（用于规模变化率计算）。
+
+    使用 akshare fund_etf_hist_em 获取份额数据。
+    返回: { "total_shares": float, "shares_change_20d": float }
+    失败返回 None。
+    """
+    try:
+        import akshare as ak
+        df = ak.fund_etf_hist_em(symbol=symbol, period="daily", start_date="20200101", end_date="20500101", adjust="")
+        if df is None or df.empty:
+            return None
+        cols = [c for c in df.columns if "份额" in str(c) or "规模" in str(c)]
+        if not cols:
+            return None
+        shares_col = cols[0]
+        latest = float(df.iloc[-1][shares_col])
+        if len(df) >= 20:
+            prev = float(df.iloc[-20][shares_col])
+            change_20d = (latest - prev) / prev if prev > 0 else 0.0
+        else:
+            change_20d = 0.0
+        return {"total_shares": latest, "shares_change_20d": change_20d}
+    except Exception:
+        pass
+    return None
+
+
 # ── Public API ───────────────────────────────────────────────────
 
 def fetch_a_stock_realtime(symbol: str | None = None) -> list[dict[str, Any]]:
