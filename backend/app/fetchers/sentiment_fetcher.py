@@ -52,17 +52,19 @@ def normalize(val: float, min_val: float = -1.0, max_val: float = 1.0) -> float:
 
 def calc_sentiment_index(
     advance_ratio: float,
-    inst_consensus: float,
-    north_flow: float,
-    margin_change: float,
+    inst_consensus: float = 0.0,
+    north_flow: float = 0.0,
+    margin_change: float = 0.0,
+    regime: str | None = None,
 ) -> float:
     """合成四维情绪指数 (0~100)。
 
     Args:
         advance_ratio: 上涨家数占比 (0~1)
-        inst_consensus: 机构共识度 (-1~1)
+        inst_consensus: 机构共识度 (-1~1, 默认0.0=中性)
         north_flow: 北向资金方向 (-1~1, 归一化)
         margin_change: 两融变化 (-1~1, 归一化)
+        regime: 市场状态，用于数据缺失时的偏置
     """
     score = (
         0.25 * advance_ratio
@@ -70,6 +72,22 @@ def calc_sentiment_index(
         + 0.25 * normalize(north_flow)
         + 0.25 * normalize(margin_change)
     )
+
+    # 当 adv_ratio 和 north_flow 均为中性默认值时（数据源故障），用 regime 偏置
+    all_default = (
+        abs(advance_ratio - 0.5) < 0.05
+        and abs(north_flow) < 0.01
+        and abs(margin_change) < 0.01
+    )
+    if all_default and regime:
+        regime_bias = {
+            "bull_strong": 0.70, "bull_weakening": 0.55,
+            "range_bound": 0.50, "slow_rise": 0.55,
+            "correction": 0.30, "bear": 0.20,
+            "defensive_rotate": 0.35, "panic": 0.10,
+        }
+        score = regime_bias.get(regime, score)
+
     return round(score * 100, 1)
 
 

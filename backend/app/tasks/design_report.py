@@ -54,7 +54,7 @@ def _build_plan_tables(strategies: list[dict]) -> str:
     """P5-a: 从引擎 strategies 数据直接渲染方案详解 Markdown 表格。
     确保报告中的数据与方案卡片完全一致，杜绝 LLM 篡改标的。
     """
-    lines = ["\n\n## 一、三种方案详解（引擎生成，与前端方案卡片完全一致）"]
+    lines = ["\n\n## 一、三种方案详解"]
 
     # ── 对比表：引擎直接渲染，LLM 不得篡改 ──
     labels = [s.get("label", "") for s in strategies]
@@ -114,8 +114,9 @@ def _build_plan_tables(strategies: list[dict]) -> str:
             name = e.get("name", "")[:12]
             w = (e.get("weight") or e.get("target_weight") or 0) * 100
             rationale = (e.get("selection_rationale") or "")[:60]
-            layer = e.get("layer", "—")
-            lines.append(f"| {layer} | {code} | {name} | {w:.0f}% | {rationale} |")
+            layer_en = e.get("layer", "—")
+            layer_cn = {"core": "核心", "satellite": "卫星", "sat": "卫星", "defense": "防御", "defence": "防御", "cash": "现金"}.get(layer_en, layer_en)
+            lines.append(f"| {layer_cn} | {code} | {name} | {w:.0f}% | {rationale} |")
 
     return "\n".join(lines)
 

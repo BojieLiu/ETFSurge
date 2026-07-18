@@ -1015,6 +1015,17 @@ def _build_design_report_prompt(
     index_realtime = market_context.get("index_realtime") or []
     sector_momentum = market_context.get("sector_momentum") or []
 
+    # 数据日期标签：非交易日的行情来自上一交易日
+    from ..core.market_calendar import is_trading_time as _is_trading
+    from datetime import timedelta as _td
+    _now = __import__('datetime', fromlist=['datetime']).datetime.now()
+    if _is_trading(_now):
+        data_date_label = "今日"
+    else:
+        _d = _now - _td(days=1)
+        _d -= _td(days=(_d.weekday() - 4)) if _d.weekday() >= 5 else _td(days=0)  # 跳到周五
+        data_date_label = f"{_d.month}月{_d.day}日"
+
     def _fmt_pct(v):
         if v is None:
             return "—"
