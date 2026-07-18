@@ -157,36 +157,21 @@ async def portfolio_design(
 ):
     """
     生成全市场ETF组合方案（核心+卫星+防御三层结构）。
-    mode='standard': 全市场扫描+卫星层两轮评分+情绪+指标股 (~15s)
-    mode='fast': 固定候选池快速生成 (~2s)
+    mode 仅保留 'standard'（全市场扫描+卫星层两轮评分+情绪+指标股）。
+    历史遗留的 'fast' 分支依赖的 generate_design 已被移除，统一走 generate_full_design。
     """
     await asyncio.to_thread(asyncio.sleep, 0)  # yield control
-    from datetime import datetime
-    
+
     if risk_profile not in ["defensive", "balanced", "aggressive"]:
         raise HTTPException(status_code=400, detail="risk_profile must be 'defensive', 'balanced', or 'aggressive'")
     if mode not in ["standard", "fast"]:
         raise HTTPException(status_code=400, detail="mode must be 'standard' or 'fast'")
-    
-    if mode == "standard":
-        # 全量管道: 全市场扫描 + 情绪 + 指标股
-        from ..services.strategy_design import generate_full_design
-        result = await generate_full_design(capital=capital, constraints=constraints)
-        strategies = result["strategies"]
-        market_context = result["market_context"]
-    else:
-        # 快速管道: 固定候选池
-        from ..services.strategy_design import generate_design
-        design = await generate_design(risk_profile, capital, mode, constraints, db)
-        strategies = design
-        market_context = {
-            "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M"),
-            "indices": [],
-            "fund_flow": [],
-            "valuation_metrics": [],
-            "market_sentiment": {"sentiment_index": 50, "sentiment_label": "\u4e2d\u6027"},
-            "benchmark_stocks": []
-        }
+
+    # 全量管道: 全市场扫描 + 情绪 + 指标股（generate_design 已废弃，统一走 generate_full_design）
+    from ..services.strategy_design import generate_full_design
+    result = await generate_full_design(capital=capital, constraints=constraints)
+    strategies = result["strategies"]
+    market_context = result["market_context"]
     
     # 保存到历史记录
     design_id = None
@@ -213,6 +198,7 @@ async def portfolio_design(
                 strategies=strategies,
                 market_sentiment=market_context.get("market_sentiment", {}),
                 benchmark_stocks=market_context.get("benchmark_stocks", []),
+                market_context=market_context,
             ))
         except Exception as e:
             logger.warning("[portfolio] failed to schedule design report: %s", e)

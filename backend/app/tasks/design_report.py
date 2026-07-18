@@ -55,8 +55,14 @@ async def compose_and_push_report(
     strategies: list[dict],
     market_sentiment: dict | None = None,
     benchmark_stocks: list[dict] | None = None,
+    market_context: dict | None = None,
 ) -> None:
     """生成 LLM 报告并通过 WS 推送。
+
+    P1 增强：新增 market_context 参数，透传完整市场上下文（含 index_realtime /
+    market_regime / macro_regime / sector_momentum）给 LLM 报告，取代仅用
+    market_sentiment + benchmark_stocks 的狭窄输入。旧调用（仅传前两个字段）
+    仍向后兼容。
 
     流程:
       1. 推送 status=generating, progress=10
@@ -79,11 +85,12 @@ async def compose_and_push_report(
             "stage": "正在分析市场环境...",
         })
 
-        # 调用 LLM
+        # 调用 LLM（P1: 透传完整 market_context）
         report_text = await generate_design_report(
             strategies=strategies,
             market_sentiment=market_sentiment,
             benchmark_stocks=benchmark_stocks,
+            market_context=market_context,
         )
 
         if not report_text:

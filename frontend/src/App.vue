@@ -33,6 +33,9 @@
           <span class="status-indicator" :class="connectionStatus" aria-hidden="true"></span>
           <span class="status-text">{{ connectionStatusText }}</span>
         </div>
+
+        <!-- Global task indicator (Plan A) -->
+        <TaskIndicator />
       </nav>
     </header>
 
@@ -90,10 +93,13 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useToastStore } from './stores/toast'
 import { useLoadingStore } from './stores/loading'
+import { useTaskStore } from './stores/task'
+import { portfolioApi } from './api'
+import TaskIndicator from './components/TaskIndicator.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -144,6 +150,75 @@ const toastIcons = {
 const dismissToast = (id) => {
   toastStore.dismiss(id)
 }
+
+// ── Global task-notification WebSocket (Plan B) ──────────────────
+// Single persistent connection driving the nav-bar task indicator.
+// Backend broadcasts { type: 'task_update', task_id, status, progress }.
+const taskStore = useTaskStore()
+let taskWs = null
+let taskWsReconnectTimer = null
+let taskWsClosedByUs = false
+
+function connectTaskWs() {
+  if (taskWs && taskWs.readyState <= 1) return
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const wsUrl = protocol + '//' + window.location.host + '/api/v1/ws/task-notifications'
+  try {
+    taskWs = new WebSocket(wsUrl)
+  } catch (e) {
+    scheduleTaskWsReconnect()
+    return
+  }
+
+  taskWs.onmessage = (event) => {
+    try {
+      const msg = JSON.parse(event.data)
+      if (msg.type !== 'task_update') return
+      const taskId = msg.task_id
+      const patch = {
+        status: msg.status,
+        progress: typeof msg.progress === 'number' ? msg.progress : 0,
+      }
+      taskStore.updateTask(taskId, patch)
+      // Backend _notify does NOT carry design_id — fetch it on completion.
+      if (msg.status === 'completed') {
+        portfolioApi.getTask(taskId).then((res) => {
+          const did = res?.data?.design_id
+          if (did) taskStore.updateTask(taskId, { designId: did })
+        }).catch(() => {})
+      }
+    } catch (e) {
+      // ignore malformed messages
+    }
+  }
+
+  taskWs.onclose = () => {
+    taskWs = null
+    if (!taskWsClosedByUs) scheduleTaskWsReconnect()
+  }
+
+  taskWs.onerror = () => {
+    // onclose will follow; reconnect handled there
+  }
+}
+
+function scheduleTaskWsReconnect() {
+  if (taskWsReconnectTimer) return
+  taskWsReconnectTimer = setTimeout(() => {
+    taskWsReconnectTimer = null
+    connectTaskWs()
+  }, 3000)
+}
+
+onMounted(() => {
+  connectTaskWs()
+})
+
+onUnmounted(() => {
+  taskWsClosedByUs = true
+  if (taskWsReconnectTimer) clearTimeout(taskWsReconnectTimer)
+  if (taskWs) taskWs.close()
+})
 </script>
 
 <style scoped>

@@ -101,6 +101,16 @@ POST /api/v1/portfolio/design-enhanced
   "market_context": {
     "timestamp": "2026-07-16 15:00",
     "indices": [...],
+    "index_realtime": [
+      {
+        "symbol": "000001",
+        "name": "上证指数",
+        "price": 3210.5,
+        "change_pct": -0.012,
+        "change_amount": -3.9,
+        "asset_type": "index"
+      }
+    ],
     "market_sentiment": {
       "sentiment_index": 45,
       "sentiment_label": "中性偏谨慎",
@@ -138,6 +148,7 @@ POST /api/v1/portfolio/design-enhanced
 |-------|------|-------------|
 | `trend_1m` | float | 近1月收益率 (decimal, e.g. -0.032 = -3.2%) |
 | `trend_3m` | float | 近3月收益率 |
+| `change_pct` | float | 当日涨跌幅 (decimal, e.g. -0.012 = -1.2%)，用于入选理由「今日涨/跌 X%」 |
 | `ma_bias_20` | float | 相对20日均线乖离率 |
 | `fund_flow_20d` | int | 近20日累计资金净流入(元) |
 | `factor_score` | float | 多因子综合评分 (0~1) |
@@ -162,6 +173,19 @@ POST /api/v1/portfolio/design-enhanced
 | `bear` | 熊市 |
 | `defensive_rotate` | 防御轮动 |
 | `panic` | 恐慌 |
+
+#### `market_context.index_realtime`
+
+实时大盘指数行情快照（由 `china_market.fetch_index_realtime()` 采集），用于 LLM 报告「市场行情快照」章节引用实际指数点位与涨跌幅。
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `symbol` | string | 指数代码 (e.g. `000001`, `399001`, `000300`) |
+| `name` | string | 指数名称 |
+| `price` | float | 当前点位 |
+| `change_pct` | float | 当日涨跌幅 (decimal) |
+| `change_amount` | float | 当日涨跌点数 |
+| `asset_type` | string | 固定为 `index` |
 
 #### `market_context.macro_regime`
 

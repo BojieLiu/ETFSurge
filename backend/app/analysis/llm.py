@@ -956,20 +956,32 @@ async def generate_design_report(
     strategies: list[dict],
     market_sentiment: dict | None = None,
     benchmark_stocks: list[dict] | None = None,
+    market_context: dict | None = None,
 ) -> str:
     """基于系统算法生成的组合方案，调用 LLM 撰写市场分析报告。
 
     Args:
         strategies: 三个方案数据（来自战略设计管道）
-        market_sentiment: 市场情绪数据（可选）
-        benchmark_stocks: 核心指标股数据（可选）
+        market_sentiment: 市场情绪数据（可选，兼容旧调用）
+        benchmark_stocks: 核心指标股数据（可选，兼容旧调用）
+        market_context: 完整市场上下文（P1 增强：含 index_realtime / market_regime /
+            macro_regime / sector_momentum 等），优先于上面两个单独字段
 
     Returns:
         Markdown 格式的分析报告
     """
+    ctx = market_context or {}
+    # 兼容旧调用：若未传 market_context，则回退到单独字段
+    if not ctx:
+        ctx = {
+            "market_sentiment": market_sentiment or {},
+            "benchmark_stocks": benchmark_stocks or [],
+        }
     prompt = _build_design_report_prompt(
-        strategies, market_sentiment or {},
-        benchmark_stocks or [],
+        strategies,
+        ctx.get("market_sentiment", market_sentiment or {}),
+        ctx.get("benchmark_stocks", benchmark_stocks or []),
+        market_context=ctx,
     )
     try:
         # 使用"symbol_analysis" agent 的通用上下文，但传入设计报告 prompt
@@ -987,8 +999,19 @@ def _build_design_report_prompt(
     strategies: list[dict],
     market_sentiment: dict,
     benchmark_stocks: list[dict],
+    market_context: dict | None = None,
 ) -> str:
-    """构建设计报告 prompt。"""
+    """构建设计报告 prompt。
+
+    P1 增强：新增「市场行情快照」（实时指数点位/涨跌幅）与「行业板块动量」两节，
+    使 LLM 报告能引用实际市场数据而非仅情绪指数。
+    """
+    market_context = market_context or {}
+    _regime = market_context.get("market_regime") or market_sentiment.get("market_regime")
+    _macro = market_context.get("macro_regime") or {}
+    index_realtime = market_context.get("index_realtime") or []
+    sector_momentum = market_context.get("sector_momentum") or []
+
     def _fmt_pct(v):
         if v is None:
             return "—"
@@ -1002,12 +1025,48 @@ def _build_design_report_prompt(
     lines.append(f"- 情绪标签: {market_sentiment.get('sentiment_label', 'N/A')}")
     lines.append("")
 
+    # ── P1 新增：市场行情快照（实时指数） ──
+    if index_realtime:
+        lines.append("### 市场行情快照（实时指数）")
+        for idx in index_realtime:
+            chg = idx.get("change_pct")
+            chg_txt = _fmt_pct(chg) if chg is not None else "—"
+            lines.append(
+                f"- {idx.get('name', idx.get('symbol', ''))}（{idx.get('symbol', '')}）: "
+                f"点位 {idx.get('price', '—')}，今日 {chg_txt}"
+            )
+        lines.append("")
+
+    # ── 市场状态 / 宏观（补充上下文） ──
+    if _regime:
+        lines.append("### 市场状态")
+        lines.append(f"- 市场状态(regime): {_regime}")
+        if _macro:
+            eco = _macro.get("economic_phase")
+            mon = _macro.get("monetary_stance")
+            if eco:
+                lines.append(f"- 宏观: {eco}" + (f"·{mon}" if mon else ""))
+        lines.append("")
+
     if benchmark_stocks:
         lines.append("### 核心指标股")
         for s in benchmark_stocks[:5]:
             lines.append(f"- {s.get('name', '')}({s.get('symbol', '')}): "
                          f"涨跌{_fmt_pct(s.get('change_pct', 0))}, "
                          f"信号: {s.get('signal', '')}")
+        lines.append("")
+
+    # ── P1 新增：行业板块动量 ──
+    if sector_momentum:
+        lines.append("### 行业板块动量（申万一级，按当日强弱排名）")
+        for item in sector_momentum[:10]:
+            name = item.get("sector_name") or item.get("sector") or ""
+            rank = item.get("rank") or item.get("rank_current")
+            total = item.get("total") or ""
+            chg = item.get("change_pct")
+            chg_txt = _fmt_pct(chg) if chg is not None else ""
+            rank_txt = f"第{rank}/{total}名" if rank is not None else ""
+            lines.append(f"- {name}: {rank_txt} 当日{chg_txt}".rstrip())
         lines.append("")
 
     lines.append("### 组合方案")

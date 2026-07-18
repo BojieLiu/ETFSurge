@@ -317,11 +317,12 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { marked } from 'marked'
 import { portfolioApi } from '../api'
 import { usePortfolioStore } from '../stores/portfolio'
 import { useToastStore } from '../stores/toast'
+import { useTaskStore } from '../stores/task'
 import { formatDate } from '../utils/formatDate'
 import AppButton from './ui/AppButton.vue'
 import AppInput from './ui/AppInput.vue'
@@ -329,6 +330,7 @@ import AppInput from './ui/AppInput.vue'
 const emit = defineEmits(['applied'])
 const store = usePortfolioStore()
 const toast = useToastStore()
+const taskStore = useTaskStore()
 
 // State
 const activeCoreFeature = ref(null)
@@ -627,6 +629,47 @@ async function startDesign() {
   loadingProgress.value = 0
   loadingText.value = '正在提交任务...'
 
+  // 详情拉取逻辑（完成事件触发）
+  async function fetchDesignDetail(designId) {
+    if (!designId) return
+    loadingText.value = '方案已生成，正在加载...'
+    loadingProgress.value = 95
+    const detailRes = await portfolioApi.getDesign(designId)
+    const data = detailRes.data
+    const plans = Array.isArray(data.strategies)
+      ? data.strategies.map(s => ({
+          style: s.label,
+          style_label: s.label,
+          portfolio_name: s.portfolio_name,
+          positioning: s.positioning,
+          expected_return: s.expected_return,
+          max_drawdown: s.max_drawdown,
+          sharpe_ratio: s.sharpe_ratio,
+          risk_factors: [],
+          rebalance_rules: '月度检视',
+          allocations: Array.isArray(s.etfs)
+            ? s.etfs.map(e => ({
+                symbol: e.symbol,
+                name: e.name,
+                layer: e.layer,
+                target_weight: e.weight,
+                selection_rationale: e.selection_rationale || '',
+              }))
+            : [],
+        }))
+      : []
+    designResult.value = {
+      plans,
+      design_text: generateDesignReport(plans, data.market_context),
+      market_context: data.market_context || {},
+      generated_at: data.created_at,
+    }
+    await loadHistoryList()
+    loadingProgress.value = 100
+    designStep.value = 'result'
+    designTab.value = 'cards'
+  }
+
   try {
     loadingProgress.value = 10
     loadingText.value = '任务已提交，后台正在生成...'
@@ -641,79 +684,54 @@ async function startDesign() {
     loadingProgress.value = 20
     loadingText.value = '正在生成方案...'
 
-    // 2. 轮询任务状态 (max 60 rounds * 3s = 180s)
-    const maxPolls = 60
-    for (let i = 0; i < maxPolls; i++) {
-      await new Promise(r => setTimeout(r, 3000))
-      try {
-        const statusRes = await portfolioApi.getTask(taskId)
-        const task = statusRes.data
+    // 2. 注册到全局任务 store（由 /ws/task-notifications 事件驱动，取代轮询）
+    taskStore.addTask(taskId)
+    const stopWatch = watch(
+      () => taskStore.getTask(taskId),
+      (task) => {
+        if (!task) return
         loadingProgress.value = task.progress || loadingProgress.value
-
+        loadingText.value = task.progress < 50 ? '正在扫描全市场 ETF...' : '正在优化组合权重...'
         if (task.status === 'completed') {
-          loadingText.value = '方案已生成，正在加载...'
-          loadingProgress.value = 95
-          // 从任务结果中直接获取 design_id，不再 listDesigns+getDesign 两跳
-          const designId = task.design_id
-          if (designId) {
-            const detailRes = await portfolioApi.getDesign(designId)
-            const data = detailRes.data
-            const plans = Array.isArray(data.strategies)
-              ? data.strategies.map(s => ({
-                  style: s.label,
-                  style_label: s.label,
-                  portfolio_name: s.portfolio_name,
-                  positioning: s.positioning,
-                  expected_return: s.expected_return,
-                  max_drawdown: s.max_drawdown,
-                  sharpe_ratio: s.sharpe_ratio,
-                  risk_factors: [],
-                  rebalance_rules: '月度检视',
-                  allocations: Array.isArray(s.etfs)
-                    ? s.etfs.map(e => ({
-                        symbol: e.symbol,
-                        name: e.name,
-                        layer: e.layer,
-                        target_weight: e.weight,
-                        selection_rationale: e.selection_rationale || '',
-                      }))
-                    : [],
-                }))
-              : []
-            designResult.value = {
-              plans,
-              design_text: generateDesignReport(plans, data.market_context),
-              market_context: data.market_context || {},
-              generated_at: data.created_at,
-            }
-            // 自动刷新历史列表
-            await loadHistoryList()
+          stopWatch()
+          const did = task.designId || submitRes.data.design_id
+          if (did) {
+            fetchDesignDetail(did).catch((e) => onDesignFailed(e))
+          } else {
+            // 极少数情况下 design_id 未随事件到达，兜底单次查询
+            portfolioApi.getTask(taskId).then((r) => {
+              const fallbackId = r?.data?.design_id
+              if (fallbackId) fetchDesignDetail(fallbackId).catch((e) => onDesignFailed(e))
+              else onDesignFailed(new Error('未获取到 design_id'))
+            }).catch((e) => onDesignFailed(e))
           }
-          loadingProgress.value = 100
-          designStep.value = 'result'
-          designTab.value = 'cards'
-          return
+        } else if (task.status === 'failed') {
+          stopWatch()
+          onDesignFailed(new Error('生成失败'))
         }
+      },
+      { deep: true, immediate: true }
+    )
 
-        if (task.status === 'failed') {
-          throw new Error(task.error_message || '生成失败')
-        }
-
-        loadingText.value = task.progress < 50 ? '正在扫描全市场 ETF...'
-          : '正在优化组合权重...'
-      } catch (pollErr) {
-        if (pollErr.message && pollErr.message.includes('404')) {
-          continue // 任务还未就绪，继续轮询
-        }
-        throw pollErr
+    // 3. 兜底：若 5s 内未收到任何 WS 事件（如 WS 未连接），单次查询同步状态
+    setTimeout(() => {
+      const t = taskStore.getTask(taskId)
+      if (t && t.status === 'running' && t.progress === 0) {
+        portfolioApi.getTask(taskId).then((r) => {
+          const d = r?.data
+          if (d) taskStore.updateTask(taskId, { status: d.status, progress: d.progress || 0, ...(d.design_id ? { designId: d.design_id } : {}) })
+        }).catch(() => {})
       }
-    }
-
-    throw new Error('生成超时，请稍后到历史记录中查看')
+    }, 5000)
   } catch (e) {
     toast(e?.response?.data?.detail || e.message || '生成失败，请重试', 'error')
     designStep.value = 'wizard'
   }
+}
+
+function onDesignFailed(e) {
+  toast(e?.response?.data?.detail || e?.message || '生成失败，请重试', 'error')
+  designStep.value = 'wizard'
 }
 
 let designWs = null

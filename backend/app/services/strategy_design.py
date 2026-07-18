@@ -6,15 +6,18 @@ Core and defense layers are fixed-weight. Satellite uses dual-pool matching,
 z-score multi-factor scoring, tilt ratios, and power-law weight distribution.
 This module is the orchestration layer that ties together:
   - allocate_layer_budget: 按风险偏好(防御/平衡/进攻)分配层预算
-  - generate_design:       对外主入口, 生成三套方案
+  - generate_full_design:  对外主入口, 生成三套方案 (delegates to generate_enhanced_design)
 """
 
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 # ── 策略元数据 ───────────────────────────────────────────────
@@ -118,145 +121,6 @@ CANDIDATE_POOL: dict[str, dict[str, Any]] = {
 }
 
 
-# ── 数据类 ──────────────────────────────────────────────────
-@dataclass
-class Asset:
-    code: str
-    name: str
-    layer: str
-    beta: float
-    liquidity: float
-    price: float = 1.0
-    change_pct: float = 0.0
-    net_inflow: float = 0.0       # 资金净流入(元)
-    valuation_pct: float = 0.5    # 估值分位 0~1
-    reason: str = ""
-
-
-@dataclass
-class MarketContext:
-    assets: dict[str, Asset] = field(default_factory=dict)
-    timestamp: str = ""
-    indices: list[dict] = field(default_factory=list)
-    fund_flow: list[dict] = field(default_factory=list)
-    valuation: list[dict] = field(default_factory=list)
-
-
-# ── 1. enrich_market_context: 补全缺失数据维度 ────────────────
-async def enrich_market_context() -> MarketContext:
-    """
-    并行拉取大盘指数、ETF资金流向、估值等数据，补全行情快照。
-    外部数据源可能超时，用 try/except 包裹，失败返回结构化默认值。
-    """
-    # 并行拉取三类数据
-    indices, fund_flow, valuation = await asyncio.gather(
-        _fetch_indices(),
-        _fetch_fund_flow(),
-        _fetch_valuation(),
-        return_exceptions=False,
-    ) if False else (
-        await _safe_gather(_fetch_indices(), _fetch_fund_flow(), _fetch_valuation())
-    )
-
-    ctx = MarketContext(timestamp="", indices=indices, fund_flow=fund_flow, valuation=valuation)
-
-    # 把行情/资金/估值映射到候选池
-    flow_map = {f.get("code"): f for f in fund_flow}
-    val_map = {v.get("code"): v for v in valuation}
-    idx_map = {i.get("code"): i for i in indices}
-
-    # 从 CANDIDATE_POOL 构建 Asset 对象填充 ctx.assets
-    for code, meta in CANDIDATE_POOL.items():
-        flow = flow_map.get(code, {})
-        val = val_map.get(code, {})
-        ctx.assets[code] = Asset(
-            code=code,
-            name=meta["name"],
-            layer=meta["layer"],
-            beta=meta["beta"],
-            liquidity=meta["liquidity"],
-            price=1.0,
-            change_pct=0.0,
-            net_inflow=float(flow.get("net_inflow", 0) or 0),
-            valuation_pct=float(val.get("valuation_percentile", 0.5) or 0.5),
-            reason=meta.get("reason", ""),
-        )
-
-    return ctx
-
-
-async def _safe_gather(*coros):
-    """并发执行, 任一异常不影响其余结果"""
-    tasks = [asyncio.ensure_future(c) for c in coros]
-    results = []
-    for t in tasks:
-        try:
-            results.append(await t)
-        except Exception:
-            results.append([])
-    return results
-
-
-async def _fetch_indices() -> list[dict]:
-    """大盘指数实时行情（含沪深300/中证A500等）"""
-    try:
-        from ..fetchers.china_market import fetch_index_realtime
-        df = fetch_index_realtime()
-        if df:
-            return df
-    except Exception:
-        pass
-    return []
-
-
-async def _fetch_fund_flow() -> list[dict]:
-    """ETF资金流向（日度净流入/份额变动）"""
-    try:
-        import akshare as ak
-        # 尝试东方财富 ETF 资金流向
-        df = ak.fund_etf_fund_flow_summary_em()
-        out = []
-        for _, row in df.iterrows():
-            code = str(row.get("代码", "") or row.get("code", ""))
-            if not code:
-                continue
-            out.append({
-                "code": code,
-                "net_inflow": float(row.get("主力净流入-净额", row.get("净流入", 0)) or 0),
-                "flow_direction": "inflow" if float(row.get("主力净流入-净额", row.get("净流入", 0)) or 0) >= 0 else "outflow",
-            })
-        return out
-    except Exception:
-        return []
-
-
-async def _fetch_valuation() -> list[dict]:
-    """ETF估值数据（PE/PB分位）"""
-    try:
-        import akshare as ak
-        df = ak.fund_etf_valuation_em(symbol="华泰柏瑞沪深300ETF", indicator="市盈率")
-        if df is not None and not df.empty:
-            last = df.iloc[-1]
-            return [{
-                "code": "510300",
-                "valuation_percentile": float(last.get("百分位", 50) or 50) / 100.0,
-                "pe_ttm": float(last.get("市盈率", 0) or 0),
-                "pb": float(last.get("市净率", 0) or 0),
-            }]
-    except Exception:
-        pass
-    return []
-
-
-# ── 2. classify_assets: 三层分类 ─────────────────────────────
-def classify_assets(ctx: MarketContext) -> dict[str, list[Asset]]:
-    """按 layer 字段分组；核心层确保含沪深300与中证A500"""
-    layers: dict[str, list[Asset]] = {"core": [], "satellite": [], "defense": []}
-    for code, a in ctx.assets.items():
-        layers.setdefault(a.layer, []).append(a)
-    return layers
-
-
 # ── 3. allocate_layer_budget: 层预算分配 ─────────────────────
 def allocate_layer_budget(risk_profile: str) -> dict[str, float]:
     """返回 {core, satellite, defense} 预算比例"""
@@ -291,8 +155,8 @@ def power_law_weights(scores: list[float], budget: float) -> list[float]:
     return result
 
 
-# ── 5. generate_design: 主入口 (v3.0) ───────────────────────
-# DEPRECATED: use generate_enhanced_design instead
+# ── 5. generate_full_design: 对外主入口 (v4) ─────────────────
+# 委托给 generate_enhanced_design 生成三套方案，并补全 sentiment/benchmark。
 async def generate_full_design(
     capital: float = 500000,
     constraints: dict | None = None,
@@ -336,12 +200,21 @@ async def generate_full_design(
     if isinstance(benchmark, (Exception, type(None))):
         benchmark = []
 
+    # P2 修复: 合并 enhanced 引擎返回的完整 market_context（含 market_regime /
+    # macro_regime / index_realtime / sector_momentum 等），而不是用简版覆盖。
+    enhanced_ctx = {}
+    if isinstance(strategies, dict) and isinstance(strategies.get("market_context"), dict):
+        enhanced_ctx = strategies.get("market_context") or {}
+
+    merged_context = {
+        **enhanced_ctx,
+        "market_sentiment": sentiment if sentiment else enhanced_ctx.get("market_sentiment"),
+        "benchmark_stocks": benchmark if benchmark else enhanced_ctx.get("benchmark_stocks"),
+    }
+
     return {
-        "strategies": strategies,
-        "market_context": {
-            "market_sentiment": sentiment,
-            "benchmark_stocks": benchmark,
-        },
+        "strategies": strategies.get("strategies", strategies) if isinstance(strategies, dict) else strategies,
+        "market_context": merged_context,
         "generated_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
 
@@ -658,6 +531,12 @@ def build_rationale(
     news_info = news_info or {}
     asset_name = meta.get("name", code)
 
+    # 0. 当日涨跌（若有）— 置于理由最前，直观展示今日表现
+    chg = trend.get("change_pct")
+    if chg is not None:
+        d = "涨" if chg >= 0 else "跌"
+        parts.append("今日" + d + str(round(abs(chg) * 100, 1)) + "%")
+
     # 1. 资产定位
     if layer == "core":
         if "沪深300" in asset_name:
@@ -802,11 +681,12 @@ async def generate_enhanced_design(
     from ..fetchers.news_fetcher import fetch_news_headlines, fetch_macro_news
     from ..fetchers.fundamental_fetcher import fetch_fund_flow, fetch_current_pe_pb
     from ..fetchers.etf_scanner import full_pipeline as scan_full_pipeline
+    from ..fetchers.china_market import fetch_index_realtime
     from ..services.pool_manager import pool_manager
 
     all_symbols = list(CANDIDATE_POOL.keys())
 
-    trend_data, macro_state, sentiment, benchmark, news_tasks = await asyncio.gather(
+    trend_data, macro_state, sentiment, benchmark, news_tasks, index_realtime = await asyncio.gather(
         asyncio.wait_for(compute_etf_trends(all_symbols), timeout=45),
         asyncio.wait_for(detect_macro_regime(), timeout=20),
         asyncio.wait_for(fetch_market_sentiment(), timeout=20),
@@ -819,6 +699,7 @@ async def generate_enhanced_design(
             ),
             timeout=15,
         ),
+        asyncio.wait_for(asyncio.to_thread(fetch_index_realtime), timeout=15),
         return_exceptions=True,
     )
     # 新增并行: 资金流 + 估值
@@ -843,6 +724,7 @@ async def generate_enhanced_design(
     macro_state = macro_state if isinstance(macro_state, dict) else {}
     sentiment = sentiment if isinstance(sentiment, dict) else {"sentiment_index": 50, "sentiment_label": "中性"}
     benchmark = benchmark if isinstance(benchmark, list) else []
+    index_realtime = index_realtime if isinstance(index_realtime, list) else []
     # 处理 fund_flow / pe_pb
     fund_flow_map = {}
     valuation_map = {}
@@ -863,7 +745,7 @@ async def generate_enhanced_design(
     adv_ratio = float(sentiment.get("advance_ratio", 0.5))
     regime = detect_market_regime(
         trends=trend_data,
-        broad_index_code="000001",
+        broad_index_code="510300",  # 沪深300ETF — 在 trend_data 中存在（P0 修复：原 "000001" 不在候选池，导致 regime 永远回退 range_bound）
         sentiment_index=sentiment_index,
         adv_ratio=adv_ratio,
     )
@@ -1055,15 +937,16 @@ async def generate_enhanced_design(
 
     return {
         "strategies": strategies,
-        "market_context": {
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
-            "market_sentiment": sentiment,
-            "market_regime": regime,
-            "macro_regime": macro_state,
-            "benchmark_stocks": benchmark,
-            "sector_momentum": sector_momentum,
-            "news_sentiment_map": news_map,
-        },
+            "market_context": {
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "market_sentiment": sentiment,
+                "market_regime": regime,
+                "macro_regime": macro_state,
+                "benchmark_stocks": benchmark,
+                "index_realtime": index_realtime,
+                "sector_momentum": sector_momentum,
+                "news_sentiment_map": news_map,
+            },
         "generated_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
         "design_metadata": {
             "version": "v4-enhanced",

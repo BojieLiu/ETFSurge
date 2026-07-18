@@ -1,49 +1,21 @@
 from unittest.mock import patch, AsyncMock
 
 """
-TDD tests for the intelligent portfolio design engine (core+satellite+defense) v3.0.
+TDD tests for the intelligent portfolio design engine (core+satellite+defense) v3.0/v4.
 
 Covers:
-- enrich_market_context builds assets from candidate pool
-- classify_assets groups by layer
 - allocate_layer_budget returns strategy-specific budgets
 - generate_enhanced_design returns 3 strategies with 8~15 holdings each, weights sum to 1.0
-- fast mode works without external network
 - power_law_weights produces reasonable weight distribution
-- v3.0 fixed core/defense weights and satellite dual-pool behavior
+- v4 fixed core/defense weights and satellite dual-pool behavior
 """
 import pytest
 
-from app.services import strategy_design as sd
 from app.services.strategy_design import (
-    Asset, MarketContext, enrich_market_context, classify_assets,
     allocate_layer_budget, generate_full_design, power_law_weights,
     STRATEGY_META, CORE_REQUIRED, CORE_FIXED, DEFENSE_FIXED,
     MIN_WEIGHT, MAX_WEIGHT,
 )
-
-
-# ── enrich_market_context ────────────────────────────────────
-async def test_enrich_market_context_builds_pool():
-    ctx = await enrich_market_context()
-    assert isinstance(ctx, MarketContext)
-    # 候选池全部进入 assets
-    assert set(ctx.assets.keys()) == set(sd.CANDIDATE_POOL.keys())
-    # 核心层含沪深300与中证A500
-    core = [a for a in ctx.assets.values() if a.layer == "core"]
-    core_codes = {a.code for a in core}
-    assert "510300" in core_codes
-    assert "560600" in core_codes
-
-
-# ── classify_assets ──────────────────────────────────────────
-async def test_classify_assets_groups_by_layer():
-    ctx = await enrich_market_context()
-    layers = classify_assets(ctx)
-    assert set(layers.keys()) == {"core", "satellite", "defense"}
-    assert len(layers["core"]) >= 2
-    assert len(layers["satellite"]) >= 2
-    assert len(layers["defense"]) >= 2
 
 
 # ── allocate_layer_budget (v3.0) ─────────────────────────────

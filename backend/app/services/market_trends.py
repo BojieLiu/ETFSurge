@@ -277,6 +277,12 @@ async def _fetch_single_trend(symbol: str) -> dict[str, float]:
         else:
             result["max_drawdown_1m"] = 0.0
 
+        # 当日涨跌幅：最新一日收盘 vs 前一日收盘（用于入选理由「今日涨/跌 X%」）
+        if len(prices) >= 2 and prices[-2] != 0:
+            result["change_pct"] = (prices[-1] - prices[-2]) / prices[-2]
+        else:
+            result["change_pct"] = 0.0
+
         return result
 
     except Exception as e:
