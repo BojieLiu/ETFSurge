@@ -302,6 +302,7 @@ async def get_design(
         "created_at": record.created_at.isoformat() if record.created_at else "",
         "capital": record.capital,
         "risk_profile": record.risk_profile,
+        "design_text": record.design_text or "",
         "strategies": json.loads(record.strategies_json) if record.strategies_json else [],
         "market_context": json.loads(record.market_snapshot_json) if record.market_snapshot_json else {},
     }
