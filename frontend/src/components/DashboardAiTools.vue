@@ -679,7 +679,7 @@ async function loadHistoryDetail(id) {
 
     designResult.value = {
       plans,
-      design_text: '',  // 历史记录不重新生成 LLM 报告
+      design_text: data.design_text || '',  // 使用数据库中持久化的 LLM 报告
       market_context: data.market_context || {},
       generated_at: data.created_at,
       is_history: true,
