@@ -150,9 +150,20 @@
 
         <!-- Tab: Report -->
         <div v-if="designTab === 'report'" class="design-report">
-          <div class="markdown-body" v-html="designReportHtml"></div>
-          <div class="panel-footer-actions">
-            <AppButton variant="ghost" @click="regenerateDesign">重新生成</AppButton>
+          <!-- LLM 报告到达前显示加载状态，不再输出误导性的硬编码假报告 -->
+          <div v-if="!designResult?.design_text && !reportError" class="report-waiting">
+            <div class="waiting-spinner"></div>
+            <p class="waiting-text">⏳ AI 报告生成中...</p>
+            <p class="waiting-hint">报告由 DeepSeek 根据实时行情撰写，预计 10-30 秒完成</p>
+          </div>
+          <div v-else-if="reportError" class="report-error">
+            <p class="error-text">❌ 报告生成失败</p>
+            <p class="error-detail">{{ reportError }}</p>
+            <AppButton variant="primary" size="sm" @click="retryReport">重新生成报告</AppButton>
+          </div>
+          <div v-else class="markdown-body" v-html="designReportHtml"></div>
+          <div class="panel-footer-actions" v-if="designResult?.design_text || reportError">
+            <AppButton variant="ghost" @click="regenerateDesign">重新生成方案</AppButton>
             <AppButton variant="ghost" @click="exitCoreFeature">完成</AppButton>
           </div>
         </div>
@@ -348,6 +359,7 @@ const loadingProgress = ref(0)
 const loadingText = ref('正在采集数据...')
 const checkingStrategy = ref(false)
 const strategyResult = ref(null)
+const reportError = ref('')  // LLM 报告错误信息
 
 const designReportHtml = computed(() => {
   if (!designResult.value?.design_text) return ''
@@ -583,6 +595,15 @@ function exitCoreFeature() {
   activeCoreFeature.value = null
 }
 
+function retryReport() {
+  reportError.value = ''
+  if (designResult.value) {
+    designResult.value = { ...designResult.value, design_text: '' }
+  }
+  // 重新触发 LLM 报告需要在设计路由上加 session_id
+  // 已经在 designWsConnect 中处理：WS 完成后会再次推送
+}
+
 function resetDesign() {
   designResult.value = null
   designStep.value = 'wizard'
@@ -644,14 +665,14 @@ async function loadHistoryDetail(id) {
 
     designResult.value = {
       plans,
-      design_text: generateDesignReport(plans, data.market_context),
+      design_text: '',  // 历史记录不重新生成 LLM 报告
       market_context: data.market_context || {},
       generated_at: data.created_at,
-      is_history: true,  // 标记为历史记录
+      is_history: true,
     }
     designStep.value = 'result'
     designTab.value = 'cards'
-    activeCoreFeature.value = 'design'  // 切换到设计结果视图
+    activeCoreFeature.value = 'design'
     showHistory.value = false
   } catch (e) {
     toast('加载方案详情失败', 'error')
@@ -699,7 +720,7 @@ async function startDesign() {
       : []
     designResult.value = {
       plans,
-      design_text: generateDesignReport(plans, data.market_context),
+      design_text: '',  // 等待 WS 推送 LLM 报告，不再硬编码假报告
       market_context: data.market_context || {},
       generated_at: data.created_at,
     }
@@ -817,7 +838,7 @@ function designWsConnect(designId) {
         }
 
         if (msg.status === 'error') {
-          console.warn('[design_report] WS error:', msg.message)
+          reportError.value = msg.message || '报告生成异常'
         }
       } catch (e) {
         // ignore parse errors

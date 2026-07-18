@@ -267,6 +267,31 @@ WS /api/v1/ws/design-report/{session_id}
 }
 ```
 
+### 2.8 前端报告 Tab 行为（无硬编码 fallback）
+
+**原则：** 前端 **不允许** 在 `design_text` 为空时硬编码生成假报告。LLM 报告唯一来源是 WS 推送。
+
+**状态机：**
+
+```
+结果页加载 → design_text="" 且 reportError=""
+                ↓
+报告 Tab 显示：「⏳ AI 报告生成中…」
+                ↓
+WS 推送 streaming chunks → 逐步显示
+                ↓ 完成                     ↓ 失败/超时
+        ✅ 完整 Markdown 报告        ❌ 报告生成失败 + 重试按钮
+```
+
+| 状态 | 触发条件 | 前端展示 |
+|------|---------|---------|
+| `waiting` | `design_text=""` 且 `reportError=""` | ⏳ AI 报告生成中... |
+| `streaming` | WS 推送 `status: "streaming"` chunks | 逐步渲染 Markdown |
+| `complete` | WS 推送 `status: "complete"` + `report_text` | 完整 Markdown 报告 |
+| `error` | WS 推送 `status: "error"` | ❌ 错误信息 + 重试按钮 |
+
+**方案卡片 Tab 始终可用**（不依赖 LLM 报告）。
+
 ---
 
 ## 3. 数据流程 / Data Flow
