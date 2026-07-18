@@ -181,35 +181,23 @@ def detect_market_regime(
 # ── 内部实现 ──────────────────────────────────────────────────
 
 async def _fetch_single_trend(symbol: str) -> dict[str, float]:
-    """获取单只ETF的趋势数据。"""
+    """获取单只ETF的趋势数据。
+    
+    数据源：china_market.fetch_history() → mootdx → Sina 两级降级，
+    比直接调 akshare.fund_etf_hist_em 更稳定。
+    """
     try:
-        import akshare as ak
-        from ..utils.decode import decode_df
+        from ..fetchers.china_market import fetch_history
 
-        # 拉取历史日线（最多120个交易日）
-        df = ak.fund_etf_hist_em(
-            symbol=symbol,
-            period="daily",
-            start_date="",
-            end_date="",
-            adjust="qfq",
-        )
-        if df is None or df.empty:
+        # 拉取历史日线（通过 china_market 的 mootdx → Sina 降级链）
+        import asyncio
+        rows = await asyncio.to_thread(fetch_history, symbol, "A", "daily")
+        if not rows:
             return {}
 
-        decode_df(df)
-
-        # 确保有收盘价
-        price_col = None
-        for col in df.columns:
-            if "收盘" in col:
-                price_col = col
-                break
-        if price_col is None:
-            return {}
-
-        # 提取收盘价序列（从旧到新）
-        prices = df[price_col].dropna().tolist()
+        # 提取收盘价与成交量（从旧到新）
+        prices = [float(r.get("收盘", 0)) for r in rows if r.get("收盘", 0) > 0]
+        volumes = [float(r.get("成交量", 0)) for r in rows]
         if len(prices) < 5:
             return {}
 
@@ -243,19 +231,10 @@ async def _fetch_single_trend(symbol: str) -> dict[str, float]:
             result["ma_bias_60"] = 0.0
 
         # 量比: 近20日均量 / 近60日均量
-        volume_col = None
-        for col in df.columns:
-            if "成交" in col or "volume" in col.lower():
-                volume_col = col
-                break
-        if volume_col is not None and len(prices) >= 61:
-            volumes = df[volume_col].dropna().tolist()
-            if len(volumes) >= 60:
-                vol_20 = sum(volumes[-20:]) / 20
-                vol_60 = sum(volumes[-60:]) / 60
-                result["vol_ratio"] = vol_20 / vol_60 if vol_60 > 0 else 1.0
-            else:
-                result["vol_ratio"] = 1.0
+        if len(volumes) >= 61 and len(prices) >= 61:
+            vol_20 = sum(volumes[-20:]) / 20
+            vol_60 = sum(volumes[-60:]) / 60
+            result["vol_ratio"] = vol_20 / vol_60 if vol_60 > 0 else 1.0
         else:
             result["vol_ratio"] = 1.0
 

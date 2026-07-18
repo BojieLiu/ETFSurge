@@ -134,12 +134,17 @@ def test_p1_prompt_contains_market_snapshot_and_sector_momentum():
 # ─── P3: change_pct in trend + build_rationale ──────────────────────
 
 async def test_p3_fetch_single_trend_has_change_pct():
-    """_fetch_single_trend must compute today's change_pct from last two closes."""
+    """_fetch_single_trend must compute today's change_pct from last two closes.
+    Uses china_market.fetch_history (mootdx→Sina) instead of raw akshare."""
     from app.services import market_trends
 
-    fake_df = _make_fake_df_with_change()
-    with patch("akshare.fund_etf_hist_em", return_value=fake_df), \
-         patch("app.utils.decode.decode_df"):
+    # Mock fetch_history return: 5 rows, closes 1.10, 1.08, 1.05, 1.00, 0.923
+    # Latest close 0.923, prev close 1.00 → change_pct = -0.077
+    fake_rows = [
+        {"日期": f"2026-07-{14+i}", "收盘": c, "成交量": 1000000 * (5-i)}
+        for i, c in enumerate([1.10, 1.08, 1.05, 1.00, 0.923])
+    ]
+    with patch("app.fetchers.china_market.fetch_history", return_value=fake_rows):
         res = await market_trends._fetch_single_trend("510300")
 
     assert "change_pct" in res, "_fetch_single_trend missing change_pct (P3)"
