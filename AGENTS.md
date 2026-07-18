@@ -35,7 +35,25 @@ docker-compose up --build --profile prod
 
 新增功能遵循「先写失败单测 → 实现 → 补单测 → build + 功能链路验证」。
 
-- **后端**：`cd backend && python -m pytest`
+### E2E 链路验证（每次改完必做）
+后端启动后运行，确保核心链路可用：
+
+```bash
+cd backend && python scripts/verify_e2e.py
+# 输出示例：
+#   [PASS] /health -> 200
+#   [PASS] dataset 返回 N 条记录
+#   [PASS] design_text  已持久化
+#   [PASS] market_regime  已判定
+```
+
+检查项：服务存活 / 历史列表 / 设计详情 / 行情数据 / AI 设计（3套方案+正确regime）。
+
+### 后端单测
+
+```bash
+cd backend && python -m pytest
+```
   - 已配置 `pytest.ini` + `conftest.py`（`asyncio_mode = auto`）。
   - 外部网络 / LLM（akshare、DeepSeek、yfinance 等）在单测中 **必须 mock**，不依赖真实 DB / 网络。
 - **前端**：`cd frontend && npm test`（即 `npx vitest run`）
