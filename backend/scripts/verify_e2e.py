@@ -194,6 +194,58 @@ def main():
     except Exception as e:
         check("POST /strategy-check", False, str(e))
 
+    # ── 7. 异步策略检查链路 ─────────────────────────────────
+    try:
+        r = requests.post(f"{BASE}/api/v1/portfolio/strategy-check-async",
+                          json={"total_capital": 500000}, timeout=30)
+        check(f"POST /strategy-check-async -> {r.status_code}", r.status_code == 202)
+        if r.status_code == 202:
+            task_data = r.json()
+            task_id = task_data.get("task_id")
+            check(f"task_id {task_id} 存在", task_id is not None, task_id)
+            # Poll for completion (wait up to 180s)
+            import time
+            deadline = time.time() + 180
+            completed = False
+            while time.time() < deadline:
+                pr = requests.get(f"{BASE}/api/v1/portfolio/strategy-check-result/{task_id}", timeout=10)
+                if pr.status_code == 200:
+                    pd = pr.json()
+                    if pd.get("status") == "completed":
+                        check(f"异步检查完成，含 {len(pd.get('suggestions',[]))} 条建议",
+                              len(pd.get("suggestions", [])) > 0)
+                        check("含 holdings_analysis",
+                              "holdings_analysis" in pd and len(pd.get("holdings_analysis", [])) > 0)
+                        check("含 market_regime",
+                              isinstance(pd.get("market_regime"), str) and pd["market_regime"] != "")
+                        completed = True
+                        break
+                    elif pd.get("status") == "failed":
+                        check("异步检查失败", False, pd.get("error_message", "未知"))
+                        completed = True
+                        break
+                time.sleep(3)
+            if not completed:
+                check("异步检查超时（180s）", False)
+    except requests.Timeout:
+        check("POST /strategy-check-async", False, "请求超时")
+    except Exception as e:
+        check("POST /strategy-check-async", False, str(e))
+
+    # ── 8. 策略检查历史查询 ─────────────────────────────────
+    try:
+        r = requests.get(f"{BASE}/api/v1/portfolio/strategy-checks?limit=5", timeout=10)
+        check(f"GET /strategy-checks -> {r.status_code}", r.status_code == 200)
+        if r.status_code == 200:
+            checks = r.json()
+            check(f"历史记录 {len(checks)} 条", isinstance(checks, list))
+            if checks:
+                cid = checks[0].get("id")
+                dr = requests.get(f"{BASE}/api/v1/portfolio/strategy-checks/{cid}", timeout=10)
+                check(f"GET /strategy-checks/{cid} -> {dr.status_code}", dr.status_code == 200)
+    except Exception as e:
+        check("GET /strategy-checks", False, str(e))
+
     # 汇总
     total = PASS + FAIL
     print(f"\n{'=' * 50}")
