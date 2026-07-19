@@ -446,3 +446,66 @@ def test_p9_consistency_check_before_broadcast():
         f"consistency check at line {check_lineno} must run before "
         f"broadcast at line {broadcast_lineno}"
     )
+
+
+# ─── P10: _strip_ai_boilerplate ─────────────────────────────────
+
+
+def test_p10_strip_ai_boilerplate_removes_header():
+    """_strip_ai_boilerplate 必须删除'报告日期'/'分析师'行及第一句 AI 腔。"""
+    from app.tasks.design_report import _strip_ai_boilerplate
+
+    text = (
+        "好的，作为专业的 ETF 投资组合策略分析师，我将为您撰写一份报告。\n\n"
+        "### ETF 投资组合策略报告\n\n"
+        "**报告日期：** 2024年5月24日\n"
+        "**分析师：** AI 投资组合策略分析师\n\n"
+        "这是正文内容。\n"
+    )
+    cleaned = _strip_ai_boilerplate(text)
+
+    assert "报告日期" not in cleaned, "should strip 报告日期 line"
+    assert "分析师" not in cleaned, "should strip 分析师 line"
+    assert "好的，作为专业的" not in cleaned, "should strip AI opening"
+    assert "这是正文内容" in cleaned, "should preserve real content"
+
+
+def test_p10_strip_ai_boilerplate_preserves_content():
+    """正常内容不应被误删。"""
+    from app.tasks.design_report import _strip_ai_boilerplate
+
+    text = "当前市场处于回调延续阶段。\n防御风格占主导。"
+    cleaned = _strip_ai_boilerplate(text)
+    assert cleaned == text, f"got: {cleaned!r}"
+
+
+def test_p10_strip_ai_boilerplate_empty():
+    """空文本不应崩溃。"""
+    from app.tasks.design_report import _strip_ai_boilerplate
+    assert _strip_ai_boilerplate("") == ""
+    assert _strip_ai_boilerplate(None) == ""
+
+
+# ─── P11: _build_plan_tables rationale length ────────────────────
+
+
+def test_p11_rationale_not_truncated_too_short():
+    """入选理由至少保留 150 字符，不应仅 100。"""
+    from app.tasks.design_report import _build_plan_tables
+
+    long_rationale = "基于" + "测试" * 60  # 120 chars
+    strategies = [
+        {
+            "label": "测试方案",
+            "layer_budget": {"core": 0.50, "satellite": 0.30, "defense": 0.20},
+            "allocations": [
+                {"symbol": "510300", "name": "HS300ETF", "layer": "core",
+                 "target_weight": 0.30, "selection_rationale": long_rationale},
+            ],
+        },
+    ]
+
+    result = _build_plan_tables(strategies)
+    assert long_rationale[:150] in result, (
+        "rationale should retain at least 150 chars"
+    )

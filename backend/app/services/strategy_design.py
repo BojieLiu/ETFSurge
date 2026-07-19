@@ -982,6 +982,26 @@ async def generate_enhanced_design(
             for h in holdings:
                 h["weight"] = round(h["weight"] * scale, 4)
 
+        # 卫星权重拉升：确保实际卫星权重接近预算（> 70%）
+        sat_budget = budgets.get("satellite", 0.0)
+        if sat_budget > 0.03:
+            actual_sat = sum(h["weight"] for h in holdings if h.get("layer") == "satellite")
+            if 0 < actual_sat < sat_budget * 0.7:
+                sat_scale = min(sat_budget / actual_sat, 2.0)
+                for h in holdings:
+                    if h.get("layer") == "satellite":
+                        h["weight"] = round(h["weight"] * sat_scale, 4)
+                # 同比例缩小非卫星层，保持总和不超预算
+                non_sat = [h for h in holdings if h.get("layer") != "satellite"]
+                non_sat_total = sum(h["weight"] for h in non_sat)
+                non_sat_target = sum(
+                    budgets.get(l, 0) for l in ["core", "defense"]
+                )
+                if non_sat_total > 0 and non_sat_target > 0:
+                    ns_scale = min(non_sat_target / non_sat_total, 1.5)
+                    for h in non_sat:
+                        h["weight"] = round(h["weight"] * ns_scale, 4)
+
         # factor_score 覆盖：确保核心/防御层也有评分
         _pool_by_sym = {p.get("symbol"): p for p in (sat_pool or [])}
         for h in holdings:

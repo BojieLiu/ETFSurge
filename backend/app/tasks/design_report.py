@@ -117,7 +117,7 @@ def _build_plan_tables(strategies: list[dict]) -> str:
             name = e.get("name", "")[:12]
             w = (e.get("weight") or e.get("target_weight") or 0) * 100
             raw = e.get("selection_rationale") or ""
-            rationale = raw.replace("\n", " ").replace("\r", "")[:100]
+            rationale = raw.replace("\n", " ").replace("\r", "")[:200]
             layer_en = e.get("layer", "—")
             layer_cn = {"core": "核心", "satellite": "卫星", "sat": "卫星", "defense": "防御", "defence": "防御", "cash": "现金"}.get(layer_en, layer_en)
             fs = e.get("factor_score", None)
@@ -133,6 +133,59 @@ def _build_plan_tables(strategies: list[dict]) -> str:
 
     lines.append("\n> 注：多因子评分（0~1）基于资金流、估值、动量、流动性等维度综合计算，非涨跌幅。")
     return "\n".join(lines)
+
+
+def _strip_ai_boilerplate(text: str | None) -> str:
+    """去除 LLM 报告中的 AI 腔开头和虚构元数据行。
+
+    移除：
+      - 以"好的"/"作为专业"/"ETT 投资…"等开头的 AI 腔段落
+      - "报告日期："/"**报告日期" 行
+      - "分析师："/"**分析师" 行
+      - 独立的 "### ETF 投资组合策略报告" 标题行
+    """
+    if not text:
+        return text or ""
+    import re
+
+    lines = text.split("\n")
+    cleaned = []
+    in_header = True
+
+    # 通用 AI 腔行检测（不论位置）
+    def _is_ai_crust(stripped: str) -> bool:
+        if not stripped:
+            return False
+        if re.match(r"\*\*报告日期", stripped) or re.match(r"报告日期", stripped):
+            return True
+        if re.match(r"\*\*分析师", stripped) or re.match(r"分析师", stripped):
+            return True
+        if re.match(r"^#(#)?\s*ETF\s*投资", stripped):
+            return True
+        if re.match(r"^好的，作为专业", stripped):
+            return True
+        return False
+
+    for line in lines:
+        stripped = line.strip()
+
+        # 文档开头：跳过 AI 腔段落（包括空行前后的连续 AI 腔）
+        if in_header and (
+            "好的" in stripped[:10]
+            or "作为专业" in stripped[:10]
+            or "作为一名" in stripped[:10]
+            or _is_ai_crust(stripped)
+        ):
+            continue
+
+        # 文档中后部：只要有通用 AI 腔模式也跳过
+        if _is_ai_crust(stripped):
+            continue
+
+        in_header = False
+        cleaned.append(line)
+
+    return "\n".join(cleaned).strip()
 
 
 def _validate_report_consistency(report_text: str, strategies: list[dict]) -> str:
@@ -252,6 +305,9 @@ async def compose_and_push_report(
         else:
             logger.warning("[design_report] LLM empty, using engine tables only")
             report_text = "# ETF 组合设计方案（数据摘要）\n" + plan_tables
+
+        # P10: 后处理 — 去除 AI 腔开头和虚构元数据
+        report_text = _strip_ai_boilerplate(report_text)
 
         if not report_text:
             logger.warning("[design_report] LLM returned empty, generating fallback summary")
