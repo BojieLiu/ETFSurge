@@ -272,7 +272,27 @@ def _compute_institutional_holdings_change(data: dict) -> float:
 
 
 def _compute_stock_divergence(data: dict) -> float:
-    """Stock return divergence -- constituent return data TBD."""
+    """Stock return divergence: use advance/decline ratio from sentiment_fetcher.
+
+    When AD ratio < 0.5 (more decliners), divergence is negative (panic).
+    When AD ratio > 1.5 (more advancers), divergence is positive (greed).
+    Normalized to -1.0 ~ 1.0 range with neutral at AD=1.0.
+    """
+    ad = data.get("advance_decline")
+    if ad is not None and ad > 0:
+        # AD=1.0 → 0, AD=0.5 → -0.5, AD=2.0 → +0.5
+        return min(max((ad - 1.0) * 2.0, -1.0), 1.0)
+    try:
+        from ..core.async_utils import run_in_thread
+        from ..fetchers.sentiment_fetcher import fetch_advance_decline_ratio
+        import asyncio
+        loop = asyncio.get_running_loop()
+        if loop and loop.is_running():
+            ad_val = run_in_thread(fetch_advance_decline_ratio, timeout=5)
+            if ad_val is not None and ad_val > 0:
+                return min(max((ad_val - 1.0) * 2.0, -1.0), 1.0)
+    except Exception:
+        pass
     return 0.0
 
 

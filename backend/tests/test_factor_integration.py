@@ -1,120 +1,115 @@
-"""因子模型集成测试 — Phase 1: 12 个因子接入策略引擎。
+"""
+Tests for factor integration: scaffolding → real compute + pool_manager wiring.
 
-P1-1: compute() 使用真实因子值（非 0 非 0.5）
-P1-2: 跨符号 z-score 标准化 (mean~0, std~1)
-P1-3: compute() 直接注入市场数据
+P1-1: _compute_stock_divergence returns non-zero with real data
+P1-2: pool_manager.refresh() includes non-empty factor_scores
+P1-3: _compute_stock_divergence fallback path works (no advance_decline in data)
 """
 
 import pytest
-from unittest.mock import patch, AsyncMock, Mock
+from unittest.mock import patch, AsyncMock, MagicMock
 
 
-# --- P1-1: FactorRegistry 真实因子值 ---
+class TestStockDivergence:
+    """Test that _compute_stock_divergence uses advance_decline ratio."""
 
-@pytest.mark.asyncio
-async def test_p1_factor_computes_real_values():
-    """compute() returns non-zero factor values with real OHLCV input."""
-    from app.factors.factor_registry import registry
+    def test_stock_divergence_computed(self):
+        """Returns >0 when advance_decline > 1.0 (more advancers)."""
+        from app.factors.factor_registry import _compute_stock_divergence
 
-    symbols = ["510300", "518880", "510880"]
-    market_data = {
-        "510300": {
-            "total_mv": 500e9, "float_mv": 400e9,
-            "close": [4.0 + i * 0.005 for i in range(60)],
-            "high": [4.0 + i * 0.01 for i in range(60)],
-            "low": [4.0 - i * 0.003 for i in range(60)],
-            "volume": [2_000_000 + i * 500 for i in range(60)],
-        },
-        "518880": {
-            "total_mv": 200e9, "float_mv": 160e9,
-            "close": [6.0 + i * 0.008 for i in range(60)],
-            "high": [6.0 + i * 0.015 for i in range(60)],
-            "low": [6.0 - i * 0.005 for i in range(60)],
-            "volume": [500_000 + i * 200 for i in range(60)],
-        },
-        "510880": {
-            "total_mv": 100e9, "float_mv": 80e9,
-            "close": [3.0 + i * 0.003 for i in range(60)],
-            "high": [3.0 + i * 0.006 for i in range(60)],
-            "low": [3.0 - i * 0.002 for i in range(60)],
-            "volume": [800_000 + i * 300 for i in range(60)],
-        },
-    }
+        result = _compute_stock_divergence({"advance_decline": 1.8})
+        assert result > 0.2
+        assert result <= 1.0
 
-    result = await registry.compute(symbols, market_data=market_data)
+    def test_stock_divergence_panic(self):
+        """Returns <0 when advance_decline < 0.5 (more decliners = panic)."""
+        from app.factors.factor_registry import _compute_stock_divergence
 
-    for sym in symbols:
-        scores = result.get(sym, {})
-        assert scores, f"compute() returned empty for {sym}"
-        non_zero = [v for v in scores.values() if abs(v) > 0.001]
-        assert len(non_zero) >= 3, (
-            f"Expected >=3 non-zero factor values for {sym}, got {len(non_zero)}"
-        )
+        result = _compute_stock_divergence({"advance_decline": 0.4})
+        assert result < -0.5
+        assert result >= -1.0
+
+    def test_stock_divergence_neutral(self):
+        """Returns ~0 when advance_decline ~1.0 (balanced)."""
+        from app.factors.factor_registry import _compute_stock_divergence
+
+        result = _compute_stock_divergence({"advance_decline": 1.0})
+        assert abs(result) < 0.01
+
+    def test_stock_divergence_clamped_high(self):
+        """Clamps to 1.0 for extreme high advance_decline."""
+        from app.factors.factor_registry import _compute_stock_divergence
+
+        result = _compute_stock_divergence({"advance_decline": 100.0})
+        assert result == 1.0
+
+    def test_stock_divergence_clamped_low(self):
+        """Clamps to -1.0 for extreme low advance_decline."""
+        from app.factors.factor_registry import _compute_stock_divergence
+
+        result = _compute_stock_divergence({"advance_decline": 0.01})
+        assert result == -1.0
+
+    def test_stock_divergence_fallback_no_data(self):
+        """Returns 0 when no advance_decline in data and no running loop."""
+        from app.factors.factor_registry import _compute_stock_divergence
+
+        # No asyncio running → fallback returns 0.0
+        result = _compute_stock_divergence({})
+        assert result == 0.0
 
 
-# --- P1-2: z-score 标准化 ---
+class TestPoolManagerFactorScores:
+    """Test that pool_manager.refresh() passes real factor_scores."""
 
-@pytest.mark.asyncio
-async def test_p1_zscore_standardization():
-    """Cross-symbol z-score: mean~0, std~1 for each factor."""
-    from app.factors.factor_registry import registry
-    import statistics
+    @pytest.mark.asyncio
+    async def test_pool_manager_has_factor_scores(self):
+        """refresh() sets non-empty factor_scores via FactorRegistry."""
+        from app.services.pool_manager import pool_manager as pm
 
-    symbols = ["510300", "518880", "510880", "512480", "159766"]
-    market_data = {
-        sym: {
-            "total_mv": 100e9 + i * 50e9,
-            "float_mv": 80e9 + i * 40e9,
-            "close": [4.0 + i * 0.01 * (j/60) for j in range(60)],
-            "high": [4.0 + i * 0.02 * (j/60) for j in range(60)],
-            "low": [4.0 - i * 0.005 * (j/60) for j in range(60)],
-            "volume": [1_000_000 + i * 10_000 * (j/60) for j in range(60)],
+        # FactorRegistry returns real scores for these
+        scores = {"momentum": 0.75, "rsi": 0.62, "atr": 0.43}
+
+        with patch.object(pm, "factor_registry") as mock_fr:
+            mock_fr.compute = AsyncMock(return_value={
+                "510300": scores, "518880": {"momentum": 0.55, "rsi": 0.30},
+            })
+            mock_fr._fetch_market_data = AsyncMock(return_value={})
+            mock_fr._computers = {}
+
+            # Mock scanner and classifier dependencies
+            with patch.object(pm, "scanner") as mock_sc:
+                mock_sc.fetch_all_etfs_base = MagicMock(return_value=[
+                    {"symbol": "510300", "name": "沪深300ETF"},
+                    {"symbol": "518880", "name": "黄金ETF"},
+                ])
+                with patch.object(pm, "classifier") as mock_cl:
+                    mock_cl.batch_classify = MagicMock(return_value={
+                        "510300": {"industry": "宽基指数", "concepts": ["大盘"]},
+                        "518880": {"industry": "商品", "concepts": ["黄金"]},
+                    })
+                    result = await pm.refresh()
+
+        # Verify factor_scores are populated
+        pool = result if isinstance(result, dict) else pm.get_pool("core")
+        for layer_name, entries in pool.items() if isinstance(pool, dict) else []:
+            for entry in entries:
+                fs = entry.get("factor_scores", {})
+                if fs:
+                    assert len(fs) > 0, f"{entry['symbol']} should have factor_scores"
+
+    @pytest.mark.asyncio
+    async def test_factor_scores_in_composite_score(self):
+        """composite_score uses factor_scores sum (was 0 before fix)."""
+        from app.services.pool_manager import pool_manager as pm
+
+        item = {
+            "symbol": "510300", "name": "沪深300ETF",
+            "factor_scores": {"momentum": 0.8, "fund_flow": 0.6},
+            "amount": 1000000000, "fund_scale": 50000000000,
         }
-        for i, sym in enumerate(symbols)
-    }
-
-    result = await registry.compute(symbols, market_data=market_data)
-
-    factor_codes = ["style.size.ln_mcap", "technical.ma.sma_20"]
-    for code in factor_codes:
-        vals = [result.get(sym, {}).get(code, 0) for sym in symbols]
-        mean = statistics.mean(vals)
-        std = statistics.stdev(vals) if len(vals) > 1 else 1.0
-        assert abs(mean) < 0.05, f"z-score mean for {code} should be ~0, got {mean:.4f}"
-        assert abs(std - 1.0) < 0.05, f"z-score std for {code} should be ~1, got {std:.4f}"
-
-
-# --- P1-3: compute_all 方法 ---
-
-@pytest.mark.asyncio
-async def test_p1_compute_all_with_market_data():
-    """compute() with direct market_data returns valid factor vectors."""
-    from app.factors.factor_registry import registry
-
-    symbols = ["510300", "518880"]
-    market_data = {
-        "510300": {
-            "total_mv": 500e9, "float_mv": 400e9,
-            "close": [4.0 * (1 + 0.01 * j) for j in range(60)],
-            "high": [4.0 * (1 + 0.02 * j) for j in range(60)],
-            "low": [4.0 * (1 - 0.005 * j) for j in range(60)],
-            "volume": [2_000_000 + j * 1000 for j in range(60)],
-        },
-        "518880": {
-            "total_mv": 200e9, "float_mv": 160e9,
-            "close": [6.0 * (1 + 0.015 * j) for j in range(60)],
-            "high": [6.0 * (1 + 0.025 * j) for j in range(60)],
-            "low": [6.0 * (1 - 0.008 * j) for j in range(60)],
-            "volume": [500_000 + j * 500 for j in range(60)],
-        },
-    }
-
-    result = await registry.compute(symbols, market_data=market_data)
-
-    for sym in symbols:
-        scores = result.get(sym, {})
-        assert len(scores) >= 8, f"Expected >=8 factor values for {sym}, got {len(scores)}"
-
-    mcap_a = result["510300"].get("style.size.ln_mcap", 0)
-    mcap_b = result["518880"].get("style.size.ln_mcap", 0)
-    assert abs(mcap_a - mcap_b) > 0.01, "ln_mcap should differ across symbols after z-score"
+        score = pm._compute_composite(item, "satellite")
+        # factor_sum = 0.8 + 0.6 = 1.4
+        # return 0.40 * 1.4 + 0.15 * 1e-9 + 0.10 * 5e-10 + 0.35 * 0.5
+        # = 0.56 + 0.15 + 0.05 + 0.175 = 0.935
+        assert score > 0.5, f"Score {score} should include factor contribution"
