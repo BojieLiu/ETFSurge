@@ -144,9 +144,9 @@
               </div>
             </div>
             <!-- UX1: 加载提示 — 允许用户切换页面 -->
-            <p class="loading-hint" v-if="loadingProgress > 0">
+            <div class="loading-hint" v-if="loadingProgress > 0">
               方案生成中，完成后会通过通知栏提醒您
-            </p>
+            </div>
           </div>
           <div class="panel-footer" style="margin-top:20px;text-align:center">
             <AppButton variant="ghost" size="sm" @click="exitCoreFeature">&#8592; 返回</AppButton>
