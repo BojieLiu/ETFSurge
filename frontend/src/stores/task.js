@@ -36,7 +36,7 @@ export const useTaskStore = defineStore('task', () => {
     return tasks.value.find((t) => t.taskId === taskId) || null
   }
 
-  function addTask(taskId, label = '智能组合设计') {
+  function addTask(taskId, label = '智能组合设计', taskType = 'design') {
     const existing = getTask(taskId)
     if (existing) {
       existing.status = 'running'
@@ -47,7 +47,7 @@ export const useTaskStore = defineStore('task', () => {
     }
     tasks.value.push({
       taskId,
-      type: 'design',
+      type: taskType,
       status: 'running',
       progress: 0,
       label,
@@ -67,10 +67,16 @@ export const useTaskStore = defineStore('task', () => {
     // Side effects on terminal transitions
     const toast = useToastStore()
     if (changes.status === 'completed') {
-      toast.show('组合方案已生成，点击查看', 'success')
+      const msg = task.type === 'check'
+        ? '策略检查已完成'
+        : '组合方案已生成，点击查看'
+      toast.show(msg, 'success')
       clearCompleted()
     } else if (changes.status === 'failed') {
-      toast.show('组合方案生成失败', 'error')
+      const msg = task.type === 'check'
+        ? '策略检查失败'
+        : '组合方案生成失败'
+      toast.show(msg, 'error')
       clearCompleted()
     }
   }

@@ -56,6 +56,10 @@ export const portfolioApi = {
   getPnl: (type, totalCapital) => api.post('/portfolio/daily-pnl', { total_capital: totalCapital }, { params: type ? { portfolio_type: type } : {} }),
   design: (params) => api.post('/portfolio/design', params, { timeout: 180000 }),
   strategyCheck: (data, config) => api.post('/portfolio/strategy-check', data, config),
+  strategyCheckAsync: (data) => api.post('/portfolio/strategy-check-async', data),
+  getStrategyCheckResult: (taskId) => api.get(`/portfolio/strategy-check-result/${taskId}`),
+  listStrategyChecks: (limit = 10, offset = 0) => api.get('/portfolio/strategy-checks', { params: { limit, offset } }),
+  getStrategyCheckDetail: (id) => api.get(`/portfolio/strategy-checks/${id}`),
   applyStrategy: (suggestions) => api.post('/portfolio/apply-strategy', suggestions),
   applyPortfolioDesign: (design) => api.post('/portfolio/apply-design', design),
 

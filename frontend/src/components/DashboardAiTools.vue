@@ -46,10 +46,13 @@
           <div v-if="historyLoading" class="history-empty">加载中...</div>
           <div v-else-if="designHistoryList.length === 0" class="history-empty">暂无历史记录，先生成一个方案吧</div>
           <div v-else class="history-list">
-            <div v-for="h in designHistoryList" :key="h.id" class="history-item" @click="loadHistoryDetail(h.id)">
+            <div v-for="h in designHistoryList" :key="h._type + '-' + h.id" class="history-item"
+                 @click="h._type === 'check' ? loadCheckDetail(h.id) : loadHistoryDetail(h.id)">
+              <span class="history-icon">{{ h._type === 'check' ? '🔍' : '💡' }}</span>
               <span class="history-date">{{ formatDate(h.created_at) }}</span>
-              <span class="history-capital">{{ (h.capital / 10000).toFixed(0) }}万</span>
-              <span class="history-style">3 套方案</span>
+              <span v-if="h._type === 'design'" class="history-capital">{{ (h.capital / 10000).toFixed(0) }}万</span>
+              <span v-if="h._type === 'design'" class="history-style">3 套方案</span>
+              <span v-if="h._type === 'check'" class="history-style">{{ h.market_regime || '—' }}</span>
               <span class="history-detail-link">查看详情</span>
             </div>
           </div>
@@ -307,10 +310,13 @@
           </div>
           <div v-if="designHistoryList.length === 0" class="history-empty">暂无历史记录</div>
           <div v-else class="history-list">
-            <div v-for="h in designHistoryList" :key="h.id" class="history-item" @click="loadHistoryDetail(h.id)">
+            <div v-for="h in designHistoryList" :key="h._type + '-' + h.id" class="history-item"
+                 @click="h._type === 'check' ? loadCheckDetail(h.id) : loadHistoryDetail(h.id)">
+              <span class="history-icon">{{ h._type === 'check' ? '🔍' : '💡' }}</span>
               <span class="history-date">{{ formatDate(h.created_at) }}</span>
-              <span class="history-capital">{{ (h.capital / 10000).toFixed(0) }}万</span>
-              <span class="history-style">3 套方案</span>
+              <span v-if="h._type === 'design'" class="history-capital">{{ (h.capital / 10000).toFixed(0) }}万</span>
+              <span v-if="h._type === 'design'" class="history-style">3 套方案</span>
+              <span v-if="h._type === 'check'" class="history-style">{{ h.market_regime || '—' }}</span>
             </div>
           </div>
         </div>
@@ -355,7 +361,10 @@
       <div v-else-if="activeCoreFeature === 'strategy' && checkingStrategy" class="panel-body">
         <div class="loading-section">
           <span class="loading-spinner">&#9203;</span>
-          <span>正在分析当前组合...</span>
+          <span>{{ strategyStage || '正在分析当前组合...' }}</span>
+          <div v-if="strategyProgress > 0" class="progress-bar">
+            <div class="progress-fill" :style="{ width: strategyProgress + '%' }"></div>
+          </div>
         </div>
       </div>
 
@@ -469,6 +478,8 @@ const loadingProgress = ref(0)
 const loadingText = ref('正在采集数据...')
 const checkingStrategy = ref(false)
 const strategyResult = ref(null)
+const strategyProgress = ref(0)
+const strategyStage = ref('')
 const reportError = ref('')  // LLM 报告错误信息
 
 const designReportHtml = computed(() => {
@@ -724,8 +735,14 @@ function enterHistoryMode() {
 async function loadHistoryList() {
   historyLoading.value = true
   try {
-    const res = await portfolioApi.listDesigns(20, 0)
-    designHistoryList.value = res.data || []
+    const [designRes, checkRes] = await Promise.all([
+      portfolioApi.listDesigns(20, 0),
+      portfolioApi.listStrategyChecks(20, 0),
+    ])
+    const designs = (designRes.data || []).map(d => ({ ...d, _type: 'design' }))
+    const checks = (checkRes.data || []).map(c => ({ ...c, _type: 'check' }))
+    designHistoryList.value = [...designs, ...checks]
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
     historyLoaded.value = true
   } catch (e) {
     toast('加载历史记录失败，请检查后端连接', 'error')
@@ -864,6 +881,17 @@ async function loadHistoryDetail(id) {
     showHistory.value = false
   } catch (e) {
     toast('加载方案详情失败', 'error')
+  }
+}
+
+async function loadCheckDetail(id) {
+  try {
+    const res = await portfolioApi.getStrategyCheckDetail(id)
+    strategyResult.value = res.data
+    activeCoreFeature.value = 'strategy'
+    showHistory.value = false
+  } catch (e) {
+    toast('加载检查详情失败', 'error')
   }
 }
 
@@ -1072,15 +1100,58 @@ async function applyPortfolioDesign(plan) {
   }
 }
 
+let stopCheckWatcher = null
+
 async function checkStrategy() {
   checkingStrategy.value = true
+  strategyProgress.value = 0
+  strategyStage.value = '正在提交任务...'
+  if (stopCheckWatcher) { clearInterval(stopCheckWatcher); stopCheckWatcher = null }
   try {
-    const res = await portfolioApi.strategyCheck({ total_capital: 500000 }, { timeout: 120000 })
-    strategyResult.value = res.data
-    toast('\u7b56\u7565\u68c0\u67e5\u5b8c\u6210', 'success')
+    const submitRes = await portfolioApi.strategyCheckAsync({ total_capital: 500000 })
+    const taskId = submitRes.data.task_id
+    strategyStage.value = '正在分析当前组合...'
+    strategyProgress.value = 5
+    const { useTaskStore } = await import('../stores/task')
+    const taskStore = useTaskStore()
+    taskStore.addTask(taskId, '策略检查', 'check')
+    // Poll progress
+    stopCheckWatcher = setInterval(async () => {
+      try {
+        const res = await portfolioApi.getStrategyCheckResult(taskId)
+        const data = res.data
+        strategyProgress.value = data.progress || strategyProgress.value
+        strategyStage.value = data.stage || '分析中...'
+        if (data.status === 'completed') {
+          clearInterval(stopCheckWatcher)
+          strategyResult.value = data
+          checkingStrategy.value = false
+          toast('策略检查完成', 'success')
+        } else if (data.status === 'failed') {
+          clearInterval(stopCheckWatcher)
+          checkingStrategy.value = false
+          toast('策略检查失败：' + (data.error_message || '未知错误'), 'error')
+        }
+      } catch (_) { /* ignore */ }
+    }, 2000)
+    // Watch Pinia store for WS events
+    const unwatch = watch(
+      () => taskStore.getTask(taskId),
+      (t) => {
+        if (!t) return
+        strategyProgress.value = t.progress || strategyProgress.value
+        strategyStage.value = t.stage || strategyStage.value
+        if (t.status === 'completed' && !strategyResult.value) {
+          portfolioApi.getStrategyCheckResult(taskId).then(r => {
+            strategyResult.value = r.data; checkingStrategy.value = false
+          })
+        } else if (t.status === 'failed' && !strategyResult.value) {
+          checkingStrategy.value = false; toast('策略检查失败', 'error')
+        }
+      }
+    )
   } catch (e) {
-    toast('\u68c0\u67e5\u5931\u8d25\uff1a' + (e?.response?.data?.detail || e.message), 'error')
-  } finally {
+    toast('提交检查失败：' + (e?.response?.data?.detail || e.message), 'error')
     checkingStrategy.value = false
   }
 }

@@ -410,3 +410,91 @@ async def portfolio_design_async(
         status_code=202,
         content={"task_id": t["task_id"], "status": "pending", "created_at": t["created_at"]},
     )
+
+
+# ── 异步策略检查 ─────────────────────────────────────────
+
+
+@router.post("/strategy-check-async")
+async def strategy_check_async(task: dict):
+    """异步提交策略检查任务，立即返回 task_id。
+
+    请求体: {capital: 500000, ...}
+    """
+    from ..tasks.design_tasks import task_manager
+    from ..tasks.strategy_check_worker import strategy_check_worker
+
+    capital = task.get("capital", 500000)
+    t = task_manager.create_task(capital=capital)
+    asyncio.create_task(strategy_check_worker(task_manager, t["task_id"]))
+    return JSONResponse(
+        status_code=202,
+        content={"task_id": t["task_id"], "status": "pending", "created_at": t["created_at"]},
+    )
+
+
+@router.get("/strategy-check-result/{task_id}")
+async def get_strategy_check_result(task_id: int):
+    """查询异步策略检查任务的结果。"""
+    from ..tasks.design_tasks import task_manager
+    from fastapi.responses import JSONResponse
+
+    task = task_manager.get_task(task_id)
+    if not task:
+        return JSONResponse(status_code=404, content={"error": "task not found"})
+    
+    if task["status"] != "completed":
+        return {
+            "task_id": task_id,
+            "status": task["status"],
+            "progress": task.get("progress", 0),
+            "error_message": task.get("error_message"),
+            "stage": task.get("stage", ""),
+        }
+
+    result = task.get("_result", {})
+    return {
+        "task_id": task_id,
+        "status": "completed",
+        "summary": result.get("summary", ""),
+        "suggestions": result.get("suggestions", []),
+        "holdings_analysis": result.get("holdings_analysis", []),
+        "risk_warnings": result.get("risk_warnings", []),
+        "market_regime": result.get("market_regime", ""),
+        "record_id": task.get("record_id"),
+    }
+
+
+@router.get("/strategy-checks")
+async def list_strategy_checks(limit: int = 10, offset: int = 0):
+    """列出历史策略检查记录。"""
+    from sqlalchemy import select, desc
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from ..database import async_session
+    from ..models.strategy_check import StrategyCheckRecord
+
+    async with async_session() as db:
+        stmt = (
+            select(StrategyCheckRecord)
+            .order_by(desc(StrategyCheckRecord.created_at))
+            .offset(offset)
+            .limit(limit)
+        )
+        rows = (await db.execute(stmt)).scalars().all()
+        return [r.to_dict() for r in rows]
+
+
+@router.get("/strategy-checks/{check_id}")
+async def get_strategy_check(check_id: int):
+    """获取单条策略检查记录详情。"""
+    from sqlalchemy import select
+    from ..database import async_session
+    from ..models.strategy_check import StrategyCheckRecord
+
+    async with async_session() as db:
+        stmt = select(StrategyCheckRecord).where(StrategyCheckRecord.id == check_id)
+        r = (await db.execute(stmt)).scalar_one_or_none()
+        if not r:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(status_code=404, content={"error": "not found"})
+        return r.to_dict()
