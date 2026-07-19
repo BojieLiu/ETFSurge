@@ -124,28 +124,30 @@
             </div>
             <span class="progress-percent">{{ loadingProgress }}%</span>
           </div>
-          <div class="loading-steps">
-            <div class="loading-step" :class="{ done: loadingProgress >= 20 }">
-              <span class="step-icon">&#128200;</span> 采集全市场数据
-              <span v-if="loadingProgress >= 20" class="step-check">&#10003;</span>
+          <div class="loading-section">
+            <div class="loading-steps">
+              <div class="loading-step" :class="{ done: loadingProgress >= 20 }">
+                <span class="step-icon">&#128200;</span> 采集全市场数据
+                <span v-if="loadingProgress >= 20" class="step-check">&#10003;</span>
+              </div>
+              <div class="loading-step" :class="{ done: loadingProgress >= 40 }">
+                <span class="step-icon">&#128269;</span> 筛选候选标的
+                <span v-if="loadingProgress >= 40" class="step-check">&#10003;</span>
+              </div>
+              <div class="loading-step" :class="{ active: loadingProgress >= 40 && loadingProgress < 80 }">
+                <span class="step-icon">&#9881;</span> 因子评分与权重分配
+                <span v-if="loadingProgress >= 80" class="step-check">&#10003;</span>
+              </div>
+              <div class="loading-step" :class="{ done: loadingProgress >= 80 }">
+                <span class="step-icon">&#128221;</span> 生成组合方案
+                <span v-if="loadingProgress >= 80" class="step-check">&#10003;</span>
+              </div>
             </div>
-            <div class="loading-step" :class="{ done: loadingProgress >= 40 }">
-              <span class="step-icon">&#128269;</span> 筛选候选标的
-              <span v-if="loadingProgress >= 40" class="step-check">&#10003;</span>
-            </div>
-            <div class="loading-step" :class="{ active: loadingProgress >= 40 && loadingProgress < 80 }">
-              <span class="step-icon">&#9881;</span> 因子评分与权重分配
-              <span v-if="loadingProgress >= 80" class="step-check">&#10003;</span>
-            </div>
-            <div class="loading-step" :class="{ done: loadingProgress >= 80 }">
-              <span class="step-icon">&#128221;</span> 生成组合方案
-              <span v-if="loadingProgress >= 80" class="step-check">&#10003;</span>
-            </div>
+            <!-- UX1: 加载提示 — 允许用户切换页面 -->
+            <p class="loading-hint" v-if="loadingProgress > 0">
+              方案生成中，完成后会通过通知栏提醒您
+            </p>
           </div>
-          <!-- UX1: 加载提示 — 允许用户切换页面 -->
-          <p class="loading-hint" v-if="loadingProgress > 0">
-            💡 方案生成中，完成后会通过通知栏提醒您
-          </p>
           <div class="panel-footer" style="margin-top:20px;text-align:center">
             <AppButton variant="ghost" size="sm" @click="exitCoreFeature">&#8592; 返回</AppButton>
           </div>
@@ -1538,12 +1540,28 @@ async function checkStrategy() {
   margin-bottom: var(--space-4);
 }
 
-.loading-hint {
-  text-align: center;
+.loading-section {
+  margin-top: var(--space-5);
+  margin-left: auto;
+  margin-right: auto;
+  max-width: 320px;
+}
+
+.loading-section .loading-hint {
+  text-align: left;
   color: var(--color-text-tertiary);
   font-size: var(--font-size-sm);
   margin-top: var(--space-4);
-  white-space: nowrap;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.loading-section .loading-hint::before {
+  content: '💡';
+  flex-shrink: 0;
 }
 
 .loading-progress {
