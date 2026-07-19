@@ -421,16 +421,21 @@ async def strategy_check_async(task: dict):
 
     请求体: {capital: 500000, ...}
     """
-    from ..tasks.design_tasks import task_manager
-    from ..tasks.strategy_check_worker import strategy_check_worker
+    import sys, traceback as tb_module
+    try:
+        from fastapi.responses import JSONResponse
+        from ..tasks.design_tasks import task_manager
+        from ..tasks.strategy_check_worker import strategy_check_worker
 
-    capital = task.get("capital", 500000)
-    t = task_manager.create_task(capital=capital)
-    asyncio.create_task(strategy_check_worker(task_manager, t["task_id"]))
-    return JSONResponse(
-        status_code=202,
-        content={"task_id": t["task_id"], "status": "pending", "created_at": t["created_at"]},
-    )
+        total_capital = task.get("total_capital", 500000)
+        t = task_manager.create_task(capital=total_capital)
+        asyncio.create_task(strategy_check_worker(task_manager, t["task_id"]))
+        return JSONResponse(
+            status_code=202,
+            content={"task_id": t["task_id"], "status": "pending", "created_at": t["created_at"]},
+        )
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 @router.get("/strategy-check-result/{task_id}")
