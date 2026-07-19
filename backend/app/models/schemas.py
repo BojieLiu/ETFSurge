@@ -120,10 +120,28 @@ class StrategySuggestion(BaseModel):
     reason: str
 
 
+class HoldingsAnalysis(BaseModel):
+    symbol: str
+    name: str
+    current_weight: float
+    signal: str
+    factor_breakdown: str = ""
+
+
+class RiskWarning(BaseModel):
+    type: str
+    severity: str
+    detail: str
+    affected: str = ""
+
+
 class StrategyCheckResponse(BaseModel):
     summary: str
     suggestions: list[StrategySuggestion]
-    raw_llm: str
+    holdings_analysis: list[dict] = []
+    risk_warnings: list[dict] = []
+    market_regime: str = ""
+    raw_llm: str = ""
 
 
 # PnL History / 累计盈亏历史

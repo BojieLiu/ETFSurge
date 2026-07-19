@@ -1073,7 +1073,7 @@ async function applyPortfolioDesign(plan) {
 async function checkStrategy() {
   checkingStrategy.value = true
   try {
-    const res = await portfolioApi.strategyCheck({ portfolio_type: 'on_exchange' })
+    const res = await portfolioApi.strategyCheck({ total_capital: 500000 })
     strategyResult.value = res.data
     toast('\u7b56\u7565\u68c0\u67e5\u5b8c\u6210', 'success')
   } catch (e) {

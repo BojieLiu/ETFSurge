@@ -172,6 +172,28 @@ def main():
     except Exception as e:
         check("POST /design", False, str(e))
 
+    # ── 6. 策略检查链路 ─────────────────────────────────────
+    try:
+        r = requests.post(f"{BASE}/api/v1/portfolio/strategy-check",
+                          json={"total_capital": 500000}, timeout=120)
+        check(f"POST /strategy-check -> {r.status_code}", r.status_code == 200)
+        if r.status_code == 200:
+            data = r.json()
+            check("包含 summary",
+                  isinstance(data.get("summary"), str) and len(data["summary"]) > 10)
+            check("包含 suggestions",
+                  isinstance(data.get("suggestions"), list) and len(data["suggestions"]) > 0)
+            check("包含 holdings_analysis（新字段）",
+                  "holdings_analysis" in data)
+            check("包含 risk_warnings（新字段）",
+                  "risk_warnings" in data)
+            check("包含 market_regime",
+                  isinstance(data.get("market_regime"), str) and data["market_regime"] != "")
+    except requests.Timeout:
+        check("POST /strategy-check", False, "请求超时（120s，LLM 缓慢）")
+    except Exception as e:
+        check("POST /strategy-check", False, str(e))
+
     # 汇总
     total = PASS + FAIL
     print(f"\n{'=' * 50}")
