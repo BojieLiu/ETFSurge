@@ -727,7 +727,7 @@ async function loadHistoryDetail(id) {
       plans,
       design_text: data.design_text || '',  // 使用数据库中持久化的 LLM 报告
       market_context: data.market_context || {},
-      generated_at: data.created_at,
+      created_at: data.created_at,
       is_history: true,
     }
     designStep.value = 'result'
