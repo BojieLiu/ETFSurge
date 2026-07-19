@@ -66,12 +66,17 @@ def get_configured_providers() -> list[ProviderConfig]:
 
     # ── Fallback: DeepSeek Official ────────────────────────────
     if settings.deepseek_api_key:
+        models = str(settings.llm_model or "")
+        # DeepSeek official API uses 'deepseek-chat' as the model name;
+        # 'deepseek-v4-flash-free' is only valid for OpenCode Zen.
+        if models in ("deepseek-v4-flash-free", "deepseek-v4-flash"):
+            models = "deepseek-chat"
         providers.append(ProviderConfig(
             id="deepseek",
             name="DeepSeek Official",
             api_url=LLM_API_URL,
             api_key=settings.deepseek_api_key,
-            model=settings.llm_model or "deepseek-v4-flash",
+            model=models,
             timeout=settings.llm_fallback_timeout,
         ))
     else:
