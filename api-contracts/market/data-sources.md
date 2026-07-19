@@ -123,6 +123,36 @@ def _route_hk(symbol: str) -> dict | None:
 
 ---
 
+## 5. 天天基金 Fetcher / 基金净值数据
+
+### Module: `backend/app/fetchers/fund_fetcher.py`
+
+#### `fetch_fund_nav(symbol: str) -> dict | None`
+```
+Input:  FUND_CODE (e.g. "000001" for 华夏成长)
+Output: { "nav": 1.2345, "daily_change_pct": 0.56 } or None
+```
+
+## 6. 两融余额 Fetcher / 深交所+上交所
+
+### Module: `backend/app/fetchers/margin_fetcher.py`
+
+#### `fetch_margin_balance() -> float | None`
+```
+Input:  none
+Output: float (total margin balance in yuan), or None
+```
+
+## 7. HK K-line Fallback / 港股K线降级
+
+### Integration: `backend/app/fetchers/china_market.py`
+
+```
+_fetch_akshare_history()  →  akshare → Finnhub candles → Alpha Vantage daily
+```
+
+---
+
 ## Frontend-Backend Checklist
 
 - [x] Twelve Data API key verified (tested SPY, GOLD, CL, AAPL)

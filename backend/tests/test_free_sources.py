@@ -275,3 +275,55 @@ class TestMarketServiceRouting:
             call_args = mock_registry.route.call_args[0][0]
             source_names = [p[0] for p in call_args]
             assert source_names == ["twelvedata", "finnhub", "alphavantage", "yfinance"]
+
+
+# ── 天天基金 Fetcher Tests ──────────────────────────────────────
+
+class TestFundFetcher:
+    def test_fetch_fund_nav_success(self):
+        from app.fetchers.fund_fetcher import fetch_fund_nav
+        mock_data = {"nav": 1.2345, "daily_change_pct": 0.56}
+        with patch("app.fetchers.fund_fetcher._fetch_nav", return_value=mock_data):
+            result = fetch_fund_nav("000001")
+        assert result is not None
+        assert result["nav"] == 1.2345
+        assert result["daily_change_pct"] == 0.56
+
+    def test_fetch_fund_nav_none_on_empty(self):
+        from app.fetchers.fund_fetcher import fetch_fund_nav
+        with patch("app.fetchers.fund_fetcher._fetch_nav", return_value=None):
+            result = fetch_fund_nav("000001")
+        assert result is None
+
+    def test_fetch_fund_nav_none_on_missing_list(self):
+        from app.fetchers.fund_fetcher import fetch_fund_nav
+        with patch("app.fetchers.fund_fetcher._fetch_nav", return_value=None):
+            result = fetch_fund_nav("000001")
+        assert result is None
+
+
+# ── 两融余额 Fetcher Tests ──────────────────────────────────────
+
+class TestMarginFetcher:
+    def test_fetch_margin_balance_success(self):
+        from app.fetchers.margin_fetcher import fetch_margin_balance
+        with patch("app.fetchers.margin_fetcher._fetch_szse", return_value=123456789012.34):
+            result = fetch_margin_balance()
+        assert result is not None
+        assert result == 123456789012.34
+
+    def test_fetch_margin_balance_none_on_szse_fail(self):
+        from app.fetchers.margin_fetcher import fetch_margin_balance
+        with patch("app.fetchers.margin_fetcher._fetch_szse", return_value=None) as m_szse:
+            from app.fetchers.margin_fetcher import fetch_margin_balance
+            with patch("app.fetchers.margin_fetcher._fetch_sse", return_value=987654321098.76):
+                result = fetch_margin_balance()
+        assert result is not None
+        assert result == 987654321098.76
+
+    def test_fetch_margin_balance_none_on_all_fail(self):
+        from app.fetchers.margin_fetcher import fetch_margin_balance
+        with patch("app.fetchers.margin_fetcher._fetch_szse", return_value=None):
+            with patch("app.fetchers.margin_fetcher._fetch_sse", return_value=None):
+                result = fetch_margin_balance()
+        assert result is None

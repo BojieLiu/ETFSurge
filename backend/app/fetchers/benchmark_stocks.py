@@ -16,6 +16,7 @@ import logging
 from typing import Any
 
 from ..core.async_utils import run_in_thread
+from ..fetchers.china_market import _mootdx_realtime, _sina_realtime
 
 logger = logging.getLogger(__name__)
 
@@ -67,24 +68,14 @@ def judge_signal(
 
 
 def _get_realtime_price(code: str) -> dict:
-    """获取个股实时行情。"""
+    """Get realtime price for a single stock via mootdx → Sina."""
     try:
-        from ..utils.proxy import no_proxy
-
-        def _p():
-            import akshare as ak
-            with no_proxy():
-                return ak.stock_zh_a_spot_em()
-        df = run_in_thread(_p, timeout=8)
-        if df is None or df.empty:
-            return {}
-        for _, row in df.iterrows():
-            symbol = str(row.get("代码", ""))
-            if symbol == code[:6]:
-                return {
-                    "price": float(row.get("最新价", 0) or 0),
-                    "change_pct": float(row.get("涨跌幅", 0) or 0),
-                }
+        items = _mootdx_realtime([code])
+        if items and items[0].get("price"):
+            return items[0]
+        items = _sina_realtime([code], "A")
+        if items and items[0].get("price"):
+            return items[0]
     except Exception:
         pass
     return {}

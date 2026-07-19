@@ -15,6 +15,7 @@ import logging
 from typing import Any
 
 from ..core.async_utils import run_in_thread
+from ..fetchers import margin_fetcher
 
 logger = logging.getLogger(__name__)
 
@@ -96,24 +97,10 @@ def calc_sentiment_index(
 def fetch_advance_decline_ratio() -> float:
     """获取市场涨跌家数比 (上涨家数/总家数)。
 
-    数据源优先级: 1. akshare 2. Sina 实时行情
+    数据源优先级: 1. Sina/EastMoney push2 API 2. akshare
     返回: 0~1, 失败时返回 0.5 (中性)
     """
-    # 1. akshare
-    try:
-        def _p():
-            import akshare as ak
-            return ak.stock_zh_a_spot_em()
-        df = run_in_thread(_p, timeout=8)
-        if df is not None and not df.empty:
-            up = sum(1 for _, r in df.iterrows() if float(r.get("涨跌幅", 0) or 0) > 0)
-            total = len(df)
-            if total > 0:
-                return up / total
-    except Exception as e:
-        logger.warning("[sentiment] akshare advance_decline failed: %s", e)
-
-    # 2. Sina fallback: 通过 china_market 获取涨跌幅大于0的家数
+    # 1. Sina/EastMoney push2 API (faster & more reliable than akshare)
     try:
         from ..fetchers.china_market import fetch_realtime_quotes
         # 获取沪深全部股票简况
@@ -130,8 +117,22 @@ def fetch_advance_decline_ratio() -> float:
             total = len(items)
             if total > 0:
                 return up / total
+    except Exception as e:
+        logger.warning("[sentiment] push2 advance_decline failed: %s", e)
+
+    # 2. akshare fallback
+    try:
+        def _p():
+            import akshare as ak
+            return ak.stock_zh_a_spot_em()
+        df = run_in_thread(_p, timeout=8)
+        if df is not None and not df.empty:
+            up = sum(1 for _, r in df.iterrows() if float(r.get("涨跌幅", 0) or 0) > 0)
+            total = len(df)
+            if total > 0:
+                return up / total
     except Exception as e2:
-        logger.warning("[sentiment] Sina fallback advance_decline failed: %s", e2)
+        logger.warning("[sentiment] akshare advance_decline failed: %s", e2)
 
     return 0.5
 
@@ -202,7 +203,18 @@ def fetch_margin_change() -> float:
             except (IndexError, ValueError, TypeError):
                 pass
     except Exception as e:
-        logger.warning("[sentiment] fetch_margin_change failed: %s", e)
+        logger.warning("[sentiment] fetch_margin_change akshare failed: %s", e)
+
+    # Fallback: 深交所/上交所 API
+    try:
+        balance = run_in_thread(margin_fetcher.fetch_margin_balance, timeout=8)
+        if balance and balance > 0:
+            # 归一化: ±5000亿为极端值
+            norm = max(-1.0, min(1.0, (balance - 1.8e12) / 5e11))
+            return norm
+    except Exception as e:
+        logger.warning("[sentiment] fetch_margin_change SZSE/SSE fallback failed: %s", e)
+
     return 0.0
 
 

@@ -18,6 +18,9 @@ from ..utils.decode import decode_df as _decode_df
 from ..core.ttl import CACHE_TTL
 from ..services.source_registry import registry
 from ..core.async_utils import run_in_thread
+from ..fetchers import finnhub_fetcher
+from ..fetchers import alphavantage_fetcher
+from ..fetchers import fund_fetcher
 
 ASSET_TYPES = {
     "A": "A股ETF", "HK": "港股ETF", "US": "美股ETF",
@@ -494,16 +497,24 @@ def fetch_fund_nav(symbol: str) -> tuple[float, float] | None:
                 return ak.fund_open_fund_info_em(symbol=symbol, indicator="单位净值")
         df = run_in_thread(_p, timeout=8)
         _decode_df(df)
-        if df is None or len(df) == 0:
-            return None
-        last = df.iloc[-1]
-        nav = float(last.get("单位净值") or last.get("unit_net_value") or 0)
-        chg = float(last.get("日增长率") or last.get("daily_growth_rate") or 0)
-        if nav:
-            return (nav, round(chg, 2))
-        return None
+        if df is not None and len(df) > 0:
+            last = df.iloc[-1]
+            nav = float(last.get("单位净值") or last.get("unit_net_value") or 0)
+            chg = float(last.get("日增长率") or last.get("daily_growth_rate") or 0)
+            if nav:
+                return (nav, round(chg, 2))
     except Exception:
-        return None
+        pass
+
+    # Fallback: 天天基金 API
+    try:
+        result = run_in_thread(lambda: fund_fetcher.fetch_fund_nav(symbol), timeout=8)
+        if result and result.get("nav"):
+            return (result["nav"], result.get("daily_change_pct", 0.0))
+    except Exception:
+        pass
+
+    return None
 
 
 def fetch_index_history(symbol: str, period: str = "daily") -> list[dict[str, Any]]:
@@ -569,11 +580,17 @@ def _fetch_akshare_history(symbol: str, asset_type: str, period: str) -> list[di
                 return None
             return fn(symbol=symbol, period=period, adjust="qfq") if asset_type == "A" else fn(symbol=symbol, period=period)
         df = run_in_thread(_p, timeout=8)
-        if df is None:
-            return []
-        if isinstance(df, pd.DataFrame) and not df.empty:
+        if df is not None and isinstance(df, pd.DataFrame) and not df.empty:
             _decode_df(df)
             return df.to_dict(orient="records")
+        # Fallback: Finnhub candles → Alpha Vantage
+        if asset_type in ("HK", "US"):
+            fh_result = run_in_thread(lambda: finnhub_fetcher.fetch_candles(symbol, "D"), timeout=8)
+            if fh_result:
+                return fh_result
+            av_result = run_in_thread(lambda: alphavantage_fetcher.fetch_daily(symbol), timeout=10)
+            if av_result:
+                return av_result
         return []
     except Exception:
         return []
