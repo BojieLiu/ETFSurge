@@ -294,7 +294,7 @@ async def get_design(
     }
 
 
-@router.get("/api/v1/portfolio/designs/{design_id}/status")
+@router.get("/designs/{design_id}/status")
 async def get_design_status(design_id: int, db: AsyncSession = Depends(get_db)):
     """方案 B: 任务存活状态检查。不依赖 report_manager，仅查 DB。"""
     from ..models.portfolio_design import PortfolioDesign
