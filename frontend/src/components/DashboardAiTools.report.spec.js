@@ -149,8 +149,8 @@ describe('DashboardAiTools - Design Report Tab', () => {
   })
 
   it('should skip to loading state when enterDesignMode called with running task', async () => {
-    // Inject a running task into the shared mock
-    _mockTasks.push({ taskId: 'task-running-1', status: 'running' })
+    // Inject a running task into the shared mock (with designId and recent createdAt)
+    _mockTasks.push({ taskId: 'task-running-1', status: 'running', designId: 42, createdAt: Date.now() })
     // Re-mount to pick up the updated mock
     const DashboardAiTools = await import('./DashboardAiTools.vue')
     wrapper = mount(DashboardAiTools.default, {
@@ -165,6 +165,7 @@ describe('DashboardAiTools - Design Report Tab', () => {
     wrapper.vm.enterDesignMode()
     await nextTick()
 
+    // fetch will throw (not mocked), catch block keeps loading if not stale
     expect(wrapper.vm.activeCoreFeature).toBe('design')
     expect(wrapper.vm.designStep).toBe('loading')
   })

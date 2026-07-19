@@ -338,8 +338,29 @@ async def compose_and_push_report(
 
 
 
+    except asyncio.TimeoutError:
+        logger.warning("[design_report] LLM timeout for session %s, saving fallback", session_id)
+        _fallback = plan_tables + "\n\n> ⚠️ AI 报告生成超时，以上为引擎方案数据。请返回重新生成。"
+        if design_id is not None:
+            try:
+                from ..database import async_session as _dbs
+                from ..models.portfolio_design import PortfolioDesign
+                async with _dbs() as _db:
+                    d = await _db.get(PortfolioDesign, design_id)
+                    if d:
+                        d.design_text = _fallback
+                        await _db.commit()
+                        logger.info("[design_report] saved fallback for design %s", design_id)
+            except Exception as pe:
+                logger.error("[design_report] fallback persist failed: %s", pe)
+        await report_manager.broadcast(session_id, {
+            "type": "design_report", "session_id": session_id,
+            "status": "complete", "report_text": _fallback,
+        })
+        return
+
     except Exception as e:
-        logger.error("[design_report] error for session %s: %s", session_id, e)
+        logger.error("[design_report] error for session %s: %s", session_id, e, exc_info=True)
         await report_manager.broadcast(session_id, {
             "type": "design_report",
             "session_id": session_id,

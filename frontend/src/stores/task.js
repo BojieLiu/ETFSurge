@@ -17,7 +17,20 @@ function _save(key, val) {
  * Driven by back-end /ws/task-notifications WebSocket broadcast.
  */
 export const useTaskStore = defineStore('task', () => {
-  const tasks = ref(_load(LS_KEYS.tasks, []))
+  const tasks = ref(_loadTasks())
+
+  function _loadTasks() {
+    const raw = _load(LS_KEYS.tasks, [])
+    const now = Date.now()
+    raw.forEach(t => {
+      if (t.status === 'running' && now - (t.createdAt || 0) > 300000) {
+        t.status = 'failed'
+        t.errorMessage = '生成超时，请重新尝试'
+      }
+    })
+    _save(LS_KEYS.tasks, raw)
+    return raw
+  }
 
   function getTask(taskId) {
     return tasks.value.find((t) => t.taskId === taskId) || null
@@ -103,7 +116,7 @@ export const useTaskStore = defineStore('task', () => {
   }
 
   return {
-    tasks, getTask, addTask, updateTask, removeTask, clearCompleted,
+    tasks, getTask, addTask, updateTask, removeTask, clearCompleted, _loadTasks,
     hasRunningTask, activeTaskId,
     designState, persistDesignState, getDesignState, clearDesignState,
   }

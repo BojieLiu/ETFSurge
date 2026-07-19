@@ -294,6 +294,35 @@ WS 推送 streaming chunks → 逐步显示
 
 ---
 
+### 2.9 设计方案状态 / Design Status
+
+```
+GET /api/v1/portfolio/designs/{design_id}/status
+```
+
+**成功响应 — `200 OK`:**
+
+```json
+{
+  "design_id": 70,
+  "alive": true,
+  "status": "running",
+  "design_text": null,
+  "created_at": "2026-07-19T03:29:57",
+  "progress": null
+}
+```
+
+**status 取值:**
+| 值 | alive | 条件 |
+|------|-------|------|
+| `running` | true | created_at < 300s 前 且 design_text 为空 |
+| `completed` | false | design_text 非空 |
+| `failed` | false | created_at > 300s 前 且 design_text 为空 |
+| `not_found` | false | 设计 ID 不存在于数据库 |
+
+---
+
 ## 3. 数据流程 / Data Flow
 
 ```
@@ -339,3 +368,4 @@ alanced/aggressive`
 - [ ] Response: 标的数量在 8~15 之间
 - [ ] WS: `/api/v1/ws/design-report/{session_id}` 可连接
 - [ ] WS: 推送的 design_report 包含完整 Markdown
+- [ ] `GET /api/v1/portfolio/designs/{id}/status` implemented and tested

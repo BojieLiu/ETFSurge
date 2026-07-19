@@ -573,12 +573,38 @@ function generateDesignReport(plans, marketContext) {
 }
 
 // Actions
-function enterDesignMode() {
-  // If there's a running task, skip wizard and go to loading
+async function enterDesignMode() {
   const runningTask = taskStore.tasks.find(t => t.status === 'running')
-  if (runningTask) {
+  if (runningTask && runningTask.designId) {
+    // Show loading immediately for responsiveness
     activeCoreFeature.value = 'design'
     designStep.value = 'loading'
+    try {
+      const res = await fetch(`/api/v1/portfolio/designs/${runningTask.designId}/status`)
+      const data = await res.json()
+      if (data.status === 'completed') {
+        // Task completed but WS notification was missed
+        taskStore.updateTask(runningTask.taskId, { status: 'completed' })
+        designResult.value = data
+        designStep.value = 'result'
+        return
+      }
+      if (data.status !== 'running') {
+        // Task is failed or not found - clean up
+        taskStore.removeTask(runningTask.taskId)
+        designStep.value = 'wizard'
+        return
+      }
+      // running - stay on loading, WS will push completion
+      return
+    } catch {
+      // Network error - fallback to staleness check
+      if (Date.now() - (runningTask.createdAt || 0) > 300000) {
+        taskStore.removeTask(runningTask.taskId)
+        designStep.value = 'wizard'
+      }
+      // else keep loading
+    }
     return
   }
   // Normal flow
