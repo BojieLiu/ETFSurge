@@ -115,7 +115,7 @@
           <p class="loading-hint">3 秒后将返回设置页，请检查后端服务是否正常运行</p>
         </div>
         <div v-else class="feature-card loading-card">
-          <div class="loading-spinner"></div>
+          <div class="loading-spinner-pulse"></div>
           <h3 class="loading-title">正在生成组合方案</h3>
           <p class="loading-text">{{ loadingText }}</p>
           <div class="loading-progress">
@@ -125,21 +125,28 @@
             <span class="progress-percent">{{ loadingProgress }}%</span>
           </div>
           <div class="loading-steps">
-            <div class="loading-step" :class="{ done: loadingProgress >= 30 }">
-              <span class="step-dot"></span> 采集全市场数据
+            <div class="loading-step" :class="{ done: loadingProgress >= 20 }">
+              <span class="step-icon">&#128200;</span> 采集全市场数据
+              <span v-if="loadingProgress >= 20" class="step-check">&#10003;</span>
             </div>
-            <div class="loading-step" :class="{ done: loadingProgress >= 60 }">
-              <span class="step-dot"></span> 筛选候选标的
+            <div class="loading-step" :class="{ done: loadingProgress >= 40 }">
+              <span class="step-icon">&#128269;</span> 筛选候选标的
+              <span v-if="loadingProgress >= 40" class="step-check">&#10003;</span>
             </div>
-            <div class="loading-step" :class="{ done: loadingProgress >= 90 }">
-              <span class="step-dot"></span> 生成组合方案
+            <div class="loading-step" :class="{ active: loadingProgress >= 40 && loadingProgress < 80 }">
+              <span class="step-icon">&#9881;</span> 因子评分与权重分配
+              <span v-if="loadingProgress >= 80" class="step-check">&#10003;</span>
+            </div>
+            <div class="loading-step" :class="{ done: loadingProgress >= 80 }">
+              <span class="step-icon">&#128221;</span> 生成组合方案
+              <span v-if="loadingProgress >= 80" class="step-check">&#10003;</span>
             </div>
           </div>
           <!-- UX1: 加载提示 — 允许用户切换页面 -->
           <p class="loading-hint" v-if="loadingProgress > 0">
-            💡 方案生成中，您可以切换到其他页面，完成后会通过通知栏提醒您
+            💡 方案生成中，您可以先查看其他页面，完成后会通过通知栏提醒您
           </p>
-          <div class="panel-footer" style="margin-top:16px;text-align:center">
+          <div class="panel-footer" style="margin-top:20px;text-align:center">
             <AppButton variant="ghost" size="sm" @click="exitCoreFeature">&#8592; 返回</AppButton>
           </div>
         </div>
@@ -1420,8 +1427,11 @@ async function checkStrategy() {
   margin-top: var(--space-5);
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: var(--space-2);
+  align-items: flex-start;
+  max-width: 320px;
+  margin-left: auto;
+  margin-right: auto;
+  gap: var(--space-3);
 }
 
 .loading-step {
@@ -1430,6 +1440,7 @@ async function checkStrategy() {
   gap: var(--space-2);
   font-size: var(--font-size-sm);
   color: var(--color-text-tertiary);
+  transition: color 0.3s ease, transform 0.3s ease;
 }
 
 .loading-step.done {
@@ -1437,15 +1448,23 @@ async function checkStrategy() {
   font-weight: var(--font-weight-medium);
 }
 
-.step-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--color-border);
+.loading-step.active {
+  color: var(--color-text);
+  font-weight: var(--font-weight-semibold);
+  transform: translateX(4px);
 }
 
-.loading-step.done .step-dot {
-  background: var(--color-primary);
+.step-icon {
+  width: 24px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.step-check {
+  margin-left: auto;
+  color: var(--color-success, #43A047);
+  font-weight: bold;
+  font-size: var(--font-size-base);
 }
 
 /* Strategy Check Info */
@@ -1494,18 +1513,23 @@ async function checkStrategy() {
   gap: var(--space-3);
 }
 
-.loading-spinner {
-  width: 32px;
-  height: 32px;
-  border: 3px solid var(--color-border);
+.loading-spinner-pulse {
+  width: 48px;
+  height: 48px;
+  border: 4px solid var(--color-border);
   border-top-color: var(--color-primary);
   border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-  margin: var(--space-6) auto;
+  animation: spin 0.8s linear infinite, pulse 1.5s ease-in-out infinite;
+  margin: var(--space-4) auto;
 }
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.08); }
 }
 
 .loading-text {
@@ -1522,7 +1546,7 @@ async function checkStrategy() {
 
 .progress-bar {
   flex: 1;
-  height: 6px;
+  height: 8px;
   background: var(--color-bg-tertiary);
   border-radius: var(--radius-full);
   overflow: hidden;
@@ -1530,9 +1554,26 @@ async function checkStrategy() {
 
 .progress-fill {
   height: 100%;
-  background: var(--color-primary);
+  background: linear-gradient(90deg, var(--color-primary), var(--color-primary-light, #5C6BC0));
   border-radius: var(--radius-full);
-  transition: width 0.3s ease;
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.progress-fill::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.25), transparent);
+  animation: shimmer 2s infinite;
+}
+
+@keyframes shimmer {
+  to { left: 100%; }
 }
 
 .progress-percent {
