@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useToastStore } from './toast'
 
 const LS_KEYS = { tasks: 'etf_surge_tasks', design: 'etf_surge_design' }
@@ -76,6 +76,13 @@ export const useTaskStore = defineStore('task', () => {
     }, delay)
   }
 
+  // ── Computed: active task detection ────────────────────────────
+  const hasRunningTask = computed(() => tasks.value.some(t => t.status === 'running'))
+  const activeTaskId = computed(() => {
+    const running = tasks.value.find(t => t.status === 'running')
+    return running ? running.taskId : null
+  })
+
   // ── UX2: 设计面板状态持久化 ──────────────────────────────────
   // 当用户导航离开设计面板时保存状态，返回时恢复
   // UX2: 设计面板状态，同样持久化到 localStorage
@@ -97,6 +104,7 @@ export const useTaskStore = defineStore('task', () => {
 
   return {
     tasks, getTask, addTask, updateTask, removeTask, clearCompleted,
+    hasRunningTask, activeTaskId,
     designState, persistDesignState, getDesignState, clearDesignState,
   }
 })

@@ -51,10 +51,10 @@ def _make_response(content: str, model: str = "deepseek-v4-flash-free",
 
 def _patch_httpx(side_effects: list):
     """
-    Patch app.analysis.llm.httpx.AsyncClient (used in llm_complete_with_system
-    and llm_complete).  side_effects is a list of return values or exceptions.
+    Patch httpx.AsyncClient globally (since httpx is imported inside
+    llm_complete_with_system function bodies).
     """
-    patcher = patch("app.analysis.llm.httpx.AsyncClient")
+    patcher = patch("httpx.AsyncClient")
     mock_cls = patcher.start()
     mock_instance = mock_cls.return_value.__aenter__.return_value
     mock_instance.post = AsyncMock(side_effect=side_effects)
@@ -121,20 +121,16 @@ class TestPrimarySuccess:
         from app.analysis.llm import llm_complete_with_system
 
         resp = _make_response("ok")
-        patcher = _patch_httpx([resp])
+        patcher = patch("httpx.AsyncClient")
+        mock_cls = patcher.start()
+        mock_instance = mock_cls.return_value.__aenter__.return_value
+        mock_instance.post = AsyncMock(return_value=resp)
         try:
             await llm_complete_with_system("system", "prompt")
+            assert mock_instance.post.call_count == 1, \
+                f"Expected 1 call, got {mock_instance.post.call_count}"
         finally:
             patcher.stop()
-
-        mock_instance = (
-            patcher.return_value.__aenter__.return_value  # type: ignore
-            if hasattr(patcher, "return_value") else None
-        )
-        # Actually let's verify through the mock_cls
-        mock_cls = patcher.return_value
-        mock_instance = mock_cls.return_value.__aenter__.return_value
-        assert mock_instance.post.call_count == 1
 
 
 # ─── P1: Primary timeout → fallback succeeds ─────────────────────
@@ -168,8 +164,10 @@ class TestPrimaryTimeout:
         finally:
             patcher.stop()
 
-        assert any("Falling back" in rec.message for rec in caplog.records), \
-            "Expected a WARNING log about fallback"
+        assert any(
+            "Provider opencode_zen failed" in rec.message
+            for rec in caplog.records
+        ), "Expected a WARNING log about provider failure"
 
 
 # ─── P2: Primary HTTP error → fallback succeeds ──────────────────
@@ -272,29 +270,44 @@ class TestUsageRecordProvider:
 # ─── UX4: Missing API key skips primary ─────────────────────────
 
 class TestMissingApiKey:
+    async def _override_keys(self, **kwargs):
+        """Override specific settings keys for this test, return old values."""
+        from app.config import settings
+        old = {}
+        for k, v in kwargs.items():
+            old[k] = getattr(settings, k)
+            setattr(settings, k, v)
+        return old
+
+    async def _restore_keys(self, old: dict):
+        from app.config import settings
+        for k, v in old.items():
+            setattr(settings, k, v)
+
     async def test_ux4_no_zen_key_skips_primary(self):
         """OPENCODE_ZEN_API_KEY is empty → skip primary, use deepseek directly."""
-        _stop_patches(_patch_provider_settings(opencode_zen_api_key=""))
-        from app.analysis.llm import llm_complete_with_system
-
-        resp = _make_response("direct fallback", model="deepseek-v4-flash")
-        patcher = _patch_httpx([resp])
+        old = await self._override_keys(opencode_zen_api_key="")
         try:
-            result = await llm_complete_with_system("system", "prompt")
-            assert result == "direct fallback"
+            from app.analysis.llm import llm_complete_with_system
+            resp = _make_response("direct fallback", model="deepseek-v4-flash")
+            patcher = _patch_httpx([resp])
+            try:
+                result = await llm_complete_with_system("system", "prompt")
+                assert result == "direct fallback"
+            finally:
+                patcher.stop()
         finally:
-            patcher.stop()
+            await self._restore_keys(old)
 
     async def test_ux4_no_keys_at_all_raises(self):
         """Both API keys empty → raise ValueError."""
-        _stop_patches(_patch_provider_settings(
+        old = await self._override_keys(
             opencode_zen_api_key="",
             deepseek_api_key="",
-        ))
-        # Need to re-import or force config reload
-        from app.analysis.provider import has_any_api_key
-        assert not has_any_api_key(), "Expected no keys configured"
-
-        from app.analysis.llm import llm_complete_with_system
-        with pytest.raises(ValueError, match="No LLM API keys configured"):
-            await llm_complete_with_system("system", "prompt")
+        )
+        try:
+            from app.analysis.llm import llm_complete_with_system
+            with pytest.raises(ValueError, match="No LLM API keys configured"):
+                await llm_complete_with_system("system", "prompt")
+        finally:
+            await self._restore_keys(old)

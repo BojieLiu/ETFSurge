@@ -139,6 +139,9 @@
           <p class="loading-hint" v-if="loadingProgress > 0">
             💡 方案生成中，您可以切换到其他页面，完成后会通过通知栏提醒您
           </p>
+          <div class="panel-footer" style="margin-top:16px;text-align:center">
+            <AppButton variant="ghost" size="sm" @click="exitCoreFeature">&#8592; 返回</AppButton>
+          </div>
         </div>
       </div>
 
@@ -571,6 +574,14 @@ function generateDesignReport(plans, marketContext) {
 
 // Actions
 function enterDesignMode() {
+  // If there's a running task, skip wizard and go to loading
+  const runningTask = taskStore.tasks.find(t => t.status === 'running')
+  if (runningTask) {
+    activeCoreFeature.value = 'design'
+    designStep.value = 'loading'
+    return
+  }
+  // Normal flow
   activeCoreFeature.value = 'design'
   designStep.value = 'wizard'
   designCapital.value = 500000

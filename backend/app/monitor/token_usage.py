@@ -99,7 +99,7 @@ class TokenUsageStore:
                 success=bool(row["success"]),
                 duration_ms=row["duration_ms"],
                 error_message=row["error_message"] or "",
-                provider=row["provider"] or "",
+                provider=row["provider"] if "provider" in row.keys() else "",
             ))
 
     async def record(self, entry: UsageRecord) -> None:

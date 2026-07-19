@@ -8,6 +8,7 @@
  *   - When design_text is empty and no error, waiting state is shown
  *   - When reportError is set, error state is shown
  *   - WS streaming chunks are concatenated into design_text
+ *   - enterDesignMode with running task skips to loading state
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
@@ -50,10 +51,18 @@ vi.mock('../stores/toast', () => ({
   useToastStore: () => ({ show: vi.fn(), toasts: [], dismiss: vi.fn() }),
 }))
 
-// Mock task store — provide a fresh instance per test
+// Mock task store — provide a fresh instance per test.
+// Uses a shared mutable tasks array so tests can inject running tasks.
+let _mockTasks = []
+
 vi.mock('../stores/task', () => ({
   useTaskStore: () => ({
-    tasks: [],
+    tasks: _mockTasks,
+    get hasRunningTask() { return _mockTasks.some(t => t.status === 'running') },
+    get activeTaskId() {
+      const r = _mockTasks.find(t => t.status === 'running')
+      return r ? r.taskId : null
+    },
     getTask: vi.fn(() => null),
     addTask: vi.fn(),
     updateTask: vi.fn(),
@@ -74,6 +83,7 @@ describe('DashboardAiTools - Design Report Tab', () => {
 
   beforeEach(async () => {
     setActivePinia(createPinia())
+    _mockTasks = []
     const DashboardAiTools = await import('./DashboardAiTools.vue')
     wrapper = mount(DashboardAiTools.default, {
       global: {
@@ -136,5 +146,34 @@ describe('DashboardAiTools - Design Report Tab', () => {
     wrapper.vm.reportError = 'WS 连接断开'
     wrapper.vm.retryReport()
     expect(wrapper.vm.reportError).toBe('')
+  })
+
+  it('should skip to loading state when enterDesignMode called with running task', async () => {
+    // Inject a running task into the shared mock
+    _mockTasks.push({ taskId: 'task-running-1', status: 'running' })
+    // Re-mount to pick up the updated mock
+    const DashboardAiTools = await import('./DashboardAiTools.vue')
+    wrapper = mount(DashboardAiTools.default, {
+      global: {
+        stubs: {
+          AppButton: true,
+          AppInput: true,
+          AppSelect: true,
+        },
+      },
+    })
+    wrapper.vm.enterDesignMode()
+    await nextTick()
+
+    expect(wrapper.vm.activeCoreFeature).toBe('design')
+    expect(wrapper.vm.designStep).toBe('loading')
+  })
+
+  it('should show wizard when enterDesignMode called without running task', async () => {
+    wrapper.vm.enterDesignMode()
+    await nextTick()
+
+    expect(wrapper.vm.activeCoreFeature).toBe('design')
+    expect(wrapper.vm.designStep).toBe('wizard')
   })
 })

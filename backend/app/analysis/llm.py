@@ -128,6 +128,10 @@ async def llm_complete_stream(
     """
     Streaming LLM completion with provider failover.
     
+    Tries providers in priority order. If the primary provider fails
+    BEFORE any token is yielded, falls back to the next provider.
+    Once a token has been yielded, commits to that provider.
+    
     Yields:
         {"type": "token", "token": "..."} - incremental token
         {"type": "done", "full_text": "...", "usage": {...}} - completion with full text
@@ -135,172 +139,212 @@ async def llm_complete_stream(
     """
     import httpx
     await _check_key()
-    
-    body = {
-        "model": settings.llm_model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt},
-        ],
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-        "stream": True,
-    }
-    if response_format:
-        body["response_format"] = response_format
 
-    _start = time.monotonic()
-    _caller = sys._getframe(1).f_code.co_name
-    
-    full_text = ""
-    prompt_tokens = 0
-    completion_tokens = 0
-    total_tokens = 0
-    
-    try:
-        async with httpx.AsyncClient(timeout=180, trust_env=False) as client:
-            async with client.stream(
-                "POST",
-                LLM_API_URL,
-                headers={
-                    "Authorization": f"Bearer {settings.deepseek_api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=body,
-            ) as resp:
-                resp.raise_for_status()
-                
-                async for line in resp.aiter_lines():
-                    if not line:
-                        continue
-                    if line.startswith("data: "):
-                        data_str = line[6:]
-                        if data_str == "[DONE]":
-                            break
-                        try:
-                            chunk = json.loads(data_str)
-                            if chunk.get("choices"):
-                                delta = chunk["choices"][0].get("delta", {})
-                                # Handle reasoning_content (DeepSeek specific)
-                                token = delta.get("content") or delta.get("reasoning_content", "")
-                                if token:
-                                    full_text += token
-                                    yield {"type": "token", "token": token}
-                            
-                            # Capture usage from final chunk
-                            if chunk.get("usage"):
-                                usage = chunk["usage"]
-                                prompt_tokens = usage.get("prompt_tokens", 0)
-                                completion_tokens = usage.get("completion_tokens", 0)
-                                total_tokens = usage.get("total_tokens", 0)
-                        except json.JSONDecodeError:
-                            continue
-                        
-    except Exception as _exc:
-        _duration = (time.monotonic() - _start) * 1000
-        await token_store.record(UsageRecord(
-            function_name=_caller,
-            prompt_tokens=0,
-            completion_tokens=0,
-            total_tokens=0,
-            model=settings.llm_model,
-            timestamp=time.time(),
-            success=False,
-            duration_ms=round(_duration, 1),
-            error_message=str(_exc),
-        ))
-        yield {"type": "error", "error": str(_exc)}
-        return
-    
-    _duration = (time.monotonic() - _start) * 1000
-    await token_store.record(UsageRecord(
-        function_name=_caller,
-        prompt_tokens=prompt_tokens,
-        completion_tokens=completion_tokens,
-        total_tokens=total_tokens,
-        model=settings.llm_model,
-        timestamp=time.time(),
-        success=True,
-        duration_ms=round(_duration, 1),
-    ))
-    
-    yield {
-        "type": "done",
-        "full_text": full_text,
-        "usage": {
-            "model": settings.llm_model,
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-            "total_tokens": total_tokens,
-            "latency_ms": round(_duration, 1),
+    providers = get_configured_providers()
+    last_exc: Exception | None = None
+
+    for provider in providers:
+        body = {
+            "model": provider.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": temperature,
+            "max_tokens": max_tokens or 8192,
+            "stream": True,
         }
-    }
+        if response_format:
+            body["response_format"] = response_format
 
+        _start = time.monotonic()
+        _caller = sys._getframe(1).f_code.co_name
 
-async def llm_complete_with_system(system_prompt: str, prompt: str, response_format: dict | None = None, force_json: bool = False) -> str:
-    """使用自定义系统提示词调用 LLM"""
-    import httpx
-    await _check_key()
-    body = {
-        "model": settings.llm_model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt},
-        ],
-        "temperature": 0.3,
-        "max_tokens": 8192,
-    }
-    if response_format:
-        body["response_format"] = response_format
-    elif force_json:
-        body["response_format"] = {"type": "json_object"}
+        full_text = ""
+        prompt_tokens = 0
+        completion_tokens = 0
+        total_tokens = 0
 
-    _start = time.monotonic()
-    _caller = sys._getframe(1).f_code.co_name
-    try:
-        async with httpx.AsyncClient(timeout=120, trust_env=False) as client:
-            resp = await client.post(
-                LLM_API_URL,
-                headers={
-                    "Authorization": f"Bearer {settings.deepseek_api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=body,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            message = data["choices"][0]["message"]
-            content = message.get("content", "")
-            if not content:
-                content = message.get("reasoning_content", "")
+        try:
+            async with httpx.AsyncClient(
+                timeout=provider.timeout, trust_env=False
+            ) as client:
+                async with client.stream(
+                    "POST",
+                    provider.api_url,
+                    headers={
+                        "Authorization": f"Bearer {provider.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=body,
+                ) as resp:
+                    resp.raise_for_status()
 
-            usage = data.get("usage", {})
+                    async for line in resp.aiter_lines():
+                        if not line:
+                            continue
+                        if line.startswith("data: "):
+                            data_str = line[6:]
+                            if data_str == "[DONE]":
+                                break
+                            try:
+                                chunk = json.loads(data_str)
+                                if chunk.get("choices"):
+                                    delta = chunk["choices"][0].get("delta", {})
+                                    token = delta.get("content") or delta.get("reasoning_content") or ""
+                                    if token:
+                                        full_text += token
+                                        yield {"type": "token", "token": token}
+
+                                if chunk.get("usage"):
+                                    usage = chunk["usage"]
+                                    prompt_tokens = usage.get("prompt_tokens", 0)
+                                    completion_tokens = usage.get("completion_tokens", 0)
+                                    total_tokens = usage.get("total_tokens", 0)
+                            except json.JSONDecodeError:
+                                continue
+
+        except Exception as _exc:
             _duration = (time.monotonic() - _start) * 1000
             await token_store.record(UsageRecord(
                 function_name=_caller,
-                prompt_tokens=usage.get("prompt_tokens", 0),
-                completion_tokens=usage.get("completion_tokens", 0),
-                total_tokens=usage.get("total_tokens", 0),
-                model=settings.llm_model,
+                prompt_tokens=0,
+                completion_tokens=0,
+                total_tokens=0,
+                model=provider.model,
                 timestamp=time.time(),
-                success=True,
+                success=False,
                 duration_ms=round(_duration, 1),
+                error_message=str(_exc),
+                provider=provider.id,
             ))
-            return content
-    except Exception as _exc:
+            last_exc = _exc
+            logger.warning(
+                "[LLM] Stream provider %s failed after %.1fs: %s",
+                provider.id, _duration / 1000, _exc,
+            )
+            # If we yielded any tokens, we're committed - propagate error
+            if full_text:
+                yield {"type": "error", "error": str(_exc)}
+                return
+            # Otherwise try next provider
+            continue
+
+        # Success: record and yield done
         _duration = (time.monotonic() - _start) * 1000
         await token_store.record(UsageRecord(
             function_name=_caller,
-            prompt_tokens=0,
-            completion_tokens=0,
-            total_tokens=0,
-            model=settings.llm_model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            model=provider.model,
             timestamp=time.time(),
-            success=False,
+            success=True,
             duration_ms=round(_duration, 1),
-            error_message=str(_exc),
+            provider=provider.id,
         ))
-        raise
+
+        yield {
+            "type": "done",
+            "full_text": full_text,
+            "usage": {
+                "model": provider.model,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+                "latency_ms": round(_duration, 1),
+            }
+        }
+        return
+
+    # All providers exhausted
+    if last_exc is None:
+        last_exc = RuntimeError("No LLM providers available")
+    yield {"type": "error", "error": str(last_exc)}
+
+
+async def llm_complete_with_system(system_prompt: str, prompt: str, response_format: dict | None = None, force_json: bool = False) -> str:
+    """Call LLM with a custom system prompt, with provider failover."""
+    import httpx
+    await _check_key()
+
+    _caller = sys._getframe(1).f_code.co_name
+    providers = get_configured_providers()
+    last_exc: Exception | None = None
+
+    for provider in providers:
+        body = {
+            "model": provider.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.3,
+            "max_tokens": 8192,
+        }
+        if response_format:
+            body["response_format"] = response_format
+        elif force_json:
+            body["response_format"] = {"type": "json_object"}
+
+        _start = time.monotonic()
+        try:
+            async with httpx.AsyncClient(
+                timeout=provider.timeout, trust_env=False
+            ) as client:
+                resp = await client.post(
+                    provider.api_url,
+                    headers={
+                        "Authorization": f"Bearer {provider.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=body,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                message = data["choices"][0]["message"]
+                content = message.get("content", "")
+                if not content:
+                    content = message.get("reasoning_content", "")
+
+                usage = data.get("usage", {})
+                _duration = (time.monotonic() - _start) * 1000
+                await token_store.record(UsageRecord(
+                    function_name=_caller,
+                    prompt_tokens=usage.get("prompt_tokens", 0),
+                    completion_tokens=usage.get("completion_tokens", 0),
+                    total_tokens=usage.get("total_tokens", 0),
+                    model=provider.model,
+                    timestamp=time.time(),
+                    success=True,
+                    duration_ms=round(_duration, 1),
+                    provider=provider.id,
+                ))
+                return content
+        except Exception as _exc:
+            _duration = (time.monotonic() - _start) * 1000
+            await token_store.record(UsageRecord(
+                function_name=_caller,
+                prompt_tokens=0,
+                completion_tokens=0,
+                total_tokens=0,
+                model=provider.model,
+                timestamp=time.time(),
+                success=False,
+                duration_ms=round(_duration, 1),
+                error_message=str(_exc),
+                provider=provider.id,
+            ))
+            last_exc = _exc
+            logger.warning(
+                "[LLM] Provider %s failed after %.1fs: %s",
+                provider.id, _duration / 1000, _exc,
+            )
+            continue
+
+    if last_exc is None:
+        raise RuntimeError("No LLM providers available")
+    raise last_exc
 
 
 def _format_indices(indices: list[dict]) -> str:
