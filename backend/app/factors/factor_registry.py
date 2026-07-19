@@ -273,6 +273,58 @@ def _compute_institutional_holdings_change(data: dict) -> float:
     return 0.0
 
 
+# ── Policy factors (十五五 static mapping) ─────────────────────────
+
+_POLICY_ALIGNMENT: dict[str, float] = {
+    "半导体": 0.95, "电子": 0.90, "计算机": 0.85,
+    "电力设备": 0.85, "通信": 0.80, "国防军工": 0.90,
+    "医药生物": 0.75, "汽车": 0.75, "机械设备": 0.60,
+    "有色金属": 0.55, "建筑装饰": 0.55, "基础化工": 0.50,
+    "交通运输": 0.50, "宽基指数": 0.50,
+    "家用电器": 0.45, "传媒": 0.45,
+    "非银金融": 0.35, "商贸零售": 0.35,
+    "食品饮料": 0.30, "纺织服装": 0.30,
+    "银行": 0.25, "房地产": 0.20,
+}
+
+_STRATEGIC_EMERGING_INDUSTRIES: set[str] = {
+    "半导体", "电子", "计算机", "电力设备",
+    "医药生物", "国防军工", "通信", "机械设备", "汽车",
+}
+
+_DUAL_CIRCULATION_INDUSTRIES: set[str] = {
+    "食品饮料", "家用电器", "汽车", "医药生物", "商贸零售",
+}
+
+
+def _compute_five_year_plan(data: dict) -> float:
+    """Compute 十五五 plan alignment score based on ETF industry classification.
+
+    Returns static score 0~1 from _POLICY_ALIGNMENT mapping.
+    Fallback to 0.30 for industries not in the mapping.
+    """
+    industry = data.get("industry", "")
+    return _POLICY_ALIGNMENT.get(industry, 0.30)
+
+
+def _compute_strategic_emerging(data: dict) -> float:
+    """Return 1.0 if ETF industry is in 战略新兴产业目录, else 0.0."""
+    industry = data.get("industry", "")
+    return 1.0 if industry in _STRATEGIC_EMERGING_INDUSTRIES else 0.0
+
+
+def _compute_dual_circulation(data: dict) -> float:
+    """Return 1.0 if ETF industry benefits from dual-circulation policy."""
+    industry = data.get("industry", "")
+    if industry in _DUAL_CIRCULATION_INDUSTRIES:
+        return 1.0
+    concepts = data.get("concepts", [])
+    for c in concepts:
+        if "消费" in c or "内需" in c or "外贸" in c:
+            return 1.0
+    return 0.0
+
+
 def _compute_stock_divergence(data: dict) -> float:
     """Stock return divergence: use advance/decline ratio from sentiment_fetcher.
 
@@ -323,6 +375,10 @@ _BUILTIN_COMPUTERS: dict[str, Callable[[dict], float]] = {
     "sentiment.stock_divergence": _compute_stock_divergence,  # scaffolding
     "sentiment.news_heat": _compute_news_heat,
     "sentiment.news_direction": _compute_news_direction,
+    # Policy factors (十五五)
+    "china.policy.five_year_plan": _compute_five_year_plan,
+    "china.policy.strategic_emerging": _compute_strategic_emerging,
+    "china.policy.dual_circulation": _compute_dual_circulation,
 }
 
 # 30 core factors for S1 (extend this list as implementation progresses)
@@ -359,6 +415,10 @@ _CORE_FACTORS = [
     "sentiment.stock_divergence",
     "sentiment.news_heat",
     "sentiment.news_direction",
+    # Policy factors
+    "china.policy.five_year_plan",
+    "china.policy.strategic_emerging",
+    "china.policy.dual_circulation",
 ]
 
 

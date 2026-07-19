@@ -271,3 +271,47 @@ class TestPhaseB:
             # At least one call per symbol with non-zero factor
             factor_calls = [c for c in mock_record.call_args_list]
             assert len(factor_calls) >= 3, f"Expected >=3 IC records, got {len(factor_calls)}"
+
+
+class TestPhaseD:
+    """Policy factors (十五五 static mapping)."""
+
+    def test_five_year_plan_semiconductor(self):
+        from app.factors.factor_registry import _compute_five_year_plan
+        score = _compute_five_year_plan({"industry": "半导体"})
+        assert score == 0.95
+        assert 0 <= score <= 1
+
+    def test_five_year_plan_fallback(self):
+        from app.factors.factor_registry import _compute_five_year_plan
+        score = _compute_five_year_plan({"industry": "unknown_industry"})
+        assert score == 0.30
+
+    def test_strategic_emerging_yes(self):
+        from app.factors.factor_registry import _compute_strategic_emerging
+        assert _compute_strategic_emerging({"industry": "半导体"}) == 1.0
+        assert _compute_strategic_emerging({"industry": "计算机"}) == 1.0
+        assert _compute_strategic_emerging({"industry": "国防军工"}) == 1.0
+
+    def test_strategic_emerging_no(self):
+        from app.factors.factor_registry import _compute_strategic_emerging
+        assert _compute_strategic_emerging({"industry": "银行"}) == 0.0
+        assert _compute_strategic_emerging({"industry": "食品饮料"}) == 0.0
+
+    def test_dual_circulation_by_industry(self):
+        from app.factors.factor_registry import _compute_dual_circulation
+        assert _compute_dual_circulation({"industry": "食品饮料"}) == 1.0
+        assert _compute_dual_circulation({"industry": "家用电器"}) == 1.0
+        assert _compute_dual_circulation({"industry": "银行"}) == 0.0
+
+    def test_dual_circulation_by_concepts(self):
+        from app.factors.factor_registry import _compute_dual_circulation
+        result = _compute_dual_circulation({"industry": "电子", "concepts": ["消费电子", "AI"]})
+        assert result == 1.0
+
+    def test_policy_factors_in_registry(self):
+        from app.factors.factor_registry import registry, _CORE_FACTORS
+        for code in ["china.policy.five_year_plan", "china.policy.strategic_emerging",
+                      "china.policy.dual_circulation"]:
+            assert code in registry._computers, f"{code} not in registry"
+            assert code in _CORE_FACTORS, f"{code} not in core factors"
