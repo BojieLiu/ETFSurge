@@ -74,6 +74,13 @@ class TokenUsageStore:
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON usage_records(timestamp)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_function ON usage_records(function_name)")
+
+            # Migration: add provider column if it doesn't exist (pre-v0.9 DBs)
+            try:
+                conn.execute("ALTER TABLE usage_records ADD COLUMN provider TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass  # column already exists
+
             conn.commit()
 
         # 启动时加载最近记录到内存
