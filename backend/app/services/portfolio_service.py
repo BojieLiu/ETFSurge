@@ -320,7 +320,11 @@ async def calculate_daily_pnl(
 
 
 async def strategy_check(db: AsyncSession, total_capital: float, design_data: dict | None = None) -> dict[str, Any]:
-    from ..analysis.llm import generate_strategy_suggestions
+    """v2: 因子评分 + regime 感知 + 结构化输出。"""
+    from ..analysis.llm import generate_strategy_check_report
+    from ..factors.factor_registry import registry as factor_registry
+    from .market_trends import compute_etf_trends, detect_market_regime
+    from ..fetchers.china_market import fetch_index_realtime
     
     # Use design_data if provided, otherwise fall back to DB ETFs
     use_design = False
@@ -352,48 +356,112 @@ async def strategy_check(db: AsyncSession, total_capital: float, design_data: di
             return e.get(attr, default)
         return getattr(e, attr, default)
     
+    symbols = [_get_attr(e, "symbol") for e in etfs if _get_attr(e, "symbol") != "CASH"]
+    
+    # 并行采集：技术指标 / 因子评分 / 市场状态
+    indicators_task = _compute_indicators(symbols)
+    factor_task = asyncio.to_thread(lambda: factor_registry.compute(symbols))
+    regime_task = _detect_regime(symbols)
+    
+    indicators, factor_scores, regime_data = await asyncio.gather(
+        indicators_task, factor_task, regime_task, return_exceptions=True,
+    )
+    
+    indicators = indicators if isinstance(indicators, dict) else {}
+    factor_scores = factor_scores if isinstance(factor_scores, dict) else {}
+    trends, index_realtime, regime = regime_data if isinstance(regime_data, tuple) else ({}, [], "range_bound")
+    
+    # 构建 market_data with allocation info
     price_map = await build_price_map(etfs)
     market_data = []
-    indicators = {}
+    factor_breakdowns = {}
     for e in etfs:
         symbol = _get_attr(e, "symbol")
         price, change_pct = price_map.get(symbol, (0, 0))
+        target_w = _get_attr(e, "target_weight", 0)
         market_data.append({
-            "symbol": symbol,
-            "name": _get_attr(e, "name", symbol),
+            "symbol": symbol, "name": _get_attr(e, "name", symbol),
             "short_name": _get_attr(e, "short_name", symbol),
             "price": price, "change_pct": change_pct,
             "asset_type": _get_attr(e, "asset_type", "ETF"),
             "portfolio_type": _get_attr(e, "portfolio_type", "on_exchange"),
-            "target_weight": _get_attr(e, "target_weight", 0),
-            "target_amount": round(total_capital * _get_attr(e, "target_weight", 0) / sum(_get_attr(ee, "target_weight", 0) for ee in etfs), 2),
+            "target_weight": target_w,
+            "target_amount": round(total_capital * target_w, 2),
         })
-        try:
-            hist = await get_history(symbol, _get_attr(e, "asset_type", "ETF"))
-            ind = compute_all_indicators(hist)
-            sig = generate_signal(ind)
-            if ind:
-                ind["signal"] = sig
-                indicators[symbol] = ind
-        except Exception:
-            continue
-
-    indices = await get_indices()
-    commodities = await get_commodities()
-    news = fetch_news_headlines()[:8]
-    macro_news_raw = []
-    try:
-        macro_news_raw = fetch_macro_news()[:5]
-        news.extend(macro_news_raw)
-    except Exception:
-        pass
-
-    llm_result = await generate_strategy_suggestions(market_data, indicators, news, macro_news_raw, indices, commodities)
+        
+        if symbol != "CASH":
+            fb = factor_scores.get(symbol, {}) if isinstance(factor_scores, dict) else {}
+            ind = indicators.get(symbol, {})
+            sig = ind.get("signal", {}) if isinstance(ind, dict) else {}
+            drift = None
+            if market_data:
+                pass
+            factor_breakdowns[symbol] = {
+                "factor_scores": fb if isinstance(fb, dict) else {},
+                "technical_indicators": ind if isinstance(ind, dict) else {},
+                "technical_signal": sig if isinstance(sig, dict) else {"signal": "hold"},
+                "weight_drift": drift,
+            }
+    
+    # LLM 分析
+    llm_result = await generate_strategy_check_report(
+        market_data=market_data,
+        factor_breakdowns=factor_breakdowns,
+        regime=regime,
+    )
+    
     return {
         "summary": llm_result.get("summary", ""),
         "suggestions": llm_result.get("suggestions", []),
+        "holdings_analysis": llm_result.get("holdings_analysis", []),
+        "risk_warnings": llm_result.get("risk_warnings", []),
+        "market_regime": regime,
         "raw_llm": str(llm_result),
     }
+
+
+async def _compute_indicators(symbols: list[str]) -> dict:
+    """并行计算每只持仓的技术指标 + 信号。"""
+    from .market_service import get_history
+    from ..analysis.indicators import compute_all_indicators
+    from ..analysis.signal import generate_signal
+    
+    results = {}
+    hist_data = await asyncio.gather(
+        *[asyncio.to_thread(get_history, sym, "A") for sym in symbols],
+        return_exceptions=True,
+    )
+    for sym, hist in zip(symbols, hist_data):
+        if isinstance(hist, list) and hist:
+            try:
+                ind = compute_all_indicators(hist)
+                sig = generate_signal(ind)
+                ind["signal"] = sig
+                results[sym] = ind
+            except Exception:
+                continue
+    return results
+
+
+async def _detect_regime(symbols: list[str]) -> tuple[dict, list, str]:
+    """并行获取 trend + index → detect_market_regime。"""
+    from .market_trends import compute_etf_trends, detect_market_regime
+    from ..fetchers.china_market import fetch_index_realtime
+    
+    trends, index_realtime = await asyncio.gather(
+        compute_etf_trends(symbols, ("5d", "1m", "3m")),
+        asyncio.to_thread(fetch_index_realtime),
+        return_exceptions=True,
+    )
+    trends = trends if isinstance(trends, dict) else {}
+    index_realtime = index_realtime if isinstance(index_realtime, list) else []
+    
+    regime = detect_market_regime(
+        trends=trends,
+        broad_index_code="510300",
+        index_realtime=index_realtime,
+    )
+    return trends, index_realtime, regime
 
 
 # 应用策略

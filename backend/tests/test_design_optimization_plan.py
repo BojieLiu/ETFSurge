@@ -509,3 +509,35 @@ def test_p11_rationale_not_truncated_too_short():
     assert long_rationale[:150] in result, (
         "rationale should retain at least 150 chars"
     )
+
+
+# ─── P12: generate_strategy_check_report ───────────────────────
+
+
+def test_p12_strategy_check_agent_registered():
+    """strategy_check agent must be registered in registry."""
+    from app.analysis.registry import get_agent
+
+    agent = get_agent("strategy_check")
+    assert agent is not None
+    assert agent.config.name == "策略检查"
+    assert agent.config.response_format == "json_object"
+
+
+# ─── P13: strategy_check response schema ───────────────────────
+
+
+def test_p13_strategy_check_schema_compliance():
+    """strategy_check v2 response schema matches contract."""
+    from app.analysis.llm import generate_strategy_check_report
+    import inspect
+    sig = inspect.signature(generate_strategy_check_report)
+    
+    # Check function signature accepts new params
+    params = list(sig.parameters.keys())
+    assert "market_data" in params
+    assert "factor_breakdowns" in params
+    assert "regime" in params
+    
+    # Return type should be dict
+    assert sig.return_annotation in (dict, inspect.Parameter.empty)

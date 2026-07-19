@@ -935,6 +935,61 @@ async def generate_strategy_suggestions(
     return json.loads(response)
 
 
+async def generate_strategy_check_report(
+    market_data: list[dict],
+    factor_breakdowns: dict[str, dict],
+    regime: str,
+) -> dict:
+    """基于持仓数据 + 因子分 + regime 生成结构化策略检查报告。"""
+    # 格式化持仓数据
+    holdings_lines = []
+    for item in market_data:
+        sym = item.get("symbol", "")
+        if sym == "CASH":
+            continue
+        fb = factor_breakdowns.get(sym, {})
+        fs = fb.get("factor_scores", {})
+        sig = fb.get("technical_signal", {})
+        drift = fb.get("weight_drift", {})
+
+        factor_text = "；".join(
+            f"{k}: {v:.2f}" for k, v in sorted(fs.items(), key=lambda x: -abs(x[1]))[:5]
+        ) if fs else "无因子数据"
+        signal_text = sig.get("signal", "hold")
+        drift_text = f"偏离 {drift.get('drift_pct', 0):.1f}%" if drift else "—"
+
+        holdings_lines.append(
+            f"- {item.get('name', sym)}({sym}): "
+            f"权重 {item.get('target_weight', 0)*100:.0f}%, "
+            f"{drift_text}；"
+            f"技术信号 {signal_text}；"
+            f"因子评分: {factor_text}"
+        )
+
+    holdings_text = "\n".join(holdings_lines)
+
+    prompt = f"""
+## 市场状态
+当前 regime: {regime}
+
+## 持仓分析
+{holdings_text}
+
+请按 strategy_check.md 要求的 JSON 格式输出分析报告。
+"""
+    from ..analysis.registry import get_agent
+    try:
+        return await get_agent("strategy_check").run_json(prompt)
+    except Exception as e:
+        logger.warning("[strategy_check] LLM analysis failed: %s", e)
+        return {
+            "summary": "LLM 分析暂不可用，请稍后重试",
+            "suggestions": [],
+            "holdings_analysis": [],
+            "risk_warnings": [],
+        }
+
+
 async def generate_sector_analysis(
     sector_code: str,
     sector_name: str,

@@ -42,6 +42,9 @@ AGENTS: dict[str, AgentConfig] = {
     ),
     "sector_analysis": AgentConfig("行业分析", "general_analyst.md"),
     "symbol_analysis": AgentConfig("个股分析", "general_analyst.md"),
+    "strategy_check": AgentConfig(
+        "策略检查", "strategy_check.md", temperature=0.1, response_format="json_object"
+    ),
 }
 
 

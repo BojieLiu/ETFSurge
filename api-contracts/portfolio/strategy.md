@@ -31,13 +31,33 @@ POST /api/v1/portfolio/strategy-check
   "summary": "当前组合进攻性偏强，建议适度增加防御型ETF配置",
   "suggestions": [
     {
-      "name": "降低A500权重",
-      "condition": "A500ETF权重26%，超过单只上限20%",
-      "action": "adjust_weight",
-      "risk_control": "单次调整不超过5%",
+      "action": "decrease",
+      "symbol": "159338",
+      "name": "中证A500ETF",
+      "current_weight": 0.26,
+      "suggested_weight": 0.20,
+      "reason": "单只权重超过20%，建议回归基准线",
       "confidence": "high"
     }
   ],
+  "holdings_analysis": [
+    {
+      "symbol": "510300",
+      "name": "沪深300ETF",
+      "factor_summary": "动量因子+0.8σ，估值因子+0.3σ，流动性充足",
+      "tech_signal": "MACD金叉，RSI中性偏强(58)",
+      "risk_flag": null
+    }
+  ],
+  "risk_warnings": [
+    {
+      "type": "concentration",
+      "severity": "high",
+      "description": "行业集中度过高（半导体+AI合计35%）",
+      "affected_symbols": ["512480", "561300"]
+    }
+  ],
+  "market_regime": "correction",
   "raw_llm": "{...}"
 }
 ```
@@ -48,11 +68,25 @@ POST /api/v1/portfolio/strategy-check
 |-------|------|-------------|
 | summary | string | Natural language summary of the strategy analysis |
 | suggestions | array | List of actionable suggestions |
-| suggestions[].name | string | Short suggestion title |
-| suggestions[].condition | string | Condition that triggered the suggestion |
-| suggestions[].action | string | `adjust_weight` \| `replace` \| `no_change` |
-| suggestions[].risk_control | string | Risk control note |
+| suggestions[].action | string | `increase` \| `decrease` \| `hold` \| `add` \| `remove` |
+| suggestions[].symbol | string | ETF trading code |
+| suggestions[].name | string | ETF display name |
+| suggestions[].current_weight | float | Current target weight (decimal, 0.30 = 30%) |
+| suggestions[].suggested_weight | float | Suggested target weight (decimal) |
+| suggestions[].reason | string | Data-driven justification |
 | suggestions[].confidence | string | `high` \| `medium` \| `low` |
+| holdings_analysis | array | Per-holding technical & factor breakdown |
+| holdings_analysis[].symbol | string | ETF code |
+| holdings_analysis[].name | string | ETF name |
+| holdings_analysis[].factor_summary | string | Factor score summary |
+| holdings_analysis[].tech_signal | string | Technical signal text |
+| holdings_analysis[].risk_flag | string/null | Risk indicator if any |
+| risk_warnings | array | Portfolio-level risk alerts |
+| risk_warnings[].type | string | `concentration` \| `drift` \| `correlation` \| `volatility` \| `liquidity` |
+| risk_warnings[].severity | string | `high` \| `medium` \| `low` |
+| risk_warnings[].description | string | Detailed warning |
+| risk_warnings[].affected_symbols | array | Related ETF codes |
+| market_regime | string | Current market regime |
 | raw_llm | string | Raw LLM response (for debugging) |
 
 ---

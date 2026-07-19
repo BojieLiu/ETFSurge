@@ -350,6 +350,92 @@
           </div>
         </div>
       </div>
+
+      <!-- Strategy Check: loading -->
+      <div v-else-if="activeCoreFeature === 'strategy' && checkingStrategy" class="panel-body">
+        <div class="loading-section">
+          <span class="loading-spinner">&#9203;</span>
+          <span>正在分析当前组合...</span>
+        </div>
+      </div>
+
+      <!-- Strategy Check: result -->
+      <div v-else-if="activeCoreFeature === 'strategy' && strategyResult" class="panel-body">
+        <div class="strategy-result">
+
+          <!-- header -->
+          <div class="sr-header">
+            <h3>策略检查结果</h3>
+            <span class="regime-badge" :class="'regime-' + (strategyResult.market_regime || 'unknown')">
+              {{ regimeLabel(strategyResult.market_regime) }}
+            </span>
+            <button class="sr-close" @click="exitCoreFeature">&times;</button>
+          </div>
+
+          <!-- summary -->
+          <div class="sr-summary">{{ strategyResult.summary }}</div>
+
+          <!-- risk warnings -->
+          <div v-if="strategyResult.risk_warnings?.length" class="sr-section">
+            <h4>&#9888; 风险预警</h4>
+            <div v-for="w in strategyResult.risk_warnings" :key="w.type + w.severity"
+                 class="risk-item" :class="'risk-' + (w.severity || 'medium')">
+              <span class="risk-type">{{ riskTypeLabel(w.type) }}</span>
+              <span>{{ w.description }}</span>
+            </div>
+          </div>
+
+          <!-- suggestions -->
+          <div v-if="strategyResult.suggestions?.length" class="sr-section">
+            <h4>&#128200; 操作建议</h4>
+            <div v-for="s in strategyResult.suggestions" :key="s.symbol + s.action" class="suggestion-card">
+              <div class="sc-header">
+                <span class="action-badge" :class="'action-' + s.action">
+                  {{ actionLabel(s.action) }}
+                </span>
+                <strong>{{ s.name }}</strong>
+                <code>{{ s.symbol }}</code>
+                <span v-if="s.current_weight !== undefined && s.suggested_weight !== undefined" class="weight-change">
+                  {{ (s.current_weight * 100).toFixed(0) }}% &rarr; {{ (s.suggested_weight * 100).toFixed(0) }}%
+                </span>
+              </div>
+              <p class="sc-reason">{{ s.reason }}</p>
+              <span class="confidence-tag" :class="'conf-' + (s.confidence || 'medium')">
+                {{ confidenceLabel(s.confidence) }}
+              </span>
+            </div>
+          </div>
+
+          <!-- holdings analysis table -->
+          <div v-if="strategyResult.holdings_analysis?.length" class="sr-section">
+            <h4>&#128202; 持仓明细分析</h4>
+            <table class="holdings-table">
+              <thead>
+                <tr>
+                  <th>标的</th>
+                  <th>代码</th>
+                  <th>因子评分</th>
+                  <th>技术信号</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="h in strategyResult.holdings_analysis" :key="h.symbol">
+                  <td>{{ h.name }}</td>
+                  <td><code>{{ h.symbol }}</code></td>
+                  <td class="td-factor">{{ h.factor_summary }}</td>
+                  <td :class="'td-signal signal-' + signalClass(h.tech_signal)">
+                    {{ h.tech_signal }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="sr-actions">
+            <AppButton variant="ghost" @click="exitCoreFeature">返回</AppButton>
+          </div>
+        </div>
+      </div>
     </div>
   </section>
 </template>
@@ -644,6 +730,37 @@ async function loadHistoryList() {
   } finally {
     historyLoading.value = false
   }
+}
+
+// 策略检查结果标签函数
+function regimeLabel(regime) {
+  const labels = {
+    bull_strong: '强牛市', bull_weakening: '牛市趋弱',
+    range_bound: '震荡', correction: '回调',
+    bear: '熊市', defensive_rotate: '防御轮动', panic: '恐慌',
+  }
+  return labels[regime] || regime || '未知'
+}
+
+function actionLabel(action) {
+  return { increase: '增配', decrease: '减配', hold: '持有',
+           add: '新增', remove: '剔除' }[action] || action
+}
+
+function confidenceLabel(c) {
+  return { high: '高置信度', medium: '中置信度', low: '低置信度' }[c] || c
+}
+
+function riskTypeLabel(type) {
+  return { concentration: '集中度', drift: '偏离', correlation: '相关性',
+           volatility: '波动', liquidity: '流动性' }[type] || type
+}
+
+function signalClass(signal) {
+  if (!signal) return 'neutral'
+  if (signal.includes('买') || signal === 'buy') return 'buy'
+  if (signal.includes('卖') || signal === 'sell') return 'sell'
+  return 'neutral'
 }
 
 function exitCoreFeature() {

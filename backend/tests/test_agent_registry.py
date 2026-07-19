@@ -26,11 +26,12 @@ EXPECTED_AGENTS = {
     "strategy_suggestions",
     "sector_analysis",
     "symbol_analysis",
+    "strategy_check",
 }
 
 
-def test_all_nine_agents_registered():
-    """Contract: exactly the 9 documented analysis chains exist."""
+def test_all_ten_agents_registered():
+    """Contract: exactly the 10 documented analysis chains exist."""
     assert set(AGENTS.keys()) == EXPECTED_AGENTS
 
 
@@ -63,6 +64,7 @@ def test_response_format_config():
         "portfolio_design",
         "portfolio_review",
         "strategy_suggestions",
+        "strategy_check",
     }
 
 
