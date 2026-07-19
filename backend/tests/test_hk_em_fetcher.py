@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 from app.fetchers.china_market import _em_hk_realtime
+from app.services.cache_service import sync_memory_cache
 
 
 def _make_fake_hk_spot_df():
@@ -38,6 +39,7 @@ def test_em_hk_returns_filtered_symbols():
 
 def test_em_hk_returns_none_on_empty():
     """_em_hk_realtime returns empty list when akshare fails."""
+    sync_memory_cache.clear()
     with patch("akshare.stock_hk_spot_em", side_effect=Exception("API error")):
         results = _em_hk_realtime(["00700"])
     assert results == []

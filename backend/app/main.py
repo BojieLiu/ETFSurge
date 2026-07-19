@@ -13,6 +13,7 @@ from .tasks.news_refresh import refresh_news_cache
 from .monitor.token_usage import token_store
 from .core.logging import get_logger, setup_logging
 from .routers import market, portfolio, analysis, news, ws, admin
+from .services.source_health import register_probe, health_loop
 
 logger = get_logger("lifespan")
 
@@ -23,6 +24,26 @@ async def lifespan(app: FastAPI):
     logger.info("应用启动中…")
     await init_db()
     await redis_cache.init()
+
+    # Register health probes for key data sources
+    from .fetchers.twelvedata_fetcher import fetch_realtime
+    from .services.source_registry import registry
+
+    async def _register_health_probes():
+        # Twelve Data
+        def _probe_td():
+            return fetch_realtime("SPY")
+        register_probe("twelvedata", _probe_td, timeout=8)
+
+        # Finnhub
+        from .fetchers.finnhub_fetcher import fetch_realtime as fh_realtime
+        def _probe_fh():
+            return fh_realtime("SPY")
+        register_probe("finnhub", _probe_fh, timeout=8)
+
+        logger.info(f"[health] registered {len(registry._health.keys())} probes including new sources")
+
+    await _register_health_probes()
 
     # 启动时后台预热行情缓存（不阻塞启动，25s 超时）
     async def _warmup_market_cache():
@@ -53,6 +74,8 @@ async def lifespan(app: FastAPI):
         scheduler.add_job(_news_scheduler_wrapper, "interval", seconds=30, id="refresh_news_cache", max_instances=1, coalesce=True)
         scheduler.start()
         app.state.scheduler = scheduler
+        # Start health probe loop
+        asyncio.create_task(health_loop(interval=120.0))
         logger.info("调度器已启动（行情 15s / 资讯 30s）")
     except Exception:
         logger.exception("调度器初始化失败")

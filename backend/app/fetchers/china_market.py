@@ -16,6 +16,7 @@ from typing import Any
 from ..utils.proxy import no_proxy
 from ..utils.decode import decode_df as _decode_df
 from ..core.ttl import CACHE_TTL
+from ..services.cache_service import sync_memory_cache
 from ..services.source_registry import registry
 from ..core.async_utils import run_in_thread
 from ..fetchers import finnhub_fetcher
@@ -366,17 +367,22 @@ def fetch_a_stock_batch(symbols: list[str]) -> list[dict[str, Any]]:
 def _em_hk_realtime(symbols: list[str]) -> list[dict[str, Any]]:
     """东方财富港股实时行情（akshare stock_hk_spot_em），按 symbols 过滤。"""
     try:
-        def _p():
-            import akshare as ak
-            with no_proxy():
-                return ak.stock_hk_spot_em()
-        df = run_in_thread(_p, timeout=8)
-        _decode_df(df)
-        if df is None or df.empty:
-            return []
+        hk_spot_cache_key = "_em_hk_spot_cache"
+        hk_all = sync_memory_cache.get(hk_spot_cache_key)
+        if hk_all is None:
+            def _p():
+                import akshare as ak
+                with no_proxy():
+                    return ak.stock_hk_spot_em()
+            df = run_in_thread(_p, timeout=8)
+            if df is None or df.empty:
+                return []
+            _decode_df(df)
+            hk_all = df.to_dict(orient="records")
+            sync_memory_cache.set(hk_spot_cache_key, hk_all, 60)
         sym_set = set(symbols)
         results = []
-        for _, row in df.iterrows():
+        for row in hk_all:
             code = str(row.get("代码", row.get("symbol", "")))
             if code not in sym_set:
                 continue
@@ -597,6 +603,10 @@ def _fetch_akshare_history(symbol: str, asset_type: str, period: str) -> list[di
 
 
 def search_etf(keyword: str) -> list[dict[str, Any]]:
+    cache_key = f"search_etf:{keyword}"
+    cached = sync_memory_cache.get(cache_key)
+    if cached is not None:
+        return cached
     try:
         def _p():
             import akshare as ak
@@ -615,6 +625,7 @@ def search_etf(keyword: str) -> list[dict[str, Any]]:
                 "change_pct": float(row.get("涨跌幅", 0) or 0),
                 "asset_type": "A",
             })
+        sync_memory_cache.set(cache_key, results, 60)
         return results
     except Exception:
         return []

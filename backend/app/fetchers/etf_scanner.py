@@ -12,17 +12,12 @@
 from __future__ import annotations
 
 import logging
-import time
 from typing import Any
 
 from ..core.async_utils import run_in_thread
+from ..services.cache_service import sync_memory_cache
 
 logger = logging.getLogger(__name__)
-
-# TTL cache
-_CACHE: dict[str, tuple[float, list]] = {}
-_CACHE_TTL = 60
-
 
 # ── 核心层关键词 ─────────────────────────────────────────────
 CORE_KEYWORDS = [
@@ -58,11 +53,11 @@ def fetch_all_etfs_base() -> list[dict[str, Any]]:
     数据源: fund_etf_spot_em (东方财富)
     返回: 每只 ETF 包含 代码/名称/最新价/涨跌幅/成交额/换手率/PE/PB/基金规模
     """
-    now = time.time()
-    cached = _CACHE.get("all_etfs")
-    if cached and now - cached[0] < _CACHE_TTL:
+    from ..core.ttl import CACHE_TTL
+    cached = sync_memory_cache.get("all_etfs")
+    if cached is not None:
         logger.debug("[etf_scanner] cache hit for all_etfs")
-        return cached[1]
+        return cached
 
     try:
         from ..utils.decode import decode_df as _decode_df
@@ -77,13 +72,14 @@ def fetch_all_etfs_base() -> list[dict[str, Any]]:
 
         _decode_df(df)
         result = df.to_dict(orient="records")
-        _CACHE["all_etfs"] = (now, result)
+        sync_memory_cache.set("all_etfs", result, CACHE_TTL.get("etf_scanner", 120))
         return result
     except Exception as e:
         logger.warning("[etf_scanner] fund_etf_spot_em failed: %s", e)
-        if cached:
+        stale = sync_memory_cache.get("all_etfs")
+        if stale is not None:
             logger.info("[etf_scanner] using stale cache")
-            return cached[1]
+            return stale
         return []
 
 
