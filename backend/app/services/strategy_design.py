@@ -104,8 +104,10 @@ CANDIDATE_POOL: dict[str, dict[str, Any]] = {
                "reason": "贵金属避险，与权益低相关"},
     "511090": {"name": "30年国债ETF", "layer": "defense", "beta": -0.1, "liquidity": 10.0,
                "reason": "长久期利率债，对冲权益波动"},
-    "511990": {"name": "货币ETF", "layer": "defense", "beta": 0.0, "liquidity": 50.0,
-               "reason": "现金管理工具，流动性缓冲"},
+    "511880": {"name": "银华日利ETF", "layer": "defense", "beta": 0.0, "liquidity": 50.0,
+               "reason": "货币基金，现金管理工具"},
+    "511990": {"name": "华宝添益ETF", "layer": "defense", "beta": 0.0, "liquidity": 50.0,
+               "reason": "货币基金，现金管理工具"},
     "513500": {"name": "标普500ETF", "layer": "defense", "beta": 0.6, "liquidity": 14.0,
                "reason": "美股宽基，跨市场分散"},
     "159980": {"name": "有色ETF", "layer": "defense", "beta": 0.5, "liquidity": 3.0,
@@ -764,6 +766,9 @@ async def generate_enhanced_design(
         sat_pool = pool_manager.get_pool("satellite") or []
         if sat_pool:
             scanned_satellite = sorted(sat_pool, key=lambda x: x.get("composite_score", 0), reverse=True)
+            # 排除货币ETF（现金管理工具，非弹性资产）
+            _monetary = {"511880", "511990"}
+            scanned_satellite = [s for s in scanned_satellite if s.get("symbol") not in _monetary]
             pool_ready = True
             logger.info("pool_manager: %d satellite candidates", len(scanned_satellite))
     except Exception as e:
@@ -781,6 +786,8 @@ async def generate_enhanced_design(
                 }
                 for item in sat_items[:20]
             ]
+            _monetary = {"511880", "511990"}
+            scanned_satellite = [s for s in scanned_satellite if s.get("symbol") not in _monetary]
         except Exception as e:
             logger.error("enhanced scan failed: %s (will fallback to hardcoded satellite pool)", e)
 

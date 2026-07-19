@@ -23,6 +23,7 @@ class UsageRecord:
     success: bool
     duration_ms: float
     error_message: str = ""
+    provider: str = ""
 
 
 class TokenUsageStore:
@@ -67,7 +68,8 @@ class TokenUsageStore:
                     timestamp REAL NOT NULL,
                     success INTEGER NOT NULL,
                     duration_ms REAL NOT NULL,
-                    error_message TEXT DEFAULT ''
+                    error_message TEXT DEFAULT '',
+                    provider TEXT DEFAULT ''
                 )
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON usage_records(timestamp)")
@@ -97,6 +99,7 @@ class TokenUsageStore:
                 success=bool(row["success"]),
                 duration_ms=row["duration_ms"],
                 error_message=row["error_message"] or "",
+                provider=row["provider"] or "",
             ))
 
     async def record(self, entry: UsageRecord) -> None:
@@ -138,10 +141,11 @@ class TokenUsageStore:
             conn.executemany(
                 """INSERT INTO usage_records
                    (function_name, prompt_tokens, completion_tokens, total_tokens,
-                    model, timestamp, success, duration_ms, error_message)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    model, timestamp, success, duration_ms, error_message, provider)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 [(r.function_name, r.prompt_tokens, r.completion_tokens, r.total_tokens,
-                  r.model, r.timestamp, int(r.success), r.duration_ms, r.error_message)
+                  r.model, r.timestamp, int(r.success), r.duration_ms, r.error_message,
+                  r.provider)
                  for r in batch]
             )
             conn.commit()

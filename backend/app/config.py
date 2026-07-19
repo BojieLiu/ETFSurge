@@ -38,8 +38,22 @@ class Settings(BaseSettings):
     deepseek_api_key: str = ""
     tushare_token: str = ""
     fred_api_key: str = ""
+    
+    # ── LLM Provider 配置 ──────────────────────────────────────
     llm_provider: str = "deepseek"
     llm_model: str = "deepseek-v4-flash"
+
+    # OpenCode Zen (主 provider)
+    opencode_zen_api_key: str = ""
+    opencode_zen_model: str = "deepseek-v4-flash-free"
+    opencode_zen_api_url: str = "https://opencode.ai/zen/v1/chat/completions"
+
+    # 降级策略
+    llm_primary_provider: str = "opencode_zen"
+    llm_fallback_provider: str = "deepseek"
+    llm_primary_timeout: int = 120
+    llm_fallback_timeout: int = 120
+
     # 日志：级别（DEBUG/INFO/WARNING/ERROR）与可选日志文件路径
     log_level: str = "INFO"
     log_file: str = ""

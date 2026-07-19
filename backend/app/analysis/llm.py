@@ -7,9 +7,12 @@ from ..config import settings
 from ..monitor.token_usage import token_store, UsageRecord
 from ..core.logging import get_logger
 from .registry import get_agent
+from .provider import get_configured_providers, has_any_api_key, ProviderConfig
 
 logger = get_logger(__name__)
 
+# Keep the official DeepSeek URL for reference; the actual URL is now
+# per-provider and obtained from get_configured_providers().
 LLM_API_URL = "https://api.deepseek.com/chat/completions"
 
 # Prompt loading mechanism
@@ -27,72 +30,92 @@ SYSTEM_PROMPT = load_prompt("general_analyst.md")
 # System prompts are loaded per-agent via AgentRuntime (registry.py).
 
 async def _check_key():
-    if not settings.deepseek_api_key:
-        raise ValueError("DEEPSEEK_API_KEY not configured in .env")
+    if not has_any_api_key():
+        raise ValueError(
+            "No LLM API keys configured. Set OPENCODE_ZEN_API_KEY "
+            "and/or DEEPSEEK_API_KEY in backend/.env"
+        )
 
 
 async def llm_complete(prompt: str, response_format: dict | None = None) -> str:
     import httpx
     await _check_key()
-    body = {
-        "model": settings.llm_model,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": prompt},
-        ],
-        "temperature": 0.3,
-        "max_tokens": 8192,
-    }
-    if response_format:
-        body["response_format"] = response_format
 
-    _start = time.monotonic()
-    _caller = sys._getframe(1).f_code.co_name  # caller function name
-    try:
-        async with httpx.AsyncClient(timeout=120, trust_env=False) as client:
-            resp = await client.post(
-                LLM_API_URL,
-                headers={
-                    "Authorization": f"Bearer {settings.deepseek_api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=body,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            message = data["choices"][0]["message"]
-            content = message.get("content", "")
-            # Some models (e.g., DeepSeek) put reasoning in reasoning_content and leave content empty
-            if not content:
-                content = message.get("reasoning_content", "")
+    _caller = sys._getframe(1).f_code.co_name
+    providers = get_configured_providers()
+    last_exc: Exception | None = None
 
-            usage = data.get("usage", {})
+    for provider in providers:
+        body = {
+            "model": provider.model,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.3,
+            "max_tokens": 8192,
+        }
+        if response_format:
+            body["response_format"] = response_format
+
+        _start = time.monotonic()
+        try:
+            async with httpx.AsyncClient(
+                timeout=provider.timeout, trust_env=False
+            ) as client:
+                resp = await client.post(
+                    provider.api_url,
+                    headers={
+                        "Authorization": f"Bearer {provider.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=body,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                message = data["choices"][0]["message"]
+                content = message.get("content", "")
+                if not content:
+                    content = message.get("reasoning_content", "")
+
+                usage = data.get("usage", {})
+                _duration = (time.monotonic() - _start) * 1000
+                await token_store.record(UsageRecord(
+                    function_name=_caller,
+                    prompt_tokens=usage.get("prompt_tokens", 0),
+                    completion_tokens=usage.get("completion_tokens", 0),
+                    total_tokens=usage.get("total_tokens", 0),
+                    model=provider.model,
+                    timestamp=time.time(),
+                    success=True,
+                    duration_ms=round(_duration, 1),
+                    provider=provider.id,
+                ))
+                return content
+        except Exception as _exc:
             _duration = (time.monotonic() - _start) * 1000
             await token_store.record(UsageRecord(
                 function_name=_caller,
-                prompt_tokens=usage.get("prompt_tokens", 0),
-                completion_tokens=usage.get("completion_tokens", 0),
-                total_tokens=usage.get("total_tokens", 0),
-                model=settings.llm_model,
+                prompt_tokens=0,
+                completion_tokens=0,
+                total_tokens=0,
+                model=provider.model,
                 timestamp=time.time(),
-                success=True,
+                success=False,
                 duration_ms=round(_duration, 1),
+                error_message=str(_exc),
+                provider=provider.id,
             ))
-            return content
-    except Exception as _exc:
-        _duration = (time.monotonic() - _start) * 1000
-        await token_store.record(UsageRecord(
-            function_name=_caller,
-            prompt_tokens=0,
-            completion_tokens=0,
-            total_tokens=0,
-            model=settings.llm_model,
-            timestamp=time.time(),
-            success=False,
-            duration_ms=round(_duration, 1),
-            error_message=str(_exc),
-        ))
-        raise
+            last_exc = _exc
+            logger.warning(
+                "[LLM] Provider %s failed after %.1fs: %s",
+                provider.id, _duration / 1000, _exc,
+            )
+            continue
+
+    if last_exc is None:
+        raise RuntimeError("No LLM providers available")
+    raise last_exc
 
 
 async def llm_complete_stream(
@@ -103,7 +126,7 @@ async def llm_complete_stream(
     max_tokens: int = 8192,
 ) -> AsyncGenerator[dict, None]:
     """
-    Streaming LLM completion using DeepSeek API with SSE.
+    Streaming LLM completion with provider failover.
     
     Yields:
         {"type": "token", "token": "..."} - incremental token

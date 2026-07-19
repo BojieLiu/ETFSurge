@@ -230,10 +230,10 @@ async def compose_and_push_report(
                     market_context=market_context,
                     plan_tables=plan_tables,
                 ),
-                timeout=90,
+                timeout=240,
             )
         except (asyncio.TimeoutError, TimeoutError):
-            logger.error("[design_report] LLM generation timed out after 90s, using fallback summary")
+            logger.error("[design_report] LLM generation timed out after 240s, using fallback summary")
             llm_analysis = None
 
         if llm_analysis:
