@@ -17,6 +17,7 @@ from ..utils.proxy import no_proxy
 from ..utils.decode import decode_df as _decode_df
 from ..core.ttl import CACHE_TTL
 from ..services.source_registry import registry
+from ..core.async_utils import run_in_thread
 
 ASSET_TYPES = {
     "A": "A股ETF", "HK": "港股ETF", "US": "美股ETF",
@@ -212,11 +213,13 @@ def _resample_4h(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _akshare_intraday_history(symbol: str, period_min: int = 60) -> list[dict[str, Any]]:
     try:
-        import akshare as ak
-        from datetime import datetime, timedelta
-        end = datetime.now().strftime("%Y%m%d")
-        start = (datetime.now() - timedelta(days=40)).strftime("%Y%m%d")
-        df = ak.stock_zh_a_hist_min_em(symbol=symbol, period=str(period_min), start_date=start, end_date=end, adjust="")
+        def _p():
+            import akshare as ak
+            from datetime import datetime, timedelta
+            end = datetime.now().strftime("%Y%m%d")
+            start = (datetime.now() - timedelta(days=40)).strftime("%Y%m%d")
+            return ak.stock_zh_a_hist_min_em(symbol=symbol, period=str(period_min), start_date=start, end_date=end, adjust="")
+        df = run_in_thread(_p, timeout=8)
         if df is None or df.empty:
             return []
         rename = {"时间": "日期", "开盘": "开盘", "最高": "最高", "最低": "最低", "收盘": "收盘", "成交量": "成交量"}
@@ -308,8 +311,10 @@ def fetch_etf_shares_outstanding(symbol: str) -> dict | None:
     失败返回 None。
     """
     try:
-        import akshare as ak
-        df = ak.fund_etf_hist_em(symbol=symbol, period="daily", start_date="20200101", end_date="20500101", adjust="")
+        def _p():
+            import akshare as ak
+            return ak.fund_etf_hist_em(symbol=symbol, period="daily", start_date="20200101", end_date="20500101", adjust="")
+        df = run_in_thread(_p, timeout=8)
         if df is None or df.empty:
             return None
         cols = [c for c in df.columns if "份额" in str(c) or "规模" in str(c)]
@@ -358,9 +363,11 @@ def fetch_a_stock_batch(symbols: list[str]) -> list[dict[str, Any]]:
 def _em_hk_realtime(symbols: list[str]) -> list[dict[str, Any]]:
     """东方财富港股实时行情（akshare stock_hk_spot_em），按 symbols 过滤。"""
     try:
-        with no_proxy():
+        def _p():
             import akshare as ak
-            df = ak.stock_hk_spot_em()
+            with no_proxy():
+                return ak.stock_hk_spot_em()
+        df = run_in_thread(_p, timeout=8)
         _decode_df(df)
         if df is None or df.empty:
             return []
@@ -411,9 +418,11 @@ def fetch_hk_stock_realtime(symbol: str | None = None) -> list[dict[str, Any]]:
 
 def fetch_futures_realtime() -> list[dict[str, Any]]:
     try:
-        with no_proxy():
+        def _p():
             import akshare as ak
-            df = ak.futures_foreign_commodity_realtime()
+            with no_proxy():
+                return ak.futures_foreign_commodity_realtime()
+        df = run_in_thread(_p, timeout=8)
         _decode_df(df)
         results = []
         for _, row in df.iterrows():
@@ -479,9 +488,11 @@ def fetch_fund_nav(symbol: str) -> tuple[float, float] | None:
     返回 (unit_net_value, daily_growth_pct)，取最新一条记录；不可用返回 None。
     """
     try:
-        with no_proxy():
+        def _p():
             import akshare as ak
-            df = ak.fund_open_fund_info_em(symbol=symbol, indicator="单位净值")
+            with no_proxy():
+                return ak.fund_open_fund_info_em(symbol=symbol, indicator="单位净值")
+        df = run_in_thread(_p, timeout=8)
         _decode_df(df)
         if df is None or len(df) == 0:
             return None
@@ -499,12 +510,14 @@ def fetch_index_history(symbol: str, period: str = "daily") -> list[dict[str, An
     """获取指数历史 K 线（日线/周线/月线），使用 akshare stock_zh_index_daily。
     akshare 返回格式: 日期,开盘,最高,最低,收盘,成交量,成交额。"""
     try:
-        import akshare as ak
         import pandas as pd
         # 处理已带前缀的 symbol（如 sh000001、sz399001）
         code = symbol[2:] if symbol.startswith(("sh", "sz", "bj")) else symbol
-        with no_proxy():
-            df = ak.stock_zh_index_daily(symbol=f"sh{code}")
+        def _p():
+            import akshare as ak
+            with no_proxy():
+                return ak.stock_zh_index_daily(symbol=f"sh{code}")
+        df = run_in_thread(_p, timeout=8)
         if df is None or df.empty:
             return []
         rename = {"date": "日期", "open": "开盘", "high": "最高", "low": "最低",
@@ -547,13 +560,17 @@ def fetch_history(symbol: str, asset_type: str = "A", period: str = "daily") -> 
 
 def _fetch_akshare_history(symbol: str, asset_type: str, period: str) -> list[dict[str, Any]]:
     try:
-        import akshare as ak
         import pandas as pd
-        m = {"A": ak.stock_zh_a_hist, "HK": ak.stock_hk_hist, "US": ak.stock_us_hist}
-        fn = m.get(asset_type)
-        if not fn:
+        def _p():
+            import akshare as ak
+            m = {"A": ak.stock_zh_a_hist, "HK": ak.stock_hk_hist, "US": ak.stock_us_hist}
+            fn = m.get(asset_type)
+            if not fn:
+                return None
+            return fn(symbol=symbol, period=period, adjust="qfq") if asset_type == "A" else fn(symbol=symbol, period=period)
+        df = run_in_thread(_p, timeout=8)
+        if df is None:
             return []
-        df = fn(symbol=symbol, period=period, adjust="qfq") if asset_type == "A" else fn(symbol=symbol, period=period)
         if isinstance(df, pd.DataFrame) and not df.empty:
             _decode_df(df)
             return df.to_dict(orient="records")
@@ -564,9 +581,11 @@ def _fetch_akshare_history(symbol: str, asset_type: str, period: str) -> list[di
 
 def search_etf(keyword: str) -> list[dict[str, Any]]:
     try:
-        with no_proxy():
+        def _p():
             import akshare as ak
-            df = ak.fund_etf_spot_em()
+            with no_proxy():
+                return ak.fund_etf_spot_em()
+        df = run_in_thread(_p, timeout=8)
         _decode_df(df)
         if keyword:
             mask = df["代码"].str.contains(keyword, na=False) | df["名称"].str.contains(keyword, na=False)
@@ -588,9 +607,11 @@ def fetch_etf_list() -> list[dict[str, Any]]:
     """返回全量 ETF 列表（代码/名称/最新价/涨跌幅），用于本地关键字过滤。
     Sina 列表接口快（~3s），akshare spot 兜底（慢但稳定）。"""
     try:
-        with no_proxy():
+        def _p():
             import akshare as ak
-            df = ak.fund_etf_category_sina(symbol="ETF基金")
+            with no_proxy():
+                return ak.fund_etf_category_sina(symbol="ETF基金")
+        df = run_in_thread(_p, timeout=8)
         cols = list(df.columns)
         if len(cols) < 5:
             raise ValueError("unexpected etf list columns")
@@ -618,9 +639,11 @@ def fetch_etf_list() -> list[dict[str, Any]]:
     except Exception:
         # 兜底：慢但稳定的 akshare spot 接口
         try:
-            with no_proxy():
+            def _p():
                 import akshare as ak
-                df = ak.fund_etf_spot_em()
+                with no_proxy():
+                    return ak.fund_etf_spot_em()
+            df = run_in_thread(_p, timeout=8)
             _decode_df(df)
             return [
                 {

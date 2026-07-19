@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     tushare_token: str = ""
     fred_api_key: str = ""
     
+    # ── Market Data API Keys (free tiers, no proxy needed) ──
+    alphavantage_api_key: str = ""
+    finnhub_api_key: str = ""
+    twelvedata_api_key: str = ""
+    
     # ── LLM Provider 配置 ──────────────────────────────────────
     llm_provider: str = "deepseek"
     llm_model: str = "deepseek-v4-flash"

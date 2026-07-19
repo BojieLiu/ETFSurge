@@ -15,6 +15,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from ..core.async_utils import run_in_thread
+
 logger = logging.getLogger(__name__)
 
 
@@ -68,10 +70,12 @@ def _get_realtime_price(code: str) -> dict:
     """获取个股实时行情。"""
     try:
         from ..utils.proxy import no_proxy
-        import akshare as ak
 
-        with no_proxy():
-            df = ak.stock_zh_a_spot_em()
+        def _p():
+            import akshare as ak
+            with no_proxy():
+                return ak.stock_zh_a_spot_em()
+        df = run_in_thread(_p, timeout=8)
         if df is None or df.empty:
             return {}
         for _, row in df.iterrows():

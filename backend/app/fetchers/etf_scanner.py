@@ -15,6 +15,8 @@ import logging
 import time
 from typing import Any
 
+from ..core.async_utils import run_in_thread
+
 logger = logging.getLogger(__name__)
 
 # TTL cache
@@ -63,10 +65,12 @@ def fetch_all_etfs_base() -> list[dict[str, Any]]:
         return cached[1]
 
     try:
-        import akshare as ak
         from ..utils.decode import decode_df as _decode_df
 
-        df = ak.fund_etf_spot_em()
+        def _p():
+            import akshare as ak
+            return ak.fund_etf_spot_em()
+        df = run_in_thread(_p, timeout=8)
         if df is None or df.empty:
             logger.warning("[etf_scanner] fund_etf_spot_em returned empty")
             return []

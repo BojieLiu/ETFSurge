@@ -12,7 +12,7 @@ async def test_all():
 
     # 2. Test news collection
     print("\n=== _collect_news ===")
-    news = _collect_news()
+    news = await _collect_news()
     print(f"news={len(news)}")
 
     # 3. Test portfolio_design

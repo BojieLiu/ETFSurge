@@ -380,6 +380,8 @@ def dynamic_layer_budget(
     Returns:
         {"core": float, "satellite": float, "defense": float}  # 现金 = 1 - sum
     """
+    if risk_profile not in STRATEGY_META:
+        risk_profile = "balanced"
     base = dict(STRATEGY_META[risk_profile]["layer_budget"])
 
     # 防御轮动/熊市: 加大防御预算

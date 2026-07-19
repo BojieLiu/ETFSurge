@@ -14,6 +14,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from ..core.async_utils import run_in_thread
+
 logger = logging.getLogger(__name__)
 
 # 情绪指数权重
@@ -99,9 +101,10 @@ def fetch_advance_decline_ratio() -> float:
     """
     # 1. akshare
     try:
-        import akshare as ak
-
-        df = ak.stock_zh_a_spot_em()
+        def _p():
+            import akshare as ak
+            return ak.stock_zh_a_spot_em()
+        df = run_in_thread(_p, timeout=8)
         if df is not None and not df.empty:
             up = sum(1 for _, r in df.iterrows() if float(r.get("涨跌幅", 0) or 0) > 0)
             total = len(df)
@@ -139,17 +142,20 @@ def fetch_north_flow() -> float:
     返回: -1~1, 失败时返回 0
     """
     try:
-        import akshare as ak
-
         # Try multiple akshare north-bound API names (version-dependent)
         df = None
         for func_name in ["stock_hsgt_north_net_flow_in_em",
                           "stock_hsgt_north_flow_in_em",
                           "stock_hsgt_north_net_flow"]:
             try:
-                func = getattr(ak, func_name, None)
-                if func:
-                    df = func(symbol="北上")
+                def _p(fn=func_name):
+                    import akshare as ak
+                    func = getattr(ak, fn, None)
+                    if func:
+                        return func(symbol="北上")
+                    return None
+                df = run_in_thread(_p, timeout=8)
+                if df is not None and not (hasattr(df, "empty") and df.empty):
                     break
             except Exception:
                 continue
@@ -173,9 +179,10 @@ def fetch_margin_change() -> float:
     返回: -1~1, 失败时返回 0
     """
     try:
-        import akshare as ak
-
-        df = ak.stock_margin_szse()
+        def _p():
+            import akshare as ak
+            return ak.stock_margin_szse()
+        df = run_in_thread(_p, timeout=8)
         if df is None or df.empty:
             return 0.0
         if len(df) >= 2:

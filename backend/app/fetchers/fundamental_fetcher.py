@@ -11,6 +11,8 @@ ETF 基本面与资金流数据采集 (Fundamental & Money Flow Fetcher)
 """
 
 from typing import Any
+
+from ..core.async_utils import run_in_thread
 from ..utils.decode import decode_df as _decode_df
 
 
@@ -37,8 +39,10 @@ def fetch_fund_scale(symbol: str) -> dict | None:
       {"shares_outstanding": float, "fund_scale": float} 或 None
     """
     try:
-        import akshare as ak
-        df = ak.fund_etf_fund_info_em(fund=symbol)
+        def _p(sym=symbol):
+            import akshare as ak
+            return ak.fund_etf_fund_info_em(fund=sym)
+        df = run_in_thread(_p, timeout=8)
         if df is None or df.empty:
             return None
         # 列名可能为 latin1 乱码，用 _decode_df
@@ -72,9 +76,11 @@ def fetch_fund_flow(symbol: str) -> dict | None:
     if not _is_a_stock(symbol):
         return None
     try:
-        import akshare as ak
         market = _get_market(symbol)
-        df = ak.stock_individual_fund_flow(stock=symbol, market=market)
+        def _p(sym=symbol, mkt=market):
+            import akshare as ak
+            return ak.stock_individual_fund_flow(stock=sym, market=mkt)
+        df = run_in_thread(_p, timeout=8)
         if df is None or df.empty:
             return None
         df = _decode_df(df)
@@ -116,9 +122,11 @@ def fetch_fund_flow_detailed(symbol: str) -> dict | None:
     if not _is_a_stock(symbol):
         return None
     try:
-        import akshare as ak
         market = _get_market(symbol)
-        df = ak.stock_individual_fund_flow(stock=symbol, market=market)
+        def _p(sym=symbol, mkt=market):
+            import akshare as ak
+            return ak.stock_individual_fund_flow(stock=sym, market=mkt)
+        df = run_in_thread(_p, timeout=8)
         if df is None or df.empty:
             return None
         df = _decode_df(df)
@@ -183,10 +191,11 @@ def fetch_hist_avg_volume(symbol: str, days: int = 20) -> dict | None:
     if not _is_a_stock(symbol):
         return None
     try:
-        import akshare as ak
         market = _get_market(symbol)
-        # stock_zh_a_hist 返回历史日线，含 成交额、市盈率-动态、市净率
-        df = ak.stock_zh_a_hist(symbol=symbol, period="daily", start_date="19900101", adjust="")
+        def _p(sym=symbol):
+            import akshare as ak
+            return ak.stock_zh_a_hist(symbol=sym, period="daily", start_date="19900101", adjust="")
+        df = run_in_thread(_p, timeout=8)
         if df is None or df.empty:
             return None
         df = _decode_df(df)
@@ -236,10 +245,12 @@ def fetch_current_pe_pb(symbol: str) -> dict | None:
     if not _is_a_stock(symbol):
         return None
     try:
-        import akshare as ak
         market = _get_market(symbol)
-        df = ak.stock_zh_a_hist(symbol=symbol, period="daily",
-                                start_date="20260101", adjust="")
+        def _p(sym=symbol):
+            import akshare as ak
+            return ak.stock_zh_a_hist(symbol=sym, period="daily",
+                                      start_date="20260101", adjust="")
+        df = run_in_thread(_p, timeout=8)
         if df is None or df.empty:
             return None
         df = _decode_df(df)

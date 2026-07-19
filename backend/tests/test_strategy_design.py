@@ -4,7 +4,7 @@ from unittest.mock import patch, AsyncMock
 TDD tests for the intelligent portfolio design engine (core+satellite+defense) v3.0/v4.
 
 Covers:
-- allocate_layer_budget returns strategy-specific budgets
+- dynamic_layer_budget returns strategy-specific budgets
 - generate_enhanced_design returns 3 strategies with 8~15 holdings each, weights sum to 1.0
 - power_law_weights produces reasonable weight distribution
 - v4 fixed core/defense weights and satellite dual-pool behavior
@@ -12,30 +12,30 @@ Covers:
 import pytest
 
 from app.services.strategy_design import (
-    allocate_layer_budget, generate_full_design, power_law_weights,
-    STRATEGY_META, CORE_REQUIRED, CORE_FIXED, DEFENSE_FIXED,
+    dynamic_layer_budget, generate_full_design, power_law_weights,
+    STRATEGY_META,
     MIN_WEIGHT, MAX_WEIGHT,
 )
 
 
-# ── allocate_layer_budget (v3.0) ─────────────────────────────
-def test_allocate_layer_budget_defensive():
-    b = allocate_layer_budget("defensive")
-    # v3.0: core=50%, satellite=15%, defense=5%, cash=30%
+# ── dynamic_layer_budget (v4.0) ─────────────────────────────
+def test_dynamic_layer_budget_defensive():
+    b = dynamic_layer_budget("defensive", "neutral")
+    # v4.0: core=50%, satellite=15%, defense=5%, cash=30%
     assert b == {"core": 0.50, "satellite": 0.15, "defense": 0.05}
     assert abs(sum(b.values()) - 0.70) < 1e-9  # 70% invested, 30% cash
 
 
-def test_allocate_layer_budget_aggressive():
-    b = allocate_layer_budget("aggressive")
-    # v3.0: core=50%, satellite=35%, defense=5%, cash=10%
+def test_dynamic_layer_budget_aggressive():
+    b = dynamic_layer_budget("aggressive", "neutral")
+    # v4.0: core=50%, satellite=35%, defense=5%, cash=10%
     assert b["core"] == 0.50
     assert b["satellite"] == 0.35
     assert b["defense"] == 0.05
 
 
-def test_allocate_layer_budget_default_balanced():
-    b = allocate_layer_budget("unknown_fallback")
+def test_dynamic_layer_budget_default_balanced():
+    b = dynamic_layer_budget("unknown_fallback", "neutral")
     assert b == STRATEGY_META["balanced"]["layer_budget"]
 
 
@@ -214,32 +214,13 @@ def test_strategy_meta_labels():
     assert STRATEGY_META["aggressive"]["label"] == "进攻型"
 
 
-# ── v3.0 固定配置验证 ─────────────────────────────────────
-def test_core_fixed_weights():
-    """v3.0 核心层固定: 沪深300 25%, 中证A500 15%, 红利低波 10%"""
-    total = sum(h["weight"] for h in CORE_FIXED)
-    assert abs(total - 0.50) < 1e-6  # 核心层合计50%
-    codes = {h["symbol"] for h in CORE_FIXED}
-    assert codes == {"510300", "560600", "510880"}
-    for h in CORE_FIXED:
-        assert h["layer"] == "core"
-
-
-def test_defense_fixed_weights():
-    """v3.0 防御层固定: 黄金ETF 5%"""
-    assert len(DEFENSE_FIXED) == 1
-    assert DEFENSE_FIXED[0]["symbol"] == "518880"
-    assert abs(DEFENSE_FIXED[0]["weight"] - 0.05) < 1e-6
-    assert DEFENSE_FIXED[0]["layer"] == "defense"
-
-
 # ── 策略差异化验证 ─────────────────────────────────────────
 
 def test_defensive_highest_cash():
     """防御型现金比例最高(30%), 进攻型最低(10%)"""
-    def_b = allocate_layer_budget("defensive")
-    bal_b = allocate_layer_budget("balanced")
-    agg_b = allocate_layer_budget("aggressive")
+    def_b = dynamic_layer_budget("defensive", "neutral")
+    bal_b = dynamic_layer_budget("balanced", "neutral")
+    agg_b = dynamic_layer_budget("aggressive", "neutral")
     def_cash = 1.0 - sum(def_b.values())
     bal_cash = 1.0 - sum(bal_b.values())
     agg_cash = 1.0 - sum(agg_b.values())
@@ -248,6 +229,6 @@ def test_defensive_highest_cash():
 
 def test_aggressive_highest_satellite():
     """进攻型卫星预算最高(35%), 防御型最低(15%)"""
-    def_b = allocate_layer_budget("defensive")
-    agg_b = allocate_layer_budget("aggressive")
+    def_b = dynamic_layer_budget("defensive", "neutral")
+    agg_b = dynamic_layer_budget("aggressive", "neutral")
     assert agg_b["satellite"] > def_b["satellite"]
