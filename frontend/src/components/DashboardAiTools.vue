@@ -710,6 +710,8 @@ async function enterDesignMode() {
 
 function enterStrategyMode() {
   activeCoreFeature.value = 'strategy'
+  strategyResult.value = null
+  checkingStrategy.value = false
 }
 
 function enterHistoryMode() {
