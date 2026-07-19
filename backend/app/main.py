@@ -41,7 +41,7 @@ async def lifespan(app: FastAPI):
             return fh_realtime("SPY")
         register_probe("finnhub", _probe_fh, timeout=8)
 
-        logger.info(f"[health] registered {len(registry._health.keys())} probes including new sources")
+        logger.info("[health] Registered 2 probes: twelvedata, finnhub")
 
     await _register_health_probes()
 

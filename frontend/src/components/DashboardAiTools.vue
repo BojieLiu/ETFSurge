@@ -631,7 +631,7 @@ async function loadHistoryList() {
     designHistoryList.value = res.data || []
     historyLoaded.value = true
   } catch (e) {
-    toast('加载历史记录失败', 'error')
+    toast('加载历史记录失败，请检查后端连接', 'error')
   } finally {
     historyLoading.value = false
   }
@@ -689,7 +689,7 @@ async function toggleHistory() {
       const res = await portfolioApi.listDesigns(20, 0)
       designHistoryList.value = res.data || []
     } catch (e) {
-      toast('加载历史记录失败', 'error')
+      toast('加载历史记录失败，请检查后端连接', 'error')
     }
   }
 }
