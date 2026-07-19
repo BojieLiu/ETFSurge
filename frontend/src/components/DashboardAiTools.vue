@@ -698,7 +698,10 @@ async function loadHistoryDetail(id) {
   try {
     const res = await portfolioApi.getDesign(id)
     const data = res.data
-    if (!data || !data.strategies) return
+    if (!data || !data.strategies || data.strategies.length === 0) {
+      toast('该历史方案数据不完整，可能是生成失败导致的', 'warning')
+      return
+    }
 
     const plans = data.strategies.map(s => ({
       style: s.label,
