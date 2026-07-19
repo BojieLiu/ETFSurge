@@ -360,7 +360,7 @@ async def strategy_check(db: AsyncSession, total_capital: float, design_data: di
     
     # 并行采集：技术指标 / 因子评分 / 市场状态
     indicators_task = _compute_indicators(symbols)
-    factor_task = asyncio.to_thread(lambda: factor_registry.compute(symbols))
+    factor_task = factor_registry.compute(symbols)
     regime_task = _detect_regime(symbols)
     
     indicators, factor_scores, regime_data = await asyncio.gather(
@@ -428,7 +428,7 @@ async def _compute_indicators(symbols: list[str]) -> dict:
     
     results = {}
     hist_data = await asyncio.gather(
-        *[asyncio.to_thread(get_history, sym, "A") for sym in symbols],
+        *[get_history(sym, "A") for sym in symbols],
         return_exceptions=True,
     )
     for sym, hist in zip(symbols, hist_data):
