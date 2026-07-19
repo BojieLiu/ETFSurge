@@ -1064,6 +1064,70 @@ async def generate_design_report(
         return ""
 
 
+def _build_factor_breakdown_table(strategies: list[dict]) -> str:
+    """Build a markdown table of factor breakdowns from strategies' allocations.
+
+    Returns:
+        A markdown table string (may be empty if no factor data found).
+    """
+    seen: set[str] = set()
+    all_factor_keys: set[str] = set()
+    rows: list[tuple[str, str, str, list[str]]] = []
+
+    # First pass: collect all unique factor keys across all allocations
+    for s in strategies:
+        for a in (s.get("allocations") or s.get("etfs") or []):
+            sym = a.get("symbol", "")
+            if sym and sym not in seen and sym != "CASH":
+                seen.add(sym)
+                fb = a.get("factor_breakdown") or a.get("factor_scores") or {}
+                for k in fb:
+                    all_factor_keys.add(k)
+
+    if not all_factor_keys:
+        return ""
+
+    factor_keys = sorted(all_factor_keys)
+    seen.clear()
+
+    # Second pass: collect row data
+    for s in strategies:
+        for a in (s.get("allocations") or s.get("etfs") or []):
+            sym = a.get("symbol", "")
+            if sym and sym not in seen and sym != "CASH":
+                seen.add(sym)
+                name = (a.get("name", "") or "")[:20]
+                fs_raw = a.get("factor_score")
+                fs = f"{fs_raw:.3f}" if isinstance(fs_raw, (int, float)) else "—"
+                fb = a.get("factor_breakdown") or a.get("factor_scores") or {}
+                cells = []
+                for k in factor_keys:
+                    v = fb.get(k)
+                    cells.append(f"{v:.3f}" if isinstance(v, (int, float)) else "—")
+                rows.append((sym, name, fs, cells))
+
+    # Build header
+    header = ["Symbol", "Name", "Factor Score"] + list(factor_keys)
+    sep = ["---"] * len(header)
+    lines = [
+        "## ETF Factor Breakdown",
+        "",
+        "Below are the detailed factor scores for each selected ETF, indicating WHY each was selected:",
+        "",
+        "| " + " | ".join(header) + " |",
+        "| " + " | ".join(sep) + " |",
+    ]
+    for sym, name, fs, cells in rows:
+        row = [sym, name, fs] + cells
+        lines.append("| " + " | ".join(row) + " |")
+    lines.append("")
+    lines.append("For each ETF, the dominant factors are the ones with highest absolute scores.")
+    lines.append("Use these factor details when writing the rationale for each ETF selection.")
+    lines.append("")
+    return "\n".join(lines)
+
+
+
 def _build_design_report_prompt(
     strategies: list[dict],
     market_sentiment: dict,
@@ -1105,6 +1169,8 @@ def _build_design_report_prompt(
         return str(v)
 
     # ── P5-a: 注入预生成的方案表格（引擎直接渲染，确保与方案卡片一致） ──
+    _factor_table = _build_factor_breakdown_table(strategies)
+
     if plan_tables:
         lines = [
             "## 注意：报告撰写范围说明",
@@ -1123,12 +1189,20 @@ def _build_design_report_prompt(
             "",
             "---",
             "",
-            "## 输入数据",
-            "",
-            "### 市场情绪",
         ]
+        if _factor_table:
+            lines.append(_factor_table)
+            lines.append("")
+        lines.append("## 输入数据")
+        lines.append("")
+        lines.append("### 市场情绪")
     else:
-        lines = ["## 输入数据", ""]
+        lines = []
+        if _factor_table:
+            lines.append(_factor_table)
+            lines.append("")
+        lines.append("## 输入数据")
+        lines.append("")
     lines.append("### 市场情绪")
     lines.append(f"- 情绪指数: {market_sentiment.get('sentiment_index', 'N/A')}")
     lines.append(f"- 情绪标签: {market_sentiment.get('sentiment_label', 'N/A')}")

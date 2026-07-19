@@ -206,7 +206,7 @@ class TestDynamicCoreAllocation:
         codes = {c["symbol"] for c in core}
         assert "510300" in codes       # 沪深300
         assert "560600" in codes       # A500
-        assert "510880" in codes       # 红利低波
+        assert "512890" in codes       # 红利低波
 
     def test_growth_allocation_contains_chuangyeban(self):
         """成长风格应包含创业板增强弹性"""
@@ -324,7 +324,7 @@ class TestComputePortfolioRisk:
 
         holdings = [
             {"symbol": "510300", "weight": 0.20},
-            {"symbol": "510880", "weight": 0.15},
+            {"symbol": "512890", "weight": 0.15},
             {"symbol": "512010", "weight": 0.08},
             {"symbol": "518880", "weight": 0.05},
             {"symbol": "511090", "weight": 0.05},

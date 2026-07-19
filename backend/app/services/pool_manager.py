@@ -37,6 +37,29 @@ LAYER_OPPORTUNISTIC = "opportunistic"
 LAYER_RESEARCH = "research"
 ALL_LAYERS = [LAYER_CORE, LAYER_SATELLITE, LAYER_DEFENSE, LAYER_OPPORTUNISTIC, LAYER_RESEARCH]
 
+# Regime-based weights for each layer
+_LAYER_WEIGHTS = {
+    "satellite": {
+        "bull":       {"factor": 0.55, "liquidity": 0.10, "scale": 0.05, "opp": 0.30},
+        "bear":       {"factor": 0.25, "liquidity": 0.10, "scale": 0.05, "opp": 0.60},
+        "correction": {"factor": 0.35, "liquidity": 0.15, "scale": 0.10, "opp": 0.40},
+        "neutral":    {"factor": 0.40, "liquidity": 0.15, "scale": 0.10, "opp": 0.35},
+    },
+    "core": {
+        "bull":       {"factor": 0.55, "liquidity": 0.20, "scale": 0.25},
+        "bear":       {"factor": 0.40, "liquidity": 0.30, "scale": 0.30},
+        "correction": {"factor": 0.45, "liquidity": 0.25, "scale": 0.30},
+        "neutral":    {"factor": 0.50, "liquidity": 0.25, "scale": 0.25},
+    },
+    "defense": {
+        "bull":       {"factor": 0.35, "liquidity": 0.25, "scale": 0.15, "opp": 0.25},
+        "bear":       {"factor": 0.25, "liquidity": 0.20, "scale": 0.15, "opp": 0.40},
+        "correction": {"factor": 0.30, "liquidity": 0.25, "scale": 0.20, "opp": 0.25},
+        "neutral":    {"factor": 0.30, "liquidity": 0.20, "scale": 0.20, "opp": 0.30},
+    },
+}
+_BASE_WEIGHTS = {"factor": 0.40, "liquidity": 0.15, "scale": 0.10, "opp": 0.35}
+
 # 层内最大数量
 MAX_PER_LAYER = {
     LAYER_CORE: 8,
@@ -76,6 +99,7 @@ class PoolManager:
         self.classifier = etf_classifier
         self.factor_registry = factor_registry
         self._opportunistic_signals: dict[str, dict] = {}
+        self.current_regime: str = "neutral"
 
     async def refresh(self) -> PoolDiff:
         """全量刷新候选池。
@@ -173,7 +197,7 @@ class PoolManager:
         # 6. 层内复合评分 + 截断
         for layer in ALL_LAYERS:
             for item in new_pool[layer]:
-                item["composite_score"] = self._compute_composite(item, layer)
+                item["composite_score"] = self._compute_composite(item, layer, regime=self.current_regime)
             max_n = MAX_PER_LAYER.get(layer, 10)
             scored = sorted(new_pool[layer], key=lambda x: x.get("composite_score", 0), reverse=True)
             new_pool[layer] = scored[:max_n]
@@ -225,32 +249,27 @@ class PoolManager:
                     pool[target].append(found)
                     logger.info("PoolManager: enforced mandatory %s -> %s", code, target)
 
-    def _compute_composite(self, item: dict[str, Any], layer: str) -> float:
-        """按层计算综合得分。
-
-        各层加权：
-          core:      因子 50%, liquidity 25%, scale 25%
-          satellite: 因子 40%, liquidity 15%, scale 10%, flow 15%, text 20%
-          defense:   因子 30%, liquidity 20%, scale 20%, text 30%
-          opp:       text 50%, factor 30%, flow 20%
-          research:  仅 liquidity
-        """
+    def _compute_composite(self, item: dict[str, Any], layer: str, regime: str = "neutral") -> float:
+        """按层+市况计算综合得分。"""
         factor_scores = item.get("factor_scores", {})
         factor_sum = sum(factor_scores.values()) if factor_scores else 0
         amount = float(item.get("amount", 0) or 0)
         scale = float(item.get("fund_scale", 0) or 0)
         opp_score = float(item.get("composite_score", 0.5))
 
-        if layer == LAYER_CORE:
-            return 0.50 * factor_sum + 0.25 * amount * 1e-9 + 0.25 * scale * 1e-9
-        elif layer == LAYER_SATELLITE:
-            return 0.40 * factor_sum + 0.15 * amount * 1e-9 + 0.10 * scale * 1e-9 + 0.35 * opp_score
-        elif layer == LAYER_DEFENSE:
-            return 0.30 * factor_sum + 0.20 * amount * 1e-9 + 0.20 * scale * 1e-9 + 0.30 * opp_score
-        elif layer == LAYER_OPPORTUNISTIC:
-            return 0.50 * opp_score + 0.30 * factor_sum + 0.20 * amount * 1e-9
+        layer_weights = _LAYER_WEIGHTS.get(layer, {})
+        w = layer_weights.get(regime, layer_weights.get("neutral", _BASE_WEIGHTS))
+
+        if layer in ("core", "satellite", "defense", "opportunistic"):
+            score = w["factor"] * factor_sum
+            score += w.get("liquidity", 0) * amount * 1e-9
+            score += w.get("scale", 0) * scale * 1e-9
+            if layer != "core":
+                score += w.get("opp", 0) * opp_score
         else:
-            return amount * 1e-9  # research: liquidity only
+            score = amount * 1e-9  # research: liquidity only
+
+        return score
 
     def set_opportunistic_signals(self, signals: dict[str, dict]) -> None:
         """设置外部机会信号（用于 Layer 4）。

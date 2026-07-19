@@ -79,13 +79,13 @@ def _mock_network_calls():
         {"id": "defensive", "label": "\u9632\u5fa1\u578b", "etfs": [
             {"symbol": "510300", "layer": "core", "weight": 0.25, "target_amount": 125000},
             {"symbol": "560600", "layer": "core", "weight": 0.15, "target_amount": 75000},
-            {"symbol": "510880", "layer": "core", "weight": 0.10, "target_amount": 50000},
+            {"symbol": "512890", "layer": "core", "weight": 0.10, "target_amount": 50000},
             {"symbol": "518880", "layer": "defense", "weight": 0.05, "target_amount": 25000},
         ]},
         {"id": "balanced", "label": "\u5e73\u8861\u578b", "etfs": [
             {"symbol": "510300", "layer": "core", "weight": 0.25, "target_amount": 125000},
             {"symbol": "560600", "layer": "core", "weight": 0.15, "target_amount": 75000},
-            {"symbol": "510880", "layer": "core", "weight": 0.10, "target_amount": 50000},
+            {"symbol": "512890", "layer": "core", "weight": 0.10, "target_amount": 50000},
             {"symbol": "518880", "layer": "defense", "weight": 0.05, "target_amount": 25000},
         ]},
         {"id": "aggressive", "label": "\u8fdb\u653b\u578b", "etfs": [
@@ -147,13 +147,13 @@ async def test_generate_design_core_has_broad_indices():
 
 @pytest.mark.skip(reason="needs external network mock")
 async def test_generate_design_fixed_core_weights():
-    """v3.0: 核心层固定权重 510300=25%, 560600=15%, 510880=10%"""
+    """v3.0: 核心层固定权重 510300=25%, 560600=15%, 512890=10%"""
     designs = await generate_full_design("balanced", 500000)
     for d in designs:
         core = {e["symbol"]: e["weight"] for e in d["etfs"] if e["layer"] == "core"}
         assert abs(core.get("510300", 0) - 0.25) < 0.02, f"{d['id']} 510300 weight off"
         assert abs(core.get("560600", 0) - 0.15) < 0.02, f"{d['id']} 560600 weight off"
-        assert abs(core.get("510880", 0) - 0.10) < 0.02, f"{d['id']} 510880 weight off"
+        assert abs(core.get("512890", 0) - 0.10) < 0.02, f"{d['id']} 512890 weight off"
 
 
 @pytest.mark.skip(reason="needs external network mock")

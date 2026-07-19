@@ -16,6 +16,8 @@ import yaml
 import pandas as pd
 import numpy as np
 
+from ..factors.ic_tracker import ic_tracker
+
 logger = logging.getLogger(__name__)
 
 # Default YAML path relative to this file
@@ -540,6 +542,16 @@ class FactorRegistry:
                 if max_z - min_z > 1e-10:
                     for sym, _ in _raw[code]:
                         result[sym][code] = (result[sym][code] - min_z) / (max_z - min_z)
+
+        # Record for IC tracking
+        try:
+            for sym in symbols:
+                if sym in result and result[sym]:
+                    for code, value in result[sym].items():
+                        if abs(value) > 0.001:
+                            ic_tracker.record(sym, code, value)
+        except Exception:
+            pass
 
         return result
 

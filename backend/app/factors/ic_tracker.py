@@ -24,6 +24,9 @@ class ICTracker:
     ICIR = mean(IC) / std(IC) — measures consistency.
     """
 
+    def __init__(self):
+        self._records: list[dict[str, Any]] = []
+
     def compute_ic(self, factor_values: pd.Series, forward_returns: pd.Series) -> float:
         """Compute single-period Spearman rank IC.
 
@@ -66,6 +69,21 @@ class ICTracker:
             ic_values.append(ic)
         return pd.Series(ic_values, index=factor_values.index[:len(ic_values)])
 
+    def record(self, symbol: str, factor_code: str, value: float) -> None:
+        """Record a factor value for IC tracking.
+
+        Args:
+            symbol: Asset symbol/ticker.
+            factor_code: Factor identifier.
+            value: Computed factor value.
+        """
+        self._records.append({
+            "symbol": symbol,
+            "factor_code": factor_code,
+            "value": value,
+            "timestamp": pd.Timestamp.now(),
+        })
+
     def compute_icir(self, ic_series: pd.Series) -> float:
         """Compute ICIR = mean(IC) / std(IC).
 
@@ -104,3 +122,7 @@ def compute_ic_series_fast(
         ic_list.append(float(corr) if not np.isnan(corr) else 0.0)
 
     return pd.Series(ic_list, index=periods)
+
+
+# Global singleton
+ic_tracker = ICTracker()

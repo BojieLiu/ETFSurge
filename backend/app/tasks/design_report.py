@@ -84,7 +84,7 @@ def _build_plan_tables(strategies: list[dict]) -> str:
     lines.append("| 防御层 | " + " | ".join(defs) + " |")
 
     # 现金 / 预期回报
-    cashes, rets = [], []
+    cashes, rets, rets_current = [], [], []
     for s in strategies:
         allocs = s.get("allocations") or s.get("etfs") or []
         cash = next((e for e in allocs if e.get("symbol") == "CASH"), None)
@@ -92,8 +92,11 @@ def _build_plan_tables(strategies: list[dict]) -> str:
         cashes.append(f"{w:.0f}%")
         r = s.get("expected_return")
         rets.append(f"{r * 100:.0f}%" if r is not None else "—")
+        rc = s.get("expected_return_current")
+        rets_current.append(f"{rc * 100:.0f}%" if rc is not None else "—")
     lines.append("| 现金仓位 | " + " | ".join(cashes) + " |")
     lines.append("| 预期年化 | " + " | ".join(rets) + " |")
+    lines.append("| 当前预期年化 | " + " | ".join(rets_current) + " |")
 
     for s in strategies:
         label = s.get("label", "")
@@ -103,8 +106,8 @@ def _build_plan_tables(strategies: list[dict]) -> str:
         def_pct = sum(e.get("weight") or e.get("target_weight") or 0 for e in allocs if e.get("layer") in ("defense", "defence")) * 100
         lines.append(f"\n### {label}")
         lines.append(f"资产结构：核心 {core_pct:.0f}% · 卫星 {sat_pct:.0f}% · 防御 {def_pct:.0f}%\n")
-        lines.append("| 资产类别 | 代码 | 名称 | 权重 | 因子 | 入选理由 |")
-        lines.append("|---------|------|------|:----:|:----:|---------|")
+        lines.append("| 资产类别 | 代码 | 名称 | 权重 | 多因子评分 | 今日涨跌 | 入选理由 |")
+        lines.append("|---------|------|------|:----:|:--------:|:-------:|---------|")
 
         allocs = s.get("allocations") or s.get("etfs") or []
         for e in allocs:
@@ -119,8 +122,16 @@ def _build_plan_tables(strategies: list[dict]) -> str:
             layer_cn = {"core": "核心", "satellite": "卫星", "sat": "卫星", "defense": "防御", "defence": "防御", "cash": "现金"}.get(layer_en, layer_en)
             fs = e.get("factor_score", None)
             fs_txt = f"{fs:.2f}" if fs is not None else ""
-            lines.append(f"| {layer_cn} | {code} | {name} | {w:.0f}% | {fs_txt} | {rationale} |")
+            dcp = e.get("daily_change_pct")
+            if dcp is not None:
+                dcp_txt = f"{dcp * 100:.2f}%" if abs(dcp) < 1 else f"{dcp:.2f}%"
+                dcp_txt = ("+" if dcp >= 0 else "") + dcp_txt
+            else:
+                # fallback to trend_data in selection_rationale or empty
+                dcp_txt = "—"
+            lines.append(f"| {layer_cn} | {code} | {name} | {w:.0f}% | {fs_txt} | {dcp_txt} | {rationale} |")
 
+    lines.append("\n> 注：多因子评分（0~1）基于资金流、估值、动量、流动性等维度综合计算，非涨跌幅。")
     return "\n".join(lines)
 
 
