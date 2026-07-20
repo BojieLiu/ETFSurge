@@ -325,7 +325,12 @@ async def calculate_daily_pnl(
 import time as _time
 _strategy_check_cache: dict[str, tuple[float, dict]] = {}  # key -> (timestamp, result)
 
-async def strategy_check(db: AsyncSession, total_capital: float, design_data: dict | None = None) -> dict[str, Any]:
+async def strategy_check(
+    db: AsyncSession,
+    total_capital: float,
+    design_data: dict | None = None,
+    portfolio_type: str | None = None,
+) -> dict[str, Any]:
     """v2: 因子评分 + regime 感知 + 结构化输出（60s LRU 缓存避免重复采集）。"""
     from ..analysis.llm import generate_strategy_check_report
     from ..factors.factor_registry import registry as factor_registry

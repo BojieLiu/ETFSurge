@@ -92,6 +92,28 @@ _global_indices_cache_ts: float = 0
 _GLOBAL_INDICES_TTL = 30
 
 
+def _to_json_native(value: Any) -> Any:
+    """将 numpy 等非 JSON 原生类型递归转换为 Python 原生类型。
+
+    下游数据源（yfinance / stooq 等）可能返回 np.float64 / np.int64 /
+    np.bool_ 等标量。FastAPI 的 jsonable_encoder 无法序列化 numpy 类型，
+    会导致缓存命中路径（直接返回 _global_indices_cache）时 500。
+    这里在写入缓存前统一清洗，保证返回结构可安全 JSON 序列化。
+    """
+    try:
+        import numpy as np
+    except ImportError:
+        np = None  # type: ignore[assignment]
+
+    if np is not None and isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, dict):
+        return {k: _to_json_native(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_to_json_native(v) for v in value]
+    return value
+
+
 async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
     """返回分组的主流全球指数行情。
 
@@ -100,6 +122,10 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
 
     带 30s 缓存，非交易时段复用上次成功值。
     """
+    # 函数内对模块级缓存变量有赋值，必须声明 global，
+    # 否则 Python 会将该变量视为局部变量，导致缓存命中分支
+    # (读取 _global_indices_cache_ts) 触发 UnboundLocalError -> 500。
+    global _global_indices_cache, _global_indices_cache_ts
     import time
     now = time.time()
     if _global_indices_cache and (now - _global_indices_cache_ts) < _GLOBAL_INDICES_TTL:
@@ -199,6 +225,8 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
             region, d = o
             regions.setdefault(region, []).append(d)
 
+    # 清洗为 JSON 原生类型（避免 numpy 标量在缓存命中路径导致 500）
+    regions = _to_json_native(regions)
     # 写入缓存（即使部分为空也缓存，避免非交易时段重复采集）
     _global_indices_cache.update(regions)
     _global_indices_cache_ts = time.time()
