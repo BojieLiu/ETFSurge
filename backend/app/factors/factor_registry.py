@@ -224,7 +224,113 @@ def _compute_news_direction(data: dict) -> float:
     return positive / max(total, 1)
 
 
-# --- Scaffolding functions (return 0, data source integration later) ---
+# ── KDJ 指标（从 indicators.py 迁移，2026-07-20） ────────────────
+def _compute_kdj_k(data: dict) -> float:
+    """technical.kdj.k_value: KDJ K 值"""
+    high = data.get("high", [])
+    low = data.get("low", [])
+    close = data.get("close", [])
+    if len(close) < 9:
+        return 50.0
+    s_high, s_low, s_close = pd.Series(high), pd.Series(low), pd.Series(close)
+    low_min = s_low.rolling(9).min()
+    high_max = s_high.rolling(9).max()
+    denom = (high_max - low_min).replace(0, pd.NA)
+    rsv = (s_close - low_min) / denom * 100
+    k = rsv.ewm(com=2, adjust=False).mean()
+    return float(k.iloc[-1]) if not pd.isna(k.iloc[-1]) else 50.0
+
+
+def _compute_kdj_d(data: dict) -> float:
+    """technical.kdj.d_value: KDJ D 值"""
+    high = data.get("high", [])
+    low = data.get("low", [])
+    close = data.get("close", [])
+    if len(close) < 9:
+        return 50.0
+    s_high, s_low, s_close = pd.Series(high), pd.Series(low), pd.Series(close)
+    low_min = s_low.rolling(9).min()
+    high_max = s_high.rolling(9).max()
+    denom = (high_max - low_min).replace(0, pd.NA)
+    rsv = (s_close - low_min) / denom * 100
+    k = rsv.ewm(com=2, adjust=False).mean()
+    d = k.ewm(com=2, adjust=False).mean()
+    return float(d.iloc[-1]) if not pd.isna(d.iloc[-1]) else 50.0
+
+
+def _compute_kdj_j(data: dict) -> float:
+    """technical.kdj.j_value: KDJ J 值"""
+    high = data.get("high", [])
+    low = data.get("low", [])
+    close = data.get("close", [])
+    if len(close) < 9:
+        return 50.0
+    s_high, s_low, s_close = pd.Series(high), pd.Series(low), pd.Series(close)
+    low_min = s_low.rolling(9).min()
+    high_max = s_high.rolling(9).max()
+    denom = (high_max - low_min).replace(0, pd.NA)
+    rsv = (s_close - low_min) / denom * 100
+    k = rsv.ewm(com=2, adjust=False).mean()
+    d = k.ewm(com=2, adjust=False).mean()
+    j = 3 * k - 2 * d
+    return float(j.iloc[-1]) if not pd.isna(j.iloc[-1]) else 50.0
+
+
+# ── 综合信号（从 signal.py 迁移，2026-07-20） ─────────────────────
+def _compute_signal_overall(data: dict) -> float:
+    """technical.signal.overall: 综合买卖信号 (-1 ~ +1)"""
+    rsi = data.get("rsi", 50)
+    score = 0.0
+    if rsi is not None:
+        if rsi < 30:
+            score += 0.4  # 超卖 → 买入信号
+        elif rsi > 70:
+            score -= 0.4  # 超买 → 卖出信号
+        elif rsi < 40:
+            score += 0.2
+        elif rsi > 60:
+            score -= 0.2
+
+    macd = data.get("macd", 0)
+    if macd is not None:
+        if macd > 0:
+            score += 0.2
+        elif macd < 0:
+            score -= 0.2
+
+    ma_bias = data.get("ma_bias_20", 0)
+    if ma_bias is not None:
+        if ma_bias > 0.05:
+            score -= 0.1
+        elif ma_bias < -0.05:
+            score += 0.1
+
+    return max(-1.0, min(1.0, score))
+
+
+# ── industry_diversification 基于 ETFClassifier ──────────────────
+def _compute_industry_diversification(data: dict) -> float:
+    """etf.industry_diversification: 用行业分布算 HHI（赫芬达尔指数）。
+    值越低代表行业越分散（0 = 完全分散，1 = 完全集中）。
+    """
+    industry_holdings = data.get("industry_holdings", {})
+    if not industry_holdings:
+        # 无行业分布数据时尝试从概念板块推断
+        concepts = data.get("concepts", [])
+        if concepts:
+            # 概念越多越分散
+            n = len(concepts)
+            return round(1.0 / max(n, 1), 4)
+        return 0.0  # 默认中性
+
+    total = sum(industry_holdings.values())
+    if total <= 0:
+        return 0.0
+    hhi = sum((w / total) ** 2 for w in industry_holdings.values())
+    return round(hhi, 4)
+
+
+# --- Scaffolding functions (保留待后续数据源接入) ---
 def _compute_premium_discount(data: dict) -> float:
     """折溢价率：(ETF价格 - IOPV) / IOPV。正常范围 -0.03 ~ 0.03。"""
     nav = data.get("nav")
@@ -369,7 +475,7 @@ _BUILTIN_COMPUTERS: dict[str, Callable[[dict], float]] = {
     "etf.premium_discount": _compute_premium_discount,  # scaffolding
     "etf.tracking_error": _compute_tracking_error,       # scaffolding
     "etf.shares_change": _compute_shares_change,          # scaffolding
-    "etf.industry_diversification": _compute_industry_diversification,  # scaffolding
+    "etf.industry_diversification": _compute_industry_diversification,
     "etf.institutional_holdings_change": _compute_institutional_holdings_change,  # scaffolding
     "sentiment.panic_greed_diff": _compute_panic_greed_diff,
     "sentiment.stock_divergence": _compute_stock_divergence,  # scaffolding
@@ -379,6 +485,12 @@ _BUILTIN_COMPUTERS: dict[str, Callable[[dict], float]] = {
     "china.policy.five_year_plan": _compute_five_year_plan,
     "china.policy.strategic_emerging": _compute_strategic_emerging,
     "china.policy.dual_circulation": _compute_dual_circulation,
+    # KDJ (2026-07-20 从 indicators.py 注册)
+    "technical.kdj.k_value": _compute_kdj_k,
+    "technical.kdj.d_value": _compute_kdj_d,
+    "technical.kdj.j_value": _compute_kdj_j,
+    # 综合信号 (2026-07-20 从 signal.py 注册)
+    "technical.signal.overall": _compute_signal_overall,
 }
 
 # 30 core factors for S1 (extend this list as implementation progresses)
@@ -438,7 +550,13 @@ class FactorRegistry:
         self.load_definitions()
 
     def load_definitions(self, yaml_path: str | None = None) -> None:
-        """Load factor definitions from YAML file."""
+        """Load factor definitions from YAML file.
+        
+        If yaml_path is explicitly provided, clear the existing factor dict
+        so the caller can load a clean test YAML (used in unit tests).
+        """
+        if yaml_path is not None:
+            self._factors.clear()
         path = Path(yaml_path) if yaml_path else _DEFAULT_YAML
         if not path.exists():
             logger.warning("Factor definitions not found at %s", path)
@@ -518,15 +636,8 @@ class FactorRegistry:
                     "volume": vols[-60:],
                 }
             except Exception as e:
-                logger.warning("[factor] fetch_history failed for %s: %s", sym, e)
-                return sym, {
-                    "total_mv": 100e9,
-                    "float_mv": 80e9,
-                    "close": [4.0 + i * 0.01 for i in range(60)],
-                    "high": [4.0 + i * 0.02 for i in range(60)],
-                    "low": [4.0 - i * 0.01 for i in range(60)],
-                    "volume": [1000000 + i * 1000 for i in range(60)],
-                }
+                logger.warning("[factor] fetch_history failed for %s: %s — skipping", sym, e)
+                return sym, {"_fetch_error": str(e)}
 
         tasks = [fetch_one(sym) for sym in symbols]
         results = await asyncio.gather(*tasks)
@@ -602,6 +713,51 @@ class FactorRegistry:
                 if max_z - min_z > 1e-10:
                     for sym, _ in _raw[code]:
                         result[sym][code] = (result[sym][code] - min_z) / (max_z - min_z)
+
+        # ── 后处理：从已计算因子推导综合信号 ──
+        signal_code = "technical.signal.overall"
+        if signal_code in self._computers and signal_code not in (codes or []):
+            pass  # signal 不在 codes 中时跳过
+        elif signal_code in (codes or []) or codes is None:
+            for sym in symbols:
+                if sym not in result:
+                    continue
+                # Build enriched data dict from computed factors
+                enriched = dict(market_data.get(sym, {}))
+                enriched["rsi"] = result[sym].get("technical.rsi.rsi_14", 50)
+                enriched["macd"] = result[sym].get("technical.macd.macd", 0)
+                # ma_bias: derive from sma_20 and last close
+                sma20 = result[sym].get("technical.ma.sma_20", 0)
+                last_close = enriched.get("close", [None])[-1] if enriched.get("close") else None
+                macd_val = result[sym].get("technical.macd.macd", 0)
+                if macd_val is not None and abs(macd_val) > 0.001:
+                    enriched["macd"] = macd_val
+                if sma20 != 0 and last_close and last_close > 0:
+                    enriched["ma_bias_20"] = (last_close - sma20) / sma20
+                try:
+                    sig = self._computers[signal_code](enriched)
+                    result[sym][signal_code] = sig
+                except Exception as e:
+                    logger.debug("Signal factor failed for %s: %s", sym, e)
+                    result[sym][signal_code] = 0.0
+
+        # ── 熔断保护：z-score 为 0 的符号比例 > 50% 时抛异常 ──
+        if codes:
+            all_empty = 0
+            for sym in symbols:
+                if sym not in result or not result[sym]:
+                    all_empty += 1
+                    continue
+                valid = [v for v in result[sym].values() if isinstance(v, (int, float)) and abs(v) > 0.001]
+                if len(valid) == 0:
+                    all_empty += 1
+            total = len(symbols)
+            if total > 0 and all_empty / total > 0.5:
+                logger.error("[factor] meltdown: %.0f%% of symbols have zero factor scores", all_empty / total * 100)
+                raise RuntimeError(
+                    f"FactorRegistry meltdown: {all_empty}/{total} symbols returned empty factor scores. "
+                    "Data sources may be unavailable."
+                )
 
         # Record for IC tracking
         try:
