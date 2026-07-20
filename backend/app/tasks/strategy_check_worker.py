@@ -13,6 +13,7 @@ import time
 from typing import Any
 
 from ..services.portfolio_service import strategy_check
+from ..services.portfolio_service import logger as svc_logger
 
 logger = logging.getLogger(__name__)
 
@@ -81,8 +82,8 @@ async def strategy_check_worker(mgr, task_id: int) -> None:
             task_id,
             progress=100,
             status="completed",
+            result=result,
             record_id=record_id,
-            _result=result,
         )
         await _notify(task_id, "completed", progress=100, stage="分析完成")
 

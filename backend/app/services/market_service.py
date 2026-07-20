@@ -116,18 +116,57 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
             item["asset_type"] = "index"
             regions.setdefault(region, []).append(item)
 
-    # 海外指数（yfinance）
+    # 海外指数：Sina（优先，中国大陆最快）→ stooq（第二）→ yfinance（兜底）
+    from ..fetchers.china_market import fetch_sina_global_index as sina_index
+    from ..fetchers.stooq_fetcher import fetch_global_index_realtime as stooq_index
     from ..fetchers.yfinance_fetcher import fetch_index_realtime as yf_index
 
     async def _foreign(sym: str, name: str, region: str):
-        d = await _call(yf_index, sym, timeout=15)
-        if d and d.get("price") is not None:
-            d = dict(d)
-            d["name"] = name
-            d["region"] = region
-            d["asset_type"] = "index"
-            d["available"] = True
-            return region, d
+        loop = asyncio.get_running_loop()
+        import functools
+
+        # 第1优先：新浪（8s 超时，中国大陆最稳定）
+        try:
+            d = await asyncio.wait_for(
+                loop.run_in_executor(None, functools.partial(sina_index, sym)),
+                timeout=10,
+            )
+            if d and d.get("price") is not None:
+                d["name"] = name
+                d["region"] = region
+                return region, d
+        except (asyncio.TimeoutError, Exception):
+            pass
+
+        # 第2优先：stooq（8s 超时，免费）
+        try:
+            d = await asyncio.wait_for(
+                loop.run_in_executor(None, functools.partial(stooq_index, sym, name, 8)),
+                timeout=10,
+            )
+            if d and d.get("price") is not None:
+                d["region"] = region
+                return region, d
+        except (asyncio.TimeoutError, Exception):
+            pass
+
+        # 第3优先：yfinance（15s 超时，兜底）
+        try:
+            d = await asyncio.wait_for(
+                loop.run_in_executor(None, functools.partial(yf_index, sym)),
+                timeout=15,
+            )
+            if d and d.get("price") is not None:
+                d = dict(d)
+                d["name"] = name
+                d["region"] = region
+                d["asset_type"] = "index"
+                d["available"] = True
+                return region, d
+        except (asyncio.TimeoutError, Exception):
+            pass
+
+        # 三级源均失败，返回占位
         return region, {
             "symbol": sym, "name": name, "region": region,
             "asset_type": "index", "price": None, "change_pct": None,
@@ -137,8 +176,9 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
     import asyncio
 
     f_defs = [(s, n, r) for s, n, r in defs if r != "A股"]
-    outs = await asyncio.gather(
-        *[_foreign(s, n, r) for s, n, r in f_defs], return_exceptions=True
+    outs = await asyncio.wait_for(
+        asyncio.gather(*[_foreign(s, n, r) for s, n, r in f_defs], return_exceptions=True),
+        timeout=30,
     )
     for o in outs:
         if isinstance(o, tuple) and len(o) == 2:

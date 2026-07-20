@@ -2,6 +2,9 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Any
 import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
 
 from ..models.portfolio import PortfolioETF
 from ..models.schemas import PortfolioETFCreate, PortfolioETFUpdate
@@ -358,15 +361,20 @@ async def strategy_check(db: AsyncSession, total_capital: float, design_data: di
     
     symbols = [_get_attr(e, "symbol") for e in etfs if _get_attr(e, "symbol") != "CASH"]
     
-    # 并行采集：技术指标 / 因子评分 / 市场状态
+    # 并行采集（带 60s 总超时，任一失败不影响整体结果）
     indicators_task = _compute_indicators(symbols)
     factor_task = factor_registry.compute(symbols)
     regime_task = _detect_regime(symbols)
-    
-    indicators, factor_scores, regime_data = await asyncio.gather(
-        indicators_task, factor_task, regime_task, return_exceptions=True,
-    )
-    
+
+    try:
+        indicators, factor_scores, regime_data = await asyncio.wait_for(
+            asyncio.gather(indicators_task, factor_task, regime_task, return_exceptions=True),
+            timeout=30,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("[strategy_check] data collection timed out after 30s, using partial results")
+        indicators, factor_scores, regime_data = {}, {}, ({}, [], "range_bound")
+
     indicators = indicators if isinstance(indicators, dict) else {}
     factor_scores = factor_scores if isinstance(factor_scores, dict) else {}
     trends, index_realtime, regime = regime_data if isinstance(regime_data, tuple) else ({}, [], "range_bound")
@@ -403,12 +411,32 @@ async def strategy_check(db: AsyncSession, total_capital: float, design_data: di
                 "weight_drift": drift,
             }
     
-    # LLM 分析
-    llm_result = await generate_strategy_check_report(
-        market_data=market_data,
-        factor_breakdowns=factor_breakdowns,
-        regime=regime,
-    )
+    # LLM 分析（带超时保护：60s 内未完成则返回部分结果）
+    try:
+        llm_result = await asyncio.wait_for(
+            generate_strategy_check_report(
+                market_data=market_data,
+                factor_breakdowns=factor_breakdowns,
+                regime=regime,
+            ),
+            timeout=45,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("[strategy_check] LLM analysis timed out (45s), returning partial data")
+        llm_result = {
+            "summary": f"LLM 分析超时（基于 {len(market_data)} 只标的因子数据，未完成深度分析）",
+            "suggestions": [],
+            "holdings_analysis": [],
+            "risk_warnings": [],
+        }
+    except Exception as e:
+        logger.warning("[strategy_check] LLM analysis failed: %s", e)
+        llm_result = {
+            "summary": f"LLM 分析暂不可用（{e}），返回因子数据摘要",
+            "suggestions": [],
+            "holdings_analysis": [],
+            "risk_warnings": [],
+        }
     
     return {
         "summary": llm_result.get("summary", ""),

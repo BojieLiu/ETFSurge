@@ -458,6 +458,70 @@ def fetch_futures_realtime() -> list[dict[str, Any]]:
         return []
 
 
+# ── 新浪全球指数实时行情 ──────────────────────────────────
+# 使用 gb_ 前缀查询全球指数，比 yfinance/stooq 更快更稳定（中国大陆）
+_GLOBAL_SINA_MAP: dict[str, str] = {
+    "^GSPC": "gb_$spx",     # 标普500
+    "^IXIC": "gb_$ixic",    # 纳斯达克
+    "^DJI": "gb_$dji",     # 道琼斯
+    "^N225": "gb_$n225",   # 日经225
+    "^HSI": "gb_$hsi",     # 恒生指数
+    "^HSCE": "gb_$hsce",   # 恒生国企指数
+    "^HSTECH": "gb_$hstech", # 恒生科技指数
+    "^KS11": "gb_$ks11",   # 韩国综合指数
+}
+# Sina 可用的全球指数代码
+_GLOBAL_SINA_SHORT: dict[str, str] = {
+    "^GSPC": "gb_$spx",
+    "^IXIC": "gb_$ixic",
+    "^DJI": "gb_$dji",
+    "^N225": "gb_$n225",
+    "^HSI": "gb_$hsi",
+    "^HSCE": "gb_$hsce",
+    "^HSTECH": "gb_$hstech",
+    "^KS11": "gb_$ks11",
+}
+
+
+def fetch_sina_global_index(symbol: str) -> dict[str, Any] | None:
+    """通过新浪财经查询全球指数实时行情（免费、极快、中国大陆最稳定）。
+
+    Args:
+        symbol: APP 标准代码如 ^GSPC, ^IXIC, ^DJI, ^N225, ^HSI。
+
+    Returns:
+        行情 dict 或 None。
+    """
+    sina_code = _GLOBAL_SINA_SHORT.get(symbol)
+    if not sina_code:
+        return None
+    try:
+        s = _session()
+        s.headers.update({"Referer": "https://finance.sina.com.cn"})
+        r = s.get(f"https://hq.sinajs.cn/list={sina_code}", timeout=8)
+        text = r.text.strip()
+        if "=" not in text or '"' not in text:
+            return None
+        parts = text.split('"')[1].split(",")
+        if len(parts) < 6:
+            return None
+        name = parts[0].strip().replace("INDEX", "").replace("  ", " ").strip()
+        price = float(parts[1]) if parts[1] else 0
+        change_pct = float(parts[2]) if parts[2] else 0
+        change_amount = float(parts[3]) if parts[3] else 0
+        return {
+            "symbol": symbol,
+            "name": name,
+            "price": price,
+            "change_pct": change_pct,
+            "change_amount": change_amount,
+            "asset_type": "index",
+            "available": True,
+        }
+    except Exception:
+        return None
+
+
 def fetch_index_realtime() -> list[dict[str, Any]]:
     """Fetch major market indices via mootdx; fallback QQ."""
     with no_proxy():

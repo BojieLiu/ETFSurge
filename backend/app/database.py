@@ -27,6 +27,7 @@ async def init_db():
         from .models.portfolio import PortfolioETF
         from .models.search import Instrument, Sector, Index
         from .models.portfolio_design import PortfolioDesign
+        from .models.strategy_check import StrategyCheckRecord
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_migrate)
 

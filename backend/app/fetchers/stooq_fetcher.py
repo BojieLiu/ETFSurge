@@ -83,6 +83,67 @@ def fetch_us_batch(symbols: list[str]) -> list[dict[str, Any]]:
         return []
 
 
+# ── 全球指数映射（APP 代码 → Stooq 代码） ──────────────────────
+_GLOBAL_INDEX_MAP: dict[str, str] = {
+    "^GSPC": "spx",
+    "^IXIC": "^ixic",
+    "^DJI": "^dji",
+    "^N225": "^n225",
+    "^HSI": "^hsi",
+    "^HSCE": "^hsce",
+    "^HSTECH": "^hstech",
+    "^KS11": "^ks11",
+    "^FTSE": "^ftse",
+    "^STOXX50E": "^stoxx50e",
+    "^AXJO": "^axjo",
+}
+
+
+def fetch_global_index_realtime(symbol: str, name: str = "", timeout: int = 8) -> dict[str, Any] | None:
+    """Stooq 全球指数实时行情（免费、无需 key、极快）。
+
+    Args:
+        symbol: APP 内代码如 ^GSPC, ^HSI, ^N225 等。
+        name: 指数名称（如 '标普500'）。
+        timeout: 单个请求超时秒数。
+
+    Returns:
+        结构化行情字典，失败时返回 None。
+    """
+    stooq_code = _GLOBAL_INDEX_MAP.get(symbol)
+    if not stooq_code:
+        return None
+    url = f"https://stooq.com/q/l/?s={stooq_code}&f=sd2t2ohlcv&h&e=csv"
+    try:
+        with no_proxy():
+            r = requests.get(url, timeout=timeout, headers={"User-Agent": "Mozilla/5.0"})
+        if not r.text or "Symbol" not in r.text:
+            return None
+        import csv, io
+        row = next(csv.DictReader(io.StringIO(r.text)), None)
+        if not row:
+            return None
+        op = float(row.get("Open") or 0)
+        cl = float(row.get("Close") or 0)
+        return {
+            "symbol": symbol,
+            "name": name,
+            "price": cl,
+            "change_pct": round((cl - op) / op * 100, 2) if op else 0.0,
+            "change_amount": round(cl - op, 2) if op else 0.0,
+            "volume": float(row.get("Volume") or 0),
+            "asset_type": "index",
+            "available": True,
+            "region": "",
+        }
+    except Exception:
+        return None
+
+
+# fetch_global_indices_batch: 改为在 market_service 中直接用 loop.run_in_executor 调用
+# fetch_global_index_realtime 保持为同步函数以供调用
+
+
 def fetch_stooq_history(
     symbol: str,
     period: str = "daily",
