@@ -100,6 +100,10 @@ class PoolManager:
         self.factor_registry = factor_registry
         self._opportunistic_signals: dict[str, dict] = {}
         self.current_regime: str = "neutral"
+        # 外部缓存（由 scheduler 或 refresh() 更新）
+        self._sector_momentum_cache: list[dict] | None = None
+        self._sector_momentum_cache_ts: float = 0
+        self._index_realtime_cache: list[dict] | None = None
 
     async def refresh(self) -> PoolDiff:
         """全量刷新候选池。
@@ -324,6 +328,18 @@ class PoolManager:
     def get_by_code(self, symbol: str) -> dict[str, Any] | None:
         """按代码查询单个 ETF。"""
         return self._by_code.get(symbol)
+
+    def get_sector_momentum(self) -> list[dict]:
+        """获取板块动量，120s 缓存 TTL。"""
+        import time
+        now = time.time()
+        if self._sector_momentum_cache and (now - self._sector_momentum_cache_ts) < 120:
+            return self._sector_momentum_cache
+        return self._sector_momentum_cache or []
+
+    def get_index_realtime(self) -> list[dict]:
+        """获取 A 股大盘实时行情缓存。"""
+        return self._index_realtime_cache or []
 
     # ── 市场状态缓存（2026-07-20 新增） ──────────────────────
     _regime_cache: str | None = None

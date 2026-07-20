@@ -348,6 +348,17 @@ async def sector_analysis(req: SectorAnalysisRequest):
         if context_parts:
             news = [{"title": "【市场背景】" + " | ".join(context_parts)}] + news
 
+    # 注入板块动量数据
+    try:
+        sector_momentum = pool_manager.get_sector_momentum() or []
+        if sector_momentum:
+            items = []
+            for item in sector_momentum[:5]:
+                items.append(f"{item.get('name','?')}: {item.get('change_pct',0):+.2f}%")
+            news = [{"title": "【板块动量】" + " | ".join(items)}] + news
+    except Exception:
+        pass
+
     try:
         report = await generate_sector_analysis(
             sector_code=sector_code,
@@ -407,6 +418,16 @@ async def symbol_analysis(req: SymbolAnalysisRequest):
             context_parts.append(f"市场情绪: {s_lbl} ({s_idx}/100)" if s_idx else f"市场情绪: {s_lbl}")
         if context_parts:
             news = [{"title": "【市场背景】" + " | ".join(context_parts)}] + news
+
+    # 注入因子矩阵数据（如该标的在矩阵中）
+    try:
+        factor_matrix = pool_manager.get_factor_matrix()
+        symbol_factors = factor_matrix.get(symbol)
+        if symbol_factors:
+            items = [f"{k}: {v}" for k, v in symbol_factors.items()]
+            news = [{"title": "【因子评分】" + " | ".join(items)}] + news
+    except Exception:
+        pass
 
     display_name = name or (realtime.get("name", "") if realtime else symbol)
     try:
