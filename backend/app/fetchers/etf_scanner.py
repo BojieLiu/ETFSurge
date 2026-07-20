@@ -47,10 +47,60 @@ CORE_REQUIRED = ["510300", "560600"]   # 沪深300ETF, 中证A500ETF
 DEFENSE_REQUIRED = ["518880", "511090"]  # 黄金ETF, 30年国债ETF
 
 
+def _tencent_gtimg_batch(codes: list[str]) -> dict[str, dict[str, Any]]:
+    """通过腾讯 gtimg 批量查询 ETF 行情，返回 code→{amount, turnover, fund_scale, pe} 映射。
+
+    gtimg 免费、稳定、一次返回 88 个字段，无需 token。
+    """
+    import requests as _req
+    chunk_size = 100
+    result: dict[str, dict[str, Any]] = {}
+    for i in range(0, len(codes), chunk_size):
+        chunk = codes[i:i + chunk_size]
+        try:
+            prefix = "sh" if codes[0][:2] in ("51", "58") else "sz"
+            query_codes = [f"{prefix}{c}" if not c.startswith(("sh", "sz", "SH", "SZ")) else c for c in chunk]
+            url = "http://qt.gtimg.cn/q=" + ",".join(c.lower() for c in query_codes)
+            resp = _req.get(url, timeout=5)
+            for line in resp.text.strip().split(";"):
+                if not line or "~" not in line:
+                    continue
+                parts = line.split("~")
+                if len(parts) < 46:
+                    continue
+                code = parts[2]
+                code_key = code[2:] if code[:2].lower() in ("sh", "sz") else code
+                try:
+                    amount = float(parts[37] or 0)
+                except (ValueError, TypeError):
+                    amount = 0
+                try:
+                    turnover = float(parts[38] or 0)
+                except (ValueError, TypeError):
+                    turnover = 0
+                try:
+                    total_mv = float(parts[45] or 0)
+                except (ValueError, TypeError):
+                    total_mv = 0
+                try:
+                    pe = float(parts[47] or 0) if len(parts) > 47 else 0
+                except (ValueError, TypeError):
+                    pe = 0
+                result[code_key] = {
+                    "amount": amount,
+                    "turnover": turnover,
+                    "fund_scale": total_mv,
+                    "pe": pe,
+                }
+        except Exception:
+            continue
+    return result
+
+
 def fetch_all_etfs_base() -> list[dict[str, Any]]:
     """一次调用获取全量 ETF 基础数据。
 
-    数据源: fund_etf_spot_em (东方财富)
+    数据源链: Sina 列表 → 腾讯 gtimg 补充指标 → akshare spot (最终兜底)
     返回: 每只 ETF 包含 代码/名称/最新价/涨跌幅/成交额/换手率/PE/PB/基金规模
     """
     from ..core.ttl import CACHE_TTL
@@ -59,28 +109,60 @@ def fetch_all_etfs_base() -> list[dict[str, Any]]:
         logger.debug("[etf_scanner] cache hit for all_etfs")
         return cached
 
+    # 1. 新浪 → 获取全量 ETF 代码列表（快、稳定、免费）
+    try:
+        from .china_market import fetch_etf_list
+        sina_result = fetch_etf_list()
+        if not sina_result or len(sina_result) < 50:
+            raise ValueError(f"Sina returned only {len(sina_result) if sina_result else 0} ETFs")
+
+        logger.info("[etf_scanner] Sina ETF list: %d ETFs", len(sina_result))
+        all_codes = [item["symbol"] for item in sina_result]
+
+        # 2. 腾讯 gtimg → 批量补充成交额/换手率/市值/PE
+        gtimg_map = _tencent_gtimg_batch(all_codes)
+        if gtimg_map:
+            logger.info("[etf_scanner] Tencent gtimg: %d ETF quotes", len(gtimg_map))
+            merged = []
+            for item in sina_result:
+                code = item["symbol"]
+                gt = gtimg_map.get(code, {})
+                item["amount"] = gt.get("amount", 0)
+                item["turnover"] = gt.get("turnover", 0)
+                item["fund_scale"] = gt.get("fund_scale", 0)
+                item["pe"] = gt.get("pe", 0)
+                item["pb"] = 0  # gtimg 不提供 PB，不影响扫描
+                merged.append(item)
+            sync_memory_cache.set("all_etfs", merged, CACHE_TTL.get("etf_scanner", 120))
+            logger.info("[etf_scanner] Sina+Tencent merged: %d ETFs", len(merged))
+            return merged
+
+        # gtimg 挂时：退到新浪数据（跳过金额/规模过滤）
+        logger.info("[etf_scanner] using Sina-only ETF list (no amount/scale filtering)")
+        sync_memory_cache.set("all_etfs", sina_result, CACHE_TTL.get("etf_scanner", 120))
+        return sina_result
+    except Exception as e:
+        logger.warning("[etf_scanner] Sina ETF list failed: %s", e)
+
+    # 3. 最终兜底：akshare spot（最慢但有全部字段）
     try:
         from ..utils.decode import decode_df as _decode_df
-
         def _p():
             import akshare as ak
             return ak.fund_etf_spot_em()
         df = run_in_thread(_p, timeout=8)
         if df is None or df.empty:
-            logger.warning("[etf_scanner] fund_etf_spot_em returned empty")
-            return []
-
+            logger.warning("[etf_scanner] fund_etf_spot_em final fallback returned empty")
+            stale = sync_memory_cache.get("all_etfs")
+            return stale or []
         _decode_df(df)
         result = df.to_dict(orient="records")
         sync_memory_cache.set("all_etfs", result, CACHE_TTL.get("etf_scanner", 120))
         return result
     except Exception as e:
-        logger.warning("[etf_scanner] fund_etf_spot_em failed: %s", e)
+        logger.warning("[etf_scanner] all ETF data sources failed: %s", e)
         stale = sync_memory_cache.get("all_etfs")
-        if stale is not None:
-            logger.info("[etf_scanner] using stale cache")
-            return stale
-        return []
+        return stale or []
 
 
 def _normalize_columns(df: pd.DataFrame) -> None:
@@ -165,11 +247,13 @@ def filter_etfs(raw_list: list[dict] | Any) -> list[dict[str, Any]]:
                 continue
 
         amount = _get_col(row, *AMOUNT_NAMES)
-        if amount < MIN_AVG_AMOUNT:
+        # 降级模式：当 amount=0（新浪源无此字段）时跳过金额过滤
+        if amount > 0 and amount < MIN_AVG_AMOUNT:
             continue
 
         scale = _get_col(row, *SCALE_NAMES)
-        if scale < MIN_FUND_SCALE:
+        # 降级模式：当 scale=0（新浪源无此字段）时跳过规模过滤
+        if scale > 0 and scale < MIN_FUND_SCALE:
             continue
 
         results.append({

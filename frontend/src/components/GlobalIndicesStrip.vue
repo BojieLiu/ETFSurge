@@ -39,7 +39,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onUnmounted } from 'vue'
 import { marketApi } from '../api'
 import { changeClass } from '../utils/changeClass'
 import AppButton from './ui/AppButton.vue'
@@ -69,12 +69,13 @@ async function fetchIndices() {
   }
 }
 
-onMounted(() => {
+function refresh() {
   fetchIndices()
-  timer.value = setInterval(fetchIndices, 60000)
-})
+}
 
 onUnmounted(() => {
   if (timer.value) clearInterval(timer.value)
 })
+
+defineExpose({ refresh })
 </script>

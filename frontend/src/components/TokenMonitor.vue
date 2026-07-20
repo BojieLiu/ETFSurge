@@ -173,6 +173,7 @@ use([CanvasRenderer, LineChart, BarChart, TitleComponent, TooltipComponent, Grid
 const PRICING = {
   'deepseek-chat': { input: 0.0005, output: 0.002 },    // ¥/1K tokens
   'deepseek-reasoner': { input: 0.001, output: 0.004 },  // ¥/1K tokens
+  'deepseek-v4-flash': { input: 0.0001, output: 0.0004 }, // ¥/1K tokens — DeepSeek V4 Flash
 }
 
 const loading = ref(true)
@@ -223,10 +224,10 @@ const estimatedCost = computed(() => {
   const total = summary.value.total || {}
   const promptTokens = total.prompt_tokens || 0
   const completionTokens = total.completion_tokens || 0
-  // Use deepseek-chat pricing as default estimate
-  const inputPrice = PRICING['deepseek-chat'].input
-  const outputPrice = PRICING['deepseek-chat'].output
-  const cost = (promptTokens / 1000) * inputPrice + (completionTokens / 1000) * outputPrice
+  // Determine model from summary data, default to deepseek-v4-flash
+  const modelName = summary.value.total?.model || 'deepseek-v4-flash'
+  const p = PRICING[modelName] || PRICING['deepseek-v4-flash']
+  const cost = (promptTokens / 1000) * p.input + (completionTokens / 1000) * p.output
   return cost
 })
 

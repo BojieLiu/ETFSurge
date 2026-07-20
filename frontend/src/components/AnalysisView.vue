@@ -193,6 +193,8 @@ const showMA20 = ref(true)
 const showMA60 = ref(false)
 const showBoll = ref(false)
 const showMACD = ref(true)
+const showKDJ = ref(false)
+const showRSI = ref(false)
 
 // Period Options
 const periodOptions = [
@@ -212,7 +214,9 @@ const indicatorToggles = [
   { key: 'ma20', label: 'MA20', model: showMA20 },
   { key: 'ma60', label: 'MA60', model: showMA60 },
   { key: 'boll', label: '布林带', model: showBoll },
-  { key: 'macd', label: 'MACD', model: showMACD }
+  { key: 'macd', label: 'MACD', model: showMACD },
+  { key: 'kdj', label: 'KDJ', model: showKDJ },
+  { key: 'rsi', label: 'RSI', model: showRSI },
 ]
 
 // Computed
@@ -302,6 +306,9 @@ const chartOption = computed(() => {
 
   const dates = d.dates.map(formatDate)
 
+  const etfInfo = etfInfoMap.value[selected.value]
+  const seriesName = etfInfo?.name ? `${etfInfo.name} (${selected.value})` : selected.value
+
   // ── Intraday line chart ──
   if (chartMode.value === 'intraday') {
     const closePrices = d.closes
@@ -341,7 +348,7 @@ const chartOption = computed(() => {
       series: [
         {
           type: 'line', data: closePrices, xAxisIndex: 0, yAxisIndex: 0,
-          name: selected.value,
+          name: seriesName,
           smooth: true, symbol: 'none',
           lineStyle: { width: 2, color: '#ef4444' },
           areaStyle: {
@@ -375,11 +382,13 @@ const chartOption = computed(() => {
   const volumes = d.volumes || []
   const volumeColors = d.closes.map((c, i) => (i === 0 ? '#22c55e' : c >= d.closes[i - 1] ? '#22c55e' : '#ef4444'))
 
-  const gridHeights = { main: 50, volume: 22, macd: 20 }
+  const gridHeights = { main: 50, volume: 22, macd: 20, kdj: 18, rsi: 18 }
   let mainPct = gridHeights.main
   let volPct = showMACD.value ? gridHeights.volume : 0
   let macdPct = showMACD.value ? gridHeights.macd : 0
-  const totalPct = mainPct + volPct + macdPct + 10
+  let kdjPct = showKDJ.value && d.kdj ? gridHeights.kdj : 0
+  let rsiPct = showRSI.value && d.rsi ? gridHeights.rsi : 0
+  const totalPct = mainPct + volPct + macdPct + kdjPct + rsiPct + 10
 
   const grids = [
     { left: '6%', right: '3%', top: 8, height: `${mainPct / totalPct * 100}%` },
@@ -390,7 +399,7 @@ const chartOption = computed(() => {
 
   // Main candlestick
   series.push({
-    type: 'candlestick', name: selected.value, data: candlesticks,
+    type: 'candlestick', name: seriesName, data: candlesticks,
     xAxisIndex: 0, yAxisIndex: 0,
     itemStyle: { color: '#22c55e', color0: '#ef4444', borderColor: '#22c55e', borderColor0: '#ef4444' },
   })
@@ -470,8 +479,62 @@ const chartOption = computed(() => {
     })
   }
 
+  // KDJ sub-chart
+  if (showKDJ.value && d.kdj && d.kdj.k && d.kdj.d && d.kdj.j) {
+    kdjPct = gridHeights.kdj
+    const kdjOffset = mainPct + volPct + (showMACD.value ? macdPct : 0) + 2
+    const kdjGridIdx = grids.length
+    grids.push({ left: '6%', right: '3%', top: `${kdjOffset / totalPct * 100}%`, height: `${kdjPct / totalPct * 100}%` })
+    xAxes.push({ type: 'category', data: dates, gridIndex: kdjGridIdx, axisLabel: { show: false } })
+    yAxes.push({ gridIndex: kdjGridIdx, scale: true, splitNumber: 3, axisLabel: { show: true, fontSize: 10 } })
+    series.push({
+      type: 'line', data: d.kdj.k, smooth: true,
+      xAxisIndex: kdjGridIdx, yAxisIndex: kdjGridIdx,
+      name: 'KDJ-K', symbol: 'none', lineStyle: { width: 1.2, color: '#3b82f6' },
+    })
+    series.push({
+      type: 'line', data: d.kdj.d, smooth: true,
+      xAxisIndex: kdjGridIdx, yAxisIndex: kdjGridIdx,
+      name: 'KDJ-D', symbol: 'none', lineStyle: { width: 1.2, color: '#f59e0b' },
+    })
+    series.push({
+      type: 'line', data: d.kdj.j, smooth: true,
+      xAxisIndex: kdjGridIdx, yAxisIndex: kdjGridIdx,
+      name: 'KDJ-J', symbol: 'none', lineStyle: { width: 1.2, color: '#a855f7' },
+    })
+  }
+
+  // RSI sub-chart
+  if (showRSI.value && d.rsi) {
+    rsiPct = gridHeights.rsi
+    const rsiOffset = mainPct + volPct + (showMACD.value ? macdPct : 0) + (showKDJ.value && d.kdj ? kdjPct : 0) + 2
+    const rsiGridIdx = grids.length
+    grids.push({ left: '6%', right: '3%', top: `${rsiOffset / totalPct * 100}%`, height: `${rsiPct / totalPct * 100}%` })
+    xAxes.push({ type: 'category', data: dates, gridIndex: rsiGridIdx, axisLabel: { show: false } })
+    yAxes.push({ gridIndex: rsiGridIdx, scale: true, splitNumber: 3, axisLabel: { show: true, fontSize: 10 }, min: 0, max: 100 })
+    series.push({
+      type: 'line', data: d.rsi, smooth: true,
+      xAxisIndex: rsiGridIdx, yAxisIndex: rsiGridIdx,
+      name: 'RSI(14)', symbol: 'none', lineStyle: { width: 1.2, color: '#ef4444' },
+    })
+  }
+
   return {
-    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'cross' },
+      formatter: (params) => {
+        const p = params[0]
+        if (!p) return ''
+        const idx = p.dataIndex
+        const date = dates[idx] || ''
+        const open = d.opens[idx]
+        const close = d.closes[idx]
+        const high = d.highs[idx]
+        const low = d.lows[idx]
+        return `<b>${date}</b><br/>开: ${open != null ? open.toFixed(3) : '—'}<br/>收: ${close != null ? close.toFixed(3) : '—'}<br/>高: ${high != null ? high.toFixed(3) : '—'}<br/>低: ${low != null ? low.toFixed(3) : '—'}`
+      }
+    },
     legend: { show: true, top: 0, left: 'center', icon: 'roundRect', itemWidth: 12, itemHeight: 8 },
     grid: grids,
     xAxis: xAxes,

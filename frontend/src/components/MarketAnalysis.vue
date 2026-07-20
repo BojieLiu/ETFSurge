@@ -1,5 +1,13 @@
 <template>
   <div class="market-analysis">
+    <!-- Market Tabs (page-level filter for all sections) -->
+    <div class="market-tabs" role="tablist">
+      <button v-for="mt in marketTabs" :key="mt.value" :class="['market-tab', { active: marketTab === mt.value }]" @click="marketTab = mt.value" role="tab" :aria-selected="marketTab === mt.value">
+        <span class="market-tab-indicator" aria-hidden="true"></span>
+        {{ mt.label }}
+      </button>
+    </div>
+
     <!-- Section 1: Market Overview -->
     <section class="section-card">
       <div class="section-header">
@@ -142,7 +150,7 @@
             <p>加载自选列表中...</p>
           </div>
 
-          <div v-else-if="!watchlist.length" class="empty-state">
+          <div v-else-if="!filteredWatchlist.length" class="empty-state">
             <div class="empty-icon" aria-hidden="true">⭐</div>
             <p class="empty-title">暂无自选标的</p>
             <p class="empty-desc">点击"添加自选"开始关注您感兴趣的标的</p>
@@ -168,7 +176,7 @@
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="item in watchlist" :key="item.id" class="watchlist-row">
+                <tr v-for="item in filteredWatchlist" :key="item.id" class="watchlist-row">
                   <td><code>{{ item.symbol }}</code></td>
                   <td><strong>{{ item.name }}</strong></td>
                   <td><span class="type-badge" :class="item.asset_type.toLowerCase()">{{ item.asset_type }}</span></td>
@@ -255,12 +263,7 @@
       </div>
     </section>
 
-    <!-- Market Tabs (filter for sections 2-4) -->
-    <div class="market-tabs" role="tablist">
-      <button v-for="mt in marketTabs" :key="mt.value" :class="['market-tab', { active: marketTab === mt.value }]" @click="marketTab = mt.value" role="tab" :aria-selected="marketTab === mt.value">{{ mt.label }}</button>
-    </div>
-
-    <!-- Section 2: Sector Analysis -->
+    <!-- Section 2: Sector Analysis (filtered by marketTab) -->
     <section class="section-card">
       <div class="section-header">
         <h2 class="section-title">
@@ -333,6 +336,12 @@
           <div v-if="selectedSectorName" class="selected-badge">
             <span class="badge-text">{{ selectedSectorName }} ({{ selectedSectorCode }})</span>
             <AppButton variant="ghost" size="xs" @click="clearSector" aria-label="清除选择">×</AppButton>
+          </div>
+
+          <!-- Empty State -->
+          <div v-if="!selectedSectorCode && !sectorLoading && !sectorError && !sectorReport" class="empty-prompt">
+            <span class="prompt-icon" aria-hidden="true">💡</span>
+            <p>选择板块开始分析</p>
           </div>
 
           <!-- Loading / Error / Report -->
@@ -415,7 +424,7 @@
               variant="primary"
               @click="analyzeSymbol"
               :loading="symbolLoading"
-              :disabled="symbolLoading || !selectedSearchItem"
+              :disabled="symbolLoading || !canAnalyzeSymbol"
             >
               <span class="btn-icon" aria-hidden="true" v-if="!symbolLoading">🧠</span>
               <span class="animate-spin" v-else aria-hidden="true">⏳</span>
@@ -807,6 +816,7 @@ async function sendAdviceQuery() {
       include_market_data: true,
       include_news: true,
       portfolio_symbols: [],
+      market: marketTab.value,
     }
     const res = await analysisApi.llmAdvice(query, context)
     adviceResponse.value = res.data.advice || res.data
@@ -820,9 +830,9 @@ async function sendAdviceQuery() {
 async function fetchWatchlist() {
   watchlistLoading.value = true
   try {
-    const { watchlist: storeWatchlist, fetchWatchlist } = useMarketStore()
-    await storeWatchlist()
-    watchlist.value = storeWatchlist.value
+    const store = useMarketStore()
+    await store.fetchWatchlist()
+    watchlist.value = store.watchlist
   } catch (e) {
     console.error('Failed to fetch watchlist:', e)
   } finally {
@@ -875,11 +885,13 @@ async function addWatchlist() {
   watchlistAdding.value = true
   searchSuggestions.value = []
   try {
-    const { addWatchlist } = useMarketStore()
-    await addWatchlist(watchlistForm.value.symbol, watchlistForm.value.asset_type, watchlistForm.value.notes)
+    const store = useMarketStore()
+    const result = await store.addWatchlist(watchlistForm.value.symbol, watchlistForm.value.asset_type, watchlistForm.value.notes)
+    console.log('[Watchlist] Add response:', result)
     showAddWatchlist.value = false
     watchlistForm.value = { symbol: '', asset_type: 'A', notes: '' }
-    await fetchWatchlist()
+    // Background refresh (store already did optimistic unshift)
+    fetchWatchlist()
     toast('添加成功', 'success')
     nextTick(() => {
       watchlistTableRef.value?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
@@ -1083,6 +1095,20 @@ const faChartHeight = computed(() => Math.max(480, window.innerHeight - 500))
 const faSignalText = computed(() => ({ buy: '买入', sell: '卖出', hold: '持有' })[faSignal.value?.signal] || '')
 const faSignalIcon = computed(() => ({ buy: '⬆️', sell: '⬇️', hold: '➡️' })[faSignal.value?.signal] || '')
 
+const canAnalyzeSymbol = computed(() => {
+  if (selectedSearchItem.value) return true
+  const q = searchQuery.value.trim()
+  if (!q) return false
+  // Manual mode: treat non-empty query as direct symbol input
+  return q.length >= 2
+})
+
+const filteredWatchlist = computed(() => {
+  if (!watchlist.value.length) return []
+  if (marketTab.value === 'global') return watchlist.value
+  return watchlist.value.filter(item => item.asset_type === marketTab.value)
+})
+
 const symbolReport = ref('')
 const symbolLoading = ref(false)
 const symbolError = ref('')
@@ -1254,7 +1280,16 @@ async function fetchFAChart() {
 const { streaming: symbolStreaming, fullText: symbolStreamText, start: startSymbolStream, disclaimer: symbolStreamDisclaimer } = useLLMStream()
 
 async function analyzeSymbol() {
-  if (!selectedSearchItem.value) return
+  if (!selectedSearchItem.value) {
+    const q = searchQuery.value.trim()
+    if (!q) return
+    // Manual mode: create a virtual search item from the raw query
+    selectedSearchItem.value = {
+      symbol: q,
+      name: q,
+      type: 'ETF'
+    }
+  }
   symbolLoading.value = true
   symbolReport.value = ''
   symbolError.value = ''
@@ -1553,10 +1588,14 @@ async function analyzeIndex() {
   }
 }
 
-// Reload sectors and reset index navigation when market tab changes
+// Reload sectors and reset navigation when market tab changes
 watch(marketTab, () => {
   onSectorTypeChange()
   indexActiveIndex.value = -1
+  // Clear symbol search on tab change
+  clearSearchItem()
+  // Reload indices for the new market
+  loadIndexMeta()
 })
 
 // Load index meta on mount
@@ -1586,10 +1625,49 @@ onMounted(() => {
 .page-description { margin-top: var(--space-1); font-size: var(--font-size-base); color: var(--color-text-secondary); line-height: var(--line-height-relaxed); }
 
 /* Market Tabs */
-.market-tabs { display: flex; gap: var(--space-2); margin-bottom: var(--space-6); border-bottom: 1px solid var(--color-border-light); padding-bottom: var(--space-2); }
-.market-tab { padding: var(--space-2) var(--space-4); font-size: var(--font-size-sm); font-weight: var(--font-weight-medium); color: var(--color-text-secondary); border: none; background: none; cursor: pointer; border-radius: var(--radius-md); transition: var(--transition-fast); }
-.market-tab:hover { background: var(--color-bg-secondary); color: var(--color-text-primary); }
-.market-tab.active { background: var(--color-bg-brand-subtle); color: var(--color-brand-600); font-weight: var(--font-weight-semibold); }
+.market-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: var(--space-8);
+  border-bottom: 2px solid var(--color-border-light);
+  padding: 0;
+  background: var(--color-surface-secondary);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+.market-tab {
+  position: relative;
+  padding: var(--space-3) var(--space-6);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  border: none;
+  background: none;
+  cursor: pointer;
+  transition: var(--transition-fast);
+  letter-spacing: var(--letter-spacing-wide);
+}
+.market-tab:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-secondary);
+}
+.market-tab.active {
+  color: var(--color-brand-600);
+  font-weight: var(--font-weight-semibold);
+  background: var(--color-bg-brand-subtle);
+}
+.market-tab.active::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--color-brand-600);
+  border-radius: var(--radius-full) var(--radius-full) 0 0;
+}
+.market-tab-indicator {
+  display: none;
+}
 
 /* Section Card */
 .section-card { }

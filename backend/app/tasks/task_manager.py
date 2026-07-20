@@ -163,17 +163,30 @@ async def design_worker(mgr: TaskManager, task_id: int) -> None:
                 await db.refresh(record)
                 design_id = record.id
         except Exception as e:
-            logger.warning("[design_worker] failed to save design history: %s", e)
+            logger.exception("[design_worker] failed to save design history: %s", e)
 
-        mgr.update_task(task_id, progress=100, status="completed",
-                        result={"strategies": strategies, "market_context": market_context, "design_id": design_id})
-        await _notify(task_id, "completed", progress=100, task=mgr.get_task(task_id))
+        # 检查结果是否有效：空策略 = 失败（数据源不可用导致）
+        error_info = result.get("error")
+        if error_info:
+            error_msg = f"{error_info}: {result.get('detail', '数据管道未能产出候选标的')}"
+            logger.warning("[design_worker] task %d completed but has error: %s", task_id, error_msg)
+            mgr.update_task(task_id, progress=0, status="failed", error_message=error_msg)
+            await _notify(task_id, "failed", progress=0)
+        elif not strategies:
+            logger.warning("[design_worker] task %d completed with 0 strategies — treating as failure", task_id)
+            mgr.update_task(task_id, progress=0, status="failed",
+                            error_message="策略生成为空：数据源不可用或未找到符合条件的 ETF")
+            await _notify(task_id, "failed", progress=0)
+        else:
+            mgr.update_task(task_id, progress=100, status="completed",
+                            result={"strategies": strategies, "market_context": market_context, "design_id": design_id})
+            await _notify(task_id, "completed", progress=100, task=mgr.get_task(task_id))
 
         logger.info("[design_worker] task %d completed with %d strategies",
                     task_id, len(strategies))
 
     except Exception as e:
         error_msg = str(e)
-        logger.warning("[design_worker] task %d failed: %s", task_id, error_msg)
+        logger.exception("[design_worker] task %d failed: %s", task_id, error_msg)
         mgr.update_task(task_id, status="failed", progress=0, error_message=error_msg)
         await _notify(task_id, "failed", progress=0)

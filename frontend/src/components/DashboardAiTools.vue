@@ -10,13 +10,13 @@
     <div class="core-actions-body">
       <!-- Feature Entrances -->
       <div v-if="!activeCoreFeature" class="core-actions-grid">
-        <button class="core-action-btn" @click="enterDesignMode" :disabled="designStep === 'loading'" aria-label="智能设计 ETF 组合方案">
+        <button class="core-action-btn" @click="enterDesignMode" aria-label="智能设计 ETF 组合方案">
           <span class="action-icon" aria-hidden="true">&#10024;</span>
           <div class="action-content">
             <span class="action-title">智能设计ETF组合方案</span>
             <span class="action-desc">输入资金，一键生成进攻/平衡/防御三种风格组合</span>
           </div>
-          <span v-if="designStep === 'loading'" class="action-loading" aria-hidden="true">&#9203;</span>
+          <span v-if="designStep === 'loading'" class="action-running-badge">任务进行中</span>
         </button>
 
         <button class="core-action-btn" @click="enterStrategyMode" :disabled="checkingStrategy">
@@ -36,6 +36,38 @@
         </button>
       </div>
 
+      <!-- Strategy Type Selection Modal -->
+      <div v-if="showStrategyModal" class="modal-overlay" @click.self="showStrategyModal = false">
+        <div class="modal-container">
+          <div class="modal-header">
+            <h3>选择分析类型</h3>
+            <button class="modal-close" @click="showStrategyModal = false">&times;</button>
+          </div>
+          <div class="modal-body">
+            <p class="modal-desc">请选择需要检查的组合类型：</p>
+            <div class="strategy-type-options">
+              <div class="strategy-type-card" @click="selectStrategyType('on_exchange')">
+                <span class="st-icon">&#127881;</span>
+                <div class="st-content">
+                  <span class="st-title">场内组合分析</span>
+                  <span class="st-desc">分析交易所上市 ETF 组合（股票、行业 ETF 等）</span>
+                </div>
+              </div>
+              <div class="strategy-type-card" @click="selectStrategyType('off_exchange')">
+                <span class="st-icon">&#127974;</span>
+                <div class="st-content">
+                  <span class="st-title">场外组合分析</span>
+                  <span class="st-desc">分析场外基金组合（联接基金、指数增强等）</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <AppButton variant="ghost" @click="showStrategyModal = false">取消</AppButton>
+          </div>
+        </div>
+      </div>
+
       <!-- History Panel (accessible from main page) -->
       <div v-if="activeCoreFeature === 'history'" class="panel-body">
         <div class="history-panel" v-if="designHistoryList.length > 0 || !historyLoaded">
@@ -49,6 +81,7 @@
             <div v-for="h in designHistoryList" :key="h._type + '-' + h.id" class="history-item"
                  @click="h._type === 'check' ? loadCheckDetail(h.id) : loadHistoryDetail(h.id)">
               <span class="history-icon">{{ h._type === 'check' ? '🔍' : '💡' }}</span>
+              <span class="history-task-type" :class="h._type">{{ h._type === 'design' ? '智能组合设计' : '策略检查与分析' }}</span>
               <span class="history-date">{{ formatDate(h.created_at) }}</span>
               <span v-if="h._type === 'design'" class="history-capital">{{ (h.capital / 10000).toFixed(0) }}万</span>
               <span v-if="h._type === 'design'" class="history-style">{{ h.risk_profile ? riskProfileLabel(h.risk_profile) : '组合方案' }}</span>
@@ -119,7 +152,7 @@
         </div>
         <div v-else class="feature-card loading-card">
           <div class="loading-spinner-pulse"></div>
-          <h3 class="loading-title">正在生成组合方案</h3>
+          <h3 class="loading-title">智能组合设计生成中...</h3>
           <p class="loading-text">{{ loadingText }}</p>
           <div class="loading-progress">
             <div class="progress-bar">
@@ -486,6 +519,7 @@ const strategyError = ref('')
 const strategyTaskStatus = ref('')  // 'running' | 'completed' | 'failed' | ''
 const strategyPortfolioType = ref('')  // ''=all, 'on_exchange', 'off_exchange'
 const reportError = ref('')  // LLM 报告错误信息
+const showStrategyModal = ref(false)
 
 const designReportHtml = computed(() => {
   if (!designResult.value?.design_text) return ''
@@ -725,11 +759,21 @@ async function enterDesignMode() {
 }
 
 function enterStrategyMode() {
-  activeCoreFeature.value = 'strategy'
+  // Show type selection modal instead of going directly to wizard
   strategyResult.value = null
   checkingStrategy.value = false
   strategyTaskStatus.value = ''
   strategyError.value = ''
+  strategyPortfolioType.value = ''
+  showStrategyModal.value = true
+}
+
+function selectStrategyType(type) {
+  strategyPortfolioType.value = type
+  showStrategyModal.value = false
+  activeCoreFeature.value = 'strategy'
+  // Start check immediately with the selected type
+  checkStrategy()
 }
 
 function enterHistoryMode() {
@@ -2011,6 +2055,168 @@ async function checkStrategy() {
 
 .history-item:hover .history-detail-link {
   opacity: 1;
+}
+
+/* History task type badge */
+.history-task-type {
+  font-size: var(--font-size-2xs);
+  padding: var(--space-0) var(--space-2);
+  border-radius: var(--radius-full);
+  white-space: nowrap;
+  font-weight: var(--font-weight-medium);
+  flex-shrink: 0;
+}
+.history-task-type.design {
+  background: #e3f2fd;
+  color: #1565c0;
+  border: 1px solid #bbdefb;
+}
+.history-task-type.check {
+  background: #fff3e0;
+  color: #e65100;
+  border: 1px solid #ffe0b2;
+}
+
+/* Running badge on design button */
+.action-running-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font-size: var(--font-size-2xs);
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: #e53935;
+  color: #fff;
+  font-weight: var(--font-weight-semibold);
+  animation: pulse-badge 2s ease-in-out infinite;
+}
+
+@keyframes pulse-badge {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+/* Strategy Type Selection Modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: var(--space-4);
+}
+
+.modal-container {
+  background: var(--color-surface-primary, #fff);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl, 0 20px 60px rgba(0,0,0,0.3));
+  max-width: 480px;
+  width: 100%;
+  overflow: hidden;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+}
+
+.modal-close {
+  border: none;
+  background: none;
+  font-size: 1.5em;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  padding: var(--space-1);
+  line-height: 1;
+  border-radius: var(--radius-sm);
+}
+
+.modal-close:hover {
+  background: var(--color-bg-secondary);
+}
+
+.modal-body {
+  padding: var(--space-5);
+}
+
+.modal-desc {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin: 0 0 var(--space-4);
+}
+
+.modal-footer {
+  padding: var(--space-3) var(--space-5);
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  justify-content: center;
+}
+
+/* Strategy type option cards */
+.strategy-type-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.strategy-type-card {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: all var(--transition-normal);
+  background: var(--color-surface-secondary);
+}
+
+.strategy-type-card:hover {
+  border-color: var(--color-primary);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.st-icon {
+  font-size: 1.8em;
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary);
+  flex-shrink: 0;
+}
+
+.st-content {
+  flex: 1;
+}
+
+.st-title {
+  display: block;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  margin-bottom: 4px;
+}
+
+.st-desc {
+  display: block;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.4;
 }
 </style>
 

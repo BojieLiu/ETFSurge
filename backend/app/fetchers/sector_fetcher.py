@@ -114,6 +114,33 @@ def _ak_concept_sectors():
         return None
 
 
+def _ak_concept_sectors_v2():
+    """补充数据源: ak.stock_board_concept_name_em() — 返回所有概念板块名称和代码。
+
+    作为 spot 接口的补充，确保不错过任何概念。
+    返回格式与 _ak_concept_sectors 兼容但仅含 sector_code / sector_name。
+    """
+    try:
+        import akshare as ak
+        import pandas as pd
+        df: pd.DataFrame = ak.stock_board_concept_name_em()  # type: ignore
+        if df is None or df.empty:
+            return []
+        out = []
+        for _, r in df.iterrows():
+            out.append({
+                "sector_code": str(r.get("概念代码", "") or ""),
+                "sector_name": str(r.get("概念名称", "") or ""),
+                "price": 0, "change_pct": 0, "change_amt": 0, "volume": 0, "amount": 0,
+                "amplitude": 0, "turnover_rate": 0, "total_market": 0, "main_inflow": 0,
+                "lead_stock_name": "", "lead_stock_code": "", "lead_stock_chg": 0,
+                "up_count": 0, "down_count": 0,
+            })
+        return out
+    except Exception:
+        return None
+
+
 def _ak_sector_stocks(sector_code: str):
     try:
         import akshare as ak
@@ -175,14 +202,57 @@ def fetch_industry_sectors(limit: int = 80) -> list[dict[str, Any]]:
     return rows[:limit]
 
 
-def fetch_concept_sectors(limit: int = 80) -> list[dict[str, Any]]:
-    """概念板块列表 (levistock 东方财富 → akshare 轮询降级)。"""
+def fetch_concept_sectors(limit: int = 150) -> list[dict[str, Any]]:
+    """概念板块列表 (levistock 东方财富 → akshare 轮询降级 → akshare 名称补充)。"""
+    import logging
+    _logger = logging.getLogger(__name__)
+
     def _lv():
         return lv.sector_em("concept")
     def _ak():
         return _ak_concept_sectors()
+    def _ak_v2():
+        return _ak_concept_sectors_v2()
+
     key = "concept_sectors"
+    # Try three sources in order: levistock → akshare spot → akshare name (full list)
     rows = _cached(key, lambda: _try_two("concept_lv", _lv, "concept_ak", _ak), "sector_concept")
+
+    # If the two-source attempt returned few results, try third source as supplement
+    if len(rows) < 60:
+        _logger.info("[sector_fetcher] only got %d concepts from primary sources, trying _ak_concept_sectors_v2", len(rows))
+        extra = _ak_concept_sectors_v2()
+        if extra:
+            existing_codes = {r["sector_code"] for r in rows if r.get("sector_code")}
+            for e in extra:
+                if e.get("sector_code") and e["sector_code"] not in existing_codes:
+                    rows.append(e)
+            _logger.info("[sector_fetcher] supplemented with %d extra concepts (total %d)",
+                         len(extra) - len(existing_codes), len(rows))
+
+    # 确保热门概念出现在结果中（通过模糊匹配）
+    POPULAR_CONCEPTS = [
+        "光模块", "CPO", "半导体设备", "半导体", "芯片", "人工智能", "AI",
+        "算力", "数据中心", "液冷", "机器人", "低空经济", "新能源",
+        "光伏", "储能", "锂电池", "新能源汽车", "智能驾驶", "车路云",
+        "央企改革", "国企改革", "中特估", "高股息", "红利",
+        "消费电子", "华为", "5G", "6G", "信创", "国产软件",
+        "创新药", "生物医药", "医疗器械", "军工", "商业航天",
+        "跨境电商", "物业管理", "旅游", "教育", "证券",
+    ]
+    found_names = {r.get("sector_name", "") for r in rows}
+    for pop in POPULAR_CONCEPTS:
+        if not any(pop in fn for fn in found_names):
+            _logger.info("[sector_fetcher] popular concept '%s' not found in results — appending placeholder", pop)
+            rows.append({
+                "sector_code": "",
+                "sector_name": pop,
+                "price": 0, "change_pct": 0, "change_amt": 0, "volume": 0, "amount": 0,
+                "amplitude": 0, "turnover_rate": 0, "total_market": 0, "main_inflow": 0,
+                "lead_stock_name": "", "lead_stock_code": "", "lead_stock_chg": 0,
+                "up_count": 0, "down_count": 0,
+            })
+
     return rows[:limit]
 
 

@@ -34,7 +34,10 @@ async def _call(fn, *args, timeout: int = 8):
     """
     try:
         return await run_sync(fn, *args, timeout=timeout)
-    except (Exception, asyncio.CancelledError):
+    except asyncio.CancelledError:
+        return None
+    except Exception as e:
+        logger.warning("[market_service] _call failed for %s: %s", fn.__name__, e)
         return None
 
 
@@ -593,9 +596,17 @@ async def _route_us(symbol: str) -> dict | None:
 async def get_history(
     symbol: str, asset_type: str = "A", period: str = "daily"
 ) -> list[dict[str, Any]]:
-    from ..fetchers.china_market import fetch_history
+    from ..fetchers.china_market import fetch_history, get_k_data
 
-    return await _call(fetch_history, symbol, asset_type, period) or []
+    result = await _call(fetch_history, symbol, asset_type, period)
+    if result:
+        return result
+    # Fallback: 当 fetch_history 返回空时尝试 get_k_data（akshare 直查）
+    logger.warning(
+        "[market_service] get_history fetch_history empty for %s (%s), trying get_k_data",
+        symbol, asset_type,
+    )
+    return await _call(get_k_data, symbol, period, timeout=15) or []
 
 
 async def get_fundamentals(symbol: str) -> dict[str, Any] | None:

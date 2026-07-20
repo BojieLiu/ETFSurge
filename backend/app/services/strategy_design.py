@@ -36,7 +36,7 @@ async def generate_enhanced_design(
     except asyncio.TimeoutError:
         logger.warning("[strategy_design] pool_manager.refresh timed out, using cached")
     except Exception as e:
-        logger.error("[strategy_design] pool_manager.refresh failed: %s", e)
+        logger.exception("[strategy_design] pool_manager.refresh failed")
 
     # 2. 读取管道产出
     factor_matrix = pool_manager.get_factor_matrix() or {}
@@ -45,70 +45,95 @@ async def generate_enhanced_design(
         "satellite": pool_manager.get_pool("satellite") or [],
         "defense": pool_manager.get_pool("defense") or [],
     }
+
+    # 2b. 检查候选池是否为空
+    total_candidates = sum(len(v) for v in candidates.values())
+    if total_candidates == 0:
+        logger.warning("[strategy_design] empty candidate pool, returning early error")
+        return {
+            "strategies": [],
+            "market_context": _build_market_context(pool_manager),
+            "generated_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "design_metadata": {"version": "v5-engine", "elapsed_seconds": 0, "regime": "unknown"},
+            "error": "无候选标的",
+            "detail": "数据管道未能生成候选池，请检查数据源连接或稍后重试",
+        }
+
     market_regime = pool_manager.get_market_regime() or "range_bound"
     market_context = _build_market_context(pool_manager)
 
-    # 3. 策略引擎：一次调用生成所有方案
-    strategies_raw = engine_allocate(
-        factor_matrix=factor_matrix,
-        candidates=candidates,
-        regime=market_regime,
-    )
+    try:
+        # 3. 策略引擎：一次调用生成所有方案
+        strategies_raw = engine_allocate(
+            factor_matrix=factor_matrix,
+            candidates=candidates,
+            regime=market_regime,
+        )
 
-    # 4. 转换为前端期望的 etfs 字段名
-    strategies = []
-    for s in strategies_raw:
-        allocs = s.pop("allocations", [])
-        # Apply risk controls before assembling
-        risk_allocations = apply_risk_controls([{"etfs": allocs}], factor_matrix, candidates)
-        allocs = risk_allocations[0]["etfs"] if risk_allocations else allocs
+        # 4. 转换为前端期望的 etfs 字段名
+        strategies = []
+        for s in strategies_raw:
+            allocs = s.pop("allocations", [])
+            # Apply risk controls before assembling
+            risk_allocations = apply_risk_controls([{"etfs": allocs}], factor_matrix, candidates)
+            allocs = risk_allocations[0]["etfs"] if risk_allocations else allocs
 
-        # enrich rationale using engine/rationale.py
-        for a in allocs:
-            if a.get("symbol") == "CASH":
-                continue
-            code = a["symbol"]
-            sym_meta = _find_candidate_meta(code, candidates)
-            a["selection_rationale"] = build_rationale(
-                code=code,
-                layer=a.get("layer", "satellite"),
-                strategy=s.get("id", "balanced"),
-                meta=sym_meta,
-                factor_scores=a.get("factor_breakdown", {}),
-                regime=market_regime,
-                industry=sym_meta.get("industry", "") if sym_meta else None,
-            )
+            # enrich rationale using engine/rationale.py
+            for a in allocs:
+                if a.get("symbol") == "CASH":
+                    continue
+                code = a["symbol"]
+                sym_meta = _find_candidate_meta(code, candidates)
+                a["selection_rationale"] = build_rationale(
+                    code=code,
+                    layer=a.get("layer", "satellite"),
+                    strategy=s.get("id", "balanced"),
+                    meta=sym_meta,
+                    factor_scores=a.get("factor_breakdown", {}),
+                    regime=market_regime,
+                    industry=sym_meta.get("industry", "") if sym_meta else None,
+                )
 
-        # Calculate cash
-        total_weight = sum(a.get("weight", 0) for a in allocs if a.get("symbol") != "CASH")
-        cash_weight = round(1.0 - total_weight, 4)
-        if cash_weight > 0:
-            allocs.append({
-                "symbol": "CASH", "name": "现金", "layer": "cash",
-                "weight": cash_weight, "selection_rationale": "流动性管理",
-            })
+            # Calculate cash
+            total_weight = sum(a.get("weight", 0) for a in allocs if a.get("symbol") != "CASH")
+            cash_weight = round(1.0 - total_weight, 4)
+            if cash_weight > 0:
+                allocs.append({
+                    "symbol": "CASH", "name": "现金", "layer": "cash",
+                    "weight": cash_weight, "selection_rationale": "流动性管理",
+                })
 
-        s["etfs"] = allocs
-        # Add target_amount for each allocation
-        for a in s["etfs"]:
-            a["target_amount"] = round(capital * a.get("weight", 0), 2)
-        strategies.append(s)
+            s["etfs"] = allocs
+            # Add target_amount for each allocation
+            for a in s["etfs"]:
+                a["target_amount"] = round(capital * a.get("weight", 0), 2)
+            strategies.append(s)
 
-    # 5. 组装返回
-    elapsed = time.monotonic() - start_time
-    logger.info("[strategy_design] v5 orchestrator generated %d strategies in %.1fs",
-                len(strategies), elapsed)
+        # 5. 组装返回
+        elapsed = time.monotonic() - start_time
+        logger.info("[strategy_design] v5 orchestrator generated %d strategies in %.1fs",
+                    len(strategies), elapsed)
 
-    return {
-        "strategies": strategies,
-        "market_context": market_context,
-        "generated_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "design_metadata": {
-            "version": "v5-engine",
-            "elapsed_seconds": round(elapsed, 1),
-            "regime": market_regime,
-        },
-    }
+        return {
+            "strategies": strategies,
+            "market_context": market_context,
+            "generated_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "design_metadata": {
+                "version": "v5-engine",
+                "elapsed_seconds": round(elapsed, 1),
+                "regime": market_regime,
+            },
+        }
+    except Exception as e:
+        logger.exception("[strategy_design] generate_enhanced_design failed")
+        return {
+            "strategies": [],
+            "market_context": market_context,
+            "generated_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "design_metadata": {"version": "v5-engine", "elapsed_seconds": round(time.monotonic() - start_time, 1), "regime": market_regime},
+            "error": "策略生成失败",
+            "detail": str(e),
+        }
 
 
 def _build_market_context(pool_manager) -> dict:

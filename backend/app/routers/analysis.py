@@ -367,6 +367,7 @@ async def sector_analysis(req: SectorAnalysisRequest):
             indices=[],
             commodities=[],
             market_data=news,
+            factor_scores=sector_momentum,
         )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM sector analysis failed: {e}")
@@ -515,9 +516,15 @@ async def llm_report_stream(req: LLMReportRequest):
 
     try:
         report = await generate_market_report(indices, commodities, market_data, indicators, enriched_news, [])
-        # Return as SSE with a single done event since generate_market_report is non-streaming
+        # 分块 SSE 推送，兼容前端 useLLMStream 的 chunk 事件消费
         async def event_generator():
             disclaimer = "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
+            # 将完整报告拆分为 ~100 字符的 chunk
+            chunk_size = 100
+            for i in range(0, len(report), chunk_size):
+                chunk_text = report[i:i + chunk_size]
+                yield f"event: chunk\ndata: {json.dumps({'text': chunk_text})}\n\n"
+            # 最终 done 事件携带完整文本
             yield f"event: done\ndata: {json.dumps({'full_text': report, 'disclaimer': disclaimer})}\n\n"
 
         return StreamingResponse(

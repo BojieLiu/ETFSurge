@@ -209,7 +209,7 @@
       </div>
 
       <!-- Empty State -->
-      <div v-if="!currentEtfs.length" class="empty-state">
+      <div v-if="!cachedEtfs.length" class="empty-state">
         <div class="empty-icon" aria-hidden="true">📦</div>
         <h3 class="empty-title">还没有 ETF</h3>
         <p class="empty-description">在上方搜索并添加 ETF 到组合</p>
@@ -221,7 +221,12 @@
 
       <!-- Table -->
       <div v-else class="table-responsive">
-        <table class="data-table" role="grid">
+        <!-- Loading overlay -->
+        <div v-if="paginating" class="paginating-overlay">
+          <div class="paginating-spinner"></div>
+          <span>加载中...</span>
+        </div>
+        <table class="data-table" role="grid" :class="{ 'paginating': paginating }">
           <thead>
             <tr>
               <th scope="col">代码</th>
@@ -238,7 +243,7 @@
             </tr>
           </thead>
           <tbody>
-             <template v-for="etf in currentEtfs" :key="etf.symbol">
+             <template v-for="etf in paginatedEtfs" :key="etf.symbol">
                <tr
                  :class="{ 'etf-row--selected': etf.symbol === props.selectedSymbol }"
                  :aria-selected="etf.symbol === props.selectedSymbol"
@@ -296,11 +301,8 @@
                   @keydown.enter="saveCostBasis(etf)"
                 />
                 <span v-else class="shares-value text-mono" @dblclick="startEditShares(etf)">
-                  {{ etf.shares_held != null ? etf.shares_held.toLocaleString() : '—' }}
+                  {{ formatShares(etf.shares_held) }}
                 </span>
-              </td>
-              <td class="cost-basis-cell text-mono">
-                {{ etf.cost_basis != null ? '¥' + formatNum(etf.cost_basis) : '—' }}
               </td>
               <td class="price-cell">
                 <span v-if="pnlMap[etf.symbol]?.current_price" class="text-mono">¥{{ pnlMap[etf.symbol].current_price.toFixed(2) }}</span>
@@ -326,7 +328,7 @@
               </td>
             </tr>
             <tr v-if="etf.portfolio_type === 'off_exchange'" class="ta-expand">
-              <td :colspan="11">
+              <td :colspan="10">
                  <div class="off-ta">
                    <button class="ta-toggle" @click.stop="toggleTa(etf)">
                     {{ taOpen[etf.symbol] ? '收起技术分析 ▲' : '查看技术分析 ▼' }}
@@ -362,6 +364,21 @@
             </template>
           </tbody>
         </table>
+        <!-- Pagination -->
+        <div class="pagination-bar" v-if="totalPages > 1">
+          <button class="page-btn" :disabled="currentPage <= 1 || paginating" @click="prevPage" aria-label="上一页">‹</button>
+          <template v-for="p in totalPages" :key="p">
+            <button
+              v-if="p === 1 || p === totalPages || Math.abs(p - currentPage) <= 2"
+              :class="['page-btn', { 'page-btn--active': p === currentPage }]"
+              @click="goToPage(p)"
+              :disabled="paginating"
+            >{{ p }}</button>
+            <span v-else-if="p === currentPage - 3 || p === currentPage + 3" class="page-ellipsis">…</span>
+          </template>
+          <button class="page-btn" :disabled="currentPage >= totalPages || paginating" @click="nextPage" aria-label="下一页">›</button>
+          <span class="page-info">共 {{ cachedEtfs.length }} 条，{{ totalPages }} 页</span>
+        </div>
       </div>
     </section>
   </div>
@@ -400,6 +417,26 @@ const pnlCapital = ref(500000)
 const pnlData = ref({ items: [] })
 const pnlLoading = ref(false)
 const adding = ref(false)
+
+// Pagination
+const currentPage = ref(1)
+const pageSize = ref(10)
+const paginating = ref(false)
+const cachedEtfs = ref([])
+
+const totalPages = computed(() => Math.max(1, Math.ceil(cachedEtfs.value.length / pageSize.value)))
+
+const paginatedEtfs = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return cachedEtfs.value.slice(start, start + pageSize.value)
+})
+
+function goToPage(page) {
+  if (page < 1 || page > totalPages.value || paginating.value) return
+  currentPage.value = page
+}
+function nextPage() { goToPage(currentPage.value + 1) }
+function prevPage() { goToPage(currentPage.value - 1) }
 
 const tabs = [
   { value: 'on_exchange', label: '场内 ETF' },
@@ -457,6 +494,12 @@ const formatChange = (n, isAmount = false) => {
 }
 
 const getChangeClass = (val) => val == null ? '' : val >= 0 ? 'text-up' : 'text-down'
+
+function formatShares(shares) {
+  if (shares == null) return 'N/A'
+  if (shares === 0) return '0'
+  return shares.toLocaleString()
+}
 
 // Search
 let searchTimer = null
@@ -622,15 +665,22 @@ async function refreshPnl() {
     pnlData.value = res.data || { items: [] }
   } catch { pnlData.value = { items: [] } }
   finally { pnlLoading.value = false }
+  // Ensure cachedEtfs is updated with latest store data after PnL refresh
+  cachedEtfs.value = currentEtfs.value
+  if (currentPage.value > totalPages.value) currentPage.value = 1
 }
 
 async function loadTab() {
+  paginating.value = true
   try {
     await store.fetchEtfs(activeTab.value)
+    cachedEtfs.value = currentEtfs.value
+    if (currentPage.value > totalPages.value) currentPage.value = 1
   } catch (e) {
     toast('加载持仓失败', 'error')
   }
   await refreshPnl()
+  paginating.value = false
 }
 
 async function loadSampleData() {
@@ -911,6 +961,57 @@ onMounted(loadTab)
 .text-muted { color: var(--color-text-tertiary); }
 
 .action-buttons { display: flex; gap: var(--space-2); }
+
+/* Pagination */
+.pagination-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  padding: var(--space-4) 0 0;
+  flex-wrap: wrap;
+}
+.page-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-primary);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+.page-btn:hover:not(:disabled) { border-color: var(--color-brand-500); color: var(--color-brand-600); }
+.page-btn--active { background: var(--color-brand-600); color: #fff; border-color: var(--color-brand-600); }
+.page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.page-ellipsis { color: var(--color-text-tertiary); padding: 0 var(--space-1); }
+.page-info { margin-left: var(--space-3); font-size: var(--font-size-xs); color: var(--color-text-tertiary); }
+
+/* Paginating overlay */
+.paginating-overlay {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-6);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+.paginating-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--color-border-light);
+  border-top-color: var(--color-brand-500);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+.data-table.paginating { opacity: 0.5; pointer-events: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
 
 /* Animations */
 .dropdown-enter-active, .dropdown-leave-active { transition: all var(--duration-fast) var(--ease-out); }

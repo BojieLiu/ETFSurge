@@ -429,11 +429,114 @@ async def generate_market_report(
     return await get_agent("market_report").run(prompt)
 
 
-async def generate_advice(query: str, context: dict[str, Any] | None = None) -> str:
-    prompt = f"用户提问: {query}\n\n"
-    if context:
-        prompt += f"上下文信息: {json.dumps(context, ensure_ascii=False)}\n\n"
-    prompt += "请给出专业、简洁的回答，控制在 500 字以内，使用 Markdown 格式"
+async def generate_advice(
+    query: str,
+    context: dict[str, Any] | None = None,
+) -> str:
+    """AI 投资顾问 — 基于市场数据、新闻、持仓生成结构化分析。
+
+    从 context 中提取 market_data / news / portfolio 等信息，
+    构建包含 4 个维度的分析框架，返回 Markdown 格式报告。
+    """
+    # ---- 提取 context 中的可用数据 ----
+    market_data = (context or {}).get("market_data", [])
+    news = (context or {}).get("news", [])
+    portfolio = (context or {}).get("portfolio", [])
+    market_snapshot = (context or {}).get("market_snapshot", "")
+
+    # ---- 1. 大盘概况 ----
+    idx_lines = []
+    if market_data:
+        for item in market_data[:8]:
+            name = item.get("name", item.get("symbol", "?"))
+            price = item.get("price", "N/A")
+            chg = item.get("change_pct", "")
+            vol = item.get("volume", "")
+            if chg != "":
+                idx_lines.append(
+                    f"- **{name}**: {price}，涨跌幅 {chg}%，成交量 {vol}"
+                )
+    idx_summary = "\n".join(idx_lines) if idx_lines else "（暂无实时指数数据）"
+
+    # ---- 2. 热点板块 ----
+    sector_lines = []
+    for item in market_data[:10]:
+        if item.get("asset_type") in ("sector", "concept", "industry", "plate"):
+            name = item.get("name", item.get("sector_name", "?"))
+            chg = item.get("change_pct", "")
+            flow = item.get("main_inflow", item.get("fund_flow", ""))
+            sector_lines.append(
+                f"- **{name}**: 涨跌幅 {chg}%，资金流向 {flow}"
+            )
+    sector_summary = "\n".join(sector_lines) if sector_lines else "（暂无板块数据）"
+
+    # ---- 3. 资金面/消息面 ----
+    fund_lines = []
+    fund_lines.append(f"- 市场快照:\n{market_snapshot}" if market_snapshot else "- 市场快照:（暂无）")
+    news_lines = []
+    if news:
+        for n in news[:8]:
+            title = n.get("title", n.get("content", ""))[:120]
+            news_lines.append(f"- {title}")
+    news_summary = "\n".join(news_lines) if news_lines else "（暂无重大新闻）"
+
+    # ---- 4. 组合/持仓概况 ----
+    portfolio_lines = []
+    if portfolio:
+        for p in portfolio[:10]:
+            sym = p.get("symbol", p.get("code", "?"))
+            name = p.get("name", "")
+            weight = p.get("target_weight", p.get("weight", ""))
+            portfolio_lines.append(f"- {name}({sym}): 目标权重 {weight}")
+    portfolio_summary = "\n".join(portfolio_lines) if portfolio_lines else "（用户未提供持仓信息）"
+
+    prompt = f"""你是一位专业的金融投资顾问。请根据以下数据，回答用户的问题。
+
+---
+## 用户问题
+{query}
+
+---
+## 一、大盘概况
+{idx_summary}
+
+---
+## 二、热点板块
+{sector_summary}
+
+---
+## 三、资金面 / 消息面
+{news_summary}
+
+---
+## 四、组合持仓概况
+{portfolio_summary}
+---
+
+请从以下 4 个维度给出结构化的 Markdown 分析报告：
+
+### 1. 大盘概况
+- 主要指数涨跌幅、**成交量变化**、涨跌家数比
+- **必须引用上面给出的具体数值**，例如"上证指数收盘 3200.5，涨幅 0.8%"
+
+### 2. 热点板块
+- 当日领涨 / 领跌板块及涨幅/跌幅
+- 资金流向（主力净流入/流出）
+
+### 3. 资金面 / 消息面
+- 北向资金动向、主力资金流向
+- 重大政策或新闻催化
+
+### 4. 后市展望与建议
+- 短期趋势判断、关键支撑/压力点位
+- 风险提示
+
+**格式要求：**
+- 使用 Markdown，关键数字和结论用 **加粗** 标注
+- 要点用 `-` 列表，语言专业、客观
+- 如有持仓信息，结合持仓给出个性化建议
+- 总字数控制在 600 字以内
+"""
     return await get_agent("advice").run(prompt)
 
 
@@ -636,6 +739,7 @@ async def generate_sector_analysis(
     indices: list[dict],
     commodities: list[dict],
     market_data: list[dict],
+    factor_scores: list[dict] | None = None,
 ) -> str:
     idx_map = {idx.get("name", ""): idx for idx in indices}
     comm_map = {c.get("name", ""): c for c in commodities}
@@ -652,8 +756,37 @@ async def generate_sector_analysis(
 - 上证指数: {idx_map.get('上证指数', {}).get('price', 'N/A')} ({idx_map.get('上证指数', {}).get('change_pct', 'N/A')}%)
 - 沪深300: {idx_map.get('沪深300', {}).get('price', 'N/A')} ({idx_map.get('沪深300', {}).get('change_pct', 'N/A')}%)
 - 黄金: {comm_map.get('黄金', {}).get('price', 'N/A')} ({comm_map.get('黄金', {}).get('change_pct', 'N/A')}%)
+"""
 
-请从以下维度分析：
+    # 注入因子/动量数据（如果有）
+    if factor_scores:
+        prompt += "\n### 因子评分 / 动量数据\n"
+        for fs in factor_scores[:15]:
+            name = fs.get("name", fs.get("symbol", "?"))
+            scores = fs.get("factor_scores", fs.get("scores", {}))
+            if scores and isinstance(scores, dict):
+                score_items = "；".join(
+                    f"{k}: {v:.2f}" for k, v in sorted(scores.items(), key=lambda x: -abs(x[1]))[:5]
+                )
+                prompt += f"- {name}: {score_items}\n"
+            else:
+                chg = fs.get("change_pct", "")
+                if chg != "":
+                    prompt += f"- {name}: 涨跌幅 {chg}%\n"
+
+    prompt += f"""
+**重要说明：**
+- 如果分析的概念包含跨市场标的（如同时在 A 股和港股上市的创新药），请明确指出当前分析的市场
+- **必须包含近 1-5 日的近期行情分析**，包括近期涨跌幅、成交量变化、板块内个股表现
+
+请从以下时间维度和分析维度进行全面分析：
+
+### 时间维度
+1. **短期（近 1-5 日）**：近期涨跌幅、成交量变化、板块内个股表现
+2. **中期（近 1 个月）**：趋势方向、主力资金动向
+3. **长期（近 3 个月以上）**：行业景气度、估值水平、政策持续性
+
+### 分析维度
 1. 行业基本面与景气度
 2. 技术面形态与关键位
 3. 资金流向与机构动向
@@ -661,7 +794,7 @@ async def generate_sector_analysis(
 5. 风险提示
 6. 操作建议（买入/持有/减仓区间）
 
- 控制在 600 字以内。"""
+  控制在 600 字以内。"""
     return await get_agent("sector_analysis").run(prompt)
 
 

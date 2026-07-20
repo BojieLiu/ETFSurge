@@ -114,7 +114,11 @@ class PoolManager:
         old_by_code = dict(self._by_code)
 
         # 1. 扫描全市场 → 3 层基础池
-        raw_layers = self.scanner.full_pipeline()
+        try:
+            raw_layers = self.scanner.full_pipeline()
+        except Exception as e:
+            logger.exception("[pool_manager] scanner.full_pipeline failed")
+            raw_layers = {"core": [], "satellite": [], "defense": []}
         raw_count = sum(len(v) for v in raw_layers.values())
         logger.info("PoolManager: scanned %d ETFs (%d core, %d sat, %d def)",
                      raw_count,
@@ -153,7 +157,7 @@ class PoolManager:
                     sym = item["symbol"]
                     item["factor_scores"] = factor_scores.get(sym, {})
             except Exception as e:
-                logger.warning("FactorRegistry compute failed: %s", e)
+                logger.exception("FactorRegistry compute failed: %s", e)
                 for item in flat:
                     item["factor_scores"] = {}
 
@@ -315,14 +319,24 @@ class PoolManager:
 
         return PoolDiff(added=added, removed=removed, changed=changed)
 
+    # 应急池已移除 — 数据源不可用时应报错而非用硬编码数据
+
     def get_pool(self, layer: str | None = None) -> dict[str, list[dict[str, Any]]] | list[dict[str, Any]]:
         """获取候选池。
 
         Args:
             layer: 指定层名。None 返回全池。
         """
+        # Check if main pool is empty → try emergency fallback
         if layer:
-            return self._pool.get(layer, [])
+            pool = self._pool.get(layer, [])
+            if not pool:
+                logger.warning("[pool_manager] get_pool('%s') returned empty — main pool may be stale", layer)
+            return pool
+
+        total = sum(len(v) for v in self._pool.values())
+        if total == 0:
+            logger.warning("[pool_manager] get_pool() called but main pool is empty — data source unavailable")
         return self._pool
 
     def get_by_code(self, symbol: str) -> dict[str, Any] | None:
@@ -366,7 +380,7 @@ class PoolManager:
                 self._regime_cache_ts = time.time()
                 logger.info("[pool] regime updated: %s", regime)
         except Exception as e:
-            logger.warning("[pool] update_market_regime failed: %s", e)
+            logger.exception("[pool] update_market_regime failed: %s", e)
 
     # ── 情绪缓存 ──────────────────────────────────────────
     _sentiment_cache: dict | None = None
@@ -398,6 +412,8 @@ class PoolManager:
                     continue
                 fs = item.get("factor_scores", {})
                 result[sym] = {k: v for k, v in fs.items() if isinstance(v, (int, float))}
+        if not result:
+            logger.warning("[pool_manager] get_factor_matrix() returned empty — pool may be empty or missing factor_scores")
         return result
 
     # ── 新闻缓存 ──────────────────────────────────────────
@@ -425,7 +441,7 @@ class PoolManager:
             self._news_cache_ts = time.time()
             logger.info("[pool] refreshed %d news items", len(all_news))
         except Exception as e:
-            logger.warning("[pool] refresh_news failed: %s", e)
+            logger.exception("[pool] refresh_news failed: %s", e)
 
 
 # Global singleton

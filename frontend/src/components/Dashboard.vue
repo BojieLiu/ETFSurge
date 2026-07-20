@@ -1,6 +1,15 @@
 <template>
   <div class="dashboard">
-    <GlobalIndicesStrip />
+    <div v-if="renderError" class="error-overlay">
+      <div class="error-card">
+        <span class="error-icon" aria-hidden="true">⚠️</span>
+        <h3>仪表盘加载异常</h3>
+        <p>发生意外错误，请刷新页面重试</p>
+        <AppButton variant="primary" @click="renderError = false; refreshAll()">重试</AppButton>
+      </div>
+    </div>
+    <template v-else>
+    <GlobalIndicesStrip ref="globalIndicesStripRef" />
 
 
     <!-- Portfolio Type Tabs -->
@@ -383,11 +392,12 @@
         <v-chart :option="pnlBarOption" :style="{ height: '350px' }" autoresize />
       </section>
     </template>
+    </template>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, onErrorCaptured, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
@@ -590,9 +600,17 @@ const pnlBarOption = computed(() => ({
 }))
 
 const marketStore = useMarketStore()
+const globalIndicesStripRef = ref(null)
+const renderError = ref(false)
+
+onErrorCaptured((err) => {
+  logger.error('[Dashboard] Uncaught error:', err)
+  renderError.value = true
+  return false
+})
 
 onMounted(async () => {
-  await Promise.all([fetchGlobalIndices(), fetchAllocations(), fetchPnl()])
+  await Promise.allSettled([fetchGlobalIndices(), fetchAllocations(), fetchPnl()])
   marketStore.connectWS((data) => {
     // Update matching global index in real-time (A-share indices pushed via WS)
     for (const region of Object.keys(globalIndices.value)) {
@@ -1287,4 +1305,35 @@ watch(() => route.path, () => {
   justify-content: flex-end;
 }
 
+/* Error overlay */
+.error-overlay {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-12) var(--space-6);
+}
+.error-card {
+  text-align: center;
+  max-width: 400px;
+  padding: var(--space-8);
+  background: var(--color-surface-primary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-md);
+}
+.error-icon {
+  font-size: var(--font-size-5xl);
+  display: block;
+  margin-bottom: var(--space-4);
+}
+.error-card h3 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+.error-card p {
+  margin: 0 0 var(--space-6);
+  font-size: var(--font-size-base);
+  color: var(--color-text-secondary);
+}
 </style>

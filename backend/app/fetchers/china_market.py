@@ -13,6 +13,7 @@
 """
 
 from typing import Any
+from ..core.logging import get_logger
 from ..utils.proxy import no_proxy
 from ..utils.decode import decode_df as _decode_df
 from ..core.ttl import CACHE_TTL
@@ -22,6 +23,8 @@ from ..core.async_utils import run_in_thread
 from ..fetchers import finnhub_fetcher
 from ..fetchers import alphavantage_fetcher
 from ..fetchers import fund_fetcher
+
+logger = get_logger(__name__)
 
 ASSET_TYPES = {
     "A": "A股ETF", "HK": "港股ETF", "US": "美股ETF",
@@ -87,6 +90,7 @@ def _mootdx_realtime(symbols: list[str]) -> list[dict[str, Any]]:
             client = _mootdx()
             df = client.quotes(symbol=symbols)
         if df is None or df.empty:
+            logger.warning("_mootdx_realtime returned empty for %s", symbols)
             return []
         results = []
         for _, row in df.iterrows():
@@ -106,6 +110,7 @@ def _mootdx_realtime(symbols: list[str]) -> list[dict[str, Any]]:
             })
         return results
     except Exception:
+        logger.warning("_mootdx_realtime exception for %s", symbols)
         return []
 
 
@@ -118,7 +123,9 @@ def _mootdx_history(symbol: str, period: str = "daily") -> list[dict[str, Any]]:
             client = _mootdx()
             df = client.bars(symbol=symbol, frequency=freq, start=0, count=count)
         if df is None or df.empty:
-            return []
+            logger.warning("_mootdx_history returned empty for %s (period=%s)", symbol, period)
+            # Fallback to akshare stock_zh_a_hist
+            return _akshare_history_fallback(symbol, period)
         results = []
         for _, row in df.iterrows():
             results.append({
@@ -130,6 +137,23 @@ def _mootdx_history(symbol: str, period: str = "daily") -> list[dict[str, Any]]:
                 "成交量": float(row.get("volume", 0) or 0),
             })
         return results
+    except Exception:
+        logger.warning("_mootdx_history exception for %s (period=%s)", symbol, period)
+        return _akshare_history_fallback(symbol, period)
+
+
+def _akshare_history_fallback(symbol: str, period: str = "daily") -> list[dict[str, Any]]:
+    """Fallback: 使用 akshare stock_zh_a_hist 获取 A 股历史 K 线。"""
+    try:
+        import pandas as pd
+        def _p():
+            import akshare as ak
+            return ak.stock_zh_a_hist(symbol=symbol, period=period, adjust="qfq")
+        df = run_in_thread(_p, timeout=15)
+        if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+            return []
+        _decode_df(df)
+        return df.to_dict(orient="records")
     except Exception:
         return []
 
@@ -662,6 +686,30 @@ def _fetch_akshare_history(symbol: str, asset_type: str, period: str) -> list[di
             if av_result:
                 return av_result
         return []
+    except Exception:
+        return []
+
+
+def get_k_data(symbol: str, period: str = "daily") -> list[dict[str, Any]]:
+    """获取A股历史K线（akshare直接查询，作为mootdx/sina降级后的兜底）。
+
+    Args:
+        symbol: 股票代码（如 "000001"）。
+        period: K线周期，如 "daily", "weekly", "monthly"。
+
+    Returns:
+        list[dict]: 每行包含 日期、开盘、最高、最低、收盘、成交量。
+    """
+    try:
+        import pandas as pd
+        def _p():
+            import akshare as ak
+            return ak.stock_zh_a_hist(symbol=symbol, period=period, adjust="qfq")
+        df = run_in_thread(_p, timeout=15)
+        if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+            return []
+        _decode_df(df)
+        return df.to_dict(orient="records")
     except Exception:
         return []
 
