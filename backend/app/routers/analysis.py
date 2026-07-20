@@ -95,16 +95,27 @@ class LLMReportRequest(BaseModel):
 
 @router.post("/llm-report")
 async def llm_report(req: LLMReportRequest):
-    """市场综合研判报告 — 使用编排器管道的 MarketContext。"""
+    """市场综合研判报告 — 优先使用编排器缓存，降级才自采。"""
+    # 尝试从编排器取缓存数据
+    from ..services.pool_manager import pool_manager
+
     try:
-        # 同时采集行情和资讯
+        regime = pool_manager.get_market_regime()
+        sentiment = pool_manager.get_market_sentiment()
+        if regime:
+            logger.debug("[llm-report] using orchestrator cache: regime=%s", regime)
+    except Exception:
+        regime = None
+        sentiment = None
+
+    try:
         from ..services.market_service import get_all_realtime, get_indices, get_commodities
         from ..fetchers.news_fetcher import fetch_news_headlines, fetch_macro_news
 
         results = await asyncio.gather(
-            asyncio.wait_for(get_all_realtime(), timeout=20),
-            asyncio.wait_for(get_indices(), timeout=20),
-            asyncio.wait_for(get_commodities(), timeout=20),
+            asyncio.wait_for(get_all_realtime(), timeout=15),
+            asyncio.wait_for(get_indices(), timeout=15),
+            asyncio.wait_for(get_commodities(), timeout=15),
             asyncio.to_thread(fetch_news_headlines),
             asyncio.to_thread(fetch_macro_news),
             return_exceptions=True,
@@ -116,9 +127,9 @@ async def llm_report(req: LLMReportRequest):
         market_data = _safe(results[0], [])
         indices = _safe(results[1], [])
         commodities = _safe(results[2], [])
-        news = _safe(results[3], [])
-        macro_news = _safe(results[4], [])
-        all_news = news + macro_news
+        news_items = _safe(results[3], [])
+        macro_items = _safe(results[4], [])
+        all_news = news_items + macro_items
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Market data fetch failed: {e}")
 
@@ -140,8 +151,20 @@ async def llm_report(req: LLMReportRequest):
         except Exception:
             continue
 
+    # 注入编排器的市场状态和情绪数据
+    enriched_news = all_news
+    if regime or sentiment:
+        context = []
+        if regime:
+            context.append(f"市场状态: {regime}")
+        if sentiment and isinstance(sentiment, dict):
+            s_idx = sentiment.get("sentiment_index", "")
+            s_lbl = sentiment.get("sentiment_label", "")
+            context.append(f"市场情绪: {s_lbl} ({s_idx}/100)" if s_idx else f"市场情绪: {s_lbl}")
+        if context:
+            enriched_news = [{"title": "【市场背景】" + " | ".join(context)}] + all_news
     try:
-        report = await generate_market_report(indices, commodities, market_data, indicators, all_news, [])
+        report = await generate_market_report(indices, commodities, market_data, indicators, enriched_news, [])
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM analysis failed: {e}")
     return {"report": report, "market_data": market_data[:10], "indices": indices[:10], "commodities": commodities[:6], "disclaimer": "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"}

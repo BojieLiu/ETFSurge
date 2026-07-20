@@ -322,12 +322,13 @@ async def calculate_daily_pnl(
     }
 
 
+import time as _time
+_strategy_check_cache: dict[str, tuple[float, dict]] = {}  # key -> (timestamp, result)
+
 async def strategy_check(db: AsyncSession, total_capital: float, design_data: dict | None = None) -> dict[str, Any]:
-    """v2: 因子评分 + regime 感知 + 结构化输出。"""
+    """v2: 因子评分 + regime 感知 + 结构化输出（60s LRU 缓存避免重复采集）。"""
     from ..analysis.llm import generate_strategy_check_report
     from ..factors.factor_registry import registry as factor_registry
-    from .market_trends import compute_etf_trends, detect_market_regime
-    from ..fetchers.china_market import fetch_index_realtime
     
     # Use design_data if provided, otherwise fall back to DB ETFs
     use_design = False
@@ -359,7 +360,13 @@ async def strategy_check(db: AsyncSession, total_capital: float, design_data: di
             return e.get(attr, default)
         return getattr(e, attr, default)
     
+    # 组合持仓计算缓存 key（按 symbol 列表 + capital 去重）
     symbols = [_get_attr(e, "symbol") for e in etfs if _get_attr(e, "symbol") != "CASH"]
+    cache_key = "_".join(sorted(symbols) if symbols else ["empty"])
+    cached = _strategy_check_cache.get(cache_key)
+    if cached and _time.monotonic() - cached[0] < 60:
+        logger.debug("[strategy_check] returning cached result")
+        return cached[1]
     
     # 并行采集（带 30s 总超时，任一失败不影响整体结果）
     indicators_task = _compute_indicators(symbols)
@@ -445,7 +452,7 @@ async def strategy_check(db: AsyncSession, total_capital: float, design_data: di
             "risk_warnings": [],
         }
     
-    return {
+    result = {
         "summary": llm_result.get("summary", ""),
         "suggestions": llm_result.get("suggestions", []),
         "holdings_analysis": llm_result.get("holdings_analysis", []),
@@ -453,6 +460,10 @@ async def strategy_check(db: AsyncSession, total_capital: float, design_data: di
         "market_regime": regime,
         "raw_llm": str(llm_result),
     }
+    # 缓存 60s
+    if cache_key:
+        _strategy_check_cache[cache_key] = (_time.monotonic(), result)
+    return result
 
 
 async def _compute_indicators(symbols: list[str]) -> dict:
