@@ -132,98 +132,8 @@ async def drift_check(
     return await calculate_weight_drift(db, portfolio_type)
 
 
-@router.post("/design")
-async def portfolio_design(
-    risk_profile: str = "balanced",
-    capital: float = 500000,
-    mode: str = "standard",
-    session_id: str | None = Query(None),
-    constraints: dict | None = None,
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    生成全市场ETF组合方案（核心+卫星+防御三层结构）。
-    mode 仅保留 'standard'（全市场扫描+卫星层两轮评分+情绪+指标股）。
-    历史遗留的 'fast' 分支依赖的 generate_design 已被移除，统一走 generate_full_design。
-    """
-    await asyncio.to_thread(asyncio.sleep, 0)  # yield control
-
-    if risk_profile not in ["defensive", "balanced", "aggressive"]:
-        raise HTTPException(status_code=400, detail="risk_profile must be 'defensive', 'balanced', or 'aggressive'")
-    if mode not in ["standard"]:
-        raise HTTPException(status_code=400, detail="mode must be 'standard'")
-
-    # 全量管道: 全市场扫描 + 情绪 + 指标股（generate_design 已废弃，统一走 generate_full_design）
-    from ..services.strategy_design import generate_full_design
-    result = await generate_full_design(capital=capital, constraints=constraints)
-    strategies = result["strategies"]
-    market_context = result["market_context"]
-    
-    # 保存到历史记录
-    design_id = None
-    try:
-        from ..models.portfolio_design import PortfolioDesign
-        design_record = PortfolioDesign(
-            capital=capital,
-            risk_profile=risk_profile,
-            strategies_json=json.dumps(strategies, ensure_ascii=False, default=str),
-            market_snapshot_json=json.dumps(market_context, ensure_ascii=False, default=str),
-        )
-        db.add(design_record)
-        await db.commit()
-        design_id = design_record.id
-    except Exception as e:
-        logger.warning("[portfolio] failed to save design history: %s", e)
-
-    # 如果传入 session_id，启动后台 LLM 报告推送
-    if session_id:
-        try:
-            from ..tasks.design_report import compose_and_push_report
-            asyncio.create_task(compose_and_push_report(
-                session_id=session_id,
-                strategies=strategies,
-                market_sentiment=market_context.get("market_sentiment", {}),
-                benchmark_stocks=market_context.get("benchmark_stocks", []),
-                market_context=market_context,
-                design_id=design_id,  # 报告完成后写回数据库
-            ))
-        except Exception as e:
-            logger.warning("[portfolio] failed to schedule design report: %s", e)
-
-    return {
-        "strategies": strategies,
-        "id": design_id,
-        "generated_at": datetime.utcnow().isoformat() + "Z",
-        "market_context": market_context
-    }
-
-
-@router.post("/design-enhanced")
-async def portfolio_design_enhanced(
-    risk_profile: str = "balanced",
-    capital: float = 500000,
-    mode: str = "enhanced",
-    constraints: dict | None = None,
-):
-    """
-    增强型组合设计 v4: 趋势数据 + 多因子评分 + 宏观状态感知 + 动态配置 + 风控。
-
-    mode='enhanced': 全链路增强设计（趋势+多因子+宏观+资讯映射+动态配置）
-    mode='standard': 回退到标准规则引擎
-    """
-    await asyncio.to_thread(asyncio.sleep, 0)
-    from datetime import datetime
-
-    if mode == "enhanced":
-        from ..services.strategy_design import generate_enhanced_design
-        result = await generate_enhanced_design(capital=capital, constraints=constraints)
-    else:
-        # fallback to standard
-        from ..services.strategy_design import generate_full_design
-        result = await generate_full_design(capital=capital, constraints=constraints)
-        result["design_metadata"] = {"version": "v3-standard", "note": "enhanced mode unavailable, fell back to standard"}
-
-    return result
+# ── /design 和 /design-enhanced 已迁移到 /design-async ──
+# 旧同步路由已移除，请使用 POST /portfolio/design-async
 
 
 # ── 设计历史记录 ──────────────────────────────────────────
@@ -370,7 +280,7 @@ async def delete_design(
 @router.get("/tasks/{task_id}")
 async def get_task_status(task_id: int):
     """查询异步任务状态。"""
-    from ..tasks.design_tasks import task_manager
+    from ..tasks.task_manager import task_manager
     task = task_manager.get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -378,7 +288,6 @@ async def get_task_status(task_id: int):
         "task_id": task["task_id"],
         "status": task["status"],
         "progress": task["progress"],
-        "design_id": task.get("design_id"),
         "error_message": task.get("error_message"),
         "created_at": task.get("created_at"),
         "completed_at": task.get("completed_at"),
@@ -388,7 +297,7 @@ async def get_task_status(task_id: int):
 @router.get("/tasks")
 async def list_tasks(limit: int = Query(10, ge=1, le=50), offset: int = Query(0, ge=0)):
     """列出最近的任务。"""
-    from ..tasks.design_tasks import task_manager
+    from ..tasks.task_manager import task_manager
     return task_manager.list_tasks(limit=limit, offset=offset)
 
 
@@ -400,10 +309,10 @@ async def portfolio_design_async(
 
     请求体: {capital: 500000, constraints: {...}}
     """
-    from ..tasks.design_tasks import task_manager, design_worker
+    from ..tasks.task_manager import task_manager, design_worker
     capital = task.get("capital", 500000)
     constraints = task.get("constraints")
-    t = task_manager.create_task(capital=capital, constraints=constraints)
+    t = task_manager.create_task(task_type="design", params={"capital": capital, "constraints": constraints})
     asyncio.create_task(design_worker(task_manager, t["task_id"]))
     from fastapi.responses import JSONResponse
     return JSONResponse(
@@ -421,14 +330,13 @@ async def strategy_check_async(task: dict):
 
     请求体: {capital: 500000, ...}
     """
-    import sys, traceback as tb_module
     try:
         from fastapi.responses import JSONResponse
-        from ..tasks.design_tasks import task_manager
+        from ..tasks.task_manager import task_manager
         from ..tasks.strategy_check_worker import strategy_check_worker
 
         total_capital = task.get("total_capital", 500000)
-        t = task_manager.create_task(capital=total_capital)
+        t = task_manager.create_task(task_type="check", params={"capital": total_capital})
         asyncio.create_task(strategy_check_worker(task_manager, t["task_id"]))
         return JSONResponse(
             status_code=202,
@@ -441,7 +349,7 @@ async def strategy_check_async(task: dict):
 @router.get("/strategy-check-result/{task_id}")
 async def get_strategy_check_result(task_id: int):
     """查询异步策略检查任务的结果。"""
-    from ..tasks.design_tasks import task_manager
+    from ..tasks.task_manager import task_manager
     from fastapi.responses import JSONResponse
 
     task = task_manager.get_task(task_id)
@@ -457,7 +365,7 @@ async def get_strategy_check_result(task_id: int):
             "stage": task.get("stage", ""),
         }
 
-    result = task.get("_result", {})
+    result = task.get("result", {})
     return {
         "task_id": task_id,
         "status": "completed",

@@ -54,7 +54,6 @@ export const portfolioApi = {
   dailyPnl: (totalCapital, type) => api.post('/portfolio/daily-pnl', { total_capital: totalCapital }, { params: type ? { portfolio_type: type } : {} }),
   getAllocation: (type, totalCapital) => api.post('/portfolio/calculate', { total_capital: totalCapital }, { params: type ? { portfolio_type: type } : {} }),
   getPnl: (type, totalCapital) => api.post('/portfolio/daily-pnl', { total_capital: totalCapital }, { params: type ? { portfolio_type: type } : {} }),
-  design: (params) => api.post('/portfolio/design', params, { timeout: 180000 }),
   strategyCheck: (data, config) => api.post('/portfolio/strategy-check', data, config),
   strategyCheckAsync: (data) => api.post('/portfolio/strategy-check-async', data),
   getStrategyCheckResult: (taskId) => api.get(`/portfolio/strategy-check-result/${taskId}`),
@@ -80,14 +79,6 @@ export const portfolioApi = {
     formData.append('skip_invalid', String(skipInvalid))
     return api.post('/portfolio/import', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
   },
-  // Design
-  design: (params) => {
-    const { capital = 500000, mode = 'standard', session_id, constraints } = params || {}
-    return api.post('/portfolio/design', constraints || {}, {
-      params: { capital, mode, ...(session_id ? { session_id } : {}) },
-      timeout: 180000,
-    })
-  },
   designAsync: (params) => {
     const { capital = 500000, constraints } = params || {}
     return api.post('/portfolio/design-async', { capital, constraints })
@@ -102,8 +93,7 @@ export const analysisApi = {
   llmReport: (symbols) => api.post('/analysis/llm-report', symbols, { timeout: 180000 }),
   llmAdvice: (query, context) => api.post('/analysis/llm-advice', context, { params: { query }, timeout: 180000 }),
   llmNewsAnalysis: () => api.post('/analysis/llm-news-analysis', {}, { timeout: 180000 }),
-  portfolioDesign: (params) => api.post('/analysis/portfolio-design', params, { timeout: 180000 }),
-  portfolioDesignStream: (params, onToken, onDone) => streamPost('/analysis/portfolio-design/stream', params, onToken, onDone),
+  // portfolioDesign / portfolioDesignStream 已移除 — 使用 POST /portfolio/design-async
   llmReportStream: (symbols, onToken, onDone) => streamPost('/analysis/llm-report/stream', symbols, onToken, onDone),
   llmAdviceStream: (query, context, onToken, onDone) => streamPost('/analysis/llm-advice/stream', context, onToken, onDone, { query }),
   sectorAnalysisStream: (params, onToken, onDone) => streamPost('/analysis/sector-analysis/stream', params, onToken, onDone),

@@ -12,8 +12,7 @@ from typing import Any
 
 from ..analysis.llm import (
     generate_market_report, generate_advice, analyze_news, analyze_news_impact,
-    generate_portfolio_design, generate_sector_analysis, generate_symbol_analysis,
-    _build_portfolio_design_prompt,
+    generate_sector_analysis, generate_symbol_analysis,
 )
 from ..analysis.registry import get_agent
 from ..services.market_service import (
@@ -29,7 +28,6 @@ from ..fetchers.sector_fetcher import (
 )
 from ..fetchers.fundamental_fetcher import fetch_fund_flow, fetch_hist_avg_volume
 from ..database import get_db
-from ..models.schemas import PortfolioDesignResponse
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
@@ -37,24 +35,6 @@ router = APIRouter(prefix="/api/v1/analysis", tags=["analysis"])
 
 
 FETCH_TIMEOUT = 45
-
-# Simple in-memory cache for market overview text (TTL: 30 seconds)
-_MARKET_OVERVIEW_CACHE = {"text": None, "timestamp": 0}
-_MARKET_OVERVIEW_TTL = 30  # seconds
-
-
-def _get_cached_market_overview():
-    """Get cached market overview text if still valid."""
-    now = time.time()
-    if _MARKET_OVERVIEW_CACHE["text"] and (now - _MARKET_OVERVIEW_CACHE["timestamp"]) < _MARKET_OVERVIEW_TTL:
-        return _MARKET_OVERVIEW_CACHE["text"]
-    return None
-
-
-def _set_cached_market_overview(text: str):
-    """Set market overview text in cache."""
-    _MARKET_OVERVIEW_CACHE["text"] = text
-    _MARKET_OVERVIEW_CACHE["timestamp"] = time.time()
 
 
 def _sse_stream(agent_generator):
@@ -105,107 +85,40 @@ class LLMReportRequest(BaseModel):
     symbols: list[str] | None = None
 
 
-async def _fetch_all_market():
-    from ..fetchers.yfinance_fetcher import fetch_us_etf_realtime
-    results = await asyncio.gather(
-        asyncio.wait_for(get_all_realtime(), timeout=20),
-        asyncio.wait_for(get_indices(), timeout=20),
-        asyncio.wait_for(get_commodities(), timeout=20),
-        return_exceptions=True,
-    )
-    def _safe(r, fallback):
-        return r if isinstance(r, list) else fallback
-    market_data = _safe(results[0], [])
-    indices = _safe(results[1], [])
-    commodities = _safe(results[2], [])
-
-    # Concurrently fetch US indices and commodities via yfinance
-    us_symbols = {"^GSPC": "标普500", "^IXIC": "纳斯达克", "^DJI": "道琼斯",
-                  "GC=F": "黄金", "CL=F": "原油", "SI=F": "白银"}
-    loop = asyncio.get_running_loop()
-    us_tasks = {}
-    for sym, name in us_symbols.items():
-        us_tasks[sym] = (name, loop.run_in_executor(None, fetch_us_etf_realtime, sym))
-
-    for sym, (name, task) in us_tasks.items():
-        try:
-            d = await asyncio.wait_for(task, timeout=10)
-            if d and d.get("price"):
-                d["name"] = name
-                if sym in ("GC=F", "CL=F", "SI=F"):
-                    commodities.append(d)
-                else:
-                    market_data.append(d)
-        except Exception:
-            pass
-
-    return market_data, indices, commodities
+# _fetch_all_market 已废弃 — 数据管道统一在编排器中采集
+# 参见 strategy_design.py 或 pool_manager.refresh()
 
 
-# --- Market Overview Caching (TTL: 30 seconds) ---
-_MARKET_OVERVIEW_CACHE = {"text": None, "timestamp": 0}
-_MARKET_OVERVIEW_TTL = 30  # seconds
-
-
-def _get_cached_market_overview():
-    """Get cached market overview text if still valid."""
-    now = time.time()
-    if _MARKET_OVERVIEW_CACHE["text"] and (now - _MARKET_OVERVIEW_CACHE["timestamp"]) < _MARKET_OVERVIEW_TTL:
-        return _MARKET_OVERVIEW_CACHE["text"]
-    return None
-
-
-def _set_cached_market_overview(text: str):
-    """Set market overview text in cache."""
-    _MARKET_OVERVIEW_CACHE["text"] = text
-    _MARKET_OVERVIEW_CACHE["timestamp"] = time.time()
-
-
-async def _collect_news():
-    """Collect news headlines and macro news asynchronously."""
-    loop = asyncio.get_running_loop()
-    news = await loop.run_in_executor(None, fetch_news_headlines)
-    if not news:
-        news = []
-    try:
-        macro = await loop.run_in_executor(None, fetch_macro_news)
-        if macro:
-            news.extend(macro)
-    except Exception:
-        pass
-    return news
-
-
-async def get_cached_market_overview() -> str:
-    """Get market overview text with 30-second TTL caching.
-    
-    Fetches market data and builds the overview text, caching for 30 seconds
-    to avoid redundant LLM prompts with identical data.
-    """
-    import time
-    now = time.time()
-    if _MARKET_OVERVIEW_CACHE["text"] and (now - _MARKET_OVERVIEW_CACHE["timestamp"]) < _MARKET_OVERVIEW_TTL:
-        return _MARKET_OVERVIEW_CACHE["text"]
-    
-    # Fetch fresh data
-    market_data, indices, commodities = await _fetch_all_market()
-    news = await _collect_news()
-    
-    # Build overview using the same logic as _build_market_overview
-    from ..analysis.llm import _build_market_overview
-    overview_text = _build_market_overview(indices, commodities, market_data, news, [])
-    
-    # Cache it
-    _MARKET_OVERVIEW_CACHE["text"] = overview_text
-    _MARKET_OVERVIEW_CACHE["timestamp"] = now
-    
-    return overview_text
+# --- Market Overview 已迁移到数据管道 ---
+# 不再使用独立缓存，统一由编排器提供
 
 
 @router.post("/llm-report")
 async def llm_report(req: LLMReportRequest):
+    """市场综合研判报告 — 使用编排器管道的 MarketContext。"""
     try:
-        market_data, indices, commodities = await _fetch_all_market()
+        # 同时采集行情和资讯
+        from ..services.market_service import get_all_realtime, get_indices, get_commodities
+        from ..fetchers.news_fetcher import fetch_news_headlines, fetch_macro_news
+
+        results = await asyncio.gather(
+            asyncio.wait_for(get_all_realtime(), timeout=20),
+            asyncio.wait_for(get_indices(), timeout=20),
+            asyncio.wait_for(get_commodities(), timeout=20),
+            asyncio.to_thread(fetch_news_headlines),
+            asyncio.to_thread(fetch_macro_news),
+            return_exceptions=True,
+        )
+
+        def _safe(r, fallback):
+            return r if isinstance(r, list) else fallback
+
+        market_data = _safe(results[0], [])
+        indices = _safe(results[1], [])
+        commodities = _safe(results[2], [])
+        news = _safe(results[3], [])
+        macro_news = _safe(results[4], [])
+        all_news = news + macro_news
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Market data fetch failed: {e}")
 
@@ -227,9 +140,8 @@ async def llm_report(req: LLMReportRequest):
         except Exception:
             continue
 
-    news = await _collect_news()
     try:
-        report = await generate_market_report(indices, commodities, market_data, indicators, news, [])
+        report = await generate_market_report(indices, commodities, market_data, indicators, all_news, [])
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM analysis failed: {e}")
     return {"report": report, "market_data": market_data[:10], "indices": indices[:10], "commodities": commodities[:6], "disclaimer": "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"}
@@ -246,7 +158,13 @@ async def llm_advice(query: str = Query(...), context: dict | None = None):
 
 @router.post("/llm-news-analysis")
 async def llm_news_analysis():
-    news = await _collect_news()
+    from ..fetchers.news_fetcher import fetch_news_headlines, fetch_macro_news
+    news = fetch_news_headlines() or []
+    try:
+        macro = fetch_macro_news() or []
+        news.extend(macro)
+    except Exception:
+        pass
     try:
         analysis = await analyze_news(news)
     except Exception as e:
@@ -262,109 +180,9 @@ async def news_impact(req: NewsImpactRequest):
     return result
 
 
-class PortfolioDesignRequest(BaseModel):
-    """组合设计请求体"""
-    capital: float = 500000
-
-
-@router.post("/portfolio-design")
-async def portfolio_design(req: PortfolioDesignRequest | None = None, db: AsyncSession = Depends(get_db)):
-    market_data, indices, commodities = await _fetch_all_market()
-    news = await _collect_news()
-    capital = req.capital if req else 500000
-
-    # Also fetch portfolio ETF prices
-    try:
-        etfs = await list_etfs(db)
-        if etfs:
-            pm = await build_price_map(etfs)
-            for e in etfs:
-                price, change_pct = pm.get(e.symbol, (0, 0))
-                market_data.append({
-                    "symbol": e.symbol, "name": e.name,
-                    "price": price, "change_pct": change_pct,
-                    "asset_type": e.asset_type, "portfolio_type": e.portfolio_type,
-                })
-    except Exception as exc:
-        logger.warning(f"[portfolio-design] ETF price fetch error: {exc}")
-
-    # Fetch additional data for enhanced LLM prompt
-    sector_data = {"industry_sectors": [], "concept_sectors": [], "hot_plates": [], "sector_heat": []}
-    fund_flows = {}
-    valuations = {}
-    try:
-        # Fetch sector/industry data (top 15 by change_pct)
-        industry_sectors = fetch_industry_sectors(15)
-        concept_sectors = fetch_concept_sectors(15)
-        hot_plates = fetch_hot_plates(10)
-        sector_heat = fetch_sector_heat(10)
-        sector_data = {
-            "industry_sectors": industry_sectors,
-            "concept_sectors": concept_sectors,
-            "hot_plates": hot_plates,
-            "sector_heat": sector_heat,
-        }
-    except Exception as exc:
-        logger.warning(f"[portfolio-design] Sector data fetch error: {exc}")
-
-    # Fetch fund flows and valuations for major ETF symbols
-    major_etf_symbols = ["510050", "510300", "510500", "159915", "588000", "513100", "518880", "512880", "159865", "513050"]
-    try:
-        for sym in major_etf_symbols:
-            flow = fetch_fund_flow(sym)
-            if flow:
-                fund_flows[sym] = flow
-            hist = fetch_hist_avg_volume(sym, 20)
-            if hist:
-                valuations[sym] = hist
-    except Exception as exc:
-        logger.warning(f"[portfolio-design] Fund flow/valuation fetch error: {exc}")
-
-    major_symbols = {"000001", "399001", "399006", "000688", "000300", "000016", "000905",
-                     "510050", "510300", "510500", "159915", "588000", "513100", "518880", "511880"}
-    filtered = [m for m in market_data if m.get("symbol", "") in major_symbols or m.get("asset_type", "") in ("index", "futures")]
-    if len(filtered) < 20 and market_data:
-        filtered = market_data[:50]
-
-    try:
-        result = await generate_portfolio_design(
-            indices, commodities, filtered, news, [],
-            capital=capital,
-            sector_data=sector_data,
-            fund_flows=fund_flows,
-            valuations=valuations,
-        )
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"LLM portfolio design failed: {e}")
-
-    # Validate response with Pydantic model
-    try:
-        validated = PortfolioDesignResponse(**result)
-        result = validated.model_dump()
-    except Exception as e:
-        logger.warning(f"[portfolio-design] Response validation failed: {e}")
-        # Return raw result if validation fails (backward compatibility)
-        pass
-
-    result["indices"] = indices[:8]
-    result["commodities"] = commodities[:6]
-    result["disclaimer"] = "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
-
-    # 添加市场情绪与指标股数据
-    try:
-        from ..fetchers.sentiment_fetcher import fetch_market_sentiment
-        result["market_sentiment"] = await fetch_market_sentiment()
-    except Exception as e:
-        logger.warning(f"[portfolio-design] sentiment fetch error: {e}")
-        result["market_sentiment"] = {"sentiment_index": 50, "sentiment_label": "\u4e2d\u6027"}
-    try:
-        from ..fetchers.benchmark_stocks import fetch_benchmark_stocks
-        result["benchmark_stocks"] = await fetch_benchmark_stocks()
-    except Exception as e:
-        logger.warning(f"[portfolio-design] benchmark stocks fetch error: {e}")
-        result["benchmark_stocks"] = []
-
-    return result
+# ── /portfolio-design 已废弃 ──
+# 组合设计功能已迁移到 POST /portfolio/design-async（引擎驱动）
+# 旧 LLM 路径不再维护
 
 
 class PortfolioReviewRequest(BaseModel):
@@ -541,72 +359,8 @@ async def llm_advice_stream(query: str = Query(...), context: dict | None = None
         raise HTTPException(status_code=502, detail=f"LLM streaming failed: {e}")
 
 
-@router.post("/portfolio-design/stream")
-async def portfolio_design_stream(req: PortfolioDesignRequest | None = None, db: AsyncSession = Depends(get_db)):
-    """流式组合设计"""
-    try:
-        market_data, indices, commodities = await _fetch_all_market()
-        news = await _collect_news()
-        capital = req.capital if req else 500000
-
-        # Also fetch portfolio ETF prices
-        try:
-            etfs = await list_etfs(db)
-            if etfs:
-                pm = await build_price_map(etfs)
-                for e in etfs:
-                    price, change_pct = pm.get(e.symbol, (0, 0))
-                    market_data.append({
-                        "symbol": e.symbol, "name": e.name,
-                        "price": price, "change_pct": change_pct,
-                        "asset_type": e.asset_type, "portfolio_type": e.portfolio_type,
-                    })
-        except Exception as exc:
-            logger.warning(f"[portfolio-design] ETF price fetch error: {exc}")
-
-        # Fetch additional data for enhanced LLM prompt
-        sector_data = {"industry_sectors": [], "concept_sectors": [], "hot_plates": [], "sector_heat": []}
-        fund_flows = {}
-        valuations = {}
-        try:
-            industry_sectors = fetch_industry_sectors(15)
-            concept_sectors = fetch_concept_sectors(15)
-            hot_plates = fetch_hot_plates(10)
-            sector_heat = fetch_sector_heat(10)
-            sector_data = {
-                "industry_sectors": industry_sectors,
-                "concept_sectors": concept_sectors,
-                "hot_plates": hot_plates,
-                "sector_heat": sector_heat,
-            }
-        except Exception as exc:
-            logger.warning(f"[portfolio-design] Sector data fetch error: {exc}")
-
-        major_etf_symbols = ["510050", "510300", "510500", "159915", "588000", "513100", "518880", "512880", "159865", "513050"]
-        try:
-            for sym in major_etf_symbols:
-                flow = fetch_fund_flow(sym)
-                if flow:
-                    fund_flows[sym] = flow
-                hist = fetch_hist_avg_volume(sym, 20)
-                if hist:
-                    valuations[sym] = hist
-        except Exception as exc:
-            logger.warning(f"[portfolio-design] Fund flow/valuation fetch error: {exc}")
-
-        # Build the enhanced prompt using the same logic as generate_portfolio_design
-        prompt = _build_portfolio_design_prompt(
-            indices, commodities, market_data, news, [],
-            capital=capital,
-            sector_data=sector_data,
-            fund_flows=fund_flows,
-            valuations=valuations,
-        )
-
-        agent = get_agent("portfolio_design")
-        return _sse_stream(agent.run_stream(prompt))
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"LLM streaming failed: {e}")
+# ── /portfolio-design/stream 已废弃 ──
+# 组合设计流式端点已移除，使用 POST /portfolio/design-async
 
 
 @router.post("/sector-analysis/stream")

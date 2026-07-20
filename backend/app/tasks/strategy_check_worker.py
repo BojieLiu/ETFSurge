@@ -110,7 +110,7 @@ async def strategy_check_worker(mgr, task_id: int) -> None:
 
 async def _notify(task_id: int, status: str, progress: int, stage: str = "") -> None:
     """通过 WS 广播任务状态变更。"""
-    from ..tasks.design_tasks import notify_manager
+    from ..tasks.task_manager import notify_manager
 
     await notify_manager.broadcast({
         "type": "task_update",

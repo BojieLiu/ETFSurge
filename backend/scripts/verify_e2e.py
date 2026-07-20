@@ -145,32 +145,21 @@ def main():
     except Exception as e:
         check("GET /market/indices", False, str(e))
 
-    section("6. AI 组合设计功能")
+    section("6. AI 组合设计功能（异步）")
 
     try:
-        r = requests.post(f"{BASE}/api/v1/portfolio/design", params={
-            "capital": 500000,
-            "mode": "standard",
-            "session_id": "e2e_verify",
-        }, json={}, timeout=60)
-        check(f"POST /design -> {r.status_code}", r.status_code == 200)
-        if r.status_code == 200:
-            data = r.json()
-            regime = data.get("market_context", {}).get("market_regime", "N/A")
-            check(f"market_regime 已判定", regime != "N/A", regime)
-            strategies = data.get("strategies", [])
-            check(f"strategies {len(strategies)} 套方案", len(strategies) >= 3,
-                  f"否（{len(strategies)}，期望3），可能是候选池为空")
-            for s in strategies:
-                lb = s.get("layer_budget", {})
-                def_pct = lb.get("defense", 0) * 100
-                core_pct = lb.get("core", 0) * 100
-                check(f"  {s['label']}: core={core_pct:.0f}% def={def_pct:.0f}%",
-                      core_pct > 0 and def_pct > 0)
+        r = requests.post(f"{BASE}/api/v1/portfolio/design-async", json={
+            "capital": 500000
+        }, timeout=30)
+        check(f"POST /design-async -> {r.status_code}", r.status_code in (200, 202))
+        if r.status_code in (200, 202):
+            task_data = r.json()
+            task_id = task_data.get("task_id")
+            check(f"设计任务已提交 task_id={task_id}", task_id is not None)
     except requests.Timeout:
-        check("POST /design", False, "请求超时（60s，外部数据源缓慢）")
+        check("POST /design-async", False, "请求超时（30s）")
     except Exception as e:
-        check("POST /design", False, str(e))
+        check("POST /design-async", False, str(e))
 
     # ── 6. 策略检查链路 ─────────────────────────────────────
     try:

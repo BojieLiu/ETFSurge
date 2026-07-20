@@ -104,7 +104,7 @@ async def design_report_ws(websocket: WebSocket, session_id: str):
 @router.websocket("/api/v1/ws/task-notifications")
 async def task_notifications_ws(websocket: WebSocket):
     """任务状态变更通知 WebSocket。"""
-    from ..tasks.design_tasks import notify_manager
+    from ..tasks.task_manager import notify_manager
 
     await websocket.accept()
     notify_manager.register(websocket)
