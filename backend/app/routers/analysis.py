@@ -172,8 +172,56 @@ async def llm_report(req: LLMReportRequest):
 
 @router.post("/llm-advice")
 async def llm_advice(query: str = Query(...), context: dict | None = None):
+    """AI 投资顾问 — 自动注入市场数据管道缓存。"""
+    from ..services.pool_manager import pool_manager
+
+    ctx = dict(context or {})
+
+    # 根据 query 关键词智能注入管道数据（零额外采集成本）
     try:
-        advice = await generate_advice(query, context)
+        q = query.lower()
+        injection_lines = []
+
+        if any(kw in q for kw in ["大盘", "今天", "最新", "走势", "行情"]):
+            regime = pool_manager.get_market_regime()
+            sentiment = pool_manager.get_market_sentiment()
+            if regime:
+                injection_lines.append(f"· 市场状态: {regime}")
+            if sentiment and isinstance(sentiment, dict):
+                idx = sentiment.get("sentiment_index", "?")
+                lbl = sentiment.get("sentiment_label", "?")
+                injection_lines.append(f"· 市场情绪: {lbl} ({idx}/100)")
+            # index_realtime from pool_manager or fallback
+            idx_data = pool_manager.get_index_realtime() or []
+            for item in idx_data[:5]:
+                injection_lines.append(
+                    f"· {item.get('name','?')}: {item.get('price','N/A')} ({item.get('change_pct',0):+.2f}%)"
+                )
+
+        if any(kw in q for kw in ["板块", "行业", "半导体", "新能源", "医药", "军工", "消费"]):
+            sector = pool_manager.get_sector_momentum() or []
+            for item in sector[:5]:
+                injection_lines.append(
+                    f"· {item.get('name','?')}: 涨跌幅 {item.get('change_pct',0):+.2f}%"
+                )
+
+        if any(kw in q for kw in ["政策", "利好", "利空", "监管", "新闻", "资讯"]):
+            news = pool_manager.get_news() or []
+            sentiment = pool_manager.get_market_sentiment()
+            if sentiment and isinstance(sentiment, dict):
+                lbl = sentiment.get("sentiment_label", "?")
+                injection_lines.append(f"· 市场情绪: {lbl}")
+            for n in news[:5]:
+                title = n.get("title", "")[:100]
+                injection_lines.append(f"· {title}")
+
+        if injection_lines:
+            ctx["market_snapshot"] = "\n".join(injection_lines)
+    except Exception as e:
+        logger.debug("[llm-advice] smart injection skipped: %s", e)
+
+    try:
+        advice = await generate_advice(query, ctx)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM advice failed: {e}")
     return {"advice": advice, "disclaimer": "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"}
