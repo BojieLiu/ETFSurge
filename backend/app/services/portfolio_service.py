@@ -361,23 +361,30 @@ async def strategy_check(db: AsyncSession, total_capital: float, design_data: di
     
     symbols = [_get_attr(e, "symbol") for e in etfs if _get_attr(e, "symbol") != "CASH"]
     
-    # 并行采集（带 60s 总超时，任一失败不影响整体结果）
+    # 并行采集（带 30s 总超时，任一失败不影响整体结果）
     indicators_task = _compute_indicators(symbols)
     factor_task = factor_registry.compute(symbols)
-    regime_task = _detect_regime(symbols)
 
     try:
-        indicators, factor_scores, regime_data = await asyncio.wait_for(
-            asyncio.gather(indicators_task, factor_task, regime_task, return_exceptions=True),
+        indicators, factor_scores = await asyncio.wait_for(
+            asyncio.gather(indicators_task, factor_task, return_exceptions=True),
             timeout=30,
         )
     except asyncio.TimeoutError:
         logger.warning("[strategy_check] data collection timed out after 30s, using partial results")
-        indicators, factor_scores, regime_data = {}, {}, ({}, [], "range_bound")
+        indicators, factor_scores = {}, {}
 
     indicators = indicators if isinstance(indicators, dict) else {}
     factor_scores = factor_scores if isinstance(factor_scores, dict) else {}
-    trends, index_realtime, regime = regime_data if isinstance(regime_data, tuple) else ({}, [], "range_bound")
+
+    # 市场状态统一从 pool_manager 读取（与设计管线一致，避免双套判定）
+    try:
+        from ..services.pool_manager import pool_manager
+        regime = pool_manager.get_market_regime() or "range_bound"
+    except Exception:
+        regime = "range_bound"
+    trends = {}
+    index_realtime = []
     
     # 构建 market_data with allocation info
     price_map = await build_price_map(etfs)
