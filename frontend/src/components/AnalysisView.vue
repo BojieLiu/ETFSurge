@@ -479,7 +479,8 @@ const chartOption = computed(() => {
         xAxisIndex: xAxes.map((_, i) => i),
         start: 60,
         end: 100,
-        zoomOnMouseWheel: true,
+        zoomOnMouseWheel: false,
+        moveOnMouseWheel: true,
         moveOnMouseMove: true,
       },
       {

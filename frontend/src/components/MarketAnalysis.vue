@@ -652,6 +652,7 @@ import AppInput from './ui/AppInput.vue'
 import AppSelect from './ui/AppSelect.vue'
 import { useLLMStream } from '@/composables/useLLMStream'
 import { useMarketStore } from '@/stores/market'
+import { analysisApi } from '@/api'
 
 use([CanvasRenderer, CandlestickChart, BarChart, LineChart, TitleComponent, TooltipComponent, GridComponent, LegendComponent, DataZoomComponent])
 
@@ -1347,7 +1348,7 @@ const faChartOption = computed(() => {
     xAxis: xAxes,
     yAxis: yAxes,
     dataZoom: [
-      { type: 'inside', xAxisIndex: xAxes.map((_, i) => i), start: 60, end: 100, zoomOnMouseWheel: true, moveOnMouseMove: true },
+      { type: 'inside', xAxisIndex: xAxes.map((_, i) => i), start: 60, end: 100, zoomOnMouseWheel: false, moveOnMouseWheel: true, moveOnMouseMove: true },
       { type: 'slider', xAxisIndex: xAxes.map((_, i) => i), bottom: 4, height: 18, start: 60, end: 100 },
     ],
     series,

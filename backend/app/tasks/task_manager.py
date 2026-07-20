@@ -98,15 +98,19 @@ class TaskNotifyManager:
 notify_manager = TaskNotifyManager()
 
 
-async def _notify(task_id: int, status: str, progress: int, stage: str = "") -> None:
-    """统一 WS 通知函数。stage 为可选进度文字描述。"""
-    await notify_manager.broadcast({
+async def _notify(task_id: int, status: str, progress: int, stage: str = "", task: dict | None = None) -> None:
+    """统一 WS 通知函数。stage 为可选进度文字描述。可传入 task 对象以携带额外字段。"""
+    payload = {
         "type": "task_update",
         "task_id": task_id,
         "status": status,
         "progress": progress,
         "stage": stage,
-    })
+        "design_id": None,
+    }
+    if status == "completed" and task and task.get("result"):
+        payload["design_id"] = task["result"].get("design_id")
+    await notify_manager.broadcast(payload)
 
 
 # ── Backward-compatible exports ─────────────────────────────────
@@ -163,7 +167,7 @@ async def design_worker(mgr: TaskManager, task_id: int) -> None:
 
         mgr.update_task(task_id, progress=100, status="completed",
                         result={"strategies": strategies, "market_context": market_context, "design_id": design_id})
-        await _notify(task_id, "completed", progress=100)
+        await _notify(task_id, "completed", progress=100, task=mgr.get_task(task_id))
 
         logger.info("[design_worker] task %d completed with %d strategies",
                     task_id, len(strategies))

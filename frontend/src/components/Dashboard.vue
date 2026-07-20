@@ -387,6 +387,8 @@ const route = useRoute()
 const { show: toast } = useToastStore()
 
 // State
+const globalIndices = ref({})
+const marketTimer = ref(null)
 const activeTab = ref('combined')
 const capitalOn = ref(500000)
 const capitalOff = ref(500000)
@@ -454,8 +456,19 @@ const formatNum = (n) => {
 }
 
 
+const fetchGlobalIndices = async () => {
+  try {
+    const res = await marketApi.indicesGlobal()
+    globalIndices.value = res.data?.indices || res.data || {}
+  } catch (e) {
+    logger.warn('[Dashboard] fetchGlobalIndices failed:', e)
+    globalIndices.value = {}
+  }
+}
+
 const refreshAll = async () => {
   await Promise.all([
+    fetchGlobalIndices(),
     fetchAllocations(),
     fetchPnl()
   ])

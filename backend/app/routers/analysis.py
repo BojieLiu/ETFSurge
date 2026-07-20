@@ -450,30 +450,85 @@ async def symbol_analysis(req: SymbolAnalysisRequest):
 
 @router.post("/llm-report/stream")
 async def llm_report_stream(req: LLMReportRequest):
-    """流式市场研判报告"""
+    """流式市场研判报告 — 使用与非流式端点相同的数据采集模式。"""
+    from ..services.pool_manager import pool_manager
+
     try:
-        # Fetch market data (same as non-streaming)
-        market_data, indices, commodities = await _fetch_all_market()
-        news = await _collect_news()
-        
-        # Get indicators for portfolio ETFs
-        indicators = {}
+        regime = pool_manager.get_market_regime()
+        sentiment = pool_manager.get_market_sentiment()
+    except Exception:
+        regime = None
+        sentiment = None
+
+    try:
+        results = await asyncio.gather(
+            asyncio.wait_for(get_all_realtime(), timeout=15),
+            asyncio.wait_for(get_indices(), timeout=15),
+            asyncio.wait_for(get_commodities(), timeout=15),
+            asyncio.to_thread(fetch_news_headlines),
+            asyncio.to_thread(fetch_macro_news),
+            return_exceptions=True,
+        )
+
+        def _safe(r, fallback):
+            return r if isinstance(r, list) else fallback
+
+        market_data = _safe(results[0], [])
+        indices = _safe(results[1], [])
+        commodities = _safe(results[2], [])
+        news_items = _safe(results[3], [])
+        macro_items = _safe(results[4], [])
+        all_news = news_items + macro_items
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Market data fetch failed: {e}")
+
+    if req.symbols:
+        market_data = [m for m in market_data if m.get("symbol") in req.symbols]
+    else:
+        major_symbols = {"000001", "399001", "399006", "000688", "000300", "510050", "510300", "510500", "159915"}
+        market_data = [m for m in market_data if m.get("symbol", "") in major_symbols or m.get("asset_type", "") in ("index", "futures")]
+
+    indicators = {}
+    for item in market_data[:5]:
+        if item.get("asset_type") in ("index", "futures"):
+            continue
         try:
-            etfs = await list_etfs(None)
-            for e in etfs:
-                hist = await asyncio.wait_for(get_history(e.symbol, e.asset_type), timeout=30)
-                ind = compute_all_indicators(hist) if hist else {}
-                if ind:
-                    indicators[e.symbol] = ind
+            hist = await asyncio.wait_for(get_history(item["symbol"], item["asset_type"]), timeout=30)
+            ind = compute_all_indicators(hist) if hist else {}
+            if ind:
+                indicators[item["symbol"]] = ind
         except Exception:
-            pass
-        
-        # Build prompt
-        prompt = _build_report_prompt(indices, commodities, market_data, indicators, news, [])
-        
-        # Stream from agent
-        agent = get_agent("market_report")
-        return _sse_stream(agent.run_stream(prompt))
+            continue
+
+    # 注入编排器的市场状态和情绪数据
+    enriched_news = all_news
+    if regime or sentiment:
+        context = []
+        if regime:
+            context.append(f"市场状态: {regime}")
+        if sentiment and isinstance(sentiment, dict):
+            s_idx = sentiment.get("sentiment_index", "")
+            s_lbl = sentiment.get("sentiment_label", "")
+            context.append(f"市场情绪: {s_lbl} ({s_idx}/100)" if s_idx else f"市场情绪: {s_lbl}")
+        if context:
+            enriched_news = [{"title": "【市场背景】" + " | ".join(context)}] + all_news
+
+    try:
+        report = await generate_market_report(indices, commodities, market_data, indicators, enriched_news, [])
+        # Return as SSE with a single done event since generate_market_report is non-streaming
+        async def event_generator():
+            disclaimer = "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
+            yield f"event: done\ndata: {json.dumps({'full_text': report, 'disclaimer': disclaimer})}\n\n"
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            }
+        )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM streaming failed: {e}")
 

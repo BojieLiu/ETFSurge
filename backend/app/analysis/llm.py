@@ -710,6 +710,7 @@ async def generate_symbol_analysis(
 
   控制在 500 字以内。"""
 
+    return await get_agent("symbol_analysis").run(prompt)
 
 # ── 设计报告 LLM 生成 ────────────────────────────────────
 

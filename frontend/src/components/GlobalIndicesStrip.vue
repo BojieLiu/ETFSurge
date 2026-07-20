@@ -59,9 +59,9 @@ function formatChange(pct) { return pct != null ? (pct > 0 ? '+' : '') + pct.toF
 async function fetchIndices() {
   loading.value = true
   try {
-    const res = await marketApi.fetchAll()
-    globalIndices.value = res.data || {}
-    emit('fetch', res.data)
+    const res = await marketApi.indicesGlobal()
+    globalIndices.value = res.data?.indices || res.data || {}
+    emit('fetch', globalIndices.value)
   } catch (e) {
     globalIndices.value = {}
   } finally {

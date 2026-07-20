@@ -287,6 +287,7 @@ async def get_task_status(task_id: int):
         "error_message": task.get("error_message"),
         "created_at": task.get("created_at"),
         "completed_at": task.get("completed_at"),
+        "result": task.get("result"),
     }
 
 

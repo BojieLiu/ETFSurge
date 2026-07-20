@@ -51,8 +51,8 @@
               <span class="history-icon">{{ h._type === 'check' ? '🔍' : '💡' }}</span>
               <span class="history-date">{{ formatDate(h.created_at) }}</span>
               <span v-if="h._type === 'design'" class="history-capital">{{ (h.capital / 10000).toFixed(0) }}万</span>
-              <span v-if="h._type === 'design'" class="history-style">3 套方案</span>
-              <span v-if="h._type === 'check'" class="history-style">{{ h.market_regime || '—' }}</span>
+              <span v-if="h._type === 'design'" class="history-style">{{ h.risk_profile ? riskProfileLabel(h.risk_profile) : '组合方案' }}</span>
+              <span v-if="h._type === 'check'" class="history-style">{{ regimeLabel(h.market_regime) }}</span>
               <span class="history-detail-link">查看详情</span>
             </div>
           </div>
@@ -315,8 +315,8 @@
               <span class="history-icon">{{ h._type === 'check' ? '🔍' : '💡' }}</span>
               <span class="history-date">{{ formatDate(h.created_at) }}</span>
               <span v-if="h._type === 'design'" class="history-capital">{{ (h.capital / 10000).toFixed(0) }}万</span>
-              <span v-if="h._type === 'design'" class="history-style">3 套方案</span>
-              <span v-if="h._type === 'check'" class="history-style">{{ h.market_regime || '—' }}</span>
+              <span v-if="h._type === 'design'" class="history-style">{{ h.risk_profile ? riskProfileLabel(h.risk_profile) : '组合方案' }}</span>
+              <span v-if="h._type === 'check'" class="history-style">{{ regimeLabel(h.market_regime) }}</span>
             </div>
           </div>
         </div>
@@ -765,6 +765,15 @@ function regimeLabel(regime) {
     bear: '熊市', defensive_rotate: '防御轮动', panic: '恐慌',
   }
   return labels[regime] || regime || '未知'
+}
+
+function riskProfileLabel(profile) {
+  const labels = {
+    aggressive: '进取型',
+    balanced: '平衡型',
+    defensive: '防御型',
+  }
+  return labels[profile] || profile || '组合方案'
 }
 
 function actionLabel(action) {
