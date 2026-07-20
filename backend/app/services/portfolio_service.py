@@ -467,11 +467,22 @@ async def strategy_check(db: AsyncSession, total_capital: float, design_data: di
 
 
 async def _compute_indicators(symbols: list[str]) -> dict:
-    """并行计算每只持仓的技术指标 + 信号。"""
+    """并行计算每只持仓的技术指标 + 信号。
+    
+    从 pool_manager 获取预计算的因子分矩阵传给 compute_all_indicators，
+    避免重复计算 RSI/KDJ/MACD。
+    """
     from .market_service import get_history
     from ..analysis.indicators import compute_all_indicators
     from ..analysis.signal import generate_signal
-    
+
+    # 复用 pool_manager 的因子分，免去重新计算 RSI/KDJ/MACD
+    try:
+        from ..services.pool_manager import pool_manager
+        factor_matrix = pool_manager.get_factor_matrix()
+    except Exception:
+        factor_matrix = {}
+
     results = {}
     hist_data = await asyncio.gather(
         *[get_history(sym, "A") for sym in symbols],
@@ -480,7 +491,8 @@ async def _compute_indicators(symbols: list[str]) -> dict:
     for sym, hist in zip(symbols, hist_data):
         if isinstance(hist, list) and hist:
             try:
-                ind = compute_all_indicators(hist)
+                sym_factors = factor_matrix.get(sym, {})
+                ind = compute_all_indicators(hist, factor_scores=sym_factors)
                 sig = generate_signal(ind)
                 ind["signal"] = sig
                 results[sym] = ind

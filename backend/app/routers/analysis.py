@@ -327,6 +327,27 @@ async def sector_analysis(req: SectorAnalysisRequest):
     except Exception:
         pass
 
+    # 注入编排器的市场状态和情绪数据
+    from ..services.pool_manager import pool_manager
+
+    try:
+        regime = pool_manager.get_market_regime()
+        sentiment = pool_manager.get_market_sentiment()
+    except Exception:
+        regime = None
+        sentiment = None
+
+    if regime or sentiment:
+        context_parts = []
+        if regime:
+            context_parts.append(f"市场状态: {regime}")
+        if sentiment and isinstance(sentiment, dict):
+            s_idx = sentiment.get("sentiment_index", "")
+            s_lbl = sentiment.get("sentiment_label", "")
+            context_parts.append(f"市场情绪: {s_lbl} ({s_idx}/100)" if s_idx else f"市场情绪: {s_lbl}")
+        if context_parts:
+            news = [{"title": "【市场背景】" + " | ".join(context_parts)}] + news
+
     try:
         report = await generate_sector_analysis(
             sector_code=sector_code,
@@ -365,6 +386,27 @@ async def symbol_analysis(req: SymbolAnalysisRequest):
         news.extend(macro)
     except Exception:
         pass
+
+    # 注入编排器的市场状态和情绪数据
+    from ..services.pool_manager import pool_manager
+
+    try:
+        regime = pool_manager.get_market_regime()
+        sentiment = pool_manager.get_market_sentiment()
+    except Exception:
+        regime = None
+        sentiment = None
+
+    if regime or sentiment:
+        context_parts = []
+        if regime:
+            context_parts.append(f"市场状态: {regime}")
+        if sentiment and isinstance(sentiment, dict):
+            s_idx = sentiment.get("sentiment_index", "")
+            s_lbl = sentiment.get("sentiment_label", "")
+            context_parts.append(f"市场情绪: {s_lbl} ({s_idx}/100)" if s_idx else f"市场情绪: {s_lbl}")
+        if context_parts:
+            news = [{"title": "【市场背景】" + " | ".join(context_parts)}] + news
 
     display_name = name or (realtime.get("name", "") if realtime else symbol)
     try:
