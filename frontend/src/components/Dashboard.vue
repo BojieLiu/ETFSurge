@@ -114,7 +114,30 @@
         </div>
       </article>
 
+      <!-- Cumulative P&L Loading Skeletons -->
+      <template v-if="pnlHistoryLoading">
+        <article class="card summary-card" v-if="activeTab !== 'off_exchange'">
+          <div class="summary-content">
+            <p class="summary-label">场内累计盈亏</p>
+            <Skeleton type="text" width="120" />
+          </div>
+        </article>
+        <article class="card summary-card" v-if="activeTab !== 'on_exchange'">
+          <div class="summary-content">
+            <p class="summary-label">场外累计盈亏</p>
+            <Skeleton type="text" width="120" />
+          </div>
+        </article>
+        <article class="card summary-card" v-if="activeTab === 'combined'">
+          <div class="summary-content">
+            <p class="summary-label">总累计盈亏</p>
+            <Skeleton type="text" width="120" />
+          </div>
+        </article>
+      </template>
+
       <!-- Cumulative P&L Summary Cards -->
+      <template v-else>
       <article class="card summary-card" v-if="activeTab !== 'off_exchange' && pnlHistory?.summary">
         <div class="summary-icon positive" aria-hidden="true">📊</div>
         <div class="summary-content">
@@ -147,6 +170,7 @@
           </p>
         </div>
       </article>
+      </template>
     </div>
 
     <!-- Loading Skeletons -->
@@ -1231,6 +1255,28 @@ watch(() => route.path, () => {
 
 /* P&L Card */
 .pnl-card { }
+
+/* Narrow Screen Responsive */
+@media (max-width: 480px) {
+  .summary-grid { grid-template-columns: 1fr; }
+  .tabs { flex-wrap: wrap; gap: var(--space-2); }
+  .capital-inputs .input-group.dual { flex-direction: column; }
+  .capital-bar { flex-direction: column; align-items: stretch; }
+  .capital-actions { justify-content: stretch; }
+  .capital-actions .btn { width: 100%; justify-content: center; }
+  .card-title { font-size: var(--font-size-base); }
+  .card-meta { flex-wrap: wrap; gap: var(--space-2); }
+  .summary-value { font-size: var(--font-size-lg); }
+}
+
+@media (max-width: 360px) {
+  .data-table th, .data-table td { padding: var(--space-2) var(--space-2); font-size: var(--font-size-xs); }
+  .data-table.alloc-table th, .data-table.alloc-table td { padding: var(--space-1) var(--space-2); }
+}
+
+@media (min-width: 320px) {
+  .dashboard { min-width: 0; }
+}
 
 /* AI Design Card */
 .ai-design-card { }

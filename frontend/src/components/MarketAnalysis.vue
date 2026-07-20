@@ -255,6 +255,11 @@
       </div>
     </section>
 
+    <!-- Market Tabs (filter for sections 2-4) -->
+    <div class="market-tabs" role="tablist">
+      <button v-for="mt in marketTabs" :key="mt.value" :class="['market-tab', { active: marketTab === mt.value }]" @click="marketTab = mt.value" role="tab" :aria-selected="marketTab === mt.value">{{ mt.label }}</button>
+    </div>
+
     <!-- Section 2: Sector Analysis -->
     <section class="section-card">
       <div class="section-header">
@@ -595,9 +600,9 @@
                 aria-haspopup="listbox"
               >
               <Transition name="fade">
-                <ul v-if="indexDropdownOpen && filteredIndices.length" class="search-dropdown" id="index-dropdown" role="listbox" @mousedown.prevent>
+                <ul v-if="indexDropdownOpen && filteredIndicesByTab.length" class="search-dropdown" id="index-dropdown" role="listbox" @mousedown.prevent>
                   <li
-                    v-for="(idx, i) in filteredIndices"
+                    v-for="(idx, i) in filteredIndicesByTab"
                     :key="idx.symbol"
                     :class="{ active: i === indexActiveIndex }"
                     class="search-item"
@@ -767,6 +772,15 @@ const searchSuggestionIndex = ref(-1)
 let suggestionSearchTimer = null
 const searchWrapRef = ref(null)
 const watchlistTableRef = ref(null)
+// Market tab state
+const marketTab = ref('A')
+const marketTabs = [
+  { value: 'A', label: 'A股' },
+  { value: 'HK', label: '港股' },
+  { value: 'US', label: '美股' },
+  { value: 'global', label: '全球' },
+]
+
 const watchlistAssetTypes = [
   { value: 'A', label: 'A股 ETF/股票' },
   { value: 'HK', label: '港股 ETF/股票' },
@@ -944,9 +958,10 @@ async function onSectorTypeChange() {
   sectorActiveIndex.value = -1
   sectorReport.value = ''
   try {
+    const market = marketTab.value === 'global' ? '' : marketTab.value
     const url = sectorType.value === 'industry'
-      ? '/api/v1/market/sectors/industry?limit=200'
-      : '/api/v1/market/sectors/concept?limit=200'
+      ? `/api/v1/market/sectors/industry?limit=200${market ? '&market=' + market : ''}`
+      : `/api/v1/market/sectors/concept?limit=200${market ? '&market=' + market : ''}`
     const data = await fetchJson(url)
     sectorList.value = Array.isArray(data) ? data : []
   } catch {
@@ -1219,7 +1234,7 @@ async function fetchFAChart() {
   faLoading.value = true
   try {
     const sym = selectedSearchItem.value.symbol
-    const at = selectedSearchItem.value?.type === 'index' ? 'index' : 'A'
+    const at = selectedSearchItem.value?.type === 'index' ? 'index' : marketTab.value
     const [chartRes, indRes, sigRes] = await Promise.all([
       fetchJson(`/api/v1/market/chart/${sym}?asset_type=${at}&period=${faPeriod.value}`),
       fetchJson(`/api/v1/market/indicators/${sym}?asset_type=${at}`),
@@ -1248,7 +1263,7 @@ async function analyzeSymbol() {
     const result = await startSymbolStream('/symbol-analysis/stream', {
       symbol: selectedSearchItem.value.symbol,
       name: selectedSearchItem.value.name,
-      asset_type: 'A',
+      asset_type: marketTab.value,
     }, (token) => {
       symbolReport.value += token
     })
@@ -1431,6 +1446,11 @@ const indexActiveIndex = ref(-1)
 const indexComboRef = ref(null)
 const indexList = ref([])
 const filteredIndices = ref([])
+const filteredIndicesByTab = computed(() => {
+  const list = filteredIndices.value
+  if (!list.length || marketTab.value === 'global') return list
+  return list.filter(idx => idx.market === marketTab.value)
+})
 const selectedIndexCode = ref('')
 const selectedIndexName = ref('')
 const indexLoading = ref(false)
@@ -1493,7 +1513,7 @@ function highlightIndex(text) {
 }
 
 function onIndexKeydown(e) {
-  const list = filteredIndices.value
+  const list = filteredIndicesByTab.value
   if (!indexDropdownOpen.value || !list.length) return
   if (e.key === 'ArrowDown') {
     e.preventDefault()
@@ -1533,6 +1553,12 @@ async function analyzeIndex() {
   }
 }
 
+// Reload sectors and reset index navigation when market tab changes
+watch(marketTab, () => {
+  onSectorTypeChange()
+  indexActiveIndex.value = -1
+})
+
 // Load index meta on mount
 onMounted(() => {
   onSectorTypeChange()
@@ -1558,6 +1584,12 @@ onMounted(() => {
 .page-header { margin-bottom: var(--space-2); }
 .page-title { font-size: var(--font-size-2xl); font-weight: var(--font-weight-bold); line-height: var(--line-height-tight); color: var(--color-text-primary); letter-spacing: var(--letter-spacing-tight); }
 .page-description { margin-top: var(--space-1); font-size: var(--font-size-base); color: var(--color-text-secondary); line-height: var(--line-height-relaxed); }
+
+/* Market Tabs */
+.market-tabs { display: flex; gap: var(--space-2); margin-bottom: var(--space-6); border-bottom: 1px solid var(--color-border-light); padding-bottom: var(--space-2); }
+.market-tab { padding: var(--space-2) var(--space-4); font-size: var(--font-size-sm); font-weight: var(--font-weight-medium); color: var(--color-text-secondary); border: none; background: none; cursor: pointer; border-radius: var(--radius-md); transition: var(--transition-fast); }
+.market-tab:hover { background: var(--color-bg-secondary); color: var(--color-text-primary); }
+.market-tab.active { background: var(--color-bg-brand-subtle); color: var(--color-brand-600); font-weight: var(--font-weight-semibold); }
 
 /* Section Card */
 .section-card { }
