@@ -27,6 +27,10 @@
             {{ summary.total.error_rate }}%
           </span>
         </div>
+        <div class="stat-card">
+          <span class="stat-label">预估费用 (¥)</span>
+          <span class="stat-value">{{ estimatedCost.toFixed(2) }}</span>
+        </div>
       </section>
 
       <!-- Tab: 日 / 月 -->
@@ -166,6 +170,11 @@ import logger from '../utils/logger'
 
 use([CanvasRenderer, LineChart, BarChart, TitleComponent, TooltipComponent, GridComponent, LegendComponent])
 
+const PRICING = {
+  'deepseek-chat': { input: 0.0005, output: 0.002 },    // ¥/1K tokens
+  'deepseek-reasoner': { input: 0.001, output: 0.004 },  // ¥/1K tokens
+}
+
 const loading = ref(true)
 const summary = ref({ total: {}, hourly: {}, daily: {}, by_function: {} })
 const timeseries = ref([])
@@ -208,6 +217,17 @@ const functionList = computed(() => {
   return Object.entries(fn)
     .map(([name, data]) => ({ name, ...data }))
     .sort((a, b) => b.total_tokens - a.total_tokens)
+})
+
+const estimatedCost = computed(() => {
+  const total = summary.value.total || {}
+  const promptTokens = total.prompt_tokens || 0
+  const completionTokens = total.completion_tokens || 0
+  // Use deepseek-chat pricing as default estimate
+  const inputPrice = PRICING['deepseek-chat'].input
+  const outputPrice = PRICING['deepseek-chat'].output
+  const cost = (promptTokens / 1000) * inputPrice + (completionTokens / 1000) * outputPrice
+  return cost
 })
 
 const trendOption = computed(() => {

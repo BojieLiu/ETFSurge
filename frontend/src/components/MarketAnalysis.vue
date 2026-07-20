@@ -86,12 +86,28 @@
               <div class="modal-body">
                 <div class="form-group">
                   <label class="form-label" for="wl-symbol">标的代码</label>
-                  <AppInput
-                    id="wl-symbol"
-                    v-model="watchlistForm.symbol"
-                    placeholder="如: 510050, 000001"
-                    @keydown.enter="addWatchlist"
-                  />
+                  <div class="search-wrap" ref="searchWrapRef">
+                    <AppInput
+                      id="wl-symbol"
+                      v-model="watchlistForm.symbol"
+                      placeholder="如: 510050, 000001"
+                      @keydown.enter="addWatchlist"
+                      @input="searchSymbols"
+                      @keydown="onWatchlistKeydown"
+                    />
+                    <ul v-if="searchSuggestions.length" class="search-dropdown" @mousedown.prevent>
+                      <li
+                        v-for="(s, i) in searchSuggestions"
+                        :key="s.symbol"
+                        :class="{ active: i === searchSuggestionIndex }"
+                        @click="selectSuggestion(s)"
+                        @mouseenter="searchSuggestionIndex = i"
+                      >
+                        <span class="suggestion-symbol">{{ s.symbol }}</span>
+                        <span class="suggestion-name">{{ s.name }}</span>
+                      </li>
+                    </ul>
+                  </div>
                 </div>
                 <div class="form-group">
                   <label class="form-label" for="wl-asset-type">资产类型</label>
@@ -137,7 +153,7 @@
           </div>
 
           <!-- Watchlist Table -->
-          <div v-else class="watchlist-table-wrapper">
+          <div v-else class="watchlist-table-wrapper" ref="watchlistTableRef">
             <table class="data-table watchlist-table" role="grid">
               <thead>
                 <tr>
@@ -507,7 +523,7 @@
               <span class="signal-icon" aria-hidden="true">{{ faSignalIcon }}</span>
               <span class="signal-text">{{ faSignalText }}</span>
             </div>
-            <div class="signal-score">评分: <strong>{{ faSignal.score }}</strong> / 100</div>
+            <div class="signal-score">评分: <strong>{{ faSignal.score }}</strong></div>
             <ul class="signal-reasons" v-if="faSignal.reasons?.length">
               <li v-for="(r, i) in faSignal.reasons" :key="i">{{ r }}</li>
             </ul>
@@ -641,7 +657,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { CandlestickChart, BarChart, LineChart } from 'echarts/charts'
@@ -652,7 +668,8 @@ import AppInput from './ui/AppInput.vue'
 import AppSelect from './ui/AppSelect.vue'
 import { useLLMStream } from '@/composables/useLLMStream'
 import { useMarketStore } from '@/stores/market'
-import { analysisApi } from '@/api'
+import { analysisApi, marketApi } from '@/api'
+import { useToastStore } from '@/stores/toast'
 
 use([CanvasRenderer, CandlestickChart, BarChart, LineChart, TitleComponent, TooltipComponent, GridComponent, LegendComponent, DataZoomComponent])
 
@@ -744,6 +761,12 @@ const watchlistForm = ref({
   notes: '',
 })
 const watchlistAdding = ref(false)
+const { show: toast } = useToastStore()
+const searchSuggestions = ref([])
+const searchSuggestionIndex = ref(-1)
+let suggestionSearchTimer = null
+const searchWrapRef = ref(null)
+const watchlistTableRef = ref(null)
 const watchlistAssetTypes = [
   { value: 'A', label: 'A股 ETF/股票' },
   { value: 'HK', label: '港股 ETF/股票' },
@@ -793,15 +816,60 @@ async function fetchWatchlist() {
   }
 }
 
+function searchSymbols() {
+  clearTimeout(suggestionSearchTimer)
+  const keyword = watchlistForm.value.symbol.trim()
+  if (!keyword) {
+    searchSuggestions.value = []
+    return
+  }
+  suggestionSearchTimer = setTimeout(async () => {
+    try {
+      const res = await marketApi.search(keyword)
+      searchSuggestions.value = (res.data || []).slice(0, 10)
+    } catch {
+      searchSuggestions.value = []
+    }
+  }, 300)
+}
+
+function onWatchlistKeydown(e) {
+  if (!searchSuggestions.value.length) return
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    searchSuggestionIndex.value = (searchSuggestionIndex.value + 1) % searchSuggestions.value.length
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    searchSuggestionIndex.value = (searchSuggestionIndex.value - 1 + searchSuggestions.value.length) % searchSuggestions.value.length
+  } else if (e.key === 'Enter' && searchSuggestionIndex.value >= 0) {
+    e.preventDefault()
+    selectSuggestion(searchSuggestions.value[searchSuggestionIndex.value])
+  } else if (e.key === 'Escape') {
+    searchSuggestions.value = []
+    searchSuggestionIndex.value = -1
+  }
+}
+
+function selectSuggestion(s) {
+  watchlistForm.value.symbol = s.symbol
+  searchSuggestions.value = []
+  searchSuggestionIndex.value = -1
+}
+
 async function addWatchlist() {
   if (!watchlistForm.value.symbol || watchlistAdding.value) return
   watchlistAdding.value = true
+  searchSuggestions.value = []
   try {
     const { addWatchlist } = useMarketStore()
     await addWatchlist(watchlistForm.value.symbol, watchlistForm.value.asset_type, watchlistForm.value.notes)
     showAddWatchlist.value = false
     watchlistForm.value = { symbol: '', asset_type: 'A', notes: '' }
     await fetchWatchlist()
+    toast('添加成功', 'success')
+    nextTick(() => {
+      watchlistTableRef.value?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    })
   } catch (e) {
     console.error('Add watchlist failed:', e)
   } finally {
@@ -1701,4 +1769,12 @@ onMounted(() => {
   .section-title { font-size: var(--font-size-lg); }
   .signal-badge { font-size: var(--font-size-lg); padding: var(--space-2) var(--space-4); }
 }
+
+/* Search dropdown */
+.search-wrap { position: relative; width: 100%; }
+.search-dropdown { position: absolute; top: calc(100% + 4px); left: 0; right: 0; max-height: 220px; overflow-y: auto; background: var(--color-surface-primary); border: 1px solid var(--color-border-medium); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); z-index: var(--z-index-dropdown); list-style: none; padding: var(--space-1); margin: 0; }
+.search-dropdown li { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3); font-size: var(--font-size-sm); cursor: pointer; border-radius: var(--radius-md); transition: var(--transition-fast); }
+.search-dropdown li.active, .search-dropdown li:hover { background: var(--color-bg-brand-subtle); color: var(--color-brand-600); }
+.suggestion-symbol { font-family: var(--font-family-mono); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
+.suggestion-name { color: var(--color-text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

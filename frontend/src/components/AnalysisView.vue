@@ -143,7 +143,7 @@
           <span class="signal-icon" aria-hidden="true">{{ signalIcon }}</span>
           <span class="signal-text">{{ signalText }}</span>
         </div>
-        <div class="signal-score">评分: <strong>{{ signal.score }}</strong> / 100</div>
+        <div class="signal-score">评分: <strong>{{ signal.score }}</strong></div>
         <ul class="signal-reasons" v-if="signal.reasons?.length">
           <li v-for="(r, i) in signal.reasons" :key="i">{{ r }}</li>
         </ul>
@@ -297,12 +297,15 @@ const chartOption = computed(() => {
   const d = chartData.value
   if (!d || !d.dates.length) return {}
 
+  // Guard: verify OHLC arrays exist before processing
+  if (!d.opens || !d.closes || !d.lows || !d.highs) return {}
+
   const dates = d.dates.map(formatDate)
 
   // ── Intraday line chart ──
   if (chartMode.value === 'intraday') {
     const closePrices = d.closes
-    const volumes = d.volumes
+    const volumes = d.volumes || []
     const volumeColors = d.closes.map((c, i) => (i === 0 ? '#22c55e' : c >= d.closes[i - 1] ? '#22c55e' : '#ef4444'))
     const minP = Math.min(...d.lows)
     const maxP = Math.max(...d.highs)
@@ -369,7 +372,7 @@ const chartOption = computed(() => {
 
   // ── K-line chart ──
   const candlesticks = d.opens.map((_, i) => [d.opens[i], d.closes[i], d.lows[i], d.highs[i]])
-  const volumes = d.volumes
+  const volumes = d.volumes || []
   const volumeColors = d.closes.map((c, i) => (i === 0 ? '#22c55e' : c >= d.closes[i - 1] ? '#22c55e' : '#ef4444'))
 
   const gridHeights = { main: 50, volume: 22, macd: 20 }
@@ -411,7 +414,7 @@ const chartOption = computed(() => {
   }
 
   // Bollinger bands
-  if (showBoll.value && d.bollinger) {
+  if (showBoll.value && d.bollinger && d.bollinger.upper && d.bollinger.middle && d.bollinger.lower) {
     const boll = d.bollinger
     series.push({
       type: 'line', data: boll.upper, smooth: true,
@@ -444,7 +447,7 @@ const chartOption = computed(() => {
   }
 
   // MACD sub-chart
-  if (showMACD.value && d.macd) {
+  if (showMACD.value && d.macd && d.macd.histogram && d.macd.dif && d.macd.dea) {
     macdPct = gridHeights.macd
     const macdOffset = mainPct + volPct + 2
     grids.push({ left: '6%', right: '3%', top: `${macdOffset / totalPct * 100}%`, height: `${macdPct / totalPct * 100}%` })

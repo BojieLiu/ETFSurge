@@ -347,9 +347,9 @@ async def strategy_check(db: AsyncSession, total_capital: float, design_data: di
                 })
             use_design = True
         else:
-            etfs = await list_etfs(db)
+            etfs = await list_etfs(db, portfolio_type)
     else:
-        etfs = await list_etfs(db)
+        etfs = await list_etfs(db, portfolio_type)
     
     if not etfs:
         return {"summary": "组合为空，请先添加ETF或生成组合方案", "suggestions": []}

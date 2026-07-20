@@ -13,6 +13,7 @@ class StrategyCheckRecord(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     capital = Column(Float, nullable=False, default=500000)
+    portfolio_type = Column(String(20), nullable=True, comment="on_exchange|off_exchange|null=all")
 
     # LLM 分析结果
     summary = Column(Text, nullable=True)

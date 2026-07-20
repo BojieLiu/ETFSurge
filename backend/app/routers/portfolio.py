@@ -333,7 +333,8 @@ async def strategy_check_async(task: dict):
         from ..tasks.strategy_check_worker import strategy_check_worker
 
         total_capital = task.get("total_capital", 500000)
-        t = task_manager.create_task(task_type="check", params={"capital": total_capital})
+        portfolio_type = task.get("portfolio_type")
+        t = task_manager.create_task(task_type="check", params={"capital": total_capital, "portfolio_type": portfolio_type})
         asyncio.create_task(strategy_check_worker(task_manager, t["task_id"]))
         return JSONResponse(
             status_code=202,

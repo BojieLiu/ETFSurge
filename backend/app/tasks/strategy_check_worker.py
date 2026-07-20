@@ -29,6 +29,7 @@ async def strategy_check_worker(mgr, task_id: int) -> None:
         await _notify(task_id, "running", progress=5)
 
         capital = task.get("capital", 500000)
+        portfolio_type = task.get("portfolio_type")
 
         # 加载持仓 / 因子评分 / 技术指标
         mgr.update_task(task_id, progress=20)
@@ -39,7 +40,7 @@ async def strategy_check_worker(mgr, task_id: int) -> None:
 
         async with async_session() as db:
             result = await asyncio.wait_for(
-                strategy_check(db, capital),
+                strategy_check(db, capital, portfolio_type=portfolio_type),
                 timeout=240,
             )
 

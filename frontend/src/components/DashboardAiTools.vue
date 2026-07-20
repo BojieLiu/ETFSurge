@@ -484,6 +484,7 @@ const strategyProgress = ref(0)
 const strategyStage = ref('')
 const strategyError = ref('')
 const strategyTaskStatus = ref('')  // 'running' | 'completed' | 'failed' | ''
+const strategyPortfolioType = ref('')  // ''=all, 'on_exchange', 'off_exchange'
 const reportError = ref('')  // LLM 报告错误信息
 
 const designReportHtml = computed(() => {
@@ -1131,7 +1132,11 @@ async function checkStrategy() {
   strategyStage.value = '正在提交任务...'
   if (stopCheckWatcher) { clearInterval(stopCheckWatcher); stopCheckWatcher = null }
   try {
-    const submitRes = await portfolioApi.strategyCheck({ total_capital: 500000 })
+    const payload = { total_capital: 500000 }
+    if (strategyPortfolioType.value) {
+      payload.portfolio_type = strategyPortfolioType.value
+    }
+    const submitRes = await portfolioApi.strategyCheck(payload)
     const taskId = submitRes.data.task_id
     strategyStage.value = '正在分析当前组合...'
     strategyProgress.value = 5

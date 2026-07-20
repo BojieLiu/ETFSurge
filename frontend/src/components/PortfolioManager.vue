@@ -169,6 +169,9 @@
           ({{ pnlSummary.weighted_change_pct >= 0 ? '+' : '' }}{{ pnlSummary.weighted_change_pct.toFixed(2) }}%)
         </span>
       </div>
+      <div v-else-if="marketDataUnavailable" class="pnl-summary pnl-summary--unavailable">
+        <span class="text-muted">行情数据暂不可用</span>
+      </div>
     </section>
 
     <!-- ETF List -->
@@ -369,6 +372,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { usePortfolioStore } from '../stores/portfolio'
 import { portfolioApi, marketApi } from '../api'
 import { useToastStore } from '../stores/toast'
+import { changeClass } from '../utils/changeClass'
 import AppButton from './ui/AppButton.vue'
 import AppInput from './ui/AppInput.vue'
 import AppSelect from './ui/AppSelect.vue'
@@ -440,6 +444,8 @@ const pnlSummary = computed(() => ({
   })()
 }))
 
+const marketDataUnavailable = computed(() => currentEtfs.value.length > 0 && (!pnlData.value.items || pnlData.value.items.length === 0))
+
 const currentWeightSum = computed(() => currentEtfs.value.reduce((s, e) => s + e.target_weight, 0))
 
 const formatNum = (v) => Number(v).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -450,7 +456,7 @@ const formatChange = (n, isAmount = false) => {
   return `${prefix}${val.toFixed(2)}${suffix}`
 }
 
-const getChangeClass = (val) => val >= 0 ? 'text-up' : 'text-down'
+const getChangeClass = (val) => val == null ? '' : val >= 0 ? 'text-up' : 'text-down'
 
 // Search
 let searchTimer = null
