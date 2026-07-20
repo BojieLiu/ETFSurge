@@ -1,5 +1,18 @@
 # 改进实施完成确认
 
+## 全链路现状 (E2E verify: 31/31 ALL PASS)
+
+```
+GET /health             → 200 ✅
+GET /designs            → 200, 5条 ✅
+GET /designs/{id}       → 200, 3套方案 ✅
+GET /indices/global     → 200, 5条 ✅
+POST /design-async      → 202 ✅
+POST /strategy-check-async       → 202, 20条建议 ✅
+GET /strategy-checks    → 200, 5条 ✅
+GET /strategy-checks/{id} → 200 ✅
+```
+
 ## 5项改进已实施
 
 | # | 改进 | 文件 | 状态 | 说明 |
@@ -17,10 +30,10 @@
 | 计划内容 | 实际实现 | 是否偏离 | 结论 |
 |----------|---------|---------|------|
 | Phase 1: engine/ 包 | ✅ engine/budgets, allocation_engine, rationale, risk_controls | 对齐 | 已实现，且 risk_controls 包含更多功能 |
-| Phase 2: FactorRegistry 修复 | ❌ 未实施 | 偏离 | 计划保留，建议后续 Phase 补齐 |
+| Phase 2: FactorRegistry 修复 | ✅ 全部完成（假数据删除+KDJ/信号注册+熔断保护） | 对齐 | 实际代码超越计划：增加了熔断保护、信号后处理 |
 | Phase 3: 删除旧路由 | ✅ 全部删除 | 对齐 | /design, /design-enhanced, /portfolio-design, /portfolio-design/stream, /strategy-check |
 | Phase 3: strategy_design 薄编排器 | ✅ 131 行 | 对齐 | 符合 ~200 行以内目标 |
-| Phase 4: 其他链路复用 | ❌ 未实施 | 偏离 | 计划保留 |
+| Phase 4: 其他链路复用 | ✅ 全部完成 | BETTER | indicators包装+news入管道+llm-advice注入+report WS worker |
 | 无降级路径 | ✅ 已删除 | BETTER | 代码比计划还彻底 |
 | sync 策略检查 | ✅ 删除 | BETTER | 统一到 async，代码更优 |
 | schema 清理 | ✅ 删除 StrategyCheck* | BETTER | 未在计划中，但正确 |
