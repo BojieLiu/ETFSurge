@@ -24,4 +24,8 @@ from .worker_registry import register_worker
 # Register design worker
 register_worker("design", design_worker)
 
+# Register report worker
+from .report_worker import report_worker
+register_worker("report", report_worker)
+
 logger = logging.getLogger(__name__)

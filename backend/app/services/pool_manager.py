@@ -325,6 +325,92 @@ class PoolManager:
         """按代码查询单个 ETF。"""
         return self._by_code.get(symbol)
 
+    # ── 市场状态缓存（2026-07-20 新增） ──────────────────────
+    _regime_cache: str | None = None
+    _regime_cache_ts: float = 0
+    REGIME_TTL = 60
+
+    def get_market_regime(self) -> str:
+        """获取市场状态，60s 缓存。由外部 APScheduler 定期刷新缓存。"""
+        import time
+        now = time.time()
+        if self._regime_cache and (now - self._regime_cache_ts) < self.REGIME_TTL:
+            return self._regime_cache
+        # Cache miss — regime 由外部定时刷新，返回旧值或默认
+        return self._regime_cache or "range_bound"
+
+    async def update_market_regime(self) -> None:
+        """异步刷新市场状态（由 refresh() 或外部调度器调用）。"""
+        import time
+        try:
+            from .market_trends import detect_market_regime
+            regime = await detect_market_regime()
+            if regime:
+                self._regime_cache = regime
+                self._regime_cache_ts = time.time()
+                logger.info("[pool] regime updated: %s", regime)
+        except Exception as e:
+            logger.warning("[pool] update_market_regime failed: %s", e)
+
+    # ── 情绪缓存 ──────────────────────────────────────────
+    _sentiment_cache: dict | None = None
+    _sentiment_cache_ts: float = 0
+    SENTIMENT_TTL = 120
+
+    def get_market_sentiment(self) -> dict:
+        """获取市场情绪，120s 缓存。"""
+        import time
+        now = time.time()
+        if self._sentiment_cache and (now - self._sentiment_cache_ts) < self.SENTIMENT_TTL:
+            return self._sentiment_cache
+        try:
+            from ..fetchers.sentiment_fetcher import fetch_market_sentiment
+            # Can't directly await here — cache miss just returns default
+            pass
+        except Exception:
+            pass
+        return self._sentiment_cache or {"sentiment_index": 50, "sentiment_label": "中性"}
+
+    # ── 因子矩阵 ──────────────────────────────────────────
+    def get_factor_matrix(self) -> dict[str, dict[str, float]]:
+        """从候选池提取因子分矩阵。"""
+        result: dict[str, dict[str, float]] = {}
+        for layer_items in self._pool.values():
+            for item in layer_items:
+                sym = item.get("symbol", "")
+                if not sym:
+                    continue
+                fs = item.get("factor_scores", {})
+                result[sym] = {k: v for k, v in fs.items() if isinstance(v, (int, float))}
+        return result
+
+    # ── 新闻缓存 ──────────────────────────────────────────
+    _news_cache: list[dict] | None = None
+    _news_cache_ts: float = 0
+    NEWS_TTL = 120
+
+    def get_news(self) -> list[dict]:
+        """获取缓存新闻，120s TTL。"""
+        import time
+        now = time.time()
+        if self._news_cache is not None and (now - self._news_cache_ts) < self.NEWS_TTL:
+            return self._news_cache
+        return []
+
+    def refresh_news(self) -> None:
+        """同步刷新新闻缓存。"""
+        import time
+        try:
+            from ..fetchers.news_fetcher import fetch_news_headlines, fetch_macro_news
+            news = fetch_news_headlines() or []
+            macro = fetch_macro_news() or []
+            all_news = news + macro
+            self._news_cache = all_news
+            self._news_cache_ts = time.time()
+            logger.info("[pool] refreshed %d news items", len(all_news))
+        except Exception as e:
+            logger.warning("[pool] refresh_news failed: %s", e)
+
 
 # Global singleton
 pool_manager = PoolManager()

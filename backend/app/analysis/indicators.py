@@ -77,8 +77,12 @@ def _resolve_col(data, aliases):
     return aliases[0]
 
 
-def compute_all_indicators(df: list[dict]) -> dict:
+def compute_all_indicators(df: list[dict], factor_scores: dict | None = None) -> dict:
+    """计算全部技术指标。
 
+    如果传入 factor_scores（从 FactorRegistry），则 RSI/KDJ 复用因子值免重复计算。
+    后端兼容：不传 factor_scores 时行为与旧版本一致。
+    """
     if not df:
         return {}
     data = pd.DataFrame(df)
@@ -90,16 +94,42 @@ def compute_all_indicators(df: list[dict]) -> dict:
     high = data[high_col].astype(float) if high_col in data.columns else close
     low_col = _resolve_col(data, COL_MAP["最低"])
     low = data[low_col].astype(float) if low_col in data.columns else close
-    return {
+
+    result = {
         "ma5": float(compute_ma(close, 5).iloc[-1]) if len(close) >= 5 else None,
         "ma10": float(compute_ma(close, 10).iloc[-1]) if len(close) >= 10 else None,
         "ma20": float(compute_ma(close, 20).iloc[-1]) if len(close) >= 20 else None,
         "ma60": float(compute_ma(close, 60).iloc[-1]) if len(close) >= 60 else None,
-        "macd": compute_macd(close),
-        "rsi": compute_rsi(close),
-        "kdj": compute_kdj(high, low, close),
         "bollinger": compute_bollinger(close),
     }
+
+    # 复用 FactorRegistry 的因子分，避免重复计算
+    if factor_scores:
+        rsi = factor_scores.get("technical.rsi.rsi_14")
+        if rsi is not None:
+            result["rsi"] = rsi
+        else:
+            result["rsi"] = compute_rsi(close)
+
+        k_value = factor_scores.get("technical.kdj.k_value")
+        d_value = factor_scores.get("technical.kdj.d_value")
+        j_value = factor_scores.get("technical.kdj.j_value")
+        if all(v is not None for v in (k_value, d_value, j_value)):
+            result["kdj"] = {"k": k_value, "d": d_value, "j": j_value}
+        else:
+            result["kdj"] = compute_kdj(high, low, close)
+
+        macd_val = factor_scores.get("technical.macd.macd")
+        if macd_val is not None:
+            result["macd"] = {"dif": 0, "dea": 0, "macd": macd_val, "histogram": []}
+        else:
+            result["macd"] = compute_macd(close)
+    else:
+        result["rsi"] = compute_rsi(close)
+        result["kdj"] = compute_kdj(high, low, close)
+        result["macd"] = compute_macd(close)
+
+    return result
 
 
 def _to_list(s):
