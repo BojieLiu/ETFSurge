@@ -1,4 +1,4 @@
-# ETF Surge 停止服务脚本
+﻿# ETF Surge 停止服务脚本
 $ErrorActionPreference = "SilentlyContinue"
 
 function Stop-ByPort {
