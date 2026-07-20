@@ -86,12 +86,25 @@ _GLOBAL_INDEX_DEFS = [
 ]
 
 
+# ── 全局指数缓存（30s 防重复采集，非交易时段复用上次成功值） ──
+_global_indices_cache: dict[str, Any] = {}
+_global_indices_cache_ts: float = 0
+_GLOBAL_INDICES_TTL = 30
+
+
 async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
     """返回分组的主流全球指数行情。
 
     A 股 → china_market (mootdx)
     海外 → yfinance (熔断降级为占位)
+
+    带 30s 缓存，非交易时段复用上次成功值。
     """
+    import time
+    now = time.time()
+    if _global_indices_cache and (now - _global_indices_cache_ts) < _GLOBAL_INDICES_TTL:
+        return _global_indices_cache
+
     defs = await _global_index_defs()
     regions: dict[str, list[dict[str, Any]]] = {}
 
@@ -116,7 +129,8 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
             item["asset_type"] = "index"
             regions.setdefault(region, []).append(item)
 
-    # 海外指数：Sina（优先，中国大陆最快）→ stooq（第二）→ yfinance（兜底）
+    # 海外指数：Sina（实测 0.2s）→ stooq（SSL 慢）→ yfinance（兜底）
+    # 2026-07-20 实测: Sina 0.2s(有数据)/0.2s(空), stooq SSL 超时
     from ..fetchers.china_market import fetch_sina_global_index as sina_index
     from ..fetchers.stooq_fetcher import fetch_global_index_realtime as stooq_index
     from ..fetchers.yfinance_fetcher import fetch_index_realtime as yf_index
@@ -125,11 +139,11 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
         loop = asyncio.get_running_loop()
         import functools
 
-        # 第1优先：新浪（8s 超时，中国大陆最稳定）
+        # 第1优先：新浪（4s 超时，实测 0.2s，中国大陆最稳定）
         try:
             d = await asyncio.wait_for(
                 loop.run_in_executor(None, functools.partial(sina_index, sym)),
-                timeout=10,
+                timeout=4,
             )
             if d and d.get("price") is not None:
                 d["name"] = name
@@ -138,11 +152,11 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
         except (asyncio.TimeoutError, Exception):
             pass
 
-        # 第2优先：stooq（8s 超时，免费）
+        # 第2优先：stooq（6s 超时，免费但非交易时段 SSL 握手慢）
         try:
             d = await asyncio.wait_for(
-                loop.run_in_executor(None, functools.partial(stooq_index, sym, name, 8)),
-                timeout=10,
+                loop.run_in_executor(None, functools.partial(stooq_index, sym, name, 6)),
+                timeout=6,
             )
             if d and d.get("price") is not None:
                 d["region"] = region
@@ -150,11 +164,11 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
         except (asyncio.TimeoutError, Exception):
             pass
 
-        # 第3优先：yfinance（15s 超时，兜底）
+        # 第3优先：yfinance（8s 超时，兜底）
         try:
             d = await asyncio.wait_for(
                 loop.run_in_executor(None, functools.partial(yf_index, sym)),
-                timeout=15,
+                timeout=8,
             )
             if d and d.get("price") is not None:
                 d = dict(d)
@@ -176,15 +190,18 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
     import asyncio
 
     f_defs = [(s, n, r) for s, n, r in defs if r != "A股"]
-    outs = await asyncio.wait_for(
-        asyncio.gather(*[_foreign(s, n, r) for s, n, r in f_defs], return_exceptions=True),
-        timeout=30,
+    outs = await asyncio.gather(
+        *[_foreign(s, n, r) for s, n, r in f_defs],
+        return_exceptions=True,
     )
     for o in outs:
         if isinstance(o, tuple) and len(o) == 2:
             region, d = o
             regions.setdefault(region, []).append(d)
 
+    # 写入缓存（即使部分为空也缓存，避免非交易时段重复采集）
+    _global_indices_cache.update(regions)
+    _global_indices_cache_ts = time.time()
     return regions
 
 
