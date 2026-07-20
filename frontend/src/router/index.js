@@ -4,7 +4,7 @@ const routes = [
   {
     path: '/',
     name: 'dashboard',
-    component: () => import('../components/Dashboard.vue'),
+    component: () => import('../views/Dashboard.vue'),
     meta: { title: 'Dashboard', description: '实时行情监控、组合概览与盈亏明细' },
   },
   {
@@ -16,7 +16,7 @@ const routes = [
   {
     path: '/market-analysis',
     name: 'market-analysis',
-    component: () => import('../components/MarketAnalysis.vue'),
+    component: () => import('../views/MarketAnalysis.vue'),
     meta: { title: '行情分析', description: '市场宏观研判、板块轮动分析与标的深度解读' },
   },
   {

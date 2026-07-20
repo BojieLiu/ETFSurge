@@ -34,7 +34,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import DashboardAiTools from './DashboardAiTools.vue'
+import DashboardAiTools from '../views/DashboardAiTools.vue'
 import PortfolioManager from './PortfolioManager.vue'
 import AnalysisView from './AnalysisView.vue'
 import { usePortfolioStore } from '../stores/portfolio'

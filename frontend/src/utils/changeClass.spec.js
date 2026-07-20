@@ -42,14 +42,14 @@ vi.mock('../api', () => ({
 vi.mock('../stores/toast', () => ({ useToastStore: () => ({ show: vi.fn() }) }))
 vi.mock('../stores/portfolio', () => ({ usePortfolioStore: () => ({ etfs: [] }) }))
 
-const DashboardAiTools = (await import('../components/DashboardAiTools.vue')).default
+const DashboardAiTools = (await import('../views/DashboardAiTools.vue')).default
 
 describe('core-actions buttons', () => {
   it('renders a concise title plus a separate helper description for each action', () => {
     const wrapper = mount(DashboardAiTools, {
       global: {
         plugins: [createPinia()],
-        stubs: { AppButton: true, AppInput: true },
+        stubs: { AppButton: true, AppInput: true, DesignWizard: true, DesignLoading: true, DesignResult: true, DesignHistory: true, StrategyCheckModal: true, StrategyCheckResult: true },
       },
     })
 

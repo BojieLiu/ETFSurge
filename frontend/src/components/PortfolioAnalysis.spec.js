@@ -16,7 +16,7 @@ vi.mock('../components/AnalysisView.vue', () => ({
     template: '<div class="av">{{ selectedSymbol }}</div>',
   },
 }))
-vi.mock('../components/DashboardAiTools.vue', () => ({
+vi.mock('../views/DashboardAiTools.vue', () => ({
   default: {
     name: 'DashboardAiTools',
     template: '<div class="ai-tools"></div>',
