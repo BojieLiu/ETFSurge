@@ -218,22 +218,6 @@ def main():
     except Exception as e:
         check("GET /strategy-checks", False, str(e))
 
-    # ── 9. 同步策略检查链路（最后执行，慢 LLM 不影响其他测试） ────
-    try:
-        r = requests.post(f"{BASE}/api/v1/portfolio/strategy-check",
-                          json={"total_capital": 500000}, timeout=60)
-        check(f"POST /strategy-check -> {r.status_code}", r.status_code in (200, 408, 504))
-        if r.status_code == 200:
-            data = r.json()
-            summary_ok = isinstance(data.get("summary"), str) and len(data["summary"]) > 5
-            suggestions_ok = isinstance(data.get("suggestions"), list)
-            check("包含 summary", summary_ok)
-            check("包含 suggestions", suggestions_ok)
-    except requests.Timeout:
-        check("POST /strategy-check", True, "超时可接受（60s，LLM 较慢，推荐使用异步模式）")
-    except Exception as e:
-        check("POST /strategy-check", False, str(e))
-
     # 汇总
     total = PASS + FAIL
     print(f"\n{'=' * 50}")

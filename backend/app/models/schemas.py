@@ -47,11 +47,6 @@ class CalculateRequest(BaseModel):
     total_capital: float = Field(gt=0)
 
 
-class StrategyCheckRequest(BaseModel):
-    total_capital: float = Field(gt=0)
-    design_data: Optional[dict] = None  # AI portfolio design to check instead of DB ETFs
-
-
 class AllocationItem(BaseModel):
     symbol: str
     name: str
@@ -111,37 +106,8 @@ class PNLSummary(BaseModel):
     weighted_change_pct: float
 
 
-class StrategySuggestion(BaseModel):
-    action: str
-    symbol: str
-    name: str
-    current_weight: float
-    suggested_weight: float
-    reason: str
-
-
-class HoldingsAnalysis(BaseModel):
-    symbol: str
-    name: str
-    current_weight: float
-    signal: str
-    factor_breakdown: str = ""
-
-
-class RiskWarning(BaseModel):
-    type: str
-    severity: str
-    detail: str
-    affected: str = ""
-
-
-class StrategyCheckResponse(BaseModel):
-    summary: str
-    suggestions: list[StrategySuggestion]
-    holdings_analysis: list[dict] = []
-    risk_warnings: list[dict] = []
-    market_regime: str = ""
-    raw_llm: str = ""
+# StrategyCheckRequest / StrategySuggestion / RiskWarning / StrategyCheckResponse 已移除
+# 策略检查统一走异步路径，不再需要 sync 响应模型
 
 
 # PnL History / 累计盈亏历史

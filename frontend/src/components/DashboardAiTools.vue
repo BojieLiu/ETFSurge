@@ -1108,7 +1108,7 @@ async function checkStrategy() {
   strategyStage.value = '正在提交任务...'
   if (stopCheckWatcher) { clearInterval(stopCheckWatcher); stopCheckWatcher = null }
   try {
-    const submitRes = await portfolioApi.strategyCheckAsync({ total_capital: 500000 })
+    const submitRes = await portfolioApi.strategyCheck({ total_capital: 500000 })
     const taskId = submitRes.data.task_id
     strategyStage.value = '正在分析当前组合...'
     strategyProgress.value = 5

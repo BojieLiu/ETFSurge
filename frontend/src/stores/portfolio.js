@@ -67,17 +67,11 @@ export const usePortfolioStore = defineStore('portfolio', () => {
     return res.data
   }
 
-  async function runStrategyCheck(capital) {
-    const res = await portfolioApi.strategyCheck(capital)
-    strategyResult.value = res.data
-    return res.data
-  }
-
   return {
     etfs, onExchange, offExchange, strategyResult,
     pnlHistory, driftCheck,
     fetchEtfs, addEtf, updateEtf, removeEtf,
     fetchDailyPnl, fetchPnLHistory, fetchDriftCheck,
-    exportPortfolio, importPortfolio, runStrategyCheck,
+    exportPortfolio, importPortfolio,
   }
 })
