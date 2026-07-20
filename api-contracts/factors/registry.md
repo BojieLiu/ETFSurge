@@ -1,5 +1,12 @@
 # API 契约: FactorRegistry 修复 + 链路复用
 
+> **实现状态: ✅ 2026-07-20 已全部完成**
+> - 假数据 fallback 已删除（替换为 error marker）
+> - KDJ 因子（k_value/d_value/j_value）已注册
+> - 综合信号因子（signal.overall）已注册（RSI+MACD+MA bias 后处理推导）
+> - industry_diversification 已基于 HHI 实现（非 scaffolding）
+> - 熔断保护：>50% 符号 z-score 为 0 时抛 RuntimeError
+
 ## 1. FactorRegistry 修复
 
 ### 路由: 无（内部接口）

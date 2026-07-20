@@ -357,15 +357,16 @@
         </div>
       </div>
 
-      <!-- Strategy Check: loading -->
+      <!-- Strategy Check: loading / progress / error -->
       <div v-else-if="activeCoreFeature === 'strategy' && checkingStrategy" class="panel-body">
-        <div class="loading-section">
-          <span class="loading-spinner">&#9203;</span>
-          <span>{{ strategyStage || '正在分析当前组合...' }}</span>
-          <div v-if="strategyProgress > 0" class="progress-bar">
-            <div class="progress-fill" :style="{ width: strategyProgress + '%' }"></div>
-          </div>
-        </div>
+        <TaskProgress
+          :taskStatus="strategyTaskStatus"
+          :taskProgress="strategyProgress"
+          :taskStage="strategyStage"
+          :errorMessage="strategyError"
+          @retry="retryStrategy"
+          @cancel="exitCoreFeature"
+        />
       </div>
 
       <!-- Strategy Check: result -->
@@ -459,6 +460,7 @@ import { useTaskStore } from '../stores/task'
 import { formatDate } from '../utils/formatDate'
 import AppButton from './ui/AppButton.vue'
 import AppInput from './ui/AppInput.vue'
+import TaskProgress from './TaskProgress.vue'
 
 const emit = defineEmits(['applied'])
 const store = usePortfolioStore()
@@ -480,6 +482,8 @@ const checkingStrategy = ref(false)
 const strategyResult = ref(null)
 const strategyProgress = ref(0)
 const strategyStage = ref('')
+const strategyError = ref('')
+const strategyTaskStatus = ref('')  // 'running' | 'completed' | 'failed' | ''
 const reportError = ref('')  // LLM 报告错误信息
 
 const designReportHtml = computed(() => {
@@ -723,6 +727,8 @@ function enterStrategyMode() {
   activeCoreFeature.value = 'strategy'
   strategyResult.value = null
   checkingStrategy.value = false
+  strategyTaskStatus.value = ''
+  strategyError.value = ''
 }
 
 function enterHistoryMode() {
@@ -1102,8 +1108,16 @@ async function applyPortfolioDesign(plan) {
 
 let stopCheckWatcher = null
 
+function retryStrategy() {
+  strategyError.value = ''
+  strategyTaskStatus.value = 'running'
+  checkStrategy()
+}
+
 async function checkStrategy() {
   checkingStrategy.value = true
+  strategyTaskStatus.value = 'running'
+  strategyError.value = ''
   strategyProgress.value = 0
   strategyStage.value = '正在提交任务...'
   if (stopCheckWatcher) { clearInterval(stopCheckWatcher); stopCheckWatcher = null }
@@ -1125,10 +1139,13 @@ async function checkStrategy() {
         if (data.status === 'completed') {
           clearInterval(stopCheckWatcher)
           strategyResult.value = data
+          strategyTaskStatus.value = 'completed'
           checkingStrategy.value = false
           toast('策略检查完成', 'success')
         } else if (data.status === 'failed') {
           clearInterval(stopCheckWatcher)
+          strategyTaskStatus.value = 'failed'
+          strategyError.value = data.error_message || '未知错误'
           checkingStrategy.value = false
           toast('策略检查失败：' + (data.error_message || '未知错误'), 'error')
         }
@@ -1143,15 +1160,18 @@ async function checkStrategy() {
         strategyStage.value = t.stage || strategyStage.value
         if (t.status === 'completed' && !strategyResult.value) {
           portfolioApi.getStrategyCheckResult(taskId).then(r => {
-            strategyResult.value = r.data; checkingStrategy.value = false
+            strategyResult.value = r.data; checkingStrategy.value = false; strategyTaskStatus.value = 'completed'
           })
         } else if (t.status === 'failed' && !strategyResult.value) {
-          checkingStrategy.value = false; toast('策略检查失败', 'error')
+          checkingStrategy.value = false; strategyTaskStatus.value = 'failed'; strategyError.value = '策略检查失败'
+          toast('策略检查失败', 'error')
         }
       }
     )
   } catch (e) {
     toast('提交检查失败：' + (e?.response?.data?.detail || e.message), 'error')
+    strategyTaskStatus.value = 'failed'
+    strategyError.value = e?.response?.data?.detail || e.message
     checkingStrategy.value = false
   }
 }
