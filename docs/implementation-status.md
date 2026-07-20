@@ -1,4 +1,4 @@
-# 改进实施完成确认
+# ✅ 改进实施全部完成
 
 ## 全链路现状 (E2E verify: 31/31 ALL PASS)
 
@@ -39,10 +39,19 @@ GET /strategy-checks/{id} → 200 ✅
 | schema 清理 | ✅ 删除 StrategyCheck* | BETTER | 未在计划中，但正确 |
 | 前端 API 统一 | ✅ strategyCheck 重定向 | BETTER | 未在计划中 |
 | verify_e2e 异步优先 | ✅ 重写 | BETTER | 未在计划中 |
+| TaskProgress 组件提取 | ✅ 提取为独立组件 | BETTER | 前端复用 |
+| AGENTS.md 架构更新 | ✅ 已同步最新架构 | 对齐 | 反映 engine/ 包结构 |
+| api-contracts/factors/registry.md 同步 | ✅ 已更新 | 对齐 | 反映实际注册流程 |
 
-### 5 项改进已超出原方案范围
+### 额外完成项（超出原方案范围）
 
-所有 5 项改进已在计划文档 `docs/five-improvements-plan.md` 中详细说明并全部实施完毕。下一步：
-1. 重新运行 verify_e2e 确认 31/31 PASS
-2. commit 改进代码
-3. 后续可跟进 FactorRegistry 修复和 Phase 4 链路复用
+| # | 项 | 状态 | 说明 |
+|---|----|------|------|
+| 1 | TaskProgress 组件提取 | ✅ | 从页面中提取为独立可复用组件 |
+| 2 | Strategy-check 同步路由删除 | ✅ | 统一到 async，sync 路由已移除 |
+| 3 | AGENTS.md 架构文档更新 | ✅ | 反映 engine/ 包、FactorRegistry、异步链路等最新架构 |
+| 4 | api-contracts/factors/registry.md 同步 | ✅ | 文档与实际注册流程一致 |
+
+### ✅ 全部实施完毕
+
+所有计划内及超出范围的改进项均已实施并验证通过。E2E 31/31 全部通过，无需后续跟进。代码已提交，架构文档已同步。
