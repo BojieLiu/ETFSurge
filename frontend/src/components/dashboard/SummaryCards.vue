@@ -1,104 +1,161 @@
 <template>
-  <div class="summary-grid">
-    <article class="card summary-card" v-if="activeTab === 'combined'">
-      <div class="summary-icon" aria-hidden="true">💰</div>
+  <div class="summary-cards">
+    <!-- Total Position Card (Combined view) -->
+    <AppCard
+      v-if="activeTab === 'combined'"
+      variant="default"
+      class="summary-card"
+      :padding="false"
+    >
       <div class="summary-content">
-        <p class="summary-label">总仓位</p>
-        <p class="summary-value" :class="loading ? 'skeleton' : ''" aria-live="polite">
-          <Skeleton v-if="loading" type="text" width="120" />
-          <span v-else>¥{{ formatNum(totalAll) }}</span>
-        </p>
+        <span class="summary-icon" aria-hidden="true">💰</span>
+        <div class="summary-text">
+          <p class="summary-label">总仓位</p>
+          <AppSkeleton v-if="loading" type="text" width="120" />
+          <p v-else class="summary-value">¥{{ formatNum(totalAll) }}</p>
+        </div>
       </div>
-    </article>
+    </AppCard>
 
-    <article class="card summary-card" v-if="activeTab !== 'off_exchange'">
-      <div class="summary-icon" :class="pnlOn >= 0 ? 'positive' : 'negative'" aria-hidden="true">
-        {{ pnlOn >= 0 ? '📈' : '📉' }}
-      </div>
+    <!-- Daily P&L Cards -->
+    <AppCard
+      v-if="activeTab !== 'off_exchange'"
+      variant="default"
+      class="summary-card"
+      :padding="false"
+    >
       <div class="summary-content">
-        <p class="summary-label">场内当日盈亏</p>
-        <p class="summary-value" :class="[loading ? 'skeleton' : '', pnlOn >= 0 ? 'text-up' : 'text-down']" aria-live="polite">
-          <Skeleton v-if="loading" type="text" width="120" />
-          <span v-else>¥{{ formatNum(pnlOn) }}</span>
-        </p>
+        <span class="summary-icon" :class="pnlOn >= 0 ? 'positive' : 'negative'" aria-hidden="true">
+          {{ pnlOn >= 0 ? '📈' : '📉' }}
+        </span>
+        <div class="summary-text">
+          <p class="summary-label">场内当日盈亏</p>
+          <AppSkeleton v-if="loading" type="text" width="120" />
+          <p v-else class="summary-value" :class="pnlOn >= 0 ? 'text-up' : 'text-down'">
+            ¥{{ formatNum(pnlOn) }}
+          </p>
+        </div>
       </div>
-    </article>
+    </AppCard>
 
-    <article class="card summary-card" v-if="activeTab !== 'on_exchange'">
-      <div class="summary-icon" :class="pnlOff >= 0 ? 'positive' : 'negative'" aria-hidden="true">
-        {{ pnlOff >= 0 ? '📈' : '📉' }}
-      </div>
+    <AppCard
+      v-if="activeTab !== 'on_exchange'"
+      variant="default"
+      class="summary-card"
+      :padding="false"
+    >
       <div class="summary-content">
-        <p class="summary-label">场外当日盈亏</p>
-        <p class="summary-value" :class="[loading ? 'skeleton' : '', pnlOff >= 0 ? 'text-up' : 'text-down']" aria-live="polite">
-          <Skeleton v-if="loading" type="text" width="120" />
-          <span v-else>¥{{ formatNum(pnlOff) }}</span>
-        </p>
+        <span class="summary-icon" :class="pnlOff >= 0 ? 'positive' : 'negative'" aria-hidden="true">
+          {{ pnlOff >= 0 ? '📈' : '📉' }}
+        </span>
+        <div class="summary-text">
+          <p class="summary-label">场外当日盈亏</p>
+          <AppSkeleton v-if="loading" type="text" width="120" />
+          <p v-else class="summary-value" :class="pnlOff >= 0 ? 'text-up' : 'text-down'">
+            ¥{{ formatNum(pnlOff) }}
+          </p>
+        </div>
       </div>
-    </article>
+    </AppCard>
 
-    <!-- Cumulative P&L loading skeletons -->
+    <!-- Cumulative P&L Loading Skeletons -->
     <template v-if="pnlHistoryLoading">
-      <article class="card summary-card" v-if="activeTab !== 'off_exchange'">
+      <AppCard
+        v-if="activeTab !== 'off_exchange'"
+        variant="default"
+        class="summary-card"
+        :padding="false"
+      >
         <div class="summary-content">
           <p class="summary-label">场内累计盈亏</p>
-          <Skeleton type="text" width="120" />
+          <AppSkeleton type="text" width="120" />
         </div>
-      </article>
-      <article class="card summary-card" v-if="activeTab !== 'on_exchange'">
+      </AppCard>
+      <AppCard
+        v-if="activeTab !== 'on_exchange'"
+        variant="default"
+        class="summary-card"
+        :padding="false"
+      >
         <div class="summary-content">
           <p class="summary-label">场外累计盈亏</p>
-          <Skeleton type="text" width="120" />
+          <AppSkeleton type="text" width="120" />
         </div>
-      </article>
-      <article class="card summary-card" v-if="activeTab === 'combined'">
+      </AppCard>
+      <AppCard
+        v-if="activeTab === 'combined'"
+        variant="default"
+        class="summary-card"
+        :padding="false"
+      >
         <div class="summary-content">
           <p class="summary-label">总累计盈亏</p>
-          <Skeleton type="text" width="120" />
+          <AppSkeleton type="text" width="120" />
         </div>
-      </article>
+      </AppCard>
     </template>
 
-    <!-- Cumulative P&L cards -->
+    <!-- Cumulative P&L Cards -->
     <template v-else>
-      <article class="card summary-card" v-if="activeTab !== 'off_exchange' && pnlHistory?.summary">
-        <div class="summary-icon positive" aria-hidden="true">📊</div>
+      <AppCard
+        v-if="activeTab !== 'off_exchange' && pnlHistory?.summary"
+        variant="default"
+        class="summary-card"
+        :padding="false"
+      >
         <div class="summary-content">
-          <p class="summary-label">场内累计盈亏</p>
-          <p class="summary-value text-up" aria-live="polite">
-            ¥{{ formatNum(findCumulativePnl('on_exchange')) }}
-            <span class="pnl-pct">({{ findCumulativePnlPct('on_exchange') }}%)</span>
-          </p>
+          <span class="summary-icon positive" aria-hidden="true">📊</span>
+          <div class="summary-text">
+            <p class="summary-label">场内累计盈亏</p>
+            <p class="summary-value text-up" aria-live="polite">
+              ¥{{ formatNum(findCumulativePnl('on_exchange')) }}
+              <span class="pnl-pct">({{ findCumulativePnlPct('on_exchange') }}%)</span>
+            </p>
+          </div>
         </div>
-      </article>
+      </AppCard>
 
-      <article class="card summary-card" v-if="activeTab !== 'on_exchange' && pnlHistory?.summary">
-        <div class="summary-icon positive" aria-hidden="true">📊</div>
+      <AppCard
+        v-if="activeTab !== 'on_exchange' && pnlHistory?.summary"
+        variant="default"
+        class="summary-card"
+        :padding="false"
+      >
         <div class="summary-content">
-          <p class="summary-label">场外累计盈亏</p>
-          <p class="summary-value text-up" aria-live="polite">
-            ¥{{ formatNum(findCumulativePnl('off_exchange')) }}
-            <span class="pnl-pct">({{ findCumulativePnlPct('off_exchange') }}%)</span>
-          </p>
+          <span class="summary-icon positive" aria-hidden="true">📊</span>
+          <div class="summary-text">
+            <p class="summary-label">场外累计盈亏</p>
+            <p class="summary-value text-up" aria-live="polite">
+              ¥{{ formatNum(findCumulativePnl('off_exchange')) }}
+              <span class="pnl-pct">({{ findCumulativePnlPct('off_exchange') }}%)</span>
+            </p>
+          </div>
         </div>
-      </article>
+      </AppCard>
 
-      <article class="card summary-card" v-if="activeTab === 'combined' && pnlHistory?.summary">
-        <div class="summary-icon positive" aria-hidden="true">📊</div>
+      <AppCard
+        v-if="activeTab === 'combined' && pnlHistory?.summary"
+        variant="default"
+        class="summary-card"
+        :padding="false"
+      >
         <div class="summary-content">
-          <p class="summary-label">总累计盈亏</p>
-          <p class="summary-value text-up" aria-live="polite">
-            ¥{{ formatNum(pnlHistory.summary.total_cumulative_pnl) }}
-            <span class="pnl-pct">({{ pnlHistory.summary.total_cumulative_pnl_pct.toFixed(2) }}%)</span>
-          </p>
+          <span class="summary-icon positive" aria-hidden="true">📊</span>
+          <div class="summary-text">
+            <p class="summary-label">总累计盈亏</p>
+            <p class="summary-value text-up" aria-live="polite">
+              ¥{{ formatNum(pnlHistory.summary.total_cumulative_pnl) }}
+              <span class="pnl-pct">({{ pnlHistory.summary.total_cumulative_pnl_pct.toFixed(2) }}%)</span>
+            </p>
+          </div>
         </div>
-      </article>
+      </AppCard>
     </template>
   </div>
 </template>
 
 <script setup>
-import Skeleton from '../ui/Skeleton.vue'
+import { AppCard, AppSkeleton } from '@/components'
 
 const props = defineProps({
   activeTab: { type: String, required: true },
@@ -129,67 +186,86 @@ function findCumulativePnl(type) {
 function findCumulativePnlPct(type) {
   if (!props.pnlHistory?.holdings) return '0.00'
   const h = props.pnlHistory.holdings.find(h => h.portfolio_type === type)
-  return (h?.cumulative_pnl_pct || 0).toFixed(2)
+  return h?.cumulative_pnl_pct ? h.cumulative_pnl_pct.toFixed(2) : '0.00'
 }
 </script>
 
 <style scoped>
-.summary-grid {
+.summary-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: var(--space-4);
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-gap-md);
 }
+
+@media (max-width: 1023px) {
+  .summary-cards {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 639px) {
+  .summary-cards {
+    grid-template-columns: 1fr;
+  }
+}
+
 .summary-card {
-  padding: var(--space-5);
+  /* AppCard handles styling */
+}
+
+.summary-content {
   display: flex;
   align-items: center;
-  gap: var(--space-4);
-  transition: var(--transition-fast);
+  gap: var(--space-3);
+  padding: var(--space-4);
 }
-.summary-card:hover {
-  border-color: var(--color-brand-300);
-  box-shadow: var(--shadow-md);
-  transform: translateY(-2px);
-}
+
 .summary-icon {
-  width: 48px;
-  height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   font-size: var(--font-size-2xl);
-  border-radius: var(--radius-lg);
-  background: var(--color-surface-secondary);
+  line-height: 1;
   flex-shrink: 0;
 }
-.summary-icon.positive { background: var(--color-bg-success-subtle); }
-.summary-icon.negative { background: var(--color-bg-danger-subtle); }
-.summary-content { flex: 1; min-width: 0; }
-.summary-label {
-  margin: 0 0 var(--space-1);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
-  color: var(--color-text-secondary);
+
+.summary-icon.positive {
+  color: var(--color-text-up);
 }
+
+.summary-icon.negative {
+  color: var(--color-text-down);
+}
+
+.summary-text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-half);
+  min-width: 0;
+}
+
+.summary-label {
+  margin: 0;
+  font: var(--text-caption);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: var(--letter-spacing-wide);
+}
+
 .summary-value {
   margin: 0;
-  font-family: var(--font-family-mono);
-  font-size: var(--font-size-xl);
-  font-weight: var(--font-weight-bold);
+  font: var(--text-h4);
   color: var(--color-text-primary);
-  line-height: var(--line-height-tight);
-  white-space: normal;
-  overflow-wrap: anywhere;
 }
-.summary-value.skeleton { color: transparent; }
+
+.summary-value.text-up {
+  color: var(--color-text-up);
+}
+
+.summary-value.text-down {
+  color: var(--color-text-down);
+}
+
 .pnl-pct {
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
-}
-.text-up { color: var(--color-text-up) !important; }
-.text-down { color: var(--color-text-down) !important; }
-@media (max-width: 480px) {
-  .summary-grid { grid-template-columns: 1fr; }
-  .summary-value { font-size: var(--font-size-lg); }
+  font: var(--text-body-sm);
+  color: var(--color-text-tertiary);
+  margin-left: var(--space-2);
 }
 </style>

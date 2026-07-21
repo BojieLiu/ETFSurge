@@ -1,56 +1,86 @@
 <template>
-  <section class="card table-card">
-    <div class="card-header">
-      <h2 class="card-title">
+  <AppCard variant="default" :padding="false" class="allocation-table">
+    <template #header>
+      <h2 class="card__title">
         <span class="card-title-icon" aria-hidden="true">📋</span>
         {{ title }}
       </h2>
-    </div>
-    <div class="table-responsive">
-      <table class="data-table alloc-table">
-        <thead>
-          <tr>
-            <th scope="col">代码</th>
-            <th scope="col">名称</th>
-            <th scope="col">权重</th>
-            <th scope="col" class="amount-header">目标金额</th>
-            <th scope="col" class="amount-header">现价</th>
-            <th scope="col">涨跌幅</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="item in items" :key="item.symbol">
-            <td><code>{{ item.symbol }}</code></td>
-            <td><strong>{{ item.name }}</strong></td>
-            <td><span class="weight-badge">{{ (item.target_weight * 100).toFixed(1) }}%</span></td>
-            <td class="amount-cell">¥{{ formatNum(item.target_amount) }}</td>
-            <td>¥{{ formatPrice(item.current_price) }}</td>
-            <td :class="changeClass(item.change_pct)">
-              <span class="change-value">{{ formatChange(item.change_pct) }}</span>
-            </td>
-          </tr>
-        </tbody>
-        <tfoot>
-          <tr class="footer-row">
-            <td colspan="2"><strong>现金仓位</strong></td>
-            <td><span class="weight-badge">{{ (cashPct * 100).toFixed(1) }}%</span></td>
-            <td class="amount-cell"><strong>¥{{ formatNum(cashAmount) }}</strong></td>
-            <td colspan="2">—</td>
-          </tr>
-        </tfoot>
-      </table>
-    </div>
-  </section>
+    </template>
+
+    <AppTable
+      :columns="columns"
+      :data="tableData"
+      row-key="symbol"
+      :striped="true"
+      :hoverable="true"
+      density="comfortable"
+    >
+      <template #cell:weight="{ row }">
+        <AppBadge variant="outline" :color="getWeightColor(row.target_weight)" class="weight-badge">
+          {{ (row.target_weight * 100).toFixed(1) }}%
+        </AppBadge>
+      </template>
+
+      <template #cell:target_amount="{ row }">
+        <span class="amount-cell">¥{{ formatNum(row.target_amount) }}</span>
+      </template>
+
+      <template #cell:current_price="{ row }">
+        <span v-if="row.current_price != null" class="price-cell">¥{{ row.current_price.toFixed(2) }}</span>
+        <span v-else class="text-muted">—</span>
+      </template>
+
+      <template #cell:change_pct="{ row }">
+        <span v-if="row.change_pct != null" :class="['change-value', changeClass(row.change_pct)]">
+          {{ formatChange(row.change_pct) }}
+        </span>
+        <span v-else class="text-muted">—</span>
+      </template>
+    </AppTable>
+
+    <template #footer>
+      <div class="table-footer">
+        <div class="footer-row">
+          <span class="footer-label"><strong>现金仓位</strong></span>
+          <AppBadge variant="outline" class="weight-badge">
+            {{ (cashPct * 100).toFixed(1) }}%
+          </AppBadge>
+          <span class="footer-amount"><strong>¥{{ formatNum(cashAmount) }}</strong></span>
+        </div>
+      </div>
+    </template>
+  </AppCard>
 </template>
 
 <script setup>
-import { changeClass } from '../../utils/changeClass'
+import { AppCard, AppTable, AppBadge } from '@/components'
 
 defineProps({
   items: { type: Array, default: () => [] },
   cashPct: { type: Number, default: 0 },
   cashAmount: { type: Number, default: 0 },
   title: { type: String, required: true }
+})
+
+const columns = [
+  { key: 'symbol', label: '代码', width: '80px' },
+  { key: 'name', label: '名称', width: '160px' },
+  { key: 'weight', label: '权重', width: '100px' },
+  { key: 'target_amount', label: '目标金额', width: '120px', align: 'right' },
+  { key: 'current_price', label: '现价', width: '100px', align: 'right' },
+  { key: 'change_pct', label: '涨跌幅', width: '100px', align: 'center' }
+]
+
+const tableData = computed(() => {
+  return props.items.map(item => ({
+    ...item,
+    symbol: item.symbol,
+    name: item.name,
+    target_weight: item.target_weight,
+    target_amount: item.target_amount,
+    current_price: item.current_price,
+    change_pct: item.change_pct
+  }))
 })
 
 function formatNum(n) {
@@ -62,124 +92,81 @@ function formatNum(n) {
   }
 }
 
-function formatPrice(v) {
-  return v != null ? v.toFixed(2) : '—'
+function changeClass(pct) {
+  if (pct == null) return ''
+  return pct >= 0 ? 'text-up' : 'text-down'
 }
 
 function formatChange(pct) {
-  return pct != null ? (pct > 0 ? '+' : '') + pct.toFixed(2) + '%' : '—'
+  if (pct == null) return '—'
+  return (pct > 0 ? '+' : '') + pct.toFixed(2) + '%'
+}
+
+function getWeightColor(weight) {
+  if (weight >= 0.2) return 'var(--color-brand-600)'
+  if (weight >= 0.1) return 'var(--color-warning-600)'
+  return 'var(--color-success-600)'
 }
 </script>
 
 <style scoped>
-.table-card {
-  display: flex;
-  flex-direction: column;
+.allocation-table {
+  /* AppCard handles layout */
 }
-.table-card .card-header {
-  flex-shrink: 0;
-}
-.card-header {
+
+.table-footer {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: var(--space-4);
-  padding: var(--space-4) var(--space-5);
-  border-bottom: 1px solid var(--color-border-light);
+  padding: var(--space-3) var(--space-6);
+  border-top: 1px solid var(--color-border-light);
+  background: var(--color-surface-secondary);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
   flex-wrap: wrap;
 }
-.card-title {
-  display: inline-flex;
+
+.footer-row {
+  display: flex;
   align-items: center;
-  gap: var(--space-2);
-  font-size: var(--font-size-lg);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-primary);
-  margin: 0;
+  gap: var(--space-4);
+  flex-wrap: wrap;
 }
-.card-title-icon {
-  font-size: var(--font-size-xl);
-  line-height: 1;
-}
-.table-responsive {
-  overflow-x: auto;
-  padding: var(--space-4) var(--space-5);
-  -webkit-overflow-scrolling: touch;
-  flex: 1;
-  min-height: 0;
-}
-.data-table {
-  width: 100%;
-  border-collapse: collapse;
+
+.footer-label {
   font-size: var(--font-size-sm);
-}
-.data-table th,
-.data-table td {
-  padding: var(--space-3) var(--space-4);
-  text-align: left;
-  vertical-align: middle;
-  border-bottom: 1px solid var(--color-border-light);
-}
-.data-table th {
-  font-weight: var(--font-weight-semibold);
   color: var(--color-text-secondary);
-  background: var(--color-surface-secondary);
-  white-space: nowrap;
-  position: sticky;
-  top: 0;
-  z-index: 1;
 }
-.data-table tbody tr {
-  transition: var(--transition-fast);
+
+.footer-amount {
+  font: var(--text-mono-lg);
+  color: var(--color-text-primary);
 }
-.data-table tbody tr:hover {
-  background: var(--color-surface-hover);
-}
-.data-table td code {
-  font-family: var(--font-family-mono);
-  font-size: var(--font-size-xs);
-  background: var(--color-surface-tertiary);
-  padding: var(--space-0.5) var(--space-1);
-  border-radius: var(--radius-sm);
-}
-.data-table.alloc-table { font-size: var(--font-size-xs); }
-.data-table.alloc-table th,
-.data-table.alloc-table td { padding: var(--space-2) var(--space-3); }
-.data-table.alloc-table td:first-child { width: 85px; }
-.data-table.alloc-table td:nth-child(2) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px; }
-.data-table.alloc-table .amount-cell { min-width: 100px; }
-.data-table .weight-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: var(--space-0.5) var(--space-2);
+
+.weight-badge {
   font-family: var(--font-family-mono);
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
-  color: var(--color-brand-700);
-  background: var(--color-bg-brand-subtle);
-  border-radius: var(--radius-full);
 }
-.data-table .change-value {
-  font-family: var(--font-family-mono);
+
+.amount-cell {
+  font: var(--text-mono);
+  text-align: right;
+  color: var(--color-text-primary);
+}
+
+.price-cell {
+  font: var(--text-mono);
+  text-align: right;
+  color: var(--color-text-primary);
+}
+
+.text-muted {
+  color: var(--color-text-tertiary);
+}
+
+.change-value {
+  font: var(--text-mono);
   font-weight: var(--font-weight-semibold);
 }
-.data-table .amount-cell {
-  white-space: nowrap;
-  font-family: var(--font-family-mono);
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-.data-table th.amount-header {
-  text-align: right;
-}
-.data-table .footer-row {
-  background: var(--color-surface-secondary);
-}
-.data-table .footer-row td {
-  border-top: 2px solid var(--color-border-medium);
-  border-bottom: none;
-  font-weight: var(--font-weight-semibold);
-}
-.text-up { color: var(--color-text-up) !important; }
-.text-down { color: var(--color-text-down) !important; }
 </style>

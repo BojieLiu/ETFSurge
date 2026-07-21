@@ -1,53 +1,74 @@
 <template>
-  <section class="card pnl-card" v-if="items.length">
-    <div class="card-header">
-      <h2 class="card-title">
-        <span class="card-title-icon" aria-hidden="true">📊</span>
+  <AppCard variant="default" :padding="false" class="pnl-detail-table">
+    <template #header>
+      <h2 class="card__title">
+        <span class="card-title-icon" aria-hidden="true">📋</span>
         当日盈亏明细
       </h2>
-      <p class="card-subtitle" v-if="activeTab !== 'combined'">
-        当前视图：{{ activeTab === 'on_exchange' ? '场内' : '场外' }} ETF
-      </p>
-    </div>
-    <div class="table-responsive">
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th scope="col">名称</th>
-            <th scope="col">类型</th>
-            <th scope="col">涨跌幅</th>
-            <th scope="col">目标金额</th>
-            <th scope="col">当日盈亏</th>
-            <th v-if="showTrackedIndex" scope="col">跟踪指数</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="item in items" :key="item.symbol">
-            <td><strong>{{ item.short_name || item.name }}</strong></td>
-            <td><span class="type-badge" :class="item.portfolio_type">{{ item.portfolio_type === 'on_exchange' ? '场内' : '场外' }}</span></td>
-            <td :class="changeClass(item.change_pct)">{{ formatChange(item.change_pct) }}</td>
-            <td class="amount-cell">¥{{ formatNum(item.target_amount) }}</td>
-            <td :class="changeClass(item.daily_pnl)">{{ formatChange(item.daily_pnl, true) }}</td>
-            <td v-if="showTrackedIndex">{{ item.tracked_index || '—' }}</td>
-          </tr>
-        </tbody>
-        <tfoot>
-          <tr class="footer-row">
-            <td colspan="2"><strong>合计</strong></td>
-            <td :class="pnlWeightedChange >= 0 ? 'text-up' : 'text-down'">{{ formatChange(pnlWeightedChange) }}</td>
-            <td class="amount-cell"><strong>¥{{ formatNum(pnlTotalAmount) }}</strong></td>
-            <td class="amount-cell" :class="pnlTotal >= 0 ? 'text-up' : 'text-down'"><strong>¥{{ formatNum(pnlTotal) }}</strong></td>
-            <td v-if="showTrackedIndex"></td>
-          </tr>
-        </tfoot>
-      </table>
-    </div>
-  </section>
+    </template>
+
+    <AppTable
+      :columns="columns"
+      :data="tableData"
+      row-key="symbol"
+      :striped="true"
+      :hoverable="true"
+      density="comfortable"
+    >
+      <template #cell:type="{ row }">
+        <AppBadge
+          :variant="row.portfolio_type === 'on_exchange' ? 'outline' : 'default'"
+          :color="row.portfolio_type === 'on_exchange' ? 'var(--color-brand-600)' : 'var(--color-success-600)'"
+          size="sm"
+          class="type-badge"
+        >
+          {{ row.portfolio_type === 'on_exchange' ? '场内' : '场外' }}
+        </AppBadge>
+      </template>
+
+      <template #cell:change_pct="{ row }">
+        <span :class="['change-value', changeClass(row.change_pct)]">
+          {{ formatChange(row.change_pct) }}
+        </span>
+      </template>
+
+      <template #cell:target_amount="{ row }">
+        <span class="amount-cell">¥{{ formatNum(row.target_amount) }}</span>
+      </template>
+
+      <template #cell:daily_pnl="{ row }">
+        <span :class="['change-value', changeClass(row.daily_pnl)]">
+          {{ formatChange(row.daily_pnl, true) }}
+        </span>
+      </template>
+
+      <template #cell:tracked_index="{ row }">
+        <span v-if="row.tracked_index">{{ row.tracked_index }}</span>
+        <span v-else class="text-muted">—</span>
+      </template>
+    </AppTable>
+
+    <template #footer>
+      <div class="table-footer">
+        <div class="footer-row">
+          <span class="footer-label"><strong>合计</strong></span>
+          <span class="footer-change" :class="pnlWeightedChange >= 0 ? 'text-up' : 'text-down'">
+            {{ formatChange(pnlWeightedChange) }}
+          </span>
+          <span class="footer-amount"><strong>¥{{ formatNum(pnlTotalAmount) }}</strong></span>
+          <span class="footer-pnl" :class="pnlTotal >= 0 ? 'text-up' : 'text-down'">
+            <strong>¥{{ formatNum(pnlTotal) }}</strong>
+          </span>
+          <span v-if="showTrackedIndex"></span>
+        </div>
+      </div>
+    </template>
+  </AppCard>
 </template>
 
 <script setup>
 import { computed } from 'vue'
-import { changeClass } from '../../utils/changeClass'
+import { AppCard, AppTable, AppBadge } from '@/components'
 
 const props = defineProps({
   items: { type: Array, default: () => [] },
@@ -59,6 +80,28 @@ const props = defineProps({
 
 const showTrackedIndex = computed(() => props.activeTab === 'off_exchange' || props.activeTab === 'combined')
 
+const columns = [
+  { key: 'short_name', label: '名称', width: '160px' },
+  { key: 'type', label: '类型', width: '80px' },
+  { key: 'change_pct', label: '涨跌幅', width: '100px', align: 'center' },
+  { key: 'target_amount', label: '目标金额', width: '120px', align: 'right' },
+  { key: 'daily_pnl', label: '当日盈亏', width: '120px', align: 'right' },
+  { key: 'tracked_index', label: '跟踪指数', width: '140px' }
+]
+
+const tableData = computed(() => {
+  return props.items.map(item => ({
+    symbol: item.symbol,
+    short_name: item.short_name || item.name,
+    name: item.name,
+    portfolio_type: item.portfolio_type,
+    change_pct: item.change_pct,
+    target_amount: item.target_amount,
+    daily_pnl: item.daily_pnl,
+    tracked_index: item.tracked_index
+  }))
+})
+
 function formatNum(n) {
   const v = n || 0
   try {
@@ -68,107 +111,81 @@ function formatNum(n) {
   }
 }
 
-function formatChange(n, isAmount = false) {
-  const val = n || 0
-  const prefix = val >= 0 && !isAmount ? '+' : ''
-  const suffix = isAmount ? '' : '%'
-  return `${prefix}${val.toFixed(2)}${suffix}`
+function changeClass(pct) {
+  if (pct == null) return ''
+  return pct >= 0 ? 'text-up' : 'text-down'
+}
+
+function formatChange(pct, isAmount = false) {
+  if (pct == null) return '—'
+  if (isAmount) {
+    return (pct > 0 ? '+' : '') + formatNum(pct)
+  }
+  return (pct > 0 ? '+' : '') + pct.toFixed(2) + '%'
 }
 </script>
 
 <style scoped>
-.pnl-card { }
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
-  padding: var(--space-4) var(--space-5);
-  border-bottom: 1px solid var(--color-border-light);
-  flex-wrap: wrap;
+.pnl-detail-table {
+  /* AppCard handles layout */
 }
-.card-title {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--font-size-lg);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-primary);
-  margin: 0;
-}
-.card-title-icon {
-  font-size: var(--font-size-xl);
-  line-height: 1;
-}
-.card-subtitle {
-  margin: var(--space-1) 0 0;
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-  font-weight: var(--font-weight-normal);
-}
-.table-responsive {
-  overflow-x: auto;
-  padding: var(--space-4) var(--space-5);
-  -webkit-overflow-scrolling: touch;
-}
-.data-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--font-size-sm);
-}
-.data-table th,
-.data-table td {
-  padding: var(--space-3) var(--space-4);
-  text-align: left;
-  vertical-align: middle;
-  border-bottom: 1px solid var(--color-border-light);
-}
-.data-table th {
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-secondary);
-  background: var(--color-surface-secondary);
-  white-space: nowrap;
-  position: sticky;
-  top: 0;
-  z-index: 1;
-}
-.data-table tbody tr {
-  transition: var(--transition-fast);
-}
-.data-table tbody tr:hover {
-  background: var(--color-surface-hover);
-}
-.data-table .amount-cell {
-  white-space: nowrap;
-  font-family: var(--font-family-mono);
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-.data-table .type-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: var(--space-0.5) var(--space-2);
+
+.type-badge {
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-medium);
-  border-radius: var(--radius-full);
-  text-transform: capitalize;
 }
-.data-table .type-badge.on_exchange {
-  color: var(--color-info-700);
-  background: var(--color-bg-info-subtle);
-}
-.data-table .type-badge.off_exchange {
-  color: var(--color-warning-700);
-  background: var(--color-bg-warning-subtle);
-}
-.data-table .footer-row {
+
+.table-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-6);
+  border-top: 1px solid var(--color-border-light);
   background: var(--color-surface-secondary);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  flex-wrap: wrap;
 }
-.data-table .footer-row td {
-  border-top: 2px solid var(--color-border-medium);
-  border-bottom: none;
+
+.footer-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.footer-label {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.footer-change {
+  font: var(--text-mono-lg);
+  font-weight: var(--font-weight-semibold);
+  min-width: 80px;
+  text-align: right;
+}
+
+.footer-amount,
+.footer-pnl {
+  font: var(--text-mono-lg);
+  font-weight: var(--font-weight-bold);
+  min-width: 100px;
+  text-align: right;
+}
+
+.text-muted {
+  color: var(--color-text-tertiary);
+}
+
+.change-value {
+  font: var(--text-mono);
   font-weight: var(--font-weight-semibold);
 }
-.text-up { color: var(--color-text-up) !important; }
-.text-down { color: var(--color-text-down) !important; }
+
+.amount-cell {
+  font: var(--text-mono);
+  text-align: right;
+  color: var(--color-text-primary);
+}
 </style>
