@@ -67,10 +67,10 @@ def get_configured_providers() -> list[ProviderConfig]:
     # ── Fallback: DeepSeek Official ────────────────────────────
     if settings.deepseek_api_key:
         models = str(settings.llm_model or "")
-        # DeepSeek official API uses 'deepseek-chat' as the model name;
-        # 'deepseek-v4-flash-free' is only valid for OpenCode Zen.
-        if models in ("deepseek-v4-flash-free", "deepseek-v4-flash"):
-            models = "deepseek-chat"
+        # deepseek-chat/deepseek-reasoner 已于 2026/07/24 废弃，统一使用 deepseek-v4-flash
+        # 'deepseek-v4-flash-free' 仅对 OpenCode Zen 有效，官方 API 用 deepseek-v4-flash
+        if models == "deepseek-v4-flash-free":
+            models = "deepseek-v4-flash"
         providers.append(ProviderConfig(
             id="deepseek",
             name="DeepSeek Official",

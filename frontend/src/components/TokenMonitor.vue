@@ -173,10 +173,7 @@ use([CanvasRenderer, LineChart, BarChart, TitleComponent, TooltipComponent, Grid
 // 官方定价 (2026-07):
 // deepseek-v4-flash: Input $0.14/1M tokens, Output $0.28/1M tokens (按 ¥7.2/USD 换算)
 // deepseek-v4-flash-free: OpenCode Zen 免费模型，费用为 ¥0
-// deepseek-chat / deepseek-reasoner 将于 2026/07/24 废弃，对应 v4-flash 的 non-thinking / thinking 模式
 const PRICING = {
-  'deepseek-chat': { input: 0.001, output: 0.002, note: '即将废弃，使用 deepseek-v4-flash' },
-  'deepseek-reasoner': { input: 0.001, output: 0.002, note: '即将废弃，使用 deepseek-v4-flash' },
   'deepseek-v4-flash': { input: 0.001, output: 0.002, cache_hit: 0.00002 },
   'deepseek-v4-flash-free': { input: 0, output: 0, note: 'OpenCode Zen 免费额度内' },
 }
