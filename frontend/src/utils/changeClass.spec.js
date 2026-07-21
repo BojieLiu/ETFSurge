@@ -33,8 +33,9 @@ vi.mock('../api', () => ({
     applyPortfolioDesign: vi.fn(() => Promise.resolve({ data: {} })),
   },
   analysisApi: {
-    portfolioDesignStream: vi.fn(() => Promise.resolve({ data: {} })),
-    portfolioDesign: vi.fn(() => Promise.resolve({ data: {} })),
+    // Deprecated: portfolioDesignStream / portfolioDesign 已移除，使用 POST /portfolio/design-async
+    // portfolioDesignStream: vi.fn(() => Promise.resolve({ data: {} })),
+    // portfolioDesign: vi.fn(() => Promise.resolve({ data: {} })),
   },
   marketApi: {},
 }))

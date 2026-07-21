@@ -73,6 +73,7 @@ async def search(keyword: str = Query("")) -> list[dict[str, Any]]:
     return await search_etf(keyword)
 
 
+# TODO: 未接入前端
 @router.get("/search/stocks")
 async def search_stocks(keyword: str = Query("")) -> list[dict[str, Any]]:
     """搜索 A 股个股。优先查本地 instruments 表（毫秒级）。"""
@@ -116,6 +117,7 @@ async def search_stocks(keyword: str = Query("")) -> list[dict[str, Any]]:
     return [s for s in normalised if kw in s["symbol"].lower() or kw in s["name"].lower()][:30]
 
 
+# TODO: 未接入前端
 @router.get("/indices/meta")
 async def indices_meta() -> list[dict[str, Any]]:
     """获取所有指数元数据（用于下拉/分组展示）。"""
@@ -160,12 +162,14 @@ async def chart(
     return compute_chart_data(hist)
 
 
+# TODO: 未接入前端
 @router.get("/fundamentals/{symbol}")
 async def fundamentals(symbol: str) -> dict:
     """Tushare 增强数据(日线 + 主力资金流)。免费 token 积分有限,已长缓存。"""
     return await get_fundamentals(symbol)
 
 
+# TODO: 未接入前端
 @router.get("/sentiment")
 async def sentiment() -> dict:
     """市场情绪(财联社/东财):涨跌分布、封板率、连板梯队、赚钱效应。"""
@@ -179,6 +183,7 @@ async def sentiment() -> dict:
 #     return await asyncio.to_thread(fetch_sector_heat, limit)
 
 
+# TODO: 未接入前端
 @router.get("/sectors/industry")
 async def industry_sectors(limit: int = Query(80)) -> list[dict[str, Any]]:
     """行业板块列表：优先本地 sectors 表，否则降级到东方财富/akshare。"""
@@ -188,6 +193,7 @@ async def industry_sectors(limit: int = Query(80)) -> list[dict[str, Any]]:
     return await asyncio.to_thread(fetch_industry_sectors, limit)
 
 
+# TODO: 未接入前端
 @router.get("/sectors/concept")
 async def concept_sectors(limit: int = Query(80)) -> list[dict[str, Any]]:
     """概念板块列表：优先本地 sectors 表，否则降级到东方财富/akshare。"""
@@ -197,36 +203,42 @@ async def concept_sectors(limit: int = Query(80)) -> list[dict[str, Any]]:
     return await asyncio.to_thread(fetch_concept_sectors, limit)
 
 
+# TODO: 未接入前端
 @router.get("/sectors/industry-cls")
 async def sector_industry_cls_route(limit: int = Query(80)) -> list[dict[str, Any]]:
     """行业板块实时行情(财联社)。"""
     return await asyncio.to_thread(fetch_sector_industry_cls, limit)
 
 
+# TODO: 未接入前端
 @router.get("/sectors/{sector_code}/stocks")
 async def sector_stocks_route(sector_code: str) -> list[dict[str, Any]]:
     """板块成分股(东方财富)。"""
     return await asyncio.to_thread(fetch_sector_stocks, sector_code)
 
 
+# TODO: 未接入前端
 @router.get("/sectors/{plate_code}/popular")
 async def sector_popular(plate_code: str) -> list[dict[str, Any]]:
     """板块热门个股(财联社)。"""
     return await asyncio.to_thread(fetch_sector_popular_stocks, plate_code)
 
 
+# TODO: 未接入前端
 @router.get("/hot-plates")
 async def hot_plates(limit: int = Query(15)) -> list[dict[str, Any]]:
     """热点板块及涨停股(财联社)。"""
     return await asyncio.to_thread(fetch_hot_plates, limit)
 
 
+# TODO: 未接入前端
 @router.get("/stock-hot-rank")
 async def stock_hot_rank(limit: int = Query(50)) -> list[dict[str, Any]]:
     """A股热门个股排名(同花顺)。"""
     return await asyncio.to_thread(fetch_stock_hot_rank, limit)
 
 
+# TODO: 未接入前端
 @router.get("/wind")
 async def wind() -> list[dict[str, Any]]:
     """今日风口/主线板块(财联社)。"""

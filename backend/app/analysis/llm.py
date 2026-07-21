@@ -768,31 +768,46 @@ async def generate_sector_analysis(
     market_data: list[dict],
     factor_scores: list[dict] | None = None,
 ) -> str:
+    """行业/概念板块 AI 分析 — 包含成分股、大盘环境、资金流向、近期行情。"""
     idx_map = {idx.get("name", ""): idx for idx in indices}
     comm_map = {c.get("name", ""): c for c in commodities}
 
-    prompt = f"""## {sector_name}({sector_code}) 行业深度分析
+    # Extract market regime/sentiment from market_data if injected
+    regime = ""
+    sentiment = ""
+    news_items = []
+    for item in market_data:
+        title = item.get("title", "")
+        if title and title.startswith("【市场背景】"):
+            regime = title.replace("【市场背景】", "").strip()
+        elif title and title.startswith("【板块动量】"):
+            pass  # handled below
+        else:
+            news_items.append(item)
 
-### 成分股行情
+    prompt = f"""## {sector_name}({sector_code}) 板块分析
+
+### 成分股（近期表现）
 """
     for s in sector_stocks[:20]:
-        prompt += f"- {s.get('name', '')}({s.get('symbol', '')}): ¥{s.get('price', 'N/A')}, 涨跌幅{s.get('change_pct', 'N/A')}%\n"
+        prompt += f"- {s.get('name', '')}({s.get('symbol', '')}): 价格 {s.get('price', 'N/A')}, 涨跌幅 {s.get('change_pct', 'N/A')}%\n"
 
     prompt += f"""
-### 宏观背景
+### 大盘环境
 - 上证指数: {idx_map.get('上证指数', {}).get('price', 'N/A')} ({idx_map.get('上证指数', {}).get('change_pct', 'N/A')}%)
 - 沪深300: {idx_map.get('沪深300', {}).get('price', 'N/A')} ({idx_map.get('沪深300', {}).get('change_pct', 'N/A')}%)
-- 黄金: {comm_map.get('黄金', {}).get('price', 'N/A')} ({comm_map.get('黄金', {}).get('change_pct', 'N/A')}%)
+- 创业板指: {idx_map.get('创业板指', {}).get('price', 'N/A')} ({idx_map.get('创业板指', {}).get('change_pct', 'N/A')}%)
+{regime}
 """
 
-    # 注入因子/动量数据（如果有）
+    # Factor scores / sector momentum
     if factor_scores:
-        prompt += "\n### 因子评分 / 动量数据\n"
+        prompt += "\n### 板块动量 / 因子得分\n"
         for fs in factor_scores[:15]:
             name = fs.get("name", fs.get("symbol", "?"))
             scores = fs.get("factor_scores", fs.get("scores", {}))
             if scores and isinstance(scores, dict):
-                score_items = "；".join(
+                score_items = ", ".join(
                     f"{k}: {v:.2f}" for k, v in sorted(scores.items(), key=lambda x: -abs(x[1]))[:5]
                 )
                 prompt += f"- {name}: {score_items}\n"
@@ -802,28 +817,39 @@ async def generate_sector_analysis(
                     prompt += f"- {name}: 涨跌幅 {chg}%\n"
 
     prompt += f"""
-**重要说明：**
-- 如果分析的概念包含跨市场标的（如同时在 A 股和港股上市的创新药），请明确指出当前分析的市场
-- **必须包含近 1-5 日的近期行情分析**，包括近期涨跌幅、成交量变化、板块内个股表现
+**分析要求：**
+- 针对中国市场 A 股进行专业分析，不要错误分析港股或美股数据
+- **重点分析近 1-5 个交易日的板块走势、量价变化**
+- 结合上述成分股表现、大盘环境和板块动量数据
 
-请从以下时间维度和分析维度进行全面分析：
+请按以下框架输出 Markdown 分析报告：
 
-### 时间维度
-1. **短期（近 1-5 日）**：近期涨跌幅、成交量变化、板块内个股表现
-2. **中期（近 1 个月）**：趋势方向、主力资金动向
-3. **长期（近 3 个月以上）**：行业景气度、估值水平、政策持续性
+### 近期走势
+1. **近 5 日**该板块的涨跌幅变化、成交量变化趋势
+2. **近 1 日**领涨/领跌成分股及原因
 
-### 分析维度
-1. 行业基本面与景气度
-2. 技术面形态与关键位
-3. 资金流向与机构动向
-4. 核心标的推荐（3-5只）
-5. 风险提示
-6. 操作建议（买入/持有/减仓区间）
+### 资金面
+1. 主力资金净流入/流出情况
+2. 板块成交额变化（放量/缩量）
 
-  控制在 600 字以内。"""
+### 催化因素
+1. 政策面驱动
+2. 行业基本面变化
+3. 外部事件催化
+
+### 后市研判
+1. 短期技术走势判断
+2. 关键支撑/压力位
+3. 关注的成分股
+4. 给出 3-5 个交易日的走势预判
+
+注意：
+- 使用具体数据（价格、涨跌幅、成交量等），不要模糊描述
+- 控制篇幅在 600 字以内
+- 用 **加粗** 标注关键数据
+"""
+    from ..analysis.registry import get_agent
     return await get_agent("sector_analysis").run(prompt)
-
 
 async def generate_symbol_analysis(
     symbol: str,

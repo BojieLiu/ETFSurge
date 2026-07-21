@@ -267,6 +267,7 @@ class PortfolioReviewRequest(BaseModel):
     meta_context: dict  # strategy_target_type, benchmark_index, last_rebalance_date, current_date, days_since_rebalance, total_portfolio_value_mn, current_annualized_volatility_pct
 
 
+# TODO: 未接入前端
 @router.post("/portfolio-review")
 async def portfolio_review(req: PortfolioReviewRequest):
     """

@@ -174,9 +174,13 @@ const chartOption = computed(() => {
           const idx = p.dataIndex
           const date = dates[idx] || ''
           const close = d.closes[idx]
+          const vol = d.volumes ? d.volumes[idx] : 0
+          const open = d.opens ? d.opens[idx] : 0
+          const high = d.highs ? d.highs[idx] : 0
+          const low = d.lows ? d.lows[idx] : 0
+          const volFormatted = vol >= 100000000 ? (vol / 100000000).toFixed(2) + '亿' : vol >= 10000 ? (vol / 10000).toFixed(2) + '万' : vol.toLocaleString()
           const change = ((close - basePrice) / basePrice * 100).toFixed(2)
-          const vol = d.volumes[idx]
-          return `<b>${date}</b><br/>收盘: ${close.toFixed(3)}<br/>涨跌幅: ${change >= 0 ? '+' : ''}${change}%<br/>成交量: ${vol || 0}`
+          return `<b>${date}</b><br/>开: ${open.toFixed(3)} 高: ${high.toFixed(3)} 低: ${low.toFixed(3)} 收: ${close.toFixed(3)}<br/>涨跌幅: ${change >= 0 ? '+' : ''}${change}%<br/>成交量: ${volFormatted}`
         },
       },
       grid: [
