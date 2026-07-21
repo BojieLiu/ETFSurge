@@ -368,6 +368,13 @@ const chartOption = computed(() => {
       type: 'line', data: d.rsi, smooth: true,
       xAxisIndex: rsiGridIdx, yAxisIndex: rsiGridIdx,
       name: 'RSI(14)', symbol: 'none', lineStyle: { width: 1.2, color: '#ef4444' },
+      markLine: {
+        silent: true,
+        data: [
+          { yAxis: 70, label: { formatter: '70 超买', fontSize: 10, color: '#ef4444' }, lineStyle: { color: '#ef4444', type: 'dashed', width: 1 } },
+          { yAxis: 30, label: { formatter: '30 超卖', fontSize: 10, color: '#22c55e' }, lineStyle: { color: '#22c55e', type: 'dashed', width: 1 } },
+        ],
+      },
     })
   }
 
