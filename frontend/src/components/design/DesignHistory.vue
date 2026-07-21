@@ -13,9 +13,7 @@
           <span class="history-icon">{{ h._type === 'check' ? '🔍' : '💡' }}</span>
           <span class="history-task-type" :class="h._type">{{ h._type === 'design' ? '智能组合设计' : '策略检查与分析' }}</span>
           <span class="history-date">{{ formatDate(h.created_at) }}</span>
-          <span v-if="h._type === 'design'" class="history-capital">{{ (h.capital / 10000).toFixed(0) }}万</span>
-          <span v-if="h._type === 'design'" class="history-style">{{ h.risk_profile ? riskProfileLabel(h.risk_profile) : '组合方案' }}</span>
-          <span v-if="h._type === 'check'" class="history-style">{{ regimeLabel(h.market_regime) }}</span>
+          <span class="history-capital">{{ h._type === 'design' ? (h.capital / 10000).toFixed(0) + '万' : '' }}</span>
           <span class="history-detail-link">查看详情</span>
         </div>
       </div>
@@ -37,20 +35,6 @@ defineProps({
 })
 
 defineEmits(['select', 'close'])
-
-function riskProfileLabel(profile) {
-  const labels = { aggressive: '进取型', balanced: '平衡型', defensive: '防御型' }
-  return labels[profile] || profile || '组合方案'
-}
-
-function regimeLabel(regime) {
-  const labels = {
-    bull_strong: '强牛市', bull_weakening: '牛市趋弱',
-    range_bound: '震荡', correction: '回调',
-    bear: '熊市', defensive_rotate: '防御轮动', panic: '恐慌',
-  }
-  return labels[regime] || regime || '未知'
-}
 </script>
 
 <style scoped>

@@ -247,7 +247,9 @@ async function addWatchlist() {
     await store.addWatchlist(watchlistForm.value.symbol, watchlistForm.value.asset_type, watchlistForm.value.notes)
     showAddWatchlist.value = false
     watchlistForm.value = { symbol: '', asset_type: 'A', notes: '' }
-    fetchWatchlist()
+    // Optimistic: local list already updated via store.unshift.
+    // Short delay then refresh to sync with server-side data
+    setTimeout(fetchWatchlist, 500)
   } catch (e) {
     console.error('Add watchlist failed:', e)
   } finally { watchlistAdding.value = false }

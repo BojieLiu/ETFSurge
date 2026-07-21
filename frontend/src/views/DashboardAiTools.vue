@@ -294,7 +294,9 @@ async function startDesign(capital) {
     loadingText.value = '正在请求 AI 设计方案...'
     const res = await portfolioApi.designAsync({ capital: capital })
     const taskData = res.data
-    taskStore.addTask({ taskId: taskData.task_id, type: 'design', status: 'running', designId: taskData.design_id, createdAt: Date.now() })
+    taskStore.addTask(taskData.task_id, '智能组合设计', 'design')
+    const storedTask = taskStore.getTask(taskData.task_id)
+    if (storedTask) storedTask.designId = taskData.design_id
 
     loadingProgress.value = 30
     loadingText.value = 'AI 正在分析全市场数据...'
@@ -360,7 +362,7 @@ async function checkStrategy() {
   try {
     const res = await portfolioApi.strategyCheck({ portfolio_type: strategyPortfolioType.value || undefined })
     const taskData = res.data
-    taskStore.addTask({ taskId: taskData.task_id, type: 'check', status: 'running', createdAt: Date.now() })
+    taskStore.addTask(taskData.task_id, '策略检查与分析', 'check')
 
     // Poll for completion
     let pollCount = 0

@@ -1,0 +1,4 @@
+# Playwright E2E test artifacts
+frontend/test-results/
+frontend/e2e/fixtures/*.png
+frontend/e2e/fixtures/*.spec.js.snap/

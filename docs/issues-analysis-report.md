@@ -1,7 +1,8 @@
-# ETF Surge — 问题分析报告与修复方案（修订版 v2）
+# ETF Surge — 问题分析报告与修复方案（修订版 v3）
 
-> 生成日期: 2026-07-20 | **修订版 v2**
-> 基于第一轮修复后的用户反馈，重新分析全部 17 个问题，复盘修复失败原因，设计第二轮修复方案。
+> 生成日期: 2026-07-21 | **修订版 v3**
+> 基于前两轮修复后的用户反馈，重新分析全部 17 个问题，复盘修复失败原因，引入 Playwright E2E 测试体系，设计第三轮修复方案。
+> - [`docs/e2e-testing-plan.md`](./e2e-testing-plan.md) — 完整 E2E 测试方案，本报告引用该方案作为验证保障
 
 ---
 
@@ -10,7 +11,7 @@
 1. [第一轮修复复盘](#第一轮修复复盘)
    - [修复总览](#修复总览)
    - [失败根因分析](#失败根因分析)
-2. [问题现状与第二轮修复方案](#问题现状与第二轮修复方案)
+2. [问题现状与第三轮修复方案](#问题现状与第三轮修复方案)
    - [P0 — 仍阻塞](#p0--仍阻塞)
      - [#1 智能组合设计：生成依然失败](#1-智能组合设计生成依然失败)
      - [#4 市场研判报告不展示内容](#4-市场研判报告不展示内容)
@@ -20,7 +21,7 @@
      - [#14 Dashboard 数据未渲染 + 白屏](#14-dashboard-数据未渲染--白屏)
    - [P1 — 仍缺陷](#p1--仍缺陷)
      - [#2 策略检查需弹窗选择组合类型](#2-策略检查需弹窗选择组合类型)
-     - [#3 历史记录显示「任务类型」而非原始代码](#3-历史记录显示任务类型而非原始代码)
+     - [#3 历史记录：保留任务类型标签，去除 regime 描述](#3-历史记录保留任务类型标签去除-regime-描述)
      - [#5 自选添加成功但列表为空](#5-自选添加成功但列表为空)
      - [#6 AI 投资顾问回答质量低](#6-ai-投资顾问回答质量低)
      - [#7 板块分析：创新药分析错位，概念缺失](#7-板块分析创新药分析错位概念缺失)
@@ -31,7 +32,7 @@
      - [#13 K 线图需加图名、技术指标、时间展示](#13-k-线图需加图名技术指标时间展示)
      - [#15 Token 监控需确认定价策略](#15-token-监控需确认定价策略)
      - [#17 全局 UI 未改进](#17-全局-ui-未改进)
-3. [第二轮修复策略与执行路线图](#第二轮修复策略与执行路线图)
+3. [第三轮修复策略与执行路线图](#第三轮修复策略与执行路线图)
 4. [优先级总表](#优先级总表)
 
 ---
@@ -87,43 +88,45 @@
 
 #### 根因 6：大组件耦合，修改风险高
 
-- `MarketAnalysis.vue`：1812 行，6 个功能区域
-- `DashboardAiTools.vue`：2141 行，5 个面板
-- 任何局部修改都容易影响其他区域
+- `MarketAnalysis.vue`：1812 行 → 重构后拆为 6 个子组件 + 容器
+- `DashboardAiTools.vue`：2141 行 → 重构后拆为 6 个子组件 + 容器
+- 重构本身正确，但重构化之后的功能验证依赖人工走查，缺乏自动化手段
+
+#### 根因 7（本次新增）：零前端集成测试
+
+所有 17 个 issue 中有 14 个是前端问题（按钮显示、输入交互、数据渲染等），但：
+
+- 没有任何自动测试能检测"按钮变文字"、"页面白屏"、"输入框不可交互"这类 CSS/渲染问题
+- `verify_e2e.py` 只测后端 HTTP，前端行为完全盲测
+- 11 个前端 vitest 文件全是 jsdom 单元测试，抓不到真实浏览器问题
+- 导致每次修改都像"盲飞"——改了一个地方，不知道坏了哪里
 
 ---
 
-## 问题现状与第二轮修复方案
+## 问题现状与第三轮修复方案
 
 ### P0 — 仍阻塞
 
-#### #1 智能组合设计：生成依然失败
+#### #1 智能组合设计：生成依然失败（新增 registerTaskCompletion 错误）
 
-**现状**：按钮点击后，通知栏显示生成失败。
+**现状**：按钮点击后通知栏显示「提交失败：taskStore.registerTaskCompletion is not a function」。历史记录里能看到任务，但点击查看详情无反应。
 
-**根因（新增诊断）**：
-可能存在以下任一原因：
-1. `generate_enhanced_design()` 内部异常未被 `design_worker` 正确捕获
-2. `pool_manager.get_pool()` 或 `get_factor_matrix()` 返回空 → 分配器无候选标的 → 生成空方案 → 前端显示失败
-3. `_notify()` 的 WS 消息前端未正确处理（即使 `design_id` 已加入 payload）
-
-**需要先诊断**：
-```python
-# 后端：在 design_worker 的 except 块中记录完整 traceback
-logger.exception("[design_worker] 生成失败")
-# 前端：在 WS 消息处理器中 console.log 收到的所有消息
-```
+**根因**：
+1. **（新增）`registerTaskCompletion` 方法不存在**：`frontend/src/views/DashboardAiTools.vue:303` 调用了 `taskStore.registerTaskCompletion(taskData.task_id, callback)`，但 `stores/task.js` 中根本没有这个方法。该方法应为旧版 store 的方法，重构中丢失。
+2. `generate_enhanced_design()` 内部异常未被正确捕获
+3. `pool_manager.get_pool()` 或 `get_factor_matrix()` 返回空 → 生成空方案
+4. 历史记录点击查看详情无反应：`DesignHistory.vue` 的 `@select` 事件绑定了 `onHistorySelect`，该函数可能未正确处理异步加载
 
 **修复方案**：
 
 | 步骤 | 位置 | 变更 |
 |------|------|------|
-| 诊断1 | `backend/app/tasks/task_manager.py` | `design_worker` except 块改用 `logger.exception` |
-| 诊断2 | `frontend/src/App.vue` | WS handler 增加 `console.log` 调试输出 |
-| 诊断3 | `backend/app/services/strategy_design.py` | 确认 `generate_enhanced_design` 对空候选池的处理 |
-| 修复 | `task_manager.py:_notify()` | 确保 WS 消息含 `type` 和 `designId` 两个字段 |
-| UX | `DashboardAiTools.vue` | 运行中任务时允许点击进入，但显示「任务进行中」弹窗而非直接跳 loading |
-| UX | `DashboardAiTools.vue` | loading 页显示任务类型（"智能组合设计生成中..."） |
+| 修复1（阻塞） | `stores/task.js` | 新增 `registerTaskCompletion(taskId, callback)` 方法：注册 WS 回调，在收到完成通知时执行 callback |
+| 修复2（阻塞） | `views/DashboardAiTools.vue:303` | 修正 `registerTaskCompletion` 调用方式；或改为纯轮询（已有 polling 备选） |
+| 修复3 | `views/DashboardAiTools.vue` | 修复 `onHistorySelect` 函数：正确加载历史详情并显示 |
+| 修复4 | `backend/app/tasks/task_manager.py` | `design_worker` except 块改用 `logger.exception` |
+| 诊断 | `backend/app/services/strategy_design.py` | 确认 `generate_enhanced_design` 对空候选池的处理 |
+| UX | `views/DashboardAiTools.vue` | loading 页显示任务类型（"智能组合设计生成中..."） |
 
 ---
 
@@ -135,21 +138,20 @@ logger.exception("[design_worker] 生成失败")
 `llm_report_stream` 被修复为 `asyncio.gather` 数据采集 + `generate_market_report` 调用，但：
 
 1. **`generate_market_report` 是非流式的** — 它不是一个 token-by-token 生成器，而是完整构建报告后一次性返回。流式端点把它包裹成 SSE（`event: done` + 完整文本），但前端 `useLLMStream` 期望的是 `event: chunk` 逐 token 推送
-2. **前端 SSE 解析不匹配** — 前端在 `MarketAnalysis.vue` 的 `generateMarketReport()` 中可能直接调用非流式端点而非流式端点，或者 SSE 解析器不识别 `event: done` 格式
+2. **前端 SSE 解析不匹配** — 前端在 `components/market/MarketReport.vue` 的 `generateMarketReport()` 中调用 `useLLMStream().start()`，流式端点 `POST /analysis/llm-report/stream` 的前端解析可能不匹配
 
 ```javascript
-// MarketAnalysis.vue 期望的流式响应格式
-// 前端 receiveSSE 期望: { event: 'chunk', data: '...' } 或 { event: 'done', data: { full_text: '...' } }
-// 实际返回: event: done\ndata: {"full_text": "...", "disclaimer": "..."}\n\n
-// 如果前端的 SSE parser 只处理 'chunk' event，则 'done' event 被忽略
+// MarketReport.vue 使用 useLLMStream composable
+// useLLMStream 的 SSE 解析逻辑在 streamPost (api/index.js)
+// streamPost 期望: event: token / event: done / event: error
 ```
 
 **修复方案**：
 
 | 步骤 | 位置 | 变更 |
 |------|------|------|
-| 1 | `frontend/src/composables/useLLMStream.js` | 确认 SSE 解析器同时处理 `chunk` 和 `done` event |
-| 2 | `frontend/src/components/MarketAnalysis.vue` | `generateMarketReport()` 确认调用正确的端点并正确设置 `marketReport` ref |
+| 1 | `frontend/src/composables/useLLMStream.js` | 确认 SSE 解析器同时处理 `token` 和 `done` event |
+| 2 | `frontend/src/components/market/MarketReport.vue` | `generateMarketReport()` 确认调用正确的端点并正确设置 `marketReport` ref |
 | 3 | `backend/app/routers/analysis.py` | 增加 `chunk` event 推送（将完整文本切分成 chunk），与前端 SSE 解析器对齐 |
 | 4 | 两端对调 | 如果流式持续不可用，临时使用非流式端点确保至少报告能展示 |
 
@@ -179,9 +181,9 @@ const [etfRes, stockRes] = await Promise.all([
 
 | 步骤 | 位置 | 变更 |
 |------|------|------|
-| 1 | `MarketAnalysis.vue` | 确认 `fetchJson` 已定义（或改用 `marketApi.search`） |
-| 2 | `MarketAnalysis.vue` | 增加搜索失败时的错误提示 |
-| 3 | `MarketAnalysis.vue` | 允许手动输入代码后直接点击分析（无需从下拉选择） |
+| 1 | `composables/useMarketSearch.js` | 确认 `fetchJson` 已定义（或改用 `marketApi.search`） |
+| 2 | `components/market/SymbolAnalysis.vue` | 增加搜索失败时的错误提示 |
+| 3 | `components/market/SymbolAnalysis.vue` | 允许手动输入代码后直接点击分析（无需从下拉选择） |
 | 4 | `backend/app/routers/market.py` | 确认 `/api/v1/market/search` 和 `/search/stocks` 端点正常返回 |
 
 ---
@@ -268,22 +270,23 @@ if _level_of(it) >= 3:  # ← 只广播 level>=3
 
 | 步骤 | 位置 | 变更 |
 |------|------|------|
-| 1 | `DashboardAiTools.vue` | 点击「策略检查分析」时弹出 Modal，让用户选择「场内组合」或「场外组合」 |
-| 2 | `DashboardAiTools.vue` | 弹窗中显示两种组合的概要信息（ETF 数量、总权重） |
-| 3 | `DashboardAiTools.vue` | 用户选择后调用端点并传入对应的 `portfolio_type` |
+| 1 | `views/DashboardAiTools.vue` | 点击「策略检查分析」时弹出 `StrategyCheckModal` |
+| 2 | `components/design/StrategyCheckModal.vue` | 弹窗中显示两种组合的概要信息（ETF 数量、总权重） |
+| 3 | `views/DashboardAiTools.vue` | 用户选择后调用端点并传入对应的 `portfolio_type` |
 
 ---
 
-#### #3 历史记录显示「任务类型」而非原始代码
+#### #3 历史记录：保留任务类型标签，去除 regime 描述
 
-**现状**：加了 `riskProfileLabel` 映射，但用户希望明确看到「策略检查与分析」或「智能组合设计生成」。
+**现状**：已实现了任务类型标签（`history-task-type` 显示"智能组合设计"或"策略检查与分析"）。但每条记录还附加了 `history-style` 标签显示 regime 描述（如"震荡"、"牛市趋弱"、"平衡型"），这些描述多余且不准确——市态判定与方案风格不是同一回事，共存造成混淆。
 
 **修复方案**：
 
 | 步骤 | 位置 | 变更 |
 |------|------|------|
-| 1 | `DashboardAiTools.vue` | 在历史项目上增加任务类型标签（`_type` 映射为中文） |
-| 2 | `DashboardAiTools.vue` | 方案详情中也显示任务类型 |
+| 1 | `DesignHistory.vue` | 保留 `history-task-type` 标签（`智能组合设计` / `策略检查与分析`） |
+| 2 | `DesignHistory.vue` | **移除** `history-style` 标签（即 `riskProfileLabel` 和 `regimeLabel` 渲染的行） |
+| 3 | `DesignHistory.vue` | `h._type === 'check'` 的记录也不再显示 regime 标签 |
 
 ---
 
@@ -350,10 +353,10 @@ Prompt 质量不足。`llm.py` 中的 `generate_advice()` 函数构建的 prompt
 
 | 步骤 | 位置 | 变更 |
 |------|------|------|
-| 1 | `MarketAnalysis.vue` 或 `sector_fetcher.py` | 根据 `marketTab` 过滤概念板块数据源（A 股从东方财富、港股从...） |
+| 1 | `composables/useSectorAnalysis.js` 或 `sector_fetcher.py` | 根据 `marketTab` 过滤概念板块数据源（A 股从东方财富、港股从...） |
 | 2 | `sector_fetcher.py` | 增加 `limit` 参数到 150，增加多个数据源 |
 | 3 | `backend/app/analysis/llm.py:generate_sector_analysis` | prompt 增加近 5 日行情分析要求 |
-| 4 | `MarketAnalysis.vue` | 移除 AI 开场白 |
+| 4 | `components/market/SectorAnalysis.vue` | 移除 AI 开场白 |
 
 ---
 
@@ -396,11 +399,13 @@ Prompt 质量不足。`llm.py` 中的 `generate_advice()` 函数构建的 prompt
 
 | 步骤 | 位置 | 变更 |
 |------|------|------|
-| 1 | `MarketAnalysis.vue` | 将 Tab 提升到组件最顶部（`market-tabs`），样式加大加粗 |
-| 2 | `MarketAnalysis.vue` | Tab 切换时，市场研判/自选/AI 顾问/板块分析/标的分析/指数分析 6 个区域都受 Tab 影响 |
-| 3 | `MarketAnalysis.vue` | 每个区域的 API 调用根据 Tab 传递对应的 `market` 参数 |
-| 4 | `MarketAnalysis.vue` | 将独立的 `watchlistAssetTypes` 与 `marketTab` 关联 |
-| 5 | 如果组件过大 | 考虑将每个 Tab 拆分成独立子组件（`AMarketPanel.vue`、`HKMarketPanel.vue` 等） |
+| 1 | `views/MarketAnalysis.vue` | 确保顶部 `market-tabs` 切换时所有子组件都收到正确的 `marketTab` prop |
+| 2 | `components/market/MarketReport.vue` | 接收 `marketTab` prop，按市场筛选数据调用对应 API |
+| 3 | `components/market/WatchlistPanel.vue` | 接收 `marketTab` prop，`filteredWatchlist` 根据 marketTab 过滤 |
+| 4 | `components/market/AiAdvisor.vue` | 接收 `marketTab` prop，请求中传 `market` 参数 |
+| 5 | `components/market/SectorAnalysis.vue` | 使用 `useSectorAnalysis` composable，`marketTab` 变化时触发 `onSectorTypeChange` |
+| 6 | `components/market/SymbolAnalysis.vue` | 接收 `marketTab` prop，搜索/分析 API 传对应的 `asset_type` |
+| 7 | `components/market/IndexAnalysis.vue` | 接收 `marketTab` prop，`filteredIndicesByTab` 根据 marketTab 过滤 |
 
 ---
 
@@ -456,7 +461,7 @@ Prompt 质量不足。`llm.py` 中的 `generate_advice()` 函数构建的 prompt
 
 ---
 
-## 第二轮修复策略与执行路线图
+## 第三轮修复策略与执行路线图
 
 ### 核心原则
 
@@ -468,6 +473,18 @@ Prompt 质量不足。`llm.py` 中的 `generate_advice()` 函数构建的 prompt
 ### 执行顺序
 
 ```
+第零批（安全网 — 必须先做）
+  ├── Playwright E2E 测试体系搭建
+  │     ├── 依赖安装 + config
+  │     ├── 所有页面 @smoke 测试（不白屏、按钮可点、输入框可交互）
+  │     ├── API mock 层（模拟全球指数 / 搜索 / stream 端点）
+  │     └── 回归 spec 框架（每修一个 bug 追加一个测试用例）
+  └── 后端 verify_e2e.py 扩展
+        ├── 按模块分组（market / portfolio / analysis / news / admin / ws）
+        ├── 新增 ~66 个端点测试用例
+        ├── WebSocket 实际连接测试（websockets 库）
+        └── 支持 --module / --smoke 选择性运行
+
 第一批（P0 — 核心功能恢复）
   ├── #8 搜索自动补全恢复（低风险，优先恢复标的选择功能）
   ├── #9 资讯推送修复（低风险，WS 广播条件放宽）
@@ -493,6 +510,17 @@ Prompt 质量不足。`llm.py` 中的 `generate_advice()` 函数构建的 prompt
 
 第五批（P2 — UI 优化）
   └── #17 全局 UI 改进（高风险，推迟）
+
+第六批（清理 — E2E 全覆盖之后）
+  ├── 删除 5 个废弃端点
+  │     ├── GET /indices/search（与 /indices/meta 重叠）
+  │     ├── GET /sectors（与 industry/concept 重叠）
+  │     ├── GET /designs/{id}/status（/designs/{id} 已含状态）
+  │     ├── POST /sector-analysis（已全部改用 stream 版）
+  │     └── POST /symbol-analysis（已全部改用 stream 版）
+  ├── 删除 changeClass.spec.js 中的废弃 mock
+  ├── 为保留的 9 个端点加 # TODO 注释
+  └── 跑 verify_e2e --smoke + test:e2e:smoke → ALL PASS
 ```
 
 ### 验证计划
@@ -501,29 +529,31 @@ Prompt 质量不足。`llm.py` 中的 `generate_advice()` 函数构建的 prompt
 |------|---------|------|
 | 诊断 | 每个 P0 问题的根因确认 | 加日志/console.log → 重启 → 复现操作 → 读日志 |
 | 修复中 | 每次编辑语法正确性 | `npm run build`（前端）/ `python -m py_compile`（后端） |
-| 修复后 | 功能链路验证 | `python scripts/verify_e2e.py` |
-| 集成 | 全部 17 个问题回归 | 人工按 checklist 逐项确认 |
-| 最终 | 前后端联调 | 浏览器打开，走查全部功能页面 |
+| 修复后 | 后端功能链路 | `python scripts/verify_e2e.py` |
+| 修复后 | 前端核心链路（不白屏、按钮渲染、输入可交互） | `npm run test:e2e:smoke`（Playwright @smoke 用例集） |
+| 修复后 | 受影响的 spec 专项验证 | `npm run test:e2e -- --grep "相关用例名"` |
+| 集成 | 全部 17 个问题回归 | `npm run test:e2e`（Playwright 全量） + `verify_e2e.py` |
+| 最终 | 视觉回归检测 | `npm run test:e2e:visual`（截图对比） |
 
 ---
 
-## 优先级总表 v2
+## 优先级总表 v3
 
 | Pri | # | 问题 | 本轮状态 | 根因类型 | 修复工作量 | 关联文件 |
 |-----|---|------|---------|---------|-----------|---------|
-| **P0** | 8 | 自动补全消失 + 按钮置灰 | 回归 | `fetchJson` 未定义或搜索端点故障 | 低 | `MarketAnalysis.vue` |
+| **P0** | 8 | 自动补全消失 + 按钮置灰 | 回归 | `fetchJson` 未定义或搜索端点故障 | 低 | `composables/useMarketSearch.js` |
 | **P0** | 9 | 资讯未推送 | 未修复 | WS 广播条件过严 | 低 | `news_refresh.py`, `NewsView.vue` |
 | **P0** | 4 | 研判报告不展示内容 | 修复不完整 | SSE 格式与前端解析不匹配 | 中 | `analysis.py`, `useLLMStream.js` |
-| **P0** | 1 | 组合设计生成失败 | 修复不完整 | 需诊断（可能是空候选池或 WS 消息处理） | 中 | `task_manager.py`, `DashboardAiTools.vue` |
+| **P0** | 1 | 组合设计生成失败（registerTaskCompletion） | 回归 | 重构丢失方法 | 中 | `stores/task.js`, `views/DashboardAiTools.vue` |
 | **P0** | 11 | 信号/评分一直为 0 | 未修复 | fetcher 数据链静默失败 | 中 | `china_market.py`, `market_service.py` |
 | **P0** | 12 | 份额空 + 翻页消失 | 修复不完整 | 数据模型缺失 + 分页逻辑缺陷 | 中 | `PortfolioManager.vue`, `portfolio_service.py` |
 | **P0** | 14 | Dashboard 白屏 | 修复不完整 | Promise.all reject + 双重 fetch | 低 | `Dashboard.vue`, `GlobalIndicesStrip.vue` |
-| **P1** | 5 | 自选添加成功但列表空 | 未修复 | 后端查询条件不一致或乐观更新缺失 | 中 | `MarketAnalysis.vue` + 后端 watchlist API |
+| **P1** | 5 | 自选添加成功但列表空 | 未修复 | 后端查询条件不一致或乐观更新缺失 | 中 | `WatchlistPanel.vue` + 后端 watchlist API |
 | **P1** | 7 | 创新药分析错位 | 未修复 | marketTab → sector_type 传导断裂 | 中 | `llm.py`, `sector_fetcher.py` |
-| **P1** | 2 | 策略检查需弹窗选择 | 实现过于简单 | 无 UI 交互 | 中 | `DashboardAiTools.vue` |
+| **P1** | 2 | 策略检查需弹窗选择 | 已实现但交互不全 | 弹窗后白屏 | 中 | `views/DashboardAiTools.vue`, `StrategyCheckModal.vue` |
 | **P1** | 6 | AI 顾问回答质量低 | 未修复 | prompt 模板数据不足 | 低 | `llm.py` |
-| **P1** | 16 | 市场 Tab 粗糙 | 实现过于简单 | Tab 作用域太小 | 高 | `MarketAnalysis.vue` |
-| **P2** | 13 | K 线图增强 | 部分修复 | chart 配置缺失 | 中 | `AnalysisView.vue`, `MarketAnalysis.vue` |
+| **P1** | 16 | 市场 Tab 粗糙 | 已拆分为子组件但联动不足 | Tab prop 传递断裂 | 中 | `views/MarketAnalysis.vue`, `components/market/*` |
+| **P2** | 13 | K 线图增强 | 部分修复 | chart 配置缺失 | 中 | `AnalysisView.vue`, `SymbolAnalysis.vue` |
 | **P2** | 3 | 历史记录任务类型 | 未完全满足 | 语义标签不清晰 | 极低 | `DashboardAiTools.vue` |
 | **P2** | 15 | Token 定价确认 | 未确认 | 需查定价文档 | 低 | `TokenMonitor.vue` |
 | **P2** | 17 | 全局 UI 改进 | 未修复 | 设计系统不完整 | 高 | 全部页面 |
@@ -531,14 +561,40 @@ Prompt 质量不足。`llm.py` 中的 `generate_advice()` 函数构建的 prompt
 
 ---
 
-## 第二轮修复 — 一键打开清单（推荐执行顺序）
+## 第三轮修复 — 一键打开清单（推荐执行顺序）
+
+> 前置条件：Playwright E2E 测试体系已搭建（见 `docs/e2e-testing-plan.md`）
+> 每个修复步骤后：`npm run test:e2e:smoke` 确认未引入回归
 
 ```
+第零批 (E2E 安全网 — 前端):
+  [ ] npm install @playwright/test
+  [ ] playwright install chromium
+  [ ] 创建 e2e/config/playwright.config.js
+  [ ] 创建 e2e/utils/server.js + server-setup.js + server-teardown.js (启停前后端)
+  [ ] 创建 e2e/utils/assertions.js (自定义断言)
+  [ ] 创建 e2e/utils/seed.js (测试数据注入，通过后端 API)
+  [ ] 创建 e2e/specs/01-smoke.spec.js (全页面 200 不白屏 + 按钮 + 输入框)
+  [ ] npm run test:e2e:smoke → ALL PASS  (01-smoke 不依赖 seed，可独立运行)
+
+第零批 (E2E 安全网 — 后端):
+  [ ] pip install websockets (用于 WS 测试)
+  [ ] 扩展 verify_e2e.py：按模块分组（section_market / portfolio / analysis / news / admin / ws）
+  [ ] 新增 Market 29 个端点测试
+  [ ] 新增 Portfolio 补齐 13 个端点测试
+  [ ] 新增 Analysis 12 个端点测试（仅验证 200/4xx）
+  [ ] 新增 News 5 个端点测试
+  [ ] 新增 Admin 3 个端点测试
+  [ ] 新增 WebSocket 5 个实际连接测试
+  [ ] 新增 --module / --smoke 命令行参数
+  [ ] python scripts/verify_e2e.py --smoke → ALL PASS
+
 第一批 (P0 核心功能):
   [ ] #8 — 检查 fetchJson 定义 / 确认搜索端点正常
   [ ] #9 — news_refresh.py 放宽广播条件 (level >= 2 或全部) + 初始全量推送
+  [ ] #9 — 追加 12-regression.spec.js 用例 → RUN → 修复 → PASS
   [ ] #4 — analysis.py: llm_report_stream 增加 chunk 事件 / 前端 SSE 解析兼容
-  [ ] #1 — 加诊断日志 → 重启 → 复现 → 定位 → 修复
+  [ ] #1 — stores/task.js 新增 registerTaskCompletion + views/DashboardAiTools.vue 修复 onHistorySelect
 
 第二批 (P0 数据/渲染):
   [ ] #11 — 检查 get_history 降级链，确认指标计算正常
@@ -548,12 +604,23 @@ Prompt 质量不足。`llm.py` 中的 `generate_advice()` 函数构建的 prompt
 
 第三批 (P1 功能增强):
   [ ] #2 — 策略检查弹窗（场内/场外选择）
-  [ ] #16 — 市场 Tab 提升到页面级 + 各功能区域联动
+  [ ] #16 — 修复 marketTab prop 传递，确保 6 个子组件联动
   [ ] #7 — sector prompt 增加近期行情 + 概念覆盖面扩大
   [ ] #6 — AI 顾问 prompt 增加数据框架
 
 第四批 (体验):
-  [ ] #3 — 历史记录显示任务类型中文标签
+  [ ] #3 — 保留任务类型标签，去除 regime 描述（DesignHistory.vue）
   [ ] #13 — K 线图加标题 + KDJ/RSI sub-chart + tooltip 时间
   [ ] #15 — 确认 DeepSeek V4 Flash 定价
+
+第五批 (清理 — E2E 全覆盖之后):
+  [ ] 删除 GET /indices/search（与 /indices/meta 重叠）
+  [ ] 删除 GET /sectors（与 industry/concept 重叠）
+  [ ] 删除 GET /designs/{id}/status（/designs/{id} 已含状态）
+  [ ] 删除 POST /sector-analysis（已改用 stream 版）
+  [ ] 删除 POST /symbol-analysis（已改用 stream 版）
+  [ ] 删除 changeClass.spec.js 中的废弃 mock
+  [ ] 为保留的 9 个端点加 # TODO: 未接入前端 注释
+  [ ] python scripts/verify_e2e.py --smoke → ALL PASS
+  [ ] npm run test:e2e:smoke → ALL PASS
 ```

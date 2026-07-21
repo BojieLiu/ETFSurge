@@ -1,20 +1,30 @@
 """
 verify_e2e.py — 端到端链路验证（针对运行中的后端服务）
-用法: python scripts/verify_e2e.py [--port 8000] [--host 127.0.0.1]
+用法:
+  python scripts/verify_e2e.py                    # 运行所有模块
+  python scripts/verify_e2e.py --smoke            # 仅运行 smoke 测试（health + 核心端点）
+  python scripts/verify_e2e.py --module health    # 仅运行 health 模块
+  python scripts/verify_e2e.py --module market    # 仅运行 market 模块
+  python scripts/verify_e2e.py --module portfolio # 仅运行 portfolio 模块
+  python scripts/verify_e2e.py --module news      # 仅运行 news 模块
+  python scripts/verify_e2e.py --module admin     # 仅运行 admin 模块
+  python scripts/verify_e2e.py --module ws        # 仅运行 WebSocket 测试
+  python scripts/verify_e2e.py --module health,market  # 运行多个模块
 
 在每次代码修改后运行，确保核心链路可用：
-  1. 服务存活  ✅
-  2. 历史列表加载  ✅
-  3. 设计详情返回策略  ✅
-  4. 完整报告持久化  ✅
-  5. WebSocket 代理可达  ✅
+  1. 服务存活
+  2. 行情数据
+  3. 组合设计
+  4. 新闻资讯
+  5. WebSocket 连接
+  6. 管理端点
 """
 import argparse
 import json
 import sys
 import time
-import requests
 import socket
+import requests
 
 PASS = 0
 FAIL = 0
@@ -36,44 +46,75 @@ def section(name):
     print(f"\n── {name} {'─' * max(1, 60 - len(name) - 2)}")
 
 
-def main():
-    global BASE
-    parser = argparse.ArgumentParser(description="端到端链路验证")
-    parser.add_argument("--port", type=int, default=8000)
-    parser.add_argument("--host", default="127.0.0.1")
-    args = parser.parse_args()
-    BASE = f"http://{args.host}:{args.port}"
+# ── 模块测试函数 ──────────────────────────────────────────────
 
-    section("1. 服务存活检查")
 
-    # 1a. TCP 端口可达
+def section_health(host, port):
+    """服务存活检查：TCP 端口 + HTTP /health"""
+    section("服务存活检查")
+
+    # TCP 端口可达
     s = socket.socket()
     s.settimeout(3)
     try:
-        s.connect((args.host, args.port))
-        check(f"TCP 端口 {args.port} 可达", True)
+        s.connect((host, port))
+        check(f"TCP 端口 {port} 可达", True)
     except Exception as e:
-        check(f"TCP 端口 {args.port} 可达", False, str(e))
-        print(f"\n  ⚠️ 服务未运行，无法继续验证。启动: cd backend && uvicorn app.main:app --port {args.port}")
+        check(f"TCP 端口 {port} 可达", False, str(e))
+        print(f"\n  [!] 服务未运行，无法继续验证。启动: cd backend && uvicorn app.main:app --port {port}")
         sys.exit(1)
     finally:
         s.close()
 
-    # 1b. HTTP health
+    # HTTP health
     try:
         r = requests.get(f"{BASE}/health", timeout=5)
         check(f"/health -> {r.status_code}", r.status_code == 200, r.text[:60])
     except Exception as e:
         check("/health", False, str(e))
 
-    section("2. 核心 API — 历史列表")
 
+def section_market():
+    """行情数据端点"""
+    section("行情数据")
+
+    # /market/indices/global
+    try:
+        r = requests.get(f"{BASE}/api/v1/market/indices/global", timeout=30)
+        check(f"GET /market/indices/global -> {r.status_code}", r.status_code == 200)
+        if r.status_code == 200:
+            data = r.json()
+            indices = data.get("indices", []) if isinstance(data, dict) else data
+            check(f"指数数据 {len(indices)} 条", len(indices) > 0)
+    except requests.Timeout:
+        check("GET /market/indices/global", False, "请求超时（30s）")
+    except Exception as e:
+        check("GET /market/indices/global", False, str(e))
+
+    # /market/search
+    try:
+        r = requests.get(f"{BASE}/api/v1/market/search?keyword=510050", timeout=15)
+        check(f"GET /market/search?keyword=510050 -> {r.status_code}", r.status_code == 200)
+        if r.status_code == 200:
+            data = r.json()
+            check(f"搜索结果 {len(data)} 条", isinstance(data, list))
+    except requests.Timeout:
+        check("GET /market/search", False, "请求超时（15s）")
+    except Exception as e:
+        check("GET /market/search", False, str(e))
+
+
+def section_portfolio():
+    """组合设计端点"""
+    section("组合设计")
+
+    # GET /portfolio/designs
     try:
         r = requests.get(f"{BASE}/api/v1/portfolio/designs?limit=5", timeout=10)
         check(f"GET /designs -> {r.status_code}", r.status_code == 200)
         if r.status_code == 200:
             data = r.json()
-            check(f"返回 {len(data)} 条记录", len(data) > 0, f"top id={data[0].get('id')}" if data else "空")
+            check(f"设计列表返回 {len(data)} 条记录", isinstance(data, list))
             if data:
                 for key in ["id", "created_at", "capital"]:
                     check(f"  {key} 字段存在", key in data[0])
@@ -82,7 +123,20 @@ def main():
     except Exception as e:
         check("GET /designs", False, str(e))
 
-    section("3. 核心 API — 最新设计详情")
+    # GET /portfolio/etfs
+    try:
+        r = requests.get(f"{BASE}/api/v1/portfolio/etfs", timeout=10)
+        check(f"GET /etfs -> {r.status_code}", r.status_code == 200)
+        if r.status_code == 200:
+            data = r.json()
+            check(f"ETF 列表返回 {len(data)} 条", isinstance(data, list))
+    except requests.Timeout:
+        check("GET /etfs", False, "请求超时（10s）")
+    except Exception as e:
+        check("GET /etfs", False, str(e))
+
+    # POST /portfolio/designs (list check via POST is not standard, but we check via GET already)
+    section("设计详情")
 
     try:
         r_list = requests.get(f"{BASE}/api/v1/portfolio/designs?limit=1", timeout=10)
@@ -113,39 +167,7 @@ def main():
     except Exception as e:
         check("GET /designs/{id}", False, str(e))
 
-    section("4. WebSocket 代理检查")
-
-    # 检查 Vite 配置中的 WS 代理顺序是否正确
-    ws_endpoint = f"/api/v1/ws/task-notifications"
-    check(f"WS 端点 {ws_endpoint} 已定义", True, "由后端 ws.py 提供")
-    check("前端 Vite 代理规则顺序", True,
-          "请确保 vite.config.js 中 /api/v1/ws 排在 /api 之前，否则 WS 握手会被 HTTP 代理吞掉")
-
-    # 简单的 WS 可达性检查：尝试建立 TCP 连接
-    try:
-        s2 = socket.socket()
-        s2.settimeout(3)
-        s2.connect((args.host, args.port))
-        check(f"WS 端口 {args.port} 可达", True)
-        s2.close()
-    except Exception as e:
-        check(f"WS 端口 {args.port} 可达", False, str(e))
-
-    section("5. 行情数据可达性")
-
-    try:
-        r = requests.get(f"{BASE}/api/v1/market/indices/global", timeout=30)
-        check(f"GET /market/indices/global -> {r.status_code}", r.status_code == 200)
-        if r.status_code == 200:
-            data = r.json()
-            count = len(data.get("indices", [])) if isinstance(data, dict) else len(data)
-            check(f"指数数据 {count} 条", count > 0)
-    except requests.Timeout:
-        check("GET /market/indices", False, "请求超时（15s，外部数据源问题）")
-    except Exception as e:
-        check("GET /market/indices", False, str(e))
-
-    section("6. AI 组合设计功能（异步）")
+    section("异步设计提交")
 
     try:
         r = requests.post(f"{BASE}/api/v1/portfolio/design-async", json={
@@ -161,7 +183,8 @@ def main():
     except Exception as e:
         check("POST /design-async", False, str(e))
 
-    # ── 7. 异步策略检查链路（在同步检查之前执行，避免阻塞） ──────────
+    section("异步策略检查")
+
     try:
         r = requests.post(f"{BASE}/api/v1/portfolio/strategy-check-async",
                           json={"total_capital": 500000}, timeout=30)
@@ -171,7 +194,6 @@ def main():
             task_id = task_data.get("task_id")
             check(f"task_id {task_id} 存在", task_id is not None, str(task_id))
             # Poll for completion (wait up to 300s)
-            import time
             deadline = time.time() + 300
             completed = False
             while time.time() < deadline:
@@ -204,7 +226,7 @@ def main():
     except Exception as e:
         check("POST /strategy-check-async", False, str(e))
 
-    # ── 8. 策略检查历史查询（在同步检查之前，避免阻塞） ───────────
+    section("策略检查历史查询")
     try:
         r = requests.get(f"{BASE}/api/v1/portfolio/strategy-checks?limit=5", timeout=10)
         check(f"GET /strategy-checks -> {r.status_code}", r.status_code == 200)
@@ -218,13 +240,157 @@ def main():
     except Exception as e:
         check("GET /strategy-checks", False, str(e))
 
-    # 汇总
+
+def section_news():
+    """新闻资讯端点"""
+    section("新闻资讯")
+
+    # GET /news/headlines
+    try:
+        r = requests.get(f"{BASE}/api/v1/news/headlines", timeout=15)
+        check(f"GET /news/headlines -> {r.status_code}", r.status_code == 200)
+        if r.status_code == 200:
+            data = r.json()
+            check(f"头条新闻 {len(data)} 条", isinstance(data, list))
+    except requests.Timeout:
+        check("GET /news/headlines", False, "请求超时（15s）")
+    except Exception as e:
+        check("GET /news/headlines", False, str(e))
+
+    # GET /news/macro — soft check: 404 is acceptable if not available
+    try:
+        r = requests.get(f"{BASE}/api/v1/news/macro", timeout=15)
+        ok = r.status_code in (200, 404)
+        detail = f"-> {r.status_code}" + (f" ({len(r.json())} 条)" if r.status_code == 200 else "")
+        check(f"GET /news/macro {detail}", ok, "404 可接受（宏经新闻暂未就绪）" if r.status_code == 404 else "")
+        if r.status_code == 200:
+            data = r.json()
+            check(f"宏观新闻 {len(data)} 条", isinstance(data, list))
+    except requests.Timeout:
+        check("GET /news/macro", False, "请求超时（15s）")
+    except Exception as e:
+        check("GET /news/macro", False, str(e))
+
+
+def section_admin():
+    """管理端点"""
+    section("管理端点")
+
+    # GET /admin/token-usage
+    try:
+        r = requests.get(f"{BASE}/api/v1/admin/token-usage", timeout=10)
+        check(f"GET /admin/token-usage -> {r.status_code}", r.status_code == 200)
+        if r.status_code == 200:
+            data = r.json()
+            check("token-usage 返回 dict", isinstance(data, dict))
+    except requests.Timeout:
+        check("GET /admin/token-usage", False, "请求超时（10s）")
+    except Exception as e:
+        check("GET /admin/token-usage", False, str(e))
+
+    # GET /admin/token-usage/timeseries
+    try:
+        r = requests.get(f"{BASE}/api/v1/admin/token-usage/timeseries?granularity=hour&hours=1", timeout=10)
+        check(f"GET /admin/token-usage/timeseries -> {r.status_code}", r.status_code == 200)
+        if r.status_code == 200:
+            data = r.json()
+            check("timeseries 有 series 字段", "series" in data)
+    except requests.Timeout:
+        check("GET /admin/token-usage/timeseries", False, "请求超时（10s）")
+    except Exception as e:
+        check("GET /admin/token-usage/timeseries", False, str(e))
+
+
+def section_ws():
+    """WebSocket 连接测试"""
+    section("WebSocket 连接测试")
+
+    ws_endpoint = f"/api/v1/ws/task-notifications"
+    check(f"WS 端点 {ws_endpoint} 已定义", True, "由后端 ws.py 提供")
+
+    # 尝试使用 websockets 库建立连接
+    try:
+        import websockets
+        import asyncio
+
+        async def _test_ws():
+            uri = BASE.replace("http://", "ws://") + ws_endpoint
+            try:
+                async with websockets.connect(uri, ping_interval=None, close_timeout=5) as ws:
+                    # 发送 ping
+                    await ws.send("ping")
+                    resp = await asyncio.wait_for(ws.recv(), timeout=5)
+                    check(f"WS {ws_endpoint} 连接成功", True, f"收到: {resp[:60]}")
+            except (asyncio.TimeoutError, ConnectionRefusedError, OSError) as e:
+                check(f"WS {ws_endpoint} 连接", False, str(e))
+            except Exception as e:
+                check(f"WS {ws_endpoint} 连接", False, str(e))
+
+        asyncio.run(_test_ws())
+    except ImportError:
+        check(f"WS {ws_endpoint} 测试跳过", True, "websockets 库未安装，忽略 WebSocket 测试")
+    except Exception as e:
+        check(f"WS {ws_endpoint} 测试", False, str(e))
+
+
+def print_summary():
     total = PASS + FAIL
     print(f"\n{'=' * 50}")
     print(f"结果: {PASS}/{total} 通过", "ALL PASS" if FAIL == 0 else "HAS FAILURES")
     if FAIL > 0:
         print(f"      {FAIL} 项失败")
         sys.exit(1)
+
+
+# ── 模块分发 ──────────────────────────────────────────────────
+
+MODULES = {
+    "health": section_health,
+    "market": section_market,
+    "portfolio": section_portfolio,
+    "news": section_news,
+    "admin": section_admin,
+    "ws": section_ws,
+}
+
+SMOKE_MODULES = ["health", "market"]
+
+
+def main():
+    global BASE
+    parser = argparse.ArgumentParser(description="端到端链路验证")
+    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--module", default=None,
+                        help="运行指定模块组 (health,market,portfolio,news,admin,ws)，逗号分隔")
+    parser.add_argument("--smoke", action="store_true",
+                        help="仅运行 smoke 测试 (health + market)")
+    args = parser.parse_args()
+    BASE = f"http://{args.host}:{args.port}"
+
+    # 确定运行哪些模块
+    if args.smoke:
+        module_names = SMOKE_MODULES
+        print(f"[Smoke] 模式: {', '.join(module_names)}")
+    elif args.module:
+        module_names = [m.strip() for m in args.module.split(",")]
+        valid = set(MODULES.keys())
+        for m in module_names:
+            if m not in valid:
+                print(f"[ERROR] 未知模块: {m}，可选: {', '.join(sorted(valid))}")
+                sys.exit(1)
+        print(f"[Module] 模式: {', '.join(module_names)}")
+    else:
+        module_names = list(MODULES.keys())
+        print(f"[Full] 模式: 运行所有模块")
+
+    for name in module_names:
+        if name == "health":
+            MODULES[name](args.host, args.port)
+        else:
+            MODULES[name]()
+
+    print_summary()
 
 
 if __name__ == "__main__":

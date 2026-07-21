@@ -300,150 +300,152 @@ async def portfolio_review(req: PortfolioReviewRequest):
     return result
 
 
-@router.post("/sector-analysis")
-async def sector_analysis(req: SectorAnalysisRequest):
-    """行业/概念板块 AI 分析: 行情 + 资金面 + 催化因素。"""
-    sector_code = req.sector_code
-    sector_type = req.sector_type
-    sector_name = req.sector_name
-    # 1. 取板块列表, 找到该板块数据
-    if sector_type == "concept":
-        sectors = await asyncio.to_thread(fetch_concept_sectors, 200)
-    else:
-        sectors = await asyncio.to_thread(fetch_industry_sectors, 200)
-    sector_data = next((s for s in sectors if s.get("sector_code") == sector_code), None)
-    if not sector_data and sector_name:
-        sector_data = next((s for s in sectors if s.get("sector_name") == sector_name), None)
-    name = sector_name or (sector_data.get("sector_name", "") if sector_data else sector_code)
+# Deprecated: use /sector-analysis/stream instead (removed in favor of streaming version)
+# @router.post("/sector-analysis")
+# async def sector_analysis(req: SectorAnalysisRequest):
+#     """行业/概念板块 AI 分析: 行情 + 资金面 + 催化因素。"""
+    # sector_code = req.sector_code
+    # sector_type = req.sector_type
+    # sector_name = req.sector_name
+    # # 1. 取板块列表, 找到该板块数据
+    # if sector_type == "concept":
+    #     sectors = await asyncio.to_thread(fetch_concept_sectors, 200)
+    # else:
+    #     sectors = await asyncio.to_thread(fetch_industry_sectors, 200)
+    # sector_data = next((s for s in sectors if s.get("sector_code") == sector_code), None)
+    # if not sector_data and sector_name:
+    #     sector_data = next((s for s in sectors if s.get("sector_name") == sector_name), None)
+    # name = sector_name or (sector_data.get("sector_name", "") if sector_data else sector_code)
+    #
+    # # 2. 成分股
+    # constituents = await asyncio.to_thread(fetch_sector_stocks, sector_code)
+    #
+    # # 3. 资讯
+    # news = fetch_news_headlines() or []
+    # try:
+    #     macro = fetch_macro_news() or []
+    #     news.extend(macro)
+    # except Exception:
+    #     pass
+    #
+    # # 注入编排器的市场状态和情绪数据
+    # from ..services.pool_manager import pool_manager
+    #
+    # try:
+    #     regime = pool_manager.get_market_regime()
+    #     sentiment = pool_manager.get_market_sentiment()
+    # except Exception:
+    #     regime = None
+    #     sentiment = None
+    #
+    # if regime or sentiment:
+    #     context_parts = []
+    #     if regime:
+    #         context_parts.append(f"市场状态: {regime}")
+    #     if sentiment and isinstance(sentiment, dict):
+    #         s_idx = sentiment.get("sentiment_index", "")
+    #         s_lbl = sentiment.get("sentiment_label", "")
+    #         context_parts.append(f"市场情绪: {s_lbl} ({s_idx}/100)" if s_idx else f"市场情绪: {s_lbl}")
+    #     if context_parts:
+    #         news = [{"title": "【市场背景】" + " | ".join(context_parts)}] + news
+    #
+    # # 注入板块动量数据
+    # try:
+    #     sector_momentum = pool_manager.get_sector_momentum() or []
+    #     if sector_momentum:
+    #         items = []
+    #         for item in sector_momentum[:5]:
+    #             items.append(f"{item.get('name','?')}: {item.get('change_pct',0):+.2f}%")
+    #         news = [{"title": "【板块动量】" + " | ".join(items)}] + news
+    # except Exception:
+    #     pass
+    #
+    # try:
+    #     report = await generate_sector_analysis(
+    #         sector_code=sector_code,
+    #         sector_name=name,
+    #         sector_stocks=constituents,
+    #         indices=[],
+    #         commodities=[],
+    #         market_data=news,
+    #         factor_scores=sector_momentum,
+    #     )
+    # except Exception as e:
+    #     raise HTTPException(status_code=502, detail=f"LLM sector analysis failed: {e}")
+    # return {"sector_name": name, "sector_code": sector_code, "report": report, "constituents_count": len(constituents), "disclaimer": "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"}
 
-    # 2. 成分股
-    constituents = await asyncio.to_thread(fetch_sector_stocks, sector_code)
 
-    # 3. 资讯
-    news = fetch_news_headlines() or []
-    try:
-        macro = fetch_macro_news() or []
-        news.extend(macro)
-    except Exception:
-        pass
-
-    # 注入编排器的市场状态和情绪数据
-    from ..services.pool_manager import pool_manager
-
-    try:
-        regime = pool_manager.get_market_regime()
-        sentiment = pool_manager.get_market_sentiment()
-    except Exception:
-        regime = None
-        sentiment = None
-
-    if regime or sentiment:
-        context_parts = []
-        if regime:
-            context_parts.append(f"市场状态: {regime}")
-        if sentiment and isinstance(sentiment, dict):
-            s_idx = sentiment.get("sentiment_index", "")
-            s_lbl = sentiment.get("sentiment_label", "")
-            context_parts.append(f"市场情绪: {s_lbl} ({s_idx}/100)" if s_idx else f"市场情绪: {s_lbl}")
-        if context_parts:
-            news = [{"title": "【市场背景】" + " | ".join(context_parts)}] + news
-
-    # 注入板块动量数据
-    try:
-        sector_momentum = pool_manager.get_sector_momentum() or []
-        if sector_momentum:
-            items = []
-            for item in sector_momentum[:5]:
-                items.append(f"{item.get('name','?')}: {item.get('change_pct',0):+.2f}%")
-            news = [{"title": "【板块动量】" + " | ".join(items)}] + news
-    except Exception:
-        pass
-
-    try:
-        report = await generate_sector_analysis(
-            sector_code=sector_code,
-            sector_name=name,
-            sector_stocks=constituents,
-            indices=[],
-            commodities=[],
-            market_data=news,
-            factor_scores=sector_momentum,
-        )
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"LLM sector analysis failed: {e}")
-    return {"sector_name": name, "sector_code": sector_code, "report": report, "constituents_count": len(constituents), "disclaimer": "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"}
-
-
-@router.post("/symbol-analysis")
-async def symbol_analysis(req: SymbolAnalysisRequest):
-    """个股/ETF AI 分析: 行情 + 技术指标 + 资讯催化。"""
-    symbol = req.symbol
-    name = req.name
-    asset_type = req.asset_type
-    # 1. 实时行情
-    realtime = await get_asset_realtime(symbol, asset_type) or {}
-
-    # 2. 历史 + 技术指标
-    hist = []
-    try:
-        hist = await asyncio.wait_for(get_history(symbol, asset_type, "daily"), timeout=30)
-    except Exception:
-        pass
-    indicators = compute_all_indicators(hist) if hist else {}
-
-    # 3. 资讯
-    news = fetch_news_headlines() or []
-    try:
-        macro = fetch_macro_news() or []
-        news.extend(macro)
-    except Exception:
-        pass
-
-    # 注入编排器的市场状态和情绪数据
-    from ..services.pool_manager import pool_manager
-
-    try:
-        regime = pool_manager.get_market_regime()
-        sentiment = pool_manager.get_market_sentiment()
-    except Exception:
-        regime = None
-        sentiment = None
-
-    if regime or sentiment:
-        context_parts = []
-        if regime:
-            context_parts.append(f"市场状态: {regime}")
-        if sentiment and isinstance(sentiment, dict):
-            s_idx = sentiment.get("sentiment_index", "")
-            s_lbl = sentiment.get("sentiment_label", "")
-            context_parts.append(f"市场情绪: {s_lbl} ({s_idx}/100)" if s_idx else f"市场情绪: {s_lbl}")
-        if context_parts:
-            news = [{"title": "【市场背景】" + " | ".join(context_parts)}] + news
-
-    # 注入因子矩阵数据（如该标的在矩阵中）
-    try:
-        factor_matrix = pool_manager.get_factor_matrix()
-        symbol_factors = factor_matrix.get(symbol)
-        if symbol_factors:
-            items = [f"{k}: {v}" for k, v in symbol_factors.items()]
-            news = [{"title": "【因子评分】" + " | ".join(items)}] + news
-    except Exception:
-        pass
-
-    display_name = name or (realtime.get("name", "") if realtime else symbol)
-    try:
-        report = await generate_symbol_analysis(
-            symbol=symbol,
-            name=display_name,
-            asset_type=asset_type,
-            realtime=realtime or {},
-            history=hist,
-            indicators=indicators,
-            news=news,
-        )
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"LLM symbol analysis failed: {e}")
-    return {"symbol": symbol, "name": display_name, "report": report, "disclaimer": "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"}
+# Deprecated: use /symbol-analysis/stream instead (removed in favor of streaming version)
+# @router.post("/symbol-analysis")
+# async def symbol_analysis(req: SymbolAnalysisRequest):
+#     """个股/ETF AI 分析: 行情 + 技术指标 + 资讯催化。"""
+#     symbol = req.symbol
+#     name = req.name
+#     asset_type = req.asset_type
+#     # 1. 实时行情
+#     realtime = await get_asset_realtime(symbol, asset_type) or {}
+#
+#     # 2. 历史 + 技术指标
+#     hist = []
+#     try:
+#         hist = await asyncio.wait_for(get_history(symbol, asset_type, "daily"), timeout=30)
+#     except Exception:
+#         pass
+#     indicators = compute_all_indicators(hist) if hist else {}
+#
+#     # 3. 资讯
+#     news = fetch_news_headlines() or []
+#     try:
+#         macro = fetch_macro_news() or []
+#         news.extend(macro)
+#     except Exception:
+#         pass
+#
+#     # 注入编排器的市场状态和情绪数据
+#     from ..services.pool_manager import pool_manager
+#
+#     try:
+#         regime = pool_manager.get_market_regime()
+#         sentiment = pool_manager.get_market_sentiment()
+#     except Exception:
+#         regime = None
+#         sentiment = None
+#
+#     if regime or sentiment:
+#         context_parts = []
+#         if regime:
+#             context_parts.append(f"市场状态: {regime}")
+#         if sentiment and isinstance(sentiment, dict):
+#             s_idx = sentiment.get("sentiment_index", "")
+#             s_lbl = sentiment.get("sentiment_label", "")
+#             context_parts.append(f"市场情绪: {s_lbl} ({s_idx}/100)" if s_idx else f"市场情绪: {s_lbl}")
+#         if context_parts:
+#             news = [{"title": "【市场背景】" + " | ".join(context_parts)}] + news
+#
+#     # 注入因子矩阵数据（如该标的在矩阵中）
+#     try:
+#         factor_matrix = pool_manager.get_factor_matrix()
+#         symbol_factors = factor_matrix.get(symbol)
+#         if symbol_factors:
+#             items = [f"{k}: {v}" for k, v in symbol_factors.items()]
+#             news = [{"title": "【因子评分】" + " | ".join(items)}] + news
+#     except Exception:
+#         pass
+#
+#     display_name = name or (realtime.get("name", "") if realtime else symbol)
+#     try:
+#         report = await generate_symbol_analysis(
+#             symbol=symbol,
+#             name=display_name,
+#             asset_type=asset_type,
+#             realtime=realtime or {},
+#             history=hist,
+#             indicators=indicators,
+#             news=news,
+#         )
+#     except Exception as e:
+#         raise HTTPException(status_code=502, detail=f"LLM symbol analysis failed: {e}")
+#     return {"symbol": symbol, "name": display_name, "report": report, "disclaimer": "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"}
 
 
 # ── SSE Streaming Endpoints ──────────────────────────────────────────────
@@ -519,11 +521,11 @@ async def llm_report_stream(req: LLMReportRequest):
         # 分块 SSE 推送，兼容前端 useLLMStream 的 chunk 事件消费
         async def event_generator():
             disclaimer = "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
-            # 将完整报告拆分为 ~100 字符的 chunk
+            # 将完整报告拆分为 ~100 字符的 token 块，兼容前端 useLLMStream token 事件
             chunk_size = 100
             for i in range(0, len(report), chunk_size):
                 chunk_text = report[i:i + chunk_size]
-                yield f"event: chunk\ndata: {json.dumps({'text': chunk_text})}\n\n"
+                yield f"event: token\ndata: {json.dumps({'token': chunk_text})}\n\n"
             # 最终 done 事件携带完整文本
             yield f"event: done\ndata: {json.dumps({'full_text': report, 'disclaimer': disclaimer})}\n\n"
 

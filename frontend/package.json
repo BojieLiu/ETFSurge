@@ -7,7 +7,11 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:e2e": "playwright test --config e2e/config/playwright.config.js",
+    "test:e2e:smoke": "playwright test --config e2e/config/playwright.config.js --grep @smoke",
+    "test:e2e:visual": "playwright test --config e2e/config/playwright.config.js --update-snapshots",
+    "test:e2e:ui": "playwright test --config e2e/config/playwright.config.js --ui"
   },
   "dependencies": {
     "@vue/compiler-sfc": "^3.5.40",
@@ -21,9 +25,11 @@
     "vue-router": "^4.4.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.52.0",
     "@vitejs/plugin-vue": "^5.1.0",
     "@vue/test-utils": "^2.4.11",
     "jsdom": "^29.1.1",
+    "playwright": "^1.52.0",
     "vite": "^5.4.0",
     "vite-plugin-pwa": "^0.20.0",
     "vitest": "^2.1.9"

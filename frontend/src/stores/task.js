@@ -36,6 +36,15 @@ export const useTaskStore = defineStore('task', () => {
     return tasks.value.find((t) => t.taskId === taskId) || null
   }
 
+  // Internal callback registry for WS-driven completion notifications
+  const _completionCallbacks = {}
+
+  function registerTaskCompletion(taskId, callback) {
+    if (typeof callback === 'function') {
+      _completionCallbacks[taskId] = callback
+    }
+  }
+
   function addTask(taskId, label = '智能组合设计', taskType = 'design') {
     const existing = getTask(taskId)
     if (existing) {
@@ -66,6 +75,16 @@ export const useTaskStore = defineStore('task', () => {
 
     // Side effects on terminal transitions
     const toast = useToastStore()
+
+    // Invoke completion callback for any terminal state
+    if (changes.status === 'completed' || changes.status === 'failed') {
+      const cb = _completionCallbacks[taskId]
+      if (cb) {
+        try { cb({ taskId, ...changes }) } catch (e) { console.warn('[taskStore] completion callback error:', e) }
+        delete _completionCallbacks[taskId]
+      }
+    }
+
     if (changes.status === 'completed') {
       const msg = task.type === 'check'
         ? '策略检查已完成'
@@ -79,6 +98,7 @@ export const useTaskStore = defineStore('task', () => {
       toast.show(msg, 'error')
       clearCompleted()
     }
+    _save(LS_KEYS.tasks, tasks.value)
   }
 
   function removeTask(taskId) {
@@ -123,6 +143,7 @@ export const useTaskStore = defineStore('task', () => {
 
   return {
     tasks, getTask, addTask, updateTask, removeTask, clearCompleted, _loadTasks,
+    registerTaskCompletion,
     hasRunningTask, activeTaskId,
     designState, persistDesignState, getDesignState, clearDesignState,
   }

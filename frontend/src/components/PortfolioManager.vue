@@ -235,7 +235,6 @@
               <th scope="col">权重</th>
               <th scope="col">成本价</th>
               <th scope="col">份额</th>
-              <th scope="col">成本</th>
               <th scope="col">现价</th>
               <th scope="col">涨跌幅</th>
               <th scope="col">当日盈亏</th>
@@ -328,7 +327,7 @@
               </td>
             </tr>
             <tr v-if="etf.portfolio_type === 'off_exchange'" class="ta-expand">
-              <td :colspan="10">
+              <td :colspan="9">
                  <div class="off-ta">
                    <button class="ta-toggle" @click.stop="toggleTa(etf)">
                     {{ taOpen[etf.symbol] ? '收起技术分析 ▲' : '查看技术分析 ▼' }}
