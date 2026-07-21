@@ -152,6 +152,28 @@ async def signal(
     return generate_signal(ind)
 
 
+@router.get("/signal/debug/{symbol}")
+async def signal_debug(
+    symbol: str,
+    asset_type: str = Query("A"),
+    period: str = Query("daily"),
+) -> dict:
+    """信号诊断端点：返回完整的链路数据（history → indicators → signal），用于调试。
+    #11 数据链静默失败时，通过此端点确认哪一步返回空。"""
+    hist = await get_history(symbol, asset_type, period)
+    ind = compute_all_indicators(hist) if hist else {}
+    sig = generate_signal(ind) if ind else {"signal": "hold", "score": 0, "debug": "indicators_empty"}
+    return {
+        "symbol": symbol,
+        "asset_type": asset_type,
+        "period": period,
+        "history_count": len(hist),
+        "history_last": hist[-1] if hist else None,
+        "indicators": ind,
+        "signal": sig,
+    }
+
+
 @router.get("/chart/{symbol}")
 async def chart(
     symbol: str,

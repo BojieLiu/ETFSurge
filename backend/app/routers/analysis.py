@@ -93,6 +93,7 @@ class LLMReportRequest(BaseModel):
 # 不再使用独立缓存，统一由编排器提供
 
 
+# TODO: 未接入前端（前端使用 /llm-report/stream 流式版本）
 @router.post("/llm-report")
 async def llm_report(req: LLMReportRequest):
     """市场综合研判报告 — 优先使用编排器缓存，降级才自采。"""
@@ -170,6 +171,7 @@ async def llm_report(req: LLMReportRequest):
     return {"report": report, "market_data": market_data[:10], "indices": indices[:10], "commodities": commodities[:6], "disclaimer": "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"}
 
 
+# TODO: 未接入前端（前端使用 /llm-advice/stream 流式版本）
 @router.post("/llm-advice")
 async def llm_advice(query: str = Query(...), context: dict | None = None):
     """AI 投资顾问 — 自动注入市场数据管道缓存。"""
@@ -227,6 +229,7 @@ async def llm_advice(query: str = Query(...), context: dict | None = None):
     return {"advice": advice, "disclaimer": "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"}
 
 
+# TODO: 未接入前端
 @router.post("/llm-news-analysis")
 async def llm_news_analysis():
     from ..fetchers.news_fetcher import fetch_news_headlines, fetch_macro_news
