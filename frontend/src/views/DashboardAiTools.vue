@@ -1,114 +1,152 @@
 <template>
-  <section class="card core-actions">
-    <div class="card-header">
-      <h2 class="card-title">
-        <span class="card-title-icon" aria-hidden="true">⚡</span>
-        AI 智能工具
-      </h2>
-    </div>
+  <section class="ai-tools">
+    <PageHeader
+      title="AI 智能工具"
+      description="智能组合设计、策略检查与历史记录"
+    >
+      <template #action>
+        <div v-if="!activeCoreFeature" class="feature-grid">
+          <AppCard
+            variant="outlined"
+            hoverable
+            clickable
+            @click="enterDesignMode"
+            class="feature-card"
+          >
+            <template #header-icon>
+              <span aria-hidden="true">✨</span>
+            </template>
+            <template #header-title>智能设计 ETF 组合方案</template>
+            <template #header-description>输入资金，一键生成进攻/平衡/防御三种风格组合</template>
+          </AppCard>
 
-    <div class="core-actions-body">
-      <!-- Feature Entrances -->
-      <div v-if="!activeCoreFeature" class="core-actions-grid">
-        <button class="core-action-btn" @click="enterDesignMode" aria-label="智能设计 ETF 组合方案">
-          <span class="action-icon" aria-hidden="true">✨</span>
-          <div class="action-content">
-            <span class="action-title">智能设计ETF组合方案</span>
-            <span class="action-desc">输入资金，一键生成进攻/平衡/防御三种风格组合</span>
-          </div>
-        </button>
+          <AppCard
+            variant="outlined"
+            hoverable
+            clickable
+            @click="enterStrategyMode"
+            :disabled="checkingStrategy"
+            class="feature-card"
+          >
+            <template #header-icon>
+              <span aria-hidden="true">🎯</span>
+            </template>
+            <template #header-title>策略检查分析</template>
+            <template #header-description>分析当前组合，优化权重与持仓</template>
+          </AppCard>
 
-        <button class="core-action-btn" @click="enterStrategyMode" :disabled="checkingStrategy">
-          <span class="action-icon" aria-hidden="true">🎯</span>
-          <div class="action-content">
-            <span class="action-title">策略检查分析</span>
-            <span class="action-desc">分析当前组合，优化权重与持仓</span>
-          </div>
-        </button>
+          <AppCard
+            variant="outlined"
+            hoverable
+            clickable
+            @click="enterHistoryMode"
+            class="feature-card"
+          >
+            <template #header-icon>
+              <span aria-hidden="true">📖</span>
+            </template>
+            <template #header-title>历史记录</template>
+            <template #header-description>查看之前生成的组合设计方案</template>
+          </AppCard>
+        </div>
+      </template>
+    </PageHeader>
 
-        <button class="core-action-btn" @click="enterHistoryMode">
-          <span class="action-icon" aria-hidden="true">📖</span>
-          <div class="action-content">
-            <span class="action-title">历史记录</span>
-            <span class="action-desc">查看之前生成的组合设计方案</span>
-          </div>
-        </button>
-      </div>
+    <!-- Strategy Type Selection Modal -->
+    <StrategyCheckModal
+      :visible="showStrategyModal"
+      @select-type="selectStrategyType"
+      @close="showStrategyModal = false"
+    />
 
-      <!-- Strategy Type Selection Modal -->
-      <StrategyCheckModal
-        :visible="showStrategyModal"
-        @select-type="selectStrategyType"
-        @close="showStrategyModal = false"
-      />
-
+    <!-- Content Panels -->
+    <div v-if="activeCoreFeature" class="ai-tools__content">
       <!-- History Panel -->
-      <DesignHistory
-        v-if="activeCoreFeature === 'history'"
-        :items="designHistoryList"
-        :loading="historyLoading"
-        :loaded="historyLoaded"
-        @select="onHistorySelect"
-        @close="exitCoreFeature"
-      />
+      <AppCard v-if="activeCoreFeature === 'history'" variant="default" :padding="false">
+        <template #header>
+          <h2 class="card__title"><span aria-hidden="true">📖</span> 历史记录</h2>
+          <AppButton variant="ghost" size="sm" @click="exitCoreFeature">关闭</AppButton>
+        </template>
+        <DesignHistory
+          :items="designHistoryList"
+          :loading="historyLoading"
+          :loaded="historyLoaded"
+          @select="onHistorySelect"
+          @close="exitCoreFeature"
+        />
+      </AppCard>
 
       <!-- Design Wizard -->
-      <DesignWizard
-        v-else-if="activeCoreFeature === 'design' && designStep === 'wizard'"
-        :capital="designCapital"
-        @start-design="startDesign"
-        @cancel="exitCoreFeature"
-      />
+      <AppCard v-else-if="activeCoreFeature === 'design' && designStep === 'wizard'" variant="default" :padding="false">
+        <DesignWizard
+          :capital="designCapital"
+          @start-design="startDesign"
+          @cancel="exitCoreFeature"
+        />
+      </AppCard>
 
       <!-- Design Loading -->
-      <DesignLoading
-        v-else-if="activeCoreFeature === 'design' && designStep === 'loading'"
-        :progress="loadingProgress"
-        :step-label="loadingText"
-        :failed="designFailed"
-        @cancel="exitCoreFeature"
-      />
+      <AppCard v-else-if="activeCoreFeature === 'design' && designStep === 'loading'" variant="default" :padding="false">
+        <DesignLoading
+          :progress="loadingProgress"
+          :step-label="loadingText"
+          :failed="designFailed"
+          @cancel="exitCoreFeature"
+        />
+      </AppCard>
 
       <!-- Design Result -->
-      <DesignResult
-        v-else-if="activeCoreFeature === 'design' && designStep === 'result' && designResult?.plans?.length"
-        :plans="designResult.plans"
-        :design-text="designResult.design_text"
-        :is-history="designResult.is_history"
-        :created-at="designResult.created_at"
-        :report-error="reportError"
-        :report-stale="designReportStale"
-        @apply="applyPlan"
-        @regenerate="regenerateDesign"
-        @close="exitCoreFeature"
-        @retry-report="retryReport"
-      />
+      <AppCard v-else-if="activeCoreFeature === 'design' && designStep === 'result' && designResult?.plans?.length" variant="default" :padding="false">
+        <DesignResult
+          :plans="designResult.plans"
+          :design-text="designResult.design_text"
+          :is-history="designResult.is_history"
+          :created-at="designResult.created_at"
+          :report-error="reportError"
+          :report-stale="designReportStale"
+          @apply="applyPlan"
+          @regenerate="regenerateDesign"
+          @close="exitCoreFeature"
+          @retry-report="retryReport"
+        />
+      </AppCard>
 
       <!-- Strategy Check Result -->
-      <StrategyCheckResult
-        v-if="activeCoreFeature === 'strategy'"
-        :result="strategyResult"
-        :loading="checkingStrategy"
-        :error="strategyError"
-        @close="exitCoreFeature"
-      />
+      <AppCard v-else-if="activeCoreFeature === 'strategy'" variant="default" :padding="false">
+        <StrategyCheckResult
+          :result="strategyResult"
+          :loading="checkingStrategy"
+          :error="strategyError"
+          @close="exitCoreFeature"
+        />
+      </AppCard>
+
+      <!-- Empty State -->
+      <AppCard v-else variant="filled" class="empty-state">
+        <div class="empty-state__content">
+          <div class="empty-state__icon" aria-hidden="true">⚡</div>
+          <h3 class="empty-state__title">暂无内容</h3>
+          <p class="empty-state__desc">请从上方选择一项功能开始</p>
+        </div>
+      </AppCard>
     </div>
   </section>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { portfolioApi } from '../api'
-import { usePortfolioStore } from '../stores/portfolio'
-import { useTaskStore } from '../stores/task'
-import { useToastStore } from '../stores/toast'
-import { formatDate } from '../utils/formatDate'
-import DesignWizard from '../components/design/DesignWizard.vue'
-import DesignLoading from '../components/design/DesignLoading.vue'
-import DesignResult from '../components/design/DesignResult.vue'
-import DesignHistory from '../components/design/DesignHistory.vue'
-import StrategyCheckModal from '../components/design/StrategyCheckModal.vue'
-import StrategyCheckResult from '../components/design/StrategyCheckResult.vue'
+import { portfolioApi } from '@/api'
+import { usePortfolioStore } from '@/stores/portfolio'
+import { useTaskStore } from '@/stores/task'
+import { useToastStore } from '@/stores/toast'
+import { formatDate } from '@/utils/formatDate'
+import DesignWizard from '@/components/design/DesignWizard.vue'
+import DesignLoading from '@/components/design/DesignLoading.vue'
+import DesignResult from '@/components/design/DesignResult.vue'
+import DesignHistory from '@/components/design/DesignHistory.vue'
+import StrategyCheckModal from '@/components/design/StrategyCheckModal.vue'
+import StrategyCheckResult from '@/components/design/StrategyCheckResult.vue'
+import { PageHeader, AppCard, AppButton } from '@/components'
 
 const emit = defineEmits(['applied'])
 
@@ -136,13 +174,6 @@ const strategyTaskStatus = ref('')
 const strategyPortfolioType = ref('')
 const reportError = ref('')
 const showStrategyModal = ref(false)
-
-const designReportStale = computed(() => {
-  if (!designResult.value?.created_at) return false
-  const created = new Date(designResult.value.created_at).getTime()
-  if (!created || isNaN(created)) return false
-  return Date.now() - created > 60_000
-})
 
 // History
 const showHistory = ref(false)
@@ -285,210 +316,255 @@ async function startDesign(capital) {
     }
     designStep.value = 'result'
     loadingProgress.value = 100
-    loadingText.value = '完成！'
-    return data
+    loadingText.value = '完成'
   }
 
   try {
-    loadingProgress.value = 10
-    loadingText.value = '正在请求 AI 设计方案...'
-    const res = await portfolioApi.designAsync({ capital: capital })
-    const taskData = res.data
-    taskStore.addTask(taskData.task_id, '智能组合设计', 'design')
-    const storedTask = taskStore.getTask(taskData.task_id)
-    if (storedTask) storedTask.designId = taskData.design_id
+    const res = await portfolioApi.designAsync({ capital, portfolio_type: 'on_exchange' })
+    const taskId = res.data.task_id
+    if (!taskId) throw new Error('未返回 task_id')
 
-    loadingProgress.value = 30
-    loadingText.value = 'AI 正在分析全市场数据...'
+    taskStore.addTask({ taskId, type: 'design', status: 'running', progress: 0 })
 
-    // Register WS listener for completion
-    const wsToken = taskStore.registerTaskCompletion(taskData.task_id, async () => {
-      loadingText.value = '方案已生成，正在加载...'
-      loadingProgress.value = 95
-      try {
-        const data = await fetchDesignDetail(taskData.design_id)
-        loadingProgress.value = 100
-        toast('组合方案生成完成！', 'success')
-      } catch {
-        toast('加载设计方案详情失败', 'error')
-        designFailed.value = '加载方案详情失败，请稍后再试'
-      }
-    })
+    const poll = async () => {
+      let attempts = 0
+      while (attempts < 180) {
+        await new Promise(r => setTimeout(r, 5000))
+        attempts++
+        try {
+          const task = taskStore.tasks.find(t => t.taskId === taskId)
+          if (!task || task.status !== 'running') break
 
-    // Poll as fallback
-    let pollCount = 0
-    const pollTimer = setInterval(async () => {
-      pollCount++
-      loadingProgress.value = Math.min(30 + pollCount * 5, 90)
-      loadingText.value = `AI 正在优化组合... (${pollCount * 5}s)`
-      try {
-        const taskRes = await portfolioApi.getTask(taskData.task_id)
-        const task = taskRes.data
-        if (task.status === 'completed') {
-          clearInterval(pollTimer)
-          await fetchDesignDetail(taskData.design_id)
-          toast('组合方案生成完成！', 'success')
-        } else if (task.status === 'failed') {
-          clearInterval(pollTimer)
-          designFailed.value = task.error || '方案生成失败，请稍后重试'
-        }
-      } catch {
-        // keep polling
-      }
-    }, 5000)
+          const statusRes = await portfolioApi.getTask(taskId)
+          const status = statusRes.data.status
+          const progress = Math.min(attempts * 0.5, 90)
+          loadingProgress.value = progress
+          taskStore.updateTask(taskId, { progress })
 
-    // Cleanup poll on unmount or 180s timeout
-    setTimeout(() => {
-      clearInterval(pollTimer)
-      if (designStep.value === 'loading' && !designFailed.value) {
-        loadingText.value = '方案生成中，您可稍后查看历史记录'
-        setTimeout(() => {
-          if (designStep.value === 'loading') {
-            exitCoreFeature()
+          if (status === 'completed') {
+            loadingProgress.value = 100
+            loadingText.value = '生成完成，正在获取详情...'
+            taskStore.updateTask(taskId, { status: 'completed' })
+            await fetchDesignDetail(statusRes.data.design_id)
+            break
+          } else if (status === 'failed') {
+            designFailed.value = statusRes.data.error || '生成失败，请重试'
+            designStep.value = 'wizard'
+            taskStore.removeTask(taskId)
+            break
           }
-        }, 3000)
+        } catch (e) {
+          console.warn('[DashboardAiTools] poll error', e)
+        }
       }
-    }, 180000)
+      if (attempts >= 180) {
+        designFailed.value = '生成超时，请重试'
+        designStep.value = 'wizard'
+        taskStore.removeTask(taskId)
+      }
+    }
+
+    poll()
   } catch (e) {
-    designFailed.value = '提交失败：' + (e?.message || '网络错误')
+    console.error('[DashboardAiTools] startDesign error', e)
+    designFailed.value = e.message || '启动失败，请重试'
+    designStep.value = 'wizard'
   }
 }
 
 async function checkStrategy() {
   checkingStrategy.value = true
-  strategyTaskStatus.value = 'running'
   strategyError.value = ''
-  strategyResult.value = null
+  strategyStage.value = '提交任务...'
+  strategyProgress.value = 0
   try {
-    const res = await portfolioApi.strategyCheck({ portfolio_type: strategyPortfolioType.value || undefined })
-    const taskData = res.data
-    taskStore.addTask(taskData.task_id, '策略检查与分析', 'check')
+    const res = await portfolioApi.strategyCheck({ portfolio_type: strategyPortfolioType.value })
+    const taskId = res.data.task_id
+    if (!taskId) throw new Error('未返回 task_id')
 
-    // Poll for completion
-    let pollCount = 0
-    const pollTimer = setInterval(async () => {
-      pollCount++
-      strategyProgress.value = Math.min(pollCount * 10, 80)
-      try {
-        const taskRes = await portfolioApi.getTask(taskData.task_id)
-        const task = taskRes.data
-        if (task.status === 'completed') {
-          clearInterval(pollTimer)
-          const detailRes = await portfolioApi.getStrategyCheckResult(taskData.task_id)
-          strategyResult.value = detailRes.data
-          strategyTaskStatus.value = 'completed'
-          checkingStrategy.value = false
-          toast('策略检查完成', 'success')
-        } else if (task.status === 'failed') {
-          clearInterval(pollTimer)
-          strategyError.value = task.error || '策略检查失败'
-          strategyTaskStatus.value = 'failed'
-          checkingStrategy.value = false
+    taskStore.addTask({ taskId, type: 'check', status: 'running', progress: 0 })
+
+    const poll = async () => {
+      let attempts = 0
+      while (attempts < 180) {
+        await new Promise(r => setTimeout(r, 5000))
+        attempts++
+        try {
+          const task = taskStore.tasks.find(t => t.taskId === taskId)
+          if (!task || task.status !== 'running') break
+
+          const statusRes = await portfolioApi.getTask(taskId)
+          const status = statusRes.data.status
+          const progress = Math.min(attempts * 0.5, 90)
+          strategyProgress.value = progress
+          strategyStage.value = statusRes.data.stage || '处理中...'
+          taskStore.updateTask(taskId, { progress })
+
+          if (status === 'completed') {
+            strategyProgress.value = 100
+            strategyStage.value = '完成'
+            taskStore.updateTask(taskId, { status: 'completed' })
+            strategyResult.value = statusRes.data
+            break
+          } else if (status === 'failed') {
+            strategyError.value = statusRes.data.error || '检查失败，请重试'
+            taskStore.removeTask(taskId)
+            break
+          }
+        } catch (e) {
+          console.warn('[DashboardAiTools] checkStrategy poll error', e)
         }
-      } catch {
-        // keep polling
       }
-    }, 3000)
+      if (attempts >= 180) {
+        strategyError.value = '检查超时，请重试'
+        taskStore.removeTask(taskId)
+      }
+    }
 
-    setTimeout(() => {
-      clearInterval(pollTimer)
-      if (checkingStrategy.value) {
-        strategyError.value = '策略检查超时，请稍后查看历史记录'
-        strategyTaskStatus.value = 'failed'
-        checkingStrategy.value = false
-      }
-    }, 120000)
+    poll()
   } catch (e) {
-    strategyError.value = '提交失败：' + (e?.message || '网络错误')
-    strategyTaskStatus.value = 'failed'
+    console.error('[DashboardAiTools] checkStrategy error', e)
+    strategyError.value = e.message || '启动失败，请重试'
     checkingStrategy.value = false
   }
 }
 
 async function loadHistoryList() {
+  if (historyLoaded.value) return
   historyLoading.value = true
   try {
-    const [designRes, checkRes] = await Promise.all([
-      portfolioApi.listDesigns(20, 0),
-      portfolioApi.listStrategyChecks(20, 0),
-    ])
-    const designs = (designRes.data || []).map(d => ({ ...d, _type: 'design' }))
-    const checks = (checkRes.data || []).map(c => ({ ...c, _type: 'check' }))
-    designHistoryList.value = [...designs, ...checks].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+    const res = await portfolioApi.listDesigns()
+    designHistoryList.value = res.data || []
     historyLoaded.value = true
   } catch (e) {
-    toast('加载历史记录失败，请检查后端连接', 'error')
+    console.error('[DashboardAiTools] loadHistoryList error', e)
   } finally {
     historyLoading.value = false
   }
 }
 
-async function onHistorySelect(id) {
+function onHistorySelect(item) {
+  designResult.value = {
+    plans: item.strategies || [],
+    design_text: item.design_text || '',
+    market_context: item.market_context || {},
+    created_at: item.created_at,
+    is_history: true,
+  }
+  designStep.value = 'result'
+  designCapital.value = item.capital || 500000
+  activeCoreFeature.value = 'design'
+}
+
+async function applyPlan(plan) {
+  applyingPlan.value = plan.style
   try {
-    const res = await portfolioApi.getDesign(id)
-    const data = res.data
-    if (!data || !data.strategies || data.strategies.length === 0) {
-      toast('该历史方案数据不完整', 'warning')
-      return
-    }
-    const plans = data.strategies.map(s => ({
-      style: s.label,
-      style_label: s.label,
-      portfolio_name: s.portfolio_name,
-      positioning: s.positioning,
-      expected_return: s.expected_return,
-      max_drawdown: s.max_drawdown,
-      sharpe_ratio: s.sharpe_ratio,
-      risk_factors: s.risk_factors || [],
-      allocations: Array.isArray(s.etfs)
-        ? s.etfs.map(e => ({ symbol: e.symbol, name: e.name, layer: e.layer, target_weight: e.weight, selection_rationale: e.selection_rationale || '' }))
-        : [],
-    }))
-    designResult.value = { plans, design_text: data.design_text || '', market_context: data.market_context || {}, created_at: data.created_at, is_history: true }
-    designStep.value = 'result'
-    designTab.value = 'cards'
-    activeCoreFeature.value = 'design'
+    await portfolioApi.applyPortfolioDesign({ design_id: plan.design_id || designResult.value.id, plan: plan })
+    toast.show({ type: 'success', message: '方案已应用到组合' })
+    emit('applied')
   } catch (e) {
-    toast('加载方案详情失败', 'error')
+    console.error('[DashboardAiTools] applyPlan error', e)
+    toast.show({ type: 'error', message: '应用失败，请重试' })
+  } finally {
+    applyingPlan.value = null
   }
 }
 
 function regenerateDesign() {
   designResult.value = null
-  startDesign(designCapital.value)
+  designStep.value = 'wizard'
 }
 
-function retryReport() {
+async function retryReport() {
+  if (!designResult.value?.plans?.length) return
   reportError.value = ''
-  if (designResult.value) {
-    designResult.value = { ...designResult.value, design_text: '' }
-  }
-}
-
-async function applyPlan(plan) {
-  if (applyingPlan.value) return
-  applyingPlan.value = plan.style
   try {
-    await portfolioApi.applyPortfolioDesign(plan)
-    toast(`已应用 ${plan.style} 方案`, 'success')
-    emit('applied')
+    const res = await portfolioApi.generateDesignReport({
+      strategies: designResult.value.plans,
+      market_context: designResult.value.market_context,
+    })
+    designResult.value.design_text = res.data.design_text
   } catch (e) {
-    toast('应用方案失败', 'error')
-  } finally {
-    applyingPlan.value = null
+    console.error('[DashboardAiTools] retryReport error', e)
+    reportError.value = '报告生成失败，请重试'
   }
 }
 </script>
 
 <style scoped>
-.core-actions { overflow: visible; }
-.core-actions-body { padding: var(--space-5); }
-.core-actions-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: var(--space-4); }
-.core-action-btn { display: flex; align-items: flex-start; gap: var(--space-4); padding: var(--space-5); border: 2px solid var(--color-border-light); border-radius: var(--radius-xl); background: var(--color-surface-primary); cursor: pointer; transition: var(--transition-fast); text-align: left; }
-.core-action-btn:hover { border-color: var(--color-brand-300); box-shadow: var(--shadow-md); transform: translateY(-2px); }
-.core-action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.action-icon { font-size: var(--font-size-3xl); line-height: 1; flex-shrink: 0; }
-.action-content { display: flex; flex-direction: column; gap: var(--space-1); }
-.action-title { font-size: var(--font-size-base); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
-.action-desc { font-size: var(--font-size-sm); color: var(--color-text-secondary); line-height: var(--line-height-normal); }
+.ai-tools {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-section-md);
+}
+
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-gap-md);
+}
+
+.feature-card {
+  height: 100%;
+  min-height: 160px;
+}
+
+.feature-card .card__header {
+  text-align: center;
+}
+
+.feature-card .card__header-content {
+  justify-content: center;
+}
+
+.feature-card .card__icon {
+  font-size: 32px;
+  margin-bottom: var(--space-3);
+}
+
+.ai-tools__content {
+  width: 100%;
+  animation: ai-tools-content-in var(--duration-normal) var(--ease-out);
+}
+
+@keyframes ai-tools-content-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 300px;
+  text-align: center;
+}
+
+.empty-state__content {
+  max-width: 320px;
+}
+
+.empty-state__icon {
+  font-size: 48px;
+  opacity: 0.4;
+  margin-bottom: var(--space-4);
+}
+
+.empty-state__title {
+  margin: 0 0 var(--space-2);
+  font: var(--text-h3);
+  color: var(--color-text-primary);
+}
+
+.empty-state__desc {
+  margin: 0;
+  font: var(--text-body);
+  color: var(--color-text-secondary);
+}
+
+@media (max-width: 1023px) {
+  .feature-grid {
+    grid-template-columns: 1fr;
+  }
+}
 </style>
