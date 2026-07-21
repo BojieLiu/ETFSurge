@@ -164,6 +164,7 @@ const chartOption = computed(() => {
     const basePrice = d.closes[0]
 
     return {
+      title: { text: seriesName, left: 'center', textStyle: { fontSize: 14, fontWeight: 'bold' } },
       tooltip: {
         trigger: 'axis',
         axisPointer: { type: 'cross' },

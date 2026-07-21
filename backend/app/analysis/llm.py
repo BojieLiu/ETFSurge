@@ -433,112 +433,139 @@ async def generate_advice(
     query: str,
     context: dict[str, Any] | None = None,
 ) -> str:
-    """AI 投资顾问 — 基于市场数据、新闻、持仓生成结构化分析。
+    """AI 投资顾问 — 结合市场数据、新闻、持仓生成结构化回答。
 
-    从 context 中提取 market_data / news / portfolio 等信息，
-    构建包含 4 个维度的分析框架，返回 Markdown 格式报告。
+    从 context 中获取 market_data / news / portfolio / market_snapshot 等信息，
+    注入市态判定与情绪数据，按 4 个维度的分析框架输出 Markdown 格式报告。
     """
-    # ---- 提取 context 中的可用数据 ----
+    # ---- 从 context 获取可用数据 ----
     market_data = (context or {}).get("market_data", [])
     news = (context or {}).get("news", [])
     portfolio = (context or {}).get("portfolio", [])
     market_snapshot = (context or {}).get("market_snapshot", "")
+    regime = (context or {}).get("market_regime", "")
+    sentiment = (context or {}).get("market_sentiment", {})
 
-    # ---- 1. 大盘概况 ----
+    # ---- 1. 大盘概况（含市态/情绪） ----
     idx_lines = []
     if market_data:
-        for item in market_data[:8]:
+        for item in market_data[:10]:
             name = item.get("name", item.get("symbol", "?"))
             price = item.get("price", "N/A")
             chg = item.get("change_pct", "")
             vol = item.get("volume", "")
+            amount = item.get("amount", "")
             if chg != "":
+                vol_str = f"成交量 {vol}" if vol else ""
+                amt_str = f"成交额 {amount}" if amount else ""
                 idx_lines.append(
-                    f"- **{name}**: {price}，涨跌幅 {chg}%，成交量 {vol}"
+                    f"- **{name}**: {price} 涨跌幅 {chg}%  {vol_str}  {amt_str}"
                 )
-    idx_summary = "\n".join(idx_lines) if idx_lines else "（暂无实时指数数据）"
+
+    idx_summary = "\n".join(idx_lines) if idx_lines else "暂无实时指数数据。"
+
+    # 市态与情绪概览
+    regime_line = f"市场状态: {regime}" if regime else "市场状态: 未知"
+    sentiment_line = ""
+    if sentiment and isinstance(sentiment, dict):
+        s_idx = sentiment.get("sentiment_index", "")
+        s_lbl = sentiment.get("sentiment_label", "")
+        if s_idx and s_lbl:
+            sentiment_line = f"市场情绪: {s_lbl} ({s_idx}/100)"
+        elif s_lbl:
+            sentiment_line = f"市场情绪: {s_lbl}"
 
     # ---- 2. 热点板块 ----
     sector_lines = []
-    for item in market_data[:10]:
+    for item in market_data[:15]:
         if item.get("asset_type") in ("sector", "concept", "industry", "plate"):
             name = item.get("name", item.get("sector_name", "?"))
             chg = item.get("change_pct", "")
             flow = item.get("main_inflow", item.get("fund_flow", ""))
             sector_lines.append(
-                f"- **{name}**: 涨跌幅 {chg}%，资金流向 {flow}"
+                f"- **{name}**: 涨跌幅 {chg}%  资金流向 {flow}"
             )
-    sector_summary = "\n".join(sector_lines) if sector_lines else "（暂无板块数据）"
+    sector_summary = "\n".join(sector_lines) if sector_lines else "暂无板块热力数据。"
 
-    # ---- 3. 资金面/消息面 ----
+    # ---- 3. 资金面 / 消息面 ----
     fund_lines = []
-    fund_lines.append(f"- 市场快照:\n{market_snapshot}" if market_snapshot else "- 市场快照:（暂无）")
+    fund_lines.append(f"- 市场快照:\n{market_snapshot}" if market_snapshot else "- 市场快照:暂无")
     news_lines = []
     if news:
-        for n in news[:8]:
+        for n in news[:10]:
             title = n.get("title", n.get("content", ""))[:120]
-            news_lines.append(f"- {title}")
-    news_summary = "\n".join(news_lines) if news_lines else "（暂无重大新闻）"
+            source = n.get("source", n.get("来源", ""))
+            prefix = f"[{source}] " if source else ""
+            news_lines.append(f"- {prefix}{title}")
+    news_summary = "\n".join(news_lines) if news_lines else "暂无重大新闻。"
 
-    # ---- 4. 组合/持仓概况 ----
+    # ---- 4. 持仓/组合概况 ----
     portfolio_lines = []
     if portfolio:
         for p in portfolio[:10]:
             sym = p.get("symbol", p.get("code", "?"))
             name = p.get("name", "")
             weight = p.get("target_weight", p.get("weight", ""))
-            portfolio_lines.append(f"- {name}({sym}): 目标权重 {weight}")
-    portfolio_summary = "\n".join(portfolio_lines) if portfolio_lines else "（用户未提供持仓信息）"
+            if isinstance(weight, (int, float)):
+                weight_str = f"{weight*100:.1f}%" if weight < 1 else f"{weight}%"
+            else:
+                weight_str = str(weight)
+            portfolio_lines.append(f"- {name}({sym}): 目标权重 {weight_str}")
+    portfolio_summary = "\n".join(portfolio_lines) if portfolio_lines else "用户未提供持仓信息。"
 
-    prompt = f"""你是一位专业的金融投资顾问。请根据以下数据，回答用户的问题。
+    prompt = f"""你是一位专业的中国金融市场投资顾问。基于以下数据，回答用户的问题。
 
 ---
-## 用户问题
+## 用户提问
 {query}
 
 ---
 ## 一、大盘概况
 {idx_summary}
 
+{regime_line}
+{sentiment_line}
+
 ---
 ## 二、热点板块
 {sector_summary}
 
 ---
-## 三、资金面 / 消息面
+## 三、资金流向 / 消息面
 {news_summary}
 
 ---
-## 四、组合持仓概况
+## 四、持仓组合概况
 {portfolio_summary}
 ---
 
-请从以下 4 个维度给出结构化的 Markdown 分析报告：
+请按以下 4 个维度给出结构化 Markdown 格式报告：
 
 ### 1. 大盘概况
 - 主要指数涨跌幅、**成交量变化**、涨跌家数比
-- **必须引用上面给出的具体数值**，例如"上证指数收盘 3200.5，涨幅 0.8%"
+- **给出具体数值而不是模糊描述**，例如"上证指数收于 3200.5，涨幅 0.8%"
 
 ### 2. 热点板块
-- 当日领涨 / 领跌板块及涨幅/跌幅
-- 资金流向（主力净流入/流出）
+- 领涨板块 / 概念及涨幅/跌幅
+- 资金流入流出情况
 
-### 3. 资金面 / 消息面
-- 北向资金动向、主力资金流向
+### 3. 资金流向 / 消息面
+- 主力资金动向、北向资金动态
 - 重大政策或新闻催化
 
 ### 4. 后市展望与建议
-- 短期趋势判断、关键支撑/压力点位
-- 风险提示
+- 短期趋势判断、关键支撑/压力位
+- 给出 2~4 条具体配置建议
 
-**格式要求：**
-- 使用 Markdown，关键数字和结论用 **加粗** 标注
-- 要点用 `-` 列表，语言专业、客观
-- 如有持仓信息，结合持仓给出个性化建议
-- 总字数控制在 600 字以内
+注意：
+- 使用 **加粗** 强调关键数据
+- 用 `-` 符号列表组织内容
+- 保持回答精炼，控制在 600 字以内
+- 必须引用上述提供的具体数据，不要凭空編造数据
 """
-    return await get_agent("advice").run(prompt)
 
+    from ..analysis.registry import get_agent
+    return await get_agent("advice").run(prompt)
 
 async def analyze_news(news_list: list[dict]) -> str:
     text = "\n".join([f"- {n.get('title', n.get('summary', ''))}" for n in news_list[:15]])
