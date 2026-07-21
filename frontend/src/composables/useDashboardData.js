@@ -53,52 +53,6 @@ export function useDashboardData(capitalOn, capitalOff, activeTab) {
   const loading = computed(() => allocationOn.value.allocations.length === 0 && allocationOff.value.allocations.length === 0)
 
   // ECharts options
-  const pieOptionOn = computed(() => ({
-    tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-    legend: { orient: 'vertical', left: 'left', top: 'middle', itemWidth: 12, itemHeight: 12 },
-    series: [{
-      name: '分配',
-      type: 'pie',
-      radius: ['40%', '70%'],
-      avoidLabelOverlap: false,
-      label: { show: false, position: 'center' },
-      emphasis: { label: { show: true, fontSize: '18', fontWeight: 'bold' } },
-      labelLine: { show: false },
-      data: (allocationOn.value.allocations || []).map(a => ({
-        value: a.target_amount,
-        name: `${a.symbol} (${(a.target_weight * 100).toFixed(1)}%)`
-      }))
-    }],
-    color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#eab308']
-  }))
-
-  const pieOptionOff = computed(() => ({
-    ...pieOptionOn.value,
-    series: [{
-      ...pieOptionOn.value.series[0],
-      data: (allocationOff.value.allocations || []).map(a => ({
-        value: a.target_amount,
-        name: `${a.symbol} (${(a.target_weight * 100).toFixed(1)}%)`
-      }))
-    }]
-  }))
-
-  const pnlBarOption = computed(() => ({
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
-    xAxis: { type: 'category', data: pnlItems.value.map(i => i.short_name || i.name), axisLabel: { interval: 0, rotate: 30 } },
-    yAxis: { type: 'value', name: '盈亏 (元)' },
-    series: [{
-      name: '当日盈亏',
-      type: 'bar',
-      data: pnlItems.value.map(i => i.daily_pnl || 0),
-      itemStyle: {
-        color: (params) => params.value >= 0 ? '#ef4444' : '#22c55e'
-      },
-      emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.3)' } }
-    }]
-  }))
-
   // Methods – data fetching
   async function fetchGlobalIndices() {
     try {
@@ -159,7 +113,6 @@ export function useDashboardData(capitalOn, capitalOff, activeTab) {
     globalIndices,
     totalAll, pnlOn, pnlOff, pnlItems, pnlTotal, pnlTotalAmount, pnlWeightedChange,
     cashPctOn, cashOn, cashPctOff, cashOff,
-    pieOptionOn, pieOptionOff, pnlBarOption,
     fetchGlobalIndices, fetchAllocations, fetchPnl, fetchPnlHistory, refreshAll
   }
 }
