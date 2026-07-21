@@ -19,8 +19,8 @@ export default defineConfig({
   },
   // globalSetup / globalTeardown manage backend (uvicorn) + frontend (Vite) lifecycle.
   // We use absolute .mjs paths to avoid ESM resolution issues.
-  globalSetup: path.resolve(__dirname, '../utils/server-setup.js'),
-  globalTeardown: path.resolve(__dirname, '../utils/server-teardown.js'),
+  globalSetup: path.resolve(__dirname, '../utils/server-setup.cjs'),
+  globalTeardown: path.resolve(__dirname, '../utils/server-teardown.cjs'),
   projects: [
     {
       name: 'chromium',

@@ -4,7 +4,7 @@ import { startServers } from './server.js'
 /**
  * @returns {Promise<void>}
  */
-export async function globalSetup() {
+export default async function globalSetup() {
   console.log('[globalSetup] Starting servers…')
   await startServers()
   console.log('[globalSetup] Servers are ready.')
