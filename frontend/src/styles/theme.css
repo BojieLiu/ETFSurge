@@ -85,6 +85,22 @@
   --color-border-focus: var(--color-brand-500);
   --color-border-error: var(--color-danger-500);
 
+  /* Chart / Data Visualization Palette - 图表色板 */
+  --chart-1: var(--color-brand-500);
+  --chart-2: var(--color-success-500);
+  --chart-3: var(--color-warning-500);
+  --chart-4: var(--color-danger-500);
+  --chart-5: #8b5cf6;
+  --chart-6: #06b6d4;
+  --chart-7: #f97316;
+  --chart-8: #ec4899;
+
+  /* Signal Semantic Colors - 信号语义色 */
+  --signal-buy: var(--color-success-600);
+  --signal-sell: var(--color-danger-600);
+  --signal-hold: var(--color-warning-600);
+  --signal-neutral: var(--color-neutral-500);
+
   /* Text Colors - 文本色 */
   --color-text-primary: var(--color-neutral-900);
   --color-text-secondary: var(--color-neutral-600);
@@ -277,6 +293,68 @@
   --breakpoint-2xl: 1536px;
 
   /* ==========================================
+     CONTAINER WIDTHS - 容器宽度
+     ========================================== */
+
+  --container-max-xs: 100%;
+  --container-max-sm: 640px;
+  --container-max-md: 768px;
+  --container-max-lg: 1024px;
+  --container-max-xl: 1280px;
+  --container-max-2xl: 1536px;
+  --container-max-full: 100%;
+
+  /* ==========================================
+     LAYOUT GRID - 布局栅格
+     ========================================== */
+
+  --grid-columns: 12;
+  --grid-gap: var(--space-gap-md);
+  --grid-gap-sm: var(--space-gap-sm);
+  --grid-gap-lg: var(--space-gap-lg);
+
+  /* ==========================================
+     SECTION SPACING - 区块间距
+     ========================================== */
+
+  --space-section-xs: var(--space-4);
+  --space-section-sm: var(--space-6);
+  --space-section-md: var(--space-8);
+  --space-section-lg: var(--space-12);
+  --space-section-xl: var(--space-16);
+
+  /* ==========================================
+     DENSITY - 密度系统
+     ========================================== */
+
+  /* Table Density */
+  --density-compact-row-height: 40px;
+  --density-compact-cell-padding-y: var(--space-2);
+  --density-compact-cell-padding-x: var(--space-3);
+
+  --density-comfortable-row-height: 52px;
+  --density-comfortable-cell-padding-y: var(--space-3);
+  --density-comfortable-cell-padding-x: var(--space-4);
+
+  --density-spacious-row-height: 64px;
+  --density-spacious-cell-padding-y: var(--space-4);
+  --density-spacious-cell-padding-x: var(--space-6);
+
+  /* Card Density */
+  --density-compact-card-padding: var(--space-3);
+  --density-comfortable-card-padding: var(--space-5);
+  --density-spacious-card-padding: var(--space-6);
+
+  /* ==========================================
+     HEADER / NAV - 页头导航
+     ========================================== */
+
+  --header-height: 64px;
+  --header-height-sm: 56px;
+  --sidebar-width: 280px;
+  --sidebar-width-collapsed: 72px;
+
+  /* ==========================================
      COMPONENT TOKENS - 组件专用令牌
      ========================================== */
 
@@ -320,6 +398,31 @@
   --badge-height: 20px;
   --badge-padding-x: var(--space-2);
   --badge-font-size: var(--font-size-xs);
+
+  /* Chart Palette - 数据可视化色板 */
+  --chart-1: var(--color-brand-500);
+  --chart-2: var(--color-success-500);
+  --chart-3: var(--color-warning-500);
+  --chart-4: var(--color-danger-500);
+  --chart-5: #8b5cf6;
+  --chart-6: #06b6d4;
+  --chart-7: #f97316;
+  --chart-8: #ec4899;
+
+  /* Signal Colors - 信号色 */
+  --signal-buy: var(--color-success-600);
+  --signal-sell: var(--color-danger-600);
+  --signal-hold: var(--color-warning-600);
+  --signal-neutral: var(--color-neutral-500);
+
+  /* Modal/Dialog */
+  --modal-backdrop: rgba(15, 23, 42, 0.5);
+  --modal-width-sm: 400px;
+  --modal-width-md: 560px;
+  --modal-width-lg: 720px;
+  --modal-width-xl: 960px;
+  --modal-width-full: calc(100% - var(--space-8));
+  --modal-max-height: calc(100vh - var(--space-16));
 }
 
 /* ==========================================

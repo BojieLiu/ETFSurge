@@ -7,13 +7,13 @@
     :aria-disabled="disabled || loading"
     @click="handleClick"
   >
-    <span v-if="loading" class="btn-loader" aria-hidden="true">
-      <svg class="spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <span v-if="loading" class="btn__loader" aria-hidden="true">
+      <svg class="btn__spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <circle cx="12" cy="12" r="10" stroke-opacity="0.25" />
         <path d="M12 2a10 10 0 0 1 10 10" stroke-linecap="round" />
       </svg>
     </span>
-    <span v-else-if="icon" class="btn-icon" aria-hidden="true">{{ icon }}</span>
+    <span v-else-if="icon" class="btn__icon" aria-hidden="true">{{ icon }}</span>
     <slot />
   </button>
 </template>
@@ -25,18 +25,19 @@ const props = defineProps({
   variant: {
     type: String,
     default: 'primary',
-    validator: (v) => ['primary', 'secondary', 'ghost', 'danger', 'success'].includes(v)
+    validator: v => ['primary', 'secondary', 'ghost', 'danger', 'success', 'outline'].includes(v)
   },
   size: {
     type: String,
     default: 'md',
-    validator: (v) => ['xs', 'sm', 'md', 'lg'].includes(v)
+    validator: v => ['xs', 'sm', 'md', 'lg'].includes(v)
   },
   disabled: { type: Boolean, default: false },
   loading: { type: Boolean, default: false },
-  type: { type: String, default: 'button', validator: (v) => ['button', 'submit', 'reset'].includes(v) },
+  type: { type: String, default: 'button', validator: v => ['button', 'submit', 'reset'].includes(v) },
   icon: { type: String, default: '' },
-  fullWidth: { type: Boolean, default: false }
+  fullWidth: { type: Boolean, default: false },
+  block: { type: Boolean, default: false }
 })
 
 const emit = defineEmits(['click'])
@@ -45,10 +46,10 @@ const buttonClasses = computed(() => [
   'btn',
   `btn--${props.variant}`,
   `btn--${props.size}`,
-  { 'btn--full': props.fullWidth, 'btn--loading': props.loading, 'btn--disabled': props.disabled }
+  { 'btn--full': props.fullWidth || props.block, 'btn--loading': props.loading, 'btn--disabled': props.disabled }
 ])
 
-const handleClick = (event) => {
+function handleClick(event) {
   if (!props.disabled && !props.loading) {
     emit('click', event)
   }
@@ -70,10 +71,10 @@ const handleClick = (event) => {
   white-space: nowrap;
   user-select: none;
   text-decoration: none;
+  outline: none;
 }
 
 .btn:focus-visible {
-  outline: none;
   box-shadow: var(--shadow-focus);
 }
 
@@ -102,7 +103,6 @@ const handleClick = (event) => {
   height: var(--btn-height-sm);
   padding: 0 var(--btn-padding-x-sm);
   font-size: var(--btn-font-size-sm);
-  gap: var(--space-1);
 }
 
 .btn--md {
@@ -118,100 +118,99 @@ const handleClick = (event) => {
 }
 
 /* Variants */
+
+/* Primary */
 .btn--primary {
-  color: var(--color-text-inverse);
   background: var(--color-brand-600);
-  border-color: var(--color-brand-600);
+  color: white;
 }
 
 .btn--primary:hover:not(:disabled) {
   background: var(--color-brand-700);
-  border-color: var(--color-brand-700);
 }
 
 .btn--primary:active:not(:disabled) {
   background: var(--color-brand-800);
-  border-color: var(--color-brand-800);
 }
 
+/* Secondary */
 .btn--secondary {
+  background: var(--color-surface-secondary);
   color: var(--color-text-primary);
-  background: var(--color-surface-primary);
-  border-color: var(--color-border-medium);
+  border-color: var(--color-border-light);
 }
 
 .btn--secondary:hover:not(:disabled) {
   background: var(--color-surface-hover);
-  border-color: var(--color-border-strong);
+  border-color: var(--color-border-medium);
 }
 
-.btn--secondary:active:not(:disabled) {
-  background: var(--color-surface-active);
-}
-
+/* Ghost */
 .btn--ghost {
-  color: var(--color-text-secondary);
   background: transparent;
-  border-color: transparent;
+  color: var(--color-text-secondary);
 }
 
 .btn--ghost:hover:not(:disabled) {
-  color: var(--color-text-primary);
   background: var(--color-surface-hover);
+  color: var(--color-text-primary);
 }
 
-.btn--ghost:active:not(:disabled) {
-  background: var(--color-surface-active);
-}
-
+/* Danger */
 .btn--danger {
-  color: var(--color-text-inverse);
   background: var(--color-danger-600);
-  border-color: var(--color-danger-600);
+  color: white;
 }
 
 .btn--danger:hover:not(:disabled) {
   background: var(--color-danger-700);
-  border-color: var(--color-danger-700);
 }
 
+/* Success */
 .btn--success {
-  color: var(--color-text-inverse);
   background: var(--color-success-600);
-  border-color: var(--color-success-600);
+  color: white;
 }
 
 .btn--success:hover:not(:disabled) {
   background: var(--color-success-700);
-  border-color: var(--color-success-700);
 }
 
-/* Icons */
-.btn-icon {
-  display: inline-flex;
-  flex-shrink: 0;
-  line-height: 1;
+/* Outline */
+.btn--outline {
+  background: transparent;
+  color: var(--color-brand-600);
+  border-color: var(--color-brand-300);
 }
 
-.btn--xs .btn-icon { font-size: 10px; }
-.btn--sm .btn-icon { font-size: 12px; }
-.btn--md .btn-icon { font-size: 14px; }
-.btn--lg .btn-icon { font-size: 16px; }
+.btn--outline:hover:not(:disabled) {
+  background: var(--color-bg-brand-subtle);
+  border-color: var(--color-brand-500);
+}
 
 /* Loader */
-.btn-loader {
-  display: inline-flex;
-  width: 1em;
-  height: 1em;
+.btn__loader {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.spinner {
-  width: 100%;
-  height: 100%;
-  animation: spin 0.8s linear infinite;
+.btn__spinner {
+  width: 16px;
+  height: 16px;
+  animation: btn-spin 1s linear infinite;
 }
 
-@keyframes spin {
+@keyframes btn-spin {
   to { transform: rotate(360deg); }
+}
+
+/* Icon */
+.btn__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1em;
+  line-height: 1;
 }
 </style>
