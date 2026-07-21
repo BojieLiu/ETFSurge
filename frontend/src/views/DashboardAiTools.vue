@@ -179,8 +179,8 @@ async function enterDesignMode() {
     activeCoreFeature.value = 'design'
     designStep.value = 'loading'
     try {
-      const res = await fetch(`/api/v1/portfolio/designs/${runningTask.designId}/status`)
-      const data = await res.json()
+      const res = await portfolioApi.getDesign(runningTask.designId)
+      const data = res.data
       if (data.status === 'completed') {
         taskStore.updateTask(runningTask.taskId, { status: 'completed' })
         designResult.value = data

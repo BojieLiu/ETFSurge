@@ -13,7 +13,6 @@ logger = get_logger(__name__)
 
 # Keep the official DeepSeek URL for reference; the actual URL is now
 # per-provider and obtained from get_configured_providers().
-LLM_API_URL = "https://api.deepseek.com/chat/completions"
 
 # Prompt loading mechanism
 from pathlib import Path

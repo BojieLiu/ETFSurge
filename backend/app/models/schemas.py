@@ -145,6 +145,7 @@ class PnLHistoryResponse(BaseModel):
 # AI Portfolio Design Response Models / AI 组合设计响应模型
 # =============================================================================
 
+# DEPRECATED: unused schema, kept for reference
 class PortfolioDesignAllocation(BaseModel):
     """单个ETF在组合中的配置详情"""
     symbol: str
@@ -157,6 +158,7 @@ class PortfolioDesignAllocation(BaseModel):
     key_metrics: Optional[dict] = None
 
 
+# DEPRECATED: unused schema, kept for reference
 class PortfolioDesignPlan(BaseModel):
     """单个风格组合方案"""
     style: str  # "进攻型" | "平衡型" | "防御型"
@@ -175,6 +177,7 @@ class PortfolioDesignPlan(BaseModel):
     rebalance_rules: str = ""
 
 
+# DEPRECATED: unused schema, kept for reference
 class PortfolioComparisonItem(BaseModel):
     """对比表单项"""
     holdings_count: Optional[int] = None
@@ -186,6 +189,7 @@ class PortfolioComparisonItem(BaseModel):
     core_holdings: Optional[str] = None
 
 
+# DEPRECATED: unused schema, kept for reference
 class PortfolioDesignResponse(BaseModel):
     """AI 组合设计完整响应"""
     design_text: str
@@ -197,6 +201,7 @@ class PortfolioDesignResponse(BaseModel):
     commodities: list[dict] = []
 
 
+# DEPRECATED: unused schema, kept for reference
 class PortfolioDesignRequest(BaseModel):
     """组合设计请求体"""
     capital: float = 500000

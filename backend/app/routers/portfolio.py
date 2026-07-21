@@ -200,57 +200,6 @@ async def get_design(
     }
 
 
-# Deprecated: use /designs/{design_id} instead (removed in favor of detail endpoint)
-# @router.get("/designs/{design_id}/status")
-# async def get_design_status(design_id: int, db: AsyncSession = Depends(get_db)):
-#     """方案 B: 任务存活状态检查。不依赖 report_manager，仅查 DB。"""
-    # from ..models.portfolio_design import PortfolioDesign
-    # from datetime import datetime, timezone
-    #
-    #     row = await db.get(PortfolioDesign, design_id)
-    #     if not row:
-    #         return {
-    #             "design_id": design_id,
-    #             "alive": False,
-    #             "status": "not_found",
-    #             "design_text": None,
-    #             "created_at": None,
-    #             "progress": None,
-    #         }
-    #
-    #     created = row.created_at
-    #     design_text = row.design_text
-    #     now = datetime.now(timezone.utc) if created.tzinfo else datetime.utcnow()
-    #
-    #     if design_text:
-    #         return {
-    #             "design_id": design_id,
-    #             "alive": False,
-    #             "status": "completed",
-    #             "design_text": design_text,
-    #             "created_at": created.isoformat() if created else None,
-    #             "progress": 100,
-    #         }
-    #
-    #     age_seconds = (now - created).total_seconds() if created else 999999
-    #     if age_seconds > 300:
-    #         return {
-    #             "design_id": design_id,
-    #             "alive": False,
-    #             "status": "failed",
-    #             "design_text": None,
-    #             "created_at": created.isoformat() if created else None,
-    #             "progress": None,
-    #         }
-    #
-    #     return {
-    #         "design_id": design_id,
-    #         "alive": True,
-    #         "status": "running",
-    #         "design_text": None,
-    #         "created_at": created.isoformat() if created else None,
-    #         "progress": min(int(age_seconds / 180 * 100), 95),
-    #     }
 
 
 @router.delete("/designs/{design_id}")

@@ -124,11 +124,6 @@ async def indices_meta() -> list[dict[str, Any]]:
     return await get_indices_meta()
 
 
-# Deprecated: use /indices/meta instead (removed in favor of meta endpoint)
-# @router.get("/indices/search")
-# async def indices_search(keyword: str = Query("")) -> list[dict[str, Any]]:
-#     """搜索指数（毫秒级），支持代码/名称模糊匹配。"""
-#     return await search_indices(keyword)
 
 
 @router.get("/indicators/{symbol}")
@@ -198,11 +193,6 @@ async def sentiment() -> dict:
     return await asyncio.to_thread(fetch_market_emotion)
 
 
-# Deprecated: use /sectors/industry or /sectors/concept instead
-# @router.get("/sectors")
-# async def sectors(limit: int = Query(20)) -> list[dict[str, Any]]:
-#     """板块热度排行(财联社)。"""
-#     return await asyncio.to_thread(fetch_sector_heat, limit)
 
 
 # TODO: 未接入前端
