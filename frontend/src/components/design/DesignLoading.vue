@@ -1,170 +1,156 @@
 <template>
-  <div class="panel-body design-loading">
-    <div v-if="failed" class="feature-card loading-card error">
-      <div class="error-icon">❌</div>
-      <h3 class="loading-title">生成失败</h3>
-      <p class="loading-text">{{ failed }}</p>
-      <p class="loading-hint">3 秒后将返回设置页，请检查后端服务是否正常运行</p>
-    </div>
-    <div v-else class="feature-card loading-card">
-      <div class="loading-spinner-pulse"></div>
-      <h3 class="loading-title">智能组合设计生成中...</h3>
-      <p class="loading-text">{{ stepLabel }}</p>
-      <div class="loading-progress">
-        <div class="progress-bar">
-          <div class="progress-fill" :style="{ width: progress + '%' }"></div>
-        </div>
-        <span class="progress-percent">{{ progress }}%</span>
+  <AppCard
+    variant="outlined"
+    title="智能组合设计生成中..."
+    :description="stepLabel"
+    icon="⏳"
+    class="design-loading"
+    :padding="false"
+  >
+    <template #header-action v-if="!failed">
+      <AppBadge :variant="progress >= 100 ? 'success' : 'default'" class="progress-badge">
+        {{ progress }}%
+      </AppBadge>
+    </template>
+
+    <div class="design-loading__body">
+      <div v-if="failed" class="design-loading__error">
+        <div class="error-icon" aria-hidden="true">❌</div>
+        <h4 class="error-title">生成失败</h4>
+        <p class="error-message">{{ failed }}</p>
+        <p class="error-hint">请检查后端服务是否正常运行</p>
       </div>
-      <div class="loading-section">
-        <div class="loading-steps">
-          <div class="loading-step" :class="{ done: progress >= 20 }">
-            <span class="step-icon">&#128200;</span> 采集全市场数据
-            <span v-if="progress >= 20" class="step-check">&#10003;</span>
-          </div>
-          <div class="loading-step" :class="{ done: progress >= 40 }">
-            <span class="step-icon">&#128269;</span> 筛选候选标的
-            <span v-if="progress >= 40" class="step-check">&#10003;</span>
-          </div>
-          <div class="loading-step" :class="{ active: progress >= 40 && progress < 80 }">
-            <span class="step-icon">&#9881;</span> 因子评分与权重分配
-            <span v-if="progress >= 80" class="step-check">&#10003;</span>
-          </div>
-          <div class="loading-step" :class="{ done: progress >= 80 }">
-            <span class="step-icon">&#128221;</span> 生成组合方案
-            <span v-if="progress >= 80" class="step-check">&#10003;</span>
+
+      <div v-else class="design-loading__progress">
+        <div class="loading-progress-bar">
+          <div class="progress-bar">
+            <div class="progress-fill" :style="{ width: progress + '%' }"></div>
           </div>
         </div>
-        <div class="loading-hint" v-if="progress > 0">
+
+        <div class="loading-steps">
+          <LoadingStep
+            v-for="step in steps"
+            :key="step.id"
+            :icon="step.icon"
+            :label="step.label"
+            :threshold="step.threshold"
+            :progress="progress"
+          />
+        </div>
+
+        <div v-if="progress > 0" class="loading-hint">
           方案生成中，完成后会通过通知栏提醒您
         </div>
       </div>
-      <div class="panel-footer" style="margin-top:20px;text-align:center">
-        <AppButton variant="ghost" size="sm" @click="$emit('cancel')">&#8592; 返回</AppButton>
-      </div>
     </div>
-  </div>
+
+    <template #footer v-if="!failed">
+      <div class="design-loading__footer">
+        <AppButton variant="ghost" size="sm" @click="$emit('cancel')">← 返回</AppButton>
+      </div>
+    </template>
+  </AppCard>
 </template>
 
 <script setup>
-import AppButton from '../ui/AppButton.vue'
+import { computed } from 'vue'
+import AppCard from '@/components/ui/AppCard.vue'
+import AppButton from '@/components/ui/AppButton.vue'
+import AppBadge from '@/components/ui/AppBadge.vue'
 
-defineProps({
+const props = defineProps({
   progress: { type: Number, default: 0 },
   stepLabel: { type: String, default: '正在采集数据...' },
   failed: { type: String, default: '' }
 })
 
 defineEmits(['cancel'])
+
+const steps = [
+  { id: 1, icon: '🔍', label: '采集全市场数据', threshold: 20 },
+  { id: 2, icon: '📊', label: '筛选候选标的', threshold: 40 },
+  { id: 3, icon: '⚙️', label: '因子评分与权重分配', threshold: 80 },
+  { id: 4, icon: '📁', label: '生成组合方案', threshold: 100 }
+]
+
+// LoadingStep sub-component
+const LoadingStep = {
+  props: { icon: String, label: String, threshold: Number, progress: Number },
+  template: `
+    <div class="loading-step" :class="{ done: progress >= threshold, active: progress >= threshold - 20 && progress < threshold }">
+      <span class="step-icon">{{ icon }}</span>
+      <span class="step-label">{{ label }}</span>
+      <span v-if="progress >= threshold" class="step-check" aria-hidden="true">✓</span>
+    </div>
+  `
+}
 </script>
 
 <style scoped>
-.panel-body {
-  padding: var(--space-4) 0;
-}
-
-.feature-card {
+.design-loading {
   max-width: 520px;
   margin: 0 auto;
-  background: var(--color-surface-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  overflow: hidden;
 }
 
-.loading-card {
-  padding: var(--space-6) var(--space-5);
+.design-loading__body {
+  padding: var(--card-padding);
+}
+
+.design-loading__error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   text-align: center;
-}
-
-.loading-card.error {
-  border-color: #e53935;
-  background: #fff5f5;
+  gap: var(--space-3);
+  padding: var(--space-4);
 }
 
 .error-icon {
-  font-size: 3em;
-  margin-bottom: var(--space-3);
+  font-size: 48px;
+  opacity: 0.8;
 }
 
-.loading-title {
-  font-size: var(--font-size-base);
-  font-weight: var(--font-weight-semibold);
-  margin: 0 0 var(--space-2);
-  color: var(--color-text-primary);
+.error-title {
+  margin: 0;
+  font: var(--text-h4);
+  color: var(--color-text-danger);
 }
 
-.loading-text {
-  font-size: var(--font-size-sm);
+.error-message {
+  margin: 0;
+  font: var(--text-body);
   color: var(--color-text-secondary);
-  margin: 0 0 var(--space-3);
 }
 
-.loading-hint {
-  font-size: var(--font-size-xs);
+.error-hint {
+  margin: 0;
+  font: var(--text-body-sm);
   color: var(--color-text-tertiary);
-  margin: var(--space-3) 0 0;
 }
 
-.loading-spinner-pulse {
-  width: 48px;
-  height: 48px;
-  margin: 0 auto var(--space-4);
-  border: 4px solid var(--color-bg-tertiary);
-  border-top-color: var(--color-primary);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-.loading-progress {
+.design-loading__progress {
   display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  margin-bottom: var(--space-5);
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.loading-progress-bar {
+  width: 100%;
 }
 
 .progress-bar {
-  flex: 1;
   height: 8px;
-  background: var(--color-bg-tertiary);
+  background: var(--color-surface-tertiary);
   border-radius: var(--radius-full);
   overflow: hidden;
-  position: relative;
 }
 
 .progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--color-primary), #42a5f5);
+  background: linear-gradient(90deg, var(--color-brand-500), var(--color-brand-400));
   border-radius: var(--radius-full);
-  transition: width 0.5s ease;
-  position: relative;
-}
-
-.progress-fill::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
-  animation: shimmer 2s infinite;
-}
-
-@keyframes shimmer {
-  to { left: 100%; }
-}
-
-.progress-percent {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-  min-width: 30px;
-  text-align: right;
-}
-
-.loading-section {
-  text-align: left;
+  transition: width var(--duration-normal) var(--ease-out);
 }
 
 .loading-steps {
@@ -176,34 +162,54 @@ defineEmits(['cancel'])
 .loading-step {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  font-size: var(--font-size-sm);
-  color: var(--color-text-tertiary);
-  padding: var(--space-2);
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-md);
-  transition: all var(--transition-fast);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  transition: var(--transition-fast);
 }
 
 .loading-step.done {
-  color: var(--color-text-secondary);
-  background: var(--color-bg-tertiary);
+  background: var(--color-bg-success-subtle);
+  color: var(--color-success-700);
 }
 
 .loading-step.active {
-  color: var(--color-primary);
-  font-weight: var(--font-weight-semibold);
-  background: rgba(25, 118, 210, 0.08);
+  background: var(--color-bg-brand-subtle);
+  color: var(--color-brand-700);
 }
 
 .step-icon {
-  font-size: 1.2em;
-  width: 24px;
-  text-align: center;
+  font-size: var(--font-size-base);
+  flex-shrink: 0;
+}
+
+.step-label {
+  flex: 1;
 }
 
 .step-check {
-  margin-left: auto;
-  color: var(--color-success, #43A047);
+  color: var(--color-success-500);
   font-weight: var(--font-weight-bold);
+  flex-shrink: 0;
+}
+
+.loading-hint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  text-align: center;
+}
+
+.design-loading__footer {
+  display: flex;
+  justify-content: center;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border-light);
+}
+
+.progress-badge {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
 }
 </style>
