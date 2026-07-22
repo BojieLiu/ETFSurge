@@ -1,152 +1,78 @@
 <template>
-  <AppCard variant="default" :padding="false" class="allocation-pie-chart">
-    <template #header>
-      <h2 class="card__title">
+  <section class="card chart-card">
+    <div class="card-header">
+      <h2 class="card-title">
         <span class="card-title-icon" aria-hidden="true">🥧</span>
         {{ title }}
       </h2>
-    </template>
-
-    <div class="chart-container" ref="chartRef" style="height: 280px"></div>
-
-    <template #footer v-if="items.length">
-      <div class="chart-legend">
-        <span
-          v-for="(item, index) in items"
-          :key="item.symbol"
-          class="legend-item"
-        >
-          <span
-            class="legend-color"
-            :style="{ backgroundColor: legendColors[index] }"
-          ></span>
-          <span class="legend-label">
-            {{ item.symbol }} ({{ (item.target_weight * 100).toFixed(1) }}%)
-          </span>
-        </span>
-      </div>
-    </template>
-  </AppCard>
+    </div>
+    <v-chart :option="chartOption" :style="{ height: '280px' }" autoresize />
+  </section>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-import * as echarts from 'echarts/core'
+import { computed } from 'vue'
+import { use } from 'echarts/core'
 import { PieChart } from 'echarts/charts'
-import { TitleComponent, TooltipComponent, LegendComponent } from 'echarts/components'
+import { TitleComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
-import { AppCard } from '@/components'
+import VChart from 'vue-echarts'
 
-echarts.use([PieChart, TitleComponent, TooltipComponent, LegendComponent, CanvasRenderer])
+use([PieChart, TitleComponent, CanvasRenderer])
 
 const props = defineProps({
   items: { type: Array, default: () => [] },
   title: { type: String, required: true }
 })
 
-const chartRef = ref(null)
-let chartInstance = null
-
-const legendColors = [
-  'var(--chart-1)',
-  'var(--chart-2)',
-  'var(--chart-3)',
-  'var(--chart-4)',
-  'var(--chart-5)',
-  'var(--chart-6)',
-  'var(--chart-7)',
-  'var(--chart-8)'
-]
-
 const chartOption = computed(() => ({
-  tooltip: {
-    trigger: 'item',
-    formatter: '{b}: {c} ({d}%)',
-    backgroundColor: 'var(--color-surface-primary)',
-    borderColor: 'var(--color-border-light)',
-    borderWidth: 1,
-    textStyle: {
-      color: 'var(--color-text-primary)'
-    }
-  },
-  legend: {
-    show: false
-  },
+  tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+  legend: { orient: 'vertical', left: 'left', top: 'middle', itemWidth: 12, itemHeight: 12 },
   series: [{
     name: '分配',
     type: 'pie',
     radius: ['40%', '70%'],
     avoidLabelOverlap: false,
     label: { show: false, position: 'center' },
-    emphasis: { label: { show: true, fontSize: '18', fontWeight: 'bold', color: 'var(--color-text-primary)' } },
+    emphasis: { label: { show: true, fontSize: '18', fontWeight: 'bold' } },
     labelLine: { show: false },
     data: (props.items || []).map(a => ({
       value: a.target_amount,
       name: `${a.symbol} (${(a.target_weight * 100).toFixed(1)}%)`
     }))
   }],
-  color: legendColors
+  color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#eab308']
 }))
-
-onMounted(() => {
-  if (chartRef.value) {
-    chartInstance = echarts.init(chartRef.value)
-    chartInstance.setOption(chartOption.value)
-  }
-})
-
-onUnmounted(() => {
-  if (chartInstance) {
-    chartInstance.dispose()
-    chartInstance = null
-  }
-})
-
-watch(chartOption, (newOption) => {
-  if (chartInstance) {
-    chartInstance.setOption(newOption)
-  }
-}, { deep: true })
 </script>
 
 <style scoped>
-.allocation-pie-chart {
-  /* AppCard handles layout */
-}
-
-.chart-container {
-  width: 100%;
-  height: 280px;
-}
-
-.chart-legend {
+.chart-card {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-3) var(--space-4);
-  padding: var(--space-3) var(--card-padding);
-  border-top: 1px solid var(--color-border-light);
-  background: var(--color-surface-secondary);
-  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  flex-direction: column;
 }
-
-.legend-item {
+.chart-card .card-header {
+  flex-shrink: 0;
+}
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--color-border-light);
+  flex-wrap: wrap;
+}
+.card-title {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-}
-
-.legend-color {
-  display: inline-block;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.legend-label {
-  font-weight: var(--font-weight-medium);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
   color: var(--color-text-primary);
+  margin: 0;
+}
+.card-title-icon {
+  font-size: var(--font-size-xl);
+  line-height: 1;
 }
 </style>
