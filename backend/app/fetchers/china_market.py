@@ -170,31 +170,46 @@ def _exchange(symbol: str) -> str:
 def _sina_realtime(symbols: list[str], asset_type: str) -> list[dict[str, Any]]:
     if not symbols:
         return []
+    # 上证指数需要 s_sh 前缀而非 sh/sz
+    _SH_INDEXES = {"000001", "000300", "000688", "000016", "000905", "000852"}
     try:
         s = _session()
         s.headers.update({"Referer": "https://finance.sina.com.cn"})
         results = []
         for sym in symbols:
-            pref = _exchange(sym)
+            pref = "s_sh" if sym in _SH_INDEXES else _exchange(sym)
             try:
                 r = s.get(f"https://hq.sinajs.cn/list={pref}{sym}", timeout=10)
                 text = r.text.strip()
                 if "=" not in text or '"' not in text:
                     continue
                 parts = text.split('"')[1].split(",")
-                if len(parts) < 30:
-                    continue
-                prev_close = float(parts[2]) if parts[2] else 0
-                price = float(parts[3]) if parts[3] else 0
-                results.append({
-                    "symbol": sym, "name": parts[0],
-                    "price": price,
-                    "change_pct": round((price - prev_close) / prev_close * 100, 2) if prev_close else 0,
-                    "change_amount": round(price - prev_close, 2) if prev_close else 0,
-                    "volume": float(parts[8]) if parts[8] else 0,
-                    "turnover": float(parts[9]) if parts[9] else 0,
-                    "asset_type": asset_type,
-                })
+                # 指数格式(6字段): [0]name [1]price [2]change_amt [3]change_pct [4]volume [5]turnover
+                # 股票格式(33字段): [0]name [3]price [2]prev_close [8]volume [9]turnover
+                if len(parts) >= 30:
+                    prev_close = float(parts[2]) if parts[2] else 0
+                    price = float(parts[3]) if parts[3] else 0
+                    results.append({
+                        "symbol": sym, "name": parts[0],
+                        "price": price,
+                        "change_pct": round((price - prev_close) / prev_close * 100, 2) if prev_close else 0,
+                        "change_amount": round(price - prev_close, 2) if prev_close else 0,
+                        "volume": float(parts[8]) if parts[8] else 0,
+                        "turnover": float(parts[9]) if parts[9] else 0,
+                        "asset_type": asset_type,
+                    })
+                elif len(parts) >= 5:
+                    # 指数格式：直接使用 change_pct，无需计算
+                    price = float(parts[1]) if parts[1] else 0
+                    results.append({
+                        "symbol": sym, "name": parts[0],
+                        "price": price,
+                        "change_pct": float(parts[3]) if parts[3] else 0,
+                        "change_amount": float(parts[2]) if parts[2] else 0,
+                        "volume": float(parts[4]) if parts[4] else 0,
+                        "turnover": float(parts[5]) if parts[5] else 0,
+                        "asset_type": asset_type,
+                    })
             except Exception:
                 continue
         return results
@@ -569,12 +584,26 @@ def fetch_sina_global_index(symbol: str) -> dict[str, Any] | None:
 
 
 def fetch_index_realtime() -> list[dict[str, Any]]:
-    """Fetch major market indices via mootdx; fallback QQ."""
+    """Fetch major market indices via Sina(s_sh)→mootdx→Tencent(QQ) 三级降级。
+
+    上证指数(000001/000300/000688 等)在 Sina 需用 s_sh 前缀（指数格式），
+    否则会被当成深圳股票返回错误价格（如 000001=平安银行10.98）。
+    """
     with no_proxy():
         indices = {"000001": "上证指数", "399001": "深证成指", "399006": "创业板指",
                    "000688": "科创50", "000300": "沪深300", "000016": "上证50",
                    "000905": "中证500", "000852": "中证1000"}
         codes = list(indices.keys())
+
+        # Tier 1: Sina（已修正 s_sh 前缀，返回正确指数数据）
+        try:
+            sina_result = _sina_realtime(codes, "index")
+            if sina_result and any(r.get("price", 0) > 100 for r in sina_result):
+                return sina_result
+        except Exception:
+            pass
+
+        # Tier 2: mootdx
         try:
             with _mootdx_locked():
                 client = _mootdx()
@@ -598,6 +627,7 @@ def fetch_index_realtime() -> list[dict[str, Any]]:
         except Exception:
             pass
 
+        # Tier 3: Tencent(QQ) 兜底
         return _tencent_realtime(codes, "index")
 
 
