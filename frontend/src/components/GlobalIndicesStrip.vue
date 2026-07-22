@@ -18,12 +18,12 @@
         class="index-card-compact"
         v-for="idx in flatIndices"
         :key="idx.symbol"
-        :class="{ unavailable: !idx.available }"
+        :class="{ unavailable: !idx.available, stale: !idx.available && idx.price != null }"
       >
-        <span class="index-name-compact">{{ idx.name }}</span>
-        <span class="index-price-compact" v-if="idx.available">{{ formatPrice(idx.price) }}</span>
+        <span class="index-name-compact">{{ idx.name }}<span v-if="!idx.available && idx.price != null" class="index-stale-badge">已收盘</span></span>
+        <span class="index-price-compact" v-if="idx.price != null">{{ formatPrice(idx.price) }}</span>
         <span class="index-price-compact muted" v-else>—</span>
-        <span class="index-change-compact" v-if="idx.available" :class="changeClass(idx.change_pct)">
+        <span class="index-change-compact" v-if="idx.change_pct != null" :class="changeClass(idx.change_pct)">
           {{ formatChange(idx.change_pct) }}
         </span>
         <span class="index-change-compact muted" v-else>暂无</span>

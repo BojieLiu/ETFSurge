@@ -101,6 +101,59 @@ _global_indices_cache: dict[str, Any] = {}
 _global_indices_cache_ts: float = 0
 _GLOBAL_INDICES_TTL = 30
 
+# 非交易时段缓存：保留最后一次有有效数据的响应（24h 有效）
+_global_indices_last_ok: dict[str, Any] = {}
+_global_indices_last_ok_ts: float = 0
+_GLOBAL_INDICES_OK_TTL = 86400  # 24 小时
+
+# ── 持久化缓存（重启后不丢失） ─────────────────────────────────
+_CACHE_DB_PATH: str | None = None
+
+
+def _get_cache_db_path() -> str:
+    global _CACHE_DB_PATH
+    if _CACHE_DB_PATH is None:
+        import os
+        data_dir = os.path.join(os.path.dirname(__file__), "..", "..", "data")
+        os.makedirs(data_dir, exist_ok=True)
+        _CACHE_DB_PATH = os.path.join(data_dir, "indices_cache.json")
+    return _CACHE_DB_PATH
+
+
+def _load_ok_cache() -> bool:
+    """从磁盘加载缓存到内存。启动时调用一次。"""
+    import json, os
+    try:
+        path = _get_cache_db_path()
+        if not os.path.exists(path):
+            return False
+        with open(path, "r", encoding="utf-8") as f:
+            blob = json.load(f)
+        _global_indices_last_ok.clear()
+        _global_indices_last_ok.update(blob.get("data", {}))
+        _global_indices_last_ok_ts = blob.get("ts", 0)
+        return bool(_global_indices_last_ok)
+    except Exception:
+        return False
+
+
+def _save_ok_cache() -> None:
+    """将内存缓存写入磁盘。"""
+    import json
+    try:
+        blob = {
+            "ts": _global_indices_last_ok_ts,
+            "data": _global_indices_last_ok,
+        }
+        with open(_get_cache_db_path(), "w", encoding="utf-8") as f:
+            json.dump(blob, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+# 启动时加载持久化缓存
+_load_ok_cache()
+
 
 def _to_json_native(value: Any) -> Any:
     """将 numpy 等非 JSON 原生类型递归转换为 Python 原生类型。
@@ -135,7 +188,7 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
     # 函数内对模块级缓存变量有赋值，必须声明 global，
     # 否则 Python 会将该变量视为局部变量，导致缓存命中分支
     # (读取 _global_indices_cache_ts) 触发 UnboundLocalError -> 500。
-    global _global_indices_cache, _global_indices_cache_ts
+    global _global_indices_cache, _global_indices_cache_ts, _global_indices_last_ok, _global_indices_last_ok_ts
     import time
     now = time.time()
     if _global_indices_cache and (now - _global_indices_cache_ts) < _GLOBAL_INDICES_TTL:
@@ -179,9 +232,9 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
             }
             regions.setdefault(region, []).append(item)
 
-    # 海外指数：Sina（4s）→ TwelveData（4s）→ 占位
+    # 海外指数：Sina（4s）→ Finnhub（6s，免费60次/分，支持全球指数）→ 占位
     from ..fetchers.china_market import fetch_sina_global_index as sina_index
-    from ..fetchers import twelvedata_fetcher
+    from ..fetchers import finnhub_fetcher
 
     async def _foreign(sym: str, name: str, region: str):
         loop = asyncio.get_running_loop()
@@ -201,16 +254,16 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
         except (asyncio.TimeoutError, Exception):
             pass
 
-        # 第2优先：TwelveData（4s，已有 API key，非交易时段有缓存数据）
+        # 第2优先：Finnhub（6s，免费60次/分，已有 API key，支持全球指数）
         try:
             d = await asyncio.wait_for(
-                loop.run_in_executor(None, functools.partial(twelvedata_fetcher.fetch_realtime, sym)),
-                timeout=4,
+                loop.run_in_executor(None, functools.partial(finnhub_fetcher.fetch_realtime, sym)),
+                timeout=6,
             )
-            if d and d.get("price") is not None:
+            if d and d.get("price") is not None and d.get("price") != 0:
                 d["name"] = name
                 d["region"] = region
-                d["available"] = True  # 前端判断用
+                d["available"] = True
                 return region, d
         except (asyncio.TimeoutError, Exception):
             pass
@@ -236,10 +289,41 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
 
     # 清洗为 JSON 原生类型（避免 numpy 标量在缓存命中路径导致 500）
     regions = _to_json_native(regions)
-    # 写入缓存（即使部分为空也缓存，避免非交易时段重复采集）
-    _global_indices_cache.update(regions)
-    _global_indices_cache_ts = time.time()
-    return regions
+
+    # 判断本次响应是否包含有效数据（至少一条有价格）
+    has_data = any(
+        item.get("available") and item.get("price") is not None
+        for lst in regions.values()
+        for item in lst
+    )
+
+    if has_data:
+        # 交易时段：更新 OK 缓存和短期缓存
+        _global_indices_last_ok = {k: list(v) for k, v in regions.items()}
+        _global_indices_last_ok_ts = time.time()
+        _save_ok_cache()  # 持久化：重启后不丢失
+        _global_indices_cache.update(regions)
+        _global_indices_cache_ts = time.time()
+        return regions
+    else:
+        # 非交易时段：所有源返回空，使用 OK 缓存（如果存在且未过期）
+        if _global_indices_last_ok and (time.time() - _global_indices_last_ok_ts) < _GLOBAL_INDICES_OK_TTL:
+            # 标记为不可用（前端显示 "暂无" + 保留价格）
+            stale = {}
+            for region, items in _global_indices_last_ok.items():
+                stale[region] = []
+                for item in items:
+                    entry = dict(item)
+                    entry["available"] = False
+                    stale[region].append(entry)
+            # 短期缓存继续刷新，避免重复采集
+            _global_indices_cache.update(stale)
+            _global_indices_cache_ts = time.time()
+            return stale
+        # 无 OK 缓存（首次启动）：返回当前空数据
+        _global_indices_cache.update(regions)
+        _global_indices_cache_ts = time.time()
+        return regions
 
 
 async def _global_index_defs() -> list[tuple[str, str, str]]:

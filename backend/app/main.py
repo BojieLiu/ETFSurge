@@ -69,6 +69,16 @@ async def lifespan(app: FastAPI):
 
     asyncio.create_task(_warmup_market_cache())
 
+    # 启动时预热全球指数缓存（非阻塞，写入持久化 cache，重启后不丢失）
+    async def _warmup_global_indices():
+        try:
+            from .services.market_service import get_global_indices
+            await asyncio.wait_for(get_global_indices(), timeout=30)
+            logger.info("全球指数缓存预热完成")
+        except (Exception, asyncio.CancelledError):
+            logger.exception("全球指数缓存预热失败（非交易时段正常）")
+    asyncio.create_task(_warmup_global_indices())
+
     try:
         async def _scheduler_wrapper():
             try:
