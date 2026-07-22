@@ -188,8 +188,9 @@ def _enrich_market_status(
     原地修改 ``regions`` 中的条目。
     """
     _REGION_TO_MARKET = {
-        "A股": "A股", "港股": "港股", "日经": "日经", "韩国": "韩国",
-        "欧美": "美股", "欧洲": "欧股",
+        "A股": "A股", "港股": "港股",
+        "日经": "日经", "韩国": "韩国", "日韩": "日经",
+        "欧美": "美股", "美股": "美股", "欧洲": "欧股",
     }
     from ..core.market_calendar import get_market_status
     for rgn, items in regions.items():
@@ -370,6 +371,14 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
                     sym = item.get("symbol")
                     if sym not in existing_symbols:
                         merged[region].append(dict(item))
+            # 移除被 EM 新区域完全取代的旧缓存区域（避免重复）
+            _em_regions = set(regions.keys())
+            _all_em_syms = {i["symbol"] for lst in regions.values() for i in lst if i.get("symbol")}
+            for _old_r in list(merged.keys()):
+                if _old_r not in _em_regions:
+                    _old_syms = {i["symbol"] for i in merged[_old_r] if i.get("symbol")}
+                    if _old_syms and _old_syms.issubset(_all_em_syms):
+                        del merged[_old_r]
             _enrich_market_status(merged)
             _global_indices_last_ok = merged
             _global_indices_last_ok_ts = time.time()
