@@ -7,7 +7,6 @@
 import asyncio
 import concurrent.futures
 
-# 默认超时阈值（秒），大部分同步数据源调用应在该时间内完成
 DEFAULT_SYNC_TIMEOUT = 8
 
 # 全局共享线程池，替代各 fetcher 中频繁创建/销毁的 ThreadPoolExecutor
@@ -49,3 +48,17 @@ async def run_sync(call, *args, timeout: int = DEFAULT_SYNC_TIMEOUT):
     return await asyncio.wait_for(
         loop.run_in_executor(None, call, *args), timeout=timeout,
     )
+
+
+def get_thread_pool_stats() -> dict:
+    """返回全局共享线程池的实时统计信息，用于健康监控。"""
+    # ThreadPoolExecutor 内部通过 _threads 集合追踪活跃线程
+    workers = _shared_executor._max_workers
+    alive = len(_shared_executor._threads) if hasattr(_shared_executor, '_threads') else 0
+    # 估算排队任务数：_work_queue.qsize() + 已提交未完成的 future
+    pending = _shared_executor._work_queue.qsize() if hasattr(_shared_executor, '_work_queue') else -1
+    return {
+        "max_workers": workers,
+        "alive_threads": alive,
+        "pending_tasks": pending,
+    }

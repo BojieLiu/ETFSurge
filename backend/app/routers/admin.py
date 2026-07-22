@@ -97,3 +97,19 @@ async def get_source_events_failures(
 async def get_source_circuit_breakers():
     """返回所有注册数据源的熔断器状态。"""
     return registry.circuit_breaker_status()
+
+
+# ── Thread Pool Monitoring ──────────────────────────────────────
+
+
+@router.get("/thread-pool")
+async def get_thread_pool():
+    """返回主线程池和 akshare 专用线程池的实时统计。"""
+    from ..core.async_utils import get_thread_pool_stats
+    from ..fetchers.news_fetcher import get_akshare_pool_stats
+
+    return {
+        "main": get_thread_pool_stats(),
+        "akshare": get_akshare_pool_stats(),
+        "warning_threshold_pct": 80,
+    }

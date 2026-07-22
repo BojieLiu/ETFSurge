@@ -3,6 +3,7 @@
 All external calls (mootdx, akshare, feedparser) are mocked;
 no network needed.
 """
+import concurrent.futures
 import asyncio
 from unittest.mock import MagicMock, patch
 
@@ -99,50 +100,89 @@ def test_mootdx_locked_releases_on_success():
 
 # ── Fix 4: _ak() timeout wrapping ────────────────────────────────
 
+def _make_future(result=None, exc=None, delay=0):
+    """Helper: create a Future that resolves with result or raises exc."""
+    f = concurrent.futures.Future()
+    if exc:
+        f.set_exception(exc)
+    else:
+        f.set_result(result)
+    return f
+
 
 def test_ak_returns_empty_on_run_in_thread_timeout(monkeypatch):
-    """_ak() must return [] when run_in_thread times out.
+    """_ak() must return [] when the dedicated executor times out.
 
-    See news_fetcher._ak — akshare calls are now wrapped in
-    run_in_thread to prevent hanging worker threads.
+    _ak() uses _akshare_executor.submit() with timeout;
+    a TimeoutError must produce [].
     """
     from app.fetchers.news_fetcher import _ak
+    import app.fetchers.news_fetcher as nfmod
 
+    # Simulate a future that never completes within the timeout
+    slow_future = concurrent.futures.Future()
     monkeypatch.setattr(
-        "app.fetchers.news_fetcher.run_in_thread",
-        lambda fn, timeout=8: None,  # simulate timeout → None
+        nfmod._akshare_executor, "submit",
+        lambda fn: slow_future,
     )
+
     assert _ak(lambda ak: [{"title": "test"}]) == []
+    # Clean up: resolve the hanging future so the executor doesn't leak
+    slow_future.set_result(None)
 
 
 def test_ak_returns_data_on_success(monkeypatch):
-    """_ak() must return akshare data when run_in_thread succeeds."""
+    """_ak() must return akshare data when the executor succeeds."""
     from app.fetchers.news_fetcher import _ak
-    fake_data = [{"title": "news", "content": "body"}]
+    import app.fetchers.news_fetcher as nfmod
 
+    fake_data = [{"title": "news", "content": "body"}]
     monkeypatch.setattr(
-        "app.fetchers.news_fetcher.run_in_thread",
-        lambda fn, timeout=8: fake_data,
+        nfmod._akshare_executor, "submit",
+        lambda fn: _make_future(result=fake_data),
     )
+
     assert _ak(lambda ak: fake_data) == fake_data
 
 
 def test_ak_calls_run_in_thread_with_timeout(monkeypatch):
-    """_ak() must pass its timeout to run_in_thread."""
+    """_ak() must respect its timeout parameter."""
     from app.fetchers.news_fetcher import _ak
+    import app.fetchers.news_fetcher as nfmod
 
-    captured = {}
-
-    def _fake_run_in_thread(fn, timeout=8):
-        captured["timeout"] = timeout
-        return []
-
+    # Override timeout to a short value, then submit a slow future
+    slow_future = concurrent.futures.Future()
+    monkeypatch.setattr(nfmod, "_AK_TIMEOUT", 0.1)
     monkeypatch.setattr(
-        "app.fetchers.news_fetcher.run_in_thread",
-        _fake_run_in_thread,
+        nfmod._akshare_executor, "submit",
+        lambda fn: slow_future,
     )
-    _ak(lambda ak: [], timeout=5)
-    assert captured["timeout"] == 5
+
+    result = _ak(lambda ak: [], timeout=0.1)
+    assert result == []
+    slow_future.set_result(None)
+
+
+# ── Fix 5: _ak() sequential timeout bounding ─────────────────────
+
+
+def test_ak_sequential_timeouts_return_empty(monkeypatch):
+    """Multiple slow _ak() calls must each return [] on timeout."""
+    from app.fetchers.news_fetcher import _ak
+    import app.fetchers.news_fetcher as nfmod
+
+    # All submits return the same hanging future
+    slow_future = concurrent.futures.Future()
+    monkeypatch.setattr(nfmod, "_AK_TIMEOUT", 0.05)
+    monkeypatch.setattr(
+        nfmod._akshare_executor, "submit",
+        lambda fn: slow_future,
+    )
+
+    for i in range(5):
+        assert _ak(lambda ak: [{}]) == [], f"iteration {i} should return []"
+
+    slow_future.set_result(None)
 
 
 # ── async_utils: run_sync timeout behavior ──────────────────────

@@ -66,3 +66,24 @@ def register_all_probes() -> None:
         result = _em_hk_realtime(["00700"])
         return bool(result and any(r.get("price", 0) > 0 for r in result))
     register_probe("dongfang", _probe_dongfang, timeout=8)
+
+    # ── T1: 主线程池健康 (1s) ──────────────────────────────────
+    from ..core.async_utils import get_thread_pool_stats
+
+    def _probe_main_pool():
+        stats = get_thread_pool_stats()
+        alive = stats.get("alive_threads", 0)
+        max_w = stats.get("max_workers", 16)
+        # 活跃线程超过 80% 即视为不健康
+        return alive <= max_w * 0.8
+    register_probe("threadpool_main", _probe_main_pool, timeout=1)
+
+    # ── T2: akshare 专用线程池健康 (1s) ───────────────────────
+    from ..fetchers.news_fetcher import get_akshare_pool_stats
+
+    def _probe_akshare_pool():
+        stats = get_akshare_pool_stats()
+        alive = stats.get("alive_threads", 0)
+        max_w = stats.get("max_workers", 4)
+        return alive <= max_w * 0.8
+    register_probe("threadpool_akshare", _probe_akshare_pool, timeout=1)

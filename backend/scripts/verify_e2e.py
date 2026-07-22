@@ -108,7 +108,7 @@ def section_market():
             has_hsce = any("HSCE" in s for s in hk_symbols)
             has_hstech = any("HSTECH" in s for s in hk_symbols)
             check("港股三大指数均覆盖", has_hsi and has_hsce and has_hstech,
-                  f"HSI={'✓' if has_hsi else '✗'} HSCE={'✓' if has_hsce else '✗'} HSTECH={'✓' if has_hstech else '✗'}")
+                  f"HSI={'Y' if has_hsi else 'N'} HSCE={'Y' if has_hsce else 'N'} HSTECH={'Y' if has_hstech else 'N'}")
     except requests.Timeout:
         check("GET /market/indices/global", False, "请求超时（30s）")
     except Exception as e:

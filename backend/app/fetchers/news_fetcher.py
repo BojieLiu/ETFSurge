@@ -10,6 +10,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 import feedparser
+import concurrent.futures
 from typing import Any
 
 from ..utils.proxy import no_proxy
@@ -26,14 +27,29 @@ def _safe(fn, timeout: int = _SRC_TIMEOUT):
     return run_in_thread(fn, timeout=timeout)
 
 
-_AK_TIMEOUT = 8
+_AK_TIMEOUT = 4
+
+# akshare 专用线程池（4 workers），隔离僵尸线程以防堵塞主共享线程池
+_akshare_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+
+
+def get_akshare_pool_stats() -> dict:
+    """返回 akshare 专用线程池的实时统计信息。"""
+    max_w = _akshare_executor._max_workers
+    alive = len(_akshare_executor._threads) if hasattr(_akshare_executor, '_threads') else 0
+    pending = _akshare_executor._work_queue.qsize() if hasattr(_akshare_executor, '_work_queue') else -1
+    return {
+        "max_workers": max_w,
+        "alive_threads": alive,
+        "pending_tasks": pending,
+    }
 
 
 def _ak(fn, timeout: int = _AK_TIMEOUT) -> list[dict[str, Any]]:
     """调用一个 akshare 新闻函数, 带超时保护, 失败返回空。
 
-    将 akshare 调用通过 run_in_thread 提交到全局线程池,
-    避免个别 akshare 接口挂死导致整个工作线程阻塞。
+    使用专用线程池 _akshare_executor 隔离 akshare 的慢请求，
+    避免僵尸线程耗尽主共享线程池 _shared_executor。
     """
     def _p():
         with no_proxy():
@@ -41,8 +57,13 @@ def _ak(fn, timeout: int = _AK_TIMEOUT) -> list[dict[str, Any]]:
             df = fn(ak)
         _decode_df(df)
         return df.to_dict(orient="records")
-    result = run_in_thread(_p, timeout=timeout)
-    return result or []
+    future = _akshare_executor.submit(_p)
+    try:
+        return future.result(timeout=timeout) or []
+    except concurrent.futures.TimeoutError:
+        return []
+    except Exception:
+        return []
 
 
 def _cached(key: str, producer, ttl_key: str = "news_headlines") -> list[dict[str, Any]]:

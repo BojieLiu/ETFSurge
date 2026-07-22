@@ -15,7 +15,7 @@ router = APIRouter(prefix="/api/v1/news", tags=["news"])
 
 @router.get("/headlines")
 async def headlines() -> list[dict[str, Any]]:
-    return await run_sync(fetch_news_headlines)
+    return await run_sync(fetch_news_headlines, timeout=30)
 
 
 @router.get("/macro")

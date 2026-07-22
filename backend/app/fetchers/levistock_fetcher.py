@@ -118,13 +118,16 @@ def fetch_cailian_telegraph(limit: int = 30) -> list[dict[str, Any]]:
     """财联社实时电报(快讯)。levistock 已封装财联社签名接口。
 
     每条快讯附加 level(1~5) 与 stars(=level) 重要性标识。
+    先尝试 category='all'（全量），若为空则回退 category='important'（重要）。
     """
 
-    def _p() -> list[dict[str, Any]]:
-        rows = _safe(lv.news_telegraph_cls, 6) or []
+    def _try_category(cat: str) -> list[dict[str, Any]]:
+        rows = _safe(lambda: lv.news_telegraph_cls(category=cat), 6) or []
         out = []
         for r in rows:
             title = r.get("title", "")
+            if not title:
+                continue
             level = _level_of(r, title)
             out.append({
                 "title": title,
@@ -135,6 +138,12 @@ def fetch_cailian_telegraph(limit: int = 30) -> list[dict[str, Any]]:
                 "stars": level,
             })
         return out[:limit]
+
+    def _p() -> list[dict[str, Any]]:
+        result = _try_category("all")
+        if not result:
+            result = _try_category("important")
+        return result
 
     return _cached("telegraph", _p, "news_telegraph")
 
