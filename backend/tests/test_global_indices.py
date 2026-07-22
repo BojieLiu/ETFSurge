@@ -256,3 +256,14 @@ async def test_all_index_entries_match_schema():
         regions = await ms.get_global_indices()
 
     _validate_index_response(regions)
+
+
+# ── Cleanup: prevent mock data from leaking into persistent cache ────────
+
+
+def teardown_module():
+    """Remove persistent cache file written by _save_ok_cache() during tests."""
+    import os
+    cache_path = os.path.join(os.path.dirname(__file__), "..", "data", "indices_cache.json")
+    if os.path.exists(cache_path):
+        os.remove(cache_path)
