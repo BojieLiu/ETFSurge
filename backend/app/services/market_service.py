@@ -122,6 +122,7 @@ def _get_cache_db_path() -> str:
 
 def _load_ok_cache() -> bool:
     """从磁盘加载缓存到内存。启动时调用一次。"""
+    global _global_indices_last_ok_ts
     import json, os
     try:
         path = _get_cache_db_path()
@@ -298,13 +299,29 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
     )
 
     if has_data:
-        # 交易时段：更新 OK 缓存和短期缓存
-        _global_indices_last_ok = {k: list(v) for k, v in regions.items()}
+        # 交易时段：更新 OK 缓存（MERGE 模式——仅替换有数据的条目）
+        merged = {}
+        # 先复制旧缓存中所有条目
+        for region, items in _global_indices_last_ok.items():
+            merged[region] = [dict(item) for item in items]
+        # 用新数据条目覆盖：仅替换 available=True 的条目
+        for region, items in regions.items():
+            if region not in merged:
+                merged[region] = []
+            new_items = {item.get("symbol"): item for item in items if item.get("available")}
+            for i, old in enumerate(merged[region]):
+                sym = old.get("symbol")
+                if sym in new_items:
+                    merged[region][i] = new_items.pop(sym)
+            # 追加新区域中不在旧缓存里的条目
+            for item in new_items.values():
+                merged[region].append(dict(item))
+        _global_indices_last_ok = merged
         _global_indices_last_ok_ts = time.time()
         _save_ok_cache()  # 持久化：重启后不丢失
-        _global_indices_cache.update(regions)
+        _global_indices_cache.update(merged)
         _global_indices_cache_ts = time.time()
-        return regions
+        return merged
     else:
         # 非交易时段：所有源返回空，使用 OK 缓存（如果存在且未过期）
         if _global_indices_last_ok and (time.time() - _global_indices_last_ok_ts) < _GLOBAL_INDICES_OK_TTL:
