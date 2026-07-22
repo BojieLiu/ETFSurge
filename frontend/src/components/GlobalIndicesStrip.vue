@@ -15,7 +15,7 @@
 
     <div v-if="hasIndices">
       <div class="region-row" v-for="(items, region) in groupedIndices" :key="region">
-        <div class="region-label" :class="'label-' + regionClass(items[0] && items[0].region)">{{ region }}</div>
+        <div class="region-label" :class="'label-' + labelClass(region)">{{ region }}</div>
         <div class="indices-grid">
           <div
             class="index-card"
@@ -63,17 +63,28 @@ const props = defineProps({
   },
 })
 
-const regionOrder = ['A股', '港股', '日经', '韩国', '澳洲', '美股', '欧洲']
+const regionOrder = ['A股', '港股', '美股', '日经·韩国', '欧洲']
 
 const hasIndices = computed(() => Object.keys(props.globalIndices).length > 0)
 const groupedIndices = computed(() => {
   const groups = {}
+  // 日经+韩国合并
+  const asia = []
+  if (props.globalIndices['日经']) asia.push(...props.globalIndices['日经'])
+  if (props.globalIndices['韩国']) asia.push(...props.globalIndices['韩国'])
+  if (asia.length) groups['日经·韩国'] = asia
+  // 其他区域按顺序
   for (const r of regionOrder) {
-    if (props.globalIndices[r]) {
+    if (r !== '日经·韩国' && props.globalIndices[r]) {
       groups[r] = props.globalIndices[r]
     }
   }
-  return groups
+  // 重新排序
+  const ordered = {}
+  for (const r of regionOrder) {
+    if (groups[r]) ordered[r] = groups[r]
+  }
+  return ordered
 })
 
 function formatPrice(v) { return v != null ? v.toFixed(2) : '—' }
@@ -85,11 +96,17 @@ function regionClass(region) {
     '港股': 'region-hk',
     '日经': 'region-jp',
     '韩国': 'region-kr',
-    '澳洲': 'region-au',
     '美股': 'region-us',
     '欧洲': 'region-eu',
   }
   return map[region] || 'region-default'
+}
+
+function labelClass(region) {
+  const map = {
+    '日经·韩国': 'region-jp',
+  }
+  return map[region] || regionClass(region)
 }
 </script>
 
@@ -156,9 +173,10 @@ function regionClass(region) {
 .region-label.label-region-hk { color: #8e24aa; }
 .region-label.label-region-jp { color: #f57c00; }
 .region-label.label-region-kr { color: #43a047; }
-.region-label.label-region-au { color: #1e88e5; }
 .region-label.label-region-us { color: #fbc02d; }
 .region-label.label-region-eu { color: #00acc1; }
+/* Combined Asia-Pacific: 日经 orange, 韩国 green — use orange accent */
+.region-label.label-region-default { color: var(--color-text-secondary); }
 
 /* ── Card grid: wrap, generous spacing ── */
 .indices-grid {

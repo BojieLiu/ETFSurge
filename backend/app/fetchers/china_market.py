@@ -507,7 +507,6 @@ _GLOBAL_SINA_MAP: dict[str, str] = {
     "^HSTECH": "gb_$hstech", # 恒生科技指数
     "^KS11": "gb_$ks11",     # 韩国综合指数
     "^FTSE": "gb_$ftse",     # 英国富时100
-    "^AXJO": "gb_$axjo",     # 澳洲标普200
     "^GDAXI": "gb_$dax",     # 德国DAX
     "^FCHI": "gb_$fchi",     # 法国CAC40
     "^STOXX50E": "gb_$stoxx50e", # 欧洲斯托克50
