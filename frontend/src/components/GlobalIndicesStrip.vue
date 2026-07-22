@@ -13,30 +13,31 @@
       </div>
     </div>
 
-    <div v-if="hasIndices" class="indices-scroll">
+    <div v-if="hasIndices" class="indices-grid">
       <div
-        class="index-card-compact"
+        class="index-card"
         v-for="idx in flatIndices"
         :key="idx.symbol"
         :class="[
           regionClass(idx.region),
-          { unavailable: !idx.available, stale: !idx.available && idx.price != null }
+          { stale: !idx.available && idx.price != null }
         ]"
       >
-        <span class="region-dot" :class="regionClass(idx.region)"></span>
-        <div class="index-info">
-          <span class="index-name-compact">{{ idx.name }}</span>
-          <span v-if="!idx.available && idx.price != null" class="index-stale-badge">已收盘</span>
+        <div class="card-top">
+          <span class="cd-dot" :class="regionClass(idx.region)"></span>
+          <span class="cd-name">{{ idx.name }}</span>
+          <span v-if="!idx.available && idx.price != null" class="cd-stale">已收盘</span>
         </div>
-        <div class="index-data">
-          <span class="index-price-compact" v-if="idx.price != null">{{ formatPrice(idx.price) }}</span>
-          <span class="index-price-compact muted" v-else>—</span>
-          <span class="index-change-compact" v-if="idx.change_pct != null" :class="changeClass(idx.change_pct)">
-            <span class="change-arrow" v-if="idx.change_pct > 0">▲</span>
-            <span class="change-arrow" v-else-if="idx.change_pct < 0">▼</span>
+        <div class="card-body">
+          <span class="cd-price" v-if="idx.price != null">{{ formatPrice(idx.price) }}</span>
+          <span class="cd-price muted" v-else>—</span>
+          <span class="cd-change" v-if="idx.change_pct != null" :class="changeClass(idx.change_pct)">
+            <span class="ca" v-if="idx.change_pct > 0">▲</span>
+            <span class="ca" v-else-if="idx.change_pct < 0">▼</span>
             {{ formatChange(idx.change_pct) }}
           </span>
-          <span class="index-change-compact muted" v-else>暂无</span>
+          <span class="cd-change muted" v-else-if="idx.price != null">上日收盘</span>
+          <span class="cd-change muted" v-else>—</span>
         </div>
       </div>
     </div>
@@ -125,153 +126,58 @@ function regionClass(region) {
   display: inline-block;
 }
 
-/* ── Scrollable card row ── */
-.indices-scroll {
+/* ── Card grid: wrap, generous spacing ── */
+.indices-grid {
   display: flex;
-  gap: var(--space-2);
-  overflow-x: auto;
-  padding-bottom: var(--space-1);
-  scroll-snap-type: x mandatory;
-  -webkit-overflow-scrolling: touch;
+  flex-wrap: wrap;
+  column-gap: 14px;
+  row-gap: 16px;
+  padding: var(--space-2) 0;
 }
 
-.indices-scroll::-webkit-scrollbar { height: 4px; }
-.indices-scroll::-webkit-scrollbar-track { background: transparent; }
-.indices-scroll::-webkit-scrollbar-thumb { background: var(--color-neutral-300); border-radius: 4px; }
-
-/* ── Individual index card ── */
-.index-card-compact {
-  flex: 0 0 160px;
-  scroll-snap-align: start;
+.index-card {
+  flex: 1 1 145px;
+  max-width: 185px;
+  min-width: 135px;
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-lg, 8px);
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: var(--radius-xl, 10px);
   background: var(--color-surface-secondary);
   border-left: 3px solid var(--color-neutral-300);
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  transition: box-shadow 0.15s;
   cursor: default;
-  position: relative;
 }
 
-.index-card-compact:hover {
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-md, 0 4px 6px rgba(0,0,0,0.07));
+.index-card:hover {
+  box-shadow: var(--shadow-sm, 0 1px 3px rgba(0,0,0,0.08));
 }
 
-/* ── Region color dots + border accents ── */
-.region-dot {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  display: inline-block;
-}
+.index-card.stale { opacity: 0.75; }
 
-/* A股 red */
-.region-a { --region-color: #e53935; border-left-color: var(--region-color); }
-.region-a .region-dot { background: var(--region-color); }
-
-/* 港股 purple */
-.region-hk { --region-color: #8e24aa; border-left-color: var(--region-color); }
-.region-hk .region-dot { background: var(--region-color); }
-
-/* 日经 orange */
-.region-jp { --region-color: #f57c00; border-left-color: var(--region-color); }
-.region-jp .region-dot { background: var(--region-color); }
-
-/* 韩国 green */
-.region-kr { --region-color: #43a047; border-left-color: var(--region-color); }
-.region-kr .region-dot { background: var(--region-color); }
-
-/* 澳洲 blue */
-.region-au { --region-color: #1e88e5; border-left-color: var(--region-color); }
-.region-au .region-dot { background: var(--region-color); }
-
-/* 美股 gold */
-.region-us { --region-color: #fbc02d; border-left-color: var(--region-color); }
-.region-us .region-dot { background: var(--region-color); }
-
-/* 欧洲 cyan */
-.region-eu { --region-color: #00acc1; border-left-color: var(--region-color); }
-.region-eu .region-dot { background: var(--region-color); }
-
-.region-default { --region-color: var(--color-neutral-400); border-left-color: var(--region-color); }
-.region-default .region-dot { background: var(--region-color); }
-
-/* ── Stale / unavailable ── */
-.index-card-compact.stale {
-  opacity: 0.75;
-}
-
-.index-card-compact.unavailable {
-  opacity: 0.5;
-}
+/* ── Region color accent ── */
+.cd-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
+.region-a .cd-dot { background: #e53935; } .region-a { border-left-color: #e53935; }
+.region-hk .cd-dot { background: #8e24aa; } .region-hk { border-left-color: #8e24aa; }
+.region-jp .cd-dot { background: #f57c00; } .region-jp { border-left-color: #f57c00; }
+.region-kr .cd-dot { background: #43a047; } .region-kr { border-left-color: #43a047; }
+.region-au .cd-dot { background: #1e88e5; } .region-au { border-left-color: #1e88e5; }
+.region-us .cd-dot { background: #fbc02d; } .region-us { border-left-color: #fbc02d; }
+.region-eu .cd-dot { background: #00acc1; } .region-eu { border-left-color: #00acc1; }
+.region-default .cd-dot { background: var(--color-neutral-400); }
 
 /* ── Card content ── */
-.index-info {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  flex-wrap: wrap;
-}
+.card-top { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.cd-name { font-size: 12px; font-weight: var(--font-weight-medium); color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cd-stale { font-size: 9px; color: var(--color-text-tertiary); background: var(--color-neutral-200); padding: 1px 5px; border-radius: 3px; line-height: 1.4; }
 
-.index-name-compact {
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-medium);
-  color: var(--color-text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 120px;
-}
-
-.index-stale-badge {
-  font-size: 10px;
-  color: var(--color-text-tertiary);
-  background: var(--color-neutral-200);
-  padding: 0 4px;
-  border-radius: 3px;
-  white-space: nowrap;
-}
-
-.index-data {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.index-price-compact {
-  font-size: var(--font-size-base);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-primary);
-  font-family: var(--font-family-mono);
-}
-
-.index-price-compact.muted {
-  color: var(--color-text-tertiary);
-}
-
-.index-change-compact {
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
-  font-family: var(--font-family-mono);
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
-.index-change-compact.muted {
-  color: var(--color-text-tertiary);
-}
-
-.change-arrow {
-  font-size: 9px;
-  line-height: 1;
-}
+.card-body { display: flex; flex-direction: column; gap: 4px; }
+.cd-price { font-size: 15px; font-weight: var(--font-weight-semibold); color: var(--color-text-primary); font-family: var(--font-family-mono); line-height: 1.2; }
+.cd-price.muted { color: var(--color-text-tertiary); }
+.cd-change { font-size: 12px; font-weight: var(--font-weight-medium); font-family: var(--font-family-mono); }
+.cd-change.muted { color: var(--color-text-tertiary); }
+.ca { font-size: 8px; line-height: 1; }
 
 /* ── Empty state ── */
 .indices-empty-compact {

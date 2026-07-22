@@ -65,6 +65,7 @@ for sym, (orig_sym, name, region, default_close) in SEED.items():
     if price is None or price == 0:
         price = default_close
         available = False  # Mark as cached/stale
+        change_pct = 0.0  # Neutral change for seed data
         print('[SEED] %s: using seed %.0f (Finnhub=0)' % (name, default_close))
     else:
         status = 'LIVE' if available else 'CACHED'

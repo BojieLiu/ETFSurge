@@ -63,7 +63,6 @@ describe('GlobalIndicesStrip', () => {
       props: { globalIndices: emptyData },
     })
     expect(wrapper.text()).toContain('上证指数')
-    expect(wrapper.text()).toContain('—')  // placeholder price
-    expect(wrapper.text()).toContain('暂无') // placeholder change
+    expect(wrapper.text()).toContain('—')  // placeholder for both price and change
   })
 })
