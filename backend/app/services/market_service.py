@@ -326,7 +326,12 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
             for i, old in enumerate(merged[region]):
                 sym = old.get("symbol")
                 if sym in new_items:
-                    merged[region][i] = new_items.pop(sym)
+                    new_item = new_items.pop(sym)
+                    # 缓存中有合理价格时，不覆盖（防止数据源返回错误值）
+                    old_price = old.get("price")
+                    if old_price is not None and old_price > 0:
+                        continue  # 保持种子数据
+                    merged[region][i] = new_item
             # 追加新区条目（含 available=False 的全新条目，如新加指数）
             for item in items:
                 sym = item.get("symbol")
