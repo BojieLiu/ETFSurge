@@ -141,7 +141,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import TaskIndicator from '../TaskIndicator.vue'
+import TaskIndicator from '../components/TaskIndicator.vue'
 
 const props = defineProps({
   navItems: {
