@@ -359,18 +359,19 @@ async def _global_index_defs() -> list[tuple[str, str, str]]:
     except Exception as e:
         logger.warning(f"[_global_index_defs] db fallback: {e}")
 
-    # Merge: DB 优先（含动态数据），硬编码补齐
-    hardcoded = set(_GLOBAL_INDEX_DEFS)
-    merged = list(db_results | (hardcoded - db_results))
-    # 保持排序：硬编码的顺序优先
-    ordered = []
+    # Merge: 以硬编码列表为主，DB 覆盖同名符号（不引入 DB 独有条目）
+    db_map = {r.symbol: (r.symbol, r.name, r.region) for r in rows} if rows else {}
+    result = []
     seen: set[str] = set()
-    for item in _GLOBAL_INDEX_DEFS + merged:
+    for item in _GLOBAL_INDEX_DEFS:
         sym = item[0]
-        if sym not in seen:
-            seen.add(sym)
-            ordered.append(item)
-    return ordered
+        if sym in db_map:
+            result.append(db_map[sym])  # DB 版本（含动态更新）
+        else:
+            result.append(item)  # 硬编码（新增指数立刻出现）
+        seen.add(sym)
+    # DB 中独有的条目（如已删除的指数）不加入
+    return result
 
 
 # ── 板块 / 搜索 ───────────────────────────────────────────────
