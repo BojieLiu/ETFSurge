@@ -310,13 +310,17 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
             if region not in merged:
                 merged[region] = []
             new_items = {item.get("symbol"): item for item in items if item.get("available")}
+            # 已有条目的符号集合（用于判断全新条目）
+            existing_symbols = {old.get("symbol") for old in merged[region]}
             for i, old in enumerate(merged[region]):
                 sym = old.get("symbol")
                 if sym in new_items:
                     merged[region][i] = new_items.pop(sym)
-            # 追加新区域中不在旧缓存里的条目
-            for item in new_items.values():
-                merged[region].append(dict(item))
+            # 追加新区条目（含 available=False 的全新条目，如新加指数）
+            for item in items:
+                sym = item.get("symbol")
+                if sym not in existing_symbols:
+                    merged[region].append(dict(item))
         _global_indices_last_ok = merged
         _global_indices_last_ok_ts = time.time()
         _save_ok_cache()  # 持久化：重启后不丢失
@@ -345,33 +349,8 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
 
 
 async def _global_index_defs() -> list[tuple[str, str, str]]:
-    """从 indices 表读取，与硬编码合并（代码新增指数自动出现，无需 DB 同步）。"""
-    db_results: set[tuple[str, str, str]] = set()
-    try:
-        async with async_session() as session:
-            rows = (
-                await session.execute(
-                    select(Index).where(Index.is_active == True)  # noqa: E712
-                )
-            ).scalars().all()
-            if rows:
-                db_results = {(r.symbol, r.name, r.region) for r in rows}
-    except Exception as e:
-        logger.warning(f"[_global_index_defs] db fallback: {e}")
-
-    # Merge: 以硬编码列表为主，DB 覆盖同名符号（不引入 DB 独有条目）
-    db_map = {r.symbol: (r.symbol, r.name, r.region) for r in rows} if rows else {}
-    result = []
-    seen: set[str] = set()
-    for item in _GLOBAL_INDEX_DEFS:
-        sym = item[0]
-        if sym in db_map:
-            result.append(db_map[sym])  # DB 版本（含动态更新）
-        else:
-            result.append(item)  # 硬编码（新增指数立刻出现）
-        seen.add(sym)
-    # DB 中独有的条目（如已删除的指数）不加入
-    return result
+    """直接返回硬编码列表（不再查 DB — DB 中的旧记录可能导致索引掉失或多余）。"""
+    return [(s, n, r) for s, n, r in _GLOBAL_INDEX_DEFS]
 
 
 # ── 板块 / 搜索 ───────────────────────────────────────────────
