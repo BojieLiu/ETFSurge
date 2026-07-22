@@ -180,10 +180,13 @@ function connectTaskWs() {
         progress: typeof msg.progress === 'number' ? msg.progress : 0,
       }
       taskStore.updateTask(taskId, patch)
-      // Backend _notify does NOT carry design_id — fetch it on completion.
-      if (msg.status === 'completed') {
+      // Backend _notify carries design_id on completed — fetch it directly.
+      if (msg.design_id) {
+        taskStore.updateTask(taskId, { designId: msg.design_id })
+      } else if (msg.status === 'completed') {
+        // fallback
         portfolioApi.getTask(taskId).then((res) => {
-          const did = res?.data?.design_id
+          const did = res?.data?.result?.design_id
           if (did) taskStore.updateTask(taskId, { designId: did })
         }).catch(() => {})
       }

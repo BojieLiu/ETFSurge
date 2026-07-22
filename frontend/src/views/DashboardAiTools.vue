@@ -90,6 +90,9 @@
         :result="strategyResult"
         :loading="checkingStrategy"
         :error="strategyError"
+        :task-status="strategyTaskStatus"
+        :task-progress="strategyProgress"
+        :task-stage="strategyStage"
         @close="exitCoreFeature"
       />
     </div>
@@ -305,13 +308,21 @@ async function startDesign(capital) {
     const wsToken = taskStore.registerTaskCompletion(taskData.task_id, async () => {
       loadingText.value = '方案已生成，正在加载...'
       loadingProgress.value = 95
-      try {
-        const data = await fetchDesignDetail(taskData.design_id)
-        loadingProgress.value = 100
-        toast('组合方案生成完成！', 'success')
-      } catch {
-        toast('加载设计方案详情失败', 'error')
-        designFailed.value = '加载方案详情失败，请稍后再试'
+      let did = taskStore.getTask(taskData.task_id)?.designId
+      if (!did) {
+        try {
+          const taskRes = await portfolioApi.getTask(taskData.task_id)
+          did = taskRes?.data?.result?.design_id
+        } catch {}
+      }
+      if (did) {
+        try {
+          await fetchDesignDetail(did)
+          toast('组合方案生成完成！', 'success')
+        } catch {
+          toast('加载设计方案详情失败', 'error')
+          designFailed.value = '加载方案详情失败，请稍后再试'
+        }
       }
     })
 
@@ -326,11 +337,14 @@ async function startDesign(capital) {
         const task = taskRes.data
         if (task.status === 'completed') {
           clearInterval(pollTimer)
-          await fetchDesignDetail(taskData.design_id)
-          toast('组合方案生成完成！', 'success')
+          const did = task?.result?.design_id || taskData.design_id
+          if (did) {
+            await fetchDesignDetail(did)
+            toast('组合方案生成完成！', 'success')
+          }
         } else if (task.status === 'failed') {
           clearInterval(pollTimer)
-          designFailed.value = task.error || '方案生成失败，请稍后重试'
+          designFailed.value = task.error_message || task.error || '方案生成失败，请稍后重试'
         }
       } catch {
         // keep polling
@@ -381,7 +395,7 @@ async function checkStrategy() {
           toast('策略检查完成', 'success')
         } else if (task.status === 'failed') {
           clearInterval(pollTimer)
-          strategyError.value = task.error || '策略检查失败'
+          strategyError.value = task.error_message || task.error || '策略检查失败'
           strategyTaskStatus.value = 'failed'
           checkingStrategy.value = false
         }
@@ -409,12 +423,22 @@ async function loadHistoryList() {
   historyLoading.value = true
   try {
     const [designRes, checkRes] = await Promise.all([
-      portfolioApi.listDesigns(20, 0),
-      portfolioApi.listStrategyChecks(20, 0),
+      portfolioApi.listDesigns(20, 0).catch(() => ({ data: [] })),
+      portfolioApi.listStrategyChecks(20, 0).catch(() => ({ data: [] })),
     ])
     const designs = (designRes.data || []).map(d => ({ ...d, _type: 'design' }))
     const checks = (checkRes.data || []).map(c => ({ ...c, _type: 'check' }))
-    designHistoryList.value = [...designs, ...checks].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+
+    // 合并运行中的设计任务（追加到列表前）
+    const runningTasks = taskStore.tasks
+        .filter(t => t.type === 'design' && t.status === 'running')
+        .map(t => ({
+            id: null, _type: 'design', status: 'running',
+            created_at: t.createdAt || new Date().toISOString(),
+            capital: '-',
+        }))
+
+    designHistoryList.value = [...runningTasks, ...designs, ...checks].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
     historyLoaded.value = true
   } catch (e) {
     toast('加载历史记录失败，请检查后端连接', 'error')
@@ -423,7 +447,22 @@ async function loadHistoryList() {
   }
 }
 
-async function onHistorySelect(id) {
+async function onHistorySelect(id, item) {
+  // 运行中：不请求后端
+  if (item?.status === 'running') {
+    toast('该方案仍在生成中，请稍后再试', 'info')
+    return
+  }
+  // 失败：提示错误
+  if (item?.status === 'failed') {
+    toast('该方案生成失败，无法查看详情', 'warning')
+    return
+  }
+  // check 类型：跳转策略检查记录详情
+  if (item?._type === 'check') {
+    toast('请前往策略检查功能查看详情', 'info')
+    return
+  }
   try {
     const res = await portfolioApi.getDesign(id)
     const data = res.data

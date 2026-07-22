@@ -19,6 +19,9 @@ from ..services.cache_service import sync_memory_cache
 
 logger = logging.getLogger(__name__)
 
+# ── Last-good 缓存兜底 ───────────────────────────────────────
+_last_good_etfs: list[dict] | None = None
+
 # ── 核心层关键词 ─────────────────────────────────────────────
 CORE_KEYWORDS = [
     "沪深300", "中证A500",
@@ -97,12 +100,60 @@ def _tencent_gtimg_batch(codes: list[str]) -> dict[str, dict[str, Any]]:
     return result
 
 
+def _fetch_em_etf_list() -> list[dict] | None:
+    """直连东方财富 push2 API 获取全量 ETF 列表（免 akshare，纯 HTTP+JSON）。
+
+    字段映射：f12=代码  f14=名称  f2=最新价  f3=涨跌幅
+             f62=换手率  f184=总市值(基金规模)  f66=市盈率  f45=成交量
+
+    使用 m:1+t:2 覆盖沪深两市全部 ETF（~1843 只），免 akshare 封装。
+    """
+    from ..utils.proxy import no_proxy
+    import requests as _req
+    headers = {"User-Agent": "Mozilla/5.0"}
+    fields = "f12,f14,f2,f3,f62,f184,f66,f45,f168,f20,f21,f115,f116"
+    all_items = []
+    total = None
+    for page in range(1, 20):
+        url = (f"http://push2.eastmoney.com/api/qt/clist/get?"
+               f"pn={page}&pz=100&po=1&np=1&fs=m:1+t:2&fields={fields}&fid=f3")
+        try:
+            with no_proxy():
+                r = _req.get(url, timeout=5, headers=headers)
+            data = r.json()
+            diff = data.get("data", {}).get("diff", [])
+            if page == 1:
+                total = data.get("data", {}).get("total", 0)
+            if not diff:
+                break
+            all_items.extend(diff)
+            # 已取够全部，提前跳出
+            if total and len(all_items) >= total:
+                break
+        except Exception:
+            break
+    if not all_items:
+        return None
+    return [{
+        "symbol": item["f12"],
+        "name": item.get("f14", ""),
+        "amount": item.get("f62", 0) or 0,
+        "fund_scale": item.get("f184", 0) or 0,
+        "price": item.get("f2", 0) or 0,
+        "change_pct": item.get("f3", 0) or 0,
+        "turnover": item.get("f45", 0) or 0,
+        "pe": item.get("f66", 0) or 0,
+        "pb": item.get("f115", 0) or 0,
+    } for item in all_items]
+
+
 def fetch_all_etfs_base() -> list[dict[str, Any]]:
     """一次调用获取全量 ETF 基础数据。
 
-    数据源链: Sina 列表 → 腾讯 gtimg 补充指标 → akshare spot (最终兜底)
+    数据源链: Sina 列表 → 腾讯 gtimg 补充指标 → East Money 直连 → akshare spot (最终兜底)
     返回: 每只 ETF 包含 代码/名称/最新价/涨跌幅/成交额/换手率/PE/PB/基金规模
     """
+    global _last_good_etfs
     from ..core.ttl import CACHE_TTL
     cached = sync_memory_cache.get("all_etfs")
     if cached is not None:
@@ -133,36 +184,50 @@ def fetch_all_etfs_base() -> list[dict[str, Any]]:
                 item["pe"] = gt.get("pe", 0)
                 item["pb"] = 0  # gtimg 不提供 PB，不影响扫描
                 merged.append(item)
-            sync_memory_cache.set("all_etfs", merged, CACHE_TTL.get("etf_scanner", 120))
+            sync_memory_cache.set("all_etfs", merged, CACHE_TTL["etf_list"])
+            _last_good_etfs = merged
             logger.info("[etf_scanner] Sina+Tencent merged: %d ETFs", len(merged))
             return merged
 
         # gtimg 挂时：退到新浪数据（跳过金额/规模过滤）
         logger.info("[etf_scanner] using Sina-only ETF list (no amount/scale filtering)")
-        sync_memory_cache.set("all_etfs", sina_result, CACHE_TTL.get("etf_scanner", 120))
+        sync_memory_cache.set("all_etfs", sina_result, CACHE_TTL["etf_list"])
+        _last_good_etfs = sina_result
         return sina_result
     except Exception as e:
         logger.warning("[etf_scanner] Sina ETF list failed: %s", e)
 
-    # 3. 最终兜底：akshare spot（最慢但有全部字段）
+    # 3. East Money 直连 HTTP（新增 Tier）
+    try:
+        em_result = _fetch_em_etf_list()
+        if em_result and len(em_result) >= 50:
+            logger.info("[etf_scanner] East Money direct HTTP: %d ETFs", len(em_result))
+            sync_memory_cache.set("all_etfs", em_result, CACHE_TTL["etf_list"])
+            _last_good_etfs = em_result
+            return em_result
+    except Exception as e:
+        logger.warning("[etf_scanner] East Money direct HTTP failed: %s", e)
+
+    # 4. 最终兜底：akshare spot（最慢但有全部字段）
     try:
         from ..utils.decode import decode_df as _decode_df
         def _p():
             import akshare as ak
             return ak.fund_etf_spot_em()
-        df = run_in_thread(_p, timeout=8)
+        df = run_in_thread(_p, timeout=25)
         if df is None or df.empty:
             logger.warning("[etf_scanner] fund_etf_spot_em final fallback returned empty")
             stale = sync_memory_cache.get("all_etfs")
-            return stale or []
+            return stale or _last_good_etfs or []
         _decode_df(df)
         result = df.to_dict(orient="records")
-        sync_memory_cache.set("all_etfs", result, CACHE_TTL.get("etf_scanner", 120))
+        sync_memory_cache.set("all_etfs", result, CACHE_TTL["etf_list"])
+        _last_good_etfs = result
         return result
     except Exception as e:
         logger.warning("[etf_scanner] all ETF data sources failed: %s", e)
         stale = sync_memory_cache.get("all_etfs")
-        return stale or []
+        return stale or _last_good_etfs or []
 
 
 def _normalize_columns(df: pd.DataFrame) -> None:

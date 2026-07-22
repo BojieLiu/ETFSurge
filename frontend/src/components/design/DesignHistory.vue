@@ -9,9 +9,15 @@
       <div v-else-if="items.length === 0" class="history-empty">暂无历史记录，先生成一个方案吧</div>
       <div v-else class="history-list">
         <div v-for="h in items" :key="h._type + '-' + h.id" class="history-item"
-             @click="$emit('select', h.id)">
+             @click="$emit('select', h.id, h)">
           <span class="history-icon">{{ h._type === 'check' ? '🔍' : '💡' }}</span>
           <span class="history-task-type" :class="h._type">{{ h._type === 'design' ? '智能组合设计' : '策略检查与分析' }}</span>
+          <span class="history-status" :class="'status-' + (h.status || 'completed')">
+            <template v-if="h.status === 'completed'">✅ 成功</template>
+            <template v-else-if="h.status === 'failed'">❌ 失败</template>
+            <template v-else-if="h.status === 'running'">⏳ 运行中</template>
+            <template v-else>✅ 成功</template>
+          </span>
           <span class="history-date">{{ formatDate(h.created_at) }}</span>
           <span class="history-capital">{{ h._type === 'design' ? (h.capital / 10000).toFixed(0) + '万' : '' }}</span>
           <span class="history-detail-link">查看详情</span>
@@ -157,6 +163,27 @@ defineEmits(['select', 'close'])
   transition: opacity var(--transition-fast);
   white-space: nowrap;
   font-weight: var(--font-weight-medium);
+}
+
+.history-status {
+  font-size: var(--font-size-2xs);
+  padding: var(--space-0) var(--space-2);
+  border-radius: var(--radius-full);
+  white-space: nowrap;
+  font-weight: var(--font-weight-medium);
+  flex-shrink: 0;
+}
+
+.history-status.status-completed {
+  color: #2e7d32;
+}
+
+.history-status.status-failed {
+  color: #c62828;
+}
+
+.history-status.status-running {
+  color: #ef6c00;
 }
 
 .history-item:hover .history-detail-link {

@@ -79,6 +79,17 @@ async def lifespan(app: FastAPI):
             logger.exception("全球指数缓存预热失败（非交易时段正常）")
     asyncio.create_task(_warmup_global_indices())
 
+    # 启动时预热 ETF 缓存（非阻塞）
+    async def _warmup_etf_cache():
+        try:
+            from app.fetchers.etf_scanner import fetch_all_etfs_base
+            result = await asyncio.to_thread(fetch_all_etfs_base)
+            if result:
+                logger.info("ETF 缓存预热完成：%d 只", len(result))
+        except Exception:
+            logger.warning("ETF 缓存预热失败（不影响启动）")
+    asyncio.create_task(_warmup_etf_cache())
+
     try:
         async def _scheduler_wrapper():
             try:

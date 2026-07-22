@@ -152,11 +152,14 @@ async def design_worker(mgr: TaskManager, task_id: int) -> None:
         design_id = None
         try:
             async with async_session() as db:
+                has_error = bool(result.get("error")) or not strategies
                 record = PortfolioDesign(
                     capital=capital,
                     risk_profile=params.get("risk_profile", "balanced"),
                     strategies_json=json.dumps(strategies, ensure_ascii=False, default=str),
                     market_snapshot_json=json.dumps(market_context, ensure_ascii=False, default=str),
+                    status="failed" if has_error else "completed",
+                    error_message=result.get("detail") if not strategies else None,
                 )
                 db.add(record)
                 await db.commit()

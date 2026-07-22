@@ -28,8 +28,9 @@ async def strategy_check_worker(mgr, task_id: int) -> None:
         mgr.update_task(task_id, status="running", progress=5)
         await _notify(task_id, "running", progress=5)
 
-        capital = task.get("capital", 500000)
-        portfolio_type = task.get("portfolio_type")
+        params = task.get("params", {})
+        capital = params.get("capital", 500000)
+        portfolio_type = params.get("portfolio_type")
 
         # 加载持仓 / 因子评分 / 技术指标
         mgr.update_task(task_id, progress=20)

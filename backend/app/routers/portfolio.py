@@ -154,6 +154,7 @@ async def list_designs(
             PortfolioDesign.created_at,
             PortfolioDesign.capital,
             PortfolioDesign.risk_profile,
+            PortfolioDesign.status,
         ))
         .order_by(desc(PortfolioDesign.created_at))
         .offset(offset)
@@ -168,6 +169,7 @@ async def list_designs(
             "created_at": r.created_at.isoformat() if r.created_at else "",
             "capital": r.capital,
             "risk_profile": r.risk_profile,
+            "status": r.status or "completed",
         }
         for r in records
     ]
@@ -195,6 +197,8 @@ async def get_design(
         "capital": record.capital,
         "risk_profile": record.risk_profile,
         "design_text": record.design_text or "",
+        "status": record.status or "completed",
+        "error_message": record.error_message,
         "strategies": json.loads(record.strategies_json) if record.strategies_json else [],
         "market_context": json.loads(record.market_snapshot_json) if record.market_snapshot_json else {},
     }
@@ -329,20 +333,24 @@ async def get_strategy_check_result(task_id: int):
 @router.get("/strategy-checks")
 async def list_strategy_checks(limit: int = 10, offset: int = 0):
     """列出历史策略检查记录。"""
-    from sqlalchemy import select, desc
-    from sqlalchemy.ext.asyncio import AsyncSession
-    from ..database import async_session
-    from ..models.strategy_check import StrategyCheckRecord
+    try:
+        from sqlalchemy import select, desc
+        from sqlalchemy.ext.asyncio import AsyncSession
+        from ..database import async_session
+        from ..models.strategy_check import StrategyCheckRecord
 
-    async with async_session() as db:
-        stmt = (
-            select(StrategyCheckRecord)
-            .order_by(desc(StrategyCheckRecord.created_at))
-            .offset(offset)
-            .limit(limit)
-        )
-        rows = (await db.execute(stmt)).scalars().all()
-        return [r.to_dict() for r in rows]
+        async with async_session() as db:
+            stmt = (
+                select(StrategyCheckRecord)
+                .order_by(desc(StrategyCheckRecord.created_at))
+                .offset(offset)
+                .limit(limit)
+            )
+            rows = (await db.execute(stmt)).scalars().all()
+            return [r.to_dict() for r in rows]
+    except Exception:
+        logger.exception("[strategy_checks] listing failed")
+        return []
 
 
 @router.get("/strategy-checks/{check_id}")

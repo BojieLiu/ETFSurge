@@ -53,6 +53,10 @@ def _migrate(conn):
     columns_design = [c["name"] for c in inspector.get_columns("portfolio_designs")]
     if "design_text" not in columns_design:
         conn.execute(text("ALTER TABLE portfolio_designs ADD COLUMN design_text TEXT"))
+    if "status" not in columns_design:
+        conn.execute(text("ALTER TABLE portfolio_designs ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'completed'"))
+    if "error_message" not in columns_design:
+        conn.execute(text("ALTER TABLE portfolio_designs ADD COLUMN error_message TEXT"))
     # StrategyCheckRecord.portfolio_type (added alongside on_exchange/off_exchange support)
     columns_check = [c["name"] for c in inspector.get_columns("strategy_check_records")]
     if "portfolio_type" not in columns_check:

@@ -23,3 +23,7 @@ class PortfolioDesign(Base):
 
     # LLM 生成的完整设计报告（Markdown 文本）
     design_text = Column(Text, nullable=True)
+
+    # 方案状态: completed / running / failed
+    status = Column(String(20), nullable=False, default="completed")
+    error_message = Column(Text, nullable=True)
