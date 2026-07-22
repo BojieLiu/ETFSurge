@@ -192,6 +192,7 @@ def section_portfolio():
 
     section("异步设计提交")
 
+    design_task_id = None
     try:
         r = requests.post(f"{BASE}/api/v1/portfolio/design-async", json={
             "capital": 500000
@@ -200,7 +201,30 @@ def section_portfolio():
         if r.status_code in (200, 202):
             task_data = r.json()
             task_id = task_data.get("task_id")
+            design_task_id = task_id
             check(f"设计任务已提交 task_id={task_id}", task_id is not None)
+            # Poll for completion
+            deadline = time.time() + 60
+            completed = False
+            while time.time() < deadline:
+                try:
+                    pr = requests.get(f"{BASE}/api/v1/portfolio/tasks/{task_id}", timeout=5)
+                    if pr.status_code == 200:
+                        pd = pr.json()
+                        status = pd.get("status")
+                        if status == "completed":
+                            check("异步设计任务完成", True)
+                            completed = True
+                            break
+                        elif status == "failed":
+                            check("异步设计任务失败", False, pd.get("error_message", "未知"))
+                            completed = True
+                            break
+                except Exception:
+                    pass
+                time.sleep(5)
+            if not completed:
+                check("异步设计超时", False, "60s 内未完成（需真实市场数据）")
     except requests.Timeout:
         check("POST /design-async", False, "请求超时（30s）")
     except Exception as e:
@@ -268,21 +292,24 @@ def section_news():
     """新闻资讯端点"""
     section("新闻资讯")
 
-    # GET /news/headlines
+    # GET /news/headlines — 超时匹配后端 run_sync(timeout=30) + 5s 网络缓冲
     try:
-        r = requests.get(f"{BASE}/api/v1/news/headlines", timeout=15)
+        r = requests.get(f"{BASE}/api/v1/news/headlines", timeout=35)
         check(f"GET /news/headlines -> {r.status_code}", r.status_code == 200)
         if r.status_code == 200:
             data = r.json()
-            check(f"头条新闻 {len(data)} 条", isinstance(data, list))
+            check(f"头条新闻 {len(data)} 条", isinstance(data, list) and len(data) > 0)
+            if data:
+                has_id = all("id" in item for item in data)
+                check("每条新闻含 id 字段（WS 去重用）", has_id)
     except requests.Timeout:
-        check("GET /news/headlines", False, "请求超时（15s）")
+        check("GET /news/headlines", False, "请求超时（35s）— 后端 30s 超时 + 缓存预热")
     except Exception as e:
         check("GET /news/headlines", False, str(e))
 
     # GET /news/macro — soft check: 404 is acceptable if not available
     try:
-        r = requests.get(f"{BASE}/api/v1/news/macro", timeout=15)
+        r = requests.get(f"{BASE}/api/v1/news/macro", timeout=35)
         ok = r.status_code in (200, 404)
         detail = f"-> {r.status_code}" + (f" ({len(r.json())} 条)" if r.status_code == 200 else "")
         check(f"GET /news/macro {detail}", ok, "404 可接受（宏经新闻暂未就绪）" if r.status_code == 404 else "")
@@ -290,7 +317,7 @@ def section_news():
             data = r.json()
             check(f"宏观新闻 {len(data)} 条", isinstance(data, list))
     except requests.Timeout:
-        check("GET /news/macro", False, "请求超时（15s）")
+        check("GET /news/macro", False, "请求超时（35s）")
     except Exception as e:
         check("GET /news/macro", False, str(e))
 

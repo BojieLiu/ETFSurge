@@ -62,6 +62,7 @@ def _select_and_weight(
     budget: float,
     layer: str,
     regime: str,
+    strategy: str = "balanced",
     max_count: int = 5,
 ) -> list[dict[str, Any]]:
     """
@@ -103,8 +104,9 @@ def _select_and_weight(
         sym = cand.get("symbol", "")
         name = cand.get("name", sym)
         rationale = build_rationale(
-            symbol=sym,
+            code=sym,
             layer=layer,
+            strategy=strategy,
             factor_scores=factor_scores,
             regime=regime,
         )
@@ -200,6 +202,7 @@ def allocate(
             core_budget,
             layer="core",
             regime=regime,
+            strategy=profile_key,
             max_count=4,
         )
         allocations.extend(core_alloc)
@@ -211,6 +214,7 @@ def allocate(
             sat_budget,
             layer="satellite",
             regime=regime,
+            strategy=profile_key,
             max_count=6,
         )
         allocations.extend(sat_alloc)
@@ -222,6 +226,7 @@ def allocate(
             def_budget,
             layer="defense",
             regime=regime,
+            strategy=profile_key,
             max_count=4,
         )
         allocations.extend(def_alloc)

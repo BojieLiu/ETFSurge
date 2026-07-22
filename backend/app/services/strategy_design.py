@@ -64,10 +64,14 @@ async def generate_enhanced_design(
 
     try:
         # 3. 策略引擎：一次调用生成所有方案
+        # 扁平化候选池：allocate() 预期 list[dict]，每项含 layer 字段
+        flat_candidates = []
+        for layer_list in candidates.values():
+            flat_candidates.extend(layer_list)
         strategies_raw = engine_allocate(
             risk_profile="balanced",
             factor_matrix=factor_matrix,
-            candidates=candidates,
+            candidates=flat_candidates,
             regime=market_regime,
         )
 
@@ -76,7 +80,7 @@ async def generate_enhanced_design(
         for s in strategies_raw:
             allocs = s.pop("allocations", [])
             # Apply risk controls before assembling
-            risk_allocations = apply_risk_controls([{"etfs": allocs}], factor_matrix, candidates)
+            risk_allocations = apply_risk_controls([{"etfs": allocs}], factor_matrix)
             allocs = risk_allocations[0]["etfs"] if risk_allocations else allocs
 
             # enrich rationale using engine/rationale.py
@@ -125,7 +129,7 @@ async def generate_enhanced_design(
                 "regime": market_regime,
             },
         }
-    except Exception as e:
+    except (asyncio.TimeoutError, ValueError, KeyError, ConnectionError, OSError) as e:
         logger.exception("[strategy_design] generate_enhanced_design failed")
         return {
             "strategies": [],
