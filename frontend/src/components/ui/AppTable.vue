@@ -90,12 +90,12 @@
 
   <div v-if="pagination" class="table__pagination">
     <AppPagination
-      :page="page"
-      :page-size="pageSize"
+      v-model:page="page"
+      v-model:pageSize="pageSize"
       :total="total"
       :page-sizes="pageSizes"
-      @update:model-value="handlePageChange"
-      @update:page-size="handlePageSizeChange"
+      @update:page="handlePageChange"
+      @update:pageSize="handlePageSizeChange"
     />
   </div>
 </template>
