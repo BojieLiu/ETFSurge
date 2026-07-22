@@ -48,7 +48,7 @@ class Index(Base):
     region = Column(String(20), nullable=False)        # 'A股','港股','美股','日经','韩国'
     asset_type = Column(String(10), default="index")
     currency = Column(String(3), default="CNY")
-    source = Column(String(20))                        # 'akshare','yfinance','stooq'
+    source = Column(String(20))                        # 'akshare','yfinance'
     is_active = Column(Boolean, default=True)
 
 

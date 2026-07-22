@@ -2,7 +2,7 @@
 
 ## 1. Overview / 概述
 
-**功能描述 / Description**: Real-time monitoring of data source health, event timeline, failures, and circuit-breaker status for all upstream data fetchers (mootdx, sina, tencent, akshare, levistock, stooq, twelvedata, finnhub, dongfang).
+**功能描述 / Description**: Real-time monitoring of data source health, event timeline, failures, and circuit-breaker status for all upstream data fetchers (mootdx, sina, tencent, akshare, levistock, twelvedata, finnhub, dongfang).
 
 **触发场景 / Trigger**: Admin dashboard display (aligned with TokenMonitor style), operational alerting.
 
@@ -33,13 +33,6 @@ GET /api/v1/admin/sources/health
     "failures": 1,
     "cooldown_remaining": 0.0,
     "last_ok": 1721620000.0
-  },
-  {
-    "name": "stooq",
-    "available": false,
-    "failures": 3,
-    "cooldown_remaining": 45.2,
-    "last_ok": 1721619900.0
   }
 ]
 ```
@@ -106,14 +99,6 @@ GET /api/v1/admin/sources/circuit-breakers
     "failure_threshold": 3,
     "cooldown_secs": 60.0,
     "failures_since_last_ok": 0
-  },
-  {
-    "name": "stooq",
-    "state": "open",
-    "failure_threshold": 3,
-    "cooldown_secs": 60.0,
-    "failures_since_last_ok": 3,
-    "cool_until": 1721620050.0
   }
 ]
 ```

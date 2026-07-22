@@ -8,7 +8,7 @@ from ..services.source_health import register_probe
 
 
 def register_all_probes() -> None:
-    """Register all 6 data-source health probes (Stooq removed — CSV API 404).
+    """Register all 6 data-source health probes.
 
     Each probe is a simple pass/fail check with an appropriate timeout.
     Probes run every 120s via the health_loop in main.py.

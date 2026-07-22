@@ -21,7 +21,7 @@
 - **WebSocket 推送**：行情、资讯、组合变更、任务进度、设计报告流式推送——无需轮询。
 - **LLM Token 用量监控**：追踪 DeepSeek/OpenCode Zen API 消耗，专用 TokenMonitor 页面——时序图表、按功能聚合、失败日志。
 - **PWA 支持**：可安装为桌面/移动端应用，带 Service Worker 缓存。
-- **多数据源容灾**：熔断器模式，自动降级链（mootdx → Sina → Tencent → akshare → yfinance → stooq/levistock），任一源失败自动切换。
+- **多数据源容灾**：熔断器模式，自动降级链（mootdx → Sina → Tencent → akshare → yfinance → levistock），任一源失败自动切换。
 
 ---
 
@@ -58,11 +58,11 @@
                     └─────┬─────┘               │ 一致性校验     │
                           │                     └────────────────┘
              ┌────────────┼──────────────────────────────┐
-             ▼            ▼              ▼                ▼
-       china_market  yfinance       finnhub /        stooq /
-       (mootdx/sina/  (美股)        twelvedata       levistock
-        tencent/                    (免费层)         (备用源)
-        akshare)
+              ▼            ▼              ▼
+        china_market  yfinance       finnhub /        levistock
+        (mootdx/sina/  (美股)        twelvedata       (备用源)
+         tencent/                    (免费层)
+         akshare)
              │
              ▼  news_fetcher → 财新 / 宏观 / 国际
              ▼  sector_fetcher / fund_fetcher / fundamental_fetcher / sentiment_fetcher
@@ -96,7 +96,7 @@
 | 层 | 技术 |
 |---|---|
 | 后端 | Python 3.12 · FastAPI · SQLAlchemy 2.0 (async) · APScheduler · httpx |
-| 数据源 | china_market (mootdx/Sina/Tencent/akshare) · yfinance · tushare · finnhub · twelvedata · stooq · levistock · alphavantage |
+| 数据源 | china_market (mootdx/Sina/Tencent/akshare) · yfinance · tushare · finnhub · twelvedata · levistock · alphavantage |
 | 缓存 | 进程内 MemoryCache（默认）+ 可选 Redis（自动降级） |
 | 数据库 | SQLite via aiosqlite（数据层已抽象，可切换其他 RDBMS） |
 | LLM | DeepSeek API / OpenCode Zen（OpenAI 兼容协议，自动故障切换） |
@@ -120,7 +120,7 @@ ETF_Surge/
 │   │   │   ├── china_market.py  # A/港/商品（mootdx→Sina→Tencent→akshare）
 │   │   │   ├── yfinance_fetcher.py
 │   │   │   ├── finnhub_fetcher.py / twelvedata_fetcher.py / alphavantage_fetcher.py
-│   │   │   ├── tushare_fetcher.py / stooq_fetcher.py / levistock_fetcher.py
+│   │   │   ├── tushare_fetcher.py / levistock_fetcher.py
 │   │   │   ├── news_fetcher.py / sector_fetcher.py / sentiment_fetcher.py
 │   │   │   ├── fund_fetcher.py / fundamental_fetcher.py / margin_fetcher.py
 │   │   │   └── etf_scanner.py / benchmark_stocks.py

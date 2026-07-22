@@ -21,7 +21,7 @@ Built with **FastAPI (async)** + **Vue 3 (Pinia + ECharts)**, pushing live data 
 - **WebSocket push**: real-time quotes, news, portfolio updates, task notifications, and design report streaming — no polling needed.
 - **LLM token usage monitoring**: tracks DeepSeek/OpenCode Zen API consumption with a dedicated TokenMonitor page — time-series charts, per-function breakdown, and failure log.
 - **PWA support**: installable as a desktop/mobile app with service worker caching.
-- **Multi-source data resilience**: circuit breaker pattern routes through fallback chains (mootdx → Sina → Tencent → akshare → yfinance → stooq/levistock) when any source fails.
+- **Multi-source data resilience**: circuit breaker pattern routes through fallback chains (mootdx → Sina → Tencent → akshare → yfinance → levistock) when any source fails.
 
 ---
 
@@ -59,11 +59,11 @@ Built with **FastAPI (async)** + **Vue 3 (Pinia + ECharts)**, pushing live data 
                     └─────┬─────┘               │  validation    │
                           │                     └────────────────┘
              ┌────────────┼──────────────────────────────┐
-             ▼            ▼              ▼                ▼
-       china_market  yfinance       finnhub /        stooq /
-       (mootdx/sina/  (US markets)  twelvedata       levistock
-        tencent/                    (free tiers)     (fallback)
-        akshare)
+              ▼            ▼              ▼
+        china_market  yfinance       finnhub /        levistock
+        (mootdx/sina/  (US markets)  twelvedata       (fallback)
+         tencent/                    (free tiers)
+         akshare)
              │
              ▼  news_fetcher → 财新 / 宏观 / 国际
              ▼  sector_fetcher / fund_fetcher / fundamental_fetcher / sentiment_fetcher
@@ -97,7 +97,7 @@ Built with **FastAPI (async)** + **Vue 3 (Pinia + ECharts)**, pushing live data 
 | Layer | Technology |
 |---|---|
 | Backend | Python 3.12 · FastAPI · SQLAlchemy 2.0 (async) · APScheduler · httpx |
-| Data Sources | china_market (mootdx/Sina/Tencent/akshare) · yfinance · tushare · finnhub · twelvedata · stooq · levistock · alphavantage |
+| Data Sources | china_market (mootdx/Sina/Tencent/akshare) · yfinance · tushare · finnhub · twelvedata · levistock · alphavantage |
 | Cache | In-process MemoryCache (default) + optional Redis (auto-degrade) |
 | Database | SQLite via aiosqlite (data layer abstracted for other RDBMS) |
 | LLM | DeepSeek API / OpenCode Zen (OpenAI-compatible, automatic failover) |
@@ -121,7 +121,7 @@ ETF_Surge/
 │   │   │   ├── china_market.py  # A/HK/commodities (mootdx→Sina→Tencent→akshare)
 │   │   │   ├── yfinance_fetcher.py
 │   │   │   ├── finnhub_fetcher.py / twelvedata_fetcher.py / alphavantage_fetcher.py
-│   │   │   ├── tushare_fetcher.py / stooq_fetcher.py / levistock_fetcher.py
+│   │   │   ├── tushare_fetcher.py / levistock_fetcher.py
 │   │   │   ├── news_fetcher.py / sector_fetcher.py / sentiment_fetcher.py
 │   │   │   ├── fund_fetcher.py / fundamental_fetcher.py / margin_fetcher.py
 │   │   │   └── etf_scanner.py / benchmark_stocks.py

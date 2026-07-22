@@ -1,6 +1,6 @@
 """行情 Service 层。
 
-编排 china_mater / yfinance_fetcher / stooq_fetcher 等数据源，
+编排 china_market / yfinance_fetcher 等数据源，
 提供统一的异步行情接口（实时 / 历史 / 搜索 / 全球指数）。
 """
 
@@ -160,7 +160,7 @@ _load_ok_cache()
 def _to_json_native(value: Any) -> Any:
     """将 numpy 等非 JSON 原生类型递归转换为 Python 原生类型。
 
-    下游数据源（yfinance / stooq 等）可能返回 np.float64 / np.int64 /
+    下游数据源（yfinance 等）可能返回 np.float64 / np.int64 /
     np.bool_ 等标量。FastAPI 的 jsonable_encoder 无法序列化 numpy 类型，
     会导致缓存命中路径（直接返回 _global_indices_cache）时 500。
     这里在写入缓存前统一清洗，保证返回结构可安全 JSON 序列化。
@@ -709,17 +709,11 @@ async def _route_us(symbol: str) -> dict | None:
 
 
 async def get_us_batch(symbols: list[str]) -> list[dict[str, Any]]:
-    """批量获取美股/ETF 实时行情，通过 SourceRegistry 路由。
-
-    链路: Stooq 批量 → TwelveData 逐个 fallback。
-    """
+    """批量获取美股/ETF 实时行情，通过 TwelveData 逐个获取。"""
     if not symbols:
         return []
-    from ..fetchers.stooq_fetcher import fetch_us_batch
     from ..fetchers import twelvedata_fetcher
 
-    def _stooq_batch():
-        return fetch_us_batch(symbols)
     def _td_batch():
         out = []
         for sym in symbols:
@@ -729,33 +723,16 @@ async def get_us_batch(symbols: list[str]) -> list[dict[str, Any]]:
         return out or None
 
     result = registry.route([
-        ("stooq", _stooq_batch),
         ("twelvedata", _td_batch),
     ], route_name="US_batch", operation="batch", target=",".join(symbols))
     return result or []
 
 
 async def get_us_history(symbol: str, period: str = "daily") -> list[dict[str, Any]]:
-    """美股/ETF 历史 K 线，通过 SourceRegistry 路由。
-
-    链路: Stooq history → 现有 get_history fallback。
-    """
+    """美股/ETF 历史 K 线，通过 get_k_data 获取。"""
     if not symbol:
         return []
-    from ..fetchers.stooq_fetcher import fetch_stooq_history
     from ..fetchers.china_market import get_k_data
-
-    def _stooq_hist():
-        return fetch_stooq_history(symbol, period)
-    def _ak_fallback():
-        return get_k_data(symbol, period)
-
-    result = registry.route([
-        ("stooq", _stooq_hist),
-    ], route_name="US_history", operation="history", target=symbol)
-    if result:
-        return result
-    # Fallback to async get_history chain
     return await _call(get_k_data, symbol, period, timeout=15) or []
 
 

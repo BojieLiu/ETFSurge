@@ -1,7 +1,6 @@
 """
-[DEPRECATED] yfinance 数据源 — 已由 Stooq 主力替换。
+[DEPRECATED] yfinance 数据源 — 已由 TwelveData / Finnhub 替换。
 
-保留此文件以防 Stooq 完全不可用时的回退。
 入口处检查 YFINANCE_PROXY 环境变量：仅设置时才尝试 yfinance 连接。
 默认 (无 YFINANCE_PROXY) 立即返回 None，跳过 yfinance 调用。
 """
