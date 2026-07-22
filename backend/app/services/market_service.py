@@ -305,6 +305,17 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
         # 先复制旧缓存中所有条目
         for region, items in _global_indices_last_ok.items():
             merged[region] = [dict(item) for item in items]
+        # 收集新数据中所有有效符号（用于清理已删除条目）
+        new_symbols: set[str] = set()
+        for items in regions.values():
+            for item in items:
+                sym = item.get("symbol")
+                if sym:
+                    new_symbols.add(sym)
+        for region in list(merged.keys()):
+            merged[region] = [item for item in merged[region] if item.get("symbol") in new_symbols]
+            if not merged[region]:
+                del merged[region]
         # 用新数据条目覆盖：仅替换 available=True 的条目
         for region, items in regions.items():
             if region not in merged:
