@@ -19,7 +19,7 @@
             <template v-else>✅ 成功</template>
           </span>
           <span class="history-date">{{ formatDate(h.created_at) }}</span>
-          <span class="history-capital">{{ h._type === 'design' ? (h.capital / 10000).toFixed(0) + '万' : '' }}</span>
+          <span class="history-capital">{{ h._type === 'design' && typeof h.capital === 'number' && h.capital > 0 ? (h.capital / 10000).toFixed(0) + '万' : '' }}</span>
           <span class="history-detail-link">查看详情</span>
         </div>
       </div>
