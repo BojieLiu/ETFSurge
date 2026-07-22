@@ -40,7 +40,7 @@ def _try_two(name_lv, lv_fn, name_ak, ak_fn, default=None):
     result = registry.route([
         (name_lv, lambda: _exec(lv_fn, _TIMEOUT)),
         (name_ak, lambda: _exec(ak_fn, _TIMEOUT)),
-    ])
+    ], route_name=name_lv, operation="sector")
     if result:
         return result
     return default if default is not None else []

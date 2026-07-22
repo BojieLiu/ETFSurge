@@ -1,11 +1,12 @@
 """
 中国国内市场数据聚合器 (China Market Data Aggregator)
 
-多数据源实时行情获取，内部含 mootdx / Sina / QQ(Tencent) / akshare 四级降级。
-数据源优先级 (由 SourceRegistry 熔断路由管理):
-  A 股实时: mootdx → Sina → QQ(Tencent)
+多数据源实时行情获取，内部含 mootdx / Sina / QQ(Tencent) / akshare / 东方财富多级降级。
+降级链已接入 SourceRegistry 熔断路由管理:
+  A 股实时: mootdx → Sina                   (registry.route)
+  A 股批量: mootdx → Tencent(QQ) → Sina     (registry.route)
+  HK 实时:  Sina → Tencent(QQ) → 东方财富    (registry.route)
   A 股K线:  mootdx → Sina
-  HK 实时:  Sina → QQ
   指数:     mootdx → QQ
   期货:     akshare
   基金净值:  akshare
@@ -361,31 +362,48 @@ def fetch_etf_shares_outstanding(symbol: str) -> dict | None:
     return None
 
 
+# ── SourceRegistry 辅助函数 ───────────────────────────────────────
+
+
+def _filtered(provider_fn, *args):
+    """Provider wrapper: 调用 provider 后过滤 price>0 结果。
+
+    确保 `registry.route()` 的 `if result` 语义正确：
+    - 如果 provider 返回空列表或所有项 price=0，返回 None → route() 会继续尝试下一个源。
+    - 如果 provider 返回有效项（至少一个 price>0），返回列表 → route() 视为成功。
+
+    此函数不修改低层 provider 函数的返回值，不影响其他调用者。
+    """
+    result = provider_fn(*args)
+    if not result:
+        return None
+    # 检查是否至少有一条数据有有效价格
+    if any(isinstance(i, dict) and i.get("price", 0) > 0 for i in result):
+        return result
+    return None
+
+
 # ── Public API ───────────────────────────────────────────────────
 
 def fetch_a_stock_realtime(symbol: str | None = None) -> list[dict[str, Any]]:
-    with no_proxy():
-        if not symbol:
-            return []
-        items = _mootdx_realtime([symbol])
-        if items and items[0].get("price"):
-            return items
-        items = _sina_realtime([symbol], "A")
-        return items
+    """A 股实时行情：mootdx → Sina，通过 SourceRegistry 熔断路由。"""
+    if not symbol:
+        return []
+    return registry.route([
+        ("mootdx", lambda: _filtered(_mootdx_realtime, [symbol])),
+        ("sina", lambda: _filtered(_sina_realtime, [symbol], "A")),
+    ], route_name="A_stock_realtime", operation="realtime", target=symbol) or []
 
 
 def fetch_a_stock_batch(symbols: list[str]) -> list[dict[str, Any]]:
-    """Batch fetch A-share quotes — used by _build_price_map."""
-    with no_proxy():
-        items = _mootdx_realtime(symbols)
-        if len(items) == len(symbols) and all(i.get("price") for i in items):
-            return items
-        # Fallback: QQ (Tencent) batch API
-        items = _tencent_realtime(symbols, "A")
-        if len(items) == len(symbols) and all(i.get("price") for i in items):
-            return items
-        # Final fallback: Sina per-symbol
-        return _sina_realtime(symbols, "A")
+    """批量 A 股实时行情：mootdx → Tencent(QQ) → Sina，通过 SourceRegistry 熔断路由。"""
+    if not symbols:
+        return []
+    return registry.route([
+        ("mootdx", lambda: _filtered(_mootdx_realtime, symbols)),
+        ("tencent", lambda: _filtered(_tencent_realtime, symbols, "A")),
+        ("sina", lambda: _filtered(_sina_realtime, symbols, "A")),
+    ], route_name="A_stock_batch", operation="batch", target=",".join(symbols)) or []
 
 
 def _em_hk_realtime(symbols: list[str]) -> list[dict[str, Any]]:
@@ -434,19 +452,14 @@ def _em_hk_realtime(symbols: list[str]) -> list[dict[str, Any]]:
 
 
 def fetch_hk_stock_realtime(symbol: str | None = None) -> list[dict[str, Any]]:
-    """港股实时行情：Sina → Tencent(QQ) → 东方财富三级降级。"""
+    """港股实时行情：Sina → Tencent(QQ) → 东方财富三级降级，通过 SourceRegistry 熔断路由。"""
     if not symbol:
         return []
-    with no_proxy():
-        items = _sina_realtime([symbol], "HK")
-        if items and items[0].get("price"):
-            return items
-        items = _tencent_realtime([symbol], "HK")
-        if items and items[0].get("price"):
-            return items
-        # EM HK spot 是全量接口，本地过滤
-        items = _em_hk_realtime([symbol])
-        return items
+    return registry.route([
+        ("sina", lambda: _filtered(_sina_realtime, [symbol], "HK")),
+        ("tencent", lambda: _filtered(_tencent_realtime, [symbol], "HK")),
+        ("dongfang", lambda: _filtered(_em_hk_realtime, [symbol])),
+    ], route_name="HK_stock_realtime", operation="realtime", target=symbol) or []
 
 
 def fetch_futures_realtime() -> list[dict[str, Any]]:
@@ -485,14 +498,17 @@ def fetch_futures_realtime() -> list[dict[str, Any]]:
 # ── 新浪全球指数实时行情 ──────────────────────────────────
 # 使用 gb_ 前缀查询全球指数，比 yfinance/stooq 更快更稳定（中国大陆）
 _GLOBAL_SINA_MAP: dict[str, str] = {
-    "^GSPC": "gb_$spx",     # 标普500
-    "^IXIC": "gb_$ixic",    # 纳斯达克
-    "^DJI": "gb_$dji",     # 道琼斯
-    "^N225": "gb_$n225",   # 日经225
-    "^HSI": "gb_$hsi",     # 恒生指数
-    "^HSCE": "gb_$hsce",   # 恒生国企指数
+    "^GSPC": "gb_$spx",       # 标普500
+    "^IXIC": "gb_$ixic",      # 纳斯达克
+    "^DJI": "gb_$dji",       # 道琼斯
+    "^N225": "gb_$n225",     # 日经225
+    "^HSI": "gb_$hsi",       # 恒生指数
+    "^HSCE": "gb_$hsce",     # 恒生国企指数
     "^HSTECH": "gb_$hstech", # 恒生科技指数
-    "^KS11": "gb_$ks11",   # 韩国综合指数
+    "^KS11": "gb_$ks11",     # 韩国综合指数
+    "^FTSE": "gb_$ftse",     # 英国富时100
+    "^AXJO": "gb_$axjo",     # 澳洲标普200
+    "^STOXX50E": "gb_$stoxx50e", # 欧洲斯托克50
 }
 # Sina 可用的全球指数代码
 _GLOBAL_SINA_SHORT: dict[str, str] = {
@@ -504,6 +520,9 @@ _GLOBAL_SINA_SHORT: dict[str, str] = {
     "^HSCE": "gb_$hsce",
     "^HSTECH": "gb_$hstech",
     "^KS11": "gb_$ks11",
+    "^FTSE": "gb_$ftse",
+    "^AXJO": "gb_$axjo",
+    "^STOXX50E": "gb_$stoxx50e",
 }
 
 

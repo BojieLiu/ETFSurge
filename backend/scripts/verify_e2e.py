@@ -84,8 +84,21 @@ def section_market():
         check(f"GET /market/indices/global -> {r.status_code}", r.status_code == 200)
         if r.status_code == 200:
             data = r.json()
-            indices = data.get("indices", []) if isinstance(data, dict) else data
-            check(f"指数数据 {len(indices)} 条", len(indices) > 0)
+            regions = data.get("indices", {}) if isinstance(data, dict) else {}
+            # Flatten: count all index entries across all regions
+            all_entries = []
+            for region_list in regions.values():
+                if isinstance(region_list, list):
+                    all_entries.extend(region_list)
+            total_count = len(all_entries)
+            check(f"全球指数共 {total_count} 条（>=13 为完整覆盖）", total_count >= 13)
+            # Verify HK 3 major indices are present
+            hk_symbols = [d.get("symbol", "") for d in all_entries if d.get("region") == "港股" or d.get("name", "").find("恒生") >= 0]
+            has_hsi = any("HSI" in s for s in hk_symbols)
+            has_hsce = any("HSCE" in s for s in hk_symbols)
+            has_hstech = any("HSTECH" in s for s in hk_symbols)
+            check("港股三大指数均覆盖", has_hsi and has_hsce and has_hstech,
+                  f"HSI={'✓' if has_hsi else '✗'} HSCE={'✓' if has_hsce else '✗'} HSTECH={'✓' if has_hstech else '✗'}")
     except requests.Timeout:
         check("GET /market/indices/global", False, "请求超时（30s）")
     except Exception as e:

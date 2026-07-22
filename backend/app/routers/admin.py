@@ -1,10 +1,15 @@
-"""Admin 工具路由 — token 用量监控等。"""
+"""Admin 工具路由 — token 用量监控 / 数据源健康 / 事件记录等。"""
 
 from fastapi import APIRouter, Query
 
 from ..monitor.token_usage import token_store
+from ..monitor.source_events import source_event_store
+from ..services.source_registry import registry
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
+
+
+# ── Token Usage (existing) ──────────────────────────────────────
 
 
 @router.get("/token-usage")
@@ -45,3 +50,50 @@ async def get_token_failures(
 ):
     """返回最近失败的 DeepSeek 调用记录（含错误信息）。"""
     return {"failures": await token_store.recent_failures(limit=limit)}
+
+
+# ── Source Health Monitoring (new) ──────────────────────────────
+
+
+@router.get("/sources/health")
+async def get_sources_health():
+    """返回所有注册数据源的当前健康状态概览。"""
+    states = registry.get_states()
+    import time
+    now = time.time()
+    result = []
+    for name, h in states.items():
+        import threading
+        # Access health state via thread-safe snapshot
+        with h._lock:
+            result.append({
+                "name": name,
+                "available": now >= h._cool_until,
+                "failures": h._failures,
+                "cooldown_remaining": max(0.0, h._cool_until - now),
+                "failure_threshold": h.failure_threshold,
+                "cooldown_secs": h.cooldown,
+            })
+    return result
+
+
+@router.get("/sources/events/timeline")
+async def get_source_events_timeline(
+    hours: float = Query(1, description="回溯小时数", ge=0.1, le=168),
+):
+    """返回数据源事件的时间线（按分钟聚合成功/失败计数）。"""
+    return await source_event_store.timeline(hours=hours)
+
+
+@router.get("/sources/events/failures")
+async def get_source_events_failures(
+    limit: int = Query(10, description="返回最近 N 条失败事件", ge=1, le=100),
+):
+    """返回最近的数据源失败事件。"""
+    return await source_event_store.recent_failures(limit=limit)
+
+
+@router.get("/sources/circuit-breakers")
+async def get_source_circuit_breakers():
+    """返回所有注册数据源的熔断器状态。"""
+    return registry.circuit_breaker_status()

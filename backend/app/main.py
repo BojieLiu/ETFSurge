@@ -13,7 +13,7 @@ from .tasks.news_refresh import refresh_news_cache
 from .monitor.token_usage import token_store
 from .core.logging import get_logger, setup_logging
 from .routers import market, portfolio, analysis, news, ws, admin
-from .services.source_health import register_probe, health_loop
+from .services.source_health import health_loop
 
 logger = get_logger("lifespan")
 
@@ -25,25 +25,39 @@ async def lifespan(app: FastAPI):
     await init_db()
     await redis_cache.init()
 
-    # Register health probes for key data sources
-    from .fetchers.twelvedata_fetcher import fetch_realtime
+    # Register all data-source health probes (7 probes + existing)
+    from .monitor.probes import register_all_probes
+    register_all_probes()
+    logger.info("[health] Registered all data-source probes")
+
+    # Wire SourceEventStore to SourceRegistry for event recording
+    from .monitor.source_events import source_event_store
     from .services.source_registry import registry
+    import asyncio
 
-    async def _register_health_probes():
-        # Twelve Data
-        def _probe_td():
-            return fetch_realtime("SPY")
-        register_probe("twelvedata", _probe_td, timeout=8)
+    def _make_event_callback():
+        def _cb(source_name, route, operation, target, success, duration_ms, error_message):
+            from .monitor.source_events import SourceEvent
+            event = SourceEvent(
+                source_name=source_name,
+                route=route,
+                operation=operation,
+                target=target,
+                success=success,
+                duration_ms=duration_ms,
+                error_message=error_message,
+                timestamp=time.time(),
+            )
+            try:
+                loop = asyncio.get_running_loop()
+                asyncio.run_coroutine_threadsafe(
+                    source_event_store.record(event), loop
+                )
+            except RuntimeError:
+                pass  # No event loop available
+        return _cb
 
-        # Finnhub
-        from .fetchers.finnhub_fetcher import fetch_realtime as fh_realtime
-        def _probe_fh():
-            return fh_realtime("SPY")
-        register_probe("finnhub", _probe_fh, timeout=8)
-
-        logger.info("[health] Registered 2 probes: twelvedata, finnhub")
-
-    await _register_health_probes()
+    registry.set_event_callback(_make_event_callback())
 
     # 启动时后台预热行情缓存（不阻塞启动，25s 超时）
     async def _warmup_market_cache():
@@ -87,6 +101,7 @@ async def lifespan(app: FastAPI):
     if scheduler:
         scheduler.shutdown(wait=False)
     await token_store.shutdown()
+    await source_event_store.shutdown()
     logger.info("应用已关闭")
 
 

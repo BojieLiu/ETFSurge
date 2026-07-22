@@ -47,7 +47,10 @@ def test_run_probes_records_failure_on_empty_result():
             import asyncio
             asyncio.run(run_probes())
 
-    mock_reg._health.return_value.record_failure.assert_called_once_with(100.0)
+    # record_failure now called with route/operation/duration_ms params
+    mock_reg._health.return_value.record_failure.assert_called_once()
+    args, kwargs = mock_reg._health.return_value.record_failure.call_args
+    assert args[0] == 100.0  # first arg is still `now`
 
 
 def test_run_probes_records_failure_on_exception():
@@ -64,7 +67,9 @@ def test_run_probes_records_failure_on_exception():
             import asyncio
             asyncio.run(run_probes())
 
-    mock_reg._health.return_value.record_failure.assert_called_once_with(100.0)
+    mock_reg._health.return_value.record_failure.assert_called_once()
+    args, kwargs = mock_reg._health.return_value.record_failure.call_args
+    assert args[0] == 100.0
 
 
 def test_run_probes_handles_multiple_sources():

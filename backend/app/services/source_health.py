@@ -26,18 +26,32 @@ async def run_probes():
     """遍历所有探针，在独立线程中执行探测函数，记录成败到 SourceRegistry。"""
     now = time.time()
     for name, fn, timeout in _PROBES:
+        t0 = time.perf_counter()
         try:
             result = await asyncio.wait_for(
                 asyncio.to_thread(fn), timeout=timeout
             )
+            elapsed = (time.perf_counter() - t0) * 1000
             if result:
-                registry._health(name).record_success()
-                logger.debug(f"[health] {name} OK")
+                registry._health(name).record_success(
+                    route="probe", operation="probe", target="",
+                    duration_ms=elapsed
+                )
+                logger.debug(f"[health] {name} OK ({elapsed:.0f}ms)")
             else:
-                registry._health(name).record_failure(now)
+                registry._health(name).record_failure(
+                    now, route="probe", operation="probe", target="",
+                    duration_ms=elapsed,
+                    error_message=f"probe returned empty for {name}"
+                )
                 logger.warning(f"[health] {name} returned empty → cooling")
         except Exception as e:
-            registry._health(name).record_failure(now)
+            elapsed = (time.perf_counter() - t0) * 1000
+            registry._health(name).record_failure(
+                now, route="probe", operation="probe", target="",
+                duration_ms=elapsed,
+                error_message=str(e)[:200]
+            )
             logger.warning(f"[health] {name} error: {e}")
 
 

@@ -73,19 +73,26 @@ async def get_commodities() -> list[dict[str, Any]]:
 
 
 _GLOBAL_INDEX_DEFS = [
+    # A 股
     ("000001", "上证指数", "A股"),
     ("399001", "深证成指", "A股"),
     ("399006", "创业板指", "A股"),
     ("000300", "沪深300", "A股"),
     ("000688", "科创50", "A股"),
+    # 港股
     ("^HSI", "恒生指数", "港股"),
     ("^HSCE", "恒生国企指数", "港股"),
     ("^HSTECH", "恒生科技指数", "港股"),
+    # 亚太
     ("^N225", "日经225", "日经"),
     ("^KS11", "韩国综合指数", "韩国"),
+    ("^AXJO", "澳洲标普200", "澳洲"),
+    # 欧美
     ("^GSPC", "标普500", "美股"),
     ("^IXIC", "纳斯达克", "美股"),
     ("^DJI", "道琼斯", "美股"),
+    ("^FTSE", "英国富时100", "欧洲"),
+    ("^STOXX50E", "欧洲斯托克50", "欧洲"),
 ]
 
 
@@ -162,7 +169,6 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
     # 2026-07-20 实测: Sina 0.2s(有数据)/0.2s(空), stooq SSL 超时
     from ..fetchers.china_market import fetch_sina_global_index as sina_index
     from ..fetchers.stooq_fetcher import fetch_global_index_realtime as stooq_index
-    from ..fetchers.yfinance_fetcher import fetch_index_realtime as yf_index
 
     async def _foreign(sym: str, name: str, region: str):
         loop = asyncio.get_running_loop()
@@ -193,18 +199,14 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
         except (asyncio.TimeoutError, Exception):
             pass
 
-        # 第3优先：yfinance（8s 超时，兜底）
+        # 第3优先：Stooq（8s 超时，免费稳定兜底，非交易时段 SSL 握手慢）
         try:
             d = await asyncio.wait_for(
-                loop.run_in_executor(None, functools.partial(yf_index, sym)),
+                loop.run_in_executor(None, functools.partial(stooq_index, sym, name, 8)),
                 timeout=8,
             )
             if d and d.get("price") is not None:
-                d = dict(d)
-                d["name"] = name
                 d["region"] = region
-                d["asset_type"] = "index"
-                d["available"] = True
                 return region, d
         except (asyncio.TimeoutError, Exception):
             pass
@@ -567,30 +569,86 @@ async def get_asset_realtime(symbol: str, asset_type: str) -> dict | None:
 
 
 async def _route_us(symbol: str) -> dict | None:
-    """美股/ETF: Twelve Data → Finnhub → Alpha Vantage → yfinance，通过 SourceRegistry 熔断路由。
+    """美股/ETF: Stooq → Twelve Data → Finnhub，通过 SourceRegistry 熔断路由。
 
-    所有免费源无需代理，自动跳过 key 未设置的源。
+    v2: 移除了 AlphaVantage（25次/天额度太低）和 yfinance（境内不稳定）。
+
+    优先级设计理由:
+    - Stooq（1st）: 免费、无需 API key、中国大陆直连稳定、无速率限制。
+      但非交易时段 SSL 握手可能慢（已设 5s 超时）。
+    - TwelveData（2nd）: 已配 API key，800次/天免费额度。Stooq 失败时兜底。
+    - Finnhub（3rd）: 已配 API key，60次/分钟免费额度。最后兜底。
+
+    Stooq 放在首位是为了优先使用免费无限源，节省 API key 调用额度。
+    TwelveData/Finnhub 均已有 API key，不会自动跳过。
     """
+    from ..fetchers.stooq_fetcher import fetch_us_etf_realtime as stooq_realtime
     from ..fetchers import twelvedata_fetcher
     from ..fetchers import finnhub_fetcher
-    from ..fetchers import alphavantage_fetcher
-    from ..fetchers.yfinance_fetcher import fetch_us_etf_realtime
 
+    def _stooq():
+        return stooq_realtime(symbol)
     def _td():
         return twelvedata_fetcher.fetch_realtime(symbol)
     def _fh():
         return finnhub_fetcher.fetch_realtime(symbol)
-    def _av():
-        return alphavantage_fetcher.fetch_realtime(symbol)
-    def _yf():
-        return fetch_us_etf_realtime(symbol)
 
     return registry.route([
+        ("stooq", _stooq),
         ("twelvedata", _td),
         ("finnhub", _fh),
-        ("alphavantage", _av),
-        ("yfinance", _yf),
-    ])
+    ], route_name="US_ETF", operation="realtime", target=symbol)
+
+
+async def get_us_batch(symbols: list[str]) -> list[dict[str, Any]]:
+    """批量获取美股/ETF 实时行情，通过 SourceRegistry 路由。
+
+    链路: Stooq 批量 → TwelveData 逐个 fallback。
+    """
+    if not symbols:
+        return []
+    from ..fetchers.stooq_fetcher import fetch_us_batch
+    from ..fetchers import twelvedata_fetcher
+
+    def _stooq_batch():
+        return fetch_us_batch(symbols)
+    def _td_batch():
+        out = []
+        for sym in symbols:
+            d = twelvedata_fetcher.fetch_realtime(sym)
+            if d:
+                out.append(d)
+        return out or None
+
+    result = registry.route([
+        ("stooq", _stooq_batch),
+        ("twelvedata", _td_batch),
+    ], route_name="US_batch", operation="batch", target=",".join(symbols))
+    return result or []
+
+
+async def get_us_history(symbol: str, period: str = "daily") -> list[dict[str, Any]]:
+    """美股/ETF 历史 K 线，通过 SourceRegistry 路由。
+
+    链路: Stooq history → 现有 get_history fallback。
+    """
+    if not symbol:
+        return []
+    from ..fetchers.stooq_fetcher import fetch_stooq_history
+    from ..fetchers.china_market import get_k_data
+
+    def _stooq_hist():
+        return fetch_stooq_history(symbol, period)
+    def _ak_fallback():
+        return get_k_data(symbol, period)
+
+    result = registry.route([
+        ("stooq", _stooq_hist),
+    ], route_name="US_history", operation="history", target=symbol)
+    if result:
+        return result
+    # Fallback to async get_history chain
+    return await _call(get_k_data, symbol, period, timeout=15) or []
 
 
 async def get_history(
