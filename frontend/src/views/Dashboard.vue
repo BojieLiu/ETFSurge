@@ -6,13 +6,20 @@
       <GlobalIndicesStrip ref="globalIndicesStripRef" />
 
       <!-- Portfolio Type Tabs -->
-      <AppTabs
-        v-model="activeTab"
-        :tabs="tabs"
-        variant="line"
-        full-width
-        aria-label="组合类型"
-      />
+      <div class="tabs" role="tablist" aria-label="组合类型">
+        <button
+          v-for="tab in tabs"
+          :key="tab.value"
+          :class="['tab', { 'tab--active': activeTab === tab.value }]"
+          @click="activeTab = tab.value"
+          role="tab"
+          :aria-selected="activeTab === tab.value"
+          :aria-controls="`panel-${tab.value}`"
+          :id="`tab-${tab.value}`"
+        >
+          {{ tab.label }}
+        </button>
+      </div>
 
       <CapitalInputBar
         :activeTab="activeTab"
@@ -36,77 +43,68 @@
 
       <!-- Loading Skeletons -->
       <div v-if="loading" class="loading-grid" aria-busy="true" aria-label="加载中">
-        <AppCard variant="default" :padding="false">
-          <AppSkeleton type="chart" height="260" />
-        </AppCard>
-        <AppCard variant="default" :padding="false">
-          <AppSkeleton type="table" rows="6" />
-        </AppCard>
+        <div class="card skeleton-card">
+          <Skeleton type="chart" height="260" />
+        </div>
+        <div class="card skeleton-card">
+          <Skeleton type="table" rows="6" />
+        </div>
       </div>
 
       <!-- Content -->
       <template v-else>
         <!-- On Exchange -->
-        <AppCard
-          v-if="allocationOn?.allocations?.length && (activeTab === 'on_exchange' || activeTab === 'combined')"
-          title="场内 ETF 目标分配"
-          :padding="false"
-        >
-          <template #header-action>
-            <AllocationPieChart :items="allocationOn.allocations" title="场内分配" />
-          </template>
+        <div v-if="allocationOn?.allocations?.length && (activeTab === 'on_exchange' || activeTab === 'combined')" class="content-grid">
+          <AllocationPieChart
+            :items="allocationOn.allocations"
+            title="场内分配"
+          />
           <AllocationTable
             :items="allocationOn.allocations"
             :cashPct="cashPctOn"
             :cashAmount="cashOn"
+            title="场内 ETF 目标分配"
           />
-        </AppCard>
+        </div>
 
         <!-- Off Exchange -->
-        <AppCard
-          v-if="allocationOff?.allocations?.length && (activeTab === 'off_exchange' || activeTab === 'combined')"
-          title="场外 ETF 目标分配"
-          :padding="false"
-        >
-          <template #header-action>
-            <AllocationPieChart :items="allocationOff.allocations" title="场外分配" />
-          </template>
+        <div v-if="allocationOff?.allocations?.length && (activeTab === 'off_exchange' || activeTab === 'combined')" class="content-grid">
+          <AllocationPieChart
+            :items="allocationOff.allocations"
+            title="场外分配"
+          />
           <AllocationTable
             :items="allocationOff.allocations"
             :cashPct="cashPctOff"
             :cashAmount="cashOff"
+            title="场外 ETF 目标分配"
           />
-        </AppCard>
+        </div>
 
         <!-- Empty State -->
-        <AppCard v-if="!allocationOn?.allocations?.length && !allocationOff?.allocations?.length" variant="filled" class="empty-state-card">
-          <template #default>
-            <div class="empty-state">
-              <div class="empty-icon" aria-hidden="true">📊</div>
-              <h3 class="empty-title">暂无组合数据</h3>
-              <p class="empty-description">请前往「组合与分析」添加 ETF</p>
-              <AppButton variant="primary" @click="$router.push('/portfolio-analysis')">
-                前往组合与分析
-              </AppButton>
-            </div>
-          </template>
-        </AppCard>
+        <div v-if="!allocationOn?.allocations?.length && !allocationOff?.allocations?.length" class="empty-state">
+          <div class="empty-icon" aria-hidden="true">📊</div>
+          <h3 class="empty-title">暂无组合数据</h3>
+          <p class="empty-description">请前往「组合与分析」添加 ETF</p>
+          <AppButton variant="primary" @click="$router.push('/portfolio-analysis')">
+            前往组合与分析
+          </AppButton>
+        </div>
 
         <!-- Daily P&L Details -->
-        <AppCard title="每日盈亏明细" :padding="false">
-          <PnLDetailTable
-            :items="pnlItems"
-            :activeTab="activeTab"
-            :pnlTotal="pnlTotal"
-            :pnlTotalAmount="pnlTotalAmount"
-            :pnlWeightedChange="pnlWeightedChange"
-          />
-        </AppCard>
+        <PnLDetailTable
+          :items="pnlItems"
+          :activeTab="activeTab"
+          :pnlTotal="pnlTotal"
+          :pnlTotalAmount="pnlTotalAmount"
+          :pnlWeightedChange="pnlWeightedChange"
+        />
 
         <!-- P&L Bar Chart -->
-        <AppCard title="盈亏分布图" :padding="false">
-          <PnLBarChart :items="pnlItems" :loading="loading" />
-        </AppCard>
+        <PnLBarChart
+          :items="pnlItems"
+          :loading="loading"
+        />
       </template>
     </template>
   </div>
@@ -119,14 +117,13 @@ import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { PieChart, BarChart } from 'echarts/charts'
 import { TitleComponent, TooltipComponent, LegendComponent, GridComponent } from 'echarts/components'
+import VChart from 'vue-echarts'
 import { useMarketStore } from '../stores/market'
 import logger from '../utils/logger'
 import { useDashboardData } from '../composables/useDashboardData'
 import GlobalIndicesStrip from '../components/GlobalIndicesStrip.vue'
 import AppButton from '../components/ui/AppButton.vue'
-import AppCard from '../components/ui/AppCard.vue'
-import AppTabs from '../components/ui/AppTabs.vue'
-import AppSkeleton from '../components/ui/Skeleton.vue'
+import Skeleton from '../components/ui/Skeleton.vue'
 import CapitalInputBar from '../components/dashboard/CapitalInputBar.vue'
 import SummaryCards from '../components/dashboard/SummaryCards.vue'
 import AllocationPieChart from '../components/dashboard/AllocationPieChart.vue'
@@ -210,55 +207,81 @@ function onRetry() {
 .dashboard {
   display: flex;
   flex-direction: column;
-  gap: var(--space-section-md);
+  gap: var(--space-6);
 }
-
+.tabs {
+  display: flex;
+  gap: var(--space-1);
+  background: var(--color-surface-tertiary);
+  padding: var(--space-1);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border-light);
+}
+.tab {
+  flex: 1;
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-md);
+  background: transparent;
+  transition: var(--transition-fast);
+  cursor: pointer;
+  border: none;
+}
+.tab:hover {
+  color: var(--color-text-primary);
+}
+.tab--active {
+  color: var(--color-brand-600);
+  background: var(--color-bg-brand-subtle);
+}
+.tab:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+.content-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-5);
+}
+@media (max-width: 1024px) {
+  .content-grid { grid-template-columns: 1fr; }
+}
 .loading-grid {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: var(--space-gap-md);
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-5);
 }
-
-@media (min-width: 1024px) {
-  .loading-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
+@media (max-width: 1024px) {
+  .loading-grid { grid-template-columns: 1fr; }
 }
-
-.empty-state-card {
-  padding: var(--space-section-xl);
+.skeleton-card {
+  padding: var(--space-5);
 }
-
+.card {
+  background: var(--color-surface-primary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+/* Empty State */
 .empty-state {
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
+  padding: var(--space-12) var(--space-6);
   text-align: center;
-  gap: var(--space-gap-md);
-  color: var(--color-text-secondary);
+  background: var(--color-surface-secondary);
+  border: 2px dashed var(--color-border-medium);
+  border-radius: var(--radius-xl);
 }
-
-.empty-icon {
-  font-size: 48px;
-  opacity: 0.5;
-}
-
-.empty-title {
-  margin: 0;
-  font: var(--text-h3);
-  color: var(--color-text-primary);
-}
-
-.empty-description {
-  margin: 0;
-  font: var(--text-body);
-  max-width: 300px;
-}
-
-/* AppTab integration styles */
-.tabs__tab {
-  padding: var(--space-2) var(--space-4);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
+.empty-icon { font-size: var(--font-size-5xl); line-height: 1; margin-bottom: var(--space-4); }
+.empty-title { margin: 0 0 var(--space-2); font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
+.empty-description { margin: 0 0 var(--space-6); font-size: var(--font-size-base); color: var(--color-text-secondary); max-width: 300px; }
+@media (max-width: 480px) {
+  .tabs { flex-wrap: wrap; gap: var(--space-2); }
 }
 </style>
