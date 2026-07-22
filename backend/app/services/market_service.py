@@ -324,7 +324,9 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
                     if sym in new_items:
                         new_item = new_items.pop(sym)
                         old_price = old.get("price")
-                        if old_price is not None and old_price > 0:
+                        # Only keep the old price if it came from a live source;
+                        # allow seed/cached data (available=False) to be replaced by live data.
+                        if old.get("available") and old_price is not None and old_price > 0:
                             continue
                         merged[region][i] = new_item
                 for item in items:
