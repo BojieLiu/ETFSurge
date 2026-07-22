@@ -38,7 +38,7 @@ const chartOption = computed(() => ({
     labelLine: { show: false },
     data: (props.items || []).map(a => ({
       value: a.target_amount,
-      name: `${a.symbol} (${(a.target_weight * 100).toFixed(1)}%)`
+      name: `${a.name} (${(a.target_weight * 100).toFixed(1)}%)`
     }))
   }],
   color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#eab308']
