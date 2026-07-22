@@ -1,5 +1,17 @@
 <template>
   <div class="portfolio-analysis">
+    <!-- Capital Input -->
+    <CapitalInputBar
+      :activeTab="'combined'"
+      :capitalOn="store.capitalOn"
+      :capitalOff="store.capitalOff"
+      @update:capitalOn="store.capitalOn = $event"
+      @update:capitalOff="store.capitalOff = $event"
+      @refresh="refreshData"
+      @refresh-on="refreshOn"
+      @refresh-off="refreshOff"
+    />
+
     <!-- Tab Navigation -->
     <div class="pa-tabs" role="tablist" aria-label="功能切换">
       <button
@@ -37,11 +49,12 @@ import { ref, onMounted } from 'vue'
 import DashboardAiTools from '../views/DashboardAiTools.vue'
 import PortfolioManager from './PortfolioManager.vue'
 import AnalysisView from './AnalysisView.vue'
+import CapitalInputBar from './dashboard/CapitalInputBar.vue'
 import { usePortfolioStore } from '../stores/portfolio'
 
 const store = usePortfolioStore()
 const selectedHolding = ref('')
-const activeTab = ref('tools')
+const activeTab = ref('holdings')
 
 const tabs = [
   { value: 'tools', label: 'AI工具', icon: '⚡' },
@@ -56,6 +69,14 @@ function onSelect(etf) {
 function refreshData() {
   store.fetchEtfs()
   store.fetchEtfs('on_exchange')
+  store.fetchEtfs('off_exchange')
+}
+
+function refreshOn() {
+  store.fetchEtfs('on_exchange')
+}
+
+function refreshOff() {
   store.fetchEtfs('off_exchange')
 }
 

@@ -24,7 +24,8 @@
 |------|------|
 | `design-optimization-plan.md` | `strategy_design.py` 重构 156 行（原 1092 行），纯函数策略引擎 `engine/` 包就绪 |
 | `frontend-architecture-refactor.md` | 4 个大组件拆为 22 个子组件，composables 抽取完成 |
-| `issues-analysis-report.md` | 17 个问题已在多轮 commit 中修复 |
+| `issues-analysis-report.md` | 问题分析文档，对应的修复已在后续多轮 commit 中落地 |
+| `five-improvements-plan.md` | 5 项改进全部实现 (`filter_extreme_drawdown` + `check_defense_effectiveness` + `remove_stale_candidates` + `_layer_phrase` 模板多样化 + 统一市态 `get_market_regime`)，见 `engine/risk_controls.py` + `engine/rationale.py` |
 
 ### 1.2 部分完成
 
@@ -41,6 +42,7 @@
 |------|--------|---------|
 | `fix-global-indices-plan.md` | **P0** | 无（独立） |
 | `sector-concept-optimization-plan.md` | **P0** | 无（独立） |
+| `optimization-plan-20260721.md` | **P0** | 数据管道/策略检查/历史记录链路修复，backend + frontend 多处改动 |
 | `frontend-ui-optimization-plan.md` | **P1** | 曾实现后回滚，需重新实施 |
 | `frontend-testing-safety-net.md` | **P1** | 前端架构重构已就绪 |
 | `frontend-performance-optimization.md` | **P1** | 无（独立） |
@@ -143,7 +145,6 @@ Sina(4s) → TwelveData(6s) → Finnhub(6s) → Stooq(8s) → placeholder
 
 | 文档 | 替代状态 | 替代者 |
 |------|---------|--------|
-| `optimization-plan-20260721.md` | P1-P6 已在多轮 commit 中修复，该方案已被 issues-analysis-report 的三轮修复替代 | `issues-analysis-report.md`（已实施） |
 | `review-20260720.md` | 仅为评审报告，非实施方案 | N/A |
 
 ---
@@ -173,7 +174,6 @@ Sina(4s) → TwelveData(6s) → Finnhub(6s) → Stooq(8s) → placeholder
 
 | 文档 | 标记 | 替代文档 |
 |------|------|---------|
-| `optimization-plan-20260721.md` | 已全部修复 | `issues-analysis-report.md` + 相关 commit |
 | `review-20260720.md` | 评审记录 | N/A |
 
 ### 3.4 增量阶段划分建议
@@ -197,6 +197,28 @@ Sina(4s) → TwelveData(6s) → Finnhub(6s) → Stooq(8s) → placeholder
 | 0.5 | GlobalIndicesStrip 补 CSS 样式 | fix-global-indices-plan.md | 0.5h | 组件样式缺失 |
 
 **验证**: verify_e2e.py + 浏览器打开 Dashboard 确认全球指数可显示
+
+### Phase 0.5 — 核心链路修复（P0，数据管道 + 策略检查 + 历史记录）
+
+**来源**: `optimization-plan-20260721.md`
+
+**目标**: 修复智能组合设计/策略检查/历史记录三大核心功能的 P0/P1 阻塞问题
+
+| # | 任务 | 文件 | 改动 | 预估工时 |
+|---|------|------|------|---------|
+| 0.5.1 | ETF 缓存 TTL 修正 + last-good 兜底 | `etf_scanner.py` | `CACHE_TTL.get("etf_scanner", 120)` → `CACHE_TTL["etf_list"]`；模块级 `_last_good_etfs` 兜底 | 1h |
+| 0.5.2 | East Money 直连 HTTP 新数据源 | `etf_scanner.py` | 新增 `_fetch_em_etf_list()` 直连东方财富 push2 API 获取全量 ETF 列表 | 2h |
+| 0.5.3 | akshare timeout 延长 + ETF 缓存预热 | `etf_scanner.py` + `main.py` | ak 超时 8→25s；启动时 `_warmup_etf_cache()` | 0.5h |
+| 0.5.4 | 策略检查 taskStatus props 补齐 | `DashboardAiTools.vue` | `StrategyCheckResult` 加 `task-status` / `task-progress` / `task-stage` prop 传递 | 1h |
+| 0.5.5 | task.error → task.error_message 兼容 | `DashboardAiTools.vue` + `strategy_check_worker.py` | 前端读 `task.error_message || task.error || fallback`；后端 worker 从 `task.params` 读 `portfolio_type` | 1h |
+| 0.5.6 | 历史记录 Promise.all 加 catch 隔离 | `DashboardAiTools.vue` + `portfolio.py` | `Promise.all([...].map(p => p.catch(...)))`；`list_strategy_checks` 加异常保护 | 1h |
+| 0.5.7 | 模型新增 status/error_message 字段 | `portfolio_design.py` + `task_manager.py` | `PortfolioDesign.status` / `error_message`；保存时写入状态；路由返回 status | 1.5h |
+| 0.5.8 | 前端历史记录状态徽标 + 运行中合并 | `DesignHistory.vue` + `DashboardAiTools.vue` | 状态徽标渲染；`loadHistoryList` 合并 running 任务；`onHistorySelect` 类型分发 | 2h |
+
+**验证**:
+- 设计生成：输入金额 → 生成三套方案 → 自动跳转结果页
+- 策略检查：弹窗选择组合类型 → 不白屏 → 不超时 → 按所选组合执行
+- 历史记录：加载不因任一路径失败整体白屏；状态徽标正确显示
 
 ### Phase 1 — 数据层修复（P0 阻塞）
 
@@ -303,7 +325,7 @@ Sina(4s) → TwelveData(6s) → Finnhub(6s) → Stooq(8s) → placeholder
 | frontend-ui-optimization-plan.md | 优化方案 | ❌ 已回滚 | ~200 行 | 全部前端视图 |
 | issues-analysis-report.md | 问题分析 | ✅ 已修复 | - | 全局 |
 | market-awareness-and-data-source-plan.md | 实施方案 | ❌ 未实施 | ~500 行 | 路由 + Service + LLM |
-| optimization-plan-20260721.md | 实施方案 | ✅ 已修复 | - | 被 issues-analysis 替代 |
+| optimization-plan-20260721.md | 实施方案 | ❌ 未实施 | ~80 行 | etf_scanner + strategy_check_worker + DesignHistory + 前端 DashboardAiTools |
 | review-20260720.md | 评审报告 | N/A | - | N/A |
 | sector-concept-optimization-plan.md | 实施方案 | ❌ 未实施 | ~300 行 | market_trends + pool_manager + llm.py |
 | source-registry-optimization-plan.md | 实施方案 | ❌ 未实施 | ~70 行 | china_market + main.py |

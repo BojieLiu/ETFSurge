@@ -1,8 +1,13 @@
 # 全球指数展示无数据 — 根因分析与修复方案
 
-> 生成日期: 2026-07-22 | 版本: v2（Review #1 after self-review）
-> 状态: **已修订 — 待二次 Review**
+> 生成日期: 2026-07-22 | 版本: v3（实施总计划冲突修复）
+> 状态: **已根据 implementation-master-plan.md §3.2 统一降级链路**
 > 范围: 前端 GlobalIndicesStrip + 后端 `get_global_indices()` 全链路
+>
+> **2026-07-22 更新**: 根据 `docs/implementation-master-plan.md` §3.2 决议，
+> 将海外指数降级链统一为 `Sina(4s) → TwelveData(6s) → Finnhub(6s) → Stooq(8s) → placeholder`，
+> 移除 yfinance。此链路已在 `docs/roadmap-data-source-unified.md` Phase A 中作为标准链路锁定。
+> 实施时以该统一链路为准，参见 `roadmap-data-source-unified.md` Phase A4。
 
 ---
 
@@ -120,10 +125,16 @@ return regions
 | 降级层 | 超时 | 备注 |
 |--------|------|------|
 | Sina | 4s | 国内实测 0.2s，但非交易时段可能返回空格式 |
-| Stooq | 6s | 代码注释承认「SSL 握手慢」 |
-| Yfinance | 8s | 中国大陆无代理可能被墙 |
+| Twelve Data | 6s | 新增层，已有 API key 配置，直连稳定 |
+| Finnhub | 6s | 新增层，已有 API key 配置，直连稳定 |
+| Stooq | 8s | 代码注释承认「SSL 握手慢」，降到最后一位 |
 
-**最坏单 symbol 等待**: 4+6+8 = 18s。7 个 symbol 并行执行，总耗时约 18s。
+> **链路变更说明**: 原链为 `Sina → Stooq → Yfinance`。根据 `implementation-master-plan.md` §3.2 决议，
+> 统一为 `Sina → TwelveData → Finnhub → Stooq`。yfinance 移出链路（中国大陆无代理不可用），
+> TwelveData + Finnhub 补位（代码已存在、直连稳定、有 API key 时自动启用）。
+> 详细合并方案见 `docs/roadmap-data-source-unified.md` Phase A。
+
+**最坏单 symbol 等待**: 4+6+6+8 = 24s。7 个 symbol 并行执行，总耗时约 24s。
 
 虽然 `_foreign()` 的 fallback 最终会返回 placeholder（`available: False`），确保 `regions` 不为空，但：
 - 18s 的响应时间接近前端 axios 60s timeout 的边缘——若加上 A 股请求时间，整体可能超过 25s
@@ -265,9 +276,14 @@ except (asyncio.TimeoutError, Exception) as e:
 
 ### Fix #5: 新增数据源降级层（Twelve Data + Finnhub）
 
-**背景**: 当前 `_foreign()` 仅 3 层降级（Sina → Stooq → Yfinance），全部免费无 key。在中国网络环境下，Sina
-可能空响应、Stooq SSL 慢、Yfinance 被墙——三层同时失效的概率不低。项目中已有多个配置了 API key 的第三方数据源
-（Twelve Data / Finnhub / Alpha Vantage），其中两个适合加入全球指数的降级链路。
+**背景**: 当前 `_foreign()` 原为 3 层降级（Sina → Stooq → Yfinance），全部免费无 key。
+根据 `implementation-master-plan.md` §3.2 决议，统一为 4 层链路：
+`Sina(4s) → TwelveData(6s) → Finnhub(6s) → Stooq(8s) → placeholder`。
+此 Fix 对应 TwelveData + Finnhub 两层的实现细节。yfinance 从链路中移除（中国大陆无代理不可用），
+Stooq 降为末位（SSL 握手慢）。
+
+**注意**: 此链路已是 `docs/roadmap-data-source-unified.md` Phase A 中的标准链路。
+实施时以该合并方案为准，避免重复修改。
 
 #### 候选数据源评估
 

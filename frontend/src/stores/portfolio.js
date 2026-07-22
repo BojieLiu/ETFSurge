@@ -9,6 +9,8 @@ export const usePortfolioStore = defineStore('portfolio', () => {
   const strategyResult = ref(null)
   const pnlHistory = ref(null)
   const driftCheck = ref(null)
+  const capitalOn = ref(500000)
+  const capitalOff = ref(500000)
 
   async function fetchEtfs(type) {
     const res = await portfolioApi.list(type)
@@ -70,6 +72,7 @@ export const usePortfolioStore = defineStore('portfolio', () => {
   return {
     etfs, onExchange, offExchange, strategyResult,
     pnlHistory, driftCheck,
+    capitalOn, capitalOff,
     fetchEtfs, addEtf, updateEtf, removeEtf,
     fetchDailyPnl, fetchPnLHistory, fetchDriftCheck,
     exportPortfolio, importPortfolio,

@@ -21,14 +21,7 @@
         </button>
       </div>
 
-      <CapitalInputBar
-        :activeTab="activeTab"
-        :capitalOn="capitalOn"
-        :capitalOff="capitalOff"
-        @update:capitalOn="capitalOn = $event"
-        @update:capitalOff="capitalOff = $event"
-        @refresh="refreshAll"
-      />
+      <!-- Capital input moved to Portfolio Analysis -->
 
       <SummaryCards
         :activeTab="activeTab"
@@ -119,12 +112,13 @@ import { PieChart, BarChart } from 'echarts/charts'
 import { TitleComponent, TooltipComponent, LegendComponent, GridComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
 import { useMarketStore } from '../stores/market'
+import { usePortfolioStore } from '../stores/portfolio'
+import { storeToRefs } from 'pinia'
 import logger from '../utils/logger'
 import { useDashboardData } from '../composables/useDashboardData'
 import GlobalIndicesStrip from '../components/GlobalIndicesStrip.vue'
 import AppButton from '../components/ui/AppButton.vue'
 import Skeleton from '../components/ui/Skeleton.vue'
-import CapitalInputBar from '../components/dashboard/CapitalInputBar.vue'
 import SummaryCards from '../components/dashboard/SummaryCards.vue'
 import AllocationPieChart from '../components/dashboard/AllocationPieChart.vue'
 import AllocationTable from '../components/dashboard/AllocationTable.vue'
@@ -137,9 +131,10 @@ use([CanvasRenderer, PieChart, BarChart, TitleComponent, TooltipComponent, Legen
 
 // UI state
 const activeTab = ref('combined')
-const capitalOn = ref(500000)
-const capitalOff = ref(500000)
 const renderError = ref(false)
+
+// Shared capital from store (set in Portfolio Analysis page)
+const { capitalOn, capitalOff } = storeToRefs(usePortfolioStore())
 
 const route = useRoute()
 
