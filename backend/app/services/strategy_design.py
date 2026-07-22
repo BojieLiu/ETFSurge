@@ -65,6 +65,7 @@ async def generate_enhanced_design(
     try:
         # 3. 策略引擎：一次调用生成所有方案
         strategies_raw = engine_allocate(
+            risk_profile="balanced",
             factor_matrix=factor_matrix,
             candidates=candidates,
             regime=market_regime,
