@@ -13,31 +13,36 @@
       </div>
     </div>
 
-    <div v-if="hasIndices" class="indices-grid">
-      <div
-        class="index-card"
-        v-for="idx in flatIndices"
-        :key="idx.symbol"
-        :class="[
-          regionClass(idx.region),
-          { stale: !idx.available && idx.price != null }
-        ]"
-      >
-        <div class="card-top">
-          <span class="cd-dot" :class="regionClass(idx.region)"></span>
-          <span class="cd-name">{{ idx.name }}</span>
-          <span v-if="!idx.available && idx.price != null" class="cd-stale">已收盘</span>
-        </div>
-        <div class="card-body">
-          <span class="cd-price" v-if="idx.price != null">{{ formatPrice(idx.price) }}</span>
-          <span class="cd-price muted" v-else>—</span>
-          <span class="cd-change" v-if="idx.change_pct != null" :class="changeClass(idx.change_pct)">
-            <span class="ca" v-if="idx.change_pct > 0">▲</span>
-            <span class="ca" v-else-if="idx.change_pct < 0">▼</span>
-            {{ formatChange(idx.change_pct) }}
-          </span>
-          <span class="cd-change muted" v-else-if="idx.price != null">上日收盘</span>
-          <span class="cd-change muted" v-else>—</span>
+    <div v-if="hasIndices">
+      <div class="region-row" v-for="(items, region) in groupedIndices" :key="region">
+        <div class="region-label" :class="'label-' + regionClass(items[0] && items[0].region)">{{ region }}</div>
+        <div class="indices-grid">
+          <div
+            class="index-card"
+            v-for="idx in items"
+            :key="idx.symbol"
+            :class="[
+              regionClass(idx.region),
+              { stale: !idx.available && idx.price != null }
+            ]"
+          >
+            <div class="card-top">
+              <span class="cd-dot" :class="regionClass(idx.region)"></span>
+              <span class="cd-name">{{ idx.name }}</span>
+              <span v-if="!idx.available && idx.price != null" class="cd-stale">已收盘</span>
+            </div>
+            <div class="card-body">
+              <span class="cd-price" v-if="idx.price != null">{{ formatPrice(idx.price) }}</span>
+              <span class="cd-price muted" v-else>—</span>
+              <span class="cd-change" v-if="idx.change_pct != null" :class="changeClass(idx.change_pct)">
+                <span class="ca" v-if="idx.change_pct > 0">▲</span>
+                <span class="ca" v-else-if="idx.change_pct < 0">▼</span>
+                {{ formatChange(idx.change_pct) }}
+              </span>
+              <span class="cd-change muted" v-else-if="idx.price != null">上日收盘</span>
+              <span class="cd-change muted" v-else>—</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -58,8 +63,18 @@ const props = defineProps({
   },
 })
 
+const regionOrder = ['A股', '港股', '日经', '韩国', '澳洲', '美股', '欧洲']
+
 const hasIndices = computed(() => Object.keys(props.globalIndices).length > 0)
-const flatIndices = computed(() => Object.values(props.globalIndices).flat())
+const groupedIndices = computed(() => {
+  const groups = {}
+  for (const r of regionOrder) {
+    if (props.globalIndices[r]) {
+      groups[r] = props.globalIndices[r]
+    }
+  }
+  return groups
+})
 
 function formatPrice(v) { return v != null ? v.toFixed(2) : '—' }
 function formatChange(pct) { return pct != null ? (pct > 0 ? '+' : '') + pct.toFixed(2) + '%' : '—' }
@@ -125,6 +140,25 @@ function regionClass(region) {
   background: var(--color-success-500);
   display: inline-block;
 }
+
+/* ── Region row: label + cards ── */
+.region-row { margin-bottom: 10px; }
+
+.region-label {
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: var(--letter-spacing-wide);
+  margin-bottom: 6px;
+  padding: 0 2px;
+}
+.region-label.label-region-a { color: #e53935; }
+.region-label.label-region-hk { color: #8e24aa; }
+.region-label.label-region-jp { color: #f57c00; }
+.region-label.label-region-kr { color: #43a047; }
+.region-label.label-region-au { color: #1e88e5; }
+.region-label.label-region-us { color: #fbc02d; }
+.region-label.label-region-eu { color: #00acc1; }
 
 /* ── Card grid: wrap, generous spacing ── */
 .indices-grid {

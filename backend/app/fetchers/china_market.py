@@ -508,6 +508,8 @@ _GLOBAL_SINA_MAP: dict[str, str] = {
     "^KS11": "gb_$ks11",     # 韩国综合指数
     "^FTSE": "gb_$ftse",     # 英国富时100
     "^AXJO": "gb_$axjo",     # 澳洲标普200
+    "^GDAXI": "gb_$dax",     # 德国DAX
+    "^FCHI": "gb_$fchi",     # 法国CAC40
     "^STOXX50E": "gb_$stoxx50e", # 欧洲斯托克50
 }
 # Sina 可用的全球指数代码
@@ -522,6 +524,8 @@ _GLOBAL_SINA_SHORT: dict[str, str] = {
     "^KS11": "gb_$ks11",
     "^FTSE": "gb_$ftse",
     "^AXJO": "gb_$axjo",
+    "^GDAXI": "gb_$dax",
+    "^FCHI": "gb_$fchi",
     "^STOXX50E": "gb_$stoxx50e",
 }
 
