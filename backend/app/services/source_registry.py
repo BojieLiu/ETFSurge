@@ -43,6 +43,20 @@ class SourceHealth:
                 self._failures = 0
         self._emit_event(route, operation, target, False, duration_ms, error_message)
 
+    def record_hard_failure(self, now: float, route: str = "",
+                            operation: str = "realtime", target: str = "",
+                            duration_ms: float = 0.0,
+                            error_message: str = "") -> None:
+        """Immediate cooling — for HTTP 4xx/5xx where the source is clearly dead.
+
+        Skips failure_threshold counting: goes straight to cooldown.
+        """
+        with self._lock:
+            self._cool_until = now + self.cooldown
+            self._failures = 0
+        self._emit_event(route, operation, target, False, duration_ms,
+                         f"[HARD] {error_message}")
+
     def set_on_event(self, cb: Optional[Callable]) -> None:
         self._on_event = cb
 
@@ -103,6 +117,12 @@ class SourceRegistry:
 
         返回第一个成功(非 None 且非异常)的结果;全部失败返回 None。
         熔断中的源会被直接跳过。
+
+        Provider 可以返回:
+        - 原始数据: 成功时返回非空值,失败返回 None/[]。
+        - (data, http_status) 元组: data 为实际返回值或 None,
+          http_status 为 HTTP 状态码(0 表示非 HTTP 错误)。
+          当 http_status >= 400 时,触发硬失败立即冷却该源。
         """
         now = time.time()
         last_exc: Optional[BaseException] = None
@@ -114,10 +134,23 @@ class SourceRegistry:
             try:
                 result = fn()
                 elapsed = (time.perf_counter() - t0) * 1000
-                if result:  # 空列表/None 视为该源未提供数据,继续下一个
+                # 支持 (data, http_status) 元组
+                http_status = 0
+                if isinstance(result, tuple) and len(result) == 2:
+                    data, http_status = result
+                else:
+                    data = result
+                # HTTP 4xx/5xx: 硬失败,立即冷却,不尝试下游
+                if http_status >= 400:
+                    h.record_hard_failure(now, route=route_name,
+                                          operation=operation, target=target,
+                                          duration_ms=elapsed,
+                                          error_message=f"HTTP {http_status} from {name}")
+                    continue
+                if data:  # 空列表/None 视为该源未提供数据,继续下一个
                     h.record_success(route=route_name, operation=operation,
                                      target=target, duration_ms=elapsed)
-                    return result
+                    return data
                 h.record_failure(now, route=route_name, operation=operation,
                                  target=target, duration_ms=elapsed,
                                  error_message=f"empty result from {name}")

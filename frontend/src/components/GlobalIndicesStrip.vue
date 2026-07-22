@@ -6,13 +6,10 @@
         全球主流指数
       </h2>
       <div class="card-actions-compact">
-        <span class="status-badge" v-if="timer" aria-live="polite">
+        <span class="status-badge" aria-live="polite">
           <span class="status-dot" aria-hidden="true"></span>
           自动刷新
         </span>
-        <AppButton variant="ghost" size="xs" @click="fetchIndices" :loading="loading">
-          刷新
-        </AppButton>
       </div>
     </div>
 
@@ -39,48 +36,22 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { marketApi } from '../api'
+import { computed } from 'vue'
 import { changeClass } from '../utils/changeClass'
-import AppButton from './ui/AppButton.vue'
+// AppButton removed — component is now pure display, parent manages auto-refresh
 
-const emit = defineEmits(['fetch'])
+// 纯展示组件：数据由父组件（Dashboard）通过 prop 传入，
+// 不再自己拉取。避免与父组件 composable 产生两个不同步的数据源。
+const props = defineProps({
+  globalIndices: {
+    type: Object,
+    default: () => ({}),
+  },
+})
 
-const globalIndices = ref({})
-const loading = ref(false)
-const timer = ref(null)
-
-const hasIndices = computed(() => Object.keys(globalIndices.value).length > 0)
-const flatIndices = computed(() => Object.values(globalIndices.value).flat())
+const hasIndices = computed(() => Object.keys(props.globalIndices).length > 0)
+const flatIndices = computed(() => Object.values(props.globalIndices).flat())
 
 function formatPrice(v) { return v != null ? v.toFixed(2) : '—' }
 function formatChange(pct) { return pct != null ? (pct > 0 ? '+' : '') + pct.toFixed(2) + '%' : '—' }
-
-async function fetchIndices() {
-  loading.value = true
-  try {
-    const res = await marketApi.indicesGlobal()
-    globalIndices.value = res.data?.indices || res.data || {}
-    emit('fetch', globalIndices.value)
-  } catch (e) {
-    globalIndices.value = {}
-  } finally {
-    loading.value = false
-  }
-}
-
-function refresh() {
-  fetchIndices()
-}
-
-// Auto-fetch on mount (was missing: caused "暂无数据" on every load)
-onMounted(() => {
-  fetchIndices()
-})
-
-onUnmounted(() => {
-  if (timer.value) clearInterval(timer.value)
-})
-
-defineExpose({ refresh })
 </script>

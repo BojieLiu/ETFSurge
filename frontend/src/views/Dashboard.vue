@@ -3,7 +3,7 @@
     <ErrorOverlay :hasError="renderError" @retry="onRetry" />
 
     <template v-if="!renderError">
-      <GlobalIndicesStrip ref="globalIndicesStripRef" />
+      <GlobalIndicesStrip :globalIndices="globalIndices" />
 
       <!-- Portfolio Type Tabs -->
       <div class="tabs" role="tablist" aria-label="组合类型">
@@ -158,7 +158,6 @@ const tabs = [
   { value: 'off_exchange', label: '场外' }
 ]
 
-const globalIndicesStripRef = ref(null)
 const marketTimer = ref(null)
 const marketStore = useMarketStore()
 
