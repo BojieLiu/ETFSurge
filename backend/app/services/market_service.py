@@ -163,6 +163,7 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
             item["name"] = name
             item["region"] = region
             item["asset_type"] = "index"
+            item["available"] = True  # 前端 GlobalIndicesStrip 用 v-if="idx.available" 判断
             regions.setdefault(region, []).append(item)
         else:
             # Placeholder when all data sources fail (e.g. off-hours)
@@ -195,6 +196,7 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
             if d and d.get("price") is not None:
                 d["name"] = name
                 d["region"] = region
+                d["available"] = True  # 前端判断用
                 return region, d
         except (asyncio.TimeoutError, Exception):
             pass
@@ -208,6 +210,7 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
             if d and d.get("price") is not None:
                 d["name"] = name
                 d["region"] = region
+                d["available"] = True  # 前端判断用
                 return region, d
         except (asyncio.TimeoutError, Exception):
             pass
