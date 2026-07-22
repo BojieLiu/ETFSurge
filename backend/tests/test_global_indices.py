@@ -1,6 +1,6 @@
 """TDD tests for global indices — HK 3 major indices + expanded global coverage.
 
-Mocks Sina (first-tier) and Stooq (fallback) instead of yfinance.
+Mocks Sina (first-tier) and TwelveData (fallback, replaces Stooq which died).
 """
 from unittest.mock import AsyncMock, patch
 
@@ -68,15 +68,15 @@ async def test_global_indices_foreign_returns_data():
             assert item["change_pct"] is not None
 
 
-async def test_global_indices_sina_fails_stooq_fallback():
-    """When Sina fails, Stooq should serve as fallback for foreign indices."""
+async def test_global_indices_sina_fails_twelve_fallback():
+    """When Sina fails, TwelveData should serve as fallback for foreign indices."""
     defs = [("^GSPC", "标普500", "美股")]
 
     def fake_sina(sym):
         return None  # Sina fails
 
-    def fake_stooq(sym, name, timeout):
-        return {"symbol": sym, "name": name, "price": 4500.0, "change_pct": -0.2, "asset_type": "index", "available": True}
+    def fake_twelve(sym):
+        return {"symbol": sym, "price": 4500.0, "change_pct": -0.2, "available": True}
 
     # Clear module-level cache before test
     ms._global_indices_cache.clear()
@@ -86,8 +86,8 @@ async def test_global_indices_sina_fails_stooq_fallback():
          patch("app.fetchers.china_market.fetch_index_realtime", return_value=[]), \
          patch("app.fetchers.china_market.fetch_sina_global_index",
                side_effect=fake_sina), \
-         patch("app.fetchers.stooq_fetcher.fetch_global_index_realtime",
-               side_effect=fake_stooq):
+         patch("app.fetchers.twelvedata_fetcher.fetch_realtime",
+               side_effect=fake_twelve):
         regions = await ms.get_global_indices()
 
     us = [d for d in regions.get("美股", []) if d["symbol"] == "^GSPC"]
@@ -104,9 +104,9 @@ async def test_global_indices_one_region_failure_isolated():
             return {"symbol": sym, "price": 25000.0, "change_pct": 0.3, "available": True}
         return None  # US fails
 
-    def fake_stooq(sym, name, timeout):
+    def fake_twelve(sym):
         if sym == "^GSPC":
-            return {"symbol": sym, "name": name, "price": 4500.0, "change_pct": -0.2, "asset_type": "index", "available": True}
+            return {"symbol": sym, "price": 4500.0, "change_pct": -0.2, "available": True}
         return None
 
     # Clear cache before test
@@ -117,8 +117,8 @@ async def test_global_indices_one_region_failure_isolated():
          patch("app.fetchers.china_market.fetch_index_realtime", return_value=[]), \
          patch("app.fetchers.china_market.fetch_sina_global_index",
                side_effect=fake_sina), \
-         patch("app.fetchers.stooq_fetcher.fetch_global_index_realtime",
-               side_effect=fake_stooq):
+         patch("app.fetchers.twelvedata_fetcher.fetch_realtime",
+               side_effect=fake_twelve):
         regions = await ms.get_global_indices()
 
     hk = [d for d in regions.get("港股", []) if d["symbol"] == "^HSI"]
@@ -137,7 +137,7 @@ async def test_global_indices_all_sources_fail_graceful():
     def fake_sina(sym):
         return None
 
-    def fake_stooq(sym, name, timeout):
+    def fake_twelve(sym):
         return None
 
     # Clear cache before test
@@ -148,8 +148,8 @@ async def test_global_indices_all_sources_fail_graceful():
          patch("app.fetchers.china_market.fetch_index_realtime", return_value=[]), \
          patch("app.fetchers.china_market.fetch_sina_global_index",
                side_effect=fake_sina), \
-         patch("app.fetchers.stooq_fetcher.fetch_global_index_realtime",
-               side_effect=fake_stooq):
+         patch("app.fetchers.twelvedata_fetcher.fetch_realtime",
+               side_effect=fake_twelve):
         regions = await ms.get_global_indices()
 
     hk = [d for d in regions.get("港股", []) if d["symbol"] == "^HSI"]

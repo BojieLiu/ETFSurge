@@ -178,16 +178,15 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
             }
             regions.setdefault(region, []).append(item)
 
-    # 海外指数：Sina（实测 0.2s）→ stooq（SSL 慢）→ yfinance（兜底）
-    # 2026-07-20 实测: Sina 0.2s(有数据)/0.2s(空), stooq SSL 超时
+    # 海外指数：Sina（4s）→ TwelveData（4s）→ 占位
     from ..fetchers.china_market import fetch_sina_global_index as sina_index
-    from ..fetchers.stooq_fetcher import fetch_global_index_realtime as stooq_index
+    from ..fetchers import twelvedata_fetcher
 
     async def _foreign(sym: str, name: str, region: str):
         loop = asyncio.get_running_loop()
         import functools
 
-        # 第1优先：新浪（4s 超时，实测 0.2s，中国大陆最稳定）
+        # 第1优先：新浪 Sina（4s 超时，中国大陆免费最稳定）
         try:
             d = await asyncio.wait_for(
                 loop.run_in_executor(None, functools.partial(sina_index, sym)),
@@ -200,31 +199,20 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
         except (asyncio.TimeoutError, Exception):
             pass
 
-        # 第2优先：stooq（6s 超时，免费但非交易时段 SSL 握手慢）
+        # 第2优先：TwelveData（4s，已有 API key，非交易时段有缓存数据）
         try:
             d = await asyncio.wait_for(
-                loop.run_in_executor(None, functools.partial(stooq_index, sym, name, 6)),
-                timeout=6,
+                loop.run_in_executor(None, functools.partial(twelvedata_fetcher.fetch_realtime, sym)),
+                timeout=4,
             )
             if d and d.get("price") is not None:
+                d["name"] = name
                 d["region"] = region
                 return region, d
         except (asyncio.TimeoutError, Exception):
             pass
 
-        # 第3优先：Stooq（8s 超时，免费稳定兜底，非交易时段 SSL 握手慢）
-        try:
-            d = await asyncio.wait_for(
-                loop.run_in_executor(None, functools.partial(stooq_index, sym, name, 8)),
-                timeout=8,
-            )
-            if d and d.get("price") is not None:
-                d["region"] = region
-                return region, d
-        except (asyncio.TimeoutError, Exception):
-            pass
-
-        # 三级源均失败，返回占位
+        # 两个数据源均失败，返回占位
         return region, {
             "symbol": sym, "name": name, "region": region,
             "asset_type": "index", "price": None, "change_pct": None,
@@ -252,7 +240,8 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
 
 
 async def _global_index_defs() -> list[tuple[str, str, str]]:
-    """从 indices 表读取，表为空降级到硬编码。"""
+    """从 indices 表读取，与硬编码合并（代码新增指数自动出现，无需 DB 同步）。"""
+    db_results: set[tuple[str, str, str]] = set()
     try:
         async with async_session() as session:
             rows = (
@@ -261,10 +250,22 @@ async def _global_index_defs() -> list[tuple[str, str, str]]:
                 )
             ).scalars().all()
             if rows:
-                return [(r.symbol, r.name, r.region) for r in rows]
+                db_results = {(r.symbol, r.name, r.region) for r in rows}
     except Exception as e:
-        logger.warning(f"[_global_index_defs] fallback to hardcoded: {e}")
-    return [(s, n, r) for s, n, r in _GLOBAL_INDEX_DEFS]
+        logger.warning(f"[_global_index_defs] db fallback: {e}")
+
+    # Merge: DB 优先（含动态数据），硬编码补齐
+    hardcoded = set(_GLOBAL_INDEX_DEFS)
+    merged = list(db_results | (hardcoded - db_results))
+    # 保持排序：硬编码的顺序优先
+    ordered = []
+    seen: set[str] = set()
+    for item in _GLOBAL_INDEX_DEFS + merged:
+        sym = item[0]
+        if sym not in seen:
+            seen.add(sym)
+            ordered.append(item)
+    return ordered
 
 
 # ── 板块 / 搜索 ───────────────────────────────────────────────
@@ -582,32 +583,25 @@ async def get_asset_realtime(symbol: str, asset_type: str) -> dict | None:
 
 
 async def _route_us(symbol: str) -> dict | None:
-    """美股/ETF: Stooq → Twelve Data → Finnhub，通过 SourceRegistry 熔断路由。
+    """美股/ETF: Twelve Data → Finnhub，通过 SourceRegistry 熔断路由。
 
-    v2: 移除了 AlphaVantage（25次/天额度太低）和 yfinance（境内不稳定）。
+    v3: 移除 Stooq（CSV API 已关闭返回404 → Cloudflare）、
+    AlphaVantage（25次/天额度太低）、yfinance（境内不稳定）。
 
     优先级设计理由:
-    - Stooq（1st）: 免费、无需 API key、中国大陆直连稳定、无速率限制。
-      但非交易时段 SSL 握手可能慢（已设 5s 超时）。
-    - TwelveData（2nd）: 已配 API key，800次/天免费额度。Stooq 失败时兜底。
-    - Finnhub（3rd）: 已配 API key，60次/分钟免费额度。最后兜底。
-
-    Stooq 放在首位是为了优先使用免费无限源，节省 API key 调用额度。
-    TwelveData/Finnhub 均已有 API key，不会自动跳过。
+    - TwelveData（1st）: 已配 API key，800次/天免费额度，支持全球指数。
+      非交易时段有缓存数据，速度快（~0.5s）。
+    - Finnhub（2nd）: 已配 API key，60次/分钟免费额度。TwelveData 失败时兜底。
     """
-    from ..fetchers.stooq_fetcher import fetch_us_etf_realtime as stooq_realtime
     from ..fetchers import twelvedata_fetcher
     from ..fetchers import finnhub_fetcher
 
-    def _stooq():
-        return stooq_realtime(symbol)
     def _td():
         return twelvedata_fetcher.fetch_realtime(symbol)
     def _fh():
         return finnhub_fetcher.fetch_realtime(symbol)
 
     return registry.route([
-        ("stooq", _stooq),
         ("twelvedata", _td),
         ("finnhub", _fh),
     ], route_name="US_ETF", operation="realtime", target=symbol)

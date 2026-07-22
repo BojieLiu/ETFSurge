@@ -8,7 +8,7 @@ from ..services.source_health import register_probe
 
 
 def register_all_probes() -> None:
-    """Register all 7 data-source health probes.
+    """Register all 6 data-source health probes (Stooq removed — CSV API 404).
 
     Each probe is a simple pass/fail check with an appropriate timeout.
     Probes run every 120s via the health_loop in main.py.
@@ -59,15 +59,7 @@ def register_all_probes() -> None:
             return False
     register_probe("levistock", _probe_levistock, timeout=10)
 
-    # ── C6: Stooq (8s) — US ETF realtime ─────────────────────
-    from ..fetchers.stooq_fetcher import fetch_us_etf_realtime as _stooq_realtime
-
-    def _probe_stooq():
-        result = _stooq_realtime("SPY")
-        return bool(result and any(r.get("price", 0) > 0 for r in result))
-    register_probe("stooq", _probe_stooq, timeout=8)
-
-    # ── C7: 东方财富 / dongfang (8s) — HK realtime ──────────
+    # ── C6: 东方财富 / dongfang (8s) — HK realtime ──────────
     from ..fetchers.china_market import _em_hk_realtime
 
     def _probe_dongfang():
