@@ -35,7 +35,7 @@ vi.mock('../api', () => ({
   portfolioApi: {
     designAsync: vi.fn().mockResolvedValue({ data: { task_id: 123 } }),
     getTask: vi.fn().mockResolvedValue({ data: { task_id: 123, status: 'completed', design_id: 456, progress: 100 } }),
-    getDesign: vi.fn().mockResolvedValue({ data: { strategies: [], created_at: '2026-07-18T00:00:00Z', market_context: {} } }),
+    getDesign: vi.fn().mockRejectedValue(new Error('API unreachable')),
     listDesigns: vi.fn().mockResolvedValue({ data: [] }),
     applyPortfolioDesign: vi.fn().mockResolvedValue({ data: {} }),
   },

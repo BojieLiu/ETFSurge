@@ -7,6 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "lint": "eslint src/",
+    "lint:fix": "eslint --fix src/",
     "test": "vitest run",
     "test:e2e": "playwright test --config e2e/config/playwright.config.js",
     "test:e2e:smoke": "playwright test --config e2e/config/playwright.config.js --grep @smoke",
@@ -28,10 +30,14 @@
     "@playwright/test": "^1.52.0",
     "@vitejs/plugin-vue": "^5.1.0",
     "@vue/test-utils": "^2.4.11",
+    "eslint": "^10.7.0",
+    "eslint-plugin-vue": "^10.10.0",
+    "globals": "^17.7.0",
     "jsdom": "^29.1.1",
     "playwright": "^1.52.0",
     "vite": "^5.4.0",
     "vite-plugin-pwa": "^0.20.0",
-    "vitest": "^2.1.9"
+    "vitest": "^2.1.9",
+    "vue-eslint-parser": "^10.4.1"
   }
 }

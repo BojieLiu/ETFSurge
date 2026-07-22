@@ -72,7 +72,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import AppButton from './AppButton.vue'
 
 const props = defineProps({
@@ -134,7 +134,7 @@ function handleEsc(event) {
   if (props.closeOnEsc && event.key === 'Escape') close()
 }
 
-function trapFocus() {
+function activateFocusTrap() {
   if (!props.trapFocus) return
   
   const modal = document.getElementById(modalId)
@@ -174,7 +174,7 @@ watch(() => props.modelValue, (open) => {
     document.body.style.overflow = 'hidden'
     document.body.setAttribute('data-modal-open', 'true')
     nextTick(() => {
-      focusTrapCleanup = trapFocus()
+      focusTrapCleanup = activateFocusTrap()
     })
   } else {
     document.body.style.overflow = ''
@@ -196,7 +196,6 @@ onUnmounted(() => {
   document.body.removeAttribute('data-modal-open')
 })
 
-import { nextTick } from 'vue'
 </script>
 
 <style scoped>

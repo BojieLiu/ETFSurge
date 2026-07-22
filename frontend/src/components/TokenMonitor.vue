@@ -166,6 +166,7 @@ import { LineChart, BarChart } from 'echarts/charts'
 import { TitleComponent, TooltipComponent, GridComponent, LegendComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
 import { adminApi } from '../api'
+import { useToastStore } from '../stores/toast'
 import logger from '../utils/logger'
 
 use([CanvasRenderer, LineChart, BarChart, TitleComponent, TooltipComponent, GridComponent, LegendComponent])
@@ -313,10 +314,11 @@ function formatNumber(n) {
 }
 
 function copyError(msg) {
+  const toast = useToastStore()
   navigator.clipboard.writeText(msg).then(() => {
-    toast('已复制到剪贴板', 'success')
+    toast.show('已复制到剪贴板', 'success')
   }).catch(() => {
-    toast('复制失败', 'error')
+    toast.show('复制失败', 'error')
   })
 }
 
