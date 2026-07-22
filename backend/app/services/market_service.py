@@ -164,6 +164,19 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
             item["region"] = region
             item["asset_type"] = "index"
             regions.setdefault(region, []).append(item)
+        else:
+            # Placeholder when all data sources fail (e.g. off-hours)
+            item = {
+                "symbol": sym,
+                "name": name,
+                "region": region,
+                "asset_type": "index",
+                "price": None,
+                "change_pct": None,
+                "change_amount": None,
+                "available": False,
+            }
+            regions.setdefault(region, []).append(item)
 
     # 海外指数：Sina（实测 0.2s）→ stooq（SSL 慢）→ yfinance（兜底）
     # 2026-07-20 实测: Sina 0.2s(有数据)/0.2s(空), stooq SSL 超时

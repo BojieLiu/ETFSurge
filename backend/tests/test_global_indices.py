@@ -155,3 +155,26 @@ async def test_global_indices_all_sources_fail_graceful():
     hk = [d for d in regions.get("港股", []) if d["symbol"] == "^HSI"]
     assert len(hk) == 1
     assert hk[0].get("available") is False
+
+
+async def test_a_share_indices_have_placeholder_when_no_data():
+    """When A-share data sources fail, placeholder entries must still be present."""
+    defs = [
+        ("000001", "上证指数", "A股"),
+        ("399001", "深证成指", "A股"),
+    ]
+
+    ms._global_indices_cache.clear()
+    ms._global_indices_cache_ts = 0
+
+    with patch.object(ms, "_global_index_defs", new=AsyncMock(return_value=defs)), \
+         patch("app.fetchers.china_market.fetch_index_realtime",
+               return_value=[]):  # Simulate no data from any source
+        regions = await ms.get_global_indices()
+
+    a_share = regions.get("A股", [])
+    assert len(a_share) == 2, f"Expected 2 A-share placeholder entries, got {len(a_share)}"
+    for item in a_share:
+        assert item["symbol"] in ("000001", "399001"), f"Unexpected symbol: {item['symbol']}"
+        assert item.get("available") is False, f"{item['symbol']} should be unavailable"
+        assert item.get("price") is None

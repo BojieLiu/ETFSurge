@@ -39,7 +39,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { marketApi } from '../api'
 import { changeClass } from '../utils/changeClass'
 import AppButton from './ui/AppButton.vue'
@@ -72,6 +72,11 @@ async function fetchIndices() {
 function refresh() {
   fetchIndices()
 }
+
+// Auto-fetch on mount (was missing: caused "暂无数据" on every load)
+onMounted(() => {
+  fetchIndices()
+})
 
 onUnmounted(() => {
   if (timer.value) clearInterval(timer.value)
