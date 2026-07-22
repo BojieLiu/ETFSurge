@@ -1,29 +1,63 @@
 <template>
   <div class="market-analysis">
-    <!-- Market Tabs (page-level filter for all sections) -->
-    <div class="market-tabs" role="tablist">
-      <button v-for="mt in marketTabs" :key="mt.value" :class="['market-tab', { active: marketTab === mt.value }]" @click="marketTab = mt.value" role="tab" :aria-selected="marketTab === mt.value">
-        <span class="market-tab-indicator" aria-hidden="true"></span>
-        {{ mt.label }}
-      </button>
+    <!-- Top Bar: Market Tabs + Quick Actions -->
+    <div class="ma-top-bar">
+      <div class="market-tabs" role="tablist">
+        <button
+          v-for="mt in marketTabs" :key="mt.value"
+          :class="['market-tab', { active: marketTab === mt.value }]"
+          @click="marketTab = mt.value"
+          role="tab" :aria-selected="marketTab === mt.value"
+        >
+          {{ mt.label }}
+        </button>
+      </div>
+
+      <div class="quick-bar" role="toolbar" aria-label="快速操作">
+        <button class="qb-btn" @click="scrollTo('report')" title="市场综合研判">
+          <span class="qb-icon" aria-hidden="true">📊</span>
+          <span class="qb-label">市场研判</span>
+        </button>
+        <button class="qb-btn" @click="scrollTo('watch')" title="自选列表">
+          <span class="qb-icon" aria-hidden="true">⭐</span>
+          <span class="qb-label">自选</span>
+        </button>
+        <button class="qb-btn" @click="scrollTo('advisor')" title="AI 投资顾问">
+          <span class="qb-icon" aria-hidden="true">💬</span>
+          <span class="qb-label">AI顾问</span>
+        </button>
+        <button class="qb-btn" @click="scrollTo('sector')" title="板块/概念分析">
+          <span class="qb-icon" aria-hidden="true">🏭</span>
+          <span class="qb-label">板块</span>
+        </button>
+        <button class="qb-btn" @click="scrollTo('symbol')" title="个股/ETF 分析">
+          <span class="qb-icon" aria-hidden="true">📈</span>
+          <span class="qb-label">个股/ETF</span>
+        </button>
+        <button class="qb-btn" @click="scrollTo('index')" title="指数分析">
+          <span class="qb-icon" aria-hidden="true">📊</span>
+          <span class="qb-label">指数</span>
+        </button>
+      </div>
     </div>
 
-    <!-- Section 1: Market Report -->
+    <!-- Sections — 直接渲染，无折叠 -->
+    <div ref="anchorReport" class="section-anchor"></div>
     <MarketReport :marketTab="marketTab" />
 
-    <!-- Section 1.5: Watchlist -->
+    <div ref="anchorWatch" class="section-anchor"></div>
     <WatchlistPanel :marketTab="marketTab" @select-symbol="onSelectSymbol" />
 
-    <!-- Section 1.7: AI Advisor -->
+    <div ref="anchorAdvisor" class="section-anchor"></div>
     <AiAdvisor :marketTab="marketTab" />
 
-    <!-- Section 2: Sector Analysis -->
+    <div ref="anchorSector" class="section-anchor"></div>
     <SectorAnalysis :marketTab="marketTab" />
 
-    <!-- Section 3: Symbol Analysis -->
+    <div ref="anchorSymbol" class="section-anchor"></div>
     <SymbolAnalysis :marketTab="marketTab" :selectedSymbol="selectedSymbol" />
 
-    <!-- Section 4: Index Analysis -->
+    <div ref="anchorIndex" class="section-anchor"></div>
     <IndexAnalysis :marketTab="marketTab" />
   </div>
 </template>
@@ -47,8 +81,25 @@ const marketTabs = [
   { value: 'global', label: '全球' },
 ]
 
+// Scroll anchors for quick bar navigation
+const anchorReport = ref(null)
+const anchorWatch = ref(null)
+const anchorAdvisor = ref(null)
+const anchorSector = ref(null)
+const anchorSymbol = ref(null)
+const anchorIndex = ref(null)
+const anchorMap = {
+  report: anchorReport, watch: anchorWatch, advisor: anchorAdvisor,
+  sector: anchorSector, symbol: anchorSymbol, index: anchorIndex,
+}
+
+function scrollTo(name) {
+  anchorMap[name].value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
 function onSelectSymbol(symbol) {
   selectedSymbol.value = symbol
+  setTimeout(() => anchorSymbol.value?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
 }
 </script>
 
@@ -56,23 +107,32 @@ function onSelectSymbol(symbol) {
 .market-analysis {
   display: flex;
   flex-direction: column;
-  gap: var(--space-8);
+  gap: var(--space-6);
+}
+
+/* ── Top bar ── */
+.ma-top-bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--color-surface-primary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
 }
 
 .market-tabs {
   display: flex;
   gap: 0;
-  margin-bottom: var(--space-8);
-  border-bottom: 2px solid var(--color-border-light);
-  padding: 0;
   background: var(--color-surface-secondary);
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  border-bottom: 2px solid var(--color-border-light);
 }
 
 .market-tab {
-  position: relative;
-  padding: var(--space-3) var(--space-6);
-  font-size: var(--font-size-base);
+  flex: 1;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
   color: var(--color-text-secondary);
   border: none;
@@ -80,6 +140,7 @@ function onSelectSymbol(symbol) {
   cursor: pointer;
   transition: var(--transition-fast);
   letter-spacing: var(--letter-spacing-wide);
+  text-align: center;
 }
 
 .market-tab:hover {
@@ -101,10 +162,46 @@ function onSelectSymbol(symbol) {
   right: 0;
   height: 3px;
   background: var(--color-brand-600);
-  border-radius: var(--radius-full) var(--radius-full) 0 0;
+  border-radius: var(--radius-full);
 }
 
-.market-tab-indicator {
-  display: none;
+/* ── Quick Action Bar ── */
+.quick-bar {
+  display: flex;
+  gap: 2px;
+  padding: var(--space-1) var(--space-2);
+  background: var(--color-surface-primary);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.qb-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1.5) var(--space-2.5);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: var(--transition-fast);
+  white-space: nowrap;
+}
+
+.qb-btn:hover {
+  color: var(--color-text-primary);
+  background: var(--color-surface-hover);
+  border-color: var(--color-border-light);
+}
+
+.qb-icon { font-size: var(--font-size-base); line-height: 1; }
+.qb-label { line-height: 1; }
+
+/* ── Scroll anchor ── */
+.section-anchor {
+  scroll-margin-top: 130px;
 }
 </style>

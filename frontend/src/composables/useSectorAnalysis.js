@@ -1,4 +1,4 @@
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, onMounted } from 'vue'
 import { fetchJson } from '../utils/fetchJson'
 
 export function useSectorAnalysis(marketTab) {
@@ -18,6 +18,9 @@ export function useSectorAnalysis(marketTab) {
   const sectorDropdownOpen = ref(false)
   const sectorActiveIndex = ref(-1)
   const sectorComboRef = ref(null)
+  // Manual input fallback — when API returns empty or user prefers direct typing
+  const manualMode = ref(false)
+  const sectorFetchError = ref('')
 
   const filteredSectors = computed(() => {
     const q = sectorQuery.value.trim().toLowerCase()
@@ -29,6 +32,7 @@ export function useSectorAnalysis(marketTab) {
 
   async function fetchSectorList() {
     sectorLoadingList.value = true
+    sectorFetchError.value = ''
     sectorList.value = []
     try {
       const url = sectorType.value === 'industry'
@@ -36,8 +40,14 @@ export function useSectorAnalysis(marketTab) {
         : `/api/v1/market/sectors/concept?limit=200${marketTab.value && marketTab.value !== 'global' ? '&market=' + marketTab.value : ''}`
       const data = await fetchJson(url)
       sectorList.value = Array.isArray(data) ? data : []
-    } catch {
+      if (!sectorList.value.length) {
+        sectorFetchError.value = '列表为空，可切换至手动输入'
+        manualMode.value = true
+      }
+    } catch (e) {
       sectorList.value = []
+      sectorFetchError.value = '加载失败: ' + (e?.message || '网络错误')
+      manualMode.value = true
     }
     sectorLoadingList.value = false
   }
@@ -49,6 +59,8 @@ export function useSectorAnalysis(marketTab) {
     sectorDropdownOpen.value = false
     sectorActiveIndex.value = -1
     sectorReport.value = ''
+    manualMode.value = false
+    sectorFetchError.value = ''
     await fetchSectorList()
   }
 
@@ -67,6 +79,7 @@ export function useSectorAnalysis(marketTab) {
     sectorQuery.value = selectedSectorName.value
     sectorDropdownOpen.value = false
     sectorActiveIndex.value = -1
+    manualMode.value = false
   }
 
   function clearSector() {
@@ -96,12 +109,28 @@ export function useSectorAnalysis(marketTab) {
     }
   }
 
+  // Manual input: use query value directly as sector code
+  function useManualInput() {
+    const q = sectorQuery.value.trim()
+    if (!q) return
+    selectedSectorCode.value = q
+    selectedSectorName.value = q
+    sectorDropdownOpen.value = false
+  }
+
   // Watch marketTab changes to reload sectors
   watch(marketTab, () => { onSectorTypeChange() })
 
-  return { sectorTypes, sectorType, sectorList, selectedSectorCode, selectedSectorName,
+  // Auto-load on mount
+  onMounted(() => { fetchSectorList() })
+
+  return {
+    sectorTypes, sectorType, sectorList, selectedSectorCode, selectedSectorName,
     sectorLoadingList, sectorReport, sectorLoading, sectorError,
     sectorQuery, sectorDropdownOpen, sectorActiveIndex, sectorComboRef,
-    filteredSectors, fetchSectorList, onSectorTypeChange,
-    onSectorFocus, onSectorBlur, selectSector, clearSector, onSectorKeydown }
+    filteredSectors, sectorFetchError, manualMode,
+    fetchSectorList, onSectorTypeChange,
+    onSectorFocus, onSectorBlur, selectSector, clearSector, onSectorKeydown,
+    useManualInput,
+  }
 }

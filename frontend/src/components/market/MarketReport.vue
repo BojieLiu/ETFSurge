@@ -1,50 +1,28 @@
 <template>
   <section class="section-card">
     <div class="section-header">
-      <h2 class="section-title">
-        <span class="section-icon" aria-hidden="true">📊</span>
-        市场综合研判
-      </h2>
+      <h2 class="section-title">📊 市场综合研判</h2>
       <p class="section-desc">基于实时行情与宏观数据的 AI 市场环境分析</p>
     </div>
 
     <div class="card">
       <div class="card-body">
-        <div class="action-row">
-          <AppButton
-            variant="primary"
-            @click="generateMarketReport"
-            :loading="marketLoading"
-            :disabled="marketLoading"
-          >
-            <span class="btn-icon" aria-hidden="true" v-if="!marketLoading">🤖</span>
-            <span class="animate-spin" v-else aria-hidden="true">⏳</span>
-            {{ marketLoading ? '分析中...' : '生成市场研判' }}
-          </AppButton>
+        <div class="action-area">
+          <button class="btn-report" @click="generate" :disabled="loading">
+            <span v-if="!loading" class="btn-icon">🤖</span>
+            <span v-else class="btn-spinner"></span>
+            <span>{{ loading ? 'AI 分析中...' : '生成市场研判' }}</span>
+          </button>
+          <p v-if="!loading && !report && !error" class="action-hint">点击按钮，AI 将综合分析当前市场环境生成报告</p>
         </div>
 
-        <div v-if="marketLoading" class="loading-state">
-          <div class="loading-spinner" aria-hidden="true"></div>
-          <p>正在调用 DeepSeek 分析市场环境...</p>
+        <div v-if="loading" class="loading-bar">
+          <div class="loading-bar-inner"></div>
         </div>
 
-        <div v-if="marketError" class="alert alert--error" role="alert">
-          <span class="alert-icon" aria-hidden="true">⚠️</span>
-          <span>{{ marketError }}</span>
-        </div>
+        <div v-if="error" class="error">{{ error }}</div>
 
-        <div v-if="marketReport" class="report-container">
-          <div class="report-content" v-html="renderMarkdown(marketReport)"></div>
-          <div class="report-disclaimer">
-            <span class="disclaimer-icon" aria-hidden="true">⚠️</span>
-            <span>本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负</span>
-          </div>
-        </div>
-
-        <div v-if="!marketReport && !marketLoading && !marketError" class="empty-prompt">
-          <span class="prompt-icon" aria-hidden="true">💡</span>
-          <p>点击上方按钮生成当前市场环境研判报告</p>
-        </div>
+        <div v-if="report" class="report" v-html="renderMarkdown(report)"></div>
       </div>
     </div>
   </section>
@@ -57,56 +35,114 @@ import { useLLMStream } from '../../composables/useLLMStream'
 
 defineProps({ marketTab: { type: String, default: 'A' } })
 
-const marketReport = ref('')
-const marketLoading = ref(false)
-const marketError = ref('')
+const report = ref('')
+const loading = ref(false)
+const error = ref('')
 
-const { streaming: marketStreaming, fullText: marketStreamText, error: marketStreamError, disclaimer: marketStreamDisclaimer, start: startMarketStream, stop: stopMarketStream } = useLLMStream()
+const { start: startStream } = useLLMStream()
 
-async function generateMarketReport() {
-  marketLoading.value = true
-  marketReport.value = ''
-  marketError.value = ''
+async function generate() {
+  loading.value = true
+  report.value = ''
+  error.value = ''
   try {
-    const result = await startMarketStream('/llm-report/stream', { symbols: null }, (token) => {
-      marketReport.value += token
+    await startStream('/llm-report/stream', { symbols: null }, (token) => {
+      report.value += token
     })
-    if (result?.disclaimer) {
-      marketStreamDisclaimer.value = result.disclaimer
-    }
   } catch (e) {
-    marketError.value = '生成失败：' + (e?.message || '网络错误')
+    error.value = '生成失败：' + (e?.message || '网络错误')
   } finally {
-    marketLoading.value = false
+    loading.value = false
   }
 }
 </script>
 
 <style scoped>
-.section-header { margin-bottom: var(--space-4); }
-.section-title {
+.section-card { margin-bottom: var(--space-4); }
+.section-header { margin-bottom: var(--space-3); }
+.section-title { font-size: var(--font-size-xl); font-weight: var(--font-weight-semibold); margin: 0 0 var(--space-1); color: var(--color-text-primary); }
+.section-desc { font-size: var(--font-size-sm); color: var(--color-text-secondary); margin: 0; }
+.card { background: var(--color-surface-primary); border: 1px solid var(--color-border-light); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); }
+.card-body { padding: var(--space-6); }
+
+.action-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-6) 0;
+}
+
+.btn-report {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  font-size: var(--font-size-xl);
+  padding: var(--space-3) var(--space-8);
+  font-size: var(--font-size-lg);
   font-weight: var(--font-weight-semibold);
-  color: var(--color-text-primary);
-  margin: 0 0 var(--space-1);
+  color: white;
+  background: linear-gradient(135deg, var(--color-brand-600), var(--color-brand-700));
+  border: none;
+  border-radius: var(--radius-xl);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
 }
-.section-icon { font-size: var(--font-size-2xl); line-height: 1; }
-.section-desc { margin: 0; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
-.action-row { display: flex; gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-4); }
-.loading-state { display: flex; flex-direction: column; align-items: center; gap: var(--space-3); padding: var(--space-8); text-align: center; color: var(--color-text-secondary); }
-.loading-spinner { width: 24px; height: 24px; border: 3px solid var(--color-border-light); border-top-color: var(--color-brand-600); border-radius: 50%; animation: spin 0.8s linear infinite; }
+
+.btn-report:hover {
+  background: linear-gradient(135deg, var(--color-brand-700), var(--color-brand-800));
+  box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+  transform: translateY(-1px);
+}
+
+.btn-report:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.btn-icon { font-size: var(--font-size-xl); line-height: 1; }
+
+.btn-spinner {
+  width: 20px;
+  height: 20px;
+  border: 3px solid rgba(255,255,255,0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
 @keyframes spin { to { transform: rotate(360deg); } }
-.alert { display: flex; align-items: flex-start; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-radius: var(--radius-lg); font-size: var(--font-size-sm); }
-.alert--error { color: var(--color-danger-700); background: var(--color-bg-danger-subtle); border: 1px solid var(--color-danger-200); }
-.report-container { margin-top: var(--space-4); }
-.report-content { line-height: 1.8; }
-.report-content :deep(h1), .report-content :deep(h2), .report-content :deep(h3) { margin-top: var(--space-6); margin-bottom: var(--space-3); }
-.report-content :deep(p) { margin: var(--space-2) 0; }
-.report-content :deep(ul), .report-content :deep(ol) { padding-left: var(--space-6); margin: var(--space-2) 0; }
-.report-disclaimer { margin-top: var(--space-4); padding: var(--space-3); font-size: var(--font-size-xs); color: var(--color-text-tertiary); background: var(--color-surface-secondary); border-radius: var(--radius-md); display: flex; gap: var(--space-2); align-items: flex-start; }
-.empty-prompt { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); padding: var(--space-8); text-align: center; color: var(--color-text-secondary); }
-.prompt-icon { font-size: var(--font-size-3xl); }
+
+.action-hint {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+  text-align: center;
+}
+
+.loading-bar {
+  height: 3px;
+  background: var(--color-surface-tertiary);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  margin-bottom: var(--space-4);
+}
+
+.loading-bar-inner {
+  height: 100%;
+  width: 30%;
+  background: var(--color-brand-500);
+  border-radius: var(--radius-full);
+  animation: loadingSlide 1.5s ease-in-out infinite;
+}
+
+@keyframes loadingSlide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+
+.error { margin-top: var(--space-3); padding: var(--space-2) var(--space-3); color: var(--color-danger-700); background: var(--color-bg-danger-subtle); border-radius: var(--radius-md); font-size: var(--font-size-sm); }
+.report { margin-top: var(--space-4); line-height: 1.8; }
 </style>
