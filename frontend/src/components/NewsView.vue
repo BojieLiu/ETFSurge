@@ -1,59 +1,47 @@
 <template>
   <div class="news-view">
-    <PageHeader
-      title="资讯监控"
-      description="实时推送重要资讯，AI 智能分析对组合的影响"
-    >
-      <template #action>
-        <div class="news-toolbar">
-          <div class="news-status" aria-live="polite">
-            <span class="status-dot" :class="{ 'status-dot--on': connected }" aria-hidden="true"></span>
-            <span>{{ connected ? '实时推送已连接' : '未连接' }}</span>
-          </div>
+    <div class="news-toolbar">
+      <div class="news-status" aria-live="polite">
+        <span class="status-dot" :class="{ 'status-dot--on': connected }" aria-hidden="true"></span>
+        <span>{{ connected ? '实时推送已连接' : '未连接' }}</span>
+      </div>
 
-          <div class="level-filter" role="group" aria-label="重要性筛选">
-            <span class="filter-label">最低重要性：</span>
-            <AppButton
-              v-for="lvl in [1,2,3,4,5]"
-              :key="lvl"
-              variant="outline"
-              size="sm"
-              :class="{ 'btn--active': minLevel === lvl }"
-              @click="minLevel = lvl"
-              :aria-pressed="minLevel === lvl"
-              :title="mapNewsLevel(lvl).label"
-            >
-              {{ mapNewsLevel(lvl).stars }} {{ mapNewsLevel(lvl).label }}
-            </AppButton>
-          </div>
-        </div>
-      </template>
-    </PageHeader>
+      <div class="level-filter" role="group" aria-label="重要性筛选">
+        <span class="filter-label">最低重要性：</span>
+        <button
+          v-for="lvl in [1,2,3,4,5]"
+          :key="lvl"
+          type="button"
+          class="filter-btn"
+          :class="{ active: minLevel === lvl }"
+          @click="minLevel = lvl"
+          :aria-pressed="minLevel === lvl"
+          :title="mapNewsLevel(lvl).label"
+        >
+          {{ mapNewsLevel(lvl).stars }} {{ mapNewsLevel(lvl).label }}
+        </button>
+      </div>
+    </div>
 
     <!-- News List -->
-    <Section title="最新资讯" :padded="false" :divided="false">
-      <AppCard variant="default" :padding="false" v-if="loading && !filteredNews.length">
-        <AppSkeleton type="text" :rows="5" />
-      </AppCard>
-
-      <div v-else class="news-list">
-        <AppCard
+    <section class="card news-card">
+      <div v-if="loading && !filteredNews.length" class="news-empty">加载中...</div>
+      <ul v-else class="news-list">
+        <li
           v-for="item in filteredNews"
           :key="item.id"
-          variant="outlined"
           class="news-item"
           :class="[`news-item--${mapNewsLevel(item.level).color}`, { 'news-item--important': isImportant(item.level) }]"
-          :padding="false"
         >
           <div class="news-item-head">
-            <AppBadge
-              :variant="mapNewsLevel(item.level).variant"
-              :dot="false"
+            <span
               class="news-level-badge"
+              :class="`news-level-badge--${mapNewsLevel(item.level).color}`"
+              :style="{ color: levelColor(item.level) }"
             >
               <span class="news-stars" aria-hidden="true">{{ mapNewsLevel(item.level).stars }}</span>
               <span class="news-level-label">{{ mapNewsLevel(item.level).label }}</span>
-            </AppBadge>
+            </span>
             <h3 class="news-title" :style="{ color: levelColor(item.level) }">{{ item.title }}</h3>
           </div>
 
@@ -62,66 +50,53 @@
           <div class="news-meta">
             <span v-if="item.source" class="news-source">{{ item.source }}</span>
             <span v-if="item.time" class="news-time">{{ item.time }}</span>
-            <AppButton
-              variant="ghost"
-              size="sm"
-              class="news-ai-btn"
-              @click="analyze(item)"
-              :disabled="analyzing"
-            >
+            <button class="news-ai-btn" @click="analyze(item)" :disabled="analyzing">
               <span aria-hidden="true">🤖</span> AI 智能分析
-            </AppButton>
+            </button>
           </div>
-        </AppCard>
+        </li>
+      </ul>
+    </section>
 
-        <div v-if="filteredNews.length === 0" class="news-empty">
-          <AppSkeleton type="text" :rows="3" />
-        </div>
+<!-- AI Impact Panel -->
+    <section v-if="impactPanel" class="card impact-panel" aria-live="polite">
+      <div class="card-header">
+        <h2 class="card-title"><span aria-hidden="true">🤖</span> AI 智能分析</h2>
+        <button class="impact-close" @click="impactPanel = null" aria-label="关闭分析">✕</button>
       </div>
-    </Section>
 
-    <!-- AI Impact Panel -->
-    <Section v-if="impactPanel" title="AI 智能分析" :padded="false" :divided="false">
-      <AppCard variant="elevated" class="impact-panel" aria-live="polite">
-        <template #header>
-          <h2 class="card__title"><span aria-hidden="true">🤖</span> AI 智能分析</h2>
-          <AppButton variant="ghost" size="sm" @click="impactPanel = null" aria-label="关闭分析">✕</AppButton>
-        </template>
+      <p v-if="impactPanel.summary" class="impact-summary">{{ impactPanel.summary }}</p>
 
-        <p v-if="impactPanel.summary" class="impact-summary">{{ impactPanel.summary }}</p>
+      <div class="impact-block">
+        <h3 class="impact-subtitle">影响范围</h3>
+        <p>{{ impactPanel.impact_scope }}</p>
+      </div>
 
-        <div class="impact-block">
-          <h3 class="impact-subtitle">影响范围</h3>
-          <p>{{ impactPanel.impact_scope }}</p>
-        </div>
+      <div v-if="impactPanel.affected_holdings && impactPanel.affected_holdings.length" class="impact-block">
+        <h3 class="impact-subtitle">对组合内标的的影响</h3>
+        <ul class="impact-holdings">
+          <li v-for="h in impactPanel.affected_holdings" :key="h.symbol" class="impact-holding">
+            <span class="holding-symbol"><code>{{ h.symbol }}</code> {{ h.name }}</span>
+            <span class="holding-reason">{{ h.impact_reason }}</span>
+          </li>
+        </ul>
+      </div>
 
-        <div v-if="impactPanel.affected_holdings && impactPanel.affected_holdings.length" class="impact-block">
-          <h3 class="impact-subtitle">对组合内标的的影响</h3>
-          <ul class="impact-holdings">
-            <li v-for="h in impactPanel.affected_holdings" :key="h.symbol" class="impact-holding">
-              <span class="holding-symbol"><code>{{ h.symbol }}</code> {{ h.name }}</span>
-              <span class="holding-reason">{{ h.impact_reason }}</span>
-            </li>
-          </ul>
-        </div>
-
-        <div class="impact-disclaimer">
-          <span class="disclaimer-icon" aria-hidden="true">⚠️</span>
-          <span>{{ impactPanel.disclaimer || '本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负' }}</span>
-        </div>
-      </AppCard>
-    </Section>
+      <div class="impact-disclaimer">
+        <span class="disclaimer-icon" aria-hidden="true">⚠️</span>
+        <span>{{ impactPanel.disclaimer || '本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负' }}</span>
+      </div>
+    </section>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { newsApi } from '@/api'
-import { useNewsWS } from '@/composables/useNewsWS'
-import { useToastStore } from '@/stores/toast'
-import { usePortfolioStore } from '@/stores/portfolio'
-import { mapNewsLevel, isImportant } from '@/utils/newsLevel'
-import { PageHeader, Section, AppCard, AppButton, AppBadge, AppSkeleton } from '@/components'
+import { ref, computed, onMounted } from 'vue'
+import { newsApi } from '../api'
+import { useNewsWS } from '../composables/useNewsWS'
+import { useToastStore } from '../stores/toast'
+import { usePortfolioStore } from '../stores/portfolio'
+import { mapNewsLevel, isImportant } from '../utils/newsLevel'
 
 const { show: toast } = useToastStore()
 const store = usePortfolioStore()
@@ -131,14 +106,13 @@ const loading = ref(false)
 const seenIds = ref(new Set())
 const impactPanel = ref(null)
 const analyzing = ref(false)
-const minLevel = ref(1)
-const connected = ref(false)
+const minLevel = ref(1) // 1-5, minimum importance level to show
 
 const LEVEL_COLORS = {
   red: '#e5484d',
   orange: '#f5901e',
   blue: '#3b82f6',
-  gray: '#8a8f98'
+  gray: '#8a8f98',
 }
 
 function levelColor(level) {
@@ -156,283 +130,91 @@ async function loadNews() {
     const items = res.data || []
     news.value = items
     items.forEach((it) => { if (it.id != null) seenIds.value.add(it.id) })
+    // Toast reminder for important items when entering the news page from elsewhere.
     items.filter((it) => isImportant(it.level)).forEach((it) => {
-      toast({ type: 'info', title: it.title, message: it.content?.slice(0, 100), duration: 8000 })
+      toast(`重要资讯：${it.title}`, 'warning')
     })
-  } catch (e) {
-    console.error('[NewsView] loadNews failed', e)
+  } catch {
+    news.value = []
   } finally {
     loading.value = false
   }
 }
 
+function handleNews(msg) {
+  const item = msg && msg.data ? msg.data : msg
+  if (!item || item.id == null) return
+  if (seenIds.value.has(item.id)) return
+  seenIds.value.add(item.id)
+  news.value = [item, ...news.value]
+}
+
+const ws = useNewsWS()
+const { connected } = ws
+ws.onNews(handleNews)
+
+onMounted(() => {
+  loadNews()
+  ws.connect()
+})
+
 async function analyze(item) {
-  if (analyzing.value) return
   analyzing.value = true
+  impactPanel.value = null
   try {
-    const res = await newsApi.impact({ news_id: item.id, holdings: store.all.map(h => h.symbol) })
+    const portfolio = (store.etfs || []).map((e) => ({ symbol: e.symbol, name: e.name }))
+    const res = await newsApi.newsImpact({
+      news: { title: item.title, content: item.content },
+      portfolio,
+    })
     impactPanel.value = res.data
-  } catch (e) {
-    console.error('[NewsView] analyze failed', e)
-    toast({ type: 'error', message: 'AI 分析失败，请稍后重试' })
+  } catch {
+    toast('AI 分析失败，请稍后重试', 'error')
   } finally {
     analyzing.value = false
   }
 }
-
-// WebSocket
-const { connected: wsConnected, connect: wsConnect, disconnect: wsDisconnect } = useNewsWS({
-  onMessage: (msg) => {
-    if (msg.type === 'news' && msg.data) {
-      const item = msg.data
-      if (item.id != null && !seenIds.value.has(item.id)) {
-        seenIds.value.add(item.id)
-        news.value.unshift(item)
-      }
-      if (isImportant(item.level)) {
-        toast({ type: 'info', title: item.title, message: item.content?.slice(0, 100), duration: 8000 })
-      }
-    }
-  },
-  onConnect: () => { connected.value = true },
-  onDisconnect: () => { connected.value = false }
-})
-
-onMounted(() => {
-  loadNews()
-  wsConnect()
-})
-
-onUnmounted(() => {
-  wsDisconnect()
-})
 </script>
 
 <style scoped>
-.news-view {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-section-md);
-}
+.news-view { display: flex; flex-direction: column; gap: var(--space-6); }
+.news-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-3); padding: var(--space-3); background: var(--color-surface-secondary); border-radius: var(--radius-lg); border: 1px solid var(--color-border-light); }
+.news-status { display: flex; align-items: center; gap: var(--space-2); color: var(--color-text-secondary); font-size: var(--font-size-sm); }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-text-muted); }
+.status-dot--on { background: #2ecc71; box-shadow: 0 0 0 3px rgba(46, 204, 113, 0.2); }
+.level-filter { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.filter-label { font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.filter-btn { display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; border: 1px solid var(--color-border); background: var(--color-surface-primary); border-radius: var(--radius-md); font-size: var(--font-size-xs); cursor: pointer; transition: all 0.15s ease; white-space: nowrap; }
+.filter-btn:hover { border-color: var(--color-primary); color: var(--color-primary); }
+.filter-btn.active { background: var(--color-primary); border-color: var(--color-primary); color: white; }
+.filter-btn.active:hover { background: var(--color-primary-dark); }
+.news-card { padding: var(--space-4); }
+.news-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-3); }
+.news-empty { color: var(--color-text-muted); padding: var(--space-4); text-align: center; }
+.news-item { border: 1px solid var(--color-border-light); border-left-width: 4px; border-radius: var(--radius-lg); padding: var(--space-3); background: var(--color-surface-secondary); }
+.news-item--red { border-left-color: #e5484d; }
+.news-item--orange { border-left-color: #f5901e; }
+.news-item--blue { border-left-color: #3b82f6; }
+.news-item--gray { border-left-color: #8a8f98; }
+.news-item--important { box-shadow: 0 0 0 1px rgba(229, 72, 77, 0.25); background: rgba(229, 72, 77, 0.04); }
+.news-item-head { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.news-level-badge { display: inline-flex; align-items: center; gap: 4px; font-size: var(--font-size-xs); font-weight: 600; }
+.news-stars { letter-spacing: 1px; }
+.news-title { margin: 0; font-size: var(--font-size-base); font-weight: 600; }
+.news-content { margin: var(--space-2) 0 0; color: var(--color-text-secondary); font-size: var(--font-size-sm); line-height: 1.6; }
+.news-meta { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-2); font-size: var(--font-size-xs); color: var(--color-text-muted); }
+.news-ai-btn { margin-left: auto; border: 1px solid var(--color-border); background: var(--color-surface-primary); border-radius: var(--radius-md); padding: 4px 10px; cursor: pointer; font-size: var(--font-size-xs); }
+.news-ai-btn:hover { border-color: var(--color-primary); }
 
-.news-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
-  flex-wrap: wrap;
-}
-
-.news-status {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-}
-
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--color-neutral-400);
-}
-
-.status-dot--on {
-  background: var(--color-success-500);
-  box-shadow: 0 0 0 2px var(--color-bg-success-subtle);
-}
-
-.level-filter {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.filter-label {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-  white-space: nowrap;
-}
-
-.filter-btn {
-  height: 28px;
-  padding: 0 var(--space-2);
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-medium);
-  border-radius: var(--radius-full);
-  background: var(--color-surface-secondary);
-  border: 1px solid var(--color-border-light);
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  transition: var(--transition-fast);
-}
-
-.filter-btn:hover,
-.filter-btn.active {
-  border-color: var(--color-brand-400);
-  color: var(--color-brand-600);
-  background: var(--color-bg-brand-subtle);
-}
-
-.filter-btn.active {
-  border-color: var(--color-brand-600);
-  color: var(--color-brand-700);
-}
-
-.news-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
-
-.news-item {
-  /* Card styling handled by AppCard */
-}
-
-.news-item-head {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-3);
-  margin-bottom: var(--space-2);
-}
-
-.news-level-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  flex-shrink: 0;
-}
-
-.news-level-badge .news-stars {
-  font-size: var(--font-size-xs);
-  line-height: 1;
-}
-
-.news-level-badge .news-level-label {
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-semibold);
-  text-transform: uppercase;
-}
-
-.news-title {
-  margin: 0;
-  font: var(--text-h4);
-  line-height: var(--line-height-snug);
-}
-
-.news-content {
-  margin: 0 0 var(--space-3);
-  font: var(--text-body-sm);
-  color: var(--color-text-secondary);
-  line-height: var(--line-height-relaxed);
-}
-
-.news-meta {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding-top: var(--space-3);
-  border-top: 1px solid var(--color-border-light);
-  font-size: var(--font-size-xs);
-  color: var(--color-text-tertiary);
-}
-
-.news-source {
-  font-weight: var(--font-weight-medium);
-  color: var(--color-text-secondary);
-}
-
-.news-time {
-  opacity: 0.7;
-}
-
-.news-ai-btn {
-  margin-left: auto;
-}
-
-.impact-panel {
-  margin-top: var(--space-4);
-}
-
-.impact-summary {
-  margin: 0 0 var(--space-4);
-  padding: var(--space-4);
-  background: var(--color-bg-brand-subtle);
-  border-radius: var(--radius-md);
-  font: var(--text-body);
-  color: var(--color-text-primary);
-}
-
-.impact-block {
-  margin-bottom: var(--space-4);
-}
-
-.impact-subtitle {
-  margin: 0 0 var(--space-2);
-  font: var(--text-h4);
-  color: var(--color-text-primary);
-}
-
-.impact-holdings {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-.impact-holding {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--space-4);
-  padding: var(--space-3);
-  background: var(--color-surface-secondary);
-  border-radius: var(--radius-md);
-}
-
-.holding-symbol code {
-  font: var(--text-mono);
-  color: var(--color-brand-600);
-  background: var(--color-bg-brand-subtle);
-  padding: var(--space-half) var(--space-1);
-  border-radius: var(--radius-sm);
-}
-
-.holding-reason {
-  font: var(--text-body-sm);
-  color: var(--color-text-secondary);
-  text-align: right;
-  max-width: 60%;
-}
-
-.impact-disclaimer {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-2);
-  padding: var(--space-3);
-  background: var(--color-bg-warning-subtle);
-  border-radius: var(--radius-md);
-  font: var(--text-body-sm);
-  color: var(--color-warning-700);
-}
-
-@media (max-width: 639px) {
-  .news-toolbar {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  
-  .level-filter {
-    justify-content: flex-start;
-    overflow-x: auto;
-    padding-bottom: var(--space-2);
-    -webkit-overflow-scrolling: touch;
-  }
-  
-  .filter-btn {
-    flex-shrink: 0;
-  }
-}
+.impact-panel { padding: var(--space-4); }
+.card-header { display: flex; align-items: center; justify-content: space-between; }
+.impact-close { background: none; border: none; cursor: pointer; color: var(--color-text-muted); font-size: var(--font-size-base); }
+.impact-summary { color: var(--color-text-primary); line-height: 1.7; }
+.impact-subtitle { font-size: var(--font-size-sm); color: var(--color-text-secondary); margin: var(--space-3) 0 var(--space-1); }
+.impact-holdings { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.impact-holding { display: flex; flex-direction: column; gap: 2px; border-bottom: 1px dashed var(--color-border-light); padding-bottom: var(--space-2); }
+.holding-symbol { font-weight: 600; }
+.holding-reason { color: var(--color-text-secondary); font-size: var(--font-size-sm); }
+.impact-disclaimer { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-3); padding: var(--space-2) var(--space-3); background: var(--color-surface-tertiary); border: 1px solid var(--color-border); border-radius: var(--radius-md); font-size: var(--font-size-xs); color: var(--color-text-muted); }
+.disclaimer-icon { flex-shrink: 0; }
 </style>
