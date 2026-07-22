@@ -175,7 +175,7 @@ onMounted(async () => {
       }
     }
   })
-  marketTimer.value = setInterval(fetchGlobalIndices, 60000)
+  marketTimer.value = setInterval(fetchGlobalIndices, 30000)
 })
 
 onUnmounted(() => {

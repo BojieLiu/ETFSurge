@@ -179,6 +179,26 @@ def _to_json_native(value: Any) -> Any:
     return value
 
 
+def _enrich_market_status(
+    regions: dict[str, list[dict[str, Any]]],
+    default_status: str = "closed",
+) -> None:
+    """为所有指数条目添加 market_status 字段（基于市场日历，而非数据源可达性）。
+
+    原地修改 ``regions`` 中的条目。
+    """
+    _REGION_TO_MARKET = {
+        "A股": "A股", "港股": "港股", "日经": "日经", "韩国": "韩国",
+        "欧美": "美股", "欧洲": "欧股",
+    }
+    from ..core.market_calendar import get_market_status
+    for rgn, items in regions.items():
+        mkt = _REGION_TO_MARKET.get(rgn, "A股")
+        status = get_market_status(mkt)
+        for it in items:
+            it["market_status"] = status
+
+
 async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
     """返回分组的主流全球指数行情。
 
@@ -311,6 +331,9 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
         # 清洗为 JSON 原生类型（避免 numpy 标量在缓存命中路径导致 500）
         regions = _to_json_native(regions)
 
+        # 标记各指数的实际交易状态（基于市场日历，而非数据源可达性）
+        _enrich_market_status(regions)
+
         # 判断本次响应是否包含有效数据
         has_data = any(
             item.get("available") and item.get("price") is not None
@@ -342,16 +365,12 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
                     sym = old.get("symbol")
                     if sym in new_items:
                         new_item = new_items.pop(sym)
-                        old_price = old.get("price")
-                        # Only keep the old price if it came from a live source;
-                        # allow seed/cached data (available=False) to be replaced by live data.
-                        if old.get("available") and old_price is not None and old_price > 0:
-                            continue
                         merged[region][i] = new_item
                 for item in items:
                     sym = item.get("symbol")
                     if sym not in existing_symbols:
                         merged[region].append(dict(item))
+            _enrich_market_status(merged)
             _global_indices_last_ok = merged
             _global_indices_last_ok_ts = time.time()
             _save_ok_cache()
@@ -368,6 +387,7 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
                         entry = dict(item)
                         entry["available"] = False
                         stale[region].append(entry)
+                _enrich_market_status(stale)
                 _global_indices_cache = stale
                 _global_indices_cache_ts = time.time()
                 return stale

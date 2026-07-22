@@ -23,13 +23,13 @@
             :key="idx.symbol"
             :class="[
               regionClass(idx.region),
-              { stale: !idx.available && idx.price != null }
+              { stale: (idx.market_status || (idx.available ? 'open' : 'closed')) === 'closed' && idx.price != null }
             ]"
           >
             <div class="card-top">
               <span class="cd-dot" :class="regionClass(idx.region)"></span>
               <span class="cd-name">{{ idx.name }}</span>
-              <span v-if="!idx.available && idx.price != null" class="cd-stale">已收盘</span>
+              <span v-if="(idx.market_status || (idx.available ? 'open' : 'closed')) === 'closed' && idx.price != null" class="cd-stale">已收盘</span>
             </div>
             <div class="card-body">
               <span class="cd-price" v-if="idx.price != null">{{ formatPrice(idx.price) }}</span>
