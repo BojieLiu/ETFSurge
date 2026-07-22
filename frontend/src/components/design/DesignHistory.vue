@@ -20,7 +20,7 @@
           </span>
           <span class="history-date">{{ formatDate(h.created_at) }}</span>
           <span class="history-capital">{{ h._type === 'design' && typeof h.capital === 'number' && h.capital > 0 ? (h.capital / 10000).toFixed(0) + '万' : '' }}</span>
-          <span class="history-detail-link">查看详情</span>
+          <span v-if="h.status === 'completed'" class="history-detail-link">查看详情</span>
         </div>
       </div>
     </div>
