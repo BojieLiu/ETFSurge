@@ -234,15 +234,34 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
                 }
                 regions.setdefault(region, []).append(item)
 
-        # 海外指数：Sina（4s）→ Finnhub（6s）→ 占位
+        # 海外指数：EM（10s）→ Sina（4s）→ Finnhub（6s）→ 占位
+        from ..fetchers import em_global_fetcher
         from ..fetchers.china_market import fetch_sina_global_index as sina_index
         from ..fetchers import finnhub_fetcher
+
+        # Call EM once for all foreign symbols (batched API)
+        _em_map: dict[str, dict] = {}
+        try:
+            _em_regions = await _call(em_global_fetcher.fetch_all, timeout=10)
+            if _em_regions:
+                for _items in _em_regions.values():
+                    for _it in _items:
+                        _em_map[_it["symbol"]] = _it
+        except Exception:
+            pass
 
         async def _foreign(sym: str, name: str, region: str):
             loop = asyncio.get_running_loop()
             import functools
 
-            # 第1优先：新浪 Sina（4s）
+            # 第1优先：东方财富 EM（10s，批量接口，覆盖全球主要指数）
+            if sym in _em_map:
+                d = dict(_em_map[sym])
+                d.setdefault("change_pct", None)
+                d.setdefault("change_amount", None)
+                return region, d
+
+            # 第2优先：新浪 Sina（4s）
             try:
                 d = await asyncio.wait_for(
                     loop.run_in_executor(None, functools.partial(sina_index, sym)),
