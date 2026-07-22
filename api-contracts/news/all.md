@@ -23,6 +23,7 @@ GET /api/v1/news/headlines
 ```json
 [
   {
+    "id": "a1b2c3d4e5f6",
     "title": "A股三大指数集体收涨",
     "source": "东方财富",
     "time": "2026-07-13 15:30",
@@ -30,6 +31,8 @@ GET /api/v1/news/headlines
   }
 ]
 ```
+
+**注意 / Note:** The `id` field is a 12-character MD5 hex digest of `time + title`, computed server-side for WebSocket deduplication. News items pushed via WebSocket always include `id`. This `id` is stable across refreshes — the same news item will have the same `id`.
 
 ---
 

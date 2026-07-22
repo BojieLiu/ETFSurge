@@ -4,6 +4,7 @@
 - 多源结果去重,统一 TTL 缓存;
 - 财联社快讯作为头条主源(免费、实时性最佳)。
 """
+import hashlib
 import re
 import time
 from datetime import datetime, timedelta, timezone
@@ -212,7 +213,11 @@ def fetch_news_headlines() -> list[dict[str, Any]]:
         items += fetch_global_news()                 # 全球：RSS + akshare
         items = _filter_fresh(items, max_age_hours=48)  # 剔除旧闻
         items.sort(key=lambda x: x.get("time", ""), reverse=True)  # 最新在前
-        return _dedupe(items)[:30]
+        result = _dedupe(items)[:30]
+        for it in result:
+            dedup_key = f"{it.get('time', '')}_{it.get('title', '')}"
+            it["id"] = hashlib.md5(dedup_key.encode()).hexdigest()[:12]
+        return result
 
     return _cached("headlines", _p)
 

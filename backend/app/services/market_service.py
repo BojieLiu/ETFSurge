@@ -192,176 +192,173 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
     # (读取 _global_indices_cache_ts) 触发 UnboundLocalError -> 500。
     global _global_indices_cache, _global_indices_cache_ts, _global_indices_last_ok, _global_indices_last_ok_ts
     import time
-    now = time.time()
-    if _global_indices_cache and (now - _global_indices_cache_ts) < _GLOBAL_INDICES_TTL:
-        return _global_indices_cache
-
-    defs = await _global_index_defs()
-    regions: dict[str, list[dict[str, Any]]] = {}
-
-    # A 股指数
-    from ..fetchers.china_market import fetch_index_realtime
-
-    a_map: dict[str, dict[str, Any]] = {}
     try:
-        a_list = await _call(fetch_index_realtime)
-        for it in a_list or []:
-            a_map[it.get("symbol")] = it
-    except Exception:
-        pass
-    for sym, name, region in defs:
-        if region != "A股":
-            continue
-        it = a_map.get(sym)
-        if it:
-            item = dict(it)
-            item["name"] = name
-            item["region"] = region
-            item["asset_type"] = "index"
-            item["available"] = True  # 前端 GlobalIndicesStrip 用 v-if="idx.available" 判断
-            regions.setdefault(region, []).append(item)
-        else:
-            # Placeholder when all data sources fail (e.g. off-hours)
-            item = {
-                "symbol": sym,
-                "name": name,
-                "region": region,
-                "asset_type": "index",
-                "price": None,
-                "change_pct": None,
-                "change_amount": None,
+        now = time.time()
+        if _global_indices_cache and (now - _global_indices_cache_ts) < _GLOBAL_INDICES_TTL:
+            return _global_indices_cache
+
+        defs = await _global_index_defs()
+        regions: dict[str, list[dict[str, Any]]] = {}
+
+        # A 股指数
+        from ..fetchers.china_market import fetch_index_realtime
+
+        a_map: dict[str, dict[str, Any]] = {}
+        try:
+            a_list = await _call(fetch_index_realtime)
+            for it in a_list or []:
+                a_map[it.get("symbol")] = it
+        except Exception:
+            pass
+        for sym, name, region in defs:
+            if region != "A股":
+                continue
+            it = a_map.get(sym)
+            if it:
+                item = dict(it)
+                item["name"] = name
+                item["region"] = region
+                item["asset_type"] = "index"
+                item["available"] = True
+                regions.setdefault(region, []).append(item)
+            else:
+                item = {
+                    "symbol": sym,
+                    "name": name,
+                    "region": region,
+                    "asset_type": "index",
+                    "price": None,
+                    "change_pct": None,
+                    "change_amount": None,
+                    "available": False,
+                }
+                regions.setdefault(region, []).append(item)
+
+        # 海外指数：Sina（4s）→ Finnhub（6s）→ 占位
+        from ..fetchers.china_market import fetch_sina_global_index as sina_index
+        from ..fetchers import finnhub_fetcher
+
+        async def _foreign(sym: str, name: str, region: str):
+            loop = asyncio.get_running_loop()
+            import functools
+
+            # 第1优先：新浪 Sina（4s）
+            try:
+                d = await asyncio.wait_for(
+                    loop.run_in_executor(None, functools.partial(sina_index, sym)),
+                    timeout=4,
+                )
+                if d and d.get("price") is not None:
+                    d["name"] = name
+                    d["region"] = region
+                    d["available"] = True
+                    return region, d
+            except (asyncio.TimeoutError, Exception):
+                pass
+
+            # 第2优先：Finnhub（6s）
+            try:
+                d = await asyncio.wait_for(
+                    loop.run_in_executor(None, functools.partial(finnhub_fetcher.fetch_realtime, sym)),
+                    timeout=6,
+                )
+                if d and d.get("price") is not None and d.get("price") != 0:
+                    d["name"] = name
+                    d["region"] = region
+                    d["available"] = True
+                    return region, d
+            except (asyncio.TimeoutError, Exception):
+                pass
+
+            # 均失败，返回占位
+            return region, {
+                "symbol": sym, "name": name, "region": region,
+                "asset_type": "index", "price": None, "change_pct": None,
                 "available": False,
             }
-            regions.setdefault(region, []).append(item)
 
-    # 海外指数：Sina（4s）→ Finnhub（6s，免费60次/分，支持全球指数）→ 占位
-    from ..fetchers.china_market import fetch_sina_global_index as sina_index
-    from ..fetchers import finnhub_fetcher
+        import asyncio
 
-    async def _foreign(sym: str, name: str, region: str):
-        loop = asyncio.get_running_loop()
-        import functools
+        f_defs = [(s, n, r) for s, n, r in defs if r != "A股"]
+        outs = await asyncio.gather(
+            *[_foreign(s, n, r) for s, n, r in f_defs],
+            return_exceptions=True,
+        )
+        for o in outs:
+            if isinstance(o, tuple) and len(o) == 2:
+                region, d = o
+                regions.setdefault(region, []).append(d)
 
-        # 第1优先：新浪 Sina（4s 超时，中国大陆免费最稳定）
-        try:
-            d = await asyncio.wait_for(
-                loop.run_in_executor(None, functools.partial(sina_index, sym)),
-                timeout=4,
-            )
-            if d and d.get("price") is not None:
-                d["name"] = name
-                d["region"] = region
-                d["available"] = True  # 前端判断用
-                return region, d
-        except (asyncio.TimeoutError, Exception):
-            pass
+        # 清洗为 JSON 原生类型（避免 numpy 标量在缓存命中路径导致 500）
+        regions = _to_json_native(regions)
 
-        # 第2优先：Finnhub（6s，免费60次/分，已有 API key，支持全球指数）
-        try:
-            d = await asyncio.wait_for(
-                loop.run_in_executor(None, functools.partial(finnhub_fetcher.fetch_realtime, sym)),
-                timeout=6,
-            )
-            if d and d.get("price") is not None and d.get("price") != 0:
-                d["name"] = name
-                d["region"] = region
-                d["available"] = True
-                return region, d
-        except (asyncio.TimeoutError, Exception):
-            pass
+        # 判断本次响应是否包含有效数据
+        has_data = any(
+            item.get("available") and item.get("price") is not None
+            for lst in regions.values()
+            for item in lst
+        )
 
-        # 两个数据源均失败，返回占位
-        return region, {
-            "symbol": sym, "name": name, "region": region,
-            "asset_type": "index", "price": None, "change_pct": None,
-            "available": False,
-        }
-
-    import asyncio
-
-    f_defs = [(s, n, r) for s, n, r in defs if r != "A股"]
-    outs = await asyncio.gather(
-        *[_foreign(s, n, r) for s, n, r in f_defs],
-        return_exceptions=True,
-    )
-    for o in outs:
-        if isinstance(o, tuple) and len(o) == 2:
-            region, d = o
-            regions.setdefault(region, []).append(d)
-
-    # 清洗为 JSON 原生类型（避免 numpy 标量在缓存命中路径导致 500）
-    regions = _to_json_native(regions)
-
-    # 判断本次响应是否包含有效数据（至少一条有价格）
-    has_data = any(
-        item.get("available") and item.get("price") is not None
-        for lst in regions.values()
-        for item in lst
-    )
-
-    if has_data:
-        # 交易时段：更新 OK 缓存（MERGE 模式——仅替换有数据的条目）
-        merged = {}
-        # 先复制旧缓存中所有条目
-        for region, items in _global_indices_last_ok.items():
-            merged[region] = [dict(item) for item in items]
-        # 收集新数据中所有有效符号（用于清理已删除条目）
-        new_symbols: set[str] = set()
-        for items in regions.values():
-            for item in items:
-                sym = item.get("symbol")
-                if sym:
-                    new_symbols.add(sym)
-        for region in list(merged.keys()):
-            merged[region] = [item for item in merged[region] if item.get("symbol") in new_symbols]
-            if not merged[region]:
-                del merged[region]
-        # 用新数据条目覆盖：仅替换 available=True 的条目
-        for region, items in regions.items():
-            if region not in merged:
-                merged[region] = []
-            new_items = {item.get("symbol"): item for item in items if item.get("available")}
-            # 已有条目的符号集合（用于判断全新条目）
-            existing_symbols = {old.get("symbol") for old in merged[region]}
-            for i, old in enumerate(merged[region]):
-                sym = old.get("symbol")
-                if sym in new_items:
-                    new_item = new_items.pop(sym)
-                    # 缓存中有合理价格时，不覆盖（防止数据源返回错误值）
-                    old_price = old.get("price")
-                    if old_price is not None and old_price > 0:
-                        continue  # 保持种子数据
-                    merged[region][i] = new_item
-            # 追加新区条目（含 available=False 的全新条目，如新加指数）
-            for item in items:
-                sym = item.get("symbol")
-                if sym not in existing_symbols:
-                    merged[region].append(dict(item))
-        _global_indices_last_ok = merged
-        _global_indices_last_ok_ts = time.time()
-        _save_ok_cache()  # 持久化：重启后不丢失
-        _global_indices_cache.update(merged)
-        _global_indices_cache_ts = time.time()
-        return merged
-    else:
-        # 非交易时段：所有源返回空，使用 OK 缓存（如果存在且未过期）
-        if _global_indices_last_ok and (time.time() - _global_indices_last_ok_ts) < _GLOBAL_INDICES_OK_TTL:
-            # 标记为不可用（前端显示 "暂无" + 保留价格）
-            stale = {}
+        if has_data:
+            # 交易时段：更新 OK 缓存（MERGE 模式）
+            merged = {}
             for region, items in _global_indices_last_ok.items():
-                stale[region] = []
+                merged[region] = [dict(item) for item in items]
+            new_symbols: set[str] = set()
+            for items in regions.values():
                 for item in items:
-                    entry = dict(item)
-                    entry["available"] = False
-                    stale[region].append(entry)
-            # 短期缓存继续刷新，避免重复采集
-            _global_indices_cache.update(stale)
+                    sym = item.get("symbol")
+                    if sym:
+                        new_symbols.add(sym)
+            for region in list(merged.keys()):
+                merged[region] = [item for item in merged[region] if item.get("symbol") in new_symbols]
+                if not merged[region]:
+                    del merged[region]
+            for region, items in regions.items():
+                if region not in merged:
+                    merged[region] = []
+                new_items = {item.get("symbol"): item for item in items if item.get("available")}
+                existing_symbols = {old.get("symbol") for old in merged[region]}
+                for i, old in enumerate(merged[region]):
+                    sym = old.get("symbol")
+                    if sym in new_items:
+                        new_item = new_items.pop(sym)
+                        old_price = old.get("price")
+                        if old_price is not None and old_price > 0:
+                            continue
+                        merged[region][i] = new_item
+                for item in items:
+                    sym = item.get("symbol")
+                    if sym not in existing_symbols:
+                        merged[region].append(dict(item))
+            _global_indices_last_ok = merged
+            _global_indices_last_ok_ts = time.time()
+            _save_ok_cache()
+            _global_indices_cache = merged
             _global_indices_cache_ts = time.time()
-            return stale
-        # 无 OK 缓存（首次启动）：返回当前空数据
-        _global_indices_cache.update(regions)
-        _global_indices_cache_ts = time.time()
-        return regions
+            return merged
+        else:
+            # 非交易时段：所有源返回空，使用 OK 缓存（如果存在且未过期）
+            if _global_indices_last_ok and (time.time() - _global_indices_last_ok_ts) < _GLOBAL_INDICES_OK_TTL:
+                stale = {}
+                for region, items in _global_indices_last_ok.items():
+                    stale[region] = []
+                    for item in items:
+                        entry = dict(item)
+                        entry["available"] = False
+                        stale[region].append(entry)
+                _global_indices_cache = stale
+                _global_indices_cache_ts = time.time()
+                return stale
+            _global_indices_cache = regions
+            _global_indices_cache_ts = time.time()
+            return regions
+
+    except Exception as e:
+        logger.error("[get_global_indices] Unexpected error: %s", e, exc_info=True)
+        if _global_indices_last_ok:
+            return _global_indices_last_ok
+        return {}
 
 
 async def _global_index_defs() -> list[tuple[str, str, str]]:

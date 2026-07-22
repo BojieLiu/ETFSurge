@@ -5,7 +5,6 @@ import router from './router'
 import logger from './utils/logger'
 import './styles/theme.css'
 import './styles/global.css'
-import './plugins/echarts'
 
 const app = createApp(App)
 app.use(createPinia())

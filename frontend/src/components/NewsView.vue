@@ -143,7 +143,11 @@ async function loadNews() {
 
 function handleNews(msg) {
   const item = msg && msg.data ? msg.data : msg
-  if (!item || item.id == null) return
+  if (!item || !item.title) return
+  // Backend always provides id since Phase 0.6; fallback for any residual edge case
+  if (item.id == null) {
+    item.id = `${item.time || Date.now()}_${item.title}`
+  }
   if (seenIds.value.has(item.id)) return
   seenIds.value.add(item.id)
   news.value = [item, ...news.value]
