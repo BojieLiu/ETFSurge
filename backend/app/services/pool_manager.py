@@ -150,9 +150,10 @@ class PoolManager:
         """
         old_by_code = dict(self._by_code)
 
-        # 1. 扫描全市场 → 3 层基础池
+        # 1. 扫描全市场 → 3 层基础池（full_pipeline 是同步函数，必须 run_sync 否则阻塞事件循环）
         try:
-            raw_layers = self.scanner.full_pipeline()
+            from ..core.async_utils import run_sync
+            raw_layers = await run_sync(self.scanner.full_pipeline)
         except Exception as e:
             logger.exception("[pool_manager] scanner.full_pipeline failed")
             raw_layers = {"core": [], "satellite": [], "defense": []}
@@ -178,7 +179,7 @@ class PoolManager:
 
         # 3. ETFClassifier 添加行业/概念
         if flat:
-            class_results = self.classifier.batch_classify(flat)
+            class_results = await run_sync(self.classifier.batch_classify, flat)
             for item in flat:
                 sym = item["symbol"]
                 info = class_results.get(sym, {})
