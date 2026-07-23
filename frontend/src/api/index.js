@@ -56,13 +56,13 @@ export const portfolioApi = {
   getPnl: (type, totalCapital) => api.post('/portfolio/daily-pnl', { total_capital: totalCapital }, { params: type ? { portfolio_type: type } : {} }),
   strategyCheck: (data) => api.post('/portfolio/strategy-check-async', data),
   getStrategyCheckResult: (taskId) => api.get(`/portfolio/strategy-check-result/${taskId}`),
-  listStrategyChecks: (limit = 10, offset = 0) => api.get('/portfolio/strategy-checks', { params: { limit, offset } }),
+  listStrategyChecks: (limit = 10, offset = 0, timeout) => api.get('/portfolio/strategy-checks', { params: { limit, offset }, ...(timeout ? { timeout } : {}) }),
   getStrategyCheckDetail: (id) => api.get(`/portfolio/strategy-checks/${id}`),
   applyStrategy: (suggestions) => api.post('/portfolio/apply-strategy', suggestions),
   applyPortfolioDesign: (design) => api.post('/portfolio/apply-design', design),
 
   // Design History
-  listDesigns: (limit = 10, offset = 0) => api.get('/portfolio/designs', { params: { limit, offset } }),
+  listDesigns: (limit = 10, offset = 0, timeout) => api.get('/portfolio/designs', { params: { limit, offset }, ...(timeout ? { timeout } : {}) }),
   getDesign: (id) => api.get(`/portfolio/designs/${id}`),
   deleteDesign: (id) => api.delete(`/portfolio/designs/${id}`),
 

@@ -7,6 +7,7 @@
       <div v-if="taskProgress > 0" class="progress-bar">
         <div class="progress-fill" :style="{ width: taskProgress + '%' }"></div>
       </div>
+      <AppButton variant="ghost" size="sm" @click="$emit('cancel')">取消</AppButton>
     </div>
 
     <!-- Error state -->

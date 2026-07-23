@@ -423,8 +423,8 @@ async function loadHistoryList() {
   historyLoading.value = true
   try {
     const [designRes, checkRes] = await Promise.all([
-      portfolioApi.listDesigns(20, 0).catch(() => ({ data: [] })),
-      portfolioApi.listStrategyChecks(20, 0).catch(() => ({ data: [] })),
+      portfolioApi.listDesigns(20, 0, 8000).catch(() => ({ data: [] })),
+      portfolioApi.listStrategyChecks(20, 0, 8000).catch(() => ({ data: [] })),
     ])
     const designs = (designRes.data || []).map(d => ({ ...d, _type: 'design' }))
     const checks = (checkRes.data || []).map(c => ({ ...c, _type: 'check' }))
