@@ -74,6 +74,36 @@ def section_health(host, port):
         check("/health", False, str(e))
 
 
+def _check_candidate_pool(host, port):
+    """检查候选池是否已预热。返回 True 表示池有候选标的。"""
+    try:
+        r = requests.get(f"{BASE}/api/v1/portfolio/designs?limit=1", timeout=10)
+        if r.status_code == 200:
+            designs = r.json()
+            if designs:
+                did = designs[0]["id"]
+                dr = requests.get(f"{BASE}/api/v1/portfolio/designs/{did}", timeout=10)
+                if dr.status_code == 200:
+                    detail = dr.json()
+                    strategies = detail.get("strategies", [])
+                    if strategies:
+                        check("候选池健康（最新设计有策略数据）", True)
+                        return True
+        check("候选池状态", False, "无历史设计记录或数据为空")
+        return False
+    except Exception as e:
+        check("候选池连通性", False, str(e))
+        return False
+
+
+def _is_infra_error(err_msg):
+    """判断错误是否为数据源基础设施问题（而非代码 bug）。"""
+    if not err_msg or not isinstance(err_msg, str):
+        return False
+    keywords = ["数据管道", "候选池", "数据源"]
+    return any(kw in err_msg for kw in keywords)
+
+
 def section_market():
     """行情数据端点"""
     section("行情数据")
@@ -268,6 +298,26 @@ def section_portfolio():
                             check("含 market_regime",
                                   isinstance(pd.get("market_regime"), str) and pd["market_regime"] != "")
                             completed = True
+
+                            # 输出质量断言 (P3d)
+                            _suggestions = pd.get("suggestions", [])
+                            _holdings = pd.get("holdings_analysis", [])
+                            if _holdings:
+                                _suggested_symbols = {s["symbol"] for s in _suggestions if "symbol" in s}
+                                _holding_symbols = {h["symbol"] for h in _holdings if "symbol" in h}
+                                if _holding_symbols:
+                                    _coverage = len(_suggested_symbols & _holding_symbols) / len(_holding_symbols)
+                                    check(f"策略检查建议覆盖率 {_coverage:.0%}", _coverage >= 0.3,
+                                          f"{len(_suggested_symbols)}/{len(_holding_symbols)} 标的被覆盖")
+                                _non_empty_factors = sum(
+                                    1 for h in _holdings
+                                    if h.get("factor_summary") and "空" not in h["factor_summary"]
+                                )
+                                if _non_empty_factors == 0:
+                                    check("因子数据可用性", False, "全部为空，见 INFRA 标注")
+                                else:
+                                    check(f"因子数据可用性 {_non_empty_factors}/{len(_holdings)}", True)
+
                             break
                         elif status == "failed":
                             check("异步检查失败", False, pd.get("error_message", "未知"))

@@ -28,15 +28,22 @@ async def generate_enhanced_design(
     import time
     start_time = time.monotonic()
     constraints = constraints or {}
+    _elapsed_logged = False
 
     # 1. 刷新数据管道
     from ..services.pool_manager import pool_manager
+    _t1 = time.monotonic()
     try:
         await asyncio.wait_for(pool_manager.refresh(), timeout=30)
     except asyncio.TimeoutError:
-        logger.warning("[strategy_design] pool_manager.refresh timed out, using cached")
+        logger.warning("[strategy_design] pool_manager.refresh timed out (%.1fs), using cached",
+                       time.monotonic() - _t1)
     except Exception as e:
         logger.exception("[strategy_design] pool_manager.refresh failed")
+    _t2 = time.monotonic()
+    if _t2 - _t1 > 0.1:
+        logger.info("[strategy_design] refresh took %.2fs, elapsed_total=%.2fs",
+                     _t2 - _t1, time.monotonic() - start_time)
 
     # 2. 读取管道产出
     factor_matrix = pool_manager.get_factor_matrix() or {}
@@ -64,16 +71,24 @@ async def generate_enhanced_design(
 
     try:
         # 3. 策略引擎：一次调用生成所有方案
+        _t3 = time.monotonic()
         # 扁平化候选池：allocate() 预期 list[dict]，每项含 layer 字段
         flat_candidates = []
         for layer_list in candidates.values():
             flat_candidates.extend(layer_list)
+        if _t3 - start_time > 0.2:
+            logger.info("[strategy_design] pre-allocate %.2fs candidates=%d",
+                         _t3 - start_time, len(flat_candidates))
         strategies_raw = engine_allocate(
             risk_profile="balanced",
             factor_matrix=factor_matrix,
             candidates=flat_candidates,
             regime=market_regime,
         )
+
+        _t4 = time.monotonic()
+        if _t4 - _t3 > 0.1:
+            logger.info("[strategy_design] allocate took %.2fs", _t4 - _t3)
 
         # 4. 转换为前端期望的 etfs 字段名
         strategies = []

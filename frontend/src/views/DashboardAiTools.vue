@@ -52,6 +52,14 @@
         @close="exitCoreFeature"
       />
 
+      <!-- Error Detail Modal -->
+      <AppModal v-model="showErrorModal" title="❌ 设计任务失败" :closable="true" size="sm">
+        <div class="error-detail-content">{{ errorDetail }}</div>
+        <template #footer>
+          <button class="app-btn app-btn--primary" @click="showErrorModal = false">关闭</button>
+        </template>
+      </AppModal>
+
       <!-- Design Wizard -->
       <DesignWizard
         v-else-if="activeCoreFeature === 'design' && designStep === 'wizard'"
@@ -112,6 +120,7 @@ import DesignResult from '../components/design/DesignResult.vue'
 import DesignHistory from '../components/design/DesignHistory.vue'
 import StrategyCheckModal from '../components/design/StrategyCheckModal.vue'
 import StrategyCheckResult from '../components/design/StrategyCheckResult.vue'
+import AppModal from '../components/ui/AppModal.vue'
 
 const emit = defineEmits(['applied'])
 
@@ -138,6 +147,8 @@ const strategyError = ref('')
 const strategyTaskStatus = ref('')
 const strategyPortfolioType = ref('')
 const reportError = ref('')
+const showErrorModal = ref(false)
+const errorDetail = ref('')
 const showStrategyModal = ref(false)
 
 // Timer refs for cleanup (prevent resource leaks on navigation)
@@ -533,9 +544,10 @@ async function onHistorySelect(id, item) {
     toast('该方案仍在生成中，请稍后再试', 'info')
     return
   }
-  // 失败：提示错误
+  // 失败：展示错误详情弹窗
   if (item?.status === 'failed') {
-    toast('该方案生成失败，无法查看详情', 'warning')
+    showErrorModal.value = true
+    errorDetail.value = item.error_message || '未知错误'
     return
   }
   // check 类型：加载策略检查详情并显示

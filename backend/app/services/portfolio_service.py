@@ -430,6 +430,19 @@ async def strategy_check(
                 "weight_drift": drift,
             }
     
+    # 统计因子数据质量
+    filled_factor_count = sum(
+        1 for fb in factor_breakdowns.values()
+        if fb.get("factor_scores") and any(v != 0 for v in fb["factor_scores"].values())
+    )
+    total_factor_count = len(factor_breakdowns)
+    data_quality = {
+        "filled_count": filled_factor_count,
+        "total_count": total_factor_count,
+        "all_empty": filled_factor_count == 0,
+        "partial": 0 < filled_factor_count < total_factor_count,
+    }
+
     # LLM 分析（带超时保护：60s 内未完成则返回部分结果）
     try:
         llm_result = await asyncio.wait_for(
@@ -437,6 +450,7 @@ async def strategy_check(
                 market_data=market_data,
                 factor_breakdowns=factor_breakdowns,
                 regime=regime,
+                data_quality=data_quality,
             ),
             timeout=45,
         )

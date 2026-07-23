@@ -69,6 +69,13 @@ async def lifespan(app: FastAPI):
 
     asyncio.create_task(_warmup_market_cache())
 
+    # 后台预加载 factor_registry（内含 pandas/numpy/yaml 重导入）
+    asyncio.create_task(
+        asyncio.to_thread(
+            lambda: __import__("app.factors.factor_registry")
+        )
+    )
+
     # 启动时预热全球指数缓存（非阻塞，写入持久化 cache，重启后不丢失）
     async def _warmup_global_indices():
         try:

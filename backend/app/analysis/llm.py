@@ -707,6 +707,7 @@ async def generate_strategy_check_report(
     market_data: list[dict],
     factor_breakdowns: dict[str, dict],
     regime: str,
+    data_quality: dict | None = None,
 ) -> dict:
     """基于持仓数据 + 因子分 + regime 生成结构化策略检查报告。"""
     # 格式化持仓数据
@@ -736,13 +737,40 @@ async def generate_strategy_check_report(
 
     holdings_text = "\n".join(holdings_lines)
 
+    # 根据持仓数量动态计算建议数上限
+    holdings_count = len(holdings_lines)
+    if holdings_count <= 5:
+        max_suggestions = 5
+    elif holdings_count <= 10:
+        max_suggestions = 8
+    else:
+        max_suggestions = 12
+
+    # 根据数据质量追加注记
+    quality_note = ""
+    if data_quality:
+        if data_quality.get("all_empty"):
+            quality_note = (
+                "\n⚠️ 数据质量注记：当前所有持仓的因子数据为空，技术信号仅供参考。\n"
+                "请基于权重配置和相关性做判断，降低所有建议的置信度。\n"
+            )
+        elif data_quality.get("partial"):
+            missing = data_quality['total_count'] - data_quality['filled_count']
+            quality_note = (
+                f"\n⚠️ 数据质量注记：{missing} / {data_quality['total_count']} 只标的因子数据缺失。\n"
+                f"请对缺失数据的标的降低置信度。\n"
+            )
+
     prompt = f"""
 ## 市场状态
 当前 regime: {regime}
+持仓数量: {holdings_count} 只
+建议条数上限: {max_suggestions} 条
 
 ## 持仓分析
 {holdings_text}
 
+{quality_note}
 请按 strategy_check.md 要求的 JSON 格式输出分析报告。
 """
     from ..analysis.registry import get_agent

@@ -139,6 +139,8 @@ async def design_worker(mgr: TaskManager, task_id: int) -> None:
     if not task:
         return
 
+    design_id = None  # must be initialized for the except handler
+
     try:
         mgr.update_task(task_id, status="running", progress=10)
         await _notify(task_id, "running", progress=10)
