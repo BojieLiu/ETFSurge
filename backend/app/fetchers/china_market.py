@@ -510,23 +510,6 @@ def fetch_futures_realtime() -> list[dict[str, Any]]:
         return []
 
 
-# ── 新浪全球指数实时行情 ──────────────────────────────────
-# 使用 gb_ 前缀查询全球指数，比 yfinance 更快更稳定（中国大陆）
-_GLOBAL_SINA_MAP: dict[str, str] = {
-    "^GSPC": "gb_$spx",       # 标普500
-    "^IXIC": "gb_$ixic",      # 纳斯达克
-    "^DJI": "gb_$dji",       # 道琼斯
-    "^N225": "gb_$n225",     # 日经225
-    "^HSI": "gb_$hsi",       # 恒生指数
-    "^HSCE": "gb_$hsce",     # 恒生国企指数
-    "^HSTECH": "gb_$hstech", # 恒生科技指数
-    "^KS11": "gb_$ks11",     # 韩国综合指数
-    "^FTSE": "gb_$ftse",     # 英国富时100
-    "^GDAXI": "gb_$dax",     # 德国DAX
-    "^FCHI": "gb_$fchi",     # 法国CAC40
-    "^STOXX50E": "gb_$stoxx50e", # 欧洲斯托克50
-}
-# Sina 可用的全球指数代码
 # Sina 全球指数页面映射（欧洲指数通过页面标题抓取）
 _GLOBAL_SINA_PAGE: dict[str, str] = {
     "^FTSE": "UKX",        # 英国富时100指数
