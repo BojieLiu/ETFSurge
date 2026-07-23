@@ -72,9 +72,10 @@ async def compute_sector_momentum(top_n: int = 10) -> list[dict[str, Any]]:
     try:
         import akshare as ak
         from ..utils.decode import decode_df
+        from ..core.async_utils import run_sync
 
-        # 获取行业板块行情
-        df = ak.stock_board_industry_name_em()
+        # 获取行业板块行情（必须 run_sync，akshare 是同步调用）
+        df = await run_sync(ak.stock_board_industry_name_em)
         if df is None or df.empty:
             return []
         decode_df(df)
