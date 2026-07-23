@@ -22,6 +22,7 @@
     <div v-else-if="result" class="strategy-result">
       <!-- header -->
       <div class="sr-header">
+        <button class="sr-back" @click="$emit('close')">← 返回</button>
         <h3>策略检查结果</h3>
         <span class="regime-badge" :class="'regime-' + (result.market_regime || 'unknown')">
           {{ regimeLabel(result.market_regime) }}
@@ -180,6 +181,21 @@ function signalClass(signal) {
   gap: var(--space-3);
   padding: var(--space-4) var(--space-5);
   border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-tertiary);
+}
+
+.sr-back {
+  background: none;
+  border: none;
+  color: var(--color-primary);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+
+.sr-back:hover {
   background: var(--color-bg-tertiary);
 }
 

@@ -129,6 +129,8 @@ async def test_global_indices_sina_fails_finnhub_fallback():
          patch("app.fetchers.china_market.fetch_index_realtime", return_value=[]), \
          patch("app.fetchers.china_market.fetch_sina_global_index",
                side_effect=fake_sina), \
+         patch("app.fetchers.em_global_fetcher.fetch_all", return_value={}), \
+         patch("app.fetchers.em_global_fetcher.fetch_hk_indices", return_value={}), \
          patch("app.fetchers.finnhub_fetcher.fetch_realtime",
                side_effect=fake_fh):
         regions = await ms.get_global_indices()
@@ -162,6 +164,8 @@ async def test_global_indices_one_region_failure_isolated():
          patch("app.fetchers.china_market.fetch_index_realtime", return_value=[]), \
          patch("app.fetchers.china_market.fetch_sina_global_index",
                side_effect=fake_sina), \
+         patch("app.fetchers.em_global_fetcher.fetch_all", return_value={}), \
+         patch("app.fetchers.em_global_fetcher.fetch_hk_indices", return_value={}), \
          patch("app.fetchers.finnhub_fetcher.fetch_realtime",
                side_effect=fake_fh):
         regions = await ms.get_global_indices()
@@ -195,6 +199,8 @@ async def test_global_indices_all_sources_fail_graceful():
          patch("app.fetchers.china_market.fetch_index_realtime", return_value=[]), \
          patch("app.fetchers.china_market.fetch_sina_global_index",
                side_effect=fake_sina), \
+         patch("app.fetchers.em_global_fetcher.fetch_all", return_value={}), \
+         patch("app.fetchers.em_global_fetcher.fetch_hk_indices", return_value={}), \
          patch("app.fetchers.finnhub_fetcher.fetch_realtime",
                side_effect=fake_fh):
         regions = await ms.get_global_indices()
@@ -256,6 +262,43 @@ async def test_all_index_entries_match_schema():
         regions = await ms.get_global_indices()
 
     _validate_index_response(regions)
+
+
+# ── 数据源映射完整性测试 ───────────────────────────────────
+
+
+def test_foreign_index_symbols_covered_by_at_least_one_source():
+    """Every foreign (non-A股) index symbol must be mapped in EM_SYMBOL_MAP
+    OR _GLOBAL_SINA_SHORT — otherwise it always returns price:null."""
+    from app.fetchers.em_global_fetcher import EM_SYMBOL_MAP
+    from app.fetchers.china_market import _GLOBAL_SINA_SHORT
+
+    # Collect our symbols in EM_SYMBOL_MAP (values are (our_sym, region, name))
+    em_our_syms = {v[0] for v in EM_SYMBOL_MAP.values()}
+    # Sina uses the same symbol key (^HSTECH, ^GSPC, …)
+    sina_our_syms = set(_GLOBAL_SINA_SHORT.keys())
+
+    # Get the full defs list
+    import inspect
+    defs_fn = ms._global_index_defs
+    if inspect.iscoroutinefunction(defs_fn):
+        import asyncio
+        defs = asyncio.run(defs_fn())
+    else:
+        defs = defs_fn()
+
+    uncovered = []
+    for sym, name, region in defs:
+        if region == "A股":
+            continue  # A股 has its own pipeline, not affected
+        if sym in em_our_syms or sym in sina_our_syms:
+            continue
+        uncovered.append(f"{sym} ({name})")
+
+    assert not uncovered, (
+        f"Foreign index symbols missing from EM_SYMBOL_MAP and "
+        f"_GLOBAL_SINA_SHORT: {', '.join(uncovered)}"
+    )
 
 
 # ── Cleanup: prevent mock data from leaking into persistent cache ────────

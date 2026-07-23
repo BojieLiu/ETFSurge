@@ -103,12 +103,22 @@ def section_market():
                     break
             check(f"全球指数共 {total_count} 条（>=6 即有数据 + 占位）", total_count >= 6)
             # Verify HK 3 major indices are present
-            hk_symbols = [d.get("symbol", "") for d in all_entries if d.get("region") == "港股" or d.get("name", "").find("恒生") >= 0]
-            has_hsi = any("HSI" in s for s in hk_symbols)
-            has_hsce = any("HSCE" in s for s in hk_symbols)
-            has_hstech = any("HSTECH" in s for s in hk_symbols)
+            hk_symbols = [d for d in all_entries if d.get("region") == "港股" or d.get("name", "").find("恒生") >= 0]
+            hk_syms_found = {d["symbol"] for d in hk_symbols}
+            has_hsi = any("HSI" in s for s in hk_syms_found)
+            has_hsce = any("HSCE" in s for s in hk_syms_found)
+            has_hstech = any("HSTECH" in s for s in hk_syms_found)
             check("港股三大指数均覆盖", has_hsi and has_hsce and has_hstech,
                   f"HSI={'Y' if has_hsi else 'N'} HSCE={'Y' if has_hsce else 'N'} HSTECH={'Y' if has_hstech else 'N'}")
+            # Also verify prices are non-null for HK 3
+            hk_hsi = next((d for d in hk_symbols if "HSI" in d.get("symbol","") and "HSCE" not in d.get("symbol","")), None)
+            hk_hsce = next((d for d in hk_symbols if "HSCE" in d.get("symbol","")), None)
+            hk_hstech = next((d for d in hk_symbols if "HSTECH" in d.get("symbol","")), None)
+            for label, entry in [("恒生指数", hk_hsi), ("恒生国企指数", hk_hsce), ("恒生科技指数", hk_hstech)]:
+                if entry:
+                    price_ok = entry.get("price") is not None
+                    check(f"{label} 价格非空", price_ok,
+                          f"price={entry.get('price')}" if not price_ok else "")
     except requests.Timeout:
         check("GET /market/indices/global", False, "请求超时（30s）")
     except Exception as e:

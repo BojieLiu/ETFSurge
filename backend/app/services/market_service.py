@@ -255,7 +255,7 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
                 }
                 regions.setdefault(region, []).append(item)
 
-        # 海外指数：EM（10s）→ Sina（4s）→ Finnhub（6s）→ 占位
+        # 海外指数：EM（10s）→ HK 指数（10s）→ Sina（4s）→ Finnhub（6s）→ 占位
         from ..fetchers import em_global_fetcher
         from ..fetchers.china_market import fetch_sina_global_index as sina_index
         from ..fetchers import finnhub_fetcher
@@ -271,6 +271,15 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
         except Exception:
             pass
 
+        # HK 指数批量接口（补充 EM 不含的 HSTECH 恒生科技指数）
+        _hk_map: dict[str, dict] = {}
+        try:
+            _hk_data = await _call(em_global_fetcher.fetch_hk_indices, timeout=10)
+            if _hk_data:
+                _hk_map.update(_hk_data)
+        except Exception:
+            pass
+
         async def _foreign(sym: str, name: str, region: str):
             loop = asyncio.get_running_loop()
             import functools
@@ -280,6 +289,11 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
                 d = dict(_em_map[sym])
                 d.setdefault("change_pct", None)
                 d.setdefault("change_amount", None)
+                return region, d
+
+            # 第1.5优先：AKShare 香港指数（补 EM 不含的恒生科技指数）
+            if sym in _hk_map:
+                d = dict(_hk_map[sym])
                 return region, d
 
             # 第2优先：新浪 Sina（4s）

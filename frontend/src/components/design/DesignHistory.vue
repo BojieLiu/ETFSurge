@@ -2,11 +2,11 @@
   <div class="panel-body">
     <div class="history-panel" v-if="items.length > 0 || !loaded">
       <div class="history-header">
-        <h4>历史方案</h4>
+        <h4>任务列表</h4>
         <button class="history-close" @click="$emit('close')">X</button>
       </div>
       <div v-if="loading" class="history-empty">加载中...</div>
-      <div v-else-if="items.length === 0" class="history-empty">暂无历史记录，先生成一个方案吧</div>
+      <div v-else-if="items.length === 0" class="history-empty">暂无任务记录</div>
       <div v-else class="history-list">
         <div v-for="h in items" :key="h._type + '-' + h.id" class="history-item"
              @click="$emit('select', h.id, h)">

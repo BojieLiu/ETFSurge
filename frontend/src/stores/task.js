@@ -19,6 +19,25 @@ function _save(key, val) {
 export const useTaskStore = defineStore('task', () => {
   const tasks = ref(_loadTasks())
 
+  // 定时清除超时任务（30s 检查一次，避免 localStorage 中的 running 任务永久显示）
+  let _staleTimer = null
+  function _startStaleCheck() {
+    if (_staleTimer) return
+    _staleTimer = setInterval(() => {
+      let changed = false
+      const now = Date.now()
+      tasks.value.forEach(t => {
+        if (t.status === 'running' && now - (t.createdAt || 0) > 300000) {
+          t.status = 'failed'
+          t.errorMessage = '生成超时，请重新尝试'
+          changed = true
+        }
+      })
+      if (changed) _save(LS_KEYS.tasks, tasks.value)
+    }, 30000)
+  }
+  _startStaleCheck()
+
   function _loadTasks() {
     const raw = _load(LS_KEYS.tasks, [])
     const now = Date.now()

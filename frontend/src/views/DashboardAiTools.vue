@@ -29,8 +29,8 @@
         <button class="core-action-btn" @click="enterHistoryMode">
           <span class="action-icon" aria-hidden="true">📖</span>
           <div class="action-content">
-            <span class="action-title">历史记录</span>
-            <span class="action-desc">查看之前生成的组合设计方案</span>
+            <span class="action-title">任务列表</span>
+            <span class="action-desc">查看历史组合设计与策略检查记录</span>
           </div>
         </button>
       </div>
@@ -355,7 +355,7 @@ async function startDesign(capital) {
     setTimeout(() => {
       clearInterval(pollTimer)
       if (designStep.value === 'loading' && !designFailed.value) {
-        loadingText.value = '方案生成中，您可稍后查看历史记录'
+        loadingText.value = '方案生成中，您可稍后查看任务列表'
         setTimeout(() => {
           if (designStep.value === 'loading') {
             exitCoreFeature()

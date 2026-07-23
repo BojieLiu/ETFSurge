@@ -135,9 +135,12 @@ async def design_worker(mgr: TaskManager, task_id: int) -> None:
         mgr.update_task(task_id, progress=30)
         await _notify(task_id, "running", progress=30)
 
-        result = await generate_enhanced_design(
-            capital=capital,
-            constraints=constraints,
+        result = await asyncio.wait_for(
+            generate_enhanced_design(
+                capital=capital,
+                constraints=constraints,
+            ),
+            timeout=150,
         )
 
         strategies = result.get("strategies", [])
@@ -188,6 +191,10 @@ async def design_worker(mgr: TaskManager, task_id: int) -> None:
         logger.info("[design_worker] task %d completed with %d strategies",
                     task_id, len(strategies))
 
+    except asyncio.TimeoutError:
+        logger.warning("[design_worker] task %d timed out (150s)", task_id)
+        mgr.update_task(task_id, status="failed", progress=0, error_message="方案生成超时（150s），数据源响应过慢，请稍后重试")
+        await _notify(task_id, "failed", progress=0)
     except Exception as e:
         error_msg = str(e)
         logger.exception("[design_worker] task %d failed: %s", task_id, error_msg)
