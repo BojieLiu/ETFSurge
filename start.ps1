@@ -22,12 +22,12 @@ if ($Local -or -not $Docker) {
     if ($Silent) {
         # 静默:后台隐藏启动 uvicorn,不弹出可见窗口
         # 注意:不能用 RedirectStandardOutput/Error,否则父进程会等待子进程 stdout 关闭而挂起
-        Start-Process -FilePath "cmd.exe" -ArgumentList "/c","cd /d $PSScriptRoot\backend && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload" -WindowStyle Hidden
+        Start-Process -FilePath "cmd.exe" -ArgumentList "/c","cd /d $PSScriptRoot\backend && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000" -WindowStyle Hidden
         Write-Host "  后端已后台启动" -ForegroundColor Green
     } else {
         # 普通:启动可见窗口
-        Start-Process cmd -ArgumentList "/c", "cd /d $PSScriptRoot\backend && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
-        Write-Host "  后端已启动 (uvicorn --reload)" -ForegroundColor Yellow
+        Start-Process cmd -ArgumentList "/c", "cd /d $PSScriptRoot\backend && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000"
+        Write-Host "  后端已启动" -ForegroundColor Yellow
     }
 
     Start-Sleep 3
@@ -46,9 +46,9 @@ if ($Local -or -not $Docker) {
 
     # 健康检查：等待后端就绪（最多 10 秒）
     $backendOk = $false
-    for ($i = 0; $i -lt 10; $i++) {
+    for ($i = 0; $i -lt 30; $i++) {
         try {
-            $resp = Invoke-WebRequest -Uri "http://127.0.0.1:8000/docs" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+            $resp = Invoke-WebRequest -Uri "http://127.0.0.1:8000/health" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
             if ($resp.StatusCode -eq 200) { $backendOk = $true; break }
         } catch {}
         Start-Sleep 1
