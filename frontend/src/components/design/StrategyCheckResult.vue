@@ -2,6 +2,9 @@
   <div class="panel-body">
     <!-- Loading state -->
     <div v-if="loading" class="loading-state">
+      <div class="loading-header">
+        <button class="sr-back" @click="$emit('close')">← 返回</button>
+      </div>
       <TaskProgress
         :taskStatus="taskStatus"
         :taskProgress="taskProgress"
@@ -154,7 +157,13 @@ function signalClass(signal) {
 }
 
 .loading-state {
-  padding: var(--space-8) 0;
+  padding: var(--space-4) 0;
+}
+
+.loading-header {
+  display: flex;
+  align-items: center;
+  padding: 0 var(--space-4) var(--space-2);
 }
 
 .error-state {
