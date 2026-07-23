@@ -332,6 +332,77 @@ def section_news():
         check("GET /news/macro", False, str(e))
 
 
+def section_async_resilience():
+    """异步任务提交后验证后端持续存活——测试护城河缺失的关键一环。"""
+    section("异步任务弹性（后端存活）")
+
+    # Helper: submit and poll with periodic health check
+    def _submit_and_watch(endpoint, payload, label, poll_deadline=60):
+        """Submit an async task, check /health every 5s while it runs."""
+        try:
+            r = requests.post(f"{BASE}{endpoint}", json=payload, timeout=30)
+            check(f"POST {endpoint} -> {r.status_code}", r.status_code == 202, f"{label}")
+            if r.status_code != 202:
+                return
+            task_id = r.json().get("task_id")
+            if not task_id:
+                check("task_id 存在", False, f"{label}")
+                return
+
+            deadline = time.time() + poll_deadline
+            health_ok_count = 0
+            health_total = 0
+            completed = False
+            while time.time() < deadline:
+                health_total += 1
+                try:
+                    hr = requests.get(f"{BASE}/health", timeout=5)
+                    if hr.status_code == 200:
+                        health_ok_count += 1
+                    else:
+                        check(f"  [{label}] /health 状态异常", False, f"HTTP {hr.status_code}")
+                except requests.Timeout:
+                    check(f"  [{label}] 后端挂死!", False, f"/health 超时 (第{health_total}次检查)")
+                    return
+                except Exception as e:
+                    check(f"  [{label}] /health 异常", False, str(e))
+                    return
+
+                # Check task status
+                try:
+                    tr = requests.get(f"{BASE}/api/v1/portfolio/tasks/{task_id}", timeout=5)
+                    if tr.status_code == 200:
+                        td = tr.json()
+                        status = td.get("status")
+                        if status == "completed":
+                            completed = True
+                            break
+                        elif status == "failed":
+                            break
+                except (requests.Timeout, Exception):
+                    pass  # task endpoint not critical for this test
+
+                time.sleep(5)
+
+            if health_total > 0:
+                check(f"  [{label}] 后端存活率 {health_ok_count}/{health_total}",
+                      health_ok_count == health_total,
+                      f"任务运行期间后端无响应 {health_total - health_ok_count} 次")
+            check(f"  [{label}] 任务{'已完成' if completed else '超时'}", completed,
+                  f"{poll_deadline}s 内{'未' if not completed else ''}完成")
+        except requests.Timeout:
+            check(f"  [{label}] 提交请求超时", False)
+        except Exception as e:
+            check(f"  [{label}] 异常", False, str(e))
+
+    _submit_and_watch("/api/v1/portfolio/design-async",
+                      {"capital": 500000, "constraints": {"risk_profile": "balanced"}},
+                      "智能组合设计", poll_deadline=120)
+    _submit_and_watch("/api/v1/portfolio/strategy-check-async",
+                      {"total_capital": 500000, "portfolio_type": "on_exchange"},
+                      "策略分析", poll_deadline=120)
+
+
 def section_admin():
     """管理端点"""
     section("管理端点")
@@ -411,6 +482,7 @@ MODULES = {
     "news": section_news,
     "admin": section_admin,
     "ws": section_ws,
+    "resilience": section_async_resilience,
 }
 
 SMOKE_MODULES = ["health", "market"]
