@@ -54,6 +54,14 @@ async def market_ws(websocket: WebSocket, symbol: str):
 async def news_ws(websocket: WebSocket):
     await manager.connect(websocket, "news")
     try:
+        # 订阅即推快照：立即推送当前最新头条，避免广播间隙空等
+        try:
+            from ..fetchers.news_fetcher import fetch_news_headlines
+            headlines = await asyncio.to_thread(fetch_news_headlines)
+            for item in (headlines or [])[:30]:
+                await websocket.send_text(json.dumps({"type": "news", "data": item}, ensure_ascii=False))
+        except Exception:
+            pass
         while True:
             data = await websocket.receive_text()
             if data.strip().lower() in ("ping", "heartbeat"):
