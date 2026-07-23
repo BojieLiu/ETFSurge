@@ -1,0 +1,15 @@
+fix: increase full_pipeline run_sync timeout from 8s to 120s
+
+Root cause: run_sync() default timeout was 8s, but full_pipeline()
+needs 20-60s for external HTTP API calls (Sina + EM). Every refresh
+timed out -> thread leaked to dead thread pool -> backend hung.
+
+Fix: pass timeout=120 to run_sync for full_pipeline call.
+Individual HTTP calls within full_pipeline already have 5s timeouts
+(timeout=5 on requests.get), so no single request hangs forever.
+
+Combined with existing protections (30s refresh cooldown, refresh
+lock, _refresh_market_snapshot fire-and-forget), this fixes the
+cascade deadlock.
+
+37/37 tests passing.
