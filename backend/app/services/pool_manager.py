@@ -267,8 +267,8 @@ class PoolManager:
         # 9. 审计日志
         pool_audit.log_refresh(diff)
 
-        # 9b. A3: 写入市场快照缓存
-        await self._refresh_market_snapshot()
+        # 9b. A3: 写入市场快照缓存（fire-and-forget 不阻塞主流程）
+        asyncio.create_task(self._refresh_market_snapshot())
 
         logger.info("PoolManager: refresh complete (v%d, %d total)",
                      self._version,
