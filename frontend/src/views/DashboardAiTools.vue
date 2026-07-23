@@ -538,10 +538,25 @@ async function onHistorySelect(id, item) {
     toast('该方案生成失败，无法查看详情', 'warning')
     return
   }
-  // check 类型：跳转策略检查记录详情
+  // check 类型：加载策略检查详情并显示
   if (item?._type === 'check') {
-    toast('请前往策略检查功能查看详情', 'info')
-    return
+    try {
+      const res = await portfolioApi.getStrategyCheckDetail(id)
+      const data = res.data
+      if (!data) {
+        toast('策略检查记录不存在', 'warning')
+        return
+      }
+      strategyResult.value = data
+      strategyTaskStatus.value = 'completed'
+      strategyProgress.value = 100
+      strategyStage.value = '分析完成'
+      activeCoreFeature.value = 'strategy'
+      return
+    } catch (e) {
+      toast('加载策略检查详情失败: ' + (e?.message || '网络错误'), 'error')
+      return
+    }
   }
   try {
     const res = await portfolioApi.getDesign(id)

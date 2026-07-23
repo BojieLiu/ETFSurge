@@ -116,6 +116,21 @@ async def _notify(task_id: int, status: str, progress: int, stage: str = "", tas
 # ── Backward-compatible exports ─────────────────────────────────
 # design_tasks.py re-exports these for existing importers
 
+async def _save_design_error(design_id: int | None, error_msg: str) -> None:
+    """将错误信息保存到 PortfolioDesign DB 记录。"""
+    if design_id is None:
+        return
+    try:
+        async with async_session() as db:
+            d = await db.get(PortfolioDesign, design_id)
+            if d:
+                d.status = "failed"
+                d.error_message = error_msg
+                await db.commit()
+    except Exception as e:
+        logger.warning("[design_worker] failed to save error to design_id=%d: %s", design_id, e)
+
+
 async def design_worker(mgr: TaskManager, task_id: int) -> None:
     """后台执行设计生成任务。"""
     from ..services.strategy_design import generate_enhanced_design
@@ -219,11 +234,13 @@ async def design_worker(mgr: TaskManager, task_id: int) -> None:
             logger.warning("[design_worker] task %d completed but has error: %s", task_id, error_msg)
             mgr.update_task(task_id, progress=0, status="failed", error_message=error_msg)
             await _notify(task_id, "failed", progress=0)
+            await _save_design_error(design_id, error_msg)
         elif not strategies:
+            error_msg = "策略生成为空：数据源不可用或未找到符合条件的 ETF"
             logger.warning("[design_worker] task %d completed with 0 strategies — treating as failure", task_id)
-            mgr.update_task(task_id, progress=0, status="failed",
-                            error_message="策略生成为空：数据源不可用或未找到符合条件的 ETF")
+            mgr.update_task(task_id, progress=0, status="failed", error_message=error_msg)
             await _notify(task_id, "failed", progress=0)
+            await _save_design_error(design_id, error_msg)
         else:
             mgr.update_task(task_id, progress=100, status="completed",
                             result={"strategies": strategies, "market_context": market_context, "design_id": design_id})
@@ -233,11 +250,14 @@ async def design_worker(mgr: TaskManager, task_id: int) -> None:
                     task_id, len(strategies))
 
     except asyncio.TimeoutError:
+        error_msg = "方案生成超时（150s），数据源响应过慢，请稍后重试"
         logger.warning("[design_worker] task %d timed out (150s)", task_id)
-        mgr.update_task(task_id, status="failed", progress=0, error_message="方案生成超时（150s），数据源响应过慢，请稍后重试")
+        mgr.update_task(task_id, status="failed", progress=0, error_message=error_msg)
         await _notify(task_id, "failed", progress=0)
+        await _save_design_error(design_id, error_msg)
     except Exception as e:
         error_msg = str(e)
         logger.exception("[design_worker] task %d failed: %s", task_id, error_msg)
         mgr.update_task(task_id, status="failed", progress=0, error_message=error_msg)
         await _notify(task_id, "failed", progress=0)
+        await _save_design_error(design_id, error_msg)

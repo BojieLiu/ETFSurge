@@ -28,7 +28,13 @@
           </span>
           <span class="history-date">{{ formatDate(h.created_at) }}</span>
           <span class="history-capital">{{ h._type === 'design' && typeof h.capital === 'number' && h.capital > 0 ? (h.capital / 10000).toFixed(0) + '万' : '' }}</span>
-          <span v-if="h.status === 'completed'" class="history-detail-link">查看详情</span>
+          <span v-if="h.error_message" class="history-error" :title="h.error_message">{{ h.error_message.slice(0, 25) }}{{ h.error_message.length > 25 ? '...' : '' }}</span>
+          <span class="history-detail-link" :class="{'detail-error': h.status === 'failed'}">
+            <template v-if="h.status === 'completed' && h._type === 'design'">📊 查看方案</template>
+            <template v-else-if="h.status === 'completed' && h._type === 'check'">📋 查看报告</template>
+            <template v-else-if="h.status === 'failed'">⚠️ 查看错误</template>
+            <template v-else>→ 查看详情</template>
+          </span>
         </div>
       </div>
     </div>
@@ -212,11 +218,32 @@ const filteredItems = computed(() => {
 .history-detail-link {
   margin-left: auto;
   font-size: var(--font-size-2xs);
-  color: var(--color-primary);
-  opacity: 0;
-  transition: opacity var(--transition-fast);
   white-space: nowrap;
-  font-weight: var(--font-weight-medium);
+  font-weight: var(--font-weight-semibold);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-primary-soft, #e3f2fd);
+  color: var(--color-primary, #1565c0);
+  border: 1px solid var(--color-primary-border, #bbdefb);
+  opacity: 0;
+  transition: all var(--transition-fast);
+  cursor: pointer;
+  line-height: 1.3;
+}
+
+.history-detail-link.detail-error {
+  background: var(--color-danger-soft, #fce4ec);
+  color: var(--color-danger, #c62828);
+  border-color: #ffcdd2;
+}
+
+.history-item:hover .history-detail-link {
+  opacity: 1;
+}
+
+.history-detail-link:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(0,0,0,0.08));
 }
 
 .history-status {
