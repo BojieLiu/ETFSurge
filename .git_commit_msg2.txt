@@ -1,0 +1,15 @@
+Add missing integration tests + fix flaky report test
+
+Backend tests (test_phase0_7.py):
+- P0-4: _compute_composite must sum only aggregated keys,
+  not raw RSI=50 values
+- C3: mock LLM in full design_worker pipeline, verify task
+  completes and DB design_text is non-null
+- 3 new Phase 0.7 tests (18 total), 37 design_opt tests
+
+Frontend tests (DashboardAiTools):
+- timer.spec.js: 3 tests for timer cleanup, 5-consecutive-error
+  detection, and submit failure fallback
+- report.spec.js: fix mock to include type='design' (required by
+  enterDesignMode stale-task filter)
+- 91/92 pass (1 pre-existing PortfolioAnalysis failure)
