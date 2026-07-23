@@ -52,14 +52,6 @@
         @close="exitCoreFeature"
       />
 
-      <!-- Error Detail Modal -->
-      <AppModal v-model="showErrorModal" title="❌ 设计任务失败" :closable="true" size="sm">
-        <div class="error-detail-content">{{ errorDetail }}</div>
-        <template #footer>
-          <button class="app-btn app-btn--primary" @click="showErrorModal = false">关闭</button>
-        </template>
-      </AppModal>
-
       <!-- Design Wizard -->
       <DesignWizard
         v-else-if="activeCoreFeature === 'design' && designStep === 'wizard'"
@@ -103,6 +95,14 @@
         :task-stage="strategyStage"
         @close="exitCoreFeature"
       />
+
+      <!-- Error Detail Modal (standalone, not in the v-if chain) -->
+      <AppModal v-model="showErrorModal" title="❌ 设计任务失败" :closable="true" size="sm">
+        <div class="error-detail-content">{{ errorDetail }}</div>
+        <template #footer>
+          <button class="app-btn app-btn--primary" @click="showErrorModal = false">关闭</button>
+        </template>
+      </AppModal>
     </div>
   </section>
 </template>
