@@ -1,68 +1,62 @@
-"""Tests for design status endpoint (Plan B)"""
+"""Tests for design status via TaskManager (Plan B)."""
 import pytest
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
-@pytest.mark.asyncio
-async def test_status_completed():
-    """design_text non-null → status=completed, alive=False"""
-    from app.routers.portfolio import get_design_status
-    
-    mock_design = AsyncMock()
-    mock_design.id = 1
-    mock_design.created_at = datetime.utcnow() - timedelta(seconds=60)
-    mock_design.design_text = "# Test Report"
-    
-    mock_db = AsyncMock()
-    mock_db.get.return_value = mock_design
-    
-    result = await get_design_status(1, mock_db)
-    assert result["status"] == "completed"
-    assert result["alive"] is False
-    assert result["design_text"] == "# Test Report"
 
-@pytest.mark.asyncio
-async def test_status_running():
-    """created_at < 300s, no design_text → status=running, alive=True"""
-    from app.routers.portfolio import get_design_status
-    
-    mock_design = AsyncMock()
-    mock_design.id = 2
-    mock_design.created_at = datetime.utcnow() - timedelta(seconds=30)
-    mock_design.design_text = None
-    
-    mock_db = AsyncMock()
-    mock_db.get.return_value = mock_design
-    
-    result = await get_design_status(2, mock_db)
-    assert result["status"] == "running"
-    assert result["alive"] is True
+class TestDesignStatus:
+    """测试通过 TaskManager 查询设计任务状态。"""
 
-@pytest.mark.asyncio
-async def test_status_failed():
-    """created_at > 300s, no design_text → status=failed, alive=False"""
-    from app.routers.portfolio import get_design_status
-    
-    mock_design = AsyncMock()
-    mock_design.id = 3
-    mock_design.created_at = datetime.utcnow() - timedelta(seconds=600)
-    mock_design.design_text = None
-    
-    mock_db = AsyncMock()
-    mock_db.get.return_value = mock_design
-    
-    result = await get_design_status(3, mock_db)
-    assert result["status"] == "failed"
-    assert result["alive"] is False
+    def test_status_completed(self):
+        """验证已完成任务返回 status=completed"""
+        from app.tasks.design_tasks import TaskManager
 
-@pytest.mark.asyncio
-async def test_status_not_found():
-    """design_id not in DB → status=not_found"""
-    from app.routers.portfolio import get_design_status
-    
-    mock_db = AsyncMock()
-    mock_db.get.return_value = None
-    
-    result = await get_design_status(999, mock_db)
-    assert result["status"] == "not_found"
-    assert result["alive"] is False
+        mgr = TaskManager()
+        mgr.create_task(task_type="design", params={"capital": 500000})
+
+        # 模拟 design_worker 执行完毕
+        mgr.update_task(1, status="completed", progress=100,
+                        result={"strategies": [{"label": "防御型"}], "market_context": {}})
+
+        task = mgr.get_task(1)
+        assert task["status"] == "completed"
+        assert task["progress"] == 100
+        assert "result" in task
+
+    def test_status_running(self):
+        """验证进行中任务返回 status=running"""
+        from app.tasks.design_tasks import TaskManager
+
+        mgr = TaskManager()
+        mgr.create_task(task_type="design", params={"capital": 500000})
+
+        # 模拟 design_worker 执行中
+        mgr.update_task(1, status="running", progress=30)
+
+        task = mgr.get_task(1)
+        assert task["status"] == "running"
+        assert task["progress"] == 30
+
+    def test_status_failed(self):
+        """验证失败任务返回 status=failed 并携带错误信息"""
+        from app.tasks.design_tasks import TaskManager
+
+        mgr = TaskManager()
+        mgr.create_task(task_type="design", params={"capital": 500000})
+
+        # 模拟 design_worker 失败
+        mgr.update_task(1, status="failed", progress=50,
+                        error_message="API timeout")
+
+        task = mgr.get_task(1)
+        assert task["status"] == "failed"
+        assert task["progress"] == 50
+        assert "API timeout" in task.get("error_message", "")
+
+    def test_status_not_found(self):
+        """验证不存在的 task_id 返回 None"""
+        from app.tasks.design_tasks import TaskManager
+
+        mgr = TaskManager()
+        task = mgr.get_task(999)
+        assert task is None

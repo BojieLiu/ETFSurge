@@ -278,7 +278,7 @@ def filter_etfs(raw_list: list[dict] | Any) -> list[dict[str, Any]]:
     CODE_NAMES = ["代码", "symbol", "code", "证券代码"]
     NAME_NAMES = ["名称", "name", "证券简称"]
     AMOUNT_NAMES = ["成交额", "amount", "成交金额", "成交额(元)"]
-    SCALE_NAMES = ["流通市值", "总市值", "fund_scale", "规模", "最新基金规模"]
+    SCALE_NAMES = ["流通市值", "总市值", "fund_scale", "规模", "最新基金规模", "基金规模"]
 
     results = []
     seen = set()
