@@ -155,6 +155,7 @@ async def list_designs(
             PortfolioDesign.capital,
             PortfolioDesign.risk_profile,
             PortfolioDesign.status,
+            PortfolioDesign.error_message,
         ))
         .order_by(desc(PortfolioDesign.created_at))
         .offset(offset)
@@ -170,6 +171,7 @@ async def list_designs(
             "capital": r.capital,
             "risk_profile": r.risk_profile,
             "status": r.status or "completed",
+            "error_message": r.error_message,
         }
         for r in records
     ]

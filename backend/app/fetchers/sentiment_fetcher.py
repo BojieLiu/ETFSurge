@@ -102,7 +102,6 @@ def fetch_advance_decline_ratio() -> float:
     """
     # 1. Sina/EastMoney push2 API (faster & more reliable than akshare)
     try:
-        from ..fetchers.china_market import fetch_realtime_quotes
         # 获取沪深全部股票简况
         import urllib.request
         url = "https://push2.eastmoney.com/api/qt/clist/get"

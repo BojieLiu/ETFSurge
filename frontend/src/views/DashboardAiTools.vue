@@ -547,7 +547,17 @@ async function onHistorySelect(id, item) {
   // 失败：展示错误详情弹窗
   if (item?.status === 'failed') {
     showErrorModal.value = true
-    errorDetail.value = item.error_message || '未知错误'
+    if (item.error_message) {
+      errorDetail.value = item.error_message
+    } else {
+      // 列表无 error_message 时尝试从详情接口获取
+      try {
+        const res = await portfolioApi.getDesign(id)
+        errorDetail.value = res.data?.error_message || '未知错误'
+      } catch {
+        errorDetail.value = '未知错误'
+      }
+    }
     return
   }
   // check 类型：加载策略检查详情并显示

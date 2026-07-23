@@ -258,6 +258,7 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
         # 海外指数：EM（10s）→ HK 指数（10s）→ Sina（4s）→ Finnhub（6s）→ 占位
         from ..fetchers import em_global_fetcher
         from ..fetchers.china_market import fetch_sina_global_index as sina_index
+        from ..fetchers.china_market import fetch_sina_page_global_index as sina_page_index
         from ..fetchers import finnhub_fetcher
 
         # Call EM once for all foreign symbols (batched API)
@@ -310,7 +311,21 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
             except (asyncio.TimeoutError, Exception):
                 pass
 
-            # 第2优先：Finnhub（6s）
+            # 第2.5优先：新浪财经页面标题抓取（欧洲指数降级，4s）
+            try:
+                d = await asyncio.wait_for(
+                    loop.run_in_executor(None, functools.partial(sina_page_index, sym)),
+                    timeout=4,
+                )
+                if d and d.get("price") is not None:
+                    d["name"] = name
+                    d["region"] = region
+                    d["available"] = True
+                    return region, d
+            except (asyncio.TimeoutError, Exception):
+                pass
+
+            # 第3优先：Finnhub（6s）
             try:
                 d = await asyncio.wait_for(
                     loop.run_in_executor(None, functools.partial(finnhub_fetcher.fetch_realtime, sym)),

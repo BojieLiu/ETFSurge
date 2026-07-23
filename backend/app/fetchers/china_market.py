@@ -527,8 +527,17 @@ _GLOBAL_SINA_MAP: dict[str, str] = {
     "^STOXX50E": "gb_$stoxx50e", # 欧洲斯托克50
 }
 # Sina 可用的全球指数代码
+# Sina 全球指数页面映射（欧洲指数通过页面标题抓取）
+_GLOBAL_SINA_PAGE: dict[str, str] = {
+    "^FTSE": "UKX",        # 英国富时100指数
+    "^GDAXI": "DAX",       # 德国DAX指数
+    "^FCHI": "CAC",        # 法国CAC40指数
+    "^STOXX50E": "SX5E",   # 欧元区Stoxx50指数
+}
+
+# Sina 可用的实时行情 API 代码
 _GLOBAL_SINA_SHORT: dict[str, str] = {
-    "^GSPC": "gb_$spx",
+    "^GSPC": "gb_$inx",    # 标普500: gb_$inx（gb_$spx 返回空数据）
     "^IXIC": "gb_$ixic",
     "^DJI": "gb_$dji",
     "^N225": "gb_$n225",
@@ -570,6 +579,63 @@ def fetch_sina_global_index(symbol: str) -> dict[str, Any] | None:
         price = float(parts[1]) if parts[1] else 0
         change_pct = float(parts[2]) if parts[2] else 0
         change_amount = float(parts[3]) if parts[3] else 0
+        return {
+            "symbol": symbol,
+            "name": name,
+            "price": price,
+            "change_pct": change_pct,
+            "change_amount": change_amount,
+            "asset_type": "index",
+            "available": True,
+        }
+    except Exception:
+        return None
+
+
+def fetch_sina_page_global_index(symbol: str) -> dict[str, Any] | None:
+    """通过新浪财经页面标题抓取全球指数行情（欧洲指数降级方案）。
+
+    Sina 的实时行情 API（hq.sinajs.cn）不提供欧洲指数数据，
+    但其全球指数详情页 ``https://finance.sina.com.cn/stock/globalindex/quotes/{page_sym}``
+    的 ``<title>`` 标签中含有实时价格和涨跌幅。
+
+    Args:
+        symbol: APP 标准代码如 ^FTSE, ^GDAXI, ^FCHI, ^STOXX50E。
+
+    Returns:
+        行情 dict 或 None。
+    """
+    page_sym = _GLOBAL_SINA_PAGE.get(symbol)
+    if not page_sym:
+        return None
+    try:
+        url = f"https://finance.sina.com.cn/stock/globalindex/quotes/{page_sym}"
+        s = _session()
+        s.headers.update({"Referer": "https://finance.sina.com.cn"})
+        r = s.get(url, timeout=8)
+        text = r.text
+        # 页面标题格式: "指数名 price(change_pct)_指数_新浪财经"
+        title_start = text.find("<title>")
+        title_end = text.find("</title>")
+        if title_start < 0 or title_end < 0:
+            return None
+        title = text[title_start + 7:title_end]
+
+        import re
+        # 从标题中提取 price 和 change_pct
+        # 格式示例: "英国富时100指数 10639.170000(-0.730000)"
+        m = re.search(r"([\d.]+)\(([-+]\d+[.]?\d*)\)", title)
+        if not m:
+            return None
+        price = float(m.group(1))
+        change_pct = float(m.group(2))
+        prev_close = price / (1 + change_pct / 100) if change_pct != -100 else None
+        change_amount = round(price - prev_close, 2) if prev_close else None
+
+        # 提取指数名
+        name_parts = title.split()
+        name = name_parts[0] if name_parts else ""
+
         return {
             "symbol": symbol,
             "name": name,
@@ -803,7 +869,7 @@ def fetch_etf_list() -> list[dict[str, Any]]:
             import akshare as ak
             with no_proxy():
                 return ak.fund_etf_category_sina(symbol="ETF基金")
-        df = run_in_thread(_p, timeout=8)
+        df = run_in_thread(_p, timeout=15)
         cols = list(df.columns)
         if len(cols) < 5:
             raise ValueError("unexpected etf list columns")

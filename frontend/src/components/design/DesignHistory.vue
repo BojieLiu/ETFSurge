@@ -28,7 +28,7 @@
           </span>
           <span class="history-date">{{ formatDate(h.created_at) }}</span>
           <span class="history-capital">{{ h._type === 'design' && typeof h.capital === 'number' && h.capital > 0 ? (h.capital / 10000).toFixed(0) + '万' : '' }}</span>
-          <span v-if="h.error_message" class="history-error" :title="h.error_message">{{ h.error_message.slice(0, 25) }}{{ h.error_message.length > 25 ? '...' : '' }}</span>
+          <span v-if="h.error_message" class="history-error" :title="h.error_message">{{ h.error_message.slice(0, 40) }}{{ h.error_message.length > 40 ? '...' : '' }}</span>
           <span class="history-detail-link" :class="{'detail-error': h.status === 'failed'}">
             <template v-if="h.status === 'completed' && h._type === 'design'">📊 查看方案</template>
             <template v-else-if="h.status === 'completed' && h._type === 'check'">📋 查看报告</template>

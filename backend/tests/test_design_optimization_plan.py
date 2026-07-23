@@ -293,6 +293,8 @@ async def test_ux3_list_designs_loads_only_metadata():
             PortfolioDesign.created_at,
             PortfolioDesign.capital,
             PortfolioDesign.risk_profile,
+            PortfolioDesign.status,
+            PortfolioDesign.error_message,
         ))
         .order_by(desc(PortfolioDesign.created_at))
         .limit(10)
@@ -307,6 +309,11 @@ async def test_ux3_list_designs_loads_only_metadata():
     )
     # Column names should be present (table alias is portfolio_designs)
     assert "portfolio_designs.created_at" in compiled or "portfolio_designs.capital" in compiled
+    # P4-1: error_message must also be in the load_only columns
+    assert "error_message" in compiled, (
+        "load_only should include error_message in the SELECT; "
+        "fix the endpoint to add error_message to load_only"
+    )
 
 
 # ─── P5-a: _build_plan_tables ──────────────────────────────────

@@ -51,8 +51,12 @@ def fetch_all() -> dict[str, list[dict[str, Any]]]:
     """
     import akshare as ak
 
-    with no_proxy():
-        df = ak.index_global_spot_em()
+    try:
+        with no_proxy():
+            df = ak.index_global_spot_em()
+    except Exception as e:
+        logger.warning("[em_global] index_global_spot_em failed: %s", e)
+        return {}
     if df is None or df.empty:
         logger.warning("[em_global] index_global_spot_em returned empty")
         return {}

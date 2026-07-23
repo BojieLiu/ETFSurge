@@ -294,6 +294,48 @@ WS 推送 streaming chunks → 逐步显示
 
 ---
 
+### 2.10 设计方案列表 / List Design History
+
+```
+GET /api/v1/portfolio/designs?limit=10&offset=0
+```
+
+**成功响应 — `200 OK`:**
+
+```json
+[
+  {
+    "id": 1,
+    "created_at": "2026-07-23T16:55:23.998973",
+    "capital": 500000.0,
+    "risk_profile": "balanced",
+    "status": "completed",
+    "error_message": null
+  },
+  {
+    "id": 2,
+    "created_at": "2026-07-23T16:55:23.998973",
+    "capital": 500000.0,
+    "risk_profile": "balanced",
+    "status": "failed",
+    "error_message": "无候选标的: 数据管道未能生成候选池，请检查数据源连接或稍后重试"
+  }
+]
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | int | 方案 ID |
+| `created_at` | string | ISO 格式创建时间 |
+| `capital` | float | 设计本金 |
+| `risk_profile` | string | 风险偏好，默认 "balanced" |
+| `status` | string | `completed` 或 `failed` |
+| `error_message` | string or null | 失败时的详细错误信息，成功时为 null |
+
+**注意：** 列表接口仅返回元数据字段，`strategies_json` 和 `market_snapshot_json` 等大字段由详情接口 `GET /portfolio/designs/{id}` 返回。
+
+---
+
 ### 2.9 设计方案状态 / Design Status
 
 ```

@@ -39,7 +39,7 @@ async def generate_enhanced_design(
         logger.warning("[strategy_design] pool_manager.refresh timed out (%.1fs), using cached",
                        time.monotonic() - _t1)
     except Exception as e:
-        logger.exception("[strategy_design] pool_manager.refresh failed")
+        logger.warning("[strategy_design] pool_manager.refresh failed/timeout — pool may be stale; _by_code=%d", len(pool_manager._by_code))
     _t2 = time.monotonic()
     if _t2 - _t1 > 0.1:
         logger.info("[strategy_design] refresh took %.2fs, elapsed_total=%.2fs",

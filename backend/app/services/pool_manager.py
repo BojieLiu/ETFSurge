@@ -182,8 +182,9 @@ class PoolManager:
             # full_pipeline 需要 20-60s（外部 HTTP API），默认 8s 不够
             raw_layers = await run_sync(self.scanner.full_pipeline, timeout=120)
         except Exception as e:
-            logger.exception("[pool_manager] scanner.full_pipeline failed")
+            logger.warning("[pool_manager] scanner.full_pipeline failed")
             raw_layers = {"core": [], "satellite": [], "defense": []}
+            logger.warning("[pool_manager] scanner.full_pipeline returned empty — data source chain failed; raw_count=%d, exception: %s", 0, e)
         raw_count = sum(len(v) for v in raw_layers.values())
         logger.info("PoolManager: scanned %d ETFs (%d core, %d sat, %d def)",
                      raw_count,

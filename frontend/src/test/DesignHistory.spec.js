@@ -143,4 +143,37 @@ describe('DesignHistory.vue', () => {
     await tabs[3].trigger('click')
     expect(wrapper.text()).toContain('当前筛选项无匹配任务')
   })
+
+  it('should show error detail modal content when clicking failed item with error_message', async () => {
+    const failedItem = {
+      id: 99,
+      _type: 'design',
+      status: 'failed',
+      created_at: '2026-07-22T06:00:00Z',
+      capital: 0,
+      error_message: '候选池为空: 数据管道未能生成候选池',
+    }
+    const wrapper = mount(DesignHistory, {
+      props: { items: [failedItem], loading: false, loaded: true },
+      global: { stubs },
+    })
+
+    // 1. The failed item renders the "⚠️ 查看错误" detail link
+    const detailLink = wrapper.find('.history-detail-link.detail-error')
+    expect(detailLink.exists()).toBe(true)
+    expect(detailLink.text()).toContain('查看错误')
+
+    // 2. The error message preview span exists with the full (untruncated) message
+    const errorSpan = wrapper.find('.history-error')
+    expect(errorSpan.exists()).toBe(true)
+    expect(errorSpan.text()).toContain('候选池为空')
+
+    // 3. Clicking the history item emits 'select' with id and full item including error_message
+    await wrapper.find('.history-item').trigger('click')
+    expect(wrapper.emitted('select')).toBeTruthy()
+    const emitted = wrapper.emitted('select')[0]
+    expect(emitted[0]).toBe(99)
+    expect(emitted[1]).toEqual(failedItem)
+    expect(emitted[1].error_message).toBe('候选池为空: 数据管道未能生成候选池')
+  })
 })
