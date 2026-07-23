@@ -1,6 +1,6 @@
 <template>
   <div class="panel-body">
-    <div class="history-panel" v-if="items.length > 0 || !loaded">
+    <div class="history-panel" v-if="items.length > 0 || loading || loaded">
       <div class="history-header">
         <h4>任务列表</h4>
         <button class="history-close" @click="$emit('close')">X</button>
