@@ -382,15 +382,19 @@ async function checkStrategy() {
     let pollCount = 0
     const pollTimer = setInterval(async () => {
       pollCount++
-      strategyProgress.value = Math.min(pollCount * 10, 80)
       try {
         const taskRes = await portfolioApi.getTask(taskData.task_id)
         const task = taskRes.data
+        // 从后端读取真实进度和阶段
+        strategyProgress.value = task.progress || Math.min(pollCount * 10, 80)
+        strategyStage.value = task.stage || ''
         if (task.status === 'completed') {
           clearInterval(pollTimer)
           const detailRes = await portfolioApi.getStrategyCheckResult(taskData.task_id)
           strategyResult.value = detailRes.data
           strategyTaskStatus.value = 'completed'
+          strategyProgress.value = 100
+          strategyStage.value = '分析完成'
           checkingStrategy.value = false
           toast('策略检查完成', 'success')
         } else if (task.status === 'failed') {

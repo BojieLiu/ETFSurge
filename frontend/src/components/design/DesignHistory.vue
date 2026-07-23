@@ -5,10 +5,18 @@
         <h4>任务列表</h4>
         <button class="history-close" @click="$emit('close')">X</button>
       </div>
+      <div class="history-filters">
+        <button v-for="opt in filterOptions" :key="opt.key"
+                class="filter-pill" :class="{ active: statusFilter === opt.key }"
+                @click="statusFilter = opt.key">
+          {{ opt.label }}
+        </button>
+      </div>
       <div v-if="loading" class="history-empty">加载中...</div>
-      <div v-else-if="items.length === 0" class="history-empty">暂无任务记录</div>
+      <div v-else-if="filteredItems.length === 0 && items.length === 0" class="history-empty">暂无任务记录</div>
+      <div v-else-if="filteredItems.length === 0" class="history-empty">当前筛选项无匹配任务</div>
       <div v-else class="history-list">
-        <div v-for="h in items" :key="h._type + '-' + h.id" class="history-item"
+        <div v-for="h in filteredItems" :key="h._type + '-' + h.id" class="history-item"
              @click="$emit('select', h.id, h)">
           <span class="history-icon">{{ h._type === 'check' ? '🔍' : '💡' }}</span>
           <span class="history-task-type" :class="h._type">{{ h._type === 'design' ? '智能组合设计' : '策略检查与分析' }}</span>
@@ -31,16 +39,30 @@
 </template>
 
 <script setup>
+import { ref, computed } from 'vue'
 import { formatDate } from '../../utils/formatDate'
 import AppButton from '../ui/AppButton.vue'
 
-defineProps({
+const props = defineProps({
   items: { type: Array, default: () => [] },
   loading: { type: Boolean, default: false },
   loaded: { type: Boolean, default: false }
 })
 
 defineEmits(['select', 'close'])
+
+const statusFilter = ref('all')
+const filterOptions = [
+  { key: 'all', label: '全部' },
+  { key: 'running', label: '运行中' },
+  { key: 'completed', label: '已完成' },
+  { key: 'failed', label: '失败' },
+]
+
+const filteredItems = computed(() => {
+  if (statusFilter.value === 'all') return props.items
+  return props.items.filter(h => h.status === statusFilter.value)
+})
 </script>
 
 <style scoped>
@@ -93,6 +115,41 @@ defineEmits(['select', 'close'])
 .history-close:hover {
   background: var(--color-bg-secondary);
   color: var(--color-text-primary);
+}
+
+.history-filters {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface-secondary);
+  position: sticky;
+  top: 45px;
+  z-index: 1;
+}
+
+.filter-pill {
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-2xs);
+  padding: var(--space-0) var(--space-3);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  line-height: 2;
+}
+
+.filter-pill:hover {
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  border-color: var(--color-primary);
+}
+
+.filter-pill.active {
+  background: var(--color-primary);
+  color: var(--color-on-primary, #fff);
+  border-color: var(--color-primary);
 }
 
 .history-empty {
