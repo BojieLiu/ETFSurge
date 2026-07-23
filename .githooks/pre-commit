@@ -2,90 +2,108 @@
 #
 # pre-commit — 检测将要提交的代码中是否包含明文 API Key / token / secret
 # 如果发现疑似泄露，阻止本次 commit。
+# 跳过检测: SKIP_SECRET_CHECK=1 git commit ...
 #
-# 跳过检查: SKIP_SECRET_CHECK=1 git commit ...
-#
+# 如果 frontend/ 下有文件变更，自动运行 npm run build 拦截 Vue 编译错误。
+# 跳过构建: SKIP_FRONTEND_BUILD=1 git commit ...
 
 set -e
 
-if [ "${SKIP_SECRET_CHECK:-}" = "1" ]; then
-    echo "[pre-commit] SKIP_SECRET_CHECK=1, 跳过 secret 扫描"
-    exit 0
-fi
+# ── 前置检查：检测明文 API Key / token / secret ──────────────────────────
+if [ "${SKIP_SECRET_CHECK}" = "1" ]; then
+    echo "[pre-commit] SKIP_SECRET_CHECK=1, 跳过密钥泄露检测"
+else
+    # 收集暂存的文件（增/改/重命名）
+    STAGED=$(git diff --cached --name-only --diff-filter=ACM -- '*.py' '*.md' '*.json' '*.yml' '*.yaml' '*.txt' '*.cfg' '*.ini' '*.conf' 'Dockerfile' 2>/dev/null || true)
 
-# 收集暂存的文件（增/改/重命名）
-STAGED=$(git diff --cached --name-only --diff-filter=ACM -- '*.py' '*.md' '*.json' '*.yml' '*.yaml' '*.txt' '*.cfg' '*.ini' '*.conf' 'Dockerfile' 2>/dev/null || true)
+    if [ -n "$STAGED" ]; then
+        HAS_LEAK=0
 
-if [ -z "$STAGED" ]; then
-    exit 0
-fi
-
-HAS_LEAK=0
-
-check_file() {
-    file="$1"
-    # 跳过已知安全的文件
-    case "$file" in
-        .env|backend/.env|.env.example|backend/.env.example|.gitignore|*.sample)
-            return
-            ;;
-        *.md)
-            # .md 文件只检查非文档的（跳过 README, AGENTS 等）
+        check_file() {
+            file="$1"
+            # 跳过已知安全的文件
             case "$file" in
-                README.md|README_EN.md|AGENTS.md|GITHUB_DESCRIPTION.md|api-contracts/*)
+                .env|backend/.env|.env.example|backend/.env.example|.gitignore|*.sample)
                     return
                     ;;
+                *.md)
+                    case "$file" in
+                        README.md|README_EN.md|AGENTS.md|GITHUB_DESCRIPTION.md|api-contracts/*)
+                            return
+                            ;;
+                    esac
+                    ;;
             esac
-            ;;
-    esac
 
-    # 如果文件不存在（可能已删除）跳过
-    [ -f "$file" ] || return
+            [ -f "$file" ] || return
 
-    # 模式1: sk- 开头后跟 20+ 字母数字 (API Keys)
-    PATTERN1='sk-[a-zA-Z0-9]\{20,\}'
-    
-    # 模式2: 赋值语句中疑似 token/secret/password 的字面量
-    PATTERN2='[Aa][Pp][Ii]_[Kk][Ee][Yy]\s*[=:]\s*['\''"][a-zA-Z0-9_\-]\{16,\}['\''"]'
-    PATTERN3='[Tt][Oo][Kk][Ee][Nn]\s*[=:]\s*['\''"][a-zA-Z0-9_\-]\{16,\}['\''"]'
-    PATTERN4='[Ss][Ee][Cc][Rr][Ee][Tt]\s*[=:]\s*['\''"][a-zA-Z0-9_\-]\{16,\}['\''"]'
-    PATTERN5='[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]\s*[=:]\s*['\''"][a-zA-Z0-9_\-]\{16,\}['\''"]'
+            PATTERN1='sk-[a-zA-Z0-9]\{20,\}'
+            PATTERN2='[Aa][Pp][Ii]_[Kk][Ee][Yy]\s*[=:]\s*['\''"][a-zA-Z0-9_\-]\{16,\}['\''"]'
+            PATTERN3='[Tt][Oo][Kk][Ee][Nn]\s*[=:]\s*['\''"][a-zA-Z0-9_\-]\{16,\}['\''"]'
+            PATTERN4='[Ss][Ee][Cc][Rr][Ee][Tt]\s*[=:]\s*['\''"][a-zA-Z0-9_\-]\{16,\}['\''"]'
+            PATTERN5='[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]\s*[=:]\s*['\''"][a-zA-Z0-9_\-]\{16,\}['\''"]'
 
-    # 用 grep 逐文件扫描
-    for pat in "$PATTERN1" "$PATTERN2" "$PATTERN3" "$PATTERN4" "$PATTERN5"; do
-        MATCHES=$(grep -Hin "$pat" "$file" 2>/dev/null || true)
-        if [ -n "$MATCHES" ]; then
-            # 过滤已知占位符
-            CLEAN=1
-            echo "$MATCHES" | while IFS= read -r line; do
-                # 忽略包含占位符的行
-                case "$line" in
-                    *sk-xxx*|*sk-xxxxxxxx*|*your_*|*YOUR_*|*_here*|*REDACTED*|*placeholder*)
-                        continue
-                        ;;
-                esac
-                echo "! [secret-leak] $file: $line"
-                CLEAN=0
+            for pat in "$PATTERN1" "$PATTERN2" "$PATTERN3" "$PATTERN4" "$PATTERN5"; do
+                MATCHES=$(grep -Hin "$pat" "$file" 2>/dev/null || true)
+                if [ -n "$MATCHES" ]; then
+                    CLEAN=1
+                    echo "$MATCHES" | while IFS= read -r line; do
+                        case "$line" in
+                            *sk-xxx*|*sk-xxxxxxxx*|*your_*|*YOUR_*|*_here*|*REDACTED*|*placeholder*)
+                                continue
+                                ;;
+                        esac
+                        echo "! [secret-leak] $file: <redacted>"
+                        CLEAN=0
+                    done
+                    if [ "$CLEAN" -eq 0 ]; then
+                        HAS_LEAK=1
+                    fi
+                fi
             done
-            if [ "$CLEAN" -eq 0 ]; then
-                HAS_LEAK=1
-            fi
+        }
+
+        for FILE in $STAGED; do
+            check_file "$FILE"
+        done
+
+        if [ "$HAS_LEAK" -ne 0 ]; then
+            echo ""
+            echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+            echo "!  检测到疑似 API Key / Token / Secret 明文泄露              !"
+            echo "!  请移除上述文件中的敏感信息后重试 commit。                    !"
+            echo "!  如需强制提交: SKIP_SECRET_CHECK=1 git commit ...           !"
+            echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+            exit 1
         fi
-    done
-}
+    fi
+fi
 
-for FILE in $STAGED; do
-    check_file "$FILE"
-done
+# ── 前端构建检查 ──────────────────────────────────────────────────────
+if [ "${SKIP_FRONTEND_BUILD}" = "1" ]; then
+    echo "[pre-commit] SKIP_FRONTEND_BUILD=1, 跳过前端构建检查"
+else
+    FRONTEND_STAGED=$(git diff --cached --name-only --diff-filter=ACM -- 'frontend/*' 2>/dev/null || true)
 
-if [ "$HAS_LEAK" -ne 0 ]; then
-    echo ""
-    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
-    echo "!  检测到疑似 API Key / Token / Secret 明文泄露              !"
-    echo "!  请移除上述文件中的敏感信息后重试 commit。                  !"
-    echo "!  如需强制提交: SKIP_SECRET_CHECK=1 git commit ...           !"
-    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
-    exit 1
+    if [ -n "$FRONTEND_STAGED" ]; then
+        echo "[pre-commit] 检测到前端文件变更，正在执行 npm run build ..."
+        cd frontend
+        # 在 Windows (Git Bash) 中必须通过 cmd /c 执行 npm
+        if cmd /c "npm run build" 2>&1; then
+            echo "[pre-commit] ✅ npm run build 通过"
+            cd ..
+        else
+            BUILD_EXIT=$?
+            cd ..
+            echo ""
+            echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+            echo "!  🚫 npm run build 失败 — 前端编译错误                        !"
+            echo "!  请修复上述错误后重新尝试 commit。                            !"
+            echo "!  如需跳过: SKIP_FRONTEND_BUILD=1 git commit ...             !"
+            echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+            exit $BUILD_EXIT
+        fi
+    fi
 fi
 
 exit 0

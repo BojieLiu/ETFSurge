@@ -44,14 +44,14 @@ describe('PortfolioAnalysis tabbed view', () => {
     expect(tabs[2].text()).toContain('技术分析')
   })
 
-  it('shows AI tools tab by default', () => {
+  it('shows holdings tab by default', () => {
     const wrapper = mount(PortfolioAnalysis, {
       global: { plugins: [createPinia()] },
     })
-    // AI tools panel is visible by default
-    expect(wrapper.find('.ai-tools').exists()).toBe(true)
+    // Holdings panel is visible by default (activeTab = 'holdings')
+    expect(wrapper.find('.pm').exists()).toBe(true)
     // Other panels are hidden
-    expect(wrapper.find('.pm').exists()).toBe(false)
+    expect(wrapper.find('.ai-tools').exists()).toBe(false)
     expect(wrapper.find('.av').exists()).toBe(false)
   })
 

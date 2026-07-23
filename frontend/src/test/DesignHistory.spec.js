@@ -60,14 +60,18 @@ describe('DesignHistory.vue', () => {
     expect(wrapper.text()).toContain('失败')
   })
 
-  it('shows 查看详情 link only for completed items', () => {
+  it('shows detail link text matching status', () => {
     const wrapper = mount(DesignHistory, {
       props: { items: sampleItems, loading: false, loaded: true },
       global: { stubs },
     })
-    // item 1 (completed) and item 2 (completed) should have it
     const detailLinks = wrapper.findAll('.history-detail-link')
-    expect(detailLinks.length).toBe(2)
+    // All 4 items render .history-detail-link; verify per-item text
+    const texts = detailLinks.map(el => el.text()).filter(t => t.trim())
+    expect(texts[0]).toContain('查看方案')    // id=1: completed + design
+    expect(texts[1]).toContain('查看报告')    // id=2: completed + check
+    expect(texts[2]).toContain('查看详情')    // id=3: running (falls to else)
+    expect(texts[3]).toContain('查看错误')    // id=4: failed
   })
 
   it('emits select with id and item on history item click', async () => {

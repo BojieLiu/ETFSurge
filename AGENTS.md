@@ -63,6 +63,7 @@ cd backend && python -m pytest
   - 已配置 `vitest.config.js` + `src/test/setup.js`（jsdom 环境）。
   - 组件测试用 `@vue/test-utils`。
 - **链路验证**：后端用 `verify_e2e.py`；前端用 `npm run build` + 浏览器走查关键页面。
+- **pre-commit 门禁**：`.githooks/pre-commit` 会在 frontend/ 有变更时自动执行 `npm run build`，拦截 Vue 编译错误（如 v-if/v-else-if 不连续）。跳过构建：`SKIP_FRONTEND_BUILD=1 git commit`。
 
 ## 关键路径
 
@@ -145,7 +146,8 @@ key 也存在于 `E:\agent_workspace\deepseek_api_key.txt.txt`。
 2. 填写路由、请求/响应结构（双语）
 3. 前后端各自对照契约实现
 4. 跑后端单测 + `verify_e2e.py`
-5. 联调时逐字段核对响应是否符合契约
+5. 前端改动用 `npm run build` 验证无编译错误（pre-commit 门禁自动执行）
+6. 联调时逐字段核对响应是否符合契约
 
 **目录结构:**
 ```
