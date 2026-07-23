@@ -100,7 +100,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { portfolioApi } from '../api'
 import { usePortfolioStore } from '../stores/portfolio'
 import { useTaskStore } from '../stores/task'
@@ -140,6 +140,12 @@ const strategyPortfolioType = ref('')
 const reportError = ref('')
 const showStrategyModal = ref(false)
 
+// Timer refs for cleanup (prevent resource leaks on navigation)
+let designPollTimer = null
+let designTimeoutTimer = null
+let strategyPollTimer = null
+let strategyTimeoutTimer = null
+
 const designReportStale = computed(() => {
   if (!designResult.value?.created_at) return false
   const created = new Date(designResult.value.created_at).getTime()
@@ -152,6 +158,13 @@ const showHistory = ref(false)
 const designHistoryList = ref([])
 const historyLoaded = ref(false)
 const historyLoading = ref(false)
+
+// Clean up all timers when component is destroyed
+onBeforeUnmount(() => {
+  if (designPollTimer) { clearInterval(designPollTimer); designPollTimer = null }
+  if (designTimeoutTimer) { clearTimeout(designTimeoutTimer); designTimeoutTimer = null }
+  clearStrategyTimers()
+})
 
 // Restore persisted state
 onMounted(() => {
@@ -177,7 +190,43 @@ onMounted(() => {
 
 // Actions
 async function enterDesignMode() {
-  const runningTask = taskStore.tasks.find(t => t.status === 'running')
+  // C: Clean up stale running tasks — if the backend restarted, in-memory tasks are dead
+  const runningTask = taskStore.tasks.find(t => t.type === 'design' && t.status === 'running')
+  if (runningTask) {
+    const age = Date.now() - (runningTask.createdAt || 0)
+    // If task is > 120s old, check if backend still knows about it
+    if (age > 120000) {
+      try {
+        const taskRes = await portfolioApi.getTask(runningTask.taskId)
+        const backendTask = taskRes.data
+        if (backendTask.status === 'completed') {
+          taskStore.updateTask(runningTask.taskId, { status: 'completed' })
+          if (runningTask.designId) {
+            activeCoreFeature.value = 'design'
+            designStep.value = 'loading'
+            await fetchDesignDetail(runningTask.designId)
+            return
+          }
+        } else if (backendTask.status === 'failed') {
+          taskStore.updateTask(runningTask.taskId, { status: 'failed' })
+          taskStore.removeTask(runningTask.taskId)
+          designStep.value = 'wizard'
+          activeCoreFeature.value = 'design'
+          return
+        }
+      } catch {
+        // Backend doesn't know about this task (404/restart) → clean up
+        if (age > 300000) {
+          taskStore.removeTask(runningTask.taskId)
+        } else {
+          taskStore.updateTask(runningTask.taskId, { status: 'failed', errorMessage: '后端已重启，任务丢失' })
+        }
+        designStep.value = 'wizard'
+        activeCoreFeature.value = 'design'
+        return
+      }
+    }
+  }
   if (runningTask && runningTask.designId) {
     activeCoreFeature.value = 'design'
     designStep.value = 'loading'
@@ -230,6 +279,11 @@ function enterHistoryMode() {
   if (!historyLoaded.value) loadHistoryList()
 }
 
+function clearStrategyTimers() {
+  if (strategyPollTimer) { clearInterval(strategyPollTimer); strategyPollTimer = null }
+  if (strategyTimeoutTimer) { clearTimeout(strategyTimeoutTimer); strategyTimeoutTimer = null }
+}
+
 function exitCoreFeature() {
   if (designStep.value === 'loading' || designStep.value === 'result') {
     taskStore.persistDesignState({
@@ -241,6 +295,7 @@ function exitCoreFeature() {
       expandedPlan: expandedPlan.value,
     })
   }
+  clearStrategyTimers()
   activeCoreFeature.value = null
 }
 
@@ -328,32 +383,41 @@ async function startDesign(capital) {
 
     // Poll as fallback
     let pollCount = 0
-    const pollTimer = setInterval(async () => {
+    let consecutiveErrors = 0
+    if (designPollTimer) clearInterval(designPollTimer)
+    designPollTimer = setInterval(async () => {
       pollCount++
       loadingProgress.value = Math.min(30 + pollCount * 5, 90)
       loadingText.value = `AI 正在优化组合... (${pollCount * 5}s)`
       try {
         const taskRes = await portfolioApi.getTask(taskData.task_id)
         const task = taskRes.data
+        consecutiveErrors = 0  // Reset on success
         if (task.status === 'completed') {
-          clearInterval(pollTimer)
+          clearInterval(designPollTimer); designPollTimer = null
           const did = task?.result?.design_id || taskData.design_id
           if (did) {
             await fetchDesignDetail(did)
             toast('组合方案生成完成！', 'success')
           }
         } else if (task.status === 'failed') {
-          clearInterval(pollTimer)
+          clearInterval(designPollTimer); designPollTimer = null
           designFailed.value = task.error_message || task.error || '方案生成失败，请稍后重试'
         }
       } catch {
-        // keep polling
+        // Detect backend restart: consecutive errors mean the task is gone
+        consecutiveErrors++
+        if (consecutiveErrors >= 5) {
+          clearInterval(designPollTimer); designPollTimer = null
+          designFailed.value = '后端服务异常，任务可能已丢失'
+        }
       }
     }, 5000)
 
-    // Cleanup poll on unmount or 180s timeout
-    setTimeout(() => {
-      clearInterval(pollTimer)
+    // Cleanup poll on 180s timeout
+    if (designTimeoutTimer) clearTimeout(designTimeoutTimer)
+    designTimeoutTimer = setTimeout(() => {
+      if (designPollTimer) { clearInterval(designPollTimer); designPollTimer = null }
       if (designStep.value === 'loading' && !designFailed.value) {
         loadingText.value = '方案生成中，您可稍后查看任务列表'
         setTimeout(() => {
@@ -369,6 +433,9 @@ async function startDesign(capital) {
 }
 
 async function checkStrategy() {
+  // Clean up any previous strategy timers before starting new one
+  clearStrategyTimers()
+
   checkingStrategy.value = true
   strategyTaskStatus.value = 'running'
   strategyError.value = ''
@@ -380,16 +447,18 @@ async function checkStrategy() {
 
     // Poll for completion
     let pollCount = 0
-    const pollTimer = setInterval(async () => {
+    let consecutiveErrors = 0
+    strategyPollTimer = setInterval(async () => {
       pollCount++
       try {
         const taskRes = await portfolioApi.getTask(taskData.task_id)
         const task = taskRes.data
+        consecutiveErrors = 0  // Reset on success
         // 从后端读取真实进度和阶段
         strategyProgress.value = task.progress || Math.min(pollCount * 10, 80)
         strategyStage.value = task.stage || ''
         if (task.status === 'completed') {
-          clearInterval(pollTimer)
+          clearStrategyTimers()
           const detailRes = await portfolioApi.getStrategyCheckResult(taskData.task_id)
           strategyResult.value = detailRes.data
           strategyTaskStatus.value = 'completed'
@@ -398,18 +467,25 @@ async function checkStrategy() {
           checkingStrategy.value = false
           toast('策略检查完成', 'success')
         } else if (task.status === 'failed') {
-          clearInterval(pollTimer)
+          clearStrategyTimers()
           strategyError.value = task.error_message || task.error || '策略检查失败'
           strategyTaskStatus.value = 'failed'
           checkingStrategy.value = false
         }
       } catch {
-        // keep polling
+        // Detect backend restart: consecutive errors mean the task is gone
+        consecutiveErrors++
+        if (consecutiveErrors >= 5) {
+          clearStrategyTimers()
+          strategyError.value = '后端服务异常，任务可能已丢失'
+          strategyTaskStatus.value = 'failed'
+          checkingStrategy.value = false
+        }
       }
     }, 3000)
 
-    setTimeout(() => {
-      clearInterval(pollTimer)
+    strategyTimeoutTimer = setTimeout(() => {
+      clearStrategyTimers()
       if (checkingStrategy.value) {
         strategyError.value = '策略检查超时，请稍后查看历史记录'
         strategyTaskStatus.value = 'failed'

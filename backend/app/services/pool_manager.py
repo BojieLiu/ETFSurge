@@ -354,7 +354,9 @@ class PoolManager:
     def _compute_composite(self, item: dict[str, Any], layer: str, regime: str = "neutral") -> float:
         """按层+市况计算综合得分。"""
         factor_scores = item.get("factor_scores", {})
-        factor_sum = sum(factor_scores.values()) if factor_scores else 0
+        # P0-4: 仅聚合顶层键求和（避免原始点分键双倍计数 + RSI=50 主导排序）
+        AGGREGATE_KEYS = {"technical", "momentum", "valuation", "sentiment"}
+        factor_sum = sum(v for k, v in factor_scores.items() if k in AGGREGATE_KEYS) if factor_scores else 0
         amount = float(item.get("amount", 0) or 0)
         scale = float(item.get("fund_scale", 0) or 0)
         opp_score = float(item.get("composite_score", 0.5))

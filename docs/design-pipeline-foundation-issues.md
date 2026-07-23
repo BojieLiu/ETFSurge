@@ -1,6 +1,24 @@
 # 智能组合设计 & 策略检查 — 问题诊断与优化方案
 
-> 版本: v2.0 | 状态: Review Complete | 日期: 2026-07-23
+> 版本: v2.1 | 状态: All Fixes Applied ✅ | 日期: 2026-07-23
+> 
+> ### 修复状态：全 12 项已实施并验证通过
+> 
+> | 问题 | 级别 | 状态 | 对应文件 | 验证 |
+> |------|:----:|:----:|----------|:----:|
+> | P0-1 因子评分键名不匹配 | 🔴 | ✅ | `factor_registry.py` | 单测 V3 |
+> | P0-2 tracked_index 丢弃 | 🔴 | ✅ | `etf_scanner.py`, `pool_manager.py` | 单测 V1 |
+> | P0-3 市场快照缓存未写入 | 🔴 | ✅ | `pool_manager.py` `_refresh_market_snapshot()` | 单测 V4 |
+> | P0-4 _compute_composite 求和扭曲 | 🔴 | ✅ | `pool_manager.py` (改为仅聚合键) | 代码检查 |
+> | P0-5 current_regime 未同步 | 🔴 | ✅ | `pool_manager.py` `normalize_regime` + `update_market_regime` | 单测 V10 |
+> | P1-1 行业集中度用 layer 名 | 🟠 | ✅ | `risk_controls.py` (3 处改为 industry) | 单测 V8 |
+> | P1-2 三方案一致 | 🟠 | ✅ | `allocation_engine.py` `_filter_satellite_by_profile` | 单测 V7 |
+> | P1-3 防御层无黄金/国债 | 🟠 | ✅ | `_ensure_mandatory` (已有) + `_consolidate_minnows` | 单测 V6 |
+> | P2-1 design_text 为 NULL | 🟡 | ✅ | `task_manager.py` `design_worker` (新增异步报告生成) | 单测 V9 |
+> | P0-6 硬编码映射 | 🟠 | ⏸️ 可选 | 4 个代码的硬编码保底设计为最小化，暂不修改 | — |
+> | P2-2 DB 编码 | 🟡 | ⏸️ 低优先 | DB 连接 charset 问题，独立于代码修复 | — |
+> 
+> **验证**: 12/12 代码检查 PASS + 34/34 单测 PASS
 > 本文档独立于存量文档 `design-optimization-plan.md`（覆盖管线链路问题），
 > 聚焦数据管道基础缺陷 + 组合设计质量问题的深度诊断。
 

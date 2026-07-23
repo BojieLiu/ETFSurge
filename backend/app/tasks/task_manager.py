@@ -171,6 +171,47 @@ async def design_worker(mgr: TaskManager, task_id: int) -> None:
         except Exception as e:
             logger.exception("[design_worker] failed to save design history: %s", e)
 
+        # C3: 异步生成 LLM 报告并写回 design_text
+        if design_id is not None and strategies:
+            async def _generate_and_save_report():
+                """后台生成报告文本并写回 PortfolioDesign.design_text。"""
+                try:
+                    from app.tasks.design_report import _build_plan_tables
+                    from app.analysis.llm import generate_design_report
+
+                    plan_tables = _build_plan_tables(strategies)
+                    market_sentiment = pool_manager.get_market_sentiment() if hasattr(pool_manager, 'get_market_sentiment') else None
+                    try:
+                        llm_analysis = await asyncio.wait_for(
+                            generate_design_report(
+                                strategies=strategies,
+                                market_sentiment=market_sentiment,
+                                market_context=market_context,
+                                plan_tables=plan_tables,
+                            ),
+                            timeout=120,
+                        )
+                    except (asyncio.TimeoutError, TimeoutError):
+                        logger.warning("[design_worker] LLM report timed out, using data summary only")
+                        llm_analysis = None
+
+                    if llm_analysis:
+                        report_text = plan_tables + "\n\n## 二、市场环境与配置建议\n\n" + llm_analysis
+                    else:
+                        report_text = "# ETF 组合设计方案（数据摘要）\n" + plan_tables
+
+                    # Save to DB
+                    async with async_session() as db:
+                        d = await db.get(PortfolioDesign, design_id)
+                        if d:
+                            d.design_text = report_text
+                            await db.commit()
+                            logger.info("[design_worker] report saved to design_id=%d (%d chars)", design_id, len(report_text))
+                except Exception as e:
+                    logger.exception("[design_worker] report generation failed for design_id=%d: %s", design_id, e)
+
+            asyncio.create_task(_generate_and_save_report())
+
         # 检查结果是否有效：空策略 = 失败（数据源不可用导致）
         error_info = result.get("error")
         if error_info:
