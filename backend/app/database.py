@@ -9,7 +9,12 @@ _db_dir = os.path.dirname(_db_path)
 if _db_dir:
     os.makedirs(_db_dir, exist_ok=True)
 
-engine = create_async_engine(settings.database_url, echo=False)
+# SQLite 连接超时 30s：防止并发写操作（APScheduler + 用户请求）死锁
+engine = create_async_engine(
+    settings.database_url,
+    echo=False,
+    connect_args={"timeout": 30},
+)
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
