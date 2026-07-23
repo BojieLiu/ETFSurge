@@ -145,9 +145,35 @@ class PoolManager:
     async def refresh(self) -> PoolDiff:
         """全量刷新候选池。
 
+        有冷却期 + 并发锁保护：
+          - 30s 内不重复刷新（缓存新鲜数据）
+          - 有正在运行的刷新则等待其完成，不启动第二个
         Returns:
             PoolDiff 差异报告。
         """
+        import time as _time
+        now = _time.time()
+        # 30s 冷却期：上次刷新距今 < 30s 时跳过
+        if hasattr(self, '_last_refresh_ts') and self._last_refresh_ts:
+            if now - self._last_refresh_ts < 30:
+                logger.info("PoolManager: refresh skipped (cooldown, %.1fs left)",
+                            30 - (now - self._last_refresh_ts))
+                return PoolDiff(changed=False, added=0, removed=0, total=len(self._by_code))
+        # 并发锁：已有刷新在进行中则等待
+        if hasattr(self, '_refresh_lock') and self._refresh_lock.locked():
+            logger.info("PoolManager: refresh already in progress, waiting...")
+            async with self._refresh_lock:
+                return PoolDiff(changed=False, added=0, removed=0, total=len(self._by_code))
+        if not hasattr(self, '_refresh_lock'):
+            import asyncio as _asyncio
+            self._refresh_lock = _asyncio.Lock()
+
+        async with self._refresh_lock:
+            self._last_refresh_ts = now
+            return await self._refresh_impl()
+
+    async def _refresh_impl(self) -> PoolDiff:
+        """实际刷新逻辑（被 refresh() 的锁保护）。"""
         old_by_code = dict(self._by_code)
 
         # 1. 扫描全市场 → 3 层基础池（full_pipeline 是同步函数，必须 run_sync 否则阻塞事件循环）
@@ -268,7 +294,8 @@ class PoolManager:
         pool_audit.log_refresh(diff)
 
         # 9b. A3: 写入市场快照缓存（fire-and-forget 不阻塞主流程）
-        asyncio.create_task(self._refresh_market_snapshot())
+        import asyncio as _asyncio2
+        _asyncio2.create_task(self._refresh_market_snapshot())
 
         logger.info("PoolManager: refresh complete (v%d, %d total)",
                      self._version,
