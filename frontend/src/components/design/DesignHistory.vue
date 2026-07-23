@@ -7,7 +7,7 @@
       </div>
       <div class="history-filters">
         <button v-for="opt in filterOptions" :key="opt.key"
-                class="filter-pill" :class="{ active: statusFilter === opt.key }"
+                class="filter-tab" :class="{ active: statusFilter === opt.key }"
                 @click="statusFilter = opt.key">
           {{ opt.label }}
         </button>
@@ -119,37 +119,34 @@ const filteredItems = computed(() => {
 
 .history-filters {
   display: flex;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-4);
+  gap: 0;
+  padding: 0 var(--space-4);
   border-bottom: 1px solid var(--color-border);
   background: var(--color-surface-secondary);
-  position: sticky;
-  top: 45px;
-  z-index: 1;
 }
 
-.filter-pill {
-  border: 1px solid var(--color-border);
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-2xs);
-  padding: var(--space-0) var(--space-3);
-  border-radius: var(--radius-full);
+.filter-tab {
+  border: none;
+  background: none;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-sm);
+  padding: var(--space-2) var(--space-3);
   cursor: pointer;
   transition: all var(--transition-fast);
-  line-height: 2;
+  position: relative;
+  font-weight: var(--font-weight-medium);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
 }
 
-.filter-pill:hover {
-  background: var(--color-bg-primary);
+.filter-tab:hover {
   color: var(--color-text-primary);
-  border-color: var(--color-primary);
+  border-bottom-color: var(--color-border);
 }
 
-.filter-pill.active {
-  background: var(--color-primary);
-  color: var(--color-on-primary, #fff);
-  border-color: var(--color-primary);
+.filter-tab.active {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
 }
 
 .history-empty {
