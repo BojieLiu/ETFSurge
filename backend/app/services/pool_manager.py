@@ -105,6 +105,43 @@ class PoolManager:
         self._sector_momentum_cache_ts: float = 0
         self._index_realtime_cache: list[dict] | None = None
 
+    async def _refresh_market_snapshot(self) -> None:
+        """A3: 写入市场快照缓存（指数 + 板块动量）。
+
+        调用外部 API 刷新 _index_realtime_cache 和 _sector_momentum_cache，
+        供 LLM 报告等消费方使用。
+        """
+        import asyncio
+        import time
+        # 刷新指数实时行情
+        try:
+            from ..services.market_service import get_global_indices
+            indices = await asyncio.wait_for(get_global_indices(), timeout=15)
+            # 展平所有区域的指数到 _index_realtime_cache
+            flat = []
+            for region, items in indices.items():
+                for item in items:
+                    item["region"] = region
+                    flat.append(item)
+            self._index_realtime_cache = flat
+            logger.info("[pool] refreshed %d index realtime entries", len(flat))
+        except Exception as e:
+            logger.warning("[pool] _refresh_market_snapshot indices failed: %s", e)
+            if self._index_realtime_cache is None:
+                self._index_realtime_cache = []
+
+        # 刷新板块动量
+        try:
+            from ..services.market_trends import compute_sector_momentum
+            sector_data = await asyncio.wait_for(compute_sector_momentum(top_n=10), timeout=15)
+            self._sector_momentum_cache = sector_data
+            self._sector_momentum_cache_ts = time.time()
+            logger.info("[pool] refreshed %d sector momentum entries", len(sector_data))
+        except Exception as e:
+            logger.warning("[pool] _refresh_market_snapshot sector failed: %s", e)
+            if self._sector_momentum_cache is None:
+                self._sector_momentum_cache = []
+
     async def refresh(self) -> PoolDiff:
         """全量刷新候选池。
 
@@ -136,6 +173,7 @@ class PoolManager:
                     "amount": item.get("amount", 0),
                     "fund_scale": item.get("fund_scale", 0),
                     "layer": layer_name,
+                    "tracked_index": item.get("tracked_index", ""),
                 })
 
         # 3. ETFClassifier 添加行业/概念
@@ -155,7 +193,9 @@ class PoolManager:
                 factor_scores = await self.factor_registry.compute(symbols)
                 for item in flat:
                     sym = item["symbol"]
-                    item["factor_scores"] = factor_scores.get(sym, {})
+                    raw_scores = factor_scores.get(sym, {})
+                    # B1: 聚合点分键为顶层分类键
+                    item["factor_scores"] = self.factor_registry.aggregate_factor_scores(raw_scores)
             except Exception as e:
                 logger.exception("FactorRegistry compute failed: %s", e)
                 for item in flat:
@@ -199,6 +239,9 @@ class PoolManager:
             item["composite_score"] = 0.0
             new_pool[target].append(item)
 
+        # 4c. B2: 同层同指数去重（依赖 tracked_index 字段）
+        new_pool = self._deduplicate_by_index(new_pool)
+
         # 5. 强制保底
         self._ensure_mandatory(new_pool, flat)
 
@@ -223,10 +266,42 @@ class PoolManager:
         # 9. 审计日志
         pool_audit.log_refresh(diff)
 
+        # 9b. A3: 写入市场快照缓存
+        await self._refresh_market_snapshot()
+
         logger.info("PoolManager: refresh complete (v%d, %d total)",
                      self._version,
                      sum(len(v) for v in self._pool.values()))
         return diff
+
+    @staticmethod
+    def _deduplicate_by_index(
+        pool: dict[str, list[dict[str, Any]]],
+    ) -> dict[str, list[dict[str, Any]]]:
+        """B2: 候选池去重——同层同 tracked_index 的 ETF 只保留 fund_scale 最大的。
+
+        当 tracked_index 为空时（Sina 源无此字段），跳过该标的的去重。
+        """
+        result: dict[str, list[dict[str, Any]]] = {layer: [] for layer in ALL_LAYERS}
+        for layer, items in pool.items():
+            seen_indices: dict[str, dict[str, Any]] = {}
+            for item in items:
+                tidx = item.get("tracked_index", "") or ""
+                if not tidx:
+                    # 无 tracked_index 的标的直接保留（Sina 源）
+                    result[layer].append(item)
+                    continue
+                existing = seen_indices.get(tidx)
+                if existing is None:
+                    seen_indices[tidx] = item
+                else:
+                    # 同指数保留 fund_scale 最大的
+                    existing_scale = float(existing.get("fund_scale", 0) or 0)
+                    new_scale = float(item.get("fund_scale", 0) or 0)
+                    if new_scale > existing_scale:
+                        seen_indices[tidx] = item
+            result[layer].extend(seen_indices.values())
+        return result
 
     def _ensure_mandatory(
         self,
@@ -257,6 +332,25 @@ class PoolManager:
                     pool[target].append(found)
                     logger.info("PoolManager: enforced mandatory %s -> %s", code, target)
 
+    @staticmethod
+    def _normalize_regime(regime: str) -> str:
+        """C2: 将市场状态值映射到 _LAYER_WEIGHTS 表的 key。
+
+        外部 detect_market_regime() 返回的值可能包含 `bull_strong`、`range_bound` 等，
+        但 _LAYER_WEIGHTS 表使用 `bull`、`neutral` 等简化 key。
+        """
+        mapping = {
+            "bull_strong": "bull",
+            "bull_weakening": "bull",
+            "range_bound": "neutral",
+            "neutral": "neutral",
+            "correction": "correction",
+            "bear": "bear",
+            "defensive_rotate": "neutral",
+            "panic": "bear",
+        }
+        return mapping.get(regime, "neutral")
+
     def _compute_composite(self, item: dict[str, Any], layer: str, regime: str = "neutral") -> float:
         """按层+市况计算综合得分。"""
         factor_scores = item.get("factor_scores", {})
@@ -266,7 +360,8 @@ class PoolManager:
         opp_score = float(item.get("composite_score", 0.5))
 
         layer_weights = _LAYER_WEIGHTS.get(layer, {})
-        w = layer_weights.get(regime, layer_weights.get("neutral", _BASE_WEIGHTS))
+        regime_key = self._normalize_regime(regime)
+        w = layer_weights.get(regime_key, layer_weights.get("neutral", _BASE_WEIGHTS))
 
         if layer in ("core", "satellite", "defense", "opportunistic"):
             score = w["factor"] * factor_sum
@@ -370,7 +465,10 @@ class PoolManager:
         return self._regime_cache or "range_bound"
 
     async def update_market_regime(self) -> None:
-        """异步刷新市场状态（由 refresh() 或外部调度器调用）。"""
+        """异步刷新市场状态（由 refresh() 或外部调度器调用）。
+        
+        C2: 同步更新 self.current_regime 以便 _compute_composite 使用最新市态。
+        """
         import time
         try:
             from .market_trends import detect_market_regime
@@ -378,6 +476,7 @@ class PoolManager:
             if regime:
                 self._regime_cache = regime
                 self._regime_cache_ts = time.time()
+                self.current_regime = regime  # C2: 同步更新
                 logger.info("[pool] regime updated: %s", regime)
         except Exception as e:
             logger.exception("[pool] update_market_regime failed: %s", e)

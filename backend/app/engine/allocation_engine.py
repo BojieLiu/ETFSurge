@@ -64,6 +64,7 @@ def _select_and_weight(
     regime: str,
     strategy: str = "balanced",
     max_count: int = 5,
+    exclude_tracked_indices: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Internal helper: score candidates, keep top *max_count*,
@@ -71,8 +72,23 @@ def _select_and_weight(
 
     Each returned dict has symbol, name, layer, weight, selection_rationale,
     factor_score, and factor_breakdown.
+
+    B3: exclude_tracked_indices — 跳过已选指数的标的，防止同指数多头持仓。
     """
+    exclude_indices = exclude_tracked_indices or set()
     if not candidates or budget <= 0:
+        return []
+
+    # B3: 过滤已选指数的候选
+    filtered = []
+    for c in candidates:
+        tidx = c.get("tracked_index", "") or ""
+        if tidx and tidx in exclude_indices:
+            continue
+        filtered.append(c)
+    candidates = filtered
+
+    if not candidates:
         return []
 
     # Build (composite_score, candidate, factor_scores) triples
@@ -110,11 +126,13 @@ def _select_and_weight(
             factor_scores=factor_scores,
             regime=regime,
         )
+        tidx = cand.get("tracked_index", "") or ""
         results.append({
             "symbol": sym,
             "name": name,
             "layer": layer,
             "weight": round(w, 4),
+            "tracked_index": tidx,
             "selection_rationale": rationale,
             "factor_score": round(composite, 3),
             "factor_breakdown": {
@@ -125,6 +143,43 @@ def _select_and_weight(
         })
 
     return results
+
+
+def _filter_satellite_by_profile(
+    candidates: list[dict[str, Any]],
+    factor_matrix: dict[str, dict[str, float]],
+    profile_key: str,
+) -> list[dict[str, Any]]:
+    """C1: 按风险偏好过滤卫星层候选列表，使三方案差异化。
+
+    - defensive: 偏好低波动/防御性行业，剔除高 beta 卫星候选
+    - aggressive: 偏好高动量/成长性行业
+    - balanced: 全量候选，不做特殊过滤
+    """
+    if not candidates or profile_key == "balanced":
+        return list(candidates)
+
+    scored: list[tuple[float, dict[str, Any]]] = []
+    for c in candidates:
+        sym = c.get("symbol", "")
+        fs = factor_matrix.get(sym, {})
+        technical = fs.get("technical", 0.0) or 0.0
+        momentum = fs.get("momentum", 0.0) or 0.0
+        valuation = fs.get("valuation", 0.0) or 0.0
+
+        if profile_key == "defensive":
+            # 防御型：偏好低 technical（低波动）+ 低 momentum（非追涨）的标的
+            # 得分越高越适合防御：负面技术信号（technical < 0）+ 低 momentum
+            suitability = -technical + (valuation * 0.3) - abs(momentum) * 0.3
+        else:
+            # 积极型：偏好高 momentum + 高 technical 的标的
+            suitability = momentum * 0.5 + technical * 0.3 + valuation * 0.2
+
+        scored.append((suitability, c))
+
+    # 排序并保留同数量候选（不同顺序）
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [item for _, item in scored]
 
 
 def allocate(
@@ -194,6 +249,8 @@ def allocate(
         def_budget = budgets.get("defense", 0.0)
 
         allocations: list[dict[str, Any]] = []
+        # B3: 跨层追踪已选指数，防止同指数多头持仓
+        selected_tracked_indices: set[str] = set()
 
         # ── Core layer ──
         core_alloc = _select_and_weight(
@@ -204,19 +261,30 @@ def allocate(
             regime=regime,
             strategy=profile_key,
             max_count=4,
+            exclude_tracked_indices=selected_tracked_indices,
         )
+        for a in core_alloc:
+            tidx = a.get("tracked_index", "") or ""
+            if tidx:
+                selected_tracked_indices.add(tidx)
         allocations.extend(core_alloc)
 
-        # ── Satellite layer ──
+        # ── Satellite layer — C1: 按 profile_key 差异化过滤 ──
+        sat_pool = _filter_satellite_by_profile(sat_candidates, factor_matrix, profile_key)
         sat_alloc = _select_and_weight(
-            sat_candidates,
+            sat_pool,
             factor_matrix,
             sat_budget,
             layer="satellite",
             regime=regime,
             strategy=profile_key,
             max_count=6,
+            exclude_tracked_indices=selected_tracked_indices,
         )
+        for a in sat_alloc:
+            tidx = a.get("tracked_index", "") or ""
+            if tidx:
+                selected_tracked_indices.add(tidx)
         allocations.extend(sat_alloc)
 
         # ── Defense layer ──
@@ -228,6 +296,7 @@ def allocate(
             regime=regime,
             strategy=profile_key,
             max_count=4,
+            exclude_tracked_indices=selected_tracked_indices,
         )
         allocations.extend(def_alloc)
 

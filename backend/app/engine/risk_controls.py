@@ -117,6 +117,57 @@ def remove_stale_candidates(
     return strategies
 
 
+def _consolidate_minnows(
+    strategies: list[dict[str, Any]],
+    min_weight: float = 0.02,
+) -> list[dict[str, Any]]:
+    """B5: 防御层最小权重门槛——合并权重低于 min_weight 的小仓位。
+
+    将 defense 层中权重 < min_weight 的所有小仓位合并到该层最大的标的中，
+    避免"羽毛级配置"（如每只 1% 的港股权益）。
+    """
+    for strategy in strategies:
+        allocs = strategy.get("allocations", [])
+        defense_items = [a for a in allocs if a.get("layer") == "defense" and a.get("symbol") != "CASH"]
+        if len(defense_items) < 2:
+            continue
+
+        minnows = [a for a in defense_items if a.get("weight", 0) < min_weight]
+        if not minnows:
+            continue
+
+        # 找出 defense 层权重最大的标的作为吸收者
+        big_fish = max(defense_items, key=lambda a: a.get("weight", 0))
+        if big_fish in minnows:
+            # 所有 defense 都 < min_weight，合并到最大的那个
+            big_fish = max(defense_items, key=lambda a: a.get("weight", 0))
+
+        total_minnow_weight = sum(a.get("weight", 0) for a in minnows)
+        # 从 minnows 中移除 big_fish 自身
+        for m in list(minnows):
+            if m["symbol"] == big_fish["symbol"]:
+                minnows.remove(m)
+                total_minnow_weight -= m.get("weight", 0)
+                break
+
+        if not minnows or total_minnow_weight <= 0:
+            continue
+
+        # 将小仓位权重加到 big_fish 上
+        big_fish["weight"] = round(big_fish.get("weight", 0) + total_minnow_weight, 4)
+        big_fish["selection_rationale"] = (big_fish.get("selection_rationale", "")
+                                           + f" | 【合并防御小仓位{len(minnows)}只, 共{total_minnow_weight*100:.1f}%】")
+
+        # 从 allocations 中移除已被合并的 minnows
+        minnow_symbols = {m["symbol"] for m in minnows}
+        strategy["allocations"] = [a for a in allocs if a["symbol"] not in minnow_symbols]
+
+        logger.info("[risk] _consolidate_minnows: merged %d minnows (%.1f%%) into %s",
+                    len(minnows), total_minnow_weight * 100, big_fish["symbol"])
+
+    return strategies
+
+
 def apply_risk_controls(
     strategies: list[dict[str, Any]],
     factor_matrix: dict[str, dict[str, float]] | None = None,
@@ -138,6 +189,8 @@ def apply_risk_controls(
     strategies = remove_stale_candidates(strategies, factor_matrix)
     strategies = filter_extreme_drawdown(strategies, factor_matrix)
     strategies = check_defense_effectiveness(strategies, factor_matrix)
+    # B5: 防御层小仓位合并
+    strategies = _consolidate_minnows(strategies)
 
     for strategy in strategies:
         allocations = strategy.get("allocations", [])
@@ -166,10 +219,10 @@ def apply_risk_controls(
                     if a.get("layer") == lay:
                         a["weight"] = round(a.get("weight", 0.0) * scale, 4)
 
-        # 3. 行业集中度 (HHI)
+        # 3. 行业集中度 (HHI) — B4: 使用真实行业字段而非层名
         sector_weights: dict[str, float] = {}
         for a in allocations:
-            sec = a.get("layer", "其他")
+            sec = a.get("industry") or a.get("layer", "其他")
             sector_weights[sec] = sector_weights.get(sec, 0.0) + a.get("weight", 0.0)
 
         hhi = sum(w ** 2 for w in sector_weights.values())
@@ -179,7 +232,7 @@ def apply_risk_controls(
             if sector_weights[max_sector] > target_weight:
                 scale = target_weight / sector_weights[max_sector]
                 for a in allocations:
-                    if a.get("layer") == max_sector:
+                    if (a.get("industry") or a.get("layer", "其他")) == max_sector:
                         a["weight"] = round(a.get("weight", 0.0) * scale, 4)
 
         # 4. 归一化
@@ -189,10 +242,10 @@ def apply_risk_controls(
             for a in allocations:
                 a["weight"] = round(a.get("weight", 0.0) * scale_back, 4)
 
-        # 5. 风险度量
+        # 5. 风险度量 — B4: 使用真实行业字段
         sector_w_final: dict[str, float] = {}
         for a in allocations:
-            sec = a.get("layer", "其他")
+            sec = a.get("industry") or a.get("layer", "其他")
             sector_w_final[sec] = sector_w_final.get(sec, 0.0) + a.get("weight", 0.0)
         hhi_final = sum(w ** 2 for w in sector_w_final.values())
 

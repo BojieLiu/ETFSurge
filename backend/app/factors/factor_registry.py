@@ -597,6 +597,45 @@ class FactorRegistry:
             return [f for f in self._factors.values() if f.category == category]
         return list(self._factors.values())
 
+    @staticmethod
+    def aggregate_factor_scores(
+        factor_scores: dict[str, float],
+    ) -> dict[str, float]:
+        """B1: 将点分键聚合为顶层分类键。
+
+        FactorRegistry.compute() 返回的键名是点分式如 `technical.ma.sma_5`，
+        但 allocation_engine 使用顶层键 `technical`、`momentum`、`valuation`、`sentiment`。
+
+        聚合策略：对每个顶层分类，取下属所有因子值的均值。
+        无下属因子的顶层键保持原值（如已存在则直接保留）。
+        """
+        if not factor_scores:
+            return factor_scores
+
+        # 定义顶层分类到点分前缀的映射
+        CATEGORY_PREFIXES = {
+            "technical": ["technical."],
+            "momentum": ["etf.", "china.policy.", "technical.signal."],
+            "valuation": ["style."],
+            "sentiment": ["sentiment."],
+        }
+
+        result = dict(factor_scores)  # 保留所有原始键
+
+        for top_key, prefixes in CATEGORY_PREFIXES.items():
+            values = []
+            for key, val in factor_scores.items():
+                if isinstance(val, (int, float)):
+                    for prefix in prefixes:
+                        if key.startswith(prefix):
+                            values.append(val)
+                            break
+            if values:
+                result[top_key] = sum(values) / len(values)
+            # 如果没有任何匹配的子因子，不设置顶层键（让消费方 fallback 到 0.0）
+
+        return result
+
     def get_factor(self, code: str) -> FactorDefinition | None:
         """Get a single factor definition by code."""
         return self._factors.get(code)

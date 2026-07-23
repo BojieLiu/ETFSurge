@@ -144,6 +144,7 @@ def _fetch_em_etf_list() -> list[dict] | None:
         "turnover": item.get("f45", 0) or 0,
         "pe": item.get("f66", 0) or 0,
         "pb": item.get("f115", 0) or 0,
+        "tracked_index": item.get("f168", ""),
     } for item in all_items]
 
 

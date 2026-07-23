@@ -32,6 +32,12 @@ backend/test_deepseek.py
 logs/
 uvicorn*
 
+# Debug / transient probe scripts
+_probe*.py
+backend/_debug*.py
+backend/_debug*.txt
+backend/_rewrite*.py
+
 # Agent session artifacts
 .sisyphus/
 
