@@ -133,6 +133,7 @@ key 也存在于 `E:\agent_workspace\deepseek_api_key.txt.txt`。
 - **前端 dev server 启动方式**：见「启动命令」中的 Windows 坑。
 - **`/ws/news` 无广播**：光连上不会收到数据，需要后端任务周期性 `broadcast("news", payload)`。
 - **LLM prompt 规则 1 必须硬约束**：`design_report.md` 的规则 1 禁止 LLM 篡改 ETF 标的。若 LLM 仍引入候选池外代码，一致性校验 `_validate_report_consistency` 会在后处理中追加修正脚注 + 写 ERROR 日志。
+- **`async def` ≠ 非阻塞**：`async def` 只改了函数签名，不改变调用链底层的行为。任何 `async def` 函数内部若直接调用同步 I/O（akshare/requests/urllib/pandas），会阻塞整个事件循环。正确做法：用 `await run_sync(call, *args)` 提交到线程池。判断标准——函数体内出现 `.get(`、`ak.`、`urllib.request` 等调用时，必须检查是否经过 `run_sync`/`asyncio.to_thread` 包裹。
 
 ## API 契约流程（强制 / Mandatory）
 
