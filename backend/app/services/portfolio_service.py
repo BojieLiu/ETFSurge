@@ -443,19 +443,16 @@ async def strategy_check(
         "partial": 0 < filled_factor_count < total_factor_count,
     }
 
-    # LLM 分析（带超时保护：60s 内未完成则返回部分结果）
+    # LLM 分析（provider timeout 负责，不再额外包裹 asyncio.wait_for）
     try:
-        llm_result = await asyncio.wait_for(
-            generate_strategy_check_report(
-                market_data=market_data,
-                factor_breakdowns=factor_breakdowns,
-                regime=regime,
-                data_quality=data_quality,
-            ),
-            timeout=45,
+        llm_result = await generate_strategy_check_report(
+            market_data=market_data,
+            factor_breakdowns=factor_breakdowns,
+            regime=regime,
+            data_quality=data_quality,
         )
     except asyncio.TimeoutError:
-        logger.warning("[strategy_check] LLM analysis timed out (45s), returning partial data")
+        logger.warning("[strategy_check] LLM analysis timed out, returning partial data")
         llm_result = {
             "summary": f"LLM 分析超时（基于 {len(market_data)} 只标的因子数据，未完成深度分析）",
             "suggestions": [],

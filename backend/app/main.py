@@ -123,6 +123,35 @@ async def lifespan(app: FastAPI):
         logger.exception("调度器初始化失败")
         app.state.scheduler = None
 
+    # 崩溃恢复：扫描 report_quality="pending" 且创建 >5min 的记录，标记为 fallback
+    try:
+        async def _recover_stale_designs():
+            from sqlalchemy import select
+            from datetime import datetime, timedelta
+            from .models.portfolio_design import PortfolioDesign
+            from .database import async_session
+
+            cutoff = datetime.utcnow() - timedelta(minutes=5)
+            async with async_session() as db:
+                stale = await db.execute(
+                    select(PortfolioDesign).where(
+                        PortfolioDesign.report_quality == "pending",
+                        PortfolioDesign.created_at < cutoff,
+                    )
+                )
+                count = 0
+                for design in stale.scalars().all():
+                    design.report_quality = "fallback"
+                    count += 1
+                if count:
+                    await db.commit()
+                    logger.info("[recovery] marked %d stale design(s) as fallback (crashed before LLM report)", count)
+                else:
+                    logger.info("[recovery] no stale designs to recover")
+        await _recover_stale_designs()
+    except Exception as exc:
+        logger.warning("[recovery] failed to scan stale designs: %s", exc)
+
     yield
 
     scheduler = getattr(app.state, "scheduler", None)

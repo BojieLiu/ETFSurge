@@ -201,6 +201,8 @@ async def get_design(
         "design_text": record.design_text or "",
         "status": record.status or "completed",
         "error_message": record.error_message,
+        "report_quality": record.report_quality or "none",
+        "report_generated_at": record.report_generated_at.isoformat() if record.report_generated_at else None,
         "strategies": json.loads(record.strategies_json) if record.strategies_json else [],
         "market_context": json.loads(record.market_snapshot_json) if record.market_snapshot_json else {},
     }

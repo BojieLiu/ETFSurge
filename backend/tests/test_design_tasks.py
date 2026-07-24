@@ -65,14 +65,34 @@ class TestDesignTaskManager:
 class TestDesignWorker:
     """测试 design_worker 异步任务"""
 
+    def _make_mock_session(self):
+        """Minimal mock DB session for pipeline tests."""
+        from unittest.mock import MagicMock, AsyncMock
+        record = MagicMock()
+        record.id = 999
+        session = MagicMock()
+        session.__aenter__.return_value = session
+        session.__aexit__.return_value = None
+        session.add = MagicMock()
+        session.commit = AsyncMock(return_value=None)
+        async def _refresh(obj):
+            obj.id = 999
+        session.refresh = AsyncMock(side_effect=_refresh)
+        session.get = AsyncMock(return_value=record)
+        return session
+
+    @patch("app.tasks.task_manager.async_session")
+    @patch("app.analysis.llm.generate_design_report", new_callable=AsyncMock)
     @patch("app.services.strategy_design.generate_enhanced_design", new_callable=AsyncMock)
-    async def test_worker_runs_full_pipeline(self, mock_gen):
+    async def test_worker_runs_full_pipeline(self, mock_gen, mock_llm, mock_db):
         """验证 worker 调用 generate_full_design"""
         from app.tasks.design_tasks import TaskManager, design_worker
 
         mgr = TaskManager()
         mgr.create_task(task_type="design", params={"capital": 500000})
 
+        mock_llm.return_value = "LLM report"
+        mock_db.return_value = self._make_mock_session()
         mock_gen.return_value = {
             "strategies": [{"label": "防御型"}],
             "market_context": {},
@@ -101,20 +121,23 @@ class TestDesignWorker:
         assert t["status"] == "failed"
         assert "API timeout" in t["error_message"]
 
+    @patch("app.tasks.task_manager.async_session")
+    @patch("app.analysis.llm.generate_design_report", new_callable=AsyncMock)
     @patch("app.services.strategy_design.generate_enhanced_design", new_callable=AsyncMock)
-    async def test_worker_saves_design_id(self, mock_gen):
+    async def test_worker_saves_design_id(self, mock_gen, mock_llm, mock_db):
         """验证 worker 完成后关联 design_id"""
         from app.tasks.design_tasks import TaskManager, design_worker
 
         mgr = TaskManager()
         mgr.create_task(task_type="design")
 
+        mock_llm.return_value = "LLM report"
+        mock_db.return_value = self._make_mock_session()
         mock_gen.return_value = {
             "strategies": [{"label": "防御型", "etfs": []}],
             "market_context": {},
         }
 
-        # Mock the DB save
         await design_worker(mgr, task_id=1)
 
         t = mgr.get_task(1)

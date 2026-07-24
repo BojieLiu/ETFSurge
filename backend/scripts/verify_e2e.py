@@ -209,8 +209,9 @@ def section_portfolio():
             check(f"GET /designs/{did} -> {r2.status_code}", r2.status_code == 200)
             if r2.status_code == 200:
                 detail = r2.json()
-                check("design_text 已持久化", bool(detail.get("design_text")),
-                      f"长度={len(detail['design_text'])}" if detail.get("design_text") else "空")
+                dt = detail.get("design_text", "") or ""
+                check(f"design_text 已持久化（{len(dt)} 字）", len(dt) > 200 and "三种方案详解" in dt,
+                      f"空" if not dt else f"长度={len(dt)}" if len(dt) <= 200 else "内容完整")
                 strategies = detail.get("strategies", [])
                 check(f"strategies 含方案", len(strategies) > 0, f"{len(strategies)} 套")
                 if strategies:
@@ -244,11 +245,11 @@ def section_portfolio():
             design_task_id = task_id
             check(f"设计任务已提交 task_id={task_id}", task_id is not None)
             # Poll for completion
-            deadline = time.time() + 60
+            deadline = time.time() + 180
             completed = False
             while time.time() < deadline:
                 try:
-                    pr = requests.get(f"{BASE}/api/v1/portfolio/tasks/{task_id}", timeout=5)
+                    pr = requests.get(f"{BASE}/api/v1/portfolio/tasks/{task_id}", timeout=10)
                     if pr.status_code == 200:
                         pd = pr.json()
                         status = pd.get("status")
@@ -258,13 +259,33 @@ def section_portfolio():
                             break
                         elif status == "failed":
                             check("异步设计任务失败", False, pd.get("error_message", "未知"))
+                            # 检查失败时 report_quality 是否在结果中
+                            result = pd.get("result", {})
+                            check("失败时 result 含设计上下文", bool(result),
+                                  f"result={result}" if result else "无 result")
                             completed = True
                             break
                 except Exception:
                     pass
                 time.sleep(5)
             if not completed:
-                check("异步设计超时", False, "60s 内未完成（需真实市场数据）")
+                check("异步设计超时", False, "180s 内未完成（数据源响应慢）")
+
+            # 异步完成后，确认 report_quality 字段在详情中存在
+            try:
+                pr2 = requests.get(f"{BASE}/api/v1/portfolio/designs?limit=1", timeout=10)
+                if pr2.status_code == 200 and pr2.json():
+                    latest = pr2.json()[0]
+                    did = latest["id"]
+                    dr = requests.get(f"{BASE}/api/v1/portfolio/designs/{did}", timeout=10)
+                    if dr.status_code == 200:
+                        detail = dr.json()
+                        rq = detail.get("report_quality", "")
+                        check(f"report_quality 字段存在（当前={rq}）",
+                              rq in ("full", "fallback", "pending", "none"),
+                              f"值={rq}")
+            except Exception:
+                pass
     except requests.Timeout:
         check("POST /design-async", False, "请求超时（30s）")
     except Exception as e:

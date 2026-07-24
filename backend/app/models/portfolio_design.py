@@ -27,3 +27,8 @@ class PortfolioDesign(Base):
     # 方案状态: completed / running / failed
     status = Column(String(20), nullable=False, default="completed")
     error_message = Column(Text, nullable=True)
+
+    # 报告质量分级: pending / full / fallback / none
+    report_quality = Column(String(16), nullable=False, default="pending")
+    # 报告生成完成时间戳
+    report_generated_at = Column(DateTime, nullable=True)

@@ -45,6 +45,12 @@ def _migrate(conn):
         conn.execute(text("ALTER TABLE portfolio_etfs ADD COLUMN portfolio_type VARCHAR(20) NOT NULL DEFAULT 'on_exchange'"))
     if "short_name" not in columns:
         conn.execute(text("ALTER TABLE portfolio_etfs ADD COLUMN short_name VARCHAR(60)"))
+    # ── portfolio_designs: report_quality + report_generated_at (design-check-pipeline-redesign) ──
+    design_cols = [c["name"] for c in inspector.get_columns("portfolio_designs")]
+    if "report_quality" not in design_cols:
+        conn.execute(text("ALTER TABLE portfolio_designs ADD COLUMN report_quality VARCHAR(16) NOT NULL DEFAULT 'pending'"))
+    if "report_generated_at" not in design_cols:
+        conn.execute(text("ALTER TABLE portfolio_designs ADD COLUMN report_generated_at TIMESTAMP"))
     # Cost basis columns (for cumulative P&L tracking)
     if "avg_cost" not in columns:
         conn.execute(text("ALTER TABLE portfolio_etfs ADD COLUMN avg_cost FLOAT"))

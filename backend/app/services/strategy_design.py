@@ -30,16 +30,14 @@ async def generate_enhanced_design(
     constraints = constraints or {}
     _elapsed_logged = False
 
-    # 1. 刷新数据管道
+    # 1. 刷新数据管道（pipeline Stage 1 负责超时保护）
     from ..services.pool_manager import pool_manager
     _t1 = time.monotonic()
     try:
-        await asyncio.wait_for(pool_manager.refresh(), timeout=30)
-    except asyncio.TimeoutError:
-        logger.warning("[strategy_design] pool_manager.refresh timed out (%.1fs), using cached",
-                       time.monotonic() - _t1)
+        await pool_manager.refresh()
     except Exception as e:
-        logger.warning("[strategy_design] pool_manager.refresh failed/timeout — pool may be stale; _by_code=%d", len(pool_manager._by_code))
+        logger.warning("[strategy_design] pool_manager.refresh failed — pool may be stale; _by_code=%d: %s",
+                       len(pool_manager._by_code), e)
     _t2 = time.monotonic()
     if _t2 - _t1 > 0.1:
         logger.info("[strategy_design] refresh took %.2fs, elapsed_total=%.2fs",

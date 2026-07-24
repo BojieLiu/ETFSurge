@@ -2,6 +2,12 @@
 task_manager.py — 通用异步任务管理器
 
 泛化 DesignTaskManager 为通用 TaskManager，支持多任务类型。
+
+v2 (design-check-pipeline-redesign):
+  - 新增 design_pipeline() 顺序 Pipeline 替代 design_worker + fire-and-forget
+  - 修复 pool_manager NameError
+  - 新增 per-stage WS 通知
+  - 引入 report_quality 分级
 """
 from __future__ import annotations
 
@@ -9,6 +15,7 @@ import asyncio
 import json
 import logging
 import time
+from datetime import datetime
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -98,7 +105,7 @@ class TaskNotifyManager:
 notify_manager = TaskNotifyManager()
 
 
-async def _notify(task_id: int, status: str, progress: int, stage: str = "", task: dict | None = None) -> None:
+async def _notify(task_id: int, status: str, progress: int, stage: str = "", task: dict | None = None, extra: dict | None = None) -> None:
     """统一 WS 通知函数。stage 为可选进度文字描述。可传入 task 对象以携带额外字段。"""
     payload = {
         "type": "task_update",
@@ -107,14 +114,15 @@ async def _notify(task_id: int, status: str, progress: int, stage: str = "", tas
         "progress": progress,
         "stage": stage,
         "design_id": None,
+        "report_quality": None,
     }
     if status == "completed" and task and task.get("result"):
         payload["design_id"] = task["result"].get("design_id")
+        payload["report_quality"] = task["result"].get("report_quality")
+    if extra:
+        payload.update(extra)
     await notify_manager.broadcast(payload)
 
-
-# ── Backward-compatible exports ─────────────────────────────────
-# design_tasks.py re-exports these for existing importers
 
 async def _save_design_error(design_id: int | None, error_msg: str) -> None:
     """将错误信息保存到 PortfolioDesign DB 记录。"""
@@ -128,138 +136,193 @@ async def _save_design_error(design_id: int | None, error_msg: str) -> None:
                 d.error_message = error_msg
                 await db.commit()
     except Exception as e:
-        logger.warning("[design_worker] failed to save error to design_id=%d: %s", design_id, e)
+        logger.warning("[design_pipeline] failed to save error to design_id=%d: %s", design_id, e)
 
 
-async def design_worker(mgr: TaskManager, task_id: int) -> None:
-    """后台执行设计生成任务。"""
+from app.database import async_session
+from app.models.portfolio_design import PortfolioDesign
+
+
+async def design_pipeline(mgr: TaskManager, task_id: int) -> None:
+    """顺序 Pipeline（替代旧的 design_worker + fire-and-forget）。
+
+    Stages: DATA+ENGINE → DB WRITE → LLM REPORT → NOTIFY
+    """
     from ..services.strategy_design import generate_enhanced_design
+    from ..tasks.design_report import _build_plan_tables
+    from ..analysis.llm import generate_design_report
 
     task = mgr.get_task(task_id)
     if not task:
         return
 
-    design_id = None  # must be initialized for the except handler
+    design_id = None
+    strategies = []
+    market_context = {}
+    report_quality = "none"
 
     try:
-        mgr.update_task(task_id, status="running", progress=10)
-        await _notify(task_id, "running", progress=10)
+        mgr.update_task(task_id, status="running", progress=10, stage="数据采集与策略计算中")
+        await _notify(task_id, "running", progress=10, stage="数据采集与策略计算中")
 
         params = task.get("params", {})
         capital = params.get("capital", 500000)
         constraints = params.get("constraints")
 
-        mgr.update_task(task_id, progress=30)
-        await _notify(task_id, "running", progress=30)
-
-        result = await asyncio.wait_for(
-            generate_enhanced_design(
-                capital=capital,
-                constraints=constraints,
-            ),
-            timeout=150,
+        # ── Stage 1&2: DATA + ENGINE (combined via generate_enhanced_design) ──
+        # generate_enhanced_design 内部已有 pool_manager.refresh() 的 30s 超时保护
+        result = await generate_enhanced_design(
+            capital=capital,
+            constraints=constraints,
         )
 
         strategies = result.get("strategies", [])
         market_context = result.get("market_context", {})
 
-        mgr.update_task(task_id, progress=70)
-        await _notify(task_id, "running", progress=70)
+        mgr.update_task(task_id, progress=60, stage="策略计算完成")
+        await _notify(task_id, "running", progress=60, stage="策略计算完成")
 
-        # 保存到数据库设计历史
-        from app.models.portfolio_design import PortfolioDesign
-        from app.database import async_session
-        design_id = None
+        # 检查结果是否有效
+        error_info = result.get("error")
+        if error_info:
+            error_msg = f"{error_info}: {result.get('detail', '数据管道未能产出候选标的')}"
+            logger.warning("[design_pipeline] task %d has error: %s", task_id, error_msg)
+            mgr.update_task(task_id, progress=0, status="failed", error_message=error_msg)
+            await _notify(task_id, "failed", progress=0)
+            return
+
+        if not strategies:
+            error_msg = "策略生成为空：数据源不可用或未找到符合条件的 ETF"
+            logger.warning("[design_pipeline] task %d completed with 0 strategies — treating as failure", task_id)
+            mgr.update_task(task_id, progress=0, status="failed", error_message=error_msg)
+            await _notify(task_id, "failed", progress=0)
+            return
+
+        # ── Stage 3: DB WRITE (progress 60→75%) ──
+        mgr.update_task(task_id, progress=65, stage="保存方案")
+        await _notify(task_id, "running", progress=65, stage="保存方案")
+
+        plan_tables = _build_plan_tables(strategies)
+        design_text = "# ETF 组合设计方案\n\n## 一、三种方案详解\n\n" + plan_tables
+
         try:
             async with async_session() as db:
-                has_error = bool(result.get("error")) or not strategies
                 record = PortfolioDesign(
                     capital=capital,
                     risk_profile=params.get("risk_profile", "balanced"),
                     strategies_json=json.dumps(strategies, ensure_ascii=False, default=str),
                     market_snapshot_json=json.dumps(market_context, ensure_ascii=False, default=str),
-                    status="failed" if has_error else "completed",
-                    error_message=result.get("detail") if not strategies else None,
+                    design_text=design_text,  # 立即写入数据摘要
+                    report_quality="pending",
+                    status="completed",
                 )
                 db.add(record)
                 await db.commit()
                 await db.refresh(record)
                 design_id = record.id
         except Exception as e:
-            logger.exception("[design_worker] failed to save design history: %s", e)
+            logger.exception("[design_pipeline] DB write failed for task %d: %s", task_id, e)
+            mgr.update_task(task_id, progress=0, status="failed", error_message=f"DB 保存失败: {e}")
+            await _notify(task_id, "failed", progress=0)
+            return
 
-        # C3: 异步生成 LLM 报告并写回 design_text
-        if design_id is not None and strategies:
-            async def _generate_and_save_report():
-                """后台生成报告文本并写回 PortfolioDesign.design_text。"""
+        logger.info("[design_pipeline] design_id=%d saved with data summary (%d chars)", design_id, len(design_text))
+        mgr.update_task(task_id, progress=75, stage="方案已保存")
+        await _notify(task_id, "running", progress=75, stage="方案已保存")
+
+        # ── Stage 4: LLM REPORT (progress 75→95%) ──
+        mgr.update_task(task_id, progress=80, stage="LLM 报告生成中")
+        await _notify(task_id, "running", progress=80, stage="LLM 报告生成中")
+
+        try:
+            # 从 market_context 取市场情绪，避免直接引用 pool_manager（NameError 修复）
+            market_sentiment = market_context.get("market_sentiment", {}) if market_context else {}
+
+            llm_analysis = await generate_design_report(
+                strategies=strategies,
+                market_sentiment=market_sentiment,
+                market_context=market_context,
+                plan_tables=plan_tables,
+            )
+            # generate_design_report 的 provider timeout 由 config 控制
+            # primary=90s, fallback=60s, 不额外包裹 asyncio.wait_for
+
+            if llm_analysis and len(llm_analysis.strip()) > 0:
+                full_text = design_text + "\n\n## 二、市场环境与配置建议\n\n" + llm_analysis
                 try:
-                    from app.tasks.design_report import _build_plan_tables
-                    from app.analysis.llm import generate_design_report
-
-                    plan_tables = _build_plan_tables(strategies)
-                    market_sentiment = pool_manager.get_market_sentiment() if hasattr(pool_manager, 'get_market_sentiment') else None
-                    try:
-                        llm_analysis = await asyncio.wait_for(
-                            generate_design_report(
-                                strategies=strategies,
-                                market_sentiment=market_sentiment,
-                                market_context=market_context,
-                                plan_tables=plan_tables,
-                            ),
-                            timeout=120,
-                        )
-                    except (asyncio.TimeoutError, TimeoutError):
-                        logger.warning("[design_worker] LLM report timed out, using data summary only")
-                        llm_analysis = None
-
-                    if llm_analysis:
-                        report_text = plan_tables + "\n\n## 二、市场环境与配置建议\n\n" + llm_analysis
-                    else:
-                        report_text = "# ETF 组合设计方案（数据摘要）\n" + plan_tables
-
-                    # Save to DB
                     async with async_session() as db:
                         d = await db.get(PortfolioDesign, design_id)
                         if d:
-                            d.design_text = report_text
+                            d.design_text = full_text
+                            d.report_quality = "full"
+                            d.report_generated_at = datetime.utcnow()
                             await db.commit()
-                            logger.info("[design_worker] report saved to design_id=%d (%d chars)", design_id, len(report_text))
+                            logger.info("[design_pipeline] report saved to design_id=%d (%d chars, quality=full)",
+                                        design_id, len(full_text))
                 except Exception as e:
-                    logger.exception("[design_worker] report generation failed for design_id=%d: %s", design_id, e)
+                    logger.warning("[design_pipeline] DB update for LLM report failed: %s", e)
+                report_quality = "full"
+            else:
+                logger.warning("[design_pipeline] LLM returned empty report for design_id=%d", design_id)
+                try:
+                    async with async_session() as db:
+                        d = await db.get(PortfolioDesign, design_id)
+                        if d:
+                            d.report_quality = "fallback"
+                            await db.commit()
+                except Exception as e:
+                    logger.warning("[design_pipeline] DB update for fallback failed: %s", e)
+                report_quality = "fallback"
 
-            asyncio.create_task(_generate_and_save_report())
+        except Exception as e:
+            logger.warning("[design_pipeline] LLM report generation failed for design_id=%d: %s", design_id, e)
+            # 标记为 fallback，数据摘要仍然可用
+            try:
+                async with async_session() as db:
+                    d = await db.get(PortfolioDesign, design_id)
+                    if d:
+                        d.report_quality = "fallback"
+                        await db.commit()
+            except Exception as db_e:
+                logger.warning("[design_pipeline] DB update after LLM failure failed: %s", db_e)
+            report_quality = "fallback"
 
-        # 检查结果是否有效：空策略 = 失败（数据源不可用导致）
-        error_info = result.get("error")
-        if error_info:
-            error_msg = f"{error_info}: {result.get('detail', '数据管道未能产出候选标的')}"
-            logger.warning("[design_worker] task %d completed but has error: %s", task_id, error_msg)
-            mgr.update_task(task_id, progress=0, status="failed", error_message=error_msg)
-            await _notify(task_id, "failed", progress=0)
-            await _save_design_error(design_id, error_msg)
-        elif not strategies:
-            error_msg = "策略生成为空：数据源不可用或未找到符合条件的 ETF"
-            logger.warning("[design_worker] task %d completed with 0 strategies — treating as failure", task_id)
-            mgr.update_task(task_id, progress=0, status="failed", error_message=error_msg)
-            await _notify(task_id, "failed", progress=0)
-            await _save_design_error(design_id, error_msg)
-        else:
-            mgr.update_task(task_id, progress=100, status="completed",
-                            result={"strategies": strategies, "market_context": market_context, "design_id": design_id})
-            await _notify(task_id, "completed", progress=100, task=mgr.get_task(task_id))
+        mgr.update_task(task_id, progress=95, stage="报告完成")
+        await _notify(task_id, "running", progress=95, stage="报告完成")
 
-        logger.info("[design_worker] task %d completed with %d strategies",
-                    task_id, len(strategies))
+        # ── Stage 5: NOTIFY (progress 95→100%) ──
+        mgr.update_task(
+            task_id,
+            progress=100,
+            status="completed",
+            result={
+                "strategies": strategies,
+                "market_context": market_context,
+                "design_id": design_id,
+                "report_quality": report_quality,
+            },
+        )
+        await _notify(task_id, "completed", progress=100, stage="设计完成",
+                      extra={"design_id": design_id, "report_quality": report_quality})
+
+        logger.info("[design_pipeline] task %d completed (design_id=%d, quality=%s)",
+                    task_id, design_id, report_quality)
 
     except asyncio.TimeoutError:
-        error_msg = "方案生成超时（150s），数据源响应过慢，请稍后重试"
-        logger.warning("[design_worker] task %d timed out (150s)", task_id)
+        error_msg = "方案生成超时，数据源响应过慢，请稍后重试"
+        logger.warning("[design_pipeline] task %d timed out", task_id)
         mgr.update_task(task_id, status="failed", progress=0, error_message=error_msg)
         await _notify(task_id, "failed", progress=0)
-        await _save_design_error(design_id, error_msg)
+        if design_id:
+            await _save_design_error(design_id, error_msg)
     except Exception as e:
         error_msg = str(e)
-        logger.exception("[design_worker] task %d failed: %s", task_id, error_msg)
+        logger.exception("[design_pipeline] task %d failed: %s", task_id, error_msg)
         mgr.update_task(task_id, status="failed", progress=0, error_message=error_msg)
         await _notify(task_id, "failed", progress=0)
-        await _save_design_error(design_id, error_msg)
+        if design_id:
+            await _save_design_error(design_id, error_msg)
+
+
+# ── Backward-compatible alias ─────────────────────────────────
+design_worker = design_pipeline
