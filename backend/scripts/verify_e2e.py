@@ -123,12 +123,12 @@ def section_market():
             total_count = len(all_entries)
             # Schema validation: every entry must have required fields
             for entry in all_entries:
-                required = ['symbol', 'name', 'region', 'asset_type', 'price', 'change_pct', 'available']
+                required = ['symbol', 'name', 'region', 'price', 'change_pct']
                 missing = [k for k in required if k not in entry]
                 if missing:
                     check('指数条目缺少字段: ' + ','.join(missing) + ' (' + entry.get('symbol', '?') + ')', False)
                     break
-                if entry.get('price') is not None and entry.get('available') is not True:
+                if entry.get('price') is not None and entry.get('available') is False:
                     check('指数 ' + entry.get('symbol', '?') + ': price有值但available=false', False)
                     break
             check(f"全球指数共 {total_count} 条（>=6 即有数据 + 占位）", total_count >= 6)

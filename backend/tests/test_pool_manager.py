@@ -48,11 +48,29 @@ class TestPoolManager:
         return classifier
 
     @pytest.fixture
-    def pool_manager(self, mock_scanner, mock_classifier):
+    def mock_factor_registry(self):
+        """Mock FactorRegistry.compute to return synthetic scores (no network)."""
+        from unittest.mock import AsyncMock
+        registry = MagicMock()
+        registry.compute = AsyncMock(return_value={
+            "510300": {"technical": 0.5, "momentum": 0.3},
+            "560600": {"technical": 0.4, "momentum": 0.2},
+            "512480": {"technical": 0.6, "momentum": 0.5},
+            "515030": {"technical": -0.1, "momentum": 0.1},
+            "512010": {"technical": -0.3, "momentum": -0.2},
+            "518880": {"technical": 0.2, "momentum": 0.0},
+            "511090": {"technical": 0.3, "momentum": -0.1},
+        })
+        registry.aggregate_factor_scores = MagicMock(return_value={"technical": 0.5, "momentum": 0.3})
+        return registry
+
+    @pytest.fixture
+    def pool_manager(self, mock_scanner, mock_classifier, mock_factor_registry):
         from app.services.pool_manager import PoolManager
         pm = PoolManager()
         pm.scanner = mock_scanner
         pm.classifier = mock_classifier
+        pm.factor_registry = mock_factor_registry
         return pm
 
     @pytest.mark.asyncio
@@ -109,8 +127,10 @@ class TestPoolManager:
 
     @pytest.mark.asyncio
     async def test_pool_diff_version_increments(self, pool_manager):
-        """每次 refresh() 版本号递增"""
+        """每次 refresh() 版本号递增 (过期冷却期以允许立即刷新)"""
         diff1 = await pool_manager.refresh()
+        # 清除冷却期，允许第二次刷新立即执行
+        pool_manager._last_refresh_ts = 0.0
         diff2 = await pool_manager.refresh()
         assert diff2.version == diff1.version + 1
 

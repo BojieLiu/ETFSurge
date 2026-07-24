@@ -17,28 +17,48 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 
-CANNED_JSON = (
-    '{"plans": [{"style": "进攻型", "style_label": "进攻型", "portfolio_name": "测试进攻组合", '
-    '"positioning": "测试定位", "expected_return": 0.15, "max_drawdown": 0.25, "sharpe_ratio": 0.8, '
-    '"expected_characteristics": "测试特征", "weight_logic": [], "allocations": [], '
-    '"market_analysis": {}, "allocation_rationale": {}, "risk_factors": [], "rebalance_rules": ""}], '
-    '"design_text": "测试报告", "data_snapshot_time": "2026-07-15 10:00（北京时间）", '
-    '"market_environment": "测试环境", "comparison_table": {}}'
-)
+# Canned responses for each endpoint type
+# Must be valid JSON for endpoints using run_json()
+CANNED_LLM_TEXT = "测试LLM响应文本"
+CANNED_LLM_JSON = '{"action": "继续持有", "rationale": "组合结构合理", "risk_level": "中等", "report": "测试报告", "sector_name": "测试行业", "symbol": "600519", "outlook": "中性"}'
 
 
 @pytest.fixture
 def client():
-    """TestClient with LLM + all data fetchers mocked."""
+    """TestClient with LLM + all data fetchers mocked.
+
+    Patches only functions that actually exist in the current router module.
+    Removed deprecated patches (_fetch_all_market, _collect_news) and
+    functions that moved to other modules (list_etfs → portfolio_service,
+    build_price_map → portfolio_service).
+    """
     with patch(
         "app.analysis.runtime.llm_complete_with_system",
-        new=AsyncMock(return_value=CANNED_JSON),
+        new=AsyncMock(return_value=CANNED_LLM_JSON),
+    # Market data functions imported into router from market_service
     ), patch(
-        "app.routers.analysis._fetch_all_market",
-        new=AsyncMock(return_value=([], [], [])),
+        "app.routers.analysis.get_all_realtime",
+        new=AsyncMock(return_value=[]),
     ), patch(
-        "app.routers.analysis._collect_news",
+        "app.routers.analysis.get_indices",
+        new=AsyncMock(return_value=[]),
+    ), patch(
+        "app.routers.analysis.get_commodities",
+        new=AsyncMock(return_value=[]),
+    ), patch(
+        "app.routers.analysis.get_history",
+        new=AsyncMock(return_value=[]),
+    ), patch(
+        "app.routers.analysis.get_asset_realtime",
+        new=AsyncMock(return_value={"symbol": "600519", "name": "贵州茅台", "price": 1700, "change_pct": 0.5}),
+    # News fetchers
+    ), patch(
+        "app.routers.analysis.fetch_news_headlines",
         return_value=[],
+    ), patch(
+        "app.routers.analysis.fetch_macro_news",
+        return_value=[],
+    # Sector fetchers
     ), patch(
         "app.routers.analysis.fetch_industry_sectors",
         return_value=[{"sector_code": "BK0001", "sector_name": "银行"}],
@@ -49,29 +69,12 @@ def client():
         "app.routers.analysis.fetch_sector_stocks",
         return_value=[{"symbol": "600036", "name": "招商银行", "price": 35.0, "change_pct": 1.0}],
     ), patch(
-        "app.routers.analysis.get_asset_realtime",
-        new=AsyncMock(return_value={"symbol": "600519", "name": "贵州茅台", "price": 1700, "change_pct": 0.5}),
-    ), patch(
-        "app.routers.analysis.get_history",
-        new=AsyncMock(return_value=[]),
-    ), patch(
-        "app.routers.analysis.fetch_news_headlines",
-        return_value=[],
-    ), patch(
-        "app.routers.analysis.fetch_macro_news",
-        return_value=[],
-    ), patch(
-        "app.routers.analysis.list_etfs",
-        new=AsyncMock(return_value=[]),
-    ), patch(
-        "app.routers.analysis.build_price_map",
-        new=AsyncMock(return_value={}),
-    ), patch(
         "app.routers.analysis.fetch_hot_plates",
         return_value=[],
     ), patch(
         "app.routers.analysis.fetch_sector_heat",
         return_value=[],
+    # Fundamental fetchers
     ), patch(
         "app.routers.analysis.fetch_fund_flow",
         return_value=None,
@@ -125,14 +128,9 @@ def test_news_impact(client):
     assert body["disclaimer"] == "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
 
 
-def test_portfolio_design(client):
-    r = client.post("/api/v1/analysis/portfolio-design", json={"capital": 500000})
-    assert r.status_code == 200
-    body = r.json()
-    assert "plans" in body
-    assert "indices" in body and "commodities" in body
-    assert "disclaimer" in body
-    assert body["disclaimer"] == "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
+# NOTE: portfolio-design endpoint was removed in refactor.
+# Portfolio design is now handled via the async task system
+# at POST /api/v1/portfolio/design-async (see test_portfolio_* in verify_e2e).
 
 
 def test_portfolio_review(client):
@@ -160,25 +158,24 @@ def test_portfolio_review(client):
     assert body["disclaimer"] == "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
 
 
-def test_sector_analysis(client):
+def test_sector_analysis_stream(client):
+    """Sector analysis is available as SSE streaming endpoint."""
     r = client.post(
-        "/api/v1/analysis/sector-analysis",
+        "/api/v1/analysis/sector-analysis/stream",
         json={"sector_code": "BK0001", "sector_type": "industry", "sector_name": "银行"},
     )
+    # SSE endpoint returns 200 with text/event-stream
     assert r.status_code == 200
-    body = r.json()
-    assert "report" in body and "sector_name" in body
-    assert "disclaimer" in body
-    assert body["disclaimer"] == "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
+    assert r.headers.get("content-type", "").startswith("text/event-stream")
+    assert "event:" in r.text
 
 
-def test_symbol_analysis(client):
+def test_symbol_analysis_stream(client):
+    """Symbol analysis is available as SSE streaming endpoint."""
     r = client.post(
-        "/api/v1/analysis/symbol-analysis",
+        "/api/v1/analysis/symbol-analysis/stream",
         json={"symbol": "600519", "name": "贵州茅台", "asset_type": "A"},
     )
     assert r.status_code == 200
-    body = r.json()
-    assert "report" in body and "symbol" in body
-    assert "disclaimer" in body
-    assert body["disclaimer"] == "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
+    assert r.headers.get("content-type", "").startswith("text/event-stream")
+    assert "event:" in r.text
