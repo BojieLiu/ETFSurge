@@ -125,11 +125,18 @@ def _select_and_weight(
     for cand in candidates:
         sym = cand.get("symbol", "")
         factor_scores = factor_matrix.get(sym, {})
+        # B: 风偏差异化因子权重 — 核心层按策略调整
+        _PROFILE_WEIGHTS = {
+            "defensive": {"technical": 0.4, "sentiment": 0.25, "momentum": 0.15, "valuation": 0.2},
+            "balanced":  {"technical": 0.3, "sentiment": 0.2,  "momentum": 0.3,  "valuation": 0.2},
+            "aggressive":{"technical": 0.2, "sentiment": 0.15, "momentum": 0.45, "valuation": 0.2},
+        }
+        pw = _PROFILE_WEIGHTS.get(strategy, _PROFILE_WEIGHTS["balanced"])
         composite = (
-            factor_scores.get("technical", 0.0) * 0.3
-            + factor_scores.get("momentum", 0.0) * 0.3
-            + factor_scores.get("valuation", 0.0) * 0.2
-            + factor_scores.get("sentiment", 0.0) * 0.2
+            factor_scores.get("technical", 0.0) * pw["technical"]
+            + factor_scores.get("momentum", 0.0) * pw["momentum"]
+            + factor_scores.get("valuation", 0.0) * pw["valuation"]
+            + factor_scores.get("sentiment", 0.0) * pw["sentiment"]
         )
         scored.append((composite, cand, factor_scores))
 
@@ -340,6 +347,28 @@ def allocate(
             exclude_tracked_indices=selected_tracked_indices,
         )
         allocations.extend(def_alloc)
+
+        # C: 强制标的权重下限后处理 — 低于 5% 的强制标的上调到 5%
+        # 从总现金仓等比例扣减
+        cash_allocs = [a for a in allocations if a.get("symbol") == "CASH"]
+        cash_weight = sum(a.get("weight", 0) for a in cash_allocs)
+        for a in allocations:
+            sym = a.get("symbol", "")
+            if sym in MANDATORY_CODES and a.get("weight", 0) < 0.05:
+                needed = 0.05 - a["weight"]
+                if cash_weight >= needed:
+                    a["weight"] = 0.05
+                    cash_weight -= needed
+        # 如果现金不够，从非强制标的中等比例扣减
+        if cash_weight < 0:
+            for a in allocations:
+                sym = a.get("symbol", "")
+                if sym not in MANDATORY_CODES and a.get("weight", 0) > 0.01 and sym != "CASH":
+                    reduction = min(a["weight"] * 0.1, abs(cash_weight) / 2)
+                    a["weight"] = round(a["weight"] - reduction, 4)
+                    cash_weight += reduction
+                    if cash_weight >= 0:
+                        break
 
         # ── Compute risk metrics (sector concentration as HHI) ──
         sector_weights: dict[str, float] = {}

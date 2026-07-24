@@ -749,7 +749,9 @@ class FactorRegistry:
                 continue
             for sym, val in _raw[code]:
                 z = (val - mean_v) / std_v
-                result[sym][code] = z
+                # 放大差距：z-score * 5 让引擎层在 0~5σ 范围内区分标的
+                # 原始 z-score 在 0 附近时（如全市场因子值相近），引擎无法有效区分
+                result[sym][code] = z * 5.0 if definition.standardization != "zscore_large" else z
             # zscore_large: 二次映射到 (0~1)
             if definition.standardization == "zscore_large":
                 z_vals = [result[sym][code] for sym, _ in _raw[code]]
