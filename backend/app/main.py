@@ -25,6 +25,15 @@ async def lifespan(app: FastAPI):
     await init_db()
     await redis_cache.init()
 
+    # Pre-import heavy modules to avoid blocking the event loop on first use
+    logger.info("[lifespan] Pre-loading heavy modules (strategy_design, analysis)...")
+    from .services.strategy_design import generate_enhanced_design as _  # noqa: F811
+    from .analysis.llm import generate_design_report as _  # noqa: F811
+    from .tasks.design_report import _build_plan_tables as _  # noqa: F811
+    from .analysis.llm import generate_strategy_check_report as _  # noqa: F811
+    from .tasks.strategy_check_worker import strategy_check_pipeline as _  # noqa: F811
+    logger.info("[lifespan] Heavy modules pre-loaded")
+
     # Register all data-source health probes (7 probes + existing)
     from .monitor.probes import register_all_probes
     register_all_probes()
