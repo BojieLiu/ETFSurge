@@ -250,6 +250,35 @@ def _sina_history(symbol: str, period: str = "daily") -> list[dict[str, Any]]:
     return []
 
 
+def _sina_history_cb(symbol: str, period: str = "daily") -> list[dict[str, Any]]:
+    """P1-6: Circuit-breaker aware Sina history via SourceRegistry."""
+    from .source_registry import registry
+    scale = {"daily": "240", "weekly": "1200", "monthly": "7200",
+             "15m": "15", "30m": "30", "1h": "60"}.get(period, "240")
+    pref = _exchange(symbol)
+
+    def _sina_call():
+        import json
+        s = _session()
+        s.headers.update({"Referer": "https://finance.sina.com.cn"})
+        url = (f"https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/"
+               f"CN_MarketData.getKLineData?symbol={pref}{symbol}&scale={scale}&datalen=240")
+        r = s.get(url, timeout=15)
+        data = json.loads(r.text)
+        if isinstance(data, list) and data:
+            return [{
+                "date": d["day"], "open": float(d["open"]), "high": float(d["high"]),
+                "low": float(d["low"]), "close": float(d["close"]), "volume": float(d.get("volume", 0)),
+            } for d in data if isinstance(d, dict)]
+        return []
+
+    from .utils import no_proxy
+    with no_proxy():
+        result = registry.route([("sina_history", _sina_call)],
+                                route_name="A_history", operation="history", target=symbol)
+        return result or []
+
+
 def _resample_4h(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out = []
     for i in range(0, len(rows), 4):
@@ -766,22 +795,22 @@ def fetch_history(symbol: str, asset_type: str = "A", period: str = "daily") -> 
         if asset_type == "A":
             # ETF 代码跳过 mootdx（不支持），直接走 Sina（快且稳定）
             if _is_etf_code(symbol):
-                return _sina_history(symbol, period)
+                return _sina_history_cb(symbol, period)
             if period in ("15m", "30m", "1h"):
                 # Sina K 线为主力（稳定），akshare eastmoney 分钟线兜底
-                rows = _sina_history(symbol, period)
+                rows = _sina_history_cb(symbol, period)
                 if not rows:
                     rows = _akshare_intraday_history(symbol, int(period[:-1]))
                 return rows
             if period == "4h":
-                rows = _sina_history(symbol, "1h")  # 60 分钟线
+                rows = _sina_history_cb(symbol, "1h")  # 分钟线
                 if not rows:
                     rows = _akshare_intraday_history(symbol, 60)
                 return _resample_4h(rows)
             items = _mootdx_history(symbol, period)
             if items:
                 return items
-            return _sina_history(symbol, period)
+            return _sina_history_cb(symbol, period)
         if asset_type in ("HK", "US"):
             return _fetch_akshare_history(symbol, asset_type, period)
         return []
