@@ -284,6 +284,30 @@ def section_portfolio():
                         check(f"report_quality 字段存在（当前={rq}）",
                               rq in ("full", "fallback", "pending", "none"),
                               f"值={rq}")
+                        # P3-3: data quality assertions
+                        strategies = detail.get("strategies", [])
+                        if strategies:
+                            all_fs = []
+                            sym_sets = []
+                            all_syms = set()
+                            for s in strategies:
+                                allocs = s.get("allocations", s.get("etfs", []))
+                                non_cash = {a["symbol"] for a in allocs if a.get("symbol") and a["symbol"] != "CASH"}
+                                sym_sets.append(non_cash)
+                                all_syms.update(non_cash)
+                                for a in allocs:
+                                    fs_val = a.get("factor_score", 0) or a.get("factor_breakdown", {}).get("technical", 0)
+                                    if isinstance(fs_val, (int, float)):
+                                        all_fs.append(fs_val)
+                            if all_fs:
+                                var = sum((x - sum(all_fs)/len(all_fs))**2 for x in all_fs) / len(all_fs)
+                                check(f"factor variance={var:.4f}>0.01", var > 0.01)
+                            for i in range(len(sym_sets) - 1):
+                                if sym_sets[i] and sym_sets[i+1]:
+                                    diff = len(sym_sets[i] - sym_sets[i+1])
+                                    check(f"strategy{i}vs{i+1} diff={diff}", diff > 0)
+                            check("510300 in allocation", "510300" in all_syms)
+                            check("518880 in allocation", "518880" in all_syms)
             except Exception:
                 pass
     except requests.Timeout:

@@ -482,10 +482,26 @@ async def strategy_check(
             "risk_warnings": [],
         }
     
+    # P2-2: 从原始 etfs 构建 symbol->weight 映射，回填到 holdings_analysis
+    weight_map: dict[str, float] = {}
+    for e in etfs:
+        sym = _get_attr(e, "symbol", "")
+        if sym and sym != "CASH":
+            w = _get_attr(e, "target_weight", None)
+            if w is None:
+                w = _get_attr(e, "weight", 0)
+            weight_map[sym] = float(w) if w else 0.0
+
+    holdings_analysis = llm_result.get("holdings_analysis", [])
+    for h in holdings_analysis:
+        sym = h.get("symbol", "")
+        if sym and h.get("weight") is None:
+            h["weight"] = weight_map.get(sym, 0.0)
+
     result = {
         "summary": llm_result.get("summary", ""),
         "suggestions": llm_result.get("suggestions", []),
-        "holdings_analysis": llm_result.get("holdings_analysis", []),
+        "holdings_analysis": holdings_analysis,
         "risk_warnings": llm_result.get("risk_warnings", []),
         "market_regime": regime,
         "raw_llm": str(llm_result),

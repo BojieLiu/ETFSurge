@@ -40,6 +40,7 @@
     {
       "symbol": "510300",
       "name": "沪深300ETF",
+      "weight": 0.05,
       "factor_summary": "动量因子+0.8σ，估值因子+0.3σ，流动性充足",
       "tech_signal": "MACD金叉，RSI中性偏强(58)，偏多信号",
       "risk_flag": null

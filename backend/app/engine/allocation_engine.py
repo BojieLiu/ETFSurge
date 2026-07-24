@@ -19,9 +19,10 @@ from .rationale import build_rationale
 MIN_WEIGHT = 0.01
 MAX_WEIGHT = 0.30
 
-# P1-3: 强制保留标的（权重不低于 5%，确保进入分配）
+# P1-3: 强制保留标的（权重不低于 3%，确保进入分配）
+# 5% ×4=20% 占用过多预算导致总持仓不足 8 只，调整为 3% ×4=12%
 MANDATORY_CODES = {"510300", "560600", "518880", "511090"}
-MANDATORY_MIN_WEIGHT = 0.05
+MANDATORY_MIN_WEIGHT = 0.03
 
 # ── Default candidate pool (fallback if candidates list is empty) ──
 _DEFAULT_CANDIDATES: list[dict[str, Any]] = [
@@ -207,11 +208,11 @@ def _filter_satellite_by_profile(
 
         scored.append((suitability, c))
 
-    # 排序并按风偏裁剪候选数量（P1-1: 非仅排序）
+    # 排序并按风偏裁剪候选数量（P1-1: 非仅排序，提高比例达 8-15 只总持仓）
     scored.sort(key=lambda x: x[0], reverse=True)
     KEEP_RATIO = {
-        "defensive": 0.5,
-        "aggressive": 0.6,
+        "defensive": 0.6,
+        "aggressive": 0.7,
         "balanced": 0.8,
     }
     keep_count = max(1, int(len(scored) * KEEP_RATIO.get(profile_key, 1.0)))
@@ -288,8 +289,8 @@ def allocate(
         # B3: 跨层追踪已选指数，防止同指数多头持仓
         selected_tracked_indices: set[str] = set()
 
-        # P1-1: 核心层 max_count 风偏差异化
-        _CORE_MAX = {"defensive": 2, "balanced": 3, "aggressive": 3}
+        # P1-1: 核心层 max_count 风偏差异化（提高数量以达 8-15 只总持仓）
+        _CORE_MAX = {"defensive": 3, "balanced": 4, "aggressive": 4}
         _DEFENSE_MAX = {"defensive": 2, "balanced": 1, "aggressive": 1}
 
         # ── Core layer ──

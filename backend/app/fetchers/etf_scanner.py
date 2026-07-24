@@ -343,7 +343,8 @@ def filter_etfs(raw_list: list[dict] | Any) -> list[dict[str, Any]]:
             # 只排除"纯"债/货币，保留黄金/跨境/商品等防御型
             # 国债/国开等纯债类排除（由债券模块管理）
             # 但黄金ETF、跨境ETF不排除
-            is_pure_bond = any(kw in name for kw in ["国债ETF", "国开债", "城投债", "信用债", "可转债"])
+            # P1-2: 国债ETF是防御层资产（30年国债ETF等），不应被过滤掉
+            is_pure_bond = any(kw in name for kw in ["国开债", "城投债", "信用债", "可转债"])
             is_money_market = any(kw in name for kw in ["货币ETF", "短融ETF", "同业存单"])
             if is_pure_bond or is_money_market:
                 continue

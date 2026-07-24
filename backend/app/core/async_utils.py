@@ -11,8 +11,9 @@ import threading
 DEFAULT_SYNC_TIMEOUT = 8
 
 # 全局共享线程池，替代各 fetcher 中频繁创建/销毁的 ThreadPoolExecutor
-# 32 workers：统一承载 run_sync + 各 fetcher 同步调用 + 数据管道负载
-_shared_executor = concurrent.futures.ThreadPoolExecutor(max_workers=32)
+# 64 workers：统一承载 run_sync + 各 fetcher 同步调用 + 数据管道负载
+# 原 32 workers 在高并发场景（多次 E2E 并行验证 + LLM 报告）下易耗尽，导致级联超时
+_shared_executor = concurrent.futures.ThreadPoolExecutor(max_workers=64)
 
 # 默认 executor 监控（过渡期记录，P1 统一后移除）
 _default_executor_lock = threading.Lock()
@@ -48,7 +49,15 @@ async def run_sync(call, *args, timeout: int = DEFAULT_SYNC_TIMEOUT):
     Raises:
         asyncio.TimeoutError: 超时未完成。
         call 抛出的原始异常。
+
+    Note:
+        当线程池队列深度超过阈值时自动打 WARNING 日志，便于排查级联超时。
     """
+    _pending = _shared_executor._work_queue.qsize() if hasattr(_shared_executor, '_work_queue') else 0
+    if _pending > 8:
+        logger = logging.getLogger(__name__)
+        logger.warning("[async_utils] run_sync queue depth=%d (fn=%s, timeout=%ds) — pool may be saturated",
+                       _pending, getattr(call, '__name__', str(call)), timeout)
     loop = asyncio.get_event_loop()
     return await asyncio.wait_for(
         loop.run_in_executor(_shared_executor, call, *args), timeout=timeout,
@@ -69,11 +78,12 @@ def _get_default_executor_max() -> int:
 
 
 def _executor_stats(executor) -> dict:
-    """抽线程池的三个核心指标。"""
+    """抽线程池的核心指标。"""
     max_w = executor._max_workers if hasattr(executor, '_max_workers') else 0
     alive = len(executor._threads) if hasattr(executor, '_threads') else 0
     pending = executor._work_queue.qsize() if hasattr(executor, '_work_queue') else -1
-    return {"max_workers": max_w, "alive_threads": alive, "pending_tasks": pending}
+    total_spawned = getattr(executor, '_num_threads_ever', 0) if hasattr(executor, '_num_threads_ever') else 0
+    return {"max_workers": max_w, "alive_threads": alive, "pending_tasks": pending, "total_spawned": total_spawned}
 
 
 def get_thread_pool_stats() -> dict:
