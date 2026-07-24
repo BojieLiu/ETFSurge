@@ -747,11 +747,22 @@ class FactorRegistry:
             std_v = statistics.stdev(all_v)
             if std_v < 1e-10:
                 continue
+            # ── 混合归一化（Solution Design S2） ──
+            # z-score（统计异常度）* 0.7 + min-max（相对排名）* 0.3
+            # 保证即使 z-score 全负，顶部标的仍得正分
+            all_vals = [v for _, v in _raw[code]]
+            min_v = min(all_vals)
+            max_v = max(all_vals)
+            mm_range = max_v - min_v
             for sym, val in _raw[code]:
                 z = (val - mean_v) / std_v
-                # 放大差距：z-score * 5 让引擎层在 0~5σ 范围内区分标的
-                # 原始 z-score 在 0 附近时（如全市场因子值相近），引擎无法有效区分
-                result[sym][code] = z * 5.0 if definition.standardization != "zscore_large" else z
+                # min-max 归一化到 [-1, 1]
+                if mm_range > 1e-10:
+                    mm = (val - min_v) / mm_range * 2.0 - 1.0
+                else:
+                    mm = 0.0
+                combined = z * 0.7 + mm * 0.3
+                result[sym][code] = combined * 5.0 if definition.standardization != "zscore_large" else combined
             # zscore_large: 二次映射到 (0~1)
             if definition.standardization == "zscore_large":
                 z_vals = [result[sym][code] for sym, _ in _raw[code]]

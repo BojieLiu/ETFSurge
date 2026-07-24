@@ -104,6 +104,10 @@ class PoolManager:
         self._sector_momentum_cache: list[dict] | None = None
         self._sector_momentum_cache_ts: float = 0
         self._index_realtime_cache: list[dict] | None = None
+        # 60s TTL 缓存（Solution Design S1-A）
+        self._cached_pool: dict | None = None
+        self._cached_ts: float = 0.0
+        self._cache_ttl: float = 60.0
 
     async def _refresh_market_snapshot(self) -> None:
         """A3: 写入市场快照缓存（指数 + 板块动量）。
@@ -145,14 +149,19 @@ class PoolManager:
     async def refresh(self) -> PoolDiff:
         """全量刷新候选池。
 
-        有冷却期 + 并发锁保护：
-          - 30s 内不重复刷新（缓存新鲜数据）
+        有 TTL 缓存 + 冷却期 + 并发锁保护：
+          - 60s TTL：缓存有效期内直接返回缓存（第二次点击 <1s）
+          - 30s 冷却期：上次刷新距今 < 30s 时跳过刷新
           - 有正在运行的刷新则等待其完成，不启动第二个
         Returns:
             PoolDiff 差异报告。
         """
         import time as _time
         now = _time.time()
+        # 60s TTL 缓存（S1-A）：缓存有效期内直接返回，不触发任何 I/O
+        if self._cached_pool and (now - self._cached_ts) < self._cache_ttl:
+            logger.debug("PoolManager: TTL cache hit (%.1fs old)", now - self._cached_ts)
+            return PoolDiff(changed=False, added=0, removed=0, total=len(self._by_code))
         # 30s 冷却期：上次刷新距今 < 30s 时跳过
         if hasattr(self, '_last_refresh_ts') and self._last_refresh_ts:
             if now - self._last_refresh_ts < 30:
@@ -171,7 +180,11 @@ class PoolManager:
         async with self._refresh_lock:
             self._last_refresh_ts = now
             try:
-                return await self._refresh_impl()
+                diff = await self._refresh_impl()
+                # 更新 TTL 缓存
+                self._cached_pool = dict(self._pool)
+                self._cached_ts = _time.time()
+                return diff
             except Exception:
                 self._last_refresh_ts = 0.0
                 raise
