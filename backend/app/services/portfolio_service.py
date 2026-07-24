@@ -482,7 +482,7 @@ async def strategy_check(
             "risk_warnings": [],
         }
     
-    # P2-2: 从原始 etfs 构建 symbol->weight 映射，回填到 holdings_analysis
+    # P2-1+P2-2+P2-4: 后处理 — 回填 weight + 真实因子分 + factor_summary
     weight_map: dict[str, float] = {}
     for e in etfs:
         sym = _get_attr(e, "symbol", "")
@@ -495,15 +495,50 @@ async def strategy_check(
     holdings_analysis = llm_result.get("holdings_analysis", [])
     for h in holdings_analysis:
         sym = h.get("symbol", "")
+        # P2-4: weight 回填
         if sym and h.get("weight") is None:
             h["weight"] = weight_map.get(sym, 0.0)
+        # P2-1: 注入真实因子分到 holdings_analysis
+        fb = factor_breakdowns.get(sym, {})
+        real_fs = fb.get("factor_scores", {})
+        real_sig = fb.get("technical_signal", {})
+        if real_fs and isinstance(real_fs, dict) and any(v != 0 for v in real_fs.values()):
+            # 用真实因子分覆盖 LLM 编造的因子描述
+            top_factors = sorted(real_fs.items(), key=lambda x: -abs(x[1]))[:3]
+            factor_str = "；".join(f"{k}: {v:.2f}σ" for k, v in top_factors)
+            h["factor_summary"] = f"{factor_str}"
+        if real_sig and isinstance(real_sig, dict) and real_sig.get("signal"):
+            sig = real_sig["signal"]
+            h["tech_signal"] = f"{sig.upper()}，真实信号"
 
+    # P2-3: 增强摘要 — 纳入市态 + 数据质量
+    regime_label = {"range_bound": "震荡", "bullish": "偏多", "bearish": "偏空",
+                    "volatile": "高波动", "unknown": "待定"}.get(regime, regime)
+    unique_sectors = set()
+    for e in etfs:
+        sym = _get_attr(e, "symbol", "")
+        if sym and sym != "CASH":
+            fb = factor_breakdowns.get(sym, {})
+            sec = fb.get("technical_indicators", {}).get("sector", "")
+            if sec:
+                unique_sectors.add(sec)
+    sector_text = f"，覆盖{len(unique_sectors)}个行业" if unique_sectors else ""
+
+    filled_count = data_quality.get("filled_count", 0) if data_quality else 0
+    total_count = data_quality.get("total_count", 0) if data_quality else 0
+    quality_summary = f"；因子数据{filled_count}/{total_count}正常" if total_count > 0 else ""
+
+    llm_summary = llm_result.get("summary", "")
     result = {
-        "summary": llm_result.get("summary", ""),
+        "summary": f"{llm_summary}（市态：{regime_label}{sector_text}{quality_summary}）" if llm_summary else f"市态：{regime_label}，{filled_count}/{total_count}只正常{quality_summary}",
         "suggestions": llm_result.get("suggestions", []),
         "holdings_analysis": holdings_analysis,
         "risk_warnings": llm_result.get("risk_warnings", []),
         "market_regime": regime,
+        "data_quality": {
+            "filled_count": filled_count,
+            "total_count": total_count,
+        },
         "raw_llm": str(llm_result),
     }
     # 缓存 60s

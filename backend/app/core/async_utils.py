@@ -15,9 +15,16 @@ DEFAULT_SYNC_TIMEOUT = 8
 # 原 32 workers 在高并发场景（多次 E2E 并行验证 + LLM 报告）下易耗尽，导致级联超时
 _shared_executor = concurrent.futures.ThreadPoolExecutor(max_workers=64)
 
+# 长任务专用线程池（设计、检查、报告），与快速 API 请求隔离
+# 8 workers 防止长任务占满 API 用的共享线程池
+_long_running_executor = concurrent.futures.ThreadPoolExecutor(max_workers=8)
+
 # 默认 executor 监控（过渡期记录，P1 统一后移除）
 _default_executor_lock = threading.Lock()
 _default_executor_max = 0
+
+# P1-5: 长任务 vs 快速 API 请求的线程池隔离标志
+# 调用方可用 _use_long_running_executor() 装饰器或参数切换
 
 
 def run_in_thread(fn, *args, timeout: int = DEFAULT_SYNC_TIMEOUT):
@@ -61,6 +68,19 @@ async def run_sync(call, *args, timeout: int = DEFAULT_SYNC_TIMEOUT):
     loop = asyncio.get_event_loop()
     return await asyncio.wait_for(
         loop.run_in_executor(_shared_executor, call, *args), timeout=timeout,
+    )
+
+
+async def run_sync_long(call, *args, timeout: int = 120):
+    """在长任务专用线程池中执行同步函数，与快速 API 请求隔离。
+
+    用于设计、检查、报告等耗时 > 10s 的同步操作。
+    timeout 默认 120s（长任务通常 30-90s）。
+    """
+    loop = asyncio.get_event_loop()
+    return await asyncio.wait_for(
+        loop.run_in_executor(_long_running_executor, call, *args),
+        timeout=timeout,
     )
 
 

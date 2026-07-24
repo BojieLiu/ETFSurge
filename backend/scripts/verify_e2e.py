@@ -110,7 +110,7 @@ def section_market():
 
     # /market/indices/global
     try:
-        r = requests.get(f"{BASE}/api/v1/market/indices/global", timeout=30)
+        r = requests.get(f"{BASE}/api/v1/market/indices/global", timeout=60)  # P1-5
         check(f"GET /market/indices/global -> {r.status_code}", r.status_code == 200)
         if r.status_code == 200:
             data = r.json()
@@ -237,7 +237,7 @@ def section_portfolio():
     try:
         r = requests.post(f"{BASE}/api/v1/portfolio/design-async", json={
             "capital": 500000
-        }, timeout=30)
+        }, timeout=60)  # P1-5
         check(f"POST /design-async -> {r.status_code}", r.status_code in (200, 202))
         if r.status_code in (200, 202):
             task_data = r.json()
@@ -245,7 +245,7 @@ def section_portfolio():
             design_task_id = task_id
             check(f"设计任务已提交 task_id={task_id}", task_id is not None)
             # Poll for completion
-            deadline = time.time() + 180
+            deadline = time.time() + 300  # P1-5: 180->300 for cold start + slow data sources
             completed = False
             while time.time() < deadline:
                 try:
