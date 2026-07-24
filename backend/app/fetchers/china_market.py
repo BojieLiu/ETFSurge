@@ -130,12 +130,20 @@ def _mootdx_history(symbol: str, period: str = "daily") -> list[dict[str, Any]]:
         results = []
         for _, row in df.iterrows():
             results.append({
+                # 中文 Key（兼容 indicators.py/chart_data）
                 "日期": str(row.get("date", "")),
                 "开盘": float(row.get("open", 0)),
                 "最高": float(row.get("high", 0)),
                 "最低": float(row.get("low", 0)),
                 "收盘": float(row.get("close", 0)),
                 "成交量": float(row.get("volume", 0) or 0),
+                # 英文 Key（兼容 factor_registry._fetch_market_data）
+                "day": str(row.get("date", "")),
+                "open": float(row.get("open", 0)),
+                "high": float(row.get("high", 0)),
+                "low": float(row.get("low", 0)),
+                "close": float(row.get("close", 0)),
+                "volume": float(row.get("volume", 0) or 0),
             })
         return results
     except Exception:
@@ -230,8 +238,12 @@ def _sina_history(symbol: str, period: str = "daily") -> list[dict[str, Any]]:
         data = json.loads(r.text)
         if isinstance(data, list) and data:
             return [{
+                # 中文 Key（兼容 indicators.py/chart_data）
                 "日期": d["day"], "开盘": float(d["open"]), "最高": float(d["high"]),
                 "最低": float(d["low"]), "收盘": float(d["close"]), "成交量": float(d.get("volume", 0)),
+                # 英文 Key（兼容 factor_registry._fetch_market_data）
+                "day": d["day"], "open": float(d["open"]), "high": float(d["high"]),
+                "low": float(d["low"]), "close": float(d["close"]), "volume": float(d.get("volume", 0)),
             } for d in data if isinstance(d, dict)]
     except Exception:
         pass
@@ -739,11 +751,22 @@ def fetch_index_history(symbol: str, period: str = "daily") -> list[dict[str, An
         return []
 
 
+_ETF_PREFIXES = ("51", "15", "16", "56", "58", "59")
+
+
+def _is_etf_code(symbol: str) -> bool:
+    """检查代码是否以 ETF 前缀开头（A股 ETF 代码特征）。"""
+    return any(symbol.startswith(p) for p in _ETF_PREFIXES)
+
+
 def fetch_history(symbol: str, asset_type: str = "A", period: str = "daily") -> list[dict[str, Any]]:
     with no_proxy():
         if asset_type == "index":
             return fetch_index_history(symbol, period)
         if asset_type == "A":
+            # ETF 代码跳过 mootdx（不支持），直接走 Sina（快且稳定）
+            if _is_etf_code(symbol):
+                return _sina_history(symbol, period)
             if period in ("15m", "30m", "1h"):
                 # Sina K 线为主力（稳定），akshare eastmoney 分钟线兜底
                 rows = _sina_history(symbol, period)

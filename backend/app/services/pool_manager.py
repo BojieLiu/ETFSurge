@@ -261,9 +261,12 @@ class PoolManager:
             # Core: 宽基指数
             if base_layer == "core" or industry == "宽基指数":
                 target = LAYER_CORE
-            # Defense: 商品/固收/跨境
-            elif base_layer == "defense" or industry in ("商品", "固收", "跨境"):
+            # Defense: 商品/固收（注意：跨境归卫星层，P1-2 修复）
+            elif base_layer == "defense" or industry in ("商品", "固收"):
                 target = LAYER_DEFENSE
+            # 跨境 → 卫星层（非防御资产）
+            elif industry == "跨境":
+                target = LAYER_SATELLITE
             # Research: unknown industry
             elif industry == "unknown":
                 target = LAYER_RESEARCH

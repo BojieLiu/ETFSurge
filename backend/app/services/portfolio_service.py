@@ -325,6 +325,16 @@ async def calculate_daily_pnl(
 import time as _time
 _strategy_check_cache: dict[str, tuple[float, dict]] = {}  # key -> (timestamp, result)
 
+
+def _is_failed_result(factor_scores: dict) -> bool:
+    """P0-4: 判断因子结果是否为失败（全部为空或全零）。"""
+    if not factor_scores:
+        return True
+    for sym, scores in factor_scores.items():
+        if scores and isinstance(scores, dict) and any(v != 0 for v in scores.values()):
+            return False
+    return True  # 所有标的因子分全为零或空
+
 async def strategy_check(
     db: AsyncSession,
     total_capital: float,
@@ -370,8 +380,12 @@ async def strategy_check(
     cache_key = "_".join(sorted(symbols) if symbols else ["empty"])
     cached = _strategy_check_cache.get(cache_key)
     if cached and _time.monotonic() - cached[0] < 60:
-        logger.debug("[strategy_check] returning cached result")
-        return cached[1]
+        # P0-4: 失效结果不命中缓存
+        if cached[1] and not _is_failed_result(cached[1].get("factor_scores", {})):
+            logger.debug("[strategy_check] returning cached result")
+            return cached[1]
+        else:
+            logger.debug("[strategy_check] cache hit but result is failed/stale, re-fetching")
     
     # 并行采集（带 30s 总超时，任一失败不影响整体结果）
     indicators_task = _compute_indicators(symbols)

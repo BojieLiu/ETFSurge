@@ -49,6 +49,42 @@ MIN_AVG_AMOUNT = 10_000_000   # 元 (1000万)
 CORE_REQUIRED = ["510300", "560600"]   # 沪深300ETF, 中证A500ETF
 DEFENSE_REQUIRED = ["518880", "511090"]  # 黄金ETF, 30年国债ETF
 
+# P0-3: tracked_index 关键词映射（从 ETF 名称提取指数名）
+INDEX_KEYWORDS = {
+    "沪深300": "沪深300",
+    "中证A500": "中证A500",
+    "上证50": "上证50",
+    "上证180": "上证180",
+    "中证800": "中证800",
+    "深证100": "深证100",
+    "深证50": "深证50",
+    "创业板": "创业板",
+    "科创50": "科创50",
+    "MSCI": "MSCI",
+    "A50": "A50",
+    "A100": "A100",
+    "红利": "红利",
+    "黄金": "黄金",
+    "国债": "国债",
+    "纳指": "纳斯达克100",
+    "标普500": "标普500",
+    "恒生": "恒生",
+    "中概": "中概",
+    "半导体": "半导体",
+    "新能源": "新能源",
+    "医药": "医药",
+    "消费": "消费",
+    "军工": "军工",
+}
+
+
+def _extract_index_keyword(name: str) -> str:
+    """从 ETF 名称中提取跟踪指数关键词。"""
+    for kw, idx_name in INDEX_KEYWORDS.items():
+        if kw in name:
+            return idx_name
+    return ""
+
 
 def _tencent_gtimg_batch(codes: list[str]) -> dict[str, dict[str, Any]]:
     """通过腾讯 gtimg 批量查询 ETF 行情，返回 code→{amount, turnover, fund_scale, pe} 映射。
@@ -427,10 +463,12 @@ def full_pipeline(raw_etfs: list[dict] | None = None) -> dict[str, list[dict]]:
     # 过滤
     filtered = filter_etfs(raw_etfs)
 
-    # 分类
+    # 分类（P0-3: 从名称提取 tracked_index 并回填，使去重和分类更准确）
     layers: dict[str, list[dict]] = {"core": [], "satellite": [], "defense": []}
     for etf in filtered:
-        layer = classify_etf(etf["name"], "")
+        tracked_idx = etf.get("tracked_index", "") or _extract_index_keyword(etf.get("name", ""))
+        etf["tracked_index"] = tracked_idx
+        layer = classify_etf(etf["name"], tracked_idx)
         layers.setdefault(layer, []).append(etf)
 
     # 每层排序取 TOP 15

@@ -785,7 +785,7 @@ class FactorRegistry:
                     logger.debug("Signal factor failed for %s: %s", sym, e)
                     result[sym][signal_code] = 0.0
 
-        # ── 熔断保护：z-score 为 0 的符号比例 > 50% 时抛异常 ──
+        # ── 数据质量管理：记录零分比例但不熔断（P0-2 去除 meltdown 异常） ──
         if codes:
             all_empty = 0
             for sym in symbols:
@@ -797,11 +797,8 @@ class FactorRegistry:
                     all_empty += 1
             total = len(symbols)
             if total > 0 and all_empty / total > 0.5:
-                logger.error("[factor] meltdown: %.0f%% of symbols have zero factor scores", all_empty / total * 100)
-                raise RuntimeError(
-                    f"FactorRegistry meltdown: {all_empty}/{total} symbols returned empty factor scores. "
-                    "Data sources may be unavailable."
-                )
+                logger.warning("[factor] data quality: %.0f%% of symbols have zero factor scores (P0-2 suppressed meltdown)",
+                               all_empty / total * 100)
 
         # Record for IC tracking
         try:

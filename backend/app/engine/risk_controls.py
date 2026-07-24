@@ -40,10 +40,9 @@ def filter_extreme_drawdown(
                 logger.info("[risk] excluded %s (1m return %.1f%%, threshold %.0f%%)",
                             etf["symbol"], ret_1m * 100, threshold * 100)
                 continue
-            etf["selection_rationale"] = (etf.get("selection_rationale", "") +
-                                          f"| 【风控：近1月跌{ret_1m*100:.1f}%，月跌幅阈值风控通过】"
-                                          if ret_1m is not None and ret_1m < -0.20
-                                          else etf.get("selection_rationale", ""))
+            # P1-4: 明确括号避免运算符优先级歧义
+            risk_note = f"| 【风控：近1月跌{ret_1m*100:.1f}%，月跌幅阈值风控通过】" if ret_1m is not None and ret_1m < -0.20 else ""
+            etf["selection_rationale"] = (etf.get("selection_rationale", "") or "") + risk_note
             filtered.append(etf)
         # Redistribute removed weight proportionally
         if removed_weight > 0 and filtered:

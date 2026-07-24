@@ -19,6 +19,10 @@ from .rationale import build_rationale
 MIN_WEIGHT = 0.01
 MAX_WEIGHT = 0.30
 
+# P1-3: 强制保留标的（权重不低于 5%，确保进入分配）
+MANDATORY_CODES = {"510300", "560600", "518880", "511090"}
+MANDATORY_MIN_WEIGHT = 0.05
+
 # ── Default candidate pool (fallback if candidates list is empty) ──
 _DEFAULT_CANDIDATES: list[dict[str, Any]] = [
     # Core
@@ -79,6 +83,30 @@ def _select_and_weight(
     if not candidates or budget <= 0:
         return []
 
+    # P1-3: 强制标的从候选池中注入（确保进入分配结果）
+    mandatory_assignments = []
+    remaining_candidates = []
+    for c in candidates:
+        sym = c.get("symbol", "")
+        if sym in MANDATORY_CODES:
+            mandatory_assignments.append({
+                "symbol": sym,
+                "name": c.get("name", sym),
+                "layer": layer,
+                "weight": MANDATORY_MIN_WEIGHT,
+                "selection_rationale": f"强制保留：{c.get('name', sym)} 作为{layer}层核心配置",
+                "factor_score": factor_matrix.get(sym, {}).get("technical", 0),
+                "factor_breakdown": factor_matrix.get(sym, {}),
+            })
+            budget -= MANDATORY_MIN_WEIGHT
+        else:
+            remaining_candidates.append(c)
+
+    # 如果预算被强制标的耗尽，直接返回
+    if budget <= 0:
+        return mandatory_assignments
+    candidates = remaining_candidates
+
     # B3: 过滤已选指数的候选
     filtered = []
     for c in candidates:
@@ -89,7 +117,7 @@ def _select_and_weight(
     candidates = filtered
 
     if not candidates:
-        return []
+        return mandatory_assignments
 
     # Build (composite_score, candidate, factor_scores) triples
     scored: list[tuple[float, dict[str, Any], dict[str, float]]] = []
@@ -110,7 +138,7 @@ def _select_and_weight(
     # Keep top *max_count*
     selected = scored[:max_count]
     if not selected:
-        return []
+        return mandatory_assignments
 
     scores = [s[0] for s in selected]
     weights = _power_law_weights(scores, budget)
@@ -142,6 +170,8 @@ def _select_and_weight(
             },
         })
 
+    # P1-3: 合并强制标的到返回结果
+    results = mandatory_assignments + results
     return results
 
 
@@ -177,9 +207,15 @@ def _filter_satellite_by_profile(
 
         scored.append((suitability, c))
 
-    # 排序并保留同数量候选（不同顺序）
+    # 排序并按风偏裁剪候选数量（P1-1: 非仅排序）
     scored.sort(key=lambda x: x[0], reverse=True)
-    return [item for _, item in scored]
+    KEEP_RATIO = {
+        "defensive": 0.5,
+        "aggressive": 0.6,
+        "balanced": 0.8,
+    }
+    keep_count = max(1, int(len(scored) * KEEP_RATIO.get(profile_key, 1.0)))
+    return [item for _, item in scored[:keep_count]]
 
 
 def allocate(
@@ -252,6 +288,10 @@ def allocate(
         # B3: 跨层追踪已选指数，防止同指数多头持仓
         selected_tracked_indices: set[str] = set()
 
+        # P1-1: 核心层 max_count 风偏差异化
+        _CORE_MAX = {"defensive": 2, "balanced": 3, "aggressive": 3}
+        _DEFENSE_MAX = {"defensive": 2, "balanced": 1, "aggressive": 1}
+
         # ── Core layer ──
         core_alloc = _select_and_weight(
             core_candidates,
@@ -260,7 +300,7 @@ def allocate(
             layer="core",
             regime=regime,
             strategy=profile_key,
-            max_count=4,
+            max_count=_CORE_MAX.get(profile_key, 4),
             exclude_tracked_indices=selected_tracked_indices,
         )
         for a in core_alloc:
@@ -295,7 +335,7 @@ def allocate(
             layer="defense",
             regime=regime,
             strategy=profile_key,
-            max_count=4,
+            max_count=_DEFENSE_MAX.get(profile_key, 4),
             exclude_tracked_indices=selected_tracked_indices,
         )
         allocations.extend(def_alloc)
