@@ -72,8 +72,9 @@ def register_all_probes() -> None:
 
     def _probe_main_pool():
         stats = get_thread_pool_stats()
-        alive = stats.get("alive_threads", 0)
-        max_w = stats.get("max_workers", 16)
+        shared = stats.get("shared_executor", {})
+        alive = shared.get("alive_threads", 0)
+        max_w = shared.get("max_workers", 32)
         # 活跃线程超过 80% 即视为不健康
         return alive <= max_w * 0.8
     register_probe("threadpool_main", _probe_main_pool, timeout=1)

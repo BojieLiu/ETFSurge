@@ -170,10 +170,13 @@ async def design_pipeline(mgr: TaskManager, task_id: int) -> None:
         constraints = params.get("constraints")
 
         # ── Stage 1&2: DATA + ENGINE (combined via generate_enhanced_design) ──
-        # generate_enhanced_design 内部已有 pool_manager.refresh() 的 30s 超时保护
-        result = await generate_enhanced_design(
-            capital=capital,
-            constraints=constraints,
+        # pool_manager.refresh() 外层的 30s timeout 已移交给 pipeline
+        result = await asyncio.wait_for(
+            generate_enhanced_design(
+                capital=capital,
+                constraints=constraints,
+            ),
+            timeout=60,  # 30s (DATA) + 10s (ENGINE) + 20s buffer
         )
 
         strategies = result.get("strategies", [])

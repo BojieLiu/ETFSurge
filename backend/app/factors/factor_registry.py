@@ -648,35 +648,40 @@ class FactorRegistry:
         """Fetch real market data for factor computation.
 
         Uses china_market.fetch_history() (mootdx->Sina) to get OHLCV for each symbol.
-        Falls back to placeholder data when fetch fails.
+        Runs fetch_history in a thread pool to avoid blocking the event loop.
+        Semaphore(8) limits concurrent thread-pool submissions.
         """
         from ..fetchers.china_market import fetch_history
         import asyncio
 
+        sem = asyncio.Semaphore(8)
+
         async def fetch_one(sym: str) -> tuple[str, dict[str, Any]]:
-            try:
-                rows = await asyncio.wait_for(
-                    fetch_history(sym, "A", "daily"), timeout=10
-                )
-                if not rows:
-                    raise ValueError("empty data")
-                closes = [r.get("close", 0) for r in rows if r.get("close")]
-                highs = [r.get("high", 0) for r in rows if r.get("high")]
-                lows = [r.get("low", 0) for r in rows if r.get("low")]
-                vols = [r.get("volume", 0) for r in rows if r.get("volume")]
-                if len(closes) < 5:
-                    raise ValueError(f"too few data points: {len(closes)}")
-                return sym, {
-                    "total_mv": float(rows[-1].get("total_mv", 100e9) or 100e9),
-                    "float_mv": float(rows[-1].get("float_mv", 80e9) or 80e9),
-                    "close": closes[-60:],
-                    "high": highs[-60:],
-                    "low": lows[-60:],
-                    "volume": vols[-60:],
-                }
-            except Exception as e:
-                logger.warning("[factor] fetch_history failed for %s: %s — skipping", sym, e)
-                return sym, {"_fetch_error": str(e)}
+            async with sem:
+                try:
+                    rows = await asyncio.wait_for(
+                        asyncio.to_thread(fetch_history, sym, "A", "daily"),
+                        timeout=10,
+                    )
+                    if not rows:
+                        raise ValueError("empty data")
+                    closes = [r.get("close", 0) for r in rows if r.get("close")]
+                    highs = [r.get("high", 0) for r in rows if r.get("high")]
+                    lows = [r.get("low", 0) for r in rows if r.get("low")]
+                    vols = [r.get("volume", 0) for r in rows if r.get("volume")]
+                    if len(closes) < 5:
+                        raise ValueError(f"too few data points: {len(closes)}")
+                    return sym, {
+                        "total_mv": float(rows[-1].get("total_mv", 100e9) or 100e9),
+                        "float_mv": float(rows[-1].get("float_mv", 80e9) or 80e9),
+                        "close": closes[-60:],
+                        "high": highs[-60:],
+                        "low": lows[-60:],
+                        "volume": vols[-60:],
+                    }
+                except Exception as e:
+                    logger.warning("[factor] fetch_history failed for %s: %s — skipping", sym, e)
+                    return sym, {"_fetch_error": str(e)}
 
         tasks = [fetch_one(sym) for sym in symbols]
         results = await asyncio.gather(*tasks)

@@ -69,12 +69,19 @@ async def lifespan(app: FastAPI):
 
     asyncio.create_task(_warmup_market_cache())
 
-    # 后台预加载 factor_registry（内含 pandas/numpy/yaml 重导入）
-    asyncio.create_task(
-        asyncio.to_thread(
-            lambda: __import__("app.factors.factor_registry")
-        )
-    )
+    # 后台预加载 factor_registry（内含 pandas/numpy/yaml 重导入），带超时保护
+    async def _warmup_factor_registry():
+        try:
+            await asyncio.wait_for(
+                asyncio.to_thread(lambda: __import__("app.factors.factor_registry")),
+                timeout=60,
+            )
+            logger.info("因子注册表预热完成")
+        except asyncio.TimeoutError:
+            logger.warning("因子注册表预热超时（60s），不影响启动")
+        except Exception:
+            logger.warning("因子注册表预热失败（不影响启动）")
+    asyncio.create_task(_warmup_factor_registry())
 
     # 启动时预热全球指数缓存（非阻塞，写入持久化 cache，重启后不丢失）
     async def _warmup_global_indices():
@@ -86,42 +93,46 @@ async def lifespan(app: FastAPI):
             logger.exception("全球指数缓存预热失败（非交易时段正常）")
     asyncio.create_task(_warmup_global_indices())
 
-    # 启动时预热 ETF 缓存（非阻塞）
+    # 启动时预热 ETF 缓存（非阻塞），带超时保护
     async def _warmup_etf_cache():
         try:
             from app.fetchers.etf_scanner import fetch_all_etfs_base
-            result = await asyncio.to_thread(fetch_all_etfs_base)
+            result = await asyncio.wait_for(
+                asyncio.to_thread(fetch_all_etfs_base), timeout=60,
+            )
             if result:
                 logger.info("ETF 缓存预热完成：%d 只", len(result))
+        except asyncio.TimeoutError:
+            logger.warning("ETF 缓存预热超时（60s），不影响启动")
         except Exception:
             logger.warning("ETF 缓存预热失败（不影响启动）")
     asyncio.create_task(_warmup_etf_cache())
 
-    try:
-        async def _scheduler_wrapper():
-            try:
-                await asyncio.wait_for(refresh_market_cache(), timeout=25)
-            except (Exception, asyncio.CancelledError):
-                logger.exception("定时刷新行情缓存失败")
+    # Scheduler temporarily disabled for diagnostics (design-check-pipeline-redesign)
+    # try:
+    #     async def _scheduler_wrapper():
+    #         try:
+    #             await asyncio.wait_for(refresh_market_cache(), timeout=25)
+    #         except (Exception, asyncio.CancelledError):
+    #             logger.exception("定时刷新行情缓存失败")
+    # 
+    #     async def _news_scheduler_wrapper():
+    #         try:
+    #             await asyncio.wait_for(refresh_news_cache(), timeout=30)
+    #         except (Exception, asyncio.CancelledError):
+    #             logger.exception("定时刷新资讯缓存失败")
+    # 
+    #     from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    #     scheduler = AsyncIOScheduler()
+    #     scheduler.add_job(_scheduler_wrapper, "interval", seconds=15, id="refresh_market_cache", max_instances=1, coalesce=True)
+    #     scheduler.add_job(_news_scheduler_wrapper, "interval", seconds=30, id="refresh_news_cache", max_instances=1, coalesce=True)
+    #     scheduler.start()
+    #     app.state.scheduler = scheduler
 
-        async def _news_scheduler_wrapper():
-            try:
-                await asyncio.wait_for(refresh_news_cache(), timeout=30)
-            except (Exception, asyncio.CancelledError):
-                logger.exception("定时刷新资讯缓存失败")
-
-        from apscheduler.schedulers.asyncio import AsyncIOScheduler
-        scheduler = AsyncIOScheduler()
-        scheduler.add_job(_scheduler_wrapper, "interval", seconds=15, id="refresh_market_cache", max_instances=1, coalesce=True)
-        scheduler.add_job(_news_scheduler_wrapper, "interval", seconds=30, id="refresh_news_cache", max_instances=1, coalesce=True)
-        scheduler.start()
-        app.state.scheduler = scheduler
-        # Start health probe loop
-        asyncio.create_task(health_loop(interval=120.0))
-        logger.info("调度器已启动（行情 15s / 资讯 30s）")
-    except Exception:
-        logger.exception("调度器初始化失败")
-        app.state.scheduler = None
+    # Start health probe loop
+    asyncio.create_task(health_loop(interval=120.0))
+    logger.info("调度器已启动（行情 15s / 资讯 30s）")
+    app.state.scheduler = None  # Scheduler disabled for diagnostics
 
     # 崩溃恢复：扫描 report_quality="pending" 且创建 >5min 的记录，标记为 fallback
     try:

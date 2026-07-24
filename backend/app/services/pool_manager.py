@@ -170,17 +170,23 @@ class PoolManager:
 
         async with self._refresh_lock:
             self._last_refresh_ts = now
-            return await self._refresh_impl()
+            try:
+                return await self._refresh_impl()
+            except Exception:
+                self._last_refresh_ts = 0.0
+                raise
 
     async def _refresh_impl(self) -> PoolDiff:
         """实际刷新逻辑（被 refresh() 的锁保护）。"""
+        import time as _time
+        _start_ts = _time.time()
         old_by_code = dict(self._by_code)
 
         # 1. 扫描全市场 → 3 层基础池（full_pipeline 是同步函数，必须 run_sync 否则阻塞事件循环）
         try:
             from ..core.async_utils import run_sync
             # full_pipeline 需要 20-60s（外部 HTTP API），默认 8s 不够
-            raw_layers = await run_sync(self.scanner.full_pipeline, timeout=120)
+            raw_layers = await run_sync(self.scanner.full_pipeline, timeout=45)
         except Exception as e:
             logger.warning("[pool_manager] scanner.full_pipeline failed")
             raw_layers = {"core": [], "satellite": [], "defense": []}
@@ -299,9 +305,11 @@ class PoolManager:
         import asyncio as _asyncio2
         _asyncio2.create_task(self._refresh_market_snapshot())
 
-        logger.info("PoolManager: refresh complete (v%d, %d total)",
+        _elapsed = _time.time() - _start_ts
+        logger.info("PoolManager: refresh complete (v%d, %d total) in %.1fs",
                      self._version,
-                     sum(len(v) for v in self._pool.values()))
+                     sum(len(v) for v in self._pool.values()),
+                     _elapsed)
         return diff
 
     @staticmethod

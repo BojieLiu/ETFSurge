@@ -502,6 +502,28 @@ def section_admin():
     except Exception as e:
         check("GET /admin/token-usage/timeseries", False, str(e))
 
+    # GET /admin/thread-pool
+    try:
+        r = requests.get(f"{BASE}/api/v1/admin/thread-pool", timeout=10)
+        check(f"GET /admin/thread-pool -> {r.status_code}", r.status_code == 200)
+        if r.status_code == 200:
+            data = r.json()
+            main_pool = data.get("main", {})
+            # Support both unified structure (shared_executor sub-key) and legacy flat key
+            if "shared_executor" in main_pool:
+                pool_stats = main_pool["shared_executor"]
+            else:
+                pool_stats = main_pool  # legacy flat structure
+            max_w = pool_stats.get("max_workers", 32)
+            alive = pool_stats.get("alive_threads", 0)
+            utilisation = alive / max_w if max_w > 0 else 0
+            check("shared_executor 未过载", utilisation < 0.8,
+                  f"active={alive}/{max_w} ({utilisation:.0%})")
+    except requests.Timeout:
+        check("GET /admin/thread-pool", False, "请求超时（10s）")
+    except Exception as e:
+        check("GET /admin/thread-pool", False, str(e))
+
 
 def section_ws():
     """WebSocket 连接测试"""
