@@ -141,8 +141,8 @@ const props = defineProps({
   designText: { type: String, default: '' },
   isHistory: { type: Boolean, default: false },
   createdAt: { type: String, default: '' },
+  reportQuality: { type: String, default: 'pending' },
   reportError: { type: String, default: '' },
-  reportStale: { type: Boolean, default: false }
 })
 
 const emit = defineEmits(['apply', 'regenerate', 'close', 'retry-report'])

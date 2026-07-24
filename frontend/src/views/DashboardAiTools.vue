@@ -76,8 +76,8 @@
         :design-text="designResult.design_text"
         :is-history="designResult.is_history"
         :created-at="designResult.created_at"
+        :report-quality="designResult.report_quality || 'none'"
         :report-error="reportError"
-        :report-stale="designReportStale"
         @apply="applyPlan"
         @regenerate="regenerateDesign"
         @close="exitCoreFeature"
@@ -156,13 +156,6 @@ let designPollTimer = null
 let designTimeoutTimer = null
 let strategyPollTimer = null
 let strategyTimeoutTimer = null
-
-const designReportStale = computed(() => {
-  if (!designResult.value?.created_at) return false
-  const created = new Date(designResult.value.created_at).getTime()
-  if (!created || isNaN(created)) return false
-  return Date.now() - created > 60_000
-})
 
 // History
 const showHistory = ref(false)
@@ -351,6 +344,7 @@ async function startDesign(capital) {
       design_text: data.design_text || '',
       market_context: data.market_context || {},
       created_at: data.created_at,
+      report_quality: data.report_quality || 'none',
     }
     designStep.value = 'result'
     loadingProgress.value = 100
@@ -600,7 +594,7 @@ async function onHistorySelect(id, item) {
         ? s.etfs.map(e => ({ symbol: e.symbol, name: e.name, layer: e.layer, target_weight: e.weight, selection_rationale: e.selection_rationale || '' }))
         : [],
     }))
-    designResult.value = { plans, design_text: data.design_text || '', market_context: data.market_context || {}, created_at: data.created_at, is_history: true }
+    designResult.value = { plans, design_text: data.design_text || '', market_context: data.market_context || {}, created_at: data.created_at, is_history: true, report_quality: data.report_quality || 'none' }
     designStep.value = 'result'
     designTab.value = 'cards'
     activeCoreFeature.value = 'design'
