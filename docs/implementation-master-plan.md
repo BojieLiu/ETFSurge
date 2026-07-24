@@ -1,8 +1,8 @@
 # ETF Surge 方案实施总计划
 
-> 生成日期: 2026-07-23 | 版本: v3.0
-> 总览 `docs/` 目录 **23 份**方案文档，梳理实施状态、冲突重叠、修复建议及分阶段执行路线。
-> v3.0 新增 `design-pipeline-foundation-issues.md` 深度诊断文档的处理；Phase 0 和 Phase 0.5 标注 ✅ 已完成；新增 Phase 0.7 处理管道基础缺陷（P0 级 Bug）；修复 v2.0 中 `five-improvements-plan.md` 内部状态不一致的问题。
+> 生成日期: 2026-07-24 | 版本: v4.0
+> 总览 `docs/` 目录 **27 份**方案文档，梳理实施状态、冲突重叠、修复建议及分阶段执行路线。
+> v4.0 新增 4 份文档（`design-check-pipeline-redesign.md`、`design-check-quality-report.md`、`design-failure-and-strategy-check-review.md`、`async-boundary-fix-plan.md`）；Phase 0.7 确认 ✅ 已完成；新增 Phase 0.8（设计失败修复）、Phase 0.9（异步边界修复）、Phase 1.0（顺序管道重构）并全部标记 ✅ 已完成；重算剩余工作依赖与排序；更新附录全部表格。
 
 ---
 
@@ -29,17 +29,21 @@
 | `news-pipeline-fix-plan.md` P0 | **Phase 0 已实施**：`fetch_news_headlines()` 加 `id` 字段 + 前端 `handleNews()` 无 `id` fallback，见 `bd72bf6` (push-on-subscribe) + `d4062c2` |
 | `frontend-performance-optimization.md` Step 1 | **Phase 0 已实施**：`main.js` 移除 ECharts 全局 import，首屏省 ~500KB |
 | `optimization-plan-20260721.md` | **Phase 0.5 已实施**（ETF 缓存 TTL + EM 直连 HTTP + akshare timeout 延长 + 策略检查 props/error/portfolio_type + 历史记录隔离/状态/徽标），见 `70a99f1` 及后续 5 个 commit |
-| `five-improvements-plan.md` | 4/5 项已实现——#2 `filter_extreme_drawdown` ✓、#3 `check_defense_effectiveness` ✓、#4 `remove_stale_candidates` ✓、#5 `_layer_phrase` 模板多样化 ✓；#1 统一市态判定仍待完成（需 `portfolio_service.py` + `strategy_check_worker.py` 改动 ~15 行） |
+| `design-pipeline-foundation-issues.md` | **Phase 0.7 已实施**（tracked_index + 因子分聚合 + 三方案差异化 + 风控修复 + 去重），见 `d478f12` + `cde3209`，15 个新单测全 PASS |
+| `design-failure-and-strategy-check-review.md` | **Phase 0.8 已实施**（前端错误弹窗 + 动态建议上限 + 数据质量注入 + 测试修复 + 级联测试 + verify_e2e 增强），见 `ad3e12eb` |
+| `async-boundary-fix-plan.md` | **Phase 0.9 已实施**（事件循环阻塞修复 + 线程池统一 32 worker + 冷却期污染修复 + 启动预热超时 + full_pipeline 45s 超时 + 异步 lint 测试），见 `2be9ccb` |
+| `design-check-pipeline-redesign.md` | **Phase 1.0 已实施**（顺序 Pipeline 替代 fire-and-forget + report_quality 分级 + 原子 DB 写入 + 崩溃恢复 + 8 个新集成测试），见 `4ff6084` + `7e93321` |
+| `five-improvements-plan.md` | 4/5 项已实现——#2 `filter_extreme_drawdown` ✓、#3 `check_defense_effectiveness` ✓、#4 `remove_stale_candidates` ✓、#5 `_layer_phrase` 模板多样化 ✓；#1 统一市态判定仍待完成 |
 
 ### 1.2 部分完成
 
 | 文档 | 完成部分 | 未完成部分 |
 |------|---------|-----------|
-| `design-report-optimization-plan.md` | 报告管道就绪、`_validate_report_consistency` 实现、WS 推送链路完整；A1（表格"因子"→"多因子评分"）已随 Phase 0.5 落地 | A2（预期收益随市态调整）、B1-B3（LLM prompt 分析增强）、C1（全市场净流入信号）、C2（卫星层科技 ETF）—— 其中 A2/C1/C2 依赖 Phase 0.7（因子分正常后验证效果） |
-| `five-improvements-plan.md` | #2（极端下跌排除）+ #3（防御有效性）+ #4（freshness 检查）+ #5（理由多样化）已实现 | #1（统一市态判定）仍待完成，~15 行，作为 Phase 1 条目 |
+| `design-report-optimization-plan.md` | 报告管道就绪、`_validate_report_consistency` 实现、WS 推送链路完整、`report_quality` 分级（full/fallback/none/pending）；A1（表格"因子"→"多因子评分"）已随 Phase 0.5 落地；管道升级为顺序 Pipeline（Phase 1.0） | A2（预期收益随市态调整）、B1-B3（LLM prompt 分析增强）、C1（全市场净流入信号）、C2（卫星层科技 ETF）—— 其中 A2/C1/C2 依赖因子分正常后验证效果 |
+| `five-improvements-plan.md` | #2（极端下跌排除）+ #3（防御有效性）+ #4（freshness 检查）+ #5（理由多样化）已实现 | #1（统一市态判定）仍待完成，~15 行 |
 | `market-awareness-and-data-source-plan.md` | Stooq 已在全球指数降级链中引用；§4 数据源替换已转入 `roadmap-data-source-unified.md` | §5 市场感知联动（MarketReport 忽略 `market` prop、AiAdvisor 硬编码、组合设计无 `market` 参数等）—— 此部分与 `market-analysis-optimization-plan.md` Phase D/E 有重叠，**建议以 market-analysis 方案为准实施** |
-| `factor-model-extension-plan.md` | 因子注册表从 12 个扩展到 ~30 个计算函数 | YAML 中 167 个远未全覆盖；IC 追踪器从未运行 |
-| `design-pipeline-foundation-issues.md` | **新诊断文档**（2026-07-23），基于代码审计 + DB 数据验证，发现 4 个 P0 + 3 个 P1 + 2 个 P2 级缺陷 | 全部待实施——Phase A 数据基础修复 + Phase B 引擎修复 + Phase C 质量提升，映射为 **Phase 0.7** |
+| `factor-model-extension-plan.md` | 因子注册表从 12 个扩展到 ~30 个计算函数；异步边界修复（Phase 0.9）后因子计算基于真实数据 | YAML 中 167 个远未全覆盖；IC 追踪器从未运行 |
+| `design-check-quality-report.md` | **新质量审计文档**（2026-07-24，v4），涵盖 19 个问题（4 P0 + 7 P1 + 4 P2 + 4 P3）；P0-1(_etf_history) 已实现（uncommitted）、P0-2(meltdown→warning) 已实现（uncommitted）、P0-3(INDEX_KEYWORDS) 已实现（uncommitted）、P0-4(缓存失效判断) 待实现 | P1-1(三策略差异化) 待检查 Phase 0.7 C1 是否满足、P1-2(防御层分类) 待实施、P1-3(强制标的进分配) 待实施、P1-4(risk_controls 拼接 bug) 待实施、P2-1~P2-4 待实施、P3-1~P3-4 待实施 |
 
 ### 1.3 已替代 (v2.0 新增)
 
@@ -49,23 +53,24 @@
 | `data-source-monitoring-plan.md` | **已替代** | `roadmap-data-source-unified.md` (Phase D) |
 | `review-20260720.md` | 评审记录，非实施方案 | N/A |
 
-### 1.4 未开始（v3.0 更新）
+### 1.4 未开始（v4.0 更新）
 
-| 文档 | 优先级 | 关键依赖 | 预估工时 |
-|------|--------|---------|---------|
-| `design-pipeline-foundation-issues.md` | **P0** | 自身 Phase A→B→C 按序；与 Phase 0.5 互补不冲突 | ~5h |
-| `news-pipeline-fix-plan.md` P1 | **P1** | 依赖 P0 已实施（Phase 0 完成） | ~2h |
-| `sector-concept-optimization-plan.md` | **P1** | Phase 1-2 独立可先行；Phase 4 依赖 LLM prompt 合并 | ~8h |
-| `market-analysis-optimization-plan.md` | **P1** | Phase A-C 须按序；D/E 独立 | ~13-19h |
-| `frontend-ui-optimization-plan.md` | **P1** | 曾实现后回滚，需测试安全网就绪后重做 | ~8h |
-| `frontend-testing-safety-net.md` | **P1** | 前端架构重构已就绪 | ~11h |
-| `frontend-performance-optimization.md` (Step 2-3) | **P1** | Step 1 已实施（Phase 0）；Step 2-3 待做 | ~1.5h |
-| `five-improvements-plan.md` #1 | **P1** | 独立，~15 行 | ~15min |
-| `roadmap-data-source-unified.md` | **P2** | 整合三份原方案，实施顺序详见自身依赖图 | ~3-5天 |
-| `market-awareness-and-data-source-plan.md` §5 | **P2** | **建议以 market-analysis Phase D/E 替代** | — |
-| `config-management-plan.md` | **P2** | 无（独立） | ~8h |
-| `factor-model-extension-plan.md` | **P3** | 远期优化 | — |
-| `e2e-testing-plan.md` | **P3** | 前端 UI 稳定后（避免维护成本过高） | ~16h |
+| 文档 | 优先级 | 关键依赖 | 预估工时 | 备注 |
+|------|--------|---------|:-------:|------|
+| `design-check-quality-report.md` 剩余 P1-P3 | **P1** | Phase 0.7 已就绪；P0-1~P0-3 已实现（uncommitted） | ~3-4h | 剩余 13 项待实施；P1-4(risk_controls 拼接) 仅 1 行 |
+| `news-pipeline-fix-plan.md` P1 | **P1** | 依赖 P0 已实施（Phase 0 完成） | ~2h | — |
+| `sector-concept-optimization-plan.md` | **P1** | Phase 1-2 独立可先行；Phase 4 依赖 LLM prompt 合并 | ~8h | — |
+| `market-analysis-optimization-plan.md` | **P1** | Phase A-C 须按序；D/E 独立；Phase 0.7/0.9 已就绪 | ~13-19h | — |
+| `frontend-ui-optimization-plan.md` | **P1** | 曾实现后回滚，需测试安全网就绪后重做 | ~8h | — |
+| `frontend-testing-safety-net.md` | **P1** | 前端架构重构已就绪 | ~11h | — |
+| `frontend-performance-optimization.md` (Step 2-3) | **P1** | Step 1 已实施（Phase 0）；Step 2-3 待做 | ~1.5h | — |
+| `five-improvements-plan.md` #1 | **P1** | 独立，~15 行 | ~15min | — |
+| `roadmap-data-source-unified.md` | **P2** | 整合三份原方案，实施顺序详见自身依赖图 | ~3-5天 | — |
+| `market-awareness-and-data-source-plan.md` §5 | **P2** | **建议以 market-analysis Phase D/E 替代** | — | — |
+| `config-management-plan.md` | **P2** | 无（独立） | ~8h | — |
+| `design-report-optimization-plan.md` A2/C1/C2 | **P2** | 依赖因子分正常（Phase 0.7 已完成） | ~2h | — |
+| `e2e-testing-plan.md` | **P3** | 前端 UI 稳定后（避免维护成本过高） | ~16h | — |
+| `factor-model-extension-plan.md` | **P3** | 远期优化 | — | — |
 
 ---
 
@@ -302,33 +307,40 @@ A1/A2 (tracked_index, ~7行) → A3 (缓存写入, ~50行) → B1 (因子分聚�
 | `optimization-plan-20260721.md` | **已实施**，移出冲突清单 | — | Phase 0.5 完成 |
 | `five-improvements-plan.md` | **4/5 已实施**，#1 待完成 | — | #2-#5 已落地，#1 作为 Phase 1 条目 |
 
-### 3.7 增量阶段划分建议（v3.0，基于 v2.0 更新）
+### 3.7 增量阶段划分建议（v4.0，基于 v3.0 更新）
 
-Phase 0 (✅ 已完成) 和 Phase 0.5 (✅ 已完成) 移出增量划分。
-新增 Phase 0.7 轨道（独立于其他任务）：
-```
-design-pipeline-foundation-issues.md  → Phase 0.7
-├── Phase A (数据基础修复)       → Phase 0.7-A
-├── Phase B (引擎修复)           → Phase 0.7-B
-└── Phase C (质量提升)           → Phase 0.7-C（部分延至 Phase 1）
-```
+Phase 0 (✅ 已完成), Phase 0.5 (✅ 已完成), Phase 0.7 (✅ 已完成) 移出增量划分。
 
-现有轨道编号更新（原 Phase 1 → 编号不变，但起始依赖前移经过 Phase 0.7）：
+新增 Phase 0.8 / 0.9 / 1.0（均已实施）：
+
+| 新增阶段 | 来源文档 | 内容 | 状态 |
+|---------|---------|------|:----:|
+| **Phase 0.8** | `design-failure-and-strategy-check-review.md` | 前端错误弹窗 + 动态建议上限 + 数据质量注入 + 测试修复 | ✅ 已实施 |
+| **Phase 0.9** | `async-boundary-fix-plan.md` | 事件循环阻塞修复 + 线程池统一 + 冷却期污染 + 预热超时 | ✅ 已实施 |
+| **Phase 1.0** | `design-check-pipeline-redesign.md` | 顺序 Pipeline + report_quality + 原子写入 + 崩溃恢复 | ✅ 已实施 |
+
+现有轨道编号更新（原 Phase 1 → 移为 Phase 1.1，起始依赖前移经过 Phase 0.7-1.0）：
 ```
 Track C: 新闻管道修复
 ├── P0 (WS id + 前端 fallback)    → Phase 0 (✅ 已实施)
-├── P1 (新浪源 + 关键词修复)      → Phase 1（独立实施）
+├── P1 (新浪源 + 关键词修复)      → Phase 1.1（独立实施）
 └── P2 (stars 新鲜度)             → Phase 6 可选
 
 Track D: 市场分析重构
-├── Phase A (统一搜索后端)          → Phase 1（可先行）
+├── Phase A (统一搜索后端)          → Phase 1.1（可先行）
 ├── Phase B (统一分析编排)          → Phase 2（与 1.8 可并行）
 ├── Phase C (前端合并组件)          → Phase 3（依赖 A+B）
 ├── Phase D (AI 顾问流式+数据)      → Phase 2 或 3（独立）
 └── Phase E (报告质量提升)          → Phase 3（独立，但 prompt 须与其他方案协调）
+
+Track E: 数据管道质量提升
+├── P0-1~P0-3 (_etf_history, meltdown→warning, INDEX_KEYWORDS) → Phase 1.1（已实现待 commit）
+├── P1-1~P1-4 (差异化 + 分类 + 强制标的 + 拼接 bug) → Phase 1.1~2
+├── P2-1~P2-4 (策略检查因子数据 + weight + 摘要 + target_weight) → Phase 2
+└── P3-1~P3-4 (测试覆盖 + pre-commit + E2E 断言 + 监控脚本) → Phase 2~3
 ```
 
-### 3.8 增量阶段划分建议（v2.0 存档）
+### 3.8 增量阶段划分建议（v2.0/v3.0 存档）
 
 > 以下为 v2.0 的原始轨道划分，保留供参考。实际以 §4 路线图为准。
 
@@ -423,22 +435,81 @@ market-analysis-optimization-plan.md
 
 **验证**: 实施后跑 `verify_e2e.py` + 针对 V1-V10 逐项检查。详见 foundation-issues §5 验证标准表。
 
-### Phase 1 — 数据层增强 & 统一市态（P1）
+### Phase 0.8 — 设计失败修复与策略检查增强 ✅ 已完成
 
-**前置依赖**: Phase 0.7 完成（因子分正常 + tracked_index 到位）
+**来源**: `design-failure-and-strategy-check-review.md`
+
+**状态**: ✅ 2026-07-24 已全部实施并验证。共 7 项修复 + 3 个新测试文件/增强。
+
+| # | 任务 | 源文档 | 关键 commit |
+|---|------|--------|:----------:|
+| 0.8.1 | 前端错误详情弹窗（AppModal） | §2-方案1 | `ad3e12eb` |
+| 0.8.2 | 动态建议上限（持仓分档 5/8/12） | §2-方案2 | `ad3e12eb` |
+| 0.8.3 | 数据质量元信息注入 prompt | §2-方案3 | `ad3e12eb` |
+| 0.8.4 | 单测修复（mock 路径 + error-dict 测试） | §2-方案4 | `ad3e12eb` |
+| 0.8.5 | 级联故障集成测试（test_design_cascade_failure.py） | §2-方案5 | `ad3e12eb` |
+| 0.8.6 | verify_e2e 增强（候选池探针 + INFRA/BUG 区分 + 质量断言） | §2-方案6 | `ad3e12eb` |
+| 0.8.7 | 候选池修复（china_market ETF 数据源 + Sina 降级） | §4 — | `8894537` |
+
+**验证结果**: 10 个涉及文件改动，252 行新增，37 行删除；所有存量测试 + 新增测试全 PASS。
+
+### Phase 0.9 — 异步边界修复与线程池统一 ✅ 已完成
+
+**来源**: `async-boundary-fix-plan.md`
+
+**状态**: ✅ 2026-07-24 已全部实施并验证。6 个 Phase + 10 个文件改动。
+
+| # | 任务 | 对应修复 | 文件 |
+|---|------|---------|------|
+| 0.9.0 | 修复 `_fetch_market_data` 同步 await（P0） | `fetch_history`→`asyncio.to_thread` + Semaphore(8) | `factor_registry.py` |
+| 0.9.1 | 统一线程池 — `run_sync` 改用 `_shared_executor`（P1） | 默认 executor→共享池 32 workers | `async_utils.py` |
+| 0.9.2 | 冷却期污染修复（P1.5） | `_last_refresh_ts` 失败后清除 | `pool_manager.py` |
+| 0.9.3 | 启动预热加超时保护（P2） | ETF 缓存 + 因子导入加 `wait_for(60)` | `main.py` |
+| 0.9.4 | full_pipeline 超时 120→45s + 耗时日志（P3） | 快速失败 + 可观测性 | `pool_manager.py` |
+| 0.9.5 | 测试防护增强（P4） | async_boundaries + async_lint + verify_e2e 增强 | 3 个测试文件 |
+
+**关键 commit**: `2be9ccb`（10 文件，493 行新增，119 行删除）。
+
+**验证结果**: 事件循环响应测试 PASS、AST lint 扫描 PASS、verify_e2e 线程池断言 PASS、服务重启后健康检查正常。
+
+### Phase 1.0 — 设计/策略检查顺序管道重构 ✅ 已完成
+
+**来源**: `design-check-pipeline-redesign.md`
+
+**状态**: ✅ 2026-07-24 已全部实施并验证。12 个文件改动，588 行新增。
+
+| # | 任务 | 说明 |
+|---|------|------|
+| 1.0.0 | PoolManager NameError 修复 | `task_manager.py` 中 `_generate_and_save_report` 的 `pool_manager` 未 import |
+| 1.0.1 | 顺序 Pipeline 替代 fire-and-forget | `design_pipeline()` 5 阶段顺序执行 + WS 推送进度 |
+| 1.0.2 | `strategy_check_pipeline()` 重构 | 同理，WS 进度推送 |
+| 1.0.3 | `report_quality` 分级 + DB 模型扩展 | pending/full/fallback/none，`report_generated_at` 时间戳 |
+| 1.0.4 | 去除嵌套超时（单层 provider timeout） | strategy_design.py 30s + portfolio_service.py 45s 移除 |
+| 1.0.5 | 崩溃恢复 — `report_quality="pending"` 记录 | main.py lifespan 扫描 >5min 的 pending→fallback |
+| 1.0.6 | 前端 report_quality 驱动 UI 状态 | 移除 60s 硬编码 `reportStale` 猜测 |
+| 1.0.7 | 8 个新集成测试 + verify_e2e 增强 | test_design_pipeline_integration.py |
+| 1.0.8 | Provider 超时调整（primary 90s, fallback 60s） | 原均为 120s |
+
+**关键 commits**: `4ff6084`（管道重构主体）、`7e93321`（前端 report_quality 状态驱动）。
+
+**验证结果**: 8 个 pipeline 集成测试全 PASS；verify_e2e `design_text` 检查升级（长度+内容）；POST /design-async 返回完整报告率从 0% 提升到预期 >90%。
+
+### Phase 1.1 — 数据层增强 & 统一市态（P1）
+
+**前置依赖**: Phase 0.7~1.0 完成（因子分正常 + 管道可靠 + 异步边界修复 + 报告分级）
 
 | # | 任务 | 源文档 | 预估工时 | 前置依赖 |
 |---|------|--------|---------|---------|
-| 1.0 | Five-improvements #1：统一市态判定（策略检查复用 pool_manager） | `five-improvements-plan.md` #1 | ~15min | 无（独立） |
-| 1.1 | Sector 数据采集扩容（行业+概念 concurrent；复用 Phase 0.7 A3 的缓存写入入口） | sector-concept Phase 1 | 4h | Phase 0.7 A3 |
-| 1.2 | PoolManager sector_cache 写入扩展（基于 A3 已有入口） | sector-concept Phase 2 | 3h | 1.1 |
-| 1.3 | APScheduler 新增 60s 板块刷新任务 | sector-concept Phase 2 | 1h | 1.2 |
-| 1.4 | 新闻关键词分类修复（移中性词、清冲突词） | news-pipeline-fix P1.1+P1.2 | 0.5h | 无 |
-| 1.5 | 新增 `fetch_sina_roll_news()` HTTP 源 | news-pipeline-fix P1.3 | 1h | 无 |
-| 1.6 | 重写 `fetch_macro_news()` 降级链（新浪优先） | news-pipeline-fix P1.4 | 0.5h | 1.5 |
-| 1.7 | 重写 `fetch_global_news()` 降级链 | news-pipeline-fix P1.5 | 0.5h | 无 |
-| 1.8 | market-analysis Phase A（统一搜索后端） | market-analysis §3 | 3-4h | 无 |
-| 1.9 | market-analysis Phase B（统一分析编排端点） | market-analysis §4 | 1-2h | 无（与 1.8 可并行） |
+| 1.1.0 | Five-improvements #1：统一市态判定（策略检查复用 pool_manager） | `five-improvements-plan.md` #1 | ~15min | 无（独立） |
+| 1.1.1 | Sector 数据采集扩容（行业+概念 concurrent；复用 Phase 0.7 A3 的缓存写入入口） | sector-concept Phase 1 | 4h | Phase 0.7 A3 |
+| 1.1.2 | PoolManager sector_cache 写入扩展（基于 A3 已有入口） | sector-concept Phase 2 | 3h | 1.1.1 |
+| 1.1.3 | APScheduler 新增 60s 板块刷新任务 | sector-concept Phase 2 | 1h | 1.1.2 |
+| 1.1.4 | 新闻关键词分类修复（移中性词、清冲突词） | news-pipeline-fix P1.1+P1.2 | 0.5h | 无 |
+| 1.1.5 | 新增 `fetch_sina_roll_news()` HTTP 源 | news-pipeline-fix P1.3 | 1h | 无 |
+| 1.1.6 | 重写 `fetch_macro_news()` 降级链（新浪优先） | news-pipeline-fix P1.4 | 0.5h | 1.1.5 |
+| 1.1.7 | 重写 `fetch_global_news()` 降级链 | news-pipeline-fix P1.5 | 0.5h | 无 |
+| 1.1.8 | market-analysis Phase A（统一搜索后端） | market-analysis §3 | 3-4h | 无 |
+| 1.1.9 | market-analysis Phase B（统一分析编排端点） | market-analysis §4 | 1-2h | 无（与 1.1.8 可并行） |
 
 **验证**:
 - LLM 报告不再显示"暂无板块热力数据"
@@ -446,22 +517,44 @@ market-analysis-optimization-plan.md
 - `GET /market/search?keyword=茅台&market=A` 返回 `type:"stock"` 结果
 - 策略检查的 regime 与设计方案一致（统一市态判定）
 
-### Phase 2 — 质量防护网 + AI 分析增强 + 设计报告增强
+### Phase 2.1 — 数据管道质量提升（质量审计剩余项）
 
-**前置依赖**: Phase 0.7 完成（因子分正常后设计报告优化才有意义）
+**前置依赖**: Phase 0.7~1.0 完成；P0-1~P0-3 已实现（uncommitted）
 
 | # | 任务 | 源文档 | 预估工时 | 前置依赖 |
 |---|------|--------|---------|---------|
-| 2.1 | AppButton/AppCard/AppTabs/AppInput/AppModal 单测 | frontend-testing-safety-net Phase A | 4h | 无 |
-| 2.2 | useDashboardData composable 单测 | frontend-testing-safety-net Phase B | 1h | 无 |
-| 2.3 | E2E spec 扩充到 10-15 条 | frontend-testing-safety-net Phase B/C | 6h | 无 |
-| 2.4 | verify_e2e.py 全局指数检查修复 | fix-global-indices-plan 根因 #7 | 0.5h | 无 |
-| 2.5 | market-analysis Phase C（前端 UnifiedAnalysis 合并组件） | market-analysis §5 | 4-5h | Phase 1.8+1.9 (A+B) |
-| 2.6 | market-analysis Phase D（AI 顾问流式+数据管道） | market-analysis §6 | 2-3h | 无（可并行） |
-| 2.7 | market-analysis Phase E（市场报告质量提升） | market-analysis §7 | 2-3h | 无（可并行） |
-| 2.8 | design-report A2：预期收益随市态动态调整 | `design-report-optimization-plan.md` A2 | ~20行 | Phase 0.7 B1（因子分正常） |
-| 2.9 | design-report C1：全市场净流入信号注入 LLM 报告 | `design-report-optimization-plan.md` C1 | ~30行 | Phase 0.7 验证通过 |
-| 2.10 | design-report C2：卫星层增加科技 ETF 选项 | `design-report-optimization-plan.md` C2 | ~15行 | Phase 0.7 验证通过 |
+| 2.1.0 | P1-1: 三策略差异化（检查 Phase 0.7 C1 是否满足需求） | design-check-quality §3 P1-1 | 0.5h | 无（验证） |
+| 2.1.1 | P1-2: 防御层分类修复（跨境→卫星层） | design-check-quality §3 P1-2 | ~3行 | 无 |
+| 2.1.2 | P1-3: 强制标的进入分配（MANDATORY_MIN_WEIGHT） | design-check-quality §3 P1-3 | ~20行 | 无 |
+| 2.1.3 | P1-4: risk_controls.py 拼接 bug 修复 | design-check-quality §3 P1-4 | ~1行 | 无 |
+| 2.1.4 | P0-4: 因子分缓存失效判断（不缓存全零结果） | design-check-quality §3 P0-4 | ~15行 | 无 |
+| 2.1.5 | P2-1: 策略检查因子数据管道修复 | design-check-quality §3 P2-1 | ~30行 | Phase 0.9 |
+| 2.1.6 | P2-2: holdings_analysis 注入 weight 字段 | design-check-quality §3 P2-2 | ~5行 | 无 |
+| 2.1.7 | P2-3: 策略检查摘要增强 | design-check-quality §3 P2-3 | ~10行 | 无 |
+| 2.1.8 | P2-4: target_weight 默认值 0.0 修复 | design-check-quality §3 P2-4 | ~1行 | 无 |
+| 2.1.9 | P3-1: 补关键模块单测（risk_controls/allocation_engine/strategy_check/sentiment） | design-check-quality §3 P3-1 | ~200行 | 2.1.0~2.1.8 |
+| 2.1.10 | P3-2: pre-commit 增加后端测试门禁 | design-check-quality §3 P3-2 | ~10行 | 无 |
+| 2.1.11 | P3-3: E2E 增加数据质量断言（因子分方差+方案差异+防御层） | design-check-quality §3 P3-3 | ~30行 | 无 |
+| 2.1.12 | P3-4: 数据管道健全性监控脚本 | design-check-quality §3 P3-4 | ~80行 | 无 |
+
+**验证**: pytest 全 PASS + verify_e2e 含数据质量断言全 PASS + 防御层含黄金/国债
+
+### Phase 2.2 — 质量防护网 + AI 分析增强 + 设计报告增强
+
+**前置依赖**: Phase 0.7~1.0 完成；Phase 2.1 完成（数据管道质量基线就绪）
+
+| # | 任务 | 源文档 | 预估工时 | 前置依赖 |
+|---|------|--------|---------|---------|
+| 2.2.1 | AppButton/AppCard/AppTabs/AppInput/AppModal 单测 | frontend-testing-safety-net Phase A | 4h | 无 |
+| 2.2.2 | useDashboardData composable 单测 | frontend-testing-safety-net Phase B | 1h | 无 |
+| 2.2.3 | E2E spec 扩充到 10-15 条 | frontend-testing-safety-net Phase B/C | 6h | 无 |
+| 2.2.4 | verify_e2e.py 全局指数检查修复 | fix-global-indices-plan 根因 #7 | 0.5h | 无 |
+| 2.2.5 | market-analysis Phase C（前端 UnifiedAnalysis 合并组件） | market-analysis §5 | 4-5h | Phase 1.1.8+1.1.9 (A+B) |
+| 2.2.6 | market-analysis Phase D（AI 顾问流式+数据管道） | market-analysis §6 | 2-3h | 无（可并行） |
+| 2.2.7 | market-analysis Phase E（市场报告质量提升） | market-analysis §7 | 2-3h | 无（可并行） |
+| 2.2.8 | design-report A2：预期收益随市态动态调整 | `design-report-optimization-plan.md` A2 | ~20行 | Phase 0.7 B1（因子分正常） |
+| 2.2.9 | design-report C1：全市场净流入信号注入 LLM 报告 | `design-report-optimization-plan.md` C1 | ~30行 | Phase 0.7 验证通过 |
+| 2.2.10 | design-report C2：卫星层增加科技 ETF 选项 | `design-report-optimization-plan.md` C2 | ~15行 | Phase 0.7 验证通过 |
 
 **验证**:
 - `npm test` 全绿 + `npm run test:e2e:smoke` 全绿
@@ -471,183 +564,210 @@ market-analysis-optimization-plan.md
 - 设计方案预期收益根据市态动态调整（非硬编码）
 - 卫星层包含宽基科技 ETF 选项（科创50/创业板）
 
-### Phase 3 — 前端 UI 重构（重新实施，防回滚）
+### Phase 3.1 — 前端 UI 重构（重新实施，防回滚）
+
+**前置依赖**: Phase 2.2 测试防护就绪（避免 UI 回滚重演）
 
 | # | 任务 | 源文档 | 预估工时 | 前置依赖 |
 |---|------|--------|---------|---------|
-| 3.1 | Dashboard 手工 card → AppCard（7 区块） | frontend-ui-optimization Phase 2 | 4h | 2.1 (测试防护) |
-| 3.2 | Dashboard 手工 tab → AppTabs | frontend-ui-optimization Phase 2 | 1h | 2.1 |
-| 3.3 | PortfolioAnalysis tab → AppTabs | frontend-ui-optimization Phase 2 | 1h | 同上 |
-| 3.4 | TokenMonitor / MarketAnalysis / DesignResult tab → AppTabs | frontend-ui-optimization Phase 2 | 2h | 同上 |
-| 3.5 | Vite chunk 优化（vendor-vue/axios/echarts 分层） | frontend-performance Step 2 | 0.5h | 无 |
-| 3.6 | 各页面 ECharts 清理重复注册 | frontend-performance Step 3 | 1h | 0.4 |
-
-**注意**: Phase 3 须在 Phase 2 测试防护就绪后才实施，以避免 UI 回滚重演。
-**注意**: market-analysis Phase C 已改变了 MarketAnalysis.vue 的 DOM 结构，UI 优化在此基础上做 AppCard/AppTabs 替换。
+| 3.1.1 | Dashboard 手工 card → AppCard（7 区块） | frontend-ui-optimization Phase 2 | 4h | 2.2.1 (AppCard 单测) |
+| 3.1.2 | Dashboard 手工 tab → AppTabs | frontend-ui-optimization Phase 2 | 1h | 2.2.1 (AppTabs 单测) |
+| 3.1.3 | PortfolioAnalysis tab → AppTabs | frontend-ui-optimization Phase 2 | 1h | 同上 |
+| 3.1.4 | TokenMonitor / MarketAnalysis / DesignResult tab → AppTabs | frontend-ui-optimization Phase 2 | 2h | 同上 |
+| 3.1.5 | Vite chunk 优化（vendor-vue/axios/echarts 分层） | frontend-performance Step 2 | 0.5h | 无 |
+| 3.1.6 | 各页面 ECharts 清理重复注册 | frontend-performance Step 3 | 1h | 0.4 |
 
 **验证**: 逐页面视觉验证 + `npm test` 全绿 + `npm run build` 确认 chunk 拆分
 
-### Phase 4 — 数据源系统改造（大方案，独立轨道）
+### Phase 4.1 — 数据源系统改造（大方案，独立轨道）
 
 此阶段完全对应 `roadmap-data-source-unified.md` 的四个子阶段。详见该文档 §依赖关系与推荐顺序。
 
 | # | 任务 | 源阶段 | 预估工时 | 前置依赖 |
 |---|------|--------|---------|---------|
-| 4.1 | 美股 `_route_us_stooq()` 新链路（Stooq→TwelveData→Finnhub） | roadmap Phase A | 2h | 无 |
-| 4.2 | 全球指数链路统一 + TwelveData/Finnhub 加入 | roadmap Phase A (A4) | 2h | 无 |
-| 4.3 | China market 3 核心函数接入 SourceRegistry | roadmap Phase B | 3h | 无 |
-| 4.4 | price=0 过滤前置修复 | roadmap Phase B | 1h | 无 |
-| 4.5 | 补齐 7 个健康探针（新建 `monitor/probes.py`） | roadmap Phase C | 2h | 无 |
-| 4.6 | SourceRegistry 加 on_event 回调 | roadmap Phase D (D2-D4) | 1h | 无 |
+| 4.1.1 | 美股 `_route_us_stooq()` 新链路（Stooq→TwelveData→Finnhub） | roadmap Phase A | 2h | 无 |
+| 4.1.2 | 全球指数链路统一 + TwelveData/Finnhub 加入 | roadmap Phase A (A4) | 2h | 无 |
+| 4.1.3 | China market 3 核心函数接入 SourceRegistry | roadmap Phase B | 3h | 无 |
+| 4.1.4 | price=0 过滤前置修复 | roadmap Phase B | 1h | 无 |
+| 4.1.5 | 补齐 7 个健康探针（新建 `monitor/probes.py`） | roadmap Phase C | 2h | 无 |
+| 4.1.6 | SourceRegistry 加 on_event 回调 | roadmap Phase D (D2-D4) | 1h | 无 |
 
 **并行策略**:
-- **Track 1**: 4.1 + 4.2 + 4.3 可并行（不同文件，互不冲突）
-- **Track 2**: 4.5 独立（仅修改 main.py + 新建 probes.py）
-- **Track 3**: 4.6 是串行瓶颈，须最后做
+- **Track 1**: 4.1.1 + 4.1.2 + 4.1.3 可并行（不同文件，互不冲突）
+- **Track 2**: 4.1.5 独立（仅修改 main.py + 新建 probes.py）
+- **Track 3**: 4.1.6 是串行瓶颈，须最后做
 
 **验证**: verify_e2e.py + 长稳运行观察降级是否正常工作
 
-### Phase 5 — 市场感知联动（可选，待评估）
+### Phase 5.1 — 市场感知联动（可选，待评估）
 
 | # | 任务 | 源文档 | 预估工时 | 前置依赖 | 备注 |
 |---|------|--------|---------|---------|------|
-| 5.1 | 后端 MarketContext 路由层 | market-awareness §5.2 | 6h | 4.1-4.3 | ⚠️ 若 market-analysis Phase D+E 已满足需求，此任务可取消 |
-| 5.2 | MarketReport market prop 传递 | market-awareness §5.3 | 2h | 5.1 | 已在 market-analysis Phase E 中部分实现 |
-| 5.3 | AiAdvisor market 上下文 | market-awareness §5.3 | 2h | 5.1 | 已在 market-analysis Phase D 中实现 |
-| 5.4 | 组合设计 market 参数 | market-awareness §5.3 | 2h | 5.1 | — |
-| 5.5 | LLM prompt 市场上下文注入 | market-awareness §5.4 | 2h | 5.1 | — |
+| 5.1.1 | 后端 MarketContext 路由层 | market-awareness §5.2 | 6h | 4.1.1-4.1.3 | ⚠️ 若 market-analysis Phase D+E 已满足需求，此任务可取消 |
+| 5.1.2 | MarketReport market prop 传递 | market-awareness §5.3 | 2h | 5.1.1 | 已在 market-analysis Phase E 中部分实现 |
+| 5.1.3 | AiAdvisor market 上下文 | market-awareness §5.3 | 2h | 5.1.1 | 已在 market-analysis Phase D 中实现 |
+| 5.1.4 | 组合设计 market 参数 | market-awareness §5.3 | 2h | 5.1.1 | — |
+| 5.1.5 | LLM prompt 市场上下文注入 | market-awareness §5.4 | 2h | 5.1.1 | — |
 
 **验证**: 切换到美股 Tab → 所有功能使用美股数据
 
-### Phase 6 — 可观测性与系统增强
+### Phase 6.1 — 可观测性与系统增强
 
 | # | 任务 | 源文档 | 预估工时 | 前置依赖 |
 |---|------|--------|---------|---------|
-| 6.1 | SourceEventStore（source_events 表 + API） | roadmap Phase D (D1+D6+D7) | 6h | 4.6 |
-| 6.2 | 前端数据源监控页面 | roadmap Phase D7 | 4h | 6.1 |
-| 6.3 | ConfigManager + app_config 表 | config-management §4.1-4.3 | 4h | 无 |
-| 6.4 | 前端 ConfigPage | config-management §5 | 4h | 6.3 |
-| 6.5 | Sector API 实时行情返回 | sector-concept Phase 3 | 3h | 1.1 |
-| 6.6 | LLM prompt 热点板块注入 | sector-concept Phase 4 | 2h | 1.2 + 1.3 |
-| 6.7 | `stars` 引入时间新鲜度 + 新闻 Level 2 精度调整 | news-pipeline-fix P2 | 1h | 无 |
-| 6.8 | `news_fetcher` 单独验证脚本更新 verify_e2e.py | news-pipeline-fix §8 | 0.5h | 0.6+0.7 |
+| 6.1.1 | SourceEventStore（source_events 表 + API） | roadmap Phase D (D1+D6+D7) | 6h | 4.1.6 |
+| 6.1.2 | 前端数据源监控页面 | roadmap Phase D7 | 4h | 6.1.1 |
+| 6.1.3 | ConfigManager + app_config 表 | config-management §4.1-4.3 | 4h | 无 |
+| 6.1.4 | 前端 ConfigPage | config-management §5 | 4h | 6.1.3 |
+| 6.1.5 | Sector API 实时行情返回 | sector-concept Phase 3 | 3h | 1.1.1 |
+| 6.1.6 | LLM prompt 热点板块注入 | sector-concept Phase 4 | 2h | 1.1.2 + 1.1.3 |
+| 6.1.7 | `stars` 引入时间新鲜度 + 新闻 Level 2 精度调整 | news-pipeline-fix P2 | 1h | 无 |
+| 6.1.8 | `news_fetcher` 单独验证脚本更新 verify_e2e.py | news-pipeline-fix §8 | 0.5h | 0.6+0.7 |
 
 **验证**: 数据源状态页可查 + 配置页读写正常 + 板块数据实时行情带涨跌颜色
 
-### Phase 7 — 远期优化
+### Phase 7.1 — 远期优化
 
 | # | 任务 | 源文档 | 说明 |
 |---|------|--------|------|
-| 7.1 | Factor IC 追踪器激活 | factor-model-extension | 评估是否需要更多因子，不急于实施 |
-| 7.2 | 排版令牌迁移 | frontend-ui-optimization Phase 3-4 | 视觉效果深化 |
-| 7.3 | SVG 图标替换 emoji | frontend-ui-optimization Phase 3 | 美观度提升 |
-| 7.4 | 响应式补齐 | frontend-ui-optimization Phase 4 | 移动端适配 |
-| 7.5 | Playwright E2E 全覆盖 | e2e-testing-plan | 12 个 spec 文件全覆盖 |
-| 7.6 | design-report B1-B3（LLM prompt 分析增强） | design-report-optimization B1-B3 | LLM prompt 深层分析增强 |
+| 7.1.1 | Factor IC 追踪器激活 | factor-model-extension | 评估是否需要更多因子，不急于实施 |
+| 7.1.2 | 排版令牌迁移 | frontend-ui-optimization Phase 3-4 | 视觉效果深化 |
+| 7.1.3 | SVG 图标替换 emoji | frontend-ui-optimization Phase 3 | 美观度提升 |
+| 7.1.4 | 响应式补齐 | frontend-ui-optimization Phase 4 | 移动端适配 |
+| 7.1.5 | Playwright E2E 全覆盖 | e2e-testing-plan | 12 个 spec 文件全覆盖 |
+| 7.1.6 | design-report B1-B3（LLM prompt 分析增强） | design-report-optimization B1-B3 | LLM prompt 深层分析增强 |
 
 ---
 
 ## 5. 附录：各方案摘要
 
-### 5.1 文档状态速查表（v3.0 更新）
+### 5.1 文档状态速查表（v4.0 更新）
 
-| 文档 | 类型 | 状态 | 改行数 | 影响模块 | 备注 |
-|------|------|------|-------|---------|-------------|
-| config-management-plan.md | 实施方案 | ❌ 未实施 | ~400 行 | 后端 admin + 前端 ConfigPage | — |
-| data-source-monitoring-plan.md | 实施方案 | ❌ **已替代** | ~500 行 | — | 被 `roadmap-data-source-unified.md` 替代 |
-| design-optimization-plan.md | 实施方案 | ✅ 已实施 | — | strategy_design + engine/ | — |
-| **design-pipeline-foundation-issues.md** | **诊断+修复方案** | **❌ 未实施** | **~80 行** | **etf_scanner + pool_manager + factor_registry + risk_controls + allocation_engine** | **⬅️ v3.0 新增，4 个 P0 + 3 个 P1** |
-| design-report-optimization-plan.md | 实施方案 | ⚠️ 部分 | ~100 行 | llm.py + design_report.py | A2/C1/C2 未完成，延至 Phase 2 |
-| e2e-testing-plan.md | 实施方案 | ❌ 未实施 | ~800 行 | frontend/e2e/ spec 文件 | 建议推迟到 Phase 7 |
-| factor-model-extension-plan.md | 实施方案 | ⚠️ 部分 | ~200 行 | factor_registry.py | 远期优化 |
-| five-improvements-plan.md | 实施方案 | ⚠️ 4/5 已实施 | ~60 行 | risk_controls.py + rationale.py | #1 待完成，Phase 1 |
-| fix-global-indices-plan.md | 修复方案 | ✅ **已实施 (Phase 0)**| ~50 行 | market_service + GlobalIndicesStrip | Phase 0 完成 |
-| frontend-architecture-refactor.md | 实施方案 | ✅ 已实施 | — | 全部前端组件 | — |
-| frontend-performance-optimization.md | 优化方案 | ⚠️ Step 1 已实施 | ~15 行 | main.js + vite.config.js | Step 2-3 待做 (Phase 3) |
-| frontend-testing-safety-net.md | 测试方案 | ❌ 未实施 | ~400 行 | frontend/test + e2e | Phase 2 |
-| frontend-ui-optimization-plan.md | 优化方案 | ❌ 已回滚 | ~200 行 | 全部前端视图 | Phase 3 |
-| issues-analysis-report.md | 问题分析 | ✅ 已修复 | — | 全局 | — |
-| market-analysis-optimization-plan.md | 实施方案 | ❌ 未实施 | ~400 行 | analysis router + llm.py + MarketAnalysis.vue + AiAdvisor.vue | Phase 1-3 |
-| market-awareness-and-data-source-plan.md | 实施方案 | ❌ 未实施 | ~500 行 | 路由 + Service + LLM | §4 已转 roadmap；§5 待评估 |
-| news-pipeline-fix-plan.md | 修复方案 | ⚠️ P0 已实施 | ~70 行 | news_fetcher.py + levistock_fetcher.py + NewsView.vue | P0 (Phase 0) ✅；P1 待做 (Phase 1) |
-| optimization-plan-20260721.md | 实施方案 | ✅ **已实施 (Phase 0.5)**| ~80 行 | etf_scanner + 前端 + 后端链路 | 全部 8 项完成 |
-| review-20260720.md | 评审报告 | N/A | — | N/A | 非实施方案 |
-| roadmap-data-source-unified.md | 实施方案 | ❌ 未实施 | ~330 行 | china_market + market_service + source_registry + monitor | 替代三份原方案，Phase 4 |
-| sector-concept-optimization-plan.md | 实施方案 | ❌ 未实施 | ~300 行 | market_trends + pool_manager + llm.py | Phase 1/6 |
-| source-registry-optimization-plan.md | 实施方案 | ❌ **已替代** | ~70 行 | china_market + main.py | 被 `roadmap-data-source-unified.md` 替代 |
+| 文档 | 类型 | 状态 | 影响模块 | 关键阶段 | 备注 |
+|------|------|------|---------|:--------:|------|
+| async-boundary-fix-plan.md | 修复方案 | ✅ **已实施 (Phase 0.9)** | factor_registry + async_utils + pool_manager + main.py | Phase 0.9 | 6 个 Phase，10 文件，493 行 |
+| config-management-plan.md | 实施方案 | ❌ 未实施 | 后端 admin + 前端 ConfigPage | Phase 6.1 | — |
+| data-source-monitoring-plan.md | 实施方案 | ❌ **已替代** | — | — | 被 `roadmap-data-source-unified.md` 替代 |
+| **design-check-pipeline-redesign.md** | **重构方案** | ✅ **已实施 (Phase 1.0)** | **task_manager + design_pipeline + DB + 前端** | **Phase 1.0** | 12 文件，588 行，8 新集成测试 |
+| design-check-quality-report.md | 质量审计 | ⚠️ 部分实施（P0 已实现，P1-P3 待做） | 全链路 | Phase 2.1 | 4 P0 + 7 P1 + 4 P2 + 4 P3；P0-1~P0-3 uncommitted |
+| design-failure-and-strategy-check-review.md | 修复方案 | ✅ **已实施 (Phase 0.8)** | 前端 + portfolio_service + llm + tests | Phase 0.8 | 10 文件，252 行 |
+| design-optimization-plan.md | 实施方案 | ✅ 已实施 | strategy_design + engine/ | Phase 0.5 前 | — |
+| **design-pipeline-foundation-issues.md** | **诊断+修复方案** | ✅ **已实施 (Phase 0.7)** | **etf_scanner + pool_manager + factor_registry + risk_controls + allocation_engine** | **Phase 0.7** | 15 新单测，9 文件，1428 行 |
+| design-report-optimization-plan.md | 实施方案 | ⚠️ 部分 | llm.py + design_report.py | Phase 2.2 | A2/C1/C2 未完成 |
+| e2e-testing-plan.md | 实施方案 | ❌ 未实施 | frontend/e2e/ spec 文件 | Phase 7.1 | 建议推迟 |
+| factor-model-extension-plan.md | 实施方案 | ⚠️ 部分 | factor_registry.py | Phase 7.1 | 远期优化 |
+| five-improvements-plan.md | 实施方案 | ⚠️ 4/5 已实施 | risk_controls.py + rationale.py | Phase 1.1 | #1 待完成 |
+| fix-global-indices-plan.md | 修复方案 | ✅ **已实施 (Phase 0)** | market_service + GlobalIndicesStrip | Phase 0 | — |
+| frontend-architecture-refactor.md | 实施方案 | ✅ 已实施 | 全部前端组件 | — | — |
+| frontend-performance-optimization.md | 优化方案 | ⚠️ Step 1 已实施 | main.js + vite.config.js | Phase 3.1 | Step 2-3 待做 |
+| frontend-testing-safety-net.md | 测试方案 | ❌ 未实施 | frontend/test + e2e | Phase 2.2 | — |
+| frontend-ui-optimization-plan.md | 优化方案 | ❌ 已回滚 | 全部前端视图 | Phase 3.1 | 需测试防护就绪 |
+| issues-analysis-report.md | 问题分析 | ✅ 已修复 | 全局 | — | — |
+| market-analysis-optimization-plan.md | 实施方案 | ❌ 未实施 | analysis router + llm.py + MarketAnalysis.vue | Phase 1.1~2.2 | — |
+| market-awareness-and-data-source-plan.md | 实施方案 | ❌ 未实施 | 路由 + Service + LLM | Phase 5.1 | §4 已转 roadmap；§5 待评估 |
+| news-pipeline-fix-plan.md | 修复方案 | ✅ P0 已实施；⚠️ P1 待做 | news_fetcher + NewsView.vue | Phase 1.1 | P0 ✅ Phase 0 |
+| optimization-plan-20260721.md | 实施方案 | ✅ **已实施 (Phase 0.5)** | etf_scanner + 前端 + 后端链路 | Phase 0.5 | 全部 8 项完成 |
+| review-20260720.md | 评审报告 | N/A | N/A | — | 非实施方案 |
+| roadmap-data-source-unified.md | 实施方案 | ❌ 未实施 | china_market + market_service + source_registry | Phase 4.1 | 替代三份原方案 |
+| sector-concept-optimization-plan.md | 实施方案 | ❌ 未实施 | market_trends + pool_manager + llm.py | Phase 1.1/6.1 | — |
+| source-registry-optimization-plan.md | 实施方案 | ❌ **已替代** | — | — | 被 roadmap 替代 |
 
-### 5.2 冲突汇总（v3.0 更新）
+### 5.2 冲突汇总（v4.0 更新）
 
 | 冲突 | 涉及文档 | 重要性 | 解决方式 | 状态 |
 |------|---------|--------|---------|:----:|
 | 数据源改造三文档抢同一代码域 | source-registry + data-source-monitoring + market-awareness §4 | 🔴 | 合并为 `roadmap-data-source-unified.md` | ✅ 已解决 |
-| foundation-issues 与存量文档改同一代码域 | foundation-issues Phase A/B + design-optimization P1/P2/P3 | 🔴 | 上下游关系非冲突；Phase 0.7 优先实施，其余延后验证 | ✅ 已解决 (§2.7) |
+| foundation-issues 与存量文档改同一代码域 | foundation-issues Phase A/B + design-optimization P1/P2/P3 | 🔴 | 上下游关系非冲突；Phase 0.7 优先实施，其余延后验证 | ✅ 已解决 |
 | 市场分析 vs 市场感知抢 `llm_advice_stream()` | market-analysis Phase D + market-awareness §5 | 🔴 | **以 market-analysis 为准**，market-awareness §5 降级为可选 | ✅ 已解决 |
-| foundation-issues A3 与 sector-concept Phase1-2 抢缓存入口 | foundation-issues A3 + sector-concept Phase 1-2 | 🟡 | 先 A3（最小化实现），sector-concept 在已有入口上扩展 | ✅ 已解决 (§2.8) |
+| foundation-issues A3 与 sector-concept Phase1-2 抢缓存入口 | foundation-issues A3 + sector-concept Phase 1-2 | 🟡 | 先 A3（最小化实现），sector-concept 在已有入口上扩展 | ✅ 已解决 |
 | LLM prompt 被三文档同时修改 | market-analysis Phase E + design-report A2/C1/C2 + sector-concept Phase 4 | 🟡 | 同步实施，统一修改 `llm.py`，先做结构后加数据 | 待实施 |
 | 同一页面被两方案同时改动 | market-analysis Phase C + frontend-ui Phase 1-2 | 🟡 | 先实施 Phase C（DOM 结构），再在目标结构上做 UI 优化 | 待实施 |
 | 全球指数降级链分歧 | fix-global-indices vs market-awareness | 🟡 | 统一链路，已写入 roadmap-data-source-unified | ✅ 已落地 |
 | UI 重构曾回滚，需要测试防护 | frontend-ui-optimization + frontend-testing-safety-net | 🟡 | 先做 testing 再做 UI | 待实施 |
+| 管道 redesign 文档与已实施代码不一致 | design-check-pipeline-redesign.md 标记"未实施"但代码已落地 | 🟢 | 更新状态为"已实施"，记录 commit 引用 | ✅ 本版已修复 |
+| async-boundary 文档标记"待实施"但已落地 | async-boundary-fix-plan.md vs 2be9ccb | 🟢 | 更新状态为"已实施" | ✅ 本版已修复 |
+| quality-report 文档与 uncommitted 代码不一致 | design-check-quality-report.md P0-1/P0-2/P0-3 vs 工作区变更 | 🟢 | 更新状态为"部分实施"，标注哪些已实现待 commit | ✅ 本版已修复 |
 
-### 5.3 关键依赖图（v3.0 更新）
+### 5.3 关键依赖图（v4.0 更新）
 
 ```
 Phase 0 (快速胜利 7 项)        ✅ 已完成
   ├── 0.1-0.5 fix-global-indices + perf
   └── 0.6-0.7 news-pipeline P0
-  │
+
 Phase 0.5 (核心链路修复)       ✅ 已完成
-  │
-Phase 0.7 (数据管道基础修复)   ◀── 新插入，P0 级（新增）
+
+Phase 0.7 (数据管道基础修复)   ✅ 已完成
   ├── 0.7.1-0.7.2 tracked_index 链  → 0.7.8 候选池去重
-  ├── 0.7.3 市场快照缓存写入        → Phase 1 sector 扩展
+  ├── 0.7.3 市场快照缓存写入        → Phase 1.1 sector 扩展
   ├── 0.7.4 因子分键名聚合           → 0.7.12 三方案差异化
-  │                                  → Phase 2.8-2.10 设计报告增强
-  ├── 0.7.5-0.7.7 防御层修复         → V5/V6 验证
-  ├── 0.7.10 regime 映射修复         → V10 验证
-  └── 0.7.11 design_text 诊断        → V9 验证
-  │
-Phase 1 (数据层增强+统一市态)   依赖 Phase 0.7
-  ├── 1.0 five-improvements #1  独立
-  ├── 1.1-1.3 sector cache      → Phase 6 LLM prompt
-  ├── 1.4-1.7 news-pipeline P1  → 新闻模块功能完整
-  └── 1.8-1.9 market-analysis A+B → Phase 2.5 (Phase C 依赖)
-  │
-Phase 2 (测试防护+市场分析+设计报告)
-  ├── 2.1-2.3 测试安全网        → 为 Phase 3 提供防护
-  ├── 2.4  verify_e2e 修复
-  ├── 2.5  market-analysis C    依赖 1.8+1.9
-  ├── 2.6-2.7  market-analysis D/E  独立
-  └── 2.8-2.10 design-report A2/C1/C2  依赖 Phase 0.7 验证通过
-  │
-Phase 3 (前端 UI 重构)         依赖 Phase 2 测试防护
-  │
-Phase 4 (数据源改造)           独立，为 Phase 5 提供前提
-  │
-Phase 5 (市场感知联动)         可选，依赖 Phase 4
-  │
-Phase 6 (可观测性增强)         独立或依赖 Phase 4
-  │
-Phase 7 (远期优化)             无紧急依赖
+  │                                  → Phase 2.2 design-report 增强
+  ├── 0.7.5-0.7.7 防御层修复
+  ├── 0.7.10 regime 映射修复
+  └── 0.7.11 design_text 诊断
+
+Phase 0.8 (设计失败修复)       ✅ 已完成
+  ├── 前端弹窗 + 建议上限 + 数据质量注入
+  └── 级联测试 + verify_e2e 增强
+
+Phase 0.9 (异步边界修复)       ✅ 已完成
+  ├── 事件循环阻塞 + 线程池统一
+  └── 冷却期污染 + 预热超时 + 测试防护
+
+Phase 1.0 (顺序管道重构)       ✅ 已完成
+  ├── 顺序 Pipeline + report_quality
+  └── 原子写入 + 崩溃恢复 + 8 集成测试
+
+Phase 1.1 (数据层增强+统一市态)   依赖 Phase 0.7~1.0
+  ├── 1.1.0 five-improvements #1  独立
+  ├── 1.1.1-1.1.3 sector cache      → Phase 6.1 LLM prompt
+  ├── 1.1.4-1.1.7 news-pipeline P1  → 新闻模块功能完整
+  └── 1.1.8-1.1.9 market-analysis A+B → Phase 2.2 (Phase C 依赖)
+
+Phase 2.1 (数据管道质量提升)    依赖 Phase 0.7~1.0
+  ├── 2.1.0-2.1.4 P1 引擎修复      → 策略差异化+分类+强制标的+拼接 bug
+  ├── 2.1.5-2.1.8 P2 策略检查增强
+  └── 2.1.9-2.1.12 P3 测试防护增强
+
+Phase 2.2 (测试防护+市场分析+设计报告)
+  ├── 2.2.1-2.2.3 测试安全网        → 为 Phase 3.1 提供防护
+  ├── 2.2.5  market-analysis C       依赖 1.1.8+1.1.9
+  ├── 2.2.6-2.2.7  market-analysis D/E
+  └── 2.2.8-2.2.10 design-report A2/C1/C2
+
+Phase 3.1 (前端 UI 重构)         依赖 Phase 2.2 测试防护
+
+Phase 4.1 (数据源改造)           独立，为 Phase 5.1 提供前提
+
+Phase 5.1 (市场感知联动)         可选，依赖 Phase 4.1
+
+Phase 6.1 (可观测性增强)         独立或依赖 Phase 4.1
+
+Phase 7.1 (远期优化)             无紧急依赖
 ```
 
-### 5.4 轨道总览（v3.0 更新）
+### 5.4 轨道总览（v4.0 更新）
 
 ```
-🔧 数据管道基础修复 Track（新，P0 级）
-  Phase 0.7.1-0.7.12 (tracked_index + 因子分 + 缓存 + 去重 + 风控 + regime + design_text)
+🔧 数据管道基础修复 Track（完成 4 个阶段）
+  Phase 0.7 (foundation-issues) ✅ → Phase 0.8 (design-failure review) ✅
+  → Phase 0.9 (async-boundary) ✅ → Phase 1.0 (pipeline-redesign) ✅
+  → Phase 2.1 (quality-report 剩余项)
 
 📰 新闻管道修复 Track
-  Phase 0 (WS 修复, ✅) → Phase 1.4-1.7 (数据源增强) → Phase 6.7-6.8 (星+验证)
+  Phase 0 (WS 修复, ✅) → Phase 1.1.4-1.1.7 (数据源增强) → Phase 6.1.7-6.1.8 (星+验证)
 
 📊 市场分析重构 Track（~13-19h）
-  Phase 1.8-1.9 (搜索+路由后端) → Phase 2.5-2.7 (前端+流式+报告) → 与 Phase 3 UI 优化协调
+  Phase 1.1.8-1.1.9 (搜索+路由后端) → Phase 2.2.5-2.2.7 (前端+流式+报告)
 
 📋 设计报告增强 Track（~2h）
-  Phase 2.8-2.10 (预期收益 + 净流入 + 科技ETF) → 依赖 Phase 0.7 B1
+  Phase 2.2.8-2.2.10 (预期收益 + 净流入 + 科技ETF)
 
 🔌 数据源统一改造 Track
-  Phase 4.1-4.6 → Phase 6.1-6.2 (EventStore+前端)
+  Phase 4.1.1-4.1.6 → Phase 6.1.1-6.1.2 (EventStore+前端)
+
+🛡️ 数据管道质量提升 Track（新增，~3-4h）
+  Phase 2.1.0-2.1.12 (引擎修复 + 策略检查增强 + 测试防护 + E2E 断言)
 ```
 
 ---
@@ -658,4 +778,5 @@ Phase 7 (远期优化)             无紧急依赖
 |------|------|------|
 | v1.0 | 2026-07-22 | 初次生成，覆盖全部 18 份文档 |
 | v2.0 | 2026-07-22 | 新增 3 份文档处理 + 新轨道 + 冲突分析；调整 Phase 0/1/2/3 |
-| v3.0 | 2026-07-23 | 新增 `design-pipeline-foundation-issues.md`（23 份文档）；Phase 0/0.5 标记 ✅ 完成；新增 Phase 0.7（12 项 P0/P1 修复）；修复 `five-improvements-plan.md` 内部状态不一致；新增 §2.7-2.11 冲突分析（foundation-issues vs 存量文档）；新增 §3.5-3.8 修复方案（foundation-issues 集成 + 归档更新）；更新 §4 路线图（Phase 0-0.7-1-2 排序）；更新附录 5.1-5.4 全部表格；统一版本号连贯性 |
+| v3.0 | 2026-07-23 | 新增 `design-pipeline-foundation-issues.md`（23 份文档）；Phase 0/0.5 标记 ✅ 完成；新增 Phase 0.7（12 项 P0/P1 修复）；修复 `five-improvements-plan.md` 内部状态不一致；新增 §2.7-2.11 冲突分析；新增 §3.5-3.8 修复方案；更新 §4 路线图；更新附录 |
+| v4.0 | 2026-07-24 | 新增 4 份文档（27 份总数）；Phase 0.7 确认 ✅；新增 Phase 0.8/0.9/1.0 全部 ✅；重算剩余 Phase 1.1~7.1 排序；新增 Phase 2.1（质量审计剩余项）；更新附录全部表格 + 依赖图 + 轨道总览；同步各方案文档状态 |

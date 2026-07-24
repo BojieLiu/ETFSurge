@@ -1,6 +1,13 @@
 # 5项改进方案 — 审阅驱动优化
 
-基于 2026-07-20 产出质量审阅报告，5 项可落地改进。
+> 实施状态: ⚠️ 4/5 已完成 | 最后修订: 2026-07-24
+> - #2 `filter_extreme_drawdown` — ✅ 已实施
+> - #3 `check_defense_effectiveness` — ✅ 已实施
+> - #4 `remove_stale_candidates` — ✅ 已实施
+> - #5 `_layer_phrase` 模板多样化 — ✅ 已实施
+> - #1 统一市态判定 — ❌ 待实施（映射为 master-plan Phase 1.1.0）
+> 
+> 基于 2026-07-20 产出质量审阅报告，5 项可落地改进。
 
 ---
 
