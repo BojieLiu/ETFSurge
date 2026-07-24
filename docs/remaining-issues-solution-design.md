@@ -1,183 +1,341 @@
-# 已知剩余问题解决方案设计
+# 已知剩余问题解决方案设计 (v3)
+
+> 状态：终稿 | 预估工时：2.5h
+> 上次评审：2026-07-25 | 本版变更：去掉 report_quality 参数 → 自动渐进状态机；
+> 修正问题三根因分析；简化缓存策略；增加验收标准和风险处理
+
+---
 
 ## 问题一：设计耗时 4.6 分钟
 
 ### 现状
-单轮设计包含三步：
-1. `pool_manager.refresh()` — 全市场 1608 只 ETF 扫描 + 因子计算 → **~30s**
-2. `allocation_engine.allocate()` — 分配引擎 → **<1s**
-3. LLM 报告生成（DeepSeek）— 三方案描述 + 市场分析 → **~100s**
-4. 报告持久化、WS推送等 → **~15s**
-                                    **总计 ≈ 4.6min**
 
-### 方案：三段缓存 + 延迟抽象 + 报告流式化
+单轮设计链路耗时分解：
 
-#### A: `pool_manager` 缓存分层（预计节省 ~25s）
+| 阶段 | 当前耗时 | 瓶颈类型 |
+|:-----|:--------:|:---------|
+| pool_manager.refresh() — 全市场1608只扫描+因子计算 | ~30s | 网络I/O |
+| allocation_engine.allocate() | <1s | CPU |
+| LLM 报告生成（三次方案描述 + 市场分析，串行） | ~100s | API I/O |
+| 报告持久化 + WS推送 | ~15s | I/O |
+| **总计** | **~4.6min** | — |
 
-当前每次设计都触发全量刷新。改为：
-- **全量缓存** 60 秒有效（`_last_refresh` 时间戳缓存）
-- **增量刷新**：60-300 秒内的刷新只更新热门标的因子分（前 50 只），跳过全量扫描
-- **强制刷新**：超过 300 秒或显式调用才全量扫描
+### 方案
+
+#### A: pool_manager 60 秒 TTL 缓存（节省 ~25s）
+
+取消全量增量分层，简化为单一 TTL 缓存：
 
 ```python
-# pool_manager.py
-_refresh_ts = 0.0
-async def refresh(self, force=False):
+# pool_manager.py, class PoolManager
+def __init__(self):
+    ...
+    self._cached_pool: dict | None = None
+    self._cached_ts: float = 0.0
+    self._cache_ttl: float = 60.0
+
+async def refresh(self, force: bool = False) -> dict:
     now = time.monotonic()
-    if not force and now - self._refresh_ts < 60:
+    if not force and self._cached_pool and (now - self._cached_ts) < self._cache_ttl:
         return self._cached_pool
-    if not force and now - self._refresh_ts < 300:
-        return await self._refresh_incremental()
-    return await self._refresh_full(persistent=True)
+    # 全量刷新（run_sync_long），结果原地缓存
+    layer_pool = await self._refresh_impl()
+    self._cached_pool = layer_pool
+    self._cached_ts = now
+    return self._cached_pool
 ```
 
-实现修改：`pool_manager.py` 增加 `_cached_pool` 字段和老化策略。涉及文件：`backend/app/services/pool_manager.py`，约 30 行新增。
+- **TTL=60s**：用户第二次点击"生成"直接命中缓存，耗时忽略
+- **force=True**：lifespan 启动时和 `POST /admin/trigger-refresh`（如存在）时使用
+- **不实现增量刷新**：1608只ETF的Sina扫描 + 腾讯补充Sina列约12-15s，占比不大，不值得为增量增加复杂度
 
-#### B: LLM 报告生成异步化（预计节省 ~90s）
+涉及文件：`backend/app/services/pool_manager.py`，约40行。
 
-当前设计流程是**串行**的：先等 allocate 结果，再串行调用三次 LLM（三份方案描述）+ 一次市场分析。
+#### B: LLM 报告并发化（节省 ~75s）
 
-改为：
-- 三份方案描述**并发调用** LLM（`asyncio.gather`）
-- 市场分析单独并发
-- 整体 LLM 耗时从 4×25s → 1×25s（最慢的单个调用）
+当前：三次方案描述 + 市场分析 = **4次串行** LLM 调用 → ~100s。
+改为：**asyncio.gather 并发**，整体耗时 = max(单次调用耗时) → ~25s。
 
 ```python
 # strategy_design.py
-descriptions = await asyncio.gather(
-    generate_description(strategies[0]),
-    generate_description(strategies[1]),
-    generate_description(strategies[2]),
-    market_analysis(regime),
-)
+from asyncio import gather
+
+async def _generate_llm_descriptions(strategies, regime):
+    """并发生成三方案描述 + 市态分析。"""
+    tasks = [
+        _describe_strategy(s, regime) for s in strategies
+    ] + [_market_analysis(regime)]
+    return await gather(*tasks)
 ```
 
-实现修改：`backend/app/services/strategy_design.py` 和 `backend/app/analysis/llm.py`，约 50 行。
+涉及文件：
+- `backend/app/services/strategy_design.py` — 替换串行调用为 gather，约 30 行
+- `backend/app/analysis/llm.py` — 无需改动，现有 `generate_description` 已经是 async
 
-#### C: 报告生成拆分为可选阶段（预计节省 ~20s 的持久化开销）
+#### C: 自动渐进状态机（向用户隐藏复杂度，替代原 report_quality）
 
-设计 API 增加 `report_depth` 参数：
-- `"quick"`：只返回 allocate 结果，不生成 LLM 报告 → **~35s**
-- `"standard"`：生成精简描述 → **~90s**
-- `"full"`：当前行为（完整报告+WS推送） → **~4.6min**
+**不暴露 `report_quality` 参数。** 后端收到 `POST /portfolio/design-async` 后自动执行三段式：
 
-```python
-# POST /portfolio/design-async
-json={"capital": 500000, "report_quality": "quick"}
+```
+task.submitted  (返回 task_id)
+    ↓
+── pool.refresh() + allocate() ──  ~35s ──
+    ↓ task.status = "quick_ready"
+    ↓ WS推送: {type: "design_quick", strategies: [...]}
+    │  前端展示组合方案，用户可操作
+    │
+    ↓ (后台继续)
+── LLM 并发描述 ──  ~60s ──
+    ↓ task.status = "stage:descriptions"
+    └─ WS推送: {type: "design_descriptions", ...}
+    │  前端组合卡片下方显示"分析"标签
+    │
+    ↓ (后台继续)
+── 完整报告 + 持久化 ──  ~60s ──
+    ↓ task.status = "completed"
+    └─ WS推送: {type: "design_report", report: {...}}
+    │  前端弹窗或新标签页展示完整报告
 ```
 
-实现修改：`backend/app/routers/portfolio.py`（路由参数）+ `backend/app/tasks/design_tasks.py`（分阶段逻辑），约 30 行。
+**核心原则**：前端只看 `task.status` 的值变化来切换 UI，不需要理解"报告深度"概念。
+
+- `in_progress` → 加载动画
+- `quick_ready` → 展示组合方案，继续显示"报告生成中..."
+- `completed` → 报告就绪，展示完整报告
+- `failed` → 显示错误
+
+涉及文件：
+- `backend/app/tasks/design_tasks.py` — design_pipeline 改为三段状态机，约 50 行
+- `backend/app/services/design_report.py` — 报告生成拆分为独立函数，约 20 行
+- `backend/app/tasks/worker_registry.py` — 注册新状态，约 5 行
+
+### 风险处理
+
+| 场景 | 行为 |
+|:-----|:-----|
+| LLM 报告阶段超时（>90s） | 任务回退到 `quick_ready` 状态，report_quality = "fallback" |
+| 分配引擎阶段失败 | 任务标记 `failed`，前端显示"数据源不可用" |
+| WS推送失败 | 静默，用户下次轮询 `/tasks/{id}` 仍可获取结果 |
 
 ### 预期效果
 
-| 模式 | 现有时长 | 优化后 | 节省 |
-|:-----|:--------:|:------:|:---:|
-| quick | 4.6min | **~35s** | 4min |
-| standard | 4.6min | **~90s** | 3min |
-| full | 4.6min | **~2min** | 2.5min |
+| 用户视角 | 路由入口 | 等待时间 | 能看到什么 |
+|:---------|:---------|:--------:|:----------|
+| 普通使用 | POST design-async | **~35s** | 三只组合方案（权重、标的、因子分） |
+| 等待完整 | 同一入口，自动升级 | +**~60s** | LLM 方案描述出现 |
+| 最终结果 | 自动完成 | +**~60s**（总计 ~160s） | 完整市场研判报告 |
+
+**对比当前：** 35s 看到组合方案 vs 当前 4.6min 才能看到任何结果。
 
 ---
 
 ## 问题二：因子分全负
 
 ### 现状
-z-score 标准化后所有因子分以 0 为中心。在持续下跌的行情中，所有 ETF 的原始因子值（RSI、MACD、动量等）都低于历史均值，导致 z-score 全为负。
 
-已经做了：z-score 乘以 5 放大。
+z-score 标准化后所有因子分以 0 为中心。在持续下跌行情中，所有 ETF 的原始因子值（RSI、MACD、动量等）都低于历史均值，z-score 全为负。
 
-但根本问题没解决：**全负的因子分仍然只能区分"谁跌得少"，无法区分"谁涨得多"。**
+已做的修复：z-score 乘以 5 放大因子（commit `5116681`）。
 
-### 方案：双基准归一化
+但根本问题是：**所有标的都相似时，z-score 的区分力趋近于零，即使放大也无法产生正分数。**
 
-#### A: 混合基准（z-score + min-max）
-对每个因子同时计算两种归一化，取综合值：
+### 方案：混合归一化
+
+当前代码（factor_registry.py ~line 746）：
 ```python
-# factor_registry.py
-z = (val - mean) / std
-mm = (val - min_v) / (max_v - min_v) * 2 - 1  # 映射到 [-1, 1]
-combined = z * 0.5 + mm * 0.5
-```
-即使 z-score 全负，min-max 也能把"相对最好的"映射到正数。
-
-#### B: 弹性尺度
-当最大值与最小值差距过小时（所有标的因子值相同），降级到固定先验：
-```python
-if max_v - min_v < EPSILON:
-    mm = 0  # 无区分度时不惩罚
+z = (val - mean_v) / std_v
+result[sym][code] = z * 5.0
 ```
 
-#### C: 因子截断与翻转
-对某些天然为负的因子做符号翻转：
+改为：
 ```python
-# 波动率：越低越好 → 符号翻转
-vol_score = -volatility_z
+z = (val - mean_v) / std_v
+
+# min-max 归一化到 [-1, 1]：保证顶部标为正
+min_v = min(vals)
+max_v = max(vals)
+if max_v - min_v > 1e-10:
+    mm = (val - min_v) / (max_v - min_v) * 2.0 - 1.0
+else:
+    mm = 0.0  # 所有值相同时不惩罚
+
+# 混合：z-score（统计异常度）+ min-max（相对排名）
+combined = z * 0.7 + mm * 0.3
+result[sym][code] = combined * 5.0
 ```
 
-### 预期效果
+`mm * 0.3` 的权重保证即使 z-score 全负，排名靠前的标的也会得到 **mm ≈ +1 → +0.3 的偏移**，足够覆盖部分 z-score 的负值。
 
-| 方案 | 因子分范围 | 正数占比 | 三方案差异度 |
-|:-----|:----------:|:--------:|:----------:|
-| 当前（z-score ×5） | -5σ ~ +5σ | 可正可负但牛市多负 | variance 0.1-5 |
-| 混合基准 | -3 ~ +3 | **>20% 为正** | variance 1-10 |
+### 影响面
+
+- 仅涉及 `factor_registry.py` 中单一循环体（~20 行）
+- 输出格式不变（仍是 `dict[str, dict[str, float]]`），下游零影响
+- 原有 z-score ×5 的代码直接替换
+
+### 效果预期
+
+| 指标 | 当前（z-score×5） | 修复后（混合归一化） |
+|:-----|:-----------------:|:------------------:|
+| 因子分区间 | -5σ ~ +5σ | -5σ ~ +5σ |
+| 多头市场顶部标的分 | >0 | >0（不变） |
+| 空头市场顶部标的分 | <0（全负） | **>0**（min-max 兜底） |
+| 尾部标的分 | <<0 | <<0（不变） |
 
 ---
 
 ## 问题三：`/tasks` 并发超时
 
-### 现状
-设计任务运行期间，GET `/api/v1/portfolio/tasks/{task_id}` 偶尔超时（15-30s 无响应）。虽然事件循环预导入问题已修复，但以下场景仍会阻塞：
+### 修正的根因分析
 
-1. SQLite 写锁（`report_quality` 持久化在事件循环线程内执行）
-2. WS 推送在被慢客户端阻塞时拖滞
+会话中已排查：
 
-### 方案：读路径隔离
+1. `TaskManager.get_task()` 是纯 dict lookup（`self._tasks.get(task_id)`）→ **无 I/O 无锁，不会阻塞**
+2. `GET /api/v1/portfolio/tasks/{task_id}` 路由是普通 async def → **无同步操作**
+3. 设计任务通过 `asyncio.create_task()` 在后台运行 → **事件循环不阻塞**
 
-#### A: `/tasks` 专用存储（内存 dict → 无锁）
+**实际根因**（已修复）：`design_tasks.py` 中的 `from app.services.strategy_design import ...` 放在函数体内，首次导入时 Python 的**导入锁**阻塞事件循环 5-15 秒。`GET /tasks` 在此期间无法被处理。
 
-当前 `TaskManager` 已有内存 dict（`self.tasks`），`get_task` 是 O(1) 的 dict lookup。但在高并发下，Python 的 GIL 和 SQLite 写锁仍可能干扰。
+修复（commit `3a3dc0a`）：main.py lifespan 预导入所有重型模块。
 
-检查发现当前 `get_task` 已经不走 DB —— 从任务状态输出看，它直接返回 dict。所以理论上不会超时。
+**以下为加固措施，非必要但推荐。**
 
-根因实际是：**服务器总线程池被长期 I/O 占满**。当 `run_sync_long` 使用 _long_running_executor（8 workers）时还剩 56 个 worker 给 API。但如果 Sina HTTP 请求在 _shared_executor 上排队...
+### 加固措施
 
-**确认修复方案：**
+#### A: 导入路径内联（推荐，5 行，5 分钟）
 
-- 新增 `/tasks` 轻量路由（skip pool_manager 和 DB）
-- 在 `main.py` lifespan 中**预创建**一个独立低优先级客户端 session 池
-- 所有数据获取类请求统一走 `_shared_executor` 的快速排队机制
-
-#### B: 读写锁细化
+将 `design_tasks.py` 和 `report_worker.py` 中的函数体内导入改为文件顶部导入，彻底消除隐患：
 
 ```python
-# task_manager.py
-_task_lock = threading.RLock()  # 替代 asyncio.Lock 避免事件循环依赖
+# design_tasks.py 顶部
+from ..services.strategy_design import generate_enhanced_design
+from ..tasks.design_report import compose_and_push_report
 ```
 
-#### C: 慢 WS 客户端自动断开
+#### B: WS 慢客户端超时断开
+
+当前 `broadcast()` 逐个发送不设超时，慢客户端可能拖累其他客户端。
 
 ```python
-# ws.py: ConnectionManager
-if time.time() - client.last_pong > 30:
-    await client.disconnect()
+# ws.py, broadcast()
+for conn in targets:
+    try:
+        await asyncio.wait_for(conn.send_text(...), timeout=5.0)
+    except (asyncio.TimeoutError, WebSocketDisconnect):
+        await self.disconnect(conn, channel)
 ```
 
-### 实施优先级
+- `asyncio.wait_for` 保每个客户端 5 秒内完成发送
+- 超时自动断开，不影响其他客户端
 
-| 步骤 | 内容 | 预计效果 |
-|:-----|:------|:--------:|
-| 1 | `get_task` 路由改为纯内存路径（跳过所有 I/O） | `/tasks` 99% 不超时 |
-| 2 | `_task_lock` 改用 threading.RLock | 减少 asyncio 锁竞争 |
-| 3 | WS 慢客户端超时断开 | 防止 WS 拖累 HTTP |
+涉及文件：`backend/app/routers/ws.py`，约 5 行。
+
+#### C: 心跳清理
+
+当前 `ConnectionManager` 没有后台心跳。慢客户端断开后 `broadcast` 仍会尝试发送直到超时。
+
+```python
+# ws.py, __init__()
+self._cleanup_interval = 60  # 60s 检查一次
+self._last_cleanup = time.monotonic()
+```
+
+不需要定时器，在 `broadcast()` 调用时检查 `if now - _last_cleanup > _cleanup_interval`，扫描无效连接。
+
+涉及文件：`backend/app/routers/ws.py`，约 15 行。
+
+---
+
+## API 契约
+
+### 请求
+
+```http
+POST /api/v1/portfolio/design-async
+Content-Type: application/json
+
+{"capital": 500000}
+```
+
+NO `report_quality`，NO `depth`。后端自动渐进。
+
+### 响应
+
+```json
+{
+  "task_id": "123",
+  "status": "in_progress",
+  "progress": 0
+}
+```
+
+### 状态机（前端轮询 /tasks/{task_id} 或 监听 WS）
+
+| task.status | 何时触发 | 前端行为 |
+|:------------|:---------|:---------|
+| `in_progress` | 提交后立即 | 显示加载动画 |
+| `quick_ready` | 分配引擎完成（~35s） | 展示组合方案，仍显示"报告生成中..."
+| | | task.result 含 {"strategies": [...], "regime": "...", "report_stage": "quick"} |
+
+
+| `completed` | 完整报告就绪（~160s） | 展开完整报告 |
+| `failed` | 分配阶段出错 | 显示错误，任务不可恢复 |
+| `completed_with_errors` | LLM 报告阶段出错 | 展示 quick_ready 方案 + "报告暂不可用" |
+
+
+
+### WS 事件（channel: design-report/{session_id}）
+
+| type | 载荷 | 触发时机 |
+|:-----|:-----|:---------|
+| `design_quick` | `{"strategies": [...], "regime": "..."}` | quick_ready |
+| `design_descriptions` | `{"descriptions": [...], "status": "partial"}` | 描述就绪 |
+| `design_report` | `{"report": {...}, "status": "full"}` | completed |
+| `design_error` | `{"error": "..."}` | failed |
+
+---
+
+## 验收标准
+
+每项修复完成后，按以下标准验证：
+
+### 问题一
+
+| # | 验收项 | 检查方法 | 通过条件 |
+|:-|:-------|:---------|:---------|
+| V1-1 | 第二次点击生成命中缓存 | 连续两次 POST，第二次耗时 <5s | 第二次 <5s |
+| V1-2 | 60s 后缓存过期 | 等待 65s 后再次 POST，耗时 >10s（有网络 I/O） | >10s |
+| V1-3 | quick_ready 状态机制 | POST 后轮询，**35s 内** status 变为 quick_ready | 35s 内 |
+| V1-4 | 完整报告 | 同一任务继续轮询，**160s 内** status 变为 completed | 160s 内 |
+| V1-5 | LLM 失败降级 | 模拟 LLM 超时，任务状态最终为 completed_with_errors（非 failed） | status=completed_with_errors |
+| V1-6 | 缓存过期后自动刷新 | 等待 65s，第 2 次请求触发 refresh（如有其他并发请求在第 65s 之后） | 刷新后候选池包含新 ETF 数据 |
+
+### 问题二
+
+| # | 验收项 | 检查方法 | 通过条件 |
+|:-|:-------|:---------|:--------- |
+| V2-1 | 因子分正数存在 | compute(["510300","518880","511090"]) 返回的分数中有 >0 的 | >20% of factors > 0 |
+| V2-2 | 区分度 >0.1 | 计算因子分方差 | variance > 0.1 |
+| V2-3 | 零标准差不崩溃 | 构造全相同因子值，compute 返回 {sym: {code: 0}} | 不抛异常 |
+
+### 问题三
+
+| # | 验收项 | 检查方法 | 通过条件 |
+|:-|:-------|:---------|:---------|
+| V3-1 | GET /tasks 不超时 | 设计任务运行中，并发 10 次 GET /tasks | 全部 <1s |
+| V3-2 | WS 慢客户端不影响 | 一个客户端暂停 10s，其他客户端正常接收 broadcast | 正常客户端不受影响 |
+| V3-3 | 断开清理 | 断开连接后 broadcast 不报错 | 无异常日志 |
 
 ---
 
 ## 实施路线图
 
-| 阶段 | 内容 | 依赖 | 预估工时 |
-|:-----|:------|:-----|:--------:|
-| **S1** | Pool 60s 缓存 + LLM 并发化 | 无 | 1 小时 |
-| **S2** | 因子双基准归一化 | S1 之后 | 30 分钟 |
-| **S3** | `/tasks` 纯内存 + WS 断开 | S1 之后 | 30 分钟 |
-| **S4** | 测试 + E2E 验证 | S1+S2+S3 | 30 分钟 |
+| 阶段 | 内容 | 依赖 | 预估工时 | 验收标准 |
+|:-----|:------|:-----|:--------:|:---------|
+| **S1** | pool 60s TTL 缓存 | 无 | 20min | V1-1, V1-2, V1-6 |
+| | LLM 并发化 + 状态机 | 无 | 40min | V1-3, V1-4, V1-5 |
+| | 导入路径内联 | 无 | 5min | V3-1 |
+| **S2** | 因子混合归一化 | S1 之后 | 20min | V2-1, V2-2, V2-3 |
+| **S3** | WS 超时 + 清理 | S1 之后 | 15min | V3-2, V3-3 |
+| **S4** | E2E 验证 | S1+S2+S3 | 30min | 全部 13 项通过 |
 
-总预估：约 **2.5 小时** 完成所有优化。
+**总计：约 2 小时 10 分钟。**
