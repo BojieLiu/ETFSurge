@@ -1,31 +1,21 @@
-fix(engine): F10 tracked-index enrichment; fund_scale integration; rationale fix
+test(data-quality): add DQ test gates; fix aggregate_factor_scores zero filter
 
-Root-cause fixes for duplicate ETF concentration and garbled rationale:
+Three systemic improvements to prevent test-encoded bug patterns:
 
-1. Duplicate tracked-index ETFs (e.g. 3x 科创100) selected together
-   - Add enrich_tracked_indices() in etf_scanner.py: fetches canonical
-     tracking index from fund.eastmoney.com/{code}.html (official source),
-     with local JSON cache and ThreadPoolExecutor(3) rate limiting.
-   - PoolManager calls enrichment in _refresh_impl() step 2.5, before
-     classifier and factor computation.
-   - B3b dedup in allocate() groups by tracked_index when available.
+1. aggregate_factor_scores zero-value filter
+   - Skip sub-factors with |value| < 0.001 in category aggregation.
+     Prevents scaffolding factors (always 0) from diluting real signals.
+     If all sub-factors are zero, the aggregate key is omitted entirely.
 
-2. All strategies picking the same ETFs (风偏不分化)
-   - Add C2 profile bonus in allocation_engine._select_and_weight(): when
-     valuation/sentiment factor data is sparse (near 0), apply heuristic
-     +/-0.3 bonus based on ETF name theme (safe vs risky keywords).
+2. News sentiment bridging (pool_manager step 3c)
+   - After FactorRegistry compute, inject news-derived sentiment scores
+     into each pool item's factor_scores dict (news_heat, news_direction,
+     panic_greed_diff). Uses existing 30s news cache.
+   - Fixes sentiment aggregate being 0.0 for all ETFs.
 
-3. factor_registry fund_scale (total_mv) using hardcoded 100e9 fallback
-   - _fetch_market_data() now accepts symbol_extra dict with scanner-
-     collected fund_scale. Priority: scanner > sina history > 100e9.
-   - PoolManager passes symbol_extra when calling factor_registry.compute()
-   - Fixes valuation/ln_mcap identical-for-all-ETFs issue.
-
-4. rationale.py "今日%" placeholder
-   - Remove change_pct/return_3m/return_1m/ma_bias_20 references (never
-     existed in factor_scores). Replace with real factors: rsi_14, macd,
-     technical.signal.overall, aggregated composites.
-
-5. DesignLoading error-state back button
-   - Add return button in the error-state v-if branch so users can
-     navigate back immediately when design fails.
+3. Data quality (DQ) test gates
+   - DQ1: _extract_index_concept dedup (科创100, 沪深300 etc.)
+   - DQ2: aggregate filters zeros; all-zero produces no aggregate key
+   - DQ3: fake test data must NOT reference prod-non-existent factor keys
+   - DQ4: profile bonus differentiates strategies
+   - DQ5: rationale has no template placeholder strings

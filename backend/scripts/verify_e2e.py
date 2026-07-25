@@ -148,7 +148,22 @@ def section_market():
                 if entry:
                     price_ok = entry.get("price") is not None
                     check(f"{label} 价格非空", price_ok,
-                          f"price={entry.get('price')}" if not price_ok else "")
+                          "" if price_ok else f"price={entry.get('price')}")
+            # 逐区域验证：每个区域至少有一条有价格的数据（而非全部 null）
+            for region_name, items in sorted(regions.items()):
+                if not items:
+                    check(f"[{region_name}] 区域存在且有指数条目", False, "空列表")
+                    continue
+                has_price = any(
+                    it.get("price") is not None and it.get("available") is True
+                    for it in items
+                )
+                price_count = sum(1 for it in items if it.get("price") is not None)
+                total = len(items)
+                check(
+                    f"[{region_name}] {price_count}/{total} 条有价格",
+                    has_price,
+                    "" if has_price else "全部指数无数据")
     except requests.Timeout:
         check("GET /market/indices/global", False, "请求超时（30s）")
     except Exception as e:

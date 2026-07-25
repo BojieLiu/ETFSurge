@@ -625,14 +625,14 @@ class FactorRegistry:
         for top_key, prefixes in CATEGORY_PREFIXES.items():
             values = []
             for key, val in factor_scores.items():
-                if isinstance(val, (int, float)):
+                if isinstance(val, (int, float)) and abs(val) > 0.001:
                     for prefix in prefixes:
                         if key.startswith(prefix):
                             values.append(val)
                             break
             if values:
                 result[top_key] = sum(values) / len(values)
-            # 如果没有任何匹配的子因子，不设置顶层键（让消费方 fallback 到 0.0）
+            # 如果没有任何非零匹配子因子，不设置顶层键（让消费方 fallback 到 0.0）
 
         return result
 

@@ -262,6 +262,26 @@ class PoolManager:
                 for item in flat:
                     item["factor_scores"] = {}
 
+        # 3c. 注入新闻情感因子到 factor_scores（已有的 sentiment 因子依赖外部数据）
+        if flat:
+            news_items = self._news_cache or []
+            if news_items:
+                total_news = len(news_items)
+                # 新闻热度：过去 120s 内的加权星数
+                news_heat_raw = sum(float(n.get("stars", 0) or 0) for n in news_items)
+                # 新闻方向：利好占比
+                positive_count = sum(1 for n in news_items if n.get("level") in ("利好", "重大"))
+                news_dir = positive_count / max(total_news, 1)
+                # 归一化热度（基线 50 条 = 1.0）
+                heat_normalized = min(news_heat_raw / 50.0, 5.0)
+                for item in flat:
+                    fs = item.get("factor_scores", {})
+                    if fs is not None:
+                        fs["sentiment.news_heat"] = heat_normalized
+                        fs["sentiment.news_direction"] = news_dir
+                        # panic_greed_diff 用新闻方向代理 sentiment_index
+                        fs["sentiment.panic_greed_diff"] = (news_dir - 0.5) * 2
+
         # 4. 分配到 5 层（含 opportunistic 信号注入）
         new_pool: dict[str, list[dict[str, Any]]] = {layer: [] for layer in ALL_LAYERS}
 

@@ -305,7 +305,14 @@ def test_foreign_index_symbols_covered_by_at_least_one_source():
 
 
 def teardown_module():
-    """Remove persistent cache file written by _save_ok_cache() during tests."""
+    """清理测试产生的缓存数据，防止 mock 数据泄漏到持久化缓存。
+
+    同时清空内存缓存和磁盘文件，确保测试结束后系统状态干净。
+    """
+    ms._global_indices_cache.clear()
+    ms._global_indices_cache_ts = 0
+    ms._global_indices_last_ok.clear()
+    ms._global_indices_last_ok_ts = 0
     import os
     cache_path = os.path.join(os.path.dirname(__file__), "..", "data", "indices_cache.json")
     if os.path.exists(cache_path):

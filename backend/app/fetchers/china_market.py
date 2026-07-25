@@ -619,7 +619,9 @@ def fetch_sina_global_index(symbol: str) -> dict[str, Any] | None:
             "asset_type": "index",
             "available": True,
         }
-    except Exception:
+    except Exception as exc:
+        logger.warning("[fetch_sina_global_index] %s (code=%s) failed: %s",
+                       symbol, _GLOBAL_SINA_SHORT.get(symbol, "?"), exc)
         return None
 
 
