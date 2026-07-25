@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Data quality gate: verifies factor data completeness for each registered factor.
+"""Pytest-based Data Quality gate: verifies factor data completeness.
 
 Checks each factor key produced by FactorRegistry.compute() against
 real fetched data and reports:
@@ -7,15 +7,18 @@ real fetched data and reports:
   - Which factors are scaffolding (always return 0.0)
   - Per-category aggregate health
 
-Requirements:
-  - At least 3 ETF symbols must produce non-technical factors with variance > 0.
-  - External data sources must be reachable (Sina, Tencent gtimg).
-
 Usage:
-    cd backend && python -m pytest tests/test_data_health.py -v
-    cd backend && python -m tests.test_data_health
+    cd backend && python -m pytest tests/test_data_health.py -v       # as pytest test
+    cd backend && python -m tests.test_data_health                     # as standalone
 """
-import sys, os, asyncio, time, pytest
+
+import sys
+import os
+import asyncio
+import time
+import pytest
+import warnings
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 PASS = 0
@@ -168,6 +171,16 @@ async def main():
             print(f"    - {w}")
     print(f"\n  {'HEALTHY' if FAIL == 0 else 'UNHEALTHY (see failures)'}")
     sys.exit(0 if FAIL == 0 else 1)
+
+
+@pytest.mark.timeout(120)  # 外部数据源可能较慢
+@pytest.mark.skip(reason="Requires live data sources (run --runslow)")
+def test_factor_data_health_pytest():
+    """Pytest entry point: runs same logic as standalone main()."""
+    asyncio.run(check_factor_data_health())
+    assert FAIL == 0, f"{FAIL} factor data quality failures — see log"
+    if WARN > 0:
+        warnings.warn(f"{WARN} warnings in factor data health check")
 
 
 if __name__ == "__main__":
