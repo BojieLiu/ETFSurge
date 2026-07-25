@@ -268,10 +268,17 @@ def fetch_sina_roll_news(num: int = 15) -> list[dict[str, Any]]:
             title = entry.get("title", "")
             if not title:
                 continue
+            # 转换 ctime（Unix 秒级时间戳）为 ISO 格式
+            ctime = entry.get("ctime", "")
+            try:
+                ts = int(ctime)
+                time_str = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+            except (ValueError, TypeError, OSError):
+                time_str = str(ctime)
             items.append({
                 "title": title,
                 "content": entry.get("content", ""),
-                "time": str(entry.get("ctime", "")),
+                "time": time_str,
                 "source": "新浪财经",
             })
         logger.info("[news] 新浪财经返回 %d 条", len(items))
