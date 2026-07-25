@@ -211,8 +211,9 @@ async def test_p3_fetch_single_trend_has_change_pct():
     assert abs(res["change_pct"] - (-0.077)) < 1e-3, f"change_pct={res.get('change_pct')}"
 
 
-def test_p3_build_rationale_today_line():
-    """build_rationale must include today's change_pct from factor_scores."""
+def test_p3_build_rationale_uses_real_factor_data():
+    """build_rationale uses actual factor keys (RSI, MACD, composite scores) instead of
+    non-existent keys like change_pct / return_3m (rationale.py fix)."""
     from app.services.strategy_design import build_rationale
 
     rationale = build_rationale(
@@ -220,11 +221,21 @@ def test_p3_build_rationale_today_line():
         layer="core",
         strategy="balanced",
         meta={"name": "HS300ETF"},
-        factor_scores={"change_pct": -7.7, "return_1m": -5.0, "return_3m": -12.0, "ma_bias_20": -2.0},
+        factor_scores={
+            "technical.rsi.rsi_14": 35.2,
+            "technical.macd.macd": 0.005,
+            "technical": -0.5,
+            "momentum": 0.3,
+            "technical.signal.overall": -0.1,
+        },
         regime="correction",
     )
-    assert "今日" in rationale, f"rationale should include today's change, got: {rationale}"
-    assert "-7.7" in rationale, f"rationale should include -7.7% change, got: {rationale}"
+    # Should NOT contain "今日" placeholder
+    assert "今日" not in rationale, f"rationale should NOT contain '今日' placeholder, got: {rationale}"
+    # Should contain actual factor data
+    assert "RSI" in rationale, f"rationale should include RSI, got: {rationale}"
+    assert "技术面" in rationale, f"rationale should include technical score, got: {rationale}"
+    assert "市场回调" in rationale, f"rationale should include market regime 'correction', got: {rationale}"
 
 
 # ─── P0.5: regime fallback via index_realtime ────────────────────────

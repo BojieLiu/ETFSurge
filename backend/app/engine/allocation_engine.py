@@ -19,6 +19,46 @@ from .rationale import build_rationale
 MIN_WEIGHT = 0.01
 MAX_WEIGHT = 0.30
 
+# B3b: ETF 名称 → 指数概念兜底提取（当 external tracked_index 为空时）
+# 去除基金公司名 + ETF/联接 后缀 → 余下字符串即为指数概念
+# 示例："科创100ETF汇添富" → "科创100"，"沪深300ETF华夏" → "沪深300"
+_COMPANY_NAMES = [
+    "华夏", "易方达", "汇添富", "嘉实", "富国", "招商", "博时", "南方",
+    "广发", "华安", "国泰", "鹏华", "天弘", "工银", "建信", "中欧",
+    "景顺", "长城", "泰康", "海富通", "光大", "兴全", "东证", "华宝",
+    "银华", "大成", "长信", "国联", "申万", "上投", "中信", "华泰",
+    "万家", "兴业", "民生", "浦银", "方正", "太平", "前海", "创金",
+    "银河", "诺安", "交银", "融通", "泓德", "中加", "永赢", "西部",
+    "浙商", "新华", "红土", "安信", "国寿", "英大", "汇丰", "恒生",
+    "中银", "国投", "德邦", "华富", "金元", "国金", "九泰", "东方",
+    "中泰", "湘财", "国融", "江信", "蜂巢", "东海", "中邮", "华融",
+    "金鹰", "长城", "同泰", "红塔", "华润", "格林", "瑞达", "明亚",
+    "惠升", "华宸", "富荣", "易米", "长江", "渤海", "爱建", "金元顺安",
+]
+
+
+def _extract_index_concept(name: str) -> str:
+    """从 ETF 名称提取指数概念（兜底，仅当外部 tracked_index 不可用时）。
+
+    策略：顺次去除基金公司名 → 去除 ETF/联接/发起 后缀 → 剩余字符串即为指数概念。
+    极端兜底：若清理后为空则返回原名的前 6 个字符。
+
+    Examples:
+        "科创100ETF汇添富" → "科创100"
+        "科创100ETF"      → "科创100"
+        "沪深300ETF华夏"  → "沪深300"
+        "黄金ETF"          → "黄金"
+    """
+    clean = name
+    for cn in _COMPANY_NAMES:
+        clean = clean.replace(cn, "")
+    for sfx in ["ETF", "联接", "LOF", "发起式", "发起", "场内", "场外"]:
+        clean = clean.replace(sfx, "")
+    clean = clean.strip()
+    if not clean or len(clean) < 2:
+        return name[:6] if len(name) >= 6 else name
+    return clean
+
 # P1-3: 强制保留标的（权重不低于 3%，确保进入分配）
 # 5% ×4=20% 占用过多预算导致总持仓不足 8 只，调整为 3% ×4=12%
 MANDATORY_CODES = {"510300", "560600", "518880", "511090"}
@@ -125,7 +165,7 @@ def _select_and_weight(
     for cand in candidates:
         sym = cand.get("symbol", "")
         factor_scores = factor_matrix.get(sym, {})
-        # B: 风偏差异化因子权重 — 核心层按策略调整
+        # B: 风偏差异化因子权重 — 按策略调整
         _PROFILE_WEIGHTS = {
             "defensive": {"technical": 0.4, "sentiment": 0.25, "momentum": 0.15, "valuation": 0.2},
             "balanced":  {"technical": 0.3, "sentiment": 0.2,  "momentum": 0.3,  "valuation": 0.2},
@@ -138,9 +178,50 @@ def _select_and_weight(
             + factor_scores.get("valuation", 0.0) * pw["valuation"]
             + factor_scores.get("sentiment", 0.0) * pw["sentiment"]
         )
+        # C2: 风偏差异化修正 — 当 valuation/sentiment 缺乏有效区分度时，
+        # 根据 ETF 名称关键字对 composite 做 +/- 调整，使防御/进攻方案真正差异化。
+        # 修正值随因子数据质量自动衰减（当 valuation 非零时减弱）。
+        _RISKY_THEMES = ["科创", "半导体", "新能源", "军工", "芯片", "AI",
+                         "人工智能", "机器人", "云计算", "大数据", "软件"]
+        _SAFE_THEMES = ["沪深300", "中证A500", "上证50", "红利", "黄金",
+                        "国债", "标普500", "纳指", "MSCI"]
+        name = cand.get("name", "")
+        c2_bonus = 0.0
+        # 估值数据可用性检查：valuation 为 0 或所有 factor_scores 的 valuation 前缀因子均为 0
+        valuation_missing = abs(factor_scores.get("valuation", 0.0)) < 0.001
+        has_style_factors = any(k.startswith("style.") for k in factor_scores
+                                if isinstance(factor_scores.get(k, 0), (int, float))
+                                and abs(factor_scores.get(k, 0)) > 0.001)
+        if valuation_missing and not has_style_factors:
+            if strategy == "defensive":
+                # 防御型：偏好安全主题，惩罚高风险主题
+                if any(t in name for t in _SAFE_THEMES):
+                    c2_bonus = 0.3
+                elif any(t in name for t in _RISKY_THEMES):
+                    c2_bonus = -0.5
+            elif strategy == "aggressive":
+                # 进攻型：偏好高风险主题，惩罚安全主题
+                if any(t in name for t in _RISKY_THEMES):
+                    c2_bonus = 0.3
+                elif any(t in name for t in _SAFE_THEMES):
+                    c2_bonus = -0.1
+        composite += c2_bonus
         scored.append((composite, cand, factor_scores))
 
-    # Sort descending by composite score
+    # B3b: 按指数概念去重（已选的 tracked_index 在 B3 已过滤，此处兜底）
+    # 对 scored 中每只 ETF，按 tracked_index 或名称提取的概念分组，
+    # 每组仅保留 composite_score 最高者。
+    concept_groups: dict[str, list[tuple[float, dict[str, Any], dict[str, float]]]] = {}
+    for item in scored:
+        cand = item[1]
+        tidx = cand.get("tracked_index", "") or ""
+        concept = tidx if tidx else _extract_index_concept(cand.get("name", ""))
+        # 如果该概念已存在且当前评分更高则替换
+        if concept not in concept_groups or item[0] > concept_groups[concept][0][0]:
+            concept_groups[concept] = [item]
+    deduped = list(concept_groups.values())
+    # 取每组的第一名（即保留的标的），按评分降序重排
+    scored = [group[0] for group in deduped]
     scored.sort(key=lambda x: x[0], reverse=True)
 
     # Keep top *max_count*

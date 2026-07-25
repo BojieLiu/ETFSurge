@@ -228,6 +228,14 @@ class PoolManager:
                     "tracked_index": item.get("tracked_index", ""),
                 })
 
+        # 2.5 F10 tracked_index 补充（仅补充 scanner 未填充的项，使用本地缓存+渐进式请求）
+        if flat:
+            try:
+                from ..fetchers.etf_scanner import enrich_tracked_indices as _enrich
+                await run_sync(_enrich, flat)
+            except Exception:
+                logger.warning("[pool_manager] F10 tracked_index enrichment failed", exc_info=True)
+
         # 3. ETFClassifier 添加行业/概念
         if flat:
             class_results = await run_sync(self.classifier.batch_classify, flat)
@@ -238,11 +246,12 @@ class PoolManager:
                 item["concepts"] = info.get("concepts", [])
                 item["classify_confidence"] = info.get("confidence", 0.0)
 
-        # 3b. FactorRegistry 计算因子得分
+        # 3b. FactorRegistry 计算因子得分（传入 fund_scale 以支持 valuation 因子）
         if flat:
             symbols = [e["symbol"] for e in flat if e.get("symbol")]
+            symbol_extra = {e["symbol"]: {"fund_scale": e.get("fund_scale", 0)} for e in flat if e.get("symbol")}
             try:
-                factor_scores = await self.factor_registry.compute(symbols)
+                factor_scores = await self.factor_registry.compute(symbols, symbol_extra=symbol_extra)
                 for item in flat:
                     sym = item["symbol"]
                     raw_scores = factor_scores.get(sym, {})

@@ -451,6 +451,99 @@ def layer_ranking(
     return result
 
 
+# ── F10 tracked_index enrichment ──────────────────────────────────────────
+import requests as _requests
+import re as _re
+import json as _json
+import os as _os
+import concurrent.futures as _cf
+
+_TRACKED_INDEX_CACHE = _os.path.join(
+    _os.path.dirname(_os.path.dirname(_os.path.dirname(__file__))),
+    "data", "etf_index_mapping.json"
+)
+
+def _load_tracked_index_cache() -> dict[str, str]:
+    try:
+        if _os.path.exists(_TRACKED_INDEX_CACHE):
+            with open(_TRACKED_INDEX_CACHE, "r", encoding="utf-8") as f:
+                return _json.load(f)
+    except Exception:
+        return {}
+    return {}
+
+def _save_tracked_index_cache(mapping: dict[str, str]) -> None:
+    try:
+        _dir = _os.path.dirname(_TRACKED_INDEX_CACHE)
+        if not _os.path.exists(_dir):
+            _os.makedirs(_dir, exist_ok=True)
+        with open(_TRACKED_INDEX_CACHE, "w", encoding="utf-8") as f:
+            _json.dump(mapping, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+def enrich_tracked_indices(etfs: list[dict], cache: dict[str, str] | None = None) -> list[dict]:
+    """批量补充 ETF tracked_index（东方财富概览页）。
+
+    只补充 tracked_index 为空且不在缓存中的 ETF，结果写入本地 JSON 缓存。
+    直接修改传入的 list 并返回。
+    """
+    local_cache = _load_tracked_index_cache() if cache is None else cache
+    _headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://fund.eastmoney.com/"}
+
+    need_fetch = []
+    for etf in etfs:
+        sym = etf.get("symbol", "")
+        if not sym:
+            continue
+        tidx = etf.get("tracked_index", "") or ""
+        if not tidx:
+            if sym in local_cache:
+                etf["tracked_index"] = local_cache[sym]
+            else:
+                need_fetch.append(etf)
+
+    if not need_fetch:
+        return etfs
+
+    def _fetch_one(sym: str) -> tuple[str, str | None]:
+        try:
+            url = f"https://fund.eastmoney.com/{sym}.html"
+            r = _requests.get(url, timeout=8, headers=_headers)
+            r.encoding = "utf-8"
+            text = r.text
+            # 跟踪标的：</a>上证科创板100指数 | <a href=...
+            m = _re.search(r"跟踪标的[：:]?\s*</a>([^<｜]+)\s*[|｜]", text)
+            if m:
+                return sym, m.group(1).strip()
+            m2 = _re.search(r"跟踪标的[：:]\s*([^<]{2,40})", text)
+            if m2:
+                return sym, m2.group(1).strip()
+        except Exception:
+            pass
+        return sym, None
+
+    updated = 0
+    with _cf.ThreadPoolExecutor(max_workers=3) as executor:
+        fut_map = {executor.submit(_fetch_one, e["symbol"]): e["symbol"] for e in need_fetch}
+        for fut in _cf.as_completed(fut_map):
+            try:
+                sym, idx_name = fut.result()
+                if idx_name:
+                    local_cache[sym] = idx_name
+                    for etf in etfs:
+                        if etf.get("symbol") == sym:
+                            etf["tracked_index"] = idx_name
+                            updated += 1
+                            break
+            except Exception:
+                pass
+
+    _save_tracked_index_cache(local_cache)
+    logger.info("TrackedIndexEnrich: %d/%d ETFs enriched via F10", updated, len(need_fetch))
+    return etfs
+
+
 def full_pipeline(raw_etfs: list[dict] | None = None) -> dict[str, list[dict]]:
     """完整管道: 全量扫描 → 过滤 → 三层分类 → 每层 TOP 15。
 

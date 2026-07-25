@@ -55,7 +55,9 @@ def build_rationale(
     industry: str | None = None,
 ) -> str:
     """
-    为指定层级的 ETF 生成数据驱动的入选理由。
+    为指定层级的 ETF 生成数据驱动的入选理由（纯函数）。
+
+    使用 factor_scores 中实际存在的因子键，无占位符引用。
 
     Args:
         code: ETF 代码
@@ -74,36 +76,57 @@ def build_rationale(
     factor_scores = factor_scores or {}
     asset_name = meta.get("name", code)
 
-    # 1. 资产介绍
+    # 1. 资产介绍与行业（使用实际存在的字段）
     if "沪深300" in asset_name:
-        parts.append(f"今日{factor_scores.get('change_pct', '')}%；{asset_name} — A股核心宽基，覆盖沪深两市龙头")
+        parts.append(f"{asset_name} — A股核心宽基，覆盖沪深两市龙头")
     elif "红利" in asset_name:
-        parts.append(f"今日{factor_scores.get('change_pct', '')}%；{asset_name} — 高股息低波动，适合底仓配置")
+        parts.append(f"{asset_name} — 高股息低波动，适合底仓配置")
     elif "黄金" in asset_name:
-        parts.append(f"今日{factor_scores.get('change_pct', '')}%；{asset_name} — 贵金属避险资产，与权益低相关")
+        parts.append(f"{asset_name} — 贵金属避险资产，与权益低相关")
     elif "国债" in asset_name:
-        parts.append(f"今日{factor_scores.get('change_pct', '')}%；{asset_name} — 利率债，货币宽松周期受益")
+        parts.append(f"{asset_name} — 利率债，货币宽松周期受益")
     else:
         ind = industry or meta.get("industry") or "行业"
-        parts.append(f"今日{factor_scores.get('change_pct', '')}%；{asset_name} — {ind}方向")
+        parts.append(f"{asset_name} — {ind}方向")
 
-    # 2. 趋势数据（如果存在）
-    ret_3m = factor_scores.get("return_3m")
-    ret_1m = factor_scores.get("return_1m")
-    if ret_3m is not None:
-        parts.append(f"近3月{ret_3m * 100:+.1f}%")
-    if ret_1m is not None:
-        parts.append(f"近1月{ret_1m * 100:+.1f}%")
-
-    # 3. 技术面
-    ma_bias = factor_scores.get("ma_bias_20")
-    if ma_bias is not None:
-        if ma_bias < 0:
-            parts.append(f"20日均线下方{abs(ma_bias)*100:.1f}%")
+    # 2. 技术面（使用 factor_scores 中实际存在的 RSI / MACD / KDJ 因子）
+    rsi = factor_scores.get("technical.rsi.rsi_14")
+    if rsi is not None and rsi > 0:
+        if rsi < 30:
+            parts.append(f"RSI {rsi:.1f} 超卖区域")
+        elif rsi > 70:
+            parts.append(f"RSI {rsi:.1f} 超买区域")
         else:
-            parts.append(f"20日均线上方{ma_bias*100:.1f}%")
+            parts.append(f"RSI {rsi:.1f} 中性区间")
 
-    # 4. 市场状态
+    macd = factor_scores.get("technical.macd.macd")
+    if macd is not None and macd >= 0.001:
+        parts.append(f"MACD 为正 {macd:.4f}，多头趋势")
+    elif macd is not None and macd <= -0.001:
+        parts.append(f"MACD 为负，空头趋势")
+
+    # 3. 复合因子分
+    tech_score = factor_scores.get("technical")
+    if tech_score is not None and tech_score != 0:
+        parts.append(f"技术面综合评分 {tech_score:+.3f}")
+    momentum = factor_scores.get("momentum")
+    if momentum is not None and momentum != 0:
+        parts.append(f"动量因子 {momentum:+.3f}")
+    valuation = factor_scores.get("valuation")
+    if valuation is not None and valuation != 0:
+        parts.append(f"估值因子 {valuation:+.3f}")
+
+    # 4. 综合信号
+    signal = factor_scores.get("technical.signal.overall")
+    if signal is not None:
+        if signal > 0.2:
+            parts.append("综合信号偏多")
+        elif signal < -0.2:
+            parts.append("综合信号偏空")
+        else:
+            parts.append("综合信号中性")
+
+    # 5. 市场状态
     regime_desc = {
         "bull_strong": "当前市场强势",
         "bull_weakening": "牛市趋弱",
@@ -116,7 +139,7 @@ def build_rationale(
     if regime and regime in regime_desc:
         parts.append(regime_desc[regime])
 
-    # 5. 层角色（模板多样化）
+    # 6. 层角色（模板多样化）
     sl = {"defensive": "防御型", "balanced": "平衡型", "aggressive": "进攻型"}
     label = sl.get(strategy, strategy)
     layer_desc = _layer_phrase(layer, asset_name, code)

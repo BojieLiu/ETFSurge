@@ -604,7 +604,12 @@ def fetch_sina_global_index(symbol: str) -> dict[str, Any] | None:
         name = parts[0].strip().replace("INDEX", "").replace("  ", " ").strip()
         price = float(parts[1]) if parts[1] else 0
         change_pct = float(parts[2]) if parts[2] else 0
-        change_amount = float(parts[3]) if parts[3] else 0
+        # Sina 列结构: 名称,价格,涨跌幅,[更新时间],涨跌额,昨收,...
+        # 新版在 [3] 插入了时间列，若含日期字符则涨跌额在 [4]
+        if len(parts) > 4 and any(c in str(parts[3]) for c in ("-", ":", "/")):
+            change_amount = float(parts[4]) if parts[4] else 0
+        else:
+            change_amount = float(parts[3]) if parts[3] else 0
         return {
             "symbol": symbol,
             "name": name,

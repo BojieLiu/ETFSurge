@@ -644,12 +644,13 @@ class FactorRegistry:
         """Register a custom computation function for a factor."""
         self._computers[code] = fn
 
-    async def _fetch_market_data(self, symbols: list[str]) -> dict[str, dict[str, Any]]:
+    async def _fetch_market_data(self, symbols: list[str], symbol_extra: dict[str, dict] | None = None) -> dict[str, dict[str, Any]]:
         """Fetch real market data for factor computation.
 
         Uses china_market.fetch_history() (mootdx->Sina) to get OHLCV for each symbol.
         Runs fetch_history in a thread pool to avoid blocking the event loop.
         Semaphore(8) limits concurrent thread-pool submissions.
+        symbol_extra: 预采集数据（如 scanner 采集的 fund_scale），注入到每个 symbol 的 data dict
         """
         from ..fetchers.china_market import fetch_history
         import asyncio
@@ -672,7 +673,11 @@ class FactorRegistry:
                     if len(closes) < 5:
                         raise ValueError(f"too few data points: {len(closes)}")
                     return sym, {
-                        "total_mv": float(rows[-1].get("total_mv", 100e9) or 100e9),
+                        "total_mv": (
+                            float((symbol_extra or {}).get(sym, {}).get("fund_scale", 0) or 0)
+                            or float(rows[-1].get("total_mv", 0) or 0)
+                            or 100e9
+                        ),
                         "float_mv": float(rows[-1].get("float_mv", 80e9) or 80e9),
                         "close": closes[-60:],
                         "high": highs[-60:],
@@ -692,6 +697,7 @@ class FactorRegistry:
         symbols: list[str],
         codes: list[str] | None = None,
         market_data: dict[str, dict[str, Any]] | None = None,
+        symbol_extra: dict[str, dict] | None = None,
     ) -> dict[str, dict[str, float]]:
         """Compute factor values for given symbols.
 
@@ -710,7 +716,7 @@ class FactorRegistry:
             # 使用外部注入的真实数据
             pass
         else:
-            market_data = await self._fetch_market_data(symbols)
+            market_data = await self._fetch_market_data(symbols, symbol_extra=symbol_extra)
 
         result: dict[str, dict[str, float]] = {}
         for sym in symbols:
