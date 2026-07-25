@@ -154,13 +154,47 @@ async def generate_enhanced_design(
         }
 
 
+def _compute_fund_flow(pool_manager) -> dict:
+    """聚合全市场候选 ETF 资金流向。
+
+    返回:
+      {"total_net_inflow": float, "positive_flow_count": int, "negative_flow_count": int, "total_symbols": int}
+    """
+    result = {
+        "total_net_inflow": 0.0,
+        "positive_flow_count": 0,
+        "negative_flow_count": 0,
+        "total_symbols": 0,
+    }
+    from ..fetchers.fundamental_fetcher import fetch_fund_flow
+    from ..utils.sync_helpers import run_sync_in_thread
+    pool = pool_manager.get_pool()
+    for layer, items in pool.items():
+        for item in items:
+            sym = item.get("symbol", "")
+            if not sym:
+                continue
+            result["total_symbols"] += 1
+            flow = run_sync_in_thread(fetch_fund_flow, sym)
+            if flow and flow.get("main_net_inflow") is not None:
+                inflow = flow["main_net_inflow"]
+                result["total_net_inflow"] += inflow
+                if inflow >= 0:
+                    result["positive_flow_count"] += 1
+                else:
+                    result["negative_flow_count"] += 1
+    return result
+
+
 def _build_market_context(pool_manager) -> dict:
     """从 pool_manager 构建市场上下文。"""
+    fund_flow = _compute_fund_flow(pool_manager)
     return {
         "market_regime": pool_manager.get_market_regime() or "range_bound",
         "market_sentiment": pool_manager.get_market_sentiment() or {"sentiment_index": 50, "sentiment_label": "中性"},
         "index_realtime": pool_manager.get_index_realtime() or [],
         "sector_momentum": pool_manager.get_sector_momentum() or [],
+        "fund_flow": fund_flow,
         "benchmark_stocks": [],
     }
 

@@ -1160,6 +1160,19 @@ def _build_design_report_prompt(
             lines.append(f"- {name}: {rank_txt} 当日{chg_txt}".rstrip())
         lines.append("")
 
+    # ── C1 资金流向 ──
+    fund_flow = market_context.get("fund_flow", {})
+    if fund_flow.get("total_symbols", 0) > 0:
+        total = fund_flow.get("total_net_inflow", 0)
+        pos = fund_flow.get("positive_flow_count", 0)
+        neg = fund_flow.get("negative_flow_count", 0)
+        direction = "净流入" if total > 0 else "净流出"
+        intensity = "显著" if abs(total) > 1000 else "温和" if abs(total) > 100 else "微弱"
+        lines.append("### 资金流向")
+        lines.append(f"- 候选池 {fund_flow['total_symbols']} 只 ETF 合计主力{intensity}{direction}：{total/10000:.1f} 亿元")
+        lines.append(f"- 主力资金净流入 {pos} 只，净流出 {neg} 只")
+        lines.append("")
+
     # ── 因子评分（5.0+ 新增） ──
     if strategies:
         lines.append("### 各标的因子评分")

@@ -2,6 +2,10 @@
 
 All external calls (mootdx, akshare, feedparser) are mocked;
 no network needed.
+
+Key regression scenarios:
+  - Thread pool not exhausted after consecutive timeouts (P0 fix)
+  - Per-call executor doesn't leak threads
 """
 import concurrent.futures
 import asyncio
@@ -200,3 +204,45 @@ async def test_run_sync_timeout_raises_timeout_error():
     elapsed = asyncio.get_event_loop().time() - start
     # Should return near the timeout, not the full 10 s
     assert elapsed < 5, f"run_sync blocked for {elapsed:.1f}s instead of timing out"
+
+
+# ── P0: run_in_thread thread exhaustion ──────────────────────────
+
+
+def test_run_in_thread_returns_none_on_timeout():
+    """run_in_thread must return None when the function exceeds timeout.
+
+    Critical: must NOT leak threads or exhaust the shared executor.
+    """
+    from app.core.async_utils import run_in_thread
+
+    def _very_slow():
+        import time
+        time.sleep(100)
+
+    result = run_in_thread(_very_slow, timeout=0.3)
+    assert result is None
+
+
+def test_run_in_thread_still_usable_after_consecutive_timeouts():
+    """After N consecutive timeouts, run_in_thread must still work.
+
+    Regression guard: per-call executor (P0 fix) must not leak threads.
+    """
+    from app.core.async_utils import run_in_thread
+
+    def _very_slow():
+        import time
+        time.sleep(100)
+
+    def _fast():
+        return 42
+
+    # 10 consecutive timeouts
+    for i in range(10):
+        r = run_in_thread(_very_slow, timeout=0.2)
+        assert r is None, f"iteration {i} should timeout"
+
+    # After 10 timeouts, a normal call must still succeed
+    result = run_in_thread(_fast, timeout=2)
+    assert result == 42, f"Expected 42, got {result}"

@@ -259,7 +259,7 @@ describe('AppModal.vue', () => {
 
   it('emits close on close button click', async () => {
     const wrapper = mount(AppModal, {
-      props: { modelValue: true, closable: true },
+      props: { modelValue: true, title: 'Modal', closable: true },
       attachTo: document.body,
     })
     await wrapper.find('.modal__close').trigger('click')

@@ -344,3 +344,50 @@ class TestCoreFactorsConsistency:
         from app.fetchers.fred_fetcher import fetch_vix
         result = await fetch_vix()
         assert result is None
+
+
+class TestCircuitBreaker:
+    """CircuitBreaker: auto-reset after cooldown."""
+
+    def test_cb_closes_after_cooldown(self):
+        """After opening, CB auto-closes once cooldown elapses."""
+        from app.factors.factor_registry import CircuitBreaker
+        import time
+
+        # Reset CB state
+        CircuitBreaker.failure_count = 0
+        CircuitBreaker.open_until = 0.0
+
+        # Record enough failures to open
+        for _ in range(CircuitBreaker.threshold):
+            CircuitBreaker.record_failure()
+
+        assert CircuitBreaker.is_open() is True
+
+        # Simulate cooldown passing
+        CircuitBreaker.open_until = time.time() - 1
+
+        assert CircuitBreaker.is_open() is False
+
+    def test_cb_resets_on_success(self):
+        """record_success resets failure_count, keeping CB closed."""
+        from app.factors.factor_registry import CircuitBreaker
+
+        CircuitBreaker.failure_count = 0
+        CircuitBreaker.open_until = 0.0
+
+        CircuitBreaker.record_failure()
+        CircuitBreaker.record_failure()
+        CircuitBreaker.record_success()
+
+        assert CircuitBreaker.is_open() is False
+        assert CircuitBreaker.failure_count == 0
+
+    def test_cb_threshold_after_fix(self):
+        """Threshold should be >= 10 (P1 fix: was 3)."""
+        from app.factors.factor_registry import CircuitBreaker
+
+        assert CircuitBreaker.threshold >= 10, (
+            f"CB threshold {CircuitBreaker.threshold} is too low; "
+            f"was increased from 3 to 10 to avoid premature tripping"
+        )
