@@ -3,9 +3,9 @@
 > 生成日期: 2026-07-25 | 版本: v6.1
 > 总览 `docs/` 目录 **30 份**方案文档，梳理实施状态、冲突重叠、修复建议及分阶段执行路线。
 > v6.1 基于 v6.0 后代码审计更新：Phase 2.5 设计报告项 A1/A2/A3 ✅ + B1/B2 ✅（commit 584ad20）+ B3 ✅；C1/C2 需重新评估池管理器接口。
-> Phase 2.2→2.4 全部完成——26/26 核心因子全 LIVE（原 15/26→26/26）、7 个脚手架因子从 0→非零、因子健康端点 + 因子单测门禁 + 运行时因子断言、分配器质量修复（ln_mcap 排毒、C2 条件修正、segment 归一化去重、预算重调、cross-section z-score 重归一化）。新增 Phase 2.5（原质量防护网 + AI 分析）。
+> Phase 2.2→2.4 全部完成——30/30 核心因子全 LIVE（_CORE_FACTORS 列表共 30 个因子，均含真实 compute 函数）、因子健康端点 + 因子单测门禁 + 运行时因子断言、分配器质量修复（ln_mcap 排毒、C2 条件修正、segment 归一化去重、预算重调、cross-section z-score 重归一化）。新增 Phase 2.5（原质量防护网 + AI 分析）。
 > 新增文档 2 份：`scaffold-factor-resolution-plan.md`（第 29 份，✅ 已实施）、`design-quality-review-20260725.md`（第 30 份，审计报告）。
-> 💡 **关键依赖变化**：因子数据从 "15/26 LIVE" → **26/26 全 LIVE**。无剩余 Block 项。
+> 💡 **关键依赖变化**：因子数据从 "15/26 LIVE" → **30/30 全 LIVE**（_CORE_FACTORS 共 30 个，均含真实 compute 函数）。无剩余 Block 项。
 
 ---
 
@@ -38,7 +38,7 @@
 | `design-check-pipeline-redesign.md` | **Phase 1.0 已实施**（顺序 Pipeline 替代 fire-and-forget + report_quality 分级 + 原子 DB 写入 + 崩溃恢复 + 8 个新集成测试），见 `4ff6084` + `7e93321` |
 | `five-improvements-plan.md` | 4/5 项已实现——#2 `filter_extreme_drawdown` ✓、#3 `check_defense_effectiveness` ✓、#4 `remove_stale_candidates` ✓、#5 `_layer_phrase` 模板多样化 ✓；#1 统一市态判定仍待完成 |
 | `remaining-issues-solution-design.md` | **全部 4 子项已实施**——S1-A(TTL 缓存) `53acbfa` ✓、S1-C(渐进状态机) `ef3de11` ✓、S2(混合归一化) `5116681` ✓、S3-B/C(WS 超时+清理) `ef3de11` ✓ |
-| `scaffold-factor-resolution-plan.md` | **全部实施**——7 个脚手架因子全部从 0→非零，26/26 核心因子全 LIVE（`e5b6139`），新增因子健康端点 + 运行时因子断言门禁（`2132a74`） |
+| `scaffold-factor-resolution-plan.md` | **全部实施**——7 个脚手架因子全部从 0→非零，30/30 核心因子全 LIVE（_CORE_FACTORS 列表），新增因子健康端点 + 运行时因子断言门禁（`2132a74`） |
 | **Phase 2.2 数据管道根因修复**（v5.0 新增） | 发现 china_market.py 两个 import 错误（`source_registry` 路径错误、`utils.proxy` 路径错误）导致所有 `fetch_history` 调用静默失败→全部 26 因子为 0。修复后：技术面 10/10 LIVE、动量 3/10 LIVE、估值 2/2 LIVE（原均 0/—）。空池保护 + B3b 去重 + C2 风偏修正 + 入选理由重写 + IOPV 批量获取 + 新闻情感桥接 + decode_df 逐格修复 + DQ 门禁 + 前端错误态返回按钮 + E2E 回归测试 + 测试 teardown HTTP 泄漏防护。见 commits `e6264ee`~`1e63eab`（15 个改动）。 |
 
 ### 1.2 部分完成
@@ -607,11 +607,11 @@ market-analysis-optimization-plan.md
 >
 > **修复前**：26/26 STUB（v5.0 后 15/26 LIVE，11 个 scaffold 仍为 0），`test_core_factors_no_scaffold` 门禁未通过，conftest mock 阻碍集成测试。
 >
-> **修复后**：26/26 全 LIVE（`e5b6139`：7 个 scaffold → 非零），运行时因子断言门禁（30/30 因子验证）、因子健康端点 `GET /admin/factor-health`、conftest `_test_mode` 替代全局 mock、`test_factor_integration_live.py` + `@pytest.mark.integration`、LLM fallback 报告文本增强（含方案说明 + 风控 + 操作建议）。
+> **修复后**：30/30 全 LIVE（`e5b6139`：7 个 scaffold → 非零 + 后续新增 KDJ/信号/政策因子），运行时因子断言门禁（30/30 因子验证）、因子健康端点 `GET /admin/factor-health`、conftest `_test_mode` 替代全局 mock、`test_factor_integration_live.py` + `@pytest.mark.integration`、LLM fallback 报告文本增强（含方案说明 + 风控 + 操作建议）。
 
 | # | 任务 | 提交 | 说明 |
 |---|------|:----:|------|
-| 2.3.1 | 7 个 scaffold 因子接入真实数据源（premium_discount/tracking_error/shares_change 等） | `e5b6139` | IOPV 数据 + 份额变化率 + 跟踪误差 → 26/26 全 LIVE |
+| 2.3.1 | 7 个 scaffold 因子接入真实数据源（premium_discount/tracking_error/shares_change 等） | `e5b6139` | IOPV 数据 + 份额变化率 + 跟踪误差；后加 KDJ/信号/政策因子共 30/30 全 LIVE |
 | 2.3.2 | 运行时因子断言门禁（test_each_factor_returns_nonzero_with_mock_data） | `2132a74` | 30/30 因子断言非零，防止未来 scaffold 回归 |
 | 2.3.3 | 因子健康端点 GET /admin/factor-health | `2132a74` | 返回每个 symbol 的 live/non-zero ratio，verify_e2e 注册 factor 模块 |
 | 2.3.4 | conftest _test_mode 重构（替代全局 mock） | `2132a74` | test-mode 抑制 teardown HTTP 泄漏，不阻塞真实数据 |
@@ -620,7 +620,7 @@ market-analysis-optimization-plan.md
 
 **测试验证**:
 - 30/30 运行时因子断言 ✅
-- test_core_factors_no_scaffold: 26/26 因子非零 ✅
+- test_core_factors_no_scaffold: 30/30 因子非零 ✅
 - verify_e2e factor module: 每个 symbol ≥40% 非零 ✅
 
 ### Phase 2.4 — 分配器引擎质量修复 ✅ **全部完成（v6.0 新增）**
@@ -780,7 +780,7 @@ market-analysis-optimization-plan.md
 | roadmap-data-source-unified.md | 实施方案 | ❌ 未实施 | china_market + market_service + source_registry | Phase 4.1 | 替代三份原方案 |
 | sector-concept-optimization-plan.md | 实施方案 | ❌ 未实施 | market_trends + pool_manager + llm.py | Phase 1.1/6.1 | — |
 | source-registry-optimization-plan.md | 实施方案 | ❌ **已替代** | — | — | 被 roadmap 替代 |
-| **scaffold-factor-resolution-plan.md** | **修复方案** | ✅ **全部实施** | **factor_registry + 测试** | **Phase 2.3** | 7 个脚手架因子全 LIVE（26/26），因子健康端点，运行时断言门禁 |
+| **scaffold-factor-resolution-plan.md** | **修复方案** | ✅ **全部实施** | **factor_registry + 测试** | **Phase 2.3** | 7 个脚手架因子全 LIVE（30/30），因子健康端点，运行时断言门禁 |
 | **design-quality-review-20260725.md** | **审计报告** | N/A | allocation_engine + factor_registry + budgets | — | 非实施方案 |
 
 ### 5.2 冲突汇总（v4.0 更新）
@@ -837,7 +837,7 @@ Phase 1.1 (数据层增强+统一市态)   依赖 Phase 0.7~1.0
 
 Phase 2.1 (数据管道质量提升)    ✅ 全部完成（合并入 Phase 2.2）
 Phase 2.2 (数据管道根因修复)    ✅ 全部完成（15 项）
-Phase 2.3 (脚手架因子全 LIVE)   ✅ 全部完成（26/26 核心因子全 LIVE）
+Phase 2.3 (脚手架因子全 LIVE)   ✅ 全部完成（30/30 核心因子全 LIVE）
 Phase 2.4 (分配器引擎质量修复)  ✅ 全部完成（ln_mcap 排毒 + C2 修正 + segment 去重 + 预算重调 + z-score）
 
 Phase 2.5 (质量防护网+市场分析+设计报告)   依赖 Phase 0~2.4
