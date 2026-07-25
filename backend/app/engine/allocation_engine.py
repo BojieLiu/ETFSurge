@@ -196,15 +196,15 @@ def _select_and_weight(
             if strategy == "defensive":
                 # 防御型：偏好安全主题，惩罚高风险主题
                 if any(t in name for t in _SAFE_THEMES):
-                    c2_bonus = 0.3
+                    c2_bonus = 0.8
                 elif any(t in name for t in _RISKY_THEMES):
-                    c2_bonus = -0.5
+                    c2_bonus = -1.5
             elif strategy == "aggressive":
                 # 进攻型：偏好高风险主题，惩罚安全主题
                 if any(t in name for t in _RISKY_THEMES):
-                    c2_bonus = 0.3
+                    c2_bonus = 1.5
                 elif any(t in name for t in _SAFE_THEMES):
-                    c2_bonus = -0.1
+                    c2_bonus = -0.3
         composite += c2_bonus
         scored.append((composite, cand, factor_scores))
 
