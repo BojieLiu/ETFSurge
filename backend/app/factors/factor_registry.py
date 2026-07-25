@@ -647,11 +647,16 @@ class FactorRegistry:
             "sentiment": ["sentiment."],
         }
 
+        # 在聚合时排除的因子键（ln_mcap 是规模因子不是估值，且所有 ETF 值都 ~25）
+        EXCLUDE_FACTORS = {"style.size.ln_mcap", "style.size.ln_float_mcap"}
+
         result = dict(factor_scores)  # 保留所有原始键
 
         for top_key, prefixes in CATEGORY_PREFIXES.items():
             values = []
             for key, val in factor_scores.items():
+                if key in EXCLUDE_FACTORS:
+                    continue
                 if isinstance(val, (int, float)) and abs(val) > 0.001:
                     for prefix in prefixes:
                         if key.startswith(prefix):

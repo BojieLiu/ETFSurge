@@ -59,6 +59,25 @@ def _extract_index_concept(name: str) -> str:
         return name[:6] if len(name) >= 6 else name
     return clean
 
+
+def _normalize_segment(concept: str) -> str:
+    """将指数概念归一化为板块级标识，用于跨层板块集中度控制。
+
+    同一板块内的高度相关指数（科创50/科创100/科创新能源等）被归为同一板块，
+    避免分配器在同板块内重复配置造成虚假分散化。
+
+    Examples:
+        "科创50" → "科创"
+        "科创100" → "科创"
+        "科创新能源" → "科创"
+        "沪深300" → "沪深300"
+        "中证A500" → "中证A500"
+    """
+    for prefix in ["科创", "半导体", "芯片", "军工", "新能源"]:
+        if concept.startswith(prefix):
+            return prefix
+    return concept
+
 # P1-3: 强制保留标的（权重不低于 3%，确保进入分配）
 # 5% ×4=20% 占用过多预算导致总持仓不足 8 只，调整为 3% ×4=12%
 MANDATORY_CODES = {"510300", "560600", "518880", "511090"}
@@ -148,11 +167,14 @@ def _select_and_weight(
         return mandatory_assignments
     candidates = remaining_candidates
 
-    # B3: 过滤已选指数的候选
+    # B3: 过滤已选指数的候选（归一化到板块级后再比较）
     filtered = []
     for c in candidates:
         tidx = c.get("tracked_index", "") or ""
-        if tidx and tidx in exclude_indices:
+        if not tidx:
+            tidx = _extract_index_concept(c.get("name", ""))
+        seg = _normalize_segment(tidx) if tidx else ""
+        if seg and seg in exclude_indices:
             continue
         filtered.append(c)
     candidates = filtered
@@ -189,10 +211,15 @@ def _select_and_weight(
         c2_bonus = 0.0
         # 估值数据可用性检查：valuation 为 0 或所有 factor_scores 的 valuation 前缀因子均为 0
         valuation_missing = abs(factor_scores.get("valuation", 0.0)) < 0.001
-        has_style_factors = any(k.startswith("style.") for k in factor_scores
-                                if isinstance(factor_scores.get(k, 0), (int, float))
-                                and abs(factor_scores.get(k, 0)) > 0.001)
-        if valuation_missing and not has_style_factors:
+        # 排除 ln_mcap / ln_float_mcap——它们只是市值对数，不是真实估值信号，
+        # 且对所有大市值 ETF 值都约 25.33，毫无区分度
+        has_meaningful_style = any(
+            k.startswith("style.") and abs(v) > 0.001
+                and "ln_mcap" not in k and "ln_float" not in k
+                for k, v in factor_scores.items()
+                if isinstance(v, (int, float))
+            )
+        if valuation_missing and not has_meaningful_style:
             if strategy == "defensive":
                 # 防御型：偏好安全主题，惩罚高风险主题
                 if any(t in name for t in _SAFE_THEMES):
@@ -377,9 +404,10 @@ def allocate(
         # B3: 跨层追踪已选指数，防止同指数多头持仓
         selected_tracked_indices: set[str] = set()
 
-        # P1-1: 核心层 max_count 风偏差异化（提高数量以达 8-15 只总持仓）
-        _CORE_MAX = {"defensive": 3, "balanced": 4, "aggressive": 4}
+        # P1-1: 核心层 max_count 风偏差异化（提高数量以达 10-18 只总持仓）
+        _CORE_MAX = {"defensive": 4, "balanced": 5, "aggressive": 5}
         _DEFENSE_MAX = {"defensive": 2, "balanced": 1, "aggressive": 1}
+        _SATELLITE_MAX = {"defensive": 6, "balanced": 8, "aggressive": 8}
 
         # ── Core layer ──
         core_alloc = _select_and_weight(
@@ -394,8 +422,12 @@ def allocate(
         )
         for a in core_alloc:
             tidx = a.get("tracked_index", "") or ""
+            if not tidx:
+                tidx = _extract_index_concept(a.get("name", ""))
             if tidx:
-                selected_tracked_indices.add(tidx)
+                # 归一化为板块级概念（科创50/科创100/科创新能源 → 科创）
+                seg = _normalize_segment(tidx)
+                selected_tracked_indices.add(seg)
         allocations.extend(core_alloc)
 
         # ── Satellite layer — C1: 按 profile_key 差异化过滤 ──
@@ -407,13 +439,16 @@ def allocate(
             layer="satellite",
             regime=regime,
             strategy=profile_key,
-            max_count=6,
+            max_count=_SATELLITE_MAX.get(profile_key, 6),
             exclude_tracked_indices=selected_tracked_indices,
         )
         for a in sat_alloc:
             tidx = a.get("tracked_index", "") or ""
+            if not tidx:
+                tidx = _extract_index_concept(a.get("name", ""))
             if tidx:
-                selected_tracked_indices.add(tidx)
+                seg = _normalize_segment(tidx)
+                selected_tracked_indices.add(seg)
         allocations.extend(sat_alloc)
 
         # ── Defense layer ──
