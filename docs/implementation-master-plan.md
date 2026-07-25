@@ -661,8 +661,8 @@ market-analysis-optimization-plan.md
 | 2.5.9 | design-report B1：黄金入选理由增强 | `design-report-optimization-plan.md` B1 | ✅ 已实施（commit 584ad20） | ~10行 | 无 |
 | 2.5.10 | design-report B2：国债久期风险提示 | `design-report-optimization-plan.md` B2 | ✅ 已实施（commit 584ad20） | ~3行 | 无 |
 | 2.5.11 | design-report B3：LLM prompt 量化规则 | `design-report-optimization-plan.md` B3 | ✅ 已实施 | — | 无 |
-| 2.5.12 | design-report C1：全市场净流入信号注入 | `design-report-optimization-plan.md` C1 | 🟡 待评估 | ~30行 | 无 |
-| 2.5.13 | design-report C2：卫星层增加科技 ETF | `design-report-optimization-plan.md` C2 | 🟡 待评估 | ~15行 | 无 |
+| 2.5.12 | design-report C1：全市场净流入信号注入 | `design-report-optimization-plan.md` C1 | 🟡 待评估（需新增 fund_flow 数据源，暂未实现） | ~30行 | 无 |
+| 2.5.13 | design-report C2：卫星层增加科技 ETF | `design-report-optimization-plan.md` C2 | ✅ 已实施（commit fee3c58：卫星层科技集中度>60%时自动引入科创50ETF分散） | ~15行 | 无 |
 
 **验证**:
 - `npm test` 全绿 + `npm run test:e2e:smoke` 全绿

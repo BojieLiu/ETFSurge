@@ -280,6 +280,7 @@ def _select_and_weight(
             "layer": layer,
             "weight": round(w, 4),
             "tracked_index": tidx,
+            "industry": cand.get("industry", ""),
             "selection_rationale": rationale,
             "factor_score": round(composite, 3),
             "factor_breakdown": {
@@ -438,6 +439,32 @@ def allocate(
             max_count=meta.get("layer_count", {}).get("satellite", 8),
         )
         allocations.extend(sat_alloc)
+
+        # C2: 如果卫星层科技主题集中度过高，引入科创50作为分散工具
+        tech_industries = {"电子", "通信", "计算机", "半导体"}
+        tech_weight = 0
+        existing_symbols = {a.get("symbol") for a in allocations}
+        for a in allocations:
+            if a.get("layer") == "satellite" and a.get("industry", "") in tech_industries:
+                tech_weight += a.get("weight", 0.0)
+        s_budget = budgets.get("satellite", 0.0)
+        if tech_weight > s_budget * 0.6 and "588000" not in existing_symbols and s_budget > 0:
+            # 从卫星预算中切出4%给科创50ETF
+            tech_etf_weight = min(0.04, s_budget * 0.15)
+            tech_etf = {
+                "symbol": "588000", "name": "科创50ETF", "layer": "satellite",
+                "weight": round(tech_etf_weight, 4),
+                "tracked_index": "科创50", "industry": "宽基",
+                "selection_rationale": "科技集中度过高，引入科创50宽基ETF分散风险",
+                "factor_score": 0, "factor_breakdown": {},
+            }
+            # 等比例削减现有卫星权重
+            surviving = [a for a in allocations if a.get("layer") == "satellite" and a.get("symbol") != "CASH"]
+            if surviving:
+                reduction_per = tech_etf_weight / len(surviving)
+                for a in surviving:
+                    a["weight"] = round(max(a.get("weight", 0) - reduction_per, 0.01), 4)
+            allocations.append(tech_etf)
 
         # ── Defense layer ──
         def_alloc = _select_and_weight(
