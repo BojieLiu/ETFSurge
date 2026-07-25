@@ -654,9 +654,9 @@ market-analysis-optimization-plan.md
 | 2.5.2 | useDashboardData composable 单测 | frontend-testing-safety-net Phase B | ✅ 已实施（35 个用例覆盖全部 computed + 异步方法 + 响应式） | 1h | 无 |
 | 2.5.3 | E2E spec 扩充到 10-15 条 | frontend-testing-safety-net Phase B/C | ✅ 已实施（5 个 spec 文件，24 个测试用例：smoke×5 + regression×3 + navigation×6 + wizard×5 + theme/assets×5） | 6h | 无 |
 | 2.5.4 | verify_e2e.py 全局指数检查修复 | fix-global-indices-plan 根因 #7 | ✅ 已实施 | 0.5h | 无 |
-| 2.5.5 | market-analysis Phase C（前端 UnifiedAnalysis 合并组件） | market-analysis §5 | ✅ 已实施（commit 0136a77：UnifiedAnalysis.vue 合并三类分析） | 4-5h | Phase 1.1.8+1.1.9 |
-| 2.5.7 | market-analysis Phase E（市场报告质量提升） | market-analysis §7 | ❌ 未完成 | 2-3h | 无（可并行） |
-| 2.5.7 | market-analysis Phase E（市场报告质量提升） | market-analysis §7 | ❌ 未完成 | 2-3h | 无（可并行） |
+| 2.5.5 | market-analysis Phase C | market-analysis §5 | ✅ 已实施 | 4-5h | Phase 1.1.8+1.1.9 |
+| 2.5.6 | market-analysis Phase D（AI 顾问流式+数据管道） | market-analysis §6 | ✅ 已实施 | 2-3h | 无 |
+| 2.5.7 | market-analysis Phase E（市场报告质量提升） | market-analysis §7 | ✅ 已实施 | 2-3h | 无 |
 | 2.5.8 | design-report A1+A2+A3 | `design-report-optimization-plan.md` | ✅ 已实施 | — | Phase 0.7 |
 | 2.5.9 | design-report B1：黄金入选理由增强 | `design-report-optimization-plan.md` B1 | ✅ 已实施（commit 584ad20） | ~10行 | 无 |
 | 2.5.10 | design-report B2：国债久期风险提示 | `design-report-optimization-plan.md` B2 | ✅ 已实施（commit 584ad20） | ~3行 | 无 |
