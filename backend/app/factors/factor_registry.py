@@ -330,6 +330,14 @@ def _compute_industry_diversification(data: dict) -> float:
     return round(hhi, 4)
 
 
+def _compute_change_pct(data: dict) -> float:
+    """日涨跌幅：(close[-1] - close[-2]) / close[-2]。来源：Sina K-line 数据。"""
+    closes = data.get("close", [])
+    if len(closes) >= 2:
+        return round((closes[-1] - closes[-2]) / closes[-2], 4)
+    return 0.0
+
+
 # --- Scaffolding functions (保留待后续数据源接入) ---
 def _compute_premium_discount(data: dict) -> float:
     """折溢价率：(ETF价格 - IOPV) / IOPV。正常范围 -0.03 ~ 0.03。"""
@@ -472,6 +480,7 @@ _BUILTIN_COMPUTERS: dict[str, Callable[[dict], float]] = {
     "technical.atr.atr_14": _compute_atr_14,
     "technical.volume.vwap": _compute_vwap,
     "etf.amount_stability": _compute_amount_stability,
+    "etf.change_pct": _compute_change_pct,
     "etf.premium_discount": _compute_premium_discount,  # scaffolding
     "etf.tracking_error": _compute_tracking_error,       # scaffolding
     "etf.shares_change": _compute_shares_change,          # scaffolding
@@ -517,6 +526,7 @@ _CORE_FACTORS = [
     "technical.volume.vwap",
     # ETF-specific
     "etf.premium_discount",
+    "etf.change_pct",
     "etf.tracking_error",
     "etf.shares_change",
     "etf.amount_stability",
@@ -672,6 +682,7 @@ class FactorRegistry:
                     vols = [r.get("volume", 0) for r in rows if r.get("volume")]
                     if len(closes) < 5:
                         raise ValueError(f"too few data points: {len(closes)}")
+                    change_pct = round((closes[-1] - closes[-2]) / closes[-2], 4) if len(closes) >= 2 else 0.0
                     return sym, {
                         "total_mv": (
                             float((symbol_extra or {}).get(sym, {}).get("fund_scale", 0) or 0)
@@ -683,6 +694,7 @@ class FactorRegistry:
                         "high": highs[-60:],
                         "low": lows[-60:],
                         "volume": vols[-60:],
+                        "change_pct": change_pct,
                     }
                 except Exception as e:
                     logger.warning("[factor] fetch_history failed for %s: %s — skipping", sym, e)
@@ -690,7 +702,40 @@ class FactorRegistry:
 
         tasks = [fetch_one(sym) for sym in symbols]
         results = await asyncio.gather(*tasks)
-        return dict(results)
+        data = dict(results)
+
+        # 2. 批量获取 IOPV 数据（Sina 实时行情）
+        # 用于 premium_discount 因子计算
+        try:
+            import urllib.request
+            prefixes = {"5": "sh", "6": "sh", "0": "sz", "1": "sz", "3": "sz"}
+            sina_list = [f"{prefixes.get(sym[0], 'sh')}{sym}" for sym in symbols]
+            url = f"http://hq.sinajs.cn/list={','.join(sina_list)}"
+            req = urllib.request.Request(url, headers={"Referer": "http://finance.sina.com.cn"})
+            resp = urllib.request.urlopen(req, timeout=8)
+            raw = resp.read().decode("gbk")
+            for line in raw.strip().split("\n"):
+                if '"' not in line:
+                    continue
+                parts = line.split('"')[1].split(",")
+                if len(parts) < 10:
+                    continue
+                # parts[0] = symbol (with prefix), parts[2] = symbol (clean)
+                sym = parts[2] if parts[2] else ""
+                if sym not in data:
+                    continue
+                try:
+                    price = float(parts[3]) if parts[3] else None
+                    nav = float(parts[8]) if parts[8] else None
+                    if nav and nav > 0:
+                        data[sym]["price"] = price or 0.0
+                        data[sym]["nav"] = nav
+                except (ValueError, IndexError):
+                    pass
+        except Exception as e:
+            logger.warning("[factor] batch NAV fetch failed: %s (proxy? — non-fatal)", e)
+
+        return data
 
     async def compute(
         self,
