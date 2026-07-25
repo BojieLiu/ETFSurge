@@ -650,9 +650,9 @@ market-analysis-optimization-plan.md
 
 | # | 任务 | 源文档 | 状态 | 预估工时 | 前置依赖 |
 |---|------|--------|:----:|:-------:|---------|
-| 2.5.1 | AppButton/AppCard/AppTabs/AppInput/AppModal 单测 | frontend-testing-safety-net Phase A | ❌ 未完成 | 4h | 无 |
-| 2.5.2 | useDashboardData composable 单测 | frontend-testing-safety-net Phase B | ❌ 未完成 | 1h | 无 |
-| 2.5.3 | E2E spec 扩充到 10-15 条 | frontend-testing-safety-net Phase B/C | ❌ 未完成 | 6h | 无 |
+| 2.5.1 | AppButton/AppCard/AppTabs/AppInput/AppModal 单测 | frontend-testing-safety-net Phase A | ✅ 已实施（43 个用例覆盖 5 个组件所有常见交互） | 4h | 无 |
+| 2.5.2 | useDashboardData composable 单测 | frontend-testing-safety-net Phase B | ✅ 已实施（35 个用例覆盖全部 computed + 异步方法 + 响应式） | 1h | 无 |
+| 2.5.3 | E2E spec 扩充到 10-15 条 | frontend-testing-safety-net Phase B/C | ✅ 已实施（5 个 spec 文件，24 个测试用例：smoke×5 + regression×3 + navigation×6 + wizard×5 + theme/assets×5） | 6h | 无 |
 | 2.5.4 | verify_e2e.py 全局指数检查修复 | fix-global-indices-plan 根因 #7 | ✅ 已实施 | 0.5h | 无 |
 | 2.5.5 | market-analysis Phase C（前端 UnifiedAnalysis 合并组件） | market-analysis §5 | ❌ 未完成 | 4-5h | Phase 1.1.8+1.1.9 |
 | 2.5.6 | market-analysis Phase D（AI 顾问流式+数据管道） | market-analysis §6 | ❌ 未完成 | 2-3h | 无（可并行） |
@@ -661,7 +661,7 @@ market-analysis-optimization-plan.md
 | 2.5.9 | design-report B1：黄金入选理由增强 | `design-report-optimization-plan.md` B1 | ✅ 已实施（commit 584ad20） | ~10行 | 无 |
 | 2.5.10 | design-report B2：国债久期风险提示 | `design-report-optimization-plan.md` B2 | ✅ 已实施（commit 584ad20） | ~3行 | 无 |
 | 2.5.11 | design-report B3：LLM prompt 量化规则 | `design-report-optimization-plan.md` B3 | ✅ 已实施 | — | 无 |
-| 2.5.12 | design-report C1：全市场净流入信号注入 | `design-report-optimization-plan.md` C1 | 🟡 待评估（需新增 fund_flow 数据源，暂未实现） | ~30行 | 无 |
+| 2.5.12 | design-report C1：全市场净流入信号注入 | `design-report-optimization-plan.md` C1 | ✅ 已实施（commit f6d47d3：利用现有 akshare stock_individual_fund_flow 聚合全池资金流向注入 LLM prompt） | ~30行 | 无 |
 | 2.5.13 | design-report C2：卫星层增加科技 ETF | `design-report-optimization-plan.md` C2 | ✅ 已实施（commit fee3c58：卫星层科技集中度>60%时自动引入科创50ETF分散） | ~15行 | 无 |
 
 **验证**:

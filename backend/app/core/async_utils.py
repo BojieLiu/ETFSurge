@@ -33,14 +33,16 @@ def run_in_thread(fn, *args, timeout: int = DEFAULT_SYNC_TIMEOUT):
     供同步 fetcher 内部使用。超时后 executor shutdown 放弃等待，
     僵尸线程随进程退出终结，不会在共享池中累积。
     """
+    ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-            future = ex.submit(fn, *args)
-            return future.result(timeout=timeout)
+        future = ex.submit(fn, *args)
+        return future.result(timeout=timeout)
     except concurrent.futures.TimeoutError:
         return None
     except Exception:
         return None
+    finally:
+        ex.shutdown(wait=False)  # 不等待僵尸线程，P0 修复
 
 
 async def run_sync(call, *args, timeout: int = DEFAULT_SYNC_TIMEOUT):
