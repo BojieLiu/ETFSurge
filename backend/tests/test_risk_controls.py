@@ -105,7 +105,8 @@ class TestAllocationEngine:
             "589980": {"momentum": 0.4, "quality": 0.2, "technical": 0.5},
             "589950": {"momentum": 0.3, "quality": 0.1, "technical": 0.4},
         }
-        result = allocate(factor_matrix, candidates, "bullish")
+        result = allocate(risk_profile="balanced", regime="bullish",
+                          factor_matrix=factor_matrix, candidates=candidates)
         assert isinstance(result, list)
         assert len(result) == 3  # 3 套方案
 
@@ -130,7 +131,8 @@ class TestAllocationEngine:
         factor_matrix = {c["symbol"]: {"momentum": 1.0 - i * 0.05, "technical": 0.8 - i * 0.03}
                          for i, c in enumerate(candidates)}
 
-        result = allocate(factor_matrix, candidates, "range_bound")
+        result = allocate(risk_profile="balanced", regime="range_bound",
+                          factor_matrix=factor_matrix, candidates=candidates)
         # 至少有两种策略的数量不同
         counts = [len(s.get("allocations", [])) for s in result]
         assert len(set(counts)) > 1, f"所有方案标的数相同: {counts}"
@@ -148,7 +150,8 @@ class TestAllocationEngine:
         ]
         factor_matrix = {c["symbol"]: {"momentum": 0.5, "technical": 0.5}
                          for c in candidates}
-        result = allocate(factor_matrix, candidates, "range_bound")
+        result = allocate(risk_profile="balanced", regime="range_bound",
+                          factor_matrix=factor_matrix, candidates=candidates)
         for strat in result:
             total_w = sum(a.get("weight", 0) for a in strat.get("allocations", []) if a["symbol"] != "CASH")
             assert total_w <= 1.0 + 1e-6, f"总权重 {total_w:.2f} 不应超过 1.0"

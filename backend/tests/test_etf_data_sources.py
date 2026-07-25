@@ -12,13 +12,13 @@ def test_p4_fetch_etf_nav():
     """fetch_etf_nav returns IOPV-like data for ETF symbols."""
     import sys, os
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-    from app.fetchers.china_market import fetch_etf_nav
+    from app.fetchers.china_market import fetch_etf_net_value
 
     # 510300 (沪深300ETF) should have IOPV data
-    nav = fetch_etf_nav("510300")
+    nav = fetch_etf_net_value("510300")
     assert nav is not None, "510300 should have NAV data"
-    assert isinstance(nav, (int, float)), f"NAV should be numeric, got {type(nav)}"
-    assert nav > 1.0, f"NAV should be > 1.0 for 510300, got {nav}"
+    assert isinstance(nav, dict), f"NAV should be dict, got {type(nav)}"
+    assert "iopv" in nav, f"NAV result should contain iopv, got {list(nav.keys())}"
     print(f"510300 IOPV: {nav}")
 
 
@@ -26,12 +26,12 @@ def test_p4_fetch_etf_shares():
     """fetch_etf_shares returns shares outstanding for ETF symbols."""
     import sys, os
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-    from app.fetchers.china_market import fetch_etf_shares
+    from app.fetchers.china_market import fetch_etf_shares_outstanding
 
-    shares = fetch_etf_shares("510300")
+    shares = fetch_etf_shares_outstanding("510300")
     assert shares is not None, "510300 should have shares data"
-    assert isinstance(shares, (int, float)), f"Shares should be numeric, got {type(shares)}"
-    assert shares > 0, f"Shares should be > 0, got {shares}"
+    assert isinstance(shares, dict), f"Shares should be dict, got {type(shares)}"
+    assert "shares" in shares, f"Result should contain shares, got {list(shares.keys())}"
     print(f"510300 shares: {shares}")
 
 

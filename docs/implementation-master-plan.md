@@ -1,8 +1,8 @@
 # ETF Surge 方案实施总计划
 
-> 生成日期: 2026-07-24 | 版本: v4.0
-> 总览 `docs/` 目录 **27 份**方案文档，梳理实施状态、冲突重叠、修复建议及分阶段执行路线。
-> v4.0 新增 4 份文档（`design-check-pipeline-redesign.md`、`design-check-quality-report.md`、`design-failure-and-strategy-check-review.md`、`async-boundary-fix-plan.md`）；Phase 0.7 确认 ✅ 已完成；新增 Phase 0.8（设计失败修复）、Phase 0.9（异步边界修复）、Phase 1.0（顺序管道重构）并全部标记 ✅ 已完成；重算剩余工作依赖与排序；更新附录全部表格。
+> 生成日期: 2026-07-25 | 版本: v4.1
+> 总览 `docs/` 目录 **28 份**方案文档，梳理实施状态、冲突重叠、修复建议及分阶段执行路线。
+> v4.1 新增 `remaining-issues-solution-design.md`（第 28 份），覆盖 3 个已知剩余问题的实现：TTL 缓存、混合归一化、渐进状态机、WS 超时+清理。Phase 2.1 中 S1-A、S1-C、S2、S3-B/C 已实施（staged）。更新文档状态表。
 
 ---
 
@@ -527,15 +527,17 @@ market-analysis-optimization-plan.md
 | 2.1.1 | P1-2: 防御层分类修复（跨境→卫星层） | design-check-quality §3 P1-2 | ~3行 | 无 |
 | 2.1.2 | P1-3: 强制标的进入分配（MANDATORY_MIN_WEIGHT） | design-check-quality §3 P1-3 | ~20行 | 无 |
 | 2.1.3 | P1-4: risk_controls.py 拼接 bug 修复 | design-check-quality §3 P1-4 | ~1行 | 无 |
-| 2.1.4 | P0-4: 因子分缓存失效判断（不缓存全零结果） | design-check-quality §3 P0-4 | ~15行 | 无 |
-| 2.1.5 | P2-1: 策略检查因子数据管道修复 | design-check-quality §3 P2-1 | ~30行 | Phase 0.9 |
+| 2.1.4 | ~~P0-4: 因子分缓存失效判断~~ → **S1-A: TTL 缓存** 已实现 | design-check-quality §3 P0-4 / remaining-issues §3-A | — | ✅ **已实施（staged）** |
+| 2.1.5 | ~~P2-1: 策略检查因子数据管道修复~~ → **S2: 混合归一化** 已实现 | design-check-quality §3 P2-1 / remaining-issues §2 | — | ✅ **已实施（`5116681`）** |
 | 2.1.6 | P2-2: holdings_analysis 注入 weight 字段 | design-check-quality §3 P2-2 | ~5行 | 无 |
 | 2.1.7 | P2-3: 策略检查摘要增强 | design-check-quality §3 P2-3 | ~10行 | 无 |
 | 2.1.8 | P2-4: target_weight 默认值 0.0 修复 | design-check-quality §3 P2-4 | ~1行 | 无 |
-| 2.1.9 | P3-1: 补关键模块单测（risk_controls/allocation_engine/strategy_check/sentiment） | design-check-quality §3 P3-1 | ~200行 | 2.1.0~2.1.8 |
-| 2.1.10 | P3-2: pre-commit 增加后端测试门禁 | design-check-quality §3 P3-2 | ~10行 | 无 |
-| 2.1.11 | P3-3: E2E 增加数据质量断言（因子分方差+方案差异+防御层） | design-check-quality §3 P3-3 | ~30行 | 无 |
-| 2.1.12 | P3-4: 数据管道健全性监控脚本 | design-check-quality §3 P3-4 | ~80行 | 无 |
+| 2.1.9 | **S1-C**: 渐进状态机（quick_ready + completed_with_errors） | remaining-issues §1-C / task_manager.py | — | ✅ **已实施（staged）** |
+| 2.1.10 | **S3-B/C**: WS broadcast timeout(5s) + stale conn cleanup(60s) | remaining-issues §3-B/C / ws.py | — | ✅ **已实施（staged）** |
+| 2.1.11 | **S3-B/C 测试**: test_solution_design_plan.py（V1-1~V3-3） | remaining-issues §验证 / tests/ | — | ✅ **已实施（staged）** |
+| 2.1.12 | P3-2: pre-commit 增加后端测试门禁 | design-check-quality §3 P3-2 | ~10行 | 无 |
+| 2.1.13 | P3-3: E2E 增加数据质量断言 | design-check-quality §3 P3-3 | ~30行 | 无 |
+| 2.1.14 | P3-4: 数据管道健全性监控脚本 | design-check-quality §3 P3-4 | ~80行 | 无 |
 
 **验证**: pytest 全 PASS + verify_e2e 含数据质量断言全 PASS + 防御层含黄金/国债
 
@@ -641,7 +643,7 @@ market-analysis-optimization-plan.md
 
 ## 5. 附录：各方案摘要
 
-### 5.1 文档状态速查表（v4.0 更新）
+### 5.1 文档状态速查表（v4.1 更新）
 
 | 文档 | 类型 | 状态 | 影响模块 | 关键阶段 | 备注 |
 |------|------|------|---------|:--------:|------|
@@ -667,6 +669,7 @@ market-analysis-optimization-plan.md
 | market-awareness-and-data-source-plan.md | 实施方案 | ❌ 未实施 | 路由 + Service + LLM | Phase 5.1 | §4 已转 roadmap；§5 待评估 |
 | news-pipeline-fix-plan.md | 修复方案 | ✅ P0 已实施；⚠️ P1 待做 | news_fetcher + NewsView.vue | Phase 1.1 | P0 ✅ Phase 0 |
 | optimization-plan-20260721.md | 实施方案 | ✅ **已实施 (Phase 0.5)** | etf_scanner + 前端 + 后端链路 | Phase 0.5 | 全部 8 项完成 |
+| **remaining-issues-solution-design.md** | **实施方案** | ✅ **已实施（staged）** | **pool_manager + task_manager + ws + factor_registry** | **Phase 2.1** | S1-A(TTL)、S1-C(渐进状态机)、S2(混合归一化)、S3-B/C(WS) |
 | review-20260720.md | 评审报告 | N/A | N/A | — | 非实施方案 |
 | roadmap-data-source-unified.md | 实施方案 | ❌ 未实施 | china_market + market_service + source_registry | Phase 4.1 | 替代三份原方案 |
 | sector-concept-optimization-plan.md | 实施方案 | ❌ 未实施 | market_trends + pool_manager + llm.py | Phase 1.1/6.1 | — |
@@ -780,3 +783,4 @@ Phase 7.1 (远期优化)             无紧急依赖
 | v2.0 | 2026-07-22 | 新增 3 份文档处理 + 新轨道 + 冲突分析；调整 Phase 0/1/2/3 |
 | v3.0 | 2026-07-23 | 新增 `design-pipeline-foundation-issues.md`（23 份文档）；Phase 0/0.5 标记 ✅ 完成；新增 Phase 0.7（12 项 P0/P1 修复）；修复 `five-improvements-plan.md` 内部状态不一致；新增 §2.7-2.11 冲突分析；新增 §3.5-3.8 修复方案；更新 §4 路线图；更新附录 |
 | v4.0 | 2026-07-24 | 新增 4 份文档（27 份总数）；Phase 0.7 确认 ✅；新增 Phase 0.8/0.9/1.0 全部 ✅；重算剩余 Phase 1.1~7.1 排序；新增 Phase 2.1（质量审计剩余项）；更新附录全部表格 + 依赖图 + 轨道总览；同步各方案文档状态 |
+| v4.1 | 2026-07-25 | 新增 `remaining-issues-solution-design.md`（28 份）；Phase 2.1 中 S1-A(TTL 缓存)、S1-C(渐进状态机)、S2(混合归一化)、S3-B/C(WS 清理+超时) 已实施（staged）；更新文档状态表 + 任务列表 |

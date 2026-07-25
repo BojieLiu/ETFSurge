@@ -1,6 +1,10 @@
 import asyncio
 import json
+import logging
+import time
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -9,6 +13,8 @@ class ConnectionManager:
     def __init__(self):
         self.active_connections: dict[str, list[WebSocket]] = {}
         self._lock = asyncio.Lock()
+        self._cleanup_interval = 60  # S3-C: 60s cleanup interval
+        self._last_cleanup = time.time()
 
     async def connect(self, websocket: WebSocket, channel: str = "market"):
         await websocket.accept()
@@ -22,15 +28,43 @@ class ConnectionManager:
             except ValueError:
                 pass
 
+    async def _cleanup_stale(self) -> None:
+        """S3-C: 扫描无效连接并清理。"""
+        now = time.time()
+        if now - self._last_cleanup < self._cleanup_interval:
+            return
+        self._last_cleanup = now
+        async with self._lock:
+            for channel, conns in list(self.active_connections.items()):
+                alive = []
+                for ws in conns:
+                    try:
+                        state = getattr(ws, 'client_state', None)
+                        name = state.name if state else "CONNECTED"
+                        if name == "CONNECTED":
+                            alive.append(ws)
+                        else:
+                            logger.debug("[ws] cleanup disconnected client from %s", channel)
+                    except Exception:
+                        alive.append(ws)
+                if len(alive) != len(conns):
+                    self.active_connections[channel] = alive
+                    logger.info("[ws] cleanup %s: removed %d stale conns",
+                                channel, len(conns) - len(alive))
+
     async def broadcast(self, channel: str, message: dict):
-        # 锁内快照，锁外逐个发送以避免持有锁期间 send_text 阻塞
+        """广播消息，每个客户端有 5s 超时保护（S3-B）。
+        同时每隔 60s 扫描无效连接并清理（S3-C）。"""
+        await self._cleanup_stale()
         async with self._lock:
             targets = list(self.active_connections.get(channel, []))
+        payload = json.dumps(message, ensure_ascii=False)
         for conn in targets:
             try:
-                await conn.send_text(json.dumps(message, ensure_ascii=False))
-            except Exception:
-                pass
+                await asyncio.wait_for(conn.send_text(payload), timeout=5.0)
+            except (asyncio.TimeoutError, Exception):
+                logger.debug("[ws] broadcast timeout/error on %s, disconnecting", channel)
+                await self.disconnect(conn, channel)
 
 
 manager = ConnectionManager()

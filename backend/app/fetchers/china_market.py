@@ -556,6 +556,8 @@ _GLOBAL_SINA_PAGE: dict[str, str] = {
     "^FTSE": "UKX",        # 英国富时100指数
     "^GDAXI": "DAX",       # 德国DAX指数
     "^FCHI": "CAC",        # 法国CAC40指数
+    "^KS11": "KOSPI",      # 韩国综合指数（KOSPI 即 KS11）
+    "^N225": "NKY",        # 日经225指数（Bloomberg 代码 NKY）
     "^STOXX50E": "SX5E",   # 欧元区Stoxx50指数
 }
 
@@ -637,32 +639,29 @@ def fetch_sina_page_global_index(symbol: str) -> dict[str, Any] | None:
         s = _session()
         s.headers.update({"Referer": "https://finance.sina.com.cn"})
         r = s.get(url, timeout=8)
-        text = r.text
-        # 页面标题格式: "指数名 price(change_pct)_指数_新浪财经"
-        title_start = text.find("<title>")
-        title_end = text.find("</title>")
-        if title_start < 0 or title_end < 0:
+        # 使用原始字节搜索价格，绕过 requests 编码检测偏差（ISO-8859-1 vs GBK）
+        raw = r.content
+        ts = raw.find(b"<title>")
+        te = raw.find(b"</title>")
+        if ts < 0 or te < 0:
             return None
-        title = text[title_start + 7:title_end]
+        title_bytes = raw[ts + 7:te]
 
         import re
-        # 从标题中提取 price 和 change_pct
-        # 格式示例: "英国富时100指数 10639.170000(-0.730000)"
-        m = re.search(r"([\d.]+)\(([-+]\d+[.]?\d*)\)", title)
+        # 价格和涨跌幅在 title 中是纯 ASCII，在原始字节中直接匹配
+        # 注意 change_pct 正数无 + 号，故 [-+] 改为 [-+]?
+        m = re.search(rb"([\d.]+)\(([-+]?\d+[.]?\d*)\)", title_bytes)
         if not m:
             return None
-        price = float(m.group(1))
-        change_pct = float(m.group(2))
+        price = float(m.group(1).decode())
+        change_pct = float(m.group(2).decode())
+
         prev_close = price / (1 + change_pct / 100) if change_pct != -100 else None
         change_amount = round(price - prev_close, 2) if prev_close else None
 
-        # 提取指数名
-        name_parts = title.split()
-        name = name_parts[0] if name_parts else ""
-
         return {
             "symbol": symbol,
-            "name": name,
+            "name": "",
             "price": price,
             "change_pct": change_pct,
             "change_amount": change_amount,

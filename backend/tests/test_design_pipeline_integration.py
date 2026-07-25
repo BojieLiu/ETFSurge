@@ -136,7 +136,8 @@ class TestDesignPipeline:
         await design_pipeline(mgr, task_id=1)
 
         t = mgr.get_task(1)
-        assert t["status"] == "completed"
+        # S1-C: LLM 超时 → completed_with_errors（方案仍然可用）
+        assert t["status"] == "completed_with_errors"
         assert t["progress"] == 100
         assert t["result"]["report_quality"] == "fallback"
         assert t["result"]["design_id"] == 1002

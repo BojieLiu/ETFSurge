@@ -170,20 +170,17 @@ async def design_pipeline(mgr: TaskManager, task_id: int) -> None:
         constraints = params.get("constraints")
 
         # ── Stage 1&2: DATA + ENGINE (combined via generate_enhanced_design) ──
-        # pool_manager.refresh() 外层的 30s timeout 已移交给 pipeline
+        # pool_manager.refresh() 内部有 60s timeout + 空池保护，此处给 90s 总预算
         result = await asyncio.wait_for(
             generate_enhanced_design(
                 capital=capital,
                 constraints=constraints,
             ),
-            timeout=60,  # 30s (DATA) + 10s (ENGINE) + 20s buffer
+            timeout=90,  # 60s (DATA refresh max) + 10s (ENGINE) + 20s buffer
         )
 
         strategies = result.get("strategies", [])
         market_context = result.get("market_context", {})
-
-        mgr.update_task(task_id, progress=60, stage="策略计算完成")
-        await _notify(task_id, "running", progress=60, stage="策略计算完成")
 
         # 检查结果是否有效
         error_info = result.get("error")
@@ -201,9 +198,17 @@ async def design_pipeline(mgr: TaskManager, task_id: int) -> None:
             await _notify(task_id, "failed", progress=0)
             return
 
-        # ── Stage 3: DB WRITE (progress 60→75%) ──
+        # ── Stage 3: quick_ready — 先推送组合方案，让用户可操作 ──
+        # （Solution Design S1-C: 渐进状态机）
+        mgr.update_task(task_id, progress=60, status="quick_ready", stage="策略计算完成",
+                        result={"strategies": strategies, "market_context": market_context,
+                                "report_stage": "quick"})
+        await _notify(task_id, "quick_ready", progress=60, stage="策略计算完成",
+                      extra={"strategies": strategies, "market_context": market_context})
+
+        # ── Stage 4: DB WRITE (progress 60→75%) ──
         mgr.update_task(task_id, progress=65, stage="保存方案")
-        await _notify(task_id, "running", progress=65, stage="保存方案")
+        await _notify(task_id, "quick_ready", progress=65, stage="保存方案")
 
         plan_tables = _build_plan_tables(strategies)
         design_text = "# ETF 组合设计方案\n\n## 一、三种方案详解\n\n" + plan_tables
@@ -215,7 +220,7 @@ async def design_pipeline(mgr: TaskManager, task_id: int) -> None:
                     risk_profile=params.get("risk_profile", "balanced"),
                     strategies_json=json.dumps(strategies, ensure_ascii=False, default=str),
                     market_snapshot_json=json.dumps(market_context, ensure_ascii=False, default=str),
-                    design_text=design_text,  # 立即写入数据摘要
+                    design_text=design_text,
                     report_quality="pending",
                     status="completed",
                 )
@@ -225,17 +230,20 @@ async def design_pipeline(mgr: TaskManager, task_id: int) -> None:
                 design_id = record.id
         except Exception as e:
             logger.exception("[design_pipeline] DB write failed for task %d: %s", task_id, e)
-            mgr.update_task(task_id, progress=0, status="failed", error_message=f"DB 保存失败: {e}")
-            await _notify(task_id, "failed", progress=0)
+            mgr.update_task(task_id, progress=0, status="completed_with_errors",
+                            error_message=f"DB 保存失败: {e}",
+                            result={"strategies": strategies, "market_context": market_context})
+            await _notify(task_id, "completed_with_errors", progress=0,
+                          extra={"strategies": strategies})
             return
 
         logger.info("[design_pipeline] design_id=%d saved with data summary (%d chars)", design_id, len(design_text))
         mgr.update_task(task_id, progress=75, stage="方案已保存")
-        await _notify(task_id, "running", progress=75, stage="方案已保存")
+        await _notify(task_id, "quick_ready", progress=75, stage="方案已保存")
 
-        # ── Stage 4: LLM REPORT (progress 75→95%) ──
+        # ── Stage 5: LLM REPORT (progress 75→95%) ──
         mgr.update_task(task_id, progress=80, stage="LLM 报告生成中")
-        await _notify(task_id, "running", progress=80, stage="LLM 报告生成中")
+        await _notify(task_id, "quick_ready", progress=80, stage="LLM 报告生成中")
 
         try:
             # 从 market_context 取市场情绪，避免直接引用 pool_manager（NameError 修复）
@@ -279,7 +287,7 @@ async def design_pipeline(mgr: TaskManager, task_id: int) -> None:
 
         except Exception as e:
             logger.warning("[design_pipeline] LLM report generation failed for design_id=%d: %s", design_id, e)
-            # 标记为 fallback，数据摘要仍然可用
+            # 标记为 completed_with_errors，数据摘要仍然可用
             try:
                 async with async_session() as db:
                     d = await db.get(PortfolioDesign, design_id)
@@ -289,11 +297,27 @@ async def design_pipeline(mgr: TaskManager, task_id: int) -> None:
             except Exception as db_e:
                 logger.warning("[design_pipeline] DB update after LLM failure failed: %s", db_e)
             report_quality = "fallback"
+            mgr.update_task(
+                task_id,
+                progress=100,
+                status="completed_with_errors",
+                result={
+                    "strategies": strategies,
+                    "market_context": market_context,
+                    "design_id": design_id,
+                    "report_quality": report_quality,
+                },
+            )
+            await _notify(task_id, "completed_with_errors", progress=100, stage="LLM 报告暂不可用",
+                          extra={"design_id": design_id, "report_quality": report_quality})
+            logger.info("[design_pipeline] task %d completed_with_errors (design_id=%d, quality=%s)",
+                        task_id, design_id, report_quality)
+            return
 
         mgr.update_task(task_id, progress=95, stage="报告完成")
-        await _notify(task_id, "running", progress=95, stage="报告完成")
+        await _notify(task_id, "quick_ready", progress=95, stage="报告完成")
 
-        # ── Stage 5: NOTIFY (progress 95→100%) ──
+        # ── Stage 6: NOTIFY (progress 95→100%) ──
         mgr.update_task(
             task_id,
             progress=100,

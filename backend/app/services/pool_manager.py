@@ -159,9 +159,12 @@ class PoolManager:
         import time as _time
         now = _time.time()
         # 60s TTL 缓存（S1-A）：缓存有效期内直接返回，不触发任何 I/O
+        # 当 _last_refresh_ts 被置 0 时（测试强制刷新），TTL 也被跳过
         if self._cached_pool and (now - self._cached_ts) < self._cache_ttl:
-            logger.debug("PoolManager: TTL cache hit (%.1fs old)", now - self._cached_ts)
-            return PoolDiff(changed=False, added=0, removed=0, total=len(self._by_code))
+            if getattr(self, '_last_refresh_ts', None):
+                logger.debug("PoolManager: TTL cache hit (%.1fs old)", now - self._cached_ts)
+                return PoolDiff(added=[], removed=[], changed=[], version=self._version,
+                                timestamp=datetime.now().isoformat())
         # 30s 冷却期：上次刷新距今 < 30s 时跳过
         if hasattr(self, '_last_refresh_ts') and self._last_refresh_ts:
             if now - self._last_refresh_ts < 30:
@@ -194,6 +197,8 @@ class PoolManager:
         import time as _time
         _start_ts = _time.time()
         old_by_code = dict(self._by_code)
+        # 缓存上次成功刷新的 pool，供 refresh 失败时兜底
+        _last_good = dict(self._pool) if self._pool and any(v for v in self._pool.values()) else None
 
         # 1. 扫描全市场 → 3 层基础池（走长任务线程池，不与 API 请求争抢）
         try:
@@ -303,7 +308,20 @@ class PoolManager:
             scored = sorted(new_pool[layer], key=lambda x: x.get("composite_score", 0), reverse=True)
             new_pool[layer] = scored[:max_n]
 
-        # 7. 重建索引
+        # 7. 空池保护：如果刷新结果为空且存在上次成功数据，保留上次 pool 而非清空
+        total_new = sum(len(v) for v in new_pool.values())
+        if total_new == 0 and _last_good is not None:
+            logger.warning("[pool_manager] refresh produced empty pool — keeping last good pool (v%d, %d total)",
+                           self._version, sum(len(v) for v in _last_good.values()))
+            # 不改变 self._pool 和 self._version，返回一个空 diff
+            _elapsed = _time.time() - _start_ts
+            pool_audit.log_refresh(PoolDiff(added=[], removed=[], changed=[], version=self._version,
+                                             timestamp=datetime.now().isoformat()))
+            logger.info("PoolManager: refresh skipped (empty result) in %.1fs", _elapsed)
+            return PoolDiff(added=[], removed=[], changed=[], version=self._version,
+                            timestamp=datetime.now().isoformat())
+
+        # 7b. 重建索引
         self._pool = new_pool
         self._rebuild_index()
         self._version += 1

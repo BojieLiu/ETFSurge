@@ -85,11 +85,19 @@ class TestFilterEtfs:
         assert "999999" not in codes, "迷你债ETF (low amount) should be filtered out"
 
     def test_filter_etfs_drops_pure_bonds(self):
-        """Pure bond / money-market ETFs must be excluded."""
+        """Pure bond / money-market ETFs must be excluded (P1-2: 国债ETF kept as defense)."""
         raw = _make_mock_raw_list()
         result = filter_etfs(raw)
         codes = {r["symbol"] for r in result}
-        assert "511090" not in codes, "国债ETF should be filtered out as pure bond"
+        # P1-2: 国债ETF is defense layer asset, NOT filtered out
+        assert "511090" in codes, "国债ETF (511090) is a defense layer asset and should NOT be filtered"
+        # 国开债/城投债/信用债/可转债 should still be excluded
+        raw_bond = raw + [{"代码": "511200", "名称": "国开债ETF", "最新价": 101.0,
+                           "涨跌幅": 0.01, "成交额": 5_000_000, "成交量": 50_000,
+                           "换手率": 0.1, "流通市值": 5.0, "总市值": 5.0}]
+        result2 = filter_etfs(raw_bond)
+        codes2 = {r["symbol"] for r in result2}
+        assert "511200" not in codes2, "国开债ETF should be filtered out as pure bond"
 
     def test_filter_etfs_from_dataframe(self):
         """filter_etfs must accept pd.DataFrame input."""

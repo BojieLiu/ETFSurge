@@ -135,8 +135,34 @@ class TestPoolManager:
         assert diff2.version == diff1.version + 1
 
     @pytest.mark.asyncio
-    async def test_empty_scanner_returns_empty_pool(self, mock_classifier):
-        """扫描器返回空时池也应为空"""
+    async def test_empty_scanner_preserves_existing_pool(self, pool_manager):
+        """扫描器返回空时不应清空已有候选池（last-good 保护）
+
+        先刷新一次建立池子，第二次 refresh 模拟扫描器失败，
+        断言：池子保留上次成功数据，版本号不变。
+        """
+        # 先成功刷新一次，建立候选池
+        diff1 = await pool_manager.refresh()
+        assert diff1.version == 1
+        pool_before = pool_manager.get_pool()
+        before_total = sum(len(v) for v in pool_before.values())
+        assert before_total > 0
+
+        # 第二次 refresh：模拟扫描器返回空（数据源故障）
+        pool_manager.scanner.full_pipeline.return_value = {"core": [], "satellite": [], "defense": []}
+        pool_manager._last_refresh_ts = 0.0  # 清除冷却期
+        diff2 = await pool_manager.refresh()
+
+        # 断言：池子未被清空，保留上次成功数据
+        pool_after = pool_manager.get_pool()
+        after_total = sum(len(v) for v in pool_after.values())
+        assert after_total == before_total, "空池保护失败：扫描器故障后候选池被清空"
+        # 版本号不应递增（refresh 返回空结果时跳过版本变更）
+        assert pool_manager._version == 1
+
+    @pytest.mark.asyncio
+    async def test_empty_scanner_first_call_returns_empty(self, mock_classifier):
+        """首次调用时扫描器就返回空 → 池为空（无 last-good 可保留）"""
         from app.services.pool_manager import PoolManager
         pm = PoolManager()
         pm.scanner = MagicMock()
@@ -145,8 +171,7 @@ class TestPoolManager:
         diff = await pm.refresh()
         pool = pm.get_pool()
         total = sum(len(v) for v in pool.values())
-        assert total == 0  # 没有 MANDATORY_CODES 时为空
-        # 但强制保留的 MANDATORY_CODES 不应出现在空池中（扫描失败应报错）
+        assert total == 0  # 没有历史数据，只能返回空
         assert diff.version == 1
 
     @pytest.mark.asyncio

@@ -1,9 +1,10 @@
 # 组合设计与策略检查全链路分析与重构方案
 
-**版本:** v1.2  
-**日期:** 2026-07-24  
+**版本:** v1.3  
+**日期:** 2026-07-25  
 **状态:** ✅ **已实施**（2026-07-24 在 commit `4ff6084` 中落地）  
 **实施说明:** 参见 `docs/implementation-master-plan.md` § Phase 1.0。所有 3 个 Phase（核心修复 + 架构清理 + 测试防护）均已完成。关键 commit: `4ff6084`（管道重构）+ `7e93321`（前端 report_quality 状态驱动）。12 文件改动，588 行新增。  
+**后续增强（2026-07-25 staged）:** 新增 S1-C 渐进状态机——Stage 2 完成后推送 `quick_ready` 状态，前端可提前展示组合方案；LLM/DB 失败时使用 `completed_with_errors` 而非 `failed`，保护已生成的策略数据。参见 `remaining-issues-solution-design.md` §1-C。  
 **审阅记录:** 并行架构评审（4 条 MAJOR + 4 条 MINOR）+ 代码验证（1 条 ERROR + 5 条 MISSING）— 全部已整合至 v1.1，v1.1 已全部实施  
 **范围:** 从用户点击「开始设计」/「策略检查」到前端展示结果的全链路
 

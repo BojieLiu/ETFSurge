@@ -5,6 +5,9 @@
       <h3 class="loading-title">生成失败</h3>
       <p class="loading-text">{{ failed }}</p>
       <p class="loading-hint">3 秒后将返回设置页，请检查后端服务是否正常运行</p>
+      <div class="panel-footer" style="margin-top:20px;text-align:center">
+        <AppButton variant="ghost" size="sm" @click="$emit('cancel')">&#8592; 返回</AppButton>
+      </div>
     </div>
     <div v-else class="feature-card loading-card">
       <div class="loading-spinner-pulse"></div>
