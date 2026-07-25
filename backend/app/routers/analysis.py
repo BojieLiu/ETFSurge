@@ -83,6 +83,7 @@ class NewsImpactRequest(BaseModel):
 
 class LLMReportRequest(BaseModel):
     symbols: list[str] | None = None
+    market: str = "A"
 
 
 # _fetch_all_market 已废弃 — 数据管道统一在编排器中采集
@@ -137,7 +138,17 @@ async def llm_report(req: LLMReportRequest):
     if req.symbols:
         market_data = [m for m in market_data if m.get("symbol") in req.symbols]
     else:
-        major_symbols = {"000001", "399001", "399006", "000688", "000300", "510050", "510300", "510500", "159915"}
+        market = req.market
+        if market == "A":
+            major_symbols = {"000001", "399001", "399006", "000688", "000300", "510050", "510300", "510500", "159915"}
+        elif market == "HK":
+            major_symbols = {"HSI", "HSCEI", "00700", "09988", "02800"}
+        elif market == "US":
+            major_symbols = {"SPX", "IXIC", "SPY", "QQQ", "AAPL"}
+        elif market == "global":
+            major_symbols = {"000001", "HSI", "SPX", "IXIC", "GC=F", "CL=F"}
+        else:
+            major_symbols = {"000001", "399001", "399006", "000688", "000300"}
         market_data = [m for m in market_data if m.get("symbol", "") in major_symbols or m.get("asset_type", "") in ("index", "futures")]
 
     indicators = {}
@@ -404,13 +415,49 @@ async def llm_report_stream(req: LLMReportRequest):
 
 @router.post("/llm-advice/stream")
 async def llm_advice_stream(query: str = Query(...), context: dict | None = None):
-    """流式投资建议问答"""
+    """流式投资建议问答 — 自动注入市场数据。"""
+    from ..services.pool_manager import pool_manager
+    from ..analysis.llm import _build_advice_stream_prompt
+    from ..fetchers.news_fetcher import fetch_news_headlines, fetch_macro_news
+
+    ctx = dict(context or {})
+
     try:
-        prompt = f"用户提问: {query}\n\n"
-        if context:
-            prompt += f"上下文信息: {json.dumps(context, ensure_ascii=False)}\n\n"
-        prompt += "请给出专业、简洁的回答，控制在 500 字以内，使用 Markdown 格式"
-        
+        ctx["market_regime"] = pool_manager.get_market_regime() or ""
+        sent = pool_manager.get_market_sentiment() or {}
+        ctx["market_sentiment"] = sent
+
+        idx_data = pool_manager.get_index_realtime() or []
+        ctx.setdefault("market_data", []).extend(idx_data[:8])
+
+        sector_data = pool_manager.get_sector_momentum() or []
+        for s in sector_data[:5]:
+            ctx.setdefault("market_data", []).append({
+                "name": s.get("name"),
+                "change_pct": s.get("change_pct"),
+                "asset_type": "sector",
+            })
+
+        news_items = fetch_news_headlines() or []
+        try:
+            macro_items = fetch_macro_news() or []
+            news_items.extend(macro_items)
+        except Exception:
+            pass
+        ctx["news"] = (ctx.get("news") or []) + (news_items or [])[:10]
+
+        try:
+            from ..services.portfolio_service import get_all_holdings
+            portfolio_items = get_all_holdings()
+            if portfolio_items:
+                ctx["portfolio"] = portfolio_items[:10]
+        except Exception:
+            pass
+    except Exception as e:
+        logger.debug("[llm-advice-stream] data injection: %s", e)
+
+    try:
+        prompt = _build_advice_stream_prompt(query, ctx)
         agent = get_agent("advice")
         return _sse_stream(agent.run_stream(prompt))
     except Exception as e:

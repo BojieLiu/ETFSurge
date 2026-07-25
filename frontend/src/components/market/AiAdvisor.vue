@@ -33,7 +33,7 @@
 <script setup>
 import { ref } from 'vue'
 import { renderMarkdown } from '../../utils/markdown'
-import { analysisApi } from '../../api'
+import { useLLMStream } from '../../composables/useLLMStream'
 
 defineProps({ marketTab: { type: String, default: 'A' } })
 
@@ -41,6 +41,7 @@ const query = ref('')
 const response = ref('')
 const loading = ref(false)
 const error = ref('')
+const { start: startStream } = useLLMStream()
 
 async function send() {
   const q = query.value.trim()
@@ -49,13 +50,9 @@ async function send() {
   response.value = ''
   error.value = ''
   try {
-    const res = await analysisApi.llmAdvice(q, {
-      include_market_data: true,
-      include_news: true,
-      portfolio_symbols: [],
-      market: 'A',
+    await startStream('/llm-advice/stream', { query: q }, (token) => {
+      response.value += token
     })
-    response.value = res.data.advice || res.data
   } catch (e) {
     error.value = '提问失败：' + (e?.message || '网络错误')
   } finally {
