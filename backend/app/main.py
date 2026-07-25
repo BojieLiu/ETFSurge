@@ -104,7 +104,7 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_warmup_global_indices())
 
     # 启动时预热 ETF 缓存（非阻塞），带超时保护
-        async def _warmup_etf_cache():
+    async def _warmup_etf_cache():
         try:
             from app.fetchers.etf_scanner import fetch_all_etfs_base
             result = await asyncio.wait_for(
