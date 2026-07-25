@@ -1,21 +1,25 @@
 # 组合设计报告生成链路优化方案
 
 > 基于五份评估反馈（2026-07-19）的系统性分析
-
----
+>
+> **⚠️ 2026-07-25 审计更新：代码架构已从 strategy_design.py（1092 行）重构至 engine/ 纯函数包。
+> 以下改动方案中所有 strategy_design.py 引用均已过时，需映射至 engine/allocation_engine.py 和 engine/rationale.py。
+> 当前实施状态：A1 ✅ / A2 ✅ / A3 ✅ / B3 ✅ 已在代码中完成（隐式通过 engine/ 重构实现）；
+> B1 🟡 / B2 🟡 需适配 engine/rationale.py 新接口实施；
+> C1 🟡 / C2 🟡 需重新评估 pool_manager 接口。**
 
 ## 一、问题总览
 
-| 编号 | 问题 | 严重级 | 根因文件 | 关联功能模块 |
-|------|------|--------|---------|-------------|
-| A1 | "因子"列含义不明，读者误以为代表涨跌幅 | **P0** | `design_report.py:106` | 表格渲染 |
-| A2 | 预期收益未随市场状态调整，恐慌行情下明显偏高 | **P0** | `strategy_design.py:950` | 组合构建 |
-| A3 | 510880 误标为"红利低波ETF"，实为红利ETF（上证红利） | **P0** | `strategy_design.py:85` | 候选池 |
-| B1 | 黄金ETF入选理由缺少近3月实际跌幅引用，避险判断过时 | P1 | `strategy_design.py:546` | 入选理由生成 |
-| B2 | 30年国债ETF未提示利率反弹久期风险 | P1 | `strategy_design.py:548` | 入选理由生成 |
-| B3 | 缺少量化企稳判定标准（"等待企稳信号"模糊） | P1 | `design_report.md` | LLM prompt |
-| C1 | 遗漏ETF全市场净流入2290亿的积极信号 | P2 | `strategy_design.py:720` | 数据采集 |
-| C2 | 卫星层缺乏宽基科技ETF（科创50/创业板）分散选项 | P2 | `strategy_design.py:838` | 卫星选择 |
+| 编号 | 问题 | 严重级 | 当前状态 | 实际代码位置（engine/ 架构） | 关联功能模块 |
+|------|------|--------|:--------:|----------------------------|-------------|
+| A1 | "因子"列含义不明，读者误以为代表涨跌幅 | **P0** | ✅ 已实施 | `design_report.py:109-134` 表头为"多因子评分"，含"今日涨跌"列+脚注 | 表格渲染 |
+| A2 | 预期收益未随市场状态调整，恐慌行情下明显偏高 | **P0** | ✅ 已实施 | `engine/budgets.py:117` `adjust_expected_return()` | 组合构建 |
+| A3 | 510880 误标为"红利低波ETF"，实为红利ETF（上证红利） | **P0** | ✅ 已实施 | `engine/allocation_engine.py:90-91` 512890在core、560600替换510500 | 候选池 |
+| B1 | 黄金ETF入选理由缺少近3月实际跌幅引用，避险判断过时 | P1 | 🟡 待实施 | `engine/rationale.py:60-63` 黄金分支待增强 | 入选理由生成 |
+| B2 | 30年国债ETF未提示利率反弹久期风险 | P1 | 🟡 待实施 | `engine/rationale.py:64-65` 国债分支待增加久期提示 | 入选理由生成 |
+| B3 | 缺少量化企稳判定标准（"等待企稳信号"模糊） | P1 | ✅ 已实施 | `analysis/prompts/v1/design_report.md` 已含"必含：量化操作建议" | LLM prompt |
+| C1 | 遗漏ETF全市场净流入2290亿的积极信号 | P2 | 🟡 待评估（新接口） | `engine/allocation_engine.py` + pool_manager 需新增 fund_flow 管道 | 数据采集 |
+| C2 | 卫星层缺乏宽基科技ETF（科创50/创业板）分散选项 | P2 | 🟡 待评估（新接口） | `engine/allocation_engine.py` 需增加科技集中度检测→自动引入科创50 | 卫星选择 |
 
 ---
 
@@ -370,28 +374,31 @@ if tech_weight > s_budget * 0.6 and "588000" not in {h.get("symbol") for h in ho
 
 ---
 
-## 十、实施顺序
+## 十、实施顺序（2026-07-25 更新）
 
-| 优先级 | 任务 | 预估工时 | 依赖 |
-|--------|------|---------|------|
-| **P0-1** | A3: 核心层双替换（510500→560600 + 510880→512890） | 20min | 无 |
-| **P0-2** | A1: 表格"因子"→"多因子评分"+新增"今日涨跌"列 | 30min | 无 |
-| **P0-3** | A2: 预期收益 regime 调整 | 20min | 无 |
-| P1-1 | B3: LLM prompt 量化规则升级 | 10min | 无 |
-| P1-2 | B1: 黄金入选理由优化 | 10min | A3之后（避免冲突） |
-| P1-3 | B2: 国债久期风险提示 | 5min | 无 |
-| P2-1 | C1: 全市场资金流汇总 | 15min | 无 |
-| P2-2 | C2: 卫星层宽基科技ETF | 20min | A3之后 |
+| 优先级 | 任务 | 状态 | 实际代码位置 | 预估工时 | 依赖 |
+|--------|------|:----:|-------------|:--------:|------|
+| **P0-1** | A3: 核心层双替换（510500→560600 + 510880→512890） | ✅ 已实施 | `engine/allocation_engine.py:83-91` | — | 无 |
+| **P0-2** | A1: 表格"因子"→"多因子评分"+新增"今日涨跌"列 | ✅ 已实施 | `tasks/design_report.py:109-134` | — | 无 |
+| **P0-3** | A2: 预期收益 regime 调整 | ✅ 已实施 | `engine/budgets.py:117` | — | 无 |
+| P1-1 | B3: LLM prompt 量化规则升级 | ✅ 已实施 | `analysis/prompts/v1/design_report.md` | — | 无 |
+| P1-2 | B1: 黄金入选理由优化 | 🟡 待实施 | `engine/rationale.py:60-63`（适配新接口） | ~10行 | 无 |
+| P1-3 | B2: 国债久期风险提示 | 🟡 待实施 | `engine/rationale.py:64-65`（适配新接口） | ~3行 | 无 |
+| P2-1 | C1: 全市场资金流汇总 | 🟡 待评估 | pool_manager + allocation_engine | ~30行 | 无 |
+| P2-2 | C2: 卫星层宽基科技ETF | 🟡 待评估 | `engine/allocation_engine.py` | ~15行 | 无 |
 
-> P0 三任务无相互依赖，可并行实施。
+> P0 三任务 + B3 均已隐式完成。B1/B2 为本次实施内容。C1/C2 需后续轮次。
 
 ---
 
-## 十一、验证策略
+## 十一、验证策略（2026-07-25 更新）
 
-| 改动 | 验证方式 |
-|------|---------|
-| A3 | `python -m pytest tests/test_strategy_design.py` — 确认 512890 通过，测试中 510880 引用已更新 |
-| A1 | 前端查看任一设计报告的方案卡片表格，确认表头正确、涨跌幅列显示 |
-| A2 | 在 correction/bear regime 下生成设计，确认预期年化被下调 |
-| A1+A2+A3 | `python scripts/verify_e2e.py` — 全链路验证 |
+| 改动 | 状态 | 验证方式 |
+|------|:----:|---------|
+| A3 | ✅ 已实施 | `engine/allocation_engine.py` 验证 560600/512890 在 MANDATORY_CODES 和 _DEFAULT_CANDIDATES 中 |
+| A1 | ✅ 已实施 | 前端查看设计报告方案表头为"多因子评分"，含"今日涨跌"列 |
+| A2 | ✅ 已实施 | 查看 `adjust_expected_return` 在 budgets.py，引擎输出含 `expected_return_current` |
+| B3 | ✅ 已实施 | 确认 design_report.md prompt 含"必含：量化操作建议" |
+| B1 | 🟡 待实施 | `python -m pytest tests/ -k "rationale"` + 查看黄金 ETF 入选理由含近3月跌幅 |
+| B2 | 🟡 待实施 | `python -m pytest tests/ -k "rationale"` + 查看国债 ETF 入选理由含久期提示 |
+| A1+A2+A3+B3+B1+B2 | ✅/🟡 | `python scripts/verify_e2e.py` — 全链路验证 |

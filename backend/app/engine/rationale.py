@@ -83,8 +83,16 @@ def build_rationale(
         parts.append(f"{asset_name} — 高股息低波动，适合底仓配置")
     elif "黄金" in asset_name:
         parts.append(f"{asset_name} — 贵金属避险资产，与权益低相关")
+        # B1: 使用动量因子作为近期跌幅的代理指标
+        momentum_val = factor_scores.get("momentum")
+        if momentum_val is not None and momentum_val < -0.5:
+            parts.append("近月承压（动量偏弱），短期避险功能受限但长期配置价值仍在")
+        else:
+            parts.append("用于对冲权益极端系统性风险和地缘政治风险")
     elif "国债" in asset_name:
         parts.append(f"{asset_name} — 利率债，货币宽松周期受益")
+        # B2: 增加久期风险提示
+        parts.append("久期较长，若稳增长政策加码利率反弹则承压")
     else:
         ind = industry or meta.get("industry") or "行业"
         parts.append(f"{asset_name} — {ind}方向")
