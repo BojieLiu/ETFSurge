@@ -2,7 +2,7 @@
 
 > 生成日期: 2026-07-25 | 版本: v6.1
 > 总览 `docs/` 目录 **30 份**方案文档，梳理实施状态、冲突重叠、修复建议及分阶段执行路线。
-> v6.1 基于 v6.0 后代码审计更新：Phase 2.5 设计报告项 A1/A2/A3 已在 engine/ 架构中隐式完成，B3 已在 LLM prompt 中完成；B1/B2 待适配新 architecture 实施；C1/C2 需重新评估池管理器接口。
+> v6.1 基于 v6.0 后代码审计更新：Phase 2.5 设计报告项 A1/A2/A3 ✅ + B1/B2 ✅（commit 584ad20）+ B3 ✅；C1/C2 需重新评估池管理器接口。
 > Phase 2.2→2.4 全部完成——26/26 核心因子全 LIVE（原 15/26→26/26）、7 个脚手架因子从 0→非零、因子健康端点 + 因子单测门禁 + 运行时因子断言、分配器质量修复（ln_mcap 排毒、C2 条件修正、segment 归一化去重、预算重调、cross-section z-score 重归一化）。新增 Phase 2.5（原质量防护网 + AI 分析）。
 > 新增文档 2 份：`scaffold-factor-resolution-plan.md`（第 29 份，✅ 已实施）、`design-quality-review-20260725.md`（第 30 份，审计报告）。
 > 💡 **关键依赖变化**：因子数据从 "15/26 LIVE" → **26/26 全 LIVE**。无剩余 Block 项。
@@ -648,23 +648,21 @@ market-analysis-optimization-plan.md
 
 **前置依赖**: Phase 0.7~1.0 完成；Phase 2.1 ✅ + Phase 2.2 ✅ + Phase 2.3 ✅ + Phase 2.4 ✅ 全部完成
 
-| # | 任务 | 源文档 | 预估工时 | 前置依赖 |
-|---|------|--------|---------|---------|
 | # | 任务 | 源文档 | 状态 | 预估工时 | 前置依赖 |
 |---|------|--------|:----:|:-------:|---------|
 | 2.5.1 | AppButton/AppCard/AppTabs/AppInput/AppModal 单测 | frontend-testing-safety-net Phase A | ❌ 未完成 | 4h | 无 |
 | 2.5.2 | useDashboardData composable 单测 | frontend-testing-safety-net Phase B | ❌ 未完成 | 1h | 无 |
 | 2.5.3 | E2E spec 扩充到 10-15 条 | frontend-testing-safety-net Phase B/C | ❌ 未完成 | 6h | 无 |
-| 2.5.4 | verify_e2e.py 全局指数检查修复 | fix-global-indices-plan 根因 #7 | ✅ 已实施（verify_e2e.py 有完整指数 schema/区域/价格检查） | 0.5h | 无 |
-| 2.5.5 | market-analysis Phase C（前端 UnifiedAnalysis 合并组件） | market-analysis §5 | ❌ 未完成 | 4-5h | Phase 1.1.8+1.1.9 (A+B) |
+| 2.5.4 | verify_e2e.py 全局指数检查修复 | fix-global-indices-plan 根因 #7 | ✅ 已实施 | 0.5h | 无 |
+| 2.5.5 | market-analysis Phase C（前端 UnifiedAnalysis 合并组件） | market-analysis §5 | ❌ 未完成 | 4-5h | Phase 1.1.8+1.1.9 |
 | 2.5.6 | market-analysis Phase D（AI 顾问流式+数据管道） | market-analysis §6 | ❌ 未完成 | 2-3h | 无（可并行） |
 | 2.5.7 | market-analysis Phase E（市场报告质量提升） | market-analysis §7 | ❌ 未完成 | 2-3h | 无（可并行） |
-| 2.5.8 | design-report A1+A2+A3：表格渲染+预期收益+核心层替换 | `design-report-optimization-plan.md` A1/A2/A3 | ✅ 已实施（engine/ 架构中完成：A1 表头"多因子评分"+今日涨跌列+脚注；A2 adjust_expected_return 在 budgets.py；A3 560600/512890 在 allocation_engine.py） | — | Phase 0.7 B1 |
-| 2.5.9 | design-report B1：黄金 ETF 入选理由动态 3 月跌幅引用 | `design-report-optimization-plan.md` B1 | 🟡 待实施（适配 engine/rationale.py 新架构） | ~10行 | 无 |
-| 2.5.10 | design-report B2：30年国债 ETF 久期风险提示 | `design-report-optimization-plan.md` B2 | 🟡 待实施（适配 engine/rationale.py 新架构） | ~3行 | 无 |
-| 2.5.11 | design-report B3：LLM prompt 量化规则升级 | `design-report-optimization-plan.md` B3 | ✅ 已实施（design_report.md 已包含"必含：量化操作建议"+卫星层指引） | — | 无 |
-| 2.5.12 | design-report C1：全市场净流入信号注入 | `design-report-optimization-plan.md` C1 | 🟡 待评估（代码已重构至 engine/ + pool_manager，需重新评估接口） | ~30行 | 无 |
-| 2.5.13 | design-report C2：卫星层增加科技 ETF 选项 | `design-report-optimization-plan.md` C2 | 🟡 待评估（需在 engine/allocation_engine.py 中添加科技集中度逻辑） | ~15行 | 无 |
+| 2.5.8 | design-report A1+A2+A3 | `design-report-optimization-plan.md` | ✅ 已实施 | — | Phase 0.7 |
+| 2.5.9 | design-report B1：黄金入选理由增强 | `design-report-optimization-plan.md` B1 | ✅ 已实施（commit 584ad20） | ~10行 | 无 |
+| 2.5.10 | design-report B2：国债久期风险提示 | `design-report-optimization-plan.md` B2 | ✅ 已实施（commit 584ad20） | ~3行 | 无 |
+| 2.5.11 | design-report B3：LLM prompt 量化规则 | `design-report-optimization-plan.md` B3 | ✅ 已实施 | — | 无 |
+| 2.5.12 | design-report C1：全市场净流入信号注入 | `design-report-optimization-plan.md` C1 | 🟡 待评估 | ~30行 | 无 |
+| 2.5.13 | design-report C2：卫星层增加科技 ETF | `design-report-optimization-plan.md` C2 | 🟡 待评估 | ~15行 | 无 |
 
 **验证**:
 - `npm test` 全绿 + `npm run test:e2e:smoke` 全绿
@@ -846,9 +844,8 @@ Phase 2.5 (质量防护网+市场分析+设计报告)   依赖 Phase 0~2.4
   ├── 2.5.1-2.5.3 测试安全网        → 为 Phase 3.1 提供防护（❌ 待实施）
   ├── 2.5.5  market-analysis C       依赖 Phase 1.1.8+1.1.9（A+B 完成，C ❌ 待实施）
   ├── 2.5.6-2.5.7  market-analysis D/E（❌ 待实施）
-  ├── 2.5.8 A1/A2/A3 ✅ 已实施
-  ├── 2.5.9-2.5.10 B1/B2 🟡 待实施（本次）
-  └── 2.5.11 B3 ✅ 已实施 / 2.5.12-2.5.13 C1/C2 🟡 待评估
+  ├── 2.5.8 A1/A2/A3 ✅ / 2.5.9 B1 ✅ / 2.5.10 B2 ✅ / 2.5.11 B3 ✅
+  └── 2.5.12-2.5.13 C1/C2 🟡 待评估
 
 Phase 3.1 (前端 UI 重构)         依赖 Phase 2.5 测试防护
 
