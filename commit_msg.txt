@@ -1,21 +1,11 @@
-test(data-quality): add DQ test gates; fix aggregate_factor_scores zero filter
+test(e2e): add design error-state regression test with back button verification
 
-Three systemic improvements to prevent test-encoded bug patterns:
-
-1. aggregate_factor_scores zero-value filter
-   - Skip sub-factors with |value| < 0.001 in category aggregation.
-     Prevents scaffolding factors (always 0) from diluting real signals.
-     If all sub-factors are zero, the aggregate key is omitted entirely.
-
-2. News sentiment bridging (pool_manager step 3c)
-   - After FactorRegistry compute, inject news-derived sentiment scores
-     into each pool item's factor_scores dict (news_heat, news_direction,
-     panic_greed_diff). Uses existing 30s news cache.
-   - Fixes sentiment aggregate being 0.0 for all ETFs.
-
-3. Data quality (DQ) test gates
-   - DQ1: _extract_index_concept dedup (科创100, 沪深300 etc.)
-   - DQ2: aggregate filters zeros; all-zero produces no aggregate key
-   - DQ3: fake test data must NOT reference prod-non-existent factor keys
-   - DQ4: profile bonus differentiates strategies
-   - DQ5: rationale has no template placeholder strings
+- Add Issue #217 regression test to 12-regression.spec.js
+- Mocks design-async POST to return failure, verifies:
+  * Error card container rendered (.loading-card.error)
+  * Error title "生成失败" visible
+  * Error message text contains "无候选标的"
+  * Back button "返回" is visible and enabled
+  * No console JS errors
+- This covers the fix: users can navigate back from design failure
+  instead of waiting 3 seconds for auto-redirect.
