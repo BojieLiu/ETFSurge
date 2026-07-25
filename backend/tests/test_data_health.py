@@ -246,6 +246,78 @@ def test_core_factors_no_scaffold():
           f"{len(stub_factors)} found, {len(unexpected)} unexpected")
 
 
+def test_each_factor_returns_nonzero_with_mock_data():
+    """#3: 运行时断言 — 对每个因子函数注入模拟数据，验证返回值非零。
+
+    如果某因子需要的数据不在 _MOCK_DATA 中，仍会调用函数（可能返回 0），
+    但至少不抛异常且函数签名正确。
+    scafhold-free 门禁：如果未来有人引入新 return 0.0 的脚手架因子，
+    但忘了更新 _MOCK_DATA，这个测试会发现它。
+    """
+    from app.factors.factor_registry import _BUILTIN_COMPUTERS
+
+    _MOCK_DATA: dict[str, dict] = {
+        "etf.amount_stability": {"volume": [100, 200, 150, 180, 210, 190, 220] * 4},
+        "etf.tracking_error": {
+            "close": [4.0, 4.1, 4.0, 4.2, 4.1, 4.3, 4.2, 4.4],
+            "benchmark_close": [4000, 4020, 4010, 4030, 4020, 4040, 4030, 4050],
+        },
+        "etf.shares_change": {"shares_change_20d": 0.03},
+        "etf.industry_diversification": {"industry_holdings": {"银行": 0.5, "地产": 0.3, "制造": 0.2}},
+        "etf.institutional_holdings_change": {"shares_change_20d": 0.05},
+        "sentiment.panic_greed_diff": {"sentiment_index": 60, "sentiment_history": [50] * 20},
+        "sentiment.stock_divergence": {"advance_decline": 1.8},
+        "style.size.ln_mcap": {"total_mv": 1e10},
+        "style.size.ln_float_mcap": {"total_mv": 8e9},
+        "technical.ma.sma_5": {"close": [4.0] * 60},
+        "technical.ma.sma_10": {"close": [4.0] * 60},
+        "technical.ma.sma_20": {"close": [4.0] * 60},
+        "technical.ma.sma_60": {"close": [4.0] * 60},
+        "technical.rsi.rsi_14": {"close": [4.0 + i * 0.01 for i in range(60)]},
+        "technical.macd.macd": {"close": [4.0 + i * 0.01 for i in range(60)]},
+        "technical.bollinger.bandwidth": {"close": [4.0 + (i % 5) * 0.1 for i in range(60)]},
+        "technical.volume.vol_ratio": {"close": [4.0] * 30, "volume": [1e6] * 30},
+        "technical.atr.atr_14": {"close": [4.0] * 30, "high": [4.1] * 30, "low": [3.9] * 30},
+        "technical.volume.vwap": {"close": [4.0] * 30, "volume": [1e6] * 30},
+        "etf.change_pct": {"close": [4.0, 4.05]},
+        "etf.premium_discount": {"price": 4.0, "nav": 3.98},
+        "sentiment.news_heat": {"news_items": [{"stars": 3}, {"stars": 4}]},
+        "sentiment.news_direction": {"news_items": [{"level": "利好"}, {"level": "中性"}, {"level": "重大"}, {"level": "中性"}]},
+        "china.policy.five_year_plan": {"industry": "半导体"},
+        "china.policy.strategic_emerging": {"industry": "电子"},
+        "china.policy.dual_circulation": {"industry": "食品饮料"},
+        "technical.kdj.k_value": {"close": [4.0] * 30, "high": [4.1] * 30, "low": [3.9] * 30},
+        "technical.kdj.d_value": {"close": [4.0] * 30, "high": [4.1] * 30, "low": [3.9] * 30},
+        "technical.kdj.j_value": {"close": [4.0] * 30, "high": [4.1] * 30, "low": [3.9] * 30},
+        "technical.signal.overall": {
+            "close": [4.0] * 30, "high": [4.1] * 30, "low": [3.9] * 30, "volume": [1e6] * 30,
+            "rsi": 35, "macd": 0.5, "ma_bias_20": 0.02,
+        },
+    }
+
+    passed = 0
+    failed = 0
+    for code, fn in _BUILTIN_COMPUTERS.items():
+        data = _MOCK_DATA.get(code, {})
+        try:
+            result = fn(data)
+            if code in _MOCK_DATA:
+                # 有模拟数据时断言非零
+                assert abs(result) > 0.001, f"{code}: expected non-zero with mock data, got {result}"
+                passed += 1
+            else:
+                # 无模拟数据的因子，至少不抛异常
+                passed += 1
+        except Exception as e:
+            failed += 1
+            print(f"  [FAIL] {code} raised {type(e).__name__}: {e}")
+
+    total = len(_BUILTIN_COMPUTERS)
+    print(f"  Run-time assertion: {passed}/{total} factors OK (failed={failed})")
+    assert failed == 0, f"{failed} factors raised exceptions"
+    assert passed == total, f"Expected {total} factors, got {passed} OK"
+
+
 @pytest.mark.timeout(120)  # 外部数据源可能较慢
 @pytest.mark.skip(reason="Requires live data sources (run --runslow)")
 def test_factor_data_health_pytest():

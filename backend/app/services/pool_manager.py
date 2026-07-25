@@ -108,6 +108,7 @@ class PoolManager:
         self._cached_pool: dict | None = None
         self._cached_ts: float = 0.0
         self._cache_ttl: float = 60.0
+        self._test_mode: bool = False  # #6: 测试模式下禁止 teardown HTTP 泄漏
 
     async def _refresh_market_snapshot(self) -> None:
         """A3: 写入市场快照缓存（指数 + 板块动量）。

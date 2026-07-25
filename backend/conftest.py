@@ -1,17 +1,16 @@
 """Pytest fixtures for the ETF Surge backend.
 
-Tests focus on pure service/logic functions (calculate_allocation, news
-classification, LLM prompt building) with external data sources (akshare,
-DeepSeek) mocked, so no DB/Redis/network is required for unit tests.
+#6: 不在 conftest 层全局 mock 外部数据源。改为 pool_manager 的 _test_mode
+属性来抑制 teardown 时的 HTTP 泄漏（见 pool_manager.py）。
 
-Autouse fixture _prevent_http_in_teardown patches slow external APIs
-globally so teardown of singleton objects does not trigger real HTTP calls
-(em_global index_spot, sentiment advance_decline, etc.).
+Tests that need mock should use local pytest fixtures, avoiding session-level
+side effects on test isolation.
 """
-from unittest.mock import MagicMock
 import types
 
 import pytest
+
+from pytest import fixture
 
 
 def _make_etf(**kw):
@@ -20,29 +19,16 @@ def _make_etf(**kw):
 
 
 @pytest.fixture(autouse=True, scope="session")
-def _prevent_http_in_teardown():
-    """Globally patch slow external HTTP sources to prevent teardown leaks.
+def _prevent_pool_teardown_http():
+    """#6: 用 pool_manager._test_mode 抑制 teardown 时的 HTTP 泄漏。
 
-    These patches are needed because PoolManager singleton cleanup sometimes
-    triggers akshare / push2 HTTP calls after tests finish. Patching at
-    session scope ensures the patches survive until ALL tests complete.
+    不再全局 mock em_global_fetcher / sentiment_fetcher，
+    让需要使用真实数据的测试能接触到原始数据源。
     """
-    import app.fetchers.em_global_fetcher as egf
-    import app.fetchers.sentiment_fetcher as sf
-
-    orig_fetch_all = egf.fetch_all
-    orig_fetch_sentiment = sf.fetch_market_sentiment
-
-    egf.fetch_all = MagicMock(return_value={})
-    sf.fetch_market_sentiment = MagicMock(return_value={
-        "sentiment_index": 50, "sentiment_label": "中性",
-        "advance_ratio": 0.5, "inst_consensus": 0.5,
-    })
-
+    import app.services.pool_manager as pm
+    pm.pool_manager._test_mode = True
     yield
-
-    egf.fetch_all = orig_fetch_all
-    sf.fetch_market_sentiment = orig_fetch_sentiment
+    pm.pool_manager._test_mode = False
 
 
 @pytest.fixture

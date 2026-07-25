@@ -621,6 +621,35 @@ def section_ws():
         check(f"WS {ws_endpoint} 测试", False, str(e))
 
 
+# ── 因子数据质量 ────────────────────────────────────────────────
+
+
+def section_factors(host, port):
+    """#5: 因子数据质量 — 通过 admin/factor-health 端点检查非零因子比例。"""
+    section("因子数据质量")
+    try:
+        r = requests.get(f"{BASE}/api/v1/admin/factor-health", timeout=30)
+        if r.status_code != 200:
+            check("factor-health endpoint", False, f"HTTP {r.status_code}")
+            return
+        data = r.json()
+        if data.get("status") != "ok":
+            check("factor-health status", False, data.get("message", "unknown"))
+            return
+        symbols = data.get("symbols", {})
+        all_healthy = True
+        for sym, info in symbols.items():
+            label = f"{sym}: {info['ratio']} live factors"
+            ok = info.get("healthy", False)
+            check(label, ok, f"threshold: >= max(10, total*0.4)")
+            if not ok:
+                all_healthy = False
+        if all_healthy:
+            check("All symbols factor-healthy", True)
+    except Exception as e:
+        check(f"factor-health endpoint", False, str(e))
+
+
 def print_summary():
     total = PASS + FAIL
     print(f"\n{'=' * 50}")
@@ -640,6 +669,7 @@ MODULES = {
     "admin": section_admin,
     "ws": section_ws,
     "resilience": section_async_resilience,
+    "factors": section_factors,
 }
 
 SMOKE_MODULES = ["health", "market"]

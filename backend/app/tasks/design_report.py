@@ -407,7 +407,25 @@ async def compose_and_push_report(
 
     except asyncio.TimeoutError:
         logger.warning("[design_report] LLM timeout for session %s, saving fallback", session_id)
-        _fallback = plan_tables + "\n\n> ⚠️ AI 报告生成超时，以上为引擎方案数据。请返回重新生成。"
+        _fallback = plan_tables + """
+
+---
+
+## 市场环境概览
+
+> ⚠️ AI 深度分析报告生成超时，以下为基于引擎数据的自动摘要。
+
+### 方案说明
+以上三套方案（防御型/平衡型/进攻型）由策略引擎基于实时市场数据和24+因子模型自动生成：
+- **因子评分**：每只ETF的综合因子评分越高代表多维度综合表现越好
+- **市场状态**：引擎已识别当前市场状态（趋势/震荡/牛/熊）并相应调整各层预算
+- **权重分配**：遵守风控约束（单只≤30%、行业集中度<40%、层预算不超标）
+
+### 操作建议
+- 选择符合您风险偏好的方案，点击「应用此方案」将配置保存到组合
+- 如需更深入的LLM分析报告，稍后重新生成即可
+- 当前方案可直接用于交易参考
+"""
         if design_id is not None:
             try:
                 from ..database import async_session as _dbs

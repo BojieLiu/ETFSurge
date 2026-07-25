@@ -113,3 +113,30 @@ async def get_thread_pool():
         "akshare": get_akshare_pool_stats(),
         "warning_threshold_pct": 80,
     }
+
+
+@router.get("/factor-health")
+async def get_factor_health():
+    """#5: 因子计算健康检查 — 返回每个符号的非零因子比例。
+
+    供 verify_e2e 和运维监控使用，不依赖 mock 环境。
+    """
+    from ..factors.factor_registry import FactorRegistry
+    try:
+        fr = FactorRegistry()
+        symbols = ["510300", "518880", "511090"]
+        result = await fr.compute(symbols)
+        report = {}
+        for sym in symbols:
+            if sym in result:
+                scores = result[sym]
+                non_zero = sum(1 for v in scores.values() if isinstance(v, (int, float)) and abs(v) > 0.01)
+                total = len(scores)
+                report[sym] = {
+                    "total": total, "live": non_zero,
+                    "ratio": f"{non_zero}/{total}",
+                    "healthy": non_zero >= max(10, total * 0.4),
+                }
+        return {"status": "ok", "symbols": report}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
