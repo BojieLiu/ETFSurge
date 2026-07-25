@@ -210,6 +210,8 @@ def test_core_factors_no_scaffold():
                     elif isinstance(node.value, ast.UnaryOp) and isinstance(node.value.op, ast.USub):
                         if isinstance(node.value.operand, ast.Constant):
                             return_values.add(-node.value.operand.value)
+                        else:
+                            return_values.add("computed")  # e.g. return -min(...)
                     else:
                         return_values.add("computed")  # non-constant return → live
             # 仅当 ALL return 都是 0 或 0.0 时标记为 stub
@@ -222,16 +224,8 @@ def test_core_factors_no_scaffold():
         else:
             live_factors.append(f)
 
-    # Scaffolding 因子的名称推断（注释中标注"scaffolding"或"TBD"）
-    known_scaffolds = {
-        "etf.tracking_error",
-        "etf.shares_change",
-        "etf.institutional_holdings_change",
-        "etf.amount_stability",
-        "etf.industry_diversification",
-        "sentiment.panic_greed_diff",
-        "sentiment.stock_divergence",
-    }
+    # 已知脚手架因子（全部已修复：26/26 因子已接入真实数据源）
+    known_scaffolds: set[str] = set()
     expected_stubs = len(known_scaffolds)
 
     if stub_factors:

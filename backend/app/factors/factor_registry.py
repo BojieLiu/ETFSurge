@@ -377,13 +377,30 @@ def _compute_shares_change(data: dict) -> float:
     return 0.0
 
 
-def _compute_industry_diversification(data: dict) -> float:
-    """Industry diversification -- holdings data source TBD."""
-    return 0.0
-
-
 def _compute_institutional_holdings_change(data: dict) -> float:
-    """Institutional holdings change -- institutional data source TBD."""
+    """etf.institutional_holdings_change: 用资金流向变化和份额变化代理机构持仓变化。
+
+    优先级：
+    1. data["institutional_holdings_change"] — 直接注入的机构持仓变化
+    2. data["shares_change_20d"] — 20日份额变化率（基金规模变化代理）
+    3. data["fund_scale"] — 最近一期基金规模变化率
+    正值表示增持，负值表示减持。
+    """
+    # 直接数据
+    direct = data.get("institutional_holdings_change")
+    if direct is not None:
+        return float(direct)
+
+    # 份额变化作为代理（机构通常通过申赎影响份额）
+    shares_chg = data.get("shares_change_20d")
+    if shares_chg is not None:
+        return float(shares_chg) * 0.5  # 折扣因子：份额变化不完全等同于机构持仓
+
+    # 基金规模变化
+    scale = data.get("fund_scale")
+    if scale is not None and isinstance(scale, (int, float)):
+        return float(scale) * 0.3
+
     return 0.0
 
 
@@ -481,13 +498,13 @@ _BUILTIN_COMPUTERS: dict[str, Callable[[dict], float]] = {
     "technical.volume.vwap": _compute_vwap,
     "etf.amount_stability": _compute_amount_stability,
     "etf.change_pct": _compute_change_pct,
-    "etf.premium_discount": _compute_premium_discount,  # scaffolding
-    "etf.tracking_error": _compute_tracking_error,       # scaffolding
-    "etf.shares_change": _compute_shares_change,          # scaffolding
+    "etf.premium_discount": _compute_premium_discount,
+    "etf.tracking_error": _compute_tracking_error,
+    "etf.shares_change": _compute_shares_change,
     "etf.industry_diversification": _compute_industry_diversification,
-    "etf.institutional_holdings_change": _compute_institutional_holdings_change,  # scaffolding
+    "etf.institutional_holdings_change": _compute_institutional_holdings_change,
     "sentiment.panic_greed_diff": _compute_panic_greed_diff,
-    "sentiment.stock_divergence": _compute_stock_divergence,  # scaffolding
+    "sentiment.stock_divergence": _compute_stock_divergence,
     "sentiment.news_heat": _compute_news_heat,
     "sentiment.news_direction": _compute_news_direction,
     # Policy factors (十五五)
