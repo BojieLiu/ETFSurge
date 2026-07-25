@@ -103,6 +103,8 @@ class PoolManager:
         # 外部缓存（由 scheduler 或 refresh() 更新）
         self._sector_momentum_cache: list[dict] | None = None
         self._sector_momentum_cache_ts: float = 0
+        self._hot_plates_cache: list[dict] | None = None       # Phase 2: 热点板块
+        self._sector_heat_cache: list[dict] | None = None      # Phase 2: 板块热度排行
         self._index_realtime_cache: list[dict] | None = None
         # 60s TTL 缓存（Solution Design S1-A）
         self._cached_pool: dict | None = None
@@ -146,6 +148,46 @@ class PoolManager:
             logger.warning("[pool] _refresh_market_snapshot sector failed: %s", e)
             if self._sector_momentum_cache is None:
                 self._sector_momentum_cache = []
+
+    async def update_sector_cache(self) -> None:
+        """刷新行业+概念板块动量缓存（Phase 2 新增，60s 定时任务专用）。
+
+        与 _refresh_market_snapshot 中的 sector 刷新分离，独立定时刷新。
+        同时刷新热点板块和板块热度排行。
+        """
+        import asyncio
+        import time
+        from .market_trends import compute_sector_momentum
+
+        try:
+            # 1. 行业+概念动量
+            momentum = await asyncio.wait_for(compute_sector_momentum(top_n=30), timeout=15)
+            if momentum:
+                self._sector_momentum_cache = momentum
+                self._sector_momentum_cache_ts = time.time()
+                logger.info("[pool] update_sector_cache: %d momentum rows", len(momentum))
+
+            # 2. 热点板块（异步，失败不影响主流程）
+            try:
+                from ..fetchers.sector_fetcher import fetch_hot_plates
+                hot = await asyncio.to_thread(fetch_hot_plates, 15)
+                if hot:
+                    self._hot_plates_cache = hot
+                    logger.info("[pool] update_sector_cache: %d hot plates", len(hot))
+            except Exception as e:
+                logger.debug("[pool] update_sector_cache hot_plates skipped: %s", e)
+
+            # 3. 板块热度排行
+            try:
+                from ..fetchers.sector_fetcher import fetch_sector_heat
+                heat = await asyncio.to_thread(fetch_sector_heat)
+                if heat:
+                    self._sector_heat_cache = heat
+            except Exception as e:
+                logger.debug("[pool] update_sector_cache sector_heat skipped: %s", e)
+
+        except Exception as e:
+            logger.warning("[pool] update_sector_cache failed: %s", e)
 
     async def refresh(self) -> PoolDiff:
         """全量刷新候选池。

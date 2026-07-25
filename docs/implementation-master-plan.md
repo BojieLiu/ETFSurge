@@ -528,11 +528,15 @@ market-analysis-optimization-plan.md
 | 1.1.1 | Sector 数据采集扩容（行业+概念 concurrent） | sector-concept Phase 1 | 4h | Phase 0.7 A3 |
 | 1.1.2 | PoolManager sector_cache 写入扩展（含概念） | sector-concept Phase 2 | 3h | 1.1.1 |
 | 1.1.3 | APScheduler 新增板块刷新任务 | sector-concept Phase 2 | 1h | 1.1.2 |
-| 1.1.4 | 新闻关键词分类修复（移中性词、清冲突词） | news-pipeline-fix P1.1+P1.2 | 0.5h | 无 |
-| 1.1.5 | 新增 `fetch_sina_roll_news()` HTTP 源 | news-pipeline-fix P1.3 | 1h | 无 |
-| 1.1.6 | 重写 `fetch_macro_news()` 降级链（新浪优先） | news-pipeline-fix P1.4 | 0.5h | 1.1.5 |
-| 1.1.7 | 重写 `fetch_global_news()` 降级链 | news-pipeline-fix P1.5 | 0.5h | 无 |
-| 1.1.14 | P2-4: target_weight 默认值 0.0 修复 | design-check-quality §3 P2-4 | ~1行 | 无 |
+
+#### ✅ 已完成并提交（commit `8c18858`）
+| # | 任务 | 源文档 | 实际改动 |
+|---|------|--------|---------|
+| 1.1.4 | 新闻关键词分类修复 | news-pipeline-fix P1.1+P1.2 | `levistock_fetcher.py`: 移4中性词, 清冲突词 |
+| 1.1.5 | 新增 `fetch_sina_roll_news()` | news-pipeline-fix P1.3 | `news_fetcher.py`: 新浪 HTTP 直连, requests+no_proxy |
+| 1.1.6 | 重写 `fetch_macro_news()` | news-pipeline-fix P1.4 | `news_fetcher.py`: 三级降级链（新浪→CLS→财联社） |
+| 1.1.7 | 重写 `fetch_global_news()` | news-pipeline-fix P1.5 | `news_fetcher.py`: RSS→akshare, 加日志 |
+| 1.1.14 | P2-4: target_weight 默认值 | design-check-quality §3 P2-4 | `models/portfolio.py`: +`default=0.05` |
 
 **验证**:
 - LLM 报告不再显示"暂无板块热力数据"

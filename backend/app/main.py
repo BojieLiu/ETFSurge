@@ -10,6 +10,7 @@ from .database import init_db
 from .services.cache_service import redis_cache
 from .tasks.market_refresh import refresh_market_cache
 from .tasks.news_refresh import refresh_news_cache
+from .tasks.sector_refresh import refresh_sector_cache
 from .monitor.token_usage import token_store
 from .core.logging import get_logger, setup_logging
 from .routers import market, portfolio, analysis, news, ws, admin
@@ -140,7 +141,18 @@ async def lifespan(app: FastAPI):
 
     # Start health probe loop
     asyncio.create_task(health_loop(interval=120.0))
-    logger.info("调度器已启动（行情 15s / 资讯 30s）")
+
+    # Start sector cache refresh loop (60s, Phase 2)
+    async def _sector_refresh_loop():
+        while True:
+            try:
+                await asyncio.wait_for(refresh_sector_cache(), timeout=20)
+            except (Exception, asyncio.CancelledError):
+                logger.warning("[lifespan] sector refresh cycle failed, will retry")
+            await asyncio.sleep(60)
+    asyncio.create_task(_sector_refresh_loop())
+    logger.info("板块缓存刷新循环已启动（60s）")
+
     app.state.scheduler = None  # Scheduler disabled for diagnostics
 
     # 崩溃恢复：扫描 report_quality="pending" 且创建 >5min 的记录，标记为 fallback

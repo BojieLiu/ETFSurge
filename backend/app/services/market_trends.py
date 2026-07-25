@@ -62,51 +62,96 @@ async def compute_etf_trends(
     return results
 
 
-async def compute_sector_momentum(top_n: int = 10) -> list[dict[str, Any]]:
-    """
-    计算申万一级行业板块20日动量变化。
-
+async def _compute_industry_momentum(top_n: int = 15) -> list[dict[str, Any]]:
+    """计算申万一级行业板块动量。
+    
     返回:
-      [{sector, rank_current, rank_change, momentum_score, direction}]
+      [{sector, sector_code, type:"industry", rank_current, change_pct, main_inflow, up_count, down_count}]
     """
     try:
         import akshare as ak
         from ..utils.decode import decode_df
         from ..core.async_utils import run_sync
 
-        # 获取行业板块行情（必须 run_sync，akshare 是同步调用）
         df = await run_sync(ak.stock_board_industry_name_em)
         if df is None or df.empty:
             return []
         decode_df(df)
 
-        # 获取当前涨幅排名
         current = []
         for _, row in df.iterrows():
-            sector_name = str(row.get("板块名称", ""))
-            change_pct = float(row.get("涨跌幅", 0) or 0)
             current.append({
-                "sector": sector_name,
-                "change_pct": change_pct,
+                "sector": str(row.get("板块名称", "")),
+                "sector_code": str(row.get("板块代码", "")),
+                "type": "industry",
+                "change_pct": float(row.get("涨跌幅", 0) or 0),
+                "main_inflow": float(row.get("主力净流入", 0) or 0),
+                "up_count": int(row.get("上涨家数", 0) or 0),
+                "down_count": int(row.get("下跌家数", 0) or 0),
             })
 
-        # 按涨幅排序取排名
         current.sort(key=lambda x: x["change_pct"], reverse=True)
         for rank, item in enumerate(current, 1):
             item["rank_current"] = rank
 
-        # 取前 top_n
-        return [
-            {
-                "sector": item["sector"],
-                "rank_current": item["rank_current"],
-                "change_pct": item["change_pct"],
-            }
-            for item in current[:top_n]
-        ]
+        return current[:top_n]
     except Exception as e:
-        logger.warning("[market_trends] compute_sector_momentum failed: %s", e)
+        logger.warning("[market_trends] _compute_industry_momentum failed: %s", e)
         return []
+
+
+async def _compute_concept_momentum(top_n: int = 15) -> list[dict[str, Any]]:
+    """计算概念板块动量（东方财富概念板块行情）。
+    
+    返回:
+      [{sector, sector_code, type:"concept", rank_current, change_pct, main_inflow, up_count, down_count}]
+    """
+    try:
+        import akshare as ak
+        from ..utils.decode import decode_df
+        from ..core.async_utils import run_sync
+
+        df = await run_sync(ak.stock_board_concept_name_em)
+        if df is None or df.empty:
+            return []
+        decode_df(df)
+
+        current = []
+        for _, row in df.iterrows():
+            current.append({
+                "sector": str(row.get("板块名称", "")),
+                "sector_code": str(row.get("板块代码", "")),
+                "type": "concept",
+                "change_pct": float(row.get("涨跌幅", 0) or 0),
+                "main_inflow": float(row.get("主力净流入", 0) or 0),
+                "up_count": int(row.get("上涨家数", 0) or 0),
+                "down_count": int(row.get("下跌家数", 0) or 0),
+            })
+
+        current.sort(key=lambda x: x["change_pct"], reverse=True)
+        for rank, item in enumerate(current, 1):
+            item["rank_current"] = rank
+
+        return current[:top_n]
+    except Exception as e:
+        logger.warning("[market_trends] _compute_concept_momentum failed: %s", e)
+        return []
+
+
+async def compute_sector_momentum(top_n: int = 15) -> list[dict[str, Any]]:
+    """计算行业+概念板块动量（各取 top_n/2）。
+
+    返回:
+      [{sector, sector_code, type:"industry"|"concept", 
+        rank_current, change_pct, main_inflow, up_count, down_count}]
+    """
+    half = max(1, top_n // 2)
+    ind = await _compute_industry_momentum(half)
+    con = await _compute_concept_momentum(half)
+    # 按涨幅混排
+    merged = ind + con
+    merged.sort(key=lambda x: x["change_pct"], reverse=True)
+    return merged[:top_n]
 
 
 def detect_market_regime(
