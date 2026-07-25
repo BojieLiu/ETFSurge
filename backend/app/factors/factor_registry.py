@@ -339,6 +339,37 @@ def _compute_change_pct(data: dict) -> float:
     return 0.0
 
 
+def _compute_return_1m(data: dict) -> float:
+    """近1月收益率：(close[-1] - close[-21]) / close[-21]，约20个交易日。"""
+    closes = data.get("close", [])
+    if len(closes) >= 21:
+        return round((closes[-1] - closes[-21]) / closes[-21], 4)
+    if len(closes) >= 2:
+        return round((closes[-1] - closes[0]) / closes[0], 4)
+    return 0.0
+
+
+def _compute_return_3m(data: dict) -> float:
+    """近3月收益率：(close[-1] - close[-61]) / close[-61]，约60个交易日。"""
+    closes = data.get("close", [])
+    if len(closes) >= 61:
+        return round((closes[-1] - closes[-61]) / closes[-61], 4)
+    if len(closes) >= 2:
+        return round((closes[-1] - closes[0]) / closes[0], 4)
+    return 0.0
+
+
+def _compute_price(data: dict) -> float:
+    """最新价格：优先使用实时价格，fallback到K线最新收盘价。来源：Sina实时 / K-line。"""
+    price = data.get("price")
+    if price is not None and price > 0:
+        return price
+    closes = data.get("close", [])
+    if closes and closes[-1] > 0:
+        return closes[-1]
+    return 0.0
+
+
 # --- Scaffolding functions (保留待后续数据源接入) ---
 def _compute_premium_discount(data: dict) -> float:
     """折溢价率：(ETF价格 - IOPV) / IOPV。正常范围 -0.03 ~ 0.03。"""
@@ -499,6 +530,9 @@ _BUILTIN_COMPUTERS: dict[str, Callable[[dict], float]] = {
     "technical.volume.vwap": _compute_vwap,
     "etf.amount_stability": _compute_amount_stability,
     "etf.change_pct": _compute_change_pct,
+    "etf.return_1m": _compute_return_1m,
+    "etf.return_3m": _compute_return_3m,
+    "etf.price": _compute_price,
     "etf.premium_discount": _compute_premium_discount,
     "etf.tracking_error": _compute_tracking_error,
     "etf.shares_change": _compute_shares_change,
@@ -543,8 +577,11 @@ _CORE_FACTORS = [
     # Technical: VWAP
     "technical.volume.vwap",
     # ETF-specific
+    "etf.price",
     "etf.premium_discount",
     "etf.change_pct",
+    "etf.return_1m",
+    "etf.return_3m",
     "etf.tracking_error",
     "etf.shares_change",
     "etf.amount_stability",
@@ -571,9 +608,9 @@ _CORE_FACTORS = [
 class CircuitBreaker:
     """简单的电路断熔，防止外部数据源故障时反复重试。"""
     failure_count: ClassVar[int] = 0
-    threshold: ClassVar[int] = 3
+    threshold: ClassVar[int] = 10
     open_until: ClassVar[float] = 0.0
-    cooldown: ClassVar[int] = 60
+    cooldown: ClassVar[int] = 30
 
     @classmethod
     def is_open(cls) -> bool:
@@ -595,7 +632,7 @@ class CircuitBreaker:
 # 全局 K 线缓存 — 避免每次 compute() 都网络 I/O
 _kline_cache: dict[str, dict[str, Any]] = {}
 _kline_cache_ts: float = 0.0
-KLINE_CACHE_TTL: float = 60.0  # 60s 缓存，与 pool_manager 刷新周期对齐
+KLINE_CACHE_TTL: float = 300.0  # 300s 缓存，覆盖设计→检查之间的时间差
 
 
 def _get_cached_kline(symbols: list[str]) -> dict[str, dict[str, Any]] | None:
@@ -699,23 +736,22 @@ class FactorRegistry:
             return factor_scores
 
         # 定义顶层分类到点分前缀的映射
+        # 注意：etf.return_1m/return_3m/change_pct 等回报类因子由 etf. 前缀捕获到 momentum
+        # etf.price 由 valuation 捕获（价格本身也是估值维度之一）
         CATEGORY_PREFIXES = {
             "technical": ["technical."],
-            "momentum": ["etf.", "china.policy.", "technical.signal."],
-            "valuation": ["style."],
+            "momentum": ["etf.return_", "etf.change_pct", "china.policy.", "technical.signal."],
+            "valuation": ["style.", "etf.price"],
             "sentiment": ["sentiment."],
         }
 
-        # 在聚合时排除的因子键（ln_mcap 是规模因子不是估值，且所有 ETF 值都 ~25）
-        EXCLUDE_FACTORS = {"style.size.ln_mcap", "style.size.ln_float_mcap"}
+        # 不移除任何因子：ln_mcap/ln_float_mcap 经 z-score 后仍有截面区分度
 
         result = dict(factor_scores)  # 保留所有原始键
 
         for top_key, prefixes in CATEGORY_PREFIXES.items():
             values = []
             for key, val in factor_scores.items():
-                if key in EXCLUDE_FACTORS:
-                    continue
                 if isinstance(val, (int, float)) and abs(val) > 0.001:
                     for prefix in prefixes:
                         if key.startswith(prefix):

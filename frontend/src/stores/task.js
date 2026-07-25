@@ -152,7 +152,14 @@ export const useTaskStore = defineStore('task', () => {
   }
 
   function getDesignState() {
-    return designState.value
+    const st = designState.value
+    if (!st) return null
+    // 如果保存超过 30 分钟，视为过期，不恢复旧设计
+    if (st._savedAt && Date.now() - st._savedAt > 30 * 60 * 1000) {
+      clearDesignState()
+      return null
+    }
+    return st
   }
 
   function clearDesignState() {

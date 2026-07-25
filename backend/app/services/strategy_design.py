@@ -93,8 +93,8 @@ async def generate_enhanced_design(
         for s in strategies_raw:
             allocs = s.pop("allocations", [])
             # Apply risk controls before assembling
-            risk_allocations = apply_risk_controls([{"etfs": allocs}], factor_matrix)
-            allocs = risk_allocations[0]["etfs"] if risk_allocations else allocs
+            risk_allocations = apply_risk_controls([{"allocations": allocs}], factor_matrix)
+            allocs = risk_allocations[0]["allocations"] if risk_allocations else allocs
 
             # enrich rationale using engine/rationale.py
             for a in allocs:

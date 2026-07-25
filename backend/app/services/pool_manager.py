@@ -214,11 +214,18 @@ class PoolManager:
                 logger.info("PoolManager: refresh skipped (cooldown, %.1fs left)",
                             30 - (now - self._last_refresh_ts))
                 return PoolDiff(changed=False, added=0, removed=0, total=len(self._by_code))
-        # 并发锁：已有刷新在进行中则等待
+        import asyncio as _asyncio
+        # 并发锁：已有刷新在进行中则等待（最长等 120s，防止死锁）
         if hasattr(self, '_refresh_lock') and self._refresh_lock.locked():
-            logger.info("PoolManager: refresh already in progress, waiting...")
-            async with self._refresh_lock:
+            logger.info("PoolManager: refresh already in progress, waiting (max 120s)...")
+            try:
+                await _asyncio.wait_for(self._refresh_lock.acquire(), timeout=120)
+                self._refresh_lock.release()
+                logger.info("PoolManager: waited for lock, returning stale pool")
                 return PoolDiff(changed=False, added=0, removed=0, total=len(self._by_code))
+            except _asyncio.TimeoutError:
+                logger.warning("PoolManager: lock wait timed out after 120s, creating new lock")
+                self._refresh_lock = _asyncio.Lock()
         if not hasattr(self, '_refresh_lock'):
             import asyncio as _asyncio
             self._refresh_lock = _asyncio.Lock()

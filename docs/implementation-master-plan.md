@@ -1,11 +1,11 @@
 # ETF Surge 方案实施总计划
 
-> 生成日期: 2026-07-25 | 版本: v6.1
+> 生成日期: 2026-07-25 | 版本: v6.2
 > 总览 `docs/` 目录 **30 份**方案文档，梳理实施状态、冲突重叠、修复建议及分阶段执行路线。
-> v6.1 基于 v6.0 后代码审计更新：Phase 2.5 设计报告项 A1/A2/A3 ✅ + B1/B2 ✅（commit 584ad20）+ B3 ✅；C1/C2 需重新评估池管理器接口。
+> v6.2 基于 v6.1 后修复：新增 etf.return_1m/return_3m/price 三个因子（33/33 全 LIVE），修 strategy_design.py key 不匹配（f"etfs"→"allocations"）使风控管线真正运行，修 valuation 聚合死代码（移除 EXCLUDE_FACTORS），修 momentum 聚合命名（分拆 etf.return/change_pct 为回报类）。Phase 2.5 A1/A2/A3 ✅ + B1/B2 ✅（commit 584ad20）+ B3 ✅；C1/C2 需重新评估池管理器接口。
 > Phase 2.2→2.4 全部完成——30/30 核心因子全 LIVE（_CORE_FACTORS 列表共 30 个因子，均含真实 compute 函数）、因子健康端点 + 因子单测门禁 + 运行时因子断言、分配器质量修复（ln_mcap 排毒、C2 条件修正、segment 归一化去重、预算重调、cross-section z-score 重归一化）。新增 Phase 2.5（原质量防护网 + AI 分析）。
 > 新增文档 2 份：`scaffold-factor-resolution-plan.md`（第 29 份，✅ 已实施）、`design-quality-review-20260725.md`（第 30 份，审计报告）。
-> 💡 **关键依赖变化**：因子数据从 "15/26 LIVE" → **30/30 全 LIVE**（_CORE_FACTORS 共 30 个，均含真实 compute 函数）。无剩余 Block 项。
+> 💡 **关键依赖变化**：因子数据从 "15/26 LIVE" → **33/33 全 LIVE**（_CORE_FACTORS 共 33 个，均含真实 compute 函数：新增 etf.return_1m/return_3m/price，修 valuation 死代码 + momentum 聚合分类）。
 
 ---
 
