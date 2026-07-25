@@ -280,6 +280,7 @@ def fetch_sina_roll_news(num: int = 15) -> list[dict[str, Any]]:
                 "content": entry.get("summary", "") or entry.get("intro", "") or entry.get("content", ""),
                 "time": time_str,
                 "source": "新浪财经",
+                "url": entry.get("url", "") or entry.get("wapurl", ""),
             })
         logger.info("[news] 新浪财经返回 %d 条", len(items))
         return _attach_level(items)
@@ -329,6 +330,7 @@ def fetch_global_news() -> list[dict[str, Any]]:
                         "content": e.get("summary", ""),
                         "source": "RSS",
                         "time": e.get("published", ""),
+                        "url": e.get("link", ""),
                     })
         if items:
             logger.info("[news] RSS 全球返回 %d 条", len(items))

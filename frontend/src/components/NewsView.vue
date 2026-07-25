@@ -47,13 +47,14 @@
 
           <p v-if="item.content" class="news-content">{{ item.content }}</p>
 
-          <div class="news-meta">
-            <span v-if="item.source" class="news-source">{{ item.source }}</span>
-            <span v-if="item.time" class="news-time">{{ item.time }}</span>
-            <button class="news-ai-btn" @click="analyze(item)" :disabled="analyzing">
-              <span aria-hidden="true">🤖</span> AI 智能分析
-            </button>
-          </div>
+            <div class="news-meta">
+             <span v-if="item.source" class="news-source">{{ item.source }}</span>
+             <span v-if="item.time" class="news-time">{{ item.time }}</span>
+             <a v-if="item.url" :href="item.url" target="_blank" rel="noopener" class="news-source-link">查看原文</a>
+             <button class="news-ai-btn" @click="analyze(item)" :disabled="analyzing">
+               <span aria-hidden="true">🤖</span> AI 智能分析
+             </button>
+           </div>
         </li>
       </ul>
     </section>
