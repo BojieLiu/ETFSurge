@@ -265,6 +265,14 @@ class PoolManager:
         # 3c. 注入新闻情感因子到 factor_scores（已有的 sentiment 因子依赖外部数据）
         if flat:
             news_items = self._news_cache or []
+            if not news_items:
+                # 新闻缓存为空时主动刷新一次（确保设计请求首次就有情感数据）
+                try:
+                    from ..core.async_utils import run_sync
+                    await run_sync(self.refresh_news)
+                    news_items = self._news_cache or []
+                except Exception:
+                    pass
             if news_items:
                 total_news = len(news_items)
                 # 新闻热度：过去 120s 内的加权星数
