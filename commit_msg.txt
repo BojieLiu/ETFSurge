@@ -1,4 +1,5 @@
-test(integration): reduce HTTP leak from 28s by clearing singleton caches
+test(integration): mock _refresh_market_snapshot to cut HTTP leak from 30s to 21s
 
-Clear sector_momentum_cache and china_macro cache on the singleton to
-prevent _refresh_impl from making real API calls during refresh.
+Singleton's _refresh_impl fires _refresh_market_snapshot() fire-and-forget,
+which calls get_global_indices (15s timeout) + compute_sector_momentum (15s
+timeout). Replace with AsyncMock so the integration test runs in ~21s.

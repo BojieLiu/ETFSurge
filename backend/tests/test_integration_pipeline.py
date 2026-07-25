@@ -7,7 +7,7 @@ with realistic data shapes.
 """
 
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 import sys
 import os
 
@@ -80,11 +80,8 @@ async def test_integration_engine_pipeline():
     pm._pool = {"core": [], "satellite": [], "defense": []}
     pm._by_code = {}
     pm._factor_cache = {}
-    # Clear any sector/china macro cache to prevent refresh_impl from calling real APIs
-    pm._sector_momentum_cache = []
-    pm._sector_momentum_cache_ts = 0
-    pm._china_macro = {}
-    pm._china_macro_ts = 0
+    # Mock the market snapshot function which calls real HTTP (global indices, sector momentum)
+    pm._refresh_market_snapshot = AsyncMock()
 
     # Mock FactorRegistry data with realistic OHLCV + fund_scale
     # Need 30+ data points to support RSI_14 (15), MACD (26), SMA_20 (20), Bollinger (20)
@@ -128,50 +125,35 @@ async def test_integration_engine_pipeline():
         _mock_enrich.return_value = None
         result = await generate_enhanced_design(capital=500000)
 
+        # All assertions inside the patch context to prevent fire-and-forget leaks
+        assert result is not None
         strategies = result.get("strategies", [])
-        print(f"\n[DEBUG] strategies: {len(strategies)}")
-        fm = live_pm.get_factor_matrix()  # Use the singleton instance directly
-        print(f"[DEBUG] factor_matrix keys: {list(fm.keys())}")
-        if fm:
-            sym = "510300"
-            if sym in fm:
-                print(f"[DEBUG] {sym} factor_scores: {dict(list(fm[sym].items())[:8])}")
+        assert len(strategies) == 3
+
+        labels = set()
+        total_non_cash = 0
+        symbols_seen = set()
+        label_list = []
+
         for s in strategies:
             label = s.get("label", s.get("name", "?"))
+            label_list.append(label)
+            labels.add(label)
             allocs = s.get("allocations", s.get("etfs", []))
-            print(f"[DEBUG] {label}: {len(allocs)} allocations")
-            for a in allocs:
-                print(f"  {a.get('symbol','?')} w={a.get('target_weight',0)}")
+            non_cash = [a for a in allocs if a.get("symbol") and a["symbol"] != "CASH"]
+            cash = [a for a in allocs if a.get("symbol") == "CASH"]
+            total_non_cash += len(non_cash)
+            assert len(cash) == 1
+            for a in non_cash:
+                symbols_seen.add(a["symbol"])
+                w = a.get("weight", a.get("target_weight", 0))
+                assert w > 0
+                rt = a.get("selection_rationale", "")
+                assert rt
+                assert "今日" not in rt
+                assert "{" not in rt
 
-    assert result is not None
-    strategies = result.get("strategies", [])
-    assert len(strategies) == 3, f"Expected 3 strategies, got {len(strategies)}"
-
-    labels = set()
-    total_non_cash = 0
-    symbols_seen = set()
-    label_list = []
-
-    for s in strategies:
-        label = s.get("label", s.get("name", "?"))
-        label_list.append(label)
-        labels.add(label)
-        allocs = s.get("allocations", s.get("etfs", []))
-        non_cash = [a for a in allocs if a.get("symbol") and a["symbol"] != "CASH"]
-        cash = [a for a in allocs if a.get("symbol") == "CASH"]
-        total_non_cash += len(non_cash)
-
-        assert len(cash) == 1, f"Expected 1 cash entry in '{label}', got {len(cash)}"
-        for a in non_cash:
-            symbols_seen.add(a["symbol"])
-            w = a.get("weight", a.get("target_weight", 0))
-            assert w > 0, f"ETF {a['symbol']} in '{label}' weight={w}"
-            rt = a.get("selection_rationale", "")
-            assert rt, f"Empty rationale for {a['symbol']}/{label}"
-            assert "今日" not in rt, f"Placeholder '今日' in {a['symbol']}/{label}"
-            assert "{" not in rt, f"Unfilled template in {a['symbol']}/{label}"
-
-    assert len(labels) == 3, f"Expected 3 distinct labels, got {labels}"
-    assert len(label_list) == 3, f"Expected 3 strategies, got {len(label_list)}"
-    assert "510300" in symbols_seen, "510300 must appear in at least one strategy"
-    assert total_non_cash >= 6, f"Expected >=6 total ETF positions, got {total_non_cash}"
+        assert len(labels) == 3
+        assert len(label_list) == 3
+        assert "510300" in symbols_seen
+        assert total_non_cash >= 6

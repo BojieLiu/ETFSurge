@@ -1,12 +1,5 @@
 import { marked } from 'marked'
 
-// Configure marked for safety and consistency
-marked.setOptions({
-  breaks: true,
-  gfm: true,
-  headerIds: false,
-})
-
 /**
  * Pure function: render Markdown text to HTML
  * Uses the `marked` library for full GFM support (tables, fenced code blocks, etc.)
@@ -20,7 +13,7 @@ export function escapeHtml(s) {
 export function renderMarkdown(md) {
   if (!md) return ''
   try {
-    return marked.parse(md)
+    return marked.parse(md, { breaks: true, gfm: true })
   } catch (e) {
     console.warn('[markdown] marked parse failed, falling back to raw text:', e)
     return `<pre>${escapeHtml(md)}</pre>`
