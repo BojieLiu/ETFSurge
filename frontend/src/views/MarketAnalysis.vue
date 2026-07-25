@@ -26,17 +26,9 @@
           <span class="qb-icon" aria-hidden="true">💬</span>
           <span class="qb-label">AI顾问</span>
         </button>
-        <button class="qb-btn" @click="scrollTo('sector')" title="板块/概念分析">
-          <span class="qb-icon" aria-hidden="true">🏭</span>
-          <span class="qb-label">板块</span>
-        </button>
-        <button class="qb-btn" @click="scrollTo('symbol')" title="个股/ETF 分析">
-          <span class="qb-icon" aria-hidden="true">📈</span>
-          <span class="qb-label">个股/ETF</span>
-        </button>
-        <button class="qb-btn" @click="scrollTo('index')" title="指数分析">
-          <span class="qb-icon" aria-hidden="true">📊</span>
-          <span class="qb-label">指数</span>
+        <button class="qb-btn" @click="scrollTo('symbol')" title="标的深度分析">
+          <span class="qb-icon" aria-hidden="true">🔍</span>
+          <span class="qb-label">标的分析</span>
         </button>
       </div>
     </div>
@@ -51,14 +43,8 @@
     <div ref="anchorAdvisor" class="section-anchor"></div>
     <AiAdvisor :marketTab="marketTab" />
 
-    <div ref="anchorSector" class="section-anchor"></div>
-    <SectorAnalysis :marketTab="marketTab" />
-
     <div ref="anchorSymbol" class="section-anchor"></div>
-    <SymbolAnalysis :marketTab="marketTab" :selectedSymbol="selectedSymbol" />
-
-    <div ref="anchorIndex" class="section-anchor"></div>
-    <IndexAnalysis :marketTab="marketTab" />
+    <UnifiedAnalysis :marketTab="marketTab" :selectedSymbol="selectedSymbol" />
   </div>
 </template>
 
@@ -67,9 +53,7 @@ import { ref } from 'vue'
 import MarketReport from '../components/market/MarketReport.vue'
 import WatchlistPanel from '../components/market/WatchlistPanel.vue'
 import AiAdvisor from '../components/market/AiAdvisor.vue'
-import SectorAnalysis from '../components/market/SectorAnalysis.vue'
-import SymbolAnalysis from '../components/market/SymbolAnalysis.vue'
-import IndexAnalysis from '../components/market/IndexAnalysis.vue'
+import UnifiedAnalysis from '../components/market/UnifiedAnalysis.vue'
 
 const marketTab = ref('A')
 const selectedSymbol = ref(null)
@@ -85,12 +69,10 @@ const marketTabs = [
 const anchorReport = ref(null)
 const anchorWatch = ref(null)
 const anchorAdvisor = ref(null)
-const anchorSector = ref(null)
 const anchorSymbol = ref(null)
-const anchorIndex = ref(null)
 const anchorMap = {
   report: anchorReport, watch: anchorWatch, advisor: anchorAdvisor,
-  sector: anchorSector, symbol: anchorSymbol, index: anchorIndex,
+  symbol: anchorSymbol,
 }
 
 function scrollTo(name) {
