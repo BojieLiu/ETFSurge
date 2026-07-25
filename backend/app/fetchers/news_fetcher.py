@@ -277,7 +277,7 @@ def fetch_sina_roll_news(num: int = 15) -> list[dict[str, Any]]:
                 time_str = str(ctime)
             items.append({
                 "title": title,
-                "content": entry.get("content", ""),
+                "content": entry.get("summary", "") or entry.get("intro", "") or entry.get("content", ""),
                 "time": time_str,
                 "source": "新浪财经",
             })
@@ -326,6 +326,7 @@ def fetch_global_news() -> list[dict[str, Any]]:
                 for e in (d.entries or [])[:8]:
                     items.append({
                         "title": e.get("title", ""),
+                        "content": e.get("summary", ""),
                         "source": "RSS",
                         "time": e.get("published", ""),
                     })
