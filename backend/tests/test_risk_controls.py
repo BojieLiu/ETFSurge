@@ -119,8 +119,10 @@ class TestAllocationEngine:
     def test_three_strategies_different_counts(self):
         """P1-1: 三方案标的数量不同（风偏裁剪生效）。"""
         from app.engine.allocation_engine import allocate
+        indices = [f"{j:04d}" for j in range(10)]
         candidates = [
-            {"symbol": s, "name": f"ETF {s}", "tracked_index": s[:3],
+            {"symbol": s, "name": f"ETF {s}", "tracked_index": indices[i],
+             "segment": f"seg{indices[i]}",
              "industry": "科技" if i % 2 == 0 else "消费", "layer": "satellite"}
             for i, s in enumerate([f"5898{str(j).zfill(2)}" for j in range(10)])
         ]

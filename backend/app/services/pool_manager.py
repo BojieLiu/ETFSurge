@@ -247,6 +247,15 @@ class PoolManager:
                 item["concepts"] = info.get("concepts", [])
                 item["classify_confidence"] = info.get("confidence", 0.0)
 
+        # 3a. Segment 字段注入（系统化去重的基石）
+        if flat:
+            from ..engine.allocation_engine import _extract_index_concept, _normalize_segment
+            for item in flat:
+                tidx = item.get("tracked_index", "") or ""
+                name = item.get("name", "")
+                concept = tidx or _extract_index_concept(name) or name
+                item["segment"] = _normalize_segment(concept) or concept
+
         # 3b. FactorRegistry 计算因子得分（传入 fund_scale 以支持 valuation 因子）
         if flat:
             symbols = [e["symbol"] for e in flat if e.get("symbol")]
@@ -612,8 +621,45 @@ class PoolManager:
         return self._sentiment_cache or {"sentiment_index": 50, "sentiment_label": "中性"}
 
     # ── 因子矩阵 ──────────────────────────────────────────
+    @staticmethod
+    def _normalize_matrix(matrix: dict[str, dict[str, float]]) -> dict[str, dict[str, float]]:
+        """对因子矩阵做截面 z-score 归一化，消除量纲差异。
+
+        排除 ln_mcap/ln_float_mcap（截面内无意义，所有大盘 ETF 都 ~25），
+        排除仅有一两个非零值的因子（归一化会放大噪声）。
+        """
+        import statistics
+        symbols = list(matrix.keys())
+        if not symbols:
+            return matrix
+
+        # 收集所有因子键
+        factor_keys: set[str] = set()
+        for scores in matrix.values():
+            factor_keys.update(k for k, v in scores.items())
+
+        EXCLUDE = {"style.size.ln_mcap", "style.size.ln_float_mcap"}
+
+        for key in factor_keys:
+            if key in EXCLUDE:
+                continue
+            values = [matrix[s].get(key, 0.0) for s in symbols]
+            # 跳过所有值相同的因子（无截面区分度）
+            if max(values) - min(values) < 0.001:
+                continue
+            # 跳过只有一两个非零值的因子（归一化后噪声膨胀）
+            non_zero = sum(1 for v in values if abs(v) > 0.001)
+            if non_zero < 3:
+                continue
+            mean = statistics.mean(values)
+            std = statistics.stdev(values) or 1.0
+            for s in symbols:
+                matrix[s][key] = (matrix[s].get(key, 0.0) - mean) / std
+
+        return matrix
+
     def get_factor_matrix(self) -> dict[str, dict[str, float]]:
-        """从候选池提取因子分矩阵。"""
+        """从候选池提取因子分矩阵，并做 z-score 归一化。"""
         result: dict[str, dict[str, float]] = {}
         for layer_items in self._pool.values():
             for item in layer_items:
@@ -624,7 +670,8 @@ class PoolManager:
                 result[sym] = {k: v for k, v in fs.items() if isinstance(v, (int, float))}
         if not result:
             logger.warning("[pool_manager] get_factor_matrix() returned empty — pool may be empty or missing factor_scores")
-        return result
+            return result
+        return self._normalize_matrix(result)
 
     # ── 新闻缓存 ──────────────────────────────────────────
     _news_cache: list[dict] | None = None

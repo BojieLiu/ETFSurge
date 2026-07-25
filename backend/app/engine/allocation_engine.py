@@ -399,71 +399,55 @@ def allocate(
     for profile_key in ("defensive", "balanced", "aggressive"):
         meta = STRATEGY_META[profile_key]
         budgets = dynamic_layer_budget(profile_key, regime)
-        core_budget = budgets.get("core", 0.0)
-        sat_budget = budgets.get("satellite", 0.0)
-        def_budget = budgets.get("defense", 0.0)
 
         allocations: list[dict[str, Any]] = []
-        # B3: 跨层追踪已选指数，防止同指数多头持仓
-        selected_tracked_indices: set[str] = set()
+        # B3: 跨层去重 — 基于 segment 字段（由 pool_manager 预先注入）
+        selected_segments: set[str] = set()
 
-        # P1-1: 核心层 max_count 风偏差异化（提高数量以达 10-18 只总持仓）
-        _CORE_MAX = {"defensive": 4, "balanced": 5, "aggressive": 5}
-        _DEFENSE_MAX = {"defensive": 2, "balanced": 1, "aggressive": 1}
-        _SATELLITE_MAX = {"defensive": 6, "balanced": 8, "aggressive": 8}
+        def _dedup_segment(a: dict) -> bool:
+            """如果 segment 已选则跳过，否则加入 selected_segments。"""
+            seg = a.get("segment", "") or ""
+            if not seg:
+                return True
+            if seg in selected_segments:
+                return False
+            selected_segments.add(seg)
+            return True
 
         # ── Core layer ──
         core_alloc = _select_and_weight(
-            core_candidates,
+            [c for c in core_candidates if _dedup_segment(c)],
             factor_matrix,
-            core_budget,
+            budgets.get("core", 0.0),
             layer="core",
             regime=regime,
             strategy=profile_key,
-            max_count=_CORE_MAX.get(profile_key, 4),
-            exclude_tracked_indices=selected_tracked_indices,
+            max_count=meta.get("layer_count", {}).get("core", 4),
         )
-        for a in core_alloc:
-            tidx = a.get("tracked_index", "") or ""
-            if not tidx:
-                tidx = _extract_index_concept(a.get("name", ""))
-            if tidx:
-                # 归一化为板块级概念（科创50/科创100/科创新能源 → 科创）
-                seg = _normalize_segment(tidx)
-                selected_tracked_indices.add(seg)
         allocations.extend(core_alloc)
 
         # ── Satellite layer — C1: 按 profile_key 差异化过滤 ──
         sat_pool = _filter_satellite_by_profile(sat_candidates, factor_matrix, profile_key)
         sat_alloc = _select_and_weight(
-            sat_pool,
+            [c for c in sat_pool if _dedup_segment(c)],
             factor_matrix,
-            sat_budget,
+            budgets.get("satellite", 0.0),
             layer="satellite",
             regime=regime,
             strategy=profile_key,
-            max_count=_SATELLITE_MAX.get(profile_key, 6),
-            exclude_tracked_indices=selected_tracked_indices,
+            max_count=meta.get("layer_count", {}).get("satellite", 8),
         )
-        for a in sat_alloc:
-            tidx = a.get("tracked_index", "") or ""
-            if not tidx:
-                tidx = _extract_index_concept(a.get("name", ""))
-            if tidx:
-                seg = _normalize_segment(tidx)
-                selected_tracked_indices.add(seg)
         allocations.extend(sat_alloc)
 
         # ── Defense layer ──
         def_alloc = _select_and_weight(
-            def_candidates,
+            [c for c in def_candidates if _dedup_segment(c)],
             factor_matrix,
-            def_budget,
+            budgets.get("defense", 0.0),
             layer="defense",
             regime=regime,
             strategy=profile_key,
-            max_count=_DEFENSE_MAX.get(profile_key, 4),
-            exclude_tracked_indices=selected_tracked_indices,
+            max_count=meta.get("layer_count", {}).get("defense", 2),
         )
         allocations.extend(def_alloc)
 

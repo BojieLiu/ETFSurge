@@ -21,6 +21,8 @@ STRATEGY_META: dict[str, dict[str, Any]] = {
         "max_drawdown": -0.12,
         "sharpe_ratio": 1.2,
         "layer_budget": {"core": 0.40, "satellite": 0.25, "defense": 0.10},
+        "layer_count": {"core": 4, "satellite": 6, "defense": 2},
+        "c2_adjust": {"safe_bonus": 0.8, "risky_penalty": -1.5},
         "expected_characteristics": "预期年化波动10-12%，最大回撤区间10-12%",
     },
     "balanced": {
@@ -28,11 +30,13 @@ STRATEGY_META: dict[str, dict[str, Any]] = {
         "label": "平衡型",
         "color": "#1976D2",
         "portfolio_name": "均衡配置组合",
-        "positioning": "核心稳健+卫星增强，攻守兼备",
+        "positioning": "核心稳健+卫星增强，攻守兼备，适合中等风险偏好者",
         "expected_return": 0.11,
         "max_drawdown": -0.18,
         "sharpe_ratio": 1.0,
         "layer_budget": {"core": 0.40, "satellite": 0.30, "defense": 0.10},
+        "layer_count": {"core": 5, "satellite": 8, "defense": 1},
+        "c2_adjust": {"safe_bonus": 0.5, "risky_penalty": 0.0},
         "expected_characteristics": "预期年化波动15-18%，最大回撤区间15-18%",
     },
     "aggressive": {
@@ -45,6 +49,8 @@ STRATEGY_META: dict[str, dict[str, Any]] = {
         "max_drawdown": -0.35,
         "sharpe_ratio": 0.8,
         "layer_budget": {"core": 0.40, "satellite": 0.35, "defense": 0.10},
+        "layer_count": {"core": 5, "satellite": 8, "defense": 1},
+        "c2_adjust": {"safe_bonus": 0.0, "risky_penalty": 1.5},
         "expected_characteristics": "预期年化波动20-25%，最大回撤区间22-28%",
     },
 }

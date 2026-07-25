@@ -18,7 +18,7 @@ async def test_all_26_factors_live_with_real_data():
     from app.factors.factor_registry import FactorRegistry
 
     fr = FactorRegistry()
-    result = await fr.compute(["510300", "518880", "511090"], timeout=30)
+    result = await fr.compute(["510300", "518880", "511090"])
 
     assert len(result) >= 2, f"Expected >=2 symbols, got {len(result)}"
 

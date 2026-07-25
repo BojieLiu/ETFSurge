@@ -558,6 +558,12 @@ _CORE_FACTORS = [
     "china.policy.five_year_plan",
     "china.policy.strategic_emerging",
     "china.policy.dual_circulation",
+    # KDJ
+    "technical.kdj.k_value",
+    "technical.kdj.d_value",
+    "technical.kdj.j_value",
+    # Comprehensive signal
+    "technical.signal.overall",
 ]
 
 
