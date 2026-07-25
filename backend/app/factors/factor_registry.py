@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import math
 import logging
+import time
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, ClassVar
 from pathlib import Path
 
 import yaml
@@ -567,6 +568,58 @@ _CORE_FACTORS = [
 ]
 
 
+class CircuitBreaker:
+    """简单的电路断熔，防止外部数据源故障时反复重试。"""
+    failure_count: ClassVar[int] = 0
+    threshold: ClassVar[int] = 3
+    open_until: ClassVar[float] = 0.0
+    cooldown: ClassVar[int] = 60
+
+    @classmethod
+    def is_open(cls) -> bool:
+        if time.time() < cls.open_until:
+            return True
+        return False
+
+    @classmethod
+    def record_failure(cls):
+        cls.failure_count += 1
+        if cls.failure_count >= cls.threshold:
+            cls.open_until = time.time() + cls.cooldown
+
+    @classmethod
+    def record_success(cls):
+        cls.failure_count = 0
+
+
+# 全局 K 线缓存 — 避免每次 compute() 都网络 I/O
+_kline_cache: dict[str, dict[str, Any]] = {}
+_kline_cache_ts: float = 0.0
+KLINE_CACHE_TTL: float = 60.0  # 60s 缓存，与 pool_manager 刷新周期对齐
+
+
+def _get_cached_kline(symbols: list[str]) -> dict[str, dict[str, Any]] | None:
+    """如果缓存有效且包含所有请求的 symbol，返回缓存数据。"""
+    global _kline_cache, _kline_cache_ts
+    if not _kline_cache:
+        return None
+    if time.time() - _kline_cache_ts > KLINE_CACHE_TTL:
+        return None
+    missing = [s for s in symbols if s not in _kline_cache]
+    if missing:
+        return None
+    return {s: dict(_kline_cache[s]) for s in symbols}
+
+
+def _set_kline_cache(data: dict[str, dict[str, Any]]):
+    """更新 K 线缓存。"""
+    global _kline_cache, _kline_cache_ts
+    for sym, d in data.items():
+        if "_fetch_error" not in d:  # 只缓存成功获取的数据
+            _kline_cache[sym] = dict(d)
+    _kline_cache_ts = time.time()
+
+
 class FactorRegistry:
     """YAML-driven factor registry with async computation.
 
@@ -685,11 +738,23 @@ class FactorRegistry:
     async def _fetch_market_data(self, symbols: list[str], symbol_extra: dict[str, dict] | None = None) -> dict[str, dict[str, Any]]:
         """Fetch real market data for factor computation.
 
-        Uses china_market.fetch_history() (mootdx->Sina) to get OHLCV for each symbol.
-        Runs fetch_history in a thread pool to avoid blocking the event loop.
-        Semaphore(8) limits concurrent thread-pool submissions.
-        symbol_extra: 预采集数据（如 scanner 采集的 fund_scale），注入到每个 symbol 的 data dict
+        Uses K-line cache (60s TTL) and circuit breaker to avoid
+        hammering external APIs when they are down.
         """
+        # 先查缓存(miss 才走网络)
+        cached = _get_cached_kline(symbols)
+        if cached is not None:
+            if symbol_extra:
+                for sym in symbols:
+                    if sym in cached and sym in symbol_extra:
+                        cached[sym].update(symbol_extra[sym])
+            return cached
+
+        # 电路断熔：如果外部数据源连续故障，直接返回空数据
+        if CircuitBreaker.is_open():
+            logger.warning("[factor] Circuit breaker is open — returning empty data for %s", symbols)
+            return {sym: {} for sym in symbols}
+
         from ..fetchers.china_market import fetch_history
         import asyncio
 
@@ -726,6 +791,7 @@ class FactorRegistry:
                     }
                 except Exception as e:
                     logger.warning("[factor] fetch_history failed for %s: %s — skipping", sym, e)
+                    CircuitBreaker.record_failure()
                     return sym, {"_fetch_error": str(e)}
 
         tasks = [fetch_one(sym) for sym in symbols]
@@ -763,6 +829,18 @@ class FactorRegistry:
         except Exception as e:
             logger.warning("[factor] batch NAV fetch failed: %s (proxy? — non-fatal)", e)
 
+        # 缓存成功获取的数据，记录电路断熔成功
+        CircuitBreaker.record_success()
+        _set_kline_cache(data)
+
+        return data
+
+    async def warm_cache(self, symbols: list[str]) -> dict[str, dict[str, Any]]:
+        """预热 K 线缓存：仅当缓存为空或过期时获取数据。"""
+        cached = _get_cached_kline(symbols)
+        if cached is not None:
+            return cached
+        data = await self._fetch_market_data(symbols)
         return data
 
     async def compute(
