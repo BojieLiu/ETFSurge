@@ -63,7 +63,7 @@
 
 | 文档 | 优先级 | 关键依赖 | 预估工时 | 备注 |
 |------|--------|---------|:-------:|------|
-| `design-check-quality-report.md` 剩余 P1-P3 | **P1** | 14/19 项已落地；Phase 0.7+ 全部就绪 | ~1h | 剩余 5 小项（~20行），参见 §4 Phase 1.1 后期 |
+| `design-check-quality-report.md` 剩余 P1-P3 | **P1** | 18/19 项已落地 | ✅ 全部完成 | Phase 1.1 全部实施（剩余 P2-4 target_weight 默认值已修） |
 | `news-pipeline-fix-plan.md` P1 | **P1** | 依赖 P0 已实施（Phase 0 完成） | ~2h | — |
 | `sector-concept-optimization-plan.md` | **P1** | Phase 1-2 独立可先行；Phase 4 依赖 LLM prompt 合并 | ~8h | — |
 | `market-analysis-optimization-plan.md` | **P1** | Phase A-C 须按序；D/E 独立；Phase 0.7/0.9 已就绪 | ~13-19h | — |
@@ -346,8 +346,8 @@ Track D: 市场分析重构
 
 Track E: 数据管道质量提升
 ├── P0-1~P0-4 (_etf_history + meltdown→warning + INDEX_KEYWORDS + S1-A TTL) → ✅ 全部已实施 (53acbfa)
-├── P1-1~P1-4 (差异化 + 分类 + 强制标的 + 拼接 bug) → ✅ P1-1(已随C1+profile权重+C2实现) + P1-3(强制标的)已实施；❌ P1-2(分类) + P1-4(拼接) → Phase 1.1 后期
-├── P2-1~P2-4 (混合归一化 + weight + 摘要 + target_weight) → ✅ P2-1(S2)已实施；❌ P2-2~P2-4 → Phase 1.1 后期
+├── P1-1~P1-4 (差异化 + 分类 + 强制标的 + 拼接 bug) → ✅ 全部已实施 (Phase 0.7 + 1.1)
+├── P2-1~P2-4 (混合归一化 + weight + 摘要 + target_weight) → ✅ 全部已实施 (Phase 2.1 + 1.1)
 └── P3-1~P3-4 (DQ门禁 + pre-commit增强 + E2E断言 + 数据健康脚本) → ✅ 全部已实施 (a5028fa/c72b0ac/afaea68/ac6dd81)
 ```
 
@@ -761,16 +761,16 @@ market-analysis-optimization-plan.md
 | design-report-optimization-plan.md | 实施方案 | ⚠️ 部分 | llm.py + design_report.py | Phase 2.2 | A2/C1/C2 未完成 |
 | e2e-testing-plan.md | 实施方案 | ❌ 未实施 | frontend/e2e/ spec 文件 | Phase 7.1 | 建议推迟 |
 | factor-model-extension-plan.md | 实施方案 | ⚠️ 部分 | factor_registry.py | Phase 7.1 | 远期优化 |
-| five-improvements-plan.md | 实施方案 | ⚠️ 4/5 已实施 | risk_controls.py + rationale.py | Phase 1.1 | #1 待完成（~15min）|
+| five-improvements-plan.md | 实施方案 | ✅ **全部完成** | risk_controls.py + rationale.py + portfolio_service.py | Phase 1.1 | #1 统一市态已落地（`portfolio_service.py:406-409`）|
 | fix-global-indices-plan.md | 修复方案 | ✅ **已实施 (Phase 0)** | market_service + GlobalIndicesStrip | Phase 0 | — |
 | frontend-architecture-refactor.md | 实施方案 | ✅ 已实施 | 全部前端组件 | — | — |
 | frontend-performance-optimization.md | 优化方案 | ⚠️ Step 1 已实施 | main.js + vite.config.js | Phase 3.1 | Step 2-3 待做 |
 | frontend-testing-safety-net.md | 测试方案 | ❌ 未实施 | frontend/test + e2e | Phase 2.2 | — |
 | frontend-ui-optimization-plan.md | 优化方案 | ❌ 已回滚 | 全部前端视图 | Phase 3.1 | 需测试防护就绪 |
 | issues-analysis-report.md | 问题分析 | ✅ 已修复 | 全局 | — | — |
-| market-analysis-optimization-plan.md | 实施方案 | ❌ 未实施 | analysis router + llm.py + MarketAnalysis.vue | Phase 1.1~2.2 | — |
+| market-analysis-optimization-plan.md | 实施方案 | ⚠️ Phase A/B 已实施 | market router + analysis router | Phase 1.1+2.2 | Phase C-E 待实施（前端合并+AI流式+报告质量）|
 | market-awareness-and-data-source-plan.md | 实施方案 | ❌ 未实施 | 路由 + Service + LLM | Phase 5.1 | §4 已转 roadmap；§5 待评估 |
-| news-pipeline-fix-plan.md | 修复方案 | ✅ P0 已实施；⚠️ P1 待做 | news_fetcher + NewsView.vue | Phase 1.1 | P0 ✅ Phase 0 |
+| news-pipeline-fix-plan.md | 修复方案 | ✅ **全部完成** | news_fetcher + levistock_fetcher + NewsView.vue | Phase 1.1 | P0+P1 全部实施（新浪源/关键词/降级链）|
 | optimization-plan-20260721.md | 实施方案 | ✅ **已实施 (Phase 0.5)** | etf_scanner + 前端 + 后端链路 | Phase 0.5 | 全部 8 项完成 |
 | **remaining-issues-solution-design.md** | **实施方案** | ✅ **全部已实施**（已从 staged→committed） | **pool_manager + task_manager + ws + factor_registry** | **Phase 2.1** | S1-A(TTL) `53acbfa`、S1-C(渐进) `ef3de11`、S2(归一化) `5116681`、S3-B/C(WS) `ef3de11` |
 | review-20260720.md | 评审报告 | N/A | N/A | — | 非实施方案 |
@@ -892,3 +892,4 @@ Phase 7.1 (远期优化)             无紧急依赖
 | v4.2 | 2026-07-25 | 基于 10+ 个新增 commit 审计更新：Phase 2.1 确认 10/15 项 ✅（含 staged→committed），6 项新增未规划已落地（F10 enrich、C2风偏分、新闻情感桥接、IOPV批量、DQ门禁、verify_design）；剩余 5 小项合并入 Phase 1.1 后期；track E 轨道状态同步更新；设计检查质量报告状态重写；文档状态表 v4.2 刷新 |
 | **v5.0** | 2026-07-25 | 15 个修复项全部完成：china_market.py import 错误根因修复（所有 26 因子从 0→非零）；空池保护 + B3b dedup + C2 风偏修正 + 入选理由重写 + IOPV 批量 + 新闻情感桥接 + change_pct 因子注册 + decode_df 逐格修复 + DB 编码修复脚本 + conftest teardown 防护 + 前端错误态返回按钮 + E2E 回归测试 + DQ 门禁 + test_data_health.py pytest 兼容。Phase 2.1 全部完成 ✅。新增 Phase 2.2（数据管道根因修复）✅ 全部完成。Phase 2.2→2.3 重编号。所有剩余项均无 Block。 |
 | **v6.0** | 2026-07-25 | 基于 v5.0 后 7 个新 commit（5f484e6~98025ad）+ 工作区改动审计更新。文档总数 28→30。Phase 2.3（脚手架因子全 LIVE + 测试防护缺口修复）✅ 完成——7 个 scaffold → 非零（26/26 全 LIVE）、运行时因子断言门禁、因子健康端点。Phase 2.4（分配器引擎质量修复）✅ 完成——ln_mcap 排毒、C2 修正、segment 去重、预算重调、cross-section z-score。Phase 2.3→2.5 重编号。 |
+| **v6.1** | 2026-07-25 | Phase 1.1 ✅ 全部完成（`1f6d00e`~`89862be` 共 7 commit）。新闻管道：新浪 HTTP 直连源、三级降级链(新浪→CLS→财联社)、关键词精度修复(P1.1/P1.2)。板块数据：概念+行业双源动量、60s 定时刷新循环。时间戳 Unix→ISO 转换。搜索端新增 `market=A` 个股支持。正文 content 字段补齐（新浪 intro/RSS summary）。文章 URL 透传 + 前端"查看原文"。测试防护：4 个新测试文件 + 1 个增强，共 35 个新测试用例。设计质量审计 18/19 全部落地。5 项改进方案全部完成。 |
