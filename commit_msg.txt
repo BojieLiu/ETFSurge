@@ -1,6 +1,4 @@
-fix(prompt): ban AI hedging language in design report; ban "并无可辩驳的证据" style
+test(integration): reduce HTTP leak from 28s by clearing singleton caches
 
-Two changes:
-1. Add explicit AI-suit ban (双重否定式绕弯子, "并无可辩驳的证据")
-2. Add instruction: when data is insufficient, say so directly and give
-   a neutral but concrete operation suggestion instead of verbose hedging
+Clear sector_momentum_cache and china_macro cache on the singleton to
+prevent _refresh_impl from making real API calls during refresh.

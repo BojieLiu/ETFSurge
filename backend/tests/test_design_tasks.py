@@ -1,4 +1,6 @@
 """TDD tests for async design task system."""
+import os
+import tempfile
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 from datetime import datetime
@@ -60,6 +62,30 @@ class TestDesignTaskManager:
 
         tasks = mgr.list_tasks()
         assert len(tasks) == 3
+
+    def test_tasks_survive_manager_recreation(self):
+        """验证 TaskManager 重启恢复：创建任务 → 更新 → 新实例 → 数据仍在"""
+        from app.tasks.design_tasks import TaskManager
+
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+            persist_path = f.name
+        try:
+            # 模拟第一次启动
+            mgr1 = TaskManager(persist_path=persist_path)
+            mgr1.create_task(task_type="design", params={"capital": 500000})
+            mgr1.update_task(1, status="running", progress=30)
+
+            # 模拟重启：销毁 mgr1，创建 mgr2（同路径）
+            mgr2 = TaskManager(persist_path=persist_path)
+            t = mgr2.get_task(1)
+
+            assert t is not None, "重启后任务不应丢失"
+            assert t["status"] == "running"
+            assert t["progress"] == 30
+            assert t["params"]["capital"] == 500000
+        finally:
+            if os.path.exists(persist_path):
+                os.unlink(persist_path)
 
 
 class TestDesignWorker:

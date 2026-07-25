@@ -29,36 +29,41 @@ TASK_TYPES = {
 
 
 class TaskManager:
-    """通用异步任务管理器。持久化到 JSON 文件，支持重启恢复。"""
+    """通用异步任务管理器。持久化到 JSON 文件，支持重启恢复。
+    
+    默认不持久化（persist_path=None）。需要持久化时显式传入路径。
+    单例 task_manager 默认使用 DEFAULT_PERSIST_PATH。
+    """
 
-    PERSIST_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "tasks.json")
+    DEFAULT_PERSIST_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "tasks.json")
 
-    def __init__(self):
+    def __init__(self, persist_path: str | None = None):
         self._tasks: dict[int, dict] = {}
         self._next_id = 1
-        self._load()  # 恢复持久化的任务
+        self._persist_path = persist_path  # None = 不持久化
+        self._load()  # 恢复持久化的任务（仅 persist_path 非 None 时）
 
     def _save(self) -> None:
         """将任务列表持久化到 JSON 文件。"""
+        if not self._persist_path:
+            return
         try:
-            path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "tasks.json"))
-            os.makedirs(os.path.dirname(path), exist_ok=True)
+            os.makedirs(os.path.dirname(self._persist_path), exist_ok=True)
             data = {
                 "tasks": list(self._tasks.values()),
                 "next_id": self._next_id,
             }
-            with open(path, "w", encoding="utf-8") as f:
+            with open(self._persist_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, default=str)
         except Exception as e:
             logger.warning("[TaskManager] persist save failed: %s", e)
 
     def _load(self) -> None:
         """从 JSON 文件恢复持久化的任务列表。"""
-        path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "tasks.json"))
-        if not os.path.exists(path):
+        if not self._persist_path or not os.path.exists(self._persist_path):
             return
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(self._persist_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             restored = data.get("tasks", [])
             for t in restored:
@@ -66,7 +71,7 @@ class TaskManager:
                 if tid is not None:
                     self._tasks[tid] = t
             self._next_id = max(data.get("next_id", 1), (max(self._tasks.keys(), default=0) + 1))
-            logger.info("[TaskManager] restored %d tasks from %s", len(restored), path)
+            logger.info("[TaskManager] restored %d tasks from %s", len(restored), self._persist_path)
         except Exception as e:
             logger.warning("[TaskManager] persist load failed: %s", e)
 
@@ -88,6 +93,7 @@ class TaskManager:
             "completed_at": None,
         }
         self._tasks[task_id] = task
+        self._save()
         logger.info("[TaskManager] created task %d (type=%s)", task_id, task_type)
         return task
 
@@ -103,13 +109,14 @@ class TaskManager:
                 task[k] = v
         if kwargs.get("status") == "completed":
             task["completed_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        self._save()
 
     def list_tasks(self, limit: int = 20, offset: int = 0) -> list[dict]:
         tasks = sorted(self._tasks.values(), key=lambda t: -t["task_id"])
         return tasks[offset:offset + limit]
 
 
-task_manager = TaskManager()
+task_manager = TaskManager(persist_path=os.path.abspath(TaskManager.DEFAULT_PERSIST_PATH))
 
 
 class TaskNotifyManager:

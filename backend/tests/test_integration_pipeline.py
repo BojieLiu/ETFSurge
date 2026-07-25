@@ -80,6 +80,11 @@ async def test_integration_engine_pipeline():
     pm._pool = {"core": [], "satellite": [], "defense": []}
     pm._by_code = {}
     pm._factor_cache = {}
+    # Clear any sector/china macro cache to prevent refresh_impl from calling real APIs
+    pm._sector_momentum_cache = []
+    pm._sector_momentum_cache_ts = 0
+    pm._china_macro = {}
+    pm._china_macro_ts = 0
 
     # Mock FactorRegistry data with realistic OHLCV + fund_scale
     # Need 30+ data points to support RSI_14 (15), MACD (26), SMA_20 (20), Bollinger (20)

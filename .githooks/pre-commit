@@ -106,6 +106,30 @@ else
     fi
 fi
 
+# ── API 调用覆盖检查 ────────────────────────────────────────────
+if [ "${SKIP_API_CHECK}" = "1" ]; then
+    echo "[pre-commit] SKIP_API_CHECK=1, 跳过 API 调用覆盖检查"
+else
+    FRONTEND_STAGED=$(git diff --cached --name-only --diff-filter=ACM -- 'frontend/src/api/*' 2>/dev/null || true)
+    if [ -n "$FRONTEND_STAGED" ]; then
+        echo "[pre-commit] 检测到 API 文件变更，正在执行 check_api_usage.py ..."
+        cd backend
+        if python scripts/check_api_usage.py 2>&1; then
+            echo "[pre-commit] ✅ API 调用覆盖检查通过"
+            cd ..
+        else
+            cd ..
+            echo ""
+            echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+            echo "!  🚫 check_api_usage 失败 — 存在定义了但未调用的 API 方法    !"
+            echo "!  请检查上述未调用的方法是否需要保留或添加调用点。             !"
+            echo "!  如需跳过: SKIP_API_CHECK=1 git commit ...                  !"
+            echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+            exit 1
+        fi
+    fi
+fi
+
 # ── 后端测试门禁（P3-2） ──────────────────────────────────────────
 if [ "${SKIP_BACKEND_TESTS}" = "1" ]; then
     echo "[pre-commit] SKIP_BACKEND_TESTS=1, 跳过后端测试"

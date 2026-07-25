@@ -8,9 +8,15 @@
  *   - activeTaskId returns the first running task's taskId
  *   - activeTaskId returns null when no task is running
  */
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useTaskStore } from '../stores/task'
+
+// Mock the api module for fetchAndMergeTasks tests
+const mockListTasks = vi.fn()
+vi.mock('../api', () => ({
+  portfolioApi: { listTasks: mockListTasks },
+}))
 
 describe('taskStore', () => {
   beforeEach(() => {
