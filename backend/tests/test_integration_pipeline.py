@@ -66,6 +66,8 @@ async def test_integration_engine_pipeline():
         {"title": "市场平稳", "level": "中性", "stars": 3},
     ])
     pm.get_regime = MagicMock(return_value="range_bound")
+    pm.get_index_realtime = MagicMock(return_value=[])
+    pm.get_sector_momentum = MagicMock(return_value=[])
 
     # Mock FactorRegistry data with realistic OHLCV + fund_scale
     REALISTIC_DATA = {
