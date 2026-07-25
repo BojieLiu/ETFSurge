@@ -278,6 +278,63 @@ class TestFredFetcher:
         result = await fetch_vix()
         assert result is None
 
+class TestFactorAggregation:
+    """测试因子聚合逻辑。"""
+
+    def test_aggregate_excludes_ln_mcap_from_valuation(self):
+        """ln_mcap/ln_float_mcap 不应进入 valuation 聚合。"""
+        from app.factors.factor_registry import FactorRegistry
+        fr = FactorRegistry()
+        factor_scores = {
+            "style.size.ln_mcap": 25.33,
+            "style.size.ln_float_mcap": 25.0,
+            "technical.ma.sma_5": -1.32,
+            "sentiment.news_heat": 0.5,
+        }
+        result = fr.aggregate_factor_scores(factor_scores)
+        assert abs(result.get("valuation", 0.0)) < 0.001, f"valuation got {result.get('valuation')}"
+        assert abs(result.get("technical", 0.0) - (-1.32)) < 0.001
+
+    def test_aggregate_preserves_original_keys(self):
+        """聚合不应丢失原始因子键。"""
+        from app.factors.factor_registry import FactorRegistry
+        fr = FactorRegistry()
+        factor_scores = {"technical.ma.sma_5": -1.0, "style.size.ln_mcap": 25.33}
+        result = fr.aggregate_factor_scores(factor_scores)
+        for key in factor_scores:
+            assert key in result, f"{key} missing"
+
+    def test_aggregate_empty_input(self):
+        """空输入应返回空 dict。"""
+        from app.factors.factor_registry import FactorRegistry
+        fr = FactorRegistry()
+        assert fr.aggregate_factor_scores({}) == {}
+
+
+class TestCoreFactorsConsistency:
+    """验证 _CORE_FACTORS 与 _BUILTIN_COMPUTERS 一致性。"""
+
+    def test_all_core_factors_have_computers(self):
+        from app.factors import factor_registry as _fr_mod
+        core = set(_fr_mod._CORE_FACTORS)
+        computers = set(_fr_mod._BUILTIN_COMPUTERS.keys())
+        missing = core - computers
+        assert len(missing) == 0, f"Factors without computers: {sorted(missing)}"
+
+    def test_all_computers_in_core_factors(self):
+        from app.factors import factor_registry as _fr_mod
+        core = set(_fr_mod._CORE_FACTORS)
+        computers = set(_fr_mod._BUILTIN_COMPUTERS.keys())
+        extra = computers - core
+        assert len(extra) == 0, f"Factors not in CORE: {sorted(extra)}"
+
+    def test_core_factors_no_duplicates(self):
+        from app.factors import factor_registry as _fr_mod
+        assert len(_fr_mod._CORE_FACTORS) == len(set(_fr_mod._CORE_FACTORS))
+
+    def test_core_factors_count(self):
+        from app.factors import factor_registry as _fr_mod
+        assert len(_fr_mod._CORE_FACTORS) == 30, f"Got {len(_fr_mod._CORE_FACTORS)}"
     @patch("app.fetchers.fred_fetcher.httpx.AsyncClient")
     @pytest.mark.asyncio
     async def test_fetch_network_error_returns_none(self, mock_client):
