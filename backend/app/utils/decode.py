@@ -50,11 +50,16 @@ def decode_df(df: pd.DataFrame) -> pd.DataFrame:
 
     # 2. 修复 string 列的值（akshare 常见乱码）
     for col in df.select_dtypes(include=["object", "str"]).columns:
-        try:
-            df[col] = df[col].apply(
-                lambda x: x.encode("latin1").decode("utf-8") if isinstance(x, str) else x,
-            )
-        except (UnicodeEncodeError, UnicodeDecodeError):
-            pass
+        fixed: list[Any] = []
+        for x in df[col]:
+            if isinstance(x, str):
+                try:
+                    fixed.append(x.encode("latin1").decode("utf-8"))
+                except (UnicodeEncodeError, UnicodeDecodeError):
+                    # 单元格级保护：正确 UTF-8 的值不会触发异常，保持原值
+                    fixed.append(x)
+            else:
+                fixed.append(x)
+        df[col] = fixed
 
     return df
