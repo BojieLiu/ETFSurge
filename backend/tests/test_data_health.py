@@ -173,6 +173,85 @@ async def main():
     sys.exit(0 if FAIL == 0 else 1)
 
 
+def test_core_factors_no_scaffold():
+    """（无网络）检查 _CORE_FACTORS 中是否有未接入数据源的脚手架因子。
+
+    通过读取 FactorRegistry 的 _computers 映射，判断哪些因子函数硬编码返回 0.0
+    （"return 0.0" 或 "return 0"），将其标记为 STUB。
+
+    只接受不超过 _KNOWN_SCAFFOLD_COUNT 个脚手架因子。
+    """
+    from app.factors.factor_registry import FactorRegistry
+    import inspect, ast
+
+    from app.factors import factor_registry as _fr_mod
+    factors = _fr_mod._CORE_FACTORS
+    fr = FactorRegistry()
+    computers = fr._computers
+
+    stub_factors = []
+    live_factors = []
+
+    for f in factors:
+        computer = computers.get(f)
+        if computer is None:
+            stub_factors.append(f)
+            continue
+        # 检查源程序是否硬编码了 return 0.0
+        source = inspect.getsource(computer)
+        is_stub = False
+        try:
+            tree = ast.parse(source)
+            return_values = set()
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Return) and node.value is not None:
+                    if isinstance(node.value, ast.Constant):
+                        return_values.add(node.value.value)
+                    elif isinstance(node.value, ast.UnaryOp) and isinstance(node.value.op, ast.USub):
+                        if isinstance(node.value.operand, ast.Constant):
+                            return_values.add(-node.value.operand.value)
+                    else:
+                        return_values.add("computed")  # non-constant return → live
+            # 仅当 ALL return 都是 0 或 0.0 时标记为 stub
+            if return_values and all(v in (0, 0.0) for v in return_values):
+                is_stub = True
+        except SyntaxError:
+            pass  # 非关键路径
+        if is_stub:
+            stub_factors.append((f, "all returns are 0.0"))
+        else:
+            live_factors.append(f)
+
+    # Scaffolding 因子的名称推断（注释中标注"scaffolding"或"TBD"）
+    known_scaffolds = {
+        "etf.tracking_error",
+        "etf.shares_change",
+        "etf.institutional_holdings_change",
+        "etf.amount_stability",
+        "etf.industry_diversification",
+        "sentiment.panic_greed_diff",
+        "sentiment.stock_divergence",
+    }
+    expected_stubs = len(known_scaffolds)
+
+    if stub_factors:
+        print(f"\n  STUB factors ({len(stub_factors)}):")
+        for s in stub_factors:
+            name = s[0] if isinstance(s, tuple) else s
+            detail = s[1] if isinstance(s, tuple) else ""
+            expected = " (known)" if name in known_scaffolds else " ⚠️ UNEXPECTED"
+            print(f"    {name}{expected}  {detail}")
+
+    print(f"\n  LIVE factors ({len(live_factors)}): {', '.join(live_factors[:8])}...")
+
+    unexpected = [s for s in stub_factors
+                  if (s[0] if isinstance(s, tuple) else s) not in known_scaffolds]
+    assert len(unexpected) == 0, \
+        f"Unexpected scaffolding factors: {[u[0] if isinstance(u, tuple) else u for u in unexpected]}"
+    print(f"\n  [+] All {len(known_scaffolds)} known scaffolding factors expected, "
+          f"{len(stub_factors)} found, {len(unexpected)} unexpected")
+
+
 @pytest.mark.timeout(120)  # 外部数据源可能较慢
 @pytest.mark.skip(reason="Requires live data sources (run --runslow)")
 def test_factor_data_health_pytest():
