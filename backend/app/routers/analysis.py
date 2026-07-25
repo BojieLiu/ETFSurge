@@ -431,12 +431,20 @@ async def llm_advice_stream(query: str = Query(...), context: dict | None = None
         ctx.setdefault("market_data", []).extend(idx_data[:8])
 
         sector_data = pool_manager.get_sector_momentum() or []
+        # F1: pass sector_momentum as dedicated key
+        ctx["sector_momentum"] = sector_data[:10]
         for s in sector_data[:5]:
             ctx.setdefault("market_data", []).append({
-                "name": s.get("name"),
+                "name": s.get("sector_name") or s.get("name", "?"),
                 "change_pct": s.get("change_pct"),
                 "asset_type": "sector",
             })
+        # F2: fund flow injection
+        try:
+            from ..services.strategy_design import _compute_fund_flow
+            ctx["fund_flow"] = _compute_fund_flow(pool_manager)
+        except Exception as e:
+            logger.debug("[llm-advice-stream] fund_flow: %s", e)
 
         news_items = fetch_news_headlines() or []
         try:

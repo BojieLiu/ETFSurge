@@ -1259,6 +1259,36 @@ def _build_advice_stream_prompt(query: str, ctx: dict) -> str:
     lines.append('2. 给出判断依据')
     lines.append('3. 如涉及操作，给出分析和建议（不构成投资指令）')
     lines.append('')
-    lines.append('使用 Markdown 格式，控制 500 字以内。')
+    lines.append('使用 Markdown 格式，控制 800 字以内。')
+
+    # F1: sector momentum data
+    sector_data = ctx.get("sector_momentum", [])
+    if sector_data:
+        lines.append("\n### 行业板块涨跌（当日排名）")
+        for item in sector_data[:10]:
+            name = item.get("sector_name") or item.get("name", "?")
+            chg = item.get("change_pct")
+            cht = f"({chg:+.2f}%)" if chg is not None else ""
+            lines.append(f"- {name}: {cht}")
+        lines.append("")
+
+    # F2: fund flow data
+    fund_flow = ctx.get("fund_flow", {})
+    if fund_flow.get("total_symbols", 0) > 0:
+        total = fund_flow.get("total_net_inflow", 0)
+        pos = fund_flow.get("positive_flow_count", 0)
+        neg = fund_flow.get("negative_flow_count", 0)
+        direction = "净流入" if total > 0 else "净流出"
+        intensity = "显著" if abs(total) > 1000 else "温和" if abs(total) > 100 else "微弱"
+        lines.append(f"### 资金流向")
+        lines.append(f"- 全市场主力{intensity}{direction}：{total/10000:.1f}亿元（净流入{pos}只/净流出{neg}只）")
+        lines.append("")
+
+    # F5: industry rotation framework
+    lines.append('### 行业轮动分析框架')
+    lines.append('- 最强/最弱板块：优先引用行业涨跌幅排名数据')
+    lines.append('- 轮动方向：分析资金从一个板块向另一个板块的趋势（短期/中期）')
+    lines.append('- 交叉验证：行业涨跌幅 + 资金流向 + 新闻事件')
+    lines.append('')
 
     return "\n".join(lines)
