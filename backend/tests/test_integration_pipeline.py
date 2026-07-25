@@ -31,11 +31,13 @@ async def test_integration_engine_pipeline():
       - Each has >= 1 non-CASH allocation with positive weight
       - Rationale has no placeholder strings
     """
+    # generate_enhanced_design uses the module-level pool_manager singleton,
+    # so we must mock the singleton directly, not create a local instance.
     from app.services.strategy_design import generate_enhanced_design
-    from app.services.pool_manager import PoolManager
+    from app.services.pool_manager import pool_manager as live_pm
     import app.factors.factor_registry as fr_mod
 
-    pm = PoolManager()
+    pm = live_pm
     pm.scanner = MagicMock()
     pm.scanner.full_pipeline.return_value = {
         "core": [
@@ -69,33 +71,36 @@ async def test_integration_engine_pipeline():
     pm.get_index_realtime = MagicMock(return_value=[])
     pm.get_sector_momentum = MagicMock(return_value=[])
 
+    # Force a fresh refresh with mocked data (skip cooldown)
+    pm._last_refresh_ts = 0.0
+    # Also mock the news/f10 enrichment to prevent real HTTP calls
+    pm._news_cache = []
+    pm._sentiment_cache = {"sentiment_index": 55, "sentiment_label": "中性"}
+    # Clear any stale pool from previous tests
+    pm._pool = {"core": [], "satellite": [], "defense": []}
+    pm._by_code = {}
+    pm._factor_cache = {}
+
     # Mock FactorRegistry data with realistic OHLCV + fund_scale
-    REALISTIC_DATA = {
-        "510300": {"close": [4.13, 4.11, 4.09, 4.07, 4.05, 4.03, 4.02, 4.06],
-                   "volume": [12345678, 11000000, 10000000, 9500000, 9000000,
-                              8500000, 8800000, 9200000],
-                   "high": [4.15, 4.13, 4.11, 4.09, 4.07, 4.05, 4.08, 4.12],
-                   "low": [4.10, 4.08, 4.06, 4.04, 4.02, 4.00, 4.01, 4.04],
-                   "open": [4.12, 4.10, 4.08, 4.06, 4.04, 4.02, 4.05, 4.10]},
-        "159338": {"close": [1.01, 1.00, 1.02, 0.99, 1.00, 0.98, 0.99, 1.01],
-                   "volume": [9876543, 9000000, 8500000, 8000000, 8200000,
-                              7800000, 8000000, 9500000],
-                   "high": [1.02, 1.01, 1.03, 1.00, 1.01, 0.99, 1.00, 1.02],
-                   "low": [1.00, 0.99, 1.01, 0.98, 0.99, 0.97, 0.98, 1.00],
-                   "open": [1.01, 1.00, 1.02, 0.99, 1.00, 0.98, 0.99, 1.01]},
-        "589980": {"close": [1.15, 1.14, 1.16, 1.13, 1.17, 1.12, 1.14, 1.16],
-                   "volume": [5432109, 5000000, 4800000, 5200000, 5600000,
-                              4600000, 4900000, 5300000],
-                   "high": [1.16, 1.15, 1.17, 1.14, 1.18, 1.13, 1.15, 1.17],
-                   "low": [1.14, 1.13, 1.15, 1.12, 1.16, 1.11, 1.13, 1.15],
-                   "open": [1.15, 1.14, 1.16, 1.13, 1.17, 1.12, 1.14, 1.16]},
-        "518880": {"close": [5.88, 5.85, 5.90, 5.84, 5.86, 5.82, 5.83, 5.87],
-                   "volume": [3456789, 3000000, 3200000, 2800000, 3100000,
-                              2700000, 2900000, 3300000],
-                   "high": [5.90, 5.87, 5.92, 5.86, 5.88, 5.84, 5.85, 5.89],
-                   "low": [5.85, 5.83, 5.88, 5.82, 5.84, 5.80, 5.81, 5.85],
-                   "open": [5.88, 5.85, 5.90, 5.84, 5.86, 5.82, 5.83, 5.87]},
-    }
+    # Need 30+ data points to support RSI_14 (15), MACD (26), SMA_20 (20), Bollinger (20)
+    def _gen_prices(base, count=35, drift=0.001, jitter=0.005):
+        """Generate realistic price list with slight drift and noise."""
+        vals = [base]
+        for i in range(1, count):
+            v = vals[-1] * (1 + drift + jitter * (i % 5 - 2) / 10)
+            vals.append(round(v, 2))
+        return vals
+
+    REALISTIC_DATA = {}
+    for sym, base_close in [("510300", 4.12), ("159338", 1.01), ("589980", 1.15), ("518880", 5.87)]:
+        closes = _gen_prices(base_close)
+        REALISTIC_DATA[sym] = {
+            "close": closes,
+            "open": [c * (1 - 0.002) for c in closes],
+            "high": [c * (1 + 0.005) for c in closes],
+            "low": [c * (1 - 0.005) for c in closes],
+            "volume": [int(v) for v in _gen_prices(10000000, 35, 0, 0.3)],
+        }
 
     async def _mock_fetch_market_data(self, symbols, symbol_extra=None):
         result = {}
@@ -109,8 +114,29 @@ async def test_integration_engine_pipeline():
         return result
 
     with patch.object(fr_mod.FactorRegistry, "_fetch_market_data",
-                      new=_mock_fetch_market_data):
+                      new=_mock_fetch_market_data), \
+         patch("app.fetchers.etf_scanner.enrich_tracked_indices") as _mock_enrich, \
+         patch("app.services.market_trends.compute_sector_momentum",
+               return_value=[]), \
+         patch("app.fetchers.sentiment_fetcher.fetch_market_sentiment",
+               return_value={"sentiment_index": 55}):
+        _mock_enrich.return_value = None
         result = await generate_enhanced_design(capital=500000)
+
+        strategies = result.get("strategies", [])
+        print(f"\n[DEBUG] strategies: {len(strategies)}")
+        fm = live_pm.get_factor_matrix()  # Use the singleton instance directly
+        print(f"[DEBUG] factor_matrix keys: {list(fm.keys())}")
+        if fm:
+            sym = "510300"
+            if sym in fm:
+                print(f"[DEBUG] {sym} factor_scores: {dict(list(fm[sym].items())[:8])}")
+        for s in strategies:
+            label = s.get("label", s.get("name", "?"))
+            allocs = s.get("allocations", s.get("etfs", []))
+            print(f"[DEBUG] {label}: {len(allocs)} allocations")
+            for a in allocs:
+                print(f"  {a.get('symbol','?')} w={a.get('target_weight',0)}")
 
     assert result is not None
     strategies = result.get("strategies", [])
