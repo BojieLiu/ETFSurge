@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from datetime import datetime
 from typing import Any
@@ -28,11 +29,46 @@ TASK_TYPES = {
 
 
 class TaskManager:
-    """通用异步任务管理器。"""
+    """通用异步任务管理器。持久化到 JSON 文件，支持重启恢复。"""
+
+    PERSIST_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "tasks.json")
 
     def __init__(self):
         self._tasks: dict[int, dict] = {}
         self._next_id = 1
+        self._load()  # 恢复持久化的任务
+
+    def _save(self) -> None:
+        """将任务列表持久化到 JSON 文件。"""
+        try:
+            path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "tasks.json"))
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            data = {
+                "tasks": list(self._tasks.values()),
+                "next_id": self._next_id,
+            }
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, default=str)
+        except Exception as e:
+            logger.warning("[TaskManager] persist save failed: %s", e)
+
+    def _load(self) -> None:
+        """从 JSON 文件恢复持久化的任务列表。"""
+        path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "tasks.json"))
+        if not os.path.exists(path):
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            restored = data.get("tasks", [])
+            for t in restored:
+                tid = t.get("task_id")
+                if tid is not None:
+                    self._tasks[tid] = t
+            self._next_id = max(data.get("next_id", 1), (max(self._tasks.keys(), default=0) + 1))
+            logger.info("[TaskManager] restored %d tasks from %s", len(restored), path)
+        except Exception as e:
+            logger.warning("[TaskManager] persist load failed: %s", e)
 
     def create_task(self, task_type: str = "design", params: dict | None = None) -> dict:
         """创建新任务，返回任务对象。"""

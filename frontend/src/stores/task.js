@@ -160,9 +160,47 @@ export const useTaskStore = defineStore('task', () => {
     _save(LS_KEYS.design, null)
   }
 
+  // ── Backend sync: fetch task list from API and merge with local ──
+  let _fetchPromise = null
+
+  async function fetchAndMergeTasks() {
+    if (_fetchPromise) return _fetchPromise
+    _fetchPromise = (async () => {
+      const { portfolioApi } = await import('../api')
+      try {
+        const res = await portfolioApi.listTasks(20, 0)
+        const remoteTasks = Array.isArray(res.data) ? res.data : []
+        const localIds = new Set(tasks.value.map(t => t.taskId))
+        let changed = false
+        for (const rt of remoteTasks) {
+          if (!localIds.has(rt.task_id)) {
+            tasks.value.push({
+              taskId: rt.task_id,
+              type: rt.type || 'design',
+              status: rt.status || 'running',
+              progress: rt.progress || 0,
+              label: rt.type === 'check' ? '策略检查与分析' : '智能组合设计',
+              designId: rt.result?.design_id || null,
+              createdAt: new Date(rt.created_at || Date.now()).getTime(),
+            })
+            changed = true
+          }
+        }
+        if (changed) _save(LS_KEYS.tasks, tasks.value)
+      } catch {
+        // Silently ignore — localStorage tasks are still available
+      }
+    })()
+    try {
+      await _fetchPromise
+    } finally {
+      _fetchPromise = null
+    }
+  }
+
   return {
     tasks, getTask, addTask, updateTask, removeTask, clearCompleted, _loadTasks,
-    registerTaskCompletion,
+    registerTaskCompletion, fetchAndMergeTasks,
     hasRunningTask, activeTaskId,
     designState, persistDesignState, getDesignState, clearDesignState,
   }

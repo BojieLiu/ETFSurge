@@ -159,7 +159,7 @@ async def test_integration_engine_pipeline():
         assert len(cash) == 1, f"Expected 1 cash entry in '{label}', got {len(cash)}"
         for a in non_cash:
             symbols_seen.add(a["symbol"])
-            w = a.get("target_weight", 0)
+            w = a.get("weight", a.get("target_weight", 0))
             assert w > 0, f"ETF {a['symbol']} in '{label}' weight={w}"
             rt = a.get("selection_rationale", "")
             assert rt, f"Empty rationale for {a['symbol']}/{label}"

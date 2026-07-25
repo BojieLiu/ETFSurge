@@ -170,6 +170,11 @@ function connectTaskWs() {
     return
   }
 
+  taskWs.onopen = () => {
+    // Backfill: on (re)connect, fetch any tasks created while disconnected
+    taskStore.fetchAndMergeTasks()
+  }
+
   taskWs.onmessage = (event) => {
     try {
       const msg = JSON.parse(event.data)
@@ -214,6 +219,8 @@ function scheduleTaskWsReconnect() {
 }
 
 onMounted(() => {
+  // Initial fetch: load any tasks that existed before this page load
+  taskStore.fetchAndMergeTasks()
   connectTaskWs()
 })
 
