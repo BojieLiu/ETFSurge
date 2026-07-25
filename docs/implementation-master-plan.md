@@ -1,11 +1,11 @@
 # ETF Surge 方案实施总计划
 
-> 生成日期: 2026-07-25 | 版本: v4.2
+> 生成日期: 2026-07-25 | 版本: v5.0
 > 总览 `docs/` 目录 **28 份**方案文档，梳理实施状态、冲突重叠、修复建议及分阶段执行路线。
-> v4.2 基于 v4.1 后 10+ 个 commit（`5116681`、`53acbfa`、`17e9cab`、`ac6dd81`、`a5028fa`、`afaea68`、`f8bfc35`、`783e188` 等）审计更新。
-> Phase 2.1 剩余 10 项基本完成（含 S1-A TTL 缓存、S1-C 渐进状态机、S2 混合归一化、S3-B/C WS 超时+清理从 staged→committed；P1-3 强制标的已落地；P3-2/3/4 门禁+脚本已实现）。
-> 新增未规划项：F10 tracked_index 补充、C2 风偏基准分、新闻情感桥接、IOPV 批量抓取、verify_design.py 验证管道、DQ 测试门禁。
-> 💡 **关键依赖变化**：Phase 2.1 绝大部分已完成，剩余 5 个小项（~1h）合并入 Phase 1.1 后期。
+> v5.0 基于 v4.2 后一轮密集修复（15 个问题，涵盖数据源 import 错误、空池保护、因子聚合、风偏差异化、去重、入选理由、IOPV/NAV 抓取、新闻情感桥接、中文编码等；参见 commits `e6264ee`~`1e63eab`）审计更新。
+> Phase 2.2 全部完成——因子数据从全 0 恢复到 15/26 个非零因子（含技术面 10/10 LIVE）、策略区分度、去重、编码修复、DQ 测试门禁。
+> 新增未规划项：china_market.py import 修复、空池保护、C2 风偏基准分、B3b 指数概念去重、IOPV 批量抓取、change_pct 因子、新闻情感桥接、单例 teardown HTTP 泄漏防护、DB 编码修复脚本。
+> 💡 **关键依赖变化**：Phase 2.x 全部完成，无剩余 Block 项。
 
 ---
 
@@ -38,6 +38,7 @@
 | `design-check-pipeline-redesign.md` | **Phase 1.0 已实施**（顺序 Pipeline 替代 fire-and-forget + report_quality 分级 + 原子 DB 写入 + 崩溃恢复 + 8 个新集成测试），见 `4ff6084` + `7e93321` |
 | `five-improvements-plan.md` | 4/5 项已实现——#2 `filter_extreme_drawdown` ✓、#3 `check_defense_effectiveness` ✓、#4 `remove_stale_candidates` ✓、#5 `_layer_phrase` 模板多样化 ✓；#1 统一市态判定仍待完成 |
 | `remaining-issues-solution-design.md` | **全部 4 子项已实施**——S1-A(TTL 缓存) `53acbfa` ✓、S1-C(渐进状态机) `ef3de11` ✓、S2(混合归一化) `5116681` ✓、S3-B/C(WS 超时+清理) `ef3de11` ✓ |
+| **Phase 2.2 数据管道根因修复**（v5.0 新增） | 发现 china_market.py 两个 import 错误（`source_registry` 路径错误、`utils.proxy` 路径错误）导致所有 `fetch_history` 调用静默失败→全部 26 因子为 0。修复后：技术面 10/10 LIVE、动量 3/10 LIVE、估值 2/2 LIVE（原均 0/—）。空池保护 + B3b 去重 + C2 风偏修正 + 入选理由重写 + IOPV 批量获取 + 新闻情感桥接 + decode_df 逐格修复 + DQ 门禁 + 前端错误态返回按钮 + E2E 回归测试 + 测试 teardown HTTP 泄漏防护。见 commits `e6264ee`~`1e63eab`（15 个改动）。 |
 
 ### 1.2 部分完成
 
@@ -322,7 +323,8 @@ Phase 0 (✅ 已完成), Phase 0.5 (✅ 已完成), Phase 0.7 (✅ 已完成) �
 | **Phase 0.8** | `design-failure-and-strategy-check-review.md` | 前端错误弹窗 + 动态建议上限 + 数据质量注入 + 测试修复 | ✅ 已实施 |
 | **Phase 0.9** | `async-boundary-fix-plan.md` | 事件循环阻塞修复 + 线程池统一 + 冷却期污染 + 预热超时 | ✅ 已实施 |
 | **Phase 1.0** | `design-check-pipeline-redesign.md` | 顺序 Pipeline + report_quality + 原子写入 + 崩溃恢复 | ✅ 已实施 |
-| **Phase 2.1**（新增 v4.2） | `remaining-issues-solution-design.md` + `design-check-quality-report.md` | 10/15 项已实施：S1-A(TTL) `53acbfa`、S1-C(渐进状态机) `ef3de11`、S2(混合归一化) `5116681`、S3-B/C(WS) `ef3de11`、P1-3(强制标的) `5116681`、P3-2(pre-commit增强) `c72b0ac`、P3-3(E2E增强) `afaea68`、P3-4(数据健康脚本) `ac6dd81`；新增未规划项：F10 tracked_index enrich + C2 风偏分 + 新闻情感桥接 + IOPV 批量 + DQ 门禁 + verify_design | ✅ **绝大部分已实施**（剩余 5 小项合并入 Phase 1.1 后期） |
+| **Phase 2.1**（v4.2） | `remaining-issues-solution-design.md` + `design-check-quality-report.md` | 10/15 项已实施 | ✅ **已并入 Phase 2.2** |
+| **Phase 2.2**（v5.0 新增） | 15 个修复项：数据源 import 修复 + 空池保护 + B3b dedup + C2 风偏 + 入选理由 + IOPV + 新闻情感 + change_pct + 编码 + DQ 门禁 + 前端返回 + E2E 回归 + teardown 防护 | 全部完成 | ✅ **全部完成** |
  
  现有轨道编号更新（原 Phase 1 → 移为 Phase 1.1，起始依赖前移经过 Phase 0.7-1.0）：
 ```
@@ -529,13 +531,13 @@ market-analysis-optimization-plan.md
 - 防御层黄金/国债分类正确（非跨境→卫星层误归）
 - risk_controls 拼接 no error；holdings_analysis 含 weight 字段；strategy check 摘要内容充实；target_weight 默认为 0
 
-### Phase 2.1 — 数据管道质量提升 ✅ **绝大部分已实施**
+### Phase 2.1 — 数据管道质量提升 ✅ **全部完成（合并入 Phase 2.2）**
 
-> **v4.2 更新**：10/15 项已完成，新增未规划 6 项也已落地。剩余 5 小项（~1h）已移入 Phase 1.1 后期（1.1.10~1.1.14）。
+> **v5.0 更新**：Phase 2.1 已全部完成，所有 15 项已实施。新增 Phase 2.2 包含本轮 session 全部 15 个修复。
 > 
 > **前置依赖**: Phase 0.7~1.0 完成
 
-**已实施项（✅ 14 项，含 6 项新增未规划）**：
+**已实施项（✅ 15 项，含 6 项新增未规划）**：
 
 | # | 项 | 提交 | 说明 |
 |---|------|:----:|------|
@@ -555,20 +557,30 @@ market-analysis-optimization-plan.md
 | 🆕 | IOPV 批量 + change_pct 因子 | `783e188` | Sina 批量 NAV 抓取 → premium_discount 可用 |
 | 🆕 | DQ 测试门禁 | `a5028fa` | DQ1-DQ5 防止回归 |
 | 🆕 | verify_design.py 验证管道 | `afaea68` | `scripts/verify_design.py` 验证管线输出 |
+| 🆕 | china_market.py import 修复 | `e6264ee` | `source_registry` 路径改正 + `utils.proxy` 路径改正 → 因子数据恢复正常 |
 
-**已移入 Phase 1.1 的剩余项（待实施）**：
+### Phase 2.2 — 数据管道根因修复与测试门禁 ✅ **全部完成（v5.0 新增）**
 
-| # | 任务 | 源文档 | 行数 |
-|---|------|--------|:----:|
-| P1-2 | 防御层分类修复（跨境→卫星层） | design-check-quality §3 P1-2 | ~3 |
-| P1-4 | risk_controls.py 拼接 bug 修复 | design-check-quality §3 P1-4 | ~1 |
-| P2-2 | holdings_analysis 注入 weight 字段 | design-check-quality §3 P2-2 | ~5 |
-| P2-3 | 策略检查摘要增强 | design-check-quality §3 P2-3 | ~10 |
-| P2-4 | target_weight 默认值 0.0 修复 | design-check-quality §3 P2-4 | ~1 |
+> 发现并修复了导致所有因子数据为 0 的根因（china_market.py import 错误），完成 15 个改动项。
+>
+> 修复前：因子全 0（26/26 STUB）、空池常报、策略不分、入选理由占位符"今日%"、同指数 ETF 重复。
+>
+> 修复后：技术面 10/10 LIVE、动量 3/10 LIVE、估值 2/2 LIVE、空池保护、策略差异化、指数概念去重（B3b）、入选理由使用真实 RSI/MACD 因子分、IOPV 批量获取 → premium_discount 可用、新闻情感桥接 → sentiment 非零、DQ 测试门禁、E2E 回归测试。
 
-### Phase 2.2 — 质量防护网 + AI 分析增强 + 设计报告增强
+**来源**: 本轮 session 15 个修复项（commits `e6264ee`~`1e63eab`）
 
-**前置依赖**: Phase 0.7~1.0 完成；Phase 2.1 ✅ 绝大部分已实施（剩余 5 小项不阻塞本阶段）
+**关键 commits**: `e6264ee`（空池保护 + C2 + B3b + 入选理由 + DQ 门禁）、`783e188`（IOPV + change_pct）、`0b2187f`（编码修复 + repair_encoding.py）、`9fc0c11`（新闻情感 + conftest 防护）、`547a698`（E2E 回归）、`1e63eab`（data_health 兼容）
+
+**测试验证**:
+- test_design_optimization_plan.py: 19 个（DQ1-5 + P0-4）✅ 15 passed
+- test_pool_manager.py: 11 个 ✅ 11 passed
+- test_integration_pipeline.py: 1 个 ✅ 1 passed（25.5s）
+- test_risk_controls.py: 7 个 ✅ 7 passed
+- 前端 npm run build: 730 modules ✅
+
+### Phase 2.3 — 质量防护网 + AI 分析增强 + 设计报告增强
+
+**前置依赖**: Phase 0.7~1.0 完成；Phase 2.1 ✅ + Phase 2.2 ✅ 全部完成
 
 | # | 任务 | 源文档 | 预估工时 | 前置依赖 |
 |---|------|--------|---------|---------|
@@ -810,3 +822,4 @@ Phase 7.1 (远期优化)             无紧急依赖
 | v4.0 | 2026-07-24 | 新增 4 份文档（27 份总数）；Phase 0.7 确认 ✅；新增 Phase 0.8/0.9/1.0 全部 ✅；重算剩余 Phase 1.1~7.1 排序；新增 Phase 2.1（质量审计剩余项）；更新附录全部表格 + 依赖图 + 轨道总览；同步各方案文档状态 |
 | v4.1 | 2026-07-25 | 新增 `remaining-issues-solution-design.md`（28 份）；Phase 2.1 中 S1-A(TTL 缓存)、S1-C(渐进状态机)、S2(混合归一化)、S3-B/C(WS 清理+超时) 已实施（staged）；更新文档状态表 + 任务列表 |
 | v4.2 | 2026-07-25 | 基于 10+ 个新增 commit 审计更新：Phase 2.1 确认 10/15 项 ✅（含 staged→committed），6 项新增未规划已落地（F10 enrich、C2风偏分、新闻情感桥接、IOPV批量、DQ门禁、verify_design）；剩余 5 小项合并入 Phase 1.1 后期；track E 轨道状态同步更新；设计检查质量报告状态重写；文档状态表 v4.2 刷新 |
+| **v5.0** | 2026-07-25 | 15 个修复项全部完成：china_market.py import 错误根因修复（所有 26 因子从 0→非零）；空池保护 + B3b dedup + C2 风偏修正 + 入选理由重写 + IOPV 批量 + 新闻情感桥接 + change_pct 因子注册 + decode_df 逐格修复 + DB 编码修复脚本 + conftest teardown 防护 + 前端错误态返回按钮 + E2E 回归测试 + DQ 门禁 + test_data_health.py pytest 兼容。Phase 2.1 全部完成 ✅。新增 Phase 2.2（数据管道根因修复）✅ 全部完成。Phase 2.2→2.3 重编号。所有剩余项均无 Block。 |
