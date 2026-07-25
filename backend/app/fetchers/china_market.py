@@ -252,7 +252,7 @@ def _sina_history(symbol: str, period: str = "daily") -> list[dict[str, Any]]:
 
 def _sina_history_cb(symbol: str, period: str = "daily") -> list[dict[str, Any]]:
     """P1-6: Circuit-breaker aware Sina history via SourceRegistry."""
-    from .source_registry import registry
+    from ..services.source_registry import registry
     scale = {"daily": "240", "weekly": "1200", "monthly": "7200",
              "15m": "15", "30m": "30", "1h": "60"}.get(period, "240")
     pref = _exchange(symbol)
@@ -272,7 +272,7 @@ def _sina_history_cb(symbol: str, period: str = "daily") -> list[dict[str, Any]]
             } for d in data if isinstance(d, dict)]
         return []
 
-    from .utils import no_proxy
+    from ..utils.proxy import no_proxy
     with no_proxy():
         result = registry.route([("sina_history", _sina_call)],
                                 route_name="A_history", operation="history", target=symbol)
