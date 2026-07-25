@@ -1,6 +1,6 @@
 # Market Analysis Module Optimization Plan / 行情分析模块优化方案
 
-> Status: **IMPLEMENTATION READY (V3)** — reviewed and revised across 2 autonomous rounds. Not yet implemented.
+> Status: **IMPLEMENTATION READY (V3)** — Phase A/B already implemented in codebase (unified search + streaming endpoints). Phase C-E remaining.
 > Corresponding issues: 6 identified problems + 1 merge proposal for market analysis input cards.
 
 ---

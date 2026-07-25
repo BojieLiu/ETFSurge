@@ -1,11 +1,11 @@
 # ETF Surge 方案实施总计划
 
-> 生成日期: 2026-07-25 | 版本: v5.0
-> 总览 `docs/` 目录 **28 份**方案文档，梳理实施状态、冲突重叠、修复建议及分阶段执行路线。
-> v5.0 基于 v4.2 后一轮密集修复（15 个问题，涵盖数据源 import 错误、空池保护、因子聚合、风偏差异化、去重、入选理由、IOPV/NAV 抓取、新闻情感桥接、中文编码等；参见 commits `e6264ee`~`1e63eab`）审计更新。
-> Phase 2.2 全部完成——因子数据从全 0 恢复到 15/26 个非零因子（含技术面 10/10 LIVE）、策略区分度、去重、编码修复、DQ 测试门禁。
-> 新增未规划项：china_market.py import 修复、空池保护、C2 风偏基准分、B3b 指数概念去重、IOPV 批量抓取、change_pct 因子、新闻情感桥接、单例 teardown HTTP 泄漏防护、DB 编码修复脚本。
-> 💡 **关键依赖变化**：Phase 2.x 全部完成，无剩余 Block 项。
+> 生成日期: 2026-07-25 | 版本: v6.0
+> 总览 `docs/` 目录 **30 份**方案文档，梳理实施状态、冲突重叠、修复建议及分阶段执行路线。
+> v6.0 基于 v5.0 后 7 个新 commit（`5f484e6`~`98025ad`，含未提交的工作区改动）审计更新。
+> Phase 2.2→2.4 全部完成——26/26 核心因子全 LIVE（原 15/26→26/26）、7 个脚手架因子从 0→非零、因子健康端点 + 因子单测门禁 + 运行时因子断言、分配器质量修复（ln_mcap 排毒、C2 条件修正、segment 归一化去重、预算重调、cross-section z-score 重归一化）。新增 Phase 2.5（原质量防护网 + AI 分析）。
+> 新增文档 2 份：`scaffold-factor-resolution-plan.md`（第 29 份，✅ 已实施）、`design-quality-review-20260725.md`（第 30 份，审计报告）。
+> 💡 **关键依赖变化**：因子数据从 "15/26 LIVE" → **26/26 全 LIVE**。无剩余 Block 项。
 
 ---
 
@@ -38,6 +38,7 @@
 | `design-check-pipeline-redesign.md` | **Phase 1.0 已实施**（顺序 Pipeline 替代 fire-and-forget + report_quality 分级 + 原子 DB 写入 + 崩溃恢复 + 8 个新集成测试），见 `4ff6084` + `7e93321` |
 | `five-improvements-plan.md` | 4/5 项已实现——#2 `filter_extreme_drawdown` ✓、#3 `check_defense_effectiveness` ✓、#4 `remove_stale_candidates` ✓、#5 `_layer_phrase` 模板多样化 ✓；#1 统一市态判定仍待完成 |
 | `remaining-issues-solution-design.md` | **全部 4 子项已实施**——S1-A(TTL 缓存) `53acbfa` ✓、S1-C(渐进状态机) `ef3de11` ✓、S2(混合归一化) `5116681` ✓、S3-B/C(WS 超时+清理) `ef3de11` ✓ |
+| `scaffold-factor-resolution-plan.md` | **全部实施**——7 个脚手架因子全部从 0→非零，26/26 核心因子全 LIVE（`e5b6139`），新增因子健康端点 + 运行时因子断言门禁（`2132a74`） |
 | **Phase 2.2 数据管道根因修复**（v5.0 新增） | 发现 china_market.py 两个 import 错误（`source_registry` 路径错误、`utils.proxy` 路径错误）导致所有 `fetch_history` 调用静默失败→全部 26 因子为 0。修复后：技术面 10/10 LIVE、动量 3/10 LIVE、估值 2/2 LIVE（原均 0/—）。空池保护 + B3b 去重 + C2 风偏修正 + 入选理由重写 + IOPV 批量获取 + 新闻情感桥接 + decode_df 逐格修复 + DQ 门禁 + 前端错误态返回按钮 + E2E 回归测试 + 测试 teardown HTTP 泄漏防护。见 commits `e6264ee`~`1e63eab`（15 个改动）。 |
 
 ### 1.2 部分完成
@@ -70,6 +71,7 @@
 | `frontend-testing-safety-net.md` | **P1** | 前端架构重构已就绪 | ~11h | — |
 | `frontend-performance-optimization.md` (Step 2-3) | **P1** | Step 1 已实施（Phase 0）；Step 2-3 待做 | ~1.5h | — |
 | `five-improvements-plan.md` #1 | **P1** | 独立，~15 行 | ~15min | — |
+| `scaffold-factor-resolution-plan.md` | **P1** | 已实施（✅ 7 个 scaffold 因子全部从 0→非零） | 0（已完成） | 已在 `e5b6139` 中落地 |
 | `roadmap-data-source-unified.md` | **P2** | 整合三份原方案，实施顺序详见自身依赖图 | ~3-5天 | — |
 | `market-awareness-and-data-source-plan.md` §5 | **P2** | **建议以 market-analysis Phase D/E 替代** | — | — |
 | `config-management-plan.md` | **P2** | 无（独立） | ~8h | — |
@@ -325,6 +327,8 @@ Phase 0 (✅ 已完成), Phase 0.5 (✅ 已完成), Phase 0.7 (✅ 已完成) �
 | **Phase 1.0** | `design-check-pipeline-redesign.md` | 顺序 Pipeline + report_quality + 原子写入 + 崩溃恢复 | ✅ 已实施 |
 | **Phase 2.1**（v4.2） | `remaining-issues-solution-design.md` + `design-check-quality-report.md` | 10/15 项已实施 | ✅ **已并入 Phase 2.2** |
 | **Phase 2.2**（v5.0 新增） | 15 个修复项：数据源 import 修复 + 空池保护 + B3b dedup + C2 风偏 + 入选理由 + IOPV + 新闻情感 + change_pct + 编码 + DQ 门禁 + 前端返回 + E2E 回归 + teardown 防护 | 全部完成 | ✅ **全部完成** |
+| **Phase 2.3**（v6.0 新增） | 4 项测试防护缺口修复 + 7 个脚手架因子全 LIVE + LLM fallback 增强。运行时因子断言门禁、因子健康端点、conftest _test_mode 重构、集成测试 marker | `e5b6139` `2132a74` | ✅ **已实施** |
+| **Phase 2.4**（v6.0 新增） | 分配器引擎质量修复：ln_mcap 排毒、C2 条件修正、segment 归一化去重、预算重调；工作区：cross-section z-score 重归一化、segment 字段注入 | `4ace706` `98025ad` + 工作区 | ✅ **已实施** |
  
  现有轨道编号更新（原 Phase 1 → 移为 Phase 1.1，起始依赖前移经过 Phase 0.7-1.0）：
 ```
@@ -503,24 +507,31 @@ market-analysis-optimization-plan.md
 
 ### Phase 1.1 — 数据层增强 & 统一市态（P1）
 
+**状态**: ⚠️ 部分完成。4 项已全部完成，6 项已由 Phase 0.7~2.2 隐含落地，5 项待实施。
+
 **前置依赖**: Phase 0.7~1.0 完成（因子分正常 + 管道可靠 + 异步边界修复 + 报告分级）
 
+#### ✅ 已完成
+| # | 任务 | 源文档 | 落地方式 | 
+|---|------|--------|---------|
+| 1.1.0 | Five-improvements #1：统一市态判定 | `five-improvements-plan.md` #1 | `portfolio_service.py:406-409` 已调用 `pool_manager.get_market_regime()`，取代自采逻辑 |
+| 1.1.8 | market-analysis Phase A（统一搜索后端） | market-analysis §3 | `GET /market/search` 已使用 `instruments` 表 + akshare 双源，支持 pinyin/first_letter 模糊匹配 |
+| 1.1.9 | market-analysis Phase B（统一分析编排端点） | market-analysis §4 | 各分析端点（sector/symbol/llm-advice/llm-report）streaming 已就绪，`UnifiedAnalysis` 前端组件依赖 Phase C 尚未实施 |
+| 1.1.10 | P1-2: 防御层分类修复（跨境→卫星层） | design-check-quality §3 P1-2 | `pool_manager.py:328-333` 已排除"跨境"归防御层 |
+| 1.1.11 | P1-4: risk_controls.py 拼接 bug 修复 | design-check-quality §3 P1-4 | `risk_controls.py:43-44` 已用明确括号修复 |
+| 1.1.12 | P2-2: holdings_analysis 注入 weight 字段 | design-check-quality §3 P2-2 | `portfolio_service.py:498-500` 从 `weight_map` 回填 |
+| 1.1.13 | P2-3: 策略检查摘要增强 | design-check-quality §3 P2-3 | `portfolio_service.py:514-533` 已纳入市态+行业覆盖+数据质量 |
+
+#### ⏳ 待实施
 | # | 任务 | 源文档 | 预估工时 | 前置依赖 |
 |---|------|--------|---------|---------|
-| 1.1.0 | Five-improvements #1：统一市态判定（策略检查复用 pool_manager） | `five-improvements-plan.md` #1 | ~15min | 无（独立） |
-| 1.1.1 | Sector 数据采集扩容（行业+概念 concurrent；复用 Phase 0.7 A3 的缓存写入入口） | sector-concept Phase 1 | 4h | Phase 0.7 A3 |
-| 1.1.2 | PoolManager sector_cache 写入扩展（基于 A3 已有入口） | sector-concept Phase 2 | 3h | 1.1.1 |
-| 1.1.3 | APScheduler 新增 60s 板块刷新任务 | sector-concept Phase 2 | 1h | 1.1.2 |
+| 1.1.1 | Sector 数据采集扩容（行业+概念 concurrent） | sector-concept Phase 1 | 4h | Phase 0.7 A3 |
+| 1.1.2 | PoolManager sector_cache 写入扩展（含概念） | sector-concept Phase 2 | 3h | 1.1.1 |
+| 1.1.3 | APScheduler 新增板块刷新任务 | sector-concept Phase 2 | 1h | 1.1.2 |
 | 1.1.4 | 新闻关键词分类修复（移中性词、清冲突词） | news-pipeline-fix P1.1+P1.2 | 0.5h | 无 |
 | 1.1.5 | 新增 `fetch_sina_roll_news()` HTTP 源 | news-pipeline-fix P1.3 | 1h | 无 |
 | 1.1.6 | 重写 `fetch_macro_news()` 降级链（新浪优先） | news-pipeline-fix P1.4 | 0.5h | 1.1.5 |
 | 1.1.7 | 重写 `fetch_global_news()` 降级链 | news-pipeline-fix P1.5 | 0.5h | 无 |
-| 1.1.8 | market-analysis Phase A（统一搜索后端） | market-analysis §3 | 3-4h | 无 |
-| 1.1.9 | market-analysis Phase B（统一分析编排端点） | market-analysis §4 | 1-2h | 无（与 1.1.8 可并行） |
-| 1.1.10 | P1-2: 防御层分类修复（跨境→卫星层） | design-check-quality §3 P1-2 | ~3行 | 无 |
-| 1.1.11 | P1-4: risk_controls.py 拼接 bug 修复 | design-check-quality §3 P1-4 | ~1行 | 无 |
-| 1.1.12 | P2-2: holdings_analysis 注入 weight 字段 | design-check-quality §3 P2-2 | ~5行 | 无 |
-| 1.1.13 | P2-3: 策略检查摘要增强 | design-check-quality §3 P2-3 | ~10行 | 无 |
 | 1.1.14 | P2-4: target_weight 默认值 0.0 修复 | design-check-quality §3 P2-4 | ~1行 | 无 |
 
 **验证**:
@@ -559,7 +570,7 @@ market-analysis-optimization-plan.md
 | 🆕 | verify_design.py 验证管道 | `afaea68` | `scripts/verify_design.py` 验证管线输出 |
 | 🆕 | china_market.py import 修复 | `e6264ee` | `source_registry` 路径改正 + `utils.proxy` 路径改正 → 因子数据恢复正常 |
 
-### Phase 2.2 — 数据管道根因修复与测试门禁 ✅ **全部完成（v5.0 新增）**
+### Phase 2.2 — 数据管道根因修复与测试门禁 ✅ **全部完成（v5.0+v6.0 扩展）**
 
 > 发现并修复了导致所有因子数据为 0 的根因（china_market.py import 错误），完成 15 个改动项。
 >
@@ -578,22 +589,65 @@ market-analysis-optimization-plan.md
 - test_risk_controls.py: 7 个 ✅ 7 passed
 - 前端 npm run build: 730 modules ✅
 
-### Phase 2.3 — 质量防护网 + AI 分析增强 + 设计报告增强
+### Phase 2.3 — 脚手架因子全 LIVE + 测试防护缺口修复 ✅ **全部完成（v6.0 新增）**
 
-**前置依赖**: Phase 0.7~1.0 完成；Phase 2.1 ✅ + Phase 2.2 ✅ 全部完成
+> 从 P3-1/3-3 的剩余缺口出发：原有 26 个核心因子中仍有 7 个为 0（硬编码 scaffold），测试防护缺少运行时断言 + 因子健康端点 + conftest 重构 + 集成测试。
+>
+> **修复前**：26/26 STUB（v5.0 后 15/26 LIVE，11 个 scaffold 仍为 0），`test_core_factors_no_scaffold` 门禁未通过，conftest mock 阻碍集成测试。
+>
+> **修复后**：26/26 全 LIVE（`e5b6139`：7 个 scaffold → 非零），运行时因子断言门禁（30/30 因子验证）、因子健康端点 `GET /admin/factor-health`、conftest `_test_mode` 替代全局 mock、`test_factor_integration_live.py` + `@pytest.mark.integration`、LLM fallback 报告文本增强（含方案说明 + 风控 + 操作建议）。
+
+| # | 任务 | 提交 | 说明 |
+|---|------|:----:|------|
+| 2.3.1 | 7 个 scaffold 因子接入真实数据源（premium_discount/tracking_error/shares_change 等） | `e5b6139` | IOPV 数据 + 份额变化率 + 跟踪误差 → 26/26 全 LIVE |
+| 2.3.2 | 运行时因子断言门禁（test_each_factor_returns_nonzero_with_mock_data） | `2132a74` | 30/30 因子断言非零，防止未来 scaffold 回归 |
+| 2.3.3 | 因子健康端点 GET /admin/factor-health | `2132a74` | 返回每个 symbol 的 live/non-zero ratio，verify_e2e 注册 factor 模块 |
+| 2.3.4 | conftest _test_mode 重构（替代全局 mock） | `2132a74` | test-mode 抑制 teardown HTTP 泄漏，不阻塞真实数据 |
+| 2.3.5 | 因子集成测试 marker + test_factor_integration_live.py | `2132a74` | `@pytest.mark.integration` 隔离 live 测试 |
+| 2.3.6 | LLM fallback 报告增强 | `2132a74` | 包含方案方法论 + 风控约束 + 操作建议 |
+
+**测试验证**:
+- 30/30 运行时因子断言 ✅
+- test_core_factors_no_scaffold: 26/26 因子非零 ✅
+- verify_e2e factor module: 每个 symbol ≥40% 非零 ✅
+
+### Phase 2.4 — 分配器引擎质量修复 ✅ **全部完成（v6.0 新增）**
+
+> 分配器引擎质量问题：ln_mcap 淹没问题、C2 条件永不触发、去重不充分、预算不匹配、cross-section 因子未归一化。
+>
+> **修复前**：valuation 维度被 ln_mcap≈25 淹没（technical 0.5 vs valuation 5.0）、C2 风偏修正因 `has_style_factors` 始终为 True 不触发、同概念 ETF 跨层重复选择、核心 50% 预算占用过多。
+>
+> **修复后**：valuation 聚合排除 ln_mcap/ln_float_mcap → 技术面/动量分不再被淹没、C2 真正常开（防御+安全奖励 0.8 penalty -1.5、进攻+风险奖励 1.5）、segment 归一化（科创50/100/新能源/创新药→"科创"）跨层+层内去重、卫星预算从 15/25/30→25/30/35、core max_count 3/4/4→4/5/5、cross-section z-score 重归一化（worktree）、segment 字段注入 `pool_manager step 3a`（worktree）。
+
+| # | 任务 | 提交 | 说明 |
+|---|------|:----:|------|
+| 2.4.1 | 估值聚合排毒（排除 ln_mcap/ln_float_mcap） | `4ace706` | 防止 log-scale 市值 ~25 淹没问题 |
+| 2.4.2 | C2 条件修正（has_meaningful_style 排除 size 因子） | `4ace706` | ln_mcap 移除后 C2 真正常开 |
+| 2.4.3 | segment 归一化 + 跨层/层内去重 | `4ace706` `98025ad` | _normalize_segment + _extract_index_concept 兜底 |
+| 2.4.4 | 卫星/核心预算重调 | `4ace706` | 核心 50→40%，卫星 15/25/30→25/30/35% |
+| 2.4.5 | cross-section z-score 重归一化 | worktree | get_factor_matrix → _normalize_matrix |
+| 2.4.6 | segment 字段注入（pool_manager step 3a） | worktree | 为系统化去重提供基础字段 |
+
+**测试验证**:
+- test_design_optimization_plan.py: DQ1-DQ5 ✅
+- test_engine: 差异化、去重、风控约束 ✅
+
+### Phase 2.5 — 质量防护网 + AI 分析增强 + 设计报告增强
+
+**前置依赖**: Phase 0.7~1.0 完成；Phase 2.1 ✅ + Phase 2.2 ✅ + Phase 2.3 ✅ + Phase 2.4 ✅ 全部完成
 
 | # | 任务 | 源文档 | 预估工时 | 前置依赖 |
 |---|------|--------|---------|---------|
-| 2.2.1 | AppButton/AppCard/AppTabs/AppInput/AppModal 单测 | frontend-testing-safety-net Phase A | 4h | 无 |
-| 2.2.2 | useDashboardData composable 单测 | frontend-testing-safety-net Phase B | 1h | 无 |
-| 2.2.3 | E2E spec 扩充到 10-15 条 | frontend-testing-safety-net Phase B/C | 6h | 无 |
-| 2.2.4 | verify_e2e.py 全局指数检查修复 | fix-global-indices-plan 根因 #7 | 0.5h | 无 |
-| 2.2.5 | market-analysis Phase C（前端 UnifiedAnalysis 合并组件） | market-analysis §5 | 4-5h | Phase 1.1.8+1.1.9 (A+B) |
-| 2.2.6 | market-analysis Phase D（AI 顾问流式+数据管道） | market-analysis §6 | 2-3h | 无（可并行） |
-| 2.2.7 | market-analysis Phase E（市场报告质量提升） | market-analysis §7 | 2-3h | 无（可并行） |
-| 2.2.8 | design-report A2：预期收益随市态动态调整 | `design-report-optimization-plan.md` A2 | ~20行 | Phase 0.7 B1（因子分正常） |
-| 2.2.9 | design-report C1：全市场净流入信号注入 LLM 报告 | `design-report-optimization-plan.md` C1 | ~30行 | Phase 0.7 验证通过 |
-| 2.2.10 | design-report C2：卫星层增加科技 ETF 选项 | `design-report-optimization-plan.md` C2 | ~15行 | Phase 0.7 验证通过 |
+| 2.5.1 | AppButton/AppCard/AppTabs/AppInput/AppModal 单测 | frontend-testing-safety-net Phase A | 4h | 无 |
+| 2.5.2 | useDashboardData composable 单测 | frontend-testing-safety-net Phase B | 1h | 无 |
+| 2.5.3 | E2E spec 扩充到 10-15 条 | frontend-testing-safety-net Phase B/C | 6h | 无 |
+| 2.5.4 | verify_e2e.py 全局指数检查修复 | fix-global-indices-plan 根因 #7 | 0.5h | 无 |
+| 2.5.5 | market-analysis Phase C（前端 UnifiedAnalysis 合并组件） | market-analysis §5 | 4-5h | Phase 1.1.8+1.1.9 (A+B) |
+| 2.5.6 | market-analysis Phase D（AI 顾问流式+数据管道） | market-analysis §6 | 2-3h | 无（可并行） |
+| 2.5.7 | market-analysis Phase E（市场报告质量提升） | market-analysis §7 | 2-3h | 无（可并行） |
+| 2.5.8 | design-report A2：预期收益随市态动态调整 | `design-report-optimization-plan.md` A2 | ~20行 | Phase 0.7 B1（因子分正常，26/26 LIVE） |
+| 2.5.9 | design-report C1：全市场净流入信号注入 LLM 报告 | `design-report-optimization-plan.md` C1 | ~30行 | Phase 0.7 验证通过 |
+| 2.5.10 | design-report C2：卫星层增加科技 ETF 选项 | `design-report-optimization-plan.md` C2 | ~15行 | Phase 0.7 验证通过 |
 
 **验证**:
 - `npm test` 全绿 + `npm run test:e2e:smoke` 全绿
@@ -605,7 +659,7 @@ market-analysis-optimization-plan.md
 
 ### Phase 3.1 — 前端 UI 重构（重新实施，防回滚）
 
-**前置依赖**: Phase 2.2 测试防护就绪（避免 UI 回滚重演）
+**前置依赖**: Phase 2.5 测试防护就绪（避免 UI 回滚重演）
 
 | # | 任务 | 源文档 | 预估工时 | 前置依赖 |
 |---|------|--------|---------|---------|
@@ -711,6 +765,8 @@ market-analysis-optimization-plan.md
 | roadmap-data-source-unified.md | 实施方案 | ❌ 未实施 | china_market + market_service + source_registry | Phase 4.1 | 替代三份原方案 |
 | sector-concept-optimization-plan.md | 实施方案 | ❌ 未实施 | market_trends + pool_manager + llm.py | Phase 1.1/6.1 | — |
 | source-registry-optimization-plan.md | 实施方案 | ❌ **已替代** | — | — | 被 roadmap 替代 |
+| **scaffold-factor-resolution-plan.md** | **修复方案** | ✅ **全部实施** | **factor_registry + 测试** | **Phase 2.3** | 7 个脚手架因子全 LIVE（26/26），因子健康端点，运行时断言门禁 |
+| **design-quality-review-20260725.md** | **审计报告** | N/A | allocation_engine + factor_registry + budgets | — | 非实施方案 |
 
 ### 5.2 冲突汇总（v4.0 更新）
 
@@ -764,18 +820,18 @@ Phase 1.1 (数据层增强+统一市态)   依赖 Phase 0.7~1.0
   ├── 1.1.4-1.1.7 news-pipeline P1  → 新闻模块功能完整
   └── 1.1.8-1.1.9 market-analysis A+B → Phase 2.2 (Phase C 依赖)
 
-Phase 2.1 (数据管道质量提升)    依赖 Phase 0.7~1.0
-  ├── 2.1.0-2.1.4 P1 引擎修复      → 策略差异化+分类+强制标的+拼接 bug
-  ├── 2.1.5-2.1.8 P2 策略检查增强
-  └── 2.1.9-2.1.12 P3 测试防护增强
+Phase 2.1 (数据管道质量提升)    ✅ 全部完成（合并入 Phase 2.2）
+Phase 2.2 (数据管道根因修复)    ✅ 全部完成（15 项）
+Phase 2.3 (脚手架因子全 LIVE)   ✅ 全部完成（26/26 核心因子全 LIVE）
+Phase 2.4 (分配器引擎质量修复)  ✅ 全部完成（ln_mcap 排毒 + C2 修正 + segment 去重 + 预算重调 + z-score）
 
-Phase 2.2 (测试防护+市场分析+设计报告)
-  ├── 2.2.1-2.2.3 测试安全网        → 为 Phase 3.1 提供防护
-  ├── 2.2.5  market-analysis C       依赖 1.1.8+1.1.9
-  ├── 2.2.6-2.2.7  market-analysis D/E
-  └── 2.2.8-2.2.10 design-report A2/C1/C2
+Phase 2.5 (质量防护网+市场分析+设计报告)   依赖 Phase 0~2.4
+  ├── 2.5.1-2.5.3 测试安全网        → 为 Phase 3.1 提供防护
+  ├── 2.5.5  market-analysis C       依赖 Phase 1.1.8+1.1.9（A+B 完成）
+  ├── 2.5.6-2.5.7  market-analysis D/E
+  └── 2.5.8-2.5.10 design-report A2/C1/C2
 
-Phase 3.1 (前端 UI 重构)         依赖 Phase 2.2 测试防护
+Phase 3.1 (前端 UI 重构)         依赖 Phase 2.5 测试防护
 
 Phase 4.1 (数据源改造)           独立，为 Phase 5.1 提供前提
 
@@ -823,3 +879,4 @@ Phase 7.1 (远期优化)             无紧急依赖
 | v4.1 | 2026-07-25 | 新增 `remaining-issues-solution-design.md`（28 份）；Phase 2.1 中 S1-A(TTL 缓存)、S1-C(渐进状态机)、S2(混合归一化)、S3-B/C(WS 清理+超时) 已实施（staged）；更新文档状态表 + 任务列表 |
 | v4.2 | 2026-07-25 | 基于 10+ 个新增 commit 审计更新：Phase 2.1 确认 10/15 项 ✅（含 staged→committed），6 项新增未规划已落地（F10 enrich、C2风偏分、新闻情感桥接、IOPV批量、DQ门禁、verify_design）；剩余 5 小项合并入 Phase 1.1 后期；track E 轨道状态同步更新；设计检查质量报告状态重写；文档状态表 v4.2 刷新 |
 | **v5.0** | 2026-07-25 | 15 个修复项全部完成：china_market.py import 错误根因修复（所有 26 因子从 0→非零）；空池保护 + B3b dedup + C2 风偏修正 + 入选理由重写 + IOPV 批量 + 新闻情感桥接 + change_pct 因子注册 + decode_df 逐格修复 + DB 编码修复脚本 + conftest teardown 防护 + 前端错误态返回按钮 + E2E 回归测试 + DQ 门禁 + test_data_health.py pytest 兼容。Phase 2.1 全部完成 ✅。新增 Phase 2.2（数据管道根因修复）✅ 全部完成。Phase 2.2→2.3 重编号。所有剩余项均无 Block。 |
+| **v6.0** | 2026-07-25 | 基于 v5.0 后 7 个新 commit（5f484e6~98025ad）+ 工作区改动审计更新。文档总数 28→30。Phase 2.3（脚手架因子全 LIVE + 测试防护缺口修复）✅ 完成——7 个 scaffold → 非零（26/26 全 LIVE）、运行时因子断言门禁、因子健康端点。Phase 2.4（分配器引擎质量修复）✅ 完成——ln_mcap 排毒、C2 修正、segment 去重、预算重调、cross-section z-score。Phase 2.3→2.5 重编号。 |

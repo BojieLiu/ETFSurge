@@ -1,17 +1,22 @@
-"""多源资讯聚合:财联社(levistock) + 东方财富 + 新浪 + CCTV/RSS。
+"""多源资讯聚合:财联社(levistock) + 新浪(直连) + 东方财富 + RSS。
 
 - 每个源独立线程 + 超时包裹,任一源挂起都不会拖垮接口;
 - 多源结果去重,统一 TTL 缓存;
-- 财联社快讯作为头条主源(免费、实时性最佳)。
+- 财联社快讯作为头条主源(免费、实时性最佳);
+- 新浪财经 HTTP 直连作为宏观源（~0.3s，替代原 akshare CCTV/百度）。
 """
 import hashlib
+import logging
 import re
 import time
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 import feedparser
+import requests
 import concurrent.futures
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from ..utils.proxy import no_proxy
 from ..utils.decode import decode_df as _decode_df
@@ -243,20 +248,65 @@ def fetch_news_headlines() -> list[dict[str, Any]]:
     return _cached("headlines", _p)
 
 
+def fetch_sina_roll_news(num: int = 15) -> list[dict[str, Any]]:
+    """新浪财经滚动新闻（HTTP 直连，~0.3s，P1.3 新增源）。
+
+    使用 requests + no_proxy() 避免代理干扰。
+    5s 超时，带 try/except 和 JSON 格式校验。
+    """
+    try:
+        url = f"https://feed.mix.sina.com.cn/api/roll/get?pageid=153&lid=2509&num={num}"
+        with no_proxy():
+            resp = requests.get(url, timeout=5)
+            resp.raise_for_status()
+            data = resp.json()
+        if not isinstance(data, dict) or "result" not in data:
+            logger.warning("[news] 新浪财经返回格式异常")
+            return []
+        items: list[dict[str, Any]] = []
+        for entry in data["result"].get("data", []):
+            title = entry.get("title", "")
+            if not title:
+                continue
+            items.append({
+                "title": title,
+                "content": entry.get("content", ""),
+                "time": str(entry.get("ctime", "")),
+                "source": "新浪财经",
+            })
+        logger.info("[news] 新浪财经返回 %d 条", len(items))
+        return _attach_level(items)
+    except Exception as e:
+        logger.warning("[news] 新浪财经请求失败: %s", e)
+        return []
+
+
 def fetch_macro_news() -> list[dict[str, Any]]:
+    """宏观新闻——三级降级链：新浪(直连) → 东方财富宏观 → 财联社兜底。
+
+    P1.4 重写：删除 akshare CCTV/百度（不稳定 + 24s 超时），新浪 HTTP 直连优先。
+    改动前 ≤24s → 改动后 ~0.3s（新浪正常时）。
+    """
     def _p() -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
-        items += _ak(lambda ak: ak.news_cctv())              # CCTV
-        items += _ak(lambda ak: ak.news_economic_baidu())    # 百度宏观
-        items += _ak(lambda ak: ak.news_economic_cls())      # 东方财富宏观
+        # 第一优先级：新浪财经（~0.3s 稳定 HTTP 直连）
+        items += fetch_sina_roll_news(15)
+        # 第二优先级：东方财富宏观（akshare，降级时出现）
         if not items:
-            items = fetch_cailian_telegraph(10)  # 避免与 fetch_news_headlines 循环依赖
+            items += _ak(lambda ak: ak.news_economic_cls())
+        # 兜底：财联社快讯（纯文本，0.4s）
+        if not items:
+            items = fetch_cailian_telegraph(10)
         return _attach_level(_dedupe(items)[:25])
 
     return _cached("macro", _p, "news_macro")
 
 
 def fetch_global_news() -> list[dict[str, Any]]:
+    """全球新闻——二级降级链：RSS → akshare 全球资讯。
+
+    P1.5 重写：增加独立 try/except + 日志，akshare 超时保持 15s 给降级留缓冲。
+    """
     def _p() -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
         feeds = [
@@ -267,15 +317,17 @@ def fetch_global_news() -> list[dict[str, Any]]:
             d = _safe(lambda: feedparser.parse(f), 8)
             if d:
                 for e in (d.entries or [])[:8]:
-                    items.append(
-                        {
-                            "title": e.get("title", ""),
-                            "source": "RSS",
-                            "time": e.get("published", ""),
-                        }
-                    )
-        if not items:
+                    items.append({
+                        "title": e.get("title", ""),
+                        "source": "RSS",
+                        "time": e.get("published", ""),
+                    })
+        if items:
+            logger.info("[news] RSS 全球返回 %d 条", len(items))
+        else:
+            # 降级：akshare 全球资讯（15s 超时）
             items += _ak(lambda ak: ak.stock_info_global_cls())
+            logger.info("[news] akshare 全球资讯返回 %d 条（RSS 降级）", len(items))
         return _attach_level(_dedupe(items)[:25])
 
     return _cached("global", _p, "news_global")

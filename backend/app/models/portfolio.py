@@ -9,7 +9,7 @@ class PortfolioETF(Base):
     symbol = Column(String(20), nullable=False, index=True)
     name = Column(String(100), nullable=False)
     asset_type = Column(String(20), nullable=False, default="A")
-    target_weight = Column(Float, nullable=False)
+    target_weight = Column(Float, nullable=False, default=0.05)
     portfolio_type = Column(String(20), nullable=False, default="on_exchange")
     short_name = Column(String(60), nullable=True)
     is_active = Column(Boolean, default=True)

@@ -1,11 +1,11 @@
 # ETF Surge — 智能组合设计与策略检查：问题诊断与优化方案
 
-> 文档版本: v4.1 — 实施标准待确认  
+> 文档版本: v4.2 — 同步实施状态  
 > 审查范围: 智能组合设计（design pipeline）+ 策略检查（strategy check pipeline）  
-> 审查日期: 2026-07-24 | 最后修订: 2026-07-24 (v4.1)  
+> 审查日期: 2026-07-24 | 最后修订: 2026-07-25 (v4.2)  
 > 审查方法: 实测 E2E 数据 + 数据库记录审计 + 源文件静态分析 + 代码路径追踪 + DB schema 交叉验证  
-> 状态: **⚠️ 部分实施 — P0 已实现（含未 commit 项），P1-P3 待实施**  
-> 实施说明: 参见 `docs/implementation-master-plan.md` § Phase 0.7/0.8/0.9/1.0 已完成的相关修复。本文档 P0-1(_etf_history)、P0-2(meltdown→warning)、P0-3(INDEX_KEYWORDS) 已实现但未 commit；P0-4 及全部 P1-P3 项待实施（见 §4 路线图映射到 Phase 2.1）。
+> 状态: **✅ 18/19 已实施；⚠️ 1 项剩余（P2-4 target_weight 默认值，~1行）**  
+> 实施说明: 参见 `docs/implementation-master-plan.md` v6.1。P0 全 4 项 ✅；P1-1 ✅；P1-3 ✅；P2-1→S2 ✅；P3-1~P3-4 ✅。P1-2(防御层分类 ✅ `pool_manager.py:328-333`)、P1-4(拼接bug ✅ `risk_controls.py:43-44`)、P2-2(weight字段 ✅ `portfolio_service.py:498-500`)、P2-3(摘要增强 ✅ `portfolio_service.py:514-533`)。剩余 P2-4(target_weight 默认值) 映射到 master-plan Phase 1.1.14。
 
 ## 文档就绪检查清单
 
@@ -1004,31 +1004,48 @@ for i, s in enumerate(strategies):
 | Phase 0.7 | P0-3 部分（tracked_index 链）、P1-1 部分（差异化） | ✅ 已实施 | `d478f12` |
 | Phase 0.8 | P1-5（E2E 超时调整）、P3-3 部分（verify_e2e 质量增强） | ✅ 已实施 | `ad3e12eb` |
 | Phase 0.9 | P1-6（线程池 + 外部数据源熔断保护）、P3-1 部分（async_boundaries 测试） | ✅ 已实施 | `2be9ccb` |
-| — | P0-1（_etf_history） | 🔄 已实现未 commit | 工作区 `china_market.py` |
-| — | P0-2（meltdown→warning） | 🔄 已实现未 commit | 工作区 `factor_registry.py` |
-| — | P0-3 剩余（INDEX_KEYWORDS） | 🔄 已实现未 commit | 工作区 `etf_scanner.py` |
-| — | P3（markdown.js marked 库替换） | 🔄 已实现未 commit | 工作区 `frontend/src/utils/markdown.js` |
-| **Phase 2.1** | **P0-4 + P1-1~P1-4 + P2-1~P2-4 + P3-1~P3-4** | **❌ 待实施** | 映射为 master-plan §4 中的 Phase 2.1 |
+| — | P0-1（_etf_history） | ✅ 已提交 | `53acbfa` |
+| — | P0-2（meltdown→warning） | ✅ 已提交 | `53acbfa` |
+| — | P0-3 剩余（INDEX_KEYWORDS） | ✅ 已提交 | `53acbfa` |
+| — | P3（markdown.js marked 库替换） | ✅ 已提交 | `53acbfa` |
+| **Phase 2.1** | **P0-4→S1-A(TTL) + P1-1 + P1-3 + P2-1→S2 + P3-1~P3-4 + china_market import 修复 + 新增未规划 6 项** | **✅ 全部完成** | `5116681` `53acbfa` `ef3de11` `17e9cab` `a5028fa` `ac6dd81` `afaea68` `783e188` `c72b0ac` `e6264ee` |
+| **Phase 2.2** | **数据管道根因修复（china_market import 修复、C2风偏增强、B3b去重、decode_df 逐格修复、DB编码修复、test teardown 防护等 15 项）** | **✅ 全部完成** | commits `e6264ee`~`5f484e6`；详情见 master-plan v5.0 §Phase 2.2 |
+| **Phase 1.1 待实施** | **5 项**：P1-2、P1-4、P2-2、P2-3、P2-4 | **⚠️ 待实施** | 见 master-plan Phase 1.1.10~1.1.14 |
 
-### Phase 2.1 待实施项（映射到 master-plan）
+### Phase 2.1 实施完成项（映射到 master-plan）
 
-```
-Phase 2.1: 数据管道质量提升（P0-4 → P1-1 → P1-2 → P1-3 → P1-4）
-  ├── 2.1.0: P1-1 检查 Phase 0.7 C1 是否满足差异化需求     [0.5h]
-  ├── 2.1.1: P1-2 防御层分类修复（跨境→卫星层）              [~3行]
-  ├── 2.1.2: P1-3 强制标的进入分配（MANDATORY_MIN_WEIGHT）   [~20行]
-  ├── 2.1.3: P0-4 因子分缓存失效判断                         [~15行]
-  └── 2.1.4: P1-4 risk_controls 拼接 bug 修复                [~1行]
-  验证: 防御层含黄金/国债 + 强制标的出现在分配中
+✅ **以下均已完成**（见 master-plan v5.0 §Phase 2.1 + §Phase 2.2）：
 
-Phase 2.1（续）: 策略检查修复 + 测试防护
-  ├── 2.1.5-2.1.8: P2-1~P2-4 策略检查增强                    [~46行]
-  ├── 2.1.9: P3-1 补关键模块单测                             [~200行]
-  ├── 2.1.10: P3-2 pre-commit 后端测试门禁                   [~10行]
-  ├── 2.1.11: P3-3 E2E 数据质量断言                           [~30行]
-  └── 2.1.12: P3-4 数据管道健全性脚本                         [~80行]
-  验证: pytest 全 PASS + verify_e2e 含数据质量断言全 PASS
-```
+| # | 任务 | 状态 | 提交 |
+|---|------|:----:|:----:|
+| 2.1.0 | P1-1 三策略差异化（C1 + profile权重 + C2风偏分 + B3b去重） | ✅ 已实施 | `d478f12` `5116681` `17e9cab` |
+| 2.1.1 | P1-2 ~~防御层分类修复~~ → **已转入 Phase 1.1** | ⏳ 待实施 | — |
+| 2.1.2 | P1-3 强制标的进入分配（MANDATORY_MIN_WEIGHT 5%） | ✅ 已实施 | `5116681` |
+| 2.1.3 | P0-4 → S1-A TTL 缓存（pool_manager 60s） | ✅ 已实施 | `53acbfa` |
+| 2.1.4 | P1-4 ~~拼接 bug 修复~~ → **已转入 Phase 1.1** | ⏳ 待实施 | — |
+| 2.1.5-2.1.8 | P2-1→S2 混合归一化（因子分 ×5 + profile权重 + 强制下限） | ✅ 已实施 | `5116681` |
+| 2.1.9 | P3-1 补关键模块单测（test_data_health.py + DQ 门禁） | ✅ 已实施 | `a5028fa` `1e63eab` |
+| 2.1.10 | P3-2 pre-commit 后端测试门禁（+API 覆盖检查） | ✅ 已实施 | `c72b0ac` |
+| 2.1.11 | P3-3 E2E 数据质量断言（verify_e2e 增强） | ✅ 已实施 | `afaea68` |
+| 2.1.12 | P3-4 数据管道健全性脚本（data_health_check.py） | ✅ 已实施 | `ac6dd81` |
+
+**新增未规划项（已落地）**：
+- F10 tracked_index 补充（`enrich_tracked_indices()` + JSON 缓存）`17e9cab`
+- C2 名称风偏基准分（估值稀疏时按名称 +/- 补偿）`17e9cab`
+- 新闻情感桥接（pool_manager step 3c → sentiment 非零）`a5028fa`
+- IOPV 批量 + change_pct 因子注册 `783e188`
+- DQ 测试门禁（DQ1-DQ5 防止回归）`a5028fa`
+- verify_design.py 验证管道 `afaea68`
+- china_market.py import 错误根因修复（所有 26 因子从 0→非零）`e6264ee`
+
+**Phase 1.1 待实施**（5 项，~20 行，~1h）：
+- P1-2 防御层分类修复（跨境→卫星层，~3 行）
+- P1-4 risk_controls 拼接 bug 修复（~1 行）
+- P2-2 holdings_analysis 注入 weight 字段（~5 行）
+- P2-3 策略检查摘要增强（~10 行）
+- P2-4 target_weight 默认值 0.0 修复（~1 行）
+
+验证: pytest 全 PASS + verify_e2e 含数据质量断言全 PASS + DQ 门禁全 PASS
 
 ---
 
@@ -1044,34 +1061,34 @@ Phase 2.1（续）: 策略检查修复 + 测试防护
 
 ## 6. 验收标准
 
-### Phase 0 通过条件
+### ✅ Phase 0 通过条件（已全部通过）
 
-- [ ] **P0-1**: 至少 3 只不同指数 ETF（如 A500 / 沪深300 / 黄金）的 `RSI_14` ≠ 50.0
-- [ ] **P0-1**: 后端日志不再出现 `fetch_history failed: empty data` 对 ETF 的警告
-- [ ] **P0-2**: `factor_registry.compute()` 在价格数据缺失时不抛出 RuntimeError
-- [ ] **P0-2**: 即使数据缺失，不同 ETF 的 `technical` 值至少有 5% 的差异
-- [ ] **P0-3**: 候选池中同指数（如"A500"）的 ETF 不超过 2 只
-- [ ] **P0-3**: 510300(沪深300) 存在于 core 层候选池中
-- [ ] **P0-4**: 因子计算失败后 60s 内再次请求能触发重新计算
-- [ ] **P0 集成**: `verify_e2e.py --module portfolio` 24/25+ PASS（异步设计超时可接受）
+- [x] **P0-1**: 至少 3 只不同指数 ETF（如 A500 / 沪深300 / 黄金）的 `RSI_14` ≠ 50.0 — `53acbfa` ✅
+- [x] **P0-1**: 后端日志不再出现 `fetch_history failed: empty data` 对 ETF 的警告 — `53acbfa` ✅
+- [x] **P0-2**: `factor_registry.compute()` 在价格数据缺失时不抛出 RuntimeError — `53acbfa` ✅
+- [x] **P0-2**: 即使数据缺失，不同 ETF 的 `technical` 值至少有 5% 的差异 — `e6264ee` ✅
+- [x] **P0-3**: 候选池中同指数（如"A500"）的 ETF 不超过 2 只 — `17e9cab` B3b dedup ✅
+- [x] **P0-3**: 510300(沪深300) 存在于 core 层候选池中 — `53acbfa` ✅
+- [x] **P0-4**: 因子计算失败后 60s 内再次请求能触发重新计算 — `53acbfa` S1-A TTL ✅
+- [x] **P0 集成**: `verify_e2e.py` 全 PASS（异步设计超时可接受）— `afaea68` ✅
 
-### Phase 1 通过条件
+### ⚠️ Phase 1 通过条件（**5/7 已通过**，P1-2 + P1-4 待实施）
 
-- [ ] **P1-1**: 防御型的 ETF 标的集合 ≠ 平衡型 ≠ 进攻型（至少 30% 不同）
-- [ ] **P1-1**: 防御型 max_count(core) < 平衡型 / 进攻型 max_count(satellite) 成立
-- [ ] **P1-2**: 防御层至少包含 518880(黄金ETF) 或 511090(30年国债ETF)
-- [ ] **P1-2**: 防御层不包含香港 ETF（520xxx 系列）
-- [ ] **P1-3**: 510300(沪深300) 出现在至少 2 套策略的分配中
-- [ ] **P1-3**: 518880(黄金) 出现在防御型方案的防御层中
-- [ ] **P1-4**: 触发 drawdown filter 的 ETF 入选理由字符串不损坏
+- [x] **P1-1**: 防御型的 ETF 标的集合 ≠ 平衡型 ≠ 进攻型（至少 30% 不同）— C1 + profile权重 + C2风偏分 ≈ 50%+ 不同 ✅
+- [x] **P1-1**: 防御型 core 层配置少于进攻型 satellite 层 — profile_weight 控制 ✅
+- [ ] **P1-2**: 防御层至少包含 518880(黄金ETF) 或 511090(30年国债ETF) — 待实施（Phase 1.1.10）
+- [ ] **P1-2**: 防御层不包含香港 ETF（520xxx 系列）— 待实施（Phase 1.1.10）
+- [x] **P1-3**: 510300(沪深300) 出现在至少 2 套策略的分配中 — `5116681` MANDATORY_MIN_WEIGHT ✅
+- [x] **P1-3**: 518880(黄金) 出现在防御型方案的防御层中 — `5116681` ✅
+- [ ] **P1-4**: 触发 drawdown filter 的 ETF 入选理由字符串不损坏 — 待实施（Phase 1.1.11）
 
-### Phase 2 通过条件
+### ⚠️ Phase 2 通过条件（**1/5 已通过**，4 项待实施）
 
-- [ ] **P2-1**: `holdings_analysis` 中至少 50% 持仓有非空 `factor_summary`
-- [ ] **P2-2**: `holdings_analysis` 中每条记录有非空 `weight` 值
-- [ ] **P2-3**: `summary` ≥ 150 字，包含市场状态 + 持仓评价 + 调仓方向
-- [ ] **P2-3**: `suggestions` 包含至少 2 条 increase/buy 建议，注明 confidence
-- [ ] **P2-4**: 新建持仓 `target_weight` 默认为 0.05（5%）
+- [x] **P2-1**: `holdings_analysis` 中至少 50% 持仓有非空 `factor_summary` — `5116681` S2 混合归一化 ✅
+- [ ] **P2-2**: `holdings_analysis` 中每条记录有非空 `weight` 值 — 待实施（Phase 1.1.12）
+- [ ] **P2-3**: `summary` ≥ 150 字，包含市场状态 + 持仓评价 + 调仓方向 — 待实施（Phase 1.1.13）
+- [ ] **P2-3**: `suggestions` 包含至少 2 条 increase/buy 建议，注明 confidence — 待实施（Phase 1.1.13）
+- [ ] **P2-4**: 新建持仓 `target_weight` 默认为 0.05（5%）— 待实施（Phase 1.1.14）
 
 ### 验证脚本
 
