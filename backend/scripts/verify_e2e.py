@@ -512,6 +512,31 @@ def section_async_resilience():
                       {"total_capital": 500000, "portfolio_type": "on_exchange"},
                       "策略分析", poll_deadline=120)
 
+    # ── 任务列表一致性验证 ──────────────────────────────────
+    try:
+        r = requests.post(f"{BASE}/api/v1/portfolio/design-async", json={"capital": 1000}, timeout=15)
+        if r.status_code == 202:
+            task_id = r.json().get("task_id")
+            check(f"轻量任务已提交 task_id={task_id}", task_id is not None, str(task_id))
+            if task_id:
+                try:
+                    tr = requests.get(f"{BASE}/api/v1/portfolio/tasks", timeout=10)
+                    if tr.status_code == 200:
+                        tasks = tr.json()
+                        ids = [t["task_id"] for t in tasks]
+                        check(f"任务 {task_id} 出现在 /portfolio/tasks 列表中", task_id in ids,
+                              f"列表共 {len(tasks)} 条")
+                    else:
+                        check("GET /portfolio/tasks 状态码", False, str(tr.status_code))
+                except requests.Timeout:
+                    check("GET /portfolio/tasks", False, "请求超时（10s）")
+                except Exception as e:
+                    check("GET /portfolio/tasks", False, str(e))
+    except requests.Timeout:
+        check("POST /design-async", False, "请求超时（15s）")
+    except Exception as e:
+        check("POST /design-async", False, str(e))
+
 
 def section_admin():
     """管理端点"""

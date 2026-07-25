@@ -69,4 +69,28 @@ describe('App.vue', () => {
     // The router-view stub should render the dashboard stub
     expect(wrapper.html()).toContain('Dashboard stub')
   })
+
+  it('calls fetchAndMergeTasks on mount', async () => {
+    router.push('/')
+    await router.isReady()
+
+    const { useTaskStore } = await import('../stores/task')
+    const store = useTaskStore()
+    const fetchSpy = vi.spyOn(store, 'fetchAndMergeTasks')
+
+    mount(App, {
+      global: {
+        plugins: [router],
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          AppToast: { template: '<div />' },
+          Teleport: { template: '<div><slot /></div>' },
+          TaskIndicator: { template: '<div />' },
+          MarketMonitor: { template: '<div />' },
+        },
+      },
+    })
+
+    expect(fetchSpy).toHaveBeenCalled()
+  })
 })
