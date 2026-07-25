@@ -505,46 +505,54 @@ market-analysis-optimization-plan.md
 
 **验证结果**: 8 个 pipeline 集成测试全 PASS；verify_e2e `design_text` 检查升级（长度+内容）；POST /design-async 返回完整报告率从 0% 提升到预期 >90%。
 
-### Phase 1.1 — 数据层增强 & 统一市态（P1）
+### Phase 1.1 — 数据层增强 & 统一市态（P1）✅ **全部完成**
 
-**状态**: ⚠️ 部分完成。4 项已全部完成，6 项已由 Phase 0.7~2.2 隐含落地，5 项待实施。
+**状态**: ✅ 2026-07-25 全部实施并验证。共 7 个 commit（`1f6d00e`~`89862be`）。
 
 **前置依赖**: Phase 0.7~1.0 完成（因子分正常 + 管道可靠 + 异步边界修复 + 报告分级）
 
-#### ✅ 已完成
-| # | 任务 | 源文档 | 落地方式 | 
-|---|------|--------|---------|
-| 1.1.0 | Five-improvements #1：统一市态判定 | `five-improvements-plan.md` #1 | `portfolio_service.py:406-409` 已调用 `pool_manager.get_market_regime()`，取代自采逻辑 |
-| 1.1.8 | market-analysis Phase A（统一搜索后端） | market-analysis §3 | `GET /market/search` 已使用 `instruments` 表 + akshare 双源，支持 pinyin/first_letter 模糊匹配 |
-| 1.1.9 | market-analysis Phase B（统一分析编排端点） | market-analysis §4 | 各分析端点（sector/symbol/llm-advice/llm-report）streaming 已就绪，`UnifiedAnalysis` 前端组件依赖 Phase C 尚未实施 |
-| 1.1.10 | P1-2: 防御层分类修复（跨境→卫星层） | design-check-quality §3 P1-2 | `pool_manager.py:328-333` 已排除"跨境"归防御层 |
-| 1.1.11 | P1-4: risk_controls.py 拼接 bug 修复 | design-check-quality §3 P1-4 | `risk_controls.py:43-44` 已用明确括号修复 |
-| 1.1.12 | P2-2: holdings_analysis 注入 weight 字段 | design-check-quality §3 P2-2 | `portfolio_service.py:498-500` 从 `weight_map` 回填 |
-| 1.1.13 | P2-3: 策略检查摘要增强 | design-check-quality §3 P2-3 | `portfolio_service.py:514-533` 已纳入市态+行业覆盖+数据质量 |
+#### 计划内任务
+| # | 任务 | 源文档 | 落地方式 | commit |
+|---|------|--------|---------|:------:|
+| 1.1.0 | 统一市态判定 | `five-improvements-plan.md` #1 | `portfolio_service.py:406-409` 调用 `pool_manager.get_market_regime()` | — |
+| 1.1.1 | Sector 概念板块数据采集 | sector-concept Phase 1 | `market_trends.py`: `_compute_industry_momentum()` + `_compute_concept_momentum()` 合并输出 | `1b6cdb0` |
+| 1.1.2 | PoolManager sector_cache 扩展 | sector-concept Phase 2 | `update_sector_cache()` + `_hot_plates_cache`/`_sector_heat_cache` | `1b6cdb0` |
+| 1.1.3 | 板块数据 60s 定时刷新 | sector-concept Phase 2 | `tasks/sector_refresh.py` + `main.py` 后台 `asyncio.create_task` 循环 | `1b6cdb0` |
+| 1.1.4 | 新闻关键词分类修复 | news-pipeline-fix P1.1+P1.2 | `levistock_fetcher.py`: 移4中性词, 清冲突词 | `8c18858` |
+| 1.1.5 | `fetch_sina_roll_news()` HTTP 源 | news-pipeline-fix P1.3 | `news_fetcher.py`: 新浪 HTTP 直连, requests+no_proxy, 5s 超时 | `8c18858` |
+| 1.1.6 | 重写 `fetch_macro_news()` 降级链 | news-pipeline-fix P1.4 | 三级: 新浪→CLS→财联社; 删除 CCTV/百度(≤24s) | `8c18858` |
+| 1.1.7 | 重写 `fetch_global_news()` 降级链 | news-pipeline-fix P1.5 | RSS→akshare global_cls, 加每源独立日志 | `8c18858` |
+| 1.1.8 | market-analysis Phase A（统一搜索） | market-analysis §3 | `GET /market/search` 已多源; 新增 `market=A` 参数支持个股搜索 | `030c739` |
+| 1.1.9 | market-analysis Phase B（编排端点） | market-analysis §4 | 各 analysis streaming 端点已就绪 | — |
+| 1.1.10 | P1-2: 防御层分类修复 | design-check-quality §3 P1-2 | `pool_manager.py:328-333`: 跨境→卫星层 | — |
+| 1.1.11 | P1-4: risk_controls 拼接 bug | design-check-quality §3 P1-4 | `risk_controls.py:43-44`: 明确括号 | — |
+| 1.1.12 | P2-2: holdings_analysis 注入 weight | design-check-quality §3 P2-2 | `portfolio_service.py:498-500`: weight_map 回填 | — |
+| 1.1.13 | P2-3: 策略检查摘要增强 | design-check-quality §3 P2-3 | `portfolio_service.py:514-533`: 市态+行业+数据质量 | — |
+| 1.1.14 | P2-4: target_weight 默认值 | design-check-quality §3 P2-4 | `models/portfolio.py`: Column `default=0.05` | `8c18858` |
 
-#### ⏳ 待实施
-| # | 任务 | 源文档 | 预估工时 | 前置依赖 |
-|---|------|--------|---------|---------|
-| 1.1.1 | Sector 数据采集扩容（行业+概念 concurrent） | sector-concept Phase 1 | 4h | Phase 0.7 A3 |
-| 1.1.2 | PoolManager sector_cache 写入扩展（含概念） | sector-concept Phase 2 | 3h | 1.1.1 |
-| 1.1.3 | APScheduler 新增板块刷新任务 | sector-concept Phase 2 | 1h | 1.1.2 |
+#### 额外新增（超出原计划范围）
+| 改項 | 说明 | commit |
+|------|------|:------:|
+| Sina 时间戳 ISO 格式转换 | `datetime.fromtimestamp(ts)` 替代 `str(ctime)`，解决跨源按字符串排序错乱 | `030c739` |
+| Sina 正文内容 | `summary`→`intro`→`content` 三级降级；实际数据中 `intro`~70字 | `030c739` |
+| RSS 正文内容 | 新增 `summary` 作为 `content` 字段（~150字） | `030c739` |
+| 文章 URL 透传 | 新浪(`url`/`wapurl`)、RSS(`link`) 传入 `url` 字段 | `89862be` |
+| 前端「查看原文」链接 | NewsView.vue 在 `item.url` 存在时显示链接，`target=_blank` | `89862be` |
+| 搜索添加 `market=A` 参数 | `/market/search` 支持 `market=A` 查个股，返回 `type:"stock"` | `030c739` |
+| `test_risk_controls.py` | 重写, 14 个测试覆盖 P1-4 回归/drawdown/defense/stale/minnows | `0733690` |
+| `test_portfolio_model.py` | 6 个测试覆盖 default/schema 验证 | `0733690` |
+| `test_news_pipeline.py` | 4 个测试覆盖三级降级链行为 | `0733690` |
+| `test_pool_manager_layer.py` | 8 个测试覆盖行业→层映射 | `0733690` |
+| `test_news_classification.py` 增强 | +5 反向断言(中性词不标利空/异动词精度) | `0733690` |
 
-#### ✅ 已完成并提交（commit `8c18858`）
-| # | 任务 | 源文档 | 实际改动 |
-|---|------|--------|---------|
-| 1.1.4 | 新闻关键词分类修复 | news-pipeline-fix P1.1+P1.2 | `levistock_fetcher.py`: 移4中性词, 清冲突词 |
-| 1.1.5 | 新增 `fetch_sina_roll_news()` | news-pipeline-fix P1.3 | `news_fetcher.py`: 新浪 HTTP 直连, requests+no_proxy |
-| 1.1.6 | 重写 `fetch_macro_news()` | news-pipeline-fix P1.4 | `news_fetcher.py`: 三级降级链（新浪→CLS→财联社） |
-| 1.1.7 | 重写 `fetch_global_news()` | news-pipeline-fix P1.5 | `news_fetcher.py`: RSS→akshare, 加日志 |
-| 1.1.14 | P2-4: target_weight 默认值 | design-check-quality §3 P2-4 | `models/portfolio.py`: +`default=0.05` |
-
-**验证**:
-- LLM 报告不再显示"暂无板块热力数据"
-- 新闻源日志含 `[news] 新浪财经返回 N 条`，`fetch_macro_news` 改动前 ≤24s → 改动后 ~0.3s
-- `GET /market/search?keyword=茅台&market=A` 返回 `type:"stock"` 结果
-- 策略检查的 regime 与设计方案一致（统一市态判定）
-- 防御层黄金/国债分类正确（非跨境→卫星层误归）
-- risk_controls 拼接 no error；holdings_analysis 含 weight 字段；strategy check 摘要内容充实；target_weight 默认为 0
+**剩余验证项**（所有项目已验证通过）:
+- ✅ LLM 报告不再显示"暂无板块热力数据"（概念+行业双源）
+- ✅ 新闻源日志含 `[news] 新浪财经返回 N 条`，宏观源耗时 ≤24s → ~0.3s
+- ✅ `GET /market/search?keyword=茅台&market=A` 返回 `type:"stock"` 结果
+- ✅ 策略检查 regime 与设计方案一致（统一 `pool_manager.get_market_regime()`）
+- ✅ 防御层黄金/国债归防御层，跨境/港股归卫星层
+- ✅ risk_controls 入选理由无拼接错误 | holdings_analysis 含 weight | target_weight 默认 0.05
+- ✅ 新闻展示财联社/新浪财经/RSS 三源混排，时间从新到旧
 
 ### Phase 2.1 — 数据管道质量提升 ✅ **全部完成（合并入 Phase 2.2）**
 
