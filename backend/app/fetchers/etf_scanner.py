@@ -197,6 +197,28 @@ def fetch_all_etfs_base() -> list[dict[str, Any]]:
         logger.debug("[etf_scanner] cache hit for all_etfs")
         return cached
 
+    # 0. 文件缓存：重启后加速首次加载
+    import os, json, time
+    _cache_file = os.path.join(os.path.dirname(__file__), "..", "data", "etf_list_cache.json")
+    if os.path.exists(_cache_file):
+        try:
+            with open(_cache_file, "r", encoding="utf-8") as _f:
+                _fc = json.load(_f)
+            if time.time() - _fc.get("ts", 0) < 3600 and len(_fc.get("etfs", [])) > 50:
+                logger.info("[etf_scanner] file cache hit: %d ETFs", len(_fc["etfs"]))
+                sync_memory_cache.set("all_etfs", _fc["etfs"], CACHE_TTL["etf_list"])
+                return _fc["etfs"]
+        except Exception:
+            pass
+
+    def _save_cache(etfs):
+        try:
+            os.makedirs(os.path.dirname(_cache_file), exist_ok=True)
+            with open(_cache_file, "w", encoding="utf-8") as _f:
+                json.dump({"ts": time.time(), "etfs": etfs}, _f, ensure_ascii=False)
+        except Exception:
+            pass
+
     # 1. 新浪 → 获取全量 ETF 代码列表（快、稳定、免费）
     try:
         from .china_market import fetch_etf_list
@@ -223,6 +245,7 @@ def fetch_all_etfs_base() -> list[dict[str, Any]]:
                 merged.append(item)
             sync_memory_cache.set("all_etfs", merged, CACHE_TTL["etf_list"])
             _last_good_etfs = merged
+            _save_cache(merged)
             logger.info("[etf_scanner] Sina+Tencent merged: %d ETFs", len(merged))
             return merged
 
@@ -230,6 +253,7 @@ def fetch_all_etfs_base() -> list[dict[str, Any]]:
         logger.info("[etf_scanner] using Sina-only ETF list (no amount/scale filtering)")
         sync_memory_cache.set("all_etfs", sina_result, CACHE_TTL["etf_list"])
         _last_good_etfs = sina_result
+        _save_cache(sina_result)
         return sina_result
     except Exception as e:
         logger.warning("[etf_scanner] Sina ETF list failed: %s", e)
@@ -241,6 +265,7 @@ def fetch_all_etfs_base() -> list[dict[str, Any]]:
             logger.info("[etf_scanner] East Money direct HTTP: %d ETFs", len(em_result))
             sync_memory_cache.set("all_etfs", em_result, CACHE_TTL["etf_list"])
             _last_good_etfs = em_result
+            _save_cache(em_result)
             return em_result
     except Exception as e:
         logger.warning("[etf_scanner] East Money direct HTTP failed: %s", e)
@@ -260,6 +285,7 @@ def fetch_all_etfs_base() -> list[dict[str, Any]]:
         result = df.to_dict(orient="records")
         sync_memory_cache.set("all_etfs", result, CACHE_TTL["etf_list"])
         _last_good_etfs = result
+        _save_cache(result)
         return result
     except Exception as e:
         logger.warning("[etf_scanner] all ETF data sources failed: %s", e)

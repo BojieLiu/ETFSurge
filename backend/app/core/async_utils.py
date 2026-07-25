@@ -28,14 +28,15 @@ _default_executor_max = 0
 
 
 def run_in_thread(fn, *args, timeout: int = DEFAULT_SYNC_TIMEOUT):
-    """同步函数版：在全局共享线程池中执行 fn，带超时保护。
+    """同步包装：每次调用创建独立线程池，超时不泄漏线程。
 
-    供同步 fetcher 函数内部使用（替代在每个函数内新建 ThreadPoolExecutor）。
-    用法: run_in_thread(fn) 或 run_in_thread(fn, arg1, arg2, timeout=5)
+    供同步 fetcher 内部使用。超时后 executor shutdown 放弃等待，
+    僵尸线程随进程退出终结，不会在共享池中累积。
     """
     try:
-        future = _shared_executor.submit(fn, *args)
-        return future.result(timeout=timeout)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+            future = ex.submit(fn, *args)
+            return future.result(timeout=timeout)
     except concurrent.futures.TimeoutError:
         return None
     except Exception:
@@ -67,7 +68,7 @@ async def run_sync(call, *args, timeout: int = DEFAULT_SYNC_TIMEOUT):
                        _pending, getattr(call, '__name__', str(call)), timeout)
     loop = asyncio.get_event_loop()
     return await asyncio.wait_for(
-        loop.run_in_executor(_shared_executor, call, *args), timeout=timeout,
+        asyncio.to_thread(call, *args), timeout=timeout,
     )
 
 

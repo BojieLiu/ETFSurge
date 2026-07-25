@@ -253,9 +253,12 @@ class PoolManager:
         # 1. 扫描全市场 → 3 层基础池（走长任务线程池，不与 API 请求争抢）
         try:
             from ..core.async_utils import run_sync_long, run_sync
-            raw_layers = await run_sync_long(self.scanner.full_pipeline, timeout=60)
-        except Exception as e:
-            logger.warning("[pool_manager] scanner.full_pipeline failed")
+            raw_layers = await asyncio.wait_for(
+                run_sync_long(self.scanner.full_pipeline, timeout=60),
+                timeout=90,
+            )
+        except (Exception, asyncio.TimeoutError) as e:
+            logger.warning("[pool_manager] scanner.full_pipeline failed or timed out")
             raw_layers = {"core": [], "satellite": [], "defense": []}
             logger.warning("[pool_manager] scanner.full_pipeline returned empty — data source chain failed; raw_count=%d, exception: %s", 0, e)
         raw_count = sum(len(v) for v in raw_layers.values())
