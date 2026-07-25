@@ -235,14 +235,17 @@ def _select_and_weight(
         composite += c2_bonus
         scored.append((composite, cand, factor_scores))
 
-    # B3b: 按指数概念去重（已选的 tracked_index 在 B3 已过滤，此处兜底）
-    # 对 scored 中每只 ETF，按 tracked_index 或名称提取的概念分组，
+    # B3b: 按板块归一化后的指数概念去重
+    # 先归一化（科创50/科创100/科创新能源 → 科创），然后按归一化后的板块分组，
     # 每组仅保留 composite_score 最高者。
     concept_groups: dict[str, list[tuple[float, dict[str, Any], dict[str, float]]]] = {}
     for item in scored:
         cand = item[1]
         tidx = cand.get("tracked_index", "") or ""
-        concept = tidx if tidx else _extract_index_concept(cand.get("name", ""))
+        if not tidx:
+            tidx = _extract_index_concept(cand.get("name", ""))
+        seg = _normalize_segment(tidx) if tidx else tidx
+        concept = seg or tidx or "unknown"
         # 如果该概念已存在且当前评分更高则替换
         if concept not in concept_groups or item[0] > concept_groups[concept][0][0]:
             concept_groups[concept] = [item]
