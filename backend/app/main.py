@@ -104,18 +104,18 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_warmup_global_indices())
 
     # 启动时预热 ETF 缓存（非阻塞），带超时保护
-    async def _warmup_etf_cache():
+        async def _warmup_etf_cache():
         try:
             from app.fetchers.etf_scanner import fetch_all_etfs_base
             result = await asyncio.wait_for(
-                asyncio.to_thread(fetch_all_etfs_base), timeout=60,
+                asyncio.to_thread(fetch_all_etfs_base), timeout=120,
             )
             if result:
-                logger.info("ETF 缓存预热完成：%d 只", len(result))
+                logger.info("ETF cache warmup done: %d items", len(result))
         except asyncio.TimeoutError:
-            logger.warning("ETF 缓存预热超时（60s），不影响启动")
-        except Exception:
-            logger.warning("ETF 缓存预热失败（不影响启动）")
+            logger.warning("ETF full scan timed out (120s), will complete on demand")
+        except Exception as e:
+            logger.warning("ETF cache warmup failed: %s", e)
     asyncio.create_task(_warmup_etf_cache())
 
     # Scheduler temporarily disabled for diagnostics (design-check-pipeline-redesign)

@@ -801,7 +801,7 @@ class FactorRegistry:
                 try:
                     rows = await asyncio.wait_for(
                         asyncio.to_thread(fetch_history, sym, "A", "daily"),
-                        timeout=10,
+                        timeout=20,
                     )
                     if not rows:
                         raise ValueError("empty data")

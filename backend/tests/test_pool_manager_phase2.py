@@ -19,6 +19,10 @@ class TestPoolManagerPhase2:
             "515030": {"style.momentum.mom_3m": 0.06, "style.quality.roe": 0.07},
             "518880": {"style.momentum.mom_3m": -0.02, "style.quality.roe": 0.04},
         })
+        reg.aggregate_factor_scores = MagicMock(side_effect=lambda raw_scores: {
+            **raw_scores,
+            "composite": sum(raw_scores.values()) / max(len(raw_scores), 1),
+        })
         return reg
 
     @pytest.fixture

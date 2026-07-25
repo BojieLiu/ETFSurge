@@ -84,6 +84,6 @@ export const newsApi = {
 
 export const adminApi = {
   tokenUsage: () => api.get('/admin/token-usage'),
-  tokenTimeseries: (granularity = 'day', days = 30) => api.get('/admin/token-usage/timeseries', { params: { granularity, days } }),
+  tokenTimeseries: (params = {}) => api.get('/admin/token-usage/timeseries', { params }),
   tokenFailures: (limit = 50) => api.get('/admin/token-usage/failures', { params: { limit } }),
 }

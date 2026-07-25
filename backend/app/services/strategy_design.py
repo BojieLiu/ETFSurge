@@ -169,6 +169,9 @@ def _compute_fund_flow(pool_manager) -> dict:
     from ..fetchers.fundamental_fetcher import fetch_fund_flow
     from ..utils.sync_helpers import run_sync_in_thread
     pool = pool_manager.get_pool()
+    if not isinstance(pool, dict):
+        logger.warning("[strategy_design] _compute_fund_flow: pool is not a dict (%s), skipping", type(pool).__name__)
+        return result
     for layer, items in pool.items():
         for item in items:
             sym = item.get("symbol", "")

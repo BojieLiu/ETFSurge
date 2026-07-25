@@ -1,5 +1,7 @@
 # Strategy Check & Apply / 策略检查与调仓
 
+> **⚠️ 2026-07-26 修正**: 原契约文档化的 `POST /api/v1/portfolio/strategy-check`（同步版）在 `61ecc2d` 中被重构为异步版本，**实际路由已不存在**。以下已更新为正确的异步端点和轮询结果获取端点。
+
 ## 1. 概述 / Overview
 
 调用 LLM 分析当前组合，生成策略调整建议（权重调整、替换、维持不变），并支持一键应用建议。
@@ -10,19 +12,40 @@ Use LLM to analyze the current portfolio, generate strategy suggestions (weight 
 
 ## 2. 端点定义 / Endpoints
 
-### 2.1 策略检查 / Strategy Check
+### 2.1 启动异步策略检查 / Launch Async Strategy Check
 
 ```
-POST /api/v1/portfolio/strategy-check
+POST /api/v1/portfolio/strategy-check-async
 ```
 
 **请求体 / Request Body:**
 
 ```json
 {
-  "total_capital": 1000000.00
+  "total_capital": 1000000.00,
+  "portfolio_type": "on_exchange"
 }
 ```
+
+**成功响应 / Success Response — `202 Accepted`:**
+
+```json
+{
+  "task_id": 42,
+  "status": "pending",
+  "created_at": "2026-07-25T10:30:00"
+}
+```
+
+---
+
+### 2.2 获取策略检查结果 / Get Strategy Check Result
+
+```
+GET /api/v1/portfolio/strategy-check-result/{task_id}
+```
+
+**成功响应 / Success Response — `200 OK`（已完成）:**
 
 **成功响应 / Success Response — `200 OK`:**
 
@@ -166,8 +189,10 @@ POST /api/v1/portfolio/apply-strategy
 
 | Item | Frontend | Backend | Notes |
 |------|----------|---------|-------|
-| `strategy-check` returns summary + suggestions | ☐ | ☐ | |
-| `strategy-check` handles empty portfolio | ☐ | ☐ | Returns "组合为空" message |
+| `strategy-check-async` launches task (returns task_id) | ✅ | ✅ | frontend calls `portfolioApi.strategyCheck(data)` |
+| `strategy-check-result/{task_id}` returns summary + suggestions | ✅ | ✅ | frontend polls with `getStrategyCheckResult(taskId)` |
+| `strategy-checks` history list | ✅ | ✅ | frontend calls `listStrategyChecks(20,0)` |
+| `strategy-check-async` handles empty portfolio | ☐ | ☐ | Returns "组合为空" message |
 | `apply-strategy` accepts suggestions array | ☐ | ☐ | |
 | `apply-strategy` returns updated symbols | ☐ | ☐ | |
 | Suggestion action `adjust_weight` adjusts weight correctly | ☐ | ☐ | |

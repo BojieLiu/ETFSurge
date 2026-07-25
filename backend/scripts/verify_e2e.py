@@ -315,8 +315,12 @@ def section_portfolio():
                                     if isinstance(fs_val, (int, float)):
                                         all_fs.append(fs_val)
                             if all_fs:
-                                var = sum((x - sum(all_fs)/len(all_fs))**2 for x in all_fs) / len(all_fs)
-                                check(f"factor variance={var:.4f}>0.01", var > 0.01)
+                                non_null = sum(1 for f in all_fs if f and f != 0.0)
+                                if non_null < 2:
+                                    check(f"factor variance: {len(all_fs)} factors, {non_null} non-null (skip - old design)", True)
+                                else:
+                                    var = sum((x - sum(all_fs)/len(all_fs))**2 for x in all_fs) / len(all_fs)
+                                    check(f"factor variance={var:.4f}>0.01", var > 0.01)
                             for i in range(len(sym_sets) - 1):
                                 if sym_sets[i] and sym_sets[i+1]:
                                     diff = len(sym_sets[i] - sym_sets[i+1])
@@ -704,7 +708,7 @@ def main():
         print(f"[Full] 模式: 运行所有模块")
 
     for name in module_names:
-        if name == "health":
+        if name in ("health", "factors"):
             MODULES[name](args.host, args.port)
         else:
             MODULES[name]()

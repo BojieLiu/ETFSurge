@@ -245,6 +245,7 @@ class PoolManager:
     async def _refresh_impl(self) -> PoolDiff:
         """实际刷新逻辑（被 refresh() 的锁保护）。"""
         import time as _time
+        import asyncio
         _start_ts = _time.time()
         old_by_code = dict(self._by_code)
         # 缓存上次成功刷新的 pool，供 refresh 失败时兜底
