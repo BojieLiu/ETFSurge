@@ -158,10 +158,23 @@ api-contracts/
 ├── analysis/              ← AI 分析 (llm-report, news-impact, agents)
 ├── news/                  ← 资讯 (headlines, macro, global, stock, research)
 ├── factors/               ← 因子模型
+├── admin/                 ← 运维监控 (token-usage, sources)
 └── market/               ← 行情 (realtime, history, search, indicators, signal, chart, indices)
 ```
 
 **检查清单:** 每个契约文件末尾有 `Frontend-Backend Checklist`，实现后逐项打勾验证。
+
+> **🚨 2026-07-26 经验教训：契约必须先于实现，而非对实现的事后描述。**
+> 即使是在为已存在接口补契约（如本次补 `apply-design` / `drift-check` 等 4 份契约），
+> 正确的顺序仍然是：
+> 1. **先写契约** — 定义接口形态、请求/响应结构，不参考后端代码
+> 2. **再读后端代码确认契约正确** — 验证接口是否按契约实现，记录偏差
+> 3. **再写单测** — 按契约描述的接口行为写测试
+> 4. **再处理断裂点** — 以前端实际消费字段与契约/后端比对，修正不一致
+>
+> 反模式：先读后端/前端代码再补契约，会导致契约变成"对现状的追认"，
+> 失去契约作为"对实现的约束"的核心价值——等人改接口时，看契约以为是对的，
+> 实际代码可能早已跑偏。
 
 ## 部署
 > 本地开发推荐 `restart.bat` — 自动停止旧进程、等端口释放、启动前后端、健康检查。
