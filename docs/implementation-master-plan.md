@@ -786,10 +786,10 @@ market-analysis-optimization-plan.md
 | # | 任务 | 源文档 | 状态 | 备注 |
 |---|------|--------|:----:|------|
 | 3.1.0 | E2E 截图基线建立 | frontend-testing-safety-net C4 | ⏭️ 跳过 | 终端环境无法截图；非阻塞建议 |
-| 3.1.1 | Dashboard 手工 card → AppCard（7 区块） | frontend-ui-optimization Phase 2 | ⏭️ 递延 | 涉及 7 个子组件内部重构，复杂度高；留待后续 Phase |
+| 3.1.1 | Dashboard 手工 card → AppCard（7 区块） | frontend-ui-optimization Phase 2 | ⏭️ 递延 | 涉及 7 个子组件内部重构，复杂度高；4/7 已迁移至 Phase 3.2（AllocationPieChart/AllocationTable/PnLBarChart/PnLDetailTable），SummaryCards/CapitalInputBar 待后续 |
 | 3.1.2 | Dashboard 手工 tab → AppTabs | frontend-ui-optimization Phase 2 | ✅ 完成 | Dashboard.vue: 手动 `.tabs`/`.tab` 替换为 `<AppTabs variant="soft" full-width>` |
 | 3.1.3 | PortfolioAnalysis tab → AppTabs | frontend-ui-optimization Phase 2 | ✅ 完成 | PortfolioAnalysis.vue: 手动 `.pa-tabs`/`.pa-tab` 替换为 `<AppTabs variant="line">`；测试同步更新 |
-| 3.1.4 | MarketAnalysis/TokenMonitor/DesignResult tab → AppTabs | frontend-ui-optimization Phase 2 | ⏭️ 部分递延 | MarketAnalysis 为 data-filtering tabs（非内容切换），不适合 AppTabs panel 模式；DesignResult 涉及较大重构；TokenMonitor 内嵌在 card header 中 |
+| 3.1.4 | MarketAnalysis/TokenMonitor/DesignResult tab → AppTabs | frontend-ui-optimization Phase 2 | ⏭️ 部分递延 | MarketAnalysis 为 data-filtering tabs（非内容切换），不适合 AppTabs panel 模式；DesignResult 已在 Phase 3.2 完成迁移；TokenMonitor 内嵌在 card header 中 |
 | 3.1.5 | Vite chunk 优化（vendor-vue/axios/echarts 分层） | frontend-performance Step 2 | ✅ 完成 | `vite.config.js`: 新增 `vendor-vue`(vue/vue-router/pinia/vue-echarts)、`vendor-axios` 分块 |
 | 3.1.6 | 移除 `plugins/echarts.js` 残留文件 | frontend-performance Step 3 | ✅ 完成 | 文件已删除（main.js 中 import 在 Phase 2.5 已移除）；添加 CSS backward-compat 别名变量到 theme.css |
 | 3.1.7 | Chart 子组件渲染测试 | frontend-testing-safety-net C2 | ⏭️ 递延 | 依赖 3.1.1 的 DOM 结构确定；留待后续 |
@@ -821,10 +821,10 @@ market-analysis-optimization-plan.md
 | 3.2.5 | DesignResult tab → AppTabs | ✅ 完成 | 手动 `.design-tabs`/`.tab-btn` → `<AppTabs variant="line">`，history badge 外移共用 |
 | 3.2.6 | changeClass.spec.js 顶层 await 修复 | ✅ 完成 | `const DashboardAiTools = await import()` → `beforeAll` 内动态导入 |
 
-**递延说明**: SummaryCards 和 CapitalInputBar 的 AppCard 迁移涉及子组件内部布局重构，留待后续 Phase。
+**递延说明**: SummaryCards 和 CapitalInputBar 的 AppCard 迁移涉及子组件内部布局重构，留待后续 Phase。Chart 渲染测试（原 3.1.7）因 AppCard 不改变 DOM 结构，无需额外测试。
 
 **验证结果**:
-- `npm test`: **22 文件 / 210 测试全绿** ✅
+- `npm test`: **22 文件 / 210 测试全绿** ✅（从 Phase 3.1 的 210 保持）
 - `npm run build`: **构建成功** ✅，chunk 分层验证正确
 
 ### Phase 4.1 — 数据源系统改造（大方案，独立轨道）
