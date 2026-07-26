@@ -268,14 +268,30 @@ async def portfolio_design_async(
 ):
     """异步提交设计任务，立即返回 task_id。
 
-    请求体: {capital: 500000, constraints: {...}}
+    请求体: {capital: 500000, constraints: {...}, market: "A"}
+    Phase 5.1: 非 A 市场返回 unsupported 友好提示。
     """
+    from ..core.market_context import resolve_market_context
+    from fastapi.responses import JSONResponse
+
+    market = task.get("market", "A")
+    market_ctx = resolve_market_context(market)
+    if not market_ctx.supports_portfolio_design:
+        return JSONResponse(
+            status_code=202,
+            content={
+                "task_id": None,
+                "status": "unsupported",
+                "message": f"组合设计当前仅支持 A 股市场（沪市/深市 ETF）。{market_ctx.title}市场的组合设计功能正在规划中。",
+            },
+        )
+
     from ..tasks.task_manager import task_manager, design_worker
     capital = task.get("capital", 500000)
     constraints = task.get("constraints")
-    t = task_manager.create_task(task_type="design", params={"capital": capital, "constraints": constraints})
+    params = {"capital": capital, "constraints": constraints, "market": market}
+    t = task_manager.create_task(task_type="design", params=params)
     asyncio.create_task(design_worker(task_manager, t["task_id"]))
-    from fastapi.responses import JSONResponse
     return JSONResponse(
         status_code=202,
         content={"task_id": t["task_id"], "status": "pending", "created_at": t["created_at"]},

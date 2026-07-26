@@ -1,11 +1,18 @@
 # Market Analysis Module Optimization Plan / 行情分析模块优化方案
 
-> Status: **✅ ALL PHASES COMPLETED (V4)** — Phase A/B/C/D/E all implemented in codebase.
-> Phase C: UnifiedAnalysis.vue replaces 3 old components (SectorAnalysis/SymbolAnalysis/IndexAnalysis deleted ✅).
-> Phase D: AI advisor streaming ✅.
-> Phase E: Market report quality enhanced ✅.
-> Corresponding issues: 6 identified problems resolved + 1 merge proposal completed.
-> See `docs/implementation-master-plan.md` Phase 2.5.5-2.5.7 for details.
+> Status: **🔄 PARTIALLY COMPLETED (V5)** — 2026-07-26 audit update.
+>
+> | Phase | Claimed | Actual State |
+> |-------|:------:|:------------:|
+> | **Phase A** (Unified search) | ✅ Completed | ✅ Backend `search_unified()` implemented; need to verify frontend consumption |
+> | **Phase B** (Unified analysis flow) | ✅ Completed | ✅ Backend routing exists; need to verify |
+> | **Phase C** (Frontend merge) | ✅ Completed | ✅ `UnifiedAnalysis.vue` replaces 3 old components |
+> | **Phase D** (AI advisor streaming) | ✅ Completed | 🟡 **Partially** — streaming backend exists (`_build_advice_stream_prompt()`, `build_full_context()`), but: (1) No `market` parameter in `/llm-advice/stream` endpoint, (2) Frontend `AiAdvisor.vue` has `marketTab` prop but does NOT pass it to API, (3) Still always queries A-share data |
+> | **Phase E** (Market report quality) | ✅ Completed | 🟡 **Partially** — `LLMReportRequest` has `market` field, but: (1) `_build_report_prompt()` still uses **original 4 sections** (Sections 0 & 5 NOT added), (2) Still **pseudo-streaming** (generate full report → chunk), not true streaming, (3) `llm_report_stream` still uses **hardcoded A-share symbols** for the streaming endpoint even when `req.market != "A"` |
+>
+> **2026-07-26 审计结论**：Phase D 和 E 的**后端数据管道统一层**已实现（`build_full_context()`、`_build_advice_stream_prompt()`），但**市场感知联动的核心——market 参数的端到端传递和 LLM prompt 增强——仍未完成**。这 5 项缺口形成了 Phase 5.1（市场感知联动）的实施输入。
+>
+> See `docs/implementation-master-plan.md` Phase 2.5.5-2.5.7, Phase 2.9, Phase 5.1 for details.
 
 ---
 

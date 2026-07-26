@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 async def build_full_context(
     pool_manager,
+    market: str = "A",
     include_regime: bool = True,
     include_sentiment: bool = True,
     include_indices: bool = True,
@@ -32,10 +33,10 @@ async def build_full_context(
     context: dict = {}
     errors: list[str] = []
 
-    # 1. Market regime
+    # 1. Market regime (Phase 5.1: 按市场获取)
     if include_regime:
         try:
-            context["market_regime"] = pool_manager.get_market_regime() or ""
+            context["market_regime"] = pool_manager.get_market_regime(market) or ""
         except Exception as e:
             context["market_regime"] = ""
             errors.append(f"regime: {e}")

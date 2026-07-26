@@ -21,9 +21,12 @@ logger = logging.getLogger(__name__)
 async def generate_enhanced_design(
     capital: float = 500000,
     constraints: dict | None = None,
+    market: str = "A",
 ) -> dict:
     """
     v5 编排器：数据管道 → 策略引擎 → 持久化返回。
+
+    Phase 5.1: 增加 market 参数入口，当前仅 A 股有候选池。
     """
     import time
     start_time = time.monotonic()

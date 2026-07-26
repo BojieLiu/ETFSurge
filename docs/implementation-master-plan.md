@@ -1,7 +1,9 @@
 # ETF Surge 方案实施总计划
 
-> 生成日期: 2026-07-26 | 版本: v7.2
-> 总览 `docs/` 目录 **32 份**方案文档（新增 `systematic-quality-review.md`、`async-boundary-fix-plan.md v2.0`），梳理实施状态、冲突重叠、修复建议及分阶段执行路线。
+> 生成日期: 2026-07-26 | 版本: **v8.0**
+> 🔴 **2026-07-26 审计更新**：重评 Phase 5.1 市场感知联动——此前标记"可选/待评估/可被 market-analysis Phase D+E 替代"的结论不成立。经代码交叉验证，`market-awareness-and-data-source-plan.md` §5 的 **10 项子任务 0/10 完全实现**，market-analysis Phase D/E 仅覆盖后端数据管道层（`build_full_context()`），未涉及 market 参数端到端传递和 LLM prompt 增强。Phase 5.1 从"可选"升级为正式阶段。详见 §3.2（重新评估内容）和 §4 Phase 5.1（更新后的任务表）。
+> 
+> 总览 `docs/` 目录 **32 份**方案文档，梳理实施状态、冲突重叠、修复建议及分阶段执行路线。
 > v7.1：Phase 2.7 剩余项 + Phase 2.8 剩余项 + Phase 2.9 全部完成。新增 encoding_diagnosis.py、refresh_sentiment_cache()、AGENTS.md 关键路径更新。新增 llm_context.py build_full_context() 统一数据管道 + llm_report_stream/llm_advice_stream 改用统一管道。
 > Phase 2.2→2.4 全部完成——33/33 核心因子全 LIVE（_CORE_FACTORS 列表共 33 个因子，均含真实 compute 函数，含 Phase 2.5 新增的 etf.return_1m/return_3m/price）、因子健康端点 + 因子单测门禁 + 运行时因子断言、分配器质量修复（ln_mcap 排毒、C2 条件修正、segment 归一化去重、预算重调、cross-section z-score 重归一化）。新增 Phase 2.5（原质量防护网 + AI 分析）。
 > 新增文档 2 份：`scaffold-factor-resolution-plan.md`（第 29 份，✅ 已实施）、`design-quality-review-20260725.md`（第 30 份，审计报告）。
@@ -48,7 +50,7 @@
 |------|---------|-----------|
 | `design-report-optimization-plan.md` | 报告管道就绪、`_validate_report_consistency` 实现、WS 推送链路完整、`report_quality` 分级（full/fallback/none/pending）；A1（表格"因子"→"多因子评分"）已随 Phase 0.5 落地；管道升级为顺序 Pipeline（Phase 1.0） | A2（预期收益随市态调整）、B1-B3（LLM prompt 分析增强）、C1（全市场净流入信号）、C2（卫星层科技 ETF）—— 其中 A2/C1/C2 依赖因子分正常后验证效果 |
 | `five-improvements-plan.md` | #2（极端下跌排除）+ #3（防御有效性）+ #4（freshness 检查）+ #5（理由多样化）已实现 | #1（统一市态判定）仍待完成，~15 行 |
-| `market-awareness-and-data-source-plan.md` | Stooq 已在全球指数降级链中引用；§4 数据源替换已转入 `roadmap-data-source-unified.md` | §5 市场感知联动（MarketReport 忽略 `market` prop、AiAdvisor 硬编码、组合设计无 `market` 参数等）—— 此部分与 `market-analysis-optimization-plan.md` Phase D/E 有重叠，**建议以 market-analysis 方案为准实施** |
+| `market-awareness-and-data-source-plan.md` | Stooq 已在全球指数降级链中引用；§4 数据源替换已转入 `roadmap-data-source-unified.md` | §5 市场感知联动（MarketContext 数据类未创建、market_router 路由层未创建、各端点 market 参数未传递、LLM prompt 未注入市场上下文、regime 缓存仍为单市场）—— **2026-07-26 审计发现 market-analysis Phase D/E 未完全覆盖此部分**（仅实现了后端数据管道统一层）。Phase D/E 的完成状态已修正为 "Partially"。详见 master plan §3.2 和 §4 Phase 5.1 状态矩阵 |
 | `factor-model-extension-plan.md` | 因子注册表从 12 个扩展到 **~33** 个计算函数（当前 _CORE_FACTORS=33）；异步边界修复（Phase 0.9）后因子计算基于真实数据 | YAML 中 167 个远未全覆盖；IC 追踪器从未运行 |
 | `design-check-quality-report.md` | 19 个问题中 **14 项已落地**：P0 全 4 项 ✅（_etf_history + meltdown→warning + INDEX_KEYWORDS + S1-A TTL 缓存）`53acbfa`；P1-1(三策略差异化) 通过 Phase 0.7 C1 + profile权重(`5116681`) + C2 名称基准分(`17e9cab`) + B3b概念去重(`17e9cab`) ✅；P1-3(强制标的进分配) ✅ `5116681`；P2-1→S2(混合归一化) ✅ `5116681`；P3-1(测试覆盖) ✅ test_data_health.py + DQ 门禁；P3-2(pre-commit) ✅ 增强 API 覆盖检查；P3-3(E2E 断言) ✅ verify_e2e.py `afaea68`；P3-4(监控脚本) ✅ data_health_check.py `ac6dd81` | **剩余 5 项**待实施（~1h）：P1-2(防御层分类→卫星层，~3行)、P1-4(risk_controls拼接bug，~1行)、P2-2(weight字段注入，~5行)、P2-3(摘要增强，~10行)、P2-4(target_weight默认值，~1行) |
 
@@ -254,14 +256,20 @@ v2.0 中以下冲突已被后续实施落地或自然消解：
 
 `roadmap-data-source-unified.md` 已创建，替代三份原文档。无需进一步操作。
 
-### 3.2 冲突修复：市场分析方案领先于市场感知方案
+### 3.2 冲突修复：市场分析方案 vs 市场感知方案（2026-07-26 重新评估）
 
-**决策**：以 `market-analysis-optimization-plan.md` Phase D 和 Phase E 的代码级方案为准，
-替代 `market-awareness-and-data-source-plan.md` §5 的大部分内容。
+**2026-07-26 审计更新**：此前决策"以 market-analysis Phase D+E 替代 market-awareness §5"基于 Phase D+E 全部完成的假设。
+经代码交叉验证，**该假设不成立**——Phase D+E 仅实现了后端数据管道统一层，**market-aware 的端到端数据流和 LLM prompt 增强均未完成**。
+
+**新决策**：
+- `market-awareness-and-data-source-plan.md` §5 应 **保留为独立方案**，但需引用 `market-analysis-optimization-plan.md` Phase D+E 已实现的后端管道作为基础设施
+- `market-analysis-optimization-plan.md` → 标记为 Partially Completed，Phase D/E 的未完成项转入 `market-awareness-and-data-source-plan.md` §5 的对应任务
+- 两方案从"替代关系"转为"基础设施 → 上层应用"的依赖关系
 
 **处理方式**：
-- `market-analysis-optimization-plan.md` → **保留，优先实施**
-- `market-awareness-and-data-source-plan.md` §5 → **降级**，标记为"待 market-analysis 落地后评估"
+- `market-awareness-and-data-source-plan.md` §5 → **从降级恢复为正式方案**（v4 已更新 §5 状态矩阵）
+- `market-analysis-optimization-plan.md` → **修正状态为 Partially**（v5 已更新状态头）
+- 实施时先确认 Phase D/E 的后端管道（`build_full_context()`）可复用，再在其上叠加 market 参数端到端传递
 
 ### 3.3 冲突修复：LLM prompt 三路合并
 
@@ -859,15 +867,28 @@ curl -s "http://localhost:8000/api/v1/admin/sources/circuit-breakers"
 curl -s "http://localhost:8000/api/v1/admin/sources/events/timeline?hours=1"
 ```
 
-### Phase 5.1 — 市场感知联动（可选，待评估）
+### Phase 5.1 — 市场感知联动（2026-07-26 评估结果：应保留为正式阶段）
 
-| # | 任务 | 源文档 | 预估工时 | 前置依赖 | 备注 |
-|---|------|--------|---------|---------|------|
-| 5.1.1 | 后端 MarketContext 路由层 | market-awareness §5.2 | 6h | Phase 4.1 (已实施, D7除外) | ⚠️ 若 market-analysis Phase D+E 已满足需求，此任务可取消。Phase 4.1 数据源改造后端已基本就绪 |
-| 5.1.2 | MarketReport market prop 传递 | market-awareness §5.3 | 2h | 5.1.1 | 已在 market-analysis Phase E 中部分实现 |
-| 5.1.3 | AiAdvisor market 上下文 | market-awareness §5.3 | 2h | 5.1.1 | 已在 market-analysis Phase D 中实现 |
-| 5.1.4 | 组合设计 market 参数 | market-awareness §5.3 | 2h | 5.1.1 | — |
-| 5.1.5 | LLM prompt 市场上下文注入 | market-awareness §5.4 | 2h | 5.1.1 | — |
+> **2026-07-26 审计结论**：此前标记为"可选，待评估"并注释"若 market-analysis Phase D+E 已满足需求，此任务可取消"。
+> 经代码交叉验证，**该结论不成立**。Phase D+E 仅实现了后端数据管道统一层（`build_full_context()`、`_build_advice_stream_prompt()`），但 **market 参数的端到端传递和 LLM prompt 的市场上下文注入均未完成**。详见以下状态矩阵：
+
+| 任务 | 计划内容 | Phase D/E 覆盖范围 | 未覆盖的部分 |
+|------|---------|:------------------:|:------------:|
+| 5.1.1 | MarketContext 数据类 + market_router 路由层 | ❌ 未覆盖 — `core/market_context.py` 和 `services/market_router.py` 均未创建 | 全部未实现 |
+| 5.1.2 | MarketReport 传 market 参数 + 后端按市场过滤 | 🟡 `LLMReportRequest` 有 `market` 字段 | 前端未传 market；`llm_report_stream` 流式版硬编码 A 股符号集 |
+| 5.1.3 | AiAdvisor 传 market + 后端按市场注入数据 | 🟡 `_build_advice_stream_prompt()` + `build_full_context()` 已实现 | `llm_advice_stream` 无 market 参数；前端 `marketTab` 未传 API |
+| 5.1.4 | 组合设计增加 market 参数 | ❌ 未覆盖 | 待验证 |
+| 5.1.5 | LLM prompt 市场上下文注入 | ❌ 未覆盖 — `general_analyst.md` 未修改，`_build_report_prompt()` 无 Section 0/5 | 全部未实现 |
+
+> **建议**：Phase 5.1 从"可选"升级为正式阶段。同时与 `market-awareness-and-data-source-plan.md` §5（已补充实施状态矩阵）协同推进。以下任务表保留原结构，备注更新为审计后的实际覆盖情况。
+
+| # | 任务 | 源文档 | 预估工时 | 前置依赖 | 备注（2026-07-26 审计） |
+|---|------|--------|---------|---------|------------------------|
+| 5.1.1 | 后端 MarketContext 路由层 | market-awareness §5.2 | 6h | Phase 4.1 (已实施) | ❌ market-analysis D+E **未覆盖**。`core/market_context.py` 和 `services/market_router.py` 从未创建。Phase 4.1 数据源改造后端已就绪可复用 |
+| 5.1.2 | MarketReport market prop 传递 | market-awareness §5.3 | 2h | 5.1.1 | 🟡 Phase 2.9 仅添加了请求模型字段，**前端未传、后端流式端点未用** |
+| 5.1.3 | AiAdvisor market 上下文 | market-awareness §5.3 | 2h | 5.1.1 | 🟡 Phase D 实现了流式管道但 **无 market 参数**，前端 `marketTab` prop 存在但未传 API |
+| 5.1.4 | 组合设计 market 参数 | market-awareness §5.3 | 2h | 5.1.1 | ❌ 未覆盖。待确认 `portfolio.py` 是否有 market 参数 |
+| 5.1.5 | LLM prompt 市场上下文注入 | market-awareness §5.4 | 2h | 5.1.1 | ❌ 未覆盖。`general_analyst.md` 未修改，`_build_report_prompt()` 无 Section 0/5 |
 
 **验证**: 切换到美股 Tab → 所有功能使用美股数据
 
@@ -925,8 +946,8 @@ curl -s "http://localhost:8000/api/v1/admin/sources/events/timeline?hours=1"
 | frontend-testing-safety-net.md | 测试方案 | ⚠️ Phase A/B 已完成 | frontend/test + e2e | Phase 2.5/3.1 | 18 spec 文件/175 条/UI 组件 43 条；Phase C（截图基线+Chart测试+剩余E2E）待做 |
 | frontend-ui-optimization-plan.md | 优化方案 | ❌ 已回滚 | 全部前端视图 | Phase 3.1 | 需测试防护就绪 |
 | issues-analysis-report.md | 问题分析 | ✅ 已修复 | 全局 | — | — |
-| market-analysis-optimization-plan.md | 实施方案 | ✅ **全部完成** | market router + analysis router | Phase 2.5 | Phase A/B/C/D/E 全部实施（5 文件，24 个测试用例）|
-| market-awareness-and-data-source-plan.md | 实施方案 | ❌ 未实施 | 路由 + Service + LLM | Phase 5.1 | §4 已转 roadmap；§5 待评估 |
+| market-analysis-optimization-plan.md | 实施方案 | 🟡 **部分完成（2026-07-26 审计修正）** | market router + analysis router | Phase 2.5 → 5.1 | Phase A/B/C ✅；Phase D/E 🟡（后端数据管道已实现，但 market 参数端到端传递和 LLM prompt 增强未完成）。详见 §4 Phase 5.1 状态矩阵 |
+| market-awareness-and-data-source-plan.md | 实施方案 | ❌ **§4 已转 roadmap；§5 未实施（2026-07-26 审计确认）** | 路由 Service + LLM prompt | Phase 5.1 | §4 已转 `roadmap-data-source-unified.md`；§5 市场感知联动的 10 项子任务中 **0/10 完全实现**（详见 §4 Phase 5.1 状态矩阵和 `market-awareness-and-data-source-plan.md` §5.5）。此前标记"待评估"结论已修正 |
 | news-pipeline-fix-plan.md | 修复方案 | ✅ **全部完成** | news_fetcher + levistock_fetcher + NewsView.vue | Phase 1.1 | P0+P1 全部实施（新浪源/关键词/降级链）|
 | optimization-plan-20260721.md | 实施方案 | ✅ **已实施 (Phase 0.5)** | etf_scanner + 前端 + 后端链路 | Phase 0.5 | 全部 8 项完成 |
 | **remaining-issues-solution-design.md** | **实施方案** | ✅ **全部已实施**（已从 staged→committed） | **pool_manager + task_manager + ws + factor_registry** | **Phase 2.1** | S1-A(TTL) `53acbfa`、S1-C(渐进) `ef3de11`、S2(归一化) `5116681`、S3-B/C(WS) `ef3de11` |
@@ -943,7 +964,7 @@ curl -s "http://localhost:8000/api/v1/admin/sources/events/timeline?hours=1"
 |------|---------|--------|---------|:----:|
 | 数据源改造三文档抢同一代码域 | source-registry + data-source-monitoring + market-awareness §4 | 🔴 | 合并为 `roadmap-data-source-unified.md` | ✅ 已解决 |
 | foundation-issues 与存量文档改同一代码域 | foundation-issues Phase A/B + design-optimization P1/P2/P3 | 🔴 | 上下游关系非冲突；Phase 0.7 优先实施，其余延后验证 | ✅ 已解决 |
-| 市场分析 vs 市场感知抢 `llm_advice_stream()` | market-analysis Phase D + market-awareness §5 | 🔴 | **以 market-analysis 为准**，market-awareness §5 降级为可选 | ✅ 已解决 |
+| 市场分析 vs 市场感知抢 `llm_advice_stream()` | market-analysis Phase D + market-awareness §5 | 🔴 | **2026-07-26 重新评估**：此前决策"降级 market-awareness §5"基于 Phase D/E 全部完成的假设。审计发现 Phase D/E 仅完成后端管道，market 参数端到端传递和 LLM prompt 增强未完成。新决策：两方案转为"基础设施→上层应用"的依赖关系 | 🔄 已更新 |
 | foundation-issues A3 与 sector-concept Phase1-2 抢缓存入口 | foundation-issues A3 + sector-concept Phase 1-2 | 🟡 | 先 A3（最小化实现），sector-concept 在已有入口上扩展 | ✅ 已解决 |
 | LLM prompt 被三文档同时修改 | market-analysis Phase E + design-report A2/C1/C2 + sector-concept Phase 4 | 🟡 | 同步实施，统一修改 `llm.py`，先做结构后加数据 | 待实施 |
 | 同一页面被两方案同时改动 | market-analysis Phase C + frontend-ui Phase 1-2 | 🟡 | 先实施 Phase C（DOM 结构），再在目标结构上做 UI 优化 | 待实施 |

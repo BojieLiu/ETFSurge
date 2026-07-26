@@ -65,8 +65,8 @@ export const portfolioApi = {
     return api.post('/portfolio/import', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
   },
   designAsync: (params) => {
-    const { capital = 500000, constraints } = params || {}
-    return api.post('/portfolio/design-async', { capital, constraints })
+    const { capital = 500000, constraints, market = 'A' } = params || {}
+    return api.post('/portfolio/design-async', { capital, constraints, market })
   },
   getTask: (taskId) => api.get(`/portfolio/tasks/${taskId}`),
   listTasks: (limit = 10, offset = 0) => api.get('/portfolio/tasks', { params: { limit, offset } }),

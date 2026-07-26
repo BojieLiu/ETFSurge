@@ -1,8 +1,12 @@
 # 市场感知联动 + 数据源替换 · 综合实施方案
 
-> 文档版本: **v3** — 经三轮 Review 修订，已达实施标准
+> 文档版本: **v4** — 2026-07-26 审计更新
+> ⚠️ **2026-07-26 审计发现**：以下 §4（数据源替换）已通过 Phase 4.1 独立实施，`roadmap-data-source-unified.md` 为替代文档，§4 内容作为历史参考保留。
+> ⚠️ **§5（市场感知联动）大部分未实施**。`core/market_context.py` 和 `services/market_router.py` 从未创建。`market-analysis-optimization-plan.md` Phase D/E 部分覆盖了 AiAdvisor 流式改造和 MarketReport market 字段，但 **非全部**：LLM prompt 未注入市场上下文，`_build_report_prompt()` 无 Section 0/5 增强，regime 缓存仍为单市场，前端未传递 market 参数。详见 §5 底部状态矩阵。
+> ⚠️ **§7（实施阶段）已过时**，应参考 `implementation-master-plan.md` Phase 2.9（LLM 上下文管道统一）+ Phase 5.1（市场感知联动评估）以获取最新实施路线。
+> 
 > 对应议题: (1) 功能与市场选择脱节 (2) yfinance 连通性问题
-> 评审历史: v1 自审发现 9 项 → 委派 reviewer 发现 8 项 → v2 修复 17 项 → v3 增加 akshare 降级内容 + 自审通过
+> 评审历史: v1 自审发现 9 项 → 委派 reviewer 发现 8 项 → v2 修复 17 项 → v3 增加 akshare 降级内容 + 自审通过 → v4 审计状态更新
 
 ---
 
@@ -885,6 +889,25 @@ async def search(keyword: str = "", market: str = Query("A")):  # ← 新增 mar
 如果分析市场为"全球市场"，综合分析全球主要指数和跨市场机会。
 ```
 
+### 5.5 实施状态矩阵（2026-07-26 审计）
+
+> 以下矩阵基于当前代码库交叉验证，标记 §5 各子项的实际实施状态。
+
+| §5 子项 | 计划内容 | 实际代码状态 | 覆盖阶段 | 说明 |
+|---------|---------|:-----------:|:--------:|------|
+| 5.1 MarketContext | `core/market_context.py` 新文件 | ❌ **未创建** | — | 文件不存在 |
+| 5.2 market_router | `services/market_router.py` 新文件 | ❌ **未创建** | — | 文件不存在 |
+| 5.3.1 MarketReport | 前端传 market, 后端过滤 | 🟡 **部分实现** | Phase 2.9 | `LLMReportRequest` 含 `market` 字段，但 `llm_report_stream` 流式端点仍硬编码 A 股符号集，前端未传 market 参数 |
+| 5.3.2 AiAdvisor | 前端传 market, 后端数据注入 | 🟡 **部分实现** | Phase D/2.9 | 后端改用 `build_full_context()` + `_build_advice_stream_prompt()`，但 **无 market 参数**（始终走 A 股管道），前端 `marketTab` prop 存在但 **未传 API** |
+| 5.3.3 SectorAnalysis | 增加 market 参数 | ❌ **未实现** | — | `SectorAnalysisRequest` 无 market 字段 |
+| 5.3.4 SymbolAnalysis | 注入 market 上下文 | ❌ **未实现** | — | `SymbolAnalysisRequest` 无 market 字段 |
+| 5.3.5 Portfolio Design | 增加 market 参数 + 非A提示 | ❌ 待验证 | — | 未在 `portfolio.py` 中确认 |
+| 5.3.6 Regime 检测 | `_regime_cache: dict[str,str]` + `get_market_regime(market)` | ❌ **未实现** | — | 仍为 `_regime_cache: str` 单市场，无 market 参数 |
+| 5.4.1 统一注入 | 所有端点首行"分析市场" | ❌ **未实现** | — | 无端点在 LLM prompt 首行注入 market 标题 |
+| 5.4.2 general_analyst.md | prompt 改为按市场动态 | ❌ **未实现** | — | `general_analyst.md` 未修改 |
+
+**结论**：§5 市场感知联动的**10 项**子任务中，**0 项完全实现**、**2 项部分实现**、**8 项未实现**。该方案作为完整方案独立实施的决策仍然有效。`market-analysis-optimization-plan.md` Phase D/E 仅覆盖了后端数据管道层面（`build_full_context()`），未涉及市场感知联动的核心——**market 参数的端到端传递和 LLM prompt 的市场上下文注入**。
+
 ---
 
 ## 6. API 契约变更
@@ -911,6 +934,13 @@ async def search(keyword: str = "", market: str = Query("A")):  # ← 新增 mar
 ---
 
 ## 7. 实施阶段
+
+> ⚠️ **2026-07-26 审计更新**：以下阶段划分基于 v3 文档撰写时的架构。Phase 4.1 已独立实施数据源改造（`roadmap-data-source-unified.md`），Phase 2.9 已统一 LLM 上下文管道（`build_full_context()`）。**§7 仅作为历史参考保留**，最新实施路线请参考：
+> - 数据源改造：`roadmap-data-source-unified.md` v3.0（已实施）
+> - 市场感知联动：`implementation-master-plan.md` Phase 5.1（待评估）
+> - LLM 数据管道：`implementation-master-plan.md` Phase 2.9（已实施）
+> - AI Advisor 流式改造：`market-analysis-optimization-plan.md` Phase D（部分实施，缺市场感知）
+> - 市场报告增强：`market-analysis-optimization-plan.md` Phase E（部分实施，缺 prompt 增强）
 
 ### 7.0 阶段零：akshare 降级修补（1天）
 

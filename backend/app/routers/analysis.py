@@ -68,6 +68,7 @@ class SectorAnalysisRequest(BaseModel):
     sector_code: str
     sector_type: str = "industry"
     sector_name: str = ""
+    market: str = "A"
 
 
 class SymbolAnalysisRequest(BaseModel):
@@ -138,18 +139,9 @@ async def llm_report(req: LLMReportRequest):
     if req.symbols:
         market_data = [m for m in market_data if m.get("symbol") in req.symbols]
     else:
-        market = req.market
-        if market == "A":
-            major_symbols = {"000001", "399001", "399006", "000688", "000300", "510050", "510300", "510500", "159915"}
-        elif market == "HK":
-            major_symbols = {"HSI", "HSCEI", "00700", "09988", "02800"}
-        elif market == "US":
-            major_symbols = {"SPX", "IXIC", "SPY", "QQQ", "AAPL"}
-        elif market == "global":
-            major_symbols = {"000001", "HSI", "SPX", "IXIC", "GC=F", "CL=F"}
-        else:
-            major_symbols = {"000001", "399001", "399006", "000688", "000300"}
-        market_data = [m for m in market_data if m.get("symbol", "") in major_symbols or m.get("asset_type", "") in ("index", "futures")]
+        from app.core.market_context import resolve_market_context
+        market_ctx = resolve_market_context(req.market)
+        market_data = [m for m in market_data if m.get("symbol", "") in market_ctx.major_symbols or m.get("asset_type", "") in ("index", "futures")]
 
     indicators = {}
     for item in market_data[:5]:
@@ -348,11 +340,14 @@ async def llm_report_stream(req: LLMReportRequest):
     commodities = ctx.get("commodities", [])
     all_news = ctx.get("news", [])
 
+    # Phase 5.1: 使用 MarketContext 按市场过滤主要标的
+    from app.core.market_context import resolve_market_context
+
+    market_ctx = resolve_market_context(req.market)
     if req.symbols:
         market_data = [m for m in market_data if m.get("symbol") in req.symbols]
     else:
-        major_symbols = {"000001", "399001", "399006", "000688", "000300", "510050", "510300", "510500", "159915"}
-        market_data = [m for m in market_data if m.get("symbol", "") in major_symbols or m.get("asset_type", "") in ("index", "futures")]
+        market_data = [m for m in market_data if m.get("symbol", "") in market_ctx.major_symbols or m.get("asset_type", "") in ("index", "futures")]
 
     indicators = {}
     for item in market_data[:5]:
@@ -460,12 +455,30 @@ async def llm_advice_stream(query: str = Query(...), context: dict | None = None
 
 @router.post("/sector-analysis/stream")
 async def sector_analysis_stream(req: SectorAnalysisRequest):
-    """流式板块分析"""
+    """流式板块分析 — Phase 5.1: 非 A 市场返回友好提示。"""
     try:
         sector_code = req.sector_code
         sector_type = req.sector_type
         sector_name = req.sector_name
-        
+
+        # Phase 5.1: 非 A 市场不支持板块分析
+        from app.core.market_context import resolve_market_context
+        market_ctx = resolve_market_context(req.market)
+        if not market_ctx.supports_sector_analysis:
+            prompt = f"当前市场为 {market_ctx.title}，该市场暂无板块分析数据。请切换到 A 股市场查看板块分析。"
+            disclaimer = "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
+            async def empty_generator():
+                yield f"event: done\ndata: {json.dumps({'full_text': prompt, 'disclaimer': disclaimer})}\n\n"
+            return StreamingResponse(
+                empty_generator(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                }
+            )
+
         if sector_type == "concept":
             sectors = await asyncio.to_thread(fetch_concept_sectors, 200)
         else:
