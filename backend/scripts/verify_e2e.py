@@ -239,6 +239,11 @@ def section_portfolio():
                             if rationale:
                                 check(f"  {a.get('symbol')} 入选理由非空", True, rationale[:60])
                                 break
+                    # Phase 2.8 G3: 设计内容质量检查
+                    check(f"  设计方案质量: {len(strategies)} 套策略", len(strategies) >= 2)
+                    dt_len = len(dt)
+                    check(f"  设计文本长度: {dt_len} 字", dt_len > 1000,
+                          f"仅 {dt_len} 字" if dt_len <= 1000 else "")
         else:
             check("GET /designs 有数据", False, "历史列表为空，暂无方案")
     except requests.Timeout:

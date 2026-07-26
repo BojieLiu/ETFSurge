@@ -21,6 +21,10 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# 设计管线并发限流: 同一时间只允许一个任务运行
+# Phase 2.6.3: 防止多个任务叠加导致线程池耗尽
+_design_semaphore = asyncio.Semaphore(1)
+
 TASK_TYPES = {
     "design": {"label": "组合设计", "ttl": 600},
     "check":  {"label": "策略检查", "ttl": 600},
@@ -204,6 +208,18 @@ async def design_pipeline(mgr: TaskManager, task_id: int) -> None:
     market_context = {}
     report_quality = "none"
 
+    # 并发限流：同一时间只允许一个设计/检查任务运行
+    if not _design_semaphore.locked():
+        async with _design_semaphore:
+            return await _design_pipeline_with_semaphore(mgr, task_id)
+    else:
+        logger.warning("[design_pipeline] task %d waiting: another design task in progress", task_id)
+        async with _design_semaphore:
+            return await _design_pipeline_with_semaphore(mgr, task_id)
+
+
+async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> None:
+    """实际的设计管线逻辑，被 _design_semaphore 保护。"""
     try:
         mgr.update_task(task_id, status="running", progress=10, stage="数据采集与策略计算中")
         await _notify(task_id, "running", progress=10, stage="数据采集与策略计算中")
@@ -237,6 +253,25 @@ async def design_pipeline(mgr: TaskManager, task_id: int) -> None:
         if not strategies:
             error_msg = "策略生成为空：数据源不可用或未找到符合条件的 ETF"
             logger.warning("[design_pipeline] task %d completed with 0 strategies — treating as failure", task_id)
+            mgr.update_task(task_id, progress=0, status="failed", error_message=error_msg)
+            await _notify(task_id, "failed", progress=0)
+            return
+
+        # Phase 2.7.1: 逐策略校验非空（非 CASH 标的 >= 1 只）
+        all_valid = True
+        for s in strategies:
+            etfs = s.get("etfs") or []
+            non_cash = [a for a in etfs if a.get("symbol") != "CASH"]
+            if len(non_cash) < 1:
+                all_valid = False
+                logger.warning(
+                    "[design_pipeline] task %d strategy '%s' has no non-CASH ETFs — rejecting",
+                    task_id, s.get("id", "?"),
+                )
+                break
+        if not all_valid:
+            error_msg = "策略校验失败：部分方案无有效 ETF 标的"
+            logger.warning("[design_pipeline] task %d: %s", task_id, error_msg)
             mgr.update_task(task_id, progress=0, status="failed", error_message=error_msg)
             await _notify(task_id, "failed", progress=0)
             return

@@ -173,6 +173,8 @@ python scripts/audit_async_blocking.py
 - `test_fetch_market_data_does_not_block_event_loop`：当前只 mock 了 `fetch_history` 路径，需要**额外 mock 覆盖 Sina IOPV 路径**，测试 heartbeat 验证事件循环未被阻塞
 - `test_design_task_does_not_block_event_loop`：新增集成测试（详见 §4.3）
 
+> **更全面的测试防护方案**（AST 扫描增强、因子降级路径、值级断言、编码 roundtrip）见 `docs/systematic-quality-review.md §9`（Phase 2.8）。本文档的修复 7 仅覆盖 G1 的 Sina IOPV 部分，不替代完整方案。
+
 #### 修复 8: 文档 — 开发约定
 
 在 `AGENTS.md` 中已有的 async def 非阻塞警告旁，追加：

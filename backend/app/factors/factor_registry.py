@@ -837,31 +837,46 @@ class FactorRegistry:
         # 2. 批量获取 IOPV 数据（Sina 实时行情）
         # 用于 premium_discount 因子计算
         try:
-            import urllib.request
             prefixes = {"5": "sh", "6": "sh", "0": "sz", "1": "sz", "3": "sz"}
             sina_list = [f"{prefixes.get(sym[0], 'sh')}{sym}" for sym in symbols]
-            url = f"http://hq.sinajs.cn/list={','.join(sina_list)}"
-            req = urllib.request.Request(url, headers={"Referer": "http://finance.sina.com.cn"})
-            resp = urllib.request.urlopen(req, timeout=8)
-            raw = resp.read().decode("gbk")
-            for line in raw.strip().split("\n"):
-                if '"' not in line:
-                    continue
-                parts = line.split('"')[1].split(",")
-                if len(parts) < 10:
-                    continue
-                # parts[0] = symbol (with prefix), parts[2] = symbol (clean)
-                sym = parts[2] if parts[2] else ""
-                if sym not in data:
-                    continue
-                try:
-                    price = float(parts[3]) if parts[3] else None
-                    nav = float(parts[8]) if parts[8] else None
-                    if nav and nav > 0:
-                        data[sym]["price"] = price or 0.0
-                        data[sym]["nav"] = nav
-                except (ValueError, IndexError):
-                    pass
+
+            async def _fetch_iopv_batch(s_list: list[str]) -> dict[str, dict]:
+                """通过线程池获取新浪 IOPV 实时行情，不阻塞事件循环。"""
+                from ..core.async_utils import run_sync
+
+                def _sync_fetch():
+                    import urllib.request
+                    url = f"http://hq.sinajs.cn/list={','.join(s_list)}"
+                    req = urllib.request.Request(
+                        url, headers={"Referer": "http://finance.sina.com.cn"}
+                    )
+                    resp = urllib.request.urlopen(req, timeout=8)
+                    return resp.read().decode("gbk")
+
+                raw = await run_sync(_sync_fetch, timeout=10)
+                parsed: dict[str, dict] = {}
+                for line in raw.strip().split("\n"):
+                    if '"' not in line:
+                        continue
+                    parts = line.split('"')[1].split(",")
+                    if len(parts) < 10:
+                        continue
+                    sym = parts[2] if parts[2] else ""
+                    if not sym:
+                        continue
+                    try:
+                        price = float(parts[3]) if parts[3] else None
+                        nav = float(parts[8]) if parts[8] else None
+                        parsed[sym] = {"price": price or 0.0, "nav": nav}
+                    except (ValueError, IndexError):
+                        pass
+                return parsed
+
+            iopv_data = await _fetch_iopv_batch(sina_list)
+            for sym, values in iopv_data.items():
+                if sym in data and values.get("nav", 0) > 0:
+                    data[sym].setdefault("price", values["price"])
+                    data[sym]["nav"] = values["nav"]
         except Exception as e:
             logger.warning("[factor] batch NAV fetch failed: %s (proxy? — non-fatal)", e)
 
@@ -905,10 +920,32 @@ class FactorRegistry:
         else:
             market_data = await self._fetch_market_data(symbols, symbol_extra=symbol_extra)
 
+        # Phase 2.7.2: 空数据告警 — 所有 symbol 的 data 均为空时发出错误日志
+        if market_data:
+            empty_symbols = [sym for sym in symbols if not market_data.get(sym)]
+            if len(empty_symbols) == len(symbols):
+                logger.error(
+                    "[factor] compute() — _fetch_market_data returned EMPTY data for ALL %d symbols: %s",
+                    len(symbols), symbols[:5],
+                )
+            elif empty_symbols:
+                logger.warning(
+                    "[factor] compute() — %d/%d symbols have empty data: %s",
+                    len(empty_symbols), len(symbols), empty_symbols[:5],
+                )
+
         result: dict[str, dict[str, float]] = {}
         for sym in symbols:
             row: dict[str, float] = {}
             data = market_data.get(sym, {}) if market_data else {}
+
+            # Phase 2.7.4: 缓存降级 — 如果 data 为空，尝试降级到过期 K 线缓存
+            if not data:
+                stale = _get_cached_kline([sym])
+                if stale and sym in stale:
+                    logger.warning("[factor] compute() — using stale cache for %s (live data empty)", sym)
+                    data = stale[sym]
+
             for code in codes:
                 computer = self._computers.get(code)
                 if computer is None:

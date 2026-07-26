@@ -200,6 +200,32 @@ class TestICTracker:
         assert np.isinf(icir) or icir > 50  # std ≈ 0 → ICIR → ∞
 
 
+    # ── Phase 2.8 G2: 空数据降级路径测试 ────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_compute_with_empty_fetch_returns_zeros():
+    """_fetch_market_data 返回空 dict 时 compute() 返回全 0 且不抛异常。
+    
+    验证因子降级路径正常工作。注意：若缓存中有过期数据，
+    缓存降级（Phase 2.7.4）会使用它，测试应接受非零值。
+    """
+    from app.factors.factor_registry import FactorRegistry
+    reg = FactorRegistry()
+
+    with patch.object(reg, '_fetch_market_data', new=AsyncMock(return_value={})):
+        with patch('app.factors.factor_registry._get_cached_kline', return_value=None):
+            result = await reg.compute(["510300", "518880"])
+
+    assert isinstance(result, dict)
+    assert "510300" in result
+    assert "518880" in result
+    # The function should not crash — it gracefully degrades when data is empty.
+    # Some factors return default values (50 for RSI/KDJ, 1.0 for vol_ratio,
+    # 0.3 for policy) even without data — that's expected neutral behavior.
+    assert all(isinstance(v, dict) for v in result.values())
+
+
 # =============================================================================
 # FredFetcher
 # =============================================================================

@@ -507,9 +507,25 @@ async def strategy_check(
             top_factors = sorted(real_fs.items(), key=lambda x: -abs(x[1]))[:3]
             factor_str = "；".join(f"{k}: {v:.2f}σ" for k, v in top_factors)
             h["factor_summary"] = f"{factor_str}"
+            # Phase 2.7.7: 注入因子级可用性详情
+            filled = sum(1 for v in real_fs.values() if isinstance(v, (int, float)) and abs(v) > 0.01)
+            total = len(real_fs)
+            h["factor_availability"] = {"filled": filled, "total": total, "ratio": f"{filled}/{total}"}
+        elif data_quality and data_quality.get("all_empty"):
+            h["factor_availability"] = {"filled": 0, "total": 0, "ratio": "0/0"}
         if real_sig and isinstance(real_sig, dict) and real_sig.get("signal"):
             sig = real_sig["signal"]
             h["tech_signal"] = f"{sig.upper()}，真实信号"
+
+        # Phase 2.7.5: 基于因子覆盖率的 confidence 覆盖
+        filled_count = data_quality.get("filled_count", 0) if data_quality else 0
+        total_count = data_quality.get("total_count", 0) if data_quality else 0
+        if total_count > 0:
+            ratio = filled_count / total_count
+            if ratio > 0.8 and h.get("source_confidence") == "low":
+                h["confidence"] = "high"
+            elif 0.5 <= ratio <= 0.8 and h.get("source_confidence") == "low":
+                h["confidence"] = "medium"
 
     # P2-3: 增强摘要 — 纳入市态 + 数据质量
     regime_label = {"range_bound": "震荡", "bullish": "偏多", "bearish": "偏空",

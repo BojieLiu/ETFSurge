@@ -33,6 +33,19 @@ _SYNC_PATTERNS = [
     "urllib.",
 ]
 
+# Phase 2.8 G1: 直接同步调用黑名单（无 await 包裹），
+# 这些调用出现在 async def 中且没有被 await 包裹即为违规。
+_SYNC_PATTERNS_DIRECT = [
+    "urllib.request.urlopen",
+    "urllib.request.Request",
+    "requests.get",
+    "requests.post",
+    "pd.read_html",
+    "pd.read_csv",
+    "yfinance.",
+    "yf.",
+]
+
 
 def _is_exempted(node: ast.Await) -> bool:
     """Skip 'await asyncio.wait_for(asyncio.to_thread(...), ...)' patterns.
@@ -42,6 +55,9 @@ def _is_exempted(node: ast.Await) -> bool:
     call = node.value
     if not isinstance(call, ast.Call):
         return False
+    # Match `await run_sync(...)` — already thread-pool bound
+    if isinstance(call.func, ast.Name) and call.func.id == "run_sync":
+        return True
     # Match asyncio.wait_for(asyncio.to_thread(...), ...)
     func = call.func
     if isinstance(func, ast.Attribute) and func.attr == "wait_for":
@@ -115,9 +131,101 @@ def test_no_direct_await_of_sync_function():
     if all_errors:
         # Print all violations for debugging
         for err in all_errors:
-            print(f"  ✗ {err}", file=sys.stderr)
+            print(f"  ! {err}", file=sys.stderr)
         pytest.fail(
             f"Found {len(all_errors)} direct await-of-sync violation(s) "
             f"across {scanned} files ({skipped} skipped). "
             "Wrap synchronous calls with asyncio.to_thread() or run_sync()."
+        )
+
+
+# ── Phase 2.8 G1: 直接同步调用检测 ──────────────────────────────
+
+
+def _extract_call_name(node: ast.Call) -> str:
+    """提取函数调用名称，支持 foo.bar.baz 格式。"""
+    parts = []
+    n = node.func
+    while isinstance(n, ast.Attribute):
+        parts.append(n.attr)
+        n = n.value
+    if isinstance(n, ast.Name):
+        parts.append(n.id)
+    return '.'.join(reversed(parts))
+
+
+def _is_awaited_in_func(func_node: ast.AsyncFunctionDef, target_call: ast.Call) -> bool:
+    """检查 target_call 是否被 async def 函数中的某个 await 包裹。"""
+    for node in ast.walk(func_node):
+        if isinstance(node, ast.Await):
+            # Check if the Call node is inside this Await's subtree
+            for child in ast.walk(node):
+                if child is target_call:
+                    return True
+    return False
+
+
+def _scan_async_for_direct_sync(func_node: ast.AsyncFunctionDef, file_path: str) -> list[str]:
+    """扫描 async def 中的直接同步调用（非 await 包裹且不在嵌套 def 中）。
+    
+    跳过嵌套 in def 中的调用 — 它们应通过 run_sync/to_thread 执行。
+    """
+    violations = []
+    rel = os.path.relpath(file_path, _APP_PATH)
+    func_name = func_node.name
+
+    # 收集嵌套 sync def 中所有节点的 id 集合（跳过它们）
+    nested_def_node_ids = set()
+    for child in ast.walk(func_node):
+        if isinstance(child, ast.FunctionDef) and not isinstance(child, ast.AsyncFunctionDef):
+            for grandchild in ast.walk(child):
+                nested_def_node_ids.add(id(grandchild))
+
+    for node in ast.walk(func_node):
+        if id(node) in nested_def_node_ids:
+            continue
+        if isinstance(node, ast.Call):
+            call_name = _extract_call_name(node)
+            for pattern in _SYNC_PATTERNS_DIRECT:
+                if call_name.startswith(pattern) or call_name == pattern.rstrip('.'):
+                    if not _is_awaited_in_func(func_node, node):
+                        violations.append(
+                            f"{rel}:{node.lineno}: direct sync call '{call_name}' "
+                            f"in async def '{func_name}'"
+                        )
+                    break
+    return violations
+
+
+def test_no_direct_sync_call_in_async_function():
+    """Fail if any async def contains a direct synchronous call.
+    
+    检测如 urllib.request.urlopen 等同步调用在 async def 中
+    没有被 await / run_sync / to_thread 包裹。
+    """
+    all_errors: list[str] = []
+    scanned = 0
+
+    for root, dirs, files in os.walk(_APP_PATH):
+        dirs[:] = [d for d in dirs if d != "__pycache__"]
+        for f in files:
+            if not f.endswith(".py"):
+                continue
+            path = os.path.join(root, f)
+            scanned += 1
+            try:
+                with open(path, encoding="utf-8-sig") as fh:
+                    tree = ast.parse(fh.read())
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.AsyncFunctionDef):
+                        all_errors.extend(_scan_async_for_direct_sync(node, path))
+            except (SyntaxError, UnicodeDecodeError):
+                continue
+
+    if all_errors:
+        for err in all_errors:
+            print(f"  ! {err}", file=sys.stderr)
+        pytest.fail(
+            f"Found {len(all_errors)} direct sync call(s) in async functions "
+            f"across {scanned} files. Wrap with run_sync() or asyncio.to_thread()."
         )

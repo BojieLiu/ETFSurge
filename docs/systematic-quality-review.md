@@ -496,26 +496,36 @@ P2-9~P2-14 (验证阶段、质量报告、审计门禁等)
 
 ```python
 # test_async_lint.py 新增函数
-def _is_direct_sync_call_in_async(node: ast.FunctionDef) -> list[str]:
-    """Check if an async def function contains direct (non-awaited) sync calls."""
+def _extract_call_name(node: ast.Call) -> str:
+    """提取函数调用名称，支持 foo.bar.baz 格式。"""
+    parts = []
+    n = node.func
+    while isinstance(n, ast.Attribute):
+        parts.append(n.attr)
+        n = n.value
+    if isinstance(n, ast.Name):
+        parts.append(n.id)
+    return '.'.join(reversed(parts))
+
+def _is_direct_sync_call_in_async(node: ast.AST) -> list[str]:
+    """检查 async def 函数中是否有直接（非 await）同步调用。
+
+    由于 ast.walk 不提供 parent 引用，需要先建立 parent 映射。
+    替代方案：在遍历时维护一个 in_await 标志栈。
+    """
     if not isinstance(node, ast.AsyncFunctionDef):
         return []
     violations = []
+    # 方案：先建 parent 映射，再从 Call 节点向上追溯
     for child in ast.walk(node):
         if isinstance(child, ast.Call):
-            # Skip if the call is inside an await
-            parent = child
-            while parent:
-                if isinstance(parent, ast.Await):
-                    break
-                parent = getattr(parent, 'parent', None)
-            else:
-                # Not inside await — check if it's a known sync function
-                call_name = _extract_call_name(child)
-                if any(p in call_name for p in SYNC_PATTERNS_DIRECT):
-                    violations.append(f"{node.name}:{child.lineno}: {call_name}")
+            # 用 lineno 粗判断——更精确的做法：
+            # 遍历 AsyncFunctionDef 时手动跟踪 await 上下文
+            ...
     return violations
 ```
+
+> **实现注意**：AST 节点默认不含 `parent` 属性。上述伪代码示意逻辑，实际实现时需要在 `ast.walk` 中手动维护一个 `in_await: bool` 标志栈，或使用 `ast.NodeTransformer` 的 `visit` 顺序推断。
 
 **新增黑名单**（区别于 `_SYNC_PATTERNS` 的 `await` 列表）：
 
@@ -569,8 +579,11 @@ async def test_compute_with_empty_fetch_returns_zeros():
 
 **新增测试 2：设计编排器集成测试**
 
+> **标记为 `@pytest.mark.slow`** — 该测试会触发真实的 pool_manager.refresh()（含外部网络调用），不适合 CI 快速流水线。
+
 ```python
 # tests/test_design_pipeline_integration.py 新增
+@pytest.mark.slow
 async def test_generate_enhanced_design_returns_valid_strategies():
     """调用真实编排器（非纯引擎），验证输出策略完整性。"""
     result = await generate_enhanced_design(capital=500000)
@@ -616,30 +629,42 @@ if holding.get("factor_scores"):
 
 | 测试文件 | 现有测试 | 增强断言 |
 |----------|---------|---------|
-| `test_strategy_check_async.py` | `test_strategy_check_returns_expected_structure` | 追加：confidence 非全 low 且分布合理 |
+| `test_strategy_check_async.py` | `test_strategy_check_returns_expected_structure` | 追加：非全 `low`（至少 1 条 confidence 为 `medium` 或 `high`） |
 | `test_design_optimization_plan.py` | `test_three_strategies_produced` | 追加：mock 因子分后，factor_summary 格式含"σ" |
 | `test_pool_manager.py` | `test_refresh_populates_cache` | 追加：market_context 完整（含 sector_momentum/market_sentiment/fund_flow） |
 
-**新增测试**：
+**新增蓝图**（集成到 `verify_e2e.py` 的 design/strategy 章节中，复用其 HTTP 基础结构而非独立文件）：
 
 ```python
-# tests/test_verify_e2e_quality.py（新建）
-class TestE2EContentQuality:
-    """验证端到端输出的内容质量（复现 verify_e2e.py 检查逻辑但更深入）。"""
+# verify_e2e.py (深化设计章节断言)
+def _check_design_content_quality():
+    """设计方案质量检查：≥2 套策略，每套 ≥3 只非 CASH ETF，design_text > 1000 字符。"""
+    r = requests.get(f"{BASE}/api/v1/portfolio/designs?limit=1")
+    if r.status_code != 200 or not r.json():
+        check("设计质量检查", False, "无可用设计")
+        return
+    did = r.json()[0]["id"]
+    detail = requests.get(f"{BASE}/api/v1/portfolio/designs/{did}").json()
+    strategies = detail.get("strategies", [])
+    check(f"设计方案数量: {len(strategies)}", len(strategies) >= 2)
+    for s in strategies:
+        non_cash = [a for a in (s.get("etfs") or []) if a.get("symbol") != "CASH"]
+        check(f"  策略 {s.get('id','?')} 非现金标的: {len(non_cash)} 只",
+              len(non_cash) >= 3)
+    dt = detail.get("design_text", "")
+    check(f"设计文本长度: {len(dt)} 字", len(dt) > 1000)
 
-    def test_design_content_quality(self, live_server):
-        """设计方案：≥2 套策略，每套 ≥3 只非 CASH ETF，design_text > 1000 字符。"""
-        r = requests.get(f"{live_server}/api/v1/portfolio/designs?limit=1")
-        design = self._get_full_detail(r.json()[0]["id"], live_server)
-        assert len(design["strategies"]) >= 2
-        for s in design["strategies"]:
-            assert sum(1 for a in s.get("etfs", []) if a["symbol"] != "CASH") >= 3
-        assert len(design.get("design_text", "")) > 1000
-
-    def test_factor_data_completeness(self, live_server):
-        """最新策略检查：至少 60% 标的有完整因子数据。"""
-        # ... 略 ...
-        assert data_quality["filled_count"] / data_quality["total_count"] > 0.6
+def _check_factor_data_completeness():
+    """最新策略检查：至少 60% 标的有完整因子数据。"""
+    # 调用 strategy-checks 接口获取最新记录
+    r = requests.get(f"{BASE}/api/v1/portfolio/strategy-checks?limit=1")
+    if r.status_code != 200 or not r.json():
+        check("因子完整性检查", False, "无策略检查记录")
+        return
+    data_quality = r.json()[0].get("data_quality", {})
+    filled = data_quality.get("filled_count", 0)
+    total = data_quality.get("total_count", 1)
+    check(f"因子数据完整率: {filled}/{total}", filled / total > 0.6)
 ```
 
 **涉及文件**：多文件 | **预估工时**：2h
@@ -692,7 +717,7 @@ async def test_database_encoding_roundtrip():
 | `tests/test_strategy_check_async.py` | 增强 | confidence 值级断言追加 |
 | `tests/test_design_optimization_plan.py` | 增强 | factor_summary 格式断言追加 |
 | `tests/test_pool_manager.py` | 增强 | market_context 完整 key 断言 |
-| `tests/test_verify_e2e_quality.py` | 新建文件 | E2E 内容质量断言（策略数/ETF数/因子覆盖率） |
+| `scripts/verify_e2e.py` | 增强 | 新增 `_check_design_content_quality` + `_check_factor_data_completeness` |
 | `tests/test_database.py` | 新建文件 | 编码 roundtrip 测试 |
 
 ---

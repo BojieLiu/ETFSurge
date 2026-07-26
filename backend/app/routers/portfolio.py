@@ -146,7 +146,7 @@ async def list_designs(
     from sqlalchemy.orm import load_only
     from ..models.portfolio_design import PortfolioDesign
 
-    # UX3: 只加载元数据字段，避免 strategies_json / market_snapshot_json 大字段拖慢查询
+    # UX3: 只加载元数据字段，避免 market_snapshot_json / design_text 大字段拖慢查询
     stmt = (
         select(PortfolioDesign)
         .options(load_only(
@@ -156,6 +156,7 @@ async def list_designs(
             PortfolioDesign.risk_profile,
             PortfolioDesign.status,
             PortfolioDesign.error_message,
+            PortfolioDesign.strategies_json,
         ))
         .order_by(desc(PortfolioDesign.created_at))
         .offset(offset)
@@ -172,6 +173,11 @@ async def list_designs(
             "risk_profile": r.risk_profile,
             "status": r.status or "completed",
             "error_message": r.error_message,
+            # Phase 2.7.8: 计算非 CASH ETF 总数
+            "etf_count": sum(
+                sum(1 for a in (s.get("etfs") or []) if a.get("symbol") != "CASH")
+                for s in (json.loads(r.strategies_json) if r.strategies_json else [])
+            ),
         }
         for r in records
     ]

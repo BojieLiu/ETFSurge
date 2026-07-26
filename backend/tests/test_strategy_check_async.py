@@ -31,6 +31,10 @@ def test_p15_strategy_check_model():
     assert isinstance(d["suggestions"], list)
     assert isinstance(d["holdings_analysis"], list)
     assert isinstance(d["risk_warnings"], list)
+    # Phase 2.8 G3: 验证置信度值有效
+    for s in d.get("suggestions", []):
+        conf = s.get("confidence", "")
+        assert conf in ("high", "medium", "low", ""), f"Invalid confidence: {conf}"
 
 
 @pytest.mark.asyncio

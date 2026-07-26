@@ -98,8 +98,13 @@ async def _fetch_pmi_trend() -> dict[str, Any]:
       {"pmi_current": float, "pmi_change": float, "above_50": bool}
     """
     try:
+        from ..core.async_utils import run_sync
         import akshare as ak
-        df = ak.macro_china_pmi()
+
+        def _sync_pmi():
+            return ak.macro_china_pmi()
+
+        df = await run_sync(_sync_pmi, timeout=30)
         if df is None or df.empty:
             return {}
 
@@ -137,13 +142,14 @@ async def _fetch_rate_env() -> dict[str, Any]:
       }
     """
     try:
+        from ..core.async_utils import run_sync
         import akshare as ak
         from ..utils.decode import decode_df
 
-        df = ak.bond_china_yield(
-            start_date="",
-            end_date="",
-        )
+        def _sync_bond_yield():
+            return ak.bond_china_yield(start_date="", end_date="")
+
+        df = await run_sync(_sync_bond_yield, timeout=30)
         if df is None or df.empty:
             return {}
 

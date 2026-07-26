@@ -64,7 +64,11 @@ async def run_sync(call, *args, timeout: int = DEFAULT_SYNC_TIMEOUT):
         当线程池队列深度超过阈值时自动打 WARNING 日志，便于排查级联超时。
     """
     _pending = _shared_executor._work_queue.qsize() if hasattr(_shared_executor, '_work_queue') else 0
-    if _pending > 8:
+    if _pending > 16:
+        logger = logging.getLogger(__name__)
+        logger.error("[async_utils] run_sync queue depth=%d (fn=%s, timeout=%ds) — POOL SATURATION!",
+                     _pending, getattr(call, '__name__', str(call)), timeout)
+    elif _pending > 8:
         logger = logging.getLogger(__name__)
         logger.warning("[async_utils] run_sync queue depth=%d (fn=%s, timeout=%ds) — pool may be saturated",
                        _pending, getattr(call, '__name__', str(call)), timeout)
