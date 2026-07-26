@@ -69,7 +69,7 @@ cd backend && python -m pytest
 
 - `backend/app/main.py` — FastAPI 入口 + lifespan：
   - 启动时预热 `refresh_market_cache()`（**25s** 超时）。
-  - APScheduler：`refresh_market_cache` 每 **15s**、`refresh_news_cache` 每 **30s**。
+  - 后台异步循环：板块缓存刷新（60s）、市态+情绪刷新（120s）。
   - 挂载路由：`market` / `portfolio` / `analysis` / `news` / `ws` / `admin`（前缀在各 router 内，统一为 `/api/v1/...`）。
 - `backend/app/tasks/market_refresh.py` — 定时刷新行情 / 资讯缓存的调度包装。
 - `backend/app/tasks/task_manager.py` — 通用 TaskManager（支持 design / check / report 三种任务类型）。
@@ -96,6 +96,7 @@ cd backend && python -m pytest
 - `backend/app/services/portfolio_service.py` — 组合计算（`calculate_allocation` / `calculate_daily_pnl`）。
 - `backend/app/services/market_service.py` — 实时行情 / 全球指数。
 - `backend/app/analysis/llm.py` — DeepSeek LLM 集成；`_build_design_report_prompt()`、`generate_design_report()` 在此。
+- `backend/app/services/llm_context.py` — LLM 上下文数据统一管道 `build_full_context()`（市场状态/情绪/指数/板块/资讯/资金流向）。
 - `frontend/src/main.js` — `createApp` + `pinia` + `router`，挂 `#app`。
 - `frontend/src/api/index.js` — axios 实例 `baseURL: '/api/v1'`，导出 `marketApi` / `portfolioApi` / `analysisApi` / `newsApi`。
 - `frontend/src/stores/portfolio.js` — 组合状态（Pinia）。
@@ -105,6 +106,8 @@ cd backend && python -m pytest
 - `frontend/src/components/NewsView.vue` — 资讯模块。
 - `frontend/src/composables/useMarketWS.js` / `useNewsWS.js` — WebSocket 客户端。
 - `backend/scripts/verify_e2e.py` — 端到端验证脚本（见「测试」章节）。
+- `backend/scripts/encoding_diagnosis.py` — 数据库编码诊断工具（检查中文是否乱码）。
+- `backend/scripts/data_health_check.py` — 数据管道健康检查（5-section 检查）。
 
 ## LLM 配置
 

@@ -153,6 +153,19 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_sector_refresh_loop())
     logger.info("板块缓存刷新循环已启动（60s）")
 
+    # Start regime + sentiment refresh loop (120s, Phase 2.7.9)
+    async def _regime_sentiment_refresh_loop():
+        while True:
+            try:
+                from .services.pool_manager import pool_manager
+                await asyncio.wait_for(pool_manager.update_market_regime(), timeout=15)
+                await asyncio.wait_for(pool_manager.refresh_sentiment_cache(), timeout=15)
+            except (Exception, asyncio.CancelledError):
+                logger.warning("[lifespan] regime/sentiment refresh cycle failed, will retry")
+            await asyncio.sleep(120)
+    asyncio.create_task(_regime_sentiment_refresh_loop())
+    logger.info("市态+情绪缓存刷新循环已启动（120s）")
+
     app.state.scheduler = None  # Scheduler disabled for diagnostics
 
     # 崩溃恢复：扫描 report_quality="pending" 且创建 >5min 的记录，标记为 fallback

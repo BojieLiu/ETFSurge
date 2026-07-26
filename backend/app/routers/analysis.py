@@ -324,37 +324,29 @@ async def portfolio_review(req: PortfolioReviewRequest):
 
 @router.post("/llm-report/stream")
 async def llm_report_stream(req: LLMReportRequest):
-    """流式市场研判报告 — 使用与非流式端点相同的数据采集模式。"""
+    """流式市场研判报告 — 使用统一上下文管道 (Phase 2.9)。"""
     from ..services.pool_manager import pool_manager
+    from ..services.llm_context import build_full_context
 
-    try:
-        regime = pool_manager.get_market_regime()
-        sentiment = pool_manager.get_market_sentiment()
-    except Exception:
-        regime = None
-        sentiment = None
+    # 使用统一上下文管道采集数据
+    ctx = await build_full_context(
+        pool_manager,
+        include_regime=True,
+        include_sentiment=True,
+        include_indices=True,
+        include_sectors=False,
+        include_news=True,
+        include_portfolio=False,
+        include_fund_flow=False,
+        include_commodities=True,
+    )
 
-    try:
-        results = await asyncio.gather(
-            asyncio.wait_for(get_all_realtime(), timeout=15),
-            asyncio.wait_for(get_indices(), timeout=15),
-            asyncio.wait_for(get_commodities(), timeout=15),
-            asyncio.to_thread(fetch_news_headlines),
-            asyncio.to_thread(fetch_macro_news),
-            return_exceptions=True,
-        )
-
-        def _safe(r, fallback):
-            return r if isinstance(r, list) else fallback
-
-        market_data = _safe(results[0], [])
-        indices = _safe(results[1], [])
-        commodities = _safe(results[2], [])
-        news_items = _safe(results[3], [])
-        macro_items = _safe(results[4], [])
-        all_news = news_items + macro_items
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Market data fetch failed: {e}")
+    regime = ctx.get("market_regime", "")
+    sentiment = ctx.get("market_sentiment", {})
+    market_data = ctx.get("market_data", [])
+    indices = ctx.get("index_realtime", [])
+    commodities = ctx.get("commodities", [])
+    all_news = ctx.get("news", [])
 
     if req.symbols:
         market_data = [m for m in market_data if m.get("symbol") in req.symbols]
@@ -415,57 +407,47 @@ async def llm_report_stream(req: LLMReportRequest):
 
 @router.post("/llm-advice/stream")
 async def llm_advice_stream(query: str = Query(...), context: dict | None = None):
-    """流式投资建议问答 — 自动注入市场数据。"""
+    """流式投资建议问答 — 使用统一上下文管道 (Phase 2.9)。"""
     from ..services.pool_manager import pool_manager
+    from ..services.llm_context import build_full_context
     from ..analysis.llm import _build_advice_stream_prompt
-    from ..fetchers.news_fetcher import fetch_news_headlines, fetch_macro_news
 
-    ctx = dict(context or {})
+    # 使用统一上下文管道
+    ctx = await build_full_context(
+        pool_manager,
+        include_regime=True,
+        include_sentiment=True,
+        include_indices=True,
+        include_sectors=True,
+        include_news=True,
+        include_portfolio=False,
+        include_fund_flow=True,
+        include_commodities=False,
+    )
 
-    try:
-        ctx["market_regime"] = pool_manager.get_market_regime() or ""
-        sent = pool_manager.get_market_sentiment() or {}
-        ctx["market_sentiment"] = sent
+    # Merge with user-provided context
+    user_ctx = dict(context or {})
+    user_ctx.update(ctx)
 
-        idx_data = pool_manager.get_index_realtime() or []
-        ctx.setdefault("market_data", []).extend(idx_data[:8])
-
-        sector_data = pool_manager.get_sector_momentum() or []
-        # F1: pass sector_momentum as dedicated key
-        ctx["sector_momentum"] = sector_data[:10]
-        for s in sector_data[:5]:
-            ctx.setdefault("market_data", []).append({
-                "name": s.get("sector_name") or s.get("name", "?"),
-                "change_pct": s.get("change_pct"),
-                "asset_type": "sector",
-            })
-        # F2: fund flow injection
-        try:
-            from ..services.strategy_design import _compute_fund_flow
-            ctx["fund_flow"] = _compute_fund_flow(pool_manager)
-        except Exception as e:
-            logger.debug("[llm-advice-stream] fund_flow: %s", e)
-
-        news_items = fetch_news_headlines() or []
-        try:
-            macro_items = fetch_macro_news() or []
-            news_items.extend(macro_items)
-        except Exception:
-            pass
-        ctx["news"] = (ctx.get("news") or []) + (news_items or [])[:10]
-
-        try:
-            from ..services.portfolio_service import get_all_holdings
-            portfolio_items = get_all_holdings()
-            if portfolio_items:
-                ctx["portfolio"] = portfolio_items[:10]
-        except Exception:
-            pass
-    except Exception as e:
-        logger.debug("[llm-advice-stream] data injection: %s", e)
+    # Build market_data for advice from index_realtime + sector_momentum
+    market_data = list(ctx.get("index_realtime", []) or [])
+    sector_data = ctx.get("sector_momentum", []) or []
+    for s in sector_data[:5]:
+        market_data.append({
+            "name": s.get("sector_name") or s.get("name", "?"),
+            "change_pct": s.get("change_pct"),
+            "asset_type": "sector",
+        })
+    user_ctx["market_data"] = market_data
+    user_ctx["market_regime"] = ctx.get("market_regime", "")
+    user_ctx["market_sentiment"] = ctx.get("market_sentiment", {})
+    user_ctx["sector_momentum"] = sector_data[:10]
+    user_ctx["fund_flow"] = ctx.get("fund_flow", {})
+    user_ctx["news"] = ctx.get("news", [])
 
     try:
-        prompt = _build_advice_stream_prompt(query, ctx)
+        prompt = _build_advice_stream_prompt(query, user_ctx)
+        from ..analysis.registry import get_agent
         agent = get_agent("advice")
         return _sse_stream(agent.run_stream(prompt))
     except Exception as e:

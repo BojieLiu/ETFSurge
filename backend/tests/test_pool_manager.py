@@ -219,3 +219,34 @@ async def test_concurrent_refresh_lock_does_not_block_forever():
 
     # Clean up
     pm._refresh_lock.release()
+
+
+@pytest.mark.asyncio
+async def test_market_context_getters_completeness():
+    """2.8.7: market_context getters should return complete data when caches are set."""
+    from app.services.pool_manager import PoolManager
+    pm = PoolManager()
+    # Set up cache data directly
+    pm._regime_cache = "range_bound"
+    pm._regime_cache_ts = 9999999999.0
+    pm._sentiment_cache = {"sentiment_index": 55, "sentiment_label": "中性"}
+    pm._sentiment_cache_ts = 9999999999.0
+    pm._sector_momentum_cache = [{"name": "半导体", "change_pct": 1.5}]
+    pm._sector_momentum_cache_ts = 9999999999.0
+    pm._index_realtime_cache = [{"name": "上证指数", "price": 3200}]
+
+    regime = pm.get_market_regime()
+    assert regime == "range_bound", f"regime: {regime}"
+
+    sentiment = pm.get_market_sentiment()
+    assert isinstance(sentiment, dict)
+    assert sentiment.get("sentiment_index") == 55
+    assert sentiment.get("sentiment_label") == "中性"
+
+    sectors = pm.get_sector_momentum()
+    assert len(sectors) >= 1
+    assert sectors[0]["name"] == "半导体"
+
+    indices = pm.get_index_realtime()
+    assert len(indices) >= 1
+    assert indices[0]["name"] == "上证指数"

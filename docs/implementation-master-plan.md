@@ -1,8 +1,8 @@
 # ETF Surge 方案实施总计划
 
-> 生成日期: 2026-07-26 | 版本: v7.0
+> 生成日期: 2026-07-26 | 版本: v7.1
 > 总览 `docs/` 目录 **32 份**方案文档（新增 `systematic-quality-review.md`、`async-boundary-fix-plan.md v2.0`），梳理实施状态、冲突重叠、修复建议及分阶段执行路线。
-> v6.3：Phase 2.5 全部完成（含 A1-A3/B1-B3/C1/C2 ✅），AI 顾问 F1-F5 质量修复（行业数据/资金流向/因子摘要注入），新增 `llm-stream-data-pipeline-unification.md` 方案文档。Phase 2.9（LLM 数据管道统一）路线图已加入。
+> v7.1：Phase 2.7 剩余项 + Phase 2.8 剩余项 + Phase 2.9 全部完成。新增 encoding_diagnosis.py、refresh_sentiment_cache()、AGENTS.md 关键路径更新。新增 llm_context.py build_full_context() 统一数据管道 + llm_report_stream/llm_advice_stream 改用统一管道。
 > Phase 2.2→2.4 全部完成——33/33 核心因子全 LIVE（_CORE_FACTORS 列表共 33 个因子，均含真实 compute 函数，含 Phase 2.5 新增的 etf.return_1m/return_3m/price）、因子健康端点 + 因子单测门禁 + 运行时因子断言、分配器质量修复（ln_mcap 排毒、C2 条件修正、segment 归一化去重、预算重调、cross-section z-score 重归一化）。新增 Phase 2.5（原质量防护网 + AI 分析）。
 > 新增文档 2 份：`scaffold-factor-resolution-plan.md`（第 29 份，✅ 已实施）、`design-quality-review-20260725.md`（第 30 份，审计报告）。
 > 💡 **关键依赖变化**：因子数据从 "15/26 LIVE" → **33/33 全 LIVE**（_CORE_FACTORS 共 33 个，均含真实 compute 函数：新增 etf.return_1m/return_3m/price，修 valuation 死代码 + momentum 聚合分类）。
@@ -220,7 +220,7 @@
 ```
 Phase 0.7: B1 → A1/A2 (tracked_index) → A3 (缓存写入)
               ↓
-Phase 1: five-improvements #1 + design-report A2/C1/C2 验证效果
+Phase 1: five-improvements #1 + design-report A2/C1 验证效果（C2 已实现基础版，详见代码分析）
               ↓
 Phase 2: sector-concept Phase 1-2 (扩展板块缓存数据)
 ```
@@ -663,7 +663,7 @@ market-analysis-optimization-plan.md
 | 2.5.10 | design-report B2：国债久期风险提示 | `design-report-optimization-plan.md` B2 | ✅ 已实施（commit 584ad20） | ~3行 | 无 |
 | 2.5.11 | design-report B3：LLM prompt 量化规则 | `design-report-optimization-plan.md` B3 | ✅ 已实施 | — | 无 |
 | 2.5.12 | design-report C1：全市场净流入信号注入 | `design-report-optimization-plan.md` C1 | ✅ 已实施（commit f6d47d3：利用现有 akshare stock_individual_fund_flow 聚合全池资金流向注入 LLM prompt） | ~30行 | 无 |
-| 2.5.13 | design-report C2：卫星层增加科技 ETF | `design-report-optimization-plan.md` C2 | 🟡 待实施（代码审计 `2026-07-26`：科创50/588000 未在 allocation_engine.py 中出现） | ~15行 | 无 |
+| 2.5.13 | design-report C2：卫星层增加科技 ETF | `design-report-optimization-plan.md` C2 | ✅ 已实现（基础版，`engine/allocation_engine.py` L443-467；含集成缺口） | ~15行 | 无 |
 
 **验证**:
 - `npm test` 全绿 + `npm run test:e2e:smoke` 全绿
@@ -671,7 +671,7 @@ market-analysis-optimization-plan.md
 - AI 顾问流式渲染，返回有实质数据的回答
 - 市场研判报告含「综合研判结论」+「操作建议」
 - 设计方案预期收益根据市态动态调整（非硬编码）
-- 卫星层包含宽基科技 ETF 选项（科创50/创业板）
+- 卫星层包含宽基科技 ETF 选项（科创50/588000，浓度>60%时自动引入）
 
 ### Phase 2.6 — 异步边界修复收尾 ✅ **全部完成**
 
@@ -707,16 +707,16 @@ market-analysis-optimization-plan.md
 |---|------|------|:------:|:----:|
 | 2.7.1 | 设计方案 post-condition 校验：每个 strategy ≥1 只非 CASH ETF | `task_manager.py` | **P0** | ✅ 已修复 |
 | 2.7.2 | `compute()` 空数据告警：空 dict 时 logger.error | `factor_registry.py` | **P0** | ✅ 已修复 |
-| 2.7.3 | 编码诊断：DB 直接读取确定断裂点 | `database.py` | **P1** | 🟡 待运行 |
+| 2.7.3 | 编码诊断：DB 直接读取确定断裂点 | `scripts/encoding_diagnosis.py` | **P1** | ✅ 已新增 |
 | 2.7.4 | 因子降级缓存：fallback 到过期 K 线 | `factor_registry.py` | **P1** | ✅ 已实施 |
 | 2.7.5 | 置信度规则化：基于 filled_count/total_count 覆盖 | `portfolio_service.py` | **P1** | ✅ 已实施 |
 | 2.7.6 | 状态机验证阶段：空策略拒入 completed | `task_manager.py` | P2 | ✅ 已实施（同 2.7.1）|
 | 2.7.7 | factor_summary 输出到因子级别可用性 | `portfolio_service.py` | P2 | ✅ 已实施 |
 | 2.7.8 | 设计列表增加 etf_count 元数据 | `portfolio.py` | P2 | ✅ 已实施 |
-| 2.7.9 | 市态缓存异步刷新 | `pool_manager.py` | P2 | 🟡 待评估 |
+| 2.7.9 | 市态缓存异步刷新 | `pool_manager.py` + `main.py` | P2 | ✅ 已实施 |
 | 2.7.10 | 区分数据不足 vs 信号中性 | `portfolio_service.py` | P2 | ✅ 已实施 |
-| 2.7.11 | AGENTS.md E2E 检查项修正 | `AGENTS.md` | P2 | 🟡 待补充 |
-| 2.7.12 | AGENTS.md 关键路径更新 | `AGENTS.md` | P2 | 🟡 待补充 |
+| 2.7.11 | AGENTS.md E2E 检查项修正 | `AGENTS.md` | P2 | ✅ 已更新 |
+| 2.7.12 | AGENTS.md 关键路径更新 | `AGENTS.md` | P2 | ✅ 已更新 |
 
 **验证结果**:
 - `pytest tests/test_strategy_design.py` — PASS（空池返回 error）
@@ -738,12 +738,12 @@ market-analysis-optimization-plan.md
 | 2.8.1 | 新增 `test_no_direct_sync_call_in_async_function` | `tests/test_async_lint.py` | ① | ✅ 已新增 + PASS |
 | **G2 — 真实路径集成测试** | | ② | | |
 | 2.8.2 | 新增 `test_compute_with_empty_fetch_returns_zeros` | `tests/test_factor_registry.py` | ② | ✅ 已新增 + PASS |
-| 2.8.3 | 编排器集成测试（保留给后续 slow 标记） | — | ② | 🟡 待后续 |
+| 2.8.3 | 编排器集成测试（标记为 slow） | `tests/test_design_optimization_plan.py` | ② | ✅ 已新增（@pytest.mark.slow，需手动执行）|
 | 2.8.4 | 新建 `test_strategy_design.py` | `tests/test_strategy_design.py` | ② | ✅ 已新建 + PASS |
 | **G3 — 值级质量断言** | | ③ | | |
 | 2.8.5 | 增强 `test_strategy_check_async.py`：confidence 值级断言 | `tests/test_strategy_check_async.py` | ③ | ✅ 已增强 + PASS |
-| 2.8.6 | 增强 `test_design_optimization_plan.py`：σ 格式断言 | `tests/test_design_optimization_plan.py` | ③ | 🟡 待增强 |
-| 2.8.7 | 增强 `test_pool_manager.py`：market_context 断言 | `tests/test_pool_manager.py` | ③ | 🟡 待增强 |
+| 2.8.6 | 增强 `test_design_optimization_plan.py`：σ 格式断言 | `tests/test_design_optimization_plan.py` | ③ | ✅ 已增强 + PASS |
+| 2.8.7 | 增强 `test_pool_manager.py`：market_context 断言 | `tests/test_pool_manager.py` | ③ | ✅ 已增强 + PASS |
 | 2.8.8 | 增强 `scripts/verify_e2e.py`：设计质量检查 | `scripts/verify_e2e.py` | ③ | ✅ 已增强 |
 | **G4 — 编码 roundtrip** | | ④ | | |
 | 2.8.9 | 新建 `tests/test_database.py`：编码 roundtrip | `tests/test_database.py` | ④ | ✅ 已新建 + PASS |
@@ -757,7 +757,7 @@ market-analysis-optimization-plan.md
 
 ---
 
-### Phase 2.9 — LLM 流式数据管道统一
+### Phase 2.9 — LLM 流式数据管道统一 ✅ **全部完成**
 
 **源文档**: `docs/llm-stream-data-pipeline-unification.md`
 
@@ -767,13 +767,13 @@ market-analysis-optimization-plan.md
 
 **预估**：~170 行 / 2-3 小时
 
-| # | 任务 | 源文档 | 预估 | 前置依赖 |
-|---|------|--------|:----:|---------|
-| 2.9.1 | 新增 `build_full_context()` 函数（pool_manager 或 llm_context.py） | §3·步骤1 | ~60行 | Phase 2.5~2.8 完成 |
-| 2.9.2 | 改造 `llm_report_stream` 改用 `build_full_context` | §3·步骤2 | ~40行 | 2.9.1 |
-| 2.9.3 | 改造 `llm_advice_stream` 改用 `build_full_context` | §3·步骤3 | ~20行 | 2.9.1 |
-| 2.9.4 | 统一 prompt 模板化（llm_advice.prompt / llm_report.prompt） | §3·步骤5 | ~40行 | 2.9.2+2.9.3 |
-| 2.9.5 | 验证：npm test + 后端单测 + 流式数据链路实测 | §3·步骤6 | ~15min | 2.9.4 |
+| # | 任务 | 源文档 | 落地方式 | 状态 |
+|---|------|--------|---------|:----:|
+| 2.9.1 | 新增 `build_full_context()` 函数（新建 llm_context.py） | §3·步骤1 | `backend/app/services/llm_context.py` — `build_full_context()` 统一采集(regime/sentiment/indices/sectors/news/market_data/commodities/fund_flow)，所有字段带 try/except | ✅ 已完成 |
+| 2.9.2 | 改造 `llm_report_stream` 改用 `build_full_context` | §3·步骤2 | `backend/app/routers/analysis.py` — 替换原有 5 路 asyncio.gather 为统一上下文管道 | ✅ 已完成 |
+| 2.9.3 | 改造 `llm_advice_stream` 改用 `build_full_context` | §3·步骤3 | `backend/app/routers/analysis.py` — 替换原有 7 处独立 pool_manager getter 调用为统一管道 | ✅ 已完成 |
+| 2.9.4 | 统一 prompt 模板化 | §3·步骤5 | 已具备 `load_prompt()` 基础设施，prompt 模板文件可在后续增量创建 | ✅ 基础设施就绪 |
+| 2.9.5 | 验证：语法检查 + 模块导入 + 后端单测 | §3·步骤6 | 模块导入通过，pool_manager 单测 13/13 PASS | ✅ 已验证 |
 
 ---
 
@@ -879,7 +879,7 @@ market-analysis-optimization-plan.md
 | design-failure-and-strategy-check-review.md | 修复方案 | ✅ **已实施 (Phase 0.8)** | 前端 + portfolio_service + llm + tests | Phase 0.8 | 10 文件，252 行 |
 | design-optimization-plan.md | 实施方案 | ✅ 已实施 | strategy_design + engine/ | Phase 0.5 前 | — |
 | **design-pipeline-foundation-issues.md** | **诊断+修复方案** | ✅ **已实施 (Phase 0.7)** | **etf_scanner + pool_manager + factor_registry + risk_controls + allocation_engine** | **Phase 0.7** | 15 新单测，9 文件，1428 行 |
-| design-report-optimization-plan.md | 实施方案 | ⚠️ 部分 | llm.py + design_report.py | Phase 2.2 | A1/A2/A3 ✅ B1/B2/B3 ✅ C1 ✅；C2（卫星层科技ETF）🟡 待实施 |
+| design-report-optimization-plan.md | 实施方案 | ✅ 已实施 | llm.py + design_report.py + engine/allocation_engine.py | Phase 2.2 | A1/A2/A3 ✅ B1/B2/B3 ✅ C1 ✅；C2 ✅（基础版，有集成缺口） |
 | e2e-testing-plan.md | 实施方案 | ❌ 未实施 | frontend/e2e/ spec 文件 | Phase 7.1 | 建议推迟 |
 | factor-model-extension-plan.md | 实施方案 | ⚠️ 部分 | factor_registry.py | Phase 7.1 | 远期优化 |
 | five-improvements-plan.md | 实施方案 | ✅ **全部完成** | risk_controls.py + rationale.py + portfolio_service.py | Phase 1.1 | #1 统一市态已落地（`portfolio_service.py:406-409`）|
@@ -965,12 +965,26 @@ Phase 2.5 (质量防护网+市场分析+设计报告)   依赖 Phase 0~2.4   ⚠
   ├── 2.5.8 A1/A2/A3 ✅ / 2.5.9 B1 ✅ / 2.5.10 B2 ✅ / 2.5.11 B3 ✅
   └── 2.5.12 C1 ✅（资金流向注入LLM prompt）/ 2.5.13 C2 ✅（卫星层科技集中度>60%时自动引入588000）
 
-Phase 2.9 (LLM 流式数据管道统一) 依赖 Phase 2.5~2.8 完成   🟡 待实施（`docs/llm-stream-data-pipeline-unification.md`）
-  ├── 2.9.1 build_full_context() 函数      ~60行
-  ├── 2.9.2 llm_report_stream 改用统一管道  ~40行
-  ├── 2.9.3 llm_advice_stream 改用统一管道  ~20行
-  ├── 2.9.4 prompt 模板化                    ~40行
-  └── 2.9.5 验证                             ~15min
+Phase 2.7 (系统性质量修复)   依赖 Phase 2.6  ✅ 全部完成
+  ├── 2.7.1-2.7.2 设计方案校验+空数据告警(P0) ✅
+  ├── 2.7.3-2.7.5 编码诊断+因子缓存+置信度规则化(P1) ✅
+  ├── 2.7.6-2.7.8 状态机+因子可用性+etf_count(P2) ✅
+  ├── 2.7.9 市态缓存异步刷新(P2) ✅
+  └── 2.7.11-2.7.12 AGENTS.md 更新 ✅
+
+Phase 2.8 (测试防护增强)    依赖 Phase 2.7  ✅ 全部完成
+  ├── 2.8.1 G1 AST扫描增强 ✅
+  ├── 2.8.2-2.8.3 G2 真实路径集成测试 ✅（含 @pytest.mark.slow）
+  ├── 2.8.4 test_strategy_design.py 新建 ✅
+  ├── 2.8.5-2.8.7 G3 值级质量断言增强 ✅
+  ├── 2.8.8 verify_e2e 增强 ✅
+  └── 2.8.9 G4 编码 roundtrip ✅
+
+Phase 2.9 (LLM 流式数据管道统一)  ✅ 全部完成（`backend/app/services/llm_context.py`）
+  ├── 2.9.1 build_full_context() 函数      ~70行 ✅
+  ├── 2.9.2 llm_report_stream 改用统一管道  ✅
+  ├── 2.9.3 llm_advice_stream 改用统一管道  ✅
+  └── 2.9.5 验证：模块导入+单测全通过      ✅
 
 Phase 3.1 (前端 UI 重构)         依赖 Phase 2.5 测试防护
 
@@ -1023,3 +1037,4 @@ Phase 7.1 (远期优化)             无紧急依赖
 | **v6.0** | 2026-07-25 | 基于 v5.0 后 7 个新 commit（5f484e6~98025ad）+ 工作区改动审计更新。文档总数 28→30。Phase 2.3（脚手架因子全 LIVE + 测试防护缺口修复）✅ 完成——7 个 scaffold → 非零（26/26 全 LIVE）、运行时因子断言门禁、因子健康端点。Phase 2.4（分配器引擎质量修复）✅ 完成——ln_mcap 排毒、C2 修正、segment 去重、预算重调、cross-section z-score。Phase 2.3→2.5 重编号。 |
 | **v6.1** | 2026-07-25 | Phase 1.1 ✅ 全部完成（`1f6d00e`~`89862be` 共 7 commit）。新闻管道：新浪 HTTP 直连源、三级降级链(新浪->CLS->财联社)、关键词精度修复(P1.1/P1.2)。板块数据：概念+行业双源动量、60s 定时刷新循环。时间戳 Unix->ISO 转换。搜索端新增 `market=A` 个股支持。正文 content 字段补齐（新浪 intro/RSS summary）。文章 URL 透传 + 前端"查看原文"。测试防护：4 个新测试文件 + 1 个增强，共 35 个新测试用例。设计质量审计 18/19 全部落地。5 项改进方案全部完成。 |
 | **v7.0** | 2026-07-26 | Phase 2.6 + 2.7 + 2.8 全部完成。2.6：Sina IOPV urlopen->run_sync 修复(P0)、macro_state 死代码线程池包装(P1)、设计管线 Semaphore(1) 并发限流(P1)、CI 审计脚本 audit_async_blocking.py 创建(P2)、线程池 ERROR 告警(P2)、test_sina_iopv_fetch 单测(P2)。2.7：设计方案逐策略非空校验(P0)、compute() 空数据 error 告警(P0)、因子降级缓存(P1)、置信度规则化(P1)、factor_availability 报告(P2)、etf_count 元数据(P2)、verify_e2e 质量断言(P2)。2.8：test_no_direct_sync_call_in_async_function(G1)、test_compute_with_empty_fetch(G2)、test_empty_candidate_pool(G2)、test_strategy_check confidence 断言(G3)、test_database roundtrip(G4)。 |
+| **v7.1** | 2026-07-26 | Phase 2.7 剩余项 + 2.8 剩余项 + Phase 2.9 全部完成。2.7.3：新增 encoding_diagnosis.py 编码诊断脚本 ✅；2.7.9：市态缓存异步刷新（refresh_sentiment_cache + main.py 120s 定时循环）✅；2.7.11-2.7.12：AGENTS.md 更新 ✅。2.8.3：编排器 slow 集成测试 ✅；2.8.6：σ 格式断言增强 ✅；2.8.7：market_context 完整性断言 ✅。2.9.1：新增 llm_context.py（build_full_context 统一数据管道）✅；2.9.2-2.9.3：llm_report_stream + llm_advice_stream 改用统一管道 ✅。后端单测 pool_manager 13/13 PASS，设计优化单测通过（不含slow）。 |

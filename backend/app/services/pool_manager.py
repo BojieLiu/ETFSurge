@@ -659,6 +659,20 @@ class PoolManager:
     _sentiment_cache_ts: float = 0
     SENTIMENT_TTL = 120
 
+    async def refresh_sentiment_cache(self) -> None:
+        """异步刷新市场情绪缓存（2.7.9）。"""
+        import time
+        import asyncio
+        try:
+            from ..fetchers.sentiment_fetcher import fetch_market_sentiment
+            sentiment = await asyncio.to_thread(fetch_market_sentiment)
+            if sentiment:
+                self._sentiment_cache = sentiment
+                self._sentiment_cache_ts = time.time()
+                logger.info("[pool] sentiment cache refreshed")
+        except Exception as e:
+            logger.warning("[pool] refresh_sentiment_cache failed: %s", e)
+
     def get_market_sentiment(self) -> dict:
         """获取市场情绪，120s 缓存。"""
         import time
