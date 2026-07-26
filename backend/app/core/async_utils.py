@@ -6,6 +6,7 @@
 
 import asyncio
 import concurrent.futures
+import logging
 import threading
 
 DEFAULT_SYNC_TIMEOUT = 8
@@ -28,21 +29,18 @@ _default_executor_max = 0
 
 
 def run_in_thread(fn, *args, timeout: int = DEFAULT_SYNC_TIMEOUT):
-    """同步包装：每次调用创建独立线程池，超时不泄漏线程。
+    """同步包装：走共享线程池执行，超时后线程自动回收。
 
-    供同步 fetcher 内部使用。超时后 executor shutdown 放弃等待，
-    僵尸线程随进程退出终结，不会在共享池中累积。
+    供同步 fetcher 内部使用。超时时返回 None，底层线程继续运行但
+    完成后会自动归还共享线程池，不会变成僵尸线程。
     """
-    ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = _shared_executor.submit(fn, *args)
     try:
-        future = ex.submit(fn, *args)
         return future.result(timeout=timeout)
     except concurrent.futures.TimeoutError:
         return None
     except Exception:
         return None
-    finally:
-        ex.shutdown(wait=False)  # 不等待僵尸线程，P0 修复
 
 
 async def run_sync(call, *args, timeout: int = DEFAULT_SYNC_TIMEOUT):
@@ -65,12 +63,12 @@ async def run_sync(call, *args, timeout: int = DEFAULT_SYNC_TIMEOUT):
     """
     _pending = _shared_executor._work_queue.qsize() if hasattr(_shared_executor, '_work_queue') else 0
     if _pending > 16:
-        logger = logging.getLogger(__name__)
-        logger.error("[async_utils] run_sync queue depth=%d (fn=%s, timeout=%ds) — POOL SATURATION!",
+        _logger = logging.getLogger(__name__)
+        _logger.error("[async_utils] run_sync queue depth=%d (fn=%s, timeout=%ds) — POOL SATURATION!",
                      _pending, getattr(call, '__name__', str(call)), timeout)
     elif _pending > 8:
-        logger = logging.getLogger(__name__)
-        logger.warning("[async_utils] run_sync queue depth=%d (fn=%s, timeout=%ds) — pool may be saturated",
+        _logger = logging.getLogger(__name__)
+        _logger.warning("[async_utils] run_sync queue depth=%d (fn=%s, timeout=%ds) — pool may be saturated",
                        _pending, getattr(call, '__name__', str(call)), timeout)
     loop = asyncio.get_event_loop()
     return await asyncio.wait_for(
@@ -118,9 +116,14 @@ def get_thread_pool_stats() -> dict:
 
     过渡期同时监控两个 pool，P1 完全落地后移除 default_executor。
     """
+    default_exec = None
+    try:
+        loop = asyncio.get_event_loop()
+        default_exec = getattr(loop, '_default_executor', None)
+    except RuntimeError:
+        # Called from a thread without an event loop (e.g. thread pool probe)
+        pass
     return {
         "shared_executor": _executor_stats(_shared_executor),
-        "default_executor": _executor_stats(
-            getattr(asyncio.get_event_loop(), '_default_executor', None)
-        ),
+        "default_executor": _executor_stats(default_exec),
     }

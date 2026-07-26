@@ -81,10 +81,11 @@ async def apply_design(design: dict, db: AsyncSession = Depends(get_db)):
 async def pnl_history(
     portfolio_type: str | None = None,
     period: str = "all",
+    total_capital: float = Query(0.0, description="总投资额，用于在成本数据缺失时估算"),
     db: AsyncSession = Depends(get_db),
 ):
     """获取累计盈亏历史"""
-    return await calculate_cumulative_pnl(db, portfolio_type, period)
+    return await calculate_cumulative_pnl(db, portfolio_type, period, total_capital)
 
 
 @router.get("/export")

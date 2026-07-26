@@ -13,7 +13,7 @@
 
     <div v-if="open" class="task-panel" role="menu">
       <div
-        v-for="t in taskStore.tasks"
+        v-for="t in recentTasks"
         :key="t.taskId"
         class="task-item"
         :class="{ 'is-clickable': t.status === 'completed' && t.designId }"
@@ -29,6 +29,10 @@
           <div class="task-progress-fill" :style="{ width: (t.progress || 0) + '%' }"></div>
         </div>
       </div>
+      <div v-if="taskStore.tasks.length > 0" class="task-panel-footer">
+        <button v-if="taskStore.taskHasMore" class="btn-load-more" @click.stop="loadMore">加载更多</button>
+        <button v-else-if="taskStore.tasks.length > MAX_VISIBLE" class="btn-clear" @click="clearAll">清除历史</button>
+      </div>
     </div>
   </div>
 </template>
@@ -42,9 +46,16 @@ const taskStore = useTaskStore()
 const router = useRouter()
 const open = ref(false)
 
+const MAX_VISIBLE = 5
+
 const runningCount = computed(
   () => taskStore.tasks.filter((t) => t.status === 'running').length
 )
+
+const recentTasks = computed(() => {
+  const sorted = [...taskStore.tasks].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+  return sorted.slice(0, MAX_VISIBLE)
+})
 
 function statusText(status) {
   if (status === 'running') return '进行中'
@@ -58,6 +69,14 @@ function onClickTask(t) {
     router.push({ path: '/', query: { designId: String(t.designId) } })
   }
   open.value = false
+}
+
+async function loadMore() {
+  await taskStore.loadMoreTasks()
+}
+
+function clearAll() {
+  taskStore.clearAllCompleted()
 }
 </script>
 
@@ -124,6 +143,31 @@ function onClickTask(t) {
 
 .task-item.is-clickable:hover {
   background: var(--color-bg-hover, #eceef1);
+}
+
+.task-panel-footer {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-1) 0 0;
+  border-top: 1px solid var(--color-border, #e0e0e0);
+  margin-top: var(--space-1);
+}
+
+.btn-clear,
+.btn-load-more {
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary, #666);
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm, 4px);
+}
+
+.btn-clear:hover,
+.btn-load-more:hover {
+  background: var(--color-bg-hover, #eceef1);
+  color: var(--color-text, #333);
 }
 
 .task-item-head {

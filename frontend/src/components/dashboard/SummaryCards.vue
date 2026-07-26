@@ -60,35 +60,44 @@
     <!-- Cumulative P&L cards -->
     <template v-else>
       <AppCard v-if="activeTab !== 'off_exchange' && pnlHistory?.summary" layout="horizontal"
-        icon="📊" style="--app-card-icon-bg: var(--color-bg-success-subtle)"
+        icon="📊" :style="pnlHistory.summary.has_cost_basis_data ? { '--app-card-icon-bg': 'var(--color-bg-success-subtle)' } : {}"
         class="summary-card" bordered padded hoverable
       >
         <p class="summary-label">场内累计盈亏</p>
-        <p class="summary-value text-up" aria-live="polite">
-          ¥{{ formatNum(findCumulativePnl('on_exchange')) }}
-          <span class="pnl-pct">({{ findCumulativePnlPct('on_exchange') }}%)</span>
+        <p class="summary-value" :class="findCumulativePnl('on_exchange') >= 0 ? 'text-up' : 'text-down'" aria-live="polite">
+          <template v-if="pnlHistory.summary.has_cost_basis_data">
+            ¥{{ formatNum(findCumulativePnl('on_exchange')) }}
+            <span class="pnl-pct">({{ findCumulativePnlPct('on_exchange') }}%)</span>
+          </template>
+          <span v-else class="text-muted">需输入成本</span>
         </p>
       </AppCard>
 
       <AppCard v-if="activeTab !== 'on_exchange' && pnlHistory?.summary" layout="horizontal"
-        icon="📊" style="--app-card-icon-bg: var(--color-bg-success-subtle)"
+        icon="📊" :style="pnlHistory.summary.has_cost_basis_data ? { '--app-card-icon-bg': 'var(--color-bg-success-subtle)' } : {}"
         class="summary-card" bordered padded hoverable
       >
         <p class="summary-label">场外累计盈亏</p>
-        <p class="summary-value text-up" aria-live="polite">
-          ¥{{ formatNum(findCumulativePnl('off_exchange')) }}
-          <span class="pnl-pct">({{ findCumulativePnlPct('off_exchange') }}%)</span>
+        <p class="summary-value" :class="findCumulativePnl('off_exchange') >= 0 ? 'text-up' : 'text-down'" aria-live="polite">
+          <template v-if="pnlHistory.summary.has_cost_basis_data">
+            ¥{{ formatNum(findCumulativePnl('off_exchange')) }}
+            <span class="pnl-pct">({{ findCumulativePnlPct('off_exchange') }}%)</span>
+          </template>
+          <span v-else class="text-muted">需输入成本</span>
         </p>
       </AppCard>
 
       <AppCard v-if="activeTab === 'combined' && pnlHistory?.summary" layout="horizontal"
-        icon="📊" style="--app-card-icon-bg: var(--color-bg-success-subtle)"
+        icon="📊" :style="pnlHistory.summary.has_cost_basis_data ? { '--app-card-icon-bg': 'var(--color-bg-success-subtle)' } : {}"
         class="summary-card" bordered padded hoverable
       >
         <p class="summary-label">总累计盈亏</p>
-        <p class="summary-value text-up" aria-live="polite">
-          ¥{{ formatNum(pnlHistory.summary.total_cumulative_pnl) }}
-          <span class="pnl-pct">({{ pnlHistory.summary.total_cumulative_pnl_pct.toFixed(2) }}%)</span>
+        <p class="summary-value" :class="pnlHistory.summary.total_cumulative_pnl >= 0 ? 'text-up' : 'text-down'" aria-live="polite">
+          <template v-if="pnlHistory.summary.has_cost_basis_data">
+            ¥{{ formatNum(pnlHistory.summary.total_cumulative_pnl) }}
+            <span class="pnl-pct">({{ pnlHistory.summary.total_cumulative_pnl_pct.toFixed(2) }}%)</span>
+          </template>
+          <span v-else class="text-muted">需输入成本</span>
         </p>
       </AppCard>
     </template>

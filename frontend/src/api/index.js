@@ -54,7 +54,7 @@ export const portfolioApi = {
   applyPortfolioDesign: (design) => api.post('/portfolio/apply-design', design),
   listDesigns: (limit = 10, offset = 0, timeout) => api.get('/portfolio/designs', { params: { limit, offset }, ...(timeout ? { timeout } : {}) }),
   getDesign: (id) => api.get(`/portfolio/designs/${id}`),
-  getPnLHistory: (type, period = 'all') => api.get('/portfolio/pnl-history', { params: { portfolio_type: type, period } }),
+  getPnLHistory: (type, period = 'all', totalCapital = 0) => api.get('/portfolio/pnl-history', { params: { portfolio_type: type, period, total_capital: totalCapital } }),
   export: (type, format = 'csv') => api.get('/portfolio/export', { params: { portfolio_type: type, format }, responseType: format === 'csv' ? 'text' : 'json' }),
   import: (file, type = 'on_exchange', mode = 'merge', skipInvalid = true) => {
     const formData = new FormData()
@@ -74,7 +74,6 @@ export const portfolioApi = {
 }
 
 export const analysisApi = {
-  llmAdvice: (query, context) => api.post('/analysis/llm-advice', context, { params: { query }, timeout: 180000 }),
 }
 
 export const newsApi = {

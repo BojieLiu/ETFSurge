@@ -91,7 +91,8 @@ GET /api/v1/portfolio/tasks
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| limit | integer | No | 20 | 最大返回数 |
+| limit | integer | No | 20 | 每页条数 |
+| offset | integer | No | 0 | 偏移量（用于分页） |
 
 **成功响应 `200 OK`:**
 

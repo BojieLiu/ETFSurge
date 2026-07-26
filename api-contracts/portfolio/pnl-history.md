@@ -20,6 +20,7 @@ GET /api/v1/portfolio/pnl-history
 |-----------|------|----------|---------|-------------|
 | portfolio_type | string | No | — | Filter: `on_exchange` \| `off_exchange` |
 | period | string | No | `all` | Time range: `1d` \| `1w` \| `1m` \| `3m` \| `6m` \| `1y` \| `all` |
+| total_capital | float | No | — | 总投资本金；为空时仅返回有成本数据的持仓盈亏，不为空时额外返回基于目标权重估算的持仓 |
 
 ---
 
@@ -36,7 +37,8 @@ GET /api/v1/portfolio/pnl-history
     "total_cumulative_pnl_pct": 8.24,
     "annualized_return": 12.5,
     "max_drawdown": -5.3,
-    "sharpe_ratio": 1.42
+    "sharpe_ratio": 1.42,
+    "has_cost_basis_data": true
   },
   "holdings": [
     {
@@ -84,6 +86,7 @@ GET /api/v1/portfolio/pnl-history
 | summary.annualized_return | float \| null | Annualized return based on holding period |
 | summary.max_drawdown | float \| null | Maximum peak-to-trough decline % |
 | summary.sharpe_ratio | float \| null | Risk-adjusted return (if period >= 30d) |
+| summary.has_cost_basis_data | boolean | true=有成本数据（真实盈亏），false=基于目标分配估算 |
 | holdings[].shares_held | float | Number of shares currently held |
 | holdings[].avg_cost | float | Weighted average cost per share |
 | holdings[].cost_basis | float | shares_held * avg_cost |

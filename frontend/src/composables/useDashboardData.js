@@ -92,9 +92,13 @@ export function useDashboardData(capitalOn, capitalOff, activeTab) {
 
   async function fetchPnlHistory(type = 'combined') {
     const portfolioType = type === 'combined' ? null : type
+    // 根据类型传递对应的投资额，用于成本数据缺失时的估算
+    const capital = type === 'combined'
+      ? (capitalOn.value + capitalOff.value)
+      : type === 'on_exchange' ? capitalOn.value : capitalOff.value
     pnlHistoryLoading.value = true
     try {
-      const res = await portfolioApi.getPnLHistory(portfolioType, '3m')
+      const res = await portfolioApi.getPnLHistory(portfolioType, '3m', capital)
       pnlHistory.value = res.data
     } catch (e) {
       toast('获取累计盈亏历史失败', 'error')

@@ -177,11 +177,29 @@ function connectTaskWs() {
     taskStore.fetchAndMergeTasks()
   }
 
+  // 节流：progress 更新每秒最多处理一次，减少主线程抖动
+  let _lastProgressTime = 0
+  const PROGRESS_THROTTLE_MS = 1000
+
   taskWs.onmessage = (event) => {
     try {
       const msg = JSON.parse(event.data)
       if (msg.type !== 'task_update') return
       const taskId = msg.task_id
+
+      // 如果本地没有该任务，自动创建（避免 WS 消息早于 addTask 调用）
+      if (!taskStore.getTask(taskId)) {
+        taskStore.addTask(taskId, msg.label || '智能组合设计')
+      }
+
+      // 节流：仅 progress 变化时限制频率
+      const now = Date.now()
+      if (msg.status === 'running' && now - _lastProgressTime < PROGRESS_THROTTLE_MS) {
+        // 跳过这次 progress 更新，但仍处理 non-progress 字段
+        return
+      }
+      _lastProgressTime = now
+
       const patch = {
         status: msg.status,
         progress: typeof msg.progress === 'number' ? msg.progress : 0,

@@ -177,12 +177,12 @@ class SourceRegistry:
             with h._lock:
                 status = {
                     "name": name,
-                    "state": "open" if not h.available(now) else "closed",
+                    "state": "open" if now < h._cool_until else "closed",
                     "failure_threshold": h.failure_threshold,
                     "cooldown_secs": h.cooldown,
                     "failures_since_last_ok": h._failures,
                 }
-                if not h.available(now):
+                if now < h._cool_until:
                     status["cool_until"] = h._cool_until
                 result.append(status)
         return result

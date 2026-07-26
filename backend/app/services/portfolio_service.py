@@ -176,6 +176,7 @@ async def calculate_allocation(
     total_capital: float = 0.0,
     portfolio_type: str | None = None,
     etfs: list[PortfolioETF] | None = None,
+    skip_fundamentals: bool = False,
 ) -> dict[str, Any]:
     if etfs is None:
         etfs = await list_etfs(db, portfolio_type)
@@ -224,24 +225,25 @@ async def calculate_allocation(
             "last_trade_date": getattr(e, 'last_trade_date', None).isoformat() if getattr(e, 'last_trade_date', None) else None,
         })
 
-    # 第二遍：并行获取 A 股 ETF 基本面数据（在线程池运行，总超时 15 秒）
-    a_etf_indices = [i for i, e in enumerate(etfs) if e.asset_type == "A"]
-    if a_etf_indices:
-        sym_task_map = {}
-        async def _fetch_all_fundamentals():
-            nonlocal sym_task_map
-            symbols = [(idx, etfs[idx].symbol) for idx in a_etf_indices]
-            futs = [run_sync(fetch_fundamentals, sym, timeout=12) for _, sym in symbols]
-            results = await asyncio.gather(*futs, return_exceptions=True)
-            sym_task_map = {sym: res for (_, sym), res in zip(symbols, results)}
-        try:
-            await asyncio.wait_for(_fetch_all_fundamentals(), timeout=15.0)
-        except Exception:
-            pass
-        for idx, sym in [(idx, etfs[idx].symbol) for idx in a_etf_indices]:
-            result = sym_task_map.get(sym)
-            if result and not isinstance(result, Exception):
-                allocations[idx].update(result)
+    # 第二遍：并行获取 A 股 ETF 基本面数据（仅当 skip_fundamentals=False）
+    if not skip_fundamentals:
+        a_etf_indices = [i for i, e in enumerate(etfs) if e.asset_type == "A"]
+        if a_etf_indices:
+            sym_task_map = {}
+            async def _fetch_all_fundamentals():
+                nonlocal sym_task_map
+                symbols = [(idx, etfs[idx].symbol) for idx in a_etf_indices]
+                futs = [run_sync(fetch_fundamentals, sym, timeout=8) for _, sym in symbols]
+                results = await asyncio.gather(*futs, return_exceptions=True)
+                sym_task_map = {sym: res for (_, sym), res in zip(symbols, results)}
+            try:
+                await asyncio.wait_for(_fetch_all_fundamentals(), timeout=10.0)
+            except Exception:
+                pass
+            for idx, sym in [(idx, etfs[idx].symbol) for idx in a_etf_indices]:
+                result = sym_task_map.get(sym)
+                if result and not isinstance(result, Exception):
+                    allocations[idx].update(result)
 
     cash_weight = max(0.0, 1.0 - weight_sum)
     cash_amount = round(total_capital * cash_weight, 2)
@@ -263,7 +265,7 @@ async def calculate_daily_pnl(
     """返回每只基金的当日盈亏和汇总。场外基金使用跟踪指数的涨跌幅作为预估收益。"""
     if etfs is None:
         etfs = await list_etfs(db, portfolio_type)
-    allocation = await calculate_allocation(db, total_capital, portfolio_type, etfs)
+    allocation = await calculate_allocation(db, total_capital, portfolio_type, etfs, skip_fundamentals=True)
     etf_map = {e.symbol: e for e in etfs}
     etf_map = {e.symbol: e for e in etfs}
     pnl_items = []
@@ -680,9 +682,11 @@ async def calculate_cumulative_pnl(
     db: AsyncSession,
     portfolio_type: str | None = None,
     period: str = "all",
+    total_capital: float = 0.0,
 ) -> dict[str, Any]:
     """
     Calculate cumulative P&L based on cost basis and shares held.
+    When cost basis data is missing, estimate from target allocation if total_capital is provided.
     """
     etfs = await list_etfs(db, portfolio_type)
     if not etfs:
@@ -693,6 +697,7 @@ async def calculate_cumulative_pnl(
     holdings_pnl = []
     total_cost_basis = 0.0
     total_market_value = 0.0
+    has_real_data = False
     
     for e in etfs:
         price, _ = price_map.get(e.symbol, (0.0, 0.0))
@@ -703,6 +708,7 @@ async def calculate_cumulative_pnl(
             market_value = e.shares_held * price
             cumulative_pnl = market_value - cost_basis
             cumulative_pnl_pct = (cumulative_pnl / cost_basis * 100) if cost_basis > 0 else 0.0
+            has_real_data = True
             
             total_cost_basis += cost_basis
             total_market_value += market_value
@@ -722,13 +728,41 @@ async def calculate_cumulative_pnl(
                 "cumulative_pnl_pct": round(cumulative_pnl_pct, 2),
                 "first_buy_date": e.first_buy_date.isoformat() if e.first_buy_date else None,
                 "last_trade_date": e.last_trade_date.isoformat() if e.last_trade_date else None,
+                "estimated": False,
+            })
+        elif total_capital > 0 and price > 0 and e.target_weight > 0:
+            # No cost basis but capital provided — estimate from target allocation
+            est_shares = (total_capital * e.target_weight) / price
+            # Use current price as estimated avg cost (cumulative PnL starts at 0)
+            cost_basis = est_shares * price
+            market_value = est_shares * price
+            cumulative_pnl = 0.0
+            cumulative_pnl_pct = 0.0
+            
+            total_cost_basis += cost_basis
+            total_market_value += market_value
+            
+            holdings_pnl.append({
+                "symbol": e.symbol,
+                "name": e.name,
+                "short_name": e.short_name,
+                "asset_type": e.asset_type,
+                "portfolio_type": e.portfolio_type,
+                "shares_held": round(est_shares, 2),
+                "avg_cost": price,
+                "cost_basis": round(cost_basis, 2),
+                "current_price": price,
+                "market_value": round(market_value, 2),
+                "cumulative_pnl": round(cumulative_pnl, 2),
+                "cumulative_pnl_pct": round(cumulative_pnl_pct, 2),
+                "first_buy_date": getattr(e, 'first_buy_date', None).isoformat() if getattr(e, 'first_buy_date', None) else None,
+                "last_trade_date": getattr(e, 'last_trade_date', None).isoformat() if getattr(e, 'last_trade_date', None) else None,
+                "estimated": True,
             })
     
     total_cumulative_pnl = total_market_value - total_cost_basis
     total_cumulative_pnl_pct = (total_cumulative_pnl / total_cost_basis * 100) if total_cost_basis > 0 else 0.0
     
-    # TODO: For daily_series, we would need historical price data
-    # For now, return empty array - can be enhanced with historical price fetching
     daily_series = []
     
     return {
@@ -737,9 +771,10 @@ async def calculate_cumulative_pnl(
             "total_market_value": round(total_market_value, 2),
             "total_cumulative_pnl": round(total_cumulative_pnl, 2),
             "total_cumulative_pnl_pct": round(total_cumulative_pnl_pct, 2),
-            "annualized_return": None,  # Requires historical data
-            "max_drawdown": None,        # Requires historical data
-            "sharpe_ratio": None,        # Requires historical data
+            "annualized_return": None,
+            "max_drawdown": None,
+            "sharpe_ratio": None,
+            "has_cost_basis_data": has_real_data,
         },
         "holdings": holdings_pnl,
         "daily_series": daily_series,

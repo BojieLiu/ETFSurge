@@ -299,8 +299,8 @@
                   @blur="saveCostBasis(etf)"
                   @keydown.enter="saveCostBasis(etf)"
                 />
-                <span v-else class="shares-value text-mono" @dblclick="startEditShares(etf)">
-                  {{ formatShares(etf.shares_held) }}
+                <span v-else class="shares-value text-mono" @dblclick="startEditShares(etf)" :title="etf.shares_held != null ? '' : '基于目标权重估算'">
+                  {{ formatShares(etf.shares_held, etf) }}
                 </span>
               </td>
               <td class="price-cell">
@@ -494,10 +494,19 @@ const formatChange = (n, isAmount = false) => {
 
 const getChangeClass = (val) => val == null ? '' : val >= 0 ? 'text-up' : 'text-down'
 
-function formatShares(shares) {
-  if (shares == null) return 'N/A'
-  if (shares === 0) return '0'
-  return shares.toLocaleString()
+function formatShares(shares, etf) {
+  if (shares != null && shares > 0) {
+    return shares.toLocaleString()
+  }
+  // 未输入实际持仓时，按目标分配估算
+  if (etf && pnlCapital.value > 0 && etf.target_weight > 0) {
+    const price = pnlMap.value[etf.symbol]?.current_price
+    if (price > 0) {
+      const estimated = Math.round((pnlCapital.value * etf.target_weight) / price)
+      if (estimated > 0) return '≈' + estimated.toLocaleString()
+    }
+  }
+  return 'N/A'
 }
 
 // Search

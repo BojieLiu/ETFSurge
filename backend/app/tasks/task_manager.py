@@ -98,6 +98,7 @@ class TaskManager:
         }
         self._tasks[task_id] = task
         self._save()
+        self.prune_tasks()
         logger.info("[TaskManager] created task %d (type=%s)", task_id, task_type)
         return task
 
@@ -114,8 +115,63 @@ class TaskManager:
         if kwargs.get("status") == "completed":
             task["completed_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         self._save()
+        if kwargs.get("status") in ("completed", "failed"):
+            self.prune_tasks()
+
+    def prune_tasks(self, max_count: int = 20, max_age_seconds: int = 3600) -> int:
+        """清理过期的已完成/失败任务，保留最新的 N 个。
+        
+        Args:
+            max_count: 保留的最大任务数
+            max_age_seconds: 已完成/失败任务的最长保留时间（秒）
+        
+        Returns:
+            清理的任务数
+        """
+        now = time.time()
+        # 解析 ISO 时间戳为时间戳
+        def _ts(t):
+            try:
+                return datetime.strptime(t["created_at"], "%Y-%m-%dT%H:%M:%SZ").timestamp()
+            except Exception:
+                return 0
+        
+        terminal = {"completed", "failed"}
+        active = {"pending", "running"}
+        
+        # 分离活跃和终端任务
+        active_tasks = {tid: t for tid, t in self._tasks.items() if t.get("status") in active}
+        terminal_tasks = [(tid, t) for tid, t in self._tasks.items() if t.get("status") in terminal]
+        
+        # 按创建时间降序排列终端任务
+        terminal_tasks.sort(key=lambda x: -_ts(x[1]))
+        
+        # 保留最新的 N 个终端任务
+        keep = set()
+        for tid, t in terminal_tasks[:max_count]:
+            keep.add(tid)
+        
+        # 删除超时的和超出数量的终端任务
+        removed = 0
+        for tid, t in terminal_tasks:
+            if tid in keep:
+                # 检查是否在老化窗口内（创建时间 < max_age_seconds）
+                age = now - _ts(t)
+                if age <= max_age_seconds:
+                    continue
+            # 不在 keep 中或超时 → 删除
+            if tid in self._tasks:
+                del self._tasks[tid]
+                removed += 1
+        
+        self._save()
+        if removed:
+            logger.info("[TaskManager] pruned %d old terminal tasks (kept %d active + %d recent)", 
+                        removed, len(active_tasks), len(keep))
+        return removed
 
     def list_tasks(self, limit: int = 20, offset: int = 0) -> list[dict]:
+        self.prune_tasks(max_count=max(20, limit * 2))
         tasks = sorted(self._tasks.values(), key=lambda t: -t["task_id"])
         return tasks[offset:offset + limit]
 

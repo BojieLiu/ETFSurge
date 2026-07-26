@@ -386,7 +386,7 @@ async function startDesign(capital) {
       }
     })
 
-    // Poll as fallback
+    // Poll as fallback (WS 为主，轮询降频以减少冗余请求)
     let pollCount = 0
     let consecutiveErrors = 0
     if (designPollTimer) clearInterval(designPollTimer)
@@ -417,7 +417,7 @@ async function startDesign(capital) {
           designFailed.value = '后端服务异常，任务可能已丢失'
         }
       }
-    }, 5000)
+    }, 10000)
 
     // Cleanup poll on 180s timeout
     if (designTimeoutTimer) clearTimeout(designTimeoutTimer)
@@ -450,7 +450,7 @@ async function checkStrategy() {
     const taskData = res.data
     taskStore.addTask(taskData.task_id, '策略检查与分析', 'check')
 
-    // Poll for completion
+    // Poll for completion (WS 为主，轮询降频以减少冗余请求)
     let pollCount = 0
     let consecutiveErrors = 0
     strategyPollTimer = setInterval(async () => {
@@ -487,7 +487,7 @@ async function checkStrategy() {
           checkingStrategy.value = false
         }
       }
-    }, 3000)
+    }, 10000)
 
     strategyTimeoutTimer = setTimeout(() => {
       clearStrategyTimers()

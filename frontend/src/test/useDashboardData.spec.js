@@ -275,13 +275,13 @@ describe('useDashboardData', () => {
   it('fetchPnlHistory calls getPnLHistory with correct params', async () => {
     const dash = useDashboardData(capitalOn, capitalOff, activeTab)
     await dash.fetchPnlHistory('combined')
-    expect(portfolioApi.getPnLHistory).toHaveBeenCalledWith(null, '3m')
+    expect(portfolioApi.getPnLHistory).toHaveBeenCalledWith(null, '3m', 150000)
   })
 
   it('fetchPnlHistory passes type for non-combined', async () => {
     const dash = useDashboardData(capitalOn, capitalOff, activeTab)
     await dash.fetchPnlHistory('on_exchange')
-    expect(portfolioApi.getPnLHistory).toHaveBeenCalledWith('on_exchange', '3m')
+    expect(portfolioApi.getPnLHistory).toHaveBeenCalledWith('on_exchange', '3m', 100000)
   })
 
   it('fetchPnlHistory sets pnlHistory data', async () => {

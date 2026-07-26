@@ -21,14 +21,14 @@
             </div>
             <div class="config-input-group">
               <input
-                :type="item.show ? 'text' : 'password'"
+                :type="showMap[item.key] ? 'text' : 'password'"
                 :value="getValue(item.key)"
                 @input="setValue(item.key, $event.target.value)"
                 :placeholder="item.configured ? '已配置' : item.placeholder || '输入密钥...'"
                 class="config-input"
               />
               <button class="btn-toggle" @click="toggleShow(item.key)">
-                {{ item.show ? '隐藏' : '显示' }}
+                {{ showMap[item.key] ? '隐藏' : '显示' }}
               </button>
             </div>
             <div class="config-badge">

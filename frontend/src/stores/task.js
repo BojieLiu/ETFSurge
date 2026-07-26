@@ -2,68 +2,90 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { useToastStore } from './toast'
 
-const LS_KEYS = { tasks: 'etf_surge_tasks', design: 'etf_surge_design' }
-
-function _load(key, fallback) {
-  try { const r = localStorage.getItem(key); return r ? JSON.parse(r) : fallback }
-  catch { return fallback }
-}
-function _save(key, val) {
-  try { localStorage.setItem(key, JSON.stringify(val)) } catch { /* quota */ }
-}
-
-// Debounced write for high-frequency WS updates - batches writes within 300ms
-const _savePending = {}
-function _saveDebounced(key, val) {
-  _savePending[key] = val
-  if (_savePending._timer) clearTimeout(_savePending._timer)
-  _savePending._timer = setTimeout(() => {
-    for (const k of Object.keys(_savePending)) {
-      if (k === '_timer') continue
-      _save(k, _savePending[k])
-      delete _savePending[k]
-    }
-    _savePending._timer = null
-  }, 300)
-}
+// designState 仍用 localStorage 持久化（导航恢复用），但任务状态走后端 API
+const LS_DESIGN_KEY = 'etf_surge_design'
 
 /**
- * Global task store persisted to localStorage (survives F5 / tab close).
- * Driven by back-end /ws/task-notifications WebSocket broadcast.
+ * Global task store — 后端为唯一数据源，tasks.json 持久化。
+ * 前端仅维护内存响应式状态，由 WS /fetchAndMergeTasks 驱动。
+ * 无 localStorage 读写，避免双源不同步问题。
  */
 export const useTaskStore = defineStore('task', () => {
-  const tasks = ref(_loadTasks())
+  /** 任务列表（内存响应式，不写 localStorage） */
+  const tasks = ref([])
 
-  // 定时清除超时任务（30s 检查一次，避免 localStorage 中的 running 任务永久显示）
+  // 定时清除超时任务（30s 检查一次，防止 WS 断开后 running 任务永久显示）
   let _staleTimer = null
   function _startStaleCheck() {
     if (_staleTimer) return
     _staleTimer = setInterval(() => {
-      let changed = false
       const now = Date.now()
+      let changed = false
       tasks.value.forEach(t => {
-        if (t.status === 'running' && now - (t.createdAt || 0) > 300000) {
+        if (t.status === 'running' && now - (t.createdAt || 0) > 120000) {
           t.status = 'failed'
           t.errorMessage = '生成超时，请重新尝试'
           changed = true
         }
       })
-      if (changed) _save(LS_KEYS.tasks, tasks.value)
+      // 仅修改内存状态，无需写 localStorage
     }, 30000)
   }
   _startStaleCheck()
 
-  function _loadTasks() {
-    const raw = _load(LS_KEYS.tasks, [])
-    const now = Date.now()
-    raw.forEach(t => {
-      if (t.status === 'running' && now - (t.createdAt || 0) > 300000) {
-        t.status = 'failed'
-        t.errorMessage = '生成超时，请重新尝试'
+  // ── 后端 API 装载（分页）────────────────────────────────
+  const PAGE_SIZE = 10
+  let _fetchPromise = null
+  let _pageTotal = 0
+  const taskHasMore = ref(false)
+
+  function _normalizeTask(rt) {
+    // 后端字段 → 前端 task 格式
+    return {
+      taskId: String(rt.task_id || rt.id),
+      type: rt.task_type || rt.type || 'design',
+      status: rt.status || 'pending',
+      progress: rt.progress || 0,
+      label: rt.label || _defaultLabel(rt.task_type || rt.type),
+      designId: rt.result?.design_id || rt.design_id || null,
+      errorMessage: rt.error_message || rt.error || null,
+      createdAt: rt.created_at ? new Date(rt.created_at).getTime() : Date.now(),
+      completedAt: rt.completed_at || null,
+      stage: rt.stage || '',
+    }
+  }
+
+  function _defaultLabel(type) {
+    if (type === 'check') return '策略检查与分析'
+    if (type === 'report') return '市场研判报告'
+    return '智能组合设计'
+  }
+
+  async function fetchAndMergeTasks() {
+    if (_fetchPromise) return _fetchPromise
+    _fetchPromise = (async () => {
+      try {
+        const { portfolioApi } = await import('../api')
+        const res = await portfolioApi.listTasks(PAGE_SIZE, 0)
+        const remoteTasks = res.data || []
+        tasks.value = remoteTasks.map(_normalizeTask)
+        taskHasMore.value = remoteTasks.length >= PAGE_SIZE
+        _pageTotal = remoteTasks.length
+      } catch (e) {
+        console.warn('[taskStore] fetch tasks failed:', e)
       }
-    })
-    _save(LS_KEYS.tasks, raw)
-    return raw
+    })()
+    _fetchPromise.finally(() => { _fetchPromise = null })
+    return _fetchPromise
+  }
+
+  async function loadMoreTasks() {
+    const offset = tasks.value.length
+    const res = await (await import('../api')).portfolioApi.listTasks(PAGE_SIZE, offset)
+    const more = (res.data || []).map(_normalizeTask)
+    tasks.value.push(...more)
+    taskHasMore.value = more.length >= PAGE_SIZE
+    _pageTotal += more.length
   }
 
   function getTask(taskId) {
@@ -85,7 +107,6 @@ export const useTaskStore = defineStore('task', () => {
       existing.status = 'running'
       existing.progress = existing.progress || 0
       existing.label = label
-      _save(LS_KEYS.tasks, tasks.value)
       return existing
     }
     tasks.value.push({
@@ -97,7 +118,6 @@ export const useTaskStore = defineStore('task', () => {
       designId: null,
       createdAt: Date.now(),
     })
-    _save(LS_KEYS.tasks, tasks.value)
     return getTask(taskId)
   }
 
@@ -105,7 +125,6 @@ export const useTaskStore = defineStore('task', () => {
     const task = getTask(taskId)
     if (!task) return
     Object.assign(task, changes)
-    _saveDebounced(LS_KEYS.tasks, tasks.value)
 
     // Side effects on terminal transitions
     const toast = useToastStore()
@@ -124,29 +143,29 @@ export const useTaskStore = defineStore('task', () => {
         ? '策略检查已完成'
         : '组合方案已生成，点击查看'
       toast.show(msg, 'success')
-      clearCompleted()
     } else if (changes.status === 'failed') {
       const msg = task.type === 'check'
         ? '策略检查失败'
         : '组合方案生成失败'
       toast.show(msg, 'error')
-      clearCompleted()
     }
-    _saveDebounced(LS_KEYS.tasks, tasks.value)
   }
 
   function removeTask(taskId) {
     tasks.value = tasks.value.filter((t) => t.taskId !== taskId)
-    _save(LS_KEYS.tasks, tasks.value)
   }
 
-  function clearCompleted(delay = 30000) {
+  function clearCompleted(delay = 5000) {
     setTimeout(() => {
       tasks.value = tasks.value.filter(
         (t) => t.status !== 'completed' && t.status !== 'failed'
       )
-      _save(LS_KEYS.tasks, tasks.value)
     }, delay)
+  }
+
+  function clearAllCompleted() {
+    // 立即清除所有已完成/失败任务，用于手动「清除历史」
+    tasks.value = tasks.value.filter(t => t.status !== 'completed' && t.status !== 'failed')
   }
 
   // ── Computed: active task detection ────────────────────────────
@@ -156,73 +175,33 @@ export const useTaskStore = defineStore('task', () => {
     return running ? running.taskId : null
   })
 
-  // ── UX2: 设计面板状态持久化 ──────────────────────────────────
-  // 当用户导航离开设计面板时保存状态，返回时恢复
-  // UX2: 设计面板状态，同样持久化到 localStorage
-  const designState = ref(_load(LS_KEYS.design, null))
+  // ── UX2: 设计面板状态持久化（仍用 localStorage，导航恢复用）───
+  const _lsLoad = () => {
+    try { const r = localStorage.getItem(LS_DESIGN_KEY); return r ? JSON.parse(r) : null }
+    catch { return null }
+  }
+  const designState = ref(_lsLoad())
 
   function persistDesignState(state) {
     designState.value = state ? { ...state, _savedAt: Date.now() } : null
-    _save(LS_KEYS.design, designState.value)
+    try { localStorage.setItem(LS_DESIGN_KEY, JSON.stringify(designState.value)) }
+    catch { /* quota */ }
   }
 
   function getDesignState() {
-    const st = designState.value
-    if (!st) return null
-    // 如果保存超过 30 分钟，视为过期，不恢复旧设计
-    if (st._savedAt && Date.now() - st._savedAt > 30 * 60 * 1000) {
-      clearDesignState()
-      return null
-    }
-    return st
+    return designState.value
   }
 
   function clearDesignState() {
     designState.value = null
-    _save(LS_KEYS.design, null)
-  }
-
-  // ── Backend sync: fetch task list from API and merge with local ──
-  let _fetchPromise = null
-
-  async function fetchAndMergeTasks() {
-    if (_fetchPromise) return _fetchPromise
-    _fetchPromise = (async () => {
-      const { portfolioApi } = await import('../api')
-      try {
-        const res = await portfolioApi.listTasks(20, 0)
-        const remoteTasks = Array.isArray(res.data) ? res.data : []
-        const localIds = new Set(tasks.value.map(t => t.taskId))
-        let changed = false
-        for (const rt of remoteTasks) {
-          if (!localIds.has(rt.task_id)) {
-            tasks.value.push({
-              taskId: rt.task_id,
-              type: rt.type || 'design',
-              status: rt.status || 'running',
-              progress: rt.progress || 0,
-              label: rt.type === 'check' ? '策略检查与分析' : '智能组合设计',
-              designId: rt.result?.design_id || null,
-              createdAt: new Date(rt.created_at || Date.now()).getTime(),
-            })
-            changed = true
-          }
-        }
-        if (changed) _save(LS_KEYS.tasks, tasks.value)
-      } catch {
-        // Silently ignore — localStorage tasks are still available
-      }
-    })()
-    try {
-      await _fetchPromise
-    } finally {
-      _fetchPromise = null
-    }
+    try { localStorage.removeItem(LS_DESIGN_KEY) } catch { /* ignore */ }
   }
 
   return {
-    tasks, getTask, addTask, updateTask, removeTask, clearCompleted, _loadTasks,
-    registerTaskCompletion, fetchAndMergeTasks,
+    tasks, getTask, addTask, updateTask, removeTask,
+    fetchAndMergeTasks, loadMoreTasks, taskHasMore,
+    clearCompleted, clearAllCompleted,
+    registerTaskCompletion,
     hasRunningTask, activeTaskId,
     designState, persistDesignState, getDesignState, clearDesignState,
   }

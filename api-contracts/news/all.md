@@ -47,10 +47,37 @@ GET /api/v1/news/headlines
 | time | string | Human-readable time in `YYYY-MM-DD HH:MM:SS` format |
 | sort_time | int | Unix epoch seconds, **numeric sort key** for reliable client-side ordering |
 | url | string | Source link |
-| level | int | Importance 1-5 (5=urgent) |
-| stars | int | Same as level (legacy alias) |
+| level | int | Importance 1-5 (5=urgent, 4=positive, 3=negative, 2=reminder, 1=other) |
+| stars | int | Combined score = level + freshness bonus (within 1h +2, 2h +1), capped at 5 |
+
+### Level classification rules / 等级分类规则
+
+**Level 5 (紧急/重大)** — breaking events, natural disasters, geopolitical crises
+- Keywords (Chinese): `重大`, `紧急`, `突发`, `特急`, `崩盘`, `熔断`, `停牌`, `退市`, `破产`, `违约`, `制裁`, `战争`, `军事行动`, `恐怖袭击`, `台风`, `地震`, `疫情`, `暂停交易`, `紧急停牌`
+- Keywords (English): `airstrike`, `crash`, `collapse`, `killed`, `fatal`
+- Source: 财联社 "important" category items get +1 level boost
+
+**Level 4 (利好/重要正面)** — positive policy, growth, upgrades
+- Keywords (Chinese): `利好`, `上调`, `降准`, `降息`, `超预期`, `大涨`, `涨停`, `创新高`, `突破`, `新高`, `大幅增长`, `大幅上升`, `飙升`, `暴涨`, `证监会`, `央行`, `国务院`, `发改委`, `财政部`, `商务部`, `获批`, `核准`, `签署`, `投产`, `量产`, `落地`, `净买入`, `回购`, `增持`, `加仓`, `走强`, `牛市`, `看涨`, `降费`, `减税`, `补贴`, `扶持`, `放宽`, `经济复苏`, `扩张`, `加速`, `回暖`, `降息预期`, `量化宽松`, `协议`, `合作`
+- Keywords (English): `positive`, `surge`, `partnership`, `breakthrough`, `soar`
+
+**Level 3 (利空/重要负面)** — negative policy, decline, risk
+- Keywords (Chinese): `利空`, `下调`, `暴跌`, `大跌`, `跌停`, `创新低`, `跌破`, `新低`, `减持`, `净卖出`, `流出`, `出逃`, `下滑`, `萎缩`, `放缓`, `减速`, `暂停`, `终止`, `取消`, `撤回`, `中止`, `违规`, `处罚`, `调查`, `立案`, `警示`, `通报批评`, `亏损`, `下降`, `熊市`, `低迷`, `疲软`, `做空`, `抛售`, `空头`, `撤离`, `加息`, `缩表`, `收紧`, `暴雷`, `爆雷`, `踩雷`
+- Keywords (English): `negative`, `sanctions`, `layoffs`, `downgrade`
+
+**Level 2 (提醒/关注)** — announcements, data releases, company notices
+- Keywords (Chinese): `提醒`, `关注`, `注意`, `风险`, `公告`, `发布`, `通知`, `公布`, `披露`, `预告`, `展望`, `提示`, `预警`, `政策`, `规则`, `办法`, `意见`, `方案`, `措施`, `调整`, `变化`, `影响`, `改革`, `交易所`, `银保监会`, `金管局`, `数据`, `CPI`, `PMI`, `GDP`, `社融`, `信贷`, `指数`, `板块`, `行业`, `赛道`, `反弹`, `拉升`, `回落`, `港股`, `美股`, `外围市场`, `欧股`, `日股`, `审议`, `通过`, `批复`, `逆回购`, `MLF`, `LPR`, `SLF`, `再贷款`, `北向资金`, `主力资金`, `融资`, `融券`, `IPO`, `上市`, `新股`, `定增`, `配股`, `可转债`, `发债`, `分红`, `派息`, `送转`, `评级`, `展望`, `目标价`, `异动`, `跳水`, `冲高`, `密集调研`, `机构调研`, `大宗交易`, `复牌`, `要约收购`, `股权转让`, `重组`, `业绩`, `营收`, `净利润`, `财报`, `国务院`, `发改委`, `财政部`, `商务部`, `欧美`, `美联储`, `欧央行`, `鲍威尔`, `采购`, `重磅`
+- Keywords (English): `watch`, `approves`, `launches`, `announces`, `data`, `FDA`
+
+**Level 1 (其他)** — default level for unmatched items
+
+**Stars formula:** `stars = min(level + freshness, 5)` where `freshness = 2` (within 1h), `1` (within 2h), `0` (older)
+
+**财联社 editorial boost:** Items from 财联社's "important" category receive a +1 level boost (capped at 5), reflecting editorial curation.
 
 ---
+
+
 
 ## 3. Macro News / 宏观资讯
 
