@@ -37,7 +37,7 @@ describe('PortfolioAnalysis tabbed view', () => {
     const wrapper = mount(PortfolioAnalysis, {
       global: { plugins: [createPinia()] },
     })
-    const tabs = wrapper.findAll('.pa-tab')
+    const tabs = wrapper.findAll('.tabs__tab')
     expect(tabs.length).toBe(3)
     expect(tabs[0].text()).toContain('AI工具')
     expect(tabs[1].text()).toContain('持仓')
@@ -49,45 +49,40 @@ describe('PortfolioAnalysis tabbed view', () => {
       global: { plugins: [createPinia()] },
     })
     // Holdings panel is visible by default (activeTab = 'holdings')
-    expect(wrapper.find('.pm').exists()).toBe(true)
-    // Other panels are hidden
-    expect(wrapper.find('.ai-tools').exists()).toBe(false)
-    expect(wrapper.find('.av').exists()).toBe(false)
-  })
-
-  it('switches to holdings tab on click', async () => {
-    const wrapper = mount(PortfolioAnalysis, {
-      global: { plugins: [createPinia()] },
-    })
-    // Click the holdings tab
-    await wrapper.findAll('.pa-tab')[1].trigger('click')
-    expect(wrapper.find('.pm').exists()).toBe(true)
-    expect(wrapper.find('.ai-tools').exists()).toBe(false)
-  })
-
-  it('switches to analysis tab on click', async () => {
-    const wrapper = mount(PortfolioAnalysis, {
-      global: { plugins: [createPinia()] },
-    })
-    // Click the analysis tab
-    await wrapper.findAll('.pa-tab')[2].trigger('click')
+    expect(wrapper.find('.pm').isVisible()).toBe(true)
+    // Other panels are rendered but not visible (AppTabs uses hidden attr)
+    expect(wrapper.find('.ai-tools').exists()).toBe(true)
+    expect(wrapper.find('.ai-tools').isVisible()).toBe(false)
     expect(wrapper.find('.av').exists()).toBe(true)
-    expect(wrapper.find('.ai-tools').exists()).toBe(false)
+    expect(wrapper.find('.av').isVisible()).toBe(false)
+  })
+
+  it('switches tabs on click', async () => {
+    const wrapper = mount(PortfolioAnalysis, {
+      global: { plugins: [createPinia()] },
+    })
+    // Click the analysis tab (index 2)
+    await wrapper.findAll('.tabs__tab')[2].trigger('click')
+    await wrapper.vm.$nextTick()
+    // Analysis panel should now be visible
+    expect(wrapper.find('.av').isVisible()).toBe(true)
+    // AI tools should not be visible
+    expect(wrapper.find('.ai-tools').isVisible()).toBe(false)
   })
 
   it('drives AnalysisView selection from the selected holding across tabs', async () => {
     const wrapper = mount(PortfolioAnalysis, {
       global: { plugins: [createPinia()] },
     })
-    // Switch to holdings tab first
-    await wrapper.findAll('.pa-tab')[1].trigger('click')
+    // Holdings tab is default (index 1)
+    await wrapper.findAll('.tabs__tab')[1].trigger('click')
     await wrapper.vm.$nextTick()
     // Click a holding in the PortfolioManager
     await wrapper.find('.sel').trigger('click')
     await wrapper.vm.$nextTick()
 
     // Switch to analysis tab
-    await wrapper.findAll('.pa-tab')[2].trigger('click')
+    await wrapper.findAll('.tabs__tab')[2].trigger('click')
 
     // The same symbol is passed down to AnalysisView
     expect(wrapper.find('.av').text()).toBe('510300')

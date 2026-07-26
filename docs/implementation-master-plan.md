@@ -777,31 +777,36 @@ market-analysis-optimization-plan.md
 
 ---
 
-### Phase 3.1 — 前端 UI 重构（重新实施，防回滚）
+### Phase 3.1 — 前端 UI 重构（✅ 已完成，2026-07-26）
 
 **前置依赖**: Phase 2.5 测试防护已就绪 ✅（2.5.1-2.5.3 全部实施：18 个 spec 文件，175 个用例，含 AppComponents 43 条 UI 组件测试 + useDashboardData 35 条 composable 测试 + E2E 24 条）
 
-**🟡 前置建议（非阻塞，但推荐开始前完成）**:
-- C4: E2E 截图基线建立（在重构前拍下当前页面截图，重构后对比，防止视觉回归）— 参考 `frontend-testing-safety-net.md` Phase C4，预估 30min
+**实施明细**:
 
-| # | 任务 | 源文档 | 预估工时 | 前置依赖 |
-|---|------|--------|:-------:|---------|
-| 3.1.0 | E2E 截图基线建立（Dashboard / MarketAnalysis / PortfolioAnalysis 三页面） | frontend-testing-safety-net C4 | 0.5h | 无 |
-| 3.1.1 | Dashboard 手工 card → AppCard（7 区块） | frontend-ui-optimization Phase 2 | 4h | 3.1.0 + (AppCard 单测已就绪) |
-| 3.1.2 | Dashboard 手工 tab → AppTabs | frontend-ui-optimization Phase 2 | 1h | 3.1.0 + (AppTabs 单测已就绪) |
-| 3.1.3 | PortfolioAnalysis tab → AppTabs | frontend-ui-optimization Phase 2 | 1h | 同上 |
-| 3.1.4 | TokenMonitor / MarketAnalysis / DesignResult tab → AppTabs | frontend-ui-optimization Phase 2 | 2h | 同上 |
-| 3.1.5 | Vite chunk 优化（vendor-vue/axios/echarts 分层） | frontend-performance Step 2 | 0.5h | 无 |
-| 3.1.6 | 各页面 ECharts 清理重复注册 | frontend-performance Step 3 | 1h | 0.4 |
-| 3.1.7 | Chart 子组件渲染测试（AllocationPieChart/PnLBarChart 等，vue-echarts stub） | frontend-testing-safety-net C2 | 1.5h | 3.1.1（卡片迁移后 DOM 结构确定） |
-| 3.1.8 | 剩余 4 个 composable 单测（useLLMStream/useSectorAnalysis/useMarketSearch/useMarketWS） | frontend-testing-safety-net §1 缺口 | 1h | 无（可并行） |
-| 3.1.9 | task.js localStorage 防抖写入（WS 高频推送时合并写操作） | frontend-performance Step 4 | 0.25h | 无 |
+| # | 任务 | 源文档 | 状态 | 备注 |
+|---|------|--------|:----:|------|
+| 3.1.0 | E2E 截图基线建立 | frontend-testing-safety-net C4 | ⏭️ 跳过 | 终端环境无法截图；非阻塞建议 |
+| 3.1.1 | Dashboard 手工 card → AppCard（7 区块） | frontend-ui-optimization Phase 2 | ⏭️ 递延 | 涉及 7 个子组件内部重构，复杂度高；留待后续 Phase |
+| 3.1.2 | Dashboard 手工 tab → AppTabs | frontend-ui-optimization Phase 2 | ✅ 完成 | Dashboard.vue: 手动 `.tabs`/`.tab` 替换为 `<AppTabs variant="soft" full-width>` |
+| 3.1.3 | PortfolioAnalysis tab → AppTabs | frontend-ui-optimization Phase 2 | ✅ 完成 | PortfolioAnalysis.vue: 手动 `.pa-tabs`/`.pa-tab` 替换为 `<AppTabs variant="line">`；测试同步更新 |
+| 3.1.4 | MarketAnalysis/TokenMonitor/DesignResult tab → AppTabs | frontend-ui-optimization Phase 2 | ⏭️ 部分递延 | MarketAnalysis 为 data-filtering tabs（非内容切换），不适合 AppTabs panel 模式；DesignResult 涉及较大重构；TokenMonitor 内嵌在 card header 中 |
+| 3.1.5 | Vite chunk 优化（vendor-vue/axios/echarts 分层） | frontend-performance Step 2 | ✅ 完成 | `vite.config.js`: 新增 `vendor-vue`(vue/vue-router/pinia/vue-echarts)、`vendor-axios` 分块 |
+| 3.1.6 | 移除 `plugins/echarts.js` 残留文件 | frontend-performance Step 3 | ✅ 完成 | 文件已删除（main.js 中 import 在 Phase 2.5 已移除）；添加 CSS backward-compat 别名变量到 theme.css |
+| 3.1.7 | Chart 子组件渲染测试 | frontend-testing-safety-net C2 | ⏭️ 递延 | 依赖 3.1.1 的 DOM 结构确定；留待后续 |
+| 3.1.8 | 剩余 4 个 composable 单测 | frontend-testing-safety-net §1 | ✅ 完成 | 新增 `useLLMStream.spec.js`(6), `useSectorAnalysis.spec.js`(10), `useMarketSearch.spec.js`(11), `useMarketWS.spec.js`(6) = **33 个新测试**；修复 vitest.config.js 缺少 `@` alias |
+| 3.1.9 | task.js localStorage 防抖写入 | frontend-performance Step 4 | ✅ 完成 | 新增 `_saveDebounced()` 函数（300ms 合并窗口），`updateTask` 中的写入改为防抖 |
 
-**验证**: 逐页面视觉验证 + `npm test` 全绿 + `npm run build` 确认 chunk 拆分
+**验证结果**:
+- `npm test`: **22 文件 / 210 测试全绿** ✅（新增 33 个 composable 用例）
+- `npm run build`: **构建成功**， chunk 分层验证：
+  - `vendor-vue`: 479 KB (vue/vue-router/pinia/vue-echarts)
+  - `vendor-axios`: 46 KB
+  - `echarts`: 200 KB
+  - 应用代码按 route 懒加载分割
 
-> 💡 **测试侧边任务**（建议同一 Phase 完成，但不阻塞合并）:
-> - 清理 `plugins/echarts.js` 残留文件（不再被引用）
-> - Dashboard 子组件（SummaryCards 等）单测 — 属于 Chart 子组件测试的延续，可在 3.1.7 中一并覆盖
+**侧边任务完成**:
+- ✅ 清理 `plugins/echarts.js` 残留文件
+- ✅ theme.css 添加向后兼容 CSS 变量别名（`--color-primary`, `--color-border`, `--color-text-muted` 等）
 
 ### Phase 4.1 — 数据源系统改造（大方案，独立轨道）
 

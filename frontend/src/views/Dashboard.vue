@@ -5,24 +5,6 @@
     <template v-if="!renderError">
       <GlobalIndicesStrip :globalIndices="globalIndices" />
 
-      <!-- Portfolio Type Tabs -->
-      <div class="tabs" role="tablist" aria-label="组合类型">
-        <button
-          v-for="tab in tabs"
-          :key="tab.value"
-          :class="['tab', { 'tab--active': activeTab === tab.value }]"
-          @click="activeTab = tab.value"
-          role="tab"
-          :aria-selected="activeTab === tab.value"
-          :aria-controls="`panel-${tab.value}`"
-          :id="`tab-${tab.value}`"
-        >
-          {{ tab.label }}
-        </button>
-      </div>
-
-      <!-- Capital input moved to Portfolio Analysis -->
-
       <SummaryCards
         :activeTab="activeTab"
         :totalAll="totalAll"
@@ -34,6 +16,38 @@
         :loading="loading"
       />
 
+      <!-- Portfolio Type Tabs -->
+      <AppTabs :tabs="tabs" v-model="activeTab" variant="soft" full-width ariaLabel="组合类型" class="dashboard-tabs">
+        <template #combined>
+          <template v-if="!loading">
+            <div v-if="allocationOn?.allocations?.length" class="content-grid">
+              <AllocationPieChart :items="allocationOn.allocations" title="场内分配" />
+              <AllocationTable :items="allocationOn.allocations" :cashPct="cashPctOn" :cashAmount="cashOn" title="场内 ETF 目标分配" />
+            </div>
+            <div v-if="allocationOff?.allocations?.length" class="content-grid">
+              <AllocationPieChart :items="allocationOff.allocations" title="场外分配" />
+              <AllocationTable :items="allocationOff.allocations" :cashPct="cashPctOff" :cashAmount="cashOff" title="场外 ETF 目标分配" />
+            </div>
+          </template>
+        </template>
+        <template #on_exchange>
+          <template v-if="!loading">
+            <div v-if="allocationOn?.allocations?.length" class="content-grid">
+              <AllocationPieChart :items="allocationOn.allocations" title="场内分配" />
+              <AllocationTable :items="allocationOn.allocations" :cashPct="cashPctOn" :cashAmount="cashOn" title="场内 ETF 目标分配" />
+            </div>
+          </template>
+        </template>
+        <template #off_exchange>
+          <template v-if="!loading">
+            <div v-if="allocationOff?.allocations?.length" class="content-grid">
+              <AllocationPieChart :items="allocationOff.allocations" title="场外分配" />
+              <AllocationTable :items="allocationOff.allocations" :cashPct="cashPctOff" :cashAmount="cashOff" title="场外 ETF 目标分配" />
+            </div>
+          </template>
+        </template>
+      </AppTabs>
+
       <!-- Loading Skeletons -->
       <div v-if="loading" class="loading-grid" aria-busy="true" aria-label="加载中">
         <div class="card skeleton-card">
@@ -44,36 +58,8 @@
         </div>
       </div>
 
-      <!-- Content -->
-      <template v-else>
-        <!-- On Exchange -->
-        <div v-if="allocationOn?.allocations?.length && (activeTab === 'on_exchange' || activeTab === 'combined')" class="content-grid">
-          <AllocationPieChart
-            :items="allocationOn.allocations"
-            title="场内分配"
-          />
-          <AllocationTable
-            :items="allocationOn.allocations"
-            :cashPct="cashPctOn"
-            :cashAmount="cashOn"
-            title="场内 ETF 目标分配"
-          />
-        </div>
-
-        <!-- Off Exchange -->
-        <div v-if="allocationOff?.allocations?.length && (activeTab === 'off_exchange' || activeTab === 'combined')" class="content-grid">
-          <AllocationPieChart
-            :items="allocationOff.allocations"
-            title="场外分配"
-          />
-          <AllocationTable
-            :items="allocationOff.allocations"
-            :cashPct="cashPctOff"
-            :cashAmount="cashOff"
-            title="场外 ETF 目标分配"
-          />
-        </div>
-
+      <!-- Empty State & P&L Sections (visible when not loading) -->
+      <template v-if="!loading">
         <!-- Empty State -->
         <div v-if="!allocationOn?.allocations?.length && !allocationOff?.allocations?.length" class="empty-state">
           <div class="empty-icon" aria-hidden="true">📊</div>
@@ -118,6 +104,7 @@ import logger from '../utils/logger'
 import { useDashboardData } from '../composables/useDashboardData'
 import GlobalIndicesStrip from '../components/GlobalIndicesStrip.vue'
 import AppButton from '../components/ui/AppButton.vue'
+import AppTabs from '../components/ui/AppTabs.vue'
 import Skeleton from '../components/ui/Skeleton.vue'
 import SummaryCards from '../components/dashboard/SummaryCards.vue'
 import AllocationPieChart from '../components/dashboard/AllocationPieChart.vue'
@@ -203,36 +190,8 @@ function onRetry() {
   flex-direction: column;
   gap: var(--space-6);
 }
-.tabs {
-  display: flex;
-  gap: var(--space-1);
-  background: var(--color-surface-tertiary);
-  padding: var(--space-1);
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--color-border-light);
-}
-.tab {
-  flex: 1;
-  padding: var(--space-2) var(--space-4);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
-  color: var(--color-text-secondary);
-  border-radius: var(--radius-md);
-  background: transparent;
-  transition: var(--transition-fast);
-  cursor: pointer;
-  border: none;
-}
-.tab:hover {
-  color: var(--color-text-primary);
-}
-.tab--active {
-  color: var(--color-brand-600);
-  background: var(--color-bg-brand-subtle);
-}
-.tab:focus-visible {
-  outline: none;
-  box-shadow: var(--shadow-focus);
+.dashboard-tabs {
+  margin-bottom: 0;
 }
 .content-grid {
   display: grid;

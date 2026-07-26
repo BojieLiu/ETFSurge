@@ -117,6 +117,13 @@
   --color-text-warning: var(--color-warning-700);
   --color-text-info: var(--color-info-700);
 
+  /* === 向后兼容别名 === */
+  --color-primary: var(--color-brand-600);
+  --color-primary-dark: var(--color-brand-700);
+  --color-primary-light: var(--color-brand-400);
+  --color-border: var(--color-border-light);
+  --color-text-muted: var(--color-text-tertiary);
+
   /* Background Colors - 背景色 */
   --color-bg-primary: var(--color-neutral-50);
   --color-bg-secondary: var(--color-neutral-100);

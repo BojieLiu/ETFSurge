@@ -45,7 +45,11 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: { echarts: ['echarts'] },
+        manualChunks: {
+          'vendor-vue': ['vue', 'vue-router', 'pinia', 'vue-echarts'],
+          'vendor-axios': ['axios'],
+          echarts: ['echarts'],
+        },
       },
     },
   },

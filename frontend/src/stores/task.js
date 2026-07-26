@@ -12,6 +12,21 @@ function _save(key, val) {
   try { localStorage.setItem(key, JSON.stringify(val)) } catch { /* quota */ }
 }
 
+// Debounced write for high-frequency WS updates - batches writes within 300ms
+const _savePending = {}
+function _saveDebounced(key, val) {
+  _savePending[key] = val
+  if (_savePending._timer) clearTimeout(_savePending._timer)
+  _savePending._timer = setTimeout(() => {
+    for (const k of Object.keys(_savePending)) {
+      if (k === '_timer') continue
+      _save(k, _savePending[k])
+      delete _savePending[k]
+    }
+    _savePending._timer = null
+  }, 300)
+}
+
 /**
  * Global task store persisted to localStorage (survives F5 / tab close).
  * Driven by back-end /ws/task-notifications WebSocket broadcast.
@@ -90,7 +105,7 @@ export const useTaskStore = defineStore('task', () => {
     const task = getTask(taskId)
     if (!task) return
     Object.assign(task, changes)
-    _save(LS_KEYS.tasks, tasks.value)
+    _saveDebounced(LS_KEYS.tasks, tasks.value)
 
     // Side effects on terminal transitions
     const toast = useToastStore()
@@ -117,7 +132,7 @@ export const useTaskStore = defineStore('task', () => {
       toast.show(msg, 'error')
       clearCompleted()
     }
-    _save(LS_KEYS.tasks, tasks.value)
+    _saveDebounced(LS_KEYS.tasks, tasks.value)
   }
 
   function removeTask(taskId) {
