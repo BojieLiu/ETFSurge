@@ -1,6 +1,6 @@
 # ETF Surge 方案实施总计划
 
-> 生成日期: 2026-07-26 | 版本: v7.1
+> 生成日期: 2026-07-26 | 版本: v7.2
 > 总览 `docs/` 目录 **32 份**方案文档（新增 `systematic-quality-review.md`、`async-boundary-fix-plan.md v2.0`），梳理实施状态、冲突重叠、修复建议及分阶段执行路线。
 > v7.1：Phase 2.7 剩余项 + Phase 2.8 剩余项 + Phase 2.9 全部完成。新增 encoding_diagnosis.py、refresh_sentiment_cache()、AGENTS.md 关键路径更新。新增 llm_context.py build_full_context() 统一数据管道 + llm_report_stream/llm_advice_stream 改用统一管道。
 > Phase 2.2→2.4 全部完成——33/33 核心因子全 LIVE（_CORE_FACTORS 列表共 33 个因子，均含真实 compute 函数，含 Phase 2.5 新增的 etf.return_1m/return_3m/price）、因子健康端点 + 因子单测门禁 + 运行时因子断言、分配器质量修复（ln_mcap 排毒、C2 条件修正、segment 归一化去重、预算重调、cross-section z-score 重归一化）。新增 Phase 2.5（原质量防护网 + AI 分析）。
@@ -786,7 +786,7 @@ market-analysis-optimization-plan.md
 | # | 任务 | 源文档 | 状态 | 备注 |
 |---|------|--------|:----:|------|
 | 3.1.0 | E2E 截图基线建立 | frontend-testing-safety-net C4 | ⏭️ 跳过 | 终端环境无法截图；非阻塞建议 |
-| 3.1.1 | Dashboard 手工 card → AppCard（7 区块） | frontend-ui-optimization Phase 2 | ⏭️ 递延 | 涉及 7 个子组件内部重构，复杂度高；4/7 已迁移至 Phase 3.2（AllocationPieChart/AllocationTable/PnLBarChart/PnLDetailTable），SummaryCards/CapitalInputBar 待后续 |
+| 3.1.1 | Dashboard 手工 card → AppCard（7 区块） | frontend-ui-optimization Phase 2 | ⏭️ 递延 | 涉及 7 个子组件内部重构，复杂度高；6/7 已迁移至 Phase 3.2（AllocationPieChart/AllocationTable/PnLBarChart/PnLDetailTable/SummaryCards），CapitalInputBar 因自定义 SVG 彩色 header 保留现状 |
 | 3.1.2 | Dashboard 手工 tab → AppTabs | frontend-ui-optimization Phase 2 | ✅ 完成 | Dashboard.vue: 手动 `.tabs`/`.tab` 替换为 `<AppTabs variant="soft" full-width>` |
 | 3.1.3 | PortfolioAnalysis tab → AppTabs | frontend-ui-optimization Phase 2 | ✅ 完成 | PortfolioAnalysis.vue: 手动 `.pa-tabs`/`.pa-tab` 替换为 `<AppTabs variant="line">`；测试同步更新 |
 | 3.1.4 | MarketAnalysis/TokenMonitor/DesignResult tab → AppTabs | frontend-ui-optimization Phase 2 | ⏭️ 部分递延 | MarketAnalysis 为 data-filtering tabs（非内容切换），不适合 AppTabs panel 模式；DesignResult 已在 Phase 3.2 完成迁移；TokenMonitor 内嵌在 card header 中 |
@@ -820,38 +820,50 @@ market-analysis-optimization-plan.md
 | 3.2.4 | PnLDetailTable → AppCard | ✅ 完成 | subtitle 移至 AppCard `header-action` slot |
 | 3.2.5 | DesignResult tab → AppTabs | ✅ 完成 | 手动 `.design-tabs`/`.tab-btn` → `<AppTabs variant="line">`，history badge 外移共用 |
 | 3.2.6 | changeClass.spec.js 顶层 await 修复 | ✅ 完成 | `const DashboardAiTools = await import()` → `beforeAll` 内动态导入 |
+| 3.2.7 | SummaryCards → AppCard (layout="horizontal") | ✅ 完成 | 新增 AppCard `layout="horizontal"` 变体：icon 左、内容右，flex-row 排列；7 个子卡片全部迁移；icon 背景色通过 CSS 自定义属性 `--app-card-icon-bg` 动态控制 |
 
-**递延说明**: SummaryCards 和 CapitalInputBar 的 AppCard 迁移涉及子组件内部布局重构，留待后续 Phase。Chart 渲染测试（原 3.1.7）因 AppCard 不改变 DOM 结构，无需额外测试。
+**递延说明**: CapitalInputBar 因自定义 SVG 彩色 header 保留现状。Chart 渲染测试（原 3.1.7）因 AppCard 不改变 DOM 结构，无需额外测试。
 
 **验证结果**:
-- `npm test`: **22 文件 / 210 测试全绿** ✅（从 Phase 3.1 的 210 保持）
+- `npm test`: **22 文件 / 212 测试全绿** ✅（新增 2 个 AppCard horizontal layout 测试）
 - `npm run build`: **构建成功** ✅，chunk 分层验证正确
 
-### Phase 4.1 — 数据源系统改造（大方案，独立轨道）
+### Phase 4.1 — 数据源系统改造（大方案，独立轨道）✅ **已实施（仅 D7 待完成）**
 
-此阶段完全对应 `roadmap-data-source-unified.md` 的四个子阶段。详见该文档 §依赖关系与推荐顺序。
+此阶段完全对应 `roadmap-data-source-unified.md` 的四个子阶段。详见该文档。
 
-| # | 任务 | 源阶段 | 预估工时 | 前置依赖 |
-|---|------|--------|---------|---------|
-| 4.1.1 | 美股 `_route_us_stooq()` 新链路（Stooq→TwelveData→Finnhub） | roadmap Phase A | 2h | 无 |
-| 4.1.2 | 全球指数链路统一 + TwelveData/Finnhub 加入 | roadmap Phase A (A4) | 2h | 无 |
-| 4.1.3 | China market 3 核心函数接入 SourceRegistry | roadmap Phase B | 3h | 无 |
-| 4.1.4 | price=0 过滤前置修复 | roadmap Phase B | 1h | 无 |
-| 4.1.5 | 补齐 7 个健康探针（新建 `monitor/probes.py`） | roadmap Phase C | 2h | 无 |
-| 4.1.6 | SourceRegistry 加 on_event 回调 | roadmap Phase D (D2-D4) | 1h | 无 |
+**状态**: 除 Phase D7（前端数据源监控面板）外，所有子任务均已实施。`roadmap-data-source-unified.md` 已更新为 v3.0 回顾文档。
 
-**并行策略**:
-- **Track 1**: 4.1.1 + 4.1.2 + 4.1.3 可并行（不同文件，互不冲突）
-- **Track 2**: 4.1.5 独立（仅修改 main.py + 新建 probes.py）
-- **Track 3**: 4.1.6 是串行瓶颈，须最后做
+| # | 任务 | 源阶段 | 状态 | 说明 |
+|---|------|--------|:----:|------|
+| 4.1.1 | 美股 `_route_us()` 链路重写 | roadmap Phase A | ✅ 已实施 | 当前为 `TwelveData→Finnhub`。Stooq API 已关(404/Cloudflare)，`stooq_fetcher.py` 已删除；AlphaVantage(25次/天)和 yfinance(境内不稳定) 已移出链路 |
+| 4.1.2 | 全球指数链路统一 | roadmap Phase A4 | ⚠️ 待确认 | `_foreign()` 使用 Sina→TwelveData→Finnhub，`_route_us()` 已改。建议在 verify_e2e.py 中增加海外指数区域断言 |
+| 4.1.3 | China market 3 核心函数接入 SourceRegistry | roadmap Phase B | ✅ 已实施 | `fetch_a_stock_realtime` / `fetch_a_stock_batch` / `fetch_hk_stock_realtime` 均已使用 `registry.route()` |
+| 4.1.4 | price=0 过滤前置修复 | roadmap Phase B | ✅ 已实施 | `_filtered()` 辅助函数在 china_market.py:424 实现，provider lambda 层过滤 |
+| 4.1.5 | 补齐健康探针 | roadmap Phase C | ✅ 已实施 | `monitor/probes.py` 已含 8 探针（6 数据源 + 2 线程池），`main.py` 调用 `register_all_probes()` |
+| 4.1.6 | SourceRegistry on_event 回调 | roadmap Phase D2-D4 | ✅ 已实施 | `source_registry.py` 已含 `set_event_callback` + `route_name` + `get_states` + `circuit_breaker_status` |
+| 4.1.7 | SourceEventStore | roadmap Phase D1 | ✅ 已实施 | `monitor/source_events.py` 完整实现（内存环5000条 + SQLite异步刷盘 + 7天清理） |
+| 4.1.8 | 数据源监控 API | roadmap Phase D6 | ✅ 已实施 | `routers/admin.py` 已含 4 个端点（health/timeline/failures/circuit-breakers） |
+| 4.1.9 | 前端数据源监控面板 | roadmap Phase D7 | ❌ 待实施 | 独立任务，无文件冲突。参照 `TokenMonitor.vue` 风格 |
 
-**验证**: verify_e2e.py + 长稳运行观察降级是否正常工作
+**实施后的并行分析**（历史记录，用于未来参考）:
+- Track 1 (Phase A+B): 实际完全并行，无文件冲突
+- Track 2 (Phase C): 已独立实施，仅改 main.py + 新建 probes.py
+- Track 3 (Phase D): D1-D6 中只有 D2-D4 需独占 source_registry.py，D1/D5/D6/D7 均独立
+
+**验证**: `verify_e2e.py` + admin API curl 命令
+```bash
+# 数据源健康检查
+curl -s "http://localhost:8000/api/v1/admin/sources/health"
+curl -s "http://localhost:8000/api/v1/admin/sources/circuit-breakers"
+curl -s "http://localhost:8000/api/v1/admin/sources/events/timeline?hours=1"
+```
 
 ### Phase 5.1 — 市场感知联动（可选，待评估）
 
 | # | 任务 | 源文档 | 预估工时 | 前置依赖 | 备注 |
 |---|------|--------|---------|---------|------|
-| 5.1.1 | 后端 MarketContext 路由层 | market-awareness §5.2 | 6h | 4.1.1-4.1.3 | ⚠️ 若 market-analysis Phase D+E 已满足需求，此任务可取消 |
+| 5.1.1 | 后端 MarketContext 路由层 | market-awareness §5.2 | 6h | Phase 4.1 (已实施, D7除外) | ⚠️ 若 market-analysis Phase D+E 已满足需求，此任务可取消。Phase 4.1 数据源改造后端已基本就绪 |
 | 5.1.2 | MarketReport market prop 传递 | market-awareness §5.3 | 2h | 5.1.1 | 已在 market-analysis Phase E 中部分实现 |
 | 5.1.3 | AiAdvisor market 上下文 | market-awareness §5.3 | 2h | 5.1.1 | 已在 market-analysis Phase D 中实现 |
 | 5.1.4 | 组合设计 market 参数 | market-awareness §5.3 | 2h | 5.1.1 | — |
@@ -863,8 +875,8 @@ market-analysis-optimization-plan.md
 
 | # | 任务 | 源文档 | 预估工时 | 前置依赖 |
 |---|------|--------|---------|---------|
-| 6.1.1 | SourceEventStore（source_events 表 + API） | roadmap Phase D (D1+D6+D7) | 6h | 4.1.6 |
-| 6.1.2 | 前端数据源监控页面 | roadmap Phase D7 | 4h | 6.1.1 |
+| 6.1.1 | SourceEventStore（source_events 表 + API） | roadmap Phase D (D1+D6) | 6h | 4.1.6 | ✅ 已实施（D1+D6 已完成，见 Phase 4.1.7+4.1.8）。D7 前端监控面板仍待实施 |
+| 6.1.2 | 前端数据源监控页面 | roadmap Phase D7 | 4h | 6.1.1 | 实际 D7 独立于其他后端任务，可直接实施。当前后端 API 已就绪 |
 | 6.1.3 | ConfigManager + app_config 表 | config-management §4.1-4.3 | 4h | 无 |
 | 6.1.4 | 前端 ConfigPage | config-management §5 | 4h | 6.1.3 |
 | 6.1.5 | Sector API 实时行情返回 | sector-concept Phase 3 | 3h | 1.1.1 |
@@ -919,7 +931,7 @@ market-analysis-optimization-plan.md
 | optimization-plan-20260721.md | 实施方案 | ✅ **已实施 (Phase 0.5)** | etf_scanner + 前端 + 后端链路 | Phase 0.5 | 全部 8 项完成 |
 | **remaining-issues-solution-design.md** | **实施方案** | ✅ **全部已实施**（已从 staged→committed） | **pool_manager + task_manager + ws + factor_registry** | **Phase 2.1** | S1-A(TTL) `53acbfa`、S1-C(渐进) `ef3de11`、S2(归一化) `5116681`、S3-B/C(WS) `ef3de11` |
 | review-20260720.md | 评审报告 | N/A | N/A | — | 非实施方案 |
-| roadmap-data-source-unified.md | 实施方案 | ❌ 未实施 | china_market + market_service + source_registry | Phase 4.1 | 替代三份原方案 |
+| roadmap-data-source-unified.md | 实施方案 | ✅ **已实施（D7除外）** | china_market + market_service + source_registry + monitor | Phase 4.1 | 替代三份原方案。v3.0 已更新为回顾文档。Phase A/B/C/D1-D6 均已实施 |
 | sector-concept-optimization-plan.md | 实施方案 | ⚠️ Phase 1-2 已实施 | market_trends + pool_manager + llm.py | Phase 1.1/6.1 | 数据采集+缓存写入+60s定时刷新已实施（`sector_refresh.py`+`update_sector_cache()`）；Phase 3-5（API实时行情+前端展示）待实施 |
 | source-registry-optimization-plan.md | 实施方案 | ❌ **已替代** | — | — | 被 roadmap 替代 |
 | **scaffold-factor-resolution-plan.md** | **修复方案** | ✅ **全部实施** | **factor_registry + 测试** | **Phase 2.3** | 7 个脚手架因子全 LIVE（33/33），因子健康端点，运行时断言门禁 |
@@ -1012,11 +1024,11 @@ Phase 2.9 (LLM 流式数据管道统一)  ✅ 全部完成（`backend/app/servic
 
 Phase 3.1 (前端 UI 重构)         依赖 Phase 2.5 测试防护
 
-Phase 4.1 (数据源改造)           独立，为 Phase 5.1 提供前提
+Phase 4.1 (数据源改造 A/B/C/D1-D6) ✅ 已实施, D7 独立待实施
 
 Phase 5.1 (市场感知联动)         可选，依赖 Phase 4.1
 
-Phase 6.1 (可观测性增强)         独立或依赖 Phase 4.1
+Phase 6.1 (可观测性增强)         D7 前端 + ConfigManager 独立; D1-D6 已随 Phase 4.1 实施
 
 Phase 7.1 (远期优化)             无紧急依赖
 ```
@@ -1039,7 +1051,7 @@ Phase 7.1 (远期优化)             无紧急依赖
   Phase 2.2.8-2.2.10 (预期收益 + 净流入 + 科技ETF)
 
 🔌 数据源统一改造 Track
-  Phase 4.1.1-4.1.6 → Phase 6.1.1-6.1.2 (EventStore+前端)
+  Phase 4.1 (A/B/C/D1-D6 ✅ 已实施) → Phase 6.1.2 (D7 前端待实施)
 
 🛡️ 数据管道质量提升 Track（新增，~3-4h）
   Phase 2.1.0-2.1.12 (引擎修复 + 策略检查增强 + 测试防护 + E2E 断言)
@@ -1062,3 +1074,4 @@ Phase 7.1 (远期优化)             无紧急依赖
 | **v6.1** | 2026-07-25 | Phase 1.1 ✅ 全部完成（`1f6d00e`~`89862be` 共 7 commit）。新闻管道：新浪 HTTP 直连源、三级降级链(新浪->CLS->财联社)、关键词精度修复(P1.1/P1.2)。板块数据：概念+行业双源动量、60s 定时刷新循环。时间戳 Unix->ISO 转换。搜索端新增 `market=A` 个股支持。正文 content 字段补齐（新浪 intro/RSS summary）。文章 URL 透传 + 前端"查看原文"。测试防护：4 个新测试文件 + 1 个增强，共 35 个新测试用例。设计质量审计 18/19 全部落地。5 项改进方案全部完成。 |
 | **v7.0** | 2026-07-26 | Phase 2.6 + 2.7 + 2.8 全部完成。2.6：Sina IOPV urlopen->run_sync 修复(P0)、macro_state 死代码线程池包装(P1)、设计管线 Semaphore(1) 并发限流(P1)、CI 审计脚本 audit_async_blocking.py 创建(P2)、线程池 ERROR 告警(P2)、test_sina_iopv_fetch 单测(P2)。2.7：设计方案逐策略非空校验(P0)、compute() 空数据 error 告警(P0)、因子降级缓存(P1)、置信度规则化(P1)、factor_availability 报告(P2)、etf_count 元数据(P2)、verify_e2e 质量断言(P2)。2.8：test_no_direct_sync_call_in_async_function(G1)、test_compute_with_empty_fetch(G2)、test_empty_candidate_pool(G2)、test_strategy_check confidence 断言(G3)、test_database roundtrip(G4)。 |
 | **v7.1** | 2026-07-26 | Phase 2.7 剩余项 + 2.8 剩余项 + Phase 2.9 全部完成。2.7.3：新增 encoding_diagnosis.py 编码诊断脚本 ✅；2.7.9：市态缓存异步刷新（refresh_sentiment_cache + main.py 120s 定时循环）✅；2.7.11-2.7.12：AGENTS.md 更新 ✅。2.8.3：编排器 slow 集成测试 ✅；2.8.6：σ 格式断言增强 ✅；2.8.7：market_context 完整性断言 ✅。2.9.1：新增 llm_context.py（build_full_context 统一数据管道）✅；2.9.2-2.9.3：llm_report_stream + llm_advice_stream 改用统一管道 ✅。后端单测 pool_manager 13/13 PASS，设计优化单测通过（不含slow）。 |
+| | **v7.2** | 2026-07-26 | Phase 4.1 状态审核。全量代码审计发现 roadmap-data-source-unified.md v2.0 中的实施方案绝大部分已被后续 commits 落地。Phase A/B/C/D1-D6 均已实施，仅 D7（前端数据源监控面板）待完成。`roadmap-data-source-unified.md` 更新为 v3.0 回顾文档。`implementation-master-plan.md` Phase 4.1 更新为 ✅ 已实施状态。 |

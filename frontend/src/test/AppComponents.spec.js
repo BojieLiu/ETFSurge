@@ -121,6 +121,25 @@ describe('AppCard.vue', () => {
     const wrapper = mount(AppCard, { slots: { footer: 'Footer Content' } })
     expect(wrapper.find('.app-card__footer').exists()).toBe(true)
   })
+
+  it('horizontal layout renders icon and content side by side', () => {
+    const wrapper = mount(AppCard, {
+      props: { layout: 'horizontal', icon: '💰' },
+      slots: { default: '<span>Content</span>' }
+    })
+    expect(wrapper.classes()).toContain('app-card--horizontal')
+    expect(wrapper.find('.app-card__main-icon').exists()).toBe(true)
+    expect(wrapper.find('.app-card__main-icon').text()).toBe('💰')
+    expect(wrapper.text()).toContain('Content')
+  })
+
+  it('horizontal layout does not render header or footer', () => {
+    const wrapper = mount(AppCard, {
+      props: { layout: 'horizontal', icon: '💰', title: 'Test' },
+    })
+    expect(wrapper.find('.app-card__header').exists()).toBe(false)
+    expect(wrapper.find('.app-card__footer').exists()).toBe(false)
+  })
 })
 
 // ── AppTabs ────────────────────────────────────────────────

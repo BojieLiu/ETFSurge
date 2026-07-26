@@ -3,6 +3,7 @@
     class="app-card"
     :class="[
       `app-card--${variant}`,
+      layoutClass,
       { 'app-card--hoverable': hoverable && !disabled },
       { 'app-card--clickable': clickable && !disabled },
       { 'app-card--disabled': disabled },
@@ -15,34 +16,49 @@
     @click="handleClick"
     @keydown.enter.space.prevent="handleClick"
   >
-    <header v-if="$slots.header || title || description" class="app-card__header">
-      <div class="app-card__header-content">
-        <div v-if="$slots['header-icon'] || icon" class="app-card__icon" aria-hidden="true">
-          <slot name="header-icon" :icon="icon">
-            <span v-if="icon">{{ icon }}</span>
-          </slot>
-        </div>
-        <div class="app-card__titles" v-if="title || description || $slots['header-title'] || $slots['header-description']">
-          <h3 v-if="title || $slots['header-title']" class="app-card__title">
-            <slot name="header-title">{{ title }}</slot>
-          </h3>
-          <p v-if="description || $slots['header-description']" class="app-card__description">
-            <slot name="header-description">{{ description }}</slot>
-          </p>
-        </div>
+    <!-- Horizontal layout: icon left, content right, no header/footer -->
+    <template v-if="layout === 'horizontal'">
+      <div v-if="icon || $slots['header-icon']" class="app-card__main-icon" aria-hidden="true">
+        <slot name="header-icon">
+          <span v-if="icon">{{ icon }}</span>
+        </slot>
       </div>
-      <div v-if="$slots['header-action']" class="app-card__header-action">
-        <slot name="header-action" />
+      <div class="app-card__content">
+        <slot />
       </div>
-    </header>
+    </template>
 
-    <div class="app-card__content">
-      <slot />
-    </div>
+    <!-- Vertical layout (default) -->
+    <template v-else>
+      <header v-if="$slots.header || title || description" class="app-card__header">
+        <div class="app-card__header-content">
+          <div v-if="$slots['header-icon'] || icon" class="app-card__icon" aria-hidden="true">
+            <slot name="header-icon" :icon="icon">
+              <span v-if="icon">{{ icon }}</span>
+            </slot>
+          </div>
+          <div class="app-card__titles" v-if="title || description || $slots['header-title'] || $slots['header-description']">
+            <h3 v-if="title || $slots['header-title']" class="app-card__title">
+              <slot name="header-title">{{ title }}</slot>
+            </h3>
+            <p v-if="description || $slots['header-description']" class="app-card__description">
+              <slot name="header-description">{{ description }}</slot>
+            </p>
+          </div>
+        </div>
+        <div v-if="$slots['header-action']" class="app-card__header-action">
+          <slot name="header-action" />
+        </div>
+      </header>
 
-    <footer v-if="$slots.footer" class="app-card__footer">
-      <slot name="footer" />
-    </footer>
+      <div class="app-card__content">
+        <slot />
+      </div>
+
+      <footer v-if="$slots.footer" class="app-card__footer">
+        <slot name="footer" />
+      </footer>
+    </template>
   </article>
 </template>
 
@@ -55,6 +71,11 @@ const props = defineProps({
     default: 'default',
     validator: v => ['default', 'elevated', 'outlined', 'filled'].includes(v)
   },
+  layout: {
+    type: String,
+    default: 'vertical',
+    validator: v => ['vertical', 'horizontal'].includes(v)
+  },
   title: String,
   description: String,
   icon: String,
@@ -66,6 +87,8 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['click'])
+
+const layoutClass = computed(() => props.layout === 'horizontal' ? 'app-card--horizontal' : 'app-card--vertical')
 
 function handleClick(event) {
   if (!props.disabled && props.clickable) {
@@ -107,17 +130,19 @@ function handleClick(event) {
   box-shadow: none;
 }
 
-/* Padding */
-.app-card--padded .app-card__header {
-  padding: var(--card-padding);
-}
-
-.app-card--padded .app-card__content {
-  padding: var(--card-padding);
-}
-
+/* Padding - shared */
+.app-card--padded .app-card__header,
+.app-card--padded .app-card__content,
 .app-card--padded .app-card__footer {
   padding: var(--card-padding);
+}
+
+/* Horizontal layout: padding goes on the card itself, content has no padding */
+.app-card--padded.app-card--horizontal {
+  padding: var(--card-padding);
+}
+.app-card--padded.app-card--horizontal .app-card__content {
+  padding: 0;
 }
 
 /* Hoverable */
@@ -153,8 +178,8 @@ function handleClick(event) {
   pointer-events: none;
 }
 
-/* Header */
-.app-card__header {
+/* Header (vertical layout) */
+.app-card--vertical .app-card__header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -164,7 +189,7 @@ function handleClick(event) {
   flex-wrap: wrap;
 }
 
-.app-card__header-content {
+.app-card--vertical .app-card__header-content {
   display: flex;
   align-items: flex-start;
   gap: var(--space-gap-md);
@@ -214,13 +239,34 @@ function handleClick(event) {
   gap: var(--space-gap-sm);
 }
 
-/* Content */
-.app-card__content {
-  /* Content padding handled by padded prop */
+/* Horizontal layout */
+.app-card--horizontal {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-4);
 }
 
-/* Footer */
-.app-card__footer {
+.app-card--horizontal .app-card__main-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--color-surface-secondary);
+  font-size: var(--font-size-2xl);
+  line-height: 1;
+}
+
+.app-card--horizontal .app-card__content {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Footer (vertical layout) */
+.app-card--vertical .app-card__footer {
   display: flex;
   align-items: center;
   gap: var(--space-gap-sm);
@@ -229,7 +275,7 @@ function handleClick(event) {
   flex-wrap: wrap;
 }
 
-/* Density variants */
+/* Density variants (backward-compat) */
 .app-card--compact .app-card__header,
 .app-card--compact .app-card__content,
 .app-card--compact .app-card__footer {
