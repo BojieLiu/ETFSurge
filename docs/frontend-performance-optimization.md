@@ -1,13 +1,18 @@
 # Frontend Performance Optimization
 
-> 分析日期：2026-07-22
+> 分析日期：2026-07-22 | 最后更新：2026-07-26
 > 针对前端首屏加载慢、路由切换卡顿的问题分析及优化方案。
+> ⚠️ **Step 1（ECharts 从 main.js 移除）已在 Phase 2.5 实施**。本文档已同步更新。
 
 ---
 
 ## 1. 问题根因分析
 
-### 🔴 核心问题 #1：ECharts 在 main.js 中被同步加载（首当其冲）
+### 🔴 核心问题 #1：ECharts 在 main.js 中被同步加载（首当其冲）— ✅ 已修复
+
+**2026-07-26 状态**：`main.js` 中的 `import './plugins/echarts'` **已删除**（Phase 2.5 `b04b448`）。ECharts 现在是按需加载的。但 `plugins/echarts.js` 文件仍残留在仓库中（未 import，不影响运行，建议清理）。
+
+原始分析如下（保留供参考）：
 
 `main.js` 中的 `import './plugins/echarts'` 是**首屏性能的最大瓶颈**。
 
@@ -75,9 +80,11 @@ component: () => import('../views/Dashboard.vue')
 
 ## 2. 优化方案
 
-### Step 1 — ECharts 从 main.js 移除，改为按需加载（高收益）
+### Step 1 — ECharts 从 main.js 移除，改为按需加载（✅ 已完成，Phase 2.5）
 
-**改动**：删除 `main.js` 中的 `import './plugins/echarts'` 行。
+**状态**：`b04b448` 已删除 `main.js` 中的 `import './plugins/echarts'` 行。ECharts 现在是按需加载的（在 Dashboard/AnalysisView/TokenMonitor 组件中各自 `use()` 注册）。
+
+> `plugins/echarts.js` 文件仍残留在 `src/plugins/` 目录中，不再被任何文件引用。建议在 Phase 3.1 中清理。
 
 此时 ECharts 会变成"真正按需"：只有访问 Dashboard / AnalysisView / TokenMonitor 这些页面时，`import()` 才会触发 ECharts chunk 的下载。
 
@@ -127,7 +134,9 @@ Step 1 删除了 `main.js` 中的全局导入后，每个图表页面应各自�
 
 ---
 
-### Step 4 — 任务商店 localStorage 写优化（低收益）
+### Step 4 — 任务商店 localStorage 写优化（⏳ 待实施，已排入 Phase 3.1.9）
+
+**状态**：已排入 `implementation-master-plan.md` Phase 3.1.9。当前 task.js 每次 `updateTask()`/`addTask()`/`removeTask()` 都直接调用 `_save()`（同步 `localStorage.setItem`）。
 
 **改动**：`task.js` 中增加防抖或批量写入。
 
@@ -166,21 +175,21 @@ function _scheduleSave() {
 ## 4. 实施路线图
 
 ```
-Step 1 (ECharts 按需) ── 删 1 行，改 1 行，10 分钟
+Step 1 (ECharts 按需) ── ✅ 已完成（Phase 2.5 `b04b448`）
     │ 验证：npm run build 后 dist/assets/ 下 echarts chunk 应
     │      只在 Dashboard/ AnalysisView 的 chunk 中出现 import
     │
-Step 2 (Chunk 优化)   ── 改 vite.config.js，5 行配置，10 分钟
+Step 2 (Chunk 优化)   ── ⏳ 待实施（改 vite.config.js，5 行配置，10 分钟）
     │ 验证：npm run build 输出应显示 vendor-vue / vendor-echarts 等
     │      独立 chunk
     │
-Step 3 (消除重复注册) ── 各图表页面清理 use() 调用，20 分钟
+Step 3 (消除重复注册) ── ⏳ 待实施（各图表页面清理 use() 调用，20 分钟）
     │ 验证：页面图表正常渲染，控制台无 ECharts 警告
     │
-Step 4 (localStorage) ── task.js 加 debounce，15 分钟
+Step 4 (localStorage) ── ⏳ 待实施（task.js 加 debounce，15 分钟）
 ```
 
-**关键优先级**：Step 1 的收益占整体优化的 70% 以上，应最先做。
+**当前状态**：Step 1 已完成，Step 2-4 待实施。Step 1 的收益占整体优化的 70% 以上，已经落地。
 
 ---
 

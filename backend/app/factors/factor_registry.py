@@ -554,7 +554,7 @@ _BUILTIN_COMPUTERS: dict[str, Callable[[dict], float]] = {
     "technical.signal.overall": _compute_signal_overall,
 }
 
-# 30 core factors for S1 (extend this list as implementation progresses)
+# 33 core factors for S1 (extend this list as implementation progresses)
 _CORE_FACTORS = [
     # Style: Size & Value
     "style.size.ln_mcap",

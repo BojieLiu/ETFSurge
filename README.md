@@ -13,7 +13,7 @@ Built with **FastAPI (async)** + **Vue 3 (Pinia + ECharts)**, pushing live data 
 - **Multi-asset real-time quotes**: stocks / ETFs / commodities across A-share, Hong Kong, and US markets, with both real-time and historical K-line data.
 - **ETF portfolio management**: custom portfolios, target weight (decimal, e.g. `0.3` = 30%), holdings and position sizing.
 - **AI Portfolio Designer**: generates three risk-profile ETF portfolios (Aggressive / Balanced / Defensive) based on real-time market data, news, and macro indicators. Includes a **pure-function strategy engine** with factor scoring, dynamic budgeting, rationale generation, and risk controls.
-- **24+ factor model**: K-line momentum, volume analysis, volatility, KDJ, MACD, RSI, Bollinger Bands, industry diversification, comprehensive signals, and more — computed via FactorRegistry with IC tracking.
+- **33-factor core model**: K-line momentum, volume analysis, volatility, KDJ, MACD, RSI, Bollinger Bands, industry diversification, premium/discount, comprehensive signals, and more — computed via FactorRegistry (33 core factors, all with real compute functions) with IC tracking.
 - **Asynchronous task system**: background task management for portfolio design, strategy checking, and market report generation with WebSocket progress push.
 - **Technical analysis**: MA, MACD, RSI, KDJ, Bollinger Bands, and aggregated buy/sell trading signals.
 - **News monitoring**: Caixin headlines, macro policy, international market news — with level/stars classification.
@@ -81,7 +81,7 @@ Built with **FastAPI (async)** + **Vue 3 (Pinia + ECharts)**, pushing live data 
 
 1. **Pure-function strategy engine (`engine/`)**: `allocation_engine.py`, `budgets.py`, `rationale.py`, `risk_controls.py` — zero I/O, zero external dependencies. Fully deterministic allocation logic using factor scores and market regime.
 2. **Unified data pipeline (`pool_manager.py`)**: single entry point for factor matrix, candidate pools, market regime, sentiment, sector momentum, and news cache.
-3. **Factor registry (`factors/factor_registry.py`)**: 24+ factors computed from market data (momentum, volume, volatility, KDJ, MACD, RSI, Bollinger, industry diversification, composite signal) with IC tracking and circuit breaker protection.
+3. **Factor registry (`factors/factor_registry.py`)**: 33 core factors computed from market data (momentum, volume, volatility, KDJ, MACD, RSI, Bollinger, industry diversification, premium/discount, composite signal) with IC tracking and circuit breaker protection.
 4. **Multi-source + circuit breaker (`source_registry.py`)**: each data source has an individual failure counter and cooldown. `route()` tries sources by priority; a failed source is skipped until its cooldown expires. Multiple free sources complement each other.
 5. **Two-level cache with graceful degradation**: L1 `MemoryCache` (in-process TTL, always available) + L2 `RedisCache` (cross-process, auto-degrades to no-op if unavailable). No Redis required.
 6. **LLM failover**: primary `opencode_zen` provider, fallback `deepseek` provider — automatic retry with configurable timeouts.
@@ -140,7 +140,7 @@ ETF_Surge/
 │   │   │   ├── rationale.py         # Data-driven selection rationale
 │   │   │   └── risk_controls.py     # Constraints (single ≤30%, sector <40%)
 │   │   ├── factors/             # Factor model
-│   │   │   ├── factor_registry.py   # 24+ factor computation
+│   │   │   ├── factor_registry.py   # 33-factor core computation
 │   │   │   ├── factor_definitions.yaml
 │   │   │   └── ic_tracker.py        # Information coefficient tracking
 │   │   ├── analysis/            # Analysis modules

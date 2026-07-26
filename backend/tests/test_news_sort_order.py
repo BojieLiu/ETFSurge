@@ -18,8 +18,11 @@ from app.fetchers.news_fetcher import (
     _normalize_time,
     _parse_time,
     fetch_news_headlines,
+    fetch_macro_news,
+    fetch_global_news,
     _dedupe,
     _attach_level,
+    _filter_fresh,
 )
 from app.tasks.news_refresh import refresh_news_cache
 from app.services.cache_service import sync_memory_cache
@@ -121,6 +124,111 @@ class TestSortTime:
         result = _attach_level(items)
         assert "sort_time" in result[0]
         assert result[0]["sort_time"] > 0, "sort_time 应由 time 正确计算"
+
+    def test_filter_fresh_preserves_sort_time(self):
+        """_filter_fresh 不应丢失 sort_time。"""
+        items = [
+            {"title": "旧闻", "time": "2026-07-25 15:30:00", "sort_time": 1802323800},
+            {"title": "新W", "time": "2026-07-26 15:30:00", "sort_time": 1802410200},
+        ]
+        result = _filter_fresh(items, max_age_hours=48)
+        for it in result:
+            assert "sort_time" in it
+
+    def test_field_contract_all_required_fields(self):
+        """每个头条条目必须包含 id/title/time/sort_time/source/level/stars。"""
+        sync_memory_cache.clear()
+        items = fetch_news_headlines()
+        assert len(items) > 0
+        REQUIRED = {"id", "title", "time", "sort_time", "source", "level", "stars"}
+        for it in items:
+            missing = REQUIRED - set(it.keys())
+            assert not missing, f"条目 {it.get('title','?')} 缺少字段: {missing}"
+            assert isinstance(it["sort_time"], int), f"sort_time 应为 int, got {type(it['sort_time'])}"
+            assert isinstance(it["level"], int) and 1 <= it["level"] <= 5, f"level 超出范围: {it['level']}"
+
+    def test_sort_time_monotonic_across_mixed_sources(self):
+        """跨来源合并后 sort_time 必须严格不增（允许相等）。"""
+        sync_memory_cache.clear()
+        items = fetch_news_headlines()
+        assert len(items) >= 2
+        for i in range(len(items) - 1):
+            assert items[i]["sort_time"] >= items[i + 1]["sort_time"], (
+                f"排序违反单调性: idx {i} ({items[i]['sort_time']}) < idx {i+1} ({items[i+1]['sort_time']})"
+            )
+
+
+class TestIndividualFetcherSortTime:
+    """验证各个 news fetcher 单独调用时也产生 sort_time。"""
+
+    def test_fetch_cailian_has_sort_time_after_normalize(self, monkeypatch):
+        """fetch_cailian_telegraph 条目经 normalize 后应含 sort_time。"""
+        import app.fetchers.news_fetcher as nfmod
+
+        orig = nfmod.fetch_cailian_telegraph
+        def _mock(*args, **kwargs):
+            items = orig(*args, **kwargs)
+            # 模拟 fetch_news_headlines 中的 normalize 步骤
+            for it in items:
+                nfmod._normalize_time(it)
+            return items
+        monkeypatch.setattr(nfmod, "fetch_cailian_telegraph", _mock)
+
+        items = nfmod.fetch_cailian_telegraph(5)
+        for it in items:
+            assert "sort_time" in it, f"财联社条目 {it.get('title','?')} 缺少 sort_time"
+
+    def test_fetch_macro_all_have_sort_time(self, monkeypatch):
+        """fetch_macro_news 的条目应全部含 sort_time。"""
+        import app.fetchers.news_fetcher as nfmod
+        sync_memory_cache.clear()
+
+        # Mock 新浪返回
+        monkeypatch.setattr(nfmod, "fetch_sina_roll_news", lambda n: [
+            {"title": "宏观1", "content": "x", "time": "2026-07-26 15:30:00", "source": "新浪"},
+            {"title": "宏观2", "content": "y", "time": "2026-07-26 14:00:00", "source": "新浪"},
+        ])
+        monkeypatch.setattr(nfmod, "_ak", lambda fn: [])
+        monkeypatch.setattr(nfmod, "fetch_cailian_telegraph", lambda n: [])
+
+        items = fetch_macro_news()
+        for it in items:
+            assert "sort_time" in it, f"宏观条目 {it.get('title','?')} 缺少 sort_time"
+            assert isinstance(it["sort_time"], int), f"sort_time 应为 int"
+        # 确认排序正确
+        if len(items) >= 2:
+            assert items[0]["sort_time"] >= items[1]["sort_time"]
+
+    def test_fetch_global_all_have_sort_time(self, monkeypatch):
+        """fetch_global_news 的条目应全部含 sort_time。"""
+        import app.fetchers.news_fetcher as nfmod
+        sync_memory_cache.clear()
+
+        # Mock: 模拟 _safe 返回一个带 entries 的对象
+        class MockEntry:
+            def __init__(self, title, summary, published, link):
+                self.title = title
+                self.summary = summary
+                self.published = published
+                self.link = link
+            def get(self, key, default=""):
+                return getattr(self, key, default)
+
+        class MockFeed:
+            entries = [
+                MockEntry("Global 1", "s1", "Tue, 14 Jul 2026 10:00:00 GMT", "https://x.com/1"),
+                MockEntry("Global 2", "s2", "Tue, 14 Jul 2026 09:00:00 GMT", "https://x.com/2"),
+            ]
+
+        monkeypatch.setattr(nfmod, "_safe", lambda fn, t: MockFeed())
+        monkeypatch.setattr(nfmod, "_ak", lambda fn: [])
+
+        items = fetch_global_news()
+        for it in items:
+            assert "sort_time" in it, f"全球条目 {it.get('title','?')} 缺少 sort_time"
+            assert isinstance(it["sort_time"], int)
+        if len(items) >= 2:
+            assert items[0]["sort_time"] >= items[1]["sort_time"]
 
 
 class TestNewsRefreshBatch:

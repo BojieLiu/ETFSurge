@@ -4,9 +4,9 @@
 >
 > **⚠️ 2026-07-25 审计更新：代码架构已从 strategy_design.py（1092 行）重构至 engine/ 纯函数包。
 > 以下改动方案中所有 strategy_design.py 引用均已过时，需映射至 engine/allocation_engine.py 和 engine/rationale.py。
-> 当前实施状态：A1 ✅ / A2 ✅ / A3 ✅ / B3 ✅ 已在代码中完成（隐式通过 engine/ 重构实现）；
-> B1 🟡 / B2 🟡 需适配 engine/rationale.py 新接口实施；
-> C1 🟡 / C2 🟡 需重新评估 pool_manager 接口。**
+> ⚠️ 2026-07-26 二次审计（基于代码交叉验证）：
+> 当前实施状态：A1 ✅ / A2 ✅ / A3 ✅ / B1 ✅ / B2 ✅ / B3 ✅ / C1 ✅（fund_flow 注入 `strategy_design.py`）；
+> C2 🟡 卫星层科技ETF仍未实施（代码中无科创50/588000引用）。**
 
 ## 一、问题总览
 
@@ -15,11 +15,11 @@
 | A1 | "因子"列含义不明，读者误以为代表涨跌幅 | **P0** | ✅ 已实施 | `design_report.py:109-134` 表头为"多因子评分"，含"今日涨跌"列+脚注 | 表格渲染 |
 | A2 | 预期收益未随市场状态调整，恐慌行情下明显偏高 | **P0** | ✅ 已实施 | `engine/budgets.py:117` `adjust_expected_return()` | 组合构建 |
 | A3 | 510880 误标为"红利低波ETF"，实为红利ETF（上证红利） | **P0** | ✅ 已实施 | `engine/allocation_engine.py:90-91` 512890在core、560600替换510500 | 候选池 |
-| B1 | 黄金ETF入选理由缺少近3月实际跌幅引用，避险判断过时 | P1 | 🟡 待实施 | `engine/rationale.py:60-63` 黄金分支待增强 | 入选理由生成 |
-| B2 | 30年国债ETF未提示利率反弹久期风险 | P1 | 🟡 待实施 | `engine/rationale.py:64-65` 国债分支待增加久期提示 | 入选理由生成 |
+| B1 | 黄金ETF入选理由缺少近3月实际跌幅引用，避险判断过时 | P1 | ✅ 已实施（`engine/rationale.py:84-91` 含动量偏弱判断 + 长期配置价值） | 入选理由生成 |
+| B2 | 30年国债ETF未提示利率反弹久期风险 | P1 | ✅ 已实施（`engine/rationale.py:92-95` 含久期风险提示："若稳增长政策加码利率反弹则承压"） | 入选理由生成 |
 | B3 | 缺少量化企稳判定标准（"等待企稳信号"模糊） | P1 | ✅ 已实施 | `analysis/prompts/v1/design_report.md` 已含"必含：量化操作建议" | LLM prompt |
-| C1 | 遗漏ETF全市场净流入2290亿的积极信号 | P2 | 🟡 待评估（新接口） | `engine/allocation_engine.py` + pool_manager 需新增 fund_flow 管道 | 数据采集 |
-| C2 | 卫星层缺乏宽基科技ETF（科创50/创业板）分散选项 | P2 | 🟡 待评估（新接口） | `engine/allocation_engine.py` 需增加科技集中度检测→自动引入科创50 | 卫星选择 |
+| C1 | 遗漏ETF全市场净流入2290亿的积极信号 | P2 | ✅ 已实施（`strategy_design.py` `_compute_fund_flow()` 聚合全池资金流向注入 LLM prompt） | 数据采集 |
+| C2 | 卫星层缺乏宽基科技ETF（科创50/创业板）分散选项 | P2 | 🟡 待实施 | `engine/allocation_engine.py` 需增加科技集中度检测→自动引入科创50 | 卫星选择 |
 
 ---
 

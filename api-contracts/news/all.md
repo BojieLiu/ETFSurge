@@ -184,5 +184,9 @@ Used for **individual hot-push** items. On connect, server sends a batch of indi
 | Empty state "暂无资讯" | ☐ | N/A | |
 | Clickable news link opens in new tab | ☐ | N/A | |
 | `sort_time` field present in all items | ☐ | ☐ | Added in news-timeline-fix |
+| `sort_time` is int type (not string) | ☐ | ☐ | Added in news-timeline-fix |
+| Items sorted by `sort_time` descending | ☐ | ☐ | Added in news-timeline-fix + verify_e2e |
 | WS `news_batch` format handled | ☐ | ☐ | Added in news-timeline-fix |
-| Frontend re-sorts after WS merge | ☐ | N/A | Added in news-timeline-fix |
+| Frontend re-sorts after any WS merge | ☐ | N/A | Added in news-timeline-fix |
+| Multi-item WS push order preserved | ☐ | N/A | Added in news-timeline-fix |
+| No-sort_time fallback to time string | ☐ | N/A | Added in news-timeline-fix |

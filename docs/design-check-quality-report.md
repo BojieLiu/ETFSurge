@@ -4,8 +4,8 @@
 > 审查范围: 智能组合设计（design pipeline）+ 策略检查（strategy check pipeline）  
 > 审查日期: 2026-07-24 | 最后修订: 2026-07-25 (v4.2)  
 > 审查方法: 实测 E2E 数据 + 数据库记录审计 + 源文件静态分析 + 代码路径追踪 + DB schema 交叉验证  
-> 状态: **✅ 18/19 已实施；⚠️ 1 项剩余（P2-4 target_weight 默认值，~1行）**  
-> 实施说明: 参见 `docs/implementation-master-plan.md` v6.1。P0 全 4 项 ✅；P1-1 ✅；P1-3 ✅；P2-1→S2 ✅；P3-1~P3-4 ✅。P1-2(防御层分类 ✅ `pool_manager.py:328-333`)、P1-4(拼接bug ✅ `risk_controls.py:43-44`)、P2-2(weight字段 ✅ `portfolio_service.py:498-500`)、P2-3(摘要增强 ✅ `portfolio_service.py:514-533`)。剩余 P2-4(target_weight 默认值) 映射到 master-plan Phase 1.1.14。
+> 状态: **✅ 19/19 已实施**  
+> 实施说明: 参见 `docs/implementation-master-plan.md` v6.2。P0 全 4 项 ✅；P1-1 ✅；P1-3 ✅；P2-1→S2 ✅；P3-1~P3-4 ✅。P1-2(防御层分类 ✅ `pool_manager.py:328-333`)、P1-4(拼接bug ✅ `risk_controls.py:43-44`)、P2-2(weight字段 ✅ `portfolio_service.py:498-500`)、P2-3(摘要增强 ✅ `portfolio_service.py:514-533`)。P2-4(target_weight 默认值 ✅ 代码已验证 `portfolio_service.py` 含 `else 0.1` 兜底)。
 
 ## 文档就绪检查清单
 

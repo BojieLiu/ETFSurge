@@ -170,6 +170,77 @@ describe('NewsView', () => {
     expect(items[0].text()).toBe('第一条')
   })
 
+  it('re-sorts after multiple legacy single-item WS pushes (prepend-reversal guard)', async () => {
+    apiMock.headlines.mockResolvedValue({ data: [] })
+    const wrapper = mount(NewsView, { global: { stubs: { VChart: true } } })
+    await flushPromises()
+
+    // Simulate original bug: 3 items pushed one-by-one via legacy 'news' type
+    // Backend pushes newest first, but prepend would reverse without re-sort
+    h.getHandler()({ type: 'news', data: { id: 1, title: '中', time: '10:02', sort_time: 1002, level: 2 } })
+    h.getHandler()({ type: 'news', data: { id: 2, title: '新', time: '10:03', sort_time: 1003, level: 3 } })
+    h.getHandler()({ type: 'news', data: { id: 3, title: '旧', time: '10:01', sort_time: 1001, level: 1 } })
+    await wrapper.vm.$nextTick()
+
+    const items = wrapper.findAll('.news-title')
+    expect(items.length).toBe(3)
+    // Must be sorted by sort_time descending: 新(1003) > 中(1002) > 旧(1001)
+    expect(items[0].text()).toBe('新')
+    expect(items[1].text()).toBe('中')
+    expect(items[2].text()).toBe('旧')
+  })
+
+  it('re-sorts after mixed REST + WS merge', async () => {
+    // REST loads old items
+    apiMock.headlines.mockResolvedValue({ data: [
+      { id: 1, title: 'REST旧', time: '2026-07-26 10:00', sort_time: 1000, level: 2 },
+      { id: 2, title: 'REST更旧', time: '2026-07-26 09:00', sort_time: 900, level: 1 },
+    ] })
+    const wrapper = mount(NewsView, { global: { stubs: { VChart: true } } })
+    await flushPromises()
+
+    // WS pushes newer items
+    h.getHandler()({
+      type: 'news_batch',
+      data: [
+        { id: 3, title: 'WS最新', time: '2026-07-26 11:00', sort_time: 1100, level: 3 },
+        { id: 4, title: 'WS次新', time: '2026-07-26 10:30', sort_time: 1050, level: 2 },
+      ],
+    })
+    await wrapper.vm.$nextTick()
+
+    const items = wrapper.findAll('.news-title')
+    expect(items.length).toBe(4)
+    // Full list sorted: WS最新(1100) > WS次新(1050) > REST旧(1000) > REST更旧(900)
+    expect(items[0].text()).toBe('WS最新')
+    expect(items[1].text()).toBe('WS次新')
+    expect(items[2].text()).toBe('REST旧')
+    expect(items[3].text()).toBe('REST更旧')
+  })
+
+  it('sorts by time string when sort_time is missing', async () => {
+    apiMock.headlines.mockResolvedValue({ data: [] })
+    const wrapper = mount(NewsView, { global: { stubs: { VChart: true } } })
+    await flushPromises()
+
+    h.getHandler()({
+      type: 'news_batch',
+      data: [
+        { id: 1, title: '较早', time: '2026-07-26 09:00', level: 1 },
+        { id: 2, title: '较晚', time: '2026-07-26 10:00', level: 2 },
+        { id: 3, title: '最早', time: '2026-07-26 08:00', level: 1 },
+      ],
+    })
+    await wrapper.vm.$nextTick()
+
+    const items = wrapper.findAll('.news-title')
+    expect(items.length).toBe(3)
+    // Fallback to time string: 较晚 > 较早 > 最早
+    expect(items[0].text()).toBe('较晚')
+    expect(items[1].text()).toBe('较早')
+    expect(items[2].text()).toBe('最早')
+  })
+
   it('calls newsApi.newsImpact and shows the impact panel', async () => {
     apiMock.headlines.mockResolvedValue({ data: SAMPLE })
     apiMock.newsImpact.mockResolvedValue({

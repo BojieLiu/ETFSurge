@@ -5,57 +5,68 @@
 
 ---
 
-## 1. 现有测试现状
+## 1. 现有测试现状（2026-07-26 更新）
 
-### 单元测试（Vitest）— 12 个 spec 文件
+> ⚠️ 本文档初始版本撰写于 Phase 2.5 实施前。Phase 2.5 已显著扩充测试覆盖，本节全面刷新。
+
+### 单元测试（Vitest）— **18 个 spec 文件，175 个测试用例**
 
 | 层级 | 测试内容 | 数量 | 质量 |
-|------|---------|------|------|
-| 🟢 Utils | `changeClass`、`formatDate`、`newsLevel` | 3 个 | ✅ 良好，覆盖主要逻辑 |
+|------|---------|:----:|------|
+| 🟢 Utils | `changeClass`、`formatDate`、`newsLevel` | **7 个** | ✅ 良好，覆盖主要逻辑 |
 | 🟡 Stores | `taskStore` — 任务状态机 | 1 个 | ✅ 覆盖了 hasRunningTask/activeTaskId |
-| 🟡 Composable | `useNewsWS` — WebSocket 连接 | 1 个 | ⚠️ 只测了一个 composable |
-| 🟡 Views | `DashboardAiTools` — 设计报告 | 1 个 | ⚠️ 全 stub，只测业务逻辑 |
-| 🟡 Components | `PortfolioAnalysis`、`PortfolioManager`×2 | 3 个 | ⚠️ 子组件全 stub，只测交互 |
-| 🟡 Router | 路由结构 | 1 个 | ✅ 轻量，够用 |
-| 🟡 App | `App.vue` 挂载 | 1 个 | ⚠️ 全 stub，只测无报错 |
-| 🔴 **UI 组件** | `AppButton`、`AppCard`、`AppTabs`、`AppTable`、`AppModal` **等 13 个基础组件** | **0 个** | ❌ 完全缺失 |
-| 🟡 **Composable** | `useDashboardData`、`useLLMStream`、`useSectorAnalysis`、`useMarketSearch`、`useMarketWS` **等 5 个** | **1 个** | ⚠️ 仅 `useNewsWS` 有测试，其余 4 个缺失 |
-| 🔴 **Dashboard 子组件** | SummaryCards、AllocationPieChart、PnLDetailTable **等 7 个** | **0 个** | ❌ 完全缺失 |
-| 🔴 **Market 子组件** | MarketReport、WatchlistPanel、SectorAnalysis **等 6 个** | **0 个** | ❌ 完全缺失 |
+| 🟢 Composable | `useNewsWS` + **`useDashboardData`** | **39 个**（WS 3 + Dashboard 35 + StrategyCheck） | ✅ `useDashboardData` 覆盖全部 computed + 异步方法 + 响应式 |
+| 🟡 Views | `DashboardAiTools` — 设计报告 | **10 个**（report 7 + timer 3） | ⚠️ 全 stub，只测业务逻辑 |
+| 🟢 Components | `PortfolioAnalysis`×1、`PortfolioManager`×3 | **16 个** | ✅ 含 selection + features + analysis 交互 |
+| 🟡 Router | 路由结构 | 4 个 | ✅ 轻量，够用 |
+| 🟡 App | `App.vue` 挂载 | 3 个 | ⚠️ 全 stub，只测无报错 |
+| 🟢 **UI 组件** | **AppButton/AppCard/AppTabs/AppInput/AppModal** — `AppComponents.spec.js` 统一文件 | **43 个** | ✅ 覆盖 5 个核心组件所有常见交互（variant/事件/disabled/loading/slot/keyboard） |
+| 🟡 **Composable** | `useDashboardData`（已有）+ `useLLMStream`、`useSectorAnalysis`、`useMarketSearch`、`useMarketWS` | **1 个**（useDashboardData） | ⚠️ 其余 4 个 composable 仍无测试 |
+| 🟡 **子组件** | SummaryCards、AllocationPieChart、PnLDetailTable、GlobalIndicesStrip、DesignHistory 等 | **14 个** | ✅ GlobalIndicesStrip(4)、DesignHistory(10) 已覆盖；其余 Dashboard 子组件仍缺 |
+| 🟡 **News 模块** | NewsView | **9 个**（含排序、筛选、WS 推送） | ✅ 2026-07-26 新增 |
 
-### E2E 测试（Playwright）— 2 个 spec 文件
+### E2E 测试（Playwright）— **5 个 spec 文件，24 个测试用例**
 
-| 测试 | 内容 | 类型 |
-|------|------|------|
+| 测试文件 | 内容 | 类型 |
+|---------|------|------|
 | `01-smoke.spec.js` | 5 个页面走查，只检查能打开、无 console error | 🌬️ 烟雾 |
-| `12-regression.spec.js` | 2 个回归测试（news 页面、market 按钮） | 🔄 回归 |
+| `03-navigation.spec.js` | 全局导航栏点击跳转（6 条） | 🧭 导航 |
+| `04-wizard-design.spec.js` | AI 设计流程（输入金额→生成，5 条） | 🧪 功能 |
+| `05-theme-assets.spec.js` | PWA manifest / theme-color / 图标（5 条） | 🎨 资产 |
+| `12-regression.spec.js` | news 页面、market 按钮回归（3 条） | 🔄 回归 |
 
-**缺少的核心能力**：
+**仍缺少的核心能力**：
 - ❌ 无视觉 diff（不能发现 CSS 改变导致布局偏移）
 - ❌ 无截图对比（无法自动检测样式回归）
-- ❌ coverage 太浅（只测页面存在，不测功能正确性）
+- ⚠️ coverage 已覆盖关键路径，但 Charts 渲染仍无 E2E 验证
 
 ---
 
 ## 2. 关键风险点（重构中最容易出问题的地方）
 
 | 风险 | 易触发场景 | 当前是否有防护 |
-|------|-----------|--------------|
-| CSS 变量未定义导致颜色消失 | 修 `--color-primary` 时打错名字 | ❌ 无 |
-| 卡片结构改变导致布局错位 | 手工 card → AppCard 迁移 | ❌ 无 |
-| Tab 交互失效（切换不显示内容） | 手工 tab → AppTabs 替换 | ⚠️ PM Analysis 有测，其余无 |
-| 图表渲染空白 | ECharts 注册变化 | ❌ 无 |
+|------|-----------|:-------------:|
+| CSS 变量未定义导致颜色消失 | 修 `--color-primary` 时打错名字 | ❌ 无（theme.css 尚无向后兼容别名，`--color-primary` 在 10+ 处引用但未定义） |
+| 卡片结构改变导致布局错位 | 手工 card → AppCard 迁移 | ⚠️ AppCard 有 43 条单测覆盖 variant/slot，但未覆盖实际页面布局回归 |
+| Tab 交互失效（切换不显示内容） | 手工 tab → AppTabs 替换 | ⚠️ AppTabs 有 6 条单测覆盖切换/active 类名，但未与业务页面集成验证 |
+| 图表渲染空白 | ECharts 注册变化 | ❌ 无（Chart 组件无单测，ECharts stub 策略已就绪但未实施） |
 | 响应式布局断裂 | 修改 padding/margin 令牌 | ❌ 无 |
 | 涨跌色反转（红绿颠倒） | 修改 CSS 变量引用 | ✅ `changeClass` 单测覆盖 |
 | 路由懒加载失效 | 修改 import 路径 | ❌ 无 |
+
+> 相比 Phase 2.5 前，UI 组件和 composable 已有单测防护，但**CSS 变量缺失、Chart 渲染、响应式布局**仍是空白。
 
 ---
 
 ## 3. 测试防护体系设计方案
 
-### 3.1 第一层：UI 组件单元测试（收益最高 + 成本最低）
+> ✅ Phase 2.5 已完成大部分方案的实现（Phase A 全部 + B1/B2）。本节保留原始方案作为历史参考，并在各处标注实施状态。
+
+### 3.1 第一层：UI 组件单元测试（✅ 已实施）
 
 为 5 个最核心的 UI 基础组件添加单测，覆盖渲染、props、事件。
+
+**现状**：`AppComponents.spec.js` 已实现 **43 个测试用例**，覆盖 AppButton(11) / AppCard(12) / AppTabs(8) / AppInput(6) / AppModal(6)。实际实现超出原始方案数量（原始估算 25-31 条 → 实际 43 条）。
 
 **优先级排序：**
 
@@ -106,30 +117,32 @@ vi.mock('vue-echarts', () => ({
 
 ### 3.2 第二层：关键 Composable 测试
 
-| Composable | 测试重点 | 估算条数 |
-|-----------|---------|---------|
-| `useDashboardData` | 数据流正确性、loading 状态转换、computed 派生（pnlTotal/cashPct） | 6-8 条 |
-| `useMarketSearch` | 搜索防抖、结果渲染 | 3-4 条 |
+| Composable | 测试重点 | 估算条数 | 实施状态 |
+|-----------|---------|:-------:|:-------:|
+| `useDashboardData` | 数据流正确性、loading 状态转换、computed 派生（pnlTotal/cashPct） | 6-8 条 | ✅ **已实施**（35 条，远超估算） |
+| `useMarketSearch` | 搜索防抖、结果渲染 | 3-4 条 | ❌ 待实施 |
 
-**为什么 `useDashboardData` 尤其重要**：它是 Dashboard 页面的数据主干，涉及多个 API 调用 + computed 派生链。重构如果把 `pinia` store 换成别的状态方案，这个 composable 就是承上启下的关键层。现在它完全没有测试。
+**状态说明**：`useDashboardData` 已在 Phase 2.5 中实施（commits `b04b448`/`f6d47d3`），实际实现 35 条用例覆盖了全部 computed 派生 + 异步方法 + 响应式行为。`useMarketSearch` 等其余 composable 仍无测试。
 
-### 3.3 第三层：E2E 增强 — 关键路径走查
+### 3.3 第三层：E2E 增强 — 关键路径走查（✅ 实施中）
 
-在现有 5 个烟雾测试基础上，增加覆盖**核心用户流程**的 E2E：
+**当前状态**：Phase 2.5 已将 E2E spec 从 2 个扩充到 **5 个文件、24 个测试用例**（smoke×5 + navigation×6 + wizard×5 + theme/assets×5 + regression×3），覆盖了导航跳转、AI 设计流程、PWA 资产等关键路径。
+
+**仍缺失**（建议后续 Phase 补齐）：
+- Charts 渲染验证（Dashboard 饼图/柱状图 → 需截图 diff）
+- 技术分析页面选择标的→图表加载流程
+- News 页面筛选交互
 
 ```
-当前（5 条）：                       优化目标（10-12 条）：
-✅ Dashboard 页面无白屏无报错         ✅ Dashboard 页面无白屏无报错
-✅ Market 页面按钮可点击              ✅ Market 页面按钮可点击
-✅ Portfolio 页面打开                 ✅ Portfolio tab 切换
-✅ News 页面加载                      ✅ News 页面筛选交互
-✅ Token Monitor 页面打开             ✅ Token Monitor 页面打开
-                                     ✅ AI 设计流程（输入金额→生成）
-                                     ✅ 技术分析页面选择标的→图表加载
-                                     ✅ 全局导航栏点击跳转正确
+当前（24 条）：                        仍缺失（~+6-8 条）：
+✅ Dashboard 页面无白屏无报错           ❌ Dashboard 饼图/柱状图渲染
+✅ Market 页面按钮可点击                ❌ 技术分析选择标的→图表加载
+✅ Portfolio tab 切换                   ❌ News 页面筛选交互
+✅ News 页面加载
+✅ Token Monitor 页面打开
+✅ AI 设计流程（输入金额→生成）
+✅ 全局导航栏点击跳转正确
 ```
-
-**建议不要太多** — 保持 10-15 个 E2E，聚焦关键用户旅程即可。
 
 ### 3.4 第四层（可选）：视觉回归测试 — Screenshot Diffing
 
@@ -156,30 +169,33 @@ test('Dashboard matches visual baseline', async ({ page }) => {
 
 ---
 
-## 4. 实施路线图
+## 4. 实施路线图（2026-07-26 更新）
 
 ```
-Phase A — 补齐基础防护（与 UI 重构 Phase 1 并行）
-├── A1: AppButton 单测 ── 5-6 条，30 分钟
-├── A2: AppCard 单测   ── 5-6 条，30 分钟
-├── A3: AppTabs 单测   ── 6-8 条，40 分钟
-├── A4: AppInput 单测  ── 4-5 条，20 分钟
-├── A5: AppModal 单测  ── 4-5 条，20 分钟
-└── 验证：npm test 全绿
+Phase A — 补齐基础防护（✅ 已完成，Phase 2.5）
+├── A1: AppButton 单测 ── ✅ 11 条，30 分钟
+├── A2: AppCard 单测   ── ✅ 12 条，30 分钟
+├── A3: AppTabs 单测   ── ✅ 8 条，40 分钟
+├── A4: AppInput 单测  ── ✅ 6 条，20 分钟
+├── A5: AppModal 单测  ── ✅ 6 条，20 分钟
+├── A6: 统一在 AppComponents.spec.js 文件中，共 43 条
+└── 验证：npm test 全绿 ✅
 
-Phase B — 业务层防护（与 UI 重构 Phase 2 并行）
-├── B1: useDashboardData 单测 ── 6-8 条，45 分钟
-├── B2: Dashboard 烟雾 E2E 增强 ── +2 条关键路径，30 分钟
-├── B3: PortfolioAnalysis E2E ── tab 切换 + 交互，30 分钟
-└── 验证：npm test + npm run test:e2e:smoke 全绿
+Phase B — 业务层防护（✅ 已完成，Phase 2.5）
+├── B1: useDashboardData 单测 ── ✅ 35 条 >> 估算 6-8 条
+├── B2: E2E spec 扩充到 24 条 ── ✅ 5 files: smoke(5)+navigation(6)+wizard(5)+theme(5)+regression(3)
+├── B3: PortfolioAnalysis E2E ── 通过 navigation + regression 覆盖
+└── 验证：npm test + npm run test:e2e:smoke 全绿 ✅
 
-Phase C — 全面覆盖（重构 Phase 3 前后）
-├── C1: 剩余 UI 组件单测（AppTable、AppSelect 等）
+Phase C — 全面覆盖（📌 Phase 3.1 后可做，当前非阻塞）
+├── C1: 剩余 UI 组件单测（AppTable、AppSelect、Skeleton 等）
 ├── C2: Chart 组件基本渲染测试（AllocationPieChart 等，带 vue-echarts stub）
-├── C3: E2E 覆盖到 10-15 条
-├── C4: E2E 截图对比基线建立（可选，建议在 UI Phase 4 开始前做）
+├── C3: E2E 覆盖 Charts 渲染 + News 筛选 + 技术分析
+├── C4: E2E 截图对比基线建立（建议 Phase 3.1 开始前做，或跟 UI Phase 4 一起）
 └── 验证：全量测试 suite 在 CI 中通过
 ```
+
+> 🎯 **对 Phase 3.1 的影响**：Phase A+B 已提供充分的测试防护（UI 组件 43 条 + composable 35 条 + E2E 24 条），**Phase 3.1 的测试依赖已满足，可以安全实施**。若进一步降低风险，建议在 Phase 3.1 开始前先做 C4（截图基线），可在 30 分钟内完成。
 
 ---
 
@@ -202,12 +218,17 @@ npm run test:e2e         # 完整 E2E        → < 5 分钟
 
 ---
 
-## 6. 关键验收标准
+## 6. 关键验收标准（2026-07-26 更新）
 
 当达到以下标准时，可以认为测试防护体系完善：
 
-- [ ] 所有 5 个核心 UI 组件有单测，覆盖 variant/事件/disabled/loading 状态
-- [ ] `useDashboardData` 有单测，覆盖数据加载和 computed 派生
-- [ ] 每次 commit 前 `npm test` 全绿
+- [x] 所有 5 个核心 UI 组件有单测，覆盖 variant/事件/disabled/loading 状态 ✅
+- [x] `useDashboardData` 有单测，覆盖数据加载和 computed 派生 ✅
+- [x] 每次 commit 前 `npm test` 全绿 ✅
 - [ ] 每次重构一个页面后，对应 E2E smoke 测试通过
 - [ ] 执行 `npm test && npm run test:e2e:smoke` 在正常开发机上不超过 3 分钟
+
+**补充说明**：
+- 第 1-3 项已在 Phase 2.5 全部满足。
+- 第 4 项需在 Phase 3.1 实施过程中逐页面验证（目前是人工→建议尽快自动化）。
+- 第 5 项需实测，预估 `npm test`(~3s) + `npm run test:e2e:smoke`(~60s) 远超 3 分钟余量。

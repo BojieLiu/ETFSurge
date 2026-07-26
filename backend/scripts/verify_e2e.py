@@ -426,6 +426,22 @@ def section_news():
             if data:
                 has_id = all("id" in item for item in data)
                 check("每条新闻含 id 字段（WS 去重用）", has_id)
+                # sort_time 字段契约 + 排序验证
+                has_sort_time = all("sort_time" in item for item in data)
+                check("每条新闻含 sort_time 字段（排序键）", has_sort_time)
+                if has_sort_time:
+                    all_int = all(isinstance(it["sort_time"], int) for it in data)
+                    check("sort_time 均为整数", all_int)
+                    if len(data) >= 2:
+                        check_len = min(5, len(data))
+                        sorted_ok = all(
+                            data[i]["sort_time"] >= data[i + 1]["sort_time"]
+                            for i in range(check_len - 1)
+                        )
+                        if sorted_ok:
+                            check(f"前 {check_len} 条按 sort_time 降序排列", True)
+                        else:
+                            check(f"前 {check_len} 条按 sort_time 降序排列", False, "排序异常")
     except requests.Timeout:
         check("GET /news/headlines", False, "请求超时（35s）— 后端 30s 超时 + 缓存预热")
     except Exception as e:

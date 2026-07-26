@@ -89,7 +89,7 @@ cd backend && python -m pytest
   - `generate_enhanced_design()` — 编排器入口：调用 pool_manager → engine/ 分配器 → 风控 → 返回三套方案。
 - `backend/app/services/pool_manager.py` — **统一数据管道**（全市场扫描 + 因子计算 + 市场状态 + 新闻缓存）：
   - `get_factor_matrix()` / `get_pool()` / `get_market_regime()` / `get_market_sentiment()` / `get_news()`。
-- `backend/app/factors/factor_registry.py` — FactorRegistry（24+ 维因子计算，含 KDJ / 综合信号 / industry_diversification，已删除假数据 fallback，带熔断保护）。
+- `backend/app/factors/factor_registry.py` — FactorRegistry（33 维核心因子计算，含 KDJ / 综合信号 / industry_diversification / premium_discount，已删除假数据 fallback，带熔断保护）。
 - `backend/app/services/market_trends.py` — `detect_market_regime()`（含 index_realtime fallback）、`compute_etf_trends()`。
 - `backend/app/fetchers/akshare_fetcher.py` — A 股 / 港股 / 商品行情与资讯数据源（备用；主力为 `china_market.py` → mootdx/Sina 降级链）。
 - `backend/app/fetchers/news_fetcher.py` — 资讯抓取（财新头条 / 宏观 / 国际），打 `level` / `stars`。
