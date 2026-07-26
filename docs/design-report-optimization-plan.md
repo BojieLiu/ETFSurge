@@ -4,9 +4,11 @@
 >
 > **⚠️ 2026-07-25 审计更新：代码架构已从 strategy_design.py（1092 行）重构至 engine/ 纯函数包。
 > 以下改动方案中所有 strategy_design.py 引用均已过时，需映射至 engine/allocation_engine.py 和 engine/rationale.py。
-> ⚠️ 2026-07-26 二次审计（基于代码交叉验证）：
-> 当前实施状态：A1 ✅ / A2 ✅ / A3 ✅ / B1 ✅ / B2 ✅ / B3 ✅ / C1 ✅（fund_flow 注入 `strategy_design.py`）；
-> C2 🟡 卫星层科技ETF仍未实施（代码中无科创50/588000引用）。**
+> ⚠️ 2026-07-26 二次审计（基于代码交叉验证 + 2026-07-26 最新代码审计）：
+> 当前实施状态（全部已实施）：
+> A1 ✅ / A2 ✅ / A3 ✅ / B1 ✅（`engine/rationale.py:60-63`） / B2 ✅（`engine/rationale.py:64-65`）
+> / B3 ✅（`analysis/prompts/v1/design_report.md:68`） / C1 🟡（待评估）
+> / C2 ✅（`engine/allocation_engine.py:443-458` 科技集中度>60%→科创50ETF 588000）**
 
 ## 一、问题总览
 
@@ -382,12 +384,12 @@ if tech_weight > s_budget * 0.6 and "588000" not in {h.get("symbol") for h in ho
 | **P0-2** | A1: 表格"因子"→"多因子评分"+新增"今日涨跌"列 | ✅ 已实施 | `tasks/design_report.py:109-134` | — | 无 |
 | **P0-3** | A2: 预期收益 regime 调整 | ✅ 已实施 | `engine/budgets.py:117` | — | 无 |
 | P1-1 | B3: LLM prompt 量化规则升级 | ✅ 已实施 | `analysis/prompts/v1/design_report.md` | — | 无 |
-| P1-2 | B1: 黄金入选理由优化 | 🟡 待实施 | `engine/rationale.py:60-63`（适配新接口） | ~10行 | 无 |
-| P1-3 | B2: 国债久期风险提示 | 🟡 待实施 | `engine/rationale.py:64-65`（适配新接口） | ~3行 | 无 |
+| P1-2 | B1: 黄金入选理由优化 | ✅ **已实施** | `engine/rationale.py:60-63`（动量因子代理判断） | — | 无 |
+| P1-3 | B2: 国债久期风险提示 | ✅ **已实施** | `engine/rationale.py:64-65`（久期风险文字注入） | — | 无 |
 | P2-1 | C1: 全市场资金流汇总 | 🟡 待评估 | pool_manager + allocation_engine | ~30行 | 无 |
-| P2-2 | C2: 卫星层宽基科技ETF | 🟡 待评估 | `engine/allocation_engine.py` | ~15行 | 无 |
+| P2-2 | C2: 卫星层宽基科技ETF | ✅ **已实施** | `engine/allocation_engine.py:443-458`（科技集中度>60%卫星预算→科创50 588000） | — | 无 |
 
-> P0 三任务 + B3 均已隐式完成。B1/B2 为本次实施内容。C1/C2 需后续轮次。
+> **2026-07-26 更新**：B1/B2/B3/C2 全部已实施 ✅。仅 C1（全市场资金流汇总）仍然待评估。
 
 ---
 
@@ -399,6 +401,7 @@ if tech_weight > s_budget * 0.6 and "588000" not in {h.get("symbol") for h in ho
 | A1 | ✅ 已实施 | 前端查看设计报告方案表头为"多因子评分"，含"今日涨跌"列 |
 | A2 | ✅ 已实施 | 查看 `adjust_expected_return` 在 budgets.py，引擎输出含 `expected_return_current` |
 | B3 | ✅ 已实施 | 确认 design_report.md prompt 含"必含：量化操作建议" |
-| B1 | 🟡 待实施 | `python -m pytest tests/ -k "rationale"` + 查看黄金 ETF 入选理由含近3月跌幅 |
-| B2 | 🟡 待实施 | `python -m pytest tests/ -k "rationale"` + 查看国债 ETF 入选理由含久期提示 |
-| A1+A2+A3+B3+B1+B2 | ✅/🟡 | `python scripts/verify_e2e.py` — 全链路验证 |
+| B1 | ✅ 已实施 | `engine/rationale.py:60-63` 黄金 ETF 入选理由含动量代理判断（近月承压/长期配置价值）|
+| B2 | ✅ 已实施 | `engine/rationale.py:64-65` 国债 ETF 入选理由含久期风险提示 |
+| C2 | ✅ 已实施 | `engine/allocation_engine.py:443-458` 科技集中度>60%→自动科创50ETF(588000)分散 |
+| A1+A2+A3+B1+B2+B3+C2 | ✅ **全部已实施** | `python scripts/verify_e2e.py` — 全链路验证 |

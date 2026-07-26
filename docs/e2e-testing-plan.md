@@ -2,6 +2,13 @@
 
 > 目标：通过 Playwright 覆盖前端**全部用户操作链路**，在每次修改后自动验证前端渲染正确性和功能完整性。
 > 生成日期: 2026-07-21
+>
+> ⚠️ **2026-07-26 实施状态更新**：本文档为完整方案蓝图。实际已实施：
+> - ✅ 基础设施：`playwright.config.js` + server utilities（`server-setup.cjs` / `server-teardown.cjs` / `server.js`）已就绪
+> - ✅ package.json 脚本：`test:e2e` / `test:e2e:smoke` / `test:e2e:visual` / `test:e2e:ui` 已配置
+> - ⚠️ 已实现 **6/12 个 spec 文件**：01-smoke / 02-visual / 03-navigation / 04-wizard-design / 05-theme-assets / 12-regression
+> - ❌ 其余 6 个 spec（02-dashboard / 03-portfolio-mgr / 05-market-tabs / 06-watchlist / 07-ai-advisor / 08-sector-analysis / 09-symbol-analysis / 10-news / 11-token-monitor）待实现
+> - 本文档保持完整方案不变，作为 Phase 7.1.5 的实施蓝图
 
 ---
 

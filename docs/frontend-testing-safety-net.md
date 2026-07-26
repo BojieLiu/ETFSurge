@@ -46,7 +46,7 @@
 
 | 风险 | 易触发场景 | 当前是否有防护 |
 |------|-----------|:-------------:|
-| CSS 变量未定义导致颜色消失 | 修 `--color-primary` 时打错名字 | ❌ 无（theme.css 尚无向后兼容别名，`--color-primary` 在 10+ 处引用但未定义） |
+| CSS 变量未定义导致颜色消失 | 修 `--color-primary` 时打错名字 | ✅ 已修复（`theme.css:121-124` 已追加向后兼容别名 `--color-primary` / `--color-primary-dark` / `--color-primary-light` / `--color-border` / `--color-text-muted`） |
 | 卡片结构改变导致布局错位 | 手工 card → AppCard 迁移 | ⚠️ AppCard 有 43 条单测覆盖 variant/slot，但未覆盖实际页面布局回归 |
 | Tab 交互失效（切换不显示内容） | 手工 tab → AppTabs 替换 | ⚠️ AppTabs 有 6 条单测覆盖切换/active 类名，但未与业务页面集成验证 |
 | 图表渲染空白 | ECharts 注册变化 | ❌ 无（Chart 组件无单测，ECharts stub 策略已就绪但未实施） |
@@ -54,7 +54,7 @@
 | 涨跌色反转（红绿颠倒） | 修改 CSS 变量引用 | ✅ `changeClass` 单测覆盖 |
 | 路由懒加载失效 | 修改 import 路径 | ❌ 无 |
 
-> 相比 Phase 2.5 前，UI 组件和 composable 已有单测防护，但**CSS 变量缺失、Chart 渲染、响应式布局**仍是空白。
+> 相比 Phase 2.5 前，UI 组件和 composable 已有单测防护。CSS 变量别名已在 `theme.css:121-124` 追加修复 ✅，但 **Chart 渲染、响应式布局**仍是空白。
 
 ---
 

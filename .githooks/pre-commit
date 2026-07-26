@@ -202,4 +202,30 @@ else
     fi
 fi
 
+# ── 后端启动冒烟测试（P3-3） ──────────────────────────────────
+if [ "${SKIP_SMOKE_STARTUP}" = "1" ]; then
+    echo "[pre-commit] SKIP_SMOKE_STARTUP=1, 跳过启动冒烟测试"
+else
+    BACKEND_STAGED=$(git diff --cached --name-only --diff-filter=ACM -- 'backend/app/*.py' 'backend/scripts/*.py' 'backend/requirements.txt' 2>/dev/null || true)
+
+    if [ -n "$BACKEND_STAGED" ]; then
+        echo "[pre-commit] 检测到后端文件变更，正在执行 smoke_startup.py ..."
+        cd backend
+        if python scripts/smoke_startup.py 2>&1; then
+            echo "[pre-commit] ✅ smoke_startup 通过"
+            cd ..
+        else
+            cd ..
+            echo ""
+            echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+            echo "!  🚫 后端启动冒烟测试失败                                      !"
+            echo "!  backend/app/ 的变更导致 uvicorn 启动异常。                   !"
+            echo "!  请检查后端是否能在本地正常启动。                              !"
+            echo "!  如需跳过: SKIP_SMOKE_STARTUP=1 git commit ...               !"
+            echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+            exit 1
+        fi
+    fi
+fi
+
 exit 0

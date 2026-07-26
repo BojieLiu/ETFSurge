@@ -4,6 +4,7 @@
 > 实施策略：分阶段渐进，每步可独立验证，最终达到完整设计系统覆盖。
 > ⚠️ **历史记录**：此方案在 Phase 2.2 前曾尝试实施并被回滚。回滚原因：前端测试防护不足，修改波及范围不可控。
 > 🎯 **现状**：Phase 2.5 已补齐测试防护（UI 组件 43 条单测 + composable 35 条 + E2E 24 条），重新实施的条件已具备。
+> ⚠️ **2026-07-26 代码审计更新**：Phase 1 Step 1（theme.css 变量补齐）已在 `frontend/src/styles/theme.css:121-124` 完成（`--color-primary`, `--color-primary-dark`, `--color-primary-light`, `--color-border`, `--color-text-muted` 向后兼容别名已存在）。实施时可直接从 Phase 1 Step 2（section-card 嵌套消除）开始。
 > **本文档保持原方案不变，作为 Phase 3.1 的实施蓝图**。实施时建议从 Phase 1（基础修复，零破坏）开始重新推进。
 
 ---
