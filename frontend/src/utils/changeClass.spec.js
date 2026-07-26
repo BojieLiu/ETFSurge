@@ -43,9 +43,12 @@ vi.mock('../api', () => ({
 vi.mock('../stores/toast', () => ({ useToastStore: () => ({ show: vi.fn() }) }))
 vi.mock('../stores/portfolio', () => ({ usePortfolioStore: () => ({ etfs: [] }) }))
 
-const DashboardAiTools = (await import('../views/DashboardAiTools.vue')).default
-
 describe('core-actions buttons', () => {
+  let DashboardAiTools
+
+  beforeAll(async () => {
+    DashboardAiTools = (await import('../views/DashboardAiTools.vue')).default
+  })
   it('renders a concise title plus a separate helper description for each action', () => {
     const wrapper = mount(DashboardAiTools, {
       global: {

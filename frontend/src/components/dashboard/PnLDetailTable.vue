@@ -1,14 +1,10 @@
 <template>
-  <section class="card pnl-card" v-if="items.length">
-    <div class="card-header">
-      <h2 class="card-title">
-        <span class="card-title-icon" aria-hidden="true">📊</span>
-        当日盈亏明细
-      </h2>
+  <AppCard v-if="items.length" title="当日盈亏明细" icon="📊">
+    <template #header-action>
       <p class="card-subtitle" v-if="activeTab !== 'combined'">
         当前视图：{{ activeTab === 'on_exchange' ? '场内' : '场外' }} ETF
       </p>
-    </div>
+    </template>
     <div class="table-responsive">
       <table class="data-table">
         <thead>
@@ -42,12 +38,13 @@
         </tfoot>
       </table>
     </div>
-  </section>
+  </AppCard>
 </template>
 
 <script setup>
 import { computed } from 'vue'
 import { changeClass } from '../../utils/changeClass'
+import AppCard from '../ui/AppCard.vue'
 
 const props = defineProps({
   items: { type: Array, default: () => [] },
@@ -77,31 +74,8 @@ function formatChange(n, isAmount = false) {
 </script>
 
 <style scoped>
-.pnl-card { }
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
-  padding: var(--space-4) var(--space-5);
-  border-bottom: 1px solid var(--color-border-light);
-  flex-wrap: wrap;
-}
-.card-title {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--font-size-lg);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-primary);
-  margin: 0;
-}
-.card-title-icon {
-  font-size: var(--font-size-xl);
-  line-height: 1;
-}
 .card-subtitle {
-  margin: var(--space-1) 0 0;
+  margin: 0;
   font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
   font-weight: var(--font-weight-normal);

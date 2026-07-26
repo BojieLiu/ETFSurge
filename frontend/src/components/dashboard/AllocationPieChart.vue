@@ -1,13 +1,7 @@
 <template>
-  <section class="card chart-card">
-    <div class="card-header">
-      <h2 class="card-title">
-        <span class="card-title-icon" aria-hidden="true">🥧</span>
-        {{ title }}
-      </h2>
-    </div>
+  <AppCard :title="title" icon="🥧">
     <v-chart :option="chartOption" :style="{ height: '280px' }" autoresize />
-  </section>
+  </AppCard>
 </template>
 
 <script setup>
@@ -17,6 +11,7 @@ import { PieChart } from 'echarts/charts'
 import { TitleComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
+import AppCard from '../ui/AppCard.vue'
 
 use([PieChart, TitleComponent, CanvasRenderer])
 
@@ -46,33 +41,5 @@ const chartOption = computed(() => ({
 </script>
 
 <style scoped>
-.chart-card {
-  display: flex;
-  flex-direction: column;
-}
-.chart-card .card-header {
-  flex-shrink: 0;
-}
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
-  padding: var(--space-4) var(--space-5);
-  border-bottom: 1px solid var(--color-border-light);
-  flex-wrap: wrap;
-}
-.card-title {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--font-size-lg);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-primary);
-  margin: 0;
-}
-.card-title-icon {
-  font-size: var(--font-size-xl);
-  line-height: 1;
-}
+/* Chart card provided by AppCard - no custom styles needed */
 </style>

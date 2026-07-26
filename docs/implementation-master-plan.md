@@ -808,6 +808,25 @@ market-analysis-optimization-plan.md
 - ✅ 清理 `plugins/echarts.js` 残留文件
 - ✅ theme.css 添加向后兼容 CSS 变量别名（`--color-primary`, `--color-border`, `--color-text-muted` 等）
 
+### Phase 3.2 — AppCard 迁移 + DesignResult AppTabs（✅ 已完成，2026-07-26）
+
+**范围**: 3.1 中递延的前端 UI 重构项
+
+| # | 任务 | 状态 | 备注 |
+|---|------|:----:|------|
+| 3.2.1 | AllocationPieChart → AppCard | ✅ 完成 | `<section class="card chart-card">` → `<AppCard>`，移除手写 card CSS |
+| 3.2.2 | AllocationTable → AppCard | ✅ 完成 | `<section class="card table-card">` → `<AppCard>` |
+| 3.2.3 | PnLBarChart → AppCard | ✅ 完成 | `<section class="card chart-card">` → `<AppCard>` |
+| 3.2.4 | PnLDetailTable → AppCard | ✅ 完成 | subtitle 移至 AppCard `header-action` slot |
+| 3.2.5 | DesignResult tab → AppTabs | ✅ 完成 | 手动 `.design-tabs`/`.tab-btn` → `<AppTabs variant="line">`，history badge 外移共用 |
+| 3.2.6 | changeClass.spec.js 顶层 await 修复 | ✅ 完成 | `const DashboardAiTools = await import()` → `beforeAll` 内动态导入 |
+
+**递延说明**: SummaryCards 和 CapitalInputBar 的 AppCard 迁移涉及子组件内部布局重构，留待后续 Phase。
+
+**验证结果**:
+- `npm test`: **22 文件 / 210 测试全绿** ✅
+- `npm run build`: **构建成功** ✅，chunk 分层验证正确
+
 ### Phase 4.1 — 数据源系统改造（大方案，独立轨道）
 
 此阶段完全对应 `roadmap-data-source-unified.md` 的四个子阶段。详见该文档 §依赖关系与推荐顺序。
