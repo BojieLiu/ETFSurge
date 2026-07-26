@@ -1,8 +1,17 @@
 # ETF Surge 资讯板块 — 推送阻断分析与修复方案
 
-> 版本: v5 | 日期: 2026-07-22 | **实施标准**
-> 三轮 review 通过: 架构完备 ✓ | 代码精确 ✓ | 一致性 ✓ | 风险覆盖 ✓ | 验证方案可执行 ✓
-> v4→v5 变更: `fetch_sina_roll_news()` 增加内部 try/except + JSON 格式校验；优先级表增加 P1.3→P1.4 依赖标注；P1.6→P2.1 降级为可选；补充 P2.2/P2.3 空缺条目；修复 `a kshare` typo；更新 9.2 影响范围表；增加 Sina `ctime` 格式不兼容风险提示；优化 `import` 排版清晰度
+> 版本: v6 | 日期: 2026-07-26 | **审计更新 — 代码比对**
+> 代码审计结果: P0-P1 共 6 项均已在先前阶段实施
+> ✅ P0.1 (后端 id) — `news_fetcher.py` line 255: `it["id"] = hashlib.md5(...)`
+> ✅ P0.2 (前端 fallback) — `NewsView.vue` line 158: `if (it.id == null) { it.id = ... }`
+> ✅ P1.1 (Level 3 中性词移除) — `levistock_fetcher.py` 已迁移至 Level 2
+> ✅ P1.2 (冲突关键词清理) — `levistock_fetcher.py` Level 2 已含"反弹"/"拉升"/"回落"等
+> ✅ P1.3 (fetch_sina_roll_news) — `news_fetcher.py` line 261 已实现
+> ✅ P1.4 (宏观改用新浪) — `fetch_macro_news()` 第一优先级已为新浪财经
+> ✅ P1.5 (RSS 重写) — `fetch_global_news()` 已含 RSS 双源 + akshare 降级
+> ❌ P2.2 (stars 新鲜度) — 待实施 (Phase 6.1.7)
+> ❌ P2.3 (Level 2 精度) — 待实施 (Phase 6.1.7)
+> ❌ §8 验证脚本 — 待扩展 (Phase 6.1.8)
 
 ---
 

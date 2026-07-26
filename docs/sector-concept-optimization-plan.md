@@ -1,6 +1,9 @@
 # 板块/概念数据优化方案
 
 > 多资产实时行情分析与 ETF 组合管理系统 · 行情研判数据增强
+> 版本: v3.0 | 更新日期: 2026-07-26 | 状态: **部分实施**
+> ✅ Phase 1-2 已实施（数据采集 + 缓存写入 + 定时刷新）
+> ❌ Phase 3-6 待实施（API 实时行情 / LLM 注入 / 综合研判 / 前端可视化）
 
 ---
 
@@ -67,7 +70,9 @@ LLM Report
 
 ## 3. 实施方案（6 个阶段，按依赖顺序）
 
-### Phase 1 — 数据采集增强
+### Phase 1 — 数据采集增强 ✅ 已实施
+
+**实施证据**: `backend/app/services/market_trends.py` 中 `compute_sector_momentum()` 已同时采集行业和概念板块动量。`backend/app/fetchers/sector_fetcher.py` 提供了 `fetch_industry_sectors()` / `fetch_concept_sectors()` 双源降级（levistock → akshare），akshare 回退包含完整实时行情字段。
 
 **目标**: `compute_sector_momentum()` 同时采集行业和概念板块动量
 
@@ -93,7 +98,9 @@ async def compute_sector_momentum(top_n: int = 15) -> list[dict[str, Any]]:
 
 4. 每个条目增加 `sector_code`、`type`（"industry"/"concept"）、`main_inflow` 字段，供 LLM 区分引用
 
-### Phase 2 — 缓存写入与定时刷新
+### Phase 2 — 缓存写入与定时刷新 ✅ 已实施
+
+**实施证据**: `backend/app/services/pool_manager.py` 中 `update_sector_cache()` 方法已实现（调用 `compute_sector_momentum()` + `fetch_hot_plates()` + `fetch_sector_heat()` 写入内存缓存）。`backend/app/tasks/sector_refresh.py` 作为 60s APScheduler 任务定时调用。`main.py` 中已注册该刷新循环。
 
 **目标**: pool_manager 的 sector_momentum_cache 有真实数据，APScheduler 定期刷新
 
@@ -179,7 +186,9 @@ async def update_sector_cache(self) -> None:
         logger.exception("[pool] update_sector_cache failed: %s", e)
 ```
 
-### Phase 3 — API 增强：返回实时行情数据
+### Phase 3 — API 增强：返回实时行情数据 ❌ 待实施
+
+**现状**: `market_service.py` 中 `get_sectors_local()` 仍只返回 `sector_code` + `sector_name`（来自本地 Sector 表），不含实时行情字段。`market.py` 路由 `/sectors/industry` 优先调用 `get_sectors_local()`，导致当本地表有记录时返回纯 code+name。但 `sector_fetcher.py` 的 `_ak_industry_sectors()` 等 fallback 已有完整实时行情（price, change_pct, main_inflow 等 16 个字段），仅需调整路由优先级即可使用。
 
 **目标**: `/sectors/industry` 和 `/sectors/concept` 返回带实时行情的数据，前端搜索框可显示涨跌幅颜色
 
@@ -215,7 +224,9 @@ async def industry_sectors(limit: int = Query(200)) -> list[dict[str, Any]]:
 </li>
 ```
 
-### Phase 4 — LLM Prompt 注入
+### Phase 4 — LLM Prompt 注入 ❌ 待实施
+
+**现状**: `llm_context.py` 的 `build_full_context()` 已包含 `include_sectors=True` 参数，通过 `pool_manager.get_sector_momentum()` 获取板块动量数据并注入上下文。但仅包含 momentum 排名，缺少财联社热点板块（`hot_plates`）、板块热度排行（`sector_heat`）数据。LLM prompt 仍无板块热点注入。
 
 **目标**: 两份报告（市场研判报告 + 组合设计报告）都能引用板块和概念数据
 
@@ -291,7 +302,9 @@ if hot_plates:
     lines.append("")
 ```
 
-### Phase 5 — 综合研判与投资建议的板块数据注入
+### Phase 5 — 综合研判与投资建议的板块数据注入 ❌ 待实施
+
+**现状**: 三个路由（`llm_report` / `llm_report_stream` / `llm_advice_stream`）均未注入热点板块数据。`analysis.py` 中无 `_inject_market_context()` 公共函数。但 `build_full_context()` 已完成统一数据管道框架，注入只需在现有管道中加入 `hot_plates` 和 `sector_heat` 数据源。
 
 **目标**: 确保 `generate_market_report()`（综合研判）和 `generate_advice()`（投资建议）及其流式变体都有板块数据
 
@@ -387,7 +400,9 @@ if sector_momentum:
 
 ---
 
-### Phase 6 — 前端可视化
+### Phase 6 — 前端可视化 ❌ 待实施
+
+**现状**: `frontend/src` 中无 sector 相关组件或页面。`market.py` 中 `/hot-plates`、`/sectors/heat`、`/stock-hot-rank`、`/sectors/industry-cls` 等 6 个路由均标记 `# TODO: 未接入前端`。需要前端 `api/index.js` 新增 API 方法并创建 SectorHeat 组件。
 
 **目标**: MarketAnalysis 页面增加热点板块可视化
 

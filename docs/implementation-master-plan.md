@@ -1,7 +1,7 @@
 # ETF Surge 方案实施总计划
 
-> 生成日期: 2026-07-26 | 版本: **v9.0**
-> ✅ **Phase 5.1 已完成**：市场感知联动全栈实施——新增 `core/market_context.py`（MarketContext 数据类）、`services/market_router.py`（5 个路由函数）；修改 `routers/analysis.py`（market 参数过滤）、`routers/portfolio.py`（非 A 市场返回 unsupported）、`services/pool_manager.py`（regime 缓存 dict[str,str] 多市场支持）、`services/strategy_design.py`（market 参数入口）、`services/llm_context.py`（market 参数透传）；`frontend/src/api/index.js`（designAsync 传 market）；35 个新单测全 PASS。详见 §4 Phase 5.1 任务表。
+> 生成日期: 2026-07-26 | 版本: **v9.1**
+> ✅ **Phase 6.1 已完成**：可观测性与系统增强 — ConfigManager + app_config 表（`models/app_config.py`, `core/config_manager.py`）、ConfigPage（`views/ConfigView.vue`）、Sector API 实时行情返回（market.py 路由优先级调整）、LLM 热点板块注入（llm_context.py + pool_manager.py）、stars 时间新鲜度 + Level 2 精度调整（news_fetcher.py + levistock_fetcher.py）、verify_e2e.py 扩展（stars/level 校验 + check_sector_data）。详见 §4 Phase 6.1。
 > 
 > 总览 `docs/` 目录 **32 份**方案文档，梳理实施状态、冲突重叠、修复建议及分阶段执行路线。
 > v7.1：Phase 2.7 剩余项 + Phase 2.8 剩余项 + Phase 2.9 全部完成。新增 encoding_diagnosis.py、refresh_sentiment_cache()、AGENTS.md 关键路径更新。新增 llm_context.py build_full_context() 统一数据管道 + llm_report_stream/llm_advice_stream 改用统一管道。
@@ -900,20 +900,20 @@ curl -s "http://localhost:8000/api/v1/admin/sources/events/timeline?hours=1"
 - 存量单测（analysis_contract/async_lint/database 等 45 个）全部 PASS
 - 前端 `npm run build` 构建通过
 
-### Phase 6.1 — 可观测性与系统增强
+### Phase 6.1 — 可观测性与系统增强 ✅ **2026-07-26 已全部实施**
 
-| # | 任务 | 源文档 | 预估工时 | 前置依赖 |
-|---|------|--------|---------|---------|
-| 6.1.1 | SourceEventStore（source_events 表 + API） | roadmap Phase D (D1+D6) | 6h | 4.1.6 | ✅ 已实施（D1+D6 已完成，见 Phase 4.1.7+4.1.8）。D7 前端监控面板仍待实施 |
-| 6.1.2 | 前端数据源监控页面 | roadmap Phase D7 | ✅ 已实施 | — | 已在 Phase 4.1.9 完成：SourceMonitor.vue + 路由 + 导航 |
-| 6.1.3 | ConfigManager + app_config 表 | config-management §4.1-4.3 | 4h | 无 |
-| 6.1.4 | 前端 ConfigPage | config-management §5 | 4h | 6.1.3 |
-| 6.1.5 | Sector API 实时行情返回 | sector-concept Phase 3 | 3h | 1.1.1 |
-| 6.1.6 | LLM prompt 热点板块注入 | sector-concept Phase 4 | 2h | 1.1.2 + 1.1.3 |
-| 6.1.7 | `stars` 引入时间新鲜度 + 新闻 Level 2 精度调整 | news-pipeline-fix P2 | 1h | 无 |
-| 6.1.8 | `news_fetcher` 单独验证脚本更新 verify_e2e.py | news-pipeline-fix §8 | 0.5h | 0.6+0.7 |
+| # | 任务 | 源文档 | 状态 | 变更文件 |
+|---|------|--------|:----:|---------|
+| 6.1.1 | SourceEventStore（source_events 表 + API） | roadmap Phase D (D1+D6) | ✅ 已实施 | `monitor/source_events.py` + `admin.py` 端点 |
+| 6.1.2 | 前端数据源监控页面 | roadmap Phase D7 | ✅ 已实施 | `components/SourceMonitor.vue` + `/source-monitor` 路由 |
+| 6.1.3 | ConfigManager + app_config 表 | config-management §4.1-4.3 | ✅ 已实施 | **新增**: `models/app_config.py`, `core/config_manager.py`, `api-contracts/admin/config.md`; **修改**: `database.py`, `routers/admin.py` |
+| 6.1.4 | 前端 ConfigPage | config-management §5 | ✅ 已实施 | **新增**: `views/ConfigView.vue`; **修改**: `router/index.js`, `App.vue`, `api/index.js` |
+| 6.1.5 | Sector API 实时行情返回 | sector-concept Phase 3 | ✅ 已实施 | `routers/market.py` — 交换 get_sectors_local 与 sector_fetcher 优先级，移除 TODO 注释 |
+| 6.1.6 | LLM prompt 热点板块注入 | sector-concept Phase 4 | ✅ 已实施 | `services/llm_context.py` — 注入 hot_plates/sector_heat; `services/pool_manager.py` — 新增 get_hot_plates()/get_sector_heat() |
+| 6.1.7 | `stars` 引入时间新鲜度 + 新闻 Level 2 精度调整 | news-pipeline-fix P2 | ✅ 已实施 | `fetchers/news_fetcher.py` — 新增 _compute_stars(); `fetchers/levistock_fetcher.py` — 移除 Level 2 时间词 |
+| 6.1.8 | `news_fetcher` 验证脚本更新 verify_e2e.py | news-pipeline-fix §8 | ✅ 已实施 | `scripts/verify_e2e.py` — 新增 stars/level 字段校验 + check_sector_data() 函数, 注册 sectors 模块 |
 
-**验证**: 数据源状态页可查 + 配置页读写正常 + 板块数据实时行情带涨跌颜色
+**验证**: 配置页 GET/PUT/恢复 ✅ 已实施 + 板块数据实时行情带涨跌颜色 ✅ 已实施 + stars 字段含时间新鲜度 ✅ 已实施 + verify_e2e.py --module sectors ✅ 已实施
 
 ### Phase 7.1 — 远期优化
 
@@ -937,7 +937,7 @@ curl -s "http://localhost:8000/api/v1/admin/sources/events/timeline?hours=1"
 | async-boundary-fix-plan.md (v1.3) | 修复方案 | 🟡 **部分实施 (Phase 0.9)** | factor_registry + async_utils + pool_manager + main.py | Phase 0.9 → 2.6 | v2.0 已发布，剩余修复见 Phase 2.6 |
 | async-boundary-fix-plan.md (v2.0) | 修复方案 | ❌ 待实施 | factor_registry.py:839-866 | Phase 2.6 | 2026-07-26 更新，修复遗漏 Sina IOPV 阻塞 |
 | systematic-quality-review.md | 审计报告 | ❌ 待实施 | 全系统 | Phase 2.7 | 2026-07-26 新增，6 个质量问题 |
-| config-management-plan.md | 实施方案 | ❌ 未实施 | 后端 admin + 前端 ConfigPage | Phase 6.1 | — |
+| config-management-plan.md | 实施方案 | ✅ **已实施 (Phase 6.1.3+6.1.4)** | 后端 admin + 前端 ConfigPage | Phase 6.1 | ConfigManager + ConfigView.vue + api-contracts |
 | data-source-monitoring-plan.md | 实施方案 | ❌ **已替代** | — | — | 被 `roadmap-data-source-unified.md` 替代 |
 | **design-check-pipeline-redesign.md** | **重构方案** | ✅ **已实施 (Phase 1.0)** | **task_manager + design_pipeline + DB + 前端** | **Phase 1.0** | 12 文件，588 行，8 新集成测试 |
 | design-check-quality-report.md | 质量审计 | ✅ **19/19 已实施** | 全链路 | Phase 1.1/2.1 | P2-4(target_weight 默认值) 代码已验证含 `else 0.1` 兜底 ✅ |
@@ -961,7 +961,7 @@ curl -s "http://localhost:8000/api/v1/admin/sources/events/timeline?hours=1"
 | **remaining-issues-solution-design.md** | **实施方案** | ✅ **全部已实施**（已从 staged→committed） | **pool_manager + task_manager + ws + factor_registry** | **Phase 2.1** | S1-A(TTL) `53acbfa`、S1-C(渐进) `ef3de11`、S2(归一化) `5116681`、S3-B/C(WS) `ef3de11` |
 | review-20260720.md | 评审报告 | N/A | N/A | — | 非实施方案 |
 | roadmap-data-source-unified.md | 实施方案 | ✅ **已实施（D7除外）** | china_market + market_service + source_registry + monitor | Phase 4.1 | 替代三份原方案。v3.0 已更新为回顾文档。Phase A/B/C/D1-D6 均已实施 |
-| sector-concept-optimization-plan.md | 实施方案 | ⚠️ Phase 1-2 已实施 | market_trends + pool_manager + llm.py | Phase 1.1/6.1 | 数据采集+缓存写入+60s定时刷新已实施（`sector_refresh.py`+`update_sector_cache()`）；Phase 3-5（API实时行情+前端展示）待实施 |
+| sector-concept-optimization-plan.md (v3.0) | 实施方案 | ✅ Phase 1-6 全部实施 | market_trends + pool_manager + llm.py + market.py + analysis.py + 前端 | Phase 1.1/6.1 | 数据采集+缓存写入+60s定时刷新 ✅; Phase 3 (API实时行情) ✅ 已实施(Phase 6.1.5); Phase 4 (LLM注入) ✅ 已实施(Phase 6.1.6); Phase 5-6 借由 build_full_context 统一数据管道覆盖 |
 | source-registry-optimization-plan.md | 实施方案 | ❌ **已替代** | — | — | 被 roadmap 替代 |
 | **scaffold-factor-resolution-plan.md** | **修复方案** | ✅ **全部实施** | **factor_registry + 测试** | **Phase 2.3** | 7 个脚手架因子全 LIVE（33/33），因子健康端点，运行时断言门禁 |
 | **design-quality-review-20260725.md** | **审计报告** | N/A | allocation_engine + factor_registry + budgets | — | 非实施方案 |
@@ -1057,7 +1057,7 @@ Phase 4.1 (数据源改造 A/B/C/D1-D6) ✅ 已实施, D7 独立待实施
 
 Phase 5.1 (市场感知联动)          ✅ 已完成（MarketContext + market_router + 多市场感知）
 
-Phase 6.1 (可观测性增强)         D7 前端 + ConfigManager 独立; D1-D6 已随 Phase 4.1 实施
+Phase 6.1 (可观测性增强)         ✅ 全部完成 — ConfigManager + ConfigPage + Sector API 实时行情 + LLM 热点注入 + stars 新鲜度 + verify_e2e 扩展
 
 Phase 7.1 (远期优化)             无紧急依赖
 ```
@@ -1080,7 +1080,7 @@ Phase 7.1 (远期优化)             无紧急依赖
   Phase 2.2.8-2.2.10 (预期收益 + 净流入 + 科技ETF)
 
 🔌 数据源统一改造 Track
-  Phase 4.1 (A/B/C/D1-D6 ✅ 已实施) → Phase 6.1.2 (D7 前端待实施)
+  Phase 4.1 (A/B/C/D1-D6 ✅ 已实施) → Phase 6.1.2 (D7 前端 ✅ 已实施) → Phase 6.1.3-6.1.4 (配置管理待实施)
 
 🛡️ 数据管道质量提升 Track（新增，~3-4h）
   Phase 2.1.0-2.1.12 (引擎修复 + 策略检查增强 + 测试防护 + E2E 断言)

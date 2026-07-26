@@ -113,7 +113,8 @@ const navItems = [
   { path: '/market-analysis', label: '行情分析', icon: '📰' },
   { path: '/news', label: '资讯', icon: '🗞️' },
   { path: '/token-monitor', label: 'Token 监控', icon: '🔑' },
-  { path: '/source-monitor', label: '数据源', icon: '📡' }
+  { path: '/source-monitor', label: '数据源', icon: '📡' },
+  { path: '/admin/config', label: '配置', icon: '⚙️' }
 ]
 
 const isActiveRoute = (path) => {

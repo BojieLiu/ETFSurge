@@ -225,6 +225,29 @@ def _dedupe(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+def _compute_stars(level: int, time_str: str) -> int:
+    """stars = 重要性 + 时间新鲜度，上限 5 星。
+
+    新鲜度加分：2小时内 +1，1小时内 +2。
+    基础分 = level（1-5），+ 新鲜度加成，上限 5。
+    """
+    if not time_str:
+        return min(level, 5)
+    try:
+        dt = datetime.strptime(str(time_str)[:19], "%Y-%m-%d %H:%M:%S")
+        hours_ago = (datetime.now() - dt).total_seconds() / 3600
+    except (ValueError, IndexError):
+        return min(level, 5)
+
+    freshness = 0
+    if hours_ago <= 1:
+        freshness = 2
+    elif hours_ago <= 2:
+        freshness = 1
+
+    return min(level + freshness, 5)
+
+
 def _attach_level(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """为条目补充 level/stars 并统一 time 字段格式。"""
     for it in items:
@@ -233,7 +256,10 @@ def _attach_level(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             title = it.get("title", "")
             level = classify_news_level(title)
             it["level"] = level
-            it["stars"] = level
+            it["stars"] = _compute_stars(level, it.get("time", ""))
+        else:
+            # 财联社源已有 level，更新 stars 加入时间新鲜度
+            it["stars"] = _compute_stars(it.get("level", 1), it.get("time", ""))
     return items
 
 
@@ -243,9 +269,8 @@ def fetch_news_headlines() -> list[dict[str, Any]]:
         items += fetch_cailian_telegraph(15)        # 财联社快讯（主源，0.4s 稳定）
         items += fetch_macro_news()                  # 宏观：CCTV + 百度
         items += fetch_global_news()                 # 全球：RSS + akshare
-        # 统一归一化时间，确保所有条目都有 sort_time
-        for it in items:
-            _normalize_time(it)
+        # 统一打标 level/stars（含财联社源的 stars 时间新鲜度刷新）
+        items = _attach_level(items)
         items = _filter_fresh(items, max_age_hours=48)  # 剔除旧闻
         # 按 sort_time 降序排列（数值排序，稳定可靠）
         items.sort(key=lambda x: x.get("sort_time", 0), reverse=True)

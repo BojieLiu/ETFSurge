@@ -33,8 +33,12 @@ async def init_db():
         from .models.search import Instrument, Sector, Index
         from .models.portfolio_design import PortfolioDesign
         from .models.strategy_check import StrategyCheckRecord
+        from .models.app_config import AppConfig
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_migrate)
+    # Phase 6.1.3: initialize ConfigManager with DB session factory
+    from .core.config_manager import config_manager
+    config_manager.init(async_session)
 
 
 def _migrate(conn):

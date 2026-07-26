@@ -90,4 +90,6 @@ export const adminApi = {
   sourcesTimeline: (hours = 1) => api.get('/admin/sources/events/timeline', { params: { hours } }),
   sourcesFailures: (limit = 10) => api.get('/admin/sources/events/failures', { params: { limit } }),
   sourcesCircuitBreakers: () => api.get('/admin/sources/circuit-breakers'),
+  getConfig: () => api.get('/admin/config'),
+  updateConfig: (payload) => api.put('/admin/config', payload),
 }

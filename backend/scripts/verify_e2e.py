@@ -464,6 +464,17 @@ def section_news():
                             check(f"前 {check_len} 条按 sort_time 降序排列", True)
                         else:
                             check(f"前 {check_len} 条按 sort_time 降序排列", False, "排序异常")
+                # Phase 6.1.8: stars/level 字段验证
+                has_level = all("level" in item for item in data)
+                check("每条新闻含 level 字段（重要性标识）", has_level)
+                if has_level:
+                    valid_levels = all(isinstance(it["level"], int) and 1 <= it["level"] <= 5 for it in data)
+                    check("level 均为 1~5 整数", valid_levels)
+                has_stars = all("stars" in item for item in data)
+                check("每条新闻含 stars 字段（新鲜度+重要性）", has_stars)
+                if has_stars:
+                    valid_stars = all(isinstance(it["stars"], int) and 1 <= it["stars"] <= 5 for it in data)
+                    check("stars 均为 1~5 整数", valid_stars)
     except requests.Timeout:
         check("GET /news/headlines", False, "请求超时（35s）— 后端 30s 超时 + 缓存预热")
     except Exception as e:
@@ -482,6 +493,26 @@ def section_news():
         check("GET /news/macro", False, "请求超时（35s）")
     except Exception as e:
         check("GET /news/macro", False, str(e))
+
+
+def check_sector_data():
+    """板块/概念数据端点验证（Phase 6.1.8）。"""
+    section("板块数据")
+    for typ in ("industry", "concept"):
+        try:
+            r = requests.get(f"{BASE}/api/v1/market/sectors/{typ}?limit=5", timeout=15)
+            check(f"GET /sectors/{typ} -> {r.status_code}", r.status_code == 200)
+            if r.status_code == 200:
+                data = r.json()
+                is_list = isinstance(data, list)
+                check(f"返回 {len(data)} 条", is_list and len(data) > 0)
+                if is_list and data:
+                    has_change = "change_pct" in data[0]
+                    has_inflow = "main_inflow" in data[0]
+                    check(f"{typ} 含 change_pct", has_change)
+                    check(f"{typ} 含 main_inflow", has_inflow)
+        except Exception as e:
+            check(f"GET /sectors/{typ}", False, str(e))
 
 
 def section_async_resilience():
@@ -715,6 +746,7 @@ MODULES = {
     "ws": section_ws,
     "resilience": section_async_resilience,
     "factors": section_factors,
+    "sectors": check_sector_data,
 }
 
 SMOKE_MODULES = ["health", "market"]

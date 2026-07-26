@@ -2,6 +2,8 @@
 
 from fastapi import APIRouter, Query
 
+from typing import Any
+
 from ..monitor.token_usage import token_store
 from ..monitor.source_events import source_event_store
 from ..services.source_registry import registry
@@ -140,3 +142,45 @@ async def get_factor_health():
         return {"status": "ok", "symbols": report}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+# ── Runtime Config Management (Phase 6.1.3) ─────────────────────
+
+
+@router.get("/config")
+async def get_config():
+    """返回所有配置项的当前值（含 DB overrides + .env fallback）。"""
+    from ..core.config_manager import config_manager
+    return await config_manager.get_all()
+
+
+@router.put("/config")
+async def update_config(payload: dict[str, str]):
+    """批量更新配置项，UPSERT 语义。
+
+    请求体: {"DEEPSEEK_API_KEY": "sk-xxx", "TUSHARE_TOKEN": "...", ...}
+    只处理 CONFIG_ITEMS 中定义的 key，忽略未知 key。
+    """
+    from ..core.config_manager import config_manager
+    from ..core.config_manager import CONFIG_ITEMS
+    valid_keys = {item["key"] for item in CONFIG_ITEMS}
+    results = {}
+    for key, value in payload.items():
+        if key not in valid_keys:
+            results[key] = "skipped (unknown key)"
+            continue
+        await config_manager.set_override(key, str(value))
+        results[key] = "updated"
+    return {"results": results}
+
+
+@router.delete("/config/{key}")
+async def delete_config_override(key: str):
+    """删除配置项的 DB override，恢复为 .env 值。"""
+    from ..core.config_manager import config_manager
+    from ..core.config_manager import CONFIG_ITEMS
+    valid_keys = {item["key"] for item in CONFIG_ITEMS}
+    if key not in valid_keys:
+        return {"status": "skipped", "reason": "unknown key"}
+    await config_manager.delete_override(key)
+    return {"status": "deleted", "key": key}

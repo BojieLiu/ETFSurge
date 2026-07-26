@@ -37,6 +37,12 @@ const routes = [
     component: () => import('../components/SourceMonitor.vue'),
     meta: { title: '数据源监控', description: '数据源健康状态、事件趋势与失败记录' },
   },
+  {
+    path: '/admin/config',
+    name: 'config',
+    component: () => import('../views/ConfigView.vue'),
+    meta: { title: '系统配置', description: '管理 API 密钥与服务配置' },
+  },
 ]
 
 export default createRouter({ history: createWebHistory(), routes })

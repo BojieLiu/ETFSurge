@@ -58,7 +58,7 @@ async def build_full_context(
             context["index_realtime"] = []
             errors.append(f"indices: {e}")
 
-    # 4. Sector momentum
+    # 4. Sector momentum + hot plates + sector heat (Phase 6.1.6)
     if include_sectors:
         try:
             sector_data = pool_manager.get_sector_momentum() or []
@@ -66,6 +66,19 @@ async def build_full_context(
         except Exception as e:
             context["sector_momentum"] = []
             errors.append(f"sectors: {e}")
+        # Phase 6.1.6: 注入热点板块和板块热度排行
+        try:
+            hot_plates_data = pool_manager.get_hot_plates() or []
+            context["hot_plates"] = hot_plates_data[:10]
+        except Exception as e:
+            context["hot_plates"] = []
+            errors.append(f"hot_plates: {e}")
+        try:
+            sector_heat_data = pool_manager.get_sector_heat() or []
+            context["sector_heat"] = sector_heat_data[:15]
+        except Exception as e:
+            context["sector_heat"] = []
+            errors.append(f"sector_heat: {e}")
 
     # 5. Realtime ETFs (from market_service cache)
     try:

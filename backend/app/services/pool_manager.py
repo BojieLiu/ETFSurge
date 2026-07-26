@@ -621,6 +621,14 @@ class PoolManager:
             return self._sector_momentum_cache
         return self._sector_momentum_cache or []
 
+    def get_hot_plates(self) -> list[dict]:
+        """获取热点板块缓存（Phase 6.1.6）。"""
+        return self._hot_plates_cache or []
+
+    def get_sector_heat(self) -> list[dict]:
+        """获取板块热度排行缓存（Phase 6.1.6）。"""
+        return self._sector_heat_cache or []
+
     def get_index_realtime(self) -> list[dict]:
         """获取 A 股大盘实时行情缓存。"""
         return self._index_realtime_cache or []

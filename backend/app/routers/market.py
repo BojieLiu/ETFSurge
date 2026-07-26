@@ -232,24 +232,28 @@ async def sentiment() -> dict:
 
 
 
-# TODO: 未接入前端
 @router.get("/sectors/industry")
 async def industry_sectors(limit: int = Query(80)) -> list[dict[str, Any]]:
-    """行业板块列表：优先本地 sectors 表，否则降级到东方财富/akshare。"""
+    """行业板块列表（含实时行情）：优先 sector_fetcher 实时数据，本地 sectors 表作降级。"""
+    realtime = await asyncio.to_thread(fetch_industry_sectors, limit)
+    if realtime:
+        return realtime[:limit]
     local = await get_sectors_local("industry")
     if local:
         return local[:limit]
-    return await asyncio.to_thread(fetch_industry_sectors, limit)
+    return []
 
 
-# TODO: 未接入前端
 @router.get("/sectors/concept")
 async def concept_sectors(limit: int = Query(80)) -> list[dict[str, Any]]:
-    """概念板块列表：优先本地 sectors 表，否则降级到东方财富/akshare。"""
+    """概念板块列表（含实时行情）：优先 sector_fetcher 实时数据，本地 sectors 表作降级。"""
+    realtime = await asyncio.to_thread(fetch_concept_sectors, limit)
+    if realtime:
+        return realtime[:limit]
     local = await get_sectors_local("concept")
     if local:
         return local[:limit]
-    return await asyncio.to_thread(fetch_concept_sectors, limit)
+    return []
 
 
 # TODO: 未接入前端
