@@ -701,7 +701,7 @@ def section_ws():
 
 
 def section_factors(host, port):
-    """#5: 因子数据质量 — 通过 admin/factor-health 端点检查非零因子比例。"""
+    """#5: 因子数据质量 — 通过 admin/factor-health 端点检查非零因子比例 + IC 端点。"""
     section("因子数据质量")
     try:
         r = requests.get(f"{BASE}/api/v1/admin/factor-health", timeout=30)
@@ -724,6 +724,25 @@ def section_factors(host, port):
             check("All symbols factor-healthy", True)
     except Exception as e:
         check(f"factor-health endpoint", False, str(e))
+
+    section("IC 追踪端点")
+    try:
+        r = requests.get(f"{BASE}/api/v1/factors/ic", timeout=30)
+        if r.status_code == 200:
+            data = r.json()
+            check("GET /api/v1/factors/ic -> 200", True)
+            factors = data.get("factors", [])
+            check(f"  factors array contains {len(factors)} entries", len(factors) > 0, f"count={len(factors)}")
+            check(f"  total field matches", data.get("total", 0) == len(factors), f"total={data.get('total')} vs len={len(factors)}")
+            check(f"  updated_at is valid", bool(data.get("updated_at")), f"updated_at={data.get('updated_at')}")
+            if factors:
+                sample = factors[0]
+                check(f"  first factor has code", bool(sample.get("code")), f"code={sample.get('code')}")
+                check(f"  first factor has ic_value", "ic_value" in sample, f"ic_value={sample.get('ic_value')}")
+        else:
+            check("GET /api/v1/factors/ic", False, f"HTTP {r.status_code}")
+    except Exception as e:
+        check(f"GET /api/v1/factors/ic", False, str(e))
 
 
 def print_summary():

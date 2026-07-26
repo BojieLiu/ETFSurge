@@ -79,11 +79,7 @@
 | `config-management-plan.md` | **P2** | 无（独立） | ~8h | — |
 | `design-report-optimization-plan.md` A2/C1/C2 | **P2** | 依赖因子分正常（Phase 0.7 已完成） | ~2h | — |
 | `e2e-testing-plan.md` | **P3** | 前端 UI 稳定后（避免维护成本过高） | ~16h | — |
-| `factor-model-extension-plan.md` | **P3** | 远期优化 | — | — |
-
----
-
-## 2. 冲突与重叠分析
+| `factor-model-extension-plan.md` | **P0** | 实施就绪（v4.0 已重写） | Phase 7.1.1 | 当前版本 v4.0，反映 33 因子架构 + IC 追踪器激活方案 | 冲突与重叠分析
 
 ### 2.1 🔴 重大重叠：数据源改造三合一（已解决）
 
@@ -917,14 +913,14 @@ curl -s "http://localhost:8000/api/v1/admin/sources/events/timeline?hours=1"
 
 ### Phase 7.1 — 远期优化
 
-| # | 任务 | 源文档 | 说明 |
-|---|------|--------|------|
-| 7.1.1 | Factor IC 追踪器激活 | factor-model-extension | 评估是否需要更多因子，不急于实施 |
-| 7.1.2 | 排版令牌迁移 | frontend-ui-optimization Phase 3-4 | 视觉效果深化 |
-| 7.1.3 | SVG 图标替换 emoji | frontend-ui-optimization Phase 3 | 美观度提升 |
-| 7.1.4 | 响应式补齐 | frontend-ui-optimization Phase 4 | 移动端适配 |
-| 7.1.5 | 进一步 E2E 增强 + 剩余 UI 组件单测 | frontend-testing-safety-net C1/C3 | Charts 渲染 E2E + News 筛选 + 技术分析流程 E2E（+6-8 条）；剩余基础组件（AppTable/AppSelect/Skeleton 等）单测 |
-| 7.1.6 | design-report B1-B3（LLM prompt 分析增强） | design-report-optimization B1-B3 | LLM prompt 深层分析增强 |
+| # | 任务 | 源文档 | 状态 | 说明 |
+|---|------|--------|:----:|------|
+| 7.1.1 | Factor IC 追踪器激活 | factor-model-extension | ✅ 已实施（Phase A） | build_forward_returns() + compute_periodic_ic() 已实现；factor_registry.py 已集成 _last_ic_batch + IC compute；GET /api/v1/factors/ic API 已创建；api-contracts/factors/ic.md 已创建；verify_e2e.py 已扩展；16 个单测全部 PASS |
+| 7.1.2 | 排版令牌迁移 | frontend-ui-optimization Phase 3-4 | ❌ 待实施 | Phase 1 Step 1（CSS 变量补齐）已在 theme.css L121-124 完成 ✅；Phase 3-4 仍需推进 |
+| 7.1.3 | SVG 图标替换 emoji | frontend-ui-optimization Phase 3 | ❌ 待实施 | 美观度提升 |
+| 7.1.4 | 响应式补齐 | frontend-ui-optimization Phase 4 | ❌ 待实施 | 移动端适配 |
+| 7.1.5 | 进一步 E2E 增强 + 剩余 UI 组件单测 | frontend-testing-safety-net C1/C3 | ❌ 待实施 | 基础设施（playwright.config.js + server utils + package.json 脚本）已就绪 ✅；已实现 6/12 个 spec 文件。Charts 渲染 E2E + News 筛选 + 技术分析流程 E2E（+6-8 条）；剩余基础组件（AppTable/AppSelect/Skeleton 等）单测 |
+| 7.1.6 | design-report B1-B3（LLM prompt 分析增强）+ C2（科技ETF分散） | design-report-optimization B1/B2/B3/C2 | ✅ **全部已实施** | B1（黄金动量入选理由）→ `engine/rationale.py:60-63`；B2（国债久期风险提示）→ `engine/rationale.py:64-65`；B3（LLM prompt 量化规则）→ `analysis/prompts/v1/design_report.md:68`；C2（科技集中度→科创50 ETF分散）→ `engine/allocation_engine.py:443-458` |
 
 ---
 
@@ -944,9 +940,9 @@ curl -s "http://localhost:8000/api/v1/admin/sources/events/timeline?hours=1"
 | design-failure-and-strategy-check-review.md | 修复方案 | ✅ **已实施 (Phase 0.8)** | 前端 + portfolio_service + llm + tests | Phase 0.8 | 10 文件，252 行 |
 | design-optimization-plan.md | 实施方案 | ✅ 已实施 | strategy_design + engine/ | Phase 0.5 前 | — |
 | **design-pipeline-foundation-issues.md** | **诊断+修复方案** | ✅ **已实施 (Phase 0.7)** | **etf_scanner + pool_manager + factor_registry + risk_controls + allocation_engine** | **Phase 0.7** | 15 新单测，9 文件，1428 行 |
-| design-report-optimization-plan.md | 实施方案 | ✅ 已实施 | llm.py + design_report.py + engine/allocation_engine.py | Phase 2.2 | A1/A2/A3 ✅ B1/B2/B3 ✅ C1 ✅；C2 ✅（基础版，有集成缺口） |
-| e2e-testing-plan.md | 实施方案 | ❌ 未实施 | frontend/e2e/ spec 文件 | Phase 7.1 | 建议推迟 |
-| factor-model-extension-plan.md | 实施方案 | ⚠️ 部分 | factor_registry.py | Phase 7.1 | 远期优化 |
+| design-report-optimization-plan.md | 实施方案 | ✅ **已实施** | llm.py + design_report.py + engine/rationale.py + engine/allocation_engine.py | Phase 2.2 | A1/A2/A3 ✅ B1/B2/B3 ✅ C1 ✅；C2 ✅（`engine/allocation_engine.py:443-458` 科技集中度>60%卫星预算→自动科创50 ETF(588000)分散） |
+| e2e-testing-plan.md | 实施方案 | ⚠️ 部分实施 | frontend/e2e/ | Phase 7.1 | 基础设施（playwright.config.js + server utils + package.json 脚本）已就绪 ✅；已实现 6/12 个 spec 文件（01-smoke / 02-visual / 03-navigation / 04-wizard-design / 05-theme-assets / 12-regression）。全量 12-spec 计划未实施 |
+| factor-model-extension-plan.md | 实施方案 | ✅ **v4.0 已重写** | factor_registry.py + ic_tracker.py + routers/factors.py | Phase 7.1.1 | 已全面重写：反映 33 因子全 LIVE 架构 + engine/ 包 + IC 追踪器两阶段激活方案（Phase A: 核心管道 + API 端点；Phase B: 持久化 + UI） |
 | five-improvements-plan.md | 实施方案 | ✅ **全部完成** | risk_controls.py + rationale.py + portfolio_service.py | Phase 1.1 | #1 统一市态已落地（`portfolio_service.py:406-409`）|
 | fix-global-indices-plan.md | 修复方案 | ✅ **已实施 (Phase 0)** | market_service + GlobalIndicesStrip | Phase 0 | — |
 | frontend-architecture-refactor.md | 实施方案 | ✅ 已实施 | 全部前端组件 | — | — |
@@ -1106,3 +1102,14 @@ Phase 7.1 (远期优化)             无紧急依赖
 | | **v7.2** | 2026-07-26 | Phase 4.1 状态审核。全量代码审计发现 roadmap-data-source-unified.md v2.0 中的实施方案绝大部分已被后续 commits 落地。Phase A/B/C/D1-D6 均已实施，仅 D7（前端数据源监控面板）待完成。`roadmap-data-source-unified.md` 更新为 v3.0 回顾文档。`implementation-master-plan.md` Phase 4.1 更新为 ✅ 已实施状态。 |
 | | **v7.3** | 2026-07-26 | Phase 4.1 全部完成：4.1.2（全球指数链路）代码审计确认实际为 EM→Sina→Finnhub 而非计划所述 TwelveData，verify_e2e.py 已含 HK/US 三大指数断言，状态修正为 ✅。4.1.9（前端数据源监控面板 D7）实施完成：新建 SourceMonitor.vue（TokenMonitor 风格，含 ECharts 堆叠柱状图 + 源状态矩阵 + 失败事件表格）、路由 `/source-monitor`、导航"📡 数据源"、`api-contracts/admin/sources.md` 契约。`api/index.js` 新增 4 个 adminApi 源监控方法。npm run build 验证通过。 |
 | | **v9.0** | 2026-07-26 | **Phase 5.1 全栈实施完成**：市场感知联动。新增 `core/market_context.py`（MarketContext 数据类，4 市场） + `services/market_router.py`（5 路由函数）。修改 `routers/analysis.py`（SectorAnalysisRequest.market、llm-report/stream 市场过滤、非 A 板块分析友好提示）、`routers/portfolio.py`（design-async market 参数，非 A 返回 unsupported）、`services/pool_manager.py`（regime 缓存 dict[str,str] 多市场）、`services/strategy_design.py`（market 参数入口）、`services/llm_context.py`（market 参数透传）、`frontend/src/api/index.js`（designAsync 传 market）。`api-contracts/market/market-context.md` 契约。35 个新单测全 PASS，存量 45 个全 PASS，npm run build 通过。commit `2371815`。 |
+| | **v9.2** | 2026-07-26 | **Phase 7.1.1 实施（IC 追踪器激活）** | 备注见下方 |
+| | | | **已实施：** |
+| | | | - build_forward_returns() + compute_periodic_ic() 到 ic_tracker.py |
+| | | | - _last_ic_batch + IC compute 集成到 factor_registry.py compute() |
+| | | | - GET /api/v1/factors/ic API 端点（routers/factors.py） |
+| | | | - api-contracts/factors/ic.md API 契约 |
+| | | | - verify_e2e.py 扩展 IC 端点检查 |
+| | | | - tests/test_ic_tracker.py 16 个单测全部 PASS |
+| | | | **还剩：** Phase B(IC 持久化 + UI) |
+| |
+| | **v9.1** | 2026-07-26 | **Phase 7.1 文档审计更新** | 2026-07-26 | **Phase 7.1 文档审计更新** — 基于代码交叉验证，6 份方案文档对齐当前代码。关键发现：7.1.6 B1/B2/B3/C2 全部已实施（`engine/rationale.py` B1+B2 ✅、`design_report.md` B3 ✅、`allocation_engine.py` C2 ✅）；`factor-model-extension-plan.md` 已重写为 v4.0（反映 33 因子架构 + IC 追踪器方案）；`frontend-ui-optimization-plan.md` Phase 1 Step 1 已在 theme.css L121-124 完成；`e2e-testing-plan.md` 基础设施就绪但有 6/12 个 spec；`frontend-testing-safety-net.md` 准确。详见 `AGENTS.md` 评估记录。 |

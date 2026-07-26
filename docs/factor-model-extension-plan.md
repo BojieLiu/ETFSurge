@@ -1,315 +1,438 @@
 # ETF Surge 因子模型扩展方案
 
-> 版本: v2.0 | 日期: 2026-07-18 | 状态: 待评审
+> 版本: v4.0 | 日期: 2026-07-26 | 状态: **实施就绪**
+>
+> ✅ **本文档已根据当前代码重写（2026-07-26）**：
+> - 反映 33 因子全 LIVE 的当前架构（而非旧版 12 因子）
+> - 反映 engine/ 纯函数包架构（而非旧的 strategy_design.py）
+> - 以 IC 追踪器激活（Phase 7.1.1）为核心实施目标
+> - YAML 定义层（167 因子）保留作参考，方向已转为 "IC 验证后决定取舍"
 
 ---
 
-## 一、现状分析
+## 一、现状全景
 
-### 1.1 因子模型架构现状
+### 1.1 因子模型四层架构
 
-ETF Surge 已搭建完整的因子模型基础设施，但存在**定义与实现严重脱节**：
+ETF Surge 的因子模型经过 Phase 2.2→2.5 的实施，已形成完整四层架构：
 
-| 层级 | 文件 | 现状 |
-|:-----|:-----|:-----|
-| **定义层** | `factor_definitions.yaml` | **167** 个因子定义，6 大类（对标 Barra/华证/申万） |
-| **计算层** | `factor_registry.py` | 仅 12 个因子有计算函数（`_BUILTIN_COMPUTERS`） |
-| **评估层** | `ic_tracker.py` | Spearman IC / ICIR 完整实现，**从未实际运行过** |
-| **应用层** | `strategy_design.py` | **完全未接入**。使用独立的 5 维度手工评分 |
+| 层级 | 文件 | 当前状态 | 
+|:-----|:-----|:--------:|
+| **定义层** | `factor_definitions.yaml` | 167 个因子定义，6 大类（对标 Barra/华证/申万） |
+| **计算层** | `factor_registry.py` | **33 个核心因子全 LIVE**（`_CORE_FACTORS` 列表，均含真实 compute 函数） |
+| **评估层** | `ic_tracker.py` | Spearman IC / ICIR 完整实现，compute() 中已集成 `ic_tracker.record()` 调用，**但无消费端点** |
+| **应用层** | `engine/allocation_engine.py` + `engine/rationale.py` + `engine/budgets.py` | 纯函数分配器，通过因子分排序 + cross-section z-score 标准化接入 |
 
-### 1.2 YAML 因子全景
+### 1.2 33 核心因子全景
+
+`factor_registry.py` 中 `_CORE_FACTORS` 列表定义了 33 个核心因子：
+
+| 类别 | 因子数 | 因子代码 | 说明 |
+|:-----|:------:|:---------|:-----|
+| style.size | 2 | `ln_mcap`, `ln_float_mcap` | 对数总市值/流通市值 |
+| technical.ma | 4 | `sma_5/10/20/60` | 5/10/20/60 日均线 |
+| technical.rsi | 1 | `rsi_14` | 14 日 RSI |
+| technical.macd | 1 | `macd` | MACD |
+| technical.bollinger | 1 | `bandwidth` | 布林带宽 |
+| technical.volume | 2 | `vol_ratio`, `vwap` | 量比、VWAP |
+| technical.atr | 1 | `atr_14` | 14 日 ATR |
+| technical.kdj | 3 | `k_value`, `d_value`, `j_value` | KDJ 三值 |
+| technical.signal | 1 | `overall` | 综合信号 |
+| etf.* | 10 | `price`, `premium_discount`, `change_pct`, `return_1m`/`return_3m`, `tracking_error`, `shares_change`, `amount_stability`, `industry_diversification`, `institutional_holdings_change` | ETF 专有因子 |
+| sentiment | 4 | `panic_greed_diff`, `stock_divergence`, `news_heat`, `news_direction` | 情绪因子 |
+| china.policy | 3 | `five_year_plan`, `strategic_emerging`, `dual_circulation` | 政策因子 |
+
+**合计：33 个核心因子，65 个 compute 函数（含辅助）。**
+
+### 1.3 YAML 定义层全景
+
+YAML 文件中定义了 167 个因子，按数据可得性和 ETF 应用价值评估：
 
 | 大类 | 定义数 | 数据可得性 | ETF 应用价值 | 处置建议 |
 |:-----|:------:|:---------:|:----------:|:--------|
-| **technical**（技术） | 58 | 🟢 OHLCV 可算 | 🟡 冗余多（排列组合） | 筛 8-10 个不共线的接入 |
+| **technical**（技术） | 58 | 🟢 OHLCV 可算 | 🟡 冗余多（排列组合） | IC 验证后筛 5-8 个不共线的扩充 |
 | **style**（风格） | 37 | 🟡 需要财务数据 | 🟢 价值/质量/成长是 ETF 核心 | **优先扩容，ROI 最高** |
 | **china_specific**（A股特有） | 13 | 🟡 北向/两融/涨跌停 | 🟢 A股 ETF 独特 alpha | **第二阶段重点** |
 | **microstructure**（微观结构） | 10 | 🟡 tick 级 | 🟢 中 — ETF 流动性筛选 | 补充 2-3 个 ETF 专用因子 |
 | **theme**（主题） | 29 | 🔴 ESG/专利/网红 | 🔴 与 ETF 无关 | ❌ 跳过 |
 | **alternative**（另类） | 20 | 🔴 需付费数据 | 🔴 边际收益低 | ❌ 跳过 |
 
-### 1.3 已实现的 12 个因子
+> **关键决策**：不再追求"补齐 167 因子差距"，改为 IC 验证驱动——先激活 IC 追踪器，让数据指示哪些 YAML 因子值得实现。
 
-| # | 因子代码 | 名称 | 计算函数 | 数据源 |
-|:-:|:--------|:-----|:--------|:------|
-| 1 | `technical.ma.sma_5` | 5日均线 | `_compute_sma_5` | close[-5:] |
-| 2 | `technical.ma.sma_10` | 10日均线 | `_compute_sma_10` | close[-10:] |
-| 3 | `technical.ma.sma_20` | 20日均线 | `_compute_sma_20` | close[-20:] |
-| 4 | `technical.ma.sma_60` | 60日均线 | `_compute_sma_60` | close[-60:] |
-| 5 | `technical.rsi.rsi_14` | 14日RSI | `_compute_rsi_14` | close[-15:] |
-| 6 | `technical.macd.macd` | MACD值 | `_compute_macd` | close[-26:] |
-| 7 | `technical.bollinger.bandwidth` | 布林带宽% | `_compute_bollinger_bandwidth` | close[-20:] |
-| 8 | `technical.volume.vol_ratio` | 量比（近5日均量/近20日均量） | `_compute_volume_ratio` | volume[-20:] |
-| 9 | `technical.atr.atr_14` | 14日ATR | `_compute_atr_14` | high/low/close[-15:] |
-| 10 | `technical.volume.vwap` | 成交量加权均价 | `_compute_vwap` | close + volume |
-| 11 | `style.size.ln_mcap` | 对数总市值 | `_compute_ln_mcap` | total_mv |
-| 12 | `style.size.ln_float_mcap` | 对数流通市值 | 复用 `_compute_ln_mcap` | float_mv |
+### 1.4 策略引擎集成方式
 
-### 1.4 当前策略引擎打分方式
+当前 `allocate()` 使用 `factor_scores`（来自 `factor_registry.compute()` 的 33 维因子分）通过以下步骤构建分数：
 
-`strategy_design.py` 使用独立的 5 维度手工评分：
+1. **因子分聚合**：各因子按类别（technical/momentum/valuation/industry/premium_discount）聚合为复合分
+2. **z-score 标准化**：cross-section 标准化（混合归一化：z-score×0.7 + min-max×0.3）
+3. **C2 风偏修正**：根据 market regime 调整因子权重（defensive 加价值权重，aggressive 加动量权重）
+4. **LN_MCAP 排毒**：消除市值主导效应
 
-```
-composite_score = 0.3 × 动量(return_1m, return_3m, ma_bias_20)
-                + 0.2 × 资金流(主力净流入)
-                + 0.2 × 估值(PE/PB分位)
-                + 0.15 × 流动性(日均成交额)
-                + 0.15 × 波动率(avg_volatility)
-```
+## 二、IC 追踪器现状
 
-**核心问题**：
+### 2.1 已实现的能力
 
-- 每个 ETF 的指标是独立计算的，没有对全市场做标准化
-- 权重纯手工（0.3/0.2/0.15），无数据支撑
-- 资金流维度只有一个粗糙的"主力净流入"数值，无方向性、持续性、结构性区分
+`backend/app/factors/ic_tracker.py` 中的 `ICTracker` 类提供了完整的 IC 计算能力：
 
-### 1.5 数据源可靠性评估
+| 方法 | 功能 | 状态 |
+|:-----|:-----|:----:|
+| `compute_ic()` | 单期 Spearman rank IC | ✅ 已实现 |
+| `compute_ic_series()` | 多期 IC 序列 | ✅ 已实现 |
+| `record()` | 记录因子值 | ✅ 已在 compute() 中调用 |
+| `compute_icir()` | ICIR = mean(IC)/std(IC) | ✅ 已实现 |
+| `compute_ic_series_fast()` | 向量化快速 IC 计算 | ✅ 已实现 |
 
-| 数据源 | 稳定性 | 覆盖范围 | 适用因子 |
-|:-------|:------:|:--------|:--------|
-| `china_market` (mootdx→Sina) | 🟢 高 | A股/ETF 日线 OHLCV | 技术 + 动量 + 波动因子 |
-| EastMoney REST API | 🟢 高 | A股估值/财务/资金流/ETF持仓 | 风格 + A股特有 + 资金流信号 + ETF专用 |
-| Sina 实时行情 | 🟢 高 | 市值/PE/PB/NAV | 风格/折溢价 |
-| `yfinance` | 🟢 高 | 美股/港股/商品 | 全球资产技术因子 |
-| `stooq` | 🟢 高 | 全球指数 | 指数技术因子 |
-| `fred` | 🟢 高 | 美国宏观数据 | 宏观因子 |
-| `akshare` | 🔴 低 | 财务/行业 | **全部弃用** |
+### 2.2 已集成的调用点
 
----
+在 `factor_registry.py` 的 `compute()` 方法末尾（~line 1050）：
 
-## 二、当前架构 vs 因子模型接入后
-
-### 2.1 打分流程对比
-
-```
-┌─ 当前 ─────────────────────────────────────────┐
-│                                                │
-│  ETF₁ → trends → return_1m, ma_bias_20, ...    │
-│  ETF₂ → trends → return_1m, ma_bias_20, ...    │
-│  ...                                           │
-│           ↓ (各自独立，无标准化)                  │
-│  composite_score = 手工权重 × 原始值              │
-│                                                │
-└────────────────────────────────────────────────┘
-
-┌─ 接入后 ───────────────────────────────────────┐
-│                                                │
-│  ETF₁ → OHLCV → FactorRegistry.compute_all()   │
-│  ETF₂ → OHLCV → FactorRegistry.compute_all()   │
-│  ...                                           │
-│           ↓ (z-score 标准化，全市场可比)          │
-│  composite_score = Σ (IC权重 × 标准化因子值)     │
-│                                                │
-└────────────────────────────────────────────────┘
+```python
+# Record for IC tracking
+try:
+    for sym in symbols:
+        if sym in result and result[sym]:
+            for code, value in result[sym].items():
+                if abs(value) > 0.001:
+                    ic_tracker.record(sym, code, value)
+except Exception:
+    pass
 ```
 
-### 2.2 关键差异
+### 2.3 缺失的功能
 
-| 维度 | 当前 | 接入后 |
+| # | 缺陷 | 影响 | 优先级 |
+|:-:|:-----|:-----|:-----:|
+| 1 | ❌ 无 forward_returns 数据管道 | `compute_ic()` 需要对比 forward return，但从未建立过数据来源 | **P0** |
+| 2 | ❌ 无 API 端点查看 IC 统计数据 | `ic_tracker._records` 数据被 record() 写入但无人读取 | **P0** |
+| 3 | ❌ 无定期 IC 计算 + 聚合 | 单靠 record() 收集原始值，从不计算 IC/ICIR 指标 | **P1** |
+| 4 | ❌ 无 IC 结果持久化 | 重启后 `_records` 数据丢失 | **P1** |
+| 5 | ❌ 无因子有效性排序 UI | 无法直观判断哪些因子有效 | **P2** |
+| 6 | ❌ 无 IC 阈值告警 | 因子失效时无通知 | **P2** |
+
+## 三、IC 追踪器激活方案
+
+### 3.1 总体策略
+
+分两阶段激活，避免一次性大改动：
+
+```
+Phase A: 建立 forward_returns 管道 + IC 计算任务 + API 端点
+         （P0 项，可独立验证）
+Phase B: IC 结果持久化 + 因子有效性排序 + IC 阈值告警
+         （P1-P2 项，依赖 Phase A）
+```
+
+### 3.2 Phase A —— 核心管道激活（~2h）
+
+#### A1: 建立 forward_returns 数据管道
+
+**文件**: `backend/app/factors/ic_tracker.py` 新增 `build_forward_returns()`
+
+**需求**：从 market_data（K 线数据）提取未来 N 日收益率作为 forward_returns。
+
+```python
+def build_forward_returns(
+    market_data: dict[str, dict[str, Any]],
+    symbols: list[str],
+    window: int = 1,
+) -> pd.Series:
+    """从 market_data 的 close 价格序列构建 forward returns。
+    
+    Args:
+        market_data: {symbol: {close: [float, ...]}}
+        symbols: 标的列表
+        window: forward 窗口（1=次日收益）
+    
+    Returns:
+        Series: {symbol: forward_return}
+    """
+    returns = {}
+    for sym in symbols:
+        data = market_data.get(sym, {})
+        close = data.get("close", [])
+        if len(close) < window + 1:
+            returns[sym] = 0.0
+            continue
+        cur = close[-1]
+        fut = close[-1 - window]
+        returns[sym] = (cur - fut) / fut if fut != 0 else 0.0
+    return pd.Series(returns)
+```
+
+**验证方式**：单测验证 `build_forward_returns()` 正确计算。
+
+#### A2: 新增 `compute_periodic_ic()` 方法
+
+**文件**: `backend/app/factors/ic_tracker.py`
+
+```python
+def compute_periodic_ic(
+    self, 
+    factor_values: dict[str, dict[str, float]],
+    market_data: dict[str, dict[str, Any]],
+    window: int = 1,
+) -> dict[str, float]:
+    """Compute IC for each factor code across all symbols.
+    
+    Returns:
+        {factor_code: ic_value}
+    """
+    forward_rets = build_forward_returns(market_data, list(factor_values.keys()), window)
+    ic_results = {}
+    
+    # Group by factor code
+    factor_by_code: dict[str, dict[str, float]] = {}
+    for sym, factors in factor_values.items():
+        for code, val in factors.items():
+            if code not in factor_by_code:
+                factor_by_code[code] = {}
+            factor_by_code[code][sym] = val
+    
+    for code, values in factor_by_code.items():
+        fv = pd.Series(values)
+        # Align with forward returns
+        common = fv.index.intersection(forward_rets.index)
+        if len(common) < 3:
+            ic_results[code] = 0.0
+            continue
+        ic_results[code] = self.compute_ic(fv[common], forward_rets[common])
+    
+    return ic_results
+```
+
+**验证方式**：单测验证 mock 数据下的 IC 计算。
+
+#### A3: 在 factor_registry.py 中添加 IC 计算调用
+
+在 `compute()` 方法末尾的 IC recording 块之后，添加 `compute_periodic_ic()` 调用并缓存结果：
+
+```python
+# Compute IC for current batch
+try:
+    if result and market_data:
+        ic_batch = ic_tracker.compute_periodic_ic(result, market_data, window=1)
+        self._last_ic_batch = ic_batch  # 暂存供 API 使用
+except Exception as e:
+    logger.debug("[factor] IC batch compute failed: %s", e)
+```
+
+**验证方式**：单测验证 `_last_ic_batch` 正确填充。
+
+#### A4: 新增 API 端点 `GET /api/v1/factors/ic`
+
+**文件**: `backend/app/routers/factors.py`（**新建** — 当前不存在 factors 路由）
+
+参照 `routers/market.py` 的 APIRouter 模式，新文件结构：
+```python
+from fastapi import APIRouter
+from ..factors.factor_registry import registry
+from ..factors.ic_tracker import ic_tracker
+
+router = APIRouter(prefix="/api/v1/factors", tags=["factors"])
+
+@router.get("/ic")
+async def get_factor_ic():
+    # 返回 FactorRegistry._last_ic_batch 中的数据
+    ...
+
+@router.get("/ic/{factor_code}")
+async def get_factor_ic_detail(factor_code: str):
+    ...
+```
+
+同时在 `backend/app/main.py` 中注册：`app.include_router(factors_router)`
+
+路由：
+```
+GET /api/v1/factors/ic
+  → 返回 {factors: [{code, name, ic_value, category, ic_ir}], updated_at}
+
+GET /api/v1/factors/ic/{factor_code}
+  → 返回 {code, name, ic_value, ic_history: [time_series]}
+```
+
+**API 契约**（`api-contracts/factors/ic.md`，新建，参照 `contract_template.md`）：
+
+```json
+GET /api/v1/factors/ic
+Response 200:
+{
+  "factors": [
+    {
+      "code": "technical.rsi.rsi_14",
+      "name": "14日RSI",
+      "category": "technical",
+      "ic_value": 0.035,
+      "ic_ir": 0.42,
+      "sample_count": 156
+    }
+  ],
+  "updated_at": "2026-07-26T10:30:00"
+}
+```
+
+**验证方式**：`verify_e2e.py` 扩展 + curl 测试。
+
+#### 新增/修改文件清单
+
+| 操作 | 文件 | 说明 |
+|:----|:-----|:-----|
+| 🆕 新建 | `api-contracts/factors/ic.md` | IC API 契约（参照 contract_template.md）|
+| 🆕 新建 | `backend/app/routers/factors.py` | factors 路由（APIRouter 模式）|
+| ✏️ 修改 | `backend/app/main.py` | 注册 `factors_router` |
+| ✏️ 修改 | `backend/app/factors/ic_tracker.py` | 添加 `build_forward_returns()` + `compute_periodic_ic()` |
+| ✏️ 修改 | `backend/app/factors/factor_registry.py` | 添加 `_last_ic_batch` 属性和 IC batch compute 调用 |
+| ✏️ 修改 | `backend/scripts/verify_e2e.py` | 添加 IC 端点检查 |
+| 🆕 新建 | `backend/tests/test_ic_tracker.py` | IC 追踪器单测 |
+
+#### A5: 扩展 verify_e2e.py
+
+在 `check_factor_health.py` 或直接扩展 `verify_e2e.py`，增加 IC 端点检查：
+
+```python
+# IC 端点检查
+resp = requests.get(f"{BASE}/api/v1/factors/ic")
+assert resp.status_code == 200
+data = resp.json()
+assert "factors" in data
+assert len(data["factors"]) > 0
+# 每个因子应有 ic_value 字段
+for f in data["factors"]:
+    assert "code" in f
+    assert "ic_value" in f
+```
+
+### 3.3 Phase B —— 增强与持久化（~3h）
+
+#### B1: SQLite 持久化 IC 记录
+
+在 `backend/app/models/` 中新增 `factor_ic.py`：
+
+```python
+class FactorICRecord(Base):
+    __tablename__ = "factor_ic_records"
+    id = Column(Integer, primary_key=True)
+    factor_code = Column(String, nullable=False, index=True)
+    ic_value = Column(Float, default=0.0)
+    ic_ir = Column(Float, default=0.0)
+    sample_count = Column(Integer, default=0)
+    computed_at = Column(DateTime, default=datetime.utcnow)
+```
+
+#### B2: 因子有效性排序前端组件
+
+**文件**: `frontend/src/components/FactorICView.vue`（新建）
+
+提供：
+- 因子列表按 `|ic_value|` 降序排列
+- 有效（`|IC| > 0.02`）vs 无效标记
+- ICIR 一致性指标
+- 因子类别筛选
+
+#### B3: IC 阈值告警
+
+在 `factor_registry.py` 中为每个 FactorDefinition 添加 IC 检查：
+
+```python
+# After computing IC batch
+for code, ic_val in ic_batch.items():
+    definition = self._factors.get(code)
+    if definition and abs(ic_val) < definition.ic_threshold:
+        logger.warning(
+            "[factor] IC below threshold for %s: ic=%.4f < threshold=%.4f",
+            code, ic_val, definition.ic_threshold,
+        )
+```
+
+## 四、实施计划（Phase 7.1.1）
+
+### 4.1 实施顺序
+
+```
+Phase A (P0) — 核心管道
+├── A1: build_forward_returns() 
+├── A2: compute_periodic_ic() 
+├── A3: factor_registry.py 集成
+├── A4: API 端点 + 契约
+├── A5: verify_e2e.py 扩展
+└── ✅ 验证：后端单测 + verify_e2e.py
+
+Phase B (P1-P2) — 增强
+├── B1: SQLite 持久化
+├── B2: 前端 IC View 组件
+├── B3: IC 阈值告警
+└── ✅ 验证：全链路 PASS
+```
+
+### 4.2 依赖关系
+
+```
+A1 ─→ A2 ─→ A3 ─→ A4 ─→ A5
+                 ↓
+                 B1 ─→ B2
+                 ↓
+                 B3
+```
+
+A1-A5 无外部依赖，可独立推进。B1-B3 依赖 A3（compute() 中已有 IC batch）。
+
+### 4.3 测试策略
+
+| 层级 | 工具 | 覆盖范围 |
+|:-----|:-----|:---------|
+| 后端单测 | pytest | build_forward_returns(), compute_periodic_ic(), API 端点 |
+| E2E | verify_e2e.py | GET /api/v1/factors/ic 响应结构 |
+| API 契约 | api-contracts/factors/ic.md | 请求/响应结构一致性 |
+
+### 4.4 验收标准
+
+```
+[PASS] GET /api/v1/factors/ic → 200 + 含 factors 数组
+[PASS] 每个因子含 code/ic_value/ic_ir/sample_count
+[PASS] updated_at 为有效 ISO 时间戳
+[PASS] 后端单测全部通过
+[PASS] verify_e2e.py 全 PASS
+```
+
+## 五、YAML 167 因子处置建议
+
+以下建议基于 2026-07-26 代码审计，供 Phase B 之后参考：
+
+| 大类 | 处置 | 理由 |
 |:-----|:-----|:------|
-| **因子数量** | 5 个手工维度 | ~40 个标准化因子 |
-| **标准化** | 无（ETF 间不可比） | z-score 全市场标准化 |
-| **权重** | 手工固定 | IC 跟踪数据驱动 |
-| **可扩展性** | 改代码 | 改 YAML 配置 |
-| **可解释性** | 粗略 | 精确到单个因子贡献 |
+| technical | IC 验证后精选 5-8 个不共线因子 | 58 个中大量排列组合（如 sma_3/7/15 等价于现有 sma_5/10/20） |
+| style | **优先扩容**，选 5-10 个高频可算的 | 价值/质量/成长是 ETF 核心 alpha 来源 |
+| china_specific | 第二阶段，选 3-5 个 | 北向资金/两融余额对 A 股 ETF 有意义 |
+| microstructure | 补充 2-3 个 | ETF 流动性筛选有价值 |
+| theme | ❌ 跳过 | 数据不可得或与 ETF 无关 |
+| alternative | ❌ 跳过 | 需付费数据，边际收益低 |
+
+## 六、相关文件索引
+
+| 文件 | 说明 |
+|:-----|:------|
+| `backend/app/factors/ic_tracker.py` | IC 追踪器（ICTracker 类 + compute_ic_series_fast） |
+| `backend/app/factors/factor_registry.py` | 因子注册表（33 核心因子 + 65 compute 函数） |
+| `backend/app/engine/allocation_engine.py` | 核心分配器（基于因子分排序） |
+| `backend/app/engine/rationale.py` | 入选理由生成 |
+| `backend/app/engine/budgets.py` | 层预算 + 预期收益调整 |
+| `backend/app/routers/factors.py` | **新建** — factors API 路由 |
+| `api-contracts/factors/ic.md` | **新建** — IC 追踪 API 契约 |
+| `backend/tests/test_ic_tracker.py` | **新建** — IC 追踪器单测 |
+| `backend/scripts/verify_e2e.py` | **修改** — 扩展 IC 检查 |
 
 ---
 
-## 三、目标因子体系：52 个因子
+## 七、Review Checklist
 
-### 3.1 技术因子（12 个）— 第一阶段
+实施前逐项确认：
 
-已实现，待接入策略引擎。全部从 `china_market` OHLCV 计算。
-
-| 因子 | 应用层级 | 用途 |
-|:-----|:--------|:-----|
-| RSI-14 | 卫星 | RSI < 30 标记超卖 → 加分 |
-| MACD | 卫星/核心 | 正值 → 趋势强，加分 |
-| 布林带宽度 | 全部 | 宽度 > 均值 → 波动率过高，扣分 |
-| 量比 | 卫星 | 量比 > 1.5 → 资金参与度高，加分 |
-| ATR-14 | 全部 | 替代当前 `avg_volatility` |
-| SMA 5/10/20/60 | 全部 | 多周期偏置，替代当前 `ma_bias_20` |
-| VWAP | 卫星 | 价格与 VWAP 偏离 → 买卖压力信号 |
-| ln_mcap × 2 | 核心/防御 | 大市值偏好 |
-
-### 3.2 基本因子（28 个）— 第二阶段
-
-**风格因子（11 个）**
-
-| 类别 | 因子 | 数据源 | 用途 |
-|:-----|:-----|:------|:-----|
-| 价值 | EP / BP / SP / 股息率 | EastMoney | 核心层低估值筛选 |
-| 质量 | ROE / ROA / 资产负债率 / 经营现金流 | EastMoney | 防御层质量筛选 |
-| 成长 | 营收增速 / 净利增速 / ROE 变化 | EastMoney | 卫星层成长性筛选 |
-
-**动量与波动因子（6 个）**
-
-| 类别 | 因子 | 数据源 | 用途 |
-|:-----|:-----|:------|:-----|
-| 动量 | 1月/3月/12月价格动量 | china_market | 趋势跟踪 |
-| 波动 | 下行波动率 / 最大回撤 / β 系数 | china_market | 风控筛选 |
-
-**A股特有因子（4 个）**
-
-| 因子 | 数据源 | 用途 |
-|:-----|:------|:-----|
-| 北向资金占比变化 | EastMoney | 外资边际态度 |
-| 两融余额变化率 | EastMoney | 杠杆情绪 |
-| 涨跌停比 | EastMoney | 市场极端情绪 |
-| 龙虎榜机构活跃度 | EastMoney | 机构参与度 |
-
-**ETF 专用因子（6 个）**
-
-| 因子 | 含义 | 数据源 | 用途 |
-|:-----|:-----|:------|:-----|
-| 折溢价率 | (ETF价格-NAV)/NAV | Sina | 排除大幅溢价 ETF |
-| 跟踪误差 | ETF vs 基准日收益差的标准差 | china_market | 排除跟踪质量差的 ETF |
-| 规模变化率 | 份额 20 日环比变化 | EastMoney | 捕捉"聪明钱" |
-| 成交额稳定性 | 20日成交额变异系数 | china_market | 排除流动性不稳定的 ETF |
-| 行业分散度 | 前3行业占比之和 | EastMoney | 单行业集中度过高扣分 |
-| 机构占比变化 | 机构持有份额环比 | EastMoney | 机构增持信号 |
-
-> 这 6 个因子的独特价值：**专门衡量 ETF 本身的好坏，不是衡量底层股票**。现有 167 个 YAML 因子全部面向个股，缺少这一维度。
-
-### 3.3 资金流信号体系（7 个）— 第二阶段，与基本因子并行
-
-资金流信号从当前单一的"主力净流入"扩展为完整的 7 因子体系：
-
-| 因子 | 含义 | 数据源 | 策略用途 |
-|:-----|:-----|:------|:--------|
-| ETF 资金流加速度 | 近5日均净流入 - 近20日均净流入 | EastMoney | 卫星层：资金加速流入 → 加分 |
-| ETF 规模变化率 | (当前份额-20日前)/20日前 | EastMoney | 核心层：长期布局信号 |
-| 北向持仓占比变化 | (本周北向-上周)/上周 | EastMoney | 核心层：外资边际态度 |
-| 主力 vs 散户背离 | 主力方向 - 散户方向 | EastMoney | 卫星层：背离时跟随机构 |
-| 板块资金轮动强度 | 板块排名周度变化幅度 | EastMoney | regime 辅助：轮动快 → 降卫星 |
-| 大宗交易折溢价 | 大宗价 vs 收盘价偏离度 | EastMoney | 防御层：折价大宗 → 减持信号 |
-| 龙虎榜机构活跃度 | 近5日机构席位买入/卖出比 | EastMoney | 卫星层：机构参与度高 → 加分 |
-
-**资金流信号在策略中的集成方式**：
-
-- **卫星层选 ETF**：ETF 资金流加速度 > 0 + 北向持仓占比上升 → 复合加分
-- **防御层调仓**：主力vs散户背离扩大 + 大宗折价 → 减仓预警
-- **regime 辅助判断**：轮动强度 > 阈值 → 市场无序，降低卫星层预算
-- **组合再平衡**：北向连续 3 日净流出某板块 → 对应 ETF 自动降权
-
-### 3.4 市场环境因子（5 个）— 第二阶段，已有数据源补充
-
-**情绪因子（3 个）**，数据全部来自已有 `sentiment_fetcher.py`，无需新增外部依赖：
-
-| 因子 | 含义 | 计算方式 | 策略用途 |
-|:-----|:-----|:--------|:--------|
-| 市场情绪指数 | 四维合成(涨跌比/北向/两融/机构共识) | 已有 `calc_sentiment_index()` | regime 调节：情绪极低 → 降卫星层 |
-| 恐慌-贪婪差值 | 当日情绪 - 20日均值 | 缓存历史情绪后计算差值 | 情绪骤变 → 触发防御调仓 |
-| 个股情绪离散度 | ETF 成分股涨跌幅的标准差 | `np.std(成分股涨跌幅)` | 离散度大 → 板块分化 → 减卫星 |
-
-**资讯事件因子（2 个）**，数据来自已有 `news_fetcher.py`，需补充 ETF 映射校验：
-
-| 因子 | 含义 | 计算方式 | 策略用途 |
-|:-----|:-----|:--------|:--------|
-| 资讯热度 | 某 ETF 关联资讯短期爆发 | 近3日 ETF 映射 `stars` 加权和 | 热度骤增 → 卫星层短期加分 |
-| 资讯情绪方向 | 近期资讯利多/利空偏向 | 近5日 `level` 中"利好"占比 | 持续利多 → 核心层加分 |
-
-> 注意：资讯因子依赖 `news_fetcher` 的 `level` 打标质量。IC 跟踪会自然验证其有效性——IC 低即自动降权。
-
-**政策因子**：不适合纳入因子模型（低频、离散、不可连续量化），保留在 LLM 报告中进行定性分析。当前 LLM 报告已能引用 `macro_regime` 和 `monetary_stance` 进行宏观政策判断。
-
----
-
-## 四、分阶段实施路线图
-
-### 第一阶段：12 因子接入（1-2 天，零外部依赖）
-
-**目标**：将已实现的 12 个因子接入策略引擎
-
-- `factor_registry.py`：新增 `compute_all()` 方法（~20 行）
-- `strategy_design.py`：`generate_enhanced_design()` 注入因子计算（~60 行）
-- `test_factor_integration.py`：新增测试（~50 行）
-
-### 第二阶段：基本因子 + 资金流信号（2 周）
-
-**目标**：补齐 28 个基本因子 + 7 个资金流信号因子
-
-| 子任务 | 因子数 | 工作量 |
-|:------|:------:|:------:|
-| 风格因子（价值/质量/成长） | 11 | 3 天 |
-| 动量/波动因子 | 6 | 1 天 |
-| A股特有因子 | 4 | 2 天 |
-| ETF 专用因子 | 6 | 3 天 |
-| 资金流信号体系 | 7 | 3 天 |
-| 市场环境因子（情绪+资讯） | 5 | 1 天 |
-| 测试 + 集成 | — | 2 天 |
-
-**关键技术难点**：ETF 风格因子需要计算 ETF 持仓成分股的加权因子暴露，方案为通过 EastMoney ETF 持仓接口获取前 10 大重仓股，按权重加权。
-
-### 第三阶段：IC 跟踪 + 动态调权（2-4 周）
-
-**目标**：激活 IC 跟踪系统，建立因子动态淘汰机制
-
-- 月频计算 40 个因子的 Spearman rank IC
-- 以下条件之一触发降权/剔除：
-  - IC 连续 3 个月为负 → 剔除
-  - IC 标准差过大（ICIR < 0.3）→ 降权
-  - 同组因子相关性 > 0.85 → 保留 IC 更高者，剔除冗余
-- 因子拥挤度监控（资金涌入某因子时预警）
-
----
-
-## 五、明确排除的因子
-
-| YAML 大类 | 定义数 | 排除原因 |
-|:---------|:------:|:--------|
-| theme（主题） | 29 | ESG/专利/网红概念 — 数据不可得，与 ETF 无关 |
-| alternative（另类） | 20 | 期权/CDS/一致预期 — 需付费数据，边际收益低 |
-| technical 中剩余 48 个 | 48 | SMA 多周期排列组合、MACD 信号线等 — 高度共线 |
-| microstructure 中 7 个 | 7 | tick 级订单簿数据 — 不可得 |
-
----
-
-## 六、风险评估
-
-| 风险 | 概率 | 缓解措施 |
-|:-----|:----:|:--------|
-| `china_market` 偶发超时 | 中 | mocldx→Sina 降级链 + 缓存 |
-| 因子共线性（SMA 系列/MACD） | 高 | 第三阶段 IC 跟踪自动降权 |
-| 接入后 ETF 排序变化过大 | 中 | 灰度：保留旧分数对照 1-2 周 |
-| EastMoney API 限流 | 低 | 2s 间隔 + 本地缓存 |
-| ETF 穿透持仓数据不全 | 中 | 仅对前 10 大重仓股加权，轻量方案 |
-
----
-
-## 七、验收标准
-
-### 第一阶段
-
-- [ ] 后端单测全部 PASS
-- [ ] `verify_e2e.py` 全部 PASS
-- [ ] `factor_score` 字段不再为 0.5 空壳值
-- [ ] z-score 标准化后，每因子均值 0±0.01，标准差 1±0.1
-- [ ] 前后端构建成功
-
-### 第二阶段
-
-- [ ] 价值/质量/成长因子与东方财富官网交叉验证
-- [ ] 资金流信号 7 因子可正常从 EastMoney API 获取
-- [ ] ETF 专用因子（折溢价/跟踪误差）计算逻辑正确
-
-### 第三阶段
-
-- [ ] IC 跟踪系统连续运行 3 个月无异常
-- [ ] 因子权重自动调整后，策略回测不劣于手工权重
-
----
-
-## 八、附录
-
-### 关键文件路径
-
-| 文件 | 用途 |
-|:-----|:-----|
-| `backend/app/factors/factor_definitions.yaml` | 167 因子定义 |
-| `backend/app/factors/factor_registry.py` | 因子注册 + 12 个计算函数 |
-| `backend/app/factors/ic_tracker.py` | IC 跟踪器 |
-| `backend/app/services/strategy_design.py` | 策略引擎（接入目标） |
-| `backend/app/fetchers/china_market.py` | 行情数据源（mootdx→Sina） |
-| `backend/app/fetchers/sentiment_fetcher.py` | EastMoney API 已验证模板 |
-| `backend/tests/test_design_optimization_plan.py` | 现有因子相关测试 |
+- [ ] 1.1 因子四层架构描述准确，与当前代码一致
+- [ ] 1.2 33 核心因子列表与 `_CORE_FACTORS` 完全对齐
+- [ ] 2.3 缺失功能编号正确，P0/P1/P2 分级合理
+- [ ] Phase A 实施方案代码示例与实际逻辑一致
+- [ ] A4 路由前缀 `/api/v1/factors/ic` 不与现有路由冲突
+- [ ] 新增文件清单完整（7 个文件）
+- [ ] 依赖图（A1→A2→A3→A4→A5）正确
+- [ ] 验收标准可实现
+- [ ] Phase B 可作为独立后续阶段

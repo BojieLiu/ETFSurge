@@ -670,6 +670,7 @@ class FactorRegistry:
     def __init__(self):
         self._factors: dict[str, FactorDefinition] = {}
         self._computers: dict[str, Callable[[dict], float]] = dict(_BUILTIN_COMPUTERS)
+        self._last_ic_batch: dict[str, float] = {}
         self.load_definitions()
 
     def load_definitions(self, yaml_path: str | None = None) -> None:
@@ -1053,6 +1054,15 @@ class FactorRegistry:
                             ic_tracker.record(sym, code, value)
         except Exception:
             pass
+
+        # Compute periodic IC for current batch
+        try:
+            if market_data is not None:
+                ic_batch = ic_tracker.compute_periodic_ic(result, market_data, window=1)
+                if ic_batch:
+                    self._last_ic_batch = ic_batch
+        except Exception as exc:
+            logger.debug("[factor] IC batch compute failed: %s", exc)
 
         return result
 

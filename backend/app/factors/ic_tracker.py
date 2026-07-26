@@ -17,6 +17,41 @@ from scipy.stats import spearmanr
 logger = logging.getLogger(__name__)
 
 
+def build_forward_returns(
+    market_data: dict[str, dict[str, Any]],
+    symbols: list[str] | None = None,
+    window: int = 1,
+) -> pd.Series:
+    """Build forward returns from market_data close price series.
+
+    Uses the close price history to compute (close[0] - close[window]) / close[window],
+    where index 0 is the most recent.
+
+    Args:
+        market_data: {symbol: {close: [float, ...]}} with close prices (recent first).
+        symbols: Optional subset of symbols to compute (default: all).
+        window: Forward return window in periods (1 = next period return).
+
+    Returns:
+        pd.Series: {symbol: forward_return} for symbols with sufficient data.
+    """
+    targets = symbols if symbols is not None else list(market_data.keys())
+    returns: dict[str, float] = {}
+    for sym in targets:
+        data = market_data.get(sym, {})
+        close = data.get("close", [])
+        if not isinstance(close, (list, tuple)) or len(close) < window + 1:
+            continue
+        try:
+            cur = float(close[0])
+            fut = float(close[window])
+            if fut != 0:
+                returns[sym] = (cur - fut) / fut
+        except (TypeError, ValueError, IndexError):
+            continue
+    return pd.Series(returns)
+
+
 class ICTracker:
     """Information Coefficient tracker for factor evaluation.
 
@@ -83,6 +118,56 @@ class ICTracker:
             "value": value,
             "timestamp": pd.Timestamp.now(),
         })
+
+    def compute_periodic_ic(
+        self,
+        factor_values: dict[str, dict[str, float]],
+        market_data: dict[str, dict[str, Any]],
+        window: int = 1,
+    ) -> dict[str, float]:
+        """Compute single-period IC for each factor code across all symbols.
+
+        Args:
+            factor_values: {symbol: {factor_code: value}}
+            market_data: {symbol: {close: [float, ...]}}
+            window: Forward return window.
+
+        Returns:
+            {factor_code: ic_value}
+        """
+        if not factor_values or not market_data:
+            return {}
+
+        symbols = list(factor_values.keys())
+        forward_rets = build_forward_returns(market_data, symbols, window)
+        if len(forward_rets) < 3:
+            return {}
+
+        # Group factor values by code
+        factor_by_code: dict[str, dict[str, float]] = {}
+        for sym, factors in factor_values.items():
+            if not factors:
+                continue
+            for code, val in factors.items():
+                if abs(val) < 0.001:
+                    continue
+                if code not in factor_by_code:
+                    factor_by_code[code] = {}
+                factor_by_code[code][sym] = val
+
+        # Compute IC per factor code
+        ic_results: dict[str, float] = {}
+        for code, values in factor_by_code.items():
+            fv = pd.Series(values)
+            common = fv.index.intersection(forward_rets.index)
+            if len(common) < 3:
+                ic_results[code] = 0.0
+                continue
+            ic_results[code] = self.compute_ic(
+                fv[common], forward_rets[common]
+            )
+
+        return ic_results
 
     def compute_icir(self, ic_series: pd.Series) -> float:
         """Compute ICIR = mean(IC) / std(IC).

@@ -13,7 +13,7 @@ from .tasks.news_refresh import refresh_news_cache
 from .tasks.sector_refresh import refresh_sector_cache
 from .monitor.token_usage import token_store
 from .core.logging import get_logger, setup_logging
-from .routers import market, portfolio, analysis, news, ws, admin
+from .routers import market, portfolio, analysis, news, ws, admin, factors
 from .services.source_health import health_loop
 
 logger = get_logger("lifespan")
@@ -233,6 +233,7 @@ app.include_router(analysis.router)
 app.include_router(news.router)
 app.include_router(ws.router)
 app.include_router(admin.router)
+app.include_router(factors.router)
 
 
 @app.get("/health")
