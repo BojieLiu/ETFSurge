@@ -1,7 +1,8 @@
 """后台定时轮询资讯，向 /ws/news 频道推送快讯。
 
-每 ~30s 拉取一次头条，广播所有条目（不再按 level 过滤），
-首轮全量推送，后续仅推送新增条目，避免重复广播。
+每 ~30s 拉取一次头条，首轮全量推送，后续仅推送新增条目。
+采用批次推送（news_batch）替代逐条推送（news），
+批次内已按 sort_time 降序排列，前端可直接替换/合并。
 """
 import asyncio
 
@@ -22,9 +23,9 @@ async def refresh_news_cache() -> None:
         logger.exception("刷新资讯缓存失败：fetch_news_headlines 异常")
         return
 
-    broadcast_count = 0
-    seen: set = set()
     is_first_cycle = not _last_titles
+    new_items: list[dict] = []
+    seen: set = set()
 
     for it in items or []:
         title = it.get("title", "")
@@ -32,24 +33,18 @@ async def refresh_news_cache() -> None:
             continue
         seen.add(title)
 
-        # 首轮全量推送（无论之前是否广播过）
-        if is_first_cycle:
-            try:
-                await manager.broadcast("news", {"type": "news", "data": it})
-                broadcast_count += 1
-            except Exception:
-                logger.exception("资讯广播失败")
-            continue
-
-        # 后续轮次仅推送新条目
-        if title in _last_titles:
-            continue
-        try:
-            await manager.broadcast("news", {"type": "news", "data": it})
-            broadcast_count += 1
-        except Exception:
-            logger.exception("资讯广播失败")
+        # 首轮全量；后续只推送新条目
+        if is_first_cycle or title not in _last_titles:
+            new_items.append(it)
 
     _last_titles = seen
-    if broadcast_count:
-        logger.info("资讯广播完成: %d 条", broadcast_count)
+
+    if not new_items:
+        return
+
+    # 批次推送——已按 sort_time 降序排列（fetch_news_headlines 保证）
+    try:
+        await manager.broadcast("news", {"type": "news_batch", "data": new_items})
+        logger.info("资讯广播完成: %d 条（batch）", len(new_items))
+    except Exception:
+        logger.exception("资讯广播失败（batch）")

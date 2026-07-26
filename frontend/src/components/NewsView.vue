@@ -142,16 +142,51 @@ async function loadNews() {
   }
 }
 
+/** Sort news array by sort_time descending (primary), fall back to time string */
+function sortNews(arr) {
+  return arr.slice().sort((a, b) => {
+    const ta = a.sort_time != null ? Number(a.sort_time) : (a.time ? new Date(a.time).getTime() / 1000 : 0)
+    const tb = b.sort_time != null ? Number(b.sort_time) : (b.time ? new Date(b.time).getTime() / 1000 : 0)
+    return tb - ta
+  })
+}
+
 function handleNews(msg) {
+  // news_batch: array of pre-sorted items
+  if (msg && msg.type === 'news_batch' && Array.isArray(msg.data)) {
+    let added = 0
+    for (const it of msg.data) {
+      if (!it || !it.title) continue
+      if (it.id == null) {
+        it.id = `${it.time || Date.now()}_${it.title}`
+      }
+      if (seenIds.value.has(it.id)) continue
+      seenIds.value.add(it.id)
+      added++
+    }
+    if (!added) return
+    // Merge — combine existing + new, dedup by id
+    const existingIds = new Set(seenIds.value)
+    const merged = [...news.value]
+    for (const it of msg.data) {
+      if (existingIds.has(it.id) && !news.value.some((n) => n.id === it.id)) {
+        merged.push(it)
+      }
+    }
+    news.value = sortNews(merged)
+    return
+  }
+
+  // Single item (legacy news type or raw message)
   const item = msg && msg.data ? msg.data : msg
   if (!item || !item.title) return
-  // Backend always provides id since Phase 0.6; fallback for any residual edge case
   if (item.id == null) {
     item.id = `${item.time || Date.now()}_${item.title}`
   }
   if (seenIds.value.has(item.id)) return
   seenIds.value.add(item.id)
-  news.value = [item, ...news.value]
+  // Prepend then re-sort to fix prepend-reversal bug
+  news.value = sortNews([item, ...news.value])
 }
 
 const ws = useNewsWS()

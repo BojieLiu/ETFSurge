@@ -160,7 +160,9 @@ def _parse_time(val: Any) -> datetime | None:
 
 
 def _normalize_time(item: dict) -> None:
-    """将不同来源的时间字段统一为 'YYYY-MM-DD HH:MM:SS' 格式的 'time' 键。"""
+    """将不同来源的时间字段统一为 'YYYY-MM-DD HH:MM:SS' 格式的 'time' 键，
+    同时添加 'sort_time'（Unix epoch 秒级整数）供前端排序使用。
+    """
     raw = None
     for k in _TIME_FIELDS:
         v = item.get(k)
@@ -168,10 +170,14 @@ def _normalize_time(item: dict) -> None:
             raw = v
             break
     if raw is None:
+        item["sort_time"] = 0
         return
     dt = _parse_time(raw)
     if dt:
         item["time"] = dt.strftime("%Y-%m-%d %H:%M:%S")
+        item["sort_time"] = int(dt.timestamp())
+    else:
+        item["sort_time"] = 0
 
 
 def _filter_fresh(items: list[dict[str, Any]], max_age_hours: int = 48) -> list[dict[str, Any]]:
@@ -237,11 +243,15 @@ def fetch_news_headlines() -> list[dict[str, Any]]:
         items += fetch_cailian_telegraph(15)        # 财联社快讯（主源，0.4s 稳定）
         items += fetch_macro_news()                  # 宏观：CCTV + 百度
         items += fetch_global_news()                 # 全球：RSS + akshare
+        # 统一归一化时间，确保所有条目都有 sort_time
+        for it in items:
+            _normalize_time(it)
         items = _filter_fresh(items, max_age_hours=48)  # 剔除旧闻
-        items.sort(key=lambda x: x.get("time", ""), reverse=True)  # 最新在前
+        # 按 sort_time 降序排列（数值排序，稳定可靠）
+        items.sort(key=lambda x: x.get("sort_time", 0), reverse=True)
         result = _dedupe(items)[:30]
         for it in result:
-            dedup_key = f"{it.get('time', '')}_{it.get('title', '')}"
+            dedup_key = f"{it.get('sort_time', '')}_{it.get('title', '')}"
             it["id"] = hashlib.md5(dedup_key.encode()).hexdigest()[:12]
         return result
 

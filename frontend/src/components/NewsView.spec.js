@@ -107,6 +107,69 @@ describe('NewsView', () => {
     expect(wrapper.text()).toContain('★★')
   })
 
+  it('handles news_batch with multiple items in correct order', async () => {
+    apiMock.headlines.mockResolvedValue({ data: [] })
+    const wrapper = mount(NewsView, { global: { stubs: { VChart: true } } })
+    await flushPromises()
+
+    h.getHandler()({
+      type: 'news_batch',
+      data: [
+        { id: 10, title: '最新新闻', time: '2026-07-26 15:30:00', sort_time: 1802410200, level: 3 },
+        { id: 20, title: '稍早新闻', time: '2026-07-26 14:00:00', sort_time: 1802402400, level: 2 },
+        { id: 30, title: '最早新闻', time: '2026-07-26 12:00:00', sort_time: 1802390400, level: 1 },
+      ],
+    })
+    await wrapper.vm.$nextTick()
+
+    const items = wrapper.findAll('.news-item')
+    expect(items.length).toBe(3)
+    // Should be sorted by sort_time descending (newest first)
+    expect(items[0].text()).toContain('最新新闻')
+    expect(items[1].text()).toContain('稍早新闻')
+    expect(items[2].text()).toContain('最早新闻')
+  })
+
+  it('news_batch deduplicates by id', async () => {
+    apiMock.headlines.mockResolvedValue({ data: [{ id: 1, title: '已有新闻', time: '10:00', level: 2 }] })
+    const wrapper = mount(NewsView, { global: { stubs: { VChart: true } } })
+    await flushPromises()
+
+    // Push batch that includes a duplicate id
+    h.getHandler()({
+      type: 'news_batch',
+      data: [
+        { id: 1, title: '已有新闻（重复）', time: '10:00', level: 2 },
+        { id: 50, title: '全新新闻', time: '2026-07-26 16:00', sort_time: 1802412000, level: 3 },
+      ],
+    })
+    await wrapper.vm.$nextTick()
+
+    const items = wrapper.findAll('.news-item')
+    // Only 2 items — the duplicate id:1 was not added
+    expect(items.length).toBe(2)
+  })
+
+  it('news_batch with same sort_time preserves server order', async () => {
+    apiMock.headlines.mockResolvedValue({ data: [] })
+    const wrapper = mount(NewsView, { global: { stubs: { VChart: true } } })
+    await flushPromises()
+
+    // All items have the same sort_time — they stay in the order the server sent
+    h.getHandler()({
+      type: 'news_batch',
+      data: [
+        { id: 1, title: '第一条', time: '2026-07-26 15:30', sort_time: 1802410200, level: 2 },
+        { id: 2, title: '第二条', time: '2026-07-26 15:30', sort_time: 1802410200, level: 2 },
+      ],
+    })
+    await wrapper.vm.$nextTick()
+
+    const items = wrapper.findAll('.news-title')
+    // Same sort_time so stable: first item keeps first position
+    expect(items[0].text()).toBe('第一条')
+  })
+
   it('calls newsApi.newsImpact and shows the impact panel', async () => {
     apiMock.headlines.mockResolvedValue({ data: SAMPLE })
     apiMock.newsImpact.mockResolvedValue({

@@ -9,6 +9,7 @@
 | GET | `/api/v1/news/global` | Global market news |
 | GET | `/api/v1/news/stock/{symbol}` | Stock/ETF-specific news |
 | GET | `/api/v1/news/research/{symbol}` | Research reports for a symbol |
+| WS | `/api/v1/ws/news` | WebSocket news push (single + batch) |
 
 ---
 
@@ -26,13 +27,28 @@ GET /api/v1/news/headlines
     "id": "a1b2c3d4e5f6",
     "title": "A股三大指数集体收涨",
     "source": "东方财富",
-    "time": "2026-07-13 15:30",
+    "time": "2026-07-13 15:30:00",
+    "sort_time": 1802410200,
     "url": "https://..."
   }
 ]
 ```
 
 **注意 / Note:** The `id` field is a 12-character MD5 hex digest of `time + title`, computed server-side for WebSocket deduplication. News items pushed via WebSocket always include `id`. This `id` is stable across refreshes — the same news item will have the same `id`.
+
+**Field details:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| id | string | 12-char MD5 hex digest, stable dedup key |
+| title | string | News headline |
+| content | string | News body / summary |
+| source | string | News source name |
+| time | string | Human-readable time in `YYYY-MM-DD HH:MM:SS` format |
+| sort_time | int | Unix epoch seconds, **numeric sort key** for reliable client-side ordering |
+| url | string | Source link |
+| level | int | Importance 1-5 (5=urgent) |
+| stars | int | Same as level (legacy alias) |
 
 ---
 
@@ -99,7 +115,57 @@ GET /api/v1/news/research/{symbol}
 
 ---
 
-## 7. 错误码 / Error Codes
+## 7. WebSocket / WebSocket 实时推送
+
+### Connection / 连接
+
+```
+ws://host/api/v1/ws/news
+```
+
+### Message types / 消息类型
+
+The server pushes two message types on the `news` channel:
+
+#### 7a. Single news item (legacy)
+
+```json
+{
+  "type": "news",
+  "data": {
+    "id": "...",
+    "title": "...",
+    "time": "2026-07-13 15:30:00",
+    "sort_time": 1802410200,
+    ...
+  }
+}
+```
+
+Used for **individual hot-push** items. On connect, server sends a batch of individual `news` messages as the initial snapshot.
+
+#### 7b. Batch news items (primary)
+
+```json
+{
+  "type": "news_batch",
+  "data": [
+    { "id": "...", "title": "...", "time": "...", "sort_time": 1802410200, ... },
+    { "id": "...", "title": "...", "time": "...", "sort_time": 1802410100, ... }
+  ]
+}
+```
+
+**Push rule / 推送规则:**
+- **First cycle** (server restart): pushes all items as `news_batch`
+- **Subsequent cycles**: pushes only new items (by title dedup) as `news_batch`
+- The `data` array is **pre-sorted by `sort_time` descending** (newest first) by the server
+
+**Frontend must handle both `news` (single) and `news_batch` (array) types.**
+
+---
+
+## 8. 错误码 / Error Codes
 
 | Code | Meaning | When |
 |------|---------|------|
@@ -107,7 +173,7 @@ GET /api/v1/news/research/{symbol}
 
 ---
 
-## 8. 前后端检查表 / Frontend-Backend Checklist
+## 9. 前后端检查表 / Frontend-Backend Checklist
 
 | Item | Frontend | Backend | Notes |
 |------|----------|---------|-------|
@@ -117,3 +183,6 @@ GET /api/v1/news/research/{symbol}
 | Loading skeleton | ☐ | N/A | |
 | Empty state "暂无资讯" | ☐ | N/A | |
 | Clickable news link opens in new tab | ☐ | N/A | |
+| `sort_time` field present in all items | ☐ | ☐ | Added in news-timeline-fix |
+| WS `news_batch` format handled | ☐ | ☐ | Added in news-timeline-fix |
+| Frontend re-sorts after WS merge | ☐ | N/A | Added in news-timeline-fix |
