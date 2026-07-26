@@ -86,4 +86,8 @@ export const adminApi = {
   tokenUsage: () => api.get('/admin/token-usage'),
   tokenTimeseries: (params = {}) => api.get('/admin/token-usage/timeseries', { params }),
   tokenFailures: (limit = 50) => api.get('/admin/token-usage/failures', { params: { limit } }),
+  sourcesHealth: () => api.get('/admin/sources/health'),
+  sourcesTimeline: (hours = 1) => api.get('/admin/sources/events/timeline', { params: { hours } }),
+  sourcesFailures: (limit = 10) => api.get('/admin/sources/events/failures', { params: { limit } }),
+  sourcesCircuitBreakers: () => api.get('/admin/sources/circuit-breakers'),
 }

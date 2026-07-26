@@ -31,6 +31,12 @@ const routes = [
     component: () => import('../components/TokenMonitor.vue'),
     meta: { title: 'Token 用量监控', description: 'DeepSeek API Token 使用统计与趋势变化' },
   },
+  {
+    path: '/source-monitor',
+    name: 'source-monitor',
+    component: () => import('../components/SourceMonitor.vue'),
+    meta: { title: '数据源监控', description: '数据源健康状态、事件趋势与失败记录' },
+  },
 ]
 
 export default createRouter({ history: createWebHistory(), routes })

@@ -832,19 +832,19 @@ market-analysis-optimization-plan.md
 
 此阶段完全对应 `roadmap-data-source-unified.md` 的四个子阶段。详见该文档。
 
-**状态**: 除 Phase D7（前端数据源监控面板）外，所有子任务均已实施。`roadmap-data-source-unified.md` 已更新为 v3.0 回顾文档。
+**状态**: 所有子任务均已实施（4.1.2 全球指数链路已稳定运行，虽未纳入 SourceRegistry 但由 EM 批量接口+Sina+Finnhub 覆盖 14 指数，verify_e2e.py 有断言保护）。`roadmap-data-source-unified.md` 已更新为 v3.0 回顾文档。
 
 | # | 任务 | 源阶段 | 状态 | 说明 |
 |---|------|--------|:----:|------|
 | 4.1.1 | 美股 `_route_us()` 链路重写 | roadmap Phase A | ✅ 已实施 | 当前为 `TwelveData→Finnhub`。Stooq API 已关(404/Cloudflare)，`stooq_fetcher.py` 已删除；AlphaVantage(25次/天)和 yfinance(境内不稳定) 已移出链路 |
-| 4.1.2 | 全球指数链路统一 | roadmap Phase A4 | ⚠️ 待确认 | `_foreign()` 使用 Sina→TwelveData→Finnhub，`_route_us()` 已改。建议在 verify_e2e.py 中增加海外指数区域断言 |
+| 4.1.2 | 全球指数链路统一 | roadmap Phase A4 | ✅ 已实施 | `_foreign()` 实际降级链: EM(东方财富批量缓存) → Sina → Sina页面爬取(欧洲) → Finnhub → 占位符。未纳入 SourceRegistry.route() 因为 EM 批量接口一次调用覆盖全部 14 指数，效率远高于 route() 单标的链式模式。verify_e2e.py §section_market 已有 HK/US 三大指数价格断言 + 逐区域有价验证。`_route_us()` 已改为 TwelveData→Finnhub 并通过 registry.route() |
 | 4.1.3 | China market 3 核心函数接入 SourceRegistry | roadmap Phase B | ✅ 已实施 | `fetch_a_stock_realtime` / `fetch_a_stock_batch` / `fetch_hk_stock_realtime` 均已使用 `registry.route()` |
 | 4.1.4 | price=0 过滤前置修复 | roadmap Phase B | ✅ 已实施 | `_filtered()` 辅助函数在 china_market.py:424 实现，provider lambda 层过滤 |
 | 4.1.5 | 补齐健康探针 | roadmap Phase C | ✅ 已实施 | `monitor/probes.py` 已含 8 探针（6 数据源 + 2 线程池），`main.py` 调用 `register_all_probes()` |
 | 4.1.6 | SourceRegistry on_event 回调 | roadmap Phase D2-D4 | ✅ 已实施 | `source_registry.py` 已含 `set_event_callback` + `route_name` + `get_states` + `circuit_breaker_status` |
 | 4.1.7 | SourceEventStore | roadmap Phase D1 | ✅ 已实施 | `monitor/source_events.py` 完整实现（内存环5000条 + SQLite异步刷盘 + 7天清理） |
 | 4.1.8 | 数据源监控 API | roadmap Phase D6 | ✅ 已实施 | `routers/admin.py` 已含 4 个端点（health/timeline/failures/circuit-breakers） |
-| 4.1.9 | 前端数据源监控面板 | roadmap Phase D7 | ❌ 待实施 | 独立任务，无文件冲突。参照 `TokenMonitor.vue` 风格 |
+| 4.1.9 | 前端数据源监控面板 | roadmap Phase D7 | ✅ 已实施 | `frontend/src/components/SourceMonitor.vue` 新建，含源状态矩阵 + ECharts 堆叠柱状图(1h/6h/24h) + 失败事件表格。路由 `/source-monitor`，导航"📡 数据源"。参照 `TokenMonitor.vue` 风格。后端 admin API 4 端点已就绪（D6），`api-contracts/admin/sources.md` 已创建 ✅ |
 
 **实施后的并行分析**（历史记录，用于未来参考）:
 - Track 1 (Phase A+B): 实际完全并行，无文件冲突
@@ -876,7 +876,7 @@ curl -s "http://localhost:8000/api/v1/admin/sources/events/timeline?hours=1"
 | # | 任务 | 源文档 | 预估工时 | 前置依赖 |
 |---|------|--------|---------|---------|
 | 6.1.1 | SourceEventStore（source_events 表 + API） | roadmap Phase D (D1+D6) | 6h | 4.1.6 | ✅ 已实施（D1+D6 已完成，见 Phase 4.1.7+4.1.8）。D7 前端监控面板仍待实施 |
-| 6.1.2 | 前端数据源监控页面 | roadmap Phase D7 | 4h | 6.1.1 | 实际 D7 独立于其他后端任务，可直接实施。当前后端 API 已就绪 |
+| 6.1.2 | 前端数据源监控页面 | roadmap Phase D7 | ✅ 已实施 | — | 已在 Phase 4.1.9 完成：SourceMonitor.vue + 路由 + 导航 |
 | 6.1.3 | ConfigManager + app_config 表 | config-management §4.1-4.3 | 4h | 无 |
 | 6.1.4 | 前端 ConfigPage | config-management §5 | 4h | 6.1.3 |
 | 6.1.5 | Sector API 实时行情返回 | sector-concept Phase 3 | 3h | 1.1.1 |
@@ -1075,3 +1075,4 @@ Phase 7.1 (远期优化)             无紧急依赖
 | **v7.0** | 2026-07-26 | Phase 2.6 + 2.7 + 2.8 全部完成。2.6：Sina IOPV urlopen->run_sync 修复(P0)、macro_state 死代码线程池包装(P1)、设计管线 Semaphore(1) 并发限流(P1)、CI 审计脚本 audit_async_blocking.py 创建(P2)、线程池 ERROR 告警(P2)、test_sina_iopv_fetch 单测(P2)。2.7：设计方案逐策略非空校验(P0)、compute() 空数据 error 告警(P0)、因子降级缓存(P1)、置信度规则化(P1)、factor_availability 报告(P2)、etf_count 元数据(P2)、verify_e2e 质量断言(P2)。2.8：test_no_direct_sync_call_in_async_function(G1)、test_compute_with_empty_fetch(G2)、test_empty_candidate_pool(G2)、test_strategy_check confidence 断言(G3)、test_database roundtrip(G4)。 |
 | **v7.1** | 2026-07-26 | Phase 2.7 剩余项 + 2.8 剩余项 + Phase 2.9 全部完成。2.7.3：新增 encoding_diagnosis.py 编码诊断脚本 ✅；2.7.9：市态缓存异步刷新（refresh_sentiment_cache + main.py 120s 定时循环）✅；2.7.11-2.7.12：AGENTS.md 更新 ✅。2.8.3：编排器 slow 集成测试 ✅；2.8.6：σ 格式断言增强 ✅；2.8.7：market_context 完整性断言 ✅。2.9.1：新增 llm_context.py（build_full_context 统一数据管道）✅；2.9.2-2.9.3：llm_report_stream + llm_advice_stream 改用统一管道 ✅。后端单测 pool_manager 13/13 PASS，设计优化单测通过（不含slow）。 |
 | | **v7.2** | 2026-07-26 | Phase 4.1 状态审核。全量代码审计发现 roadmap-data-source-unified.md v2.0 中的实施方案绝大部分已被后续 commits 落地。Phase A/B/C/D1-D6 均已实施，仅 D7（前端数据源监控面板）待完成。`roadmap-data-source-unified.md` 更新为 v3.0 回顾文档。`implementation-master-plan.md` Phase 4.1 更新为 ✅ 已实施状态。 |
+| | **v7.3** | 2026-07-26 | Phase 4.1 全部完成：4.1.2（全球指数链路）代码审计确认实际为 EM→Sina→Finnhub 而非计划所述 TwelveData，verify_e2e.py 已含 HK/US 三大指数断言，状态修正为 ✅。4.1.9（前端数据源监控面板 D7）实施完成：新建 SourceMonitor.vue（TokenMonitor 风格，含 ECharts 堆叠柱状图 + 源状态矩阵 + 失败事件表格）、路由 `/source-monitor`、导航"📡 数据源"、`api-contracts/admin/sources.md` 契约。`api/index.js` 新增 4 个 adminApi 源监控方法。npm run build 验证通过。 |
