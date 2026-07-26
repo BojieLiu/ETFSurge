@@ -258,8 +258,7 @@ function handleJumperChange(event) {
   border-radius: var(--radius-md);
   background: transparent;
   color: var(--color-text-secondary);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
+  font: var(--text-body-sm);
   cursor: pointer;
   transition: var(--transition-fast);
 }

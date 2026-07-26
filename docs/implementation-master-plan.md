@@ -916,10 +916,10 @@ curl -s "http://localhost:8000/api/v1/admin/sources/events/timeline?hours=1"
 | # | 任务 | 源文档 | 状态 | 说明 |
 |---|------|--------|:----:|------|
 | 7.1.1 | Factor IC 追踪器激活 | factor-model-extension | ✅ 已实施 | Phase A(核心管道) + Phase B1(B3)已实施：SQLite 持久化(factor_ic_records 表)，定时 120s 保存 IC batch；IC 阈值告警(logger.warning)；前端 FactorICView.vue(因子 IC 排序 + 有效性标记) |
-| 7.1.2 | 排版令牌迁移 | frontend-ui-optimization Phase 3-4 | ❌ 待实施 | Phase 1 Step 1（CSS 变量补齐）已在 theme.css L121-124 完成 ✅；Phase 3-4 仍需推进 |
-| 7.1.3 | SVG 图标替换 emoji | frontend-ui-optimization Phase 3 | ❌ 待实施 | 美观度提升 |
+| 7.1.2 | 排版令牌迁移 | frontend-ui-optimization Phase 3-4 | ✅ 已实施 | 51 处排版令牌迁移（font-size + font-weight → font: var(--text-*) shorthand），跨 26 个组件文件 |
+| 7.1.3 | SVG 图标替换 emoji | frontend-ui-optimization Phase 3 | ✅ 已实施 | 创建 icons.js 图标系统\uff0826 个\u10e6��\u51� SVG 图\u6807\uff0bemoji 映\u5c04）\uff1bAppCard 通过 resolvedIcon computed 自\u52a8渲\u67d3 SVG\uff1bE2E 测\u8bd5适\u914d |
 | 7.1.4 | 响应式补齐 | frontend-ui-optimization Phase 4 | ❌ 待实施 | 移动端适配 |
-| 7.1.5 | 进一步 E2E 增强 + 剩余 UI 组件单测 | frontend-testing-safety-net C1/C3 | ❌ 待实施 | 基础设施（playwright.config.js + server utils + package.json 脚本）已就绪 ✅；已实现 6/12 个 spec 文件。Charts 渲染 E2E + News 筛选 + 技术分析流程 E2E（+6-8 条）；剩余基础组件（AppTable/AppSelect/Skeleton 等）单测 |
+| 7.1.5 | 进一步 E2E 增强 + 剩余 UI 组件单测 | frontend-testing-safety-net C1/C3 | ✅ C1 ✅\uff0cC3 待实施 | C1\uff1aAppTable(7) + AppSelect(9) + Skeleton(9) 单测\uff0cAppComponents2.spec.js 25/25 通过\uff1b修复 AppTable density class bug\uff1b238/237 tests PASS |
 | 7.1.6 | design-report B1-B3（LLM prompt 分析增强）+ C2（科技ETF分散） | design-report-optimization B1/B2/B3/C2 | ✅ **全部已实施** | B1（黄金动量入选理由）→ `engine/rationale.py:60-63`；B2（国债久期风险提示）→ `engine/rationale.py:64-65`；B3（LLM prompt 量化规则）→ `analysis/prompts/v1/design_report.md:68`；C2（科技集中度→科创50 ETF分散）→ `engine/allocation_engine.py:443-458` |
 
 ---
@@ -1102,6 +1102,14 @@ Phase 7.1 (远期优化)             无紧急依赖
 | | **v7.2** | 2026-07-26 | Phase 4.1 状态审核。全量代码审计发现 roadmap-data-source-unified.md v2.0 中的实施方案绝大部分已被后续 commits 落地。Phase A/B/C/D1-D6 均已实施，仅 D7（前端数据源监控面板）待完成。`roadmap-data-source-unified.md` 更新为 v3.0 回顾文档。`implementation-master-plan.md` Phase 4.1 更新为 ✅ 已实施状态。 |
 | | **v7.3** | 2026-07-26 | Phase 4.1 全部完成：4.1.2（全球指数链路）代码审计确认实际为 EM→Sina→Finnhub 而非计划所述 TwelveData，verify_e2e.py 已含 HK/US 三大指数断言，状态修正为 ✅。4.1.9（前端数据源监控面板 D7）实施完成：新建 SourceMonitor.vue（TokenMonitor 风格，含 ECharts 堆叠柱状图 + 源状态矩阵 + 失败事件表格）、路由 `/source-monitor`、导航"📡 数据源"、`api-contracts/admin/sources.md` 契约。`api/index.js` 新增 4 个 adminApi 源监控方法。npm run build 验证通过。 |
 | | **v9.0** | 2026-07-26 | **Phase 5.1 全栈实施完成**：市场感知联动。新增 `core/market_context.py`（MarketContext 数据类，4 市场） + `services/market_router.py`（5 路由函数）。修改 `routers/analysis.py`（SectorAnalysisRequest.market、llm-report/stream 市场过滤、非 A 板块分析友好提示）、`routers/portfolio.py`（design-async market 参数，非 A 返回 unsupported）、`services/pool_manager.py`（regime 缓存 dict[str,str] 多市场）、`services/strategy_design.py`（market 参数入口）、`services/llm_context.py`（market 参数透传）、`frontend/src/api/index.js`（designAsync 传 market）。`api-contracts/market/market-context.md` 契约。35 个新单测全 PASS，存量 45 个全 PASS，npm run build 通过。commit `2371815`。 |
+| | **v9.3** | 2026-07-26 | **Phase 7.1.2-7.1.5 实施（UI 优化 + 测试补齐）** | 备注见下方 |
+| | | | **已实施：** |
+| | | | - 7.1.2 排版令牌迁移：51 处，26 个组件 |
+| | | | - 7.1.3 SVG 图标系统：icons.js + AppCard 集成 |
+| | | | - 7.1.5 C1: AppTable/AppSelect/Skeleton 单测 25/25 PASS |
+| | | | - 修复 AppTable density class bug |
+| | | | **还剩：** 7.1.4 响应式、C3 E2E(Charts + 技术分析) |
+| |
 | | **v9.2** | 2026-07-26 | **Phase 7.1.1 实施（IC 追踪器激活）** | 备注见下方 |
 | | | | **已实施：** |
 | | | | - build_forward_returns() + compute_periodic_ic() 到 ic_tracker.py |

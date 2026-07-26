@@ -122,8 +122,7 @@ function formatChange(n, isAmount = false) {
   display: inline-flex;
   align-items: center;
   padding: var(--space-0.5) var(--space-2);
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-medium);
+  font: var(--text-caption);
   border-radius: var(--radius-full);
   text-transform: capitalize;
 }

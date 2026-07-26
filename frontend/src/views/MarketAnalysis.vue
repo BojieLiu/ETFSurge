@@ -114,8 +114,7 @@ function onSelectSymbol(symbol) {
 .market-tab {
   flex: 1;
   padding: var(--space-2) var(--space-3);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
+  font: var(--text-body-sm);
   color: var(--color-text-secondary);
   border: none;
   background: none;
@@ -162,8 +161,7 @@ function onSelectSymbol(symbol) {
   align-items: center;
   gap: var(--space-1);
   padding: var(--space-1.5) var(--space-2.5);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
+  font: var(--text-body-sm);
   color: var(--color-text-secondary);
   background: transparent;
   border: 1px solid transparent;

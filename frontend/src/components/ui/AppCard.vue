@@ -20,7 +20,7 @@
     <template v-if="layout === 'horizontal'">
       <div v-if="icon || $slots['header-icon']" class="app-card__main-icon" aria-hidden="true">
         <slot name="header-icon">
-          <span v-if="icon">{{ icon }}</span>
+          <span v-if="icon" v-html="resolvedIcon"></span>
         </slot>
       </div>
       <div class="app-card__content">
@@ -64,6 +64,7 @@
 
 <script setup>
 import { computed } from 'vue'
+import { icon as getIcon } from '../../utils/icons.js'
 
 const props = defineProps({
   variant: {
@@ -87,6 +88,12 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['click'])
+
+const resolvedIcon = computed(() => {
+  if (!props.icon) return ''
+  const svg = getIcon(props.icon)
+  return svg || props.icon
+})
 
 const layoutClass = computed(() => props.layout === 'horizontal' ? 'app-card--horizontal' : 'app-card--vertical')
 

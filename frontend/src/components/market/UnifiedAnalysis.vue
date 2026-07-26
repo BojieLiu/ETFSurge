@@ -217,8 +217,7 @@ async function doAnalyze() {
 }
 .analysis-tab {
   padding: var(--space-2) var(--space-4);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
+  font: var(--text-body-sm);
   color: var(--color-text-secondary);
   border: none;
   background: none;
@@ -259,8 +258,7 @@ async function doAnalyze() {
 .text-input::placeholder { color: var(--color-text-tertiary); }
 .btn-primary {
   padding: var(--space-2) var(--space-5);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
+  font: var(--text-body);
   color: white;
   background: var(--color-brand-600);
   border: none;

@@ -145,16 +145,14 @@ function findCumulativePnlPct(type) {
 
 .summary-label {
   margin: 0 0 var(--space-1);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
+  font: var(--text-body-sm);
   color: var(--color-text-secondary);
 }
 
 .summary-value {
   margin: 0;
   font-family: var(--font-family-mono);
-  font-size: var(--font-size-xl);
-  font-weight: var(--font-weight-bold);
+  font: var(--text-h2);
   color: var(--color-text-primary);
   line-height: var(--line-height-tight);
   white-space: normal;
@@ -164,8 +162,7 @@ function findCumulativePnlPct(type) {
 .summary-value.skeleton { color: transparent; }
 
 .pnl-pct {
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
+  font: var(--text-body-sm);
 }
 
 .text-up { color: var(--color-text-up) !important; }

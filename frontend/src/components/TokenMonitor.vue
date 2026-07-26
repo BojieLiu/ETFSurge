@@ -356,8 +356,7 @@ onMounted(fetchData)
 }
 
 .stat-value {
-  font-size: var(--font-size-2xl);
-  font-weight: var(--font-weight-bold);
+  font: var(--text-h2);
   color: var(--color-text-primary);
   font-variant-numeric: tabular-nums;
 }
@@ -386,8 +385,7 @@ onMounted(fetchData)
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  font-size: var(--font-size-lg);
-  font-weight: var(--font-weight-semibold);
+  font: var(--text-h4);
   color: var(--color-text-primary);
   margin: 0;
 }
@@ -416,8 +414,7 @@ onMounted(fetchData)
   border-radius: var(--radius-md);
   background: transparent;
   color: var(--color-text-secondary);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
+  font: var(--text-body-sm);
   cursor: pointer;
   transition: all 0.15s;
 }

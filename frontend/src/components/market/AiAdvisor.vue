@@ -84,8 +84,7 @@ async function send() {
 .text-input::placeholder { color: var(--color-text-tertiary); }
 .btn-primary {
   padding: var(--space-2) var(--space-5);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
+  font: var(--text-body);
   color: white;
   background: var(--color-brand-600);
   border: none;

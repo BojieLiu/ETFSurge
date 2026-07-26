@@ -304,8 +304,7 @@ watch(() => route.path, () => {
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
   color: var(--color-text-secondary);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
+  font: var(--text-body-sm);
   border-radius: var(--radius-md);
   text-decoration: none;
   transition: var(--transition-fast);
@@ -340,8 +339,7 @@ watch(() => route.path, () => {
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-1) var(--space-3);
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-medium);
+  font: var(--text-caption);
   border-radius: var(--radius-full);
   background: var(--color-surface-secondary);
   border: 1px solid var(--color-border-light);
@@ -486,8 +484,7 @@ watch(() => route.path, () => {
   gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
   color: var(--color-text-secondary);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
+  font: var(--text-body-sm);
   border-radius: var(--radius-md);
   text-decoration: none;
   transition: var(--transition-fast);
@@ -574,8 +571,7 @@ watch(() => route.path, () => {
 }
 
 .app-page-header__title {
-  font-size: var(--font-size-2xl);
-  font-weight: var(--font-weight-bold);
+  font: var(--text-h2);
   line-height: var(--line-height-tight);
   color: var(--color-text-primary);
   margin-bottom: var(--space-1);

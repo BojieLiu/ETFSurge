@@ -842,8 +842,7 @@ onMounted(loadTab)
 .tab {
   flex: 1;
   padding: var(--space-2) var(--space-4);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
+  font: var(--text-body-sm);
   color: var(--color-text-secondary);
   border-radius: var(--radius-md);
   background: transparent;
@@ -988,8 +987,7 @@ onMounted(loadTab)
   border-radius: var(--radius-md);
   background: var(--color-surface-primary);
   color: var(--color-text-primary);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
+  font: var(--text-body-sm);
   cursor: pointer;
   transition: var(--transition-fast);
 }

@@ -78,8 +78,7 @@ async function generate() {
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-3) var(--space-8);
-  font-size: var(--font-size-lg);
-  font-weight: var(--font-weight-semibold);
+  font: var(--text-h4);
   color: white;
   background: linear-gradient(135deg, var(--color-brand-600), var(--color-brand-700));
   border: none;

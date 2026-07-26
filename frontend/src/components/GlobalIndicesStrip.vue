@@ -127,8 +127,7 @@ function labelClass(region) {
 }
 
 .card-title {
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
+  font: var(--text-body);
   color: var(--color-text-primary);
   margin: 0;
   display: flex;

@@ -91,8 +91,7 @@ defineEmits(['cancel'])
 }
 
 .loading-title {
-  font-size: var(--font-size-base);
-  font-weight: var(--font-weight-semibold);
+  font: var(--text-h4);
   margin: 0 0 var(--space-2);
   color: var(--color-text-primary);
 }

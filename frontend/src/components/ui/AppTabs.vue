@@ -261,8 +261,7 @@ watch(() => props.modelValue, (val) => {
   justify-content: center;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-4);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
+  font: var(--text-body-sm);
   color: var(--color-text-secondary);
   background: transparent;
   border: none;
@@ -300,8 +299,7 @@ watch(() => props.modelValue, (val) => {
   min-width: 18px;
   height: 18px;
   padding: 0 var(--space-1);
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-semibold);
+  font: var(--text-caption);
   color: var(--color-brand-600);
   background: var(--color-bg-brand-subtle);
   border-radius: var(--radius-full);

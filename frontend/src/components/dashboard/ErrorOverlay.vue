@@ -42,8 +42,7 @@ defineEmits(['retry'])
 }
 .error-card h3 {
   margin: 0 0 var(--space-2);
-  font-size: var(--font-size-lg);
-  font-weight: var(--font-weight-semibold);
+  font: var(--text-h4);
   color: var(--color-text-primary);
 }
 .error-card p {

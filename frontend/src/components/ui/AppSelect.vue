@@ -119,8 +119,7 @@ const onFocus = (e) => {
 }
 
 .select-label {
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-medium);
+  font: var(--text-caption);
   color: var(--color-text-secondary);
 }
 

@@ -129,7 +129,8 @@ describe('AppCard.vue', () => {
     })
     expect(wrapper.classes()).toContain('app-card--horizontal')
     expect(wrapper.find('.app-card__main-icon').exists()).toBe(true)
-    expect(wrapper.find('.app-card__main-icon').text()).toBe('💰')
+    // Icon renders as SVG via resolvedIcon computed
+    expect(wrapper.find('.app-card__main-icon svg').exists()).toBe(true)
     expect(wrapper.text()).toContain('Content')
   })
 

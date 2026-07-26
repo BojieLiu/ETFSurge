@@ -103,8 +103,7 @@ function startDesign() {
 }
 
 .feature-card-title {
-  font-size: var(--font-size-base);
-  font-weight: var(--font-weight-semibold);
+  font: var(--text-h4);
   margin: 0 0 var(--space-1);
 }
 
@@ -137,8 +136,7 @@ function startDesign() {
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
-  font-size: var(--font-size-lg);
-  font-weight: var(--font-weight-semibold);
+  font: var(--text-h4);
   margin-bottom: var(--space-4);
 }
 
@@ -154,8 +152,7 @@ function startDesign() {
 
 .capital-input-wrapper :deep(input) {
   text-align: center;
-  font-size: var(--font-size-lg);
-  font-weight: var(--font-weight-semibold);
+  font: var(--text-h4);
   padding: var(--space-3);
 }
 

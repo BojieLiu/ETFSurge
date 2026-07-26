@@ -101,8 +101,7 @@ const filteredItems = computed(() => {
 
 .history-header h4 {
   margin: 0;
-  font-size: var(--font-size-base);
-  font-weight: var(--font-weight-semibold);
+  font: var(--text-h4);
   color: var(--color-text-primary);
 }
 
@@ -199,8 +198,7 @@ const filteredItems = computed(() => {
 }
 
 .history-capital {
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
+  font: var(--text-body);
   color: var(--color-text);
   min-width: 60px;
   white-space: nowrap;

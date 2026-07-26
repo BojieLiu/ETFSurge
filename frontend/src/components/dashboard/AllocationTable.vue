@@ -119,8 +119,7 @@ function formatChange(pct) {
   align-items: center;
   padding: var(--space-0.5) var(--space-2);
   font-family: var(--font-family-mono);
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-semibold);
+  font: var(--text-caption);
   color: var(--color-brand-700);
   background: var(--color-bg-brand-subtle);
   border-radius: var(--radius-full);

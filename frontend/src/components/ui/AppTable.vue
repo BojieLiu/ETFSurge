@@ -1,6 +1,6 @@
 <template>
   <div class="table-wrapper" :class="{ 'table-wrapper--sticky-header': stickyHeader }">
-    <table class="table" :role="role">
+    <table :class="['table', 'table--' + density]" :role="role">
       <thead v-if="columns.length" class="table__thead">
         <tr class="table__header-row">
           <th

@@ -320,8 +320,7 @@ function handleDocumentClick(event) {
 
 .tooltip__inner {
   padding: var(--space-2) var(--space-3);
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-medium);
+  font: var(--text-caption);
   line-height: var(--line-height-normal);
   color: var(--color-text-inverse);
   background: var(--color-neutral-900);

@@ -140,8 +140,7 @@ defineEmits(['update:capitalOn', 'update:capitalOff', 'refresh', 'refresh-on', '
 }
 .capital-title {
   margin: 0;
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
+  font: var(--text-body);
   color: var(--color-brand-800);
   letter-spacing: var(--letter-spacing-wide);
 }
@@ -178,8 +177,7 @@ defineEmits(['update:capitalOn', 'update:capitalOff', 'refresh', 'refresh-on', '
   max-width: 300px;
 }
 .input-label {
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
+  font: var(--text-body-sm);
   color: var(--color-text-secondary);
   white-space: nowrap;
 }

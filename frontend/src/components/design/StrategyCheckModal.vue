@@ -72,8 +72,7 @@ defineEmits(['select-type', 'close'])
 
 .modal-header h3 {
   margin: 0;
-  font-size: var(--font-size-base);
-  font-weight: var(--font-weight-semibold);
+  font: var(--text-h4);
 }
 
 .modal-close {
@@ -150,8 +149,7 @@ defineEmits(['select-type', 'close'])
 
 .st-title {
   display: block;
-  font-size: var(--font-size-base);
-  font-weight: var(--font-weight-semibold);
+  font: var(--text-h4);
   color: var(--color-text-primary);
   margin-bottom: 4px;
 }

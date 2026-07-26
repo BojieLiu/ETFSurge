@@ -210,8 +210,7 @@ function signalClass(signal) {
 
 .sr-header h3 {
   margin: 0;
-  font-size: var(--font-size-base);
-  font-weight: var(--font-weight-semibold);
+  font: var(--text-h4);
   flex: 1;
 }
 
@@ -265,8 +264,7 @@ function signalClass(signal) {
 
 .sr-section h4 {
   margin: 0 0 var(--space-3);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
+  font: var(--text-body);
   color: var(--color-text-primary);
 }
 

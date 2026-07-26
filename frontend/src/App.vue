@@ -302,8 +302,7 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  font-size: var(--font-size-lg);
-  font-weight: var(--font-weight-bold);
+  font: var(--text-h3);
   color: var(--color-brand-600);
   text-decoration: none;
   white-space: nowrap;
@@ -336,8 +335,7 @@ onUnmounted(() => {
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
+  font: var(--text-body-sm);
   color: var(--color-text-secondary);
   border-radius: var(--radius-md);
   text-decoration: none;
@@ -370,8 +368,7 @@ onUnmounted(() => {
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-1) var(--space-3);
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-medium);
+  font: var(--text-caption);
   color: var(--color-text-tertiary);
   border-radius: var(--radius-full);
   background: var(--color-surface-tertiary);
@@ -435,8 +432,7 @@ onUnmounted(() => {
 }
 
 .page-title {
-  font-size: var(--font-size-2xl);
-  font-weight: var(--font-weight-bold);
+  font: var(--text-h2);
   line-height: var(--line-height-tight);
   color: var(--color-text-primary);
   letter-spacing: var(--letter-spacing-tight);
@@ -623,8 +619,7 @@ onUnmounted(() => {
 
 .loading-text {
   margin-top: var(--space-4);
-  font-size: var(--font-size-base);
-  font-weight: var(--font-weight-medium);
+  font: var(--text-body);
   color: var(--color-text-primary);
   text-align: center;
 }
