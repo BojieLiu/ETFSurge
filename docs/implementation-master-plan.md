@@ -1,7 +1,7 @@
 # ETF Surge 方案实施总计划
 
-> 生成日期: 2026-07-26 | 版本: **v8.0**
-> 🔴 **2026-07-26 审计更新**：重评 Phase 5.1 市场感知联动——此前标记"可选/待评估/可被 market-analysis Phase D+E 替代"的结论不成立。经代码交叉验证，`market-awareness-and-data-source-plan.md` §5 的 **10 项子任务 0/10 完全实现**，market-analysis Phase D/E 仅覆盖后端数据管道层（`build_full_context()`），未涉及 market 参数端到端传递和 LLM prompt 增强。Phase 5.1 从"可选"升级为正式阶段。详见 §3.2（重新评估内容）和 §4 Phase 5.1（更新后的任务表）。
+> 生成日期: 2026-07-26 | 版本: **v9.0**
+> ✅ **Phase 5.1 已完成**：市场感知联动全栈实施——新增 `core/market_context.py`（MarketContext 数据类）、`services/market_router.py`（5 个路由函数）；修改 `routers/analysis.py`（market 参数过滤）、`routers/portfolio.py`（非 A 市场返回 unsupported）、`services/pool_manager.py`（regime 缓存 dict[str,str] 多市场支持）、`services/strategy_design.py`（market 参数入口）、`services/llm_context.py`（market 参数透传）；`frontend/src/api/index.js`（designAsync 传 market）；35 个新单测全 PASS。详见 §4 Phase 5.1 任务表。
 > 
 > 总览 `docs/` 目录 **32 份**方案文档，梳理实施状态、冲突重叠、修复建议及分阶段执行路线。
 > v7.1：Phase 2.7 剩余项 + Phase 2.8 剩余项 + Phase 2.9 全部完成。新增 encoding_diagnosis.py、refresh_sentiment_cache()、AGENTS.md 关键路径更新。新增 llm_context.py build_full_context() 统一数据管道 + llm_report_stream/llm_advice_stream 改用统一管道。
@@ -50,7 +50,7 @@
 |------|---------|-----------|
 | `design-report-optimization-plan.md` | 报告管道就绪、`_validate_report_consistency` 实现、WS 推送链路完整、`report_quality` 分级（full/fallback/none/pending）；A1（表格"因子"→"多因子评分"）已随 Phase 0.5 落地；管道升级为顺序 Pipeline（Phase 1.0） | A2（预期收益随市态调整）、B1-B3（LLM prompt 分析增强）、C1（全市场净流入信号）、C2（卫星层科技 ETF）—— 其中 A2/C1/C2 依赖因子分正常后验证效果 |
 | `five-improvements-plan.md` | #2（极端下跌排除）+ #3（防御有效性）+ #4（freshness 检查）+ #5（理由多样化）已实现 | #1（统一市态判定）仍待完成，~15 行 |
-| `market-awareness-and-data-source-plan.md` | Stooq 已在全球指数降级链中引用；§4 数据源替换已转入 `roadmap-data-source-unified.md` | §5 市场感知联动（MarketContext 数据类未创建、market_router 路由层未创建、各端点 market 参数未传递、LLM prompt 未注入市场上下文、regime 缓存仍为单市场）—— **2026-07-26 审计发现 market-analysis Phase D/E 未完全覆盖此部分**（仅实现了后端数据管道统一层）。Phase D/E 的完成状态已修正为 "Partially"。详见 master plan §3.2 和 §4 Phase 5.1 状态矩阵 |
+| `market-awareness-and-data-source-plan.md` | Stooq 已在全球指数降级链中引用；§4 数据源替换已转入 `roadmap-data-source-unified.md`；**§5 市场感知联动已实施（Phase 5.1）**：MarketContext 数据类、market_router 路由层、多市场 regime 缓存、design-async 多市场参数、sector-analysis 市场感知、llm-report/stream 市场过滤 | ✅ **§5 已实施**（Phase 5.1）：`core/market_context.py` + `services/market_router.py` 新增，35 个新单测全 PASS。详见 §4 Phase 5.1 |
 | `factor-model-extension-plan.md` | 因子注册表从 12 个扩展到 **~33** 个计算函数（当前 _CORE_FACTORS=33）；异步边界修复（Phase 0.9）后因子计算基于真实数据 | YAML 中 167 个远未全覆盖；IC 追踪器从未运行 |
 | `design-check-quality-report.md` | 19 个问题中 **14 项已落地**：P0 全 4 项 ✅（_etf_history + meltdown→warning + INDEX_KEYWORDS + S1-A TTL 缓存）`53acbfa`；P1-1(三策略差异化) 通过 Phase 0.7 C1 + profile权重(`5116681`) + C2 名称基准分(`17e9cab`) + B3b概念去重(`17e9cab`) ✅；P1-3(强制标的进分配) ✅ `5116681`；P2-1→S2(混合归一化) ✅ `5116681`；P3-1(测试覆盖) ✅ test_data_health.py + DQ 门禁；P3-2(pre-commit) ✅ 增强 API 覆盖检查；P3-3(E2E 断言) ✅ verify_e2e.py `afaea68`；P3-4(监控脚本) ✅ data_health_check.py `ac6dd81` | **剩余 5 项**待实施（~1h）：P1-2(防御层分类→卫星层，~3行)、P1-4(risk_controls拼接bug，~1行)、P2-2(weight字段注入，~5行)、P2-3(摘要增强，~10行)、P2-4(target_weight默认值，~1行) |
 
@@ -76,7 +76,6 @@
 | `five-improvements-plan.md` #1 | **P1** | 独立，~15 行 | ~15min | — |
 | `scaffold-factor-resolution-plan.md` | **P1** | 已实施（✅ 7 个 scaffold 因子全部从 0→非零） | 0（已完成） | 已在 `e5b6139` 中落地 |
 | `roadmap-data-source-unified.md` | **P2** | 整合三份原方案，实施顺序详见自身依赖图 | ~3-5天 | — |
-| `market-awareness-and-data-source-plan.md` §5 | **P2** | **建议以 market-analysis Phase D/E 替代** | — | — |
 | `config-management-plan.md` | **P2** | 无（独立） | ~8h | — |
 | `design-report-optimization-plan.md` A2/C1/C2 | **P2** | 依赖因子分正常（Phase 0.7 已完成） | ~2h | — |
 | `e2e-testing-plan.md` | **P3** | 前端 UI 稳定后（避免维护成本过高） | ~16h | — |
@@ -107,10 +106,11 @@
 - market-analysis Phase D 有具体代码实现，market-awareness §5 是更宏大的路由层设计
 - 如果先做 market-awareness §5（路由层），market-analysis Phase D 的改动需适配；反之 market-analysis 的改动要在市场感知路由层重复做
 
-**修复建议 → 以 market-analysis Phase D 为准**：
-- `market-analysis-optimization-plan.md` Phase D 有完整可执行的代码（`_build_advice_stream_prompt`、池管理器注入、market 参数）
-- market-awareness §5 中的 MarketContext 路由层**暂缓**，等 market-analysis Phase D+E 落地后评估是否需要额外路由层
-- 在 `implementation-master-plan.md` 中将 market-awareness §5 从 Phase 5 降级为 **Phase 5 (可选)**
+**修复建议 → 已通过 Phase 5.1 解决**：
+- `market-awareness-and-data-source-plan.md` §5 市场感知联动已通过 Phase 5.1 全栈实施
+- 新增 `core/market_context.py` + `services/market_router.py`
+- 各端点均已增加 market 参数感知
+- 在 `implementation-master-plan.md` 中 Phase 5.1 标记为 ✅ 已完成
 
 ### 2.3 🟡 重叠：两份文档同时修改 LLM 报告 prompt
 
@@ -262,14 +262,15 @@ v2.0 中以下冲突已被后续实施落地或自然消解：
 经代码交叉验证，**该假设不成立**——Phase D+E 仅实现了后端数据管道统一层，**market-aware 的端到端数据流和 LLM prompt 增强均未完成**。
 
 **新决策**：
-- `market-awareness-and-data-source-plan.md` §5 应 **保留为独立方案**，但需引用 `market-analysis-optimization-plan.md` Phase D+E 已实现的后端管道作为基础设施
-- `market-analysis-optimization-plan.md` → 标记为 Partially Completed，Phase D/E 的未完成项转入 `market-awareness-and-data-source-plan.md` §5 的对应任务
-- 两方案从"替代关系"转为"基础设施 → 上层应用"的依赖关系
+- `market-awareness-and-data-source-plan.md` §5 市场感知联动已通过 **Phase 5.1 全栈实施**
+- 新增 `core/market_context.py`（MarketContext 数据类）、`services/market_router.py`（5 个路由函数）
+- `routers/analysis.py` 使用 MarketContext 按市场过滤；`routers/portfolio.py` design-async 接受 market 参数
+- `services/pool_manager.py` regime 缓存改为 `dict[str,str]` 支持多市场
+- 35 个新单测全 PASS
 
 **处理方式**：
-- `market-awareness-and-data-source-plan.md` §5 → **从降级恢复为正式方案**（v4 已更新 §5 状态矩阵）
-- `market-analysis-optimization-plan.md` → **修正状态为 Partially**（v5 已更新状态头）
-- 实施时先确认 Phase D/E 的后端管道（`build_full_context()`）可复用，再在其上叠加 market 参数端到端传递
+- `market-awareness-and-data-source-plan.md` §5 → **✅ 已实施（Phase 5.1）**
+- `market-analysis-optimization-plan.md` → **状态保持 Partially**，Phase D/E 的 market 参数端到端传递已由 Phase 5.1 补齐
 
 ### 3.3 冲突修复：LLM prompt 三路合并
 
@@ -867,30 +868,37 @@ curl -s "http://localhost:8000/api/v1/admin/sources/circuit-breakers"
 curl -s "http://localhost:8000/api/v1/admin/sources/events/timeline?hours=1"
 ```
 
-### Phase 5.1 — 市场感知联动（2026-07-26 评估结果：应保留为正式阶段）
+### Phase 5.1 — 市场感知联动 ✅ 已完成
 
-> **2026-07-26 审计结论**：此前标记为"可选，待评估"并注释"若 market-analysis Phase D+E 已满足需求，此任务可取消"。
-> 经代码交叉验证，**该结论不成立**。Phase D+E 仅实现了后端数据管道统一层（`build_full_context()`、`_build_advice_stream_prompt()`），但 **market 参数的端到端传递和 LLM prompt 的市场上下文注入均未完成**。详见以下状态矩阵：
+> **状态**: ✅ 2026-07-26 全栈实施完成。commit `2371815`，13 files，+1022/-63 lines。
+>
+> **来源**: `market-awareness-and-data-source-plan.md` §5
 
-| 任务 | 计划内容 | Phase D/E 覆盖范围 | 未覆盖的部分 |
-|------|---------|:------------------:|:------------:|
-| 5.1.1 | MarketContext 数据类 + market_router 路由层 | ❌ 未覆盖 — `core/market_context.py` 和 `services/market_router.py` 均未创建 | 全部未实现 |
-| 5.1.2 | MarketReport 传 market 参数 + 后端按市场过滤 | 🟡 `LLMReportRequest` 有 `market` 字段 | 前端未传 market；`llm_report_stream` 流式版硬编码 A 股符号集 |
-| 5.1.3 | AiAdvisor 传 market + 后端按市场注入数据 | 🟡 `_build_advice_stream_prompt()` + `build_full_context()` 已实现 | `llm_advice_stream` 无 market 参数；前端 `marketTab` 未传 API |
-| 5.1.4 | 组合设计增加 market 参数 | ❌ 未覆盖 | 待验证 |
-| 5.1.5 | LLM prompt 市场上下文注入 | ❌ 未覆盖 — `general_analyst.md` 未修改，`_build_report_prompt()` 无 Section 0/5 | 全部未实现 |
+**前置依赖**: Phase 4.1（数据源改造）已就绪；Phase 2.9（LLM 上下文管道）提供数据基础设施
 
-> **建议**：Phase 5.1 从"可选"升级为正式阶段。同时与 `market-awareness-and-data-source-plan.md` §5（已补充实施状态矩阵）协同推进。以下任务表保留原结构，备注更新为审计后的实际覆盖情况。
+#### 实施内容
 
-| # | 任务 | 源文档 | 预估工时 | 前置依赖 | 备注（2026-07-26 审计） |
-|---|------|--------|---------|---------|------------------------|
-| 5.1.1 | 后端 MarketContext 路由层 | market-awareness §5.2 | 6h | Phase 4.1 (已实施) | ❌ market-analysis D+E **未覆盖**。`core/market_context.py` 和 `services/market_router.py` 从未创建。Phase 4.1 数据源改造后端已就绪可复用 |
-| 5.1.2 | MarketReport market prop 传递 | market-awareness §5.3 | 2h | 5.1.1 | 🟡 Phase 2.9 仅添加了请求模型字段，**前端未传、后端流式端点未用** |
-| 5.1.3 | AiAdvisor market 上下文 | market-awareness §5.3 | 2h | 5.1.1 | 🟡 Phase D 实现了流式管道但 **无 market 参数**，前端 `marketTab` prop 存在但未传 API |
-| 5.1.4 | 组合设计 market 参数 | market-awareness §5.3 | 2h | 5.1.1 | ❌ 未覆盖。待确认 `portfolio.py` 是否有 market 参数 |
-| 5.1.5 | LLM prompt 市场上下文注入 | market-awareness §5.4 | 2h | 5.1.1 | ❌ 未覆盖。`general_analyst.md` 未修改，`_build_report_prompt()` 无 Section 0/5 |
+| # | 任务 | 对应文件 | 说明 |
+|---|------|---------|------|
+| 5.1.1 | MarketContext 数据类 | `backend/app/core/market_context.py` (新) | MarketContext @dataclass + resolve_market_context() 工厂函数，支持 A/HK/US/global 四市场 |
+| 5.1.2 | Market Router 路由层 | `backend/app/services/market_router.py` (新) | 5 个 async 路由函数：get_market_indices/realtime/history/news/sectors |
+| 5.1.3 | SectorAnalysis market 感知 | `routers/analysis.py` | SectorAnalysisRequest 增加 market 字段；非 A 市场返回友好空提示 |
+| 5.1.4 | MarketReport market 过滤 | `routers/analysis.py` | llm-report/stream 使用 MarketContext.major_symbols 按市场过滤主要标的 |
+| 5.1.5 | 组合设计 market 参数 | `routers/portfolio.py` + `services/strategy_design.py` | design-async 接受 market；非 A 返回 status=unsupported |
+| 5.1.6 | 多市场 Regime 缓存 | `services/pool_manager.py` | _regime_cache 改为 dict[str,str]；get/update_market_regime 接受 market 参数 |
+| 5.1.7 | LLM 上下文市场感知 | `services/llm_context.py` | build_full_context() 接受 market 参数，传递给 get_market_regime(market) |
+| 5.1.8 | 前端 API 适配 | `frontend/src/api/index.js` | designAsync 传递 market 参数 |
 
-**验证**: 切换到美股 Tab → 所有功能使用美股数据
+#### 新增文件
+- `api-contracts/market/market-context.md` — API 契约文档
+- `core/market_context.py` — MarketContext 数据类（index_symbols/title/regime_broad_index/supports_*）
+- `services/market_router.py` — 5 async 路由函数，按市场分发到正确数据源
+
+#### 测试验证
+- `tests/test_market_context.py` — 35 个新单测，全部 PASS
+- 覆盖：4 市场全部属性、边界情况（空字符串/大小写/空格）、regime 缓存、llm-report 过滤
+- 存量单测（analysis_contract/async_lint/database 等 45 个）全部 PASS
+- 前端 `npm run build` 构建通过
 
 ### Phase 6.1 — 可观测性与系统增强
 
@@ -947,7 +955,7 @@ curl -s "http://localhost:8000/api/v1/admin/sources/events/timeline?hours=1"
 | frontend-ui-optimization-plan.md | 优化方案 | ❌ 已回滚 | 全部前端视图 | Phase 3.1 | 需测试防护就绪 |
 | issues-analysis-report.md | 问题分析 | ✅ 已修复 | 全局 | — | — |
 | market-analysis-optimization-plan.md | 实施方案 | 🟡 **部分完成（2026-07-26 审计修正）** | market router + analysis router | Phase 2.5 → 5.1 | Phase A/B/C ✅；Phase D/E 🟡（后端数据管道已实现，但 market 参数端到端传递和 LLM prompt 增强未完成）。详见 §4 Phase 5.1 状态矩阵 |
-| market-awareness-and-data-source-plan.md | 实施方案 | ❌ **§4 已转 roadmap；§5 未实施（2026-07-26 审计确认）** | 路由 Service + LLM prompt | Phase 5.1 | §4 已转 `roadmap-data-source-unified.md`；§5 市场感知联动的 10 项子任务中 **0/10 完全实现**（详见 §4 Phase 5.1 状态矩阵和 `market-awareness-and-data-source-plan.md` §5.5）。此前标记"待评估"结论已修正 |
+| market-awareness-and-data-source-plan.md | 实施方案 | ✅ **§5 已实施（Phase 5.1）** | core/market_context + services/market_router + 端市场感知接入 | Phase 5.1 | §4 已转 `roadmap-data-source-unified.md`；§5 市场感知联动全栈实施：MarketContext 数据类、market_router 路由层、多市场 regime 缓存、design-async 多市场参数、sector-analysis 市场感知。35 个新单测全 PASS。commit `2371815` |
 | news-pipeline-fix-plan.md | 修复方案 | ✅ **全部完成** | news_fetcher + levistock_fetcher + NewsView.vue | Phase 1.1 | P0+P1 全部实施（新浪源/关键词/降级链）|
 | optimization-plan-20260721.md | 实施方案 | ✅ **已实施 (Phase 0.5)** | etf_scanner + 前端 + 后端链路 | Phase 0.5 | 全部 8 项完成 |
 | **remaining-issues-solution-design.md** | **实施方案** | ✅ **全部已实施**（已从 staged→committed） | **pool_manager + task_manager + ws + factor_registry** | **Phase 2.1** | S1-A(TTL) `53acbfa`、S1-C(渐进) `ef3de11`、S2(归一化) `5116681`、S3-B/C(WS) `ef3de11` |
@@ -964,7 +972,7 @@ curl -s "http://localhost:8000/api/v1/admin/sources/events/timeline?hours=1"
 |------|---------|--------|---------|:----:|
 | 数据源改造三文档抢同一代码域 | source-registry + data-source-monitoring + market-awareness §4 | 🔴 | 合并为 `roadmap-data-source-unified.md` | ✅ 已解决 |
 | foundation-issues 与存量文档改同一代码域 | foundation-issues Phase A/B + design-optimization P1/P2/P3 | 🔴 | 上下游关系非冲突；Phase 0.7 优先实施，其余延后验证 | ✅ 已解决 |
-| 市场分析 vs 市场感知抢 `llm_advice_stream()` | market-analysis Phase D + market-awareness §5 | 🔴 | **2026-07-26 重新评估**：此前决策"降级 market-awareness §5"基于 Phase D/E 全部完成的假设。审计发现 Phase D/E 仅完成后端管道，market 参数端到端传递和 LLM prompt 增强未完成。新决策：两方案转为"基础设施→上层应用"的依赖关系 | 🔄 已更新 |
+| 市场分析 vs 市场感知抢 `llm_advice_stream()` | market-analysis Phase D + market-awareness §5 | 🔴 | Phase 5.1 全栈实施：新增 MarketContext 数据类 + market_router 路由层 + 多市场感知接入；market-awareness §5 从规划变为已实施 | ✅ Phase 5.1 已完成 (commit `2371815`) |
 | foundation-issues A3 与 sector-concept Phase1-2 抢缓存入口 | foundation-issues A3 + sector-concept Phase 1-2 | 🟡 | 先 A3（最小化实现），sector-concept 在已有入口上扩展 | ✅ 已解决 |
 | LLM prompt 被三文档同时修改 | market-analysis Phase E + design-report A2/C1/C2 + sector-concept Phase 4 | 🟡 | 同步实施，统一修改 `llm.py`，先做结构后加数据 | 待实施 |
 | 同一页面被两方案同时改动 | market-analysis Phase C + frontend-ui Phase 1-2 | 🟡 | 先实施 Phase C（DOM 结构），再在目标结构上做 UI 优化 | 待实施 |
@@ -1047,7 +1055,7 @@ Phase 3.1 (前端 UI 重构)         依赖 Phase 2.5 测试防护
 
 Phase 4.1 (数据源改造 A/B/C/D1-D6) ✅ 已实施, D7 独立待实施
 
-Phase 5.1 (市场感知联动)         可选，依赖 Phase 4.1
+Phase 5.1 (市场感知联动)          ✅ 已完成（MarketContext + market_router + 多市场感知）
 
 Phase 6.1 (可观测性增强)         D7 前端 + ConfigManager 独立; D1-D6 已随 Phase 4.1 实施
 
@@ -1097,3 +1105,4 @@ Phase 7.1 (远期优化)             无紧急依赖
 | **v7.1** | 2026-07-26 | Phase 2.7 剩余项 + 2.8 剩余项 + Phase 2.9 全部完成。2.7.3：新增 encoding_diagnosis.py 编码诊断脚本 ✅；2.7.9：市态缓存异步刷新（refresh_sentiment_cache + main.py 120s 定时循环）✅；2.7.11-2.7.12：AGENTS.md 更新 ✅。2.8.3：编排器 slow 集成测试 ✅；2.8.6：σ 格式断言增强 ✅；2.8.7：market_context 完整性断言 ✅。2.9.1：新增 llm_context.py（build_full_context 统一数据管道）✅；2.9.2-2.9.3：llm_report_stream + llm_advice_stream 改用统一管道 ✅。后端单测 pool_manager 13/13 PASS，设计优化单测通过（不含slow）。 |
 | | **v7.2** | 2026-07-26 | Phase 4.1 状态审核。全量代码审计发现 roadmap-data-source-unified.md v2.0 中的实施方案绝大部分已被后续 commits 落地。Phase A/B/C/D1-D6 均已实施，仅 D7（前端数据源监控面板）待完成。`roadmap-data-source-unified.md` 更新为 v3.0 回顾文档。`implementation-master-plan.md` Phase 4.1 更新为 ✅ 已实施状态。 |
 | | **v7.3** | 2026-07-26 | Phase 4.1 全部完成：4.1.2（全球指数链路）代码审计确认实际为 EM→Sina→Finnhub 而非计划所述 TwelveData，verify_e2e.py 已含 HK/US 三大指数断言，状态修正为 ✅。4.1.9（前端数据源监控面板 D7）实施完成：新建 SourceMonitor.vue（TokenMonitor 风格，含 ECharts 堆叠柱状图 + 源状态矩阵 + 失败事件表格）、路由 `/source-monitor`、导航"📡 数据源"、`api-contracts/admin/sources.md` 契约。`api/index.js` 新增 4 个 adminApi 源监控方法。npm run build 验证通过。 |
+| | **v9.0** | 2026-07-26 | **Phase 5.1 全栈实施完成**：市场感知联动。新增 `core/market_context.py`（MarketContext 数据类，4 市场） + `services/market_router.py`（5 路由函数）。修改 `routers/analysis.py`（SectorAnalysisRequest.market、llm-report/stream 市场过滤、非 A 板块分析友好提示）、`routers/portfolio.py`（design-async market 参数，非 A 返回 unsupported）、`services/pool_manager.py`（regime 缓存 dict[str,str] 多市场）、`services/strategy_design.py`（market 参数入口）、`services/llm_context.py`（market 参数透传）、`frontend/src/api/index.js`（designAsync 传 market）。`api-contracts/market/market-context.md` 契约。35 个新单测全 PASS，存量 45 个全 PASS，npm run build 通过。commit `2371815`。 |
