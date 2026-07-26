@@ -200,22 +200,32 @@ const timelineHours = ref(1)
 
 async function fetchData() {
   loading.value = true
+  // 分步请求，每个独立 try/catch，防止单个端点挂起阻塞全部页面
   try {
-    const [healthRes, cbRes, tlRes, failRes] = await Promise.all([
-      adminApi.sourcesHealth(),
-      adminApi.sourcesCircuitBreakers(),
-      adminApi.sourcesTimeline(timelineHours.value),
-      adminApi.sourcesFailures(10),
-    ])
+    const healthRes = await adminApi.sourcesHealth()
     sources.value = healthRes.data || []
+  } catch (e) {
+    logger.error('sourcesHealth failed', e)
+  }
+  try {
+    const cbRes = await adminApi.sourcesCircuitBreakers()
     circuitBreakers.value = cbRes.data || []
+  } catch (e) {
+    logger.error('sourcesCircuitBreakers failed', e)
+  }
+  try {
+    const tlRes = await adminApi.sourcesTimeline(timelineHours.value)
     timeline.value = tlRes.data || []
+  } catch (e) {
+    logger.error('sourcesTimeline failed', e)
+  }
+  try {
+    const failRes = await adminApi.sourcesFailures(10)
     failures.value = failRes.data || []
   } catch (e) {
-    logger.error('Failed to fetch source monitoring data', e)
-  } finally {
-    loading.value = false
+    logger.error('sourcesFailures failed', e)
   }
+  loading.value = false
 }
 
 async function switchTimeline(hours) {
