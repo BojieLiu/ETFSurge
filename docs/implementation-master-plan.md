@@ -919,7 +919,7 @@ curl -s "http://localhost:8000/api/v1/admin/sources/events/timeline?hours=1"
 | 7.1.2 | 排版令牌迁移 | frontend-ui-optimization Phase 3-4 | ✅ 已实施 | 51 处排版令牌迁移（font-size + font-weight → font: var(--text-*) shorthand），跨 26 个组件文件 |
 | 7.1.3 | SVG 图标替换 emoji | frontend-ui-optimization Phase 3 | ✅ 已实施 | 创建 icons.js 图标系统\uff0826 个\u10e6��\u51� SVG 图\u6807\uff0bemoji 映\u5c04）\uff1bAppCard 通过 resolvedIcon computed 自\u52a8渲\u67d3 SVG\uff1bE2E 测\u8bd5适\u914d |
 | 7.1.4 | 响应式补齐 | frontend-ui-optimization Phase 4 | ❌ 待实施 | 移动端适配 |
-| 7.1.5 | 进一步 E2E 增强 + 剩余 UI 组件单测 | frontend-testing-safety-net C1/C3 | ✅ C1 ✅\uff0cC3 待实施 | C1\uff1aAppTable(7) + AppSelect(9) + Skeleton(9) 单测\uff0cAppComponents2.spec.js 25/25 通过\uff1b修复 AppTable density class bug\uff1b238/237 tests PASS |
+| 7.1.5 | 进一步 E2E 增强 + 剩余 UI 组件单测 | frontend-testing-safety-net C1/C3 | ✅ C1 + C3 均已实施 | C1\uff1aAppTable(7) + AppSelect(9) + Skeleton(9) 单测\uff0cAppComponents2.spec.js 25/25 通过\uff1b修复 AppTable density class bug\uff1bC3\uff1aCharts E2E(4) + News E2E(4) + 技术分析 E2E(5) = 13 条新增 spec |
 | 7.1.6 | design-report B1-B3（LLM prompt 分析增强）+ C2（科技ETF分散） | design-report-optimization B1/B2/B3/C2 | ✅ **全部已实施** | B1（黄金动量入选理由）→ `engine/rationale.py:60-63`；B2（国债久期风险提示）→ `engine/rationale.py:64-65`；B3（LLM prompt 量化规则）→ `analysis/prompts/v1/design_report.md:68`；C2（科技集中度→科创50 ETF分散）→ `engine/allocation_engine.py:443-458` |
 
 ---
