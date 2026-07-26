@@ -1,5 +1,5 @@
 import sys, os
-sys.stdout.reconfigure(encoding='utf-8')
+sys.stdout.reconfigure(encoding='utf-8')  # type: ignore[union-attr]
 
 filepath = 'frontend/src/components/Dashboard.vue'
 

@@ -14,6 +14,7 @@ Lifecycle:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from typing import Any
@@ -90,6 +91,10 @@ class PoolManager:
         pool = pm.get_pool()         # 获取全池
         entry = pm.get_by_code("510300")  # 按 code 查询
     """
+
+    # Dynamic attributes set via setattr/hasattr in _refresh — declare here for mypy
+    _last_refresh_ts: float = 0.0
+    _refresh_lock: asyncio.Lock | None = None
 
     def __init__(self):
         self._pool: dict[str, list[dict[str, Any]]] = {layer: [] for layer in ALL_LAYERS}
@@ -215,20 +220,22 @@ class PoolManager:
             if now - self._last_refresh_ts < 30:
                 logger.info("PoolManager: refresh skipped (cooldown, %.1fs left)",
                             30 - (now - self._last_refresh_ts))
-                return PoolDiff(changed=False, added=0, removed=0, total=len(self._by_code))
+                return PoolDiff(changed=[], added=[], removed=[], version=self._version,
+                                timestamp=datetime.now().isoformat())
         import asyncio as _asyncio
         # 并发锁：已有刷新在进行中则等待（最长等 120s，防止死锁）
-        if hasattr(self, '_refresh_lock') and self._refresh_lock.locked():
+        if self._refresh_lock is not None and self._refresh_lock.locked():
             logger.info("PoolManager: refresh already in progress, waiting (max 120s)...")
             try:
-                await _asyncio.wait_for(self._refresh_lock.acquire(), timeout=120)
-                self._refresh_lock.release()
+                await _asyncio.wait_for(self._refresh_lock.acquire(), timeout=120)  # type: ignore[union-attr]
+                self._refresh_lock.release()  # type: ignore[union-attr]
                 logger.info("PoolManager: waited for lock, returning stale pool")
-                return PoolDiff(changed=False, added=0, removed=0, total=len(self._by_code))
+                return PoolDiff(changed=[], added=[], removed=[], version=self._version,
+                                timestamp=datetime.now().isoformat())
             except _asyncio.TimeoutError:
                 logger.warning("PoolManager: lock wait timed out after 120s, creating new lock")
                 self._refresh_lock = _asyncio.Lock()
-        if not hasattr(self, '_refresh_lock'):
+        if self._refresh_lock is None:
             import asyncio as _asyncio
             self._refresh_lock = _asyncio.Lock()
 

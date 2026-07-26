@@ -26,28 +26,32 @@ export function useDashboardData(capitalOn, capitalOff, activeTab) {
     return [...(pnlOnData.value.items || []), ...(pnlOffData.value.items || [])]
   })
 
-  const pnlTotal = computed(() => pnlItems.value.reduce((sum, item) => sum + (item.daily_pnl || 0), 0))
-  const pnlTotalAmount = computed(() => pnlItems.value.reduce((sum, item) => sum + (item.target_amount || 0), 0))
+  // PnL computed — use backend aggregate fields directly (Sprint 1 P0)
+  const pnlTotal = computed(() => {
+    if (activeTab.value === 'on_exchange') return pnlOnData.value.total_pnl || 0
+    if (activeTab.value === 'off_exchange') return pnlOffData.value.total_pnl || 0
+    return (pnlOnData.value.total_pnl || 0) + (pnlOffData.value.total_pnl || 0)
+  })
+
+  const pnlTotalAmount = computed(() => {
+    if (activeTab.value === 'on_exchange') return pnlOnData.value.total_amount || 0
+    if (activeTab.value === 'off_exchange') return pnlOffData.value.total_amount || 0
+    return (pnlOnData.value.total_amount || 0) + (pnlOffData.value.total_amount || 0)
+  })
 
   const pnlWeightedChange = computed(() => {
-    const total = pnlTotalAmount.value
-    if (!total) return 0
-    return pnlItems.value.reduce((sum, item) => sum + ((item.daily_pnl || 0) / total) * 100, 0)
+    if (activeTab.value === 'on_exchange') return pnlOnData.value.weighted_change_pct || 0
+    if (activeTab.value === 'off_exchange') return pnlOffData.value.weighted_change_pct || 0
+    const totalAmount = (pnlOnData.value.total_amount || 0) + (pnlOffData.value.total_amount || 0)
+    const totalPnl = (pnlOnData.value.total_pnl || 0) + (pnlOffData.value.total_pnl || 0)
+    return totalAmount > 0 ? (totalPnl / totalAmount) * 100 : 0
   })
 
-  const cashPctOn = computed(() => {
-    const total = capitalOn.value
-    const used = allocationOn.value.total_amount || 0
-    return total > 0 ? Math.max(0, (total - used) / total) : 0
-  })
-  const cashOn = computed(() => capitalOn.value - (allocationOn.value.total_amount || 0))
-
-  const cashPctOff = computed(() => {
-    const total = capitalOff.value
-    const used = allocationOff.value.total_amount || 0
-    return total > 0 ? Math.max(0, (total - used) / total) : 0
-  })
-  const cashOff = computed(() => capitalOff.value - (allocationOff.value.total_amount || 0))
+  // Cash metrics — use backend cash_weight/cash_amount directly (Sprint 1 P0)
+  const cashPctOn = computed(() => allocationOn.value.cash_weight || 0)
+  const cashOn = computed(() => allocationOn.value.cash_amount || 0)
+  const cashPctOff = computed(() => allocationOff.value.cash_weight || 0)
+  const cashOff = computed(() => allocationOff.value.cash_amount || 0)
 
   // Loading state: true when both allocation arrays are empty
   const loading = computed(() => allocationOn.value.allocations.length === 0 && allocationOff.value.allocations.length === 0)

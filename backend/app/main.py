@@ -28,11 +28,11 @@ async def lifespan(app: FastAPI):
 
     # Pre-import heavy modules to avoid blocking the event loop on first use
     logger.info("[lifespan] Pre-loading heavy modules (strategy_design, analysis)...")
-    from .services.strategy_design import generate_enhanced_design as _  # noqa: F811
-    from .analysis.llm import generate_design_report as _  # noqa: F811
-    from .tasks.design_report import _build_plan_tables as _  # noqa: F811
-    from .analysis.llm import generate_strategy_check_report as _  # noqa: F811
-    from .tasks.strategy_check_worker import strategy_check_pipeline as _  # noqa: F811
+    from .services.strategy_design import generate_enhanced_design  # noqa: F811 — lazy import, never called by name
+    from .analysis.llm import generate_design_report  # noqa: F811 — lazy import, never called by name
+    from .tasks.design_report import _build_plan_tables  # noqa: F811 — lazy import, never called by name
+    from .analysis.llm import generate_strategy_check_report  # noqa: F811 — lazy import, never called by name
+    from .tasks.strategy_check_worker import strategy_check_pipeline  # noqa: F811 — lazy import, never called by name
     logger.info("[lifespan] Heavy modules pre-loaded")
 
     # Register all data-source health probes (7 probes + existing)

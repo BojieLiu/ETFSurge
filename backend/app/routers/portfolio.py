@@ -200,6 +200,34 @@ async def get_design(
     if not record:
         raise HTTPException(status_code=404, detail="Design not found")
 
+    strategies = json.loads(record.strategies_json) if record.strategies_json else []
+
+    # Build plans from strategies (Sprint 1 P1: eliminate frontend conversion)
+    plans = []
+    for s in strategies:
+        etfs = s.get("etfs", []) or []
+        plans.append({
+            "style": s.get("label", ""),
+            "style_label": s.get("label", ""),
+            "portfolio_name": s.get("portfolio_name", ""),
+            "positioning": s.get("positioning", ""),
+            "expected_return": s.get("expected_return"),
+            "max_drawdown": s.get("max_drawdown"),
+            "sharpe_ratio": s.get("sharpe_ratio"),
+            "risk_factors": s.get("risk_factors") or [],
+            "rebalance_rules": "月度检视",
+            "allocations": [
+                {
+                    "symbol": e.get("symbol", ""),
+                    "name": e.get("name", ""),
+                    "layer": e.get("layer", ""),
+                    "target_weight": e.get("weight", 0),
+                    "selection_rationale": e.get("selection_rationale") or "",
+                }
+                for e in etfs
+            ],
+        })
+
     return {
         "id": record.id,
         "created_at": record.created_at.isoformat() if record.created_at else "",
@@ -210,7 +238,8 @@ async def get_design(
         "error_message": record.error_message,
         "report_quality": record.report_quality or "none",
         "report_generated_at": record.report_generated_at.isoformat() if record.report_generated_at else None,
-        "strategies": json.loads(record.strategies_json) if record.strategies_json else [],
+        "strategies": strategies,
+        "plans": plans,
         "market_context": json.loads(record.market_snapshot_json) if record.market_snapshot_json else {},
     }
 

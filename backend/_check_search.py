@@ -18,7 +18,7 @@ from app.routers.market import router
 for route in router.routes:
     if hasattr(route, 'path') and '/search' in str(route.path):
         import inspect
-        src = inspect.getsource(route.endpoint)
+        src = inspect.getsource(route.endpoint)  # type: ignore[attr-defined]
         if 'market' in src:
             print(f"\n  [OK] {route.path} accepts 'market' param")
         else:

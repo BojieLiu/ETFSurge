@@ -36,8 +36,8 @@ class StrategyCheckRecord(Base):
             "capital": self.capital,
             "summary": self.summary,
             "market_regime": self.market_regime,
-            "suggestions": json.loads(self.suggestions_json) if self.suggestions_json else [],
-            "holdings_analysis": json.loads(self.holdings_json) if self.holdings_json else [],
-            "risk_warnings": json.loads(self.risk_warnings_json) if self.risk_warnings_json else [],
+            "suggestions": json.loads(str(self.suggestions_json)) if self.suggestions_json else [],
+            "holdings_analysis": json.loads(str(self.holdings_json)) if self.holdings_json else [],
+            "risk_warnings": json.loads(str(self.risk_warnings_json)) if self.risk_warnings_json else [],
             "type": "check",
         }

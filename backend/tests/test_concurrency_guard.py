@@ -137,7 +137,7 @@ class TestNoDirectSyncInAsyncDef:
             # 挂载 parent 指针
             for node in ast.walk(tree):
                 for child in ast.iter_child_nodes(node):
-                    child._parent = node  # type: ignore[attr-defined]
+                    child._parent = node
 
             relpath = os.path.relpath(fpath, _APP_PATH)
 

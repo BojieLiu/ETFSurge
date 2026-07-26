@@ -74,7 +74,7 @@ async def generate_enhanced_design(
         # 3. 策略引擎：一次调用生成所有方案
         _t3 = time.monotonic()
         # 扁平化候选池：allocate() 预期 list[dict]，每项含 layer 字段
-        flat_candidates = []
+        flat_candidates: list = []
         for layer_list in candidates.values():
             flat_candidates.extend(layer_list)
         if _t3 - start_time > 0.2:

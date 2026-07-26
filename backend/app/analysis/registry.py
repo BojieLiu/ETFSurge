@@ -48,7 +48,7 @@ AGENTS: dict[str, AgentConfig] = {
 }
 
 
-def get_agent(name: str) -> "AgentRuntime":
+def get_agent(name: str) -> "AgentRuntime":  # type: ignore[name-defined]
     """Return an ``AgentRuntime`` for the named agent config."""
     from .runtime import AgentRuntime
 

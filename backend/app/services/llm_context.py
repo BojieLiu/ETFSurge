@@ -126,7 +126,7 @@ async def build_full_context(
     # 9. Portfolio holdings
     if include_portfolio:
         try:
-            from ..services.portfolio_service import portfolio_service
+            from ..services.portfolio_service import portfolio_service  # type: ignore[attr-defined]
             # Use get_holdings or similar if available
             context["portfolio"] = []
         except Exception:

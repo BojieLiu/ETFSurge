@@ -12,7 +12,7 @@ def _patched_session_init(self, *args, **kwargs):
     self.trust_env = False
 
 
-requests.Session.__init__ = _patched_session_init
+requests.Session.__init__ = _patched_session_init  # type: ignore[method-assign]
 
 
 @contextmanager

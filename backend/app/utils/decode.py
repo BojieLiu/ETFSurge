@@ -32,12 +32,15 @@ def decode_df(df: pd.DataFrame) -> pd.DataFrame:
     for col in df.columns:
         if isinstance(col, bytes):
             try:
-                renamed[col] = col.decode("utf-8")
+                key = col.decode("utf-8")
+                renamed[key] = col.decode("utf-8")
             except UnicodeDecodeError:
                 try:
-                    renamed[col] = col.decode("latin1")
+                    key = col.decode("latin1")
+                    renamed[key] = col.decode("latin1")
                 except UnicodeDecodeError:
-                    renamed[col] = col.decode("gbk", errors="replace")
+                    key = col.decode("gbk", errors="replace")
+                    renamed[key] = col.decode("gbk", errors="replace")
         elif isinstance(col, str):
             try:
                 cleaned = col.encode("latin1").decode("utf-8")

@@ -90,7 +90,7 @@ async def _compute_industry_momentum(top_n: int = 15) -> list[dict[str, Any]]:
                 "down_count": int(row.get("下跌家数", 0) or 0),
             })
 
-        current.sort(key=lambda x: x["change_pct"], reverse=True)
+        current.sort(key=lambda x: x["change_pct"], reverse=True)  # type: ignore[arg-type,return-value]
         for rank, item in enumerate(current, 1):
             item["rank_current"] = rank
 
@@ -128,7 +128,7 @@ async def _compute_concept_momentum(top_n: int = 15) -> list[dict[str, Any]]:
                 "down_count": int(row.get("下跌家数", 0) or 0),
             })
 
-        current.sort(key=lambda x: x["change_pct"], reverse=True)
+        current.sort(key=lambda x: x["change_pct"], reverse=True)  # type: ignore[arg-type,return-value]
         for rank, item in enumerate(current, 1):
             item["rank_current"] = rank
 

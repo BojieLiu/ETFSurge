@@ -34,7 +34,7 @@ class MemoryCache:
         """批量读取，单次锁获取，避免 mget 退化成 N 次独立 lock acquire。"""
         now = time.time()
         async with self._lock:
-            results = []
+            results: list = []
             for k in keys:
                 item = self._store.get(k)
                 if not item:
@@ -74,14 +74,14 @@ class RedisCache:
         try:
             import redis.asyncio as aioredis
 
-            self._client = aioredis.from_url(
+            self._client = aioredis.from_url(  # type: ignore[assignment]
                 settings.redis_url,
                 decode_responses=True,
                 socket_connect_timeout=2,
                 socket_timeout=2,
             )
             # 仅当真实连通才标记可用，避免不可用 Redis 拖慢每个缓存调用
-            await asyncio.wait_for(self._client.ping(), timeout=2)
+            await asyncio.wait_for(self._client.ping(), timeout=2)  # type: ignore[attr-defined]
             self._available = True
         except Exception:
             self._available = False
@@ -95,7 +95,7 @@ class RedisCache:
         if not self.available:
             return None
         try:
-            raw = await self._client.get(key)
+            raw = await self._client.get(key)  # type: ignore[attr-defined]
             return json.loads(raw) if raw else None
         except Exception:
             return None
@@ -104,7 +104,7 @@ class RedisCache:
         if not self.available:
             return
         try:
-            await self._client.set(key, json.dumps(value, ensure_ascii=False), ex=ttl)
+            await self._client.set(key, json.dumps(value, ensure_ascii=False), ex=ttl)  # type: ignore[attr-defined]
         except Exception:
             pass
 
@@ -112,7 +112,7 @@ class RedisCache:
         if not self.available or not keys:
             return [None] * len(keys)
         try:
-            raws = await self._client.mget(keys)
+            raws = await self._client.mget(keys)  # type: ignore[attr-defined]
             return [json.loads(r) if r else None for r in raws]
         except Exception:
             return [None] * len(keys)
@@ -121,7 +121,7 @@ class RedisCache:
         if not self.available or not mapping:
             return
         try:
-            async with self._client.pipeline() as pipe:
+            async with self._client.pipeline() as pipe:  # type: ignore[attr-defined]
                 for k, v in mapping.items():
                     pipe.set(k, json.dumps(v, ensure_ascii=False), ex=ttl)
                 await pipe.execute()

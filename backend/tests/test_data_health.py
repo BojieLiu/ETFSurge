@@ -24,8 +24,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 PASS = 0
 FAIL = 0
 WARN = 0
-ERRORS = []
-WARNINGS = []
+ERRORS: list = []
+WARNINGS: list = []
 
 
 def check(name, ok, detail=""):
@@ -163,8 +163,8 @@ async def main():
     print(f"  WARN: {WARN}")
     if ERRORS:
         print(f"\n  Failures:")
-        for e in ERRORS:
-            print(f"    - {e}")
+        for error_item in ERRORS:
+            print(f"    - {error_item}")
     if WARNINGS:
         print(f"\n  Warnings:")
         for w in WARNINGS:

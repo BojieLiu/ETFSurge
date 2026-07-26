@@ -219,7 +219,7 @@ class ICTracker:
         if factor_code not in self._records:
             return 0
         # Count unique symbols for this factor
-        rec = self._records[factor_code]
+        rec = self._records[factor_code]  # type: ignore[call-overload]
         if isinstance(rec, dict):
             return len(rec)
         return 0

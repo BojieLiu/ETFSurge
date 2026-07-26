@@ -94,7 +94,7 @@ async def get_market_realtime(market: str, symbols: list[str] | None = None) -> 
     elif market == "US":
         if not symbols:
             return []
-        from app.fetchers import stooq_fetcher, twelvedata_fetcher
+        from app.fetchers import stooq_fetcher, twelvedata_fetcher  # type: ignore[attr-defined]
         batch = await _call(stooq_fetcher.fetch_us_batch, symbols, timeout=12)
         if batch:
             return batch
@@ -126,8 +126,8 @@ async def get_market_history(market: str, symbol: str, period: str = "daily") ->
         return await get_history(symbol, "A", period) or []
 
     elif market == "HK":
-        from app.fetchers.china_market import fetch_hk_history
-        from app.fetchers import stooq_fetcher
+        from app.fetchers.china_market import fetch_hk_history  # type: ignore[attr-defined]
+        from app.fetchers import stooq_fetcher  # type: ignore[attr-defined]
         hk_history = await _call(fetch_hk_history, symbol, period, timeout=15)
         if hk_history:
             return hk_history
@@ -135,7 +135,7 @@ async def get_market_history(market: str, symbol: str, period: str = "daily") ->
         return await _call(stooq_fetcher.fetch_stooq_history, symbol, period, timeout=15) or []
 
     elif market == "US":
-        from app.fetchers import stooq_fetcher, twelvedata_fetcher, finnhub_fetcher
+        from app.fetchers import stooq_fetcher, twelvedata_fetcher, finnhub_fetcher  # type: ignore[attr-defined]
         stooq_data = await _call(stooq_fetcher.fetch_stooq_history, symbol, period, timeout=15)
         if stooq_data:
             return stooq_data
@@ -161,7 +161,7 @@ async def get_market_news(market: str, max_count: int = 10) -> list[dict]:
     """
     from app.fetchers.news_fetcher import fetch_news_headlines, fetch_macro_news, fetch_global_news
 
-    all_news = []
+    all_news: list = []
     try:
         headlines = await _call(fetch_news_headlines, timeout=8) or []
         all_news.extend(headlines)

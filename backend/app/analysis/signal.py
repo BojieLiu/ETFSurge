@@ -5,7 +5,7 @@ def generate_signal(indicators: dict) -> dict[str, Any]:
     if not indicators:
         return {"signal": "hold", "score": 0, "reason": "insufficient_data"}
 
-    score = 0
+    score = 0.0
     reasons = []
 
     rsi = indicators.get("rsi", 50)
@@ -99,7 +99,10 @@ def generate_signal(indicators: dict) -> dict[str, Any]:
     }
 
 
-def compute_td_sequential(close: "pd.Series") -> dict:
+import pandas as pd
+
+
+def compute_td_sequential(close: pd.Series) -> dict:
     """计算 Tom Demark Sequential 九转序列。
 
     Args:

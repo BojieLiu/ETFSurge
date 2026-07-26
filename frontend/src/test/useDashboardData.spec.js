@@ -102,15 +102,15 @@ describe('useDashboardData', () => {
   })
 
   // ── Computed: cash ─────────────────────────────────────
-  it('cashOn = capitalOn - used amount', () => {
+  it('cashOn reads cash_amount from allocation response', () => {
     const dash = useDashboardData(capitalOn, capitalOff, activeTab)
-    dash.allocationOn.value = { allocations: [], total_amount: 40000 }
+    dash.allocationOn.value = { allocations: [], total_amount: 40000, cash_amount: 60000 }
     expect(dash.cashOn.value).toBe(60000)
   })
 
-  it('cashPctOn = (capital - used) / capital', () => {
+  it('cashPctOn reads cash_weight from allocation response', () => {
     const dash = useDashboardData(capitalOn, capitalOff, activeTab)
-    dash.allocationOn.value = { allocations: [], total_amount: 30000 }
+    dash.allocationOn.value = { allocations: [], total_amount: 30000, cash_weight: 0.7 }
     expect(dash.cashPctOn.value).toBeCloseTo(0.7)
   })
 
@@ -120,15 +120,15 @@ describe('useDashboardData', () => {
     expect(dash.cashPctOn.value).toBe(0)
   })
 
-  it('cashOff = capitalOff - used amount', () => {
+  it('cashOff reads cash_amount from allocation response', () => {
     const dash = useDashboardData(capitalOn, capitalOff, activeTab)
-    dash.allocationOff.value = { allocations: [], total_amount: 20000 }
+    dash.allocationOff.value = { allocations: [], total_amount: 20000, cash_amount: 30000 }
     expect(dash.cashOff.value).toBe(30000)
   })
 
-  it('cashPctOff = (capital - used) / capital', () => {
+  it('cashPctOff reads cash_weight from allocation response', () => {
     const dash = useDashboardData(capitalOn, capitalOff, activeTab)
-    dash.allocationOff.value = { allocations: [], total_amount: 10000 }
+    dash.allocationOff.value = { allocations: [], total_amount: 10000, cash_weight: 0.8 }
     expect(dash.cashPctOff.value).toBeCloseTo(0.8)
   })
 
@@ -178,37 +178,41 @@ describe('useDashboardData', () => {
     expect(dash.pnlItems.value[0].symbol).toBe('B')
   })
 
-  it('pnlTotal sums all daily_pnl values', () => {
+  it('pnlTotal reads total_pnl from backend response (combined)', () => {
     const dash = useDashboardData(capitalOn, capitalOff, activeTab)
     dash.pnlOnData.value = {
       items: [
         { symbol: 'A', daily_pnl: 100, target_amount: 1000 },
         { symbol: 'B', daily_pnl: 50, target_amount: 500 },
       ],
+      total_pnl: 150,
     }
     expect(dash.pnlTotal.value).toBe(150)
   })
 
-  it('pnlTotalAmount sums all target_amount values', () => {
+  it('pnlTotalAmount reads total_amount from backend response (combined)', () => {
     const dash = useDashboardData(capitalOn, capitalOff, activeTab)
     dash.pnlOnData.value = {
       items: [
         { symbol: 'A', daily_pnl: 100, target_amount: 1000 },
         { symbol: 'B', daily_pnl: 50, target_amount: 500 },
       ],
+      total_amount: 1500,
     }
     expect(dash.pnlTotalAmount.value).toBe(1500)
   })
 
-  it('pnlWeightedChange calculates weighted return %', () => {
+  it('pnlWeightedChange uses backend weighted_change_pct or combined formula', () => {
     const dash = useDashboardData(capitalOn, capitalOff, activeTab)
     dash.pnlOnData.value = {
       items: [
         { symbol: 'A', daily_pnl: 100, target_amount: 1000 },
         { symbol: 'B', daily_pnl: 50, target_amount: 500 },
       ],
+      total_pnl: 150,
+      total_amount: 1500,
     }
-    // (100/1500 + 50/1500) * 100 = (0.0667 + 0.0333) * 100 = 10%
+    // combined: (totalPnl / totalAmount) * 100 = (150/1500)*100 = 10%
     expect(dash.pnlWeightedChange.value).toBeCloseTo(10, 0.01)
   })
 
@@ -334,11 +338,11 @@ describe('useDashboardData', () => {
     expect(dash.totalAll.value).toBe(80000)
   })
 
-  it('cashOn recomputes when allocationOn total_amount changes', async () => {
+  it('cashOn recomputes when allocationOn cash_amount changes', async () => {
     const dash = useDashboardData(capitalOn, capitalOff, activeTab)
-    expect(dash.cashOn.value).toBe(100000)
-    dash.allocationOn.value = { allocations: [], total_amount: 60000 }
+    expect(dash.cashOn.value).toBe(0)
+    dash.allocationOn.value = { allocations: [], total_amount: 40000, cash_amount: 60000 }
     await nextTick()
-    expect(dash.cashOn.value).toBe(40000)
+    expect(dash.cashOn.value).toBe(60000)
   })
 })

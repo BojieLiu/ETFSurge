@@ -226,7 +226,7 @@ def apply_risk_controls(
 
         hhi = sum(w ** 2 for w in sector_weights.values())
         if hhi >= MAX_SECTOR_CONCENTRATION and sector_weights:
-            max_sector = max(sector_weights, key=sector_weights.get)
+            max_sector = max(sector_weights, key=lambda k: sector_weights.get(k, 0))
             target_weight = MAX_SECTOR_CONCENTRATION ** 0.5
             if sector_weights[max_sector] > target_weight:
                 scale = target_weight / sector_weights[max_sector]

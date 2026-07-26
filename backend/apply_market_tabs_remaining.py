@@ -1,5 +1,5 @@
 import sys, os
-sys.stdout.reconfigure(encoding='utf-8')
+sys.stdout.reconfigure(encoding='utf-8')  # type: ignore[union-attr]
 
 base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 filepath = os.path.join(base, 'frontend/src/components/MarketAnalysis.vue')
