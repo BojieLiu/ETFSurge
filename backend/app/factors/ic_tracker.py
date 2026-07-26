@@ -8,10 +8,14 @@ including them in portfolio design weights.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any
 
-import pandas as pd
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 import numpy as np
+import pandas as pd
 from scipy.stats import spearmanr
 
 logger = logging.getLogger(__name__)
@@ -180,6 +184,45 @@ class ICTracker:
         if std == 0:
             return float('inf')
         return float(ic_series.mean() / std)
+
+    async def save_ic_batch_to_db(self, session: AsyncSession, ic_batch: dict[str, float]) -> int:
+        """Persist the current IC batch to the database.
+
+        Args:
+            session: SQLAlchemy async session
+            ic_batch: {factor_code: ic_value} dict from registry._last_ic_batch
+
+        Returns:
+            Number of records saved
+        """
+        from ..models.factor_ic import FactorICRecord  # lazy import to avoid circular dependency
+
+        count = 0
+        now = datetime.utcnow()
+        for code, ic_val in ic_batch.items():
+            if abs(ic_val) < 0.0001:
+                continue
+            record = FactorICRecord(
+                factor_code=code,
+                ic_value=round(float(ic_val), 4),
+                sample_count=self._get_ic_sample_count(code),
+                computed_at=now,
+            )
+            session.add(record)
+            count += 1
+
+        await session.commit()
+        return count
+
+    def _get_ic_sample_count(self, factor_code: str) -> int:
+        """Estimate sample count from internal records for a given factor."""
+        if factor_code not in self._records:
+            return 0
+        # Count unique symbols for this factor
+        rec = self._records[factor_code]
+        if isinstance(rec, dict):
+            return len(rec)
+        return 0
 
 
 def compute_ic_series_fast(

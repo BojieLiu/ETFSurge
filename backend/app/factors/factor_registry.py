@@ -1061,6 +1061,14 @@ class FactorRegistry:
                 ic_batch = ic_tracker.compute_periodic_ic(result, market_data, window=1)
                 if ic_batch:
                     self._last_ic_batch = ic_batch
+                    # B3: IC threshold alerts
+                    for code, ic_val in ic_batch.items():
+                        definition = self._factors.get(code)
+                        if definition and 0 < abs(ic_val) < definition.ic_threshold:
+                            logger.warning(
+                                "[factor] IC below threshold for %s: ic=%.4f < threshold=%.4f",
+                                code, ic_val, definition.ic_threshold,
+                            )
         except Exception as exc:
             logger.debug("[factor] IC batch compute failed: %s", exc)
 

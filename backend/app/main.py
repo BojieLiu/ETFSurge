@@ -184,6 +184,30 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning("[recovery] failed to scan stale designs: %s", exc)
 
+    # Start IC persistence loop (120s, B1)
+    async def _ic_persistence_loop():
+        from .factors.ic_tracker import ic_tracker
+        from .factors.factor_registry import registry
+        from .database import async_session
+
+        await asyncio.sleep(30)  # delay first run
+        while True:
+            try:
+                ic_batch = getattr(registry, "_last_ic_batch", None)
+                if ic_batch and len(ic_batch) > 0:
+                    async with async_session() as db:
+                        count = await ic_tracker.save_ic_batch_to_db(db, ic_batch)
+                    if count:
+                        logger.info("[ic_persistence] saved %d IC records", count)
+                else:
+                    logger.debug("[ic_persistence] no IC data to persist")
+            except Exception as exc:
+                logger.warning("[ic_persistence] cycle failed: %s", exc)
+            await asyncio.sleep(120)
+
+    asyncio.create_task(_ic_persistence_loop())
+    logger.info("IC 持久化循环已启动（120s）")
+
     yield
 
     scheduler = getattr(app.state, "scheduler", None)

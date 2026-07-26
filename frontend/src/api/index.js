@@ -82,6 +82,10 @@ export const newsApi = {
   newsImpact: (payload) => api.post('/analysis/news-impact', payload),
 }
 
+export const factorsApi = {
+  getIC: () => api.get('/factors/ic'),
+}
+
 export const adminApi = {
   tokenUsage: () => api.get('/admin/token-usage'),
   tokenTimeseries: (params = {}) => api.get('/admin/token-usage/timeseries', { params }),

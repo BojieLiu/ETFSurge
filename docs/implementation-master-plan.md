@@ -915,7 +915,7 @@ curl -s "http://localhost:8000/api/v1/admin/sources/events/timeline?hours=1"
 
 | # | 任务 | 源文档 | 状态 | 说明 |
 |---|------|--------|:----:|------|
-| 7.1.1 | Factor IC 追踪器激活 | factor-model-extension | ✅ 已实施（Phase A） | build_forward_returns() + compute_periodic_ic() 已实现；factor_registry.py 已集成 _last_ic_batch + IC compute；GET /api/v1/factors/ic API 已创建；api-contracts/factors/ic.md 已创建；verify_e2e.py 已扩展；16 个单测全部 PASS |
+| 7.1.1 | Factor IC 追踪器激活 | factor-model-extension | ✅ 已实施 | Phase A(核心管道) + Phase B1(B3)已实施：SQLite 持久化(factor_ic_records 表)，定时 120s 保存 IC batch；IC 阈值告警(logger.warning)；前端 FactorICView.vue(因子 IC 排序 + 有效性标记) |
 | 7.1.2 | 排版令牌迁移 | frontend-ui-optimization Phase 3-4 | ❌ 待实施 | Phase 1 Step 1（CSS 变量补齐）已在 theme.css L121-124 完成 ✅；Phase 3-4 仍需推进 |
 | 7.1.3 | SVG 图标替换 emoji | frontend-ui-optimization Phase 3 | ❌ 待实施 | 美观度提升 |
 | 7.1.4 | 响应式补齐 | frontend-ui-optimization Phase 4 | ❌ 待实施 | 移动端适配 |
