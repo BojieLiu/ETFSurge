@@ -1,9 +1,9 @@
 # ETF Surge 方案实施总计划
 
-> 生成日期: 2026-07-26 | 版本: **v9.1**
+> 生成日期: 2026-07-27 | 版本: **v9.4**
 > ✅ **Phase 6.1 已完成**：可观测性与系统增强 — ConfigManager + app_config 表（`models/app_config.py`, `core/config_manager.py`）、ConfigPage（`views/ConfigView.vue`）、Sector API 实时行情返回（market.py 路由优先级调整）、LLM 热点板块注入（llm_context.py + pool_manager.py）、stars 时间新鲜度 + Level 2 精度调整（news_fetcher.py + levistock_fetcher.py）、verify_e2e.py 扩展（stars/level 校验 + check_sector_data）。详见 §4 Phase 6.1。
 > 
-> 总览 `docs/` 目录 **32 份**方案文档，梳理实施状态、冲突重叠、修复建议及分阶段执行路线。
+> 总览 `docs/` 目录 **33 份**方案文档，梳理实施状态、冲突重叠、修复建议及分阶段执行路线。新增 `frontend-logic-sink-plan.md`（第 33 份，Sprint 1 P0/P1 已完成）。
 > v7.1：Phase 2.7 剩余项 + Phase 2.8 剩余项 + Phase 2.9 全部完成。新增 encoding_diagnosis.py、refresh_sentiment_cache()、AGENTS.md 关键路径更新。新增 llm_context.py build_full_context() 统一数据管道 + llm_report_stream/llm_advice_stream 改用统一管道。
 > Phase 2.2→2.4 全部完成——33/33 核心因子全 LIVE（_CORE_FACTORS 列表共 33 个因子，均含真实 compute 函数，含 Phase 2.5 新增的 etf.return_1m/return_3m/price）、因子健康端点 + 因子单测门禁 + 运行时因子断言、分配器质量修复（ln_mcap 排毒、C2 条件修正、segment 归一化去重、预算重调、cross-section z-score 重归一化）。新增 Phase 2.5（原质量防护网 + AI 分析）。
 > 新增文档 2 份：`scaffold-factor-resolution-plan.md`（第 29 份，✅ 已实施）、`design-quality-review-20260725.md`（第 30 份，审计报告）。
@@ -917,7 +917,7 @@ curl -s "http://localhost:8000/api/v1/admin/sources/events/timeline?hours=1"
 |---|------|--------|:----:|------|
 | 7.1.1 | Factor IC 追踪器激活 | factor-model-extension | ✅ 已实施 | Phase A(核心管道) + Phase B1(B3)已实施：SQLite 持久化(factor_ic_records 表)，定时 120s 保存 IC batch；IC 阈值告警(logger.warning)；前端 FactorICView.vue(因子 IC 排序 + 有效性标记) |
 | 7.1.2 | 排版令牌迁移 | frontend-ui-optimization Phase 3-4 | ✅ 已实施 | 51 处排版令牌迁移（font-size + font-weight → font: var(--text-*) shorthand），跨 26 个组件文件 |
-| 7.1.3 | SVG 图标替换 emoji | frontend-ui-optimization Phase 3 | ✅ 已实施 | 创建 icons.js 图标系统\uff0826 个\u10e6��\u51� SVG 图\u6807\uff0bemoji 映\u5c04）\uff1bAppCard 通过 resolvedIcon computed 自\u52a8渲\u67d3 SVG\uff1bE2E 测\u8bd5适\u914d |
+| 7.1.3 | SVG 图标替换 emoji | frontend-ui-optimization Phase 3 | ✅ 已实施 | 创建 icons.js 图标系统\uff0826 个\u10e6��\u51� SVG 图\u6807\uff0bemoji 映\u5c04）\uff1bAppCard 通过 resolvedIcon computed 自\u52a8渲\u67d3 SVG\uff1bE2E 测\u8bd5适\u914d |
 | 7.1.4 | 响应式补齐 | frontend-ui-optimization Phase 4 | ❌ 待实施 | 移动端适配 |
 | 7.1.5 | 进一步 E2E 增强 + 剩余 UI 组件单测 | frontend-testing-safety-net C1/C3 | ✅ C1 + C3 均已实施 | C1\uff1aAppTable(7) + AppSelect(9) + Skeleton(9) 单测\uff0cAppComponents2.spec.js 25/25 通过\uff1b修复 AppTable density class bug\uff1bC3\uff1aCharts E2E(4) + News E2E(4) + 技术分析 E2E(5) = 13 条新增 spec |
 | 7.1.6 | design-report B1-B3（LLM prompt 分析增强）+ C2（科技ETF分散） | design-report-optimization B1/B2/B3/C2 | ✅ **全部已实施** | B1（黄金动量入选理由）→ `engine/rationale.py:60-63`；B2（国债久期风险提示）→ `engine/rationale.py:64-65`；B3（LLM prompt 量化规则）→ `analysis/prompts/v1/design_report.md:68`；C2（科技集中度→科创50 ETF分散）→ `engine/allocation_engine.py:443-458` |
@@ -1102,6 +1102,17 @@ Phase 7.1 (远期优化)             无紧急依赖
 | | **v7.2** | 2026-07-26 | Phase 4.1 状态审核。全量代码审计发现 roadmap-data-source-unified.md v2.0 中的实施方案绝大部分已被后续 commits 落地。Phase A/B/C/D1-D6 均已实施，仅 D7（前端数据源监控面板）待完成。`roadmap-data-source-unified.md` 更新为 v3.0 回顾文档。`implementation-master-plan.md` Phase 4.1 更新为 ✅ 已实施状态。 |
 | | **v7.3** | 2026-07-26 | Phase 4.1 全部完成：4.1.2（全球指数链路）代码审计确认实际为 EM→Sina→Finnhub 而非计划所述 TwelveData，verify_e2e.py 已含 HK/US 三大指数断言，状态修正为 ✅。4.1.9（前端数据源监控面板 D7）实施完成：新建 SourceMonitor.vue（TokenMonitor 风格，含 ECharts 堆叠柱状图 + 源状态矩阵 + 失败事件表格）、路由 `/source-monitor`、导航"📡 数据源"、`api-contracts/admin/sources.md` 契约。`api/index.js` 新增 4 个 adminApi 源监控方法。npm run build 验证通过。 |
 | | **v9.0** | 2026-07-26 | **Phase 5.1 全栈实施完成**：市场感知联动。新增 `core/market_context.py`（MarketContext 数据类，4 市场） + `services/market_router.py`（5 路由函数）。修改 `routers/analysis.py`（SectorAnalysisRequest.market、llm-report/stream 市场过滤、非 A 板块分析友好提示）、`routers/portfolio.py`（design-async market 参数，非 A 返回 unsupported）、`services/pool_manager.py`（regime 缓存 dict[str,str] 多市场）、`services/strategy_design.py`（market 参数入口）、`services/llm_context.py`（market 参数透传）、`frontend/src/api/index.js`（designAsync 传 market）。`api-contracts/market/market-context.md` 契约。35 个新单测全 PASS，存量 45 个全 PASS，npm run build 通过。commit `2371815`。 |
+| | **v9.4** | 2026-07-27 | **Phase 7.1.6 Sprint 1 P0/P1 前端逻辑下沉** | 备注见下方 |
+| | | | **已实施：** |
+| | | | - P0: Dashboard 财务指标去重（useDashboardData.js 7 个 computed 改用后端字段：total_pnl/total_amount/weighted_change_pct/cash_weight/cash_amount） |
+| | | | - P0: 35 个 useDashboardData 单测全 PASS |
+| | | | - P1: 设计方案后端新增 `plans` 字段（get_design API），前端 `fetchDesignDetail`/`onHistorySelect` 直接使用 |
+| | | | - 后端 `routers/portfolio.py` get_design() 新增 plans 映射 |
+| | | | - 前端 `DashboardAiTools.vue` 两处 strategies→plans 转换消除 |
+| | | | - 修复 DashboardAiTools.vue 编码损坏（UTF-16 LE → UTF-8 无 BOM，恢复 emoji 和中文字符） |
+| | | | - 新增 `docs/frontend-logic-sink-plan.md` 方案文档（v2 版，32 份→33 份） |
+| | | | - 23 前端测试文件 237 单测全 PASS，npm run build 通过 |
+| | |
 | | **v9.3** | 2026-07-26 | **Phase 7.1.2-7.1.5 实施（UI 优化 + 测试补齐）** | 备注见下方 |
 | | | | **已实施：** |
 | | | | - 7.1.2 排版令牌迁移：51 处，26 个组件 |

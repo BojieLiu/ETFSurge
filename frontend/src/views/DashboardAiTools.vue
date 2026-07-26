@@ -1,36 +1,36 @@
-﻿<template>
+<template>
   <section class="card core-actions">
     <div class="card-header">
       <h2 class="card-title">
-        <span class="card-title-icon" aria-hidden="true">鈿?/span>
-        AI 鏅鸿兘宸ュ叿
+        <span class="card-title-icon" aria-hidden="true">⚡</span>
+        AI 智能工具
       </h2>
     </div>
 
     <div class="core-actions-body">
       <!-- Feature Entrances -->
       <div v-if="!activeCoreFeature" class="core-actions-grid">
-        <button class="core-action-btn" @click="enterDesignMode" aria-label="鏅鸿兘璁捐 ETF 缁勫悎鏂规">
-          <span class="action-icon" aria-hidden="true">鉁?/span>
+        <button class="core-action-btn" @click="enterDesignMode" aria-label="智能设计 ETF 组合方案">
+          <span class="action-icon" aria-hidden="true">✨</span>
           <div class="action-content">
-            <span class="action-title">鏅鸿兘璁捐ETF缁勫悎鏂规</span>
-            <span class="action-desc">杈撳叆璧勯噾锛屼竴閿敓鎴愯繘鏀?骞宠　/闃插尽涓夌椋庢牸缁勫悎</span>
+            <span class="action-title">智能设计ETF组合方案</span>
+            <span class="action-desc">输入资金，一键生成进攻/平衡/防御三种风格组合</span>
           </div>
         </button>
 
         <button class="core-action-btn" @click="enterStrategyMode" :disabled="checkingStrategy">
-          <span class="action-icon" aria-hidden="true">馃幆</span>
+          <span class="action-icon" aria-hidden="true">🎯</span>
           <div class="action-content">
-            <span class="action-title">绛栫暐妫€鏌ュ垎鏋?/span>
-            <span class="action-desc">鍒嗘瀽褰撳墠缁勫悎锛屼紭鍖栨潈閲嶄笌鎸佷粨</span>
+            <span class="action-title">策略检查分析</span>
+            <span class="action-desc">分析当前组合，优化权重与持仓</span>
           </div>
         </button>
 
         <button class="core-action-btn" @click="enterHistoryMode">
-          <span class="action-icon" aria-hidden="true">馃摉</span>
+          <span class="action-icon" aria-hidden="true">📖</span>
           <div class="action-content">
-            <span class="action-title">浠诲姟鍒楄〃</span>
-            <span class="action-desc">鏌ョ湅鍘嗗彶缁勫悎璁捐涓庣瓥鐣ユ鏌ヨ褰?/span>
+            <span class="action-title">任务列表</span>
+            <span class="action-desc">查看历史组合设计与策略检查记录</span>
           </div>
         </button>
       </div>
@@ -97,10 +97,10 @@
       />
 
       <!-- Error Detail Modal (standalone, not in the v-if chain) -->
-      <AppModal v-model="showErrorModal" title="鉂?璁捐浠诲姟澶辫触" :closable="true" size="sm">
+      <AppModal v-model="showErrorModal" title="❌ 设计任务失败" :closable="true" size="sm">
         <div class="error-detail-content">{{ errorDetail }}</div>
         <template #footer>
-          <button class="app-btn app-btn--primary" @click="showErrorModal = false">鍏抽棴</button>
+          <button class="app-btn app-btn--primary" @click="showErrorModal = false">关闭</button>
         </template>
       </AppModal>
     </div>
@@ -138,7 +138,7 @@ const designTab = ref('cards')
 const expandedPlan = ref(null)
 const applyingPlan = ref(null)
 const loadingProgress = ref(0)
-const loadingText = ref('姝ｅ湪閲囬泦鏁版嵁...')
+const loadingText = ref('正在采集数据...')
 const checkingStrategy = ref(false)
 const strategyResult = ref(null)
 const strategyProgress = ref(0)
@@ -194,7 +194,7 @@ onMounted(() => {
 
 // Actions
 async function enterDesignMode() {
-  // C: Clean up stale running tasks 鈥?if the backend restarted, in-memory tasks are dead
+  // C: Clean up stale running tasks — if the backend restarted, in-memory tasks are dead
   const runningTask = taskStore.tasks.find(t => t.type === 'design' && t.status === 'running')
   if (runningTask) {
     const age = Date.now() - (runningTask.createdAt || 0)
@@ -219,11 +219,11 @@ async function enterDesignMode() {
           return
         }
       } catch {
-        // Backend doesn't know about this task (404/restart) 鈫?clean up
+        // Backend doesn't know about this task (404/restart) → clean up
         if (age > 300000) {
           taskStore.removeTask(runningTask.taskId)
         } else {
-          taskStore.updateTask(runningTask.taskId, { status: 'failed', errorMessage: '鍚庣宸查噸鍚紝浠诲姟涓㈠け' })
+          taskStore.updateTask(runningTask.taskId, { status: 'failed', errorMessage: '后端已重启，任务丢失' })
         }
         designStep.value = 'wizard'
         activeCoreFeature.value = 'design'
@@ -308,15 +308,36 @@ async function startDesign(capital) {
   designStep.value = 'loading'
   designResult.value = null
   loadingProgress.value = 0
-  loadingText.value = '姝ｅ湪鎻愪氦浠诲姟...'
+  loadingText.value = '正在提交任务...'
 
   async function fetchDesignDetail(designId) {
     if (!designId) return
-    loadingText.value = '鏂规宸茬敓鎴愶紝姝ｅ湪鍔犺浇...'
+    loadingText.value = '方案已生成，正在加载...'
     loadingProgress.value = 95
     const detailRes = await portfolioApi.getDesign(designId)
     const data = detailRes.data
-    const plans = Array.isArray(data.plans) ? data.plans : []
+    const plans = Array.isArray(data.strategies)
+      ? data.strategies.map(s => ({
+          style: s.label,
+          style_label: s.label,
+          portfolio_name: s.portfolio_name,
+          positioning: s.positioning,
+          expected_return: s.expected_return,
+          max_drawdown: s.max_drawdown,
+          sharpe_ratio: s.sharpe_ratio,
+          risk_factors: [],
+          rebalance_rules: '月度检视',
+          allocations: Array.isArray(s.etfs)
+            ? s.etfs.map(e => ({
+                symbol: e.symbol,
+                name: e.name,
+                layer: e.layer,
+                target_weight: e.weight,
+                selection_rationale: e.selection_rationale || '',
+              }))
+            : [],
+        }))
+      : []
 
     designResult.value = {
       plans,
@@ -327,25 +348,25 @@ async function startDesign(capital) {
     }
     designStep.value = 'result'
     loadingProgress.value = 100
-    loadingText.value = '瀹屾垚锛?
+    loadingText.value = '完成！'
     return data
   }
 
   try {
     loadingProgress.value = 10
-    loadingText.value = '姝ｅ湪璇锋眰 AI 璁捐鏂规...'
+    loadingText.value = '正在请求 AI 设计方案...'
     const res = await portfolioApi.designAsync({ capital: capital })
     const taskData = res.data
-    taskStore.addTask(taskData.task_id, '鏅鸿兘缁勫悎璁捐', 'design')
+    taskStore.addTask(taskData.task_id, '智能组合设计', 'design')
     const storedTask = taskStore.getTask(taskData.task_id)
     if (storedTask) storedTask.designId = taskData.design_id
 
     loadingProgress.value = 30
-    loadingText.value = 'AI 姝ｅ湪鍒嗘瀽鍏ㄥ競鍦烘暟鎹?..'
+    loadingText.value = 'AI 正在分析全市场数据...'
 
     // Register WS listener for completion
     const wsToken = taskStore.registerTaskCompletion(taskData.task_id, async () => {
-      loadingText.value = '鏂规宸茬敓鎴愶紝姝ｅ湪鍔犺浇...'
+      loadingText.value = '方案已生成，正在加载...'
       loadingProgress.value = 95
       let did = taskStore.getTask(taskData.task_id)?.designId
       if (!did) {
@@ -357,22 +378,22 @@ async function startDesign(capital) {
       if (did) {
         try {
           await fetchDesignDetail(did)
-          toast('缁勫悎鏂规鐢熸垚瀹屾垚锛?, 'success')
+          toast('组合方案生成完成！', 'success')
         } catch {
-          toast('鍔犺浇璁捐鏂规璇︽儏澶辫触', 'error')
-          designFailed.value = '鍔犺浇鏂规璇︽儏澶辫触锛岃绋嶅悗鍐嶈瘯'
+          toast('加载设计方案详情失败', 'error')
+          designFailed.value = '加载方案详情失败，请稍后再试'
         }
       }
     })
 
-    // Poll as fallback (WS 涓轰富锛岃疆璇㈤檷棰戜互鍑忓皯鍐椾綑璇锋眰)
+    // Poll as fallback
     let pollCount = 0
     let consecutiveErrors = 0
     if (designPollTimer) clearInterval(designPollTimer)
     designPollTimer = setInterval(async () => {
       pollCount++
       loadingProgress.value = Math.min(30 + pollCount * 5, 90)
-      loadingText.value = `AI 姝ｅ湪浼樺寲缁勫悎... (${pollCount * 5}s)`
+      loadingText.value = `AI 正在优化组合... (${pollCount * 5}s)`
       try {
         const taskRes = await portfolioApi.getTask(taskData.task_id)
         const task = taskRes.data
@@ -382,28 +403,28 @@ async function startDesign(capital) {
           const did = task?.result?.design_id || taskData.design_id
           if (did) {
             await fetchDesignDetail(did)
-            toast('缁勫悎鏂规鐢熸垚瀹屾垚锛?, 'success')
+            toast('组合方案生成完成！', 'success')
           }
         } else if (task.status === 'failed') {
           clearInterval(designPollTimer); designPollTimer = null
-          designFailed.value = task.error_message || task.error || '鏂规鐢熸垚澶辫触锛岃绋嶅悗閲嶈瘯'
+          designFailed.value = task.error_message || task.error || '方案生成失败，请稍后重试'
         }
       } catch {
         // Detect backend restart: consecutive errors mean the task is gone
         consecutiveErrors++
         if (consecutiveErrors >= 5) {
           clearInterval(designPollTimer); designPollTimer = null
-          designFailed.value = '鍚庣鏈嶅姟寮傚父锛屼换鍔″彲鑳藉凡涓㈠け'
+          designFailed.value = '后端服务异常，任务可能已丢失'
         }
       }
-    }, 10000)
+    }, 5000)
 
     // Cleanup poll on 180s timeout
     if (designTimeoutTimer) clearTimeout(designTimeoutTimer)
     designTimeoutTimer = setTimeout(() => {
       if (designPollTimer) { clearInterval(designPollTimer); designPollTimer = null }
       if (designStep.value === 'loading' && !designFailed.value) {
-        loadingText.value = '鏂规鐢熸垚涓紝鎮ㄥ彲绋嶅悗鏌ョ湅浠诲姟鍒楄〃'
+        loadingText.value = '方案生成中，您可稍后查看任务列表'
         setTimeout(() => {
           if (designStep.value === 'loading') {
             exitCoreFeature()
@@ -412,7 +433,7 @@ async function startDesign(capital) {
       }
     }, 180000)
   } catch (e) {
-    designFailed.value = '鎻愪氦澶辫触锛? + (e?.message || '缃戠粶閿欒')
+    designFailed.value = '提交失败：' + (e?.message || '网络错误')
   }
 }
 
@@ -427,9 +448,9 @@ async function checkStrategy() {
   try {
     const res = await portfolioApi.strategyCheck({ portfolio_type: strategyPortfolioType.value || undefined })
     const taskData = res.data
-    taskStore.addTask(taskData.task_id, '绛栫暐妫€鏌ヤ笌鍒嗘瀽', 'check')
+    taskStore.addTask(taskData.task_id, '策略检查与分析', 'check')
 
-    // Poll for completion (WS 涓轰富锛岃疆璇㈤檷棰戜互鍑忓皯鍐椾綑璇锋眰)
+    // Poll for completion
     let pollCount = 0
     let consecutiveErrors = 0
     strategyPollTimer = setInterval(async () => {
@@ -438,7 +459,7 @@ async function checkStrategy() {
         const taskRes = await portfolioApi.getTask(taskData.task_id)
         const task = taskRes.data
         consecutiveErrors = 0  // Reset on success
-        // 浠庡悗绔鍙栫湡瀹炶繘搴﹀拰闃舵
+        // 从后端读取真实进度和阶段
         strategyProgress.value = task.progress || Math.min(pollCount * 10, 80)
         strategyStage.value = task.stage || ''
         if (task.status === 'completed') {
@@ -447,12 +468,12 @@ async function checkStrategy() {
           strategyResult.value = detailRes.data
           strategyTaskStatus.value = 'completed'
           strategyProgress.value = 100
-          strategyStage.value = '鍒嗘瀽瀹屾垚'
+          strategyStage.value = '分析完成'
           checkingStrategy.value = false
-          toast('绛栫暐妫€鏌ュ畬鎴?, 'success')
+          toast('策略检查完成', 'success')
         } else if (task.status === 'failed') {
           clearStrategyTimers()
-          strategyError.value = task.error_message || task.error || '绛栫暐妫€鏌ュけ璐?
+          strategyError.value = task.error_message || task.error || '策略检查失败'
           strategyTaskStatus.value = 'failed'
           checkingStrategy.value = false
         }
@@ -461,23 +482,23 @@ async function checkStrategy() {
         consecutiveErrors++
         if (consecutiveErrors >= 5) {
           clearStrategyTimers()
-          strategyError.value = '鍚庣鏈嶅姟寮傚父锛屼换鍔″彲鑳藉凡涓㈠け'
+          strategyError.value = '后端服务异常，任务可能已丢失'
           strategyTaskStatus.value = 'failed'
           checkingStrategy.value = false
         }
       }
-    }, 10000)
+    }, 3000)
 
     strategyTimeoutTimer = setTimeout(() => {
       clearStrategyTimers()
       if (checkingStrategy.value) {
-        strategyError.value = '绛栫暐妫€鏌ヨ秴鏃讹紝璇风◢鍚庢煡鐪嬪巻鍙茶褰?
+        strategyError.value = '策略检查超时，请稍后查看历史记录'
         strategyTaskStatus.value = 'failed'
         checkingStrategy.value = false
       }
     }, 120000)
   } catch (e) {
-    strategyError.value = '鎻愪氦澶辫触锛? + (e?.message || '缃戠粶閿欒')
+    strategyError.value = '提交失败：' + (e?.message || '网络错误')
     strategyTaskStatus.value = 'failed'
     checkingStrategy.value = false
   }
@@ -493,7 +514,7 @@ async function loadHistoryList() {
     const designs = (designRes.data || []).map(d => ({ ...d, _type: 'design' }))
     const checks = (checkRes.data || []).map(c => ({ ...c, _type: 'check' }))
 
-    // 鍚堝苟杩愯涓殑璁捐浠诲姟锛堣拷鍔犲埌鍒楄〃鍓嶏級
+    // 合并运行中的设计任务（追加到列表前）
     const runningTasks = taskStore.tasks
         .filter(t => t.type === 'design' && t.status === 'running')
         .map(t => ({
@@ -505,66 +526,80 @@ async function loadHistoryList() {
     designHistoryList.value = [...runningTasks, ...designs, ...checks].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
     historyLoaded.value = true
   } catch (e) {
-    toast('鍔犺浇鍘嗗彶璁板綍澶辫触锛岃妫€鏌ュ悗绔繛鎺?, 'error')
+    toast('加载历史记录失败，请检查后端连接', 'error')
   } finally {
     historyLoading.value = false
   }
 }
 
 async function onHistorySelect(id, item) {
-  // 杩愯涓細涓嶈姹傚悗绔?  if (item?.status === 'running') {
-    toast('璇ユ柟妗堜粛鍦ㄧ敓鎴愪腑锛岃绋嶅悗鍐嶈瘯', 'info')
+  // 运行中：不请求后端
+  if (item?.status === 'running') {
+    toast('该方案仍在生成中，请稍后再试', 'info')
     return
   }
-  // 澶辫触锛氬睍绀洪敊璇鎯呭脊绐?  if (item?.status === 'failed') {
+  // 失败：展示错误详情弹窗
+  if (item?.status === 'failed') {
     showErrorModal.value = true
     if (item.error_message) {
       errorDetail.value = item.error_message
     } else {
-      // 鍒楄〃鏃?error_message 鏃跺皾璇曚粠璇︽儏鎺ュ彛鑾峰彇
+      // 列表无 error_message 时尝试从详情接口获取
       try {
         const res = await portfolioApi.getDesign(id)
-        errorDetail.value = res.data?.error_message || '鏈煡閿欒'
+        errorDetail.value = res.data?.error_message || '未知错误'
       } catch {
-        errorDetail.value = '鏈煡閿欒'
+        errorDetail.value = '未知错误'
       }
     }
     return
   }
-  // check 绫诲瀷锛氬姞杞界瓥鐣ユ鏌ヨ鎯呭苟鏄剧ず
+  // check 类型：加载策略检查详情并显示
   if (item?._type === 'check') {
     try {
       const res = await portfolioApi.getStrategyCheckDetail(id)
       const data = res.data
       if (!data) {
-        toast('绛栫暐妫€鏌ヨ褰曚笉瀛樺湪', 'warning')
+        toast('策略检查记录不存在', 'warning')
         return
       }
       strategyResult.value = data
       strategyTaskStatus.value = 'completed'
       strategyProgress.value = 100
-      strategyStage.value = '鍒嗘瀽瀹屾垚'
+      strategyStage.value = '分析完成'
       activeCoreFeature.value = 'strategy'
       return
     } catch (e) {
-      toast('鍔犺浇绛栫暐妫€鏌ヨ鎯呭け璐? ' + (e?.message || '缃戠粶閿欒'), 'error')
+      toast('加载策略检查详情失败: ' + (e?.message || '网络错误'), 'error')
       return
     }
   }
   try {
     const res = await portfolioApi.getDesign(id)
     const data = res.data
-    if (!data || !data.plans || data.plans.length === 0) {
-      toast('璇ュ巻鍙叉柟妗堟暟鎹笉瀹屾暣', 'warning')
+    if (!data || !data.strategies || data.strategies.length === 0) {
+      toast('该历史方案数据不完整', 'warning')
       return
     }
-    const plans = Array.isArray(data.plans) ? data.plans : []
+    const plans = data.strategies.map(s => ({
+      style: s.label,
+      style_label: s.label,
+      portfolio_name: s.portfolio_name,
+      positioning: s.positioning,
+      expected_return: s.expected_return,
+      max_drawdown: s.max_drawdown,
+      sharpe_ratio: s.sharpe_ratio,
+      risk_factors: s.risk_factors || [],
+      allocations: Array.isArray(s.etfs)
+        ? s.etfs.map(e => ({ symbol: e.symbol, name: e.name, layer: e.layer, target_weight: e.weight, selection_rationale: e.selection_rationale || '' }))
+        : [],
+    }))
     designResult.value = { plans, design_text: data.design_text || '', market_context: data.market_context || {}, created_at: data.created_at, is_history: true, report_quality: data.report_quality || 'none' }
     designStep.value = 'result'
     designTab.value = 'cards'
     activeCoreFeature.value = 'design'
   } catch (e) {
-    toast('鍔犺浇鏂规璇︽儏澶辫触', 'error')
+    toast('加载方案详情失败', 'error')
   }
 }
 
@@ -585,10 +620,10 @@ async function applyPlan(plan) {
   applyingPlan.value = plan.style
   try {
     await portfolioApi.applyPortfolioDesign(plan)
-    toast(`宸插簲鐢?${plan.style} 鏂规`, 'success')
+    toast(`已应用 ${plan.style} 方案`, 'success')
     emit('applied')
   } catch (e) {
-    toast('搴旂敤鏂规澶辫触', 'error')
+    toast('应用方案失败', 'error')
   } finally {
     applyingPlan.value = null
   }
