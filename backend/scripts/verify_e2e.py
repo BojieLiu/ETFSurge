@@ -149,6 +149,23 @@ def section_market():
                     price_ok = entry.get("price") is not None
                     check(f"{label} 价格非空", price_ok,
                           "" if price_ok else f"price={entry.get('price')}")
+            # Verify US 3 major indices are present (4.1.2 对齐检查)
+            us_symbols = [d for d in all_entries if d.get("region") == "美股"]
+            us_syms_found = {d["symbol"] for d in us_symbols}
+            has_spx = any("GSPC" in s for s in us_syms_found)
+            has_ixic = any("IXIC" in s for s in us_syms_found)
+            has_dji = any("DJI" in s for s in us_syms_found)
+            check("美股三大指数均覆盖", has_spx and has_ixic and has_dji,
+                  f"SPX={'Y' if has_spx else 'N'} IXIC={'Y' if has_ixic else 'N'} DJI={'Y' if has_dji else 'N'}")
+            # Also verify prices are non-null for US 3
+            us_spx = next((d for d in us_symbols if "GSPC" in d.get("symbol","")), None)
+            us_ixic = next((d for d in us_symbols if "IXIC" in d.get("symbol","")), None)
+            us_dji = next((d for d in us_symbols if "DJI" in d.get("symbol","")), None)
+            for label, entry in [("标普500", us_spx), ("纳斯达克", us_ixic), ("道琼斯", us_dji)]:
+                if entry:
+                    price_ok = entry.get("price") is not None
+                    check(f"{label} 价格非空", price_ok,
+                          "" if price_ok else f"price={entry.get('price')}")
             # 逐区域验证：每个区域至少有一条有价格的数据（而非全部 null）
             for region_name, items in sorted(regions.items()):
                 if not items:

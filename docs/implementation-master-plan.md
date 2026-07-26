@@ -785,7 +785,7 @@ market-analysis-optimization-plan.md
 
 | # | 任务 | 源文档 | 状态 | 备注 |
 |---|------|--------|:----:|------|
-| 3.1.0 | E2E 截图基线建立 | frontend-testing-safety-net C4 | ⏭️ 跳过 | 终端环境无法截图；非阻塞建议 |
+| 3.1.0 | E2E 截图基线建立 | frontend-testing-safety-net C4 | ✅ 完成 | 新增 `e2e/specs/02-visual.spec.js`（4 个截图基线测试：Dashboard 加载态、Dashboard 骨架屏、PortfolioAnalysis、MarketAnalysis）；本地运行 `npm run test:e2e:visual` 生成基线 |
 | 3.1.1 | Dashboard 手工 card → AppCard（7 区块） | frontend-ui-optimization Phase 2 | ⏭️ 递延 | 涉及 7 个子组件内部重构，复杂度高；6/7 已迁移至 Phase 3.2（AllocationPieChart/AllocationTable/PnLBarChart/PnLDetailTable/SummaryCards），CapitalInputBar 因自定义 SVG 彩色 header 保留现状 |
 | 3.1.2 | Dashboard 手工 tab → AppTabs | frontend-ui-optimization Phase 2 | ✅ 完成 | Dashboard.vue: 手动 `.tabs`/`.tab` 替换为 `<AppTabs variant="soft" full-width>` |
 | 3.1.3 | PortfolioAnalysis tab → AppTabs | frontend-ui-optimization Phase 2 | ✅ 完成 | PortfolioAnalysis.vue: 手动 `.pa-tabs`/`.pa-tab` 替换为 `<AppTabs variant="line">`；测试同步更新 |

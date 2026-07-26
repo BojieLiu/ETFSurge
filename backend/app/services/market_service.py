@@ -204,7 +204,7 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
     """返回分组的主流全球指数行情。
 
     A 股 → china_market (mootdx)
-    海外 → yfinance (熔断降级为占位)
+    海外 → EM缓存 → Sina → Finnhub (熔断降级为占位)
 
     带 30s 缓存，非交易时段复用上次成功值。
     """
