@@ -799,9 +799,10 @@ class FactorRegistry:
         async def fetch_one(sym: str) -> tuple[str, dict[str, Any]]:
             async with sem:
                 try:
+                    from ..core.async_utils import run_sync
                     rows = await asyncio.wait_for(
-                        asyncio.to_thread(fetch_history, sym, "A", "daily"),
-                        timeout=20,
+                        run_sync(fetch_history, sym, "A", "daily", timeout=20),
+                        timeout=25,
                     )
                     if not rows:
                         raise ValueError("empty data")

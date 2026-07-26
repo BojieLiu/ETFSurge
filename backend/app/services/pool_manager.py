@@ -170,7 +170,8 @@ class PoolManager:
             # 2. 热点板块（异步，失败不影响主流程）
             try:
                 from ..fetchers.sector_fetcher import fetch_hot_plates
-                hot = await asyncio.to_thread(fetch_hot_plates, 15)
+                from ..core.async_utils import run_sync
+                hot = await run_sync(fetch_hot_plates, 15, timeout=20)
                 if hot:
                     self._hot_plates_cache = hot
                     logger.info("[pool] update_sector_cache: %d hot plates", len(hot))
@@ -180,7 +181,8 @@ class PoolManager:
             # 3. 板块热度排行
             try:
                 from ..fetchers.sector_fetcher import fetch_sector_heat
-                heat = await asyncio.to_thread(fetch_sector_heat)
+                from ..core.async_utils import run_sync
+                heat = await run_sync(fetch_sector_heat, timeout=20)
                 if heat:
                     self._sector_heat_cache = heat
             except Exception as e:
@@ -645,7 +647,7 @@ class PoolManager:
         import time
         try:
             from .market_trends import detect_market_regime
-            regime = await detect_market_regime()
+            regime = detect_market_regime()
             if regime:
                 self._regime_cache = regime
                 self._regime_cache_ts = time.time()
@@ -662,10 +664,9 @@ class PoolManager:
     async def refresh_sentiment_cache(self) -> None:
         """异步刷新市场情绪缓存（2.7.9）。"""
         import time
-        import asyncio
         try:
             from ..fetchers.sentiment_fetcher import fetch_market_sentiment
-            sentiment = await asyncio.to_thread(fetch_market_sentiment)
+            sentiment = await fetch_market_sentiment()
             if sentiment:
                 self._sentiment_cache = sentiment
                 self._sentiment_cache_ts = time.time()

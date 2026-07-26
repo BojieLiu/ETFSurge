@@ -45,20 +45,19 @@ def _session():
 
 # ── mootdx helper ────────────────────────────────────────────────
 
-import contextlib
-import threading
-
-_MOOTDX_CLIENT = None
-_MOOTDX_LOCK = threading.Lock()
-
-# mootdx socket read/write timeout (must be less than the async
-# _call timeout=8 so mootdx errors out before asyncio cancels)
+# mootdx socket read/write timeout
 _MOOTDX_TIMEOUT = 6
-# max seconds to wait for the mootdx lock before falling back
-_MOOTDX_LOCK_TIMEOUT = 10
+
+_MOOTDX_CLIENT: "Quotes | None" = None
 
 
 def _mootdx():
+    """获取 mootdx 客户端（懒初始化，无需全局锁）。
+
+    mootdx 的 socket 连接并非线程安全，但由于 SourceRegistry
+    已提供 Sina/Tencent 降级通道，即使 mootdx 并发崩溃也能
+    秒级熔断。去掉全局锁避免线程池被阻塞线程填满。
+    """
     global _MOOTDX_CLIENT
     if _MOOTDX_CLIENT is None:
         from mootdx.quotes import Quotes
@@ -66,30 +65,12 @@ def _mootdx():
     return _MOOTDX_CLIENT
 
 
-@contextlib.contextmanager
-def _mootdx_locked():
-    """Acquire _MOOTDX_LOCK with timeout to prevent cascading blockage.
-
-    When a previous mootdx call hangs (holding the lock), this will
-    time out after _MOOTDX_LOCK_TIMEOUT seconds and let the caller
-    fall through to the next data-source tier instead of blocking
-    the entire worker thread indefinitely.
-    """
-    if not _MOOTDX_LOCK.acquire(timeout=_MOOTDX_LOCK_TIMEOUT):
-        raise TimeoutError("mootdx lock acquisition timed out")
-    try:
-        yield
-    finally:
-        _MOOTDX_LOCK.release()
-
-
 def _mootdx_realtime(symbols: list[str]) -> list[dict[str, Any]]:
     if not symbols:
         return []
     try:
-        with _mootdx_locked():
-            client = _mootdx()
-            df = client.quotes(symbol=symbols)
+        client = _mootdx()
+        df = client.quotes(symbol=symbols)
         if df is None or df.empty:
             logger.warning("_mootdx_realtime returned empty for %s", symbols)
             return []
@@ -120,9 +101,8 @@ def _mootdx_history(symbol: str, period: str = "daily") -> list[dict[str, Any]]:
     freq = freq_map.get(period, 9)
     count = 500
     try:
-        with _mootdx_locked():
-            client = _mootdx()
-            df = client.bars(symbol=symbol, frequency=freq, start=0, count=count)
+        client = _mootdx()
+        df = client.bars(symbol=symbol, frequency=freq, start=0, count=count)
         if df is None or df.empty:
             logger.warning("_mootdx_history returned empty for %s (period=%s)", symbol, period)
             # Fallback to akshare stock_zh_a_hist
@@ -701,9 +681,8 @@ def fetch_index_realtime() -> list[dict[str, Any]]:
 
         # Tier 2: mootdx
         try:
-            with _mootdx_locked():
-                client = _mootdx()
-                df = client.index(symbol=codes)
+            client = _mootdx()
+            df = client.index(symbol=codes)
             if df is not None and not df.empty:
                 results = []
                 for _, row in df.iterrows():

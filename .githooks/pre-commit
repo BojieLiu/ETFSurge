@@ -130,6 +130,55 @@ else
     fi
 fi
 
+# ── 后端异步阻塞审计 ────────────────────────────────────────────
+if [ "${SKIP_AUDIT_ASYNC}" = "1" ]; then
+    echo "[pre-commit] SKIP_AUDIT_ASYNC=1, 跳过异步阻塞审计"
+else
+    BACKEND_STAGED=$(git diff --cached --name-only --diff-filter=ACM -- 'backend/app/*.py' 2>/dev/null || true)
+    if [ -n "$BACKEND_STAGED" ]; then
+        echo "[pre-commit] 检测到后端 Python 变更，正在执行 audit_async_blocking.py ..."
+        cd backend
+        if python scripts/audit_async_blocking.py 2>&1; then
+            echo "[pre-commit] ✅ audit_async_blocking 通过"
+            cd ..
+        else
+            cd ..
+            echo ""
+            echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+            echo "!  🚫 audit_async_blocking 失败                                !"
+            echo "!  存在 async def 内同步阻塞调用或线程池使用不当               !"
+            echo "!  请修复后重试，或 SKIP_AUDIT_ASYNC=1 git commit ...          !"
+            echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+            exit 1
+        fi
+    fi
+fi
+
+# ── 后端类型检查（mypy） ─────────────────────────────────────────
+if command -v mypy &> /dev/null; then
+    if [ "${SKIP_MYPY}" = "1" ]; then
+        echo "[pre-commit] SKIP_MYPY=1, 跳过 mypy 类型检查"
+    else
+        BACKEND_STAGED=$(git diff --cached --name-only --diff-filter=ACM -- 'backend/app/*.py' 2>/dev/null || true)
+        if [ -n "$BACKEND_STAGED" ]; then
+            echo "[pre-commit] 检测到后端 Python 变更，正在执行 mypy ..."
+            cd backend
+            if python -m mypy 2>&1; then
+                echo "[pre-commit] ✅ mypy 通过"
+                cd ..
+            else
+                cd ..
+                echo ""
+                echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                echo "!  🚫 mypy 类型检查失败                                       !"
+                echo "!  请修复类型错误后重试，或 SKIP_MYPY=1 git commit ...        !"
+                echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                exit 1
+            fi
+        fi
+    fi
+fi
+
 # ── 后端测试门禁（P3-2） ──────────────────────────────────────────
 if [ "${SKIP_BACKEND_TESTS}" = "1" ]; then
     echo "[pre-commit] SKIP_BACKEND_TESTS=1, 跳过后端测试"

@@ -180,3 +180,34 @@ async def test_sina_iopv_fetch_uses_run_sync():
     else:
         # If no nav found, it's OK — the path was exercised (mock data has limited fields)
         pass
+
+
+@pytest.mark.asyncio
+async def test_run_sync_uses_shared_executor():
+    """Verify run_sync uses _shared_executor, not the default executor.
+
+    This guards against the bug where _shared_executor was created but
+    never wired into run_sync's execution path, causing all background
+    tasks to compete for the smaller default executor pool.
+    """
+    from app.core.async_utils import run_sync, _shared_executor
+
+    call_executor = None
+    original_run_in_executor = asyncio.get_event_loop().run_in_executor
+
+    async def _proxy_run_in_executor(executor, func, *args):
+        nonlocal call_executor
+        call_executor = executor
+        return await original_run_in_executor(executor, func, *args)
+
+    with patch.object(
+        asyncio.get_event_loop(), "run_in_executor",
+        side_effect=_proxy_run_in_executor,
+    ):
+        result = await run_sync(lambda: 42, timeout=5)
+
+    assert result == 42, f"Expected 42, got {result}"
+    assert call_executor is _shared_executor, (
+        f"run_sync used executor {call_executor!r}, "
+        f"expected _shared_executor {_shared_executor!r}"
+    )

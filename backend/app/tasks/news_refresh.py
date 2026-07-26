@@ -4,8 +4,7 @@
 采用批次推送（news_batch）替代逐条推送（news），
 批次内已按 sort_time 降序排列，前端可直接替换/合并。
 """
-import asyncio
-
+from ..core.async_utils import run_sync
 from ..core.logging import get_logger
 from ..fetchers.news_fetcher import fetch_news_headlines
 from ..routers.ws import manager
@@ -18,7 +17,7 @@ _last_titles: set = set()
 async def refresh_news_cache() -> None:
     global _last_titles
     try:
-        items = await asyncio.to_thread(fetch_news_headlines)
+        items = await run_sync(fetch_news_headlines, timeout=30)
     except Exception:
         logger.exception("刷新资讯缓存失败：fetch_news_headlines 异常")
         return

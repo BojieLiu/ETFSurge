@@ -23,13 +23,16 @@ def register_probe(name: str, fn: Callable, timeout: int = 5):
 
 
 async def run_probes():
-    """遍历所有探针，在独立线程中执行探测函数，记录成败到 SourceRegistry。"""
+    """遍历所有探针，在共享线程池中执行探测函数，记录成败到 SourceRegistry。"""
+    from ..core.async_utils import run_sync
+
     now = time.time()
     for name, fn, timeout in _PROBES:
         t0 = time.perf_counter()
         try:
             result = await asyncio.wait_for(
-                asyncio.to_thread(fn), timeout=timeout
+                run_sync(fn, timeout=timeout),
+                timeout=timeout + 5,
             )
             elapsed = (time.perf_counter() - t0) * 1000
             if result:

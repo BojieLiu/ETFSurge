@@ -204,7 +204,7 @@ def fetch_all_etfs_base() -> list[dict[str, Any]]:
         try:
             with open(_cache_file, "r", encoding="utf-8") as _f:
                 _fc = json.load(_f)
-            if time.time() - _fc.get("ts", 0) < 3600 and len(_fc.get("etfs", [])) > 50:
+            if time.time() - _fc.get("ts", 0) < 14400 and len(_fc.get("etfs", [])) > 50:
                 logger.info("[etf_scanner] file cache hit: %d ETFs", len(_fc["etfs"]))
                 sync_memory_cache.set("all_etfs", _fc["etfs"], CACHE_TTL["etf_list"])
                 return _fc["etfs"]

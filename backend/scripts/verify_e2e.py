@@ -622,9 +622,12 @@ def section_admin():
                 pool_stats = main_pool  # legacy flat structure
             max_w = pool_stats.get("max_workers", 32)
             alive = pool_stats.get("alive_threads", 0)
+            pending = pool_stats.get("pending_tasks", 0)
             utilisation = alive / max_w if max_w > 0 else 0
             check("shared_executor 未过载", utilisation < 0.8,
                   f"active={alive}/{max_w} ({utilisation:.0%})")
+            check("shared_executor 队列深度正常", pending < 16,
+                  f"pending_tasks={pending}")
     except requests.Timeout:
         check("GET /admin/thread-pool", False, "请求超时（10s）")
     except Exception as e:

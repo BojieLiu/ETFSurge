@@ -14,6 +14,7 @@ from ..fetchers.fundamental_fetcher import fetch_fundamentals
 from ..fetchers.news_fetcher import fetch_news_headlines, fetch_macro_news
 from ..analysis.indicators import compute_all_indicators
 from ..analysis.signal import generate_signal
+from ..core.async_utils import run_sync
 from .market_service import get_history, get_indices, get_commodities
 
 PORTFOLIO_TYPES = {"on_exchange": "场内", "off_exchange": "场外"}
@@ -81,13 +82,8 @@ async def remove_etf(db: AsyncSession, symbol: str) -> bool:
 
 async def build_price_map(etfs: list[PortfolioETF | dict]) -> dict[str, tuple[float, float]]:
     """公开包装器，将同步 _build_price_map 放入线程池执行。"""
-    import asyncio
-    loop = asyncio.get_event_loop()
     try:
-        return await asyncio.wait_for(
-            loop.run_in_executor(None, _build_price_map, etfs),
-            timeout=30.0
-        )
+        return await run_sync(_build_price_map, etfs, timeout=30)
     except (asyncio.TimeoutError, Exception):
         return {}
 
@@ -231,28 +227,21 @@ async def calculate_allocation(
     # 第二遍：并行获取 A 股 ETF 基本面数据（在线程池运行，总超时 15 秒）
     a_etf_indices = [i for i, e in enumerate(etfs) if e.asset_type == "A"]
     if a_etf_indices:
-        loop = asyncio.get_event_loop()
+        sym_task_map = {}
         async def _fetch_all_fundamentals():
-            tasks = {}
-            for idx in a_etf_indices:
-                sym = etfs[idx].symbol
-                fut = loop.run_in_executor(None, fetch_fundamentals, sym)
-                tasks[sym] = fut
-            done, _ = await asyncio.wait(tasks.values(), timeout=12.0)
-            for idx in a_etf_indices:
-                sym = etfs[idx].symbol
-                fut = tasks[sym]
-                if fut in done:
-                    try:
-                        result = fut.result()
-                        if result:
-                            allocations[idx].update(result)
-                    except Exception:
-                        pass
+            nonlocal sym_task_map
+            symbols = [(idx, etfs[idx].symbol) for idx in a_etf_indices]
+            futs = [run_sync(fetch_fundamentals, sym, timeout=12) for _, sym in symbols]
+            results = await asyncio.gather(*futs, return_exceptions=True)
+            sym_task_map = {sym: res for (_, sym), res in zip(symbols, results)}
         try:
             await asyncio.wait_for(_fetch_all_fundamentals(), timeout=15.0)
         except Exception:
             pass
+        for idx, sym in [(idx, etfs[idx].symbol) for idx in a_etf_indices]:
+            result = sym_task_map.get(sym)
+            if result and not isinstance(result, Exception):
+                allocations[idx].update(result)
 
     cash_weight = max(0.0, 1.0 - weight_sum)
     cash_amount = round(total_capital * cash_weight, 2)

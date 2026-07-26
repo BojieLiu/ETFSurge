@@ -37,9 +37,9 @@ export default defineConfig({
     port: 5173,
     proxy: {
       // 注意顺序：更具体的路径在前，否则 /api 会先匹配 /api/v1/ws
-      '/api/v1/ws': { target: process.env.VITE_WS_TARGET || 'ws://localhost:8000', ws: true, changeOrigin: true },
-      '/ws': { target: process.env.VITE_WS_TARGET || 'ws://localhost:8000', ws: true, changeOrigin: true },
-      '/api': { target: process.env.VITE_PROXY_TARGET || 'http://localhost:8000', changeOrigin: true },
+      '/api/v1/ws': { target: process.env.VITE_WS_TARGET || 'ws://127.0.0.1:8000', ws: true, changeOrigin: true },
+      '/ws': { target: process.env.VITE_WS_TARGET || 'ws://127.0.0.1:8000', ws: true, changeOrigin: true },
+      '/api': { target: process.env.VITE_PROXY_TARGET || 'http://127.0.0.1:8000', changeOrigin: true },
     },
   },
   build: {

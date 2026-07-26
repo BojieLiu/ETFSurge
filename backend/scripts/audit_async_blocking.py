@@ -111,6 +111,15 @@ def _is_exempted_await(node: ast.Await, tree: ast.AST) -> bool:
     return False
 
 
+def _defined_as_async(name: str, tree: ast.AST) -> bool:
+    """判断名为 name 的函数在树中是否被定义为 async def。"""
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
+            if node.name == name:
+                return isinstance(node, ast.AsyncFunctionDef)
+    return False
+
+
 def _is_inside_nested_def(node: ast.AST, func_node: ast.AsyncFunctionDef) -> bool:
     """判断 node 是否在 async def 内部嵌套的同步 def 中。"""
     for parent in ast.walk(func_node):
@@ -168,6 +177,65 @@ def scan_async_function(func_node: ast.AsyncFunctionDef, file_path: str) -> list
     return violations
 
 
+def _scan_to_thread_misuse(tree: ast.AST, file_path: str) -> list[str]:
+    """增强检查 1：asyncio.to_thread 的参数是 async def 函数。
+    
+    这种情况不会报错，但返回的是协程对象而非实际结果。
+    检查仅在参数是同一文件内定义的简单名称时有效。
+    """
+    violations = []
+    rel = os.path.relpath(file_path, _APP_PATH)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        call_name = _extract_call_name(node)
+        if call_name != "asyncio.to_thread":
+            continue
+        if not node.args:
+            continue
+        first_arg = node.args[0]
+        # 检查第一个参数是简单名称且在文件中定义为 async def
+        if isinstance(first_arg, ast.Name):
+            if _defined_as_async(first_arg.id, tree):
+                violations.append(
+                    f"{rel}:{node.lineno}: asyncio.to_thread() called with async function "
+                    f"'{first_arg.id}' — use 'await func()' instead of to_thread"
+                )
+        elif isinstance(first_arg, ast.Attribute):
+            # 形如 asyncio.to_thread(fetch_market_sentiment) 的 import 调用
+            # 我们无法跨文件判断是否为 async，但可以通过属性名猜
+            # 已知错误模式：to_thread(async_fetch_fn) 在另文件中定义
+            attr_name = first_arg.attr if hasattr(first_arg, 'attr') else ''
+            if attr_name.endswith(('_sentiment', '_async', '_coroutine')):
+                violations.append(
+                    f"{rel}:{node.lineno}: asyncio.to_thread() called with potentially async "
+                    f"function '{attr_name}' — verify target is sync"
+                )
+    return violations
+
+
+def _scan_default_executor_usage(tree: ast.AST, file_path: str) -> list[str]:
+    """增强检查 2：loop.run_in_executor(None, ...) 使用默认 executor。
+    
+    应该改用 run_sync() 来统一走 _shared_executor。
+    """
+    violations = []
+    rel = os.path.relpath(file_path, _APP_PATH)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        call_name = _extract_call_name(node)
+        if call_name.endswith("run_in_executor") and node.args:
+            first_arg = node.args[0]
+            # loop.run_in_executor(None, ...) — 第一个参数是 None 字面量
+            if isinstance(first_arg, ast.Constant) and first_arg.value is None:
+                violations.append(
+                    f"{rel}:{node.lineno}: loop.run_in_executor(None, ...) uses default executor"
+                    f" — use 'await run_sync(fn, args, timeout=X)' instead"
+                )
+    return violations
+
+
 def scan_file(file_path: str) -> list[str]:
     """扫描单个 .py 文件，返回所有 async def 中的违规列表。"""
     violations: list[str] = []
@@ -180,6 +248,10 @@ def scan_file(file_path: str) -> list[str]:
     for node in ast.walk(tree):
         if isinstance(node, ast.AsyncFunctionDef):
             violations.extend(scan_async_function(node, file_path))
+
+    # 增强检查
+    violations.extend(_scan_to_thread_misuse(tree, file_path))
+    violations.extend(_scan_default_executor_usage(tree, file_path))
 
     return violations
 

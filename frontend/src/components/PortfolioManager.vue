@@ -671,12 +671,20 @@ async function refreshPnl() {
 
 async function loadTab() {
   paginating.value = true
-  try {
-    await store.fetchEtfs(activeTab.value)
-    cachedEtfs.value = currentEtfs.value
-    if (currentPage.value > totalPages.value) currentPage.value = 1
-  } catch (e) {
-    toast('加载持仓失败', 'error')
+  // Retry up to 2 times with 2s gap, in case backend just started
+  for (let attempt = 0; attempt <= 2; attempt++) {
+    try {
+      await store.fetchEtfs(activeTab.value)
+      cachedEtfs.value = currentEtfs.value
+      if (currentPage.value > totalPages.value) currentPage.value = 1
+      break
+    } catch (e) {
+      if (attempt < 2) {
+        await new Promise(r => setTimeout(r, 2000))
+      } else {
+        toast('Loading portfolio failed, check backend', 'error')
+      }
+    }
   }
   await refreshPnl()
   paginating.value = false

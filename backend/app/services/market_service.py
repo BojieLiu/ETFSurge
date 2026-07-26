@@ -282,8 +282,7 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
             pass
 
         async def _foreign(sym: str, name: str, region: str):
-            loop = asyncio.get_running_loop()
-            import functools
+            from ..core.async_utils import run_sync
 
             # 第1优先：东方财富 EM（10s，批量接口，覆盖全球主要指数）
             if sym in _em_map:
@@ -299,10 +298,7 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
 
             # 第2优先：新浪 Sina（4s）
             try:
-                d = await asyncio.wait_for(
-                    loop.run_in_executor(None, functools.partial(sina_index, sym)),
-                    timeout=4,
-                )
+                d = await run_sync(sina_index, sym, timeout=4)
                 if d and d.get("price") is not None:
                     d["name"] = name
                     d["region"] = region
@@ -313,10 +309,7 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
 
             # 第2.5优先：新浪财经页面标题抓取（欧洲指数降级，4s）
             try:
-                d = await asyncio.wait_for(
-                    loop.run_in_executor(None, functools.partial(sina_page_index, sym)),
-                    timeout=4,
-                )
+                d = await run_sync(sina_page_index, sym, timeout=4)
                 if d and d.get("price") is not None:
                     d["name"] = name
                     d["region"] = region
@@ -327,10 +320,7 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
 
             # 第3优先：Finnhub（6s）
             try:
-                d = await asyncio.wait_for(
-                    loop.run_in_executor(None, functools.partial(finnhub_fetcher.fetch_realtime, sym)),
-                    timeout=6,
-                )
+                d = await run_sync(finnhub_fetcher.fetch_realtime, sym, timeout=6)
                 if d and d.get("price") is not None and d.get("price") != 0:
                     d["name"] = name
                     d["region"] = region

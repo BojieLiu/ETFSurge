@@ -79,20 +79,6 @@ async def lifespan(app: FastAPI):
 
     asyncio.create_task(_warmup_market_cache())
 
-    # 后台预加载 factor_registry（内含 pandas/numpy/yaml 重导入），带超时保护
-    async def _warmup_factor_registry():
-        try:
-            await asyncio.wait_for(
-                asyncio.to_thread(lambda: __import__("app.factors.factor_registry")),
-                timeout=60,
-            )
-            logger.info("因子注册表预热完成")
-        except asyncio.TimeoutError:
-            logger.warning("因子注册表预热超时（60s），不影响启动")
-        except Exception:
-            logger.warning("因子注册表预热失败（不影响启动）")
-    asyncio.create_task(_warmup_factor_registry())
-
     # 启动时预热全球指数缓存（非阻塞，写入持久化 cache，重启后不丢失）
     async def _warmup_global_indices():
         try:
@@ -107,9 +93,8 @@ async def lifespan(app: FastAPI):
     async def _warmup_etf_cache():
         try:
             from app.fetchers.etf_scanner import fetch_all_etfs_base
-            result = await asyncio.wait_for(
-                asyncio.to_thread(fetch_all_etfs_base), timeout=120,
-            )
+            from ..core.async_utils import run_sync
+            result = await run_sync(fetch_all_etfs_base, timeout=120)
             if result:
                 logger.info("ETF cache warmup done: %d items", len(result))
         except asyncio.TimeoutError:
@@ -144,6 +129,8 @@ async def lifespan(app: FastAPI):
 
     # Start sector cache refresh loop (60s, Phase 2)
     async def _sector_refresh_loop():
+        # 延迟 10s 首轮执行，让 ETF / 指数预热优先完成
+        await asyncio.sleep(10)
         while True:
             try:
                 await asyncio.wait_for(refresh_sector_cache(), timeout=20)

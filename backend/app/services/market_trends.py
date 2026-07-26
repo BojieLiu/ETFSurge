@@ -236,8 +236,8 @@ async def _fetch_single_trend(symbol: str) -> dict[str, float]:
         from ..fetchers.china_market import fetch_history
 
         # 拉取历史日线（通过 china_market 的 mootdx → Sina 降级链）
-        import asyncio
-        rows = await asyncio.to_thread(fetch_history, symbol, "A", "daily")
+        from ..core.async_utils import run_sync
+        rows = await run_sync(fetch_history, symbol, "A", "daily", timeout=30)
         if not rows:
             return {}
 

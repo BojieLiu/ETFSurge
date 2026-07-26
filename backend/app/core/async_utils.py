@@ -74,7 +74,7 @@ async def run_sync(call, *args, timeout: int = DEFAULT_SYNC_TIMEOUT):
                        _pending, getattr(call, '__name__', str(call)), timeout)
     loop = asyncio.get_event_loop()
     return await asyncio.wait_for(
-        asyncio.to_thread(call, *args), timeout=timeout,
+        loop.run_in_executor(_shared_executor, call, *args), timeout=timeout,
     )
 
 
