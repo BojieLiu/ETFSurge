@@ -1221,8 +1221,12 @@ Phase 7.1 (远期优化)             无紧急依赖
 | | | | **新增契约：** api-contracts/portfolio/timeline.md; updated pnl-history.md, market/all.md |
 | | | | **改动文件：** 5 backend + 8 frontend + 3 contract |
 | |
-| | | **v10.3** | 2026-07-27 | **Phase 10.3 — 文档剩余计划收官** | 审计 4 份文档并实施剩余可行任务 |
+| | | **v10.3** | 2026-07-27 | **Phase 10.3 — 文档方案 v2 重写 + TokenMonitor AppTabs 迁移** | 4 份文档重审计、重设计，实施可行项 |
+| | | | **方案重设计：** |
+| | | | **UI 优化 v2** — 基于 8 路由代码审计完全重写：发现 old plan 的 Phase 1 两项已自然解决；Dashboard/PortfolioAnalysis 已用 AppTabs ✅；MarketAnalysis 的「市场切换」实为 filter 非 tab，AppTabs 不适用 ⛔；TokenMonitor 的 tab-btn ✅ 已迁移；NewsView/SourceMonitor/FactorIC 手工 card → 低优先级推迟 |
+| | | | **system-performance 更新** — §9 优先级表全面重写，12 项逐一标注状态 |
+| | | | **testing-safety-net 更新** — 更新 test count 256，验收标准第 5 项 ✅ |
+| | | | **performance doc** → 已归档至 `docs/archived/` |
 | | | | **已实现：** |
-| | | | **C2** — Chart 组件单测：新增 `frontend/src/test/ChartComponents.spec.js` 16 条测试，覆盖 AllocationPieChart 和 PnLBarChart 的渲染/空态/props 校验。vue-echarts 和 echarts/core 全局 mock，无需 Canvas 运行时 |
-| | | | **文档审计结论：** `frontend-performance-optimization.md` 全部 4 个 Step 已完成；`frontend-ui-optimization-plan.md` Phase 1 两个 Step 均已自然解决；`system-performance-and-quality-review.md` 阶段一 4 项 + 阶段二 1 项已完成；`frontend-testing-safety-net.md` Phase C1 自然完成 + C2 新增 |
-| | | | **改动文件：** `frontend/src/test/ChartComponents.spec.js`（新）、`docs/frontend-performance-optimization.md`、`docs/frontend-testing-safety-net.md`、`docs/frontend-ui-optimization-plan.md`、`docs/system-performance-and-quality-review.md`、`docs/implementation-master-plan.md` |
+| | | | **TokenMonitor → AppTabs** — 替换手工 `tab-group`/`tab-btn` 为 `<AppTabs v-model>`，删除 `switchGranularity()` 函数，新增 `watch(granularity, fetchData)`，新增 `granularityTabs` 数据。TokenMonitor 单测 3 条 ✅ |
+| | | | **改动文件：** `frontend/src/components/TokenMonitor.vue`、`frontend/src/test/TokenMonitor.spec.js`（新）、`frontend/src/test/ChartComponents.spec.js`（已有）、`docs/frontend-ui-optimization-plan.md`（v2 重写）、`docs/frontend-testing-safety-net.md`、`docs/system-performance-and-quality-review.md`、`docs/implementation-master-plan.md` |

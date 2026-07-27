@@ -1,194 +1,126 @@
-# Frontend UI Optimization Plan
+# Frontend UI Optimization Plan (v2)
 
 > 核心目标：页面美观、协调、专业性强。
 > 实施策略：分阶段渐进，每步可独立验证，最终达到完整设计系统覆盖。
-> ⚠️ **历史记录**：此方案在 Phase 2.2 前曾尝试实施并被回滚。回滚原因：前端测试防护不足，修改波及范围不可控。
-> 🎯 **现状**：Phase 2.5 已补齐测试防护（UI 组件 43 条单测 + composable 35 条 + E2E 24 条），重新实施的条件已具备。
-> ⚠️ **2026-07-27 代码审计更新**：
-- Phase 1 Step 1（theme.css 变量补齐）已在 `frontend/src/styles/theme.css:121-124` 完成 ✅
-- Phase 1 Step 2（section-card 嵌套消除）经代码审计确认：`section-card` 在 5 个组件中仍作为 HTML 类名使用，但 CSS 中 `.section-card` 仅定义 `margin-bottom`（无 border/shadow），内层 `.card` 拥有独立视觉样式，**不存在文档所述的双层卡片边框问题**。嵌套消除已自然解决 ✅
-- 实施时可直接从 **Phase 2（核心组件统一）** 开始
-> **本文档保持原方案不变，作为 Phase 3.1 的实施蓝图**。实施时建议从 Phase 1（基础修复，零破坏）开始重新推进。
+> 版本：**v2 — 2026-07-27 代码审计后重写**。原方案 v1 写于 Phase 2.2 前，基于旧代码状态。
+> 本次 v2 基于 8 个路由页面的实际代码审计，重写实施路径。
 
 ---
 
-## 1. 现状摘要
+## 1. 当前代码审计结果
 
-### 设计令牌（已就绪）
-`theme.css` 定义了完善的设计系统：色彩（品牌色/语义色/中性色/图表色）、排版（字号/字重/行高/组合令牌）、间距（4px 基准）、圆角、阴影（6级）、动效（时长/缓动）、z-index 层级。
+### 设计系统基础设施（已就绪）
 
-### 基础组件库（已就绪）
-13 个 UI 组件：`AppButton`, `AppCard`, `AppInput`, `AppTabs`, `AppTable`, `AppModal`, `AppToast`, `AppBadge`, `AppAvatar`, `AppSelect`, `AppPagination`, `AppTooltip`, `Skeleton`。
+| 基础设施 | 状态 |
+|---------|:----:|
+| `theme.css` 设计令牌（品牌色/语义色/中性色/图表色、排版、间距、圆角、阴影、动效） | ✅ 已定义 |
+| CSS 变量后向兼容别名（`--color-primary` 等 5 个） | ✅ `theme.css:121-124` |
+| 13 个 UI 组件（AppButton/Card/Input/Tabs/Table/Modal/Toast/Badge/Avatar/Select/Pagination/Tooltip/Skeleton） | ✅ 已实现 |
+| 布局组件（AppLayout/PageContainer/PageHeader） | ✅ 已实现 |
+| SVG 图标组件（SvgIcon.vue） | ✅ 已存在 |
 
-### 布局组件（已就绪）
-`AppLayout` 提供 header + sidebar + main 三区域骨架，含 sticky header、响应式 sidebar、页面标题插槽。
-另有 `PageContainer`、`PageHeader` 等辅助布局组件。
+### 页面现状（8 个路由）
 
-### 页面现状（5 个路由）
+| 路由 | 组件 | Tab 使用情况 | Card 使用情况 |
+|------|------|:------------:|:-------------:|
+| `/` Dashboard | views/Dashboard.vue | **AppTabs** ✅ | AppCard 部分使用（PieChart/BarChart）；SummaryCards/CapitalInputBar 手工 card |
+| `/portfolio-analysis` | components/PortfolioAnalysis.vue | **AppTabs** ✅ | 各子组件自行管理 |
+| `/market-analysis` | views/MarketAnalysis.vue | **手工 market-tabs** ❌ | `section-card` wrapper + 手工 `card` 类名 |
+| `/news` | components/NewsView.vue | 无 tabs | 手工 `card` + `card-header` + `card-title` |
+| `/token-monitor` | components/TokenMonitor.vue | **手工 tab-btn** ❌ + 手工 `card` | 手工 `card` + `card-header` + `card-title` |
+| `/source-monitor` | components/SourceMonitor.vue | 无 tabs | 手工 `stat-card` ❌ |
+| `/factor-ic` | components/FactorICView.vue | 无 tabs | 手工 `stat-card` ❌ |
+| `/admin/config` | views/ConfigView.vue | 无 tabs | 手工 `config-card` ❌ |
 
-| 路由 | 构成 | 当前质量 |
-|------|------|---------|
-| `/` Dashboard | GlobalIndicesStrip + CapitalInputBar + SummaryCards + AllocationPieChart/Table ×2 + PnLDetailTable + PnLBarChart | 功能完整，7 个区块的卡片/标题/间距各自为政 |
-| `/portfolio-analysis` | AI 工具 / 持仓管理 / 技术分析 三 tab | 三套子页样式分离，Tab 为自绘 |
-| `/market-analysis` | 6 个区块（MarketReport / WatchlistPanel / AiAdvisor / SectorAnalysis / SymbolAnalysis / IndexAnalysis） | 全部使用 `section-card` 包裹，内层再套 `card`，双层边框视觉噪音 |
-| `/news` | 资讯流 + AI 影响分析面板 | 独立样式，整体尚可 |
-| `/token-monitor` | 统计卡 + 趋势图 + 功能调用表 + 失败记录表 | 统计卡可用，表格分 CSS-grid 和 data-table 两套 |
+### v1 方案中已自然解决的问题
 
----
+| v1 问题 | v1 描述 | 实际状态 |
+|---------|--------|:--------:|
+| `--color-primary` 等 4 变量未定义 | 25+ 处引用渲染为 undefined | ✅ `theme.css:121-124` 已追加别名（可能是向后兼容补丁） |
+| section-card 嵌套双层边框 | 6 个市场组件嵌套 `section-card > card` | ✅ `.section-card` 仅定义 `margin-bottom`，无边框/阴影，双层边框不存在 |
+| Dashboard Tab 为自绘 | Tab 五套独立 | ✅ `Dashboard.vue:20` 已使用 **AppTabs** |
+| PortfolioAnalysis Tab 为自绘 | 同上 | ✅ `PortfolioAnalysis.vue:16` 已使用 **AppTabs** |
+| plugins/echarts.js 残留 | 文件未删除 | ✅ `src/plugins/` 已为空目录 |
+| task.js localStorage 高频写 | 性能问题 | ✅ task store 已改为 API 驱动 |
 
-## 2. 需要解决的问题
+### 仍存在的真实问题
 
-### 🔴 高优先级
-
-| # | 问题 | 状态 | 影响 |
-|---|------|------|------|
-| 1 | `--color-primary` / `--color-border` / `--color-text-muted` / `--color-primary-dark` **被引用但未在 theme.css 中定义** | 25+ 处引用，渲染为 undefined | 颜色偏离预期，多个组件显示异常 |
-| 2 | **卡片视觉碎片化**：3 种模式混乱并存 | | |
-| | a) `AppCard` 组件（有，但未充分利用） | 仅少数场景使用 | |
-| | b) 手工 `card` + `card-header` + `card-title` 类名 | Dashboard 全部子组件 | |
-| | c) `section-card` + `section-header` + `section-title` | 6 个市场组件 | 嵌套双层卡片边框 |
-| 3 | **Tab 控件五套独立实现**，均未使用 `AppTabs` | Dashboard / PortfolioAnalysis / MarketAnalysis / TokenMonitor / DesignResult | 样式不统一，间距/下划线/高亮各有差异 |
-
-### 🟡 中优先级
-
-| # | 问题 | 影响 |
-|---|------|------|
-| 4 | Emoji 图标散落 40+ 处，各平台渲染不一致，缺乏专业感 | 全局美观度 |
-| 5 | 排版复合令牌（`--text-h1` ~ `--text-h4`, `--text-body` 等）未被充分利用，15-20 处仍在手写 `font-size + font-weight` | 代码冗余，不一致 |
-| 6 | 图表颜色在多个组件中硬编码，与 theme.css 的 `--chart-1` ~ `--chart-8` 不互通 | 改色板需改多处 |
-| 7 | 加载状态不统一：Skeleton vs spinner 混用 | 体验碎片化 |
-| 8 | 响应式断点不连贯：Dashboard 在窄屏下不切换单列，Market tabs 移动端溢出 | 移动端体验 |
-
-### 🟢 低优先级
-
-| # | 问题 | 影响 |
-|---|------|------|
-| 9 | WatchlistPanel 手工实现 Modal，未使用 `AppModal` | 代码复用不足 |
-| 10 | 部分页面 section header 与 AppLayout 的 page-header 功能重叠 | 冗余结构 |
-| 11 | 各页面 hover 效果不一致：SummaryCards 有 translateY + shadow，其他卡片没有 | 交互不统一 |
+| # | 问题 | 所在页面 | 严重度 |
+|---|------|---------|:------:|
+| 1 | **MarketAnalysis 使用手工市场切换 tabs**（`market-tabs` class），未用 `AppTabs` | market-analysis | 🟡 中 |
+| 2 | **TokenMonitor 使用手工粒度切换 tabs**（`tab-group` / `tab-btn` class），未用 `AppTabs` | token-monitor | 🟡 中 |
+| 3 | **NewsView 手工 card 类名**（`card` + `card-header` + `card-title`），未用 `AppCard` | news | 🟢 低 |
+| 4 | **TokenMonitor 手工 card 类名**，未用 `AppCard` | token-monitor | 🟢 低 |
+| 5 | **Emoji 图标散落多处**（基于 v1 统计约 40+ 处），各平台渲染不一致，而 `SvgIcon.vue` + `icons.js`（20 个 SVG 图标）已存在但未充分使用 | 全部 | 🟡 中 |
+| 6 | **图表颜色硬编码**（8 处 hex 值），与 theme.css `--chart-1` ~ `--chart-8` 不互通 | Dashboard 子组件 | 🟢 低 |
+| 7 | **加载状态不统一**：Skeleton / spinner / loading text 混用 | 全部 | 🟢 低 |
+| 8 | **响应式断点碎片化**：部分使用 480px，全局使用 640/768/1024 | 部分页面 | 🟢 低 |
+| 9 | **部分页面的 card hover 效果不一致**（SummaryCards 有 translateY，其他无） | 全部 | 🟢 低 |
 
 ---
 
-## 3. 完整优化方案（最终目标）
+## 2. 优化方案（分阶段）
 
-### 3.1 变量补齐 — 一步到位
+### Phase 1 — 低风险模式统一（✅ 已完成）
 
-**改动**：`theme.css` 追加向后兼容别名变量。
+| Step | 内容 | 状态 | 说明 |
+|------|------|:----:|------|
+| Step 1 | theme.css 变量补齐 | ✅ 已完成 | `theme.css:121-124` 已追加 `--color-primary` 等 5 个别名 |
+| Step 2 | section-card 嵌套消除 | ✅ 已自然解决 | `.section-card` 已无边框/阴影，嵌套视觉噪音不存在 |
 
-```css
-/* === 向后兼容别名 === */
---color-primary: var(--color-brand-600);
---color-primary-dark: var(--color-brand-700);
---color-primary-light: var(--color-brand-400);
---color-border: var(--color-border-light);
---color-text-muted: var(--color-text-tertiary);
-```
+### Phase 2 — 核心组件统一替换（1 步已完成）
 
-**为什么这样解决**：不改任何组件代码，25+ 处引用立即正确。现有代码的自由变量引用全部被兜底。
+| Step | 内容 | 风险 | 状态 |
+|------|------|:----:|:----:|
+| **Step 3** | TokenMonitor 粒度选择器 → AppTabs | 🟢 低 | ✅ **已完成**（Phase 10.3） |
+| **Step 4** | MarketAnalysis 市场切换 → AppTabs | ⛔ **不适用** | MarketAnalysis 的「市场选择」是 filter/selector（所有区块同时响应），非内容切换 tab。AppTabs 是为「只显示一个 tab 内容」设计的，不适合此场景。**不做迁移。** |
+| **Step 5** | NewsView 手工 card → AppCard | 🟡 中 | ⛔ **建议推迟**。NewsView 的手工 `card` 结构与列表渲染紧密耦合（`section.card.news-card > ul.news-list > li`），替换为 AppCard 需重构 HTML 结构，且现有 12 条单测需全部通过。收益有限（视觉差异小）。**待 UI 重新设计时再做。** |
 
-### 3.2 卡片模式统一
+**验证方式**：
+- Step 3: TokenMonitor 粒度切换功能正常
+- npm test 全绿
+- E2E smoke test 通过
 
-**最终目标**：所有卡片区块使用 `<AppCard>` 组件。
+### Phase 3 — 跨页面统一（3 步，中度风险）
 
-- `AppCard` 预制了 `header` / `content` / `footer` 三区域结构
-- 支持 4 种 variant（default / elevated / outlined / filled）
-- 内置 hover / click / disabled 状态
+| Step | 内容 | 风险 | 预估工时 |
+|------|------|:----:|:--------:|
+| **Step 6** | **图表颜色抽象**：创建 `src/utils/chartColors.js`，替换 Dashboard/TokenMonitor/NewsView 中的硬编码色值 | 🟡 中 | 1h |
+| **Step 7** | **统一加载状态**：各页面使用 Skeleton 组件替代零散 spinner 和 loading text | 🟢 低 | 1h |
+| **Step 8** | **统一响应式断点**：全局使用 640/768/1024 三级断点，替换 480px | 🟢 低 | 1h |
 
-**实施路径**：从 Dashboard 开始逐个组件迁移，每个完成后视觉验证。
+**验证方式**：截图对比 + 移动端走查
 
-### 3.3 Tab 控件统一
+### Phase 4 — 可选优化（需评估）
 
-**最终目标**：所有页面使用 `<AppTabs>` 组件。
+> 以下条目收益不明确或成本较高，**建议先评估再决定是否进入实施**。
 
-- `AppTabs` 支持 line / enclosed / soft 三种 variant
-- 支持图标、badge、懒加载、键盘导航、滚动
-- 有动画指示器
-
-**实施路径**：从简单页面（Dashboard → TokenMonitor）到复杂页面（PortfolioAnalysis → MarketAnalysis）。
-
-### 3.4 SVG 图标系统引入
-
-**最终目标**：所有 emoji 图标替换为 SVG 图标。
-
-- 推荐 [Lucide](https://lucide.dev)（轻量、树摇支持、Vue 官方组件库风格）
-- 或使用 SVG sprite，保持与品牌色一致的颜色控制
-- 每个图标可设置 `currentColor`，自动跟随文本色
-
-### 3.5 排版令牌迁移
-
-**最终目标**：不再手写 `font-size + font-weight`，全部使用组合令牌。
-
-```css
-/* ❌ 当前 */
-font-size: var(--font-size-xl);
-font-weight: var(--font-weight-semibold);
-
-/* ✅ 目标 */
-font: var(--text-h3);
-```
-
-### 3.6 图表颜色抽象
-
-**最终目标**：所有 ECharts 颜色引用统一来源。
-
-新建 `frontend/src/utils/chartColors.js`：
-
-```js
-export const chartColors = [
-  '#3b82f6', '#22c55e', '#f59e0b', '#ef4444',
-  '#8b5cf6', '#06b6d4', '#f97316', '#ec4899'
-]
-```
-
-各组件 import 使用，未来换色板只改一处。
-
-### 3.7 其余统一
-
-- 加载状态全部使用 `Skeleton` 组件
-- Modal 全部使用 `AppModal`
-- 统一响应式断点策略：目前 global.css 使用 640px / 768px / 1024px，但部分组件（SummaryCards、CapitalInputBar）使用 480px。应在全系统内统一使用 640 / 768 / 1024 三级断点
-- 统一卡片 hover 效果（`translateY(-2px) + shadow-md`）
+| Step | 内容 | 收益评估 |
+|------|------|:--------:|
+| **Step 9** | Emoji 替换为 SvgIcon（利用已存在的 `SvgIcon.vue` 组件） | ⚠️ 收益中等，工作量 40+ 处替换 |
+| **Step 10** | 统一 card hover 效果（translateY + shadow） | 🟢 低工作量，纯 CSS |
+| **Step 11** | AppCard 替换 TokenMonitor/SourceMonitor/FactorIC 手工 card | 🟢 低工作量、低风险 |
 
 ---
 
-## 4. 分阶段实施路线图
+## 3. 验证方法
 
 ```
-Phase 1 — 基础修复（安全，零破坏）
-├── Step 1: theme.css 变量补齐 ── 5 行 CSS
-├── Step 2: section-card 嵌套消除 ── 3 行 CSS（不改 HTML）
-└── 验证：
-    ├─ 浏览器打开所有 5 个路由，检查原先灰色文字/边框是否恢复品牌色
-    ├─ Console 无 "Undefined CSS variable" 类警告
-    ├─ MarketAnalysis 页面各区块不再显示双层卡片边框
-    └─ npm test 全绿
+Phase 2 验证：
+├─ Step 3: TokenMonitor 粒度切换功能正常
+├─ Step 4: MarketAnalysis 市场 Tab 切换 + 快速栏功能正常
+├─ Step 5: NewsView 渲染/筛选/WS 推送正常
+├─ npm test 全绿（含 ChartComponents.spec.js）
+└─ npm run build 无编译错误
 
-Phase 2 — 核心组件统一
-├── Step 3: Dashboard 手工 card → AppCard（7 个区块：CapitalInputBar、SummaryCards、AllocationPieChart×2、AllocationTable×2、PnLDetailTable、PnLBarChart）
-├── Step 4: Dashboard 手工 tab → AppTabs
-├── Step 5: PortfolioAnalysis 手工 tab → AppTabs
-├── Step 6: TokenMonitor 手工 tab → AppTabs
-├── Step 7: MarketAnalysis 手工 tab → AppTabs
-└── Step 8: DesignResult 手工 tab → AppTabs
-    每步独立验证：
-    ├─ npm test 全绿
-    ├─ 该页面 Tab 点击切换内容正确
-    ├─ 该页面 Card 区块 padding / 边框 / 标题层级与 AppCard 默认样式一致
-    └─ 浏览器 Console 无 Vue 警告或未定义 CSS 变量警告
+Phase 3 验证：
+├─ Step 6: 图表颜色保持视觉一致，无颜色异常
+├─ Step 7: Skeleton 替换后 loading 态视觉正确
+├─ Step 8: 640/768/1024 断点下布局正确
+└─ 全页面截图对比
 
-Phase 3 — 视觉深化
-├── Step 9: 引入 SVG 图标系统，替换 emoji
-├── Step 10: 排版令牌迁移（可批量或渐进）
-├── Step 11: Chart 颜色抽象
-├── Step 12: 统一加载状态（Skeleton）
-├── Step 13: WatchlistPanel Modal → AppModal
-└── 验证：全页面截图对比
-
-Phase 4 — 精细化打磨
-├── Step 14: 响应式补齐（全局统一 640/768/1024 断点，替换零散的 480px 断点）
-├── Step 15: 统一 hover/transition 效果
-├── Step 16: 统一空状态样式
-└── 验证：移动端/桌面端全流程走查
+Phase 4 验证：
+├─ emoji 替换后页面专业感提升
+├─ hover 效果统一
+└─ card 结构统一
 ```
-
-每 Phase 完成后可单独合并/发布。

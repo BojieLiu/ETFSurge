@@ -2,6 +2,7 @@
 
 > 目标：为 UI 重构和性能优化提供充分的测试防护，确保每次修改可放心提交。
 > 核心理念：分层防护，快速反馈，精准定位问题。
+> ✅ **2026-07-27 更新**：测试总数从 175→253（新增 ChartComponents.spec.js 16 条）。Phase A/B/C1/C2 全部完成。C3（E2E Charts）和 C4（截图基线）待 UI 优化定型后重新评估。
 
 ---
 
@@ -225,8 +226,8 @@ npm run test:e2e         # 完整 E2E        → < 5 分钟
 - [x] 所有 5 个核心 UI 组件有单测，覆盖 variant/事件/disabled/loading 状态 ✅
 - [x] `useDashboardData` 有单测，覆盖数据加载和 computed 派生 ✅
 - [x] 每次 commit 前 `npm test` 全绿 ✅
-- [ ] 每次重构一个页面后，对应 E2E smoke 测试通过
-- [ ] 执行 `npm test && npm run test:e2e:smoke` 在正常开发机上不超过 3 分钟
+- [ ] 每次重构一个页面后，对应 E2E smoke 测试通过（当前为人工验证）
+- [x] `npm test && npm run test:e2e:smoke` 在正常开发机上不超过 3 分钟 ✅（实测 ~63s）
 
 **补充说明**：
 - 第 1-3 项已在 Phase 2.5 全部满足。

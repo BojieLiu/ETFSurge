@@ -40,26 +40,7 @@
             <span class="card-title-icon" aria-hidden="true">📈</span>
             Token 消耗趋势
           </h2>
-          <div class="tab-group" role="tablist" aria-label="时间粒度切换">
-            <button
-              :class="['tab-btn', { 'tab-btn--active': granularity === 'day' }]"
-              role="tab"
-              :aria-selected="granularity === 'day'"
-              @click="switchGranularity('day')"
-            >按日</button>
-            <button
-              :class="['tab-btn', { 'tab-btn--active': granularity === 'month' }]"
-              role="tab"
-              :aria-selected="granularity === 'month'"
-              @click="switchGranularity('month')"
-            >按月</button>
-            <button
-              :class="['tab-btn', { 'tab-btn--active': granularity === 'hour' }]"
-              role="tab"
-              :aria-selected="granularity === 'hour'"
-              @click="switchGranularity('hour')"
-            >按小时</button>
-          </div>
+          <AppTabs :tabs="granularityTabs" v-model="granularity" variant="soft" size="sm" class="granularity-tabs" />
         </div>
         <div class="card-body">
           <v-chart
@@ -159,12 +140,13 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { LineChart, BarChart } from 'echarts/charts'
 import { TitleComponent, TooltipComponent, GridComponent, LegendComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
+import AppTabs from './ui/AppTabs.vue'
 import { adminApi } from '../api'
 import { useToastStore } from '../stores/toast'
 import logger from '../utils/logger'
@@ -183,6 +165,11 @@ const loading = ref(true)
 const summary = ref({ total: {}, hourly: {}, daily: {}, by_function: {} })
 const timeseries = ref([])
 const granularity = ref('day')
+const granularityTabs = [
+  { value: 'day', label: '按日' },
+  { value: 'month', label: '按月' },
+  { value: 'hour', label: '按小时' },
+]
 const failures = ref([])
 
 async function fetchData() {
@@ -211,10 +198,7 @@ function formatTime(iso) {
   return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 
-async function switchGranularity(gr) {
-  granularity.value = gr
-  await fetchData()
-}
+watch(granularity, () => { fetchData() })
 
 const functionList = computed(() => {
   const fn = summary.value.by_function || {}
