@@ -552,6 +552,64 @@ def check_sector_data():
             check(f"GET /sectors/{typ}", False, str(e))
 
 
+def check_data_quality():
+    """ETF 基础数据质量校验（P1 fix-plan-master: verify_e2e 应校验数据质量）。"""
+    section("数据质量")
+    try:
+        r = requests.get(f"{BASE}/api/v1/market/etfs?limit=50", timeout=15)
+        if r.status_code == 200:
+            data = r.json()
+            etfs = data if isinstance(data, list) else data.get("data", [])
+            if not etfs:
+                check("ETF 数据列表非空", False, "返回 0 条记录")
+                return
+
+            key_count = len(etfs)
+            check(f"ETF 记录数 >= 10", key_count >= 10, f"实际 {key_count}")
+
+            # 检查 amount（成交额）和 fund_scale（基金规模）字段
+            with_amount = sum(1 for e in etfs if float(e.get("amount", 0) or 0) > 1e6)
+            with_scale = sum(1 for e in etfs if float(e.get("fund_scale", 0) or 0) > 0.5)
+            with_price = sum(1 for e in etfs if float(e.get("price", 0) or 0) > 0)
+
+            check(f"有成交额的 ETF >= {max(1, key_count // 5)}",
+                  with_amount >= max(1, key_count // 5),
+                  f"{with_amount}/{key_count}")
+            check(f"有基金规模的 ETF >= {max(1, key_count // 3)}",
+                  with_scale >= max(1, key_count // 3),
+                  f"{with_scale}/{key_count}")
+            check(f"有价格的 ETF >= {max(1, key_count // 5)}",
+                  with_price >= max(1, key_count // 5),
+                  f"{with_price}/{key_count}")
+
+            # 检查数据字段完整性：核心字段不应为空
+            has_symbol = sum(1 for e in etfs if e.get("symbol", ""))
+            has_name = sum(1 for e in etfs if e.get("name", ""))
+            check(f"ETF 含代码 {has_symbol}/{key_count}", has_symbol == key_count)
+            check(f"ETF 含名称 {has_name}/{key_count}", has_name == key_count)
+            # 检查是否有分层数据（pool API）
+            try:
+                r2 = requests.get(f"{BASE}/api/v1/portfolio/candidates", timeout=10)
+                if r2.status_code == 200:
+                    pool = r2.json()
+                    layers = ["core", "satellite", "defense"]
+                    layer_counts = {l: len(pool.get(l, [])) for l in layers}
+                    total_pool = sum(layer_counts.values())
+                    check(f"候选池总数量 >= 20", total_pool >= 20,
+                          f"core={layer_counts.get('core',0)} sat={layer_counts.get('satellite',0)} def={layer_counts.get('defense',0)}")
+                    for l in layers:
+                        check(f"候选池 {l} 层 > 0", layer_counts.get(l, 0) > 0,
+                              f"{l}={layer_counts.get(l,0)}")
+                else:
+                    check("GET /portfolio/candidates", False, f"HTTP {r2.status_code}")
+            except Exception as e2:
+                check("候选池检查", False, str(e2))
+        else:
+            check("GET /market/etfs", False, f"HTTP {r.status_code}")
+    except Exception as e:
+        check("数据质量检查", False, str(e))
+
+
 def section_async_resilience():
     """异步任务提交后验证后端持续存活——测试护城河缺失的关键一环。"""
     section("异步任务弹性（后端存活）")
@@ -826,6 +884,7 @@ MODULES = {
     "resilience": section_async_resilience,
     "factors": section_factors,
     "sectors": check_sector_data,
+    "quality": check_data_quality,
 }
 
 SMOKE_MODULES = ["health", "market"]

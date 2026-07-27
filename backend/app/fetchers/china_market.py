@@ -765,7 +765,7 @@ def fetch_index_history(symbol: str, period: str = "daily") -> list[dict[str, An
         return []
 
 
-_ETF_PREFIXES = ("51", "15", "16", "56", "58", "59")
+_ETF_PREFIXES = ("51", "52", "15", "16", "56", "58", "59")
 
 
 def _is_etf_code(symbol: str) -> bool:

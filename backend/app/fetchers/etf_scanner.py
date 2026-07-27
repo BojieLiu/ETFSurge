@@ -24,9 +24,10 @@ _last_good_etfs: list[dict] | None = None
 
 # ── 核心层关键词 ─────────────────────────────────────────────
 CORE_KEYWORDS = [
-    "沪深300", "中证A500",
+    "沪深300", "中证A500", "中证500",
     "上证50", "上证180", "中证800",
     "深证100", "深证50",
+    "科创50", "创业板",
     "MSCI", "A50", "A100",
 ]
 
@@ -36,7 +37,6 @@ DEFENSE_KEYWORDS = [
     "黄金", "白银", "原油", "商品",
     "国债", "国开", "进出口", "地方债", "城投债", "可转债", "信用债",
     "标普500", "纳斯达克", "纳指", "道琼斯",
-    "恒生", "H股", "中概", "恒生科技",
     "日经", "德国", "法国", "欧洲",
     "全球", "美元", "短融", "货币", "同业存单",
 ]
@@ -140,14 +140,16 @@ def _fetch_em_etf_list() -> list[dict] | None:
     """直连东方财富 push2 API 获取全量 ETF 列表（免 akshare，纯 HTTP+JSON）。
 
     字段映射：f12=代码  f14=名称  f2=最新价  f3=涨跌幅
-             f62=换手率  f184=总市值(基金规模)  f66=市盈率  f45=成交量
+             f62=换手率  f72=成交额  f184=基金规模  f66=市盈率  f45=成交量
 
     使用 m:1+t:2 覆盖沪深两市全部 ETF（~1843 只），免 akshare 封装。
+
+    2026-07-27 修复: 新增 f72=成交额, 修正 f62→换手率, f45→成交量
     """
     from ..utils.proxy import no_proxy
     import requests as _req
     headers = {"User-Agent": "Mozilla/5.0"}
-    fields = "f12,f14,f2,f3,f62,f184,f66,f45,f168,f20,f21,f115,f116"
+    fields = "f12,f14,f2,f3,f62,f72,f184,f66,f45,f168,f20,f21,f115,f116"
     all_items = []
     total = None
     for page in range(1, 20):
@@ -173,11 +175,12 @@ def _fetch_em_etf_list() -> list[dict] | None:
     return [{
         "symbol": item["f12"],
         "name": item.get("f14", ""),
-        "amount": item.get("f62", 0) or 0,
+        "amount": item.get("f72", 0) or 0,
         "fund_scale": item.get("f184", 0) or 0,
         "price": item.get("f2", 0) or 0,
         "change_pct": item.get("f3", 0) or 0,
-        "turnover": item.get("f45", 0) or 0,
+        "turnover": item.get("f62", 0) or 0,      # 换手率
+        "volume": item.get("f45", 0) or 0,        # 成交量
         "pe": item.get("f66", 0) or 0,
         "pb": item.get("f115", 0) or 0,
         "tracked_index": item.get("f168", ""),
@@ -429,12 +432,17 @@ def classify_etf(name: str, tracked_index: str = "") -> str:
 
 def layer_ranking(
     items: list[dict[str, Any]],
-    top_n: int = 15,
+    top_n: int = 25,
     required: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """层内排序取 TOP N。
 
-    评分: 50% 流动性(成交额) + 50% 规模(基金规模)
+    评分: 优先使用基金规模排序。当成交额数据可用（有正数）时，
+          使用 30% 成交额 + 70% 规模加权；当成交额不可用时，
+          仅用规模排序（非交易时段/数据缺失场景）。
+
+    修复 P2: 改用 scale 做主排序依据，top_n 从 15 提升到 25
+            (fix-plan-pool.md 修复 P2)
     required: 强制保留的代码列表（即使不在 TOP N）
     """
     if not items:
@@ -450,13 +458,24 @@ def layer_ranking(
         rank_map = {v: (n - 1 - i) / max(n - 1, 1) if n > 1 else 1.0 for i, v in enumerate(sorted_vals)}
         return [rank_map.get(v, 0) for v in vals]
 
-    amount_pct = _percentile("amount")
-    scale_pct = _percentile("fund_scale")
+    # 检查 amount 是否可用（有正数）
+    amount_vals = [item.get("amount", 0) or 0 for item in items]
+    max_amount = max(amount_vals)
 
-    scored = []
-    for i, item in enumerate(items):
-        score = 0.50 * amount_pct[i] + 0.50 * scale_pct[i]
-        scored.append((score, item))
+    if max_amount > 100000:  # 有实际成交数据
+        amount_pct = _percentile("amount")
+        scale_pct = _percentile("fund_scale")
+        scored = []
+        for i, item in enumerate(items):
+            score = 0.30 * amount_pct[i] + 0.70 * scale_pct[i]
+            scored.append((score, item))
+    else:
+        # 仅用规模排序（成交额不可用时的兜底）
+        scale_pct = _percentile("fund_scale")
+        scored = []
+        for i, item in enumerate(items):
+            score = 1.00 * scale_pct[i]
+            scored.append((score, item))
 
     scored.sort(key=lambda x: -x[0])
 
@@ -595,9 +614,9 @@ def full_pipeline(raw_etfs: list[dict] | None = None) -> dict[str, list[dict]]:
         layers.setdefault(layer, []).append(etf)
 
     # 每层排序取 TOP 15
-    core = layer_ranking(layers.get("core", []), top_n=15, required=CORE_REQUIRED)
-    satellite = layer_ranking(layers.get("satellite", []), top_n=15)
-    defense = layer_ranking(layers.get("defense", []), top_n=15, required=DEFENSE_REQUIRED)
+    core = layer_ranking(layers.get("core", []), top_n=25, required=CORE_REQUIRED)
+    satellite = layer_ranking(layers.get("satellite", []), top_n=25)
+    defense = layer_ranking(layers.get("defense", []), top_n=25, required=DEFENSE_REQUIRED)
 
     # 标记 layer
     for e in core:

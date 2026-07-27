@@ -61,10 +61,10 @@ class TestEtfScanner:
         assert classify_etf("上证50ETF", "") == "core"
         assert classify_etf("上证180ETF", "") == "core"
         assert classify_etf("中证800ETF", "") == "core"
-        # v3.0: 创业板/科创50/中证500 归入卫星层
-        assert classify_etf("科创50ETF", "") == "satellite"
-        assert classify_etf("创业板ETF", "") == "satellite"
-        assert classify_etf("中证500ETF", "") == "satellite"
+        # v9.9 fix-plan-pool: 创业板/科创50/中证500 归入核心层
+        assert classify_etf("科创50ETF", "") == "core"
+        assert classify_etf("创业板ETF", "") == "core"
+        assert classify_etf("中证500ETF", "") == "core"
         assert classify_etf("MSCI A50ETF", "") == "core"
 
     def test_classify_etf_defense(self):
@@ -124,16 +124,16 @@ class TestEtfScanner:
             "深证100ETF": "core",
             # 防御
             "黄金ETF": "defense", "国债ETF": "defense", "纳指ETF": "defense",
-            "标普500ETF": "defense", "恒生ETF": "defense", "货币ETF": "defense",
+            "标普500ETF": "defense", "恒生ETF": "satellite", "货币ETF": "defense",
             "日经ETF": "defense", "短融ETF": "defense",
             # 卫星（排除法）
             "半导体ETF": "satellite", "新能源ETF": "satellite", "医药ETF": "satellite",
             "军工ETF": "satellite", "证券ETF": "satellite", "银行ETF": "satellite",
             "消费ETF": "satellite", "AIETF": "satellite", "有色ETF": "satellite",
             "央企ETF": "satellite", "传媒ETF": "satellite", "游戏ETF": "satellite",
-            # v3.0: 中证500/创业板/科创50/中证1000 归入卫星层
-            "中证500ETF": "satellite", "创业板ETF": "satellite",
-            "科创50ETF": "satellite", "中证1000ETF": "satellite",
+            # v9.9 fix-plan-pool: 中证500/创业板/科创50 归入核心层
+            "中证500ETF": "core", "创业板ETF": "core",
+            "科创50ETF": "core", "中证1000ETF": "satellite",
             "碳中和ETF": "satellite", "数字经济ETF": "satellite",
         }
         for name, expected in test_cases.items():

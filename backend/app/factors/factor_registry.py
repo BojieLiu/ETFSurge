@@ -1048,8 +1048,9 @@ class FactorRegistry:
                     for code, value in result[sym].items():
                         if abs(value) > 0.001:
                             ic_tracker.record(sym, code, value)
-        except Exception:
-            pass
+        except Exception as e:
+            # P0 fix-plan-master: bare except was silently swallowing errors
+            logger.warning("[factor] IC tracking record failed (non-fatal): %s", e)
 
         # Compute periodic IC for current batch
         try:

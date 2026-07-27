@@ -1,6 +1,6 @@
 ﻿# ETF Surge 方案实施总计划
 
-> 生成日期: 2026-07-27 | 版本: **v9.8**
+> 生成日期: 2026-07-27 | 版本: **v10.0**
 > ✅ **Phase 6.1 已完成**
 > ✅ **Phase 6.2 已完成**：组合管线与报告质量修复 — Fix A (task_manager.py 校验降级)、问题 2 规则驱动风险检测 (portfolio_service.py _compute_risk_warnings)、test_decode.py (9/9 PASS)、TestP4 恢复、报告渲染排版优化 (DesignResult.vue CSS)。详见 `docs/design-report-quality-fix-plan.md`。：可观测性与系统增强 — ConfigManager + app_config 表（`models/app_config.py`, `core/config_manager.py`）、ConfigPage（`views/ConfigView.vue`）、Sector API 实时行情返回（market.py 路由优先级调整）、LLM 热点板块注入（llm_context.py + pool_manager.py）、stars 时间新鲜度 + Level 2 精度调整（news_fetcher.py + levistock_fetcher.py）、verify_e2e.py 扩展（stars/level 校验 + check_sector_data）。详见 §4 Phase 6.1。
 > ✅ **Phase 7 已完成**：系统质量诊断修复 (system-quality-diagnosis)
@@ -1182,3 +1182,17 @@ Phase 7.1 (远期优化)             无紧急依赖
 | | | | **E1+H** — 前端构建优化：`vite.config.js` 集成 `rollup-plugin-visualizer`（ANALYZE 模式生成 `dist/stats.html`），设置 `chunkSizeWarningLimit: 500` 和 `assetsInlineLimit: 4096` |
 | | | | **新增测试：** `test_route_contract.py` (14 用例) — 覆盖 `_parse_contract_method` 6 种模式、`load_expected_routes` 目录扫描、`compare_routes` 6 种场景 |
 | | | | **改动文件：** `backend/app/main.py`、`backend/app/services/market_service.py`、`backend/scripts/verify_e2e.py`、`backend/scripts/check_routes.py`（新）、`backend/tests/test_route_contract.py`（新）、`frontend/vite.config.js` |
+| |
+| | **v10.0** | 2026-07-27 | **Phase 10 — 候选池与数据链路修复 (pool-fix-plan)** | 详见 `docs/fix-plan-master.md` + `docs/fix-plan-pool.md` |
+| | | | **已实现：** |
+| | | | **F1** — `_ETF_PREFIXES` 加入 `"52"` (`china_market.py`)，支持 520xxx 港股通 ETF 路由 |
+| | | | **F2** — `_fetch_em_etf_list` 修复字段映射：新增 `f72=成交额` 替换 `f62=换手率→amount`，`f62→turnover`，`f45→volume`，修复沪市 ETF amount=0 根因 |
+| | | | **F3** — `CORE_KEYWORDS` 新增 科创50/创业板/中证500；`DEFENSE_KEYWORDS` 移除 恒生/H股/中概（港股非防御资产） |
+| | | | **F4** — `layer_ranking` 改用 scale 做主排序：amount 可用时 30/70 加权，不可用时仅用 scale；`top_n` 从 15 提升至 25 |
+| | | | **F5** — `pool_manager.py` 新增 `_balance_by_industry()` 行业均衡化：每 segment 取 top 1 后再按得分补齐 |
+| | | | **F6** — `pool_manager.py` 新增 `_is_market_hours()` 非交易时段检测；`_compute_composite` 非交易时段 liquidity 权重减半 |
+| | | | **F7** — `factor_registry.py` 修复 bare `except Exception: pass` → 带日志的 `except Exception as e: logger.warning(...)` |
+| | | | **F8** — `verify_e2e.py` 新增 `check_data_quality()` 数据质量校验模块（字段完整性 + 候选池覆盖） |
+| | | | **F9** — 测试更新：`test_design_new_modules.py` 12 测试同步关键词变更（分类预期 + 注释） |
+| | | | **F10** — `docs/implementation-master-plan.md` 更新至 v10.0 |
+| | | | **改动文件：** `backend/app/fetchers/etf_scanner.py`、`backend/app/fetchers/china_market.py`、`backend/app/services/pool_manager.py`、`backend/app/factors/factor_registry.py`、`backend/scripts/verify_e2e.py`、`backend/tests/test_design_new_modules.py` |

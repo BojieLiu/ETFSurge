@@ -411,13 +411,14 @@ class PoolManager:
         # 5. 强制保底
         self._ensure_mandatory(new_pool, flat)
 
-        # 6. 层内复合评分 + 截断
+        # 6. 层内复合评分 + 行业均衡化 + 截断
         for layer in ALL_LAYERS:
             for item in new_pool[layer]:
                 item["composite_score"] = self._compute_composite(item, layer, regime=self.current_regime)
             max_n = MAX_PER_LAYER.get(layer, 10)
-            scored = sorted(new_pool[layer], key=lambda x: x.get("composite_score", 0), reverse=True)
-            new_pool[layer] = scored[:max_n]
+            # P4 fix-plan-pool: 行业均衡化后再截断
+            balanced = self._balance_by_industry(new_pool[layer], max_n=max_n)
+            new_pool[layer] = balanced[:max_n]
 
         # 7. 空池保护：如果刷新结果为空且存在上次成功数据，保留上次 pool 而非清空
         total_new = sum(len(v) for v in new_pool.values())
@@ -534,6 +535,19 @@ class PoolManager:
                     logger.info("PoolManager: enforced mandatory %s -> %s", code, target)
 
     @staticmethod
+    def _is_market_hours() -> bool:
+        """检查当前是否为A股交易时段。
+
+        非交易时段：成交额数据可能为昨日值，应降低流动性权重。
+        """
+        from datetime import datetime as _dt
+        now = _dt.now()
+        if now.weekday() >= 5:  # 周末
+            return False
+        t = now.strftime("%H:%M")
+        return "09:30" <= t <= "11:30" or "13:00" <= t <= "15:00"
+
+    @staticmethod
     def _normalize_regime(regime: str) -> str:
         """C2: 将市场状态值映射到 _LAYER_WEIGHTS 表的 key。
 
@@ -553,7 +567,11 @@ class PoolManager:
         return mapping.get(regime, "neutral")
 
     def _compute_composite(self, item: dict[str, Any], layer: str, regime: str = "neutral") -> float:
-        """按层+市况计算综合得分。"""
+        """按层+市况计算综合得分。
+
+        非交易时段（P6 fix-plan-pool）: 流动性数据可能为昨日值，
+        降低流动性权重，以规模排序为主。
+        """
         factor_scores = item.get("factor_scores", {})
         # P0-4: 仅聚合顶层键求和（避免原始点分键双倍计数 + RSI=50 主导排序）
         AGGREGATE_KEYS = {"technical", "momentum", "valuation", "sentiment"}
@@ -566,16 +584,70 @@ class PoolManager:
         regime_key = self._normalize_regime(regime)
         w = layer_weights.get(regime_key, layer_weights.get("neutral", _BASE_WEIGHTS))
 
+        # P6: 非交易时段，流动性权重减半（数据可能为昨日值）
+        is_market_open = self._is_market_hours()
+        liquidity_weight = w.get("liquidity", 0)
+        if not is_market_open:
+            liquidity_weight *= 0.5
+            scale_weight = w.get("scale", 0) + w.get("liquidity", 0) * 0.5
+        else:
+            scale_weight = w.get("scale", 0)
+
         if layer in ("core", "satellite", "defense", "opportunistic"):
             score = w["factor"] * factor_sum
-            score += w.get("liquidity", 0) * amount * 1e-9
-            score += w.get("scale", 0) * scale * 1e-9
+            score += liquidity_weight * amount * 1e-9
+            score += scale_weight * scale * 1e-9
             if layer != "core":
                 score += w.get("opp", 0) * opp_score
         else:
             score = amount * 1e-9  # research: liquidity only
 
         return score
+
+    @staticmethod
+    def _balance_by_industry(
+        items: list[dict[str, Any]],
+        max_n: int = 10,
+    ) -> list[dict[str, Any]]:
+        """P4 fix-plan-pool: 按行业/segment 均衡化候选池。
+
+        确保同一层内覆盖多个行业，避免某行业一家独大。
+        策略：
+          1. 按 segment 分组
+          2. 每个 segment 取 composite_score 最高的 1 只
+          3. 若还有余量，从剩余高分中补齐
+        """
+        if not items:
+            return []
+        if len(items) <= max_n:
+            return items
+
+        from collections import defaultdict
+        # 按 segment 分组
+        groups: dict[str, list[dict]] = defaultdict(list)
+        for item in items:
+            seg = item.get("segment", "") or item.get("industry", "unknown")
+            groups[seg].append(item)
+
+        # 每个 segment 排序，取 top 1
+        selected: list[dict] = []
+        selected_codes: set[str] = set()
+        for seg, group in groups.items():
+            group_sorted = sorted(group, key=lambda x: x.get("composite_score", 0), reverse=True)
+            top = group_sorted[0]
+            selected.append(top)
+            selected_codes.add(top.get("symbol", ""))
+
+        # 如果还不够，从剩余中按得分补齐
+        if len(selected) < max_n:
+            remaining = []
+            for item in items:
+                if item.get("symbol", "") not in selected_codes:
+                    remaining.append(item)
+            remaining.sort(key=lambda x: x.get("composite_score", 0), reverse=True)
+            selected.extend(remaining[:max_n - len(selected)])
+
+        return selected[:max_n]
 
     def set_opportunistic_signals(self, signals: dict[str, dict]) -> None:
         """设置外部机会信号（用于 Layer 4）。
