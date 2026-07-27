@@ -204,11 +204,56 @@ function applyPlan(pf) {
 .risk-list { margin: 0; padding-left: var(--space-4); font-size: var(--font-size-sm); color: var(--color-text-secondary); }
 .risk-list li { margin-bottom: var(--space-1); }
 
-.markdown-body { font-size: var(--font-size-sm); line-height: 1.6; }
-.markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4 { margin: var(--space-4) 0 var(--space-2); color: var(--color-text); }
+.markdown-body { font-size: var(--font-size-sm); line-height: 1.8; color: var(--color-text-primary); }
+
+/* Headings */
+.markdown-body h1 { font-size: 1.4em; margin: var(--space-5) 0 var(--space-3); padding-bottom: var(--space-2); border-bottom: 2px solid var(--color-primary); color: var(--color-text-primary); font-weight: var(--font-weight-bold); }
+.markdown-body h2 { font-size: 1.2em; margin: var(--space-5) 0 var(--space-3); padding-bottom: var(--space-1); border-bottom: 1px solid var(--color-border); color: var(--color-text-primary); font-weight: var(--font-weight-semibold); }
+.markdown-body h3 { font-size: 1.1em; margin: var(--space-4) 0 var(--space-2); color: var(--color-text-primary); font-weight: var(--font-weight-semibold); }
+.markdown-body h4 { font-size: 1em; margin: var(--space-3) 0 var(--space-2); color: var(--color-text-secondary); font-weight: var(--font-weight-semibold); }
+
+/* Paragraphs */
+.markdown-body p { margin: var(--space-2) 0; line-height: 1.8; }
+
+/* Emphasis */
+.markdown-body strong { font-weight: var(--font-weight-bold); color: var(--color-text-primary); }
+.markdown-body em { font-style: italic; color: var(--color-text-secondary); }
+
+/* Lists */
 .markdown-body ul, .markdown-body ol { padding-left: var(--space-5); margin: var(--space-2) 0; }
-.markdown-body code { background: var(--color-bg-tertiary); padding: 1px 4px; border-radius: 3px; font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; font-size: 0.9em; color: var(--color-primary); }
+.markdown-body li { margin: var(--space-1) 0; line-height: 1.7; }
+.markdown-body li > p { margin: 0; }
+.markdown-body ul ul, .markdown-body ol ol, .markdown-body ul ol, .markdown-body ol ul { margin: 0; }
+
+/* Inline code */
+.markdown-body code { background: var(--color-bg-tertiary); padding: 2px 6px; border-radius: var(--radius-sm); font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; font-size: 0.88em; color: var(--color-primary); }
+
+/* Code blocks */
+.markdown-body pre { background: #1e1e2e; color: #cdd6f4; padding: var(--space-4); border-radius: var(--radius-md); overflow-x: auto; margin: var(--space-4) 0; font-size: 0.88em; line-height: 1.6; }
+.markdown-body pre code { background: transparent; padding: 0; border-radius: 0; color: inherit; font-size: inherit; }
+
+/* Tables - Comprehensive styling */
+.markdown-body table { width: 100%; border-collapse: collapse; margin: var(--space-4) 0; font-size: 0.92em; display: block; overflow-x: auto; }
+.markdown-body thead { background: var(--color-surface-secondary); }
+.markdown-body th { padding: var(--space-2) var(--space-3); text-align: left; font-weight: var(--font-weight-semibold); color: var(--color-text-primary); border-bottom: 2px solid var(--color-primary); white-space: nowrap; }
+.markdown-body td { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-border-light); color: var(--color-text-primary); }
+.markdown-body tbody tr:hover { background: var(--color-bg-tertiary); }
+.markdown-body tbody tr:nth-child(even) { background: rgba(0,0,0,0.02); }
+.markdown-body tbody tr:nth-child(even):hover { background: var(--color-bg-tertiary); }
+
+/* Blockquotes */
+.markdown-body blockquote { margin: var(--space-3) 0; padding: var(--space-3) var(--space-4); border-left: 4px solid var(--color-primary); background: var(--color-bg-tertiary); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; color: var(--color-text-secondary); }
+.markdown-body blockquote p { margin: var(--space-1) 0; }
+
+/* Horizontal rule */
 .markdown-body hr { border: none; border-top: 1px solid var(--color-border); margin: var(--space-5) 0; }
-.markdown-body p { margin: var(--space-2) 0; line-height: 1.7; }
+
+/* Images */
+.markdown-body img { max-width: 100%; height: auto; border-radius: var(--radius-md); margin: var(--space-3) 0; }
+
+/* First element reset */
 .markdown-body > *:first-child { margin-top: 0; }
+
+/* Last element reset */
+.markdown-body > *:last-child { margin-bottom: 0; }
 </style>

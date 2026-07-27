@@ -251,18 +251,9 @@ async def design_pipeline(mgr: TaskManager, task_id: int) -> None:
 
     Stages: DATA+ENGINE → DB WRITE → LLM REPORT → NOTIFY
     """
-    from ..services.strategy_design import generate_enhanced_design
-    from ..tasks.design_report import _build_plan_tables
-    from ..analysis.llm import generate_design_report
-
     task = mgr.get_task(task_id)
     if not task:
         return
-
-    design_id = None
-    strategies = []
-    market_context = {}
-    report_quality = "none"
 
     # 并发限流：同一时间只允许一个设计/检查任务运行
     if not _design_semaphore.locked():
@@ -276,10 +267,24 @@ async def design_pipeline(mgr: TaskManager, task_id: int) -> None:
 
 async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> None:
     """实际的设计管线逻辑，被 _design_semaphore 保护。"""
+    # Lazy imports moved here from design_pipeline to be in the correct scope
+    from ..services.strategy_design import generate_enhanced_design
+    from ..tasks.design_report import _build_plan_tables
+    from ..analysis.llm import generate_design_report
+
+    design_id = None
+    strategies = []
+    market_context = {}
+    report_quality = "none"
+
     try:
         mgr.update_task(task_id, status="running", progress=10, stage="数据采集与策略计算中")
         await _notify(task_id, "running", progress=10, stage="数据采集与策略计算中")
 
+        task = mgr.get_task(task_id)
+        if not task:
+            logger.error("[design_pipeline] task %d not found after start", task_id)
+            return
         params = task.get("params", {})
         capital = params.get("capital", 500000)
         constraints = params.get("constraints")
@@ -314,23 +319,31 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
             return
 
         # Phase 2.7.1: 逐策略校验非空（非 CASH 标的 >= 1 只）
-        all_valid = True
+        # 修复 A: 降级为"至少有一套策略有非 CASH 标的即成功"
+        # 无有效标的的策略填充全 CASH + warning 而非让整次设计失败
+        valid_count = 0
         for s in strategies:
             etfs = s.get("etfs") or []
             non_cash = [a for a in etfs if a.get("symbol") != "CASH"]
-            if len(non_cash) < 1:
-                all_valid = False
+            if len(non_cash) >= 1:
+                valid_count += 1
+            else:
                 logger.warning(
-                    "[design_pipeline] task %d strategy '%s' has no non-CASH ETFs — rejecting",
+                    "[design_pipeline] task %d strategy '%s' has no non-CASH ETFs — filling with CASH",
                     task_id, s.get("id", "?"),
                 )
-                break
-        if not all_valid:
-            error_msg = "策略校验失败：部分方案无有效 ETF 标的"
+                s["etfs"] = [{"symbol": "CASH", "name": "现金", "weight": 1.0, "layer": "cash",
+                              "selection_rationale": "当前估值/行情数据下无合适标的，全部现金保留"}]
+                s["warning"] = "本方案在当前市场状态下无符合条件 ETF，全部配置现金"
+        if valid_count == 0:
+            error_msg = "策略校验失败：所有方案均无有效 ETF 标的"
             logger.warning("[design_pipeline] task %d: %s", task_id, error_msg)
             mgr.update_task(task_id, progress=0, status="failed", error_message=error_msg)
             await _notify(task_id, "failed", progress=0)
             return
+        else:
+            logger.info("[design_pipeline] task %d: %d/%d strategies have valid non-CASH ETFs",
+                        task_id, valid_count, len(strategies))
 
         # ── Stage 3: quick_ready — 先推送组合方案，让用户可操作 ──
         # （Solution Design S1-C: 渐进状态机）

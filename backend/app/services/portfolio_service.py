@@ -540,7 +540,10 @@ async def strategy_check(
         "summary": f"{llm_summary}（市态：{regime_label}{sector_text}{quality_summary}）" if llm_summary else f"市态：{regime_label}，{filled_count}/{total_count}只正常{quality_summary}",
         "suggestions": llm_result.get("suggestions", []),
         "holdings_analysis": holdings_analysis,
-        "risk_warnings": llm_result.get("risk_warnings", []),
+        "risk_warnings": _combine_risk_warnings(
+            llm_result.get("risk_warnings", []),
+            _compute_risk_warnings(holdings_analysis, factor_scores, regime),
+        ),
         "market_regime": regime,
         "data_quality": {
             "filled_count": filled_count,
@@ -552,6 +555,79 @@ async def strategy_check(
     if cache_key:
         _strategy_check_cache[cache_key] = (_time.monotonic(), result)
     return result
+
+
+def _combine_risk_warnings(
+    llm_warnings: list[dict],
+    rule_warnings: list[dict],
+) -> list[dict]:
+    """合并 LLM 和规则风险警告，确保至少有一条。"""
+    combined = llm_warnings + rule_warnings
+    if not combined:
+        combined = [{"type": "general", "severity": "info",
+                      "description": "当前组合风险指标正常，未触发自动警告。"}]
+    return combined
+
+
+def _compute_risk_warnings(
+    holdings_analysis: list[dict],
+    factor_matrix: dict[str, dict[str, float | int]],
+    regime: str,
+) -> list[dict]:
+    """基于因子数据和持仓分析计算组合风险警告。
+    
+    独立于 LLM 输出，确保风险 section 不会为空。
+    """
+    warnings: list[dict] = []
+    from collections import defaultdict
+
+    # 1. 行业集中度风险
+    sector_weights: dict[str, float] = defaultdict(float)
+    for h in holdings_analysis:
+        sym = h.get("symbol", "")
+        if sym == "CASH":
+            continue
+        sec = h.get("sector") or h.get("industry", "")
+        w = float(h.get("weight", 0) or 0)
+        sector_weights[sec] += w
+
+    unique_sectors = len(sector_weights)
+    if unique_sectors <= 2 and len(holdings_analysis) > 2:
+        top_sector = max(sector_weights, key=sector_weights.get)
+        warnings.append({
+            "type": "concentration",
+            "severity": "high",
+            "description": f"行业集中度风险：仅覆盖{unique_sectors}个行业，"
+                           f"最大行业{top_sector}占比{sector_weights[top_sector]:.0%}",
+            "affected_symbols": [h.get("symbol", "") for h in holdings_analysis if (h.get("sector") or h.get("industry", "")) == top_sector],
+        })
+
+    # 2. 单只权重超配风险
+    for h in holdings_analysis:
+        w = float(h.get("weight", 0) or 0)
+        if w >= 0.25:
+            sym = h.get("symbol", "")
+            name = h.get("name", sym)
+            warnings.append({
+                "type": "concentration",
+                "severity": "medium",
+                "description": f"{name}权重{w:.0%}，超过25%建议上限",
+                "affected_symbols": [sym],
+            })
+
+    # 3. 低流动性风险
+    for h in holdings_analysis:
+        turnover = float(h.get("turnover_rate", 0) or 0)
+        if 0 < turnover < 0.01:
+            sym = h.get("symbol", "")
+            warnings.append({
+                "type": "liquidity",
+                "severity": "low",
+                "description": f"{h.get('name', sym)}成交量较低",
+                "affected_symbols": [sym],
+            })
+
+    return warnings
 
 
 async def _compute_indicators(symbols: list[str]) -> dict:
