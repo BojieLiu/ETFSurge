@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import asyncio
+import os
 import time
 from contextlib import asynccontextmanager
 
@@ -15,14 +18,50 @@ from .monitor.token_usage import token_store
 from .core.logging import get_logger, setup_logging
 from .routers import market, portfolio, analysis, news, ws, admin, factors, system
 from .services.source_health import health_loop
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from .profiling.warmup_profiler import WarmupProfiler
 
 logger = get_logger("lifespan")
+
+# ── Profiling (enabled via PROFILE_WARMUP=1 env var) ──────────
+_PROFILE_WARMUP = os.environ.get("PROFILE_WARMUP", "").lower() in ("1", "true", "yes")
+
+_profiler: WarmupProfiler | None = None
+if _PROFILE_WARMUP:
+    from .profiling.warmup_profiler import (
+        WarmupProfiler,
+        get_warmup_profiler,
+        warmup_timer,
+    )
+    _profiler = get_warmup_profiler()
+    logger.info("[profiler] Warmup profiling ENABLED (PROFILE_WARMUP=1)")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
     logger.info("应用启动中…")
+
+    # B2: Global exception handler for unhandled coroutine exceptions
+    loop = asyncio.get_running_loop()
+
+    def _global_exception_handler(loop, context):
+        exc = context.get("exception")
+        msg = context.get("message", "Unknown error")
+        logger.capture_exception = True
+        if exc:
+            logger.error("[crash-guard] Unhandled exception in async task: %s | %s", exc, msg)
+        else:
+            logger.error("[crash-guard] Async error: %s", msg)
+
+    loop.set_exception_handler(_global_exception_handler)
+    logger.info("[crash-guard] Global exception handler installed")
+
+    if _PROFILE_WARMUP:
+        assert _profiler is not None  # type narrowing for mypy
+        _profiler.enable_pyinstrument()
     await init_db()
     await redis_cache.init()
 
@@ -78,6 +117,14 @@ async def lifespan(app: FastAPI):
 
     registry.set_event_callback(_make_event_callback())
 
+    if _PROFILE_WARMUP:
+        assert _profiler is not None  # type narrowing for mypy
+        _profiler.enable_cprofile()
+        logger.info("[profiler] cProfile + pyinstrument enabled for warmup")
+
+    # ── A1-A2: Collect warmup tasks for profiler to capture timing ──
+    _warmup_tasks: list[asyncio.Task] = []
+
     # 启动时后台预热行情缓存（不阻塞启动，25s 超时）
     async def _warmup_market_cache():
         _mark = app.state.warmup["market_cache"]
@@ -91,7 +138,7 @@ async def lifespan(app: FastAPI):
             _mark["success"] = False
             logger.exception("行情缓存预热失败（不影响启动）")
 
-    asyncio.create_task(_warmup_market_cache())
+    _warmup_tasks.append(asyncio.create_task(_warmup_market_cache()))
 
     # 启动时预热全球指数缓存（非阻塞，写入持久化 cache，重启后不丢失）
     async def _warmup_global_indices():
@@ -106,7 +153,7 @@ async def lifespan(app: FastAPI):
             _mark["done"] = True
             _mark["success"] = False
             logger.exception("全球指数缓存预热失败（非交易时段正常）")
-    asyncio.create_task(_warmup_global_indices())
+    _warmup_tasks.append(asyncio.create_task(_warmup_global_indices()))
 
     # 启动时预热 ETF 缓存（非阻塞），带超时保护
     async def _warmup_etf_cache():
@@ -127,7 +174,7 @@ async def lifespan(app: FastAPI):
             _mark["done"] = True
             _mark["success"] = False
             logger.warning("ETF cache warmup failed: %s", e)
-    asyncio.create_task(_warmup_etf_cache())
+    _warmup_tasks.append(asyncio.create_task(_warmup_etf_cache()))
 
     # Scheduler temporarily disabled for diagnostics (design-check-pipeline-redesign)
     # try:
@@ -233,6 +280,22 @@ async def lifespan(app: FastAPI):
 
     asyncio.create_task(_ic_persistence_loop())
     logger.info("IC 持久化循环已启动（120s）")
+
+    # A1-A2: Wait for warmup tasks to complete before stopping profiler
+    if _warmup_tasks:
+        logger.info("[warmup] Waiting for %d warmup task(s) to complete...", len(_warmup_tasks))
+        done, pending = await asyncio.wait(_warmup_tasks, timeout=130)
+        completed = len(done)
+        timed_out = len(pending)
+        logger.info("[warmup] %d task(s) completed, %d still pending (will continue in background)", completed, timed_out)
+
+    if _PROFILE_WARMUP:
+        assert _profiler is not None  # type narrowing for mypy
+        _profiler.disable_pyinstrument()
+        _profiler.disable_cprofile()
+        _profiler.print_summary()
+        _profiler.write_report("warmup_timing.json")
+        logger.info("[profiler] Warmup profiling complete — reports saved to logs/")
 
     yield
 

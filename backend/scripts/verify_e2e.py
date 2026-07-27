@@ -109,14 +109,24 @@ def _is_infra_error(err_msg):
     return any(kw in err_msg for kw in keywords)
 
 
+def _check_response_time(label: str, elapsed: float, gate_secs: float):
+    """Check response time against a gate threshold."""
+    ok = elapsed < gate_secs
+    check(f"{label} 响应时间 {elapsed:.1f}s < {gate_secs}s (gate)", ok,
+          f"gate={gate_secs}s, actual={elapsed:.1f}s" if not ok else "")
+
+
 def section_market():
     """行情数据端点"""
     section("行情数据")
 
-    # /market/indices/global
+    # /market/indices/global with response time gate (D)
     try:
+        _t0 = time.time()
         r = requests.get(f"{BASE}/api/v1/market/indices/global", timeout=60)  # P1-5
-        check(f"GET /market/indices/global -> {r.status_code}", r.status_code == 200)
+        _elapsed = time.time() - _t0
+        check(f"GET /market/indices/global -> {r.status_code} ({_elapsed:.1f}s)", r.status_code == 200)
+        _check_response_time("/market/indices/global", _elapsed, 30.0)
         if r.status_code == 200:
             data = r.json()
             regions = data.get("indices", {}) if isinstance(data, dict) else {}
@@ -191,10 +201,13 @@ def section_market():
     except Exception as e:
         check("GET /market/indices/global", False, str(e))
 
-    # /market/search
+    # /market/search with response time gate (D)
     try:
+        _t0 = time.time()
         r = requests.get(f"{BASE}/api/v1/market/search?keyword=510050", timeout=15)
-        check(f"GET /market/search?keyword=510050 -> {r.status_code}", r.status_code == 200)
+        _elapsed = time.time() - _t0
+        check(f"GET /market/search?keyword=510050 -> {r.status_code} ({_elapsed:.1f}s)", r.status_code == 200)
+        _check_response_time("/market/search", _elapsed, 10.0)
         if r.status_code == 200:
             data = r.json()
             check(f"搜索结果 {len(data)} 条", isinstance(data, list))
@@ -208,10 +221,13 @@ def section_portfolio():
     """组合设计端点"""
     section("组合设计")
 
-    # GET /portfolio/designs
+    # GET /portfolio/designs with response time gate (D)
     try:
+        _t0 = time.time()
         r = requests.get(f"{BASE}/api/v1/portfolio/designs?limit=5", timeout=10)
-        check(f"GET /designs -> {r.status_code}", r.status_code == 200)
+        _elapsed = time.time() - _t0
+        check(f"GET /designs -> {r.status_code} ({_elapsed:.1f}s)", r.status_code == 200)
+        _check_response_time("/portfolio/designs", _elapsed, 5.0)
         if r.status_code == 200:
             data = r.json()
             check(f"设计列表返回 {len(data)} 条记录", isinstance(data, list))
@@ -223,10 +239,13 @@ def section_portfolio():
     except Exception as e:
         check("GET /designs", False, str(e))
 
-    # GET /portfolio/etfs
+    # GET /portfolio/etfs with response time gate (D)
     try:
+        _t0 = time.time()
         r = requests.get(f"{BASE}/api/v1/portfolio/etfs", timeout=10)
-        check(f"GET /etfs -> {r.status_code}", r.status_code == 200)
+        _elapsed = time.time() - _t0
+        check(f"GET /etfs -> {r.status_code} ({_elapsed:.1f}s)", r.status_code == 200)
+        _check_response_time("/portfolio/etfs", _elapsed, 5.0)
         if r.status_code == 200:
             data = r.json()
             check(f"ETF 列表返回 {len(data)} 条", isinstance(data, list))
@@ -453,10 +472,13 @@ def section_news():
     """新闻资讯端点"""
     section("新闻资讯")
 
-    # GET /news/headlines — 超时匹配后端 run_sync(timeout=30) + 5s 网络缓冲
+    # GET /news/headlines with response time gate (D) — 超时匹配后端 run_sync(timeout=30) + 5s 网络缓冲
     try:
+        _t0 = time.time()
         r = requests.get(f"{BASE}/api/v1/news/headlines", timeout=35)
-        check(f"GET /news/headlines -> {r.status_code}", r.status_code == 200)
+        _elapsed = time.time() - _t0
+        check(f"GET /news/headlines -> {r.status_code} ({_elapsed:.1f}s)", r.status_code == 200)
+        _check_response_time("/news/headlines", _elapsed, 30.0)
         if r.status_code == 200:
             data = r.json()
             check(f"头条新闻 {len(data)} 条", isinstance(data, list) and len(data) > 0)
@@ -630,10 +652,13 @@ def section_admin():
     """管理端点"""
     section("管理端点")
 
-    # GET /admin/token-usage
+    # GET /admin/token-usage with response time gate (D)
     try:
+        _t0 = time.time()
         r = requests.get(f"{BASE}/api/v1/admin/token-usage", timeout=10)
-        check(f"GET /admin/token-usage -> {r.status_code}", r.status_code == 200)
+        _elapsed = time.time() - _t0
+        check(f"GET /admin/token-usage -> {r.status_code} ({_elapsed:.1f}s)", r.status_code == 200)
+        _check_response_time("/admin/token-usage", _elapsed, 5.0)
         if r.status_code == 200:
             data = r.json()
             check("token-usage 返回 dict", isinstance(data, dict))

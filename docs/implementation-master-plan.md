@@ -1171,3 +1171,14 @@ Phase 7.1 (远期优化)             无紧急依赖
 | | | | **新增测试：** `test_indicators.py` (27 用例), `test_factor_compute_functions.py` (20 用例) |
 | | | | **新增契约：** `api-contracts/common/internal-indicators-contract.md`, `api-contracts/factors/registry.md` |
 | | | | **改动文件：** 5 源文件 + 2 测试文件 + 2 契约文件
+| |
+| | **v9.9** | 2026-07-27 | **Phase 9 — 系统性能与质量增强 (system-performance-quality)** | 详见 `docs/system-performance-and-quality-review.md` |
+| | | | **已实施（阶段一+二）：** |
+| | | | **B1** — 修复 `market_service.py:667` `cache_set` UnboundLocalError：将 `cache_set` import 移至 `get_portfolio_realtime()` 函数顶部，删除重复 import |
+| | | | **B2** — 全局异常处理器：在 `main.py` lifespan 中添加 `loop.set_exception_handler()`，捕获未处理的协程异常并记 ERROR 日志 |
+| | | | **A1-A2** — WarmupProfiler 时序采集集成：收集三个 warmup 任务到 `_warmup_tasks` 列表，使用 `asyncio.wait()` 等待任务完成后再停止 profiler |
+| | | | **C1** — `check_routes.py`：路由契约验证脚本，按 `(method, path)` 比对 `app.routes` 与 `api-contracts/**/*.md` 中的路由描述，支持 `--json`/`--actual-only` 模式 |
+| | | | **D** — 响应时间门限：`verify_e2e.py` 新增 `_check_response_time()` 函数，为 `/market/indices/global`、`/market/search`、`/portfolio/designs`、`/portfolio/etfs`、`/news/headlines`、`/admin/token-usage` 六个端点添加 P95 响应时间门限检查 |
+| | | | **E1+H** — 前端构建优化：`vite.config.js` 集成 `rollup-plugin-visualizer`（ANALYZE 模式生成 `dist/stats.html`），设置 `chunkSizeWarningLimit: 500` 和 `assetsInlineLimit: 4096` |
+| | | | **新增测试：** `test_route_contract.py` (14 用例) — 覆盖 `_parse_contract_method` 6 种模式、`load_expected_routes` 目录扫描、`compare_routes` 6 种场景 |
+| | | | **改动文件：** `backend/app/main.py`、`backend/app/services/market_service.py`、`backend/scripts/verify_e2e.py`、`backend/scripts/check_routes.py`（新）、`backend/tests/test_route_contract.py`（新）、`frontend/vite.config.js` |

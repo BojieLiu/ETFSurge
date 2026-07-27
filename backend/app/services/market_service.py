@@ -620,7 +620,7 @@ async def get_portfolio_realtime() -> list[dict[str, Any]]:
     场外 ETF → 盘中估算（tracked_index）/ 盘后净值
     """
     # 7.6a: 15s app-level cache to reduce API response time
-    from .cache_service import cache_get
+    from .cache_service import cache_get, cache_set
     cached = await cache_get(_PORTFOLIO_REALTIME_CACHE_KEY)
     if cached is not None:
         return cached
@@ -732,7 +732,6 @@ async def get_portfolio_realtime() -> list[dict[str, Any]]:
             q["estimate_source"] = None
 
     # 7.6a: 写入 15s 缓存
-    from .cache_service import cache_set
     await cache_set(_PORTFOLIO_REALTIME_CACHE_KEY, quotes, _PORTFOLIO_REALTIME_TTL)
 
     return quotes

@@ -2,6 +2,7 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { VitePWA } from 'vite-plugin-pwa'
 import path from 'path'
+import { visualizer } from 'rollup-plugin-visualizer'
 
 export default defineConfig({
   plugins: [
@@ -25,6 +26,13 @@ export default defineConfig({
           { urlPattern: /^\/api\//, handler: 'NetworkFirst', options: { cacheName: 'api-cache' } },
         ],
       },
+    }),
+    // E1+H: Bundle visualization + size budget (enabled via ANALYZE=true env var)
+    visualizer({
+      filename: 'dist/stats.html',
+      open: false,
+      gzipSize: true,
+      brotliSize: true,
     }),
   ],
   resolve: {
@@ -52,5 +60,8 @@ export default defineConfig({
         },
       },
     },
+    // H: Bundle size budget — warn if any chunk exceeds thresholds
+    chunkSizeWarningLimit: 500,
+    assetsInlineLimit: 4096,
   },
 })
