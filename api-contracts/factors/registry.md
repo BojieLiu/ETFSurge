@@ -1,71 +1,54 @@
-# API 契约: FactorRegistry 修复 + 链路复用
+# FactorRegistry — Internal API Contract
 
-> **实现状态: ✅ 2026-07-20 已全部完成**
-> - 假数据 fallback 已删除（替换为 error marker）
-> - KDJ 因子（k_value/d_value/j_value）已注册
-> - 综合信号因子（signal.overall）已注册（RSI+MACD+MA bias 后处理推导）
-> - industry_diversification 已基于 HHI 实现（非 scaffolding）
-> - 熔断保护：>50% 符号 z-score 为 0 时抛 RuntimeError
+> Scope: `factors/factor_registry.py` compute functions refactor — pandas-ta reint
+> Status: Active · No public API change
 
-## 1. FactorRegistry 修复
+## Public Interface (unchanged)
 
-### 路由: 无（内部接口）
-### 改动内容
+### `FactorRegistry.compute_batch(symbols, market_data, ...) -> dict[str, dict[str, float]]`
 
-#### 1.1 删除假数据 fallback (factor_registry.py:522-528)
-换为 raise ValueError 并调用方处理。市场数据不可用时不生成合成数据。
+No signature or return type change. All 32 compute functions keep their:
+- **Signature**: `_compute_xxx(data: dict[str, Any]) -> float`
+- **Return**: single float (default when data insufficient)
+- **No I/O**: pure function, no external calls
 
-```python
-# 旧
-return sym, {"close": [4.0 + i * 0.01 for i in range(60)], ...}
+## Compute Functions Affected (11 functions → pandas-ta)
 
-# 新
-raise ValueError(f"fetch_history failed for {sym}: {e}")
-```
+| Function | pandas-ta Equivalent | Internal Change |
+|---|---|---|
+| `_compute_sma_5` | `ta.sma(pd.Series(data["close"]), length=5).iloc[-1]` | List→Series→pandas-ta |
+| `_compute_sma_10` | `ta.sma(pd.Series(data["close"]), length=10).iloc[-1]` | Same pattern |
+| `_compute_sma_20` | `ta.sma(pd.Series(data["close"]), length=20).iloc[-1]` | Same pattern |
+| `_compute_sma_60` | `ta.sma(pd.Series(data["close"]), length=60).iloc[-1]` | Same pattern |
+| `_compute_rsi_14` | `ta.rsi(pd.Series(data["close"]), length=14).iloc[-1]` | Same pattern |
+| `_compute_macd` | `ta.macd(pd.Series(data["close"]))["MACD_12_26_9"].iloc[-1]` | Returns DIF (MACD line = EMA12-EMA26) |
+| `_compute_bollinger_bandwidth` | `ta.bbands(pd.Series(data["close"]))["BBB_*"].iloc[-1]` | Uses pre-computed BBB |
+| `_compute_atr_14` | `ta.atr(high=pd.Series(data["high"]), low=..., close=..., length=14).iloc[-1]` | Requires H/L/C |
+| `_compute_kdj_k` | Shared: `kdj = ta.kdj(...)`, return `kdj["K_*"].iloc[-1]` | Shared cache across K/D/J |
+| `_compute_kdj_d` | Same shared kdj result | `kdj["D_*"].iloc[-1]` |
+| `_compute_kdj_j` | Same shared kdj result | `kdj["J_*"].iloc[-1]` |
 
-**调用方处理**: `compute()` 捕获异常后对该符号设空 dict `{}`，不影响其他符号。
+## Compute Functions Unchanged (21 functions)
 
-#### 1.2 注册 KDJ 因子
-从 `indicators.py` 提取 KDJ 计算逻辑，注册为:
-- `technical.kdj.k_value`: K 值
-- `technical.kdj.d_value`: D 值
-- `technical.kdj.j_value`: J 值
+All remaining functions (ln_mcap, volume_ratio, vwap, amount_stability, panic_greed_diff,
+news_heat, news_direction, signal_overall, industry_diversification, change_pct,
+return_1m/3m, price, premium_discount, tracking_error, shares_change,
+institutional_holdings_change, five_year_plan, strategic_emerging,
+dual_circulation, stock_divergence) — **not affected**.
 
-#### 1.3 注册综合信号因子
-从 `signal.py` 提取 `generate_signal()` 中多指标综合信号，注册为:
-- `technical.signal.overall`: 综合买卖信号 (-1 ~ +1)
+## Empty/Edge Behavior (preserved)
 
-#### 1.4 实现 industry_diversification
-用 `ETFClassifier` 的行业分布计算 HHI（赫芬达尔指数），替代当前返回 0。
+| Function | Current Default | Notes |
+|---|---|---|
+| sma_5/10/20/60 | 0.0 | When len(close) < window |
+| rsi_14 | 50.0 | When len(close) < 15 |
+| macd | 0.0 | When len(close) < 26 |
+| bollinger_bandwidth | 0.0 | When len(close) < 20 |
+| atr_14 | 0.0 | When len(close) < 15 |
+| kdj_k/d/j | 50.0 | When len(close) < 9 |
 
-#### 1.5 熔断保护
-`compute()` 结尾检查：z-score 为 0 的符号比例 > 50% 则抛异常。
-
-### 测试
-- test_factor_registry.py 现有用例全部通过
-- 新增 test_fake_data_removed() 确认假数据被删除
-- 新增 test_kdj_registered() 确认 KDJ 因子已注册
-- 新增 test_signal_registered() 确认信号因子已注册
-
----
-
-## 2. indicators.py 包装层
-
-### 路由: 无（内部接口）
-### 改动内容
-`compute_all_indicators()` 从 FactorRegistry 获取已有因子分，补充独立计算的 KDJ/EMA/综合信号。
-
-### 测试
-- test_indicators_uses_factor_registry() 确认委托逻辑
-- 返回格式不变（前端无感知）
-
----
-
-## 3. strategy_check() 复用 FactorRegistry
-
-### 路由: 无（strategy_check 内部）
-### 改动内容
-`strategy_check()` 已经通过 pool_manager.get_market_regime() 统一了 regime。还需复用 factor_matrix 替代自采 `factor_registry.compute(symbols)`。
-
-### 测试
-- verify_e2e.py 中策略检查测试继续通过
+## Verification
+- [ ] All 11 functions return same type (float)
+- [ ] All 11 functions return same default for empty data
+- [ ] All 21 unaffected functions return unchanged values
+- [ ] `compute_batch` produces identical-shaped output dict

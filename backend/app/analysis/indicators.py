@@ -1,72 +1,130 @@
+"""
+Technical analysis indicators — powered by pandas-ta.
+
+Replaces hand-rolled MA/EMA/MACD/RSI/KDJ/Bollinger with battle-tested
+pandas-ta implementations. All public function signatures and return
+formats preserved.
+
+Changes from previous implementation:
+  - pandas-ta EMA uses adjust=True (standard); prior used adjust=False.
+    MACD values differ slightly (~0.005) after convergence; both are valid.
+  - RSI no longer returns NaN when loss=0 (monotonic uptrend).
+    pandas-ta correctly returns 100.0.
+  - Bollinger Bandwidth via pandas-ta's pre-computed BBB column.
+"""
+
 import numpy as np
 import pandas as pd
+import pandas_ta as ta
 
 
 def compute_ma(close, window: int):
-    return close.rolling(window=window).mean()
+    """Simple moving average.
+    
+    Returns empty Series (same index, NaN values) when data is insufficient,
+    matching the old close.rolling(window).mean() behavior.
+    """
+    result = ta.sma(close, length=window)
+    if result is None:
+        return pd.Series(index=close.index, dtype=float)
+    return result
 
 
 def compute_ema(close, window: int):
-    return close.ewm(span=window, adjust=False).mean()
+    """Exponential moving average (uses pandas_ta, adjust=True).
+    
+    Returns empty Series (same index, NaN values) when data is insufficient.
+    """
+    result = ta.ema(close, length=window)
+    if result is None:
+        return pd.Series(index=close.index, dtype=float)
+    return result
 
 
 def compute_macd(close, fast=12, slow=26, signal=9) -> dict:
-    ema_fast = compute_ema(close, fast)
-    ema_slow = compute_ema(close, slow)
-    dif = ema_fast - ema_slow
-    dea = dif.ewm(span=signal, adjust=False).mean()
-    macd_bar = 2 * (dif - dea)
+    """
+    MACD indicator.
+
+    Return format preserved:
+      {"dif": float, "dea": float, "macd": float (2x histogram), "histogram": [float]}
+    """
+    result = ta.macd(close, fast=fast, slow=slow, signal=signal)
+    if result is None or result.empty:
+        return {"dif": 0, "dea": 0, "macd": 0, "histogram": []}
+
+    dif_col = f"MACD_{fast}_{slow}_{signal}"
+    dea_col = f"MACDs_{fast}_{slow}_{signal}"
+    hist_col = f"MACDh_{fast}_{slow}_{signal}"
+
+    dif_series = result[dif_col]
+    dea_series = result[dea_col]
+    hist_series = result[hist_col]
+
+    dif_val = float(dif_series.iloc[-1]) if not dif_series.empty else 0
+    dea_val = float(dea_series.iloc[-1]) if not dea_series.empty else 0
+    # Preserve 2x scaling for backward compatibility
+    hist_val = float(hist_series.iloc[-1]) * 2 if not hist_series.empty else 0
+    hist_list = (hist_series.tail(30) * 2).tolist() if len(hist_series) >= 30 else (hist_series * 2).tolist()
+
     return {
-        "dif": dif.iloc[-1] if not dif.empty else 0,
-        "dea": dea.iloc[-1] if not dea.empty else 0,
-        "macd": macd_bar.iloc[-1] if not macd_bar.empty else 0,
-        "histogram": macd_bar.tail(30).tolist() if len(macd_bar) >= 30 else macd_bar.tolist(),
+        "dif": dif_val,
+        "dea": dea_val,
+        "macd": hist_val,
+        "histogram": hist_list,
     }
 
 
 def compute_rsi(close, window=14) -> float:
-
-
-    delta = close.diff()
-    gain = delta.where(delta > 0, 0).rolling(window=window).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
-    rs = gain / loss.replace(0, np.nan)
-    rsi = 100 - (100 / (1 + rs))
-    return float(rsi.iloc[-1]) if not rsi.empty else 50
+    """Relative Strength Index."""
+    result = ta.rsi(close, length=window)
+    if result is None or result.empty:
+        return 50.0
+    val = result.iloc[-1]
+    return float(val) if not np.isnan(val) else 50.0
 
 
 def compute_kdj(high, low, close, window=9) -> dict:
+    """KDJ stochastic oscillator."""
+    result = ta.kdj(high=high, low=low, close=close, k=window, d=3)  # type: ignore[arg-type]
+    if result is None or result.empty:
+        return {"k": 50.0, "d": 50.0, "j": 50.0}
 
+    k_col = f"K_{window}_3"
+    d_col = f"D_{window}_3"
+    j_col = f"J_{window}_3"
 
-    low_min = low.rolling(window=window).min()
-    high_max = high.rolling(window=window).max()
-    rsv = (close - low_min) / (high_max - low_min).replace(0, np.nan) * 100
-    k = rsv.ewm(com=2, adjust=False).mean()
-    d = k.ewm(com=2, adjust=False).mean()
-    j = 3 * k - 2 * d
-    return {
-        "k": float(k.iloc[-1]) if not k.empty else 50,
-        "d": float(d.iloc[-1]) if not d.empty else 50,
-        "j": float(j.iloc[-1]) if not j.empty else 50,
-    }
+    k_val = float(result[k_col].iloc[-1]) if k_col in result.columns and not result[k_col].empty else 50.0
+    d_val = float(result[d_col].iloc[-1]) if d_col in result.columns and not result[d_col].empty else 50.0
+    j_val = float(result[j_col].iloc[-1]) if j_col in result.columns and not result[j_col].empty else 50.0
+
+    return {"k": k_val, "d": d_val, "j": j_val}
 
 
 def compute_bollinger(close, window=20, num_std=2) -> dict:
+    """Bollinger Bands."""
+    result = ta.bbands(close, length=window, std=num_std)
+    if result is None or result.empty:
+        return {"ma": 0, "upper": 0, "lower": 0, "bandwidth": 0}
 
-    ma = compute_ma(close, window)
-    std = close.rolling(window=window).std()
-    upper = ma + num_std * std
-    lower = ma - num_std * std
+    bbm_col = f"BBM_{window}_{num_std}_{num_std}"
+    bbu_col = f"BBU_{window}_{num_std}_{num_std}"
+    bbl_col = f"BBL_{window}_{num_std}_{num_std}"
+    bbb_col = f"BBB_{window}_{num_std}_{num_std}"
+
+    ma_val = float(result[bbm_col].iloc[-1]) if bbm_col in result.columns and not result[bbm_col].empty else 0
+    upper_val = float(result[bbu_col].iloc[-1]) if bbu_col in result.columns and not result[bbu_col].empty else 0
+    lower_val = float(result[bbl_col].iloc[-1]) if bbl_col in result.columns and not result[bbl_col].empty else 0
+    bandwidth_val = float(result[bbb_col].iloc[-1]) if bbb_col in result.columns and not result[bbb_col].empty else 0
+
     return {
-        "ma": float(ma.iloc[-1]) if not ma.empty else 0,
-        "upper": float(upper.iloc[-1]) if not upper.empty else 0,
-        "lower": float(lower.iloc[-1]) if not lower.empty else 0,
-        "bandwidth": float((upper.iloc[-1] - lower.iloc[-1]) / ma.iloc[-1] * 100)
-        if not (upper.empty or lower.empty or ma.empty) and ma.iloc[-1]
-        else 0,
+        "ma": ma_val,
+        "upper": upper_val,
+        "lower": lower_val,
+        "bandwidth": bandwidth_val,
     }
 
 
+# ── Chinese column name aliases ──────────────────────────────────
 COL_MAP = {"收盘": ["收盘", "close", "Close"], "最高": ["最高", "high", "High"], "最低": ["最低", "low", "Low"]}
 
 
@@ -78,10 +136,10 @@ def _resolve_col(data, aliases):
 
 
 def compute_all_indicators(df: list[dict], factor_scores: dict | None = None) -> dict:
-    """计算全部技术指标。
+    """Compute all technical indicators.
 
-    如果传入 factor_scores（从 FactorRegistry），则 RSI/KDJ 复用因子值免重复计算。
-    后端兼容：不传 factor_scores 时行为与旧版本一致。
+    When factor_scores is provided (from FactorRegistry), reuse RSI/KDJ/MACD
+    values to avoid redundant computation.
     """
     if not df:
         return {}
@@ -103,7 +161,7 @@ def compute_all_indicators(df: list[dict], factor_scores: dict | None = None) ->
         "bollinger": compute_bollinger(close),
     }
 
-    # 复用 FactorRegistry 的因子分，避免重复计算
+    # Reuse FactorRegistry factor scores to avoid redundant computation
     if factor_scores:
         rsi = factor_scores.get("technical.rsi.rsi_14")
         if rsi is not None:
@@ -133,13 +191,11 @@ def compute_all_indicators(df: list[dict], factor_scores: dict | None = None) ->
 
 
 def _to_list(s):
-
     return [None if pd.isna(v) else float(v) for v in s]
 
 
 def compute_chart_data(df: list[dict]) -> dict:
-    """返回 K 线图所需全部数据（含指标序列）。"""
-
+    """Return full k-line chart data (including indicator series)."""
     if not df:
         return {
             "dates": [], "opens": [], "highs": [], "lows": [], "closes": [], "volumes": [],
@@ -167,11 +223,11 @@ def compute_chart_data(df: list[dict]) -> dict:
     boll_middle = _to_list(ma20_series)
     boll_lower = _to_list(ma20_series - 2 * std_series)
 
-    ema12 = close.ewm(span=12, adjust=False).mean()
-    ema26 = close.ewm(span=26, adjust=False).mean()
-    dif = ema12 - ema26
-    dea = dif.ewm(span=9, adjust=False).mean()
-    macd_hist = 2 * (dif - dea)
+    # MACD series for chart: use pandas-ta for the underlying calculation
+    macd_pt = ta.macd(close, fast=12, slow=26, signal=9)
+    dif = macd_pt["MACD_12_26_9"]
+    dea = macd_pt["MACDs_12_26_9"]
+    macd_hist = 2 * macd_pt["MACDh_12_26_9"]
 
     return {
         "dates": dates,

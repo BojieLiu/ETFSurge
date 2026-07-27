@@ -15,6 +15,9 @@ import asyncio
 import logging
 from typing import Any
 
+import pandas as pd
+import pandas_ta as ta
+
 logger = logging.getLogger(__name__)
 
 _FETCH_TIMEOUT = 30  # seconds
@@ -224,6 +227,82 @@ def detect_market_regime(
     return regime
 
 
+def _compute_trend_from_prices(
+    prices: list[float],
+    volumes: list[float] | None = None,
+    latest_price: float | None = None,
+) -> dict[str, float]:
+    """
+    Compute trend indicators from price/volume arrays using pandas-ta.
+
+    Pure function - no I/O. Returns same fields as _fetch_single_trend.
+    """
+    import math
+
+    volumes = volumes or []
+    n = len(prices)
+    result: dict[str, float] = {}
+    latest = latest_price if latest_price is not None else (prices[-1] if n > 0 else 0.0)
+
+    if n < 5:
+        return {}
+
+    # Multi-period returns
+    periods_map = {"return_5d": 5, "return_1m": 20, "return_3m": 60}
+    for key, days in periods_map.items():
+        idx = n - 1 - days
+        if idx >= 0 and prices[idx] != 0:
+            result[key] = (latest - prices[idx]) / prices[idx]
+        else:
+            result[key] = 0.0
+
+    # MA bias via pandas-ta
+    ps = pd.Series(prices)
+    if n >= 21:
+        ma20 = ta.sma(ps, length=20)
+        if ma20 is not None and not ma20.empty:
+            ma20_val = float(ma20.iloc[-1])
+            result["ma_bias_20"] = (latest - ma20_val) / ma20_val if ma20_val != 0 else 0.0
+        else:
+            result["ma_bias_20"] = 0.0
+    else:
+        result["ma_bias_20"] = 0.0
+
+    if n >= 61:
+        ma60 = ta.sma(ps, length=60)
+        if ma60 is not None and not ma60.empty:
+            ma60_val = float(ma60.iloc[-1])
+            result["ma_bias_60"] = (latest - ma60_val) / ma60_val if ma60_val != 0 else 0.0
+        else:
+            result["ma_bias_60"] = 0.0
+    else:
+        result["ma_bias_60"] = 0.0
+
+    # Volume ratio
+    if len(volumes) >= 61 and n >= 61:
+        vol_20 = sum(volumes[-20:]) / 20
+        vol_60 = sum(volumes[-60:]) / 60
+        result["vol_ratio"] = vol_20 / vol_60 if vol_60 > 0 else 1.0
+    else:
+        result["vol_ratio"] = 1.0
+
+    # Volatility & max drawdown via pandas-ta
+    if n >= 21:
+        ret = ps.pct_change().dropna()
+        if len(ret) >= 20:
+            result["volatility_20d"] = float(ret.tail(20).std() * (252 ** 0.5))
+        max_dd = (ps / ps.cummax() - 1).min()
+        result["max_drawdown_1m"] = float(max_dd) if not pd.isna(max_dd) else 0.0
+
+    # Daily change
+    if n >= 2 and prices[-2] != 0:
+        result["change_pct"] = (prices[-1] - prices[-2]) / prices[-2]
+    else:
+        result["change_pct"] = 0.0
+
+    return result
+
+
 # ── 内部实现 ──────────────────────────────────────────────────
 
 async def _fetch_single_trend(symbol: str) -> dict[str, float]:
@@ -247,80 +326,8 @@ async def _fetch_single_trend(symbol: str) -> dict[str, float]:
         if len(prices) < 5:
             return {}
 
-        # 计算多周期收益率
-        latest = prices[-1]
-        result: dict[str, float] = {}
-
-        periods_map = {
-            "return_5d": 5,
-            "return_1m": 20,
-            "return_3m": 60,
-        }
-        for key, days in periods_map.items():
-            idx = len(prices) - 1 - days
-            if idx >= 0 and prices[idx] != 0:
-                result[key] = (latest - prices[idx]) / prices[idx]
-            else:
-                result[key] = 0.0
-
-        # 均线乖离率
-        if len(prices) >= 21:
-            ma20 = sum(prices[-21:-1]) / 20  # 前20日收盘均值
-            result["ma_bias_20"] = (latest - ma20) / ma20 if ma20 != 0 else 0.0
-        else:
-            result["ma_bias_20"] = 0.0
-
-        if len(prices) >= 61:
-            ma60 = sum(prices[-61:-1]) / 60
-            result["ma_bias_60"] = (latest - ma60) / ma60 if ma60 != 0 else 0.0
-        else:
-            result["ma_bias_60"] = 0.0
-
-        # 量比: 近20日均量 / 近60日均量
-        if len(volumes) >= 61 and len(prices) >= 61:
-            vol_20 = sum(volumes[-20:]) / 20
-            vol_60 = sum(volumes[-60:]) / 60
-            result["vol_ratio"] = vol_20 / vol_60 if vol_60 > 0 else 1.0
-        else:
-            result["vol_ratio"] = 1.0
-
-        # 20日年化波动率
-        if len(prices) >= 21:
-            daily_returns = [
-                (prices[i] - prices[i - 1]) / prices[i - 1]
-                for i in range(len(prices) - 21, len(prices))
-                if prices[i - 1] != 0
-            ]
-            if len(daily_returns) > 1:
-                mean = sum(daily_returns) / len(daily_returns)
-                variance = sum((r - mean) ** 2 for r in daily_returns) / len(daily_returns)
-                import math
-                result["volatility_20d"] = math.sqrt(variance * 252)  # 年化
-            else:
-                result["volatility_20d"] = 0.0
-        else:
-            result["volatility_20d"] = 0.0
-
-        # 近1月最大回撤
-        if len(prices) >= 21:
-            lookback = prices[-21:]
-            peak = lookback[0]
-            max_dd = 0.0
-            for p in lookback[1:]:
-                if p > peak:
-                    peak = p
-                dd = (p - peak) / peak
-                if dd < max_dd:
-                    max_dd = dd
-            result["max_drawdown_1m"] = max_dd
-        else:
-            result["max_drawdown_1m"] = 0.0
-
-        # 当日涨跌幅：最新一日收盘 vs 前一日收盘（用于入选理由「今日涨/跌 X%」）
-        if len(prices) >= 2 and prices[-2] != 0:
-            result["change_pct"] = (prices[-1] - prices[-2]) / prices[-2]
-        else:
-            result["change_pct"] = 0.0
+        # 使用 pandas-ta 辅助函数计算趋势指标
+        result = _compute_trend_from_prices(prices, volumes)
 
         return result
 

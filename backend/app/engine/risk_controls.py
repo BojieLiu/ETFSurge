@@ -1,16 +1,44 @@
 """
 risk_controls.py — 因子暴露集中度风控 + 资产质量检查（纯函数，无 I/O）
+
+Constraints can be customized by importing and reassigning the settings object:
+    from app.engine.risk_controls import RISK_SETTINGS
+    RISK_SETTINGS.max_single_weight = 0.25
 """
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-MAX_SINGLE_WEIGHT = 0.30
-MAX_SECTOR_CONCENTRATION = 0.40
-MIN_WEIGHT = 0.01
+
+@dataclass
+class RiskSettings:
+    """Configurable risk constraints.
+
+    All values are decimal fractions (0.30 = 30%).
+    """
+    max_single_weight: float = 0.30
+    max_sector_concentration: float = 0.40
+    min_weight: float = 0.01
+    # Reserve for future constraints (e.g., correlation, turnover)
+    max_correlation: float = 0.95
+    max_turnover_rate: float = 0.50
+
+
+# Global settings singleton — importers can modify as needed
+RISK_SETTINGS = RiskSettings()
+
+
+def _get_constraints() -> dict[str, float]:
+    """Read current constraint values from RISK_SETTINGS."""
+    return {
+        "max_single_weight": RISK_SETTINGS.max_single_weight,
+        "max_sector_concentration": RISK_SETTINGS.max_sector_concentration,
+        "min_weight": RISK_SETTINGS.min_weight,
+    }
 
 
 def filter_extreme_drawdown(
@@ -175,8 +203,8 @@ def apply_risk_controls(
     对生成的方案应用风控约束（含质量检查管线）。
 
     Checks:
-    - 单只权重 <= MAX_SINGLE_WEIGHT
-    - 行业集中度 < MAX_SECTOR_CONCENTRATION
+    - 单只权重 <= RISK_SETTINGS.max_single_weight
+    - 行业集中度 < RISK_SETTINGS.max_sector_concentration
     - 层预算不超标
     - 极端下跌过滤 #2
     - 防御有效性检查 #3
@@ -201,8 +229,8 @@ def apply_risk_controls(
         # 1. 单只权重上限
         for a in allocations:
             w = a.get("weight", 0.0)
-            if w > MAX_SINGLE_WEIGHT:
-                a["weight"] = MAX_SINGLE_WEIGHT
+            if w > RISK_SETTINGS.max_single_weight:
+                a["weight"] = RISK_SETTINGS.max_single_weight
 
         # 2. 层预算校验
         layer_actual: dict[str, float] = {}
@@ -225,9 +253,9 @@ def apply_risk_controls(
             sector_weights[sec] = sector_weights.get(sec, 0.0) + a.get("weight", 0.0)
 
         hhi = sum(w ** 2 for w in sector_weights.values())
-        if hhi >= MAX_SECTOR_CONCENTRATION and sector_weights:
+        if hhi >= RISK_SETTINGS.max_sector_concentration and sector_weights:
             max_sector = max(sector_weights, key=lambda k: sector_weights.get(k, 0))
-            target_weight = MAX_SECTOR_CONCENTRATION ** 0.5
+            target_weight = RISK_SETTINGS.max_sector_concentration ** 0.5
             if sector_weights[max_sector] > target_weight:
                 scale = target_weight / sector_weights[max_sector]
                 for a in allocations:

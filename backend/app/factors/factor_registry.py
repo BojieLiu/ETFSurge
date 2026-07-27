@@ -16,6 +16,7 @@ from pathlib import Path
 import yaml
 import pandas as pd
 import numpy as np
+import pandas_ta as ta
 
 from ..factors.ic_tracker import ic_tracker
 
@@ -73,76 +74,74 @@ def _compute_ln_mcap(data: dict[str, Any]) -> float:
     return math.log(mv) if mv > 0 else 0.0
 
 
+def _compute_sma(data: dict[str, Any], window: int) -> float:
+    """Shared SMA computation via pandas-ta."""
+    close = data.get("close", [])
+    if len(close) < window:
+        return 0.0
+    result = ta.sma(pd.Series(close), length=window)
+    if result is None or result.empty:
+        return 0.0
+    val = result.iloc[-1]
+    return float(val) if not np.isnan(val) else 0.0
+
+
 def _compute_sma_5(data: dict[str, Any]) -> float:
     """technical.ma.sma_5: 5日均线"""
-    close = data.get("close", [])
-    if len(close) < 5:
-        return 0.0
-    return float(np.mean(close[-5:]))
+    return _compute_sma(data, 5)
 
 
 def _compute_sma_10(data: dict[str, Any]) -> float:
     """technical.ma.sma_10: 10日均线"""
-    close = data.get("close", [])
-    if len(close) < 10:
-        return 0.0
-    return float(np.mean(close[-10:]))
+    return _compute_sma(data, 10)
 
 
 def _compute_sma_20(data: dict[str, Any]) -> float:
     """technical.ma.sma_20: 20日均线"""
-    close = data.get("close", [])
-    if len(close) < 20:
-        return 0.0
-    return float(np.mean(close[-20:]))
+    return _compute_sma(data, 20)
 
 
 def _compute_sma_60(data: dict[str, Any]) -> float:
     """technical.ma.sma_60: 60日均线"""
-    close = data.get("close", [])
-    if len(close) < 60:
-        return 0.0
-    return float(np.mean(close[-60:]))
+    return _compute_sma(data, 60)
 
 
 def _compute_rsi_14(data: dict[str, Any]) -> float:
-    """technical.rsi.rsi_14: 14日RSI"""
+    """technical.rsi.rsi_14: 14日RSI (via pandas-ta)"""
     close = data.get("close", [])
     if len(close) < 15:
         return 50.0
-    s = pd.Series(close)
-    delta = s.diff()
-    gain = delta.where(delta > 0, 0).rolling(14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
-    rs = gain / loss.replace(0, np.nan)
-    rsi = 100 - (100 / (1 + rs))
-    return float(rsi.iloc[-1]) if not np.isnan(rsi.iloc[-1]) else 50.0
+    result = ta.rsi(pd.Series(close), length=14)
+    if result is None or result.empty:
+        return 50.0
+    val = result.iloc[-1]
+    return float(val) if not np.isnan(val) else 50.0
 
 
 def _compute_macd(data: dict[str, Any]) -> float:
-    """technical.macd.macd: MACD值"""
+    """technical.macd.macd: MACD DIF值 (via pandas-ta)"""
     close = data.get("close", [])
     if len(close) < 26:
         return 0.0
-    s = pd.Series(close)
-    ema12 = s.ewm(span=12, adjust=False).mean()
-    ema26 = s.ewm(span=26, adjust=False).mean()
-    dif = ema12 - ema26
-    return float(dif.iloc[-1])
+    result = ta.macd(pd.Series(close), fast=12, slow=26, signal=9)
+    if result is None or result.empty:
+        return 0.0
+    dif_col = "MACD_12_26_9"
+    val = result[dif_col].iloc[-1]
+    return float(val) if not np.isnan(val) else 0.0
 
 
 def _compute_bollinger_bandwidth(data: dict[str, Any]) -> float:
-    """technical.bollinger.bandwidth: 布林带宽%"""
+    """technical.bollinger.bandwidth: 布林带宽% (via pandas-ta)"""
     close = data.get("close", [])
     if len(close) < 20:
         return 0.0
-    s = pd.Series(close)
-    ma20 = s.rolling(20).mean()
-    std20 = s.rolling(20).std()
-    upper = ma20 + 2 * std20
-    lower = ma20 - 2 * std20
-    bw = (upper - lower) / ma20
-    return float(bw.iloc[-1]) if not np.isnan(bw.iloc[-1]) else 0.0
+    result = ta.bbands(pd.Series(close), length=20, std=2)  # type: ignore[arg-type]
+    if result is None or result.empty:
+        return 0.0
+    bbb_col = "BBB_20_2.0_2.0"
+    val = result[bbb_col].iloc[-1]
+    return float(val) if not np.isnan(val) else 0.0
 
 
 def _compute_volume_ratio(data: dict[str, Any]) -> float:
@@ -156,16 +155,19 @@ def _compute_volume_ratio(data: dict[str, Any]) -> float:
 
 
 def _compute_atr_14(data: dict[str, Any]) -> float:
-    """technical.atr.atr_14: 14日ATR"""
+    """technical.atr.atr_14: 14日ATR (via pandas-ta)"""
     high = data.get("high", [])
     low = data.get("low", [])
     close = data.get("close", [])
     if len(close) < 15:
         return 0.0
-    h, l, c = pd.Series(high), pd.Series(low), pd.Series(close)
-    tr = pd.concat([h - l, (h - c.shift()).abs(), (l - c.shift()).abs()], axis=1).max(axis=1)
-    atr = tr.rolling(14).mean()
-    return float(atr.iloc[-1]) if not np.isnan(atr.iloc[-1]) else 0.0
+    result = ta.atr(
+        high=pd.Series(high), low=pd.Series(low), close=pd.Series(close), length=14
+    )
+    if result is None or result.empty:
+        return 0.0
+    val = result.iloc[-1]
+    return float(val) if not np.isnan(val) else 0.0
 
 
 def _compute_vwap(data: dict[str, Any]) -> float:
@@ -225,56 +227,50 @@ def _compute_news_direction(data: dict) -> float:
     return positive / max(total, 1)
 
 
-# ── KDJ 指标（从 indicators.py 迁移，2026-07-20） ────────────────
+# ── KDJ 指标 (via pandas-ta) ─────────────────────────────────────
 def _compute_kdj_k(data: dict) -> float:
-    """technical.kdj.k_value: KDJ K 值"""
+    """technical.kdj.k_value: KDJ K 值 (via pandas-ta)"""
     high = data.get("high", [])
     low = data.get("low", [])
     close = data.get("close", [])
     if len(close) < 9:
         return 50.0
-    s_high, s_low, s_close = pd.Series(high), pd.Series(low), pd.Series(close)
-    low_min = s_low.rolling(9).min()
-    high_max = s_high.rolling(9).max()
-    denom = (high_max - low_min).replace(0, pd.NA)
-    rsv = (s_close - low_min) / denom * 100
-    k = rsv.ewm(com=2, adjust=False).mean()
-    return float(k.iloc[-1]) if not pd.isna(k.iloc[-1]) else 50.0
+    result = ta.kdj(high=pd.Series(high), low=pd.Series(low), close=pd.Series(close), k=9, d=3)  # type: ignore[arg-type]
+    if result is None or result.empty:
+        return 50.0
+    k_col = "K_9_3"
+    val = result[k_col].iloc[-1]
+    return float(val) if not pd.isna(val) else 50.0
 
 
 def _compute_kdj_d(data: dict) -> float:
-    """technical.kdj.d_value: KDJ D 值"""
+    """technical.kdj.d_value: KDJ D 值 (via pandas-ta)"""
     high = data.get("high", [])
     low = data.get("low", [])
     close = data.get("close", [])
     if len(close) < 9:
         return 50.0
-    s_high, s_low, s_close = pd.Series(high), pd.Series(low), pd.Series(close)
-    low_min = s_low.rolling(9).min()
-    high_max = s_high.rolling(9).max()
-    denom = (high_max - low_min).replace(0, pd.NA)
-    rsv = (s_close - low_min) / denom * 100
-    k = rsv.ewm(com=2, adjust=False).mean()
-    d = k.ewm(com=2, adjust=False).mean()
-    return float(d.iloc[-1]) if not pd.isna(d.iloc[-1]) else 50.0
+    result = ta.kdj(high=pd.Series(high), low=pd.Series(low), close=pd.Series(close), k=9, d=3)  # type: ignore[arg-type]
+    if result is None or result.empty:
+        return 50.0
+    d_col = "D_9_3"
+    val = result[d_col].iloc[-1]
+    return float(val) if not pd.isna(val) else 50.0
 
 
 def _compute_kdj_j(data: dict) -> float:
-    """technical.kdj.j_value: KDJ J 值"""
+    """technical.kdj.j_value: KDJ J 值 (via pandas-ta)"""
     high = data.get("high", [])
     low = data.get("low", [])
     close = data.get("close", [])
     if len(close) < 9:
         return 50.0
-    s_high, s_low, s_close = pd.Series(high), pd.Series(low), pd.Series(close)
-    low_min = s_low.rolling(9).min()
-    high_max = s_high.rolling(9).max()
-    denom = (high_max - low_min).replace(0, pd.NA)
-    rsv = (s_close - low_min) / denom * 100
-    k = rsv.ewm(com=2, adjust=False).mean()
-    d = k.ewm(com=2, adjust=False).mean()
-    j = 3 * k - 2 * d
-    return float(j.iloc[-1]) if not pd.isna(j.iloc[-1]) else 50.0
+    result = ta.kdj(high=pd.Series(high), low=pd.Series(low), close=pd.Series(close), k=9, d=3)  # type: ignore[arg-type]
+    if result is None or result.empty:
+        return 50.0
+    j_col = "J_9_3"
+    val = result[j_col].iloc[-1]
+    return float(val) if not pd.isna(val) else 50.0
 
 
 # ── 综合信号（从 signal.py 迁移，2026-07-20） ─────────────────────

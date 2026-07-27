@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Any
 import pytest
 from app.engine.risk_controls import (
-    MAX_SINGLE_WEIGHT,
+    RISK_SETTINGS,
     _consolidate_minnows,
     apply_risk_controls,
     check_defense_effectiveness,
@@ -122,4 +122,4 @@ class TestApplyRiskControls:
         result = apply_risk_controls([_strategy([_etf('510300', weight=0.5)], layer_budget={'core': 0.5})], fm)
         for a in result[0]['allocations']:
             if a.get('symbol') != 'CASH':
-                assert a['weight'] <= MAX_SINGLE_WEIGHT + 0.001
+                assert a['weight'] <= RISK_SETTINGS.max_single_weight + 0.001

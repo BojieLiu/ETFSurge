@@ -19,13 +19,68 @@ from ..fetchers import margin_fetcher
 
 logger = logging.getLogger(__name__)
 
-# 情绪指数权重
+# ── Static default weights (used when no regime context) ──────────
 SENTIMENT_WEIGHTS = {
-    "advance_ratio": 0.25,     # 涨跌家数比
-    "inst_consensus": 0.25,    # 机构共识度
-    "north_flow": 0.25,        # 北向资金
-    "margin_change": 0.25,     # 两融变化
+    "advance_ratio": 0.25,
+    "inst_consensus": 0.25,
+    "north_flow": 0.25,
+    "margin_change": 0.25,
 }
+
+# ── Regime-conditioned weights ───────────────────────────────────
+# In strong bull markets, institutional consensus and north flow carry more signal.
+# In bear/correction, advance/decline ratio and margin changes matter more.
+_REGIME_WEIGHTS = {
+    "bull_strong":   {"advance_ratio": 0.15, "inst_consensus": 0.35, "north_flow": 0.35, "margin_change": 0.15},
+    "bull_weakening": {"advance_ratio": 0.20, "inst_consensus": 0.30, "north_flow": 0.30, "margin_change": 0.20},
+    "range_bound":   {"advance_ratio": 0.25, "inst_consensus": 0.25, "north_flow": 0.25, "margin_change": 0.25},
+    "correction":    {"advance_ratio": 0.30, "inst_consensus": 0.20, "north_flow": 0.20, "margin_change": 0.30},
+    "bear":          {"advance_ratio": 0.35, "inst_consensus": 0.15, "north_flow": 0.15, "margin_change": 0.35},
+    "panic":         {"advance_ratio": 0.40, "inst_consensus": 0.10, "north_flow": 0.10, "margin_change": 0.40},
+    "defensive_rotate": {"advance_ratio": 0.30, "inst_consensus": 0.25, "north_flow": 0.20, "margin_change": 0.25},
+}
+
+
+def _dynamic_weights(regime: str | None) -> dict[str, float]:
+    """Return regime-conditioned weights, falling back to equal weights."""
+    if regime and regime in _REGIME_WEIGHTS:
+        return dict(_REGIME_WEIGHTS[regime])
+    return dict(SENTIMENT_WEIGHTS)
+
+
+# ── Momentum tracking for sentiment inertia correction ───────────
+# Stores (value, timestamp) for the three most recent calculations.
+_sentiment_history: list[tuple[float, float]] = []
+
+
+def _momentum_correction(current: float) -> float:
+    """
+    Apply inertia correction based on recent sentiment trajectory.
+    
+    A sharp drop (e.g., 75→55 in one period) indicates actual sentiment
+    is worse than the current value suggests. Adds a penalty proportional
+    to the rate of change.
+    """
+    global _sentiment_history
+    now = __import__('time').time()
+    _sentiment_history.append((current, now))
+    # Keep last 3 entries
+    if len(_sentiment_history) > 3:
+        _sentiment_history.pop(0)
+    
+    if len(_sentiment_history) < 2:
+        return current
+    
+    prev_val = _sentiment_history[-2][0]
+    delta = current - prev_val
+    
+    # Sharp drop (-15+ points in one period): penalize
+    # Sharp rise (+15+ points in one period): boost
+    correction = delta * 0.3  # Dampened momentum factor
+    corrected = current + correction
+    
+    # Clamp to [0, 100]
+    return max(0.0, min(100.0, corrected))
 
 
 def sentiment_label(index: float) -> str:
@@ -60,23 +115,24 @@ def calc_sentiment_index(
     margin_change: float = 0.0,
     regime: str | None = None,
 ) -> float:
-    """合成四维情绪指数 (0~100)。
+    """合成四维情绪指数 (0~100)，含动态权重 + 情绪惯量修正。
 
     Args:
         advance_ratio: 上涨家数占比 (0~1)
         inst_consensus: 机构共识度 (-1~1, 默认0.0=中性)
         north_flow: 北向资金方向 (-1~1, 归一化)
         margin_change: 两融变化 (-1~1, 归一化)
-        regime: 市场状态，用于数据缺失时的偏置
+        regime: 市场状态，用于条件权重 + 数据缺失偏置
     """
+    w = _dynamic_weights(regime)
     score = (
-        0.25 * advance_ratio
-        + 0.25 * normalize(inst_consensus)
-        + 0.25 * normalize(north_flow)
-        + 0.25 * normalize(margin_change)
+        w["advance_ratio"] * advance_ratio
+        + w["inst_consensus"] * normalize(inst_consensus)
+        + w["north_flow"] * normalize(north_flow)
+        + w["margin_change"] * normalize(margin_change)
     )
 
-    # 当 adv_ratio 和 north_flow 均为中性默认值时（数据源故障），用 regime 偏置
+    # 当多维度均为中性默认值时（数据源故障），用 regime 偏置
     all_default = (
         abs(advance_ratio - 0.5) < 0.05
         and abs(north_flow) < 0.01
@@ -85,13 +141,15 @@ def calc_sentiment_index(
     if all_default and regime:
         regime_bias = {
             "bull_strong": 0.70, "bull_weakening": 0.55,
-            "range_bound": 0.50, "slow_rise": 0.55,
+            "range_bound": 0.50,
             "correction": 0.30, "bear": 0.20,
             "defensive_rotate": 0.35, "panic": 0.10,
         }
         score = regime_bias.get(regime, score)
 
-    return round(score * 100, 1)
+    raw = round(score * 100, 1)
+    # Apply momentum (inertia) correction
+    return _momentum_correction(raw)
 
 
 def fetch_advance_decline_ratio() -> float:
