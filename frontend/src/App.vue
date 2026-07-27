@@ -34,6 +34,12 @@
           <span class="status-text">{{ connectionStatusText }}</span>
         </div>
 
+        <!-- Warmup Indicator -->
+        <div v-if="isWarmingUp" class="nav-warmup" title="数据预热中" aria-label="数据预热中">
+          <span class="warmup-dot" aria-hidden="true"></span>
+          <span class="warmup-label">预热中</span>
+        </div>
+
         <!-- Global task indicator (Plan A) -->
         <TaskIndicator />
       </nav>
@@ -99,12 +105,16 @@ import { useToastStore } from './stores/toast'
 import { useLoadingStore } from './stores/loading'
 import { useTaskStore } from './stores/task'
 import { portfolioApi } from './api'
+import { useWarmupStatus } from './composables/useWarmupStatus'
 import TaskIndicator from './components/TaskIndicator.vue'
 
 const router = useRouter()
 const route = useRoute()
 const toastStore = useToastStore()
 const loadingStore = useLoadingStore()
+
+// Warmup status (global — used in nav-bar indicator)
+const { isWarmingUp, startPolling, stopPolling } = useWarmupStatus()
 
 // Navigation items
 const navItems = [
@@ -160,6 +170,15 @@ const taskStore = useTaskStore()
 let taskWs = null
 let taskWsReconnectTimer = null
 let taskWsClosedByUs = false
+
+// Start warmup polling on mount, stop on unmount
+onMounted(() => {
+  startPolling()
+})
+
+onUnmounted(() => {
+  stopPolling()
+})
 
 function connectTaskWs() {
   if (taskWs && taskWs.readyState <= 1) return
@@ -418,6 +437,31 @@ onUnmounted(() => {
   50% { opacity: 0.5; }
 }
 
+/* Nav Warmup Indicator */
+.nav-warmup {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  font: var(--text-caption);
+  color: var(--color-text-warning);
+  background: var(--color-bg-warning-subtle);
+  border-radius: var(--radius-full);
+  white-space: nowrap;
+}
+.warmup-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-warning-500);
+  animation: warmup-pulse-dot 1.5s ease-in-out infinite;
+}
+@keyframes warmup-pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+.warmup-label { font-weight: var(--font-weight-medium); }
+
 /* ==========================================
    Main Content
    ========================================== */
@@ -653,6 +697,8 @@ onUnmounted(() => {
   .nav-status .status-text {
     display: none;
   }
+
+  .nav-warmup { display: none; }
 
   .page-title { font-size: var(--font-size-xl); }
   .main { padding: var(--space-4) 0; }

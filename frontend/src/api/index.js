@@ -86,6 +86,10 @@ export const factorsApi = {
   getActive: () => api.get('/factors/active'),
 }
 
+export const systemApi = {
+  warmup: () => api.get('/system/warmup'),
+}
+
 export const adminApi = {
   tokenUsage: () => api.get('/admin/token-usage'),
   tokenTimeseries: (params = {}) => api.get('/admin/token-usage/timeseries', { params }),

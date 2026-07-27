@@ -13,7 +13,7 @@ from .tasks.news_refresh import refresh_news_cache
 from .tasks.sector_refresh import refresh_sector_cache
 from .monitor.token_usage import token_store
 from .core.logging import get_logger, setup_logging
-from .routers import market, portfolio, analysis, news, ws, admin, factors
+from .routers import market, portfolio, analysis, news, ws, admin, factors, system
 from .services.source_health import health_loop
 
 logger = get_logger("lifespan")
@@ -34,6 +34,15 @@ async def lifespan(app: FastAPI):
     from .analysis.llm import generate_strategy_check_report  # noqa: F811 — lazy import, never called by name
     from .tasks.strategy_check_worker import strategy_check_pipeline  # noqa: F811 — lazy import, never called by name
     logger.info("[lifespan] Heavy modules pre-loaded")
+
+    # Initialize warmup state -- consumed by /api/v1/system/warmup endpoint
+    app.state.warmup = {
+        "market_cache": {"done": False, "success": False, "label": "行情缓存"},
+        "global_indices": {"done": False, "success": False, "label": "全球指数"},
+        "etf_cache": {"done": False, "success": False, "label": "ETF 扫描"},
+    }
+    app.state._startup_ts = time.time()
+    logger.info("[warmup] Warmup state initialized")
 
     # Register all data-source health probes (7 probes + existing)
     from .monitor.probes import register_all_probes
@@ -71,35 +80,52 @@ async def lifespan(app: FastAPI):
 
     # 启动时后台预热行情缓存（不阻塞启动，25s 超时）
     async def _warmup_market_cache():
+        _mark = app.state.warmup["market_cache"]
         try:
             await asyncio.wait_for(refresh_market_cache(), timeout=25)
+            _mark["done"] = True
+            _mark["success"] = True
             logger.info("行情缓存预热完成")
         except (Exception, asyncio.CancelledError):
+            _mark["done"] = True
+            _mark["success"] = False
             logger.exception("行情缓存预热失败（不影响启动）")
 
     asyncio.create_task(_warmup_market_cache())
 
     # 启动时预热全球指数缓存（非阻塞，写入持久化 cache，重启后不丢失）
     async def _warmup_global_indices():
+        _mark = app.state.warmup["global_indices"]
         try:
             from .services.market_service import get_global_indices
             await asyncio.wait_for(get_global_indices(), timeout=30)
+            _mark["done"] = True
+            _mark["success"] = True
             logger.info("全球指数缓存预热完成")
         except (Exception, asyncio.CancelledError):
+            _mark["done"] = True
+            _mark["success"] = False
             logger.exception("全球指数缓存预热失败（非交易时段正常）")
     asyncio.create_task(_warmup_global_indices())
 
     # 启动时预热 ETF 缓存（非阻塞），带超时保护
     async def _warmup_etf_cache():
+        _mark = app.state.warmup["etf_cache"]
         try:
             from app.fetchers.etf_scanner import fetch_all_etfs_base
             from ..core.async_utils import run_sync
             result = await run_sync(fetch_all_etfs_base, timeout=120)
+            _mark["done"] = True
+            _mark["success"] = bool(result)
             if result:
                 logger.info("ETF cache warmup done: %d items", len(result))
         except asyncio.TimeoutError:
+            _mark["done"] = True
+            _mark["success"] = False
             logger.warning("ETF full scan timed out (120s), will complete on demand")
         except Exception as e:
+            _mark["done"] = True
+            _mark["success"] = False
             logger.warning("ETF cache warmup failed: %s", e)
     asyncio.create_task(_warmup_etf_cache())
 
@@ -258,6 +284,7 @@ app.include_router(news.router)
 app.include_router(ws.router)
 app.include_router(admin.router)
 app.include_router(factors.router)
+app.include_router(system.router)
 
 
 @app.get("/health")

@@ -53,6 +53,10 @@ export function useDashboardData(capitalOn, capitalOff, activeTab) {
   const cashPctOff = computed(() => allocationOff.value.cash_weight || 0)
   const cashOff = computed(() => allocationOff.value.cash_amount || 0)
 
+  // fetchAttempted: true after first API call completes (success or failure).
+  // This lets the dashboard distinguish "loading" from "empty portfolio".
+  const fetchAttempted = ref(false)
+
   // Loading state: true when both allocation arrays are empty
   const loading = computed(() => allocationOn.value.allocations.length === 0 && allocationOff.value.allocations.length === 0)
 
@@ -65,6 +69,8 @@ export function useDashboardData(capitalOn, capitalOff, activeTab) {
     } catch (e) {
       logger.warn('[Dashboard] fetchGlobalIndices failed:', e)
       globalIndices.value = {}
+    } finally {
+      fetchAttempted.value = true
     }
   }
 
@@ -78,6 +84,8 @@ export function useDashboardData(capitalOn, capitalOff, activeTab) {
       allocationOff.value = offRes.data || { allocations: [], total_amount: 0 }
     } catch (e) {
       toast('获取分配数据失败', 'error')
+    } finally {
+      fetchAttempted.value = true
     }
   }
 
@@ -91,6 +99,8 @@ export function useDashboardData(capitalOn, capitalOff, activeTab) {
       pnlOffData.value = offRes.data || { items: [] }
     } catch (e) {
       toast('获取盈亏数据失败', 'error')
+    } finally {
+      fetchAttempted.value = true
     }
   }
 
@@ -117,7 +127,7 @@ export function useDashboardData(capitalOn, capitalOff, activeTab) {
 
   return {
     allocationOn, allocationOff, pnlOnData, pnlOffData,
-    pnlHistory, pnlHistoryLoading, loading,
+    pnlHistory, pnlHistoryLoading, loading, fetchAttempted,
     globalIndices,
     totalAll, pnlOn, pnlOff, pnlItems, pnlTotal, pnlTotalAmount, pnlWeightedChange,
     cashPctOn, cashOn, cashPctOff, cashOff,

@@ -48,8 +48,15 @@
         </template>
       </AppTabs>
 
-      <!-- Loading Skeletons -->
-      <div v-if="loading" class="loading-grid" aria-busy="true" aria-label="加载中">
+      <!-- Loading Skeletons (initial fetch not yet attempted) -->
+      <div v-if="!fetchAttempted" class="loading-grid" aria-busy="true" aria-label="加载中">
+        <div v-if="isWarmingUp" class="warmup-banner">
+          <div class="warmup-spinner" aria-hidden="true"></div>
+          <div class="warmup-text">
+            <p class="warmup-title">{{ phaseTitle }}</p>
+            <p class="warmup-desc">{{ phaseDesc }}</p>
+          </div>
+        </div>
         <div class="card skeleton-card">
           <Skeleton type="chart" height="260" />
         </div>
@@ -58,18 +65,18 @@
         </div>
       </div>
 
-      <!-- Empty State & P&L Sections (visible when not loading) -->
-      <template v-if="!loading">
-        <!-- Empty State -->
-        <div v-if="!allocationOn?.allocations?.length && !allocationOff?.allocations?.length" class="empty-state">
-          <div class="empty-icon" aria-hidden="true">📊</div>
-          <h3 class="empty-title">暂无组合数据</h3>
-          <p class="empty-description">请前往「组合与分析」添加 ETF</p>
-          <AppButton variant="primary" @click="$router.push('/portfolio-analysis')">
-            前往组合与分析
-          </AppButton>
-        </div>
+      <!-- Empty State (fetch attempted, no allocations anywhere) -->
+      <div v-if="fetchAttempted && !allocationOn?.allocations?.length && !allocationOff?.allocations?.length" class="empty-state">
+        <div class="empty-icon" aria-hidden="true">📊</div>
+        <h3 class="empty-title">暂无组合数据</h3>
+        <p class="empty-description">请前往「组合与分析」添加 ETF</p>
+        <AppButton variant="primary" @click="$router.push('/portfolio-analysis')">
+          前往组合与分析
+        </AppButton>
+      </div>
 
+      <!-- Content + P&L (visible when fetch attempted AND has allocations) -->
+      <template v-if="fetchAttempted && (allocationOn?.allocations?.length || allocationOff?.allocations?.length)">
         <!-- Daily P&L Details -->
         <PnLDetailTable
           :items="pnlItems"
@@ -102,6 +109,7 @@ import { usePortfolioStore } from '../stores/portfolio'
 import { storeToRefs } from 'pinia'
 import logger from '../utils/logger'
 import { useDashboardData } from '../composables/useDashboardData'
+import { useWarmupStatus } from '../composables/useWarmupStatus'
 import GlobalIndicesStrip from '../components/GlobalIndicesStrip.vue'
 import AppButton from '../components/ui/AppButton.vue'
 import AppTabs from '../components/ui/AppTabs.vue'
@@ -128,11 +136,15 @@ const route = useRoute()
 // Composable – all data logic
 const {
   allocationOn, allocationOff, globalIndices,
-  pnlHistory, pnlHistoryLoading, loading,
+  pnlHistory, pnlHistoryLoading, loading, fetchAttempted,
   totalAll, pnlOn, pnlOff, pnlItems, pnlTotal, pnlTotalAmount, pnlWeightedChange,
   cashPctOn, cashOn, cashPctOff, cashOff,
   fetchGlobalIndices, fetchAllocations, fetchPnl, fetchPnlHistory, refreshAll
 } = useDashboardData(capitalOn, capitalOff, activeTab)
+
+const {
+  isWarmingUp, phaseTitle, phaseDesc, startPolling, stopPolling,
+} = useWarmupStatus()
 
 const tabs = [
   { value: 'combined', label: '综合' },
@@ -150,6 +162,8 @@ onErrorCaptured((err) => {
 })
 
 onMounted(async () => {
+  // Start warmup polling (stops automatically when all_done or times out)
+  startPolling()
   await Promise.allSettled([fetchGlobalIndices(), fetchAllocations(), fetchPnl()])
   fetchPnlHistory(activeTab.value)
   marketStore.connectWS((data) => {
@@ -219,6 +233,33 @@ function onRetry() {
   box-shadow: var(--shadow-sm);
   overflow: hidden;
 }
+/* Warmup Banner */
+.warmup-banner {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  background: var(--color-bg-info-subtle);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-lg);
+  margin-bottom: var(--space-2);
+}
+.warmup-spinner {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border: 3px solid var(--color-border-light);
+  border-top-color: var(--color-brand-600);
+  border-radius: 50%;
+  animation: warmup-spin 0.8s linear infinite;
+}
+@keyframes warmup-spin {
+  to { transform: rotate(360deg); }
+}
+.warmup-text { flex: 1; min-width: 0; }
+.warmup-title { margin: 0; font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); color: var(--color-brand-700); }
+.warmup-desc { margin: var(--space-1) 0 0; font-size: var(--font-size-xs); color: var(--color-text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Empty State */
 .empty-state {
   display: flex;

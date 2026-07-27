@@ -1,4 +1,4 @@
-# ETF Surge 方案实施总计划
+﻿# ETF Surge 方案实施总计划
 
 > 生成日期: 2026-07-27 | 版本: **v9.5**
 > ✅ **Phase 6.1 已完成**：可观测性与系统增强 — ConfigManager + app_config 表（`models/app_config.py`, `core/config_manager.py`）、ConfigPage（`views/ConfigView.vue`）、Sector API 实时行情返回（market.py 路由优先级调整）、LLM 热点板块注入（llm_context.py + pool_manager.py）、stars 时间新鲜度 + Level 2 精度调整（news_fetcher.py + levistock_fetcher.py）、verify_e2e.py 扩展（stars/level 校验 + check_sector_data）。详见 §4 Phase 6.1。
@@ -910,6 +910,20 @@ curl -s "http://localhost:8000/api/v1/admin/sources/events/timeline?hours=1"
 | 6.1.8 | `news_fetcher` 验证脚本更新 verify_e2e.py | news-pipeline-fix §8 | ✅ 已实施 | `scripts/verify_e2e.py` — 新增 stars/level 字段校验 + check_sector_data() 函数, 注册 sectors 模块 |
 
 **验证**: 配置页 GET/PUT/恢复 ✅ 已实施 + 板块数据实时行情带涨跌颜色 ✅ 已实施 + stars 字段含时间新鲜度 ✅ 已实施 + verify_e2e.py --module sectors ✅ 已实施
+
+### Phase 6.2 — 数据预热可见性与 Dashboard 加载体验优化 ✅ **2026-07-27 已全部实施**
+
+| # | 任务 | 源文档 | 状态 | 变更文件 |
+|---|------|--------|:----:|---------|
+| 6.2.1 | Warmup Status API (GET /api/v1/system/warmup) | 本方案 | ✅ 已实施 | **新增**: routers/system.py, api-contracts/system/warmup.md; **修改**: main.py (warmup 状态初始化 + 预热任务状态追踪) |
+| 6.2.2 | Backend unit tests (warmup status + endpoint) | 本方案 | ✅ 已实施 | **新增**: tests/test_warmup_status.py (5 tests, all mock) |
+| 6.2.3 | Frontend useWarmupStatus.js composable | 本方案 | ✅ 已实施 | **新增**: composables/useWarmupStatus.js (5s polling, 120s timeout, phase title derivation) |
+| 6.2.4 | Dashboard multi-phase loading UX | 本方案 | ✅ 已实施 | **修改**: views/Dashboard.vue (warmup banner + fetchAttempted separation) |
+| 6.2.5 | Fix useDashboardData.js loading/empty conflated bug | 本方案 | ✅ 已实施 | **修改**: composables/useDashboardData.js (added fetchAttempted ref, fixed empty portfolio deadlock) |
+| 6.2.6 | Nav bar warmup indicator | 本方案 | ✅ 已实施 | **修改**: App.vue (nav-warmup pulsing dot + label) |
+| 6.2.7 | Frontend API registration (systemApi) | 本方案 | ✅ 已实施 | **修改**: api/index.js (added systemApi.warmup()) |
+
+**验证**: Backend tests 5/5 PASS + npm run build (741 modules, 0 errors) + Nav bar shows warming-up pulse indicator + Dashboard skeleton with phase text
 
 ### Phase 7.1 — 远期优化
 
