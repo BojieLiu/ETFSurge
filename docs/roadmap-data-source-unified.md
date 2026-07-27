@@ -1,245 +1,181 @@
-# 数据源统一改造方案
-
-> 创建日期: 2026-07-22 | 版本: v3.0 | 上次更新: 2026-07-26
-> **合并替代**：此文档合并了以下三份方案的代码改动部分，消除重叠与冲突：
-> 1. `source-registry-optimization-plan.md` — China market 接入 SourceRegistry
-> 2. `data-source-monitoring-plan.md` — 数据源可观测性
-> 3. `market-awareness-and-data-source-plan.md` §4 — 美股数据源替换 (yfinance → Stooq)
+﻿# 鏁版嵁婧愮粺涓€鏀归€犳柟妗?
+> 鍒涘缓鏃ユ湡: 2026-07-22 | 鐗堟湰: v3.0 | 涓婃鏇存柊: 2026-07-26
+> **鍚堝苟鏇夸唬**锛氭鏂囨。鍚堝苟浜嗕互涓嬩笁浠芥柟妗堢殑浠ｇ爜鏀瑰姩閮ㄥ垎锛屾秷闄ら噸鍙犱笌鍐茬獊锛?> 1. `archived/source-registry-optimization-plan.md` 鈥?China market 鎺ュ叆 SourceRegistry
+> 2. `archived/data-source-monitoring-plan.md` 鈥?鏁版嵁婧愬彲瑙傛祴鎬?> 3. `market-awareness-and-data-source-plan.md` 搂4 鈥?缇庤偂鏁版嵁婧愭浛鎹?(yfinance 鈫?Stooq)
 >
-> **v3.0 状态总览**：除 Phase D7（前端监控面板）外，所有 Phase (A→D6) **均已实施**。
-> 本文档已从"实施计划"转换为"实施回顾 + 剩余任务指引"。
->
-> **v2.0→v3.0 更新说明**：2026-07-26 全量代码审计发现 v2.0 中的实施方案绝大部分已被后续 commits 落地。
-> 修正：Phase A（Stooq 已下线→实际为 TwelveData→Finnhub）、
-> Phase B（3 函数已全部接入 registry.route() + _filtered price=0 过滤）、
-> Phase C（probes.py 已创建含 8 探针）、
-> Phase D（D1-D6 已实施，仅 D7 前端页面待完成）。
-> 删除了对已不存在文件（stooq_fetcher.py）的引用。
->
-> 涉及代码审计文件（2026-07-26）:
->   - `backend/app/fetchers/china_market.py` (961 行，3 函数已使用 registry.route + _filtered)
->   - `backend/app/services/source_registry.py` (192 行，已含 route_name 参数 + on_event 回调 + get_states + circuit_breaker_status)
->   - ~~`backend/app/fetchers/stooq_fetcher.py`~~ **文件已删除**（Stooq CSV API 已关闭返回 404/Cloudflare）
->   - `backend/app/services/source_health.py` (已有 register_probe + run_probes + health_loop 机制)
->   - `backend/app/services/market_service.py` (982 行，`_route_us()` 使用 `TwelveData→Finnhub`，已移除 Stooq/AlphaVantage/yfinance)
->   - `backend/app/main.py` (253 行，已调用 register_all_probes + 挂载 SourceEventStore 回调)
->   - `backend/app/monitor/probes.py` (存在，注册 8 个探针：6 数据源 + 2 线程池) ✅ 新建完成
->   - `backend/app/monitor/source_events.py` (存在，完整 SourceEventStore 实现) ✅ 新建完成
->   - `backend/app/routers/admin.py` (存在，4 个 sources API 端点已实现)
+> **v3.0 鐘舵€佹€昏**锛氶櫎 Phase D7锛堝墠绔洃鎺ч潰鏉匡級澶栵紝鎵€鏈?Phase (A鈫扗6) **鍧囧凡瀹炴柦**銆?> 鏈枃妗ｅ凡浠?瀹炴柦璁″垝"杞崲涓?瀹炴柦鍥為【 + 鍓╀綑浠诲姟鎸囧紩"銆?>
+> **v2.0鈫抳3.0 鏇存柊璇存槑**锛?026-07-26 鍏ㄩ噺浠ｇ爜瀹¤鍙戠幇 v2.0 涓殑瀹炴柦鏂规缁濆ぇ閮ㄥ垎宸茶鍚庣画 commits 钀藉湴銆?> 淇锛歅hase A锛圫tooq 宸蹭笅绾库啋瀹為檯涓?TwelveData鈫扚innhub锛夈€?> Phase B锛? 鍑芥暟宸插叏閮ㄦ帴鍏?registry.route() + _filtered price=0 杩囨护锛夈€?> Phase C锛坧robes.py 宸插垱寤哄惈 8 鎺㈤拡锛夈€?> Phase D锛圖1-D6 宸插疄鏂斤紝浠?D7 鍓嶇椤甸潰寰呭畬鎴愶級銆?> 鍒犻櫎浜嗗宸蹭笉瀛樺湪鏂囦欢锛坰tooq_fetcher.py锛夌殑寮曠敤銆?>
+> 娑夊強浠ｇ爜瀹¤鏂囦欢锛?026-07-26锛?
+>   - `backend/app/fetchers/china_market.py` (961 琛岋紝3 鍑芥暟宸蹭娇鐢?registry.route + _filtered)
+>   - `backend/app/services/source_registry.py` (192 琛岋紝宸插惈 route_name 鍙傛暟 + on_event 鍥炶皟 + get_states + circuit_breaker_status)
+>   - ~~`backend/app/fetchers/stooq_fetcher.py`~~ **鏂囦欢宸插垹闄?*锛圫tooq CSV API 宸插叧闂繑鍥?404/Cloudflare锛?>   - `backend/app/services/source_health.py` (宸叉湁 register_probe + run_probes + health_loop 鏈哄埗)
+>   - `backend/app/services/market_service.py` (982 琛岋紝`_route_us()` 浣跨敤 `TwelveData鈫扚innhub`锛屽凡绉婚櫎 Stooq/AlphaVantage/yfinance)
+>   - `backend/app/main.py` (253 琛岋紝宸茶皟鐢?register_all_probes + 鎸傝浇 SourceEventStore 鍥炶皟)
+>   - `backend/app/monitor/probes.py` (瀛樺湪锛屾敞鍐?8 涓帰閽堬細6 鏁版嵁婧?+ 2 绾跨▼姹? 鉁?鏂板缓瀹屾垚
+>   - `backend/app/monitor/source_events.py` (瀛樺湪锛屽畬鏁?SourceEventStore 瀹炵幇) 鉁?鏂板缓瀹屾垚
+>   - `backend/app/routers/admin.py` (瀛樺湪锛? 涓?sources API 绔偣宸插疄鐜?
 
 ---
 
-## 背景
+## 鑳屾櫙
 
-这三份方案各自覆盖了数据源的不同方面，但在 `SourceRegistry`、`china_market.py` 降级链、美股路由等方面多处重叠。合并为统一方案后，可对外按序实施、避免冲突。
-
-统一方案覆盖三大目标：
-
-1. **提升国内数据路径韧性** — mootdx/Sina/QQ 等核心降级链接入熔断器
-2. **替换不稳定数据源** — yfinance → 多源熔断链（TwelveData→Finnhub，境内直连稳定）
-3. **建立可观测性** — 全链路事件记录 + 健康探针（复用 `monitor/token_usage.py` 的模式）
+杩欎笁浠芥柟妗堝悇鑷鐩栦簡鏁版嵁婧愮殑涓嶅悓鏂归潰锛屼絾鍦?`SourceRegistry`銆乣china_market.py` 闄嶇骇閾俱€佺編鑲¤矾鐢辩瓑鏂归潰澶氬閲嶅彔銆傚悎骞朵负缁熶竴鏂规鍚庯紝鍙澶栨寜搴忓疄鏂姐€侀伩鍏嶅啿绐併€?
+缁熶竴鏂规瑕嗙洊涓夊ぇ鐩爣锛?
+1. **鎻愬崌鍥藉唴鏁版嵁璺緞闊ф€?* 鈥?mootdx/Sina/QQ 绛夋牳蹇冮檷绾ч摼鎺ュ叆鐔旀柇鍣?2. **鏇挎崲涓嶇ǔ瀹氭暟鎹簮** 鈥?yfinance 鈫?澶氭簮鐔旀柇閾撅紙TwelveData鈫扚innhub锛屽鍐呯洿杩炵ǔ瀹氾級
+3. **寤虹珛鍙娴嬫€?* 鈥?鍏ㄩ摼璺簨浠惰褰?+ 鍋ュ悍鎺㈤拡锛堝鐢?`monitor/token_usage.py` 鐨勬ā寮忥級
 
 ---
 
-## 代码审计结果摘要（2026-07-26 更新）
+## 浠ｇ爜瀹¤缁撴灉鎽樿锛?026-07-26 鏇存柊锛?
+### 宸插氨缁殑鍩虹璁炬柦
 
-### 已就绪的基础设施
-
-| 组件 | 位置 | 当前状态 |
+| 缁勪欢 | 浣嶇疆 | 褰撳墠鐘舵€?|
 |------|------|---------|
-| `SourceRegistry.route()` | `services/source_registry.py:106` | ✅ 存在，已含 `route_name` 参数 + 硬失败支持 |
-| `SourceHealth` 熔断器 | `services/source_registry.py:15` | ✅ 存在，已含 `on_event` 回调 + `record_hard_failure` |
-| 健康探针系统 | `services/source_health.py` | ✅ 存在，`register_probe()` + `run_probes()` + `health_loop()` 完整 |
-| 已注册探针 | `monitor/probes.py` (via main.py:39) | ✅ 8 个（mootdx, sina, tencent, akshare, levistock, dongfang, threadpool_main, threadpool_akshare） |
-| `Stooq` 相关 | — | ❌ **已移除**（CSV API 关闭返回 404/Cloudflare，文件已删除） |
-| 监控模块 | `monitor/token_usage.py` | ✅ 有 `TokenUsageStore` 模式可复用 |
-| 美股 `_route_us()` | `market_service.py:762` | ✅ 当前为 `TwelveData→Finnhub`（已移除 Stooq/AlphaVantage/yfinance） |
-| China market 降级链 | `china_market.py:444-518` | ✅ 3 函数（A股实时/批量/港股）均已使用 `registry.route()` |
-| price=0 过滤 | `china_market.py:424-439` | ✅ `_filtered()` 辅助函数在 provider lambda 层过滤 |
-| SourceEventStore | `monitor/source_events.py` | ✅ 存在，内存环(5000条) + SQLite 异步刷盘 + 7天滚动清理 |
-| 数据源监控 API | `routers/admin.py` | ✅ 4 个端点（health/timeline/failures/circuit-breakers） |
-| 前端监控面板 | 待新建 | ❌ **唯一未完成项**（D7） |
+| `SourceRegistry.route()` | `services/source_registry.py:106` | 鉁?瀛樺湪锛屽凡鍚?`route_name` 鍙傛暟 + 纭け璐ユ敮鎸?|
+| `SourceHealth` 鐔旀柇鍣?| `services/source_registry.py:15` | 鉁?瀛樺湪锛屽凡鍚?`on_event` 鍥炶皟 + `record_hard_failure` |
+| 鍋ュ悍鎺㈤拡绯荤粺 | `services/source_health.py` | 鉁?瀛樺湪锛宍register_probe()` + `run_probes()` + `health_loop()` 瀹屾暣 |
+| 宸叉敞鍐屾帰閽?| `monitor/probes.py` (via main.py:39) | 鉁?8 涓紙mootdx, sina, tencent, akshare, levistock, dongfang, threadpool_main, threadpool_akshare锛?|
+| `Stooq` 鐩稿叧 | 鈥?| 鉂?**宸茬Щ闄?*锛圕SV API 鍏抽棴杩斿洖 404/Cloudflare锛屾枃浠跺凡鍒犻櫎锛?|
+| 鐩戞帶妯″潡 | `monitor/token_usage.py` | 鉁?鏈?`TokenUsageStore` 妯″紡鍙鐢?|
+| 缇庤偂 `_route_us()` | `market_service.py:762` | 鉁?褰撳墠涓?`TwelveData鈫扚innhub`锛堝凡绉婚櫎 Stooq/AlphaVantage/yfinance锛?|
+| China market 闄嶇骇閾?| `china_market.py:444-518` | 鉁?3 鍑芥暟锛圓鑲″疄鏃?鎵归噺/娓偂锛夊潎宸蹭娇鐢?`registry.route()` |
+| price=0 杩囨护 | `china_market.py:424-439` | 鉁?`_filtered()` 杈呭姪鍑芥暟鍦?provider lambda 灞傝繃婊?|
+| SourceEventStore | `monitor/source_events.py` | 鉁?瀛樺湪锛屽唴瀛樼幆(5000鏉? + SQLite 寮傛鍒风洏 + 7澶╂粴鍔ㄦ竻鐞?|
+| 鏁版嵁婧愮洃鎺?API | `routers/admin.py` | 鉁?4 涓鐐癸紙health/timeline/failures/circuit-breakers锛?|
+| 鍓嶇鐩戞帶闈㈡澘 | 寰呮柊寤?| 鉂?**鍞竴鏈畬鎴愰」**锛圖7锛?|
 
-### 需改造的关键缺口
+### 闇€鏀归€犵殑鍏抽敭缂哄彛
 
-| 缺口 | 涉及文件 | 严重度 | 状态 |
+| 缂哄彛 | 娑夊強鏂囦欢 | 涓ラ噸搴?| 鐘舵€?|
 |------|---------|--------|:----:|
-| China market 降级链硬编码未走 SR | `china_market.py` | P0 | ✅ 已实施 |
-| price=0 检查在顶层函数而非 route 中 | `china_market.py:371,381` | P1 | ✅ 已实施（_filtered） |
-| 仅 2 个探针，缺少 mootdx/sina/tencent/akshare/levistock | `main.py` | P1 | ✅ 已实施（8 探针） |
-| 无 SourceEventStore，无数据源监控 API | 需新建 | P2 | ✅ D1-D6 已实施 |
-| 无前端数据源监控面板 | 需新建 | P2 | ❌ **D7 待实施** |
-| 非交易时段 price=0 会被误判为失败 | `china_market.py` 全部 fetcher | P2 | ⚠️ 需特别注意（_filtered 已缓解但非交易时段仍可能误判） |
+| China market 闄嶇骇閾剧‖缂栫爜鏈蛋 SR | `china_market.py` | P0 | 鉁?宸插疄鏂?|
+| price=0 妫€鏌ュ湪椤跺眰鍑芥暟鑰岄潪 route 涓?| `china_market.py:371,381` | P1 | 鉁?宸插疄鏂斤紙_filtered锛?|
+| 浠?2 涓帰閽堬紝缂哄皯 mootdx/sina/tencent/akshare/levistock | `main.py` | P1 | 鉁?宸插疄鏂斤紙8 鎺㈤拡锛?|
+| 鏃?SourceEventStore锛屾棤鏁版嵁婧愮洃鎺?API | 闇€鏂板缓 | P2 | 鉁?D1-D6 宸插疄鏂?|
+| 鏃犲墠绔暟鎹簮鐩戞帶闈㈡澘 | 闇€鏂板缓 | P2 | 鉂?**D7 寰呭疄鏂?* |
+| 闈炰氦鏄撴椂娈?price=0 浼氳璇垽涓哄け璐?| `china_market.py` 鍏ㄩ儴 fetcher | P2 | 鈿狅笍 闇€鐗瑰埆娉ㄦ剰锛坃filtered 宸茬紦瑙ｄ絾闈炰氦鏄撴椂娈典粛鍙兘璇垽锛?|
 
 ---
 
-## 架构概览（当前状态 2026-07-26）
-
+## 鏋舵瀯姒傝锛堝綋鍓嶇姸鎬?2026-07-26锛?
 ```
-┌─ 业务路径 (route_name) ────────────────────────┐
-│ A_stock_realtime / HK_stock_realtime / US_ETF   │
-│ A_stock_batch / probe / sector                  │
-└─────────────────────────────────────────────────┘
-         │ 路由（统一走 SourceRegistry.route()）
-         ▼
-┌─ SourceRegistry (熔断器) ───────────────────────┐
-│  route(providers, route_name="...")              │
-│     ├─ 冷却判断 → 跳过失败源                     │
-│     ├─ 调用 → 计时 → result 有效性判断           │
-│     └─ on_event 回调 → SourceEventStore.record() │
-└──────────────────────────────────────────────────┘
-         │ 降级链（按优先级）
-         ▼
-┌─ 数据源 ────────────────────────────────────────┐
-│ A股实时:  mootdx → Sina                          │
-│ A股批量:  mootdx → Tencent(QQ) → Sina           │
-│ 港股实时:  Sina → Tencent(QQ) → 东方财富         │
-│ 美股实时:  TwelveData → Finnhub                  │  ← v3: 移除 Stooq/Alphavantage/yfinance
-│ 全球指数:  Sina → TwelveData → Finnhub           │  ← v3: 移除 Stooq
-│ 行业板块:  levistock → akshare                   │
-└──────────────────────────────────────────────────┘
-         │ 探针 (每 120s, 8 个)
-         ▼
-┌─ 可观测性 ──────────────────────────────────────┐
-│ SourceEventStore (复用 monitor/token_usage 模式) │
-│  ├─ 内存环 (5000条) → 异步刷盘 data/source.db   │  ✅
-│  ├─ 4 个 REST API → admin 路由                  │  ✅
-│  └─ 前端监控面板（风格对齐 TokenMonitor）        │  ❌ D7 待实施
-└──────────────────────────────────────────────────┘
-```
+鈹屸攢 涓氬姟璺緞 (route_name) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹?A_stock_realtime / HK_stock_realtime / US_ETF   鈹?鈹?A_stock_batch / probe / sector                  鈹?鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?         鈹?璺敱锛堢粺涓€璧?SourceRegistry.route()锛?         鈻?鈹屸攢 SourceRegistry (鐔旀柇鍣? 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹? route(providers, route_name="...")              鈹?鈹?    鈹溾攢 鍐峰嵈鍒ゆ柇 鈫?璺宠繃澶辫触婧?                    鈹?鈹?    鈹溾攢 璋冪敤 鈫?璁℃椂 鈫?result 鏈夋晥鎬у垽鏂?          鈹?鈹?    鈹斺攢 on_event 鍥炶皟 鈫?SourceEventStore.record() 鈹?鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?         鈹?闄嶇骇閾撅紙鎸変紭鍏堢骇锛?         鈻?鈹屸攢 鏁版嵁婧?鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹?A鑲″疄鏃?  mootdx 鈫?Sina                          鈹?鈹?A鑲℃壒閲?  mootdx 鈫?Tencent(QQ) 鈫?Sina           鈹?鈹?娓偂瀹炴椂:  Sina 鈫?Tencent(QQ) 鈫?涓滄柟璐㈠瘜         鈹?鈹?缇庤偂瀹炴椂:  TwelveData 鈫?Finnhub                  鈹? 鈫?v3: 绉婚櫎 Stooq/Alphavantage/yfinance
+鈹?鍏ㄧ悆鎸囨暟:  Sina 鈫?TwelveData 鈫?Finnhub           鈹? 鈫?v3: 绉婚櫎 Stooq
+鈹?琛屼笟鏉垮潡:  levistock 鈫?akshare                   鈹?鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?         鈹?鎺㈤拡 (姣?120s, 8 涓?
+         鈻?鈹屸攢 鍙娴嬫€?鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹?SourceEventStore (澶嶇敤 monitor/token_usage 妯″紡) 鈹?鈹? 鈹溾攢 鍐呭瓨鐜?(5000鏉? 鈫?寮傛鍒风洏 data/source.db   鈹? 鉁?鈹? 鈹溾攢 4 涓?REST API 鈫?admin 璺敱                  鈹? 鉁?鈹? 鈹斺攢 鍓嶇鐩戞帶闈㈡澘锛堥鏍煎榻?TokenMonitor锛?       鈹? 鉂?D7 寰呭疄鏂?鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?```
 
-**与 v2.0 的关键差异**:
-- A 股/港股降级链：**已全部通过 registry.route() 管理熔断** ✅
-- 美股实时：**移除 Stooq**（API 已关）、**移除 AlphaVantage**（25次/天限额）、**移除 yfinance**（境内不稳定）
-- 当前美股链路仅为 `TwelveData → Finnhub`
-- 已注册探针：**2 个 → 8 个** ✅
-- SourceEventStore：**已完成** ✅
-
+**涓?v2.0 鐨勫叧閿樊寮?*:
+- A 鑲?娓偂闄嶇骇閾撅細**宸插叏閮ㄩ€氳繃 registry.route() 绠＄悊鐔旀柇** 鉁?- 缇庤偂瀹炴椂锛?*绉婚櫎 Stooq**锛圓PI 宸插叧锛夈€?*绉婚櫎 AlphaVantage**锛?5娆?澶╅檺棰濓級銆?*绉婚櫎 yfinance**锛堝鍐呬笉绋冲畾锛?- 褰撳墠缇庤偂閾捐矾浠呬负 `TwelveData 鈫?Finnhub`
+- 宸叉敞鍐屾帰閽堬細**2 涓?鈫?8 涓?* 鉁?- SourceEventStore锛?*宸插畬鎴?* 鉁?
 ---
 
-## 实施回顾与剩余任务
+## 瀹炴柦鍥為【涓庡墿浣欎换鍔?
+### Phase A 鈥?缇庤偂璺敱閲嶅啓锛堝彇浠?yfinance锛夆渽 **宸插疄鏂?*
 
-### Phase A — 美股路由重写（取代 yfinance）✅ **已实施**
+**鏉ユ簮**: `market-awareness-and-data-source-plan.md` 搂4.1~4.5
 
-**来源**: `market-awareness-and-data-source-plan.md` §4.1~4.5
+**鐩爣**: 缇庤偂瀹炴椂/鎵归噺/鍘嗗彶鏁版嵁浠?yfinance 涓诲姏鍒囨崲涓哄鍐呯洿杩為摼璺?
+**瀹炵幇鎯呭喌**:
+- `_route_us()` (market_service.py:762) 鏀逛负 `TwelveData 鈫?Finnhub` 鍙屽眰閾捐矾
+- Stooq CSV API 宸插叧闂紙404/Cloudflare锛夛紝`stooq_fetcher.py` 宸插垹闄?- AlphaVantage 鍥?25娆?澶╁厤璐归搴﹀お浣庣Щ鍑洪摼璺?- yfinance 鍥犲鍐呬笉绋冲畾绉诲嚭閾捐矾
+- `_route_us()` 鏄?async 鍑芥暟锛屽凡浣跨敤 `registry.route()` 绠＄悊鐔旀柇 + route_name + event recording
 
-**目标**: 美股实时/批量/历史数据从 yfinance 主力切换为境内直连链路
+**鍏抽敭 commit/鏀瑰姩**:
+- 瀹為檯鏀瑰姩涓?v2.0 璁″垝鏈夊亸宸細鍘熸湰璁″垝寮曞叆 Stooq 鍋氫富鍔涳紝浣?Stooq API 宸叉锛涘疄闄呮敼涓虹簿绠€閾?- `_route_us()` docstring 娉ㄩ噴宸叉洿鏂帮細v3 璇存槑绉婚櫎鍘熷洜
 
-**实现情况**:
-- `_route_us()` (market_service.py:762) 改为 `TwelveData → Finnhub` 双层链路
-- Stooq CSV API 已关闭（404/Cloudflare），`stooq_fetcher.py` 已删除
-- AlphaVantage 因 25次/天免费额度太低移出链路
-- yfinance 因境内不稳定移出链路
-- `_route_us()` 是 async 函数，已使用 `registry.route()` 管理熔断 + route_name + event recording
+**鍏ㄧ悆鎸囨暟閾捐矾瀵归綈**锛?026-07-26锛?.1.2锛?
+- `_foreign()` 闄嶇骇閾撅細EM缂撳瓨 鈫?娓偂缂撳瓨 鈫?Sina 鈫?Sina椤甸潰 鈫?Finnhub 鈫?鍗犱綅绗?- `_route_us()` 闄嶇骇閾撅細TwelveData 鈫?Finnhub锛堥€氳繃 `registry.route()`锛?- 鍏ㄧ悆鎸囨暟涓庣編鑲?ETF 鍏辩敤 Finnhub 浣滀负鏈€缁堝厹搴曟簮锛屼絾 `_foreign()` 涓嶇粡杩?`registry.route()`锛堝墠涓ょ骇鏄唴瀛樼紦瀛橈紝涓嶉€傚悎鐔旀柇璺敱妯″紡锛?- 瀵归綈纭锛歚get_global_indices()` docstring 宸叉洿鏂帮紙yfinance鈫扚innhub锛夛紝verify_e2e.py 鏂板 US 涓夊ぇ鎸囨暟锛圫PX/IXIC/DJI锛夎鐩栨柇瑷€ + 浠锋牸闈炵┖妫€鏌?- 缁撹锛氫袱鏉￠摼璺洰鏍囦笉鍚岋紙鎵归噺闈㈡澘 vs 鍗曞彧绮剧‘锛夛紝褰撳墠鐘舵€佸凡婊¤冻闇€姹傦紝鏃犻渶缁熶竴涓哄悓涓€璺敱鏈哄埗
 
-**关键 commit/改动**:
-- 实际改动与 v2.0 计划有偏差：原本计划引入 Stooq 做主力，但 Stooq API 已死；实际改为精简链
-- `_route_us()` docstring 注释已更新：v3 说明移除原因
-
-**全球指数链路对齐**（2026-07-26，4.1.2）:
-- `_foreign()` 降级链：EM缓存 → 港股缓存 → Sina → Sina页面 → Finnhub → 占位符
-- `_route_us()` 降级链：TwelveData → Finnhub（通过 `registry.route()`）
-- 全球指数与美股 ETF 共用 Finnhub 作为最终兜底源，但 `_foreign()` 不经过 `registry.route()`（前两级是内存缓存，不适合熔断路由模式）
-- 对齐确认：`get_global_indices()` docstring 已更新（yfinance→Finnhub），verify_e2e.py 新增 US 三大指数（SPX/IXIC/DJI）覆盖断言 + 价格非空检查
-- 结论：两条链路目标不同（批量面板 vs 单只精确），当前状态已满足需求，无需统一为同一路由机制
-
-**验证** (当前):
+**楠岃瘉** (褰撳墠):
 ```bash
-# 美股实时
+# 缇庤偂瀹炴椂
 curl -s "http://localhost:8000/api/v1/market/realtime/US?symbol=SPY" | python -c "import sys,json; d=json.load(sys.stdin); print(f'OK: price={d.get(\"price\",0)}' if d.get('price',0)>0 else 'NO DATA')"
 
-# verify_e2e.py 全 PASS
+# verify_e2e.py 鍏?PASS
 cd backend && python scripts/verify_e2e.py
 ```
 
 ---
 
-### Phase B — China market 接入 SourceRegistry ✅ **已实施**
+### Phase B 鈥?China market 鎺ュ叆 SourceRegistry 鉁?**宸插疄鏂?*
 
-**来源**: `source-registry-optimization-plan.md` §P0-A
+**鏉ユ簮**: `archived/source-registry-optimization-plan.md` 搂P0-A
 
-**目标**: `fetch_a_stock_realtime` / `fetch_a_stock_batch` / `fetch_hk_stock_realtime` 三函数从手写 if-else 切换为 SourceRegistry.route()
+**鐩爣**: `fetch_a_stock_realtime` / `fetch_a_stock_batch` / `fetch_hk_stock_realtime` 涓夊嚱鏁颁粠鎵嬪啓 if-else 鍒囨崲涓?SourceRegistry.route()
 
-**实现情况**:
+**瀹炵幇鎯呭喌**:
 
-| 函数 | 行 | 降级链 | 已使用 route() | price=0 过滤 |
+| 鍑芥暟 | 琛?| 闄嶇骇閾?| 宸蹭娇鐢?route() | price=0 杩囨护 |
 |------|---|--------|:--------------:|:-------------:|
-| `fetch_a_stock_realtime` | china_market.py:444 | mootdx → Sina | ✅ | ✅ (_filtered) |
-| `fetch_a_stock_batch` | china_market.py:454 | mootdx → Tencent → Sina | ✅ | ✅ (_filtered) |
-| `fetch_hk_stock_realtime` | china_market.py:510 | Sina → Tencent → 东方财富 | ✅ | ✅ (_filtered) |
+| `fetch_a_stock_realtime` | china_market.py:444 | mootdx 鈫?Sina | 鉁?| 鉁?(_filtered) |
+| `fetch_a_stock_batch` | china_market.py:454 | mootdx 鈫?Tencent 鈫?Sina | 鉁?| 鉁?(_filtered) |
+| `fetch_hk_stock_realtime` | china_market.py:510 | Sina 鈫?Tencent 鈫?涓滄柟璐㈠瘜 | 鉁?| 鉁?(_filtered) |
 
-**关键技术决策**:
-- `_filtered(provider_fn, *args)` 包装函数在 china_market.py:424 实现——在 provider lambda 层做 price=0 过滤，
-  不修改底层 `_mootdx_realtime`/`_sina_realtime`/`_tencent_realtime` 函数的返回值契约。
-- `registry.route()` 的 `route_name` 参数传递业务路径名，配合 SourceEventStore 事件追踪。
-
-**注意**: 非交易时段 price=0 会被 `_filtered` 过滤导致 route() 尝试下一源。
-当前策略是先试完所有源，全部 price=0 时返回 `[]`。交易时段行为正确。
-
-**验证** (当前):
+**鍏抽敭鎶€鏈喅绛?*:
+- `_filtered(provider_fn, *args)` 鍖呰鍑芥暟鍦?china_market.py:424 瀹炵幇鈥斺€斿湪 provider lambda 灞傚仛 price=0 杩囨护锛?  涓嶄慨鏀瑰簳灞?`_mootdx_realtime`/`_sina_realtime`/`_tencent_realtime` 鍑芥暟鐨勮繑鍥炲€煎绾︺€?- `registry.route()` 鐨?`route_name` 鍙傛暟浼犻€掍笟鍔¤矾寰勫悕锛岄厤鍚?SourceEventStore 浜嬩欢杩借釜銆?
+**娉ㄦ剰**: 闈炰氦鏄撴椂娈?price=0 浼氳 `_filtered` 杩囨护瀵艰嚧 route() 灏濊瘯涓嬩竴婧愩€?褰撳墠绛栫暐鏄厛璇曞畬鎵€鏈夋簮锛屽叏閮?price=0 鏃惰繑鍥?`[]`銆備氦鏄撴椂娈佃涓烘纭€?
+**楠岃瘉** (褰撳墠):
 ```bash
-# A 股实时 — 正常返回
+# A 鑲″疄鏃?鈥?姝ｅ父杩斿洖
 curl -s "http://localhost:8000/api/v1/market/realtime/A?symbol=000001" | python -c "import sys,json; d=json.load(sys.stdin); print(f'OK: price={d.get(\"price\",0)}' if d.get('price',0)>0 else 'NO DATA')"
 
-# 港股实时 — 正常返回
+# 娓偂瀹炴椂 鈥?姝ｅ父杩斿洖
 curl -s "http://localhost:8000/api/v1/market/realtime/HK?symbol=00700" | python -c "import sys,json; d=json.load(sys.stdin); print(f'OK: price={d.get(\"price\",0)}' if d.get('price',0)>0 else 'NO DATA')"
 
-# verify_e2e.py 全 PASS
+# verify_e2e.py 鍏?PASS
 cd backend && python scripts/verify_e2e.py
 ```
 
 ---
 
-### Phase C — 健康探针补全 ✅ **已实施**
+### Phase C 鈥?鍋ュ悍鎺㈤拡琛ュ叏 鉁?**宸插疄鏂?*
 
-**来源**: `source-registry-optimization-plan.md` §P0-B + `data-source-monitoring-plan.md` §5.3
+**鏉ユ簮**: `archived/source-registry-optimization-plan.md` 搂P0-B + `archived/data-source-monitoring-plan.md` 搂5.3
 
-**目标**: 补齐所有核心数据源的主动健康探测，覆盖 6 个数据源 + 2 个线程池
+**鐩爣**: 琛ラ綈鎵€鏈夋牳蹇冩暟鎹簮鐨勪富鍔ㄥ仴搴锋帰娴嬶紝瑕嗙洊 6 涓暟鎹簮 + 2 涓嚎绋嬫睜
 
-**实现情况**:
-- 新建 `backend/app/monitor/probes.py` — 集中管理全部探针
-- `main.py` 在 lifespan 中调用 `register_all_probes()`（不含内联注册）
-- 探针名与 `SourceRegistry` 中的源名一致（熔断状态共享）
-- 探针运行间隔 120s（health_loop）
-
-| 步骤 | 探针 | 源名 | 探测函数 | 超时 | 说明 |
+**瀹炵幇鎯呭喌**:
+- 鏂板缓 `backend/app/monitor/probes.py` 鈥?闆嗕腑绠＄悊鍏ㄩ儴鎺㈤拡
+- `main.py` 鍦?lifespan 涓皟鐢?`register_all_probes()`锛堜笉鍚唴鑱旀敞鍐岋級
+- 鎺㈤拡鍚嶄笌 `SourceRegistry` 涓殑婧愬悕涓€鑷达紙鐔旀柇鐘舵€佸叡浜級
+- 鎺㈤拡杩愯闂撮殧 120s锛坔ealth_loop锛?
+| 姝ラ | 鎺㈤拡 | 婧愬悕 | 鎺㈡祴鍑芥暟 | 瓒呮椂 | 璇存槑 |
 |------|------|------|---------|:----:|------|
-| C1 | mootdx | `mootdx` | `_mootdx_realtime(["510050"])` | 8s | 50ETF，轻量单代码查询 |
-| C2 | sina | `sina` | `_sina_realtime(["510050"], "A")` | 10s | 直调 Sina 下层 |
-| C3 | tencent | `tencent` | `_tencent_realtime(["510050"], "A")` | 10s | 直调 QQ 下层 |
-| C4 | akshare | `akshare` | `ak.stock_zh_a_hist("510050", "daily")` | 15s | 历史日线非全量，`import akshare` 在 lambda 内惰性加载 |
-| C5 | levistock | `levistock` | `lv.sector_em("industry")` | 10s | 行业板块 |
-| C6 | 东方财富 | `dongfang` | `_em_hk_realtime(["00700"])` | 8s | 港股兜底源 |
-| T1 | 主线程池 | `threadpool_main` | `get_thread_pool_stats()` | 1s | 活跃线程≤80%视为健康 |
-| T2 | akshare 线程池 | `threadpool_akshare` | `get_akshare_pool_stats()` | 1s | 同上 |
+| C1 | mootdx | `mootdx` | `_mootdx_realtime(["510050"])` | 8s | 50ETF锛岃交閲忓崟浠ｇ爜鏌ヨ |
+| C2 | sina | `sina` | `_sina_realtime(["510050"], "A")` | 10s | 鐩磋皟 Sina 涓嬪眰 |
+| C3 | tencent | `tencent` | `_tencent_realtime(["510050"], "A")` | 10s | 鐩磋皟 QQ 涓嬪眰 |
+| C4 | akshare | `akshare` | `ak.stock_zh_a_hist("510050", "daily")` | 15s | 鍘嗗彶鏃ョ嚎闈炲叏閲忥紝`import akshare` 鍦?lambda 鍐呮儼鎬у姞杞?|
+| C5 | levistock | `levistock` | `lv.sector_em("industry")` | 10s | 琛屼笟鏉垮潡 |
+| C6 | 涓滄柟璐㈠瘜 | `dongfang` | `_em_hk_realtime(["00700"])` | 8s | 娓偂鍏滃簳婧?|
+| T1 | 涓荤嚎绋嬫睜 | `threadpool_main` | `get_thread_pool_stats()` | 1s | 娲昏穬绾跨▼鈮?0%瑙嗕负鍋ュ悍 |
+| T2 | akshare 绾跨▼姹?| `threadpool_akshare` | `get_akshare_pool_stats()` | 1s | 鍚屼笂 |
 
-**验证**:
+**楠岃瘉**:
 ```bash
-# 启动后等 120s，查看日志
-# 日志应包含: "[health] Running probes..." "[health] probe results: mootdx=OK, sina=OK, ..."
+# 鍚姩鍚庣瓑 120s锛屾煡鐪嬫棩蹇?# 鏃ュ織搴斿寘鍚? "[health] Running probes..." "[health] probe results: mootdx=OK, sina=OK, ..."
 ```
 
 ---
 
-### Phase D — SourceEventStore 事件记录（D1-D6 ✅ 已实施, D7 ❌ 待实施）
+### Phase D 鈥?SourceEventStore 浜嬩欢璁板綍锛圖1-D6 鉁?宸插疄鏂? D7 鉂?寰呭疄鏂斤級
 
-**来源**: `data-source-monitoring-plan.md` §5.1~5.2
+**鏉ユ簮**: `archived/data-source-monitoring-plan.md` 搂5.1~5.2
 
-**目标**: 全链路数据源事件记录 + API 暴露 + 前端面板
+**鐩爣**: 鍏ㄩ摼璺暟鎹簮浜嬩欢璁板綍 + API 鏆撮湶 + 鍓嶇闈㈡澘
 
-#### D1-D6 实现情况
+#### D1-D6 瀹炵幇鎯呭喌
 
-| 步骤 | 文件 | 改动 | 状态 |
+| 姝ラ | 鏂囦欢 | 鏀瑰姩 | 鐘舵€?|
 |------|------|------|:----:|
-| D1 | `backend/app/monitor/source_events.py` | **新建** SourceEventStore 类（内存环 5000 条 → 异步批量刷盘 SQLite `data/source.db`，7天滚动清理） | ✅ 已实现 |
-| D2 | `backend/app/services/source_registry.py` | `SourceHealth.__init__` 已含 `on_event` 回调参数；`record_success/record_failure` 已调用 `self._on_event`；新增 `record_hard_failure` | ✅ 已实现 |
-| D3 | 同上 | `SourceRegistry.set_event_callback(cb)` 已实现，含 `_make_source_callback` 包装 | ✅ 已实现 |
-| D4 | `source_registry.py` | `route()` 已含 `route_name` 参数，成功/失败时传 route_name 给回调；`_route_us()` 传 `route_name="US_ETF"`；3 个 china_market 函数传各自 route_name | ✅ 已实现 |
-| D5 | `backend/app/main.py` | lifespan 中调用 `registry.set_event_callback(_make_event_callback())`，`asyncio.run_coroutine_threadsafe` 写入 | ✅ 已实现 |
-| D6 | `backend/app/routers/admin.py` | 4 个 API 已实现：`GET /sources/health` / `/sources/events/timeline` / `/sources/events/failures` / `/sources/circuit-breakers` | ✅ 已实现 |
-| D7 | 前端 | **新增数据源健康监控页面**（与 TokenMonitor 风格对齐，ECharts 趋势图 + 源状态表格） | ❌ **待实施** |
+| D1 | `backend/app/monitor/source_events.py` | **鏂板缓** SourceEventStore 绫伙紙鍐呭瓨鐜?5000 鏉?鈫?寮傛鎵归噺鍒风洏 SQLite `data/source.db`锛?澶╂粴鍔ㄦ竻鐞嗭級 | 鉁?宸插疄鐜?|
+| D2 | `backend/app/services/source_registry.py` | `SourceHealth.__init__` 宸插惈 `on_event` 鍥炶皟鍙傛暟锛沗record_success/record_failure` 宸茶皟鐢?`self._on_event`锛涙柊澧?`record_hard_failure` | 鉁?宸插疄鐜?|
+| D3 | 鍚屼笂 | `SourceRegistry.set_event_callback(cb)` 宸插疄鐜帮紝鍚?`_make_source_callback` 鍖呰 | 鉁?宸插疄鐜?|
+| D4 | `source_registry.py` | `route()` 宸插惈 `route_name` 鍙傛暟锛屾垚鍔?澶辫触鏃朵紶 route_name 缁欏洖璋冿紱`_route_us()` 浼?`route_name="US_ETF"`锛? 涓?china_market 鍑芥暟浼犲悇鑷?route_name | 鉁?宸插疄鐜?|
+| D5 | `backend/app/main.py` | lifespan 涓皟鐢?`registry.set_event_callback(_make_event_callback())`锛宍asyncio.run_coroutine_threadsafe` 鍐欏叆 | 鉁?宸插疄鐜?|
+| D6 | `backend/app/routers/admin.py` | 4 涓?API 宸插疄鐜帮細`GET /sources/health` / `/sources/events/timeline` / `/sources/events/failures` / `/sources/circuit-breakers` | 鉁?宸插疄鐜?|
+| D7 | 鍓嶇 | **鏂板鏁版嵁婧愬仴搴风洃鎺ч〉闈?*锛堜笌 TokenMonitor 椋庢牸瀵归綈锛孍Charts 瓒嬪娍鍥?+ 婧愮姸鎬佽〃鏍硷級 | 鉂?**寰呭疄鏂?* |
 
-**数据模型** (SQLite: `data/source.db`):
+**鏁版嵁妯″瀷** (SQLite: `data/source.db`):
 
 ```sql
 CREATE TABLE IF NOT EXISTS source_events (
@@ -248,89 +184,68 @@ CREATE TABLE IF NOT EXISTS source_events (
     route       TEXT    NOT NULL DEFAULT '',  -- 'A_stock_realtime' / 'US_ETF' / 'probe' / ...
     operation   TEXT    NOT NULL DEFAULT 'realtime',  -- 'realtime' / 'history' / 'probe'
     target      TEXT    NOT NULL DEFAULT '',  -- '000001' / 'SPY' / ...
-    success     INTEGER NOT NULL,       -- 1=成功 0=失败
+    success     INTEGER NOT NULL,       -- 1=鎴愬姛 0=澶辫触
     duration_ms REAL    NOT NULL DEFAULT 0,
     error_message TEXT  NOT NULL DEFAULT '',
     timestamp   REAL    NOT NULL        -- Unix timestamp
 );
 ```
 
-**滚动清理**: 每日检查一次，`DELETE FROM source_events WHERE timestamp < unixepoch('now', '-7 days')`
+**婊氬姩娓呯悊**: 姣忔棩妫€鏌ヤ竴娆★紝`DELETE FROM source_events WHERE timestamp < unixepoch('now', '-7 days')`
 
-#### ✅ D1-D6 验证 (当前):
+#### 鉁?D1-D6 楠岃瘉 (褰撳墠):
 
 ```bash
-# 1. 源健康概览（应返回所有注册源的状态）
-curl -s "http://localhost:8000/api/v1/admin/sources/health" | python -c "import sys,json; d=json.load(sys.stdin); assert len(d)>2, 'too few sources'; [print(f'{s[\"name\"]}: {\"✅\" if s[\"available\"] else \"❌\"}') for s in d]"
+# 1. 婧愬仴搴锋瑙堬紙搴旇繑鍥炴墍鏈夋敞鍐屾簮鐨勭姸鎬侊級
+curl -s "http://localhost:8000/api/v1/admin/sources/health" | python -c "import sys,json; d=json.load(sys.stdin); assert len(d)>2, 'too few sources'; [print(f'{s[\"name\"]}: {\"鉁匼" if s[\"available\"] else \"鉂孿"}') for s in d]"
 
-# 2. 事件时间线
-curl -s "http://localhost:8000/api/v1/admin/sources/events/timeline?hours=1" | python -c "import sys,json; d=json.load(sys.stdin); print(f'OK: {len(d)} buckets')"
+# 2. 浜嬩欢鏃堕棿绾?curl -s "http://localhost:8000/api/v1/admin/sources/events/timeline?hours=1" | python -c "import sys,json; d=json.load(sys.stdin); print(f'OK: {len(d)} buckets')"
 
-# 3. 最近失败
-curl -s "http://localhost:8000/api/v1/admin/sources/events/failures?limit=10" | python -c "import sys,json; d=json.load(sys.stdin); print(f'OK: {len(d)} failures')"
+# 3. 鏈€杩戝け璐?curl -s "http://localhost:8000/api/v1/admin/sources/events/failures?limit=10" | python -c "import sys,json; d=json.load(sys.stdin); print(f'OK: {len(d)} failures')"
 
-# 4. 熔断状态
-curl -s "http://localhost:8000/api/v1/admin/sources/circuit-breakers" | python -c "import sys,json; d=json.load(sys.stdin); print(f'OK: {len(d)} sources')"
+# 4. 鐔旀柇鐘舵€?curl -s "http://localhost:8000/api/v1/admin/sources/circuit-breakers" | python -c "import sys,json; d=json.load(sys.stdin); print(f'OK: {len(d)} sources')"
 ```
 
-#### ❌ D7 实施指引
+#### 鉂?D7 瀹炴柦鎸囧紩
 
-**目标**: 新增前端数据源健康监控页面，与现有 TokenMonitor 风格对齐
+**鐩爣**: 鏂板鍓嶇鏁版嵁婧愬仴搴风洃鎺ч〉闈紝涓庣幇鏈?TokenMonitor 椋庢牸瀵归綈
 
-**推荐参考**:
-- 前端 `TokenMonitor.vue` 的布局（ECharts + 表格）
-- API 端点：
-  - `GET /api/v1/admin/sources/health` → 源状态表格
-  - `GET /api/v1/admin/sources/events/timeline?hours=1` → ECharts 趋势图（成功/失败双线）
-  - `GET /api/v1/admin/sources/events/failures?limit=10` → 失败列表
-- `frontend/src/router/index.js` 新增路由 `/admin/sources`
-- `frontend/src/App.vue` `navItems` 新增入口
+**鎺ㄨ崘鍙傝€?*:
+- 鍓嶇 `TokenMonitor.vue` 鐨勫竷灞€锛圗Charts + 琛ㄦ牸锛?- API 绔偣锛?  - `GET /api/v1/admin/sources/health` 鈫?婧愮姸鎬佽〃鏍?  - `GET /api/v1/admin/sources/events/timeline?hours=1` 鈫?ECharts 瓒嬪娍鍥撅紙鎴愬姛/澶辫触鍙岀嚎锛?  - `GET /api/v1/admin/sources/events/failures?limit=10` 鈫?澶辫触鍒楄〃
+- `frontend/src/router/index.js` 鏂板璺敱 `/admin/sources`
+- `frontend/src/App.vue` `navItems` 鏂板鍏ュ彛
 
-**参考实现步骤**:
-1. 新建 `frontend/src/views/SourceMonitor.vue`（参考 `TokenMonitor.vue` 布局 + Pinia store）
-2. 新建 `frontend/src/stores/sources.js`（参考 `stores/token.js` 模式）
-3. 注册路由：`router/index.js` 添加 `/admin/sources` → `SourceMonitor`
-4. App.vue 导航栏添加"数据源"入口
-5. 验证：各 API 调用正常，ECharts 折线图显示成功/失败趋势
+**鍙傝€冨疄鐜版楠?*:
+1. 鏂板缓 `frontend/src/views/SourceMonitor.vue`锛堝弬鑰?`TokenMonitor.vue` 甯冨眬 + Pinia store锛?2. 鏂板缓 `frontend/src/stores/sources.js`锛堝弬鑰?`stores/token.js` 妯″紡锛?3. 娉ㄥ唽璺敱锛歚router/index.js` 娣诲姞 `/admin/sources` 鈫?`SourceMonitor`
+4. App.vue 瀵艰埅鏍忔坊鍔?鏁版嵁婧?鍏ュ彛
+5. 楠岃瘉锛氬悇 API 璋冪敤姝ｅ父锛孍Charts 鎶樼嚎鍥炬樉绀烘垚鍔?澶辫触瓒嬪娍
 
 ---
 
-## 依赖关系与推荐顺序
-
+## 渚濊禆鍏崇郴涓庢帹鑽愰『搴?
 ```
-Phase A (美股路由)    ✅ 已实施
-    │
-Phase B (China SR)   ✅ 已实施
-    │
-Phase C (探针)        ✅ 已实施
-    │
-Phase D (EventStore)  ─── D1-D6 ✅ 已实施 | D7 ❌ 待实施（独立，无文件冲突）
-```
+Phase A (缇庤偂璺敱)    鉁?宸插疄鏂?    鈹?Phase B (China SR)   鉁?宸插疄鏂?    鈹?Phase C (鎺㈤拡)        鉁?宸插疄鏂?    鈹?Phase D (EventStore)  鈹€鈹€鈹€ D1-D6 鉁?宸插疄鏂?| D7 鉂?寰呭疄鏂斤紙鐙珛锛屾棤鏂囦欢鍐茬獊锛?```
 ---
 
-## 验证标准（汇总）
+## 楠岃瘉鏍囧噯锛堟眹鎬伙級
 
-| 阶段 | 验证方式 | 通过条件 | 失败应对 |
+| 闃舵 | 楠岃瘉鏂瑰紡 | 閫氳繃鏉′欢 | 澶辫触搴斿 |
 |------|---------|---------|---------|
-| A | curl 命令自动化断言 | 美股实时含 price>0 | 检查 TwelveData/Finnhub API key |
-| B | curl + verify_e2e.py | A 股/港股实时有数据，e2e 全 PASS | 确认降级链正常工作 |
-| C | 启动日志 | 8 个探针均返回 OK | 逐个调试探针函数；超时过长者增加 timeout |
-| D1-D6 | 4 个 curl 命令 | 全部返回 200 + 有效 JSON，source_events 表有数据 | 检查 DB 文件权限；检查回调注册顺序 |
-| D7 | 前端浏览 | 数据源健康页展示正确 | 检查 API 返回格式与前端期望一致 |
+| A | curl 鍛戒护鑷姩鍖栨柇瑷€ | 缇庤偂瀹炴椂鍚?price>0 | 妫€鏌?TwelveData/Finnhub API key |
+| B | curl + verify_e2e.py | A 鑲?娓偂瀹炴椂鏈夋暟鎹紝e2e 鍏?PASS | 纭闄嶇骇閾炬甯稿伐浣?|
+| C | 鍚姩鏃ュ織 | 8 涓帰閽堝潎杩斿洖 OK | 閫愪釜璋冭瘯鎺㈤拡鍑芥暟锛涜秴鏃惰繃闀胯€呭鍔?timeout |
+| D1-D6 | 4 涓?curl 鍛戒护 | 鍏ㄩ儴杩斿洖 200 + 鏈夋晥 JSON锛宻ource_events 琛ㄦ湁鏁版嵁 | 妫€鏌?DB 鏂囦欢鏉冮檺锛涙鏌ュ洖璋冩敞鍐岄『搴?|
+| D7 | 鍓嶇娴忚 | 鏁版嵁婧愬仴搴烽〉灞曠ず姝ｇ‘ | 妫€鏌?API 杩斿洖鏍煎紡涓庡墠绔湡鏈涗竴鑷?|
 
 ---
 
-## 剩余工作（按优先级排序）
+## 鍓╀綑宸ヤ綔锛堟寜浼樺厛绾ф帓搴忥級
 
-| # | 任务 | 源阶段 | 预估 | 前置依赖 |
+| # | 浠诲姟 | 婧愰樁娈?| 棰勪及 | 鍓嶇疆渚濊禆 |
 |---|------|--------|:----:|---------|
-| 1 | D7: 前端数据源监控面板 | Phase D7 | 4h | D6 (已就绪) |
+| 1 | D7: 鍓嶇鏁版嵁婧愮洃鎺ч潰鏉?| Phase D7 | 4h | D6 (宸插氨缁? |
 
-## 参考
-
-- 原始方案 `source-registry-optimization-plan.md` — 已归档，内容已合并入本文档
-- 原始方案 `data-source-monitoring-plan.md` — 已归档，内容已合并入本文档
-- 原始方案 `market-awareness-and-data-source-plan.md` — §4 已合并，§5 市场感知联动待 market-analysis 方案实施后评估
-- 全局指数链路决议: `docs/implementation-master-plan.md` §3.2
-- 代码审计日期: 2026-07-26
-- 合并决议: `docs/implementation-master-plan.md` §3.1
+## 鍙傝€?
+- 鍘熷鏂规 `archived/source-registry-optimization-plan.md` 鈥?宸插綊妗ｏ紝鍐呭宸插悎骞跺叆鏈枃妗?- 鍘熷鏂规 `archived/data-source-monitoring-plan.md` 鈥?宸插綊妗ｏ紝鍐呭宸插悎骞跺叆鏈枃妗?- 鍘熷鏂规 `market-awareness-and-data-source-plan.md` 鈥?搂4 宸插悎骞讹紝搂5 甯傚満鎰熺煡鑱斿姩寰?market-analysis 鏂规瀹炴柦鍚庤瘎浼?- 鍏ㄥ眬鎸囨暟閾捐矾鍐宠: `docs/implementation-master-plan.md` 搂3.2
+- 浠ｇ爜瀹¤鏃ユ湡: 2026-07-26
+- 鍚堝苟鍐宠: `docs/implementation-master-plan.md` 搂3.1

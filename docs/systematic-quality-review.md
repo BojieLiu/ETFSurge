@@ -1,72 +1,64 @@
-# 系统质量审查与修复方案
+﻿# 绯荤粺璐ㄩ噺瀹℃煡涓庝慨澶嶆柟妗?
+> 瀹℃煡鏃ユ湡: 2026-07-26
+> 瀹℃煡鑼冨洿: 缁勫悎璁捐绠＄嚎銆佺瓥鐣ユ鏌ョ绾裤€佸洜瀛愭暟鎹閬撱€佸紓姝ユ墽琛屾ā鍨?
+---
 
-> 审查日期: 2026-07-26
-> 审查范围: 组合设计管线、策略检查管线、因子数据管道、异步执行模型
+## 鐩綍
+
+1. [鍙戠幇鐨勯棶棰樻眹鎬籡(#1-鍙戠幇鐨勯棶棰樻眹鎬?
+2. [闂涓€锛欵vent Loop 闃诲瀵艰嚧鏈嶅姟鎸傛](#2-浜嬩欢寰幆闃诲)
+3. [闂浜岋細璁捐鏂规绌哄３閫€鍖朷(#3-璁捐鏂规绌哄３閫€鍖?
+4. [闂涓夛細鍥犲瓙鏁版嵁澶ч潰绉己澶盷(#4-鍥犲瓙鏁版嵁澶ч潰绉己澶?
+5. [闂鍥涳細缃俊搴﹀缁堜负浣嶿(#5-缃俊搴﹀缁堜负浣?
+6. [闂浜旓細缂栫爜涓庡瓨鍌ㄤ贡鐮乚(#6-缂栫爜涓庡瓨鍌ㄤ贡鐮?
+7. [闂鍏細绛栫暐妫€鏌ヤ笌璁捐鐨勭郴缁熸€у亸宸甝(#7-绯荤粺鎬у亸宸?
+8. [淇鏂规涓庝紭鍏堢骇](#8-淇鏂规涓庝紭鍏堢骇)
 
 ---
 
-## 目录
-
-1. [发现的问题汇总](#1-发现的问题汇总)
-2. [问题一：Event Loop 阻塞导致服务挂死](#2-事件循环阻塞)
-3. [问题二：设计方案空壳退化](#3-设计方案空壳退化)
-4. [问题三：因子数据大面积缺失](#4-因子数据大面积缺失)
-5. [问题四：置信度始终为低](#5-置信度始终为低)
-6. [问题五：编码与存储乱码](#6-编码与存储乱码)
-7. [问题六：策略检查与设计的系统性偏差](#7-系统性偏差)
-8. [修复方案与优先级](#8-修复方案与优先级)
-
----
-
-## 1. 发现的问题汇总
-
-| # | 问题 | 严重度 | 影响面 | 根因分类 |
+## 1. 鍙戠幇鐨勯棶棰樻眹鎬?
+| # | 闂 | 涓ラ噸搴?| 褰卞搷闈?| 鏍瑰洜鍒嗙被 |
 |---|------|--------|--------|----------|
-| 1 | 事件循环被同步 I/O 阻塞，导致服务挂死 | 🔴 P0 | 全系统可用性 | 异步边界违规 |
-| 2 | 设计方案返回空壳（0 只 ETF）但标记 completed | 🔴 P0 | 组合设计功能 | 缺少有效性校验 |
-| 3 | 因子数据大面积缺失（"因子数据不足"） | 🟠 P1 | 策略质量 | 数据源容错缺失 |
-| 4 | 策略建议置信度始终为 low | 🟠 P1 | 用户信任 | 打分/聚合阈值问题 |
-| 5 | 中文文本存储乱码（mojibake） | 🟠 P1 | 所有中文内容 | 编码传递路径断裂 |
-| 6 | 设计退化（Design 219+ vs 218）无错误提示 | 🟡 P2 | 方案可用性 | 状态机设计缺陷 |
-| 7 | 市态缓存只有被动刷新，无主动填充机制 | 🟡 P2 | 实时性 | 架构设计 |
+| 1 | 浜嬩欢寰幆琚悓姝?I/O 闃诲锛屽鑷存湇鍔℃寕姝?| 馃敶 P0 | 鍏ㄧ郴缁熷彲鐢ㄦ€?| 寮傛杈圭晫杩濊 |
+| 2 | 璁捐鏂规杩斿洖绌哄３锛? 鍙?ETF锛変絾鏍囪 completed | 馃敶 P0 | 缁勫悎璁捐鍔熻兘 | 缂哄皯鏈夋晥鎬ф牎楠?|
+| 3 | 鍥犲瓙鏁版嵁澶ч潰绉己澶憋紙"鍥犲瓙鏁版嵁涓嶈冻"锛?| 馃煚 P1 | 绛栫暐璐ㄩ噺 | 鏁版嵁婧愬閿欑己澶?|
+| 4 | 绛栫暐寤鸿缃俊搴﹀缁堜负 low | 馃煚 P1 | 鐢ㄦ埛淇′换 | 鎵撳垎/鑱氬悎闃堝€奸棶棰?|
+| 5 | 涓枃鏂囨湰瀛樺偍涔辩爜锛坢ojibake锛?| 馃煚 P1 | 鎵€鏈変腑鏂囧唴瀹?| 缂栫爜浼犻€掕矾寰勬柇瑁?|
+| 6 | 璁捐閫€鍖栵紙Design 219+ vs 218锛夋棤閿欒鎻愮ず | 馃煛 P2 | 鏂规鍙敤鎬?| 鐘舵€佹満璁捐缂洪櫡 |
+| 7 | 甯傛€佺紦瀛樺彧鏈夎鍔ㄥ埛鏂帮紝鏃犱富鍔ㄥ～鍏呮満鍒?| 馃煛 P2 | 瀹炴椂鎬?| 鏋舵瀯璁捐 |
 
 ---
 
-## 2. 事件循环阻塞
+## 2. 浜嬩欢寰幆闃诲
 
-### 2.1 现象
+### 2.1 鐜拌薄
 
-向 `POST /api/v1/portfolio/design-async` 发送设计请求后：
-1. 请求成功返回 task_id（说明 `create_task` 完成）
-2. 后台 `asyncio.create_task(design_pipeline(...))` 启动
-3. `design_pipeline` → `generate_enhanced_design()` → `pool_manager.refresh()` 开始执行
-4. **此时所有后续请求（健康检查、策略检查、查询）全部超时**
-5. 服务进程死锁，只能强制 kill
+鍚?`POST /api/v1/portfolio/design-async` 鍙戦€佽璁¤姹傚悗锛?1. 璇锋眰鎴愬姛杩斿洖 task_id锛堣鏄?`create_task` 瀹屾垚锛?2. 鍚庡彴 `asyncio.create_task(design_pipeline(...))` 鍚姩
+3. `design_pipeline` 鈫?`generate_enhanced_design()` 鈫?`pool_manager.refresh()` 寮€濮嬫墽琛?4. **姝ゆ椂鎵€鏈夊悗缁姹傦紙鍋ュ悍妫€鏌ャ€佺瓥鐣ユ鏌ャ€佹煡璇級鍏ㄩ儴瓒呮椂**
+5. 鏈嶅姟杩涚▼姝婚攣锛屽彧鑳藉己鍒?kill
 
-### 2.2 代码定位
+### 2.2 浠ｇ爜瀹氫綅
 
-**调用链：**
+**璋冪敤閾撅細**
 
 ```
 portfolio.py:270  asyncio.create_task(design_worker(task_manager, t["task_id"]))
-  → task_manager.py:398  design_worker = design_pipeline
-    → task_manager.py:217  await asyncio.wait_for(
+  鈫?task_manager.py:398  design_worker = design_pipeline
+    鈫?task_manager.py:217  await asyncio.wait_for(
                             generate_enhanced_design(capital, constraints), timeout=90)
-      → strategy_design.py:37  await pool_manager.refresh()
-        → pool_manager.py:258  run_sync_long(self.scanner.full_pipeline, timeout=60)
-          → scanner.full_pipeline  [同步 I/O: akshare, urllib, requests]
-        → pool_manager.py:289  await run_sync(_enrich, flat)
-          → _enrich  [同步 I/O]
-        → pool_manager.py:295  await run_sync(self.classifier.batch_classify, flat)
-          → batch_classify  [同步 I/O]
+      鈫?strategy_design.py:37  await pool_manager.refresh()
+        鈫?pool_manager.py:258  run_sync_long(self.scanner.full_pipeline, timeout=60)
+          鈫?scanner.full_pipeline  [鍚屾 I/O: akshare, urllib, requests]
+        鈫?pool_manager.py:289  await run_sync(_enrich, flat)
+          鈫?_enrich  [鍚屾 I/O]
+        鈫?pool_manager.py:295  await run_sync(self.classifier.batch_classify, flat)
+          鈫?batch_classify  [鍚屾 I/O]
 ```
 
-**根因：**
+**鏍瑰洜锛?*
 
-`pool_manager.refresh()` 内部的 `run_sync_long()` 和 `run_sync()` 将同步任务提交到线程池执行。但在某些场景下——特别是当线程池满或 I/O 操作进入死锁——**线程池中的同步调用会回堵事件循环**。
-
-具体来看 `factor_registry.py` 的 `_fetch_market_data()`（第 833-872 行）：
-
+`pool_manager.refresh()` 鍐呴儴鐨?`run_sync_long()` 鍜?`run_sync()` 灏嗗悓姝ヤ换鍔℃彁浜ゅ埌绾跨▼姹犳墽琛屻€備絾鍦ㄦ煇浜涘満鏅笅鈥斺€旂壒鍒槸褰撶嚎绋嬫睜婊℃垨 I/O 鎿嶄綔杩涘叆姝婚攣鈥斺€?*绾跨▼姹犱腑鐨勫悓姝ヨ皟鐢ㄤ細鍥炲牭浜嬩欢寰幆**銆?
+鍏蜂綋鏉ョ湅 `factor_registry.py` 鐨?`_fetch_market_data()`锛堢 833-872 琛岋級锛?
 ```python
 # factor_registry.py:840-846
 import urllib.request
@@ -74,43 +66,38 @@ prefixes = {"5": "sh", "6": "sh", "0": "sz", "1": "sz", "3": "sz"}
 sina_list = [f"{prefixes.get(sym[0], 'sh')}{sym}" for sym in symbols]
 url = f"http://hq.sinajs.cn/list={','.join(sina_list)}"
 req = urllib.request.Request(url, headers={"Referer": "http://finance.sina.com.cn"})
-resp = urllib.request.urlopen(req, timeout=8)  # ← 同步阻塞！
-raw = resp.read().decode("gbk")
+resp = urllib.request.urlopen(req, timeout=8)  # 鈫?鍚屾闃诲锛?raw = resp.read().decode("gbk")
 ```
 
-这是 `async def _fetch_market_data()` —— 一个 async 函数，**内部直接使用同步 `urllib.request.urlopen()` 来做 HTTP 请求**。没有 `await run_sync()` 包装。这直接阻塞了事件循环。
+杩欐槸 `async def _fetch_market_data()` 鈥斺€?涓€涓?async 鍑芥暟锛?*鍐呴儴鐩存帴浣跨敤鍚屾 `urllib.request.urlopen()` 鏉ュ仛 HTTP 璇锋眰**銆傛病鏈?`await run_sync()` 鍖呰銆傝繖鐩存帴闃诲浜嗕簨浠跺惊鐜€?
+### 2.3 淇鏂瑰悜
 
-### 2.3 修复方向
-
-1. **唯一线上阻塞点修复**：`factor_registry.py:844-845` 的 Sina IOPV 批量获取改用 `await run_sync()` 包装（详细方案见 `docs/async-boundary-fix-plan.md §2.1`）
-2. **死代码清理**：`macro_state.py:102/143` 的 `_fetch_pmi_trend`/`_fetch_rate_env` 两个未调用的 async 函数中的 akshare 调用需要修复以防启用后阻塞
-3. **引入 CI 审计**：新增 `scripts/audit_async_blocking.py` 作为 pre-commit 门禁，AST 扫描禁止 async def 内出现同步 I/O
-4. **异步边界单元测试**：在现有 `tests/test_async_boundaries.py` 中补测，覆盖 Sina IOPV 路径
+1. **鍞竴绾夸笂闃诲鐐逛慨澶?*锛歚factor_registry.py:844-845` 鐨?Sina IOPV 鎵归噺鑾峰彇鏀圭敤 `await run_sync()` 鍖呰锛堣缁嗘柟妗堣 `docs/archived/async-boundary-fix-plan.md 搂2.1`锛?2. **姝讳唬鐮佹竻鐞?*锛歚macro_state.py:102/143` 鐨?`_fetch_pmi_trend`/`_fetch_rate_env` 涓や釜鏈皟鐢ㄧ殑 async 鍑芥暟涓殑 akshare 璋冪敤闇€瑕佷慨澶嶄互闃插惎鐢ㄥ悗闃诲
+3. **寮曞叆 CI 瀹¤**锛氭柊澧?`scripts/audit_async_blocking.py` 浣滀负 pre-commit 闂ㄧ锛孉ST 鎵弿绂佹 async def 鍐呭嚭鐜板悓姝?I/O
+4. **寮傛杈圭晫鍗曞厓娴嬭瘯**锛氬湪鐜版湁 `tests/test_async_boundaries.py` 涓ˉ娴嬶紝瑕嗙洊 Sina IOPV 璺緞
 
 ---
 
-## 3. 设计方案空壳退化
+## 3. 璁捐鏂规绌哄３閫€鍖?
+### 3.1 鐜拌薄
 
-### 3.1 现象
+瀵规瘮 ID=218 涓?ID=219-222 鐨勮璁℃柟妗堬細
 
-对比 ID=218 与 ID=219-222 的设计方案：
-
-| 维度 | Design 218 | Designs 219-222 |
+| 缁村害 | Design 218 | Designs 219-222 |
 |------|:----------:|:---------------:|
-| 策略数量 | 3 套 | 1 套（空壳） |
-| 每套 ETFs | 8-11 只 | **0 只** |
-| expected_return | 有值 | **null** |
-| max_drawdown | 有值 | **null** |
-| market_context keys | 5 个 | 2 个 |
-| design_text 长度 | 9,098 chars | **551 chars** |
-| status | completed | completed ✓ |
-| report_quality | full | full ✓ |
+| 绛栫暐鏁伴噺 | 3 濂?| 1 濂楋紙绌哄３锛?|
+| 姣忓 ETFs | 8-11 鍙?| **0 鍙?* |
+| expected_return | 鏈夊€?| **null** |
+| max_drawdown | 鏈夊€?| **null** |
+| market_context keys | 5 涓?| 2 涓?|
+| design_text 闀垮害 | 9,098 chars | **551 chars** |
+| status | completed | completed 鉁?|
+| report_quality | full | full 鉁?|
 
-Designs 219-222 **全部标记为 "completed" 和 "full"，但实际无可用内容**——这是比失败更严重的问题，因为用户看到的是"已完成"却无法操作。
+Designs 219-222 **鍏ㄩ儴鏍囪涓?"completed" 鍜?"full"锛屼絾瀹為檯鏃犲彲鐢ㄥ唴瀹?*鈥斺€旇繖鏄瘮澶辫触鏇翠弗閲嶇殑闂锛屽洜涓虹敤鎴风湅鍒扮殑鏄?宸插畬鎴?鍗存棤娉曟搷浣溿€?
+### 3.2 浠ｇ爜瀹氫綅
 
-### 3.2 代码定位
-
-**问题出现在 `generate_enhanced_design()`（strategy_design.py）的候选池空检查逻辑中：**
+**闂鍑虹幇鍦?`generate_enhanced_design()`锛坰trategy_design.py锛夌殑鍊欓€夋睜绌烘鏌ラ€昏緫涓細**
 
 ```python
 # strategy_design.py:56-65
@@ -119,90 +106,76 @@ if total_candidates == 0:
     return {
         "strategies": [],
         "market_context": _build_market_context(pool_manager),
-        "error": "无候选标的",
-        "detail": "数据管道未能生成候选池",
+        "error": "鏃犲€欓€夋爣鐨?,
+        "detail": "鏁版嵁绠￠亾鏈兘鐢熸垚鍊欓€夋睜",
     }
 ```
 
-当候选池为空，函数返回 `{"strategies": [], "error": "无候选标的"}`。
-
-**但在调用端（task_manager.py:225-242）：**
+褰撳€欓€夋睜涓虹┖锛屽嚱鏁拌繑鍥?`{"strategies": [], "error": "鏃犲€欓€夋爣鐨?}`銆?
+**浣嗗湪璋冪敤绔紙task_manager.py:225-242锛夛細**
 
 ```python
 strategies = result.get("strategies", [])
 error_info = result.get("error")
 if error_info:
-    # 标记为 failed → 正确
+    # 鏍囪涓?failed 鈫?姝ｇ‘
     mgr.update_task(task_id, ..., status="failed", ...)
     return
 
 if not strategies:
-    # 标记为 failed → 正确
+    # 鏍囪涓?failed 鈫?姝ｇ‘
     mgr.update_task(task_id, ..., status="failed", ...)
     return
 ```
 
-这里看起来逻辑是对的——空策略会报 failed。**但 Designs 219-222 却显示 "completed" 且有 "full" 的 report_quality**。
-
-这意味着要么：
-1. `generate_enhanced_design()` 返回了 `strategies` 列表，但里面的策略缺失 ETFs（line 93-128 那里出了问题）
-2. 或者 `pool_manager.refresh()` 超时后候选池空了，但 `pool_manager.refresh()` 的异常被 `strategy_design.py:38` 的 `except Exception` 吞掉了
-
-看设计管线的上游——`strategy_design.py:36-40`：
-
+杩欓噷鐪嬭捣鏉ラ€昏緫鏄鐨勨€斺€旂┖绛栫暐浼氭姤 failed銆?*浣?Designs 219-222 鍗存樉绀?"completed" 涓旀湁 "full" 鐨?report_quality**銆?
+杩欐剰鍛崇潃瑕佷箞锛?1. `generate_enhanced_design()` 杩斿洖浜?`strategies` 鍒楄〃锛屼絾閲岄潰鐨勭瓥鐣ョ己澶?ETFs锛坙ine 93-128 閭ｉ噷鍑轰簡闂锛?2. 鎴栬€?`pool_manager.refresh()` 瓒呮椂鍚庡€欓€夋睜绌轰簡锛屼絾 `pool_manager.refresh()` 鐨勫紓甯歌 `strategy_design.py:38` 鐨?`except Exception` 鍚炴帀浜?
+鐪嬭璁＄绾跨殑涓婃父鈥斺€擿strategy_design.py:36-40`锛?
 ```python
 try:
     await pool_manager.refresh()
 except Exception as e:
-    logger.warning("[strategy_design] pool_manager.refresh failed — pool may be stale")
+    logger.warning("[strategy_design] pool_manager.refresh failed 鈥?pool may be stale")
 ```
 
-这里虽然有异常捕获但不影响后续流程。之后 `pool_manager.get_pool("core")` 可能返回空列表——那么 `total_candidates == 0` 触发空池返回。
+杩欓噷铏界劧鏈夊紓甯告崟鑾蜂絾涓嶅奖鍝嶅悗缁祦绋嬨€備箣鍚?`pool_manager.get_pool("core")` 鍙兘杩斿洖绌哄垪琛ㄢ€斺€旈偅涔?`total_candidates == 0` 瑙﹀彂绌烘睜杩斿洖銆?
+浣?Designs 219-222 閮芥樉绀?`status=completed, report_quality=full` 涓?`strategies` 鏈?**1 涓?*绌虹瓥鐣モ€斺€斾笉鏄┖鍒楄〃銆?
+**鐪熸鐨勯棶棰樺彲鑳藉湪 `engine_allocate()` 鏂规硶涓?*鈥斺€斿鏋?`flat_candidates` 涓嶄负绌轰絾鍥犲瓙鍒嗗叏涓?0锛屽紩鎿庡彲鑳戒骇鐢熶簡鏃?ETF 鍒嗛厤鐨勭瓥鐣ユā鏉裤€傛垨鑰?`_build_plan_tables` 鍦ㄧ┖绛栫暐鍒楄〃鎯呭喌涓嬩粛鐒剁敓鎴愪簡 551 chars 鐨勬ā鏉裤€?
+### 3.3 淇鏂瑰悜
 
-但 Designs 219-222 都显示 `status=completed, report_quality=full` 且 `strategies` 有 **1 个**空策略——不是空列表。
-
-**真正的问题可能在 `engine_allocate()` 方法中**——如果 `flat_candidates` 不为空但因子分全为 0，引擎可能产生了无 ETF 分配的策略模板。或者 `_build_plan_tables` 在空策略列表情况下仍然生成了 551 chars 的模板。
-
-### 3.3 修复方向
-
-1. **硬增加 `post-condition` 校验**：在 `strategies` 被返回前，验证每个 strategy 的 etfs 列表非空且至少一只非 CASH 标的
-2. **状态机严谨化**：`completed` 状态必须有明确的完成条件定义（非空策略 + 有效数据），不符合则进入 `completed_with_errors` 或 `failed`
-3. **增加 `strategy.etfs_count` 到列表元数据**（`GET /designs` 的 load_only 查询中），前端在列表页即可识别空壳方案
-4. **对比 Design 218 和 219 的 `elapsed_seconds`** ——如果 219 以后的请求都极快完成（<2秒），说明数据管道根本没产出候选池
+1. **纭鍔?`post-condition` 鏍￠獙**锛氬湪 `strategies` 琚繑鍥炲墠锛岄獙璇佹瘡涓?strategy 鐨?etfs 鍒楄〃闈炵┖涓旇嚦灏戜竴鍙潪 CASH 鏍囩殑
+2. **鐘舵€佹満涓ヨ皑鍖?*锛歚completed` 鐘舵€佸繀椤绘湁鏄庣‘鐨勫畬鎴愭潯浠跺畾涔夛紙闈炵┖绛栫暐 + 鏈夋晥鏁版嵁锛夛紝涓嶇鍚堝垯杩涘叆 `completed_with_errors` 鎴?`failed`
+3. **澧炲姞 `strategy.etfs_count` 鍒板垪琛ㄥ厓鏁版嵁**锛坄GET /designs` 鐨?load_only 鏌ヨ涓級锛屽墠绔湪鍒楄〃椤靛嵆鍙瘑鍒┖澹虫柟妗?4. **瀵规瘮 Design 218 鍜?219 鐨?`elapsed_seconds`** 鈥斺€斿鏋?219 浠ュ悗鐨勮姹傞兘鏋佸揩瀹屾垚锛?2绉掞級锛岃鏄庢暟鎹閬撴牴鏈病浜у嚭鍊欓€夋睜
 
 ---
 
-## 4. 因子数据大面积缺失
+## 4. 鍥犲瓙鏁版嵁澶ч潰绉己澶?
+### 4.1 鐜拌薄
 
-### 4.1 现象
-
-从策略检查 102 的 `holdings_analysis` 中：
+浠庣瓥鐣ユ鏌?102 鐨?`holdings_analysis` 涓細
 
 ```json
-{"symbol": "159338", "name": "中证A500ETF", "factor_summary": "因子数据不足",
+{"symbol": "159338", "name": "涓瘉A500ETF", "factor_summary": "鍥犲瓙鏁版嵁涓嶈冻",
  "tech_signal": "hold", "risk_flag": null}
 ```
 
-10 只持仓中 **全部显示 "因子数据不足"**。`factor_summary` 字段没有输出具体的因子分值（正常应该是 `"momentum: 1.23σ；technical: 0.87σ；..."` 的格式）。
+10 鍙寔浠撲腑 **鍏ㄩ儴鏄剧ず "鍥犲瓙鏁版嵁涓嶈冻"**銆俙factor_summary` 瀛楁娌℃湁杈撳嚭鍏蜂綋鐨勫洜瀛愬垎鍊硷紙姝ｅ父搴旇鏄?`"momentum: 1.23蟽锛泃echnical: 0.87蟽锛?.."` 鐨勬牸寮忥級銆?
+### 4.2 浠ｇ爜瀹氫綅
 
-### 4.2 代码定位
-
-**数据缺陷传递链：**
+**鏁版嵁缂洪櫡浼犻€掗摼锛?*
 
 ```
-strategy_check() → factor_registry.compute(symbols)
-  → compute() line 906: market_data = await self._fetch_market_data(symbols)
-    → _fetch_market_data() line 782-831: 逐个 symbol 获取 K 线数据
-      → [同步 urllib/akshare 调用]  → 可能超时/失败 → 返回 {"_fetch_error": "..."}
-    → line 839-866: 批量获取 IOPV（Sina 实时行情）
-      → [同步 urllib.request.urlopen] → 可能超时/失败
-  → compute() line 919-922: 对每个 symbol 逐个因子计算
-    → 如果 data 为空 或 key 缺失 → row[code] = 0.0  (静默填零)
+strategy_check() 鈫?factor_registry.compute(symbols)
+  鈫?compute() line 906: market_data = await self._fetch_market_data(symbols)
+    鈫?_fetch_market_data() line 782-831: 閫愪釜 symbol 鑾峰彇 K 绾挎暟鎹?      鈫?[鍚屾 urllib/akshare 璋冪敤]  鈫?鍙兘瓒呮椂/澶辫触 鈫?杩斿洖 {"_fetch_error": "..."}
+    鈫?line 839-866: 鎵归噺鑾峰彇 IOPV锛圫ina 瀹炴椂琛屾儏锛?      鈫?[鍚屾 urllib.request.urlopen] 鈫?鍙兘瓒呮椂/澶辫触
+  鈫?compute() line 919-922: 瀵规瘡涓?symbol 閫愪釜鍥犲瓙璁＄畻
+    鈫?濡傛灉 data 涓虹┖ 鎴?key 缂哄け 鈫?row[code] = 0.0  (闈欓粯濉浂)
 ```
 
-**核心路径：**
+**鏍稿績璺緞锛?*
 
-在 `compute()` 函数的第 919 行：
+鍦?`compute()` 鍑芥暟鐨勭 919 琛岋細
 
 ```python
 try:
@@ -211,59 +184,50 @@ try:
     row[code] = raw_value if raw_value is not None else 0.0
 except Exception as e:
     logger.debug("Factor %s failed for %s: %s", code, sym, e)
-    row[code] = 0.0  # ← 静默失败
+    row[code] = 0.0  # 鈫?闈欓粯澶辫触
 ```
 
-如果 `data` 字典为空（因为 `_fetch_market_data` 全部失败），**所有因子得分为 0.0**。之后：
+濡傛灉 `data` 瀛楀吀涓虹┖锛堝洜涓?`_fetch_market_data` 鍏ㄩ儴澶辫触锛夛紝**鎵€鏈夊洜瀛愬緱鍒嗕负 0.0**銆備箣鍚庯細
 
 ```python
-# line 936-958: z-score 标准化
-all_v = [v for _, v in _raw[code]]
+# line 936-958: z-score 鏍囧噯鍖?all_v = [v for _, v in _raw[code]]
 if len(all_v) < 2:
-    continue  # ← 所有值一样，跳过标准化
-```
+    continue  # 鈫?鎵€鏈夊€间竴鏍凤紝璺宠繃鏍囧噯鍖?```
 
-当所有值为 0 时，`std_v = 0`，标准化被跳过。最终所有 symbol 的因子分全是 0。
-
-回到 `strategy_check()` 的 holdings_analysis 后处理（line 505）：
+褰撴墍鏈夊€间负 0 鏃讹紝`std_v = 0`锛屾爣鍑嗗寲琚烦杩囥€傛渶缁堟墍鏈?symbol 鐨勫洜瀛愬垎鍏ㄦ槸 0銆?
+鍥炲埌 `strategy_check()` 鐨?holdings_analysis 鍚庡鐞嗭紙line 505锛夛細
 
 ```python
 if real_fs and isinstance(real_fs, dict) and any(v != 0 for v in real_fs.values()):
     top_factors = sorted(real_fs.items(), key=lambda x: -abs(x[1]))[:3]
     ...
 else:
-    # 不覆盖 LLM 的因子描述 → LLM 说 "因子数据不足"
+    # 涓嶈鐩?LLM 鐨勫洜瀛愭弿杩?鈫?LLM 璇?"鍥犲瓙鏁版嵁涓嶈冻"
 ```
 
-因为所有因子分都是 0，`any(v != 0)` 为 False，所以 LLM 生成的 "因子数据不足" 不会被覆盖。
-
-### 4.3 根因链
-
+鍥犱负鎵€鏈夊洜瀛愬垎閮芥槸 0锛宍any(v != 0)` 涓?False锛屾墍浠?LLM 鐢熸垚鐨?"鍥犲瓙鏁版嵁涓嶈冻" 涓嶄細琚鐩栥€?
+### 4.3 鏍瑰洜閾?
 ```
-外部数据超时/失败
-  → _fetch_market_data 返回空 dict
-    → 所有因子得分为 0
-      → z-score 标准化全部跳过
-        → factor_summary = "因子数据不足"
+澶栭儴鏁版嵁瓒呮椂/澶辫触
+  鈫?_fetch_market_data 杩斿洖绌?dict
+    鈫?鎵€鏈夊洜瀛愬緱鍒嗕负 0
+      鈫?z-score 鏍囧噯鍖栧叏閮ㄨ烦杩?        鈫?factor_summary = "鍥犲瓙鏁版嵁涓嶈冻"
 ```
 
-中间没有熔断、没有降级、没有"至少返回部分因子"的机制。
+涓棿娌℃湁鐔旀柇銆佹病鏈夐檷绾с€佹病鏈?鑷冲皯杩斿洖閮ㄥ垎鍥犲瓙"鐨勬満鍒躲€?
+### 4.4 淇鏂瑰悜
 
-### 4.4 修复方向
-
-1. **因子级别的独立性**：每个因子的 `_fetch_market_data()` 应独立执行，一个因子失败不应影响其他因子
-2. **引入缓存层**：`compute()` 应优先使用缓存 K 线数据（已有 `_get_cached_kline` 但未在 `compute()` 中兜底）
-3. **降级策略**：当实时数据获取失败时，fallback 到缓存数据（即使过期），而非返回 0
-4. **分层报告数据质量**：`factor_summary` 具体到 "momentum: 成功, valuation: 数据源超时" 的粒度，而非笼统的"数据不足"
-5. **`compute()` 的 try/except 应该区分**——`data` 为空时应该 logging warning 而非静默填零
+1. **鍥犲瓙绾у埆鐨勭嫭绔嬫€?*锛氭瘡涓洜瀛愮殑 `_fetch_market_data()` 搴旂嫭绔嬫墽琛岋紝涓€涓洜瀛愬け璐ヤ笉搴斿奖鍝嶅叾浠栧洜瀛?2. **寮曞叆缂撳瓨灞?*锛歚compute()` 搴斾紭鍏堜娇鐢ㄧ紦瀛?K 绾挎暟鎹紙宸叉湁 `_get_cached_kline` 浣嗘湭鍦?`compute()` 涓厹搴曪級
+3. **闄嶇骇绛栫暐**锛氬綋瀹炴椂鏁版嵁鑾峰彇澶辫触鏃讹紝fallback 鍒扮紦瀛樻暟鎹紙鍗充娇杩囨湡锛夛紝鑰岄潪杩斿洖 0
+4. **鍒嗗眰鎶ュ憡鏁版嵁璐ㄩ噺**锛歚factor_summary` 鍏蜂綋鍒?"momentum: 鎴愬姛, valuation: 鏁版嵁婧愯秴鏃? 鐨勭矑搴︼紝鑰岄潪绗肩粺鐨?鏁版嵁涓嶈冻"
+5. **`compute()` 鐨?try/except 搴旇鍖哄垎**鈥斺€擿data` 涓虹┖鏃跺簲璇?logging warning 鑰岄潪闈欓粯濉浂
 
 ---
 
-## 5. 置信度始终为低
+## 5. 缃俊搴﹀缁堜负浣?
+### 5.1 鐜拌薄
 
-### 5.1 现象
-
-检查 102 的 4 条建议：
+妫€鏌?102 鐨?4 鏉″缓璁細
 
 ```json
 {"action": "decrease", "symbol": "159338", "suggested_weight": 0.15, "confidence": "low"}
@@ -272,90 +236,82 @@ else:
 {"action": "hold", "symbol": "510880", "suggested_weight": 0.08, "confidence": "low"}
 ```
 
-**全部 `confidence: "low"`**，无法区分建议的可靠程度。
+**鍏ㄩ儴 `confidence: "low"`**锛屾棤娉曞尯鍒嗗缓璁殑鍙潬绋嬪害銆?
+### 5.2 浠ｇ爜瀹氫綅
 
-### 5.2 代码定位
-
-置信度由 LLM 生成——`generate_strategy_check_report()` 在 `analysis/llm.py` 中构造 prompt 要求 LLM 输出 `confidence` 字段。
-
-**数据传递链：**
+缃俊搴︾敱 LLM 鐢熸垚鈥斺€擿generate_strategy_check_report()` 鍦?`analysis/llm.py` 涓瀯閫?prompt 瑕佹眰 LLM 杈撳嚭 `confidence` 瀛楁銆?
+**鏁版嵁浼犻€掗摼锛?*
 
 ```
-strategy_check() → generate_strategy_check_report(market_data, factor_breakdowns, regime, data_quality)
-  → LLM prompt: 包含 {factor_summary: "因子数据不足"} 的 holdings_analysis
-  → LLM 看到 "因子数据不足" → 降级所有 confidence 为 low
+strategy_check() 鈫?generate_strategy_check_report(market_data, factor_breakdowns, regime, data_quality)
+  鈫?LLM prompt: 鍖呭惈 {factor_summary: "鍥犲瓙鏁版嵁涓嶈冻"} 鐨?holdings_analysis
+  鈫?LLM 鐪嬪埌 "鍥犲瓙鏁版嵁涓嶈冻" 鈫?闄嶇骇鎵€鏈?confidence 涓?low
 ```
 
-**后处理逻辑（portfolio_service.py:505-508）：**
+**鍚庡鐞嗛€昏緫锛坧ortfolio_service.py:505-508锛夛細**
 
 ```python
 if real_fs and isinstance(real_fs, dict) and any(v != 0 for v in real_fs.values()):
     top_factors = sorted(real_fs.items(), key=lambda x: -abs(x[1]))[:3]
-    h["factor_summary"] = "...真实因子分..."
+    h["factor_summary"] = "...鐪熷疄鍥犲瓙鍒?.."
 else:
-    # 不覆盖 — LLM 的 "因子数据不足" 保留
+    # 涓嶈鐩?鈥?LLM 鐨?"鍥犲瓙鏁版嵁涓嶈冻" 淇濈暀
 ```
 
-**根因：**
+**鏍瑰洜锛?*
 
-1. 因子数据全为 0 → `any(v != 0)` 为 False → 真实因子分不注入 coverage
-2. LLM 收到的 `factor_summary` 是空的或 "因子数据不足" → 缺乏定量依据 → 所有 confidence = low
-3. Prompt 内对 confidence 判定标准不明确——只给了 "high/medium/low" 可选项但没有量化门槛
-4. `data_quality` 参数虽传给 LLM，但 LLM 是否有效使用了它取决于 prompt 质量——当前 prompt 可能没有要求 LLM 基于 `filled_count/total_count` 校准 confidence
+1. 鍥犲瓙鏁版嵁鍏ㄤ负 0 鈫?`any(v != 0)` 涓?False 鈫?鐪熷疄鍥犲瓙鍒嗕笉娉ㄥ叆 coverage
+2. LLM 鏀跺埌鐨?`factor_summary` 鏄┖鐨勬垨 "鍥犲瓙鏁版嵁涓嶈冻" 鈫?缂轰箯瀹氶噺渚濇嵁 鈫?鎵€鏈?confidence = low
+3. Prompt 鍐呭 confidence 鍒ゅ畾鏍囧噯涓嶆槑纭€斺€斿彧缁欎簡 "high/medium/low" 鍙€夐」浣嗘病鏈夐噺鍖栭棬妲?4. `data_quality` 鍙傛暟铏戒紶缁?LLM锛屼絾 LLM 鏄惁鏈夋晥浣跨敤浜嗗畠鍙栧喅浜?prompt 璐ㄩ噺鈥斺€斿綋鍓?prompt 鍙兘娌℃湁瑕佹眰 LLM 鍩轰簬 `filled_count/total_count` 鏍″噯 confidence
 
-### 5.3 修复方向
+### 5.3 淇鏂瑰悜
 
-1. **定义明确的 confidence 计算规则**，在 `strategy_check()` 后处理中覆盖 LLM 输出（类似它已经覆盖 factor_summary 的方式）：
-   - `filled_count / total_count > 0.8` → high
-   - `0.5 ≤ ratio ≤ 0.8` → medium  
-   - `ratio < 0.5` → low
-   - 建议调整幅度 > 5% 且因子数据充分 → high
-   - 建议调整幅度 < 3% 或因子数据不足 → low
-2. **在 LLM prompt 中注入具体的 `filled_count/total_count` 指引**，要求 LLM 据此校准 confidence
-3. **先修因子数据缺失（Issue #3）**——confidence 问题本质上是因子数据问题的下游症状，只有因子数据正常后 confidence 才能有真正的意义
+1. **瀹氫箟鏄庣‘鐨?confidence 璁＄畻瑙勫垯**锛屽湪 `strategy_check()` 鍚庡鐞嗕腑瑕嗙洊 LLM 杈撳嚭锛堢被浼煎畠宸茬粡瑕嗙洊 factor_summary 鐨勬柟寮忥級锛?   - `filled_count / total_count > 0.8` 鈫?high
+   - `0.5 鈮?ratio 鈮?0.8` 鈫?medium  
+   - `ratio < 0.5` 鈫?low
+   - 寤鸿璋冩暣骞呭害 > 5% 涓斿洜瀛愭暟鎹厖鍒?鈫?high
+   - 寤鸿璋冩暣骞呭害 < 3% 鎴栧洜瀛愭暟鎹笉瓒?鈫?low
+2. **鍦?LLM prompt 涓敞鍏ュ叿浣撶殑 `filled_count/total_count` 鎸囧紩**锛岃姹?LLM 鎹鏍″噯 confidence
+3. **鍏堜慨鍥犲瓙鏁版嵁缂哄け锛圛ssue #3锛?*鈥斺€攃onfidence 闂鏈川涓婃槸鍥犲瓙鏁版嵁闂鐨勪笅娓哥棁鐘讹紝鍙湁鍥犲瓙鏁版嵁姝ｅ父鍚?confidence 鎵嶈兘鏈夌湡姝ｇ殑鎰忎箟
 
 ---
 
-## 6. 编码与存储乱码
+## 6. 缂栫爜涓庡瓨鍌ㄤ贡鐮?
+### 6.1 鐜拌薄
 
-### 6.1 现象
-
-API 返回的中文字段在终端和日志中显示为 mojibake（乱码）：
-
+API 杩斿洖鐨勪腑鏂囧瓧娈靛湪缁堢鍜屾棩蹇椾腑鏄剧ず涓?mojibake锛堜贡鐮侊級锛?
 ```
-"positioning": "\ufffd\ufffd..."  应为 "低波稳健配置"
-"summary": "\ufffd\ufffd..."      应为 "组合目前持仓10只..."
+"positioning": "\ufffd\ufffd..."  搴斾负 "浣庢尝绋冲仴閰嶇疆"
+"summary": "\ufffd\ufffd..."      搴斾负 "缁勫悎鐩墠鎸佷粨10鍙?.."
 ```
 
-设计方案的策略名：
-```
-"label": "\ufffd\ufffd\ufffd..."  应为 "稳健型"
-"label": "\ufffd\ufffd\ufffd..."  应为 "平衡型"
-```
-
-### 6.2 初步诊断
-
-追踪 `design_text` 的写入链路：
-
-```
-generate_enhanced_design() → 返回 UTF-8 Python 字符串
-  → _build_plan_tables(strategies) → plan_tables
-    → design_text = "# ETF 方案\n\n" + plan_tables
-      → PortfolioDesign(design_text=design_text)
-        → db.add(record) → await db.commit()
-          → aiosqlite
+璁捐鏂规鐨勭瓥鐣ュ悕锛?```
+"label": "\ufffd\ufffd\ufffd..."  搴斾负 "绋冲仴鍨?
+"label": "\ufffd\ufffd\ufffd..."  搴斾负 "骞宠　鍨?
 ```
 
-**待验证的假设（按可能性排序）：**
+### 6.2 鍒濇璇婃柇
 
-1. **终端/日志编码**：uvicorn 控制台输出编码非 UTF-8（Windows GBK），导致日志和 `backend.err` 中的中文显示为乱码，**但 DB 实际存储正确**
-2. **DB 编码**：aiosqlite/SQLite 文件编码问题——需要 DB 连接时显式设置 `PRAGMA encoding="UTF-8"`
-3. **GBK 解码残留**：`factor_registry.py:846` 的 `resp.read().decode("gbk")` 从新浪取 IOPV 数据，如果未正确转换 UTF-8 可能污染后续处理
+杩借釜 `design_text` 鐨勫啓鍏ラ摼璺細
 
-**验证步骤：**
+```
+generate_enhanced_design() 鈫?杩斿洖 UTF-8 Python 瀛楃涓?  鈫?_build_plan_tables(strategies) 鈫?plan_tables
+    鈫?design_text = "# ETF 鏂规\n\n" + plan_tables
+      鈫?PortfolioDesign(design_text=design_text)
+        鈫?db.add(record) 鈫?await db.commit()
+          鈫?aiosqlite
+```
+
+**寰呴獙璇佺殑鍋囪锛堟寜鍙兘鎬ф帓搴忥級锛?*
+
+1. **缁堢/鏃ュ織缂栫爜**锛歶vicorn 鎺у埗鍙拌緭鍑虹紪鐮侀潪 UTF-8锛圵indows GBK锛夛紝瀵艰嚧鏃ュ織鍜?`backend.err` 涓殑涓枃鏄剧ず涓轰贡鐮侊紝**浣?DB 瀹為檯瀛樺偍姝ｇ‘**
+2. **DB 缂栫爜**锛歛iosqlite/SQLite 鏂囦欢缂栫爜闂鈥斺€旈渶瑕?DB 杩炴帴鏃舵樉寮忚缃?`PRAGMA encoding="UTF-8"`
+3. **GBK 瑙ｇ爜娈嬬暀**锛歚factor_registry.py:846` 鐨?`resp.read().decode("gbk")` 浠庢柊娴彇 IOPV 鏁版嵁锛屽鏋滄湭姝ｇ‘杞崲 UTF-8 鍙兘姹℃煋鍚庣画澶勭悊
+
+**楠岃瘉姝ラ锛?*
 
 ```bash
-# 1. 直接从 DB 读取 design_text 验证编码
+# 1. 鐩存帴浠?DB 璇诲彇 design_text 楠岃瘉缂栫爜
 python -c "
 import aiosqlite
 import asyncio
@@ -369,135 +325,112 @@ async def check():
 asyncio.run(check())
 "
 
-# 2. 如果 DB 内容正确但 API 返回乱码 → 问题在 fastapi/uvicorn 编码中间件
-# 3. 如果 DB 内容就乱码 → 问题在写入链路
-```
+# 2. 濡傛灉 DB 鍐呭姝ｇ‘浣?API 杩斿洖涔辩爜 鈫?闂鍦?fastapi/uvicorn 缂栫爜涓棿浠?# 3. 濡傛灉 DB 鍐呭灏变贡鐮?鈫?闂鍦ㄥ啓鍏ラ摼璺?```
 
-### 6.3 修复方向
+### 6.3 淇鏂瑰悜
 
-1. **执行验证步骤 1** 确定断裂点是在写入还是读出
-2. 如果 DB 正确：检查 `uvicorn` 启动编码 `PYTHONIOENCODING=utf-8`、FastAPI `JSONResponse` media_type 设置
-3. 如果 DB 乱码：在 `database.py` 的连接 URL 中增加 `?charset=utf-8` 或使用 aiosqlite pragma
+1. **鎵ц楠岃瘉姝ラ 1** 纭畾鏂鐐规槸鍦ㄥ啓鍏ヨ繕鏄鍑?2. 濡傛灉 DB 姝ｇ‘锛氭鏌?`uvicorn` 鍚姩缂栫爜 `PYTHONIOENCODING=utf-8`銆丗astAPI `JSONResponse` media_type 璁剧疆
+3. 濡傛灉 DB 涔辩爜锛氬湪 `database.py` 鐨勮繛鎺?URL 涓鍔?`?charset=utf-8` 鎴栦娇鐢?aiosqlite pragma
 
 ---
 
-## 7. 系统性偏差
-
-### 7.1 设计退化与市态缓存
-
-Designs 219-222 的 `market_context` 只有 2 个 key（`market_regime` 和 `index_realtime`），而 Design 218 有 5 个：
+## 7. 绯荤粺鎬у亸宸?
+### 7.1 璁捐閫€鍖栦笌甯傛€佺紦瀛?
+Designs 219-222 鐨?`market_context` 鍙湁 2 涓?key锛坄market_regime` 鍜?`index_realtime`锛夛紝鑰?Design 218 鏈?5 涓細
 
 ```
 218: market_regime, market_sentiment, index_realtime, sector_momentum, fund_flow
 219: market_regime, index_realtime
 ```
 
-`_build_market_context()`（strategy_design.py:192-200）会调用：
-- `pool_manager.get_market_sentiment()` → 如果缓存过期，返回默认值（不会空）
-- `pool_manager.get_sector_momentum()` → 如果缓存过期，返回 `None` → `[]`
+`_build_market_context()`锛坰trategy_design.py:192-200锛変細璋冪敤锛?- `pool_manager.get_market_sentiment()` 鈫?濡傛灉缂撳瓨杩囨湡锛岃繑鍥為粯璁ゅ€硷紙涓嶄細绌猴級
+- `pool_manager.get_sector_momentum()` 鈫?濡傛灉缂撳瓨杩囨湡锛岃繑鍥?`None` 鈫?`[]`
 
-**关键发现**：`get_market_sentiment()` 在缓存过期时无法异步刷新（因为是同步方法），所以返回默认值。但 `get_sector_momentum()` 返回 `None` 继而被 `_build_market_context` 过滤为 `[]`。
+**鍏抽敭鍙戠幇**锛歚get_market_sentiment()` 鍦ㄧ紦瀛樿繃鏈熸椂鏃犳硶寮傛鍒锋柊锛堝洜涓烘槸鍚屾鏂规硶锛夛紝鎵€浠ヨ繑鍥為粯璁ゅ€笺€備絾 `get_sector_momentum()` 杩斿洖 `None` 缁ц€岃 `_build_market_context` 杩囨护涓?`[]`銆?
+杩欐剰鍛崇潃 Designs 219-222 杩愯鏃?**pool_manager 鐨?sector_momentum 缂撳瓨鍜?fund_flow 鏁版嵁閮戒负绌?*鈥斺€旇繖涓?`pool_manager.refresh()` 娌℃湁瀹屽叏鎵ц鎴愬姛鏈夊叧銆?
+> **鍚堝苟璇存槑**锛氳璁￠€€鍖栵紙鍘?Issue #6锛夊拰甯傛€佺紦瀛樼┖娲烇紙鍘?Issue #7锛夋槸鍚屼竴 root cause鈥斺€旀暟鎹閬撴湭鎴愬姛鎵ц锛屽鑷寸┖澹虫柟妗?+ 绌虹紦瀛樺悓鏃跺嚭鐜般€備袱涓棶棰樺湪鏈妭鍚堝苟鍒嗘瀽銆?
+### 7.2 绛栫暐妫€鏌ョ殑鍥犲瓙娉ㄥ叆缂洪櫡
 
-这意味着 Designs 219-222 运行时 **pool_manager 的 sector_momentum 缓存和 fund_flow 数据都为空**——这与 `pool_manager.refresh()` 没有完全执行成功有关。
-
-> **合并说明**：设计退化（原 Issue #6）和市态缓存空洞（原 Issue #7）是同一 root cause——数据管道未成功执行，导致空壳方案 + 空缓存同时出现。两个问题在本节合并分析。
-
-### 7.2 策略检查的因子注入缺陷
-
-策略检查在 `strategy_check()` 的 505 行尝试用真实因子分覆盖 LLM 生成的因子摘要：
+绛栫暐妫€鏌ュ湪 `strategy_check()` 鐨?505 琛屽皾璇曠敤鐪熷疄鍥犲瓙鍒嗚鐩?LLM 鐢熸垚鐨勫洜瀛愭憳瑕侊細
 
 ```python
 if real_fs and isinstance(real_fs, dict) and any(v != 0 for v in real_fs.values()):
     top_factors = sorted(real_fs.items(), key=lambda x: -abs(x[1]))[:3]
-    factor_str = "；".join(f"{k}: {v:.2f}σ" for k, v in top_factors)
+    factor_str = "锛?.join(f"{k}: {v:.2f}蟽" for k, v in top_factors)
     h["factor_summary"] = f"{factor_str}"
 ```
 
-**问题**：`any(v != 0)` 的门槛太低——只有一个因子非零就会触发覆盖。但更好的指标应该是**非零因子的比例**和**信号强度**。
+**闂**锛歚any(v != 0)` 鐨勯棬妲涘お浣庘€斺€斿彧鏈変竴涓洜瀛愰潪闆跺氨浼氳Е鍙戣鐩栥€備絾鏇村ソ鐨勬寚鏍囧簲璇ユ槸**闈為浂鍥犲瓙鐨勬瘮渚?*鍜?*淇″彿寮哄害**銆?
+### 7.3 璁捐绠＄嚎鐨?闈欓粯闄嶇骇"鐭澘
 
-### 7.3 设计管线的"静默降级"短板
-
-从 `pool_manager.refresh()` 的执行路径看，信号量机制基本完整：
-- 60s TTL 缓存
-- 30s 冷却期
-- 并发锁
-
-但问题是：**当所有保护都触发后，系统"静默降级"了**——返回空缓存、默认值、零分，没有发出足够的告警。用户看到 "completed" 以为是成功的，实际是空洞的。
-
+浠?`pool_manager.refresh()` 鐨勬墽琛岃矾寰勭湅锛屼俊鍙烽噺鏈哄埗鍩烘湰瀹屾暣锛?- 60s TTL 缂撳瓨
+- 30s 鍐峰嵈鏈?- 骞跺彂閿?
+浣嗛棶棰樻槸锛?*褰撴墍鏈変繚鎶ら兘瑙﹀彂鍚庯紝绯荤粺"闈欓粯闄嶇骇"浜?*鈥斺€旇繑鍥炵┖缂撳瓨銆侀粯璁ゅ€笺€侀浂鍒嗭紝娌℃湁鍙戝嚭瓒冲鐨勫憡璀︺€傜敤鎴风湅鍒?"completed" 浠ヤ负鏄垚鍔熺殑锛屽疄闄呮槸绌烘礊鐨勩€?
 ---
 
-## 8. 修复方案与优先级
+## 8. 淇鏂规涓庝紭鍏堢骇
 
-> **跨文档依赖**：Issue #1（事件循环阻塞）的详细修复方案见 `docs/async-boundary-fix-plan.md`，以下仅列概要。
+> **璺ㄦ枃妗ｄ緷璧?*锛欼ssue #1锛堜簨浠跺惊鐜樆濉烇級鐨勮缁嗕慨澶嶆柟妗堣 `docs/archived/async-boundary-fix-plan.md`锛屼互涓嬩粎鍒楁瑕併€?
+### P0 鈥?蹇呴』绔嬪嵆淇
 
-### P0 — 必须立即修复
-
-| # | 修复项 | 涉及文件 | 关联问题 | 预估工时 |
+| # | 淇椤?| 娑夊強鏂囦欢 | 鍏宠仈闂 | 棰勪及宸ユ椂 |
 |---|--------|----------|----------|:--------:|
-| 1 | **修复 async 函数中的唯一同步 I/O**：`factor_registry.py:844-845` 的 Sina IOPV `urllib.request.urlopen` 改为 `await run_sync()` | `factor_registry.py` | Issue #1 | 0.5h |
-| 2 | **设计方案 post-condition 校验**：每个 strategy 必须有 ≥1 只非 CASH ETF 才允许标记 completed | `task_manager.py`, `strategy_design.py` | Issue #2 | 0.5h |
-| 3 | **`compute()` 空数据告警**：`_fetch_market_data` 返回空 dict 时 logger.error 而非静默填零 | `factor_registry.py` | Issue #3 | 0.25h |
+| 1 | **淇 async 鍑芥暟涓殑鍞竴鍚屾 I/O**锛歚factor_registry.py:844-845` 鐨?Sina IOPV `urllib.request.urlopen` 鏀逛负 `await run_sync()` | `factor_registry.py` | Issue #1 | 0.5h |
+| 2 | **璁捐鏂规 post-condition 鏍￠獙**锛氭瘡涓?strategy 蹇呴』鏈?鈮? 鍙潪 CASH ETF 鎵嶅厑璁告爣璁?completed | `task_manager.py`, `strategy_design.py` | Issue #2 | 0.5h |
+| 3 | **`compute()` 绌烘暟鎹憡璀?*锛歚_fetch_market_data` 杩斿洖绌?dict 鏃?logger.error 鑰岄潪闈欓粯濉浂 | `factor_registry.py` | Issue #3 | 0.25h |
 
-### P1 — 高优先级
+### P1 鈥?楂樹紭鍏堢骇
 
-| # | 修复项 | 涉及文件 | 关联问题 | 预估工时 |
+| # | 淇椤?| 娑夊強鏂囦欢 | 鍏宠仈闂 | 棰勪及宸ユ椂 |
 |---|--------|----------|----------|:--------:|
-| 4 | **编码诊断**：执行验证步骤（DB 直接读取）确定断裂点在写入还是读出 | `database.py` 检查 | Issue #5 | 0.5h |
-| 5 | **因子降级缓存**：`compute()` 实时数据失败时 fallback 到过期 K 线缓存 | `factor_registry.py` | Issue #3 | 0.5h |
-| 6 | **置信度规则化**：`strategy_check()` 后处理中基于 `filled_count/total_count` 覆盖 confidence | `portfolio_service.py` | Issue #4 | 0.25h |
-| 7 | **设计任务并发控制**：限制同一时间只有一个设计/检查任务运行 | `task_manager.py` | Issue #1 | 0.25h |
-| 8 | **死代码修复**：`macro_state.py` 的 `_fetch_pmi_trend`/`_fetch_rate_env` 加 `await run_sync()` | `macro_state.py` | Issue #1 | 0.5h |
+| 4 | **缂栫爜璇婃柇**锛氭墽琛岄獙璇佹楠わ紙DB 鐩存帴璇诲彇锛夌‘瀹氭柇瑁傜偣鍦ㄥ啓鍏ヨ繕鏄鍑?| `database.py` 妫€鏌?| Issue #5 | 0.5h |
+| 5 | **鍥犲瓙闄嶇骇缂撳瓨**锛歚compute()` 瀹炴椂鏁版嵁澶辫触鏃?fallback 鍒拌繃鏈?K 绾跨紦瀛?| `factor_registry.py` | Issue #3 | 0.5h |
+| 6 | **缃俊搴﹁鍒欏寲**锛歚strategy_check()` 鍚庡鐞嗕腑鍩轰簬 `filled_count/total_count` 瑕嗙洊 confidence | `portfolio_service.py` | Issue #4 | 0.25h |
+| 7 | **璁捐浠诲姟骞跺彂鎺у埗**锛氶檺鍒跺悓涓€鏃堕棿鍙湁涓€涓璁?妫€鏌ヤ换鍔¤繍琛?| `task_manager.py` | Issue #1 | 0.25h |
+| 8 | **姝讳唬鐮佷慨澶?*锛歚macro_state.py` 鐨?`_fetch_pmi_trend`/`_fetch_rate_env` 鍔?`await run_sync()` | `macro_state.py` | Issue #1 | 0.5h |
 
-### P2 — 中期优化
+### P2 鈥?涓湡浼樺寲
 
-| # | 修复项 | 涉及文件 | 关联问题 | 预估工时 |
+| # | 淇椤?| 娑夊強鏂囦欢 | 鍏宠仈闂 | 棰勪及宸ユ椂 |
 |---|--------|----------|----------|:--------:|
-| 9 | **状态机验证**：design pipeline 增加 validating 阶段，空策略拒入 completed | `task_manager.py` | Issue #2, #6 | 1h |
-| 10 | **因子质量报告**：`factor_summary` 输出到因子级别的可用性详情 | `portfolio_service.py`, LLM prompt | Issue #3 | 0.5h |
-| 11 | **设计列表增加 etf_count 元数据**：`GET /designs` load_only 增加 ETF 计数 | `portfolio.py` | Issue #2 | 0.25h |
-| 12 | **市态缓存异步刷新**：`get_sector_momentum()` 缓存过期时启动异步刷新 | `pool_manager.py` | Issue #6 | 0.5h |
-| 13 | **区分数据不足 vs 信号中性**："hold" 信号需区分两种场景 | `portfolio_service.py` | Issue #4 | 0.5h |
-| 14 | **CI 审计门禁**：`scripts/audit_async_blocking.py` + pre-commit 集成 | 新建 | Issue #1 | 0.5h |
+| 9 | **鐘舵€佹満楠岃瘉**锛歞esign pipeline 澧炲姞 validating 闃舵锛岀┖绛栫暐鎷掑叆 completed | `task_manager.py` | Issue #2, #6 | 1h |
+| 10 | **鍥犲瓙璐ㄩ噺鎶ュ憡**锛歚factor_summary` 杈撳嚭鍒板洜瀛愮骇鍒殑鍙敤鎬ц鎯?| `portfolio_service.py`, LLM prompt | Issue #3 | 0.5h |
+| 11 | **璁捐鍒楄〃澧炲姞 etf_count 鍏冩暟鎹?*锛歚GET /designs` load_only 澧炲姞 ETF 璁℃暟 | `portfolio.py` | Issue #2 | 0.25h |
+| 12 | **甯傛€佺紦瀛樺紓姝ュ埛鏂?*锛歚get_sector_momentum()` 缂撳瓨杩囨湡鏃跺惎鍔ㄥ紓姝ュ埛鏂?| `pool_manager.py` | Issue #6 | 0.5h |
+| 13 | **鍖哄垎鏁版嵁涓嶈冻 vs 淇″彿涓€?*锛?hold" 淇″彿闇€鍖哄垎涓ょ鍦烘櫙 | `portfolio_service.py` | Issue #4 | 0.5h |
+| 14 | **CI 瀹¤闂ㄧ**锛歚scripts/audit_async_blocking.py` + pre-commit 闆嗘垚 | 鏂板缓 | Issue #1 | 0.5h |
 
-### 修复执行顺序
+### 淇鎵ц椤哄簭
 
 ```
-P0-1 (async I/O) → P0-3 (compute告警) → P1-5 (因子缓存) → P0-2 (设计校验)
-                                           ↓
-P1-4 (编码诊断) → P1-6 (置信度) → P1-7 (并发控制) → P1-8 (死代码)
-                                           ↓
-P2-9~P2-14 (验证阶段、质量报告、审计门禁等)
+P0-1 (async I/O) 鈫?P0-3 (compute鍛婅) 鈫?P1-5 (鍥犲瓙缂撳瓨) 鈫?P0-2 (璁捐鏍￠獙)
+                                           鈫?P1-4 (缂栫爜璇婃柇) 鈫?P1-6 (缃俊搴? 鈫?P1-7 (骞跺彂鎺у埗) 鈫?P1-8 (姝讳唬鐮?
+                                           鈫?P2-9~P2-14 (楠岃瘉闃舵銆佽川閲忔姤鍛娿€佸璁￠棬绂佺瓑)
 ```
 
-> **依赖约束**：P1-6（置信度）依赖 P1-5（因子数据正常后才有意义）。P2-14（CI 门禁）不依赖其他 P0/P1，可随时插入现有工作流。
+> **渚濊禆绾︽潫**锛歅1-6锛堢疆淇″害锛変緷璧?P1-5锛堝洜瀛愭暟鎹甯稿悗鎵嶆湁鎰忎箟锛夈€侾2-14锛圕I 闂ㄧ锛変笉渚濊禆鍏朵粬 P0/P1锛屽彲闅忔椂鎻掑叆鐜版湁宸ヤ綔娴併€?
+## 9. 娴嬭瘯闃叉姢缂哄彛涓庝慨澶嶆柟妗?
+> 鍏宠仈鏂囨。锛歚docs/archived/async-boundary-fix-plan.md`锛圙1 鐩存帴鐩稿叧锛夈€乣docs/implementation-master-plan.md 搂4 Phase 2.8`
 
-## 9. 测试防护缺口与修复方案
+鐜版湁娴嬭瘯浣撶郴锛?8 涓枃浠讹紝~360 涓敤渚嬶級澶ч噺瑕嗙洊姝ｅ父璺緞锛屼絾瀛樺湪 4 灞傜粨鏋勬€х己鍙ｅ鑷翠笂杩?6 涓棶棰樻湭琚瘑鍒€?
+### 9.1 鍥涘眰缂哄彛鍥為【
 
-> 关联文档：`docs/async-boundary-fix-plan.md`（G1 直接相关）、`docs/implementation-master-plan.md §4 Phase 2.8`
+涓婃枃 搂2-搂7 鐨?6 涓川閲忛棶棰樻湭琚幇鏈夋祴璇曢槻鎶や綋绯昏瘑鍒紝鏍规簮鍦?4 灞傛祴璇曠己鍙ｏ細
 
-现有测试体系（48 个文件，~360 个用例）大量覆盖正常路径，但存在 4 层结构性缺口导致上述 6 个问题未被识别。
-
-### 9.1 四层缺口回顾
-
-上文 §2-§7 的 6 个质量问题未被现有测试防护体系识别，根源在 4 层测试缺口：
-
-| 缺口 | 描述 | 代码示例 | 影响的 Issue |
+| 缂哄彛 | 鎻忚堪 | 浠ｇ爜绀轰緥 | 褰卞搷鐨?Issue |
 |------|------|----------|:-----------:|
-| **① AST 扫描方向错** | `test_async_lint` 只检测 `await sync_func()` 模式，不检测直接同步调用 | `resp = urllib.request.urlopen(req)` 在 `async def` 内（无 await） | #1 |
-| **② Mock 跳过真实路径** | 测试通过 mock 绕过了数据获取链路，只测"好数据上的逻辑" | `registry.compute(symbols, market_data=MOCK_DATA)` → 不经过 `_fetch_market_data` | #1, #3 |
-| **③ 只检查结构不检查值** | 断言止于"字段存在"，不验证内容质量 | `assert "confidence" in result` ≠ `assert c != "low"` | #2, #4, #6 |
-| **④ 无编码 roundtrip 测试** | 写入→存储→读出的编码路径无任何防护 | 无测试验证 `"稳健型" → DB → "稳健型"` 一致 | #5 |
+| **鈶?AST 鎵弿鏂瑰悜閿?* | `test_async_lint` 鍙娴?`await sync_func()` 妯″紡锛屼笉妫€娴嬬洿鎺ュ悓姝ヨ皟鐢?| `resp = urllib.request.urlopen(req)` 鍦?`async def` 鍐咃紙鏃?await锛?| #1 |
+| **鈶?Mock 璺宠繃鐪熷疄璺緞** | 娴嬭瘯閫氳繃 mock 缁曡繃浜嗘暟鎹幏鍙栭摼璺紝鍙祴"濂芥暟鎹笂鐨勯€昏緫" | `registry.compute(symbols, market_data=MOCK_DATA)` 鈫?涓嶇粡杩?`_fetch_market_data` | #1, #3 |
+| **鈶?鍙鏌ョ粨鏋勪笉妫€鏌ュ€?* | 鏂█姝簬"瀛楁瀛樺湪"锛屼笉楠岃瘉鍐呭璐ㄩ噺 | `assert "confidence" in result` 鈮?`assert c != "low"` | #2, #4, #6 |
+| **鈶?鏃犵紪鐮?roundtrip 娴嬭瘯** | 鍐欏叆鈫掑瓨鍌ㄢ啋璇诲嚭鐨勭紪鐮佽矾寰勬棤浠讳綍闃叉姢 | 鏃犳祴璇曢獙璇?`"绋冲仴鍨? 鈫?DB 鈫?"绋冲仴鍨?` 涓€鑷?| #5 |
 
-### 9.2 修复方案（按缺口）
-
-#### 修复 G1: AST 扫描增强 — 新增直接同步调用检测
-
-**当前漏洞**：`test_async_lint.py` 只遍历 `ast.Await` 节点，忽略 `ast.Call` 在 `ast.AsyncFunctionDef` 中的直接调用。
-
+### 9.2 淇鏂规锛堟寜缂哄彛锛?
+#### 淇 G1: AST 鎵弿澧炲己 鈥?鏂板鐩存帴鍚屾璋冪敤妫€娴?
+**褰撳墠婕忔礊**锛歚test_async_lint.py` 鍙亶鍘?`ast.Await` 鑺傜偣锛屽拷鐣?`ast.Call` 鍦?`ast.AsyncFunctionDef` 涓殑鐩存帴璋冪敤銆?
 ```python
-# test_async_lint.py 新增函数
+# test_async_lint.py 鏂板鍑芥暟
 def _extract_call_name(node: ast.Call) -> str:
-    """提取函数调用名称，支持 foo.bar.baz 格式。"""
+    """鎻愬彇鍑芥暟璋冪敤鍚嶇О锛屾敮鎸?foo.bar.baz 鏍煎紡銆?""
     parts = []
     n = node.func
     while isinstance(n, ast.Attribute):
@@ -508,26 +441,21 @@ def _extract_call_name(node: ast.Call) -> str:
     return '.'.join(reversed(parts))
 
 def _is_direct_sync_call_in_async(node: ast.AST) -> list[str]:
-    """检查 async def 函数中是否有直接（非 await）同步调用。
-
-    由于 ast.walk 不提供 parent 引用，需要先建立 parent 映射。
-    替代方案：在遍历时维护一个 in_await 标志栈。
-    """
+    """妫€鏌?async def 鍑芥暟涓槸鍚︽湁鐩存帴锛堥潪 await锛夊悓姝ヨ皟鐢ㄣ€?
+    鐢变簬 ast.walk 涓嶆彁渚?parent 寮曠敤锛岄渶瑕佸厛寤虹珛 parent 鏄犲皠銆?    鏇夸唬鏂规锛氬湪閬嶅巻鏃剁淮鎶や竴涓?in_await 鏍囧織鏍堛€?    """
     if not isinstance(node, ast.AsyncFunctionDef):
         return []
     violations = []
-    # 方案：先建 parent 映射，再从 Call 节点向上追溯
+    # 鏂规锛氬厛寤?parent 鏄犲皠锛屽啀浠?Call 鑺傜偣鍚戜笂杩芥函
     for child in ast.walk(node):
         if isinstance(child, ast.Call):
-            # 用 lineno 粗判断——更精确的做法：
-            # 遍历 AsyncFunctionDef 时手动跟踪 await 上下文
-            ...
+            # 鐢?lineno 绮楀垽鏂€斺€旀洿绮剧‘鐨勫仛娉曪細
+            # 閬嶅巻 AsyncFunctionDef 鏃舵墜鍔ㄨ窡韪?await 涓婁笅鏂?            ...
     return violations
 ```
 
-> **实现注意**：AST 节点默认不含 `parent` 属性。上述伪代码示意逻辑，实际实现时需要在 `ast.walk` 中手动维护一个 `in_await: bool` 标志栈，或使用 `ast.NodeTransformer` 的 `visit` 顺序推断。
-
-**新增黑名单**（区别于 `_SYNC_PATTERNS` 的 `await` 列表）：
+> **瀹炵幇娉ㄦ剰**锛欰ST 鑺傜偣榛樿涓嶅惈 `parent` 灞炴€с€備笂杩颁吉浠ｇ爜绀烘剰閫昏緫锛屽疄闄呭疄鐜版椂闇€瑕佸湪 `ast.walk` 涓墜鍔ㄧ淮鎶や竴涓?`in_await: bool` 鏍囧織鏍堬紝鎴栦娇鐢?`ast.NodeTransformer` 鐨?`visit` 椤哄簭鎺ㄦ柇銆?
+**鏂板榛戝悕鍗?*锛堝尯鍒簬 `_SYNC_PATTERNS` 鐨?`await` 鍒楄〃锛夛細
 
 ```python
 _SYNC_PATTERNS_DIRECT = [
@@ -538,8 +466,7 @@ _SYNC_PATTERNS_DIRECT = [
 ]
 ```
 
-**新增测试**：
-
+**鏂板娴嬭瘯**锛?
 ```python
 def test_no_direct_sync_call_in_async_function():
     """Fail if any async def contains a direct synchronous call."""
@@ -556,20 +483,18 @@ def test_no_direct_sync_call_in_async_function():
         '\n'.join(violations)
 ```
 
-**涉及文件**：`tests/test_async_lint.py` | **预估工时**：0.5h
+**娑夊強鏂囦欢**锛歚tests/test_async_lint.py` | **棰勪及宸ユ椂**锛?.5h
 
 ---
 
-#### 修复 G2: 真实路径集成测试 — 补上跳过的那段链路
-
-**当前漏洞**：因子计算和设计管线测试全部绕过 `_fetch_market_data()`，直接注入预构造数据。从不测试"数据源挂了"的场景。
-
-**新增测试 1：因子降级路径测试**
+#### 淇 G2: 鐪熷疄璺緞闆嗘垚娴嬭瘯 鈥?琛ヤ笂璺宠繃鐨勯偅娈甸摼璺?
+**褰撳墠婕忔礊**锛氬洜瀛愯绠楀拰璁捐绠＄嚎娴嬭瘯鍏ㄩ儴缁曡繃 `_fetch_market_data()`锛岀洿鎺ユ敞鍏ラ鏋勯€犳暟鎹€備粠涓嶆祴璇?鏁版嵁婧愭寕浜?鐨勫満鏅€?
+**鏂板娴嬭瘯 1锛氬洜瀛愰檷绾ц矾寰勬祴璇?*
 
 ```python
-# tests/test_factor_registry.py 新增
+# tests/test_factor_registry.py 鏂板
 async def test_compute_with_empty_fetch_returns_zeros():
-    """当 _fetch_market_data 返回空时，因子得分全为 0 但不抛异常。"""
+    """褰?_fetch_market_data 杩斿洖绌烘椂锛屽洜瀛愬緱鍒嗗叏涓?0 浣嗕笉鎶涘紓甯搞€?""
     registry._fetch_market_data = AsyncMock(return_value={})
     result = await registry.compute(["000001", "000002"])
     for sym, scores in result.items():
@@ -577,113 +502,107 @@ async def test_compute_with_empty_fetch_returns_zeros():
             assert val == 0.0, f"{sym}.{code} = {val}, expected 0"
 ```
 
-**新增测试 2：设计编排器集成测试**
+**鏂板娴嬭瘯 2锛氳璁＄紪鎺掑櫒闆嗘垚娴嬭瘯**
 
-> **标记为 `@pytest.mark.slow`** — 该测试会触发真实的 pool_manager.refresh()（含外部网络调用），不适合 CI 快速流水线。
-
+> **鏍囪涓?`@pytest.mark.slow`** 鈥?璇ユ祴璇曚細瑙﹀彂鐪熷疄鐨?pool_manager.refresh()锛堝惈澶栭儴缃戠粶璋冪敤锛夛紝涓嶉€傚悎 CI 蹇€熸祦姘寸嚎銆?
 ```python
-# tests/test_design_pipeline_integration.py 新增
+# tests/test_design_pipeline_integration.py 鏂板
 @pytest.mark.slow
 async def test_generate_enhanced_design_returns_valid_strategies():
-    """调用真实编排器（非纯引擎），验证输出策略完整性。"""
+    """璋冪敤鐪熷疄缂栨帓鍣紙闈炵函寮曟搸锛夛紝楠岃瘉杈撳嚭绛栫暐瀹屾暣鎬с€?""
     result = await generate_enhanced_design(capital=500000)
     assert "strategies" in result
-    assert len(result["strategies"]) >= 2  # 至少 2 套方案
-    for s in result["strategies"]:
+    assert len(result["strategies"]) >= 2  # 鑷冲皯 2 濂楁柟妗?    for s in result["strategies"]:
         etfs = [a for a in s.get("etfs", []) if a.get("symbol") != "CASH"]
         assert len(etfs) >= 3, f"Strategy {s.get('id')}: only {len(etfs)} non-CASH ETFs"
 ```
 
-**新增测试 3：空池降级测试**
+**鏂板娴嬭瘯 3锛氱┖姹犻檷绾ф祴璇?*
 
 ```python
-# tests/test_strategy_design.py 新增
+# tests/test_strategy_design.py 鏂板
 async def test_empty_candidate_pool_returns_error():
-    """候选池为空时，编排器返回 error 而非空策略。"""
+    """鍊欓€夋睜涓虹┖鏃讹紝缂栨帓鍣ㄨ繑鍥?error 鑰岄潪绌虹瓥鐣ャ€?""
     with patch.object(pool_manager, 'get_pool', return_value={"core": [], "satellite": [], "defense": []}):
         result = await generate_enhanced_design(capital=500000)
         assert "error" in result
-        assert result["error"] == "无候选标的"
+        assert result["error"] == "鏃犲€欓€夋爣鐨?
 ```
 
-**涉及文件**：`tests/test_factor_registry.py`、`tests/test_design_pipeline_integration.py`、`tests/test_strategy_design.py`（新建） | **预估工时**：1.5h
+**娑夊強鏂囦欢**锛歚tests/test_factor_registry.py`銆乣tests/test_design_pipeline_integration.py`銆乣tests/test_strategy_design.py`锛堟柊寤猴級 | **棰勪及宸ユ椂**锛?.5h
 
 ---
 
-#### 修复 G3: 值级质量断言增强
+#### 淇 G3: 鍊肩骇璐ㄩ噺鏂█澧炲己
 
-**当前漏洞**：断言止于"字段存在"，不检查字段值的合理性。
-
+**褰撳墠婕忔礊**锛氭柇瑷€姝簬"瀛楁瀛樺湪"锛屼笉妫€鏌ュ瓧娈靛€肩殑鍚堢悊鎬с€?
 ```python
-# 现状
+# 鐜扮姸
 assert "confidence" in suggestion
 assert "factor_summary" in holding
 
-# 目标
+# 鐩爣
 assert suggestion["confidence"] in ("high", "medium", "low")
 if holding.get("factor_scores"):
-    assert "σ" in holding["factor_summary"]  # 真实因子分格式
-```
+    assert "蟽" in holding["factor_summary"]  # 鐪熷疄鍥犲瓙鍒嗘牸寮?```
 
-**具体改动：**
+**鍏蜂綋鏀瑰姩锛?*
 
-| 测试文件 | 现有测试 | 增强断言 |
+| 娴嬭瘯鏂囦欢 | 鐜版湁娴嬭瘯 | 澧炲己鏂█ |
 |----------|---------|---------|
-| `test_strategy_check_async.py` | `test_strategy_check_returns_expected_structure` | 追加：非全 `low`（至少 1 条 confidence 为 `medium` 或 `high`） |
-| `test_design_optimization_plan.py` | `test_three_strategies_produced` | 追加：mock 因子分后，factor_summary 格式含"σ" |
-| `test_pool_manager.py` | `test_refresh_populates_cache` | 追加：market_context 完整（含 sector_momentum/market_sentiment/fund_flow） |
+| `test_strategy_check_async.py` | `test_strategy_check_returns_expected_structure` | 杩藉姞锛氶潪鍏?`low`锛堣嚦灏?1 鏉?confidence 涓?`medium` 鎴?`high`锛?|
+| `test_design_optimization_plan.py` | `test_three_strategies_produced` | 杩藉姞锛歮ock 鍥犲瓙鍒嗗悗锛宖actor_summary 鏍煎紡鍚?蟽" |
+| `test_pool_manager.py` | `test_refresh_populates_cache` | 杩藉姞锛歮arket_context 瀹屾暣锛堝惈 sector_momentum/market_sentiment/fund_flow锛?|
 
-**新增蓝图**（集成到 `verify_e2e.py` 的 design/strategy 章节中，复用其 HTTP 基础结构而非独立文件）：
+**鏂板钃濆浘**锛堥泦鎴愬埌 `verify_e2e.py` 鐨?design/strategy 绔犺妭涓紝澶嶇敤鍏?HTTP 鍩虹缁撴瀯鑰岄潪鐙珛鏂囦欢锛夛細
 
 ```python
-# verify_e2e.py (深化设计章节断言)
+# verify_e2e.py (娣卞寲璁捐绔犺妭鏂█)
 def _check_design_content_quality():
-    """设计方案质量检查：≥2 套策略，每套 ≥3 只非 CASH ETF，design_text > 1000 字符。"""
+    """璁捐鏂规璐ㄩ噺妫€鏌ワ細鈮? 濂楃瓥鐣ワ紝姣忓 鈮? 鍙潪 CASH ETF锛宒esign_text > 1000 瀛楃銆?""
     r = requests.get(f"{BASE}/api/v1/portfolio/designs?limit=1")
     if r.status_code != 200 or not r.json():
-        check("设计质量检查", False, "无可用设计")
+        check("璁捐璐ㄩ噺妫€鏌?, False, "鏃犲彲鐢ㄨ璁?)
         return
     did = r.json()[0]["id"]
     detail = requests.get(f"{BASE}/api/v1/portfolio/designs/{did}").json()
     strategies = detail.get("strategies", [])
-    check(f"设计方案数量: {len(strategies)}", len(strategies) >= 2)
+    check(f"璁捐鏂规鏁伴噺: {len(strategies)}", len(strategies) >= 2)
     for s in strategies:
         non_cash = [a for a in (s.get("etfs") or []) if a.get("symbol") != "CASH"]
-        check(f"  策略 {s.get('id','?')} 非现金标的: {len(non_cash)} 只",
+        check(f"  绛栫暐 {s.get('id','?')} 闈炵幇閲戞爣鐨? {len(non_cash)} 鍙?,
               len(non_cash) >= 3)
     dt = detail.get("design_text", "")
-    check(f"设计文本长度: {len(dt)} 字", len(dt) > 1000)
+    check(f"璁捐鏂囨湰闀垮害: {len(dt)} 瀛?, len(dt) > 1000)
 
 def _check_factor_data_completeness():
-    """最新策略检查：至少 60% 标的有完整因子数据。"""
-    # 调用 strategy-checks 接口获取最新记录
-    r = requests.get(f"{BASE}/api/v1/portfolio/strategy-checks?limit=1")
+    """鏈€鏂扮瓥鐣ユ鏌ワ細鑷冲皯 60% 鏍囩殑鏈夊畬鏁村洜瀛愭暟鎹€?""
+    # 璋冪敤 strategy-checks 鎺ュ彛鑾峰彇鏈€鏂拌褰?    r = requests.get(f"{BASE}/api/v1/portfolio/strategy-checks?limit=1")
     if r.status_code != 200 or not r.json():
-        check("因子完整性检查", False, "无策略检查记录")
+        check("鍥犲瓙瀹屾暣鎬ф鏌?, False, "鏃犵瓥鐣ユ鏌ヨ褰?)
         return
     data_quality = r.json()[0].get("data_quality", {})
     filled = data_quality.get("filled_count", 0)
     total = data_quality.get("total_count", 1)
-    check(f"因子数据完整率: {filled}/{total}", filled / total > 0.6)
+    check(f"鍥犲瓙鏁版嵁瀹屾暣鐜? {filled}/{total}", filled / total > 0.6)
 ```
 
-**涉及文件**：多文件 | **预估工时**：2h
+**娑夊強鏂囦欢**锛氬鏂囦欢 | **棰勪及宸ユ椂**锛?h
 
 ---
 
-#### 修复 G4: 编码 roundtrip 测试
+#### 淇 G4: 缂栫爜 roundtrip 娴嬭瘯
 
-**当前漏洞**：没有任何测试验证"中文写入 DB → 读回 → 内容一致"。
-
+**褰撳墠婕忔礊**锛氭病鏈変换浣曟祴璇曢獙璇?涓枃鍐欏叆 DB 鈫?璇诲洖 鈫?鍐呭涓€鑷?銆?
 ```python
-# tests/test_database.py 新建
+# tests/test_database.py 鏂板缓
 @pytest.mark.asyncio
 async def test_database_encoding_roundtrip():
-    """写入中文字符串，读回后完全一致。"""
+    """鍐欏叆涓枃瀛楃涓诧紝璇诲洖鍚庡畬鍏ㄤ竴鑷淬€?""
     from app.database import async_session
     from app.models.portfolio_design import PortfolioDesign
 
-    test_text = "稳健型方案：低波稳健配置，控制回撤，适合保守型投资者"
+    test_text = "绋冲仴鍨嬫柟妗堬細浣庢尝绋冲仴閰嶇疆锛屾帶鍒跺洖鎾わ紝閫傚悎淇濆畧鍨嬫姇璧勮€?
 
     async with async_session() as db:
         record = PortfolioDesign(
@@ -695,57 +614,51 @@ async def test_database_encoding_roundtrip():
         await db.commit()
         record_id = record.id
 
-        # 重新读取
+        # 閲嶆柊璇诲彇
         db2 = async_session()
         loaded = await db2.get(PortfolioDesign, record_id)
         assert loaded.design_text == test_text, \
             f"Mojibake detected!\n  wrote: {repr(test_text)}\n  read:  {repr(loaded.design_text)}"
 ```
 
-**涉及文件**：`tests/test_database.py`（新建） | **预估工时**：0.5h
+**娑夊強鏂囦欢**锛歚tests/test_database.py`锛堟柊寤猴級 | **棰勪及宸ユ椂**锛?.5h
 
 ---
 
-### 9.3 各测试文件改动清单
-
-| 文件 | 改动类型 | 内容 |
+### 9.3 鍚勬祴璇曟枃浠舵敼鍔ㄦ竻鍗?
+| 鏂囦欢 | 鏀瑰姩绫诲瀷 | 鍐呭 |
 |------|----------|------|
-| `tests/test_async_lint.py` | 增强 | 新增 `test_no_direct_sync_call_in_async_function` |
-| `tests/test_factor_registry.py` | 新增测试 | `test_compute_with_empty_fetch_returns_zeros` |
-| `tests/test_design_pipeline_integration.py` | 新增测试 | `test_generate_enhanced_design_returns_valid_strategies` |
-| `tests/test_strategy_design.py` | 新建文件 | `test_empty_candidate_pool_returns_error` |
-| `tests/test_strategy_check_async.py` | 增强 | confidence 值级断言追加 |
-| `tests/test_design_optimization_plan.py` | 增强 | factor_summary 格式断言追加 |
-| `tests/test_pool_manager.py` | 增强 | market_context 完整 key 断言 |
-| `scripts/verify_e2e.py` | 增强 | 新增 `_check_design_content_quality` + `_check_factor_data_completeness` |
-| `tests/test_database.py` | 新建文件 | 编码 roundtrip 测试 |
+| `tests/test_async_lint.py` | 澧炲己 | 鏂板 `test_no_direct_sync_call_in_async_function` |
+| `tests/test_factor_registry.py` | 鏂板娴嬭瘯 | `test_compute_with_empty_fetch_returns_zeros` |
+| `tests/test_design_pipeline_integration.py` | 鏂板娴嬭瘯 | `test_generate_enhanced_design_returns_valid_strategies` |
+| `tests/test_strategy_design.py` | 鏂板缓鏂囦欢 | `test_empty_candidate_pool_returns_error` |
+| `tests/test_strategy_check_async.py` | 澧炲己 | confidence 鍊肩骇鏂█杩藉姞 |
+| `tests/test_design_optimization_plan.py` | 澧炲己 | factor_summary 鏍煎紡鏂█杩藉姞 |
+| `tests/test_pool_manager.py` | 澧炲己 | market_context 瀹屾暣 key 鏂█ |
+| `scripts/verify_e2e.py` | 澧炲己 | 鏂板 `_check_design_content_quality` + `_check_factor_data_completeness` |
+| `tests/test_database.py` | 鏂板缓鏂囦欢 | 缂栫爜 roundtrip 娴嬭瘯 |
 
 ---
 
-### 9.4 实施前提条件
+### 9.4 瀹炴柦鍓嶆彁鏉′欢
 
 ```
-Phase 2.6 (异步边界修复) 必须先完成
-    ↓ 否则 test_async_lint 新增测试会被真实阻塞触发
-Phase 2.7 (系统性质量修复) 必须先完成
-    ↓ 否则 test_generate_enhanced_design 会因空池/数据缺失失败
-Phase 2.8 (测试防护增强) ← 本方案
-    ↓ 可以作为现有代码的最后一道安全网
-后续日常开发
-```
+Phase 2.6 (寮傛杈圭晫淇) 蹇呴』鍏堝畬鎴?    鈫?鍚﹀垯 test_async_lint 鏂板娴嬭瘯浼氳鐪熷疄闃诲瑙﹀彂
+Phase 2.7 (绯荤粺鎬ц川閲忎慨澶? 蹇呴』鍏堝畬鎴?    鈫?鍚﹀垯 test_generate_enhanced_design 浼氬洜绌烘睜/鏁版嵁缂哄け澶辫触
+Phase 2.8 (娴嬭瘯闃叉姢澧炲己) 鈫?鏈柟妗?    鈫?鍙互浣滀负鐜版湁浠ｇ爜鐨勬渶鍚庝竴閬撳畨鍏ㄧ綉
+鍚庣画鏃ュ父寮€鍙?```
 
-### 附录：文件引用索引
-
-| 文件 | 行号 | 说明 | 关联问题 |
+### 闄勫綍锛氭枃浠跺紩鐢ㄧ储寮?
+| 鏂囦欢 | 琛屽彿 | 璇存槑 | 鍏宠仈闂 |
 |------|------|------|----------|
-| `factor_registry.py` | 839-866 | Sina IOPV 批量获取（urllib.request.urlopen 阻塞） | Issue #1 |
-| `factor_registry.py` | 906 | `compute()` 调用 `_fetch_market_data` 入口 | Issue #1, #3 |
-| `factor_registry.py` | 919-922 | 因子计算失败静默填 0 | Issue #3 |
-| `macro_state.py` | 94-126 | `_fetch_pmi_trend` 死代码 | Issue #1 |
-| `macro_state.py` | 129-171 | `_fetch_rate_env` 死代码 | Issue #1 |
-| `task_manager.py` | 225-242 | `design_pipeline` 策略结果校验逻辑 | Issue #2 |
-| `strategy_design.py` | 56-65 | 候选池空检查 | Issue #2 |
-| `portfolio_service.py` | 392-398 | `strategy_check` 因子数据并行采集 | Issue #3 |
-| `portfolio_service.py` | 505-508 | 因子注入后处理（all-0 跳过） | Issue #3, #4 |
-| `pool_manager.py` | 614-674 | `get_sector_momentum` / `get_market_sentiment` 缓存 | Issue #6 |
+| `factor_registry.py` | 839-866 | Sina IOPV 鎵归噺鑾峰彇锛坲rllib.request.urlopen 闃诲锛?| Issue #1 |
+| `factor_registry.py` | 906 | `compute()` 璋冪敤 `_fetch_market_data` 鍏ュ彛 | Issue #1, #3 |
+| `factor_registry.py` | 919-922 | 鍥犲瓙璁＄畻澶辫触闈欓粯濉?0 | Issue #3 |
+| `macro_state.py` | 94-126 | `_fetch_pmi_trend` 姝讳唬鐮?| Issue #1 |
+| `macro_state.py` | 129-171 | `_fetch_rate_env` 姝讳唬鐮?| Issue #1 |
+| `task_manager.py` | 225-242 | `design_pipeline` 绛栫暐缁撴灉鏍￠獙閫昏緫 | Issue #2 |
+| `strategy_design.py` | 56-65 | 鍊欓€夋睜绌烘鏌?| Issue #2 |
+| `portfolio_service.py` | 392-398 | `strategy_check` 鍥犲瓙鏁版嵁骞惰閲囬泦 | Issue #3 |
+| `portfolio_service.py` | 505-508 | 鍥犲瓙娉ㄥ叆鍚庡鐞嗭紙all-0 璺宠繃锛?| Issue #3, #4 |
+| `pool_manager.py` | 614-674 | `get_sector_momentum` / `get_market_sentiment` 缂撳瓨 | Issue #6 |
 
