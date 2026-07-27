@@ -482,27 +482,88 @@ class PoolManager:
     ) -> dict[str, list[dict[str, Any]]]:
         """B2: 候选池去重——同层同 tracked_index 的 ETF 只保留 fund_scale 最大的。
 
-        当 tracked_index 为空时（Sina 源无此字段），跳过该标的的去重。
+        当 tracked_index 为空时（Sina 源无此字段），使用名称推断去重（ETF + 联接C 合并）。
         """
+        # 名称中常见的"联接"类后缀
+        _LINK_FUND_SUFFIXES = ("联接", "联", "LOF", "C")
+
+        def _extract_index_concept(name: str) -> str:
+            """从 ETF 名提取指数概念（去除基金公司名和联接/ETF 后缀）。"""
+            # 去除基金公司名
+            _COMPANY_NAMES = [
+                "华夏", "易方达", "汇添富", "嘉实", "富国", "招商", "博时", "南方",
+                "广发", "华安", "国泰", "鹏华", "天弘", "工银", "建信", "中欧",
+                "景顺", "长城", "泰康", "海富通", "光大", "兴全", "东证", "华宝",
+                "银华", "大成", "长信", "国联", "申万", "上投", "中信", "华泰",
+                "万家", "兴业", "民生", "浦银", "方正", "太平", "前海", "创金",
+                "银河", "诺安", "交银", "融通", "泓德", "中加", "永赢", "西部",
+                "浙商", "新华", "红土", "安信", "国寿", "英大", "汇丰", "恒生",
+                "中银", "国投", "德邦", "华富", "金元", "国金", "九泰", "东方",
+                "中泰", "湘财", "国融", "江信", "蜂巢", "东海", "中邮", "华融",
+                "金鹰", "长城", "同泰", "红塔", "华润", "格林", "瑞达", "明亚",
+                "惠升", "华宸", "富荣", "易米", "长江", "渤海",
+            ]
+            for company in sorted(_COMPANY_NAMES, key=len, reverse=True):
+                name = name.replace(company, "")
+            # 去除常见后缀
+            for suffix in ("ETF", "联接", "联", "LOF"):
+                name = name.replace(suffix, "")
+            return name.strip()
+
         result: dict[str, list[dict[str, Any]]] = {layer: [] for layer in ALL_LAYERS}
         for layer, items in pool.items():
             seen_indices: dict[str, dict[str, Any]] = {}
+            # 记录已按名称去重的 code，避免 name-based 重复
+            name_seen: dict[str, dict[str, Any]] = {}
             for item in items:
                 tidx = item.get("tracked_index", "") or ""
-                if not tidx:
-                    # 无 tracked_index 的标的直接保留（Sina 源）
-                    result[layer].append(item)
-                    continue
-                existing = seen_indices.get(tidx)
-                if existing is None:
-                    seen_indices[tidx] = item
-                else:
-                    # 同指数保留 fund_scale 最大的
-                    existing_scale = float(existing.get("fund_scale", 0) or 0)
-                    new_scale = float(item.get("fund_scale", 0) or 0)
-                    if new_scale > existing_scale:
+                if tidx:
+                    # tracked_index 精确去重
+                    existing = seen_indices.get(tidx)
+                    if existing is None:
                         seen_indices[tidx] = item
+                    else:
+                        existing_scale = float(existing.get("fund_scale", 0) or 0)
+                        new_scale = float(item.get("fund_scale", 0) or 0)
+                        if new_scale > existing_scale:
+                            seen_indices[tidx] = item
+                else:
+                    # 无 tracked_index → 按名称推断的概念去重（联接C 合并）
+                    raw_name = item.get("name", item.get("symbol", ""))
+                    concept = _extract_index_concept(raw_name)
+                    if not concept:
+                        # 完全无法推断概念，直接保留
+                        result[layer].append(item)
+                        continue
+                    existing = name_seen.get(concept)
+                    if existing is None:
+                        name_seen[concept] = item
+                    else:
+                        existing_scale = float(existing.get("fund_scale", 0) or 0)
+                        new_scale = float(item.get("fund_scale", 0) or 0)
+                        # 没有联接后缀的优先（即 ETF 优先于联接C）
+                        existing_is_etf = not any(s in existing.get("name", "") for s in _LINK_FUND_SUFFIXES)
+                        new_is_etf = not any(s in item.get("name", "") for s in _LINK_FUND_SUFFIXES)
+                        if new_is_etf and not existing_is_etf:
+                            name_seen[concept] = item
+                        elif existing_is_etf and not new_is_etf:
+                            pass  # keep existing
+                        elif new_scale > existing_scale:
+                            name_seen[concept] = item
+
+            # 合并：tracked_index 精确去重 + name-based 去重
             result[layer].extend(seen_indices.values())
+            # name_seen 中那些没有 tracked_index 的也要加入
+            for concept, item in name_seen.items():
+                code = item.get("symbol", item.get("code", ""))
+                # 检查是否已经被 tracked_index 去重包含了
+                already_in = any(
+                    e.get("symbol") == code or e.get("code") == code
+                    for e in result[layer]
+                )
+                if not already_in:
+                    result[layer].append(item)
+
         return result
 
     def _ensure_mandatory(

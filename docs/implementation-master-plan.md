@@ -1231,3 +1231,17 @@ Phase 7.1 (远期优化)             无紧急依赖
 | | | | **已实现：** |
 | | | | **TokenMonitor → AppTabs** — 替换手工 `tab-group`/`tab-btn` 为 `<AppTabs v-model>`，删除 `switchGranularity()` 函数，新增 `watch(granularity, fetchData)`，新增 `granularityTabs` 数据。TokenMonitor 单测 3 条 ✅ |
 | | | | **改动文件：** `frontend/src/components/TokenMonitor.vue`、`frontend/src/test/TokenMonitor.spec.js`（新）、`frontend/src/test/ChartComponents.spec.js`（已有）、`docs/frontend-ui-optimization-plan.md`（v2 重写）、`docs/frontend-testing-safety-net.md`、`docs/system-performance-and-quality-review.md`、`docs/implementation-master-plan.md` |
+| |
+| | **v11.0** | 2026-07-27 | **Phase 12 — 全面优化实施 (optimization-master-plan)** | 详见 `docs/optimization-master-plan.md` |
+| | | | **已实现（P0-阻塞修复）：** |
+| | | | **FIX-20** — `strategy_design.py` 事件循环阻塞修复。`_build_market_context` 和 `_compute_fund_flow` 改为 `async def`，使用 `asyncio.gather()` 并发获取全市场 fund flow（58 个标的从串行 58s→并行 8s）。`generate_enhanced_design` 中改用 `await _build_market_context()` 避免阻塞事件循环 |
+| | | | **FIX-12c** — `strategy_design.py` 新增 `_validate_target_amount_consistency()` 函数。验证所有策略中 target_amount = capital × weight，不一致时记录 WARNING 日志 |
+| | | | **已实现（P1-严重修复）：** |
+| | | | **FIX-05** — `routers/factors.py` 三个端点（`/model`、`/active`、`/ic`）新增 60s TTL 响应缓存和 Cache-Control/ETag HTTP 头，减少重复聚合计算 |
+| | | | **FIX-11** — `pool_manager.py` `_deduplicate_by_index()` 增强。当 `tracked_index` 为空时使用名称推断概念去重（ETF + 联接C 合并），保留 fund_scale 最大（或纯 ETF 优先于联接C）的标的 |
+| | | | **已审计（无需改动 — 前期已实施）：** |
+| | | | **FIX-08** — `engine/rationale.py` 模板已修复，无 `{daily_change}%` 占位符（前期 Phase 6.2 已处理） |
+| | | | **FIX-12** — 前端 ECharts 按需加载：所有组件已使用 `echarts/core` 子导入，无全量 `import * as echarts`（前期已处理） |
+| | | | **FIX-13** — `rollup-plugin-visualizer` 已在 devDependencies 中、vite.config.js 已配置（前期 Phase 9 已处理） |
+| | | | **FIX-14** — 路由级组件代码分割：所有路由已使用 `() => import()` 动态导入（前期 Phase 3.1 已处理） |
+| | | | **改动文件：** `backend/app/services/strategy_design.py`、`backend/app/routers/factors.py`、`backend/app/services/pool_manager.py`、`docs/optimization-master-plan.md`、`docs/implementation-master-plan.md` |

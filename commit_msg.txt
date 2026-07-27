@@ -1,22 +1,21 @@
-Phase 6.2: Implement design-report-quality-fix-plan
+Implement optimization-master-plan: FIX-20/FIX-05/FIX-11/FIX-12c
 
-- Fix A: Downgrade strategy validation in task_manager.py from
-  'all-or-nothing' to 'at least one strategy has non-CASH' (P0).
-  Strategies without candidates are filled with CASH+warning
-  instead of causing the entire design to fail.
+P0 fixes:
+- FIX-20: Convert _build_market_context/_compute_fund_flow from sync
+  to async with asyncio.gather() concurrency. Fix event loop blocking
+  in generate_enhanced_design by adding proper await calls.
+- FIX-12c: Add _validate_target_amount_consistency() to ensure
+  target_amount == capital * weight for all strategy allocations.
 
-- Issue 2 fix: Add _compute_risk_warnings() in portfolio_service.py (P1)
-  Rule-based risk detection (sector concentration, single position
-  overweight, low liquidity) ensures risk_warnings is never empty.
-  Combined with LLM output via _combine_risk_warnings().
+P1 fixes:
+- FIX-05: Add 60s TTL response caching with Cache-Control/ETag
+  headers to all three factors endpoints (/model, /active, /ic).
+- FIX-11: Enhance _deduplicate_by_index() with name-based ETF+联接C
+  dedup fallback when tracked_index is unavailable.
 
-- Gap 5: New test_decode.py (9 tests) covering latin1 double-encoding
-  fix, clean UTF-8 preservation, edge cases (P0).
+Audited already-implemented:
+- FIX-08: rationale.py template (Phase 6.2)
+- FIX-12/13/14: Frontend ECharts lazy loading, bundle visualizer,
+  route code splitting (Phases 3.1/9)
 
-- Gap 1: Restore TestP4 from @pytest.mark.skip with actual test
-  cases validating the validation downgrade behavior (P0).
-
-- Report rendering: Enhance DesignResult.vue markdown-body CSS with
-  proper table styling, code blocks, blockquotes, images (P0).
-
-- Update docs/implementation-master-plan.md to v9.6
+Update docs/implementation-master-plan.md v11.0.

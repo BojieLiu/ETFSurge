@@ -19,9 +19,16 @@ from .core.logging import get_logger, setup_logging
 from .routers import market, portfolio, analysis, news, ws, admin, factors, system
 from .services.source_health import health_loop
 from typing import TYPE_CHECKING, cast
+from contextlib import contextmanager
+from collections.abc import Generator
 
 if TYPE_CHECKING:
     from .profiling.warmup_profiler import WarmupProfiler
+
+# ── No-op timer when profiling is disabled ──
+@contextmanager
+def _noop_timer(label: str = "", category: str = "", note: str = "") -> Generator[None, None, None]:
+    yield
 
 logger = get_logger("lifespan")
 
@@ -29,12 +36,14 @@ logger = get_logger("lifespan")
 _PROFILE_WARMUP = os.environ.get("PROFILE_WARMUP", "").lower() in ("1", "true", "yes")
 
 _profiler: WarmupProfiler | None = None
+warmup_timer = _noop_timer  # default: no-op
 if _PROFILE_WARMUP:
     from .profiling.warmup_profiler import (
         WarmupProfiler,
         get_warmup_profiler,
-        warmup_timer,
+        warmup_timer as _real_warmup_timer,
     )
+    warmup_timer = _real_warmup_timer  # type: ignore[assignment]
     _profiler = get_warmup_profiler()
     logger.info("[profiler] Warmup profiling ENABLED (PROFILE_WARMUP=1)")
 
@@ -63,8 +72,11 @@ async def lifespan(app: FastAPI):
     if _PROFILE_WARMUP:
         assert _profiler is not None  # type narrowing for mypy
         _profiler.enable_pyinstrument()
-    await init_db()
-    await redis_cache.init()
+
+    with warmup_timer("init_db", "db", "Database initialization"):
+        await init_db()
+    with warmup_timer("redis_init", "cache", "Redis cache initialization"):
+        await redis_cache.init()
 
     # Pre-import heavy modules to avoid blocking the event loop on first use
     logger.info("[lifespan] Pre-loading heavy modules (strategy_design, analysis)...")
@@ -128,53 +140,56 @@ async def lifespan(app: FastAPI):
 
     # 启动时后台预热行情缓存（不阻塞启动，25s 超时）
     async def _warmup_market_cache():
-        _mark = app.state.warmup["market_cache"]
-        try:
-            await asyncio.wait_for(refresh_market_cache(), timeout=25)
-            _mark["done"] = True
-            _mark["success"] = True
-            logger.info("行情缓存预热完成")
-        except (Exception, asyncio.CancelledError):
-            _mark["done"] = True
-            _mark["success"] = False
-            logger.exception("行情缓存预热失败（不影响启动）")
+        with warmup_timer("warmup_market_cache", "warmup", "行情缓存预热"):
+            _mark = app.state.warmup["market_cache"]
+            try:
+                await asyncio.wait_for(refresh_market_cache(), timeout=25)
+                _mark["done"] = True
+                _mark["success"] = True
+                logger.info("行情缓存预热完成")
+            except (Exception, asyncio.CancelledError):
+                _mark["done"] = True
+                _mark["success"] = False
+                logger.exception("行情缓存预热失败（不影响启动）")
 
     _warmup_tasks.append(asyncio.create_task(_warmup_market_cache()))
 
     # 启动时预热全球指数缓存（非阻塞，写入持久化 cache，重启后不丢失）
     async def _warmup_global_indices():
-        _mark = app.state.warmup["global_indices"]
-        try:
-            from .services.market_service import get_global_indices
-            await asyncio.wait_for(get_global_indices(), timeout=30)
-            _mark["done"] = True
-            _mark["success"] = True
-            logger.info("全球指数缓存预热完成")
-        except (Exception, asyncio.CancelledError):
-            _mark["done"] = True
-            _mark["success"] = False
-            logger.exception("全球指数缓存预热失败（非交易时段正常）")
+        with warmup_timer("warmup_global_indices", "warmup", "全球指数缓存预热"):
+            _mark = app.state.warmup["global_indices"]
+            try:
+                from .services.market_service import get_global_indices
+                await asyncio.wait_for(get_global_indices(), timeout=30)
+                _mark["done"] = True
+                _mark["success"] = True
+                logger.info("全球指数缓存预热完成")
+            except (Exception, asyncio.CancelledError):
+                _mark["done"] = True
+                _mark["success"] = False
+                logger.exception("全球指数缓存预热失败（非交易时段正常）")
     _warmup_tasks.append(asyncio.create_task(_warmup_global_indices()))
 
     # 启动时预热 ETF 缓存（非阻塞），带超时保护
     async def _warmup_etf_cache():
-        _mark = app.state.warmup["etf_cache"]
-        try:
-            from app.fetchers.etf_scanner import fetch_all_etfs_base
-            from .core.async_utils import run_sync
-            result = await run_sync(fetch_all_etfs_base, timeout=120)
-            _mark["done"] = True
-            _mark["success"] = bool(result)
-            if result:
-                logger.info("ETF cache warmup done: %d items", len(result))
-        except asyncio.TimeoutError:
-            _mark["done"] = True
-            _mark["success"] = False
-            logger.warning("ETF full scan timed out (120s), will complete on demand")
-        except Exception as e:
-            _mark["done"] = True
-            _mark["success"] = False
-            logger.warning("ETF cache warmup failed: %s", e)
+        with warmup_timer("warmup_etf_cache", "warmup", "ETF 扫描预热"):
+            _mark = app.state.warmup["etf_cache"]
+            try:
+                from app.fetchers.etf_scanner import fetch_all_etfs_base
+                from .core.async_utils import run_sync
+                result = await run_sync(fetch_all_etfs_base, timeout=120)
+                _mark["done"] = True
+                _mark["success"] = bool(result)
+                if result:
+                    logger.info("ETF cache warmup done: %d items", len(result))
+            except asyncio.TimeoutError:
+                _mark["done"] = True
+                _mark["success"] = False
+                logger.warning("ETF full scan timed out (120s), will complete on demand")
+            except Exception as e:
+                _mark["done"] = True
+                _mark["success"] = False
+                logger.warning("ETF cache warmup failed: %s", e)
     _warmup_tasks.append(asyncio.create_task(_warmup_etf_cache()))
 
     # Scheduler temporarily disabled for diagnostics (design-check-pipeline-redesign)

@@ -1,11 +1,13 @@
 """Factor analysis and IC tracking routes."""
 from __future__ import annotations
 
+import time
 from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 
 from ..core.logging import get_logger
 from ..factors.factor_registry import registry
@@ -13,6 +15,25 @@ from ..factors.factor_registry import registry
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/v1/factors", tags=["factors"])
+
+# ── Simple TTL-based response cache (60s refresh) ──────────────
+_CACHE: dict[str, tuple[float, str, dict]] = {}  # key -> (expiry_ts, etag, body)
+
+
+def _get_cached(key: str, ttl: int = 60) -> tuple[str, dict] | None:
+    """Return (etag, body) if cache is still fresh, else None."""
+    entry = _CACHE.get(key)
+    if entry and time.monotonic() < entry[0]:
+        return entry[1], entry[2]
+    return None
+
+
+def _set_cache(key: str, etag: str, body: dict, ttl: int = 60) -> None:
+    _CACHE[key] = (time.monotonic() + ttl, etag, body)
+
+
+def _build_cache_key(path: str, params: frozenset | None = None) -> str:
+    return f"{path}:{hash(params) if params else ''}"
 
 # 因子模型的科普描述
 CATEGORY_DESCRIPTIONS: dict[str, str] = {
@@ -30,12 +51,23 @@ CATEGORY_DESCRIPTIONS: dict[str, str] = {
 
 
 @router.get("/model")
-async def get_factor_model() -> dict[str, Any]:
+async def get_factor_model() -> JSONResponse:
     """Return factor model overview: category breakdown, total counts, descriptions.
 
     Provides a structured view of the registered factor definitions for
     display in the FactorModelView frontend component.
+
+    Cached for 60s — data changes only when factors are re-registered.
     """
+    ck = _build_cache_key("/api/v1/factors/model")
+    cached = _get_cached(ck, ttl=60)
+    if cached:
+        etag, body = cached
+        return JSONResponse(
+            content=body,
+            headers={"Cache-Control": "private, max-age=60", "ETag": etag},
+        )
+
     all_factors = registry.list_factors()
 
     # Category breakdown
@@ -60,22 +92,39 @@ async def get_factor_model() -> dict[str, Any]:
             "subcategories": sub_list,
         })
 
-    return {
+    body = {
         "total": len(all_factors),
         "categories": categories,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
+    etag = f"\"{hash(str(body))}\""
+    _set_cache(ck, etag, body, ttl=60)
+    return JSONResponse(
+        content=body,
+        headers={"Cache-Control": "private, max-age=60", "ETag": etag},
+    )
 
 
 @router.get("/active")
-async def get_active_factors() -> dict[str, Any]:
+async def get_active_factors() -> JSONResponse:
     """Return actively computed factors with IC values, grouped by category.
 
     Only includes factors that have a registered compute function
     (i.e., actually computed, not just YAML-defined).
     Each factor includes: code, name, category, subcategory, description,
     standardization, ic_threshold, and current ic_value if available.
+
+    Cached for 60s — data changes only on background compute cycle.
     """
+    ck = _build_cache_key("/api/v1/factors/active")
+    cached = _get_cached(ck, ttl=60)
+    if cached:
+        etag, body = cached
+        return JSONResponse(
+            content=body,
+            headers={"Cache-Control": "private, max-age=60", "ETag": etag},
+        )
+
     ic_batch = registry._last_ic_batch
     categories: dict[str, dict[str, Any]] = {}
 
@@ -132,7 +181,7 @@ async def get_active_factors() -> dict[str, Any]:
     total_no_data = sum(c["no_data_count"] for c in cat_list)
     avg_all_ic = round(sum(all_ic_vals) / len(all_ic_vals), 4) if all_ic_vals else None
 
-    return {
+    body = {
         "total": len(registry._computers),
         "categories": cat_list,
         "summary": {
@@ -143,6 +192,12 @@ async def get_active_factors() -> dict[str, Any]:
         },
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
+    etag = f"\"{hash(str(body))}\""
+    _set_cache(ck, etag, body, ttl=60)
+    return JSONResponse(
+        content=body,
+        headers={"Cache-Control": "private, max-age=60", "ETag": etag},
+    )
 
 
 def _get_factor_name(code: str) -> str:
@@ -170,12 +225,23 @@ def _get_factor_category(code: str) -> str:
 
 
 @router.get("/ic")
-async def get_factor_ic() -> dict[str, Any]:
+async def get_factor_ic() -> JSONResponse:
     """Return current IC values for all core factors.
 
     Data comes from FactorRegistry._last_ic_batch, which is updated
     automatically after each compute() call when market_data is available.
+
+    Cached for 60s — data changes only on background compute cycle.
     """
+    ck = _build_cache_key("/api/v1/factors/ic")
+    cached = _get_cached(ck, ttl=60)
+    if cached:
+        etag, body = cached
+        return JSONResponse(
+            content=body,
+            headers={"Cache-Control": "private, max-age=60", "ETag": etag},
+        )
+
     ic_batch = registry._last_ic_batch
 
     factors = [
@@ -190,8 +256,14 @@ async def get_factor_ic() -> dict[str, Any]:
         if abs(val) > 0.0
     ]
 
-    return {
+    body = {
         "factors": factors,
         "total": len(factors),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
+    etag = f"\"{hash(str(body))}\""
+    _set_cache(ck, etag, body, ttl=60)
+    return JSONResponse(
+        content=body,
+        headers={"Cache-Control": "private, max-age=60", "ETag": etag},
+    )

@@ -60,7 +60,7 @@ async def generate_enhanced_design(
         logger.warning("[strategy_design] empty candidate pool, returning early error")
         return {
             "strategies": [],
-            "market_context": _build_market_context(pool_manager),
+            "market_context": await _build_market_context(pool_manager),
             "generated_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
             "design_metadata": {"version": "v5-engine", "elapsed_seconds": 0, "regime": "unknown"},
             "error": "无候选标的",
@@ -68,7 +68,7 @@ async def generate_enhanced_design(
         }
 
     market_regime = pool_manager.get_market_regime() or "range_bound"
-    market_context = _build_market_context(pool_manager)
+    market_context = await _build_market_context(pool_manager)
 
     try:
         # 3. 策略引擎：一次调用生成所有方案
@@ -130,7 +130,10 @@ async def generate_enhanced_design(
                 a["target_amount"] = round(capital * a.get("weight", 0), 2)
             strategies.append(s)
 
-        # 5. 组装返回
+        # 5. target_amount 一致性校验
+        _validate_target_amount_consistency(strategies, capital)
+
+        # 6. 组装返回
         elapsed = time.monotonic() - start_time
         logger.info("[strategy_design] v5 orchestrator generated %d strategies in %.1fs",
                     len(strategies), elapsed)
@@ -157,44 +160,71 @@ async def generate_enhanced_design(
         }
 
 
-def _compute_fund_flow(pool_manager) -> dict:
-    """聚合全市场候选 ETF 资金流向。
+async def _compute_fund_flow(pool_manager) -> dict:
+    """聚合全市场候选 ETF 资金流向（真异步，asyncio.gather 并发请求）。
 
     返回:
       {"total_net_inflow": float, "positive_flow_count": int, "negative_flow_count": int, "total_symbols": int}
     """
-    result = {
-        "total_net_inflow": 0.0,
-        "positive_flow_count": 0,
-        "negative_flow_count": 0,
-        "total_symbols": 0,
-    }
-    from ..fetchers.fundamental_fetcher import fetch_fund_flow
-    from ..utils.sync_helpers import run_sync_in_thread
+    from ..core.async_utils import run_sync
+
     pool = pool_manager.get_pool()
     if not isinstance(pool, dict):
-        logger.warning("[strategy_design] _compute_fund_flow: pool is not a dict (%s), skipping", type(pool).__name__)
-        return result
+        logger.warning(
+            "[strategy_design] _compute_fund_flow: pool is not a dict (%s), skipping",
+            type(pool).__name__,
+        )
+        return {"total_net_inflow": 0.0, "positive_flow_count": 0,
+                "negative_flow_count": 0, "total_symbols": 0}
+
+    # 收集所有 symbol
+    all_symbols = []
     for layer, items in pool.items():
         for item in items:
             sym = item.get("symbol", "")
-            if not sym:
-                continue
-            result["total_symbols"] += 1
-            flow = run_sync_in_thread(fetch_fund_flow, sym)
-            if flow and flow.get("main_net_inflow") is not None:
-                inflow = flow["main_net_inflow"]
-                result["total_net_inflow"] += inflow
-                if inflow >= 0:
-                    result["positive_flow_count"] += 1
-                else:
-                    result["negative_flow_count"] += 1
-    return result
+            if sym:
+                all_symbols.append(sym)
+
+    if not all_symbols:
+        return {"total_net_inflow": 0.0, "positive_flow_count": 0,
+                "negative_flow_count": 0, "total_symbols": 0}
+
+    # 并发获取所有 fund flow
+    from ..fetchers.fundamental_fetcher import fetch_fund_flow
+
+    async def _fetch_one(sym: str) -> dict | None:
+        try:
+            return await run_sync(fetch_fund_flow, sym, timeout=8)
+        except Exception:
+            return None
+
+    results = await asyncio.gather(*[_fetch_one(s) for s in all_symbols],
+                                  return_exceptions=False)
+
+    total_net_inflow = 0.0
+    positive_count = 0
+    negative_count = 0
+
+    for flow in results:
+        if flow and flow.get("main_net_inflow") is not None:
+            inflow = flow["main_net_inflow"]
+            total_net_inflow += inflow
+            if inflow >= 0:
+                positive_count += 1
+            else:
+                negative_count += 1
+
+    return {
+        "total_net_inflow": total_net_inflow,
+        "positive_flow_count": positive_count,
+        "negative_flow_count": negative_count,
+        "total_symbols": len(all_symbols),
+    }
 
 
-def _build_market_context(pool_manager) -> dict:
-    """从 pool_manager 构建市场上下文。"""
-    fund_flow = _compute_fund_flow(pool_manager)
+async def _build_market_context(pool_manager) -> dict:
+    """从 pool_manager 构建市场上下文（真异步）。"""
+    fund_flow = await _compute_fund_flow(pool_manager)
     return {
         "market_regime": pool_manager.get_market_regime() or "range_bound",
         "market_sentiment": pool_manager.get_market_sentiment() or {"sentiment_index": 50, "sentiment_label": "中性"},
@@ -203,6 +233,28 @@ def _build_market_context(pool_manager) -> dict:
         "fund_flow": fund_flow,
         "benchmark_stocks": [],
     }
+
+
+def _validate_target_amount_consistency(strategies: list[dict], capital: float) -> list[str]:
+    """验证所有策略的 target_amount = capital * weight，返回不一致的警告列表。"""
+    warnings: list[str] = []
+    for s in strategies:
+        sid = s.get("id", "unknown")
+        for a in s.get("etfs", []):
+            if a.get("symbol") == "CASH":
+                continue
+            w = a.get("weight", 0)
+            expected = round(capital * w, 2)
+            actual = a.get("target_amount", 0)
+            if abs(actual - expected) > 0.01:
+                msg = (
+                    f"[target_amount] {sid}/{a.get('symbol')}: "
+                    f"expected {expected} (capital={capital} * weight={w}), "
+                    f"got {actual}"
+                )
+                warnings.append(msg)
+                logger.warning(msg)
+    return warnings
 
 
 def _find_candidate_meta(symbol: str, candidates: dict) -> dict | None:
