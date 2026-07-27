@@ -184,3 +184,84 @@ async def delete_config_override(key: str):
         return {"status": "skipped", "reason": "unknown key"}
     await config_manager.delete_override(key)
     return {"status": "deleted", "key": key}
+
+
+# ── System Metrics (7.2c) ────────────────────────────────────────
+
+
+@router.get("/metrics")
+async def get_system_metrics():
+    """返回系统运行指标：池健康、设计成功率、并发失败计数等。
+
+    供 verify_e2e 和运维监控使用，无需认证。
+    """
+    from ..services.pool_manager import pool_manager
+    from ..database import async_session
+    from ..models.portfolio_design import PortfolioDesign
+    from sqlalchemy import select, func
+
+    # 候选池健康
+    pool = pool_manager.get_pool()
+    total_candidates = sum(len(v) for v in pool.values()) if pool else 0
+    pool_healthy = total_candidates > 0
+
+    # 连续刷新失败计数
+    consecutive_failures = getattr(pool_manager, '_consecutive_failures', -1)
+
+    # 设计方案健康度
+    design_success_rate = 0.0
+    total_designs = 0
+    recent_designs_with_etfs = 0
+    recent_total = 0
+    try:
+        async with async_session() as db:
+            # 近期设计成功率
+            result = await db.execute(
+                select(PortfolioDesign).order_by(PortfolioDesign.id.desc()).limit(20)
+            )
+            recent = result.scalars().all()
+            recent_total = len(recent)
+            for d in recent:
+                import json
+                strategies = json.loads(d.strategies_json) if d.strategies_json else []
+                non_cash = 0
+                for s in strategies:
+                    etfs = s.get("etfs", [])
+                    for a in etfs:
+                        if a.get("symbol") != "CASH":
+                            non_cash += 1
+                if non_cash > 0:
+                    recent_designs_with_etfs += 1
+
+            # 全量成功率
+            count_result = await db.execute(select(func.count()).select_from(PortfolioDesign))
+            total_designs = count_result.scalar() or 0
+            if total_designs > 0:
+                success_count = await db.execute(
+                    select(func.count()).select_from(PortfolioDesign).where(
+                        PortfolioDesign.error_message.is_(None),
+                        PortfolioDesign.status == "completed",
+                    )
+                )
+                design_success_rate = (success_count.scalar() or 0) / total_designs
+    except Exception as e:
+        logger.warning("[admin/metrics] DB query failed: %s", e)
+
+    return {
+        "pool": {
+            "healthy": pool_healthy,
+            "total_candidates": total_candidates,
+            "consecutive_refresh_failures": consecutive_failures,
+        },
+        "designs": {
+            "total": total_designs,
+            "success_rate": round(design_success_rate, 4),
+            "recent_20_with_etfs": recent_designs_with_etfs,
+            "recent_20_total": recent_total,
+        },
+        "status": "ok" if (pool_healthy or total_designs > 0) else "degraded",
+    }
+
+
+import logging
+logger = logging.getLogger(__name__)

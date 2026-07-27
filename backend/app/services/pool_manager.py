@@ -116,6 +116,8 @@ class PoolManager:
         self._cached_ts: float = 0.0
         self._cache_ttl: float = 60.0
         self._test_mode: bool = False  # #6: 测试模式下禁止 teardown HTTP 泄漏
+        # 7.1: consecutive refresh failure counter for observability
+        self._consecutive_failures: int = 0
 
     async def _refresh_market_snapshot(self) -> None:
         """A3: 写入市场快照缓存（指数 + 板块动量）。
@@ -419,21 +421,40 @@ class PoolManager:
 
         # 7. 空池保护：如果刷新结果为空且存在上次成功数据，保留上次 pool 而非清空
         total_new = sum(len(v) for v in new_pool.values())
-        if total_new == 0 and _last_good is not None:
-            logger.warning("[pool_manager] refresh produced empty pool — keeping last good pool (v%d, %d total)",
-                           self._version, sum(len(v) for v in _last_good.values()))
-            # 不改变 self._pool 和 self._version，返回一个空 diff
-            _elapsed = _time.time() - _start_ts
-            pool_audit.log_refresh(PoolDiff(added=[], removed=[], changed=[], version=self._version,
-                                             timestamp=datetime.now().isoformat()))
-            logger.info("PoolManager: refresh skipped (empty result) in %.1fs", _elapsed)
-            return PoolDiff(added=[], removed=[], changed=[], version=self._version,
-                            timestamp=datetime.now().isoformat())
+        if total_new == 0:
+            if _last_good is not None:
+                logger.warning("[pool_manager] refresh produced empty pool — keeping last good pool (v%d, %d total)",
+                               self._version, sum(len(v) for v in _last_good.values()))
+                # 不改变 self._pool 和 self._version，返回一个空 diff
+                _elapsed = _time.time() - _start_ts
+                pool_audit.log_refresh(PoolDiff(added=[], removed=[], changed=[], version=self._version,
+                                                 timestamp=datetime.now().isoformat()))
+                logger.info("PoolManager: refresh skipped (empty result) in %.1fs", _elapsed)
+                return PoolDiff(added=[], removed=[], changed=[], version=self._version,
+                                timestamp=datetime.now().isoformat())
+            else:
+                # 7.1: 首次刷新生效 — 无上次成功数据可回退，记录 CRITICAL
+                self._consecutive_failures += 1
+                logger.critical(
+                    "[pool_manager] FIRST-RUN refresh produced empty pool — "
+                    "data sources unavailable or timed out. "
+                    "consecutive_failures=%d. Pool will remain empty until a successful refresh.",
+                    self._consecutive_failures
+                )
+                # Don't overwrite self._pool (already empty), just return empty diff
+                _elapsed = _time.time() - _start_ts
+                pool_audit.log_refresh(PoolDiff(added=[], removed=[], changed=[], version=self._version,
+                                                 timestamp=datetime.now().isoformat()))
+                logger.info("PoolManager: first-run refresh failed in %.1fs (no fallback available)", _elapsed)
+                return PoolDiff(added=[], removed=[], changed=[], version=self._version,
+                                timestamp=datetime.now().isoformat())
 
         # 7b. 重建索引
         self._pool = new_pool
         self._rebuild_index()
         self._version += 1
+        # 7.1: 重置连续失败计数（本次刷新成功）
+        self._consecutive_failures = 0
 
         # 8. 计算 diff
         diff = self._compute_diff(old_by_code)

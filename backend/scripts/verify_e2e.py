@@ -66,10 +66,15 @@ def section_health(host, port):
     finally:
         s.close()
 
-    # HTTP health
+    # HTTP health with response time gate (7.5b)
     try:
+        _t0 = time.time()
         r = requests.get(f"{BASE}/health", timeout=5)
-        check(f"/health -> {r.status_code}", r.status_code == 200, r.text[:60])
+        _elapsed = time.time() - _t0
+        check(f"/health -> {r.status_code} ({_elapsed:.1f}s)", r.status_code == 200,
+              f"{r.text[:60]}" if r.status_code == 200 else str(r.text[:60]))
+        check(f"/health 响应时间 {_elapsed:.1f}s < 3s (gate)", _elapsed < 3.0,
+              f"gate=3.0s, actual={_elapsed:.1f}s")
     except Exception as e:
         check("/health", False, str(e))
 
@@ -430,6 +435,16 @@ def section_portfolio():
                 cid = checks[0].get("id")
                 dr = requests.get(f"{BASE}/api/v1/portfolio/strategy-checks/{cid}", timeout=10)
                 check(f"GET /strategy-checks/{cid} -> {dr.status_code}", dr.status_code == 200)
+                if dr.status_code == 200:
+                    detail = dr.json()
+                    risk_warnings = detail.get("risk_warnings", [])
+                    check(f"risk_warnings 非空（{len(risk_warnings)} 条）", len(risk_warnings) > 0,
+                          "" if risk_warnings else "空列表")
+                    check(f"risk_warnings 含有效类型",
+                          all(w.get("type") in ("concentration","drift","correlation","volatility","liquidity")
+                              for w in risk_warnings),
+                          "有未知类型" if any(w.get("type") not in ("concentration","drift","correlation","volatility","liquidity")
+                                              for w in risk_warnings) else "")
     except Exception as e:
         check("GET /strategy-checks", False, str(e))
 
@@ -663,6 +678,26 @@ def section_admin():
         check("GET /admin/thread-pool", False, "请求超时（10s）")
     except Exception as e:
         check("GET /admin/thread-pool", False, str(e))
+
+    # GET /admin/metrics (7.2c)
+    try:
+        _t0 = time.time()
+        r = requests.get(f"{BASE}/api/v1/admin/metrics", timeout=10)
+        _elapsed = time.time() - _t0
+        check(f"GET /admin/metrics -> {r.status_code} ({_elapsed:.1f}s)", r.status_code == 200)
+        if r.status_code == 200:
+            data = r.json()
+            check("/admin/metrics 包含 pool 信息", "pool" in data, f"keys={list(data.keys())}")
+            check("/admin/metrics 包含 designs 信息", "designs" in data)
+            if "pool" in data:
+                pool = data["pool"]
+                check(f"池健康: healthy={pool.get('healthy')}, candidates={pool.get('total_candidates')}",
+                      isinstance(pool.get("healthy"), bool))
+            if "designs" in data:
+                designs = data["designs"]
+                check(f"设计总数: {designs.get('total', 0)}", True)
+    except Exception as e:
+        check("GET /admin/metrics", False, str(e))
 
 
 def section_ws():

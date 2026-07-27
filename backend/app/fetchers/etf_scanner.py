@@ -185,9 +185,11 @@ def _fetch_em_etf_list() -> list[dict] | None:
 
 
 def fetch_all_etfs_base() -> list[dict[str, Any]]:
-    """一次调用获取全量 ETF 基础数据。
+    """一次调用获取全量 ETF 基础数据（带熔断路由）。
 
-    数据源链: Sina 列表 → 腾讯 gtimg 补充指标 → East Money 直连 → akshare spot (最终兜底)
+    数据源链: Sina/Tencent → East Money 直连 → akshare spot (熔断路由)
+    每层通过 SourceRegistry 熔断路由保护，失败后自动冷却，跳过不可用源。
+
     返回: 每只 ETF 包含 代码/名称/最新价/涨跌幅/成交额/换手率/PE/PB/基金规模
     """
     global _last_good_etfs
@@ -219,20 +221,18 @@ def fetch_all_etfs_base() -> list[dict[str, Any]]:
         except Exception:
             pass
 
-    # 1. 新浪 → 获取全量 ETF 代码列表（快、稳定、免费）
-    try:
+    from ..services.source_registry import registry
+
+    # Provider 1: Sina ETF 列表 + Tencent gtimg 补充指标
+    def _sina_tencent_provider():
         from .china_market import fetch_etf_list
         sina_result = fetch_etf_list()
         if not sina_result or len(sina_result) < 50:
             raise ValueError(f"Sina returned only {len(sina_result) if sina_result else 0} ETFs")
 
-        logger.info("[etf_scanner] Sina ETF list: %d ETFs", len(sina_result))
         all_codes = [item["symbol"] for item in sina_result]
-
-        # 2. 腾讯 gtimg → 批量补充成交额/换手率/市值/PE
         gtimg_map = _tencent_gtimg_batch(all_codes)
         if gtimg_map:
-            logger.info("[etf_scanner] Tencent gtimg: %d ETF quotes", len(gtimg_map))
             merged = []
             for item in sina_result:
                 code = item["symbol"]
@@ -241,56 +241,59 @@ def fetch_all_etfs_base() -> list[dict[str, Any]]:
                 item["turnover"] = gt.get("turnover", 0)
                 item["fund_scale"] = gt.get("fund_scale", 0)
                 item["pe"] = gt.get("pe", 0)
-                item["pb"] = 0  # gtimg 不提供 PB，不影响扫描
+                item["pb"] = 0
                 merged.append(item)
-            sync_memory_cache.set("all_etfs", merged, CACHE_TTL["etf_list"])
-            _last_good_etfs = merged
-            _save_cache(merged)
             logger.info("[etf_scanner] Sina+Tencent merged: %d ETFs", len(merged))
             return merged
 
-        # gtimg 挂时：退到新浪数据（跳过金额/规模过滤）
+        # gtimg 挂时退到新浪纯列表
         logger.info("[etf_scanner] using Sina-only ETF list (no amount/scale filtering)")
-        sync_memory_cache.set("all_etfs", sina_result, CACHE_TTL["etf_list"])
-        _last_good_etfs = sina_result
-        _save_cache(sina_result)
         return sina_result
-    except Exception as e:
-        logger.warning("[etf_scanner] Sina ETF list failed: %s", e)
 
-    # 3. East Money 直连 HTTP（新增 Tier）
-    try:
+    # Provider 2: East Money 直连 HTTP
+    def _eastmoney_provider():
         em_result = _fetch_em_etf_list()
         if em_result and len(em_result) >= 50:
-            logger.info("[etf_scanner] East Money direct HTTP: %d ETFs", len(em_result))
-            sync_memory_cache.set("all_etfs", em_result, CACHE_TTL["etf_list"])
-            _last_good_etfs = em_result
-            _save_cache(em_result)
             return em_result
-    except Exception as e:
-        logger.warning("[etf_scanner] East Money direct HTTP failed: %s", e)
+        return None
 
-    # 4. 最终兜底：akshare spot（最慢但有全部字段）
-    try:
+    # Provider 3: akshare spot（最终兜底）
+    def _akshare_provider():
         from ..utils.decode import decode_df as _decode_df
         def _p():
             import akshare as ak
             return ak.fund_etf_spot_em()
         df = run_in_thread(_p, timeout=25)
         if df is None or df.empty:
-            logger.warning("[etf_scanner] fund_etf_spot_em final fallback returned empty")
-            stale = sync_memory_cache.get("all_etfs")
-            return stale or _last_good_etfs or []
+            return None
         _decode_df(df)
-        result = df.to_dict(orient="records")
+        return df.to_dict(orient="records")
+
+    # 通过 SourceRegistry 熔断路由依次尝试三个源
+    # 熔断语义: 连续失败 failure_threshold(3) 次后冷却 cooldown(60s)
+    result = registry.route(
+        [
+            ("sina_tencent_etf", _sina_tencent_provider),
+            ("eastmoney_etf", _eastmoney_provider),
+            ("akshare_etf", _akshare_provider),
+        ],
+        route_name="etf_scan",
+        operation="batch",
+        target="all_etfs",
+    )
+
+    if result:
         sync_memory_cache.set("all_etfs", result, CACHE_TTL["etf_list"])
         _last_good_etfs = result
         _save_cache(result)
+        logger.info("[etf_scanner] circuit-breaker routed: %d ETFs", len(result))
         return result
-    except Exception as e:
-        logger.warning("[etf_scanner] all ETF data sources failed: %s", e)
-        stale = sync_memory_cache.get("all_etfs")
-        return stale or _last_good_etfs or []
+
+    # 所有源全部失败 → 返回缓存/上次成功数据
+    stale = sync_memory_cache.get("all_etfs")
+    logger.warning("[etf_scanner] all data sources via circuit breaker exhausted, "
+                   "returning stale cache (len=%d)", len(stale) if stale else 0)
+    return stale or _last_good_etfs or []
 
 
 def _normalize_columns(df: pd.DataFrame) -> None:
