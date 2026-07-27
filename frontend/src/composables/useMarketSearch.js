@@ -1,5 +1,5 @@
 import { ref, onUnmounted } from 'vue'
-import { fetchJson } from '../utils/fetchJson'
+import { marketApi } from '../api'
 
 /**
  * Composable for market search with debounce, keyboard nav, completion
@@ -32,13 +32,9 @@ export function useMarketSearch() {
     const q = searchQuery.value.trim()
     if (!q) return
     try {
-      const [etfRes, stockRes] = await Promise.all([
-        fetchJson(`/api/v1/market/search?keyword=${encodeURIComponent(q)}`),
-        fetchJson(`/api/v1/market/search/stocks?keyword=${encodeURIComponent(q)}`)
-      ])
-      const etfs = (Array.isArray(etfRes) ? etfRes : (etfRes.data || etfRes.results || [])).map(r => ({ symbol: r.symbol, name: r.name, type: 'ETF' }))
-      const stocks = (Array.isArray(stockRes) ? stockRes : (stockRes.data || stockRes.results || [])).map(r => ({ symbol: r.symbol, name: r.name, type: '股票' }))
-      searchResults.value = [...etfs, ...stocks].slice(0, 20)
+      const res = await marketApi.search(q, { include_stocks: true })
+      const results = res.data || []
+      searchResults.value = results.slice(0, 20)
       activeIndex.value = -1
       updateCompletion()
       showDropdown.value = searchResults.value.length > 0

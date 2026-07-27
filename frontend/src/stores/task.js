@@ -14,24 +14,7 @@ export const useTaskStore = defineStore('task', () => {
   /** 任务列表（内存响应式，不写 localStorage） */
   const tasks = ref([])
 
-  // 定时清除超时任务（30s 检查一次，防止 WS 断开后 running 任务永久显示）
-  let _staleTimer = null
-  function _startStaleCheck() {
-    if (_staleTimer) return
-    _staleTimer = setInterval(() => {
-      const now = Date.now()
-      let changed = false
-      tasks.value.forEach(t => {
-        if (t.status === 'running' && now - (t.createdAt || 0) > 120000) {
-          t.status = 'failed'
-          t.errorMessage = '生成超时，请重新尝试'
-          changed = true
-        }
-      })
-      // 仅修改内存状态，无需写 localStorage
-    }, 30000)
-  }
-  _startStaleCheck()
+
 
   // ── 后端 API 装载（分页）────────────────────────────────
   const PAGE_SIZE = 10

@@ -481,6 +481,7 @@ async def search_etf(keyword: str) -> list[dict[str, Any]]:
                         "name": r.name,
                         "market": r.market,
                         "asset_type": r.asset_type,
+                        "type": "etf",
                     }
                     for r in rows
                 ]

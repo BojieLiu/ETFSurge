@@ -1,5 +1,5 @@
 import { ref, watch, computed, onMounted } from 'vue'
-import { fetchJson } from '../utils/fetchJson'
+import { marketApi } from '../api'
 
 export function useSectorAnalysis(marketTab) {
   const sectorTypes = [
@@ -35,10 +35,8 @@ export function useSectorAnalysis(marketTab) {
     sectorFetchError.value = ''
     sectorList.value = []
     try {
-      const url = sectorType.value === 'industry'
-        ? `/api/v1/market/sectors/industry?limit=200${marketTab.value && marketTab.value !== 'global' ? '&market=' + marketTab.value : ''}`
-        : `/api/v1/market/sectors/concept?limit=200${marketTab.value && marketTab.value !== 'global' ? '&market=' + marketTab.value : ''}`
-      const data = await fetchJson(url)
+      const res = await marketApi.getSectors({ type: sectorType.value, limit: 200, market: (marketTab.value && marketTab.value !== 'global') ? marketTab.value : 'A' })
+      const data = Array.isArray(res.data) ? res.data : []
       sectorList.value = Array.isArray(data) ? data : []
       if (!sectorList.value.length) {
         sectorFetchError.value = '列表为空，可切换至手动输入'

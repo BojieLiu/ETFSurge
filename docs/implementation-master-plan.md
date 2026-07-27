@@ -1203,3 +1203,19 @@ Phase 7.1 (远期优化)             无紧急依赖
 | | | | **F11** — `china_market.py` 新增 `_run_mootdx_with_timeout()` 函数，使用 `concurrent.futures.ThreadPoolExecutor(max_workers=1)` 包裹 mootdx socket 读操作（`client.quotes` / `client.bars`），8s 硬超时，解决 P0 mootdx TCP read 挂死线程池问题 |
 | | | | **F12** — `frontend/vite.config.js` 优化 chunk 拆分：`vendor-echarts`（echarts+vue-echarts）与 `vendor-vue` 分离，新增 `vendor-marked` 独立 chunk；`chunkSizeWarningLimit` 提升至 700KB |
 | | | | **改动文件：** `backend/app/fetchers/china_market.py`、`frontend/vite.config.js` |
+| |
+| |
+| | | | | **v10.2** | 2026-07-27 | **Phase 11 — 文档计划剩余项实施** | 详见 docs/factor-model-extension-plan.md + docs/frontend-logic-sink-plan.md |
+| | | | | **已实现（后端）：** |
+| | | | | **B3.1** — task_manager.py get_task() 确保 progress/stage/status 始终有值 |
+| | | | | **B2.5** — portfolio_service.py new summary.by_type field |
+| | | | | **B2.3** — market.py search include_stocks param; search_etf type field |
+| | | | | **B3.2** — market.py unified GET /sectors route |
+| | | | | **B2.1** — portfolio.py GET /timeline endpoint |
+| | | | **已实现（前端）：** |
+| | | | | **Sprint 1.2** — DashboardAiTools.vue uses data.plans directly |
+| | | | | **Sprint 2.1** — single timeline API call; **2.2** unified search; **2.3** by_type PnL |
+| | | | | **Sprint 3** — useTaskPolling.js, remove stale check, sector URL unified |
+| | | | | **Sprint 4.1** — watchlist CRUD uses fetchWatchlist() |
+| | | | **新增契约：** api-contracts/portfolio/timeline.md; updated pnl-history.md, market/all.md |
+| | | | **改动文件：** 5 backend + 8 frontend + 3 contract |

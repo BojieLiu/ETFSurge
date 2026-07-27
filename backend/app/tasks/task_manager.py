@@ -103,7 +103,13 @@ class TaskManager:
         return task
 
     def get_task(self, task_id: int) -> dict | None:
-        return self._tasks.get(task_id)
+        task = self._tasks.get(task_id)
+        if task:
+            # Ensure progress, stage, status are always present
+            task.setdefault("progress", 0)
+            task.setdefault("stage", "")
+            task.setdefault("status", "pending")
+        return task
 
     def update_task(self, task_id: int, **kwargs) -> None:
         task = self._tasks.get(task_id)

@@ -147,28 +147,24 @@ export const useMarketStore = defineStore('market', () => {
 
   async function addWatchlist(symbol, assetType = 'A', notes = '') {
     const res = await marketApi.addWatchlist({ symbol, asset_type: assetType, notes })
-    watchlist.value.unshift(res.data)
-    watchlistTotal.value += 1
+    await fetchWatchlist()
     return res.data
   }
 
   async function updateWatchlist(id, data) {
     const res = await marketApi.updateWatchlist(id, data)
-    const idx = watchlist.value.findIndex(item => item.id === id)
-    if (idx >= 0) watchlist.value[idx] = res.data
+    await fetchWatchlist()
     return res.data
   }
 
   async function removeWatchlist(id) {
     await marketApi.removeWatchlist(id)
-    watchlist.value = watchlist.value.filter(item => item.id !== id)
-    watchlistTotal.value -= 1
+    await fetchWatchlist()
   }
 
   async function batchRemoveWatchlist(ids) {
     await marketApi.batchRemoveWatchlist(ids)
-    watchlist.value = watchlist.value.filter(item => !ids.includes(item.id))
-    watchlistTotal.value -= ids.length
+    await fetchWatchlist()
   }
 
   function getQuote(symbol) {

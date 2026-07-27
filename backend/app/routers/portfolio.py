@@ -423,3 +423,62 @@ async def get_strategy_check(check_id: int):
             from fastapi.responses import JSONResponse
             return JSONResponse(status_code=404, content={"error": "not found"})
         return r.to_dict()
+
+
+@router.get("/timeline")
+async def get_timeline(
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get merged timeline of portfolio designs and strategy checks.
+    Queries both tables, merges by created_at DESC, supports pagination.
+    """
+    from ..models.portfolio_design import PortfolioDesign
+    from ..models.strategy_check import StrategyCheckRecord
+    import json
+
+    # Query designs
+    design_stmt = select(PortfolioDesign).order_by(PortfolioDesign.created_at.desc())
+    design_result = await db.execute(design_stmt)
+    designs = design_result.scalars().all()
+
+    # Query checks
+    check_stmt = select(StrategyCheckRecord).order_by(StrategyCheckRecord.created_at.desc())
+    check_result = await db.execute(check_stmt)
+    checks = check_result.scalars().all()
+
+    # Build items from designs
+    design_items = []
+    for d in designs:
+        strategies = json.loads(d.strategies_json) if d.strategies_json else []
+        design_items.append({
+            "id": d.id,
+            "_type": "design",
+            "created_at": d.created_at.isoformat() if d.created_at else "",
+            "status": d.status or "completed",
+            "capital": d.capital,
+            "error_message": d.error_message,
+        })
+
+    # Build items from checks
+    check_items = []
+    for c in checks:
+        check_items.append({
+            "id": c.id,
+            "_type": "check",
+            "created_at": c.created_at.isoformat() if c.created_at else "",
+            "status": c.status or "completed",
+            "summary": c.summary or c.error_message or "\u7b56\u7565\u68c0\u67e5\u5df2\u5b8c\u6210",
+            "error_message": c.error_message,
+        })
+
+    # Merge and sort by created_at DESC
+    merged = sorted(design_items + check_items, key=lambda x: x["created_at"], reverse=True)
+    total = len(merged)
+
+    # Paginate
+    items = merged[offset:offset + limit]
+
+    return {"items": items, "total": total}

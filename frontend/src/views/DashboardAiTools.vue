@@ -321,28 +321,7 @@ async function startDesign(capital) {
     loadingProgress.value = 95
     const detailRes = await portfolioApi.getDesign(designId)
     const data = detailRes.data
-    const plans = Array.isArray(data.strategies)
-      ? data.strategies.map(s => ({
-          style: s.label,
-          style_label: s.label,
-          portfolio_name: s.portfolio_name,
-          positioning: s.positioning,
-          expected_return: s.expected_return,
-          max_drawdown: s.max_drawdown,
-          sharpe_ratio: s.sharpe_ratio,
-          risk_factors: [],
-          rebalance_rules: '月度检视',
-          allocations: Array.isArray(s.etfs)
-            ? s.etfs.map(e => ({
-                symbol: e.symbol,
-                name: e.name,
-                layer: e.layer,
-                target_weight: e.weight,
-                selection_rationale: e.selection_rationale || '',
-              }))
-            : [],
-        }))
-      : []
+    const plans = data.plans || []
 
     designResult.value = {
       plans,
@@ -512,12 +491,11 @@ async function checkStrategy() {
 async function loadHistoryList() {
   historyLoading.value = true
   try {
-    const [designRes, checkRes] = await Promise.all([
-      portfolioApi.listDesigns(20, 0, 8000).catch(() => ({ data: [] })),
-      portfolioApi.listStrategyChecks(20, 0, 8000).catch(() => ({ data: [] })),
-    ])
-    const designs = (designRes.data || []).map(d => ({ ...d, _type: 'design' }))
-    const checks = (checkRes.data || []).map(c => ({ ...c, _type: 'check' }))
+    const res = await portfolioApi.getTimeline(20, 0)
+    const data = res.data || {}
+    const designs = (data.items || [])
+    const designRes = { data: [] }
+    const checkRes = { data: [] }
 
     // 合并运行中的设计任务（追加到列表前）
     const runningTasks = taskStore.tasks
@@ -586,19 +564,7 @@ async function onHistorySelect(id, item) {
       toast('该历史方案数据不完整', 'warning')
       return
     }
-    const plans = data.strategies.map(s => ({
-      style: s.label,
-      style_label: s.label,
-      portfolio_name: s.portfolio_name,
-      positioning: s.positioning,
-      expected_return: s.expected_return,
-      max_drawdown: s.max_drawdown,
-      sharpe_ratio: s.sharpe_ratio,
-      risk_factors: s.risk_factors || [],
-      allocations: Array.isArray(s.etfs)
-        ? s.etfs.map(e => ({ symbol: e.symbol, name: e.name, layer: e.layer, target_weight: e.weight, selection_rationale: e.selection_rationale || '' }))
-        : [],
-    }))
+    const plans = data.plans || []
     designResult.value = { plans, design_text: data.design_text || '', market_context: data.market_context || {}, created_at: data.created_at, is_history: true, report_quality: data.report_quality || 'none' }
     designStep.value = 'result'
     designTab.value = 'cards'

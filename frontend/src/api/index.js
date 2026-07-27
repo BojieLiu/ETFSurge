@@ -27,7 +27,7 @@ api.interceptors.response.use(
 export const marketApi = {
   realtimePortfolio: () => api.get('/market/realtime/portfolio'),
   history: (symbol, assetType = 'A', period = 'daily') => api.get(`/market/history/${symbol}`, { params: { asset_type: assetType, period } }),
-  search: (keyword) => api.get('/market/search', { params: { keyword } }),
+  search: (keyword, options = {}) => api.get('/market/search', { params: { keyword, ...options } }),
   indicators: (symbol, assetType = 'A') => api.get(`/market/indicators/${symbol}`, { params: { asset_type: assetType } }),
   signal: (symbol, assetType = 'A') => api.get(`/market/signal/${symbol}`, { params: { asset_type: assetType } }),
   chart: (symbol, assetType = 'A', period = 'daily') => api.get(`/market/chart/${symbol}`, { params: { asset_type: assetType, period } }),
@@ -43,6 +43,7 @@ export const marketApi = {
   getSectorHeat: (limit = 20) => api.get('/market/sectors/heat', { params: { limit } }),
   getStockHotRank: (limit = 50) => api.get('/market/stock-hot-rank', { params: { limit } }),
   getMarketWind: () => api.get('/market/wind'),
+  getSectors: (params = {}) => api.get('/market/sectors', { params }),
 }
 
 export const portfolioApi = {
@@ -77,6 +78,7 @@ export const portfolioApi = {
   getTask: (taskId) => api.get(`/portfolio/tasks/${taskId}`),
   listTasks: (limit = 10, offset = 0) => api.get('/portfolio/tasks', { params: { limit, offset } }),
   getDriftCheck: (type) => api.get('/portfolio/drift-check', { params: type ? { portfolio_type: type } : {} }),
+  getTimeline: (limit = 20, offset = 0) => api.get('/portfolio/timeline', { params: { limit, offset } }),
 }
 
 export const analysisApi = {

@@ -129,14 +129,14 @@ function formatNum(n) {
 }
 
 function findCumulativePnl(type) {
-  if (!props.pnlHistory?.holdings) return 0
-  const h = props.pnlHistory.holdings.find(h => h.portfolio_type === type)
-  return h?.cumulative_pnl || 0
+  // Uses backend summary.by_type (Sprint 2.3)
+  const h = props.pnlHistory?.summary?.by_type?.[type]
+  return h?.cumulative_pnl ?? 0
 }
 
 function findCumulativePnlPct(type) {
-  if (!props.pnlHistory?.holdings) return '0.00'
-  const h = props.pnlHistory.holdings.find(h => h.portfolio_type === type)
+  // Uses backend summary.by_type (Sprint 2.3)
+  const h = props.pnlHistory?.summary?.by_type?.[type]
   return (h?.cumulative_pnl_pct || 0).toFixed(2)
 }
 </script>

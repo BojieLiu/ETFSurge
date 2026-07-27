@@ -72,6 +72,7 @@ async def history(
 async def search(
     keyword: str = Query(""),
     market: str | None = Query(None, description="Market filter: A/HK/US/global"),
+    include_stocks: bool = Query(False, description="Also include individual stocks in results"),
 ) -> list[dict[str, Any]]:
     """Unified search: market=A searches stocks via instruments table, default searches ETFs."""
     from ..models.search import Instrument
@@ -275,6 +276,22 @@ async def sector_stocks_route(sector_code: str) -> list[dict[str, Any]]:
 async def sector_popular(plate_code: str) -> list[dict[str, Any]]:
     """板块热门个股(财联社)。"""
     return await asyncio.to_thread(fetch_sector_popular_stocks, plate_code)
+
+
+@router.get("/sectors")
+async def unified_sectors(
+    type: str = Query(..., description="Sector type: industry or concept"),
+    limit: int = Query(200, description="Max results"),
+    market: str = Query("A", description="Market filter"),
+) -> list[dict[str, Any]]:
+    """Unified sector endpoint. Delegates to industry or concept routes."""
+    if type == "industry":
+        return await industry_sectors(limit)
+    elif type == "concept":
+        return await concept_sectors(limit)
+    else:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=f"Invalid sector type: {type}. Use industry or concept.")
 
 
 # Phase 6: 前端已接入（marketApi.getHotPlates）

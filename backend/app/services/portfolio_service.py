@@ -839,6 +839,24 @@ async def calculate_cumulative_pnl(
     total_cumulative_pnl = total_market_value - total_cost_basis
     total_cumulative_pnl_pct = (total_cumulative_pnl / total_cost_basis * 100) if total_cost_basis > 0 else 0.0
     
+        # Build by_type summary: aggregate PnL by portfolio_type
+    by_type = {"on_exchange": {"cumulative_pnl": 0.0, "cumulative_pnl_pct": 0.0},
+               "off_exchange": {"cumulative_pnl": 0.0, "cumulative_pnl_pct": 0.0}}
+    on_cost = 0.0
+    off_cost = 0.0
+    for h in holdings_pnl:
+        pt = h.get("portfolio_type", "")
+        pnl = h.get("cumulative_pnl", 0.0)
+        cost = h.get("cost_basis", 0.0) or 0.0
+        if pt == "on_exchange":
+            by_type["on_exchange"]["cumulative_pnl"] += pnl
+            on_cost += cost
+        elif pt == "off_exchange":
+            by_type["off_exchange"]["cumulative_pnl"] += pnl
+            off_cost += cost
+    by_type["on_exchange"]["cumulative_pnl_pct"] = round((by_type["on_exchange"]["cumulative_pnl"] / on_cost * 100), 2) if on_cost > 0 else 0.0
+    by_type["off_exchange"]["cumulative_pnl_pct"] = round((by_type["off_exchange"]["cumulative_pnl"] / off_cost * 100), 2) if off_cost > 0 else 0.0
+
     daily_series = []
     
     return {
@@ -851,6 +869,7 @@ async def calculate_cumulative_pnl(
             "max_drawdown": None,
             "sharpe_ratio": None,
             "has_cost_basis_data": has_real_data,
+            "by_type": by_type,
         },
         "holdings": holdings_pnl,
         "daily_series": daily_series,
