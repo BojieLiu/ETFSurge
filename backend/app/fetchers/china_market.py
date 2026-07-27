@@ -45,10 +45,33 @@ def _session():
 
 # ── mootdx helper ────────────────────────────────────────────────
 
-# mootdx socket read/write timeout
+import concurrent.futures as _cf
+
+# mootdx 连接超时（Quotes.factory 的 TCP 连接超时）
 _MOOTDX_TIMEOUT = 6
+# mootdx 单次读操作超时（client.quotes / client.bars 的 socket read 超时）
+# 使用 concurrent.futures 实现，防止 mootdx socket 读挂死线程池
+_MOOTDX_READ_TIMEOUT = 8
 
 _MOOTDX_CLIENT: "Quotes | None" = None
+# 单线程 executor 用于 mootdx 读操作的超时保护
+_MOOTDX_EXECUTOR = _cf.ThreadPoolExecutor(max_workers=1, thread_name_prefix="mootdx")
+
+
+def _run_mootdx_with_timeout(fn, timeout: int = _MOOTDX_READ_TIMEOUT):
+    """在独立线程中执行 mootdx 读操作，带硬超时。
+
+    解决 P0 问题：mootdx TCP socket read 可能无限挂起 → 线程池耗尽。
+    asyncio.wait_for 无法中断同步阻塞的线程，因此用 ThreadPoolExecutor
+    的 future.result(timeout=N) 实现硬超时。
+    """
+    future = _MOOTDX_EXECUTOR.submit(fn)
+    try:
+        return future.result(timeout=timeout)
+    except _cf.TimeoutError:
+        logger.warning("[mootdx] read timed out after %ds — socket may be hung", timeout)
+        # future 继续在后台运行，但已超时返回 None；线程最终会被 executor 回收
+        return None
 
 
 def _mootdx():
@@ -70,8 +93,11 @@ def _mootdx_realtime(symbols: list[str]) -> list[dict[str, Any]]:
         return []
     try:
         client = _mootdx()
-        df = client.quotes(symbol=symbols)
-        if df is None or df.empty:
+        df = _run_mootdx_with_timeout(lambda: client.quotes(symbol=symbols))
+        if df is None:
+            logger.warning("_mootdx_realtime timed out for %s", symbols)
+            return []
+        if df.empty:
             logger.warning("_mootdx_realtime returned empty for %s", symbols)
             return []
         results = []
@@ -102,8 +128,11 @@ def _mootdx_history(symbol: str, period: str = "daily") -> list[dict[str, Any]]:
     count = 500
     try:
         client = _mootdx()
-        df = client.bars(symbol=symbol, frequency=freq, start=0, count=count)
-        if df is None or df.empty:
+        df = _run_mootdx_with_timeout(lambda: client.bars(symbol=symbol, frequency=freq, start=0, count=count))
+        if df is None:
+            logger.warning("_mootdx_history timed out for %s (period=%s)", symbol, period)
+            return _akshare_history_fallback(symbol, period)
+        if df.empty:
             logger.warning("_mootdx_history returned empty for %s (period=%s)", symbol, period)
             # Fallback to akshare stock_zh_a_hist
             return _akshare_history_fallback(symbol, period)

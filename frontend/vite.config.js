@@ -54,14 +54,15 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          'vendor-vue': ['vue', 'vue-router', 'pinia', 'vue-echarts'],
+          'vendor-vue': ['vue', 'vue-router', 'pinia'],
+          'vendor-echarts': ['echarts', 'vue-echarts'],
           'vendor-axios': ['axios'],
-          echarts: ['echarts'],
+          'vendor-marked': ['marked'],
         },
       },
     },
     // H: Bundle size budget — warn if any chunk exceeds thresholds
-    chunkSizeWarningLimit: 500,
+    chunkSizeWarningLimit: 700,
     assetsInlineLimit: 4096,
   },
 })

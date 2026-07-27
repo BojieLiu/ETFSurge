@@ -1196,3 +1196,9 @@ Phase 7.1 (远期优化)             无紧急依赖
 | | | | **F9** — 测试更新：`test_design_new_modules.py` 12 测试同步关键词变更（分类预期 + 注释） |
 | | | | **F10** — `docs/implementation-master-plan.md` 更新至 v10.0 |
 | | | | **改动文件：** `backend/app/fetchers/etf_scanner.py`、`backend/app/fetchers/china_market.py`、`backend/app/services/pool_manager.py`、`backend/app/factors/factor_registry.py`、`backend/scripts/verify_e2e.py`、`backend/tests/test_design_new_modules.py` |
+| |
+| | | **v10.1** | 2026-07-27 | **Phase 10.1 — mootdx 超时防护 + 前端性能** | 续 Phase 10 |
+| | | | **已实现：** |
+| | | | **F11** — `china_market.py` 新增 `_run_mootdx_with_timeout()` 函数，使用 `concurrent.futures.ThreadPoolExecutor(max_workers=1)` 包裹 mootdx socket 读操作（`client.quotes` / `client.bars`），8s 硬超时，解决 P0 mootdx TCP read 挂死线程池问题 |
+| | | | **F12** — `frontend/vite.config.js` 优化 chunk 拆分：`vendor-echarts`（echarts+vue-echarts）与 `vendor-vue` 分离，新增 `vendor-marked` 独立 chunk；`chunkSizeWarningLimit` 提升至 700KB |
+| | | | **改动文件：** `backend/app/fetchers/china_market.py`、`frontend/vite.config.js` |
