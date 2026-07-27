@@ -22,6 +22,10 @@
           <span class="qb-icon" aria-hidden="true">⭐</span>
           <span class="qb-label">自选</span>
         </button>
+        <button class="qb-btn" @click="scrollTo('sector')" title="热点板块">
+          <span class="qb-icon" aria-hidden="true">🔥</span>
+          <span class="qb-label">板块</span>
+        </button>
         <button class="qb-btn" @click="scrollTo('advisor')" title="AI 投资顾问">
           <span class="qb-icon" aria-hidden="true">💬</span>
           <span class="qb-label">AI顾问</span>
@@ -40,6 +44,9 @@
     <div ref="anchorWatch" class="section-anchor"></div>
     <WatchlistPanel :marketTab="marketTab" @select-symbol="onSelectSymbol" />
 
+    <div ref="anchorSector" class="section-anchor"></div>
+    <SectorHeatMap />
+
     <div ref="anchorAdvisor" class="section-anchor"></div>
     <AiAdvisor :marketTab="marketTab" />
 
@@ -54,6 +61,7 @@ import MarketReport from '../components/market/MarketReport.vue'
 import WatchlistPanel from '../components/market/WatchlistPanel.vue'
 import AiAdvisor from '../components/market/AiAdvisor.vue'
 import UnifiedAnalysis from '../components/market/UnifiedAnalysis.vue'
+import SectorHeatMap from '../components/market/SectorHeatMap.vue'
 
 const marketTab = ref('A')
 const selectedSymbol = ref(null)
@@ -70,8 +78,9 @@ const anchorReport = ref(null)
 const anchorWatch = ref(null)
 const anchorAdvisor = ref(null)
 const anchorSymbol = ref(null)
+const anchorSector = ref(null)
 const anchorMap = {
-  report: anchorReport, watch: anchorWatch, advisor: anchorAdvisor,
+  report: anchorReport, watch: anchorWatch, sector: anchorSector, advisor: anchorAdvisor,
   symbol: anchorSymbol,
 }
 

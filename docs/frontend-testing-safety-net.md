@@ -9,7 +9,7 @@
 
 > ⚠️ 本文档初始版本撰写于 Phase 2.5 实施前。Phase 2.5 已显著扩充测试覆盖，本节全面刷新。
 
-### 单元测试（Vitest）— **18 个 spec 文件，175 个测试用例**
+### 单元测试（Vitest）— **25 个 spec 文件，253 个测试用例**
 
 | 层级 | 测试内容 | 数量 | 质量 |
 |------|---------|:----:|------|
@@ -187,11 +187,11 @@ Phase B — 业务层防护（✅ 已完成，Phase 2.5）
 ├── B3: PortfolioAnalysis E2E ── 通过 navigation + regression 覆盖
 └── 验证：npm test + npm run test:e2e:smoke 全绿 ✅
 
-Phase C — 全面覆盖（📌 Phase 3.1 后可做，当前非阻塞）
-├── C1: 剩余 UI 组件单测（AppTable、AppSelect、Skeleton 等）
-├── C2: Chart 组件基本渲染测试（AllocationPieChart 等，带 vue-echarts stub）
-├── C3: E2E 覆盖 Charts 渲染 + News 筛选 + 技术分析
-├── C4: E2E 截图对比基线建立（建议 Phase 3.1 开始前做，或跟 UI Phase 4 一起）
+Phase C — 全面覆盖（📌 UI 优化前可做，当前非阻塞）
+├── C1: 剩余 UI 组件单测（AppTable、AppSelect、Skeleton 等）—— AppComponents2.spec.js 已覆盖（7+14+7=28 条），C1 已自然完成
+├── C2: Chart 组件基本渲染测试（AllocationPieChart + PnLBarChart，带 vue-echarts stub）—— ✅ 已完成（Phase 10.2，ChartComponents.spec.js，16 条）
+├── C3: E2E 覆盖 Charts 渲染 + 技术分析（📌 待实施，需 UI 定型后）
+├── C4: E2E 截图对比基线建立（📌 待实施，建议 UI Phase 2 完成后）
 └── 验证：全量测试 suite 在 CI 中通过
 ```
 

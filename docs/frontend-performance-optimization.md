@@ -1,8 +1,8 @@
 # Frontend Performance Optimization
 
-> 分析日期：2026-07-22 | 最后更新：2026-07-26
+> 分析日期：2026-07-22 | 最后更新：2026-07-27
 > 针对前端首屏加载慢、路由切换卡顿的问题分析及优化方案。
-> ⚠️ **Step 1（ECharts 从 main.js 移除）已在 Phase 2.5 实施**。本文档已同步更新。
+> ✅ **全部 4 个 Step 已在 Phase 2.5 / 10.1 / 10.2 中完成。本文档可归档。**
 
 ---
 
@@ -179,17 +179,16 @@ Step 1 (ECharts 按需) ── ✅ 已完成（Phase 2.5 `b04b448`）
     │ 验证：npm run build 后 dist/assets/ 下 echarts chunk 应
     │      只在 Dashboard/ AnalysisView 的 chunk 中出现 import
     │
-Step 2 (Chunk 优化)   ── ⏳ 待实施（改 vite.config.js，5 行配置，10 分钟）
-    │ 验证：npm run build 输出应显示 vendor-vue / vendor-echarts 等
-    │      独立 chunk
+Step 2 (Chunk 优化)   ── ✅ 已完成（Phase 10.1：vite.config.js 已拆 vendor-vue/vendor-echarts/vendor-axios）
+    │ 验证：npm run build 输出显示 vendor-vue / vendor-echarts 等独立 chunk
     │
-Step 3 (消除重复注册) ── ⏳ 待实施（各图表页面清理 use() 调用，20 分钟）
-    │ 验证：页面图表正常渲染，控制台无 ECharts 警告
+Step 3 (消除重复注册) ── ✅ 已完成（Phase 10.2：src/plugins/echarts.js 已删除）
+    │ 验证：控制台无 ECharts 警告
     │
-Step 4 (localStorage) ── ⏳ 待实施（task.js 加 debounce，15 分钟）
+Step 4 (localStorage) ── ✅ 已完成（task.js 改为 API 驱动，无高频 localStorage 写入）
 ```
 
-**当前状态**：Step 1 已完成，Step 2-4 待实施。Step 1 的收益占整体优化的 70% 以上，已经落地。
+**当前状态**：全部 4 个 Step 已完成。Step 1（Phase 2.5）+ Step 2（Phase 10.1）+ Step 3&4（Phase 10.2）均已落地验证。
 
 ---
 

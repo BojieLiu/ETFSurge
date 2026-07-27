@@ -467,6 +467,77 @@ def section_portfolio():
     except Exception as e:
         check("GET /strategy-checks", False, str(e))
 
+    section("组合交易接口")
+
+    # POST /portfolio/calculate
+    try:
+        r = requests.post(f"{BASE}/api/v1/portfolio/calculate",
+                          json={"total_capital": 100000, "holdings": []}, timeout=10)
+        check(f"POST /calculate -> {r.status_code}", r.status_code == 200)
+    except Exception as e:
+        check("POST /calculate", False, str(e))
+
+    # POST /portfolio/daily-pnl
+    try:
+        r = requests.post(f"{BASE}/api/v1/portfolio/daily-pnl",
+                          json={"holdings": [{"symbol": "510300", "shares": 100, "cost_price": 4.0}]}, timeout=10)
+        check(f"POST /daily-pnl -> {r.status_code}",
+              r.status_code == 200, "空数据" if r.status_code == 200 and not r.json() else "")
+    except Exception as e:
+        check("POST /daily-pnl", False, str(e))
+
+    # GET /portfolio/pnl-history
+    try:
+        r = requests.get(f"{BASE}/api/v1/portfolio/pnl-history?days=7", timeout=10)
+        check(f"GET /pnl-history -> {r.status_code}",
+              r.status_code == 200, "空数据" if r.status_code == 200 and not r.json() else "")
+    except Exception as e:
+        check("GET /pnl-history", False, str(e))
+
+    # GET /portfolio/drift-check
+    try:
+        r = requests.get(f"{BASE}/api/v1/portfolio/drift-check", timeout=10)
+        ok = r.status_code == 200
+        check(f"GET /drift-check -> {r.status_code}", ok)
+        if ok:
+            check(f"drift 数据含字段", bool(r.json()), "空数据" if not r.json() else "")
+    except Exception as e:
+        check("GET /drift-check", False, str(e))
+
+    # GET /portfolio/export
+    try:
+        r = requests.get(f"{BASE}/api/v1/portfolio/export", timeout=10)
+        check(f"GET /export -> {r.status_code}", r.status_code in (200, 404),
+              "404 — 无持仓数据" if r.status_code == 404 else "")
+    except Exception as e:
+        check("GET /export", False, str(e))
+
+    # GET /portfolio/tasks
+    try:
+        r = requests.get(f"{BASE}/api/v1/portfolio/tasks?limit=5", timeout=10)
+        check(f"GET /tasks -> {r.status_code}", r.status_code == 200)
+        if r.status_code == 200:
+            tasks = r.json() if isinstance(r.json(), list) else []
+            check(f"任务列表 {len(tasks)} 条", True)
+    except Exception as e:
+        check("GET /tasks", False, str(e))
+
+    # GET /portfolio/timeline
+    try:
+        r = requests.get(f"{BASE}/api/v1/portfolio/timeline?days=30", timeout=10)
+        check(f"GET /timeline -> {r.status_code}", r.status_code == 200)
+    except Exception as e:
+        check("GET /timeline", False, str(e))
+
+    # POST /portfolio/apply-design (with empty body to test schema validation)
+    try:
+        r = requests.post(f"{BASE}/api/v1/portfolio/apply-design",
+                          json={"design": {}}, timeout=10)
+        check(f"POST /apply-design -> {r.status_code}",
+              r.status_code in (200, 422), "422 可接受（空 body 校验）" if r.status_code == 422 else "")
+    except Exception as e:
+        check("POST /apply-design", False, str(e))
+
 
 def section_news():
     """新闻资讯端点"""

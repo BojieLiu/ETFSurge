@@ -3,7 +3,14 @@
 > 目标：通过 Playwright 覆盖前端**全部用户操作链路**，在每次修改后自动验证前端渲染正确性和功能完整性。
 > 生成日期: 2026-07-21
 >
-> ⚠️ **2026-07-27 实施状态更新（最新审计）**：本文档为完整方案蓝图。实际已实施：
+> ✅ **2026-07-27 第二次更新 — 剩余缺口已关闭**：本文档为完整方案蓝图。实际已实施：
+> - ✅ 基础设施：`playwright.config.js` + server utilities 已就绪
+> - ✅ package.json 脚本已配置
+> - ✅ 总计 **16 个 spec 文件**（9 原存 + 7 新增）
+> - ✅ 新增 7 个 spec：09-portfolio-manager / 10-market-tabs / 11-watchlist / 13-ai-advisor / 14-sector-analysis / 15-symbol-analysis / 16-token-monitor
+> - ✅ `verify_e2e.py` 扩展含组合计算/盈亏/偏离/导出/时间线/应用设计 等 10 个新增端点检查
+> - ❌ 冗余 API 端点清理（Section 9.11）仍有 ~15 个端点待审 — 不在本次 scope
+> - 本文档保持完整方案不变
 > - ✅ 基础设施：`playwright.config.js` + server utilities（`server-setup.cjs` / `server-teardown.cjs` / `server.js`）已就绪
 > - ✅ package.json 脚本：`test:e2e` / `test:e2e:smoke` / `test:e2e:visual` / `test:e2e:ui` 已配置
 > - ⚠️ 已实现 **9 个 spec 文件**，命名与计划方案不完全对齐（见下方映射表）

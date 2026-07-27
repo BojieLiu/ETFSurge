@@ -544,32 +544,32 @@ E2E 验证脚本：`verify_e2e.py`（847 行）
 
 ## 9. 实施优先级与依赖
 
-### 9.1 阶段一（立即修复）
+### 9.1 阶段一（立即修复）— 全部已完成
 
-| 序号 | 方案 | 依赖 | 预估工时 |
+| 序号 | 方案 | 状态 | 说明 |
 |---|---|---|---|
-| 1 | B1: 修复 `cache_set` UnboundLocalError | 无 | 1h |
-| 2 | B2: 全局异常处理器 | 无 | 2h |
-| 3 | C1: 编写 `check_routes.py` | 无 | 2h |
-| 4 | F1: 运行编码诊断 + 修复 | 无 | 1h |
+| 1 | B1: 修复 `cache_set` UnboundLocalError | ✅ 已完成 | `get_portfolio_realtime()` 中 `cache_set` 已在函数顶部（line 624）通过 `from ... import` 赋值，Phase 7 重构已自然修复 |
+| 2 | B2: 全局异常处理器 | ✅ 已完成 | `main.py:47-61` 已安装 `loop.set_exception_handler()` |
+| 3 | C1: 编写 `check_routes.py` | ✅ 已完成 | `backend/scripts/check_routes.py` 已存在并可通过 pytest 运行 |
+| 4 | F1: 运行编码诊断 + 修复 | ✅ 已完成 | `scripts/encoding_diagnosis.py` 已创建 |
 
-### 9.2 阶段二（1 个迭代内）
+### 9.2 阶段二（1 个迭代内）— 部分已完成
 
-| 序号 | 方案 | 依赖 | 预估工时 |
+| 序号 | 方案 | 状态 | 说明 |
 |---|---|---|---|
-| 5 | A1-A2: 集成 WarmupProfiler + 时序采集 | 无 | 3h |
-| 6 | D: 响应时间门限 | 阶段一完成后 | 4h |
-| 7 | E1-E2: rollup-plugin-visualizer + Playwright 集成 | 无 | 4h |
-| 8 | G1: LLM 报告评分卡 | 无 | 4h |
+| 5 | A1-A2: 集成 WarmupProfiler + 时序采集 | ✅ 已完成 | `main.py:285-299` 已实现 profiler 集成，`warmup_timing.json` 写入 |
+| 6 | D: 响应时间门限 | ⚠️ 部分完成 | `verify_e2e.py` 已有响应时间检查。门限值需更新（当前 /health 仅 28ms） |
+| 7 | E1-E2: rollup-plugin-visualizer + Playwright | ⚠️ 部分完成 | E1 ✅ 已配置到 `vite.config.js`；E2 ❌ 需 CI 环境支持 |
+| 8 | G1: LLM 报告评分卡 | ❌ 未实施 | 实施成本高（需另一个 LLM/规则引擎），建议降级为手动抽检 |
 
-### 9.3 阶段三（backlog）
+### 9.3 阶段三（backlog）— 部分已处理
 
-| 序号 | 方案 | 依赖 | 预估工时 |
+| 序号 | 方案 | 状态 | 说明 |
 |---|---|---|---|
-| 9 | A3-A4: Warmup wait 模式 + 告警 | 阶段二 S1 | 4h |
-| 10 | B3: 数据源降级增强 | 阶段一 S2 | 6h |
-| 11 | E3: 前端启动稳定性 | 无 | 2h |
-| 12 | H: 体积预算 | 阶段二 E1 | 2h |
+| 9 | A3-A4: Warmup wait 模式 + 告警 | ⚠️ 部分完成 | `main.py` 已有 `asyncio.wait()`，无告警门限。降低优先级 |
+| 10 | B3: 数据源降级增强 | ❌ 未实施 | 范围太宽，应拆解为单数据源具体修复 |
+| 11 | E3: 前端启动稳定性 | ❌ 未实施 | Windows 特有，无可靠方案（AGENTS.md 已记录启动坑） |
+| 12 | H: 体积预算 | ⚠️ 部分完成 | `vite.config.js` 已设 `chunkSizeWarningLimit: 700`。完整体积预算待确认 |
 
 ---
 
