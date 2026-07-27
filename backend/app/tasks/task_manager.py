@@ -138,7 +138,13 @@ class TaskManager:
         # 解析 ISO 时间戳为时间戳
         def _ts(t):
             try:
-                return datetime.strptime(t["created_at"], "%Y-%m-%dT%H:%M:%SZ").timestamp()
+                # created_at is UTC, but strptime creates a naive datetime.
+                # .timestamp() on naive datetime treats it as LOCAL time,
+                # causing timezone-dependent age miscalculation.
+                # Fix: use timezone.utc to make the timestamp UTC-aware.
+                dt = datetime.strptime(t["created_at"], "%Y-%m-%dT%H:%M:%SZ")
+                from datetime import timezone as _tz
+                return dt.replace(tzinfo=_tz.utc).timestamp()
             except Exception:
                 return 0
         

@@ -25,7 +25,7 @@ def _mock_strategies(count=3):
         {
             "id": labels[i],
             "label": {"defensive": "防御型", "balanced": "平衡型", "aggressive": "进攻型"}[labels[i]],
-            "allocations": [
+            "etfs": [
                 {"symbol": "510300", "name": "沪深300ETF", "layer": "core", "weight": 0.3,
                  "factor_score": 0.75, "daily_change_pct": 0.01,
                  "selection_rationale": "核心宽基，估值合理"},
