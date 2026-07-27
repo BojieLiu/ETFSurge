@@ -83,6 +83,7 @@ export const newsApi = {
 
 export const factorsApi = {
   getIC: () => api.get('/factors/ic'),
+  getActive: () => api.get('/factors/active'),
 }
 
 export const adminApi = {

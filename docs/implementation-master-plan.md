@@ -1,6 +1,6 @@
 # ETF Surge 方案实施总计划
 
-> 生成日期: 2026-07-27 | 版本: **v9.4**
+> 生成日期: 2026-07-27 | 版本: **v9.5**
 > ✅ **Phase 6.1 已完成**：可观测性与系统增强 — ConfigManager + app_config 表（`models/app_config.py`, `core/config_manager.py`）、ConfigPage（`views/ConfigView.vue`）、Sector API 实时行情返回（market.py 路由优先级调整）、LLM 热点板块注入（llm_context.py + pool_manager.py）、stars 时间新鲜度 + Level 2 精度调整（news_fetcher.py + levistock_fetcher.py）、verify_e2e.py 扩展（stars/level 校验 + check_sector_data）。详见 §4 Phase 6.1。
 > 
 > 总览 `docs/` 目录 **33 份**方案文档，梳理实施状态、冲突重叠、修复建议及分阶段执行路线。新增 `frontend-logic-sink-plan.md`（第 33 份，Sprint 1 P0/P1 已完成）。
@@ -1102,7 +1102,17 @@ Phase 7.1 (远期优化)             无紧急依赖
 | | **v7.2** | 2026-07-26 | Phase 4.1 状态审核。全量代码审计发现 roadmap-data-source-unified.md v2.0 中的实施方案绝大部分已被后续 commits 落地。Phase A/B/C/D1-D6 均已实施，仅 D7（前端数据源监控面板）待完成。`roadmap-data-source-unified.md` 更新为 v3.0 回顾文档。`implementation-master-plan.md` Phase 4.1 更新为 ✅ 已实施状态。 |
 | | **v7.3** | 2026-07-26 | Phase 4.1 全部完成：4.1.2（全球指数链路）代码审计确认实际为 EM→Sina→Finnhub 而非计划所述 TwelveData，verify_e2e.py 已含 HK/US 三大指数断言，状态修正为 ✅。4.1.9（前端数据源监控面板 D7）实施完成：新建 SourceMonitor.vue（TokenMonitor 风格，含 ECharts 堆叠柱状图 + 源状态矩阵 + 失败事件表格）、路由 `/source-monitor`、导航"📡 数据源"、`api-contracts/admin/sources.md` 契约。`api/index.js` 新增 4 个 adminApi 源监控方法。npm run build 验证通过。 |
 | | **v9.0** | 2026-07-26 | **Phase 5.1 全栈实施完成**：市场感知联动。新增 `core/market_context.py`（MarketContext 数据类，4 市场） + `services/market_router.py`（5 路由函数）。修改 `routers/analysis.py`（SectorAnalysisRequest.market、llm-report/stream 市场过滤、非 A 板块分析友好提示）、`routers/portfolio.py`（design-async market 参数，非 A 返回 unsupported）、`services/pool_manager.py`（regime 缓存 dict[str,str] 多市场）、`services/strategy_design.py`（market 参数入口）、`services/llm_context.py`（market 参数透传）、`frontend/src/api/index.js`（designAsync 传 market）。`api-contracts/market/market-context.md` 契约。35 个新单测全 PASS，存量 45 个全 PASS，npm run build 通过。commit `2371815`。 |
-| | **v9.4** | 2026-07-27 | **Phase 7.1.6 Sprint 1 P0/P1 前端逻辑下沉** | 备注见下方 |
+| | **v9.5** | 2026-07-27 | **Factor model display on AI tools page** | 备注见下方 |
+| | | | **已实施：** |
+| | | | - 新增 `GET /api/v1/factors/active` 端点（routers/factors.py）：返回已注册计算函数的因子列表，按 category 分组，附带 IC 值、标准化方式、阈值、有效性状态 |
+| | | | - 新增 `api-contracts/factors/active.md` API 契约 |
+| | | | - 新增 `tests/test_factors_router.py` 10 个单测全部 PASS（contract conformance） |
+| | | | - 新增 `frontend/src/components/FactorModelView.vue`：可展开分类卡片 + 因子行(IC色条/IC值/截断简介) + hover 浮层(完整元数据+有效性状态) + ECharts IC 柱状图 |
+| | | | - `frontend/src/views/DashboardAiTools.vue` 集成 FactorModelView，位于 AI 工具卡片下方 |
+| | | | - `frontend/src/api/index.js` 新增 `factorsApi.getActive()` |
+| | | | - npm run build 通过 |
+| | |
+| | | **v9.4** | 2026-07-27 | **Phase 7.1.6 Sprint 1 P0/P1 前端逻辑下沉** | 备注见下方 |
 | | | | **已实施：** |
 | | | | - P0: Dashboard 财务指标去重（useDashboardData.js 7 个 computed 改用后端字段：total_pnl/total_amount/weighted_change_pct/cash_weight/cash_amount） |
 | | | | - P0: 35 个 useDashboardData 单测全 PASS |

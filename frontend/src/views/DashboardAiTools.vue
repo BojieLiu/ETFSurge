@@ -1,4 +1,5 @@
 <template>
+  <div class="ai-tools-page">
   <section class="card core-actions">
     <div class="card-header">
       <h2 class="card-title">
@@ -105,6 +106,9 @@
       </AppModal>
     </div>
   </section>
+
+  <FactorModelView />
+  </div>
 </template>
 
 <script setup>
@@ -121,6 +125,7 @@ import DesignHistory from '../components/design/DesignHistory.vue'
 import StrategyCheckModal from '../components/design/StrategyCheckModal.vue'
 import StrategyCheckResult from '../components/design/StrategyCheckResult.vue'
 import AppModal from '../components/ui/AppModal.vue'
+import FactorModelView from '../components/FactorModelView.vue'
 
 const emit = defineEmits(['applied'])
 
@@ -641,4 +646,11 @@ async function applyPlan(plan) {
 .action-content { display: flex; flex-direction: column; gap: var(--space-1); }
 .action-title { font-size: var(--font-size-base); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
 .action-desc { font-size: var(--font-size-sm); color: var(--color-text-secondary); line-height: var(--line-height-normal); }
+
+/* Page layout */
+.ai-tools-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
 </style>

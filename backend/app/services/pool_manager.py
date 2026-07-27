@@ -227,8 +227,8 @@ class PoolManager:
         if self._refresh_lock is not None and self._refresh_lock.locked():
             logger.info("PoolManager: refresh already in progress, waiting (max 120s)...")
             try:
-                await _asyncio.wait_for(self._refresh_lock.acquire(), timeout=120)  # type: ignore[union-attr]
-                self._refresh_lock.release()  # type: ignore[union-attr]
+                await _asyncio.wait_for(self._refresh_lock.acquire(), timeout=120)
+                self._refresh_lock.release()
                 logger.info("PoolManager: waited for lock, returning stale pool")
                 return PoolDiff(changed=[], added=[], removed=[], version=self._version,
                                 timestamp=datetime.now().isoformat())
