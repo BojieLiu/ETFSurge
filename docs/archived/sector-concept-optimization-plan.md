@@ -1,14 +1,14 @@
 # 板块/概念数据优化方案
 
 > 多资产实时行情分析与 ETF 组合管理系统 · 行情研判数据增强
-> 版本: v3.2 | 更新日期: 2026-07-27 | 状态: **部分实施（经代码审计校准）**
-> ✅ Phase 1-2 已实施（数据采集 + 缓存写入 + 定时刷新）
-> ✅ Phase 2 增强：`pool_manager.py:update_sector_cache()` 已实现行业+概念动量、热点板块、板块热度三项独立刷新
-> ✅ L6 定时刷新：`pool_manager.py:_refresh_market_snapshot()` 和 `update_sector_cache()` 均可被定时任务调用
-> 🟡 L3 API 实时行情：`pool_manager.py` 已实现 `get_hot_plates()` / `get_sector_heat()` 缓存读取接口。路由优先调实时数据（`fetch_industry_sectors()` / `fetch_concept_sectors()`），本地表作降级。但前端涨跌幅颜色显示未适配，3 个 API 契约文件未创建
-> 🟡 Phase 4（LLM Prompt 注入）：`build_full_context()` 已注入 sector_momentum + hot_plates + sector_heat，但 `generate_advice()` 仍用旧 asset_type 过滤，`_build_design_report_prompt()` 缺少概念板块和热点板块段落
-> ❌ Phase 5（综合研判注入）：`llm_report_stream` 中 `include_sectors=False` 显式禁用；3 条路由均未注入板块数据；`_inject_market_context()` 公共函数未抽取
-> ❌ Phase 6（前端可视化）：`SectorHeatMap.vue` 未创建，前端 API 方法未接入，3 个契约文件未创建
+> 版本: v3.3 | 更新日期: 2026-07-27 | 状态: **全部实施（2026-07-27 代码审计确认）**
+> ✅ **本文档所有 Phase 1-6 已于 2026-07-27 第三次迭代全部实施。**
+> ✅ Phase 1-2: 数据采集 + 缓存写入 + 定时刷新
+> ✅ L3 API: `/market/sectors/industry`, `/market/sectors/concept`, `/market/sectors` (统一路由) 均已上线
+> ✅ Phase 4: `build_full_context()` 含 `include_sectors=True`，注入 sector_momentum + hot_plates + sector_heat
+> ✅ Phase 5: `_inject_market_context()` 公共函数已创建；`llm_report_stream` 中 `include_sectors=True`
+> ✅ Phase 6: `SectorHeatMap.vue` 嵌入 `MarketAnalysis.vue`（➕板块快速栏 + 锚点滚动）
+> 🟡 剩余 3 个低优先级路由（`/sectors/industry-cls`, `/{code}/stocks`, `/{code}/popular`）标记 `TODO: 未接入前端`，属新增功能不在此方案 scope
 
 ---
 

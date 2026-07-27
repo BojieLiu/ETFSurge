@@ -9,7 +9,8 @@
 > ✅ **Phase 9 已完成**：剩余策略缺口闭环（2026-07-27 代码审计驱动）— Market Analysis Phase D(1-3): llm_advice_stream 新增 market 参数 (LLMAdviceRequest)、AiAdvisor.vue 传递 marketTab 到 API、build_full_context 按市场获取数据。Phase E(1-3): _build_report_prompt() 扩展为 6 节（含 0. 全景速览 + 5. 操作建议）、llm_report_stream 改为真流式 (agent.run_stream)、include_sectors=True 启用板块数据。Sector Phase 4: generate_advice() 改用 hot_plates/sector_heat、_build_design_report_prompt() 新增概念板块 + 热点板块段落。Phase 5: _inject_market_context() 公共函数。Phase 3b+6: useSectorAnalysis.js 涨跌幅颜色 helpers、api/index.js 新增 6 个板块 API 方法、SectorHeatMap.vue 组件。verify_e2e.py 新增 analysis 模块 + news/global 检查。API 清理：/hot-plates /stock-hot-rank /wind 前端标记已接入。
 > ✅ **Phase 10 已完成**：收尾剩余任务（2026-07-27 第二次迭代）— SectorHeatMap.vue 嵌入 MarketAnalysis.vue（含快速栏「板块」按钮 + 锚点滚动）。verify_e2e.py section_portfolio 扩展 10 个新端点（calculate / daily-pnl / pnl-history / drift-check / export / tasks / timeline / apply-design）。Playwright 新增 7 个 spec 文件（09-portfolio-manager / 10-market-tabs / 11-watchlist / 13-ai-advisor / 14-sector-analysis / 15-symbol-analysis / 16-token-monitor）。
 > 
-> 总览 `docs/` 目录 **33 份**方案文档，梳理实施状态、冲突重叠、修复建议及分阶段执行路线。新增 `frontend-logic-sink-plan.md`（第 33 份，Sprint 1 P0/P1 已完成）。
+> 总览 `docs/` 目录 **29 份活跃 + 归档**方案文档，梳理实施状态、冲突重叠、修复建议及分阶段执行路线。
+> **新归档（2026-07-27 v10.3）**：`frontend-logic-sink-plan.md`（Sprints 1-4 全部完成）、`e2e-testing-plan.md`（16/12 spec 覆盖）、`factor-model-extension-plan.md`（IC 追踪器全部实施）、`sector-concept-optimization-plan.md`（Phase 1-6 全部实施）。
 > v7.1：Phase 2.7 剩余项 + Phase 2.8 剩余项 + Phase 2.9 全部完成。新增 encoding_diagnosis.py、refresh_sentiment_cache()、AGENTS.md 关键路径更新。新增 llm_context.py build_full_context() 统一数据管道 + llm_report_stream/llm_advice_stream 改用统一管道。
 > Phase 2.2→2.4 全部完成——33/33 核心因子全 LIVE（_CORE_FACTORS 列表共 33 个因子，均含真实 compute 函数，含 Phase 2.5 新增的 etf.return_1m/return_3m/price）、因子健康端点 + 因子单测门禁 + 运行时因子断言、分配器质量修复（ln_mcap 排毒、C2 条件修正、segment 归一化去重、预算重调、cross-section z-score 重归一化）。新增 Phase 2.5（原质量防护网 + AI 分析）。
 > 新增文档 2 份：`archived/scaffold-factor-resolution-plan.md`（第 29 份，✅ 已实施）、`design-quality-review-20260725.md`（第 30 份，审计报告）。
@@ -1206,7 +1207,7 @@ Phase 7.1 (远期优化)             无紧急依赖
 | | | | **改动文件：** `backend/app/fetchers/china_market.py`、`frontend/vite.config.js` |
 | |
 | |
-| | | | | **v10.2** | 2026-07-27 | **Phase 11 — 文档计划剩余项实施** | 详见 docs/factor-model-extension-plan.md + docs/frontend-logic-sink-plan.md |
+| | | | | **v10.3** | 2026-07-27 | **Phase 11 — 文档计划全部完成** | 4 份计划全部实施完毕，已归档至 `docs/archived/` |
 | | | | | **已实现（后端）：** |
 | | | | | **B3.1** — task_manager.py get_task() 确保 progress/stage/status 始终有值 |
 | | | | | **B2.5** — portfolio_service.py new summary.by_type field |
