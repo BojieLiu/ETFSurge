@@ -1245,4 +1245,12 @@ Phase 7.1 (远期优化)             无紧急依赖
 | | | | **FIX-12** — 前端 ECharts 按需加载：所有组件已使用 `echarts/core` 子导入，无全量 `import * as echarts`（前期已处理） |
 | | | | **FIX-13** — `rollup-plugin-visualizer` 已在 devDependencies 中、vite.config.js 已配置（前期 Phase 9 已处理） |
 | | | | **FIX-14** — 路由级组件代码分割：所有路由已使用 `() => import()` 动态导入（前期 Phase 3.1 已处理） |
-| | | | **改动文件：** `backend/app/factors/factor_registry.py`、`backend/app/engine/allocation_engine.py`、`backend/tests/test_factor_compute_functions.py`、`backend/tests/test_factor_missing_value_semantics.py`、`api-contracts/factors/registry.md`、`docs/optimization-master-plan.md`、`docs/implementation-master-plan.md` |
+| | | | **FIX-02** — `china_market.py` 模块级 `requests.Session()` 共享复用，7 个调用点全部使用统一 session，避免每次调用创建新 SSL 连接（P1） |
+| | | | **FIX-04** — `pool_manager.py` `_refresh_market_snapshot` 改为 `asyncio.gather` 并发获取指数行情和板块动量（P1） |
+| | | | **FIX-06** — 新闻 TTL 统一缩减：headlines 120→60s, macro/global/stock 300→60s，降低资讯延迟（P2） |
+| | | | **FIX-07** — `portfolio_service.py` `_build_price_map` 中港/美/NAV 行情获取从串行 for 循环改为 `ThreadPoolExecutor` 并发（P2） |
+| | | | **FIX-10** — 新增 `_compute_confidence()` 纯函数，始终基于因子覆盖率计算置信度（不限 LLM source_confidence）。`strategy_check()` 返回值新增 `data_confidence` 字段（P2） |
+| | | | **FIX-21** — `strategy_check_worker.py` 新增外层 120s `asyncio.wait_for` 超时保护，防止管线无限制挂起（P1） |
+| | | | **FIX-03** — `cache_service.py` `RedisCache.init()` 添加 `if self.available: return` 幂等退出，`get/set/mget/mset` 惰性自动初始化（P2） |
+| | | | **FIX-15** — 新增 `.lighthouserc.yml` Lighthouse CI 配置（3 页 × 3 次运行，性能≥60%, 无障碍/最佳实践/SEO≥80%）（P3） |
+| | | | **改动文件：** `backend/app/fetchers/china_market.py`、`backend/app/core/ttl.py`、`backend/app/services/pool_manager.py`、`backend/app/services/portfolio_service.py`、`backend/app/tasks/strategy_check_worker.py`、`backend/app/services/cache_service.py`、`.lighthouserc.yml`、`docs/optimization-master-plan.md`、`docs/implementation-master-plan.md` |

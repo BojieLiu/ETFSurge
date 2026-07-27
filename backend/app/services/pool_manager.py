@@ -127,34 +127,36 @@ class PoolManager:
         """
         import asyncio
         import time
-        # 刷新指数实时行情
-        try:
-            from ..services.market_service import get_global_indices
-            indices = await asyncio.wait_for(get_global_indices(), timeout=15)
-            # 展平所有区域的指数到 _index_realtime_cache
-            flat = []
-            for region, items in indices.items():
-                for item in items:
-                    item["region"] = region
-                    flat.append(item)
-            self._index_realtime_cache = flat
-            logger.info("[pool] refreshed %d index realtime entries", len(flat))
-        except Exception as e:
-            logger.warning("[pool] _refresh_market_snapshot indices failed: %s", e)
-            if self._index_realtime_cache is None:
-                self._index_realtime_cache = []
+        async def _fetch_indices():
+            try:
+                from ..services.market_service import get_global_indices
+                indices = await asyncio.wait_for(get_global_indices(), timeout=15)
+                flat = []
+                for region, items in indices.items():
+                    for item in items:
+                        item["region"] = region
+                        flat.append(item)
+                self._index_realtime_cache = flat
+                logger.info("[pool] refreshed %d index realtime entries", len(flat))
+            except Exception as e:
+                logger.warning("[pool] _refresh_market_snapshot indices failed: %s", e)
+                if self._index_realtime_cache is None:
+                    self._index_realtime_cache = []
 
-        # 刷新板块动量
-        try:
-            from ..services.market_trends import compute_sector_momentum
-            sector_data = await asyncio.wait_for(compute_sector_momentum(top_n=10), timeout=15)
-            self._sector_momentum_cache = sector_data
-            self._sector_momentum_cache_ts = time.time()
-            logger.info("[pool] refreshed %d sector momentum entries", len(sector_data))
-        except Exception as e:
-            logger.warning("[pool] _refresh_market_snapshot sector failed: %s", e)
-            if self._sector_momentum_cache is None:
-                self._sector_momentum_cache = []
+        async def _fetch_sector():
+            try:
+                from ..services.market_trends import compute_sector_momentum
+                sector_data = await asyncio.wait_for(compute_sector_momentum(top_n=10), timeout=15)
+                self._sector_momentum_cache = sector_data
+                self._sector_momentum_cache_ts = time.time()
+                logger.info("[pool] refreshed %d sector momentum entries", len(sector_data))
+            except Exception as e:
+                logger.warning("[pool] _refresh_market_snapshot sector failed: %s", e)
+                if self._sector_momentum_cache is None:
+                    self._sector_momentum_cache = []
+
+        # 并发获取指数行情和板块动量（FIX-04）
+        await asyncio.gather(_fetch_indices(), _fetch_sector())
 
     async def update_sector_cache(self) -> None:
         """刷新行业+概念板块动量缓存（Phase 2 新增，60s 定时任务专用）。

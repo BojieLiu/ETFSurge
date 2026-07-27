@@ -70,7 +70,9 @@ class RedisCache:
         self._available = False
 
     async def init(self) -> None:
-        """初始化 Redis 客户端并探测连通性；不可用时自动降级（不阻塞请求）。"""
+        """FIX-03: 初始化 Redis 客户端；若已连接则跳过。"""
+        if self.available:
+            return
         try:
             import redis.asyncio as aioredis
 

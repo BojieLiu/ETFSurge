@@ -115,23 +115,36 @@ def _build_price_map(etfs: list[PortfolioETF | dict]) -> dict[str, tuple[float, 
         except Exception:
             pass
 
-    if hk_symbols:
-        try:
-            for s in hk_symbols:
-                items = fetch_hk_stock_realtime(s)
-                if items:
-                    item = items[0]
-                    m[s] = (item["price"], item["change_pct"])
-        except Exception:
-            pass
-
-    for s in us_symbols:
-        try:
-            data = fetch_us_etf_realtime(s)
-            if data:
-                m[s] = (data["price"], data["change_pct"])
-        except Exception:
-            pass
+    # FIX-07: parallel HK/US quote fetch
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    futures = []
+    if hk_symbols or us_symbols:
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            def _fetch_hk(sym):
+                try:
+                    items = fetch_hk_stock_realtime(sym)
+                    if items:
+                        return sym, (float(items[0]["price"]), float(items[0]["change_pct"]))
+                except Exception:
+                    pass
+                return sym, None
+            def _fetch_us(sym):
+                try:
+                    data = fetch_us_etf_realtime(sym)
+                    if data:
+                        return sym, (float(data["price"]), float(data["change_pct"]))
+                except Exception:
+                    pass
+                return sym, None
+            if hk_symbols:
+                for s in hk_symbols:
+                    futures.append(executor.submit(_fetch_hk, s))
+            for s in us_symbols:
+                futures.append(executor.submit(_fetch_us, s))
+            for f in as_completed(futures):
+                sym, val = f.result()
+                if val is not None:
+                    m[sym] = val
 
     # Also fetch tracked indices for off-exchange funds
     tracked = list({_get_attr(e, "tracked_index") for e in etfs if _get_attr(e, "tracked_index") and _get_attr(e, "tracked_index") not in m})
@@ -143,23 +156,33 @@ def _build_price_map(etfs: list[PortfolioETF | dict]) -> dict[str, tuple[float, 
                     m[item["symbol"]] = (item["price"], item["change_pct"])
         except Exception:
             pass
-        # Fallback: compute change from NAV if still missing
-        for t in tracked:
-            if t not in m:
+        # Fallback: compute change from NAV if still missing (FIX-07 parallel)
+        tracked_missing = [t for t in tracked if t not in m]
+        if tracked_missing:
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            def _fetch_nav_fallback(sym):
                 try:
-                    nav_data = fetch_fund_nav(t)
+                    nav_data = fetch_fund_nav(sym)
                     if nav_data:
-                        # Handle both tuple (price, change_pct) and dict return
                         if isinstance(nav_data, tuple) and len(nav_data) >= 1:
-                            m[t] = (float(nav_data[0]), float(nav_data[1]) if len(nav_data) > 1 else 0.0)
+                            return sym, (float(nav_data[0]), float(nav_data[1]) if len(nav_data) > 1 else 0.0)
                         elif isinstance(nav_data, dict) and nav_data.get("nav") and nav_data.get("nav_date"):
                             from datetime import datetime, timedelta
                             nav = float(nav_data["nav"])
                             nav_date = datetime.strptime(nav_data["nav_date"], "%Y-%m-%d")
                             if (datetime.now() - nav_date).days <= 3:
-                                m[t] = (nav, 0.0)
+                                return sym, (nav, 0.0)
                 except Exception:
                     pass
+                return sym, None
+            nav_futures = []
+            with ThreadPoolExecutor(max_workers=min(len(tracked_missing), 4)) as nav_executor:
+                for t in tracked_missing:
+                    nav_futures.append(nav_executor.submit(_fetch_nav_fallback, t))
+                for f in as_completed(nav_futures):
+                    sym, val = f.result()
+                    if val is not None:
+                        m[sym] = val
 
     # Map tracked_index prices to fund symbols for off-exchange funds
     for e in etfs:
@@ -508,15 +531,10 @@ async def strategy_check(
             sig = real_sig["signal"]
             h["tech_signal"] = f"{sig.upper()}，真实信号"
 
-        # Phase 2.7.5: 基于因子覆盖率的 confidence 覆盖
+        # FIX-10: 始终基于因子覆盖率计算 confidence，不依赖 LLM source_confidence
         filled_count = data_quality.get("filled_count", 0) if data_quality else 0
         total_count = data_quality.get("total_count", 0) if data_quality else 0
-        if total_count > 0:
-            ratio = filled_count / total_count
-            if ratio > 0.8 and h.get("source_confidence") == "low":
-                h["confidence"] = "high"
-            elif 0.5 <= ratio <= 0.8 and h.get("source_confidence") == "low":
-                h["confidence"] = "medium"
+        h["confidence"] = _compute_confidence(filled_count, total_count)
 
     # P2-3: 增强摘要 — 纳入市态 + 数据质量
     regime_label = {"range_bound": "震荡", "bullish": "偏多", "bearish": "偏空",
@@ -536,6 +554,7 @@ async def strategy_check(
     quality_summary = f"；因子数据{filled_count}/{total_count}正常" if total_count > 0 else ""
 
     llm_summary = llm_result.get("summary", "")
+    data_confidence = _compute_confidence(filled_count, total_count)
     result = {
         "summary": f"{llm_summary}（市态：{regime_label}{sector_text}{quality_summary}）" if llm_summary else f"市态：{regime_label}，{filled_count}/{total_count}只正常{quality_summary}",
         "suggestions": llm_result.get("suggestions", []),
@@ -549,12 +568,25 @@ async def strategy_check(
             "filled_count": filled_count,
             "total_count": total_count,
         },
+        "data_confidence": data_confidence,
         "raw_llm": str(llm_result),
     }
     # 缓存 60s
     if cache_key:
         _strategy_check_cache[cache_key] = (_time.monotonic(), result)
     return result
+
+
+def _compute_confidence(filled_count: int, total_count: int) -> str:
+    """FIX-10: 基于因子数据覆盖率计算置信度（不依赖 LLM source_confidence）。"""
+    if total_count <= 0:
+        return "low"
+    ratio = filled_count / total_count
+    if ratio > 0.8:
+        return "high"
+    elif ratio >= 0.5:
+        return "medium"
+    return "low"
 
 
 def _combine_risk_warnings(
