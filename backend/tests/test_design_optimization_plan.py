@@ -47,6 +47,19 @@ def _patch_singleton_methods(monkeypatch):
                         MagicMock(return_value="range_bound"))
     monkeypatch.setattr("app.services.pool_manager.pool_manager.refresh_news",
                         MagicMock(return_value=None))
+    # Mock scanner/classifier/factor_registry so pool_manager.refresh()
+    # does NOT make real I/O calls. Individual tests override return_value.
+    _mock_scanner = MagicMock()
+    _mock_scanner.full_pipeline.return_value = {"core": [], "satellite": [], "defense": []}
+    monkeypatch.setattr("app.services.pool_manager.pool_manager.scanner", _mock_scanner)
+    _mock_classifier = MagicMock()
+    _mock_classifier.batch_classify.return_value = {}
+    monkeypatch.setattr("app.services.pool_manager.pool_manager.classifier", _mock_classifier)
+    _mock_freg = MagicMock()
+    _mock_freg.compute = AsyncMock(return_value={})
+    _mock_freg.get_factor_scores = MagicMock(return_value={})
+    _mock_freg.aggregate_factor_scores = MagicMock(return_value={})
+    monkeypatch.setattr("app.services.pool_manager.pool_manager.factor_registry", _mock_freg)
 
 
 @pytest.fixture
@@ -98,12 +111,10 @@ def mock_pool_data():
 async def test_p0_generate_enhanced_design_no_blow():
     """P0: generate_enhanced_design must not blow with realistic factor data."""
     from app.services.strategy_design import generate_enhanced_design
-    from app.services.pool_manager import PoolManager
+    from app.services.pool_manager import pool_manager
 
-    pm = PoolManager()
-    # Mock scanner to return simple data quickly
-    pm.scanner = MagicMock()
-    pm.scanner.full_pipeline.return_value = {
+    # Set test data on the singleton (pre-mocked by _patch_singleton_methods)
+    pool_manager.scanner.full_pipeline.return_value = {
         "core": [
             {"symbol": "510300", "name": "沪深300ETF", "tracked_index": "沪深300指数",
              "amount": 5e8, "fund_scale": 2.3e9},
@@ -119,12 +130,17 @@ async def test_p0_generate_enhanced_design_no_blow():
              "amount": 2e8, "fund_scale": 1.5e9},
         ],
     }
-    pm.classifier = MagicMock()
-    pm.classifier.batch_classify.return_value = {
+    pool_manager.classifier.batch_classify.return_value = {
         "510300": {"industry": "宽基指数", "concepts": ["沪深300"], "confidence": 0.95},
         "159338": {"industry": "宽基指数", "concepts": ["A500"], "confidence": 0.92},
         "589980": {"industry": "主题指数", "concepts": ["科创100"], "confidence": 0.88},
         "518880": {"industry": "商品", "concepts": ["黄金"], "confidence": 0.95},
+    }
+    pool_manager.factor_registry.compute.return_value = {
+        "510300": {"technical.signal.overall": 0.189, "technical.rsi.rsi_14": -0.089},
+        "159338": {"technical.signal.overall": 0.128, "technical.rsi.rsi_14": -0.215},
+        "589980": {"technical.signal.overall": 0.312, "technical.rsi.rsi_14": -0.412},
+        "518880": {"technical.signal.overall": 0.05, "technical.rsi.rsi_14": -0.1},
     }
 
     result = await generate_enhanced_design(capital=500000)
@@ -158,11 +174,9 @@ async def test_p0_generate_enhanced_design_no_blow():
 async def test_p1_market_context_includes_index_realtime():
     """P1: market_context must include index_realtime."""
     from app.services.strategy_design import generate_enhanced_design
-    from app.services.pool_manager import PoolManager
+    from app.services.pool_manager import pool_manager
 
-    pm = PoolManager()
-    pm.scanner = MagicMock()
-    pm.scanner.full_pipeline.return_value = {
+    pool_manager.scanner.full_pipeline.return_value = {
         "core": [{"symbol": "510300", "name": "沪深300ETF", "tracked_index": "沪深300指数",
                   "amount": 5e8, "fund_scale": 2.3e9}],
         "satellite": [],
@@ -171,14 +185,14 @@ async def test_p1_market_context_includes_index_realtime():
              "amount": 2e8, "fund_scale": 1.5e9},
         ],
     }
-    pm.classifier = MagicMock()
-    pm.classifier.batch_classify.return_value = {
+    pool_manager.classifier.batch_classify.return_value = {
         "510300": {"industry": "宽基指数", "concepts": ["沪深300"], "confidence": 0.95},
         "518880": {"industry": "商品", "concepts": ["黄金"], "confidence": 0.95},
     }
-    pm.get_market_sentiment = MagicMock(return_value={"sentiment_index": 55})
-    pm.get_news = MagicMock(return_value=[])
-    pm.get_regime = MagicMock(return_value="range_bound")
+    pool_manager.factor_registry.compute.return_value = {
+        "510300": {"technical.signal.overall": 0.189},
+        "518880": {"technical.signal.overall": 0.05},
+    }
 
     result = await generate_enhanced_design(capital=500000)
     assert result is not None
@@ -343,15 +357,10 @@ class TestP4:
 # ─── P5: detect_market_regime ──────────────────────────────────────
 
 
-@pytest.mark.asyncio
-async def test_p5_detect_market_regime_empty_data():
-    """P5: detect_market_regime must handle empty/None input gracefully."""
+def test_p5_detect_market_regime_empty_data():
+    """P5: detect_market_regime must handle empty/None input gracefully (sync fn)."""
     from app.services.market_trends import detect_market_regime
-    # Simulating complete data unavailability
-    from app.services.pool_manager import PoolManager
-    pm = PoolManager()
-    pm.get_index_realtime = MagicMock(return_value=[])
-    regime = await detect_market_regime()
+    regime = detect_market_regime(trends=None)
     assert regime is not None
     assert isinstance(regime, str)
     assert len(regime) > 0
@@ -471,11 +480,9 @@ def test_dq3_fake_data_uses_real_keys(mock_pool_data):
 async def test_dq4_profile_bonus_differentiates_strategies():
     """DQ4: profile bonus must differentiate strategies when factors are sparse."""
     from app.services.strategy_design import generate_enhanced_design
-    from app.services.pool_manager import PoolManager
+    from app.services.pool_manager import pool_manager
 
-    pm = PoolManager()
-    pm.scanner = MagicMock()
-    pm.scanner.full_pipeline.return_value = {
+    pool_manager.scanner.full_pipeline.return_value = {
         "core": [
             {"symbol": "510300", "name": "沪深300ETF", "tracked_index": "沪深300指数",
              "amount": 5e8, "fund_scale": 2.3e9},
@@ -491,21 +498,18 @@ async def test_dq4_profile_bonus_differentiates_strategies():
              "amount": 2e8, "fund_scale": 1.5e9},
         ],
     }
-    pm.classifier = MagicMock()
-    pm.classifier.batch_classify.return_value = {
+    pool_manager.classifier.batch_classify.return_value = {
         "510300": {"industry": "宽基指数", "concepts": ["沪深300"], "confidence": 0.95},
         "159338": {"industry": "宽基指数", "concepts": ["A500"], "confidence": 0.92},
         "589980": {"industry": "主题指数", "concepts": ["科创100"], "confidence": 0.88},
         "518880": {"industry": "商品", "concepts": ["黄金"], "confidence": 0.95},
     }
-    pm.factor_registry = MagicMock()
-    pm.factor_registry.compute = AsyncMock(return_value={
+    pool_manager.factor_registry.compute.return_value = {
         "510300": {"technical": 0.3, "momentum": 0.3},
         "159338": {"technical": 0.0, "momentum": 0.0},
         "589980": {"technical": 0.0, "momentum": 0.0},
         "518880": {"technical": 0.0, "momentum": 0.0},
-    })
-    pm.factor_registry.aggregate_factor_scores = MagicMock(return_value={})
+    }
 
     result = await generate_enhanced_design(capital=500000)
     assert result is not None
