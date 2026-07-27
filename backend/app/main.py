@@ -45,7 +45,8 @@ async def lifespan(app: FastAPI):
     logger.info("应用启动中…")
 
     # B2: Global exception handler for unhandled coroutine exceptions
-    loop = asyncio.get_running_loop()
+    import asyncio as _local_asyncio
+    loop = _local_asyncio.get_running_loop()
 
     def _global_exception_handler(loop, context):
         exc = context.get("exception")
@@ -160,7 +161,7 @@ async def lifespan(app: FastAPI):
         _mark = app.state.warmup["etf_cache"]
         try:
             from app.fetchers.etf_scanner import fetch_all_etfs_base
-            from ..core.async_utils import run_sync
+            from .core.async_utils import run_sync
             result = await run_sync(fetch_all_etfs_base, timeout=120)
             _mark["done"] = True
             _mark["success"] = bool(result)

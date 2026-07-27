@@ -155,9 +155,18 @@ def _get_factor_name(code: str) -> str:
 
 
 def _get_factor_category(code: str) -> str:
-    """Extract category prefix from factor code."""
+    """Extract category prefix from factor code.
+
+    Normalizes known short prefixes to their canonical category names
+    to avoid duplicate categories when some factors lack YAML definitions.
+    """
+    CATEGORY_PREFIX_MAP = {
+        "etf": "etf_specific",
+        "china": "china_specific",
+    }
     parts = code.split(".")
-    return parts[0] if parts else "unknown"
+    raw = parts[0] if parts else "unknown"
+    return CATEGORY_PREFIX_MAP.get(raw, raw)
 
 
 @router.get("/ic")

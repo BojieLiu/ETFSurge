@@ -23,17 +23,23 @@
       <template v-else>
         <!-- Stats Overview Row -->
         <div class="stats-row">
-          <div class="stat-item">
-            <span class="stat-num">{{ data?.total ?? 0 }}</span>
+          <div class="stat-item stat-item-primary">
+            <span class="stat-num stat-num-brand">{{ data?.total ?? 0 }}</span>
             <span class="stat-lbl">已接入</span>
           </div>
           <div class="stat-item">
             <span class="stat-num text-up">{{ summary?.valid ?? 0 }}</span>
-            <span class="stat-lbl">有效</span>
+            <span class="stat-lbl">
+              <span class="stat-icon stat-icon-valid" aria-hidden="true">✓</span>
+              有效
+            </span>
           </div>
           <div class="stat-item">
             <span class="stat-num text-warn">{{ summary?.warn ?? 0 }}</span>
-            <span class="stat-lbl">低于阈值</span>
+            <span class="stat-lbl">
+              <span class="stat-icon stat-icon-warn" aria-hidden="true">⚠</span>
+              低于阈值
+            </span>
           </div>
           <div class="stat-item">
             <span class="stat-num text-muted">{{ summary?.no_data ?? 0 }}</span>
@@ -45,15 +51,30 @@
           </div>
         </div>
 
+        <!-- Section Divider -->
+        <div class="section-divider">
+          <span class="section-divider-label">因子分类</span>
+        </div>
+
         <!-- Expandable Category Cards -->
         <div v-for="cat in categories" :key="cat.name" class="category-card">
           <div class="cat-header" @click="toggleCategory(cat.name)" role="button" tabindex="0" @keydown.enter="toggleCategory(cat.name)">
-            <span class="cat-expand" :class="{ expanded: expanded[cat.name] }">▸</span>
+            <span class="cat-expand" :class="{ expanded: expanded[cat.name] }">
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor" aria-hidden="true">
+                <path d="M3 1l4 4-4 4" stroke="currentColor" stroke-width="1.5" fill="none"/>
+              </svg>
+            </span>
             <span class="cat-name">{{ catLabel(cat.name) }}</span>
             <span class="cat-count-badge">{{ cat.count }} 因子</span>
             <span class="cat-stats-detail">
-              <span class="cat-stat valid">{{ cat.valid_count }} 有效</span>
-              <span v-if="cat.warn_count > 0" class="cat-stat warn">⚠️ {{ cat.warn_count }}</span>
+              <span class="cat-stat valid">
+                <span class="stat-dot stat-dot-valid"></span>
+                {{ cat.valid_count }} 有效
+              </span>
+              <span v-if="cat.warn_count > 0" class="cat-stat warn">
+                <span class="stat-dot stat-dot-warn"></span>
+                {{ cat.warn_count }} 待关注
+              </span>
               <span v-if="cat.no_data_count > 0" class="cat-stat no-data">{{ cat.no_data_count }} 无数据</span>
             </span>
             <span v-if="cat.avg_ic !== null" class="cat-avg-ic" :class="avgIcColor(cat.avg_ic)">
@@ -75,6 +96,7 @@
                 v-for="f in cat.factors"
                 :key="f.code"
                 class="factor-row"
+                :class="{ 'factor-row-highlight': f.ic_value !== null && abs(f.ic_value) >= 0.05 }"
               >
                 <span class="factor-name">
                   <AppTooltip placement="right" :disabled="!f.description">
@@ -102,14 +124,15 @@
                   </AppTooltip>
                 </span>
                 <span class="factor-ic-bar-col">
-                  <span class="ic-bar-track">
+                  <span v-if="f.ic_value !== null" class="ic-bar-wrap">
                     <span
-                      v-if="f.ic_value !== null"
                       class="ic-bar-fill"
                       :class="f.ic_value >= 0 ? 'ic-pos' : 'ic-neg'"
                       :style="{ width: icBarWidth(f.ic_value) }"
                     ></span>
+                    <span class="ic-bar-label">{{ abs(f.ic_value).toFixed(4) }}</span>
                   </span>
+                  <span v-else class="ic-bar-empty">--</span>
                 </span>
                 <span class="factor-ic-val" :class="icColorClass(f.ic_value)">
                   {{ f.ic_value !== null ? f.ic_value.toFixed(4) : '--' }}
@@ -121,9 +144,11 @@
           </Transition>
         </div>
 
-        <!-- IC Bar Chart -->
+        <!-- IC Bar Chart Section -->
         <div class="ic-chart-section">
-          <h3 class="ic-chart-title">因子 IC 表现</h3>
+          <div class="section-divider section-divider-chart">
+            <span class="section-divider-label">因子 IC 表现</span>
+          </div>
           <div ref="chartRef" class="ic-chart-container"></div>
         </div>
       </template>
@@ -148,9 +173,10 @@ const error = ref('')
 const data = ref(null)
 const expanded = ref({})
 const chartRef = ref(null)
+
 let chartInstance = null
 
-/* ── Derived ── */
+/* ── Computed ── */
 const summary = computed(() => data.value?.summary ?? null)
 const categories = computed(() => data.value?.categories ?? [])
 
@@ -179,7 +205,7 @@ function catLabel(name) {
 function icBarWidth(val) {
   if (val === null || val === undefined) return '0px'
   const pct = Math.min(Math.abs(val) * 800, 100)
-  return `${Math.max(pct, 4)}%`
+  return `${Math.max(pct, 6)}%`
 }
 
 function icColorClass(val) {
@@ -230,7 +256,17 @@ function renderChart() {
     return n.length > 14 ? n.slice(0, 12) + '...' : n
   })
   const values = sorted.map(f => f.ic_value)
-  const colors = values.map(v => v >= 0 ? '#ef4444' : '#22c55e')
+
+  // Use brand blue gradient for positive, warm orange for negative
+  const brandBlue = '#3b82f6'
+  const warmOrange = '#f97316'
+  const colors = values.map(v => {
+    const intensity = Math.min(Math.abs(v) * 10, 0.9)
+    if (v >= 0) {
+      return rgbaColor(brandBlue, intensity)
+    }
+    return rgbaColor(warmOrange, intensity)
+  })
 
   const option = {
     tooltip: {
@@ -243,25 +279,37 @@ function renderChart() {
         return `<strong>${item.name || item.code}</strong><br/>类别: ${catLabel(item.category || '')}<br/>IC: <strong>${item.ic_value.toFixed(4)}</strong>`
       },
     },
-    grid: { left: '3%', right: '8%', top: '3%', bottom: '3%', containLabel: true },
+    grid: { left: '3%', right: '10%', top: '5%', bottom: '5%', containLabel: true },
     xAxis: {
       type: 'value',
       axisLabel: { fontSize: 11, formatter: (v) => v.toFixed(2) },
       splitLine: { lineStyle: { type: 'dashed', color: '#e2e8f0' } },
+      axisLine: { show: false },
+      axisTick: { show: false },
     },
     yAxis: {
       type: 'category',
       data: names,
-      axisLabel: { fontSize: 11, width: 100, overflow: 'truncate' },
+      axisLabel: { fontSize: 11, width: 100, overflow: 'truncate', fontWeight: 500 },
+      axisLine: { show: false },
+      axisTick: { show: false },
     },
     series: [{
       type: 'bar',
-      data: values.map((v, i) => ({ value: v, itemStyle: { color: colors[i] } })),
-      barMaxWidth: 16,
+      data: values.map((v, i) => ({
+        value: v,
+        itemStyle: {
+          color: colors[i],
+          borderRadius: [0, 4, 4, 0],
+        },
+      })),
+      barMaxWidth: 18,
       label: {
         show: true,
         position: 'right',
         fontSize: 11,
+        fontWeight: 600,
+        fontFamily: 'monospace',
         formatter: (p) => abs(p.value).toFixed(4),
       },
     }],
@@ -270,6 +318,13 @@ function renderChart() {
   if (chartInstance) chartInstance.dispose()
   chartInstance = echarts.init(chartRef.value)
   chartInstance.setOption(option)
+}
+
+function rgbaColor(hex, alpha) {
+  const r = parseInt(hex.slice(1, 3), 16)
+  const g = parseInt(hex.slice(3, 5), 16)
+  const b = parseInt(hex.slice(5, 7), 16)
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }
 
 function handleResize() {
@@ -283,10 +338,7 @@ async function fetchData() {
   try {
     const resp = await factorsApi.getActive()
     data.value = resp.data
-    // Default: expand first category
-    if (resp.data?.categories?.length) {
-      expanded.value[resp.data.categories[0].name] = true
-    }
+    // Default: all collapsed
   } catch (e) {
     error.value = e.message || '请求失败'
   } finally {
@@ -309,12 +361,12 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .factor-model { overflow: visible; }
-.model-body { padding: var(--space-5); }
+.model-body { padding: var(--space-6); }
 
 /* Loading / Error */
 .loading-container, .error-container {
-  display: flex; flex-direction: column; align-items: center; gap: var(--space-3);
-  padding: var(--space-8); color: var(--color-text-secondary);
+  display: flex; flex-direction: column; align-items: center; gap: var(--space-4);
+  padding: var(--space-10); color: var(--color-text-secondary);
 }
 .loading-spinner {
   width: 28px; height: 28px;
@@ -325,28 +377,87 @@ onBeforeUnmount(() => {
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* Stats Row */
+/* ── Section Divider ── */
+.section-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-6) 0 var(--space-4);
+}
+.section-divider::before,
+.section-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--color-border-light);
+}
+.section-divider-label {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.section-divider-chart {
+  margin-top: 0;
+  margin-bottom: var(--space-4);
+}
+
+/* ── Stats Row ── */
 .stats-row {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
   gap: var(--space-3);
-  margin-bottom: var(--space-5);
 }
 .stat-item {
   display: flex; flex-direction: column; align-items: center;
-  gap: var(--space-1); padding: var(--space-3);
+  gap: var(--space-1); padding: var(--space-4) var(--space-3);
   background: var(--color-surface-secondary);
   border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border-light);
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
 }
-.stat-num { font-size: var(--font-size-xl); font-weight: var(--font-weight-bold); color: var(--color-text-primary); }
-.stat-lbl { font-size: var(--font-size-xs); color: var(--color-text-secondary); }
+.stat-item:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  transform: translateY(-1px);
+}
+.stat-item-primary {
+  background: linear-gradient(135deg, var(--color-brand-50), var(--color-neutral-0));
+  border-color: var(--color-brand-200);
+}
+.stat-num {
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  line-height: 1.1;
+}
+.stat-num-brand {
+  color: var(--color-brand-600);
+}
+.stat-lbl {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.stat-icon {
+  font-size: 10px;
+}
+.stat-icon-valid { color: var(--color-success-600); }
+.stat-icon-warn { color: var(--color-warning-600); }
 
-/* Category Card */
+/* ── Category Card ── */
 .category-card {
   margin-bottom: var(--space-3);
   border: 1px solid var(--color-border-light);
   border-radius: var(--radius-lg);
   overflow: hidden;
+  transition: box-shadow 0.2s ease;
+}
+.category-card:hover {
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
 }
 .cat-header {
   display: flex; align-items: center; gap: var(--space-3);
@@ -359,25 +470,63 @@ onBeforeUnmount(() => {
 .cat-header:hover { background: var(--color-surface-hover); }
 .cat-expand {
   font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-  transition: transform 0.2s;
+  color: var(--color-text-tertiary);
+  transition: transform 0.25s ease;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+}
+.cat-expand:hover {
+  color: var(--color-text-primary);
+  background: var(--color-surface-active);
 }
 .cat-expand.expanded { transform: rotate(90deg); }
-.cat-name { font-weight: var(--font-weight-semibold); color: var(--color-text-primary); flex-shrink: 0; }
-.cat-count-badge {
-  font-size: var(--font-size-xs); color: var(--color-brand-600);
-  background: var(--color-brand-50); padding: 0.1rem 0.5rem;
-  border-radius: var(--radius-full); flex-shrink: 0;
+.cat-name {
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  flex-shrink: 0;
+  font-size: var(--font-size-base);
 }
-.cat-stats-detail { display: flex; gap: var(--space-2); flex: 1; }
-.cat-stat { font-size: var(--font-size-xs); }
+.cat-count-badge {
+  font-size: var(--font-size-xs); color: var(--color-brand-700);
+  background: var(--color-brand-50); padding: 0.15rem 0.6rem;
+  border-radius: var(--radius-full); flex-shrink: 0;
+  font-weight: var(--font-weight-medium);
+  border: 1px solid var(--color-brand-100);
+}
+.cat-stats-detail { display: flex; gap: var(--space-3); flex: 1; flex-wrap: wrap; }
+.cat-stat {
+  font-size: var(--font-size-xs);
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
 .cat-stat.valid { color: var(--color-success-600); }
 .cat-stat.warn { color: var(--color-warning-600); }
 .cat-stat.no-data { color: var(--color-text-tertiary); }
-.cat-avg-ic { font-size: var(--font-size-xs); font-weight: var(--font-weight-medium); flex-shrink: 0; }
+.stat-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.stat-dot-valid { background: var(--color-success-500); }
+.stat-dot-warn { background: var(--color-warning-500); }
+.cat-avg-ic {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  flex-shrink: 0;
+  font-family: monospace;
+  padding: 0.1rem 0.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-primary);
+  border: 1px solid var(--color-border-light);
+}
 
-/* Expand transition */
+/* ── Expand transition ── */
 .expand-enter-active, .expand-leave-active {
   transition: max-height 0.25s ease, opacity 0.2s ease;
   max-height: 2000px; overflow: hidden;
@@ -386,57 +535,98 @@ onBeforeUnmount(() => {
   max-height: 0; opacity: 0;
 }
 
-/* Factor Rows */
+/* ── Factor Rows ── */
 .cat-body { border-top: 1px solid var(--color-border-light); }
 .factor-row {
   display: grid;
-  grid-template-columns: 140px 100px 80px 1fr;
-  gap: var(--space-2);
+  grid-template-columns: 160px 120px 90px 1fr;
+  gap: var(--space-3);
   padding: var(--space-2) var(--space-4);
   font-size: var(--font-size-sm);
   align-items: center;
   transition: background var(--transition-fast);
+  min-height: 40px;
 }
-.factor-row:hover { background: var(--color-surface-hover); }
+.factor-row:hover {
+  background: var(--color-surface-hover);
+}
+.factor-row-highlight {
+  background: rgba(59, 130, 246, 0.02);
+}
 .factor-header {
   font-size: var(--font-size-xs);
   color: var(--color-text-tertiary);
   background: var(--color-surface-primary);
-  border-bottom: 1px solid var(--color-border-light);
-  font-weight: var(--font-weight-medium);
+  border-bottom: 1px solid var(--color-border-medium);
+  font-weight: var(--font-weight-semibold);
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  min-height: 32px;
 }
 .factor-name-text {
   font-weight: var(--font-weight-medium);
   color: var(--color-text-primary);
   cursor: help;
   border-bottom: 1px dashed var(--color-border-medium);
+  font-size: var(--font-size-sm);
+}
+.factor-name-text:hover {
+  color: var(--color-brand-600);
+  border-bottom-color: var(--color-brand-300);
 }
 
-/* IC Bar */
-.factor-ic-bar-col { display: flex; align-items: center; }
-.ic-bar-track {
-  width: 80px; height: 8px;
-  background: var(--color-neutral-200);
-  border-radius: var(--radius-full);
-  overflow: hidden;
+/* ── IC Bar ── */
+.factor-ic-bar-col {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.ic-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  position: relative;
 }
 .ic-bar-fill {
-  height: 100%;
+  height: 8px;
   border-radius: var(--radius-full);
-  transition: width 0.3s ease;
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1), background 0.3s ease;
+  min-width: 6px;
 }
-.ic-bar-fill.ic-pos { background: #ef4444; }
-.ic-bar-fill.ic-neg { background: #22c55e; }
+.ic-bar-fill.ic-pos {
+  background: linear-gradient(90deg, var(--color-brand-300), var(--color-brand-600));
+}
+.ic-bar-fill.ic-neg {
+  background: linear-gradient(90deg, #fdba74, var(--color-warning-600));
+}
+.ic-bar-label {
+  font-size: 10px;
+  font-family: monospace;
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.ic-bar-empty {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  letter-spacing: 0.5px;
+}
 
-.factor-ic-val { font-family: monospace; font-size: var(--font-size-xs); text-align: right; }
+.factor-ic-val {
+  font-family: monospace;
+  font-size: var(--font-size-xs);
+  text-align: right;
+  font-weight: var(--font-weight-medium);
+}
 .factor-desc {
   color: var(--color-text-secondary);
   font-size: var(--font-size-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  padding-left: var(--space-1);
 }
 .factor-empty {
   padding: var(--space-4);
@@ -445,12 +635,12 @@ onBeforeUnmount(() => {
   font-size: var(--font-size-sm);
 }
 
-/* Tooltip Rich Content */
+/* ── Tooltip Rich Content ── */
 .tooltip-rich {
-  min-width: 200px;
+  min-width: 220px;
   line-height: var(--line-height-normal);
 }
-.tip-title { font-weight: var(--font-weight-bold); margin-bottom: var(--space-1); }
+.tip-title { font-weight: var(--font-weight-bold); margin-bottom: var(--space-1); font-size: var(--font-size-base); }
 .tip-code { font-size: var(--font-size-xs); color: var(--color-text-tertiary); margin-bottom: var(--space-1); font-family: monospace; }
 .tip-desc { font-size: var(--font-size-sm); margin-bottom: var(--space-2); color: var(--color-text-secondary); }
 .tip-meta { display: flex; gap: var(--space-3); font-size: var(--font-size-xs); color: var(--color-text-tertiary); margin-bottom: var(--space-1); }
@@ -460,36 +650,34 @@ onBeforeUnmount(() => {
 .tip-status.status-ok { color: var(--color-success-600); }
 .tip-status.status-warn { color: var(--color-warning-600); }
 
-/* IC Chart Section */
+/* ── IC Chart Section ── */
 .ic-chart-section {
-  margin-top: var(--space-5);
-  padding-top: var(--space-4);
-  border-top: 1px solid var(--color-border-light);
+  margin-top: var(--space-6);
 }
-.ic-chart-title {
-  margin: 0 0 var(--space-3);
-  font-size: var(--font-size-base);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-primary);
+.ic-chart-section .section-divider {
+  margin-top: 0;
 }
 .ic-chart-container {
-  width: 100%; height: 280px;
+  width: 100%; height: 300px;
   background: var(--color-surface-secondary);
   border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border-light);
+  padding: var(--space-2);
 }
 
-/* Colors */
-.text-up { color: #ef4444; }
-.text-down { color: #22c55e; }
-.text-warn { color: #f59e0b; }
+/* ── Colors ── */
+.text-up { color: var(--color-brand-600); }
+.text-down { color: #f97316; }
+.text-warn { color: var(--color-warning-600); }
 .text-muted { color: var(--color-text-tertiary); }
 
-/* Responsive */
+/* ── Responsive ── */
 @media (max-width: 768px) {
   .stats-row { grid-template-columns: repeat(3, 1fr); }
-  .factor-row { grid-template-columns: 100px 60px 70px 1fr; }
+  .factor-row { grid-template-columns: 120px 80px 70px 1fr; gap: var(--space-1); }
   .cat-stats-detail { display: none; }
-  .ic-chart-container { height: 200px; }
+  .ic-chart-container { height: 220px; }
+  .model-body { padding: var(--space-4); }
 }
 
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); padding: 0.5rem 1rem; font-size: var(--font-size-sm); font-weight: var(--font-weight-medium); border-radius: var(--radius-md); cursor: pointer; transition: var(--transition-fast); border: 1px solid transparent; }

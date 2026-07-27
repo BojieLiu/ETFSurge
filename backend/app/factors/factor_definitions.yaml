@@ -577,7 +577,7 @@ factor_definitions:
   frequency: "quarterly"
   standardization: "zscore"
   lookback_window: 1
-  description: "中央企业直接控股标识"
+  description: "中央企业直接控股标识(0/1)，央企改革和重组受益标的"
   tags: ["china_specific", "state_ownership", "central_control"]
   dependencies: ["is_central_control"]
   ic_threshold: 0.02
@@ -630,7 +630,7 @@ factor_definitions:
   frequency: "quarterly"
   standardization: "zscore"
   lookback_window: 3
-  description: "近3年分红复合增长率"
+  description: "近3年现金分红复合增长率，衡量分红持续增长能力和股东回报意愿"
   tags: ["china_specific", "dividend", "growth"]
   dependencies: ["dividend_history"]
   ic_threshold: 0.02
@@ -995,7 +995,7 @@ factor_definitions:
   frequency: "quarterly"
   standardization: "zscore"
   lookback_window: 1
-  description: "公司治理综合评分"
+  description: "ESG治理子项综合评分，评估董事会结构、股东权益保护和信息披露质量"
   tags: ["alternative", "esg", "governance"]
   dependencies: ["esg_data"]
   ic_threshold: 0.02
@@ -1035,7 +1035,7 @@ factor_definitions:
   frequency: "monthly"
   standardization: "zscore"
   lookback_window: 3
-  description: "核心产品用户留存率"
+  description: "核心产品月活跃用户留存率，反映用户粘性和产品生命周期健康度"
   tags: ["alternative", "web_traffic", "retention", "engagement"]
   dependencies: ["web_traffic_data"]
   ic_threshold: 0.02
@@ -1062,7 +1062,7 @@ factor_definitions:
   frequency: "monthly"
   standardization: "zscore"
   lookback_window: 3
-  description: "单用户平均消费额"
+  description: "每活跃信用卡用户月均消费金额，反映居民消费能力和消费意愿"
   tags: ["alternative", "credit_card", "spend", "consumer"]
   dependencies: ["credit_card_data"]
   ic_threshold: 0.02
@@ -1131,7 +1131,7 @@ factor_definitions:
   frequency: "monthly"
   standardization: "zscore"
   lookback_window: 1
-  description: "液冷散热产业链暴露度"
+  description: "液冷散热产业链暴露度，AI算力需求驱动液冷渗透率快速提升"
   tags: ["theme", "ai", "cooling", "thermal"]
   dependencies: ["revenue_breakdown", "supply_chain_position"]
   ic_threshold: 0.02
@@ -1382,7 +1382,7 @@ factor_definitions:
   frequency: "monthly"
   standardization: "zscore"
   lookback_window: 1
-  description: "高功率密度电机/电控"
+  description: "高功率密度电机/电控系统，低空经济/eVTOL核心动力零部件"
   tags: ["theme", "low_altitude", "motor", "propulsion"]
   dependencies: ["revenue_breakdown", "supply_chain_position"]
   ic_threshold: 0.02
@@ -1636,7 +1636,7 @@ factor_definitions:
   frequency: "daily"
   standardization: "zscore"
   lookback_window: 9
-  description: "KDJ随机指标K值"
+  description: "KDJ随机指标K值(快线)，反映短期价格动量，金叉死叉信号"
   tags: ["technical", "kdj", "stochastic", "oscillator"]
   dependencies: ["high", "low", "close"]
   ic_threshold: 0.02
@@ -1649,7 +1649,7 @@ factor_definitions:
   frequency: "daily"
   standardization: "zscore"
   lookback_window: 9
-  description: "KDJ随机指标D值"
+  description: "KDJ随机指标D值(慢线)，K值的3日平滑，确认趋势方向"
   tags: ["technical", "kdj", "stochastic", "oscillator"]
   dependencies: ["high", "low", "close"]
   ic_threshold: 0.02
@@ -1663,6 +1663,45 @@ factor_definitions:
   standardization: "zscore"
   lookback_window: 9
   description: "KDJ随机指标J值(3K-2D)，超买超卖更敏感"
+  tags: ["technical", "kdj", "stochastic", "j_value"]
+  dependencies: ["high", "low", "close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.kdj.k_value"
+  name: "KDJ K值(快线计算)"
+  category: "technical"
+  subcategory: "kdj"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 9
+  description: "短期KDJ随机指标K值，直接计算RSV的3日加权，较标准的KDJ K更敏感"
+  tags: ["technical", "kdj", "stochastic", "fast"]
+  dependencies: ["high", "low", "close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.kdj.d_value"
+  name: "KDJ D值(慢线计算)"
+  category: "technical"
+  subcategory: "kdj"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 9
+  description: "KDJ D值由K值的3日平滑生成，确认趋势方向的可靠性更强"
+  tags: ["technical", "kdj", "stochastic", "slow"]
+  dependencies: ["high", "low", "close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.kdj.j_value"
+  name: "KDJ J值(超买超卖)"
+  category: "technical"
+  subcategory: "kdj"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 9
+  description: "KDJ J值 = 3K - 2D，对超买超卖区间的探测比K/D更敏感"
   tags: ["technical", "kdj", "stochastic", "j_value"]
   dependencies: ["high", "low", "close"]
   ic_threshold: 0.02
@@ -1702,7 +1741,7 @@ factor_definitions:
   frequency: "daily"
   standardization: "zscore"
   lookback_window: 14
-  description: "威廉指标，超买超卖"
+  description: "Williams %R 14日超买超卖指标，高于-20超买、低于-80超卖"
   tags: ["technical", "williams_r", "oscillator"]
   dependencies: ["high", "low", "close"]
   ic_threshold: 0.02
@@ -1866,6 +1905,19 @@ factor_definitions:
   ic_threshold: 0.02
   ic_ir_threshold: 0.5
 
+- code: "technical.bollinger.bandwidth"
+  name: "布林带带宽"
+  category: "technical"
+  subcategory: "bollinger"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 20
+  description: "(上轨-下轨)/中轨，衡量波动率收缩与扩张，带宽收窄预示变盘"
+  tags: ["technical", "bollinger", "width", "volatility", "squeeze"]
+  dependencies: ["close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
 - code: "technical.keltner.upper"
   name: "肯特纳上轨"
   category: "technical"
@@ -1939,7 +1991,7 @@ factor_definitions:
   frequency: "daily"
   standardization: "zscore"
   lookback_window: 20
-  description: "20日平均真实波幅"
+  description: "20日平均真实波幅(ATR)，衡量价格波动幅度，用于止损和仓位管理"
   tags: ["technical", "atr", "volatility"]
   dependencies: ["high", "low", "close"]
   ic_threshold: 0.02
@@ -1979,7 +2031,7 @@ factor_definitions:
   frequency: "daily"
   standardization: "zscore"
   lookback_window: 1
-  description: "累积成交量，资金流向"
+  description: "On-Balance Volume能量潮，累积成交量变化判断资金流向和量价配合"
   tags: ["technical", "obv", "volume", "accumulation"]
   dependencies: ["close", "volume"]
   ic_threshold: 0.02
@@ -2046,6 +2098,32 @@ factor_definitions:
   lookback_window: 1
   description: "只在成交量放大时变动，散户情绪"
   tags: ["technical", "pvi", "volume", "retail"]
+  dependencies: ["close", "volume"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.volume.vol_ratio"
+  name: "成交量比"
+  category: "technical"
+  subcategory: "volume"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "当日成交量/过去5日均量，量比放大说明交投活跃，缩量暗示观望情绪"
+  tags: ["technical", "volume", "ratio", "activity"]
+  dependencies: ["volume"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "technical.volume.vwap"
+  name: "成交量加权均价"
+  category: "technical"
+  subcategory: "volume"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "(价格*成交量)累计/成交量累计，日内真实成交中枢，机构大单成本参考"
+  tags: ["technical", "vwap", "volume", "institutional"]
   dependencies: ["close", "volume"]
   ic_threshold: 0.02
   ic_ir_threshold: 0.5
@@ -2163,7 +2241,7 @@ factor_definitions:
   frequency: "daily"
   standardization: "zscore"
   lookback_window: 1
-  description: "过滤噪音，识别转折点"
+  description: "ZigZag指标过滤价格噪音，识别关键转折点，辅助判断趋势结构和支撑阻力"
   tags: ["technical", "zigzag", "swing", "turning_point"]
   dependencies: ["high", "low", "close"]
   ic_threshold: 0.02
@@ -2234,8 +2312,21 @@ factor_definitions:
   ic_threshold: 0.02
   ic_ir_threshold: 0.5
 
+- code: "technical.signal.overall"
+  name: "综合技术信号"
+  category: "technical"
+  subcategory: "signal"
+  frequency: "daily"
+  standardization: "none"
+  lookback_window: 1
+  description: "综合MACD/RSI/KDJ/布林带等多个指标的买卖信号，多空力量总体判断"
+  tags: ["technical", "signal", "composite", "aggregate"]
+  dependencies: ["close", "high", "low", "volume"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
 # =============================================================================
-# --- ETF-specific (6 factors) ---
+# --- ETF-specific (10 factors) ---
 # =============================================================================
 - code: "etf.premium_discount"
   name: "折溢价率"
@@ -2312,6 +2403,58 @@ factor_definitions:
   description: "机构持有份额环比变化，正数=加分"
   tags: ["etf", "smart_money"]
   dependencies: ["institutional_shares"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "etf.change_pct"
+  name: "涨跌幅"
+  category: "etf_specific"
+  subcategory: "etf"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "日涨跌幅：(close[-1] - close[-2]) / close[-2]"
+  tags: ["etf", "momentum"]
+  dependencies: ["close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "etf.return_1m"
+  name: "近1月收益率"
+  category: "etf_specific"
+  subcategory: "etf"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 21
+  description: "近1月(约20交易日)累计收益率"
+  tags: ["etf", "momentum"]
+  dependencies: ["close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "etf.return_3m"
+  name: "近3月收益率"
+  category: "etf_specific"
+  subcategory: "etf"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 61
+  description: "近3月(约60交易日)累计收益率"
+  tags: ["etf", "momentum"]
+  dependencies: ["close"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
+- code: "etf.price"
+  name: "最新价格"
+  category: "etf_specific"
+  subcategory: "etf"
+  frequency: "daily"
+  standardization: "zscore"
+  lookback_window: 1
+  description: "ETF 最新成交价，优先实时行情，回退到 K 线收盘价"
+  tags: ["etf", "price"]
+  dependencies: ["price", "close"]
   ic_threshold: 0.02
   ic_ir_threshold: 0.5
 
