@@ -13,11 +13,11 @@ CACHE_TTL = {
     "quote_futures": 10,    # 期货实时行情
 
     # ── 资讯 ────────────────────────────────────────────────────
-    "news_headlines": 120,   # 头条快讯
-    "news_macro": 300,       # 宏观资讯
-    "news_global": 300,      # 国际资讯
-    "news_stock": 300,       # 个股资讯
-    "news_telegraph": 120,   # 财联社快讯
+    "news_headlines": 60,   # 头条快讯
+    "news_macro": 60,       # 宏观资讯
+    "news_global": 60,      # 国际资讯
+    "news_stock": 60,       # 个股资讯
+    "news_telegraph": 60,   # 财联社快讯
     "news_emotion": 60,      # 市场情绪
     "news_wind": 120,        # 市场风向
 

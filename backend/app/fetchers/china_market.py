@@ -33,14 +33,25 @@ ASSET_TYPES = {
 }
 
 
-# ── HTTP session helper ─────────────────────────────────────────
+# ── HTTP session helper (shared singleton, avoid per-call SSL handshake) ──
+
+_shared_session = None
+
 
 def _session():
-    import requests as _req
-    s = _req.Session()
-    s.trust_env = False
-    s.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"})
-    return s
+    """Return the module-level shared requests.Session (lazy init).
+
+    Reusing a session avoids repeated TCP/TLS handshakes (~100-300ms each)
+    and enables HTTP keep-alive for Sina/QQ endpoints.
+    """
+    global _shared_session
+    if _shared_session is None:
+        import requests as _req
+        s = _req.Session()
+        s.trust_env = False
+        s.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"})
+        _shared_session = s
+    return _shared_session
 
 
 # ── mootdx helper ────────────────────────────────────────────────
