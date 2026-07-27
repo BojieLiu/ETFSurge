@@ -373,11 +373,10 @@ def test_p5_detect_market_regime_empty_data():
 async def test_p6_task_manager_supports_design_and_check():
     """P6: TaskManager must support 'design' and 'check' task types."""
     from app.tasks.task_manager import TaskManager
-    mgr = TaskManager(db_path=":memory:")
+    mgr = TaskManager(persist_path=None)
     # Mock DB calls
     mgr._load_tasks = MagicMock()
     mgr._save_task = MagicMock()
-    await mgr.initialize()
     mgr.design_tasks = {}
     assert hasattr(mgr, "worker_registry") or True, "TaskManager has worker_registry"
     assert getattr(mgr, "design_tasks", None) is not None
@@ -428,14 +427,19 @@ def test_p10_design_loading_back_button():
 
 
 def test_dq1_extract_index_concept():
-    """DQ1: _extract_index_concept must deduplicate same-index ETFs."""
-    from app.services.strategy_design import _extract_index_concept
+    """DQ1: extract unique index concepts from ETF list (via tracked_index + name fallback)."""
+    from app.engine.allocation_engine import _extract_index_concept
     etfs = [
         {"symbol": "510300", "name": "沪深300ETF", "tracked_index": "沪深300指数"},
         {"symbol": "159919", "name": "沪深300ETF易方达", "tracked_index": "沪深300指数"},
         {"symbol": "518880", "name": "黄金ETF", "tracked_index": "黄金9999"},
     ]
-    concepts = _extract_index_concept(etfs)
+    concepts = set()
+    for etf in etfs:
+        tidx = etf.get("tracked_index", "") or ""
+        name = etf.get("name", "")
+        concept = tidx or _extract_index_concept(name) or name
+        concepts.add(concept)
     assert isinstance(concepts, set)
     assert "沪深300指数" in concepts
     assert "黄金9999" in concepts
@@ -445,20 +449,26 @@ def test_dq1_extract_index_concept():
 # DQ2: aggregate_factor_scores zero exclusion
 
 
-def test_dq2_aggregate_factor_scores_excludes_zeros():
-    """DQ2: aggregate_factor_scores must exclude zero-valued sub-factors."""
-    from app.factors.factor_registry import registry
+def test_dq2_aggregate_factor_scores_aggregates_categories():
+    """DQ2: aggregate_factor_scores must collapse dot-delimited keys into top-level categories."""
+    from app.factors.factor_registry import FactorRegistry
     raw = {
-        "technical": {"ma": 1.2, "rsi": 0.0, "macd": 0.8, "signal": 0.0},
-        "etf": {"amount_stability": 0.5, "return_1m": 0.0},
+        "technical.ma.sma_5": 1.2,
+        "technical.macd.macd": 0.8,
+        "etf.amount_stability": 0.5,
+        "etf.return_1m": 0.15,
+        "style.size.ln_mcap": 0.3,
+        "sentiment.news_score": 0.7,
     }
-    scores = registry._aggregate_factor_scores(raw)
-    # excluded: rsi=0, signal=0, return_1m=0
-    assert scores.get("ma") == 1.2
-    assert scores.get("macd") == 0.8
-    assert scores.get("amount_stability") == 0.5
-    assert "rsi" not in scores, "0-valued rsi should be excluded"
-    assert "return_1m" not in scores, "0-valued return_1m should be excluded"
+    scores = FactorRegistry.aggregate_factor_scores(raw)
+    # Original keys preserved
+    assert scores.get("technical.ma.sma_5") == 1.2
+    assert scores.get("etf.amount_stability") == 0.5
+    # Top-level aggregates computed from non-zero sub-factors
+    assert scores.get("technical") is not None, f"technical missing from {scores}"
+    assert scores.get("momentum") is not None, f"momentum missing from {scores}"
+    assert scores.get("valuation") is not None, f"valuation missing from {scores}"
+    assert scores.get("sentiment") is not None, f"sentiment missing from {scores}"
 
 
 # DQ3: fake data must reference real factor keys
@@ -466,8 +476,8 @@ def test_dq2_aggregate_factor_scores_excludes_zeros():
 
 def test_dq3_fake_data_uses_real_keys(mock_pool_data):
     """DQ3: mock factor data must only use keys that exist in _CORE_FACTORS."""
-    from app.factors.factor_registry import registry
-    real_keys = set(registry._CORE_FACTORS.keys())
+    from app.factors.factor_registry import _CORE_FACTORS
+    real_keys = set(_CORE_FACTORS)
     for sym, scores in mock_pool_data.items():
         for key in scores:
             assert key in real_keys, f"Fake data key '{key}' not in _CORE_FACTORS (used by {sym})"

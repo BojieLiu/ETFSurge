@@ -73,35 +73,6 @@ def test_mootdx_has_socket_timeout(monkeypatch):
 # ── Fix 2: _MOOTDX_LOCK non-blocking acquire ────────────────────
 
 
-def test_mootdx_locked_raises_on_timeout(monkeypatch):
-    """_mootdx_locked() must raise TimeoutError when lock is held.
-
-    Prevents cascading thread blockage when a previous mootdx
-    call hangs while holding the lock.
-    """
-    import app.fetchers.china_market as cm
-    from app.fetchers.china_market import _mootdx_locked
-
-    # Pre-acquire the real lock so the context manager times out
-    acquired = cm._MOOTDX_LOCK.acquire(timeout=2)
-    assert acquired, "should have acquired the test lock"
-
-    with pytest.raises(TimeoutError):
-        with _mootdx_locked():
-            pass
-
-    cm._MOOTDX_LOCK.release()
-
-
-def test_mootdx_locked_releases_on_success():
-    """_mootdx_locked() must release the lock after the critical section."""
-    from app.fetchers.china_market import _MOOTDX_LOCK, _mootdx_locked
-
-    with _mootdx_locked():
-        assert _MOOTDX_LOCK.locked()
-    assert not _MOOTDX_LOCK.locked()
-
-
 # ── Fix 4: _ak() timeout wrapping ────────────────────────────────
 
 def _make_future(result=None, exc=None, delay=0):

@@ -29,6 +29,7 @@ def mock_db_session():
             self.risk_profile = risk_profile
             self.status = status
             self.error_message = error_message
+            self.strategies_json = None  # Needed by list_designs for etf_count
 
     mock_records = [
         MockDesign(
@@ -154,6 +155,7 @@ async def test_list_designs_error_message_preserved():
             self.risk_profile = risk_profile
             self.status = status
             self.error_message = error_message
+            self.strategies_json = None
 
     failed_record = MockDesign(
         id=99,
