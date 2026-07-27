@@ -444,6 +444,8 @@ async def generate_advice(
     market_snapshot = (context or {}).get("market_snapshot", "")
     regime = (context or {}).get("market_regime", "")
     sentiment = (context or {}).get("market_sentiment", {})
+    hot_plates = (context or {}).get("hot_plates", [])
+    sector_heat = (context or {}).get("sector_heat", [])
 
     # ---- 1. 大盘概况（含市态/情绪） ----
     idx_lines = []
@@ -474,16 +476,42 @@ async def generate_advice(
         elif s_lbl:
             sentiment_line = f"市场情绪: {s_lbl}"
 
-    # ---- 2. 热点板块 ----
+    # ---- 2. 热点板块（优先使用 hot_plates / sector_heat） ----
     sector_lines = []
-    for item in market_data[:15]:
-        if item.get("asset_type") in ("sector", "concept", "industry", "plate"):
-            name = item.get("name", item.get("sector_name", "?"))
+
+    # Phase 4: 优先使用上下文中的 hot_plates 数据
+    if hot_plates:
+        for hp in hot_plates[:8]:
+            name = hp.get("plate_name", hp.get("name", ""))
+            reason = hp.get("reason", hp.get("hot_reason", ""))
+            stocks = hp.get("stocks", hp.get("lead_stocks", []))
+            stock_str = ", ".join([s.get("name", "") for s in stocks[:3]])
+            line = f"- **{name}**: {reason}"
+            if stock_str:
+                line += f"  领涨: {stock_str}"
+            sector_lines.append(line)
+
+    # Phase 4: 使用上下文中的 sector_heat 数据
+    if sector_heat:
+        sector_lines.append("**板块热度排行:**")
+        for item in sector_heat[:8]:
+            name = item.get("sector_name", item.get("name", "?"))
+            heat = item.get("heat_index", "")
             chg = item.get("change_pct", "")
-            flow = item.get("main_inflow", item.get("fund_flow", ""))
-            sector_lines.append(
-                f"- **{name}**: 涨跌幅 {chg}%  资金流向 {flow}"
-            )
+            if heat:
+                sector_lines.append(f"- {name}: 热度 {heat}, 涨跌幅 {chg}%")
+
+    # Fallback: 从 market_data 按 asset_type 过滤
+    if not hot_plates and not sector_heat:
+        for item in market_data[:15]:
+            if item.get("asset_type") in ("sector", "concept", "industry", "plate"):
+                name = item.get("name", item.get("sector_name", "?"))
+                chg = item.get("change_pct", "")
+                flow = item.get("main_inflow", item.get("fund_flow", ""))
+                sector_lines.append(
+                    f"- **{name}**: 涨跌幅 {chg}%  资金流向 {flow}"
+                )
+
     sector_summary = "\n".join(sector_lines) if sector_lines else "暂无板块热力数据。"
 
     # ---- 3. 资金面 / 消息面 ----
@@ -630,10 +658,14 @@ def _build_report_prompt(
 
     prompt = f"""{overview}
 
-请生成一份纯粹的市场环境研判报告。
-重要约束：本报告只做市场研判，严禁给出任何具体组合（进攻型 / 平衡型 / 防御型）的仓位配置、买卖清单或调仓指令——组合层面的操作请使用「检视策略」功能。
+请生成一份市场环境研判报告，包含市场研判和操作建议两部分。
 
-报告须使用 Markdown，包含以下 4 个一级章节（以 `##` 作为章节标题），章节之间用 `---` 分隔：
+报告须使用 Markdown，包含以下 6 个一级章节（以 `##` 作为章节标题），章节之间用 `---` 分隔：
+
+## 0. 市场全景速览
+- 一句话总结当前市场核心状态（趋势延续 / 横盘消化 / 趋势终结）
+- 关键数据速览：主要指数涨跌、成交量变化、涨跌家数比
+- 核心矛盾一句话概括
 
 ## 1. 市场阶段与核心矛盾
 - 市场阶段：趋势延续 / 横盘消化 / 趋势终结（须给出明确判断与依据）
@@ -653,10 +685,16 @@ def _build_report_prompt(
 ## 4. 核心风险提示
 - 按风险等级列出 2~4 条关键风险，并给出可观测的触发条件
 
+## 5. 操作建议
+- 当前仓位建议（基于市态和风险敞口）
+- 关注方向：最看好的 1-2 个板块/风格方向
+- 规避方向：需要规避的 1-2 个板块/风格方向
+- 关键观测点：接下来 1-2 周需要跟踪的触发条件
+
 格式要求：
 - 关键结论与数字用 `**加粗**` 标注，数字必须引用上方输入数据
 - 要点用 `-` 列表，语言专业、客观、可执行
-- 全程控制在 900 字以内"""
+- 全程控制在 1200 字以内"""
     return prompt
 
 
@@ -1053,6 +1091,7 @@ def _build_design_report_prompt(
     _macro = market_context.get("macro_regime") or {}
     index_realtime = market_context.get("index_realtime") or []
     sector_momentum = market_context.get("sector_momentum") or []
+    hot_plates = market_context.get("hot_plates") or []
 
     # 数据日期标签：非交易日的行情来自上一交易日
     from ..core.market_calendar import is_trading_time as _is_trading
@@ -1158,6 +1197,32 @@ def _build_design_report_prompt(
             chg_txt = _fmt_pct(chg) if chg is not None else ""
             rank_txt = f"第{rank}/{total}名" if rank is not None else ""
             lines.append(f"- {name}: {rank_txt} 当日{chg_txt}".rstrip())
+        lines.append("")
+
+    # ── Phase 4 新增：概念板块动量 ──
+    concept_items = [i for i in sector_momentum if i.get("type") == "concept"]
+    if concept_items:
+        lines.append("### 概念板块动量（按当日涨跌幅排名）")
+        for item in concept_items[:10]:
+            name = item.get("sector_name") or item.get("sector") or ""
+            chg = item.get("change_pct")
+            chg_txt = _fmt_pct(chg) if chg is not None else ""
+            flow = item.get("main_inflow", "")
+            flow_txt = f"  主力净流入: {flow}" if flow else ""
+            lines.append(f"- {name}: {chg_txt}{flow_txt}")
+        lines.append("")
+
+    # ── Phase 4 新增：热点板块（财联社） ──
+    if hot_plates:
+        lines.append("### 今日热点板块（财联社）")
+        for hp in hot_plates[:8]:
+            name = hp.get("plate_name", hp.get("name", ""))
+            reason = hp.get("reason", hp.get("hot_reason", ""))
+            stocks = hp.get("stocks", hp.get("lead_stocks", []))
+            stock_str = ", ".join([s.get("name", "") for s in stocks[:3]])
+            lines.append(f"- **{name}**: {reason}")
+            if stock_str:
+                lines.append(f"  领涨: {stock_str}")
         lines.append("")
 
     # ── C1 资金流向 ──

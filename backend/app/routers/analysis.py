@@ -13,6 +13,7 @@ from typing import Any
 from ..analysis.llm import (
     generate_market_report, generate_advice, analyze_news, analyze_news_impact,
     generate_sector_analysis, generate_symbol_analysis,
+    _build_report_prompt,
 )
 from ..analysis.registry import get_agent
 from ..services.market_service import (
@@ -64,6 +65,46 @@ def _sse_stream(agent_generator):
     )
 
 
+def _inject_market_context(query: str, ctx: dict) -> dict:
+    """根据 query 关键词智能注入市场数据到 context。
+
+    Sector Phase 5: 流式和非流式路由共享的公共函数。
+    根据查询关键词识别用户意图，从 pool_manager 缓存获取对应数据注入 ctx。
+    """
+    from ..services.pool_manager import pool_manager
+    q = query.lower()
+    injection_lines = []
+
+    # 板块/行业/概念相关查询
+    sector_keywords = ["板块", "行业", "概念", "热点", "半导体", "新能源", "消费", "医药", "科技", "金融", "军工"]
+    if any(kw in q for kw in sector_keywords):
+        sector = pool_manager.get_sector_momentum() or []
+        for item in sector[:5]:
+            name = item.get("sector_name") or item.get("name", "?")
+            chg = item.get("change_pct", 0)
+            if isinstance(chg, (int, float)):
+                injection_lines.append(f"· {name}: 涨跌幅 {chg:+.2f}%")
+            else:
+                injection_lines.append(f"· {name}")
+
+    # 大盘/行情相关查询
+    market_keywords = ["大盘", "今天", "最新", "市场", "行情", "指数"]
+    if any(kw in q for kw in market_keywords):
+        idx_data = pool_manager.get_index_realtime() or []
+        for item in idx_data[:5]:
+            name = item.get("name", item.get("symbol", "?"))
+            price = item.get("price", "")
+            chg = item.get("change_pct", "")
+            if isinstance(chg, (int, float)):
+                injection_lines.append(f"· {name}: {price} ({chg:+.2f}%)")
+            else:
+                injection_lines.append(f"· {name}: {price}")
+
+    if injection_lines:
+        ctx["market_snapshot"] = "\n".join(injection_lines)
+    return ctx
+
+
 class SectorAnalysisRequest(BaseModel):
     sector_code: str
     sector_type: str = "industry"
@@ -85,6 +126,12 @@ class NewsImpactRequest(BaseModel):
 class LLMReportRequest(BaseModel):
     symbols: list[str] | None = None
     market: str = "A"
+
+
+class LLMAdviceRequest(BaseModel):
+    query: str
+    market: str = "A"
+    context: dict | None = None
 
 
 # _fetch_all_market 已废弃 — 数据管道统一在编排器中采集
@@ -326,7 +373,7 @@ async def llm_report_stream(req: LLMReportRequest):
         include_regime=True,
         include_sentiment=True,
         include_indices=True,
-        include_sectors=False,
+        include_sectors=True,
         include_news=True,
         include_portfolio=False,
         include_fund_flow=False,
@@ -375,41 +422,28 @@ async def llm_report_stream(req: LLMReportRequest):
             enriched_news = [{"title": "【市场背景】" + " | ".join(context)}] + all_news
 
     try:
-        report = await generate_market_report(indices, commodities, market_data, indicators, enriched_news, [])
-        # 分块 SSE 推送，兼容前端 useLLMStream 的 chunk 事件消费
-        async def event_generator():
-            disclaimer = "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
-            # 将完整报告拆分为 ~100 字符的 token 块，兼容前端 useLLMStream token 事件
-            chunk_size = 100
-            for i in range(0, len(report), chunk_size):
-                chunk_text = report[i:i + chunk_size]
-                yield f"event: token\ndata: {json.dumps({'token': chunk_text})}\n\n"
-            # 最终 done 事件携带完整文本
-            yield f"event: done\ndata: {json.dumps({'full_text': report, 'disclaimer': disclaimer})}\n\n"
-
-        return StreamingResponse(
-            event_generator(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            }
-        )
+        # Phase E(2): True streaming — 使用 agent.run_stream 实时推送 LLM token
+        prompt = _build_report_prompt(indices, commodities, market_data, indicators, enriched_news, [])
+        agent = get_agent("market_report")
+        return _sse_stream(agent.run_stream(prompt))
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM streaming failed: {e}")
 
 
 @router.post("/llm-advice/stream")
-async def llm_advice_stream(query: str = Query(...), context: dict | None = None):
-    """流式投资建议问答 — 使用统一上下文管道 (Phase 2.9)。"""
+async def llm_advice_stream(req: LLMAdviceRequest):
+    """流式投资建议问答 — 使用统一上下文管道 (Phase 2.9)。
+
+    Phase D(1): 新增 market 参数，传递给 build_full_context() 按市场获取数据。
+    """
     from ..services.pool_manager import pool_manager
     from ..services.llm_context import build_full_context
     from ..analysis.llm import _build_advice_stream_prompt
 
-    # 使用统一上下文管道
+    # 使用统一上下文管道（按市场获取数据）
     ctx = await build_full_context(
         pool_manager,
+        market=req.market,
         include_regime=True,
         include_sentiment=True,
         include_indices=True,
@@ -421,7 +455,7 @@ async def llm_advice_stream(query: str = Query(...), context: dict | None = None
     )
 
     # Merge with user-provided context
-    user_ctx = dict(context or {})
+    user_ctx = dict(req.context or {})
     user_ctx.update(ctx)
 
     # Build market_data for advice from index_realtime + sector_momentum
@@ -440,8 +474,11 @@ async def llm_advice_stream(query: str = Query(...), context: dict | None = None
     user_ctx["fund_flow"] = ctx.get("fund_flow", {})
     user_ctx["news"] = ctx.get("news", [])
 
+    # Sector Phase 5: 注入市场上下文
+    user_ctx = _inject_market_context(req.query, user_ctx)
+
     try:
-        prompt = _build_advice_stream_prompt(query, user_ctx)
+        prompt = _build_advice_stream_prompt(req.query, user_ctx)
         from ..analysis.registry import get_agent
         agent = get_agent("advice")
         return _sse_stream(agent.run_stream(prompt))

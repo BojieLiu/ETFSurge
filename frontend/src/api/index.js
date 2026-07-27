@@ -37,6 +37,12 @@ export const marketApi = {
   updateWatchlist: (id, data) => api.put(`/market/watchlist/${id}`, data),
   removeWatchlist: (id) => api.delete(`/market/watchlist/${id}`),
   batchRemoveWatchlist: (ids) => api.delete('/market/watchlist', { data: { ids } }),
+  getSectorsIndustry: (limit = 80) => api.get('/market/sectors/industry', { params: { limit } }),
+  getSectorsConcept: (limit = 80) => api.get('/market/sectors/concept', { params: { limit } }),
+  getHotPlates: (limit = 15) => api.get('/market/hot-plates', { params: { limit } }),
+  getSectorHeat: (limit = 20) => api.get('/market/sectors/heat', { params: { limit } }),
+  getStockHotRank: (limit = 50) => api.get('/market/stock-hot-rank', { params: { limit } }),
+  getMarketWind: () => api.get('/market/wind'),
 }
 
 export const portfolioApi = {

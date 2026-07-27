@@ -1,0 +1,22 @@
+Phase 6.2: Implement design-report-quality-fix-plan
+
+- Fix A: Downgrade strategy validation in task_manager.py from
+  'all-or-nothing' to 'at least one strategy has non-CASH' (P0).
+  Strategies without candidates are filled with CASH+warning
+  instead of causing the entire design to fail.
+
+- Issue 2 fix: Add _compute_risk_warnings() in portfolio_service.py (P1)
+  Rule-based risk detection (sector concentration, single position
+  overweight, low liquidity) ensures risk_warnings is never empty.
+  Combined with LLM output via _combine_risk_warnings().
+
+- Gap 5: New test_decode.py (9 tests) covering latin1 double-encoding
+  fix, clean UTF-8 preservation, edge cases (P0).
+
+- Gap 1: Restore TestP4 from @pytest.mark.skip with actual test
+  cases validating the validation downgrade behavior (P0).
+
+- Report rendering: Enhance DesignResult.vue markdown-body CSS with
+  proper table styling, code blocks, blockquotes, images (P0).
+
+- Update docs/implementation-master-plan.md to v9.6

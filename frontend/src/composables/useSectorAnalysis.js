@@ -134,3 +134,15 @@ export function useSectorAnalysis(marketTab) {
     useManualInput,
   }
 }
+
+
+export function getChangeClass(pct) {
+  if (pct === undefined || pct === null) return ''
+  return pct >= 0 ? 'text-up' : 'text-down'
+}
+
+export function formatChange(pct) {
+  if (pct === undefined || pct === null) return ''
+  const prefix = pct > 0 ? '+' : ''
+  return prefix + pct.toFixed(2) + '%'
+}

@@ -1,12 +1,12 @@
 # ETF Surge 因子模型扩展方案
 
-> 版本: v4.0 | 日期: 2026-07-26 | 状态: **实施就绪**
+> 版本: v5.0 | 日期: 2026-07-27 | 状态: **已实施回顾**
 >
-> ✅ **本文档已根据当前代码重写（2026-07-26）**：
+> ✅ **本文档已根据当前代码重写（2026-07-27 全量审计）**：
 > - 反映 33 因子全 LIVE 的当前架构（而非旧版 12 因子）
 > - 反映 engine/ 纯函数包架构（而非旧的 strategy_design.py）
-> - 以 IC 追踪器激活（Phase 7.1.1）为核心实施目标
-> - YAML 定义层（167 因子）保留作参考，方向已转为 "IC 验证后决定取舍"
+> - IC 追踪器（Phase 7.1.1）已实施完毕，仅 A5(verify_e2e) 未完成
+> - YAML 定义层（167 因子）方向已转为 "IC 验证后决定取舍"
 
 ---
 
@@ -20,7 +20,7 @@ ETF Surge 的因子模型经过 Phase 2.2→2.5 的实施，已形成完整四�
 |:-----|:-----|:--------:|
 | **定义层** | `factor_definitions.yaml` | 167 个因子定义，6 大类（对标 Barra/华证/申万） |
 | **计算层** | `factor_registry.py` | **33 个核心因子全 LIVE**（`_CORE_FACTORS` 列表，均含真实 compute 函数） |
-| **评估层** | `ic_tracker.py` | Spearman IC / ICIR 完整实现，compute() 中已集成 `ic_tracker.record()` 调用，**但无消费端点** |
+| **评估层** | `ic_tracker.py` | Spearman IC / ICIR 完整实现，compute() 中已集成 IC batch compute + threshold alert，API 端点 (`/factors/ic`) 已暴露，`save_ic_batch_to_db()` 已持久化 |
 | **应用层** | `engine/allocation_engine.py` + `engine/rationale.py` + `engine/budgets.py` | 纯函数分配器，通过因子分排序 + cross-section z-score 标准化接入 |
 
 ### 1.2 33 核心因子全景
@@ -57,7 +57,7 @@ YAML 文件中定义了 167 个因子，按数据可得性和 ETF 应用价值�
 | **theme**（主题） | 29 | 🔴 ESG/专利/网红 | 🔴 与 ETF 无关 | ❌ 跳过 |
 | **alternative**（另类） | 20 | 🔴 需付费数据 | 🔴 边际收益低 | ❌ 跳过 |
 
-> **关键决策**：不再追求"补齐 167 因子差距"，改为 IC 验证驱动——先激活 IC 追踪器，让数据指示哪些 YAML 因子值得实现。
+> **当前状态**：IC 追踪器已激活。下一步——IC 验证驱动 YAML 因子扩容。
 
 ### 1.4 策略引擎集成方式
 
@@ -98,31 +98,37 @@ except Exception:
     pass
 ```
 
-### 2.3 缺失的功能
+### 2.3 已实施的功能（原缺失项状态更新）
 
-| # | 缺陷 | 影响 | 优先级 |
-|:-:|:-----|:-----|:-----:|
-| 1 | ❌ 无 forward_returns 数据管道 | `compute_ic()` 需要对比 forward return，但从未建立过数据来源 | **P0** |
-| 2 | ❌ 无 API 端点查看 IC 统计数据 | `ic_tracker._records` 数据被 record() 写入但无人读取 | **P0** |
-| 3 | ❌ 无定期 IC 计算 + 聚合 | 单靠 record() 收集原始值，从不计算 IC/ICIR 指标 | **P1** |
-| 4 | ❌ 无 IC 结果持久化 | 重启后 `_records` 数据丢失 | **P1** |
-| 5 | ❌ 无因子有效性排序 UI | 无法直观判断哪些因子有效 | **P2** |
-| 6 | ❌ 无 IC 阈值告警 | 因子失效时无通知 | **P2** |
+| # | 缺陷 | 原优先级 | 当前状态 |
+|:-:|:-----|:-------:|:-------:|
+| 1 | 无 forward_returns 数据管道 | P0 | ✅ `build_forward_returns()` 在 ic_tracker.py 已实现 |
+| 2 | 无 API 端点查看 IC 统计数据 | P0 | ✅ `/factors/ic` 端点已暴露，`/factors/active` 含分类视图 |
+| 3 | 无定期 IC 计算 + 聚合 | P1 | ✅ `compute_periodic_ic()` 在 factor_registry.compute() 中集成 |
+| 4 | 无 IC 结果持久化 | P1 | ✅ `save_ic_batch_to_db()` + `FactorICRecord` 模型 |
+| 5 | 无因子有效性排序 UI | P2 | ✅ `FactorICView.vue` + `FactorModelView.vue` 均已实现 |
+| 6 | 无 IC 阈值告警 | P2 | ✅ `factor_registry.py` compute() 末尾已集成日志告警 |
 
-## 三、IC 追踪器激活方案
+### 2.4 唯一未实施的项
 
-### 3.1 总体策略
+| # | 任务 | 影响 | 优先级 | 预估 |
+|:-:|:-----|:-----|:-----:|:----:|
+| A5 | verify_e2e.py 扩展 IC 端点检查 | 确保 e2e 覆盖 IC 链路 | P2 | 15min |
 
-分两阶段激活，避免一次性大改动：
+## 三、IC 追踪器实施回顾（2026-07-27）
+
+### 3.1 总体策略（实施完毕）
+
+两阶段均已实施完毕（2026-07-27 审计确认）：
 
 ```
-Phase A: 建立 forward_returns 管道 + IC 计算任务 + API 端点
-         （P0 项，可独立验证）
-Phase B: IC 结果持久化 + 因子有效性排序 + IC 阈值告警
-         （P1-P2 项，依赖 Phase A）
+Phase A: 建立 forward_returns 管道 + IC 计算任务 + API 端点  ✅
+         （build_forward_returns, compute_periodic_ic, /factors/* 端点）
+Phase B: IC 结果持久化 + 因子有效性排序 + IC 阈值告警      ✅
+         （SQLite 持久化, FactorICView/FactorModelView 组件, 日志告警）
 ```
 
-### 3.2 Phase A —— 核心管道激活（~2h）
+### 3.2 Phase A —— 核心管道（✅ 已实施）
 
 #### A1: 建立 forward_returns 数据管道
 
@@ -218,7 +224,7 @@ except Exception as e:
 
 **验证方式**：单测验证 `_last_ic_batch` 正确填充。
 
-#### A4: 新增 API 端点 `GET /api/v1/factors/ic`
+#### ✅ A4: 新增 API 端点 `GET /api/v1/factors/ic`（含 `/model`, `/active`）
 
 **文件**: `backend/app/routers/factors.py`（**新建** — 当前不存在 factors 路由）
 
@@ -277,13 +283,13 @@ Response 200:
 
 | 操作 | 文件 | 说明 |
 |:----|:-----|:-----|
-| 🆕 新建 | `api-contracts/factors/ic.md` | IC API 契约（参照 contract_template.md）|
-| 🆕 新建 | `backend/app/routers/factors.py` | factors 路由（APIRouter 模式）|
-| ✏️ 修改 | `backend/app/main.py` | 注册 `factors_router` |
-| ✏️ 修改 | `backend/app/factors/ic_tracker.py` | 添加 `build_forward_returns()` + `compute_periodic_ic()` |
-| ✏️ 修改 | `backend/app/factors/factor_registry.py` | 添加 `_last_ic_batch` 属性和 IC batch compute 调用 |
-| ✏️ 修改 | `backend/scripts/verify_e2e.py` | 添加 IC 端点检查 |
-| 🆕 新建 | `backend/tests/test_ic_tracker.py` | IC 追踪器单测 |
+| ✅ 已建 | `api-contracts/factors/ic.md` | IC API 契约 |
+| ✅ 已建 | `backend/app/routers/factors.py` | factors 路由（3 端点）|
+| ✅ 已改 | `backend/app/main.py` | 已注册 factors_router |
+| ✅ 已改 | `backend/app/factors/ic_tracker.py` | 含 build_forward_returns + compute_periodic_ic + save_ic_batch_to_db |
+| ✅ 已改 | `backend/app/factors/factor_registry.py` | 含 _last_ic_batch + IC compute + threshold alert |
+| ⏳ 待改 | `backend/scripts/verify_e2e.py` | 添加 IC 端点检查（A5） |
+| ✅ 已建 | `backend/tests/test_ic_tracker.py` | IC 追踪器单测 |
 
 #### A5: 扩展 verify_e2e.py
 
@@ -302,7 +308,7 @@ for f in data["factors"]:
     assert "ic_value" in f
 ```
 
-### 3.3 Phase B —— 增强与持久化（~3h）
+### 3.3 Phase B —— 增强与持久化（✅ 已实施）
 
 #### B1: SQLite 持久化 IC 记录
 

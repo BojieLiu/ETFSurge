@@ -1,11 +1,12 @@
 ﻿# ETF Surge 方案实施总计划
 
-> 生成日期: 2026-07-27 | 版本: **v10.0**
+> 生成日期: 2026-07-27 | 版本: **v10.1**
 > ✅ **Phase 6.1 已完成**
 > ✅ **Phase 6.2 已完成**：组合管线与报告质量修复 — Fix A (task_manager.py 校验降级)、问题 2 规则驱动风险检测 (portfolio_service.py _compute_risk_warnings)、test_decode.py (9/9 PASS)、TestP4 恢复、报告渲染排版优化 (DesignResult.vue CSS)。详见 `docs/design-report-quality-fix-plan.md`。：可观测性与系统增强 — ConfigManager + app_config 表（`models/app_config.py`, `core/config_manager.py`）、ConfigPage（`views/ConfigView.vue`）、Sector API 实时行情返回（market.py 路由优先级调整）、LLM 热点板块注入（llm_context.py + pool_manager.py）、stars 时间新鲜度 + Level 2 精度调整（news_fetcher.py + levistock_fetcher.py）、verify_e2e.py 扩展（stars/level 校验 + check_sector_data）。详见 §4 Phase 6.1。
 > ✅ **Phase 7 已完成**：系统质量诊断修复 (system-quality-diagnosis)
 > ✅ **Phase 7 已完成**：系统质量诊断修复 (system-quality-diagnosis) — 池弹性 CRITICAL 日志 (`pool_manager.py:438`)、`/admin/metrics` 端点 (`admin.py`)、`get_portfolio_realtime()` 15s 缓存 (`market_service.py:617`)、`fetch_all_etfs_base()` 熔断路由 (`etf_scanner.py:264-282`)、`verify_e2e.py` 增强 (risk_warnings/response_time/metrics)、`test_performance_benchmark.py` (6 端点 gate)、`test_pool_resilience.py` (5 用例)。详见 `docs/archived/system_quality_diagnosis_report.md`§7。
 > ✅ **Phase 8 已完成**：去重造轮子 (wheel-unreinvention) — `analysis/indicators.py` → pandas-ta、`factors/factor_registry.py` 11 个 compute 函数 → pandas-ta、`sentiment_fetcher.py` 动态权重 + 情绪惯量、`market_trends.py` 精简计算层、`risk_controls.py` 阈值配置化。新增 47 个单测。详见下方 §v9.8。
+> ✅ **Phase 9 已完成**：剩余策略缺口闭环（2026-07-27 代码审计驱动）— Market Analysis Phase D(1-3): llm_advice_stream 新增 market 参数 (LLMAdviceRequest)、AiAdvisor.vue 传递 marketTab 到 API、build_full_context 按市场获取数据。Phase E(1-3): _build_report_prompt() 扩展为 6 节（含 0. 全景速览 + 5. 操作建议）、llm_report_stream 改为真流式 (agent.run_stream)、include_sectors=True 启用板块数据。Sector Phase 4: generate_advice() 改用 hot_plates/sector_heat、_build_design_report_prompt() 新增概念板块 + 热点板块段落。Phase 5: _inject_market_context() 公共函数。Phase 3b+6: useSectorAnalysis.js 涨跌幅颜色 helpers、api/index.js 新增 6 个板块 API 方法、SectorHeatMap.vue 组件。verify_e2e.py 新增 analysis 模块 + news/global 检查。API 清理：/hot-plates /stock-hot-rank /wind 前端标记已接入。
 > 
 > 总览 `docs/` 目录 **33 份**方案文档，梳理实施状态、冲突重叠、修复建议及分阶段执行路线。新增 `frontend-logic-sink-plan.md`（第 33 份，Sprint 1 P0/P1 已完成）。
 > v7.1：Phase 2.7 剩余项 + Phase 2.8 剩余项 + Phase 2.9 全部完成。新增 encoding_diagnosis.py、refresh_sentiment_cache()、AGENTS.md 关键路径更新。新增 llm_context.py build_full_context() 统一数据管道 + llm_report_stream/llm_advice_stream 改用统一管道。

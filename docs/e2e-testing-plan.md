@@ -3,12 +3,28 @@
 > 目标：通过 Playwright 覆盖前端**全部用户操作链路**，在每次修改后自动验证前端渲染正确性和功能完整性。
 > 生成日期: 2026-07-21
 >
-> ⚠️ **2026-07-26 实施状态更新**：本文档为完整方案蓝图。实际已实施：
+> ⚠️ **2026-07-27 实施状态更新（最新审计）**：本文档为完整方案蓝图。实际已实施：
 > - ✅ 基础设施：`playwright.config.js` + server utilities（`server-setup.cjs` / `server-teardown.cjs` / `server.js`）已就绪
 > - ✅ package.json 脚本：`test:e2e` / `test:e2e:smoke` / `test:e2e:visual` / `test:e2e:ui` 已配置
-> - ⚠️ 已实现 **6/12 个 spec 文件**：01-smoke / 02-visual / 03-navigation / 04-wizard-design / 05-theme-assets / 12-regression
-> - ❌ 其余 6 个 spec（02-dashboard / 03-portfolio-mgr / 05-market-tabs / 06-watchlist / 07-ai-advisor / 08-sector-analysis / 09-symbol-analysis / 10-news / 11-token-monitor）待实现
+> - ⚠️ 已实现 **9 个 spec 文件**，命名与计划方案不完全对齐（见下方映射表）
+> - ❌ **关键功能链路 spec 仍有 8 个缺口**：dashboard / portfolio-mgr / market-tabs / watchlist / ai-advisor / sector-analysis / symbol-analysis / token-monitor
+> - ❌ 后端 `verify_e2e.py` 扩展（Section 9：Portfolio/Analysis/News/Admin 约 35 个端点）**未实施**
+> - ❌ 冗余 API 端点清理（Section 9.11：约 15 个端点）**未实施**
 > - 本文档保持完整方案不变，作为 Phase 7.1.5 的实施蓝图
+>
+> **实际文件 vs 计划名称映射：**
+> | 计划中的 spec | 实际文件 | 状态 |
+> |:---|---|:---:|
+> | 01-smoke.spec | 01-smoke.spec.js | ✅ |
+> | 02-dashboard.spec | 02-visual.spec.js（不同内容）| ⚠️ 命名偏离 |
+> | 03-portfolio-mgr.spec | 03-navigation.spec.js（不同内容）| ⚠️ 命名偏离 |
+> | 04-ai-tools.spec | 04-wizard-design.spec.js（近似）| ⚠️ 命名偏离 |
+> | 05-market-tabs.spec | 05-theme-assets.spec.js（不同内容）| ⚠️ 命名偏离 |
+> | —（计划未列） | 06-charts.spec.js | ✅ 额外 |
+> | —（计划未列） | 07-news.spec.js | ✅ 额外 |
+> | —（计划未列） | 08-technical-analysis.spec.js | ✅ 额外 |
+> | 12-regression.spec | 12-regression.spec.js | ✅ |
+> | 06-watchlist / 07-ai-advisor / 08-sector-analysis / 09-symbol-analysis / 10-news / 11-token-monitor | ❌ 不存在
 
 ---
 

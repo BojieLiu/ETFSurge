@@ -1,0 +1,15 @@
+Phase 10.1: mootdx socket timeout protection + frontend chunk optimization
+
+F11 - _run_mootdx_with_timeout: Add concurrent.futures-based hard timeout
+      (8s) for mootdx socket read operations (client.quotes and
+      client.bars). Uses dedicated single-thread executor to prevent
+      thread pool starvation when mootdx TCP read hangs.
+      (china_market.py)
+
+F12 - Frontend chunk optimization: Split vendor-echarts (echarts+vue-echarts)
+      from vendor-vue; add vendor-marked as separate chunk; bump
+      chunkSizeWarningLimit to 700KB to accommodate echarts vendor size.
+      (vite.config.js)
+
+Note: verify_e2e _check_response_time already uses check() which
+increments FAIL and blocks CI - no change needed.

@@ -277,21 +277,21 @@ async def sector_popular(plate_code: str) -> list[dict[str, Any]]:
     return await asyncio.to_thread(fetch_sector_popular_stocks, plate_code)
 
 
-# TODO: 未接入前端
+# Phase 6: 前端已接入（marketApi.getHotPlates）
 @router.get("/hot-plates")
 async def hot_plates(limit: int = Query(15)) -> list[dict[str, Any]]:
     """热点板块及涨停股(财联社)。"""
     return await asyncio.to_thread(fetch_hot_plates, limit)
 
 
-# TODO: 未接入前端
+# Phase 6: 前端已接入（marketApi.getStockHotRank）
 @router.get("/stock-hot-rank")
 async def stock_hot_rank(limit: int = Query(50)) -> list[dict[str, Any]]:
     """A股热门个股排名(同花顺)。"""
     return await asyncio.to_thread(fetch_stock_hot_rank, limit)
 
 
-# TODO: 未接入前端
+# Phase 6: 前端已接入（marketApi.getMarketWind）
 @router.get("/wind")
 async def wind() -> list[dict[str, Any]]:
     """今日风口/主线板块(财联社)。"""

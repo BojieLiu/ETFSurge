@@ -35,7 +35,7 @@ import { ref } from 'vue'
 import { renderMarkdown } from '../../utils/markdown'
 import { useLLMStream } from '../../composables/useLLMStream'
 
-defineProps({ marketTab: { type: String, default: 'A' } })
+const props = defineProps({ marketTab: { type: String, default: 'A' } })
 
 const query = ref('')
 const response = ref('')
@@ -50,7 +50,7 @@ async function send() {
   response.value = ''
   error.value = ''
   try {
-    await startStream('/llm-advice/stream', { query: q }, (token) => {
+    await startStream('/llm-advice/stream', { query: q, market: props.marketTab }, (token) => {
       response.value += token
     })
   } catch (e) {

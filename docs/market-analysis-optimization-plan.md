@@ -7,12 +7,22 @@
 > | **Phase A** (Unified search) | ✅ Completed | ✅ Backend `search_unified()` implemented; need to verify frontend consumption |
 > | **Phase B** (Unified analysis flow) | ✅ Completed | ✅ Backend routing exists; need to verify |
 > | **Phase C** (Frontend merge) | ✅ Completed | ✅ `UnifiedAnalysis.vue` replaces 3 old components |
-> | **Phase D** (AI advisor streaming) | ✅ Completed | 🟡 **Partially** — streaming backend exists (`_build_advice_stream_prompt()`, `build_full_context()`), but: (1) No `market` parameter in `/llm-advice/stream` endpoint, (2) Frontend `AiAdvisor.vue` has `marketTab` prop but does NOT pass it to API, (3) Still always queries A-share data |
-> | **Phase E** (Market report quality) | ✅ Completed | 🟡 **Partially** — `LLMReportRequest` has `market` field, but: (1) `_build_report_prompt()` still uses **original 4 sections** (Sections 0 & 5 NOT added), (2) Still **pseudo-streaming** (generate full report → chunk), not true streaming, (3) `llm_report_stream` still uses **hardcoded A-share symbols** for the streaming endpoint even when `req.market != "A"` |
+> | **Phase D** (AI advisor streaming) | 🟡 **Partially** | Streaming backend exists (`build_full_context()`, `_build_advice_stream_prompt()`), but **3 concrete gaps remain**: (1) `/llm-advice/stream` endpoint does NOT pass `market` from request to `build_full_context()` (always defaults to "A"), (2) Frontend `AiAdvisor.vue` has `marketTab` prop but sends `{ query: q }` — **no `market` field** in API call, (3) Always queries A-share data |
+> | **Phase E** (Market report quality) | 🟡 **Partially** | `LLMReportRequest` has `market` field, `resolve_market_context()` exists, but **3 concrete gaps remain**: (1) `_build_report_prompt()` still uses **original 4 sections** (Sections 0 & 5 NOT added — verified at llm.py:636-659), (2) Still **pseudo-streaming** (generate full report → 100-char chunks, verified at analysis.py:377-386), (3) `llm_report_stream` sets `include_sectors=False` (analysis.py:329), so **all sector data is explicitly excluded** from streaming reports |
 >
 > **2026-07-26 审计结论**：Phase D 和 E 的**后端数据管道统一层**已实现（`build_full_context()`、`_build_advice_stream_prompt()`），但**市场感知联动的核心——market 参数的端到端传递和 LLM prompt 增强——仍未完成**。这 5 项缺口形成了 Phase 5.1（市场感知联动）的实施输入。
 >
-> See `docs/implementation-master-plan.md` Phase 2.5.5-2.5.7, Phase 2.9, Phase 5.1 for details.
+> **2026-07-27 第一次更新**：Phase 5.1（市场感知联动）已通过跨 Phase 全栈实施完成。`core/market_context.py` + `services/market_router.py` 已上线，各端点已增加 market 参数感知。
+>
+> **2026-07-27 第二次更新（代码审计校准）**：经实际代码验证，5 项缺口仍有 **4 项未闭合**：
+> - Phase D (1) `/llm-advice/stream` 的 market 参数 → ❌ `analysis.py:324` 未传 `market=`，默认 "A"
+> - Phase D (2) 前端 AiAdvisor marketTab → ❌ `AiAdvisor.vue:53` 发送 `{ query: q }`，无 market
+> - Phase D (3) 始终查 A 股 → ❌ `build_full_context()` 无 market 参数，默认 "A"
+> - Phase E (1) 报告只 4 节 → ❌ `llm.py:636-659` 仍是 4 节，缺 Section 0/5
+> - Phase E (2) 伪流式 → ❌ `analysis.py:377-386` 首先生成完整 report 再切块
+> - Phase E (3) 板块数据排除 → 🟡 market_router 已解决数据路由，但 `include_sectors=False` 导致丢失
+>
+> See `docs/implementation-master-plan.md` Phase 5.1 for details.
 
 ---
 

@@ -531,6 +531,56 @@ def section_news():
     except Exception as e:
         check("GET /news/macro", False, str(e))
 
+    # GET /news/global
+    try:
+        r = requests.get(f"{BASE}/api/v1/news/global", timeout=35)
+        ok = r.status_code in (200, 404)
+        detail = f"-> {r.status_code}" + (f" ({len(r.json())} 条)" if r.status_code == 200 else "")
+        check(f"GET /news/global {detail}", ok, "404 可接受" if r.status_code == 404 else "")
+    except Exception as e:
+        check("GET /news/global", False, str(e))
+
+
+def section_analysis():
+    """AI 分析端点验证 — 仅检查状态码，不对 LLM 内容做断言。"""
+    section(" AI 分析")
+
+    endpoints = [
+        ("POST /analysis/llm-report", f"{BASE}/api/v1/analysis/llm-report", {"symbols": None, "market": "A"}),
+        ("POST /analysis/llm-advice", f"{BASE}/api/v1/analysis/llm-advice", {"query": "今天行情如何"}),
+    ]
+    for label, url, body in endpoints:
+        try:
+            r = requests.post(url, json=body, timeout=30)
+            ok = r.status_code in (200, 400, 502)
+            check(f"{label} -> {r.status_code}", ok,
+                  "502 可接受（LLM key 或网络问题）" if r.status_code == 502 else "")
+        except requests.Timeout:
+            check(label, False, "请求超时（30s）")
+        except Exception as e:
+            check(label, False, str(e))
+
+    # Streaming endpoints — 只检查 200
+    stream_endpoints = [
+        ("POST /analysis/llm-report/stream", f"{BASE}/api/v1/analysis/llm-report/stream",
+         {"symbols": None, "market": "A"}),
+        ("POST /analysis/llm-advice/stream", f"{BASE}/api/v1/analysis/llm-advice/stream",
+         {"query": "今天行情如何", "market": "A"}),
+    ]
+    for label, url, body in stream_endpoints:
+        try:
+            r = requests.post(url, json=body, timeout=10, stream=True)
+            ok = r.status_code == 200
+            ct = r.headers.get("content-type", "")
+            check(f"{label} -> {r.status_code}", ok,
+                  f"Content-Type: {ct}" if ok else "")
+            if ok:
+                r.close()
+        except requests.Timeout:
+            check(label, False, "请求超时（10s）")
+        except Exception as e:
+            check(label, False, str(e))
+
 
 def check_sector_data():
     """板块/概念数据端点验证（Phase 6.1.8）。"""
@@ -883,6 +933,7 @@ MODULES = {
     "ws": section_ws,
     "resilience": section_async_resilience,
     "factors": section_factors,
+    "analysis": section_analysis,
     "sectors": check_sector_data,
     "quality": check_data_quality,
 }

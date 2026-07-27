@@ -1,9 +1,14 @@
 # 板块/概念数据优化方案
 
 > 多资产实时行情分析与 ETF 组合管理系统 · 行情研判数据增强
-> 版本: v3.0 | 更新日期: 2026-07-26 | 状态: **部分实施**
+> 版本: v3.2 | 更新日期: 2026-07-27 | 状态: **部分实施（经代码审计校准）**
 > ✅ Phase 1-2 已实施（数据采集 + 缓存写入 + 定时刷新）
-> ❌ Phase 3-6 待实施（API 实时行情 / LLM 注入 / 综合研判 / 前端可视化）
+> ✅ Phase 2 增强：`pool_manager.py:update_sector_cache()` 已实现行业+概念动量、热点板块、板块热度三项独立刷新
+> ✅ L6 定时刷新：`pool_manager.py:_refresh_market_snapshot()` 和 `update_sector_cache()` 均可被定时任务调用
+> 🟡 L3 API 实时行情：`pool_manager.py` 已实现 `get_hot_plates()` / `get_sector_heat()` 缓存读取接口。路由优先调实时数据（`fetch_industry_sectors()` / `fetch_concept_sectors()`），本地表作降级。但前端涨跌幅颜色显示未适配，3 个 API 契约文件未创建
+> 🟡 Phase 4（LLM Prompt 注入）：`build_full_context()` 已注入 sector_momentum + hot_plates + sector_heat，但 `generate_advice()` 仍用旧 asset_type 过滤，`_build_design_report_prompt()` 缺少概念板块和热点板块段落
+> ❌ Phase 5（综合研判注入）：`llm_report_stream` 中 `include_sectors=False` 显式禁用；3 条路由均未注入板块数据；`_inject_market_context()` 公共函数未抽取
+> ❌ Phase 6（前端可视化）：`SectorHeatMap.vue` 未创建，前端 API 方法未接入，3 个契约文件未创建
 
 ---
 
@@ -14,11 +19,11 @@
 | 层级 | 问题 | 严重程度 | 影响范围 |
 |------|------|----------|----------|
 | **L1 数据采集** | `compute_sector_momentum()` 只采集申万一级行业，遗漏概念板块 | P0 | LLM 报告缺失概念板块分析 |
-| **L2 缓存写入** | `pool_manager._sector_momentum_cache` 无写入入口，永远为空 | P0 | LLM 报告 sector_momentum 段落恒为空白 |
+| **L2 缓存写入** | `pool_manager._sector_momentum_cache` 已修复：`update_sector_cache()` 定期写入行业+概念动量 | ✅ 已实施 |`pool_manager.py:151,173` 写入入口已存在 |
 | **L3 API 响应** | `/sectors/industry` 和 `/sectors/concept` 只返回 code+name，丢实时行情 | P1 | 前端搜索框无涨跌幅颜色，UX 不佳 |
 | **L4 LLM Prompt** | `generate_advice()`（llm.py:477-487）用 `asset_type` 筛选但 `market_data` 不含板块条目 | P0 | "暂无板块热力数据" 恒成立 |
 | **L5 前端展示** | `fetch_hot_plates()` / `fetch_sector_heat()` 等 6 个路由标记 `TODO: 未接入前端` | P2 | 无热点板块排行可视化 |
-| **L6 定时刷新** | APScheduler 只刷新行情和新闻，无板块数据刷新任务 | P1 | 板块数据可能过时 |
+| **L6 定时刷新** | `pool_manager._refresh_market_snapshot()` 内部刷新 sector；`update_sector_cache()` 作为独立定时入口 | 🟡 部分实施 | 需要确认定时循环中是否调用了 `update_sector_cache()` |
 
 ---
 
@@ -186,9 +191,9 @@ async def update_sector_cache(self) -> None:
         logger.exception("[pool] update_sector_cache failed: %s", e)
 ```
 
-### Phase 3 — API 增强：返回实时行情数据 ❌ 待实施
+### Phase 3 — API 增强：返回实时行情数据 🟡 部分实施
 
-**现状**: `market_service.py` 中 `get_sectors_local()` 仍只返回 `sector_code` + `sector_name`（来自本地 Sector 表），不含实时行情字段。`market.py` 路由 `/sectors/industry` 优先调用 `get_sectors_local()`，导致当本地表有记录时返回纯 code+name。但 `sector_fetcher.py` 的 `_ak_industry_sectors()` 等 fallback 已有完整实时行情（price, change_pct, main_inflow 等 16 个字段），仅需调整路由优先级即可使用。
+**现状（代码审计校准）**: 路由已调整为**优先调实时数据**（`fetch_industry_sectors()` → 降级到 `get_sectors_local()`），非计划中所述的"优先本地表"。但前端 `useSectorAnalysis.js` 搜索结果列表仍未显示涨跌幅颜色（Phase 3b），且 `api-contracts/market/sectors-industry.md` / `sectors-concept.md` 契约文件未创建。
 
 **目标**: `/sectors/industry` 和 `/sectors/concept` 返回带实时行情的数据，前端搜索框可显示涨跌幅颜色
 
@@ -224,9 +229,12 @@ async def industry_sectors(limit: int = Query(200)) -> list[dict[str, Any]]:
 </li>
 ```
 
-### Phase 4 — LLM Prompt 注入 ❌ 待实施
+### Phase 4 — LLM Prompt 注入 🟡 部分实施
 
-**现状**: `llm_context.py` 的 `build_full_context()` 已包含 `include_sectors=True` 参数，通过 `pool_manager.get_sector_momentum()` 获取板块动量数据并注入上下文。但仅包含 momentum 排名，缺少财联社热点板块（`hot_plates`）、板块热度排行（`sector_heat`）数据。LLM prompt 仍无板块热点注入。
+**现状（代码审计校准）**: 
+- ✅ `llm_context.py` 的 `build_full_context()` 已包含 `sector_momentum` + `hot_plates` + `sector_heat` 三项数据，并非计划中所述的"仅 momentum"。`get_hot_plates()` / `get_sector_heat()` 缓存接口已实现。
+- ❌ `llm.py` 的 `generate_advice()`（第 478-487 行）仍用旧 `asset_type` 过滤方式遍历 `market_data`，未使用 `hot_plates` / `sector_heat` 数据。
+- ❌ `llm.py` 的 `_build_design_report_prompt()`（第 1151 行起）只显示行业板块动量，缺少概念板块段落、热点板块段落、板块热度排行段落。
 
 **目标**: 两份报告（市场研判报告 + 组合设计报告）都能引用板块和概念数据
 
@@ -302,9 +310,14 @@ if hot_plates:
     lines.append("")
 ```
 
-### Phase 5 — 综合研判与投资建议的板块数据注入 ❌ 待实施
+### Phase 5 — 综合研判与投资建议的板块数据注入 ❌ 未完成
 
-**现状**: 三个路由（`llm_report` / `llm_report_stream` / `llm_advice_stream`）均未注入热点板块数据。`analysis.py` 中无 `_inject_market_context()` 公共函数。但 `build_full_context()` 已完成统一数据管道框架，注入只需在现有管道中加入 `hot_plates` 和 `sector_heat` 数据源。
+**现状（代码审计校准）**: 
+- ❌ `llm_report_stream`: 流式报告中 `include_sectors=False`（`analysis.py` 第 329 行），**显式禁用了板块数据**。这是最关键的缺口。
+- ❌ `llm_report`（非流式）: `generate_market_report()` → `_build_report_prompt()` 完全不含任何板块数据。
+- ❌ `llm_advice_stream`: 未注入板块/概念数据。
+- ❌ `_inject_market_context()` 公共函数未实现。
+- ⚠️ `build_full_context()` 统一数据管道已存在（含 hot_plates / sector_heat 获取能力），只需在调用处启用。
 
 **目标**: 确保 `generate_market_report()`（综合研判）和 `generate_advice()`（投资建议）及其流式变体都有板块数据
 
@@ -400,9 +413,14 @@ if sector_momentum:
 
 ---
 
-### Phase 6 — 前端可视化 ❌ 待实施
+### Phase 6 — 前端可视化 ❌ 未实施
 
-**现状**: `frontend/src` 中无 sector 相关组件或页面。`market.py` 中 `/hot-plates`、`/sectors/heat`、`/stock-hot-rank`、`/sectors/industry-cls` 等 6 个路由均标记 `# TODO: 未接入前端`。需要前端 `api/index.js` 新增 API 方法并创建 SectorHeat 组件。
+**现状（代码审计校准）**: 
+- ✅ 后端 `/hot-plates`、`/sectors/heat`、`/stock-hot-rank`、`/wind` 路由已实现（`market.py` 第 281-298 行），缓存层 `get_hot_plates()` / `get_sector_heat()` 存在。
+- ❌ 前端 `SectorHeatMap.vue` 未创建。
+- ❌ `frontend/src/api/index.js` 中无 `getHotPlates` / `getSectorHeat` / `getStockHotRank` / `getMarketWind` 方法。
+- ❌ `api-contracts/market/hot-plates.md` 等 3 个契约文件未创建。
+- ❌ `# TODO: 未接入前端` 路由标记未清除：`/hot-plates`、`/sectors/heat`、`/stock-hot-rank`、`/wind`、`/sectors/industry-cls`。
 
 **目标**: MarketAnalysis 页面增加热点板块可视化
 

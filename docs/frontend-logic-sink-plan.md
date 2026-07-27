@@ -2,7 +2,7 @@
 
 > 目标：消除前端重复计算和业务逻辑，让前端只做"拿数据、展数据"，后端管"计算/聚合/状态"
 >
-> 版本：v2（经过系统审查修正后）
+> 版本：v3（2026-07-27 代码审计更新）
 
 ## 目录
 
@@ -16,7 +16,7 @@
 
 ## Sprint 1 — P0/P1: Dashboard 财务指标去重 + 方案格式去重
 
-### 1.1 P0: Dashboard 财务指标去重
+### 1.1 P0: Dashboard 财务指标去重 ✅ 已实施
 
 #### 现状
 
@@ -104,6 +104,8 @@ const pnlItems = computed(() => {
 
 > ⚠️ Mock 数据调整：`portfolioApi.getPnl` 的 mock response 需要增加 `total_pnl`/`total_amount`/`weighted_change_pct` 等汇总字段（后端实际上已经返回这些字段，但 mock 中没有包含）。
 
+> **2026-07-27 更新**：`useDashboardData.js` 已改造完成（L29-54 使用后端字段），单测 `useDashboardData.spec.js` 需同步 mock 更新。
+
 #### 验证策略
 
 - 运行 `cd frontend && npm test` 检查 `useDashboardData` 测试通过
@@ -115,7 +117,7 @@ const pnlItems = computed(() => {
 
 ---
 
-### 1.2 P1: 设计方案格式转换去重
+### 1.2 P1: 设计方案格式转换去重 🔶 部分实施
 
 #### 现状
 
@@ -188,6 +190,8 @@ onHistorySelect()   L584-597  → data.strategies → plans
 | B1.1 | `backend/app/routers/portfolio.py` | `get_design()` 返回中增加 `plans` 字段（实现字段映射逻辑） |
 | F1.10 | `frontend/src/views/DashboardAiTools.vue` | `fetchDesignDetail()` 改为 `const plans = data.plans || []`（删除转换逻辑） |
 | F1.11 | 同上 | `onHistorySelect()` 改为 `const plans = data.plans || []`（删除转换逻辑） |
+
+> **2026-07-27 更新**：后端 `get_design()` 已返回 `plans` 字段（L205-242），但前端 `fetchDesignDetail`（L324）和 `onHistorySelect`（L589）仍手动转换。需简化。
 
 #### 验证策略
 
@@ -569,7 +573,7 @@ watchlist.value = watchlist.value.filter(...)  // 删除后
 
 | Sprint | 内容 | 后端改动量 | 前端改动量 | 风险 | 需新契约 |
 |--------|------|-----------|-----------|------|---------|
-| **Sprint 1** | P0 财务指标去重 + P1 方案格式去重 | 极小（增加 `plans` 字段） | 中（2 个文件重构 + 1 个文件简化） | **低** | 更新 `designs/{id}` 契约 |
+| **Sprint 1** | P0 财务指标去重 + P1 方案格式去重 | ✅ `plans` 字段已增加 | 🔶 后端完成，前端 pending（另 1 个文件简化） | **低** | 更新 `designs/{id}` 契约 |
 | **Sprint 2** | P1 历史 timeline + 搜索统一 + P3 PnL 分类型 | 中（2 个新路由 + 1 个现有路由增强） | 小（3 个文件修调用） | **低** | `timeline.md` 新建 + `search` 更新 + `pnl-history` 更新 |
 | **Sprint 3** | P2 轮询提取 + Sector URL + 超时修复 | 小（1 个 bug fix） | 中（新建 composable + 2 个文件重构） | **中**（需验证轮询可靠性） | 无需 |
 | **Sprint 4** | P2 自选同步 + P3 格式化 | 极小（2 个字段） | 中（4 个文件微调） | **低** | 无需 |
