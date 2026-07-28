@@ -27,6 +27,15 @@ from .levistock_fetcher import classify_news_level, fetch_cailian_telegraph
 
 _SRC_TIMEOUT = 5
 
+# HTTP session reuse: avoid SSL handshake overhead on every request
+_http_session = requests.Session()
+_http_session.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+})
+
 
 def _safe(fn, timeout: int = _SRC_TIMEOUT):
     return run_in_thread(fn, timeout=timeout)
@@ -292,7 +301,7 @@ def fetch_sina_roll_news(num: int = 15) -> list[dict[str, Any]]:
     try:
         url = f"https://feed.mix.sina.com.cn/api/roll/get?pageid=153&lid=2509&num={num}"
         with no_proxy():
-            resp = requests.get(url, timeout=5)
+            resp = _http_session.get(url, timeout=5)
             resp.raise_for_status()
             data = resp.json()
         if not isinstance(data, dict) or "result" not in data:

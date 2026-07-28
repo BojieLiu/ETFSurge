@@ -8,6 +8,7 @@ from ..monitor.token_usage import token_store, UsageRecord
 from ..core.logging import get_logger
 from .registry import get_agent
 from .provider import get_configured_providers, has_any_api_key, ProviderConfig
+from ..services.source_registry import registry
 
 logger = get_logger(__name__)
 
@@ -27,6 +28,69 @@ def load_prompt(name: str) -> str:
 SYSTEM_PROMPT = load_prompt("general_analyst.md")
 
 # System prompts are loaded per-agent via AgentRuntime (registry.py).
+
+_CIRCUIT_BREAKER_NAME = "deepseek"
+
+
+def _build_engine_fallback(strategies: list[dict], regime: str = "unknown") -> str:
+    """Generate a meaningful engine-based fallback report when LLM is unavailable.
+
+    Uses factor scores, layer budgets, and market regime data to produce
+    a structured summary without any external API call.
+    """
+    lines = [
+        "# ETF 组合设计方案（引擎分析摘要）",
+        "",
+        "> ⚠️ AI深度分析当前不可用，以下为策略引擎基于实时因子数据的自动分析。",
+        "",
+        f"**当前市态**: {regime}",
+        "",
+        "## 方案概览",
+        "",
+    ]
+    for s in strategies:
+        label = s.get("label", "未命名方案")
+        lb = s.get("layer_budget", {})
+        core_pct = lb.get("core", 0) * 100
+        sat_pct = lb.get("satellite", 0) * 100
+        def_pct = lb.get("defense", 0) * 100
+        lines.append(f"### {label}")
+        lines.append(f"层预算：核心 {core_pct:.0f}% · 卫星 {sat_pct:.0f}% · 防御 {def_pct:.0f}%")
+        lines.append("")
+        for e in s.get("allocations") or s.get("etfs") or []:
+            if e.get("symbol") == "CASH":
+                continue
+            name = e.get("name", e.get("symbol", ""))
+            w = (e.get("weight") or e.get("target_weight") or 0) * 100
+            fs = e.get("factor_score", "")
+            rationale = e.get("selection_rationale", "")[:60]
+            fs_str = f"（因子分: {fs:.3f}）" if isinstance(fs, (int, float)) else ""
+            rationale_str = f" — {rationale}" if rationale else ""
+            lines.append(f"- {name} ({e.get('symbol')}) {w:.0f}%{fs_str}{rationale_str}")
+        lines.append("")
+    lines.append("## 风险提示")
+    lines.append("")
+    total_weight = sum(
+        (e.get("weight") or e.get("target_weight") or 0)
+        for s in strategies
+        for e in (s.get("allocations") or s.get("etfs") or [])
+        if e.get("symbol") != "CASH"
+    )
+    if total_weight > 0.9:
+        lines.append(f"- 总权益仓位 {total_weight*100:.0f}%，高于 90% 阈值，注意市场下行风险")
+    # Check single-position concentration
+    for s in strategies:
+        for e in s.get("allocations") or s.get("etfs") or []:
+            w = e.get("weight") or e.get("target_weight") or 0
+            if w > 0.3:
+                lines.append(f"- {e.get('name', e.get('symbol'))} 权重 {w*100:.0f}% 超 30% 集中度限制")
+    if len(lines) <= 10:
+        lines.append("- 当前无有效持仓数据")
+    lines.append("")
+    lines.append("---")
+    lines.append("*本报告由引擎自动生成，不含AI分析内容。*")
+    return "\n".join(lines)
+
 
 async def _check_key():
     if not has_any_api_key():
@@ -998,16 +1062,40 @@ async def generate_design_report(
         ctx.get("benchmark_stocks", benchmark_stocks or []),
         market_context=ctx, plan_tables=plan_tables,
     )
+
+    # ── Circuit breaker check ──────────────────────────────────────
+    import time as _time
+    _now = _time.time()
+    if not registry._health(_CIRCUIT_BREAKER_NAME).available(_now):
+        logger.info(
+            "[generate_design_report] Circuit breaker open for %s, "
+            "using engine fallback", _CIRCUIT_BREAKER_NAME
+        )
+        regime = ctx.get("market_regime", "unknown")
+        return _build_engine_fallback(strategies, regime)
+
     try:
+        _start = _time.monotonic()
         # 使用"symbol_analysis" agent 的通用上下文，但传入设计报告 prompt
         result = await get_agent("symbol_analysis").run(
             prompt,
             system_override=load_prompt("design_report.md"),
         )
+        elapsed_ms = (_time.monotonic() - _start) * 1000
+        registry._health(_CIRCUIT_BREAKER_NAME).record_success(_now, duration_ms=elapsed_ms)
         return result or "报告生成失败"
     except Exception as e:
         logger.warning("[generate_design_report] LLM call failed: %s", e)
-        return ""
+        elapsed_ms = (_time.monotonic() - _start) * 1000
+        try:
+            registry._health(_CIRCUIT_BREAKER_NAME).record_failure(
+                _now, duration_ms=int(elapsed_ms), error=str(e)[:500]
+            )
+        except Exception as re:
+            logger.warning("[generate_design_report] Failed to record failure: %s", re)
+        # Return engine fallback instead of empty string
+        regime = ctx.get("market_regime", "unknown")
+        return _build_engine_fallback(strategies, regime)
 
 
 def _build_factor_breakdown_table(strategies: list[dict]) -> str:

@@ -1,6 +1,7 @@
 ﻿# ETF Surge 方案实施总计划
 
-> 生成日期: 2026-07-28 | 版本: **v13.0**
+> 生成日期: 2026-07-28 | 版本: **v13.1**
+> ✅ **Phase 13d 已完成**（2026-07-28）：诊断计划剩余项实施 — LLM 熔断保护 + 引擎级 fallback + 超时缩减 + 报告内容校验 + SSL 会话复用 + 预热退化告警。详见下方 v13.1。
 > ✅ **Phase 13 已完成**（2026-07-28）：系统综合诊断与优化 — 基于 `docs/system-diagnosis-and-optimization-plan.md`。详见下方 v13.0。
 > ✅ **Phase 12 已完成**：系统优化与质量保障 Phase 1-4 — 基于 `docs/optimization-master-plan-v2.md`。详见下方 v12.0。
 > ✅ **Phase 6.1 已完成**
@@ -1292,6 +1293,7 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 | | | | **FIX-15** — 新增 `.lighthouserc.yml` Lighthouse CI 配置（3 页 × 3 次运行，性能≥60%, 无障碍/最佳实践/SEO≥80%）（P3） |
 | | | | **改动文件：** `backend/app/fetchers/china_market.py`、`backend/app/core/ttl.py`、`backend/app/services/pool_manager.py`、`backend/app/services/portfolio_service.py`、`backend/app/tasks/strategy_check_worker.py`、`backend/app/services/cache_service.py`、`.lighthouserc.yml`、`docs/optimization-master-plan.md`、`docs/implementation-master-plan.md` |
 | | **v13.0** | 2026-07-28 | **Phase 13 — 系统综合诊断与优化 (system-diagnosis-and-optimization)** | 详见下方 |
+| | **v13.1** | 2026-07-28 | **Phase 13d — 剩余诊断项实施 (LLM熔断+引擎fallback+内容校验+SSL复用)** | 详见下方 |
 | | | | **已实现（P0 — 修复阻塞问题）：** |
 | | | | **P0-1** — 因子 Z-score winsorization：`factor_registry.py` 新增 `ZSCORE_CLIP_BOUND = 5.0`，`_standardize()` zscore 分支返回前 clip 到 [-5, 5] 并记录极端值日志 |
 | | | | **P0-2** — 市态判定单日涨跌幅阈值：`market_trends.py` `detect_market_regime()` 新增 `daily_change_pct` 参数，<-5%→panic、-5%~-3%→correction、>+5%→bull_strong、>+3%→bull_weakening |
@@ -1310,3 +1312,18 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 | | | | **P2-3** — 数据源 fallback 测试：`test_data_source_fallback.py` 18 个测试（主源成功跳过备用、空结果触发降级、异常触发降级、熔断跳过、HTTP 4xx/5xx 硬失败、冷却恢复、健康指标验证） |
 | | | | **P2-4** — CI 门禁配置：`.lighthouserc.yml`（Lighthouse CI 3 次运行，Perf≥60%, 无障碍/SEO≥80%）、`backend/scripts/check_perf_budget.py`（预热≤5s, API avg≤3s, max≤10s） |
 | | | | **改动文件：** `backend/app/factors/factor_registry.py`、`backend/app/services/market_trends.py`、`backend/app/tasks/design_report.py`、`backend/app/routers/market.py`、`backend/app/main.py`、`backend/scripts/verify_e2e.py`、`backend/tests/test_factor_registry.py`、`backend/tests/test_report_quality.py`、`backend/app/fetchers/fundamentals_fetcher.py`、`backend/app/engine/allocation_engine.py`、`backend/app/core/async_utils.py`、`backend/app/routers/admin.py`、`backend/tests/test_data_source_fallback.py`、`frontend/src/components/analysis/ChartPanel.vue`、`.lighthouserc.yml`、`backend/scripts/check_perf_budget.py`、`docs/implementation-master-plan.md` |
+| | **v13.1** | 2026-07-28 | **Phase 13d — 诊断计划剩余项实施 (剩余 system-diagnosis-and-optimization 项)** | 详见下方 |
+| | | | **已实现（P0 — LLM 熔断 + 引擎 fallback + 超时缩减）：** |
+| | | | **P0-CB1** — LLM 熔断保护：`llm.py` `generate_design_report()` 新增 SourceRegistry 熔断器检查，熔断打开时跳过 LLM 调用直接返回引擎 fallback；LLM 成功/失败记录到 SourceRegistry 健康状态 |
+| | | | **P0-CB2** — 引擎级 fallback 内容：`llm.py` 新增 `_build_engine_fallback()` 函数，基于策略数据和市态生成结构化降级报告（含因子评分、层预算、风险提示），即使 LLM 不可用也能返回有意义的报告 |
+| | | | **P0-CB3** — 超时缩减：`config.py` `llm_primary_timeout` 90s→30s, `llm_fallback_timeout` 60s→30s，用户等待从最长 300s→120s |
+| | | | **已实现（P1 — 报告内容校验 + SSL 会话复用）：** |
+| | | | **P1-V1** — 设计报告内容校验：`design_report.py` 新增 `_validate_design_text()` 函数（检查方案详解标题、重复标题检测、截断描述、最小长度 200 字）、`_count_repeated_headers()` 工具函数 |
+| | | | **P1-SSL1** — SSL 会话复用：`news_fetcher.py` 新增模块级 `_http_session = requests.Session()`，替换原 `requests.get()` 调用，复用 TCP + SSL 连接 |
+| | | | **已实现（P2 — 预热退化告警）：** |
+| | | | **P2-W1** — 预热性能退化告警：`main.py` lifespan 末尾新增预热耗时计算，超 30s→WARNING 日志提示，15-30s→INFO 记录 |
+| | | | **新增测试（TDD 先写后实现）：** |
+| | | | **T1** — `test_llm_circuit_breaker.py` 5 个测试（熔断打开跳过 LLM、熔断关闭正常调用、失败记录到 SourceRegistry、引擎 fallback 含策略数据、空策略处理） |
+| | | | **T2** — `test_design_report_validation.py` 9 个测试（完整报告无警告、缺少章节、重复标题、过短、截断、空报告、无/有重复标题、无标题） |
+| | | | **T3** — `test_ssl_session.py` 3 个测试（Session 实例验证、请求头验证、模块级属性验证） |
+| | | | **改动文件：** `backend/app/config.py`、`backend/app/analysis/llm.py`、`backend/app/tasks/design_report.py`、`backend/app/fetchers/news_fetcher.py`、`backend/app/main.py`、`backend/tests/test_llm_circuit_breaker.py`（新）、`backend/tests/test_design_report_validation.py`（新）、`backend/tests/test_ssl_session.py`（新）、`docs/implementation-master-plan.md` |

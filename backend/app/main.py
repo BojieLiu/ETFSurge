@@ -356,6 +356,22 @@ async def lifespan(app: FastAPI):
         _profiler.write_report("warmup_timing.json")
         logger.info("[profiler] Warmup profiling complete — reports saved to logs/")
 
+    # ── Warmup degradation alert (7.5 P2) ────────────────────────────
+    _warmup_duration = time.time() - getattr(app.state, "_startup_ts", time.time())
+    if _warmup_duration > 30:
+        logger.warning(
+            "[warmup] Warmup took %.1fs (threshold 30s) — degradation possible. "
+            "Check data source health and network latency.",
+            _warmup_duration,
+        )
+    elif _warmup_duration > 15:
+        logger.info(
+            "[warmup] Warmup took %.1fs — within acceptable range.",
+            _warmup_duration,
+        )
+    else:
+        logger.info("[warmup] Warmup completed in %.1fs.", _warmup_duration)
+
     yield
 
     scheduler = getattr(app.state, "scheduler", None)

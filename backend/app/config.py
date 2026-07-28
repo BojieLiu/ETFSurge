@@ -56,8 +56,8 @@ class Settings(BaseSettings):
     # 降级策略
     llm_primary_provider: str = "opencode_zen"
     llm_fallback_provider: str = "deepseek"
-    llm_primary_timeout: int = 90
-    llm_fallback_timeout: int = 60
+    llm_primary_timeout: int = 30
+    llm_fallback_timeout: int = 30
 
     # 日志：级别（DEBUG/INFO/WARNING/ERROR）与可选日志文件路径
     log_level: str = "INFO"

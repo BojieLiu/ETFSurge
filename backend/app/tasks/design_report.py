@@ -188,6 +188,43 @@ def _strip_ai_boilerplate(text: str | None) -> str:
     return "\n".join(cleaned).strip()
 
 
+def _count_repeated_headers(text: str) -> int:
+    """Count duplicate markdown headers (same heading text at any level).
+
+    Returns the number of headers that appear more than once.
+    """
+    import re
+    headers = re.findall(r'^#{1,6}\s+.*$', text, re.MULTILINE)
+    seen: set[str] = set()
+    repeats = 0
+    for h in headers:
+        if h in seen:
+            repeats += 1
+        seen.add(h)
+    return repeats
+
+
+def _validate_design_text(design_text: str) -> list[str]:
+    """Validate design report content completeness and quality.
+
+    Returns a list of warning strings (empty = no issues).
+    """
+    warnings: list[str] = []
+    if "## 一、三种方案详解" not in design_text:
+        warnings.append("缺少方案详解标题")
+    if _count_repeated_headers(design_text) > 0:
+        warnings.append("存在重复标题")
+    # Check for truncated descriptions
+    for line in design_text.splitlines():
+        if "适合中等风" in line and "险偏好" not in line:
+            warnings.append("存在截断描述")
+            break
+    # Minimum length check
+    if len(design_text) < 200:
+        warnings.append("报告内容过短")
+    return warnings
+
+
 def _validate_report_consistency(report_text: str, strategies: list[dict]) -> str:
     """校验 LLM 报告中的 ETF 代码是否与引擎策略数据一致。
     如 LLM 引入了引擎方案以外的标的，追加修正脚注。
