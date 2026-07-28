@@ -207,7 +207,7 @@ async def _compute_fund_flow(pool_manager) -> dict:
                 "negative_flow_count": 0, "total_symbols": 0}
 
     # 并发获取所有 fund flow（Semaphore 限流）
-    from ..fetchers.fundamental_fetcher import fetch_fund_flow
+    from ..fetchers.fundamentals_fetcher import fetch_fund_flow
 
     async def _fetch_one(sym: str) -> dict | None:
         async with _fund_flow_sem:  # OPT-04: 最多 8 个并发

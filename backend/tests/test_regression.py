@@ -22,25 +22,25 @@ from app.services.source_registry import SourceRegistry, SourceHealth
 class TestOpt01CircuitBreakerRegression:
     """OPT-01 红绿切换回归测试。"""
 
-    @patch("app.fetchers.fundamental_fetcher._push2_available", return_value=False)
+    @patch("app.fetchers.fundamentals_fetcher._push2_available", return_value=False)
     def test_fetch_fund_flow_returns_none_when_push2_open(self, mock_push2):
         """push2 熔断时 fetch_fund_flow 应立即返回 None（不等 8s 超时）。"""
-        from app.fetchers.fundamental_fetcher import fetch_fund_flow
+        from app.fetchers.fundamentals_fetcher import fetch_fund_flow
         result = fetch_fund_flow("159338")
         assert result is None, "熔断时应立即返回 None"
 
-    @patch("app.fetchers.fundamental_fetcher._push2_available", return_value=False)
+    @patch("app.fetchers.fundamentals_fetcher._push2_available", return_value=False)
     def test_fetch_fund_flow_detailed_returns_none_when_push2_open(self, mock_push2):
         """push2 熔断时 fetch_fund_flow_detailed 应立即返回 None。"""
-        from app.fetchers.fundamental_fetcher import fetch_fund_flow_detailed
+        from app.fetchers.fundamentals_fetcher import fetch_fund_flow_detailed
         result = fetch_fund_flow_detailed("159338")
         assert result is None, "熔断时应立即返回 None"
 
-    @patch("app.fetchers.fundamental_fetcher._push2_available", return_value=True)
-    @patch("app.fetchers.fundamental_fetcher.run_in_thread", return_value=None)
+    @patch("app.fetchers.fundamentals_fetcher._push2_available", return_value=True)
+    @patch("app.fetchers.fundamentals_fetcher.run_in_thread", return_value=None)
     def test_fetch_fund_flow_proceeds_when_push2_available(self, mock_run, mock_push2):
         """push2 可用时 fetch_fund_flow 正常执行（run_in_thread 被调用）。"""
-        from app.fetchers.fundamental_fetcher import fetch_fund_flow
+        from app.fetchers.fundamentals_fetcher import fetch_fund_flow
         result = fetch_fund_flow("159338")
         assert result is None
 
@@ -87,7 +87,7 @@ class TestOpt02FundFlowDegradation:
 
         with patch("app.services.source_registry.registry._health",
                    return_value=mock_h):
-            with patch("app.fetchers.fundamental_fetcher.fetch_fund_flow",
+            with patch("app.fetchers.fundamentals_fetcher.fetch_fund_flow",
                        return_value={"main_net_inflow": 1000000.0, "main_net_inflow_pct": 2.5}):
                 result = await _compute_fund_flow(mock_pm)
                 assert result["total_net_inflow"] == 1000000.0
@@ -162,7 +162,7 @@ class TestOpt04SemaphoreRegression:
 
         with patch("app.services.source_registry.registry._health",
                    return_value=mock_h):
-            with patch("app.fetchers.fundamental_fetcher.fetch_fund_flow",
+            with patch("app.fetchers.fundamentals_fetcher.fetch_fund_flow",
                        return_value={"main_net_inflow": 100.0, "main_net_inflow_pct": 1.0}):
                 result = await _compute_fund_flow(mock_pm)
                 assert result["total_symbols"] == 10

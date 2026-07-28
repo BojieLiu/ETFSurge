@@ -840,7 +840,7 @@ class PoolManager:
         """异步刷新市场情绪缓存（2.7.9）。"""
         import time
         try:
-            from ..fetchers.sentiment_fetcher import fetch_market_sentiment
+            from ..fetchers.fundamentals_fetcher import fetch_market_sentiment
             sentiment = await fetch_market_sentiment()
             if sentiment:
                 self._sentiment_cache = sentiment
@@ -856,7 +856,7 @@ class PoolManager:
         if self._sentiment_cache and (now - self._sentiment_cache_ts) < self.SENTIMENT_TTL:
             return self._sentiment_cache
         try:
-            from ..fetchers.sentiment_fetcher import fetch_market_sentiment
+            from ..fetchers.fundamentals_fetcher import fetch_market_sentiment
             # Can't directly await here — cache miss just returns default
             pass
         except Exception:

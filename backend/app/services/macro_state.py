@@ -183,7 +183,7 @@ async def _fetch_sentiment_reference() -> float:
     返回: 0~100 情绪指数
     """
     try:
-        from ..fetchers.sentiment_fetcher import fetch_market_sentiment
+        from ..fetchers.fundamentals_fetcher import fetch_market_sentiment
         result = await fetch_market_sentiment()
         return float(result.get("sentiment_index", 50))
     except Exception:

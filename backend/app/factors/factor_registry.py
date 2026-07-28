@@ -497,7 +497,7 @@ def _compute_stock_divergence(data: dict) -> float:
         return min(max((ad - 1.0) * 2.0, -1.0), 1.0)
     try:
         from ..core.async_utils import run_in_thread
-        from ..fetchers.sentiment_fetcher import fetch_advance_decline_ratio
+        from ..fetchers.fundamentals_fetcher import fetch_advance_decline_ratio
         import asyncio
         loop = asyncio.get_running_loop()
         if loop and loop.is_running():

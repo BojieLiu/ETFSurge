@@ -302,13 +302,13 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
         constraints = params.get("constraints")
 
         # ── Stage 1&2: DATA + ENGINE (combined via generate_enhanced_design) ──
-        # pool_manager.refresh() 内部有 60s timeout + 空池保护，此处给 90s 总预算
+        # OPT-06: 超时预算拆分，DATA 阶段 45s 上限
         result = await asyncio.wait_for(
             generate_enhanced_design(
                 capital=capital,
                 constraints=constraints,
             ),
-            timeout=90,  # 60s (DATA refresh max) + 10s (ENGINE) + 20s buffer
+            timeout=45,  # OPT-06: DATA 阶段 45s 预算（原 90s 总预算拆分为三段）
         )
 
         strategies = result.get("strategies", [])
@@ -408,14 +408,16 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
             # 从 market_context 取市场情绪，避免直接引用 pool_manager（NameError 修复）
             market_sentiment = market_context.get("market_sentiment", {}) if market_context else {}
 
-            llm_analysis = await generate_design_report(
-                strategies=strategies,
-                market_sentiment=market_sentiment,
-                market_context=market_context,
-                plan_tables=plan_tables,
+            # OPT-06: LLM 阶段 35s 预算
+            llm_analysis = await asyncio.wait_for(
+                generate_design_report(
+                    strategies=strategies,
+                    market_sentiment=market_sentiment,
+                    market_context=market_context,
+                    plan_tables=plan_tables,
+                ),
+                timeout=35,  # OPT-06: LLM 报告 35s 预算
             )
-            # generate_design_report 的 provider timeout 由 config 控制
-            # primary=90s, fallback=60s, 不额外包裹 asyncio.wait_for
 
             if llm_analysis and len(llm_analysis.strip()) > 0:
                 full_text = design_text + "\n\n## 二、市场环境与配置建议\n\n" + llm_analysis

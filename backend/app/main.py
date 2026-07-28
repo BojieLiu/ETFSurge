@@ -300,7 +300,7 @@ async def lifespan(app: FastAPI):
     # A1-A2: Wait for warmup tasks to complete before stopping profiler
     if _warmup_tasks:
         logger.info("[warmup] Waiting for %d warmup task(s) to complete...", len(_warmup_tasks))
-        done, pending = await asyncio.wait(_warmup_tasks, timeout=130)
+        done, pending = await asyncio.wait(_warmup_tasks, timeout=60)
         completed = len(done)
         timed_out = len(pending)
         logger.info("[warmup] %d task(s) completed, %d still pending (will continue in background)", completed, timed_out)

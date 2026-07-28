@@ -984,6 +984,37 @@ def section_factors(host, port):
         check(f"GET /api/v1/factors/ic", False, str(e))
 
 
+# ── 数据源熔断器状态 ────────────────────────────────────────────
+
+
+def section_circuit_breaker():
+    """#6: 数据源熔断器状态 — 检查 SourceRegistry 端点（OPT-07 E2E 降级场景）。"""
+    section("数据源熔断器状态")
+    try:
+        r = requests.get(f"{BASE}/api/v1/admin/sources", timeout=10)
+        if r.status_code != 200:
+            check("GET /admin/sources -> 200", False, f"HTTP {r.status_code}")
+            return
+        data = r.json()
+        sources = data.get("sources", {})
+        if not sources:
+            check("admin/sources 返回数据", False, "sources 为空")
+            return
+        check(f"admin/sources 返回 {len(sources)} 个数据源", len(sources) >= 1)
+        for name, status in sources.items():
+            state = status.get("state", "unknown")
+            failures = status.get("failures", 0)
+            check(f"  {name}: state={state}, failures={failures}", True)
+        # 验证熔断器端点包含必要字段
+        if sources:
+            sample = next(iter(sources.values()))
+            has_code = "cooldown_until" in sample
+            check(f"  ciruit-breaker 字段完整（cooldown_until）", has_code,
+                  "missing field: cooldown_until" if not has_code else "")
+    except Exception as e:
+        check("熔断器状态检查", False, str(e))
+
+
 def print_summary():
     total = PASS + FAIL
     print(f"\n{'=' * 50}")
@@ -1007,6 +1038,7 @@ MODULES = {
     "analysis": section_analysis,
     "sectors": check_sector_data,
     "quality": check_data_quality,
+    "circuit-breaker": section_circuit_breaker,
 }
 
 SMOKE_MODULES = ["health", "market"]
