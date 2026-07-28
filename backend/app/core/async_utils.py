@@ -24,6 +24,18 @@ _long_running_executor = concurrent.futures.ThreadPoolExecutor(max_workers=8)
 _default_executor_lock = threading.Lock()
 _default_executor_max = 0
 
+# 队列深度峰值计数器 — 累积记录超过 ERROR 阈值的次数
+_queue_depth_spike_count = 0
+_queue_depth_spike_lock = threading.Lock()
+
+
+def get_queue_depth_spike_count() -> int:
+    """返回自启动以来线程池队列深度超过 ERROR 阈值的总次数。
+
+    用于监控线程池饱和度趋势。
+    """
+    return _queue_depth_spike_count
+
 # P1-5: 长任务 vs 快速 API 请求的线程池隔离标志
 # 调用方可用 _use_long_running_executor() 装饰器或参数切换
 
@@ -79,6 +91,9 @@ async def run_sync(call, *args, timeout: int = DEFAULT_SYNC_TIMEOUT):
         _logger = logging.getLogger(__name__)
         _logger.error("[async_utils] run_sync queue depth=%d (fn=%s, timeout=%ds) — POOL SATURATION!",
                      _pending, getattr(call, '__name__', str(call)), timeout)
+        with _queue_depth_spike_lock:
+            global _queue_depth_spike_count
+            _queue_depth_spike_count += 1
     elif _pending > 8:
         _logger = logging.getLogger(__name__)
         _logger.warning("[async_utils] run_sync queue depth=%d (fn=%s, timeout=%ds) — pool may be saturated",

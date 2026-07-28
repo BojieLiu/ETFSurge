@@ -721,7 +721,7 @@ def fetch_margin_change() -> float:
 
     # Fallback: 深交所/上交所 API
     try:
-        balance = run_in_thread(margin_fetcher.fetch_margin_balance, timeout=8, executor="long")
+        balance = run_in_thread(fetch_margin_balance, timeout=8, executor="long")
         if balance and balance > 0:
             # 归一化: ±5000亿为极端值
             norm = max(-1.0, min(1.0, (balance - 1.8e12) / 5e11))

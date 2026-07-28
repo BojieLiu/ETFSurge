@@ -124,6 +124,9 @@ async def get_factor_health():
     供 verify_e2e 和运维监控使用，不依赖 mock 环境。
     """
     from ..factors.factor_registry import FactorRegistry
+    _cache = getattr(get_factor_health, "_cache", None)
+    if _cache and time.time() - _cache["ts"] < 60:
+        return _cache["data"]
     try:
         fr = FactorRegistry()
         symbols = ["510300", "518880", "511090"]
@@ -139,7 +142,9 @@ async def get_factor_health():
                     "ratio": f"{non_zero}/{total}",
                     "healthy": non_zero >= max(10, total * 0.4),
                 }
-        return {"status": "ok", "symbols": report}
+        cached = {"status": "ok", "symbols": report}
+        get_factor_health._cache = {"data": cached, "ts": time.time()}
+        return cached
     except Exception as e:
         return {"status": "error", "message": str(e)}
 

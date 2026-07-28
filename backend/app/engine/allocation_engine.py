@@ -129,6 +129,7 @@ def _select_and_weight(
     strategy: str = "balanced",
     max_count: int = 5,
     exclude_tracked_indices: set[str] | None = None,
+    penalize_symbols: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Internal helper: score candidates, keep top *max_count*,
@@ -237,6 +238,9 @@ def _select_and_weight(
                     c2_bonus = 1.5
                 elif any(t in name for t in _SAFE_THEMES):
                     c2_bonus = -0.3
+        # P1: Penalize symbols already used in prior strategies
+        if penalize_symbols and sym in penalize_symbols:
+            composite -= 1.5  # Reduce score to disadvantage overlap
         composite += c2_bonus
         scored.append((composite, cand, factor_scores))
 
@@ -401,6 +405,8 @@ def allocate(
 
     # Build each risk-profile strategy
     strategies: list[dict[str, Any]] = []
+    # Track symbol usage across profiles to reduce overlap (P1)
+    _used_symbols_for_overlap: set[str] = set()
 
     for profile_key in ("defensive", "balanced", "aggressive"):
         meta = STRATEGY_META[profile_key]
@@ -421,6 +427,8 @@ def allocate(
             return True
 
         # ── Core layer ──
+        # Penalize symbols already used in prior strategies (P1)
+        _penalize = _used_symbols_for_overlap.copy() if _used_symbols_for_overlap else set()
         core_alloc = _select_and_weight(
             [c for c in core_candidates if _dedup_segment(c)],
             factor_matrix,
@@ -429,6 +437,7 @@ def allocate(
             regime=regime,
             strategy=profile_key,
             max_count=meta.get("layer_count", {}).get("core", 4),
+            penalize_symbols=_penalize,
         )
         allocations.extend(core_alloc)
 
@@ -442,6 +451,7 @@ def allocate(
             regime=regime,
             strategy=profile_key,
             max_count=meta.get("layer_count", {}).get("satellite", 8),
+            penalize_symbols=_penalize,
         )
         allocations.extend(sat_alloc)
 
@@ -480,6 +490,7 @@ def allocate(
             regime=regime,
             strategy=profile_key,
             max_count=meta.get("layer_count", {}).get("defense", 2),
+            penalize_symbols=_penalize,
         )
         allocations.extend(def_alloc)
 
@@ -551,5 +562,10 @@ def allocate(
             "risk_metrics": risk_metrics,
         }
         strategies.append(strategy)
+        # Accumulate symbols for overlap reduction in subsequent strategies (P1)
+        for alloc in allocations:
+            sym = alloc.get("symbol", "")
+            if sym and sym != "CASH":
+                _used_symbols_for_overlap.add(sym)
 
     return strategies
