@@ -157,7 +157,7 @@ def _fetch_em_etf_list() -> list[dict] | None:
     all_items = []
     total = None
     for page in range(1, 20):
-        url = (f"http://push2.eastmoney.com/api/qt/clist/get?"
+        url = (f"http://push2delay.eastmoney.com/api/qt/clist/get?"
                f"pn={page}&pz=100&po=1&np=1&fs=m:1+t:2&fields={fields}&fid=f3")
         try:
             with no_proxy():

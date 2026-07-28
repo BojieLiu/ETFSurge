@@ -16,7 +16,7 @@ logger = get_logger(__name__)
 # --- fundamental_fetcher.py: Fund flow ---
 
 from ..utils.decode import decode_df as _decode_df
-_PUSH2_SOURCE = "push2.eastmoney.com"
+_PUSH2_SOURCE = "push2delay.eastmoney.com"
 _AKSHARE_SOURCE = "akshare"
 
 
@@ -603,9 +603,9 @@ def fetch_advance_decline_ratio() -> float:
     返回: 0~1, 失败时返回 0.5 (中性)
     """
     # S01: 检查熔断器状态
-    if not _source_registry._health("push2delay.eastmoney.com").available(_time.time()):
+    if not _push2_h.available(_time.time()):
         logger.warning("[sentiment] push2delay circuit open, skipping direct fetch")
-        _source_registry.record_failure("push2delay.eastmoney.com")
+        _push2_h.record_failure(_time.time())
         return _advance_decline_fallback()
 
     # 1. push2delay.eastmoney.com (实测可用，替代被拒的 push2)
@@ -622,11 +622,11 @@ def fetch_advance_decline_ratio() -> float:
             up = sum(1 for i in items if float(i.get("f3", 0) or 0) > 0)
             total = len(items)
             if total > 0:
-                _source_registry.record_success("push2delay.eastmoney.com")
+                _push2_h.record_success()
                 return up / total
     except Exception as e:
         logger.warning("[sentiment] push2delay advance_decline failed: %s", e)
-        _source_registry.record_failure("push2delay.eastmoney.com")
+        _push2_h.record_failure(_time.time())
 
     return _advance_decline_fallback()
 
@@ -642,12 +642,12 @@ def _advance_decline_fallback() -> float:
             up = sum(1 for _, r in df.iterrows() if float(r.get("涨跌幅", 0) or 0) > 0)
             total = len(df)
             if total > 0:
-                _source_registry.record_success("push2delay.eastmoney.com")
+                _push2_h.record_success()
                 return up / total
     except Exception as e2:
         logger.warning("[sentiment] akshare advance_decline fallback failed: %s", e2)
 
-    _source_registry.record_failure("push2delay.eastmoney.com")
+    _push2_h.record_failure(_time.time())
     return 0.5
 
 

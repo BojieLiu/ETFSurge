@@ -177,7 +177,7 @@ async def _compute_fund_flow(pool_manager) -> dict:
     # OPT-02: 熔断器检查，push2 不可用时直接返回空数据
     from ..services.source_registry import registry as _source_registry
     import time
-    push2_h = _source_registry._health("push2.eastmoney.com")
+    push2_h = _source_registry._health("push2delay.eastmoney.com")
     if not push2_h.available(time.time()):
         logger.info("[strategy_design] _compute_fund_flow: push2 circuit open, returning empty")
         return {"total_net_inflow": 0.0, "positive_flow_count": 0,
