@@ -187,6 +187,11 @@ def _select_and_weight(
     for cand in candidates:
         sym = cand.get("symbol", "")
         factor_scores = factor_matrix.get(sym, {})
+        # ROOT CAUSE FIX: aggregate_factor_scores converts flat keys
+        # (e.g. "technical.ma.sma_5") into category-level scores
+        # (e.g. "technical", "momentum") before the composite calculation.
+        from app.factors.factor_registry import FactorRegistry as _FR
+        factor_scores = _FR.aggregate_factor_scores(factor_scores)
         # B: 风偏差异化因子权重 — 按策略调整
         _PROFILE_WEIGHTS = {
             "defensive": {"technical": 0.4, "sentiment": 0.25, "momentum": 0.15, "valuation": 0.2},

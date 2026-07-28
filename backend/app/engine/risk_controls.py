@@ -126,8 +126,9 @@ def remove_stale_candidates(
                 filtered.append(etf)
                 continue
             fs = factor_matrix.get(etf.get("symbol", ""), {})
-            has_price = fs.get("price", 0) > 0
-            has_return = abs(fs.get("return_1m", 0)) > 0.0001
+            # Factor keys are namespaced: check both bare and prefixed keys
+            has_price = fs.get("price", 0) > 0 or abs(fs.get("etf.price", 0)) > 0.0001
+            has_return = abs(fs.get("return_1m", 0)) > 0.0001 or abs(fs.get("etf.return_1m", 0)) > 0.0001
             if not has_price and not has_return:
                 removed_weight += etf.get("weight", 0.0)
                 logger.info("[risk] removed stale %s (no price/return data)", etf["symbol"])
