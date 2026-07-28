@@ -73,7 +73,7 @@ def fetch_realtime(symbol: str) -> dict[str, Any] | None:
             }
         except (ValueError, TypeError, KeyError):
             return None
-    return run_in_thread(_p, timeout=_TIMEOUT)
+    return run_in_thread(_p, timeout=_TIMEOUT, executor="long")
 
 
 def fetch_history(symbol: str, days: int = 60) -> list[dict[str, Any]] | None:
@@ -113,4 +113,4 @@ def fetch_history(symbol: str, days: int = 60) -> list[dict[str, Any]] | None:
             except (ValueError, TypeError, KeyError):
                 continue
         return result
-    return run_in_thread(_p, timeout=_TIMEOUT)
+    return run_in_thread(_p, timeout=_TIMEOUT, executor="long")

@@ -21,7 +21,7 @@ _TIMEOUT = 10
 def _exec(fn, timeout: int = _TIMEOUT):
     """在线程中执行 fn, 超时 / 异常返回 None。"""
     from ..core.async_utils import run_in_thread
-    return run_in_thread(fn, timeout=timeout)
+    return run_in_thread(fn, timeout=timeout, executor="long")
 
 
 def _cached(key: str, producer, ttl_key: str = "sector_industry"):

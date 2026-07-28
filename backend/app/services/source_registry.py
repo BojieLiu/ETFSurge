@@ -5,41 +5,91 @@
 - `route()` 按优先级尝试各源,跳过冷却中或不可用的源,记录成败以更新健康度。
 - 支持 `on_event` 回调,将成功/失败事件推送到 SourceEventStore。
 这样多个免费数据源可以互相补充、自动隔离不稳定的源,提升整体稳定性。
+
+OPT-15 优化（2026-07-28）:
+- try_call() 包装器：健康检查 → 执行 → 记录结果，三合一
+- Fast-fail 检测：< 500ms 的失败视为硬失败，立即冷却
+- 指数退避冷却：连续熔断冷却时间指数增长（60s→120s→240s→480s→600s max）
+- reset_source()：手动重置熔断器状态
 """
 
 import threading
 import time
 from typing import Any, Callable, Optional
 
+# 快速失败阈值（毫秒）
+_FAST_FAIL_MS = 500
+
 
 class SourceHealth:
+    """单个数据源的健康状态与熔断器。
+
+    OPT-15 新增：
+    - base_cooldown / max_cooldown：指数退避参数
+    - _consecutive_cycles：连续冷却周期计数
+    - record_failure：快失败检测（duration_ms < 500ms 自动转为硬失败）
+    """
+
     def __init__(self, cooldown: float = 60.0, failure_threshold: int = 3,
+                 max_cooldown: float = 600.0,
                  on_event: Optional[Callable] = None) -> None:
+        self.base_cooldown = cooldown
         self.cooldown = cooldown
+        self.max_cooldown = max_cooldown
         self.failure_threshold = failure_threshold
         self._on_event = on_event
         self._failures = 0
         self._cool_until = 0.0
+        self._consecutive_cycles = 0
         self._lock = threading.Lock()
 
     def available(self, now: float) -> bool:
         with self._lock:
             return now >= self._cool_until
 
+    def _calculate_cooldown(self) -> float:
+        """指数退避计算冷却时长。
+
+        退避序列：60s → 120s → 240s → 480s → 600s(max)
+        """
+        if self._consecutive_cycles == 0:
+            self._consecutive_cycles = 1
+        else:
+            self._consecutive_cycles += 1
+        return min(
+            self.base_cooldown * (2 ** (self._consecutive_cycles - 1)),
+            self.max_cooldown,
+        )
+
     def record_success(self, route: str = "", operation: str = "realtime",
                        target: str = "", duration_ms: float = 0.0) -> None:
         with self._lock:
             self._failures = 0
             self._cool_until = 0.0
+            self._consecutive_cycles = 0
         self._emit_event(route, operation, target, True, duration_ms, "")
 
     def record_failure(self, now: float, route: str = "", operation: str = "realtime",
                        target: str = "", duration_ms: float = 0.0,
                        error_message: str = "") -> None:
+        """记录一次失败。
+
+        OPT-15: 如果 duration_ms < 500ms（快失败），自动转为硬失败。
+        连续失败达到阈值时，使用指数退避计算冷却时间。
+        """
+        # Fast-fail 检测：< 500ms 的失败视为硬失败，立即冷却
+        if duration_ms > 0 and duration_ms < _FAST_FAIL_MS:
+            self.record_hard_failure(now, route=route, operation=operation,
+                                     target=target, duration_ms=duration_ms,
+                                     error_message=f"[FAST-FAIL] {error_message}" if error_message else "[FAST-FAIL]")
+            return
+
         with self._lock:
             self._failures += 1
             if self._failures >= self.failure_threshold:
-                self._cool_until = now + self.cooldown
+                actual_cooldown = self._calculate_cooldown()
+                self.cooldown = actual_cooldown
+                self._cool_until = now + actual_cooldown
                 self._failures = 0
         self._emit_event(route, operation, target, False, duration_ms, error_message)
 
@@ -50,9 +100,12 @@ class SourceHealth:
         """Immediate cooling — for HTTP 4xx/5xx where the source is clearly dead.
 
         Skips failure_threshold counting: goes straight to cooldown.
+        Uses exponential backoff for cooldown duration.
         """
         with self._lock:
-            self._cool_until = now + self.cooldown
+            actual_cooldown = self._calculate_cooldown()
+            self.cooldown = actual_cooldown
+            self._cool_until = now + actual_cooldown
             self._failures = 0
         self._emit_event(route, operation, target, False, duration_ms,
                          f"[HARD] {error_message}")
@@ -102,6 +155,45 @@ class SourceRegistry:
             h = SourceHealth(on_event=self._make_source_callback(name))
             self._states[name] = h
         return self._states[name]
+
+    def try_call(self, name: str, fn: Callable, *args,
+                 timeout: float = 0, **kwargs) -> Any:
+        """健康检查 → 执行 → 记录结果，三合一。
+
+        Args:
+            name: 数据源名称（如 "push2.eastmoney.com"）
+            fn: 要执行的函数
+            *args: 传给 fn 的位置参数
+            timeout: 超时秒数（0 表示不超时）
+            **kwargs: 传给 fn 的关键字参数
+
+        Returns:
+            fn(*args, **kwargs) 的结果，或 None（熔断/失败时）
+
+        自动处理：
+        - 熔断器打开时直接返回 None，不执行 fn
+        - 成功时调用 record_success
+        - 失败时自动检测 fast-fail（<500ms）并调用 record_hard_failure
+        - 超时时调用 record_failure
+        """
+        h = self._health(name)
+        now = time.time()
+        if not h.available(now):
+            return None
+
+        t0 = time.perf_counter()
+        try:
+            result = fn(*args, **kwargs)
+            elapsed = (time.perf_counter() - t0) * 1000
+            h.record_success(route="", operation="try_call",
+                             target=name, duration_ms=elapsed)
+            return result
+        except Exception as e:
+            elapsed = (time.perf_counter() - t0) * 1000
+            h.record_failure(now, route="", operation="try_call",
+                             target=name, duration_ms=elapsed,
+                             error_message=str(e)[:200])
+            return None
 
     def route(self, providers: list[tuple[str, Callable[[], Any]]],
               route_name: str = "",
@@ -180,12 +272,23 @@ class SourceRegistry:
                     "state": "open" if now < h._cool_until else "closed",
                     "failure_threshold": h.failure_threshold,
                     "cooldown_secs": h.cooldown,
+                    "max_cooldown": h.max_cooldown,
                     "failures_since_last_ok": h._failures,
+                    "consecutive_cycles": h._consecutive_cycles,
                 }
                 if now < h._cool_until:
                     status["cool_until"] = h._cool_until
                 result.append(status)
         return result
+
+    def reset_source(self, name: str) -> None:
+        """手动重置指定数据源的熔断器状态。"""
+        h = self._health(name)
+        with h._lock:
+            h._failures = 0
+            h._cool_until = 0.0
+            h._consecutive_cycles = 0
+            h.cooldown = h.base_cooldown
 
 
 # 全局注册表(跨请求共享健康度)

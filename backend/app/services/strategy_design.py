@@ -160,12 +160,29 @@ async def generate_enhanced_design(
         }
 
 
+# OPT-04: 资金流向并发限流，最多 8 个并发请求
+_fund_flow_sem = asyncio.Semaphore(8)
+
+
 async def _compute_fund_flow(pool_manager) -> dict:
-    """聚合全市场候选 ETF 资金流向（真异步，asyncio.gather 并发请求）。
+    """聚合全市场候选 ETF 资金流向（带并发限流 + 熔断器保护）。
+
+    OPT-02: push2 熔断时快速返回空数据（不等 8s 超时）。
+    OPT-04: Semaphore(8) 限制并发，防止线程池耗尽。
 
     返回:
-      {"total_net_inflow": float, "positive_flow_count": int, "negative_flow_count": int, "total_symbols": int}
+      {"total_net_inflow": float, "positive_flow_count": int,
+       "negative_flow_count": int, "total_symbols": int}
     """
+    # OPT-02: 熔断器检查，push2 不可用时直接返回空数据
+    from ..services.source_registry import registry as _source_registry
+    import time
+    push2_h = _source_registry._health("push2.eastmoney.com")
+    if not push2_h.available(time.time()):
+        logger.info("[strategy_design] _compute_fund_flow: push2 circuit open, returning empty")
+        return {"total_net_inflow": 0.0, "positive_flow_count": 0,
+                "negative_flow_count": 0, "total_symbols": 0}
+
     from ..core.async_utils import run_sync
 
     pool = pool_manager.get_pool()
@@ -189,24 +206,25 @@ async def _compute_fund_flow(pool_manager) -> dict:
         return {"total_net_inflow": 0.0, "positive_flow_count": 0,
                 "negative_flow_count": 0, "total_symbols": 0}
 
-    # 并发获取所有 fund flow
+    # 并发获取所有 fund flow（Semaphore 限流）
     from ..fetchers.fundamental_fetcher import fetch_fund_flow
 
     async def _fetch_one(sym: str) -> dict | None:
-        try:
-            return await run_sync(fetch_fund_flow, sym, timeout=8)
-        except Exception:
-            return None
+        async with _fund_flow_sem:  # OPT-04: 最多 8 个并发
+            try:
+                return await run_sync(fetch_fund_flow, sym, timeout=8)
+            except Exception:
+                return None
 
     results = await asyncio.gather(*[_fetch_one(s) for s in all_symbols],
-                                  return_exceptions=False)
+                                  return_exceptions=True)
 
     total_net_inflow = 0.0
     positive_count = 0
     negative_count = 0
 
     for flow in results:
-        if flow and flow.get("main_net_inflow") is not None:
+        if isinstance(flow, dict) and flow.get("main_net_inflow") is not None:
             inflow = flow["main_net_inflow"]
             total_net_inflow += inflow
             if inflow >= 0:

@@ -8,12 +8,26 @@ ETF 基本面与资金流数据采集 (Fundamental & Money Flow Fetcher)
   - 主力净流入：akshare stock_individual_fund_flow
 
 所有函数在失败时返回 None，绝不抛异常。
+
+OPT-01: 集成 SourceRegistry 熔断器，push2 不可用时立即降级返回 None。
 """
 
 from typing import Any
 
 from ..core.async_utils import run_in_thread
 from ..utils.decode import decode_df as _decode_df
+from ..services.source_registry import registry as _source_registry
+
+
+_PUSH2_SOURCE = "push2.eastmoney.com"
+_AKSHARE_SOURCE = "akshare"
+
+
+def _push2_available() -> bool:
+    """检查 push2 数据源是否可用（熔断器未打开）。"""
+    import time
+    h = _source_registry._health(_PUSH2_SOURCE)
+    return h.available(time.time())
 
 
 def _is_a_stock(symbol: str) -> bool:
@@ -42,7 +56,7 @@ def fetch_fund_scale(symbol: str) -> dict | None:
         def _p(sym=symbol):
             import akshare as ak
             return ak.fund_etf_fund_info_em(fund=sym)
-        df = run_in_thread(_p, timeout=8)
+        df = run_in_thread(_p, timeout=8, executor="long")
         if df is None or df.empty:
             return None
         # 列名可能为 latin1 乱码，用 _decode_df
@@ -75,12 +89,15 @@ def fetch_fund_flow(symbol: str) -> dict | None:
     """
     if not _is_a_stock(symbol):
         return None
+    # OPT-01: 熔断器检查，push2 不可用时立即降级
+    if not _push2_available():
+        return None
     try:
         market = _get_market(symbol)
         def _p(sym=symbol, mkt=market):
             import akshare as ak
             return ak.stock_individual_fund_flow(stock=sym, market=mkt)
-        df = run_in_thread(_p, timeout=8)
+        df = run_in_thread(_p, timeout=8, executor="long")
         if df is None or df.empty:
             return None
         df = _decode_df(df)
@@ -121,12 +138,15 @@ def fetch_fund_flow_detailed(symbol: str) -> dict | None:
     """
     if not _is_a_stock(symbol):
         return None
+    # OPT-01: 熔断器检查，push2 不可用时立即降级
+    if not _push2_available():
+        return None
     try:
         market = _get_market(symbol)
         def _p(sym=symbol, mkt=market):
             import akshare as ak
             return ak.stock_individual_fund_flow(stock=sym, market=mkt)
-        df = run_in_thread(_p, timeout=8)
+        df = run_in_thread(_p, timeout=8, executor="long")
         if df is None or df.empty:
             return None
         df = _decode_df(df)
@@ -195,7 +215,7 @@ def fetch_hist_avg_volume(symbol: str, days: int = 20) -> dict | None:
         def _p(sym=symbol):
             import akshare as ak
             return ak.stock_zh_a_hist(symbol=sym, period="daily", start_date="19900101", adjust="")
-        df = run_in_thread(_p, timeout=8)
+        df = run_in_thread(_p, timeout=8, executor="long")
         if df is None or df.empty:
             return None
         df = _decode_df(df)
@@ -250,7 +270,7 @@ def fetch_current_pe_pb(symbol: str) -> dict | None:
             import akshare as ak
             return ak.stock_zh_a_hist(symbol=sym, period="daily",
                                       start_date="20260101", adjust="")
-        df = run_in_thread(_p, timeout=8)
+        df = run_in_thread(_p, timeout=8, executor="long")
         if df is None or df.empty:
             return None
         df = _decode_df(df)

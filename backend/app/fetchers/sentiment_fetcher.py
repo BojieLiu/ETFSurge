@@ -182,7 +182,7 @@ def fetch_advance_decline_ratio() -> float:
         def _p():
             import akshare as ak
             return ak.stock_zh_a_spot_em()
-        df = run_in_thread(_p, timeout=8)
+        df = run_in_thread(_p, timeout=8, executor="long")
         if df is not None and not df.empty:
             up = sum(1 for _, r in df.iterrows() if float(r.get("涨跌幅", 0) or 0) > 0)
             total = len(df)
@@ -212,7 +212,7 @@ def fetch_north_flow() -> float:
                     if func:
                         return func(symbol="北上")
                     return None
-                df = run_in_thread(_p, timeout=8)
+                df = run_in_thread(_p, timeout=8, executor="long")
                 if df is not None and not (hasattr(df, "empty") and df.empty):
                     break
             except Exception:
@@ -240,7 +240,7 @@ def fetch_margin_change() -> float:
         def _p():
             import akshare as ak
             return ak.stock_margin_szse()
-        df = run_in_thread(_p, timeout=8)
+        df = run_in_thread(_p, timeout=8, executor="long")
         if df is None or df.empty:
             return 0.0
         if len(df) >= 2:
@@ -264,7 +264,7 @@ def fetch_margin_change() -> float:
 
     # Fallback: 深交所/上交所 API
     try:
-        balance = run_in_thread(margin_fetcher.fetch_margin_balance, timeout=8)
+        balance = run_in_thread(margin_fetcher.fetch_margin_balance, timeout=8, executor="long")
         if balance and balance > 0:
             # 归一化: ±5000亿为极端值
             norm = max(-1.0, min(1.0, (balance - 1.8e12) / 5e11))

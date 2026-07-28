@@ -65,7 +65,7 @@ def fetch_realtime(symbol: str) -> dict[str, Any] | None:
             }
         except (ValueError, TypeError, KeyError):
             return None
-    return run_in_thread(_p, timeout=_TIMEOUT)
+    return run_in_thread(_p, timeout=_TIMEOUT, executor="long")
 
 
 def fetch_candles(symbol: str, resolution: str = "D") -> list[dict[str, Any]] | None:
@@ -114,4 +114,4 @@ def fetch_candles(symbol: str, resolution: str = "D") -> list[dict[str, Any]] | 
             except (ValueError, TypeError, IndexError):
                 continue
         return result
-    return run_in_thread(_p, timeout=_TIMEOUT)
+    return run_in_thread(_p, timeout=_TIMEOUT, executor="long")

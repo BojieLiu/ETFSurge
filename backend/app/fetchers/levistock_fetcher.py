@@ -15,7 +15,7 @@ _TIMEOUT = 8
 
 def _safe(fn, timeout: int = _TIMEOUT):
     """在线程中执行 fn,超时/异常均返回 None,绝不挂起。"""
-    return run_in_thread(fn, timeout=timeout)
+    return run_in_thread(fn, timeout=timeout, executor="long")
 
 
 def _cached(key: str, producer, ttl_key: str = "news_telegraph"):

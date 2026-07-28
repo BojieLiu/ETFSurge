@@ -178,7 +178,7 @@ def _akshare_history_fallback(symbol: str, period: str = "daily") -> list[dict[s
         def _p():
             import akshare as ak
             return ak.stock_zh_a_hist(symbol=symbol, period=period, adjust="qfq")
-        df = run_in_thread(_p, timeout=15)
+        df = run_in_thread(_p, timeout=15, executor="long")
         if df is None or not isinstance(df, pd.DataFrame) or df.empty:
             return []
         _decode_df(df)
@@ -324,7 +324,7 @@ def _akshare_intraday_history(symbol: str, period_min: int = 60) -> list[dict[st
             end = datetime.now().strftime("%Y%m%d")
             start = (datetime.now() - timedelta(days=40)).strftime("%Y%m%d")
             return ak.stock_zh_a_hist_min_em(symbol=symbol, period=str(period_min), start_date=start, end_date=end, adjust="")
-        df = run_in_thread(_p, timeout=8)
+        df = run_in_thread(_p, timeout=8, executor="long")
         if df is None or df.empty:
             return []
         rename = {"时间": "日期", "开盘": "开盘", "最高": "最高", "最低": "最低", "收盘": "收盘", "成交量": "成交量"}
@@ -419,7 +419,7 @@ def fetch_etf_shares_outstanding(symbol: str) -> dict | None:
         def _p():
             import akshare as ak
             return ak.fund_etf_hist_em(symbol=symbol, period="daily", start_date="20200101", end_date="20500101", adjust="")
-        df = run_in_thread(_p, timeout=8)
+        df = run_in_thread(_p, timeout=8, executor="long")
         if df is None or df.empty:
             return None
         cols = [c for c in df.columns if "份额" in str(c) or "规模" in str(c)]
@@ -492,7 +492,7 @@ def _em_hk_realtime(symbols: list[str]) -> list[dict[str, Any]]:
                 import akshare as ak
                 with no_proxy():
                     return ak.stock_hk_spot_em()
-            df = run_in_thread(_p, timeout=8)
+            df = run_in_thread(_p, timeout=8, executor="long")
             if df is None or df.empty:
                 return []
             _decode_df(df)
@@ -544,7 +544,7 @@ def fetch_futures_realtime() -> list[dict[str, Any]]:
             import akshare as ak
             with no_proxy():
                 return ak.futures_foreign_commodity_realtime()
-        df = run_in_thread(_p, timeout=8)
+        df = run_in_thread(_p, timeout=8, executor="long")
         _decode_df(df)
         results = []
         for _, row in df.iterrows():
@@ -756,7 +756,7 @@ def fetch_fund_nav(symbol: str) -> tuple[float, float] | None:
             import akshare as ak
             with no_proxy():
                 return ak.fund_open_fund_info_em(symbol=symbol, indicator="单位净值")
-        df = run_in_thread(_p, timeout=8)
+        df = run_in_thread(_p, timeout=8, executor="long")
         _decode_df(df)
         if df is not None and len(df) > 0:
             last = df.iloc[-1]
@@ -769,7 +769,7 @@ def fetch_fund_nav(symbol: str) -> tuple[float, float] | None:
 
     # Fallback: 天天基金 API
     try:
-        result = run_in_thread(lambda: fund_fetcher.fetch_fund_nav(symbol), timeout=8)
+        result = run_in_thread(lambda: fund_fetcher.fetch_fund_nav(symbol), timeout=8, executor="long")
         if result and result.get("nav"):
             return (result["nav"], result.get("daily_change_pct", 0.0))
     except Exception:
@@ -789,7 +789,7 @@ def fetch_index_history(symbol: str, period: str = "daily") -> list[dict[str, An
             import akshare as ak
             with no_proxy():
                 return ak.stock_zh_index_daily(symbol=f"sh{code}")
-        df = run_in_thread(_p, timeout=8)
+        df = run_in_thread(_p, timeout=8, executor="long")
         if df is None or df.empty:
             return []
         rename = {"date": "日期", "open": "开盘", "high": "最高", "low": "最低",
@@ -851,16 +851,16 @@ def _fetch_akshare_history(symbol: str, asset_type: str, period: str) -> list[di
             if not fn:
                 return None
             return fn(symbol=symbol, period=period, adjust="qfq") if asset_type == "A" else fn(symbol=symbol, period=period)
-        df = run_in_thread(_p, timeout=8)
+        df = run_in_thread(_p, timeout=8, executor="long")
         if df is not None and isinstance(df, pd.DataFrame) and not df.empty:
             _decode_df(df)
             return df.to_dict(orient="records")
         # Fallback: Finnhub candles → Alpha Vantage
         if asset_type in ("HK", "US"):
-            fh_result = run_in_thread(lambda: finnhub_fetcher.fetch_candles(symbol, "D"), timeout=8)
+            fh_result = run_in_thread(lambda: finnhub_fetcher.fetch_candles(symbol, "D"), timeout=8, executor="long")
             if fh_result:
                 return fh_result
-            av_result = run_in_thread(lambda: alphavantage_fetcher.fetch_daily(symbol), timeout=10)
+            av_result = run_in_thread(lambda: alphavantage_fetcher.fetch_daily(symbol), timeout=10, executor="long")
             if av_result:
                 return av_result
         return []
@@ -883,7 +883,7 @@ def get_k_data(symbol: str, period: str = "daily") -> list[dict[str, Any]]:
         def _p():
             import akshare as ak
             return ak.stock_zh_a_hist(symbol=symbol, period=period, adjust="qfq")
-        df = run_in_thread(_p, timeout=15)
+        df = run_in_thread(_p, timeout=15, executor="long")
         if df is None or not isinstance(df, pd.DataFrame) or df.empty:
             return []
         _decode_df(df)
@@ -902,7 +902,7 @@ def search_etf(keyword: str) -> list[dict[str, Any]]:
             import akshare as ak
             with no_proxy():
                 return ak.fund_etf_spot_em()
-        df = run_in_thread(_p, timeout=8)
+        df = run_in_thread(_p, timeout=8, executor="long")
         _decode_df(df)
         if keyword:
             mask = df["代码"].str.contains(keyword, na=False) | df["名称"].str.contains(keyword, na=False)
@@ -929,7 +929,7 @@ def fetch_etf_list() -> list[dict[str, Any]]:
             import akshare as ak
             with no_proxy():
                 return ak.fund_etf_category_sina(symbol="ETF基金")
-        df = run_in_thread(_p, timeout=15)
+        df = run_in_thread(_p, timeout=15, executor="long")
         cols = list(df.columns)
         if len(cols) < 5:
             raise ValueError("unexpected etf list columns")
@@ -961,7 +961,7 @@ def fetch_etf_list() -> list[dict[str, Any]]:
                 import akshare as ak
                 with no_proxy():
                     return ak.fund_etf_spot_em()
-            df = run_in_thread(_p, timeout=8)
+            df = run_in_thread(_p, timeout=8, executor="long")
             _decode_df(df)
             return [
                 {

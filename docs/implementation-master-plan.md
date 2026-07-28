@@ -1,9 +1,10 @@
 ﻿# ETF Surge 方案实施总计划
 
-> 生成日期: 2026-07-27 | 版本: **v10.3**
+> 生成日期: 2026-07-28 | 版本: **v11.0**
 > ✅ **Phase 6.1 已完成**
 > ✅ **Phase 6.2 已完成**：组合管线与报告质量修复 — Fix A (task_manager.py 校验降级)、问题 2 规则驱动风险检测 (portfolio_service.py _compute_risk_warnings)、test_decode.py (9/9 PASS)、TestP4 恢复、报告渲染排版优化 (DesignResult.vue CSS)。详见 `docs/design-report-quality-fix-plan.md`。：可观测性与系统增强 — ConfigManager + app_config 表（`models/app_config.py`, `core/config_manager.py`）、ConfigPage（`views/ConfigView.vue`）、Sector API 实时行情返回（market.py 路由优先级调整）、LLM 热点板块注入（llm_context.py + pool_manager.py）、stars 时间新鲜度 + Level 2 精度调整（news_fetcher.py + levistock_fetcher.py）、verify_e2e.py 扩展（stars/level 校验 + check_sector_data）。详见 §4 Phase 6.1。
 > ✅ **Phase 7 已完成**：系统质量诊断修复 (system-quality-diagnosis)
+> ✅ **Phase 11 已完成**（2026-07-28）：性能诊断与优化 — OPT-01~OPT-16 基于 `docs/performance-diagnosis-and-optimization-plan.md`。详见下方 v11.0。
 > ✅ **Phase 7 已完成**：系统质量诊断修复 (system-quality-diagnosis) — 池弹性 CRITICAL 日志 (`pool_manager.py:438`)、`/admin/metrics` 端点 (`admin.py`)、`get_portfolio_realtime()` 15s 缓存 (`market_service.py:617`)、`fetch_all_etfs_base()` 熔断路由 (`etf_scanner.py:264-282`)、`verify_e2e.py` 增强 (risk_warnings/response_time/metrics)、`test_performance_benchmark.py` (6 端点 gate)、`test_pool_resilience.py` (5 用例)。详见 `docs/archived/system_quality_diagnosis_report.md`§7。
 > ✅ **Phase 8 已完成**：去重造轮子 (wheel-unreinvention) — `analysis/indicators.py` → pandas-ta、`factors/factor_registry.py` 11 个 compute 函数 → pandas-ta、`sentiment_fetcher.py` 动态权重 + 情绪惯量、`market_trends.py` 精简计算层、`risk_controls.py` 阈值配置化。新增 47 个单测。详见下方 §v9.8。
 > ✅ **Phase 9 已完成**：剩余策略缺口闭环（2026-07-27 代码审计驱动）— Market Analysis Phase D(1-3): llm_advice_stream 新增 market 参数 (LLMAdviceRequest)、AiAdvisor.vue 传递 marketTab 到 API、build_full_context 按市场获取数据。Phase E(1-3): _build_report_prompt() 扩展为 6 节（含 0. 全景速览 + 5. 操作建议）、llm_report_stream 改为真流式 (agent.run_stream)、include_sectors=True 启用板块数据。Sector Phase 4: generate_advice() 改用 hot_plates/sector_heat、_build_design_report_prompt() 新增概念板块 + 热点板块段落。Phase 5: _inject_market_context() 公共函数。Phase 3b+6: useSectorAnalysis.js 涨跌幅颜色 helpers、api/index.js 新增 6 个板块 API 方法、SectorHeatMap.vue 组件。verify_e2e.py 新增 analysis 模块 + news/global 检查。API 清理：/hot-plates /stock-hot-rank /wind 前端标记已接入。
@@ -1077,6 +1078,17 @@ Phase 5.1 (市场感知联动)          ✅ 已完成（MarketContext + market_r
 Phase 6.1 (可观测性增强)         ✅ 全部完成 — ConfigManager + ConfigPage + Sector API 实时行情 + LLM 热点注入 + stars 新鲜度 + verify_e2e 扩展
 
 Phase 7.1 (远期优化)             无紧急依赖
+
+Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~OPT-16 基于 `docs/performance-diagnosis-and-optimization-plan.md`
+   ├── OPT-01: 熔断器集成 fundamental_fetcher（push2 熔断检查）
+   ├── OPT-02: _compute_fund_flow 快速降级
+   ├── OPT-03: run_in_thread executor 参数
+   ├── OPT-04: Semaphore(8) 并发限流
+   ├── OPT-05: SourceRegistry 全覆盖 fundamental_fetcher
+   ├── OPT-08/16: 回归测试套件 test_regression.py（17 红绿切换测试）
+   ├── OPT-10: run_in_thread 全代码库 40+ 调用点审计
+   ├── OPT-13: AST 审计脚本 scripts/audit_pool_usage.py
+   └── OPT-15: SourceRegistry 三优化——try_call、fast-fail、指数退避
 ```
 
 ### 5.4 轨道总览（v4.0 更新）
@@ -1109,6 +1121,7 @@ Phase 7.1 (远期优化)             无紧急依赖
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| **v11.0** | 2026-07-28 | **Phase 11 — 性能诊断与优化（OPT-01~OPT-16）** 全部完成。基于 `docs/performance-diagnosis-and-optimization-plan.md`。OPT-01: 熔断器集成（`fundamental_fetcher.py` push2 熔断检查）✅。OPT-02: `_compute_fund_flow` 快速降级 ✅。OPT-03: `run_in_thread` 新增 `executor` 参数 ✅。OPT-04: `_compute_fund_flow` Semaphore(8) 并发限流 ✅。OPT-05: SourceRegistry 全覆盖（`fundamental_fetcher` 接入）✅。OPT-08/16: 回归测试套件 `test_regression.py`（17 个用例，红绿切换门禁）✅。OPT-10: `run_in_thread` 全代码库 40+ 调用点审计（long vs shared 池分流）✅。OPT-13: AST 审计脚本 `scripts/audit_pool_usage.py` ✅。OPT-15: SourceRegistry 三优化——`try_call()` 包装器、fast-fail 检测（<500ms 硬失败）、指数退避冷却（60s→120s→240s→480s→600s max）✅。API 契约 `api-contracts/admin/circuit-breaker.md` 新增。`test_source_registry_optimizations.py` 14 个新单测 ✅。总计 31 个新单测 + 17 个回归测试，存量 58 个全 PASS。详见 §4 Phase 11。 |
 | v1.0 | 2026-07-22 | 初次生成，覆盖全部 18 份文档 |
 | v2.0 | 2026-07-22 | 新增 3 份文档处理 + 新轨道 + 冲突分析；调整 Phase 0/1/2/3 |
 | v3.0 | 2026-07-23 | 新增 `design-pipeline-foundation-issues.md`（23 份文档）；Phase 0/0.5 标记 ✅ 完成；新增 Phase 0.7（12 项 P0/P1 修复）；修复 `five-improvements-plan.md` 内部状态不一致；新增 §2.7-2.11 冲突分析；新增 §3.5-3.8 修复方案；更新 §4 路线图；更新附录 |

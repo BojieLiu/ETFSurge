@@ -85,4 +85,4 @@ def fetch_fund_nav(symbol: str) -> dict[str, Any] | None:
 
     All calls run through ``run_in_thread`` with 8s timeout.
     """
-    return run_in_thread(_fetch_nav, symbol, timeout=_TIMEOUT)
+    return run_in_thread(_fetch_nav, symbol, timeout=_TIMEOUT, executor="long")

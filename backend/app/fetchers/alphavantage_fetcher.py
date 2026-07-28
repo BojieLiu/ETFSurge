@@ -68,7 +68,7 @@ def fetch_realtime(symbol: str) -> dict[str, Any] | None:
             }
         except (ValueError, TypeError, KeyError):
             return None
-    return run_in_thread(_p, timeout=_TIMEOUT)
+    return run_in_thread(_p, timeout=_TIMEOUT, executor="long")
 
 
 def fetch_daily(symbol: str, outputsize: str = "compact") -> list[dict[str, Any]] | None:
@@ -108,4 +108,4 @@ def fetch_daily(symbol: str, outputsize: str = "compact") -> list[dict[str, Any]
             except (ValueError, TypeError, KeyError):
                 continue
         return result
-    return run_in_thread(_p, timeout=_TIMEOUT)
+    return run_in_thread(_p, timeout=_TIMEOUT, executor="long")

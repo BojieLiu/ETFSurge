@@ -266,7 +266,7 @@ def fetch_all_etfs_base() -> list[dict[str, Any]]:
         def _p():
             import akshare as ak
             return ak.fund_etf_spot_em()
-        df = run_in_thread(_p, timeout=25)
+        df = run_in_thread(_p, timeout=25, executor="long")
         if df is None or df.empty:
             return None
         _decode_df(df)

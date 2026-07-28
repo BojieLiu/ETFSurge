@@ -28,13 +28,26 @@ _default_executor_max = 0
 # 调用方可用 _use_long_running_executor() 装饰器或参数切换
 
 
-def run_in_thread(fn, *args, timeout: int = DEFAULT_SYNC_TIMEOUT):
-    """同步包装：走共享线程池执行，超时后线程自动回收。
+def run_in_thread(fn, *args, timeout: int = DEFAULT_SYNC_TIMEOUT,
+                  executor: str = "shared"):
+    """同步包装：在线程池中执行同步函数，带超时保护。
 
     供同步 fetcher 内部使用。超时时返回 None，底层线程继续运行但
-    完成后会自动归还共享线程池，不会变成僵尸线程。
+    完成后会自动归还线程池，不会变成僵尸线程。
+
+    Args:
+        fn: 可调用对象（同步函数）。
+        *args: 传给 fn 的变长参数。
+        timeout: 超时秒数，默认 8 秒。
+        executor: 线程池选择。
+            "shared" (默认, ≤5s 任务) — 使用 _shared_executor (64 workers)
+            "long" (>5s 任务) — 使用 _long_running_executor (8 workers)
+
+    Returns:
+        fn(*args) 的返回值，或 None（超时/异常时）。
     """
-    future = _shared_executor.submit(fn, *args)
+    pool = _long_running_executor if executor == "long" else _shared_executor
+    future = pool.submit(fn, *args)
     try:
         return future.result(timeout=timeout)
     except concurrent.futures.TimeoutError:

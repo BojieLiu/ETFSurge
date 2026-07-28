@@ -135,9 +135,9 @@ def fetch_margin_balance() -> float | None:
 
     All calls run through ``run_in_thread`` with 8s timeout.
     """
-    result = run_in_thread(_fetch_szse, timeout=_TIMEOUT)
+    result = run_in_thread(_fetch_szse, timeout=_TIMEOUT, executor="long")
     if result is not None:
         return result
 
     logger.info("[margin_fetcher] SZSE failed, trying SSE fallback")
-    return run_in_thread(_fetch_sse, timeout=_TIMEOUT)
+    return run_in_thread(_fetch_sse, timeout=_TIMEOUT, executor="long")

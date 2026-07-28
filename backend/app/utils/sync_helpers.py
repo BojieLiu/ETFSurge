@@ -8,4 +8,4 @@ from app.core.async_utils import run_in_thread
 
 def run_sync_in_thread(fn, *args, **kwargs):
     """Run a synchronous function in a per-call thread pool with timeout."""
-    return run_in_thread(fn, *args, **kwargs)
+    return run_in_thread(fn, *args, **kwargs, executor="long")
