@@ -1121,6 +1121,7 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| **v11.1** | 2026-07-28 | **Phase 11.1 — Fetcher 合并重组**。按业务域将 18 个 fetcher 合并为 11 个。组1: `global_markets_fetcher.py` — 合并 7 个全球行情/宏观数据源（em_global/yfinance/alphavantage/twelvedata/finnhub/tushare/fred），保留 fred 的 async httpx 架构备用。组2: `fundamentals_fetcher.py` — 合并 3 个资金流/情绪/两融数据源（fundamental_fetcher/margin_fetcher/sentiment_fetcher），修复同组跨文件引用。清理 `stooq_fetcher` 悬空 import（market_router.py）。删除 7 个旧全局 fetcher + 3 个旧组2 fetcher 文件。更新 10 个调用方文件的 import 路径。36/36 测试通过。 |
 | **v11.0** | 2026-07-28 | **Phase 11 — 性能诊断与优化（OPT-01~OPT-16）** 全部完成。基于 `docs/performance-diagnosis-and-optimization-plan.md`。OPT-01: 熔断器集成（`fundamental_fetcher.py` push2 熔断检查）✅。OPT-02: `_compute_fund_flow` 快速降级 ✅。OPT-03: `run_in_thread` 新增 `executor` 参数 ✅。OPT-04: `_compute_fund_flow` Semaphore(8) 并发限流 ✅。OPT-05: SourceRegistry 全覆盖（`fundamental_fetcher` 接入）✅。OPT-08/16: 回归测试套件 `test_regression.py`（17 个用例，红绿切换门禁）✅。OPT-10: `run_in_thread` 全代码库 40+ 调用点审计（long vs shared 池分流）✅。OPT-13: AST 审计脚本 `scripts/audit_pool_usage.py` ✅。OPT-15: SourceRegistry 三优化——`try_call()` 包装器、fast-fail 检测（<500ms 硬失败）、指数退避冷却（60s→120s→240s→480s→600s max）✅。API 契约 `api-contracts/admin/circuit-breaker.md` 新增。`test_source_registry_optimizations.py` 14 个新单测 ✅。总计 31 个新单测 + 17 个回归测试，存量 58 个全 PASS。详见 §4 Phase 11。 |
 | v1.0 | 2026-07-22 | 初次生成，覆盖全部 18 份文档 |
 | v2.0 | 2026-07-22 | 新增 3 份文档处理 + 新轨道 + 冲突分析；调整 Phase 0/1/2/3 |

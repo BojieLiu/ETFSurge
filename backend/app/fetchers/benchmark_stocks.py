@@ -94,7 +94,7 @@ def _get_stock_news(code: str) -> list[str]:
 def _get_fund_flow(code: str) -> dict:
     """获取个股四类资金流。"""
     try:
-        from ..fetchers.fundamental_fetcher import fetch_fund_flow_detailed
+        from ..fetchers.fundamentals_fetcher import fetch_fund_flow_detailed
         return fetch_fund_flow_detailed(code) or {}
     except Exception:
         return {}

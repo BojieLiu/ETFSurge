@@ -21,8 +21,8 @@ from ..core.ttl import CACHE_TTL
 from ..services.cache_service import sync_memory_cache
 from ..services.source_registry import registry
 from ..core.async_utils import run_in_thread
-from ..fetchers import finnhub_fetcher
-from ..fetchers import alphavantage_fetcher
+from ..fetchers import global_markets_fetcher
+from ..fetchers import global_markets_fetcher
 from ..fetchers import fund_fetcher
 
 logger = get_logger(__name__)
@@ -857,10 +857,10 @@ def _fetch_akshare_history(symbol: str, asset_type: str, period: str) -> list[di
             return df.to_dict(orient="records")
         # Fallback: Finnhub candles → Alpha Vantage
         if asset_type in ("HK", "US"):
-            fh_result = run_in_thread(lambda: finnhub_fetcher.fetch_candles(symbol, "D"), timeout=8, executor="long")
+            fh_result = run_in_thread(lambda: global_markets_fetcher.fetch_candles(symbol, "D"), timeout=8, executor="long")
             if fh_result:
                 return fh_result
-            av_result = run_in_thread(lambda: alphavantage_fetcher.fetch_daily(symbol), timeout=10, executor="long")
+            av_result = run_in_thread(lambda: global_markets_fetcher.fetch_daily(symbol), timeout=10, executor="long")
             if av_result:
                 return av_result
         return []

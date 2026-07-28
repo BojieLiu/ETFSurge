@@ -4,7 +4,7 @@ from unittest.mock import patch, MagicMock
 import pandas as pd
 import pytest
 
-from app.fetchers.fundamental_fetcher import (
+from app.fetchers.fundamentals_fetcher import (
     fetch_fund_scale,
     fetch_fund_flow,
     fetch_hist_avg_volume,
@@ -98,9 +98,9 @@ class TestFetchHistAvgVolume:
 
 
 class TestFetchFundamentals:
-    @patch("app.fetchers.fundamental_fetcher.fetch_fund_scale")
-    @patch("app.fetchers.fundamental_fetcher.fetch_fund_flow")
-    @patch("app.fetchers.fundamental_fetcher.fetch_hist_avg_volume")
+    @patch("app.fetchers.fundamentals_fetcher.fetch_fund_scale")
+    @patch("app.fetchers.fundamentals_fetcher.fetch_fund_flow")
+    @patch("app.fetchers.fundamentals_fetcher.fetch_hist_avg_volume")
     def test_aggregates_all_sources(self, mock_hist, mock_flow, mock_scale):
         mock_scale.return_value = {"shares_outstanding": 45.2, "fund_scale": 50.3}
         mock_hist.return_value = {"avg_volume_20d": 1.9e8, "pe_ttm": 12.5, "pb": 1.3}
@@ -114,9 +114,9 @@ class TestFetchFundamentals:
         assert result["main_net_inflow"] == 1.25e7
         assert result["main_net_inflow_pct"] == 4.7
 
-    @patch("app.fetchers.fundamental_fetcher.fetch_fund_scale")
-    @patch("app.fetchers.fundamental_fetcher.fetch_fund_flow")
-    @patch("app.fetchers.fundamental_fetcher.fetch_hist_avg_volume")
+    @patch("app.fetchers.fundamentals_fetcher.fetch_fund_scale")
+    @patch("app.fetchers.fundamentals_fetcher.fetch_fund_flow")
+    @patch("app.fetchers.fundamentals_fetcher.fetch_hist_avg_volume")
     def test_returns_nulls_when_all_fail(self, mock_hist, mock_flow, mock_scale):
         mock_scale.return_value = None
         mock_hist.return_value = None

@@ -27,7 +27,7 @@ from ..fetchers.sector_fetcher import (
     fetch_industry_sectors, fetch_concept_sectors, fetch_sector_stocks,
     fetch_hot_plates, fetch_sector_heat,
 )
-from ..fetchers.fundamental_fetcher import fetch_fund_flow, fetch_hist_avg_volume
+from ..fetchers.fundamentals_fetcher import fetch_fund_flow, fetch_hist_avg_volume
 from ..database import get_db
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse

@@ -256,15 +256,15 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
                 regions.setdefault(region, []).append(item)
 
         # 海外指数：EM（10s）→ HK 指数（10s）→ Sina（4s）→ Finnhub（6s）→ 占位
-        from ..fetchers import em_global_fetcher
+        from ..fetchers import global_markets_fetcher
         from ..fetchers.china_market import fetch_sina_global_index as sina_index
         from ..fetchers.china_market import fetch_sina_page_global_index as sina_page_index
-        from ..fetchers import finnhub_fetcher
+        from ..fetchers import global_markets_fetcher
 
         # Call EM once for all foreign symbols (batched API)
         _em_map: dict[str, dict] = {}
         try:
-            _em_regions = await _call(em_global_fetcher.fetch_all, timeout=10)
+            _em_regions = await _call(global_markets_fetcher.fetch_all, timeout=10)
             if _em_regions:
                 for _items in _em_regions.values():
                     for _it in _items:
@@ -275,7 +275,7 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
         # HK 指数批量接口（补充 EM 不含的 HSTECH 恒生科技指数）
         _hk_map: dict[str, dict] = {}
         try:
-            _hk_data = await _call(em_global_fetcher.fetch_hk_indices, timeout=10)
+            _hk_data = await _call(global_markets_fetcher.fetch_hk_indices, timeout=10)
             if _hk_data:
                 _hk_map.update(_hk_data)
         except Exception:
@@ -320,7 +320,7 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
 
             # 第3优先：Finnhub（6s）
             try:
-                d = await run_sync(finnhub_fetcher.fetch_realtime, sym, timeout=6)
+                d = await run_sync(global_markets_fetcher.fetch_realtime, sym, timeout=6)
                 if d and d.get("price") is not None and d.get("price") != 0:
                     d["name"] = name
                     d["region"] = region
@@ -774,13 +774,13 @@ async def _route_us(symbol: str) -> dict | None:
       非交易时段有缓存数据，速度快（~0.5s）。
     - Finnhub（2nd）: 已配 API key，60次/分钟免费额度。TwelveData 失败时兜底。
     """
-    from ..fetchers import twelvedata_fetcher
-    from ..fetchers import finnhub_fetcher
+    from ..fetchers import global_markets_fetcher
+    from ..fetchers import global_markets_fetcher
 
     def _td():
-        return twelvedata_fetcher.fetch_realtime(symbol)
+        return global_markets_fetcher.fetch_realtime(symbol)
     def _fh():
-        return finnhub_fetcher.fetch_realtime(symbol)
+        return global_markets_fetcher.fetch_realtime(symbol)
 
     return registry.route([
         ("twelvedata", _td),
@@ -792,12 +792,12 @@ async def get_us_batch(symbols: list[str]) -> list[dict[str, Any]]:
     """批量获取美股/ETF 实时行情，通过 TwelveData 逐个获取。"""
     if not symbols:
         return []
-    from ..fetchers import twelvedata_fetcher
+    from ..fetchers import global_markets_fetcher
 
     def _td_batch():
         out = []
         for sym in symbols:
-            d = twelvedata_fetcher.fetch_realtime(sym)
+            d = global_markets_fetcher.fetch_realtime(sym)
             if d:
                 out.append(d)
         return out or None
@@ -833,7 +833,7 @@ async def get_history(
 
 
 async def get_fundamentals(symbol: str) -> dict[str, Any] | None:
-    from ..fetchers.tushare_fetcher import fetch_daily
+    from ..fetchers.global_markets_fetcher import fetch_daily
 
     try:
         data = await _call(fetch_daily, symbol, "20260101", "20261231", timeout=10)

@@ -1,4 +1,4 @@
-"""
+﻿"""
 Market Router — 按市场路由数据请求 (Phase 5.1).
 
 提供 5 个 async 路由函数，根据 market 参数将数据请求分发到正确的数据源。
@@ -94,14 +94,14 @@ async def get_market_realtime(market: str, symbols: list[str] | None = None) -> 
     elif market == "US":
         if not symbols:
             return []
-        from app.fetchers import stooq_fetcher, twelvedata_fetcher  # type: ignore[attr-defined]
+        from app.fetchers import global_markets_fetcher  # type: ignore[attr-defined]
         batch = await _call(stooq_fetcher.fetch_us_batch, symbols, timeout=12)
         if batch:
             return batch
         # 降级: TwelveData 逐个
         results = []
         for sym in symbols:
-            d = await _call(twelvedata_fetcher.fetch_realtime, sym, timeout=8)
+            d = await _call(global_markets_fetcher.fetch_realtime, sym, timeout=8)
             if d:
                 d["asset_type"] = "US"
                 results.append(d)
@@ -135,14 +135,14 @@ async def get_market_history(market: str, symbol: str, period: str = "daily") ->
         return await _call(stooq_fetcher.fetch_stooq_history, symbol, period, timeout=15) or []
 
     elif market == "US":
-        from app.fetchers import stooq_fetcher, twelvedata_fetcher, finnhub_fetcher  # type: ignore[attr-defined]
+        from app.fetchers import global_markets_fetcher  # type: ignore[attr-defined]
         stooq_data = await _call(stooq_fetcher.fetch_stooq_history, symbol, period, timeout=15)
         if stooq_data:
             return stooq_data
-        td_data = await _call(twelvedata_fetcher.fetch_history, symbol, 60, timeout=10)
+        td_data = await _call(global_markets_fetcher.fetch_history, symbol, 60, timeout=10)
         if td_data:
             return td_data
-        fh_data = await _call(finnhub_fetcher.fetch_candles, symbol, "D", timeout=10)
+        fh_data = await _call(global_markets_fetcher.fetch_candles, symbol, "D", timeout=10)
         return fh_data or []
 
     elif market == "global":
@@ -203,3 +203,4 @@ async def get_market_sectors(market: str, sector_type: str = "industry") -> list
     except Exception:
         logger.warning("[market_router] sector fetch failed for %s", market)
         return []
+
