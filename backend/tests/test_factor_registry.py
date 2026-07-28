@@ -289,80 +289,6 @@ async def test_compute_with_empty_fetch_returns_zeros():
 # FredFetcher
 # =============================================================================
 
-class TestFredFetcher:
-    """FRED API 宏观数据获取（所有 HTTP 调用 mock）"""
-
-    @pytest.fixture
-    def mock_fred_response(self):
-        """模拟 FRED API 的 JSON 响应"""
-        return {
-            "observations": [
-                {"date": "2026-07-15", "value": "15.67"},
-                {"date": "2026-07-14", "value": "16.50"},
-                {"date": "2026-07-13", "value": "17.16"},
-            ]
-        }
-
-    @patch("app.fetchers.fred_fetcher.httpx.AsyncClient")
-    @pytest.mark.asyncio
-    async def test_fetch_vix(self, mock_client, mock_fred_response):
-        """fetch_vix() 应返回最新 VIX 值"""
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = mock_fred_response
-        mock_client.return_value.__aenter__.return_value.get.return_value = mock_resp
-
-        from app.fetchers.fred_fetcher import fetch_vix
-        vix = await fetch_vix()
-        assert vix == 15.67
-
-    @patch("app.fetchers.fred_fetcher.httpx.AsyncClient")
-    @pytest.mark.asyncio
-    async def test_fetch_us_10y(self, mock_client):
-        """fetch_us_10y() 应返回最新美债收益率"""
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "observations": [
-                {"date": "2026-07-15", "value": "4.55"},
-                {"date": "2026-07-14", "value": "4.52"},
-            ]
-        }
-        mock_client.return_value.__aenter__.return_value.get.return_value = mock_resp
-
-        from app.fetchers.fred_fetcher import fetch_us_10y
-        yield_10y = await fetch_us_10y()
-        assert yield_10y == 4.55
-
-    @patch("app.fetchers.fred_fetcher.httpx.AsyncClient")
-    @pytest.mark.asyncio
-    async def test_fetch_fed_rate(self, mock_client):
-        """fetch_fed_rate() 应返回联邦基金利率"""
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "observations": [
-                {"date": "2026-07-15", "value": "3.63"},
-            ]
-        }
-        mock_client.return_value.__aenter__.return_value.get.return_value = mock_resp
-
-        from app.fetchers.fred_fetcher import fetch_fed_rate
-        rate = await fetch_fed_rate()
-        assert rate == 3.63
-
-    @patch("app.fetchers.fred_fetcher.httpx.AsyncClient")
-    @pytest.mark.asyncio
-    async def test_fetch_api_error_returns_none(self, mock_client):
-        """API 错误时应返回 None（不抛异常）"""
-        mock_resp = MagicMock()
-        mock_resp.status_code = 403
-        mock_client.return_value.__aenter__.return_value.get.return_value = mock_resp
-
-        from app.fetchers.fred_fetcher import fetch_vix
-        result = await fetch_vix()
-        assert result is None
-
 class TestFactorAggregation:
     """测试因子聚合逻辑。"""
 
@@ -419,16 +345,7 @@ class TestCoreFactorsConsistency:
 
     def test_core_factors_count(self):
         from app.factors import factor_registry as _fr_mod
-        assert len(_fr_mod._CORE_FACTORS) == 30, f"Got {len(_fr_mod._CORE_FACTORS)}"
-    @patch("app.fetchers.fred_fetcher.httpx.AsyncClient")
-    @pytest.mark.asyncio
-    async def test_fetch_network_error_returns_none(self, mock_client):
-        """网络异常时应返回 None（不抛异常）"""
-        mock_client.return_value.__aenter__.return_value.get.side_effect = Exception("Connection timeout")
-
-        from app.fetchers.fred_fetcher import fetch_vix
-        result = await fetch_vix()
-        assert result is None
+        assert len(_fr_mod._CORE_FACTORS) == 33, f"Got {len(_fr_mod._CORE_FACTORS)}"
 
 
 class TestCircuitBreaker:

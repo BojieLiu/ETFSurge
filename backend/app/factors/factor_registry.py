@@ -758,7 +758,8 @@ class FactorRegistry:
             "sentiment": ["sentiment."],
         }
 
-        # 不移除任何因子：ln_mcap/ln_float_mcap 经 z-score 后仍有截面区分度
+        # 排除 ln_mcap/ln_float_mcap 从 valuation 聚合：市值维度不等于估值维度
+        _EXCLUDE_FROM_VALUATION = {"ln_mcap", "ln_float_mcap"}
 
         result = dict(factor_scores)  # 保留所有原始键
 
@@ -766,6 +767,11 @@ class FactorRegistry:
             values = []
             for key, val in factor_scores.items():
                 if isinstance(val, (int, float)) and abs(val) > 0.001:
+                    # 排除市值因子扭曲 valuation 聚合
+                    if top_key == "valuation":
+                        _short_key = key.split(".")[-1]
+                        if _short_key in _EXCLUDE_FROM_VALUATION:
+                            continue
                     for prefix in prefixes:
                         if key.startswith(prefix):
                             values.append(val)
