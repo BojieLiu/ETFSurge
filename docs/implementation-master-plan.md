@@ -1297,9 +1297,16 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 | | | | **P0-2** — 市态判定单日涨跌幅阈值：`market_trends.py` `detect_market_regime()` 新增 `daily_change_pct` 参数，<-5%→panic、-5%~-3%→correction、>+5%→bull_strong、>+3%→bull_weakening |
 | | | | **P0-3** — LLM 报告一致性增强：`design_report.py` `_validate_report_consistency()` 新增重复章节标题检测 + 去重、空白行折叠（4+→2）、fixes_applied 汇总日志 |
 | | | | **P0-4** — Chart 500 错误修复：`market.py` chart 端点增加 `try/except` 包裹 + `_empty_chart_response()` fallback，KeyError 和通用异常均返回空结构 |
+| | | | **P0-5** — 修复 margin_fetcher 未定义引用：`fundamentals_fetcher.py` line 724 `margin_fetcher.fetch_margin_balance` → `fetch_margin_balance`（合并后残留引用） |
+| | | | **P0-6** — 三方案差异化：`allocation_engine.py` 新增跨方案 ETF 重叠度限制，后序方案对已选标的减 1.5σ 惩罚分 |
 | | | | **已实现（P1 — 性能优化）：** |
 | | | | **P1-1** — 预热超时缩减：`main.py` market_cache 25s→10s, global_indices 30s→15s；global_indices 新增 `indices_cache.json` 1h 本地缓存跳过检查 |
+| | | | **P1-2** — factor-health 60s TTL 缓存：`admin.py` `/factor-health` 端点新增内存缓存避免每次触发 15s 全量计算 |
+| | | | **P1-3** — 线程池队列深度监控：`async_utils.py` 新增 `get_queue_depth_spike_count()` 计数器 + 线程安全锁 |
+| | | | **P1-4** — 前端 CLS 修复：`ChartPanel.vue` 图表容器添加 `min-height: 350px`，loading 状态加 `min-height: 300px` |
 | | | | **已实现（P2 — 防护体系增强）：** |
 | | | | **P2-1** — `verify_e2e.py` 新增 API 5xx 零容忍检查（`section_api_5xx_check`）、因子 Z-score 合理性门禁（`section_factor_zscore_check`）、方案差异化度 Jaccard 校验（`section_solution_diversity_check`） |
 | | | | **P2-2** — 新增 8 个单测：4 个 winsorization 测试（`TestStandardizeWinsorization`）、5 个市态判定每日涨跌幅测试、3 个报告一致性测试 |
-| | | | **改动文件：** `backend/app/factors/factor_registry.py`、`backend/app/services/market_trends.py`、`backend/app/tasks/design_report.py`、`backend/app/routers/market.py`、`backend/app/main.py`、`backend/scripts/verify_e2e.py`、`backend/tests/test_factor_registry.py`、`backend/tests/test_report_quality.py`、`docs/implementation-master-plan.md` |
+| | | | **P2-3** — 数据源 fallback 测试：`test_data_source_fallback.py` 18 个测试（主源成功跳过备用、空结果触发降级、异常触发降级、熔断跳过、HTTP 4xx/5xx 硬失败、冷却恢复、健康指标验证） |
+| | | | **P2-4** — CI 门禁配置：`.lighthouserc.yml`（Lighthouse CI 3 次运行，Perf≥60%, 无障碍/SEO≥80%）、`backend/scripts/check_perf_budget.py`（预热≤5s, API avg≤3s, max≤10s） |
+| | | | **改动文件：** `backend/app/factors/factor_registry.py`、`backend/app/services/market_trends.py`、`backend/app/tasks/design_report.py`、`backend/app/routers/market.py`、`backend/app/main.py`、`backend/scripts/verify_e2e.py`、`backend/tests/test_factor_registry.py`、`backend/tests/test_report_quality.py`、`backend/app/fetchers/fundamentals_fetcher.py`、`backend/app/engine/allocation_engine.py`、`backend/app/core/async_utils.py`、`backend/app/routers/admin.py`、`backend/tests/test_data_source_fallback.py`、`frontend/src/components/analysis/ChartPanel.vue`、`.lighthouserc.yml`、`backend/scripts/check_perf_budget.py`、`docs/implementation-master-plan.md` |
