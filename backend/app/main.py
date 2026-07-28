@@ -273,6 +273,34 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning("[recovery] failed to scan stale designs: %s", exc)
 
+    # A04: 启动时清理积压的 stuck 任务（旧 session 遗留的 "running" 任务）
+    # 找出所有 status="running" 且创建时间 > 5min 的任务，标记为 failed
+    try:
+        async def _cleanup_stuck_tasks():
+            from .tasks.task_manager import task_manager as _tm
+            stuck_count = 0
+            for tid, t in list(_tm._tasks.items()):
+                if t.get("status") == "running":
+                    created = t.get("created_at", "")
+                    try:
+                        from datetime import datetime as _dt
+                        created_dt = _dt.strptime(created, "%Y-%m-%dT%H:%M:%SZ")
+                        if (datetime.utcnow() - created_dt).total_seconds() > 300:
+                            _tm.update_task(tid, status="failed", progress=0,
+                                            error_message="启动时清理：任务超时（旧 session 遗留）")
+                            stuck_count += 1
+                    except (ValueError, Exception):
+                        _tm.update_task(tid, status="failed", progress=0,
+                                        error_message="启动时清理：任务状态异常")
+                        stuck_count += 1
+            if stuck_count:
+                logger.info("[recovery] cleaned up %d stuck task(s) on startup", stuck_count)
+            else:
+                logger.info("[recovery] no stuck tasks found on startup")
+        await _cleanup_stuck_tasks()
+    except Exception as exc:
+        logger.warning("[recovery] failed to cleanup stuck tasks: %s", exc)
+
     # Start IC persistence loop (120s, B1)
     async def _ic_persistence_loop():
         from .factors.ic_tracker import ic_tracker

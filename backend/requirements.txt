@@ -19,6 +19,8 @@ pypinyin>=0.53
 scipy>=1.14.0
 pandas_ta>=0.3.14b0
 
+python-multipart>=0.0.9
+
 # ── Dev / CI tools ──────────────────────────────
 mypy>=2.0.0
 pyinstrument>=5.0.0

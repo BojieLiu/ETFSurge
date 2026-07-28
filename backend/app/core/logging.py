@@ -65,6 +65,11 @@ def setup_logging() -> None:
     # 仅保留 WARNING 及以上（调度失败仍会经 logger.exception 输出）。
     logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
+    # S04: numba 内部 SSA DEBUG 日志在日志中泛滥（每个调用数百行），
+    # 降级到 WARNING 级别以抑制噪声。
+    for numba_logger in ("numba", "numba.core.ssa", "numba.core"):
+        logging.getLogger(numba_logger).setLevel(logging.WARNING)
+
     _CONFIGURED = True
 
 

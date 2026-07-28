@@ -191,16 +191,36 @@ def _strip_ai_boilerplate(text: str | None) -> str:
 def _validate_report_consistency(report_text: str, strategies: list[dict]) -> str:
     """校验 LLM 报告中的 ETF 代码是否与引擎策略数据一致。
     如 LLM 引入了引擎方案以外的标的，追加修正脚注。
-    如 LLM 遗漏了三个方案中的某个，追加提醒段落。"""
+    如 LLM 遗漏了三个方案中的某个，追加提醒段落。
+    
+    Q04 增强:
+    - 检查所有方案是否均为 CASH（无真实 ETF），追加明确警告
+    - 若策略 ETF 数为 0，在报告中追加修正脚注
+    """
     import re
 
     # 提取引擎策略中的所有 ETF 代码
     engine_symbols: set[str] = set()
+    total_real_etfs = 0
     for s in strategies:
         for a in s.get("allocations") or s.get("etfs") or []:
             sym = a.get("symbol", "")
             if sym and sym != "CASH":
                 engine_symbols.add(sym)
+                total_real_etfs += 1
+
+    # Q04: 检查是否所有方案均为空（无真实 ETF）
+    if total_real_etfs == 0:
+        logger.warning(
+            "[design_report] All strategies have 0 real ETFs — appending empty allocation footnote"
+        )
+        empty_note = (
+            "\n\n> **⚠️ 方案数据说明**：当前所有方案均无真实 ETF 标的（100%现金），"
+            "因子评分均低于选标阈值或数据源不可用。"
+            "建议在市场数据恢复正常后重新生成设计方案。"
+        )
+        report_text += empty_note
+        return report_text
 
     # 提取报告中所有 ETF 代码（6 位纯数字）
     report_symbols: set[str] = set(re.findall(r"\b(\d{6})\b", report_text))

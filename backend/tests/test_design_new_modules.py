@@ -145,7 +145,8 @@ class TestEtfScanner:
 class TestSentimentFetcher:
     def test_sentiment_label_boundaries(self):
         """验证情绪指数映射到正确标签"""
-        from app.fetchers.sentiment_fetcher import sentiment_label
+        # v11.1: sentiment_label moved from sentiment_fetcher to fundamentals_fetcher
+        from app.fetchers.fundamentals_fetcher import sentiment_label
         assert sentiment_label(85) == "亢奋"
         assert sentiment_label(70) == "乐观"
         assert sentiment_label(55) == "中性偏乐观"
@@ -156,7 +157,7 @@ class TestSentimentFetcher:
 
     def test_sentiment_index_formula(self):
         """验证情绪指数合成公式"""
-        from app.fetchers.sentiment_fetcher import calc_sentiment_index
+        from app.fetchers.fundamentals_fetcher import calc_sentiment_index
         result = calc_sentiment_index(
             advance_ratio=0.6,      # 60% 个股上涨
             inst_consensus=0.3,     # 机构净买入
@@ -167,7 +168,7 @@ class TestSentimentFetcher:
 
     def test_sentiment_index_extremes(self):
         """验证极端情绪"""
-        from app.fetchers.sentiment_fetcher import calc_sentiment_index
+        from app.fetchers.fundamentals_fetcher import calc_sentiment_index
         # 极端乐观
         high = calc_sentiment_index(
             advance_ratio=0.9, inst_consensus=0.8,

@@ -839,15 +839,36 @@ class PoolManager:
     async def refresh_sentiment_cache(self) -> None:
         """异步刷新市场情绪缓存（2.7.9）。"""
         import time
+        import json
+        import os
         try:
             from ..fetchers.fundamentals_fetcher import fetch_market_sentiment
             sentiment = await fetch_market_sentiment()
             if sentiment:
                 self._sentiment_cache = sentiment
                 self._sentiment_cache_ts = time.time()
-                logger.info("[pool] sentiment cache refreshed")
+                # A02: Persist sentiment cache to file for crash recovery
+                _cache_dir = os.path.join(os.path.dirname(__file__), "..", "data")
+                os.makedirs(_cache_dir, exist_ok=True)
+                _cache_file = os.path.join(_cache_dir, "sentiment_cache.json")
+                with open(_cache_file, "w", encoding="utf-8") as f:
+                    json.dump({"sentiment": sentiment, "ts": time.time()}, f, ensure_ascii=False)
+                logger.info("[pool] sentiment cache refreshed and persisted")
         except Exception as e:
             logger.warning("[pool] refresh_sentiment_cache failed: %s", e)
+            # A02: On failure, try to restore from persisted file
+            try:
+                _cache_dir = os.path.join(os.path.dirname(__file__), "..", "data")
+                _cache_file = os.path.join(_cache_dir, "sentiment_cache.json")
+                if os.path.exists(_cache_file):
+                    with open(_cache_file, "r", encoding="utf-8") as f:
+                        cached = json.load(f)
+                    if isinstance(cached, dict) and "sentiment" in cached:
+                        self._sentiment_cache = cached["sentiment"]
+                        self._sentiment_cache_ts = cached.get("ts", 0)
+                        logger.info("[pool] restored sentiment from persisted cache file")
+            except Exception as restore_e:
+                logger.warning("[pool] failed to restore sentiment from cache file: %s", restore_e)
 
     def get_market_sentiment(self) -> dict:
         """获取市场情绪，120s 缓存。"""

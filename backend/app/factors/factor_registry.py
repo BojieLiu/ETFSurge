@@ -501,7 +501,8 @@ def _compute_stock_divergence(data: dict) -> float:
         import asyncio
         loop = asyncio.get_running_loop()
         if loop and loop.is_running():
-            ad_val = run_in_thread(fetch_advance_decline_ratio, timeout=5)
+            # S02: Reduced timeout from 5s to 2s to prevent 5s blocking loops
+            ad_val = run_in_thread(fetch_advance_decline_ratio, timeout=2)
             if ad_val is not None and ad_val > 0:
                 return min(max((ad_val - 1.0) * 2.0, -1.0), 1.0)
     except Exception:

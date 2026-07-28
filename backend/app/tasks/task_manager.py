@@ -348,10 +348,31 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
                               "selection_rationale": "当前估值/行情数据下无合适标的，全部现金保留"}]
                 s["warning"] = "本方案在当前市场状态下无符合条件 ETF，全部配置现金"
         if valid_count == 0:
-            error_msg = "策略校验失败：所有方案均无有效 ETF 标的"
+            # Q01/Q03: Empty allocation → mark as failed with specific error_message
+            error_msg = "分配引擎未输出有效ETF标的：所有方案均为100%现金。因子评分均低于阈值或数据源不可用。"
             logger.warning("[design_pipeline] task %d: %s", task_id, error_msg)
             mgr.update_task(task_id, progress=0, status="failed", error_message=error_msg)
             await _notify(task_id, "failed", progress=0)
+            # Also save to DB with report_quality="empty"
+            try:
+                async with async_session() as db:
+                    record = PortfolioDesign(
+                        capital=params.get("capital", 500000),
+                        risk_profile=params.get("risk_profile", "balanced"),
+                        strategies_json=json.dumps(strategies, ensure_ascii=False, default=str),
+                        market_snapshot_json=json.dumps(market_context, ensure_ascii=False, default=str),
+                        design_text="",
+                        report_quality="empty",
+                        status="failed",
+                        error_message=error_msg,
+                    )
+                    db.add(record)
+                    await db.commit()
+                    await db.refresh(record)
+                    design_id = record.id
+                    logger.info("[design_pipeline] empty allocation saved as design_id=%d (quality=empty)", design_id)
+            except Exception as db_e:
+                logger.warning("[design_pipeline] failed to save empty allocation to DB: %s", db_e)
             return
         else:
             logger.info("[design_pipeline] task %d: %d/%d strategies have valid non-CASH ETFs",
@@ -426,11 +447,17 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
                         d = await db.get(PortfolioDesign, design_id)
                         if d:
                             d.design_text = full_text
-                            d.report_quality = "full"
+                            # Q03: Check if strategies have real ETFs before marking "full"
+                            has_real_etfs = any(
+                                e.get("symbol") != "CASH"
+                                for s in strategies
+                                for e in (s.get("etfs") or [])
+                            )
+                            d.report_quality = "full" if has_real_etfs else "partial"
                             d.report_generated_at = datetime.utcnow()
                             await db.commit()
-                            logger.info("[design_pipeline] report saved to design_id=%d (%d chars, quality=full)",
-                                        design_id, len(full_text))
+                            logger.info("[design_pipeline] report saved to design_id=%d (%d chars, quality=%s)",
+                                        design_id, len(full_text), d.report_quality)
                 except Exception as e:
                     logger.warning("[design_pipeline] DB update for LLM report failed: %s", e)
                 report_quality = "full"
@@ -440,24 +467,25 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
                     async with async_session() as db:
                         d = await db.get(PortfolioDesign, design_id)
                         if d:
-                            d.report_quality = "fallback"
+                            # Q03: LLM timed out but allocation succeeded → partial
+                            d.report_quality = "partial"
                             await db.commit()
                 except Exception as e:
-                    logger.warning("[design_pipeline] DB update for fallback failed: %s", e)
-                report_quality = "fallback"
+                    logger.warning("[design_pipeline] DB update for partial fallback failed: %s", e)
+                report_quality = "partial"
 
         except Exception as e:
             logger.warning("[design_pipeline] LLM report generation failed for design_id=%d: %s", design_id, e)
-            # 标记为 completed_with_errors，数据摘要仍然可用
+            # Q03: Mark as partial — allocation succeeded but LLM failed
             try:
                 async with async_session() as db:
                     d = await db.get(PortfolioDesign, design_id)
                     if d:
-                        d.report_quality = "fallback"
+                        d.report_quality = "partial"
                         await db.commit()
             except Exception as db_e:
                 logger.warning("[design_pipeline] DB update after LLM failure failed: %s", db_e)
-            report_quality = "fallback"
+            report_quality = "partial"
             mgr.update_task(
                 task_id,
                 progress=100,

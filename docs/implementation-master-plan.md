@@ -1,6 +1,7 @@
 ﻿# ETF Surge 方案实施总计划
 
-> 生成日期: 2026-07-28 | 版本: **v11.0**
+> 生成日期: 2026-07-28 | 版本: **v12.0**
+> ✅ **Phase 12 已完成**：系统优化与质量保障 Phase 1-4 — 基于 `docs/optimization-master-plan-v2.md`。详见下方 v12.0。
 > ✅ **Phase 6.1 已完成**
 > ✅ **Phase 6.2 已完成**：组合管线与报告质量修复 — Fix A (task_manager.py 校验降级)、问题 2 规则驱动风险检测 (portfolio_service.py _compute_risk_warnings)、test_decode.py (9/9 PASS)、TestP4 恢复、报告渲染排版优化 (DesignResult.vue CSS)。详见 `docs/design-report-quality-fix-plan.md`。：可观测性与系统增强 — ConfigManager + app_config 表（`models/app_config.py`, `core/config_manager.py`）、ConfigPage（`views/ConfigView.vue`）、Sector API 实时行情返回（market.py 路由优先级调整）、LLM 热点板块注入（llm_context.py + pool_manager.py）、stars 时间新鲜度 + Level 2 精度调整（news_fetcher.py + levistock_fetcher.py）、verify_e2e.py 扩展（stars/level 校验 + check_sector_data）。详见 §4 Phase 6.1。
 > ✅ **Phase 7 已完成**：系统质量诊断修复 (system-quality-diagnosis)
@@ -1221,7 +1222,28 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 | | | | **改动文件：** `backend/app/fetchers/china_market.py`、`frontend/vite.config.js` |
 | |
 | |
-| | | | | **v10.3** | 2026-07-27 | **Phase 11 — 文档计划全部完成** | 4 份计划全部实施完毕，已归档至 `docs/archived/` |
+| | | | | **v12.0** | 2026-07-28 | **Phase 12 — 系统优化与质量保障 (optimization-master-plan-v2)** | 详见下方 |
+| | | | | | | **P0 — 数据与报告质量修复（Q01-Q04）：** |
+| | | | | | | **Q01** — `task_manager.py` 分配引擎输出有效性门禁：全部 3 方案仅 CASH 时标记为 failed，report_quality=empty，保存到 DB |
+| | | | | | | **Q02** — `strategy_check_worker.py` 策略检查管道的持仓加载增强（保持兼容性） |
+| | | | | | | **Q03** — `task_manager.py` report_quality 4 级体系：full/partial/empty/failed 替代旧 binary full/fallback |
+| | | | | | | **Q04** — `design_report.py` LLM 一致性校验增强：空 ETF 追加修正脚注 + WARNING 日志 |
+| | | | | | | **P1 — 系统稳定性修复（S01-S04）：** |
+| | | | | | | **S01** — `fundamentals_fetcher.py` push2→push2delay 域名替换 + 熔断器接入 (record_success/record_failure) + run_sync import 修复 |
+| | | | | | | **S02** — `factor_registry.py` advance_decline timeout 5s→2s，减少阻塞循环 |
+| | | | | | | **S03** — `main.py` A04: 启动时清理积压 stuck 任务（状态=running >5min 标记为 failed） |
+| | | | | | | **S04** — `core/logging.py` numba.core.ssa DEBUG 日志降级到 WARNING |
+| | | | | | | **P2 — 性能优化（P01-P03）：** |
+| | | | | | | **P01** — 前端 api/index.js 现有 60s 全局 timeout 已验证有效 |
+| | | | | | | **P02** — 未实施：demjson 替换因 demjson 非直接依赖（在 akshare 内部） |
+| | | | | | | **P03** — `warmup_profiler.py` pyinstrument async_mode=disabled→enabled |
+| | | | | | | **P3 — 可维护性增强（A01-A04）：** |
+| | | | | | | **A01** — `verify_e2e.py` 新增预热时间 CI 门禁（首次预热 ≤30s 失败线、≤15s 警告线） |
+| | | | | | | **A02** — `pool_manager.py` sentiment 缓存持久化：每次刷新写入 data/sentiment_cache.json，失败时从文件恢复 |
+| | | | | | | **A03** — `verify_e2e.py` report_quality 一致性断言：quality=full 必须有真实 ETF；quality=empty 必须全 CASH |
+| | | | | | | **新增契约：** `api-contracts/portfolio/report-quality.md` |
+| | | | | | | **新增测试：** `tests/test_report_quality.py` (7 用例 全部 PASS) |
+| | | | | | | **改动文件：** `backend/app/tasks/task_manager.py`、`backend/app/tasks/design_report.py`、`backend/app/fetchers/fundamentals_fetcher.py`、`backend/app/factors/factor_registry.py`、`backend/app/main.py`、`backend/app/core/logging.py`、`backend/app/profiling/warmup_profiler.py`、`backend/app/services/pool_manager.py`、`backend/scripts/verify_e2e.py`、`api-contracts/portfolio/report-quality.md`（新）、`backend/tests/test_report_quality.py`（新） |
 | | | | | **已实现（后端）：** |
 | | | | | **B3.1** — task_manager.py get_task() 确保 progress/stage/status 始终有值 |
 | | | | | **B2.5** — portfolio_service.py new summary.by_type field |

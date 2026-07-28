@@ -77,7 +77,8 @@ class WarmupProfiler:
             try:
                 from pyinstrument import Profiler
 
-                self._pyinstrument_session = Profiler(async_mode="disabled")
+                # P03: Enable async_mode to capture async coroutines (was "disabled")
+                self._pyinstrument_session = Profiler(async_mode="enabled")
                 self._pyinstrument_session.start()
                 self._pyinstrument_active = True
                 logger.info("[profiler] pyinstrument enabled")

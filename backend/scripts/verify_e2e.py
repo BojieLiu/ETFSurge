@@ -78,6 +78,25 @@ def section_health(host, port):
     except Exception as e:
         check("/health", False, str(e))
 
+    # A01: Warmup timing CI gate - read warmup state from /api/v1/system/warmup
+    try:
+        wr = requests.get(f"{BASE}/api/v1/system/warmup", timeout=5)
+        if wr.status_code == 200:
+            wd = wr.json()
+            warmup_total = wd.get("total_elapsed", 0) or wd.get("duration_ms", 0) or 0
+            if warmup_total > 0:
+                is_ok = warmup_total < 30000  # 30s failure line
+                is_warn = warmup_total < 15000  # 15s warning line
+                check(f"预热完成时间 {warmup_total/1000:.1f}s < 30s (gate)", is_ok,
+                      f"FAIL: {warmup_total/1000:.1f}s 超过 30s 失败线" if not is_ok else
+                      f"WARN: {warmup_total/1000:.1f}s 超过 15s 警告线" if not is_warn else "")
+            else:
+                check("预热计时器未启用", True, "PROFILE_WARMUP=1 环境变量未设置")
+        else:
+            check("/system/warmup 端点", False, f"HTTP {wr.status_code}")
+    except Exception as e:
+        check("/system/warmup 端点", False, str(e))
+
 
 def _check_candidate_pool(host, port):
     """检查候选池是否已预热。返回 True 表示池有候选标的。"""
@@ -343,7 +362,7 @@ def section_portfolio():
                         detail = dr.json()
                         rq = detail.get("report_quality", "")
                         check(f"report_quality 字段存在（当前={rq}）",
-                              rq in ("full", "fallback", "pending", "none"),
+                              rq in ("full", "partial", "empty", "failed", "pending", "none"),
                               f"值={rq}")
                         # P3-3: data quality assertions
                         strategies = detail.get("strategies", [])
@@ -373,6 +392,16 @@ def section_portfolio():
                                     check(f"strategy{i}vs{i+1} diff={diff}", diff > 0)
                             check("510300 in allocation", "510300" in all_syms)
                             check("518880 in allocation", "518880" in all_syms)
+                            # A03: report_quality consistency check
+                            # When quality="full", must have real ETFs
+                            if rq == "full":
+                                has_real = any(bool(sym_set) for sym_set in sym_sets)
+                                check(f"quality=full 且含真实ETF", has_real,
+                                      f"WARN: quality=full 但方案无真实ETF" if not has_real else "")
+                            elif rq == "empty":
+                                has_real = any(bool(sym_set) for sym_set in sym_sets)
+                                check(f"quality=empty 方案全为CASH", not has_real,
+                                      f"WARN: quality=empty 但仍有真实ETF" if has_real else "")
             except Exception:
                 pass
     except requests.Timeout:

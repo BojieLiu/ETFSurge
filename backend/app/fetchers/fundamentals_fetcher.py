@@ -6,7 +6,7 @@ import time as _time
 from datetime import datetime, timedelta
 from typing import Any
 
-from ..core.async_utils import run_in_thread
+from ..core.async_utils import run_in_thread, run_sync
 from ..config import settings
 from ..services.source_registry import registry as _source_registry
 from ..core.logging import get_logger
@@ -597,29 +597,42 @@ def calc_sentiment_index(
 def fetch_advance_decline_ratio() -> float:
     """获取市场涨跌家数比 (上涨家数/总家数)。
 
-    数据源优先级: 1. Sina/EastMoney push2 API 2. akshare
+    FIX-S01: 使用 push2delay 域名替代 push2 (push2 已被拒)；
+             失败时通过 registry.record_failure() 报告熔断器。
+    数据源优先级: 1. push2delay.eastmoney.com 2. akshare
     返回: 0~1, 失败时返回 0.5 (中性)
     """
-    # 1. Sina/EastMoney push2 API (faster & more reliable than akshare)
+    # S01: 检查熔断器状态
+    if not _source_registry._health("push2delay.eastmoney.com").available(_time.time()):
+        logger.warning("[sentiment] push2delay circuit open, skipping direct fetch")
+        _source_registry.record_failure("push2delay.eastmoney.com")
+        return _advance_decline_fallback()
+
+    # 1. push2delay.eastmoney.com (实测可用，替代被拒的 push2)
     try:
-        # 获取沪深全部股票简况
         import urllib.request
-        url = "https://push2.eastmoney.com/api/qt/clist/get"
+        import json
+        url = "https://push2delay.eastmoney.com/api/qt/clist/get"
         params = "?pn=1&pz=5000&po=1&np=1&fields=f2,f3,f4&fs=m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"
         req = urllib.request.Request(url + params, headers={"User-Agent": "Mozilla/5.0"})
         resp = urllib.request.urlopen(req, timeout=10)
-        import json
         data = json.loads(resp.read().decode("utf-8"))
         items = data.get("data", {}).get("diff", [])
         if items:
             up = sum(1 for i in items if float(i.get("f3", 0) or 0) > 0)
             total = len(items)
             if total > 0:
+                _source_registry.record_success("push2delay.eastmoney.com")
                 return up / total
     except Exception as e:
-        logger.warning("[sentiment] push2 advance_decline failed: %s", e)
+        logger.warning("[sentiment] push2delay advance_decline failed: %s", e)
+        _source_registry.record_failure("push2delay.eastmoney.com")
 
-    # 2. akshare fallback
+    return _advance_decline_fallback()
+
+
+def _advance_decline_fallback() -> float:
+    """S01: akshare fallback for advance_decline ratio. Also reports to circuit breaker."""
     try:
         def _p():
             import akshare as ak
@@ -629,10 +642,12 @@ def fetch_advance_decline_ratio() -> float:
             up = sum(1 for _, r in df.iterrows() if float(r.get("涨跌幅", 0) or 0) > 0)
             total = len(df)
             if total > 0:
+                _source_registry.record_success("push2delay.eastmoney.com")
                 return up / total
     except Exception as e2:
-        logger.warning("[sentiment] akshare advance_decline failed: %s", e2)
+        logger.warning("[sentiment] akshare advance_decline fallback failed: %s", e2)
 
+    _source_registry.record_failure("push2delay.eastmoney.com")
     return 0.5
 
 
