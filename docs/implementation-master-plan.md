@@ -1,6 +1,7 @@
 ﻿# ETF Surge 方案实施总计划
 
-> 生成日期: 2026-07-28 | 版本: **v13.1**
+> 生成日期: 2026-07-29 | 版本: **v13.2**
+> ✅ **Phase 13e 已完成**（2026-07-29）：LLM Provider 链路诊断修复 — 移除熔断器误伤 + 修复 system_override 被静默丢弃。详见下方 v13.2。
 > ✅ **Phase 13d 已完成**（2026-07-28）：诊断计划剩余项实施 — LLM 熔断保护 + 引擎级 fallback + 超时缩减 + 报告内容校验 + SSL 会话复用 + 预热退化告警。详见下方 v13.1。
 > ✅ **Phase 13 已完成**（2026-07-28）：系统综合诊断与优化 — 基于 `docs/system-diagnosis-and-optimization-plan.md`。详见下方 v13.0。
 > ✅ **Phase 12 已完成**：系统优化与质量保障 Phase 1-4 — 基于 `docs/optimization-master-plan-v2.md`。详见下方 v12.0。
@@ -1327,3 +1328,11 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 | | | | **T2** — `test_design_report_validation.py` 9 个测试（完整报告无警告、缺少章节、重复标题、过短、截断、空报告、无/有重复标题、无标题） |
 | | | | **T3** — `test_ssl_session.py` 3 个测试（Session 实例验证、请求头验证、模块级属性验证） |
 | | | | **改动文件：** `backend/app/config.py`、`backend/app/analysis/llm.py`、`backend/app/tasks/design_report.py`、`backend/app/fetchers/news_fetcher.py`、`backend/app/main.py`、`backend/tests/test_llm_circuit_breaker.py`（新）、`backend/tests/test_design_report_validation.py`（新）、`backend/tests/test_ssl_session.py`（新）、`docs/implementation-master-plan.md` |
+| | **v13.2** | 2026-07-29 | **Phase 13e — LLM Provider 链路诊断修复 (plan v1.2)** | 详见下方 |
+| | | | **已修复（P0 — LLM 熔断误伤 + system_override 丢弃）：** |
+| | | | **FIX-CB** — 熔断器误伤修复：`llm.py` `generate_design_report()` 移除 circuit breaker 检查 (`registry._health().available()`)、`record_success()`/`record_failure()` 及 `_CIRCUIT_BREAKER_NAME` 常量。Provider failover 链（OpenCode Zen → DeepSeek）本身是充分的防护，熔断器在 Provider 短暂不可用时导致空报告误伤。引擎 fallback (`_build_engine_fallback()`) 保留作为 LLM 异常时的最后防线 |
+| | | | **FIX-SO** — `system_override` 静默丢弃修复：`AgentRuntime.run()` 新增 `kwargs.get("system_override", self.system_prompt)` 处理，使得 `generate_design_report()` 传入的 `system_override=load_prompt("design_report.md")` 能被正确使用（原被静默忽略，始终使用 agent.default prompt） |
+| | | | **新增测试（TDD）：** |
+| | | | **T1** — `test_runtime_system_override.py` 4 个测试（system_override 覆盖、fallback 到默认、其他 kwargs 传递、无 kwargs 调用） |
+| | | | **T2** — `test_llm_circuit_breaker.py` 更新至 5 个测试（熔断检查已移除：LLM 异常→引擎 fallback、LLM 成功→返回 LLM 内容、fallback 含策略数据、空策略、空市态） |
+| | | | **改动文件：** `backend/app/analysis/llm.py`、`backend/app/analysis/runtime.py`、`backend/tests/test_runtime_system_override.py`（新）、`backend/tests/test_llm_circuit_breaker.py`（更新）、`docs/implementation-master-plan.md` |

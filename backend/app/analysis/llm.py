@@ -8,7 +8,6 @@ from ..monitor.token_usage import token_store, UsageRecord
 from ..core.logging import get_logger
 from .registry import get_agent
 from .provider import get_configured_providers, has_any_api_key, ProviderConfig
-from ..services.source_registry import registry
 
 logger = get_logger(__name__)
 
@@ -28,9 +27,6 @@ def load_prompt(name: str) -> str:
 SYSTEM_PROMPT = load_prompt("general_analyst.md")
 
 # System prompts are loaded per-agent via AgentRuntime (registry.py).
-
-_CIRCUIT_BREAKER_NAME = "deepseek"
-
 
 def _build_engine_fallback(strategies: list[dict], regime: str = "unknown") -> str:
     """Generate a meaningful engine-based fallback report when LLM is unavailable.
@@ -1063,36 +1059,19 @@ async def generate_design_report(
         market_context=ctx, plan_tables=plan_tables,
     )
 
-    # ── Circuit breaker check ──────────────────────────────────────
-    import time as _time
-    _now = _time.time()
-    if not registry._health(_CIRCUIT_BREAKER_NAME).available(_now):
-        logger.info(
-            "[generate_design_report] Circuit breaker open for %s, "
-            "using engine fallback", _CIRCUIT_BREAKER_NAME
-        )
-        regime = ctx.get("market_regime", "unknown")
-        return _build_engine_fallback(strategies, regime)
-
+    # ── LLM call with Provider failover ────────────────────────────
+    # 方案一（plan v1.2）: Provider failover 是充分的防护层，
+    # 熔断器检查已移除（它会误伤正常 Provider 导致空报告）。
+    # _build_engine_fallback() 作为 last-resort fallback 保留。
     try:
-        _start = _time.monotonic()
         # 使用"symbol_analysis" agent 的通用上下文，但传入设计报告 prompt
         result = await get_agent("symbol_analysis").run(
             prompt,
             system_override=load_prompt("design_report.md"),
         )
-        elapsed_ms = (_time.monotonic() - _start) * 1000
-        registry._health(_CIRCUIT_BREAKER_NAME).record_success(_now, duration_ms=elapsed_ms)
         return result or "报告生成失败"
     except Exception as e:
         logger.warning("[generate_design_report] LLM call failed: %s", e)
-        elapsed_ms = (_time.monotonic() - _start) * 1000
-        try:
-            registry._health(_CIRCUIT_BREAKER_NAME).record_failure(
-                _now, duration_ms=int(elapsed_ms), error=str(e)[:500]
-            )
-        except Exception as re:
-            logger.warning("[generate_design_report] Failed to record failure: %s", re)
         # Return engine fallback instead of empty string
         regime = ctx.get("market_regime", "unknown")
         return _build_engine_fallback(strategies, regime)

@@ -53,12 +53,17 @@ class AgentRuntime:
         return None
 
     async def run(self, prompt: str, **kwargs) -> str:
-        """Run the agent and return the raw LLM text response."""
+        """Run the agent and return the raw LLM text response.
+
+        Supports optional ``system_override`` in **kwargs:
+        when provided, it replaces ``self.system_prompt`` for this call.
+        """
+        system_prompt = kwargs.get("system_override", self.system_prompt)
         last_exc: Exception | None = None
         for attempt in range(1, self.config.max_retries + 1):
             try:
                 return await llm_complete_with_system(
-                    system_prompt=self.system_prompt,
+                    system_prompt=system_prompt,
                     prompt=prompt,
                     response_format=self._response_format(),
                 )
