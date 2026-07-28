@@ -28,6 +28,10 @@ class StrategyCheckRecord(Base):
     # JSON: list[risk_warnings dicts]
     risk_warnings_json = Column(Text, nullable=True)
 
+    # Q02: Full LLM-generated report text (matching portfolio_designs.design_text)
+    # Q02: Full LLM-generated report text (matching portfolio_designs.design_text)
+    report_text = Column(Text, nullable=True)
+
     def to_dict(self) -> dict:
         import json
         return {
@@ -39,5 +43,6 @@ class StrategyCheckRecord(Base):
             "suggestions": json.loads(str(self.suggestions_json)) if self.suggestions_json else [],
             "holdings_analysis": json.loads(str(self.holdings_json)) if self.holdings_json else [],
             "risk_warnings": json.loads(str(self.risk_warnings_json)) if self.risk_warnings_json else [],
+            "report_text": self.report_text or "",
             "type": "check",
         }

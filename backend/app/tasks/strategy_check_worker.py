@@ -106,6 +106,7 @@ async def _pipeline_body(mgr, task_id: int) -> dict:
                 risk_warnings_json=json.dumps(
                     result.get("risk_warnings", []), ensure_ascii=False, default=str
                 ),
+                report_text=result.get("report_text", "") or "",
             )
             db.add(record)
             await db.commit()

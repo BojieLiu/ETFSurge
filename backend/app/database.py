@@ -77,3 +77,6 @@ def _migrate(conn):
     columns_check = [c["name"] for c in inspector.get_columns("strategy_check_records")]
     if "portfolio_type" not in columns_check:
         conn.execute(text("ALTER TABLE strategy_check_records ADD COLUMN portfolio_type VARCHAR(20)"))
+    # Q02: strategy_check_records.report_text
+    if "report_text" not in columns_check:
+        conn.execute(text("ALTER TABLE strategy_check_records ADD COLUMN report_text TEXT"))

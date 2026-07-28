@@ -19,6 +19,10 @@ from ..services.cache_service import sync_memory_cache
 
 logger = logging.getLogger(__name__)
 
+# P02: ETF list cache (TTL 300s) to reduce warmup time
+_etf_list_cache = {}
+ETF_CACHE_TTL = 300
+
 # ── Last-good 缓存兜底 ───────────────────────────────────────
 _last_good_etfs: list[dict] | None = None
 

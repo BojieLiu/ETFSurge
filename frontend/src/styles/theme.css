@@ -710,3 +710,22 @@ button:focus-visible {
   cursor: not-allowed;
 }
 .z-toast { z-index: var(--z-index-toast); }
+.loading-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+  width: 100%;
+}
+
+.loading-spinner {
+  min-height: 120px;
+}
+
+.content-placeholder {
+  min-height: 160px;
+}
+
+.data-panel-loading {
+  min-height: 300px;
+}

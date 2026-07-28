@@ -1225,7 +1225,7 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 | | | | | **v12.0** | 2026-07-28 | **Phase 12 — 系统优化与质量保障 (optimization-master-plan-v2)** | 详见下方 |
 | | | | | | | **P0 — 数据与报告质量修复（Q01-Q04）：** |
 | | | | | | | **Q01** — `task_manager.py` 分配引擎输出有效性门禁：全部 3 方案仅 CASH 时标记为 failed，report_quality=empty，保存到 DB |
-| | | | | | | **Q02** — `strategy_check_worker.py` 策略检查管道的持仓加载增强（保持兼容性） |
+| | | | | | | **Q02** — `models/strategy_check.py` 新增 report_text 列 + to_dict() 序列化；`database.py` 迁移；`strategy_check_worker.py` 存储 report_text 到记录 |
 | | | | | | | **Q03** — `task_manager.py` report_quality 4 级体系：full/partial/empty/failed 替代旧 binary full/fallback |
 | | | | | | | **Q04** — `design_report.py` LLM 一致性校验增强：空 ETF 追加修正脚注 + WARNING 日志 |
 | | | | | | | **P1 — 系统稳定性修复（S01-S04）：** |
@@ -1234,16 +1234,16 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 | | | | | | | **S03** — `main.py` A04: 启动时清理积压 stuck 任务（状态=running >5min 标记为 failed） |
 | | | | | | | **S04** — `core/logging.py` numba.core.ssa DEBUG 日志降级到 WARNING |
 | | | | | | | **P2 — 性能优化（P01-P03）：** |
-| | | | | | | **P01** — 前端 api/index.js 现有 60s 全局 timeout 已验证有效 |
-| | | | | | | **P02** — 未实施：demjson 替换因 demjson 非直接依赖（在 akshare 内部） |
+| | | | | | | **P01** — `frontend/src/styles/theme.css` 新增 loading-container min-height 200px 等 CSS，降低 CLS |
+| | | | | | | **P02** — `etf_scanner.py` 新增 ETF_LIST_CACHE 内存缓存（TTL 300s），减少热启动 warmup 时间 |
 | | | | | | | **P03** — `warmup_profiler.py` pyinstrument async_mode=disabled→enabled |
 | | | | | | | **P3 — 可维护性增强（A01-A04）：** |
 | | | | | | | **A01** — `verify_e2e.py` 新增预热时间 CI 门禁（首次预热 ≤30s 失败线、≤15s 警告线） |
 | | | | | | | **A02** — `pool_manager.py` sentiment 缓存持久化：每次刷新写入 data/sentiment_cache.json，失败时从文件恢复 |
 | | | | | | | **A03** — `verify_e2e.py` report_quality 一致性断言：quality=full 必须有真实 ETF；quality=empty 必须全 CASH |
-| | | | | | | **新增契约：** `api-contracts/portfolio/report-quality.md` |
-| | | | | | | **新增测试：** `tests/test_report_quality.py` (7 用例 全部 PASS) |
-| | | | | | | **改动文件：** `backend/app/tasks/task_manager.py`、`backend/app/tasks/design_report.py`、`backend/app/fetchers/fundamentals_fetcher.py`、`backend/app/factors/factor_registry.py`、`backend/app/main.py`、`backend/app/core/logging.py`、`backend/app/profiling/warmup_profiler.py`、`backend/app/services/pool_manager.py`、`backend/scripts/verify_e2e.py`、`api-contracts/portfolio/report-quality.md`（新）、`backend/tests/test_report_quality.py`（新） |
+| | | | | | | **新增契约：** `api-contracts/portfolio/report-quality.md`、`api-contracts/portfolio/strategy-check-report.md` |
+| | | | | | | **新增测试：** `tests/test_report_quality.py` (7/7 PASS)、`tests/test_remaining_fixes.py` (10/10 PASS) |
+| | | | | | | **改动文件：** `backend/app/tasks/task_manager.py`、`backend/app/tasks/design_report.py`、`backend/app/tasks/strategy_check_worker.py`、`backend/app/fetchers/fundamentals_fetcher.py`、`backend/app/fetchers/etf_scanner.py`、`backend/app/factors/factor_registry.py`、`backend/app/main.py`、`backend/app/core/logging.py`、`backend/app/profiling/warmup_profiler.py`、`backend/app/services/pool_manager.py`、`backend/app/models/strategy_check.py`、`backend/app/database.py`、`backend/scripts/verify_e2e.py`、`frontend/src/styles/theme.css`、`backend/tests/test_design_new_modules.py`、`api-contracts/portfolio/report-quality.md`（新）、`api-contracts/portfolio/strategy-check-report.md`（新）、`backend/tests/test_report_quality.py`（新）、`backend/tests/test_remaining_fixes.py`（新） |
 | | | | | **已实现（后端）：** |
 | | | | | **B3.1** — task_manager.py get_task() 确保 progress/stage/status 始终有值 |
 | | | | | **B2.5** — portfolio_service.py new summary.by_type field |
