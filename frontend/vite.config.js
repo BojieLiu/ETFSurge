@@ -28,12 +28,12 @@ export default defineConfig({
       },
     }),
     // E1+H: Bundle visualization + size budget (enabled via ANALYZE=true env var)
-    visualizer({
+    ...(process.env.ANALYZE === 'true' ? [visualizer({
       filename: 'dist/stats.html',
       open: false,
       gzipSize: true,
       brotliSize: true,
-    }),
+    })] : []),
   ],
   resolve: {
     alias: {

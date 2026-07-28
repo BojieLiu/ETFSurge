@@ -59,6 +59,8 @@ services:
       - ./backend/.env
     environment:
       - REDIS_URL=redis://redis:6379/0
+      - PROFILE_WARMUP=1
+      - LOG_LEVEL=DEBUG
     volumes:
       - ./backend:/app
       - ./data:/app/data
