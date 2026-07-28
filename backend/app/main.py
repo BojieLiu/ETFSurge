@@ -138,12 +138,12 @@ async def lifespan(app: FastAPI):
     # ── A1-A2: Collect warmup tasks for profiler to capture timing ──
     _warmup_tasks: list[asyncio.Task] = []
 
-    # 启动时后台预热行情缓存（不阻塞启动，25s 超时）
+    # 启动时后台预热行情缓存（不阻塞启动，10s 超时 → 部分数据可接受）
     async def _warmup_market_cache():
         with warmup_timer("warmup_market_cache", "warmup", "行情缓存预热"):
             _mark = app.state.warmup["market_cache"]
             try:
-                await asyncio.wait_for(refresh_market_cache(), timeout=25)
+                await asyncio.wait_for(refresh_market_cache(), timeout=10)
                 _mark["done"] = True
                 _mark["success"] = True
                 logger.info("行情缓存预热完成")
@@ -154,13 +154,28 @@ async def lifespan(app: FastAPI):
 
     _warmup_tasks.append(asyncio.create_task(_warmup_market_cache()))
 
-    # 启动时预热全球指数缓存（非阻塞，写入持久化 cache，重启后不丢失）
+    # 启动时预热全球指数缓存（非阻塞，15s 超时）
     async def _warmup_global_indices():
         with warmup_timer("warmup_global_indices", "warmup", "全球指数缓存预热"):
             _mark = app.state.warmup["global_indices"]
             try:
                 from .services.market_service import get_global_indices
-                await asyncio.wait_for(get_global_indices(), timeout=30)
+                # 先尝试加载本地持久化缓存，避免重复网络请求
+                _persist_path = os.path.join(
+                    os.path.dirname(os.path.dirname(__file__)),
+                    "data", "indices_cache.json",
+                )
+                if os.path.isfile(_persist_path):
+                    _mtime = os.path.getmtime(_persist_path)
+                    _age = time.time() - _mtime
+                    if _age < 3600:  # < 1 hour old
+                        logger.info(
+                            "全球指数本地缓存 %.1fs 内有效，跳过网络预热", _age
+                        )
+                        _mark["done"] = True
+                        _mark["success"] = True
+                        return
+                await asyncio.wait_for(get_global_indices(), timeout=15)
                 _mark["done"] = True
                 _mark["success"] = True
                 logger.info("全球指数缓存预热完成")

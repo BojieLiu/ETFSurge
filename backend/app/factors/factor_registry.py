@@ -22,6 +22,10 @@ from ..factors.ic_tracker import ic_tracker
 
 logger = logging.getLogger(__name__)
 
+# Z-score clipping bound: cap extreme Z-scores to [-5, 5] to prevent
+# values like 16.22σ from distorting downstream allocation.
+ZSCORE_CLIP_BOUND = 5.0
+
 # Default YAML path relative to this file
 _DEFAULT_YAML = Path(__file__).parent / "factor_definitions.yaml"
 
@@ -48,14 +52,25 @@ class FactorDefinition:
 
 
 def _standardize(series: pd.Series, method: str) -> pd.Series:
-    """Apply standardization to a factor series."""
+    """Apply standardization to a factor series with winsorization."""
     if method == "none" or len(series) < 2:
         return series
     if method == "zscore":
         std = series.std()
         if std == 0:
             return series * 0
-        return (series - series.mean()) / std
+        result = (series - series.mean()) / std
+        # Winsorization: clip extreme Z-scores to prevent values like 16.22σ
+        extreme_mask = result.abs() > ZSCORE_CLIP_BOUND
+        if extreme_mask.any():
+            n_extreme = extreme_mask.sum()
+            _raw_max = result.abs().max()
+            if _raw_max is not None:
+                logger.warning(
+                    "[_standardize] Z-score winsorization clipped %d values (max raw=%.2f, bound=%.1f)",
+                    n_extreme, _raw_max, ZSCORE_CLIP_BOUND,
+                )
+        return result.clip(lower=-ZSCORE_CLIP_BOUND, upper=ZSCORE_CLIP_BOUND)
     if method == "rank":
         return series.rank(pct=True)
     if method == "minmax":

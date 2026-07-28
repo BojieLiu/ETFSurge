@@ -1,6 +1,7 @@
 ﻿# ETF Surge 方案实施总计划
 
-> 生成日期: 2026-07-28 | 版本: **v12.0**
+> 生成日期: 2026-07-28 | 版本: **v13.0**
+> ✅ **Phase 13 已完成**（2026-07-28）：系统综合诊断与优化 — 基于 `docs/system-diagnosis-and-optimization-plan.md`。详见下方 v13.0。
 > ✅ **Phase 12 已完成**：系统优化与质量保障 Phase 1-4 — 基于 `docs/optimization-master-plan-v2.md`。详见下方 v12.0。
 > ✅ **Phase 6.1 已完成**
 > ✅ **Phase 6.2 已完成**：组合管线与报告质量修复 — Fix A (task_manager.py 校验降级)、问题 2 规则驱动风险检测 (portfolio_service.py _compute_risk_warnings)、test_decode.py (9/9 PASS)、TestP4 恢复、报告渲染排版优化 (DesignResult.vue CSS)。详见 `docs/design-report-quality-fix-plan.md`。：可观测性与系统增强 — ConfigManager + app_config 表（`models/app_config.py`, `core/config_manager.py`）、ConfigPage（`views/ConfigView.vue`）、Sector API 实时行情返回（market.py 路由优先级调整）、LLM 热点板块注入（llm_context.py + pool_manager.py）、stars 时间新鲜度 + Level 2 精度调整（news_fetcher.py + levistock_fetcher.py）、verify_e2e.py 扩展（stars/level 校验 + check_sector_data）。详见 §4 Phase 6.1。
@@ -1290,3 +1291,15 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 | | | | **FIX-03** — `cache_service.py` `RedisCache.init()` 添加 `if self.available: return` 幂等退出，`get/set/mget/mset` 惰性自动初始化（P2） |
 | | | | **FIX-15** — 新增 `.lighthouserc.yml` Lighthouse CI 配置（3 页 × 3 次运行，性能≥60%, 无障碍/最佳实践/SEO≥80%）（P3） |
 | | | | **改动文件：** `backend/app/fetchers/china_market.py`、`backend/app/core/ttl.py`、`backend/app/services/pool_manager.py`、`backend/app/services/portfolio_service.py`、`backend/app/tasks/strategy_check_worker.py`、`backend/app/services/cache_service.py`、`.lighthouserc.yml`、`docs/optimization-master-plan.md`、`docs/implementation-master-plan.md` |
+| | **v13.0** | 2026-07-28 | **Phase 13 — 系统综合诊断与优化 (system-diagnosis-and-optimization)** | 详见下方 |
+| | | | **已实现（P0 — 修复阻塞问题）：** |
+| | | | **P0-1** — 因子 Z-score winsorization：`factor_registry.py` 新增 `ZSCORE_CLIP_BOUND = 5.0`，`_standardize()` zscore 分支返回前 clip 到 [-5, 5] 并记录极端值日志 |
+| | | | **P0-2** — 市态判定单日涨跌幅阈值：`market_trends.py` `detect_market_regime()` 新增 `daily_change_pct` 参数，<-5%→panic、-5%~-3%→correction、>+5%→bull_strong、>+3%→bull_weakening |
+| | | | **P0-3** — LLM 报告一致性增强：`design_report.py` `_validate_report_consistency()` 新增重复章节标题检测 + 去重、空白行折叠（4+→2）、fixes_applied 汇总日志 |
+| | | | **P0-4** — Chart 500 错误修复：`market.py` chart 端点增加 `try/except` 包裹 + `_empty_chart_response()` fallback，KeyError 和通用异常均返回空结构 |
+| | | | **已实现（P1 — 性能优化）：** |
+| | | | **P1-1** — 预热超时缩减：`main.py` market_cache 25s→10s, global_indices 30s→15s；global_indices 新增 `indices_cache.json` 1h 本地缓存跳过检查 |
+| | | | **已实现（P2 — 防护体系增强）：** |
+| | | | **P2-1** — `verify_e2e.py` 新增 API 5xx 零容忍检查（`section_api_5xx_check`）、因子 Z-score 合理性门禁（`section_factor_zscore_check`）、方案差异化度 Jaccard 校验（`section_solution_diversity_check`） |
+| | | | **P2-2** — 新增 8 个单测：4 个 winsorization 测试（`TestStandardizeWinsorization`）、5 个市态判定每日涨跌幅测试、3 个报告一致性测试 |
+| | | | **改动文件：** `backend/app/factors/factor_registry.py`、`backend/app/services/market_trends.py`、`backend/app/tasks/design_report.py`、`backend/app/routers/market.py`、`backend/app/main.py`、`backend/scripts/verify_e2e.py`、`backend/tests/test_factor_registry.py`、`backend/tests/test_report_quality.py`、`docs/implementation-master-plan.md` |

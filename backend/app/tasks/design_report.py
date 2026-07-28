@@ -196,10 +196,66 @@ def _validate_report_consistency(report_text: str, strategies: list[dict]) -> st
     Q04 增强:
     - 检查所有方案是否均为 CASH（无真实 ETF），追加明确警告
     - 若策略 ETF 数为 0，在报告中追加修正脚注
+    
+    P1 增强 (system-diagnosis):
+    - 检测重复章节标题，追加修正脚注
+    - 折叠 3+ 连续空行为最多 2 行
     """
     import re
 
-    # 提取引擎策略中的所有 ETF 代码
+    fixes_applied = 0
+
+    # ── 重复章节标题检测 ──
+    headers = re.findall(r"^(##+)\s+(.+)$", report_text, re.MULTILINE)
+    seen_headers: dict[str, list[int]] = {}
+    dup_lines: list[int] = []
+    for i, (level, title) in enumerate(headers):
+        key = f"{level}|{title.strip()}"
+        if key in seen_headers:
+            dup_lines.append(i)
+        else:
+            seen_headers[key] = [i]
+    if dup_lines:
+        logger.warning(
+            "[design_report] Detected %d duplicate section headers in LLM report",
+            len(dup_lines),
+        )
+        dup_note = (
+            "\n\n> **📝 格式说明**：报告存在重复章节标题，已自动去重。"
+            "请以方案卡片中的完整方案信息为准。"
+        )
+        report_text += dup_note
+        fixes_applied += len(dup_lines)
+        # Remove duplicate header lines from the text
+        lines = report_text.split("\n")
+        # Track which header lines (by index in lines) are duplicates
+        header_line_indices: dict[str, int] = {}  # key -> first occurrence line index
+        dedup_lines = []
+        for line in lines:
+            m = re.match(r"^(##+)\s+(.+)$", line)
+            if m:
+                key = f"{m.group(1)}|{m.group(2).strip()}"
+                if key in header_line_indices:
+                    # Skip duplicate header line
+                    fixes_applied += 1
+                    continue
+                header_line_indices[key] = len(dedup_lines)
+            dedup_lines.append(line)
+        report_text = "\n".join(dedup_lines)
+
+    # ── 空白行规范化 ──
+    original_len = len(report_text)
+    # Collapse 4+ consecutive newlines to 2 (preserve paragraph separation, remove stacking)
+    report_text = re.sub(r"\n{4,}", "\n\n\n", report_text)
+    collapsed = original_len - len(report_text)
+    if collapsed > 0:
+        logger.info(
+            "[design_report] Collapsed %d chars of excess blank lines in LLM report",
+            collapsed,
+        )
+        fixes_applied += 1
+
+    # ── 提取引擎策略中的所有 ETF 代码 ──
     engine_symbols: set[str] = set()
     total_real_etfs = 0
     for s in strategies:
@@ -238,6 +294,7 @@ def _validate_report_consistency(report_text: str, strategies: list[dict]) -> st
             + "。以上分析仅供参考，实际配置以方案卡片中的 ETF 标的和权重为准。"
         )
         report_text += extra_note
+        fixes_applied += 1
 
     # 检查是否覆盖了三种方案
     plan_names = [s.get("label", "") or s.get("style", "") for s in strategies]
@@ -261,6 +318,13 @@ def _validate_report_consistency(report_text: str, strategies: list[dict]) -> st
             + " 三个方案，报告未完整展开的方案请参考「方案卡片」Tab 查看完整明细。"
         )
         report_text += miss_note
+        fixes_applied += 1
+
+    if fixes_applied > 0:
+        logger.info(
+            "[design_report] _validate_report_consistency applied %d total fixes",
+            fixes_applied,
+        )
 
     return report_text
 

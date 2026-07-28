@@ -213,8 +213,29 @@ async def chart(
     asset_type: str = Query("A"),
     period: str = Query("daily"),
 ) -> dict:
-    hist = await get_history(symbol, asset_type, period)
-    return compute_chart_data(hist)
+    """返回 K 线图数据（含 MA/MACD/布林带指标序列）。"""
+    try:
+        hist = await get_history(symbol, asset_type, period)
+        if not hist:
+            logger.warning("[chart] Empty history for %s/%s/%s", symbol, asset_type, period)
+            return _empty_chart_response()
+        return compute_chart_data(hist)
+    except KeyError as e:
+        logger.error("[chart] Missing column %s in history data for %s", e, symbol)
+        return _empty_chart_response()
+    except Exception as e:
+        logger.exception("[chart] compute_chart_data failed for %s: %s", symbol, e)
+        return _empty_chart_response()
+
+
+def _empty_chart_response() -> dict:
+    """Return an empty but valid chart data structure."""
+    return {
+        "dates": [], "opens": [], "highs": [], "lows": [], "closes": [], "volumes": [],
+        "ma5": [], "ma10": [], "ma20": [], "ma60": [],
+        "bollinger": {"upper": [], "middle": [], "lower": []},
+        "macd": {"dif": [], "dea": [], "histogram": []},
+    }
 
 
 # TODO: 未接入前端

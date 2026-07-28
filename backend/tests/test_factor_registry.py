@@ -11,6 +11,65 @@ from datetime import datetime, date
 
 
 # =============================================================================
+# Z-score Winsorization
+# =============================================================================
+
+
+class TestStandardizeWinsorization:
+    """验证 Z-score winsorization 将极端值截断到 [-5, 5]。"""
+
+    def test_winsorization_clips_extreme_zscores(self):
+        """极端 Z-score 应被截断到 ZSCORE_CLIP_BOUND。"""
+        from app.factors.factor_registry import _standardize, ZSCORE_CLIP_BOUND
+        import pandas as pd
+        import numpy as np
+
+        # 创建一个包含极端值的 Series：一个点在 16σ，其余在 0 附近
+        values = [0.0] * 98 + [16.0] + [-16.0]
+        series = pd.Series(values, dtype=float)
+        result = _standardize(series, "zscore")
+
+        # 验证所有值在 [-5, 5] 范围内
+        assert result.abs().max() <= ZSCORE_CLIP_BOUND + 1e-6, (
+            f"Z-score {result.abs().max():.2f} exceeds {ZSCORE_CLIP_BOUND}"
+        )
+
+    def test_winsorization_preserves_normal_values(self):
+        """正常 Z-score（在 [-5, 5] 内）不应被截断。"""
+        from app.factors.factor_registry import _standardize
+        import pandas as pd
+        import numpy as np
+
+        np.random.seed(42)
+        values = np.random.randn(100) * 0.5  # 小标准差
+        series = pd.Series(values, dtype=float)
+        result = _standardize(series, "zscore")
+
+        # 所有值应在 [-5, 5] 内
+        assert result.abs().max() <= 5.0 + 1e-6
+
+    def test_winsorization_zero_std(self):
+        """零标准差时应返回全零。"""
+        from app.factors.factor_registry import _standardize
+        import pandas as pd
+
+        series = pd.Series([5.0] * 10, dtype=float)
+        result = _standardize(series, "zscore")
+        assert (result == 0).all()
+
+    def test_winsorization_non_zscore_methods_unchanged(self):
+        """非 zscore 方法不受 winsorization 影响。"""
+        from app.factors.factor_registry import _standardize
+        import pandas as pd
+
+        series = pd.Series([1.0, 2.0, 3.0, 100.0, 200.0], dtype=float)
+        # rank: 不应被截断
+        result = _standardize(series, "rank")
+        assert result.max() == 1.0
+        assert result.min() == 1.0 / len(series)  # min rank percentile
+
+
+# =============================================================================
 # FactorRegistry
 # =============================================================================
 

@@ -163,6 +163,7 @@ def detect_market_regime(
     sentiment_index: float = 50.0,
     adv_ratio: float = 0.5,
     index_realtime: list[dict] | None = None,  # P0.5: 实时指数兜底
+    daily_change_pct: float | None = None,      # P1: 单日涨跌幅 (如 -0.0735 = -7.35%)
 ) -> str:
     """
     基于趋势数据和情绪指标判断当前市场状态。
@@ -174,6 +175,7 @@ def detect_market_regime(
         sentiment_index: 情绪指数 0~100
         adv_ratio: 上涨家数占比 0~1
         index_realtime: 实时指数行情快照（P0.5 fallback）
+        daily_change_pct: 单日涨跌幅 (如 -0.0735)，优先于多周期趋势判断
 
     Returns:
         "bull_strong" / "bull_weakening" / "range_bound" /
@@ -181,6 +183,33 @@ def detect_market_regime(
     """
     # 默认
     regime = "range_bound"
+
+    # P1: 单日涨跌幅阈值判定 — 优先于多周期趋势，捕捉暴跌/暴涨
+    if daily_change_pct is not None:
+        if daily_change_pct < -0.05:
+            logger.warning(
+                "[detect_market_regime] Daily change %.2f%% < -5%% → panic",
+                daily_change_pct * 100,
+            )
+            return "panic"
+        if daily_change_pct < -0.03:
+            logger.info(
+                "[detect_market_regime] Daily change %.2f%% < -3%% → correction",
+                daily_change_pct * 100,
+            )
+            return "correction"
+        if daily_change_pct > 0.05:
+            logger.info(
+                "[detect_market_regime] Daily change %.2f%% > +5%% → bull_strong",
+                daily_change_pct * 100,
+            )
+            return "bull_strong"
+        if daily_change_pct > 0.03:
+            logger.info(
+                "[detect_market_regime] Daily change %.2f%% > +3%% → correction (surge)",
+                daily_change_pct * 100,
+            )
+            return "bull_weakening"
 
     # 从趋势数据中提取主要信号
     index_trend = (trends or {}).get(broad_index_code, {})
@@ -218,9 +247,13 @@ def detect_market_regime(
         for idx in index_realtime:
             chg = idx.get("change_pct", 0) or 0
             if chg < -0.05:
+                return "panic"
+            if chg < -0.03:
                 return "correction"
-            if chg < -0.03 and sentiment_index < 50:
+            if chg < -0.02 and sentiment_index < 50:
                 return "defensive_rotate"
+            if chg > 0.05:
+                return "bull_strong"
             if chg > 0.03 and sentiment_index > 60:
                 return "bull_weakening"
 

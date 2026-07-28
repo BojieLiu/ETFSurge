@@ -1044,6 +1044,140 @@ def section_circuit_breaker():
         check("熔断器状态检查", False, str(e))
 
 
+# ── API 5xx 检测 ──────────────────────────────────────────────
+
+
+def section_api_5xx_check():
+    """API 5xx 检测 — 零容忍，任何 5xx 即 FAIL。"""
+    section("API 5xx 检测")
+    # 验证几个核心端点是否有 5xx 错误
+    endpoints = [
+        "/api/v1/market/realtime",
+        "/api/v1/market/etfs?limit=10",
+        "/api/v1/market/chart/510300",
+        "/api/v1/market/indices/global",
+        "/api/v1/portfolio/list",
+        "/api/v1/news/headlines?limit=5",
+        "/health",
+    ]
+    has_5xx = False
+    for ep in endpoints:
+        try:
+            r = requests.get(f"{BASE}{ep}", timeout=10)
+            if r.status_code >= 500:
+                check(f"GET {ep} -> {r.status_code}", False, "5xx 不允许")
+                has_5xx = True
+            else:
+                check(f"GET {ep} -> {r.status_code}", True)
+        except Exception as e:
+            check(f"GET {ep}", False, str(e))
+            has_5xx = True
+    if not has_5xx:
+        check("所有端点无 5xx 错误", True)
+
+
+# ── 因子 Z-score 门禁 ───────────────────────────────────────────
+
+
+def section_factor_zscore_check(host="127.0.0.1", port=8000):
+    """因子 Z-score 合理性校验 — 检查 factor-health 端点是否有极端 Z-score。"""
+    section("因子 Z-score 合理性")
+    try:
+        r = requests.get(f"http://{host}:{port}/api/v1/admin/factor-health", timeout=15)
+        if r.status_code != 200:
+            check("GET /admin/factor-health", False, f"HTTP {r.status_code}")
+            return
+        data = r.json()
+        # 尝试不同响应结构
+        factors = data.get("factors", {}) or data.get("factor_scores", {}) or data
+        if not factors:
+            check("factor-health 返回数据", False, "无因子数据")
+            return
+        extreme_factors = []
+        for code, info in factors.items():
+            if isinstance(info, dict):
+                z = info.get("zscore", info.get("z_score", info.get("value", 0)))
+            elif isinstance(info, (int, float)):
+                z = info
+            else:
+                continue
+            if isinstance(z, (int, float)) and abs(z) > 5:
+                extreme_factors.append(f"{code}: z={z:.2f}")
+        if extreme_factors:
+            for e in extreme_factors:
+                check(f"Z-score 极端: {e}", False, f"|z| > 5")
+            check(f"共 {len(extreme_factors)} 个因子 Z-score 超限", False)
+        else:
+            check(f"所有因子 Z-score 在 [-5, 5] 范围内", True)
+    except Exception as e:
+        check("因子 Z-score 检查", False, str(e))
+
+
+# ── 方案差异化度校验 ─────────────────────────────────────────────
+
+
+def section_solution_diversity_check():
+    """Check that the 3 strategy solutions have differentiated ETF sets.
+    Uses Jaccard similarity: any pair with >60% overlap triggers a WARNING."""
+    section("方案差异化度")
+    try:
+        # Get latest design
+        r = requests.get(f"{BASE}/api/v1/portfolio/designs?limit=1", timeout=10)
+        if r.status_code != 200:
+            check("GET /portfolio/designs", False, f"HTTP {r.status_code}")
+            return
+        designs = r.json()
+        if not designs or not isinstance(designs, list):
+            check("设计方案数据", False, "无设计方案")
+            return
+        latest = designs[0]
+        strategies = latest.get("strategies", latest.get("allocations", []))
+        if len(strategies) < 2:
+            check(f"方案数 >= 3", len(strategies) >= 3, f"实际 {len(strategies)}")
+            return
+
+        # Extract ETF sets per strategy
+        plan_sets = []
+        plan_names = []
+        for s in strategies:
+            allocations = s.get("allocations", s.get("etfs", []))
+            symbols = set()
+            for a in allocations:
+                sym = a.get("symbol", "")
+                if sym and sym != "CASH":
+                    symbols.add(sym)
+            name = s.get("label", s.get("style", f"plan_{len(plan_names)}"))
+            plan_sets.append(symbols)
+            plan_names.append(name)
+
+        # Compute Jaccard similarity for all pairs
+        high_overlap = False
+        for i in range(len(plan_sets)):
+            for j in range(i + 1, len(plan_sets)):
+                a, b = plan_sets[i], plan_sets[j]
+                if not a and not b:
+                    continue
+                if not a or not b:
+                    jaccard = 0.0
+                else:
+                    intersection = len(a & b)
+                    union = len(a | b)
+                    jaccard = intersection / union if union > 0 else 0.0
+                label = f"{plan_names[i]} vs {plan_names[j]}: J={jaccard:.2f}"
+                if jaccard > 0.6:
+                    check(label, False, "重叠度 > 60%")
+                    high_overlap = True
+                else:
+                    check(label, True,
+                          f"交集={len(a&b)} 并集={len(a|b)}" if a and b else "")
+        if high_overlap:
+            check("方案差异化度", False, "存在高重叠方案对")
+        else:
+            check("方案差异化度合格", True)
+    except Exception as e:
+        check("方案差异化度检查", False, str(e))
+
+
 def print_summary():
     total = PASS + FAIL
     print(f"\n{'=' * 50}")
@@ -1068,6 +1202,9 @@ MODULES = {
     "sectors": check_sector_data,
     "quality": check_data_quality,
     "circuit-breaker": section_circuit_breaker,
+    "5xx": section_api_5xx_check,
+    "zscore": section_factor_zscore_check,
+    "diversity": section_solution_diversity_check,
 }
 
 SMOKE_MODULES = ["health", "market"]
