@@ -74,7 +74,7 @@ async def strategy_check_pipeline(mgr, task_id: int) -> None:
         # FIX-21: 外层 120s 超时保护，防止整个管线无限制挂起
         import asyncio
         return await asyncio.wait_for(
-            _pipeline_body(mgr, task_id),
+            _pipeline_body(mgr, task_id),  # type: ignore[arg-type]
             timeout=120,
         )
     except asyncio.TimeoutError:

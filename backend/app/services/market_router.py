@@ -94,8 +94,9 @@ async def get_market_realtime(market: str, symbols: list[str] | None = None) -> 
     elif market == "US":
         if not symbols:
             return []
-        from app.fetchers import global_markets_fetcher  # type: ignore[attr-defined]
-        batch = await _call(stooq_fetcher.fetch_us_batch, symbols, timeout=12)
+        from app.fetchers import global_markets_fetcher
+        # Stooq API closed (Cloudflare 404); fall through to TwelveData
+        batch = None
         if batch:
             return batch
         # 降级: TwelveData 逐个
@@ -126,19 +127,15 @@ async def get_market_history(market: str, symbol: str, period: str = "daily") ->
         return await get_history(symbol, "A", period) or []
 
     elif market == "HK":
-        from app.fetchers.china_market import fetch_hk_history  # type: ignore[attr-defined]
-        from app.fetchers import stooq_fetcher  # type: ignore[attr-defined]
-        hk_history = await _call(fetch_hk_history, symbol, period, timeout=15)
-        if hk_history:
-            return hk_history
-        # 降级: Stooq (港股ETF)
-        return await _call(stooq_fetcher.fetch_stooq_history, symbol, period, timeout=15) or []
+        # fetch_hk_history removed (doesn't exist in china_market.py)
+        return []
 
     elif market == "US":
-        from app.fetchers import global_markets_fetcher  # type: ignore[attr-defined]
-        stooq_data = await _call(stooq_fetcher.fetch_stooq_history, symbol, period, timeout=15)
-        if stooq_data:
-            return stooq_data
+        from app.fetchers import global_markets_fetcher
+        # Fall through to TwelveData
+        fallback_data = None
+        if fallback_data:
+            return fallback_data
         td_data = await _call(global_markets_fetcher.fetch_history, symbol, 60, timeout=10)
         if td_data:
             return td_data
