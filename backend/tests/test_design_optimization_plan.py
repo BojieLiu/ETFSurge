@@ -458,6 +458,7 @@ def test_dq2_aggregate_factor_scores_aggregates_categories():
         "etf.amount_stability": 0.5,
         "etf.return_1m": 0.15,
         "style.size.ln_mcap": 0.3,
+        "etf.price.dividend_yield": 0.6,
         "sentiment.news_score": 0.7,
     }
     scores = FactorRegistry.aggregate_factor_scores(raw)

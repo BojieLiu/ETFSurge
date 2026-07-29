@@ -1253,6 +1253,32 @@ def section_factor_integrity(host="127.0.0.1", port=8000):
 
 
 # ── 模块分发 ──────────────────────────────────────────────────
+def section_indicator_quality():
+    """F14: Technical indicator data quality -- check Bollinger bandwidth non-zero, MA valid."""
+    section("Technical Indicator Quality")
+    try:
+        r = requests.get(f"{BASE}/api/v1/market/indicators/510300", timeout=15)
+        if r.status_code == 200:
+            data = r.json()
+            bb = data.get("bollinger", {}) or data.get("bbands", {}) or {}
+            bandwidth = bb.get("bandwidth", 0)
+            upper = bb.get("upper", 0)
+            ma = bb.get("ma", 0)
+            lower = bb.get("lower", 0)
+            if upper > ma > lower:
+                check(f"BB: upper({upper:.3f}) > ma({ma:.3f}) > lower({lower:.3f})", True)
+                check(f"BB bandwidth={bandwidth:.4f} > 0", bandwidth > 0.001,
+                      f"bandwidth={bandwidth:.4f}, column name mismatch possible")
+            else:
+                check(f"BB: upper({upper:.3f}) ma({ma:.3f}) lower({lower:.3f})",
+                      False, "data abnormal or default zeros")
+        else:
+            check("GET /market/indicators/510300 -> 200", False, f"HTTP {r.status_code}")
+    except requests.Timeout:
+        check("GET /market/indicators/510300", False, "timeout (15s)")
+    except Exception as e:
+        check("GET /market/indicators/510300", False, str(e))
+
 
 MODULES = {
     "health": section_health,
@@ -1272,6 +1298,7 @@ MODULES = {
     "diversity": section_solution_diversity_check,
     "snapshot": section_snapshot_health,
     "factor-integrity": section_factor_integrity,
+    "indicator-quality": section_indicator_quality,
 }
 
 SMOKE_MODULES = ["health", "market"]

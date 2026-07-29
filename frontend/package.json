@@ -37,6 +37,6 @@
     "rollup-plugin-visualizer": "^7.0.1",
     "vite": "^5.4.0",
     "vite-plugin-pwa": "^0.20.0",
-    "vitest": "^2.1.9",
+    "vitest": "^2.1.9"
   }
 }
