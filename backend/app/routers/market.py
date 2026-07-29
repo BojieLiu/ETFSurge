@@ -11,7 +11,7 @@ from ..services.market_service import (
     get_all_realtime, get_asset_realtime, get_history, search_etf,
     get_realtime_batch, get_portfolio_realtime, get_fundamentals,
     get_global_indices, get_sectors_local, get_indices_meta, search_indices,
-    get_watchlist, add_watchlist, update_watchlist, remove_watchlist, batch_remove_watchlist,
+    get_watchlist, add_watchlist, update_watchlist, remove_watchlist, batch_remove_watchlist, search_hk_us,
 )
 from ..analysis.indicators import compute_all_indicators, compute_chart_data
 from ..analysis.signal import generate_signal
@@ -107,6 +107,11 @@ async def search(
         except Exception as e:
             logger.warning("[search] stock search failed: %s", e)
         return []
+
+    if market and market.upper() == "HK":
+        return await search_hk_us(keyword)
+    if market and market.upper() == "US":
+        return await search_hk_us(keyword)
 
     return await search_etf(keyword)
 

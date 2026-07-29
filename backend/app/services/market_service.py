@@ -576,6 +576,71 @@ async def search_etf(keyword: str) -> list[dict[str, Any]]:
     return [e for e in full if kw in e["symbol"].lower() or kw in e["name"].lower()][:20]
 
 
+HKUS_ETF_MAP: list[dict[str, str]] = [
+    # 港股 ETF (港股代码带 `.HK` 后缀用于区分)
+    {"symbol": "02800.HK", "name": "盈富基金", "market": "HK"},
+    {"symbol": "02828.HK", "name": "恒生中国企业", "market": "HK"},
+    {"symbol": "03033.HK", "name": "南方恒生科技", "market": "HK"},
+    {"symbol": "03067.HK", "name": "安硕恒生科技", "market": "HK"},
+    {"symbol": "03188.HK", "name": "华夏沪深300", "market": "HK"},
+    {"symbol": "02823.HK", "name": "安硕A50", "market": "HK"},
+    {"symbol": "02840.HK", "name": "SPDR金ETF", "market": "HK"},
+    {"symbol": "03081.HK", "name": "价值黄金", "market": "HK"},
+    {"symbol": "03111.HK", "name": "易方达MSCI中国A50", "market": "HK"},
+    {"symbol": "07200.HK", "name": "FL二南方恒指", "market": "HK"},
+    {"symbol": "07226.HK", "name": "XL二南方恒科", "market": "HK"},
+    # 美股 ETF
+    {"symbol": "SPY", "name": "SPDR S&P 500 ETF", "market": "US"},
+    {"symbol": "QQQ", "name": "Invesco QQQ Trust", "market": "US"},
+    {"symbol": "IVV", "name": "iShares Core S&P 500", "market": "US"},
+    {"symbol": "VOO", "name": "Vanguard S&P 500", "market": "US"},
+    {"symbol": "VTI", "name": "Vanguard Total Stock Market", "market": "US"},
+    {"symbol": "GLD", "name": "SPDR Gold Shares", "market": "US"},
+    {"symbol": "SLV", "name": "iShares Silver Trust", "market": "US"},
+    {"symbol": "FXI", "name": "iShares China Large-Cap", "market": "US"},
+    {"symbol": "KWEB", "name": "KraneShares CSI China Internet", "market": "US"},
+    {"symbol": "EEM", "name": "iShares MSCI Emerging Markets", "market": "US"},
+    {"symbol": "DIA", "name": "SPDR Dow Jones Industrial", "market": "US"},
+    {"symbol": "IWM", "name": "iShares Russell 2000", "market": "US"},
+]
+
+
+async def search_hk_us(keyword: str = "") -> list[dict[str, Any]]:
+    """Search HK/US ETFs by keyword.
+
+    Uses static map for fast local matching.
+    Returns list of {symbol, name, market, asset_type, type}.
+    Type suffix: .HK for HK stocks, no suffix for US stocks.
+    """
+    kw = keyword.lower().strip()
+
+    # Filter by keyword if given
+    if kw:
+        results = []
+        for e in HKUS_ETF_MAP:
+            if kw in e["symbol"].lower() or kw in e["name"].lower():
+                results.append({
+                    "symbol": e["symbol"],
+                    "name": e["name"],
+                    "market": e["market"],
+                    "asset_type": "etf",
+                    "type": "etf",
+                })
+        return results
+
+    # Return all if no keyword
+    return [
+        {
+            "symbol": e["symbol"],
+            "name": e["name"],
+            "market": e["market"],
+            "asset_type": "etf",
+            "type": "etf",
+        }
+        for e in HKUS_ETF_MAP
+    ]
+
+
 async def get_indices_meta() -> list[dict[str, Any]]:
     from ..models.search import IndexMeta
     from sqlalchemy import select
