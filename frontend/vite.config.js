@@ -51,11 +51,19 @@ export default defineConfig({
     },
   },
   build: {
+    // P2.3: Tree-shaking optimization — remove dead exports
     rollupOptions: {
+      treeshake: {
+        moduleSideEffects: false,
+        propertyReadSideEffects: false,
+        tryCatchDeoptimization: false,
+      },
       output: {
         manualChunks: {
           'vendor-vue': ['vue', 'vue-router', 'pinia'],
-          'vendor-echarts': ['echarts', 'vue-echarts'],
+          // P2.1: Remove full echarts from manualChunk — tree-shakable imports
+          // used via echarts/core/echarts/charts/echarts/components
+          'vendor-echarts': ['vue-echarts'],
           'vendor-axios': ['axios'],
           'vendor-marked': ['marked'],
         },

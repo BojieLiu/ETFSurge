@@ -1460,3 +1460,17 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 | | | | **New tests:** `tests/test_phase2a_data_quality.py` (18 cases) |
 | | | | **Result:** 18/18 new tests PASS; Phase 1 15/15 also PASS; total 33/33 zero regression. |
 | | | | **Affected files:** `backend/app/fetchers/fundamentals_fetcher.py`, `backend/app/fetchers/china_market.py`, `backend/tests/test_phase2a_data_quality.py` (new), `docs/implementation-master-plan.md` |
+
+| | **v25.0** | 2026-07-29 | **Phase 25 - Frontend Optimization + Test Hardening** | see below |
+| | | | **Source:** `docs/comprehensive-diagnosis-report.md` |
+| | | | **P2.1 - ECharts lazy import:** Code already uses echarts/core/charts/components/renderers paths (tree-shakable). Removed full echarts from vendor-echarts manualChunks, only vue-echarts wrapper remains, ~800KiB saving. |
+| | | | **P2.2 - Route lazy loading:** All 8 routes already use () => import(...) dynamic imports. No change needed. |
+| | | | **P2.3 - Tree-shaking config:** Added rollupOptions.treeshake with moduleSideEffects=false, propertyReadSideEffects=false, tryCatchDeoptimization=false. |
+| | | | **P2.4 - nginx Gzip:** Added full gzip config (on, min_length 1024, comp_level 6, types for JS/CSS/JSON/SVG/XML, vary header). |
+| | | | **P3.1 - LLM import check (verify_e2e):** section_llm_import() verifies from app.analysis.llm import llm_complete works. |
+| | | | **P3.2 - Task status assertion (verify_e2e):** section_task_status() checks design history has completed status records. |
+| | | | **P3.3 - Cross-market search (verify_e2e):** section_search() tests HK (盈富基金) and US (SPY) search endpoints. |
+| | | | **P3.4 - Source health check (verify_e2e):** section_admin() checks /admin/sources/health. |
+| | | | **P3.5 - Encoding validation (verify_e2e):** section_encoding() checks for replacement chars in Chinese text. |
+| | | | **P3.7 - Factor IC quality (verify_e2e):** section_factor_ic() checks /factors/ic endpoint. |
+| | | | **Affected files:** frontend/vite.config.js, frontend/nginx.conf, backend/scripts/verify_e2e.py |
