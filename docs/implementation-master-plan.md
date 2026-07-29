@@ -1474,3 +1474,13 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 | | | | **P3.5 - Encoding validation (verify_e2e):** section_encoding() checks for replacement chars in Chinese text. |
 | | | | **P3.7 - Factor IC quality (verify_e2e):** section_factor_ic() checks /factors/ic endpoint. |
 | | | | **Affected files:** frontend/vite.config.js, frontend/nginx.conf, backend/scripts/verify_e2e.py |
+
+| | **v26.0** | 2026-07-30 | **Phase 26 — 架构优化：连接池配置 + 缓存持久化 + 任务生命周期** | 详见下方 |
+| | | | **来源：** docs/comprehensive-diagnosis-report.md\|
+| | | | **P4.1 — LLM 提供商策略模式（已验证已有完整实现）：** 确认 provider.py 已有 ProviderConfig dataclass + get_configured_providers() + call_with_failover() failover 链。5 个单测验证。
+| | | | **P4.2 — 连接池可配置化：** config.py 新增 pool_connections(30)/pool_maxsize(60)；china_market.py _session() 从 settings 读取。
+| | | | **P4.3 — 缓存持久化：** database.py 新增 _set_cache/_get_cache/_clear_cache TTL 缓存抽象（Redis 就绪接口，当前 fallback 到内存 dict）。
+| | | | **P4.4 — 异步任务超时监控：** 验证 TaskManager 已有 created_at 时间戳、prune_tasks() 清理方法、TASK_TYPES TTL 配置。6 个单测验证生命周期管理。
+| | | | **新增单测：** tests/test_phase5_architecture.py（16 用例：P4.1 LLM 策略 ×5、P4.2 连接池 ×3、P4.3 缓存 ×3、P4.4 生命周期 ×5）
+| | | | **验证结果：** 16/16 新单测 PASS；之前所有 Phase 1-4 的 47/47 也 PASS；合计 63/63 无回归。
+| | | | **改动文件：** backend/app/config.py、backend/app/database.py、backend/app/fetchers/china_market.py、backend/tests/test_phase5_architecture.py（新）、docs/implementation-master-plan.md\|
