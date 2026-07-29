@@ -61,8 +61,19 @@ export default defineConfig({
         },
       },
     },
+    // S10: Production optimizations
+    minify: 'terser',
+    terserOptions: {
+      compress: { drop_console: true, drop_debugger: true },
+    },
+    // S10: Split CSS by entry for parallel loading (was false — single monolithic CSS)
+    cssCodeSplit: true,
+    sourcemap: false,
+    // S10: Modulepreload strategy — generate preload hints for entry chunks
+    modulePreload: { polyfill: false },
     // H: Bundle size budget — warn if any chunk exceeds thresholds
     chunkSizeWarningLimit: 700,
     assetsInlineLimit: 4096,
+    reportCompressedSize: true,
   },
 })

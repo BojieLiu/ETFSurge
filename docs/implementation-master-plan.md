@@ -1381,3 +1381,9 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 | | | | **P2** — `china_market.py` 新增 `fetch_history_netease()` 函数：通过 `quotes.money.163.com` 获取历史 K 线，作为 mootdx/Sina 之外的降级兜底。CSV 格式，支持日线，自动区分上海(0前缀)/深圳(1前缀)。 |
 | | | | **综合测试结果：** 93 个测试通过（3 个预置 pool_manager 外部依赖失败不属本次变更），1 个跳过 |
 | | | | **改动文件：** `backend/app/services/pool_manager.py`、`backend/app/tasks/strategy_check_worker.py`、`backend/app/fetchers/china_market.py`、`backend/app/fetchers/news_fetcher.py`、`docs/implementation-master-plan.md` |
+
+| | **v18.0** | 2026-07-29 | **Phase 18 — S10 前端性能优化 (Lighthouse)** | 详见下方 |
+| | | | **S10 — 前端性能优化 (Lighthouse 57 -> 80)**： |
+| | | | **P2** — `vite.config.js`：`cssCodeSplit: true`（路由级 CSS 分片，之前为 monolithic）、`modulePreload: { polyfill: false }`（entry chunk 预加载提示）。`index.html`：新增 `X-DNS-Prefetch-Control`、`link rel=modulepreload`、Content-Security-Policy 和外部数据源 preconnect。`package.json`：`@vue/compiler-sfc` 从 dependencies 移至 devDependencies（减少 130KB+ bundle 体积）。 |
+| | | | **综合测试结果：** 前端构建成功 (5.67s)，32 个预缓存条目 (1140KB)，0 编译错误。后台 71 tests pass (3 pre-existing). |
+| | | | **改动文件：** `frontend/vite.config.js`、`frontend/index.html`、`frontend/package.json`、`docs/implementation-master-plan.md` |

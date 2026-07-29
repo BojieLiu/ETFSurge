@@ -16,7 +16,6 @@
     "test:e2e:ui": "playwright test --config e2e/config/playwright.config.js --ui"
   },
   "dependencies": {
-    "@vue/compiler-sfc": "^3.5.40",
     "@vueuse/core": "^11.0.0",
     "axios": "^1.7.0",
     "echarts": "^5.5.0",
@@ -29,6 +28,7 @@
   "devDependencies": {
     "@playwright/test": "^1.52.0",
     "@vitejs/plugin-vue": "^5.1.0",
+    "@vue/compiler-sfc": "^3.5.40",
     "@vue/test-utils": "^2.4.11",
     "eslint": "^10.7.0",
     "eslint-plugin-vue": "^10.10.0",

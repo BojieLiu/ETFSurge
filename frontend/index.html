@@ -3,7 +3,28 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="多资产实时行情分析与 ETF 组合管理系统" />
+    <meta name="theme-color" content="#1a1a2e" />
+    <meta http-equiv="X-DNS-Prefetch-Control" content="on" />
+
+    <!-- S10: Resource hints for faster loading -->
+    <link rel="preconnect" href="http://127.0.0.1:8000" />
+    <link rel="dns-prefetch" href="http://127.0.0.1:8000" />
+    <link rel="preconnect" href="https://fundgz.1234567.com.cn" />
+    <link rel="preconnect" href="http://qt.gtimg.cn" />
+
+    <!-- S10: Preload main JS entry for earlier module loading -->
+    <link rel="modulepreload" href="/src/main.js" />
+
+    <!-- S10: Security headers hint -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws: wss: http: https:; font-src 'self' data:;" />
+
     <title>ETF Surge - ETF 破浪者</title>
+    <style>
+      /* S10: Critical inlined CSS to prevent CLS (layout shift) */
+      html, body, #app { margin: 0; padding: 0; min-height: 100vh; }
+      body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; background: #0f0f23; color: #e0e0e0; }
+    </style>
   </head>
   <body>
     <div id="app"></div>
