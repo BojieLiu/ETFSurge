@@ -47,9 +47,14 @@ def _session():
     global _shared_session
     if _shared_session is None:
         import requests as _req
+        from requests.adapters import HTTPAdapter
         s = _req.Session()
         s.trust_env = False
         s.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"})
+        # P1.5: Enlarge HTTP connection pool for concurrent data fetches
+        adapter = HTTPAdapter(pool_connections=30, pool_maxsize=60)
+        s.mount("http://", adapter)
+        s.mount("https://", adapter)
         _shared_session = s
     return _shared_session
 

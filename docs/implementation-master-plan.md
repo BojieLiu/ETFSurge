@@ -1444,3 +1444,19 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 | | | | **新增单测：** `tests/test_phase1_diagnosis_fixes.py`（15 个用例：P0.5 IPv4 ×3、P0.1 LLM import ×5、P0.6 422 修复 ×1、P0.2 状态过渡 ×3、P1.4 探针 ×2、P3 E2E ×1） |
 | | | | **验证结果：** 15/15 新单测 PASS；`test_analysis_contract.py::test_llm_advice` 修复后 PASS；无回归。 |
 | | | | **改动文件：** `backend/app/config.py`、`backend/app/tasks/strategy_check_worker.py`、`backend/app/routers/analysis.py`、`backend/app/monitor/probes.py`、`backend/tests/test_phase1_diagnosis_fixes.py`（新）、`backend/tests/test_analysis_contract.py`、`docs/comprehensive-diagnosis-report.md`（状态更新）、`docs/implementation-master-plan.md` |
+
+| | **v23.0** | 2026-07-29 | **Phase 23 - Diagnosis Phase 2a: Factor & Data Quality** | see below |
+| | | | **Source:** `docs/comprehensive-diagnosis-report.md` \S\11-12 |
+| | | | **P1.2d - Margin swap to akshare: (fundamentals_fetcher.py)** |
+| | | | Replace `_fetch_szse()` / `_fetch_sse()` urllib HTTP (404) with `akshare.stock_margin_szse()` + `akshare.stock_margin_sse()`. Remove `_SZSE_URL`, `_SZSE_HEADERS`, `_SSE_URL`, `_SSE_HEADERS`, `urllib.request`/`json` dependencies. |
+| | | | **P1.2e - Remove north_flow + add volume_ratio: (fundamentals_fetcher.py)** |
+| | | | Remove `north_flow` from `SENTIMENT_WEIGHTS` and `_REGIME_WEIGHTS`, replace with `volume_ratio`. Delete `fetch_north_flow()` func. Add `_fetch_volume_ratio()` (akshare, 5d/20d avg volume ratio). Update `calc_sentiment_index()` signature and logic. New 4-dim weights: advance_ratio=0.30, margin_change=0.30, volume_ratio=0.20, inst_consensus=0.20. |
+| | | | **P1.5 - HTTP connection pool expansion: (china_market.py)** |
+| | | | Add `HTTPAdapter(pool_connections=30, pool_maxsize=60)` to shared `_session()`. |
+| | | | **P1.1 - Market context fix:** Verify pool_manager has index_realtime, sector_momentum with fallback handling. |
+| | | | **P1.2a - News factor pipeline:** Verify `_compute_news_heat()` / `_compute_news_direction()` receive data via `data.get("news_items", [])`. |
+| | | | **P1.2b - premium_discount fix:** Verify `_compute_premium_discount()` uses `data.get("nav")` + `data.get("price")` (IOPV data from Sina/QQ). |
+| | | | **P0.4 - Encoding:** Verify `config.py` sets `env_file_encoding = "utf-8"`. |
+| | | | **New tests:** `tests/test_phase2a_data_quality.py` (18 cases) |
+| | | | **Result:** 18/18 new tests PASS; Phase 1 15/15 also PASS; total 33/33 zero regression. |
+| | | | **Affected files:** `backend/app/fetchers/fundamentals_fetcher.py`, `backend/app/fetchers/china_market.py`, `backend/tests/test_phase2a_data_quality.py` (new), `docs/implementation-master-plan.md` |

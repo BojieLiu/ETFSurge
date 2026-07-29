@@ -339,103 +339,73 @@ _TIMEOUT = 8
 
 # ── SZSE ───────────────────────────────────────────────────────────
 
-_SZSE_URL = "https://www.szse.cn/api/report/ezfintrade/getFundCcl"
-_SZSE_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
-    ),
-    "Referer": "https://www.szse.cn/",
-    "Content-Type": "application/json",
-}
-
-
 def _fetch_szse() -> float | None:
-    """Fetch margin balance from SZSE via POST.
+    """Fetch margin balance from SZSE via akshare.
 
     Returns total 融资余额 (margin debit balance) in yuan, or None.
+    Uses stock_margin_szse() from akshare (verified working under IPv4).
     """
-    body = json.dumps({"scDate": ""}).encode("utf-8")
-    req = urllib.request.Request(_SZSE_URL, data=body, headers=_SZSE_HEADERS, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
-            raw = resp.read().decode("utf-8")
-            data: dict[str, Any] = json.loads(raw)
+        def _p():
+            import akshare as ak
+            df = ak.stock_margin_szse()
+            if df is not None and not df.empty:
+                return float(df['融资余额'].iloc[-1])
+            return None
+        from ..core.async_utils import run_in_thread
+        result = run_in_thread(_p, timeout=_TIMEOUT, executor="long")
+        return result
     except Exception as exc:
-        logger.warning("[margin_fetcher] SZSE request failed: %s", exc)
+        logger.warning("[margin_fetcher] SZSE akshare failed: %s", exc)
         return None
 
-    # Expected structure: {"data": [{"scDate": "...", "rzye": "123456789012.34", ...}]}
+
+def _fetch_szse_sync() -> float | None:
+    """Synchronous version for direct calls without thread pool."""
     try:
-        rows = data.get("data", [])
-        if not rows:
-            logger.warning("[margin_fetcher] SZSE: empty data array")
-            return None
-        row = rows[0]
-        val_str = row.get("rzye")  # 融资余额
-        if not val_str:
-            logger.warning("[margin_fetcher] SZSE: missing rzye field")
-            return None
-        return float(val_str)
-    except (AttributeError, IndexError, ValueError, TypeError) as exc:
-        logger.warning("[margin_fetcher] SZSE parse error: %s", exc)
+        import akshare as ak
+        df = ak.stock_margin_szse()
+        if df is not None and not df.empty:
+            return float(df['融资余额'].iloc[-1])
+        return None
+    except Exception as exc:
+        logger.warning("[margin_fetcher] SZSE akshare sync failed: %s", exc)
         return None
 
 
 # ── SSE ────────────────────────────────────────────────────────────
 
-_SSE_URL = "https://query.sse.com.cn/security/stock/queryMarginBalance.do"
-_SSE_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
-    ),
-    "Referer": "https://www.sse.com.cn/",
-}
-
-
 def _fetch_sse() -> float | None:
-    """Fetch margin balance from SSE via JSONP GET.
+    """Fetch margin balance from SSE via akshare.
 
     Returns total 融资余额 (margin debit balance) in yuan, or None.
+    Uses stock_margin_sse() from akshare (verified working under IPv4).
     """
-    url = f"{_SSE_URL}?jsonCallBack=jsonp&_={int(_time.time() * 1000)}"
-    req = urllib.request.Request(url, headers=_SSE_HEADERS)
     try:
-        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
-            raw = resp.read().decode("utf-8")
+        def _p():
+            import akshare as ak
+            df = ak.stock_margin_sse()
+            if df is not None and not df.empty:
+                return float(df['融资余额'].iloc[-1])
+            return None
+        from ..core.async_utils import run_in_thread
+        result = run_in_thread(_p, timeout=_TIMEOUT, executor="long")
+        return result
     except Exception as exc:
-        logger.warning("[margin_fetcher] SSE request failed: %s", exc)
+        logger.warning("[margin_fetcher] SSE akshare failed: %s", exc)
         return None
 
-    # Response is JSONP: jsonp({...})
-    # Strip the callback wrapper to get plain JSON
-    try:
-        text = raw.strip()
-        if text.startswith("jsonp(") and text.endswith(")"):
-            text = text[len("jsonp(") : -1]
-        data: dict[str, Any] = json.loads(text)
-    except Exception as exc:
-        logger.warning("[margin_fetcher] SSE JSONP parse error: %s", exc)
-        return None
 
-    # Expected structure: {"total": ..., "page": ..., "result": [...]}
-    # Each result row has "rzye" (融资余额)
+def _fetch_sse_sync() -> float | None:
+    """Synchronous version for direct calls without thread pool."""
     try:
-        rows = data.get("result", [])
-        if not rows:
-            logger.warning("[margin_fetcher] SSE: empty result array")
-            return None
-        row = rows[0]
-        val_str = row.get("rzye")
-        if not val_str:
-            logger.warning("[margin_fetcher] SSE: missing rzye field")
-            return None
-        return float(val_str)
-    except (AttributeError, IndexError, ValueError, TypeError) as exc:
-        logger.warning("[margin_fetcher] SSE parse error: %s", exc)
+        import akshare as ak
+        df = ak.stock_margin_sse()
+        if df is not None and not df.empty:
+            return float(df['融资余额'].iloc[-1])
+        return None
+    except Exception as exc:
+        logger.warning("[margin_fetcher] SSE akshare sync failed: %s", exc)
         return None
 
 
@@ -463,25 +433,24 @@ logger = logging.getLogger(__name__)
 
 # ── Static default weights (used when no regime context) ──────────
 SENTIMENT_WEIGHTS = {
-    "advance_ratio": 0.25,
-    "inst_consensus": 0.25,
-    "north_flow": 0.25,
-    "margin_change": 0.25,
+    "advance_ratio": 0.30,
+    "margin_change": 0.30,
+    "volume_ratio": 0.20,
+    "inst_consensus": 0.20,
 }
 
 # ── Regime-conditioned weights ───────────────────────────────────
 # In strong bull markets, institutional consensus and north flow carry more signal.
 # In bear/correction, advance/decline ratio and margin changes matter more.
 _REGIME_WEIGHTS = {
-    "bull_strong":   {"advance_ratio": 0.15, "inst_consensus": 0.35, "north_flow": 0.35, "margin_change": 0.15},
-    "bull_weakening": {"advance_ratio": 0.20, "inst_consensus": 0.30, "north_flow": 0.30, "margin_change": 0.20},
-    "range_bound":   {"advance_ratio": 0.25, "inst_consensus": 0.25, "north_flow": 0.25, "margin_change": 0.25},
-    "correction":    {"advance_ratio": 0.30, "inst_consensus": 0.20, "north_flow": 0.20, "margin_change": 0.30},
-    "bear":          {"advance_ratio": 0.35, "inst_consensus": 0.15, "north_flow": 0.15, "margin_change": 0.35},
-    "panic":         {"advance_ratio": 0.40, "inst_consensus": 0.10, "north_flow": 0.10, "margin_change": 0.40},
-    "defensive_rotate": {"advance_ratio": 0.30, "inst_consensus": 0.25, "north_flow": 0.20, "margin_change": 0.25},
+    "bull_strong":   {"advance_ratio": 0.20, "inst_consensus": 0.35, "volume_ratio": 0.25, "margin_change": 0.20},
+    "bull_weakening": {"advance_ratio": 0.25, "inst_consensus": 0.30, "volume_ratio": 0.25, "margin_change": 0.20},
+    "range_bound":   {"advance_ratio": 0.25, "inst_consensus": 0.20, "volume_ratio": 0.25, "margin_change": 0.30},
+    "correction":    {"advance_ratio": 0.30, "inst_consensus": 0.15, "volume_ratio": 0.20, "margin_change": 0.35},
+    "bear":          {"advance_ratio": 0.35, "inst_consensus": 0.15, "volume_ratio": 0.15, "margin_change": 0.35},
+    "panic":         {"advance_ratio": 0.40, "inst_consensus": 0.10, "volume_ratio": 0.10, "margin_change": 0.40},
+    "defensive_rotate": {"advance_ratio": 0.30, "inst_consensus": 0.25, "volume_ratio": 0.20, "margin_change": 0.25},
 }
-
 
 def _dynamic_weights(regime: str | None) -> dict[str, float]:
     """Return regime-conditioned weights, falling back to equal weights."""
@@ -552,9 +521,9 @@ def normalize(val: float, min_val: float = -1.0, max_val: float = 1.0) -> float:
 
 def calc_sentiment_index(
     advance_ratio: float,
-    inst_consensus: float = 0.0,
-    north_flow: float = 0.0,
     margin_change: float = 0.0,
+    volume_ratio: float = 0.0,
+    inst_consensus: float = 0.0,
     regime: str | None = None,
 ) -> float:
     """合成四维情绪指数 (0~100)，含动态权重 + 情绪惯量修正。
@@ -562,22 +531,22 @@ def calc_sentiment_index(
     Args:
         advance_ratio: 上涨家数占比 (0~1)
         inst_consensus: 机构共识度 (-1~1, 默认0.0=中性)
-        north_flow: 北向资金方向 (-1~1, 归一化)
         margin_change: 两融变化 (-1~1, 归一化)
+        volume_ratio: 成交量比 (近5日/20日)
         regime: 市场状态，用于条件权重 + 数据缺失偏置
     """
     w = _dynamic_weights(regime)
     score = (
         w["advance_ratio"] * advance_ratio
         + w["inst_consensus"] * normalize(inst_consensus)
-        + w["north_flow"] * normalize(north_flow)
+        + w["volume_ratio"] * normalize(volume_ratio)
         + w["margin_change"] * normalize(margin_change)
     )
 
     # 当多维度均为中性默认值时（数据源故障），用 regime 偏置
     all_default = (
         abs(advance_ratio - 0.5) < 0.05
-        and abs(north_flow) < 0.01
+        and abs(volume_ratio - 1.0) < 0.01
         and abs(margin_change) < 0.01
     )
     if all_default and regime:
@@ -651,41 +620,7 @@ def _advance_decline_fallback() -> float:
     return 0.5
 
 
-def fetch_north_flow() -> float:
-    """获取北向资金当日净流入 (归一化 -1~1)。
 
-    返回: -1~1, 失败时返回 0
-    """
-    try:
-        # Try multiple akshare north-bound API names (version-dependent)
-        df = None
-        for func_name in ["stock_hsgt_north_net_flow_in_em",
-                          "stock_hsgt_north_flow_in_em",
-                          "stock_hsgt_north_net_flow"]:
-            try:
-                def _p(fn=func_name):
-                    import akshare as ak
-                    func = getattr(ak, fn, None)
-                    if func:
-                        return func(symbol="北上")
-                    return None
-                df = run_in_thread(_p, timeout=8, executor="long")
-                if df is not None and not (hasattr(df, "empty") and df.empty):
-                    break
-            except Exception:
-                continue
-        if df is None or (hasattr(df, "empty") and df.empty):
-            return 0.0
-        # 取最近一条的净流入
-        latest = df.iloc[0]
-        for col in df.columns:
-            if "净流入" in col or "net" in col.lower():
-                val = float(latest[col] or 0)
-                # 归一化: ±50亿为极端值
-                return max(-1.0, min(1.0, val / 50_000_000))
-    except Exception as e:
-        logger.warning("[sentiment] fetch_north_flow failed: %s", e)
-    return 0.0
 
 
 def fetch_margin_change() -> float:
@@ -732,6 +667,40 @@ def fetch_margin_change() -> float:
     return 0.0
 
 
+def _fetch_volume_ratio() -> float:
+    """Get volume ratio (5-day avg vol / 20-day avg vol).
+
+    Returns: float >= 0, defaults to 1.0 on failure.
+    """
+    try:
+        def _p():
+            import akshare as ak
+            import pandas as pd
+            df = ak.stock_market_fundamental_em()
+            if df is not None and not df.empty:
+                try:
+                    vol_col = None
+                    for col in df.columns:
+                        if 'amount' in col.lower() or 'volume' in col.lower() or '成交' in col:
+                            vol_col = col
+                            break
+                    if vol_col and len(df) >= 20:
+                        vol_series = pd.to_numeric(df[vol_col], errors='coerce').fillna(0)
+                        vol5 = vol_series.tail(5).mean()
+                        vol20 = vol_series.tail(20).mean()
+                        if vol20 > 0:
+                            return float(vol5 / vol20)
+                except (ValueError, IndexError, TypeError):
+                    pass
+            return 1.0
+        from ..core.async_utils import run_in_thread
+        result = run_in_thread(_p, timeout=8, executor="long")
+        return result if result is not None else 1.0
+    except Exception as e:
+        logger.warning("[sentiment] _fetch_volume_ratio failed: %s", e)
+        return 1.0
+
+
 async def fetch_market_sentiment() -> dict[str, Any]:
     """一站式获取市场情绪指数。
 
@@ -741,26 +710,26 @@ async def fetch_market_sentiment() -> dict[str, Any]:
         "sentiment_label": "中性偏乐观",
         "advance_ratio": 0.6,
         "institutional_consensus": 0.0,
-        "north_flow": 0.0,
+        "volume_ratio": 1.0,
         "margin_change": 0.0,
     }
     """
     import asyncio
-    advance, north, margin = await asyncio.gather(
+    advance, vr, margin = await asyncio.gather(
         run_sync(fetch_advance_decline_ratio, timeout=15),
-        run_sync(fetch_north_flow, timeout=15),
+        run_sync(_fetch_volume_ratio, timeout=15),
         run_sync(fetch_margin_change, timeout=15),
         return_exceptions=True,
     )
 
     advance = advance if isinstance(advance, float) and not isinstance(advance, Exception) else 0.5
-    north = north if isinstance(north, float) and not isinstance(north, Exception) else 0.0
+    vr = vr if isinstance(vr, float) and not isinstance(vr, Exception) else 1.0
     margin = margin if isinstance(margin, float) and not isinstance(margin, Exception) else 0.0
 
     index = calc_sentiment_index(
         advance_ratio=advance,
         inst_consensus=0.0,  # 共识度由调用方传入（需要四类资金流数据）
-        north_flow=north,
+        volume_ratio=vr,
         margin_change=margin,
     )
 
@@ -769,6 +738,6 @@ async def fetch_market_sentiment() -> dict[str, Any]:
         "sentiment_label": sentiment_label(index),
         "advance_ratio": round(advance, 4),
         "institutional_consensus": 0.0,  # placeholder, 调用方填充
-        "north_flow": round(north, 4),
+        "volume_ratio": round(vr, 4),
         "margin_change": round(margin, 4),
     }
