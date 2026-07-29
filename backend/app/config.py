@@ -75,6 +75,10 @@ class Settings(BaseSettings):
     opencode_zen_model: str = "deepseek-v4-flash-free"
     opencode_zen_api_url: str = "https://opencode.ai/zen/v1/chat/completions"
 
+    # connnection pool 配置
+    pool_connections: int = 30
+    pool_maxsize: int = 60
+
     # 降级策略
     llm_primary_provider: str = "opencode_zen"
     llm_fallback_provider: str = "deepseek"

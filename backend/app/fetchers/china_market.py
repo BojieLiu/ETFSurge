@@ -51,8 +51,12 @@ def _session():
         s = _req.Session()
         s.trust_env = False
         s.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"})
-        # P1.5: Enlarge HTTP connection pool for concurrent data fetches
-        adapter = HTTPAdapter(pool_connections=30, pool_maxsize=60)
+        # P4.2: Connection pool configurable from settings
+        from ..config import settings
+        adapter = HTTPAdapter(
+            pool_connections=settings.pool_connections,
+            pool_maxsize=settings.pool_maxsize,
+        )
         s.mount("http://", adapter)
         s.mount("https://", adapter)
         _shared_session = s

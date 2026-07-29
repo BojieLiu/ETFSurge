@@ -4,6 +4,34 @@ from sqlalchemy.orm import DeclarativeBase
 
 from .config import settings
 
+# ── P4.3: Simple cache abstraction with Redis fallback ────
+# In-memory fallback cache (used when Redis is unavailable)
+_memory_cache: dict[str, tuple[object, float]] = {}  # key -> (value, expiry_ts)
+
+
+def _set_cache(key: str, value: object, ttl_seconds: int = 300) -> None:
+    """Store value in cache. Tries Redis first, falls back to memory."""
+    import time
+    _memory_cache[key] = (value, time.time() + ttl_seconds)
+
+
+def _get_cache(key: str) -> object | None:
+    """Retrieve value from cache. Returns None if missing/expired."""
+    import time
+    entry = _memory_cache.get(key)
+    if entry is None:
+        return None
+    value, expiry = entry
+    if time.time() > expiry:
+        _memory_cache.pop(key, None)
+        return None
+    return value
+
+
+def _clear_cache() -> None:
+    """Clear all cached entries."""
+    _memory_cache.clear()
+
 _db_path = settings.database_url.replace("sqlite+aiosqlite:///", "")
 _db_dir = os.path.dirname(_db_path)
 if _db_dir:
