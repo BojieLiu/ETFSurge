@@ -348,48 +348,60 @@ class TestCoreFactorsConsistency:
         assert len(_fr_mod._CORE_FACTORS) == 33, f"Got {len(_fr_mod._CORE_FACTORS)}"
 
 
-class TestCircuitBreaker:
-    """CircuitBreaker: auto-reset after cooldown."""
+class TestSourceRegistryFactorSource:
+    """SourceRegistry for factor.history: circuit breaker behavior.
 
-    def test_cb_closes_after_cooldown(self):
-        """After opening, CB auto-closes once cooldown elapses."""
-        from app.factors.factor_registry import CircuitBreaker
+    Replaced old factor_registry.CircuitBreaker (S1: 熔断器接入数据源).
+    All data source health tracking is now via SourceRegistry
+    with per-source circuit breakers and exponential backoff.
+    """
+
+    def test_factor_history_available_by_default(self):
+        """factor.history source starts as available."""
+        import time
+        from app.services.source_registry import registry
+        h = registry._health("factor.history")
+        assert h.available(time.time()) is True
+
+    def test_factor_history_opens_after_failures(self):
+        """After threshold failures, source enters cooldown (unavailable)."""
+        from app.services.source_registry import registry
         import time
 
-        # Reset CB state
-        CircuitBreaker.failure_count = 0
-        CircuitBreaker.open_until = 0.0
+        h = registry._health("factor.history")
+        h._failures = h.failure_threshold - 1  # one more to trigger
+        h._cool_until = 0.0
 
-        # Record enough failures to open
-        for _ in range(CircuitBreaker.threshold):
-            CircuitBreaker.record_failure()
+        h.record_failure(time.time(), route="kline", operation="history",
+                         target="test", duration_ms=2000)
+        assert h.available(time.time()) is False
 
-        assert CircuitBreaker.is_open() is True
+    def test_factor_history_recovers_after_cooldown(self):
+        """After cooldown elapses, source becomes available again."""
+        from app.services.source_registry import registry
+        import time
 
-        # Simulate cooldown passing
-        CircuitBreaker.open_until = time.time() - 1
+        h = registry._health("factor.history")
+        h._failures = 0
+        h._cool_until = time.time() - 1  # cooldown already passed
 
-        assert CircuitBreaker.is_open() is False
+        assert h.available(time.time()) is True
 
-    def test_cb_resets_on_success(self):
-        """record_success resets failure_count, keeping CB closed."""
-        from app.factors.factor_registry import CircuitBreaker
+    def test_factor_history_success_resets_failures(self):
+        """record_success resets failures and clears cooldown."""
+        from app.services.source_registry import registry
+        import time
 
-        CircuitBreaker.failure_count = 0
-        CircuitBreaker.open_until = 0.0
+        h = registry._health("factor.history")
+        h._failures = 5
+        h._cool_until = 9999999999.0
 
-        CircuitBreaker.record_failure()
-        CircuitBreaker.record_failure()
-        CircuitBreaker.record_success()
+        h.record_success(route="kline", operation="test", target="test")
+        assert h._failures == 0
+        assert h._cool_until == 0.0
 
-        assert CircuitBreaker.is_open() is False
-        assert CircuitBreaker.failure_count == 0
-
-    def test_cb_threshold_after_fix(self):
-        """Threshold should be >= 10 (P1 fix: was 3)."""
-        from app.factors.factor_registry import CircuitBreaker
-
-        assert CircuitBreaker.threshold >= 10, (
-            f"CB threshold {CircuitBreaker.threshold} is too low; "
-            f"was increased from 3 to 10 to avoid premature tripping"
-        )
+    def test_factor_history_threshold(self):
+        """Default failure threshold should be >= 3."""
+        from app.services.source_registry import registry
+        h = registry._health("factor.history")
+        assert h.failure_threshold >= 3

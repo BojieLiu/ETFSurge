@@ -81,14 +81,17 @@ async def test_fetch_market_data_does_not_block_event_loop():
 
 @pytest.mark.asyncio
 async def test_fetch_market_data_semaphore_limits_concurrency():
-    # 清除 kline 缓存和 CircuitBreaker，避免前序测试污染
+    # 清除 kline 缓存和 SourceRegistry 状态，避免前序测试污染
     from app.factors.factor_registry import (
-        _kline_cache, _kline_cache_ts, CircuitBreaker
+        _kline_cache, _kline_cache_ts
     )
     _kline_cache.clear()
     _kline_cache_ts = 0.0
-    CircuitBreaker.failure_count = 0
-    CircuitBreaker.open_until = 0.0
+    from app.services.source_registry import registry as _sr
+    factor_h = _sr._health("factor.history")
+    factor_h._failures = 0
+    factor_h._cool_until = 0.0
+    factor_h._consecutive_cycles = 0
     """Verify that Semaphore(8) limits concurrent to_thread submissions.
 
     We replace fetch_history with a slow async-compatible stub and count

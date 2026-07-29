@@ -291,6 +291,7 @@ class PoolManager:
                     "name": item.get("name", ""),
                     "amount": item.get("amount", 0),
                     "fund_scale": item.get("fund_scale", 0),
+                    "fund_shares": item.get("fund_shares", 0),  # S2: 基金份额
                     "layer": layer_name,
                     "tracked_index": item.get("tracked_index", ""),
                 })
@@ -325,7 +326,10 @@ class PoolManager:
         # 3b. FactorRegistry 计算因子得分（传入 fund_scale 以支持 valuation 因子）
         if flat:
             symbols = [e["symbol"] for e in flat if e.get("symbol")]
-            symbol_extra = {e["symbol"]: {"fund_scale": e.get("fund_scale", 0)} for e in flat if e.get("symbol")}
+            symbol_extra = {e["symbol"]: {
+                "fund_scale": e.get("fund_scale", 0),
+                "fund_shares": e.get("fund_shares", 0),  # S2: 基金份额
+            } for e in flat if e.get("symbol")}
             try:
                 factor_scores = await self.factor_registry.compute(symbols, symbol_extra=symbol_extra)
                 for item in flat:

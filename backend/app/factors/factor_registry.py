@@ -19,6 +19,7 @@ import numpy as np
 import pandas_ta as ta
 
 from ..factors.ic_tracker import ic_tracker
+from ..services.source_registry import registry as _source_registry
 
 logger = logging.getLogger(__name__)
 
@@ -617,28 +618,11 @@ _CORE_FACTORS = [
 ]
 
 
-class CircuitBreaker:
-    """简单的电路断熔，防止外部数据源故障时反复重试。"""
-    failure_count: ClassVar[int] = 0
-    threshold: ClassVar[int] = 10
-    open_until: ClassVar[float] = 0.0
-    cooldown: ClassVar[int] = 30
-
-    @classmethod
-    def is_open(cls) -> bool:
-        if time.time() < cls.open_until:
-            return True
-        return False
-
-    @classmethod
-    def record_failure(cls):
-        cls.failure_count += 1
-        if cls.failure_count >= cls.threshold:
-            cls.open_until = time.time() + cls.cooldown
-
-    @classmethod
-    def record_success(cls):
-        cls.failure_count = 0
+# CircuitBreaker has been replaced by SourceRegistry (S1: 熔断器接入数据源)
+# The old class-level CircuitBreaker was removed — all data source health
+# tracking is now handled by source_registry.SourceHealth with per-source
+# circuit breakers and exponential backoff.
+# K-line caching is retained below for performance.
 
 
 # 全局 K 线缓存 — 避免每次 compute() 都网络 I/O
@@ -805,9 +789,11 @@ class FactorRegistry:
                         cached[sym].update(symbol_extra[sym])
             return cached
 
-        # 电路断熔：如果外部数据源连续故障，直接返回空数据
-        if CircuitBreaker.is_open():
-            logger.warning("[factor] Circuit breaker is open — returning empty data for %s", symbols)
+        # 电路断熔（SourceRegistry）：如果外部数据源连续故障，直接返回空数据
+        source_h = _source_registry._health("factor.history")
+        now = time.time()
+        if not source_h.available(now):
+            logger.warning("[factor] SourceRegistry circuit open for factor.history — returning empty data for %s", symbols)
             return {sym: {} for sym in symbols}
 
         from ..fetchers.china_market import fetch_history
@@ -844,10 +830,13 @@ class FactorRegistry:
                         "low": lows[-60:],
                         "volume": vols[-60:],
                         "change_pct": change_pct,
+                        # S2: inject fund_shares for shares_change factor
+                        "fund_shares": float((symbol_extra or {}).get(sym, {}).get("fund_shares", 0) or 0),
                     }
                 except Exception as e:
                     logger.warning("[factor] fetch_history failed for %s: %s — skipping", sym, e)
-                    CircuitBreaker.record_failure()
+                    source_h.record_failure(time.time(), route="kline", operation="history",
+                                            target=sym, error_message=str(e)[:200])
                     return sym, {"_fetch_error": str(e)}
 
         tasks = [fetch_one(sym) for sym in symbols]
@@ -957,8 +946,8 @@ class FactorRegistry:
         except Exception as e:
             logger.warning("[factor] batch NAV fetch failed: %s (proxy? — non-fatal)", e)
 
-        # 缓存成功获取的数据，记录电路断熔成功
-        CircuitBreaker.record_success()
+        # 缓存成功获取的数据，记录 SourceRegistry 成功
+        source_h.record_success(route="kline", operation="batch_fetch", target=",".join(symbols[:3]))
         _set_kline_cache(data)
 
         return data

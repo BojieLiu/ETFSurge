@@ -1,6 +1,7 @@
 ﻿# ETF Surge 方案实施总计划
 
-> 生成日期: 2026-07-29 | 版本: **v14.0**
+> 生成日期: 2026-07-29 | 版本: **v15.0**
+> ✅ **Phase 15 已完成**（2026-07-29）：诊断计划 P0/P1 剩余项 — S1(CircuitBreaker废弃) + S2(shares_change数据注入) + S9(fund_shares字段)。详见下方 v15.0。
 > ✅ **Phase 14 已完成**（2026-07-29）：诊断计划 P0 项实施 — S1(熔断器market_service接入) + S2(天天基金IOPV) + S3(本地快照兜底) + S4(chart列名修复) + S8(QQ Tencent IOPV降级)。详见下方 v14.0。
 > ✅ **Phase 13e 已完成**（2026-07-29）：LLM Provider 链路诊断修复 — 移除熔断器误伤 + 修复 system_override 被静默丢弃。详见下方 v13.2。
 > ✅ **Phase 13d 已完成**（2026-07-28）：诊断计划剩余项实施 — LLM 熔断保护 + 引擎级 fallback + 超时缩减 + 报告内容校验 + SSL 会话复用 + 预热退化告警。详见下方 v13.1。
@@ -1359,3 +1360,12 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 | | | | **P1** — `factor_registry._fetch_market_data()` 新增 QQ Tencent IOPV 降级：Sina 数据不足时自动尝试 `qt.gtimg.cn` 获取 ETF IOPV。双源自动切换，日志记录切换事件。 |
 | | | | **改动文件：** `backend/app/factors/factor_registry.py` |
 | | | | **综合测试结果：** 77 个测试通过（含新增 22 个），1 个跳过 |
+| | **v15.0** | 2026-07-29 | **Phase 15 — 诊断计划 P0/P1 剩余项 (S1 CircuitBreaker废弃 + S2 shares注入)** | 详见下方 |
+| | | | **S1 — 废弃 factor_registry.CircuitBreaker (P0 complete)**： |
+| | | | **P0** — 移除 `factor_registry.CircuitBreaker` 类（类级熔断器），替换为 `SourceRegistry` 的 `factor.history` 源健康追踪。`is_open()` → `source_h.available()`，`record_failure()` → `source_h.record_failure()`，`record_success()` → `source_h.record_success()`。迁移 `test_async_boundaries.py` 和 `test_factor_registry.py` 中对应测试到 SourceRegistry。 |
+| | | | **S2 — ETF 份额数据注入 (P0 partial)**： |
+| | | | **P0** — `etf_scanner.py` 新增 `f85`(基金份额) 和 `f84`(基金规模备用) 字段查询与映射。`pool_manager.py` 将 `fund_shares` 注入 `symbol_extra` 数据管道。`factor_registry._fetch_market_data()` 透传 `fund_shares` 供 `_compute_shares_change` / `_compute_institutional_holdings_change` 消费。 |
+| | | | **S9 — push2delay 字段增强 (P2)**： |
+| | | | **P2** — ETF 扫描 URL 新增 `f84`/`f85` 字段，增强数据源交付能力。 |
+| | | | **综合测试结果：** 83 个测试通过（原有 77 + 增量 6），1 个跳过 |
+| | | | **改动文件：** `backend/app/factors/factor_registry.py`、`backend/app/fetchers/etf_scanner.py`、`backend/app/services/pool_manager.py`、`backend/tests/test_factor_registry.py`、`backend/tests/test_async_boundaries.py`、`docs/implementation-master-plan.md` |

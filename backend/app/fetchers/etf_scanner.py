@@ -153,7 +153,7 @@ def _fetch_em_etf_list() -> list[dict] | None:
     from ..utils.proxy import no_proxy
     import requests as _req
     headers = {"User-Agent": "Mozilla/5.0"}
-    fields = "f12,f14,f2,f3,f62,f72,f184,f66,f45,f168,f20,f21,f115,f116"
+    fields = "f12,f14,f2,f3,f62,f72,f84,f85,f184,f66,f45,f168,f20,f21,f115,f116"
     all_items = []
     total = None
     for page in range(1, 20):
@@ -185,6 +185,8 @@ def _fetch_em_etf_list() -> list[dict] | None:
         "change_pct": item.get("f3", 0) or 0,
         "turnover": item.get("f62", 0) or 0,      # 换手率
         "volume": item.get("f45", 0) or 0,        # 成交量
+        "fund_shares": item.get("f85", 0) or 0,  # 基金份额 (S2: 用于 shares_change 因子)
+        "fund_scale2": item.get("f84", 0) or 0,  # 基金规模备用
         "pe": item.get("f66", 0) or 0,
         "pb": item.get("f115", 0) or 0,
         "tracked_index": item.get("f168", ""),
