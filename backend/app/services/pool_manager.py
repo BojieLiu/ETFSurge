@@ -111,10 +111,14 @@ class PoolManager:
         self._hot_plates_cache: list[dict] | None = None       # Phase 2: 热点板块
         self._sector_heat_cache: list[dict] | None = None      # Phase 2: 板块热度排行
         self._index_realtime_cache: list[dict] | None = None
-        # S5: MarketDataHub K 线缓存（统一数据管道）
-        self._kline_cache: dict[str, dict[str, Any]] = {}
+        # S5: MarketDataHub K 线缓存（统一数据管道，R3: 单行式缓存 + 锁）
+        self._kline_cache_rows: dict[str, list[dict]] = {}  # 行式: {symbol: [{date,open,...}]}
         self._kline_cache_ts: float = 0.0
         self._kline_cache_symbols: list[str] = []
+        self._kline_cache_lock: asyncio.Lock = asyncio.Lock()  # R3: 单锁保护
+
+        # 兼容旧字段名（get_kline 仍可读）
+        self._kline_cache: dict[str, dict[str, Any]] = {}
         # 60s TTL 缓存（Solution Design S1-A）
         self._cached_pool: dict | None = None
         self._cached_ts: float = 0.0
@@ -122,6 +126,37 @@ class PoolManager:
         self._test_mode: bool = False  # #6: 测试模式下禁止 teardown HTTP 泄漏
         # 7.1: consecutive refresh failure counter for observability
         self._consecutive_failures: int = 0
+
+    @staticmethod
+    def _rows_to_columns(rows: list[dict], days: int = 60) -> dict[str, list[float]]:
+        """R3: 将行式 K 线数据转为列式（懒转换）。
+
+        Input:  [{date, open, high, low, close, volume}, ...]
+        Output: {close: [3.45, ...], high: [3.5, ...], low: [3.3, ...], volume: [1e7, ...],
+                 change_pct: [0.5, ...]}
+        """
+        if not rows:
+            return {"close": [], "high": [], "low": [], "volume": [], "change_pct": []}
+        tail = rows[-days:]
+        closes = [r.get("close", r.get("close", 0)) for r in tail]
+        highs = [r.get("high", r.get("high", r.get("close", 0))) for r in tail]
+        lows = [r.get("low", r.get("low", r.get("close", 0))) for r in tail]
+        vols = [r.get("volume", r.get("volume", 0)) for r in tail]
+
+        change_pct = [0.0]
+        for i in range(1, len(closes)):
+            if closes[i - 1]:
+                change_pct.append(round((closes[i] - closes[i - 1]) / closes[i - 1] * 100, 2))
+            else:
+                change_pct.append(0.0)
+
+        return {
+            "close": closes,
+            "high": highs,
+            "low": lows,
+            "volume": vols,
+            "change_pct": change_pct,
+        }
 
     async def _refresh_market_snapshot(self) -> None:
         """A3: 写入市场快照缓存（指数 + 板块动量）。
@@ -335,7 +370,7 @@ class PoolManager:
                 "fund_shares": e.get("fund_shares", 0),  # S2: 基金份额
             } for e in flat if e.get("symbol")}
             try:
-                # S5: 使用缓存 K 线作为 market_data，避免 factor_registry 重复 I/O
+                # S5: 使用缓存 K 线作为 market_data（R3: 从行式缓存懒转换）
                 cached_kline = self._kline_cache if self._kline_cache_ts > 0 else None
                 factor_scores = await self.factor_registry.compute(
                     symbols, symbol_extra=symbol_extra,
@@ -799,43 +834,86 @@ class PoolManager:
     # ── S5: MarketDataHub K 线缓存 ────────────────────────────────────
 
     def get_kline(self, symbol: str, max_age: int = 300) -> dict[str, Any] | None:
-        """从 Hub 缓存读取 K 线数据（S5: 统一数据管道）。
+        """R3: 从行式缓存懒转换返回列式 K 线数据。
 
         Args:
             symbol: ETF 代码。
             max_age: 缓存最大时效（秒），默认 300s（5 分钟）。
 
         Returns:
-            K 线数据 dict（含 close/high/low/volume/changes 等），或 None。
+            列式 K 线数据 {close:[], high:[], ...}，或 None。
+        """
+        rows = self.get_kline_rows(symbol, max_age=max_age)
+        if rows is None or not rows:
+            return None
+        return self._rows_to_columns(rows)
+
+    def get_kline_rows(self, symbol: str, max_age: int = 300) -> list[dict] | None:
+        """R3: 获取行式 K 线数据（直接读缓存，无转换）。
+
+        Args:
+            symbol: ETF 代码。
+            max_age: 缓存最大时效（秒）。
+
+        Returns:
+            行式 K 线 [{date, open, high, low, close, volume}, ...]，或 None。
         """
         import time
-        cache = self._kline_cache.get(symbol)
-        if cache:
-            age = time.time() - self._kline_cache_ts
-            if age < max_age:
-                return cache
+        rows = self._kline_cache_rows.get(symbol)
+        if rows and (time.time() - self._kline_cache_ts) < max_age:
+            return rows
         return None
 
     async def refresh_kline(self, symbols: list[str]) -> None:
-        """增量刷新 K 线缓存（S5）。从 factor_registry._fetch_market_data 获取。
+        """S5: 增量刷新 K 线缓存（R3: 直接 fetch_history + Semaphore 并发）。
+
+        不再经过 factor_registry._fetch_market_data（消除循环依赖）。
+        统一存储行式格式，get_kline() 时懒转换为列式。
 
         Args:
             symbols: 需要刷新的 ETF 代码列表。
         """
         if not symbols:
             return
-        from ..factors.factor_registry import FactorRegistry
-        try:
-            data = await self.factor_registry._fetch_market_data(
-                symbols, symbol_extra=self._build_symbol_extra(symbols)
-            )
-            if data:
-                self._kline_cache.update(data)
+        from ..fetchers.china_market import fetch_history
+        from ..core.async_utils import run_sync
+
+        sem = asyncio.Semaphore(5)  # R3: 并发控制
+
+        async def _fetch_one(sym: str) -> tuple[str, list[dict] | None]:
+            async with sem:
+                try:
+                    rows = await run_sync(fetch_history, sym, "A", "daily", timeout=20)
+                    return sym, rows
+                except Exception as e:
+                    logger.debug("[pool] refresh_kline fetch_history(%s) failed: %s", sym, e)
+                    return sym, None
+
+        tasks = [_fetch_one(sym) for sym in symbols]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        async with self._kline_cache_lock:
+            updated = 0
+            for r in results:
+                if isinstance(r, tuple) and len(r) == 2:
+                    sym, rows = r
+                    if isinstance(rows, list) and rows:
+                        self._kline_cache_rows[sym] = rows
+                        updated += 1
+            if updated > 0:
                 self._kline_cache_ts = __import__('time').time()
                 self._kline_cache_symbols = list(set(self._kline_cache_symbols + symbols))
-                logger.debug("[pool_manager] refreshed kline cache for %d symbols", len(symbols))
-        except Exception as e:
-            logger.warning("[pool_manager] refresh_kline failed: %s", e)
+                # 同步更新列式缓存（向后兼容 get_kline 旧调用方）
+                self._sync_columnar_cache()
+                logger.debug("[pool] refresh_kline updated %d/%d symbols", updated, len(symbols))
+
+    def _sync_columnar_cache(self):
+        """R3: 从行式缓存重建列式缓存（兼容旧 get_kline 调用方）。"""
+        self._kline_cache = {}
+        for sym, rows in self._kline_cache_rows.items():
+            cols = self._rows_to_columns(rows)
+            if cols and cols.get("close"):
+                self._kline_cache[sym] = cols
 
     def _build_symbol_extra(self, symbols: list[str]) -> dict[str, dict]:
         """构建 symbol_extra 字典，供 factor_registry 使用。"""

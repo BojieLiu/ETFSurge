@@ -892,6 +892,15 @@ async def get_us_history(symbol: str, period: str = "daily") -> list[dict[str, A
 async def get_history(
     symbol: str, asset_type: str = "A", period: str = "daily"
 ) -> list[dict[str, Any]]:
+    # S5: 优先查 Hub K 线缓存
+    try:
+        from .pool_manager import pool_manager as pm
+        cached = pm.get_kline_rows(symbol, max_age=300)
+        if cached:
+            return cached
+    except Exception:
+        pass
+
     from ..fetchers.china_market import fetch_history, get_k_data
 
     result = await _call(fetch_history, symbol, asset_type, period)
