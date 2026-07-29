@@ -96,7 +96,7 @@ def test_llm_report(client):
 
 
 def test_llm_advice(client):
-    r = client.post("/api/v1/analysis/llm-advice?query=现在该加仓吗")
+    r = client.post("/api/v1/analysis/llm-advice", json={"query": "现在该加仓吗"})
     assert r.status_code == 200
     body = r.json()
     assert "advice" in body

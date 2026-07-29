@@ -1429,3 +1429,18 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 | | | | **UI Phase 3 Step 8 — 响应式断点统一**：`Dashboard.vue` 和 `PortfolioManager.vue` 中 `@media (max-width: 480px)` → `@media (max-width: 640px)`，对齐全局 640/768/1024 三级断点体系。 |
 | | | | **验证结果：** 256 个前端单测全部通过（25 个 spec 文件，0 失败）。 |
 | | | | **改动文件：** `frontend/src/utils/chartColors.js`（新）、`frontend/src/components/AnalysisView.vue`、`frontend/src/test/useMarketSearch.spec.js`、`frontend/src/test/useSectorAnalysis.spec.js`、`frontend/src/views/Dashboard.vue`、`frontend/src/components/PortfolioManager.vue`、`docs/frontend-testing-safety-net.md`（状态更新）、`docs/frontend-ui-optimization-plan.md`（状态更新）、`docs/implementation-master-plan.md` |
+| | **v22.0** | 2026-07-29 | **Phase 22 — 综合诊断 Phase 1：一击必杀（系统恢复运行基础）** | 详见下方 |
+| | | | **来源：** `docs/comprehensive-diagnosis-report.md` §§11-12 |
+| | | | **P0.5 — 全局 IPv4 优先策略（System Recovery）：** |
+| | | | `backend/app/config.py` — 新增 `enable_ipv4_only()` / `disable_ipv4_only()` 辅助函数，模块加载时自动启用 IPv4，规避东方财富 CDN 的 IPv6 路由问题。`_original_getaddrinfo` 保存原始函数实现可逆恢复。 |
+| | | | **P0.1 — 修复策略检查 LLM 导入错误：** |
+| | | | `backend/app/tasks/strategy_check_worker.py` — 将 `_generate_check_llm_report()` 和 `_generate_check_llm_comment()` 中的 `from ..analysis.llm import llm_provider` / `llm_provider.chat()` 替换为 `from ..analysis.llm import llm_complete` + `asyncio.wait_for(llm_complete(prompt), timeout=X)`，适配 LLM 模块重构后的函数签名（string→string 而非 {content} dict）。 |
+| | | | **P0.6 — 修复 LLM Advice 422 错误：** |
+| | | | `backend/app/routers/analysis.py` — 将 `POST /api/v1/analysis/llm-advice` 端点签名从 `query: str = Query(...)`（触发 FastAPI 422）改为 `req: LLMAdviceRequest`（Pydantic 模型 request body）。新增 `LLMAdviceRequest` 模型类（含 `query: str` 和 `context: dict | None` 字段）。同步更新 `test_analysis_contract.py::test_llm_advice` 从 `?query=xxx` 改为 `json={"query": ...}`。 |
+| | | | **P0.2 — 修复设计报告生成过渡到 completed：** |
+| | | | 确认 `task_manager.py` 中 `design_pipeline` 已实现完整状态机（LLM 成功→completed, LLM 失败/异常→completed_with_errors, 超时→failed, 空策略→failed）。`generate_design_report()` 有 35s 外层 timeout 保护。新增 3 个单测验证所有过渡路径。 |
+| | | | **P1.4 — 修复数据源探针准确性：** |
+| | | | `backend/app/monitor/probes.py` — akshare 探针从 `stock_zh_a_hist()`（历史 K 线）改为 `stock_sector_spot_em()`（板块热点，系统实际使用的函数），更准确反映 akshare 数据源的可用性。 |
+| | | | **新增单测：** `tests/test_phase1_diagnosis_fixes.py`（15 个用例：P0.5 IPv4 ×3、P0.1 LLM import ×5、P0.6 422 修复 ×1、P0.2 状态过渡 ×3、P1.4 探针 ×2、P3 E2E ×1） |
+| | | | **验证结果：** 15/15 新单测 PASS；`test_analysis_contract.py::test_llm_advice` 修复后 PASS；无回归。 |
+| | | | **改动文件：** `backend/app/config.py`、`backend/app/tasks/strategy_check_worker.py`、`backend/app/routers/analysis.py`、`backend/app/monitor/probes.py`、`backend/tests/test_phase1_diagnosis_fixes.py`（新）、`backend/tests/test_analysis_contract.py`、`docs/comprehensive-diagnosis-report.md`（状态更新）、`docs/implementation-master-plan.md` |

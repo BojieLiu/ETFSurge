@@ -23,7 +23,8 @@ async def _generate_check_llm_report(result: dict, capital: float) -> str | None
     基于持仓分析结果，调用 LLM 生成简短的市场研判和建议。
     """
     try:
-        from ..analysis.llm import llm_provider
+        import asyncio
+        from ..analysis.llm import llm_complete
         
         positions = result.get("positions", [])
         if not positions:
@@ -51,9 +52,9 @@ async def _generate_check_llm_report(result: dict, capital: float) -> str | None
             + summary
         )
         
-        response = await llm_provider.chat(prompt, timeout=30)
-        if response and response.get("content"):
-            return response["content"]
+        response = await asyncio.wait_for(llm_complete(prompt), timeout=30)
+        if response and response.strip():
+            return response.strip()
         return None
     except Exception as e:
         logger.warning("[strategy_check] LLM report generation failed: %s", e)
@@ -209,7 +210,8 @@ async def _generate_check_llm_comment(result: dict) -> str | None:
     非阻塞函数，失败时静默返回 None。
     """
     try:
-        from ..analysis.llm import llm_provider
+        import asyncio
+        from ..analysis.llm import llm_complete
 
         positions = result.get("positions", [])
         if not positions:
@@ -233,9 +235,9 @@ async def _generate_check_llm_comment(result: dict) -> str | None:
             + "\n".join(lines)
         )
 
-        response = await llm_provider.chat(prompt, timeout=20)
-        if response and isinstance(response, dict) and response.get("content"):
-            return response["content"].strip()
+        response = await asyncio.wait_for(llm_complete(prompt), timeout=20)
+        if response and response.strip():
+            return response.strip()
         return None
     except Exception as e:
         logger.debug("[strategy_check] LLM comment generation skipped: %s", e)

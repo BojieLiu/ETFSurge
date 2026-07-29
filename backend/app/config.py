@@ -1,3 +1,4 @@
+import socket
 from pathlib import Path
 from typing import List
 
@@ -10,6 +11,27 @@ _PROJECT_DIR = _BACKEND_DIR.parent  # E:\ETF_Surge
 _DATA_DIR = _PROJECT_DIR / "data"
 _DATA_DIR.mkdir(parents=True, exist_ok=True)
 _ENV_FILE = _BACKEND_DIR / ".env"
+
+
+# ── P0.5: IPv4 优先策略 ─────────────────────────────────────────
+# 强制所有 socket 连接使用 IPv4，规避东方财富 CDN 的 IPv6 路由问题
+_original_getaddrinfo = socket.getaddrinfo
+
+
+def enable_ipv4_only() -> None:
+    """Monkey-patch socket.getaddrinfo to force IPv4 (AF_INET) only."""
+    def _ipv4_getaddrinfo(host, port, family=0, socktype=0, proto=0, flags=0):
+        return _original_getaddrinfo(host, port, socket.AF_INET, socktype, proto, flags)
+    socket.getaddrinfo = _ipv4_getaddrinfo
+
+
+def disable_ipv4_only() -> None:
+    """Restore original socket.getaddrinfo (allow both IPv4 and IPv6)."""
+    socket.getaddrinfo = _original_getaddrinfo
+
+
+# P0.5b: 模块加载时自动启用 IPv4 优先
+enable_ipv4_only()
 
 
 def _parse_cors_origins(v: str) -> List[str]:

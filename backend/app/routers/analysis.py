@@ -221,13 +221,20 @@ async def llm_report(req: LLMReportRequest):
     return {"report": report, "market_data": market_data[:10], "indices": indices[:10], "commodities": commodities[:6], "disclaimer": "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"}
 
 
+class LLMAdviceRequest(BaseModel):
+    """P0.6: 修复 422 错误 — 用 Pydantic 模型代替 Query() 参数"""
+    query: str = ""
+    context: dict | None = None
+
+
 # TODO: 未接入前端（前端使用 /llm-advice/stream 流式版本）
 @router.post("/llm-advice")
-async def llm_advice(query: str = Query(...), context: dict | None = None):
+async def llm_advice(req: LLMAdviceRequest):
     """AI 投资顾问 — 自动注入市场数据管道缓存。"""
     from ..services.pool_manager import pool_manager
 
-    ctx = dict(context or {})
+    query = req.query
+    ctx = dict(req.context or {})
 
     # 根据 query 关键词智能注入管道数据（零额外采集成本）
     try:

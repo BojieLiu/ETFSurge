@@ -38,12 +38,14 @@ def register_all_probes() -> None:
         return bool(result and any(r.get("price", 0) > 0 for r in result))
     register_probe("tencent", _probe_tencent, timeout=10)
 
-    # ── C4: akshare (15s) — use history endpoint, minimal load ──
+    # ── C4: akshare (15s) — use sector endpoint (system-actual function) ──
     def _probe_akshare():
         try:
             # Lazy import to avoid startup overhead
+            # Use stock_sector_spot_em (板块热点) which is the actual function
+            # used by the system via sector_fetcher, not stock_zh_a_hist
             import akshare as ak  # type: ignore[import-untyped]
-            df = ak.stock_zh_a_hist("510050", period="daily")
+            df = ak.stock_sector_spot_em()
             return df is not None and len(df) > 0
         except Exception:
             return False
