@@ -275,7 +275,7 @@ function onRetry() {
 .empty-icon { font-size: var(--font-size-5xl); line-height: 1; margin-bottom: var(--space-4); }
 .empty-title { margin: 0 0 var(--space-2); font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
 .empty-description { margin: 0 0 var(--space-6); font-size: var(--font-size-base); color: var(--color-text-secondary); max-width: 300px; }
-@media (max-width: 480px) {
+@media (max-width: 640px) {
   .tabs { flex-wrap: wrap; gap: var(--space-2); }
 }
 </style>

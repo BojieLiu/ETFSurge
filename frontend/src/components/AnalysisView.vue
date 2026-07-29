@@ -46,6 +46,7 @@ import { TitleComponent, TooltipComponent, GridComponent, LegendComponent, DataZ
 import { usePortfolioStore } from '../stores/portfolio'
 import { marketApi } from '../api'
 import AppButton from './ui/AppButton.vue'
+import { chartColor, CHART_COLORS, CANDLE_UP, CANDLE_DOWN, histogramColor } from '../utils/chartColors'
 
 import ControlPanel from './analysis/ControlPanel.vue'
 import ChartPanel from './analysis/ChartPanel.vue'
@@ -157,7 +158,7 @@ const chartOption = computed(() => {
     const closePrices = d.closes
     const volumes = d.volumes || []
     const volumeColors = d.closes.map((c, i) =>
-      i === 0 ? '#22c55e' : c >= d.closes[i - 1] ? '#22c55e' : '#ef4444'
+      i === 0 ? CANDLE_DOWN : c >= d.closes[i - 1] ? CANDLE_DOWN : CANDLE_UP
     )
     const minP = Math.min(...d.lows)
     const maxP = Math.max(...d.highs)
@@ -200,7 +201,7 @@ const chartOption = computed(() => {
           type: 'line', data: closePrices, xAxisIndex: 0, yAxisIndex: 0,
           name: seriesName,
           smooth: true, symbol: 'none',
-          lineStyle: { width: 2, color: '#ef4444' },
+          lineStyle: { width: 2, color: CANDLE_UP },
           areaStyle: {
             color: {
               type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
@@ -231,7 +232,7 @@ const chartOption = computed(() => {
   const candlesticks = d.opens.map((_, i) => [d.opens[i], d.closes[i], d.lows[i], d.highs[i]])
   const volumes = d.volumes || []
   const volumeColors = d.closes.map((c, i) =>
-    i === 0 ? '#22c55e' : c >= d.closes[i - 1] ? '#22c55e' : '#ef4444'
+    i === 0 ? CANDLE_DOWN : c >= d.closes[i - 1] ? CANDLE_DOWN : CANDLE_UP
   )
 
   const gridHeights = { main: 50, volume: 22, macd: 20, kdj: 18, rsi: 18 }
@@ -253,15 +254,15 @@ const chartOption = computed(() => {
   series.push({
     type: 'candlestick', name: seriesName, data: candlesticks,
     xAxisIndex: 0, yAxisIndex: 0,
-    itemStyle: { color: '#22c55e', color0: '#ef4444', borderColor: '#22c55e', borderColor0: '#ef4444' },
+    itemStyle: { color: CANDLE_DOWN, color0: CANDLE_UP, borderColor: CANDLE_DOWN, borderColor0: CANDLE_UP },
   })
 
   // MA lines
   const maConfig = [
-    { key: 'ma5', show: showMA5.value, color: '#f59e0b', name: 'MA5' },
-    { key: 'ma10', show: showMA10.value, color: '#3b82f6', name: 'MA10' },
-    { key: 'ma20', show: showMA20.value, color: '#a855f7', name: 'MA20' },
-    { key: 'ma60', show: showMA60.value, color: '#22c55e', name: 'MA60' },
+    { key: 'ma5', show: showMA5.value, color: chartColor('ma5'), name: 'MA5' },
+    { key: 'ma10', show: showMA10.value, color: chartColor('ma10'), name: 'MA10' },
+    { key: 'ma20', show: showMA20.value, color: chartColor('ma20'), name: 'MA20' },
+    { key: 'ma60', show: showMA60.value, color: chartColor('ma60'), name: 'MA60' },
   ]
   for (const cfg of maConfig) {
     if (!cfg.show) continue
@@ -280,17 +281,17 @@ const chartOption = computed(() => {
     series.push({
       type: 'line', data: boll.upper, smooth: true,
       xAxisIndex: 0, yAxisIndex: 0,
-      name: 'BOLL上轨', symbol: 'none', lineStyle: { width: 1, color: '#94a3b8' },
+      name: 'BOLL上轨', symbol: 'none', lineStyle: { width: 1, color: chartColor('bollUpper') },
     })
     series.push({
       type: 'line', data: boll.middle, smooth: true,
       xAxisIndex: 0, yAxisIndex: 0,
-      name: 'BOLL中轨', symbol: 'none', lineStyle: { width: 1.2, color: '#1e293b' },
+      name: 'BOLL中轨', symbol: 'none', lineStyle: { width: 1.2, color: chartColor('bollMiddle') },
     })
     series.push({
       type: 'line', data: boll.lower, smooth: true,
       xAxisIndex: 0, yAxisIndex: 0,
-      name: 'BOLL下轨', symbol: 'none', lineStyle: { width: 1, color: '#94a3b8' },
+      name: 'BOLL下轨', symbol: 'none', lineStyle: { width: 1, color: chartColor('bollLower') },
     })
   }
 
@@ -314,7 +315,7 @@ const chartOption = computed(() => {
     grids.push({ left: '6%', right: '3%', top: `${(macdOffset / totalPct) * 100}%`, height: `${(macdPct / totalPct) * 100}%` })
     xAxes.push({ type: 'category', data: dates, gridIndex: 2, axisLabel: { rotate: 30, fontSize: 10 } })
     yAxes.push({ gridIndex: 2, scale: true, splitNumber: 3, axisLabel: { show: true, fontSize: 10 } })
-    const histColors = d.macd.histogram.map((v) => (v || 0) >= 0 ? '#22c55e' : '#ef4444')
+    const histColors = d.macd.histogram.map((v) => histogramColor(v))
     series.push({
       type: 'bar', data: d.macd.histogram, xAxisIndex: 2, yAxisIndex: 2,
       name: 'MACD', itemStyle: { color: (p) => histColors[p.dataIndex] },
@@ -322,12 +323,12 @@ const chartOption = computed(() => {
     series.push({
       type: 'line', data: d.macd.dif, smooth: true,
       xAxisIndex: 2, yAxisIndex: 2,
-      name: 'DIF', symbol: 'none', lineStyle: { width: 1.2, color: '#3b82f6' },
+      name: 'DIF', symbol: 'none', lineStyle: { width: 1.2, color: chartColor('macdDif') },
     })
     series.push({
       type: 'line', data: d.macd.dea, smooth: true,
       xAxisIndex: 2, yAxisIndex: 2,
-      name: 'DEA', symbol: 'none', lineStyle: { width: 1.2, color: '#f59e0b' },
+      name: 'DEA', symbol: 'none', lineStyle: { width: 1.2, color: chartColor('macdDea') },
     })
   }
 
@@ -342,17 +343,17 @@ const chartOption = computed(() => {
     series.push({
       type: 'line', data: d.kdj.k, smooth: true,
       xAxisIndex: kdjGridIdx, yAxisIndex: kdjGridIdx,
-      name: 'KDJ-K', symbol: 'none', lineStyle: { width: 1.2, color: '#3b82f6' },
+      name: 'KDJ-K', symbol: 'none', lineStyle: { width: 1.2, color: chartColor('kdjK') },
     })
     series.push({
       type: 'line', data: d.kdj.d, smooth: true,
       xAxisIndex: kdjGridIdx, yAxisIndex: kdjGridIdx,
-      name: 'KDJ-D', symbol: 'none', lineStyle: { width: 1.2, color: '#f59e0b' },
+      name: 'KDJ-D', symbol: 'none', lineStyle: { width: 1.2, color: chartColor('kdjD') },
     })
     series.push({
       type: 'line', data: d.kdj.j, smooth: true,
       xAxisIndex: kdjGridIdx, yAxisIndex: kdjGridIdx,
-      name: 'KDJ-J', symbol: 'none', lineStyle: { width: 1.2, color: '#a855f7' },
+      name: 'KDJ-J', symbol: 'none', lineStyle: { width: 1.2, color: chartColor('kdjJ') },
     })
   }
 
@@ -367,12 +368,12 @@ const chartOption = computed(() => {
     series.push({
       type: 'line', data: d.rsi, smooth: true,
       xAxisIndex: rsiGridIdx, yAxisIndex: rsiGridIdx,
-      name: 'RSI(14)', symbol: 'none', lineStyle: { width: 1.2, color: '#ef4444' },
+      name: 'RSI(14)', symbol: 'none', lineStyle: { width: 1.2, color: chartColor('rsi') },
       markLine: {
         silent: true,
         data: [
-          { yAxis: 70, label: { formatter: '70 超买', fontSize: 10, color: '#ef4444' }, lineStyle: { color: '#ef4444', type: 'dashed', width: 1 } },
-          { yAxis: 30, label: { formatter: '30 超卖', fontSize: 10, color: '#22c55e' }, lineStyle: { color: '#22c55e', type: 'dashed', width: 1 } },
+          { yAxis: 70, label: { formatter: '70 超买', fontSize: 10, color: CANDLE_UP }, lineStyle: { color: CANDLE_UP, type: 'dashed', width: 1 } },
+          { yAxis: 30, label: { formatter: '30 超卖', fontSize: 10, color: CANDLE_DOWN }, lineStyle: { color: CANDLE_DOWN, type: 'dashed', width: 1 } },
         ],
       },
     })

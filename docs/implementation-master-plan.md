@@ -1,7 +1,8 @@
 ﻿# ETF Surge 方案实施总计划
 
-> 生成日期: 2026-07-29 | 版本: **v20.1**
+> 生成日期: 2026-07-29 | 版本: **v21.0**
 > ✅ **文档归档（2026-07-29 v20.1）**：8 份已全部实施/已替代的方案文档归档至 `docs/archived/` — `optimization-master-plan.md`、`optimization-master-plan-v2.md`、`performance-diagnosis-and-optimization-plan.md`、`fix-plan-master.md`、`fix-plan-pool.md`、`s5-markethub-design.md`、`system-performance-and-quality-review.md`、`fundamental-flow-factors-evaluation.md`。
+> ✅ **Phase 21 已完成**（2026-07-29）：修复 4 个前端单测失败（useMarketSearch + useSectorAnalysis mock 目标错误） + UI Phase 3(Steps 6-8)。详见下方 v21.0。
 > ✅ **Phase 20 已完成**（2026-07-29）：综合诊断剩余项 — F1(布林带列名前缀匹配修复 P0) + F2(板块默认限额 80→500 P1) + F3(ic_tracker 类型错误 P1) + 11 个新单测。详见下方 v20.0。
 > ✅ **Phase 16 已完成**（2026-07-29）：P1/P2 剩余项 — S5(K线缓存统一) + S7(策略检查LLM报告) + S11(新闻重试) + S12(网易财经K线)。详见下方 v16.0。
 > ✅ **Phase 15 已完成**（2026-07-29）：诊断计划 P0/P1 剩余项 — S1(CircuitBreaker废弃) + S2(shares_change数据注入) + S9(fund_shares字段)。详见下方 v17.0。
@@ -1416,3 +1417,15 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 | | | | **新增测试：** `tests/test_diagnosis_remaining_fixes.py`（11 个新用例：4 布林带值校验 + 5 ic_tracker 样本计数 + 2 板块限额 API 契约） |
 | | | | **综合测试结果：** 93 个相关测试通过（除 1 个标记为 @pytest.mark.slow 的集成测试需要真实数据源），0 回归 |
 | | | | **改动文件：** `backend/app/analysis/indicators.py`、`backend/app/routers/market.py`、`backend/app/factors/ic_tracker.py`、`backend/tests/test_diagnosis_remaining_fixes.py`（新）、`backend/scripts/verify_e2e.py`、`backend/tests/test_design_optimization_plan.py`、`.github/workflows/performance.yml`（新）、`.lighthouserc.js`（新）、`docs/implementation-master-plan.md` |
+| | **v21.0** | 2026-07-29 | **Phase 21 — 契约驱动 + 测试驱动：修复 4 个失败前端单测 + UI Phase 3 (Steps 6-8)** | 详见下方 |
+| | | | **问题：** |
+| | | | 1. 4 个前端单测失败（useMarketSearch 2 个 + useSectorAnalysis 2 个）— mock 目标从 `fetchJson` 误指向为 `../utils/fetchJson`，但真实 composable 已改用 `../api` (axios-based `marketApi`)。 |
+| | | | 2. UI Phase 3 Steps 6-8 未实施（`frontend-ui-optimization-plan.md` v2 确认） |
+| | | | **修复（TDD）：** |
+| | | | **T1 — useMarketSearch mock 修复**：`vi.mock('../utils/fetchJson')` → `vi.mock('../api')`，所有 `fetchJson` 引用改为 `marketApi.search`。响应格式改为 `{ data: [...] }` 匹配 axios 封装。 |
+| | | | **T2 — useSectorAnalysis mock 修复**：同上，`vi.mock('../utils/fetchJson')` → `vi.mock('../api')`，`fetchJson.mockResolvedValue([])` → `marketApi.getSectors.mockResolvedValue({ data: [] })`，参数断言从 URL 字符串匹配改为对象匹配。 |
+| | | | **UI Phase 3 Step 6 — chartColors.js 抽象**：新建 `frontend/src/utils/chartColors.js`，提供 `CHART_COLORS`（8 色调色板，匹配 `--chart-1..--chart-8` CSS 变量）、`chartColor(name)`、`getChartColor(index)`、`histogramColor(value)`、`CANDLE_UP`/`CANDLE_DOWN` 常量。`AnalysisView.vue` 中 20 处硬编码 hex 值（`#22c55e`/`#ef4444`/`#3b82f6`/`#f59e0b`/`#a855f7`/`#94a3b8`/`#1e293b`）全部替换为 chartColors 引用。 |
+| | | | **UI Phase 3 Step 7 — Skeleton 加载状态统一**：确认 `Skeleton.vue`（`frontend/src/components/ui/Skeleton.vue`）已完整实现（6 种变体 + shimmer 动画），被 Dashboard.vue 使用。无需额外实施。 |
+| | | | **UI Phase 3 Step 8 — 响应式断点统一**：`Dashboard.vue` 和 `PortfolioManager.vue` 中 `@media (max-width: 480px)` → `@media (max-width: 640px)`，对齐全局 640/768/1024 三级断点体系。 |
+| | | | **验证结果：** 256 个前端单测全部通过（25 个 spec 文件，0 失败）。 |
+| | | | **改动文件：** `frontend/src/utils/chartColors.js`（新）、`frontend/src/components/AnalysisView.vue`、`frontend/src/test/useMarketSearch.spec.js`、`frontend/src/test/useSectorAnalysis.spec.js`、`frontend/src/views/Dashboard.vue`、`frontend/src/components/PortfolioManager.vue`、`docs/frontend-testing-safety-net.md`（状态更新）、`docs/frontend-ui-optimization-plan.md`（状态更新）、`docs/implementation-master-plan.md` |

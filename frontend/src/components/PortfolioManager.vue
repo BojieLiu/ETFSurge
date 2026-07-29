@@ -1052,7 +1052,7 @@ onMounted(loadTab)
   .card-meta { margin-left: 0; width: 100%; justify-content: space-between; }
 }
 
-@media (max-width: 480px) {
+@media (max-width: 640px) {
   .tabs { flex-direction: column; }
   .tab { text-align: center; }
   .action-buttons { flex-direction: column; }

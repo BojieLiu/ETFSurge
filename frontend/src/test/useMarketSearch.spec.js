@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-vi.mock('../utils/fetchJson', () => ({
-  fetchJson: vi.fn(),
+vi.mock('../api', () => ({
+  marketApi: {
+    search: vi.fn(),
+  },
 }))
 
-import { fetchJson } from '../utils/fetchJson'
+import { marketApi } from '../api'
 import { useMarketSearch } from '../composables/useMarketSearch'
 
 describe('useMarketSearch', () => {
@@ -34,26 +36,26 @@ describe('useMarketSearch', () => {
   it('does not search with very short query on input', () => {
     composable.searchQuery.value = 'a'
     composable.onSearchInput()
-    expect(fetchJson).not.toHaveBeenCalled()
+    expect(marketApi.search).not.toHaveBeenCalled()
   })
 
   it('triggers search after input debounce', () => {
     vi.useFakeTimers()
     composable.searchQuery.value = '沪深300'
     composable.onSearchInput()
-    expect(fetchJson).not.toHaveBeenCalled() // not yet, debounced
+    expect(marketApi.search).not.toHaveBeenCalled() // not yet, debounced
     vi.advanceTimersByTime(300)
-    expect(fetchJson).toHaveBeenCalledTimes(2) // ETF + stock
+    expect(marketApi.search).toHaveBeenCalledTimes(1)
     vi.useRealTimers()
   })
 
   it('populates search results from API response', async () => {
-    fetchJson.mockResolvedValue([
+    marketApi.search.mockResolvedValue({ data: [
       { symbol: '510300', name: '沪深300ETF' },
-    ])
+    ]})
     composable.searchQuery.value = '510300'
     await composable.doSearch()
-    expect(fetchJson).toHaveBeenCalled()
+    expect(marketApi.search).toHaveBeenCalled()
     expect(composable.searchResults.value.length).toBeGreaterThan(0)
     expect(composable.searchResults.value[0].symbol).toBe('510300')
   })

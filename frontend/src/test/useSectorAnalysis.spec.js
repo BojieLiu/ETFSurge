@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-vi.mock('../utils/fetchJson', () => ({
-  fetchJson: vi.fn(),
+vi.mock('../api', () => ({
+  marketApi: {
+    getSectors: vi.fn(),
+  },
 }))
 
-import { fetchJson } from '../utils/fetchJson'
+import { marketApi } from '../api'
 import { useSectorAnalysis } from '../composables/useSectorAnalysis'
 
 describe('useSectorAnalysis', () => {
@@ -13,7 +15,7 @@ describe('useSectorAnalysis', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    fetchJson.mockResolvedValue([])
+    marketApi.getSectors.mockResolvedValue({ data: [] })
     marketTab = { value: 'A' }
     composable = useSectorAnalysis(marketTab)
   })
@@ -31,18 +33,22 @@ describe('useSectorAnalysis', () => {
   })
 
   it('fetchSectorList fetches industry sectors', async () => {
-    fetchJson.mockClear()
+    marketApi.getSectors.mockClear()
     await composable.fetchSectorList()
-    expect(fetchJson).toHaveBeenCalled()
-    expect(fetchJson.mock.calls[0][0]).toContain('/api/v1/market/sectors/industry')
+    expect(marketApi.getSectors).toHaveBeenCalled()
+    expect(marketApi.getSectors.mock.calls[0][0]).toEqual({
+      type: 'industry', limit: 200, market: 'A'
+    })
   })
 
   it('switches to concept sector type and fetches', async () => {
-    fetchJson.mockClear()
+    marketApi.getSectors.mockClear()
     composable.sectorType.value = 'concept'
     await composable.onSectorTypeChange()
-    expect(fetchJson).toHaveBeenCalled()
-    expect(fetchJson.mock.calls[0][0]).toContain('/api/v1/market/sectors/concept')
+    expect(marketApi.getSectors).toHaveBeenCalled()
+    expect(marketApi.getSectors.mock.calls[0][0]).toEqual({
+      type: 'concept', limit: 200, market: 'A'
+    })
   })
 
   it('selectSector sets selected values and closes dropdown', () => {
