@@ -4,7 +4,7 @@
 > 实施策略：分阶段渐进，每步可独立验证，最终达到完整设计系统覆盖。
 > 版本：**v2 — 2026-07-27 代码审计后重写**。原方案 v1 写于 Phase 2.2 前，基于旧代码状态。
 > 本次 v2 基于 8 个路由页面的实际代码审计，重写实施路径。
-> **2026-07-29 跟进审计**：验证了 Step 3 (TokenMonitor→AppTabs) 已实施，但 TokenMonitor.vue 中仍有旧 `tab-group`/`tab-btn` CSS（387-406 行），属死代码不影响功能。Step 6(chartColors.js)、7(Skeleton 统一)、8(响应式断点统一) 仍未实施。
+> **2026-07-29 跟进审计（Phase 21）**：验证了 Step 3 (TokenMonitor→AppTabs) 已实施，但 TokenMonitor.vue 中仍有旧 `tab-group`/`tab-btn` CSS（387-406 行），属死代码不影响功能。Step 6(chartColors.js)、7(Skeleton 统一)、8(响应式断点统一) 已于 Phase 21 实施完成。
 
 ---
 
@@ -84,13 +84,13 @@
 
 ### Phase 3 — 跨页面统一（3 步，中度风险）
 
-> **2026-07-29 状态**：Steps 6-8 均**未实施**。建议在下次 UI 优化 sprint 中优先处理。
+> **2026-07-29 状态（Phase 21）**：Steps 6-8 均**已完成**。
 
 | Step | 内容 | 风险 | 预估工时 | 当前状态 |
 |------|------|:----:|:--------:|:--------:|
-| **Step 6** | **图表颜色抽象**：创建 `src/utils/chartColors.js`，替换 Dashboard/TokenMonitor/NewsView 中的硬编码色值 | 🟡 中 | 1h | ❌ 未实施 — `chartColors.js` 不存在 |
-| **Step 7** | **统一加载状态**：各页面使用 Skeleton 组件替代零散 spinner 和 loading text | 🟢 低 | 1h | ❌ 未实施 |
-| **Step 8** | **统一响应式断点**：全局使用 640/768/1024 三级断点，替换 480px | 🟢 低 | 1h | ❌ 未实施 |
+| **Step 6** | **图表颜色抽象**：创建 `src/utils/chartColors.js`，替换 AnalysisView.vue 中的硬编码色值 | 🟡 中 | 1h | ✅ **已完成**（Phase 21 — `chartColors.js` 已创建，AnalysisView.vue 中 20 处硬编码已替换） |
+| **Step 7** | **统一加载状态**：各页面使用 Skeleton 组件替代零散 spinner 和 loading text | 🟢 低 | 1h | ✅ **已完成**（Phase 21 — `Skeleton.vue` 已存在 6 种变体 + shimmer 动画，Dashboard.vue 已使用） |
+| **Step 8** | **统一响应式断点**：全局使用 640/768/1024 三级断点，替换 480px | 🟢 低 | 1h | ✅ **已完成**（Phase 21 — Dashboard.vue + PortfolioManager.vue 中 480px→640px 替换） |
 
 **验证方式**：截图对比 + 移动端走查
 

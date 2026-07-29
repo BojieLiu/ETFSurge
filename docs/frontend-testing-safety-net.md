@@ -8,15 +8,15 @@
 
 ## 1. 现有测试现状（2026-07-26 更新）
 
-> ⚠️ 本文档初始版本撰写于 Phase 2.5 前。**2026-07-29 审计更新**：现为 25 个 spec 文件，256 个测试用例（252 通过，4 失败）。
+> ⚠️ 本文档初始版本撰写于 Phase 2.5 前。**2026-07-29 审计更新（Phase 21）**：现为 25 个 spec 文件，256 个测试用例（256 通过，0 失败）。
 
-### 单元测试（Vitest）— **25 个 spec 文件，252 通过 / 256 总计（4 失败）**
+### 单元测试（Vitest）— **25 个 spec 文件，256 通过 / 256 总计（0 失败）**
 
 | 层级 | 测试内容 | 数量 | 质量 |
 |------|---------|:----:|------|
 | 🟢 Utils | `changeClass`、`formatDate`、`newsLevel` | **19 个**（5+12+6） | ✅ 良好，覆盖主要逻辑 |
 | 🟡 Stores | `taskStore` — 任务状态机 | **5 个** | ✅ 覆盖了 hasRunningTask/activeTaskId |
-| 🟢 Composable | `useNewsWS` + `useDashboardData` + `useLLMStream` + `useMarketSearch` + `useMarketWS` + `useSectorAnalysis` | **71 个**（WS 3 + Dashboard 35 + LLM 6 + Search 11(2❌) + MarketWS 6 + Sector 10(2❌)） | ⚠️ useSectorAnalysis(2/10 失败) + useMarketSearch(2/11 失败) 需修复 |
+| 🟢 Composable | `useNewsWS` + `useDashboardData` + `useLLMStream` + `useMarketSearch` + `useMarketWS` + `useSectorAnalysis` | **71 个**（WS 3 + Dashboard 35 + LLM 6 + Search 11 + MarketWS 6 + Sector 10） | ✅ **Phase 21 已修复** — mock 指向修正（fetchJson→marketApi） |
 | 🟡 Views | `DashboardAiTools` — 设计报告 | **10 个**（report 7 + timer 3） | ⚠️ 全 stub，只测业务逻辑 |
 | 🟢 Components | `PortfolioAnalysis`×1、`PortfolioManager`×3 | **16 个** | ✅ 含 selection + features + analysis 交互 |
 | 🟢 **子组件** | DashboardHistory(10) + StrategyCheckResult(10) + GlobalIndicesStrip(4) + ChartComponents(16) | **40 个** | ✅ 2026-07-29：全部已覆盖 |
@@ -41,7 +41,7 @@
 - ⚠️ Charts 渲染已有 E2E spec (`06-charts.spec.js`) 和 ChartComponents 单测 (16 条)
 - ❌ E2E 覆盖仍有空白：AI Advisor (`13-ai-advisor.spec.js`)，Sector analysis，Symbol analysis，Token monitor specs 已创建但尚未集成/运行
 
-> **⚠️ 2026-07-29 审计发现**：npm test 结果实际为 **4 个测试失败** — 分布在 `useSectorAnalysis.spec.js`（10 条中 2 失败）和 `useMarketSearch.spec.js`（11 条中 2 失败）。这些是新创建的 composable 测试，mock 尚未完善。在标记"✅ 全绿"前需修复。
+> **⚠️ 2026-07-29 审计发现**：npm test 结果原为 **4 个测试失败** — 分布在 `useSectorAnalysis.spec.js`（10 条中 2 失败）和 `useMarketSearch.spec.js`（11 条中 2 失败）。这些是新创建的 composable 测试，mock 指向 `fetchJson` 但 composable 已改用 `marketApi`。**Phase 21 已修复**：mock 改为指向 `../api`，所有 256 测试通过。
 
 ---
 
@@ -190,7 +190,7 @@ Phase B — 业务层防护（✅ 已完成，Phase 2.5）
 ├── B3: PortfolioAnalysis E2E ── 通过 navigation + regression 覆盖
 └── 验证：npm test + npm run test:e2e:smoke 全绿 ✅
 
-Phase C — 全面覆盖（📌 部分完成，4 个测试需修复）
+Phase C — 全面覆盖（✅ 全部完成，Phase 21）
 ├── C1: 剩余 UI 组件单测（AppTable、AppSelect、Skeleton 等）—— AppComponents2.spec.js 已覆盖（25 条），C1 已自然完成 ✅
 ├── C2: Chart 组件基本渲染测试（AllocationPieChart + PnLBarChart，带 vue-echarts stub）—— ✅ 已完成（ChartComponents.spec.js，16 条）
 ├── C3: E2E 覆盖 Charts 渲染 + 技术分析——06-charts.spec.js 已创建 ✅，另有 13-ai-advisor/14-sector-analysis 等 E2E 待集成
@@ -228,12 +228,12 @@ npm run test:e2e         # 完整 E2E        → < 5 分钟
 
 - [x] 所有 11 个核心 UI 组件有单测，覆盖 variant/事件/disabled/loading 状态 ✅
 - [x] `useDashboardData` + `useLLMStream` + `useMarketWS` 等 6 个 composable 有单测 ✅
-- [ ] **每次 commit 前 `npm test` 全绿** — ❌ **当前 4 个失败需修复**（useSectorAnalysis 2 + useMarketSearch 2）
+- [x] **每次 commit 前 `npm test` 全绿** — ✅ **Phase 21 已修复**（useSectorAnalysis + useMarketSearch mock 修正）
 - [ ] 每次重构一个页面后，对应 E2E smoke 测试通过（当前为人工验证）
 - [x] `npm test && npm run test:e2e:smoke` 在正常开发机上不超过 3 分钟 ✅（实测 ~63s）
 
 **补充说明**：
 - 第 1-2 项已在 Phase 10.2-10.3 全部满足。
-- 第 3 项**当前不达标**：`useSectorAnalysis.spec.js` 2/10 失败 + `useMarketSearch.spec.js` 2/11 失败。需要修复 mock 后恢复全绿状态。
+- 第 3 项**已修复（Phase 21）**：`useSectorAnalysis.spec.js`（10/10 通过）+ `useMarketSearch.spec.js`（11/11 通过）。mock 目标从 `fetchJson` 修正为 `../api` 后恢复全绿状态（256/256 通过）。
 - 第 4 项需在后续实施过程中逐页面验证（目前是人工→建议尽快自动化）。
 - 第 5 项需实测，预估 `npm test`(~5s) + `npm run test:e2e:smoke`(~60s) 远超 3 分钟余量。
