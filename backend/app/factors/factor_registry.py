@@ -775,6 +775,14 @@ class FactorRegistry:
         self._computers[code] = fn
 
     async def _fetch_market_data(self, symbols: list[str], symbol_extra: dict[str, dict] | None = None) -> dict[str, dict[str, Any]]:
+        """[DEPRECATED] S5: 仅在 Hub 缓存无数据时作为 fallback 使用。
+
+        新代码应通过 MarketDataHub.get_kline() 获取 K 线数据。
+        
+        .. deprecated::
+            Use MarketDataHub.get_kline() or get_kline_rows() instead.
+            Will be removed in Phase 20.
+        """
         """Fetch real market data for factor computation.
 
         Uses K-line cache (60s TTL) and circuit breaker to avoid
