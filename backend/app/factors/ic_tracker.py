@@ -215,14 +215,15 @@ class ICTracker:
         return count
 
     def _get_ic_sample_count(self, factor_code: str) -> int:
-        """Estimate sample count from internal records for a given factor."""
-        if factor_code not in self._records:
-            return 0
-        # Count unique symbols for this factor
-        rec = self._records[factor_code]  # type: ignore[call-overload]
-        if isinstance(rec, dict):
-            return len(rec)
-        return 0
+        """Count occurrences of *factor_code* in internal records.
+
+        self._records is list[dict], not a dict indexed by factor_code,
+        so we must sum matches rather than doing a direct key lookup.
+        """
+        return sum(
+            1 for r in self._records
+            if isinstance(r, dict) and r.get("factor_code") == factor_code
+        )
 
 
 def compute_ic_series_fast(

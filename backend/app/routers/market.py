@@ -255,7 +255,7 @@ async def sentiment() -> dict:
 
 
 @router.get("/sectors/industry")
-async def industry_sectors(limit: int = Query(80)) -> list[dict[str, Any]]:
+async def industry_sectors(limit: int = Query(500)) -> list[dict[str, Any]]:
     """行业板块列表（含实时行情）：优先 sector_fetcher 实时数据，本地 sectors 表作降级。"""
     realtime = await asyncio.to_thread(fetch_industry_sectors, limit)
     if realtime:
@@ -267,7 +267,7 @@ async def industry_sectors(limit: int = Query(80)) -> list[dict[str, Any]]:
 
 
 @router.get("/sectors/concept")
-async def concept_sectors(limit: int = Query(80)) -> list[dict[str, Any]]:
+async def concept_sectors(limit: int = Query(500)) -> list[dict[str, Any]]:
     """概念板块列表（含实时行情）：优先 sector_fetcher 实时数据，本地 sectors 表作降级。"""
     realtime = await asyncio.to_thread(fetch_concept_sectors, limit)
     if realtime:

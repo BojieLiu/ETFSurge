@@ -848,6 +848,10 @@ class PoolManager:
             return None
         return self._rows_to_columns(rows)
 
+    def get_kline_symbols(self) -> list[str]:
+        """返回缓存中有 K 线数据的 ETF 代码列表。"""
+        return list(self._kline_cache_rows.keys())
+
     def get_kline_rows(self, symbol: str, max_age: int = 300) -> list[dict] | None:
         """R3: 获取行式 K 线数据（直接读缓存，无转换）。
 

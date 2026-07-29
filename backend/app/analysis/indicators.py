@@ -106,15 +106,28 @@ def compute_bollinger(close, window=20, num_std=2) -> dict:
     if result is None or result.empty:
         return {"ma": 0, "upper": 0, "lower": 0, "bandwidth": 0}
 
-    bbm_col = f"BBM_{window}_{num_std}_{num_std}"
-    bbu_col = f"BBU_{window}_{num_std}_{num_std}"
-    bbl_col = f"BBL_{window}_{num_std}_{num_std}"
-    bbb_col = f"BBB_{window}_{num_std}_{num_std}"
+    # ------------------------------------------------------------------
+    # pandas-ta stores std as float in column names (e.g. BBB_20_2.0_2.0),
+    # so we match by prefix rather than constructing an exact string.
+    # This avoids a P0 bug where BBB_20_2_2 (int) did not match the
+    # actual column BBB_20_2.0_2.0 produced by pandas-ta 0.7+.
+    # ------------------------------------------------------------------
+    def _first_col(prefix: str) -> str:
+        """Return the first column matching *prefix* in result.columns."""
+        for c in result.columns:
+            if c.startswith(prefix):
+                return c
+        return ""
 
-    ma_val = float(result[bbm_col].iloc[-1]) if bbm_col in result.columns and not result[bbm_col].empty else 0
-    upper_val = float(result[bbu_col].iloc[-1]) if bbu_col in result.columns and not result[bbu_col].empty else 0
-    lower_val = float(result[bbl_col].iloc[-1]) if bbl_col in result.columns and not result[bbl_col].empty else 0
-    bandwidth_val = float(result[bbb_col].iloc[-1]) if bbb_col in result.columns and not result[bbb_col].empty else 0
+    bbm_col = _first_col(f"BBM_{window}_")
+    bbu_col = _first_col(f"BBU_{window}_")
+    bbl_col = _first_col(f"BBL_{window}_")
+    bbb_col = _first_col(f"BBB_{window}_")
+
+    ma_val = float(result[bbm_col].iloc[-1]) if bbm_col and not result[bbm_col].empty else 0
+    upper_val = float(result[bbu_col].iloc[-1]) if bbu_col and not result[bbu_col].empty else 0
+    lower_val = float(result[bbl_col].iloc[-1]) if bbl_col and not result[bbl_col].empty else 0
+    bandwidth_val = float(result[bbb_col].iloc[-1]) if bbb_col and not result[bbb_col].empty else 0
 
     return {
         "ma": ma_val,
