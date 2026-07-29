@@ -1398,8 +1398,14 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 | | | | **新增 API 契约：** `api-contracts/market/market-data-hub.md` |
 | | | | **综合测试结果：** 79 tests pass (0 pre-existing failures)，1 skipped |
 | | | | **改动文件：** `backend/app/services/market_data_hub.py`（新）、`backend/app/fetchers/ttj_fetcher.py`、`backend/tests/test_s5_remaining.py`（新）、`api-contracts/market/market-data-hub.md`（新）、`docs/implementation-master-plan.md` |
-| | **v20.0** | 2026-07-29 | **Phase 20 — 综合诊断剩余项修复** | 详见下方 |
-| | | | **来源:** `docs/comprehensive-diagnosis-and-optimization-plan.md` — 全面诊断报告（18项问题），已完成项见 Phase 14-19，Phase 20 覆盖剩余 P0/P1 项 |
+| | **v20.1** | 2026-07-29 | **Phase 20 — 综合诊断剩余项修复 + CI/断言补全** | 详见下方 |
+| | | | **版本表:** v20.0 = F1(布林带)+F2(板块限额)+F3(ic_tracker); v20.1 = F13(CI)+F14(断言)+test修复+cleanup |
+| | | | **F13 — Lighthouse CI 性能基线 (P3)**： |
+| | | | 新增 `.github/workflows/performance.yml` — push/PR 到 main 时构建前端生产包、启动后端+Redis、运行 Lighthouse CI（Performance >= 50, LCP < 8s, TBT < 500ms）。新增 `.lighthouserc.js` — 本地 LHCI 桌面预设配置，上传至 temporary-public-storage。 |
+| | | | **F14 — verify_e2e 技术指标质量断言 (P3)**： |
+| | | | `verify_e2e.py` — 新增 `section_indicator_quality()`，检查 510300 的布林带有效性（upper > ma > lower, bandwidth > 0.001）。注册到 MODULES 调度。 |
+| | | | **预置测试修复**： |
+| | | | `test_design_optimization_plan.py` — `test_dq2_aggregate_factor_scores_aggregates_categories` 中 valuation key (`style.size.ln_mcap`) 被 `_EXCLUDE_FROM_VALUATION` 排除。新增 `etf.price.dividend_yield`: 0.6 使 valuation 聚合可计算。 |
 | | | | **F1 — 布林带列名前缀匹配修复 (P0)**： |
 | | | | `indicators.py` — pandas-ta 0.7+ 将 std 参数以浮点数形式编码至列名（如 `BBB_20_2.0_2.0`），原代码硬编码整数字符串（`BBB_20_2_2`）导致全部 4 条布林带值静默降为 0。改用列名前缀匹配（`BBB_20_`），兼容任意 pandas-ta 版本。 |
 | | | | **F2 — 行业/概念板块默认限额修复 (P1)**： |
@@ -1407,5 +1413,5 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 | | | | **F3 — ic_tracker._get_ic_sample_count 类型错误修复 (P1)**： |
 | | | | `ic_tracker.py` — 原代码将 `list[dict]` 按 `dict` 使用（`factor_code not in self._records` 和 `self._records[factor_code]`），在 str 索引 list 时静默返回 0。改为遍历统计匹配记录数。 |
 | | | | **新增测试：** `tests/test_diagnosis_remaining_fixes.py`（11 个新用例：4 布林带值校验 + 5 ic_tracker 样本计数 + 2 板块限额 API 契约） |
-| | | | **综合测试结果：** 88 个相关测试通过（55 直接 + 33 关联），0 失败，0 回归 |
-| | | | **改动文件：** `backend/app/analysis/indicators.py`、`backend/app/routers/market.py`、`backend/app/factors/ic_tracker.py`、`backend/tests/test_diagnosis_remaining_fixes.py`（新）、`docs/implementation-master-plan.md` |
+| | | | **综合测试结果：** 93 个相关测试通过（除 1 个标记为 @pytest.mark.slow 的集成测试需要真实数据源），0 回归 |
+| | | | **改动文件：** `backend/app/analysis/indicators.py`、`backend/app/routers/market.py`、`backend/app/factors/ic_tracker.py`、`backend/tests/test_diagnosis_remaining_fixes.py`（新）、`backend/scripts/verify_e2e.py`、`backend/tests/test_design_optimization_plan.py`、`.github/workflows/performance.yml`（新）、`.lighthouserc.js`（新）、`docs/implementation-master-plan.md` |
