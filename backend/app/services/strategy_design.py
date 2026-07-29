@@ -115,6 +115,30 @@ async def generate_enhanced_design(
                     industry=sym_meta.get("industry", "") if sym_meta else None,
                 )
 
+            # S6: Inject daily_change_pct and price from pool_manager market data
+            for a in allocs:
+                if a.get("symbol") == "CASH":
+                    continue
+                code = a["symbol"]
+                pool_entry = pool_manager.get_by_code(code) if hasattr(pool_manager, 'get_by_code') else {}
+                if pool_entry:
+                    dcp = pool_entry.get("change_pct") or pool_entry.get("daily_change_pct")
+                    if dcp is not None:
+                        a["daily_change_pct"] = dcp
+                    price = pool_entry.get("price") or pool_entry.get("last_price")
+                    if price is not None:
+                        a["price"] = price
+                    fs = pool_entry.get("factor_score")
+                    if fs is not None:
+                        a["factor_score"] = fs
+                # Fallback to factor_matrix
+                if a.get("daily_change_pct") is None:
+                    fm = factor_matrix.get(code, {}) if isinstance(factor_matrix, dict) else {}
+                    if fm:
+                        dcp = fm.get("change_pct") or fm.get("daily_change_pct")
+                        if dcp is not None:
+                            a["daily_change_pct"] = dcp
+
             # Calculate cash
             total_weight = sum(a.get("weight", 0) for a in allocs if a.get("symbol") != "CASH")
             cash_weight = round(1.0 - total_weight, 4)

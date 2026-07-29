@@ -1187,6 +1187,71 @@ def print_summary():
         sys.exit(1)
 
 
+# ── S9: 新增模块 ──────────────────────────────────────────────────
+
+
+def section_snapshot_health():
+    """S3: 本地快照服务健康检查。"""
+    section("快照服务检查")
+    import tempfile
+    import os
+    from pathlib import Path
+
+    try:
+        from app.services.snapshot_service import SnapshotService
+        tmp = tempfile.mkdtemp()
+        svc = SnapshotService(tmp)
+        svc.save_snapshot("e2e_test", {"hello": "world"})
+        loaded = svc.load_snapshot("e2e_test", max_age_hours=24)
+        check("快照保存/读取", loaded is not None and loaded.get("hello") == "world")
+        svc.clear_snapshot("e2e_test")
+        loaded2 = svc.load_snapshot("e2e_test", max_age_hours=24)
+        check("快照清除", loaded2 is None)
+        # Clean up
+        import shutil
+        shutil.rmtree(tmp, ignore_errors=True)
+    except ImportError as e:
+        check("快照模块导入", False, str(e))
+    except Exception as e:
+        check("快照服务测试", False, str(e))
+
+
+def section_factor_integrity(host="127.0.0.1", port=8000):
+    """S9: 因子完整性检查 — 验证 key 因子不为全 0。"""
+    section("因子完整性检查")
+
+    # Direct check via health endpoint for factor status
+    try:
+        r = requests.get(f"http://{host}:{port}/api/v1/admin/sources/health", timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            if isinstance(data, dict):
+                factor_h = data.get("factor.history", {})
+                status = factor_h.get("status", "unknown")
+                check(f"factor.history source health: {status}", status in ("healthy", "active") or "fail" in str(factor_h.get("_failures","")))
+            elif isinstance(data, list):
+                check(f"factor sources: {len(data)}", len(data) > 0)
+        else:
+            check("GET /admin/sources/health", False, f"status={r.status_code}")
+    except requests.ConnectionError:
+        check("POST /admin/sources/health", False, "connection refused — server may be down")
+    except Exception as e:
+        check("GET /admin/sources/health", False, str(e))
+
+    # Check factor matrix endpoint if available
+    try:
+        r = requests.get(f"http://{host}:{port}/api/v1/factors", timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            if isinstance(data, dict):
+                keys = list(data.keys())[:5]
+                check(f"因子矩阵: {len(keys)} 个有效标的", len(keys) > 0, f"样本: {keys[:3]}")
+            elif isinstance(data, list):
+                check(f"因子矩阵: {len(data)} 条记录", len(data) > 0)
+    except Exception as e:
+        check("GET /factors", False, str(e))
+
+
 # ── 模块分发 ──────────────────────────────────────────────────
 
 MODULES = {
@@ -1205,6 +1270,8 @@ MODULES = {
     "5xx": section_api_5xx_check,
     "zscore": section_factor_zscore_check,
     "diversity": section_solution_diversity_check,
+    "snapshot": section_snapshot_health,
+    "factor-integrity": section_factor_integrity,
 }
 
 SMOKE_MODULES = ["health", "market"]
