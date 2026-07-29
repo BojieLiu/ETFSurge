@@ -1,6 +1,6 @@
 ﻿# ETF Surge 方案实施总计划
 
-> 生成日期: 2026-07-29 | 版本: **v16.0**
+> 生成日期: 2026-07-29 | 版本: **v19.0**
 > ✅ **Phase 16 已完成**（2026-07-29）：P1/P2 剩余项 — S5(K线缓存统一) + S7(策略检查LLM报告) + S11(新闻重试) + S12(网易财经K线)。详见下方 v16.0。
 > ✅ **Phase 15 已完成**（2026-07-29）：诊断计划 P0/P1 剩余项 — S1(CircuitBreaker废弃) + S2(shares_change数据注入) + S9(fund_shares字段)。详见下方 v17.0。
 > ✅ **Phase 14 已完成**（2026-07-29）：诊断计划 P0 项实施 — S1(熔断器market_service接入) + S2(天天基金IOPV) + S3(本地快照兜底) + S4(chart列名修复) + S8(QQ Tencent IOPV降级)。详见下方 v14.0。
@@ -1387,3 +1387,13 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 | | | | **P2** — `vite.config.js`：`cssCodeSplit: true`（路由级 CSS 分片，之前为 monolithic）、`modulePreload: { polyfill: false }`（entry chunk 预加载提示）。`index.html`：新增 `X-DNS-Prefetch-Control`、`link rel=modulepreload`、Content-Security-Policy 和外部数据源 preconnect。`package.json`：`@vue/compiler-sfc` 从 dependencies 移至 devDependencies（减少 130KB+ bundle 体积）。 |
 | | | | **综合测试结果：** 前端构建成功 (5.67s)，32 个预缓存条目 (1140KB)，0 编译错误。后台 71 tests pass (3 pre-existing). |
 | | | | **改动文件：** `frontend/vite.config.js`、`frontend/index.html`、`frontend/package.json`、`docs/implementation-master-plan.md` |
+| | **v19.0** | 2026-07-29 | **Phase 19 — S5 剩余项实施 + S2 shares修复 + 未对齐项** | 详见下方 |
+| | | | **S5 Step 6 — MarketDataHub 别名 (MarketDataHub = PoolManager)**： |
+| | | | **P1** — 新建 `market_data_hub.py` 模块，`MarketDataHub = PoolManager` 别名。提供统一的 `get_kline_rows()`、`get_kline_symbols()` 接口。`api-contracts/market/market-data-hub.md` 契约文档。现有 `PoolManager` 引用无需修改。 |
+| | | | **S5 Step 7 — get_history 全量接入 Hub 缓存**： |
+| | | | **P1** — `market_service.get_history()` 改为优先查 `pool_manager.get_kline_rows()`，缓存命中直接返回，miss 降级到 `fetch_history()`。 |
+| | | | **S2 — fetch_etf_shares 从 stub 改为真实 API 调用**： |
+| | | | **P0** — `ttj_fetcher.fetch_etf_shares()` 从 `return None` stub 改为调用 push2delay API (f85 字段) 获取实时基金份额数据。包含 SourceRegistry 熔断器集成。 |
+| | | | **新增 API 契约：** `api-contracts/market/market-data-hub.md` |
+| | | | **综合测试结果：** 79 tests pass (0 pre-existing failures)，1 skipped |
+| | | | **改动文件：** `backend/app/services/market_data_hub.py`（新）、`backend/app/fetchers/ttj_fetcher.py`、`backend/tests/test_s5_remaining.py`（新）、`api-contracts/market/market-data-hub.md`（新）、`docs/implementation-master-plan.md` |

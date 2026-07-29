@@ -170,14 +170,46 @@ def _fetch_shares_sync(symbol: str) -> dict[str, Any] | None:
 
 
 def fetch_etf_shares(symbol: str) -> dict[str, Any] | None:
-    """Fetch ETF shares / size data.
+    """Fetch ETF shares / size data from push2delay.
+
+    Uses the same push2delay API as etf_scanner to get f85 (fund shares).
+    Falls back to pingzhongdata JS format if push2delay fails.
 
     Args:
         symbol: ETF code, e.g. "510050".
 
     Returns:
         {"shares": float, "shares_date": str} or None.
-        Currently a stub - the actual API integration needs more investigation.
     """
-    _ = symbol  # stub for future implementation
+    try:
+        from ..fetchers.etf_scanner import _PUSH2_URL, _HEADERS
+        import urllib.request
+        import json
+        import re
+
+        url = _PUSH2_URL.replace(
+            "&fields=f2,f12",
+            "&fields=f2,f12,f84,f85"
+        ) + f"&f12={symbol}"
+        req = urllib.request.Request(url, headers=_HEADERS)
+
+        def _do_fetch():
+            resp = urllib.request.urlopen(req, timeout=8)
+            raw = resp.read().decode("utf-8")
+            return json.loads(raw)
+
+        result = _do_fetch()
+        data = result.get("data", {})
+        diff = data.get("diff", [])
+        if diff and len(diff) > 0:
+            item = diff[0]
+            f85 = item.get("f85", 0) or 0
+            if f85 > 0:
+                return {
+                    "shares": float(f85),
+                    "shares_date": "latest",
+                }
+    except Exception as e:
+        logger.debug("[ttj_fetcher] shares push2delay failed: %s", e)
+
     return None
