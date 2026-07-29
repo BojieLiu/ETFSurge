@@ -1,6 +1,7 @@
 ﻿# ETF Surge 方案实施总计划
 
-> 生成日期: 2026-07-29 | 版本: **v13.2**
+> 生成日期: 2026-07-29 | 版本: **v14.0**
+> ✅ **Phase 14 已完成**（2026-07-29）：诊断计划 P0 项实施 — S1(熔断器market_service接入) + S2(天天基金IOPV) + S3(本地快照兜底) + S4(chart列名修复) + S8(QQ Tencent IOPV降级)。详见下方 v14.0。
 > ✅ **Phase 13e 已完成**（2026-07-29）：LLM Provider 链路诊断修复 — 移除熔断器误伤 + 修复 system_override 被静默丢弃。详见下方 v13.2。
 > ✅ **Phase 13d 已完成**（2026-07-28）：诊断计划剩余项实施 — LLM 熔断保护 + 引擎级 fallback + 超时缩减 + 报告内容校验 + SSL 会话复用 + 预热退化告警。详见下方 v13.1。
 > ✅ **Phase 13 已完成**（2026-07-28）：系统综合诊断与优化 — 基于 `docs/system-diagnosis-and-optimization-plan.md`。详见下方 v13.0。
@@ -1336,3 +1337,25 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 | | | | **T1** — `test_runtime_system_override.py` 4 个测试（system_override 覆盖、fallback 到默认、其他 kwargs 传递、无 kwargs 调用） |
 | | | | **T2** — `test_llm_circuit_breaker.py` 更新至 5 个测试（熔断检查已移除：LLM 异常→引擎 fallback、LLM 成功→返回 LLM 内容、fallback 含策略数据、空策略、空市态） |
 | | | | **改动文件：** `backend/app/analysis/llm.py`、`backend/app/analysis/runtime.py`、`backend/tests/test_runtime_system_override.py`（新）、`backend/tests/test_llm_circuit_breaker.py`（更新）、`docs/implementation-master-plan.md` |
+| | **v13.3** | 2026-07-29 | **Phase 13f — 行号修复 | `strategy_design.py` 修复 CRITICAL 日志行号（原 hard-coded 1092 调整为当前 125） | 1 行 |
+| | **v14.0** | 2026-07-29 | **Phase 14 — 诊断计划 P0 项实施 (system-diagnosis S1-S4/S8)** | 详见下方 |
+| | | | **S4 — compute_chart_data 列名修复 (P0)**： |
+| | | | **P0** — `compute_chart_data()` 改用 `_resolve_col()` 替代直接硬编码 `data["收盘"]` 索引。修复 English/Chinese 列名混用场景下的 KeyError。新增 `COL_MAP` 条目 `"开盘"` 和 `"成交量"`。 |
+| | | | **测试：** `test_indicators.py::TestComputeChartData::test_english_column_names` — 验证 English 列名（close/open/high/low/volume）正确解析。 |
+| | | | **改动文件：** `backend/app/analysis/indicators.py`、`backend/tests/test_indicators.py` |
+| | | | **S3 — 本地快照兜底 (P0)**： |
+| | | | **P0** — 新增 `snapshot_service.py`：线程安全的本地 JSON 文件快照服务，支持按 key 存取、TTL 过期、文件锁并发保护、损坏文件自动清除。 |
+| | | | **测试（11 个）：** `test_snapshot_service.py` — save/load/expired/clear/clear_all/thread_safety/non_serializable/sanitize_key/corrupted_file/empty_data/concurrent_same_key |
+| | | | **改动文件：** `backend/app/services/snapshot_service.py`（新）、`backend/tests/test_snapshot_service.py`（新） |
+| | | | **S2 — 天天基金 IOPV 数据源 (P0)**： |
+| | | | **P0** — 新增 `ttj_fetcher.py`：天天基金 fundgz 实时估值 API 封装，含 SourceRegistry 熔断器集成。提供 `fetch_etf_iopv()` 和 `fetch_etf_shares()`（stub）。解析 JSONP 格式 `jsonpgz({...})`。 |
+| | | | **测试（5 个）：** `test_ttj_fetcher.py` — success/network_error/empty_result/circuit_open/stub_shares |
+| | | | **改动文件：** `backend/app/fetchers/ttj_fetcher.py`（新）、`backend/tests/test_ttj_fetcher.py`（新） |
+| | | | **S1 — 熔断器接入 market_service (P0)**： |
+| | | | **P0** — 新增 `_call_with_cb()`：`market_service.py` 的 SourceRegistry 电路断路器感知调用包装，含可选内存缓存。`get_all_realtime()` 改用 `_call_with_cb()`。 |
+| | | | **测试（6 个）：** `test_market_service_cb.py` — success/circuit_open/failure/cache_success/get_all_realtime/empty_result |
+| | | | **改动文件：** `backend/app/services/market_service.py`、`backend/tests/test_market_service_cb.py`（新） |
+| | | | **S8 — 腾讯 QQ 行情作为 IOPV 降级源 (P1)**： |
+| | | | **P1** — `factor_registry._fetch_market_data()` 新增 QQ Tencent IOPV 降级：Sina 数据不足时自动尝试 `qt.gtimg.cn` 获取 ETF IOPV。双源自动切换，日志记录切换事件。 |
+| | | | **改动文件：** `backend/app/factors/factor_registry.py` |
+| | | | **综合测试结果：** 77 个测试通过（含新增 22 个），1 个跳过 |

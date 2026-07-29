@@ -4,6 +4,7 @@
 提供统一的异步行情接口（实时 / 历史 / 搜索 / 全球指数）。
 """
 
+import time
 from typing import Any
 
 import asyncio
@@ -21,6 +22,9 @@ from ..core.logging import get_logger
 
 logger = get_logger(__name__)
 
+# In-memory cache for _call_with_cb (simple dict, not the Redis cache)
+_simple_cache: dict[str, tuple[float, Any]] = {}
+
 
 # ── 同步调用桥接 ───────────────────────────────────────────────
 
@@ -37,7 +41,71 @@ async def _call(fn, *args, timeout: int = 8):
     except asyncio.CancelledError:
         return None
     except Exception as e:
-        logger.warning("[market_service] _call failed for %s: %s", fn.__name__, e)
+        fn_name = getattr(fn, '__name__', str(fn))
+        logger.warning("[market_service] _call failed for %s: %s", fn_name, e)
+        return None
+
+
+async def _call_with_cb(source_name: str, fn, *args,
+                        timeout: int = 8,
+                        route: str = "",
+                        operation: str = "realtime",
+                        target: str = "",
+                        cache_key: str | None = None,
+                        cache_ttl: int = 0) -> Any:
+    """_call with SourceRegistry circuit breaker awareness (S1).
+
+    Checks circuit breaker before calling; records success/failure after.
+    Optional in-memory cache with configurable TTL.
+
+    Args:
+        source_name: Data source name for circuit breaker tracking.
+        fn: Sync function to call via run_sync.
+        timeout: Timeout in seconds (default 8).
+        route/operation/target: Circuit breaker event metadata.
+        cache_key: Optional key for in-memory result caching.
+        cache_ttl: Cache TTL in seconds (0 = no caching).
+
+    Returns:
+        Function result, cached result, or None (circuit open / failure).
+    """
+    # Check in-memory cache first
+    if cache_key and cache_ttl > 0:
+        cached = _simple_cache.get(cache_key)
+        if cached is not None:
+            ts, value = cached
+            if time.time() - ts < cache_ttl:
+                return value
+
+    # Check circuit breaker
+    source_h = registry._health(source_name)
+    now = time.time()
+    fn_name = getattr(fn, '__name__', str(fn))
+    if not source_h.available(now):
+        logger.debug("[market_service] circuit open for %s, skipping %s", source_name, target or fn_name)
+        return None
+
+    t0 = time.perf_counter()
+    try:
+        result = await _call(fn, *args, timeout=timeout)
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        if result is not None:
+            source_h.record_success(route=route, operation=operation,
+                                    target=target or fn_name, duration_ms=elapsed_ms)
+            # Store in cache
+            if cache_key and cache_ttl > 0:
+                _simple_cache[cache_key] = (time.time(), result)
+            return result
+        source_h.record_failure(now, route=route, operation=operation,
+                                target=target or fn_name, duration_ms=elapsed_ms,
+                                error_message="empty result")
+        return None
+    except Exception as exc:
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        source_h.record_failure(now, route=route, operation=operation,
+                                target=target or fn_name, duration_ms=elapsed_ms,
+                                error_message=str(exc)[:200])
+        logger.warning("[market_service] _call_with_cb failed for %s: %s", fn_name, exc)
         return None
 
 
@@ -45,11 +113,16 @@ async def _call(fn, *args, timeout: int = 8):
 
 
 async def get_all_realtime() -> list[dict[str, Any]]:
+    """Get all realtime market data with circuit breaker (S1)."""
     results = []
     try:
         from ..fetchers.china_market import fetch_index_realtime
 
-        data = await _call(fetch_index_realtime)
+        data = await _call_with_cb(
+            "china_market", fetch_index_realtime,
+            route="realtime", operation="probe", target="indices",
+            cache_key="realtime_indices", cache_ttl=15,
+        )
         if data:
             results.extend(data)
     except Exception:

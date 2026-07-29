@@ -245,3 +245,22 @@ class TestComputeChartData:
         result = compute_chart_data(chart_df)
         lengths = [len(v) for k, v in result.items() if isinstance(v, list)]
         assert len(set(lengths)) == 1, f"Lists differ in length: {lengths}"
+
+    def test_english_column_names(self, close_series, hl_series):
+        """S4: compute_chart_data must handle English column names via _resolve_col()."""
+        high, low = hl_series
+        df = pd.DataFrame({
+            "date": pd.date_range("2026-01-01", periods=60, freq="D"),
+            "open": close_series - 0.5,
+            "high": high,
+            "low": low,
+            "close": close_series,
+            "volume": abs(np.random.randn(60) * 1e8),
+        })
+        records = df.to_dict("records")
+        result = compute_chart_data(records)
+        assert len(result["closes"]) == 60
+        assert len(result["opens"]) == 60
+        assert len(result["highs"]) == 60
+        assert len(result["lows"]) == 60
+        assert len(result["volumes"]) == 60

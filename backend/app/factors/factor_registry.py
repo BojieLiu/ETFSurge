@@ -854,14 +854,14 @@ class FactorRegistry:
         results = await asyncio.gather(*tasks)
         data = dict(results)
 
-        # 2. 批量获取 IOPV 数据（Sina 实时行情）
-        # 用于 premium_discount 因子计算
+        # 2. 批量获取 IOPV 数据（Sina + QQ Tencent 双源降级）
+        # 用于 premium_discount 因子计算 (S8: 腾讯QQ降级链)
         try:
             prefixes = {"5": "sh", "6": "sh", "0": "sz", "1": "sz", "3": "sz"}
-            sina_list = [f"{prefixes.get(sym[0], 'sh')}{sym}" for sym in symbols]
+            sina_list = [f"{prefixes.get(sym[0], chr(39)+sym+chr(39))}" for sym in symbols]
 
-            async def _fetch_iopv_batch(s_list: list[str]) -> dict[str, dict]:
-                """通过线程池获取新浪 IOPV 实时行情，不阻塞事件循环。"""
+            async def _fetch_iopv_from_sina(s_list: list[str]) -> dict[str, dict]:
+                """通过线程池获取新浪 IOPV 实时行情。"""
                 from ..core.async_utils import run_sync
 
                 def _sync_fetch():
@@ -892,11 +892,68 @@ class FactorRegistry:
                         pass
                 return parsed
 
-            iopv_data = await _fetch_iopv_batch(sina_list)
+            async def _fetch_iopv_from_qq(s_list: list[str]) -> dict[str, dict]:
+                """S8: 腾讯 QQ 行情作为 Sina IOPV 的降级源。
+
+                QQ 格式: v_sh510050="1~510050~50ETF~...~price~...~iopv..."
+                ETF 字段位置（~分隔）:
+                  pos 3 = current price, pos 31 = IOPV (estimated NAV)
+                """
+                from ..core.async_utils import run_sync
+
+                def _sync_fetch():
+                    import urllib.request
+                    qq_symbols = ",".join(s_list)
+                    url = f"http://qt.gtimg.cn/q={qq_symbols}"
+                    req = urllib.request.Request(
+                        url, headers={"User-Agent": "Mozilla/5.0"}
+                    )
+                    resp = urllib.request.urlopen(req, timeout=8)
+                    return resp.read().decode("utf-8")
+
+                raw = await run_sync(_sync_fetch, timeout=10)
+                parsed: dict[str, dict] = {}
+                for line in raw.strip().split("\n"):
+                    if "~" not in line or '"' not in line:
+                        continue
+                    parts = line.split('"')[1].split("~")
+                    if len(parts) < 33:
+                        continue
+                    try:
+                        price_str = parts[3] if len(parts) > 3 and parts[3] else ""
+                        iopv_str = parts[31] if len(parts) > 31 and parts[31] else ""
+                        code = parts[2] if len(parts) > 2 else ""
+                        if not code:
+                            continue
+                        price = float(price_str) if price_str else None
+                        iopv = float(iopv_str) if iopv_str else None
+                        if iopv and iopv > 0:
+                            parsed[code] = {"price": price or 0.0, "nav": iopv}
+                    except (ValueError, IndexError):
+                        pass
+                return parsed
+
+            # 首先尝试 Sina
+            iopv_data = await _fetch_iopv_from_sina(sina_list)
+            sina_hit_count = sum(1 for v in iopv_data.values() if v.get("nav", 0) > 0)
+
+            # 如果 Sina 数据不足，降级到 QQ Tencent
+            if sina_hit_count < len(symbols) * 0.3:
+                logger.info("[factor] Sina IOPV only got %d/%d, trying QQ Tencent fallback (S8)",
+                            sina_hit_count, len(symbols))
+                try:
+                    qq_data = await _fetch_iopv_from_qq(sina_list)
+                    qq_hit_count = sum(1 for v in qq_data.values() if v.get("nav", 0) > 0)
+                    if qq_hit_count > sina_hit_count:
+                        logger.info("[factor] QQ Tencent fallback got %d IOPV values", qq_hit_count)
+                        iopv_data = qq_data
+                except Exception as qq_e:
+                    logger.debug("[factor] QQ Tencent IOPV fallback failed: %s", qq_e)
+
             for sym, values in iopv_data.items():
                 if sym in data and values.get("nav", 0) > 0:
-                    data[sym].setdefault("price", values["price"])
-                    data[sym]["nav"] = values["nav"]
+                    data[sym].setdefault("price", values.get("price", 0))
+                    data[sym]["nav"] = values.get("nav", 0)
         except Exception as e:
             logger.warning("[factor] batch NAV fetch failed: %s (proxy? — non-fatal)", e)
 

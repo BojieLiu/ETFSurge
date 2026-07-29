@@ -125,7 +125,7 @@ def compute_bollinger(close, window=20, num_std=2) -> dict:
 
 
 # ── Chinese column name aliases ──────────────────────────────────
-COL_MAP = {"收盘": ["收盘", "close", "Close"], "最高": ["最高", "high", "High"], "最低": ["最低", "low", "Low"]}
+COL_MAP = {"收盘": ["收盘", "close", "Close"], "最高": ["最高", "high", "High"], "最低": ["最低", "low", "Low"], "开盘": ["开盘", "open", "Open"], "成交量": ["成交量", "volume", "Volume", "成交额", "amount", "Amount"]}
 
 
 def _resolve_col(data, aliases):
@@ -195,7 +195,11 @@ def _to_list(s):
 
 
 def compute_chart_data(df: list[dict]) -> dict:
-    """Return full k-line chart data (including indicator series)."""
+    """Return full k-line chart data (including indicator series).
+
+    Uses _resolve_col() to handle both Chinese and English column names
+    (S4: column name fix from system-diagnosis plan).
+    """
     if not df:
         return {
             "dates": [], "opens": [], "highs": [], "lows": [], "closes": [], "volumes": [],
@@ -204,12 +208,25 @@ def compute_chart_data(df: list[dict]) -> dict:
             "macd": {"dif": [], "dea": [], "histogram": []},
         }
     data = pd.DataFrame(df)
-    close = data["收盘"].astype(float)
-    high = data.get("最高", close).astype(float)
-    low = data.get("最低", close).astype(float)
-    volume = data.get("成交量", pd.Series([0] * len(data))).astype(float)
+    close_col = _resolve_col(data, COL_MAP["收盘"])
+    high_col = _resolve_col(data, COL_MAP["最高"])
+    low_col = _resolve_col(data, COL_MAP["最低"])
+    open_col = _resolve_col(data, COL_MAP["开盘"])
+    volume_col = _resolve_col(data, COL_MAP["成交量"])
+    date_aliases = ["日期", "date", "Date", "datetime", "Datetime"]
 
-    dates = data.get("日期", pd.Series([""] * len(data)))
+    close = data[close_col].astype(float)
+    high = data[high_col].astype(float) if high_col in data.columns else close
+    low = data[low_col].astype(float) if low_col in data.columns else close
+    volume = data[volume_col].astype(float) if volume_col in data.columns else pd.Series([0.0] * len(data))
+
+    # Resolve date column
+    date_col = open_col  # default fallback
+    for a in date_aliases:
+        if a in data.columns:
+            date_col = a
+            break
+    dates = data[date_col] if date_col in data.columns else pd.Series([""] * len(data))
     dates = [str(d) for d in dates]
 
     ma5 = _to_list(compute_ma(close, 5))
@@ -231,7 +248,7 @@ def compute_chart_data(df: list[dict]) -> dict:
 
     return {
         "dates": dates,
-        "opens": _to_list(data["开盘"]),
+        "opens": _to_list(data[open_col]),
         "highs": _to_list(high),
         "lows": _to_list(low),
         "closes": _to_list(close),
