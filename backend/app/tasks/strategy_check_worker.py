@@ -16,6 +16,50 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+
+async def _generate_check_llm_report(result: dict, capital: float) -> str | None:
+    """S7: 生成策略检查的 LLM 分析报告。
+    
+    基于持仓分析结果，调用 LLM 生成简短的市场研判和建议。
+    """
+    try:
+        from ..analysis.llm import llm_provider
+        
+        positions = result.get("positions", [])
+        if not positions:
+            return None
+            
+        # Build a compact summary for LLM
+        total_value = sum(p.get("market_value", 0) for p in positions)
+        total_change = sum(p.get("change_pct", 0) for p in positions)
+        top_holdings = [p for p in positions if p.get("weight", 0) > 0.05][:5]
+        
+        summary = (
+            f"当前持仓 {len(positions)} 只ETF，总市值 {total_value:.2f}，"
+            f"平均涨跌幅 {total_change/len(positions):.2f}%。\n"
+        )
+        if top_holdings:
+            summary += "主要持仓：\n"
+            for h in top_holdings:
+                if h.get("symbol"):
+                    summary += f"- {h.get('name','')}({h.get('symbol')}): "
+                    summary += f"权重 {h.get('weight',0)*100:.1f}%, "
+                    summary += f"涨跌 {h.get('change_pct',0):.2f}%\n"
+        
+        prompt = (
+            "请根据以下ETF组合持仓信息，给出简短的市场研判和调仓建议（200字以内）：\n\n"
+            + summary
+        )
+        
+        response = await llm_provider.chat(prompt, timeout=30)
+        if response and response.get("content"):
+            return response["content"]
+        return None
+    except Exception as e:
+        logger.warning("[strategy_check] LLM report generation failed: %s", e)
+        return None
+
+
 async def strategy_check_pipeline(mgr, task_id: int) -> None:
     """顺序 Pipeline：DATA → LLM → DB SAVE → NOTIFY"""
     from ..services.portfolio_service import strategy_check
@@ -116,6 +160,14 @@ async def _pipeline_body(mgr, task_id: int) -> dict:
     except Exception as e:
         logger.warning("[strategy_check_pipeline] DB persist failed: %s", e)
 
+    # S7: 生成 LLM 市场研判注释（非阻塞，失败不影响主流程）
+    try:
+        llm_comment = await _generate_check_llm_comment(result)
+        if llm_comment:
+            result["llm_comment"] = llm_comment
+    except Exception:
+        pass
+
     # Stage 4: NOTIFY (progress 95→100%)
     mgr.update_task(
         task_id,
@@ -146,6 +198,48 @@ async def _notify(task_id: int, status: str, progress: int, stage: str = "") -> 
         "progress": progress,
         "stage": stage,
     })
+
+
+# ── S7: LLM 市场研判注释生成 ───────────────────────────────────
+
+
+async def _generate_check_llm_comment(result: dict) -> str | None:
+    """S7: 基于策略检查结果，生成简短 LLM 市场研判注释。
+
+    非阻塞函数，失败时静默返回 None。
+    """
+    try:
+        from ..analysis.llm import llm_provider
+
+        positions = result.get("positions", [])
+        if not positions:
+            return None
+
+        total_value = sum(p.get("market_value", 0) for p in positions)
+        avg_change = sum(p.get("change_pct", 0) for p in positions) / max(len(positions), 1)
+        top3 = sorted(positions, key=lambda x: abs(x.get("weight", 0)), reverse=True)[:3]
+
+        lines = [f"当前持仓 {len(positions)} 只ETF，总市值 {total_value:.0f}"]
+        lines.append(f"组合平均涨跌 {avg_change:+.2f}%")
+        for p in top3:
+            name = p.get("name", "") or p.get("symbol", "")
+            w = p.get("weight", 0) * 100
+            chg = p.get("change_pct", 0)
+            lines.append(f"  - {name}: 权重 {w:.1f}%, 涨跌 {chg:+.2f}%")
+
+        prompt = (
+            "请根据以下ETF组合持仓信息，给出简短的市场研判和调仓建议"
+            "（150字以内，中文，分1-2点）：\n\n"
+            + "\n".join(lines)
+        )
+
+        response = await llm_provider.chat(prompt, timeout=20)
+        if response and isinstance(response, dict) and response.get("content"):
+            return response["content"].strip()
+        return None
+    except Exception as e:
+        logger.debug("[strategy_check] LLM comment generation skipped: %s", e)
+        return None
 
 
 # ── Backward-compatible alias ─────────────────────────────────

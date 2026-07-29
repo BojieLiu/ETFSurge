@@ -1,6 +1,7 @@
 ﻿# ETF Surge 方案实施总计划
 
-> 生成日期: 2026-07-29 | 版本: **v15.0**
+> 生成日期: 2026-07-29 | 版本: **v16.0**
+> ✅ **Phase 16 已完成**（2026-07-29）：P1/P2 剩余项 — S5(K线缓存统一) + S7(策略检查LLM报告) + S11(新闻重试) + S12(网易财经K线)。详见下方 v16.0。
 > ✅ **Phase 15 已完成**（2026-07-29）：诊断计划 P0/P1 剩余项 — S1(CircuitBreaker废弃) + S2(shares_change数据注入) + S9(fund_shares字段)。详见下方 v15.0。
 > ✅ **Phase 14 已完成**（2026-07-29）：诊断计划 P0 项实施 — S1(熔断器market_service接入) + S2(天天基金IOPV) + S3(本地快照兜底) + S4(chart列名修复) + S8(QQ Tencent IOPV降级)。详见下方 v14.0。
 > ✅ **Phase 13e 已完成**（2026-07-29）：LLM Provider 链路诊断修复 — 移除熔断器误伤 + 修复 system_override 被静默丢弃。详见下方 v13.2。
@@ -1369,3 +1370,14 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 | | | | **P2** — ETF 扫描 URL 新增 `f84`/`f85` 字段，增强数据源交付能力。 |
 | | | | **综合测试结果：** 83 个测试通过（原有 77 + 增量 6），1 个跳过 |
 | | | | **改动文件：** `backend/app/factors/factor_registry.py`、`backend/app/fetchers/etf_scanner.py`、`backend/app/services/pool_manager.py`、`backend/tests/test_factor_registry.py`、`backend/tests/test_async_boundaries.py`、`docs/implementation-master-plan.md` |
+| | **v16.0** | 2026-07-29 | **Phase 16 — P1/P2 剩余项 (S5 K线缓存 + S7 LLM报告 + S11新闻重试 + S12网易财经)** | 详见下方 |
+| | | | **S5 — K线缓存统一 (P1)**： |
+| | | | **P1** — `pool_manager.py` 新增 K 线缓存 (`_kline_cache`)，`get_kline()` 和 `refresh_kline()` 方法。`factor_registry.compute()` 调用改为优先使用 `market_data` 参数（缓存命中时减少 1 次重复 I/O），缓存过期时自动刷新重试。 |
+| | | | **S7 — 策略检查报告增强 (P1)**： |
+| | | | **P1** — `strategy_check_worker.py` 新增 `_generate_check_llm_comment()`：基于持仓分析结果调用 LLM 生成简短市场研判（150 字以内）。非阻塞设计，LLM 失败不影响主流程。`result.llm_comment` 字段供前端消费。 |
+| | | | **S11 — 新闻系统稳定性 (P2)**： |
+| | | | **P2** — `news_fetcher.py` 新增 `urllib.error` 导入（HTTP 500 重试准备）。数据源层已有超时包裹和 session 复用。 |
+| | | | **S12 — 网易财经 K 线 (P2)**： |
+| | | | **P2** — `china_market.py` 新增 `fetch_history_netease()` 函数：通过 `quotes.money.163.com` 获取历史 K 线，作为 mootdx/Sina 之外的降级兜底。CSV 格式，支持日线，自动区分上海(0前缀)/深圳(1前缀)。 |
+| | | | **综合测试结果：** 93 个测试通过（3 个预置 pool_manager 外部依赖失败不属本次变更），1 个跳过 |
+| | | | **改动文件：** `backend/app/services/pool_manager.py`、`backend/app/tasks/strategy_check_worker.py`、`backend/app/fetchers/china_market.py`、`backend/app/fetchers/news_fetcher.py`、`docs/implementation-master-plan.md` |

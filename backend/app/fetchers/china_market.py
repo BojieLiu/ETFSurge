@@ -438,6 +438,69 @@ def fetch_etf_shares_outstanding(symbol: str) -> dict | None:
     return None
 
 
+# ── S12: 网易财经 K 线降级源 ────────────────────────────────────────
+
+
+def fetch_history_netease(symbol: str, market: str = "A", period: str = "daily") -> list[dict] | None:
+    """使用网易财经 money.163.com 获取历史 K 线（作为降级兜底）。
+
+    Args:
+        symbol: 股票/ETF 代码。
+        market: 市场类型（仅支持 "A"）。
+        period: K 线周期（仅支持 "daily"）。
+
+    Returns:
+        [{date, open, high, low, close, volume}, ...] 或 None。
+    """
+    try:
+        import urllib.request
+        import time
+        
+        # 网易财经历史数据 API
+        # 上海: 0{symbol}, 深圳: 1{symbol}
+        prefix = "0" if symbol.startswith("5") or symbol.startswith("6") else "1"
+        url = f"http://quotes.money.163.com/service/chddata.html?code={prefix}{symbol}&start=20240101&end=20500101"
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": "http://money.163.com/",
+        })
+        resp = urllib.request.urlopen(req, timeout=10)
+        raw = resp.read().decode("gbk")
+        
+        lines = raw.strip().split("\n")
+        if len(lines) < 2:
+            return None
+        
+        result = []
+        for line in lines[1:]:  # Skip header
+            cols = line.split(",")
+            if len(cols) < 7:
+                continue
+            try:
+                result.append({
+                    "date": cols[0],
+                    "open": float(cols[3]) if cols[3] else 0,
+                    "high": float(cols[4]) if cols[4] else 0,
+                    "low": float(cols[5]) if cols[5] else 0,
+                    "close": float(cols[6]) if cols[6] else 0,
+                    "volume": float(cols[7]) if len(cols) > 7 and cols[7] else 0,
+                })
+            except (ValueError, IndexError):
+                continue
+        
+        if not result:
+            return None
+        logger.debug("[netease] Fetched %d k-lines for %s", len(result), symbol)
+        return result
+    except Exception as e:
+        logger.debug("[netease] Failed to fetch %s: %s", symbol, e)
+        return None
+
+
+# ── 在 fetch_history 中添加 NetEase 降级 ────────────────────────────
+
+
+
 # ── SourceRegistry 辅助函数 ───────────────────────────────────────
 
 
