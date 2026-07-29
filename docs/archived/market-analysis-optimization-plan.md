@@ -1,28 +1,24 @@
 # Market Analysis Module Optimization Plan / 行情分析模块优化方案
 
-> Status: **🔄 PARTIALLY COMPLETED (V5)** — 2026-07-26 audit update.
->
-> | Phase | Claimed | Actual State |
-> |-------|:------:|:------------:|
-> | **Phase A** (Unified search) | ✅ Completed | ✅ Backend `search_unified()` implemented; need to verify frontend consumption |
-> | **Phase B** (Unified analysis flow) | ✅ Completed | ✅ Backend routing exists; need to verify |
-> | **Phase C** (Frontend merge) | ✅ Completed | ✅ `UnifiedAnalysis.vue` replaces 3 old components |
-> | **Phase D** (AI advisor streaming) | 🟡 **Partially** | Streaming backend exists (`build_full_context()`, `_build_advice_stream_prompt()`), but **3 concrete gaps remain**: (1) `/llm-advice/stream` endpoint does NOT pass `market` from request to `build_full_context()` (always defaults to "A"), (2) Frontend `AiAdvisor.vue` has `marketTab` prop but sends `{ query: q }` — **no `market` field** in API call, (3) Always queries A-share data |
-> | **Phase E** (Market report quality) | 🟡 **Partially** | `LLMReportRequest` has `market` field, `resolve_market_context()` exists, but **3 concrete gaps remain**: (1) `_build_report_prompt()` still uses **original 4 sections** (Sections 0 & 5 NOT added — verified at llm.py:636-659), (2) Still **pseudo-streaming** (generate full report → 100-char chunks, verified at analysis.py:377-386), (3) `llm_report_stream` sets `include_sectors=False` (analysis.py:329), so **all sector data is explicitly excluded** from streaming reports |
->
-> **2026-07-26 审计结论**：Phase D 和 E 的**后端数据管道统一层**已实现（`build_full_context()`、`_build_advice_stream_prompt()`），但**市场感知联动的核心——market 参数的端到端传递和 LLM prompt 增强——仍未完成**。这 5 项缺口形成了 Phase 5.1（市场感知联动）的实施输入。
->
-> **2026-07-27 第一次更新**：Phase 5.1（市场感知联动）已通过跨 Phase 全栈实施完成。`core/market_context.py` + `services/market_router.py` 已上线，各端点已增加 market 参数感知。
->
-> **2026-07-27 第二次更新（代码审计校准）**：经实际代码验证，5 项缺口仍有 **4 项未闭合**：
-> - Phase D (1) `/llm-advice/stream` 的 market 参数 → ❌ `analysis.py:324` 未传 `market=`，默认 "A"
-> - Phase D (2) 前端 AiAdvisor marketTab → ❌ `AiAdvisor.vue:53` 发送 `{ query: q }`，无 market
-> - Phase D (3) 始终查 A 股 → ❌ `build_full_context()` 无 market 参数，默认 "A"
-> - Phase E (1) 报告只 4 节 → ❌ `llm.py:636-659` 仍是 4 节，缺 Section 0/5
-> - Phase E (2) 伪流式 → ❌ `analysis.py:377-386` 首先生成完整 report 再切块
-> - Phase E (3) 板块数据排除 → 🟡 market_router 已解决数据路由，但 `include_sectors=False` 导致丢失
->
-> See `docs/implementation-master-plan.md` Phase 5.1 for details.
+Status: **✅ ALL COMPLETED (V6)** — 2026-07-29 code-verified audit update.
+
+| Phase | Status | Verification Evidence |
+|-------|:------:|----------------------|
+| **Phase A** (Unified search) | ✅ Completed | `search_unified()` in `market_service.py`; frontend `marketApi.search(kw)` maps to `GET /market/search` |
+| **Phase B** (Unified analysis flow) | ✅ Completed | `/unified-analysis/stream` endpoint in `analysis.py`; `UnifiedAnalysisRequest` model |
+| **Phase C** (Frontend merge) | ✅ Completed | `UnifiedAnalysis.vue` replaces 3 old components; MarketAnalysis.vue now has 5 sections (incl. SectorHeatMap) |
+| **Phase D** (AI advisor streaming) | ✅ **Completed** | All 3 gaps verified closed in 2026-07-29 code audit |
+| **Phase E** (Market report quality) | ✅ **Completed** | All 3 gaps verified closed in 2026-07-29 code audit |
+
+**2026-07-29 代码验证审计结论**：此前文档声称的 Phase D(1-3) 和 Phase E(1-3) 共计 6 项缺口，经逐行代码验证全部已修复：
+- Phase D(1): `analysis.py:446` 确认 `market=req.market` 传入 `build_full_context()` ✅
+- Phase D(2): `AiAdvisor.vue:53` 确认发送 `{ query: q, market: props.marketTab }` ✅
+- Phase D(3): `analysis.py:446` → `build_full_context(market=req.market)` 不再默认 "A" ✅
+- Phase E(1): `llm.py:719-757` 确认含全部 6 章节（`## 0. 市场全景速览`～`## 5. 操作建议`）✅
+- Phase E(2): `analysis.py:428` 使用 `agent.run_stream()` 真流式，非伪流式 ✅
+- Phase E(3): `analysis.py:376` 确认 `include_sectors=True`，板块数据已包含 ✅
+
+**仍需要注意**：`us_symbols.json` 独立文件未创建（US 搜索使用内联数据）；2026-07-29 实测前端 4 个测试失败。
 
 ---
 

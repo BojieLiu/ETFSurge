@@ -1,4 +1,4 @@
-# 数据源统一改造方案
+﻿# 数据源统一改造方案
 > 创建日期: 2026-07-22 | 版本: v4.0 | 上次更新: 2026-07-27
 > **合并替代**：此文档合并了以下三份方案的代码改动部分，消除重叠与冲突：
 > 1. `archived/source-registry-optimization-plan.md` — China market 接入 SourceRegistry
@@ -14,7 +14,7 @@
 > 修正：Phase A（Stooq 已下线→实际为 TwelveData→Finnhub）。
 > Phase B： 函数已全部接入 registry.route() + _filtered price=0 过滤。
 > Phase C：probes.py 已创建含 8 探针。
-> Phase D：D1-D6 已实施，仅 D7 前端页面待完成。
+> Phase D：D1-D7 全部实施完成（含前端 SourceMonitor.vue）。
 > 删除了对已不存在文件（stooq_fetcher.py）的引用。
 >
 > 涉及代码审计文件（2026-07-26）：
@@ -300,7 +300,7 @@ cd backend && python scripts/verify_e2e.py
 
 
 
-### Phase D 鈥?SourceEventStore 浜嬩欢璁板綍锛圖1-D6 鉁?宸插疄鏂? D7 鉂?寰呭疄鏂斤級
+### Phase D — SourceEventStore 事件记录（D1-D7 ✅ 已全部实施）
 
 
 
@@ -332,7 +332,7 @@ cd backend && python scripts/verify_e2e.py
 
 | D6 | `backend/app/routers/admin.py` | 4 涓?API 宸插疄鐜帮細`GET /sources/health` / `/sources/events/timeline` / `/sources/events/failures` / `/sources/circuit-breakers` | 鉁?宸插疄鐜?|
 
-| D7 | 鍓嶇 | **鏂板鏁版嵁婧愬仴搴风洃鎺ч〉闈?*锛堜笌 TokenMonitor 椋庢牸瀵归綈锛孍Charts 瓒嬪娍鍥?+ 婧愮姸鎬佽〃鏍硷級 | 鉂?**寰呭疄鏂?* |
+| D7 | 前端 | **SourceMonitor.vue**（682行，ECharts趋势图 + 源状态表格 + 熔断器 + 失败列表） | ✅ **已实施** |
 
 
 
@@ -398,8 +398,8 @@ curl -s "http://localhost:8000/api/v1/admin/sources/health" | python -c "import 
 
 
 
-#### 鉂?D7 瀹炴柦鎸囧紩
-
+#### ⏳ D7 实施指引 → ✅ 已完成（2026-07-29 确认）
+> **2026-07-29 验证**：rontend/src/components/SourceMonitor.vue（682行）确认存在，使用 adminApi 调用 4 个数据源 API，含 ECharts 趋势图、熔断器状态、失败列表。
 
 
 **鐩爣**: 鏂板鍓嶇鏁版嵁婧愬仴搴风洃鎺ч〉闈紝涓庣幇鏈?TokenMonitor 椋庢牸瀵归綈
@@ -434,7 +434,7 @@ curl -s "http://localhost:8000/api/v1/admin/sources/health" | python -c "import 
 
 ```
 
-Phase A (缇庤偂璺敱)    鉁?宸插疄鏂?    鈹?Phase B (China SR)   鉁?宸插疄鏂?    鈹?Phase C (鎺㈤拡)        鉁?宸插疄鏂?    鈹?Phase D (EventStore)  鈹€鈹€鈹€ D1-D6 鉁?宸插疄鏂?| D7 鉂?寰呭疄鏂斤紙鐙珛锛屾棤鏂囦欢鍐茬獊锛?```
+All Phases A+B+C+D1-D7 completed (D7: SourceMonitor.vue is live).
 
 ---
 
@@ -464,7 +464,7 @@ Phase A (缇庤偂璺敱)    鉁?宸插疄鏂?    鈹?Phase B (China SR)   �
 
 
 
-## 鍓╀綑宸ヤ綔锛堟寜浼樺厛绾ф帓搴忥級
+## 剩余工作（2026-07-29 更新：无剩余任务）
 
 
 
@@ -472,7 +472,7 @@ Phase A (缇庤偂璺敱)    鉁?宸插疄鏂?    鈹?Phase B (China SR)   �
 
 |---|------|--------|:----:|---------|
 
-| 1 | D7: 鍓嶇鏁版嵁婧愮洃鎺ч潰鏉?| Phase D7 | 4h | D6 (宸插氨缁? |
+| 1 | **D7: 前端数据源监控面板** — ✅ 已完成（SourceMonitor.vue, 682行） | Phase D7 | 0h（已实施） | D6（已完成） |
 
 
 

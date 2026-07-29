@@ -8,23 +8,22 @@
 
 ## 1. 现有测试现状（2026-07-26 更新）
 
-> ⚠️ 本文档初始版本撰写于 Phase 2.5 实施前。Phase 2.5 已显著扩充测试覆盖，本节全面刷新。
+> ⚠️ 本文档初始版本撰写于 Phase 2.5 前。**2026-07-29 审计更新**：现为 25 个 spec 文件，256 个测试用例（252 通过，4 失败）。
 
-### 单元测试（Vitest）— **25 个 spec 文件，253 个测试用例**
+### 单元测试（Vitest）— **25 个 spec 文件，252 通过 / 256 总计（4 失败）**
 
 | 层级 | 测试内容 | 数量 | 质量 |
 |------|---------|:----:|------|
-| 🟢 Utils | `changeClass`、`formatDate`、`newsLevel` | **7 个** | ✅ 良好，覆盖主要逻辑 |
-| 🟡 Stores | `taskStore` — 任务状态机 | 1 个 | ✅ 覆盖了 hasRunningTask/activeTaskId |
-| 🟢 Composable | `useNewsWS` + **`useDashboardData`** | **39 个**（WS 3 + Dashboard 35 + StrategyCheck） | ✅ `useDashboardData` 覆盖全部 computed + 异步方法 + 响应式 |
+| 🟢 Utils | `changeClass`、`formatDate`、`newsLevel` | **19 个**（5+12+6） | ✅ 良好，覆盖主要逻辑 |
+| 🟡 Stores | `taskStore` — 任务状态机 | **5 个** | ✅ 覆盖了 hasRunningTask/activeTaskId |
+| 🟢 Composable | `useNewsWS` + `useDashboardData` + `useLLMStream` + `useMarketSearch` + `useMarketWS` + `useSectorAnalysis` | **71 个**（WS 3 + Dashboard 35 + LLM 6 + Search 11(2❌) + MarketWS 6 + Sector 10(2❌)） | ⚠️ useSectorAnalysis(2/10 失败) + useMarketSearch(2/11 失败) 需修复 |
 | 🟡 Views | `DashboardAiTools` — 设计报告 | **10 个**（report 7 + timer 3） | ⚠️ 全 stub，只测业务逻辑 |
 | 🟢 Components | `PortfolioAnalysis`×1、`PortfolioManager`×3 | **16 个** | ✅ 含 selection + features + analysis 交互 |
+| 🟢 **子组件** | DashboardHistory(10) + StrategyCheckResult(10) + GlobalIndicesStrip(4) + ChartComponents(16) | **40 个** | ✅ 2026-07-29：全部已覆盖 |
 | 🟡 Router | 路由结构 | 4 个 | ✅ 轻量，够用 |
 | 🟡 App | `App.vue` 挂载 | 3 个 | ⚠️ 全 stub，只测无报错 |
-| 🟢 **UI 组件** | **AppButton/AppCard/AppTabs/AppInput/AppModal** — `AppComponents.spec.js` 统一文件 | **43 个** | ✅ 覆盖 5 个核心组件所有常见交互（variant/事件/disabled/loading/slot/keyboard） |
-| 🟡 **Composable** | `useDashboardData`（已有）+ `useLLMStream`、`useSectorAnalysis`、`useMarketSearch`、`useMarketWS` | **1 个**（useDashboardData） | ⚠️ 其余 4 个 composable 仍无测试 |
-| 🟡 **子组件** | SummaryCards、AllocationPieChart、PnLDetailTable、GlobalIndicesStrip、DesignHistory 等 | **14 个** | ✅ GlobalIndicesStrip(4)、DesignHistory(10) 已覆盖；其余 Dashboard 子组件仍缺 |
-| 🟡 **News 模块** | NewsView | **9 个**（含排序、筛选、WS 推送） | ✅ 2026-07-26 新增 |
+| 🟢 **UI 组件** | AppButton/AppCard/AppTabs/AppInput/AppModal + AppTable/AppSelect/Skeleton/Pagination/Tooltip/Badge | **70 个**（AppComponents.spec.js 45 + AppComponents2.spec.js 25） | ✅ 覆盖 11 个核心组件所有常见交互 |
+| 🟢 **News 模块** | NewsView + TokenMonitor | **15 个**（NewsView 12 + TokenMonitor 3） | ✅ 2026-07-29 新增 |
 
 ### E2E 测试（Playwright）— **5 个 spec 文件，24 个测试用例**
 
@@ -39,7 +38,10 @@
 **仍缺少的核心能力**：
 - ❌ 无视觉 diff（不能发现 CSS 改变导致布局偏移）
 - ❌ 无截图对比（无法自动检测样式回归）
-- ⚠️ coverage 已覆盖关键路径，但 Charts 渲染仍无 E2E 验证
+- ⚠️ Charts 渲染已有 E2E spec (`06-charts.spec.js`) 和 ChartComponents 单测 (16 条)
+- ❌ E2E 覆盖仍有空白：AI Advisor (`13-ai-advisor.spec.js`)，Sector analysis，Symbol analysis，Token monitor specs 已创建但尚未集成/运行
+
+> **⚠️ 2026-07-29 审计发现**：npm test 结果实际为 **4 个测试失败** — 分布在 `useSectorAnalysis.spec.js`（10 条中 2 失败）和 `useMarketSearch.spec.js`（11 条中 2 失败）。这些是新创建的 composable 测试，mock 尚未完善。在标记"✅ 全绿"前需修复。
 
 ---
 
@@ -188,12 +190,13 @@ Phase B — 业务层防护（✅ 已完成，Phase 2.5）
 ├── B3: PortfolioAnalysis E2E ── 通过 navigation + regression 覆盖
 └── 验证：npm test + npm run test:e2e:smoke 全绿 ✅
 
-Phase C — 全面覆盖（📌 UI 优化前可做，当前非阻塞）
-├── C1: 剩余 UI 组件单测（AppTable、AppSelect、Skeleton 等）—— AppComponents2.spec.js 已覆盖（7+14+7=28 条），C1 已自然完成
-├── C2: Chart 组件基本渲染测试（AllocationPieChart + PnLBarChart，带 vue-echarts stub）—— ✅ 已完成（Phase 10.2，ChartComponents.spec.js，16 条）
-├── C3: E2E 覆盖 Charts 渲染 + 技术分析（📌 待实施，需 UI 定型后）
+Phase C — 全面覆盖（📌 部分完成，4 个测试需修复）
+├── C1: 剩余 UI 组件单测（AppTable、AppSelect、Skeleton 等）—— AppComponents2.spec.js 已覆盖（25 条），C1 已自然完成 ✅
+├── C2: Chart 组件基本渲染测试（AllocationPieChart + PnLBarChart，带 vue-echarts stub）—— ✅ 已完成（ChartComponents.spec.js，16 条）
+├── C3: E2E 覆盖 Charts 渲染 + 技术分析——06-charts.spec.js 已创建 ✅，另有 13-ai-advisor/14-sector-analysis 等 E2E 待集成
 ├── C4: E2E 截图对比基线建立（📌 待实施，建议 UI Phase 2 完成后）
-└── 验证：全量测试 suite 在 CI 中通过
+├── ⚠️ 4 个测试失败待修复：useSectorAnalysis.spec.js (2) + useMarketSearch.spec.js (2)
+└── 验证：npm test 应在修复后达到 256/256 通过
 ```
 
 > 🎯 **对 Phase 3.1 的影响**：Phase A+B 已提供充分的测试防护（UI 组件 43 条 + composable 35 条 + E2E 24 条），**Phase 3.1 的测试依赖已满足，可以安全实施**。若进一步降低风险，建议在 Phase 3.1 开始前先做 C4（截图基线），可在 30 分钟内完成。
@@ -223,13 +226,14 @@ npm run test:e2e         # 完整 E2E        → < 5 分钟
 
 当达到以下标准时，可以认为测试防护体系完善：
 
-- [x] 所有 5 个核心 UI 组件有单测，覆盖 variant/事件/disabled/loading 状态 ✅
-- [x] `useDashboardData` 有单测，覆盖数据加载和 computed 派生 ✅
-- [x] 每次 commit 前 `npm test` 全绿 ✅
+- [x] 所有 11 个核心 UI 组件有单测，覆盖 variant/事件/disabled/loading 状态 ✅
+- [x] `useDashboardData` + `useLLMStream` + `useMarketWS` 等 6 个 composable 有单测 ✅
+- [ ] **每次 commit 前 `npm test` 全绿** — ❌ **当前 4 个失败需修复**（useSectorAnalysis 2 + useMarketSearch 2）
 - [ ] 每次重构一个页面后，对应 E2E smoke 测试通过（当前为人工验证）
 - [x] `npm test && npm run test:e2e:smoke` 在正常开发机上不超过 3 分钟 ✅（实测 ~63s）
 
 **补充说明**：
-- 第 1-3 项已在 Phase 2.5 全部满足。
-- 第 4 项需在 Phase 3.1 实施过程中逐页面验证（目前是人工→建议尽快自动化）。
-- 第 5 项需实测，预估 `npm test`(~3s) + `npm run test:e2e:smoke`(~60s) 远超 3 分钟余量。
+- 第 1-2 项已在 Phase 10.2-10.3 全部满足。
+- 第 3 项**当前不达标**：`useSectorAnalysis.spec.js` 2/10 失败 + `useMarketSearch.spec.js` 2/11 失败。需要修复 mock 后恢复全绿状态。
+- 第 4 项需在后续实施过程中逐页面验证（目前是人工→建议尽快自动化）。
+- 第 5 项需实测，预估 `npm test`(~5s) + `npm run test:e2e:smoke`(~60s) 远超 3 分钟余量。
