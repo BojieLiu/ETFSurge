@@ -1,6 +1,7 @@
 ﻿# ETF Surge 方案实施总计划
 
-> 生成日期: 2026-07-29 | 版本: **v20.0**
+> 生成日期: 2026-07-29 | 版本: **v20.1**
+> ✅ **文档归档（2026-07-29 v20.1）**：8 份已全部实施/已替代的方案文档归档至 `docs/archived/` — `optimization-master-plan.md`、`optimization-master-plan-v2.md`、`performance-diagnosis-and-optimization-plan.md`、`fix-plan-master.md`、`fix-plan-pool.md`、`s5-markethub-design.md`、`system-performance-and-quality-review.md`、`fundamental-flow-factors-evaluation.md`。
 > ✅ **Phase 20 已完成**（2026-07-29）：综合诊断剩余项 — F1(布林带列名前缀匹配修复 P0) + F2(板块默认限额 80→500 P1) + F3(ic_tracker 类型错误 P1) + 11 个新单测。详见下方 v20.0。
 > ✅ **Phase 16 已完成**（2026-07-29）：P1/P2 剩余项 — S5(K线缓存统一) + S7(策略检查LLM报告) + S11(新闻重试) + S12(网易财经K线)。详见下方 v16.0。
 > ✅ **Phase 15 已完成**（2026-07-29）：诊断计划 P0/P1 剩余项 — S1(CircuitBreaker废弃) + S2(shares_change数据注入) + S9(fund_shares字段)。详见下方 v17.0。
@@ -8,11 +9,11 @@
 > ✅ **Phase 13e 已完成**（2026-07-29）：LLM Provider 链路诊断修复 — 移除熔断器误伤 + 修复 system_override 被静默丢弃。详见下方 v13.2。
 > ✅ **Phase 13d 已完成**（2026-07-28）：诊断计划剩余项实施 — LLM 熔断保护 + 引擎级 fallback + 超时缩减 + 报告内容校验 + SSL 会话复用 + 预热退化告警。详见下方 v13.1。
 > ✅ **Phase 13 已完成**（2026-07-28）：系统综合诊断与优化 — 基于 `docs/system-diagnosis-and-optimization-plan.md`。详见下方 v13.0。
-> ✅ **Phase 12 已完成**：系统优化与质量保障 Phase 1-4 — 基于 `docs/optimization-master-plan-v2.md`。详见下方 v12.0。
+> ✅ **Phase 12 已完成**：系统优化与质量保障 Phase 1-4 — 基于 `docs/archived/optimization-master-plan-v2.md`。详见下方 v12.0。
 > ✅ **Phase 6.1 已完成**
 > ✅ **Phase 6.2 已完成**：组合管线与报告质量修复 — Fix A (task_manager.py 校验降级)、问题 2 规则驱动风险检测 (portfolio_service.py _compute_risk_warnings)、test_decode.py (9/9 PASS)、TestP4 恢复、报告渲染排版优化 (DesignResult.vue CSS)。详见 `docs/design-report-quality-fix-plan.md`。：可观测性与系统增强 — ConfigManager + app_config 表（`models/app_config.py`, `core/config_manager.py`）、ConfigPage（`views/ConfigView.vue`）、Sector API 实时行情返回（market.py 路由优先级调整）、LLM 热点板块注入（llm_context.py + pool_manager.py）、stars 时间新鲜度 + Level 2 精度调整（news_fetcher.py + levistock_fetcher.py）、verify_e2e.py 扩展（stars/level 校验 + check_sector_data）。详见 §4 Phase 6.1。
 > ✅ **Phase 7 已完成**：系统质量诊断修复 (system-quality-diagnosis)
-> ✅ **Phase 11 已完成**（2026-07-28）：性能诊断与优化 — OPT-01~OPT-16 基于 `docs/performance-diagnosis-and-optimization-plan.md`。详见下方 v11.0。
+> ✅ **Phase 11 已完成**（2026-07-28）：性能诊断与优化 — OPT-01~OPT-16 基于 `docs/archived/performance-diagnosis-and-optimization-plan.md`。详见下方 v11.0。
 > ✅ **Phase 7 已完成**：系统质量诊断修复 (system-quality-diagnosis) — 池弹性 CRITICAL 日志 (`pool_manager.py:438`)、`/admin/metrics` 端点 (`admin.py`)、`get_portfolio_realtime()` 15s 缓存 (`market_service.py:617`)、`fetch_all_etfs_base()` 熔断路由 (`etf_scanner.py:264-282`)、`verify_e2e.py` 增强 (risk_warnings/response_time/metrics)、`test_performance_benchmark.py` (6 端点 gate)、`test_pool_resilience.py` (5 用例)。详见 `docs/archived/system_quality_diagnosis_report.md`§7。
 > ✅ **Phase 8 已完成**：去重造轮子 (wheel-unreinvention) — `analysis/indicators.py` → pandas-ta、`factors/factor_registry.py` 11 个 compute 函数 → pandas-ta、`sentiment_fetcher.py` 动态权重 + 情绪惯量、`market_trends.py` 精简计算层、`risk_controls.py` 阈值配置化。新增 47 个单测。详见下方 §v9.8。
 > ✅ **Phase 9 已完成**：剩余策略缺口闭环（2026-07-27 代码审计驱动）— Market Analysis Phase D(1-3): llm_advice_stream 新增 market 参数 (LLMAdviceRequest)、AiAdvisor.vue 传递 marketTab 到 API、build_full_context 按市场获取数据。Phase E(1-3): _build_report_prompt() 扩展为 6 节（含 0. 全景速览 + 5. 操作建议）、llm_report_stream 改为真流式 (agent.run_stream)、include_sectors=True 启用板块数据。Sector Phase 4: generate_advice() 改用 hot_plates/sector_heat、_build_design_report_prompt() 新增概念板块 + 热点板块段落。Phase 5: _inject_market_context() 公共函数。Phase 3b+6: useSectorAnalysis.js 涨跌幅颜色 helpers、api/index.js 新增 6 个板块 API 方法、SectorHeatMap.vue 组件。verify_e2e.py 新增 analysis 模块 + news/global 检查。API 清理：/hot-plates /stock-hot-rank /wind 前端标记已接入。
@@ -1087,7 +1088,7 @@ Phase 6.1 (可观测性增强)         ✅ 全部完成 — ConfigManager + Conf
 
 Phase 7.1 (远期优化)             无紧急依赖
 
-Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~OPT-16 基于 `docs/performance-diagnosis-and-optimization-plan.md`
+Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~OPT-16 基于 `docs/archived/performance-diagnosis-and-optimization-plan.md`
    ├── OPT-01: 熔断器集成 fundamental_fetcher（push2 熔断检查）
    ├── OPT-02: _compute_fund_flow 快速降级
    ├── OPT-03: run_in_thread executor 参数
@@ -1130,7 +1131,7 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 | 版本 | 日期 | 变更 |
 |------|------|------|
 | **v11.1** | 2026-07-28 | **Phase 11.1 — Fetcher 合并重组**。按业务域将 18 个 fetcher 合并为 11 个。组1: `global_markets_fetcher.py` — 合并 7 个全球行情/宏观数据源（em_global/yfinance/alphavantage/twelvedata/finnhub/tushare/fred），保留 fred 的 async httpx 架构备用。组2: `fundamentals_fetcher.py` — 合并 3 个资金流/情绪/两融数据源（fundamental_fetcher/margin_fetcher/sentiment_fetcher），修复同组跨文件引用。清理 `stooq_fetcher` 悬空 import（market_router.py）。删除 7 个旧全局 fetcher + 3 个旧组2 fetcher 文件。更新 10 个调用方文件的 import 路径。36/36 测试通过。 |
-| **v11.0** | 2026-07-28 | **Phase 11 — 性能诊断与优化（OPT-01~OPT-16）** 全部完成。基于 `docs/performance-diagnosis-and-optimization-plan.md`。OPT-01: 熔断器集成（`fundamental_fetcher.py` push2 熔断检查）✅。OPT-02: `_compute_fund_flow` 快速降级 ✅。OPT-03: `run_in_thread` 新增 `executor` 参数 ✅。OPT-04: `_compute_fund_flow` Semaphore(8) 并发限流 ✅。OPT-05: SourceRegistry 全覆盖（`fundamental_fetcher` 接入）✅。OPT-08/16: 回归测试套件 `test_regression.py`（17 个用例，红绿切换门禁）✅。OPT-10: `run_in_thread` 全代码库 40+ 调用点审计（long vs shared 池分流）✅。OPT-13: AST 审计脚本 `scripts/audit_pool_usage.py` ✅。OPT-15: SourceRegistry 三优化——`try_call()` 包装器、fast-fail 检测（<500ms 硬失败）、指数退避冷却（60s→120s→240s→480s→600s max）✅。API 契约 `api-contracts/admin/circuit-breaker.md` 新增。`test_source_registry_optimizations.py` 14 个新单测 ✅。总计 31 个新单测 + 17 个回归测试，存量 58 个全 PASS。详见 §4 Phase 11。 |
+| **v11.0** | 2026-07-28 | **Phase 11 — 性能诊断与优化（OPT-01~OPT-16）** 全部完成。基于 `docs/archived/performance-diagnosis-and-optimization-plan.md`。OPT-01: 熔断器集成（`fundamental_fetcher.py` push2 熔断检查）✅。OPT-02: `_compute_fund_flow` 快速降级 ✅。OPT-03: `run_in_thread` 新增 `executor` 参数 ✅。OPT-04: `_compute_fund_flow` Semaphore(8) 并发限流 ✅。OPT-05: SourceRegistry 全覆盖（`fundamental_fetcher` 接入）✅。OPT-08/16: 回归测试套件 `test_regression.py`（17 个用例，红绿切换门禁）✅。OPT-10: `run_in_thread` 全代码库 40+ 调用点审计（long vs shared 池分流）✅。OPT-13: AST 审计脚本 `scripts/audit_pool_usage.py` ✅。OPT-15: SourceRegistry 三优化——`try_call()` 包装器、fast-fail 检测（<500ms 硬失败）、指数退避冷却（60s→120s→240s→480s→600s max）✅。API 契约 `api-contracts/admin/circuit-breaker.md` 新增。`test_source_registry_optimizations.py` 14 个新单测 ✅。总计 31 个新单测 + 17 个回归测试，存量 58 个全 PASS。详见 §4 Phase 11。 |
 | v1.0 | 2026-07-22 | 初次生成，覆盖全部 18 份文档 |
 | v2.0 | 2026-07-22 | 新增 3 份文档处理 + 新轨道 + 冲突分析；调整 Phase 0/1/2/3 |
 | v3.0 | 2026-07-23 | 新增 `design-pipeline-foundation-issues.md`（23 份文档）；Phase 0/0.5 标记 ✅ 完成；新增 Phase 0.7（12 项 P0/P1 修复）；修复 `five-improvements-plan.md` 内部状态不一致；新增 §2.7-2.11 冲突分析；新增 §3.5-3.8 修复方案；更新 §4 路线图；更新附录 |
@@ -1197,7 +1198,7 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 | | | | **新增契约：** `api-contracts/common/internal-indicators-contract.md`, `api-contracts/factors/registry.md` |
 | | | | **改动文件：** 5 源文件 + 2 测试文件 + 2 契约文件
 | |
-| | **v9.9** | 2026-07-27 | **Phase 9 — 系统性能与质量增强 (system-performance-quality)** | 详见 `docs/system-performance-and-quality-review.md` |
+| | **v9.9** | 2026-07-27 | **Phase 9 — 系统性能与质量增强 (system-performance-quality)** | 详见 `docs/archived/system-performance-and-quality-review.md` |
 | | | | **已实施（阶段一+二）：** |
 | | | | **B1** — 修复 `market_service.py:667` `cache_set` UnboundLocalError：将 `cache_set` import 移至 `get_portfolio_realtime()` 函数顶部，删除重复 import |
 | | | | **B2** — 全局异常处理器：在 `main.py` lifespan 中添加 `loop.set_exception_handler()`，捕获未处理的协程异常并记 ERROR 日志 |
@@ -1208,7 +1209,7 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 | | | | **新增测试：** `test_route_contract.py` (14 用例) — 覆盖 `_parse_contract_method` 6 种模式、`load_expected_routes` 目录扫描、`compare_routes` 6 种场景 |
 | | | | **改动文件：** `backend/app/main.py`、`backend/app/services/market_service.py`、`backend/scripts/verify_e2e.py`、`backend/scripts/check_routes.py`（新）、`backend/tests/test_route_contract.py`（新）、`frontend/vite.config.js` |
 | |
-| | **v10.0** | 2026-07-27 | **Phase 10 — 候选池与数据链路修复 (pool-fix-plan)** | 详见 `docs/fix-plan-master.md` + `docs/fix-plan-pool.md` |
+| | **v10.0** | 2026-07-27 | **Phase 10 — 候选池与数据链路修复 (pool-fix-plan)** | 详见 `docs/archived/fix-plan-master.md` + `docs/archived/fix-plan-pool.md` |
 | | | | **已实现：** |
 | | | | **F1** — `_ETF_PREFIXES` 加入 `"52"` (`china_market.py`)，支持 520xxx 港股通 ETF 路由 |
 | | | | **F2** — `_fetch_em_etf_list` 修复字段映射：新增 `f72=成交额` 替换 `f62=换手率→amount`，`f62→turnover`，`f45→volume`，修复沪市 ETF amount=0 根因 |
@@ -1273,9 +1274,9 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 | | | | **performance doc** → 已归档至 `docs/archived/` |
 | | | | **已实现：** |
 | | | | **TokenMonitor → AppTabs** — 替换手工 `tab-group`/`tab-btn` 为 `<AppTabs v-model>`，删除 `switchGranularity()` 函数，新增 `watch(granularity, fetchData)`，新增 `granularityTabs` 数据。TokenMonitor 单测 3 条 ✅ |
-| | | | **改动文件：** `frontend/src/components/TokenMonitor.vue`、`frontend/src/test/TokenMonitor.spec.js`（新）、`frontend/src/test/ChartComponents.spec.js`（已有）、`docs/frontend-ui-optimization-plan.md`（v2 重写）、`docs/frontend-testing-safety-net.md`、`docs/system-performance-and-quality-review.md`、`docs/implementation-master-plan.md` |
+| | | | **改动文件：** `frontend/src/components/TokenMonitor.vue`、`frontend/src/test/TokenMonitor.spec.js`（新）、`frontend/src/test/ChartComponents.spec.js`（已有）、`docs/frontend-ui-optimization-plan.md`（v2 重写）、`docs/frontend-testing-safety-net.md`、`docs/archived/system-performance-and-quality-review.md`、`docs/implementation-master-plan.md` |
 | |
-| | **v11.1** | 2026-07-27 | **Phase 12 — 全面优化实施 (optimization-master-plan)** | 详见 `docs/optimization-master-plan.md` |
+| | **v11.1** | 2026-07-27 | **Phase 12 — 全面优化实施 (optimization-master-plan)** | 详见 `docs/archived/optimization-master-plan.md` |
 | | | | **已实现（P1-严重修复）：** |
 | | | | **FIX-09** — 因子缺失值语义化。`factor_registry.py` 所有 41 个 compute 函数改为在数据不足时返回 `None`（而非 `0.0`/`50.0`/`1.0`），区分「计算为零」和「数据缺失」。`compute()` 不再将 None→0.0，z-score 标准化排除 None。`aggregate_factor_scores()` 跳过 None 值。`allocation_engine.py` composite 评分跳过 None 类别（权重重分配）。新增 `test_factor_missing_value_semantics.py`（44 个分支测试覆盖缺失值、混合值、全 None 等场景） |
 | | | | **已实现（P0-阻塞修复）：** |
@@ -1296,7 +1297,7 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 | | | | **FIX-21** — `strategy_check_worker.py` 新增外层 120s `asyncio.wait_for` 超时保护，防止管线无限制挂起（P1） |
 | | | | **FIX-03** — `cache_service.py` `RedisCache.init()` 添加 `if self.available: return` 幂等退出，`get/set/mget/mset` 惰性自动初始化（P2） |
 | | | | **FIX-15** — 新增 `.lighthouserc.yml` Lighthouse CI 配置（3 页 × 3 次运行，性能≥60%, 无障碍/最佳实践/SEO≥80%）（P3） |
-| | | | **改动文件：** `backend/app/fetchers/china_market.py`、`backend/app/core/ttl.py`、`backend/app/services/pool_manager.py`、`backend/app/services/portfolio_service.py`、`backend/app/tasks/strategy_check_worker.py`、`backend/app/services/cache_service.py`、`.lighthouserc.yml`、`docs/optimization-master-plan.md`、`docs/implementation-master-plan.md` |
+| | | | **改动文件：** `backend/app/fetchers/china_market.py`、`backend/app/core/ttl.py`、`backend/app/services/pool_manager.py`、`backend/app/services/portfolio_service.py`、`backend/app/tasks/strategy_check_worker.py`、`backend/app/services/cache_service.py`、`.lighthouserc.yml`、`docs/archived/optimization-master-plan.md`、`docs/implementation-master-plan.md` |
 | | **v13.0** | 2026-07-28 | **Phase 13 — 系统综合诊断与优化 (system-diagnosis-and-optimization)** | 详见下方 |
 | | **v13.1** | 2026-07-28 | **Phase 13d — 剩余诊断项实施 (LLM熔断+引擎fallback+内容校验+SSL复用)** | 详见下方 |
 | | | | **已实现（P0 — 修复阻塞问题）：** |
@@ -1398,8 +1399,8 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 | | | | **新增 API 契约：** `api-contracts/market/market-data-hub.md` |
 | | | | **综合测试结果：** 79 tests pass (0 pre-existing failures)，1 skipped |
 | | | | **改动文件：** `backend/app/services/market_data_hub.py`（新）、`backend/app/fetchers/ttj_fetcher.py`、`backend/tests/test_s5_remaining.py`（新）、`api-contracts/market/market-data-hub.md`（新）、`docs/implementation-master-plan.md` |
-| | **v20.1** | 2026-07-29 | **Phase 20 — 综合诊断剩余项修复 + CI/断言补全** | 详见下方 |
-| | | | **版本表:** v20.0 = F1(布林带)+F2(板块限额)+F3(ic_tracker); v20.1 = F13(CI)+F14(断言)+test修复+cleanup |
+| | **v20.1** | 2026-07-29 | **Phase 20 — 综合诊断剩余项修复 + CI/断言补全 + 文档归档** | 详见下方 |
+| | | | **版本表:** v20.0 = F1(布林带)+F2(板块限额)+F3(ic_tracker); v20.1 = F13(CI)+F14(断言)+test修复+cleanup+归档8份文档 |
 | | | | **F13 — Lighthouse CI 性能基线 (P3)**： |
 | | | | 新增 `.github/workflows/performance.yml` — push/PR 到 main 时构建前端生产包、启动后端+Redis、运行 Lighthouse CI（Performance >= 50, LCP < 8s, TBT < 500ms）。新增 `.lighthouserc.js` — 本地 LHCI 桌面预设配置，上传至 temporary-public-storage。 |
 | | | | **F14 — verify_e2e 技术指标质量断言 (P3)**： |
