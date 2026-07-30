@@ -157,6 +157,8 @@ async def list_designs(
             PortfolioDesign.risk_profile,
             PortfolioDesign.status,
             PortfolioDesign.error_message,
+            PortfolioDesign.report_quality,
+            PortfolioDesign.report_generated_at,
             PortfolioDesign.strategies_json,
         ))
         .order_by(desc(PortfolioDesign.created_at))
@@ -174,6 +176,8 @@ async def list_designs(
             "risk_profile": r.risk_profile,
             "status": r.status or "completed",
             "error_message": r.error_message,
+            "report_quality": r.report_quality or "none",
+            "report_generated_at": r.report_generated_at.isoformat() if r.report_generated_at else None,
             # Phase 2.7.8: 计算非 CASH ETF 总数
             "etf_count": sum(
                 sum(1 for a in (s.get("etfs") or []) if a.get("symbol") != "CASH")
