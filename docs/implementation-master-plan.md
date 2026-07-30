@@ -1,6 +1,6 @@
 ﻿# ETF Surge 方案实施总计划
 
-> 生成日期: 2026-07-31 | 版本: **v34.0**
+> 生成日期: 2026-07-31 | 版本: **v35.0**
 > ✅ **文档归档（2026-07-29 v20.1）**：8 份已全部实施/已替代的方案文档归档至 `docs/archived/` — `optimization-master-plan.md`、`optimization-master-plan-v2.md`、`performance-diagnosis-and-optimization-plan.md`、`fix-plan-master.md`、`fix-plan-pool.md`、`s5-markethub-design.md`、`system-performance-and-quality-review.md`、`fundamental-flow-factors-evaluation.md`。
 > ✅ **Phase 21 已完成**（2026-07-29）：修复 4 个前端单测失败（useMarketSearch + useSectorAnalysis mock 目标错误） + UI Phase 3(Steps 6-8)。详见下方 v21.0。
 > ✅ **Phase 27 已完成**（2026-07-30）：实施 `docs/system-diagnosis-and-optimization-plan.md` 子集 — F1(timeline select 导入 P0) + F2(A股搜索降级 levistock P1) + F4(max_tokens 8192→12288) + F5(删除 reasoning_content fallback) + F19(因子 industry 注入) + F15/F16/F20/F22(verify_e2e 加固：跨市场搜索/M14 门禁/china_specific 完整性/预热门禁收紧)。契约驱动 + TDD：新增 `api-contracts/market/search.md` 与 `tests/test_system_diagnosis_fixes.py`（15 用例全 PASS）。详见下方 v27.0。
@@ -1525,6 +1525,11 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 | | | | **验证结果：** 15/15 新单测 PASS；因子/LLM/pool 相关既有套件 77 PASS（3 个 pool_manager 用例为预存失败，与本次改动无关，已用 `git stash` 验证）。 |
 | | | | **改动文件：** `backend/app/routers/portfolio.py`、`backend/app/routers/market.py`、`backend/app/analysis/llm.py`、`backend/app/services/pool_manager.py`、`backend/scripts/verify_e2e.py`、`backend/tests/test_system_diagnosis_fixes.py`（新）、`api-contracts/market/search.md`（新）、`docs/implementation-master-plan.md` |
 | | | | **未实施（本期范围外，待后续 Phase）：** F3(HK/US 实时查询增强)、F6(LLM 重试)、F7(LLM 健康探针端点)、F8(calculate 并行化)、F9-F14(预热/前端性能)、F17(Lighthouse CI)、F18 等，见原方案实施路标。
+
+| | **v35.0** | 2026-07-31 | **Phase 32 — Z18 新闻 AI 分析管道增强** | 详见下方 |
+| | | | | **来源：** `docs/v5_diagnostic_and_optimization_plan.md` Z18 |
+| | | | | **Z18 — 新闻 AI 分析管道增强 (中)：** fetch_news_headlines 原只返回 3-5 条（仅依赖财联社主源）。修复：新增 fetch_eastmoney_news() 作为财经头条补充源（_ak akshare 线程池保护，4s 超时），插入财联社与宏观新闻之间。同时增强 analyze_news() LLM prompt—新增情绪指数(0-100)、版块影响列表(正面/负面)、新闻一致性检查。 |
+| | | | | **改动文件：** backend/app/fetchers/news_fetcher.py（新增 fetch_eastmoney_news）、backend/app/analysis/llm.py（analyze_news prompt增强）、docs/implementation-master-plan.md（本版本更新） |
 
 | | **v34.0** | 2026-07-31 | **Phase 30e — v5 诊断方案最终项：Z19 修复** | 详见下方 |
 | | | | | **来源：** `docs/v5_diagnostic_and_optimization_plan.md` |

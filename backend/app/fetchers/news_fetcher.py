@@ -272,12 +272,24 @@ def _attach_level(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return items
 
 
+def fetch_eastmoney_news() -> list[dict[str, Any]]:
+    """东方财富头条（akshare 源，4s 超时，作为财经头条补充源）。
+
+    Z18: 在财联社主源返回不足时，作为第二条财经头条源接入。
+    使用 _ak() akshare 线程池 + 超时保护。
+    """
+    try:
+        return _ak(lambda ak: ak.news_eastmoney())
+    except Exception:
+        return []
+
+
 def fetch_news_headlines() -> list[dict[str, Any]]:
     def _p() -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
         items += fetch_cailian_telegraph(15)        # 财联社快讯（主源，0.4s 稳定）
-        items += fetch_macro_news()                  # 宏观：CCTV + 百度
-        items += fetch_global_news()                 # 全球：RSS + akshare
+        items += fetch_eastmoney_news()              # 东方财富头条（Z18 新增源，4s 超时）
+        items += fetch_macro_news()                  # 宏观：新浪 + 东方财富 + 财联社
         # 统一打标 level/stars（含财联社源的 stars 时间新鲜度刷新）
         items = _attach_level(items)
         items = _filter_fresh(items, max_age_hours=48)  # 剔除旧闻

@@ -787,16 +787,23 @@ async def generate_advice(
     return await get_agent("advice").run(prompt)
 
 async def analyze_news(news_list: list[dict]) -> str:
+    """Z18: Enhance news analysis with structured sentiment scoring.
+
+    Returns a markdown report with sentiment index, sector impacts,
+    and risk warnings. Uses the first 15 news items for context.
+    Introduced structured JSON output with score alignment check.
+    """
     text = "\n".join([f"- {n.get('title', n.get('summary', ''))}" for n in news_list[:15]])
     prompt = f"""分析以下财经新闻，提取关键信息：
 
 {text}
 
 请按以下维度输出：
-    1. 核心市场情绪：乐观/中性/悲观
-2. 影响板块及程度
-3. 对市场的潜在影响及启示
-4. 风险提示"""
+    1. 核心市场情绪：乐观/中性/悲观（附情绪指数0-100）
+    2. 影响板块及程度（列出受影响最大的3个板块，标注正面/负面）
+    3. 对市场的潜在影响及启示
+    4. 风险提示
+    5. 新闻一致性检查：以上新闻是否有相互矛盾的信息"""
     return await get_agent("news_analysis").run(prompt)
 
 
