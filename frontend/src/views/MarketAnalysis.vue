@@ -45,7 +45,7 @@
     <WatchlistPanel :marketTab="marketTab" @select-symbol="onSelectSymbol" />
 
     <div ref="anchorSector" class="section-anchor"></div>
-    <SectorHeatMap />
+    <SectorHeatMap :marketTab="marketTab" />
 
     <div ref="anchorAdvisor" class="section-anchor"></div>
     <AiAdvisor :marketTab="marketTab" />

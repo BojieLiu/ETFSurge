@@ -96,8 +96,13 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import { marketApi } from '../../api'
+
+// Z31: Accept marketTab prop from parent for market-scoped data
+const props = defineProps({
+  marketTab: { type: String, default: 'A' },
+})
 
 const tabs = [
   { key: 'hot', label: '热点板块' },
@@ -120,6 +125,13 @@ async function switchTab(tab) {
   error.value = ''
   await fetchData()
 }
+
+// Z31: Re-fetch when market tab changes
+watch(() => props.marketTab, () => {
+  dataList.value = []
+  error.value = ''
+  fetchData()
+})
 
 async function fetchData() {
   loading.value = true

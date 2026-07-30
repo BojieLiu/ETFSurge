@@ -795,7 +795,7 @@ async def analyze_news(news_list: list[dict]) -> str:
 请按以下维度输出：
     1. 核心市场情绪：乐观/中性/悲观
 2. 影响板块及程度
-3. 对组合调仓的潜在启示
+3. 对市场的潜在影响及启示
 4. 风险提示"""
     return await get_agent("news_analysis").run(prompt)
 
@@ -806,15 +806,18 @@ NEWS_IMPACT_SYSTEM_PROMPT = load_prompt("news_impact.md")
 async def analyze_news_impact(news_item: dict, holdings: list[dict]) -> dict:
     """分析单条新闻对当前组合内各标的的具体影响。
 
+    Z32: 当组合为空时，改为分析对市场整体的影响。
     返回 {"impact_scope": str, "affected_holdings": [...], "summary": str}。
     """
+    has_holdings = bool(holdings and any(h.get('symbol') for h in holdings))
     holdings_text = "\n".join(
         f"- {h.get('symbol', '')} {h.get('name', '')} "
         f"({h.get('asset_type', '')}) 目标权重 {h.get('target_weight', '')}"
         for h in holdings
-    ) or "（组合为空）"
+    ) if has_holdings else "（暂未持仓）"
 
-    prompt = f"""新闻标题：{news_item.get('title', '')}
+    if has_holdings:
+        prompt = f"""新闻标题：{news_item.get('title', '')}
 新闻内容：{news_item.get('content', '')}
 
 当前组合持仓：
@@ -823,6 +826,16 @@ async def analyze_news_impact(news_item: dict, holdings: list[dict]) -> dict:
 请分析这条新闻对组合的影响，重点回答：
 (a) 影响范围（市场/板块）；
 (b) 组合内哪些标的会受到影响、具体如何受影响。
+只返回约定结构的 JSON。"""
+    else:
+        prompt = f"""新闻标题：{news_item.get('title', '')}
+新闻内容：{news_item.get('content', '')}
+
+当前无持仓组合。
+
+请分析这条新闻对市场整体的影响，重点回答：
+(a) 影响范围（市场/板块）；
+(b) 哪些行业或主题会受到正面/负面影响。
 只返回约定结构的 JSON。"""
 
     try:

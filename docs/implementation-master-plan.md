@@ -1526,6 +1526,13 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 | | | | **改动文件：** `backend/app/routers/portfolio.py`、`backend/app/routers/market.py`、`backend/app/analysis/llm.py`、`backend/app/services/pool_manager.py`、`backend/scripts/verify_e2e.py`、`backend/tests/test_system_diagnosis_fixes.py`（新）、`api-contracts/market/search.md`（新）、`docs/implementation-master-plan.md` |
 | | | | **未实施（本期范围外，待后续 Phase）：** F3(HK/US 实时查询增强)、F6(LLM 重试)、F7(LLM 健康探针端点)、F8(calculate 并行化)、F9-F14(预热/前端性能)、F17(Lighthouse CI)、F18 等，见原方案实施路标。
 
+| | **v33.0** | 2026-07-31 | **Phase 30d — v5 诊断方案实施：Z31/Z32/Z33 修复** | 详见下方 |
+| | | | | **来源：** `docs/v5_diagnostic_and_optimization_plan.md` |
+| | | | | **Z31 — 行情分析页 Tab 切换无效 (中)：** SectorHeatMap 组件未接收 marketTab prop，切换 A/HK/US/global 标签时该组件不响应。修复：SectorHeatMap.vue 新增 defineProps({ marketTab }) + watch(() => props.marketTab, fetchData)；父组件 MarketAnalysis.vue 的 SectorHeatMap 改为 SectorHeatMap marketTab="{{" marketTab "}}" 。 |
+| | | | | **Z32 — 新闻 AI 智能分析 prompt 方向错误 (中)：** llm.py:798 批量分析 prompt 写“对组合调仓的潜在启示”（无组合上下文）；llm.py:823 单条分析 prompt 写“对组合的影响”。修复：批量改为“对市场的潜在影响及启示”；单条新增 has_holdings 判断—有持仓时“对组合的影响”+ 无持仓时“对市场整体的影响”。 |
+| | | | | **Z33 — 线程池误列在数据源 admin 页面 (低)：** SourceMonitor.vue 将 threadpool_main/threadpool_akshare 探针混在数据源表格中。修复：enrichedSources 新增 category 字段（data/system），表格新增类型列以示区分。 |
+| | | | | **改动文件：** backend/app/analysis/llm.py（Z32）、frontend/src/components/market/SectorHeatMap.vue（Z31）、frontend/src/views/MarketAnalysis.vue（Z31）、frontend/src/components/SourceMonitor.vue（Z33）、docs/implementation-master-plan.md（本版本更新） |
+
 | | **v32.0** | 2026-07-31 | **Phase 30c — v5 诊断方案验证：Z22/Z28/Z29/Z30 单元测试覆盖** | 详见下方 |
 | | | | | **来源：** docs/v5_diagnostic_and_optimization_plan.md |
 | | | | | **Z22 — 个股 watchlist 行情 (P1)：** get_asset_realtime 已正确处理 stock asset_type。新增单元测试验证 600519(stock) 和 510300(A) 两种资产类型均能返回 price/change_pct。 |

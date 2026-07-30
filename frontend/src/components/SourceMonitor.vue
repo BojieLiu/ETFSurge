@@ -93,6 +93,7 @@
         <div class="card-body">
           <div v-if="sources.length" class="source-table">
             <div class="source-table-header">
+              <span class="src-col-type">类型</span>
               <span class="src-col-name">数据源</span>
               <span class="src-col-status">状态</span>
               <span class="src-col-num">失败次数</span>
@@ -104,6 +105,11 @@
               :key="src.name"
               class="source-table-row"
             >
+              <span class="src-col-type">
+                <span :class="['type-badge', src.category === 'system' ? 'type-system' : 'type-data']">
+                  {{ src.category === 'system' ? '系统' : '数据' }}
+                </span>
+              </span>
               <span class="src-col-name mono">{{ src.name }}</span>
               <span class="src-col-status">
                 <span :class="['status-badge', src.available ? 'status-ok' : 'status-error']">
@@ -237,12 +243,19 @@ const availableCount = computed(() => sources.value.filter(s => s.available).len
 const circuitBrokenCount = computed(() => circuitBreakers.value.filter(cb => cb.state === 'open').length)
 const failureCount = computed(() => sources.value.filter(s => s.failures > 0).length)
 
+// Z33: Categorize sources as 'data' or 'system' (threadpool/monitoring)
+function getSourceCategory(name) {
+  const systemPrefixes = ['threadpool', 'thread_pool', 'system_']
+  return systemPrefixes.some(p => name.startsWith(p)) ? 'system' : 'data'
+}
+
 const enrichedSources = computed(() => {
   const cbMap = {}
   circuitBreakers.value.forEach(cb => { cbMap[cb.name] = cb })
   return sources.value.map(src => ({
     ...src,
     cbState: cbMap[src.name]?.state || 'closed',
+    category: getSourceCategory(src.name),
   }))
 })
 
@@ -484,6 +497,27 @@ onMounted(fetchData)
   border-bottom: none;
 }
 
+.src-col-type {
+  text-align: center;
+  width: 48px;
+  flex-shrink: 0;
+}
+.type-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+.type-data {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+.type-system {
+  background: #f3e8ff;
+  color: #7c3aed;
+}
 .src-col-name {
   overflow: hidden;
   text-overflow: ellipsis;
