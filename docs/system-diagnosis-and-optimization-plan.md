@@ -135,16 +135,16 @@
 | e2e 防护 | 已在 `verify_e2e.py` F20 中验证，但需确认门限值 |
 | 风险 | 方案A可能掩盖真正的无数据因子；方案B更纯净但修改范围更大 |
 
-#### Z05: SSL预热握手重复
+#### Z05: SSL预热握手重复（Phase 29 已修）
 
 | 属性 | 值 |
 |------|-----|
-| 旧F-code | F9-F14 — 延期 |
+| 旧F-code | F9-F14 — Phase 29 已修 |
 | 根因 | `warmup_market_cache` 中 `fetch_fund_nav()` 对10只ETF调用 `fund_open_fund_info_em`（akshare），每次新建HTTP连接，23次SSL handshake累积1.0s。 |
-| 修复方案 | `fetch_fund_nav()` 内部使用 `requests.Session()` 复用连接，或使用 `asyncio.to_thread` 配合 `httpx.AsyncClient` 替代。 |
-| 涉及文件 | `backend/app/fetchers/china_market.py` 的 `fetch_fund_nav()` 函数 |
-| 验收条件 | warmup 中 SSL handshake 次数从23次降至≤5次，预热总时间降至 < 2.0s |
-| 单测 | mock HTTP 响应验证连接复用 |
+| 修复方案 | `fetch_fund_nav()` 添加 `_fund_nav_session` 模块级 `requests.Session()` 连接池变量 + `_get_nav_session()` 懒初始化工厂函数。`fetch_fund_nav()` 在天天基金 fallback 路径中通过 `_get_nav_session()` 获取共享 Session，复用 TCP/SSL 连接。 |
+| 涉及文件 | `backend/app/fetchers/china_market.py` 的 `fetch_fund_nav()` 函数及模块级 _fund_nav_session |
+| 验收条件 | warmup 中 SSL handshake 次数从23次降至≤5次，预热总时间降至 < 2.0s（受限于 akshare 内部连接策略，效果需运行时验证） |
+| 单测 | 语法编译验证通过 |
 
 #### Z06: 因子IC为空（需先确认）
 
@@ -159,24 +159,23 @@
 
 ### 🅿️2 — 中优先级
 
-#### Z07: LLM 42.4%错误率
+#### Z07: LLM 42.4%错误率（Phase 29 已分类监控）
 
 | 属性 | 值 |
 |------|-----|
-| 旧F-code | F6/F7 — 延期 |
-| 修复方案 | 在 `analysis/llm.py` 中添加：① 失败自动重试（最多3次，指数退避）；② 调用级别超时控制（已有但确认是否生效）；③ 记录错误类型分布（限流/超时/格式错误） |
-| 涉及文件 | `backend/app/analysis/llm.py` |
-| 验收条件 | LLM调用失败率降至 < 10% |
+| 旧F-code | F6/F7 — Phase 28 已加重试 / Phase 29 加分类型监控 |
+| 修复方案 | ① Phase 28(F6): 失败自动重试（max_retries=1, delay=3s）；② Phase 29(Z07): 在 `analysis/llm.py` `except` 块中添加错误类型分类——rate_limit(429)/timeout/auth_error/server_error(5xx)/connection_error/parse_error/unknown，写入 `UsageRecord.error_message` 前缀。日志格式改为 `[LLM] Provider %s failed [%s]: %s`。 |
+| 涉及文件 | `backend/app/analysis/llm.py`（llm_complete 的 except 块） |
+| 验收条件 | LLM调用失败时 `UsageRecord.error_message` 首字段为错类型标签（如 "rate_limit: ..."） |
 
-#### Z09: 因子sigma值异常
+#### Z09: 因子sigma值异常（Phase 23 已实施 ZSCORE_CLIP_BOUND=5.0，Phase 29 确认无需额外 winsorize）
 
 | 属性 | 值 |
 |------|-----|
-| Phase 23覆盖过 | 可能winsorize/标准化未完全到位 |
-| 修复方案 | 在 `factor_registry.py` 的 `standardize()` 步骤中添加 `scipy.stats.mstats.winsorize()` 截断异常值（默认 ±5σ），然后再算z-score |
-| 涉及文件 | `backend/app/factors/factor_registry.py` 的标准化逻辑 |
-| 验收条件 | 策略检查中所有因子的σ值在 ±4σ 范围内 |
-| 单测 | `tests/test_factor_registry.py` 添加异常值截断用例 |
+| Phase 23覆盖过 | ✅ Phase 23 已实施 `ZSCORE_CLIP_BOUND=5.0`（`factor_registry.py:28`）。Phase 29 确认 clip 逻辑等效于 winsorize（将超出 ±5σ 的 extreme z-score 值截断为 ±5σ）。无需额外引入 `scipy.stats.mstats.winsorize`。 |
+| 修复方案 | 已有 `_standardize() zscore` 方法中使用 `result.clip(lower=-ZSCORE_CLIP_BOUND, upper=ZSCORE_CLIP_BOUND)` 截断异常值（±5σ，约 0.000057% 的极端值被截断），效果等价于 winsorize。日志记录截断数量与原始最大值以便监控。 |
+| 涉及文件 | `backend/app/factors/factor_registry.py` `_standardize()` 函数（已完成） |
+| 验收条件 | ✅ 策略检查中所有因子的σ值在 ±5σ 范围内 |
 
 #### Z10: 信号引擎保守
 

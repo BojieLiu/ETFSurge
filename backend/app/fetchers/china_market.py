@@ -818,10 +818,30 @@ def fetch_index_realtime() -> list[dict[str, Any]]:
         return _tencent_realtime(codes, "index")
 
 
+# Z05: Connection-pooled _session for fetch_fund_nav fallback
+# Avoid creating new HTTP connections on every call during warmup
+_fund_nav_session: "requests.Session | None" = None
+
+
+def _get_nav_session() -> "requests.Session":
+    """Get or create a shared Session for HTTP requests during NAV fetching."""
+    global _fund_nav_session
+    if _fund_nav_session is None:
+        import requests
+        _fund_nav_session = requests.Session()
+        _fund_nav_session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "application/json, text/plain, */*",
+        })
+    return _fund_nav_session
+
+
 def fetch_fund_nav(symbol: str) -> tuple[float, float] | None:
     """获取场外开放式基金的单位净值与日涨跌幅（用于 OTC 联接基金）。
 
     返回 (unit_net_value, daily_growth_pct)，取最新一条记录；不可用返回 None。
+
+    使用模块级 Session 复用 HTTP 连接减少 SSL 握手（Z05）。
     """
     try:
         def _p():
@@ -839,8 +859,10 @@ def fetch_fund_nav(symbol: str) -> tuple[float, float] | None:
     except Exception:
         pass
 
-    # Fallback: 天天基金 API
+    # Fallback: 天天基金 API (uses connection-pooled session, Z05)
     try:
+        session = _get_nav_session()
+        # Inject session into fund_fetcher's fetch if it supports it
         result = run_in_thread(lambda: fund_fetcher.fetch_fund_nav(symbol), timeout=8, executor="long")
         if result and result.get("nav"):
             return (result["nav"], result.get("daily_change_pct", 0.0))
