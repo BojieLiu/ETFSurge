@@ -61,6 +61,8 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - PROFILE_WARMUP=1
       - LOG_LEVEL=DEBUG
+      # 覆盖 .env 中的 Windows 绝对路径，适配容器内路径
+      - DATABASE_URL=sqlite+aiosqlite:////app/data/portfolio.db
     volumes:
       - ./backend:/app
       - ./data:/app/data
