@@ -322,26 +322,26 @@ def fetch_index_realtime(symbol: str) -> dict[str, Any] | None:
 
 # --- alphavantage_fetcher.py: Alpha Vantage API ---
 
-_API_BASE = "https://www.alphavantage.co/query"
+_AV_API_BASE = "https://www.alphavantage.co/query"
 _TIMEOUT = 10
 
 
-def _get_apikey() -> str | None:
+def _get_av_apikey() -> str | None:
     key = settings.alphavantage_api_key
     if not key or key == "" or key.startswith("your_"):
         return None
     return key
 
 
-def _request(params: dict[str, str]) -> dict[str, Any] | None:
+def _av_request(params: dict[str, str]) -> dict[str, Any] | None:
     """Make an Alpha Vantage API request with timeout."""
-    key = _get_apikey()
+    key = _get_av_apikey()
     if not key:
         return None
     import urllib.request
     import json
     params["apikey"] = key
-    url = _API_BASE + "?" + "&".join(f"{k}={v}" for k, v in params.items())
+    url = _AV_API_BASE + "?" + "&".join(f"{k}={v}" for k, v in params.items())
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
@@ -353,8 +353,8 @@ def _request(params: dict[str, str]) -> dict[str, Any] | None:
         return None
 
 
-def fetch_realtime(symbol: str) -> dict[str, Any] | None:
-    """Fetch realtime quote from Alpha Vantage (GLOBAL_QUOTE).
+def fetch_realtime_alphavantage(symbol: str) -> dict[str, Any] | None:
+    """[RENAMED] Fetch realtime quote from Alpha Vantage (GLOBAL_QUOTE).
 
     Args:
         symbol: Ticker symbol.
@@ -363,7 +363,7 @@ def fetch_realtime(symbol: str) -> dict[str, Any] | None:
         Normalized dict or None.
     """
     def _p():
-        data = _request({"function": "GLOBAL_QUOTE", "symbol": symbol})
+        data = _av_request({"function": "GLOBAL_QUOTE", "symbol": symbol})
         if not data or "Global Quote" not in data:
             return None
         gq = data["Global Quote"]
@@ -425,26 +425,26 @@ def fetch_daily(symbol: str, outputsize: str = "compact") -> list[dict[str, Any]
 
 # --- twelvedata_fetcher.py: Twelve Data API ---
 
-_API_BASE = "https://api.twelvedata.com"
+_TD_API_BASE = "https://api.twelvedata.com"
 _TIMEOUT = 10
 
 
-def _get_apikey() -> str | None:
+def _get_td_apikey() -> str | None:
     key = settings.twelvedata_api_key
     if not key or key == "" or key.startswith("your_"):
         return None
     return key
 
 
-def _request(path: str, params: dict[str, str]) -> dict[str, Any] | None:
+def _td_request(path: str, params: dict[str, str]) -> dict[str, Any] | None:
     """Make a Twelve Data API request with timeout, return parsed JSON or None."""
-    key = _get_apikey()
+    key = _get_td_apikey()
     if not key:
         return None
     params["apikey"] = key
     import urllib.request
     import json
-    url = f"{_API_BASE}{path}?" + "&".join(f"{k}={v}" for k, v in params.items())
+    url = f"{_TD_API_BASE}{path}?" + "&".join(f"{k}={v}" for k, v in params.items())
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
@@ -456,8 +456,8 @@ def _request(path: str, params: dict[str, str]) -> dict[str, Any] | None:
         return None
 
 
-def fetch_realtime(symbol: str) -> dict[str, Any] | None:
-    """Fetch realtime quote for a symbol. Returns normalized dict or None.
+def fetch_realtime_twelvedata(symbol: str) -> dict[str, Any] | None:
+    """[RENAMED] Fetch realtime quote for a symbol. Returns normalized dict or None.
 
     Args:
         symbol: Ticker symbol (SPY, AAPL, GOLD, CL, etc.)
@@ -468,7 +468,7 @@ def fetch_realtime(symbol: str) -> dict[str, Any] | None:
         None on any error.
     """
     def _p():
-        data = _request("/quote", {"symbol": symbol})
+        data = _td_request("/quote", {"symbol": symbol})
         if not data or not data.get("close"):
             return None
         try:
@@ -764,7 +764,7 @@ def fetch_stock_basic() -> list[dict[str, Any]]:
 
 logger = logging.getLogger(__name__)
 
-_API_BASE = "https://api.stlouisfed.org/fred/series/observations"
+_FRED_API_BASE = "https://api.stlouisfed.org/fred/series/observations"
 _API_KEY = settings.fred_api_key
 
 _TIMEOUT = 15
@@ -781,7 +781,7 @@ async def _fetch_series(series_id: str) -> float | None:
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT, trust_env=False) as client:
             resp = await client.get(
-                _API_BASE,
+                _FRED_API_BASE,
                 params={
                     "series_id": series_id,
                     "api_key": _API_KEY,

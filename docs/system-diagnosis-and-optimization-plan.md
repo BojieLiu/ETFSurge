@@ -50,7 +50,7 @@
 | 本轮ID | 问题简述 | 旧F-code | 旧方案优先级 | Phase中是否实施 | 本轮状态 |
 |--------|---------|---------|------------|---------------|---------|
 | Z01 | factor-health 500: `time not defined` | ❌ **新发现** | — | ❌ 从未识别 | 🆕 **待排期** |
-| Z02 | 美股实时行情 null | **F3** | P1 | ❌ 显式延期（Phase 27 commit） | 🟡 **延期** |
+| Z02 | 美股实时行情 null | **F3** | P1 | ✅ **Phase 29 已修**（名称冲突导致 TwelveData 死代码 + FRED _API_BASE 覆盖 Finnhub） | ✅ **已修** |
 | Z03 | china_specific 3因子显示no_data | **F19** | P1/P8 | ✅ **已实施**但IC未累积 | ⚠️ **已修但展示问题** |
 | Z04 | etf_specific 10因子全无数据 | ❌ **新发现** | — | ❌ F19只覆盖china_specific | 🆕 **待排期** |
 | Z05 | SSL预热握手重复(23次,1.0s) | **F9-F14** | P2-P3 | ❌ 显式延期 | 🟡 **延期** |
@@ -107,16 +107,16 @@
 | 验收条件 | `/api/v1/factors/active` 中 etf_specific 类别的 `no_data_count` < 3（即至少7/10个有IC值） |
 | 单测 | `tests/test_factor_registry.py` 中验证各 `_compute_etf_*` 函数对 mock 输入返回正确值 |
 
-#### Z02: 美股实时行情 null（延期中提升优先级）
+#### Z02: 美股实时行情 null（Phase 29 已修）
 
 | 属性 | 值 |
 |------|-----|
-| 旧F-code | F3 — Phase 27 显式延期 |
-| 根因 | `market_service.py` 的 `get_asset_realtime(symbol, asset_type='US')` 降级链依次尝试 yfinance → levistock → Twelve Data，全部失败返回 null |
-| 修复方案 | ① 确认yfinance被限流还是超时（查日志）；② 增加 Finnhub / Alpha Vantage 备选；③ 添加 US 交易时段检查，非交易时段返回缓存数据 |
-| 涉及文件 | `backend/app/services/market_service.py`, `backend/app/fetchers/yfinance_fetcher.py` |
-| 验收条件 | `GET /api/v1/market/realtime/MSFT?asset_type=US` 返回非 null 的有效行情数据 |
-| 前置依赖 | 需要 Finnhub / Alpha Vantage API Key 正常工作 |
+| 旧F-code | F3 — Phase 29 已修 |
+| 根因 | `global_markets_fetcher.py` 合并多个数据源时产生了**三重函数名冲突**：三个同名的 `fetch_realtime()`、`_request()`、`_get_apikey()`、`_API_BASE` 互相覆盖。Python 只保留最后一个定义（Finnhub），导致 TwelveData 代码完全不可达。此外 FRED 的 `_API_BASE` 在 Finnhub 之后定义，把 Finnhub 的也覆盖了，导致所有数据源请求都指向 FRED URL。 |
+| 修复方案 | ① Alpha Vantage 函数改名：`_API_BASE→_AV_API_BASE`、`_get_apikey→_get_av_apikey`、`_request→_av_request`、`fetch_realtime→fetch_realtime_alphavantage`；② TwelveData 函数改名：`_API_BASE→_TD_API_BASE`、`_get_apikey→_get_td_apikey`、`_request→_td_request`、`fetch_realtime→fetch_realtime_twelvedata`；③ FRED `_API_BASE→_FRED_API_BASE` 防止覆盖 Finnhub；④ `_route_us()` 的 `_td()` 路由改用 `fetch_realtime_twelvedata`，`_fh()` 保留 `fetch_realtime`（Finnhub） |
+| 涉及文件 | `backend/app/fetchers/global_markets_fetcher.py`（全部重命名）、`backend/app/services/market_service.py`（_route_us 更新） |
+| 验收条件 | `GET /api/v1/market/realtime/SPY?asset_type=US` 返回 `{"price": 729.46, "change_pct": -1.54, ...}`（已验证 ✅） |
+| 验证结果 | Finnhub: SPY=729.46 -1.54% ✅ / TwelveData: SPY=729.46002 -1.54% ✅ |
 
 ---
 

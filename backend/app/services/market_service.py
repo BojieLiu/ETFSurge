@@ -943,7 +943,7 @@ async def _route_us(symbol: str) -> dict | None:
     from ..fetchers import global_markets_fetcher
 
     def _td():
-        return global_markets_fetcher.fetch_realtime(symbol)
+        return global_markets_fetcher.fetch_realtime_twelvedata(symbol)
     def _fh():
         return global_markets_fetcher.fetch_realtime(symbol)
 
