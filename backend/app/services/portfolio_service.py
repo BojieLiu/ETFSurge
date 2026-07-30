@@ -81,118 +81,121 @@ async def remove_etf(db: AsyncSession, symbol: str) -> bool:
 
 
 async def build_price_map(etfs: list[PortfolioETF | dict]) -> dict[str, tuple[float, float]]:
-    """公开包装器，将同步 _build_price_map 放入线程池执行。"""
+    """Public wrapper: fetch realtime prices for all holdings concurrently (F8).
+
+    Runs the independent A-share batch, HK, US and index fetches in parallel
+    via asyncio.gather + run_sync so a slow source does not block the others.
+    """
     try:
-        return await run_sync(_build_price_map, etfs, timeout=30)
-    except (asyncio.TimeoutError, Exception):
+        return await _build_price_map_async(etfs)
+    except Exception:
         return {}
 
 
-def _build_price_map(etfs: list[PortfolioETF | dict]) -> dict[str, tuple[float, float]]:
-    """批量获取一组持仓的实时价格，返回 {symbol: (price, change_pct)} 映射表。"""
-    from ..fetchers.china_market import (
-        fetch_a_stock_batch, fetch_fund_nav, fetch_hk_stock_realtime, fetch_index_realtime,
-    )
+def _get_etf_attr(e, attr, default=None):
+    """Read symbol/asset_type/tracked_index from a PortfolioETF or dict."""
+    if isinstance(e, dict):
+        return e.get(attr, default)
+    return getattr(e, attr, default)
 
-    def _get_attr(e, attr, default=None):
-        if isinstance(e, dict):
-            return e.get(attr, default)
-        return getattr(e, attr, default)
 
-    a_symbols = [_get_attr(e, "symbol") for e in etfs if _get_attr(e, "asset_type") == "A" and _get_attr(e, "symbol", "")[:1] in ("1", "5", "6")]
-    hk_symbols = [_get_attr(e, "symbol") for e in etfs if _get_attr(e, "asset_type") == "HK"]
-    us_symbols = [_get_attr(e, "symbol") for e in etfs if _get_attr(e, "asset_type") == "US"]
-    # 离岸/场外 ETF 按 tracked_index 获取实时行情
-    tracked_a = [_get_attr(e, "tracked_index") for e in etfs if _get_attr(e, "tracked_index") and _get_attr(e, "tracked_index", "")[:1] in ("1", "5", "6")]
+def _split_symbols(etfs):
+    a_symbols = [_get_etf_attr(e, "symbol") for e in etfs
+                 if _get_etf_attr(e, "asset_type") == "A"
+                 and _get_etf_attr(e, "symbol", "")[:1] in ("1", "5", "6")]
+    hk_symbols = [_get_etf_attr(e, "symbol") for e in etfs if _get_etf_attr(e, "asset_type") == "HK"]
+    us_symbols = [_get_etf_attr(e, "symbol") for e in etfs if _get_etf_attr(e, "asset_type") == "US"]
+    tracked_a = [_get_etf_attr(e, "tracked_index") for e in etfs
+                 if _get_etf_attr(e, "tracked_index") and _get_etf_attr(e, "tracked_index", "")[:1] in ("1", "5", "6")]
     a_symbols = a_symbols + tracked_a
+    return a_symbols, hk_symbols, us_symbols, tracked_a
+
+
+async def _build_price_map_async(etfs):
+    """Concurrently fetch realtime prices for all holdings (F8)."""
+    # Use module-level imports (lines 11-12) so tests can patch
+    # app.services.portfolio_service.fetch_fund_nav etc.
+    a_symbols, hk_symbols, us_symbols, tracked_a = _split_symbols(etfs)
     m: dict[str, tuple[float, float]] = {}
 
-    if a_symbols:
+    async def _a_batch():
+        if not a_symbols:
+            return []
+        return await run_sync(fetch_a_stock_batch, a_symbols)
+
+    async def _hk_batch():
+        out = {}
+        for s in hk_symbols:
+            try:
+                items = await run_sync(fetch_hk_stock_realtime, s)
+                if items:
+                    out[s] = (float(items[0]["price"]), float(items[0]["change_pct"]))
+            except Exception:
+                pass
+        return out
+
+    async def _us_batch():
+        out = {}
+        for s in us_symbols:
+            try:
+                data = await run_sync(fetch_us_etf_realtime, s)
+                if data:
+                    out[s] = (float(data["price"]), float(data["change_pct"]))
+            except Exception:
+                pass
+        return out
+
+    async def _idx_batch():
         try:
-            all_a = fetch_a_stock_batch(a_symbols)
-            for item in all_a:
+            return {it["symbol"]: (it["price"], it["change_pct"]) for it in await run_sync(fetch_index_realtime)}
+        except Exception:
+            return {}
+
+    # F8: run independent top-level fetches concurrently (offloaded to threads).
+    results = await asyncio.gather(_a_batch(), _hk_batch(), _us_batch(), _idx_batch(),
+                                    return_exceptions=True)
+    for res in results:
+        if isinstance(res, Exception):
+            continue
+        if isinstance(res, list):  # A-share batch
+            for item in res:
                 m[item["symbol"]] = (item["price"], item["change_pct"])
-        except Exception:
-            pass
+        elif isinstance(res, dict):  # HK / US / index
+            m.update(res)
 
-    # FIX-07: parallel HK/US quote fetch
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-    futures = []
-    if hk_symbols or us_symbols:
-        with ThreadPoolExecutor(max_workers=8) as executor:
-            def _fetch_hk(sym):
-                try:
-                    items = fetch_hk_stock_realtime(sym)
-                    if items:
-                        return sym, (float(items[0]["price"]), float(items[0]["change_pct"]))
-                except Exception:
-                    pass
-                return sym, None
-            def _fetch_us(sym):
-                try:
-                    data = fetch_us_etf_realtime(sym)
-                    if data:
-                        return sym, (float(data["price"]), float(data["change_pct"]))
-                except Exception:
-                    pass
-                return sym, None
-            if hk_symbols:
-                for s in hk_symbols:
-                    futures.append(executor.submit(_fetch_hk, s))
-            for s in us_symbols:
-                futures.append(executor.submit(_fetch_us, s))
-            for f in as_completed(futures):
-                sym, val = f.result()
-                if val is not None:
-                    m[sym] = val
-
-    # Also fetch tracked indices for off-exchange funds
-    tracked = list({_get_attr(e, "tracked_index") for e in etfs if _get_attr(e, "tracked_index") and _get_attr(e, "tracked_index") not in m})
+    # NAV fallback for off-exchange tracked indices still missing (parallel).
+    tracked = list({_get_etf_attr(e, "tracked_index") for e in etfs
+                    if _get_etf_attr(e, "tracked_index") and _get_etf_attr(e, "tracked_index") not in m})
     if tracked:
-        try:
-            all_idx = fetch_index_realtime()
-            for item in all_idx:
-                if item["symbol"] in tracked:
-                    m[item["symbol"]] = (item["price"], item["change_pct"])
-        except Exception:
-            pass
-        # Fallback: compute change from NAV if still missing (FIX-07 parallel)
-        tracked_missing = [t for t in tracked if t not in m]
-        if tracked_missing:
-            from concurrent.futures import ThreadPoolExecutor, as_completed
-            def _fetch_nav_fallback(sym):
-                try:
-                    nav_data = fetch_fund_nav(sym)
-                    if nav_data:
-                        if isinstance(nav_data, tuple) and len(nav_data) >= 1:
-                            return sym, (float(nav_data[0]), float(nav_data[1]) if len(nav_data) > 1 else 0.0)
-                        elif isinstance(nav_data, dict) and nav_data.get("nav") and nav_data.get("nav_date"):
-                            from datetime import datetime, timedelta
-                            nav = float(nav_data["nav"])
-                            nav_date = datetime.strptime(nav_data["nav_date"], "%Y-%m-%d")
-                            if (datetime.now() - nav_date).days <= 3:
-                                return sym, (nav, 0.0)
-                except Exception:
-                    pass
-                return sym, None
-            nav_futures = []
-            with ThreadPoolExecutor(max_workers=min(len(tracked_missing), 4)) as nav_executor:
-                for t in tracked_missing:
-                    nav_futures.append(nav_executor.submit(_fetch_nav_fallback, t))
-                for f in as_completed(nav_futures):
-                    sym, val = f.result()
-                    if val is not None:
-                        m[sym] = val
+        async def _nav(s):
+            try:
+                nav = await run_sync(fetch_fund_nav, s)
+                if nav:
+                    if isinstance(nav, tuple) and len(nav) >= 1:
+                        return s, (float(nav[0]), float(nav[1]) if len(nav) > 1 else 0.0)
+                    elif isinstance(nav, dict) and nav.get("nav") and nav.get("nav_date"):
+                        from datetime import datetime
+                        nav_v = float(nav["nav"])
+                        nav_date = datetime.strptime(nav["nav_date"], "%Y-%m-%d")
+                        if (datetime.now() - nav_date).days <= 3:
+                            return s, (nav_v, 0.0)
+            except Exception:
+                pass
+            return s, None
+
+        nav_res = await asyncio.gather(*[_nav(t) for t in tracked])
+        for s, val in nav_res:
+            if val is not None:
+                m[s] = val
 
     # Map tracked_index prices to fund symbols for off-exchange funds
     for e in etfs:
-        sym = _get_attr(e, "symbol")
-        ti = _get_attr(e, "tracked_index")
+        sym = _get_etf_attr(e, "symbol")
+        ti = _get_etf_attr(e, "tracked_index")
         if ti and ti in m and sym not in m:
             m[sym] = m[ti]
 
     return m
-
 
 async def calculate_allocation(
     db: AsyncSession | None = None,

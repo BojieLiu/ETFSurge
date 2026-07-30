@@ -51,21 +51,36 @@ export default defineConfig({
     },
   },
   build: {
+    // F12: target a modern baseline so terser emits leaner ES2020 output
+    // (smaller bundles → better Lighthouse performance in prod).
+    target: 'es2020',
+    cssTarget: 'chrome80',
     // P2.3: Tree-shaking optimization — remove dead exports
     rollupOptions: {
+      // F12 fix: previously `moduleSideEffects: false` told rollup to assume
+      // NO module has side effects, which dropped the side-effectful entry
+      // (main.js -> app.mount) and emitted a blank-page prod build (no
+      // executable <script>). Keep rollup's default side-effect detection
+      // (respects each package.json "sideEffects" field) while still trimming
+      // redundant property reads.
       treeshake: {
-        moduleSideEffects: false,
         propertyReadSideEffects: false,
         tryCatchDeoptimization: false,
       },
       output: {
-        manualChunks: {
-          'vendor-vue': ['vue', 'vue-router', 'pinia'],
-          // P2.1: Remove full echarts from manualChunk — tree-shakable imports
-          // used via echarts/core/echarts/charts/echarts/components
-          'vendor-echarts': ['vue-echarts'],
-          'vendor-axios': ['axios'],
-          'vendor-marked': ['marked'],
+        // F12: function-based manualChunks reliably splits heavy vendors into
+        // their own chunks (the static-object form produced empty chunks
+        // because the libs were merged into the entry chunk). This enables
+        // long-term caching + parallel download → better Lighthouse perf.
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('echarts') || id.includes('zrender')) return 'vendor-echarts'
+            if (id.includes('marked')) return 'vendor-marked'
+            if (id.includes('axios')) return 'vendor-axios'
+            if (id.includes('vue') || id.includes('vue-router') ||
+                id.includes('pinia') || id.includes('@vue')) return 'vendor-vue'
+            return 'vendor'
+          }
         },
       },
     },

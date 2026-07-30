@@ -1,9 +1,10 @@
 ﻿# ETF Surge 方案实施总计划
 
-> 生成日期: 2026-07-29 | 版本: **v27.0**
+> 生成日期: 2026-07-30 | 版本: **v28.0**
 > ✅ **文档归档（2026-07-29 v20.1）**：8 份已全部实施/已替代的方案文档归档至 `docs/archived/` — `optimization-master-plan.md`、`optimization-master-plan-v2.md`、`performance-diagnosis-and-optimization-plan.md`、`fix-plan-master.md`、`fix-plan-pool.md`、`s5-markethub-design.md`、`system-performance-and-quality-review.md`、`fundamental-flow-factors-evaluation.md`。
 > ✅ **Phase 21 已完成**（2026-07-29）：修复 4 个前端单测失败（useMarketSearch + useSectorAnalysis mock 目标错误） + UI Phase 3(Steps 6-8)。详见下方 v21.0。
 > ✅ **Phase 27 已完成**（2026-07-30）：实施 `docs/system-diagnosis-and-optimization-plan.md` 子集 — F1(timeline select 导入 P0) + F2(A股搜索降级 levistock P1) + F4(max_tokens 8192→12288) + F5(删除 reasoning_content fallback) + F19(因子 industry 注入) + F15/F16/F20/F22(verify_e2e 加固：跨市场搜索/M14 门禁/china_specific 完整性/预热门禁收紧)。契约驱动 + TDD：新增 `api-contracts/market/search.md` 与 `tests/test_system_diagnosis_fixes.py`（15 用例全 PASS）。详见下方 v27.0。
+> ✅ **Phase 28 已完成**（2026-07-30）：推进 `docs/system-diagnosis-and-optimization-plan.md` 的**遗漏项 + 推迟项**，并先对齐 4 处实现偏差回方案字面。契约驱动 + TDD：先写契约/后编码/再补单测。范围：4 处偏差对齐（D1 F2→ETF 模式降级、D2/D3 F16→5s 门禁、D4 F20→valid_count>0）+ F6(LLM 重试) + F8(calculate 并行化) + F14(aiosqlite 降级 WARNING) + F3(HK/US 搜索实时行情补充) + F7(LLM 健康探针端点) + F9(ETF 扫描并行批处理) + F11(demjson→orjson/json 守卫 shim) + F12(前端 prod 构建调优，含修复 v25.0 P2.3 的空白页 bug) + F13(CLS 修复) + F17(verify_e2e LLM 连通性测试) + F18(Lighthouse CI Performance>60 门禁)。新增契约 `api-contracts/admin/llm-health.md`，单测扩至 26 用例全 PASS。详见下方 v28.0。
 > ✅ **Phase 20 已完成**（2026-07-29）：综合诊断剩余项 — F1(布林带列名前缀匹配修复 P0) + F2(板块默认限额 80→500 P1) + F3(ic_tracker 类型错误 P1) + 11 个新单测。详见下方 v20.0。
 > ✅ **Phase 16 已完成**（2026-07-29）：P1/P2 剩余项 — S5(K线缓存统一) + S7(策略检查LLM报告) + S11(新闻重试) + S12(网易财经K线)。详见下方 v16.0。
 > ✅ **Phase 15 已完成**（2026-07-29）：诊断计划 P0/P1 剩余项 — S1(CircuitBreaker废弃) + S2(shares_change数据注入) + S9(fund_shares字段)。详见下方 v17.0。
@@ -1486,6 +1487,26 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 | | | | **验证结果：** 16/16 新单测 PASS；之前所有 Phase 1-4 的 47/47 也 PASS；合计 63/63 无回归。
 | | | | **改动文件：** backend/app/config.py、backend/app/database.py、backend/app/fetchers/china_market.py、backend/tests/test_phase5_architecture.py（新）、docs/implementation-master-plan.md\|
 | | **v27.0** | 2026-07-30 | **Phase 27 — 系统诊断方案实施（契约驱动 + TDD）** | 详见下方 |
+| | **v28.0** | 2026-07-30 | **Phase 28 — 系统诊断方案：偏差对齐 + 遗漏/推迟项** | 详见下方 |
+| | | | **来源：** `docs/system-diagnosis-and-optimization-plan.md` |
+| | | | **偏差对齐（先于遗漏项，回到方案字面）：** |
+| | | | **D1 — F2 实现对齐：** 原 v27.0 将 `search(market="A")` 降级写成 levistock `fetch_all_stocks`；方案字面为「fallback 到 ETF 模式」。改为调用 `search_etf(keyword)`（与 F2 方案字面一致），并更新 `api-contracts/market/search.md` 第 5 条。 |
+| | | | **D2/D3 — F16 门禁对齐：** `verify_e2e.py` search / drift-check 慢查询门禁由 10.0s 收紧到方案字面 5.0s。 |
+| | | | **D4 — F20 完整性对齐：** china_specific 断言由 `no_data < count` 改为方案字面 `valid_count > 0`（数据真正可用而非仅非全缺失）。 |
+| | | | **F6 — LLM 重试 (P3)：** `llm.py` `llm_complete` / `llm_complete_with_system` 外层增加 `for attempt in range(max_retries+1)` 重试循环，全供应商失败后重试 1 次（间隔 3s），常量 `LLM_MAX_RETRIES=1` / `LLM_RETRY_DELAY=3.0`。 |
+| | | | **F8 — calculate 并行化 (P4)：** `portfolio_service.build_price_map` 改为异步并行：`asyncio.gather` 并发 A/HK/US/指数四批（各用 `run_sync` 包裹同步 I/O），NAV 兜底同样并行。公开签名 `async def build_price_map(etfs) -> dict` 不变。 |
+| | | | **F14 — aiosqlite 日志降级 (P11)：** `core/logging.py` 预热期间 `logging.getLogger("aiosqlite").setLevel(WARNING)`，消除每条 SQL 的前后 DEBUG 字符串格式化开销。 |
+| | | | **F3 — HK/US 跨市场搜索 (P2)：** `market_service.search_hk_us` 以静态 `HKUS_ETF_MAP` 为基础匹配，并实时补充行情（`get_asset_realtime` 经项目统一实时管道 TwelveData/Finnhub/HK 源）附加 `price`/`change_pct`；实时失败降级为仅静态结果（不抛错）。注：方案原文提 yfinance/akshare，但本项目已因境内不稳定移除 yfinance（见 `_route_us`），故采用既有实时管道等价补充。 |
+| | | | **F7 — LLM 健康探针 (P3)：** 新增 `GET /api/v1/admin/llm/health`（并发探测所有已配置供应商、最小 prompt、`max_tokens=16`、不写 token_store、失败结构化返回不抛 500）。契约 `api-contracts/admin/llm-health.md`。 |
+| | | | **F9 — ETF 扫描并行批处理 (P5)：** `etf_scanner._tencent_gtimg_batch` 由「逐块串行 HTTP」改为 `_tencent_gtimg_chunk` + `ThreadPoolExecutor` 并发（≤8 worker，小批量≤2 块走串行）；单块失败互不影响。 |
+| | | | **F11 — demjson→orjson/json 守卫 shim (P5)：** 新增 `core/fast_json.py` `install_demjson_shim()`，用 orjson/json 快路径替换 akshare 的 `demjson.decode`，非严格 JSON 自动回退原 demjson；仅 `ETF_FAST_JSON=1` 时于启动期安装，默认不影响主路径。 |
+| | | | **F12 — 前端 prod 构建调优 (P6)：** 修复 v25.0 P2.3 的 `treeshake: { moduleSideEffects: false }` 缺陷——该配置令 rollup 丢弃副作用入口（`main.js`→`app.mount`），导致生产构建只产出空 vendor chunk、无可执行 `<script>`，线上白屏。改为保留 rollup 默认副作用探测（仅 `propertyReadSideEffects:false`）；并新增 `build.target:'es2020'`、`cssTarget:'chrome80'`、函数式 `manualChunks`（按包名可靠拆分 vendor-vue/echarts/axios/marked）。`npm run build` 现已产出真实入口脚本 + 合理 vendor 分块。 |
+| | | | **F13 — CLS 修复 (P6)：** `App.vue` `.main` 增加 `min-height: 70vh`，为异步路由视图加载预留垂直空间，避免内容塌陷造成的布局偏移（配合 `.lighthouserc.js` 的 CLS<0.1 硬门禁）。 |
+| | | | **F17 — verify_e2e LLM 连通性 (P3)：** `verify_e2e.py` `section_llm_import` 新增 `GET /admin/llm/health` 连通性探针（端点恒 200；探测失败记为 degraded 不阻断 e2e）。 |
+| | | | **F18 — Lighthouse CI 门禁：** `.lighthouserc.js` Performance 改为 `error` 硬门禁 `minScore 0.6`（方案字面 >60 最低线），CLS 设为 `error` `maxNumericValue 0.1`；`.github/workflows/performance.yml` 注释对齐 F18。 |
+| | | | **F10 — 预热缓存 (P9)：** 经核查 `etf_scanner.fetch_all_etfs_base` 已实现内存缓存 + 文件缓存（`data/etf_list_cache.json`，4h TTL），满足「后续启动直接读取」，故 F10 视为已满足（本 turn 未额外改动，依赖 F9 加速首次扫描）。 |
+| | | | **契约：** 新增 `api-contracts/admin/llm-health.md`（F7）；更新 `api-contracts/market/search.md`（F2 D1 / F3）。 |
+| | | | **新增/扩展单测：** `tests/test_system_diagnosis_fixes.py` 扩至 **26 用例全 PASS**（F3×3 / F6 经 F4/F5 覆盖 / F7×4 / F9×2 / F11×2 / F14 经导入验证 / F19×3 等）；前端 `npm run build` 通过。 |
 | | | | **来源：** `docs/system-diagnosis-and-optimization-plan.md` |
 | | | | **F1 — timeline 端点 500 (P0)：** `backend/app/routers/portfolio.py` 的 `get_timeline()` 补 `from sqlalchemy import select`（函数内仅 import 了模型类与 json，缺失 `select` 导致 NameError 500）。 |
 | | | | **F2 — A 股搜索断裂 (P1)：** `backend/app/routers/market.py` `search(market="A")` 在本地 `Instrument` 表为空（未预装）时，新增 levistock `fetch_all_stocks` 实时降级，按 keyword 过滤返回真实 A 股个股，杜绝 0 结果断链。HK/US 维持 `search_hk_us` 不变。 |

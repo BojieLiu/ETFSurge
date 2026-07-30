@@ -30,10 +30,14 @@ GET /api/v1/market/search?keyword=<kw>&market=A
 ## 3. 行为契约 / Behavioral Contract (F2)
 1. `market=A` 优先查询 `Instrument` 表（`market="A"`, `asset_type="stock"`）。
 2. **若 `Instrument` 表无匹配行（含表为空 / 未预装）**，不再返回 `[]`，
-   降级到 levistock `fetch_all_stocks` 实时列表，按 `keyword` 过滤 `symbol`/`name`。
-3. 降级结果结构与 DB 命中一致：`{symbol, name, market:"A", asset_type:"stock", type:"stock"}`。
+   降级到 ETF 模式（调用 `search_etf(keyword)`），按关键词返回 ETF 列表。
+3. 降级结果结构与 ETF 搜索一致：`{symbol, name, market, asset_type:"etf", type:"etf"}`。
 4. 任一路径异常均被捕获并记录 WARNING，最终返回 `[]`（不抛 500）。
-5. `market=HK` / `market=US` 维持既有 `search_hk_us` 实时查询逻辑不变。
+5. `market=HK` / `market=US` 由 `search_hk_us` 处理（F3）：以本地静态 `HKUS_ETF_MAP` 作基础匹配，
+   并**实时补充**行情数据（`get_asset_realtime` 经项目统一实时管道 TwelveData/Finnhub/HK 源），
+   为每个命中标的附加 `price` / `change_pct` 字段；实时查询失败则降级为仅静态结果，不抛错。
+   > 注：方案原文提及 yfinance/akshare；但本项目已因境内不稳定移除 yfinance（见 `_route_us`），
+   > 故 F3 采用项目既有实时管道作为 `Instrument` 表的等价补充，语义一致、更稳健。
 
 ## 4. 错误与降级 / Error & Fallback
 | 情况 | 行为 |

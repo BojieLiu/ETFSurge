@@ -1,8 +1,9 @@
-// F13: Lighthouse CI 配置 — 性能基线门禁
+// F18: Lighthouse CI 配置 — 性能门禁
 //
 // 配置流式收集 + 本地断言门禁。
-// 当前门禁设置为渐进式改善基线，随优化逐步收紧。
-// 参考: docs/comprehensive-diagnosis-and-optimization-plan.md §11.4 F13
+// 方案 system-diagnosis-and-optimization-plan.md F18 要求设定 Performance > 60 最低线。
+// Performance 设为 error（硬门禁），其余类别为 warn（渐进式改善）。
+// 参考: docs/system-diagnosis-and-optimization-plan.md §5.4 F18
 //
 // 用法:
 //   lhci autorun --config=.lighthouserc.js
@@ -22,16 +23,17 @@ module.exports = {
       },
     },
     assert: {
-      // 渐进式门禁: Phase 1 基线 (Performance >= 50, 从29逐步提升)
+      // F18: Performance 硬门禁 >= 60（最低线）；其余类别渐进式 warn
       assertions: {
-        "categories:performance": ["warn", { minScore: 0.5 }],
+        "categories:performance": ["error", { minScore: 0.6 }],
         "categories:accessibility": ["warn", { minScore: 0.8 }],
         "categories:best-practices": ["warn", { minScore: 0.8 }],
         "categories:seo": ["warn", { minScore: 0.8 }],
         // 核心 Web Vitals 基线
         "largest-contentful-paint": ["warn", { maxNumericValue: 8000 }],
         "total-blocking-time": ["warn", { maxNumericValue: 500 }],
-        "cumulative-layout-shift": ["warn", { maxNumericValue: 0.1 }],
+        // F13: CLS 目标 < 0.1（配合 .main min-height 预留空间）
+        "cumulative-layout-shift": ["error", { maxNumericValue: 0.1 }],
       },
     },
     upload: {

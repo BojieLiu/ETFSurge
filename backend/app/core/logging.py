@@ -70,6 +70,10 @@ def setup_logging() -> None:
     for numba_logger in ("numba", "numba.core.ssa", "numba.core"):
         logging.getLogger(numba_logger).setLevel(logging.WARNING)
 
+    # F14: aiosqlite 在预热期间每条 SQL 前后均打印 DEBUG 日志，
+    # 累计造成数秒 CPU 浪费。降级到 WARNING 以抑制预热期噪声。
+    logging.getLogger("aiosqlite").setLevel(logging.WARNING)
+
     _CONFIGURED = True
 
 

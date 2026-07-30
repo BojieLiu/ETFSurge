@@ -117,6 +117,19 @@ async def get_thread_pool():
     }
 
 
+@router.get("/llm/health")
+async def get_llm_health(
+    timeout: float = Query(15.0, description="单供应商探测超时(秒)", ge=1.0, le=60.0),
+):
+    """F7: LLM 供应商健康探针 — 实时探测每个已配置供应商的连通性。
+
+    不调用完整业务链路，不写入 token_store。探测失败返回结构化结果而非 500。
+    供 verify_e2e F17 连通性测试与运维监控使用。
+    """
+    from ..analysis.llm import llm_health_check
+    return await llm_health_check(timeout=timeout)
+
+
 @router.get("/factor-health")
 async def get_factor_health():
     """#5: 因子计算健康检查 — 返回每个符号的非零因子比例。

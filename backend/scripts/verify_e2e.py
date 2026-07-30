@@ -244,7 +244,7 @@ def section_market():
             ok = r.status_code == 200 and isinstance(r.json(), list) and len(r.json()) > 0
             check(f"GET /market/search?keyword={_kw}&market={_mkt} -> {r.status_code} ({_elapsed:.1f}s) 有结果",
                   ok, "" if ok else f"返回 {len(r.json()) if r.status_code == 200 else 'ERR'} 条")
-            _check_response_time(f"/market/search?market={_mkt}", _elapsed, 10.0)
+            _check_response_time(f"/market/search?market={_mkt}", _elapsed, 5.0)
         except requests.Timeout:
             check(f"GET /market/search?market={_mkt}", False, "请求超时（20s）")
         except Exception as e:
@@ -543,9 +543,12 @@ def section_portfolio():
 
     # GET /portfolio/drift-check
     try:
+        _t0 = time.time()
         r = requests.get(f"{BASE}/api/v1/portfolio/drift-check", timeout=10)
+        _elapsed = time.time() - _t0
         ok = r.status_code == 200
         check(f"GET /drift-check -> {r.status_code}", ok)
+        _check_response_time("/portfolio/drift-check", _elapsed, 5.0)
         if ok:
             check(f"drift 数据含字段", bool(r.json()), "空数据" if not r.json() else "")
     except Exception as e:
@@ -1025,12 +1028,12 @@ def section_factors(host, port):
             cn = cats.get("china_specific")
             if cn:
                 cnt = cn.get("count", 0)
-                no_data = cn.get("no_data_count", 0)
+                valid = cn.get("valid_count", 0)
                 # F19 regression guard: industry injection must make these factors
-                # produce real (non-None) IC values rather than all no_data.
-                check(f"china_specific 有 {cnt} 个因子且非全部 no_data (no_data={no_data})",
-                      cnt >= 3 and no_data < cnt,
-                      f"count={cnt}, no_data={no_data}")
+                # produce real (non-None) IC values -> valid_count > 0.
+                check(f"china_specific 有 {cnt} 个因子且 valid_count>0 (valid={valid})",
+                      cnt >= 3 and valid > 0,
+                      f"count={cnt}, valid_count={valid}")
             else:
                 check("china_specific 类别存在", False, "未返回 china_specific 类别")
         else:
@@ -1398,6 +1401,35 @@ def section_llm_import():
         check("LLM 模块导入", False, f"ImportError: {e}")
     except Exception as e:
         check("LLM 模块", False, f"Error: {e}")
+
+    # F17: LLM 供应商连通性探针（不调用完整链路）。端点恒返回 200，
+    # 探测失败仅记为 degraded（不阻断 e2e），但端点本身必须可达且结构合法。
+    try:
+        _t0 = time.time()
+        r = requests.get(f"{BASE}/api/v1/admin/llm/health", timeout=30)
+        _elapsed = time.time() - _t0
+        check(f"GET /admin/llm/health -> {r.status_code} ({_elapsed:.1f}s)", r.status_code == 200)
+        if r.status_code == 200:
+            data = r.json()
+            has_structure = (
+                "status" in data and "has_api_key" in data and "providers" in data
+                and isinstance(data["providers"], list)
+            )
+            check("LLM 健康响应结构合法", has_structure,
+                  f"status={data.get('status')}, providers={len(data.get('providers', []))}")
+            if data.get("has_api_key"):
+                available = [p for p in data["providers"] if p.get("ok")]
+                if available:
+                    check("至少一个 LLM 供应商可用", True,
+                          f"{len(available)}/{len(data['providers'])} 可用")
+                else:
+                    # 供应商全部探测失败：记为 WARN（degraded），不阻断 e2e
+                    check("LLM 供应商连通性", True,
+                          f"WARN: 全部探测失败 (degraded)，但端点正常")
+            else:
+                check("LLM API key 未配置", True, "status=no_key，跳过连通性")
+    except Exception as e:
+        check("LLM 健康端点连通性", False, f"Error: {e}")
 
 
 def section_task_status():

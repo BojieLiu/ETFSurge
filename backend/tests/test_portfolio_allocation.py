@@ -75,7 +75,7 @@ async def test_off_exchange_price_gt_zero_via_nav():
     with patch("app.services.portfolio_service.fetch_fund_nav", return_value=nav), \
          patch("app.services.portfolio_service.fetch_a_stock_batch", return_value=[]), \
          patch("app.services.portfolio_service.fetch_us_etf_realtime", return_value=None):
-        price_map = ps._build_price_map(etfs)
+        price_map = await ps.build_price_map(etfs)
 
     assert price_map["022449"][0] > 0
     assert price_map["022449"] == nav

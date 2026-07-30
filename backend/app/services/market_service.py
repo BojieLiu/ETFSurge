@@ -605,40 +605,67 @@ HKUS_ETF_MAP: list[dict[str, str]] = [
 ]
 
 
-async def search_hk_us(keyword: str = "") -> list[dict[str, Any]]:
+async def search_hk_us(keyword: str = "", enrich: bool = True) -> list[dict[str, Any]]:
     """Search HK/US ETFs by keyword.
 
-    Uses static map for fast local matching.
-    Returns list of {symbol, name, market, asset_type, type}.
-    Type suffix: .HK for HK stocks, no suffix for US stocks.
+    Uses static map for fast local matching (always works offline), then
+    supplements each hit with live quote data via the project's unified realtime
+    pipeline (TwelveData/Finnhub for US, HK sources for HK) — F3.
+    Live enrichment is best-effort: any failure falls back to the static result
+    without raising.
+
+    Returns list of {symbol, name, market, asset_type, type, [price], [change_pct]}.
     """
+    import asyncio
+
     kw = keyword.lower().strip()
 
-    # Filter by keyword if given
+    # Base matches from static map
     if kw:
-        results = []
-        for e in HKUS_ETF_MAP:
-            if kw in e["symbol"].lower() or kw in e["name"].lower():
-                results.append({
-                    "symbol": e["symbol"],
-                    "name": e["name"],
-                    "market": e["market"],
-                    "asset_type": "etf",
-                    "type": "etf",
-                })
+        base = [e for e in HKUS_ETF_MAP
+                if kw in e["symbol"].lower() or kw in e["name"].lower()]
+    else:
+        base = list(HKUS_ETF_MAP)
+
+    results = [{
+        "symbol": e["symbol"],
+        "name": e["name"],
+        "market": e["market"],
+        "asset_type": "etf",
+        "type": "etf",
+    } for e in base]
+
+    if not enrich or not results:
         return results
 
-    # Return all if no keyword
-    return [
-        {
-            "symbol": e["symbol"],
-            "name": e["name"],
-            "market": e["market"],
-            "asset_type": "etf",
-            "type": "etf",
-        }
-        for e in HKUS_ETF_MAP
-    ]
+    # F3: supplement with live quotes (best-effort, fast-fail on timeout)
+    async def _enrich(item: dict) -> dict:
+        try:
+            quote = await asyncio.wait_for(
+                get_asset_realtime(item["symbol"], item["market"]),
+                timeout=8.0,
+            )
+            if quote:
+                if quote.get("price") is not None:
+                    item = {**item, "price": quote["price"]}
+                if quote.get("change_pct") is not None:
+                    item = {**item, "change_pct": quote["change_pct"]}
+        except Exception as _exc:
+            logger.debug("[search_hk_us] live enrich failed for %s: %s",
+                         item["symbol"], _exc)
+        return item
+
+    try:
+        enriched = await asyncio.gather(*(_enrich(it) for it in results),
+                                        return_exceptions=True)
+        # _enrich catches its own errors and returns the original dict, so
+        # `enriched` is normally all dicts; keep only dicts as a safety net.
+        dicts = [r for r in enriched if isinstance(r, dict)]
+        if dicts:
+            results = dicts
+    except Exception as _exc:
+        logger.warning("[search_hk_us] enrichment gather failed: %s", _exc)
+    return results
 
 
 async def get_indices_meta() -> list[dict[str, Any]]:

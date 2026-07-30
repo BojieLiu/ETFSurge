@@ -469,6 +469,9 @@ onUnmounted(() => {
   flex: 1;
   width: 100%;
   padding: var(--space-6) 0;
+  /* F13: reserve vertical space for async route views so loading them
+     does not collapse the layout and shift surrounding elements (CLS). */
+  min-height: 70vh;
 }
 
 .container {

@@ -90,53 +90,74 @@ def _extract_index_keyword(name: str) -> str:
     return ""
 
 
+def _tencent_gtimg_chunk(chunk: list[str]) -> dict[str, dict[str, Any]]:
+    """Fetch a single gtimg chunk (sync HTTP). Returns code→metrics map."""
+    import requests as _req
+    partial: dict[str, dict[str, Any]] = {}
+    try:
+        prefix = "sh" if chunk[0][:2] in ("51", "58") else "sz"
+        query_codes = [f"{prefix}{c}" if not c.startswith(("sh", "sz", "SH", "SZ")) else c for c in chunk]
+        url = "http://qt.gtimg.cn/q=" + ",".join(c.lower() for c in query_codes)
+        resp = _req.get(url, timeout=5)
+        for line in resp.text.strip().split(";"):
+            if not line or "~" not in line:
+                continue
+            parts = line.split("~")
+            if len(parts) < 46:
+                continue
+            code = parts[2]
+            code_key = code[2:] if code[:2].lower() in ("sh", "sz") else code
+            try:
+                amount = float(parts[37] or 0)
+            except (ValueError, TypeError):
+                amount = 0
+            try:
+                turnover = float(parts[38] or 0)
+            except (ValueError, TypeError):
+                turnover = 0
+            try:
+                total_mv = float(parts[45] or 0)
+            except (ValueError, TypeError):
+                total_mv = 0
+            try:
+                pe = float(parts[47] or 0) if len(parts) > 47 else 0
+            except (ValueError, TypeError):
+                pe = 0
+            partial[code_key] = {
+                "amount": amount,
+                "turnover": turnover,
+                "fund_scale": total_mv,
+                "pe": pe,
+            }
+    except Exception:
+        return partial
+    return partial
+
+
 def _tencent_gtimg_batch(codes: list[str]) -> dict[str, dict[str, Any]]:
     """通过腾讯 gtimg 批量查询 ETF 行情，返回 code→{amount, turnover, fund_scale, pe} 映射。
 
     gtimg 免费、稳定、一次返回 88 个字段，无需 token。
+
+    F9: 将原来「逐块串行 HTTP」改为「分块后线程池并发请求」，把 ~18 个串行
+    请求压缩为并发（典型 5~8 worker），显著缩短预热期 ETF 扫描耗时。
+    单块失败不影响其他块（各自 try/except），行为向后兼容。
     """
-    import requests as _req
     chunk_size = 100
+    chunks = [codes[i:i + chunk_size] for i in range(0, len(codes), chunk_size)]
+    if not chunks:
+        return {}
+    # 小批量直接串行，避免线程池开销
+    if len(chunks) <= 2:
+        merged: dict[str, dict[str, Any]] = {}
+        for ch in chunks:
+            merged.update(_tencent_gtimg_chunk(ch))
+        return merged
+    from concurrent.futures import ThreadPoolExecutor
     result: dict[str, dict[str, Any]] = {}
-    for i in range(0, len(codes), chunk_size):
-        chunk = codes[i:i + chunk_size]
-        try:
-            prefix = "sh" if codes[0][:2] in ("51", "58") else "sz"
-            query_codes = [f"{prefix}{c}" if not c.startswith(("sh", "sz", "SH", "SZ")) else c for c in chunk]
-            url = "http://qt.gtimg.cn/q=" + ",".join(c.lower() for c in query_codes)
-            resp = _req.get(url, timeout=5)
-            for line in resp.text.strip().split(";"):
-                if not line or "~" not in line:
-                    continue
-                parts = line.split("~")
-                if len(parts) < 46:
-                    continue
-                code = parts[2]
-                code_key = code[2:] if code[:2].lower() in ("sh", "sz") else code
-                try:
-                    amount = float(parts[37] or 0)
-                except (ValueError, TypeError):
-                    amount = 0
-                try:
-                    turnover = float(parts[38] or 0)
-                except (ValueError, TypeError):
-                    turnover = 0
-                try:
-                    total_mv = float(parts[45] or 0)
-                except (ValueError, TypeError):
-                    total_mv = 0
-                try:
-                    pe = float(parts[47] or 0) if len(parts) > 47 else 0
-                except (ValueError, TypeError):
-                    pe = 0
-                result[code_key] = {
-                    "amount": amount,
-                    "turnover": turnover,
-                    "fund_scale": total_mv,
-                    "pe": pe,
-                }
-        except Exception:
-            continue
+    with ThreadPoolExecutor(max_workers=min(8, len(chunks))) as ex:
+        for partial in ex.map(_tencent_gtimg_chunk, chunks):
+            result.update(partial)
     return result
 
 

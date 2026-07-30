@@ -53,6 +53,15 @@ async def lifespan(app: FastAPI):
     setup_logging()
     logger.info("应用启动中…")
 
+    # F11: opt-in fast JSON shim for akshare's demjson decoder. Only active when
+    # ETF_FAST_JSON=1; never affects the default path (full fallback to demjson).
+    if os.environ.get("ETF_FAST_JSON", "").lower() in ("1", "true", "yes"):
+        from .core.fast_json import install_demjson_shim
+        try:
+            install_demjson_shim()
+        except Exception as _e:
+            logger.warning("[fast_json] shim install failed, ignored: %s", _e)
+
     # B2: Global exception handler for unhandled coroutine exceptions
     import asyncio as _local_asyncio
     loop = _local_asyncio.get_running_loop()

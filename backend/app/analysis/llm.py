@@ -1,6 +1,7 @@
 import json
 import time
 import sys
+import asyncio
 from typing import Any, AsyncGenerator
 
 from ..config import settings
@@ -10,6 +11,11 @@ from .registry import get_agent
 from .provider import get_configured_providers, has_any_api_key, ProviderConfig
 
 logger = get_logger(__name__)
+
+# F6: LLM retry policy — after every configured provider fails, retry the
+# full provider sequence once, waiting LLM_RETRY_DELAY seconds between attempts.
+LLM_MAX_RETRIES = 1
+LLM_RETRY_DELAY = 3.0
 
 # Keep the official DeepSeek URL for reference; the actual URL is now
 # per-provider and obtained from get_configured_providers().
@@ -96,32 +102,46 @@ async def _check_key():
         )
 
 
-async def llm_complete(prompt: str, response_format: dict | None = None) -> str:
+# F7: LLM health probe — ping each configured provider with a minimal request
+# and report connectivity. Does NOT call the full business chain and does NOT
+# write to token_store (health pings must not pollute real usage stats).
+async def llm_health_check(timeout: float = 15.0) -> dict:
+    """Probe every configured LLM provider and return a structured health report.
+
+    Returns a dict with overall `status` ("ok" / "degraded" / "no_key"),
+    `has_api_key`, `checked_at` and a `providers` list. Failures are reported
+    structurally (never raised), so the endpoint always returns 200.
+    """
     import httpx
-    await _check_key()
 
-    _caller = sys._getframe(1).f_code.co_name
+    checked_at = time.time()
+    if not has_any_api_key():
+        return {
+            "status": "no_key",
+            "checked_at": checked_at,
+            "has_api_key": False,
+            "providers": [],
+        }
+
     providers = get_configured_providers()
-    last_exc: Exception | None = None
+    if not providers:
+        return {
+            "status": "no_key",
+            "checked_at": checked_at,
+            "has_api_key": False,
+            "providers": [],
+        }
 
-    for provider in providers:
+    async def _probe(provider: ProviderConfig) -> dict:
         body = {
             "model": provider.model,
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-            ],
-            "temperature": 0.3,
-            "max_tokens": 12288,
+            "messages": [{"role": "user", "content": "ping"}],
+            "temperature": 0.0,
+            "max_tokens": 16,
         }
-        if response_format:
-            body["response_format"] = response_format
-
         _start = time.monotonic()
         try:
-            async with httpx.AsyncClient(
-                timeout=provider.timeout, trust_env=False
-            ) as client:
+            async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
                 resp = await client.post(
                     provider.api_url,
                     headers={
@@ -132,43 +152,143 @@ async def llm_complete(prompt: str, response_format: dict | None = None) -> str:
                 )
                 resp.raise_for_status()
                 data = resp.json()
-                message = data["choices"][0]["message"]
-                content = message.get("content", "")
+                msg = (data.get("choices") or [{}])[0].get("message", {})
+                # content may be empty for reasoning models with tiny max_tokens;
+                # the probe only cares that the API responded with a valid message.
+                has_content = "content" in msg or "reasoning_content" in msg
+                if not has_content:
+                    raise ValueError("provider returned no message")
+                latency = (time.monotonic() - _start) * 1000
+                return {
+                    "id": provider.id,
+                    "name": provider.name,
+                    "model": provider.model,
+                    "ok": True,
+                    "latency_ms": round(latency, 1),
+                    "status": "available",
+                    "error": None,
+                }
+        except Exception as _exc:
+            latency = (time.monotonic() - _start) * 1000
+            status = "timeout" if isinstance(_exc, (httpx.TimeoutException, asyncio.TimeoutError)) else "error"
+            return {
+                "id": provider.id,
+                "name": provider.name,
+                "model": provider.model,
+                "ok": False,
+                "latency_ms": round(latency, 1),
+                "status": status,
+                "error": str(_exc),
+            }
 
-                usage = data.get("usage", {})
+    results = await asyncio.gather(*(_probe(p) for p in providers), return_exceptions=True)
+    # gather never raises (each _probe catches), but guard anyway
+    providers_out = []
+    for r in results:
+        if isinstance(r, Exception):
+            providers_out.append({
+                "id": "unknown", "name": "unknown", "model": "unknown",
+                "ok": False, "latency_ms": 0.0, "status": "error", "error": str(r),
+            })
+        elif isinstance(r, dict):
+            providers_out.append(r)
+
+    overall = "ok" if any(p["ok"] for p in providers_out) else "degraded"
+    return {
+        "status": overall,
+        "checked_at": checked_at,
+        "has_api_key": True,
+        "providers": providers_out,
+    }
+
+
+async def llm_complete(
+    prompt: str,
+    response_format: dict | None = None,
+    max_retries: int = LLM_MAX_RETRIES,
+    retry_delay: float = LLM_RETRY_DELAY,
+) -> str:
+    import httpx
+    await _check_key()
+
+    _caller = sys._getframe(1).f_code.co_name
+    providers = get_configured_providers()
+    last_exc: Exception | None = None
+
+    for attempt in range(max_retries + 1):
+        for provider in providers:
+            body = {
+                "model": provider.model,
+                "messages": [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0.3,
+                "max_tokens": 12288,
+            }
+            if response_format:
+                body["response_format"] = response_format
+
+            _start = time.monotonic()
+            try:
+                async with httpx.AsyncClient(
+                    timeout=provider.timeout, trust_env=False
+                ) as client:
+                    resp = await client.post(
+                        provider.api_url,
+                        headers={
+                            "Authorization": f"Bearer {provider.api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json=body,
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                    message = data["choices"][0]["message"]
+                    content = message.get("content", "")
+
+                    usage = data.get("usage", {})
+                    _duration = (time.monotonic() - _start) * 1000
+                    await token_store.record(UsageRecord(
+                        function_name=_caller,
+                        prompt_tokens=usage.get("prompt_tokens", 0),
+                        completion_tokens=usage.get("completion_tokens", 0),
+                        total_tokens=usage.get("total_tokens", 0),
+                        model=provider.model,
+                        timestamp=time.time(),
+                        success=True,
+                        duration_ms=round(_duration, 1),
+                        provider=provider.id,
+                    ))
+                    return content
+            except Exception as _exc:
                 _duration = (time.monotonic() - _start) * 1000
                 await token_store.record(UsageRecord(
                     function_name=_caller,
-                    prompt_tokens=usage.get("prompt_tokens", 0),
-                    completion_tokens=usage.get("completion_tokens", 0),
-                    total_tokens=usage.get("total_tokens", 0),
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                    total_tokens=0,
                     model=provider.model,
                     timestamp=time.time(),
-                    success=True,
+                    success=False,
                     duration_ms=round(_duration, 1),
+                    error_message=str(_exc),
                     provider=provider.id,
                 ))
-                return content
-        except Exception as _exc:
-            _duration = (time.monotonic() - _start) * 1000
-            await token_store.record(UsageRecord(
-                function_name=_caller,
-                prompt_tokens=0,
-                completion_tokens=0,
-                total_tokens=0,
-                model=provider.model,
-                timestamp=time.time(),
-                success=False,
-                duration_ms=round(_duration, 1),
-                error_message=str(_exc),
-                provider=provider.id,
-            ))
-            last_exc = _exc
+                last_exc = _exc
+                logger.warning(
+                    "[LLM] Provider %s failed after %.1fs: %s",
+                    provider.id, _duration / 1000, _exc,
+                )
+                continue
+
+        # All providers failed this attempt -> retry after a short delay
+        if attempt < max_retries:
             logger.warning(
-                "[LLM] Provider %s failed after %.1fs: %s",
-                provider.id, _duration / 1000, _exc,
+                "[LLM] all providers failed (attempt %d/%d), retrying in %.1fs",
+                attempt + 1, max_retries, retry_delay,
             )
-            continue
+            await asyncio.sleep(retry_delay)
 
     if last_exc is None:
         raise RuntimeError("No LLM providers available")
@@ -320,8 +440,15 @@ async def llm_complete_stream(
     yield {"type": "error", "error": str(last_exc)}
 
 
-async def llm_complete_with_system(system_prompt: str, prompt: str, response_format: dict | None = None, force_json: bool = False) -> str:
-    """Call LLM with a custom system prompt, with provider failover."""
+async def llm_complete_with_system(
+    system_prompt: str,
+    prompt: str,
+    response_format: dict | None = None,
+    force_json: bool = False,
+    max_retries: int = LLM_MAX_RETRIES,
+    retry_delay: float = LLM_RETRY_DELAY,
+) -> str:
+    """Call LLM with a custom system prompt, with provider failover + retry (F6)."""
     import httpx
     await _check_key()
 
@@ -329,73 +456,82 @@ async def llm_complete_with_system(system_prompt: str, prompt: str, response_for
     providers = get_configured_providers()
     last_exc: Exception | None = None
 
-    for provider in providers:
-        body = {
-            "model": provider.model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt},
-            ],
-            "temperature": 0.3,
-            "max_tokens": 12288,
-        }
-        if response_format:
-            body["response_format"] = response_format
-        elif force_json:
-            body["response_format"] = {"type": "json_object"}
+    for attempt in range(max_retries + 1):
+        for provider in providers:
+            body = {
+                "model": provider.model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0.3,
+                "max_tokens": 12288,
+            }
+            if response_format:
+                body["response_format"] = response_format
+            elif force_json:
+                body["response_format"] = {"type": "json_object"}
 
-        _start = time.monotonic()
-        try:
-            async with httpx.AsyncClient(
-                timeout=provider.timeout, trust_env=False
-            ) as client:
-                resp = await client.post(
-                    provider.api_url,
-                    headers={
-                        "Authorization": f"Bearer {provider.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json=body,
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                message = data["choices"][0]["message"]
-                content = message.get("content", "")
+            _start = time.monotonic()
+            try:
+                async with httpx.AsyncClient(
+                    timeout=provider.timeout, trust_env=False
+                ) as client:
+                    resp = await client.post(
+                        provider.api_url,
+                        headers={
+                            "Authorization": f"Bearer {provider.api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json=body,
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                    message = data["choices"][0]["message"]
+                    content = message.get("content", "")
 
-                usage = data.get("usage", {})
+                    usage = data.get("usage", {})
+                    _duration = (time.monotonic() - _start) * 1000
+                    await token_store.record(UsageRecord(
+                        function_name=_caller,
+                        prompt_tokens=usage.get("prompt_tokens", 0),
+                        completion_tokens=usage.get("completion_tokens", 0),
+                        total_tokens=usage.get("total_tokens", 0),
+                        model=provider.model,
+                        timestamp=time.time(),
+                        success=True,
+                        duration_ms=round(_duration, 1),
+                        provider=provider.id,
+                    ))
+                    return content
+            except Exception as _exc:
                 _duration = (time.monotonic() - _start) * 1000
                 await token_store.record(UsageRecord(
                     function_name=_caller,
-                    prompt_tokens=usage.get("prompt_tokens", 0),
-                    completion_tokens=usage.get("completion_tokens", 0),
-                    total_tokens=usage.get("total_tokens", 0),
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                    total_tokens=0,
                     model=provider.model,
                     timestamp=time.time(),
-                    success=True,
+                    success=False,
                     duration_ms=round(_duration, 1),
+                    error_message=str(_exc),
                     provider=provider.id,
                 ))
-                return content
-        except Exception as _exc:
-            _duration = (time.monotonic() - _start) * 1000
-            await token_store.record(UsageRecord(
-                function_name=_caller,
-                prompt_tokens=0,
-                completion_tokens=0,
-                total_tokens=0,
-                model=provider.model,
-                timestamp=time.time(),
-                success=False,
-                duration_ms=round(_duration, 1),
-                error_message=str(_exc),
-                provider=provider.id,
-            ))
-            last_exc = _exc
+                last_exc = _exc
+                logger.warning(
+                    "[LLM] Provider %s failed after %.1fs: %s",
+                    provider.id, _duration / 1000, _exc,
+                )
+                continue
+
+        # All providers failed this attempt -> retry after a short delay
+        if attempt < max_retries:
             logger.warning(
-                "[LLM] Provider %s failed after %.1fs: %s",
-                provider.id, _duration / 1000, _exc,
+                "[LLM] all providers failed (attempt %d/%d), retrying in %.1fs",
+                attempt + 1, max_retries, retry_delay,
             )
-            continue
+            await asyncio.sleep(retry_delay)
 
     if last_exc is None:
         raise RuntimeError("No LLM providers available")

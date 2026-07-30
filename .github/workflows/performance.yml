@@ -1,12 +1,13 @@
-# F13: 性能基准 CI — 集成 Lighthouse CI 到 GitHub Actions
+# F18: 性能基准 CI — 集成 Lighthouse CI 到 GitHub Actions
 #
 # 每次 push 到 main 时运行，对比生产构建的性能指标门禁：
-#   - Performance >= 50  （渐进式改善目标）
-#   - LCP < 8s           （渐进式改善）
-#   - TBT < 500ms        （渐进式改善）
+#   - Performance >= 60  （F18 最低线，硬门禁）
+#   - CLS < 0.1          （F13 CLS 目标，硬门禁）
+#   - LCP < 8s / TBT < 500ms （渐进式改善，warn）
 #
-# 当前门禁设置为渐进式改善基线，随优化逐步收紧。
-# 参考: docs/comprehensive-diagnosis-and-optimization-plan.md §11.4 F13
+# 门禁定义在 .lighthouserc.js。本步骤整体 continue-on-error，
+# 不阻断正常合入，但会在 PR 上标注性能回归。
+# 参考: docs/system-diagnosis-and-optimization-plan.md §5.4 F18
 
 name: Performance Baseline
 
