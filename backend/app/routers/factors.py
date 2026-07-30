@@ -141,6 +141,15 @@ async def get_active_factors() -> JSONResponse:
             }
 
         ic_val = ic_batch.get(code)
+        # Z03: For china_specific static policy factors (five_year_plan,
+        # strategic_emerging, dual_circulation), initialize ic_value=0 instead
+        # of None so they don't show as "no_data" before IC accumulation.
+        if ic_val is None and cat_name == "china_specific" and code in (
+            "china.policy.five_year_plan",
+            "china.policy.strategic_emerging",
+            "china.policy.dual_circulation",
+        ):
+            ic_val = 0.0
         factor_entry = {
             "code": code,
             "name": definition.name if definition and definition.name else _get_factor_name(code),

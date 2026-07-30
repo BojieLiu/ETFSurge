@@ -38,14 +38,15 @@ async def test_empty_pool_cascade_to_design_error(
     mock_get_regime, mock_get_sentiment, mock_get_index,
     mock_get_sector, mock_get_factor, mock_get_pool, mock_refresh,
 ):
-    """验证 pool_manager 刷新后候选池为空 → strategy_design 返回 error。
+        """Z11: empty pool now uses static pool fallback instead of error."""
+        from app.services.strategy_design import generate_enhanced_design
 
-    这是真实故障（数据源不可用）的单元级再现。"""
-    from app.services.strategy_design import generate_enhanced_design
+        result = await generate_enhanced_design(capital=500000)
 
-    result = await generate_enhanced_design(capital=500000)
-
-    assert result.get("error") == "无候选标的"
-    assert len(result.get("strategies", [])) == 0
-    assert "数据管道" in result.get("detail", "")
-    assert "market_context" in result
+        # Z11 fix: empty pool now returns fallback strategies, not error
+        assert "strategies" in result
+        assert len(result.get("strategies", [])) > 0
+        meta = result.get("design_metadata", {})
+        # Should have fallback flag when applicable
+        # regime can be "unknown" or "range_bound" depending on mock timing
+        assert meta.get("regime") in (None, "unknown", "range_bound")

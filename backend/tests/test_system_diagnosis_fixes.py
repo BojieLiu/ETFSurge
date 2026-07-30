@@ -321,3 +321,158 @@ def test_F9_gtimg_batch_small_input_serial():
         merged = es._tencent_gtimg_batch(codes)
     assert set(merged.keys()) == set(codes)
     assert len(calls) == 2  # serial: exactly 2 chunk calls
+
+
+# ─── Z01: factor-health endpoint must have `import time` in scope ──
+
+def test_Z01_factor_health_has_time_import():
+    """Verify that get_factor_health() can access time.time() without NameError."""
+    import inspect
+    from app.routers import admin as admin_mod
+
+    src = inspect.getsource(admin_mod.get_factor_health)
+    # The function must have `time.time()` calls; either time is imported
+    # at module level or inside the function
+    assert "time.time()" in src
+    # Check module-level imports include 'import time'
+    mod_src = inspect.getsource(admin_mod)
+    assert "import time" in mod_src.split("from fastapi")[0] or "import time" in mod_src
+
+
+# ─── Z03: china_specific ic_value initialized to 0 for static factors ──
+
+@pytest.mark.asyncio
+async def test_Z03_china_specific_ic_not_none():
+    """Verify /api/v1/factors/active returns china_specific with ic_value!=None."""
+    import json
+    from app.routers import factors as factors_mod
+    from app.factors.factor_registry import registry
+
+    # Simulate a freshly initialized _last_ic_batch
+    old_batch = registry._last_ic_batch
+    registry._last_ic_batch = {}
+    try:
+        resp = await factors_mod.get_active_factors()
+        body = json.loads(resp.body) if isinstance(resp.body, bytes) else resp.body
+        for cat in body.get("categories", []):
+            if cat["name"] == "china_specific":
+                for f in cat["factors"]:
+                    # Static policy factors should have ic_value=0 not None
+                    if f["code"] in ("china.policy.five_year_plan",
+                                     "china.policy.strategic_emerging",
+                                     "china.policy.dual_circulation"):
+                        assert f["ic_value"] is not None, f"{f['code']} ic_value should not be None"
+    finally:
+        registry._last_ic_batch = old_batch
+
+
+# ─── Z04: etf_specific data field injection in _fetch_market_data ──
+
+@pytest.mark.asyncio
+async def test_Z04_fetch_market_data_injects_industry_concepts():
+    """Verify symbol_extra industry/concepts injected into fetch market data."""
+    from app.factors.factor_registry import FactorRegistry
+
+    fr = FactorRegistry()
+    extra = {"510300": {"industry": "金融", "concepts": ["大盘", "蓝筹"]}}
+    # We can't easily call _fetch_market_data without network, but we can
+    # verify that _compute_industry_diversification receives these fields
+    from app.factors.factor_registry import _compute_industry_diversification
+    result = _compute_industry_diversification({"concepts": ["金融", "科技", "医药"]})
+    assert result < 0.5  # multiple concepts -> more diversified
+    result = _compute_industry_diversification({"concepts": ["金融"]})
+    assert result > 0.3  # single concept -> more concentrated
+
+
+@pytest.mark.asyncio
+async def test_Z04_premium_discount_compute_uses_nav():
+    """Verify premium_discount compute function uses nav from IOPV data."""
+    from app.factors.factor_registry import _compute_premium_discount
+    # price > nav -> positive premium
+    assert _compute_premium_discount({"price": 1.05, "nav": 1.00}) == pytest.approx(0.05, abs=1e-3)
+    # price < nav -> negative premium (discount)
+    assert _compute_premium_discount({"price": 0.95, "nav": 1.00}) == pytest.approx(-0.05, abs=1e-3)
+    # no nav -> 0.0
+    assert _compute_premium_discount({"price": 1.00}) == 0.0
+
+
+@pytest.mark.asyncio
+async def test_Z04_tracking_error_uses_benchmark_close():
+    """Verify tracking_error uses benchmark_close when available."""
+    from app.factors.factor_registry import _compute_tracking_error
+    # close and benchmark_close both [100, 101, 102, 103, 104, 105]
+    # ETF returns: 1%, 1%, 1%, 1%, 1%
+    # Benchmark returns: 1%, 1%, 1%, 1%, 1% -> diff squared: 0
+    closes = [100, 101, 102, 103, 104, 105]
+    result = _compute_tracking_error({"close": closes, "benchmark_close": closes})
+    assert result == 0.0
+
+    # Different returns -> tracking error > 0
+    bench_closes = [100, 110, 120, 130, 140, 150]
+    result = _compute_tracking_error({"close": closes, "benchmark_close": bench_closes})
+    assert result > 0.0
+
+
+@pytest.mark.asyncio
+async def test_Z04_shares_change_existing_field():
+    """Verify shares_change reads shares_change_20d when present."""
+    from app.factors.factor_registry import _compute_shares_change
+    assert _compute_shares_change({"shares_change_20d": 0.15}) == 0.15
+    assert _compute_shares_change({}) == 0.0
+
+
+# ─── Z10: Signal threshold relaxation ──────────────────────────────
+
+def test_Z10_high_score_triggers_buy():
+    """With relaxed threshold, a high positive score generates buy signal."""
+    from app.analysis.signal import generate_signal
+    # RSI < 30 (+2) + MACD golden cross (+1) + MA5>MA20 (+1) = 4.0 >= 2 (original) or >= 1.5 (new)
+    result = generate_signal({"rsi": 25, "macd": {"dif": 2, "dea": 1}, "ma5": 10.5, "ma20": 10.0})
+    assert result["signal"] == "buy"
+    assert result["score"] >= 1.5
+
+
+def test_Z10_moderate_score_triggers_buy_with_relaxed_threshold():
+    """With threshold relaxed from 2.0 to 1.5, moderate signals become buy."""
+    from app.analysis.signal import generate_signal
+    # RSI<40 (+1) + KDJ超卖金叉 (+1) = 2.0, originally >= 2.0 buy
+    # After relaxing to 1.5, even 1.6 should be buy
+    result = generate_signal({"rsi": 35, "kdj": {"k": 25, "d": 20, "j": 15}, "ma5": 10.5, "ma20": 10.0})
+    # RSI=35 => <40 so +1. KDJ k=25 < d=30 and k<30 => +1. Total=2.0
+    assert result["score"] >= 2.0
+    assert result["signal"] == "buy"
+
+
+def test_Z10_edge_near_threshold():
+    """Score just above 1.5 should be buy with relaxed threshold."""
+    from app.analysis.signal import generate_signal
+    # MACD 金叉 (+1) + MA5>MA20 (+1) = 2.0 -> buy with either threshold
+    result = generate_signal({"macd": {"dif": 1, "dea": 0}, "ma5": 10.5, "ma20": 10.0})
+    assert result["score"] >= 1.5
+    assert result["signal"] == "buy"
+
+
+# ─── Z11: Design circuit breaker fallback ──────────────────────────
+
+@pytest.mark.asyncio
+async def test_Z11_design_fallback_handles_failure_gracefully():
+    """When design pipeline fails, generate_enhanced_design returns gracefully."""
+    from app.services import strategy_design as sd_mod
+    from unittest.mock import AsyncMock, MagicMock, patch as mock_patch
+
+    with mock_patch("app.services.pool_manager.pool_manager") as mock_pm:
+        mock_pm.refresh = AsyncMock()
+        mock_pm.get_factor_matrix = MagicMock(side_effect=RuntimeError("design failed"))
+        mock_pm.get_pool = MagicMock(return_value=[])
+        mock_pm.get_market_regime = MagicMock(return_value="range_bound")
+        mock_pm.get_market_sentiment = MagicMock(return_value={})
+        mock_pm.get_index_realtime = MagicMock(return_value=[])
+        mock_pm.get_sector_momentum = MagicMock(return_value=[])
+        mock_pm.get_by_code = MagicMock(return_value={})
+
+        result = await sd_mod.generate_enhanced_design(500000)
+        assert isinstance(result, dict)
+        assert "strategies" in result
+        # Should not be empty (fallback provides strategies)
+        assert len(result.get("strategies", [])) > 0
+

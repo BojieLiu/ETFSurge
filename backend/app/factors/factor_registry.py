@@ -954,6 +954,20 @@ class FactorRegistry:
         except Exception as e:
             logger.warning("[factor] batch NAV fetch failed: %s (proxy? — non-fatal)", e)
 
+        # Z04: 注入 symbol_extra 中的 etf_specific 字段
+        # 这些字段用于：industry/concepts → industry_diversification,
+        # benchmark_close → tracking_error, shares_change_20d → shares_change
+        if symbol_extra:
+            for sym in symbols:
+                if sym in data and sym in symbol_extra:
+                    extra = symbol_extra[sym]
+                    # 只注入 etf_specific 相关字段，不覆盖已有字段
+                    for key in ("industry", "concepts", "benchmark_close",
+                                "shares_change_20d", "institutional_holdings_change",
+                                "shares_change", "fund_scale"):
+                        if key in extra and key not in data[sym]:
+                            data[sym][key] = extra[key]
+
         # 缓存成功获取的数据，记录 SourceRegistry 成功
         source_h.record_success(route="kline", operation="batch_fetch", target=",".join(symbols[:3]))
         _set_kline_cache(data)

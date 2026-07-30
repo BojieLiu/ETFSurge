@@ -85,9 +85,10 @@ def generate_signal(indicators: dict) -> dict[str, Any]:
             score -= 0.5
             reasons.append(f"九转卖出序列{sell} 接近反转")
 
-    if score >= 2:
+    # Z10: Relaxed thresholds from +/-2.0 to +/-1.5
+    if score >= 1.5:
         signal = "buy"
-    elif score <= -2:
+    elif score <= -1.5:
         signal = "sell"
     else:
         signal = "hold"

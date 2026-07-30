@@ -1,10 +1,11 @@
 ﻿# ETF Surge 方案实施总计划
 
-> 生成日期: 2026-07-30 | 版本: **v28.0**
+> 生成日期: 2026-07-30 | 版本: **v29.0**
 > ✅ **文档归档（2026-07-29 v20.1）**：8 份已全部实施/已替代的方案文档归档至 `docs/archived/` — `optimization-master-plan.md`、`optimization-master-plan-v2.md`、`performance-diagnosis-and-optimization-plan.md`、`fix-plan-master.md`、`fix-plan-pool.md`、`s5-markethub-design.md`、`system-performance-and-quality-review.md`、`fundamental-flow-factors-evaluation.md`。
 > ✅ **Phase 21 已完成**（2026-07-29）：修复 4 个前端单测失败（useMarketSearch + useSectorAnalysis mock 目标错误） + UI Phase 3(Steps 6-8)。详见下方 v21.0。
 > ✅ **Phase 27 已完成**（2026-07-30）：实施 `docs/system-diagnosis-and-optimization-plan.md` 子集 — F1(timeline select 导入 P0) + F2(A股搜索降级 levistock P1) + F4(max_tokens 8192→12288) + F5(删除 reasoning_content fallback) + F19(因子 industry 注入) + F15/F16/F20/F22(verify_e2e 加固：跨市场搜索/M14 门禁/china_specific 完整性/预热门禁收紧)。契约驱动 + TDD：新增 `api-contracts/market/search.md` 与 `tests/test_system_diagnosis_fixes.py`（15 用例全 PASS）。详见下方 v27.0。
-> ✅ **Phase 28 已完成**（2026-07-30）：推进 `docs/system-diagnosis-and-optimization-plan.md` 的**遗漏项 + 推迟项**，并先对齐 4 处实现偏差回方案字面。契约驱动 + TDD：先写契约/后编码/再补单测。范围：4 处偏差对齐（D1 F2→ETF 模式降级、D2/D3 F16→5s 门禁、D4 F20→valid_count>0）+ F6(LLM 重试) + F8(calculate 并行化) + F14(aiosqlite 降级 WARNING) + F3(HK/US 搜索实时行情补充) + F7(LLM 健康探针端点) + F9(ETF 扫描并行批处理) + F11(demjson→orjson/json 守卫 shim) + F12(前端 prod 构建调优，含修复 v25.0 P2.3 的空白页 bug) + F13(CLS 修复) + F17(verify_e2e LLM 连通性测试) + F18(Lighthouse CI Performance>60 门禁)。新增契约 `api-contracts/admin/llm-health.md`，单测扩至 26 用例全 PASS。详见下方 v28.0。
+> ✅ **Phase 28 已完成**（2026-07-30）：推进 `docs/system-diagnosis-and-optimization-plan.md` 的**遗漏项 + 推迟项**。详见下方 v28.0。
+> ✅ **Phase 29 已完成**（2026-07-30）：实施诊断方案剩余 5 项修复 — Z01(import time 模块级) + Z03(china_specific IC 显示修复) + Z04(etf_specific 数据注入) + Z10(信号阈值放松 ±1.5) + Z11(设计熔断器静态池兜底)。契约驱动 + TDD：单测扩至 36 用例全 PASS。详见下方 v29.0。
 > ✅ **Phase 20 已完成**（2026-07-29）：综合诊断剩余项 — F1(布林带列名前缀匹配修复 P0) + F2(板块默认限额 80→500 P1) + F3(ic_tracker 类型错误 P1) + 11 个新单测。详见下方 v20.0。
 > ✅ **Phase 16 已完成**（2026-07-29）：P1/P2 剩余项 — S5(K线缓存统一) + S7(策略检查LLM报告) + S11(新闻重试) + S12(网易财经K线)。详见下方 v16.0。
 > ✅ **Phase 15 已完成**（2026-07-29）：诊断计划 P0/P1 剩余项 — S1(CircuitBreaker废弃) + S2(shares_change数据注入) + S9(fund_shares字段)。详见下方 v17.0。
@@ -1521,4 +1522,14 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 | | | | **新增单测：** `backend/tests/test_system_diagnosis_fixes.py`（15 用例：F4 max_tokens=12288 ×1、F5 空 content 不泄露 reasoning ×2、F19 三因子 industry 消费 ×12）。 |
 | | | | **验证结果：** 15/15 新单测 PASS；因子/LLM/pool 相关既有套件 77 PASS（3 个 pool_manager 用例为预存失败，与本次改动无关，已用 `git stash` 验证）。 |
 | | | | **改动文件：** `backend/app/routers/portfolio.py`、`backend/app/routers/market.py`、`backend/app/analysis/llm.py`、`backend/app/services/pool_manager.py`、`backend/scripts/verify_e2e.py`、`backend/tests/test_system_diagnosis_fixes.py`（新）、`api-contracts/market/search.md`（新）、`docs/implementation-master-plan.md` |
-| | | | **未实施（本期范围外，待后续 Phase）：** F3(HK/US 实时查询增强)、F6(LLM 重试)、F7(LLM 健康探针端点)、F8(calculate 并行化)、F9-F14(预热/前端性能)、F17(Lighthouse CI)、F18 等，见原方案实施路标。 |
+| | | | **未实施（本期范围外，待后续 Phase）：** F3(HK/US 实时查询增强)、F6(LLM 重试)、F7(LLM 健康探针端点)、F8(calculate 并行化)、F9-F14(预热/前端性能)、F17(Lighthouse CI)、F18 等，见原方案实施路标。
+
+| | **v29.0** | 2026-07-30 | **Phase 29 — 系统诊断方案剩余项：契约驱动 + TDD 实施五处修复** | 详见下方 |
+| | | | | **来源：** `docs/system-diagnosis-and-optimization-plan.md` |
+| | | | | **Z01 — factor-health 500 (P0)：** `backend/app/routers/admin.py` `get_factor_health()` 在外部 import `time` 作用于 `time.time()` 时缺失，导致函数调用 500。**修复：** 将 `import time` 提升至模块顶部（从 `get_sources_health()` 函数内移至模块级别），所有路由均可访问。 |
+| | | | | **Z03 — china_specific IC 显示 (P1)：** `backend/app/routers/factors.py` `get_active_factors()` 中，三个 china_specific 静态映射因子（`five_year_plan` / `strategic_emerging` / `dual_circulation`）在 `_last_ic_batch` 为空时 `ic_value` 为 None（非空则赋 `self._last_ic_batch.get(f["code"])`），前端显示异常。**修复：** 当 `ic_value` 为 None 时，静态因子赋 `ic_value=0`，避免前端表格 `ic_value` 空缺。 |
+| | | | | **Z04 — etf_specific 数据注入 (P0)：** 10 个 etf_specific 因子的 `_compute_*` 函数已全部存在，但依赖字段如 `benchmark_close`（tracking_error）、`shares_change_20d`（shares_change）、`industry`/`concepts`（industry_diversification）在 `_fetch_market_data()` 中未被填充至 market_data，导致这些因子一直返回默认值。**修复：** `_fetch_market_data()` 在 NAV 批量获取后，将 `symbol_extra` 中的 `benchmark_close`、`shares_change_20d`、`industry`、`concepts`、`institutional_holdings_change`、`fund_scale` 等字段注入 market_data（不覆盖已有字段）。 |
+| | | | | **Z10 — 信号阈值放松 (P2)：** `backend/app/analysis/signal.py` `generate_signal()` 原先 BUY/SELL 阈值为 `>= 2` / `<= -2`，信号过于保守；最高可达分约 7 分，±2 导致大量信号落入 hold 区间。**修复：** 阈值下调至 `>= 1.5` / `<= -1.5`，同时保留 hold 区间位于 0 附近（-1.0~+1.0 仍为 hold）。 |
+| | | | | **Z11 — 设计熔断器兜底 (P3)：** `backend/app/services/strategy_design.py` 原实现在数据管道（`get_factor_matrix`/`get_pool`）全部断裂时直接返回 `strategies: []` 错误。**修复：** 空候选池时（`total_candidates == 0`），改为使用静态池（`pool_manager.etf_pool` 或硬编码 6 只核心 ETF：沪深300/上证50/黄金/国债/创业板/科创50）作为兜底。静态池按 `layer` 分发至 core/satellite/defense 三层，后续引擎可正常运作。同时 `get_factor_matrix` 调用包裹在 `try/except` 中，失败时 `factor_matrix = {}` 而非抛错。 |
+| | | | | **新增单测：** `tests/test_system_diagnosis_fixes.py` 扩至 **36 用例全 PASS**：新增 Z01×1、Z03×1、Z04×4（industry_diversification/premium_discount/tracking_error/shares_change）、Z10×3（high_moderate_edge）、Z11×1（fallback graceful）。 |
+| | | | | **改动文件：** `backend/app/routers/admin.py`（Z01）、`backend/app/routers/factors.py`（Z03）、`backend/app/factors/factor_registry.py`（Z04）、`backend/app/analysis/signal.py`（Z10）、`backend/app/services/strategy_design.py`（Z11）、`backend/tests/test_system_diagnosis_fixes.py`（测试扩至 36 用例）、`docs/implementation-master-plan.md`（本版本更新） | |

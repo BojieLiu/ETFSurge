@@ -47,7 +47,11 @@ async def generate_enhanced_design(
                      _t2 - _t1, time.monotonic() - start_time)
 
     # 2. 读取管道产出
-    factor_matrix = pool_manager.get_factor_matrix() or {}
+    try:
+        factor_matrix = pool_manager.get_factor_matrix() or {}
+    except Exception as e:
+        logger.warning("[strategy_design] get_factor_matrix failed: %s", e)
+        factor_matrix = {}
     candidates = {
         "core": pool_manager.get_pool("core") or [],
         "satellite": pool_manager.get_pool("satellite") or [],
@@ -57,15 +61,21 @@ async def generate_enhanced_design(
     # 2b. 检查候选池是否为空
     total_candidates = sum(len(v) for v in candidates.values())
     if total_candidates == 0:
-        logger.warning("[strategy_design] empty candidate pool, returning early error")
-        return {
-            "strategies": [],
-            "market_context": await _build_market_context(pool_manager),
-            "generated_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "design_metadata": {"version": "v5-engine", "elapsed_seconds": 0, "regime": "unknown"},
-            "error": "无候选标的",
-            "detail": "数据管道未能生成候选池，请检查数据源连接或稍后重试",
+        logger.warning("[strategy_design] empty candidate pool, falling back to static pool")
+        static_etfs = getattr(pool_manager, 'etf_pool', None) or [
+            {"symbol": "510300", "name": "沪深300ETF", "market": "A", "layer": "core"},
+            {"symbol": "510050", "name": "上证50ETF", "market": "A", "layer": "core"},
+            {"symbol": "518880", "name": "黄金ETF", "market": "A", "layer": "defense"},
+            {"symbol": "511090", "name": "国债ETF", "market": "A", "layer": "defense"},
+            {"symbol": "159915", "name": "创业板ETF", "market": "A", "layer": "satellite"},
+            {"symbol": "588000", "name": "科创50ETF", "market": "A", "layer": "satellite"},
+        ]
+        candidates = {
+            "core": [e for e in static_etfs if e.get("layer") == "core"],
+            "satellite": [e for e in static_etfs if e.get("layer") == "satellite"],
+            "defense": [e for e in static_etfs if e.get("layer") == "defense"],
         }
+        total_candidates = sum(len(v) for v in candidates.values())
 
     market_regime = pool_manager.get_market_regime() or "range_bound"
     market_context = await _build_market_context(pool_manager)
@@ -172,16 +182,58 @@ async def generate_enhanced_design(
                 "regime": market_regime,
             },
         }
-    except (asyncio.TimeoutError, ValueError, KeyError, ConnectionError, OSError) as e:
-        logger.exception("[strategy_design] generate_enhanced_design failed")
-        return {
-            "strategies": [],
-            "market_context": market_context,
-            "generated_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "design_metadata": {"version": "v5-engine", "elapsed_seconds": round(time.monotonic() - start_time, 1), "regime": market_regime},
-            "error": "策略生成失败",
-            "detail": str(e),
-        }
+    except (asyncio.TimeoutError, ValueError, KeyError, ConnectionError, OSError, RuntimeError) as e:
+        logger.exception("[strategy_design] generate_enhanced_design failed — attempting static pool fallback")
+        # Z11: Fallback to static ETF pool when design pipeline fails
+        try:
+            static_etfs = getattr(pool_manager, 'etf_pool', None) or [
+                {"symbol": "510300", "name": "沪深300ETF", "market": "A", "layer": "core", "weight": 0.30},
+                {"symbol": "510050", "name": "上证50ETF", "market": "A", "layer": "core", "weight": 0.20},
+                {"symbol": "518880", "name": "黄金ETF", "market": "A", "layer": "defense", "weight": 0.15},
+                {"symbol": "511090", "name": "国债ETF", "market": "A", "layer": "defense", "weight": 0.15},
+                {"symbol": "159915", "name": "创业板ETF", "market": "A", "layer": "satellite", "weight": 0.10},
+                {"symbol": "588000", "name": "科创50ETF", "market": "A", "layer": "satellite", "weight": 0.10},
+            ]
+            fallback_strategies = [{
+                "id": "balanced",
+                "name": "均衡配置（静态池兜底）",
+                "description": "数据管道异常时使用静态候选池",
+                "risk_profile": "balanced",
+                "expected_return": "4-8%",
+                "expected_volatility": "12-18%",
+                "etfs": [
+                    {"symbol": e["symbol"], "name": e["name"], "layer": e["layer"],
+                     "weight": e["weight"],
+                     "target_amount": round(capital * e["weight"], 2),
+                     "selection_rationale": "静态池兜底"}
+                    for e in static_etfs
+                ],
+            }]
+            elapsed = time.monotonic() - start_time
+            logger.info("[strategy_design] fallback generated %d strategies in %.1fs",
+                        len(fallback_strategies), elapsed)
+            return {
+                "strategies": fallback_strategies,
+                "market_context": market_context,
+                "generated_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "design_metadata": {
+                    "version": "v5-engine-fallback",
+                    "elapsed_seconds": round(elapsed, 1),
+                    "regime": market_regime,
+                    "fallback": True,
+                },
+                "warning": "使用静态池兜底，因子数据不可用",
+            }
+        except Exception as fallback_e:
+            logger.exception("[strategy_design] fallback also failed")
+            return {
+                "strategies": [],
+                "market_context": market_context,
+                "generated_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "design_metadata": {"version": "v5-engine", "elapsed_seconds": round(time.monotonic() - start_time, 1), "regime": market_regime},
+                "error": "策略生成失败",
+                "detail": str(e),
+            }
 
 
 # OPT-04: 资金流向并发限流，最多 8 个并发请求
