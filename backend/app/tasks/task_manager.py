@@ -39,7 +39,8 @@ class TaskManager:
     单例 task_manager 默认使用 DEFAULT_PERSIST_PATH。
     """
 
-    DEFAULT_PERSIST_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "tasks.json")
+    # Z27: Fix path - task_manager.py is in app/tasks/, data/ is at project root (backend/data/)
+    DEFAULT_PERSIST_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "data", "tasks.json")
 
     def __init__(self, persist_path: str | None = None):
         self._tasks: dict[int, dict] = {}

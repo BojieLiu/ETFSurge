@@ -967,8 +967,10 @@ async def generate_strategy_check_report(
 
     holdings_text = "\n".join(holdings_lines)
 
-    # 根据持仓数量动态计算建议数上限
+    # 根据持仓数量动态计算建议数上下限
     holdings_count = len(holdings_lines)
+    # Z26: 下限不少于持仓数一半，确保 LLM 不跳过无因子数据的标的
+    min_suggestions = max(3, holdings_count // 2)
     if holdings_count <= 5:
         max_suggestions = 5
     elif holdings_count <= 10:
@@ -995,7 +997,7 @@ async def generate_strategy_check_report(
 ## 市场状态
 当前 regime: {regime}
 持仓数量: {holdings_count} 只
-建议条数上限: {max_suggestions} 条
+建议条数范围: {min_suggestions}~{max_suggestions} 条（下限{min_suggestions}条，必须覆盖每个持仓标的至少一条建议）
 
 ## 持仓分析
 {holdings_text}

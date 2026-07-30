@@ -43,6 +43,7 @@ export const marketApi = {
   getSectorHeat: (limit = 20) => api.get('/market/sectors/heat', { params: { limit } }),
   getStockHotRank: (limit = 50) => api.get('/market/stock-hot-rank', { params: { limit } }),
   getMarketWind: () => api.get('/market/wind'),
+  getSectorRotation: (limit = 20) => api.get('/market/sectors/rotation', { params: { limit } }),
   getSectors: (params = {}) => api.get('/market/sectors', { params }),
 }
 

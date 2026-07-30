@@ -311,13 +311,23 @@ async def sector_popular(plate_code: str) -> list[dict[str, Any]]:
     return await asyncio.to_thread(fetch_sector_popular_stocks, plate_code)
 
 
+# Z17: Add sector rotation endpoint
+@router.get("/sectors/rotation")
+async def sector_rotation(limit: int = Query(20)) -> list[dict[str, Any]]:
+    """板块轮动数据 — 行业板块实时行情(财联社)，含涨跌幅、主力资金、涨跌家数。"""
+    return await asyncio.to_thread(fetch_sector_industry_cls, limit)
+
+
 @router.get("/sectors")
 async def unified_sectors(
-    type: str = Query(..., description="Sector type: industry or concept"),
+    type: str = Query("industry", description="Sector type: industry or concept"),
     limit: int = Query(200, description="Max results"),
     market: str = Query("A", description="Market filter"),
 ) -> list[dict[str, Any]]:
-    """Unified sector endpoint. Delegates to industry or concept routes."""
+    """Unified sector endpoint. Delegates to industry or concept routes.
+
+    Z17: type 参数改为非必需（默认 industry），避免前端未传参时 422。
+    """
     if type == "industry":
         return await industry_sectors(limit)
     elif type == "concept":
