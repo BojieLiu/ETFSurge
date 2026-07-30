@@ -1,6 +1,6 @@
 ﻿# ETF Surge 方案实施总计划
 
-> 生成日期: 2026-07-31 | 版本: **v31.0**
+> 生成日期: 2026-07-31 | 版本: **v34.0**
 > ✅ **文档归档（2026-07-29 v20.1）**：8 份已全部实施/已替代的方案文档归档至 `docs/archived/` — `optimization-master-plan.md`、`optimization-master-plan-v2.md`、`performance-diagnosis-and-optimization-plan.md`、`fix-plan-master.md`、`fix-plan-pool.md`、`s5-markethub-design.md`、`system-performance-and-quality-review.md`、`fundamental-flow-factors-evaluation.md`。
 > ✅ **Phase 21 已完成**（2026-07-29）：修复 4 个前端单测失败（useMarketSearch + useSectorAnalysis mock 目标错误） + UI Phase 3(Steps 6-8)。详见下方 v21.0。
 > ✅ **Phase 27 已完成**（2026-07-30）：实施 `docs/system-diagnosis-and-optimization-plan.md` 子集 — F1(timeline select 导入 P0) + F2(A股搜索降级 levistock P1) + F4(max_tokens 8192→12288) + F5(删除 reasoning_content fallback) + F19(因子 industry 注入) + F15/F16/F20/F22(verify_e2e 加固：跨市场搜索/M14 门禁/china_specific 完整性/预热门禁收紧)。契约驱动 + TDD：新增 `api-contracts/market/search.md` 与 `tests/test_system_diagnosis_fixes.py`（15 用例全 PASS）。详见下方 v27.0。
