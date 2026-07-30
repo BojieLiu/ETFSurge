@@ -422,8 +422,8 @@ async def strategy_check(
 
     # 市场状态统一从 pool_manager 读取（与设计管线一致，避免双套判定）
     try:
-        from ..services.pool_manager import pool_manager
-        regime = pool_manager.get_market_regime() or "range_bound"
+        from ..services.market_data_hub import market_data_hub
+        regime = market_data_hub.get_market_regime() or "range_bound"
     except Exception:
         regime = "range_bound"
     trends = {}
@@ -677,8 +677,8 @@ async def _compute_indicators(symbols: list[str]) -> dict:
 
     # 复用 pool_manager 的因子分，免去重新计算 RSI/KDJ/MACD
     try:
-        from ..services.pool_manager import pool_manager
-        factor_matrix = pool_manager.get_factor_matrix()
+        from ..services.market_data_hub import market_data_hub
+        factor_matrix = market_data_hub.get_factor_matrix()
     except Exception:
         factor_matrix = {}
 

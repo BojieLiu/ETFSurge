@@ -986,7 +986,7 @@ async def get_history(
 ) -> list[dict[str, Any]]:
     # S5: 优先查 Hub K 线缓存
     try:
-        from .pool_manager import pool_manager as pm
+        from .market_data_hub import market_data_hub
         cached = pm.get_kline_rows(symbol, max_age=300)
         if cached:
             return cached

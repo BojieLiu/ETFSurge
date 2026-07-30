@@ -15,7 +15,7 @@ async def refresh_sector_cache() -> None:
     调用 PoolManager.update_sector_cache() 完成全部刷新。
     """
     try:
-        from ..services.pool_manager import pool_manager
-        await pool_manager.update_sector_cache()
+        from ..services.market_data_hub import market_data_hub
+        await market_data_hub.update_sector_cache()
     except Exception as e:
         logger.exception("[sector_refresh] refresh_sector_cache failed: %s", e)

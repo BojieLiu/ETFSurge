@@ -7,7 +7,7 @@ Market Context — 统一的市场上下文数据类和解析入口 (Phase 5.1).
 用法:
     from app.core.market_context import resolve_market_context
     ctx = resolve_market_context("HK")
-    regime = pool_manager.get_market_regime(ctx.market)
+    regime = market_data_hub.get_market_regime(ctx.market)
 """
 
 from __future__ import annotations

@@ -213,13 +213,13 @@ async def get_system_metrics():
 
     供 verify_e2e 和运维监控使用，无需认证。
     """
-    from ..services.pool_manager import pool_manager
+    from ..services.market_data_hub import market_data_hub
     from ..database import async_session
     from ..models.portfolio_design import PortfolioDesign
     from sqlalchemy import select, func
 
     # 候选池健康
-    pool = pool_manager.get_pool()
+    pool = market_data_hub.get_pool()
     total_candidates = sum(len(v) for v in pool.values()) if pool else 0
     pool_healthy = total_candidates > 0
 

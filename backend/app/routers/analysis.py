@@ -71,14 +71,14 @@ def _inject_market_context(query: str, ctx: dict) -> dict:
     Sector Phase 5: 流式和非流式路由共享的公共函数。
     根据查询关键词识别用户意图，从 pool_manager 缓存获取对应数据注入 ctx。
     """
-    from ..services.pool_manager import pool_manager
+    from ..services.market_data_hub import market_data_hub
     q = query.lower()
     injection_lines = []
 
     # 板块/行业/概念相关查询
     sector_keywords = ["板块", "行业", "概念", "热点", "半导体", "新能源", "消费", "医药", "科技", "金融", "军工"]
     if any(kw in q for kw in sector_keywords):
-        sector = pool_manager.get_sector_momentum() or []
+        sector = market_data_hub.get_sector_momentum() or []
         for item in sector[:5]:
             name = item.get("sector_name") or item.get("name", "?")
             chg = item.get("change_pct", 0)
@@ -90,7 +90,7 @@ def _inject_market_context(query: str, ctx: dict) -> dict:
     # 大盘/行情相关查询
     market_keywords = ["大盘", "今天", "最新", "市场", "行情", "指数"]
     if any(kw in q for kw in market_keywords):
-        idx_data = pool_manager.get_index_realtime() or []
+        idx_data = market_data_hub.get_index_realtime() or []
         for item in idx_data[:5]:
             name = item.get("name", item.get("symbol", "?"))
             price = item.get("price", "")
@@ -135,7 +135,7 @@ class LLMAdviceRequest(BaseModel):
 
 
 # _fetch_all_market 已废弃 — 数据管道统一在编排器中采集
-# 参见 strategy_design.py 或 pool_manager.refresh()
+# 参见 strategy_design.py 或 market_data_hub.refresh()
 
 
 # --- Market Overview 已迁移到数据管道 ---
@@ -147,11 +147,11 @@ class LLMAdviceRequest(BaseModel):
 async def llm_report(req: LLMReportRequest):
     """市场综合研判报告 — 优先使用编排器缓存，降级才自采。"""
     # 尝试从编排器取缓存数据
-    from ..services.pool_manager import pool_manager
+    from ..services.market_data_hub import market_data_hub
 
     try:
-        regime = pool_manager.get_market_regime()
-        sentiment = pool_manager.get_market_sentiment()
+        regime = market_data_hub.get_market_regime()
+        sentiment = market_data_hub.get_market_sentiment()
         if regime:
             logger.debug("[llm-report] using orchestrator cache: regime=%s", regime)
     except Exception:
@@ -225,7 +225,7 @@ async def llm_report(req: LLMReportRequest):
 @router.post("/llm-advice")
 async def llm_advice(req: LLMAdviceRequest):
     """AI 投资顾问 — 自动注入市场数据管道缓存。"""
-    from ..services.pool_manager import pool_manager
+    from ..services.market_data_hub import market_data_hub
 
     query = req.query
     ctx = dict(req.context or {})
@@ -236,8 +236,8 @@ async def llm_advice(req: LLMAdviceRequest):
         injection_lines = []
 
         if any(kw in q for kw in ["大盘", "今天", "最新", "走势", "行情"]):
-            regime = pool_manager.get_market_regime()
-            sentiment = pool_manager.get_market_sentiment()
+            regime = market_data_hub.get_market_regime()
+            sentiment = market_data_hub.get_market_sentiment()
             if regime:
                 injection_lines.append(f"· 市场状态: {regime}")
             if sentiment and isinstance(sentiment, dict):
@@ -245,22 +245,22 @@ async def llm_advice(req: LLMAdviceRequest):
                 lbl = sentiment.get("sentiment_label", "?")
                 injection_lines.append(f"· 市场情绪: {lbl} ({idx}/100)")
             # index_realtime from pool_manager or fallback
-            idx_data = pool_manager.get_index_realtime() or []
+            idx_data = market_data_hub.get_index_realtime() or []
             for item in idx_data[:5]:
                 injection_lines.append(
                     f"· {item.get('name','?')}: {item.get('price','N/A')} ({item.get('change_pct',0):+.2f}%)"
                 )
 
         if any(kw in q for kw in ["板块", "行业", "半导体", "新能源", "医药", "军工", "消费"]):
-            sector = pool_manager.get_sector_momentum() or []
+            sector = market_data_hub.get_sector_momentum() or []
             for item in sector[:5]:
                 injection_lines.append(
                     f"· {item.get('name','?')}: 涨跌幅 {item.get('change_pct',0):+.2f}%"
                 )
 
         if any(kw in q for kw in ["政策", "利好", "利空", "监管", "新闻", "资讯"]):
-            news = pool_manager.get_news() or []
-            sentiment = pool_manager.get_market_sentiment()
+            news = market_data_hub.get_news() or []
+            sentiment = market_data_hub.get_market_sentiment()
             if sentiment and isinstance(sentiment, dict):
                 lbl = sentiment.get("sentiment_label", "?")
                 injection_lines.append(f"· 市场情绪: {lbl}")
@@ -365,7 +365,7 @@ async def portfolio_review(req: PortfolioReviewRequest):
 @router.post("/llm-report/stream")
 async def llm_report_stream(req: LLMReportRequest):
     """流式市场研判报告 — 使用统一上下文管道 (Phase 2.9)。"""
-    from ..services.pool_manager import pool_manager
+    from ..services.market_data_hub import market_data_hub
     from ..services.llm_context import build_full_context
 
     # 使用统一上下文管道采集数据
@@ -437,7 +437,7 @@ async def llm_advice_stream(req: LLMAdviceRequest):
 
     Phase D(1): 新增 market 参数，传递给 build_full_context() 按市场获取数据。
     """
-    from ..services.pool_manager import pool_manager
+    from ..services.market_data_hub import market_data_hub
     from ..services.llm_context import build_full_context
     from ..analysis.llm import _build_advice_stream_prompt
 

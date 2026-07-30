@@ -257,9 +257,9 @@ async def lifespan(app: FastAPI):
     async def _regime_sentiment_refresh_loop():
         while True:
             try:
-                from .services.pool_manager import pool_manager
-                await asyncio.wait_for(pool_manager.update_market_regime(), timeout=15)
-                await asyncio.wait_for(pool_manager.refresh_sentiment_cache(), timeout=15)
+                from .services.market_data_hub import market_data_hub
+                await asyncio.wait_for(market_data_hub.update_market_regime(), timeout=15)
+                await asyncio.wait_for(market_data_hub.refresh_sentiment_cache(), timeout=15)
             except (Exception, asyncio.CancelledError):
                 logger.warning("[lifespan] regime/sentiment refresh cycle failed, will retry")
             await asyncio.sleep(120)

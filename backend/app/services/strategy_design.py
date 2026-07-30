@@ -34,13 +34,13 @@ async def generate_enhanced_design(
     _elapsed_logged = False
 
     # 1. 刷新数据管道（pipeline Stage 1 负责超时保护）
-    from ..services.pool_manager import pool_manager
+    from ..services.market_data_hub import market_data_hub
     _t1 = time.monotonic()
     try:
-        await pool_manager.refresh()
+        await market_data_hub.refresh()
     except Exception as e:
-        logger.warning("[strategy_design] pool_manager.refresh failed — pool may be stale; _by_code=%d: %s",
-                       len(pool_manager._by_code), e)
+        logger.warning("[strategy_design] market_data_hub.refresh failed — pool may be stale; _by_code=%d: %s",
+                       len(market_data_hub._by_code), e)
     _t2 = time.monotonic()
     if _t2 - _t1 > 0.1:
         logger.info("[strategy_design] refresh took %.2fs, elapsed_total=%.2fs",
@@ -48,21 +48,21 @@ async def generate_enhanced_design(
 
     # 2. 读取管道产出
     try:
-        factor_matrix = pool_manager.get_factor_matrix() or {}
+        factor_matrix = market_data_hub.get_factor_matrix() or {}
     except Exception as e:
         logger.warning("[strategy_design] get_factor_matrix failed: %s", e)
         factor_matrix = {}
     candidates = {
-        "core": pool_manager.get_pool("core") or [],
-        "satellite": pool_manager.get_pool("satellite") or [],
-        "defense": pool_manager.get_pool("defense") or [],
+        "core": market_data_hub.get_pool("core") or [],
+        "satellite": market_data_hub.get_pool("satellite") or [],
+        "defense": market_data_hub.get_pool("defense") or [],
     }
 
     # 2b. 检查候选池是否为空
     total_candidates = sum(len(v) for v in candidates.values())
     if total_candidates == 0:
         logger.warning("[strategy_design] empty candidate pool, falling back to static pool")
-        static_etfs = getattr(pool_manager, 'etf_pool', None) or [
+        static_etfs = getattr(market_data_hub, 'etf_pool', None) or [
             {"symbol": "510300", "name": "沪深300ETF", "market": "A", "layer": "core"},
             {"symbol": "510050", "name": "上证50ETF", "market": "A", "layer": "core"},
             {"symbol": "518880", "name": "黄金ETF", "market": "A", "layer": "defense"},
@@ -77,8 +77,8 @@ async def generate_enhanced_design(
         }
         total_candidates = sum(len(v) for v in candidates.values())
 
-    market_regime = pool_manager.get_market_regime() or "range_bound"
-    market_context = await _build_market_context(pool_manager)
+    market_regime = market_data_hub.get_market_regime() or "range_bound"
+    market_context = await _build_market_context(market_data_hub)
 
     try:
         # 3. 策略引擎：一次调用生成所有方案
@@ -130,7 +130,7 @@ async def generate_enhanced_design(
                 if a.get("symbol") == "CASH":
                     continue
                 code = a["symbol"]
-                pool_entry = pool_manager.get_by_code(code) if hasattr(pool_manager, 'get_by_code') else {}
+                pool_entry = market_data_hub.get_by_code(code) if hasattr(market_data_hub, 'get_by_code') else {}
                 if pool_entry:
                     dcp = pool_entry.get("change_pct") or pool_entry.get("daily_change_pct")
                     if dcp is not None:
@@ -186,7 +186,7 @@ async def generate_enhanced_design(
         logger.exception("[strategy_design] generate_enhanced_design failed — attempting static pool fallback")
         # Z11: Fallback to static ETF pool when design pipeline fails
         try:
-            static_etfs = getattr(pool_manager, 'etf_pool', None) or [
+            static_etfs = getattr(market_data_hub, 'etf_pool', None) or [
                 {"symbol": "510300", "name": "沪深300ETF", "market": "A", "layer": "core", "weight": 0.30},
                 {"symbol": "510050", "name": "上证50ETF", "market": "A", "layer": "core", "weight": 0.20},
                 {"symbol": "518880", "name": "黄金ETF", "market": "A", "layer": "defense", "weight": 0.15},
