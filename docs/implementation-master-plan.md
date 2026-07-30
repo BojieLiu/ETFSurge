@@ -1526,6 +1526,16 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 | | | | **改动文件：** `backend/app/routers/portfolio.py`、`backend/app/routers/market.py`、`backend/app/analysis/llm.py`、`backend/app/services/pool_manager.py`、`backend/scripts/verify_e2e.py`、`backend/tests/test_system_diagnosis_fixes.py`（新）、`api-contracts/market/search.md`（新）、`docs/implementation-master-plan.md` |
 | | | | **未实施（本期范围外，待后续 Phase）：** F3(HK/US 实时查询增强)、F6(LLM 重试)、F7(LLM 健康探针端点)、F8(calculate 并行化)、F9-F14(预热/前端性能)、F17(Lighthouse CI)、F18 等，见原方案实施路标。
 
+| | **v32.0** | 2026-07-31 | **Phase 30c — v5 诊断方案验证：Z22/Z28/Z29/Z30 单元测试覆盖** | 详见下方 |
+| | | | | **来源：** docs/v5_diagnostic_and_optimization_plan.md |
+| | | | | **Z22 — 个股 watchlist 行情 (P1)：** get_asset_realtime 已正确处理 stock asset_type。新增单元测试验证 600519(stock) 和 510300(A) 两种资产类型均能返回 price/change_pct。 |
+| | | | | **Z28 — watchlist 字段一致性 (P3)：** get_watchlist 返回的 
+ealtime dict 使用英文 key（price/change_pct/volume），无中文字段名。新增单元测试验证字段名纯 ASCII。 |
+| | | | | **Z29 — 搜索中文编码 (P3)：** FastAPI Query 参数自动处理 URL 编码/解码。新增单元测试验证中文关键词 贵州茅台 的 URL 编解码往返。 |
+| | | | | **Z30 — LLM 数据管道完整性 (中)：** uild_full_context 在数据源失败时不会崩溃（异常静默降级）。新增单元测试验证结构完整性 + 异常安全。 |
+| | | | | **新增单测：** 	ests/test_v5_remaining_fixes.py（8 用例：Z22×2、Z28×2、Z29×2、Z30×2）。全 PASS。 |
+| | | | | **改动文件：** ackend/tests/test_v5_remaining_fixes.py（新）、docs/implementation-master-plan.md（本版本更新） |
+
 | | **v31.0** | 2026-07-31 | **Phase 30b — v5 诊断方案剩余项：TaskManager/策略检查/板块轮动** | 详见下方 |
 | | | | | **来源：** `docs/v5_diagnostic_and_optimization_plan.md` |
 | | | | | **Z27 — TaskManager persist path 修复 (P1)：** `DEFAULT_PERSIST_PATH` 原为 `app/tasks/../data/tasks.json` → `backend/app/data/tasks.json`（不存在的目录）。**修复：** 改为 `../../data/tasks.json` → `backend/data/tasks.json`。 |
