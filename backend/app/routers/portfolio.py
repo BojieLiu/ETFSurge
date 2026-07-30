@@ -437,6 +437,7 @@ async def get_timeline(
     """
     from ..models.portfolio_design import PortfolioDesign
     from ..models.strategy_check import StrategyCheckRecord
+    from sqlalchemy import select
     import json
 
     # Query designs

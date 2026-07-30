@@ -112,7 +112,7 @@ async def llm_complete(prompt: str, response_format: dict | None = None) -> str:
                 {"role": "user", "content": prompt},
             ],
             "temperature": 0.3,
-            "max_tokens": 8192,
+            "max_tokens": 12288,
         }
         if response_format:
             body["response_format"] = response_format
@@ -134,8 +134,6 @@ async def llm_complete(prompt: str, response_format: dict | None = None) -> str:
                 data = resp.json()
                 message = data["choices"][0]["message"]
                 content = message.get("content", "")
-                if not content:
-                    content = message.get("reasoning_content", "")
 
                 usage = data.get("usage", {})
                 _duration = (time.monotonic() - _start) * 1000
@@ -182,7 +180,7 @@ async def llm_complete_stream(
     prompt: str,
     response_format: dict | None = None,
     temperature: float = 0.3,
-    max_tokens: int = 8192,
+    max_tokens: int = 12288,
 ) -> AsyncGenerator[dict, None]:
     """
     Streaming LLM completion with provider failover.
@@ -210,7 +208,7 @@ async def llm_complete_stream(
                 {"role": "user", "content": prompt},
             ],
             "temperature": temperature,
-            "max_tokens": max_tokens or 8192,
+            "max_tokens": max_tokens or 12288,
             "stream": True,
         }
         if response_format:
@@ -339,7 +337,7 @@ async def llm_complete_with_system(system_prompt: str, prompt: str, response_for
                 {"role": "user", "content": prompt},
             ],
             "temperature": 0.3,
-            "max_tokens": 8192,
+            "max_tokens": 12288,
         }
         if response_format:
             body["response_format"] = response_format
@@ -363,8 +361,6 @@ async def llm_complete_with_system(system_prompt: str, prompt: str, response_for
                 data = resp.json()
                 message = data["choices"][0]["message"]
                 content = message.get("content", "")
-                if not content:
-                    content = message.get("reasoning_content", "")
 
                 usage = data.get("usage", {})
                 _duration = (time.monotonic() - _start) * 1000

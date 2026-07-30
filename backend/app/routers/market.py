@@ -106,6 +106,27 @@ async def search(
                     } for r in rows]
         except Exception as e:
             logger.warning("[search] stock search failed: %s", e)
+
+        # F2: fallback to levistock real-time A-share stock list when the
+        # local instruments table is empty (prevents 0-result search breakage).
+        try:
+            full = await asyncio.to_thread(fetch_all_stocks)
+            normalised = [
+                {
+                    "symbol": s.get("stock_code") or s.get("symbol", ""),
+                    "name": s.get("stock_name") or s.get("name", ""),
+                    "market": "A",
+                    "asset_type": "stock",
+                    "type": "stock",
+                }
+                for s in full
+            ]
+            if not keyword:
+                return normalised[:30]
+            kw = keyword.lower()
+            return [s for s in normalised if kw in s["symbol"].lower() or kw in s["name"].lower()][:30]
+        except Exception as e:
+            logger.warning("[search] A-share levistock fallback failed: %s", e)
         return []
 
     if market and market.upper() == "HK":

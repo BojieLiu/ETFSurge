@@ -161,7 +161,7 @@ class TestSentimentFetcher:
         result = calc_sentiment_index(
             advance_ratio=0.6,      # 60% 个股上涨
             inst_consensus=0.3,     # 机构净买入
-            north_flow=0.2,         # 北向净流入(归一化)
+            volume_ratio=0.2,       # 量能比(近5日/20日)
             margin_change=0.1,      # 两融增加
         )
         assert 0 <= result <= 100
@@ -172,14 +172,14 @@ class TestSentimentFetcher:
         # 极端乐观
         high = calc_sentiment_index(
             advance_ratio=0.9, inst_consensus=0.8,
-            north_flow=0.8, margin_change=0.7,
+            volume_ratio=0.8, margin_change=0.7,
         )
         assert high > 70
 
         # 极端悲观
         low = calc_sentiment_index(
             advance_ratio=0.1, inst_consensus=-0.8,
-            north_flow=-0.8, margin_change=-0.7,
+            volume_ratio=-0.8, margin_change=-0.7,
         )
         assert low < 30
 

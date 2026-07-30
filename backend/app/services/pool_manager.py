@@ -368,6 +368,11 @@ class PoolManager:
             symbol_extra = {e["symbol"]: {
                 "fund_scale": e.get("fund_scale", 0),
                 "fund_shares": e.get("fund_shares", 0),  # S2: 基金份额
+                # F19: inject industry so china_specific factors
+                # (five_year_plan / strategic_emerging / dual_circulation)
+                # receive real classification instead of empty string.
+                "industry": e.get("industry", "unknown"),
+                "concepts": e.get("concepts", []),
             } for e in flat if e.get("symbol")}
             try:
                 # S5: 使用缓存 K 线作为 market_data（R3: 从行式缓存懒转换）
@@ -927,6 +932,9 @@ class PoolManager:
             result[sym] = {
                 "fund_scale": entry.get("fund_scale", 0),
                 "fund_shares": entry.get("fund_shares", 0),
+                # F19: carry industry/concepts for china_specific factors
+                "industry": entry.get("industry", "unknown"),
+                "concepts": entry.get("concepts", []),
             }
         return result
 

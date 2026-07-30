@@ -1,8 +1,9 @@
 ﻿# ETF Surge 方案实施总计划
 
-> 生成日期: 2026-07-29 | 版本: **v21.0**
+> 生成日期: 2026-07-29 | 版本: **v27.0**
 > ✅ **文档归档（2026-07-29 v20.1）**：8 份已全部实施/已替代的方案文档归档至 `docs/archived/` — `optimization-master-plan.md`、`optimization-master-plan-v2.md`、`performance-diagnosis-and-optimization-plan.md`、`fix-plan-master.md`、`fix-plan-pool.md`、`s5-markethub-design.md`、`system-performance-and-quality-review.md`、`fundamental-flow-factors-evaluation.md`。
 > ✅ **Phase 21 已完成**（2026-07-29）：修复 4 个前端单测失败（useMarketSearch + useSectorAnalysis mock 目标错误） + UI Phase 3(Steps 6-8)。详见下方 v21.0。
+> ✅ **Phase 27 已完成**（2026-07-30）：实施 `docs/system-diagnosis-and-optimization-plan.md` 子集 — F1(timeline select 导入 P0) + F2(A股搜索降级 levistock P1) + F4(max_tokens 8192→12288) + F5(删除 reasoning_content fallback) + F19(因子 industry 注入) + F15/F16/F20/F22(verify_e2e 加固：跨市场搜索/M14 门禁/china_specific 完整性/预热门禁收紧)。契约驱动 + TDD：新增 `api-contracts/market/search.md` 与 `tests/test_system_diagnosis_fixes.py`（15 用例全 PASS）。详见下方 v27.0。
 > ✅ **Phase 20 已完成**（2026-07-29）：综合诊断剩余项 — F1(布林带列名前缀匹配修复 P0) + F2(板块默认限额 80→500 P1) + F3(ic_tracker 类型错误 P1) + 11 个新单测。详见下方 v20.0。
 > ✅ **Phase 16 已完成**（2026-07-29）：P1/P2 剩余项 — S5(K线缓存统一) + S7(策略检查LLM报告) + S11(新闻重试) + S12(网易财经K线)。详见下方 v16.0。
 > ✅ **Phase 15 已完成**（2026-07-29）：诊断计划 P0/P1 剩余项 — S1(CircuitBreaker废弃) + S2(shares_change数据注入) + S9(fund_shares字段)。详见下方 v17.0。
@@ -1484,3 +1485,19 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 | | | | **新增单测：** tests/test_phase5_architecture.py（16 用例：P4.1 LLM 策略 ×5、P4.2 连接池 ×3、P4.3 缓存 ×3、P4.4 生命周期 ×5）
 | | | | **验证结果：** 16/16 新单测 PASS；之前所有 Phase 1-4 的 47/47 也 PASS；合计 63/63 无回归。
 | | | | **改动文件：** backend/app/config.py、backend/app/database.py、backend/app/fetchers/china_market.py、backend/tests/test_phase5_architecture.py（新）、docs/implementation-master-plan.md\|
+| | **v27.0** | 2026-07-30 | **Phase 27 — 系统诊断方案实施（契约驱动 + TDD）** | 详见下方 |
+| | | | **来源：** `docs/system-diagnosis-and-optimization-plan.md` |
+| | | | **F1 — timeline 端点 500 (P0)：** `backend/app/routers/portfolio.py` 的 `get_timeline()` 补 `from sqlalchemy import select`（函数内仅 import 了模型类与 json，缺失 `select` 导致 NameError 500）。 |
+| | | | **F2 — A 股搜索断裂 (P1)：** `backend/app/routers/market.py` `search(market="A")` 在本地 `Instrument` 表为空（未预装）时，新增 levistock `fetch_all_stocks` 实时降级，按 keyword 过滤返回真实 A 股个股，杜绝 0 结果断链。HK/US 维持 `search_hk_us` 不变。 |
+| | | | **F4 — LLM max_tokens (P3)：** `backend/app/analysis/llm.py` 三处 `max_tokens` 8192 → 12288（llm_complete 请求体、默认参数、stream 默认），确保 reasoning 模型留出 content 产出预算。 |
+| | | | **F5 — 删除 reasoning_content fallback (P3)：** `llm_complete` / `llm_complete_with_system` 移除 `if not content: content = message.get("reasoning_content", "")`。reasoning_content 是模型内部思维链（scratchpad），非交付物；content 为空时 JSON 场景由调用方结构化 fallback、文本场景由引擎摘要兜底。下游 `_extract_json` 已在空文本时抛错并被各调用方 try/except 捕获。 |
+| | | | **F19 — 因子 industry 注入 (P8)：** `backend/app/services/pool_manager.py` 的 `symbol_extra`（内联构建 + `_build_symbol_extra`）新增 `industry` / `concepts` 字段。三个 `china_specific` 因子（`five_year_plan` / `strategic_emerging` / `dual_circulation`）依赖 `data["industry"]`，此前因字段缺失恒为默认值 → IC 过滤全 no_data；注入后跨截面有变异，IC 可计算。 |
+| | | | **F15 — verify_e2e 跨市场搜索覆盖：** `backend/scripts/verify_e2e.py` section_market 新增 `market=A/HK/US` 三组搜索断言（200 + 有结果 + 10s 门禁）。 |
+| | | | **F16 — 响应时间门禁：** section_portfolio 为 `/timeline`、`/calculate` 增加 5s 慢查询门禁（`_check_response_time`）。 |
+| | | | **F20 — 因子完整性检查：** section_factors 新增 `/factors/active` 断言 `total>=30` 且 `china_specific` 类别 `no_data_count < count`（F19 回归防护）。 |
+| | | | **F22 — 预热门禁收紧：** section_health 预热失败线 30s→20s、警告线 15s→10s。 |
+| | | | **契约：** 新增 `api-contracts/market/search.md`（F2 `market=A` 降级行为契约）。 |
+| | | | **新增单测：** `backend/tests/test_system_diagnosis_fixes.py`（15 用例：F4 max_tokens=12288 ×1、F5 空 content 不泄露 reasoning ×2、F19 三因子 industry 消费 ×12）。 |
+| | | | **验证结果：** 15/15 新单测 PASS；因子/LLM/pool 相关既有套件 77 PASS（3 个 pool_manager 用例为预存失败，与本次改动无关，已用 `git stash` 验证）。 |
+| | | | **改动文件：** `backend/app/routers/portfolio.py`、`backend/app/routers/market.py`、`backend/app/analysis/llm.py`、`backend/app/services/pool_manager.py`、`backend/scripts/verify_e2e.py`、`backend/tests/test_system_diagnosis_fixes.py`（新）、`api-contracts/market/search.md`（新）、`docs/implementation-master-plan.md` |
+| | | | **未实施（本期范围外，待后续 Phase）：** F3(HK/US 实时查询增强)、F6(LLM 重试)、F7(LLM 健康探针端点)、F8(calculate 并行化)、F9-F14(预热/前端性能)、F17(Lighthouse CI)、F18 等，见原方案实施路标。 |

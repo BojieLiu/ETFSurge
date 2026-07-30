@@ -85,11 +85,11 @@ def section_health(host, port):
             wd = wr.json()
             warmup_total = wd.get("total_elapsed", 0) or wd.get("duration_ms", 0) or 0
             if warmup_total > 0:
-                is_ok = warmup_total < 30000  # 30s failure line
-                is_warn = warmup_total < 15000  # 15s warning line
-                check(f"预热完成时间 {warmup_total/1000:.1f}s < 30s (gate)", is_ok,
-                      f"FAIL: {warmup_total/1000:.1f}s 超过 30s 失败线" if not is_ok else
-                      f"WARN: {warmup_total/1000:.1f}s 超过 15s 警告线" if not is_warn else "")
+                is_ok = warmup_total < 20000  # F22: 20s failure line (tightened from 30s)
+                is_warn = warmup_total < 10000  # F22: 10s warning line (tightened from 15s)
+                check(f"预热完成时间 {warmup_total/1000:.1f}s < 20s (gate)", is_ok,
+                      f"FAIL: {warmup_total/1000:.1f}s 超过 20s 失败线" if not is_ok else
+                      f"WARN: {warmup_total/1000:.1f}s 超过 10s 警告线" if not is_warn else "")
             else:
                 check("预热计时器未启用", True, "PROFILE_WARMUP=1 环境变量未设置")
         else:
@@ -234,6 +234,21 @@ def section_market():
         check("GET /market/search", False, "请求超时（15s）")
     except Exception as e:
         check("GET /market/search", False, str(e))
+
+    # F15: cross-market search coverage (P1/P2 回归防护)
+    for _mkt, _kw in [("A", "510880"), ("HK", "00700"), ("US", "AAPL")]:
+        try:
+            _t0 = time.time()
+            r = requests.get(f"{BASE}/api/v1/market/search?keyword={_kw}&market={_mkt}", timeout=20)
+            _elapsed = time.time() - _t0
+            ok = r.status_code == 200 and isinstance(r.json(), list) and len(r.json()) > 0
+            check(f"GET /market/search?keyword={_kw}&market={_mkt} -> {r.status_code} ({_elapsed:.1f}s) 有结果",
+                  ok, "" if ok else f"返回 {len(r.json()) if r.status_code == 200 else 'ERR'} 条")
+            _check_response_time(f"/market/search?market={_mkt}", _elapsed, 10.0)
+        except requests.Timeout:
+            check(f"GET /market/search?market={_mkt}", False, "请求超时（20s）")
+        except Exception as e:
+            check(f"GET /market/search?market={_mkt}", False, str(e))
 
 
 def section_portfolio():
@@ -500,9 +515,12 @@ def section_portfolio():
 
     # POST /portfolio/calculate
     try:
+        _t0 = time.time()
         r = requests.post(f"{BASE}/api/v1/portfolio/calculate",
                           json={"total_capital": 100000, "holdings": []}, timeout=10)
+        _elapsed = time.time() - _t0
         check(f"POST /calculate -> {r.status_code}", r.status_code == 200)
+        _check_response_time("/portfolio/calculate", _elapsed, 5.0)
     except Exception as e:
         check("POST /calculate", False, str(e))
 
@@ -553,8 +571,11 @@ def section_portfolio():
 
     # GET /portfolio/timeline
     try:
+        _t0 = time.time()
         r = requests.get(f"{BASE}/api/v1/portfolio/timeline?days=30", timeout=10)
+        _elapsed = time.time() - _t0
         check(f"GET /timeline -> {r.status_code}", r.status_code == 200)
+        _check_response_time("/portfolio/timeline", _elapsed, 5.0)
     except Exception as e:
         check("GET /timeline", False, str(e))
 
@@ -992,6 +1013,30 @@ def section_factors(host, port):
             check("All symbols factor-healthy", True)
     except Exception as e:
         check(f"factor-health endpoint", False, str(e))
+
+    # F20: factor completeness — total factor count + china_specific data integrity
+    try:
+        r = requests.get(f"{BASE}/api/v1/factors/active", timeout=30)
+        if r.status_code == 200:
+            data = r.json()
+            total = data.get("total", 0)
+            check(f"GET /factors/active total={total} >= 30", total >= 30, f"total={total}")
+            cats = {c["name"]: c for c in data.get("categories", [])}
+            cn = cats.get("china_specific")
+            if cn:
+                cnt = cn.get("count", 0)
+                no_data = cn.get("no_data_count", 0)
+                # F19 regression guard: industry injection must make these factors
+                # produce real (non-None) IC values rather than all no_data.
+                check(f"china_specific 有 {cnt} 个因子且非全部 no_data (no_data={no_data})",
+                      cnt >= 3 and no_data < cnt,
+                      f"count={cnt}, no_data={no_data}")
+            else:
+                check("china_specific 类别存在", False, "未返回 china_specific 类别")
+        else:
+            check("GET /api/v1/factors/active", False, f"HTTP {r.status_code}")
+    except Exception as e:
+        check("GET /api/v1/factors/active", False, str(e))
 
     section("IC 追踪端点")
     try:
