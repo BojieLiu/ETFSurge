@@ -7,10 +7,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-# pandas_ta removed from requirements.txt because numba (its dep) doesn't support Python 3.14.
-# Install separately with --no-deps; pandas_ta works fine without numba (pure Python fallback).
-RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements.txt && \
-    pip install --no-deps "pandas_ta>=0.3.14b0"
+# pandas_ta hard-pins numba==0.61.2 which can't build from source on Python 3.14.
+# Split into 4 steps: 1) pandas_ta --no-deps avoids pin; 2) pin numpy<2.5;
+# 3) install requirements (numpy satisfied, stays <2.5); 4) install numba 0.66.0.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-deps "pandas_ta>=0.3.14b0" && \
+    pip install "numpy>=1.22,<2.5" && \
+    pip install -r requirements.txt && \
+    pip install "numba>=0.66.0"
 
 COPY . .
 
