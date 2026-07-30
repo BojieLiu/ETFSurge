@@ -1,11 +1,12 @@
 ﻿# ETF Surge 方案实施总计划
 
-> 生成日期: 2026-07-30 | 版本: **v29.0**
+> 生成日期: 2026-07-31 | 版本: **v30.0**
 > ✅ **文档归档（2026-07-29 v20.1）**：8 份已全部实施/已替代的方案文档归档至 `docs/archived/` — `optimization-master-plan.md`、`optimization-master-plan-v2.md`、`performance-diagnosis-and-optimization-plan.md`、`fix-plan-master.md`、`fix-plan-pool.md`、`s5-markethub-design.md`、`system-performance-and-quality-review.md`、`fundamental-flow-factors-evaluation.md`。
 > ✅ **Phase 21 已完成**（2026-07-29）：修复 4 个前端单测失败（useMarketSearch + useSectorAnalysis mock 目标错误） + UI Phase 3(Steps 6-8)。详见下方 v21.0。
 > ✅ **Phase 27 已完成**（2026-07-30）：实施 `docs/system-diagnosis-and-optimization-plan.md` 子集 — F1(timeline select 导入 P0) + F2(A股搜索降级 levistock P1) + F4(max_tokens 8192→12288) + F5(删除 reasoning_content fallback) + F19(因子 industry 注入) + F15/F16/F20/F22(verify_e2e 加固：跨市场搜索/M14 门禁/china_specific 完整性/预热门禁收紧)。契约驱动 + TDD：新增 `api-contracts/market/search.md` 与 `tests/test_system_diagnosis_fixes.py`（15 用例全 PASS）。详见下方 v27.0。
 > ✅ **Phase 28 已完成**（2026-07-30）：推进 `docs/system-diagnosis-and-optimization-plan.md` 的**遗漏项 + 推迟项**。详见下方 v28.0。
 > ✅ **Phase 29 已完成**（2026-07-30）：实施诊断方案 6 项修复 — Z01(import time 模块级) + Z02(US 行情：修复 Finnhub/TwelveData 函数名冲突 + FRED _API_BASE 覆盖) + Z03(china_specific IC 显示修复) + Z04(etf_specific 数据注入) + Z10(信号阈值放松 ±1.5) + Z11(设计熔断器静态池兜底)。契约驱动 + TDD：单测扩至 36 用例全 PASS。详见下方 v29.0。
+> ✅ **Phase 30 已完成**（2026-07-31）：实施 `docs/v5_diagnostic_and_optimization_plan.md` — Z21(WatchlistPanel.vue formatPct 修复) + Z23(fetch_hot_plates levistock 异常兜底) + Z24(LLMAdviceRequest 去重，仅保留一个带 market 字段的模型) + Z15(verify_e2e section_search 修复—原用 POST/query 改为 GET/keyword，新增 A股搜索验证) + Z16(verify_e2e 新增 section_fundamentals)。契约驱动 + TDD：新增 `tests/test_v5_diagnosis_fixes.py`（9 用例全 PASS）。详见下方 v30.0。
 > ✅ **Phase 20 已完成**（2026-07-29）：综合诊断剩余项 — F1(布林带列名前缀匹配修复 P0) + F2(板块默认限额 80→500 P1) + F3(ic_tracker 类型错误 P1) + 11 个新单测。详见下方 v20.0。
 > ✅ **Phase 16 已完成**（2026-07-29）：P1/P2 剩余项 — S5(K线缓存统一) + S7(策略检查LLM报告) + S11(新闻重试) + S12(网易财经K线)。详见下方 v16.0。
 > ✅ **Phase 15 已完成**（2026-07-29）：诊断计划 P0/P1 剩余项 — S1(CircuitBreaker废弃) + S2(shares_change数据注入) + S9(fund_shares字段)。详见下方 v17.0。
@@ -1523,6 +1524,16 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 | | | | **验证结果：** 15/15 新单测 PASS；因子/LLM/pool 相关既有套件 77 PASS（3 个 pool_manager 用例为预存失败，与本次改动无关，已用 `git stash` 验证）。 |
 | | | | **改动文件：** `backend/app/routers/portfolio.py`、`backend/app/routers/market.py`、`backend/app/analysis/llm.py`、`backend/app/services/pool_manager.py`、`backend/scripts/verify_e2e.py`、`backend/tests/test_system_diagnosis_fixes.py`（新）、`api-contracts/market/search.md`（新）、`docs/implementation-master-plan.md` |
 | | | | **未实施（本期范围外，待后续 Phase）：** F3(HK/US 实时查询增强)、F6(LLM 重试)、F7(LLM 健康探针端点)、F8(calculate 并行化)、F9-F14(预热/前端性能)、F17(Lighthouse CI)、F18 等，见原方案实施路标。
+
+| | **v30.0** | 2026-07-31 | **Phase 30 — v5 诊断方案实施：契约驱动 + TDD 修复6项问题** | 详见下方 |
+| | | | | **来源：** `docs/v5_diagnostic_and_optimization_plan.md` |
+| | | | | **Z21 — 510300 涨跌幅-112% 显示bug (P0)：** `frontend/src/components/market/WatchlistPanel.vue` `formatPct()` 中 `(pct * 100).toFixed(2)` 将 API 返回的百分比值（-1.12 = -1.12%）错误地乘以 100，导致显示 -112%。**修复：** 去掉 `* 100`，改为 `pct.toFixed(2) + '%'`。 |
+| | | | | **Z23 — 热点板块 404 (P0)：** `backend/app/fetchers/sector_fetcher.py` `fetch_hot_plates()` 在 levistock `get_sector_hot_plates()` 抛出异常时未捕获，导致路由 500/404。**修复：** 在内部 `_p()` 函数中添加 `try/except`，捕获异常后返回空列表。 |
+| | | | | **Z24 — AI 投资顾问 HTTP 500 (P0)：** `backend/app/routers/analysis.py` 中存在两个 `LLMAdviceRequest` 类定义（L131+L224），第二个覆盖第一个，`market` 字段丢失。前端发送 `{query, market}` 时 market 被 Pydantic 静默丢弃。**修复：** 删除第二个重复定义（L224-227），仅保留第一个完整模型（含 `query: str, market: str = "A", context: dict|None = None`）。 |
+| | | | | **Z15 — verify_e2e 补充 (P1)：** `backend/scripts/verify_e2e.py` 的 `section_search()` 原使用 `requests.post(..., json={"query": ...})`，但 `/search` 路由实际为 `GET /api/v1/market/search?keyword=...`，该测试从未正确运行过。**修复：** 改为 `requests.get(params={"keyword": ...})`；新增 A 股搜索(510300) + HK(盈富基金) + US(SPY) 三项测试，含返回列表校验。 |
+| | | | | **Z16 — 基本面 500 检查 (P2)：** verify_e2e 未覆盖 fundamentals 端点。**修复：** 新增 `section_fundamentals()`，测试 `/api/v1/market/fundamentals/510300` 端点可达。 |
+| | | | | **新增单测：** `backend/tests/test_v5_diagnosis_fixes.py`（9 用例：Z21×1(纯逻辑)、Z23×3(异常兜底/正常返回/路由异常)、Z24×2(market字段/query必填)、Z22×2(get_asset_realtime stock/非ETF)、Z15×1(section_search 存在性)）。全 PASS。 |
+| | | | | **改动文件：** `frontend/src/components/market/WatchlistPanel.vue`（Z21）、`backend/app/fetchers/sector_fetcher.py`（Z23）、`backend/app/routers/analysis.py`（Z24）、`backend/scripts/verify_e2e.py`（Z15/Z16）、`backend/tests/test_v5_diagnosis_fixes.py`（新）、`docs/implementation-master-plan.md`（本版本更新） |
 
 | | **v29.0** | 2026-07-30 | **Phase 29 — 系统诊断方案剩余项：契约驱动 + TDD 实施六处修复** | 详见下方 |
 | | | | | **来源：** `docs/system-diagnosis-and-optimization-plan.md` |

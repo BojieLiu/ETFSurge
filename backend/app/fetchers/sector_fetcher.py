@@ -341,10 +341,16 @@ def fetch_stock_hot_rank(limit: int = 50) -> list[dict[str, Any]]:
 
 
 def fetch_hot_plates(limit: int = 15) -> list[dict[str, Any]]:
-    """热点板块及涨停股 (财联社)。"""
+    """热点板块及涨停股 (财联社)。
+
+    Z23: 捕获 levistock 异常，返回空列表而非抛出。
+    """
     def _p():
-        rows = lv.get_sector_hot_plates() or []
-        return rows[:limit]
+        try:
+            rows = lv.get_sector_hot_plates() or []
+            return rows[:limit]
+        except Exception:
+            return []
     return _cached("hot_plates", _p, "sector_hot_plates")
 
 

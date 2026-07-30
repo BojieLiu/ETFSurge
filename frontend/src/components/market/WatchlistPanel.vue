@@ -201,7 +201,7 @@ const filtered = computed(() => {
 function formatPct(pct) {
   if (pct == null) return '—'
   const s = pct >= 0 ? '+' : ''
-  return s + (pct * 100).toFixed(2) + '%'
+  return s + pct.toFixed(2) + '%'
 }
 
 function formatVol(v) {
