@@ -234,7 +234,7 @@ class TestIndividualFetcherSortTime:
 class TestNewsRefreshBatch:
     """news_refresh 批次推送行为。"""
 
-    @patch("app.tasks.news_refresh.fetch_news_headlines")
+    @patch("app.services.market_data_hub.market_data_hub.get_news_headlines")
     @patch("app.tasks.news_refresh.manager")
     async def test_first_cycle_broadcasts_batch(self, mock_manager, mock_fetch):
         """首轮应广播一条 news_batch 消息（数组），而非逐条广播。"""
@@ -263,7 +263,7 @@ class TestNewsRefreshBatch:
         # 批次内已排序（最新在前）
         assert batch_data["data"][0]["sort_time"] >= batch_data["data"][1]["sort_time"]
 
-    @patch("app.tasks.news_refresh.fetch_news_headlines")
+    @patch("app.services.market_data_hub.market_data_hub.get_news_headlines")
     @patch("app.tasks.news_refresh.manager")
     async def test_subsequent_cycle_only_new_titles(self, mock_manager, mock_fetch):
         """后续轮次只推新增条目。"""

@@ -1101,30 +1101,78 @@ class MarketDataHub:
 
     # ── 新闻缓存 ──────────────────────────────────────────
     _news_cache: list[dict] | None = None
+    _news_buckets: dict | None = None
     _news_cache_ts: float = 0
     NEWS_TTL = 120
 
     def get_news(self) -> list[dict]:
-        """获取缓存新闻，120s TTL。"""
+        """获取缓存新闻（合并视图），120s TTL。"""
         import time
         now = time.time()
         if self._news_cache is not None and (now - self._news_cache_ts) < self.NEWS_TTL:
             return self._news_cache
         return []
 
+    def _news_bucket(self, key: str) -> list[dict]:
+        """按分类返回新闻桶；缓存过期或未初始化时懒刷新一次。"""
+        import time
+        now = time.time()
+        if self._news_buckets is None or (now - self._news_cache_ts) > self.NEWS_TTL:
+            self.refresh_news()
+        return (self._news_buckets or {}).get(key, [])
+
+    def get_news_headlines(self) -> list[dict]:
+        """财联社头条（分类缓存）。"""
+        return self._news_bucket("headlines")
+
+    def get_news_macro(self) -> list[dict]:
+        """宏观政策新闻（分类缓存）。"""
+        return self._news_bucket("macro")
+
+    def get_news_global(self) -> list[dict]:
+        """国际宏观新闻（分类缓存）。"""
+        return self._news_bucket("global")
+
+    def get_news_stock(self, symbol: str) -> list[dict]:
+        """个股新闻（实时取数，无缓存）。"""
+        try:
+            from ..fetchers.news_fetcher import fetch_stock_news
+            return fetch_stock_news(symbol) or []
+        except Exception as e:
+            logger.warning("[hub] get_news_stock(%s) failed: %s", symbol, e)
+            return []
+
+    def get_akshare_pool_stats(self) -> dict:
+        """akshare 池统计（直接委托）。"""
+        try:
+            from ..fetchers.news_fetcher import get_akshare_pool_stats
+            return get_akshare_pool_stats()
+        except Exception as e:
+            logger.warning("[hub] get_akshare_pool_stats failed: %s", e)
+            return {}
+
     def refresh_news(self) -> None:
-        """同步刷新新闻缓存。"""
+        """同步刷新新闻分类缓存（headlines/macro/global 分别入桶）。"""
         import time
         try:
-            from ..fetchers.news_fetcher import fetch_news_headlines, fetch_macro_news
-            news = fetch_news_headlines() or []
+            from ..fetchers.news_fetcher import (
+                fetch_news_headlines,
+                fetch_macro_news,
+                fetch_global_news,
+            )
+            headlines = fetch_news_headlines() or []
             macro = fetch_macro_news() or []
-            all_news = news + macro
-            self._news_cache = all_news
+            global_news = fetch_global_news() or []
+            self._news_buckets = {
+                "headlines": headlines,
+                "macro": macro,
+                "global": global_news,
+            }
+            self._news_cache = headlines + macro + global_news  # 合并视图兼容
             self._news_cache_ts = time.time()
-            logger.info("[pool] refreshed %d news items", len(all_news))
+            logger.info("[hub] refreshed %d news items", len(self._news_cache))
         except Exception as e:
-            logger.exception("[pool] refresh_news failed: %s", e)
+            logger.exception("[hub] refresh_news failed: %s", e)
 
 
 # Global singleton

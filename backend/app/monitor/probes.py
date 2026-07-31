@@ -82,10 +82,10 @@ def register_all_probes() -> None:
     register_probe("threadpool_main", _probe_main_pool, timeout=1)
 
     # ── T2: akshare 专用线程池健康 (1s) ───────────────────────
-    from ..fetchers.news_fetcher import get_akshare_pool_stats
+    from ..services.market_data_hub import market_data_hub
 
     def _probe_akshare_pool():
-        stats = get_akshare_pool_stats()
+        stats = market_data_hub.get_akshare_pool_stats()
         alive = stats.get("alive_threads", 0)
         max_w = stats.get("max_workers", 4)
         return alive <= max_w * 0.8

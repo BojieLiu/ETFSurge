@@ -6,7 +6,7 @@
 """
 from ..core.async_utils import run_sync
 from ..core.logging import get_logger
-from ..fetchers.news_fetcher import fetch_news_headlines
+from ..services.market_data_hub import market_data_hub
 from ..routers.ws import manager
 
 logger = get_logger(__name__)
@@ -17,9 +17,9 @@ _last_titles: set = set()
 async def refresh_news_cache() -> None:
     global _last_titles
     try:
-        items = await run_sync(fetch_news_headlines, timeout=30)
+        items = await run_sync(market_data_hub.get_news_headlines, timeout=30)
     except Exception:
-        logger.exception("刷新资讯缓存失败：fetch_news_headlines 异常")
+        logger.exception("刷新资讯缓存失败：get_news_headlines 异常")
         return
 
     is_first_cycle = not _last_titles

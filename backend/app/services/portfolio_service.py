@@ -11,7 +11,7 @@ from ..models.schemas import PortfolioETFCreate, PortfolioETFUpdate
 from ..fetchers.china_market import fetch_a_stock_batch, fetch_fund_nav, fetch_hk_stock_realtime, fetch_index_realtime
 from ..fetchers.global_markets_fetcher import fetch_us_etf_realtime
 from ..fetchers.fundamentals_fetcher import fetch_fundamentals
-from ..fetchers.news_fetcher import fetch_news_headlines, fetch_macro_news
+from ..services.market_data_hub import market_data_hub
 from ..analysis.indicators import compute_all_indicators
 from ..analysis.signal import generate_signal
 from ..core.async_utils import run_sync

@@ -37,14 +37,14 @@ async def report_worker(mgr, task_id: int) -> None:
 
         # 并行采集行情和新闻
         from ..services.market_service import get_all_realtime, get_indices, get_commodities
-        from ..fetchers.news_fetcher import fetch_news_headlines, fetch_macro_news
+        from ..services.market_data_hub import market_data_hub
 
         results = await asyncio.gather(
             asyncio.wait_for(get_all_realtime(), timeout=15),
             asyncio.wait_for(get_indices(), timeout=15),
             asyncio.wait_for(get_commodities(), timeout=15),
-            asyncio.to_thread(fetch_news_headlines),
-            asyncio.to_thread(fetch_macro_news),
+            asyncio.to_thread(market_data_hub.get_news_headlines),
+            asyncio.to_thread(market_data_hub.get_news_macro),
             return_exceptions=True,
         )
 

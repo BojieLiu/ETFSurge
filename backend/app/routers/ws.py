@@ -90,8 +90,8 @@ async def news_ws(websocket: WebSocket):
     try:
         # 订阅即推快照：立即推送当前最新头条，避免广播间隙空等
         try:
-            from ..fetchers.news_fetcher import fetch_news_headlines
-            headlines = await asyncio.to_thread(fetch_news_headlines)
+            from ..services.market_data_hub import market_data_hub
+            headlines = await asyncio.to_thread(market_data_hub.get_news_headlines)
             for item in (headlines or [])[:30]:
                 await websocket.send_text(json.dumps({"type": "news", "data": item}, ensure_ascii=False))
         except Exception:

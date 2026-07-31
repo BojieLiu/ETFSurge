@@ -53,10 +53,10 @@ def client():
         new=AsyncMock(return_value={"symbol": "600519", "name": "贵州茅台", "price": 1700, "change_pct": 0.5}),
     # News fetchers
     ), patch(
-        "app.routers.analysis.fetch_news_headlines",
+        "app.services.market_data_hub.market_data_hub.get_news_headlines",
         return_value=[],
     ), patch(
-        "app.routers.analysis.fetch_macro_news",
+        "app.services.market_data_hub.market_data_hub.get_news_macro",
         return_value=[],
     # Sector fetchers
     ), patch(

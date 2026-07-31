@@ -266,6 +266,18 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_regime_sentiment_refresh_loop())
     logger.info("市态+情绪缓存刷新循环已启动（120s）")
 
+    # Start news refresh loop (120s, v6 Phase 1: news aggregation cache)
+    async def _news_refresh_loop():
+        while True:
+            try:
+                from .services.market_data_hub import market_data_hub
+                await asyncio.wait_for(asyncio.to_thread(market_data_hub.refresh_news), timeout=20)
+            except (Exception, asyncio.CancelledError):
+                logger.warning("[lifespan] news refresh cycle failed, will retry")
+            await asyncio.sleep(120)
+    asyncio.create_task(_news_refresh_loop())
+    logger.info("资讯缓存刷新循环已启动（120s）")
+
     app.state.scheduler = None  # Scheduler disabled for diagnostics
 
     # 崩溃恢复：扫描 report_quality="pending" 且创建 >5min 的记录，标记为 fallback

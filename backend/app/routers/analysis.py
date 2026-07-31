@@ -22,12 +22,12 @@ from ..services.market_service import (
 )
 
 from ..analysis.indicators import compute_all_indicators
-from ..fetchers.news_fetcher import fetch_news_headlines, fetch_macro_news
 from ..fetchers.sector_fetcher import (
     fetch_industry_sectors, fetch_concept_sectors, fetch_sector_stocks,
     fetch_hot_plates, fetch_sector_heat,
 )
 from ..fetchers.fundamentals_fetcher import fetch_fund_flow, fetch_hist_avg_volume
+from ..services.market_data_hub import market_data_hub
 from ..database import get_db
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
@@ -160,14 +160,13 @@ async def llm_report(req: LLMReportRequest):
 
     try:
         from ..services.market_service import get_all_realtime, get_indices, get_commodities
-        from ..fetchers.news_fetcher import fetch_news_headlines, fetch_macro_news
-
+        
         results = await asyncio.gather(
             asyncio.wait_for(get_all_realtime(), timeout=15),
             asyncio.wait_for(get_indices(), timeout=15),
             asyncio.wait_for(get_commodities(), timeout=15),
-            asyncio.to_thread(fetch_news_headlines),
-            asyncio.to_thread(fetch_macro_news),
+            asyncio.to_thread(market_data_hub.get_news_headlines),
+            asyncio.to_thread(market_data_hub.get_news_macro),
             return_exceptions=True,
         )
 
@@ -283,10 +282,9 @@ async def llm_advice(req: LLMAdviceRequest):
 # TODO: 未接入前端
 @router.post("/llm-news-analysis")
 async def llm_news_analysis():
-    from ..fetchers.news_fetcher import fetch_news_headlines, fetch_macro_news
-    news = fetch_news_headlines() or []
+    news = market_data_hub.get_news_headlines() or []
     try:
-        macro = fetch_macro_news() or []
+        macro = market_data_hub.get_news_macro() or []
         news.extend(macro)
     except Exception:
         pass
@@ -525,9 +523,9 @@ async def sector_analysis_stream(req: SectorAnalysisRequest):
         name = sector_name or (sector_data.get("sector_name", "") if sector_data else sector_code)
         
         constituents = await asyncio.to_thread(fetch_sector_stocks, sector_code)
-        news = fetch_news_headlines() or []
+        news = market_data_hub.get_news_headlines() or []
         try:
-            macro = fetch_macro_news() or []
+            macro = market_data_hub.get_news_macro() or []
             news.extend(macro)
         except Exception:
             pass
@@ -560,9 +558,9 @@ async def symbol_analysis_stream(req: SymbolAnalysisRequest):
             pass
         indicators = compute_all_indicators(hist) if hist else {}
         
-        news = fetch_news_headlines() or []
+        news = market_data_hub.get_news_headlines() or []
         try:
-            macro = fetch_macro_news() or []
+            macro = market_data_hub.get_news_macro() or []
             news.extend(macro)
         except Exception:
             pass

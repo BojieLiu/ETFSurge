@@ -1,4 +1,4 @@
-﻿"""
+"""
 Market Router — 按市场路由数据请求 (Phase 5.1).
 
 提供 5 个 async 路由函数，根据 market 参数将数据请求分发到正确的数据源。
@@ -156,26 +156,26 @@ async def get_market_news(market: str, max_count: int = 10) -> list[dict]:
 
     注：当前仅 A 股有专有新闻源（财联社/宏观）。HK/US 通过国际通用新闻补充。
     """
-    from app.fetchers.news_fetcher import fetch_news_headlines, fetch_macro_news, fetch_global_news
+    from app.services.market_data_hub import market_data_hub
 
     all_news: list = []
     try:
-        headlines = await _call(fetch_news_headlines, timeout=8) or []
+        headlines = await _call(market_data_hub.get_news_headlines, timeout=8) or []
         all_news.extend(headlines)
     except Exception:
-        logger.warning("[market_router] fetch_news_headlines failed")
+        logger.warning("[market_router] get_news_headlines failed")
 
     try:
-        macro = await _call(fetch_macro_news, timeout=8) or []
+        macro = await _call(market_data_hub.get_news_macro, timeout=8) or []
         all_news.extend(macro)
     except Exception:
-        logger.warning("[market_router] fetch_macro_news failed")
+        logger.warning("[market_router] get_news_macro failed")
 
     try:
-        global_news = await _call(fetch_global_news, timeout=8) or []
+        global_news = await _call(market_data_hub.get_news_global, timeout=8) or []
         all_news.extend(global_news)
     except Exception:
-        logger.warning("[market_router] fetch_global_news failed")
+        logger.warning("[market_router] get_news_global failed")
 
     return all_news[:max_count]
 

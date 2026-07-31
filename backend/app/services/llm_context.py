@@ -92,10 +92,10 @@ async def build_full_context(
     # 6. News
     if include_news:
         try:
-            from ..fetchers.news_fetcher import fetch_news_headlines, fetch_macro_news
-            news_items = await asyncio.to_thread(fetch_news_headlines) or []
+            from ..services.market_data_hub import market_data_hub
+            news_items = await asyncio.to_thread(market_data_hub.get_news_headlines) or []
             try:
-                macro_items = await asyncio.to_thread(fetch_macro_news) or []
+                macro_items = await asyncio.to_thread(market_data_hub.get_news_macro) or []
                 news_items.extend(macro_items)
             except Exception:
                 pass
