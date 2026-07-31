@@ -548,7 +548,7 @@ async def search_etf(keyword: str) -> list[dict[str, Any]]:
             stmt = stmt.limit(30)
             rows = (await session.execute(stmt)).scalars().all()
             if rows:
-                return [
+                results = [
                     {
                         "symbol": r.symbol,
                         "name": r.name,
@@ -558,6 +558,8 @@ async def search_etf(keyword: str) -> list[dict[str, Any]]:
                     }
                     for r in rows
                 ]
+                # Z20: 统一排序契约
+                return _sort_search_results(results, keyword)
     except Exception as e:
         logger.warning(f"[search_etf] local table failed, fallback: {e}")
 
@@ -649,6 +651,63 @@ HKUS_STOCK_MAP: list[dict[str, str]] = [
 def _norm_symbol(s: str) -> str:
     """归一化去重键：去掉 .HK/.US 后缀（基座 ETF 带后缀、spot 全量列表不带）。"""
     return s.split(".")[0].lower()
+
+
+def _sort_search_results(items: list[dict], keyword: str) -> list[dict]:
+    """Z20: 统一搜索排序契约（SQL 与 Python 降级行为完全一致）。
+
+    分档优先级（高 → 低）:
+      1 精确代码（symbol == kw，大小写不敏感）
+      2 代码前缀（symbol.startswith(kw)）
+      3 精确名称（name == kw）
+      4 名称前缀（name.startswith(kw)）
+      5 名称包含（kw in name）
+      6 拼音/首字母（first_letter 前缀匹配，简化实现）
+      7 其他
+
+    同档内次序:
+      type_rank: etf=0 < stock=1
+      market_rank: A=1 < HK=2 < US=3 < index/commodity=4
+      symbol 字典序升序（大小写不敏感）
+
+    确定性: 相同输入 → 相同输出（sorted 稳定）。
+    """
+    kw = (keyword or "").strip()
+    kw_lower = kw.lower()
+
+    def _rank(item: dict):
+        sym = str(item.get("symbol", "") or "")
+        name = str(item.get("name", "") or "")
+        asset_type = str(item.get("asset_type", "") or "").lower()
+        market = str(item.get("market", "") or "")
+
+        if sym.lower() == kw_lower:
+            tier = 1
+        elif kw_lower and sym.lower().startswith(kw_lower):
+            tier = 2
+        elif name == kw:
+            tier = 3
+        elif kw and name.startswith(kw):
+            tier = 4
+        elif kw and kw in name:
+            tier = 5
+        elif kw:
+            first_letters = "".join(c[0] for c in name.split() if c).upper()
+            if first_letters.startswith(kw.upper()):
+                tier = 6
+            else:
+                tier = 7
+        else:
+            tier = 7
+
+        type_rank = 0 if asset_type == "etf" else 1
+        market_rank = {
+            "A": 1, "HK": 2, "US": 3,
+            "index": 4, "commodity": 4, "gold": 4, "oil": 4, "silver": 4,
+        }.get(market, 9)
+        return (tier, type_rank, market_rank, sym.lower())
+
+    return sorted(items, key=_rank)
 
 
 async def search_hk_us(keyword: str = "", enrich: bool = True,
@@ -1101,6 +1160,82 @@ async def get_fundamentals(symbol: str) -> dict[str, Any] | None:
 
 
 # ── Watchlist / 自选列表 ──────────────────────────────────────────
+
+async def resolve_symbol_to_code(symbol: str, asset_type: str = "A") -> str | None:
+    """按名称反查标的代码（Z22 watchlist 脏数据自愈）。
+
+    当 watchlist 中 symbol 存的是中文名称（历史脏数据）时，据此函数
+    反查真实代码。
+
+    路径:
+    1. ETF（asset_type in A/etf/ETF）: 查 instruments 表 name 匹配
+       （先精确、后包含），返回 symbol 列。
+    2. 个股（asset_type == A）: fetch_all_stocks() 全量列表按
+       stock_name 精确 → 包含匹配，返回 stock_code。
+    3. 其他市场: 暂不支持，返回 None。
+
+    返回解析出的真实代码，失败返回 None。
+    """
+    from ..models.search import Instrument
+    from sqlalchemy import or_
+
+    kw = (symbol or "").strip()
+    if not kw:
+        return None
+
+    # ── 1. ETF / 指数路径：本地 instruments 表 ─────────────────────
+    try:
+        async with async_session() as session:
+            # 先精确名称匹配
+            stmt_exact = (
+                select(Instrument.symbol)
+                .where(
+                    Instrument.is_active == True,  # noqa: E712
+                    Instrument.name == kw,
+                )
+                .limit(5)
+            )
+            exact_rows = (await session.execute(stmt_exact)).scalars().all()
+            if exact_rows:
+                return exact_rows[0]
+            # 包含匹配：取 symbol 最短（最可能是主代码）
+            stmt = (
+                select(Instrument.symbol)
+                .where(
+                    Instrument.is_active == True,  # noqa: E712
+                    Instrument.name.like(f"%{kw}%"),
+                )
+                .limit(20)
+            )
+            rows = (await session.execute(stmt)).scalars().all()
+            if rows:
+                rows_sorted = sorted(rows, key=lambda s: len(s))
+                return rows_sorted[0]
+    except Exception as e:
+        logger.warning("[watchlist] resolve_symbol_to_code instruments lookup failed: %s", e)
+
+    # ── 2. 个股路径：全量 A 股列表按名称匹配 ────────────────────────
+    try:
+        from ..services.market_data_hub import market_data_hub
+
+        full = market_data_hub.get_all_stocks() or []
+        for item in full:
+            stock_name = item.get("stock_name") or item.get("name") or ""
+            if stock_name == kw:
+                return item.get("stock_code") or item.get("symbol")
+        # 包含匹配：优先 symbol 前缀匹配 6 位
+        candidates = [
+            item for item in full
+            if kw in (item.get("stock_name") or item.get("name") or "")
+        ]
+        if candidates:
+            candidates.sort(key=lambda i: len(i.get("stock_code") or i.get("symbol") or ""))
+            return candidates[0].get("stock_code") or candidates[0].get("symbol")
+    except Exception as e:
+        logger.warning("[watchlist] resolve_symbol_to_code stock lookup failed: %s", e)
+
+    return None
+
 
 async def get_watchlist(limit: int = 100, offset: int = 0) -> dict[str, Any]:
     from ..models.search import Watchlist

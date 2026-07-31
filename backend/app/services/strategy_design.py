@@ -17,6 +17,81 @@ from ..engine.risk_controls import apply_risk_controls
 
 logger = logging.getLogger(__name__)
 
+# Z11: 静态兜底核心池（非交易时段 / 数据管道断裂时使用）
+STATIC_CORE_POOL = [
+    {"symbol": "510300", "name": "沪深300ETF", "layer": "core",
+     "factor_score": 0.5, "trend_1m": 0.0, "trend_3m": 0.0,
+     "fund_flow_20d": 0, "market_cap": 1e10},
+    {"symbol": "510050", "name": "上证50ETF", "layer": "core",
+     "factor_score": 0.5, "trend_1m": 0.0, "trend_3m": 0.0,
+     "fund_flow_20d": 0, "market_cap": 1e10},
+    {"symbol": "518880", "name": "黄金ETF", "layer": "defense",
+     "factor_score": 0.5, "trend_1m": 0.0, "trend_3m": 0.0,
+     "fund_flow_20d": 0, "market_cap": 1e10},
+    {"symbol": "511010", "name": "国债ETF", "layer": "defense",
+     "factor_score": 0.5, "trend_1m": 0.0, "trend_3m": 0.0,
+     "fund_flow_20d": 0, "market_cap": 1e10},
+    {"symbol": "159915", "name": "创业板ETF", "layer": "satellite",
+     "factor_score": 0.5, "trend_1m": 0.0, "trend_3m": 0.0,
+     "fund_flow_20d": 0, "market_cap": 1e10},
+    {"symbol": "588000", "name": "科创50ETF", "layer": "satellite",
+     "factor_score": 0.5, "trend_1m": 0.0, "trend_3m": 0.0,
+     "fund_flow_20d": 0, "market_cap": 1e10},
+]
+
+# Z11: 静态政策标识因子之外，静态池每层内等权分配
+def _build_static_pool_strategies(capital: float) -> list[dict]:
+    """基于 STRATEGY_META.layer_budget 等权分配静态核心池，生成 3 套方案。
+
+    Z11: 不再硬编码权重（0.4/0.35/0.25），统一引用 STRATEGY_META。
+    """
+    strategies: list[dict] = []
+    for profile in ("defensive", "balanced", "aggressive"):
+        meta = STRATEGY_META.get(profile, STRATEGY_META["balanced"])
+        budget = meta.get("layer_budget", {"core": 0.40, "satellite": 0.30, "defense": 0.10})
+
+        layer_groups: dict[str, list[dict]] = {"core": [], "satellite": [], "defense": []}
+        for e in STATIC_CORE_POOL:
+            layer = e.get("layer")
+            if isinstance(layer, str) and layer in layer_groups:
+                layer_groups[layer].append(e)
+
+        allocs: list[dict] = []
+        for layer, items in layer_groups.items():
+            if not items:
+                continue
+            layer_weight = budget.get(layer, 0.0)
+            per_item = round(layer_weight / len(items), 4)
+            for it in items:
+                allocs.append({
+                    "symbol": it["symbol"],
+                    "name": it["name"],
+                    "layer": layer,
+                    "weight": per_item,
+                    "target_amount": round(capital * per_item, 2),
+                    "selection_rationale": "静态核心池兜底（非交易时段/数据受限）",
+                })
+
+        used = sum(a["weight"] for a in allocs)
+        cash = round(1.0 - used, 4)
+        if cash > 0:
+            allocs.append({
+                "symbol": "CASH", "name": "现金", "layer": "cash",
+                "weight": cash, "target_amount": round(capital * cash, 2),
+                "selection_rationale": "流动性管理",
+            })
+
+        strategies.append({
+            "id": profile,
+            "name": meta.get("label", profile),
+            "description": f"{meta.get('positioning', '')}（静态池兜底方案）",
+            "risk_profile": profile,
+            "expected_return": f"{meta.get('expected_return', 0.1)*100:.0f}-{meta.get('expected_return', 0.1)*100+4:.0f}%",
+            "expected_volatility": "12-20%",
+            "etfs": allocs,
+        })
+    return strategies
+
 
 async def generate_enhanced_design(
     capital: float = 500000,
@@ -58,27 +133,60 @@ async def generate_enhanced_design(
         "defense": market_data_hub.get_pool("defense") or [],
     }
 
-    # 2b. 检查候选池是否为空
+    # 2b. 检查候选池是否为空（Z11: 空池 → 静态池兜底 + degradation 标记）
     total_candidates = sum(len(v) for v in candidates.values())
+    factor_matrix_empty = not bool(factor_matrix)
+    pool_empty = total_candidates == 0
+    static_pool_used: list[str] = []
     if total_candidates == 0:
         logger.warning("[strategy_design] empty candidate pool, falling back to static pool")
-        static_etfs = getattr(market_data_hub, 'etf_pool', None) or [
-            {"symbol": "510300", "name": "沪深300ETF", "market": "A", "layer": "core"},
-            {"symbol": "510050", "name": "上证50ETF", "market": "A", "layer": "core"},
-            {"symbol": "518880", "name": "黄金ETF", "market": "A", "layer": "defense"},
-            {"symbol": "511090", "name": "国债ETF", "market": "A", "layer": "defense"},
-            {"symbol": "159915", "name": "创业板ETF", "market": "A", "layer": "satellite"},
-            {"symbol": "588000", "name": "科创50ETF", "market": "A", "layer": "satellite"},
-        ]
+        pool_attr = getattr(market_data_hub, 'etf_pool', None)
+        static_etfs: list[dict] = pool_attr if isinstance(pool_attr, list) else STATIC_CORE_POOL
         candidates = {
             "core": [e for e in static_etfs if e.get("layer") == "core"],
             "satellite": [e for e in static_etfs if e.get("layer") == "satellite"],
             "defense": [e for e in static_etfs if e.get("layer") == "defense"],
         }
         total_candidates = sum(len(v) for v in candidates.values())
+        static_pool_used = [str(e.get("symbol", "")) for e in static_etfs if e.get("symbol")]
 
     market_regime = market_data_hub.get_market_regime() or "range_bound"
     market_context = await _build_market_context(market_data_hub)
+
+    # Z11: 降级模式判定（normal / static_pool / partial_data）
+    _now_iso = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def _degradation(mode: str, reason: str) -> dict:
+        return {
+            "mode": mode,
+            "reason": reason,
+            "factor_matrix_empty": factor_matrix_empty,
+            "pool_empty": pool_empty,
+            "static_pool_used": static_pool_used if mode == "static_pool" else [],
+            "timestamp": _now_iso,
+        }
+
+    # 静态池兜底：直接生成 3 套方案（不进 allocate，避免二次降级）
+    if pool_empty:
+        strategies = _build_static_pool_strategies(capital)
+        elapsed = time.monotonic() - start_time
+        logger.info("[strategy_design] static pool fallback generated %d strategies in %.1fs",
+                    len(strategies), elapsed)
+        return {
+            "strategies": strategies,
+            "market_context": market_context,
+            "generated_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "design_metadata": {
+                "version": "v5-engine-static-pool",
+                "elapsed_seconds": round(elapsed, 1),
+                "regime": market_regime,
+                "fallback": True,
+            },
+            "degradation": _degradation(
+                "static_pool",
+                "非交易时段/数据管道为空：候选池为空，使用静态核心池兜底",
+            ),
+        }
 
     try:
         # 3. 策略引擎：一次调用生成所有方案
@@ -172,6 +280,16 @@ async def generate_enhanced_design(
         logger.info("[strategy_design] v5 orchestrator generated %d strategies in %.1fs",
                     len(strategies), elapsed)
 
+        # Z11: 部分候选缺因子分 → partial_data 模式
+        missing_symbols: list[str] = []
+        for layer_list in candidates.values():
+            for c in layer_list:
+                if not isinstance(c, dict):
+                    continue
+                sym = c.get("symbol")
+                if sym and sym not in (factor_matrix or {}):
+                    missing_symbols.append(str(sym))
+        partial_data = bool(missing_symbols) and not pool_empty
         return {
             "strategies": strategies,
             "market_context": market_context,
@@ -181,34 +299,18 @@ async def generate_enhanced_design(
                 "elapsed_seconds": round(elapsed, 1),
                 "regime": market_regime,
             },
+            # Z11: 正常路径也暴露 degradation（mode=normal / partial_data）
+            "degradation": _degradation(
+                "partial_data" if partial_data else "normal",
+                "部分候选标的缺因子分：缺失因子按 0 填充"
+                if partial_data else "正常数据管道",
+            ),
         }
     except (asyncio.TimeoutError, ValueError, KeyError, ConnectionError, OSError, RuntimeError) as e:
         logger.exception("[strategy_design] generate_enhanced_design failed — attempting static pool fallback")
         # Z11: Fallback to static ETF pool when design pipeline fails
         try:
-            static_etfs = getattr(market_data_hub, 'etf_pool', None) or [
-                {"symbol": "510300", "name": "沪深300ETF", "market": "A", "layer": "core", "weight": 0.30},
-                {"symbol": "510050", "name": "上证50ETF", "market": "A", "layer": "core", "weight": 0.20},
-                {"symbol": "518880", "name": "黄金ETF", "market": "A", "layer": "defense", "weight": 0.15},
-                {"symbol": "511090", "name": "国债ETF", "market": "A", "layer": "defense", "weight": 0.15},
-                {"symbol": "159915", "name": "创业板ETF", "market": "A", "layer": "satellite", "weight": 0.10},
-                {"symbol": "588000", "name": "科创50ETF", "market": "A", "layer": "satellite", "weight": 0.10},
-            ]
-            fallback_strategies = [{
-                "id": "balanced",
-                "name": "均衡配置（静态池兜底）",
-                "description": "数据管道异常时使用静态候选池",
-                "risk_profile": "balanced",
-                "expected_return": "4-8%",
-                "expected_volatility": "12-18%",
-                "etfs": [
-                    {"symbol": e["symbol"], "name": e["name"], "layer": e["layer"],
-                     "weight": e["weight"],
-                     "target_amount": round(capital * e["weight"], 2),
-                     "selection_rationale": "静态池兜底"}
-                    for e in static_etfs
-                ],
-            }]
+            fallback_strategies = _build_static_pool_strategies(capital)
             elapsed = time.monotonic() - start_time
             logger.info("[strategy_design] fallback generated %d strategies in %.1fs",
                         len(fallback_strategies), elapsed)
@@ -217,12 +319,16 @@ async def generate_enhanced_design(
                 "market_context": market_context,
                 "generated_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "design_metadata": {
-                    "version": "v5-engine-fallback",
+                    "version": "v5-engine-static-pool",
                     "elapsed_seconds": round(elapsed, 1),
                     "regime": market_regime,
                     "fallback": True,
                 },
                 "warning": "使用静态池兜底，因子数据不可用",
+                "degradation": _degradation(
+                    "static_pool",
+                    f"设计管线异常（{type(e).__name__}），使用静态核心池兜底",
+                ),
             }
         except Exception as fallback_e:
             logger.exception("[strategy_design] fallback also failed")

@@ -15,6 +15,59 @@ from ..core.logging import get_logger
 
 logger = get_logger(__name__)
 
+# --- Z05: 共享 httpx.Client（连接池复用，减少 SSL 握手） ---
+_shared_client: "httpx.Client | None" = None
+
+
+def _get_shared_client() -> httpx.Client:
+    """Z05: 模块级共享 httpx.Client 单例（keepalive 连接复用）。
+
+    同一 host 复用连接，避免每次请求重新 TLS 握手。
+    """
+    global _shared_client
+    if _shared_client is None or _shared_client.is_closed:
+        _shared_client = httpx.Client(
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=5),
+            timeout=httpx.Timeout(_TIMEOUT, connect=5.0),
+            trust_env=False,
+            follow_redirects=True,
+        )
+    return _shared_client
+
+
+def _http_get_json(url: str) -> dict[str, Any] | None:
+    """通过共享 client 发起 GET 并解析 JSON（Z05: 连接复用）。
+
+    任何异常返回 None（容错，不阻塞主流程）。
+    """
+    try:
+        resp = _get_shared_client().get(
+            url, headers={"User-Agent": "Mozilla/5.0"}
+        )
+        resp.raise_for_status()
+        return resp.json()
+    except Exception:
+        return None
+
+
+def get_connection_pool_stats() -> dict[str, int]:
+    """Z05: 返回共享连接池统计（握手/复用次数），供 /admin/sources 可观测。
+
+    handshakes 取 httpx 底层连接池实际建立的连接数（同 host 复用后不再增长）。
+    内省失败时返回 0（容错）。
+    """
+    try:
+        client = _get_shared_client()
+        transport = getattr(client, "_transport", None)
+        pool = getattr(transport, "_pool", None)
+        if pool is None:
+            return {"handshakes": 0, "reused": 0}
+        num_connections = int(getattr(pool, "num_connections", 0) or 0)
+        return {"handshakes": num_connections, "reused": max(0, num_connections - 1)}
+    except Exception:
+        return {"handshakes": 0, "reused": 0}
+
+
 # --- em_global_fetcher.py: EM Global Index ---
 
 # Map East Money symbols → (our_symbol, region, display_name)
@@ -102,8 +155,6 @@ def _fetch_tencent_hk_indices() -> dict[str, dict[str, Any]]:
     API format: http://qt.gtimg.cn/q=hk{symbol}
     Returns dict keyed by our symbol, empty dict on failure.
     """
-    import urllib.request
-    import json as _json
 
     TENCENT_SYMBOL_MAP: dict[str, str] = {
         "HSI": "^HSI",
@@ -121,9 +172,12 @@ def _fetch_tencent_hk_indices() -> dict[str, dict[str, Any]]:
     url = f"http://qt.gtimg.cn/q={qstr}"
 
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            text = resp.read().decode("gbk").strip()
+        # Z05: 走共享 httpx.Client（连接复用）；GBK 编码文本
+        resp = _get_shared_client().get(
+            url, headers={"User-Agent": "Mozilla/5.0"}
+        )
+        resp.raise_for_status()
+        text = resp.content.decode("gbk", errors="ignore").strip()
     except Exception:
         return {}
 
@@ -338,14 +392,12 @@ def _av_request(params: dict[str, str]) -> dict[str, Any] | None:
     key = _get_av_apikey()
     if not key:
         return None
-    import urllib.request
-    import json
     params["apikey"] = key
     url = _AV_API_BASE + "?" + "&".join(f"{k}={v}" for k, v in params.items())
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+        data = _http_get_json(url)
+        if data is None:
+            return None
         if "Error Message" in data or "Note" in data:
             return None
         return data
@@ -442,13 +494,11 @@ def _td_request(path: str, params: dict[str, str]) -> dict[str, Any] | None:
     if not key:
         return None
     params["apikey"] = key
-    import urllib.request
-    import json
     url = f"{_TD_API_BASE}{path}?" + "&".join(f"{k}={v}" for k, v in params.items())
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+        data = _http_get_json(url)
+        if data is None:
+            return None
         if data.get("status") == "error":
             return None
         return data
@@ -549,15 +599,11 @@ def _request(path: str, params: dict[str, str] | None = None) -> dict[str, Any] 
     key = _get_apikey()
     if not key:
         return None
-    import urllib.request
-    import json
     url = f"{_API_BASE}{path}?token={key}"
     if params:
         url += "&" + "&".join(f"{k}={v}" for k, v in params.items())
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+        return _http_get_json(url)
     except Exception:
         return None
 

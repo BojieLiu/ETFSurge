@@ -1387,13 +1387,72 @@ class MarketDataHub:
             return []
 
     def get_stock_hot_rank(self, limit: int = 50) -> list[dict]:
-        """热门个股排行。"""
+        """热门个股排行（Z25: 补全 volume/turnover/sector）。"""
         try:
             from ..fetchers.sector_fetcher import fetch_stock_hot_rank
-            return fetch_stock_hot_rank(limit) or []
+            rows = fetch_stock_hot_rank(limit) or []
         except Exception as e:
             logger.warning("[hub] get_stock_hot_rank failed: %s", e)
             return []
+        if not rows:
+            return []
+        try:
+            return self._enrich_stock_hot_rank(rows)
+        except Exception as e:
+            logger.warning("[hub] stock_hot_rank enrich failed: %s", e)
+            return rows
+
+    def _enrich_stock_hot_rank(self, rows: list[dict]) -> list[dict]:
+        """Z25: 热门个股补全 volume/turnover（批量行情）+ sector（行业映射）。
+
+        任一补全步骤失败不阻塞主流程，缺失字段留默认值。
+        """
+        codes = [str(r.get("code") or r.get("symbol") or "").strip() for r in rows]
+        codes = [c for c in codes if c]
+        if not codes:
+            return rows
+
+        # 1) volume/turnover via batch realtime
+        batch_map: dict[str, dict] = {}
+        try:
+            from ..fetchers.china_market import fetch_a_stock_batch
+            batch = fetch_a_stock_batch(codes) or []
+            for b in batch:
+                sym = str(b.get("symbol", "")).strip()
+                if sym:
+                    batch_map[sym] = b
+        except Exception as e:
+            logger.warning("[hub] stock_hot_rank batch realtime failed: %s", e)
+
+        # 2) sector via industry map
+        sector_map: dict[str, str] = {}
+        try:
+            from ..fetchers.sector_fetcher import get_stock_industry_map
+            sector_map = get_stock_industry_map(codes) or {}
+        except Exception as e:
+            logger.warning("[hub] stock_hot_rank industry map failed: %s", e)
+
+        out: list[dict] = []
+        for rank, row in enumerate(rows, start=1):
+            code = str(row.get("code") or row.get("symbol") or "").strip()
+            b = batch_map.get(code) or {}
+            item = dict(row)
+            item["rank"] = rank
+            item["symbol"] = code
+            item["volume"] = b.get("volume", item.get("volume", 0))
+            item["turnover"] = b.get("turnover", item.get("turnover", 0))
+            if b:
+                if b.get("price") is not None:
+                    item["price"] = b["price"]
+                if b.get("change_pct") is not None:
+                    item["change_pct"] = b["change_pct"]
+                if b.get("change_amount") is not None:
+                    item["change_amount"] = b["change_amount"]
+            # 批量行情自带 sector 优先，其次行业映射，最后空串
+            item["sector"] = b.get("sector") or sector_map.get(code) or ""
+            item["asset_type"] = "A"
+            out.append(item)
+        return out
 
     def get_sector_popular_stocks(self, plate_code: str) -> list[dict]:
         """板块热门个股。"""

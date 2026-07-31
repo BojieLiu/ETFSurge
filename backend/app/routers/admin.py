@@ -101,6 +101,21 @@ async def get_source_circuit_breakers():
     return registry.circuit_breaker_status()
 
 
+# ── Z05: SSL 连接池可观测 ───────────────────────────────────────
+
+
+@router.get("/sources/connection-pool")
+async def get_connection_pool():
+    """Z05: 返回共享 HTTP 连接池统计（SSL 握手/复用次数）。"""
+    from ..fetchers.global_markets_fetcher import get_connection_pool_stats
+
+    stats = get_connection_pool_stats()
+    return {
+        "provider": "httpx.AsyncClient-shared-pool",
+        **stats,
+    }
+
+
 # ── Thread Pool Monitoring ──────────────────────────────────────
 
 

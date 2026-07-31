@@ -1033,6 +1033,11 @@ async def generate_strategy_check_report(
 持仓数量: {holdings_count} 只
 建议条数范围: {min_suggestions}~{max_suggestions} 条（下限{min_suggestions}条，必须覆盖每个持仓标的至少一条建议）
 
+## 输出硬约束（Z26）
+- 每条建议的 action 字段必须为小写枚举之一: increase / decrease / hold（禁止 BUY/SELL/HOLD 大写形式）
+- 每条建议必须包含 current_weight 与 suggested_weight（0-1 小数）
+- 每条建议必须包含 reason 与 confidence（0-1 小数）
+
 ## 持仓分析
 {holdings_text}
 

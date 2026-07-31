@@ -473,18 +473,21 @@ async def strategy_check(
         "partial": 0 < filled_factor_count < total_factor_count,
     }
 
-    # LLM 分析（provider timeout 负责，不再额外包裹 asyncio.wait_for）
+    # LLM 分析（Z26: 内层 20s 显式预算，超时走规则引擎兜底）
     try:
-        llm_result = await generate_strategy_check_report(
-            market_data=market_data,
-            factor_breakdowns=factor_breakdowns,
-            regime=regime,
-            data_quality=data_quality,
+        llm_result = await asyncio.wait_for(
+            generate_strategy_check_report(
+                market_data=market_data,
+                factor_breakdowns=factor_breakdowns,
+                regime=regime,
+                data_quality=data_quality,
+            ),
+            timeout=20,
         )
     except asyncio.TimeoutError:
-        logger.warning("[strategy_check] LLM analysis timed out, returning partial data")
+        logger.warning("[strategy_check] LLM analysis timed out after 20s, using rule fallback")
         llm_result = {
-            "summary": f"LLM 分析超时（基于 {len(market_data)} 只标的因子数据，未完成深度分析）",
+            "summary": f"LLM 分析超时（基于 {len(market_data)} 只标的因子数据，规则引擎兜底生成建议）",
             "suggestions": [],
             "holdings_analysis": [],
             "risk_warnings": [],
@@ -557,9 +560,51 @@ async def strategy_check(
 
     llm_summary = llm_result.get("summary", "")
     data_confidence = _compute_confidence(filled_count, total_count)
+
+    # ── Z26: 规则引擎兜底 + 覆盖率统计（确保 100% 覆盖） ──────────────
+    hold_symbols = [m for m in market_data if m.get("symbol") != "CASH"]
+    total_holdings = len(hold_symbols)
+    llm_suggestions = llm_result.get("suggestions", []) or []
+    for s in llm_suggestions:
+        s.setdefault("source", "llm")
+        # 契约硬约束: action 仅允许 increase/decrease/hold
+        if s.get("action") not in ("increase", "decrease", "hold"):
+            s["action"] = "hold"
+
+    covered_symbols = {s.get("symbol") for s in llm_suggestions if s.get("symbol")}
+    covered_by_llm = len(covered_symbols)
+    rule_suggestions: list[dict] = []
+    for m in hold_symbols:
+        sym = m.get("symbol")
+        if sym in covered_symbols:
+            continue
+        fb = factor_breakdowns.get(sym, {})
+        rule_suggestions.append(_rule_based_suggestion(
+            symbol=sym,
+            name=m.get("name", sym),
+            target_weight=m.get("target_weight", 0),
+            factor_score=fb.get("factor_scores", {}),
+            signal=fb.get("technical_signal"),
+            regime=regime,
+        ))
+    covered_by_rule = len(rule_suggestions)
+
+    merged_suggestions = llm_suggestions + rule_suggestions
+    covered_total = covered_by_llm + covered_by_rule
+    coverage_pct = covered_total / total_holdings if total_holdings else 1.0
+    if total_holdings and coverage_pct < 1.0:
+        logger.error("[strategy_check] coverage < 100%%: %s/%s holdings covered",
+                     covered_total, total_holdings)
+    coverage = {
+        "total_holdings": total_holdings,
+        "covered_by_llm": covered_by_llm,
+        "covered_by_rule": covered_by_rule,
+        "coverage_pct": round(coverage_pct, 4),
+    }
+
     result = {
         "summary": f"{llm_summary}（市态：{regime_label}{sector_text}{quality_summary}）" if llm_summary else f"市态：{regime_label}，{filled_count}/{total_count}只正常{quality_summary}",
-        "suggestions": llm_result.get("suggestions", []),
+        "suggestions": merged_suggestions,
         "holdings_analysis": holdings_analysis,
         "risk_warnings": _combine_risk_warnings(
             llm_result.get("risk_warnings", []),
@@ -571,6 +616,7 @@ async def strategy_check(
             "total_count": total_count,
         },
         "data_confidence": data_confidence,
+        "coverage": coverage,
         "raw_llm": str(llm_result),
     }
     # 缓存 60s
@@ -589,6 +635,52 @@ def _compute_confidence(filled_count: int, total_count: int) -> str:
     elif ratio >= 0.5:
         return "medium"
     return "low"
+
+
+def _rule_based_suggestion(
+    symbol: str,
+    name: str,
+    target_weight: float,
+    factor_score: dict,
+    signal: dict | None,
+    regime: str,
+) -> dict:
+    """Z26: 规则引擎兜底建议 — 基于因子分 + 技术信号 + regime 决策表。
+
+    仅输出 increase/decrease/hold 枚举（契约硬约束），source='rule'，
+    confidence 固定 0.7。suggested_weight 调整：
+      increase -> min(current * 1.2, 0.30)（单只 ≤30% 风控）
+      decrease -> max(current * 0.7, 0.0)
+      hold     -> 维持当前权重
+    """
+    fs_vals = [v for v in (factor_score or {}).values()
+               if isinstance(v, (int, float)) and v != 0]
+    avg_factor = sum(fs_vals) / len(fs_vals) if fs_vals else 0.0
+    sig = ""
+    if isinstance(signal, dict):
+        sig = signal.get("signal", "hold") or "hold"
+
+    bearish = regime in ("bearish", "bear", "bear_market", "defensive")
+    if avg_factor > 0.5 and sig == "buy" and not bearish:
+        action, reason = "increase", "因子评分优+技术买入信号，建议增仓"
+        suggested = min(target_weight * 1.2, 0.30)
+    elif avg_factor < -0.5 and sig == "sell":
+        action, reason = "decrease", "因子评分弱+技术卖出信号，建议减仓"
+        suggested = max(target_weight * 0.7, 0.0)
+    else:
+        action, reason = "hold", "维持现状"
+        suggested = target_weight
+
+    return {
+        "symbol": symbol,
+        "name": name,
+        "action": action,
+        "current_weight": round(float(target_weight or 0), 4),
+        "suggested_weight": round(float(suggested), 4),
+        "reason": reason,
+        "confidence": 0.7,
+        "source": "rule",
+    }
 
 
 def _combine_risk_warnings(

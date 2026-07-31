@@ -667,6 +667,9 @@ class FactorRegistry:
         self._factors: dict[str, FactorDefinition] = {}
         self._computers: dict[str, Callable[[dict], float]] = dict(_BUILTIN_COMPUTERS)
         self._last_ic_batch: dict[str, float] = {}
+        # Z03: 因子健康度元数据（sample_count / 最后计算时间）
+        self._sample_counts: dict[str, int] = {}
+        self._last_computed_at: str | None = None
         self.load_definitions()
 
     def load_definitions(self, yaml_path: str | None = None) -> None:
@@ -1148,6 +1151,16 @@ class FactorRegistry:
                 ic_batch = ic_tracker.compute_periodic_ic(result, market_data, window=1)
                 if ic_batch:
                     self._last_ic_batch = ic_batch
+                    # Z03: 记录样本数与最后计算时间（供 /factors/active 健康度展示）
+                    from datetime import datetime, timezone as _tz
+                    self._last_computed_at = datetime.now(_tz.utc).isoformat()
+                    self._sample_counts = {
+                        code: sum(
+                            1 for sym in result
+                            if abs((result[sym].get(code) or 0)) > 0.001
+                        )
+                        for code in ic_batch
+                    }
                     # B3: IC threshold alerts
                     for code, ic_val in ic_batch.items():
                         definition = self._factors.get(code)

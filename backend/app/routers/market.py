@@ -452,6 +452,11 @@ async def wind() -> list[dict[str, Any]]:
 
 # ── Watchlist / 自选列表 ──────────────────────────────────────────────
 
+import re
+from ..services.market_service import resolve_symbol_to_code
+
+CODE_PATTERN = re.compile(r"^[0-9A-Za-z.\-]+$")
+
 
 @router.get("/watchlist", response_model=dict)
 async def watchlist_list(
@@ -474,20 +479,57 @@ async def watchlist_list(
         enriched = []
         for item in items:
             realtime = await market_data_hub.get_asset_realtime(item.symbol, item.asset_type)
+            
+            # Z22: Auto-heal dirty data - if symbol is not a valid code, try to resolve by name
+            resolved_symbol = item.symbol
+            resolved_realtime = realtime
+            if not CODE_PATTERN.match(item.symbol) or realtime is None:
+                # Try to resolve symbol from name
+                resolved = await resolve_symbol_to_code(item.symbol, item.asset_type)
+                if resolved and resolved != item.symbol:
+                    resolved_symbol = resolved
+                    resolved_realtime = await market_data_hub.get_asset_realtime(resolved, item.asset_type)
+                    # Auto-heal DB: update symbol if different
+                    # 用独立短会话执行 UPDATE，避免 rollback 影响主循环 session 中已加载对象
+                    if resolved_symbol != item.symbol:
+                        from sqlalchemy import update as sa_update
+                        resolved_name = resolved_realtime.get("name") if resolved_realtime else None
+                        try:
+                            async with async_session() as heal_session:
+                                await heal_session.execute(
+                                    sa_update(Watchlist)
+                                    .where(Watchlist.id == item.id)
+                                    .values(
+                                        symbol=resolved_symbol,
+                                        name=resolved_name or item.name,
+                                    )
+                                )
+                                await heal_session.commit()
+                        except Exception as e:
+                            # Unique constraint conflict - log warning, continue with resolved data
+                            logger.warning("[watchlist] auto-heal unique conflict for id=%s: %s", item.id, e)
+            
+            # Name fallback: realtime.name or symbol
+            display_name = item.name
+            if resolved_realtime and resolved_realtime.get("name"):
+                display_name = resolved_realtime["name"]
+            if not display_name or not display_name.strip():
+                display_name = resolved_symbol
+            
             item_dict = {
                 "id": item.id,
-                "symbol": item.symbol,
-                "name": item.name,
+                "symbol": resolved_symbol,
+                "name": display_name,
                 "asset_type": item.asset_type,
                 "notes": item.notes,
                 "created_at": item.created_at.isoformat() if item.created_at else None,
                 "updated_at": item.updated_at.isoformat() if item.updated_at else None,
             }
-            if realtime:
+            if resolved_realtime:
                 item_dict["realtime"] = {
-                    "price": realtime.get("price"),
-                    "change_pct": realtime.get("change_pct"),
-                    "volume": realtime.get("volume"),
+                    "price": resolved_realtime.get("price"),
+                    "change_pct": resolved_realtime.get("change_pct"),
+                    "volume": resolved_realtime.get("volume"),
                 }
             enriched.append(item_dict)
 
@@ -502,6 +544,10 @@ async def watchlist_list(
 @router.post("/watchlist", response_model=dict, status_code=201)
 async def watchlist_add(data: WatchlistCreate) -> dict[str, Any]:
     """添加自选"""
+    # Z22: Validate symbol format - must be alphanumeric/dot/dash, no Chinese
+    if not CODE_PATTERN.match(data.symbol):
+        raise HTTPException(status_code=422, detail="无法解析该标的，请通过搜索选择")
+    
     async with async_session() as session:
         # Check if already exists
         stmt = select(Watchlist).where(Watchlist.symbol == data.symbol)
@@ -510,9 +556,15 @@ async def watchlist_add(data: WatchlistCreate) -> dict[str, Any]:
         if existing:
             raise HTTPException(status_code=409, detail="该标的已在自选列表中")
 
-        # Get name from market data
+        # Get realtime data to validate code exists and get name
         realtime = await market_data_hub.get_asset_realtime(data.symbol, data.asset_type)
-        name = realtime.get("name", data.symbol) if realtime else data.symbol
+        if not realtime:
+            raise HTTPException(status_code=422, detail="无法解析该标的，请通过搜索选择")
+
+        # Name fallback: realtime.name or symbol
+        name = realtime.get("name", data.symbol)
+        if not name or not name.strip():
+            name = data.symbol
 
         item = Watchlist(
             symbol=data.symbol,

@@ -1058,6 +1058,7 @@ def section_factors(host, port):
         check(f"factor-health endpoint", False, str(e))
 
     # F20: factor completeness — total factor count + china_specific data integrity
+    # Z03: china.policy 三因子为静态标识因子（status='static'，不计算 IC，不计入 valid/warn/no_data）
     try:
         r = requests.get(f"{BASE}/api/v1/factors/active", timeout=30)
         if r.status_code == 200:
@@ -1068,12 +1069,17 @@ def section_factors(host, port):
             cn = cats.get("china_specific")
             if cn:
                 cnt = cn.get("count", 0)
-                valid = cn.get("valid_count", 0)
-                # F19 regression guard: industry injection must make these factors
-                # produce real (non-None) IC values -> valid_count > 0.
-                check(f"china_specific 有 {cnt} 个因子且 valid_count>0 (valid={valid})",
-                      cnt >= 3 and valid > 0,
-                      f"count={cnt}, valid_count={valid}")
+                statuses = [f.get("status") for f in cn.get("factors", [])]
+                # Z03 契约: 静态因子 status='static' + ic_value=null；不再要求 valid_count>0
+                all_static = all(s == "static" for s in statuses) if statuses else False
+                check(f"china_specific 有 {cnt} 个因子且均为静态标识 (statuses={statuses})",
+                      cnt >= 3 and all_static,
+                      f"count={cnt}, statuses={statuses}")
+                # 每个静态因子 ic_value 必须为 null（移除硬编码 0）
+                ic_vals = [f.get("ic_value") for f in cn.get("factors", [])]
+                check("静态因子 ic_value 全部为 null（不硬编码 0）",
+                      all(v is None for v in ic_vals),
+                      f"ic_values={ic_vals}")
             else:
                 check("china_specific 类别存在", False, "未返回 china_specific 类别")
         else:

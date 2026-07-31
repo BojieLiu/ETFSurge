@@ -340,6 +340,27 @@ def fetch_stock_hot_rank(limit: int = 50) -> list[dict[str, Any]]:
     return _cached("stock_hot_rank", _p, "sector_heat")
 
 
+def get_stock_industry_map(symbols: list[str]) -> dict[str, str]:
+    """批量查询股票代码 → 行业名称映射（Z25 热门个股 sector 补全）。
+
+    数据源: tushare stock_basic（无 key / 失败返回空映射，容错）。
+    缓存: 1h（stock_basic）。
+    """
+    if not symbols:
+        return {}
+    def _p():
+        try:
+            from .global_markets_fetcher import fetch_stock_basic
+            rows = fetch_stock_basic() or []
+            return {
+                str(r.get("symbol", "")).strip(): str(r.get("industry", "") or "").strip()
+                for r in rows if str(r.get("symbol", "")).strip()
+            }
+        except Exception:
+            return {}
+    return _cached("stock_industry_map", _p, "stock_basic") or {}
+
+
 def fetch_hot_plates(limit: int = 15) -> list[dict[str, Any]]:
     """热点板块及涨停股 (财联社)。
 

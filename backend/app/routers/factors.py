@@ -128,6 +128,26 @@ async def get_active_factors() -> JSONResponse:
     ic_batch = registry._last_ic_batch
     categories: dict[str, dict[str, Any]] = {}
 
+    # Z03: 静态政策标识因子（不计算 IC，status='static'）
+    STATIC_FACTOR_CODES = {
+        "china.policy.five_year_plan",
+        "china.policy.strategic_emerging",
+        "china.policy.dual_circulation",
+    }
+    sample_counts = getattr(registry, "_sample_counts", {}) or {}
+    last_computed_at = getattr(registry, "_last_computed_at", None)
+
+    def _status_of(code: str, ic_val: float | None, ic_threshold: float) -> tuple[str, str]:
+        """Z03: 权威状态 + 原因说明。"""
+        if code in STATIC_FACTOR_CODES:
+            return "static", "静态政策标识因子，不计算 IC"
+        if ic_val is None:
+            return "no_data", "尚未计算 IC（数据不足）"
+        threshold = ic_threshold if ic_threshold and ic_threshold > 0 else 0.02
+        if abs(ic_val) >= threshold:
+            return "valid", f"IC {ic_val:.4f} ≥ 阈值 {threshold}，样本数 {sample_counts.get(code, 0)}"
+        return "warn", f"IC {ic_val:.4f} < 阈值 {threshold}，样本数 {sample_counts.get(code, 0)}"
+
     for code in registry._computers:
         definition = registry.get_factor(code)
         cat_name = definition.category if definition else _get_factor_category(code)
@@ -141,23 +161,25 @@ async def get_active_factors() -> JSONResponse:
             }
 
         ic_val = ic_batch.get(code)
-        # Z03: For china_specific static policy factors (five_year_plan,
-        # strategic_emerging, dual_circulation), initialize ic_value=0 instead
-        # of None so they don't show as "no_data" before IC accumulation.
-        if ic_val is None and cat_name == "china_specific" and code in (
-            "china.policy.five_year_plan",
-            "china.policy.strategic_emerging",
-            "china.policy.dual_circulation",
-        ):
-            ic_val = 0.0
+        ic_threshold = definition.ic_threshold if definition else 0.02
+        if code in STATIC_FACTOR_CODES:
+            # Z03: 静态因子 ic_value=null（不再硬编码 0）、threshold=0
+            ic_val = None
+            ic_threshold = 0.0
+        status, reason = _status_of(code, ic_val, ic_threshold)
         factor_entry = {
             "code": code,
             "name": definition.name if definition and definition.name else _get_factor_name(code),
             "subcategory": sub_name,
             "description": definition.description if definition else "",
             "standardization": definition.standardization if definition else "zscore",
-            "ic_threshold": definition.ic_threshold if definition else 0.02,
+            "ic_threshold": ic_threshold,
             "ic_value": round(ic_val, 4) if ic_val is not None else None,
+            # Z03 新增字段
+            "status": status,
+            "reason": reason,
+            "sample_count": 0 if code in STATIC_FACTOR_CODES else sample_counts.get(code, 0),
+            "last_computed_at": None if code in STATIC_FACTOR_CODES else last_computed_at,
         }
         categories[cat_name]["factors"].append(factor_entry)
 
@@ -166,11 +188,13 @@ async def get_active_factors() -> JSONResponse:
     for cat_name in sorted(categories.keys()):
         cat = categories[cat_name]
         factors = cat["factors"]
-        vals = [f["ic_value"] for f in factors if f["ic_value"] is not None]
+        # Z03: 静态因子不计入 valid/warn/no_data/avg_ic 统计
+        computed = [f for f in factors if f["status"] != "static"]
+        vals = [f["ic_value"] for f in computed if f["ic_value"] is not None]
         avg_ic = round(sum(vals) / len(vals), 4) if vals else None
-        valid_count = sum(1 for f in factors if f["ic_value"] is not None and abs(f["ic_value"]) >= (f["ic_threshold"] or 0.02))
-        warn_count = sum(1 for f in factors if f["ic_value"] is not None and abs(f["ic_value"]) < (f["ic_threshold"] or 0.02))
-        no_data_count = sum(1 for f in factors if f["ic_value"] is None)
+        valid_count = sum(1 for f in computed if f["status"] == "valid")
+        warn_count = sum(1 for f in computed if f["status"] == "warn")
+        no_data_count = sum(1 for f in computed if f["status"] == "no_data")
 
         cat_list.append({
             "name": cat_name,
@@ -184,7 +208,8 @@ async def get_active_factors() -> JSONResponse:
         })
 
     # Compute global summary
-    all_ic_vals = [f["ic_value"] for cat in cat_list for f in cat["factors"] if f["ic_value"] is not None]
+    all_ic_vals = [f["ic_value"] for cat in cat_list for f in cat["factors"]
+                   if f["status"] != "static" and f["ic_value"] is not None]
     total_valid = sum(c["valid_count"] for c in cat_list)
     total_warn = sum(c["warn_count"] for c in cat_list)
     total_no_data = sum(c["no_data_count"] for c in cat_list)

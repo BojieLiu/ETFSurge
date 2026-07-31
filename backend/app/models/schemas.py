@@ -223,8 +223,9 @@ class ImportResult(BaseModel):
 
 # Watchlist / 自选列表
 class WatchlistBase(BaseModel):
-    symbol: str
-    asset_type: str = "etf"
+    # Z22: symbol 必须是代码形态（字母数字点横线），拒绝中文/空格/特殊字符
+    symbol: str = Field(..., pattern=r"^[0-9A-Za-z.\-]+$", min_length=1, max_length=20)
+    asset_type: str = "A"
     notes: Optional[str] = None
 
 
