@@ -269,6 +269,7 @@ def _attach_level(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         else:
             # 财联社源已有 level，更新 stars 加入时间新鲜度
             it["stars"] = _compute_stars(it.get("level", 1), it.get("time", ""))
+        it.setdefault("ai_summary", None)  # Z18: AI 摘要字段，由后台管道 enrich_news_summaries 填充
     return items
 
 

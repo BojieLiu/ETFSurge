@@ -1084,6 +1084,17 @@ class MarketDataHub:
 
         for key in factor_keys:
             if key in EXCLUDE:
+                # Z09: size 因子做 min-max 归一化（保留截面相对排序、消除量纲），
+                # 而非完全跳过——否则原始 ln(mcap)≈25 会作为“25σ”离群值进入 factor_breakdown
+                values = [matrix[s].get(key, 0.0) for s in symbols]
+                vmin, vmax = min(values), max(values)
+                if vmax - vmin < 1e-10:
+                    # 截面无区分度（如 total_mv 未注入导致全同）时置中性 0，不泄漏原始量纲值
+                    for s in symbols:
+                        matrix[s][key] = 0.0
+                    continue
+                for s in symbols:
+                    matrix[s][key] = (matrix[s].get(key, 0.0) - vmin) / (vmax - vmin) * 2.0 - 1.0
                 continue
             values = [matrix[s].get(key, 0.0) for s in symbols]
             # 跳过所有值相同的因子（无截面区分度）
@@ -1140,6 +1151,33 @@ class MarketDataHub:
     def get_news_headlines(self) -> list[dict]:
         """财联社头条（分类缓存）。"""
         return self._news_bucket("headlines")
+
+    async def enrich_news_summaries(self) -> int:
+        """Z18: 为重要新闻(level>=3 或 stars>=4)生成 AI 摘要并写回缓存。
+
+        LLM 失败静默保留 None；单轮最多 5 条控制成本；改的是缓存内 dict 引用，
+        因此 write-back 对 get_news_headlines 立即可见。
+        """
+        try:
+            from ..analysis.llm import generate_news_summary
+        except Exception:
+            return 0
+        items = self._news_bucket("headlines")
+        targets = [
+            n for n in items
+            if not n.get("ai_summary")
+            and (int(n.get("stars", 0) or 0) >= 4 or str(n.get("level", "")) in ("重大", "利好"))
+        ]
+        enriched = 0
+        for n in targets[:5]:
+            try:
+                summary = await generate_news_summary(n.get("title", ""), n.get("content", ""))
+                if summary:
+                    n["ai_summary"] = summary
+                    enriched += 1
+            except Exception:
+                continue
+        return enriched
 
     def get_news_macro(self) -> list[dict]:
         """宏观政策新闻（分类缓存）。"""

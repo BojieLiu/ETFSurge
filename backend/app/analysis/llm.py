@@ -810,6 +810,20 @@ async def analyze_news(news_list: list[dict]) -> str:
 NEWS_IMPACT_SYSTEM_PROMPT = load_prompt("news_impact.md")
 
 
+async def generate_news_summary(title: str, content: str) -> str:
+    """Z18: 单条新闻生成一句话中文摘要（后台管道用，失败返回空串不抛错）。"""
+    prompt = (
+        f"请用一句话（不超过40字）概括以下新闻的核心要点，"
+        f"直接输出摘要正文，不要任何前缀、引号或标点修饰。\n"
+        f"标题：{title}\n内容：{(content or '')[:200]}"
+    )
+    try:
+        text = await llm_complete(prompt, max_retries=0)
+        return (text or "").strip().strip('"').strip("'")[:80]
+    except Exception:
+        return ""
+
+
 async def analyze_news_impact(news_item: dict, holdings: list[dict]) -> dict:
     """分析单条新闻对当前组合内各标的的具体影响。
 

@@ -33,7 +33,7 @@ import { ref } from 'vue'
 import { renderMarkdown } from '../../utils/markdown'
 import { useLLMStream } from '../../composables/useLLMStream'
 
-defineProps({ marketTab: { type: String, default: 'A' } })
+const props = defineProps({ marketTab: { type: String, default: 'A' } })
 
 const report = ref('')
 const loading = ref(false)
@@ -46,7 +46,8 @@ async function generate() {
   report.value = ''
   error.value = ''
   try {
-    await startStream('/llm-report/stream', { symbols: null }, (token) => {
+    // Z31: 发送 market 参数，后端按 marketTab 采集对应市场数据
+    await startStream('/llm-report/stream', { symbols: null, market: props.marketTab }, (token) => {
       report.value += token
     })
   } catch (e) {

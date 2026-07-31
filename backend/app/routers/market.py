@@ -244,7 +244,11 @@ def _empty_chart_response() -> dict:
 @router.get("/fundamentals/{symbol}")
 async def fundamentals(symbol: str) -> dict:
     """Tushare 增强数据(日线 + 主力资金流)。免费 token 积分有限,已长缓存。"""
-    return await market_data_hub.get_market_fundamentals(symbol)
+    result = await market_data_hub.get_market_fundamentals(symbol)
+    if result is None:
+        # Z16: 数据源不可用时返回结构化空响应而非 None (避免 response_model 校验 500)
+        return {"symbol": symbol, "daily": [], "error": "fundamentals data unavailable"}
+    return result
 
 
 # TODO: 未接入前端

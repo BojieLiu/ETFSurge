@@ -405,3 +405,27 @@ class TestSourceRegistryFactorSource:
         from app.services.source_registry import registry
         h = registry._health("factor.history")
         assert h.failure_threshold >= 3
+
+    def test_etf_specific_factors_registered(self):
+        """Z04: 全部 10 个 etf_specific 因子必须在 _computers 注册且可计算。
+
+        防护回归：factor_definitions 中 etf_specific 因子的 compute_fn 为空字符串，
+        但 _BUILTIN_COMPUTERS 必须提供真实实现；否则 compute() 输出缺失 etf.* 键。
+        """
+        from app.factors.factor_registry import FactorRegistry, _CORE_FACTORS, _BUILTIN_COMPUTERS
+        etf_codes = [c for c in _CORE_FACTORS if c.startswith("etf.")]
+        assert len(etf_codes) >= 10, f"expected >=10 etf_specific factors, got {len(etf_codes)}"
+        missing = [c for c in etf_codes if c not in _BUILTIN_COMPUTERS]
+        assert not missing, f"etf_specific factors missing compute fn: {missing}"
+
+        reg = FactorRegistry()
+        # 用最小 data 验证 price/change_pct 等可计算（不依赖网络）
+        data = {"price": 4.65, "change_pct": 1.04, "close": [4.5, 4.55, 4.6, 4.62, 4.65],
+                "volume": [1e6, 1.1e6, 1.2e6, 1.3e6, 1.4e6], "total_mv": 1e11}
+        for code in etf_codes:
+            fn = _BUILTIN_COMPUTERS[code]
+            try:
+                val = fn(data)
+                assert isinstance(val, (int, float)), f"{code} returned {type(val)}"
+            except Exception as e:
+                raise AssertionError(f"{code} compute raised: {e}") from e

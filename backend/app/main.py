@@ -272,6 +272,8 @@ async def lifespan(app: FastAPI):
             try:
                 from .services.market_data_hub import market_data_hub
                 await asyncio.wait_for(asyncio.to_thread(market_data_hub.refresh_news), timeout=20)
+                # Z18: 后台为重要新闻生成 AI 摘要（不阻塞刷新循环，失败静默）
+                asyncio.create_task(market_data_hub.enrich_news_summaries())
             except (Exception, asyncio.CancelledError):
                 logger.warning("[lifespan] news refresh cycle failed, will retry")
             await asyncio.sleep(120)
