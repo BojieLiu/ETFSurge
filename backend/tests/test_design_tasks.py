@@ -120,7 +120,7 @@ class TestDesignWorker:
         mock_llm.return_value = "LLM report"
         mock_db.return_value = self._make_mock_session()
         mock_gen.return_value = {
-            "strategies": [{"label": "防御型"}],
+            "strategies": [{"label": "防御型", "etfs": [{"symbol": "510300", "name": "沪深300ETF", "layer": "core", "weight": 0.5}]}],
             "market_context": {},
         }
 
@@ -160,7 +160,7 @@ class TestDesignWorker:
         mock_llm.return_value = "LLM report"
         mock_db.return_value = self._make_mock_session()
         mock_gen.return_value = {
-            "strategies": [{"label": "防御型", "etfs": []}],
+            "strategies": [{"label": "防御型", "etfs": [{"symbol": "510300", "name": "沪深300ETF", "layer": "core", "weight": 0.5}]}],
             "market_context": {},
         }
 

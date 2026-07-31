@@ -71,9 +71,9 @@ async def test_sina_page_fallback_in_foreign():
          patch("app.fetchers.china_market.fetch_index_realtime", return_value=[]), \
          patch("app.fetchers.china_market.fetch_sina_global_index",
                side_effect=fake_sina), \
-         patch("app.fetchers.em_global_fetcher.fetch_all", return_value={}), \
-         patch("app.fetchers.em_global_fetcher.fetch_hk_indices", return_value={}), \
-         patch("app.fetchers.finnhub_fetcher.fetch_realtime", return_value=None):
+         patch("app.fetchers.global_markets_fetcher.fetch_all", return_value={}), \
+         patch("app.fetchers.global_markets_fetcher.fetch_hk_indices", return_value={}), \
+         patch("app.fetchers.global_markets_fetcher.fetch_realtime", return_value=None):
         regions = await ms.get_global_indices()
 
     eu = [d for d in regions.get("欧洲", []) if d["symbol"] == "^FTSE"]
@@ -105,9 +105,9 @@ async def test_sina_page_does_not_break_us_indices():
          patch("app.fetchers.china_market.fetch_index_realtime", return_value=[]), \
          patch("app.fetchers.china_market.fetch_sina_global_index",
                side_effect=fake_sina), \
-         patch("app.fetchers.em_global_fetcher.fetch_all", return_value={}), \
-         patch("app.fetchers.em_global_fetcher.fetch_hk_indices", return_value={}), \
-         patch("app.fetchers.finnhub_fetcher.fetch_realtime", return_value=None):
+         patch("app.fetchers.global_markets_fetcher.fetch_all", return_value={}), \
+         patch("app.fetchers.global_markets_fetcher.fetch_hk_indices", return_value={}), \
+         patch("app.fetchers.global_markets_fetcher.fetch_realtime", return_value=None):
         regions = await ms.get_global_indices()
 
     for sym in ("^GSPC", "^IXIC", "^DJI"):

@@ -954,7 +954,7 @@ def _fetch_akshare_history(symbol: str, asset_type: str, period: str) -> list[di
             fh_result = run_in_thread(lambda: global_markets_fetcher.fetch_candles(symbol, "D"), timeout=8, executor="long")
             if fh_result:
                 return fh_result
-            av_result = run_in_thread(lambda: global_markets_fetcher.fetch_daily(symbol), timeout=10, executor="long")
+            av_result = run_in_thread(lambda: global_markets_fetcher.fetch_daily_alphavantage(symbol), timeout=10, executor="long")
             if av_result:
                 return av_result
         return []

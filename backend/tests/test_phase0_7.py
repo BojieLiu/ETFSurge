@@ -94,8 +94,8 @@ def test_v3_aggregate_factor_scores():
         "technical.volume.vol_ratio": 1.2,
         "sentiment.panic_greed_diff": 0.5,
         "sentiment.news_heat": 0.3,
-        "style.size.ln_mcap": 0.6,
-        "etf.amount_stability": 0.4,
+        "style.quality.roa": 0.6,
+        "etf.return_1m": 0.4,
         "china.policy.five_year_plan": 0.3,
     }
 
@@ -475,7 +475,7 @@ def test_b1_pool_integration_aggregation():
         "technical.ma.sma_5": 0.7,
         "technical.rsi.rsi_14": 55.0,
         "sentiment.panic_greed_diff": 0.4,
-        "etf.amount_stability": 0.6,
+        "etf.return_1m": 0.6,
     }
     aggregated = factor_registry.aggregate_factor_scores(raw)
     assert "technical" in aggregated
@@ -566,7 +566,7 @@ async def test_c3_design_worker_saves_design_text_pipeline():
             "id": "balanced",
             "label": "均衡型",
             "layer_budget": {"core": 0.50, "satellite": 0.30, "defense": 0.20},
-            "allocations": [
+            "etfs": [
                 {"symbol": "510300", "name": "沪深300ETF", "layer": "core", "weight": 0.3,
                  "factor_score": 0.7, "factor_breakdown": {}, "selection_rationale": "宽基配置"},
                 {"symbol": "518880", "name": "黄金ETF", "layer": "defense", "weight": 0.1,

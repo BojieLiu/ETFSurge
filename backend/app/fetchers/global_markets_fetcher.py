@@ -384,7 +384,7 @@ def fetch_realtime_alphavantage(symbol: str) -> dict[str, Any] | None:
     return run_in_thread(_p, timeout=_TIMEOUT, executor="long")
 
 
-def fetch_daily(symbol: str, outputsize: str = "compact") -> list[dict[str, Any]] | None:
+def fetch_daily_alphavantage(symbol: str, outputsize: str = "compact") -> list[dict[str, Any]] | None:
     """Fetch daily K-line history from Alpha Vantage (TIME_SERIES_DAILY).
 
     Args:
@@ -396,7 +396,7 @@ def fetch_daily(symbol: str, outputsize: str = "compact") -> list[dict[str, Any]
         None on error.
     """
     def _p():
-        data = _request({
+        data = _av_request({
             "function": "TIME_SERIES_DAILY",
             "symbol": symbol,
             "outputsize": outputsize,
@@ -504,7 +504,7 @@ def fetch_history(symbol: str, days: int = 60) -> list[dict[str, Any]] | None:
         None on any error.
     """
     def _p():
-        data = _request("/time_series", {
+        data = _td_request("/time_series", {
             "symbol": symbol,
             "interval": "1day",
             "outputsize": str(min(days, 5000)),

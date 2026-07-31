@@ -129,9 +129,9 @@ async def test_global_indices_sina_fails_finnhub_fallback():
          patch("app.fetchers.china_market.fetch_index_realtime", return_value=[]), \
          patch("app.fetchers.china_market.fetch_sina_global_index",
                side_effect=fake_sina), \
-         patch("app.fetchers.em_global_fetcher.fetch_all", return_value={}), \
-         patch("app.fetchers.em_global_fetcher.fetch_hk_indices", return_value={}), \
-         patch("app.fetchers.finnhub_fetcher.fetch_realtime",
+         patch("app.fetchers.global_markets_fetcher.fetch_all", return_value={}), \
+         patch("app.fetchers.global_markets_fetcher.fetch_hk_indices", return_value={}), \
+         patch("app.fetchers.global_markets_fetcher.fetch_realtime",
                side_effect=fake_fh):
         regions = await ms.get_global_indices()
 
@@ -164,9 +164,9 @@ async def test_global_indices_one_region_failure_isolated():
          patch("app.fetchers.china_market.fetch_index_realtime", return_value=[]), \
          patch("app.fetchers.china_market.fetch_sina_global_index",
                side_effect=fake_sina), \
-         patch("app.fetchers.em_global_fetcher.fetch_all", return_value={}), \
-         patch("app.fetchers.em_global_fetcher.fetch_hk_indices", return_value={}), \
-         patch("app.fetchers.finnhub_fetcher.fetch_realtime",
+         patch("app.fetchers.global_markets_fetcher.fetch_all", return_value={}), \
+         patch("app.fetchers.global_markets_fetcher.fetch_hk_indices", return_value={}), \
+         patch("app.fetchers.global_markets_fetcher.fetch_realtime",
                side_effect=fake_fh):
         regions = await ms.get_global_indices()
 
@@ -199,9 +199,9 @@ async def test_global_indices_all_sources_fail_graceful():
          patch("app.fetchers.china_market.fetch_index_realtime", return_value=[]), \
          patch("app.fetchers.china_market.fetch_sina_global_index",
                side_effect=fake_sina), \
-         patch("app.fetchers.em_global_fetcher.fetch_all", return_value={}), \
-         patch("app.fetchers.em_global_fetcher.fetch_hk_indices", return_value={}), \
-         patch("app.fetchers.finnhub_fetcher.fetch_realtime",
+         patch("app.fetchers.global_markets_fetcher.fetch_all", return_value={}), \
+         patch("app.fetchers.global_markets_fetcher.fetch_hk_indices", return_value={}), \
+         patch("app.fetchers.global_markets_fetcher.fetch_realtime",
                side_effect=fake_fh):
         regions = await ms.get_global_indices()
 
@@ -270,7 +270,7 @@ async def test_all_index_entries_match_schema():
 def test_foreign_index_symbols_covered_by_at_least_one_source():
     """Every foreign (non-A股) index symbol must be mapped in EM_SYMBOL_MAP
     OR _GLOBAL_SINA_SHORT — otherwise it always returns price:null."""
-    from app.fetchers.em_global_fetcher import EM_SYMBOL_MAP
+    from app.fetchers.global_markets_fetcher import EM_SYMBOL_MAP
     from app.fetchers.china_market import _GLOBAL_SINA_SHORT
 
     # Collect our symbols in EM_SYMBOL_MAP (values are (our_sym, region, name))

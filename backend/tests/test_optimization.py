@@ -131,10 +131,10 @@ def test_resample_4h():
 
 def test_fetch_history_15m():
     # Sina 为分钟线主力源（eastmoney 分钟接口当前不稳定），akshare 仅兜底
-    with patch("app.fetchers.china_market._sina_history") as mock_sina, \
+    with patch("app.fetchers.china_market._sina_history_cb") as mock_sina, \
          patch("app.fetchers.china_market._akshare_intraday_history") as mock_min:
         mock_sina.return_value = [{"日期": "d1", "开盘": 1, "最高": 2, "最低": 0.5, "收盘": 1.5, "成交量": 100}]
-        result = china_market.fetch_history("510050", "A", "15m")
+        result = china_market.fetch_history("600000", "A", "15m")
         assert mock_sina.called
         assert not mock_min.called
         assert result[0]["收盘"] == 1.5
@@ -142,9 +142,9 @@ def test_fetch_history_15m():
 
 def test_fetch_history_4h_resample():
     # 4h 由 Sina 60 分钟线重采样得到
-    with patch("app.fetchers.china_market._sina_history") as mock_sina:
+    with patch("app.fetchers.china_market._sina_history_cb") as mock_sina:
         mock_sina.return_value = [{"日期": f"d{i}", "开盘": 1, "最高": i, "最低": 0, "收盘": i + 1, "成交量": 10} for i in range(8)]
-        result = china_market.fetch_history("510050", "A", "4h")
+        result = china_market.fetch_history("600000", "A", "4h")
         assert mock_sina.called
         assert len(result) == 2
         assert result[0]["最高"] == 3

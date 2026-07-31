@@ -987,7 +987,7 @@ async def get_history(
     # S5: 优先查 Hub K 线缓存
     try:
         from .market_data_hub import market_data_hub
-        cached = pm.get_kline_rows(symbol, max_age=300)
+        cached = market_data_hub.get_kline_rows(symbol, max_age=300)
         if cached:
             return cached
     except Exception:

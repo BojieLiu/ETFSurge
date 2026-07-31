@@ -19,8 +19,9 @@ async def test_analyze_news_impact_structured(monkeypatch):
         ],
         "summary": "整体利好组合中的宽基ETF",
     }
-    monkeypatch.setattr(llmmod, "llm_complete_with_system",
-                        AsyncMock(return_value=json.dumps(payload)))
+    mock_agent = MagicMock()
+    mock_agent.run_json = AsyncMock(return_value=payload)
+    monkeypatch.setattr("app.analysis.llm.get_agent", lambda name: mock_agent)
 
     result = await llmmod.analyze_news_impact(
         {"title": "央行降准", "content": "全面降准0.5个百分点"},

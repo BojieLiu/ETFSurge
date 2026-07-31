@@ -139,7 +139,7 @@ class TestDesignPipeline:
         # S1-C: LLM 超时 → completed_with_errors（方案仍然可用）
         assert t["status"] == "completed_with_errors"
         assert t["progress"] == 100
-        assert t["result"]["report_quality"] == "fallback"
+        assert t["result"]["report_quality"] == "partial"
         assert t["result"]["design_id"] == 1002
 
     @patch("app.services.strategy_design.generate_enhanced_design", new_callable=AsyncMock)
@@ -215,8 +215,9 @@ class TestDesignPipeline:
         assert "引擎计算异常" in t.get("error_message", "")
 
     @patch("app.tasks.task_manager.async_session")
+    @patch("app.analysis.llm.generate_design_report", new_callable=AsyncMock)
     @patch("app.services.strategy_design.generate_enhanced_design", new_callable=AsyncMock)
-    async def test_pipeline_market_context_available(self, mock_gen_design, mock_db_session):
+    async def test_pipeline_market_context_available(self, mock_gen_design, mock_llm, mock_db_session):
         """Regression: market_context passed through, no NameError."""
         from app.tasks.task_manager import TaskManager, design_pipeline
 
@@ -224,8 +225,8 @@ class TestDesignPipeline:
             "strategies": _mock_strategies(),
             "market_context": _mock_market_context(),
         }
-        # Two sessions needed: Stage 3 write + Stage 4 LLM (we don't mock LLM here,
-        # so it tries to call real generate_design_report which we need to handle)
+        mock_llm.return_value = "LLM report content"
+        # Two sessions needed: Stage 3 write + Stage 4 LLM result update
         mock_db_session.side_effect = [
             _make_mock_session(design_id=1004),  # Stage 3: initial write
             _make_mock_session(design_id=1004),  # Stage 4: LLM result update

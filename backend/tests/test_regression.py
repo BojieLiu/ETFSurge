@@ -72,7 +72,7 @@ class TestOpt02FundFlowDegradation:
             result = await _compute_fund_flow(mock_pm)
             assert result["total_net_inflow"] == 0.0
             assert result["total_symbols"] == 0
-            mock_health.assert_called_once_with("push2.eastmoney.com")
+            mock_health.assert_called_once_with("push2delay.eastmoney.com")
 
     @pytest.mark.asyncio
     async def test_compute_fund_flow_proceeds_when_push2_available(self):

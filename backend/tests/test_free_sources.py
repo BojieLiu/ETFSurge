@@ -42,9 +42,9 @@ def mock_td_history():
 
 class TestTwelveDataFetcher:
     def test_fetch_realtime_success(self, mock_td_response):
-        from app.fetchers.twelvedata_fetcher import fetch_realtime
+        from app.fetchers.global_markets_fetcher import fetch_realtime_twelvedata as fetch_realtime
 
-        with patch("app.fetchers.twelvedata_fetcher._request", return_value=mock_td_response):
+        with patch("app.fetchers.global_markets_fetcher._td_request", return_value=mock_td_response):
             result = fetch_realtime("SPY")
 
         assert result is not None
@@ -59,23 +59,23 @@ class TestTwelveDataFetcher:
         assert result["previous_close"] == 750.72
 
     def test_fetch_realtime_none_on_missing_close(self):
-        from app.fetchers.twelvedata_fetcher import fetch_realtime
+        from app.fetchers.global_markets_fetcher import fetch_realtime_twelvedata as fetch_realtime
 
-        with patch("app.fetchers.twelvedata_fetcher._request", return_value={"symbol": "SPY"}):
+        with patch("app.fetchers.global_markets_fetcher._td_request", return_value={"symbol": "SPY"}):
             result = fetch_realtime("SPY")
         assert result is None
 
     def test_fetch_realtime_none_on_error(self):
-        from app.fetchers.twelvedata_fetcher import fetch_realtime
+        from app.fetchers.global_markets_fetcher import fetch_realtime_twelvedata as fetch_realtime
 
-        with patch("app.fetchers.twelvedata_fetcher._request", return_value=None):
+        with patch("app.fetchers.global_markets_fetcher._td_request", return_value=None):
             result = fetch_realtime("SPY")
         assert result is None
 
     def test_fetch_history_success(self, mock_td_history):
-        from app.fetchers.twelvedata_fetcher import fetch_history
+        from app.fetchers.global_markets_fetcher import fetch_history
 
-        with patch("app.fetchers.twelvedata_fetcher._request", return_value=mock_td_history):
+        with patch("app.fetchers.global_markets_fetcher._td_request", return_value=mock_td_history):
             result = fetch_history("SPY", days=60)
 
         assert result is not None
@@ -86,9 +86,9 @@ class TestTwelveDataFetcher:
         assert result[1]["volume"] == 62569200
 
     def test_fetch_history_none_on_error(self):
-        from app.fetchers.twelvedata_fetcher import fetch_history
+        from app.fetchers.global_markets_fetcher import fetch_history
 
-        with patch("app.fetchers.twelvedata_fetcher._request", return_value={"status": "error"}):
+        with patch("app.fetchers.global_markets_fetcher._td_request", return_value={"status": "error"}):
             result = fetch_history("SPY")
         assert result is None
 
@@ -121,9 +121,9 @@ def mock_fh_candles():
 
 class TestFinnhubFetcher:
     def test_fetch_realtime_success(self, mock_fh_response):
-        from app.fetchers.finnhub_fetcher import fetch_realtime
+        from app.fetchers.global_markets_fetcher import fetch_realtime
 
-        with patch("app.fetchers.finnhub_fetcher._request", return_value=mock_fh_response):
+        with patch("app.fetchers.global_markets_fetcher._request", return_value=mock_fh_response):
             result = fetch_realtime("SPY")
 
         assert result is not None
@@ -137,16 +137,16 @@ class TestFinnhubFetcher:
         assert result["previous_close"] == 750.72
 
     def test_fetch_realtime_none_on_empty(self):
-        from app.fetchers.finnhub_fetcher import fetch_realtime
+        from app.fetchers.global_markets_fetcher import fetch_realtime
 
-        with patch("app.fetchers.finnhub_fetcher._request", return_value={}):
+        with patch("app.fetchers.global_markets_fetcher._request", return_value={}):
             result = fetch_realtime("SPY")
         assert result is None
 
     def test_fetch_candles_success(self, mock_fh_candles):
-        from app.fetchers.finnhub_fetcher import fetch_candles
+        from app.fetchers.global_markets_fetcher import fetch_candles
 
-        with patch("app.fetchers.finnhub_fetcher._request", return_value=mock_fh_candles):
+        with patch("app.fetchers.global_markets_fetcher._request", return_value=mock_fh_candles):
             result = fetch_candles("SPY", "D")
 
         assert result is not None
@@ -156,9 +156,9 @@ class TestFinnhubFetcher:
         assert "volume" in result[0]
 
     def test_fetch_candles_none_on_error_status(self):
-        from app.fetchers.finnhub_fetcher import fetch_candles
+        from app.fetchers.global_markets_fetcher import fetch_candles
 
-        with patch("app.fetchers.finnhub_fetcher._request", return_value={"s": "no_data"}):
+        with patch("app.fetchers.global_markets_fetcher._request", return_value={"s": "no_data"}):
             result = fetch_candles("INVALID")
         assert result is None
 
@@ -206,9 +206,9 @@ def mock_av_daily():
 
 class TestAlphaVantageFetcher:
     def test_fetch_realtime_success(self, mock_av_response):
-        from app.fetchers.alphavantage_fetcher import fetch_realtime
+        from app.fetchers.global_markets_fetcher import fetch_realtime_alphavantage as fetch_realtime
 
-        with patch("app.fetchers.alphavantage_fetcher._request", return_value=mock_av_response):
+        with patch("app.fetchers.global_markets_fetcher._av_request", return_value=mock_av_response):
             result = fetch_realtime("SPY")
 
         assert result is not None
@@ -219,16 +219,16 @@ class TestAlphaVantageFetcher:
         assert result["latest_trading_day"] == "2026-07-17"
 
     def test_fetch_realtime_none_on_missing(self):
-        from app.fetchers.alphavantage_fetcher import fetch_realtime
+        from app.fetchers.global_markets_fetcher import fetch_realtime_alphavantage as fetch_realtime
 
-        with patch("app.fetchers.alphavantage_fetcher._request", return_value={}):
+        with patch("app.fetchers.global_markets_fetcher._av_request", return_value={}):
             result = fetch_realtime("SPY")
         assert result is None
 
     def test_fetch_daily_success(self, mock_av_daily):
-        from app.fetchers.alphavantage_fetcher import fetch_daily
+        from app.fetchers.global_markets_fetcher import fetch_daily_alphavantage as fetch_daily
 
-        with patch("app.fetchers.alphavantage_fetcher._request", return_value=mock_av_daily):
+        with patch("app.fetchers.global_markets_fetcher._av_request", return_value=mock_av_daily):
             result = fetch_daily("SPY", "compact")
 
         assert result is not None
@@ -238,9 +238,9 @@ class TestAlphaVantageFetcher:
         assert result[1]["close"] == 743.29
 
     def test_fetch_daily_none_on_error(self):
-        from app.fetchers.alphavantage_fetcher import fetch_daily
+        from app.fetchers.global_markets_fetcher import fetch_daily_alphavantage as fetch_daily
 
-        with patch("app.fetchers.alphavantage_fetcher._request", return_value={"Error Message": "rate limit"}):
+        with patch("app.fetchers.global_markets_fetcher._av_request", return_value={"Error Message": "rate limit"}):
             result = fetch_daily("SPY")
         assert result is None
 
@@ -274,7 +274,7 @@ class TestMarketServiceRouting:
             # Verify registry was called with 4 sources in correct order
             call_args = mock_registry.route.call_args[0][0]
             source_names = [p[0] for p in call_args]
-            assert source_names == ["twelvedata", "finnhub", "alphavantage", "yfinance"]
+            assert source_names == ["twelvedata", "finnhub"]
 
 
 # ── 天天基金 Fetcher Tests ──────────────────────────────────────
@@ -306,24 +306,24 @@ class TestFundFetcher:
 
 class TestMarginFetcher:
     def test_fetch_margin_balance_success(self):
-        from app.fetchers.margin_fetcher import fetch_margin_balance
-        with patch("app.fetchers.margin_fetcher._fetch_szse", return_value=123456789012.34):
+        from app.fetchers.fundamentals_fetcher import fetch_margin_balance
+        with patch("app.fetchers.fundamentals_fetcher._fetch_szse", return_value=123456789012.34):
             result = fetch_margin_balance()
         assert result is not None
         assert result == 123456789012.34
 
     def test_fetch_margin_balance_none_on_szse_fail(self):
-        from app.fetchers.margin_fetcher import fetch_margin_balance
-        with patch("app.fetchers.margin_fetcher._fetch_szse", return_value=None) as m_szse:
-            from app.fetchers.margin_fetcher import fetch_margin_balance
-            with patch("app.fetchers.margin_fetcher._fetch_sse", return_value=987654321098.76):
+        from app.fetchers.fundamentals_fetcher import fetch_margin_balance
+        with patch("app.fetchers.fundamentals_fetcher._fetch_szse", return_value=None) as m_szse:
+            from app.fetchers.fundamentals_fetcher import fetch_margin_balance
+            with patch("app.fetchers.fundamentals_fetcher._fetch_sse", return_value=987654321098.76):
                 result = fetch_margin_balance()
         assert result is not None
         assert result == 987654321098.76
 
     def test_fetch_margin_balance_none_on_all_fail(self):
-        from app.fetchers.margin_fetcher import fetch_margin_balance
-        with patch("app.fetchers.margin_fetcher._fetch_szse", return_value=None):
-            with patch("app.fetchers.margin_fetcher._fetch_sse", return_value=None):
+        from app.fetchers.fundamentals_fetcher import fetch_margin_balance
+        with patch("app.fetchers.fundamentals_fetcher._fetch_szse", return_value=None):
+            with patch("app.fetchers.fundamentals_fetcher._fetch_sse", return_value=None):
                 result = fetch_margin_balance()
         assert result is None

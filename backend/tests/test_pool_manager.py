@@ -172,7 +172,8 @@ class TestMarketDataHub:
         pool = pm.get_pool()
         total = sum(len(v) for v in pool.values())
         assert total == 0  # 没有历史数据，只能返回空
-        assert diff.version == 1
+        # 首次刷新即空：无 last-good 可回退，version 不递增
+        assert diff.version == 0
 
     @pytest.mark.asyncio
     async def test_classifier_integration(self, market_data_hub):
@@ -209,7 +210,8 @@ async def test_concurrent_refresh_lock_does_not_block_forever():
     pm.factor_registry = MagicMock()
 
     # Lock the refresh lock to simulate a stuck first refresh
-    if not hasattr(pm, "_refresh_lock"):
+    # _refresh_lock is a class attribute defaulting to None
+    if pm._refresh_lock is None:
         pm._refresh_lock = asyncio.Lock()
     await pm._refresh_lock.acquire()
     pm._last_refresh_ts = 9999999999
@@ -227,7 +229,7 @@ async def test_market_context_getters_completeness():
     from app.services.market_data_hub import MarketDataHub
     pm = MarketDataHub()
     # Set up cache data directly
-    pm._regime_cache = "range_bound"
+    pm._regime_cache = {"A": "range_bound"}
     pm._regime_cache_ts = 9999999999.0
     pm._sentiment_cache = {"sentiment_index": 55, "sentiment_label": "中性"}
     pm._sentiment_cache_ts = 9999999999.0
