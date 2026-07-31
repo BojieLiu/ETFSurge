@@ -474,9 +474,9 @@ async def get_timeline(
             "id": c.id,
             "_type": "check",
             "created_at": c.created_at.isoformat() if c.created_at else "",
-            "status": c.status or "completed",
-            "summary": c.summary or c.error_message or "\u7b56\u7565\u68c0\u67e5\u5df2\u5b8c\u6210",
-            "error_message": c.error_message,
+            "status": "completed",
+            "summary": c.summary or "\u7b56\u7565\u68c0\u67e5\u5df2\u5b8c\u6210",
+            "error_message": None,
         })
 
     # Merge and sort by created_at DESC

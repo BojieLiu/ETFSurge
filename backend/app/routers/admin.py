@@ -108,7 +108,8 @@ async def get_source_circuit_breakers():
 async def get_thread_pool():
     """返回主线程池和 akshare 专用线程池的实时统计。"""
     from ..core.async_utils import get_thread_pool_stats
-    
+    from ..services.market_data_hub import market_data_hub
+
     return {
         "main": get_thread_pool_stats(),
         "akshare": market_data_hub.get_akshare_pool_stats(),

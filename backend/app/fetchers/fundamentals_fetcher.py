@@ -19,6 +19,9 @@ from ..utils.decode import decode_df as _decode_df
 _PUSH2_SOURCE = "push2delay.eastmoney.com"
 _AKSHARE_SOURCE = "akshare"
 
+# 熔断器健康句柄（registry._health 返回稳定单例，供涨跌家数采集记录成功/失败）
+_push2_h = _source_registry._health(_PUSH2_SOURCE)
+
 
 def _push2_available() -> bool:
     """检查 push2 数据源是否可用（熔断器未打开）。"""

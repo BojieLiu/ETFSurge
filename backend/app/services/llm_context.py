@@ -117,7 +117,7 @@ async def build_full_context(
     if include_fund_flow:
         try:
             from ..services.strategy_design import _compute_fund_flow
-            context["fund_flow"] = _compute_fund_flow(market_data_hub)
+            context["fund_flow"] = await _compute_fund_flow(market_data_hub)
         except Exception as e:
             context["fund_flow"] = {}
             errors.append(f"fund_flow: {e}")
