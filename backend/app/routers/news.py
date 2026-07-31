@@ -2,7 +2,6 @@ from fastapi import APIRouter, Query
 from typing import Any
 
 from ..core.async_utils import run_sync
-from ..fetchers.news_fetcher import fetch_research_reports
 from ..services.market_data_hub import market_data_hub
 
 router = APIRouter(prefix="/api/v1/news", tags=["news"])
@@ -30,4 +29,4 @@ async def stock_news(symbol: str) -> list[dict[str, Any]]:
 
 @router.get("/research/{symbol}")
 async def research(symbol: str) -> list[dict[str, Any]]:
-    return await run_sync(fetch_research_reports, symbol)
+    return await run_sync(market_data_hub.get_research_reports, symbol)

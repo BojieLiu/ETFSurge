@@ -12,13 +12,6 @@ from ..services.market_service import (
 )
 from ..analysis.indicators import compute_all_indicators, compute_chart_data
 from ..analysis.signal import generate_signal
-from ..fetchers.levistock_fetcher import (
-    fetch_market_emotion, fetch_sector_heat, fetch_market_wind,
-)
-from ..fetchers.sector_fetcher import (
-    fetch_stock_hot_rank, fetch_sector_popular_stocks,
-    fetch_all_stocks, fetch_sector_history, fetch_sector_industry_cls,
-)
 from ..services.market_data_hub import market_data_hub
 from ..models.search import Watchlist
 from ..models.schemas import WatchlistCreate, WatchlistUpdate, WatchlistResponse
@@ -152,7 +145,7 @@ async def search_stocks(keyword: str = Query("")) -> list[dict[str, Any]]:
         logger.warning(f"[search_stocks] local table failed: {e}")
 
     # 降级：levistock 全量
-    full = await asyncio.to_thread(fetch_all_stocks)
+    full = await asyncio.to_thread(market_data_hub.get_all_stocks)
     normalised = [
         {"symbol": s.get("stock_code") or s.get("symbol", ""),
          "name": s.get("stock_name") or s.get("name", "")}
@@ -258,7 +251,7 @@ async def fundamentals(symbol: str) -> dict:
 @router.get("/sentiment")
 async def sentiment() -> dict:
     """市场情绪(财联社/东财):涨跌分布、封板率、连板梯队、赚钱效应。"""
-    return await asyncio.to_thread(fetch_market_emotion)
+    return await asyncio.to_thread(market_data_hub.get_market_emotion)
 
 
 
@@ -291,7 +284,7 @@ async def concept_sectors(limit: int = Query(500)) -> list[dict[str, Any]]:
 @router.get("/sectors/industry-cls")
 async def sector_industry_cls_route(limit: int = Query(80)) -> list[dict[str, Any]]:
     """行业板块实时行情(财联社)。"""
-    return await asyncio.to_thread(fetch_sector_industry_cls, limit)
+    return await asyncio.to_thread(market_data_hub.get_sector_industry_cls, limit)
 
 
 # TODO: 未接入前端
@@ -305,14 +298,14 @@ async def sector_stocks_route(sector_code: str) -> list[dict[str, Any]]:
 @router.get("/sectors/{plate_code}/popular")
 async def sector_popular(plate_code: str) -> list[dict[str, Any]]:
     """板块热门个股(财联社)。"""
-    return await asyncio.to_thread(fetch_sector_popular_stocks, plate_code)
+    return await asyncio.to_thread(market_data_hub.get_sector_popular_stocks, plate_code)
 
 
 # Z17: Add sector rotation endpoint
 @router.get("/sectors/rotation")
 async def sector_rotation(limit: int = Query(20)) -> list[dict[str, Any]]:
     """板块轮动数据 — 行业板块实时行情(财联社)，含涨跌幅、主力资金、涨跌家数。"""
-    return await asyncio.to_thread(fetch_sector_industry_cls, limit)
+    return await asyncio.to_thread(market_data_hub.get_sector_industry_cls, limit)
 
 
 @router.get("/sectors")
@@ -345,14 +338,14 @@ async def hot_plates(limit: int = Query(15)) -> list[dict[str, Any]]:
 @router.get("/stock-hot-rank")
 async def stock_hot_rank(limit: int = Query(50)) -> list[dict[str, Any]]:
     """A股热门个股排名(同花顺)。"""
-    return await asyncio.to_thread(fetch_stock_hot_rank, limit)
+    return await asyncio.to_thread(market_data_hub.get_stock_hot_rank, limit)
 
 
 # Phase 6: 前端已接入（marketApi.getMarketWind）
 @router.get("/wind")
 async def wind() -> list[dict[str, Any]]:
     """今日风口/主线板块(财联社)。"""
-    return await asyncio.to_thread(fetch_market_wind)
+    return await asyncio.to_thread(market_data_hub.get_market_wind)
 
 
 # ── Watchlist / 自选列表 ──────────────────────────────────────────────

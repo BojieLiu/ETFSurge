@@ -8,8 +8,7 @@ logger = logging.getLogger(__name__)
 
 from ..models.portfolio import PortfolioETF
 from ..models.schemas import PortfolioETFCreate, PortfolioETFUpdate
-from ..fetchers.china_market import fetch_a_stock_batch, fetch_fund_nav, fetch_hk_stock_realtime, fetch_index_realtime
-from ..fetchers.global_markets_fetcher import fetch_us_etf_realtime
+from ..services.market_data_hub import market_data_hub
 from ..services.market_data_hub import market_data_hub
 from ..services.market_data_hub import market_data_hub
 from ..analysis.indicators import compute_all_indicators
@@ -121,13 +120,13 @@ async def _build_price_map_async(etfs):
     async def _a_batch():
         if not a_symbols:
             return []
-        return await run_sync(fetch_a_stock_batch, a_symbols)
+        return await run_sync(market_data_hub.get_a_stock_batch, a_symbols)
 
     async def _hk_batch():
         out = {}
         for s in hk_symbols:
             try:
-                items = await run_sync(fetch_hk_stock_realtime, s)
+                items = await run_sync(market_data_hub.get_hk_stock_realtime, s)
                 if items:
                     out[s] = (float(items[0]["price"]), float(items[0]["change_pct"]))
             except Exception:
@@ -138,7 +137,7 @@ async def _build_price_map_async(etfs):
         out = {}
         for s in us_symbols:
             try:
-                data = await run_sync(fetch_us_etf_realtime, s)
+                data = await run_sync(market_data_hub.get_us_etf_realtime, s)
                 if data:
                     out[s] = (float(data["price"]), float(data["change_pct"]))
             except Exception:
@@ -147,7 +146,7 @@ async def _build_price_map_async(etfs):
 
     async def _idx_batch():
         try:
-            return {it["symbol"]: (it["price"], it["change_pct"]) for it in await run_sync(fetch_index_realtime)}
+            return {it["symbol"]: (it["price"], it["change_pct"]) for it in await run_sync(market_data_hub.get_index_realtime)}
         except Exception:
             return {}
 
@@ -169,7 +168,7 @@ async def _build_price_map_async(etfs):
     if tracked:
         async def _nav(s):
             try:
-                nav = await run_sync(fetch_fund_nav, s)
+                nav = await run_sync(market_data_hub.get_fund_nav, s)
                 if nav:
                     if isinstance(nav, tuple) and len(nav) >= 1:
                         return s, (float(nav[0]), float(nav[1]) if len(nav) > 1 else 0.0)
@@ -702,11 +701,11 @@ async def _compute_indicators(symbols: list[str]) -> dict:
 async def _detect_regime(symbols: list[str]) -> tuple[dict, list, str]:
     """并行获取 trend + index → detect_market_regime。"""
     from .market_trends import compute_etf_trends, detect_market_regime
-    from ..fetchers.china_market import fetch_index_realtime
+    from ..services.market_data_hub import market_data_hub
     
     trends, index_realtime = await asyncio.gather(
         compute_etf_trends(symbols, ("5d", "1m", "3m")),
-        asyncio.to_thread(fetch_index_realtime),
+        asyncio.to_thread(market_data_hub.get_index_realtime),
         return_exceptions=True,
     )
     trends = trends if isinstance(trends, dict) else {}

@@ -1328,6 +1328,147 @@ class MarketDataHub:
         return await _get(symbol)
 
 
+    # ── Phase 5a: remaining fetcher delegates (DoD single-source) ──
+
+    def get_market_emotion(self) -> dict:
+        """市场情绪（levistock）。"""
+        try:
+            from ..fetchers.levistock_fetcher import fetch_market_emotion
+            return fetch_market_emotion() or {}
+        except Exception as e:
+            logger.warning("[hub] get_market_emotion failed: %s", e)
+            return {}
+
+    def get_market_wind(self) -> list[dict]:
+        """市场风控（levistock）。"""
+        try:
+            from ..fetchers.levistock_fetcher import fetch_market_wind
+            return fetch_market_wind() or []
+        except Exception as e:
+            logger.warning("[hub] get_market_wind failed: %s", e)
+            return []
+
+    def get_stock_hot_rank(self, limit: int = 50) -> list[dict]:
+        """热门个股排行。"""
+        try:
+            from ..fetchers.sector_fetcher import fetch_stock_hot_rank
+            return fetch_stock_hot_rank(limit) or []
+        except Exception as e:
+            logger.warning("[hub] get_stock_hot_rank failed: %s", e)
+            return []
+
+    def get_sector_popular_stocks(self, plate_code: str) -> list[dict]:
+        """板块热门个股。"""
+        try:
+            from ..fetchers.sector_fetcher import fetch_sector_popular_stocks
+            return fetch_sector_popular_stocks(plate_code) or []
+        except Exception as e:
+            logger.warning("[hub] get_sector_popular_stocks(%s) failed: %s", plate_code, e)
+            return []
+
+    def get_all_stocks(self) -> list[dict]:
+        """全市场股票列表。"""
+        try:
+            from ..fetchers.sector_fetcher import fetch_all_stocks
+            return fetch_all_stocks() or []
+        except Exception as e:
+            logger.warning("[hub] get_all_stocks failed: %s", e)
+            return []
+
+    def get_sector_history(self, sector_code: str) -> list[dict]:
+        """板块历史行情。"""
+        try:
+            from ..fetchers.sector_fetcher import fetch_sector_history
+            return fetch_sector_history(sector_code) or []
+        except Exception as e:
+            logger.warning("[hub] get_sector_history(%s) failed: %s", sector_code, e)
+            return []
+
+    def get_sector_industry_cls(self, limit: int = 80) -> list[dict]:
+        """行业板块分类（轮动）。"""
+        try:
+            from ..fetchers.sector_fetcher import fetch_sector_industry_cls
+            return fetch_sector_industry_cls(limit) or []
+        except Exception as e:
+            logger.warning("[hub] get_sector_industry_cls failed: %s", e)
+            return []
+
+    def get_a_stock_batch(self, symbols: list[str]) -> list[dict]:
+        """A 股批量实时行情。"""
+        try:
+            from ..fetchers.china_market import fetch_a_stock_batch
+            return fetch_a_stock_batch(symbols) or []
+        except Exception as e:
+            logger.warning("[hub] get_a_stock_batch failed: %s", e)
+            return []
+
+    def get_fund_nav(self, symbol: str):
+        """基金净值。"""
+        try:
+            from ..fetchers.china_market import fetch_fund_nav
+            return fetch_fund_nav(symbol)
+        except Exception as e:
+            logger.warning("[hub] get_fund_nav(%s) failed: %s", symbol, e)
+            return None
+
+    def get_hk_stock_realtime(self, symbol: str | None = None) -> list[dict]:
+        """港股实时行情。"""
+        try:
+            from ..fetchers.china_market import fetch_hk_stock_realtime
+            return fetch_hk_stock_realtime(symbol) or []
+        except Exception as e:
+            logger.warning("[hub] get_hk_stock_realtime failed: %s", e)
+            return []
+
+    def get_us_etf_realtime(self, symbol: str):
+        """美股 ETF 实时行情。"""
+        try:
+            from ..fetchers.global_markets_fetcher import fetch_us_etf_realtime
+            return fetch_us_etf_realtime(symbol)
+        except Exception as e:
+            logger.warning("[hub] get_us_etf_realtime(%s) failed: %s", symbol, e)
+            return None
+
+    def get_research_reports(self, symbol: str) -> list[dict]:
+        """个股研报。"""
+        try:
+            from ..fetchers.news_fetcher import fetch_research_reports
+            return fetch_research_reports(symbol) or []
+        except Exception as e:
+            logger.warning("[hub] get_research_reports(%s) failed: %s", symbol, e)
+            return []
+
+
+    # ── Phase 5c: US realtime / history (global_markets_fetcher) ──
+
+    def get_us_stock_realtime(self, symbol: str):
+        """美股个股实时（TwelveData 降级链）。"""
+        try:
+            from ..fetchers.global_markets_fetcher import fetch_realtime
+            return fetch_realtime(symbol)
+        except Exception as e:
+            logger.warning("[hub] get_us_stock_realtime(%s) failed: %s", symbol, e)
+            return None
+
+    def get_us_history(self, symbol: str, days: int = 60) -> list[dict]:
+        """美股历史 K 线（TwelveData）。"""
+        try:
+            from ..fetchers.global_markets_fetcher import fetch_history
+            return fetch_history(symbol, days) or []
+        except Exception as e:
+            logger.warning("[hub] get_us_history(%s) failed: %s", symbol, e)
+            return []
+
+    def get_us_candles(self, symbol: str, resolution: str = "D") -> list[dict]:
+        """美股蜡烛图（Finnhub）。"""
+        try:
+            from ..fetchers.global_markets_fetcher import fetch_candles
+            return fetch_candles(symbol, resolution) or []
+        except Exception as e:
+            logger.warning("[hub] get_us_candles(%s) failed: %s", symbol, e)
+            return []
+
+
 
 # Global singleton
 market_data_hub = MarketDataHub()

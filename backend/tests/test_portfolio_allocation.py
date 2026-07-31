@@ -17,9 +17,9 @@ def _etf(**kw):
 
 async def test_calculate_allocation_total_amount_non_normalized(dummy_portfolio_rows):
     """total_amount = sum(target_amounts); weights NOT normalized by weight_sum."""
-    with patch("app.services.portfolio_service.fetch_a_stock_batch", return_value=[]), \
-         patch("app.services.portfolio_service.fetch_fund_nav", return_value=None), \
-         patch("app.services.portfolio_service.fetch_us_etf_realtime", return_value=None):
+    with patch("app.services.market_data_hub.market_data_hub.get_a_stock_batch", return_value=[]), \
+         patch("app.services.market_data_hub.market_data_hub.get_fund_nav", return_value=None), \
+         patch("app.services.market_data_hub.market_data_hub.get_us_etf_realtime", return_value=None):
         result = await calculate_allocation(etfs=dummy_portfolio_rows, total_capital=500000)
 
     assert result["total_capital"] == 500000
@@ -44,9 +44,9 @@ async def test_calculate_allocation_cash_when_underweight():
         _etf(symbol="518880", name="B", short_name="B", asset_type="A",
              portfolio_type="on_exchange", target_weight=0.3, tracked_index=None),
     ]
-    with patch("app.services.portfolio_service.fetch_a_stock_batch", return_value=[]), \
-         patch("app.services.portfolio_service.fetch_fund_nav", return_value=None), \
-         patch("app.services.portfolio_service.fetch_us_etf_realtime", return_value=None):
+    with patch("app.services.market_data_hub.market_data_hub.get_a_stock_batch", return_value=[]), \
+         patch("app.services.market_data_hub.market_data_hub.get_fund_nav", return_value=None), \
+         patch("app.services.market_data_hub.market_data_hub.get_us_etf_realtime", return_value=None):
         result = await calculate_allocation(etfs=etfs, total_capital=500000)
 
     assert result["cash_weight"] == pytest.approx(0.3)
@@ -55,9 +55,9 @@ async def test_calculate_allocation_cash_when_underweight():
 
 
 async def test_calculate_daily_pnl_total_amount(dummy_portfolio_rows):
-    with patch("app.services.portfolio_service.fetch_a_stock_batch", return_value=[]), \
-         patch("app.services.portfolio_service.fetch_fund_nav", return_value=None), \
-         patch("app.services.portfolio_service.fetch_us_etf_realtime", return_value=None):
+    with patch("app.services.market_data_hub.market_data_hub.get_a_stock_batch", return_value=[]), \
+         patch("app.services.market_data_hub.market_data_hub.get_fund_nav", return_value=None), \
+         patch("app.services.market_data_hub.market_data_hub.get_us_etf_realtime", return_value=None):
         result = await calculate_daily_pnl(etfs=dummy_portfolio_rows, total_capital=500000)
 
     assert result["total_amount"] == pytest.approx(500000.0)
@@ -72,9 +72,9 @@ async def test_off_exchange_price_gt_zero_via_nav():
              target_weight=0.3, tracked_index="159338"),
     ]
     nav = (1.2345, 0.56)
-    with patch("app.services.portfolio_service.fetch_fund_nav", return_value=nav), \
-         patch("app.services.portfolio_service.fetch_a_stock_batch", return_value=[]), \
-         patch("app.services.portfolio_service.fetch_us_etf_realtime", return_value=None):
+    with patch("app.services.market_data_hub.market_data_hub.get_fund_nav", return_value=nav), \
+         patch("app.services.market_data_hub.market_data_hub.get_a_stock_batch", return_value=[]), \
+         patch("app.services.market_data_hub.market_data_hub.get_us_etf_realtime", return_value=None):
         price_map = await ps.build_price_map(etfs)
 
     assert price_map["022449"][0] > 0

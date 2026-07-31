@@ -79,11 +79,11 @@ async def get_market_realtime(market: str, symbols: list[str] | None = None) -> 
     elif market == "HK":
         if not symbols:
             return []
-        from app.fetchers.china_market import fetch_hk_stock_realtime
+        from app.services.market_data_hub import market_data_hub
         results = []
         for sym in symbols:
             try:
-                items = await _call(fetch_hk_stock_realtime, sym, timeout=8)
+                items = await _call(market_data_hub.get_hk_stock_realtime, sym, timeout=8)
                 if items:
                     results.extend(items)
             except Exception:
@@ -93,7 +93,7 @@ async def get_market_realtime(market: str, symbols: list[str] | None = None) -> 
     elif market == "US":
         if not symbols:
             return []
-        from app.fetchers import global_markets_fetcher
+        from app.services.market_data_hub import market_data_hub
         # Stooq API closed (Cloudflare 404); fall through to TwelveData
         batch = None
         if batch:
@@ -101,7 +101,7 @@ async def get_market_realtime(market: str, symbols: list[str] | None = None) -> 
         # 降级: TwelveData 逐个
         results = []
         for sym in symbols:
-            d = await _call(global_markets_fetcher.fetch_realtime, sym, timeout=8)
+            d = await _call(market_data_hub.get_us_stock_realtime, sym, timeout=8)
             if d:
                 d["asset_type"] = "US"
                 results.append(d)
@@ -131,15 +131,15 @@ async def get_market_history(market: str, symbol: str, period: str = "daily") ->
         return []
 
     elif market == "US":
-        from app.fetchers import global_markets_fetcher
+        from app.services.market_data_hub import market_data_hub
         # Fall through to TwelveData
         fallback_data = None
         if fallback_data:
             return fallback_data
-        td_data = await _call(global_markets_fetcher.fetch_history, symbol, 60, timeout=10)
+        td_data = await _call(market_data_hub.get_us_history, symbol, 60, timeout=10)
         if td_data:
             return td_data
-        fh_data = await _call(global_markets_fetcher.fetch_candles, symbol, "D", timeout=10)
+        fh_data = await _call(market_data_hub.get_us_candles, symbol, "D", timeout=10)
         return fh_data or []
 
     elif market == "global":

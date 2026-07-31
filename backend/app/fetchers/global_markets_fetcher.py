@@ -267,7 +267,7 @@ def fetch_us_etf_realtime(symbol: str) -> dict[str, Any] | None:
         return None
 
 
-def fetch_history(symbol: str, period: str = "1mo") -> list[dict[str, Any]]:
+def fetch_history_yfinance(symbol: str, period: str = "1mo") -> list[dict[str, Any]]:
     try:
         proxy = os.environ.get("YFINANCE_PROXY", "")
         if proxy:
