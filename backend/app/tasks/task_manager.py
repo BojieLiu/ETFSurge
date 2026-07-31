@@ -8,16 +8,30 @@ v2 (design-check-pipeline-redesign):
   - 修复 market_data_hub NameError
   - 新增 per-stage WS 通知
   - 引入 report_quality 分级
+
+v3 (Z27 task-persistence-redesign):
+  - TaskManager 改为 DB-backed（SQLite tasks 表为唯一真相源），删除 JSON 双轨
+  - create_task/get_task/update_task/list_tasks/prune_tasks 全部 async
+  - 任务完成时 record_id 回写任务行（design → portfolio_designs.id; check → strategy_check_records.id）
+  - _notify 携带 record_id + task_type（WS 契约 §2.4.2）
+  - 启动收敛把遗留非终态任务标记 failed（main.py）
 """
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
-import os
-import time
+import warnings
 from datetime import datetime
 from typing import Any
+
+from sqlalchemy import delete, select
+
+# Z27 (D11): 模块级 import（单例在模块底部创建，此处 import 无循环依赖风险；
+# 测试可通过 patch("app.tasks.task_manager.async_session") 覆盖）
+from app.database import async_session
+from app.models.portfolio_design import PortfolioDesign
+from app.models.task import TaskRecord
 
 logger = logging.getLogger(__name__)
 
@@ -31,165 +45,127 @@ TASK_TYPES = {
     "report": {"label": "市场研判", "ttl": 600},
 }
 
+# Z27: 终态任务保留策略（替代原 1h TTL JSON 剪枝）
+TERMINAL_STATUSES = ("completed", "completed_with_errors", "failed")
+ACTIVE_STATUSES = ("pending", "running", "quick_ready")
+
 
 class TaskManager:
-    """通用异步任务管理器。持久化到 JSON 文件，支持重启恢复。
-    
-    默认不持久化（persist_path=None）。需要持久化时显式传入路径。
-    单例 task_manager 默认使用 DEFAULT_PERSIST_PATH。
+    """通用异步任务管理器（Z27: DB-backed，tasks 表为唯一真相源）。
+
+    所有任务生命周期状态落 SQLite，进程重启后 GET /tasks 仍返回历史任务。
+    不再读写 tasks.json；不再持有进程内 _tasks dict / _next_id。
     """
 
-    # Z27: Fix path - task_manager.py is in app/tasks/, data/ is at project root (backend/data/)
-    DEFAULT_PERSIST_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "data", "tasks.json")
+    # Z27: 终态任务保留期（替代原 1h TTL JSON 剪枝）
+    RETENTION_TERMINAL_DAYS = 7          # 终态任务保留天数
+    RETENTION_TERMINAL_MAX = 100         # 终态任务最大保留条数
 
-    def __init__(self, persist_path: str | None = None):
-        self._tasks: dict[int, dict] = {}
-        self._next_id = 1
-        self._persist_path = persist_path  # None = 不持久化
-        self._load()  # 恢复持久化的任务（仅 persist_path 非 None 时）
+    def __init__(self, persist_path: str | None = None, session_factory=None):
+        """D10: session_factory 允许测试注入独立 SQLite 引擎；None → 模块级 async_session。"""
+        if persist_path is not None:
+            warnings.warn(
+                "[TaskManager] persist_path is deprecated (Z27: DB-backed); ignored",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            logger.warning("[TaskManager] persist_path ignored (DB-backed since Z27)")
+        # ⚠️ 惰性解析：单例在模块底部创建，而 async_session 在文件顶部 import，
+        #    方法内部 `self._session_factory or async_session` 每次调用时取模块级全局，
+        #    测试 patch("app.tasks.task_manager.async_session") 因此生效。
+        self._session_factory = session_factory
 
-    def _save(self) -> None:
-        """将任务列表持久化到 JSON 文件。"""
-        if not self._persist_path:
-            return
-        try:
-            os.makedirs(os.path.dirname(self._persist_path), exist_ok=True)
-            data = {
-                "tasks": list(self._tasks.values()),
-                "next_id": self._next_id,
-            }
-            with open(self._persist_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, default=str)
-        except Exception as e:
-            logger.warning("[TaskManager] persist save failed: %s", e)
+    def _sf(self):
+        return self._session_factory or async_session
 
-    def _load(self) -> None:
-        """从 JSON 文件恢复持久化的任务列表。"""
-        if not self._persist_path or not os.path.exists(self._persist_path):
-            return
-        try:
-            with open(self._persist_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            restored = data.get("tasks", [])
-            for t in restored:
-                tid = t.get("task_id")
-                if tid is not None:
-                    self._tasks[tid] = t
-            self._next_id = max(data.get("next_id", 1), (max(self._tasks.keys(), default=0) + 1))
-            logger.info("[TaskManager] restored %d tasks from %s", len(restored), self._persist_path)
-        except Exception as e:
-            logger.warning("[TaskManager] persist load failed: %s", e)
-
-    def create_task(self, task_type: str = "design", params: dict | None = None) -> dict:
-        """创建新任务，返回任务对象。"""
+    async def create_task(self, task_type: str = "design", params: dict | None = None) -> dict:
+        """创建新任务（INSERT tasks, status=pending），返回契约 dict。"""
         assert task_type in TASK_TYPES, f"unknown task type: {task_type}"
-        task_id = self._next_id
-        self._next_id += 1
-        task = {
-            "task_id": task_id,
-            "type": task_type,
-            "status": "pending",
-            "progress": 0,
-            "stage": "",
-            "params": params or {},
-            "result": None,
-            "error_message": None,
-            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "completed_at": None,
-        }
-        self._tasks[task_id] = task
-        self._save()
-        self.prune_tasks()
-        logger.info("[TaskManager] created task %d (type=%s)", task_id, task_type)
-        return task
+        async with self._sf()() as db:
+            record = TaskRecord(
+                task_type=task_type,
+                status="pending",
+                progress=0,
+                stage="",
+                params_json=json.dumps(params or {}, ensure_ascii=False, default=str),
+                result_json=None,
+            )
+            db.add(record)
+            await db.commit()
+            await db.refresh(record)
+            logger.info("[TaskManager] created task %d (type=%s)", record.id, task_type)
+            await self.prune_tasks()
+            return record.to_dict()
 
-    def get_task(self, task_id: int) -> dict | None:
-        task = self._tasks.get(task_id)
-        if task:
-            # Ensure progress, stage, status are always present
-            task.setdefault("progress", 0)
-            task.setdefault("stage", "")
-            task.setdefault("status", "pending")
-        return task
+    async def get_task(self, task_id: int) -> dict | None:
+        """SELECT 任务并返回契约 dict（含 type/stage/params/record_id）。"""
+        async with self._sf()() as db:
+            record = await db.get(TaskRecord, task_id)
+            return record.to_dict() if record else None
 
-    def update_task(self, task_id: int, **kwargs) -> None:
-        task = self._tasks.get(task_id)
-        if not task:
-            return
-        for k, v in kwargs.items():
-            if v is not None:
-                task[k] = v
-        if kwargs.get("status") == "completed":
-            task["completed_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        self._save()
-        if kwargs.get("status") in ("completed", "failed"):
-            self.prune_tasks()
+    async def update_task(self, task_id: int, **kwargs) -> None:
+        """更新任务字段（白名单）。params/result 序列化为 JSON 列；status 终态时写 completed_at。"""
+        allowed = {"status", "progress", "stage", "params", "result", "error_message", "record_id"}
+        async with self._sf()() as db:
+            record = await db.get(TaskRecord, task_id)
+            if not record:
+                return
+            for k, v in kwargs.items():
+                if k not in allowed or v is None:
+                    continue  # 保留旧语义: None 不覆盖既有值
+                if k in ("params", "result"):
+                    setattr(record, f"{k}_json", json.dumps(v, ensure_ascii=False, default=str))
+                else:
+                    setattr(record, k, v)
+            if kwargs.get("status") in TERMINAL_STATUSES and record.completed_at is None:
+                record.completed_at = datetime.utcnow()
+            await db.commit()
+            if kwargs.get("status") in TERMINAL_STATUSES:
+                await self.prune_tasks()
 
-    def prune_tasks(self, max_count: int = 20, max_age_seconds: int = 3600) -> int:
-        """清理过期的已完成/失败任务，保留最新的 N 个。
-        
-        Args:
-            max_count: 保留的最大任务数
-            max_age_seconds: 已完成/失败任务的最长保留时间（秒）
-        
-        Returns:
-            清理的任务数
+    async def prune_tasks(self, max_count: int = RETENTION_TERMINAL_MAX,
+                          max_age_days: int = RETENTION_TERMINAL_DAYS) -> int:
+        """删除超期且超出保留条数的终态任务；活跃任务永不清理。
+
+        单条 SQL：DELETE 终态且 created_at 早于 cutoff 且不在最近 max_count 条内。
         """
-        now = time.time()
-        # 解析 ISO 时间戳为时间戳
-        def _ts(t):
-            try:
-                # created_at is UTC, but strptime creates a naive datetime.
-                # .timestamp() on naive datetime treats it as LOCAL time,
-                # causing timezone-dependent age miscalculation.
-                # Fix: use timezone.utc to make the timestamp UTC-aware.
-                dt = datetime.strptime(t["created_at"], "%Y-%m-%dT%H:%M:%SZ")
-                from datetime import timezone as _tz
-                return dt.replace(tzinfo=_tz.utc).timestamp()
-            except Exception:
-                return 0
-        
-        terminal = {"completed", "failed"}
-        active = {"pending", "running"}
-        
-        # 分离活跃和终端任务
-        active_tasks = {tid: t for tid, t in self._tasks.items() if t.get("status") in active}
-        terminal_tasks = [(tid, t) for tid, t in self._tasks.items() if t.get("status") in terminal]
-        
-        # 按创建时间降序排列终端任务
-        terminal_tasks.sort(key=lambda x: -_ts(x[1]))
-        
-        # 保留最新的 N 个终端任务
-        keep = set()
-        for tid, t in terminal_tasks[:max_count]:
-            keep.add(tid)
-        
-        # 删除超时的和超出数量的终端任务
-        removed = 0
-        for tid, t in terminal_tasks:
-            if tid in keep:
-                # 检查是否在老化窗口内（创建时间 < max_age_seconds）
-                age = now - _ts(t)
-                if age <= max_age_seconds:
-                    continue
-            # 不在 keep 中或超时 → 删除
-            if tid in self._tasks:
-                del self._tasks[tid]
-                removed += 1
-        
-        self._save()
-        if removed:
-            logger.info("[TaskManager] pruned %d old terminal tasks (kept %d active + %d recent)", 
-                        removed, len(active_tasks), len(keep))
-        return removed
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(days=max_age_days)
+        async with self._sf()() as db:
+            subq = (
+                select(TaskRecord.id)
+                .where(TaskRecord.status.in_(TERMINAL_STATUSES))
+                .order_by(TaskRecord.created_at.desc(), TaskRecord.id.desc())
+                .limit(max_count)
+            )
+            result = await db.execute(
+                delete(TaskRecord).where(
+                    TaskRecord.status.in_(TERMINAL_STATUSES),
+                    TaskRecord.created_at < cutoff,
+                    TaskRecord.id.not_in(subq),
+                )
+            )
+            await db.commit()
+            removed = result.rowcount or 0
+            if removed:
+                logger.info("[TaskManager] pruned %d old terminal task(s) (kept %d recent, %dd window)",
+                            removed, max_count, max_age_days)
+            return removed
 
-    def list_tasks(self, limit: int = 20, offset: int = 0) -> list[dict]:
-        self.prune_tasks(max_count=max(20, limit * 2))
-        tasks = sorted(self._tasks.values(), key=lambda t: -t["task_id"])
-        return tasks[offset:offset + limit]
+    async def list_tasks(self, limit: int = 20, offset: int = 0) -> list[dict]:
+        """列出任务（created_at DESC, id DESC），分页。"""
+        await self.prune_tasks()
+        async with self._sf()() as db:
+            rows = (await db.execute(
+                select(TaskRecord)
+                .order_by(TaskRecord.created_at.desc(), TaskRecord.id.desc())
+                .limit(limit)
+                .offset(offset)
+            )).scalars().all()
+            return [r.to_dict() for r in rows]
 
 
-task_manager = TaskManager(persist_path=os.path.abspath(TaskManager.DEFAULT_PERSIST_PATH))
+task_manager = TaskManager()
 
 
 class TaskNotifyManager:
@@ -221,18 +197,25 @@ class TaskNotifyManager:
 notify_manager = TaskNotifyManager()
 
 
-async def _notify(task_id: int, status: str, progress: int, stage: str = "", task: dict | None = None, extra: dict | None = None) -> None:
-    """统一 WS 通知函数。stage 为可选进度文字描述。可传入 task 对象以携带额外字段。"""
+async def _notify(task_id: int, status: str, progress: int, stage: str = "", task: dict | None = None,
+                  extra: dict | None = None, record_id: int | None = None,
+                  task_type: str | None = None) -> None:
+    """统一 WS 通知函数（Z27: 契约 §2.4.2 — 携带 task_type + record_id）。
+
+    record_id: design/check 完成时必填；task_type: 前端据此初始化任务类型/label。
+    """
     payload = {
         "type": "task_update",
         "task_id": task_id,
+        "task_type": task_type or (task.get("type") if task else None),
         "status": status,
         "progress": progress,
         "stage": stage,
         "design_id": None,
+        "record_id": record_id,
         "report_quality": None,
     }
-    if status == "completed" and task and task.get("result"):
+    if status in ("completed", "completed_with_errors") and task and task.get("result"):
         payload["design_id"] = task["result"].get("design_id")
         payload["report_quality"] = task["result"].get("report_quality")
     if extra:
@@ -255,16 +238,12 @@ async def _save_design_error(design_id: int | None, error_msg: str) -> None:
         logger.warning("[design_pipeline] failed to save error to design_id=%s: %s", design_id, e)
 
 
-from app.database import async_session
-from app.models.portfolio_design import PortfolioDesign
-
-
 async def design_pipeline(mgr: TaskManager, task_id: int) -> None:
     """顺序 Pipeline（替代旧的 design_worker + fire-and-forget）。
 
     Stages: DATA+ENGINE → DB WRITE → LLM REPORT → NOTIFY
     """
-    task = mgr.get_task(task_id)
+    task = await mgr.get_task(task_id)
     if not task:
         return
 
@@ -291,10 +270,10 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
     report_quality = "none"
 
     try:
-        mgr.update_task(task_id, status="running", progress=10, stage="数据采集与策略计算中")
+        await mgr.update_task(task_id, status="running", progress=10, stage="数据采集与策略计算中")
         await _notify(task_id, "running", progress=10, stage="数据采集与策略计算中")
 
-        task = mgr.get_task(task_id)
+        task = await mgr.get_task(task_id)
         if not task:
             logger.error("[design_pipeline] task %d not found after start", task_id)
             return
@@ -320,14 +299,14 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
         if error_info:
             error_msg = f"{error_info}: {result.get('detail', '数据管道未能产出候选标的')}"
             logger.warning("[design_pipeline] task %d has error: %s", task_id, error_msg)
-            mgr.update_task(task_id, progress=0, status="failed", error_message=error_msg)
+            await mgr.update_task(task_id, progress=0, status="failed", error_message=error_msg)
             await _notify(task_id, "failed", progress=0)
             return
 
         if not strategies:
             error_msg = "策略生成为空：数据源不可用或未找到符合条件的 ETF"
             logger.warning("[design_pipeline] task %d completed with 0 strategies — treating as failure", task_id)
-            mgr.update_task(task_id, progress=0, status="failed", error_message=error_msg)
+            await mgr.update_task(task_id, progress=0, status="failed", error_message=error_msg)
             await _notify(task_id, "failed", progress=0)
             return
 
@@ -352,7 +331,7 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
             # Q01/Q03: Empty allocation → mark as failed with specific error_message
             error_msg = "分配引擎未输出有效ETF标的：所有方案均为100%现金。因子评分均低于阈值或数据源不可用。"
             logger.warning("[design_pipeline] task %d: %s", task_id, error_msg)
-            mgr.update_task(task_id, progress=0, status="failed", error_message=error_msg)
+            await mgr.update_task(task_id, progress=0, status="failed", error_message=error_msg)
             await _notify(task_id, "failed", progress=0)
             # Also save to DB with report_quality="empty"
             try:
@@ -372,6 +351,11 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
                     await db.refresh(record)
                     design_id = record.id
                     logger.info("[design_pipeline] empty allocation saved as design_id=%s (quality=empty)", design_id)
+                    # Z27 (M8): 回写 record_id — 此时 design_id 才产生，须在 :334 的 failed 通知之后
+                    await mgr.update_task(task_id, record_id=design_id)
+                    # 补发一次 WS 通知携带 record_id（前端同步任务面板的 recordId）
+                    await _notify(task_id, "failed", progress=0, record_id=design_id,
+                                  task_type="design")
             except Exception as db_e:
                 logger.warning("[design_pipeline] failed to save empty allocation to DB: %s", db_e)
             return
@@ -381,14 +365,14 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
 
         # ── Stage 3: quick_ready — 先推送组合方案，让用户可操作 ──
         # （Solution Design S1-C: 渐进状态机）
-        mgr.update_task(task_id, progress=60, status="quick_ready", stage="策略计算完成",
+        await mgr.update_task(task_id, progress=60, status="quick_ready", stage="策略计算完成",
                         result={"strategies": strategies, "market_context": market_context,
                                 "report_stage": "quick"})
         await _notify(task_id, "quick_ready", progress=60, stage="策略计算完成",
                       extra={"strategies": strategies, "market_context": market_context})
 
         # ── Stage 4: DB WRITE (progress 60→75%) ──
-        mgr.update_task(task_id, progress=65, stage="保存方案")
+        await mgr.update_task(task_id, progress=65, stage="保存方案")
         await _notify(task_id, "quick_ready", progress=65, stage="保存方案")
 
         plan_tables = _build_plan_tables(strategies)
@@ -411,7 +395,7 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
                 design_id = record.id
         except Exception as e:
             logger.exception("[design_pipeline] DB write failed for task %d: %s", task_id, e)
-            mgr.update_task(task_id, progress=0, status="completed_with_errors",
+            await mgr.update_task(task_id, progress=0, status="completed_with_errors",
                             error_message=f"DB 保存失败: {e}",
                             result={"strategies": strategies, "market_context": market_context})
             await _notify(task_id, "completed_with_errors", progress=0,
@@ -419,11 +403,11 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
             return
 
         logger.info("[design_pipeline] design_id=%s saved with data summary (%d chars)", design_id, len(design_text))
-        mgr.update_task(task_id, progress=75, stage="方案已保存")
+        await mgr.update_task(task_id, progress=75, stage="方案已保存")
         await _notify(task_id, "quick_ready", progress=75, stage="方案已保存")
 
         # ── Stage 5: LLM REPORT (progress 75→95%) ──
-        mgr.update_task(task_id, progress=80, stage="LLM 报告生成中")
+        await mgr.update_task(task_id, progress=80, stage="LLM 报告生成中")
         await _notify(task_id, "quick_ready", progress=80, stage="LLM 报告生成中")
 
         try:
@@ -488,10 +472,11 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
             except Exception as db_e:
                 logger.warning("[design_pipeline] DB update after LLM failure failed: %s", db_e)
             report_quality = "partial"
-            mgr.update_task(
+            await mgr.update_task(
                 task_id,
                 progress=100,
                 status="completed_with_errors",
+                record_id=design_id,
                 result={
                     "strategies": strategies,
                     "market_context": market_context,
@@ -500,19 +485,21 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
                 },
             )
             await _notify(task_id, "completed_with_errors", progress=100, stage="LLM 报告暂不可用",
+                          record_id=design_id, task_type="design",
                           extra={"design_id": design_id, "report_quality": report_quality})
             logger.info("[design_pipeline] task %d completed_with_errors (design_id=%s, quality=%s)",
                         task_id, design_id, report_quality)
             return
 
-        mgr.update_task(task_id, progress=95, stage="报告完成")
+        await mgr.update_task(task_id, progress=95, stage="报告完成")
         await _notify(task_id, "quick_ready", progress=95, stage="报告完成")
 
         # ── Stage 6: NOTIFY (progress 95→100%) ──
-        mgr.update_task(
+        await mgr.update_task(
             task_id,
             progress=100,
             status="completed",
+            record_id=design_id,
             result={
                 "strategies": strategies,
                 "market_context": market_context,
@@ -521,6 +508,7 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
             },
         )
         await _notify(task_id, "completed", progress=100, stage="设计完成",
+                      record_id=design_id, task_type="design",
                       extra={"design_id": design_id, "report_quality": report_quality})
 
         logger.info("[design_pipeline] task %d completed (design_id=%s, quality=%s)",
@@ -529,16 +517,18 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
     except asyncio.TimeoutError:
         error_msg = "方案生成超时，数据源响应过慢，请稍后重试"
         logger.warning("[design_pipeline] task %d timed out", task_id)
-        mgr.update_task(task_id, status="failed", progress=0, error_message=error_msg)
+        await mgr.update_task(task_id, status="failed", progress=0, error_message=error_msg)
         await _notify(task_id, "failed", progress=0)
         if design_id:
+            await mgr.update_task(task_id, record_id=design_id)
             await _save_design_error(design_id, error_msg)
     except Exception as e:
         error_msg = str(e)
         logger.exception("[design_pipeline] task %d failed: %s", task_id, error_msg)
-        mgr.update_task(task_id, status="failed", progress=0, error_message=error_msg)
+        await mgr.update_task(task_id, status="failed", progress=0, error_message=error_msg)
         await _notify(task_id, "failed", progress=0)
         if design_id:
+            await mgr.update_task(task_id, record_id=design_id)
             await _save_design_error(design_id, error_msg)
 
 

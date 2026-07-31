@@ -10,10 +10,12 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
+
+from tests.db_fixtures import task_mgr  # noqa: F401
 
 
 # ── P4.1: LLM Provider Strategy ──────────────────────────
@@ -140,50 +142,47 @@ class TestP4_3_RedisCache:
 class TestP4_4_TaskTimeoutMonitor:
     """P4.4: Tasks should have lifetime monitoring."""
 
-    def test_task_manager_has_lifetime_tracking(self):
+    async def test_task_manager_has_lifetime_tracking(self, task_mgr):
         """TaskManager should track task lifetime via created_at."""
-        from app.tasks.task_manager import TaskManager
-
-        mgr = TaskManager(persist_path=None)
-        task = mgr.create_task("design", {})
+        task = await task_mgr.create_task("design", {})
         task_id = task["task_id"]
 
         assert "created_at" in task, "Task should have created_at"
         # created_at is UTC ISO timestamp string
         assert isinstance(task["created_at"], str)
         assert "T" in task["created_at"]
+        assert task["created_at"].endswith("Z")
+        assert task_id > 0
 
-    def test_task_has_prune_tasks_method(self):
+    async def test_task_has_prune_tasks_method(self):
         """TaskManager should have prune_tasks for cleanup."""
         from app.tasks.task_manager import TaskManager
 
-        mgr = TaskManager(persist_path=None)
+        mgr = TaskManager(session_factory=None)
         assert hasattr(mgr, "prune_tasks")
 
-    def test_stale_task_detection_by_created_at(self):
-        """Tasks past their TTL can be detected by created_at timestamp."""
-        from app.tasks.task_manager import TaskManager, TASK_TYPES
+    async def test_stale_task_detection_by_created_at(self, task_mgr, task_db):
+        """Tasks past their retention window can be pruned via created_at (max_count=0)."""
+        from app.models.task import TaskRecord
 
-        mgr = TaskManager(persist_path=None)
-        task = mgr.create_task("design", {})
+        task = await task_mgr.create_task("design", {})
         task_id = task["task_id"]
+        await task_mgr.update_task(task_id, status="completed", progress=100, result={})
 
-        # Mark completed with very old completed_at
-        old_ts = (
-            datetime.fromtimestamp(time.time() - 7200, tz=timezone.utc)
-            .strftime("%Y-%m-%dT%H:%M:%SZ")
-        )
-        mgr._tasks[task_id]["status"] = "completed"
-        mgr._tasks[task_id]["completed_at"] = old_ts
+        # Mark completed with very old created_at
+        async with task_db() as db:
+            rec = await db.get(TaskRecord, task_id)
+            rec.created_at = datetime.utcnow() - timedelta(hours=2)
+            await db.commit()
 
-        # Run prune with max_age_seconds=0 to expire everything
-        pruned = mgr.prune_tasks(max_count=100, max_age_seconds=0)
-        remaining = mgr.get_task(task_id)
+        # Run prune with max_count=0 → 不在保留集内，超期即删
+        await task_mgr.prune_tasks(max_count=0, max_age_days=0)
+        remaining = await task_mgr.get_task(task_id)
         assert remaining is None, (
             f"Old completed task should be pruned, got: {remaining}"
         )
 
-    def test_all_task_types_have_ttl(self):
+    async def test_all_task_types_have_ttl(self):
         """All TASK_TYPES entries should have a TTL defined."""
         from app.tasks.task_manager import TASK_TYPES
 
@@ -191,22 +190,29 @@ class TestP4_4_TaskTimeoutMonitor:
             assert "ttl" in config, f"Task type {task_type} missing ttl"
             assert config["ttl"] > 0, f"Task type {task_type} has non-positive ttl"
 
-    def test_prune_respects_max_count(self):
-        """prune_tasks should keep at least max_count tasks."""
-        from app.tasks.task_manager import TaskManager
+    async def test_prune_respects_max_count(self, task_mgr, task_db):
+        """prune_tasks 保留集（max_count）内任务不被删除；保留集外超期删除。"""
+        from app.models.task import TaskRecord
 
-        mgr = TaskManager(persist_path=None)
+        created_ids = []
         for _ in range(5):
-            mgr.create_task("design", {})
+            t = await task_mgr.create_task("design", {})
+            created_ids.append(t["task_id"])
 
         # Set first 3 to completed with old timestamp
-        for tid, t in list(mgr._tasks.items())[:3]:
-            t["status"] = "completed"
-            t["completed_at"] = (
-                datetime.fromtimestamp(time.time() - 7200, tz=timezone.utc)
-                .strftime("%Y-%m-%dT%H:%M:%SZ")
-            )
+        async with task_db() as db:
+            for tid in created_ids[:3]:
+                rec = await db.get(TaskRecord, tid)
+                rec.status = "completed"
+                rec.completed_at = datetime.utcnow()
+                rec.created_at = datetime.utcnow() - timedelta(hours=2)
+            await db.commit()
 
-        pruned = mgr.prune_tasks(max_count=3, max_age_seconds=1)
-        remaining = len(mgr._tasks)
-        assert remaining >= 3, f"Expected at least 3 tasks remaining, got {remaining}"
+        # max_count=3（默认保留集大小）→ 3 个终态都在保留集内 → 全部保留
+        await task_mgr.prune_tasks(max_count=3, max_age_days=0)
+        assert await task_mgr.get_task(created_ids[0]) is not None
+
+        # max_count=0 → 保留集为空 → 超期终态全部删除，活跃（pending）任务保留
+        await task_mgr.prune_tasks(max_count=0, max_age_days=0)
+        remaining = [tid for tid in created_ids if await task_mgr.get_task(tid)]
+        assert len(remaining) == 2, f"Expected 2 active tasks remaining, got {remaining}"

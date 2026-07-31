@@ -16,7 +16,7 @@
         v-for="t in recentTasks"
         :key="t.taskId"
         class="task-item"
-        :class="{ 'is-clickable': t.status === 'completed' && t.designId }"
+        :class="{ 'is-clickable': (t.status === 'completed' || t.status === 'completed_with_errors') && (t.designId || (t.type === 'check' && t.recordId)) }"
         @click="onClickTask(t)"
       >
         <div class="task-item-head">
@@ -59,14 +59,21 @@ const recentTasks = computed(() => {
 
 function statusText(status) {
   if (status === 'running') return '进行中'
+  if (status === 'quick_ready') return '方案已就绪'
   if (status === 'completed') return '✅ 完成'
+  if (status === 'completed_with_errors') return '已完成（报告异常）'
   if (status === 'failed') return '❌ 失败'
   return status
 }
 
 function onClickTask(t) {
-  if (t.status === 'completed' && t.designId) {
-    router.push({ path: '/', query: { designId: String(t.designId) } })
+  // Z27: check 任务经 recordId 跳组合分析页；design 任务经 designId 直达方案
+  if (t.status === 'completed' || t.status === 'completed_with_errors') {
+    if (t.type === 'check' && t.recordId) {
+      router.push('/portfolio-analysis')
+    } else if (t.designId) {
+      router.push({ path: '/', query: { designId: String(t.designId) } })
+    }
   }
   open.value = false
 }

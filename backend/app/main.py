@@ -311,30 +311,30 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning("[recovery] failed to scan stale designs: %s", exc)
 
-    # A04: 启动时清理积压的 stuck 任务（旧 session 遗留的 "running" 任务）
-    # 找出所有 status="running" 且创建时间 > 5min 的任务，标记为 failed
+    # A04 (Z27 重写): 启动时收敛遗留的非终态任务（进程已死，任务不可能继续执行）
+    # DB-backed: 所有 pending/running/quick_ready → failed + error_message，诚实收敛状态
     try:
         async def _cleanup_stuck_tasks():
-            from .tasks.task_manager import task_manager as _tm
-            stuck_count = 0
-            for tid, t in list(_tm._tasks.items()):
-                if t.get("status") == "running":
-                    created = t.get("created_at", "")
-                    try:
-                        from datetime import datetime as _dt
-                        created_dt = _dt.strptime(created, "%Y-%m-%dT%H:%M:%SZ")
-                        if (datetime.utcnow() - created_dt).total_seconds() > 300:
-                            _tm.update_task(tid, status="failed", progress=0,
-                                            error_message="启动时清理：任务超时（旧 session 遗留）")
-                            stuck_count += 1
-                    except (ValueError, Exception):
-                        _tm.update_task(tid, status="failed", progress=0,
-                                        error_message="启动时清理：任务状态异常")
-                        stuck_count += 1
-            if stuck_count:
-                logger.info("[recovery] cleaned up %d stuck task(s) on startup", stuck_count)
-            else:
-                logger.info("[recovery] no stuck tasks found on startup")
+            from datetime import datetime
+            from sqlalchemy import select
+            from .models.task import TaskRecord
+            from .database import async_session
+
+            async with async_session() as db:
+                stuck = (await db.execute(
+                    select(TaskRecord).where(
+                        TaskRecord.status.in_(["pending", "running", "quick_ready"])
+                    )
+                )).scalars().all()
+                for t in stuck:
+                    t.status = "failed"
+                    t.error_message = "后端重启，任务中断（未完成），请重新提交"
+                    t.completed_at = datetime.utcnow()
+                if stuck:
+                    await db.commit()
+                    logger.info("[recovery] marked %d stuck task(s) as failed on startup", len(stuck))
+                else:
+                    logger.info("[recovery] no stuck tasks found on startup")
         await _cleanup_stuck_tasks()
     except Exception as exc:
         logger.warning("[recovery] failed to cleanup stuck tasks: %s", exc)

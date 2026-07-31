@@ -165,33 +165,29 @@ async def test_ws_cleanup_stale():
 # ═══════════════════════════════════════════════════════════════════
 
 @pytest.mark.asyncio
-async def test_task_manager_quick_ready():
+async def test_task_manager_quick_ready(task_mgr):
     """V1-3: TaskManager 支持 quick_ready 状态"""
-    from app.tasks.task_manager import TaskManager
+    mgr = task_mgr
+    task = await mgr.create_task("design", {"capital": 500000})
 
-    mgr = TaskManager()
-    task = mgr.create_task("design", {"capital": 500000})
+    await mgr.update_task(task["task_id"], status="quick_ready", progress=60,
+                          result={"strategies": [], "report_stage": "quick"})
 
-    mgr.update_task(task["task_id"], status="quick_ready", progress=60,
-                    result={"strategies": [], "report_stage": "quick"})
-
-    updated = mgr.get_task(task["task_id"])
+    updated = await mgr.get_task(task["task_id"])
     assert updated["status"] == "quick_ready"
     assert updated["progress"] == 60
     assert updated["result"]["report_stage"] == "quick"
 
 
 @pytest.mark.asyncio
-async def test_task_manager_completed_with_errors():
+async def test_task_manager_completed_with_errors(task_mgr):
     """验证 completed_with_errors 状态可被正确设置"""
-    from app.tasks.task_manager import TaskManager
+    mgr = task_mgr
+    task = await mgr.create_task("design", {"capital": 500000})
 
-    mgr = TaskManager()
-    task = mgr.create_task("design", {"capital": 500000})
+    await mgr.update_task(task["task_id"], status="completed_with_errors", progress=100,
+                          result={"strategies": [], "report_quality": "fallback"})
 
-    mgr.update_task(task["task_id"], status="completed_with_errors", progress=100,
-                    result={"strategies": [], "report_quality": "fallback"})
-
-    updated = mgr.get_task(task["task_id"])
+    updated = await mgr.get_task(task["task_id"])
     assert updated["status"] == "completed_with_errors"
     assert updated["result"]["report_quality"] == "fallback"

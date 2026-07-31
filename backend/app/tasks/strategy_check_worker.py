@@ -66,7 +66,7 @@ async def strategy_check_pipeline(mgr, task_id: int) -> None:
     from ..services.portfolio_service import strategy_check
     from app.database import async_session
 
-    task = mgr.get_task(task_id)
+    task = await mgr.get_task(task_id)
     if not task:
         return
 
@@ -79,7 +79,7 @@ async def strategy_check_pipeline(mgr, task_id: int) -> None:
         )
     except asyncio.TimeoutError:
         logger.error("[strategy_check_pipeline] task %d timed out after 120s", task_id)
-        mgr.update_task(
+        await mgr.update_task(
             task_id,
             status="failed",
             progress=100,
@@ -89,7 +89,7 @@ async def strategy_check_pipeline(mgr, task_id: int) -> None:
         await _notify(task_id, "failed", progress=100, stage="分析超时")
     except Exception as e:
         logger.error("[strategy_check_pipeline] task %d failed: %s", task_id, e)
-        mgr.update_task(
+        await mgr.update_task(
             task_id,
             status="failed",
             progress=100,
@@ -103,11 +103,11 @@ async def _pipeline_body(mgr, task_id: int) -> dict:
     from ..services.portfolio_service import strategy_check
     from app.database import async_session
 
-    task = mgr.get_task(task_id)
+    task = await mgr.get_task(task_id)
     if not task:
         return {}
 
-    mgr.update_task(task_id, status="running", progress=5, stage="初始化")
+    await mgr.update_task(task_id, status="running", progress=5, stage="初始化")
     await _notify(task_id, "running", progress=5, stage="初始化")
 
     params = task.get("params", {})
@@ -115,22 +115,22 @@ async def _pipeline_body(mgr, task_id: int) -> dict:
     portfolio_type = params.get("portfolio_type")
 
     # Stage 1: DATA (progress 5→40%) — 数据采集 & 策略检查
-    mgr.update_task(task_id, progress=10, stage="加载持仓数据")
+    await mgr.update_task(task_id, progress=10, stage="加载持仓数据")
     await _notify(task_id, "running", progress=10, stage="加载持仓数据")
 
     from app.database import async_session
     async with async_session() as db:
         result = await strategy_check(db, capital, portfolio_type=portfolio_type)
 
-    mgr.update_task(task_id, progress=40, stage="数据采集完成")
+    await mgr.update_task(task_id, progress=40, stage="数据采集完成")
     await _notify(task_id, "running", progress=40, stage="数据采集完成")
 
     # Stage 2: LLM (progress 40→80%) — LLM 已在 strategy_check 内部完成
-    mgr.update_task(task_id, progress=60, stage="AI 分析完成")
+    await mgr.update_task(task_id, progress=60, stage="AI 分析完成")
     await _notify(task_id, "running", progress=60, stage="AI 分析完成")
 
     # Stage 3: DB (progress 80→95%) — 持久化到数据库
-    mgr.update_task(task_id, progress=80, stage="保存报告")
+    await mgr.update_task(task_id, progress=80, stage="保存报告")
     await _notify(task_id, "running", progress=80, stage="保存报告")
 
     record_id = None
@@ -156,7 +156,7 @@ async def _pipeline_body(mgr, task_id: int) -> dict:
             db.add(record)
             await db.commit()
             await db.refresh(record)
-            record_id = record.id
+            record_id = int(record.id)
             logger.info("[strategy_check_pipeline] record %d saved", record_id)
     except Exception as e:
         logger.warning("[strategy_check_pipeline] DB persist failed: %s", e)
@@ -170,14 +170,15 @@ async def _pipeline_body(mgr, task_id: int) -> dict:
         pass
 
     # Stage 4: NOTIFY (progress 95→100%)
-    mgr.update_task(
+    await mgr.update_task(
         task_id,
         progress=100,
         status="completed",
         result=result,
         record_id=record_id,
     )
-    await _notify(task_id, "completed", progress=100, stage="分析完成")
+    await _notify(task_id, "completed", progress=100, stage="分析完成",
+                  record_id=record_id, task_type="check")
 
     logger.info(
         "[strategy_check_pipeline] task %d completed (record %s)",
@@ -188,16 +189,19 @@ async def _pipeline_body(mgr, task_id: int) -> dict:
     return result
 
 
-async def _notify(task_id: int, status: str, progress: int, stage: str = "") -> None:
-    """通过 WS 广播任务状态变更。"""
+async def _notify(task_id: int, status: str, progress: int, stage: str = "",
+                  record_id: int | None = None, task_type: str = "check") -> None:
+    """通过 WS 广播任务状态变更（Z27: 契约 §2.4.2 — 携带 task_type + record_id）。"""
     from ..tasks.task_manager import notify_manager
 
     await notify_manager.broadcast({
         "type": "task_update",
         "task_id": task_id,
+        "task_type": task_type,
         "status": status,
         "progress": progress,
         "stage": stage,
+        "record_id": record_id,
     })
 
 

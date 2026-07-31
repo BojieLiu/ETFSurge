@@ -547,76 +547,79 @@ def test_p0_4_compute_composite_handles_empty_factor_scores():
 
 
 @pytest.mark.asyncio
-async def test_c3_design_worker_saves_design_text_pipeline():
+async def test_c3_design_worker_saves_design_text_pipeline(task_db):
     """design_worker must persist non-null design_text after LLM call.
 
     Full pipeline test: mock LLM and DB, run design_worker,
     verify the DB record has non-empty design_text.
     """
-    from app.tasks.task_manager import TaskManager, design_worker
-    from app.database import async_session
+    from app.tasks.task_manager import design_worker
     from app.models.portfolio_design import PortfolioDesign
 
-    mgr = TaskManager()
-    task = mgr.create_task("design", params={"capital": 500000})
+    # Z27 适配：mgr 与 pipeline 的 PortfolioDesign 写入全部指向独立测试库（task_db）
+    with patch("app.database.async_session", task_db), \
+            patch("app.tasks.task_manager.async_session", task_db):
+        from app.tasks.task_manager import TaskManager
 
-    # Mock generate_enhanced_design to return valid strategies quickly
-    strategies = [
-        {
-            "id": "balanced",
-            "label": "均衡型",
-            "layer_budget": {"core": 0.50, "satellite": 0.30, "defense": 0.20},
-            "etfs": [
-                {"symbol": "510300", "name": "沪深300ETF", "layer": "core", "weight": 0.3,
-                 "factor_score": 0.7, "factor_breakdown": {}, "selection_rationale": "宽基配置"},
-                {"symbol": "518880", "name": "黄金ETF", "layer": "defense", "weight": 0.1,
-                 "factor_score": 0.5, "factor_breakdown": {}, "selection_rationale": "避险"},
-            ],
+        mgr = TaskManager()
+        task = await mgr.create_task("design", params={"capital": 500000})
+
+        # Mock generate_enhanced_design to return valid strategies quickly
+        strategies = [
+            {
+                "id": "balanced",
+                "label": "均衡型",
+                "layer_budget": {"core": 0.50, "satellite": 0.30, "defense": 0.20},
+                "etfs": [
+                    {"symbol": "510300", "name": "沪深300ETF", "layer": "core", "weight": 0.3,
+                     "factor_score": 0.7, "factor_breakdown": {}, "selection_rationale": "宽基配置"},
+                    {"symbol": "518880", "name": "黄金ETF", "layer": "defense", "weight": 0.1,
+                     "factor_score": 0.5, "factor_breakdown": {}, "selection_rationale": "避险"},
+                ],
+            }
+        ]
+        mock_result = {
+            "strategies": strategies,
+            "market_context": {
+                "market_regime": "range_bound",
+                "index_realtime": [{"name": "上证指数", "price": 3200}],
+            },
         }
-    ]
-    mock_result = {
-        "strategies": strategies,
-        "market_context": {
-            "market_regime": "range_bound",
-            "index_realtime": [{"name": "上证指数", "price": 3200}],
-        },
-    }
 
-    with patch(
-        "app.services.strategy_design.generate_enhanced_design",
-        new=AsyncMock(return_value=mock_result),
-    ):
         with patch(
-            "app.analysis.llm.generate_design_report",
-            new=AsyncMock(return_value="LLM analysis: market is bullish on tech sectors."),
+            "app.services.strategy_design.generate_enhanced_design",
+            new=AsyncMock(return_value=mock_result),
         ):
-            await design_worker(mgr, task["task_id"])
+            with patch(
+                "app.analysis.llm.generate_design_report",
+                new=AsyncMock(return_value="LLM analysis: market is bullish on tech sectors."),
+            ):
+                await design_worker(mgr, task["task_id"])
 
-    # Verify the task completed
-    final_task = mgr.get_task(task["task_id"])
-    assert final_task is not None
-    assert final_task["status"] == "completed", (
-        f"Task should be completed, got {final_task['status']}: "
-        f"{final_task.get('error_message', '')}"
-    )
-
-    # Verify DB record has design_text
-    async with async_session() as db:
-        records = (await db.execute(
-            PortfolioDesign.__table__.select().order_by(PortfolioDesign.id.desc()).limit(1)
-        )).all()
-        if records:
-            # SQLAlchemy 2.0 uses row tuples from .all()
-            row = records[0]
-            # Access by column index: we just check it exists
-            has_design_text = row.design_text is not None and len(str(row.design_text)) > 0
-        else:
-            has_design_text = False
-
-    if not has_design_text:
-        # Fallback: check if task result has the info we need
-        result = final_task.get("result", {})
-        assert result.get("design_id") is not None or has_design_text, (
-            "C3 BROKEN: design_worker completed but no design_text found in DB. "
-            "The report generation was likely skipped."
+        # Verify the task completed
+        final_task = await mgr.get_task(task["task_id"])
+        assert final_task is not None
+        assert final_task["status"] == "completed", (
+            f"Task should be completed, got {final_task['status']}: "
+            f"{final_task.get('error_message', '')}"
         )
+
+        # Verify DB record has design_text（测试库内查询）
+        async with task_db() as db:
+            records = (await db.execute(
+                PortfolioDesign.__table__.select().order_by(PortfolioDesign.id.desc()).limit(1)
+            )).all()
+            if records:
+                # SQLAlchemy 2.0 uses row tuples from .all()
+                row = records[0]
+                has_design_text = row.design_text is not None and len(str(row.design_text)) > 0
+            else:
+                has_design_text = False
+
+        if not has_design_text:
+            # Fallback: check if task result has the info we need
+            result = final_task.get("result", {})
+            assert result.get("design_id") is not None or has_design_text, (
+                "C3 BROKEN: design_worker completed but no design_text found in DB. "
+                "The report generation was likely skipped."
+            )

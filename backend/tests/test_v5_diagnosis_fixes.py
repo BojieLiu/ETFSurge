@@ -17,65 +17,52 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from typing import Any
 
+from tests.db_fixtures import task_mgr  # noqa: F401
 
-# ─── Z27: TaskManager persist path ─────────────────────────────
+
+# ─── Z27: TaskManager DB-backed persistence ────────────────────────
 
 
-def test_task_manager_persist_path():
-    """Z27: DEFAULT_PERSIST_PATH should resolve to backend/data/tasks.json."""
+def test_task_manager_no_json_persist_path():
+    """Z27: 删除 JSON 双轨后 DEFAULT_PERSIST_PATH/_persist_path 属性不再存在（A5）。"""
     from app.tasks.task_manager import TaskManager
-    import os
-    path = TaskManager.DEFAULT_PERSIST_PATH
-    # Should resolve to something under backend/data/, not backend/app/data/
-    norm = os.path.normpath(path)
-    assert "app" + os.sep + "data" not in norm, (
-        f"Path should not contain app/data: {norm}"
-    )
-    assert norm.endswith("data" + os.sep + "tasks.json"), (
-        f"Path should end with data/tasks.json: {norm}"
-    )
-    # Verify the parent dir exists
-    parent = os.path.dirname(norm)
-    assert os.path.exists(parent), f"Parent directory should exist: {parent}"
+    # 属性已删除 → AttributeError（tasks.json 不再被创建/读写）
+    assert not hasattr(TaskManager, "DEFAULT_PERSIST_PATH")
+    assert not hasattr(TaskManager, "_persist_path")
 
 
-def test_task_manager_create_and_get_task():
-    """Z27: TaskManager create_task + get_task basic contract."""
-    from app.tasks.task_manager import TaskManager
-    tm = TaskManager(persist_path=None)  # No persistence for test
-    task = tm.create_task("design", {"capital": 100000})
-    assert task["task_id"] == 1
+async def test_task_manager_create_and_get_task(task_mgr):
+    """Z27: TaskManager create_task + get_task 契约（DB-backed）。"""
+    task = await task_mgr.create_task("design", {"capital": 100000})
+    assert task["task_id"] > 0
     assert task["status"] == "pending"
     assert task["type"] == "design"
 
     # Retrieve by ID
-    retrieved = tm.get_task(1)
+    retrieved = await task_mgr.get_task(task["task_id"])
     assert retrieved is not None
-    assert retrieved["task_id"] == 1
+    assert retrieved["task_id"] == task["task_id"]
 
     # Non-existent
-    assert tm.get_task(999) is None
+    assert await task_mgr.get_task(999999) is None
 
 
-def test_task_manager_list_tasks():
-    """Z27: TaskManager list_tasks returns all tasks sorted by creation."""
-    from app.tasks.task_manager import TaskManager
-    tm = TaskManager(persist_path=None)
-    t1 = tm.create_task("design")
-    t2 = tm.create_task("check")
-    tasks = tm.list_tasks()
+async def test_task_manager_list_tasks(task_mgr):
+    """Z27: list_tasks 按创建时间倒序。"""
+    t1 = await task_mgr.create_task("design")
+    t2 = await task_mgr.create_task("check")
+    tasks = await task_mgr.list_tasks()
     assert len(tasks) >= 2
     # Most recent first
-    assert tasks[0]["task_id"] >= tasks[1]["task_id"]
+    ids = [x["task_id"] for x in tasks]
+    assert ids.index(t2["task_id"]) < ids.index(t1["task_id"])
 
 
-def test_task_manager_update_task():
-    """Z27: TaskManager update_task modifies status/progress."""
-    from app.tasks.task_manager import TaskManager
-    tm = TaskManager(persist_path=None)
-    task = tm.create_task("design")
-    tm.update_task(task["task_id"], status="running", progress=50)
-    updated = tm.get_task(task["task_id"])
+async def test_task_manager_update_task(task_mgr):
+    """Z27: update_task 修改 status/progress。"""
+    task = await task_mgr.create_task("design")
+    await task_mgr.update_task(task["task_id"], status="running", progress=50)
+    updated = await task_mgr.get_task(task["task_id"])
     assert updated["status"] == "running"
     assert updated["progress"] == 50
 

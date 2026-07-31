@@ -63,6 +63,7 @@ async def init_db():
         from .models.strategy_check import StrategyCheckRecord
         from .models.app_config import AppConfig
         from .models.factor_ic import FactorICRecord
+        from .models.task import TaskRecord
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_migrate)
     # Phase 6.1.3: initialize ConfigManager with DB session factory

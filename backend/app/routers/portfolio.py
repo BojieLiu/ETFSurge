@@ -273,27 +273,19 @@ async def delete_design(
 # ── 异步任务 ──────────────────────────────────
 @router.get("/tasks/{task_id}")
 async def get_task_status(task_id: int):
-    """查询异步任务状态。"""
+    """查询异步任务状态（Z27: 返回契约全量字段 type/stage/params/result/record_id）。"""
     from ..tasks.task_manager import task_manager
-    task = task_manager.get_task(task_id)
+    task = await task_manager.get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    return {
-        "task_id": task["task_id"],
-        "status": task["status"],
-        "progress": task["progress"],
-        "error_message": task.get("error_message"),
-        "created_at": task.get("created_at"),
-        "completed_at": task.get("completed_at"),
-        "result": task.get("result"),
-    }
+    return task
 
 
 @router.get("/tasks")
-async def list_tasks(limit: int = Query(10, ge=1, le=50), offset: int = Query(0, ge=0)):
-    """列出最近的任务。"""
+async def list_tasks(limit: int = Query(20, ge=1, le=50), offset: int = Query(0, ge=0)):
+    """列出最近的任务（Z27: limit 默认 20，与契约/前端一致）。"""
     from ..tasks.task_manager import task_manager
-    return task_manager.list_tasks(limit=limit, offset=offset)
+    return await task_manager.list_tasks(limit=limit, offset=offset)
 
 
 @router.post("/design-async")
@@ -324,7 +316,7 @@ async def portfolio_design_async(
     capital = task.get("capital", 500000)
     constraints = task.get("constraints")
     params = {"capital": capital, "constraints": constraints, "market": market}
-    t = task_manager.create_task(task_type="design", params=params)
+    t = await task_manager.create_task(task_type="design", params=params)
     asyncio.create_task(design_worker(task_manager, t["task_id"]))
     return JSONResponse(
         status_code=202,
@@ -348,7 +340,7 @@ async def strategy_check_async(task: dict):
 
         total_capital = task.get("total_capital", 500000)
         portfolio_type = task.get("portfolio_type")
-        t = task_manager.create_task(task_type="check", params={"capital": total_capital, "portfolio_type": portfolio_type})
+        t = await task_manager.create_task(task_type="check", params={"capital": total_capital, "portfolio_type": portfolio_type})
         asyncio.create_task(strategy_check_worker(task_manager, t["task_id"]))
         return JSONResponse(
             status_code=202,
@@ -364,7 +356,7 @@ async def get_strategy_check_result(task_id: int):
     from ..tasks.task_manager import task_manager
     from fastapi.responses import JSONResponse
 
-    task = task_manager.get_task(task_id)
+    task = await task_manager.get_task(task_id)
     if not task:
         return JSONResponse(status_code=404, content={"error": "task not found"})
     

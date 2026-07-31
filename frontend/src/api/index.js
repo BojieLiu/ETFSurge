@@ -77,7 +77,7 @@ export const portfolioApi = {
     return api.post('/portfolio/design-async', { capital, constraints, market })
   },
   getTask: (taskId) => api.get(`/portfolio/tasks/${taskId}`),
-  listTasks: (limit = 10, offset = 0) => api.get('/portfolio/tasks', { params: { limit, offset } }),
+  listTasks: (limit = 20, offset = 0) => api.get('/portfolio/tasks', { params: { limit, offset } }),
   getDriftCheck: (type) => api.get('/portfolio/drift-check', { params: type ? { portfolio_type: type } : {} }),
   getTimeline: (limit = 20, offset = 0) => api.get('/portfolio/timeline', { params: { limit, offset } }),
 }

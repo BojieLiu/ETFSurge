@@ -31,6 +31,8 @@ export const useTaskStore = defineStore('task', () => {
       progress: rt.progress || 0,
       label: rt.label || _defaultLabel(rt.task_type || rt.type),
       designId: rt.result?.design_id || rt.design_id || null,
+      // Z27: recordId — design 任务与 design_id 同值；check 任务取 record_id（可关联 strategy-checks/{id}）
+      recordId: rt.record_id || (rt.type === 'design' ? (rt.result?.design_id || rt.design_id || null) : null) || null,
       errorMessage: rt.error_message || rt.error || null,
       createdAt: rt.created_at ? new Date(rt.created_at).getTime() : Date.now(),
       completedAt: rt.completed_at || null,
@@ -126,6 +128,8 @@ export const useTaskStore = defineStore('task', () => {
         ? '策略检查已完成'
         : '组合方案已生成，点击查看'
       toast.show(msg, 'success')
+    } else if (changes.status === 'completed_with_errors') {
+      toast.show('方案已完成但报告生成异常', 'warning')
     } else if (changes.status === 'failed') {
       const msg = task.type === 'check'
         ? '策略检查失败'

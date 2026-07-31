@@ -207,8 +207,12 @@ function connectTaskWs() {
       const taskId = msg.task_id
 
       // 如果本地没有该任务，自动创建（避免 WS 消息早于 addTask 调用）
+      // Z27: 用 task_type 初始化任务类型与 label（否则 check 任务会被误建为 design）
       if (!taskStore.getTask(taskId)) {
-        taskStore.addTask(taskId, msg.label || '智能组合设计')
+        const type = msg.task_type || 'design'
+        const label = type === 'check' ? '策略检查与分析'
+          : type === 'report' ? '市场研判报告' : '智能组合设计'
+        taskStore.addTask(taskId, label, type)
       }
 
       // 节流：仅 progress 变化时限制频率
@@ -225,9 +229,13 @@ function connectTaskWs() {
       }
       taskStore.updateTask(taskId, patch)
       // Backend _notify carries design_id on completed — fetch it directly.
-      if (msg.design_id) {
-        taskStore.updateTask(taskId, { designId: msg.design_id })
-      } else if (msg.status === 'completed') {
+      // Z27: 同时处理 record_id（check 任务无 design_id，只有 record_id）
+      if (msg.record_id || msg.design_id) {
+        taskStore.updateTask(taskId, {
+          recordId: msg.record_id || msg.design_id,
+          ...(msg.design_id ? { designId: msg.design_id } : {}),
+        })
+      } else if (msg.status === 'completed' || msg.status === 'completed_with_errors') {
         // fallback
         portfolioApi.getTask(taskId).then((res) => {
           const did = res?.data?.result?.design_id

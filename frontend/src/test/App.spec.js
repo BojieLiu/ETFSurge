@@ -93,4 +93,132 @@ describe('App.vue', () => {
 
     expect(fetchSpy).toHaveBeenCalled()
   })
+
+  // ── Z27: WS task_update 处理（§7.2） ───────────────────────────
+
+  it('creates task with type from WS task_type and updates recordId', async () => {
+    router.push('/')
+    await router.isReady()
+
+    // 假 WebSocket：捕获实例以便注入 onmessage
+    const wsInstances = []
+    class FakeWebSocket {
+      constructor(url) {
+        this.url = url
+        this.readyState = 0
+        this.onopen = null
+        this.onmessage = null
+        this.onclose = null
+        this.onerror = null
+        wsInstances.push(this)
+      }
+      close() { this.readyState = 3 }
+    }
+    FakeWebSocket.CONNECTING = 0
+    FakeWebSocket.OPEN = 1
+    const origWS = window.WebSocket
+    window.WebSocket = FakeWebSocket
+
+    try {
+      const { useTaskStore } = await import('../stores/task')
+      mount(App, {
+        global: {
+          plugins: [router],
+          stubs: {
+            AppLayout: { template: '<div><slot /></div>' },
+            AppToast: { template: '<div />' },
+            Teleport: { template: '<div><slot /></div>' },
+            TaskIndicator: { template: '<div />' },
+            MarketMonitor: { template: '<div />' },
+          },
+        },
+      })
+
+      const ws = wsInstances[0]
+      expect(ws).toBeTruthy()
+
+      // check 任务完成消息：task_type='check' + record_id=97
+      ws.onmessage({
+        data: JSON.stringify({
+          type: 'task_update',
+          task_id: 9,
+          task_type: 'check',
+          status: 'completed',
+          progress: 100,
+          record_id: 97,
+        }),
+      })
+
+      const store = useTaskStore()
+      // WS addTask 保留原始 task_id（数字）；getTask 需传同一类型
+      const t = store.getTask(9)
+      expect(t).not.toBeNull()
+      expect(t.type).toBe('check')
+      expect(t.label).toBe('策略检查与分析')
+      expect(t.status).toBe('completed')
+      expect(t.recordId).toBe(97)
+    } finally {
+      window.WebSocket = origWS
+    }
+  })
+
+  it('creates design task with default label when task_type missing', async () => {
+    router.push('/')
+    await router.isReady()
+
+    const wsInstances = []
+    class FakeWebSocket {
+      constructor(url) {
+        this.url = url
+        this.readyState = 0
+        this.onopen = null
+        this.onmessage = null
+        this.onclose = null
+        this.onerror = null
+        wsInstances.push(this)
+      }
+      close() { this.readyState = 3 }
+    }
+    FakeWebSocket.CONNECTING = 0
+    FakeWebSocket.OPEN = 1
+    const origWS = window.WebSocket
+    window.WebSocket = FakeWebSocket
+
+    try {
+      const { useTaskStore } = await import('../stores/task')
+      mount(App, {
+        global: {
+          plugins: [router],
+          stubs: {
+            AppLayout: { template: '<div><slot /></div>' },
+            AppToast: { template: '<div />' },
+            Teleport: { template: '<div><slot /></div>' },
+            TaskIndicator: { template: '<div />' },
+            MarketMonitor: { template: '<div />' },
+          },
+        },
+      })
+
+      const ws = wsInstances[0]
+      ws.onmessage({
+        data: JSON.stringify({
+          type: 'task_update',
+          task_id: 11,
+          status: 'running',
+          progress: 10,
+          design_id: 222,
+        }),
+      })
+
+      const store = useTaskStore()
+      const t = store.getTask(11)
+      expect(t).not.toBeNull()
+      expect(t.type).toBe('design')
+      expect(t.label).toBe('智能组合设计')
+      expect(t.designId).toBe(222)
+      expect(t.recordId).toBe(222)
+    } finally {
+      window.WebSocket = origWS
+    }
+  })
 })

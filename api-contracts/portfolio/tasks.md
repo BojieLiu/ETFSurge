@@ -123,7 +123,7 @@ GET /api/v1/portfolio/tasks
 |-------|------|-------------|
 | task_id | integer | **任务唯一标识**（前端读取此字段，不是 `id`） |
 | type | string | `design` \| `check` \| `report` |
-| status | string | `pending` \| `running` \| `completed` \| `failed` \| `cancelled` |
+| status | string | `pending` \| `running` \| `quick_ready` \| `completed` \| `completed_with_errors` \| `failed` \| `cancelled` |
 | progress | integer | 0-100 进度百分比 |
 | stage | string | 当前阶段描述（如 "数据采集与因子计算"） |
 | params | object | 任务创建时传入的参数 |
@@ -166,6 +166,60 @@ GET /api/v1/portfolio/tasks/{task_id}
   "detail": "Task not found"
 }
 ```
+
+---
+
+### 2.4.1 状态枚举 / Status Enum
+
+| status | 含义 |
+|--------|------|
+| `pending` | 已创建，等待 worker |
+| `running` | 执行中 |
+| `quick_ready` | 组合方案已就绪（可先看方案），LLM 报告生成中 |
+| `completed` | 完成（含 LLM 报告） |
+| `completed_with_errors` | 方案完成但 LLM 报告失败/DB 保存失败 |
+| `failed` | 失败（含启动收敛） |
+| `cancelled` | 保留（当前无取消功能，预留） |
+
+---
+
+### 2.4.2 WebSocket 任务通知 / WS Task Notifications
+
+```
+WS /api/v1/ws/task-notifications
+```
+
+服务端广播消息（`type: "task_update"`）：
+
+```json
+{
+  "type": "task_update",
+  "task_id": 39,
+  "task_type": "design",
+  "status": "completed",
+  "progress": 100,
+  "stage": "设计完成",
+  "design_id": 222,
+  "record_id": 222,
+  "report_quality": "full"
+}
+```
+
+**字段说明:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| type | string | 固定为 `task_update` |
+| task_id | integer | 任务 ID |
+| task_type | string | `design` \| `check` \| `report`（**必填**；前端收到时若本地无该任务，据此初始化任务类型与 label） |
+| status | string | 见 §2.4.1 状态枚举 |
+| progress | integer | 0-100 进度百分比 |
+| stage | string | 当前阶段描述 |
+| design_id | integer/null | design 任务完成时携带（与 record_id 同值） |
+| record_id | integer/null | design/check 任务完成时**必填**（design 与 design_id 同值；check 为 strategy_check_records.id） |
+| report_quality | string/null | design 报告质量分级 |
+
+前端约束：收到 `task_update` 即更新内存任务；`design_id`/`record_id` 用于跳转。
 
 ---
 
@@ -352,7 +406,16 @@ GET /api/v1/portfolio/strategy-checks/{id}
 
 ## Frontend-Backend Checklist
 
+> Z27（任务持久化重构，2026-07-31）新增项：任务生命周期落 DB（`TaskRecord` 表），
+> `tasks.json` 不再读写；任务完成时 `record_id` 回写任务行；启动时遗留非终态任务收敛为 failed。
+
 - [ ] 后端 `GET /api/v1/portfolio/tasks` 返回 `task_id` 字段（非 `id`）
+- [ ] `GET /tasks/{task_id}` 返回全部契约字段：`task_id`/`type`/`status`/`progress`/`stage`/`params`/`result`/`error_message`/`created_at`/`completed_at`/`record_id`
+- [ ] 任务列表在**后端重启后**仍返回（DB 持久化，无 JSON 文件）
+- [ ] design 任务 `record_id` 可关联 `GET /designs/{record_id}`；check 任务 `record_id` 可关联 `GET /strategy-checks/{record_id}`
+- [ ] WS `task_update` 完成时携带 `record_id` 与 `task_type`
+- [ ] 状态枚举含 `quick_ready`/`completed_with_errors`
+- [ ] `GET /tasks` 的 `limit` 默认值为 20（契约/路由/前端一致）
 - [ ] 前端读取 `rt.task_id` 作为任务唯一标识
 - [ ] 前端显示任务时：pending(等待中) / running(运行中) / completed(已完成) / failed(失败)
 - [ ] 前端显示进度百分比 `progress` 字段

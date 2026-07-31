@@ -19,6 +19,8 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from tests.db_fixtures import task_mgr  # noqa: F401
+
 
 # ─── MarketContext Tests ──────────────────────────────────────────
 
@@ -227,11 +229,9 @@ class TestMarketDataHubRegimeCache:
 
 class TestDesignAsyncMarketParam:
 
-    def test_task_params_contain_market(self):
-        """Task params dict must contain market field."""
-        from app.tasks.task_manager import task_manager
-        task_manager._tasks.clear()
-        t = task_manager.create_task(task_type="design", params={"capital": 500000, "market": "HK"})
+    async def test_task_params_contain_market(self, task_mgr):
+        """Task params dict must contain market field（Z27: DB-backed 注入测试库）。"""
+        t = await task_mgr.create_task(task_type="design", params={"capital": 500000, "market": "HK"})
         assert t["params"].get("market") == "HK"
 
 

@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 async def report_worker(mgr, task_id: int) -> None:
     """后台执行市场研判报告生成。"""
-    task = mgr.get_task(task_id)
+    task = await mgr.get_task(task_id)
     if not task:
         return
 
@@ -26,6 +26,7 @@ async def report_worker(mgr, task_id: int) -> None:
         await notify_manager.broadcast({
             "type": "task_update",
             "task_id": task_id,
+            "task_type": "report",
             "status": status,
             "progress": progress,
             "stage": stage,
@@ -33,7 +34,7 @@ async def report_worker(mgr, task_id: int) -> None:
 
     try:
         await _notify("running", 5, "采集行情数据")
-        mgr.update_task(task_id, status="running", progress=5)
+        await mgr.update_task(task_id, status="running", progress=5)
 
         # 并行采集行情和新闻
         from ..services.market_data_hub import market_data_hub
@@ -59,7 +60,7 @@ async def report_worker(mgr, task_id: int) -> None:
         all_news = news + macro_items
 
         await _notify("running", 40, f"加载 {len(indices)} 指数 + {len(market_data)} 标的")
-        mgr.update_task(task_id, progress=40)
+        await mgr.update_task(task_id, progress=40)
 
         # 计算部分 K 线指标
         await _notify("running", 50, "计算技术指标")
@@ -81,7 +82,7 @@ async def report_worker(mgr, task_id: int) -> None:
                 continue
 
         await _notify("running", 65, "LLM 生成报告")
-        mgr.update_task(task_id, progress=65)
+        await mgr.update_task(task_id, progress=65)
 
         # LLM 生成报告
         report = await asyncio.wait_for(
@@ -96,15 +97,15 @@ async def report_worker(mgr, task_id: int) -> None:
             "commodities": commodities[:6],
         }
 
-        mgr.update_task(task_id, progress=100, status="completed", result=result)
+        await mgr.update_task(task_id, progress=100, status="completed", result=result)
         await _notify("completed", 100, "报告生成完成")
         logger.info("[report_worker] task %d completed", task_id)
 
     except asyncio.TimeoutError:
         logger.warning("[report_worker] task %d timed out", task_id)
-        mgr.update_task(task_id, status="failed", error_message="报告生成超时（90s）")
+        await mgr.update_task(task_id, status="failed", error_message="报告生成超时（90s）")
         await _notify("failed", 0, "超时")
     except Exception as e:
         logger.warning("[report_worker] task %d failed: %s", task_id, e)
-        mgr.update_task(task_id, status="failed", error_message=str(e))
+        await mgr.update_task(task_id, status="failed", error_message=str(e))
         await _notify("failed", 0, str(e))

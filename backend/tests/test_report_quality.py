@@ -9,17 +9,19 @@ Covers:
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
+from tests.db_fixtures import task_mgr  # noqa: F401
+
 
 # ─── FIX-Q01: Allocation quality gate ──────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_q01_empty_allocation_marked_failed():
+async def test_q01_empty_allocation_marked_failed(task_mgr):
     """Q01: If all 3 strategies have 0 real ETFs, task should be marked 'failed'."""
-    from app.tasks.task_manager import _design_pipeline_with_semaphore, task_manager
+    from app.tasks.task_manager import _design_pipeline_with_semaphore
 
-    # Create a task
-    task = task_manager.create_task("design", {"capital": 500000})
+    # Z27: 用注入测试库的 TaskManager（不碰全局单例/开发库）
+    task = await task_mgr.create_task("design", {"capital": 500000})
 
     # Mock at source module (lazy imported inside function)
     with patch("app.services.strategy_design.generate_enhanced_design") as mock_gen:
@@ -42,9 +44,9 @@ async def test_q01_empty_allocation_marked_failed():
             mock_ctx.get = AsyncMock(return_value=None)
             mock_ctx.add = MagicMock()
 
-            await _design_pipeline_with_semaphore(task_manager, task["task_id"])
+            await _design_pipeline_with_semaphore(task_mgr, task["task_id"])
 
-    result = task_manager.get_task(task["task_id"])
+    result = await task_mgr.get_task(task["task_id"])
     assert result is not None
     assert result["status"] == "failed", f"Expected failed, got {result['status']}"
     assert result["error_message"] is not None
@@ -52,11 +54,11 @@ async def test_q01_empty_allocation_marked_failed():
 
 
 @pytest.mark.asyncio
-async def test_q01_partial_valid_allocation_proceeds():
+async def test_q01_partial_valid_allocation_proceeds(task_mgr):
     """Q01: If at least one strategy has >=3 non-CASH ETFs, pipeline proceeds."""
-    from app.tasks.task_manager import _design_pipeline_with_semaphore, task_manager
+    from app.tasks.task_manager import _design_pipeline_with_semaphore
 
-    task = task_manager.create_task("design", {"capital": 500000})
+    task = await task_mgr.create_task("design", {"capital": 500000})
 
     with patch("app.services.strategy_design.generate_enhanced_design") as mock_gen:
         mock_gen.return_value = {
@@ -75,17 +77,20 @@ async def test_q01_partial_valid_allocation_proceeds():
             "error": None,
         }
 
-        with patch("app.tasks.task_manager.async_session") as mock_db:
-            mock_ctx = MagicMock()
-            mock_ctx.__aenter__ = AsyncMock(return_value=mock_ctx)
-            mock_ctx.__aexit__ = AsyncMock()
-            mock_db.return_value = mock_ctx
-            mock_ctx.get = AsyncMock(return_value=None)
-            mock_ctx.add = MagicMock()
+        # Z27: 必须 mock LLM — 否则管线会调用真实 DeepSeek API（无界阻塞）
+        with patch("app.analysis.llm.generate_design_report",
+                   new=AsyncMock(return_value="# 测试报告\n\nLLM 分析内容。")):
+            with patch("app.tasks.task_manager.async_session") as mock_db:
+                mock_ctx = MagicMock()
+                mock_ctx.__aenter__ = AsyncMock(return_value=mock_ctx)
+                mock_ctx.__aexit__ = AsyncMock()
+                mock_db.return_value = mock_ctx
+                mock_ctx.get = AsyncMock(return_value=None)
+                mock_ctx.add = MagicMock()
 
-            await _design_pipeline_with_semaphore(task_manager, task["task_id"])
+                await _design_pipeline_with_semaphore(task_mgr, task["task_id"])
 
-    result = task_manager.get_task(task["task_id"])
+    result = await task_mgr.get_task(task["task_id"])
     assert result is not None
     # Should NOT have failed at the empty-allocation gate
     if result["status"] == "failed":

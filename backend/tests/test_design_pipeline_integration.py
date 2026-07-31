@@ -1,19 +1,24 @@
 """
 TDD integration tests for design_pipeline and strategy_check_pipeline.
 
-Tests cover the full sequential pipeline with mocked data sources and LLM.
-External network / DB / LLM are all mocked; only in-memory task state is real.
-
 Test cases (per design-check-pipeline-redesign.md §4.1):
   1. test_pipeline_full_success      — LLM succeeds → report_quality="full"
   2. test_pipeline_llm_timeout       — LLM times out → report_quality="fallback"
   3. test_pipeline_empty_pool        — empty candidates → task failed
   4. test_pipeline_ws_notify         — WS receives progress + completed events
   5. test_strategy_check_pipeline    — strategy check pipeline basic flow
+
+Z27 适配（结构重写，见 docs/z27-task-persistence-redesign.md §8.2）：
+  - TaskManager 用真实测试库（tests/db_fixtures.task_mgr，D10），不再 mock async_session 当任务库
+  - 保留对 app.tasks.task_manager.async_session 的 patch（D11，管 pipeline 写 portfolio_designs）
+  - task_id 从 create_task() 返回值取（不再硬编码 1）
+  - 断言目标从「task 内存 dict」改为「DB 读回」
 """
 import asyncio
 import pytest
 from unittest.mock import patch, AsyncMock, MagicMock, ANY
+
+from tests.db_fixtures import task_db, task_mgr  # noqa: F401
 
 
 # ── Helpers ───────────────────────────────────────────────────────
@@ -82,16 +87,16 @@ class TestDesignPipeline:
     Patch targets match LOCAL imports inside design_pipeline():
       - generate_enhanced_design  → app.services.strategy_design (local import)
       - generate_design_report    → app.analysis.llm (local import)
-      - async_session             → app.tasks.task_manager (module-level import)
+      - async_session             → app.tasks.task_manager (module-level import, D11)
       - notify_manager            → app.tasks.task_manager (module-level)
     """
 
     @patch("app.tasks.task_manager.async_session")
     @patch("app.analysis.llm.generate_design_report", new_callable=AsyncMock)
     @patch("app.services.strategy_design.generate_enhanced_design", new_callable=AsyncMock)
-    async def test_pipeline_full_success(self, mock_gen_design, mock_llm, mock_db_session):
+    async def test_pipeline_full_success(self, mock_gen_design, mock_llm, mock_db_session, task_mgr):
         """Scenario: LLM succeeds → task completed, report_quality='full'."""
-        from app.tasks.task_manager import TaskManager, design_pipeline
+        from app.tasks.task_manager import design_pipeline
 
         mock_gen_design.return_value = {
             "strategies": _mock_strategies(),
@@ -101,23 +106,23 @@ class TestDesignPipeline:
 
         mock_db_session.return_value = _make_mock_session(design_id=1001)
 
-        mgr = TaskManager()
-        mgr.create_task(task_type="design", params={"capital": 500000})
-        await design_pipeline(mgr, task_id=1)
+        t = await task_mgr.create_task(task_type="design", params={"capital": 500000})
+        await design_pipeline(task_mgr, task_id=t["task_id"])
 
-        t = mgr.get_task(1)
-        assert t["status"] == "completed"
-        assert t["progress"] == 100
-        assert t["result"]["report_quality"] == "full"
-        assert t["result"]["design_id"] == 1001
-        assert "strategies" in t["result"]
+        got = await task_mgr.get_task(t["task_id"])
+        assert got["status"] == "completed"
+        assert got["progress"] == 100
+        assert got["result"]["report_quality"] == "full"
+        assert got["result"]["design_id"] == 1001
+        assert got["record_id"] == 1001  # Z27: 完成时回写 record_id
+        assert "strategies" in got["result"]
 
     @patch("app.tasks.task_manager.async_session")
     @patch("app.analysis.llm.generate_design_report", new_callable=AsyncMock)
     @patch("app.services.strategy_design.generate_enhanced_design", new_callable=AsyncMock)
-    async def test_pipeline_llm_timeout(self, mock_gen_design, mock_llm, mock_db_session):
+    async def test_pipeline_llm_timeout(self, mock_gen_design, mock_llm, mock_db_session, task_mgr):
         """Scenario: LLM raises exception → report_quality='fallback', data summary still available."""
-        from app.tasks.task_manager import TaskManager, design_pipeline
+        from app.tasks.task_manager import design_pipeline
 
         mock_gen_design.return_value = {
             "strategies": _mock_strategies(),
@@ -131,21 +136,21 @@ class TestDesignPipeline:
             _make_mock_session(design_id=1002),  # Stage 4: fallback update
         ]
 
-        mgr = TaskManager()
-        mgr.create_task(task_type="design", params={"capital": 500000})
-        await design_pipeline(mgr, task_id=1)
+        t = await task_mgr.create_task(task_type="design", params={"capital": 500000})
+        await design_pipeline(task_mgr, task_id=t["task_id"])
 
-        t = mgr.get_task(1)
+        got = await task_mgr.get_task(t["task_id"])
         # S1-C: LLM 超时 → completed_with_errors（方案仍然可用）
-        assert t["status"] == "completed_with_errors"
-        assert t["progress"] == 100
-        assert t["result"]["report_quality"] == "partial"
-        assert t["result"]["design_id"] == 1002
+        assert got["status"] == "completed_with_errors"
+        assert got["progress"] == 100
+        assert got["result"]["report_quality"] == "partial"
+        assert got["result"]["design_id"] == 1002
+        assert got["record_id"] == 1002  # Z27
 
     @patch("app.services.strategy_design.generate_enhanced_design", new_callable=AsyncMock)
-    async def test_pipeline_empty_pool(self, mock_gen_design):
+    async def test_pipeline_empty_pool(self, mock_gen_design, task_mgr):
         """Scenario: empty candidate pool → task failed with error."""
-        from app.tasks.task_manager import TaskManager, design_pipeline
+        from app.tasks.task_manager import design_pipeline
 
         mock_gen_design.return_value = {
             "strategies": [],
@@ -154,22 +159,21 @@ class TestDesignPipeline:
             "detail": "数据管道未能生成候选池",
         }
 
-        mgr = TaskManager()
-        mgr.create_task(task_type="design", params={"capital": 500000})
-        await design_pipeline(mgr, task_id=1)
+        t = await task_mgr.create_task(task_type="design", params={"capital": 500000})
+        await design_pipeline(task_mgr, task_id=t["task_id"])
 
-        t = mgr.get_task(1)
-        assert t["status"] == "failed"
-        assert "无候选标的" in t.get("error_message", "")
+        got = await task_mgr.get_task(t["task_id"])
+        assert got["status"] == "failed"
+        assert "无候选标的" in got.get("error_message", "")
 
     @patch("app.tasks.task_manager.notify_manager")
     @patch("app.tasks.task_manager.async_session")
     @patch("app.analysis.llm.generate_design_report", new_callable=AsyncMock)
     @patch("app.services.strategy_design.generate_enhanced_design", new_callable=AsyncMock)
     async def test_pipeline_ws_notify(self, mock_gen_design, mock_llm, mock_db_session,
-                                      mock_notify_mgr):
+                                      mock_notify_mgr, task_mgr):
         """Scenario: WS receives progress updates + final completed event."""
-        from app.tasks.task_manager import TaskManager, design_pipeline
+        from app.tasks.task_manager import design_pipeline
 
         mock_gen_design.return_value = {
             "strategies": _mock_strategies(),
@@ -181,9 +185,8 @@ class TestDesignPipeline:
 
         mock_notify_mgr.broadcast = AsyncMock()
 
-        mgr = TaskManager()
-        mgr.create_task(task_type="design", params={"capital": 500000})
-        await design_pipeline(mgr, task_id=1)
+        t = await task_mgr.create_task(task_type="design", params={"capital": 500000})
+        await design_pipeline(task_mgr, task_id=t["task_id"])
 
         # Verify WS notifications were broadcast
         assert mock_notify_mgr.broadcast.called
@@ -198,28 +201,30 @@ class TestDesignPipeline:
         assert final["progress"] == 100
         assert final["design_id"] == 1003
         assert final.get("report_quality") == "full"
+        # Z27: 完成通知携带 record_id + task_type
+        assert final["record_id"] == 1003
+        assert final["task_type"] == "design"
 
     @patch("app.services.strategy_design.generate_enhanced_design", new_callable=AsyncMock)
-    async def test_pipeline_engine_error(self, mock_gen_design):
+    async def test_pipeline_engine_error(self, mock_gen_design, task_mgr):
         """Scenario: generate_enhanced_design raises exception → task failed."""
-        from app.tasks.task_manager import TaskManager, design_pipeline
+        from app.tasks.task_manager import design_pipeline
 
         mock_gen_design.side_effect = ValueError("引擎计算异常")
 
-        mgr = TaskManager()
-        mgr.create_task(task_type="design", params={"capital": 500000})
-        await design_pipeline(mgr, task_id=1)
+        t = await task_mgr.create_task(task_type="design", params={"capital": 500000})
+        await design_pipeline(task_mgr, task_id=t["task_id"])
 
-        t = mgr.get_task(1)
-        assert t["status"] == "failed"
-        assert "引擎计算异常" in t.get("error_message", "")
+        got = await task_mgr.get_task(t["task_id"])
+        assert got["status"] == "failed"
+        assert "引擎计算异常" in got.get("error_message", "")
 
     @patch("app.tasks.task_manager.async_session")
     @patch("app.analysis.llm.generate_design_report", new_callable=AsyncMock)
     @patch("app.services.strategy_design.generate_enhanced_design", new_callable=AsyncMock)
-    async def test_pipeline_market_context_available(self, mock_gen_design, mock_llm, mock_db_session):
+    async def test_pipeline_market_context_available(self, mock_gen_design, mock_llm, mock_db_session, task_mgr):
         """Regression: market_context passed through, no NameError."""
-        from app.tasks.task_manager import TaskManager, design_pipeline
+        from app.tasks.task_manager import design_pipeline
 
         mock_gen_design.return_value = {
             "strategies": _mock_strategies(),
@@ -232,13 +237,12 @@ class TestDesignPipeline:
             _make_mock_session(design_id=1004),  # Stage 4: LLM result update
         ]
 
-        mgr = TaskManager()
-        mgr.create_task(task_type="design", params={"capital": 500000})
-        await design_pipeline(mgr, task_id=1)
+        t = await task_mgr.create_task(task_type="design", params={"capital": 500000})
+        await design_pipeline(task_mgr, task_id=t["task_id"])
 
-        t = mgr.get_task(1)
-        assert t["status"] == "completed"
-        assert "market_context" in t["result"]
+        got = await task_mgr.get_task(t["task_id"])
+        assert got["status"] == "completed"
+        assert "market_context" in got["result"]
 
 
 # ── Strategy Check Pipeline Tests ─────────────────────────────────
@@ -247,10 +251,9 @@ class TestStrategyCheckPipeline:
 
     @patch("app.database.async_session")  # strategy_check_worker imports async_session from app.database
     @patch("app.services.portfolio_service.strategy_check", new_callable=AsyncMock)
-    async def test_strategy_check_full(self, mock_strategy_check, mock_db_session):
-        """Scenario: strategy_check succeeds → task completed with result."""
+    async def test_strategy_check_full(self, mock_strategy_check, mock_db_session, task_mgr):
+        """Scenario: strategy_check succeeds → task completed with result + record_id."""
         from app.tasks.strategy_check_worker import strategy_check_pipeline
-        from app.tasks.task_manager import TaskManager
 
         mock_strategy_check.return_value = {
             "summary": "组合健康，建议维持现有配置",
@@ -262,22 +265,20 @@ class TestStrategyCheckPipeline:
 
         mock_db_session.return_value = _make_mock_session(design_id=2001)
 
-        mgr = TaskManager()
-        mgr.create_task(task_type="check", params={"capital": 500000})
-        await strategy_check_pipeline(mgr, task_id=1)
+        t = await task_mgr.create_task(task_type="check", params={"capital": 500000})
+        await strategy_check_pipeline(task_mgr, task_id=t["task_id"])
 
-        t = mgr.get_task(1)
-        assert t["status"] == "completed"
-        assert t["progress"] == 100
-        assert "market_regime" in t["result"]
-        assert len(t["result"]["suggestions"]) == 1
-        assert t.get("record_id") == 2001
+        got = await task_mgr.get_task(t["task_id"])
+        assert got["status"] == "completed"
+        assert got["progress"] == 100
+        assert "market_regime" in got["result"]
+        assert len(got["result"]["suggestions"]) == 1
+        assert got.get("record_id") == 2001
 
     @patch("app.services.portfolio_service.strategy_check", new_callable=AsyncMock)
-    async def test_strategy_check_empty_portfolio(self, mock_strategy_check):
+    async def test_strategy_check_empty_portfolio(self, mock_strategy_check, task_mgr):
         """Scenario: empty portfolio → completed with empty suggestions."""
         from app.tasks.strategy_check_worker import strategy_check_pipeline
-        from app.tasks.task_manager import TaskManager
 
         mock_strategy_check.return_value = {
             "summary": "组合为空",
@@ -287,9 +288,8 @@ class TestStrategyCheckPipeline:
             "market_regime": "range_bound",
         }
 
-        mgr = TaskManager()
-        mgr.create_task(task_type="check", params={"capital": 500000})
-        await strategy_check_pipeline(mgr, task_id=1)
+        t = await task_mgr.create_task(task_type="check", params={"capital": 500000})
+        await strategy_check_pipeline(task_mgr, task_id=t["task_id"])
 
-        t = mgr.get_task(1)
-        assert t["status"] == "completed"
+        got = await task_mgr.get_task(t["task_id"])
+        assert got["status"] == "completed"

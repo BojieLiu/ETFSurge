@@ -493,9 +493,8 @@ async function loadHistoryList() {
   try {
     const res = await portfolioApi.getTimeline(20, 0)
     const data = res.data || {}
-    const designs = (data.items || [])
-    const designRes = { data: [] }
-    const checkRes = { data: [] }
+    // Z27: /portfolio/timeline 已合并 design+check，直接使用 items（移除未定义的 checks 引用）
+    const items = (data.items || [])
 
     // 合并运行中的设计任务（追加到列表前）
     const runningTasks = taskStore.tasks
@@ -506,7 +505,7 @@ async function loadHistoryList() {
             capital: '-',
         }))
 
-    designHistoryList.value = [...runningTasks, ...designs, ...checks].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+    designHistoryList.value = [...runningTasks, ...items].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
     historyLoaded.value = true
   } catch (e) {
     toast('加载历史记录失败，请检查后端连接', 'error')

@@ -26,6 +26,8 @@ from datetime import datetime, timezone
 import sys
 import os
 
+from tests.db_fixtures import task_mgr  # noqa: F401
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
@@ -311,7 +313,8 @@ class TestP4:
                 with patch("app.analysis.llm.generate_design_report",
                            new=AsyncMock(return_value="# 测试报告\n\nLLM 分析内容。")):
                     task_mgr = MagicMock()
-                    task_mgr.get_task.return_value = {"params": {"capital": 500000}}
+                    task_mgr.get_task = AsyncMock(return_value={"params": {"capital": 500000}, "type": "design"})
+                    task_mgr.update_task = AsyncMock()
                     await design_pipeline(mgr=task_mgr, task_id=1)
                     failed_calls = [c for c in task_mgr.update_task.call_args_list
                                    if isinstance(c[1], dict) and c[1].get('status') == 'failed']
@@ -344,7 +347,8 @@ class TestP4:
                     new=AsyncMock(return_value={"strategies": mock_strategies, "market_context": {}})):
             with patch("app.tasks.task_manager.async_session"):
                 task_mgr = MagicMock()
-                task_mgr.get_task.return_value = {"params": {"capital": 500000}}
+                task_mgr.get_task = AsyncMock(return_value={"params": {"capital": 500000}, "type": "design"})
+                task_mgr.update_task = AsyncMock()
                 await design_pipeline(mgr=task_mgr, task_id=2)
                 failed_calls = [c for c in task_mgr.update_task.call_args_list
                                if isinstance(c[1], dict) and c[1].get('status') == 'failed']
@@ -372,16 +376,15 @@ def test_p5_detect_market_regime_empty_data():
 
 
 @pytest.mark.asyncio
-async def test_p6_task_manager_supports_design_and_check():
-    """P6: TaskManager must support 'design' and 'check' task types."""
-    from app.tasks.task_manager import TaskManager
-    mgr = TaskManager(persist_path=None)
-    # Mock DB calls
-    mgr._load_tasks = MagicMock()
-    mgr._save_task = MagicMock()
-    mgr.design_tasks = {}
-    assert hasattr(mgr, "worker_registry") or True, "TaskManager has worker_registry"
-    assert getattr(mgr, "design_tasks", None) is not None
+async def test_p6_task_manager_supports_design_and_check(task_mgr):
+    """P6: TaskManager must support 'design' and 'check' task types（Z27: DB-backed）。"""
+    from app.tasks.task_manager import TASK_TYPES
+    assert "design" in TASK_TYPES
+    assert "check" in TASK_TYPES
+    t = await task_mgr.create_task("design")
+    assert t["type"] == "design"
+    c = await task_mgr.create_task("check")
+    assert c["type"] == "check"
 
 
 # ─── P7: strategy_check_worker ─────────────────────────────────────

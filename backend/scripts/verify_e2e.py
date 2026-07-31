@@ -1496,6 +1496,63 @@ def section_task_status():
         check("任务状态检查", False, f"Error: {e}")
 
 
+def section_task_persistence():
+    """Z27: 任务持久化 — POST /design-async → 轮询至终态 → 断言契约字段 + record_id 可关联 /designs/{id}。"""
+    section("任务持久化 (Z27)")
+    try:
+        # 1. 提交设计任务
+        r = requests.post(f"{BASE}/api/v1/portfolio/design-async",
+                          json={"capital": 500000}, timeout=15)
+        if r.status_code not in (200, 202):
+            check("POST /design-async", False, f"HTTP {r.status_code}")
+            return
+        task_id = r.json().get("task_id")
+        if not task_id:
+            check("POST /design-async 返回 task_id", False, "missing task_id")
+            return
+        check("POST /design-async 返回 task_id", True, f"task_id={task_id}")
+
+        # 2. 轮询至终态（completed / completed_with_errors / failed）
+        terminal = {"completed", "completed_with_errors", "failed"}
+        status = None
+        for _ in range(40):
+            tr = requests.get(f"{BASE}/api/v1/portfolio/tasks/{task_id}", timeout=15)
+            if tr.status_code == 200:
+                data = tr.json()
+                status = data.get("status")
+                if status in terminal:
+                    break
+            time.sleep(5)
+        check(f"任务 {task_id} 到达终态 ({status})", status in terminal, f"status={status}")
+        if status not in terminal:
+            return
+
+        # 3. 契约字段完整性（type/stage/record_id）
+        check("响应含 type 字段", "type" in data, f"type={data.get('type')}")
+        check("响应含 stage 字段", "stage" in data, f"stage={data.get('stage')}")
+        check("响应含 params 字段", isinstance(data.get("params"), dict))
+        record_id = data.get("record_id")
+        check("响应含 record_id", record_id is not None, f"record_id={record_id}")
+
+        # 4. design 任务 record_id 可关联 GET /designs/{record_id}
+        if record_id:
+            dr = requests.get(f"{BASE}/api/v1/portfolio/designs/{record_id}", timeout=15)
+            check(f"GET /designs/{record_id} 可关联", dr.status_code == 200, f"HTTP {dr.status_code}")
+
+        # 5. 任务列表包含该任务且带 record_id
+        lr = requests.get(f"{BASE}/api/v1/portfolio/tasks", timeout=15)
+        if lr.status_code == 200:
+            tasks = lr.json()
+            mine = [t for t in tasks if t.get("task_id") == task_id]
+            check("GET /tasks 包含该任务", len(mine) == 1,
+                  f"{len(mine)} matched" if mine else "not found")
+            if mine:
+                check("列表任务带 record_id", mine[0].get("record_id") == record_id,
+                      f"record_id={mine[0].get('record_id')}")
+    except Exception as e:
+        check("任务持久化 (Z27)", False, f"Error: {e}")
+
+
 def section_search():
     """P3.3/Z15: Cross-market search test — 默认(无 market)跨市场合并必须非空（Z29）。"""
     section("跨市场搜索")
@@ -1605,6 +1662,7 @@ def section_factor_ic():
 # Register Phase 4 modules
 MODULES["llm"] = section_llm_import
 MODULES["task"] = section_task_status
+MODULES["task-persistence"] = section_task_persistence
 MODULES["search"] = section_search
 MODULES["encoding"] = section_encoding
 MODULES["factor_ic"] = section_factor_ic
