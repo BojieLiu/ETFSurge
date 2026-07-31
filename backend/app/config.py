@@ -97,6 +97,9 @@ class Settings(BaseSettings):
         env_file = str(_ENV_FILE)
         env_file_encoding = "utf-8"
         populate_by_name = True  # 允许用别名（alias）读取
+        # 忽略未声明的环境变量（如 PROFILE_WARMUP / LOG_LEVEL 等进程级变量），
+        # 避免容器环境中出现无关变量时 Settings 实例化崩溃（extra_forbidden）
+        extra = "ignore"
 
 
 settings = Settings()
