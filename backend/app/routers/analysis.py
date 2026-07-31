@@ -370,7 +370,7 @@ async def llm_report_stream(req: LLMReportRequest):
 
     # 使用统一上下文管道采集数据
     ctx = await build_full_context(
-        pool_manager,
+        market_data_hub,
         include_regime=True,
         include_sentiment=True,
         include_indices=True,
@@ -443,7 +443,7 @@ async def llm_advice_stream(req: LLMAdviceRequest):
 
     # 使用统一上下文管道（按市场获取数据）
     ctx = await build_full_context(
-        pool_manager,
+        market_data_hub,
         market=req.market,
         include_regime=True,
         include_sentiment=True,

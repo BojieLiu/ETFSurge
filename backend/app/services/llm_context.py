@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 async def build_full_context(
-    pool_manager,
+    market_data_hub,
     market: str = "A",
     include_regime: bool = True,
     include_sentiment: bool = True,
@@ -36,7 +36,7 @@ async def build_full_context(
     # 1. Market regime (Phase 5.1: 按市场获取)
     if include_regime:
         try:
-            context["market_regime"] = pool_manager.get_market_regime(market) or ""
+            context["market_regime"] = market_data_hub.get_market_regime(market) or ""
         except Exception as e:
             context["market_regime"] = ""
             errors.append(f"regime: {e}")
@@ -44,15 +44,15 @@ async def build_full_context(
     # 2. Market sentiment
     if include_sentiment:
         try:
-            context["market_sentiment"] = pool_manager.get_market_sentiment() or {}
+            context["market_sentiment"] = market_data_hub.get_market_sentiment() or {}
         except Exception as e:
             context["market_sentiment"] = {}
             errors.append(f"sentiment: {e}")
 
-    # 3. Index realtime (from pool_manager cache)
+    # 3. Index realtime (from market_data_hub cache)
     if include_indices:
         try:
-            idx_data = pool_manager.get_index_realtime() or []
+            idx_data = market_data_hub.get_index_realtime() or []
             context["index_realtime"] = idx_data[:10]
         except Exception as e:
             context["index_realtime"] = []
@@ -61,20 +61,20 @@ async def build_full_context(
     # 4. Sector momentum + hot plates + sector heat (Phase 6.1.6)
     if include_sectors:
         try:
-            sector_data = pool_manager.get_sector_momentum() or []
+            sector_data = market_data_hub.get_sector_momentum() or []
             context["sector_momentum"] = sector_data[:15]
         except Exception as e:
             context["sector_momentum"] = []
             errors.append(f"sectors: {e}")
         # Phase 6.1.6: 注入热点板块和板块热度排行
         try:
-            hot_plates_data = pool_manager.get_hot_plates() or []
+            hot_plates_data = market_data_hub.get_hot_plates() or []
             context["hot_plates"] = hot_plates_data[:10]
         except Exception as e:
             context["hot_plates"] = []
             errors.append(f"hot_plates: {e}")
         try:
-            sector_heat_data = pool_manager.get_sector_heat() or []
+            sector_heat_data = market_data_hub.get_sector_heat() or []
             context["sector_heat"] = sector_heat_data[:15]
         except Exception as e:
             context["sector_heat"] = []
@@ -114,11 +114,11 @@ async def build_full_context(
             context["commodities"] = []
             errors.append(f"commodities: {e}")
 
-    # 8. Fund flow (from pool_manager pool data)
+    # 8. Fund flow (from market_data_hub pool data)
     if include_fund_flow:
         try:
             from ..services.strategy_design import _compute_fund_flow
-            context["fund_flow"] = _compute_fund_flow(pool_manager)
+            context["fund_flow"] = _compute_fund_flow(market_data_hub)
         except Exception as e:
             context["fund_flow"] = {}
             errors.append(f"fund_flow: {e}")

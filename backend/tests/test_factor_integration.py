@@ -2,7 +2,7 @@
 Tests for factor integration: scaffolding → real compute + pool_manager wiring.
 
 P1-1: _compute_stock_divergence returns non-zero with real data
-P1-2: pool_manager.refresh() includes non-empty factor_scores
+P1-2: market_data_hub.refresh() includes non-empty factor_scores
 P1-3: _compute_stock_divergence fallback path works (no advance_decline in data)
 """
 
@@ -176,13 +176,13 @@ class TestStockDivergence:
         assert result == 0.0
 
 
-class TestPoolManagerFactorScores:
-    """Test that pool_manager.refresh() passes real factor_scores."""
+class TestMarketDataHubFactorScores:
+    """Test that market_data_hub.refresh() passes real factor_scores."""
 
     @pytest.mark.asyncio
     async def test_pool_manager_has_factor_scores(self):
         """refresh() sets non-empty factor_scores via FactorRegistry."""
-        from app.services.pool_manager import pool_manager as pm
+        from app.services.market_data_hub import market_data_hub as pm
 
         # FactorRegistry returns real scores for these
         scores = {"momentum": 0.75, "rsi": 0.62, "atr": 0.43}
@@ -218,7 +218,7 @@ class TestPoolManagerFactorScores:
     @pytest.mark.asyncio
     async def test_factor_scores_in_composite_score(self):
         """composite_score uses factor_scores sum (was 0 before fix)."""
-        from app.services.pool_manager import pool_manager as pm
+        from app.services.market_data_hub import market_data_hub as pm
 
         item = {
             "symbol": "510300", "name": "沪深300ETF",
@@ -237,7 +237,7 @@ class TestPhaseB:
 
     def test_regime_weights_differ(self):
         """Same item scores differently in bull vs bear regime."""
-        from app.services.pool_manager import pool_manager as pm
+        from app.services.market_data_hub import market_data_hub as pm
         item = {"factor_scores": {"momentum": 0.8}, "amount": 1e9, "fund_scale": 5e10}
         bull_score = pm._compute_composite(item, "satellite", "bull")
         bear_score = pm._compute_composite(item, "satellite", "bear")
@@ -245,7 +245,7 @@ class TestPhaseB:
 
     def test_bull_weights_factor_more(self):
         """Bull regime weights factor higher than bear."""
-        from app.services.pool_manager import pool_manager as pm
+        from app.services.market_data_hub import market_data_hub as pm
         item = {"factor_scores": {"momentum": 0.8}, "amount": 1e9, "fund_scale": 5e10}
         bull_score = pm._compute_composite(item, "satellite", "bull")
         bear_score = pm._compute_composite(item, "satellite", "bear")

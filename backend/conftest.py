@@ -1,7 +1,7 @@
 """Pytest fixtures for the ETF Surge backend.
 
 #6: 不在 conftest 层全局 mock 外部数据源。改为 pool_manager 的 _test_mode
-属性来抑制 teardown 时的 HTTP 泄漏（见 pool_manager.py）。
+属性来抑制 teardown 时的 HTTP 泄漏（见 market_data_hub.py）。
 
 Tests that need mock should use local pytest fixtures, avoiding session-level
 side effects on test isolation.
@@ -20,15 +20,15 @@ def _make_etf(**kw):
 
 @pytest.fixture(autouse=True, scope="session")
 def _prevent_pool_teardown_http():
-    """#6: 用 pool_manager._test_mode 抑制 teardown 时的 HTTP 泄漏。
+    """#6: 用 market_data_hub._test_mode 抑制 teardown 时的 HTTP 泄漏。
 
     不再全局 mock em_global_fetcher / sentiment_fetcher，
     让需要使用真实数据的测试能接触到原始数据源。
     """
-    import app.services.pool_manager as pm
-    pm.pool_manager._test_mode = True
+    import app.services.market_data_hub as mdh
+    mdh.market_data_hub._test_mode = True
     yield
-    pm.pool_manager._test_mode = False
+    mdh.market_data_hub._test_mode = False
 
 
 @pytest.fixture

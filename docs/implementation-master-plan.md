@@ -1,6 +1,6 @@
 ﻿# ETF Surge 方案实施总计划
 
-> 生成日期: 2026-07-31 | 版本: **v35.0**
+> 生成日期: 2026-07-31 | 版本: **v36.0**
 > ✅ **文档归档（2026-07-29 v20.1）**：8 份已全部实施/已替代的方案文档归档至 `docs/archived/` — `optimization-master-plan.md`、`optimization-master-plan-v2.md`、`performance-diagnosis-and-optimization-plan.md`、`fix-plan-master.md`、`fix-plan-pool.md`、`s5-markethub-design.md`、`system-performance-and-quality-review.md`、`fundamental-flow-factors-evaluation.md`。
 > ✅ **Phase 21 已完成**（2026-07-29）：修复 4 个前端单测失败（useMarketSearch + useSectorAnalysis mock 目标错误） + UI Phase 3(Steps 6-8)。详见下方 v21.0。
 > ✅ **Phase 27 已完成**（2026-07-30）：实施 `docs/system-diagnosis-and-optimization-plan.md` 子集 — F1(timeline select 导入 P0) + F2(A股搜索降级 levistock P1) + F4(max_tokens 8192→12288) + F5(删除 reasoning_content fallback) + F19(因子 industry 注入) + F15/F16/F20/F22(verify_e2e 加固：跨市场搜索/M14 门禁/china_specific 完整性/预热门禁收紧)。契约驱动 + TDD：新增 `api-contracts/market/search.md` 与 `tests/test_system_diagnosis_fixes.py`（15 用例全 PASS）。详见下方 v27.0。
@@ -1525,6 +1525,12 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 | | | | **验证结果：** 15/15 新单测 PASS；因子/LLM/pool 相关既有套件 77 PASS（3 个 pool_manager 用例为预存失败，与本次改动无关，已用 `git stash` 验证）。 |
 | | | | **改动文件：** `backend/app/routers/portfolio.py`、`backend/app/routers/market.py`、`backend/app/analysis/llm.py`、`backend/app/services/pool_manager.py`、`backend/scripts/verify_e2e.py`、`backend/tests/test_system_diagnosis_fixes.py`（新）、`api-contracts/market/search.md`（新）、`docs/implementation-master-plan.md` |
 | | | | **未实施（本期范围外，待后续 Phase）：** F3(HK/US 实时查询增强)、F6(LLM 重试)、F7(LLM 健康探针端点)、F8(calculate 并行化)、F9-F14(预热/前端性能)、F17(Lighthouse CI)、F18 等，见原方案实施路标。
+
+| | **v36.0** | 2026-07-31 | **Phase 33 — 数据管道入口改名 (pool_manager → MarketDataHub)** | 详见下方 |
+| | | | | **背景：** pool_manager 名不副实—它早已从“ETF 候选池管理”沿变为“全市场数据入口”（20 个公开方法中只有 get_pool/get_by_code 与池相关）。本次彻底改名——不是架构统一，而是命名纠正，为将来的 god-object 拆分腾出干净名称。 |
+| | | | | **实施内容：** git mv pool_manager.py → market_data_hub.py（保留 git 历史）；类 PoolManager → MarketDataHub；单例 pool_manager → market_data_hub；删除旧别名文件与 pool_manager re-export；修复潜在 NameError（analysis.py:373/446 传 pool_manager 但未 import，admin.py:227）+函数参数名更新；全部测试 mock 路径迁移。 |
+| | | | | **测试：** 全量 795 passed / 38 failed（均为预存在失败：缺少模块的 fetcher 测试、网络依赖、因子聚合旧账），改名带来 0 新失败。E2E 16/16 PASS。 |
+| | | | | **改动文件：** backend/app/services/market_data_hub.py（重命名+类改名）、backend/app/services/pool_manager.py（删除）、源文件 9 个（NameError 修复）、测试 17 个 + conftest.py + scripts 2 个（mock 路径迁移）、AGENTS.md、docs/implementation-master-plan.md |
 
 | | **v35.0** | 2026-07-31 | **Phase 32 — Z18 新闻 AI 分析管道增强** | 详见下方 |
 | | | | | **来源：** `docs/v5_diagnostic_and_optimization_plan.md` Z18 |

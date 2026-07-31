@@ -460,7 +460,7 @@ async def test_Z11_design_fallback_handles_failure_gracefully():
     from app.services import strategy_design as sd_mod
     from unittest.mock import AsyncMock, MagicMock, patch as mock_patch
 
-    with mock_patch("app.services.pool_manager.pool_manager") as mock_pm:
+    with mock_patch("app.services.market_data_hub.market_data_hub") as mock_pm:
         mock_pm.refresh = AsyncMock()
         mock_pm.get_factor_matrix = MagicMock(side_effect=RuntimeError("design failed"))
         mock_pm.get_pool = MagicMock(return_value=[])

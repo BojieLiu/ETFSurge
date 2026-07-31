@@ -30,6 +30,8 @@ def mock_db_session():
             self.status = status
             self.error_message = error_message
             self.strategies_json = None  # Needed by list_designs for etf_count
+            self.report_quality = "none"  # Z19: list endpoint exposes report_quality
+            self.report_generated_at = None  # Z19: list endpoint exposes report_generated_at
 
     mock_records = [
         MockDesign(
@@ -156,6 +158,8 @@ async def test_list_designs_error_message_preserved():
             self.status = status
             self.error_message = error_message
             self.strategies_json = None
+            self.report_quality = "none"  # Z19: list endpoint exposes report_quality
+            self.report_generated_at = None  # Z19: list endpoint exposes report_generated_at
 
     failed_record = MockDesign(
         id=99,

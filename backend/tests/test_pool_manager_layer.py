@@ -1,16 +1,16 @@
 """
-TDD: PoolManager 层分配逻辑测试。
+TDD: MarketDataHub 层分配逻辑测试。
 
 覆盖 P1-2 防御层分类修复：跨境→卫星层，商品/固收→防御层。
 测试不依赖 DB 或外部网络，直接验证 _refresh_impl() 内的层映射逻辑。
 """
 import pytest
 
-from app.services.pool_manager import LAYER_CORE, LAYER_DEFENSE, LAYER_SATELLITE
+from app.services.market_data_hub import LAYER_CORE, LAYER_DEFENSE, LAYER_SATELLITE
 
 
 def _flat_item(symbol: str, name: str, base_layer: str, industry: str) -> dict:
-    """辅助构造 pool_manager._refresh_impl 中的 flat item。"""
+    """辅助构造 market_data_hub._refresh_impl 中的 flat item。"""
     return {
         "symbol": symbol,
         "name": name,
@@ -28,7 +28,7 @@ class TestLayerAssignment:
     """行业→层映射的准确性。"""
 
     def _apply_layer_assignment(self, item: dict) -> str:
-        """模拟 pool_manager.py:325-338 的层分配逻辑。"""
+        """模拟 market_data_hub.py:325-338 的层分配逻辑。"""
         base_layer = item.get("layer", "satellite")
         industry = item.get("industry", "unknown")
 

@@ -1,5 +1,5 @@
 """
-PoolAudit: in-memory audit log for PoolManager refresh events.
+PoolAudit: in-memory audit log for MarketDataHub refresh events.
 
 Tracks pool changes (added/removed/changed ETFs) across refresh cycles.
 Production use can persist to SQLite or log file.

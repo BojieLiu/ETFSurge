@@ -2,7 +2,7 @@
 ETFClassifier: infer Shenwan industry classification and concept board
 membership for ETFs based on name keywords and tracked_index metadata.
 
-Used by PoolManager._classify_5layer() to enrich classification decisions
+Used by MarketDataHub._classify_5layer() to enrich classification decisions
 beyond simple name-keyword matching.
 
 Data sources:

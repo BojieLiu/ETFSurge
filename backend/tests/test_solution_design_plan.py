@@ -22,8 +22,8 @@ from unittest.mock import patch, AsyncMock, Mock, MagicMock
 @pytest.mark.asyncio
 async def test_pool_ttl_cache_hit():
     """V1-1: TTL 有效期内第二次 refresh 应返回缓存，不触发 I/O"""
-    from app.services.pool_manager import PoolManager
-    pm = PoolManager()
+    from app.services.market_data_hub import MarketDataHub
+    pm = MarketDataHub()
     # 注入缓存数据
     pm._cached_pool = {"core": [{"symbol": "510300", "name": "HS300ETF"}]}
     pm._cached_ts = time.time()
@@ -42,8 +42,8 @@ async def test_pool_ttl_cache_hit():
 @pytest.mark.asyncio
 async def test_pool_ttl_cache_expired():
     """V1-2: TTL 过期后 refresh 应执行刷新"""
-    from app.services.pool_manager import PoolManager
-    pm = PoolManager()
+    from app.services.market_data_hub import MarketDataHub
+    pm = MarketDataHub()
     # 注入过期缓存
     pm._cached_pool = {"core": []}
     pm._cached_ts = time.time() - 120  # 过期

@@ -240,7 +240,7 @@ async def generate_enhanced_design(
 _fund_flow_sem = asyncio.Semaphore(8)
 
 
-async def _compute_fund_flow(pool_manager) -> dict:
+async def _compute_fund_flow(market_data_hub) -> dict:
     """聚合全市场候选 ETF 资金流向（带并发限流 + 熔断器保护）。
 
     OPT-02: push2 熔断时快速返回空数据（不等 8s 超时）。
@@ -261,7 +261,7 @@ async def _compute_fund_flow(pool_manager) -> dict:
 
     from ..core.async_utils import run_sync
 
-    pool = pool_manager.get_pool()
+    pool = market_data_hub.get_pool()
     if not isinstance(pool, dict):
         logger.warning(
             "[strategy_design] _compute_fund_flow: pool is not a dict (%s), skipping",
@@ -316,14 +316,14 @@ async def _compute_fund_flow(pool_manager) -> dict:
     }
 
 
-async def _build_market_context(pool_manager) -> dict:
+async def _build_market_context(market_data_hub) -> dict:
     """从 pool_manager 构建市场上下文（真异步）。"""
-    fund_flow = await _compute_fund_flow(pool_manager)
+    fund_flow = await _compute_fund_flow(market_data_hub)
     return {
-        "market_regime": pool_manager.get_market_regime() or "range_bound",
-        "market_sentiment": pool_manager.get_market_sentiment() or {"sentiment_index": 50, "sentiment_label": "中性"},
-        "index_realtime": pool_manager.get_index_realtime() or [],
-        "sector_momentum": pool_manager.get_sector_momentum() or [],
+        "market_regime": market_data_hub.get_market_regime() or "range_bound",
+        "market_sentiment": market_data_hub.get_market_sentiment() or {"sentiment_index": 50, "sentiment_label": "中性"},
+        "index_realtime": market_data_hub.get_index_realtime() or [],
+        "sector_momentum": market_data_hub.get_sector_momentum() or [],
         "fund_flow": fund_flow,
         "benchmark_stocks": [],
     }

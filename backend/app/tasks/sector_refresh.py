@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 async def refresh_sector_cache() -> None:
     """定时刷新板块动量缓存，60s 周期。
 
-    调用 PoolManager.update_sector_cache() 完成全部刷新。
+    调用 MarketDataHub.update_sector_cache() 完成全部刷新。
     """
     try:
         from ..services.market_data_hub import market_data_hub

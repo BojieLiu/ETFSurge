@@ -1,5 +1,5 @@
 """
-TDD: PoolManager Phase 3 - daily refresh audit + market data adapter.
+TDD: MarketDataHub Phase 3 - daily refresh audit + market data adapter.
 """
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
@@ -7,7 +7,7 @@ from datetime import datetime
 
 
 class TestPoolAudit:
-    """PoolManager 审计日志"""
+    """MarketDataHub 审计日志"""
 
     @pytest.fixture
     def audit(self):
@@ -96,28 +96,28 @@ class TestMarketDataAdapter:
 
 
 class TestDailyRefresh:
-    """PoolManager 日频刷新调度"""
+    """MarketDataHub 日频刷新调度"""
 
     @pytest.mark.asyncio
     async def test_refresh_and_audit(self):
         """refresh() 后审计日志应有记录"""
-        from app.services.pool_manager import pool_manager
+        from app.services.market_data_hub import market_data_hub
         from app.services.pool_audit import pool_audit
 
-        with patch.object(pool_manager, 'scanner') as mock_scanner:
+        with patch.object(market_data_hub, 'scanner') as mock_scanner:
             mock_scanner.full_pipeline.return_value = {
                 "core": [{"symbol": "510300", "name": "沪深300ETF", "amount": 10e8, "fund_scale": 50e8}],
                 "satellite": [{"symbol": "512480", "name": "半导体ETF", "amount": 8e8, "fund_scale": 30e8}],
                 "defense": [{"symbol": "518880", "name": "黄金ETF", "amount": 20e8, "fund_scale": 100e8}],
             }
-            pool_manager.classifier = MagicMock()
-            pool_manager.classifier.batch_classify.return_value = {
+            market_data_hub.classifier = MagicMock()
+            market_data_hub.classifier.batch_classify.return_value = {
                 "510300": {"industry": "宽基指数", "concepts": [], "confidence": 0.85},
                 "512480": {"industry": "电子", "concepts": [], "confidence": 0.85},
                 "518880": {"industry": "商品", "concepts": [], "confidence": 0.85},
             }
 
-            diff = await pool_manager.refresh()
+            diff = await market_data_hub.refresh()
             # 审计日志应有记录
             log_entry = pool_audit.get_last_refresh()
             assert log_entry is not None

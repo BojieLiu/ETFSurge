@@ -4,7 +4,7 @@ TDD flow pattern:
   - P0: generate_enhanced_design must NOT blow (regardless of missing data)
   - P1: generate_enhanced_design must include `index_realtime` in market_context;
         _build_design_report_prompt must render "market snapshot" and "sector momentum".
-  - P2: pool_manager._refresh_impl must preserve last_good_pool when scanner fails
+  - P2: market_data_hub._refresh_impl must preserve last_good_pool when scanner fails
   - P3: build_rationale must use real factor keys (RSI, MACD, signal), not placeholders
   - P4: task_manager design_pipeline must handle empty strategy gracefully
   - P5: market_trends.detect_market_regime must accept empty/None data
@@ -35,31 +35,31 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 @pytest.fixture(autouse=True)
 def _patch_singleton_methods(monkeypatch):
     """Auto-patch pool_manager singleton methods to prevent real HTTP calls."""
-    monkeypatch.setattr("app.services.pool_manager.pool_manager.get_index_realtime",
+    monkeypatch.setattr("app.services.market_data_hub.market_data_hub.get_index_realtime",
                         MagicMock(return_value=[]))
-    monkeypatch.setattr("app.services.pool_manager.pool_manager.get_sector_momentum",
+    monkeypatch.setattr("app.services.market_data_hub.market_data_hub.get_sector_momentum",
                         MagicMock(return_value=[]))
-    monkeypatch.setattr("app.services.pool_manager.pool_manager.get_market_sentiment",
+    monkeypatch.setattr("app.services.market_data_hub.market_data_hub.get_market_sentiment",
                         MagicMock(return_value={"sentiment_index": 55}))
-    monkeypatch.setattr("app.services.pool_manager.pool_manager.get_news",
+    monkeypatch.setattr("app.services.market_data_hub.market_data_hub.get_news",
                         MagicMock(return_value=[]))
-    monkeypatch.setattr("app.services.pool_manager.pool_manager.get_market_regime",
+    monkeypatch.setattr("app.services.market_data_hub.market_data_hub.get_market_regime",
                         MagicMock(return_value="range_bound"))
-    monkeypatch.setattr("app.services.pool_manager.pool_manager.refresh_news",
+    monkeypatch.setattr("app.services.market_data_hub.market_data_hub.refresh_news",
                         MagicMock(return_value=None))
-    # Mock scanner/classifier/factor_registry so pool_manager.refresh()
+    # Mock scanner/classifier/factor_registry so market_data_hub.refresh()
     # does NOT make real I/O calls. Individual tests override return_value.
     _mock_scanner = MagicMock()
     _mock_scanner.full_pipeline.return_value = {"core": [], "satellite": [], "defense": []}
-    monkeypatch.setattr("app.services.pool_manager.pool_manager.scanner", _mock_scanner)
+    monkeypatch.setattr("app.services.market_data_hub.market_data_hub.scanner", _mock_scanner)
     _mock_classifier = MagicMock()
     _mock_classifier.batch_classify.return_value = {}
-    monkeypatch.setattr("app.services.pool_manager.pool_manager.classifier", _mock_classifier)
+    monkeypatch.setattr("app.services.market_data_hub.market_data_hub.classifier", _mock_classifier)
     _mock_freg = MagicMock()
     _mock_freg.compute = AsyncMock(return_value={})
     _mock_freg.get_factor_scores = MagicMock(return_value={})
     _mock_freg.aggregate_factor_scores = MagicMock(return_value={})
-    monkeypatch.setattr("app.services.pool_manager.pool_manager.factor_registry", _mock_freg)
+    monkeypatch.setattr("app.services.market_data_hub.market_data_hub.factor_registry", _mock_freg)
 
 
 @pytest.fixture
@@ -111,10 +111,10 @@ def mock_pool_data():
 async def test_p0_generate_enhanced_design_no_blow():
     """P0: generate_enhanced_design must not blow with realistic factor data."""
     from app.services.strategy_design import generate_enhanced_design
-    from app.services.pool_manager import pool_manager
+    from app.services.market_data_hub import market_data_hub
 
     # Set test data on the singleton (pre-mocked by _patch_singleton_methods)
-    pool_manager.scanner.full_pipeline.return_value = {
+    market_data_hub.scanner.full_pipeline.return_value = {
         "core": [
             {"symbol": "510300", "name": "沪深300ETF", "tracked_index": "沪深300指数",
              "amount": 5e8, "fund_scale": 2.3e9},
@@ -130,13 +130,13 @@ async def test_p0_generate_enhanced_design_no_blow():
              "amount": 2e8, "fund_scale": 1.5e9},
         ],
     }
-    pool_manager.classifier.batch_classify.return_value = {
+    market_data_hub.classifier.batch_classify.return_value = {
         "510300": {"industry": "宽基指数", "concepts": ["沪深300"], "confidence": 0.95},
         "159338": {"industry": "宽基指数", "concepts": ["A500"], "confidence": 0.92},
         "589980": {"industry": "主题指数", "concepts": ["科创100"], "confidence": 0.88},
         "518880": {"industry": "商品", "concepts": ["黄金"], "confidence": 0.95},
     }
-    pool_manager.factor_registry.compute.return_value = {
+    market_data_hub.factor_registry.compute.return_value = {
         "510300": {"technical.signal.overall": 0.189, "technical.rsi.rsi_14": -0.089},
         "159338": {"technical.signal.overall": 0.128, "technical.rsi.rsi_14": -0.215},
         "589980": {"technical.signal.overall": 0.312, "technical.rsi.rsi_14": -0.412},
@@ -174,9 +174,9 @@ async def test_p0_generate_enhanced_design_no_blow():
 async def test_p1_market_context_includes_index_realtime():
     """P1: market_context must include index_realtime."""
     from app.services.strategy_design import generate_enhanced_design
-    from app.services.pool_manager import pool_manager
+    from app.services.market_data_hub import market_data_hub
 
-    pool_manager.scanner.full_pipeline.return_value = {
+    market_data_hub.scanner.full_pipeline.return_value = {
         "core": [{"symbol": "510300", "name": "沪深300ETF", "tracked_index": "沪深300指数",
                   "amount": 5e8, "fund_scale": 2.3e9}],
         "satellite": [],
@@ -185,11 +185,11 @@ async def test_p1_market_context_includes_index_realtime():
              "amount": 2e8, "fund_scale": 1.5e9},
         ],
     }
-    pool_manager.classifier.batch_classify.return_value = {
+    market_data_hub.classifier.batch_classify.return_value = {
         "510300": {"industry": "宽基指数", "concepts": ["沪深300"], "confidence": 0.95},
         "518880": {"industry": "商品", "concepts": ["黄金"], "confidence": 0.95},
     }
-    pool_manager.factor_registry.compute.return_value = {
+    market_data_hub.factor_registry.compute.return_value = {
         "510300": {"technical.signal.overall": 0.189},
         "518880": {"technical.signal.overall": 0.05},
     }
@@ -206,8 +206,8 @@ async def test_p1_market_context_includes_index_realtime():
 @pytest.mark.asyncio
 async def test_p2_empty_scanner_preserves_pool():
     """P2: empty scanner must not wipe a pre-populated pool (local instance)."""
-    from app.services.pool_manager import PoolManager
-    pm = PoolManager()
+    from app.services.market_data_hub import MarketDataHub
+    pm = MarketDataHub()
     pm.scanner = MagicMock()
     pm.scanner.full_pipeline.return_value = {
         "core": [{"symbol": "510300", "name": "沪深300ETF", "tracked_index": "沪深300指数",
@@ -308,12 +308,14 @@ class TestP4:
         with patch("app.services.strategy_design.generate_enhanced_design",
                     new=AsyncMock(return_value={"strategies": mock_strategies, "market_context": {}})):
             with patch("app.tasks.task_manager.async_session"):
-                task_mgr = MagicMock()
-                task_mgr.get_task.return_value = {"params": {"capital": 500000}}
-                await design_pipeline(mgr=task_mgr, task_id=1)
-                failed_calls = [c for c in task_mgr.update_task.call_args_list
-                               if isinstance(c[1], dict) and c[1].get('status') == 'failed']
-                assert len(failed_calls) == 0, f"Pipeline should not fail: {failed_calls}"
+                with patch("app.analysis.llm.generate_design_report",
+                           new=AsyncMock(return_value="# 测试报告\n\nLLM 分析内容。")):
+                    task_mgr = MagicMock()
+                    task_mgr.get_task.return_value = {"params": {"capital": 500000}}
+                    await design_pipeline(mgr=task_mgr, task_id=1)
+                    failed_calls = [c for c in task_mgr.update_task.call_args_list
+                                   if isinstance(c[1], dict) and c[1].get('status') == 'failed']
+                    assert len(failed_calls) == 0, f"Pipeline should not fail: {failed_calls}"
 
     @pytest.mark.asyncio
     async def test_p4_all_cash_still_fails(self):
@@ -491,9 +493,9 @@ def test_dq3_fake_data_uses_real_keys(mock_pool_data):
 async def test_dq4_profile_bonus_differentiates_strategies():
     """DQ4: profile bonus must differentiate strategies when factors are sparse."""
     from app.services.strategy_design import generate_enhanced_design
-    from app.services.pool_manager import pool_manager
+    from app.services.market_data_hub import market_data_hub
 
-    pool_manager.scanner.full_pipeline.return_value = {
+    market_data_hub.scanner.full_pipeline.return_value = {
         "core": [
             {"symbol": "510300", "name": "沪深300ETF", "tracked_index": "沪深300指数",
              "amount": 5e8, "fund_scale": 2.3e9},
@@ -509,13 +511,13 @@ async def test_dq4_profile_bonus_differentiates_strategies():
              "amount": 2e8, "fund_scale": 1.5e9},
         ],
     }
-    pool_manager.classifier.batch_classify.return_value = {
+    market_data_hub.classifier.batch_classify.return_value = {
         "510300": {"industry": "宽基指数", "concepts": ["沪深300"], "confidence": 0.95},
         "159338": {"industry": "宽基指数", "concepts": ["A500"], "confidence": 0.92},
         "589980": {"industry": "主题指数", "concepts": ["科创100"], "confidence": 0.88},
         "518880": {"industry": "商品", "concepts": ["黄金"], "confidence": 0.95},
     }
-    pool_manager.factor_registry.compute.return_value = {
+    market_data_hub.factor_registry.compute.return_value = {
         "510300": {"technical": 0.3, "momentum": 0.3},
         "159338": {"technical": 0.0, "momentum": 0.0},
         "589980": {"technical": 0.0, "momentum": 0.0},
@@ -557,7 +559,7 @@ def test_dq5_rationale_no_placeholder(mock_pool_data):
 async def test_orchestrator_returns_valid_strategies():
     """Slow integration: calls real orchestrator (needs network).
     
-    Note: triggers real pool_manager.refresh() with external network calls.
+    Note: triggers real market_data_hub.refresh() with external network calls.
     Not suitable for CI; run with --runslow or -m slow manually.
     """
     from app.services.strategy_design import generate_enhanced_design

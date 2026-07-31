@@ -7,31 +7,31 @@ from unittest.mock import patch, AsyncMock, MagicMock
 
 @pytest.mark.asyncio
 @patch(
-    "app.services.pool_manager.PoolManager.refresh",
+    "app.services.market_data_hub.MarketDataHub.refresh",
     new_callable=AsyncMock,
 )
 @patch(
-    "app.services.pool_manager.PoolManager.get_pool",
+    "app.services.market_data_hub.MarketDataHub.get_pool",
     return_value=[],
 )
 @patch(
-    "app.services.pool_manager.PoolManager.get_factor_matrix",
+    "app.services.market_data_hub.MarketDataHub.get_factor_matrix",
     return_value={},
 )
 @patch(
-    "app.services.pool_manager.PoolManager.get_sector_momentum",
+    "app.services.market_data_hub.MarketDataHub.get_sector_momentum",
     return_value=[],
 )
 @patch(
-    "app.services.pool_manager.PoolManager.get_index_realtime",
+    "app.services.market_data_hub.MarketDataHub.get_index_realtime",
     return_value=[],
 )
 @patch(
-    "app.services.pool_manager.PoolManager.get_market_sentiment",
+    "app.services.market_data_hub.MarketDataHub.get_market_sentiment",
     return_value={"sentiment_index": 50, "sentiment_label": "中性"},
 )
 @patch(
-    "app.services.pool_manager.PoolManager.get_market_regime",
+    "app.services.market_data_hub.MarketDataHub.get_market_regime",
     return_value="range_bound",
 )
 async def test_empty_pool_cascade_to_design_error(

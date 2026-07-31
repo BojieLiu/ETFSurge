@@ -224,7 +224,7 @@ async def get_system_metrics():
     pool_healthy = total_candidates > 0
 
     # 连续刷新失败计数
-    consecutive_failures = getattr(pool_manager, '_consecutive_failures', -1)
+    consecutive_failures = getattr(market_data_hub, '_consecutive_failures', -1)
 
     # 设计方案健康度
     design_success_rate = 0.0

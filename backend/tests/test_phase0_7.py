@@ -61,7 +61,7 @@ def test_v1a_tracked_index_in_em_fetch():
 
 
 def test_v1b_tracked_index_in_pool_flat():
-    """flat.append in pool_manager.refresh must carry tracked_index (A2)."""
+    """flat.append in market_data_hub.refresh must carry tracked_index (A2)."""
     # Test the append pattern directly
     raw_item = {"symbol": "510300", "name": "沪深300ETF", "amount": 100000000,
                 "fund_scale": 500.0, "tracked_index": "000300"}
@@ -140,7 +140,7 @@ def test_v3_empty_factor_scores_returned_as_is():
 
 def test_v2_deduplicate_by_index():
     """_deduplicate_by_index must keep largest fund_scale for same tracked_index (B2)."""
-    from app.services.pool_manager import PoolManager
+    from app.services.market_data_hub import MarketDataHub
 
     pool = {
         "core": [
@@ -159,7 +159,7 @@ def test_v2_deduplicate_by_index():
         "research": [],
     }
 
-    deduped = PoolManager._deduplicate_by_index(pool)
+    deduped = MarketDataHub._deduplicate_by_index(pool)
 
     # Core should have 2 entries (one per tracked_index, keeping largest scale)
     core = deduped["core"]
@@ -173,7 +173,7 @@ def test_v2_deduplicate_by_index():
 
 def test_v2_dedup_skips_empty_tracked_index():
     """Items with empty tracked_index should be kept as-is."""
-    from app.services.pool_manager import PoolManager
+    from app.services.market_data_hub import MarketDataHub
 
     pool = {
         "core": [
@@ -188,7 +188,7 @@ def test_v2_dedup_skips_empty_tracked_index():
         "research": [],
     }
 
-    deduped = PoolManager._deduplicate_by_index(pool)
+    deduped = MarketDataHub._deduplicate_by_index(pool)
     # Both should be kept when tracked_index is empty
     assert len(deduped["core"]) == 2
 
@@ -366,7 +366,7 @@ def test_b3_tracked_index_in_result():
 
 def test_c2_normalize_regime():
     """_normalize_regime must map all regime values correctly."""
-    from app.services.pool_manager import PoolManager
+    from app.services.market_data_hub import MarketDataHub
 
     test_cases = [
         ("bull_strong", "bull"),
@@ -380,7 +380,7 @@ def test_c2_normalize_regime():
         ("unknown_value", "neutral"),  # fallback
     ]
     for input_val, expected in test_cases:
-        result = PoolManager._normalize_regime(input_val)
+        result = MarketDataHub._normalize_regime(input_val)
         assert result == expected, (
             f"_normalize_regime({input_val!r}) = {result!r}, expected {expected!r}"
         )
@@ -459,11 +459,11 @@ async def test_c3_design_worker_saves_design_text():
         await db.commit()
 
 
-# ─── B1: PoolManager refresh pipeline integrates aggregation ───────────
+# ─── B1: MarketDataHub refresh pipeline integrates aggregation ───────────
 
 
 def test_b1_pool_integration_aggregation():
-    """PoolManager refresh must produce aggregated factor_scores with top-level keys.
+    """MarketDataHub refresh must produce aggregated factor_scores with top-level keys.
 
     This tests that after aggregation, items in the pool have 'technical',
     'momentum', 'valuation', 'sentiment' keys in factor_scores.
@@ -493,9 +493,9 @@ def test_p0_4_compute_composite_uses_aggregated_keys_only():
     aggregated keys (technical=~9.5), the sum should only include aggregated
     keys. Otherwise RSI=50 dominates the composite score.
     """
-    from app.services.pool_manager import PoolManager
+    from app.services.market_data_hub import MarketDataHub
 
-    pm = PoolManager()
+    pm = MarketDataHub()
 
     # Simulate factor_scores with both raw dot-prefixed keys AND aggregated keys
     factor_scores = {
@@ -531,8 +531,8 @@ def test_p0_4_compute_composite_uses_aggregated_keys_only():
 
 def test_p0_4_compute_composite_handles_empty_factor_scores():
     """When factor_scores is empty, composite should not crash."""
-    from app.services.pool_manager import PoolManager
-    pm = PoolManager()
+    from app.services.market_data_hub import MarketDataHub
+    pm = MarketDataHub()
     item = {
         "factor_scores": {},
         "amount": 100_000_000,

@@ -192,14 +192,14 @@ class TestResolveMarketContextEdgeCases:
 # ─── Pool Manager Regime Cache Tests ───────────────────────────
 
 
-class TestPoolManagerRegimeCache:
+class TestMarketDataHubRegimeCache:
 
-    @patch("app.services.pool_manager.pool_manager")
+    @patch("app.services.market_data_hub.market_data_hub")
     def test_regime_cache_is_dict(self, mock_pm):
         """Regime cache must support per-market keys."""
         # Create a fresh instance to test the type
-        from app.services.pool_manager import PoolManager
-        pm = PoolManager()
+        from app.services.market_data_hub import MarketDataHub
+        pm = MarketDataHub()
         # After init, _regime_cache should be a dict
         assert isinstance(pm._regime_cache, dict)
         # Default for unknown market
@@ -207,17 +207,17 @@ class TestPoolManagerRegimeCache:
 
     def test_get_market_regime_with_market_param(self):
         """get_market_regime must accept optional market param."""
-        from app.services.pool_manager import PoolManager
-        pm = PoolManager()
+        from app.services.market_data_hub import MarketDataHub
+        pm = MarketDataHub()
         result = pm.get_market_regime("A")
         assert isinstance(result, str)
         assert result == "range_bound"  # default for empty cache
 
     def test_update_market_regime_signature(self):
         """update_market_regime must accept market param."""
-        from app.services.pool_manager import PoolManager
+        from app.services.market_data_hub import MarketDataHub
         import inspect
-        sig = inspect.signature(PoolManager.update_market_regime)
+        sig = inspect.signature(MarketDataHub.update_market_regime)
         params = list(sig.parameters.keys())
         assert "market" in params
 
@@ -240,7 +240,7 @@ class TestDesignAsyncMarketParam:
 
 class TestLLMReportMarketAwareness:
 
-    @patch("app.services.pool_manager.pool_manager")
+    @patch("app.services.market_data_hub.market_data_hub")
     def test_llm_report_request_has_market(self, mock_pm):
         """LLMReportRequest must have market field with default 'A'."""
         from app.routers.analysis import LLMReportRequest

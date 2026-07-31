@@ -9,28 +9,33 @@ import pytest
 
 
 class TestMarketDataHubAlias:
-    """S5 Step 8: MarketDataHub = PoolManager alias."""
+    """S5 Step 8: MarketDataHub is the canonical data-pipeline entry (renamed from PoolManager)."""
 
-    def test_market_data_hub_imported_as_alias(self):
-        """MarketDataHub should be importable and is PoolManager."""
-        from app.services.market_data_hub import MarketDataHub
-        from app.services.pool_manager import PoolManager
-        assert MarketDataHub is PoolManager or issubclass(MarketDataHub, PoolManager), (
-            "MarketDataHub must be PoolManager or its subclass"
-        )
+    def test_market_data_hub_importable_as_class_and_singleton(self):
+        """MarketDataHub class + market_data_hub singleton should both exist."""
+        from app.services.market_data_hub import MarketDataHub, market_data_hub
+        assert isinstance(market_data_hub, MarketDataHub)
+        # The old pool_manager name must be gone (thorough rename, no alias)
+        import app.services.market_data_hub as mdh
+        assert not hasattr(mdh, "pool_manager"), "pool_manager alias should be removed"
+        import app.services as svc_mod
+        assert not hasattr(svc_mod, "pool_manager"), "app.services.pool_manager module should be gone"
+        import importlib
+        assert importlib.util.find_spec("app.services.pool_manager") is None, \
+            "pool_manager.py should be renamed to market_data_hub.py"
 
     def test_market_data_hub_has_core_methods(self):
-        """MarketDataHub/PoolManager should have the unified K-line methods."""
-        from app.services.pool_manager import PoolManager
+        """MarketDataHub should have the unified K-line methods."""
+        from app.services.market_data_hub import MarketDataHub
         
         methods = ["get_kline", "get_kline_rows", "refresh_kline", "get_kline_symbols"]
         for m in methods:
-            assert hasattr(PoolManager, m), f"PoolManager missing {m}()"
+            assert hasattr(MarketDataHub, m), f"MarketDataHub missing {m}()"
 
     def test_get_kline_symbols_exists(self):
         """get_kline_symbols() returns a list."""
-        from app.services.pool_manager import pool_manager
-        symbols = pool_manager.get_kline_symbols()
+        from app.services.market_data_hub import market_data_hub
+        symbols = market_data_hub.get_kline_symbols()
         assert isinstance(symbols, list)
 
 
@@ -43,8 +48,8 @@ class TestMarketServiceHubAware:
     @pytest.mark.asyncio
     async def test_get_history_hub_cache_hit(self):
         """When Hub has cached data, skip direct fetch."""
-        from app.services import pool_manager as pm_module
-        with patch.object(pm_module.pool_manager, "get_kline_rows") as mock_get_rows:
+        from app.services import market_data_hub as mdh_module
+        with patch.object(mdh_module.market_data_hub, "get_kline_rows") as mock_get_rows:
             # Mock cache hit
             mock_get_rows.return_value = [
                 {"date": "2026-07-28", "close": 3.48,

@@ -19,7 +19,7 @@ async def test_integration_engine_pipeline():
     """Engine-level integration: mock only data sources, run real engine.
 
     Mocks at data source boundary:
-      - PoolManager scanner.full_pipeline (realistic ETF entries)
+      - MarketDataHub scanner.full_pipeline (realistic ETF entries)
       - FactorRegistry._fetch_market_data (realistic OHLCV)
       - Classifier.batch_classify (industry/concept mapping)
 
@@ -34,7 +34,7 @@ async def test_integration_engine_pipeline():
     # generate_enhanced_design uses the module-level pool_manager singleton,
     # so we must mock the singleton directly, not create a local instance.
     from app.services.strategy_design import generate_enhanced_design
-    from app.services.pool_manager import pool_manager as live_pm
+    from app.services.market_data_hub import market_data_hub as live_pm
     import app.factors.factor_registry as fr_mod
 
     pm = live_pm
@@ -120,7 +120,7 @@ async def test_integration_engine_pipeline():
          patch("app.fetchers.etf_scanner.enrich_tracked_indices") as _mock_enrich, \
          patch("app.services.market_trends.compute_sector_momentum",
                return_value=[]), \
-         patch("app.fetchers.sentiment_fetcher.fetch_market_sentiment",
+         patch("app.fetchers.fundamentals_fetcher.fetch_market_sentiment",
                return_value={"sentiment_index": 55}):
         _mock_enrich.return_value = None
         result = await generate_enhanced_design(capital=500000)

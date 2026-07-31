@@ -105,10 +105,10 @@ def test_pool_candidate_counts():
     """检查 pool_manager 各层候选数。"""
     sys.path.insert(0, "backend")
     try:
-        from app.services.pool_manager import PoolManager
+        from app.services.market_data_hub import MarketDataHub
         import asyncio
 
-        pm = PoolManager()
+        pm = MarketDataHub()
         pool = asyncio.run(pm.refresh())
 
         core = pool.get("core", [])
@@ -119,7 +119,7 @@ def test_pool_candidate_counts():
         check(f"Satellite 层候选数 >= 5", len(satellite) >= 5, f"count={len(satellite)}")
         check(f"Defense 层候选数 >= 2", len(defense) >= 2, f"count={len(defense)}")
     except Exception as e:
-        check("PoolManager 可运行", False, str(e)[:100])
+        check("MarketDataHub 可运行", False, str(e)[:100])
 
 
 def test_db_writable():
@@ -163,7 +163,7 @@ if __name__ == "__main__":
     section("2. FactorRegistry 因子分")
     test_factor_differentiation()
 
-    section("3. PoolManager 候选池")
+    section("3. MarketDataHub 候选池")
     test_pool_candidate_counts()
 
     section("4. 存储层")

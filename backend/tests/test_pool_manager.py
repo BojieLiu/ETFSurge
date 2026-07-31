@@ -8,7 +8,7 @@ from unittest.mock import patch, MagicMock, AsyncMock
 from datetime import datetime
 
 
-class TestPoolManager:
+class TestMarketDataHub:
     """PoolManager: candidate pool lifecycle."""
 
     @pytest.fixture
@@ -65,28 +65,28 @@ class TestPoolManager:
         return registry
 
     @pytest.fixture
-    def pool_manager(self, mock_scanner, mock_classifier, mock_factor_registry):
-        from app.services.pool_manager import PoolManager
-        pm = PoolManager()
+    def market_data_hub(self, mock_scanner, mock_classifier, mock_factor_registry):
+        from app.services.market_data_hub import MarketDataHub
+        pm = MarketDataHub()
         pm.scanner = mock_scanner
         pm.classifier = mock_classifier
         pm.factor_registry = mock_factor_registry
         return pm
 
     @pytest.mark.asyncio
-    async def test_refresh_returns_pool_diff(self, pool_manager):
+    async def test_refresh_returns_pool_diff(self, market_data_hub):
         """refresh() 应返回 PoolDiff 对象"""
-        diff = await pool_manager.refresh()
+        diff = await market_data_hub.refresh()
         assert diff is not None
         assert hasattr(diff, "added")
         assert hasattr(diff, "removed")
         assert diff.version == 1
 
     @pytest.mark.asyncio
-    async def test_refresh_contains_all_layers(self, pool_manager):
+    async def test_refresh_contains_all_layers(self, market_data_hub):
         """刷新后候选池应包含 5 层"""
-        await pool_manager.refresh()
-        pool = pool_manager.get_pool()
+        await market_data_hub.refresh()
+        pool = market_data_hub.get_pool()
         assert "core" in pool
         assert "satellite" in pool
         assert "defense" in pool
@@ -94,77 +94,77 @@ class TestPoolManager:
         assert "research" in pool
 
     @pytest.mark.asyncio
-    async def test_mandatory_codes_preserved(self, pool_manager):
+    async def test_mandatory_codes_preserved(self, market_data_hub):
         """510300 和 518880 应始终在池中"""
-        await pool_manager.refresh()
-        pool = pool_manager.get_pool()
+        await market_data_hub.refresh()
+        pool = market_data_hub.get_pool()
         all_symbols = {e["symbol"] for layer in pool.values() for e in layer}
         assert "510300" in all_symbols  # 沪深300ETF
         assert "518880" in all_symbols  # 黄金ETF
 
     @pytest.mark.asyncio
-    async def test_get_pool_by_layer(self, pool_manager):
+    async def test_get_pool_by_layer(self, market_data_hub):
         """get_pool(layer='core') 只返回核心层"""
-        await pool_manager.refresh()
-        core = pool_manager.get_pool(layer="core")
+        await market_data_hub.refresh()
+        core = market_data_hub.get_pool(layer="core")
         assert len(core) >= 2
         assert all(e.get("layer") == "core" for e in core)
 
     @pytest.mark.asyncio
-    async def test_get_by_code_found(self, pool_manager):
+    async def test_get_by_code_found(self, market_data_hub):
         """按 code 查询应返回单个条目"""
-        await pool_manager.refresh()
-        entry = pool_manager.get_by_code("510300")
+        await market_data_hub.refresh()
+        entry = market_data_hub.get_by_code("510300")
         assert entry is not None
         assert entry["symbol"] == "510300"
         assert "industry" in entry
 
     @pytest.mark.asyncio
-    async def test_get_by_code_not_found(self, pool_manager):
+    async def test_get_by_code_not_found(self, market_data_hub):
         """不存在的 code 返回 None"""
-        await pool_manager.refresh()
-        assert pool_manager.get_by_code("999999") is None
+        await market_data_hub.refresh()
+        assert market_data_hub.get_by_code("999999") is None
 
     @pytest.mark.asyncio
-    async def test_pool_diff_version_increments(self, pool_manager):
+    async def test_pool_diff_version_increments(self, market_data_hub):
         """每次 refresh() 版本号递增 (过期冷却期以允许立即刷新)"""
-        diff1 = await pool_manager.refresh()
+        diff1 = await market_data_hub.refresh()
         # 清除冷却期，允许第二次刷新立即执行
-        pool_manager._last_refresh_ts = 0.0
-        diff2 = await pool_manager.refresh()
+        market_data_hub._last_refresh_ts = 0.0
+        diff2 = await market_data_hub.refresh()
         assert diff2.version == diff1.version + 1
 
     @pytest.mark.asyncio
-    async def test_empty_scanner_preserves_existing_pool(self, pool_manager):
+    async def test_empty_scanner_preserves_existing_pool(self, market_data_hub):
         """扫描器返回空时不应清空已有候选池（last-good 保护）
 
         先刷新一次建立池子，第二次 refresh 模拟扫描器失败，
         断言：池子保留上次成功数据，版本号不变。
         """
         # 先成功刷新一次，建立候选池
-        diff1 = await pool_manager.refresh()
+        diff1 = await market_data_hub.refresh()
         assert diff1.version == 1
-        pool_before = pool_manager.get_pool()
+        pool_before = market_data_hub.get_pool()
         before_total = sum(len(v) for v in pool_before.values())
         assert before_total > 0
 
         # 第二次 refresh：模拟扫描器返回空（数据源故障）
-        pool_manager.scanner.full_pipeline.return_value = {"core": [], "satellite": [], "defense": []}
-        pool_manager._last_refresh_ts = 0.0  # 清除冷却期
-        diff2 = await pool_manager.refresh()
+        market_data_hub.scanner.full_pipeline.return_value = {"core": [], "satellite": [], "defense": []}
+        market_data_hub._last_refresh_ts = 0.0  # 清除冷却期
+        diff2 = await market_data_hub.refresh()
 
         # 断言：池子未被清空，保留上次成功数据
-        pool_after = pool_manager.get_pool()
+        pool_after = market_data_hub.get_pool()
         after_total = sum(len(v) for v in pool_after.values())
         assert after_total == before_total, "空池保护失败：扫描器故障后候选池被清空"
         # 版本号不应递增（refresh 返回空结果时跳过版本变更）
-        assert pool_manager._version == 1
+        assert market_data_hub._version == 1
 
     @pytest.mark.asyncio
     async def test_empty_scanner_first_call_returns_empty(self, mock_classifier):
         """首次调用时扫描器就返回空 → 池为空（无 last-good 可保留）"""
-        from app.services.pool_manager import PoolManager
-        pm = PoolManager()
+        from app.services.market_data_hub import MarketDataHub
+        pm = MarketDataHub()
         pm.scanner = MagicMock()
         pm.scanner.full_pipeline.return_value = {"core": [], "satellite": [], "defense": []}
         pm.classifier = mock_classifier
@@ -175,14 +175,14 @@ class TestPoolManager:
         assert diff.version == 1
 
     @pytest.mark.asyncio
-    async def test_classifier_integration(self, pool_manager):
+    async def test_classifier_integration(self, market_data_hub):
         """候选池条目应包含 industry/concepts 字段"""
-        await pool_manager.refresh()
-        entry = pool_manager.get_by_code("512480")
+        await market_data_hub.refresh()
+        entry = market_data_hub.get_by_code("512480")
         assert entry is not None
         assert entry.get("industry") == "电子"
 
-    def test_pool_entry_structure(self, pool_manager):
+    def test_pool_entry_structure(self, market_data_hub):
         """PoolEntry 数据结构完整性"""
         # After refresh, check internal structure
         pass
@@ -197,9 +197,9 @@ async def test_concurrent_refresh_lock_does_not_block_forever():
     """
     import asyncio
     from unittest.mock import MagicMock
-    from app.services.pool_manager import PoolManager
+    from app.services.market_data_hub import MarketDataHub
 
-    pm = PoolManager()
+    pm = MarketDataHub()
     pm.scanner = MagicMock()
     pm.scanner.full_pipeline.return_value = {
         "core": [], "satellite": [], "defense": []
@@ -224,8 +224,8 @@ async def test_concurrent_refresh_lock_does_not_block_forever():
 @pytest.mark.asyncio
 async def test_market_context_getters_completeness():
     """2.8.7: market_context getters should return complete data when caches are set."""
-    from app.services.pool_manager import PoolManager
-    pm = PoolManager()
+    from app.services.market_data_hub import MarketDataHub
+    pm = MarketDataHub()
     # Set up cache data directly
     pm._regime_cache = "range_bound"
     pm._regime_cache_ts = 9999999999.0

@@ -5,7 +5,7 @@ import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
 
-class TestPoolManagerPhase2:
+class TestMarketDataHubPhase2:
     """PoolManager Phase 2: factor scoring + layer 4/5."""
 
     @pytest.fixture
@@ -26,9 +26,9 @@ class TestPoolManagerPhase2:
         return reg
 
     @pytest.fixture
-    def pool_manager(self, mock_factor_registry):
-        from app.services.pool_manager import PoolManager
-        pm = PoolManager()
+    def market_data_hub(self, mock_factor_registry):
+        from app.services.market_data_hub import MarketDataHub
+        pm = MarketDataHub()
         # Inject mock dependencies
         pm.scanner = MagicMock()
         pm.scanner.full_pipeline.return_value = {
@@ -56,39 +56,39 @@ class TestPoolManagerPhase2:
         return pm
 
     @pytest.mark.asyncio
-    async def test_refresh_calls_factor_registry(self, pool_manager, mock_factor_registry):
+    async def test_refresh_calls_factor_registry(self, market_data_hub, mock_factor_registry):
         """refresh() 应调用 FactorRegistry.compute()"""
-        await pool_manager.refresh()
+        await market_data_hub.refresh()
         mock_factor_registry.compute.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_entries_have_factor_scores(self, pool_manager):
+    async def test_entries_have_factor_scores(self, market_data_hub):
         """候选池条目应包含 factor_scores 字段"""
-        await pool_manager.refresh()
-        entry = pool_manager.get_by_code("510300")
+        await market_data_hub.refresh()
+        entry = market_data_hub.get_by_code("510300")
         assert entry is not None
         assert "factor_scores" in entry
         assert "style.momentum.mom_3m" in entry["factor_scores"]
 
     @pytest.mark.asyncio
-    async def test_layer_4_opportunistic_exists(self, pool_manager):
+    async def test_layer_4_opportunistic_exists(self, market_data_hub):
         """第 4 层(Opportunistic)应存在"""
-        await pool_manager.refresh()
-        pool = pool_manager.get_pool()
+        await market_data_hub.refresh()
+        pool = market_data_hub.get_pool()
         assert "opportunistic" in pool
 
     @pytest.mark.asyncio
-    async def test_layer_5_research_exists(self, pool_manager):
+    async def test_layer_5_research_exists(self, market_data_hub):
         """第 5 层(Research)应存在"""
-        await pool_manager.refresh()
-        pool = pool_manager.get_pool()
+        await market_data_hub.refresh()
+        pool = market_data_hub.get_pool()
         assert "research" in pool
 
     @pytest.mark.asyncio
-    async def test_sorted_by_factor_score_within_layer(self, pool_manager):
+    async def test_sorted_by_factor_score_within_layer(self, market_data_hub):
         """同层内应因子得分高的排前面"""
-        await pool_manager.refresh()
-        satellite = pool_manager.get_pool(layer="satellite")
+        await market_data_hub.refresh()
+        satellite = market_data_hub.get_pool(layer="satellite")
         if len(satellite) >= 2:
             s0 = satellite[0]["symbol"]
             s1 = satellite[1]["symbol"]
@@ -97,28 +97,28 @@ class TestPoolManagerPhase2:
             assert fs0 >= fs1, "satellite layer should be sorted by composite score descending"
 
     @pytest.mark.asyncio
-    async def test_opportunistic_added_via_text_signals(self, pool_manager):
+    async def test_opportunistic_added_via_text_signals(self, market_data_hub):
         """文本信号可触发 ETF 加入 opportunistic 层"""
-        pool_manager.set_opportunistic_signals({
+        market_data_hub.set_opportunistic_signals({
             "159995": {"signal": "policy_heat", "heat_score": 0.85, "reason": "半导体政策利好"},
         })
-        await pool_manager.refresh()
-        opp = pool_manager.get_pool(layer="opportunistic")
+        await market_data_hub.refresh()
+        opp = market_data_hub.get_pool(layer="opportunistic")
         if opp:
             assert any(e["symbol"] == "159995" for e in opp)
 
     @pytest.mark.asyncio
-    async def test_composite_score_weighted_correctly(self, pool_manager):
+    async def test_composite_score_weighted_correctly(self, market_data_hub):
         """综合得分应按层差异化计算"""
-        await pool_manager.refresh()
-        core = pool_manager.get_pool(layer="core")
+        await market_data_hub.refresh()
+        core = market_data_hub.get_pool(layer="core")
         if core:
             # core 层应重 factor, 轻 amount
             pass  # structural validation only
 
-    def test_set_opportunistic_signals(self, pool_manager):
+    def test_set_opportunistic_signals(self, market_data_hub):
         """set_opportunistic_signals 应存储外部信号"""
         signals = {"159995": {"signal": "policy_heat", "heat_score": 0.85}}
-        pool_manager.set_opportunistic_signals(signals)
-        assert len(pool_manager._opportunistic_signals) == 1
-        assert pool_manager._opportunistic_signals["159995"]["heat_score"] == 0.85
+        market_data_hub.set_opportunistic_signals(signals)
+        assert len(market_data_hub._opportunistic_signals) == 1
+        assert market_data_hub._opportunistic_signals["159995"]["heat_score"] == 0.85

@@ -14,21 +14,21 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from app.services.pool_manager import PoolManager, ALL_LAYERS
+from app.services.market_data_hub import MarketDataHub, ALL_LAYERS
 
 
 @pytest.fixture
 def pm():
-    """Fresh PoolManager with empty pool (simulates first-run state)."""
-    mgr = PoolManager()
+    """Fresh MarketDataHub with empty pool (simulates first-run state)."""
+    mgr = MarketDataHub()
     mgr._test_mode = True
     return mgr
 
 
 @pytest.fixture
 def pm_with_data():
-    """PoolManager with pre-populated data (simulates previous successful run)."""
-    mgr = PoolManager()
+    """MarketDataHub with pre-populated data (simulates previous successful run)."""
+    mgr = MarketDataHub()
     mgr._pool = {
         "core": [{"symbol": "510300", "name": "沪深300ETF", "fund_scale": 1e9}],
         "satellite": [],
@@ -43,7 +43,7 @@ def pm_with_data():
 
 
 class TestPoolResilience:
-    """Verify that PoolManager survives data source failures gracefully."""
+    """Verify that MarketDataHub survives data source failures gracefully."""
 
     @pytest.mark.asyncio
     async def test_first_run_failure_emits_critical_log(self, pm, caplog):

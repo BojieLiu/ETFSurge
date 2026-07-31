@@ -4,13 +4,13 @@ import asyncio, time, logging
 logging.basicConfig(level=logging.WARNING)
 
 async def test():
-    from app.services.pool_manager import pool_manager
+    from app.services.market_data_hub import pool_manager
 
-    await pool_manager.refresh()
-    factor_matrix = pool_manager.get_factor_matrix()
+    await market_data_hub.refresh()
+    factor_matrix = market_data_hub.get_factor_matrix()
     print(f"Factor matrix: {len(factor_matrix)} symbols")
 
-    pool = pool_manager.get_pool()
+    pool = market_data_hub.get_pool()
     candidates = {
         "core": pool.get("core", []),
         "satellite": pool.get("satellite", []),

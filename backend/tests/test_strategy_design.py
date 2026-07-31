@@ -13,19 +13,19 @@ async def test_empty_candidate_pool_returns_error():
     async def mock_refresh(*args, **kwargs):
         pass
 
-    with patch("app.services.pool_manager.pool_manager.refresh",
+    with patch("app.services.market_data_hub.market_data_hub.refresh",
                side_effect=mock_refresh):
-        with patch("app.services.pool_manager.pool_manager.get_pool",
+        with patch("app.services.market_data_hub.market_data_hub.get_pool",
                    side_effect=lambda layer=None: {"core": [], "satellite": [], "defense": []} if layer is None else []):
-            with patch("app.services.pool_manager.pool_manager.get_factor_matrix",
+            with patch("app.services.market_data_hub.market_data_hub.get_factor_matrix",
                        return_value={}):
-                with patch("app.services.pool_manager.pool_manager.get_market_regime",
+                with patch("app.services.market_data_hub.market_data_hub.get_market_regime",
                            return_value="range_bound"):
-                    with patch("app.services.pool_manager.pool_manager.get_market_sentiment",
+                    with patch("app.services.market_data_hub.market_data_hub.get_market_sentiment",
                                return_value={"sentiment_index": 50, "sentiment_label": "中性"}):
-                        with patch("app.services.pool_manager.pool_manager.get_index_realtime",
+                        with patch("app.services.market_data_hub.market_data_hub.get_index_realtime",
                                    return_value=[]):
-                            with patch("app.services.pool_manager.pool_manager.get_sector_momentum",
+                            with patch("app.services.market_data_hub.market_data_hub.get_sector_momentum",
                                        return_value=[]):
                                 result = await generate_enhanced_design(capital=500000)
 

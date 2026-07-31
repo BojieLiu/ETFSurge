@@ -252,7 +252,7 @@ async def _save_design_error(design_id: int | None, error_msg: str) -> None:
                 d.error_message = error_msg
                 await db.commit()
     except Exception as e:
-        logger.warning("[design_pipeline] failed to save error to design_id=%d: %s", design_id, e)
+        logger.warning("[design_pipeline] failed to save error to design_id=%s: %s", design_id, e)
 
 
 from app.database import async_session
@@ -371,7 +371,7 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
                     await db.commit()
                     await db.refresh(record)
                     design_id = record.id
-                    logger.info("[design_pipeline] empty allocation saved as design_id=%d (quality=empty)", design_id)
+                    logger.info("[design_pipeline] empty allocation saved as design_id=%s (quality=empty)", design_id)
             except Exception as db_e:
                 logger.warning("[design_pipeline] failed to save empty allocation to DB: %s", db_e)
             return
@@ -418,7 +418,7 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
                           extra={"strategies": strategies})
             return
 
-        logger.info("[design_pipeline] design_id=%d saved with data summary (%d chars)", design_id, len(design_text))
+        logger.info("[design_pipeline] design_id=%s saved with data summary (%d chars)", design_id, len(design_text))
         mgr.update_task(task_id, progress=75, stage="方案已保存")
         await _notify(task_id, "quick_ready", progress=75, stage="方案已保存")
 
@@ -457,13 +457,13 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
                             d.report_quality = "full" if has_real_etfs else "partial"
                             d.report_generated_at = datetime.utcnow()
                             await db.commit()
-                            logger.info("[design_pipeline] report saved to design_id=%d (%d chars, quality=%s)",
+                            logger.info("[design_pipeline] report saved to design_id=%s (%d chars, quality=%s)",
                                         design_id, len(full_text), d.report_quality)
                 except Exception as e:
                     logger.warning("[design_pipeline] DB update for LLM report failed: %s", e)
                 report_quality = "full"
             else:
-                logger.warning("[design_pipeline] LLM returned empty report for design_id=%d", design_id)
+                logger.warning("[design_pipeline] LLM returned empty report for design_id=%s", design_id)
                 try:
                     async with async_session() as db:
                         d = await db.get(PortfolioDesign, design_id)
@@ -476,7 +476,7 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
                 report_quality = "partial"
 
         except Exception as e:
-            logger.warning("[design_pipeline] LLM report generation failed for design_id=%d: %s", design_id, e)
+            logger.warning("[design_pipeline] LLM report generation failed for design_id=%s: %s", design_id, e)
             # Q03: Mark as partial — allocation succeeded but LLM failed
             try:
                 async with async_session() as db:
@@ -500,7 +500,7 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
             )
             await _notify(task_id, "completed_with_errors", progress=100, stage="LLM 报告暂不可用",
                           extra={"design_id": design_id, "report_quality": report_quality})
-            logger.info("[design_pipeline] task %d completed_with_errors (design_id=%d, quality=%s)",
+            logger.info("[design_pipeline] task %d completed_with_errors (design_id=%s, quality=%s)",
                         task_id, design_id, report_quality)
             return
 
@@ -522,7 +522,7 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
         await _notify(task_id, "completed", progress=100, stage="设计完成",
                       extra={"design_id": design_id, "report_quality": report_quality})
 
-        logger.info("[design_pipeline] task %d completed (design_id=%d, quality=%s)",
+        logger.info("[design_pipeline] task %d completed (design_id=%s, quality=%s)",
                     task_id, design_id, report_quality)
 
     except asyncio.TimeoutError:

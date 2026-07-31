@@ -177,7 +177,7 @@ class TestP1_1_MarketContext:
     def test_pool_manager_has_market_context(self):
         """pool_manager should export market context data functions."""
         probes_path = os.path.join(
-            os.path.dirname(__file__), "..", "app", "services", "pool_manager.py"
+            os.path.dirname(__file__), "..", "app", "services", "market_data_hub.py"
         )
         with open(probes_path, "r", encoding="utf-8") as f:
             content = f.read()
@@ -189,7 +189,7 @@ class TestP1_1_MarketContext:
     def test_market_context_has_fallback(self):
         """Market context should have fallback defaults to avoid empty data."""
         probes_path = os.path.join(
-            os.path.dirname(__file__), "..", "app", "services", "pool_manager.py"
+            os.path.dirname(__file__), "..", "app", "services", "market_data_hub.py"
         )
         with open(probes_path, "r", encoding="utf-8") as f:
             content = f.read()

@@ -86,8 +86,8 @@ cd backend && python -m pytest
   - `rationale.py` — 数据驱动的入选理由生成（因子分 + 市态感知 + 模板多样化）。
   - `risk_controls.py` — 风控约束（单只 ≤30%、行业集中度 <40%、层预算不超标）。
 - `backend/app/services/strategy_design.py` — **轻量编排器（125 行，原 1092 行）**：
-  - `generate_enhanced_design()` — 编排器入口：调用 pool_manager → engine/ 分配器 → 风控 → 返回三套方案。
-- `backend/app/services/pool_manager.py` — **统一数据管道**（全市场扫描 + 因子计算 + 市场状态 + 新闻缓存）：
+  - `generate_enhanced_design()` — 编排器入口：调用 market_data_hub → engine/ 分配器 → 风控 → 返回三套方案。
+- `backend/app/services/market_data_hub.py` — **统一数据管道**（全市场扫描 + 因子计算 + 市场状态 + 新闻缓存）：
   - `get_factor_matrix()` / `get_pool()` / `get_market_regime()` / `get_market_sentiment()` / `get_news()`。
 - `backend/app/factors/factor_registry.py` — FactorRegistry（33 维核心因子计算，含 KDJ / 综合信号 / industry_diversification / premium_discount，已删除假数据 fallback，带熔断保护）。
 - `backend/app/services/market_trends.py` — `detect_market_regime()`（含 index_realtime fallback）、`compute_etf_trends()`。
