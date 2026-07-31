@@ -60,26 +60,26 @@ def client():
         return_value=[],
     # Sector fetchers
     ), patch(
-        "app.routers.analysis.fetch_industry_sectors",
+        "app.services.market_data_hub.market_data_hub.get_sector_industry",
         return_value=[{"sector_code": "BK0001", "sector_name": "银行"}],
     ), patch(
-        "app.routers.analysis.fetch_concept_sectors",
+        "app.services.market_data_hub.market_data_hub.get_sector_concept",
         return_value=[],
     ), patch(
-        "app.routers.analysis.fetch_sector_stocks",
+        "app.services.market_data_hub.market_data_hub.get_sector_stocks",
         return_value=[{"symbol": "600036", "name": "招商银行", "price": 35.0, "change_pct": 1.0}],
     ), patch(
-        "app.routers.analysis.fetch_hot_plates",
+        "app.services.market_data_hub.market_data_hub.get_hot_plates",
         return_value=[],
     ), patch(
-        "app.routers.analysis.fetch_sector_heat",
+        "app.services.market_data_hub.market_data_hub.get_sector_heat",
         return_value=[],
     # Fundamental fetchers
     ), patch(
-        "app.routers.analysis.fetch_fund_flow",
+        "app.services.market_data_hub.market_data_hub.get_fund_flow",
         return_value=None,
     ), patch(
-        "app.routers.analysis.fetch_hist_avg_volume",
+        "app.services.market_data_hub.market_data_hub.get_hist_avg_volume",
         return_value=None,
     ):
         yield TestClient(app)

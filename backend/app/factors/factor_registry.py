@@ -513,12 +513,12 @@ def _compute_stock_divergence(data: dict) -> float:
         return min(max((ad - 1.0) * 2.0, -1.0), 1.0)
     try:
         from ..core.async_utils import run_in_thread
-        from ..fetchers.fundamentals_fetcher import fetch_advance_decline_ratio
+        from ..services.market_data_hub import market_data_hub
         import asyncio
         loop = asyncio.get_running_loop()
         if loop and loop.is_running():
             # S02: Reduced timeout from 5s to 2s to prevent 5s blocking loops
-            ad_val = run_in_thread(fetch_advance_decline_ratio, timeout=2)
+            ad_val = run_in_thread(market_data_hub.get_advance_decline, timeout=2)
             if ad_val is not None and ad_val > 0:
                 return min(max((ad_val - 1.0) * 2.0, -1.0), 1.0)
     except Exception:
@@ -804,7 +804,7 @@ class FactorRegistry:
             logger.warning("[factor] SourceRegistry circuit open for factor.history — returning empty data for %s", symbols)
             return {sym: {} for sym in symbols}
 
-        from ..fetchers.china_market import fetch_history
+        from ..services.market_data_hub import market_data_hub
         import asyncio
 
         sem = asyncio.Semaphore(8)
@@ -814,7 +814,7 @@ class FactorRegistry:
                 try:
                     from ..core.async_utils import run_sync
                     rows = await asyncio.wait_for(
-                        run_sync(fetch_history, sym, "A", "daily", timeout=20),
+                        run_sync(market_data_hub.get_history, sym, "A", "daily", timeout=20),
                         timeout=25,
                     )
                     if not rows:

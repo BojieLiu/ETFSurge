@@ -345,11 +345,11 @@ async def _fetch_single_trend(symbol: str) -> dict[str, float]:
     比直接调 akshare.fund_etf_hist_em 更稳定。
     """
     try:
-        from ..fetchers.china_market import fetch_history
+        from ..services.market_data_hub import market_data_hub
 
-        # 拉取历史日线（通过 china_market 的 mootdx → Sina 降级链）
+        # 拉取历史日线（经 hub 委托 china_market 的 mootdx → Sina 降级链）
         from ..core.async_utils import run_sync
-        rows = await run_sync(fetch_history, symbol, "A", "daily", timeout=30)
+        rows = await run_sync(market_data_hub.get_history, symbol, "A", "daily", timeout=30)
         if not rows:
             return {}
 

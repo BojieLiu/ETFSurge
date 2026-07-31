@@ -19,10 +19,10 @@ from ..fetchers.levistock_fetcher import (
     fetch_market_emotion, fetch_sector_heat, fetch_market_wind,
 )
 from ..fetchers.sector_fetcher import (
-    fetch_industry_sectors, fetch_concept_sectors, fetch_sector_stocks,
-    fetch_hot_plates, fetch_stock_hot_rank, fetch_sector_popular_stocks,
+    fetch_stock_hot_rank, fetch_sector_popular_stocks,
     fetch_all_stocks, fetch_sector_history, fetch_sector_industry_cls,
 )
+from ..services.market_data_hub import market_data_hub
 from ..models.search import Watchlist
 from ..models.schemas import WatchlistCreate, WatchlistUpdate, WatchlistResponse
 from sqlalchemy import select
@@ -269,7 +269,7 @@ async def sentiment() -> dict:
 @router.get("/sectors/industry")
 async def industry_sectors(limit: int = Query(500)) -> list[dict[str, Any]]:
     """行业板块列表（含实时行情）：优先 sector_fetcher 实时数据，本地 sectors 表作降级。"""
-    realtime = await asyncio.to_thread(fetch_industry_sectors, limit)
+    realtime = await asyncio.to_thread(market_data_hub.get_sector_industry, limit)
     if realtime:
         return realtime[:limit]
     local = await get_sectors_local("industry")
@@ -281,7 +281,7 @@ async def industry_sectors(limit: int = Query(500)) -> list[dict[str, Any]]:
 @router.get("/sectors/concept")
 async def concept_sectors(limit: int = Query(500)) -> list[dict[str, Any]]:
     """概念板块列表（含实时行情）：优先 sector_fetcher 实时数据，本地 sectors 表作降级。"""
-    realtime = await asyncio.to_thread(fetch_concept_sectors, limit)
+    realtime = await asyncio.to_thread(market_data_hub.get_sector_concept, limit)
     if realtime:
         return realtime[:limit]
     local = await get_sectors_local("concept")
@@ -301,7 +301,7 @@ async def sector_industry_cls_route(limit: int = Query(80)) -> list[dict[str, An
 @router.get("/sectors/{sector_code}/stocks")
 async def sector_stocks_route(sector_code: str) -> list[dict[str, Any]]:
     """板块成分股(东方财富)。"""
-    return await asyncio.to_thread(fetch_sector_stocks, sector_code)
+    return await asyncio.to_thread(market_data_hub.get_sector_stocks, sector_code)
 
 
 # TODO: 未接入前端
@@ -341,7 +341,7 @@ async def unified_sectors(
 @router.get("/hot-plates")
 async def hot_plates(limit: int = Query(15)) -> list[dict[str, Any]]:
     """热点板块及涨停股(财联社)。"""
-    return await asyncio.to_thread(fetch_hot_plates, limit)
+    return await asyncio.to_thread(market_data_hub.get_hot_plates, limit)
 
 
 # Phase 6: 前端已接入（marketApi.getStockHotRank）

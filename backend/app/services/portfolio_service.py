@@ -10,7 +10,7 @@ from ..models.portfolio import PortfolioETF
 from ..models.schemas import PortfolioETFCreate, PortfolioETFUpdate
 from ..fetchers.china_market import fetch_a_stock_batch, fetch_fund_nav, fetch_hk_stock_realtime, fetch_index_realtime
 from ..fetchers.global_markets_fetcher import fetch_us_etf_realtime
-from ..fetchers.fundamentals_fetcher import fetch_fundamentals
+from ..services.market_data_hub import market_data_hub
 from ..services.market_data_hub import market_data_hub
 from ..analysis.indicators import compute_all_indicators
 from ..analysis.signal import generate_signal
@@ -259,7 +259,7 @@ async def calculate_allocation(
             async def _fetch_all_fundamentals():
                 nonlocal sym_task_map
                 symbols = [(idx, etfs[idx].symbol) for idx in a_etf_indices]
-                futs = [run_sync(fetch_fundamentals, sym, timeout=8) for _, sym in symbols]
+                futs = [run_sync(market_data_hub.get_fundamentals, sym, timeout=8) for _, sym in symbols]
                 results = await asyncio.gather(*futs, return_exceptions=True)
                 sym_task_map = {sym: res for (_, sym), res in zip(symbols, results)}
             try:

@@ -857,6 +857,15 @@ class MarketDataHub:
         """返回缓存中有 K 线数据的 ETF 代码列表。"""
         return list(self._kline_cache_rows.keys())
 
+    def get_history(self, symbol: str, market: str = "A", period: str = "daily") -> list[dict] | None:
+        """实时取历史 K 线（委托 china_market.fetch_history，含 fallback 链）。"""
+        try:
+            from ..fetchers.china_market import fetch_history
+            return fetch_history(symbol, market, period) or []
+        except Exception as e:
+            logger.warning("[hub] get_history(%s) failed: %s", symbol, e)
+            return None
+
     def get_kline_rows(self, symbol: str, max_age: int = 300) -> list[dict] | None:
         """R3: 获取行式 K 线数据（直接读缓存，无转换）。
 
@@ -946,8 +955,15 @@ class MarketDataHub:
             return self._sector_momentum_cache
         return self._sector_momentum_cache or []
 
-    def get_hot_plates(self) -> list[dict]:
-        """获取热点板块缓存（Phase 6.1.6）。"""
+    def get_hot_plates(self, limit: int | None = None) -> list[dict]:
+        """热点板块。默认返回缓存；传 limit 时实时取数（保持路由语义）。"""
+        if limit is not None:
+            try:
+                from ..fetchers.sector_fetcher import fetch_hot_plates as _live
+                return _live(limit) or []
+            except Exception as e:
+                logger.warning("[hub] get_hot_plates(limit) failed: %s", e)
+                return []
         return self._hot_plates_cache or []
 
     def get_sector_heat(self) -> list[dict]:
@@ -1173,6 +1189,72 @@ class MarketDataHub:
             logger.info("[hub] refreshed %d news items", len(self._news_cache))
         except Exception as e:
             logger.exception("[hub] refresh_news failed: %s", e)
+
+    # ── Phase 2: sector / fundamental / history aggregation ──
+
+    def get_sector_industry(self, limit: int = 80) -> list[dict]:
+        """行业板块列表（实时取数）。"""
+        try:
+            from ..fetchers.sector_fetcher import fetch_industry_sectors
+            return fetch_industry_sectors(limit) or []
+        except Exception as e:
+            logger.warning("[hub] get_sector_industry failed: %s", e)
+            return []
+
+    def get_sector_concept(self, limit: int = 150) -> list[dict]:
+        """概念板块列表（实时取数）。"""
+        try:
+            from ..fetchers.sector_fetcher import fetch_concept_sectors
+            return fetch_concept_sectors(limit) or []
+        except Exception as e:
+            logger.warning("[hub] get_sector_concept failed: %s", e)
+            return []
+
+    def get_sector_stocks(self, sector_code: str) -> list[dict]:
+        """板块成分股（实时取数）。"""
+        try:
+            from ..fetchers.sector_fetcher import fetch_sector_stocks
+            return fetch_sector_stocks(sector_code) or []
+        except Exception as e:
+            logger.warning("[hub] get_sector_stocks(%s) failed: %s", sector_code, e)
+            return []
+
+    def get_fund_flow(self, symbol: str) -> dict | None:
+        """个股资金流。"""
+        try:
+            from ..fetchers.fundamentals_fetcher import fetch_fund_flow
+            return fetch_fund_flow(symbol)
+        except Exception as e:
+            logger.warning("[hub] get_fund_flow(%s) failed: %s", symbol, e)
+            return None
+
+    def get_hist_avg_volume(self, symbol: str, days: int = 20) -> dict | None:
+        """历史平均成交量。"""
+        try:
+            from ..fetchers.fundamentals_fetcher import fetch_hist_avg_volume
+            return fetch_hist_avg_volume(symbol, days)
+        except Exception as e:
+            logger.warning("[hub] get_hist_avg_volume(%s) failed: %s", symbol, e)
+            return None
+
+    def get_fundamentals(self, symbol: str) -> dict:
+        """基本面数据（Tushare）。"""
+        try:
+            from ..fetchers.fundamentals_fetcher import fetch_fundamentals
+            return fetch_fundamentals(symbol) or {}
+        except Exception as e:
+            logger.warning("[hub] get_fundamentals(%s) failed: %s", symbol, e)
+            return {}
+
+    def get_advance_decline(self) -> float:
+        """涨跌家数比（因子用）。"""
+        try:
+            from ..fetchers.fundamentals_fetcher import fetch_advance_decline_ratio
+            return fetch_advance_decline_ratio()
+        except Exception as e:
+            logger.warning("[hub] get_advance_decline failed: %s", e)
+            return 0.0
+
 
 
 # Global singleton

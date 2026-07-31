@@ -191,12 +191,12 @@ async def get_market_sectors(market: str, sector_type: str = "industry") -> list
     if market != "A":
         return []
 
-    from app.fetchers.sector_fetcher import fetch_industry_sectors, fetch_concept_sectors
+    from app.services.market_data_hub import market_data_hub
 
     try:
         if sector_type == "concept":
-            return await _call(fetch_concept_sectors, 200, timeout=10) or []
-        return await _call(fetch_industry_sectors, 200, timeout=10) or []
+            return await _call(market_data_hub.get_sector_concept, 200, timeout=10) or []
+        return await _call(market_data_hub.get_sector_industry, 200, timeout=10) or []
     except Exception:
         logger.warning("[market_router] sector fetch failed for %s", market)
         return []

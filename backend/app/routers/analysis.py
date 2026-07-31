@@ -22,11 +22,7 @@ from ..services.market_service import (
 )
 
 from ..analysis.indicators import compute_all_indicators
-from ..fetchers.sector_fetcher import (
-    fetch_industry_sectors, fetch_concept_sectors, fetch_sector_stocks,
-    fetch_hot_plates, fetch_sector_heat,
-)
-from ..fetchers.fundamentals_fetcher import fetch_fund_flow, fetch_hist_avg_volume
+from ..services.market_data_hub import market_data_hub
 from ..services.market_data_hub import market_data_hub
 from ..database import get_db
 from fastapi import HTTPException
@@ -516,13 +512,13 @@ async def sector_analysis_stream(req: SectorAnalysisRequest):
             )
 
         if sector_type == "concept":
-            sectors = await asyncio.to_thread(fetch_concept_sectors, 200)
+            sectors = await asyncio.to_thread(market_data_hub.get_sector_concept, 200)
         else:
-            sectors = await asyncio.to_thread(fetch_industry_sectors, 200)
+            sectors = await asyncio.to_thread(market_data_hub.get_sector_industry, 200)
         sector_data = next((s for s in sectors if s.get("sector_code") == sector_code), None)
         name = sector_name or (sector_data.get("sector_name", "") if sector_data else sector_code)
         
-        constituents = await asyncio.to_thread(fetch_sector_stocks, sector_code)
+        constituents = await asyncio.to_thread(market_data_hub.get_sector_stocks, sector_code)
         news = market_data_hub.get_news_headlines() or []
         try:
             macro = market_data_hub.get_news_macro() or []

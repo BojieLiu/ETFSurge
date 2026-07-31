@@ -283,12 +283,12 @@ async def _compute_fund_flow(market_data_hub) -> dict:
                 "negative_flow_count": 0, "total_symbols": 0}
 
     # 并发获取所有 fund flow（Semaphore 限流）
-    from ..fetchers.fundamentals_fetcher import fetch_fund_flow
+    from ..services.market_data_hub import market_data_hub
 
     async def _fetch_one(sym: str) -> dict | None:
         async with _fund_flow_sem:  # OPT-04: 最多 8 个并发
             try:
-                return await run_sync(fetch_fund_flow, sym, timeout=8)
+                return await run_sync(market_data_hub.get_fund_flow, sym, timeout=8)
             except Exception:
                 return None
 
