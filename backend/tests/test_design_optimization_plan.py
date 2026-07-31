@@ -34,7 +34,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 @pytest.fixture(autouse=True)
 def _patch_singleton_methods(monkeypatch):
-    """Auto-patch pool_manager singleton methods to prevent real HTTP calls."""
+    """Auto-patch market_data_hub singleton methods to prevent real HTTP calls."""
     monkeypatch.setattr("app.services.market_data_hub.market_data_hub.get_index_realtime",
                         MagicMock(return_value=[]))
     monkeypatch.setattr("app.services.market_data_hub.market_data_hub.get_sector_momentum",
@@ -200,7 +200,7 @@ async def test_p1_market_context_includes_index_realtime():
     assert len(strategies) >= 1
 
 
-# ─── P2: pool_manager empty-scanner fallback ─────────────────────────
+# ─── P2: market_data_hub empty-scanner fallback ─────────────────────────
 
 
 @pytest.mark.asyncio

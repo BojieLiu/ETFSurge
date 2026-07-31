@@ -1,12 +1,12 @@
 """
-TDD: PoolManager Phase 2 - factor-enhanced scoring + Layer 4/5.
+TDD: MarketDataHub Phase 2 - factor-enhanced scoring + Layer 4/5.
 """
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
 
 class TestMarketDataHubPhase2:
-    """PoolManager Phase 2: factor scoring + layer 4/5."""
+    """MarketDataHub Phase 2: factor scoring + layer 4/5."""
 
     @pytest.fixture
     def mock_factor_registry(self):

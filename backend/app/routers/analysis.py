@@ -69,7 +69,7 @@ def _inject_market_context(query: str, ctx: dict) -> dict:
     """根据 query 关键词智能注入市场数据到 context。
 
     Sector Phase 5: 流式和非流式路由共享的公共函数。
-    根据查询关键词识别用户意图，从 pool_manager 缓存获取对应数据注入 ctx。
+    根据查询关键词识别用户意图，从 market_data_hub 缓存获取对应数据注入 ctx。
     """
     from ..services.market_data_hub import market_data_hub
     q = query.lower()
@@ -244,7 +244,7 @@ async def llm_advice(req: LLMAdviceRequest):
                 idx = sentiment.get("sentiment_index", "?")
                 lbl = sentiment.get("sentiment_label", "?")
                 injection_lines.append(f"· 市场情绪: {lbl} ({idx}/100)")
-            # index_realtime from pool_manager or fallback
+            # index_realtime from market_data_hub or fallback
             idx_data = market_data_hub.get_index_realtime() or []
             for item in idx_data[:5]:
                 injection_lines.append(

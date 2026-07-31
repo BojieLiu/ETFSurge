@@ -1,7 +1,7 @@
 """
 strategy_design.py — 轻量编排器（v5）
 
-职责：调用数据管道（pool_manager）→ 调用纯策略引擎（engine/）→ 持久化返回。
+职责：调用数据管道（market_data_hub）→ 调用纯策略引擎（engine/）→ 持久化返回。
 """
 from __future__ import annotations
 
@@ -125,7 +125,7 @@ async def generate_enhanced_design(
                     industry=sym_meta.get("industry", "") if sym_meta else None,
                 )
 
-            # S6: Inject daily_change_pct and price from pool_manager market data
+            # S6: Inject daily_change_pct and price from market_data_hub market data
             for a in allocs:
                 if a.get("symbol") == "CASH":
                     continue
@@ -317,7 +317,7 @@ async def _compute_fund_flow(market_data_hub) -> dict:
 
 
 async def _build_market_context(market_data_hub) -> dict:
-    """从 pool_manager 构建市场上下文（真异步）。"""
+    """从 market_data_hub 构建市场上下文（真异步）。"""
     fund_flow = await _compute_fund_flow(market_data_hub)
     return {
         "market_regime": market_data_hub.get_market_regime() or "range_bound",

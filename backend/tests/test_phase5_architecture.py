@@ -121,7 +121,7 @@ class TestP4_3_RedisCache:
         )
 
     def test_pool_manager_has_cache_abstraction(self):
-        """pool_manager should use cache-backed state."""
+        """market_data_hub should use cache-backed state."""
         probes_path = os.path.join(
             os.path.dirname(__file__), "..", "app", "services", "market_data_hub.py"
         )

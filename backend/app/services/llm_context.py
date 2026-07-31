@@ -25,7 +25,7 @@ async def build_full_context(
     """统一的 LLM 上下文数据采集。
 
     所有字段都有 try/except 保护，单源失败不污染整体。
-    pool_manager 参数是已初始化的 PoolManager 单例。
+    market_data_hub 参数是已初始化的 MarketDataHub 单例。
 
     Returns:
         dict: 包含请求的上下文数据

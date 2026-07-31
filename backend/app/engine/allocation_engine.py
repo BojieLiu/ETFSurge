@@ -413,7 +413,7 @@ def allocate(
         budgets = dynamic_layer_budget(profile_key, regime)
 
         allocations: list[dict[str, Any]] = []
-        # B3: 跨层去重 — 基于 segment 字段（由 pool_manager 预先注入）
+        # B3: 跨层去重 — 基于 segment 字段（由 market_data_hub 预先注入）
         selected_segments: set[str] = set()
 
         def _dedup_segment(a: dict) -> bool:

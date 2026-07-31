@@ -1,5 +1,5 @@
 """
-Tests for factor integration: scaffolding → real compute + pool_manager wiring.
+Tests for factor integration: scaffolding → real compute + market_data_hub wiring.
 
 P1-1: _compute_stock_divergence returns non-zero with real data
 P1-2: market_data_hub.refresh() includes non-empty factor_scores
@@ -180,7 +180,7 @@ class TestMarketDataHubFactorScores:
     """Test that market_data_hub.refresh() passes real factor_scores."""
 
     @pytest.mark.asyncio
-    async def test_pool_manager_has_factor_scores(self):
+    async def test_market_data_hub_has_factor_scores(self):
         """refresh() sets non-empty factor_scores via FactorRegistry."""
         from app.services.market_data_hub import market_data_hub as pm
 

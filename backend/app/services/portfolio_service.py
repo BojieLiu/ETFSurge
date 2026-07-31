@@ -420,7 +420,7 @@ async def strategy_check(
     indicators = indicators if isinstance(indicators, dict) else {}
     factor_scores = factor_scores if isinstance(factor_scores, dict) else {}
 
-    # 市场状态统一从 pool_manager 读取（与设计管线一致，避免双套判定）
+    # 市场状态统一从 market_data_hub 读取（与设计管线一致，避免双套判定）
     try:
         from ..services.market_data_hub import market_data_hub
         regime = market_data_hub.get_market_regime() or "range_bound"
@@ -668,14 +668,14 @@ def _compute_risk_warnings(
 async def _compute_indicators(symbols: list[str]) -> dict:
     """并行计算每只持仓的技术指标 + 信号。
     
-    从 pool_manager 获取预计算的因子分矩阵传给 compute_all_indicators，
+    从 market_data_hub 获取预计算的因子分矩阵传给 compute_all_indicators，
     避免重复计算 RSI/KDJ/MACD。
     """
     from .market_service import get_history
     from ..analysis.indicators import compute_all_indicators
     from ..analysis.signal import generate_signal
 
-    # 复用 pool_manager 的因子分，免去重新计算 RSI/KDJ/MACD
+    # 复用 market_data_hub 的因子分，免去重新计算 RSI/KDJ/MACD
     try:
         from ..services.market_data_hub import market_data_hub
         factor_matrix = market_data_hub.get_factor_matrix()

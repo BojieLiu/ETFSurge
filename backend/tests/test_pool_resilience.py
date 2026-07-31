@@ -1,5 +1,5 @@
 """
-Test pool_manager resilience (7.5a): data pipeline fallback behavior.
+Test market_data_hub resilience (7.5a): data pipeline fallback behavior.
 
 These tests verify that:
   1. _last_good fallback preserves existing pool when scanner fails

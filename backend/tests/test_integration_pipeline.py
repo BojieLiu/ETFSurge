@@ -31,7 +31,7 @@ async def test_integration_engine_pipeline():
       - Each has >= 1 non-CASH allocation with positive weight
       - Rationale has no placeholder strings
     """
-    # generate_enhanced_design uses the module-level pool_manager singleton,
+    # generate_enhanced_design uses the module-level market_data_hub singleton,
     # so we must mock the singleton directly, not create a local instance.
     from app.services.strategy_design import generate_enhanced_design
     from app.services.market_data_hub import market_data_hub as live_pm

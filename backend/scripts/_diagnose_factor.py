@@ -4,7 +4,7 @@ import asyncio, time, logging
 logging.basicConfig(level=logging.WARNING)
 
 async def test():
-    from app.services.market_data_hub import pool_manager
+    from app.services.market_data_hub import market_data_hub
 
     await market_data_hub.refresh()
     factor_matrix = market_data_hub.get_factor_matrix()

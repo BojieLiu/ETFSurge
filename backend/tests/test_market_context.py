@@ -6,7 +6,7 @@ Covers:
   - resolve_market_context() backward compatibility
   - market_router routing functions
   - design-async market parameter (unsupported market)
-  - pool_manager regime cache dict[str,str]
+  - market_data_hub regime cache dict[str,str]
   - llm-report/stream market-aware filtering
   - sector-analysis market awareness
 """

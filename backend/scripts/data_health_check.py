@@ -102,7 +102,7 @@ def test_factor_differentiation():
 
 
 def test_pool_candidate_counts():
-    """检查 pool_manager 各层候选数。"""
+    """检查 market_data_hub 各层候选数。"""
     sys.path.insert(0, "backend")
     try:
         from app.services.market_data_hub import MarketDataHub

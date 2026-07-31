@@ -3,7 +3,7 @@
 Phase 2a — 因子与数据质量:
   P1.2d: 两融余额换源 (fundamentals_fetcher → akshare)
   P1.2e: 删除 north_flow + 新增 volume_ratio 因子
-  P1.1:  修复市场上下文空数据 (pool_manager 数据刷新链路)
+  P1.1:  修复市场上下文空数据 (market_data_hub 数据刷新链路)
   P1.2a: 新闻因子数据通路修复 (sentiment.news_heat/direction)
   P1.2b: premium_discount 因子修复 (IOPV数据链)
   P0.3:  修复港股美股搜索为 0
@@ -172,10 +172,10 @@ class TestP1_2e_SentimentWeights:
 # ── P1.1: 市场上下文空数据 ─────────────────────────────────
 
 class TestP1_1_MarketContext:
-    """P1.1: Ensure pool_manager properly populates market context."""
+    """P1.1: Ensure market_data_hub properly populates market context."""
 
     def test_pool_manager_has_market_context(self):
-        """pool_manager should export market context data functions."""
+        """market_data_hub should export market context data functions."""
         probes_path = os.path.join(
             os.path.dirname(__file__), "..", "app", "services", "market_data_hub.py"
         )
@@ -184,7 +184,7 @@ class TestP1_1_MarketContext:
 
         required_keys = ["index_realtime", "sector_momentum", "market_sentiment"]
         for key in required_keys:
-            assert key in content, f"pool_manager missing {key}"
+            assert key in content, f"market_data_hub missing {key}"
 
     def test_market_context_has_fallback(self):
         """Market context should have fallback defaults to avoid empty data."""
@@ -198,7 +198,7 @@ class TestP1_1_MarketContext:
         has_fallback = any(
             term in content for term in ["fallback", "default", "empty", "None"]
         )
-        assert has_fallback, "pool_manager should handle empty/None data with fallbacks"
+        assert has_fallback, "market_data_hub should handle empty/None data with fallbacks"
 
 
 # ── P1.2a: 新闻因子通路 ───────────────────────────────────

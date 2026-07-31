@@ -1,5 +1,5 @@
 """
-TDD: PoolManager - unified candidate pool management.
+TDD: MarketDataHub - unified candidate pool management.
 
 All external calls (etf_scanner, ETFClassifier, FactorRegistry) must be mocked.
 """
@@ -9,7 +9,7 @@ from datetime import datetime
 
 
 class TestMarketDataHub:
-    """PoolManager: candidate pool lifecycle."""
+    """MarketDataHub: candidate pool lifecycle."""
 
     @pytest.fixture
     def mock_scanner(self):

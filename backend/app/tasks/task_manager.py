@@ -5,7 +5,7 @@ task_manager.py — 通用异步任务管理器
 
 v2 (design-check-pipeline-redesign):
   - 新增 design_pipeline() 顺序 Pipeline 替代 design_worker + fire-and-forget
-  - 修复 pool_manager NameError
+  - 修复 market_data_hub NameError
   - 新增 per-stage WS 通知
   - 引入 report_quality 分级
 """
@@ -427,7 +427,7 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
         await _notify(task_id, "quick_ready", progress=80, stage="LLM 报告生成中")
 
         try:
-            # 从 market_context 取市场情绪，避免直接引用 pool_manager（NameError 修复）
+            # 从 market_context 取市场情绪，避免直接引用 market_data_hub（NameError 修复）
             market_sentiment = market_context.get("market_sentiment", {}) if market_context else {}
 
             # OPT-06: LLM 阶段 35s 预算
