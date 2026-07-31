@@ -243,8 +243,13 @@ function doSearch() {
 
 function selectSuggestion(s) {
   form.value.symbol = s.symbol
-  // Z29: HK/US 结果回填市场类型，否则 addWatchlist 会按 A 股入库（无行情）
-  if (s.market === 'HK' || s.market === 'US') form.value.asset_type = s.market
+  // Z29: HK/US 结果回填市场类型；A 股结果回落 'A'
+  // （否则先选 AAPL(US) 再选 A 股标的，会用错误市场类型入库、拿不到行情）
+  if (s.market === 'HK' || s.market === 'US') {
+    form.value.asset_type = s.market
+  } else if (s.market === 'A') {
+    form.value.asset_type = 'A'
+  }
   suggestions.value = []
   suggestIndex.value = -1
 }

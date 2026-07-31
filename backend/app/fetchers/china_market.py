@@ -628,6 +628,8 @@ def fetch_hk_spot_list() -> list[dict[str, Any]]:
                 return ak.stock_hk_spot_em()
         df = run_in_thread(_p, timeout=10, executor="long")
         if df is None or df.empty:
+            # 失败/空也短缓存 60s，避免网络不可用时每次搜索都阻塞
+            sync_memory_cache.set(cache_key, [], 60)
             return []
         _decode_df(df)
         rows = []
@@ -644,6 +646,11 @@ def fetch_hk_spot_list() -> list[dict[str, Any]]:
         sync_memory_cache.set(cache_key, rows, CACHE_TTL["hk_spot_list"])
         return rows
     except Exception:
+        # 失败/异常也短缓存 60s
+        try:
+            sync_memory_cache.set(cache_key, [], 60)
+        except Exception:
+            pass
         return []
 
 
@@ -666,6 +673,8 @@ def fetch_us_spot_list() -> list[dict[str, Any]]:
                 return ak.stock_us_spot_em()
         df = run_in_thread(_p, timeout=10, executor="long")
         if df is None or df.empty:
+            # 失败/空也短缓存 60s，避免网络不可用时每次搜索都阻塞
+            sync_memory_cache.set(cache_key, [], 60)
             return []
         _decode_df(df)
         rows = []
@@ -679,6 +688,11 @@ def fetch_us_spot_list() -> list[dict[str, Any]]:
         sync_memory_cache.set(cache_key, rows, CACHE_TTL["us_spot_list"])
         return rows
     except Exception:
+        # 失败/异常也短缓存 60s
+        try:
+            sync_memory_cache.set(cache_key, [], 60)
+        except Exception:
+            pass
         return []
 
 

@@ -983,10 +983,14 @@ def section_admin():
         r = requests.get(f"{BASE}/api/v1/admin/sources/health", timeout=10)
         if r.status_code == 200:
             data = r.json()
-            sources = data.get('sources', {})
-            healthy = sum(1 for v in sources.values()
-                          if isinstance(v, dict) and v.get("healthy", False))
-            check("数据源健康", healthy > 0, f"{healthy}/{len(sources)} 健康")
+            # 端点实际返回数组 [{name, available, failures, ...}]；兼容 dict 包装形态
+            sources = data if isinstance(data, list) else data.get("sources", data)
+            if isinstance(sources, list) and sources:
+                healthy = sum(1 for v in sources
+                              if isinstance(v, dict) and v.get("available", False))
+                check("数据源健康", healthy > 0, f"{healthy}/{len(sources)} 健康")
+            else:
+                check("数据源健康端点", False, "响应结构非预期（非列表）")
         else:
             check("数据源健康端点", False, f"HTTP {r.status_code}")
     except Exception as e:

@@ -680,9 +680,14 @@ async def search_hk_us(keyword: str = "", enrich: bool = True,
     if include_stocks:
         # 函数内局部导入 + 每次调用重新解析模块属性 → 测试 patch 模块属性即生效
         from ..fetchers.china_market import fetch_hk_spot_list, fetch_us_spot_list
-        for mk, fetcher in (("HK", fetch_hk_spot_list), ("US", fetch_us_spot_list)):
-            rows = await _call(fetcher, timeout=15)  # _call 失败返回 None，必须判空
-            if not rows:
+        # 并发拉取两个市场的 spot（单个最坏 10s 超时，串行会翻倍阻塞搜索）
+        spot_rows = await asyncio.gather(
+            _call(fetch_hk_spot_list, timeout=15),
+            _call(fetch_us_spot_list, timeout=15),
+            return_exceptions=True,
+        )
+        for mk, rows in zip(("HK", "US"), spot_rows):
+            if not rows or not isinstance(rows, list):
                 continue
             for r in rows:
                 sym = r.get("symbol", "")

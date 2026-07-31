@@ -55,9 +55,9 @@ describe('WatchlistPanel — Z29 asset_type backfill', () => {
     expect(wrapper.vm.form.asset_type).toBe('HK')
   })
 
-  it('selectSuggestion 选中 A 股标的 → form.asset_type 保持 A', async () => {
+  it('selectSuggestion 选中 A 股标的 → form.asset_type 回落 A（即使之前是 US）', async () => {
     await flushPromises()
-    wrapper.vm.form.asset_type = 'A'
+    wrapper.vm.form.asset_type = 'US' // 模拟先选了 AAPL
     wrapper.vm.suggestions = [{ market: 'A', symbol: '600519', name: '贵州茅台' }]
     wrapper.vm.selectSuggestion(wrapper.vm.suggestions[0])
     expect(wrapper.vm.form.asset_type).toBe('A')
