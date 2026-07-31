@@ -143,4 +143,14 @@ describe('useMarketSearch', () => {
     expect(composable.showDropdown.value).toBe(false)
     expect(composable.activeIndex.value).toBe(-1)
   })
+
+  it('Z29: doSearch passes raw Chinese keyword + include_stocks:true (axios 负责编码)', async () => {
+    // 防回归：中文 keyword 必须原样传给 marketApi.search（不预编码、不手拼 URL），
+    // include_stocks 显式传递（后端按分支生效）。
+    marketApi.search.mockResolvedValue({ data: [{ symbol: '00700', name: '腾讯控股' }] })
+    composable.searchQuery.value = '腾讯控股'
+    await composable.doSearch()
+    expect(marketApi.search).toHaveBeenCalledWith('腾讯控股', { include_stocks: true })
+    expect(composable.searchResults.value[0].symbol).toBe('00700')
+  })
 })

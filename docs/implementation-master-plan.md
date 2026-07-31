@@ -1,12 +1,13 @@
 ﻿# ETF Surge 方案实施总计划
 
-> 生成日期: 2026-07-31 | 版本: **v37.0**
+> 生成日期: 2026-07-31 | 版本: **v38.0**
 > ✅ **文档归档（2026-07-29 v20.1）**：8 份已全部实施/已替代的方案文档归档至 `docs/archived/` — `optimization-master-plan.md`、`optimization-master-plan-v2.md`、`performance-diagnosis-and-optimization-plan.md`、`fix-plan-master.md`、`fix-plan-pool.md`、`s5-markethub-design.md`、`system-performance-and-quality-review.md`、`fundamental-flow-factors-evaluation.md`。
 > ✅ **Phase 21 已完成**（2026-07-29）：修复 4 个前端单测失败（useMarketSearch + useSectorAnalysis mock 目标错误） + UI Phase 3(Steps 6-8)。详见下方 v21.0。
 > ✅ **Phase 27 已完成**（2026-07-30）：实施 `docs/system-diagnosis-and-optimization-plan.md` 子集 — F1(timeline select 导入 P0) + F2(A股搜索降级 levistock P1) + F4(max_tokens 8192→12288) + F5(删除 reasoning_content fallback) + F19(因子 industry 注入) + F15/F16/F20/F22(verify_e2e 加固：跨市场搜索/M14 门禁/china_specific 完整性/预热门禁收紧)。契约驱动 + TDD：新增 `api-contracts/market/search.md` 与 `tests/test_system_diagnosis_fixes.py`（15 用例全 PASS）。详见下方 v27.0。
 > ✅ **Phase 28 已完成**（2026-07-30）：推进 `docs/system-diagnosis-and-optimization-plan.md` 的**遗漏项 + 推迟项**。详见下方 v28.0。
 > ✅ **Phase 29 已完成**（2026-07-30）：实施诊断方案 6 项修复 — Z01(import time 模块级) + Z02(US 行情：修复 Finnhub/TwelveData 函数名冲突 + FRED _API_BASE 覆盖) + Z03(china_specific IC 显示修复) + Z04(etf_specific 数据注入) + Z10(信号阈值放松 ±1.5) + Z11(设计熔断器静态池兜底)。契约驱动 + TDD：单测扩至 36 用例全 PASS。详见下方 v29.0。
 > ✅ **Phase 30a 已完成**（2026-07-31）：实施 `docs/v5_diagnostic_and_optimization_plan.md` — Z21(WatchlistPanel.vue formatPct 修复) + Z23(fetch_hot_plates levistock 异常兜底) + Z24(LLMAdviceRequest 去重，仅保留一个带 market 字段的模型) + Z15(verify_e2e section_search 修复) + Z16(verify_e2e 新增 section_fundamentals)。详见下方 v30.0。
+> ✅ **Phase 35 已完成**（2026-07-31）：实施 `docs/v5_z15_z29_implementation_design.md` — **Z29**（搜索自动补全不完善）：`search_hk_us` 重写为「静态基座(ETF+个股) + akshare 全量 spot 缓存 + ETF 实时 enrich」三级搜索，`include_stocks` 按分支生效，`asset_type` 统一为市场代码(HK/US)，默认模式跨市场合并(A股ETF→A股个股→HK→US，≤30)；前端 WatchlistPanel 传 include_stocks + selectSuggestion 回填 asset_type。**Z15**（verify_e2e 强化）：消灭恒过断言、新增 hk-market/us-market/factor-health 模块、section_fundamentals 严格化、sector rotation 门禁、修复 section_admin 重复定义。契约驱动 + TDD：新增 `api-contracts/market/search.md` v3.0 与 `tests/test_z29_search.py`（14 用例全 PASS），前端新增 WatchlistPanel.spec.js（4 用例）+ useMarketSearch 编码防护测试，npm run build 通过。详见下方 v38.0。
 > ✅ **Phase 30b 已完成**（2026-07-31）：实施 `docs/v5_diagnostic_and_optimization_plan.md` 剩余项 — Z27(TaskManager persist path 修复) + Z26(策略检查 LLM prompt min_suggestions 下限) + Z17(板块轮动路由 `/sectors/rotation` + `/sectors` `type` 参数默认值防 422) + Z25(frontend API 新增 `getSectorRotation`)。契约驱动 + TDD：扩 `test_v5_diagnosis_fixes.py` 至 14 用例全 PASS。详见下方 v31.0。
 > ✅ **Phase 20 已完成**（2026-07-29）：综合诊断剩余项 — F1(布林带列名前缀匹配修复 P0) + F2(板块默认限额 80→500 P1) + F3(ic_tracker 类型错误 P1) + 11 个新单测。详见下方 v20.0。
 > ✅ **Phase 16 已完成**（2026-07-29）：P1/P2 剩余项 — S5(K线缓存统一) + S7(策略检查LLM报告) + S11(新闻重试) + S12(网易财经K线)。详见下方 v16.0。
@@ -1526,7 +1527,18 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 | | | | **改动文件：** `backend/app/routers/portfolio.py`、`backend/app/routers/market.py`、`backend/app/analysis/llm.py`、`backend/app/services/pool_manager.py`、`backend/scripts/verify_e2e.py`、`backend/tests/test_system_diagnosis_fixes.py`（新）、`api-contracts/market/search.md`（新）、`docs/implementation-master-plan.md` |
 | | | | **未实施（本期范围外，待后续 Phase）：** F3(HK/US 实时查询增强)、F6(LLM 重试)、F7(LLM 健康探针端点)、F8(calculate 并行化)、F9-F14(预热/前端性能)、F17(Lighthouse CI)、F18 等，见原方案实施路标。
 
-| | **v37.0** | 2026-07-31 | **Phase 34 — v6 架构迁移计划全部完成（数据管道入口聚合）** | 详见下方 |
+| | **v38.0** | 2026-07-31 | **Phase 35 — Z15(verify_e2e强化) + Z29(搜索自动补全) 实施** | 详见下方 |
+| | | | | **来源：** `docs/v5_z15_z29_implementation_design.md`（v2.1，仅 Z15 + Z29 两项） |
+| | | | | **Z29 — 后端搜索（4 处改动）：** ① `HKUS_STOCK_MAP` 静态个股基座（15 港股 + 18 美股龙头，离线可用）；② `china_market.py` 新增 `fetch_hk_spot_list`/`fetch_us_spot_list`（akshare spot，6h 长 TTL 缓存，列名兼容 + HK 代码 zfill(5) 补零，失败返回 [] 绝不抛）；③ `search_hk_us` 重写为三级搜索（静态基座 → include_stocks 时 spot 动态补充 → 仅 type=="etf" 命中实时 enrich），`asset_type` 统一为市场代码 `"HK"/"US"`、`type` 为 `"etf"/"stock"`，归一化 symbol 去重基座优先（`盈富基金` 恰好一条不误标 stock）；④ `/market/search` 路由重写：`market=HK/US` 透传 include_stocks，`market=null/global` 跨市场合并（search_etf 过滤非 ETF 行 + `_search_a_stocks` instruments→levistock 降级链 + HK→US 排序，各段 top10 总计 ≤30，(market,symbol) 去重）。 |
+| | | | | **Z29 — 前端（2 处）：** WatchlistPanel `doSearch` 传 `{include_stocks:true}`；`selectSuggestion` 对 HK/US 结果回填 `form.asset_type`（否则 AAPL/00700 按 A 股入库无行情）。 |
+| | | | | **Z15 — verify_e2e C1-C9：** C1 section_search 消灭恒过（510300/盈富基金/SPY 逐条断言非空）；C2/C3 新增 `hk-market`/`us-market` 模块（个股 + ETF 基座，market 字段校验）；C4 `factor-health` 别名薄包装；C5 section_fundamentals 严格化（500/异常 → FAIL，清理乱码标签）；C6 check_sector_data 追加 `/sectors/rotation` 轮动门禁；C7 删除弱版 section_admin 重复定义（sources/health 并入强版）；C8 模块注册 + main() 特判元组补 factor-health；C9 F15 断言 HK/US URL 补 `&include_stocks=true`。 |
+| | | | | **契约：** `api-contracts/market/search.md` 更新至 v3.0（market=null 跨市场语义 / include_stocks 按分支生效 / asset_type=市场代码 / 截断排序约束 / HK-US 个股响应示例）。 |
+| | | | | **测试：** 后端新增 `tests/test_z29_search.py` **14 用例全 PASS**（个股搜索/中英文名/静态兜底/include_stocks 语义/基座优先去重/asset_type 市场代码/spot 不 enrich/路由级跨市场合并+排序+去重/levistock 降级链）；既有 F3 × 3 回归通过；相关套件 140 用例全 PASS；前端新增 WatchlistPanel.spec.js 4 用例 + useMarketSearch 编码防护 1 用例全 PASS，`npm run build` 通过。 |
+| | | | | **验证结果：** 后端 `python -m pytest` 分段回归全绿（0-75% 段在批量运行中全 PASS；其余 25% 段 201 用例含 test_z29_search 14 用例 + F3 回归全 PASS；另 140 个相关用例全 PASS）；verify_e2e `search,hk-market,us-market,factor-health,fundamentals,sectors,admin` 模块全 PASS；前后端本地启动手动走查搜索框（00700/AAPL/SPY/盈富基金/贵州茅台 均命中）。 |
+| | | | | **改动文件：** `backend/app/services/market_service.py`（HKUS_STOCK_MAP + search_hk_us 重写）、`backend/app/routers/market.py`（search 路由 + _search_a_stocks）、`backend/app/fetchers/china_market.py`（2 个 spot fetcher）、`backend/app/core/ttl.py`（2 个 6h TTL）、`backend/scripts/verify_e2e.py`（C1-C9）、`backend/tests/test_z29_search.py`（新）、`frontend/src/components/market/WatchlistPanel.vue`、`frontend/src/components/market/WatchlistPanel.spec.js`（新）、`frontend/src/test/useMarketSearch.spec.js`、`api-contracts/market/search.md`、`docs/implementation-master-plan.md` |
+| | | | | **已知问题（非本方案范围）：** 前端全量 `npm test` 中 TokenMonitor「renders granularity tab labels」1 例失败为**预存 flake**（隔离运行通过、与本次改动无关，已用 git stash 验证）；R4/R5 设计风险照旧（HK 个股实时 enrich 前缀 bug 由「个股一律不 enrich」规避；US spot 境内网络不可用时降级静态基座）。 |
+
+
 | | | | | **来源：** `docs/architecture-migration-plan-v6.md`（v6.3） |
 | | | | | **Phase 0 — 重命名收尾 (1313c6f)：** 清理 17 个源文件/测试中 pool_manager 注释残留；grep 终检空。 |
 | | | | | **Phase 1 — 新闻聚合 (d9099b6)：** hub 新增带标签新闻桶（headlines/macro/global）+ 懒刷新；9 个新闻直连点改向 hub；main.py 新增 120s news 循环。 |

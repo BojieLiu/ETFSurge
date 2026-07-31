@@ -605,40 +605,111 @@ HKUS_ETF_MAP: list[dict[str, str]] = [
 ]
 
 
-async def search_hk_us(keyword: str = "", enrich: bool = True) -> list[dict[str, Any]]:
-    """Search HK/US ETFs by keyword.
+# Z29: 静态个股基座（离线可用）。5 位港股代码无后缀；美股代码无后缀。
+# 与 HKUS_ETF_MAP 一并作为 `search_hk_us` 的静态基座；高流动性龙头为主。
+HKUS_STOCK_MAP: list[dict[str, str]] = [
+    # 港股个股
+    {"symbol": "00700", "name": "腾讯控股", "market": "HK"},
+    {"symbol": "09988", "name": "阿里巴巴-W", "market": "HK"},
+    {"symbol": "03690", "name": "美团-W", "market": "HK"},
+    {"symbol": "01810", "name": "小米集团-W", "market": "HK"},
+    {"symbol": "00005", "name": "汇丰控股", "market": "HK"},
+    {"symbol": "00388", "name": "香港交易所", "market": "HK"},
+    {"symbol": "00941", "name": "中国移动", "market": "HK"},
+    {"symbol": "01299", "name": "友邦保险", "market": "HK"},
+    {"symbol": "02318", "name": "中国平安", "market": "HK"},
+    {"symbol": "09618", "name": "京东集团-SW", "market": "HK"},
+    {"symbol": "01024", "name": "快手-W", "market": "HK"},
+    {"symbol": "02020", "name": "安踏体育", "market": "HK"},
+    {"symbol": "02382", "name": "舜宇光学科技", "market": "HK"},
+    {"symbol": "00939", "name": "建设银行", "market": "HK"},
+    {"symbol": "01398", "name": "工商银行", "market": "HK"},
+    # 美股个股
+    {"symbol": "AAPL", "name": "苹果", "market": "US"},
+    {"symbol": "MSFT", "name": "微软", "market": "US"},
+    {"symbol": "NVDA", "name": "英伟达", "market": "US"},
+    {"symbol": "GOOGL", "name": "谷歌-A", "market": "US"},
+    {"symbol": "AMZN", "name": "亚马逊", "market": "US"},
+    {"symbol": "TSLA", "name": "特斯拉", "market": "US"},
+    {"symbol": "META", "name": "Meta平台", "market": "US"},
+    {"symbol": "BRK.B", "name": "伯克希尔哈撒韦-B", "market": "US"},
+    {"symbol": "LLY", "name": "礼来", "market": "US"},
+    {"symbol": "AVGO", "name": "博通", "market": "US"},
+    {"symbol": "JPM", "name": "摩根大通", "market": "US"},
+    {"symbol": "V", "name": "Visa", "market": "US"},
+    {"symbol": "XOM", "name": "埃克森美孚", "market": "US"},
+    {"symbol": "COST", "name": "好市多", "market": "US"},
+    {"symbol": "ORCL", "name": "甲骨文", "market": "US"},
+    {"symbol": "PG", "name": "宝洁", "market": "US"},
+    {"symbol": "HD", "name": "家得宝", "market": "US"},
+    {"symbol": "NFLX", "name": "奈飞", "market": "US"},
+]
 
-    Uses static map for fast local matching (always works offline), then
-    supplements each hit with live quote data via the project's unified realtime
-    pipeline (TwelveData/Finnhub for US, HK sources for HK) — F3.
-    Live enrichment is best-effort: any failure falls back to the static result
-    without raising.
 
-    Returns list of {symbol, name, market, asset_type, type, [price], [change_pct]}.
+def _norm_symbol(s: str) -> str:
+    """归一化去重键：去掉 .HK/.US 后缀（基座 ETF 带后缀、spot 全量列表不带）。"""
+    return s.split(".")[0].lower()
+
+
+async def search_hk_us(keyword: str = "", enrich: bool = True,
+                       include_stocks: bool = False) -> list[dict[str, Any]]:
+    """三级搜索 HK/US：静态基座 →（include_stocks=True 时）akshare 全量 spot → ETF 实时 enrich。
+
+    include_stocks=False 为默认（仅静态 ETF 基座，向后兼容，不触网——
+    既有 F3 单测保持纯静态）；True 时启用 spot 动态补充（调用方显式传入）。
+
+    asset_type 统一为市场代码（"HK"/"US"），type 为证券种类（"etf"/"stock"）——
+    与 PortfolioManager.selectHotEtf / watchlist 添加链路的 asset_type 语义对齐。
+
+    enrich 仅作用于 type=="etf" 命中（全部来自静态 ETF 基座，≤24 只）：
+    spot 个股命中量大且行内已带实时价 → 不 enrich（防限流）；
+    静态基座个股命中因 HK 实时链路前缀 bug 不可靠 → 不 enrich（R5）。
     """
-    import asyncio
-
     kw = keyword.lower().strip()
+    # ① 静态基座: HKUS_ETF_MAP（恒有）+ HKUS_STOCK_MAP（仅 include_stocks 时，参数语义一致）
+    base_pool = HKUS_ETF_MAP + (HKUS_STOCK_MAP if include_stocks else [])
+    base = [{
+        "symbol": e["symbol"], "name": e["name"], "market": e["market"],
+        "asset_type": e["market"],
+        "type": "etf" if e["symbol"] in _HKUS_ETF_SYMBOLS else "stock",
+    } for e in base_pool
+        if not kw or kw in e["symbol"].lower() or kw in e["name"].lower()]
 
-    # Base matches from static map
-    if kw:
-        base = [e for e in HKUS_ETF_MAP
-                if kw in e["symbol"].lower() or kw in e["name"].lower()]
-    else:
-        base = list(HKUS_ETF_MAP)
+    # ② 动态补充: akshare 全量 spot（尽力而为；与基座按归一化 symbol 去重，基座优先）
+    spot: list[dict[str, Any]] = []
+    if include_stocks:
+        # 函数内局部导入 + 每次调用重新解析模块属性 → 测试 patch 模块属性即生效
+        from ..fetchers.china_market import fetch_hk_spot_list, fetch_us_spot_list
+        for mk, fetcher in (("HK", fetch_hk_spot_list), ("US", fetch_us_spot_list)):
+            rows = await _call(fetcher, timeout=15)  # _call 失败返回 None，必须判空
+            if not rows:
+                continue
+            for r in rows:
+                sym = r.get("symbol", "")
+                name = r.get("name", "")
+                name_en = r.get("name_en") or ""
+                if kw and kw not in sym.lower() and kw not in name.lower() and kw not in name_en.lower():
+                    continue
+                spot.append({
+                    "symbol": sym, "name": name_en or name,
+                    "market": mk, "asset_type": mk, "type": "stock",
+                })
 
-    results = [{
-        "symbol": e["symbol"],
-        "name": e["name"],
-        "market": e["market"],
-        "asset_type": "etf",
-        "type": "etf",
-    } for e in base]
+    # 去重（key 归一化处理 .HK/.US 后缀不一致；base 在前 → 基座优先天然成立）
+    seen: set[tuple[str, str]] = set()
+    merged: list[dict[str, Any]] = []
+    for it in base + spot:
+        key = (_norm_symbol(it["symbol"]), it["market"])
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(it)
+    results = merged[:30]
 
-    if not enrich or not results:
+    if not enrich:
         return results
 
-    # F3: supplement with live quotes (best-effort, fast-fail on timeout)
+    # ③ enrich 仅作用于 type=="etf" 命中
     async def _enrich(item: dict) -> dict:
         try:
             quote = await asyncio.wait_for(
@@ -655,17 +726,23 @@ async def search_hk_us(keyword: str = "", enrich: bool = True) -> list[dict[str,
                          item["symbol"], _exc)
         return item
 
+    etf_results = [it for it in results if it["type"] == "etf"]
     try:
-        enriched = await asyncio.gather(*(_enrich(it) for it in results),
+        enriched = await asyncio.gather(*(_enrich(it) for it in etf_results),
                                         return_exceptions=True)
-        # _enrich catches its own errors and returns the original dict, so
-        # `enriched` is normally all dicts; keep only dicts as a safety net.
-        dicts = [r for r in enriched if isinstance(r, dict)]
-        if dicts:
-            results = dicts
+        # gather 保持顺序，与 etf_results 一一对应；_enrich 返回新 dict，不能用 id() 映射
+        enriched_map = {
+            (orig["symbol"], orig["market"]): new
+            for orig, new in zip(etf_results, enriched) if isinstance(new, dict)
+        }
+        results = [enriched_map.get((it["symbol"], it["market"]), it)
+                   if it["type"] == "etf" else it for it in results]
     except Exception as _exc:
         logger.warning("[search_hk_us] enrichment gather failed: %s", _exc)
     return results
+
+
+_HKUS_ETF_SYMBOLS = {e["symbol"] for e in HKUS_ETF_MAP}
 
 
 async def get_indices_meta() -> list[dict[str, Any]]:

@@ -61,18 +61,27 @@ async def history(
 @router.get("/search")
 async def search(
     keyword: str = Query(""),
-    market: str | None = Query(None, description="Market filter: A/HK/US/global"),
-    include_stocks: bool = Query(False, description="Also include individual stocks in results"),
+    market: str | None = Query(None, description="Market filter: A/HK/US/global; null = 跨市场"),
+    include_stocks: bool = Query(False, description="结果中是否包含个股"),
 ) -> list[dict[str, Any]]:
-    """Unified search: market=A searches stocks via instruments table, default searches ETFs."""
+    """统一搜索。
+
+    - market=A   → 个股优先（instruments 表）→ 空则降级 ETF（F2 既有行为）。
+    - market=HK/US → search_hk_us(keyword, include_stocks=include_stocks)
+      （include_stocks=false 仅静态 ETF 基座；true 静态基座 + akshare spot 个股）。
+    - market=null/global → 跨市场合并：A股ETF →（include_stocks 时 A股个股）→ HK → US，
+      各段 top 10、总计 ≤ 30、按 (market, symbol) 去重（Z29）。
+    """
     from ..models.search import Instrument
     from sqlalchemy import select, or_
 
-    if market and market.upper() == "A":
+    mkt = market.upper() if market else None
+
+    if mkt == "A":
         try:
             async with async_session() as session:
                 stmt = select(Instrument).where(
-                    Instrument.is_active == True,
+                    Instrument.is_active == True,  # noqa: E712
                     Instrument.market == "A",
                     Instrument.asset_type == "stock",
                 )
@@ -105,12 +114,101 @@ async def search(
             logger.warning("[search] A-share ETF-mode fallback failed: %s", e)
         return []
 
-    if market and market.upper() == "HK":
-        return await search_hk_us(keyword)
-    if market and market.upper() == "US":
-        return await search_hk_us(keyword)
+    if mkt == "HK":
+        return await search_hk_us(keyword, include_stocks=include_stocks)
+    if mkt == "US":
+        return await search_hk_us(keyword, include_stocks=include_stocks)
 
-    return await market_data_hub.search_etf(keyword)
+    # 默认 / global：跨市场合并（A股ETF → A股个股(include_stocks) → HK → US）
+    try:
+        a_etf, hk_us = await asyncio.gather(
+            market_data_hub.search_etf(keyword),
+            search_hk_us(keyword, enrich=False, include_stocks=include_stocks),
+        )
+    except Exception as e:
+        logger.warning("[search] cross-market merge failed: %s", e)
+        a_etf, hk_us = [], []
+
+    merged: list[dict[str, Any]] = []
+    # A 股 ETF 段：过滤非 ETF 行，避免与 _search_a_stocks 的个股结果重复
+    a_etf = [r for r in (a_etf or []) if r.get("asset_type") == "etf"]
+    merged += a_etf[:10]
+    if include_stocks:
+        merged += await _search_a_stocks(keyword)
+    hk_us = hk_us or []
+    merged += [r for r in hk_us if r.get("market") == "HK"][:10]
+    merged += [r for r in hk_us if r.get("market") == "US"][:10]
+
+    # 按 (market, symbol) 去重（跨段可能重复）
+    seen: set[tuple[str, str]] = set()
+    dedup: list[dict[str, Any]] = []
+    for it in merged:
+        key = (it.get("market"), it.get("symbol"))
+        if key in seen:
+            continue
+        seen.add(key)
+        dedup.append(it)
+    return dedup[:30]
+
+
+async def _search_a_stocks(keyword: str) -> list[dict[str, Any]]:
+    """A 股个股搜索：instruments 表（market=A, asset_type=stock）→ 空则 levistock 降级。
+
+    仅供默认分支 include_stocks=true 使用；market=A 分支保持既有行为不动。
+    """
+    from ..models.search import Instrument
+    from sqlalchemy import select, or_
+
+    try:
+        async with async_session() as session:
+            stmt = select(Instrument).where(
+                Instrument.is_active == True,  # noqa: E712
+                Instrument.market == "A",
+                Instrument.asset_type == "stock",
+            )
+            if keyword:
+                kw = keyword.lower()
+                stmt = stmt.where(
+                    or_(
+                        Instrument.symbol.ilike(f"%{kw}%"),
+                        Instrument.name.ilike(f"%{kw}%"),
+                        Instrument.pinyin.ilike(f"%{kw}%"),
+                        Instrument.first_letter.ilike(f"%{kw}%"),
+                    )
+                )
+            stmt = stmt.limit(10)
+            rows = (await session.execute(stmt)).scalars().all()
+            if rows:
+                return [{
+                    "symbol": r.symbol, "name": r.name,
+                    "market": r.market, "asset_type": r.asset_type,
+                    "type": "stock",
+                } for r in rows]
+    except Exception as e:
+        logger.warning("[search] _search_a_stocks local table failed: %s", e)
+
+    # 降级：levistock 全量（与 /search/stocks 同链）
+    try:
+        full = await asyncio.to_thread(market_data_hub.get_all_stocks)
+        normalised = [
+            {"symbol": s.get("stock_code") or s.get("symbol", ""),
+             "name": s.get("stock_name") or s.get("name", "")}
+            for s in (full or [])
+        ]
+        if not keyword:
+            return [{
+                "symbol": s["symbol"], "name": s["name"],
+                "market": "A", "asset_type": "stock", "type": "stock",
+            } for s in normalised][:10]
+        kw = keyword.lower()
+        return [{
+            "symbol": s["symbol"], "name": s["name"],
+            "market": "A", "asset_type": "stock", "type": "stock",
+        } for s in normalised
+            if kw in s["symbol"].lower() or kw in s["name"].lower()][:10]
+    except Exception as e:
+        logger.warning("[search] _search_a_stocks levistock fallback failed: %s", e)
+        return []
 
 
 # TODO: 未接入前端

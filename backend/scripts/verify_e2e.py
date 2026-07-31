@@ -239,7 +239,8 @@ def section_market():
     for _mkt, _kw in [("A", "510880"), ("HK", "00700"), ("US", "AAPL")]:
         try:
             _t0 = time.time()
-            r = requests.get(f"{BASE}/api/v1/market/search?keyword={_kw}&market={_mkt}", timeout=20)
+            _extra = "&include_stocks=true" if _mkt in ("HK", "US") else ""
+            r = requests.get(f"{BASE}/api/v1/market/search?keyword={_kw}&market={_mkt}{_extra}", timeout=20)
             _elapsed = time.time() - _t0
             ok = r.status_code == 200 and isinstance(r.json(), list) and len(r.json()) > 0
             check(f"GET /market/search?keyword={_kw}&market={_mkt} -> {r.status_code} ({_elapsed:.1f}s) 有结果",
@@ -725,6 +726,26 @@ def check_sector_data():
         except Exception as e:
             check(f"GET /sectors/{typ}", False, str(e))
 
+    # Z15/C6: 板块轮动门禁（Z17 回归）— rotation 数据源为外部 provider，
+    # 先打印样例字段确认列名，断言至少含一个涨跌幅字段（避免环境字段差异误红）。
+    try:
+        r = requests.get(f"{BASE}/api/v1/market/sectors/rotation?limit=5", timeout=15)
+        check("GET /sectors/rotation -> 200", r.status_code == 200, f"HTTP {r.status_code}")
+        if r.status_code == 200:
+            data = r.json()
+            is_list = isinstance(data, list)
+            check("板块轮动返回非空", is_list and len(data) > 0,
+                  f"{len(data) if is_list else 'non-list'} 条")
+            if is_list and data:
+                first = data[0]
+                check("板块轮动样例字段", True, f"keys={list(first.keys())[:8]}")
+                change_keys = [k for k in ("change_pct", "change", "pct_chg", "涨跌幅")
+                               if k in first]
+                check("板块轮动含涨跌幅字段", len(change_keys) > 0,
+                      f"匹配字段: {change_keys}")
+    except Exception as e:
+        check("GET /sectors/rotation", False, str(e))
+
 
 def check_data_quality():
     """ETF 基础数据质量校验（P1 fix-plan-master: verify_e2e 应校验数据质量）。"""
@@ -957,6 +978,21 @@ def section_admin():
         check("GET /admin/metrics", False, str(e))
 
 
+    # Z15/C7: 数据源健康（并入强版；原弱版 section_admin 已删除）
+    try:
+        r = requests.get(f"{BASE}/api/v1/admin/sources/health", timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            sources = data.get('sources', {})
+            healthy = sum(1 for v in sources.values()
+                          if isinstance(v, dict) and v.get("healthy", False))
+            check("数据源健康", healthy > 0, f"{healthy}/{len(sources)} 健康")
+        else:
+            check("数据源健康端点", False, f"HTTP {r.status_code}")
+    except Exception as e:
+        check("数据源健康端点", False, str(e))
+
+
 def section_ws():
     """WebSocket 连接测试"""
     section("WebSocket 连接测试")
@@ -1059,6 +1095,11 @@ def section_factors(host, port):
             check("GET /api/v1/factors/ic", False, f"HTTP {r.status_code}")
     except Exception as e:
         check(f"GET /api/v1/factors/ic", False, str(e))
+
+
+def section_factor_health(host, port):
+    """Z15/C4: factor-health 别名 — 薄包装复用 section_factors 完整断言。"""
+    section_factors(host, port)
 
 
 # ── 数据源熔断器状态 ────────────────────────────────────────────
@@ -1381,7 +1422,7 @@ def main():
         print(f"[Full] 模式: 运行所有模块")
 
     for name in module_names:
-        if name in ("health", "factors"):
+        if name in ("health", "factors", "factor-health"):
             MODULES[name](args.host, args.port)
         else:
             MODULES[name]()
@@ -1452,64 +1493,84 @@ def section_task_status():
 
 
 def section_search():
-    """P3.3/Z15: Cross-market search test (A/HK/US)."""
+    """P3.3/Z15: Cross-market search test — 默认(无 market)跨市场合并必须非空（Z29）。"""
     section("跨市场搜索")
-    # Z15 fix: /search is GET with ?keyword=, not POST with JSON body
-    try:
-        r = requests.get(f"{BASE}/api/v1/market/search", params={"keyword": "510300"}, timeout=10)
-        check("A股搜索 (510300)", r.status_code == 200, f"HTTP {r.status_code}")
-        if r.status_code == 200:
-            data = r.json()
-            check("A股搜索返回列表", isinstance(data, list) and len(data) > 0,
-                  f"返回 {len(data) if isinstance(data, list) else 'non-list'} 条")
-    except Exception as e:
-        check("A股搜索", True, f"端点可达 (Error: {e})")
-    try:
-        r = requests.get(f"{BASE}/api/v1/market/search", params={"keyword": "盈富基金"}, timeout=10)
-        check("港股搜索 (盈富基金)", r.status_code == 200, f"HTTP {r.status_code}")
-    except Exception as e:
-        check("港股搜索", True, f"端点可达 (Error: {e})")
-    try:
-        r = requests.get(f"{BASE}/api/v1/market/search", params={"keyword": "SPY"}, timeout=10)
-        check("美股搜索 (SPY)", r.status_code == 200, f"HTTP {r.status_code}")
-    except Exception as e:
-        check("美股搜索", True, f"端点可达 (Error: {e})")
+    # Z29: 默认模式跨市场合并 → 510300(A股ETF) / 盈富基金(HK) / SPY(US) 都必须有结果
+    for label, kw in [("A股搜索 (510300)", "510300"),
+                      ("港股搜索 (盈富基金)", "盈富基金"),
+                      ("美股搜索 (SPY)", "SPY")]:
+        try:
+            r = requests.get(f"{BASE}/api/v1/market/search", params={"keyword": kw}, timeout=10)
+            data = r.json() if r.status_code == 200 else []
+            ok = r.status_code == 200 and isinstance(data, list) and len(data) > 0
+            check(label, ok,
+                  "" if ok else f"HTTP {r.status_code}, 返回 {len(data) if isinstance(data, list) else 'ERR'} 条")
+        except Exception as e:
+            check(label, False, str(e))
+
+
+def section_hk_market():
+    """Z15/C2: 港股市场搜索 — 个股(include_stocks=true) + 静态 ETF 基座必须非空。"""
+    section("港股市场搜索")
+    for label, params in [
+        ("港股个股搜索 (00700, include_stocks=true)",
+         {"keyword": "00700", "market": "HK", "include_stocks": "true"}),
+        ("港股 ETF 搜索 (盈富基金)", {"keyword": "盈富基金", "market": "HK"}),
+    ]:
+        try:
+            r = requests.get(f"{BASE}/api/v1/market/search", params=params, timeout=15)
+            data = r.json() if r.status_code == 200 else []
+            ok = r.status_code == 200 and isinstance(data, list) and len(data) > 0
+            check(label, ok,
+                  "" if ok else f"HTTP {r.status_code}, {len(data) if isinstance(data, list) else 'ERR'} 条")
+            if ok:
+                check(f"{label}: market 均为 HK",
+                      all(x.get("market") == "HK" for x in data),
+                      f"markets={sorted({x.get('market') for x in data})}")
+        except Exception as e:
+            check(label, False, str(e))
+
+
+def section_us_market():
+    """Z15/C3: 美股市场搜索 — 个股(include_stocks=true) + 静态 ETF 基座必须非空。"""
+    section("美股市场搜索")
+    for label, params in [
+        ("美股个股搜索 (AAPL, include_stocks=true)",
+         {"keyword": "AAPL", "market": "US", "include_stocks": "true"}),
+        ("美股 ETF 搜索 (SPY)", {"keyword": "SPY", "market": "US"}),
+    ]:
+        try:
+            r = requests.get(f"{BASE}/api/v1/market/search", params=params, timeout=15)
+            data = r.json() if r.status_code == 200 else []
+            ok = r.status_code == 200 and isinstance(data, list) and len(data) > 0
+            check(label, ok,
+                  "" if ok else f"HTTP {r.status_code}, {len(data) if isinstance(data, list) else 'ERR'} 条")
+            if ok:
+                check(f"{label}: market 均为 US",
+                      all(x.get("market") == "US" for x in data),
+                      f"markets={sorted({x.get('market') for x in data})}")
+        except Exception as e:
+            check(label, False, str(e))
 
 
 def section_fundamentals():
-    """Z16: Fundamentals-500 endpoint check."""
+    """Z16/Z15/C5: Fundamentals — 200 + symbol 存在 + daily 为 list；500/异常一律 FAIL。"""
     section("基本面数据")
     try:
         r = requests.get(f"{BASE}/api/v1/market/fundamentals/510300", timeout=10)
-        # 200 = success; 500 = Tushare token not configured (pre-existing, not our code bug)
-        if r.status_code == 200:
-            check("基本面端点在�? (510300)", True, f"HTTP {r.status_code}")
-            data = r.json()
-            if data:
-                check("基本面返回数据非空", True)
-            else:
-                check("基本面返回数据", True, "空数据（可能无需数据")
-        else:
-            check("基本面端点在", True, f"HTTP {r.status_code} (Tushare token可能未配置,非代码bug)")
+        if r.status_code != 200:
+            check("基本面端点 (510300)", False, f"HTTP {r.status_code}")
+            return
+        check("基本面端点 (510300)", True, f"HTTP {r.status_code}")
+        data = r.json()
+        check("基本面 symbol 字段存在",
+              isinstance(data, dict) and bool(data.get("symbol")),
+              f"symbol={data.get('symbol') if isinstance(data, dict) else 'non-dict'}")
+        check("基本面 daily 为列表",
+              isinstance(data, dict) and isinstance(data.get("daily"), list),
+              f"daily type={type(data.get('daily')).__name__ if isinstance(data, dict) else 'N/A'}")
     except Exception as e:
-        check("基本面", True, f"端点在 (Error: {e})")
-
-
-def section_admin():
-    """P3.4: Source health check."""
-    section("管理端点检查")
-    try:
-        r = requests.get(f"{BASE}/api/v1/admin/sources/health", timeout=10)
-        if r.status_code == 200:
-            data = r.json()
-            sources = data.get('sources', {})
-            healthy = sum(1 for v in sources.values()
-                            if isinstance(v, dict) and v.get("healthy", False))
-            check("数据源健康", healthy > 0, f"{healthy}/{len(sources)} 健康")
-        else:
-            check("数据源健康端点", True, f"HTTP {r.status_code}")
-    except Exception:
-        check("数据源健康端点", True, "endpoint not available")
+        check("基本面端点 (510300)", False, str(e))
 
 
 def section_encoding():
@@ -1541,10 +1602,12 @@ def section_factor_ic():
 MODULES["llm"] = section_llm_import
 MODULES["task"] = section_task_status
 MODULES["search"] = section_search
-MODULES["admin"] = section_admin
 MODULES["encoding"] = section_encoding
 MODULES["factor_ic"] = section_factor_ic
 MODULES["fundamentals"] = section_fundamentals
+MODULES["hk-market"] = section_hk_market
+MODULES["us-market"] = section_us_market
+MODULES["factor-health"] = section_factor_health
 
 if __name__ == "__main__":
     main()

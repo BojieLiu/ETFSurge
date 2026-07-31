@@ -35,4 +35,8 @@ CACHE_TTL = {
     "instrument_list": 3600, # 全量证券列表
     "nav": 3600,             # 基金净值（一天更新一次即可）
     "all_stocks": 3600,      # 全量股票列表
+
+    # ── 搜索用全量 spot 列表 (Z29: 长 TTL 6h，代码/名称变化极低频) ──
+    "hk_spot_list": 21600,   # 港股全量 spot（stock_hk_spot_em，供搜索）
+    "us_spot_list": 21600,   # 美股全量 spot（stock_us_spot_em，供搜索）
 }

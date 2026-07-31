@@ -610,6 +610,78 @@ def fetch_hk_stock_realtime(symbol: str | None = None) -> list[dict[str, Any]]:
     ], route_name="HK_stock_realtime", operation="realtime", target=symbol) or []
 
 
+def fetch_hk_spot_list() -> list[dict[str, Any]]:
+    """港股全量 spot 列表（akshare stock_hk_spot_em），6h 长 TTL 缓存，供搜索用。
+
+    返回: [{"symbol": "00700", "name": "腾讯控股", "market": "HK"}, ...]
+    失败返回 []，绝不抛异常。
+    与 `_em_hk_realtime` 的 60s 实时缓存相互独立（key 不同、TTL 不同）。
+    """
+    cache_key = "hk_spot_list"
+    cached = sync_memory_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    try:
+        def _p():
+            import akshare as ak
+            with no_proxy():
+                return ak.stock_hk_spot_em()
+        df = run_in_thread(_p, timeout=10, executor="long")
+        if df is None or df.empty:
+            return []
+        _decode_df(df)
+        rows = []
+        for _, row in df.iterrows():
+            code = str(row.get("代码", row.get("symbol", ""))).strip()
+            # R2: akshare 代码列可能不带前导零（700 vs 00700），统一补零到 5 位
+            if code.isdigit() and len(code) < 5:
+                code = code.zfill(5)
+            rows.append({
+                "symbol": code,
+                "name": str(row.get("名称", row.get("name", ""))),
+                "market": "HK",
+            })
+        sync_memory_cache.set(cache_key, rows, CACHE_TTL["hk_spot_list"])
+        return rows
+    except Exception:
+        return []
+
+
+def fetch_us_spot_list() -> list[dict[str, Any]]:
+    """美股全量 spot 列表（akshare stock_us_spot_em），6h 长 TTL 缓存，供搜索用。
+
+    返回: [{"symbol": "AAPL", "name": "苹果", "name_en": "Apple Inc", "market": "US"}, ...]
+    失败返回 []，绝不抛异常。
+    注意：akshare 该接口列名以实际返回为准（名称=中文、代码、英文名称），
+    本函数对列名做了兼容读取；境内网络不可用时返回 []（搜索降级为静态基座）。
+    """
+    cache_key = "us_spot_list"
+    cached = sync_memory_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    try:
+        def _p():
+            import akshare as ak
+            with no_proxy():
+                return ak.stock_us_spot_em()
+        df = run_in_thread(_p, timeout=10, executor="long")
+        if df is None or df.empty:
+            return []
+        _decode_df(df)
+        rows = []
+        for _, row in df.iterrows():
+            rows.append({
+                "symbol": str(row.get("代码", row.get("symbol", ""))).strip(),
+                "name": str(row.get("名称", row.get("name", ""))),
+                "name_en": str(row.get("英文名称", row.get("name_en", row.get("英文名", "")))),
+                "market": "US",
+            })
+        sync_memory_cache.set(cache_key, rows, CACHE_TTL["us_spot_list"])
+        return rows
+    except Exception:
+        return []
+
+
 def fetch_futures_realtime() -> list[dict[str, Any]]:
     try:
         def _p():

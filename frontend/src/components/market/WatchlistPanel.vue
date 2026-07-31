@@ -234,7 +234,8 @@ function doSearch() {
   if (!kw) { suggestions.value = []; return }
   searchTimer = setTimeout(async () => {
     try {
-      const res = await marketApi.search(kw)
+      // Z29: 默认跨市场模式混入个股（AAPL/00700 等），自选可添加个股
+      const res = await marketApi.search(kw, { include_stocks: true })
       suggestions.value = (res.data || []).slice(0, 10)
     } catch { suggestions.value = [] }
   }, 300)
@@ -242,6 +243,8 @@ function doSearch() {
 
 function selectSuggestion(s) {
   form.value.symbol = s.symbol
+  // Z29: HK/US 结果回填市场类型，否则 addWatchlist 会按 A 股入库（无行情）
+  if (s.market === 'HK' || s.market === 'US') form.value.asset_type = s.market
   suggestions.value = []
   suggestIndex.value = -1
 }
