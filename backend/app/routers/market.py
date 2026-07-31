@@ -8,9 +8,6 @@ from typing import Any
 
 from ..database import async_session
 from ..services.market_service import (
-    get_all_realtime, get_asset_realtime, get_history, search_etf,
-    get_realtime_batch, get_portfolio_realtime, get_fundamentals,
-    get_global_indices, get_sectors_local, get_indices_meta, search_indices,
     get_watchlist, add_watchlist, update_watchlist, remove_watchlist, batch_remove_watchlist, search_hk_us,
 )
 from ..analysis.indicators import compute_all_indicators, compute_chart_data
@@ -33,12 +30,12 @@ router = APIRouter(prefix="/api/v1/market", tags=["market"])
 
 @router.get("/realtime")
 async def realtime_all() -> list[dict[str, Any]]:
-    return await get_all_realtime()
+    return await market_data_hub.get_all_realtime()
 
 
 @router.get("/realtime/portfolio")
 async def realtime_portfolio() -> list[dict[str, Any]]:
-    return await get_portfolio_realtime()
+    return await market_data_hub.get_portfolio_realtime()
 
 
 @router.get("/realtime/batch")
@@ -46,17 +43,17 @@ async def realtime_batch(
     symbols: list[str] = Query(...),
     asset_type: str = Query("A"),
 ) -> list[dict[str, Any]]:
-    return await get_realtime_batch(symbols, asset_type)
+    return await market_data_hub.get_realtime(symbols, asset_type)
 
 
 @router.get("/realtime/{symbol}")
 async def realtime_asset(symbol: str, asset_type: str = Query("A")) -> dict | None:
-    return await get_asset_realtime(symbol, asset_type)
+    return await market_data_hub.get_asset_realtime(symbol, asset_type)
 
 
 @router.get("/indices/global")
 async def global_indices() -> dict[str, Any]:
-    return {"indices": await get_global_indices()}
+    return {"indices": await market_data_hub.get_global_indices()}
 
 
 @router.get("/history/{symbol}")
@@ -65,7 +62,7 @@ async def history(
     asset_type: str = Query("A"),
     period: str = Query("daily"),
 ) -> list[dict[str, Any]]:
-    return await get_history(symbol, asset_type, period)
+    return await market_data_hub.get_market_history(symbol, asset_type, period)
 
 
 @router.get("/search")
@@ -110,7 +107,7 @@ async def search(
         # F2: fallback to ETF mode when the local instruments table is empty
         # (per system-diagnosis plan: "在 search 端点中 fallback 到 ETF 模式").
         try:
-            return await search_etf(keyword)
+            return await market_data_hub.search_etf(keyword)
         except Exception as e:
             logger.warning("[search] A-share ETF-mode fallback failed: %s", e)
         return []
@@ -120,7 +117,7 @@ async def search(
     if market and market.upper() == "US":
         return await search_hk_us(keyword)
 
-    return await search_etf(keyword)
+    return await market_data_hub.search_etf(keyword)
 
 
 # TODO: 未接入前端
@@ -171,7 +168,7 @@ async def search_stocks(keyword: str = Query("")) -> list[dict[str, Any]]:
 @router.get("/indices/meta")
 async def indices_meta() -> list[dict[str, Any]]:
     """获取所有指数元数据（用于下拉/分组展示）。"""
-    return await get_indices_meta()
+    return await market_data_hub.get_indices_meta()
 
 
 
@@ -182,7 +179,7 @@ async def indicators(
     asset_type: str = Query("A"),
     period: str = Query("daily"),
 ) -> dict:
-    hist = await get_history(symbol, asset_type, period)
+    hist = await market_data_hub.get_market_history(symbol, asset_type, period)
     return compute_all_indicators(hist)
 
 
@@ -192,7 +189,7 @@ async def signal(
     asset_type: str = Query("A"),
     period: str = Query("daily"),
 ) -> dict:
-    hist = await get_history(symbol, asset_type, period)
+    hist = await market_data_hub.get_market_history(symbol, asset_type, period)
     ind = compute_all_indicators(hist)
     return generate_signal(ind)
 
@@ -205,7 +202,7 @@ async def signal_debug(
 ) -> dict:
     """信号诊断端点：返回完整的链路数据（history → indicators → signal），用于调试。
     #11 数据链静默失败时，通过此端点确认哪一步返回空。"""
-    hist = await get_history(symbol, asset_type, period)
+    hist = await market_data_hub.get_market_history(symbol, asset_type, period)
     ind = compute_all_indicators(hist) if hist else {}
     sig = generate_signal(ind) if ind else {"signal": "hold", "score": 0, "debug": "indicators_empty"}
     return {
@@ -227,7 +224,7 @@ async def chart(
 ) -> dict:
     """返回 K 线图数据（含 MA/MACD/布林带指标序列）。"""
     try:
-        hist = await get_history(symbol, asset_type, period)
+        hist = await market_data_hub.get_market_history(symbol, asset_type, period)
         if not hist:
             logger.warning("[chart] Empty history for %s/%s/%s", symbol, asset_type, period)
             return _empty_chart_response()
@@ -254,7 +251,7 @@ def _empty_chart_response() -> dict:
 @router.get("/fundamentals/{symbol}")
 async def fundamentals(symbol: str) -> dict:
     """Tushare 增强数据(日线 + 主力资金流)。免费 token 积分有限,已长缓存。"""
-    return await get_fundamentals(symbol)
+    return await market_data_hub.get_market_fundamentals(symbol)
 
 
 # TODO: 未接入前端
@@ -272,7 +269,7 @@ async def industry_sectors(limit: int = Query(500)) -> list[dict[str, Any]]:
     realtime = await asyncio.to_thread(market_data_hub.get_sector_industry, limit)
     if realtime:
         return realtime[:limit]
-    local = await get_sectors_local("industry")
+    local = await market_data_hub.get_sectors_local("industry")
     if local:
         return local[:limit]
     return []
@@ -284,7 +281,7 @@ async def concept_sectors(limit: int = Query(500)) -> list[dict[str, Any]]:
     realtime = await asyncio.to_thread(market_data_hub.get_sector_concept, limit)
     if realtime:
         return realtime[:limit]
-    local = await get_sectors_local("concept")
+    local = await market_data_hub.get_sectors_local("concept")
     if local:
         return local[:limit]
     return []
@@ -381,7 +378,7 @@ async def watchlist_list(
         # Enrich with realtime data
         enriched = []
         for item in items:
-            realtime = await get_asset_realtime(item.symbol, item.asset_type)
+            realtime = await market_data_hub.get_asset_realtime(item.symbol, item.asset_type)
             item_dict = {
                 "id": item.id,
                 "symbol": item.symbol,
@@ -419,7 +416,7 @@ async def watchlist_add(data: WatchlistCreate) -> dict[str, Any]:
             raise HTTPException(status_code=409, detail="该标的已在自选列表中")
 
         # Get name from market data
-        realtime = await get_asset_realtime(data.symbol, data.asset_type)
+        realtime = await market_data_hub.get_asset_realtime(data.symbol, data.asset_type)
         name = realtime.get("name", data.symbol) if realtime else data.symbol
 
         item = Watchlist(

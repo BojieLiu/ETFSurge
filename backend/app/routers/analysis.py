@@ -16,10 +16,7 @@ from ..analysis.llm import (
     _build_report_prompt,
 )
 from ..analysis.registry import get_agent
-from ..services.market_service import (
-    get_all_realtime, get_history, get_indices, get_commodities,
-    get_asset_realtime, get_realtime_batch,
-)
+from ..services.market_data_hub import market_data_hub
 
 from ..analysis.indicators import compute_all_indicators
 from ..services.market_data_hub import market_data_hub
@@ -155,12 +152,11 @@ async def llm_report(req: LLMReportRequest):
         sentiment = None
 
     try:
-        from ..services.market_service import get_all_realtime, get_indices, get_commodities
-        
+                
         results = await asyncio.gather(
-            asyncio.wait_for(get_all_realtime(), timeout=15),
-            asyncio.wait_for(get_indices(), timeout=15),
-            asyncio.wait_for(get_commodities(), timeout=15),
+            asyncio.wait_for(market_data_hub.get_all_realtime(), timeout=15),
+            asyncio.wait_for(market_data_hub.get_indices(), timeout=15),
+            asyncio.wait_for(market_data_hub.get_commodities(), timeout=15),
             asyncio.to_thread(market_data_hub.get_news_headlines),
             asyncio.to_thread(market_data_hub.get_news_macro),
             return_exceptions=True,
@@ -546,7 +542,7 @@ async def symbol_analysis_stream(req: SymbolAnalysisRequest):
         name = req.name
         asset_type = req.asset_type
         
-        realtime = await get_asset_realtime(symbol, asset_type) or {}
+        realtime = await market_data_hub.get_asset_realtime(symbol, asset_type) or {}
         hist = []
         try:
             hist = await asyncio.wait_for(get_history(symbol, asset_type, "daily"), timeout=30)

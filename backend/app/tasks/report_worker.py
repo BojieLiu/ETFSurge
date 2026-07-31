@@ -36,13 +36,13 @@ async def report_worker(mgr, task_id: int) -> None:
         mgr.update_task(task_id, status="running", progress=5)
 
         # 并行采集行情和新闻
-        from ..services.market_service import get_all_realtime, get_indices, get_commodities
+        from ..services.market_data_hub import market_data_hub
         from ..services.market_data_hub import market_data_hub
 
         results = await asyncio.gather(
-            asyncio.wait_for(get_all_realtime(), timeout=15),
-            asyncio.wait_for(get_indices(), timeout=15),
-            asyncio.wait_for(get_commodities(), timeout=15),
+            asyncio.wait_for(market_data_hub.get_all_realtime(), timeout=15),
+            asyncio.wait_for(market_data_hub.get_indices(), timeout=15),
+            asyncio.wait_for(market_data_hub.get_commodities(), timeout=15),
             asyncio.to_thread(market_data_hub.get_news_headlines),
             asyncio.to_thread(market_data_hub.get_news_macro),
             return_exceptions=True,
@@ -64,7 +64,7 @@ async def report_worker(mgr, task_id: int) -> None:
         # 计算部分 K 线指标
         await _notify("running", 50, "计算技术指标")
         from ..analysis.indicators import compute_all_indicators
-        from ..services.market_service import get_history
+        from ..services.market_data_hub import market_data_hub
 
         indicators = {}
         for item in market_data[:5]:
@@ -72,7 +72,7 @@ async def report_worker(mgr, task_id: int) -> None:
                 continue
             try:
                 hist = await asyncio.wait_for(
-                    get_history(item["symbol"], item["asset_type"]), timeout=15
+                    market_data_hub.get_market_history(item["symbol"], item["asset_type"]), timeout=15
                 )
                 ind = compute_all_indicators(hist)
                 if ind:

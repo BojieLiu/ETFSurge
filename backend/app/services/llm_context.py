@@ -82,8 +82,8 @@ async def build_full_context(
 
     # 5. Realtime ETFs (from market_service cache)
     try:
-        from ..services.market_service import get_all_realtime
-        all_realtime = await asyncio.wait_for(get_all_realtime(), timeout=15)
+        from ..services.market_data_hub import market_data_hub
+        all_realtime = await asyncio.wait_for(market_data_hub.get_all_realtime(), timeout=15)
         context["market_data"] = all_realtime[:20] if all_realtime else []
     except Exception as e:
         context["market_data"] = []
@@ -107,8 +107,7 @@ async def build_full_context(
     # 7. Commodities (gold, oil, silver futures)
     if include_commodities:
         try:
-            from ..services.market_service import get_commodities
-            commodities = await asyncio.wait_for(get_commodities(), timeout=15)
+            commodities = await asyncio.wait_for(market_data_hub.get_commodities(), timeout=15)
             context["commodities"] = commodities[:10] if commodities else []
         except Exception as e:
             context["commodities"] = []

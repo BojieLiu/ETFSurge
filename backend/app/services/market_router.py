@@ -28,18 +28,17 @@ async def _call(fn, *args, timeout: int = 8):
 
 async def get_market_indices(market: str) -> list[dict]:
     """按市场返回相关指数行情。"""
-    from app.services.market_service import get_indices as get_a_indices
-    from app.services.market_service import get_global_indices
+    from app.services.market_data_hub import market_data_hub
 
     if market == "A":
-        data = await get_a_indices()
+        data = await market_data_hub.get_indices()
         return data or []
 
     # HK/US/global → 从全球指数中过滤
     try:
-        global_data = await get_global_indices() or {}
+        global_data = await market_data_hub.get_global_indices() or {}
     except Exception:
-        logger.warning("[market_router] get_global_indices failed")
+        logger.warning("[market_router] hub.get_global_indices failed")
         return []
 
     region_map = {"HK": "港股", "US": "美股", "global": None}
@@ -70,8 +69,8 @@ async def get_market_realtime(market: str, symbols: list[str] | None = None) -> 
         list[dict]: 实时行情数据
     """
     if market == "A":
-        from app.services.market_service import get_all_realtime
-        data = await get_all_realtime()
+        from app.services.market_data_hub import market_data_hub
+        data = await market_data_hub.get_all_realtime()
         if symbols:
             sym_set = set(symbols)
             return [d for d in data if d.get("symbol") in sym_set]
@@ -109,8 +108,8 @@ async def get_market_realtime(market: str, symbols: list[str] | None = None) -> 
         return results
 
     elif market == "global":
-        from app.services.market_service import get_all_realtime
-        a_data = await get_all_realtime() or []
+        from app.services.market_data_hub import market_data_hub
+        a_data = await market_data_hub.get_all_realtime() or []
         indices_data = await get_market_indices("global")
         return a_data + indices_data
 
@@ -122,9 +121,10 @@ async def get_market_realtime(market: str, symbols: list[str] | None = None) -> 
 
 async def get_market_history(market: str, symbol: str, period: str = "daily") -> list[dict]:
     """按市场路由历史K线。"""
+    from app.services.market_data_hub import market_data_hub
+
     if market == "A":
-        from app.services.market_service import get_history
-        return await get_history(symbol, "A", period) or []
+        return await market_data_hub.get_market_history(symbol, "A", period) or []
 
     elif market == "HK":
         # fetch_hk_history removed (doesn't exist in china_market.py)

@@ -1256,6 +1256,78 @@ class MarketDataHub:
             return 0.0
 
 
+    # ── Phase 3: realtime / indices / commodities (delegate market_service) ──
+
+    async def get_realtime(self, symbols: list[str], asset_type: str = "A") -> list[dict]:
+        """批量实时行情（委托 market_service.get_realtime_batch）。"""
+        from ..services.market_service import get_realtime_batch
+        return await get_realtime_batch(symbols, asset_type)
+
+    async def get_all_realtime(self) -> list[dict]:
+        """全量实时行情（委托 market_service.get_all_realtime）。"""
+        from ..services.market_service import get_all_realtime
+        return await get_all_realtime()
+
+    async def get_asset_realtime(self, symbol: str, asset_type: str) -> dict | None:
+        """单标的实时行情（委托 market_service.get_asset_realtime）。"""
+        from ..services.market_service import get_asset_realtime
+        return await get_asset_realtime(symbol, asset_type)
+
+    async def get_portfolio_realtime(self) -> list[dict]:
+        """组合实时行情（委托 market_service.get_portfolio_realtime）。"""
+        from ..services.market_service import get_portfolio_realtime
+        return await get_portfolio_realtime()
+
+    async def get_indices(self) -> list[dict]:
+        """全球指数（委托 market_service.get_indices）。"""
+        from ..services.market_service import get_indices
+        return await get_indices()
+
+    async def get_global_indices(self) -> dict[str, list[dict]]:
+        """全球指数分组（委托 market_service.get_global_indices）。"""
+        from ..services.market_service import get_global_indices
+        return await get_global_indices()
+
+    async def get_commodities(self) -> list[dict]:
+        """商品行情（委托 market_service.get_commodities）。"""
+        from ..services.market_service import get_commodities
+        return await get_commodities()
+
+
+    # ── Phase 3b: search / meta / history (delegate market_service) ──
+
+    async def get_market_history(self, symbol: str, asset_type: str = "A", period: str = "daily") -> list[dict]:
+        """历史 K 线（完整 fallback 链，委托 market_service.get_history）。"""
+        from ..services.market_service import get_history as _get_history
+        return await _get_history(symbol, asset_type, period)
+
+    async def search_etf(self, keyword: str) -> list[dict]:
+        """ETF 搜索（委托 market_service.search_etf）。"""
+        from ..services.market_service import search_etf as _search_etf
+        return await _search_etf(keyword)
+
+    async def get_sectors_local(self, sector_type: str) -> list[dict]:
+        """本地板块列表（委托 market_service.get_sectors_local）。"""
+        from ..services.market_service import get_sectors_local as _get
+        return await _get(sector_type)
+
+    async def get_indices_meta(self) -> list[dict]:
+        """指数元数据（委托 market_service.get_indices_meta）。"""
+        from ..services.market_service import get_indices_meta as _get
+        return await _get()
+
+    async def search_indices(self, keyword: str) -> list[dict]:
+        """指数搜索（委托 market_service.search_indices）。"""
+        from ..services.market_service import search_indices as _search
+        return await _search(keyword)
+
+
+    async def get_market_fundamentals(self, symbol: str) -> dict | None:
+        """基本面（market_service 版：返回 {symbol, daily} 结构）。"""
+        from ..services.market_service import get_fundamentals as _get
+        return await _get(symbol)
+
+
 
 # Global singleton
 market_data_hub = MarketDataHub()

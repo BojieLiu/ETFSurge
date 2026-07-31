@@ -15,7 +15,7 @@ from ..services.market_data_hub import market_data_hub
 from ..analysis.indicators import compute_all_indicators
 from ..analysis.signal import generate_signal
 from ..core.async_utils import run_sync
-from .market_service import get_history, get_indices, get_commodities
+from ..services.market_data_hub import market_data_hub
 
 PORTFOLIO_TYPES = {"on_exchange": "场内", "off_exchange": "场外"}
 
@@ -671,7 +671,6 @@ async def _compute_indicators(symbols: list[str]) -> dict:
     从 market_data_hub 获取预计算的因子分矩阵传给 compute_all_indicators，
     避免重复计算 RSI/KDJ/MACD。
     """
-    from .market_service import get_history
     from ..analysis.indicators import compute_all_indicators
     from ..analysis.signal import generate_signal
 
@@ -684,7 +683,7 @@ async def _compute_indicators(symbols: list[str]) -> dict:
 
     results = {}
     hist_data = await asyncio.gather(
-        *[get_history(sym, "A") for sym in symbols],
+        *[market_data_hub.get_market_history(sym, "A") for sym in symbols],
         return_exceptions=True,
     )
     for sym, hist in zip(symbols, hist_data):

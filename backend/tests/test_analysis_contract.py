@@ -37,19 +37,19 @@ def client():
         new=AsyncMock(return_value=CANNED_LLM_JSON),
     # Market data functions imported into router from market_service
     ), patch(
-        "app.routers.analysis.get_all_realtime",
+        "app.services.market_data_hub.market_data_hub.get_all_realtime",
         new=AsyncMock(return_value=[]),
     ), patch(
-        "app.routers.analysis.get_indices",
+        "app.services.market_data_hub.market_data_hub.get_indices",
         new=AsyncMock(return_value=[]),
     ), patch(
-        "app.routers.analysis.get_commodities",
+        "app.services.market_data_hub.market_data_hub.get_commodities",
         new=AsyncMock(return_value=[]),
     ), patch(
-        "app.routers.analysis.get_history",
+        "app.services.market_data_hub.market_data_hub.get_market_history",
         new=AsyncMock(return_value=[]),
     ), patch(
-        "app.routers.analysis.get_asset_realtime",
+        "app.services.market_data_hub.market_data_hub.get_asset_realtime",
         new=AsyncMock(return_value={"symbol": "600519", "name": "贵州茅台", "price": 1700, "change_pct": 0.5}),
     # News fetchers
     ), patch(
