@@ -414,8 +414,8 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
             # 从 market_context 取市场情绪，避免直接引用 market_data_hub（NameError 修复）
             market_sentiment = market_context.get("market_sentiment", {}) if market_context else {}
 
-            # OPT-06: LLM 阶段 150s 预算（Z19: 原 35s/90s 对完整 provider-failover 链
-            # (primary 90s + fallback 60s) 过紧，主 provider 慢/失败时必超时 → partial）
+            # OPT-06/Z28: LLM 阶段 240s 预算（与 design_report 内层 240s、provider
+            # timeout 240s 三层对齐；免费模型高峰排队常 >90s，过紧预算必然 partial）
             llm_analysis = await asyncio.wait_for(
                 generate_design_report(
                     strategies=strategies,
@@ -423,7 +423,7 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
                     market_context=market_context,
                     plan_tables=plan_tables,
                 ),
-                timeout=150,
+                timeout=240,
             )
 
             if llm_analysis and len(llm_analysis.strip()) > 0:

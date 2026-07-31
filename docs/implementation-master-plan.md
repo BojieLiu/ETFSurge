@@ -1,6 +1,7 @@
 ﻿# ETF Surge 方案实施总计划
 
-> 生成日期: 2026-07-31 | 版本: **v40.0**
+> 生成日期: 2026-07-31 | 版本: **v40.1**
+> ✅ **Phase 40.1 已完成**（2026-07-31）：**LLM 超时三层对齐修复** — 日志取证确认服务商无故障（TCP/TLS 秒级成功，失败全为 ReadTimeout），根因为三层超时错位（provider 90s/60s、task_manager LLM 阶段 150s、design_report 内层 240s 永远够不到）；方案 A 对齐放宽：`.env` 与 `config.py` 默认值 `LLM_PRIMARY/FALLBACK_TIMEOUT 90/60 → 240/240`，`task_manager.py` LLM 阶段 `timeout=150 → 240`，免费模型高峰排队不再必然 partial。详见下方 v40.1。
 > ✅ **Phase 40 已完成**（2026-07-31）：实施 `docs/z_fixes_design_v5.3.md` — **7 项问题修复**：Z22(watchlist 脏数据自愈：名称解析 + 独立会话回写 + symbol 格式/行情存在性校验 + name 空串兜底) + Z25(热门个股 volume/turnover/sector 补全) + Z26(策略检查规则引擎兜底：20s LLM 超时预算 + 覆盖率 100% + source 字段 + action 枚举硬约束) + Z05(共享 httpx.Client 连接池：4 处 urlopen 统一改造 + `/admin/sources/connection-pool` 握手可观测) + Z03(`/factors/active` 权威 status/reason/sample_count/last_computed_at，china_specific 静态因子 ic_value=null 不再硬编码 0) + Z11(design 降级契约：static_pool/partial_data 模式 + degradation 字段贯穿 + 静态池 STRATEGY_META 层预算等权分配 3 套方案) + Z20(搜索统一分档排序契约 `_sort_search_results`)。契约驱动 + TDD：新增 7 份契约（`api-contracts/`：watchlist-v2 / stock-hot-rank-v2 / strategy-check-v2 / ssl-connection-pool / active-v2 / design-degradation / search-sorting）+ 7 个测试文件 43 用例全 PASS，既有相关套件 69/70 PASS（唯一失败为基线即有的真实网络集成测试）。详见下方 v40.0。
 > ✅ **文档归档（2026-07-29 v20.1）**：8 份已全部实施/已替代的方案文档归档至 `docs/archived/` — `optimization-master-plan.md`、`optimization-master-plan-v2.md`、`performance-diagnosis-and-optimization-plan.md`、`fix-plan-master.md`、`fix-plan-pool.md`、`s5-markethub-design.md`、`system-performance-and-quality-review.md`、`fundamental-flow-factors-evaluation.md`。
 > ✅ **Phase 21 已完成**（2026-07-29）：修复 4 个前端单测失败（useMarketSearch + useSectorAnalysis mock 目标错误） + UI Phase 3(Steps 6-8)。详见下方 v21.0。
@@ -1542,6 +1543,12 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 | | | | | **测试（TDD，43 用例全 PASS）：** `tests/test_watchlist_dirty.py`（10）、`test_z25_stock_hot_rank.py`（6）、`test_z26_strategy_check_coverage.py`（5）、`test_z05_ssl_pool.py`（7）、`test_z03_factors_active.py`（3）、`test_z11_degradation.py`（4）、`test_z20_search_sort.py`（8）；既有相关套件回归 69/70 PASS（唯一失败 `test_orchestrator_returns_valid_strategies` 为基线即有的真实网络集成测试，已用 `git stash` 验证与本批改动无关）。 |
 | | | | | **验证结果：** 后端新增 43 用例全 PASS；`verify_e2e.py` 全模块 PASS（本地启动后端后验证）；前端 `npm run build` 通过（pre-commit 门禁）；本地 `start.ps1 -Local` 前后端启动健康检查通过。 |
 | | | | | **改动文件：** 后端 12（routers/market.py、services/market_service.py、models/schemas.py、services/market_data_hub.py、fetchers/sector_fetcher.py、services/portfolio_service.py、analysis/llm.py、fetchers/global_markets_fetcher.py、routers/admin.py、routers/factors.py、factors/factor_registry.py、services/strategy_design.py）、测试 7（新）、契约 7（新）、文档 2（implementation-master-plan.md + z_fixes_design_v5.3.md 状态）。 |
+
+| | **v40.1** | 2026-07-31 | **Phase 40.1 — LLM 超时三层对齐（240s）修复** | 详见下方 |
+| | | | | **背景：** Phase 40 验证期间观察 task 10/12 `completed_with_errors, quality=partial`。日志取证：`connect_tcp/TLS 均秒级成功`（服务商无故障），失败全为 `ReadTimeout(TimeoutError())`（免费模型 `deepseek-v4-flash-free` 高峰排队 >90s）；`CancelledError` 精确落在 task_manager LLM 阶段 150s 预算处（22:48:57+150s=22:51:27），非任务层 240s。 |
+| | | | | **根因：** 三层超时错位 — provider 层 primary 90s/fallback 60s（.env）→ 单次必撞墙；`task_manager.py` LLM 阶段外层 150s（两次 provider 尝试后即被掐断）；`design_report.py` 内层 240s 永远够不到。 |
+| | | | | **修复（方案 A 对齐放宽）：** `.env` `LLM_PRIMARY_TIMEOUT/LLM_FALLBACK_TIMEOUT 90/60 → 240/240`；`app/config.py` 默认值 30/30 → 240/240（Docker 无 .env 回落一致）；`task_manager.py` LLM 阶段 `timeout=150 → 240` + 注释更新；`design_report.py` 240s 保持。`strategy_check` 20s 预算（Z26 契约，快速降级设计）不受影响。 |
+| | | | | **验证：** settings 加载 = 240/240；`test_llm_provider_failover.py` 11/11 PASS；task/design 相关套件 25/25 PASS；后端重启健康 200；预期效果：免费模型高峰有完整 240s 排队窗口，fallback 链（240s+240s）在任务层 240s 内可完成 1 轮完整尝试，不再必然 partial。 |
 
 | | **v39.0** | 2026-07-31 | **Phase 39 — Z27 任务持久化重构（DB 唯一真相源）实施** | 详见下方 |
 | | | | | **来源：** `docs/z27-task-persistence-redesign.md`（v2.1，已通过两轮独立审查） |
