@@ -250,7 +250,7 @@ perf_diag 49 端点扫描：**46/49 通过**（3 个 405 为脚本用 GET 调 PO
 | Z01 | factor-health 500 | ✅ 已修 | HTTP 200 + ok |
 | Z02 | 美股行情 null | ✅ 已修 | SPY 742.9 有值 |
 | Z03 | china_specific 3 因子 no_data | ✅ 已修 | 状态均为 static |
-| Z04 | etf_specific 10 因子无数据 | ❌ **未达标** | 仍 4 个 no_data（验收要求 <3）；industry_diversification 已修复 |
+| Z04 | etf_specific 10 因子无数据 | ❌ **未达标** | 仍 4 个 no_data（验收要求 <3）；industry_diversification 已修复；修复方案见 §9.5 专项 |
 | Z05 | SSL 预热握手重复 | ✅ 改善 | 预热 1.77s（历史 38s→3s） |
 | Z06 | 因子 IC 全空 | ✅ 已修 | 23 条 IC 非空，avg_ic 0.22 |
 | Z07 | LLM 42.4% 错误率 | ⚠️ 改善未达标 | 23.2%（462/1995），429 限流持续（Retry-After 8h） |
@@ -329,7 +329,7 @@ perf_diag 49 端点扫描：**46/49 通过**（3 个 405 为脚本用 GET 调 PO
 | F3-1 | 资讯分级不合理 | `classify_news_level` 增加相关性加权（A 股/组合相关关键词加权、国际微观降级），财联社源评级复核 | 验收："召回/赌博"类国际新闻 ≤ 2 星 |
 | F3-2 | 搜索排序缺陷 | 跨市场合并前先做全局精确匹配（symbol==kw 优先于首字母模糊）；`market=A` 个股搜索降级到 levistock 个股 | 验收：`search?keyword=SPY` 首条为 SPY；`market=A&keyword=贵州茅台` 返回茅台 |
 | F3-3 | 设计现金仓位偏高 | 预算引擎对 range_bound 市态的现金上限收紧（22-32% → ≤15%），非交易时段才有高现金 | 验收：balanced 方案现金 ≤ 15% |
-| F3-4 | Z04 etf_specific 4 因子 | 补 premium_discount（ask1/bid1）、tracking_error（K 线跟踪偏离）、shares_change（份额数据）、institutional_holdings_change（基金季报） | 验收：etf_specific no_data < 3 |
+| F3-4 | Z04 etf_specific 4 因子 | 详见「§9.5 专项：Z04 修复方案」：A NAV 降级链（premium_discount）→ B benchmark_close 注入（tracking_error，分批宽基先行）→ C 份额数据源（shares_change + institutional_holdings_change 同时复活）→ D IC/状态展示修复 | 验收：etf_specific no_data < 3，且 no_data 因子 reason 明确标注缺失字段 |
 | F3-5 | sentiment 3 因子无数据 | 接通 panic_greed_diff（涨跌分布）、news_heat/news_direction（资讯情绪）数据管道 | 验收：sentiment no_data = 0 |
 | F3-6 | LLM 429 限流 | 增加指数退避重试（尊重 Retry-After）+ provider 轮换 + 高峰排队（成本权衡：免费模型限流是常态，可接受降级） | 验收：单次分析失败前至少 2 次重试 |
 | F3-7 | 自选美股名称 | `get_asset_realtime` US 分支补充 name 字段（静态基座映射） | 验收：自选 SPY 显示 "SPDR S&P 500 ETF" |
@@ -345,6 +345,141 @@ perf_diag 49 端点扫描：**46/49 通过**（3 个 405 为脚本用 GET 调 PO
 | T5 | factor-health 门限改为多次采样取中位数 + 数据就绪等待（最多 30s） | 时序 flaky |
 | T6 | 数据源熔断演练：通过 `admin/config` 或环境变量强制置 mootdx/akshare 熔断态，验证降级链输出非空 | 数据源运行时盲区 |
 
+### 🔬 专项：Z04 etf_specific 因子无数据修复方案（细化）
+
+> 对应 F3-4。本节给出可直接开工的实施级方案：根因定位（含代码行号）、10 因子数据依赖清单、4 步修复（A-D，含伪代码）、TDD 测试计划与量化验收条件。
+
+#### 9.5.1 问题现象与影响
+
+- `GET /api/v1/factors/active` 实测：etf_specific 类别 10 因子中 **6 个 valid、4 个 no_data**，Z04 验收（no_data < 3）未达标。
+- no_data 的 4 个：`etf.premium_discount` / `etf.tracking_error` / `etf.shares_change` / `etf.institutional_holdings_change`。
+- 附带影响：① 这 4 个因子全 0.0 被 IC 过滤，不参与 avg_ic 与因子评分；② `factors/active` 的 no_data reason 统一显示「尚未计算 IC（数据不足）」，**误导排障方向**（实际是数据源未接入，而非样本不足）；③ 设计引擎（`engine/rationale.py`）无法引用这些因子，削弱方案理由的 ETF 专属维度。
+
+#### 9.5.2 根因分析（三层缺口叠加）
+
+**缺口① 数据源未注入（主因）** — `market_data_hub.py::_build_symbol_extra`（L936-948）目前只产出 `fund_scale / fund_shares / industry / concepts` 4 个字段；而 `factor_registry.py::_fetch_market_data`（L960-972）的 Z04 注入循环**已支持** `benchmark_close / shares_change_20d / institutional_holdings_change` —— 注入代码在，上游数据源缺失，形成"接口就位、无数据可注"。
+
+**缺口② IC 过滤导致"永远 no_data"（次因）** — `ic_tracker.py::compute_periodic_ic`（L156）只收集 `abs(value) >= 0.001` 的因子值。数据缺失的因子恒返回 0.0 → 被过滤 → 永远进不了 `_last_ic_batch` → `factors.py`（L144-145）判为 no_data。
+
+**缺口③ 真实数据源存在但未接入** — 三个现成资源未被消费：
+| 资源 | 位置 | 现状 |
+|------|------|------|
+| ETF→基准指数映射 | `backend/data/etf_index_mapping.json`（45 条） | 只有指数**名称**，无指数**代码**；未被任何代码读取 |
+| 基金 NAV 接口 | `fund_fetcher.py::fetch_fund_nav`（天天基金） | 已封装，未接到 premium_discount 降级链 |
+| 指数元数据 | `indices_meta` 表（`symbol`/`name`/`index_type`） | 仅覆盖宽基（sh000300 等），行业指数代码缺失 |
+
+#### 9.5.3 10 因子数据依赖清单
+
+| 因子 | 依赖字段 | 当前数据源 | 状态 | 修复步骤 |
+|------|---------|-----------|:---:|:---:|
+| `etf.amount_stability` | volume 序列 | K 线 | ✅ valid | — |
+| `etf.change_pct` | change_pct | K 线 | ✅ valid | — |
+| `etf.return_1m` / `etf.return_3m` | close 序列 | K 线 | ✅ valid | — |
+| `etf.price` | price | K 线/实时 | ✅ valid | — |
+| `etf.industry_diversification` | industry / concepts | hub 注入 | ✅ valid | — |
+| `etf.premium_discount` | **nav** + price | Sina/QQ IOPV（无外网即缺） | ❌ no_data | **A** |
+| `etf.tracking_error` | **benchmark_close** + close | 无（mapping 未消费） | ❌ no_data | **B** |
+| `etf.shares_change` | **shares_change_20d** | 无（fund_fetcher 仅 NAV 快照） | ❌ no_data | **C** |
+| `etf.institutional_holdings_change` | institutional_holdings_change / **shares_change_20d** / fund_scale | 无 | ❌ no_data | **C** |
+
+#### 9.5.4 修复步骤（按成本排序）
+
+**步骤 A — premium_discount NAV 降级链（低）**
+
+- 文件：`backend/app/factors/factor_registry.py`（`_fetch_market_data` L953-958 的 IOPV 抓取块）
+- 改动：Sina/QQ IOPV 命中率不足或抛异常时，对剩余 symbols 调 `market_data_hub.get_fund_nav(sym)`（天天基金日频净值）注入 `nav`。
+- 伪代码：
+```python
+# 现有 except 块（L957-958）后追加降级
+missing = [s for s in symbols if not (data.get(s) or {}).get("nav")]
+for sym in missing:
+    try:
+        nav = await market_data_hub.get_fund_nav(sym)   # {"nav": float}
+        if nav and nav.get("nav"):
+            data.setdefault(sym, {})["nav"] = nav["nav"]
+    except Exception:
+        continue
+```
+- 口径注意：NAV 为日频、IOPV 为盘中实时，降级后折溢价口径变为「收盘折溢价」，需在因子定义/文档注明（不回退为 0.0 假数据）。
+
+**步骤 B — tracking_error benchmark_close 注入（中）**
+
+- 文件：`backend/data/etf_index_mapping.json`（补 index_code）、`backend/app/services/market_data_hub.py::_build_symbol_extra`
+- 改动：
+  1. mapping 扩展为 `{"510300": {"index_name": "沪深300指数", "index_code": "sh000300"}}`；行业指数代码用 akshare `index_zh_a_hist` / `index_stock_info` 一次性补全后固化（45 条手工核对）。
+  2. `_build_symbol_extra` 读 mapping，取指数代码，从指数历史（hub.get_history 支持指数或指数缓存）取最近 20 日 close 填 `benchmark_close`。
+- 伪代码：
+```python
+mapping = _load_etf_index_mapping()          # {"510300": {"index_code": "sh000300"}}
+for sym in symbols:
+    idx_code = mapping.get(sym, {}).get("index_code")
+    if not idx_code:
+        continue                              # 无代码的 ETF 跳过，不阻塞其他因子
+    closes = await _fetch_index_closes(idx_code, days=20)   # hub 历史或指数缓存
+    if len(closes) >= 5:
+        result[sym]["benchmark_close"] = closes
+```
+- 风险控制：行业指数历史接口成本高 → **分批实施**，第一批发 mapping 中的宽基（沪深300/中证500/上证50/创业板指等），行业指数随 mapping 补全跟进。
+
+**步骤 C — shares_change / institutional_holdings_change 份额数据（中）**
+
+- 文件：`backend/app/fetchers/fund_fetcher.py`（新增 `fetch_fund_shares_history`）、`backend/app/services/market_data_hub.py::_build_symbol_extra`
+- 改动：
+  1. `fund_fetcher.py` 新增 `fetch_fund_shares_history(symbol) -> {"shares_20d_change": float}`：天天基金 `fund_fund_shares_em`（份额规模变化）取最近 2 期份额计算变化率。
+  2. `_build_symbol_extra` 注入 `shares_change_20d`；该字段同时喂 `_compute_shares_change`（直接用）与 `_compute_institutional_holdings_change`（×0.5 折扣代理）→ **两因子同时复活**。
+- 伪代码：
+```python
+async def fetch_fund_shares_history(symbol: str) -> dict | None:
+    # ak.fund_fund_shares_em(symbol) → DataFrame(份额日期/份额)
+    rows = await run_sync(ak.fund_fund_shares_em, symbol, timeout=15)
+    if len(rows) >= 2:
+        cur, prev = rows.iloc[-1]["份额"], rows.iloc[-2]["份额"]
+        if prev and prev > 0:
+            return {"shares_20d_change": round((cur - prev) / prev, 4)}
+    return None
+```
+- 风险控制：份额数据日更/周更，20 日窗口可能不足 → 退化为「最近一期变化率」并在 reason 注明；抓取加 24h 缓存 + 失败静默（沿用现有熔断框架）。
+
+**步骤 D — IC/状态展示修复（低中）**
+
+- 文件：`backend/app/routers/factors.py`（L144-145 reason）、`backend/app/factors/ic_tracker.py`（L156 过滤处）
+- 改动：
+  1. `factors.py::_status_of` 的 no_data reason 区分两类：**「数据源未接入（缺 nav/benchmark_close/shares_change_20d）」**与**「IC 未累积（样本 <3）」**，依据因子定义元数据 + `_sample_counts` 判定。
+  2. `ic_tracker.py` 在过滤处统计全 0.0 因子的零值占比 `_zero_ratio`，随 `/factors/ic` 输出（`zero_ratio` 字段），避免"数据缺失"被误报为"IC 无效"。
+- 验收：`factors/active` 每个 no_data 因子的 reason 明确指向缺失字段，不再笼统显示"数据不足"。
+
+#### 9.5.5 TDD 测试计划（先写失败单测）
+
+`tests/test_factor_etf_specific.py` 新增：
+
+| 用例 | 断言 |
+|------|------|
+| `test_premium_discount_with_nav` | mock data 含 nav+price → 返回值非 0 |
+| `test_tracking_error_with_benchmark` | mock close+benchmark_close（5 日以上）→ 非 0 且 ≤0.05 |
+| `test_shares_change_from_20d` | mock shares_change_20d → 因子直接生效 |
+| `test_institutional_holdings_change_proxy` | mock shares_change_20d → 因子 = 值 × 0.5 |
+| `test_symbol_extra_injects_benchmark` | mock hub `_build_symbol_extra` + mapping → `benchmark_close` 注入 |
+| `test_no_data_reason_specifics` | mock ic_batch 为空 → reason 区分「数据源缺失」vs「IC 不足」 |
+
+集成用例：`test_factor_ic_etf_specific` — 用场内 10 只 ETF 的 K 线（mock 网络）+ 注入 symbol_extra，断言 etf_specific `no_data_count < 3`。
+
+#### 9.5.6 验收条件（量化）
+
+1. `GET /api/v1/factors/active`：etf_specific `no_data_count` 从 **4 → ≤2**。
+2. 复活的因子进入 `_last_ic_batch`，纳入 valid/warn 统计（先解决"无数据"，不要求 IC 质量达标）。
+3. `factors/active` 剩余 no_data 因子 reason 明确标注缺失字段。
+4. `python -m pytest tests/test_factor_etf_specific.py` 全绿；全量 pytest 无新增失败。
+5. 回归：`verify_e2e.py` 全 PASS（含 factor-health 检查）。
+
+#### 9.5.7 风险与回退
+
+| 风险 | 缓解 |
+|------|------|
+| 行业指数代码补全成本高 | 分批：宽基先行，mapping 无代码的 ETF 跳过 benchmark_close，不阻塞其他因子 |
+| 天天基金接口限流 | 份额抓取 24h 缓存 + 失败静默（沿用熔断框架） |
+| NAV 日频 vs IOPV 实时口径差异 | 文档注明口径；若折溢价失真，premium_discount 保留 no_data 并明确标注（**不回退为 0.0 假数据**） |
+| IC 质量波动（avg_ic 可能下降） | 仅展示不熔断；IC 低于 threshold 已有 B3 告警机制 |
+
 ---
 
 ## 十、实施优先级路线图
@@ -359,7 +494,7 @@ perf_diag 49 端点扫描：**46/49 通过**（3 个 405 为脚本用 GET 调 PO
   F2-1 组合计算并行 / F2-2 首页性能 / F2-3 sectors/heat / F2-4 前端方法 / F2-5 预热并行
   T1/T2 防回归测试（与 F0 修复同批交付：F0 交付即加 T1/T2，拦截两个 P0 bug 回归）
 第四梯队（P3-P4 — 持续）
-  F3-1~F3-7 质量完善（Z07 限流重试与 Z04 因子补齐已含其中，视成本权衡调度）
+  F3-1~F3-7 质量完善（Z04 因子补齐见 §9.5 专项 4 步方案；Z07 限流重试可提前至 P2 并行）
   T3-T6 测试防护补强
 ```
 
@@ -395,3 +530,4 @@ perf_diag 49 端点扫描：**46/49 通过**（3 个 405 为脚本用 GET 调 PO
 | v1.0 | 2026-07-31 | 初稿：15 步诊断全量结果 + P0-P4 修复方案 + 测试防护补强 |
 | v1.1 | 2026-07-31 | 首轮 review 修订：修正港股降级链顺序（sina→tencent→dongfang）、LLM 泄漏术语；补步骤索引表/持仓全表/e2e 失败完整清单/P1-P2 涉及文件列/P3 验收条件；T1/T2 提前至 P2；T3/T6 断言补全 |
 | v1.2 | 2026-07-31 | 二轮 review 修订：P1/P2/P3 表头补列（涉及文件/验收条件，修复渲染错位）；T1/T2 调度措辞修正（F0 交付即加）；§5.3 持仓表补全 10 只含权重；T4 补 daily-pnl 参数修复；calculate 耗时口径统一（8.2s/8257-8287ms）；F0-4 涉及文件补全路径 |
+| v1.3 | 2026-07-31 | Z04 细化：新增 §9.5 专项修复方案（根因三层缺口/10 因子依赖清单/步骤 A-D 含伪代码/TDD 测试计划/量化验收/风险回退）；F3-4 表项与 Z04 问题行改为引用专项章节 |
