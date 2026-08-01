@@ -3,7 +3,7 @@
 > 生成时间: 2026-07-31
 > 环境: Docker (Python 3.14-slim + Node 24 Alpine + Nginx + Redis 8)
 > 执行范围: 15 项全链路验证（步骤 1-15，见 §0 索引表）
-> 状态: v1.10（已完成多轮 review 与修订，达到实施标准；待讨论项见 §9.10.7）
+> 状态: v1.11（已完成多轮 review 与修订，达到实施标准；全部待讨论项已于 2026-08-01 确认，见 §9.10.7）
 
 ---
 
@@ -336,7 +336,7 @@ perf_diag 49 端点扫描：**46/49 通过**（3 个 405 为脚本用 GET 调 PO
 |----|------|---------|---------|---------|
 | F0-1 ✅ | prod 容器空库 | `backend` 服务 environment 增加 `DATABASE_URL=sqlite+aiosqlite:////app/data/portfolio.db` 覆盖 Windows 路径 | `docker-compose.yml` | 容器内 `SELECT COUNT(*) FROM instruments` = 1544 |
 | F0-2 ✅ | Settings extra_forbidden | `Settings.Config` 增加 `extra="ignore"` | `backend/app/config.py` | 任意无关环境变量不导致启动崩溃 |
-| F0-3 | **WS 生产断裂** | **默认方案**：nginx.conf 增加 `location /api/v1/ws`（`proxy_pass http://backend:8000` + upgrade 头，置于 `location /api` 之前）；备选方案：前端统一改 `/ws/*`（方案选型待 §9.10.7-3 决策） | `frontend/nginx.conf` | `wscat -c ws://localhost/api/v1/ws/portfolio` 握手成功 |
+| F0-3 | **WS 生产断裂** | **已确认（§9.10.7-3）**：nginx.conf 增加 `location /api/v1/ws`（`proxy_pass http://backend:8000` + upgrade 头，置于 `location /api` 之前）；后端与前端代码零改动 | `frontend/nginx.conf` | `wscat -c ws://localhost/api/v1/ws/portfolio` 握手成功 |
 | F0-4 | **A 股 K 线单源依赖** | `get_history` 降级链增加 sina K 线/levistock 源；akshare 熔断期间从 `indices_cache.json`/内存缓存兜底；`get_k_data` 失败不再返回空而标记 stale | `backend/app/services/market_service.py`、`backend/app/fetchers/china_market.py` | akshare 熔断时 `history/indicators/signal` 仍有数据（stale 标记） |
 | F0-5 | **候选池 = 当日涨幅 Top25**（核心层偏离主流宽基） | 详见「§9.6 专项：候选池修复」：A 候选池改成交额排序（`fid=f6`）+ 分页失败重试不 break → B 主流宽基静态兜底注入（510300/510500/510050/588000 等）使 `CORE_REQUIRED/DEFENSE_REQUIRED` 生效 → C 板块配额防科创包场 → D 卫星 ≥4 只 → E C2 惩罚触发条件修正 | `backend/app/fetchers/etf_scanner.py`、`backend/app/engine/allocation_engine.py` | 方案 core 含主流宽基；卫星 ≥4；防御型科创卫星 ≤10% |
 
@@ -377,7 +377,7 @@ perf_diag 49 端点扫描：**46/49 通过**（3 个 405 为脚本用 GET 调 PO
 | F3-3 | 设计现金仓位偏高 | 预算引擎对 range_bound 市态的现金上限收紧（22-32% → ≤15%），非交易时段才有高现金 | `backend/app/engine/budgets.py` | 验收：balanced 方案现金 ≤ 15% |
 | F3-4 | Z04 etf_specific 4 因子 | 详见「§9.5 专项：Z04 修复方案」：A NAV 降级链（premium_discount）→ B benchmark_close 注入（tracking_error，分批宽基先行）→ C 份额数据源（shares_change + institutional_holdings_change 同时复活）→ D IC/状态展示修复 | `backend/app/factors/factor_registry.py`、`backend/app/services/market_data_hub.py`、`backend/app/fetchers/fund_fetcher.py`、`backend/app/fetchers/etf_scanner.py` | 验收：etf_specific no_data < 3，且 no_data 因子 reason 明确标注缺失字段 |
 | F3-5 | sentiment 3 因子无数据 | 接通 panic_greed_diff（涨跌分布）、news_heat/news_direction（资讯情绪）数据管道 | `backend/app/factors/factor_registry.py`、`backend/app/services/market_data_hub.py` | 验收：sentiment no_data = 0 |
-| F3-6 | LLM 429 限流 | 增加指数退避重试（尊重 Retry-After）+ provider 轮换 + 高峰排队（成本权衡：免费模型限流是常态，可接受降级） | `backend/app/analysis/llm.py` | 验收：单次分析失败前至少 2 次重试 |
+| F3-6 | LLM 429 限流 | **已确认（§9.10.7-6）**：指数退避重试（1-2 次，≤30s，尊重 Retry-After）+ provider 轮换 + 失败明确提示「LLM 限流，已降级」（不做高峰排队，避免任务堆积） | `backend/app/analysis/llm.py` | 验收：单次分析失败前至少 2 次重试 |
 | F3-7 | 自选美股名称 | `get_asset_realtime` US 分支补充 name 字段（静态基座映射） | `backend/app/services/market_service.py` | 验收：自选 SPY 显示 "SPDR S&P 500 ETF" |
 
 ### 🅿️4 — 测试防护补强（步骤 13 落地）
@@ -472,14 +472,14 @@ for sym in symbols:
     if len(closes) >= 5:
         result[sym]["benchmark_close"] = closes
 ```
-- 风险控制：行业指数历史接口成本高 → **分批实施**，第一批发 mapping 中的宽基（沪深300/中证500/上证50/创业板指等），行业指数随 mapping 补全跟进。
+- 风险控制：行业指数历史接口成本高 → **分批实施（§9.10.7-4 已确认：宽基先行）**，第一批发 mapping 中的宽基（沪深300/中证500/上证50/创业板指等 5-6 只），验证链路后再扩展行业指数（行业指数随 mapping 补全跟进）。
 
 **步骤 C — shares_change / institutional_holdings_change 份额数据（中）**
 
 - 文件：`backend/app/fetchers/fund_fetcher.py`（新增 `fetch_fund_shares_history`）、`backend/app/services/market_data_hub.py::_build_symbol_extra`
 - 改动：
   1. `fund_fetcher.py` 新增 `fetch_fund_shares_history(symbol) -> {"shares_20d_change": float}`：天天基金 `fund_fund_shares_em`（份额规模变化）取最近 2 期份额计算变化率。
-  2. `_build_symbol_extra` 注入 `shares_change_20d`；该字段同时喂 `_compute_shares_change`（直接用）与 `_compute_institutional_holdings_change`（×0.5 折扣代理）→ **两因子同时复活**。
+  2. `_build_symbol_extra` 注入 `shares_change_20d`；该字段同时喂 `_compute_shares_change`（直接用）与 `_compute_institutional_holdings_change`（**×0.5 折扣代理，§9.10.7-5 已确认**）→ **两因子同时复活**。
 - 伪代码：
 ```python
 async def fetch_fund_shares_history(symbol: str) -> dict | None:
@@ -1004,9 +1004,9 @@ async function analyze(item) {
 
 ---
 
-### 🔬 专项：新闻重要性分级质量修复（P3，待讨论项见 §9.10.7）
+### 🔬 专项：新闻重要性分级质量修复（P3）
 
-> 覆盖 F3-1。本节含实测证据：`_LEVEL_KEYWORDS` 关键词表全量比对 + 30 条真实标注逐条复核（地缘军事事件系统性低估 4 条、关键词误命中高估 2 条、源 level 盲信 1 条、其余合理）。
+> 覆盖 F3-1。本节含实测证据：`_LEVEL_KEYWORDS` 关键词表全量比对 + 30 条真实标注逐条复核（地缘军事事件系统性低估 4 条、关键词误命中高估 2 条、源 level 盲信 1 条、其余合理）。修复步骤已按 §9.10.7 决策定稿：stars 纯语义化（选项 1）+ 军事词仅组合相关资产触发 L5。
 
 #### 9.10.1 问题现象与影响
 
@@ -1038,10 +1038,10 @@ async function analyze(item) {
 - 文件：`levistock_fetcher.py::_level_of`
 - 改动：本地分类与源 level 差值 ≥2 时**以本地分类为准** + 记 WARNING 日志（可观察误标漂移）；源 level 仅作「未命中任何关键词」时的兜底。
 
-**步骤 C — stars 纯语义化（R3，待用户决策，见 §9.10.7）**
+**步骤 C — stars 纯语义化（R3，已确认选项 1）**
 
-- 选项 1（推荐）：`stars = level`，重要性唯一锚点，新鲜度靠已有 `time` 字段展示。
-- 选项 2：保留 freshness 混合，但前端拆分展示（星=重要性、时钟图标=新鲜度）。
+- 文件：`levistock_fetcher.py` / `news_fetcher.py`
+- 改动（§9.10.7-1 已确认）：**`stars = level`**，重要性唯一锚点，新鲜度靠已有 `time` 字段展示。
 - 影响：前端 `mapNewsLevel` 无需改（仍按 level 定色），`isImportant(level>=4)` 不变。
 
 **步骤 D — 标题+内容双输入（R4）**
@@ -1056,7 +1056,7 @@ async function analyze(item) {
 | 1 | `test_geo_political_escalated` | 「特朗普下令对伊朗发动袭击」→ level ≥4 |
 | 2 | `test_irrelevant_stock_suspension_not_L5` | 「7月最牛股停牌」→ level ≤2 |
 | 3 | `test_source_level_overridden_when_divergent` | mock 源 level=5 + 本地分类 L2（差距≥2）→ 输出 L2 + WARNING 日志 |
-| 4 | `test_stars_equal_level`（选项 1 时） | L3 新闻恒 3★（无论新鲜度） |
+| 4 | `test_stars_equal_level`（选项 1，已确认） | L3 新闻恒 3★（无论新鲜度） |
 | 5 | `test_content_keyword_matches` | 标题中性 + 正文含「军事行动」→ level 命中 L4 词 |
 
 #### 9.10.5 量化验收
@@ -1073,11 +1073,16 @@ async function analyze(item) {
 | L2 删词后普通新闻降为 L1 显示过灰 | 前端 mapNewsLevel 已支持 L1 灰色展示；观察一周样本分布微调阈值 |
 | stars 改纯语义后与历史数据不一致 | 仅影响展示不改存储；历史已存数据不重算 |
 
-#### 9.10.7 待讨论项（实施前需确认）
+#### 9.10.7 决策记录（2026-08-01 已全部确认）
 
-1. **stars 语义化选项**：选项 1（stars=level，推荐）还是选项 2（保留 freshness 拆分展示）？
-2. **军事词触发范围**：L5 是否仅组合相关资产（军工/原油/黄金）触发，还是全市场事件即 L5？
-3. **F0-3 WS 方案选型**：默认 nginx 代理（改 nginx.conf，后端不变）还是前端改路径（改 `useMarketWS.js`/`useNewsWS.js` 连 `/api/v1/ws/*`）？——涉及 F0-3 实施路径，需在实施前确认。
+> 以下 6 项实施前决策点均已与用户逐项确认，选中的方案以**加粗**标注；实施时无需再议。
+
+1. **stars 语义化** → **选项 1：`stars = level`**（重要性唯一锚点，新鲜度靠 `time` 字段展示；前端无需改动）。
+2. **军事词触发范围** → **仅组合相关资产（军工/原油/黄金持仓）触发 L5**，其余地缘军事事件归 L4（宁缺毋滥，避免噪音）。
+3. **F0-3 WS 方案选型** → **默认：改 nginx.conf**（加 `location /api/v1/ws` upgrade 代理，后端与前端代码零改动）。
+4. **§9.5 步骤 B 分批范围** → **宽基先行**：第一批发 mapping 中主流宽基（沪深300/中证500/上证50/创业板指等 5-6 只），验证链路后再扩展行业指数。
+5. **institutional_holdings_change 数据源** → **接受 ×0.5 折扣代理**（权重×0.5 降信噪比，因子先有值可展示，后续换源再校准）。
+6. **LLM 429 限流策略（F3-6）** → **指数退避（≤30s，1-2 次）+ provider 轮换 + 失败明确提示「LLM 限流，已降级」**；不做高峰排队（避免任务堆积）。
 
 ---
 
@@ -1099,7 +1104,7 @@ async function analyze(item) {
   T1/T2 防回归测试（与 F0 修复同批交付：F0 交付即加 T1/T2，拦截两个 P0 bug 回归）
 第四梯队（P3-P4 — 持续）
   F3-1~F3-7 质量完善（Z04 因子补齐见 §9.5 专项 4 步方案；Z07 限流重试可提前至 P2 并行）
-  §9.10 专项：F3-1 新闻分级（词表治理 + 双轨校验 + stars 语义化；**先做 A/B/D，步骤 C 待 §9.10.7 决策**）
+  §9.10 专项：F3-1 新闻分级（词表治理 + 双轨校验 + stars 语义化，已按 §9.10.7 决策定稿）
   T1-T13 测试防护补强（§8.3/§8.4 映射：T7/T10 随 F 修复同批，T8/T9 随 F1-7/F1-9 同批，T13 数据卫生随任意测试批次）
 ```
 
@@ -1143,3 +1148,4 @@ async function analyze(item) {
 | v1.8 | 2026-08-01 | 终稿多轮 review 修订（第 4-6 轮）：①头部版本号/步骤 15 状态对齐；②修订记录行序重排（v1.4-v1.7 升序）；③F3 表补「涉及文件」列；④§9.7 补齐 9.7.5 TDD 9 用例 + 9.7.6 风险回退，R3/R5 细化到函数与阈值（`_style_probe` 四类短语池 / `0.4技术+0.4估值+0.2动量`+「双弱不判多」+极端值封顶）；⑤代码事实校正（`_select_and_weight` 替代 `allocate`、`_load_tracked_index_cache` 替代 `_load_etf_index_mapping`）；⑥新增 §9.10 专项「新闻分级质量修复」（词表治理/双轨校验/stars 语义化/双输入，含 TDD 5 用例 + 待讨论项）；⑦Z32 幽灵引用清理、F2-4 验收量化、§9.1-9.4 编号说明、§5.3 权重合计注记 |
 | v1.9 | 2026-08-01 | 新增 §8.3「用户反馈逐条映射：为何测试未发现」（11 条反馈 ↔ 既有测试 ↔ 断点 ↔ 缺口类型）与 §8.4「测试防护体系根因诊断」（G1-G7 七类缺口 + 体系性结论：断言从「接口形状」升级到「业务语义」）；T 表新增 T7-T12（数值门限/LLM 金丝雀基线/超时路径回归/真实调用链分级测试/契约自动化校验/链路两端测试）；新增 F1-9「策略检查超时假象」修复项（`CancelledError` 不被捕获 + usage 留痕 + fallback 执行 + 前端文案区分）；路线图 P4 批次更新（T1-T12 与 F 修复同批交付） |
 | v1.10 | 2026-08-01 | 终稿多轮 review 修订（第 7-9 轮）：①§8.3 口径统一（14 条编号反馈归并为 11 个独立现象，③⑫⑬ 与 ⑨⑩ 同根因合并说明）；②§8.3 ① 测试引用修正为 `test_z26_strategy_check_coverage.py`（实测已覆盖 TimeoutError→兜底，缺口精确到 `wait_for` 取消路径）；③§8.4 扩为 8 类缺口（新增 G8 数据卫生）并加与 §8.2 的定位说明；④T 表新增 T13 数据卫生门禁、T12 补组件 spec 文件名；⑤F 表验收量化（F1-8/F2-9 引用专项验收标准）、F0-3 标默认方案并入 §9.10.7-3 待决策；⑥R5 根因补实测数据与 `signal.py::generate_signal` 定位；⑦索引表步骤 14/15 状态收口、步骤 13 补 §8.4 引用；⑧宽基清单统一（含 159915）、§9.5.6-2 补 valid+warn 门限、§9.9.5 补 fake timers 断言方式、§9.10.5 固定样本集、§9.8 步骤 D 补前置依赖说明 |
+| v1.11 | 2026-08-01 | 6 项实施前决策点全部确认（§9.10.7 改为「决策记录」）：①stars 语义化 → 选项 1（`stars=level`）；②军事词触发 → 仅组合相关资产触发 L5；③F0-3 WS 方案 → 改 nginx.conf（前后端零改动）；④§9.5 步骤 B 分批 → 宽基先行（5-6 只）；⑤institutional_holdings_change → ×0.5 折扣代理；⑥LLM 429（F3-6）→ 指数退避 1-2 次 ≤30s + provider 轮换 + 失败提示，不做高峰排队。同步更新 F0-3/F3-6 表项、§9.5 步骤 B/C、§9.10 标题与步骤 C、TDD 用例 4 注释、路线图 P3/P4 批次；全部「待决策」标记清除 |
