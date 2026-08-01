@@ -299,6 +299,7 @@ perf_diag 49 端点扫描：**46/49 通过**（3 个 405 为脚本用 GET 调 PO
 | F0-2 ✅ | Settings extra_forbidden | `Settings.Config` 增加 `extra="ignore"` | `backend/app/config.py` | 任意无关环境变量不导致启动崩溃 |
 | F0-3 | **WS 生产断裂** | nginx.conf 增加 `location /api/v1/ws`（`proxy_pass http://backend:8000` + upgrade 头，置于 `location /api` 之前）；或前端统一改 `/ws/*` | `frontend/nginx.conf` | `wscat -c ws://localhost/api/v1/ws/portfolio` 握手成功 |
 | F0-4 | **A 股 K 线单源依赖** | `get_history` 降级链增加 sina K 线/levistock 源；akshare 熔断期间从 `indices_cache.json`/内存缓存兜底；`get_k_data` 失败不再返回空而标记 stale | `backend/app/services/market_service.py`、`backend/app/fetchers/china_market.py` | akshare 熔断时 `history/indicators/signal` 仍有数据（stale 标记） |
+| F0-5 | **候选池 = 当日涨幅 Top25**（核心层偏离主流宽基） | 详见「§9.6 专项：候选池修复」：A 候选池改成交额排序（`fid=f6`）+ 分页失败重试不 break → B 主流宽基静态兜底注入（510300/510500/510050/588000 等）使 `CORE_REQUIRED/DEFENSE_REQUIRED` 生效 → C 板块配额防科创包场 → D 卫星 ≥4 只 → E C2 惩罚触发条件修正 | `backend/app/fetchers/etf_scanner.py`、`backend/app/engine/allocation_engine.py` | 方案 core 含主流宽基；卫星 ≥4；防御型科创卫星 ≤10% |
 
 ### 🅿️1 — 高优先级（数据质量与正确性）
 
@@ -311,6 +312,7 @@ perf_diag 49 端点扫描：**46/49 通过**（3 个 405 为脚本用 GET 调 PO
 | F1-5 | 设计因子数据不一致 | 统一设计引擎与 `indicators` 端点的 K 线来源与时点；rationale 从 factor_scores 取 RSI 时校验数据新鲜度 | 涉及：`backend/app/engine/`、`backend/app/factors/factor_registry.py` | 设计报告 RSI 与实际 `indicators` 一致 |
 | F1-6 | 板块成分股错位 | 修复 BK0447 等板块成分股映射（sector 代码→成分股接口错位） | 涉及：`backend/app/services/market_data_hub.py`（get_sector_stocks） | 半导体板块返回半导体成分股 |
 | F1-7 | LLM 输出未后处理 | 对 LLM 流式输出做系统提示词隔离（system prompt 与用户内容严格分段）+ 输出首段过滤已知泄漏模式 | 涉及：`backend/app/analysis/llm.py`、`backend/app/routers/analysis.py` | 输出无"我们只需要回答…"类泄漏 |
+| F1-8 | **组合设计投资合理性**（方案与市场脱节） | 详见「§9.7 专项：投资合理性评估」：R1 因子数据正确性（RSI K 线口径对齐 + 估值字段按资产类别禁用）→ R2 market_context 填充 → R3 rationale 绑定标的属性 → R4 候选池多样性（见 F0-5）→ R5 信号聚合「双弱不判多」约束 | 涉及：`backend/app/engine/rationale.py`、`backend/app/analysis/signal.py`、`backend/app/factors/factor_registry.py`、`backend/app/services/llm_context.py` | core 重叠 ≤1 只；防御型科创卫星 ≤10%；rationale 无模板缺陷；market_context 非空 |
 
 ### 🅿️2 — 中优先级（性能与断裂修复）
 
@@ -482,16 +484,212 @@ async def fetch_fund_shares_history(symbol: str) -> dict | None:
 
 ---
 
+### 🔬 专项：候选池修复 — 组合设计核心层偏离主流宽基（P0/P1）
+
+> 对应新增 F0-5（候选池来源）与 F1-8（选标/去重）。本节给出实施级方案：现象（方案快照证据）、根因链（含代码行号）、修复步骤 A-E（含伪代码）、TDD 测试计划与量化验收条件。
+
+#### 9.6.1 问题现象与影响（方案快照 `logs/design_latest_full.json` 实证）
+
+| 现象 | 快照证据 | 投资影响 |
+|------|---------|---------|
+| 核心层无主流宽基 | 三套方案 core 全部是「价值/增强/成长」变体宽基：562320 沪深300价值、562330 中证500价值、563080 中证A50、562340 中证500成长、563030 中证500增强、562000 A100；**最主流的 510300 沪深300ETF / 510500 中证500ETF / 510050 上证50ETF / 588000 科创50ETF 全部缺席** | 方案与市场主流配置脱节，投资者难以对齐基准 |
+| 卫星层被科创系包场 | 589720 科创创新药、589420 科创芯片设计、589560 科创人工智能、589960 科创新能源——名称全部带「科创」 | 风格高度集中，未达卫星层分散目的 |
+| 卫星数量偏少 | 防御型/进攻型各仅 2 只卫星（预算引擎 `layer_count.satellite=8` 上限远未用满） | 卫星层失去「多赛道分散」的意义 |
+| 防御型配 25% 科创卫星 | 防御稳健组合 satellite=589720(12.58%)+589420(12.42%) | 与「防御」风偏矛盾（详见 §9.7） |
+
+#### 9.6.2 根因链（三层叠加）
+
+1. **候选池 = 当日涨幅 Top25（主因）**
+   - `etf_scanner.py::_fetch_em_etf_list`（L180-197）按 `fid=f3`（涨跌幅降序）分页拉全市场 ETF → 当日涨幅榜被题材/小盘 ETF 占满，主流宽基当日涨幅进不了 Top25 → **被挤出候选池**。
+   - 分页 `except: break`（L196-197）：任一分页失败即静默中断，只返回部分数据，加剧候选池偏斜。
+   - `full_pipeline`（L622-646）在各层 `layer_ranking(top_n=25)` 再截断一次，池子进一步收窄。
+
+2. **强制清单注入静默失效（CORE_REQUIRED/DEFENSE_REQUIRED 形同虚设）**
+   - `layer_ranking(..., required=CORE_REQUIRED)`（L644-646）的 required 注入逻辑（L512-524）**只从候选池 `items` 里查找** `510300`/`560600`/`518880`/`511090`；候选池里没有 → `found=None` → **静默跳过，不报错、不补录**。
+   - 结果：`CORE_REQUIRED=["510300","560600"]` 从未生效，方案里 core 全是涨幅榜里的变体宽基。
+
+3. **板块去重拦不住「科创系」**
+   - `allocation_engine.py::allocate` L247-260 `concept_groups` 按 `tracked_index` 归一化前缀去重（科创50/科创100/科创新能源 → 科创），每组仅留最高分。
+   - 但 589720（创新药）/589420（芯片设计）/589560（人工智能）/589960（新能源）**归一化后分属 医药/电子/计算机/新能源 四个不同概念组** → 名称都带「科创」却各自入选 → 去重逻辑对「同主题不同概念名」失效。
+
+4. **卫星少 = 候选池窄的必然结果**
+   - core 层被变体宽基占满（见现象 1）+ 卫星候选本身不足（涨幅榜上科创系集中）→ `_filter_satellite_by_profile`（L307-347）KEEP_RATIO 裁剪后只剩 2 只。
+
+5. **C2 防御型科创惩罚失效（放大 4 的影响）**
+   - `allocation_engine.py` L219 `valuation_missing = abs(factor_scores.get("valuation",0)) < 0.001`：防御型对科创的 `c2_bonus=-1.5`（L229-234）**只在 `valuation_missing` 时生效**。
+   - 实际估值因子非零（虽然值是错位的假信号，如 589720 估值 -0.462）→ 条件不满足 → 惩罚分支不进 → 防御型仍配 25% 科创卫星。
+
+#### 9.6.3 修复步骤（按成本排序）
+
+**步骤 A — 候选池来源改为规模/成交额排序（P0，核心）**
+
+- 文件：`backend/app/fetchers/etf_scanner.py::_fetch_em_etf_list`（L180-197）
+- 改动：
+  1. 分页排序 `fid=f3`（涨跌幅）→ **`fid=f6`（成交额）** 或 `fid=f12`（代码序全市场遍历）；主流宽基成交额/规模恒居前列，天然留在池内。
+  2. `except: break`（L196-197）改为：**重试 1 次 → 仍失败则记录 WARNING 并继续下一页**（不静默丢页）。
+- 伪代码：
+```python
+for page in range(1, 20):
+    url = (f"http://push2delay.eastmoney.com/api/qt/clist/get?"
+           f"pn={page}&pz=100&po=1&np=1&fs=m:1+t:2&fields={fields}&fid=f6")  # 成交额降序
+    for attempt in range(2):                      # 重试 1 次
+        try:
+            with no_proxy():
+                r = _req.get(url, timeout=5, headers=headers)
+            data = r.json()
+            diff = data.get("data", {}).get("diff")
+            if diff:
+                all_items.extend(diff)
+            break
+        except Exception:
+            if attempt == 1:
+                logger.warning("EM ETF list page %d failed, skip", page)   # 不 break，继续下一页
+```
+
+**步骤 B — 主流宽基静态兜底注入（P0，使强制清单生效）**
+
+- 文件：`backend/app/fetchers/etf_scanner.py::full_pipeline`（L622-646）
+- 改动：维护主流宽基静态清单（510300/510500/510050/588000/159915/511090/518880 等），`full_pipeline` 组装候选池后**将清单成员从 `instruments` 表（静态元数据：规模/名称/代码）补录进对应层**，不依赖当日涨幅榜。
+- 效果：`layer_ranking(required=CORE_REQUIRED)` 的注入（L514-524）从此能找到 510300/560600 → 强制清单真正生效。
+
+**步骤 C — 板块配额（P1，防科创包场）**
+
+- 文件：`backend/app/engine/allocation_engine.py::allocate`（L247-260 去重处）
+- 改动：去重按归一化概念组后，**每组最多保留 composite 前 2 名**；另增加「科创系」聚合约束：名称含科创/半导体/芯片的候选合计 ≤ 卫星层预算的 50%。
+- 伪代码：
+```python
+# 概念组去重后追加主题配额
+tech_candidates = [s for s in survived if any(t in s["name"] for t in
+                    ("科创", "半导体", "芯片", "AI", "人工智能"))]
+if sum(w for w in tech_candidates) > s_budget * 0.5:
+    # 按 composite 降序保留，超出部分裁剪（权重回补其余卫星）
+```
+
+**步骤 D — 卫星数量下限（P1）**
+
+- 文件：`backend/app/engine/allocation_engine.py::_filter_satellite_by_profile`（L341-347）
+- 改动：KEEP_RATIO 裁剪后 `keep_count = max(4, ...)`（预算允许时卫星 ≥ 4 只）；候选不足 4 时从 core 层未入选者按 composite 降序补足。
+
+**步骤 E — C2 惩罚触发条件修正（P1）**
+
+- 文件：`backend/app/engine/allocation_engine.py` L219-228
+- 改动：估值信号需「有意义的非零」才视为可用——排除字段错位值（黄金等无估值概念标的的 +3.9 类假信号）与 `ln_mcap/ln_float_mcap`（L220-221 已有排除，扩展到估值维度）；否则判定 `valuation_missing=True` → 防御型科创惩罚分支正常触发。
+
+#### 9.6.4 TDD 测试计划（先写失败单测）
+
+`tests/test_design_candidate_pool.py` 新增：
+
+| 用例 | 断言 |
+|------|------|
+| `test_pool_sorted_by_amount` | mock EM 列表接口响应 → `_fetch_em_etf_list` 请求 URL 含 `fid=f6` |
+| `test_pool_page_fail_continues` | mock 第 1 页抛异常 → 不抛错、返回第 2 页起数据、WARNING 日志 |
+| `test_core_required_injected` | mock 候选池无 510300 → `full_pipeline` 输出 core 含 510300（静态兜底） |
+| `test_defense_required_injected` | mock 候选池无 518880 → 输出 defense 含 518880 |
+| `test_sector_quota` | mock 全科创候选 → 归一化概念组每类 ≤2、科创系合计 ≤ 卫星预算 50% |
+| `test_satellite_min_count` | mock 因子矩阵 → 每方案卫星 ≥ 4 |
+| `test_c2_penalty_defensive_kcb` | mock 估值因子为错位值（黄金 +3.9）→ 防御型科创候选 c2_bonus=-1.5 生效 |
+
+集成用例：`test_design_core_contains_wide_basis` — mock 完整管道 → 三套方案 core 至少含 1 只主流宽基（510300/510500/510050/588000 之一）。
+
+#### 9.6.5 验收条件（量化）
+
+1. 组合设计三套方案：core 层至少 1 只来自主流宽基清单（510300/510500/510050/588000/159915）。
+2. 每方案卫星 ≥ 4 只；防御型方案科创系卫星权重 ≤ 10%。
+3. 归一化概念组在卫星层不重复（每组 ≤1 只入选权重位，或 ≤2 只候选）。
+4. `pytest tests/test_design_candidate_pool.py` 全绿。
+
+#### 9.6.6 风险与回退
+
+| 风险 | 缓解 |
+|------|------|
+| 成交额排序冷门时段失真（开盘首分钟） | 合并规模 `fund_scale` 加权（复用 layer_ranking 现有 30/70 加权逻辑）；极端情况回退代码序全量池 |
+| 静态兜底清单引入流动性差的同名 ETF | 清单仅取 instruments 表内**规模最大**的同代码 ETF，并带成交额校验 |
+| 配额裁剪导致预算未用满 | 裁剪回收的权重按 composite 顺序回补其余卫星；不引入 CASH 膨胀 |
+
+---
+
+### 🔬 专项：组合设计投资合理性评估（含证据）
+
+> 对应新增 F1-8。本节先给出**证据化的问题清单**（方案快照 + 代码交叉验证），再给出修复优先级映射。候选池根因已在 §9.6 覆盖，本节聚焦**因子数据正确性 → 市场上下文 → 理由生成 → 信号聚合**四层。
+
+#### 9.7.1 现象证据（全部来自 `logs/design_latest_full.json` 实测）
+
+**A. 三套方案高度重叠，差异仅剩预算参数机械缩放**
+
+| 维度 | 证据 | 问题 |
+|------|------|------|
+| core 重叠 | 562320 出现 3/3 套、563080/562330/562340/563030 各 2/3 套 | 三方案核心几乎相同，未体现风偏差异 |
+| satellite 重叠 | 589720 出现 3/3 套、589420 2/3、589560 2/3 | 卫星亦高度重叠 |
+| 唯一差异 | 权重 + 现金（32%/27%/22%）+ 参数（er 0.08/0.11/0.16、mdd -0.12/-0.18/-0.35） | 方案 = 预算模板机械缩放，非因子驱动差异化 |
+
+**B. 因子数据正确性（选标依据本身不可信）**
+
+| 证据 | 实测值 | 问题 |
+|------|--------|------|
+| RSI 全面异常 | 方案内 RSI 全部 <3（562320 RSI 2.4、562330 1.4、563080 1.0、562340 0.4、589720 0.2、518880 0.3） | 真实 RSI（562320 实测 ~65.3）严重不符；K 线来源/口径 bug（F1-5 同源） |
+| 黄金「估值因子 +3.926」 | 518880 黄金 ETF 出现估值因子 +3.926、技术面 +2.833，而 MACD 为负、RSI 0.3 | 字段错位：黄金无 PE 估值概念；技术面正分与负向指标自相矛盾 |
+| 信号自相矛盾 | 589720 技术 -0.408 / 估值 -0.462 却判「综合信号偏多」 | 单靠动量 +1.047 拉平；信号聚合规则需复核 |
+
+**C. rationale 模板错位（理由与标的属性不符）**
+
+| 证据 | 问题 |
+|------|------|
+| 589850 科创50 / 589980 科创100 被套「作为组合压舱石，低波动宽基」模板（rationale.py L15 短语池） | 高波动成长指数被冠「压舱石/低波动」——模板未绑定标的实际波动属性 |
+| 562320 rationale 截断为「…作为组合压」；562330 出现「在方案中在方案中」重复拼接 | 模板字符串拼接缺陷 |
+| 562000 标注「unknown方向」 | tracked_index 提取缺失（F10 富集失败） |
+
+**D. market_context 数据缺失（方案与市场大环境脱节）**
+
+| 字段 | 快照值 | 期望 |
+|------|--------|------|
+| `index_realtime` | 0 条 | ≥3 条（上证/深成/创业板） |
+| `sector_momentum` | 0 条 | ≥5 条（领涨/领跌板块） |
+| `fund_flow` | 全 0（total_symbols=18 但净流入 0） | 非全 0 的实际资金流 |
+| `benchmark_stocks` | 0 条 | 若干龙头股信号 |
+
+→ 编排器/LLM 完全没有市场大环境输入，方案仅由因子分机械排序生成，与「市场行情匹配度」脱节（F1-3/F1-4 同源）。
+
+#### 9.7.2 根因分级与修复映射
+
+| 级别 | 根因 | 涉及文件 | 对应 F 表 |
+|------|------|---------|----------|
+| R1 | 因子数据正确性：RSI K 线口径 bug、估值字段错位 | `backend/app/factors/factor_registry.py`、`backend/app/services/market_data_hub.py` | F1-5（已有） |
+| R2 | market_context 采集链路缺失（index_realtime/sector_momentum/fund_flow 全空） | `backend/app/services/llm_context.py`、`backend/app/routers/analysis.py` | F1-3/F1-4（已有） |
+| R3 | rationale 模板未绑定标的属性（按 layer 固定套用短语池） | `backend/app/engine/rationale.py` | F1-8 新增 |
+| R4 | 候选池多样性（涨幅榜 Top25 → 无主流宽基、科创包场） | `backend/app/fetchers/etf_scanner.py`、`backend/app/engine/allocation_engine.py` | F0-5 / F1-8（§9.6 专项） |
+| R5 | 信号聚合复核：技术+估值双弱判「偏多」 | `backend/app/analysis/signal.py`（或因子聚合处） | F1-8 新增 |
+
+#### 9.7.3 修复优先级（实施顺序）
+
+1. **R1 因子数据正确性**（最高优先——选标依据错了，后面全错）：RSI 与 `indicators` 端点对齐（F1-5 验收）；估值因子按资产类别禁用（黄金/债券类剔除估值字段）。
+2. **R2 market_context 填充**：修复 index_realtime/sector_momentum/fund_flow 采集（F1-3/F1-4）。
+3. **R3 rationale 绑定标的属性**：按 layer + 标的波动率/风格选模板短语，废弃固定「压舱石」；修复字符串拼接缺陷（截断/重复）。
+4. **R4 候选池多样性**：§9.6 专项步骤 A-E。
+5. **R5 信号聚合复核**：技术/估值/动量加权规则加「双弱不判多」约束，单因子极端值设封顶。
+
+#### 9.7.4 验收条件（量化）
+
+1. 三套方案 core 重叠 ≤1 只（或方案间 Jaccard 相似度 < 0.5）；卫星重叠 ≤1 只。
+2. 防御型方案科创系卫星权重 ≤ 10%；方案 RSI 与 `indicators` 端点一致（F1-5 同验收）。
+3. rationale 无模板拼接缺陷（无截断、无「在方案中在方案中」重复）；科创50/科创100 不再出现「压舱石/低波动」措辞。
+4. `market_context`：index_realtime ≥3 条、sector_momentum ≥5 条、fund_flow 非全 0。
+5. 无「技术+估值双弱却判偏多」信号输出（R5 约束生效）。
+
+---
+
 ## 十、实施优先级路线图
 
 ```
 第一梯队（P0 — 立即，预计 1 人日）
   F0-3 WS nginx 代理修复（30min）   F0-4 K 线降级链增强（半日）
+  F0-5 候选池修复（成交额排序 + 宽基兜底注入，见 §9.6 步骤 A/B）
 第二梯队（P1 — 本周，预计 2-3 人日）
   F1-1 港股行情 / F1-2 单只降级链 / F1-3 LLM 上下文 / F1-4 市场参数
   F1-5 因子一致性 / F1-6 成分股 / F1-7 LLM 输出后处理
+  F1-8 投资合理性（§9.7 R1-R5：因子正确性→market_context→rationale→信号聚合）
 第三梯队（P2 — 下迭代，预计 2-3 人日）
   F2-1 组合计算并行 / F2-2 首页性能 / F2-3 sectors/heat / F2-4 前端方法 / F2-5 预热并行
+  §9.6 步骤 C-E（板块配额/卫星下限/C2 惩罚修正，与 F0-5 同批或紧随）
   T1/T2 防回归测试（与 F0 修复同批交付：F0 交付即加 T1/T2，拦截两个 P0 bug 回归）
 第四梯队（P3-P4 — 持续）
   F3-1~F3-7 质量完善（Z04 因子补齐见 §9.5 专项 4 步方案；Z07 限流重试可提前至 P2 并行）
@@ -531,3 +729,4 @@ async def fetch_fund_shares_history(symbol: str) -> dict | None:
 | v1.1 | 2026-07-31 | 首轮 review 修订：修正港股降级链顺序（sina→tencent→dongfang）、LLM 泄漏术语；补步骤索引表/持仓全表/e2e 失败完整清单/P1-P2 涉及文件列/P3 验收条件；T1/T2 提前至 P2；T3/T6 断言补全 |
 | v1.2 | 2026-07-31 | 二轮 review 修订：P1/P2/P3 表头补列（涉及文件/验收条件，修复渲染错位）；T1/T2 调度措辞修正（F0 交付即加）；§5.3 持仓表补全 10 只含权重；T4 补 daily-pnl 参数修复；calculate 耗时口径统一（8.2s/8257-8287ms）；F0-4 涉及文件补全路径 |
 | v1.3 | 2026-07-31 | Z04 细化：新增 §9.5 专项修复方案（根因三层缺口/10 因子依赖清单/步骤 A-D 含伪代码/TDD 测试计划/量化验收/风险回退）；F3-4 表项与 Z04 问题行改为引用专项章节 |
+| v1.4 | 2026-08-01 | 新增 §9.6 专项「候选池修复」（核心层偏离主流宽基：涨幅榜 Top25 根因链 5 层 + 步骤 A-E 含伪代码 + TDD 7 用例 + 量化验收）与 §9.7 专项「投资合理性评估」（方案快照证据 A-D + 根因 R1-R5 映射 + 修复优先级 + 量化验收）；F 表新增 F0-5/F1-8；路线图更新（F0-5 进 P0、F1-8 进 P1、§9.6 步骤 C-E 进 P2） |
