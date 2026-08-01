@@ -149,15 +149,24 @@ class ICTracker:
 
         # Group factor values by code
         factor_by_code: dict[str, dict[str, float]] = {}
+        # F3-4 步骤D: 零值占比统计（code -> [zero_count, total_count]）
+        _stats: dict[str, list[int]] = {}
         for sym, factors in factor_values.items():
             if not factors:
                 continue
             for code, val in factors.items():
+                st = _stats.setdefault(code, [0, 0])
+                st[1] += 1
                 if abs(val) < 0.001:
+                    st[0] += 1
                     continue
                 if code not in factor_by_code:
                     factor_by_code[code] = {}
                 factor_by_code[code][sym] = val
+        self._zero_ratio = {
+            c: (st[0] / st[1]) if st[1] else 0.0
+            for c, st in _stats.items()
+        }
 
         # Compute IC per factor code
         ic_results: dict[str, float] = {}

@@ -567,6 +567,14 @@ _BUILTIN_COMPUTERS: dict[str, Callable[[dict], float]] = {
     "technical.signal.overall": _compute_signal_overall,
 }
 
+# F3-4 步骤D: etf_specific 四因子的数据源缺口键（factors/active no_data reason 区分用）
+ET_SPECIFIC_GAP_CODES = {
+    "etf.premium_discount": "nav",
+    "etf.tracking_error": "benchmark_close",
+    "etf.shares_change": "shares_change_20d",
+    "etf.institutional_holdings_change": "shares_change_20d/institutional_holdings_change",
+}
+
 # 33 core factors for S1 (extend this list as implementation progresses)
 _CORE_FACTORS = [
     # Style: Size & Value
@@ -670,6 +678,9 @@ class FactorRegistry:
         # Z03: 因子健康度元数据（sample_count / 最后计算时间）
         self._sample_counts: dict[str, int] = {}
         self._last_computed_at: str | None = None
+        # F3-4 步骤D: 最近一次 _fetch_market_data 的 etf_specific 数据源缺口
+        # （factor_code -> [缺失字段的 symbol 列表]；供 factors/active no_data reason 区分）
+        self._data_source_gaps: dict[str, list[str]] = {}
         self.load_definitions()
 
     def load_definitions(self, yaml_path: str | None = None) -> None:
@@ -962,6 +973,37 @@ class FactorRegistry:
         except Exception as e:
             logger.warning("[factor] batch NAV fetch failed: %s (proxy? — non-fatal)", e)
 
+        # F3-4 步骤A: IOPV 命中率不足 → 天天基金日频净值降级（收盘折溢价口径，不回退 0.0 假数据）
+        _missing_nav = [s for s in symbols if not (data.get(s) or {}).get("nav")]
+        if _missing_nav:
+            from ..core.async_utils import run_sync
+            from ..services.market_data_hub import market_data_hub as _hub
+            for _sym in _missing_nav:
+                try:
+                    _nav = await run_sync(_hub.get_fund_nav, _sym, timeout=6)
+                    if _nav and _nav.get("nav"):
+                        data.setdefault(_sym, {})["nav"] = _nav["nav"]
+                except Exception:
+                    continue
+
+        # F3-5: 注入 sentiment 数据字段（panic_greed_diff 用 sentiment_index/history，
+        # news_heat / news_direction 用 news_items）——此前只注入到 refresh_pool 的
+        # factor_scores，compute 路径拿不到 → 全 0 → 被 IC 过滤 → 永远 no_data。
+        try:
+            from ..services.market_data_hub import market_data_hub as _hub2
+            _sent = _hub2.get_market_sentiment() or {}
+            _news = _hub2.get_news_headlines() or []
+            for _sym in symbols:
+                _d = data.setdefault(_sym, {})
+                if _sent.get("sentiment_index") is not None:
+                    _d["sentiment_index"] = float(_sent["sentiment_index"])
+                if _sent.get("sentiment_history"):
+                    _d["sentiment_history"] = _sent["sentiment_history"]
+                if _news:
+                    _d["news_items"] = _news[-30:]
+        except Exception as _e:
+            logger.warning("[factor] sentiment data inject failed: %s", _e)
+
         # Z04: 注入 symbol_extra 中的 etf_specific 字段
         # 这些字段用于：industry/concepts → industry_diversification,
         # benchmark_close → tracking_error, shares_change_20d → shares_change
@@ -979,6 +1021,25 @@ class FactorRegistry:
         # 缓存成功获取的数据，记录 SourceRegistry 成功
         source_h.record_success(route="kline", operation="batch_fetch", target=",".join(symbols[:3]))
         _set_kline_cache(data)
+
+        # F3-4 步骤D: 记录 etf_specific 数据源缺口（factors/active no_data reason 区分用）
+        self._data_source_gaps = {}
+        for _code, _field in ET_SPECIFIC_GAP_CODES.items():
+            if _field == "nav":
+                _missing = [s for s in symbols if not (data.get(s) or {}).get("nav")]
+            elif _field == "benchmark_close":
+                _missing = [s for s in symbols if not (data.get(s) or {}).get("benchmark_close")]
+            elif _field.startswith("shares_change_20d"):
+                _missing = [
+                    s for s in symbols
+                    if (data.get(s) or {}).get("shares_change_20d") is None
+                    and (data.get(s) or {}).get("institutional_holdings_change") is None
+                    and not (data.get(s) or {}).get("fund_scale")
+                ]
+            else:
+                _missing = [s for s in symbols if (data.get(s) or {}).get("shares_change_20d") is None]
+            if _missing:
+                self._data_source_gaps[_code] = _missing
 
         return data
 

@@ -431,6 +431,11 @@ class MarketDataHub:
                 "concepts": e.get("concepts", []),
             } for e in flat if e.get("symbol")}
             try:
+                # F3-4 步骤B/C: 注入 benchmark_close（宽基）+ shares_change_20d（份额）
+                symbol_extra = await self._enrich_symbol_extra(symbols, symbol_extra)
+            except Exception as e:
+                logger.warning("[hub] symbol_extra enrich failed (non-fatal): %s", e)
+            try:
                 # S5: 使用缓存 K 线作为 market_data（R3: 从行式缓存懒转换）
                 cached_kline = self._kline_cache if self._kline_cache_ts > 0 else None
                 factor_scores = await self.factor_registry.compute(
@@ -1024,6 +1029,70 @@ class MarketDataHub:
                 "concepts": entry.get("concepts", []),
             }
         return result
+
+    # F3-4 步骤B: 宽基 ETF → 指数代码（东财指数，benchmark_close 注入用）。
+    # §9.10.7-4 已确认「宽基先行」：行业指数随 mapping 补全后跟进。
+    _WIDE_BASIS_INDEX_CODES = {
+        "510300": "sh000300",  # 沪深300
+        "510500": "sh000905",  # 中证500
+        "510050": "sh000016",  # 上证50
+        "588000": "sh000688",  # 科创50
+        "159915": "sz399006",  # 创业板指
+        "510880": "sh000015",  # 上证红利
+    }
+    # F3-4 步骤C: 份额数据 24h 缓存（fund_fund_shares_em 日更/周更）
+    _FUND_SHARES_CACHE: dict[str, tuple[float, dict]] = {}
+    _FUND_SHARES_TTL = 86400.0
+
+    async def _enrich_symbol_extra(
+        self,
+        symbols: list[str],
+        base_extra: dict[str, dict],
+    ) -> dict[str, dict]:
+        """F3-4 步骤B/C: 注入 benchmark_close（宽基指数历史 close）与 shares_change_20d（份额变化）。
+
+        - benchmark_close → tracking_error（§9.5.4 步骤B，宽基先行）
+        - shares_change_20d → shares_change 直接生效 + institutional_holdings_change ×0.5 折扣代理
+        - 任一失败静默（不阻塞主流程），份额数据 24h 缓存
+        """
+        import time
+        from ..fetchers.china_market import fetch_etf_shares_outstanding
+
+        out = {s: dict(base_extra.get(s) or {}) for s in symbols}
+
+        async def _bench(sym: str):
+            idx_code = self._WIDE_BASIS_INDEX_CODES.get(sym)
+            if not idx_code:
+                return
+            try:
+                hist = await self.get_market_history(idx_code, "index", "daily")
+                closes = [float(r.get("close", 0)) for r in (hist or []) if r.get("close")]
+                if len(closes) >= 5:
+                    out.setdefault(sym, {})["benchmark_close"] = closes[-20:]
+            except Exception as e:
+                logger.debug("[hub] benchmark_close for %s failed: %s", sym, e)
+
+        async def _shares(sym: str):
+            try:
+                cached = self._FUND_SHARES_CACHE.get(sym)
+                if cached and (time.time() - cached[0]) < self._FUND_SHARES_TTL:
+                    shares_data = cached[1]
+                else:
+                    from ..core.async_utils import run_sync
+                    shares_data = await run_sync(fetch_etf_shares_outstanding, sym, timeout=10) or {}
+                    self._FUND_SHARES_CACHE[sym] = (time.time(), shares_data)
+                if shares_data.get("shares_change_20d") is not None:
+                    out.setdefault(sym, {})["shares_change_20d"] = shares_data["shares_change_20d"]
+                    # §9.10.7-5 确认: institutional_holdings_change 用 ×0.5 折扣代理
+                    out[sym]["institutional_holdings_change"] = float(shares_data["shares_change_20d"]) * 0.5
+            except Exception as e:
+                logger.debug("[hub] shares_change_20d for %s failed: %s", sym, e)
+
+        await asyncio.gather(
+            *(_bench(s) for s in symbols),
+            *(_shares(s) for s in symbols),
+        )
+        return out
 
     def get_sector_momentum(self) -> list[dict]:
         """获取板块动量，120s 缓存 TTL。"""

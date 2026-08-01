@@ -235,26 +235,11 @@ def _dedupe(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _compute_stars(level: int, time_str: str) -> int:
-    """stars = 重要性 + 时间新鲜度，上限 5 星。
+    """stars = level（F3-1 步骤C，§9.10.7-1 已确认：纯语义化）。
 
-    新鲜度加分：2小时内 +1，1小时内 +2。
-    基础分 = level（1-5），+ 新鲜度加成，上限 5。
+    重要性唯一锚点，新鲜度靠 time 字段展示；L3 恒 3★（无论新鲜度）。
     """
-    if not time_str:
-        return min(level, 5)
-    try:
-        dt = datetime.strptime(str(time_str)[:19], "%Y-%m-%d %H:%M:%S")
-        hours_ago = (datetime.now() - dt).total_seconds() / 3600
-    except (ValueError, IndexError):
-        return min(level, 5)
-
-    freshness = 0
-    if hours_ago <= 1:
-        freshness = 2
-    elif hours_ago <= 2:
-        freshness = 1
-
-    return min(level + freshness, 5)
+    return max(1, min(int(level or 1), 5))
 
 
 def _attach_level(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -263,7 +248,8 @@ def _attach_level(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         _normalize_time(it)                        # 统一时间格式
         if "level" not in it:                      # 财联社已经在源头打标
             title = it.get("title", "")
-            level = classify_news_level(title)
+            # F3-1 步骤D: 标题+正文双输入（正文前 200 字）
+            level = classify_news_level(title, it.get("content", ""))
             it["level"] = level
             it["stars"] = _compute_stars(level, it.get("time", ""))
         else:

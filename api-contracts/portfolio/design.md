@@ -1,5 +1,7 @@
 # Portfolio Design / 组合设计
 
+> **v3.0 (F3-3)**: `STRATEGY_META.layer_budget` 三档预算和调整为 0.85（防御 45/30/10、平衡 45/30/10、进攻 40/35/10）——`range_bound` 市态方案现金由 22-32% 收紧至 **≤15%**（balanced 方案现金 = 15%）；bear/correction 分支的额外现金保护逻辑不变。
+
 ## 1. 概述 / Overview
 
 基于全市场 ETF 扫描 + 三层分类 + 多维度数据（行情/资讯/资金流/情绪），生成三种风险偏好的 ETF 组合方案。

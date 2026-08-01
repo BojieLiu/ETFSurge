@@ -1060,7 +1060,12 @@ async def get_asset_realtime(symbol: str, asset_type: str) -> dict | None:
 
     try:
         if asset_type == "US":
-            return await _route_us(symbol)
+            data = await _route_us(symbol)
+            # F3-7: 美股实时数据源（TwelveData/Finnhub）可能无 name →
+            # 用静态基座映射补全（自选 SPY 显示 "SPDR S&P 500 ETF"）
+            if data and not data.get("name"):
+                data["name"] = _us_static_name(symbol)
+            return data
         try:
             all_a = await _call(fetch_a_stock_realtime, symbol)
             for item in all_a or []:
@@ -1092,7 +1097,6 @@ async def _route_us(symbol: str) -> dict | None:
     - Finnhub（2nd）: 已配 API key，60次/分钟免费额度。TwelveData 失败时兜底。
     """
     from ..fetchers import global_markets_fetcher
-    from ..fetchers import global_markets_fetcher
 
     def _td():
         return global_markets_fetcher.fetch_realtime_twelvedata(symbol)
@@ -1103,6 +1107,17 @@ async def _route_us(symbol: str) -> dict | None:
         ("twelvedata", _td),
         ("finnhub", _fh),
     ], route_name="US_ETF", operation="realtime", target=symbol)
+
+
+def _us_static_name(symbol: str) -> str:
+    """F3-7: 从静态基座映射查美股名称（SPY → 'SPDR S&P 500 ETF'）。"""
+    sym = (symbol or "").upper()
+    if not sym:
+        return ""
+    for e in HKUS_ETF_MAP + HKUS_STOCK_MAP:
+        if e.get("market") == "US" and str(e.get("symbol", "")).upper() == sym:
+            return str(e.get("name", ""))
+    return ""
 
 
 async def get_us_batch(symbols: list[str]) -> list[dict[str, Any]]:

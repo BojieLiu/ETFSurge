@@ -253,8 +253,8 @@ async def test_search_include_stocks_true_adds_a_stocks():
     assert moutai, "A-share stock must be appended when include_stocks=true"
     assert moutai[0]["market"] == "A"
     assert moutai[0]["asset_type"] == "stock"
-    # A-share ETF still first
-    assert res[0]["symbol"] == "510300"
+    # F3-2: 跨市场合并后全局精确匹配置顶（keyword=600519 → 茅台第一，不再被段序压住）
+    assert res[0]["symbol"] == "600519"
 
 
 @pytest.mark.asyncio

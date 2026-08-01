@@ -3,6 +3,8 @@
 > 关联方案: `docs/z_fixes_design_v5.3.md` Z03
 > 变更类型: 既有端点响应增强（`/factors/active` 新增样本数/新鲜度/权威状态，移除硬编码 ic=0）
 > 版本: v2.0
+>
+> **v3.0 (F3-4/F3-5)**: ① etf_specific 四因子 no_data 的 reason 区分「数据源未接入（缺字段，N 只样本）」与「IC 未累积（样本 <3）」——依据 `factor_registry._data_source_gaps`（`_fetch_market_data` 注入 nav/benchmark_close/shares_change_20d 后记录缺口）；② sentiment 三因子（panic_greed_diff/news_heat/news_direction）经 `_fetch_market_data` 注入 `sentiment_index`/`sentiment_history`/`news_items` 后产出真实值 → 进入 IC batch → 不再恒 no_data；③ `/factors/ic` 响应新增 `zero_ratio` 字段（code → 零值占比，1.0 = 全部样本为 0 → 数据源未接入）。
 
 ## 1. 概述 / Overview
 

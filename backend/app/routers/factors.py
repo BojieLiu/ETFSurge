@@ -10,7 +10,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from ..core.logging import get_logger
-from ..factors.factor_registry import registry
+from ..factors.factor_registry import registry, ET_SPECIFIC_GAP_CODES
 
 logger = get_logger(__name__)
 
@@ -142,7 +142,12 @@ async def get_active_factors() -> JSONResponse:
         if code in STATIC_FACTOR_CODES:
             return "static", "静态政策标识因子，不计算 IC"
         if ic_val is None:
-            return "no_data", "尚未计算 IC（数据不足）"
+            # F3-4 步骤D: 区分「数据源未接入（缺字段）」与「IC 未累积（样本不足）」
+            gaps = getattr(registry, "_data_source_gaps", {}) or {}
+            missing = gaps.get(code, [])
+            if missing:
+                return "no_data", f"数据源未接入（{len(missing)} 只样本缺 {ET_SPECIFIC_GAP_CODES.get(code, '必要字段')}）"
+            return "no_data", "IC 未累积（样本 <3）"
         threshold = ic_threshold if ic_threshold and ic_threshold > 0 else 0.02
         if abs(ic_val) >= threshold:
             return "valid", f"IC {ic_val:.4f} ≥ 阈值 {threshold}，样本数 {sample_counts.get(code, 0)}"
@@ -297,6 +302,8 @@ async def get_factor_ic() -> JSONResponse:
     body = {
         "factors": factors,
         "total": len(factors),
+        # F3-4 步骤D: 零值占比（1.0 = 全部样本为 0 → 数据源未接入；区分「数据缺失」与「IC 无效」）
+        "zero_ratio": getattr(registry, "_zero_ratio", {}) or {},
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     etag = f"\"{hash(str(body))}\""

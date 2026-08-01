@@ -1,5 +1,7 @@
 # Hot Plates & Sector Heat API / 热点板块与板块热度接口
 
+> **v3.0 (F3-2)**: 跨市场搜索（`market` 为空/`global`）合并结果经 `_sort_search_results` 全局排序——精确代码命中（symbol==kw）置顶，不再被 A→HK→US 段序压住；`market=A` 个股搜索降级链改为 instruments 表 → levistock 个股（`_search_a_stocks`）→ ETF。
+
 ## 1. 概述 / Overview
 
 **功能描述**: 财联社热点板块、板块热度排行、热门个股排行、市场风向等实时板块数据接口集合。

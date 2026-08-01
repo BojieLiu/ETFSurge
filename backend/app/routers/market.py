@@ -9,6 +9,7 @@ from typing import Any
 from ..database import async_session
 from ..services.market_service import (
     get_watchlist, add_watchlist, update_watchlist, remove_watchlist, batch_remove_watchlist, search_hk_us,
+    _sort_search_results,
 )
 from ..analysis.indicators import compute_all_indicators, compute_chart_data
 from ..analysis.signal import generate_signal
@@ -78,6 +79,7 @@ async def search(
     mkt = market.upper() if market else None
 
     if mkt == "A":
+        # F3-2: 个股搜索优先（instruments 表）→ 空则降级 levistock 个股 → 再降 ETF
         try:
             async with async_session() as session:
                 stmt = select(Instrument).where(
@@ -98,18 +100,28 @@ async def search(
                 stmt = stmt.limit(30)
                 rows = (await session.execute(stmt)).scalars().all()
                 if rows:
-                    return [{
+                    items = [{
                         "symbol": r.symbol, "name": r.name,
                         "market": r.market, "asset_type": r.asset_type,
                         "type": "stock",
                     } for r in rows]
+                    return _sort_search_results(items, keyword)
         except Exception as e:
             logger.warning("[search] stock search failed: %s", e)
+
+        # F3-2: instruments 空 → levistock 个股降级（贵州茅台等）
+        try:
+            stocks = await _search_a_stocks(keyword)
+            if stocks:
+                return _sort_search_results(stocks, keyword)
+        except Exception as e:
+            logger.warning("[search] levistock stock fallback failed: %s", e)
 
         # F2: fallback to ETF mode when the local instruments table is empty
         # (per system-diagnosis plan: "在 search 端点中 fallback 到 ETF 模式").
         try:
-            return await market_data_hub.search_etf(keyword)
+            etfs = await market_data_hub.search_etf(keyword)
+            return _sort_search_results(etfs, keyword)
         except Exception as e:
             logger.warning("[search] A-share ETF-mode fallback failed: %s", e)
         return []
@@ -148,7 +160,8 @@ async def search(
             continue
         seen.add(key)
         dedup.append(it)
-    return dedup[:30]
+    # F3-2: 跨市场合并后全局精确匹配优先（symbol==kw 置顶，段序不再压住精确命中）
+    return _sort_search_results(dedup[:30], keyword)
 
 
 async def _search_a_stocks(keyword: str) -> list[dict[str, Any]]:

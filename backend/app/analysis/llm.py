@@ -14,8 +14,22 @@ logger = get_logger(__name__)
 
 # F6: LLM retry policy — after every configured provider fails, retry the
 # full provider sequence once, waiting LLM_RETRY_DELAY seconds between attempts.
-LLM_MAX_RETRIES = 1
+# F3-6: 429 限流场景按 Retry-After / 指数退避（≤30s）重试 2 次后再降级。
+LLM_MAX_RETRIES = 2
 LLM_RETRY_DELAY = 3.0
+_LLM_RATE_LIMIT_CAP = 30.0
+
+
+def _rate_limit_wait(attempt: int, resp_headers=None) -> float:
+    """429 限流等待时间：优先尊重 Retry-After（cap 30s），否则指数退避 3s*2^attempt（cap 30s）。"""
+    if resp_headers:
+        ra = resp_headers.get("retry-after") or resp_headers.get("Retry-After")
+        if ra:
+            try:
+                return max(0.0, min(float(ra), _LLM_RATE_LIMIT_CAP))
+            except (TypeError, ValueError):
+                pass
+    return min(LLM_RETRY_DELAY * (2 ** attempt), _LLM_RATE_LIMIT_CAP)
 
 # Keep the official DeepSeek URL for reference; the actual URL is now
 # per-provider and obtained from get_configured_providers().
@@ -260,6 +274,10 @@ async def llm_complete(
     _caller = sys._getframe(1).f_code.co_name
     providers = get_configured_providers()
     last_exc: Exception | None = None
+    _any_429 = False
+    _last_429_headers = None
+    _any_429 = False
+    _last_429_headers = None
 
     for attempt in range(max_retries + 1):
         for provider in providers:
@@ -312,6 +330,16 @@ async def llm_complete(
                     return content
             except Exception as _exc:
                 _duration = (time.monotonic() - _start) * 1000
+                # F3-6: 识别 429 限流（尊重 Retry-After / 指数退避，重试 2 次后降级）
+                _resp = getattr(_exc, "response", None)
+                _is_429 = (
+                    isinstance(_exc, httpx.HTTPStatusError)
+                    and _resp is not None
+                    and getattr(_resp, "status_code", None) == 429
+                )
+                if _is_429:
+                    _any_429 = True
+                    _last_429_headers = getattr(_resp, "headers", None)
                 await token_store.record(UsageRecord(
                     function_name=_caller,
                     prompt_tokens=0,
@@ -333,12 +361,16 @@ async def llm_complete(
 
         # All providers failed this attempt -> retry after a short delay
         if attempt < max_retries:
+            wait = _rate_limit_wait(attempt, _last_429_headers) if _any_429 else retry_delay
             logger.warning(
                 "[LLM] all providers failed (attempt %d/%d), retrying in %.1fs",
-                attempt + 1, max_retries, retry_delay,
+                attempt + 1, max_retries, wait,
             )
-            await asyncio.sleep(retry_delay)
+            await asyncio.sleep(wait)
 
+    if _any_429:
+        logger.warning("[LLM] LLM 限流，已降级（重试 %d 轮后仍 429）", max_retries)
+        raise RuntimeError(f"LLM 限流，已降级：{last_exc}")
     if last_exc is None:
         raise RuntimeError("No LLM providers available")
     raise last_exc
@@ -350,14 +382,18 @@ async def llm_complete_stream(
     response_format: dict | None = None,
     temperature: float = 0.3,
     max_tokens: int = 12288,
+    max_retries: int = LLM_MAX_RETRIES,
 ) -> AsyncGenerator[dict, None]:
     """
     Streaming LLM completion with provider failover.
-    
+
     Tries providers in priority order. If the primary provider fails
     BEFORE any token is yielded, falls back to the next provider.
     Once a token has been yielded, commits to that provider.
-    
+
+    F3-6: 429 限流时按 Retry-After / 指数退避重试（最多 max_retries 轮），
+    全部失败后产出 error 事件并明确提示「LLM 限流，已降级」。
+
     Yields:
         {"type": "token", "token": "..."} - incremental token
         {"type": "done", "full_text": "...", "usage": {...}} - completion with full text
@@ -368,126 +404,152 @@ async def llm_complete_stream(
 
     providers = get_configured_providers()
     last_exc: Exception | None = None
+    _any_429 = False
+    _last_429_headers = None
 
-    for provider in providers:
-        body = {
-            "model": provider.model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt},
-            ],
-            "temperature": temperature,
-            "max_tokens": max_tokens or 12288,
-            "stream": True,
-        }
-        if response_format:
-            body["response_format"] = response_format
+    for attempt in range(max_retries + 1):
+        for provider in providers:
+            body = {
+                "model": provider.model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": temperature,
+                "max_tokens": max_tokens or 12288,
+                "stream": True,
+            }
+            if response_format:
+                body["response_format"] = response_format
 
-        _start = time.monotonic()
-        _caller = sys._getframe(1).f_code.co_name
+            _start = time.monotonic()
+            _caller = sys._getframe(1).f_code.co_name
 
-        full_text = ""
-        prompt_tokens = 0
-        completion_tokens = 0
-        total_tokens = 0
+            full_text = ""
+            prompt_tokens = 0
+            completion_tokens = 0
+            total_tokens = 0
 
-        try:
-            async with httpx.AsyncClient(
-                timeout=provider.timeout, trust_env=False
-            ) as client:
-                async with client.stream(
-                    "POST",
-                    provider.api_url,
-                    headers={
-                        "Authorization": f"Bearer {provider.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json=body,
-                ) as resp:
-                    resp.raise_for_status()
+            try:
+                async with httpx.AsyncClient(
+                    timeout=provider.timeout, trust_env=False
+                ) as client:
+                    async with client.stream(
+                        "POST",
+                        provider.api_url,
+                        headers={
+                            "Authorization": f"Bearer {provider.api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json=body,
+                    ) as resp:
+                        resp.raise_for_status()
 
-                    async for line in resp.aiter_lines():
-                        if not line:
-                            continue
-                        if line.startswith("data: "):
-                            data_str = line[6:]
-                            if data_str == "[DONE]":
-                                break
-                            try:
-                                chunk = json.loads(data_str)
-                                if chunk.get("choices"):
-                                    delta = chunk["choices"][0].get("delta", {})
-                                    # F1-7: 只取 content 通道，丢弃 reasoning_content
-                                    # （推理模型的思考过程可能复述 system prompt，泄漏到输出）
-                                    token = delta.get("content") or ""
-                                    if token:
-                                        full_text += token
-                                        yield {"type": "token", "token": token}
-
-                                if chunk.get("usage"):
-                                    usage = chunk["usage"]
-                                    prompt_tokens = usage.get("prompt_tokens", 0)
-                                    completion_tokens = usage.get("completion_tokens", 0)
-                                    total_tokens = usage.get("total_tokens", 0)
-                            except json.JSONDecodeError:
+                        async for line in resp.aiter_lines():
+                            if not line:
                                 continue
+                            if line.startswith("data: "):
+                                data_str = line[6:]
+                                if data_str == "[DONE]":
+                                    break
+                                try:
+                                    chunk = json.loads(data_str)
+                                    if chunk.get("choices"):
+                                        delta = chunk["choices"][0].get("delta", {})
+                                        # F1-7: 只取 content 通道，丢弃 reasoning_content
+                                        # （推理模型的思考过程可能复述 system prompt，泄漏到输出）
+                                        token = delta.get("content") or ""
+                                        if token:
+                                            full_text += token
+                                            yield {"type": "token", "token": token}
 
-        except Exception as _exc:
+                                    if chunk.get("usage"):
+                                        usage = chunk["usage"]
+                                        prompt_tokens = usage.get("prompt_tokens", 0)
+                                        completion_tokens = usage.get("completion_tokens", 0)
+                                        total_tokens = usage.get("total_tokens", 0)
+                                except json.JSONDecodeError:
+                                    continue
+
+            except Exception as _exc:
+                _duration = (time.monotonic() - _start) * 1000
+                # F3-6: 识别 429 限流
+                _resp = getattr(_exc, "response", None)
+                _is_429 = (
+                    isinstance(_exc, httpx.HTTPStatusError)
+                    and _resp is not None
+                    and getattr(_resp, "status_code", None) == 429
+                )
+                if _is_429:
+                    _any_429 = True
+                    _last_429_headers = getattr(_resp, "headers", None)
+                await token_store.record(UsageRecord(
+                    function_name=_caller,
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                    total_tokens=0,
+                    model=provider.model,
+                    timestamp=time.time(),
+                    success=False,
+                    duration_ms=round(_duration, 1),
+                    error_message=str(_exc),
+                    provider=provider.id,
+                ))
+                last_exc = _exc
+                logger.warning(
+                    "[LLM] Stream provider %s failed after %.1fs: %s",
+                    provider.id, _duration / 1000, _exc,
+                )
+                # If we yielded any tokens, we're committed - propagate error
+                if full_text:
+                    yield {"type": "error", "error": str(_exc)}
+                    return
+                # Otherwise try next provider
+                continue
+
+            # Success: record and yield done
             _duration = (time.monotonic() - _start) * 1000
             await token_store.record(UsageRecord(
                 function_name=_caller,
-                prompt_tokens=0,
-                completion_tokens=0,
-                total_tokens=0,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
                 model=provider.model,
                 timestamp=time.time(),
-                success=False,
+                success=True,
                 duration_ms=round(_duration, 1),
-                error_message=str(_exc),
                 provider=provider.id,
             ))
-            last_exc = _exc
-            logger.warning(
-                "[LLM] Stream provider %s failed after %.1fs: %s",
-                provider.id, _duration / 1000, _exc,
-            )
-            # If we yielded any tokens, we're committed - propagate error
-            if full_text:
-                yield {"type": "error", "error": str(_exc)}
-                return
-            # Otherwise try next provider
-            continue
 
-        # Success: record and yield done
-        _duration = (time.monotonic() - _start) * 1000
-        await token_store.record(UsageRecord(
-            function_name=_caller,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=total_tokens,
-            model=provider.model,
-            timestamp=time.time(),
-            success=True,
-            duration_ms=round(_duration, 1),
-            provider=provider.id,
-        ))
-
-        yield {
-            "type": "done",
-            "full_text": strip_internal_leak(full_text),
-            "usage": {
-                "model": provider.model,
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "total_tokens": total_tokens,
-                "latency_ms": round(_duration, 1),
+            yield {
+                "type": "done",
+                "full_text": strip_internal_leak(full_text),
+                "usage": {
+                    "model": provider.model,
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": total_tokens,
+                    "latency_ms": round(_duration, 1),
+                }
             }
-        }
-        return
+            return
 
-    # All providers exhausted
+        # 本轮所有 provider 失败 → 退避后重试（F3-6）
+        if attempt < max_retries:
+            wait = _rate_limit_wait(attempt, _last_429_headers) if _any_429 else LLM_RETRY_DELAY
+            logger.warning(
+                "[LLM] Stream all providers failed (attempt %d/%d), retrying in %.1fs",
+                attempt + 1, max_retries, wait,
+            )
+            await asyncio.sleep(wait)
+
+    # All providers exhausted after all retries
     if last_exc is None:
         last_exc = RuntimeError("No LLM providers available")
+    if _any_429:
+        logger.warning("[LLM] LLM 限流，已降级（重试 %d 轮后仍 429）", max_retries)
+        yield {"type": "error", "error": f"LLM 限流，已降级：{last_exc}"}
+        return
     yield {"type": "error", "error": str(last_exc)}
 
 
