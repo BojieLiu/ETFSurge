@@ -3,18 +3,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Any
 import asyncio
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
 from ..models.portfolio import PortfolioETF
 from ..models.schemas import PortfolioETFCreate, PortfolioETFUpdate
 from ..services.market_data_hub import market_data_hub
-from ..services.market_data_hub import market_data_hub
-from ..services.market_data_hub import market_data_hub
 from ..analysis.indicators import compute_all_indicators
 from ..analysis.signal import generate_signal
 from ..core.async_utils import run_sync
-from ..services.market_data_hub import market_data_hub
 
 PORTFOLIO_TYPES = {"on_exchange": "场内", "off_exchange": "场外"}
 
@@ -110,11 +108,35 @@ def _split_symbols(etfs):
     return a_symbols, hk_symbols, us_symbols, tracked_a
 
 
+# F2-1: 组合行情 15s 模块级缓存（与 portfolio:realtime TTL 一致；
+# 缓存键 = 四类 symbol 列表；命中时跳过网络拉取，组合计算从 8s 级降至亚秒级）
+_PRICE_MAP_CACHE: dict[tuple, tuple[float, dict]] = {}
+_PRICE_MAP_TTL = 15.0
+
+# F2-1: A 股 ETF 基本面（pe/pb/规模）同样 15s 缓存——它是 /calculate 8s 主因之一
+#（每只 get_fundamentals 最多 8s，20 只并行仍被最慢单只拖到 ~8s）
+_FUNDAMENTALS_CACHE: dict[tuple, tuple[float, dict]] = {}
+
+
+def _clear_price_map_cache() -> None:
+    """清空行情缓存（测试与手动刷新用）。"""
+    _PRICE_MAP_CACHE.clear()
+    _FUNDAMENTALS_CACHE.clear()
+
+
 async def _build_price_map_async(etfs):
-    """Concurrently fetch realtime prices for all holdings (F8)."""
-    # Use module-level imports (lines 11-12) so tests can patch
-    # app.services.portfolio_service.fetch_fund_nav etc.
+    """Concurrently fetch realtime prices for all holdings (F8 + F2-1)."""
     a_symbols, hk_symbols, us_symbols, tracked_a = _split_symbols(etfs)
+    _cache_key = (
+        tuple(sorted(a_symbols)),
+        tuple(sorted(hk_symbols)),
+        tuple(sorted(us_symbols)),
+        tuple(sorted(tracked_a)),
+    )
+    _now = time.monotonic()
+    _cached = _PRICE_MAP_CACHE.get(_cache_key)
+    if _cached and (_now - _cached[0]) < _PRICE_MAP_TTL:
+        return _cached[1]
     m: dict[str, tuple[float, float]] = {}
 
     async def _a_batch():
@@ -123,25 +145,43 @@ async def _build_price_map_async(etfs):
         return await run_sync(market_data_hub.get_a_stock_batch, a_symbols)
 
     async def _hk_batch():
-        out = {}
-        for s in hk_symbols:
+        if not hk_symbols:
+            return {}
+
+        async def _one(s):
             try:
                 items = await run_sync(market_data_hub.get_hk_stock_realtime, s)
                 if items:
-                    out[s] = (float(items[0]["price"]), float(items[0]["change_pct"]))
+                    return s, (float(items[0]["price"]), float(items[0]["change_pct"]))
             except Exception:
                 pass
+            return s, None
+
+        out = {}
+        results = await asyncio.gather(*[_one(s) for s in hk_symbols], return_exceptions=True)
+        for r in results:
+            if isinstance(r, tuple) and r[1] is not None:
+                out[r[0]] = r[1]
         return out
 
     async def _us_batch():
-        out = {}
-        for s in us_symbols:
+        if not us_symbols:
+            return {}
+
+        async def _one(s):
             try:
                 data = await run_sync(market_data_hub.get_us_etf_realtime, s)
                 if data:
-                    out[s] = (float(data["price"]), float(data["change_pct"]))
+                    return s, (float(data["price"]), float(data["change_pct"]))
             except Exception:
                 pass
+            return s, None
+
+        out = {}
+        results = await asyncio.gather(*[_one(s) for s in us_symbols], return_exceptions=True)
+        for r in results:
+            if isinstance(r, tuple) and r[1] is not None:
+                out[r[0]] = r[1]
         return out
 
     async def _idx_batch():
@@ -194,6 +234,7 @@ async def _build_price_map_async(etfs):
         if ti and ti in m and sym not in m:
             m[sym] = m[ti]
 
+    _PRICE_MAP_CACHE[_cache_key] = (time.monotonic(), m)
     return m
 
 async def calculate_allocation(
@@ -254,17 +295,24 @@ async def calculate_allocation(
     if not skip_fundamentals:
         a_etf_indices = [i for i, e in enumerate(etfs) if e.asset_type == "A"]
         if a_etf_indices:
-            sym_task_map = {}
-            async def _fetch_all_fundamentals():
-                nonlocal sym_task_map
-                symbols = [(idx, etfs[idx].symbol) for idx in a_etf_indices]
-                futs = [run_sync(market_data_hub.get_fundamentals, sym, timeout=8) for _, sym in symbols]
-                results = await asyncio.gather(*futs, return_exceptions=True)
-                sym_task_map = {sym: res for (_, sym), res in zip(symbols, results)}
-            try:
-                await asyncio.wait_for(_fetch_all_fundamentals(), timeout=10.0)
-            except Exception:
-                pass
+            symbols = [(idx, etfs[idx].symbol) for idx in a_etf_indices]
+            _fkey = tuple(sorted(s for _, s in symbols))
+            _now = time.monotonic()
+            _fcached = _FUNDAMENTALS_CACHE.get(_fkey)
+            if _fcached and (_now - _fcached[0]) < _PRICE_MAP_TTL:
+                sym_task_map = _fcached[1]
+            else:
+                sym_task_map = {}
+                async def _fetch_all_fundamentals():
+                    nonlocal sym_task_map
+                    futs = [run_sync(market_data_hub.get_fundamentals, sym, timeout=8) for _, sym in symbols]
+                    results = await asyncio.gather(*futs, return_exceptions=True)
+                    sym_task_map = {sym: res for (_, sym), res in zip(symbols, results)}
+                try:
+                    await asyncio.wait_for(_fetch_all_fundamentals(), timeout=10.0)
+                except Exception:
+                    pass
+                _FUNDAMENTALS_CACHE[_fkey] = (time.monotonic(), sym_task_map)
             for idx, sym in [(idx, etfs[idx].symbol) for idx in a_etf_indices]:
                 result = sym_task_map.get(sym)
                 if result and not isinstance(result, Exception):

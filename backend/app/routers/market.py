@@ -451,6 +451,28 @@ async def hot_plates(limit: int = Query(15)) -> list[dict[str, Any]]:
     return await asyncio.to_thread(market_data_hub.get_hot_plates, limit)
 
 
+# F2-3: 板块热度路由（数据源/hub 方法已存在，此前未暴露 → 前端 404）
+@router.get("/sectors/heat")
+async def sectors_heat(limit: int = Query(20)) -> dict[str, Any]:
+    """板块热度排行(财联社)。
+
+    响应归一化对齐前端契约：plate_name→name、cur_heat→heat_index，
+    保留 rank_change / is_new / plate_code。
+    """
+    rows = await asyncio.to_thread(market_data_hub.get_sector_heat, limit)
+    items = []
+    for r in rows or []:
+        items.append({
+            "rank": r.get("rank"),
+            "name": r.get("plate_name") or r.get("name", ""),
+            "heat_index": r.get("cur_heat", r.get("heat_index", 0)),
+            "rank_change": r.get("rank_change"),
+            "is_new": r.get("is_new", 0),
+            "plate_code": r.get("plate_code", ""),
+        })
+    return {"items": items, "total": len(items)}
+
+
 # Phase 6: 前端已接入（marketApi.getStockHotRank）
 @router.get("/stock-hot-rank")
 async def stock_hot_rank(limit: int = Query(50)) -> list[dict[str, Any]]:

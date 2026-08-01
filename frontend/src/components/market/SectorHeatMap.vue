@@ -65,8 +65,12 @@
               </span>
             </div>
             <span class="row-heat" v-if="item.heat_index !== undefined">
-              热度: {{ item.heat_index }}
+              热度: {{ fmtHeat(item.heat_index) }}
             </span>
+            <span v-if="item.rank_change !== undefined && item.rank_change !== null" :class="['row-rank-chg', item.rank_change >= 0 ? 'text-up' : 'text-down']">
+              {{ item.rank_change > 0 ? '↑' : (item.rank_change < 0 ? '↓' : '—') }}{{ item.rank_change ? Math.abs(item.rank_change) : '' }}
+            </span>
+            <button class="row-action" @click="emitAnalyze('sector', item)" title="AI 分析">🤖 AI</button>
           </div>
         </div>
 
@@ -75,12 +79,22 @@
           <div
             v-for="(item, i) in dataList"
             :key="i"
-            class="data-row"
+            class="data-row data-row--stock"
           >
             <span class="row-rank">{{ i + 1 }}</span>
             <div class="row-main">
               <span class="row-name">{{ item.name }}</span>
               <span class="row-code">{{ item.symbol }}</span>
+              <span class="row-stock-meta">
+                <span v-if="item.price" class="row-price">现价 {{ fmtPrice(item.price) }}</span>
+                <span v-if="item.sector" class="row-sector">{{ item.sector }}</span>
+                <span v-if="item.turnover" class="row-turnover">成交 {{ fmtTurnover(item.turnover) }}</span>
+                <span
+                  v-for="(c, ci) in (item.concept_tags || []).slice(0, 3)"
+                  :key="ci"
+                  class="row-chip"
+                >{{ c }}</span>
+              </span>
             </div>
             <span
               v-if="item.change_pct !== undefined"
@@ -88,16 +102,34 @@
             >
               {{ item.change_pct >= 0 ? '+' : '' }}{{ item.change_pct.toFixed(2) }}%
             </span>
+            <div class="row-actions">
+              <button class="row-action" @click="openTechnical(item)" title="技术分析">📈 技术</button>
+              <button class="row-action" @click="emitAnalyze('symbol', item)" title="AI 分析">🤖 AI</button>
+            </div>
           </div>
         </div>
       </div>
     </div>
+
+    <!-- F2-7 步骤E: 技术分析弹窗 -->
+    <TechnicalAnalysisModal
+      v-if="techModal"
+      :symbol="techModal.symbol"
+      :name="techModal.name"
+      asset-type="A"
+      @close="techModal = null"
+      @ai="(p) => { techModal = null; emitAnalyze('symbol', p) }"
+    />
   </section>
 </template>
 
 <script setup>
 import { ref, watch, onMounted } from 'vue'
 import { marketApi } from '../../api'
+import TechnicalAnalysisModal from './TechnicalAnalysisModal.vue'
+
+// F2-7 步骤E: 行内「AI 分析」事件（联动 MarketAnalysis → UnifiedAnalysis）
+const emit = defineEmits(['analyze'])
 
 // Z31: Accept marketTab prop from parent for market-scoped data
 const props = defineProps({
@@ -113,10 +145,42 @@ const activeTab = ref('hot')
 const dataList = ref([])
 const loading = ref(false)
 const error = ref('')
+const techModal = ref(null)
+
+function fmtPrice(v) {
+  return Number(v).toFixed(2)
+}
+
+function fmtTurnover(v) {
+  const n = Number(v)
+  if (!n) return '—'
+  if (n >= 1e8) return (n / 1e8).toFixed(2) + '亿'
+  if (n >= 1e4) return (n / 1e4).toFixed(0) + '万'
+  return String(n)
+}
+
+function fmtHeat(v) {
+  const n = Number(v)
+  if (!n && n !== 0) return '—'
+  return n >= 10000 ? (n / 10000).toFixed(2) + '万' : n.toFixed(1)
+}
+
+// F2-7 步骤E: 热点行 → UnifiedAnalysis（symbol / sector 模式）
+function emitAnalyze(mode, item) {
+  if (mode === 'sector') {
+    emit('analyze', { mode: 'sector', query: item.plate_code || item.name, name: item.name || item.plate_name })
+  } else {
+    emit('analyze', { mode: 'symbol', query: item.symbol || item.code, name: item.name })
+  }
+}
+
+function openTechnical(item) {
+  techModal.value = { symbol: item.symbol || item.code, name: item.name }
+}
 
 function leadStockNames(item) {
   const stocks = item.lead_stocks || item.stocks || []
-  return stocks.slice(0, 3).map(s => s.name || '').filter(Boolean).join(', ')
+  return stocks.slice(0, 3).map(s => s.name || s.secu_name || '').filter(Boolean).join(', ')
 }
 
 async function switchTab(tab) {
@@ -190,4 +254,12 @@ onMounted(() => { fetchData() })
 .row-code { font-size: var(--text-xs); color: var(--color-text-tertiary); }
 .row-change { font-size: var(--text-sm); font-weight: 500; white-space: nowrap; }
 .row-heat { font-size: var(--text-xs); color: var(--color-text-secondary); white-space: nowrap; }
+.row-rank-chg { font-size: var(--text-xs); white-space: nowrap; }
+.row-actions { display: flex; gap: var(--space-1); flex-wrap: wrap; }
+.row-action { padding: 2px 8px; font-size: var(--text-xs); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface-primary); color: var(--color-text-secondary); cursor: pointer; white-space: nowrap; }
+.row-action:hover { border-color: var(--color-primary); color: var(--color-primary); }
+.row-stock-meta { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; font-size: var(--text-xs); color: var(--color-text-tertiary); }
+.row-price, .row-sector, .row-turnover { color: var(--color-text-secondary); }
+.row-chip { padding: 1px 6px; border-radius: var(--radius-full); background: var(--color-bg-brand-subtle, rgba(59, 130, 246, 0.08)); border: 1px solid var(--color-brand-200, rgba(59, 130, 246, 0.2)); color: var(--color-brand-600); font-size: var(--text-xs); }
+.data-row--stock { flex-wrap: wrap; }
 </style>

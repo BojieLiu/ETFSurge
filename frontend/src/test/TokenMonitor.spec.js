@@ -39,7 +39,7 @@ describe('TokenMonitor.vue — Granularity Tabs', () => {
   it('renders granularity tab labels', async () => {
     const wrapper = mount(TokenMonitor)
     // Wait for fetch and render
-    await new Promise(r => setTimeout(r, 50))
+    await new Promise((r) => setTimeout(r, 300))
     await wrapper.vm.$nextTick()
 
     expect(wrapper.text()).toContain('按日')
@@ -49,7 +49,7 @@ describe('TokenMonitor.vue — Granularity Tabs', () => {
 
   it('starts with day granularity selected', async () => {
     const wrapper = mount(TokenMonitor)
-    await new Promise(r => setTimeout(r, 50))
+    await new Promise((r) => setTimeout(r, 300))
     await wrapper.vm.$nextTick()
 
     // The AppTabs v-model binds granularity; default is 'day'
@@ -58,7 +58,7 @@ describe('TokenMonitor.vue — Granularity Tabs', () => {
 
   it('switches granularity when tab is clicked', async () => {
     const wrapper = mount(TokenMonitor)
-    await new Promise(r => setTimeout(r, 50))
+    await new Promise((r) => setTimeout(r, 300))
     await wrapper.vm.$nextTick()
 
     // Find the v-model-driven AppTabs and simulate switching

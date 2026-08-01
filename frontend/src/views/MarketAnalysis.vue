@@ -45,13 +45,13 @@
     <WatchlistPanel :marketTab="marketTab" @select-symbol="onSelectSymbol" />
 
     <div ref="anchorSector" class="section-anchor"></div>
-    <SectorHeatMap :marketTab="marketTab" />
+    <SectorHeatMap :marketTab="marketTab" @analyze="onQuickAnalyze" />
 
     <div ref="anchorAdvisor" class="section-anchor"></div>
     <AiAdvisor :marketTab="marketTab" />
 
     <div ref="anchorSymbol" class="section-anchor"></div>
-    <UnifiedAnalysis :marketTab="marketTab" :selectedSymbol="selectedSymbol" />
+    <UnifiedAnalysis :marketTab="marketTab" :selectedSymbol="selectedSymbol" :external-trigger="externalTrigger" />
   </div>
 </template>
 
@@ -65,6 +65,13 @@ import SectorHeatMap from '../components/market/SectorHeatMap.vue'
 
 const marketTab = ref('A')
 const selectedSymbol = ref(null)
+const externalTrigger = ref(null)
+
+// F2-7 步骤E: 热点行快速入口 → 滚动到分析区 + 触发 UnifiedAnalysis（symbol/sector 模式）
+function onQuickAnalyze({ mode, query, name }) {
+  externalTrigger.value = { mode, query, name }
+  setTimeout(() => anchorSymbol.value?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
+}
 
 const marketTabs = [
   { value: 'A', label: 'A股' },

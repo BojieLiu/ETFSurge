@@ -15,17 +15,73 @@ Lifecycle:
 from __future__ import annotations
 
 import asyncio
+import ast
 import logging
 from dataclasses import dataclass, field
 from typing import Any
 from datetime import datetime
 
 from ..fetchers import etf_scanner
+from ..fetchers import sector_fetcher
 from ..factors.factor_registry import registry as factor_registry
 from .etf_classifier import classifier as etf_classifier
 from .pool_audit import pool_audit
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_stock_list(s: Any) -> list:
+    """安全解析 stock_list 字符串为数组（F2-6 步骤A；§9.8.3 伪代码）。
+
+    数据源以字符串化列表存于行内，前端无解析层 → 在此统一转数组。
+    非法字符串返回 []，绝不 eval。
+    """
+    if isinstance(s, list):
+        return s
+    if not s:
+        return []
+    try:
+        parsed = ast.literal_eval(s)
+        return parsed if isinstance(parsed, list) else []
+    except Exception:
+        return []
+
+
+def _parse_concept_tags(tag: Any) -> list[str]:
+    """解析热门个股 tag 字符串为 concept_tags 数组（F2-6 步骤A）。"""
+    if isinstance(tag, list):
+        return [str(t) for t in tag if str(t).strip()][:6]
+    if not tag:
+        return []
+    if isinstance(tag, str):
+        try:
+            parsed = ast.literal_eval(tag)
+            if isinstance(parsed, list):
+                return [str(t) for t in parsed if str(t).strip()][:6]
+        except Exception:
+            pass
+        # 朴素逗号分隔兜底
+        if "," in tag:
+            return [t.strip() for t in tag.split(",") if t.strip()][:6]
+    return []
+
+
+def _normalize_hot_plate(r: dict) -> dict:
+    """热点板块行字段归一化（F2-6 步骤A，保持前端契约稳定）。
+
+    secu_name→name、up_reason→reason、plate_stock_up_num→stock_count、
+    stock_list(字符串)→lead_stocks(数组)。
+    """
+    item = dict(r)
+    if "secu_name" in item and "name" not in item:
+        item["name"] = item.pop("secu_name")
+    if "up_reason" in item and "reason" not in item:
+        item["reason"] = item.pop("up_reason")
+    if "plate_stock_up_num" in item and "stock_count" not in item:
+        item["stock_count"] = item.pop("plate_stock_up_num")
+    if "stock_list" in item:
+        item["lead_stocks"] = _parse_stock_list(item.pop("stock_list"))
+    return item
 
 # 强制保留标的（池刷新时永不出池）
 MANDATORY_CODES = {"510300", "560600", "518880", "511090"}
@@ -978,18 +1034,32 @@ class MarketDataHub:
         return self._sector_momentum_cache or []
 
     def get_hot_plates(self, limit: int | None = None) -> list[dict]:
-        """热点板块。默认返回缓存；传 limit 时实时取数（保持路由语义）。"""
+        """热点板块。默认返回缓存；传 limit 时实时取数（保持路由语义）。
+
+        F2-6 步骤A: 输出统一归一化（secu_name→name / up_reason→reason /
+        plate_stock_up_num→stock_count / stock_list→lead_stocks 数组）。
+        """
         if limit is not None:
             try:
-                from ..fetchers.sector_fetcher import fetch_hot_plates as _live
-                return _live(limit) or []
+                rows = sector_fetcher.fetch_hot_plates(limit) or []
             except Exception as e:
                 logger.warning("[hub] get_hot_plates(limit) failed: %s", e)
                 return []
-        return self._hot_plates_cache or []
+        else:
+            rows = self._hot_plates_cache or []
+        return [_normalize_hot_plate(r) for r in rows]
 
-    def get_sector_heat(self) -> list[dict]:
-        """获取板块热度排行缓存（Phase 6.1.6）。"""
+    def get_sector_heat(self, limit: int | None = None) -> list[dict]:
+        """获取板块热度排行（Phase 6.1.6）。
+
+        F2-3: limit 传值时实时取数（与 get_hot_plates 语义一致），否则返回缓存。
+        """
+        if limit is not None:
+            try:
+                return sector_fetcher.fetch_sector_heat(limit) or []
+            except Exception as e:
+                logger.warning("[hub] get_sector_heat(%s) failed: %s", limit, e)
+                return []
         return self._sector_heat_cache or []
 
     def get_index_realtime(self) -> list[dict]:
@@ -1473,6 +1543,8 @@ class MarketDataHub:
             # 批量行情自带 sector 优先，其次行业映射，最后空串
             item["sector"] = b.get("sector") or sector_map.get(code) or ""
             item["asset_type"] = "A"
+            # F2-6 步骤A: tag 字符串解析为 concept_tags 数组（前端 chip 展示）
+            item["concept_tags"] = _parse_concept_tags(row.get("tag"))
             out.append(item)
         return out
 

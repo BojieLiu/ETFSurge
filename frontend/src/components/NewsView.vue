@@ -51,42 +51,42 @@
              <span v-if="item.source" class="news-source">{{ item.source }}</span>
              <span v-if="item.time" class="news-time">{{ item.time }}</span>
              <a v-if="item.url" :href="item.url" target="_blank" rel="noopener" class="news-source-link">查看原文</a>
-             <button class="news-ai-btn" @click="analyze(item)" :disabled="analyzing">
+             <button class="news-ai-btn" :class="{ 'news-ai-btn--active': impactTarget === item.id }" @click="analyze(item)" :disabled="analyzing">
                <span aria-hidden="true">🤖</span> AI 智能分析
              </button>
            </div>
+
+           <!-- F2-8: 行内展开分析区（结果出现在该条卡片内，无滚动/跳转） -->
+           <div v-if="impactTarget === item.id" class="impact-inline" aria-live="polite">
+             <div v-if="analyzing" class="impact-loading">🤖 AI 分析中…</div>
+             <div v-else-if="impactError" class="impact-inline-error">
+               <span>AI 分析失败，请稍后重试</span>
+               <button class="impact-retry" @click="analyze(item)">重试</button>
+             </div>
+             <div v-else-if="impactPanel" class="impact-inline-body">
+               <button class="impact-close" @click="impactTarget = null; impactPanel = null" aria-label="关闭分析">✕</button>
+               <p v-if="impactPanel.summary" class="impact-summary">{{ impactPanel.summary }}</p>
+               <div class="impact-block">
+                 <h4 class="impact-subtitle">影响范围</h4>
+                 <p>{{ impactPanel.impact_scope }}</p>
+               </div>
+               <div v-if="impactPanel.affected_holdings && impactPanel.affected_holdings.length" class="impact-block">
+                 <h4 class="impact-subtitle">对组合内标的的影响</h4>
+                 <ul class="impact-holdings">
+                   <li v-for="h in impactPanel.affected_holdings" :key="h.symbol" class="impact-holding">
+                     <span class="holding-symbol"><code>{{ h.symbol }}</code> {{ h.name }}</span>
+                     <span class="holding-reason">{{ h.impact_reason }}</span>
+                   </li>
+                 </ul>
+               </div>
+               <div class="impact-disclaimer">
+                 <span class="disclaimer-icon" aria-hidden="true">⚠️</span>
+                 <span>{{ impactPanel.disclaimer || '本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负' }}</span>
+               </div>
+             </div>
+           </div>
         </li>
       </ul>
-    </section>
-
-<!-- AI Impact Panel -->
-    <section v-if="impactPanel" class="card impact-panel" aria-live="polite">
-      <div class="card-header">
-        <h2 class="card-title"><span aria-hidden="true">🤖</span> AI 智能分析</h2>
-        <button class="impact-close" @click="impactPanel = null" aria-label="关闭分析">✕</button>
-      </div>
-
-      <p v-if="impactPanel.summary" class="impact-summary">{{ impactPanel.summary }}</p>
-
-      <div class="impact-block">
-        <h3 class="impact-subtitle">影响范围</h3>
-        <p>{{ impactPanel.impact_scope }}</p>
-      </div>
-
-      <div v-if="impactPanel.affected_holdings && impactPanel.affected_holdings.length" class="impact-block">
-        <h3 class="impact-subtitle">对组合内标的的影响</h3>
-        <ul class="impact-holdings">
-          <li v-for="h in impactPanel.affected_holdings" :key="h.symbol" class="impact-holding">
-            <span class="holding-symbol"><code>{{ h.symbol }}</code> {{ h.name }}</span>
-            <span class="holding-reason">{{ h.impact_reason }}</span>
-          </li>
-        </ul>
-      </div>
-
-      <div class="impact-disclaimer">
-        <span class="disclaimer-icon" aria-hidden="true">⚠️</span>
-        <span>{{ impactPanel.disclaimer || '本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负' }}</span>
-      </div>
     </section>
   </div>
 </template>
@@ -105,7 +105,9 @@ const store = usePortfolioStore()
 const news = ref([])
 const loading = ref(false)
 const seenIds = ref(new Set())
-const impactPanel = ref(null)
+const impactTarget = ref(null) // F2-8: 当前展开分析的新闻 id
+const impactPanel = ref(null)  // F2-8: 最近一次分析结果
+const impactError = ref(false) // F2-8: 行内失败状态（展示重试）
 const analyzing = ref(false)
 const minLevel = ref(1) // 1-5, minimum importance level to show
 
@@ -199,8 +201,17 @@ onMounted(() => {
 })
 
 async function analyze(item) {
-  analyzing.value = true
+  // F2-8: 已展开且有结果时再次点击 → 收起（toggle）；失败/分析中状态再次点击 → 重新分析
+  if (impactTarget.value === item.id && impactPanel.value && !analyzing.value) {
+    impactTarget.value = null
+    impactPanel.value = null
+    impactError.value = false
+    return
+  }
+  impactTarget.value = item.id
   impactPanel.value = null
+  impactError.value = false
+  analyzing.value = true
   try {
     const portfolio = (store.etfs || []).map((e) => ({ symbol: e.symbol, name: e.name }))
     const res = await newsApi.newsImpact({
@@ -209,7 +220,8 @@ async function analyze(item) {
     })
     impactPanel.value = res.data
   } catch {
-    toast('AI 分析失败，请稍后重试', 'error')
+    // F2-8: 失败在行内展示错误 + 重试（不再全局 toast 后无痕）
+    impactError.value = true
   } finally {
     analyzing.value = false
   }
@@ -245,16 +257,23 @@ async function analyze(item) {
 .news-meta { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-2); font-size: var(--font-size-xs); color: var(--color-text-muted); }
 .news-ai-btn { margin-left: auto; border: 1px solid var(--color-border); background: var(--color-surface-primary); border-radius: var(--radius-md); padding: 4px 10px; cursor: pointer; font-size: var(--font-size-xs); }
 .news-ai-btn:hover { border-color: var(--color-primary); }
+.news-ai-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.news-ai-btn--active { border-color: var(--color-primary); color: var(--color-primary); background: var(--color-bg-brand-subtle); }
 
-.impact-panel { padding: var(--space-4); }
-.card-header { display: flex; align-items: center; justify-content: space-between; }
-.impact-close { background: none; border: none; cursor: pointer; color: var(--color-text-muted); font-size: var(--font-size-base); }
+/* F2-8: 行内展开区 */
+.impact-inline { margin-top: var(--space-2); padding: var(--space-3); border: 1px solid var(--color-border); border-left: 3px solid var(--color-primary); border-radius: var(--radius-md); background: var(--color-surface-tertiary); animation: impact-fadein 0.2s ease; }
+@keyframes impact-fadein { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.impact-loading { color: var(--color-text-secondary); font-size: var(--font-size-sm); }
+.impact-inline-error { display: flex; align-items: center; gap: var(--space-2); color: var(--color-danger-700); font-size: var(--font-size-sm); }
+.impact-retry { padding: 2px 10px; border: 1px solid var(--color-border); border-radius: var(--radius-md); cursor: pointer; background: var(--color-surface-primary); font-size: var(--font-size-xs); }
+.impact-inline-body { position: relative; max-height: 360px; overflow-y: auto; }
+.impact-close { position: absolute; top: 0; right: 0; background: none; border: none; cursor: pointer; color: var(--color-text-muted); font-size: var(--font-size-base); z-index: 1; }
 .impact-summary { color: var(--color-text-primary); line-height: 1.7; }
-.impact-subtitle { font-size: var(--font-size-sm); color: var(--color-text-secondary); margin: var(--space-3) 0 var(--space-1); }
+.impact-subtitle { font-size: var(--font-size-sm); color: var(--color-text-secondary); margin: var(--space-2) 0 var(--space-1); }
 .impact-holdings { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
 .impact-holding { display: flex; flex-direction: column; gap: 2px; border-bottom: 1px dashed var(--color-border-light); padding-bottom: var(--space-2); }
 .holding-symbol { font-weight: 600; }
 .holding-reason { color: var(--color-text-secondary); font-size: var(--font-size-sm); }
-.impact-disclaimer { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-3); padding: var(--space-2) var(--space-3); background: var(--color-surface-tertiary); border: 1px solid var(--color-border); border-radius: var(--radius-md); font-size: var(--font-size-xs); color: var(--color-text-muted); }
+.impact-disclaimer { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-2); padding: var(--space-2) var(--space-3); background: var(--color-surface-secondary); border: 1px solid var(--color-border); border-radius: var(--radius-md); font-size: var(--font-size-xs); color: var(--color-text-muted); }
 .disclaimer-icon { flex-shrink: 0; }
 </style>

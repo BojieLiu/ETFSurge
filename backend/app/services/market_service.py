@@ -285,6 +285,7 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
     # 否则 Python 会将该变量视为局部变量，导致缓存命中分支
     # (读取 _global_indices_cache_ts) 触发 UnboundLocalError -> 500。
     global _global_indices_cache, _global_indices_cache_ts, _global_indices_last_ok, _global_indices_last_ok_ts
+    import asyncio
     import time
     try:
         now = time.time()
@@ -294,16 +295,36 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
         defs = await _global_index_defs()
         regions: dict[str, list[dict[str, Any]]] = {}
 
-        # A 股指数
-        from ..fetchers.china_market import fetch_index_realtime
+        # F2-5: A 股指数 / EM / HK 三段拉取并行 gather（此前顺序 await 串行拉长预热）
+        from ..fetchers import global_markets_fetcher
 
+        async def _fetch_a_indices():
+            from ..fetchers.china_market import fetch_index_realtime
+            try:
+                return await _call(fetch_index_realtime)
+            except Exception:
+                return []
+
+        async def _fetch_em_all():
+            try:
+                return await _call(global_markets_fetcher.fetch_all, timeout=10)
+            except Exception:
+                return {}
+
+        async def _fetch_hk_indices():
+            try:
+                return await _call(global_markets_fetcher.fetch_hk_indices, timeout=10)
+            except Exception:
+                return {}
+
+        _a_list, _em_regions, _hk_data = await asyncio.gather(
+            _fetch_a_indices(), _fetch_em_all(), _fetch_hk_indices(),
+        )
+
+        # A 股指数
         a_map: dict[str, dict[str, Any]] = {}
-        try:
-            a_list = await _call(fetch_index_realtime)
-            for it in a_list or []:
-                a_map[it.get("symbol")] = it
-        except Exception:
-            pass
+        for it in _a_list or []:
+            a_map[it.get("symbol")] = it
         for sym, name, region in defs:
             if region != "A股":
                 continue
@@ -329,30 +350,20 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
                 regions.setdefault(region, []).append(item)
 
         # 海外指数：EM（10s）→ HK 指数（10s）→ Sina（4s）→ Finnhub（6s）→ 占位
-        from ..fetchers import global_markets_fetcher
         from ..fetchers.china_market import fetch_sina_global_index as sina_index
         from ..fetchers.china_market import fetch_sina_page_global_index as sina_page_index
-        from ..fetchers import global_markets_fetcher
 
         # Call EM once for all foreign symbols (batched API)
         _em_map: dict[str, dict] = {}
-        try:
-            _em_regions = await _call(global_markets_fetcher.fetch_all, timeout=10)
-            if _em_regions:
-                for _items in _em_regions.values():
-                    for _it in _items:
-                        _em_map[_it["symbol"]] = _it
-        except Exception:
-            pass
+        if _em_regions:
+            for _items in _em_regions.values():
+                for _it in _items:
+                    _em_map[_it["symbol"]] = _it
 
         # HK 指数批量接口（补充 EM 不含的 HSTECH 恒生科技指数）
         _hk_map: dict[str, dict] = {}
-        try:
-            _hk_data = await _call(global_markets_fetcher.fetch_hk_indices, timeout=10)
-            if _hk_data:
-                _hk_map.update(_hk_data)
-        except Exception:
-            pass
+        if _hk_data:
+            _hk_map.update(_hk_data)
 
         async def _foreign(sym: str, name: str, region: str):
             from ..core.async_utils import run_sync

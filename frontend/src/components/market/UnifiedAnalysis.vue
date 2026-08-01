@@ -55,11 +55,15 @@
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue'
 import { renderMarkdown } from '../../utils/markdown'
-import { marketApi } from '../../api'
+import { useLLMStream } from '../../composables/useLLMStream'
+
+const { start: startStream } = useLLMStream()
 
 const props = defineProps({
   marketTab: { type: String, default: 'A' },
   selectedSymbol: { type: String, default: null },
+  // F2-7 步骤E: 外部快速分析入口（热点行「AI 分析」→ { mode, query, name }）
+  externalTrigger: { type: Object, default: null },
 })
 
 const activeMode = ref('symbol')
@@ -160,6 +164,18 @@ watch(() => props.selectedSymbol, (val) => {
   }
 })
 
+// F2-7 步骤E: 外部触发（sector 模式快速入口）——activeMode + query + doAnalyze
+watch(() => props.externalTrigger, (trig) => {
+  if (trig && trig.query) {
+    activeMode.value = (trig.mode === 'sector' || trig.mode === 'index') ? trig.mode : 'symbol'
+    query.value = trig.query
+    symbol.value = trig.query
+    result.value = ''
+    error.value = ''
+    nextTick(() => doAnalyze())
+  }
+})
+
 function quickSelect(ex) {
   query.value = ex.code
   symbol.value = ex.code
@@ -177,24 +193,19 @@ async function doAnalyze() {
   result.value = ''
   lastAnalyzed.value = q
 
-  try {
-    const typeMap = { symbol: 'symbol', sector: 'sector', index: 'index' }
-    const analysisApi = activeMode.value === 'sector'
-      ? marketApi.sectorAnalysis?.({ keyword: q, market: props.marketTab })
-      : marketApi.marketAnalysis?.({ keyword: q, symbol: q, type: typeMap[activeMode.value] || 'auto', market: props.marketTab })
+  // F2-4: 复用已验证的 SSE 流式端点（symbol/sector/index 三模式），删除 fallback 假成功分支
+  const endpoint = activeMode.value === 'sector'
+    ? '/sector-analysis/stream'
+    : '/symbol-analysis/stream'
+  const body = activeMode.value === 'sector'
+    ? { sector_code: q, sector_name: q, sector_type: 'industry', market: props.marketTab }
+    : { symbol: q, name: q, asset_type: props.marketTab === 'HK' ? 'HK' : (props.marketTab === 'US' ? 'US' : 'A'), market: props.marketTab }
 
-    if (analysisApi) {
-      const res = await analysisApi
-      result.value = res?.data?.analysis || res?.data?.result || `分析完成: ${q}`
-    } else {
-      // Fallback when API not fully wired
-      const res = await fetch(`/api/v1/market/search?keyword=${encodeURIComponent(q)}&market=${props.marketTab}`)
-      if (res.ok) {
-        result.value = `✅ 查询完成: ${q}`
-      } else {
-        result.value = `分析: ${q}`
-      }
-    }
+  try {
+    const { fullText } = await startStream(endpoint, body, (token) => {
+      result.value += token
+    })
+    result.value = fullText
   } catch (e) {
     error.value = '分析失败：' + (e?.message || '网络错误')
   } finally {

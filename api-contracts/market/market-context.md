@@ -94,6 +94,10 @@ POST /api/v1/analysis/sector-analysis/stream
 
 SSE stream. When market != "A", returns empty sector data with prompt noting "该市场暂无板块分析数据".
 
+> **v2.0 (F2-7 步骤F)**: `sector_code` 支持热板块/热度的 `cls` 前缀代码（如 `cls82558`）。
+> 后端按「名称优先 → cls 数字段匹配 BK」归一化；映射失败返回 `404 {"detail": "板块映射失败：..."}`，
+> 前端降级为板块搜索。
+
 ---
 
 ## 5. Symbol Analysis Stream / 标的分析流式端点

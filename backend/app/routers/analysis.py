@@ -482,6 +482,43 @@ async def llm_advice_stream(req: LLMAdviceRequest):
 # 组合设计流式端点已移除，使用 POST /portfolio/design-async
 
 
+def _normalize_sector_code(
+    code: str,
+    industry: list[dict],
+    concept: list[dict],
+    name: str = "",
+) -> str:
+    """板块代码归一化（F2-7 步骤F；§9.8.3）。
+
+    热板块/热度的 cls 前缀代码（如 cls82558）与东财 BK/行业板块是两套编码，
+    在 sector 分析前归一化：
+      1. 名称优先 —— 前端传 sector_name（热板块行有 plate_name）时按名称精确命中；
+      2. 数字段精确匹配 —— cls 数字段 == BK 代码数字段（去掉 BK 前缀）；
+      3. 已是 BK 代码原样返回；
+      4. 归一化失败返回原值（调用方按未命中返回结构化错误）。
+    """
+    if not code:
+        return code
+    tables = list(industry or []) + list(concept or [])
+    if name:
+        hit = next(
+            (s for s in tables if (s.get("sector_name") or "") == name), None
+        )
+        if hit:
+            return str(hit.get("sector_code") or code)
+    if str(code).lower().startswith("cls"):
+        import re as _re
+        digits = _re.sub(r"\D", "", code)
+        if digits:
+            hit = next(
+                (s for s in tables if str(s.get("sector_code", "")).replace("BK", "") == digits),
+                None,
+            )
+            if hit:
+                return str(hit.get("sector_code") or code)
+    return code
+
+
 @router.post("/sector-analysis/stream")
 async def sector_analysis_stream(req: SectorAnalysisRequest):
     """流式板块分析 — Phase 5.1: 非 A 市场返回友好提示。"""
@@ -512,7 +549,29 @@ async def sector_analysis_stream(req: SectorAnalysisRequest):
             sectors = await asyncio.to_thread(market_data_hub.get_sector_concept, 200)
         else:
             sectors = await asyncio.to_thread(market_data_hub.get_sector_industry, 200)
-        sector_data = next((s for s in sectors if s.get("sector_code") == sector_code), None)
+        # F2-7 步骤F: 热板块 cls 前缀代码归一化（名称优先 → 数字段匹配）
+        normalized = _normalize_sector_code(
+            sector_code,
+            sectors if sector_type != "concept" else [],
+            sectors if sector_type == "concept" else [],
+            name=sector_name,
+        )
+        sector_data = next(
+            (s for s in sectors if s.get("sector_code") == normalized), None
+        )
+        if sector_data:
+            sector_code = sector_data.get("sector_code", sector_code)
+        elif normalized != sector_code:
+            # 归一化后未命中 → 用原值兜底再查一次
+            sector_data = next(
+                (s for s in sectors if s.get("sector_code") == sector_code), None
+            )
+        if not sector_data:
+            # F2-7 步骤F: 映射失败返回结构化错误（前端降级为搜索）
+            raise HTTPException(
+                status_code=404,
+                detail=f"板块映射失败：{req.sector_code}（请用板块名称搜索）",
+            )
         name = sector_name or (sector_data.get("sector_name", "") if sector_data else sector_code)
         
         constituents = await asyncio.to_thread(market_data_hub.get_sector_stocks, sector_code)

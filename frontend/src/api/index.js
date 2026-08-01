@@ -37,14 +37,13 @@ export const marketApi = {
   updateWatchlist: (id, data) => api.put(`/market/watchlist/${id}`, data),
   removeWatchlist: (id) => api.delete(`/market/watchlist/${id}`),
   batchRemoveWatchlist: (ids) => api.delete('/market/watchlist', { data: { ids } }),
-  getSectorsIndustry: (limit = 80) => api.get('/market/sectors/industry', { params: { limit } }),
-  getSectorsConcept: (limit = 80) => api.get('/market/sectors/concept', { params: { limit } }),
+  getSectors: (params = {}) => api.get('/market/sectors', { params }),
   getHotPlates: (limit = 15) => api.get('/market/hot-plates', { params: { limit } }),
   getSectorHeat: (limit = 20) => api.get('/market/sectors/heat', { params: { limit } }),
   getStockHotRank: (limit = 50) => api.get('/market/stock-hot-rank', { params: { limit } }),
-  getMarketWind: () => api.get('/market/wind'),
-  getSectorRotation: (limit = 20) => api.get('/market/sectors/rotation', { params: { limit } }),
-  getSectors: (params = {}) => api.get('/market/sectors', { params }),
+  // 说明（F2-4）：symbol/sector 分析是 SSE 流式端点（/analysis/*-analysis/stream），
+  // 前端经 useLLMStream（fetch + ReadableStream）消费，因此不在 marketApi 定义
+  // axios 方法 —— check_api_usage 门禁要求方法必有调用点，无调用点即删除。
 }
 
 export const portfolioApi = {
@@ -57,10 +56,8 @@ export const portfolioApi = {
   getPnl: (type, totalCapital) => api.post('/portfolio/daily-pnl', { total_capital: totalCapital }, { params: type ? { portfolio_type: type } : {} }),
   strategyCheck: (data) => api.post('/portfolio/strategy-check-async', data),
   getStrategyCheckResult: (taskId) => api.get(`/portfolio/strategy-check-result/${taskId}`),
-  listStrategyChecks: (limit = 10, offset = 0, timeout) => api.get('/portfolio/strategy-checks', { params: { limit, offset }, ...(timeout ? { timeout } : {}) }),
   getStrategyCheckDetail: (id) => api.get(`/portfolio/strategy-checks/${id}`),
   applyPortfolioDesign: (design) => api.post('/portfolio/apply-design', design),
-  listDesigns: (limit = 10, offset = 0, timeout) => api.get('/portfolio/designs', { params: { limit, offset }, ...(timeout ? { timeout } : {}) }),
   getDesign: (id) => api.get(`/portfolio/designs/${id}`),
   getPnLHistory: (type, period = 'all', totalCapital = 0) => api.get('/portfolio/pnl-history', { params: { portfolio_type: type, period, total_capital: totalCapital } }),
   export: (type, format = 'csv') => api.get('/portfolio/export', { params: { portfolio_type: type, format }, responseType: format === 'csv' ? 'text' : 'json' }),

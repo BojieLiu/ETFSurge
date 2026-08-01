@@ -3,7 +3,7 @@
     <ErrorOverlay :hasError="renderError" @retry="onRetry" />
 
     <template v-if="!renderError">
-      <GlobalIndicesStrip :globalIndices="globalIndices" />
+      <GlobalIndicesStrip :globalIndices="globalIndices" :loading="!fetchAttempted" />
 
       <SummaryCards
         :activeTab="activeTab"
@@ -19,7 +19,11 @@
       <!-- Portfolio Type Tabs -->
       <AppTabs :tabs="tabs" v-model="activeTab" variant="soft" full-width ariaLabel="组合类型" class="dashboard-tabs">
         <template #combined>
-          <template v-if="!loading">
+          <div v-if="loading" class="content-grid" aria-busy="true">
+            <div class="card skeleton-card"><Skeleton type="chart" height="260" /></div>
+            <div class="card skeleton-card"><Skeleton type="table" rows="6" /></div>
+          </div>
+          <template v-else>
             <div v-if="allocationOn?.allocations?.length" class="content-grid">
               <AllocationPieChart :items="allocationOn.allocations" title="场内分配" />
               <AllocationTable :items="allocationOn.allocations" :cashPct="cashPctOn" :cashAmount="cashOn" title="场内 ETF 目标分配" />
@@ -31,7 +35,11 @@
           </template>
         </template>
         <template #on_exchange>
-          <template v-if="!loading">
+          <div v-if="loading" class="content-grid" aria-busy="true">
+            <div class="card skeleton-card"><Skeleton type="chart" height="260" /></div>
+            <div class="card skeleton-card"><Skeleton type="table" rows="6" /></div>
+          </div>
+          <template v-else>
             <div v-if="allocationOn?.allocations?.length" class="content-grid">
               <AllocationPieChart :items="allocationOn.allocations" title="场内分配" />
               <AllocationTable :items="allocationOn.allocations" :cashPct="cashPctOn" :cashAmount="cashOn" title="场内 ETF 目标分配" />
@@ -39,7 +47,11 @@
           </template>
         </template>
         <template #off_exchange>
-          <template v-if="!loading">
+          <div v-if="loading" class="content-grid" aria-busy="true">
+            <div class="card skeleton-card"><Skeleton type="chart" height="260" /></div>
+            <div class="card skeleton-card"><Skeleton type="table" rows="6" /></div>
+          </div>
+          <template v-else>
             <div v-if="allocationOff?.allocations?.length" class="content-grid">
               <AllocationPieChart :items="allocationOff.allocations" title="场外分配" />
               <AllocationTable :items="allocationOff.allocations" :cashPct="cashPctOff" :cashAmount="cashOff" title="场外 ETF 目标分配" />
@@ -77,20 +89,25 @@
 
       <!-- Content + P&L (visible when fetch attempted AND has allocations) -->
       <template v-if="fetchAttempted && (allocationOn?.allocations?.length || allocationOff?.allocations?.length)">
-        <!-- Daily P&L Details -->
-        <PnLDetailTable
-          :items="pnlItems"
-          :activeTab="activeTab"
-          :pnlTotal="pnlTotal"
-          :pnlTotalAmount="pnlTotalAmount"
-          :pnlWeightedChange="pnlWeightedChange"
-        />
+        <!-- Daily P&L Details（F2-2: 刷新时保持骨架防 CLS） -->
+        <div v-if="loading" class="card skeleton-card" aria-busy="true">
+          <Skeleton type="table" rows="4" />
+        </div>
+        <template v-else>
+          <PnLDetailTable
+            :items="pnlItems"
+            :activeTab="activeTab"
+            :pnlTotal="pnlTotal"
+            :pnlTotalAmount="pnlTotalAmount"
+            :pnlWeightedChange="pnlWeightedChange"
+          />
 
-        <!-- P&L Bar Chart -->
-        <PnLBarChart
-          :items="pnlItems"
-          :loading="loading"
-        />
+          <!-- P&L Bar Chart -->
+          <PnLBarChart
+            :items="pnlItems"
+            :loading="loading"
+          />
+        </template>
       </template>
     </template>
   </div>

@@ -137,6 +137,9 @@ POST /api/v1/analysis/news-impact
 }
 ```
 
+> **v2.0 (F2-9)**: prompt 含硬约束「若新闻与组合内标的无直接关联，须明确回答『无直接影响』，
+> 禁止强行关联；只列出实际受影响的标的，宁缺毋滥」。`affected_holdings` 允许为空数组（无直接关联时）。
+
 ---
 
 ## 6. Portfolio Design / 组合设计

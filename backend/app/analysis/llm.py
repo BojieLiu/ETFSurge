@@ -901,7 +901,12 @@ async def analyze_news_impact(news_item: dict, holdings: list[dict]) -> dict:
 请分析这条新闻对组合的影响，重点回答：
 (a) 影响范围（市场/板块）；
 (b) 组合内哪些标的会受到影响、具体如何受影响。
-只返回约定结构的 JSON。"""
+只返回约定结构的 JSON。
+
+重要约束（必须遵守）：
+- 若新闻与组合内标的无直接关联，须明确回答「无直接影响」，禁止强行关联；
+- 只列出实际受影响的标的，宁缺毋滥；
+- 若组合为空，回答对市场整体的影响。"""
     else:
         prompt = f"""新闻标题：{news_item.get('title', '')}
 新闻内容：{news_item.get('content', '')}
@@ -911,7 +916,11 @@ async def analyze_news_impact(news_item: dict, holdings: list[dict]) -> dict:
 请分析这条新闻对市场整体的影响，重点回答：
 (a) 影响范围（市场/板块）；
 (b) 哪些行业或主题会受到正面/负面影响。
-只返回约定结构的 JSON。"""
+只返回约定结构的 JSON。
+
+重要约束（必须遵守）：
+- 若新闻与 A 股市场无直接关联，须明确回答「无直接影响」，禁止强行关联；
+- 只列出实际受影响的行业/主题，宁缺毋滥。"""
 
     try:
         data = await get_agent("news_impact").run_json(prompt)

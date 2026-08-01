@@ -6,6 +6,9 @@
 
 Calculate target amounts, estimated shares, and real-time prices for each ETF based on target weights and total capital.
 
+> **v2.0 (F2-1)**: 持仓行情走 15s 模块级缓存（`portfolio_service._PRICE_MAP_CACHE`，与 `portfolio:realtime` TTL 一致），
+> HK/US 多只标的分批拉取并行（`asyncio.gather`），`POST /calculate` 响应从 ~8s 级降至亚秒级（多次采样中位数 &lt; 2s）。
+
 ---
 
 ## 2. 端点定义 / Endpoint

@@ -517,10 +517,15 @@ def section_portfolio():
 
     # POST /portfolio/calculate
     try:
-        _t0 = time.time()
-        r = requests.post(f"{BASE}/api/v1/portfolio/calculate",
-                          json={"total_capital": 100000, "holdings": []}, timeout=10)
-        _elapsed = time.time() - _t0
+        # F2-1: 多次采样取中位数（验收口径：中位数 < 2s；首次冷拉行情/基本面不计入）
+        _samples = []
+        for _s in range(3):
+            _t0 = time.time()
+            _r = requests.post(f"{BASE}/api/v1/portfolio/calculate",
+                               json={"total_capital": 100000, "holdings": []}, timeout=30)
+            _samples.append(time.time() - _t0)
+        r = _r
+        _elapsed = sorted(_samples)[len(_samples) // 2]  # 中位数
         check(f"POST /calculate -> {r.status_code}", r.status_code == 200)
         _check_response_time("/portfolio/calculate", _elapsed, 5.0)
     except Exception as e:

@@ -241,7 +241,7 @@ describe('NewsView', () => {
     expect(items[2].text()).toBe('最早')
   })
 
-  it('calls newsApi.newsImpact and shows the impact panel', async () => {
+  it('calls newsApi.newsImpact and shows the impact inline (F2-8)', async () => {
     apiMock.headlines.mockResolvedValue({ data: SAMPLE })
     apiMock.newsImpact.mockResolvedValue({
       data: {
@@ -257,7 +257,9 @@ describe('NewsView', () => {
     await flushPromises()
 
     expect(apiMock.newsImpact).toHaveBeenCalled()
-    expect(wrapper.find('.impact-panel').exists()).toBe(true)
+    // F2-8: 结果展示在该条卡片内的行内展开区（不再有页面底部面板）
+    expect(wrapper.find('.impact-panel').exists()).toBe(false)
+    expect(wrapper.find('.impact-inline').exists()).toBe(true)
     expect(wrapper.text()).toContain('全市场')
     expect(wrapper.text()).toContain('上证50ETF')
   })
