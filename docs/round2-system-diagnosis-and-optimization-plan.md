@@ -3,7 +3,7 @@
 > 生成时间: 2026-07-31
 > 环境: Docker (Python 3.14-slim + Node 24 Alpine + Nginx + Redis 8)
 > 执行范围: 15 项全链路验证（步骤 1-15，见 §0 索引表）
-> 状态: v1.2（已完成三轮 review，达到实施标准）
+> 状态: v1.8（已完成多轮 review 与修订，达到实施标准；待讨论项见 §9.10.7）
 
 ---
 
@@ -26,7 +26,7 @@
 | 12 | 后端全链路性能诊断 | §2.3 | ✅（组合计算 8.2s） |
 | 13 | 测试防护体系失效分析 | §8 | ✅（6 类盲区） |
 | 14 | 汇总文档 + 多轮 review | 本文档 | 🔄 进行中 |
-| 15 | 回收容器进程 | 待执行 | ⏳ |
+| 15 | 回收容器进程 | 已执行 | ✅（docker ps 为空，见 §2.4） |
 
 ## 一、执行摘要
 
@@ -198,6 +198,8 @@ perf_diag 49 端点扫描：**46/49 通过**（3 个 405 为脚本用 GET 调 PO
 | 513010 恒生科技ETF | 3% | — | 同上 |
 | 518880 黄金ETF | 13% | — | 同上 |
 
+> 注：上表 10 只持仓权重合计 ≈76%，其余为现金/未列持仓——组合允许现金仓位，非 100% 属正常（现金逻辑见 §7 Z03 与 §9.6.3 步骤 E）。
+
 评估结论：
 - 信号引擎能输出明确 buy/sell（score ±2，**Z10 已改善**），与 range_bound 市态判断一致、逻辑合理。
 - **严重问题**：akshare 熔断窗口期 history/indicators/signal 全线 `insufficient_data`（实测捕捉）；设计时点因子数据与实际指标不一致（见 §3.2）。
@@ -263,7 +265,7 @@ perf_diag 49 端点扫描：**46/49 通过**（3 个 405 为脚本用 GET 调 PO
 | Z14 | pre-commit 仅前端 | ✅ 已修 | 已含密钥/构建/API 覆盖/异步审计/mypy/pytest/冒烟 |
 | Z15 | verify_e2e 覆盖不足 | ✅ 部分 | 已含 US/HK 搜索、factor-health、IC、search；但见 §8.2 盲区 |
 
-结论：**12/15 已修或部分修；Z04 未达标，Z07/Z11 部分改善**。本轮新发现（未列入旧清单）：B1 WS 生产断裂、B2-B6 断裂点、AK 线单源依赖、HK 行情链路、LLM 上下文缺失、市场参数失效、因子数据不一致、sentiment 因子无数据、搜索排序缺陷、资讯分级缺陷。
+结论：**12/15 已修或部分修（其中 Z03/Z05/Z10/Z15 为部分改善）；Z04 未达标，Z07/Z11 部分改善**。本轮新发现（未列入旧清单）：B1 WS 生产断裂、B2-B6 断裂点、A 股 K 线单源依赖、HK 行情链路、LLM 上下文缺失、市场参数失效、因子数据不一致、sentiment 因子无数据、搜索排序缺陷、资讯分级缺陷。
 
 ---
 
@@ -291,7 +293,9 @@ perf_diag 49 端点扫描：**46/49 通过**（3 个 405 为脚本用 GET 调 PO
 
 ## 九、优化修复方案
 
-### 🅿️0 — 阻断性修复（已实施 2 项，剩余 2 项）
+> 说明：§9.1-§9.4 为早期修复方案（见修订记录 v1.0-v1.3），其内容已并入后续 §9.5-§9.9 专项；编号空缺保留以维持历史引用稳定。
+
+### 🅿️0 — 阻断性修复（已实施 2 项，剩余 3 项）
 
 | ID | 问题 | 修复方案 | 涉及文件 | 验收条件 |
 |----|------|---------|---------|---------|
@@ -305,11 +309,11 @@ perf_diag 49 端点扫描：**46/49 通过**（3 个 405 为脚本用 GET 调 PO
 
 | ID | 问题 | 修复方案 | 涉及文件 | 验收条件 |
 |----|------|---------|---------|---------|
-| F1-1 | 港股实时行情全 null | 排查 `fetch_hk_stock_realtime`（`china_market.py` 实际降级链 **sina → tencent → dongfang(_em_hk_realtime)**）与代码归一化（HK 代码无 `.HK` 后缀） | 涉及：`backend/app/fetchers/china_market.py` | `realtime/00700?asset_type=HK` 返回价格 |
+| F1-1 | 港股实时行情全 null | 修复 `fetch_hk_stock_realtime`（`china_market.py`）tencent 降级分支：HK 代码无 `.HK` 后缀时 tencent 返回结构为空但未触发降级 → 在 tencent 分支前增加代码归一化（补 `.HK` 后缀）+ 返回结构校验（价格字段为空即继续降级到 dongfang `_em_hk_realtime`） | 涉及：`backend/app/fetchers/china_market.py` | `realtime/00700?asset_type=HK` 返回价格 |
 | F1-2 | 单只 A 股实时行情间歇性 null | `fetch_a_stock_realtime` 降级链补 tencent（与批量一致：mootdx→tencent→sina） | 涉及：`backend/app/fetchers/china_market.py` | 连续 10 次 `realtime/510300` 无 null |
-| F1-3 | LLM 上下文数据缺失 | 修复 `llm-advice`/`symbol-analysis` 的 `build_full_context` 采集链路（market 分支参数传导 + K 线注入） | 涉及：`backend/app/services/llm_context.py`、`backend/app/routers/analysis.py` | llm-advice 回答引用真实行情数据 |
+| F1-3 | LLM 上下文数据缺失 | 修复 `llm-advice`/`symbol-analysis` 的 `build_full_context` 采集链路（market 分支参数传导 + K 线注入） | 涉及：`backend/app/services/llm_context.py`、`backend/app/routers/analysis.py` | llm-advice 回答引用真实行情（含 ≥1 只持仓现价/涨跌幅且与 realtime 一致，无编造数字） |
 | F1-4 | `llm-report` market 参数失效 | 后端按 `market` 参数切换指数/板块/资讯采集（HK/US 分支） | 涉及：`backend/app/routers/analysis.py`、`backend/app/analysis/llm.py` | `market=HK` 报告含恒生指数 |
-| F1-5 | 设计因子数据不一致 | 统一设计引擎与 `indicators` 端点的 K 线来源与时点；rationale 从 factor_scores 取 RSI 时校验数据新鲜度 | 涉及：`backend/app/engine/`、`backend/app/factors/factor_registry.py` | 设计报告 RSI 与实际 `indicators` 一致 |
+| F1-5 | 设计因子数据不一致 | 统一设计引擎与 `indicators` 端点的 K 线来源与时点；rationale 从 factor_scores 取 RSI 时校验数据新鲜度 | 涉及：`backend/app/engine/`、`backend/app/factors/factor_registry.py` | 设计报告 RSI 与 `indicators` 一致（±2 容差，验收见 §9.7.5-1） |
 | F1-6 | 板块成分股错位 | 修复 BK0447 等板块成分股映射（sector 代码→成分股接口错位） | 涉及：`backend/app/services/market_data_hub.py`（get_sector_stocks） | 半导体板块返回半导体成分股 |
 | F1-7 | LLM 输出未后处理 | 对 LLM 流式输出做系统提示词隔离（system prompt 与用户内容严格分段）+ 输出首段过滤已知泄漏模式 | 涉及：`backend/app/analysis/llm.py`、`backend/app/routers/analysis.py` | 输出无"我们只需要回答…"类泄漏 |
 | F1-8 | **组合设计投资合理性**（方案与市场脱节） | 详见「§9.7 专项：投资合理性评估」：R1 因子数据正确性（RSI K 线口径对齐 + 估值字段按资产类别禁用）→ R2 market_context 填充 → R3 rationale 绑定标的属性 → R4 候选池多样性（见 F0-5）→ R5 信号聚合「双弱不判多」约束 | 涉及：`backend/app/engine/rationale.py`、`backend/app/analysis/signal.py`、`backend/app/factors/factor_registry.py`、`backend/app/services/llm_context.py` | core 重叠 ≤1 只；防御型科创卫星 ≤10%；rationale 无模板缺陷；market_context 非空 |
@@ -321,7 +325,7 @@ perf_diag 49 端点扫描：**46/49 通过**（3 个 405 为脚本用 GET 调 PO
 | F2-1 | 组合计算 8.2s | `calculate_allocation`/`daily_pnl` 对持仓行情/K 线改 `asyncio.gather` 并行 + 15s 缓存（注意：缓存会降低数据新鲜度，15s 与 `portfolio:realtime` 一致可接受） | 涉及：`backend/app/services/portfolio_service.py` | calculate < 2s（多次采样中位数） |
 | F2-2 | 首页 Lighthouse 60 | Dashboard 慢 API 并行加载 + 骨架屏（消除 CLS）+ 路由级代码分割（echarts 按需）+ 关键 API 预热缓存 | 涉及：`frontend/src/views/Dashboard.vue`、`frontend/src/router/index.js`、`vite.config.js` | 首页 Performance ≥ 85（3 次采样中位数），CLS < 0.1 |
 | F2-3 | `/market/sectors/heat` 404 | 后端暴露 `GET /market/sectors/heat`（hub 已有 `get_sector_heat`，数据源实测正常）或前端改调 `sectors/rotation`。详见「§9.8 专项步骤 B」 | 涉及：`backend/app/routers/market.py`、`frontend/src/components/market/SectorHeatMap.vue` | 前端 SectorHeatMap 无 404 |
-| F2-4 | `marketApi.sectorAnalysis/marketAnalysis` 未定义 | 前端定义方法并接通 `/analysis/symbol-analysis/stream`、`/analysis/sector-analysis/stream`（详见「§9.8 专项步骤 D」，删除 fallback 假成功分支） | 涉及：`frontend/src/api/index.js`、`frontend/src/components/market/UnifiedAnalysis.vue` | UnifiedAnalysis 真实分析可用 |
+| F2-4 | `marketApi.sectorAnalysis/marketAnalysis` 未定义 | 前端定义方法并接通 `/analysis/symbol-analysis/stream`、`/analysis/sector-analysis/stream`（详见「§9.8 专项步骤 D」，删除 fallback 假成功分支） | 涉及：`frontend/src/api/index.js`、`frontend/src/components/market/UnifiedAnalysis.vue` | symbol/sector/index 三模式均返回**流式分析内容**（F12 可见对应 /stream 请求；页面无「✅ 查询完成」fallback 文案） |
 | F2-5 | 预热指数/新闻串行 | `warmup_global_indices` 内 `asyncio.gather` 并行拉取 | 涉及：`backend/app/main.py` | 预热 < 1.0s |
 | F2-6 | **热点板块/热门个股字段契约不匹配 + 信息不足** | 详见「§9.8 专项步骤 A/C」：A 后端字段归一化（`get_hot_plates`/`get_sector_heat`/`get_stock_hot_rank`，`stock_list`/`tag` 用 `ast.literal_eval` 安全解析）→ C 热门个股行增强（price/sector/turnover/concept chips） | 涉及：`backend/app/services/market_data_hub.py`、`backend/app/fetchers/sector_fetcher.py`、`frontend/src/components/market/SectorHeatMap.vue` | 热点板块 ≥10 行；个股行含 price/sector/turnover/chip |
 | F2-7 | **热门个股/板块无快速分析入口** | 详见「§9.8 专项步骤 E/F」：个股行「技术分析」（indicators+signal 弹窗）+「AI 分析」（emit → UnifiedAnalysis symbol 模式）；板块行「AI 分析」（UnifiedAnalysis 扩展 externalTrigger 支持 sector 模式）；`cls` 板块代码归一化 | 涉及：`frontend/src/components/market/SectorHeatMap.vue`、`frontend/src/views/MarketAnalysis.vue`、`backend/app/routers/analysis.py` | 点击后自动聚焦分析区并触发真实分析 |
@@ -330,15 +334,15 @@ perf_diag 49 端点扫描：**46/49 通过**（3 个 405 为脚本用 GET 调 PO
 
 ### 🅿️3 — 低优先级（质量完善）
 
-| ID | 问题 | 修复方案 | 验收条件 |
-|----|------|---------|---------|
-| F3-1 | 资讯分级不合理 | `classify_news_level` 增加相关性加权（A 股/组合相关关键词加权、国际微观降级），财联社源评级复核 | 验收："召回/赌博"类国际新闻 ≤ 2 星 |
-| F3-2 | 搜索排序缺陷 | 跨市场合并前先做全局精确匹配（symbol==kw 优先于首字母模糊）；`market=A` 个股搜索降级到 levistock 个股 | 验收：`search?keyword=SPY` 首条为 SPY；`market=A&keyword=贵州茅台` 返回茅台 |
-| F3-3 | 设计现金仓位偏高 | 预算引擎对 range_bound 市态的现金上限收紧（22-32% → ≤15%），非交易时段才有高现金 | 验收：balanced 方案现金 ≤ 15% |
-| F3-4 | Z04 etf_specific 4 因子 | 详见「§9.5 专项：Z04 修复方案」：A NAV 降级链（premium_discount）→ B benchmark_close 注入（tracking_error，分批宽基先行）→ C 份额数据源（shares_change + institutional_holdings_change 同时复活）→ D IC/状态展示修复 | 验收：etf_specific no_data < 3，且 no_data 因子 reason 明确标注缺失字段 |
-| F3-5 | sentiment 3 因子无数据 | 接通 panic_greed_diff（涨跌分布）、news_heat/news_direction（资讯情绪）数据管道 | 验收：sentiment no_data = 0 |
-| F3-6 | LLM 429 限流 | 增加指数退避重试（尊重 Retry-After）+ provider 轮换 + 高峰排队（成本权衡：免费模型限流是常态，可接受降级） | 验收：单次分析失败前至少 2 次重试 |
-| F3-7 | 自选美股名称 | `get_asset_realtime` US 分支补充 name 字段（静态基座映射） | 验收：自选 SPY 显示 "SPDR S&P 500 ETF" |
+| ID | 问题 | 修复方案 | 涉及文件 | 验收条件 |
+|----|------|---------|---------|---------|
+| F3-1 | 资讯分级不合理 | 详见「§9.10 专项：新闻重要性分级质量修复」：A 词表治理（跨级去重/L2 删泛词/补地缘军事词）→ B 双轨交叉校验（源 level 与本地分类差≥2 以本地为准）→ C stars 纯语义化（待决策）→ D 标题+内容双输入 | `backend/app/fetchers/levistock_fetcher.py`、`backend/app/fetchers/news_fetcher.py` | 30 条真实标注复核：地缘军事类 ≥L4 无漏标；「停牌/召回/赌博」类 ≤2★；跨级重复=0 |
+| F3-2 | 搜索排序缺陷 | 跨市场合并前先做全局精确匹配（symbol==kw 优先于首字母模糊）；`market=A` 个股搜索降级到 levistock 个股 | `backend/app/routers/market.py`、`backend/app/services/market_service.py` | 验收：`search?keyword=SPY` 首条为 SPY；`market=A&keyword=贵州茅台` 返回茅台 |
+| F3-3 | 设计现金仓位偏高 | 预算引擎对 range_bound 市态的现金上限收紧（22-32% → ≤15%），非交易时段才有高现金 | `backend/app/engine/budgets.py` | 验收：balanced 方案现金 ≤ 15% |
+| F3-4 | Z04 etf_specific 4 因子 | 详见「§9.5 专项：Z04 修复方案」：A NAV 降级链（premium_discount）→ B benchmark_close 注入（tracking_error，分批宽基先行）→ C 份额数据源（shares_change + institutional_holdings_change 同时复活）→ D IC/状态展示修复 | `backend/app/factors/factor_registry.py`、`backend/app/services/market_data_hub.py`、`backend/app/fetchers/fund_fetcher.py`、`backend/app/fetchers/etf_scanner.py` | 验收：etf_specific no_data < 3，且 no_data 因子 reason 明确标注缺失字段 |
+| F3-5 | sentiment 3 因子无数据 | 接通 panic_greed_diff（涨跌分布）、news_heat/news_direction（资讯情绪）数据管道 | `backend/app/factors/factor_registry.py`、`backend/app/services/market_data_hub.py` | 验收：sentiment no_data = 0 |
+| F3-6 | LLM 429 限流 | 增加指数退避重试（尊重 Retry-After）+ provider 轮换 + 高峰排队（成本权衡：免费模型限流是常态，可接受降级） | `backend/app/analysis/llm.py` | 验收：单次分析失败前至少 2 次重试 |
+| F3-7 | 自选美股名称 | `get_asset_realtime` US 分支补充 name 字段（静态基座映射） | `backend/app/services/market_service.py` | 验收：自选 SPY 显示 "SPDR S&P 500 ETF" |
 
 ### 🅿️4 — 测试防护补强（步骤 13 落地）
 
@@ -416,7 +420,7 @@ for sym in missing:
   2. `_build_symbol_extra` 读 mapping，取指数代码，从指数历史（hub.get_history 支持指数或指数缓存）取最近 20 日 close 填 `benchmark_close`。
 - 伪代码：
 ```python
-mapping = _load_etf_index_mapping()          # {"510300": {"index_code": "sh000300"}}
+mapping = _load_tracked_index_cache()          # etf_scanner.py L541，读取 data/etf_index_mapping.json
 for sym in symbols:
     idx_code = mapping.get(sym, {}).get("index_code")
     if not idx_code:
@@ -513,7 +517,7 @@ async def fetch_fund_shares_history(symbol: str) -> dict | None:
    - 结果：`CORE_REQUIRED=["510300","560600"]` 从未生效，方案里 core 全是涨幅榜里的变体宽基。
 
 3. **板块去重拦不住「科创系」**
-   - `allocation_engine.py::allocate` L247-260 `concept_groups` 按 `tracked_index` 归一化前缀去重（科创50/科创100/科创新能源 → 科创），每组仅留最高分。
+   - `allocation_engine.py::_select_and_weight`（L123-307，`concept_groups` 去重在 L247-260）按 `tracked_index` 归一化前缀去重（科创50/科创100/科创新能源 → 科创），每组仅留最高分。
    - 但 589720（创新药）/589420（芯片设计）/589560（人工智能）/589960（新能源）**归一化后分属 医药/电子/计算机/新能源 四个不同概念组** → 名称都带「科创」却各自入选 → 去重逻辑对「同主题不同概念名」失效。
 
 4. **卫星少 = 候选池窄的必然结果**
@@ -558,7 +562,7 @@ for page in range(1, 20):
 
 **步骤 C — 板块配额（P1，防科创包场）**
 
-- 文件：`backend/app/engine/allocation_engine.py::allocate`（L247-260 去重处）
+- 文件：`backend/app/engine/allocation_engine.py::_select_and_weight`（L247-260 去重处）
 - 改动：去重按归一化概念组后，**每组最多保留 composite 前 2 名**；另增加「科创系」聚合约束：名称含科创/半导体/芯片的候选合计 ≤ 卫星层预算的 50%。
 - 伪代码：
 ```python
@@ -599,7 +603,7 @@ if sum(w for w in tech_candidates) > s_budget * 0.5:
 
 1. 组合设计三套方案：core 层至少 1 只来自主流宽基清单（510300/510500/510050/588000/159915）。
 2. 每方案卫星 ≥ 4 只；防御型方案科创系卫星权重 ≤ 10%。
-3. 归一化概念组在卫星层不重复（每组 ≤1 只入选权重位，或 ≤2 只候选）。
+3. 归一化概念组在卫星层不重复（每组**入选权重位 ≤1 只**；候选位允许 ≤2 只，但权重位以最高分者独占）。
 4. `pytest tests/test_design_candidate_pool.py` 全绿。
 
 #### 9.6.6 风险与回退
@@ -667,9 +671,9 @@ if sum(w for w in tech_candidates) > s_budget * 0.5:
 
 1. **R1 因子数据正确性**（最高优先——选标依据错了，后面全错）：RSI 与 `indicators` 端点对齐（F1-5 验收）；估值因子按资产类别禁用（黄金/债券类剔除估值字段）。
 2. **R2 market_context 填充**：修复 index_realtime/sector_momentum/fund_flow 采集（F1-3/F1-4）。
-3. **R3 rationale 绑定标的属性**：按 layer + 标的波动率/风格选模板短语，废弃固定「压舱石」；修复字符串拼接缺陷（截断/重复）。
+3. **R3 rationale 绑定标的属性**：在 `rationale.py` 新增 `_style_probe(symbol)` 标的风格探测——从 factor_scores 读波动/风格属性（或按 `tracked_index` 名称匹配），将标的归入 {低波宽基 / 高波成长 / 主题卫星 / 防御资产} 四类短语池，废弃固定「压舱石」；`tracked_index` 含「科创」的指数强制归入「高波成长」池，绝不落「压舱石/低波动」池（L15 短语池保留但仅低波宽基类可用）。同时修复字符串拼接缺陷：模板统一用完整句式 `f"{name}作为{n}的{d}，{b}"` 一次生成，禁止逐段 append（修截断与「在方案中在方案中」重复）。
 4. **R4 候选池多样性**：§9.6 专项步骤 A-E。
-5. **R5 信号聚合复核**：技术/估值/动量加权规则加「双弱不判多」约束，单因子极端值设封顶。
+5. **R5 信号聚合复核**：`signal.py` 聚合公式改为加权 `0.4*技术 + 0.4*估值 + 0.2*动量`（现状单靠动量 +1.047 拉平技术/估值双弱）；新增硬约束「**技术<0 且 估值<0 → 综合信号不得为 buy/偏多，至多 hold**」；单因子极端值封顶 `|score| ≤ 1.0` 防单项拉平。
 
 #### 9.7.4 验收条件（量化）
 
@@ -678,6 +682,30 @@ if sum(w for w in tech_candidates) > s_budget * 0.5:
 3. rationale 无模板拼接缺陷（无截断、无「在方案中在方案中」重复）；科创50/科创100 不再出现「压舱石/低波动」措辞。
 4. `market_context`：index_realtime ≥3 条、sector_momentum ≥5 条、fund_flow 非全 0。
 5. 无「技术+估值双弱却判偏多」信号输出（R5 约束生效）。
+
+#### 9.7.5 TDD 测试计划（测试文件 `tests/test_design_investment_quality.py`）
+
+| # | 用例 | 对应根因 | 断言 |
+|---|------|---------|------|
+| 1 | `test_rsi_matches_indicators_endpoint` | R1 | mock 同一标的同一 K 线 → 设计引擎 factor_scores 的 RSI 与 `/indicators` 端点一致（±2 容差） |
+| 2 | `test_valuation_field_disabled_for_gold_bond` | R1 | 518880（黄金）/511090（国债）类资产 → 估值因子不产出分数，reason 标注「资产类别不支持」 |
+| 3 | `test_market_context_index_realtime_not_empty` | R2 | mock hub 正常 → 设计 market_context.index_realtime ≥3 条 |
+| 4 | `test_market_context_sector_momentum_not_empty` | R2 | 同上 → sector_momentum ≥5 条 |
+| 5 | `test_rationale_no_template_corruption` | R3 | 562320 类标的 rationale 无截断（不以「压」结尾）、无「在方案中在方案中」重复 |
+| 6 | `test_kc_index_not_labeled_pillar` | R3 | 589850/589980 类科创指数 rationale 不含「压舱石」「低波动」措辞 |
+| 7 | `test_dual_weak_not_bullish` | R5 | 技术<0 且 估值<0（动量不足以拉平）→ 综合信号非 buy/偏多，至多 hold |
+| 8 | `test_valuation_extreme_capped` | R5 | 单因子极端值（如估值 +9）→ 聚合前被截断至 ≤1.0 |
+| 9 | `test_design_full_pipeline_market_aligned`（集成） | R1-R5 | 完整设计链路 → 三方案 core 重叠 ≤1、防御型科创卫星 ≤10%、market_context 非空、rationale 无模板缺陷 |
+
+#### 9.7.6 风险与回退
+
+| 风险 | 缓解 |
+|------|------|
+| RSI 口径改动影响历史设计报告一致性 | 只改口径不改数据源；历史报告保留原始快照（`logs/design_latest_full.json` 不回写） |
+| 黄金/债券剔除估值字段后该类因子永久 no_data | no_data reason 明确标注「资产类别不支持」，不参与 IC 过滤（避免与「数据源未接入」混淆，对齐 §9.5 验收口径） |
+| market_context 采集加重 LLM 上下文 token | 截断 top_n（index 3 条 / sector 5 条 / fund_flow 汇总）+ 上下文预算内控制 |
+| rationale 模板重构影响既有方案文案 | 保留原短语池仅新增「按标的属性选池」分支；验收以 §9.7.4-3 六只基线方案回归 |
+| 「双弱不判多」减少 buy 信号 | 与 Z10「信号引擎保守」验收对齐：score ±2 仍有 buy/sell 输出（只压错误方向，不压幅度） |
 
 ---
 
@@ -899,22 +927,26 @@ async function analyze(item) {
 
 **后端（`tests/test_news_impact_quality.py`）**
 
-1. `test_no_direct_link_explicitly_says`：mock LLM 返回含「无直接影响」的 JSON → 断言 `impact_reason` 含该字样（prompt 约束生效）。
-2. `test_irrelevant_news_not_forced_into_holdings`：mock LLM 返回只含 1 只相关标的 → 断言 `affected_holdings` 不强行塞满全部持仓。
-3. `test_empty_portfolio_market_scope`：portfolio 为空 → 返回 `impact_scope` 为市场整体（Z32 回归）。
+| # | 用例 | 断言 |
+|---|------|------|
+| 1 | `test_no_direct_link_explicitly_says` | mock LLM 返回含「无直接影响」的 JSON → `impact_reason` 含该字样（prompt 约束生效） |
+| 2 | `test_irrelevant_news_not_forced_into_holdings` | mock LLM 返回只含 1 只相关标的 → `affected_holdings` 不强行塞满全部持仓 |
+| 3 | `test_empty_portfolio_market_scope` | portfolio 为空 → `impact_scope` 为市场整体（组合为空分支回归） |
 
 **前端（`src/test/NewsView.spec.js`）**
 
-4. `test_analyze_expands_inline`：点击某条「AI 智能分析」→ 断言该条**卡片内**出现分析区（不再依赖页面底部面板）。
-5. `test_analyze_shows_loading_text`：点击后展开区显示「AI 分析中…」，完成后消失并显示结果。
-6. `test_analyze_switches_target`：先分析 A 再分析 B → 断言 A 卡片内展开区消失、B 卡片内出现。
-7. `test_analyze_toggle_close`：已展开的条目再次点击 → 收起（`impactTarget` 清空）。
-8. `test_analyze_failure_inline`：mock 失败 → 该条展开区显示错误 + 重试按钮，页面不报全局错。
+| # | 用例 | 断言 |
+|---|------|------|
+| 4 | `test_analyze_expands_inline` | 点击某条「AI 智能分析」→ 该条**卡片内**出现分析区（不再依赖页面底部面板） |
+| 5 | `test_analyze_shows_loading_text` | 点击后展开区显示「AI 分析中…」，完成后消失并显示结果 |
+| 6 | `test_analyze_switches_target` | 先分析 A 再分析 B → A 卡片内展开区消失、B 卡片内出现 |
+| 7 | `test_analyze_toggle_close` | 已展开的条目再次点击 → 收起（`impactTarget` 清空） |
+| 8 | `test_analyze_failure_inline` | mock 失败 → 该条展开区显示错误 + 重试按钮，页面不报全局错 |
 
 #### 9.9.5 量化验收
 
-1. 点击某条新闻「AI 智能分析」→ 该条卡片下方**即时**展开「AI 分析中…」，成功后结果显示在该条卡片内（无滚动、无跳转）。
-2. 3 条基线样本（降准/半导体停产/黄岩岛）结论合理且无强行关联（2 次运行均稳定）。
+1. 点击某条新闻「AI 智能分析」→ 该条卡片下方 **500ms 内**展开「AI 分析中…」，成功后结果显示在该条卡片内（无滚动、无跳转）。
+2. 3 条基线样本（降准/半导体停产/黄岩岛）结论**必须含「无直接影响」声明或受影响持仓 ≤2 只**（无强行关联，2 次运行均稳定）。
 3. `pytest tests/test_news_impact_quality.py` + `npm test` 全绿。
 
 #### 9.9.6 风险与回退
@@ -925,6 +957,82 @@ async function analyze(item) {
 | 分析中切换新闻竞态 | 分析中全局禁用所有「AI 智能分析」按钮（`:disabled="analyzing"`） |
 | 收起误操作 | 仅 ✕ 与再次点击触发收起；结果保留在 `impactPanel` 可重开 |
 | prompt 硬约束导致 LLM 过度保守（该分析的也省略） | 约束措辞「宁缺毋滥」但保留「实际受影响标的必须列出」；基线样本回归 |
+
+---
+
+### 🔬 专项：新闻重要性分级质量修复（P3，待讨论项见 §9.10.7）
+
+> 覆盖 F3-1。本节含实测证据：`_LEVEL_KEYWORDS` 关键词表全量比对 + 30 条真实标注逐条复核（地缘军事事件系统性低估 4 条、关键词误命中高估 2 条、源 level 盲信 1 条、其余合理）。
+
+#### 9.10.1 问题现象与影响
+
+| 现象 | 实测证据 | 影响 |
+|------|---------|------|
+| 地缘军事事件系统性低估 | 「油轮遭弹体击中」1★1、「伊朗冲突推高商品价格」1★1、「特朗普下令对伊朗发动袭击」2★2、「日元受干预提振」1★1 ——「袭击/冲突/干预」均不在关键词表 | 高风险事件被降级，用户错过避险信号 |
+| 关键词误命中高估 | 「7月最牛股，停牌！」5★5（「停牌」命中 L5） | 普通个股事件升为紧急级，噪音干扰 |
+| 源 level 盲信 | 「黄岩岛管理办法发布」3★3——财联社源自带 level=3 被直接采信，本地分类未复核 | 中性法规被标「重要负面」 |
+| stars 语义混合失真 | `stars = min(level + freshness, 5)`：L4/L5 恒为 4-5 星、L1 新新闻可拿 3 星——星数既非重要性也非新鲜度，与前端 `mapNewsLevel`（按 level 定色）脱节 | 用户看到的星数与颜色语义不一致 |
+
+#### 9.10.2 根因分析
+
+| # | 根因 | 涉及文件 |
+|---|------|---------|
+| R1 | **双轨打标冲突：源 level 盲信**——`_level_of` 优先采信财联社源头自带 level，本地关键词分类只是 fallback | `backend/app/fetchers/levistock_fetcher.py` L124-135 |
+| R2 | **关键词表缺陷**：①跨级别重复冲突（「停牌」L5∩L2、「违约」L5∩L3、机构名「国务院/发改委/财政部/商务部」L4∩L2）；②L2 过宽（103 词）覆盖公告/发布/数据/政策/指数/板块/业绩/财报/重组/美联储等高频泛词；③缺地缘军事词（袭击/冲突/干预/军事/空袭/战/核） | `backend/app/fetchers/levistock_fetcher.py`（`_LEVEL_KEYWORDS`） |
+| R3 | **stars 语义混合**：`_compute_stars` 将重要性+新鲜度混为单一 1-5 星 | `backend/app/fetchers/news_fetcher.py` L237-257 |
+| R4 | **单标题输入**：分类只看标题，正文关键词（如「军事行动」）错过 | `backend/app/fetchers/news_fetcher.py` |
+
+#### 9.10.3 修复步骤（按成本排序）
+
+**步骤 A — 关键词表治理（R2）**
+
+- 文件：`levistock_fetcher.py::_LEVEL_KEYWORDS`
+- 改动：①跨级去重（停牌→L2、违约→L5；机构名从 L4 移除，降为「上下文加权词」而非主判据）；②L2 删高频泛词（公告/发布/数据/政策/指数/板块/业绩/财报/重组/美联储），改为「词出现仅作 context 不升 level」；③补地缘军事词：L5 加「袭击/空袭/开战/宣战/核」，L4 加「冲突/军事/干预/制裁/战」，L3 加「边境/军演/国防」。
+
+**步骤 B — 双轨交叉校验（R1）**
+
+- 文件：`levistock_fetcher.py::_level_of`
+- 改动：本地分类与源 level 差值 ≥2 时**以本地分类为准** + 记 WARNING 日志（可观察误标漂移）；源 level 仅作「未命中任何关键词」时的兜底。
+
+**步骤 C — stars 纯语义化（R3，待用户决策，见 §9.10.7）**
+
+- 选项 1（推荐）：`stars = level`，重要性唯一锚点，新鲜度靠已有 `time` 字段展示。
+- 选项 2：保留 freshness 混合，但前端拆分展示（星=重要性、时钟图标=新鲜度）。
+- 影响：前端 `mapNewsLevel` 无需改（仍按 level 定色），`isImportant(level>=4)` 不变。
+
+**步骤 D — 标题+内容双输入（R4）**
+
+- 文件：`news_fetcher.py`
+- 改动：`classify_news_level` 增加 `content` 参数（调用方传正文前 200 字），关键词命中任一输入即计级。
+
+#### 9.10.4 TDD 测试计划（测试文件 `tests/test_news_level_classification.py`）
+
+| # | 用例 | 断言 |
+|---|------|------|
+| 1 | `test_geo_political_escalated` | 「特朗普下令对伊朗发动袭击」→ level ≥4 |
+| 2 | `test_irrelevant_stock_suspension_not_L5` | 「7月最牛股停牌」→ level ≤2 |
+| 3 | `test_source_level_overridden_when_divergent` | mock 源 level=5 + 本地分类 L2（差距≥2）→ 输出 L2 + WARNING 日志 |
+| 4 | `test_stars_equal_level`（选项 1 时） | L3 新闻恒 3★（无论新鲜度） |
+| 5 | `test_content_keyword_matches` | 标题中性 + 正文含「军事行动」→ level 命中 L4 词 |
+
+#### 9.10.5 量化验收
+
+1. 30 条真实标注复核：地缘军事类新闻全部升到 L4+（无漏标）；「停牌/召回/赌博」类 ≤2★。
+2. 关键词表跨级重复 = 0（脚本断言：每个词只属于一个 level）。
+3. `pytest tests/test_news_level_classification.py` 全绿。
+
+#### 9.10.6 风险与回退
+
+| 风险 | 缓解 |
+|------|------|
+| 军事词过激（正常军事动态被升 L5） | L5 词（核/开战/宣战/袭击）收窄为组合直接相关（军工/原油/黄金持仓）时触发，其余归 L4 |
+| L2 删词后普通新闻降为 L1 显示过灰 | 前端 mapNewsLevel 已支持 L1 灰色展示；观察一周样本分布微调阈值 |
+| stars 改纯语义后与历史数据不一致 | 仅影响展示不改存储；历史已存数据不重算 |
+
+#### 9.10.7 待讨论项（实施前需确认）
+
+1. **stars 语义化选项**：选项 1（stars=level，推荐）还是选项 2（保留 freshness 拆分展示）？
+2. **军事词触发范围**：L5 是否仅组合相关资产（军工/原油/黄金）触发，还是全市场事件即 L5？
 
 ---
 
@@ -946,6 +1054,7 @@ async function analyze(item) {
   T1/T2 防回归测试（与 F0 修复同批交付：F0 交付即加 T1/T2，拦截两个 P0 bug 回归）
 第四梯队（P3-P4 — 持续）
   F3-1~F3-7 质量完善（Z04 因子补齐见 §9.5 专项 4 步方案；Z07 限流重试可提前至 P2 并行）
+  §9.10 专项：F3-1 新闻分级（词表治理 + 双轨校验 + stars 语义化；**先做 A/B/D，步骤 C 待 §9.10.7 决策**）
   T3-T6 测试防护补强
 ```
 
@@ -983,6 +1092,7 @@ async function analyze(item) {
 | v1.2 | 2026-07-31 | 二轮 review 修订：P1/P2/P3 表头补列（涉及文件/验收条件，修复渲染错位）；T1/T2 调度措辞修正（F0 交付即加）；§5.3 持仓表补全 10 只含权重；T4 补 daily-pnl 参数修复；calculate 耗时口径统一（8.2s/8257-8287ms）；F0-4 涉及文件补全路径 |
 | v1.3 | 2026-07-31 | Z04 细化：新增 §9.5 专项修复方案（根因三层缺口/10 因子依赖清单/步骤 A-D 含伪代码/TDD 测试计划/量化验收/风险回退）；F3-4 表项与 Z04 问题行改为引用专项章节 |
 | v1.4 | 2026-08-01 | 新增 §9.6 专项「候选池修复」（核心层偏离主流宽基：涨幅榜 Top25 根因链 5 层 + 步骤 A-E 含伪代码 + TDD 7 用例 + 量化验收）与 §9.7 专项「投资合理性评估」（方案快照证据 A-D + 根因 R1-R5 映射 + 修复优先级 + 量化验收）；F 表新增 F0-5/F1-8；路线图更新（F0-5 进 P0、F1-8 进 P1、§9.6 步骤 C-E 进 P2） |
-| v1.7 | 2026-08-01 | §9.9 专项交互方案升级为**行内展开**（用户确认方案 A）：分析结果直接显示在对应新闻卡片内（删除页面底部面板 + scrollIntoView），新增 `impactTarget` 状态与 toggle/切换/失败重试交互；TDD 前端用例更新为 5 条（展开/loading/切换/收起/失败）；量化验收与风险表同步更新 |
-| v1.6 | 2026-08-01 | 新增 §9.9 专项「资讯 AI 智能分析 UX 与质量」：实测 3 条新闻（降准/半导体停产/黄岩岛）后端 `/analysis/news-impact` 链路功能正常、结论合理，定位「没反应」为前端 UX 缺陷（面板渲染在列表底部 + 无滚动/loading 反馈）+ 「不合理」为 LLM 单条波动；修复步骤 A（scrollIntoView + 按钮文字 + 锚点高亮）/B（prompt「无直接关联须明确声明」硬约束）+ TDD 5 用例 + 量化验收；F 表新增 F2-8/F2-9；路线图 P2 批次更新 |
 | v1.5 | 2026-08-01 | 新增 §9.8 专项「热点板块/热门个股数据修复 + 快速分析入口」：实测三个数据源正常（hot_plates 11 条/heat 20 条/stock_hot_rank 50 条）、前端字段契约不匹配（secu_name vs plate_name 等）+ /sectors/heat 路由缺失 + 隐藏断裂（marketApi 无 sectorAnalysis 方法、UnifiedAnalysis 走 fallback 假成功）+ 修复步骤 A-F（后端归一化/新增路由/信息增强/流式接线/快速入口/代码归一化）+ TDD 计划 + 量化验收；F 表新增 F2-6/F2-7、F2-3/F2-4 细化引用 §9.8；路线图 P2 批次更新 |
+| v1.6 | 2026-08-01 | 新增 §9.9 专项「资讯 AI 智能分析 UX 与质量」：实测 3 条新闻（降准/半导体停产/黄岩岛）后端 `/analysis/news-impact` 链路功能正常、结论合理，定位「没反应」为前端 UX 缺陷（面板渲染在列表底部 + 无滚动/loading 反馈）+ 「不合理」为 LLM 单条波动；修复步骤 A（scrollIntoView + 按钮文字 + 锚点高亮）/B（prompt「无直接关联须明确声明」硬约束）+ TDD 5 用例 + 量化验收；F 表新增 F2-8/F2-9；路线图 P2 批次更新 |
+| v1.7 | 2026-08-01 | §9.9 专项交互方案升级为**行内展开**（用户确认方案 A）：分析结果直接显示在对应新闻卡片内（删除页面底部面板），新增 `impactTarget` 状态与 toggle/切换/失败重试交互；TDD 前端用例更新为 5 条（展开/loading/切换/收起/失败）；量化验收与风险表同步更新 |
+| v1.8 | 2026-08-01 | 终稿多轮 review 修订（第 4-6 轮）：①头部版本号/步骤 15 状态对齐；②修订记录行序重排（v1.4-v1.7 升序）；③F3 表补「涉及文件」列；④§9.7 补齐 9.7.5 TDD 9 用例 + 9.7.6 风险回退，R3/R5 细化到函数与阈值（`_style_probe` 四类短语池 / `0.4技术+0.4估值+0.2动量`+「双弱不判多」+极端值封顶）；⑤代码事实校正（`_select_and_weight` 替代 `allocate`、`_load_tracked_index_cache` 替代 `_load_etf_index_mapping`）；⑥新增 §9.10 专项「新闻分级质量修复」（词表治理/双轨校验/stars 语义化/双输入，含 TDD 5 用例 + 待讨论项）；⑦Z32 幽灵引用清理、F2-4 验收量化、§9.1-9.4 编号说明、§5.3 权重合计注记 |
