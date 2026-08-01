@@ -3,7 +3,7 @@
 > 生成时间: 2026-07-31
 > 环境: Docker (Python 3.14-slim + Node 24 Alpine + Nginx + Redis 8)
 > 执行范围: 15 项全链路验证（步骤 1-15，见 §0 索引表）
-> 状态: v1.8（已完成多轮 review 与修订，达到实施标准；待讨论项见 §9.10.7）
+> 状态: v1.9（已完成多轮 review 与修订，达到实施标准；待讨论项见 §9.10.7）
 
 ---
 
@@ -289,6 +289,38 @@ perf_diag 49 端点扫描：**46/49 通过**（3 个 405 为脚本用 GET 调 PO
 | 时序 flaky | 因子 live 数依赖后台 60s/120s 刷新，硬阈值 | e2e 自身不稳定，掩盖真实状态 |
 | 脚本卫生 | 过期端点、PYTHONPATH 依赖、WS 测试缺库时"跳过即 PASS" | 失败噪音污染，削弱门禁可信度 |
 
+### 8.3 用户反馈逐条映射：为何测试未发现（本轮 11 条反馈）
+
+> 本节将 round-2 全程用户反馈的每个现象与既有测试逐一比对，定位「有测试仍漏」的具体断点。结论先行：**大部分反馈对应测试是存在的，但断言标准 / 调用链 / 边界与真实体验脱节**——「没有测试」只是少数，更多是「测试存在但不检验用户看到的东西」。
+
+| # | 用户反馈（现象） | 既有测试 | 为何未发现 | 缺口类型 |
+|---|----------------|---------|-----------|---------|
+| ① | 策略检查「LLM 分析超时」但体感秒出 | `test_strategy_check_async.py`（有） | 测试覆盖正常路径与 fallback 输出，**未测 `wait_for` 超时抛 `CancelledError`（BaseException）不被 `except Exception` 捕获** → 失败记录写不进 usage 表、fallback provider 从未轮到；e2e 只看最终 fallback 文案，不校验「是否真调用过 LLM / 是否留痕」 | 异常路径盲区 + 遥测断言缺失 |
+| ② | 因子页 30 因子无数据（页面空快照） | `test_factors_router.py`（有） | 断言只查字段类型 + `valid+warn+no_data==total` 等式，**不设 no_data 数值门限**（30/30 no_data 也全 PASS）；且单测 mock 环境 `_last_ic_batch` 恒为空，运行态空快照无法复现；前端无轮询属纯 UX，无任何组件测试 | 断言标准过弱 + 运行态盲区 + 前端交互盲区 |
+| ③⑫⑬ | 市场研判 / AI 投顾 / 个股分析报告含系统提示词 | `test_report_quality.py`（有） | mock LLM 返回固定合法文本 → 只校验结构，`reasoning_content` 泄漏只在**推理模型真实流式输出**时出现，mock 永远不触发；T3⑤ 只断言「我们只需要」单一模式，未覆盖 reasoning 通道泄漏 | LLM 非确定性盲区（T3 断言模式过窄） |
+| ④ | watchlist 510300 备注「更新备注OK」 | 无（数据库残留） | 验证自选功能时手工测试写入的脏数据，无清理机制 | 数据卫生盲区 |
+| ⑤ | 自选补全慢 / 补全前点添加失败 / 选中只回填代码 | `useMarketSearch.spec.js`（有） | 只测 debounce / 键盘导航 / 结果填充 happy path；**未测**：跨市场 gather 超时降级、`selectSuggestion` 回填 name、添加失败 toast 与重试引导 | 前端交互盲区 |
+| ⑥ | 热点板块空 / 板块热度 404 / 热门个股信息少 | `test_z25_stock_hot_rank.py` + fetcher 单测（有） | 数据源单测只验证 fetcher 返回结构，**未测路由存在性**（`/sectors/heat` 404）+ **前端字段契约**（`secu_name` vs `plate_name` 不匹配）；e2e 未覆盖该端点 | 契约校验盲区（路由 + 字段） |
+| ⑦ | 标的/板块/概念/指数分析只显示「✅ 查询完成」 | 无 | `marketApi` 未定义 `sectorAnalysis/marketAnalysis` 方法 → 前端走 fallback 假成功；后端路径存在但前端从未接线，**单测与 e2e 都测不到前端 API 层缺口** | 前后端契约盲区（隐藏断裂） |
+| ⑧ | 资讯 AI 智能分析「没反应」 | `test_news_impact.py`（有） | 后端 mock LLM 固定返回 → 只验证解析；**前端渲染位置（面板在页面底部）/ loading 态 / 滚动反馈完全没测** | 前端交互盲区 |
+| ⑨⑩ | 资讯分析结论偶发不合理 / 新闻分级不合理 | `test_news_classification.py`（有） | 测的是 `classify_news_level` 本地关键词函数，**生产实际采信财联社源 level（`_level_of` 双轨盲信）→ 测试函数 ≠ 生产调用链**；词表无地缘军事词，用例亦未覆盖军事类 | 测试与生产调用链脱节 |
+| ⑪ | 组合设计核心非主流宽基 / 卫星全科创 / 卫星少 | `test_design_optimization_plan.py`（有） | 测的是引擎纯函数（**给定**候选池 → 分配合理），**未测候选池本身来源**（`etf_scanner` 涨幅榜 Top25 是上游问题）；e2e 只查「方案数 ≥3」不查方案质量 | 测试边界过窄（只测下游不测上游） |
+| ⑭ | AI 投顾自曝「未包含行业涨跌幅排名数据」 | 无 | 实测 `_compute_industry_momentum` 抛 `RemoteDisconnected`（上游数据源失败）→ LLM 上下文缺板块数据，prompt 无「数据缺失不披露」约束；无测试校验 LLM 上下文完整性 | 数据源运行时盲区 + LLM 上下文断言缺失 |
+
+### 8.4 测试防护体系根因诊断（7 类缺口）
+
+| 缺口 | 机制 | 典型受害者 | 修复方向 |
+|------|------|-----------|---------|
+| G1 断言标准过弱 | 断言「字段存在 / 类型 / 数量等式」，不校验值域合理性 | ②因子页（30 no_data 仍 PASS） | 数值门限 + 值域 sanity 断言（T7/T10） |
+| G2 测试与生产调用链脱节 | 测试直接调内部函数，绕过真实入口的预处理（源 level 盲信） | ⑨⑩新闻分级 | 按真实调用链写测试（T10） |
+| G3 异常/降级路径未覆盖 | 只测 happy path，`CancelledError`/熔断/超时是盲区 | ①超时假象、⑭板块数据失败 | 注入异常断言 + 遥测留痕校验（T9） |
+| G4 LLM 非确定性无质量门禁 | mock 固定返回 → 一切质量缺陷不可见 | ③⑫⑬提示词泄漏 | 基线样本 + 规则金丝雀断言（T8） |
+| G5 前端交互盲区 | 只测 composable 状态，不测组件点击→渲染→失败 UX | ⑤⑦⑧补全/假成功/无反应 | 组件交互测试套件（T8） |
+| G6 前后端契约无自动化校验 | api-contracts 有文档无机器可执行校验；字段名漂移无感知 | ⑥⑦字段不匹配/假成功 | 契约→schema 断言生成（T11） |
+| G7 测试边界过窄 | 下游引擎测了，上游数据源/路由不测 | ⑪候选池来源 | 链路两端都要有测试（T12） |
+
+> **体系性结论**：现有防护以「接口形状」为核心（200 / 非空 / 字段存在），用户以「业务正确性 + 交互体验」为验收标准——两者之间的落差就是全部 11 条反馈逃逸的通道。补强方向不是堆用例，而是**把断言从「接口形状」升级到「业务语义」**（值域 / 真实调用链 / 异常路径 / LLM 基线 / 前端交互 / 契约一致性）。
+
 ---
 
 ## 九、优化修复方案
@@ -317,6 +349,7 @@ perf_diag 49 端点扫描：**46/49 通过**（3 个 405 为脚本用 GET 调 PO
 | F1-6 | 板块成分股错位 | 修复 BK0447 等板块成分股映射（sector 代码→成分股接口错位） | 涉及：`backend/app/services/market_data_hub.py`（get_sector_stocks） | 半导体板块返回半导体成分股 |
 | F1-7 | LLM 输出未后处理 | 对 LLM 流式输出做系统提示词隔离（system prompt 与用户内容严格分段）+ 输出首段过滤已知泄漏模式 | 涉及：`backend/app/analysis/llm.py`、`backend/app/routers/analysis.py` | 输出无"我们只需要回答…"类泄漏 |
 | F1-8 | **组合设计投资合理性**（方案与市场脱节） | 详见「§9.7 专项：投资合理性评估」：R1 因子数据正确性（RSI K 线口径对齐 + 估值字段按资产类别禁用）→ R2 market_context 填充 → R3 rationale 绑定标的属性 → R4 候选池多样性（见 F0-5）→ R5 信号聚合「双弱不判多」约束 | 涉及：`backend/app/engine/rationale.py`、`backend/app/analysis/signal.py`、`backend/app/factors/factor_registry.py`、`backend/app/services/llm_context.py` | core 重叠 ≤1 只；防御型科创卫星 ≤10%；rationale 无模板缺陷；market_context 非空 |
+| F1-9 | **策略检查「LLM 超时」假象**（体感秒出但报超时） | `portfolio_service.py::generate_strategy_check_report` 的 `asyncio.wait_for(timeout=20)` 超时抛 `CancelledError`（BaseException）**不被 `except Exception` 捕获** → 失败记录写不进 usage 表、fallback provider 从未轮到；修复：①捕获 `CancelledError`（或改 `except BaseException` 兜底）+ 记 WARNING 日志 + 写 usage 失败记录；②fallback provider 循环在挂起被整体取消的问题——超时后仍走 fallback 尝试；③前端文案区分「真超时」与「规则兜底」 | 涉及：`backend/app/services/portfolio_service.py`、`backend/app/analysis/llm.py` | 强制 20s 超时场景下：usage 表有失败记录、fallback 有机会执行、日志含「timed out」+ 完整耗时 |
 
 ### 🅿️2 — 中优先级（性能与断裂修复）
 
@@ -354,6 +387,12 @@ perf_diag 49 端点扫描：**46/49 通过**（3 个 405 为脚本用 GET 调 PO
 | T4 | 修复 e2e 过期端点（/market/etfs、/admin/sources）、PYTHONPATH（`sys.path.insert(0, backend)`）、`POST /daily-pnl` 参数（对照契约补全请求体）、WS 缺库"跳过即 PASS"改为 SKIP 计数 | 失败噪音 |
 | T5 | factor-health 门限改为多次采样取中位数 + 数据就绪等待（最多 30s） | 时序 flaky |
 | T6 | 数据源熔断演练：通过 `admin/config` 或环境变量强制置 mootdx/akshare 熔断态，验证降级链输出非空 | 数据源运行时盲区 |
+| T7 | factors/active **数值门限断言**（对齐 §9.5 验收）：`etf_specific no_data ≤ 2`、`sentiment no_data = 0`；`no_data` 因子 reason 必须标注缺失字段（禁止统一「尚未计算 IC」） | G1 断言过弱（②） |
+| T8 | **LLM 质量金丝雀基线**（非 mock）：固定 3 条基线样本（降准/半导体停产/黄岩岛）+ 固定 prompt，断言输出①不含 system prompt 片段（含 reasoning 通道泄漏，对齐 F1-7）；②不含「未包含 XX 数据」自曝缺失模式（对齐 ⑭）；③news-impact 结论含「无直接影响」或受影响 ≤2 只（对齐 §9.9.5-2）；`test_report_quality.py` 增加 reasoning_content 泄漏用例（mock 返回 `reasoning_content` 含 prompt → 断言不进入正文） | G4 LLM 非确定性（③⑫⑬⑭） |
+| T9 | **策略检查超时路径回归**：mock `wait_for` 超时抛 `CancelledError` → 断言①异常被捕获、fallback 文案正确；②usage 记录写入（留痕不丢）；③fallback provider 有机会执行 | G3 异常路径（①） |
+| T10 | **按真实调用链写分级测试**：`levistock_fetcher._level_of` 直接测（财联社源 level=5 + 本地分类 L2 → 以本地为准，对齐 §9.10 步骤 B）；`test_news_classification` 补地缘军事/停牌用例（对齐 §9.10.4 用例 1-2） | G2 调用链脱节（⑨⑩） |
+| T11 | **契约自动化校验**：api-contracts 每份契约生成 pytest 模板（字段存在性+类型+值域）；e2e 增加 `/sectors/heat` 端点 + `secu_name/plate_name` 字段映射断言（对齐 §9.8）；前端 `marketApi` 方法清单与 `api-contracts` 对照测试（发现 `sectorAnalysis` 缺失类隐藏断裂） | G6 契约盲区（⑥⑦） |
+| T12 | **链路两端测试**：候选池来源测试（`etf_scanner` 排序字段 `fid` + 兜底注入生效，对齐 §9.6 步骤 A/B）+ 前端组件交互测试套件（WatchlistPanel 回填 name/添加失败 toast、NewsView 行内展开、SectorHeatMap 字段映射，对齐 §9.8/§9.9） | G5/G7 前端交互 + 边界过窄（⑤⑦⑧⑪） |
 
 ### 🔬 专项：Z04 etf_specific 因子无数据修复方案（细化）
 
@@ -1055,7 +1094,7 @@ async function analyze(item) {
 第四梯队（P3-P4 — 持续）
   F3-1~F3-7 质量完善（Z04 因子补齐见 §9.5 专项 4 步方案；Z07 限流重试可提前至 P2 并行）
   §9.10 专项：F3-1 新闻分级（词表治理 + 双轨校验 + stars 语义化；**先做 A/B/D，步骤 C 待 §9.10.7 决策**）
-  T3-T6 测试防护补强
+  T1-T12 测试防护补强（§8.3/§8.4 映射：T7/T10 随 F 修复同批，T8/T9 随 F1-7/F1-9 同批）
 ```
 
 > 说明：Z07（LLM 429/23.2% 错误率）影响 llm-advice/llm-report 核心体验，因免费模型限流属常态（Retry-After 可达 8h），F3-6 重试策略成本低，可提前至 P2 并行推进；T1/T2 为防回归能力最强项，与 F0 修复同批交付可拦截本轮 P0 bug 回归。
@@ -1096,3 +1135,4 @@ async function analyze(item) {
 | v1.6 | 2026-08-01 | 新增 §9.9 专项「资讯 AI 智能分析 UX 与质量」：实测 3 条新闻（降准/半导体停产/黄岩岛）后端 `/analysis/news-impact` 链路功能正常、结论合理，定位「没反应」为前端 UX 缺陷（面板渲染在列表底部 + 无滚动/loading 反馈）+ 「不合理」为 LLM 单条波动；修复步骤 A（scrollIntoView + 按钮文字 + 锚点高亮）/B（prompt「无直接关联须明确声明」硬约束）+ TDD 5 用例 + 量化验收；F 表新增 F2-8/F2-9；路线图 P2 批次更新 |
 | v1.7 | 2026-08-01 | §9.9 专项交互方案升级为**行内展开**（用户确认方案 A）：分析结果直接显示在对应新闻卡片内（删除页面底部面板），新增 `impactTarget` 状态与 toggle/切换/失败重试交互；TDD 前端用例更新为 5 条（展开/loading/切换/收起/失败）；量化验收与风险表同步更新 |
 | v1.8 | 2026-08-01 | 终稿多轮 review 修订（第 4-6 轮）：①头部版本号/步骤 15 状态对齐；②修订记录行序重排（v1.4-v1.7 升序）；③F3 表补「涉及文件」列；④§9.7 补齐 9.7.5 TDD 9 用例 + 9.7.6 风险回退，R3/R5 细化到函数与阈值（`_style_probe` 四类短语池 / `0.4技术+0.4估值+0.2动量`+「双弱不判多」+极端值封顶）；⑤代码事实校正（`_select_and_weight` 替代 `allocate`、`_load_tracked_index_cache` 替代 `_load_etf_index_mapping`）；⑥新增 §9.10 专项「新闻分级质量修复」（词表治理/双轨校验/stars 语义化/双输入，含 TDD 5 用例 + 待讨论项）；⑦Z32 幽灵引用清理、F2-4 验收量化、§9.1-9.4 编号说明、§5.3 权重合计注记 |
+| v1.9 | 2026-08-01 | 新增 §8.3「用户反馈逐条映射：为何测试未发现」（11 条反馈 ↔ 既有测试 ↔ 断点 ↔ 缺口类型）与 §8.4「测试防护体系根因诊断」（G1-G7 七类缺口 + 体系性结论：断言从「接口形状」升级到「业务语义」）；T 表新增 T7-T12（数值门限/LLM 金丝雀基线/超时路径回归/真实调用链分级测试/契约自动化校验/链路两端测试）；新增 F1-9「策略检查超时假象」修复项（`CancelledError` 不被捕获 + usage 留痕 + fallback 执行 + 前端文案区分）；路线图 P4 批次更新（T1-T12 与 F 修复同批交付） |
