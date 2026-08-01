@@ -20,8 +20,8 @@
 
 | 端点 | 新增字段 | 说明 |
 |------|----------|------|
-| `GET /api/v1/admin/sources` | `sources[].connection_pool.handshakes` | 该数据源累计 SSL 握手次数 |
-| `GET /api/v1/admin/sources` | `sources[].connection_pool.reused` | 连接复用次数 |
+| `GET /api/v1/admin/sources/connection-pool` | `sources[].connection_pool.handshakes` | 该数据源累计 SSL 握手次数 |
+| `GET /api/v1/admin/sources/connection-pool` | `sources[].connection_pool.reused` | 连接复用次数 |
 | `GET /api/v1/system/warmup` | `warmup.market_cache.handshakes` | 预热阶段握手计数 |
 | 日志 | `logger.info("[warmup] SSL handshakes: %d", count)` | 启动日志可见 |
 

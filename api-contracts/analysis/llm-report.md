@@ -44,7 +44,7 @@ POST /api/v1/analysis/llm-report
 ## 3. LLM Advice / LLM 投资建议
 
 ```
-POST /api/v1/analysis/llm-advice?query=<question>
+POST /api/v1/analysis/llm-advice
 ```
 
 **查询参数 / Query Parameters:**

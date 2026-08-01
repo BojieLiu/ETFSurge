@@ -26,7 +26,7 @@ The enhanced portfolio design engine incorporating trend data, multi-factor scor
 ### 2.1 生成增强型组合设计 / Generate Enhanced Portfolio Design
 
 ```
-POST /api/v1/portfolio/design-enhanced
+POST /api/v1/portfolio/design-async（原 /design-enhanced 已迁移，T11 校准）
 ```
 
 **请求体 / Request Body:**

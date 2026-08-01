@@ -2,7 +2,7 @@
 
 **功能描述**: Strategy check report enhancement — add `report_text` column to strategy_check_records for LLM report storage, matching portfolio_designs schema.
 
-**设计端点**: `GET /api/v1/portfolio/strategy-check` and `GET /api/v1/portfolio/strategy-check/{id}`
+**设计端点**: `GET /api/v1/portfolio/strategy-checks` and `GET /api/v1/portfolio/strategy-checks/{check_id}`（T11 校准：原单数 /strategy-check 已不存在）
 
 ## Fields
 

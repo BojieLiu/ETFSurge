@@ -13,7 +13,7 @@
 ### 2.1 熔断器状态查询
 
 ```
-GET /api/v1/admin/circuit-breaker
+GET /api/v1/admin/sources/circuit-breakers
 ```
 
 **成功响应 — `200 OK`:**
@@ -41,25 +41,13 @@ GET /api/v1/admin/circuit-breaker
 }
 ```
 
-### 2.2 熔断器重置
+> T11 契约校准：原契约声明 `GET /admin/circuit-breaker`（后端从未实现），实际路由为
+> `GET /admin/sources/circuit-breakers`（admin.py）。
 
-```
-POST /api/v1/admin/circuit-breaker/reset
-Content-Type: application/json
+### 2.2 熔断器重置（**未实现** — 契约校准删除声明）
 
-{
-  "name": "push2.eastmoney.com"
-}
-```
-
-**成功响应 — `200 OK`:**
-
-```json
-{
-  "status": "reset",
-  "name": "push2.eastmoney.com"
-}
-```
+> T11 契约校准：原契约声明 `POST /admin/circuit-breaker/reset`，后端无此路由，
+> 删除该端点声明（契约只反映已实现接口）。
 
 ### 2.3 内联调用模型
 

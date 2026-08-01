@@ -1,6 +1,6 @@
 # Strategy Check & Apply / 策略检查与调仓
 
-> **⚠️ 2026-07-26 修正**: 原契约文档化的 `POST /api/v1/portfolio/strategy-check`（同步版）在 `61ecc2d` 中被重构为异步版本，**实际路由已不存在**。以下已更新为正确的异步端点和轮询结果获取端点。
+> **⚠️ 2026-07-26 修正**: 原契约文档化的同步版策略检查（`POST /portfolio/strategy-check`）在 `61ecc2d` 中被重构为异步版本，**实际路由已不存在**（T11 校准：现为 `POST /portfolio/strategy-check-async`）。以下已更新为正确的异步端点和轮询结果获取端点。
 
 ## 1. 概述 / Overview
 

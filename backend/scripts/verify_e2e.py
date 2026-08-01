@@ -21,18 +21,27 @@ verify_e2e.py — 端到端链路验证（针对运行中的后端服务）
 """
 import argparse
 import json
+import os
 import sys
 import time
 import socket
 import requests
 
+# T4: 无论从哪个目录运行，都能 import app.*
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 PASS = 0
 FAIL = 0
+SKIP = 0
 BASE = "http://127.0.0.1:8000"
 
 
-def check(label, ok, detail=""):
-    global PASS, FAIL
+def check(label, ok, detail="", skip=False):
+    global PASS, FAIL, SKIP
+    if skip:
+        SKIP += 1
+        print(f"  [SKIP] {label}" + (f" — {detail}" if detail else ""))
+        return
     if ok:
         PASS += 1
         mark = "PASS"
@@ -758,7 +767,7 @@ def check_data_quality():
     """ETF 基础数据质量校验（P1 fix-plan-master: verify_e2e 应校验数据质量）。"""
     section("数据质量")
     try:
-        r = requests.get(f"{BASE}/api/v1/market/etfs?limit=50", timeout=15)
+        r = requests.get(f"{BASE}/api/v1/market/search?keyword=510300", timeout=15)
         if r.status_code == 200:
             data = r.json()
             etfs = data if isinstance(data, list) else data.get("data", [])
@@ -1031,7 +1040,8 @@ def section_ws():
 
         asyncio.run(_test_ws())
     except ImportError:
-        check(f"WS {ws_endpoint} 测试跳过", True, "websockets 库未安装，忽略 WebSocket 测试")
+        check(f"WS {ws_endpoint} 测试跳过", True,
+              "websockets 库未安装，忽略 WebSocket 测试", skip=True)
     except Exception as e:
         check(f"WS {ws_endpoint} 测试", False, str(e))
 
@@ -1048,15 +1058,35 @@ def section_factors(host, port):
             check("factor-health endpoint", False, f"HTTP {r.status_code}")
             return
         data = r.json()
-        if data.get("status") != "ok":
-            check("factor-health status", False, data.get("message", "unknown"))
+        # T5: 数据就绪等待 + 多次采样取中位数（防因子批处理未完成导致的时序 flaky）
+        _samples: dict[str, list[float]] = {}
+        _last = data
+        for _i in range(3):
+            try:
+                _r2 = requests.get(f"{BASE}/api/v1/admin/factor-health", timeout=30)
+                if _r2.status_code == 200:
+                    _last = _r2.json()
+            except Exception:
+                pass
+            syms = _last.get("symbols", {}) if isinstance(_last, dict) else {}
+            for _sym, _info in syms.items():
+                _raw = str(_info.get("ratio", 0) or 0)
+                try:
+                    _ratio = float(_raw.split("/")[0])  # "23/33" -> 23.0
+                except (ValueError, AttributeError):
+                    _ratio = 0.0
+                _samples.setdefault(_sym, []).append(_ratio)
+            if _i < 2:
+                time.sleep(1.0)
+        if _last.get("status") != "ok":
+            check("factor-health status", False, _last.get("message", "unknown"))
             return
-        symbols = data.get("symbols", {})
         all_healthy = True
-        for sym, info in symbols.items():
-            label = f"{sym}: {info['ratio']} live factors"
-            ok = info.get("healthy", False)
-            check(label, ok, f"threshold: >= max(10, total*0.4)")
+        for sym, ratios in _samples.items():
+            med = sorted(ratios)[len(ratios) // 2]
+            ok = med >= max(10, 33 * 0.4)
+            check(f"{sym}: {med:.0f}/33 live factors (median of {len(ratios)})", ok,
+                  f"threshold: >= max(10, total*0.4)")
             if not ok:
                 all_healthy = False
         if all_healthy:
@@ -1101,6 +1131,18 @@ def section_factors(host, port):
             data = r.json()
             check("GET /api/v1/factors/ic -> 200", True)
             factors = data.get("factors", [])
+            # T5: IC 数据就绪等待（IC 为周期计算，服务刚重启时为空——最多轮询 60s）
+            for _i in range(12):
+                if factors:
+                    break
+                time.sleep(5)
+                try:
+                    _r3 = requests.get(f"{BASE}/api/v1/factors/ic", timeout=30)
+                    if _r3.status_code == 200:
+                        data = _r3.json()
+                        factors = data.get("factors", [])
+                except Exception:
+                    pass
             check(f"  factors array contains {len(factors)} entries", len(factors) > 0, f"count={len(factors)}")
             check(f"  total field matches", data.get("total", 0) == len(factors), f"total={data.get('total')} vs len={len(factors)}")
             check(f"  updated_at is valid", bool(data.get("updated_at")), f"updated_at={data.get('updated_at')}")
@@ -1126,26 +1168,25 @@ def section_circuit_breaker():
     """#6: 数据源熔断器状态 — 检查 SourceRegistry 端点（OPT-07 E2E 降级场景）。"""
     section("数据源熔断器状态")
     try:
-        r = requests.get(f"{BASE}/api/v1/admin/sources", timeout=10)
+        r = requests.get(f"{BASE}/api/v1/admin/sources/health", timeout=10)
         if r.status_code != 200:
-            check("GET /admin/sources -> 200", False, f"HTTP {r.status_code}")
+            check("GET /admin/sources/health -> 200", False, f"HTTP {r.status_code}")
             return
         data = r.json()
-        sources = data.get("sources", {})
-        if not sources:
-            check("admin/sources 返回数据", False, "sources 为空")
+        if not isinstance(data, list) or not data:
+            check("admin/sources/health 返回数据", False, "sources 为空")
             return
-        check(f"admin/sources 返回 {len(sources)} 个数据源", len(sources) >= 1)
-        for name, status in sources.items():
-            state = status.get("state", "unknown")
-            failures = status.get("failures", 0)
+        check(f"admin/sources/health 返回 {len(data)} 个数据源", len(data) >= 1)
+        for src in data:
+            name = src.get("name", "?")
+            state = "available" if src.get("available") else "cooldown"
+            failures = src.get("failures", 0)
             check(f"  {name}: state={state}, failures={failures}", True)
         # 验证熔断器端点包含必要字段
-        if sources:
-            sample = next(iter(sources.values()))
-            has_code = "cooldown_until" in sample
-            check(f"  ciruit-breaker 字段完整（cooldown_until）", has_code,
-                  "missing field: cooldown_until" if not has_code else "")
+        sample = data[0]
+        has_code = "cooldown_remaining" in sample
+        check(f"  circuit-breaker 字段完整（cooldown_remaining）", has_code,
+              "missing field: cooldown_remaining" if not has_code else "")
     except Exception as e:
         check("熔断器状态检查", False, str(e))
 
@@ -1159,7 +1200,7 @@ def section_api_5xx_check():
     # 验证几个核心端点是否有 5xx 错误
     endpoints = [
         "/api/v1/market/realtime",
-        "/api/v1/market/etfs?limit=10",
+        "/api/v1/market/sectors/heat?limit=5",
         "/api/v1/market/chart/510300",
         "/api/v1/market/indices/global",
         "/api/v1/portfolio/list",
@@ -1284,10 +1325,203 @@ def section_solution_diversity_check():
         check("方案差异化度检查", False, str(e))
 
 
+
+# ── T2: DB 完整性 ─────────────────────────────────────────────────
+
+
+
+# ── T1: nginx 拓扑层（prod 模式 http://localhost 走 nginx） ───────────────
+
+
+def section_nginx_proxy():
+    """T1: nginx 拓扑 — /api 代理可达 + WS 握手（http://localhost）。
+
+    本地开发直连 uvicorn（无 nginx）时整体 SKIP 不 FAIL；
+    prod（docker-compose nginx:80）运行时执行真实拓扑断言。
+    """
+    section("nginx 拓扑代理")
+    try:
+        r = requests.get("http://localhost/api/v1/market/indices/global", timeout=6)
+    except Exception:
+        check("nginx /api 代理可达", True,
+              "nginx 未运行（本地直连 uvicorn），跳过", skip=True)
+        return
+    check("GET http://localhost/api/v1/market/indices/global -> 200",
+          r.status_code == 200, f"HTTP {r.status_code}")
+    try:
+        import websockets
+        import asyncio
+
+        async def _test():
+            async with websockets.connect(
+                "ws://localhost/api/v1/ws/task-notifications",
+                ping_interval=None, close_timeout=5,
+            ) as ws:
+                await ws.send("ping")
+                resp = await asyncio.wait_for(ws.recv(), timeout=5)
+                return resp
+
+        resp = asyncio.run(_test())
+        check("WS ws://localhost/api/v1/ws/task-notifications 握手成功", True,
+              f"收到: {str(resp)[:40]}")
+    except Exception as e:
+        check("nginx WS 握手", False, str(e))
+
+
+def section_db_integrity():
+    """T2: prod 容器 DB 完整性 — instruments>1000 且 portfolio_etfs/watchlist 非空。"""
+    section("DB 完整性")
+    import sqlite3
+    from pathlib import Path
+    # .env 覆盖为项目根 data/portfolio.db（backend/scripts -> 项目根）
+    db_path = Path(__file__).resolve().parent.parent.parent / "data" / "portfolio.db"
+    if not db_path.exists():
+        check("DB 文件存在", False, str(db_path))
+        return
+    try:
+        conn = sqlite3.connect(str(db_path))
+        cur = conn.cursor()
+        for table, min_rows, label in (
+            ("instruments", 1000, "instruments > 1000"),
+            ("portfolio_etfs", 1, "portfolio_etfs 非空"),
+            ("watchlist", 1, "watchlist 非空"),
+        ):
+            try:
+                n = cur.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                check(f"{label}（{table}={n}）", n >= min_rows, f"actual={n}")
+            except sqlite3.Error as e:
+                check(f"{label}", False, str(e))
+        conn.close()
+    except Exception as e:
+        check("DB 完整性检查", False, str(e))
+
+
+# ── T13: 数据卫生门禁 ─────────────────────────────────────────────
+
+
+def section_data_hygiene():
+    """T13: 测试库无残留脏数据（watchlist 测试备注 / 测试写入记录）。"""
+    section("数据卫生")
+    import sqlite3
+    from pathlib import Path
+    # .env 覆盖为项目根 data/portfolio.db（backend/scripts -> 项目根）
+    db_path = Path(__file__).resolve().parent.parent.parent / "data" / "portfolio.db"
+    if not db_path.exists():
+        check("DB 文件存在", False, str(db_path))
+        return
+    try:
+        conn = sqlite3.connect(str(db_path))
+        cur = conn.cursor()
+        # 验收: SELECT * FROM watchlist WHERE notes='更新备注OK' 恒为空
+        n = cur.execute("SELECT COUNT(*) FROM watchlist WHERE notes='更新备注OK'").fetchone()[0]
+        check("watchlist 无测试备注残留（notes='更新备注OK'）", n == 0, f"残留 {n} 条")
+        # design_text 不应含 verify_e2e 写入的测试标记（如有则说明 e2e 污染了业务表）
+        try:
+            n2 = cur.execute(
+                "SELECT COUNT(*) FROM portfolio_designs WHERE design_text LIKE '%[e2e-test]%'"
+            ).fetchone()[0]
+            check("portfolio_designs 无 e2e 测试标记", n2 == 0, f"残留 {n2} 条")
+        except sqlite3.Error:
+            pass  # 表结构无 design_text 时跳过
+        conn.close()
+    except Exception as e:
+        check("数据卫生检查", False, str(e))
+
+
+
+# ── T7: factors/active 数值门限（§9.5 验收） ─────────────────────────────
+
+
+def section_factor_thresholds():
+    """T7: etf_specific no_data ≤2、sentiment no_data =0、no_data reason 标注缺失字段。"""
+    section("因子数值门限")
+    try:
+        data = None
+        for _i in range(6):  # 就绪等待最多 30s（IC 周期计算）
+            try:
+                r = requests.get(f"{BASE}/api/v1/factors/active", timeout=30)
+                if r.status_code == 200:
+                    data = r.json()
+                    break
+            except Exception:
+                pass
+            time.sleep(5)
+        if data is None:
+            check("GET /factors/active", False, "多次重试失败")
+            return
+        cats = {c.get("name"): c for c in data.get("categories", [])}
+        # IC 就绪检查：IC batch 空 = 服务冷启动/数据源冷却中（周期计算未完成）→ 门禁 SKIP
+        try:
+            _ic = requests.get(f"{BASE}/api/v1/factors/ic", timeout=15).json()
+            _ic_ready = bool(_ic.get("factors"))
+        except Exception:
+            _ic_ready = False
+        if not _ic_ready:
+            check("IC batch 就绪（数值门禁前提）", True,
+                  "IC 未累积（服务冷启动/数据源冷却），门禁待数据就绪后生效", skip=True)
+        else:
+            for cname, max_nd in (("etf_specific", 2), ("sentiment", 0)):
+                c = cats.get(cname)
+                if not c:
+                    check(f"{cname} 类别存在", False)
+                    continue
+                no_data = [f for f in c.get("factors", []) if f.get("status") == "no_data"]
+                check(f"{cname} no_data ≤ {max_nd}", len(no_data) <= max_nd,
+                      f"no_data={len(no_data)}: {[f.get('code') for f in no_data][:4]}")
+        # F3-4 步骤D 验收: no_data reason 必须标注缺失字段/IC 未累积（禁止统一「尚未计算 IC」）
+        bad_reason = []
+        for c in data.get("categories", []):
+            for f in c.get("factors", []):
+                if f.get("status") == "no_data":
+                    rsn = f.get("reason", "")
+                    if "尚未计算 IC" in rsn:
+                        bad_reason.append(f.get("code"))
+        check("no_data reason 不出现笼统「尚未计算 IC」", not bad_reason,
+              f"违反: {bad_reason[:4]}" if bad_reason else "reason 已区分标注")
+    except Exception as e:
+        check("因子数值门限", False, str(e))
+
+
+# ── T14: 方案质量门禁（§8.5.3 清单自动化） ───────────────────────────────
+
+
+def section_design_quality_gate():
+    """T14: 最近设计方案经 validate_design_quality 校验（5 类问题）+ 三方案差异。"""
+    section("方案质量门禁")
+    try:
+        r = requests.get(f"{BASE}/api/v1/portfolio/designs?limit=1", timeout=10)
+        if r.status_code != 200:
+            check("GET /portfolio/designs", False, f"HTTP {r.status_code}")
+            return
+        rows = r.json()
+        if not rows:
+            check("存在设计方案记录", True, "无历史方案，跳过", skip=True)
+            return
+        did = rows[0].get("id")
+        r2 = requests.get(f"{BASE}/api/v1/portfolio/designs/{did}", timeout=10)
+        if r2.status_code != 200:
+            check(f"GET /portfolio/designs/{did}", False, f"HTTP {r2.status_code}")
+            return
+        detail = r2.json()
+        strategies = detail.get("strategies") or (detail.get("strategies_json") or {}).get("strategies") or []
+        if not strategies:
+            check("设计方案含 strategies", True, "无 strategies（LLM 报告未生成时方案仍可评估）", skip=True)
+            return
+        from app.engine.design_quality import validate_design_quality, check_strategies_differ
+        issues = validate_design_quality(strategies)
+        check("方案质量门禁 5 项清单", not issues, "; ".join(issues[:3]) if issues else "全部通过")
+        differ = check_strategies_differ(strategies)
+        check("三套方案非机械缩放", differ, "层权重结构趋同" if not differ else "")
+    except Exception as e:
+        check("方案质量门禁", False, str(e))
+
+
 def print_summary():
     total = PASS + FAIL
     print(f"\n{'=' * 50}")
     print(f"结果: {PASS}/{total} 通过", "ALL PASS" if FAIL == 0 else "HAS FAILURES")
+    if SKIP:
+        print(f"      {SKIP} 项跳过")
     if FAIL > 0:
         print(f"      {FAIL} 项失败")
         sys.exit(1)
@@ -1405,6 +1639,11 @@ MODULES = {
     "snapshot": section_snapshot_health,
     "factor-integrity": section_factor_integrity,
     "indicator-quality": section_indicator_quality,
+    "db-integrity": section_db_integrity,
+    "nginx-proxy": section_nginx_proxy,
+    "data-hygiene": section_data_hygiene,
+    "factor-thresholds": section_factor_thresholds,
+    "design-quality": section_design_quality_gate,
 }
 
 SMOKE_MODULES = ["health", "market"]

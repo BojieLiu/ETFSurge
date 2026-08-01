@@ -39,7 +39,7 @@ Agent 配置集中在 `analysis/registry.py` 的 `AGENTS` 字典中；系统提�
 | POST | `/api/v1/analysis/symbol-analysis` | symbol_analysis | 个股/ETF 分析 |
 
 > `strategy_suggestions` 无独立 HTTP 端点，由 `portfolio_service.calculate_daily_pnl`
-> 内部调用，经 `POST /api/v1/portfolio/strategy-check` 暴露。
+> 内部调用，经 `POST /api/v1/portfolio/strategy-check-async` 暴露。
 
 ---
 
@@ -76,7 +76,7 @@ POST /api/v1/analysis/llm-report
 ## 3. LLM Advice / 投资建议
 
 ```
-POST /api/v1/analysis/llm-advice?query=<question>
+POST /api/v1/analysis/llm-advice
 ```
 
 **查询参数 / Query:**
@@ -145,7 +145,6 @@ POST /api/v1/analysis/news-impact
 ## 6. Portfolio Design / 组合设计
 
 ```
-POST /api/v1/analysis/portfolio-design
 ```
 
 **请求体 / Request Body:**
@@ -218,7 +217,7 @@ POST /api/v1/analysis/portfolio-review
 ## 8. Sector Analysis / 行业分析
 
 ```
-POST /api/v1/analysis/sector-analysis
+POST /api/v1/analysis/sector-analysis/stream
 ```
 
 **请求体 / Request Body:**
@@ -234,7 +233,7 @@ POST /api/v1/analysis/sector-analysis
 ## 9. Symbol Analysis / 个股分析
 
 ```
-POST /api/v1/analysis/symbol-analysis
+POST /api/v1/analysis/symbol-analysis/stream
 ```
 
 **请求体 / Request Body:**

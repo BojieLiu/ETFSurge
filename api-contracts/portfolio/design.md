@@ -15,7 +15,7 @@ Generate three risk-profile ETF portfolio plans using full-market ETF scanning, 
 ### 2.1 生成组合设计 / Generate Portfolio Design
 
 ```
-POST /api/v1/portfolio/design
+POST /api/v1/portfolio/design-async（原 /design 已迁移，T11 校准）
 ```
 
 **请求体 / Request Body:**
@@ -141,7 +141,6 @@ POST /api/v1/portfolio/design
 ### 2.2 基于 LLM 的组合设计（含情绪/指标股数据）
 
 ```
-POST /api/v1/analysis/portfolio-design
 ```
 
 **请求体同 2.1。**
@@ -165,7 +164,7 @@ POST /api/v1/analysis/portfolio-design
 ### 2.3 异步任务提交 / Submit Async Design Task
 
 ```
-POST /api/v1/portfolio/design?async=true
+POST /api/v1/portfolio/design-async（async 语义内建）
 ```
 
 **请求体同 2.1。**
@@ -341,7 +340,7 @@ GET /api/v1/portfolio/designs?limit=10&offset=0
 ### 2.9 设计方案状态 / Design Status
 
 ```
-GET /api/v1/portfolio/designs/{design_id}/status
+GET /api/v1/portfolio/designs/{design_id}（原 /status 端点已移除，T11 校准）
 ```
 
 **成功响应 — `200 OK`:**
@@ -412,4 +411,4 @@ alanced/aggressive`
 - [ ] Response: 标的数量在 8~15 之间
 - [ ] WS: `/api/v1/ws/design-report/{session_id}` 可连接
 - [ ] WS: 推送的 design_report 包含完整 Markdown
-- [ ] `GET /api/v1/portfolio/designs/{id}/status` implemented and tested
+- [ ] `GET /api/v1/portfolio/designs/{id}（原 /status 已移除，T11 校准）` implemented and tested

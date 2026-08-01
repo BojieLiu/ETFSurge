@@ -1,12 +1,12 @@
 # API 契约: 非交易时段降级契约 (Z11)
 
 > 关联方案: `docs/z_fixes_design_v5.3.md` Z11
-> 变更类型: 内部实现契约化（统一静态池 + fallback 元数据 + 降级形态契约），`/portfolio/design-enhanced` 响应含降级标识
+> 变更类型: 内部实现契约化（统一静态池 + fallback 元数据 + 降级形态契约），`/portfolio/design-async` 响应含降级标识
 > 版本: v1.0
 
 ## 1. 概述 / Overview
 
-**功能描述**: 统一非交易时段/数据管道断裂时的降级行为。定义静态兜底池、fallback 元数据、降级形态契约，确保 `/portfolio/design-enhanced` 始终返回三套方案且前端可感知降级状态。
+**功能描述**: 统一非交易时段/数据管道断裂时的降级行为。定义静态兜底池、fallback 元数据、降级形态契约，确保 `/portfolio/design-async` 始终返回三套方案且前端可感知降级状态。
 
 **触发场景**: 
 - 非交易时段（因子矩阵为空、候选池为空）
@@ -20,7 +20,7 @@
 ### 2.1 生成增强型组合设计 / Generate Enhanced Portfolio Design (响应增强)
 
 ```
-POST /api/v1/portfolio/design-enhanced
+POST /api/v1/portfolio/design-async
 ```
 
 #### 响应增强字段 / Enhanced Response Fields (Z11)
@@ -133,4 +133,4 @@ STATIC_CORE_POOL = [
 ## 6. 测试 / Tests
 
 - 后端单测: `backend/tests/test_z11_degradation.py`（mock factor_matrix={}/pool=[] 验证 static_pool 模式；mock 部分因子缺失验证 partial_data 模式）
-- verify_e2e: `section_portfolio` design-enhanced 断言 degradation 字段存在
+- verify_e2e: `section_portfolio` design-async 断言 degradation 字段存在

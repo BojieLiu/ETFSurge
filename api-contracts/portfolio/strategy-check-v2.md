@@ -17,7 +17,7 @@
 ### 2.1 发起策略检查 / Trigger Strategy Check
 
 ```
-POST /api/v1/portfolio/strategy-check
+POST /api/v1/portfolio/strategy-check-async
 ```
 
 #### 请求体 / Request Body
@@ -109,7 +109,7 @@ GET /api/v1/portfolio/tasks/{task_id}
 ### 2.3 策略检查历史记录 / Strategy Check History
 
 ```
-GET /api/v1/portfolio/strategy-check
+GET /api/v1/portfolio/strategy-checks
 ```
 
 #### 成功响应 / Success Response — `200 OK`
