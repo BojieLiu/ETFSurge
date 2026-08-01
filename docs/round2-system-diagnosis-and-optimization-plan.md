@@ -320,9 +320,11 @@ perf_diag 49 端点扫描：**46/49 通过**（3 个 405 为脚本用 GET 调 PO
 |----|------|---------|---------|---------|
 | F2-1 | 组合计算 8.2s | `calculate_allocation`/`daily_pnl` 对持仓行情/K 线改 `asyncio.gather` 并行 + 15s 缓存（注意：缓存会降低数据新鲜度，15s 与 `portfolio:realtime` 一致可接受） | 涉及：`backend/app/services/portfolio_service.py` | calculate < 2s（多次采样中位数） |
 | F2-2 | 首页 Lighthouse 60 | Dashboard 慢 API 并行加载 + 骨架屏（消除 CLS）+ 路由级代码分割（echarts 按需）+ 关键 API 预热缓存 | 涉及：`frontend/src/views/Dashboard.vue`、`frontend/src/router/index.js`、`vite.config.js` | 首页 Performance ≥ 85（3 次采样中位数），CLS < 0.1 |
-| F2-3 | `/market/sectors/heat` 404 | 后端暴露 `GET /market/sectors/heat`（hub 已有 `get_sector_heat`）或前端改调 `sectors/rotation` | 涉及：`backend/app/routers/market.py` 或 `frontend/src/components/market/SectorHeatMap.vue` | 前端 SectorHeatMap 无 404 |
-| F2-4 | `marketApi.sectorAnalysis/marketAnalysis` 未定义 | 前端定义方法并接通 `/analysis/symbol-analysis/stream`、`/analysis/sector-analysis/stream` | 涉及：`frontend/src/api/index.js`、`frontend/src/components/market/UnifiedAnalysis.vue` | UnifiedAnalysis 真实分析可用 |
+| F2-3 | `/market/sectors/heat` 404 | 后端暴露 `GET /market/sectors/heat`（hub 已有 `get_sector_heat`，数据源实测正常）或前端改调 `sectors/rotation`。详见「§9.8 专项步骤 B」 | 涉及：`backend/app/routers/market.py`、`frontend/src/components/market/SectorHeatMap.vue` | 前端 SectorHeatMap 无 404 |
+| F2-4 | `marketApi.sectorAnalysis/marketAnalysis` 未定义 | 前端定义方法并接通 `/analysis/symbol-analysis/stream`、`/analysis/sector-analysis/stream`（详见「§9.8 专项步骤 D」，删除 fallback 假成功分支） | 涉及：`frontend/src/api/index.js`、`frontend/src/components/market/UnifiedAnalysis.vue` | UnifiedAnalysis 真实分析可用 |
 | F2-5 | 预热指数/新闻串行 | `warmup_global_indices` 内 `asyncio.gather` 并行拉取 | 涉及：`backend/app/main.py` | 预热 < 1.0s |
+| F2-6 | **热点板块/热门个股字段契约不匹配 + 信息不足** | 详见「§9.8 专项步骤 A/C」：A 后端字段归一化（`get_hot_plates`/`get_sector_heat`/`get_stock_hot_rank`，`stock_list`/`tag` 用 `ast.literal_eval` 安全解析）→ C 热门个股行增强（price/sector/turnover/concept chips） | 涉及：`backend/app/services/market_data_hub.py`、`backend/app/fetchers/sector_fetcher.py`、`frontend/src/components/market/SectorHeatMap.vue` | 热点板块 ≥10 行；个股行含 price/sector/turnover/chip |
+| F2-7 | **热门个股/板块无快速分析入口** | 详见「§9.8 专项步骤 E/F」：个股行「技术分析」（indicators+signal 弹窗）+「AI 分析」（emit → UnifiedAnalysis symbol 模式）；板块行「AI 分析」（UnifiedAnalysis 扩展 externalTrigger 支持 sector 模式）；`cls` 板块代码归一化 | 涉及：`frontend/src/components/market/SectorHeatMap.vue`、`frontend/src/views/MarketAnalysis.vue`、`backend/app/routers/analysis.py` | 点击后自动聚焦分析区并触发真实分析 |
 
 ### 🅿️3 — 低优先级（质量完善）
 
@@ -677,6 +679,139 @@ if sum(w for w in tech_candidates) > s_budget * 0.5:
 
 ---
 
+### 🔬 专项：热点板块/热门个股数据修复 + 快速分析入口（P2）
+
+> 覆盖 F2-3（/sectors/heat 404）与新增 F2-6（字段契约修复）/F2-7（快速分析入口）。本节含实测证据（三个数据源全部返回正常，问题在字段契约与路由）+ 隐藏断裂（UnifiedAnalysis 分析 API 未接线）+ 修复步骤 A-F + TDD 计划 + 量化验收。
+
+#### 9.8.1 问题现象与影响（用户观察 + 实测）
+
+| 现象 | 实测证据 | 影响 |
+|------|---------|------|
+| 热点板块 tab 显示为空 | `fetch_hot_plates(15)` 实测返回 **11 条**（字段 `secu_name`/`up_reason`/`plate_stock_up_num`/`stock_list`，其中 `stock_list` 是**字符串化的列表**）；前端模板（SectorHeatMap.vue L39-45）读的是 `plate_name \|\| name`、`reason \|\| hot_reason`、`lead_stocks \|\| stocks` → **字段全不匹配 → 每行渲染为空** | 用户看到"热点板块是空的"，实为数据被前端丢弃 |
+| 板块热度 tab 报 404 | 前端 `getSectorHeat` → `GET /market/sectors/heat`；后端 market.py 路由清单**无此路由**（F2-3 记录在案）；但 `fetch_sector_heat(20)` 实测返回 **20 条正常**（plate_code/rank/cur_heat/rank_change/is_new/plate_name） | 数据源活着，路由缺失 → 404 |
+| 热门个股信息太少 | 前端 stock tab（L82-90）只渲染 `name`/`symbol`/`change_pct`；hub enrich 后数据（market_data_hub.py L1405-1455）实有 `price`/`change_amt`/`turnover`/`volume`/`sector`/`tag`（含 `concept_tag` 概念标签，字符串形式） | 用户无法判断个股成色与所属板块 |
+| **隐藏断裂：UnifiedAnalysis 分析入口实际没接 API** | `frontend/src/api/index.js` 的 `marketApi` **没有** `sectorAnalysis`/`marketAnalysis` 方法；UnifiedAnalysis.vue L182-184 用 `marketApi.sectorAnalysis?.()`（可选链）→ undefined → 走 L190-197 fallback，仅返回「✅ 查询完成」字符串，**未调用任何真实分析接口** | AI 分析入口形同虚设；快速入口若不先修此断裂，做了也白做 |
+
+#### 9.8.2 根因分析
+
+| # | 根因 | 涉及文件 |
+|---|------|---------|
+| R1 | 热点板块/板块热度/热门个股三处**前端字段契约与后端数据源字段不一致**（历史演进中数据源换过字段名，前端模板未同步） | `frontend/src/components/market/SectorHeatMap.vue` L39-45/L59-69/L82-90、`backend/app/fetchers/sector_fetcher.py` L336-375 |
+| R2 | `/market/sectors/heat` 路由缺失（数据源存在、hub 有方法、仅未暴露） | `backend/app/routers/market.py`（F2-3） |
+| R3 | `stock_list`/`tag` 以**字符串形式**存于数据源行内，前端无解析层（直接当数组/对象用 → undefined） | `backend/app/fetchers/sector_fetcher.py`、`backend/app/services/market_data_hub.py` L1405-1455 |
+| R4 | UnifiedAnalysis 依赖的 `marketApi.sectorAnalysis/marketAnalysis` **从未定义**，可选链静默降级为 fallback 假成功 | `frontend/src/api/index.js`、`frontend/src/components/market/UnifiedAnalysis.vue` L182-197 |
+| R5 | SectorHeatMap 无任何事件发射（不像 WatchlistPanel 有 `@select-symbol`），热点行无法联动分析区 | `frontend/src/components/market/SectorHeatMap.vue` |
+
+#### 9.8.3 修复步骤（按依赖排序）
+
+**步骤 A — 后端字段归一化（R1/R3，保持前端契约稳定）**
+
+- 文件：`backend/app/services/market_data_hub.py`（`get_hot_plates` L958、`get_stock_hot_rank` L1389）与 `backend/app/fetchers/sector_fetcher.py` L336-375
+- 改动：
+  1. `get_hot_plates`：`secu_name→name`、`up_reason→reason`、`plate_stock_up_num→stock_count`；`stock_list` 用 `ast.literal_eval` 安全解析成数组 → `lead_stocks`（元素取 `secu_code/secu_name`）。
+  2. `get_stock_hot_rank` enrich 时把 `tag` 字符串解析为 `concept_tags: [...]` 数组（同样 `ast.literal_eval` + try/except 兜底）。
+- 伪代码：
+```python
+def _parse_stock_list(s: str) -> list[dict]:
+    if isinstance(s, list):
+        return s
+    try:
+        return ast.literal_eval(s) if s else []
+    except Exception:
+        return []
+```
+
+**步骤 B — 新增 `GET /market/sectors/heat` 路由（R2，F2-3）**
+
+- 文件：`backend/app/routers/market.py`
+- 改动：新增端点，调 `market_data_hub.get_sector_heat(limit)`（数据源已实测正常），响应归一化 `plate_name→name`、`cur_heat→heat_index`、保留 `rank_change`/`is_new`。
+- 契约（对齐 api-contracts/market/）：
+```json
+{ "items": [{ "rank": 1, "name": "AI智能体", "heat_index": 13501.4,
+              "rank_change": 5, "is_new": 0, "plate_code": "cls82558" }], "total": 20 }
+```
+
+**步骤 C — 热门个股信息增强（前端 stock tab）**
+
+- 文件：`frontend/src/components/market/SectorHeatMap.vue` L74-92
+- 改动：行内新增展示 `price`（现价）、`sector`（所属板块）、`turnover`（成交额，万/亿格式化）、`concept_tags`（前 2-3 个概念标签 chip）。
+- 样式：复用现有 `text-up/text-down`（红涨绿跌）；概念标签用轻量 chip 样式。
+
+**步骤 D — UnifiedAnalysis 分析 API 接线修复（R4，前置条件）**
+
+- 文件：`frontend/src/api/index.js` + `frontend/src/components/market/UnifiedAnalysis.vue`
+- 改动：
+  1. `marketApi` 新增真实方法（对齐后端已验证端点）：
+```js
+symbolAnalysis: (data) => api.post('/analysis/symbol-analysis/stream', data),
+sectorAnalysis: (data) => api.post('/analysis/sector-analysis/stream', data),
+```
+  2. UnifiedAnalysis `doAnalyze` 改用 `useLLMStream().start()`（复用 MarketReport/AiAdvisor 已验证的 SSE 模式）：
+     - `symbol` 模式 → `POST /analysis/symbol-analysis/stream`（body: `{symbol, name, asset_type}`）
+     - `sector` 模式 → `POST /analysis/sector-analysis/stream`（body: `{sector_code, sector_name, sector_type, market}`）
+     - 删除 fallback 假成功分支（L190-197）。
+- 效果：AI 分析从「✅ 查询完成」变为真实流式分析内容（修复隐藏断裂）。
+
+**步骤 E — 快速分析入口（R5，用户核心需求）**
+
+- 文件：`frontend/src/components/market/SectorHeatMap.vue`、`frontend/src/views/MarketAnalysis.vue`
+- 设计（复用 WatchlistPanel → `@select-symbol` → `selectedSymbol` → UnifiedAnalysis 既有联动模式，MarketAnalysis.vue L45/L92/L154-161）：
+
+  1. **个股行**（stock tab）加两个按钮：
+     - 「技术分析」→ 打开轻量弹窗 `TechnicalAnalysisModal`（复用后端 `GET /market/indicators/{symbol}` + `GET /market/signal/{symbol}`，展示价格/RSI/MACD/KDJ/MA + 综合信号与方向）
+     - 「AI 分析」→ `emit('analyze', { mode: 'symbol', query: code, name })` → MarketAnalysis 设置 `selectedSymbol`（既有链路，自动触发 UnifiedAnalysis symbol 模式分析）→ `scrollTo('symbol')`
+  2. **板块行**（hot/heat tab）加「AI 分析」按钮：
+     - `emit('analyze', { mode: 'sector', query: plate_code, name: plate_name })` → UnifiedAnalysis 需支持外部触发 sector 模式：扩展 props 为 `externalTrigger: { mode, query, name }`，watch 后设置 `activeMode` + `query` + `doAnalyze()`（替代/兼容现有 `selectedSymbol`）
+  3. 交互细节：点击后滚动到 `anchorSymbol`（复用现有 `scrollTo('symbol')`），分析区自动聚焦触发；技术分析弹窗内支持「转 AI 分析」二次跳转。
+
+**步骤 F — 后端板块代码映射兜底**
+
+- 文件：`backend/app/routers/analysis.py`（`/sector-analysis/stream` 内）
+- 改动：热板块/热度的 `cls` 前缀代码（cls82558）在 sector 分析前做代码归一化（截断前缀取数字段 82558 → 匹配 BK/行业板块），映射失败返回结构化错误而非空结果。
+
+#### 9.8.4 TDD 测试计划
+
+后端 `tests/test_sector_heat.py` 新增：
+
+| 用例 | 断言 |
+|------|------|
+| `test_sectors_heat_route` | `GET /market/sectors/heat?limit=20` → 200，items 含 name/heat_index/rank_change |
+| `test_hot_plates_normalized` | mock `fetch_hot_plates` 返回原始字段 → hub 输出含 name/reason/lead_stocks 数组 |
+| `test_stock_list_parse_safe` | `stock_list` 为非法字符串 → 返回 `[]` 不抛错 |
+| `test_stock_hot_rank_concept_tags` | enrich 后含 `concept_tags` 数组 |
+| `test_cls_code_normalized` | sector 分析入口 cls82558 → 归一化成功（mock LLM） |
+
+前端 `src/test/SectorHeatMap.spec.js` 新增：
+
+| 用例 | 断言 |
+|------|------|
+| `renders_hot_plates` | mock hot-plates 响应（原始字段）→ 行显示 name/reason/lead stocks |
+| `renders_sector_heat` | mock sectors/heat 响应 → 行显示 name/heat_index/rank_change |
+| `renders_stock_extra` | mock stock-hot-rank 响应 → 行显示 price/sector/turnover/concept chips |
+| `emit_analyze_symbol` | 点击「AI 分析」→ emit `analyze {mode:'symbol', query:'688825'}` |
+| `emit_analyze_sector` | 点击板块行「AI 分析」→ emit `analyze {mode:'sector', query:'cls82558'}` |
+| `technical_modal_opens` | 点击「技术分析」→ 弹窗出现并请求 indicators/signal |
+
+#### 9.8.5 验收条件（量化）
+
+1. 热点板块 tab 显示 ≥10 行（名称 + 涨跌幅 + 领涨股 + 上榜理由），无空行。
+2. 板块热度 tab 200 无 404，显示名称/热度/排名变化（↑↓）。
+3. 热门个股行显示 price/sector/turnover/概念标签（≥2 个 chip），且红涨绿跌正确。
+4. UnifiedAnalysis 的 symbol/sector 分析返回**真实流式内容**（非「✅ 查询完成」）。
+5. 热门个股「AI 分析」→ 分析区自动聚焦并触发；「技术分析」弹窗展示 indicators+signal。
+6. `pytest tests/test_sector_heat.py` + `npm test`（新增用例）全绿。
+
+#### 9.8.6 风险与回退
+
+| 风险 | 缓解 |
+|------|------|
+| `ast.literal_eval` 解析失败 | try/except 返回 `[]`；绝不 eval |
+| 热板块 `cls` 代码与 BK 板块映射不全 | 归一化失败返回结构化错误（`{detail: "板块映射失败"}`）+ 前端降级为搜索 |
+| SSE 流式接入回归 | 复用已验证的 `useLLMStream`（MarketReport/AiAdvisor 同款）；保留 60s 超时与取消 |
+| 弹窗与移动端布局 | 技术分析弹窗限宽 + 可滚动；按钮行在窄屏折行 |
+
+---
+
 ## 十、实施优先级路线图
 
 ```
@@ -688,7 +823,8 @@ if sum(w for w in tech_candidates) > s_budget * 0.5:
   F1-5 因子一致性 / F1-6 成分股 / F1-7 LLM 输出后处理
   F1-8 投资合理性（§9.7 R1-R5：因子正确性→market_context→rationale→信号聚合）
 第三梯队（P2 — 下迭代，预计 2-3 人日）
-  F2-1 组合计算并行 / F2-2 首页性能 / F2-3 sectors/heat / F2-4 前端方法 / F2-5 预热并行
+  F2-1 组合计算并行 / F2-2 首页性能 / F2-5 预热并行
+  §9.8 专项：F2-3 sectors/heat 路由 + F2-4 UnifiedAnalysis 接线 + F2-6 字段契约/个股信息 + F2-7 快速分析入口（一个批次交付，前端为主）
   §9.6 步骤 C-E（板块配额/卫星下限/C2 惩罚修正，与 F0-5 同批或紧随）
   T1/T2 防回归测试（与 F0 修复同批交付：F0 交付即加 T1/T2，拦截两个 P0 bug 回归）
 第四梯队（P3-P4 — 持续）
@@ -730,3 +866,4 @@ if sum(w for w in tech_candidates) > s_budget * 0.5:
 | v1.2 | 2026-07-31 | 二轮 review 修订：P1/P2/P3 表头补列（涉及文件/验收条件，修复渲染错位）；T1/T2 调度措辞修正（F0 交付即加）；§5.3 持仓表补全 10 只含权重；T4 补 daily-pnl 参数修复；calculate 耗时口径统一（8.2s/8257-8287ms）；F0-4 涉及文件补全路径 |
 | v1.3 | 2026-07-31 | Z04 细化：新增 §9.5 专项修复方案（根因三层缺口/10 因子依赖清单/步骤 A-D 含伪代码/TDD 测试计划/量化验收/风险回退）；F3-4 表项与 Z04 问题行改为引用专项章节 |
 | v1.4 | 2026-08-01 | 新增 §9.6 专项「候选池修复」（核心层偏离主流宽基：涨幅榜 Top25 根因链 5 层 + 步骤 A-E 含伪代码 + TDD 7 用例 + 量化验收）与 §9.7 专项「投资合理性评估」（方案快照证据 A-D + 根因 R1-R5 映射 + 修复优先级 + 量化验收）；F 表新增 F0-5/F1-8；路线图更新（F0-5 进 P0、F1-8 进 P1、§9.6 步骤 C-E 进 P2） |
+| v1.5 | 2026-08-01 | 新增 §9.8 专项「热点板块/热门个股数据修复 + 快速分析入口」：实测三个数据源正常（hot_plates 11 条/heat 20 条/stock_hot_rank 50 条）、前端字段契约不匹配（secu_name vs plate_name 等）+ /sectors/heat 路由缺失 + 隐藏断裂（marketApi 无 sectorAnalysis 方法、UnifiedAnalysis 走 fallback 假成功）+ 修复步骤 A-F（后端归一化/新增路由/信息增强/流式接线/快速入口/代码归一化）+ TDD 计划 + 量化验收；F 表新增 F2-6/F2-7、F2-3/F2-4 细化引用 §9.8；路线图 P2 批次更新 |
