@@ -325,7 +325,7 @@ perf_diag 49 端点扫描：**46/49 通过**（3 个 405 为脚本用 GET 调 PO
 | F2-5 | 预热指数/新闻串行 | `warmup_global_indices` 内 `asyncio.gather` 并行拉取 | 涉及：`backend/app/main.py` | 预热 < 1.0s |
 | F2-6 | **热点板块/热门个股字段契约不匹配 + 信息不足** | 详见「§9.8 专项步骤 A/C」：A 后端字段归一化（`get_hot_plates`/`get_sector_heat`/`get_stock_hot_rank`，`stock_list`/`tag` 用 `ast.literal_eval` 安全解析）→ C 热门个股行增强（price/sector/turnover/concept chips） | 涉及：`backend/app/services/market_data_hub.py`、`backend/app/fetchers/sector_fetcher.py`、`frontend/src/components/market/SectorHeatMap.vue` | 热点板块 ≥10 行；个股行含 price/sector/turnover/chip |
 | F2-7 | **热门个股/板块无快速分析入口** | 详见「§9.8 专项步骤 E/F」：个股行「技术分析」（indicators+signal 弹窗）+「AI 分析」（emit → UnifiedAnalysis symbol 模式）；板块行「AI 分析」（UnifiedAnalysis 扩展 externalTrigger 支持 sector 模式）；`cls` 板块代码归一化 | 涉及：`frontend/src/components/market/SectorHeatMap.vue`、`frontend/src/views/MarketAnalysis.vue`、`backend/app/routers/analysis.py` | 点击后自动聚焦分析区并触发真实分析 |
-| F2-8 | **资讯 AI 智能分析「无反应」** | 详见「§9.9 专项步骤 A」：点击后 `scrollIntoView` 面板 + 按钮文字「AI 分析中…」+ 面板锚点/高亮；面板本就渲染在新闻列表底部，无滚动提示导致用户感知「没反应」 | 涉及：`frontend/src/components/NewsView.vue` | 点击后 1s 内视图滚动至面板且按钮有 loading 反馈 |
+| F2-8 | **资讯 AI 智能分析「无反应」** | 详见「§9.9 专项步骤 A」：改为**行内展开**——结果直接显示在对应新闻卡片内（`impactTarget` + toggle/切换/失败重试），删除页面底部面板 | 涉及：`frontend/src/components/NewsView.vue` | 点击后结果出现在该条卡片内，无滚动、无跳转 |
 | F2-9 | **资讯分析质量偶发「不合理」** | 详见「§9.9 专项步骤 B」：prompt 增加硬约束「若新闻与组合标的无直接关联，明确说明『无直接影响』，不得强行关联」（实测 3 条样本 LLM 已较克制，此约束用于压制单条波动） | 涉及：`backend/app/analysis/llm.py`（`analyze_news_impact` prompt） | 3 条基线样本（降准/半导体停产/黄岩岛）结论均合理，且无强行关联 |
 
 ### 🅿️3 — 低优先级（质量完善）
@@ -834,26 +834,57 @@ sectorAnalysis: (data) => api.post('/analysis/sector-analysis/stream', data),
 
 #### 9.9.3 修复步骤（按依赖排序）
 
-**步骤 A — 前端反馈与定位（R1）**
+**步骤 A — 前端交互重构：行内展开（R1，方案 A 已确认）**
 
 - 文件：`frontend/src/components/NewsView.vue`
+- 设计原则：分析是针对**某一条**新闻的，结果必须出现在**该条新闻卡片内**（而非页面底部面板）——结果与所分析新闻强关联、不打断阅读位置、无需滚动。
 - 改动：
-  1. 按钮文字随 `analyzing` 切换：「AI 智能分析」→「AI 分析中…」+ spinner（L54）。
-  2. 面板 `<section>` 加 `id="news-impact-panel"`（L63）；`analyze()` 成功后 `nextTick(() => document.getElementById('news-impact-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' }))`。
-  3. 面板加入场高亮（CSS `outline`/背景过渡 1.2s 淡出），视觉锚定。
+  1. 新增状态：`impactTarget`（当前展开分析的新闻 id）、`impactPanel`（结果数据）、`analyzing`（全局 loading）。
+  2. 模板：在每条新闻卡片 meta 区（L50-57）下方加条件渲染展开区：
+  ```vue
+  <div v-if="impactTarget === item.id" class="impact-inline">
+    <div v-if="analyzing" class="impact-loading">🤖 AI 分析中…</div>
+    <div v-else-if="impactPanel" class="impact-inline-body">
+      <!-- 复用原面板内容：summary / impact_scope / affected_holdings / disclaimer -->
+      <button class="impact-close" @click="impactTarget = null; impactPanel = null">✕</button>
+    </div>
+  </div>
+  ```
+  3. 交互规则：
+     - 点击某条「AI 智能分析」→ `impactTarget = item.id`，该条卡片下方展开 loading → 完成后在该条卡片内展示结果。
+     - 分析中点击其他新闻 → 忽略（按钮全局 `:disabled="analyzing"`），避免竞态。
+     - 点击已展开的条目 → 收起（toggle）；或点展开区 ✕ 收起。
+     - 分析失败 → 该条展开区显示错误文案 + 重试按钮，而非全局 toast 后无痕。
+  4. 删除原页面底部 `<section v-if="impactPanel">` 面板（L62-90 迁移进卡片内）。
 - 伪代码：
 ```js
+const impactTarget = ref(null)   // 当前展开分析的新闻 id
+const impactPanel = ref(null)    // 最近一次分析结果
+const analyzing = ref(false)
+
 async function analyze(item) {
-  analyzing.value = true; impactPanel.value = null
+  // 再次点击已展开条目 → 收起
+  if (impactTarget.value === item.id && impactPanel.value) {
+    impactTarget.value = null; impactPanel.value = null
+    return
+  }
+  impactTarget.value = item.id
+  impactPanel.value = null
+  analyzing.value = true
   try {
-    const res = await newsApi.newsImpact({ news: {...}, portfolio: (store.etfs||[]).map(e => ({symbol:e.symbol, name:e.name})) })
+    const res = await newsApi.newsImpact({
+      news: { title: item.title, content: item.content },
+      portfolio: (store.etfs || []).map(e => ({ symbol: e.symbol, name: e.name })),
+    })
     impactPanel.value = res.data
-    await nextTick()
-    document.getElementById('news-impact-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  } catch { toast('AI 分析失败，请稍后重试', 'error') }
-  finally { analyzing.value = false }
+  } catch {
+    impactPanel.value = { error: true }   // 展开区显示失败 + 重试
+  } finally {
+    analyzing.value = false
+  }
 }
 ```
+- CSS：`.impact-inline` 卡片内边框高亮 + 入场淡入；`.impact-inline-body` 长文本限高滚动（max-height + overflow-y auto）。
 
 **步骤 B — prompt 质量约束（R2）**
 
@@ -874,12 +905,15 @@ async function analyze(item) {
 
 **前端（`src/test/NewsView.spec.js`）**
 
-4. `test_analyze_shows_loading_text`：点击后按钮文字变「AI 分析中…」，完成后恢复。
-5. `test_analyze_scrolls_to_panel`：mock `scrollIntoView` → 成功响应后断言被调用（jsdom mock）。
+4. `test_analyze_expands_inline`：点击某条「AI 智能分析」→ 断言该条**卡片内**出现分析区（不再依赖页面底部面板）。
+5. `test_analyze_shows_loading_text`：点击后展开区显示「AI 分析中…」，完成后消失并显示结果。
+6. `test_analyze_switches_target`：先分析 A 再分析 B → 断言 A 卡片内展开区消失、B 卡片内出现。
+7. `test_analyze_toggle_close`：已展开的条目再次点击 → 收起（`impactTarget` 清空）。
+8. `test_analyze_failure_inline`：mock 失败 → 该条展开区显示错误 + 重试按钮，页面不报全局错。
 
 #### 9.9.5 量化验收
 
-1. 点击「AI 智能分析」→ 按钮即时变「AI 分析中…」，成功后 1s 内视图平滑滚动至面板（jsdom 单测 + 浏览器走查）。
+1. 点击某条新闻「AI 智能分析」→ 该条卡片下方**即时**展开「AI 分析中…」，成功后结果显示在该条卡片内（无滚动、无跳转）。
 2. 3 条基线样本（降准/半导体停产/黄岩岛）结论合理且无强行关联（2 次运行均稳定）。
 3. `pytest tests/test_news_impact_quality.py` + `npm test` 全绿。
 
@@ -887,9 +921,10 @@ async function analyze(item) {
 
 | 风险 | 缓解 |
 |------|------|
-| `scrollIntoView` 在无面板（失败/空响应）时误滚 | 仅成功分支 + 可选链判空 |
+| 长文本撑爆卡片 | `.impact-inline-body` 限高（max-height ~360px）+ overflow-y auto |
+| 分析中切换新闻竞态 | 分析中全局禁用所有「AI 智能分析」按钮（`:disabled="analyzing"`） |
+| 收起误操作 | 仅 ✕ 与再次点击触发收起；结果保留在 `impactPanel` 可重开 |
 | prompt 硬约束导致 LLM 过度保守（该分析的也省略） | 约束措辞「宁缺毋滥」但保留「实际受影响标的必须列出」；基线样本回归 |
-| 平滑滚动动画与 Vue 渲染竞争 | `nextTick` 后再滚动；失败降级为 `window.scrollTo` |
 
 ---
 
@@ -948,5 +983,6 @@ async function analyze(item) {
 | v1.2 | 2026-07-31 | 二轮 review 修订：P1/P2/P3 表头补列（涉及文件/验收条件，修复渲染错位）；T1/T2 调度措辞修正（F0 交付即加）；§5.3 持仓表补全 10 只含权重；T4 补 daily-pnl 参数修复；calculate 耗时口径统一（8.2s/8257-8287ms）；F0-4 涉及文件补全路径 |
 | v1.3 | 2026-07-31 | Z04 细化：新增 §9.5 专项修复方案（根因三层缺口/10 因子依赖清单/步骤 A-D 含伪代码/TDD 测试计划/量化验收/风险回退）；F3-4 表项与 Z04 问题行改为引用专项章节 |
 | v1.4 | 2026-08-01 | 新增 §9.6 专项「候选池修复」（核心层偏离主流宽基：涨幅榜 Top25 根因链 5 层 + 步骤 A-E 含伪代码 + TDD 7 用例 + 量化验收）与 §9.7 专项「投资合理性评估」（方案快照证据 A-D + 根因 R1-R5 映射 + 修复优先级 + 量化验收）；F 表新增 F0-5/F1-8；路线图更新（F0-5 进 P0、F1-8 进 P1、§9.6 步骤 C-E 进 P2） |
+| v1.7 | 2026-08-01 | §9.9 专项交互方案升级为**行内展开**（用户确认方案 A）：分析结果直接显示在对应新闻卡片内（删除页面底部面板 + scrollIntoView），新增 `impactTarget` 状态与 toggle/切换/失败重试交互；TDD 前端用例更新为 5 条（展开/loading/切换/收起/失败）；量化验收与风险表同步更新 |
 | v1.6 | 2026-08-01 | 新增 §9.9 专项「资讯 AI 智能分析 UX 与质量」：实测 3 条新闻（降准/半导体停产/黄岩岛）后端 `/analysis/news-impact` 链路功能正常、结论合理，定位「没反应」为前端 UX 缺陷（面板渲染在列表底部 + 无滚动/loading 反馈）+ 「不合理」为 LLM 单条波动；修复步骤 A（scrollIntoView + 按钮文字 + 锚点高亮）/B（prompt「无直接关联须明确声明」硬约束）+ TDD 5 用例 + 量化验收；F 表新增 F2-8/F2-9；路线图 P2 批次更新 |
 | v1.5 | 2026-08-01 | 新增 §9.8 专项「热点板块/热门个股数据修复 + 快速分析入口」：实测三个数据源正常（hot_plates 11 条/heat 20 条/stock_hot_rank 50 条）、前端字段契约不匹配（secu_name vs plate_name 等）+ /sectors/heat 路由缺失 + 隐藏断裂（marketApi 无 sectorAnalysis 方法、UnifiedAnalysis 走 fallback 假成功）+ 修复步骤 A-F（后端归一化/新增路由/信息增强/流式接线/快速入口/代码归一化）+ TDD 计划 + 量化验收；F 表新增 F2-6/F2-7、F2-3/F2-4 细化引用 §9.8；路线图 P2 批次更新 |
