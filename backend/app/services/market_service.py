@@ -1144,7 +1144,27 @@ async def get_history(
         "[market_service] get_history fetch_history empty for %s (%s), trying get_k_data",
         symbol, asset_type,
     )
-    return await _call(get_k_data, symbol, period, timeout=15) or []
+    k_data = await _call(get_k_data, symbol, period, timeout=15) or []
+    if k_data:
+        return k_data
+
+    # F0-4: akshare 熔断 / 数据源全线失败时，从 Hub K 线缓存取任意年龄的过期数据
+    # 兜底（stale 标记），避免 history/indicators/signal 全线 insufficient_data。
+    try:
+        from .market_data_hub import market_data_hub
+        stale_rows = market_data_hub.get_kline_rows_any(symbol)
+        if stale_rows:
+            age = market_data_hub.get_kline_age_seconds(symbol)
+            market_data_hub.mark_kline_stale(symbol, True)
+            logger.warning(
+                "[market_service] get_history all sources empty for %s (%s) — "
+                "falling back to stale K-line cache (age=%.0fs, rows=%d)",
+                symbol, asset_type, age if age is not None else -1, len(stale_rows),
+            )
+            return stale_rows
+    except Exception as e:
+        logger.debug("[market_service] stale cache fallback failed for %s: %s", symbol, e)
+    return []
 
 
 async def get_fundamentals(symbol: str) -> dict[str, Any] | None:

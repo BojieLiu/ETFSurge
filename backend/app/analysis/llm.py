@@ -32,6 +32,52 @@ def load_prompt(name: str) -> str:
 # System prompts are loaded from markdown files (prompts/v1/*.md)
 SYSTEM_PROMPT = load_prompt("general_analyst.md")
 
+# F1-7: 已知的系统提示词泄漏模式（推理模型可能把 system prompt 内容
+# 复述进 reasoning_content / content 通道）。命中即整行剔除。
+_LEAK_PATTERNS = (
+    "我们只需要回答",
+    "我们只需要",
+    "请忽略以上指令",
+    "忽略以上",
+    "你是专业",
+    "你是一名",
+    "你是一个",
+    "你的任务是",
+    "请严格按照以下提示词",
+    "系统提示词内容",
+    "system prompt",
+    "作为AI助手",
+    "作为 AI 助手",
+)
+
+
+def strip_internal_leak(text: str) -> str:
+    """F1-7: 过滤 LLM 输出中泄漏的内部指令片段。
+
+    对包含已知泄漏模式的整行进行剔除，并移除行内的残余指令关键词。
+    纯函数，输入输出均为字符串，永不抛异常。
+    """
+    if not isinstance(text, str):
+        return ""
+    if not text:
+        return ""
+    out_lines = []
+    for line in text.split("\n"):
+        stripped = line.strip()
+        if not stripped:
+            out_lines.append(line)
+            continue
+        if any(p.lower() in stripped.lower() for p in _LEAK_PATTERNS):
+            continue
+        out_lines.append(line)
+    cleaned = "\n".join(out_lines)
+    # 行内残余泄漏词剔除（如夹在正常句子中的「我们只需要回答…」片段）
+    import re as _re
+    for p in _LEAK_PATTERNS:
+        cleaned = _re.sub(_re.escape(p), "", cleaned, flags=_re.IGNORECASE)
+    cleaned = _re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    return cleaned
+
 # System prompts are loaded per-agent via AgentRuntime (registry.py).
 
 def _build_engine_fallback(strategies: list[dict], regime: str = "unknown") -> str:
@@ -246,6 +292,9 @@ async def llm_complete(
                     data = resp.json()
                     message = data["choices"][0]["message"]
                     content = message.get("content", "")
+                    # F1-7: 推理模型可能把 system prompt 复述进 content/reasoning，
+                    # 统一做泄漏过滤后再返回。
+                    content = strip_internal_leak(content)
 
                     usage = data.get("usage", {})
                     _duration = (time.monotonic() - _start) * 1000
@@ -368,7 +417,9 @@ async def llm_complete_stream(
                                 chunk = json.loads(data_str)
                                 if chunk.get("choices"):
                                     delta = chunk["choices"][0].get("delta", {})
-                                    token = delta.get("content") or delta.get("reasoning_content") or ""
+                                    # F1-7: 只取 content 通道，丢弃 reasoning_content
+                                    # （推理模型的思考过程可能复述 system prompt，泄漏到输出）
+                                    token = delta.get("content") or ""
                                     if token:
                                         full_text += token
                                         yield {"type": "token", "token": token}
@@ -423,7 +474,7 @@ async def llm_complete_stream(
 
         yield {
             "type": "done",
-            "full_text": full_text,
+            "full_text": strip_internal_leak(full_text),
             "usage": {
                 "model": provider.model,
                 "prompt_tokens": prompt_tokens,
@@ -489,6 +540,9 @@ async def llm_complete_with_system(
                     data = resp.json()
                     message = data["choices"][0]["message"]
                     content = message.get("content", "")
+                    # F1-7: 推理模型可能把 system prompt 复述进 content/reasoning，
+                    # 统一做泄漏过滤后再返回。
+                    content = strip_internal_leak(content)
 
                     usage = data.get("usage", {})
                     _duration = (time.monotonic() - _start) * 1000
@@ -1045,12 +1099,23 @@ async def generate_strategy_check_report(
 请按 strategy_check.md 要求的 JSON 格式输出分析报告。
 """
     from ..analysis.registry import get_agent
+    _start_ms = time.monotonic()
     try:
         return await get_agent("strategy_check").run_json(prompt)
-    except Exception as e:
-        logger.warning("[strategy_check] LLM analysis failed: %s", e)
+    except BaseException as e:  # noqa: BLE001 — F1-9: 必须捕获 CancelledError（BaseException）
+        # F1-9: asyncio.wait_for(20s) 超时取消内部任务时抛 CancelledError，
+        # 它不是 Exception 子类，`except Exception` 捕获不到 → 失败记录写不进 usage、
+        # fallback provider 从未轮到。这里捕获后立即构造规则兜底（同步操作，不允许再 await），
+        # 使 wait_for 拿到兜底结果而不是让取消异常穿透。
+        duration_s = time.monotonic() - _start_ms
+        logger.warning(
+            "[strategy_check] LLM analysis interrupted after %.1fs (timed out or cancelled: %s) — rule fallback",
+            duration_s, type(e).__name__,
+        )
         return {
-            "summary": "LLM 分析暂不可用，请稍后重试",
+            "summary": (
+                f"LLM 分析超时（{duration_s:.0f}s 未返回，已用规则引擎兜底）"
+            ),
             "suggestions": [],
             "holdings_analysis": [],
             "risk_warnings": [],

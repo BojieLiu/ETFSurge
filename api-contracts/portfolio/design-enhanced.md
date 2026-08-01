@@ -196,6 +196,22 @@ POST /api/v1/portfolio/design-enhanced
 | `change_amount` | float | 当日涨跌点数 |
 | `asset_type` | string | 固定为 `index` |
 
+> **F1-3 变更**：当本地指数缓存为空（后台刷新未完成/数据源失败）时，自动从
+> 全球指数分组（`get_global_indices`）的「A股」区域兜底，保证 `index_realtime`
+> 非空（≥3 条）。
+
+#### `market_context.benchmark_stocks`
+
+> **F1-3 新增**：领涨/领跌板块的头部成分股（龙头股信号），供 LLM 判断
+> 「市场主线」与「风格切换」。取自 `sector_momentum` 前 2 领涨 + 1 领跌板块
+> 的前 3 只成分股，上限 9 条；板块成分股获取失败时静默跳过（可能为空数组）。
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `symbol` | string | 股票代码 |
+| `name` | string | 股票名称 |
+| `sector` | string | 所属板块名称 |
+
 #### `market_context.macro_regime`
 
 | Field | Type | Values |

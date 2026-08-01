@@ -343,7 +343,7 @@ def test_Z01_factor_health_has_time_import():
 
 @pytest.mark.asyncio
 async def test_Z03_china_specific_ic_not_none():
-    """Verify /api/v1/factors/active returns china_specific with ic_value!=None."""
+    """Verify /api/v1/factors/active returns china_specific with ic_value==null (Z03)."""
     import json
     from app.routers import factors as factors_mod
     from app.factors.factor_registry import registry
@@ -357,11 +357,13 @@ async def test_Z03_china_specific_ic_not_none():
         for cat in body.get("categories", []):
             if cat["name"] == "china_specific":
                 for f in cat["factors"]:
-                    # Static policy factors should have ic_value=0 not None
+                    # Phase 40 Z03: 静态政策因子 ic_value=null（不再硬编码 0），
+                    # status='static'（旧断言 ic_value!=None 与 Z03 修复冲突）
                     if f["code"] in ("china.policy.five_year_plan",
                                      "china.policy.strategic_emerging",
                                      "china.policy.dual_circulation"):
-                        assert f["ic_value"] is not None, f"{f['code']} ic_value should not be None"
+                        assert f["ic_value"] is None, f"{f['code']} ic_value should be None (static)"
+                        assert f["status"] == "static", f"{f['code']} status should be static"
     finally:
         registry._last_ic_batch = old_batch
 

@@ -474,6 +474,9 @@ async def strategy_check(
     }
 
     # LLM 分析（Z26: 内层 20s 显式预算，超时走规则引擎兜底）
+    # F1-9: wait_for 超时会取消内部协程，抛 CancelledError（BaseException），
+    # 必须与 TimeoutError 一起捕获，否则 usage 失败记录缺失、规则兜底文案丢失。
+    _llm_start = _time.monotonic()
     try:
         llm_result = await asyncio.wait_for(
             generate_strategy_check_report(
@@ -484,10 +487,29 @@ async def strategy_check(
             ),
             timeout=20,
         )
-    except asyncio.TimeoutError:
-        logger.warning("[strategy_check] LLM analysis timed out after 20s, using rule fallback")
+    except (asyncio.TimeoutError, asyncio.CancelledError) as e:
+        _llm_dur = _time.monotonic() - _llm_start
+        logger.warning(
+            "[strategy_check] LLM analysis timed out/cancelled after %.1fs (%s), using rule fallback",
+            _llm_dur, type(e).__name__,
+        )
+        # F1-9: 失败留痕 — 写 usage 失败记录（成功路径由 llm.py 写入）
+        try:
+            from ..monitor.token_usage import token_store, UsageRecord
+            await token_store.record(UsageRecord(
+                function_name="generate_strategy_check_report",
+                prompt_tokens=0, completion_tokens=0, total_tokens=0,
+                model="", timestamp=_time.time(), success=False,
+                duration_ms=round(_llm_dur * 1000, 1),
+                error_message=f"wait_for timeout ({type(e).__name__})",
+                provider="",
+            ))
+        except Exception as _ue:
+            logger.debug("[strategy_check] usage record failed (non-fatal): %s", _ue)
         llm_result = {
-            "summary": f"LLM 分析超时（基于 {len(market_data)} 只标的因子数据，规则引擎兜底生成建议）",
+            "summary": (
+                f"LLM 分析超时（{_llm_dur:.0f}s 未返回，已用规则引擎兜底生成建议）"
+            ),
             "suggestions": [],
             "holdings_analysis": [],
             "risk_warnings": [],

@@ -97,6 +97,31 @@ POST /api/v1/analysis/llm-news-analysis
 
 ---
 
+## 5.1 变更记录 / Changelog (F1-3 / F1-4 / F1-7)
+
+### market 参数（F1-4）
+
+`llm-report` 与 `llm-advice` 请求体均支持 `market` 字段（`A` | `HK` | `US`，默认 `A`）：
+
+```json
+{ "symbols": ["^HSI"], "market": "HK" }
+```
+
+| market | index_realtime 来源 | sector_momentum |
+|--------|--------------------|-----------------|
+| `A`    | 本地指数缓存（上证/深成/创业板等） | 采集 A 股板块动量 |
+| `HK`   | 全球指数分组「港股」（恒生/恒生科技等） | 不采集（无本地板块数据） |
+| `US`   | 全球指数分组「美股」（标普/纳指/道指） | 不采集 |
+
+### LLM 输出过滤（F1-7）
+
+所有流式/非流式 LLM 输出的 `full_text` / `content` 均经过
+`strip_internal_leak` 过滤：系统提示词泄漏片段（如「我们只需要回答…」、
+reasoning_content 复述）被整行剔除。**前端无需变更**，仅保证最终文本不含
+内部指令。
+
+---
+
 ## 6. 前后端检查表 / Frontend-Backend Checklist
 
 | Item | Frontend | Backend | Notes |

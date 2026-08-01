@@ -50,16 +50,26 @@ async def build_full_context(
             errors.append(f"sentiment: {e}")
 
     # 3. Index realtime (from market_data_hub cache)
+    # F1-4: 按 market 参数分支 — A 股用本地指数缓存；HK/US 从全球指数
+    # 分组（get_global_indices）取对应区域，修复 market=HK/US 仍输出 A 股指数。
     if include_indices:
         try:
-            idx_data = market_data_hub.get_index_realtime() or []
+            if market.upper() in ("HK", "US", "EU", "欧股"):
+                global_idx = await asyncio.wait_for(
+                    market_data_hub.get_global_indices(), timeout=15
+                ) or {}
+                region = {"HK": "港股", "US": "美股", "EU": "欧股", "欧股": "欧股"}.get(market.upper(), "A股")
+                idx_data = global_idx.get(region, []) or []
+            else:
+                idx_data = market_data_hub.get_index_realtime() or []
             context["index_realtime"] = idx_data[:10]
         except Exception as e:
             context["index_realtime"] = []
             errors.append(f"indices: {e}")
 
     # 4. Sector momentum + hot plates + sector heat (Phase 6.1.6)
-    if include_sectors:
+    # F1-4: 板块数据仅 A 股市场适用（HK/US 无本地板块采集）
+    if include_sectors and market.upper() in ("A", ""):
         try:
             sector_data = market_data_hub.get_sector_momentum() or []
             context["sector_momentum"] = sector_data[:15]

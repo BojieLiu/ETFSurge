@@ -188,13 +188,14 @@ async def get_active_factors() -> JSONResponse:
     for cat_name in sorted(categories.keys()):
         cat = categories[cat_name]
         factors = cat["factors"]
-        # Z03: 静态因子不计入 valid/warn/no_data/avg_ic 统计
+        # Z03: 静态因子不计入 valid/warn/no_data/avg_ic 统计，但单独计数
         computed = [f for f in factors if f["status"] != "static"]
         vals = [f["ic_value"] for f in computed if f["ic_value"] is not None]
         avg_ic = round(sum(vals) / len(vals), 4) if vals else None
         valid_count = sum(1 for f in computed if f["status"] == "valid")
         warn_count = sum(1 for f in computed if f["status"] == "warn")
         no_data_count = sum(1 for f in computed if f["status"] == "no_data")
+        static_count = sum(1 for f in factors if f["status"] == "static")
 
         cat_list.append({
             "name": cat_name,
@@ -204,6 +205,7 @@ async def get_active_factors() -> JSONResponse:
             "valid_count": valid_count,
             "warn_count": warn_count,
             "no_data_count": no_data_count,
+            "static_count": static_count,
             "factors": factors,
         })
 
@@ -213,6 +215,7 @@ async def get_active_factors() -> JSONResponse:
     total_valid = sum(c["valid_count"] for c in cat_list)
     total_warn = sum(c["warn_count"] for c in cat_list)
     total_no_data = sum(c["no_data_count"] for c in cat_list)
+    total_static = sum(c["static_count"] for c in cat_list)
     avg_all_ic = round(sum(all_ic_vals) / len(all_ic_vals), 4) if all_ic_vals else None
 
     body = {
@@ -222,6 +225,7 @@ async def get_active_factors() -> JSONResponse:
             "valid": total_valid,
             "warn": total_warn,
             "no_data": total_no_data,
+            "static": total_static,
             "avg_ic": avg_all_ic,
         },
         "updated_at": datetime.now(timezone.utc).isoformat(),

@@ -1608,7 +1608,10 @@ factor_definitions:
   category: "technical"
   subcategory: "rsi"
   frequency: "daily"
-  standardization: "zscore"
+  # F1-5: zscore → raw，保留真实 0-100 RSI。此前 z-score ×5 使设计因子中的
+  # RSI 变为 ±5 相对分，与 /indicators 端点（真实 RSI）不一致，rationale 的
+  # 「RSI<30 超卖」判断也失效（方案内 RSI 全部显示 <3）。
+  standardization: "raw"
   lookback_window: 14
   description: "14日相对强弱指标，标准RSI"
   tags: ["technical", "rsi", "oscillator", "standard"]
@@ -1621,7 +1624,8 @@ factor_definitions:
   category: "technical"
   subcategory: "rsi"
   frequency: "daily"
-  standardization: "zscore"
+  # F1-5: 同 rsi_14，保留真实 0-100 值
+  standardization: "raw"
   lookback_window: 24
   description: "24日相对强弱指标，中长期强弱"
   tags: ["technical", "rsi", "oscillator", "medium_term"]

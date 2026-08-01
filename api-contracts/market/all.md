@@ -227,6 +227,40 @@ GET /api/v1/market/indices/global
 
 ---
 
+## 10. 变更记录 / Changelog (F0-4 / F1-1 / F1-2)
+
+### 10.1 Realtime — 港股符号归一化（F1-1）
+
+`GET /api/v1/market/realtime/{symbol}?asset_type=HK` 支持 `00700.HK` 与 `00700` 两种输入；
+响应 `symbol` 字段**与请求保持一致**（含 `.HK` 后缀）。降级链：
+
+```
+HK: Sina(rt_hk 前缀) → Tencent(QQ, hk 前缀) → 东方财富(代码归一化匹配)
+A:  mootdx → Tencent(QQ) → Sina   ← F1-2 补 tencent，与批量版对齐
+```
+
+### 10.2 Indicators / Signal — stale 标记（F0-4）
+
+当外部数据源（mootdx/sina/akshare/netease）全部失败、`get_history` 回落
+到过期 K 线缓存时，响应附加：
+
+```json
+{
+  "rsi": 55.2,
+  "_stale": true,
+  "_stale_note": "数据源全部不可用，返回过期缓存（可能延迟）"
+}
+```
+
+前端可据此提示「数据可能延迟」。正常场景不出现 `_stale` 字段。
+
+### 10.3 History — stale 缓存兜底（F0-4）
+
+`GET /api/v1/market/history/{symbol}` 在全部数据源失败时，返回**任意年龄的
+过期 K 线缓存**（不再返回空数组），由后端 WARNING 日志标记 `stale`。
+
+---
+
 ## 10. 前后端检查表 / Frontend-Backend Checklist
 
 | Item | Frontend | Backend | Notes |

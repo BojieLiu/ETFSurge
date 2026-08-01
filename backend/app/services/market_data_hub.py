@@ -882,6 +882,28 @@ class MarketDataHub:
             return rows
         return None
 
+    # F0-4: 过期 K 线缓存兜底（akshare 熔断 / 全源失败时仍有数据）
+    _kline_stale_flags: dict[str, bool] = {}
+
+    def get_kline_rows_any(self, symbol: str) -> list[dict] | None:
+        """F0-4: 返回任意年龄的 K 线缓存（不检查新鲜度）。"""
+        return self._kline_cache_rows.get(symbol) or None
+
+    def get_kline_age_seconds(self, symbol: str) -> float | None:
+        """F0-4: 缓存数据龄（秒），无缓存返回 None。"""
+        import time
+        if symbol in self._kline_cache_rows:
+            return max(0.0, time.time() - self._kline_cache_ts)
+        return None
+
+    def mark_kline_stale(self, symbol: str, stale: bool = True) -> None:
+        """F0-4: 记录该 symbol 最近一次 history 是否走了 stale 兜底。"""
+        self._kline_stale_flags[symbol] = stale
+
+    def is_kline_stale(self, symbol: str) -> bool:
+        """F0-4: 查询该 symbol 是否最近一次 history 走了 stale 兜底。"""
+        return self._kline_stale_flags.get(symbol, False)
+
     async def refresh_kline(self, symbols: list[str]) -> None:
         """S5: 增量刷新 K 线缓存（R3: 直接 fetch_history + Semaphore 并发）。
 

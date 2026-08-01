@@ -737,11 +737,13 @@ class FactorRegistry:
 
         # 定义顶层分类到点分前缀的映射
         # 注意：etf.return_1m/return_3m/change_pct 等回报类因子由 etf. 前缀捕获到 momentum
-        # etf.price 由 valuation 捕获（价格本身也是估值维度之一）
+        # F1-5/§9.7 R1: 纯价格键 etf.price 不再是 valuation 分量——价格≠估值，
+        # 否则黄金/债券等无估值概念的资产也会产生「估值分」（字段错位假信号 +3.9）。
+        # 但 etf.price.* 子键（如 etf.price.dividend_yield 股息率）是真实估值维度，保留。
         CATEGORY_PREFIXES = {
             "technical": ["technical."],
             "momentum": ["etf.return_", "etf.change_pct", "china.policy.", "technical.signal."],
-            "valuation": ["style.", "etf.price"],
+            "valuation": ["style.", "etf.price."],
             "sentiment": ["sentiment."],
         }
 
@@ -754,6 +756,9 @@ class FactorRegistry:
             values = []
             for key, val in factor_scores.items():
                 if isinstance(val, (int, float)) and abs(val) > 0.001:
+                    # F1-5: 纯价格键（etf.price）不算估值——它只是最新价本身
+                    if top_key == "valuation" and key == "etf.price":
+                        continue
                     # 排除市值因子扭曲 valuation 聚合
                     if top_key == "valuation":
                         _short_key = key.split(".")[-1]

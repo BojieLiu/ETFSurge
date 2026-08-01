@@ -504,10 +504,11 @@ def section_portfolio():
                     risk_warnings = detail.get("risk_warnings", [])
                     check(f"risk_warnings 非空（{len(risk_warnings)} 条）", len(risk_warnings) > 0,
                           "" if risk_warnings else "空列表")
+                    # 有效类型集合：引擎规则兜底会产生 general/info 类型（非 LLM 枚举）
+                    _valid_rw = ("concentration", "drift", "correlation", "volatility", "liquidity", "general")
                     check(f"risk_warnings 含有效类型",
-                          all(w.get("type") in ("concentration","drift","correlation","volatility","liquidity")
-                              for w in risk_warnings),
-                          "有未知类型" if any(w.get("type") not in ("concentration","drift","correlation","volatility","liquidity")
+                          all(w.get("type") in _valid_rw for w in risk_warnings),
+                          "有未知类型" if any(w.get("type") not in _valid_rw
                                               for w in risk_warnings) else "")
     except Exception as e:
         check("GET /strategy-checks", False, str(e))
@@ -528,7 +529,8 @@ def section_portfolio():
     # POST /portfolio/daily-pnl
     try:
         r = requests.post(f"{BASE}/api/v1/portfolio/daily-pnl",
-                          json={"holdings": [{"symbol": "510300", "shares": 100, "cost_price": 4.0}]}, timeout=10)
+                          json={"total_capital": 100000,
+                                "holdings": [{"symbol": "510300", "shares": 100, "cost_price": 4.0}]}, timeout=10)
         check(f"POST /daily-pnl -> {r.status_code}",
               r.status_code == 200, "空数据" if r.status_code == 200 and not r.json() else "")
     except Exception as e:

@@ -204,6 +204,16 @@ def _exchange(symbol: str) -> str:
     return "sz"
 
 
+def _normalize_hk_symbol(symbol: str) -> str:
+    """F1-1: 港股代码归一化 — 去除 .HK 后缀、转大写，供各数据源前缀拼接。"""
+    if not symbol:
+        return symbol
+    s = symbol.upper()
+    if s.endswith(".HK"):
+        s = s[:-3]
+    return s
+
+
 def _sina_realtime(symbols: list[str], asset_type: str) -> list[dict[str, Any]]:
     if not symbols:
         return []
@@ -214,9 +224,16 @@ def _sina_realtime(symbols: list[str], asset_type: str) -> list[dict[str, Any]]:
         s.headers.update({"Referer": "https://finance.sina.com.cn"})
         results = []
         for sym in symbols:
-            pref = "s_sh" if sym in _SH_INDEXES else _exchange(sym)
+            # F1-1: 港股新浪前缀为 rt_hk + 5 位代码（如 rt_hk00700），
+            # 此前误用 _exchange() 拼出 sz00700 → 恒为空 → tencent 降级也失效。
+            if asset_type == "HK":
+                pref = "rt_hk"
+                sym_key = _normalize_hk_symbol(sym)
+            else:
+                pref = "s_sh" if sym in _SH_INDEXES else _exchange(sym)
+                sym_key = sym
             try:
-                r = s.get(f"https://hq.sinajs.cn/list={pref}{sym}", timeout=10)
+                r = s.get(f"https://hq.sinajs.cn/list={pref}{sym_key}", timeout=10)
                 text = r.text.strip()
                 if "=" not in text or '"' not in text:
                     continue
@@ -352,7 +369,15 @@ def _tencent_realtime(symbols: list[str], asset_type: str) -> list[dict[str, Any
     if not symbols:
         return []
     try:
-        codes = ",".join(f"{_exchange(s)}{s}" for s in symbols)
+        # F1-1: 港股腾讯前缀为 hk + 5 位代码（如 hk00700），此前误用
+        # _exchange() 拼出 sz00700 → tencent 分支恒空但不报错 → 直接返回空结构。
+        code_parts = []
+        for s in symbols:
+            if asset_type == "HK":
+                code_parts.append(f"hk{_normalize_hk_symbol(s)}")
+            else:
+                code_parts.append(f"{_exchange(s)}{s}")
+        codes = ",".join(code_parts)
         s = _session()
         r = s.get(f"http://qt.gtimg.cn/q={codes}", timeout=10)
         if not r.text:
@@ -367,8 +392,16 @@ def _tencent_realtime(symbols: list[str], asset_type: str) -> list[dict[str, Any
             code = parts[2]
             price = float(parts[3]) if parts[3] else 0
             prev_close = float(parts[4]) if parts[4] else 0
+            # F1-1: 返回符号归一化 — 以调用方传入的原始符号为准（含 .HK 后缀），
+            # 保证 _filtered() 的调用者拿到一致的 symbol（组合/自选存的是 00700.HK）。
+            out_sym = code
+            if asset_type == "HK":
+                for req in symbols:
+                    if _normalize_hk_symbol(req) == code.upper() or req.upper() == code.upper():
+                        out_sym = req
+                        break
             results.append({
-                "symbol": code, "name": parts[1],
+                "symbol": out_sym, "name": parts[1],
                 "price": price,
                 "change_pct": float(parts[32]) if parts[32] else 0,
                 "change_amount": float(parts[31]) if parts[31] else 0,
@@ -534,11 +567,16 @@ def _filtered(provider_fn, *args):
 # ── Public API ───────────────────────────────────────────────────
 
 def fetch_a_stock_realtime(symbol: str | None = None) -> list[dict[str, Any]]:
-    """A 股实时行情：mootdx → Sina，通过 SourceRegistry 熔断路由。"""
+    """A 股实时行情：mootdx → Tencent(QQ) → Sina，通过 SourceRegistry 熔断路由。
+
+    F1-2: 与批量版 fetch_a_stock_batch 降级链对齐（补 tencent），
+    修复 mootdx 熔断窗口期单只 A 股 realtime 间歇性为空的问题。
+    """
     if not symbol:
         return []
     return registry.route([
         ("mootdx", lambda: _filtered(_mootdx_realtime, [symbol])),
+        ("tencent", lambda: _filtered(_tencent_realtime, [symbol], "A")),
         ("sina", lambda: _filtered(_sina_realtime, [symbol], "A")),
     ], route_name="A_stock_realtime", operation="realtime", target=symbol) or []
 
@@ -570,11 +608,11 @@ def _em_hk_realtime(symbols: list[str]) -> list[dict[str, Any]]:
             _decode_df(df)
             hk_all = df.to_dict(orient="records")
             sync_memory_cache.set(hk_spot_cache_key, hk_all, 60)
-        sym_set = set(symbols)
+        sym_set = set(_normalize_hk_symbol(s) for s in symbols)
         results = []
         for row in hk_all:
             code = str(row.get("代码", row.get("symbol", "")))
-            if code not in sym_set:
+            if _normalize_hk_symbol(code) not in sym_set:
                 continue
             try:
                 price = float(row.get("最新价", 0) or 0)
@@ -584,8 +622,14 @@ def _em_hk_realtime(symbols: list[str]) -> list[dict[str, Any]]:
                 chg = float(row.get("涨跌幅", 0) or 0)
             except (ValueError, TypeError):
                 chg = 0
+            # F1-1: 返回符号与请求一致（含 .HK 后缀），保证契约稳定
+            out_sym = code
+            for req in symbols:
+                if _normalize_hk_symbol(req) == _normalize_hk_symbol(code):
+                    out_sym = req
+                    break
             results.append({
-                "symbol": code,
+                "symbol": out_sym,
                 "name": str(row.get("名称", row.get("name", ""))),
                 "price": price,
                 "change_pct": round(chg, 2),
@@ -1000,7 +1044,15 @@ def fetch_history(symbol: str, asset_type: str = "A", period: str = "daily") -> 
         if asset_type == "A":
             # ETF 代码跳过 mootdx（不支持），直接走 Sina（快且稳定）
             if _is_etf_code(symbol):
-                return _sina_history_cb(symbol, period)
+                rows = _sina_history_cb(symbol, period)
+                if rows:
+                    return rows
+                # F0-4: 网易财经日线兜底
+                if period == "daily":
+                    ne_rows = fetch_history_netease(symbol, "A", "daily")
+                    if ne_rows:
+                        return ne_rows
+                return []
             if period in ("15m", "30m", "1h"):
                 # Sina K 线为主力（稳定），akshare eastmoney 分钟线兜底
                 rows = _sina_history_cb(symbol, period)
@@ -1015,7 +1067,15 @@ def fetch_history(symbol: str, asset_type: str = "A", period: str = "daily") -> 
             items = _mootdx_history(symbol, period)
             if items:
                 return items
-            return _sina_history_cb(symbol, period)
+            rows = _sina_history_cb(symbol, period)
+            if rows:
+                return rows
+            # F0-4: 网易财经日线兜底（mootdx/sina 均失败时，akshare 熔断期间仍有数据）
+            if period == "daily":
+                ne_rows = fetch_history_netease(symbol, "A", "daily")
+                if ne_rows:
+                    return ne_rows
+            return []
         if asset_type in ("HK", "US"):
             return _fetch_akshare_history(symbol, asset_type, period)
         return []

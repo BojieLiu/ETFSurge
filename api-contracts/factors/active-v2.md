@@ -68,6 +68,7 @@ GET /api/v1/factors/active
     "valid": 20,
     "warn": 5,
     "no_data": 8,
+    "static": 3,
     "avg_ic": 0.0312
   },
   "updated_at": "2026-07-31T15:00:00Z"
@@ -102,7 +103,10 @@ GET /api/v1/factors/active
   - `reason = "静态政策标识因子，不计算 IC"`
   - `sample_count = 0`
   - `last_computed_at = null`
-- 这些因子**不计入** `summary.valid/warn/no_data` 统计，单独归类。
+- 这些因子**不计入** `summary.valid/warn/no_data` 统计，单独归类：
+  - `summary.static`（全局静态因子数）
+  - `category.static_count`（该分类下静态因子数）
+  - 恒等式：`valid + warn + no_data + static == total`（全端点）
 
 ---
 

@@ -78,6 +78,38 @@ def _normalize_segment(concept: str) -> str:
             return prefix
     return concept
 
+
+# F0-5 步骤 C: 科创系主题词（名称含这些词的候选合计权重受卫星预算 50% 配额约束）
+_TECH_THEMES = ("科创", "半导体", "芯片", "AI", "人工智能")
+
+
+def _is_tech_theme(name: str) -> bool:
+    """判断 ETF 名称是否属于科创系主题（用于卫星层配额裁剪）。"""
+    return any(t in (name or "") for t in _TECH_THEMES)
+
+
+# F0-5 步骤 E: 无估值概念的资产类别（黄金/债券/商品/跨境固收等）。
+# 这些资产没有 PE/PB 估值含义，价格因子产生的「估值分」是字段错位假信号，
+# 应视为估值缺失，使防御型 C2 惩罚分支（科创 -1.5）正常触发。
+_NO_VALUATION_ASSETS = (
+    "黄金", "白银", "原油", "商品", "豆粕", "有色", "煤炭", "钢铁",
+    "国债", "国开", "进出口", "地方债", "城投债", "可转债", "信用债",
+    "货币", "短融", "同业存单", "标普", "纳指", "纳斯达克", "道琼斯",
+    "日经", "德国", "法国", "欧洲", "恒生", "中概", "东南亚", "全球",
+)
+
+
+def _valuation_is_meaningful(factor_scores: dict[str, float], name: str = "") -> bool:
+    """F0-5 步骤 E: 估值信号是否「有意义」。
+
+    - 无估值概念资产（黄金/债券等）→ 恒 False（估值字段错位值不算数）
+    - 有概念但 |valuation| < 0.001 → False（无数据）
+    - 其余 → True
+    """
+    if any(t in (name or "") for t in _NO_VALUATION_ASSETS):
+        return False
+    return abs(factor_scores.get("valuation", 0.0)) > 0.001
+
 # P1-3: 强制保留标的（权重不低于 3%，确保进入分配）
 # 5% ×4=20% 占用过多预算导致总持仓不足 8 只，调整为 3% ×4=12%
 MANDATORY_CODES = {"510300", "560600", "518880", "511090"}
@@ -215,8 +247,11 @@ def _select_and_weight(
                         "国债", "标普500", "纳指", "MSCI"]
         name = cand.get("name", "")
         c2_bonus = 0.0
-        # 估值数据可用性检查：valuation 为 0 或所有 factor_scores 的 valuation 前缀因子均为 0
-        valuation_missing = abs(factor_scores.get("valuation", 0.0)) < 0.001
+        # F0-5 步骤 E: 估值信号需「有意义的非零」才视为可用——
+        # 排除字段错位值（黄金等无估值概念标的的 +3.9 类假信号）与
+        # ln_mcap/ln_float_mcap；否则判定 valuation_missing=True →
+        # 防御型科创惩罚分支（c2_bonus=-1.5）正常触发。
+        valuation_missing = not _valuation_is_meaningful(factor_scores, name)
         # 排除 ln_mcap / ln_float_mcap——它们只是市值对数，不是真实估值信号，
         # 且对所有大市值 ETF 值都约 25.33，毫无区分度
         has_meaningful_style = any(
@@ -270,6 +305,51 @@ def _select_and_weight(
 
     scores = [s[0] for s in selected]
     weights = _power_law_weights(scores, budget)
+
+    # F0-5 步骤 C: 卫星层科创系配额 — 名称含 科创/半导体/芯片/AI 的候选
+    # 合计权重 ≤ 卫星预算的配额比例（防御型 40% 收紧至验收线 10% 以内，
+    # 平衡/进攻 50%），超出部分按 composite 降序裁剪、权重回补其余卫星，
+    # 防止科创系包场（同主题不同概念名绕过去重）。
+    if layer == "satellite" and budget > 0:
+        tech_alloc_total = sum(
+            w for (_, cand, _), w in zip(selected, weights)
+            if _is_tech_theme(cand.get("name", ""))
+        )
+        tech_cap_ratio = 0.4 if strategy == "defensive" else 0.5
+        tech_cap = budget * tech_cap_ratio
+        if tech_alloc_total > tech_cap + 1e-9:
+            # 科技候选按 composite 降序，保留到预算上限
+            kept: list[tuple] = []
+            dropped: list[tuple] = []
+            acc = 0.0
+            for item, w in zip(selected, weights):
+                if _is_tech_theme(item[1].get("name", "")):
+                    if acc + w <= tech_cap:
+                        kept.append((item, w))
+                        acc += w
+                    else:
+                        room = tech_cap - acc
+                        if room > 1e-9:
+                            kept.append((item, room))
+                            acc = tech_cap
+                        dropped.append((item, w - room if room > 1e-9 else w))
+                else:
+                    kept.append((item, w))
+            # 回收被裁剪的权重，按 composite 降序回补其余卫星（不引入 CASH 膨胀）
+            reclaimed = sum(w for _, w in dropped)
+            non_tech_kept = [(i, w) for i, w in kept if not _is_tech_theme(i[1].get("name", ""))]
+            if reclaimed > 0 and non_tech_kept:
+                total_non_tech = sum(w for _, w in non_tech_kept)
+                if total_non_tech > 0:
+                    new_kept = []
+                    for i, w in kept:
+                        if _is_tech_theme(i[1].get("name", "")):
+                            new_kept.append((i, w))
+                        else:
+                            new_kept.append((i, w + reclaimed * w / total_non_tech))
+                    kept = new_kept
+            selected = [i for i, _ in kept]
+            weights = [w for _, w in kept]
 
     results: list[dict[str, Any]] = []
     for (composite, cand, factor_scores), w in zip(selected, weights):
@@ -343,7 +423,10 @@ def _filter_satellite_by_profile(
         "aggressive": 0.7,
         "balanced": 0.8,
     }
-    keep_count = max(1, int(len(scored) * KEEP_RATIO.get(profile_key, 1.0)))
+    # F0-5 步骤 D: 卫星数量下限 ≥ 4（预算允许时），防止候选池窄时
+    # 卫星层被裁剪到只剩 2 只、失去「多赛道分散」意义。
+    keep_count = max(4, int(len(scored) * KEEP_RATIO.get(profile_key, 1.0)))
+    keep_count = min(keep_count, len(scored))
     return [item for _, item in scored[:keep_count]]
 
 
@@ -454,6 +537,52 @@ def allocate(
             penalize_symbols=_penalize,
         )
         allocations.extend(sat_alloc)
+
+        # F0-5 步骤 D: 卫星数量下限 ≥4 — 概念组去重/配额裁剪后实际入选
+        # 卫星仍 <4 时，从 core 层未入选者按 composite 降序补足（symbol 级
+        # 未入选即允许，绕过 segment 去重——否则 510300 等主流宽基因与
+        # core 同 segment 被过滤，卫星层只剩 1-2 只）。
+        if len(sat_alloc) < 4:
+            used_syms = {a.get("symbol") for a in allocations}
+            _backup = []
+            for c in core_candidates:
+                sym = c.get("symbol", "")
+                if sym in used_syms:
+                    continue
+                # 防御型：补足不引入科创系（科创集中度验收 ≤10%）
+                if profile_key == "defensive" and _is_tech_theme(c.get("name", "")):
+                    continue
+                fs = factor_matrix.get(sym, {})
+                composite = (
+                    fs.get("technical", 0.0) * 0.3
+                    + fs.get("momentum", 0.0) * 0.3
+                    + fs.get("valuation", 0.0) * 0.2
+                    + fs.get("sentiment", 0.0) * 0.2
+                )
+                _backup.append((composite, c))
+            _backup.sort(key=lambda x: -x[0])
+            need = 4 - len(sat_alloc)
+            backup_cands = [dict(c) for _, c in _backup[:need]]
+            for c in backup_cands:
+                c.pop("segment", None)
+            # 补足用剩余卫星预算（避免与 sat_alloc 重复分配导致总权重超标）
+            spent = sum(
+                a.get("weight", 0.0) for a in allocations
+                if a.get("layer") == "satellite"
+            )
+            remaining = max(0.0, budgets.get("satellite", 0.0) - spent)
+            if backup_cands and remaining > 1e-6:
+                backup_alloc = _select_and_weight(
+                    backup_cands,
+                    factor_matrix,
+                    remaining,
+                    layer="satellite",
+                    regime=regime,
+                    strategy=profile_key,
+                    max_count=need,
+                    penalize_symbols=_penalize,
+                )
+                allocations.extend(backup_alloc)
 
         # C2: 如果卫星层科技主题集中度过高，引入科创50作为分散工具
         tech_industries = {"电子", "通信", "计算机", "半导体"}

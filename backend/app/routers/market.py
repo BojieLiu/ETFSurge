@@ -271,7 +271,15 @@ async def indicators(
     period: str = Query("daily"),
 ) -> dict:
     hist = await market_data_hub.get_market_history(symbol, asset_type, period)
-    return compute_all_indicators(hist)
+    result = compute_all_indicators(hist)
+    # F0-4: 全源失败走 stale 缓存兜底时，显式标记数据新鲜度
+    try:
+        if market_data_hub.is_kline_stale(symbol):
+            result["_stale"] = True
+            result["_stale_note"] = "数据源全部不可用，返回过期缓存（可能延迟）"
+    except Exception:
+        pass
+    return result
 
 
 @router.get("/signal/{symbol}")
@@ -282,7 +290,14 @@ async def signal(
 ) -> dict:
     hist = await market_data_hub.get_market_history(symbol, asset_type, period)
     ind = compute_all_indicators(hist)
-    return generate_signal(ind)
+    result = generate_signal(ind)
+    # F0-4: stale 标记透传
+    try:
+        if market_data_hub.is_kline_stale(symbol):
+            result["_stale"] = True
+    except Exception:
+        pass
+    return result
 
 
 @router.get("/signal/debug/{symbol}")

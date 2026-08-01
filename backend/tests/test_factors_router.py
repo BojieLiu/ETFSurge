@@ -51,11 +51,11 @@ class TestActiveFactorsEndpoint:
         assert s["avg_ic"] is None or isinstance(s["avg_ic"], float)
 
     def test_summary_counts_total(self):
-        """valid + warn + no_data == total."""
+        """valid + warn + no_data + static == total（Z03: 静态因子单独计数）。"""
         resp = client.get("/api/v1/factors/active")
         body = resp.json()
         s = body["summary"]
-        assert s["valid"] + s["warn"] + s["no_data"] == body["total"]
+        assert s["valid"] + s["warn"] + s["no_data"] + s["static"] == body["total"]
 
     def test_category_structure(self):
         """Each category has required fields: name, count, factors, valid_count, warn_count, no_data_count."""
@@ -112,11 +112,11 @@ class TestActiveFactorsEndpoint:
         assert all_types_valid
 
     def test_category_counts_aggregate(self):
-        """Category-level valid_count + warn_count + no_data_count == count."""
+        """Category-level valid+warn+no_data+static == count（Z03: static 单独计数）。"""
         resp = client.get("/api/v1/factors/active")
         body = resp.json()
         for cat in body["categories"]:
-            assert cat["valid_count"] + cat["warn_count"] + cat["no_data_count"] == cat["count"]
+            assert cat["valid_count"] + cat["warn_count"] + cat["no_data_count"] + cat["static_count"] == cat["count"]
 
     def test_summary_totals_match_category_sums(self):
         """Global summary valid/warn/no_data match sum of category values."""

@@ -142,20 +142,48 @@ def _ak_concept_sectors_v2():
 
 
 def _ak_sector_stocks(sector_code: str):
+    """akshare 板块成分股。
+
+    F1-6: akshare 的 `stock_board_industry_cons_em(symbol=...)` 接收的是
+    **板块名称**（如"半导体"）而非板块代码（BK0447）。此前直接传代码 →
+    接口静默返回错位数据（半导体板块返回软件股）。修复：先建立
+    行业/概念两张表的 代码→名称 映射，把传入代码转成名称再查询。
+    """
     try:
         import akshare as ak
-        # 尝试行业板块成分股
-        df = ak.stock_board_industry_cons_em(symbol=sector_code)  # type: ignore
-        if df is not None and not df.empty:
-            out = []
-            for _, r in df.iterrows():
-                out.append({
-                    "stock_code": str(r.get("代码", "") or ""),
-                    "stock_name": str(r.get("名称", "") or ""),
-                })
-            return out
-        # 试概念板块
-        df = ak.stock_board_concept_cons_em(symbol=sector_code)  # type: ignore
+        import pandas as pd
+
+        # F1-6: 板块代码 → 名称映射（行业 + 概念）
+        name_by_code: dict[str, str] = {}
+        for df_fn in (ak.stock_board_industry_name_em, ak.stock_board_concept_name_em):
+            try:
+                df = df_fn()
+                if df is not None and not df.empty:
+                    for _, r in df.iterrows():
+                        code = str(r.get("板块代码", "") or "")
+                        name = str(r.get("板块名称", "") or "")
+                        if code and name:
+                            name_by_code.setdefault(code, name)
+            except Exception:
+                continue
+        # 传入代码 → 转名称；传入名称 → 原样使用（老调用方兼容）
+        query_name = name_by_code.get(str(sector_code), sector_code)
+
+        # 尝试行业板块成分股（用名称查询）
+        try:
+            df = ak.stock_board_industry_cons_em(symbol=query_name)  # type: ignore
+            if df is not None and not df.empty:
+                out = []
+                for _, r in df.iterrows():
+                    out.append({
+                        "stock_code": str(r.get("代码", "") or ""),
+                        "stock_name": str(r.get("名称", "") or ""),
+                    })
+                return out
+        except Exception:
+            pass
+        # 降级：概念板块成分股（同样用名称查询）
+        df = ak.stock_board_concept_cons_em(symbol=query_name)  # type: ignore
         if df is not None and not df.empty:
             out = []
             for _, r in df.iterrows():

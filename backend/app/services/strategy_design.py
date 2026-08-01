@@ -423,15 +423,57 @@ async def _compute_fund_flow(market_data_hub) -> dict:
 
 
 async def _build_market_context(market_data_hub) -> dict:
-    """从 market_data_hub 构建市场上下文（真异步）。"""
+    """从 market_data_hub 构建市场上下文（真异步）。
+
+    F1-3: ①index_realtime 为空时从全球指数分组兜底（缓存未刷新场景）；
+    ②benchmark_stocks 填充领涨/领跌指数成分（此前恒为空数组，LLM 无大盘龙头信号）。
+    """
     fund_flow = await _compute_fund_flow(market_data_hub)
+
+    index_realtime = market_data_hub.get_index_realtime() or []
+    # F1-3: 缓存未刷新/为空时从全球指数分组兜底（A 股区域）
+    if not index_realtime:
+        try:
+            global_idx = await asyncio.wait_for(market_data_hub.get_global_indices(), timeout=15) or {}
+            index_realtime = global_idx.get("A股", []) or []
+        except Exception as e:
+            logger.debug("[strategy_design] global indices fallback failed: %s", e)
+
+    # F1-3: 领涨/领跌板块头部成分作为 benchmark_stocks（龙头股信号）
+    benchmark_stocks: list[dict] = []
+    try:
+        sector_momentum = market_data_hub.get_sector_momentum() or []
+        top_sectors = sorted(
+            [s for s in sector_momentum if isinstance(s.get("change_pct"), (int, float))],
+            key=lambda s: -s["change_pct"],
+        )[:2] + sorted(
+            [s for s in sector_momentum if isinstance(s.get("change_pct"), (int, float))],
+            key=lambda s: s["change_pct"],
+        )[:1]
+        for sec in top_sectors:
+            code = sec.get("sector_code") or sec.get("code") or ""
+            if not code:
+                continue
+            try:
+                stocks = market_data_hub.get_sector_stocks(code) or []
+                for st in stocks[:3]:
+                    benchmark_stocks.append({
+                        "symbol": st.get("stock_code") or st.get("code", ""),
+                        "name": st.get("stock_name") or st.get("name", ""),
+                        "sector": sec.get("sector_name") or sec.get("name", ""),
+                    })
+            except Exception:
+                continue
+    except Exception as e:
+        logger.debug("[strategy_design] benchmark_stocks build failed: %s", e)
+
     return {
         "market_regime": market_data_hub.get_market_regime() or "range_bound",
         "market_sentiment": market_data_hub.get_market_sentiment() or {"sentiment_index": 50, "sentiment_label": "中性"},
-        "index_realtime": market_data_hub.get_index_realtime() or [],
+        "index_realtime": index_realtime,
         "sector_momentum": market_data_hub.get_sector_momentum() or [],
         "fund_flow": fund_flow,
-        "benchmark_stocks": [],
+        "benchmark_stocks": benchmark_stocks[:9],
     }
 
 

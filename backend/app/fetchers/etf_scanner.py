@@ -53,6 +53,48 @@ MIN_AVG_AMOUNT = 10_000_000   # 元 (1000万)
 CORE_REQUIRED = ["510300", "560600"]   # 沪深300ETF, 中证A500ETF
 DEFENSE_REQUIRED = ["518880", "511090"]  # 黄金ETF, 30年国债ETF
 
+# F0-5 步骤 B: 主流宽基静态兜底清单（不依赖当日涨幅榜，使 CORE_REQUIRED/
+# DEFENSE_REQUIRED 的注入逻辑真正生效）。full_pipeline 组装候选池后，
+# 将清单成员补录进对应层——否则涨幅榜 Top25 会把主流宽基挤出候选池，
+# layer_ranking 的 required 注入（仅从候选池 items 查找）静默失效。
+WIDE_BASIS_STATIC = [
+    {"symbol": "510300", "name": "沪深300ETF", "layer": "core", "tracked_index": "沪深300",
+     "fund_scale": 900.0, "amount": 2_000_000_000, "price": 0.0, "change_pct": 0.0},
+    {"symbol": "510500", "name": "中证500ETF", "layer": "core", "tracked_index": "中证500",
+     "fund_scale": 800.0, "amount": 1_500_000_000, "price": 0.0, "change_pct": 0.0},
+    {"symbol": "510050", "name": "上证50ETF", "layer": "core", "tracked_index": "上证50",
+     "fund_scale": 700.0, "amount": 1_000_000_000, "price": 0.0, "change_pct": 0.0},
+    {"symbol": "588000", "name": "科创50ETF", "layer": "core", "tracked_index": "科创50",
+     "fund_scale": 600.0, "amount": 800_000_000, "price": 0.0, "change_pct": 0.0},
+    {"symbol": "159915", "name": "创业板ETF", "layer": "core", "tracked_index": "创业板指",
+     "fund_scale": 500.0, "amount": 700_000_000, "price": 0.0, "change_pct": 0.0},
+    {"symbol": "518880", "name": "黄金ETF", "layer": "defense", "tracked_index": "黄金",
+     "fund_scale": 400.0, "amount": 1_200_000_000, "price": 0.0, "change_pct": 0.0},
+    {"symbol": "511090", "name": "30年国债ETF", "layer": "defense", "tracked_index": "国债",
+     "fund_scale": 300.0, "amount": 500_000_000, "price": 0.0, "change_pct": 0.0},
+]
+
+# F0-5 步骤 B: 静态兜底注入——优先复用 raw 数据（若有实时成交额/规模），
+# 否则使用静态元数据。
+def _inject_static_wide_basis(
+    layer_items: list[dict[str, Any]],
+    layer: str,
+    raw_etfs: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    raw_by_code = {e.get("symbol"): e for e in raw_etfs or []}
+    existing = {e["symbol"] for e in layer_items}
+    for item in WIDE_BASIS_STATIC:
+        if item["layer"] != layer or item["symbol"] in existing:
+            continue
+        merged = dict(item)
+        raw = raw_by_code.get(item["symbol"])
+        if raw:
+            for k in ("price", "change_pct", "amount", "fund_scale", "turnover", "volume", "name", "tracked_index"):
+                if raw.get(k):
+                    merged[k] = raw[k]
+        layer_items.append(merged)
+    return layer_items
+
 # P0-3: tracked_index 关键词映射（从 ETF 名称提取指数名）
 INDEX_KEYWORDS = {
     "沪深300": "沪深300",
@@ -177,23 +219,36 @@ def _fetch_em_etf_list() -> list[dict] | None:
     fields = "f12,f14,f2,f3,f62,f72,f84,f85,f184,f66,f45,f168,f20,f21,f115,f116"
     all_items = []
     total = None
+    # F0-5 步骤 A: fid=f3（涨跌幅）→ fid=f6（成交额）排序，
+    # 主流宽基成交额/规模恒居前列，天然留在池内（不再被题材股涨幅榜挤出）。
     for page in range(1, 20):
         url = (f"http://push2delay.eastmoney.com/api/qt/clist/get?"
-               f"pn={page}&pz=100&po=1&np=1&fs=m:1+t:2&fields={fields}&fid=f3")
-        try:
-            with no_proxy():
-                r = _req.get(url, timeout=5, headers=headers)
-            data = r.json()
-            diff = data.get("data", {}).get("diff", [])
-            if page == 1:
-                total = data.get("data", {}).get("total", 0)
-            if not diff:
-                break
-            all_items.extend(diff)
-            # 已取够全部，提前跳出
-            if total and len(all_items) >= total:
-                break
-        except Exception:
+               f"pn={page}&pz=100&po=1&np=1&fs=m:1+t:2&fields={fields}&fid=f6")
+        # F0-5 步骤 A: 分页失败重试 1 次，仍失败则记录 WARNING 继续下一页（不静默丢页）
+        stop_paging = False
+        for attempt in range(2):
+            try:
+                with no_proxy():
+                    r = _req.get(url, timeout=5, headers=headers)
+                data = r.json()
+                diff = data.get("data", {}).get("diff", [])
+                if page == 1:
+                    total = data.get("data", {}).get("total", 0)
+                if not diff:
+                    stop_paging = True  # 无更多数据
+                    break
+                all_items.extend(diff)
+                if total and len(all_items) >= total:
+                    stop_paging = True  # 已取够全部
+                    break
+                break  # 本页成功且未取够 → 下一页
+            except Exception:
+                if attempt == 1:
+                    logger.warning(
+                        "[etf_scanner] EM ETF list page %d failed twice, skipping (not breaking)",
+                        page,
+                    )
+        if stop_paging:
             break
     if not all_items:
         return None
@@ -644,6 +699,11 @@ def full_pipeline(raw_etfs: list[dict] | None = None) -> dict[str, list[dict]]:
     core = layer_ranking(layers.get("core", []), top_n=25, required=CORE_REQUIRED)
     satellite = layer_ranking(layers.get("satellite", []), top_n=25)
     defense = layer_ranking(layers.get("defense", []), top_n=25, required=DEFENSE_REQUIRED)
+
+    # F0-5 步骤 B: 主流宽基静态兜底注入 — 涨幅榜 Top25 缺主流宽基时补录，
+    # 使 CORE_REQUIRED/DEFENSE_REQUIRED 真正生效（层内 required 注入只查候选池 items）。
+    core = _inject_static_wide_basis(core, "core", raw_etfs)
+    defense = _inject_static_wide_basis(defense, "defense", raw_etfs)
 
     # 标记 layer
     for e in core:

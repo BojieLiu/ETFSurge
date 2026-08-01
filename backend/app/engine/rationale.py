@@ -7,19 +7,28 @@ import hashlib
 from typing import Any
 
 # ── 层角色短语池（P2 改进 #5：模板多样化） ────────────────────────────
+# F1-8/§9.7 R3: 短语池按标的风格（_style_probe）选择，不再按 layer 固定套用。
+# 「压舱石/低波动」措辞只属于低波宽基池；科创类指数强制归入高波成长池。
 _CORE_PHRASES = [
-    lambda n: f"在方案中作为核心底仓配置，跟踪{n}",
+    lambda n: f"作为组合压舱石，低波动宽基{n}",
     lambda n: f"核心层选择——{n}，兼具流动性与分散性",
     lambda n: f"作为核心宽基{n}，提供市场β收益",
     lambda n: f"{n}核心层配置，大盘价值代表性",
     lambda n: f"以{n}作为组合压舱石，低波动宽基",
 ]
 
-_SATELLITE_PHRASES = [
-    lambda n: f"卫星层配置{n}，增强组合弹性",
+_HIGH_GROWTH_PHRASES = [
+    lambda n: f"高弹性成长指数{n}，波动较大但进攻性强",
+    lambda n: f"成长风格{n}，高 Beta 品种适合进攻配置",
+    lambda n: f"主题弹性{n}，波动与收益空间同步放大",
+    lambda n: f"高波动成长{n}，博取景气赛道超额收益",
+    lambda n: f"科创成长{n}，弹性充足、适合卫星仓位",
+]
+
+_THEME_SATELLITE_PHRASES = [
+    lambda n: f"主题卫星{n}，参与赛道轮动机会",
     lambda n: f"行业{n}作为弹性卫星，博取超额收益",
-    lambda n: f"{n}卫星仓位，参与赛道轮动机会",
-    lambda n: f"主题{n}卫星配置，高弹性品种",
+    lambda n: f"{n}卫星仓位，高弹性品种",
     lambda n: f"{n}作为卫星增强，聚焦高景气方向",
 ]
 
@@ -31,18 +40,49 @@ _DEFENSE_PHRASES = [
     lambda n: f"低相关性{n}，有效平衡组合波动",
 ]
 
+# F1-8/§9.7 R3: 标的风格 → 短语池映射
+_STYLE_TO_POOL = {
+    "low_vol_wide": _CORE_PHRASES,
+    "high_growth": _HIGH_GROWTH_PHRASES,
+    "theme_satellite": _THEME_SATELLITE_PHRASES,
+    "defensive": _DEFENSE_PHRASES,
+}
 
-def _layer_phrase(layer: str, asset_name: str, sym: str = "") -> str:
-    """从短语池中选择一条层角色描述，用 symbol hash 保证稳定性。"""
-    pool = {
-        "core": _CORE_PHRASES,
-        "satellite": _SATELLITE_PHRASES,
+
+def _style_probe(meta: dict | None = None) -> str:
+    """F1-8/§9.7 R3: 标的风格探测（纯函数，无 I/O）。
+
+    按 tracked_index / 名称归入 {low_vol_wide 低波宽基 / high_growth 高波成长 /
+    theme_satellite 主题卫星 / defensive 防御资产} 四类。
+    科创/半导体/芯片 类指数**强制**归入 high_growth——绝不落「压舱石/低波动」池。
+    """
+    meta = meta or {}
+    name = meta.get("name", "") or ""
+    tidx = meta.get("tracked_index", "") or ""
+    combo = f"{tidx} {name}"
+    if any(t in combo for t in ("科创", "半导体", "芯片", "人工智能", "AI")):
+        return "high_growth"
+    if any(t in combo for t in ("黄金", "白银", "国债", "债券", "货币", "商品",
+                                "原油", "豆粕", "标普", "纳指", "日经")):
+        return "defensive"
+    if any(t in combo for t in ("红利", "低波", "价值", "上证50", "沪深300",
+                                "中证A", "中证500", "中证800", "创业板")):
+        return "low_vol_wide"
+    return "theme_satellite"
+
+
+def _layer_phrase(layer: str, asset_name: str, sym: str = "", style: str = "") -> str:
+    """从风格短语池中选择一条完整描述，用 symbol hash 保证稳定性。
+
+    F1-8: 短语生成完整句式（不再以「在方案中」开头），调用方统一以
+    「在{label}方案中{layer_desc}」拼装，杜绝「在方案中在方案中」重复。
+    """
+    pool = _STYLE_TO_POOL.get(style) or {
+        "core": _CORE_PHRASES, "satellite": _THEME_SATELLITE_PHRASES,
         "defense": _DEFENSE_PHRASES,
-    }
-    phrasers = pool.get(layer, _CORE_PHRASES)
-    # Deterministic choice: seed from symbol hash so the same symbol gets the same phrase
-    idx = int(hashlib.md5(sym.encode()).hexdigest(), 16) % len(phrasers) if sym else 0
-    return phrasers[idx](asset_name)
+    }.get(layer, _CORE_PHRASES)
+    idx = int(hashlib.md5(sym.encode()).hexdigest(), 16) % len(pool) if sym else 0
+    return pool[idx](asset_name)
 
 
 def build_rationale(
@@ -124,15 +164,31 @@ def build_rationale(
     if valuation is not None and valuation != 0:
         parts.append(f"估值因子 {valuation:+.3f}")
 
-    # 4. 综合信号
-    signal = factor_scores.get("technical.signal.overall")
-    if signal is not None:
-        if signal > 0.2:
-            parts.append("综合信号偏多")
-        elif signal < -0.2:
-            parts.append("综合信号偏空")
-        else:
-            parts.append("综合信号中性")
+    # 4. 综合信号 — F1-8/§9.7 R5: 改用三因子加权聚合（0.4技术+0.4估值+0.2动量），
+    # 含「双弱不判多」硬约束与单因子极端值封顶（纯函数，无 I/O）。
+    try:
+        from ..analysis.signal import composite_signal
+        _t = factor_scores.get("technical", 0.0) or 0.0
+        _v = factor_scores.get("valuation", 0.0) or 0.0
+        _m = factor_scores.get("momentum", 0.0) or 0.0
+        if any((_t, _v, _m)):
+            cs = composite_signal(_t, _v, _m)
+            if cs["signal"] == "buy":
+                parts.append(f"综合信号偏多（{cs['score']:+.2f}）")
+            elif cs["signal"] == "sell":
+                parts.append(f"综合信号偏空（{cs['score']:+.2f}）")
+            else:
+                parts.append(f"综合信号中性（{cs['score']:+.2f}）")
+    except Exception:
+        # 极端兜底：退回基于技术信号 overall 的旧判断
+        signal = factor_scores.get("technical.signal.overall")
+        if signal is not None:
+            if signal > 0.2:
+                parts.append("综合信号偏多")
+            elif signal < -0.2:
+                parts.append("综合信号偏空")
+            else:
+                parts.append("综合信号中性")
 
     # 5. 市场状态
     regime_desc = {
@@ -147,10 +203,11 @@ def build_rationale(
     if regime and regime in regime_desc:
         parts.append(regime_desc[regime])
 
-    # 6. 层角色（模板多样化）
+    # 6. 层角色（F1-8/§9.7 R3: 按标的风格选池，完整句式一次生成，杜绝重复拼接）
     sl = {"defensive": "防御型", "balanced": "平衡型", "aggressive": "进攻型"}
     label = sl.get(strategy, strategy)
-    layer_desc = _layer_phrase(layer, asset_name, code)
+    style = _style_probe(meta)
+    layer_desc = _layer_phrase(layer, asset_name, code, style)
     parts.append(f"在{label}方案中{layer_desc}")
 
     return "；".join(parts) if parts else f"{asset_name} — 基于因子评分入选"
