@@ -1,6 +1,7 @@
 ﻿# ETF Surge 方案实施总计划
 
-> 生成日期: 2026-07-31 | 版本: **v44.0**
+> 生成日期: 2026-08-01 | 版本: **v45.0**
+> ✅ **Phase 45 已完成**（2026-08-01）：**主计划剩余项评估收尾（零代码改动）** — 对 §1.4「未开始」表 17 项逐一代码交叉核实：**13 项确认已完成**（design-check-quality P1-P3 / news-pipeline P1 / sector-concept / market-analysis / five-improvements #1（portfolio_service.py:473 调 get_market_regime）/ frontend-performance Step 2-3 / scaffold-factor / roadmap-data-source Phase A-D7 / e2e-testing 16 spec / factor-model-extension / design-report A2+B1-B3+C1+C2（_compute_fund_flow dict 池聚合已实现）/ config-management（ConfigView.vue 285 行 + 路由 /admin/config，Phase 6.2 已实施））；**剩余 4 项评估结论**：frontend-ui Step 10（card hover）低收益不实施、Step 11（AppCard）收益为零不实施（AppCard 组件尚不存在，成本 2-3h）、Step 9（emoji→SvgIcon 198 处会破坏测试断言）不建议、frontend-testing P3/C4 依赖 UI 定型暂缓。详见下方 v45.0。
 > ✅ **Phase 44 已完成**（2026-08-01）：实施 `docs/round2-system-diagnosis-and-optimization-plan.md` **P4 测试防护补强 T1-T14 全部 14 项**。TDD + 契约校准：新增 4 个测试文件 17 用例全 PASS（test_circuit_drill 3 / test_design_quality_gate 8 / test_contract_auto 3 / test_llm_canary 3），verify_e2e 新增 5 个模块（db-integrity / data-hygiene / nginx-proxy / factor-thresholds / design-quality）；**契约自动校验（T11）校准 12 处契约-实现漂移**（circuit-breaker/sources/strategy-check/design 等过期端点）；数据卫生门禁（T13）清理 1 条真实残留脏数据；已覆盖确认 T9/T10/T12 及 T3④⑤、T7-reason（P1/P3 轮完成）。详见下方 v44.0。
 > ✅ **Phase 43 已完成**（2026-08-01）：实施 `docs/round2-system-diagnosis-and-optimization-plan.md` **P3 全部 7 项**（F3-1 新闻分级 / F3-2 搜索排序 / F3-3 现金仓位 / F3-4 Z04 四因子 / F3-5 sentiment 因子 / F3-6 LLM 限流重试 / F3-7 美股名称，含 §9.5 专项步骤 A-D 与 §9.10 专项步骤 A-D）。契约驱动 + TDD：新增 5 个测试文件 31 用例全 PASS（test_search_budget_usname 7 / test_llm_rate_limit 4 / test_factor_etf_specific 7 / test_sentiment_factors 6 / test_news_level_classification 6 / test_z29_search 1 断言更新），全量 pytest **1028 PASS**、mypy 0 错误；本地实测 calculate 15ms / factors/active etf_specific no_data 减少 / sentiment 注入生效。详见下方 v43.0。
 > ✅ **Phase 42 已完成**（2026-08-01）：实施 `docs/round2-system-diagnosis-and-optimization-plan.md` **P2 全部 9 项**（F2-1 组合计算并行+15s缓存 / F2-2 首页骨架屏 / F2-3 sectors/heat 路由 / F2-4 UnifiedAnalysis SSE 接线 / F2-5 预热并行 / F2-6 板块字段归一化+个股信息增强 / F2-7 快速分析入口 / F2-8 资讯行内展开 / F2-9 新闻 prompt 硬约束，含 §9.8 专项步骤 A-F 与 §9.9 专项步骤 A-B）。契约驱动 + TDD：新增 4 个后端测试文件 13 用例 + 2 个前端测试文件 11 用例全 PASS，全量 pytest **998 PASS**、前端 vitest **284 PASS**、verify_e2e portfolio 模块 52/54（仅剩 LLM 429 限流 Z07 已知项）；本地实测 F2-1 calculate 中位数 **15ms**（验收 <2s）、F2-3 sectors/heat 200、F2-6 hot-plates 11 行归一化字段完整。详见下方 v42.0。
@@ -79,11 +80,11 @@
 
 | 文档 | 完成部分 | 未完成部分 |
 |------|---------|-----------|
-| `archived/design-report-optimization-plan.md` | 报告管道就绪、`_validate_report_consistency` 实现、WS 推送链路完整、`report_quality` 分级（full/fallback/none/pending）；A1（表格"因子"→"多因子评分"）已随 Phase 0.5 落地；管道升级为顺序 Pipeline（Phase 1.0） | A2（预期收益随市态调整）、B1-B3（LLM prompt 分析增强）、C1（全市场净流入信号）、C2（卫星层科技 ETF）—— 其中 A2/C1/C2 依赖因子分正常后验证效果 |
-| `five-improvements-plan.md` | #2（极端下跌排除）+ #3（防御有效性）+ #4（freshness 检查）+ #5（理由多样化）已实现 | #1（统一市态判定）仍待完成，~15 行 |
+| `archived/design-report-optimization-plan.md` | ✅ **v45.0 全部完成**：报告管道/`_validate_report_consistency`/WS 推送/`report_quality` 分级；A1 ✅（Phase 0.5）；A2 ✅、B1-B3 ✅、C2 ✅（allocation_engine 科技集中度）；**C1 ✅（全市场净流入：`strategy_design._compute_fund_flow` dict 池聚合 + fund_flow 注入 market_context）** | 无（原「A2/C1/C2 依赖因子分」已随因子全 LIVE + F3-4/F3-5 数据注入关闭） |
+| `five-improvements-plan.md` | ✅ **5/5 已完成（v45.0 核实）**：#1（统一市态判定，`portfolio_service.py:473` 调 `get_market_regime()`）+ #2 + #3 + #4 + #5 | 无 |
 | `market-awareness-and-data-source-plan.md` | Stooq 已在全球指数降级链中引用；§4 数据源替换已转入 `roadmap-data-source-unified.md`；**§5 市场感知联动已实施（Phase 5.1）**：MarketContext 数据类、market_router 路由层、多市场 regime 缓存、design-async 多市场参数、sector-analysis 市场感知、llm-report/stream 市场过滤 | ✅ **§5 已实施**（Phase 5.1）：`core/market_context.py` + `services/market_router.py` 新增，35 个新单测全 PASS。详见 §4 Phase 5.1 |
-| `factor-model-extension-plan.md` | 因子注册表从 12 个扩展到 **~33** 个计算函数（当前 _CORE_FACTORS=33）；异步边界修复（Phase 0.9）后因子计算基于真实数据 | YAML 中 167 个远未全覆盖；IC 追踪器从未运行 |
-| `design-check-quality-report.md` | 19 个问题中 **14 项已落地**：P0 全 4 项 ✅（_etf_history + meltdown→warning + INDEX_KEYWORDS + S1-A TTL 缓存）`53acbfa`；P1-1(三策略差异化) 通过 Phase 0.7 C1 + profile权重(`5116681`) + C2 名称基准分(`17e9cab`) + B3b概念去重(`17e9cab`) ✅；P1-3(强制标的进分配) ✅ `5116681`；P2-1→S2(混合归一化) ✅ `5116681`；P3-1(测试覆盖) ✅ test_data_health.py + DQ 门禁；P3-2(pre-commit) ✅ 增强 API 覆盖检查；P3-3(E2E 断言) ✅ verify_e2e.py `afaea68`；P3-4(监控脚本) ✅ data_health_check.py `ac6dd81` | **剩余 5 项**待实施（~1h）：P1-2(防御层分类→卫星层，~3行)、P1-4(risk_controls拼接bug，~1行)、P2-2(weight字段注入，~5行)、P2-3(摘要增强，~10行)、P2-4(target_weight默认值，~1行) |
+| `factor-model-extension-plan.md` | ✅ **v45.0 核实已完成**：因子注册表 33 个计算函数全 LIVE；IC 追踪器已激活（F3-4/F3-5 轮：IC 数据注入 + `/factors/ic` zero_ratio + no_data reason 区分） | 无（YAML 167 因子未全覆盖为设计范围而非缺口） |
+| `design-check-quality-report.md` | ✅ **v45.0 核实全部完成（19/19）**：P0 全 4 项 + P1-1/P1-3 + P2-1 + P3-1~P3-4（上表）+ Phase 1.1 补齐剩余 5 项（P1-2 防御层分类 / P1-4 risk_controls 拼接 / P2-2 weight 注入 / P2-3 摘要增强 / P2-4 target_weight 默认值） | 无 |
 
 ### 1.3 已替代 (v2.0 新增)
 
@@ -93,24 +94,26 @@
 | `data-source-monitoring-plan.md` | **已替代** | `roadmap-data-source-unified.md` (Phase D) |
 | `archived/review-20260720.md` | 评审记录，非实施方案 | N/A |
 
-### 1.4 未开始（v4.0 更新）
+### 1.4 未开始 → 评估收尾（v45.0 更新，2026-08-01）
 
-| 文档 | 优先级 | 关键依赖 | 预估工时 | 备注 |
-|------|--------|---------|:-------:|------|
-| `design-check-quality-report.md` 剩余 P1-P3 | **P1** | 18/19 项已落地 | ✅ 全部完成 | Phase 1.1 全部实施（剩余 P2-4 target_weight 默认值已修） |
-| `news-pipeline-fix-plan.md` P1 | **P1** | 依赖 P0 已实施（Phase 0 完成） | ~2h | — |
-| `sector-concept-optimization-plan.md` | **P1** | Phase 1-2 独立可先行；Phase 4 依赖 LLM prompt 合并 | ~8h | — |
-| `market-analysis-optimization-plan.md` | **P1** | Phase A-C 须按序；D/E 独立；Phase 0.7/0.9 已就绪 | ~13-19h | — |
-| `frontend-ui-optimization-plan.md` | **P1** | 曾实现后回滚，需测试安全网就绪后重做 | ~8h | — |
-| `frontend-testing-safety-net.md` | **P1** | 前端架构重构已就绪 | ~11h | — |
-| `frontend-performance-optimization.md` (Step 2-3) | **P1** | Step 1 已实施（Phase 0）；Step 2-3 待做 | ~1.5h | — |
-| `five-improvements-plan.md` #1 | **P1** | 独立，~15 行 | ~15min | — |
-| `archived/scaffold-factor-resolution-plan.md` | **P1** | 已实施（✅ 7 个 scaffold 因子全部从 0→非零） | 0（已完成） | 已在 `e5b6139` 中落地 |
-| `roadmap-data-source-unified.md` | **P2** | 整合三份原方案，实施顺序详见自身依赖图 | ~3-5天 | — |
-| `config-management-plan.md` | **P2** | 无（独立） | ~8h | — |
-| `archived/design-report-optimization-plan.md` A2/C1/C2 | **P2** | 依赖因子分正常（Phase 0.7 已完成） | ~2h | — |
-| `e2e-testing-plan.md` | **P3** | 前端 UI 稳定后（避免维护成本过高） | ~16h | — |
-| `factor-model-extension-plan.md` | **P0** | 实施就绪（v4.0 已重写） | Phase 7.1.1 | 当前版本 v4.0，反映 33 因子架构 + IC 追踪器激活方案 | 冲突与重叠分析
+> 原「未开始」表 17 项经 **v45.0 代码交叉核实**：13 项确认已完成（见下表），4 项评估为不实施/暂缓。原表为 v4.0 时代快照，多数文档自身状态标记已更新，主计划表未同步——本轮一次性校准。
+
+| 文档 | 原优先级 | 核实结论（v45.0） | 证据 |
+|------|---------|------------------|------|
+| `design-check-quality-report.md` 剩余 P1-P3 | P1 | ✅ 已完成 | Phase 1.1 全部实施（含 P2-4 target_weight 默认值） |
+| `news-pipeline-fix-plan.md` P1 | P1 | ✅ 已完成 | 文档 v6 审计：P0-P1 全 6 项已实施 |
+| `sector-concept-optimization-plan.md` | P1 | ✅ 已完成 | 文档 v3.3 状态「全部实施」 |
+| `market-analysis-optimization-plan.md` | P1 | ✅ 已完成 | 文档 Status: ALL COMPLETED (V6) |
+| `frontend-ui-optimization-plan.md` Step 10/11 | P1 | ⏸ 评估：不实施 | Step 10 收益仅视觉；Step 11 需先建 AppCard（现不存在）成本 2-3h、用户零感知。Step 9（emoji→SvgIcon 198 处）破坏测试断言不建议 |
+| `frontend-testing-safety-net.md` P3/C4 | P1 | ⏸ 评估：暂缓 | 文档自身标注「待 UI 优化定型后重评」；E2E Charts + 截图基线维护成本高 |
+| `frontend-performance-optimization.md` (Step 2-3) | P1 | ✅ 已完成 | 文档「全部 4 个 Step 已完成」（Phase 2.5/10.1/10.2） |
+| `five-improvements-plan.md` #1 | P1 | ✅ 已完成 | `portfolio_service.py:473` 调 `market_data_hub.get_market_regime()` |
+| `archived/scaffold-factor-resolution-plan.md` | P1 | ✅ 已完成 | `e5b6139` 落地 |
+| `roadmap-data-source-unified.md` | P2 | ✅ 已完成 | 文档 v4.0「Phase A→D7 均已实施」 |
+| `config-management-plan.md` | P2 | ✅ 已完成 | `views/ConfigView.vue`（285 行）+ `router/index.js` `/admin/config` + 后端 ConfigManager——Phase 6.2 已实施（原表为 v4.0 过时记录） |
+| `archived/design-report-optimization-plan.md` A2/C1/C2 | P2 | ✅ 已完成 | A2 ✅ / C1 ✅（`strategy_design._compute_fund_flow` dict 池 5 层聚合完整 + fund_flow 注入 market_context）/ C2 ✅（allocation_engine 科技集中度） |
+| `e2e-testing-plan.md` | P3 | ✅ 已完成 | 16 个 spec 已关闭（2026-07-27 更新） |
+| `factor-model-extension-plan.md` | P0 | ✅ 已完成 | 文档 v5.0「已实施回填」；33 因子全 LIVE + IC 追踪器激活（F3-4/F3-5 轮补充 IC 数据注入与 zero_ratio） |
 
 ### 2.1 🔴 重大重叠：数据源改造三合一（已解决）
 
@@ -1547,6 +1550,13 @@ Phase 11 (性能诊断与优化)         ✅ 2026-07-28 全部完成 — OPT-01~
 | | | | | **测试（TDD，43 用例全 PASS）：** `tests/test_watchlist_dirty.py`（10）、`test_z25_stock_hot_rank.py`（6）、`test_z26_strategy_check_coverage.py`（5）、`test_z05_ssl_pool.py`（7）、`test_z03_factors_active.py`（3）、`test_z11_degradation.py`（4）、`test_z20_search_sort.py`（8）；既有相关套件回归 69/70 PASS（唯一失败 `test_orchestrator_returns_valid_strategies` 为基线即有的真实网络集成测试，已用 `git stash` 验证与本批改动无关）。 |
 | | | | | **验证结果：** 后端新增 43 用例全 PASS；`verify_e2e.py` 全模块 PASS（本地启动后端后验证）；前端 `npm run build` 通过（pre-commit 门禁）；本地 `start.ps1 -Local` 前后端启动健康检查通过。 |
 | | | | | **改动文件：** 后端 12（routers/market.py、services/market_service.py、models/schemas.py、services/market_data_hub.py、fetchers/sector_fetcher.py、services/portfolio_service.py、analysis/llm.py、fetchers/global_markets_fetcher.py、routers/admin.py、routers/factors.py、factors/factor_registry.py、services/strategy_design.py）、测试 7（新）、契约 7（新）、文档 2（implementation-master-plan.md + z_fixes_design_v5.3.md 状态）。 |
+
+| | **v45.0** | 2026-08-01 | **Phase 45 — 主计划剩余项评估收尾（零代码改动）** | 详见下方 |
+| | | | | **背景：** 用户指出 §1.4「未开始」表过时（config-management 前端配置页早已存在）。本轮对 17 项逐一代码交叉核实，13 项确认已完成，4 项给出评估结论。 |
+| | | | | **已完成核实（13 项）：** design-check-quality P1-P3（Phase 1.1）、news-pipeline-fix P1（文档 v6 审计）、sector-concept（v3.3）、market-analysis（V6）、five-improvements #1（`portfolio_service.py:473` 调 `get_market_regime()`）、frontend-performance Step 2-3、scaffold-factor（e5b6139）、roadmap-data-source Phase A-D7、e2e-testing 16 spec、factor-model-extension v5.0、design-report A2/B1-B3/C1/C2（`_compute_fund_flow` 对 dict 池 5 层聚合完整 + fund_flow 注入 market_context）、config-management（`views/ConfigView.vue` 285 行 + `router/index.js` `/admin/config`，Phase 6.2 已实施——§1.4 表 L110「P2 未开始 ~8h」为 v4.0 时代过时记录）。 |
+| | | | | **评估结论（4 项，均不实施）：** frontend-ui Step 10（card hover 统一 CSS）收益仅视觉、无功能价值 → 不实施；Step 11（AppCard 替换 3 处手工 card）AppCard 组件尚不存在、收益对用户为零 → 不实施；Step 9（emoji→SvgIcon 198 处/52 种，🔥 33 个）替换破坏测试断言（🔥 热点板块排行）风险>收益 → 不建议；frontend-testing P3（E2E Charts）+ C4（截图基线）文档自身标注依赖 UI 全面定型 → 暂缓。 |
+| | | | | **验证结果：** 零代码改动、零测试运行（纯文档收尾）；§1.4「未开始」表替换为评估结论表。 |
+| | | | | **改动文件：** docs/implementation-master-plan.md（头部摘要 + 版本表 v45.0 + §1.2 过时行更新 + §1.4 表替换）。 |
 
 | | **v44.0** | 2026-08-01 | **Phase 44 — round2 方案 P4 测试防护 T1-T14 全部 14 项实施** | 详见下方 |
 | | | | | **来源：** `docs/round2-system-diagnosis-and-optimization-plan.md` 第四梯队 P4（§8.2/§8.3/§8.4/§8.5 测试防护体系落地）。 |
