@@ -26,6 +26,20 @@ describe('useMarketSearch', () => {
     expect(composable.selectedSearchItem.value).toBeNull()
   })
 
+  it('R5: 选定后显示「代码 + 名称」（如 "510300 沪深300ETF"）', async () => {
+    marketApi.search.mockResolvedValue({ data: [{ symbol: '510300', name: '沪深300ETF' }] })
+    composable.searchQuery.value = '510300'
+    await composable.doSearch()
+    // 补全预览：代码 + 名称
+    expect(composable.completionFull.value).toBe('510300 沪深300ETF')
+    // Tab 键选定（acceptCompletion 内部路径）→ searchQuery 同格式
+    const e = new KeyboardEvent('keydown', { key: 'Tab' })
+    vi.spyOn(e, 'preventDefault').mockImplementation(() => {})
+    composable.onSearchKeydown(e)
+    expect(composable.searchQuery.value).toBe('510300 沪深300ETF')
+    expect(composable.searchQuery.value).not.toContain('(') // 不再用旧 "名称 (代码)" 格式
+  })
+
   it('clears results when search input is empty', () => {
     composable.searchQuery.value = ''
     composable.onSearchInput()

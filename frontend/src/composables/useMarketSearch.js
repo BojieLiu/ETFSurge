@@ -34,13 +34,14 @@ export function useMarketSearch() {
 
   function updateCompletion() {
     const top = searchResults.value[0]
-    completionFull.value = top ? `${top.name} (${top.symbol})` : ''
+    // 补全预览：代码 + 名称（如 "510300 沪深300ETF"），代码前置便于快速识别
+    completionFull.value = top ? `${top.symbol} ${top.name}` : ''
   }
 
   function acceptCompletion() {
     const top = searchResults.value[0]
     if (!top) return
-    searchQuery.value = `${top.name} (${top.symbol})`
+    searchQuery.value = `${top.symbol} ${top.name}`
     activeIndex.value = 0
     completionFull.value = ''
     showDropdown.value = true
