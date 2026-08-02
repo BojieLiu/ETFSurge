@@ -179,3 +179,9 @@ portfolio/calculate、daily-pnl、etfs、pnl-history、import/export/drift-check
 - **实施**：watch(marketTab) → `stopStream()` 取消进行中旧流 + 清空 report/error + 自动为当前市场重新生成；序号守卫（genSeq）确保快速切换时旧流 token/状态不覆盖新市场；按钮文案带市场名（生成A股研判/港股/美股）。
 - **验证**：前端 311 测试全过（MarketReport 新增 2 个 R4-28 用例：切换清空+自动生成、序号守卫丢旧流）+ build 成功。
 - **R4-27b 修订**：用户澄清在意的不是代码本身而是 `^` 符号观感（yahoo 风格前缀）→ 改为**保留代码、仅去掉 `^` 前缀**（^HSTECH → HSTECH；格式「恒生科技指数(HSTECH): 4829.22, 涨跌幅0.53%」）。实测 HK 报告无 `^`；prompt 格式测试 7 passed。
+
+## R4-29 🟡 A 股个股自动补全慢（用户体感 5-6s vs ETF 16ms）
+- **现象**：页面等待 A 股标的（个股/中文名）自动补全选项需 5-6s；ETF 搜索仅 16ms。
+- **核实**（实测）：instruments 本地表 **1544 行全部为 ETF，A 股个股（asset_type=stock）0 行**；个股搜索走 `_search_a_stocks` → 本地表空 → levistock 全量降级（`fetch_all_stocks`，5000+ 股，外部 API）：茅台/宁德 冷缓存首次 2.7-4s，缓存命中后 0-63ms（`all_stocks` TTL=1h 已有）。
+- **根因**：个股未灌入 instruments 表（`sync_instruments.py` 支持 A 股个股段 `stock_zh_a_spot_em` 但从未成功灌入）；levistock 缓存为进程内存 → 重启后首次搜索必慢；叠加更早旧后端 spot 60s 失败缓存期间的体验。
+- **方案**（详见 plan P1-7）：运行 `sync_instruments.py` 灌入 A 股个股（含拼音/首字母）→ 个股搜索与 ETF 同机制：本地毫秒级、无冷启动惩罚、重启不丢。
