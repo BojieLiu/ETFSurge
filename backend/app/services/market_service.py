@@ -1063,7 +1063,7 @@ _ASSET_REALTIME_CACHE_TTL = 3.0
 
 
 async def get_asset_realtime(symbol: str, asset_type: str) -> dict | None:
-    from ..fetchers.china_market import fetch_a_stock_realtime, fetch_hk_stock_realtime
+    from ..fetchers.china_market import fetch_a_stock_realtime, fetch_hk_stock_realtime, fetch_index_realtime
 
     # N07: 3s 短缓存（并发请求/重复刷新场景避免重复 8s 等待）
     _ckey = (str(symbol).upper(), str(asset_type).upper())
@@ -1093,6 +1093,20 @@ async def get_asset_realtime(symbol: str, asset_type: str) -> dict | None:
                 if item["symbol"] == symbol:
                     result = item
                     break
+        elif asset_type == "index":
+            # R5: 指数实时——fetch_index_realtime（新浪 s_sh 三级降级，8 个 A 股指数）。
+            # 旧实现走 A 股股票路径：000001 被当成深市股票（平安银行 11.63）→
+            # 指数分析 prompt 拿到错位行情（LLM 报告"数据缺失/不匹配"）。
+            idx_rows = await _call(fetch_index_realtime, timeout=_timeout)
+            result = next((r for r in (idx_rows or []) if str(r.get("symbol")) == symbol), None)
+            if result is None:
+                # 兜底：本地指数缓存（定时刷新）
+                try:
+                    from .market_data_hub import market_data_hub
+                    idx_cached = market_data_hub.get_index_realtime() or []
+                    result = next((r for r in idx_cached if str(r.get("symbol")) == symbol), None)
+                except Exception:
+                    pass
         else:
             all_a = await _call(fetch_a_stock_realtime, symbol, timeout=_timeout)
             for item in all_a or []:

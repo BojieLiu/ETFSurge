@@ -159,3 +159,20 @@ def test_route_tuple_data_500_hard_failure(monkeypatch):
     assert result == {"ok": 3}
     # (None, 500) → record_hard_failure：直接冷却（_failures 重置为 0）
     assert reg._health("sina")._cool_until > 0, "HTTP 500 应触发硬冷却"
+
+
+async def test_get_asset_realtime_index_not_stock_misresolved(monkeypatch):
+    """R5: get_asset_realtime('000001','index') 走指数源——不得被 A 股路径
+    解析成深市股票（平安银行 11.63）导致指数分析错位数据。"""
+    from app.services import market_service
+    idx_rows = [{"symbol": "000001", "name": "上证指数", "price": 3832.26,
+                 "change_pct": 0.72, "asset_type": "index"}]
+
+    async def _fake_call(fn, *args, timeout=8):
+        return idx_rows
+
+    monkeypatch.setattr(market_service, "_call", _fake_call)
+    result = await market_service.get_asset_realtime("000001", "index")
+    assert result is not None
+    assert result["price"] == 3832.26, "指数应返回上证指数点位，而非深市股票价格"
+    assert result["name"] == "上证指数"
