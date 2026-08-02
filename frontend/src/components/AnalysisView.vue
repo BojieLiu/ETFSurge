@@ -440,8 +440,8 @@ async function fetchChart() {
   try {
     const [chartRes, indRes, sigRes] = await Promise.all([
       marketApi.chart(sym, assetType, period.value),
-      marketApi.indicators(sym, assetType),
-      marketApi.signal(sym, assetType),
+      marketApi.indicators(sym, assetType, period.value),
+      marketApi.signal(sym, assetType, period.value),
     ])
     chartData.value = chartRes.data
     indicatorData.value = indRes.data
@@ -464,6 +464,12 @@ watch(
     }
   }
 )
+
+// Period switch → re-fetch chart + indicators + signal.
+// 旧实现只更新 ref 不重取：切换周期后图表/指标/信号保持旧周期，交互无效。
+watch(period, () => {
+  fetchChart()
+})
 
 // Lifecycle
 onMounted(async () => {
