@@ -14,6 +14,24 @@ export function useMarketSearch() {
   const searchRef = ref(null)
   let searchTimer = null
 
+  // R5 搜索提速：
+  // 1) debounce 300ms → 200ms（后端 search 实测 4-14ms，300ms 等待无必要）
+  // 2) AbortController 取消过期请求（快速输入时只保留最后一次的网络）
+  // 3) seq 守卫丢弃乱序响应（防慢请求覆盖新结果）
+  // 4) 60s 结果缓存（instruments 表低频变化，重复关键词直接命中）
+  const SEARCH_DEBOUNCE_MS = 200
+  const SEARCH_CACHE_TTL = 60_000
+  const searchCache = new Map() // `${include_stocks}:${q}` -> { ts, results }
+  let searchSeq = 0
+  let searchAbort = null
+
+  function applyResults(results) {
+    searchResults.value = results
+    activeIndex.value = -1
+    updateCompletion()
+    showDropdown.value = results.length > 0
+  }
+
   function updateCompletion() {
     const top = searchResults.value[0]
     completionFull.value = top ? `${top.name} (${top.symbol})` : ''
@@ -31,14 +49,23 @@ export function useMarketSearch() {
   async function doSearch() {
     const q = searchQuery.value.trim()
     if (!q) return
+    const cacheKey = `stocks:${q}`
+    const hit = searchCache.get(cacheKey)
+    if (hit && Date.now() - hit.ts < SEARCH_CACHE_TTL) {
+      applyResults(hit.results)
+      return
+    }
+    const seq = ++searchSeq
+    if (searchAbort) searchAbort.abort()
+    searchAbort = new AbortController()
     try {
-      const res = await marketApi.search(q, { include_stocks: true })
-      const results = res.data || []
-      searchResults.value = results.slice(0, 20)
-      activeIndex.value = -1
-      updateCompletion()
-      showDropdown.value = searchResults.value.length > 0
-    } catch {
+      const res = await marketApi.search(q, { include_stocks: true }, { signal: searchAbort.signal })
+      if (seq !== searchSeq) return // 过期响应丢弃
+      const results = (res.data || []).slice(0, 20)
+      searchCache.set(cacheKey, { ts: Date.now(), results })
+      applyResults(results)
+    } catch (e) {
+      if (e?.name === 'AbortError' || seq !== searchSeq) return
       searchResults.value = []
       completionFull.value = ''
     }
@@ -53,7 +80,7 @@ export function useMarketSearch() {
       showDropdown.value = false
       return
     }
-    searchTimer = setTimeout(doSearch, 300)
+    searchTimer = setTimeout(doSearch, SEARCH_DEBOUNCE_MS)
   }
 
   function onSearchFocus() {

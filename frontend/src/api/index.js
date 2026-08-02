@@ -27,7 +27,7 @@ api.interceptors.response.use(
 export const marketApi = {
   realtimePortfolio: () => api.get('/market/realtime/portfolio'),
   history: (symbol, assetType = 'A', period = 'daily') => api.get(`/market/history/${symbol}`, { params: { asset_type: assetType, period } }),
-  search: (keyword, options = {}) => api.get('/market/search', { params: { keyword, ...options } }),
+  search: (keyword, options = {}, config = {}) => api.get('/market/search', { params: { keyword, ...options }, ...config }),
   indicesMeta: () => api.get('/market/indices/meta'),
   indicators: (symbol, assetType = 'A', period = 'daily') => api.get(`/market/indicators/${symbol}`, { params: { asset_type: assetType, period } }),
   signal: (symbol, assetType = 'A', period = 'daily') => api.get(`/market/signal/${symbol}`, { params: { asset_type: assetType, period } }),

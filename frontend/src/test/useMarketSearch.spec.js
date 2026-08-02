@@ -44,7 +44,7 @@ describe('useMarketSearch', () => {
     composable.searchQuery.value = '沪深300'
     composable.onSearchInput()
     expect(marketApi.search).not.toHaveBeenCalled() // not yet, debounced
-    vi.advanceTimersByTime(300)
+    vi.advanceTimersByTime(200)
     expect(marketApi.search).toHaveBeenCalledTimes(1)
     vi.useRealTimers()
   })
@@ -58,6 +58,36 @@ describe('useMarketSearch', () => {
     expect(marketApi.search).toHaveBeenCalled()
     expect(composable.searchResults.value.length).toBeGreaterThan(0)
     expect(composable.searchResults.value[0].symbol).toBe('510300')
+  })
+
+  it('R5: 乱序响应被 seq 守卫丢弃（慢请求不覆盖新结果）', async () => {
+    let resolveOld, resolveNew
+    marketApi.search
+      .mockReturnValueOnce(new Promise(r => { resolveOld = r }))
+      .mockReturnValueOnce(new Promise(r => { resolveNew = r }))
+    composable.searchQuery.value = '510'
+    const p1 = composable.doSearch()
+    composable.searchQuery.value = '5103'
+    const p2 = composable.doSearch()
+    // 新请求先返回
+    resolveNew({ data: [{ symbol: '510300', name: '沪深300ETF' }] })
+    await p2
+    // 旧请求后返回——必须被丢弃
+    resolveOld({ data: [{ symbol: 'OLD', name: '过期结果' }] })
+    await p1
+    expect(composable.searchResults.value[0].symbol).toBe('510300')
+    expect(composable.searchResults.value[0].symbol).not.toBe('OLD')
+  })
+
+  it('R5: 60s 内同关键词二次搜索命中缓存，不再发请求', async () => {
+    marketApi.search.mockResolvedValue({ data: [{ symbol: '518880', name: '黄金ETF' }] })
+    composable.searchQuery.value = '518880'
+    await composable.doSearch()
+    expect(marketApi.search).toHaveBeenCalledTimes(1)
+    composable.searchQuery.value = ''
+    composable.searchQuery.value = '518880'
+    await composable.doSearch()
+    expect(marketApi.search).toHaveBeenCalledTimes(1) // 缓存命中，未发第二次请求
   })
 
   it('navigates results with ArrowDown key', () => {
@@ -150,7 +180,7 @@ describe('useMarketSearch', () => {
     marketApi.search.mockResolvedValue({ data: [{ symbol: '00700', name: '腾讯控股' }] })
     composable.searchQuery.value = '腾讯控股'
     await composable.doSearch()
-    expect(marketApi.search).toHaveBeenCalledWith('腾讯控股', { include_stocks: true })
+    expect(marketApi.search).toHaveBeenCalledWith('腾讯控股', { include_stocks: true }, expect.objectContaining({ signal: expect.anything() }))
     expect(composable.searchResults.value[0].symbol).toBe('00700')
   })
 })
