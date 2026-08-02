@@ -26,6 +26,7 @@
               :value="activeMode === 'symbol' ? search.searchQuery.value : query"
               @input="activeMode === 'symbol' ? search.onSearchInput() : (query = $event.target.value)"
               :placeholder="currentPlaceholder"
+              :title="currentPlaceholder"
               class="text-input"
               @keydown.enter="activeMode === 'symbol' ? search.onSearchKeydown($event) : doAnalyze()"
               @focus="activeMode === 'symbol' && search.onSearchFocus()"
@@ -142,9 +143,10 @@ const currentModeLabel = computed(() => {
 })
 
 const placeholders = {
-  symbol: '输入代码，如 510050、000001、贵州茅台...',
-  sector: '输入板块代码/名称，如 BK0477、半导体...',
-  index: '输入指数代码，如 000001 (上证)、HSI (恒生)、SPX (标普)...',
+  // R5: 精简文案——完整示例已由下方“快速输入”chips 提供；placeholder 过长在窄屏必被截断
+  symbol: '输入代码或名称，如 510050',
+  sector: '输入板块代码/名称，如 BK0477',
+  index: '输入指数代码，如 000001/HSI',
 }
 
 const currentPlaceholder = computed(() => placeholders[activeMode.value] || placeholders.symbol)
