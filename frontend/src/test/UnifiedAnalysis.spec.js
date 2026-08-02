@@ -185,4 +185,22 @@ describe('UnifiedAnalysis R40 (tab 切换重置)', () => {
     expect(wrapper.vm.query).toBe('BK0477')
     expect(searchState.searchQuery.value).toBe('') // 补全输入未被污染
   })
+
+  it('R5: 补全选中后 searchQuery 同步（doAnalyze 与输入框读它）', async () => {
+    const wrapper = mounted()
+    wrapper.vm.activeMode = 'symbol'
+    const item = { symbol: '510050', name: '上证50ETF', market: 'A' }
+    wrapper.vm.pickSearchItem(item)
+    expect(searchState.searchQuery.value).toBe('510050') // 输入框显示选中项
+    expect(wrapper.vm.symbol).toBe('510050')
+    expect(wrapper.vm.query).toBe('510050')
+  })
+
+  it('R5: 空输入点分析给出提示（旧实现静默无动作）', async () => {
+    const wrapper = mounted()
+    wrapper.vm.activeMode = 'symbol'
+    searchState.searchQuery.value = ''
+    wrapper.vm.doAnalyze()
+    expect(wrapper.vm.error).toContain('请输入标的代码或名称')
+  })
 })

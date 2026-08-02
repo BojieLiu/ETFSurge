@@ -260,6 +260,9 @@ function quickSelect(ex) {
 // F7 R18: 下拉选中 → 写入 query + 触发分析（名称→代码由 doAnalyze 内解析）
 function pickSearchItem(item) {
   query.value = item.symbol
+  // R5: 同步写回 searchQuery——doAnalyze(symbol 模式)与输入框显示都读它；
+  // 旧实现只写 query/symbol → 补全选中后 doAnalyze 读 searchQuery（旧输入/空）→ 请求错标或无动作
+  if (search.searchQuery) search.searchQuery.value = item.symbol
   search.selectedSearchItem.value = item
   search.showDropdown.value = false
   symbol.value = item.symbol
@@ -271,7 +274,11 @@ function pickSearchItem(item) {
 async function doAnalyze() {
   // F7 R18: symbol 模式输入源为 search.searchQuery（自动补全框）；sector/index 仍用 query
   const q = (activeMode.value === 'symbol' ? search.searchQuery.value : query.value).trim()
-  if (!q) return
+  if (!q) {
+    // R5: 空输入点“分析”给出明确反馈（旧实现静默 return，页面无任何动作）
+    error.value = '请输入标的代码或名称'
+    return
+  }
   query.value = q
   symbol.value = q
   loading.value = true
