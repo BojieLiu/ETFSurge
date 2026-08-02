@@ -1068,6 +1068,8 @@ class MarketDataHub:
     # F3-4 步骤C: 份额数据 24h 缓存（fund_fund_shares_em 日更/周更）
     _FUND_SHARES_CACHE: dict[str, tuple[float, dict]] = {}
     _FUND_SHARES_TTL = 86400.0
+    # P2-1 延伸 (R4-16): symbol_extra enrich 总超时（数据源慢时降级部分数据，不阻塞刷新）
+    _ENRICH_TOTAL_TIMEOUT = 60.0
 
     async def _enrich_symbol_extra(
         self,
@@ -1088,7 +1090,7 @@ class MarketDataHub:
         # P2-1 延伸 (R4-16): 并发限制 + 总超时——66 只 × 2 个任务无限制并发
         # 会在 NAV/份额数据源慢时打满线程池（POOL SATURATION，get_fund_nav 6s 超时
         # × 大量堆积）→ 候选池刷新永远失败 → verify_e2e 候选池类检查全 FAIL。
-        # Semaphore(8) 控制并发 + wait_for 60s 总超时（超时降级为部分数据，不阻塞刷新）。
+        # Semaphore(8) 控制并发 + wait_for 总超时（超时降级为部分数据，不阻塞刷新）。
         _sem = asyncio.Semaphore(8)
 
         async def _bench(sym: str):
@@ -1132,12 +1134,12 @@ class MarketDataHub:
                     *(_bench(s) for s in symbols),
                     *(_shares(s) for s in symbols),
                 ),
-                timeout=60,
+                timeout=self._ENRICH_TOTAL_TIMEOUT,
             )
         except asyncio.TimeoutError:
             logger.warning(
-                "[hub] symbol_extra enrich timed out after 60s (partial: %d/%d symbols)",
-                len(out), len(symbols),
+                "[hub] symbol_extra enrich timed out after %ss (partial: %d/%d symbols)",
+                self._ENRICH_TOTAL_TIMEOUT, len(out), len(symbols),
             )
         return out
 
