@@ -671,15 +671,23 @@ async def sector_analysis_stream(req: SectorAnalysisRequest):
             sectors = await asyncio.to_thread(market_data_hub.get_sector_concept, 200)
         else:
             sectors = await asyncio.to_thread(market_data_hub.get_sector_industry, 200)
+        # R5: 概念映射兜底——前端 sector 模式固定传 sector_type='industry'，
+        # 概念名（芯片/光模块/CPO 等）在行业表找不到 → 404。
+        # 取对侧表一起参与名称归一化（缓存命中，开销小），命中后按合并表定位 sector_data。
+        if sector_type == "concept":
+            other = await asyncio.to_thread(market_data_hub.get_sector_industry, 200)
+        else:
+            other = await asyncio.to_thread(market_data_hub.get_sector_concept, 200)
+        combined = list(sectors or []) + list(other or [])
         # F2-7 步骤F: 热板块 cls 前缀代码归一化（名称优先 → 数字段匹配）
         normalized = _normalize_sector_code(
             sector_code,
-            sectors if sector_type != "concept" else [],
-            sectors if sector_type == "concept" else [],
+            combined,
+            [],
             name=sector_name,
         )
         sector_data = next(
-            (s for s in sectors if s.get("sector_code") == normalized), None
+            (s for s in combined if s.get("sector_code") == normalized), None
         )
         if sector_data:
             sector_code = sector_data.get("sector_code", sector_code)

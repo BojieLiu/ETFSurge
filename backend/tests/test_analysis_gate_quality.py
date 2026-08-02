@@ -37,6 +37,23 @@ def test_normalize_sector_code_case_insensitive():
     assert analysis_router._normalize_sector_code("BK0800", [], concept, name="ai算力") == "BK0800"
 
 
+def test_normalize_sector_code_concept_name_in_combined_tables():
+    """R5: 概念名（芯片）在行业表缺失、概念表存在——合并表必须命中（前端固定传 industry 的兜底）。"""
+    industry = [
+        {"sector_code": "BK1036", "sector_name": "半导体及元件"},
+        {"sector_code": "BK0475", "sector_name": "银行"},
+    ]
+    concept = [
+        {"sector_code": "BK1035", "sector_name": "芯片"},
+        {"sector_code": "BK0800", "sector_name": "AI算力"},
+    ]
+    # 模拟调用处合并：industry + concept 一起传（_normalize_sector_code 内部已合并两表）
+    result = analysis_router._normalize_sector_code("芯片", industry, concept, name="芯片")
+    assert result == "BK1035", f"概念名应从合并表命中，实际 {result}"
+    # 行业名不受影响
+    assert analysis_router._normalize_sector_code("cls82558", industry, concept, name="半导体") == "BK1036"
+
+
 async def test_symbol_analysis_data_unavailable_no_llm(monkeypatch):
     """R21: realtime/hist 全空 → 返回 SSE error，不调 LLM。"""
     from app.routers import analysis as ar
