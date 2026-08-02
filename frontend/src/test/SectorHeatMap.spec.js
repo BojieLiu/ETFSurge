@@ -143,4 +143,26 @@ describe('SectorHeatMap (F2-6/F2-7 §9.8)', () => {
     expect(marketApi.indicators).toHaveBeenCalledWith('688825', 'A')
     expect(marketApi.signal).toHaveBeenCalledWith('688825', 'A')
   })
+
+  it('R4-25: 综合信号文本随响应动态渲染（非静态空值）', async () => {
+    marketApi.getStockHotRank.mockResolvedValue({
+      data: [{ name: '海光信息', symbol: '688825', change_pct: 5.2 }],
+    })
+    marketApi.indicators.mockResolvedValue({ data: { rsi: 56.75, ma5: 4.2, ma20: 4.14 } })
+    marketApi.signal.mockResolvedValue({
+      data: { signal: 'buy', score: 1.5, reasons: ['MACD偏多', 'MA5>MA20 多头排列'] },
+    })
+    const wrapper = mount(SectorHeatMap)
+    const tabs = wrapper.findAll('.tab-btn')
+    await tabs[2].trigger('click')
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+    await wrapper.findAll('.row-action')[0].trigger('click')
+    await wrapper.vm.$nextTick()
+    const modal = wrapper.findComponent(TechnicalAnalysisModal)
+    expect(modal.find('.ta-signal-value').text()).toContain('买入')
+    expect(modal.find('.ta-signal-score').text()).toContain('1.5')
+    expect(modal.text()).toContain('MACD偏多')
+    expect(modal.text()).toContain('多头排列')
+  })
 })

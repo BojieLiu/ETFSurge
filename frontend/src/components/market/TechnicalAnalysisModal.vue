@@ -17,7 +17,10 @@
           <span class="ta-signal-label">综合信号</span>
           <span class="ta-signal-value">{{ signalText }}</span>
           <span v-if="signalData.score !== undefined" class="ta-signal-score">得分 {{ signalData.score }}</span>
-          <p v-if="signalData.reason" class="ta-signal-reason">{{ signalData.reason }}</p>
+          <ul v-if="signalData.reasons?.length" class="ta-signal-reasons">
+            <li v-for="(r, i) in signalData.reasons" :key="i">{{ r }}</li>
+          </ul>
+          <p v-else-if="signalData.reason" class="ta-signal-reason">{{ signalData.reason }}</p>
         </div>
 
         <!-- 关键指标 -->
@@ -25,22 +28,32 @@
           <div class="ta-cell">
             <span class="ta-cell-label">RSI(14)</span>
             <span class="ta-cell-value">{{ fmt(ind.rsi) }}</span>
+            <span v-if="ind.rsi != null" class="ta-cell-note">{{ rsiText(ind.rsi) }}</span>
           </div>
           <div class="ta-cell">
             <span class="ta-cell-label">MACD</span>
             <span class="ta-cell-value">{{ ind.macd ? `${fmt(ind.macd.dif)} / ${fmt(ind.macd.dea)}` : '—' }}</span>
+            <span v-if="ind.macd" class="ta-cell-note">{{ macdText(ind.macd) }}</span>
           </div>
           <div class="ta-cell">
             <span class="ta-cell-label">KDJ</span>
             <span class="ta-cell-value">{{ ind.kdj ? `K ${fmt(ind.kdj.k)} D ${fmt(ind.kdj.d)}` : '—' }}</span>
+            <span v-if="ind.kdj && ind.kdj.j != null" class="ta-cell-note">{{ kdjText(ind.kdj) }}</span>
           </div>
           <div class="ta-cell">
-            <span class="ta-cell-label">MA20</span>
-            <span class="ta-cell-value">{{ fmt(ind.ma20) }}</span>
+            <span class="ta-cell-label">MA5 / MA20</span>
+            <span class="ta-cell-value">{{ fmt(ind.ma5) }} / {{ fmt(ind.ma20) }}</span>
+            <span v-if="ind.ma5 != null && ind.ma20 != null" class="ta-cell-note">{{ maText(ind.ma5, ind.ma20) }}</span>
           </div>
           <div class="ta-cell">
-            <span class="ta-cell-label">MA60</span>
-            <span class="ta-cell-value">{{ fmt(ind.ma60) }}</span>
+            <span class="ta-cell-label">MA10 / MA60</span>
+            <span class="ta-cell-value">{{ fmt(ind.ma10) }} / {{ fmt(ind.ma60) }}</span>
+            <span v-if="ind.ma10 != null && ind.ma60 != null" class="ta-cell-note">{{ maText(ind.ma10, ind.ma60) }}</span>
+          </div>
+          <div class="ta-cell">
+            <span class="ta-cell-label">BOLL 支撑 / 压力</span>
+            <span class="ta-cell-value">{{ ind.bollinger ? `${fmt(ind.bollinger.lower)} / ${fmt(ind.bollinger.upper)}` : '—' }}</span>
+            <span v-if="ind.bollinger" class="ta-cell-note">{{ bollText(ind.bollinger) }}</span>
           </div>
         </div>
 
@@ -55,7 +68,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { marketApi } from '../../api'
 
 const props = defineProps({
@@ -74,11 +87,43 @@ function fmt(v) {
   return v === undefined || v === null ? '—' : Number(v).toFixed(2)
 }
 
-const signalText = {
-  buy: '🟢 买入',
-  hold: '🟡 持有',
-  sell: '🔴 卖出',
-}[signalData.value?.signal] || signalData.value?.signal || '—'
+// R4-25: signalText 从静态 const 改为 computed —— 旧实现 setup 时求值一次
+// （signalData 尚为 null），导致「综合信号」永远显示「—」。
+const signalText = computed(() => {
+  const s = signalData.value?.signal
+  return ({ buy: '🟢 买入', hold: '🟡 持有', sell: '🔴 卖出' })[s] || s || '—'
+})
+
+// R4-25: 指标方向解读 —— 每个数值附一行可读结论，辅助投资决策
+function rsiText(v) {
+  if (v == null) return ''
+  if (v < 30) return '超卖区'
+  if (v < 40) return '偏弱'
+  if (v < 60) return '中性'
+  if (v < 70) return '偏强'
+  return '超买区'
+}
+function macdText(m) {
+  if (!m || m.dif == null || m.dea == null) return ''
+  if (m.dif > m.dea) return m.dif > 0 ? '金叉·多头' : '金叉·偏多'
+  return m.dif < 0 ? '死叉·空头' : '死叉·偏空'
+}
+function kdjText(k) {
+  if (!k || k.k == null || k.d == null) return ''
+  const j = k.j
+  if (j != null && j > 100) return `${k.k > k.d ? '金叉' : '死叉'}·J超买`
+  if (j != null && j < 0) return `${k.k > k.d ? '金叉' : '死叉'}·J超卖`
+  return k.k > k.d ? '金叉' : '死叉'
+}
+function maText(short, long) {
+  if (short == null || long == null) return ''
+  const diff = Math.abs((short - long) / long)
+  return short > long ? `多头排列（短>长 ${(diff * 100).toFixed(1)}%）` : `空头排列（短<长 ${(diff * 100).toFixed(1)}%）`
+}
+function bollText(b) {
+  if (!b || b.upper == null || b.lower == null) return ''
+  return `支撑 ${fmt(b.lower)} / 压力 ${fmt(b.upper)}`
+}
 
 async function load() {
   loading.value = true
@@ -143,8 +188,11 @@ onMounted(load)
 .ta-signal-value { font-weight: 600; margin-left: var(--space-2); }
 .ta-signal-score { font-size: var(--font-size-xs); color: var(--color-text-secondary); margin-left: var(--space-2); }
 .ta-signal-reason { margin: var(--space-1) 0 0; font-size: var(--font-size-xs); color: var(--color-text-secondary); }
+.ta-signal-reasons { margin: var(--space-1) 0 0; padding-left: var(--space-4); font-size: var(--font-size-xs); color: var(--color-text-secondary); }
+.ta-signal-reasons li { margin: 2px 0; }
 .ta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); }
 .ta-cell { display: flex; flex-direction: column; gap: 2px; padding: var(--space-2) var(--space-3); background: var(--color-surface-secondary, #f5f5f5); border-radius: var(--radius-md); }
+.ta-cell-note { font-size: var(--font-size-2xs); color: var(--color-text-tertiary); }
 .ta-cell-label { font-size: var(--font-size-xs); color: var(--color-text-tertiary); }
 .ta-cell-value { font-size: var(--font-size-sm); font-family: var(--font-family-mono); }
 .ta-stale { margin-top: var(--space-2); font-size: var(--font-size-xs); color: var(--color-warning); }

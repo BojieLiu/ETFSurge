@@ -11,7 +11,7 @@
           <button class="btn-report" @click="generate" :disabled="loading">
             <span v-if="!loading" class="btn-icon">🤖</span>
             <span v-else class="btn-spinner"></span>
-            <span>{{ loading ? 'AI 分析中...' : (report ? '重新生成研判' : '生成市场研判') }}</span>
+            <span>{{ loading ? 'AI 分析中...' : (report ? '重新生成研判' : `生成${marketLabel}研判`) }}</span>
           </button>
           <p v-if="!loading && !report && !error" class="action-hint">点击按钮，AI 将综合分析当前市场环境生成报告</p>
         </div>
@@ -29,7 +29,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { renderMarkdown } from '../../utils/markdown'
 import { useLLMStream } from '../../composables/useLLMStream'
 
@@ -39,23 +39,44 @@ const report = ref('')
 const loading = ref(false)
 const error = ref('')
 
-const { start: startStream } = useLLMStream()
+const marketLabels = { A: 'A股', HK: '港股', US: '美股' }
+const marketLabel = computed(() => marketLabels[props.marketTab] || props.marketTab || '市场')
+
+const { start: startStream, stop: stopStream } = useLLMStream()
+
+// R4-28: 序号守卫——快速切换 tab 时丢弃过期市场流的 token/状态，
+// 避免旧流回调覆盖新市场报告或错乱 loading 状态
+let genSeq = 0
 
 async function generate() {
+  const seq = ++genSeq
   loading.value = true
   report.value = ''
   error.value = ''
   try {
     // Z31: 发送 market 参数，后端按 marketTab 采集对应市场数据
     await startStream('/llm-report/stream', { symbols: null, market: props.marketTab }, (token) => {
+      if (seq !== genSeq) return // 过期市场流 token 丢弃
       report.value += token
     })
   } catch (e) {
+    if (e?.name === 'AbortError') return
+    if (seq !== genSeq) return
     error.value = '生成失败：' + (e?.message || '网络错误')
   } finally {
-    loading.value = false
+    if (seq === genSeq) loading.value = false
   }
 }
+
+// R4-28: 切换市场 tab → 取消进行中的旧流、清空旧报告（避免停留港股等旧市场内容）、
+// 自动为当前市场重新生成研判
+watch(() => props.marketTab, () => {
+  stopStream()
+  genSeq++ // 使旧 generate 的后续回调失效
+  report.value = ''
+  error.value = ''
+  generate()
+})
 </script>
 
 <style scoped>

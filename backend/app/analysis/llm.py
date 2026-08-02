@@ -657,7 +657,8 @@ async def llm_complete_with_system(
 def _format_indices(indices: list[dict]) -> str:
     if not indices:
         return ""
-    lines = [f"- {idx.get('name','')}({idx.get('symbol','')}): {idx.get('price','N/A')}, 涨跌幅{idx.get('change_pct','N/A')}%" for idx in indices[:15]]
+    # R4-27b: 保留指数代码但去除内部 ^ 前缀（^HSTECH → HSTECH），观感自然
+    lines = [f"- {idx.get('name','')}({str(idx.get('symbol','')).lstrip('^')}): {idx.get('price','N/A')}, 涨跌幅{idx.get('change_pct','N/A')}%" for idx in indices[:15]]
     return "\n".join(lines)
 
 
@@ -693,7 +694,8 @@ def _build_market_overview(
     a_stock_names = {"上证指数", "深证成指", "创业板指", "科创50", "沪深300", "上证50", "中证500", "中证1000"}
     for idx in indices:
         if idx.get("name") in a_stock_names:
-            prompt += f"- {idx.get('name')}({idx.get('symbol','')}): {idx.get('price','N/A')}, 涨跌幅{idx.get('change_pct','N/A')}%\n"
+            # R4-27b: 保留代码但去除内部 ^ 前缀
+            prompt += f"- {idx.get('name')}({str(idx.get('symbol','')).lstrip('^')}): {idx.get('price','N/A')}, 涨跌幅{idx.get('change_pct','N/A')}%\n"
     if not any(idx.get("name") in a_stock_names for idx in indices):
         prompt += _format_indices(indices) or "（暂无数据）\n"
 
@@ -701,7 +703,7 @@ def _build_market_overview(
     us_stock_names = {"标普500", "纳斯达克", "道琼斯"}
     for s in major_stocks + indices:
         if s.get("name") in us_stock_names:
-            prompt += f"- {s.get('name')}({s.get('symbol','')}): {s.get('price','N/A')}, 涨跌幅{s.get('change_pct','N/A')}%\n"
+            prompt += f"- {s.get('name')}({str(s.get('symbol','')).lstrip('^')}): {s.get('price','N/A')}, 涨跌幅{s.get('change_pct','N/A')}%\n"
     if not any(s.get("name") in us_stock_names for s in major_stocks + indices):
         prompt += "（暂无数据）\n"
 
@@ -1008,7 +1010,7 @@ async def analyze_news_impact(news_item: dict, holdings: list[dict], market_cont
 （affected_holdings 中的 symbol 必须严格从上述清单中选择，不得新增任何代码）
 
 请分析这条新闻对组合的影响，重点回答：
-(a) 影响范围（市场/板块）；
+(a) 影响范围：必须明确方向（利好/利空/中性）＋板块＋概念，如「方向：利好；板块：A股文化传媒（影视院线、内容制作）；概念：影视、内容IP」；
 (b) 组合内哪些标的会受到影响、具体如何受影响。
 只返回约定结构的 JSON。
 
@@ -1023,7 +1025,7 @@ async def analyze_news_impact(news_item: dict, holdings: list[dict], market_cont
 当前无持仓组合。
 
 请分析这条新闻对市场整体的影响，重点回答：
-(a) 影响范围（市场/板块）；
+(a) 影响范围：必须明确方向（利好/利空/中性）＋板块＋概念，如「方向：利好；板块：A股文化传媒（影视院线、内容制作）；概念：影视、内容IP」；
 (b) 哪些行业或主题会受到正面/负面影响。
 只返回约定结构的 JSON。
 
@@ -1225,6 +1227,8 @@ async def generate_strategy_check_report(
 - 每条建议的 action 字段必须为小写枚举之一: increase / decrease / hold（禁止 BUY/SELL/HOLD 大写形式）
 - 每条建议必须包含 current_weight 与 suggested_weight（0-1 小数）
 - 每条建议必须包含 reason 与 confidence（0-1 小数）
+- reason 必须为 2-3 句完整逻辑（R4-22），按「触发依据；操作节奏；风险纪律」三段式组织，
+  禁止单句理由（如仅"建议增仓"）
 
 ## 持仓分析
 {holdings_text}

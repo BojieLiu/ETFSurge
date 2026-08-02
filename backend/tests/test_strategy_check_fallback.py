@@ -185,6 +185,40 @@ class TestRuleSuggestionEnhancement:
         assert s["action"] == "increase", s["reason"]
         assert "偏离目标权重" in s["reason"]
 
+    def test_reason_richness_three_parts(self):
+        """R4-22: reason 丰富化 — 三段式（依据/操作/纪律），含操作节奏与风险边界。"""
+        # 强买入 → increase：应含分批节奏 + 风控线
+        s = _rule_based_suggestion(
+            symbol="510300", name="沪深300ETF", target_weight=0.2,
+            factor_score={"technical": 0.8, "momentum": 0.6},
+            signal={"signal": "buy"}, regime="range_bound",
+        )
+        parts = s["reason"].split("；")
+        assert len(parts) >= 3, s["reason"]  # 依据/操作/纪律三段
+        assert any("分 2 次" in p or "分批" in p for p in parts), s["reason"]
+        assert any("MA20" in p or "止损" in p or "离场" in p or "破位" in p for p in parts), s["reason"]
+
+        # 中性 hold：应含持有逻辑 + 观察触发点
+        s2 = _rule_based_suggestion(
+            symbol="511010", name="国债ETF", target_weight=0.2,
+            factor_score={"technical": 0.05},
+            signal={"signal": "hold"}, regime="range_bound",
+        )
+        parts2 = s2["reason"].split("；")
+        assert len(parts2) >= 3, s2["reason"]
+        assert any("维持现状" in p for p in parts2)
+        assert any("RSI" in p or "超卖" in p or "观察" in p for p in parts2), s2["reason"]
+
+        # 强卖出 → decrease：应含减仓节奏 + 破位纪律
+        s3 = _rule_based_suggestion(
+            symbol="518880", name="黄金ETF", target_weight=0.3,
+            factor_score={"technical": -0.7, "momentum": -0.5},
+            signal={"signal": "sell"}, regime="range_bound",
+        )
+        parts3 = s3["reason"].split("；")
+        assert len(parts3) >= 3, s3["reason"]
+        assert any("减幅不超过" in p for p in parts3), s3["reason"]
+
 
 class TestRiskCombineHonesty:
     def test_llm_failed_warning(self):

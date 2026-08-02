@@ -752,8 +752,10 @@ async def search_hk_us(keyword: str = "", enrich: bool = True,
         from ..fetchers.china_market import fetch_hk_spot_list, fetch_us_spot_list
         # 并发拉取两个市场的 spot（单个最坏 10s 超时，串行会翻倍阻塞搜索）
         spot_rows = await asyncio.gather(
-            _call(fetch_hk_spot_list, timeout=15),
-            _call(fetch_us_spot_list, timeout=15),
+            # R4-26: spot 拉取超时 15s → 4s——缓存 miss 且数据源不可用时快速失败，
+            # 搜索立即降级到静态基座（毫秒级），不等 akshare 长时间超时
+            _call(fetch_hk_spot_list, timeout=4),
+            _call(fetch_us_spot_list, timeout=4),
             return_exceptions=True,
         )
         for mk, rows in zip(("HK", "US"), spot_rows):

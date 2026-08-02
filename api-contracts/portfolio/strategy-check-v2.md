@@ -101,6 +101,7 @@ GET /api/v1/portfolio/tasks/{task_id}
 | result.suggestions[].suggested_weight | number | 建议权重（0-1） |
 | result.suggestions[].source | string | `rule`（规则引擎）\| `llm`（大模型） |
 | result.suggestions[].confidence | number | 置信度 0-1，规则引擎输出默认 0.7 |
+| result.suggestions[].reason | string | **丰富化（R4-22）**：2-3 句完整逻辑，按「触发依据；操作节奏；风险纪律」三段式组织，用「；」分隔；规则引擎与 LLM 均须遵守 |
 | result.coverage | object | **新增** 覆盖率统计，确保 100% |
 | result.coverage.coverage_pct | number | 必须为 1.0（100%） |
 

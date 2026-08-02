@@ -780,29 +780,60 @@ def _rule_based_suggestion(
 
     bearish = regime in ("bearish", "bear", "bear_market", "defensive")
     cur = current_weight if current_weight is not None else target_weight
+    # R4-22: 建议丰富化 — reason 输出 3 句结构化文本（依据/操作/纪律），
+    # 保留旧关键词（测试断言兼容：偏离目标权重/未达增仓阈值/因子分/信号）
+    _regime_cn = {"range_bound": "震荡", "bullish": "偏多", "bearish": "偏空",
+                  "volatile": "高波动", "unknown": "待定"}.get(regime, regime)
     # 相对偏离度：|current - target| / max(target, eps) > 20% → 向 target 回归
     _eps = 1e-9
     if current_weight is not None and abs(current_weight - target_weight) > max(target_weight, _eps) * 0.2:
         if current_weight < target_weight:
             action = "increase"
-            reason = f"偏离目标权重（当前 {current_weight:.1%} < 目标 {target_weight:.1%}），建议回归"
+            reason = (
+                f"偏离目标权重（当前 {current_weight:.1%} < 目标 {target_weight:.1%}），建议回归至 {target_weight:.1%}；"
+                f"分 2 次加仓、单次加仓不超过目标权重的 20%，避免追高；"
+                f"当前市态{_regime_cn}，若跌破 MA20 或市态转空则暂停加仓"
+            )
             suggested = min(target_weight, 0.30)
         else:
             action = "decrease"
-            reason = f"偏离目标权重（当前 {current_weight:.1%} > 目标 {target_weight:.1%}），建议回归"
+            reason = (
+                f"偏离目标权重（当前 {current_weight:.1%} > 目标 {target_weight:.1%}），建议回归至 {target_weight:.1%}；"
+                f"分批减仓、单次减幅不超过当前仓位的 30%，平滑换仓成本；"
+                f"若跌破前期支撑位可加速离场，保留现金等待市态企稳"
+            )
             suggested = max(target_weight, 0.0)
     elif avg_factor > 0.5 and sig == "buy" and not bearish:
-        action, reason = "increase", f"因子评分优({avg_factor:.2f})+技术买入信号，建议增仓"
+        action = "increase"
+        reason = (
+            f"因子评分优({avg_factor:.2f})、技术面买入信号，基本面与动量共振，建议增仓；"
+            f"分 2 次执行、单次加仓不超过目标权重的 20%，留出回调加仓空间；"
+            f"若市态转空或跌破 MA20 则暂停加仓，不逆势硬扛"
+        )
         suggested = min(cur * 1.2, 0.30)
     elif avg_factor < -0.5 and sig == "sell":
-        action, reason = "decrease", f"因子评分弱({avg_factor:.2f})+技术卖出信号，建议减仓"
+        action = "decrease"
+        reason = (
+            f"因子评分弱({avg_factor:.2f})+技术卖出信号，趋势转弱，建议减仓；"
+            f"分批执行、单次减幅不超过当前仓位的 30%，避免一次性冲击成本；"
+            f"若继续破位（跌破 MA60 或前期低点）加速离场，市态{_regime_cn}下优先控制回撤"
+        )
         suggested = max(cur * 0.7, 0.0)
     elif avg_factor > 0.2 and sig == "buy":
         action = "hold"
-        reason = f"偏多（因子分 {avg_factor:.2f} 未达增仓阈值 0.5），维持现状"
+        reason = (
+            f"偏多（因子分 {avg_factor:.2f} 未达增仓阈值 0.5），维持现状；"
+            f"继续持有观察，若因子分突破 0.5 或放量突破关键阻力位再转增配；"
+            f"止损纪律：跌破 MA20 或买入逻辑破坏即减仓一半"
+        )
         suggested = cur
     else:
-        action, reason = "hold", f"因子分 {avg_factor:.2f}（中性区间），信号 {sig or '中性'}，维持现状"
+        action = "hold"
+        reason = (
+            f"因子分 {avg_factor:.2f}（中性区间），信号 {sig or '中性'}，维持现状；"
+            f"持有逻辑不变，跟踪因子与信号变化；"
+            f"关注 RSI 进入超卖区（<30）或因子转正后的加仓机会，市态{_regime_cn}不追涨杀跌"
+        )
         suggested = cur
 
     return {
@@ -874,13 +905,19 @@ def _build_rule_fallback_report(
     lines.append("")
     lines.append("### 操作建议")
     if merged_suggestions:
+        lines.append("")
         for s in merged_suggestions:
             action = s.get("action", "hold")
             sym = s.get("symbol", "")
             cw = s.get("current_weight", 0)
             sw = s.get("suggested_weight", 0)
+            conf = s.get("confidence", "medium")
             reason = (s.get("reason", "") or "").replace("|", "｜")
-            lines.append(f"- {sym} {s.get('name', sym)}：{action} {cw:.1%} → {sw:.1%}｜{reason}")
+            lines.append(f"**{sym} {s.get('name', sym)}**：`{action}` {cw:.1%} → {sw:.1%}（置信度 {conf}）")
+            # R4-22: reason 为 3 句结构化文本（依据/操作/纪律），分点列出提升可读性
+            for part in [p for p in reason.split("；") if p.strip()]:
+                lines.append(f"- {part.strip()}")
+            lines.append("")
     else:
         lines.append("- 无可操作标的（组合为空）。")
     return "\n".join(lines)
