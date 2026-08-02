@@ -1280,13 +1280,9 @@ async def calculate_cumulative_pnl(
                     cumulative_pnl = market_value - cost_basis
                     cumulative_pnl_pct = (cumulative_pnl / cost_basis * 100) if cost_basis > 0 else 0.0
                     estimate_note = "" if has_chg else "净值变动暂缺"
-                    # 019633 avg_cost=3.534 疑似录入异常——WARN 日志提示用户核对（不改数据）
-                    if price > 0 and (e.avg_cost / price > 3 or e.avg_cost / price < 1 / 3):
-                        logger.warning(
-                            "[cumulative_pnl] %s avg_cost=%.3f 与场内对应价 %.3f 量级差异过大，"
-                            "疑似录入异常，请核对成本数据",
-                            e.symbol, e.avg_cost, price,
-                        )
+                    # 019633 avg_cost=3.534 经用户确认为真实申购成本（a94c0af 决策）
+                    # ——非录入错误，无需 WARN 提示核对；新口径（联接净值折算）下
+                    # 单只盈亏率即真实语义。
                 else:
                     # avg_cost 异常（<=0）→ 无法按净值折算，降级按本金估算（盈亏 0）
                     est_shares = 0.0

@@ -1583,16 +1583,20 @@ def section_design_quality_gate():
             weak = [a for a in core if (a.get("target_weight") or a.get("weight") or 0) < 0.05]
             check(f"M7 {s.get('id', s.get('name', '?'))} 核心单只权重 ≥5%",
                   not weak, f"弱权重: {[a.get('symbol') for a in weak]}")
-        # P1-1 验收2（combination-design-review §四.2）: 三方案核心层**同时**含
-        # 中证A500（560600/159338）与沪深300（510300）——R4-15 曾只验「沪深300 存在」
-        # 或「二者之一」，A500 缺失仍 PASS。
+        # P1-1 验收2（combination-design-review §四.2 + 用户决策 f84fe5c）: 三方案核心层
+        # 均含宽基锚——「沪深300 或 中证A500 皆可」作公共底仓（引擎按强制注入/评分选其
+        # 一；R4-15 曾只验「沪深300 存在」且 A500 缺失仍 PASS → 放宽为锚之一但不再允许
+        # 「仅有沪深300 而无 A500」被当作达标，A500 必须出现在至少一个方案核心层）。
         if len(core_syms_list) == 3:
-            _all_hs300 = all(("510300" in cs) for cs in core_syms_list)
-            _all_a500 = all(bool(cs & {"560600", "159338"}) for cs in core_syms_list)
-            check("P1-1 三方案核心层均含 沪深300(510300)", _all_hs300,
-                  "某方案核心层缺 510300" if not _all_hs300 else "全部含")
-            check("P1-1 三方案核心层均含 中证A500(560600/159338)", _all_a500,
-                  "某方案核心层缺 A500" if not _all_a500 else "全部含")
+            _anchor_ok = all(
+                bool(cs & {"510300", "560600", "159338"}) for cs in core_syms_list
+            )
+            check("P1-1 三方案核心层均含宽基锚(A500/沪深300)", _anchor_ok,
+                  "某方案核心层缺宽基锚(510300/560600/159338)"
+                  if not _anchor_ok else "全部含锚")
+            _a500_anywhere = any(cs & {"560600", "159338"} for cs in core_syms_list)
+            check("P1-1 至少一方案核心层含中证A500", _a500_anywhere,
+                  "A500(560600/159338) 未进入任何方案核心层" if not _a500_anywhere else "A500 已入核心")
             # P1-1 验收3: 任意方案核心层中证500 家族 ≤1 只（价值/成长/增强视为同一指数）
             for s in strategies:
                 allocs = s.get("allocations") or s.get("etfs") or []

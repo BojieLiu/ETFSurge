@@ -81,15 +81,19 @@ def test_design_quality_integration():
         core_syms = {a["symbol"] for a in core}
         core_syms_list.append(core_syms)
 
-        # P1-1 验收2: 核心层含 A500 与 沪深300
-        assert "510300" in core_syms, f"{s['id']} 核心层缺 沪深300: {sorted(core_syms)}"
-        assert bool(core_syms & {"560600", "159338"}), \
-            f"{s['id']} 核心层缺 A500: {sorted(core_syms)}"
+        # P1-1 验收2（用户决策 f84fe5c）: 核心层含宽基锚——「沪深300 或 A500 皆可」
+        # 作公共底仓；A500 至少进入一个方案核心层（不再要求每方案同时含两者）
+        assert bool(core_syms & {"510300", "560600", "159338"}), \
+            f"{s['id']} 核心层缺宽基锚(510300/560600/159338): {sorted(core_syms)}"
         # P1-1 验收4: 卫星层无宽基（A100/中证500/沪深300/科创50/创业板）
         for a in sat:
             assert a["symbol"] not in ("562000", "588000", "159915", "510300"), \
                 f"{s['id']} 卫星层混入宽基 {a['symbol']}"
             assert not _is_wide_name(a), f"{s['id']} 卫星层混入宽基 {a['symbol']}"
+
+    # P1-1 验收2 补充（用户决策 f84fe5c）: A500 至少进入一个方案核心层
+    assert any(cs & {"560600", "159338"} for cs in core_syms_list), \
+        "A500(560600/159338) 未进入任何方案核心层"
 
     # P1-2: 任意两方案核心层重叠（剔除公共底仓 510300 + 强制标的）≤1
     # 强制标的（MANDATORY_CODES: 510300/560600/518880/511090）允许跨方案重复
