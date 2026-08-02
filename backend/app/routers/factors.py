@@ -182,6 +182,10 @@ async def get_active_factors() -> JSONResponse:
         factor_entry = {
             "code": code,
             "name": definition.name if definition and definition.name else _get_factor_name(code),
+            # P2-4 (R4-11d): 注入 category 字段——前端 FactorModelView tooltip 读
+            # item.category（旧实现无此字段 → tooltip 分类显示空；父级 categories[].name
+            # 在 flatMap 渲染时丢失）。
+            "category": cat_name,
             "subcategory": sub_name,
             "description": definition.description if definition else "",
             "standardization": definition.standardization if definition else "zscore",

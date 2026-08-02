@@ -142,7 +142,13 @@ async def _build_price_map_async(etfs):
     async def _a_batch():
         if not a_symbols:
             return []
-        return await run_sync(market_data_hub.get_a_stock_batch, a_symbols)
+        # P2-1 (R4-16): 单源超时截断 3s——慢源降级为空并 WARN，不拖累整体
+        try:
+            return await asyncio.wait_for(
+                run_sync(market_data_hub.get_a_stock_batch, a_symbols), timeout=3.0)
+        except Exception as e:
+            logger.warning("[price_map] A股批量行情超时/失败（3s 截断）: %s", e)
+            return []
 
     async def _hk_batch():
         if not hk_symbols:
@@ -158,7 +164,13 @@ async def _build_price_map_async(etfs):
             return s, None
 
         out = {}
-        results = await asyncio.gather(*[_one(s) for s in hk_symbols], return_exceptions=True)
+        try:
+            results = await asyncio.wait_for(
+                asyncio.gather(*[_one(s) for s in hk_symbols], return_exceptions=True),
+                timeout=3.0)
+        except Exception as e:
+            logger.warning("[price_map] 港股行情超时（3s 截断）: %s", e)
+            return out
         for r in results:
             if isinstance(r, tuple) and r[1] is not None:
                 out[r[0]] = r[1]
@@ -178,7 +190,13 @@ async def _build_price_map_async(etfs):
             return s, None
 
         out = {}
-        results = await asyncio.gather(*[_one(s) for s in us_symbols], return_exceptions=True)
+        try:
+            results = await asyncio.wait_for(
+                asyncio.gather(*[_one(s) for s in us_symbols], return_exceptions=True),
+                timeout=3.0)
+        except Exception as e:
+            logger.warning("[price_map] 美股行情超时（3s 截断）: %s", e)
+            return out
         for r in results:
             if isinstance(r, tuple) and r[1] is not None:
                 out[r[0]] = r[1]
@@ -186,8 +204,10 @@ async def _build_price_map_async(etfs):
 
     async def _idx_batch():
         try:
-            return {it["symbol"]: (it["price"], it["change_pct"]) for it in await run_sync(market_data_hub.get_index_realtime)}
-        except Exception:
+            return {it["symbol"]: (it["price"], it["change_pct"]) for it in await asyncio.wait_for(
+                run_sync(market_data_hub.get_index_realtime), timeout=3.0)}
+        except Exception as e:
+            logger.warning("[price_map] 指数行情超时（3s 截断）: %s", e)
             return {}
 
     # F8: run independent top-level fetches concurrently (offloaded to threads).
@@ -208,7 +228,9 @@ async def _build_price_map_async(etfs):
     if tracked:
         async def _nav(s):
             try:
-                nav = await run_sync(market_data_hub.get_fund_nav, s)
+                # P2-1: NAV 单源 3s 截断
+                nav = await asyncio.wait_for(
+                    run_sync(market_data_hub.get_fund_nav, s), timeout=3.0)
                 if nav:
                     if isinstance(nav, tuple) and len(nav) >= 1:
                         return s, (float(nav[0]), float(nav[1]) if len(nav) > 1 else 0.0)
@@ -607,8 +629,40 @@ async def strategy_check(
             weight_map[sym] = float(w) if w else 0.0
 
     holdings_analysis = llm_result.get("holdings_analysis", [])
+
+    # P0-1 (R4-01): 行业注入——从 market_data_hub 候选池构建 symbol→industry 映射
+    # （与设计任务同一来源；候选池条目含 ETFClassifier 产出的 industry 字段）。
+    # 仅作数据回填，不参与因子计算；失败时静默（risk_warnings 有空行业保护兜底）。
+    industry_map: dict[str, str] = {}
+    try:
+        from ..services.market_data_hub import market_data_hub as _hub
+        _pool = _hub.get_pool()
+        _pool_items = _pool.values() if isinstance(_pool, dict) else (_pool or [])
+        for _items in _pool_items:
+            for _it in _items or []:
+                _sym = _it.get("symbol", "")
+                _ind = _it.get("industry") or ""
+                if _sym and _ind and _ind != "unknown" and _sym not in industry_map:
+                    industry_map[_sym] = _ind
+        for _sym in (symbols or []):
+            if _sym and _sym not in industry_map:
+                _entry = _hub.get_by_code(_sym)
+                if _entry:
+                    _ind = (_entry.get("industry") or "").strip()
+                    if _ind and _ind != "unknown":
+                        industry_map[_sym] = _ind
+        if industry_map:
+            logger.debug("[strategy_check] industry map built for %d symbols", len(industry_map))
+    except Exception as _e:
+        logger.debug("[strategy_check] industry map build failed (non-fatal): %s", _e)
+
     for h in holdings_analysis:
         sym = h.get("symbol", "")
+        # P0-1: 注入 sector/industry（缺失时由 _compute_risk_warnings 空行业保护兜底）
+        _ind = industry_map.get(sym, "")
+        if _ind:
+            h.setdefault("industry", _ind)
+            h.setdefault("sector", _ind)
         # P2-4: weight 回填
         if sym and h.get("weight") is None:
             h["weight"] = weight_map.get(sym, 0.0)
@@ -972,14 +1026,32 @@ def _compute_risk_warnings(
 
     unique_sectors = len(sector_weights)
     if unique_sectors <= 2 and len(holdings_analysis) > 2:
-        top_sector = max(sector_weights, key=sector_weights.get)
-        warnings.append({
-            "type": "concentration",
-            "severity": "high",
-            "description": f"行业集中度风险：仅覆盖{unique_sectors}个行业，"
-                           f"最大行业{top_sector}占比{sector_weights[top_sector]:.0%}",
-            "affected_symbols": [h.get("symbol", "") for h in holdings_analysis if (h.get("sector") or h.get("industry", "")) == top_sector],
-        })
+        blank_weight = sector_weights.get("", 0.0)
+        if blank_weight > 0:
+            # P0-1 (R4-01): 空行业保护——行业数据缺失（数据源未覆盖）时
+            # 降级为 WARN + 显式标注，而非误导性的 HIGH「仅覆盖1个行业」。
+            # （旧逻辑把无行业字段的标的全部归入空串行业 → unique_sectors=1 误报）
+            warnings.append({
+                "type": "concentration",
+                "severity": "warning",
+                "description": (
+                    f"行业集中度提示：行业数据缺失（数据源未覆盖{blank_weight:.0%}权重标的），"
+                    "行业分布无法准确评估"
+                ),
+                "affected_symbols": [
+                    h.get("symbol", "") for h in holdings_analysis
+                    if not (h.get("sector") or h.get("industry", ""))
+                ],
+            })
+        else:
+            top_sector = max(sector_weights, key=sector_weights.get)
+            warnings.append({
+                "type": "concentration",
+                "severity": "high",
+                "description": f"行业集中度风险：仅覆盖{unique_sectors}个行业，"
+                               f"最大行业{top_sector}占比{sector_weights[top_sector]:.0%}",
+                "affected_symbols": [h.get("symbol", "") for h in holdings_analysis if (h.get("sector") or h.get("industry", "")) == top_sector],
+            })
 
     # 2. 单只权重超配风险
     for h in holdings_analysis:
@@ -1187,17 +1259,56 @@ async def calculate_cumulative_pnl(
                 "last_trade_date": e.last_trade_date.isoformat() if e.last_trade_date else None,
                 "estimated": False,
             })
-        elif e.avg_cost is not None and total_capital > 0 and price > 0 and e.target_weight > 0:
+        elif e.avg_cost is not None and total_capital > 0 and e.target_weight > 0:
             # R64: 有 avg_cost 但无份额——按目标权重估算份额，成本用用户录入的 avg_cost
             # （旧逻辑用 current price 当成本 → 累计盈亏恒为 0、成本价零贡献）
-            est_shares = (total_capital * e.target_weight) / price
-            cost_basis = est_shares * e.avg_cost
-            market_value = est_shares * price
-            cumulative_pnl = market_value - cost_basis
-            cumulative_pnl_pct = (cumulative_pnl / cost_basis * 100) if cost_basis > 0 else 0.0
+            target_amount = total_capital * e.target_weight
+            pt = e.portfolio_type or ""
+            if pt == "off_exchange":
+                # P1-6 (R4-21): 场外累计盈亏口径修复——联接基金不再混用
+                # 「场内 ETF 实时价折算份额」与「联接基金净值成本」（两者量级差
+                # 2-5 倍：半导体联接C avg_cost=3.534 vs 场内 0.67，成本被错误放大）。
+                # 唯一口径：份额按联接净值折算 → 成本=投入本金；市值按跟踪指数
+                # 涨跌幅估算（场内对应 ETF change_pct 作代理）；无涨跌幅时降级
+                # market_value=本金（盈亏 0，标注「净值变动暂缺」）。
+                if e.avg_cost > 0:
+                    est_shares = target_amount / e.avg_cost
+                    cost_basis = target_amount
+                    _, change_pct = price_map.get(e.symbol, (0.0, 0.0))
+                    has_chg = isinstance(change_pct, (int, float)) and abs(change_pct) > 1e-9
+                    market_value = target_amount * (1 + change_pct / 100.0) if has_chg else target_amount
+                    cumulative_pnl = market_value - cost_basis
+                    cumulative_pnl_pct = (cumulative_pnl / cost_basis * 100) if cost_basis > 0 else 0.0
+                    estimate_note = "" if has_chg else "净值变动暂缺"
+                    # 019633 avg_cost=3.534 疑似录入异常——WARN 日志提示用户核对（不改数据）
+                    if price > 0 and (e.avg_cost / price > 3 or e.avg_cost / price < 1 / 3):
+                        logger.warning(
+                            "[cumulative_pnl] %s avg_cost=%.3f 与场内对应价 %.3f 量级差异过大，"
+                            "疑似录入异常，请核对成本数据",
+                            e.symbol, e.avg_cost, price,
+                        )
+                else:
+                    # avg_cost 异常（<=0）→ 无法按净值折算，降级按本金估算（盈亏 0）
+                    est_shares = 0.0
+                    cost_basis = target_amount
+                    market_value = target_amount
+                    cumulative_pnl = 0.0
+                    cumulative_pnl_pct = 0.0
+                    estimate_note = "净值变动暂缺"
+            elif price > 0:
+                # on_exchange：场内价与场内 avg_cost 同单位，无错配（保持原口径）
+                est_shares = target_amount / price
+                cost_basis = est_shares * e.avg_cost
+                market_value = est_shares * price
+                cumulative_pnl = market_value - cost_basis
+                cumulative_pnl_pct = (cumulative_pnl / cost_basis * 100) if cost_basis > 0 else 0.0
+                estimate_note = ""
+            else:
+                # R67⑤: on_exchange 且 price=0 → 无法估算，但仍计入 has_real_data
+                has_real_data = True
+                continue
             has_real_data = True
             estimated_cost_basis += cost_basis
-            pt = e.portfolio_type or ""
             if pt in est_cost_by_type:
                 est_cost_by_type[pt] += cost_basis
 
@@ -1220,6 +1331,7 @@ async def calculate_cumulative_pnl(
                 "first_buy_date": getattr(e, 'first_buy_date', None).isoformat() if getattr(e, 'first_buy_date', None) else None,
                 "last_trade_date": getattr(e, 'last_trade_date', None).isoformat() if getattr(e, 'last_trade_date', None) else None,
                 "estimated": True,
+                "estimate_note": estimate_note,
             })
         elif total_capital > 0 and price > 0 and e.target_weight > 0:
             # 无 avg_cost——旧估算逻辑（price 当成本，PnL 从 0 起，不置 has_real_data）

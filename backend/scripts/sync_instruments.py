@@ -46,7 +46,7 @@ async def _fetch_akshare_list(fn_name: str, symbol_col: str, name_col: str, mark
         return []
     # akshare 中文列可能 latin1 编码，需解码
     try:
-        from app.fetchers.akshare_fetcher import _decode_df
+        from app.utils.decode import decode_df as _decode_df
         df = _decode_df(df)
     except Exception:
         pass
@@ -81,7 +81,8 @@ async def collect_all() -> list[dict]:
         ("港股", "stock_hk_main_board_spot_em"),
     ]
     tasks = [
-        _fetch_akshare_list(fn, "代码", "名称", mkt, at)
+        (_fetch_a_stock_list() if fn == "stock_zh_a_spot_em"
+         else _fetch_akshare_list(fn, "代码", "名称", mkt, at))
         for (_, fn), (mkt, at) in zip(segments, [("A", "stock"), ("A", "etf"), ("HK", "stock")])
     ]
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -99,6 +100,29 @@ async def collect_all() -> list[dict]:
             seen.add(key)
             merged.append(row)
     return merged
+
+
+async def _fetch_a_stock_list() -> list[dict]:
+    """P1-7 (R4-29): A 股个股列表——东财主源 + 新浪降级链。
+
+    东财 stock_zh_a_spot_em 熔断时（2026-08-02 实测 ConnectionError）回退新浪
+    stock_zh_a_spot（列：代码/名称），保证个股仍能灌入 instruments 本地表，
+    消除「个股搜索走 levistock 全量外部拉取、冷启动 5-6s」的体验。
+    """
+    try:
+        rows = await _fetch_akshare_list("stock_zh_a_spot_em", "代码", "名称", "A", "stock")
+        if rows:
+            return rows
+    except Exception as e:
+        print(f"  [WARN] A股个股 stock_zh_a_spot_em failed: {e}")
+    try:
+        rows = await _fetch_akshare_list("stock_zh_a_spot", "代码", "名称", "A", "stock")
+        if rows:
+            print("  [INFO] A股个股: 新浪降级链生效（东财不可用）")
+            return rows
+    except Exception as e:
+        print(f"  [WARN] A股个股 stock_zh_a_spot failed: {e}")
+    return []
 
 
 async def sync():

@@ -4,7 +4,7 @@
     <AppCard v-if="activeTab === 'combined'" layout="horizontal" icon="💰" class="summary-card" bordered padded hoverable>
       <p class="summary-label">总仓位</p>
       <p class="summary-value" :class="loading ? 'skeleton' : ''" aria-live="polite">
-        <Skeleton v-if="loading" type="text" width="120" />
+        <span v-if="loading" class="value-skeleton" aria-hidden="true"></span>
         <span v-else>¥{{ formatNum(totalAll) }}</span>
       </p>
     </AppCard>
@@ -17,7 +17,7 @@
     >
       <p class="summary-label">场内当日盈亏</p>
       <p class="summary-value" :class="[loading ? 'skeleton' : '', pnlOn >= 0 ? 'text-up' : 'text-down']" aria-live="polite">
-        <Skeleton v-if="loading" type="text" width="120" />
+        <span v-if="loading" class="value-skeleton" aria-hidden="true"></span>
         <span v-else>¥{{ formatNum(pnlOn) }}</span>
       </p>
     </AppCard>
@@ -30,7 +30,7 @@
     >
       <p class="summary-label">场外当日盈亏</p>
       <p class="summary-value" :class="[loading ? 'skeleton' : '', pnlOff >= 0 ? 'text-up' : 'text-down']" aria-live="polite">
-        <Skeleton v-if="loading" type="text" width="120" />
+        <span v-if="loading" class="value-skeleton" aria-hidden="true"></span>
         <span v-else>¥{{ formatNum(pnlOff) }}</span>
       </p>
     </AppCard>
@@ -40,19 +40,19 @@
       <AppCard v-if="activeTab !== 'off_exchange'" layout="horizontal" class="summary-card" bordered padded>
         <div class="summary-content">
           <p class="summary-label">场内累计盈亏</p>
-          <Skeleton type="text" width="120" />
+          <span class="value-skeleton" aria-hidden="true"></span>
         </div>
       </AppCard>
       <AppCard v-if="activeTab !== 'on_exchange'" layout="horizontal" class="summary-card" bordered padded>
         <div class="summary-content">
           <p class="summary-label">场外累计盈亏</p>
-          <Skeleton type="text" width="120" />
+          <span class="value-skeleton" aria-hidden="true"></span>
         </div>
       </AppCard>
       <AppCard v-if="activeTab === 'combined'" layout="horizontal" class="summary-card" bordered padded>
         <div class="summary-content">
           <p class="summary-label">总累计盈亏</p>
-          <Skeleton type="text" width="120" />
+          <span class="value-skeleton" aria-hidden="true"></span>
         </div>
       </AppCard>
     </template>
@@ -113,7 +113,6 @@
 </template>
 
 <script setup>
-import Skeleton from '../ui/Skeleton.vue'
 import AppCard from '../ui/AppCard.vue'
 
 const props = defineProps({
@@ -162,7 +161,45 @@ function estimatedRatio(type) {
 }
 
 .summary-card {
+  /* P0-4 (R4-19): 卡片固定最小高度——加载态（单行骨架）与完成态（数字+估算提示）
+     高度一致，消除首屏数据到达时的布局偏移（CLS）。 */
+  min-height: 96px;
   transition: var(--transition-fast);
+}
+
+.summary-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.summary-value {
+  min-height: 1.5rem;
+}
+
+/* P0-4: 单行骨架占位——高度与 text-h2 数字行严格一致，替换时零重排 */
+.value-skeleton {
+  display: inline-block;
+  width: 120px;
+  height: 1.5rem;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(
+    90deg,
+    var(--color-surface-tertiary) 25%,
+    var(--color-surface-secondary) 50%,
+    var(--color-surface-tertiary) 75%
+  );
+  background-size: 200% 100%;
+  animation: summary-shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes summary-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .value-skeleton { animation: none; }
 }
 
 .summary-label {

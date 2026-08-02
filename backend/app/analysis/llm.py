@@ -738,9 +738,45 @@ async def generate_market_report(
     news: list[dict],
     macro_news: list[dict],
     market: str = "A",
+    global_liquidity: dict | None = None,
 ) -> str:
-    prompt = _build_report_prompt(indices, commodities, market_data, indicators, news, macro_news, market=market)
+    # P1-5 (R4-23): 海外流动性——调用方未显式传入时内部默认采集 FRED
+    # （美债10Y/VIX/联邦基金利率），失败静默不注入，不影响主报告。
+    if global_liquidity is None:
+        global_liquidity = await _fetch_global_liquidity()
+    prompt = _build_report_prompt(indices, commodities, market_data, indicators, news, macro_news,
+                                  market=market, global_liquidity=global_liquidity)
     return await get_agent("market_report").run(prompt)
+
+
+async def _fetch_global_liquidity() -> dict | None:
+    """P1-5 (R4-23): FRED 海外流动性采集——美债10Y/VIX/联邦基金利率。
+
+    任一指标失败静默（该键不注入）；全部失败/无 API key 返回 None。
+    首期仅 3 个指标（CPI/非农暂不接入，控制 prompt 长度）。
+    """
+    try:
+        from ..fetchers.global_markets_fetcher import (
+            fetch_fed_rate,
+            fetch_us_10y,
+            fetch_vix,
+        )
+        import asyncio as _asyncio
+        _us10, _vix, _fed = await _asyncio.wait_for(
+            _asyncio.gather(
+                fetch_us_10y(), fetch_vix(), fetch_fed_rate(),
+                return_exceptions=True,
+            ),
+            timeout=15,
+        )
+        gl: dict[str, float] = {}
+        for _k, _v in (("us_10y", _us10), ("vix", _vix), ("fed_rate", _fed)):
+            if isinstance(_v, float):
+                gl[_k] = round(_v, 2)
+        return gl or None
+    except Exception as e:
+        logger.debug("[llm] _fetch_global_liquidity failed (non-fatal): %s", e)
+        return None
 
 
 async def generate_advice(
@@ -1069,8 +1105,25 @@ def _build_report_prompt(
     news: list[dict],
     macro_news: list[dict],
     market: str = "A",
+    global_liquidity: dict | None = None,
 ) -> str:
     overview = _build_market_overview(indices, commodities, market_data, news, macro_news, market=market)
+
+    # P1-5 (R4-23): 海外流动性数据段——FRED 美债10Y/VIX/联邦基金利率。
+    # 仅当至少一项可用时注入；全失败（None）时不出现该段，不影响主报告。
+    if global_liquidity:
+        gl_lines = []
+        _us10 = global_liquidity.get("us_10y")
+        _vix = global_liquidity.get("vix")
+        _fed = global_liquidity.get("fed_rate")
+        if _us10 is not None:
+            gl_lines.append(f"- 美债10年期收益率: {_us10}%")
+        if _vix is not None:
+            gl_lines.append(f"- VIX恐慌指数: {_vix}")
+        if _fed is not None:
+            gl_lines.append(f"- 联邦基金利率: {_fed}%")
+        if gl_lines:
+            overview += "\n\n### 海外流动性\n" + "\n".join(gl_lines)
 
     prompt = f"""{overview}
 

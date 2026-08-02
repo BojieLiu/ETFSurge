@@ -115,6 +115,7 @@ export const useTaskStore = defineStore('task', () => {
     const toast = useToastStore()
 
     // Invoke completion callback for any terminal state
+    const hasCb = !!_completionCallbacks[taskId]
     if (changes.status === 'completed' || changes.status === 'failed') {
       const cb = _completionCallbacks[taskId]
       if (cb) {
@@ -123,7 +124,10 @@ export const useTaskStore = defineStore('task', () => {
       }
     }
 
-    if (changes.status === 'completed') {
+    // factor-and-strategy-check-review 问题2 R2: 组件已注册完成回调（自管 toast 与
+    // 结果页状态）时，全局「已完成」toast 不再立即弹——旧行为 WS completed 先到只
+    // 触发全局 toast、组件仍停留 loading（「先提示完成再停留加载」）。
+    if (changes.status === 'completed' && !hasCb) {
       const msg = task.type === 'check'
         ? '策略检查已完成'
         : '组合方案已生成，点击查看'

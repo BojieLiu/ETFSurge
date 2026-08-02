@@ -26,22 +26,22 @@ class TestCollectAllSegments:
     @pytest.mark.asyncio
     async def test_partial_segment_failure_logs_error(self, caplog):
         """N09: 部分段失败打 ERROR，成功段数据保留。"""
-        call_n = {"n": 0}
-
-        async def _side(*a, **kw):
-            call_n["n"] += 1
-            if call_n["n"] == 2:
+        # P1-7: 个股段含降级链（东财 em 失败 → 新浪 spot 成功）
+        async def _side(fn_name, *a, **kw):
+            if fn_name == "stock_zh_a_spot_em":
                 raise ConnectionError("akshare down")
-            # 段1 返回 A 股个股、段3 返回港股（不同 symbol 避免去重合并）
-            return [_row("600519", "贵州茅台")] if call_n["n"] == 1 \
-                else [_row("00700", "腾讯控股", market="HK")]
+            if fn_name == "stock_zh_a_spot":
+                return [_row("600519", "贵州茅台")]
+            if fn_name == "fund_etf_spot_em":
+                raise ConnectionError("ETF down")
+            return [_row("00700", "腾讯控股", market="HK")]
 
-        # 3 段：段1/段3 成功、段2 失败
+        # 个股（新浪降级成功）+ 港股成功、ETF 失败
         with patch.object(si, "_fetch_akshare_list", side_effect=_side):
             with caplog.at_level(logging.ERROR):
                 rows = await si.collect_all()
 
-        assert len(rows) == 2, "成功段数据应保留（段1+段3）"
+        assert len(rows) == 2, "成功段数据应保留（个股降级 + 港股）"
         syms = {r["symbol"] for r in rows}
         assert syms == {"600519", "00700"}, f"两段数据都应保留: {syms}"
         error_msgs = [r.message for r in caplog.records if r.levelno >= logging.ERROR]

@@ -153,18 +153,19 @@ def test_sector_quota_tech_theme_cap():
 # ── 步骤 D：卫星数量下限 ───────────────────────────────────────
 
 def test_satellite_min_count():
-    """每方案卫星 ≥ 4 只（预算允许时）。"""
+    """每方案卫星 ≥ 4 只（预算允许时）——M5 弱化下限：宽基不得入卫星，
+    宁可 3 只也不混入宽基（combination-design-review M5 语义）。"""
     from app.engine.allocation_engine import allocate
 
     candidates = []
     for i, (sym, name) in enumerate([
         ("510300", "沪深300ETF"), ("510500", "中证500ETF"), ("510050", "上证50ETF"),
-        ("588000", "科创50ETF"), ("159915", "创业板ETF"), ("512010", "医药ETF"),
-        ("515030", "新能源车ETF"), ("512880", "证券ETF"), ("515790", "光伏ETF"),
-        ("512760", "芯片ETF"), ("510880", "红利ETF"), ("511010", "国债ETF"),
-        ("518880", "黄金ETF"), ("513500", "标普500ETF"),
+        ("512890", "红利低波ETF"), ("588000", "科创50ETF"), ("159915", "创业板ETF"),
+        ("512010", "医药ETF"), ("515030", "新能源车ETF"), ("512880", "证券ETF"),
+        ("515790", "光伏ETF"), ("512760", "芯片ETF"), ("510880", "红利ETF"),
+        ("511010", "国债ETF"), ("518880", "黄金ETF"), ("513500", "标普500ETF"),
     ]):
-        layer = "defense" if sym in ("511010", "518880", "513500") else ("core" if i < 3 else "satellite")
+        layer = "defense" if sym in ("511010", "518880", "513500") else ("core" if i < 4 else "satellite")
         candidates.append({"symbol": sym, "name": name, "layer": layer,
                            "tracked_index": name.replace("ETF", "")})
     factor_matrix = {c["symbol"]: {"technical": 0.3, "momentum": 0.2,
@@ -176,7 +177,13 @@ def test_satellite_min_count():
     assert len(strategies) == 3
     for s in strategies:
         sats = [a for a in s["allocations"] if a.get("layer") == "satellite"]
-        assert len(sats) >= 4, f"{s['id']} 卫星仅 {len(sats)} 只，低于下限 4"
+        sat_syms = {a["symbol"] for a in sats}
+        # M5: 卫星层不得混入宽基（core 属性：沪深300/中证500/上证50/科创50/创业板）
+        wide = sat_syms & {"510300", "510500", "510050", "588000", "159915"}
+        assert not wide, f"{s['id']} 卫星层混入宽基 {sorted(wide)}"
+        # 弱化下限：宽基排除 + 防御偏好（红利入核心）后 ≥2 只即可——
+        # 旧断言 ≥4 依赖宽基凑数，与 M5「宁可不足也不混宽基」冲突
+        assert len(sats) >= 2, f"{s['id']} 卫星仅 {len(sats)} 只"
 
 
 # ── 步骤 E：C2 惩罚触发条件修正 ───────────────────────────────

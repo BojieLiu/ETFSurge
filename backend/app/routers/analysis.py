@@ -139,6 +139,39 @@ class LLMReportRequest(BaseModel):
     market: str = "A"
 
 
+def _filter_indices_for_market(market_ctx, indices: list[dict]) -> list[dict]:
+    """P0-2 (R4-13 / N04 补全): 指数按市场过滤——HK/US 报告不再混入 A 股指数。
+
+    与 market_data 的 N04 修复（market_ctx.index_symbols 白名单）对齐；
+    symbol 做 ^ 前缀归一化（数据侧 "HSI" 与配置侧 "^HSI" 等价）。
+    A/GLOBAL 市场保持全量（A 报告引用日经/美股属正常关联信息）。
+    """
+    if market_ctx.market not in ("HK", "US"):
+        return indices
+    idx_syms = {str(s).lstrip("^") for s in market_ctx.index_symbols}
+    if not idx_syms:
+        return []
+    filtered = [i for i in (indices or [])
+                if str(i.get("symbol", "")).lstrip("^") in idx_syms]
+    if filtered != indices:
+        logger.info(
+            "[llm-report] indices filtered for market=%s: %d → %d (A股指数已排除)",
+            market_ctx.market, len(indices or []), len(filtered),
+        )
+    return filtered
+
+
+def _filter_commodities_for_market(market_ctx, commodities: list[dict]) -> list[dict]:
+    """P0-2: 商品行情按市场过滤——HK/US 报告不注入 A 股期货市场数据。
+
+    commodities 为国内期货实时行情（沪金/沪银/原油等，A 股市场数据源），
+    对 HK/US 研判无直接关联，避免污染；A/GLOBAL 保留。
+    """
+    if market_ctx.market in ("HK", "US"):
+        return []
+    return commodities or []
+
+
 class LLMAdviceRequest(BaseModel):
     query: str
     market: str = "A"
@@ -207,6 +240,13 @@ async def llm_report(req: LLMReportRequest):
                 and m.get("symbol", "") in market_ctx.index_symbols
             )
         ]
+
+    # P0-2 (R4-13 / N04 补全): indices/commodities 同样按市场过滤——
+    # 旧实现只过滤了 market_data，indices 全量传入 → LLM 引用 A 股指数。
+    from app.core.market_context import resolve_market_context as _resolve_ctx
+    _mctx = _resolve_ctx(req.market)
+    indices = _filter_indices_for_market(_mctx, indices)
+    commodities = _filter_commodities_for_market(_mctx, commodities)
 
     indicators = {}
     for item in market_data[:5]:
@@ -444,6 +484,10 @@ async def llm_report_stream(req: LLMReportRequest):
             )
         ]
 
+    # P0-2 (R4-13 / N04 补全): indices/commodities 同样按市场过滤（对齐 llm_report）
+    indices = _filter_indices_for_market(market_ctx, indices)
+    commodities = _filter_commodities_for_market(market_ctx, commodities)
+
     indicators = {}
     for item in market_data[:5]:
         if item.get("asset_type") in ("index", "futures"):
@@ -471,7 +515,15 @@ async def llm_report_stream(req: LLMReportRequest):
 
     try:
         # Phase E(2): True streaming — 使用 agent.run_stream 实时推送 LLM token
-        prompt = _build_report_prompt(indices, commodities, market_data, indicators, enriched_news, [])
+        # P1-5 (R4-23): 采集海外流动性（FRED）注入 prompt；失败静默不注入
+        _gl = None
+        try:
+            from ..analysis.llm import _fetch_global_liquidity
+            _gl = await _fetch_global_liquidity()
+        except Exception:
+            _gl = None
+        prompt = _build_report_prompt(indices, commodities, market_data, indicators,
+                                      enriched_news, [], global_liquidity=_gl)
         agent = get_agent("market_report")
         return _sse_stream(agent.run_stream(prompt))
     except Exception as e:
@@ -679,6 +731,11 @@ async def symbol_analysis_stream(req: SymbolAnalysisRequest):
         symbol = req.symbol
         name = req.name
         asset_type = req.asset_type
+        # P1-3 (R4-09): asset_type 枚举归一化——'stock' 等非标准值会导致
+        # get_history 静默返回 0 条（技术指标全空、报告诚实降级）。
+        # 归一化到 A/ETF 等标准市场代码后再取数。
+        _asset_norm = {"stock": "A", "sh": "A", "sz": "A", "fund": "ETF", "etf": "ETF"}
+        asset_type = _asset_norm.get(str(asset_type or "").lower(), asset_type or "A")
         
         realtime = await market_data_hub.get_asset_realtime(symbol, asset_type) or {}
         # R20: 中文名→代码兜底解析（前端漏解析时后端解析）——仅明显非代码输入才触发，
@@ -697,7 +754,25 @@ async def symbol_analysis_stream(req: SymbolAnalysisRequest):
             hist = await asyncio.wait_for(get_history(symbol, asset_type, "daily"), timeout=30)
         except Exception:
             pass
+        # P1-3: get_history 失败时按 'A' 重试（非标准 asset_type 曾导致 0 条）
+        if not hist and str(asset_type).upper() != "A":
+            try:
+                hist = await asyncio.wait_for(get_history(symbol, "A", "daily"), timeout=30)
+            except Exception:
+                pass
         indicators = compute_all_indicators(hist) if hist else {}
+        
+        # P1-3 (R4-09): 基本面估值数据注入——PE/PB（akshare 日线估值列），
+        # 缺失时明确标注数据源不可用（不再静默缺失，LLM 不再误报
+        # 「输入数据未包含 PE、PB、ROE 等财务指标」）
+        fundamentals_text = "（数据源不可用，无法获取 PE/PB 等估值指标）"
+        try:
+            from ..fetchers.fundamentals_fetcher import fetch_current_pe_pb
+            fund_data = await asyncio.to_thread(fetch_current_pe_pb, symbol)
+            if fund_data and (fund_data.get("pe_ttm") is not None or fund_data.get("pb") is not None):
+                fundamentals_text = json.dumps(fund_data, ensure_ascii=False)
+        except Exception as _fe:
+            logger.debug("[symbol-analysis] fundamentals fetch failed (non-fatal): %s", _fe)
         
         news = market_data_hub.get_news_headlines() or []
         try:
@@ -719,6 +794,7 @@ async def symbol_analysis_stream(req: SymbolAnalysisRequest):
 实时行情：{json.dumps(realtime, ensure_ascii=False)}
 技术指标：{json.dumps(indicators, ensure_ascii=False)}
 历史K线(最近30条)：{json.dumps(hist[-30:], ensure_ascii=False) if hist else '无'}
+基本面(PE/PB估值)：{fundamentals_text}
 资讯催化：{json.dumps(news[:10], ensure_ascii=False)}{focus_line}
 
 请输出：

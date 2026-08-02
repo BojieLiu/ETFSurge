@@ -62,11 +62,14 @@
 
       <!-- Loading Skeletons (initial fetch not yet attempted) -->
       <div v-if="!fetchAttempted" class="loading-grid" aria-busy="true" aria-label="加载中">
-        <div v-if="isWarmingUp" class="warmup-banner">
-          <div class="warmup-spinner" aria-hidden="true"></div>
-          <div class="warmup-text">
-            <p class="warmup-title">{{ phaseTitle }}</p>
-            <p class="warmup-desc">{{ phaseDesc }}</p>
+        <!-- P0-4: warmup 占位槽——banner 消失时保留高度，避免下方内容上移（CLS） -->
+        <div class="warmup-slot">
+          <div v-if="isWarmingUp" class="warmup-banner">
+            <div class="warmup-spinner" aria-hidden="true"></div>
+            <div class="warmup-text">
+              <p class="warmup-title">{{ phaseTitle }}</p>
+              <p class="warmup-desc">{{ phaseDesc }}</p>
+            </div>
           </div>
         </div>
         <!-- R54: 加载文案明确化，避免用户误以为卡死 -->
@@ -260,6 +263,11 @@ function onRetry() {
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-sm);
   overflow: hidden;
+}
+/* P0-4: warmup 占位槽固定高度——banner 隐藏/显示不产生布局偏移 */
+.warmup-slot {
+  grid-column: 1 / -1;
+  min-height: 64px;
 }
 /* Warmup Banner */
 .warmup-banner {

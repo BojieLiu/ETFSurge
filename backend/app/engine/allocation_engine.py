@@ -120,6 +120,25 @@ def _valuation_is_meaningful(factor_scores: dict[str, float], name: str = "") ->
         return False
     return abs(factor_scores.get("valuation", 0.0)) > 0.001
 
+
+# M5 (P1-1 子步骤 3): A 股宽基语义关键词——卫星 backup 补足时排除，
+# 防止 core 属性宽基混入卫星层。industry 字段缺失/为 unknown 时按名称与
+# tracked_index 语义补判（A100 562000 industry=unknown 曾漏网，R4-15 验收4 FAIL）。
+_A_WIDE_BASIS_KEYWORDS = (
+    "中证A100", "A100", "中证A500", "中证A50", "中证500", "中证800",
+    "沪深300", "上证50", "上证180", "上证综指", "科创50", "创业板",
+    "中证100", "深证100", "MSCI中国",
+)
+
+
+def _is_wide_basis(c: dict[str, Any]) -> bool:
+    """M5: 判断候选是否为 A 股宽基（core 属性）——industry 字段优先，名称/指数语义补判。"""
+    ind = (c.get("industry") or "").strip()
+    if ind == "宽基指数" or "宽基" in ind:
+        return True
+    text = f"{c.get('name', '') or ''}{c.get('tracked_index', '') or ''}"
+    return any(k in text for k in _A_WIDE_BASIS_KEYWORDS)
+
 # P1-3: 强制保留标的（权重不低于 3%，确保进入分配）
 # 5% ×4=20% 占用过多预算导致总持仓不足 8 只，调整为 3% ×4=12%
 MANDATORY_CODES = {"510300", "560600", "518880", "511090"}
@@ -500,6 +519,10 @@ def allocate(
     strategies: list[dict[str, Any]] = []
     # Track symbol usage across profiles to reduce overlap (P1)
     _used_symbols_for_overlap: set[str] = set()
+    # P1-2 (R4-14): 前序方案核心层已占用的「非强制」标的——每方案核心层选取时
+    # 排除它们，保证任意两方案核心层重叠（剔除公共底仓 510300 与强制标的）≤1。
+    # 强制标的（MANDATORY_CODES）各司其职允许跨方案重复，不计入重叠上限。
+    _prev_core_used: set[str] = set()
 
     for profile_key in ("defensive", "balanced", "aggressive"):
         meta = STRATEGY_META[profile_key]
@@ -526,8 +549,22 @@ def allocate(
         # _select_and_weight 内额外叠加，导致核心层 5-6 只、单只权重被摊薄）。
         mandatory_in_core = sum(1 for c in core_candidates if c.get("symbol") in MANDATORY_CODES)
         core_max_count = max(int(meta.get("layer_count", {}).get("core", 4)) - mandatory_in_core, 1)
+        # P1-2: 核心层候选排除前序方案已占用的非强制标的（公共底仓/强制标的保留）
+        _core_pool = [c for c in core_candidates if _dedup_segment(c)]
+        if _prev_core_used:
+            _deduped_pool = [
+                c for c in _core_pool
+                if c.get("symbol") in MANDATORY_CODES or c.get("symbol") not in _prev_core_used
+            ]
+            # 兜底：去重后非强制候选 ≥2 才收紧（否则放宽去重，保证核心层数量下限
+            # [3,5]——高分宽基候选不足时宁可重叠也不空核心）。
+            _deduped_non_mandatory = [
+                c for c in _deduped_pool if c.get("symbol") not in MANDATORY_CODES
+            ]
+            if len(_deduped_non_mandatory) >= 2:
+                _core_pool = _deduped_pool
         core_alloc = _select_and_weight(
-            [c for c in core_candidates if _dedup_segment(c)],
+            _core_pool,
             factor_matrix,
             budgets.get("core", 0.0),
             layer="core",
@@ -537,6 +574,11 @@ def allocate(
             penalize_symbols=_penalize,
         )
         allocations.extend(core_alloc)
+        # P1-2: 记录本方案核心层非强制标的（供后续方案去重）
+        _prev_core_used |= {
+            a.get("symbol", "") for a in core_alloc
+            if a.get("symbol") not in MANDATORY_CODES and a.get("symbol") != "CASH"
+        }
 
         # U11 R1: 后续方案 core 与已用标的重叠过多（全部 ⊂ 前序已用）时，
         # 从 core_candidates 未用者强制引入 ≥1 只新宽基（高分宽基只有 4-5 只，
@@ -578,6 +620,10 @@ def allocate(
 
         # ── Satellite layer — C1: 按 profile_key 差异化过滤 ──
         sat_pool = _filter_satellite_by_profile(sat_candidates, factor_matrix, profile_key)
+        # P1-1 验收4 (R4-15): 卫星层原始候选也排除宽基——M5 只覆盖 backup 补足路径，
+        # 原始卫星候选混入宽基（588000 科创50 / 562000 A100 曾入选）导致层属性混乱、
+        # 行业集中度约束失真（verify_e2e design-quality 门禁同口径断言）。
+        sat_pool = [c for c in sat_pool if not _is_wide_basis(c)]
         sat_alloc = _select_and_weight(
             [c for c in sat_pool if _dedup_segment(c)],
             factor_matrix,
@@ -601,9 +647,10 @@ def allocate(
                 sym = c.get("symbol", "")
                 if sym in used_syms:
                     continue
-                # M5: 卫星 backup 排除宽基（industry=宽基指数）——宽基是 core 属性，
-                # 混入卫星层使层属性混乱、行业集中度约束失真；宁可卫星 <4 也不引入
-                if c.get("industry") == "宽基指数":
+                # M5: 卫星 backup 排除宽基（industry=宽基指数 + 名称/指数语义补判）——
+                # 宽基是 core 属性，混入卫星层使层属性混乱、行业集中度约束失真；
+                # 宁可卫星 <4 也不引入（R4-15 验收4：A100 562000 industry=unknown 漏网修复）
+                if _is_wide_basis(c):
                     continue
                 # 防御型：补足不引入科创系（科创集中度验收 ≤10%）
                 if profile_key == "defensive" and _is_tech_theme(c.get("name", "")):

@@ -21,6 +21,7 @@ async def build_full_context(
     include_portfolio: bool = True,
     include_fund_flow: bool = True,
     include_commodities: bool = True,
+    include_global_liquidity: bool = True,
 ) -> dict:
     """统一的 LLM 上下文数据采集。
 
@@ -158,6 +159,31 @@ async def build_full_context(
             context["portfolio"] = []
         except Exception:
             context["portfolio"] = []
+
+    # 10. 海外流动性（P1-5 / R4-23）——FRED 美债10Y/VIX/联邦基金利率。
+    # 任一指标失败静默（该键不注入）；全部失败时不注入该段，不影响主报告。
+    if include_global_liquidity:
+        gl: dict[str, float] = {}
+        try:
+            from ..fetchers.global_markets_fetcher import (
+                fetch_fed_rate,
+                fetch_us_10y,
+                fetch_vix,
+            )
+            _us10, _vix, _fed = await asyncio.wait_for(
+                asyncio.gather(
+                    fetch_us_10y(), fetch_vix(), fetch_fed_rate(),
+                    return_exceptions=True,
+                ),
+                timeout=15,
+            )
+            for _k, _v in (("us_10y", _us10), ("vix", _vix), ("fed_rate", _fed)):
+                if isinstance(_v, float):
+                    gl[_k] = round(_v, 2)
+        except Exception as e:
+            errors.append(f"global_liquidity: {e}")
+        if gl:
+            context["global_liquidity"] = gl
 
     if errors:
         logger.debug("[llm_context] build_full_context partial errors: %s", errors)

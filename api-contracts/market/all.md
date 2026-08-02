@@ -33,6 +33,12 @@ GET /api/v1/market/realtime/{symbol}?asset_type=A
 | symbols | string | Yes (batch) | — | batch |
 | asset_type | string | No | `A` | batch, single |
 
+> **P2-2 (R4-05) 参数形态约定 / Symbol parameter forms (batch):**
+> `symbols` 同时支持两种等价形态，服务端统一解析为逗号分隔全量列表（不取首项）：
+> - 逗号分隔：`?symbols=159338,510880` → `["159338", "510880"]`
+> - 重复参数：`?symbols=159338&symbols=510880` → `["159338", "510880"]`
+> - 混合 + 空白清洗：`?symbols=159338, 510880&symbols=518880` → `["159338", "510880", "518880"]`
+
 **成功响应 / Success Response — `200 OK`:**
 
 ```json

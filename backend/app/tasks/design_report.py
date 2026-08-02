@@ -124,6 +124,20 @@ def _build_plan_tables(strategies: list[dict]) -> str:
     lines.append("| 现金仓位 | " + " | ".join(cashes) + " |")
     lines.append("| 预期年化 | " + " | ".join(rets) + " |")
     lines.append("| 当前预期年化 | " + " | ".join(rets_current) + " |")
+    # P2-6 (R4-03): 「当前预期年化 == 预期年化」显式说明——避免默认同值被误读为
+    # 「系统评估过当前市态且收益不变」；range_bound 市态 dynamic_layer_budget
+    # 调整系数为 0（budgets.py adjust_expected_return），相等是设计行为。
+    _no_adjust = bool(strategies) and all(
+        s.get("expected_return_current") is None
+        or (s.get("expected_return") is not None
+            and abs((s.get("expected_return_current") or 0) - (s.get("expected_return") or 0)) < 1e-9)
+        for s in strategies
+    )
+    if _no_adjust:
+        lines.append(
+            "\n> 注：当前预期年化与预期年化一致——当前市态未触发预期收益调整"
+            "（震荡市态调整系数为 0，属设计行为，非数据异常）。"
+        )
 
     for s in strategies:
         label = s.get("label", "")
@@ -156,8 +170,9 @@ def _build_plan_tables(strategies: list[dict]) -> str:
                 dcp_txt = f"{dcp * 100:.2f}%" if abs(dcp) < 1 else f"{dcp:.2f}%"
                 dcp_txt = ("+" if dcp >= 0 else "") + dcp_txt
             else:
-                # fallback to trend_data in selection_rationale or empty
-                dcp_txt = "—"
+                # P1-4 (R4-02): 涨跌数据缺失显性化——输出「数据源不可用」而非 "—"，
+                # 避免「数据源降级导致的数据缺失」被误读为「0% 涨跌」或静默缺失。
+                dcp_txt = "数据源不可用"
             lines.append(f"| {layer_cn} | {code} | {name} | {w:.0f}% | {fs_txt} | {dcp_txt} | {rationale} |")
 
     lines.append("\n> 注：多因子评分（0~1）基于资金流、估值、动量、流动性等维度综合计算，非涨跌幅。")

@@ -817,21 +817,17 @@ def check_data_quality():
             has_name = sum(1 for e in etfs if e.get("name", ""))
             check(f"ETF 含代码 {has_symbol}/{key_count}", has_symbol == key_count)
             check(f"ETF 含名称 {has_name}/{key_count}", has_name == key_count)
-            # 检查是否有分层数据（pool API）
+            # 检查候选池健康——/portfolio/candidates 端点不存在（契约收敛），
+            # 候选池状态由 /admin/config 的 pool 段提供（admin.py pool.total_candidates/healthy）。
             try:
-                r2 = requests.get(f"{BASE}/api/v1/portfolio/candidates", timeout=10)
-                if r2.status_code == 200:
-                    pool = r2.json()
-                    layers = ["core", "satellite", "defense"]
-                    layer_counts = {l: len(pool.get(l, [])) for l in layers}
-                    total_pool = sum(layer_counts.values())
-                    check(f"候选池总数量 >= 20", total_pool >= 20,
-                          f"core={layer_counts.get('core',0)} sat={layer_counts.get('satellite',0)} def={layer_counts.get('defense',0)}")
-                    for l in layers:
-                        check(f"候选池 {l} 层 > 0", layer_counts.get(l, 0) > 0,
-                              f"{l}={layer_counts.get(l,0)}")
-                else:
-                    check("GET /portfolio/candidates", False, f"HTTP {r2.status_code}")
+                r2 = requests.get(f"{BASE}/api/v1/admin/config", timeout=10)
+                cfg = r2.json() if r2.status_code == 200 else {}
+                pool = cfg.get("pool", {}) if isinstance(cfg, dict) else {}
+                total_pool = pool.get("total_candidates", 0)
+                check(f"候选池总数量 >= 20", total_pool >= 20,
+                      f"total_candidates={total_pool}（数据源熔断时可能为 0）")
+                check("候选池健康", bool(pool.get("healthy")),
+                      f"healthy={pool.get('healthy')}")
             except Exception as e2:
                 check("候选池检查", False, str(e2))
         else:
@@ -1569,6 +1565,7 @@ def section_design_quality_gate():
         differ = check_strategies_differ(strategies)
         check("三套方案非机械缩放", differ, "层权重结构趋同" if not differ else "")
         # M7: 核心层数量 ∈ [3,5]（含强制 510300/560600）且含宽基锚（中证A500/沪深300 之一）
+        core_syms_list: list[set[str]] = []
         for s in strategies:
             # 兼容两种结构：engine 输出 allocations / 持久化详情用 etfs
             allocs = s.get("allocations") or s.get("etfs") or []
@@ -1577,6 +1574,7 @@ def section_design_quality_gate():
             check(f"M7 {s.get('id', s.get('name', '?'))} 核心层 [{n_core}] ∈ [3,5]",
                   3 <= n_core <= 5, f"core={n_core}")
             core_syms = {a.get("symbol") for a in core}
+            core_syms_list.append(core_syms)
             core_names = " ".join((a.get("name") or "") for a in core)
             has_anchor = bool(core_syms & {"510300", "560600", "159338"}) or "中证A500" in core_names or "沪深300" in core_names
             check(f"M7 {s.get('id', s.get('name', '?'))} 含宽基锚(中证A500/沪深300)",
@@ -1585,6 +1583,52 @@ def section_design_quality_gate():
             weak = [a for a in core if (a.get("target_weight") or a.get("weight") or 0) < 0.05]
             check(f"M7 {s.get('id', s.get('name', '?'))} 核心单只权重 ≥5%",
                   not weak, f"弱权重: {[a.get('symbol') for a in weak]}")
+        # P1-1 验收2（combination-design-review §四.2）: 三方案核心层**同时**含
+        # 中证A500（560600/159338）与沪深300（510300）——R4-15 曾只验「沪深300 存在」
+        # 或「二者之一」，A500 缺失仍 PASS。
+        if len(core_syms_list) == 3:
+            _all_hs300 = all(("510300" in cs) for cs in core_syms_list)
+            _all_a500 = all(bool(cs & {"560600", "159338"}) for cs in core_syms_list)
+            check("P1-1 三方案核心层均含 沪深300(510300)", _all_hs300,
+                  "某方案核心层缺 510300" if not _all_hs300 else "全部含")
+            check("P1-1 三方案核心层均含 中证A500(560600/159338)", _all_a500,
+                  "某方案核心层缺 A500" if not _all_a500 else "全部含")
+            # P1-1 验收3: 任意方案核心层中证500 家族 ≤1 只（价值/成长/增强视为同一指数）
+            for s in strategies:
+                allocs = s.get("allocations") or s.get("etfs") or []
+                core = [a for a in allocs if a.get("layer") == "core"]
+                c500 = [a for a in core
+                        if "中证500" in ((a.get("tracked_index") or "") + (a.get("name") or ""))]
+                check(f"P1-1 {s.get('id', s.get('name', '?'))} 核心层中证500家族 ≤1",
+                      len(c500) <= 1,
+                      f"中证500家族 {len(c500)} 只: {[a.get('symbol') for a in c500]}" if len(c500) > 1 else "≤1")
+            # P1-1 验收4: 卫星层无宽基（A100/中证500/沪深300 等 industry=宽基指数）
+            for s in strategies:
+                allocs = s.get("allocations") or s.get("etfs") or []
+                sat = [a for a in allocs if a.get("layer") == "satellite"]
+                _wide_sat = [
+                    a for a in sat
+                    if (a.get("industry") or "") == "宽基指数"
+                    or any(k in ((a.get("name") or "") + (a.get("tracked_index") or ""))
+                           for k in ("A100", "中证500", "沪深300", "上证50", "科创50", "创业板"))
+                ]
+                check(f"P1-1 {s.get('id', s.get('name', '?'))} 卫星层无宽基",
+                      not _wide_sat,
+                      f"卫星混入宽基: {[a.get('symbol') for a in _wide_sat]}" if _wide_sat else "卫星层纯主题/行业")
+            # P1-2 (R4-14): 任意两方案核心层重叠（剔除公共底仓 510300 + 强制标的）≤1
+            # 强制标的（MANDATORY_CODES: 510300/560600/518880/511090）各司其职允许
+            # 跨方案重复，不计入重叠上限（重叠上限 = 公共底仓 1 只）。
+            _MANDATORY = {"510300", "560600", "518880", "511090"}
+            for i in range(len(core_syms_list)):
+                for j in range(i + 1, len(core_syms_list)):
+                    a = {s for s in core_syms_list[i] if s not in _MANDATORY}
+                    b = {s for s in core_syms_list[j] if s not in _MANDATORY}
+                    overlap = len(a & b)
+                    names = [strategies[i].get("id", strategies[i].get("name", f"p{i}")),
+                             strategies[j].get("id", strategies[j].get("name", f"p{j}"))]
+                    check(f"P1-2 核心层重叠(剔除公共底仓) ≤1: {names[0]} vs {names[1]}",
+                          overlap <= 1,
+                          f"重叠 {overlap} 只: {sorted(a & b)}" if overlap > 1 else f"重叠 {overlap} 只")
         # F3 R10/R13: 报告文本质量断言——标题无重复 + 今日涨跌列非空 + 表格行数=标的数
         import re as _re
         report_text = detail.get("design_text") or detail.get("report_text") or ""
@@ -1598,15 +1642,27 @@ def section_design_quality_gate():
             alloc_total = sum(len(s.get("allocations") or s.get("etfs") or []) for s in strategies)
             check("R13 表格行数=标的数", len(table_rows) >= len(strategies),
                   f"表格行 {len(table_rows)} vs 方案 {len(strategies)}" if len(table_rows) < len(strategies) else f"{len(table_rows)} 行 × {len(strategies)} 方案")
-            # R10: 今日涨跌列非空——至少 1 只标的有真实涨跌幅（非 "—"）
+            # P1-4 (R4-02): R10 今日涨跌列——区分「真实涨跌幅」与「数据源缺失」：
+            # 有真实涨跌单元格 → PASS；全部「数据源不可用」→ WARN（skip 语义，
+            # 数据源降级不误报 PASS 也不静默绿）；两者皆无 → FAIL。
             change_cells = _re.findall(r"\| [+-]?[0-9.]+% \|", report_text)
-            check("R10 今日涨跌列非空", len(change_cells) >= 1,
-                  "无真实涨跌幅单元格" if not change_cells else f"{len(change_cells)} 个涨跌单元格")
+            unavailable_cells = _re.findall(r"\| 数据源不可用 \|", report_text)
+            if change_cells:
+                check("R10 今日涨跌列非空", True, f"{len(change_cells)} 个真实涨跌单元格")
+            elif unavailable_cells:
+                check("R10 今日涨跌列全为数据源不可用（数据源降级）", True,
+                      f"{len(unavailable_cells)} 个「数据源不可用」单元格，数据源降级中", skip=True)
+            else:
+                check("R10 今日涨跌列非空", False, "既无真实涨跌也无降级标注")
     except Exception as e:
         check("方案质量门禁", False, str(e))
 
 
 def print_summary():
+    # R4-18/P0-3: 本函数内 FAIL += 1（S3 skip 阈值逻辑）使 Python 将 FAIL 视为
+    # 函数局部变量，读取 PASS + FAIL 时未赋值 → UnboundLocalError 必崩。
+    # 门禁脚本自身 bug 曾使「全 PASS 也 exit 1」且总结永不打印（防护体系失效）。
+    global PASS, FAIL, SKIP
     total = PASS + FAIL
     print(f"\n{'=' * 50}")
     print(f"结果: {PASS}/{total} 通过", "ALL PASS" if FAIL == 0 else "HAS FAILURES")
@@ -1829,7 +1885,9 @@ def section_task_status():
     """P3.2: Task status assertion."""
     section("任务状态检查")
     try:
-        r = requests.get(f"{BASE}/api/v1/portfolio/designs/history", timeout=10)
+        # /portfolio/designs/history 端点不存在（被 /designs?limit= 取代，旧路径
+        # 会落入 /designs/{design_id} 路由 → 422）——修正为真实端点
+        r = requests.get(f"{BASE}/api/v1/portfolio/designs", params={"limit": 5}, timeout=10)
         if r.status_code == 200:
             data = r.json()
             if isinstance(data, list):
@@ -1914,6 +1972,22 @@ def section_search():
             ok = r.status_code == 200 and isinstance(data, list) and len(data) > 0
             check(label, ok,
                   "" if ok else f"HTTP {r.status_code}, 返回 {len(data) if isinstance(data, list) else 'ERR'} 条")
+        except Exception as e:
+            check(label, False, str(e))
+    # P1-7 (R4-29): A 股个股命中——instruments 本地表已灌入个股（>5000 行），
+    # 搜「茅台/600519」必须命中本地个股（旧实现表内无个股 → levistock 外部降级 5-6s）
+    for label, kw in [("A股个股搜索 (茅台)", "茅台"),
+                      ("A股个股代码搜索 (600519)", "600519")]:
+        try:
+            t0 = time.time()
+            r = requests.get(f"{BASE}/api/v1/market/search",
+                             params={"keyword": kw, "include_stocks": "true"}, timeout=10)
+            dt_ms = (time.time() - t0) * 1000
+            data = r.json() if r.status_code == 200 else []
+            hits = [x for x in data if x.get("asset_type") == "stock"] if isinstance(data, list) else []
+            check(label, r.status_code == 200 and len(hits) > 0,
+                  f"{len(hits)} 个股命中, {dt_ms:.0f}ms" if hits else
+                  f"无个股命中 (HTTP {r.status_code}, {len(data) if isinstance(data, list) else 'ERR'} 条)")
         except Exception as e:
             check(label, False, str(e))
 

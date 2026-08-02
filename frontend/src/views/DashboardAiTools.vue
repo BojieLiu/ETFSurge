@@ -434,6 +434,26 @@ async function checkStrategy() {
     const taskData = res.data
     taskStore.addTask(taskData.task_id, '策略检查与分析', 'check')
 
+    // factor-and-strategy-check-review 问题2 R1/R3: 注册 WS 完成回调（与 design 流程对称）。
+    // 旧实现只轮询——WS completed 先到只触发全局 toast，组件 checkingStrategy 仍 true，
+    // 停留在 loading 直到 3s 后轮询 → 用户看到「先提示已完成再停留加载」。
+    taskStore.registerTaskCompletion(taskData.task_id, async () => {
+      try {
+        const detailRes = await portfolioApi.getStrategyCheckResult(taskData.task_id)
+        strategyResult.value = detailRes.data
+        strategyTaskStatus.value = 'completed'
+        strategyProgress.value = 100
+        strategyStage.value = '分析完成'
+        checkingStrategy.value = false
+        toast('策略检查完成', 'success')
+      } catch {
+        strategyError.value = '加载策略检查结果失败'
+        strategyTaskStatus.value = 'failed'
+        checkingStrategy.value = false
+      }
+      clearStrategyTimers()
+    })
+
     // Poll for completion
     let pollCount = 0
     let consecutiveErrors = 0

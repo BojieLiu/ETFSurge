@@ -37,7 +37,18 @@ async def realtime_batch(
     symbols: list[str] = Query(...),
     asset_type: str = Query("A"),
 ) -> list[dict[str, Any]]:
-    return await market_data_hub.get_realtime(symbols, asset_type)
+    # P2-2 (R4-05): 统一解析——「重复参数」（?symbols=a&symbols=b）与
+    # 「逗号分隔」（?symbols=a,b）两种形态等价；逗号分隔按逗号全量 split，
+    # 不取首项（旧行为：list[str] 把 "a,b" 当单个元素 → 只返回 1 条）。
+    flat: list[str] = []
+    for _s in symbols:
+        for _part in str(_s).split(","):
+            _part = _part.strip()
+            if _part:
+                flat.append(_part)
+    if not flat:
+        return []
+    return await market_data_hub.get_realtime(flat, asset_type)
 
 
 @router.get("/realtime/{symbol}")
@@ -501,6 +512,8 @@ async def sectors_heat(limit: int = Query(20)) -> dict[str, Any]:
     rows = await asyncio.to_thread(market_data_hub.get_sector_heat, limit)
     items = []
     for r in rows or []:
+        # P2-4 (R4-11a): 透传 change_pct（前端 SectorHeatMap 读 item.change_pct 显示涨跌幅，
+        # 旧白名单丢弃该字段 → 热度行涨跌幅恒不显示）
         items.append({
             "rank": r.get("rank"),
             "name": r.get("plate_name") or r.get("name", ""),
@@ -508,6 +521,7 @@ async def sectors_heat(limit: int = Query(20)) -> dict[str, Any]:
             "rank_change": r.get("rank_change"),
             "is_new": r.get("is_new", 0),
             "plate_code": r.get("plate_code", ""),
+            "change_pct": r.get("change_pct"),
         })
     return {"items": items, "total": len(items)}
 

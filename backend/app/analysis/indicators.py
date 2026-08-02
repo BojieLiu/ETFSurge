@@ -259,6 +259,17 @@ def compute_chart_data(df: list[dict]) -> dict:
     dea = macd_pt["MACDs_12_26_9"]
     macd_hist = 2 * macd_pt["MACDh_12_26_9"]
 
+    # P2-4 (R4-11b): KDJ/RSI 序列——前端 AnalysisView 读 d.kdj.k/d.rsi 渲染子图，
+    # 旧实现只出 ma/bollinger/macd → KDJ/RSI 子图条件恒 false 静默不渲染。
+    rsi_series = ta.rsi(close, length=14)
+    kdj_df = ta.kdj(high=high, low=low, close=close, k=9, d=3)  # type: ignore[arg-type]
+    _empty_seq = [None] * len(close)
+    kdj = {
+        "k": _to_list(kdj_df["K_9_3"]) if kdj_df is not None and "K_9_3" in kdj_df.columns else list(_empty_seq),
+        "d": _to_list(kdj_df["D_9_3"]) if kdj_df is not None and "D_9_3" in kdj_df.columns else list(_empty_seq),
+        "j": _to_list(kdj_df["J_9_3"]) if kdj_df is not None and "J_9_3" in kdj_df.columns else list(_empty_seq),
+    }
+
     return {
         "dates": dates,
         "opens": _to_list(data[open_col]),
@@ -269,4 +280,7 @@ def compute_chart_data(df: list[dict]) -> dict:
         "ma5": ma5, "ma10": ma10, "ma20": ma20, "ma60": ma60,
         "bollinger": {"upper": boll_upper, "middle": boll_middle, "lower": boll_lower},
         "macd": {"dif": _to_list(dif), "dea": _to_list(dea), "histogram": _to_list(macd_hist)},
+        # P2-4: kdj/rsi 序列（与 dates 等长）
+        "kdj": kdj,
+        "rsi": _to_list(rsi_series) if rsi_series is not None else list(_empty_seq),
     }

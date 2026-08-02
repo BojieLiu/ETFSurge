@@ -50,8 +50,10 @@
               <option value="style">风格</option>
               <option value="technical">技术</option>
               <option value="sentiment">情绪</option>
-              <option value="china">A 股特有</option>
-              <option value="etf">ETF</option>
+              <!-- P2-4 (R4-11c): 选项对齐后端 categories 归一化值（_get_factor_category
+                   输出 china_specific/etf_specific；旧 'china'/'etf' → 过滤恒为空） -->
+              <option value="china_specific">A 股特有</option>
+              <option value="etf_specific">ETF</option>
             </select>
             <select v-model="sortBy" class="select-input" @change="applyFilters">
               <option value="abs_ic">|IC| 降序</option>

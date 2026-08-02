@@ -387,11 +387,32 @@ def fetch_global_news() -> list[dict[str, Any]]:
 
 
 def fetch_stock_news(symbol: str) -> list[dict[str, Any]]:
+    # P2-3 (R4-06): 东方财富 stock_news_em 返回中文键（新闻标题/新闻内容/发布时间/
+    # 新闻来源/新闻链接）→ 归一化为英文键（title/content/time/source/url），
+    # 与 headlines/macro/global 契约一致（旧实现直接透传 → 前端/客户端读 None）。
+    _STOCK_NEWS_KEY_MAP = {
+        "新闻标题": "title",
+        "新闻内容": "content",
+        "发布时间": "time",
+        "新闻来源": "source",
+        "新闻链接": "url",
+    }
+
+    def _normalize_stock_news_keys(item: dict) -> dict:
+        if not any(k in item for k in _STOCK_NEWS_KEY_MAP):
+            return item
+        out = dict(item)
+        for cn, en in _STOCK_NEWS_KEY_MAP.items():
+            if cn in out and en not in out:
+                out[en] = out.pop(cn)
+        return out
+
     def _p() -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
         items += _ak(lambda ak: ak.stock_news_em(symbol=symbol))  # 东方财富个股(主源)
         if not items:
             items += fetch_cailian_telegraph(20)                   # 财联社兜底
+        items = [_normalize_stock_news_keys(i) for i in items]
         return _attach_level(_dedupe(items)[:25])
 
     return _cached("stock:" + symbol, _p, "news_stock")
