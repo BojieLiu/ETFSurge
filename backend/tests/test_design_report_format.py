@@ -3,7 +3,7 @@ F3 R1-R10 (combination-design-review.md F3): 组合设计报告内容层修复�
 
 - R1: task_manager 前缀不再产生重复标题（plan_tables 自带标题）。
 - R2/R3: _dedup_headers 写库前统一去重（检出即回写）+ 空行 \n{3,} → \n\n。
-- R4: 入选理由压缩 ≤80 字（保留表格内，用户决策）。
+- R4（2026-08-02 更新）：入选理由不再截断（对齐 R5 名称处理，markdown 表格换行）——旧决策"理由压缩 ≤80 字"已由用户撤销。
 - R5: 名称不截断。
 - R6: _build_plan_tables 首行无 \n\n 前导。
 - R8: strategy_design 显式 None 判断（0.0 不再被 or 丢弃）。
@@ -15,7 +15,6 @@ import pytest
 
 from app.tasks.design_report import (
     _build_plan_tables,
-    _compress_rationale,
     _dedup_headers,
 )
 
@@ -60,29 +59,31 @@ class TestR1TitleDedup:
         assert "存在重复标题" not in warnings, f"去重后不应再报重复: {warnings}"
 
 
-class TestR4RationaleCompress:
-    def test_rationale_compressed_to_80(self):
-        """R4: 理由压缩 ≤80 字（长文本截断）。"""
-        long = ("市场震荡；在防御型方案中沪深300ETF华泰柏瑞核心层配置，大盘价值代表性。" * 5)
-        compressed = _compress_rationale(long, limit=80)
-        assert len(compressed) <= 80, f"压缩后 {len(compressed)} 字 > 80"
-        assert compressed.endswith("…"), "截断应带省略号"
+class TestR4RationaleNotTruncated:
+    def test_table_cell_rationale_not_truncated(self):
+        """R4（2026-08-02 更新）: 理由不截断——完整理由必须保留在表格中。
 
-    def test_short_rationale_kept(self):
-        """R4: 短理由不截断。"""
-        short = "大盘价值代表性，防御型核心"
-        assert _compress_rationale(short, limit=80) == short
-
-    def test_table_cell_rationale_within_80(self):
-        """R4: 表格中理由列 ≤80 字。"""
-        tables = _build_plan_tables([_strategy(rationale="数据驱动理由" * 40)])
+        旧行为：_compress_rationale 截断到 ≤80 字（丢失估值/资金流/市态等关键尾部），
+        与 R5 名称不截断不一致；用户已撤销该决策。
+        """
+        long = "数据驱动理由" * 40  # 240 字，远超旧 80 字上限
+        tables = _build_plan_tables([_strategy(rationale=long)])
+        assert long in tables, "完整理由必须保留（旧行为截断为 ≤80 字）"
         for line in tables.splitlines():
             if "| 核心 |" in line:
                 cells = line.split("|")
                 assert len(cells) > 7
                 rationale_cell = cells[7]
-                assert len(rationale_cell) <= 80 + 3, \
-                    f"理由列 {len(rationale_cell)} 字超限（含分隔符容差）"
+                assert rationale_cell.strip() == long, "理由列应为完整文本，不得截断/加省略号"
+
+    def test_rationale_pipe_and_newline_escaped(self):
+        """防御：理由含竖线/换行（如风控追加文本）不得拆裂表格行——转义后表格仍为单行。"""
+        tricky = "核心宽基；风控提示：近1月跌8.2%\n第二行补充 | 附加说明"
+        tables = _build_plan_tables([_strategy(rationale=tricky)])
+        core_lines = [l for l in tables.splitlines() if "| 核心 |" in l]
+        assert len(core_lines) == 1, f"理由含 |/\\n 拆裂表格行：{core_lines}"
+        assert "\\|" in core_lines[0], "竖线必须转义为 \\|"
+        assert "第二行补充" in core_lines[0], "换行应展平为空格而非拆行"
 
 
 class TestR5NameNotTruncated:

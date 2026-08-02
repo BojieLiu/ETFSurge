@@ -50,32 +50,6 @@ class DesignReportManager:
 report_manager = DesignReportManager()
 
 
-def _compress_rationale(raw: str, limit: int = 80) -> str:
-    """F3 R4: 入选理由压缩到 limit 字内（保留首句摘要 + 关键数据）。
-
-    用户决策 2026-08-01：理由保留在表格内，靠全局 CSS 换行解决排版——
-    只压缩字数不移动列结构。
-    """
-    text = (raw or "").replace("\n", " ").replace("\r", "").strip()
-    if not text:
-        return ""
-    if len(text) <= limit:
-        return text
-    # 按句号/分号断句，取能放下的完整句
-    import re
-    sentences = re.split(r"(?<=[。；;])", text)
-    out = ""
-    for s in sentences:
-        if len(out) + len(s) > limit:
-            break
-        out += s
-    if not out:
-        out = text[:limit]
-    if len(out) < len(text):
-        out = out.rstrip("。；;") + "…"
-    return out[:limit]
-
-
 def _build_plan_tables(strategies: list[dict]) -> str:
     """P5-a: 从引擎 strategies 数据直接渲染方案详解 Markdown 表格。
     确保报告中的数据与方案卡片完全一致，杜绝 LLM 篡改标的。
@@ -159,8 +133,10 @@ def _build_plan_tables(strategies: list[dict]) -> str:
             name = e.get("name", "")
             w = (e.get("weight") or e.get("target_weight") or 0) * 100
             raw = e.get("selection_rationale") or ""
-            # F3 R4: 理由压缩 ≤80 字（保留在表格内，用户决策；配合全局 CSS 换行）
-            rationale = _compress_rationale(raw, limit=80)
+            # F3 R4 用户决策更新（2026-08-02）：理由不再截断——与 R5 名称处理一致，
+            # markdown 表格渲染自动换行；完整理由保留估值/资金流/市态等关键尾部。
+            # 竖线转义 + 换行展平：防止 rationale 含 `|`/`\n`（如风控追加文本）拆裂表格行。
+            rationale = raw.replace("|", "\\|").replace("\n", " ").replace("\r", "")
             layer_en = e.get("layer", "—")
             layer_cn = {"core": "核心", "satellite": "卫星", "sat": "卫星", "defense": "防御", "defence": "防御", "cash": "现金"}.get(layer_en, layer_en)
             fs = e.get("factor_score", None)
