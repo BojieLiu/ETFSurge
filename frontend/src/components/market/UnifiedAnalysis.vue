@@ -24,7 +24,7 @@
             <input
               type="text"
               :value="activeMode === 'symbol' ? search.searchQuery.value : query"
-              @input="activeMode === 'symbol' ? search.onSearchInput() : (query = $event.target.value)"
+              @input="onInput"
               :placeholder="currentPlaceholder"
               :title="currentPlaceholder"
               class="text-input"
@@ -88,8 +88,21 @@ import { useMarketSearch } from '../../composables/useMarketSearch'
 import { marketApi } from '../../api'
 
 const { start: startStream, stop: stopStream } = useLLMStream()
-// F7 R18: symbol 模式自动补全（复用 useMarketSearch：300ms debounce + include_stocks）
+// F7 R18: symbol 模式自动补全（复用 useMarketSearch：200ms debounce + include_stocks）
 const search = useMarketSearch()
+
+// R5: 输入处理——symbol 模式必须先把值写回 search.searchQuery 再触发 onSearchInput。
+// 旧实现只调 onSearchInput() 不写回：onSearchInput 内部读 searchQuery.value（恒为空）
+// → 永不触发搜索 → 自动补全完全不工作。
+function onInput(e) {
+  const v = e.target.value
+  if (activeMode.value === 'symbol') {
+    search.searchQuery.value = v
+    search.onSearchInput()
+  } else {
+    query.value = v
+  }
+}
 
 const props = defineProps({
   marketTab: { type: String, default: 'A' },

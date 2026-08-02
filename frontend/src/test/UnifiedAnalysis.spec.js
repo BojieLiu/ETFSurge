@@ -168,4 +168,21 @@ describe('UnifiedAnalysis R40 (tab 切换重置)', () => {
     expect(opts.length).toBe(1)
     expect(wrapper.find('.search-dropdown').exists()).toBe(true)
   })
+
+  it('R5: symbol 模式输入写回 searchQuery（旧 bug：只调 onSearchInput 不写回 → 补全永不触发）', async () => {
+    const wrapper = mounted()
+    wrapper.vm.activeMode = 'symbol'
+    const input = wrapper.find('input.text-input')
+    await input.setValue('5100')
+    expect(searchState.searchQuery.value).toBe('5100')
+  })
+
+  it('R5: 非 symbol 模式输入写入 query（不触发补全）', async () => {
+    const wrapper = mounted()
+    wrapper.vm.activeMode = 'sector'
+    const input = wrapper.find('input.text-input')
+    await input.setValue('BK0477')
+    expect(wrapper.vm.query).toBe('BK0477')
+    expect(searchState.searchQuery.value).toBe('') // 补全输入未被污染
+  })
 })
