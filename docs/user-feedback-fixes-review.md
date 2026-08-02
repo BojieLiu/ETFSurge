@@ -67,10 +67,12 @@
 
 ## 三、待实施方案（4+1 项）
 
-1. **#1 因子 IC 后台计算**（R1，round5 R5-1-5）：`_last_ic_batch` 仅请求驱动，重启后 30 因子全 no_data；后台循环补 `compute_periodic_ic`。
-2. **#2 策略检查 LLM 超时**（P0 两项）：①超时 summary 透传最后失败原因（429/超时区分）；②`_rate_limit_wait` cap 参数化（策略检查 cap 10s + max_retries=1）——60s 预算内快速失败。根治需 R5-1-1（全局 LLM 信号量 + 429 任务排队）。
-3. **#16 国内宏观数据管道**：`macro_fetcher.py`（LPR/中美利差/M2/CPI-PPI，akshare 实测 4/6 可用）+ `llm_context` 加 `domestic_macro` 段 + 契约补字段 + 8 用例。
-4. **#17 场外基金技术分析**：`taTarget` 对 tracked_index 为场内代码时改 `assetType='A'`（或后端解析真实指数代码）。
+> 以下 4 项已正式化为 `docs/round5-diagnosis-and-optimization-plan.md`（v1.4）§十 修复项，含文件/行级、TDD、验收——本文档仅作索引。
+
+1. **#1 因子 IC 后台计算** → **R5-1-5**（round5 §十）：`_last_ic_batch` 仅请求驱动，重启后 30 因子全 no_data；启动恢复 + 120s 周期 compute。
+2. **#2 策略检查 LLM 超时** → **R5-1-6**（round5 §十）：①超时 summary 透传最后失败原因（429/超时区分，`get_last_llm_error()`）；②`_rate_limit_wait` cap 参数化（策略检查 cap 10s + max_retries=1）——60s 预算内快速失败。根治见 R5-1-1（全局 LLM 信号量 + 429 任务排队）。
+3. **#16 国内宏观数据管道** → **R5-2-10**（round5 §十）：`macro_fetcher.py`（LPR/中美利差/M2/CPI-PPI，akshare 实测）+ `llm_context` `domestic_macro` 段 + 契约补字段 + 8 用例。
+4. **#17 场外基金技术分析** → **R5-2-11**（round5 §十）：`taTarget` 对 tracked_index 为场内代码时改 `assetType='A'`（前缀与后端 `_is_etf_code` 对齐）。
 5. （顺带）**#3 疑 PWA 缓存**：确认用户强刷后是否恢复；若仍异常需浏览器 Network 抓包。
 
 ## 四、测试防护体系漏洞分析——为何未发现这些 bug
@@ -92,7 +94,7 @@
 2. **数据类 bug 依赖真实数据形态**：000001→平安银行、板块快照未注入、概念名映射——mock 数据都是"理想形态"（000001 就返回指数），**真实数据的"代码撞车"（000001 既是上证指数又是平安银行）只有真实数据源才暴露**。
 3. **性能问题无门禁**：功能正确 ≠ 体验达标。串行富化、300ms debounce 都"功能正确"，但用户感知是"慢/空"。
 
-## 五、测试防护体系弥补方案（设计，未实施）
+## 五、测试防护体系弥补方案（已正式化为 round5 🅿️3 批次 R5-3-1~5，见 round5-diagnosis-and-optimization-plan.md v1.4；设计，未实施）
 
 ### 5.1 前端：交互型组件测试改为「真实 composable + mock 网络」
 
