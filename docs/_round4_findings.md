@@ -11,6 +11,7 @@
 - **涉及文件**：`backend/app/services/portfolio_service.py`、`backend/app/tasks/strategy_check_worker.py`（缺字段注入）。
 
 ## R4-02 🟡 设计报告「今日涨跌」列为空（—）
+- **结论**（已更新）：数据源当日数据可用性耦合——数据源降级时涨跌数据静默缺失（显示 `—`）；已入 plan P1-4（数据源降级时输出「数据源不可用」+ verify_e2e R10 区分「真实 0%」与「缺失」）。
 - **现象**：design 327 design_text 表格中「今日涨跌」列全部为 `—`。
 - **历史关联**：combination-design-review.md F3.3「今日涨跌缺失 = 数据注入时机 + falsy 丢弃」修复项。
 - **待核实**：是否仍为 falsy 丢弃或数据源无当日数据。
@@ -170,18 +171,19 @@ portfolio/calculate、daily-pnl、etfs、pnl-history、import/export/drift-check
 - **现象**：港股综合研判出现「恒生科技（代码 ^HSTECH，报 4829.22）…」——内部指数代码（^HSTECH 为 yahoo 风格标识）被 LLM 复述进面向用户的正文。
 - **根因**：`llm.py _format_indices` 与 `_build_market_overview` 的指数行把 `(symbol)` 拼进 prompt，LLM 原样带出。
 - **附注**：「中信证券明确建议增配创新药、非银金融」有新闻依据（headlines：「中信证券：调整基本结束 8月修复可期 建议增配能化、有色、非银和创新药」），非幻觉；但 LLM 之前仅部分转述（漏能化/有色），本次生成已完整转述。
-- **实施**：上述格式化函数指数行去掉内部 symbol（保留名称+点位+涨跌幅）；个股行情代码保留（600519 等公开代码对用户有意义）。
-- **验证**：HK 报告不再含 ^HSTECH/内部代码；13 个 prompt/报告格式相关测试全过。
+- **实施**（R4-27b 修订后最终口径）：`llm.py _format_indices` 与 `_build_market_overview` 指数行**保留代码、仅去掉 `^` 前缀**（`str(symbol).lstrip('^')`，^HSTECH → HSTECH，格式「恒生科技指数(HSTECH): 4829.22」）——用户在意的是 `^` 符号观感而非代码本身；个股行情代码原样保留。
+- **验证**：HK 报告不再含 `^`；prompt 格式测试 7 passed；格式化单测输出「- 恒生科技指数(HSTECH): 4829.22, 涨跌幅0.53%」。
 
 ## R4-28 🟢 市场综合研判切换 tab 后仍停留旧市场报告（已实施）
 - **现象**：切市场 tab 后，市场综合研判仍显示上一个市场（如港股）的报告，与当前 tab 不符。
 - **根因**：`MarketReport.vue` 的 `report` 只在点击「生成」时更新，marketTab 变化无 watch → 旧报告残留。
 - **实施**：watch(marketTab) → `stopStream()` 取消进行中旧流 + 清空 report/error + 自动为当前市场重新生成；序号守卫（genSeq）确保快速切换时旧流 token/状态不覆盖新市场；按钮文案带市场名（生成A股研判/港股/美股）。
 - **验证**：前端 311 测试全过（MarketReport 新增 2 个 R4-28 用例：切换清空+自动生成、序号守卫丢旧流）+ build 成功。
-- **R4-27b 修订**：用户澄清在意的不是代码本身而是 `^` 符号观感（yahoo 风格前缀）→ 改为**保留代码、仅去掉 `^` 前缀**（^HSTECH → HSTECH；格式「恒生科技指数(HSTECH): 4829.22, 涨跌幅0.53%」）。实测 HK 报告无 `^`；prompt 格式测试 7 passed。
 
 ## R4-29 🟡 A 股个股自动补全慢（用户体感 5-6s vs ETF 16ms）
 - **现象**：页面等待 A 股标的（个股/中文名）自动补全选项需 5-6s；ETF 搜索仅 16ms。
 - **核实**（实测）：instruments 本地表 **1544 行全部为 ETF，A 股个股（asset_type=stock）0 行**；个股搜索走 `_search_a_stocks` → 本地表空 → levistock 全量降级（`fetch_all_stocks`，5000+ 股，外部 API）：茅台/宁德 冷缓存首次 2.7-4s，缓存命中后 0-63ms（`all_stocks` TTL=1h 已有）。
 - **根因**：个股未灌入 instruments 表（`sync_instruments.py` 支持 A 股个股段 `stock_zh_a_spot_em` 但从未成功灌入）；levistock 缓存为进程内存 → 重启后首次搜索必慢；叠加更早旧后端 spot 60s 失败缓存期间的体验。
 - **方案**（详见 plan P1-7）：运行 `sync_instruments.py` 灌入 A 股个股（含拼音/首字母）→ 个股搜索与 ETF 同机制：本地毫秒级、无冷启动惩罚、重启不丢。
+
+> **编号说明**：本清单无 R4-04 编号（记录过程中跳号，未产生该条目）；plan 附录 A 与 test-gap 范围表述均按「R4-01~R4-29（无 R4-04）」口径。
