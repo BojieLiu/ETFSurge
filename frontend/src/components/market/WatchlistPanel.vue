@@ -264,7 +264,7 @@ async function addItem() {
     await store.addWatchlist(form.value.symbol, form.value.asset_type, form.value.notes, form.value.name)
     showAddModal.value = false
     form.value = { symbol: '', asset_type: 'A', notes: '', name: '' }
-    setTimeout(fetchItems, 500)
+    // R5: store 已乐观插入（POST 带 realtime）并后台刷新——不再需要 500ms 延迟全量拉取
   } catch (e) {
     addError.value = '添加失败: ' + (e?.response?.data?.detail || e?.message || '网络错误')
   } finally {

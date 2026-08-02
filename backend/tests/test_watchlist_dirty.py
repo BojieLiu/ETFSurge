@@ -184,6 +184,21 @@ class TestWatchlistDirtyData:
         assert response.json()["name"] == "510300"
 
     @pytest.mark.asyncio
+    async def test_post_watchlist_response_includes_realtime(self, async_client, mock_realtime):
+        """R5: POST 响应携带 realtime——添加后前端立即可显示价格（不等全量 GET）。"""
+        response = await async_client.post(
+            "/api/v1/market/watchlist",
+            json={"symbol": "600519", "asset_type": "A", "notes": "测试"},
+        )
+        assert response.status_code == 201
+        body = response.json()
+        assert body["symbol"] == "600519"
+        assert body["realtime"] is not None
+        assert body["realtime"]["price"] == 1750.50
+        assert body["realtime"]["change_pct"] == 1.25
+        assert body["realtime"]["volume"] == 12345678
+
+    @pytest.mark.asyncio
     async def test_get_watchlist_auto_heal_unique_conflict(self, async_client, wl_db, mock_realtime):
         """GET /watchlist: heal hits unique conflict -> warning, response still resolved, DB unchanged."""
         await _insert_watchlist(wl_db, "600519", "贵州茅台")  # pre-existing resolved code

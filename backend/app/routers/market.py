@@ -565,11 +565,26 @@ async def watchlist_list(
         result = await session.execute(stmt)
         items = result.scalars().all()
 
-        # Enrich with realtime data
+        # Enrich with realtime data — R5: 并行拉取（原串行逐 item，多标的时响应数秒；
+        # 单标的 3s 超时截断，慢源不拖累整体——对齐 P2-1/R4-16 模式）
+        async def _realtime_one(item):
+            try:
+                return await asyncio.wait_for(
+                    market_data_hub.get_asset_realtime(item.symbol, item.asset_type),
+                    timeout=3,
+                )
+            except BaseException:
+                return None
+
+        _realtimes = await asyncio.gather(
+            *(_realtime_one(it) for it in items), return_exceptions=True
+        )
+
         enriched = []
-        for item in items:
-            realtime = await market_data_hub.get_asset_realtime(item.symbol, item.asset_type)
-            
+        for item, realtime in zip(items, _realtimes):
+            if isinstance(realtime, BaseException):
+                realtime = None
+
             # Z22: Auto-heal dirty data - if symbol is not a valid code, try to resolve by name
             resolved_symbol = item.symbol
             resolved_realtime = realtime
@@ -695,6 +710,12 @@ async def watchlist_add(data: WatchlistCreate) -> dict[str, Any]:
             "notes": item.notes,
             "created_at": item.created_at.isoformat() if item.created_at else None,
             "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+            # R5: 响应携带实时行情——添加后前端立即可显示价格，不等慢速全量 GET
+            "realtime": {
+                "price": realtime.get("price") if realtime else None,
+                "change_pct": realtime.get("change_pct") if realtime else None,
+                "volume": realtime.get("volume") if realtime else None,
+            },
         }
 
 

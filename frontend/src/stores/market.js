@@ -148,8 +148,15 @@ export const useMarketStore = defineStore('market', () => {
   async function addWatchlist(symbol, assetType = 'A', notes = '', name = '') {
     // R28: 携带前端搜索到的真实名称——后端 realtime 失败时用 name 入库（不 422）
     const res = await marketApi.addWatchlist({ symbol, asset_type: assetType, notes, name })
-    await fetchWatchlist()
-    return res.data
+    const added = res.data
+    // R5: 乐观插入——POST 响应已带 realtime（后端优化），立即显示价格，不等慢速全量 GET
+    if (added?.symbol) {
+      watchlist.value = [{ ...added, realtime: added.realtime || null }, ...watchlist.value]
+      watchlistTotal.value += 1
+    }
+    // 后台全量刷新兜底（GET 已并行化，不阻塞 UI）
+    fetchWatchlist().catch(() => {})
+    return added
   }
 
   async function updateWatchlist(id, data) {
