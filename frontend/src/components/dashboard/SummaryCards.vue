@@ -1,13 +1,16 @@
 <template>
   <div class="summary-grid">
-    <!-- 总仓位 -->
-    <AppCard v-if="activeTab === 'combined'" layout="horizontal" icon="💰" class="summary-card" bordered padded hoverable>
+    <!-- 总仓位（独占一行，突出显示） -->
+    <AppCard v-if="activeTab === 'combined'" layout="horizontal" icon="💰" class="summary-card summary-card--total" bordered padded hoverable>
       <p class="summary-label">总仓位</p>
-      <p class="summary-value" :class="loading ? 'skeleton' : ''" aria-live="polite">
+      <p class="summary-value summary-value--total" :class="loading ? 'skeleton' : ''" aria-live="polite">
         <span v-if="loading" class="value-skeleton" aria-hidden="true"></span>
         <span v-else>¥{{ formatNum(totalAll) }}</span>
       </p>
     </AppCard>
+
+    <!-- 当日盈亏组 -->
+    <p class="summary-group-label">当日盈亏</p>
 
     <!-- 场内当日盈亏 -->
     <AppCard v-if="activeTab !== 'off_exchange'" layout="horizontal"
@@ -18,7 +21,7 @@
       <p class="summary-label">场内当日盈亏</p>
       <p class="summary-value" :class="[loading ? 'skeleton' : '', pnlOn >= 0 ? 'text-up' : 'text-down']" aria-live="polite">
         <span v-if="loading" class="value-skeleton" aria-hidden="true"></span>
-        <span v-else>¥{{ formatNum(pnlOn) }}</span>
+        <span v-else>¥{{ signed(pnlOn) }}{{ formatNum(Math.abs(pnlOn)) }}</span>
       </p>
     </AppCard>
 
@@ -31,9 +34,12 @@
       <p class="summary-label">场外当日盈亏</p>
       <p class="summary-value" :class="[loading ? 'skeleton' : '', pnlOff >= 0 ? 'text-up' : 'text-down']" aria-live="polite">
         <span v-if="loading" class="value-skeleton" aria-hidden="true"></span>
-        <span v-else>¥{{ formatNum(pnlOff) }}</span>
+        <span v-else>¥{{ signed(pnlOff) }}{{ formatNum(Math.abs(pnlOff)) }}</span>
       </p>
     </AppCard>
+
+    <!-- 累计盈亏组 -->
+    <p class="summary-group-label">累计盈亏</p>
 
     <!-- Cumulative P&L loading skeletons -->
     <template v-if="pnlHistoryLoading">
@@ -66,13 +72,17 @@
         <p class="summary-label">场内累计盈亏</p>
         <p class="summary-value" :class="findCumulativePnl('on_exchange') >= 0 ? 'text-up' : 'text-down'" aria-live="polite">
           <template v-if="pnlHistory.summary.has_cost_basis_data">
-            ¥{{ formatNum(findCumulativePnl('on_exchange')) }}
-            <span class="pnl-pct">({{ findCumulativePnlPct('on_exchange') }}%)</span>
+            ¥{{ signed(findCumulativePnl('on_exchange')) }}{{ formatNum(Math.abs(findCumulativePnl('on_exchange'))) }}
+            <span class="pnl-pct">({{ signedPct(findCumulativePnlPct('on_exchange')) }}%)</span>
           </template>
           <span v-else class="text-muted">需输入成本</span>
         </p>
-        <!-- R66: 含估算份额 → 标注估算成本占比 -->
-        <p v-if="estimatedRatio('on_exchange') > 0" class="estimate-hint">含估算成本 {{ Math.round(estimatedRatio('on_exchange') * 100) }}%（按目标权重估算）</p>
+        <!-- R66: 含估算份额 → tooltip 标注估算成本占比 -->
+        <p v-if="estimatedRatio('on_exchange') > 0" class="estimate-hint">
+          <AppTooltip placement="bottom-start" :content="`含估算成本 ${Math.round(estimatedRatio('on_exchange') * 100)}%（按目标权重估算）`">
+            估算 {{ Math.round(estimatedRatio('on_exchange') * 100) }}%
+          </AppTooltip>
+        </p>
       </AppCard>
 
       <AppCard v-if="activeTab !== 'on_exchange' && pnlHistory?.summary" layout="horizontal"
@@ -82,13 +92,17 @@
         <p class="summary-label">场外累计盈亏</p>
         <p class="summary-value" :class="findCumulativePnl('off_exchange') >= 0 ? 'text-up' : 'text-down'" aria-live="polite">
           <template v-if="pnlHistory.summary.has_cost_basis_data">
-            ¥{{ formatNum(findCumulativePnl('off_exchange')) }}
-            <span class="pnl-pct">({{ findCumulativePnlPct('off_exchange') }}%)</span>
+            ¥{{ signed(findCumulativePnl('off_exchange')) }}{{ formatNum(Math.abs(findCumulativePnl('off_exchange'))) }}
+            <span class="pnl-pct">({{ signedPct(findCumulativePnlPct('off_exchange')) }}%)</span>
           </template>
           <span v-else class="text-muted">需输入成本</span>
         </p>
-        <!-- R66: 含估算份额 → 标注估算成本占比 -->
-        <p v-if="estimatedRatio('off_exchange') > 0" class="estimate-hint">含估算成本 {{ Math.round(estimatedRatio('off_exchange') * 100) }}%（按目标权重估算）</p>
+        <!-- R66: 含估算份额 → tooltip 标注估算成本占比 -->
+        <p v-if="estimatedRatio('off_exchange') > 0" class="estimate-hint">
+          <AppTooltip placement="bottom-start" :content="`含估算成本 ${Math.round(estimatedRatio('off_exchange') * 100)}%（按目标权重估算）`">
+            估算 {{ Math.round(estimatedRatio('off_exchange') * 100) }}%
+          </AppTooltip>
+        </p>
       </AppCard>
 
       <AppCard v-if="activeTab === 'combined' && pnlHistory?.summary" layout="horizontal"
@@ -98,22 +112,28 @@
         <p class="summary-label">总累计盈亏</p>
         <p class="summary-value" :class="pnlHistory.summary.total_cumulative_pnl >= 0 ? 'text-up' : 'text-down'" aria-live="polite">
           <template v-if="pnlHistory.summary.has_cost_basis_data">
-            ¥{{ formatNum(pnlHistory.summary.total_cumulative_pnl) }}
-            <span class="pnl-pct">({{ pnlHistory.summary.total_cumulative_pnl_pct.toFixed(2) }}%)</span>
+            ¥{{ signed(pnlHistory.summary.total_cumulative_pnl) }}{{ formatNum(Math.abs(pnlHistory.summary.total_cumulative_pnl)) }}
+            <span class="pnl-pct">({{ signedPct(pnlHistory.summary.total_cumulative_pnl_pct) }}%)</span>
           </template>
           <span v-else class="text-muted">需输入成本</span>
         </p>
-        <!-- R66: 总览含估算份额 → 标注 -->
+        <!-- R66: 总览含估算份额 → tooltip 标注 -->
         <p v-if="(pnlHistory.summary.estimated_ratio || 0) > 0" class="estimate-hint">
-          含估算成本 {{ Math.round(pnlHistory.summary.estimated_ratio * 100) }}%（按目标权重估算）
+          <AppTooltip placement="bottom-start" :content="`含估算成本 ${Math.round(pnlHistory.summary.estimated_ratio * 100)}%（按目标权重估算）`">
+            估算 {{ Math.round(pnlHistory.summary.estimated_ratio * 100) }}%
+          </AppTooltip>
         </p>
       </AppCard>
     </template>
+
+    <!-- 数据刷新指示器（常驻占位，零 CLS：数据加载不新增行） -->
+    <p class="summary-updated">更新于 {{ lastUpdated || '--:--:--' }}</p>
   </div>
 </template>
 
 <script setup>
 import AppCard from '../ui/AppCard.vue'
+import AppTooltip from '../ui/AppTooltip.vue'
 
 const props = defineProps({
   activeTab: { type: String, required: true },
@@ -123,7 +143,8 @@ const props = defineProps({
   pnlTotal: { type: Number, required: true },
   pnlHistory: { type: Object, default: null },
   pnlHistoryLoading: { type: Boolean, default: false },
-  loading: { type: Boolean, default: true }
+  loading: { type: Boolean, default: true },
+  lastUpdated: { type: String, default: null }
 })
 
 function formatNum(n) {
@@ -133,6 +154,19 @@ function formatNum(n) {
   } catch {
     return v.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
   }
+}
+
+// 正负号：颜色之外的第二编码通道（色弱友好）。0 不加符号。
+function signed(n) {
+  if (!n) return ''
+  return n > 0 ? '+' : '-'
+}
+
+// 百分比字符串（toFixed(2) 产物）加正负号：'+33.33%' / '-33.33%' / '0.00%'
+function signedPct(pctStr) {
+  const v = parseFloat(pctStr) || 0
+  if (v === 0) return '0.00'
+  return (v > 0 ? '+' : '-') + Math.abs(v).toFixed(2)
 }
 
 function findCumulativePnl(type) {
@@ -167,6 +201,20 @@ function estimatedRatio(type) {
   transition: var(--transition-fast);
 }
 
+/* 总仓位卡独占一行（突出主数字） */
+.summary-card--total {
+  grid-column: 1 / -1;
+}
+
+/* 逻辑分组标签（当日盈亏 / 累计盈亏） */
+.summary-group-label {
+  grid-column: 1 / -1;
+  margin: var(--space-2) 0 0;
+  font: var(--text-body-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+}
+
 .summary-content {
   display: flex;
   flex-direction: column;
@@ -176,6 +224,8 @@ function estimatedRatio(type) {
 .summary-value {
   min-height: 1.5rem;
 }
+
+.summary-value.skeleton { color: transparent; }
 
 /* P0-4: 单行骨架占位——高度与 text-h2 数字行严格一致，替换时零重排 */
 .value-skeleton {
@@ -218,7 +268,10 @@ function estimatedRatio(type) {
   overflow-wrap: anywhere;
 }
 
-.summary-value.skeleton { color: transparent; }
+/* 总仓位主数字放大一档（--text-h2 → --text-h1）；须定义在 .summary-value 之后才能覆盖其 font shorthand */
+.summary-value--total {
+  font: var(--text-h1);
+}
 
 .pnl-pct {
   font: var(--text-body-sm);
@@ -228,6 +281,16 @@ function estimatedRatio(type) {
   margin: var(--space-1) 0 0;
   font: var(--text-body-xs);
   color: var(--color-text-secondary);
+}
+
+/* 数据刷新指示器（常驻渲染，占位高度固定 → 加载完成零布局偏移） */
+.summary-updated {
+  grid-column: 1 / -1;
+  min-height: 1rem;
+  margin: var(--space-1) 0 0;
+  font: var(--text-body-xs);
+  color: var(--color-text-tertiary);
+  text-align: right;
 }
 
 .text-up { color: var(--color-text-up) !important; }

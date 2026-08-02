@@ -14,6 +14,7 @@
         :pnlHistory="pnlHistory"
         :pnlHistoryLoading="pnlHistoryLoading"
         :loading="loading"
+        :lastUpdated="lastUpdated"
       />
 
       <!-- Portfolio Type Tabs -->
@@ -178,6 +179,12 @@ const tabs = [
 const marketTimer = ref(null)
 const marketStore = useMarketStore()
 
+// 数据刷新指示器：refreshAll 完成后记录时间戳（SummaryCards 右下角展示）
+const lastUpdated = ref(null)
+function markUpdated() {
+  lastUpdated.value = new Date().toLocaleTimeString('zh-CN', { hour12: false })
+}
+
 onErrorCaptured((err) => {
   logger.error('[Dashboard] Uncaught error:', err)
   renderError.value = true
@@ -190,6 +197,7 @@ onMounted(async () => {
   // R52: 初始加载必须走 refreshAll（统一 fetchAttempted 置位），
   // 旧 Promise.allSettled 路径永远不置位 → 骨架永久显示、空态无法出现
   await refreshAll()
+  markUpdated()
   fetchPnlHistory(activeTab.value)
   marketStore.connectWS((data) => {
     const indices = globalIndices.value
@@ -210,7 +218,7 @@ onUnmounted(() => {
 })
 
 watch(() => route.path, () => {
-  refreshAll()
+  refreshAll().then(markUpdated)
 })
 
 watch(activeTab, (tab) => {
@@ -219,7 +227,7 @@ watch(activeTab, (tab) => {
 
 function onRetry() {
   renderError.value = false
-  refreshAll()
+  refreshAll().then(markUpdated)
 }
 </script>
 
