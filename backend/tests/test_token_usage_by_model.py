@@ -86,7 +86,9 @@ class TestR56TimeseriesByModel:
     async def test_timeseries_bucket_by_model_and_total(self, tmp_path):
         """R56 ②: bucket 含 by_model + 返回窗口 total（含 by_model）。"""
         store = _make_store(tmp_path)
-        now = time.time()
+        # R5: 固定基准时间——真实 time.time() 在凌晨 00:00-01:00 运行时 now-3600 会跨日，
+        # today bucket 断言 flaky（KeyError）；固定 2026-08-02 12:00 保证三条记录跨今天/昨天稳定
+        now = __import__("datetime").datetime(2026, 8, 2, 12, 0, 0).timestamp()
         # 今天 2 条（不同模型），昨天 1 条
         today_key = __import__("datetime").datetime.fromtimestamp(now).strftime("%Y-%m-%d")
         await store.record(_rec(model="deepseek-v4-flash", prompt=100, completion=50, ts=now - 3600))

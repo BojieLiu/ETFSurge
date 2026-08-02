@@ -704,14 +704,33 @@ async def sector_analysis_stream(req: SectorAnalysisRequest):
         except Exception:
             pass
         
+        # R5: 注入板块实时行情快照（get_sector_industry 已含成交额/主力净流入/换手率/涨跌家数
+        # ——旧实现只喂 name/成分股/资讯，LLM 无行情数据 → 报告出现
+        # 「未提供板块K线、成交额、主力资金流向、北向持仓」的诚实降级说明）。
+        # 北向持仓接口（hsgt）当前数据源不可用，不注入；K线需东财接口（限流时降级），
+        # 快照已含板块指数点位与涨跌幅，足以支撑资金面/技术面定量分析。
+        sector_snapshot = {
+            "板块指数点位": sector_data.get("price"),
+            "今日涨跌幅%": sector_data.get("change_pct"),
+            "今日成交额": sector_data.get("amount"),
+            "换手率%": sector_data.get("turnover_rate"),
+            "主力资金净流入": sector_data.get("main_inflow"),
+            "上涨/下跌家数": [sector_data.get("up_count"), sector_data.get("down_count")],
+            "领涨股": f"{sector_data.get('lead_stock_name')}({sector_data.get('lead_stock_code')}) +{sector_data.get('lead_stock_chg')}%"
+            if sector_data.get("lead_stock_name") else None,
+            "领跌股": f"{sector_data.get('top_drop_name')}({sector_data.get('top_drop_code')})"
+            if sector_data.get("top_drop_name") else None,
+        }
+
         prompt = f"""分析板块 {name} ({sector_code})：
+板块实时行情：{json.dumps(sector_snapshot, ensure_ascii=False)}
 成分股：{json.dumps(constituents[:15], ensure_ascii=False)}
 资讯：{json.dumps(news[:10], ensure_ascii=False)}
 
 请输出：
 1. 板块概况
-2. 资金面
-3. 技术面
+2. 资金面（基于板块主力净流入、成交额等数据定量分析）
+3. 技术面（基于板块指数点位与涨跌幅）
 4. 催化因素
 5. 风险提示
 6. 核心标的推荐"""
