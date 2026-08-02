@@ -144,6 +144,20 @@ function switchMode(mode) {
   lastAnalyzed.value = ''  // 重置旧去重状态，避免干扰下次 selectedSymbol 触发
 }
 
+// R5: 市场切换重置——A→US 后旧市场的标的分析结果/输入不应残留（交互优化）
+watch(() => props.marketTab, () => {
+  stopStream()
+  query.value = ''
+  symbol.value = ''
+  result.value = ''
+  error.value = ''
+  loading.value = false
+  lastAnalyzed.value = ''
+  if (search.searchQuery) search.searchQuery.value = ''
+  search.searchResults.value = []
+  search.showDropdown.value = false
+})
+
 const modes = [
   { value: 'symbol', label: '个股/ETF' },
   { value: 'sector', label: '板块/概念' },

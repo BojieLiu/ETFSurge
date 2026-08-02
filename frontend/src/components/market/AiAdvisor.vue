@@ -31,7 +31,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { renderMarkdown } from '../../utils/markdown'
 import { useLLMStream } from '../../composables/useLLMStream'
 
@@ -41,7 +41,7 @@ const query = ref('')
 const response = ref('')
 const loading = ref(false)
 const error = ref('')
-const { start: startStream } = useLLMStream()
+const { start: startStream, stop: stopStream } = useLLMStream()
 
 async function send() {
   const q = query.value.trim()
@@ -59,6 +59,14 @@ async function send() {
     loading.value = false
   }
 }
+// R5: 市场切换重置——A→US 后旧市场的投顾回答/输入不应残留（交互优化）
+watch(() => props.marketTab, () => {
+  stopStream()
+  response.value = ''
+  error.value = ''
+  loading.value = false
+})
+
 </script>
 
 <style scoped>

@@ -203,4 +203,23 @@ describe('UnifiedAnalysis R40 (tab 切换重置)', () => {
     wrapper.vm.doAnalyze()
     expect(wrapper.vm.error).toContain('请输入标的代码或名称')
   })
+
+  it('R5: 切换 marketTab 清空旧市场的结果/输入（A→US 不残留 A 股分析）', async () => {
+    const wrapper = mounted()
+    wrapper.vm.activeMode = 'symbol'
+    wrapper.vm.result = '## A股标的分析报告'
+    wrapper.vm.query = '510050'
+    wrapper.vm.symbol = '510050'
+    searchState.searchQuery.value = '510050'
+    searchState.searchResults.value = [{ symbol: '510050' }]
+    searchState.showDropdown.value = true
+    await wrapper.setProps({ marketTab: 'US' })
+    await nextTick()
+    expect(wrapper.vm.result).toBe('') // 旧报告清空
+    expect(wrapper.vm.query).toBe('')
+    expect(wrapper.vm.symbol).toBe('')
+    expect(searchState.searchQuery.value).toBe('')
+    expect(searchState.searchResults.value).toEqual([])
+    expect(searchState.showDropdown.value).toBe(false)
+  })
 })
