@@ -143,12 +143,6 @@
 - 追加**门禁自检**：verify_e2e 结束必须打印 "X/Y 通过"，且 exit code 与 FAIL 数一致；在 CI 中验证「全 PASS 时 exit 0」。
 - 验收：`python scripts/verify_e2e.py --module zscore` 正常打印总结并 exit 0。
 
-**P0-4：首页 CLS 修复（R4-19）**
-- 子步骤 1（复现定位）：本地 prod 构建 + Lighthouse 对 `/` 与 `/dashboard` 各采样 3 次，记录 CLS 数值与「偏移发生帧」——确认是否由 Dashboard 首屏并行 API（realtime/portfolio、indices、news、sectors/heat）数据到达时序触发（数据注入 → 卡片高度变化 → 布局偏移）。
-- 子步骤 2（改动清单）：①卡片容器按内容上限预留固定 `min-height`（定位组件：Dashboard 指标卡 grid 容器，见 `frontend/src/components/dashboard/`）；②WS 推送更新（realtime 行情）改 `transform: translate` 或绝对定位，避免触发重排；③若根因是首屏折叠内容（above-the-fold 为空），调整渲染顺序先出骨架。
-- 子步骤 3（CI 门禁）：LHCI 配置接入 CI（`npx lhci autorun`，预算 performance≥60、CLS≤0.1）。
-- 验收：Lighthouse 首页 CLS ≤ 0.1、Performance ≥ 60（3 次采样中位数），LHCI 在 CI 中通过。
-
 ### 🅿️1 高优先级（数据质量/方案质量）
 
 **P1-1：combination-design-review 验收补齐（R4-15）**（大型修改，跨 ba80488 复验 + 候选池 + 引擎 + verify_e2e，拆 4 子步骤）
@@ -159,7 +153,7 @@
 - 验收：design 新纪录三方案核心层含 A500+沪深300、卫星层无宽基（verify_e2e design-quality 模块自动断言）。
 
 **P1-2：U11 核心层跨方案重叠 ≤1（R4-14）**
-- 分配引擎（`engine/allocation_engine.py` allocate() 核心层选取段）：三方案核心层候选去重——每方案核心层选取时排除前序方案已占用的核心标的；**保留沪深300（510300）为公共底仓的例外**（强制标的，不计入重叠上限），重叠上限 = 公共底仓 1 只。
+- 分配引擎（`engine/allocation_engine.py` allocate() 核心层选取段）：三方案核心层候选去重——每方案核心层选取时排除前序方案已占用的核心标的；**保留公共底仓例外**（用户决策：**沪深300 或中证A500 皆可**，由引擎按强制注入/评分选其一作为三方案公共底仓，不计入重叠上限），重叠上限 = 公共底仓 1 只。
 - 补充判定规则：重叠计数仅统计「非强制、非公共底仓」的核心标的；`_dedup_segment` 归一化覆盖 上证50/中证A50/科创50 家族（现仅覆盖科创前缀与中证500/300 家族，R4-14 同源缺陷）。
 - 验收：verify_e2e diversity 检查阈值收紧为「任意两方案核心层重叠（剔除公共底仓）≤1」。
 
@@ -192,6 +186,12 @@
 - 子步骤 2（验证）：灌入后 `SELECT COUNT(*) FROM instruments WHERE asset_type='stock' AND market='A'` 应 >5000；`market=A` 与跨市场（include_stocks）搜「茅台」「宁德」「600519」稳态 <100ms。
 - 子步骤 3（回归）：重启后端后重测（无冷缓存惩罚）；verify_e2e 搜索模块加「个股命中」断言（原只验 ETF）。
 - 验收：instruments 表含 A 股个股（>5000 行）；搜「茅台/宁德」稳态 <100ms（重启后仍快）。
+
+**P1-8：首页 CLS 修复（R4-19，原 P0-4——用户决策降级：非阻断，随 P1 批次实施）**
+- 子步骤 1（复现定位）：本地 prod 构建 + Lighthouse 对 `/` 与 `/dashboard` 各采样 3 次，记录 CLS 数值与「偏移发生帧」——确认是否由 Dashboard 首屏并行 API（realtime/portfolio、indices、news、sectors/heat）数据到达时序触发（数据注入 → 卡片高度变化 → 布局偏移）。
+- 子步骤 2（改动清单）：①卡片容器按内容上限预留固定 `min-height`（定位组件：Dashboard 指标卡 grid 容器，见 `frontend/src/components/dashboard/`）；②WS 推送更新（realtime 行情）改 `transform: translate` 或绝对定位，避免触发重排；③若根因是首屏折叠内容（above-the-fold 为空），调整渲染顺序先出骨架。
+- 子步骤 3（CI 门禁）：LHCI 配置接入 CI（`npx lhci autorun`，预算 performance≥60、CLS≤0.1）。
+- 验收：Lighthouse 首页 CLS ≤ 0.1、Performance ≥ 60（3 次采样中位数），LHCI 在 CI 中通过。
 
 ### 🅿️2 中优先级（性能/契约）
 
@@ -241,14 +241,14 @@
   P0-3 (verify_e2e 自检)      ← 最先修，防护体系地基
   P0-1 (strategy-check 行业)  ← 独立
   P0-2 (HK/US 指数过滤)       ← 独立，LLM 报告可信度
-  P0-4 (首页 CLS)             ← 前端，需 CI 接入
 批次 2（P1，高优先级）
   P1-1/P1-2 (方案质量)        ← 依赖 ba80488 复验
   P1-3 (个股分析数据)         ← 独立
   P1-4 (今日涨跌降级)          ← 独立
   P1-5 (海外流动性接入)        ← 独立，FRED fetcher 已就绪仅接线
   P1-6 (场外盈亏口径)          ← 独立（用户已确认 019633 成本真实）
-  P1-7 (个股搜索本地化)        ← 独立，需 akshare 可用时跑 sync_instruments
+  P1-7 (个股搜索本地化)        ← 独立，需 akshare 可用时跑 sync_instruments（用户同意灌库）
+  P1-8 (首页 CLS)             ← 原 P0-4，用户决策降级非阻断，随本批实施
 批次 3（P2，中优先级）
   P2-1 (组合计算/预热)  P2-2 (batch 契约)  P2-3 (news 键归一化)
   P2-4 (前端 4 处弱断裂)  P2-6 (预期收益显性化)
@@ -265,7 +265,6 @@
 | P0-1 | strategy-check 报告断言（内容级）；空行业 WARN+标注 | verify_e2e 新检查 |
 | P0-2 | llm-report market=HK/US 内容纯净断言 | verify_e2e + 单测 |
 | P0-3 | verify_e2e 正常 exit 0 | CI 门禁 |
-| P0-4 | Lighthouse 首页 CLS≤0.1 / P≥60（3 次中位数） | LHCI 接入 CI |
 | P1-1 | design 新纪录核心层含 A500+沪深300、卫星层无宽基 | verify_e2e design-quality |
 | P1-2 | 两方案核心层重叠（剔除公共底仓）≤1 | verify_e2e diversity |
 | P1-3 | 600519 报告含基本面段 | 单测 + e2e |
@@ -273,6 +272,7 @@
 | P1-5 | 研判报告海外流动性段含真实美债 10Y/VIX；非交易时段报告仍完整 | 单测 + 链路验证 |
 | P1-6 | 场外 pnl-history 单只盈亏率与联接净值变动语义一致（量级悬殊用例） | 单测 |
 | P1-7 | instruments 含 A 股个股（>5000 行）；搜「茅台/宁德」稳态 <100ms | sync 脚本 + 链路验证 |
+| P1-8 | Lighthouse 首页 CLS≤0.1 / P≥60（3 次中位数） | LHCI 接入 CI |
 | P2-1 | `/portfolio/calculate` 端到端 ≤3s、预热 market_cache ≤1.5s | verify_e2e calculate 门禁 |
 | P2-2 | batch `symbols=510300,510880` 返回 2 条 | e2e 多符号用例 |
 | P2-3 | `/news/stock/{symbol}` 返回英文键 | 单测 + e2e |
@@ -290,3 +290,4 @@
 - v1.2 (2026-08-02)：新增 P1-6 场外累计盈亏口径修复（R4-21）与 P1-7 A 股个股搜索本地化（R4-29）；findings 补 R4-29（个股补全慢：instruments 无个股 + levistock 冷缓存）；R4-24~R4-28 已实施项记录于 findings。
 - v1.3 (2026-08-02)：多轮 review 修订——①修复 P1-4 正文错位（内容从 P1-7 下移回）并补实施/验收；②验收总表补齐 8 个缺失 P 项（P1-4/P2-1~P2-4/P3-1~P3-3）；③统一 R4-21 严重度（执行摘要 5→6 项，P1-6 注明用户报障）；④大型修改细化：P1-1 拆 4 子步骤（含术语映射）、P1-5 拆 3 子步骤（美元指数定夺 fx_pair_quote、首期仅 3 个 FRED 指标）、P0-4 拆 3 子步骤（含复现定位）、P1-7 拆 3 子步骤、P2-4 四处在各自验收；⑤定夺「或」方案：P0-1 行业映射唯一数据源、P1-6 市值唯一口径（联接净值）、P2-2 后端统一解析；⑥P1-2 补 R4-14 编号与重叠判定规则（公共底仓例外 + 上证50/A50/科创50 家族归一化）；⑦§九 根因 1 移除 R4-07、§五 搜索行标注 R4-26 已修复；⑧P3-1~P3-3 补实施方向与验收（标暂缓）；⑨附录 A 注明无 R4-04。
 - v1.4 (2026-08-02)：用户决策落档——①19633 avg_cost=3.534 确认为真实申购成本（非录入错误），P1-6 移除 WARN 提示、按新口径正常估算；②实施改**分批**（批次 1 P0 → 批次 2 P1 → 批次 3 P2 → 批次 4 P3 暂缓），每批验收 + verify_e2e 全绿。
+- v1.5 (2026-08-02)：用户决策落档——③**P0-4 降级**（首页 CLS 非阻断）→ 重编号 **P1-8** 移入 P1 批次；④P1-7 灌库步骤**同意执行**；⑤P1-2 公共底仓例外**沪深300 或中证A500 皆可**（引擎按强制注入/评分选一）。
