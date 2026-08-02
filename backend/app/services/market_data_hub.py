@@ -1085,43 +1085,60 @@ class MarketDataHub:
 
         out = {s: dict(base_extra.get(s) or {}) for s in symbols}
 
+        # P2-1 延伸 (R4-16): 并发限制 + 总超时——66 只 × 2 个任务无限制并发
+        # 会在 NAV/份额数据源慢时打满线程池（POOL SATURATION，get_fund_nav 6s 超时
+        # × 大量堆积）→ 候选池刷新永远失败 → verify_e2e 候选池类检查全 FAIL。
+        # Semaphore(8) 控制并发 + wait_for 60s 总超时（超时降级为部分数据，不阻塞刷新）。
+        _sem = asyncio.Semaphore(8)
+
         async def _bench(sym: str):
-            idx_code = self._WIDE_BASIS_INDEX_CODES.get(sym)
-            if not idx_code:
-                return
-            try:
-                hist = await self.get_market_history(idx_code, "index", "daily")
-                closes = [float(r.get("close", 0)) for r in (hist or []) if r.get("close")]
-                if len(closes) >= 5:
-                    out.setdefault(sym, {})["benchmark_close"] = closes[-20:]
-            except Exception as e:
-                logger.debug("[hub] benchmark_close for %s failed: %s", sym, e)
+            async with _sem:
+                idx_code = self._WIDE_BASIS_INDEX_CODES.get(sym)
+                if not idx_code:
+                    return
+                try:
+                    hist = await self.get_market_history(idx_code, "index", "daily")
+                    closes = [float(r.get("close", 0)) for r in (hist or []) if r.get("close")]
+                    if len(closes) >= 5:
+                        out.setdefault(sym, {})["benchmark_close"] = closes[-20:]
+                except Exception as e:
+                    logger.debug("[hub] benchmark_close for %s failed: %s", sym, e)
 
         async def _shares(sym: str):
-            try:
-                cached = self._FUND_SHARES_CACHE.get(sym)
-                if cached and (time.time() - cached[0]) < self._FUND_SHARES_TTL:
-                    shares_data = cached[1]
-                else:
-                    from ..core.async_utils import run_sync
-                    shares_data = await run_sync(fetch_etf_shares_outstanding, sym, timeout=10)
-                    # F19 R71: 失败/空结果不写 24h 成功缓存——旧代码 `or {}` 把失败变成
-                    # {} 写进缓存 → 后续 24h 命中 {} → gap 持续；akshare 恢复后还要再等
-                    # 24h 才重试（熔断恢复后自动补齐被缓存破绽阻断）
-                    if not shares_data or shares_data.get("shares_change_20d") is None:
-                        return
-                    self._FUND_SHARES_CACHE[sym] = (time.time(), shares_data)
-                if shares_data.get("shares_change_20d") is not None:
-                    out.setdefault(sym, {})["shares_change_20d"] = shares_data["shares_change_20d"]
-                    # §9.10.7-5 确认: institutional_holdings_change 用 ×0.5 折扣代理
-                    out[sym]["institutional_holdings_change"] = float(shares_data["shares_change_20d"]) * 0.5
-            except Exception as e:
-                logger.debug("[hub] shares_change_20d for %s failed: %s", sym, e)
+            async with _sem:
+                try:
+                    cached = self._FUND_SHARES_CACHE.get(sym)
+                    if cached and (time.time() - cached[0]) < self._FUND_SHARES_TTL:
+                        shares_data = cached[1]
+                    else:
+                        from ..core.async_utils import run_sync
+                        shares_data = await run_sync(fetch_etf_shares_outstanding, sym, timeout=10)
+                        # F19 R71: 失败/空结果不写 24h 成功缓存——旧代码 `or {}` 把失败变成
+                        # {} 写进缓存 → 后续 24h 命中 {} → gap 持续；akshare 恢复后还要再等
+                        # 24h 才重试（熔断恢复后自动补齐被缓存破绽阻断）
+                        if not shares_data or shares_data.get("shares_change_20d") is None:
+                            return
+                        self._FUND_SHARES_CACHE[sym] = (time.time(), shares_data)
+                    if shares_data.get("shares_change_20d") is not None:
+                        out.setdefault(sym, {})["shares_change_20d"] = shares_data["shares_change_20d"]
+                        # §9.10.7-5 确认: institutional_holdings_change 用 ×0.5 折扣代理
+                        out[sym]["institutional_holdings_change"] = float(shares_data["shares_change_20d"]) * 0.5
+                except Exception as e:
+                    logger.debug("[hub] shares_change_20d for %s failed: %s", sym, e)
 
-        await asyncio.gather(
-            *(_bench(s) for s in symbols),
-            *(_shares(s) for s in symbols),
-        )
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(
+                    *(_bench(s) for s in symbols),
+                    *(_shares(s) for s in symbols),
+                ),
+                timeout=60,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "[hub] symbol_extra enrich timed out after 60s (partial: %d/%d symbols)",
+                len(out), len(symbols),
+            )
         return out
 
     def get_sector_momentum(self) -> list[dict]:
