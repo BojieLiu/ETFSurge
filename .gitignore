@@ -50,4 +50,5 @@ opencode.json
 # CodeWhale agent artifacts
 .codewhale/
 
-# Reasonix tooling.reasonix/
+# Reasonix tooling
+.reasonix/
