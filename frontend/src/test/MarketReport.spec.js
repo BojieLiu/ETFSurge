@@ -56,7 +56,7 @@ describe('MarketReport R4-28 (切换 marketTab)', () => {
     startMock.mockResolvedValue({ fullText: '' })
   })
 
-  it('切换 tab → 取消旧流、清空旧报告、以新市场自动重新生成', async () => {
+  it('切换 tab → 取消旧流、清空旧报告，但不自动触发 LLM（R5 交互优化）', async () => {
     const wrapper = mounted('HK')
     // 先有一份港股报告
     wrapper.vm.report = '## 港股研判'
@@ -66,8 +66,8 @@ describe('MarketReport R4-28 (切换 marketTab)', () => {
     await wrapper.vm.$nextTick()
     expect(stopMock).toHaveBeenCalled() // 取消旧流
     expect(wrapper.vm.report).toBe('') // 旧报告清空
-    expect(startMock).toHaveBeenCalledTimes(1)
-    expect(startMock.mock.calls[0][1]).toMatchObject({ market: 'A' }) // 新市场参数
+    expect(startMock).not.toHaveBeenCalled() // 不再自动生成——由用户点击按钮触发
+    expect(wrapper.text()).toContain('生成A股研判') // 空态按钮
   })
 
   it('快速切换时序号守卫：旧流 token 不再写入报告', async () => {
@@ -77,7 +77,8 @@ describe('MarketReport R4-28 (切换 marketTab)', () => {
       callbacks.push(cb)
       return new Promise(() => {}) // 永不 resolve，模拟进行中的流
     })
-    await wrapper.setProps({ marketTab: 'HK' }) // watch 触发 → 流 1
+    wrapper.vm.generate() // 流 1
+    await wrapper.setProps({ marketTab: 'HK' }) // watch 触发 → stopStream + genSeq++（流 1 失效）
     wrapper.vm.generate() // 手动再生成（流 2，序号更高）
     expect(callbacks.length).toBe(2)
     callbacks[0]('旧的 token') // 流 1 的 token——应被序号守卫丢弃

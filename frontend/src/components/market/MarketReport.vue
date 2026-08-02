@@ -68,14 +68,13 @@ async function generate() {
   }
 }
 
-// R4-28: 切换市场 tab → 取消进行中的旧流、清空旧报告（避免停留港股等旧市场内容）、
-// 自动为当前市场重新生成研判
+// R5 交互优化：切换市场 tab → 只取消进行中的旧流、清空旧报告（避免残留旧市场内容），
+// **不自动触发 LLM 研判**——LLM 生成耗时且消耗配额，由用户点击按钮主动生成。
 watch(() => props.marketTab, () => {
   stopStream()
   genSeq++ // 使旧 generate 的后续回调失效
   report.value = ''
   error.value = ''
-  generate()
 })
 </script>
 
