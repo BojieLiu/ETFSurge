@@ -161,6 +161,18 @@ async def _pipeline_body(mgr, task_id: int) -> dict:
     except Exception as e:
         logger.warning("[strategy_check_pipeline] DB persist failed: %s", e)
 
+    # U2 R2: report_text 为空 → 任务标记 failed（诚实收敛，前端可提示
+    # "LLM 分析失败，已展示规则摘要"；旧实现 completed + 空报告误导用户）
+    report_text = result.get("report_text", "") or ""
+    if not report_text.strip():
+        logger.warning(
+            "[strategy_check_pipeline] report_text empty for task %d — marking failed",
+            task_id,
+        )
+        await mgr.update_task(task_id, status="failed", stage="报告为空")
+        await _notify(task_id, "failed", progress=95, stage="报告为空")
+        return result
+
     # S7: 生成 LLM 市场研判注释（非阻塞，失败不影响主流程）
     try:
         llm_comment = await _generate_check_llm_comment(result)

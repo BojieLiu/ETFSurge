@@ -227,6 +227,8 @@ class WatchlistBase(BaseModel):
     symbol: str = Field(..., pattern=r"^[0-9A-Za-z.\-]+$", min_length=1, max_length=20)
     asset_type: str = "A"
     notes: Optional[str] = None
+    # R28: 前端搜索已带真实名称——入库优先用它（realtime 失败时不 422）
+    name: Optional[str] = None
 
 
 class WatchlistCreate(WatchlistBase):

@@ -320,6 +320,25 @@ describe('useDashboardData', () => {
     expect(portfolioApi.getPnl).toHaveBeenCalledTimes(2)
   })
 
+  it('R52: fetchAttempted set only after refreshAll completes (not per-fetch)', async () => {
+    // 单个 fetch 的 finally 不再置位——只有 refreshAll 全部完成后才置位
+    const dash = useDashboardData(capitalOn, capitalOff, activeTab)
+    expect(dash.fetchAttempted.value).toBe(false)
+    await dash.fetchGlobalIndices()
+    expect(dash.fetchAttempted.value).toBe(false)
+    await dash.fetchAllocations()
+    expect(dash.fetchAttempted.value).toBe(false)
+    await dash.refreshAll()
+    expect(dash.fetchAttempted.value).toBe(true)
+  })
+
+  it('R52: refreshAll sets fetchAttempted even when a fetch fails', async () => {
+    marketApi.indicesGlobal.mockRejectedValue(new Error('boom'))
+    const dash = useDashboardData(capitalOn, capitalOff, activeTab)
+    await dash.refreshAll()  // 不抛异常（fetch 内部捕获）
+    expect(dash.fetchAttempted.value).toBe(true)
+  })
+
   // ── Computed reactivity ────────────────────────────────
   it('loading recomputes when allocation data changes', async () => {
     const dash = useDashboardData(capitalOn, capitalOff, activeTab)

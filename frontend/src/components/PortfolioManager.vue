@@ -117,6 +117,10 @@
               :step="1"
               size="md"
             />
+            <!-- R66: 录了成本价但未录份额 → 提示按目标权重估算 -->
+            <p v-if="form.avg_cost != null && form.avg_cost > 0 && (form.shares_held == null || form.shares_held === 0)" class="field-hint">
+              未填份额，累计盈亏将按目标权重估算
+            </p>
           </div>
 
           <div class="form-field form-field--weight">
@@ -881,6 +885,7 @@ onMounted(loadTab)
 .form-field--search { flex: 1; min-width: 280px; }
 .form-field--weight { flex: 0 0 180px; }
 .form-label { font-weight: var(--font-weight-medium); color: var(--color-text-secondary); }
+.field-hint { margin: var(--space-1) 0 0; font-size: var(--text-xs); color: var(--color-warning, #b45309); }
 
 .search-wrap { position: relative; width: 100%; }
 .search-dropdown { position: absolute; top: calc(100% + var(--space-1)); left: 0; right: 0; max-height: 280px; overflow-y: auto; background: var(--color-surface-primary); border: 1px solid var(--color-border-medium); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); z-index: var(--z-index-dropdown); list-style: none; padding: var(--space-1); }

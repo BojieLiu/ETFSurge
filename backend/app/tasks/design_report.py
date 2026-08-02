@@ -50,11 +50,38 @@ class DesignReportManager:
 report_manager = DesignReportManager()
 
 
+def _compress_rationale(raw: str, limit: int = 80) -> str:
+    """F3 R4: 入选理由压缩到 limit 字内（保留首句摘要 + 关键数据）。
+
+    用户决策 2026-08-01：理由保留在表格内，靠全局 CSS 换行解决排版——
+    只压缩字数不移动列结构。
+    """
+    text = (raw or "").replace("\n", " ").replace("\r", "").strip()
+    if not text:
+        return ""
+    if len(text) <= limit:
+        return text
+    # 按句号/分号断句，取能放下的完整句
+    import re
+    sentences = re.split(r"(?<=[。；;])", text)
+    out = ""
+    for s in sentences:
+        if len(out) + len(s) > limit:
+            break
+        out += s
+    if not out:
+        out = text[:limit]
+    if len(out) < len(text):
+        out = out.rstrip("。；;") + "…"
+    return out[:limit]
+
+
 def _build_plan_tables(strategies: list[dict]) -> str:
     """P5-a: 从引擎 strategies 数据直接渲染方案详解 Markdown 表格。
     确保报告中的数据与方案卡片完全一致，杜绝 LLM 篡改标的。
     """
-    lines = ["\n\n## 一、三种方案详解"]
+    # F3 R6: 首行不带 \n\n 前导（避免与 task_manager 前缀拼接后 3 个连续空行）
+    lines = ["## 一、三种方案详解"]
 
     # ── 对比表：引擎直接渲染，LLM 不得篡改 ──
     labels = [s.get("label", "") for s in strategies]
@@ -114,10 +141,12 @@ def _build_plan_tables(strategies: list[dict]) -> str:
             if e.get("symbol") == "CASH":
                 continue
             code = e.get("symbol", "")
-            name = e.get("name", "")[:12]
+            # F3 R5: 名称不截断（旧 [:12] 产生"中证500增强ETF易方"类残句）
+            name = e.get("name", "")
             w = (e.get("weight") or e.get("target_weight") or 0) * 100
             raw = e.get("selection_rationale") or ""
-            rationale = raw.replace("\n", " ").replace("\r", "")[:200]
+            # F3 R4: 理由压缩 ≤80 字（保留在表格内，用户决策；配合全局 CSS 换行）
+            rationale = _compress_rationale(raw, limit=80)
             layer_en = e.get("layer", "—")
             layer_cn = {"core": "核心", "satellite": "卫星", "sat": "卫星", "defense": "防御", "defence": "防御", "cash": "现金"}.get(layer_en, layer_en)
             fs = e.get("factor_score", None)
@@ -204,6 +233,31 @@ def _count_repeated_headers(text: str) -> int:
     return repeats
 
 
+def _dedup_headers(text: str) -> str:
+    """F3 R2/R3: 轻量标题去重 + 空行规范化（所有写库路径共用）。
+
+    检出重复标题即回写修正（不只看 warning）；空行 \n{3,} → \n\n。
+    """
+    import re
+    if not text:
+        return text
+    lines = text.split("\n")
+    seen: dict[str, int] = {}
+    out: list[str] = []
+    for line in lines:
+        m = re.match(r"^(#{1,6})\s+(.+)$", line)
+        if m:
+            key = f"{m.group(1)}|{m.group(2).strip()}"
+            if key in seen:
+                continue  # 丢弃重复标题行
+            seen[key] = len(out)
+        out.append(line)
+    text = "\n".join(out)
+    # R6: 空行 3+ → 2（旧实现保留 3 空行仍偏多）
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text
+
+
 def _validate_design_text(design_text: str) -> list[str]:
     """Validate design report content completeness and quality.
 
@@ -282,8 +336,8 @@ def _validate_report_consistency(report_text: str, strategies: list[dict]) -> st
 
     # ── 空白行规范化 ──
     original_len = len(report_text)
-    # Collapse 4+ consecutive newlines to 2 (preserve paragraph separation, remove stacking)
-    report_text = re.sub(r"\n{4,}", "\n\n\n", report_text)
+    # R6: 空行规范化——3+ 连续空行压到 2（与 _dedup_headers 同规格，避免 LLM 空行堆叠）
+    report_text = re.sub(r"\n{3,}", "\n\n", report_text)
     collapsed = original_len - len(report_text)
     if collapsed > 0:
         logger.info(

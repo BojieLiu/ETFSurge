@@ -39,6 +39,12 @@ MARKET_REGIME_INDEX_MAP: dict[str, str | None] = {
     "GLOBAL": None,
 }
 
+# F17 R61: 东财行情 API 主机集中常量。
+# 2026-08-01 实测（宿主机）：push2.eastmoney.com HTTP→502 错误网关、HTTPS→连接被关闭；
+# push2delay.eastmoney.com HTTP→200 正常。P1.7「push2delay 回退 push2」前提不满足
+# （P0.5 IPv4 优先已上线），故保留 push2delay 并集中管理，避免域名散落。
+EM_PUSH_HOST = "push2delay.eastmoney.com"
+
 # LLM 报告/分析中使用的"主要标的"符号集
 MARKET_MAJOR_SYMBOLS: dict[str, set[str]] = {
     "A": {"000001", "399001", "399006", "000688", "000300", "510050", "510300", "510500", "159915"},

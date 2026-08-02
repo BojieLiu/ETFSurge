@@ -33,6 +33,8 @@ CORE_KEYWORDS = [
     "深证100", "深证50",
     "科创50", "创业板",
     "MSCI", "A50", "A100",
+    # M1 (combination-design-review): 红利类归 core，作防守型核心（用户决策 2026-08-01）
+    "红利低波", "中证红利",
 ]
 
 
@@ -59,19 +61,29 @@ DEFENSE_REQUIRED = ["518880", "511090"]  # 黄金ETF, 30年国债ETF
 # layer_ranking 的 required 注入（仅从候选池 items 查找）静默失效。
 WIDE_BASIS_STATIC = [
     {"symbol": "510300", "name": "沪深300ETF", "layer": "core", "tracked_index": "沪深300",
-     "fund_scale": 900.0, "amount": 2_000_000_000, "price": 0.0, "change_pct": 0.0},
+     "fund_scale": 900.0, "amount": 2_000_000_000, "price": 0.0, "change_pct": None},
     {"symbol": "510500", "name": "中证500ETF", "layer": "core", "tracked_index": "中证500",
-     "fund_scale": 800.0, "amount": 1_500_000_000, "price": 0.0, "change_pct": 0.0},
+     "fund_scale": 800.0, "amount": 1_500_000_000, "price": 0.0, "change_pct": None},
     {"symbol": "510050", "name": "上证50ETF", "layer": "core", "tracked_index": "上证50",
-     "fund_scale": 700.0, "amount": 1_000_000_000, "price": 0.0, "change_pct": 0.0},
+     "fund_scale": 700.0, "amount": 1_000_000_000, "price": 0.0, "change_pct": None},
     {"symbol": "588000", "name": "科创50ETF", "layer": "core", "tracked_index": "科创50",
-     "fund_scale": 600.0, "amount": 800_000_000, "price": 0.0, "change_pct": 0.0},
+     "fund_scale": 600.0, "amount": 800_000_000, "price": 0.0, "change_pct": None},
     {"symbol": "159915", "name": "创业板ETF", "layer": "core", "tracked_index": "创业板指",
-     "fund_scale": 500.0, "amount": 700_000_000, "price": 0.0, "change_pct": 0.0},
+     "fund_scale": 500.0, "amount": 700_000_000, "price": 0.0, "change_pct": None},
+    # M1: 中证A500（沪市主力 + 深市兜底）——CORE_REQUIRED 依赖其在池中
+    {"symbol": "560600", "name": "中证A500ETF", "layer": "core", "tracked_index": "中证A500",
+     "fund_scale": 550.0, "amount": 900_000_000, "price": 0.0, "change_pct": None},
+    {"symbol": "159338", "name": "中证A500ETF", "layer": "core", "tracked_index": "中证A500",
+     "fund_scale": 300.0, "amount": 500_000_000, "price": 0.0, "change_pct": None},
+    # M1: 红利类归 core，作防守型核心（用户决策 2026-08-01，防御型红利合计上限 15% 见 risk_controls）
+    {"symbol": "512890", "name": "红利低波ETF", "layer": "core", "tracked_index": "红利低波",
+     "fund_scale": 200.0, "amount": 300_000_000, "price": 0.0, "change_pct": None},
+    {"symbol": "515080", "name": "中证红利ETF", "layer": "core", "tracked_index": "中证红利",
+     "fund_scale": 150.0, "amount": 200_000_000, "price": 0.0, "change_pct": None},
     {"symbol": "518880", "name": "黄金ETF", "layer": "defense", "tracked_index": "黄金",
-     "fund_scale": 400.0, "amount": 1_200_000_000, "price": 0.0, "change_pct": 0.0},
+     "fund_scale": 400.0, "amount": 1_200_000_000, "price": 0.0, "change_pct": None},
     {"symbol": "511090", "name": "30年国债ETF", "layer": "defense", "tracked_index": "国债",
-     "fund_scale": 300.0, "amount": 500_000_000, "price": 0.0, "change_pct": 0.0},
+     "fund_scale": 300.0, "amount": 500_000_000, "price": 0.0, "change_pct": None},
 ]
 
 # F0-5 步骤 B: 静态兜底注入——优先复用 raw 数据（若有实时成交额/规模），
@@ -83,6 +95,7 @@ def _inject_static_wide_basis(
 ) -> list[dict[str, Any]]:
     raw_by_code = {e.get("symbol"): e for e in raw_etfs or []}
     existing = {e["symbol"] for e in layer_items}
+    injected: list[str] = []
     for item in WIDE_BASIS_STATIC:
         if item["layer"] != layer or item["symbol"] in existing:
             continue
@@ -93,12 +106,33 @@ def _inject_static_wide_basis(
                 if raw.get(k):
                     merged[k] = raw[k]
         layer_items.append(merged)
+        injected.append(item["symbol"])
+    if injected:
+        logger.info(
+            "WideBasisInject: layer=%s injected %d static fallbacks: %s",
+            layer, len(injected), ",".join(sorted(injected)),
+        )
     return layer_items
+
+
+def _log_missing_required(layer: str, required: list[str], pool_items: list[dict[str, Any]]) -> None:
+    """M2: 强制标的注入后校验——required 未命中打 WARNING，消除静默失效。"""
+    if not required:
+        return
+    in_pool = {e.get("symbol") for e in pool_items}
+    missing = [c for c in required if c not in in_pool]
+    if missing:
+        logger.warning(
+            "WideBasisInject: layer=%s REQUIRED codes missing from pool after injection: %s",
+            layer, ",".join(missing),
+        )
 
 # P0-3: tracked_index 关键词映射（从 ETF 名称提取指数名）
 INDEX_KEYWORDS = {
     "沪深300": "沪深300",
     "中证A500": "中证A500",
+    # M3: 中证500 家族（价值/成长/增强）名称提取为基准指数，与归一化保持一致
+    "中证500": "中证500",
     "上证50": "上证50",
     "上证180": "上证180",
     "中证800": "中证800",
@@ -222,7 +256,9 @@ def _fetch_em_etf_list() -> list[dict] | None:
     # F0-5 步骤 A: fid=f3（涨跌幅）→ fid=f6（成交额）排序，
     # 主流宽基成交额/规模恒居前列，天然留在池内（不再被题材股涨幅榜挤出）。
     for page in range(1, 20):
-        url = (f"http://push2delay.eastmoney.com/api/qt/clist/get?"
+        # F17 R61: 域名集中常量（实测 push2 502/HTTPS 连接关闭，保留 push2delay）
+        from ..core.market_context import EM_PUSH_HOST
+        url = (f"http://{EM_PUSH_HOST}/api/qt/clist/get?"
                f"pn={page}&pz=100&po=1&np=1&fs=m:1+t:2&fields={fields}&fid=f6")
         # F0-5 步骤 A: 分页失败重试 1 次，仍失败则记录 WARNING 继续下一页（不静默丢页）
         stop_paging = False
@@ -704,6 +740,10 @@ def full_pipeline(raw_etfs: list[dict] | None = None) -> dict[str, list[dict]]:
     # 使 CORE_REQUIRED/DEFENSE_REQUIRED 真正生效（层内 required 注入只查候选池 items）。
     core = _inject_static_wide_basis(core, "core", raw_etfs)
     defense = _inject_static_wide_basis(defense, "defense", raw_etfs)
+
+    # M2: 注入后校验 required 未命中 → WARNING（消除静默失效）
+    _log_missing_required("core", CORE_REQUIRED, core)
+    _log_missing_required("defense", DEFENSE_REQUIRED, defense)
 
     # 标记 layer
     for e in core:

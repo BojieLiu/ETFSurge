@@ -10,7 +10,7 @@
       <button
         v-for="mode in modes" :key="mode.value"
         :class="['analysis-tab', { active: activeMode === mode.value }]"
-        @click="activeMode = mode.value"
+        @click="switchMode(mode.value)"
         role="tab" :aria-selected="activeMode === mode.value"
       >
         {{ mode.label }}
@@ -20,13 +20,31 @@
     <div class="card">
       <div class="card-body">
         <div class="input-row">
-          <input
-            type="text"
-            v-model="query"
-            :placeholder="currentPlaceholder"
-            class="text-input"
-            @keydown.enter="doAnalyze"
-          />
+          <div class="search-wrap">
+            <input
+              type="text"
+              :value="activeMode === 'symbol' ? search.searchQuery.value : query"
+              @input="activeMode === 'symbol' ? search.onSearchInput() : (query = $event.target.value)"
+              :placeholder="currentPlaceholder"
+              class="text-input"
+              @keydown.enter="activeMode === 'symbol' ? search.onSearchKeydown($event) : doAnalyze()"
+              @focus="activeMode === 'symbol' && search.onSearchFocus()"
+              @blur="activeMode === 'symbol' && search.onSearchBlur()"
+            />
+            <!-- F7 R18: 自动补全下拉 -->
+            <ul v-if="activeMode === 'symbol' && search.showDropdown.value" class="search-dropdown">
+              <li
+                v-for="(item, i) in search.searchResults.value"
+                :key="item.symbol + i"
+                :class="['search-option', { active: i === search.activeIndex.value }]"
+                @mousedown.prevent="pickSearchItem(item)"
+              >
+                <span class="opt-name">{{ item.name }}</span>
+                <span class="opt-symbol">{{ item.symbol }}</span>
+                <span class="opt-type">{{ item.market || item.asset_type || '' }}</span>
+              </li>
+            </ul>
+          </div>
           <button class="btn-primary" @click="doAnalyze" :disabled="loading">
             {{ loading ? '分析中...' : '🔍 分析' }}
           </button>
@@ -40,6 +58,15 @@
       <button
         v-for="ex in visibleExamples" :key="ex.code"
         class="chip" @click="quickSelect(ex)">{{ ex.label }}</button>
+    </div>
+
+    <!-- F10 R35: 预设问题模板——点击后以该问题作为 prompt 附加输入 -->
+    <div v-if="symbol && !loading" class="question-chips">
+      <span class="chip-label">针对性分析:</span>
+      <button
+        v-for="tpl in QUESTION_TEMPLATES" :key="tpl.key"
+        class="chip" :class="{ active: selectedQuestion === tpl.question }"
+        @click="setQuestion(tpl)">{{ tpl.label }}</button>
     </div>
 
     <div v-if="error" class="error">{{ error }}</div>
@@ -56,8 +83,12 @@
 import { ref, computed, watch, nextTick } from 'vue'
 import { renderMarkdown } from '../../utils/markdown'
 import { useLLMStream } from '../../composables/useLLMStream'
+import { useMarketSearch } from '../../composables/useMarketSearch'
+import { marketApi } from '../../api'
 
-const { start: startStream } = useLLMStream()
+const { start: startStream, stop: stopStream } = useLLMStream()
+// F7 R18: symbol 模式自动补全（复用 useMarketSearch：300ms debounce + include_stocks）
+const search = useMarketSearch()
 
 const props = defineProps({
   marketTab: { type: String, default: 'A' },
@@ -73,6 +104,31 @@ const loading = ref(false)
 const result = ref('')
 const error = ref('')
 const lastAnalyzed = ref('')
+// F10 R35: 预设问题模板（选中个股后针对性分析）
+const selectedQuestion = ref('')
+const QUESTION_TEMPLATES = [
+  { key: 'tech', label: '📈 技术面分析', question: '请重点分析技术面：趋势、均线、MACD/KDJ/RSI 信号与关键支撑压力位' },
+  { key: 'ops', label: '💼 操作建议', question: '请给出明确的操作建议：仓位、买卖点与止损位' },
+  { key: 'news', label: '📰 资讯催化', question: '请重点分析近期资讯催化：利好利空因素与事件驱动' },
+  { key: 'risk', label: '⚠️ 风险提示', question: '请重点提示风险：最大回撤、基本面风险与流动性风险' },
+]
+
+function setQuestion(tpl) {
+  selectedQuestion.value = selectedQuestion.value === tpl.question ? '' : tpl.question
+}
+
+// R40: tab 切换重置——先 stopStream 中止在途请求，再清空输入/结果/错误/去重状态
+function switchMode(mode) {
+  if (mode === activeMode.value) return
+  stopStream()
+  activeMode.value = mode
+  query.value = ''
+  symbol.value = ''
+  result.value = ''
+  error.value = ''
+  loading.value = false
+  lastAnalyzed.value = ''  // 重置旧去重状态，避免干扰下次 selectedSymbol 触发
+}
 
 const modes = [
   { value: 'symbol', label: '个股/ETF' },
@@ -159,6 +215,7 @@ const visibleExamples = computed(() => {
 watch(() => props.selectedSymbol, (val) => {
   if (val && val !== lastAnalyzed.value) {
     query.value = val
+    if (search.searchQuery) search.searchQuery.value = val
     symbol.value = val
     nextTick(() => doAnalyze())
   }
@@ -169,6 +226,7 @@ watch(() => props.externalTrigger, (trig) => {
   if (trig && trig.query) {
     activeMode.value = (trig.mode === 'sector' || trig.mode === 'index') ? trig.mode : 'symbol'
     query.value = trig.query
+    if (search.searchQuery) search.searchQuery.value = trig.query
     symbol.value = trig.query
     result.value = ''
     error.value = ''
@@ -184,14 +242,67 @@ function quickSelect(ex) {
   doAnalyze()
 }
 
+// F7 R18: 下拉选中 → 写入 query + 触发分析（名称→代码由 doAnalyze 内解析）
+function pickSearchItem(item) {
+  query.value = item.symbol
+  search.selectedSearchItem.value = item
+  search.showDropdown.value = false
+  symbol.value = item.symbol
+  result.value = ''
+  error.value = ''
+  doAnalyze()
+}
+
 async function doAnalyze() {
-  const q = query.value.trim()
+  // F7 R18: symbol 模式输入源为 search.searchQuery（自动补全框）；sector/index 仍用 query
+  const q = (activeMode.value === 'symbol' ? search.searchQuery.value : query.value).trim()
   if (!q) return
+  query.value = q
   symbol.value = q
   loading.value = true
   error.value = ''
   result.value = ''
   lastAnalyzed.value = q
+
+  // R43: 代码输入（如 510050）时后端用 realtime 回填真实名称；中文名直接传原名
+  const looksLikeCode = /^[0-9A-Za-z.]+$/.test(q) && q.length <= 12
+  let reqSymbol = q
+  let reqName = looksLikeCode ? '' : q
+  let assetType = props.marketTab === 'HK' ? 'HK' : (props.marketTab === 'US' ? 'US' : 'A')
+
+  // F7 R19: symbol 模式名称→代码解析（命中下拉搜索结果首条则用其 symbol）
+  if (activeMode.value === 'symbol' && !looksLikeCode) {
+    try {
+      const res = await marketApi.search(q, { include_stocks: true })
+      const hits = res.data || []
+      const hit = hits.find((i) => i.name === q) || hits[0]
+      if (hit) {
+        reqSymbol = hit.symbol || q
+        reqName = hit.name || q
+      }
+    } catch (e) {
+      // 解析失败回退：按原输入交给后端（R20 兜底）
+    }
+  }
+
+  // R42: index 模式先解析中文指数名（如"沪深300"）→ 真实 symbol + 名称，避免 404
+  if (activeMode.value === 'index') {
+    try {
+      const meta = (await marketApi.indicesMeta()).data || []
+      const hit = meta.find((i) => i.name === q)
+        || meta.find((i) => i.symbol === q)
+        || meta.find((i) => (i.name || '').includes(q))
+      if (hit) {
+        reqSymbol = hit.symbol || q
+        reqName = hit.name || q
+      } else if (looksLikeCode) {
+        reqName = '' // 代码直传，后端 realtime 回填
+      }
+      assetType = 'index'
+    } catch (e) {
+      // 解析失败回退：按原输入交给后端（realtime 兜底）
+    }
+  }
 
   // F2-4: 复用已验证的 SSE 流式端点（symbol/sector/index 三模式），删除 fallback 假成功分支
   const endpoint = activeMode.value === 'sector'
@@ -199,7 +310,7 @@ async function doAnalyze() {
     : '/symbol-analysis/stream'
   const body = activeMode.value === 'sector'
     ? { sector_code: q, sector_name: q, sector_type: 'industry', market: props.marketTab }
-    : { symbol: q, name: q, asset_type: props.marketTab === 'HK' ? 'HK' : (props.marketTab === 'US' ? 'US' : 'A'), market: props.marketTab }
+    : { symbol: reqSymbol, name: reqName, asset_type: assetType, market: props.marketTab, question: selectedQuestion.value }
 
   try {
     const { fullText } = await startStream(endpoint, body, (token) => {
@@ -254,6 +365,23 @@ async function doAnalyze() {
 .card { background: var(--color-surface-primary); border: 1px solid var(--color-border-light); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); }
 .card-body { padding: var(--space-5); }
 .input-row { display: flex; gap: var(--space-3); }
+.search-wrap { position: relative; flex: 1; }
+.search-dropdown {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 20;
+  list-style: none; margin: 0; padding: var(--space-1) 0;
+  background: var(--color-surface, #fff); border: 1px solid var(--color-border, #ddd);
+  border-radius: var(--radius-md, 8px); box-shadow: 0 4px 16px rgba(0,0,0,.12);
+  max-height: 260px; overflow-y: auto;
+}
+.search-option {
+  display: flex; gap: var(--space-2); align-items: center;
+  padding: var(--space-2) var(--space-3); cursor: pointer;
+  font: var(--text-body-sm); color: var(--color-text-primary);
+}
+.search-option:hover, .search-option.active { background: var(--color-bg-secondary, #f5f5f5); }
+.opt-name { flex: 1; }
+.opt-symbol { font-family: var(--font-mono, monospace); color: var(--color-text-secondary); font-size: var(--text-xs); }
+.opt-type { color: var(--color-text-muted, #999); font-size: var(--text-xs); }
 .text-input {
   flex: 1;
   padding: var(--space-2) var(--space-3);
@@ -283,6 +411,8 @@ async function doAnalyze() {
 .error { margin: var(--space-3); padding: var(--space-2) var(--space-3); color: var(--color-danger-700); background: var(--color-bg-danger-subtle); border-radius: var(--radius-md); font-size: var(--font-size-sm); }
 .result { margin-top: var(--space-4); line-height: 1.8; }
 .quick-chips { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-3); padding: 0 var(--space-1); }
+.question-chips { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-2); padding: 0 var(--space-1); }
+.question-chips .chip.active { background: var(--color-brand-600, #2563eb); color: #fff; border-color: var(--color-brand-600, #2563eb); }
 .chip-label { font-size: var(--font-size-xs); color: var(--color-text-tertiary); }
 .chip { padding: var(--space-1) var(--space-3); font-size: var(--font-size-sm); font-family: var(--font-family-mono); font-weight: var(--font-weight-medium); color: var(--color-brand-600); background: var(--color-bg-brand-subtle); border: 1px solid var(--color-brand-200); border-radius: var(--radius-full); cursor: pointer; transition: var(--transition-fast); }
 .chip:hover { background: var(--color-brand-100); border-color: var(--color-brand-400); }

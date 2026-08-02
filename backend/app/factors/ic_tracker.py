@@ -66,7 +66,7 @@ class ICTracker:
     def __init__(self):
         self._records: list[dict[str, Any]] = []
 
-    def compute_ic(self, factor_values: pd.Series, forward_returns: pd.Series) -> float:
+    def compute_ic(self, factor_values: pd.Series, forward_returns: pd.Series) -> float | None:
         """Compute single-period Spearman rank IC.
 
         Args:
@@ -74,15 +74,23 @@ class ICTracker:
             forward_returns: Forward returns (e.g. t+1) for the same assets.
 
         Returns:
-            Spearman rank correlation coefficient.
+            Spearman rank correlation coefficient, or None when the IC is
+            undefined (insufficient samples / constant input / NaN) —
+            U3/N06: None 语义表示"该因子本批不可计算"，调用方跳过而非写 0。
         """
         combined = pd.concat([factor_values, forward_returns], axis=1).dropna()
         if len(combined) < 3:
-            return 0.0
+            return None
         vals = combined.iloc[:, 0]
         rets = combined.iloc[:, 1]
+        # U3/N06: 常量输入检测——spearmanr 对常量序列产生 ConstantInputWarning + NaN，
+        # 旧代码把 NaN 转 0.0，全 0 批次覆盖 _last_ic_batch → IC 数据永久丢失（Z06/N06）。
+        if vals.nunique() == 1 or rets.nunique() == 1:
+            return None
         corr, _ = spearmanr(vals, rets)
-        return float(corr) if not np.isnan(corr) else 0.0
+        if np.isnan(corr):
+            return None
+        return float(corr)
 
     def compute_ic_series(
         self,
@@ -105,7 +113,8 @@ class ICTracker:
             fv = factor_values.loc[idx]
             fr = forward_returns.loc[idx]
             ic = self.compute_ic(fv, fr)
-            ic_values.append(ic)
+            if ic is not None:  # U3/N06: 跳过不可计算的周期（None）
+                ic_values.append(ic)
         return pd.Series(ic_values, index=factor_values.index[:len(ic_values)])
 
     def record(self, symbol: str, factor_code: str, value: float) -> None:
@@ -174,11 +183,15 @@ class ICTracker:
             fv = pd.Series(values)
             common = fv.index.intersection(forward_rets.index)
             if len(common) < 3:
-                ic_results[code] = 0.0
+                # U3/N06: 样本不足跳过该因子（不写 0.0——全 0 批次会覆盖有效 IC）
                 continue
-            ic_results[code] = self.compute_ic(
+            ic_val = self.compute_ic(
                 fv[common], forward_rets[common]
             )
+            if ic_val is None:
+                # U3/N06: 常量输入/NaN → 跳过，不污染批次
+                continue
+            ic_results[code] = ic_val
 
         return ic_results
 
@@ -209,6 +222,11 @@ class ICTracker:
         count = 0
         now = datetime.utcnow()
         for code, ic_val in ic_batch.items():
+            # U3/N06: 过滤 None / NaN / 0 值（旧逻辑只过滤 0，NaN 会落库）
+            if ic_val is None:
+                continue
+            if isinstance(ic_val, float) and (ic_val != ic_val):  # NaN 自比较
+                continue
             if abs(ic_val) < 0.0001:
                 continue
             record = FactorICRecord(

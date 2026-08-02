@@ -186,14 +186,16 @@ class TestAllocationIntegration:
         assert len(set(counts)) > 1 or max(counts) >= 4, \
             f"Not sufficiently differentiated: counts={counts}"
 
-        # 检查三方案的总权重不同
+        # 检查三方案的总权重不同（旧断言：三方案权重应不同以体现差异化）
+        # U6 R1 后：预算用满 → 总权重都收敛到层预算和（~85%），差异化体现在
+        # 标的构成而非总权重。断言预算用满（现金收敛）。
         weights = [
             sum(a.get("weight", 0) for a in s.get("allocations", []) if a.get("symbol") != "CASH")
             for s in result
         ]
         print(f"  Total weights per profile: {[round(w*100, 1) for w in weights]}")
-        assert max(weights) > min(weights) + 0.01, \
-            f"All profiles have nearly identical weights: {[round(w*100, 1) for w in weights]}"
+        assert min(weights) >= 0.83, \
+            f"U6 R1 预算用满后总权重应 ≈层预算和（~85%），实际 {[round(w*100, 1) for w in weights]}"
 
     def test_defensive_has_less_risky_exposure(self):
         """防御型相较进攻型有更少的科创板等高风险暴露。"""

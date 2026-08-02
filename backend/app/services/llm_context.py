@@ -90,11 +90,29 @@ async def build_full_context(
             context["sector_heat"] = []
             errors.append(f"sector_heat: {e}")
 
-    # 5. Realtime ETFs (from market_service cache)
+    # 5. Realtime market data (from market_service cache)
+    # N04/U9: 按 market 过滤——HK/US 报告不再注入全量 A 股指数实时（旧代码
+    # get_all_realtime() 只含 A 股指数 → HK/US 报告大谈创业板/上证50）。
+    # 注意：直接使用传入的 market_data_hub 参数（旧代码 `from ... import
+    # market_data_hub` 遮蔽参数名 → 单测注入的 FakeHub 失效、依赖全局单例）。
     try:
-        from ..services.market_data_hub import market_data_hub
         all_realtime = await asyncio.wait_for(market_data_hub.get_all_realtime(), timeout=15)
-        context["market_data"] = all_realtime[:20] if all_realtime else []
+        if market.upper() in ("HK", "US", "EU", "欧股"):
+            from app.core.market_context import resolve_market_context
+            market_ctx = resolve_market_context(market)
+            # get_all_realtime 只含 A 股指数；对 HK/US 补充对应区域全球指数
+            global_idx = await asyncio.wait_for(
+                market_data_hub.get_global_indices(), timeout=15
+            ) or {}
+            region = {"HK": "港股", "US": "美股", "EU": "欧股", "欧股": "欧股"}.get(market.upper(), "A股")
+            region_data = list(global_idx.get(region, []) or [])
+            # 再叠加该市场 major_symbols 的实时数据（若有）
+            major_symbols = market_ctx.major_symbols or set()
+            context["market_data"] = (region_data + [
+                r for r in (all_realtime or []) if r.get("symbol") in major_symbols
+            ])[:20]
+        else:
+            context["market_data"] = all_realtime[:20] if all_realtime else []
     except Exception as e:
         context["market_data"] = []
         errors.append(f"realtime: {e}")

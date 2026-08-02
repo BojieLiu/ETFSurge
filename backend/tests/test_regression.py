@@ -53,11 +53,15 @@ class TestOpt02FundFlowDegradation:
     """OPT-02 红绿切换回归测试。"""
 
     @pytest.mark.asyncio
-    async def test_compute_fund_flow_returns_empty_when_push2_open(self):
-        """push2 熔断时 _compute_fund_flow 应直接返回空数据（不进 gather）。"""
+    async def test_compute_fund_flow_returns_empty_when_akshare_open(self):
+        """F17 R62: fund_flow 熔断 gate 为 akshare 源（真实数据路径），非 push2delay。
+
+        旧断言 push2delay 是 R62 修复前的语义错位（fund_flow 被涨跌家数路径的
+        push2 熔断 gate 误伤）。R62 后改查 akshare 健康。
+        """
         from app.services.strategy_design import _compute_fund_flow
 
-        # 将 push2 熔断器设为不可用
+        # 将 akshare 熔断器设为不可用
         mock_h = MagicMock()
         mock_h.available.return_value = False
 
@@ -72,7 +76,8 @@ class TestOpt02FundFlowDegradation:
             result = await _compute_fund_flow(mock_pm)
             assert result["total_net_inflow"] == 0.0
             assert result["total_symbols"] == 0
-            mock_health.assert_called_once_with("push2delay.eastmoney.com")
+            # R62: gate 查 akshare 源健康（不再查 push2delay）
+            mock_health.assert_called_once_with("akshare")
 
     @pytest.mark.asyncio
     async def test_compute_fund_flow_proceeds_when_push2_available(self):

@@ -111,6 +111,12 @@ def dynamic_layer_budget(risk_profile: str, regime: str) -> dict[str, float]:
         base["core"] = max(base.get("core", 0.50) - shift * 0.5, 0.35)
         base["defense"] = max(base.get("defense", 0.05) - shift * 0.3, 0.03)
 
+    # ── U6 R2: range_bound 下 balanced 微调（satellite +0.02 / defense -0.02，
+    # 配合 R1 预算用满使实际现金收敛到理论值，验收 ≤15%） ──
+    elif regime in ("range_bound",) and risk_profile == "balanced":
+        base["satellite"] = min(base.get("satellite", 0.30) + 0.02, 0.50)
+        base["defense"] = max(base.get("defense", 0.10) - 0.02, 0.03)
+
     return base
 
 

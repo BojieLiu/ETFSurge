@@ -729,3 +729,149 @@ button:focus-visible {
 .data-panel-loading {
   min-height: 300px;
 }
+
+/* ==========================================
+   F5 R11 / F11 R37: 全局 markdown v-html 表格样式
+   一次覆盖所有 v-html 容器：UnifiedAnalysis (.result) / AiAdvisor (.response) /
+   MarketReport (.report) / DesignResult (.markdown-body)。
+   - word-break: break-word + vertical-align: top: 长理由文本（≤80 字）换行不撑爆表格
+   - display: block + overflow-x: auto: 窄屏横向滚动
+   scoped 组件内同属性优先级更高，天然覆盖全局（DesignResult 已定义局部样式不受影响）
+   ========================================== */
+.result table,
+.response table,
+.report table,
+.markdown-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: var(--space-4) 0;
+  font-size: 0.92em;
+  display: block;
+  overflow-x: auto;
+}
+.result table thead,
+.response table thead,
+.report table thead,
+.markdown-body table thead {
+  background: var(--color-surface-secondary);
+}
+.result table th,
+.response table th,
+.report table th,
+.markdown-body table th {
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  border-bottom: 2px solid var(--color-primary);
+  white-space: nowrap;
+}
+.result table td,
+.response table td,
+.report table td,
+.markdown-body table td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border-light);
+  color: var(--color-text-primary);
+  word-break: break-word;
+  vertical-align: top;
+}
+.result table tbody tr:hover,
+.response table tbody tr:hover,
+.report table tbody tr:hover,
+.markdown-body table tbody tr:hover {
+  background: var(--color-bg-tertiary);
+}
+.result table tbody tr:nth-child(even),
+.response table tbody tr:nth-child(even),
+.report table tbody tr:nth-child(even),
+.markdown-body table tbody tr:nth-child(even) {
+  background: rgba(0, 0, 0, 0.02);
+}
+.result table tbody tr:nth-child(even):hover,
+.response table tbody tr:nth-child(even):hover,
+.report table tbody tr:nth-child(even):hover,
+.markdown-body table tbody tr:nth-child(even):hover {
+  background: var(--color-bg-tertiary);
+}
+
+/* F11 R37: .response/.result/.report 补 h1-h4/p/ul 基础样式（三处 v-html 容器统一） */
+.result h1,
+.response h1,
+.report h1,
+.markdown-body h1 {
+  font-size: 1.4em;
+  margin: var(--space-5) 0 var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: 2px solid var(--color-primary);
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-bold);
+}
+.result h2,
+.response h2,
+.report h2,
+.markdown-body h2 {
+  font-size: 1.2em;
+  margin: var(--space-5) 0 var(--space-3);
+  padding-bottom: var(--space-1);
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-semibold);
+}
+.result h3,
+.response h3,
+.report h3,
+.markdown-body h3 {
+  font-size: 1.1em;
+  margin: var(--space-4) 0 var(--space-2);
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-semibold);
+}
+.result h4,
+.response h4,
+.report h4,
+.markdown-body h4 {
+  font-size: 1em;
+  margin: var(--space-3) 0 var(--space-2);
+  color: var(--color-text-secondary);
+  font-weight: var(--font-weight-semibold);
+}
+.result p,
+.response p,
+.report p,
+.markdown-body p {
+  margin: var(--space-2) 0;
+  line-height: 1.8;
+  color: var(--color-text-primary);
+}
+.result ul,
+.response ul,
+.report ul,
+.markdown-body ul,
+.result ol,
+.response ol,
+.report ol,
+.markdown-body ol {
+  padding-left: var(--space-5);
+  margin: var(--space-2) 0;
+  color: var(--color-text-primary);
+}
+.result li,
+.response li,
+.report li,
+.markdown-body li {
+  margin: var(--space-1) 0;
+  line-height: 1.7;
+}
+.result > *:first-child,
+.response > *:first-child,
+.report > *:first-child,
+.markdown-body > *:first-child {
+  margin-top: 0;
+}
+.result > *:last-child,
+.response > *:last-child,
+.report > *:last-child,
+.markdown-body > *:last-child {
+  margin-bottom: 0;
+}

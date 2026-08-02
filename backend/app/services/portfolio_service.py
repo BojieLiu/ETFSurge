@@ -305,11 +305,26 @@ async def calculate_allocation(
                 sym_task_map = {}
                 async def _fetch_all_fundamentals():
                     nonlocal sym_task_map
-                    futs = [run_sync(market_data_hub.get_fundamentals, sym, timeout=8) for _, sym in symbols]
-                    results = await asyncio.gather(*futs, return_exceptions=True)
+                    # U5 R1/R2: 单标的 3s 快速失败（数据源 3s 无响应即返回空 dict，
+                    # 不占满 8s）+ asyncio.Semaphore(4) 限并发（避免 10 路同打
+                    # 同一数据源触发限流）——旧实现 8s×并发 gather + 10s 总预算
+                    # 实测 8.2s（某标的 fundamentals 接近超时）
+                    _sem = asyncio.Semaphore(4)
+
+                    async def _one(sym: str) -> dict:
+                        async with _sem:
+                            try:
+                                return await asyncio.wait_for(
+                                    run_sync(market_data_hub.get_fundamentals, sym, timeout=8),
+                                    timeout=3.0,
+                                )
+                            except (asyncio.TimeoutError, Exception):
+                                return {}
+
+                    results = await asyncio.gather(*[_one(sym) for _, sym in symbols])
                     sym_task_map = {sym: res for (_, sym), res in zip(symbols, results)}
                 try:
-                    await asyncio.wait_for(_fetch_all_fundamentals(), timeout=10.0)
+                    await asyncio.wait_for(_fetch_all_fundamentals(), timeout=5.0)
                 except Exception:
                     pass
                 _FUNDAMENTALS_CACHE[_fkey] = (time.monotonic(), sym_task_map)
@@ -521,9 +536,12 @@ async def strategy_check(
         "partial": 0 < filled_factor_count < total_factor_count,
     }
 
-    # LLM 分析（Z26: 内层 20s 显式预算，超时走规则引擎兜底）
+    # LLM 分析（Z26: 显式预算，超时走规则引擎兜底）
+    # U2 R3: 超时预算 20s → 60s（对齐设计任务 240s 的下限；20s 内 LLM 基本必超时，
+    # 3 条实测记录 208/209/210 全部超时）。
     # F1-9: wait_for 超时会取消内部协程，抛 CancelledError（BaseException），
     # 必须与 TimeoutError 一起捕获，否则 usage 失败记录缺失、规则兜底文案丢失。
+    _llm_failed = False
     _llm_start = _time.monotonic()
     try:
         llm_result = await asyncio.wait_for(
@@ -533,9 +551,10 @@ async def strategy_check(
                 regime=regime,
                 data_quality=data_quality,
             ),
-            timeout=20,
+            timeout=60,
         )
     except (asyncio.TimeoutError, asyncio.CancelledError) as e:
+        _llm_failed = True
         _llm_dur = _time.monotonic() - _llm_start
         logger.warning(
             "[strategy_check] LLM analysis timed out/cancelled after %.1fs (%s), using rule fallback",
@@ -563,6 +582,7 @@ async def strategy_check(
             "risk_warnings": [],
         }
     except Exception as e:
+        _llm_failed = True
         logger.warning("[strategy_check] LLM analysis failed: %s", e)
         llm_result = {
             "summary": f"LLM 分析暂不可用（{e}），返回因子数据摘要",
@@ -570,6 +590,11 @@ async def strategy_check(
             "holdings_analysis": [],
             "risk_warnings": [],
         }
+
+    # F1-9 兜底识别：llm.py 内部捕获 CancelledError 返回兜底结构（wait_for 不抛异常），
+    # 此时 summary 以"LLM 分析超时"开头——同样视为 LLM 失败（风险兜底诚实化）
+    if not _llm_failed and str(llm_result.get("summary", "")).startswith("LLM 分析超时"):
+        _llm_failed = True
     
     # P2-1+P2-2+P2-4: 后处理 — 回填 weight + 真实因子分 + factor_summary
     weight_map: dict[str, float] = {}
@@ -672,13 +697,29 @@ async def strategy_check(
         "coverage_pct": round(coverage_pct, 4),
     }
 
+    # U2 R1: 风险兜底诚实化（LLM 超时/因子缺失 → warning 级降级标注）
+    risk_warnings = _combine_risk_warnings(
+        llm_result.get("risk_warnings", []),
+        _compute_risk_warnings(holdings_analysis, factor_scores, regime),
+        llm_failed=_llm_failed,
+        data_all_empty=bool((data_quality or {}).get("all_empty")),
+    )
+
     result = {
         "summary": f"{llm_summary}（市态：{regime_label}{sector_text}{quality_summary}）" if llm_summary else f"市态：{regime_label}，{filled_count}/{total_count}只正常{quality_summary}",
         "suggestions": merged_suggestions,
         "holdings_analysis": holdings_analysis,
-        "risk_warnings": _combine_risk_warnings(
-            llm_result.get("risk_warnings", []),
-            _compute_risk_warnings(holdings_analysis, factor_scores, regime),
+        "risk_warnings": risk_warnings,
+        # U2 R1: 兜底正文——rule/LLM 建议一律渲染为完整 Markdown 报告
+        # （旧实现无 report_text 键 → task 结果 report_text len=0）
+        "report_text": _build_rule_fallback_report(
+            market_data=market_data,
+            factor_breakdowns=factor_breakdowns,
+            merged_suggestions=merged_suggestions,
+            regime=regime,
+            data_quality=data_quality,
+            llm_failed=_llm_failed,
+            risk_warnings=risk_warnings,
         ),
         "market_regime": regime,
         "data_quality": {
@@ -714,6 +755,7 @@ def _rule_based_suggestion(
     factor_score: dict,
     signal: dict | None,
     regime: str,
+    current_weight: float | None = None,
 ) -> dict:
     """Z26: 规则引擎兜底建议 — 基于因子分 + 技术信号 + regime 决策表。
 
@@ -722,6 +764,12 @@ def _rule_based_suggestion(
       increase -> min(current * 1.2, 0.30)（单只 ≤30% 风控）
       decrease -> max(current * 0.7, 0.0)
       hold     -> 维持当前权重
+
+    U2 R2 (factor-and-strategy-check-review 问题3 R2): 决策表分档——
+      - avg_factor > 0.5 + buy 且非 bearish → increase
+      - avg_factor < -0.5 + sell → decrease
+      - avg_factor ∈ (0.2, 0.5) + buy → hold（偏多但未达增仓阈值 0.5）
+      - 其余 hold，reason 带因子分/信号依据（不再裸"维持现状"）
     """
     fs_vals = [v for v in (factor_score or {}).values()
                if isinstance(v, (int, float)) and v != 0]
@@ -731,21 +779,37 @@ def _rule_based_suggestion(
         sig = signal.get("signal", "hold") or "hold"
 
     bearish = regime in ("bearish", "bear", "bear_market", "defensive")
-    if avg_factor > 0.5 and sig == "buy" and not bearish:
-        action, reason = "increase", "因子评分优+技术买入信号，建议增仓"
-        suggested = min(target_weight * 1.2, 0.30)
+    cur = current_weight if current_weight is not None else target_weight
+    # 相对偏离度：|current - target| / max(target, eps) > 20% → 向 target 回归
+    _eps = 1e-9
+    if current_weight is not None and abs(current_weight - target_weight) > max(target_weight, _eps) * 0.2:
+        if current_weight < target_weight:
+            action = "increase"
+            reason = f"偏离目标权重（当前 {current_weight:.1%} < 目标 {target_weight:.1%}），建议回归"
+            suggested = min(target_weight, 0.30)
+        else:
+            action = "decrease"
+            reason = f"偏离目标权重（当前 {current_weight:.1%} > 目标 {target_weight:.1%}），建议回归"
+            suggested = max(target_weight, 0.0)
+    elif avg_factor > 0.5 and sig == "buy" and not bearish:
+        action, reason = "increase", f"因子评分优({avg_factor:.2f})+技术买入信号，建议增仓"
+        suggested = min(cur * 1.2, 0.30)
     elif avg_factor < -0.5 and sig == "sell":
-        action, reason = "decrease", "因子评分弱+技术卖出信号，建议减仓"
-        suggested = max(target_weight * 0.7, 0.0)
+        action, reason = "decrease", f"因子评分弱({avg_factor:.2f})+技术卖出信号，建议减仓"
+        suggested = max(cur * 0.7, 0.0)
+    elif avg_factor > 0.2 and sig == "buy":
+        action = "hold"
+        reason = f"偏多（因子分 {avg_factor:.2f} 未达增仓阈值 0.5），维持现状"
+        suggested = cur
     else:
-        action, reason = "hold", "维持现状"
-        suggested = target_weight
+        action, reason = "hold", f"因子分 {avg_factor:.2f}（中性区间），信号 {sig or '中性'}，维持现状"
+        suggested = cur
 
     return {
         "symbol": symbol,
         "name": name,
         "action": action,
-        "current_weight": round(float(target_weight or 0), 4),
+        "current_weight": round(float(cur or 0), 4),
         "suggested_weight": round(float(suggested), 4),
         "reason": reason,
         "confidence": 0.7,
@@ -753,15 +817,97 @@ def _rule_based_suggestion(
     }
 
 
+def _build_rule_fallback_report(
+    market_data: list[dict],
+    factor_breakdowns: dict,
+    merged_suggestions: list[dict],
+    regime: str,
+    data_quality: dict | None,
+    llm_failed: bool = False,
+    risk_warnings: list[dict] | None = None,
+) -> str:
+    """U2 R1: 用已生成的 suggestions/factor/risk 渲染结构化 Markdown 正文。
+
+    旧问题：rule 兜底只有 suggestions 数组、report_text 永远为空（task 66
+    report_text len=0）——本函数为兜底路径生成完整正文：
+    市态结论 → 因子数据质量 → 逐标的因子/信号/建议表 → 风险提示 → 操作建议。
+    """
+    regime_label = {"range_bound": "震荡", "bullish": "偏多", "bearish": "偏空",
+                    "volatile": "高波动", "unknown": "待定"}.get(regime, regime)
+    lines: list[str] = []
+    lines.append("## 策略检查报告")
+    lines.append("")
+    lines.append(f"**市态**：{regime_label}")
+    if llm_failed:
+        lines.append("")
+        lines.append("> ⚠️ LLM 分析超时/不可用，以下内容由规则引擎基于因子数据与信号生成。")
+    filled = (data_quality or {}).get("filled_count", 0)
+    total = (data_quality or {}).get("total_count", 0)
+    lines.append("")
+    lines.append(f"**因子数据质量**：{filled}/{total} 只持仓因子数据可用。")
+    lines.append("")
+    lines.append("### 逐标的因子/信号/建议")
+    lines.append("| 代码 | 名称 | 因子分 | 信号 | 建议 | 理由 |")
+    lines.append("|------|------|--------|------|------|------|")
+    for s in merged_suggestions or []:
+        sym = s.get("symbol", "")
+        fb = factor_breakdowns.get(sym, {}) or {}
+        fs = fb.get("factor_scores", {}) or {}
+        fs_vals = [v for v in fs.values() if isinstance(v, (int, float)) and v != 0]
+        avg = sum(fs_vals) / len(fs_vals) if fs_vals else 0.0
+        sig = ((fb.get("technical_signal") or {}).get("signal") or "hold")
+        action = s.get("action", "hold")
+        reason = (s.get("reason", "") or "").replace("|", "｜")
+        lines.append(
+            f"| {sym} | {s.get('name', sym)} | {avg:.2f} | {sig} | {action} | {reason} |"
+        )
+    lines.append("")
+    lines.append("### 风险提示")
+    warnings = risk_warnings or []
+    if warnings:
+        for w in warnings:
+            sev = w.get("severity", "info")
+            desc = (w.get("description", "") or "").replace("|", "｜")
+            lines.append(f"- [{sev}] {desc}")
+    else:
+        lines.append("- 当前组合风险指标正常，未触发自动警告。")
+    lines.append("")
+    lines.append("### 操作建议")
+    if merged_suggestions:
+        for s in merged_suggestions:
+            action = s.get("action", "hold")
+            sym = s.get("symbol", "")
+            cw = s.get("current_weight", 0)
+            sw = s.get("suggested_weight", 0)
+            reason = (s.get("reason", "") or "").replace("|", "｜")
+            lines.append(f"- {sym} {s.get('name', sym)}：{action} {cw:.1%} → {sw:.1%}｜{reason}")
+    else:
+        lines.append("- 无可操作标的（组合为空）。")
+    return "\n".join(lines)
+
+
 def _combine_risk_warnings(
     llm_warnings: list[dict],
     rule_warnings: list[dict],
+    llm_failed: bool = False,
+    data_all_empty: bool = False,
 ) -> list[dict]:
-    """合并 LLM 和规则风险警告，确保至少有一条。"""
+    """合并 LLM 和规则风险警告，确保至少有一条。
+
+    U2 R3 (factor-and-strategy-check-review 问题3 R3): 风险兜底诚实化——
+    LLM 超时或因子数据缺失时输出 warning 级降级标注，而非误导性的 info"正常"。
+    """
     combined = llm_warnings + rule_warnings
     if not combined:
-        combined = [{"type": "general", "severity": "info",
-                      "description": "当前组合风险指标正常，未触发自动警告。"}]
+        if data_all_empty:
+            combined = [{"type": "general", "severity": "warning",
+                         "description": "因子数据不可用，风险提示完整性受限（基于规则引擎部分数据）。"}]
+        elif llm_failed:
+            combined = [{"type": "general", "severity": "warning",
+                         "description": "LLM 分析超时，风险提示基于规则引擎部分数据，完整性受限。"}]
+        else:
+            combined = [{"type": "general", "severity": "info",
+                          "description": "当前组合风险指标正常，未触发自动警告。"}]
     return combined
 
 
@@ -969,6 +1115,9 @@ async def calculate_cumulative_pnl(
     total_cost_basis = 0.0
     total_market_value = 0.0
     has_real_data = False
+    # R65: 估算成本累计（估算占比 = estimated_cost_basis / total_cost_basis）
+    estimated_cost_basis = 0.0
+    est_cost_by_type = {"on_exchange": 0.0, "off_exchange": 0.0}
     
     for e in etfs:
         price, _ = price_map.get(e.symbol, (0.0, 0.0))
@@ -1001,18 +1150,52 @@ async def calculate_cumulative_pnl(
                 "last_trade_date": e.last_trade_date.isoformat() if e.last_trade_date else None,
                 "estimated": False,
             })
+        elif e.avg_cost is not None and total_capital > 0 and price > 0 and e.target_weight > 0:
+            # R64: 有 avg_cost 但无份额——按目标权重估算份额，成本用用户录入的 avg_cost
+            # （旧逻辑用 current price 当成本 → 累计盈亏恒为 0、成本价零贡献）
+            est_shares = (total_capital * e.target_weight) / price
+            cost_basis = est_shares * e.avg_cost
+            market_value = est_shares * price
+            cumulative_pnl = market_value - cost_basis
+            cumulative_pnl_pct = (cumulative_pnl / cost_basis * 100) if cost_basis > 0 else 0.0
+            has_real_data = True
+            estimated_cost_basis += cost_basis
+            pt = e.portfolio_type or ""
+            if pt in est_cost_by_type:
+                est_cost_by_type[pt] += cost_basis
+
+            total_cost_basis += cost_basis
+            total_market_value += market_value
+
+            holdings_pnl.append({
+                "symbol": e.symbol,
+                "name": e.name,
+                "short_name": e.short_name,
+                "asset_type": e.asset_type,
+                "portfolio_type": e.portfolio_type,
+                "shares_held": round(est_shares, 2),
+                "avg_cost": e.avg_cost,
+                "cost_basis": round(cost_basis, 2),
+                "current_price": price,
+                "market_value": round(market_value, 2),
+                "cumulative_pnl": round(cumulative_pnl, 2),
+                "cumulative_pnl_pct": round(cumulative_pnl_pct, 2),
+                "first_buy_date": getattr(e, 'first_buy_date', None).isoformat() if getattr(e, 'first_buy_date', None) else None,
+                "last_trade_date": getattr(e, 'last_trade_date', None).isoformat() if getattr(e, 'last_trade_date', None) else None,
+                "estimated": True,
+            })
         elif total_capital > 0 and price > 0 and e.target_weight > 0:
-            # No cost basis but capital provided — estimate from target allocation
+            # 无 avg_cost——旧估算逻辑（price 当成本，PnL 从 0 起，不置 has_real_data）
             est_shares = (total_capital * e.target_weight) / price
             # Use current price as estimated avg cost (cumulative PnL starts at 0)
             cost_basis = est_shares * price
             market_value = est_shares * price
             cumulative_pnl = 0.0
             cumulative_pnl_pct = 0.0
-            
+
             total_cost_basis += cost_basis
             total_market_value += market_value
-            
+
             holdings_pnl.append({
                 "symbol": e.symbol,
                 "name": e.name,
@@ -1030,13 +1213,19 @@ async def calculate_cumulative_pnl(
                 "last_trade_date": getattr(e, 'last_trade_date', None).isoformat() if getattr(e, 'last_trade_date', None) else None,
                 "estimated": True,
             })
+        elif e.avg_cost is not None:
+            # R67⑤: 有 avg_cost 但无法估算（capital/price/weight 任一为 0）→
+            # 跳过估算但仍计入 has_real_data（前端据此显示盈亏区而非"需输入成本"）
+            has_real_data = True
     
     total_cumulative_pnl = total_market_value - total_cost_basis
     total_cumulative_pnl_pct = (total_cumulative_pnl / total_cost_basis * 100) if total_cost_basis > 0 else 0.0
     
         # Build by_type summary: aggregate PnL by portfolio_type
-    by_type = {"on_exchange": {"cumulative_pnl": 0.0, "cumulative_pnl_pct": 0.0},
-               "off_exchange": {"cumulative_pnl": 0.0, "cumulative_pnl_pct": 0.0}}
+    by_type = {"on_exchange": {"cumulative_pnl": 0.0, "cumulative_pnl_pct": 0.0,
+                                "estimated_cost_basis": 0.0, "estimated_ratio": 0.0},
+               "off_exchange": {"cumulative_pnl": 0.0, "cumulative_pnl_pct": 0.0,
+                                "estimated_cost_basis": 0.0, "estimated_ratio": 0.0}}
     on_cost = 0.0
     off_cost = 0.0
     for h in holdings_pnl:
@@ -1051,6 +1240,11 @@ async def calculate_cumulative_pnl(
             off_cost += cost
     by_type["on_exchange"]["cumulative_pnl_pct"] = round((by_type["on_exchange"]["cumulative_pnl"] / on_cost * 100), 2) if on_cost > 0 else 0.0
     by_type["off_exchange"]["cumulative_pnl_pct"] = round((by_type["off_exchange"]["cumulative_pnl"] / off_cost * 100), 2) if off_cost > 0 else 0.0
+    # R65: by_type 估算占比（estimated_cost_basis / total_cost_basis）
+    by_type["on_exchange"]["estimated_cost_basis"] = round(est_cost_by_type["on_exchange"], 2)
+    by_type["on_exchange"]["estimated_ratio"] = round(est_cost_by_type["on_exchange"] / on_cost, 4) if on_cost > 0 else 0.0
+    by_type["off_exchange"]["estimated_cost_basis"] = round(est_cost_by_type["off_exchange"], 2)
+    by_type["off_exchange"]["estimated_ratio"] = round(est_cost_by_type["off_exchange"] / off_cost, 4) if off_cost > 0 else 0.0
 
     daily_series = []
     
@@ -1064,6 +1258,9 @@ async def calculate_cumulative_pnl(
             "max_drawdown": None,
             "sharpe_ratio": None,
             "has_cost_basis_data": has_real_data,
+            # R65: 估算占比——前端据此显示"含估算成本"提示
+            "estimated_cost_basis": round(estimated_cost_basis, 2),
+            "estimated_ratio": round(estimated_cost_basis / total_cost_basis, 4) if total_cost_basis > 0 else 0.0,
             "by_type": by_type,
         },
         "holdings": holdings_pnl,

@@ -110,6 +110,19 @@ class SourceHealth:
         self._emit_event(route, operation, target, False, duration_ms,
                          f"[HARD] {error_message}")
 
+    def record_miss(self, route: str = "", operation: str = "realtime",
+                    target: str = "", duration_ms: float = 0.0,
+                    error_message: str = "") -> None:
+        """U1/N03: 记录"未命中"事件（provider 正常但查无此标的/空结果）。
+
+        与 record_failure 的关键区别：**不增加 _failures、不触发熔断**——
+        数据源正常但无该标的数据 ≠ 源故障。否则 HK 标的先走 A 股路径查询
+        返回空会污染 sina/tencent 熔断状态（round3 N03 根因）。
+        """
+        self._emit_event(route, operation, target, False, duration_ms,
+                         f"[MISS] {error_message}")
+
+
     def set_on_event(self, cb: Optional[Callable]) -> None:
         self._on_event = cb
 
@@ -243,9 +256,11 @@ class SourceRegistry:
                     h.record_success(route=route_name, operation=operation,
                                      target=target, duration_ms=elapsed)
                     return data
-                h.record_failure(now, route=route_name, operation=operation,
-                                 target=target, duration_ms=elapsed,
-                                 error_message=f"empty result from {name}")
+                # U1/N03: 空结果计为"未命中"而非失败——数据源正常但查无此标的
+                # ≠ 源故障，不计入失败阈值（否则连续空结果会熔断正常源）
+                h.record_miss(route=route_name, operation=operation,
+                              target=target, duration_ms=elapsed,
+                              error_message=f"empty result from {name}")
             except Exception as e:  # noqa: BLE001 - 源级异常需隔离
                 elapsed = (time.perf_counter() - t0) * 1000
                 last_exc = e

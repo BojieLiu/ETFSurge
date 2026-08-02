@@ -150,20 +150,15 @@ import AppTabs from './ui/AppTabs.vue'
 import { adminApi } from '../api'
 import { useToastStore } from '../stores/toast'
 import logger from '../utils/logger'
+import { calcCost, modelCostFromBuckets } from '../utils/pricing'
 
 use([CanvasRenderer, LineChart, BarChart, TitleComponent, TooltipComponent, GridComponent, LegendComponent])
-
-// 官方定价 (2026-07):
-// deepseek-v4-flash: Input $0.14/1M tokens, Output $0.28/1M tokens (按 ¥7.2/USD 换算)
-// deepseek-v4-flash-free: OpenCode Zen 免费模型，费用为 ¥0
-const PRICING = {
-  'deepseek-v4-flash': { input: 0.001, output: 0.002, cache_hit: 0.00002 },
-  'deepseek-v4-flash-free': { input: 0, output: 0, note: 'OpenCode Zen 免费额度内' },
-}
 
 const loading = ref(true)
 const summary = ref({ total: {}, hourly: {}, daily: {}, by_function: {} })
 const timeseries = ref([])
+// R59: timeseries 窗口 total（与图表同一窗口/同一数据源）
+const windowTotal = ref({})
 const granularity = ref('day')
 const granularityTabs = [
   { value: 'day', label: '按日' },
@@ -183,6 +178,7 @@ async function fetchData() {
     ])
     summary.value = sumRes.data
     timeseries.value = tsRes.data.series || []
+    windowTotal.value = tsRes.data.total || {}
     failures.value = failRes.data.failures || []
   } catch (e) {
     logger.error('Failed to fetch token usage', e)
@@ -207,15 +203,20 @@ const functionList = computed(() => {
     .sort((a, b) => b.total_tokens - a.total_tokens)
 })
 
+// R57/R59: 顶部预估费用 = timeseries 窗口 total 逐模型计价（同一窗口、同一数据源）
 const estimatedCost = computed(() => {
-  const total = summary.value.total || {}
-  const promptTokens = total.prompt_tokens || 0
-  const completionTokens = total.completion_tokens || 0
-  // Determine model from summary data, default to deepseek-v4-flash
-  const modelName = summary.value.total?.model || 'deepseek-v4-flash'
-  const p = PRICING[modelName] || PRICING['deepseek-v4-flash']
-  const cost = (promptTokens / 1000) * p.input + (completionTokens / 1000) * p.output
-  return cost
+  const bm = windowTotal.value?.by_model
+  if (bm && Object.keys(bm).length) {
+    return modelCostFromBuckets(bm)
+  }
+  // 老后端兼容：无 by_model → 总 token × flash 单价
+  const total = windowTotal.value || {}
+  return calcCost(total.prompt_tokens || 0, total.completion_tokens || 0, 'deepseek-v4-flash')
+})
+
+// R58: 每日费用系列（series 逐日 by_model 计价）
+const costSeries = computed(() => {
+  return timeseries.value.map(s => modelCostFromBuckets(s.by_model))
 })
 
 const trendOption = computed(() => {
@@ -226,19 +227,29 @@ const trendOption = computed(() => {
   const maxTokens = Math.max(...series.map(s => s.total_tokens), 1)
 
   return {
-    tooltip: {
-      trigger: 'axis',
-      axisPointer: { type: 'cross' },
-    },
     legend: {
-      data: ['总 Token', '调用次数'],
+      data: ['总 Token', '调用次数', '费用(¥)'],
       top: 0,
     },
     grid: {
       left: '3%',
-      right: '4%',
+      right: '12%',
       bottom: '3%',
       containLabel: true,
+    },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'cross' },
+      // R58: 三行（Token / 调用 / 费用）
+      formatter: (params) => {
+        const list = Array.isArray(params) ? params : [params]
+        const first = list[0]
+        if (!first) return ''
+        const i = first.dataIndex
+        const calls = series[i]?.calls ?? 0
+        const cost = costSeries.value[i] ?? 0
+        return `${first.axisValue}<br/>总 Token: ${first.data}<br/>调用次数: ${calls}<br/>费用: ¥${cost.toFixed(2)}`
+      },
     },
     xAxis: {
       type: 'category',
@@ -264,6 +275,13 @@ const trendOption = computed(() => {
         name: '调用次数',
         min: 0,
       },
+      {
+        // R58: 第三轴——费用（¥），避免被 Token 量级压制
+        type: 'value',
+        name: '费用(¥)',
+        min: 0,
+        splitLine: { show: false },
+      },
     ],
     series: [
       {
@@ -287,8 +305,20 @@ const trendOption = computed(() => {
         symbol: 'circle',
         symbolSize: 6,
       },
+      {
+        // R58: 费用折线（绿色，第三轴）
+        name: '费用(¥)',
+        type: 'line',
+        yAxisIndex: 2,
+        data: costSeries.value,
+        lineStyle: { color: '#10b981', width: 2 },
+        itemStyle: { color: '#10b981' },
+        smooth: true,
+        symbol: 'circle',
+        symbolSize: 6,
+      },
     ],
-    color: ['#3b82f6', '#f59e0b'],
+    color: ['#3b82f6', '#f59e0b', '#10b981'],
   }
 })
 

@@ -240,10 +240,16 @@ async def generate_enhanced_design(
                 code = a["symbol"]
                 pool_entry = market_data_hub.get_by_code(code) if hasattr(market_data_hub, 'get_by_code') else {}
                 if pool_entry:
-                    dcp = pool_entry.get("change_pct") or pool_entry.get("daily_change_pct")
+                    # F3 R8: 显式 None 判断（旧 `or` 会丢弃 falsy 的 0.0——
+                    # 静态兜底条目 change_pct 曾为 0.0 → "—" 误显示）
+                    dcp = pool_entry.get("change_pct")
+                    if dcp is None:
+                        dcp = pool_entry.get("daily_change_pct")
                     if dcp is not None:
                         a["daily_change_pct"] = dcp
-                    price = pool_entry.get("price") or pool_entry.get("last_price")
+                    price = pool_entry.get("price")
+                    if price is None:
+                        price = pool_entry.get("last_price")
                     if price is not None:
                         a["price"] = price
                     fs = pool_entry.get("factor_score")
@@ -253,7 +259,10 @@ async def generate_enhanced_design(
                 if a.get("daily_change_pct") is None:
                     fm = factor_matrix.get(code, {}) if isinstance(factor_matrix, dict) else {}
                     if fm:
-                        dcp = fm.get("change_pct") or fm.get("daily_change_pct")
+                        # F3 R8: 显式 None 判断（同 pool_entry 路径）
+                        dcp = fm.get("change_pct")
+                        if dcp is None:
+                            dcp = fm.get("daily_change_pct")
                         if dcp is not None:
                             a["daily_change_pct"] = dcp
 
@@ -356,12 +365,16 @@ async def _compute_fund_flow(market_data_hub) -> dict:
       {"total_net_inflow": float, "positive_flow_count": int,
        "negative_flow_count": int, "total_symbols": int}
     """
-    # OPT-02: 熔断器检查，push2 不可用时直接返回空数据
+    # OPT-02: 熔断器检查——F17 R62: fund_flow 走 market_data_hub.get_fund_flow（akshare），
+    # 旧 gate 查 push2delay 健康是语义错位（fund_flow 被涨跌家数路径熔断 gate 误伤），
+    # 改为检查 akshare 源健康；push2delay gate 仅适用于直接走 HTTP 的路径
     from ..services.source_registry import registry as _source_registry
     import time
-    push2_h = _source_registry._health("push2delay.eastmoney.com")
-    if not push2_h.available(time.time()):
-        logger.info("[strategy_design] _compute_fund_flow: push2 circuit open, returning empty")
+    from ..core.market_context import EM_PUSH_HOST
+    _ = EM_PUSH_HOST  # 域名集中常量引用（避免散落）
+    akshare_h = _source_registry._health("akshare")
+    if not akshare_h.available(time.time()):
+        logger.info("[strategy_design] _compute_fund_flow: akshare circuit open, returning empty")
         return {"total_net_inflow": 0.0, "positive_flow_count": 0,
                 "negative_flow_count": 0, "total_symbols": 0}
 

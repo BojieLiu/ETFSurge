@@ -69,9 +69,8 @@ export function useDashboardData(capitalOn, capitalOff, activeTab) {
     } catch (e) {
       logger.warn('[Dashboard] fetchGlobalIndices failed:', e)
       globalIndices.value = {}
-    } finally {
-      fetchAttempted.value = true
     }
+    // R52: fetchAttempted 由 refreshAll 统一置位（移除各 fetch 的 finally 置位）
   }
 
   async function fetchAllocations() {
@@ -84,9 +83,8 @@ export function useDashboardData(capitalOn, capitalOff, activeTab) {
       allocationOff.value = offRes.data || { allocations: [], total_amount: 0 }
     } catch (e) {
       toast('获取分配数据失败', 'error')
-    } finally {
-      fetchAttempted.value = true
     }
+    // R52: fetchAttempted 由 refreshAll 统一置位
   }
 
   async function fetchPnl() {
@@ -99,9 +97,8 @@ export function useDashboardData(capitalOn, capitalOff, activeTab) {
       pnlOffData.value = offRes.data || { items: [] }
     } catch (e) {
       toast('获取盈亏数据失败', 'error')
-    } finally {
-      fetchAttempted.value = true
     }
+    // R52: fetchAttempted 由 refreshAll 统一置位
   }
 
   async function fetchPnlHistory(type = 'combined') {
@@ -121,8 +118,13 @@ export function useDashboardData(capitalOn, capitalOff, activeTab) {
     }
   }
 
+  // R52: fetchAttempted 只在所有数据源完成后置位——覆盖 refreshAll 与 onMounted 两条路径
   async function refreshAll() {
-    await Promise.all([fetchGlobalIndices(), fetchAllocations(), fetchPnl()])
+    try {
+      await Promise.all([fetchGlobalIndices(), fetchAllocations(), fetchPnl()])
+    } finally {
+      fetchAttempted.value = true
+    }
   }
 
   return {

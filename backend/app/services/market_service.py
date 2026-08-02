@@ -1055,9 +1055,25 @@ async def get_portfolio_realtime() -> list[dict[str, Any]]:
     return quotes
 
 
+# N07: 同步超时结果短缓存（3s TTL）——避免数据源慢时每次请求都重复等待
+_asset_realtime_cache: dict[tuple[str, str], tuple[float, dict | None]] = {}
+_ASSET_REALTIME_CACHE_TTL = 3.0
+
+
 async def get_asset_realtime(symbol: str, asset_type: str) -> dict | None:
     from ..fetchers.china_market import fetch_a_stock_realtime, fetch_hk_stock_realtime
 
+    # N07: 3s 短缓存（并发请求/重复刷新场景避免重复 8s 等待）
+    _ckey = (str(symbol).upper(), str(asset_type).upper())
+    _cached = _asset_realtime_cache.get(_ckey)
+    if _cached and (time.time() - _cached[0]) < _ASSET_REALTIME_CACHE_TTL:
+        return _cached[1]
+
+    # N07: _call 超时按 asset_type 分级——A 股 8s，HK/US 放宽到 15s
+    # （港股降级链更长，8s 常超时导致间歇 null）
+    _timeout = 8 if asset_type == "A" else 15
+
+    result: dict | None = None
     try:
         if asset_type == "US":
             data = await _route_us(symbol)
@@ -1065,24 +1081,34 @@ async def get_asset_realtime(symbol: str, asset_type: str) -> dict | None:
             # 用静态基座映射补全（自选 SPY 显示 "SPDR S&P 500 ETF"）
             if data and not data.get("name"):
                 data["name"] = _us_static_name(symbol)
-            return data
-        try:
-            all_a = await _call(fetch_a_stock_realtime, symbol)
-            for item in all_a or []:
-                if item["symbol"] == symbol:
-                    return item
-        except Exception:
-            pass
-        try:
-            all_hk = await _call(fetch_hk_stock_realtime, symbol)
+            result = data
+        # U1/N03: 按 asset_type 分流——HK 标的不再先跑 A 股路径。
+        # 旧逻辑先查 A 股再查 HK：A 股路径对非 A 股代码返回空被计为失败，
+        # 污染 sina/tencent 熔断状态（round2 U1 / round3 N03 根因）。
+        elif asset_type == "HK":
+            all_hk = await _call(fetch_hk_stock_realtime, symbol, timeout=_timeout)
             for item in all_hk or []:
                 if item["symbol"] == symbol:
-                    return item
-        except Exception:
-            pass
-        return None
+                    result = item
+                    break
+        else:
+            all_a = await _call(fetch_a_stock_realtime, symbol, timeout=_timeout)
+            for item in all_a or []:
+                if item["symbol"] == symbol:
+                    result = item
+                    break
+            # 非 A/HK/US 类型（或 A 股查无此标的）：保持旧行为尝试 HK 兜底
+            if result is None and asset_type != "A":
+                all_hk = await _call(fetch_hk_stock_realtime, symbol, timeout=_timeout)
+                for item in all_hk or []:
+                    if item["symbol"] == symbol:
+                        result = item
+                        break
     except Exception:
-        return None
+        pass
+
+    _asset_realtime_cache[_ckey] = (time.time(), result)
+    return result
 
 
 async def _route_us(symbol: str) -> dict | None:
@@ -1301,11 +1327,13 @@ async def get_watchlist(limit: int = 100, offset: int = 0) -> dict[str, Any]:
         )
         items = result.scalars().all()
 
-        # Enrich with realtime data
-        enriched = []
-        for item in items:
-            realtime = await get_asset_realtime(item.symbol, item.asset_type)
-            enriched.append({
+        # Enrich with realtime data (N07: 串行 → asyncio.gather 并发)
+        async def _enrich_one(item):
+            try:
+                realtime = await get_asset_realtime(item.symbol, item.asset_type)
+            except Exception:
+                realtime = None
+            return {
                 "id": item.id,
                 "symbol": item.symbol,
                 "name": item.name,
@@ -1314,7 +1342,9 @@ async def get_watchlist(limit: int = 100, offset: int = 0) -> dict[str, Any]:
                 "created_at": item.created_at.isoformat() if item.created_at else None,
                 "updated_at": item.updated_at.isoformat() if item.updated_at else None,
                 "realtime": realtime,
-            })
+            }
+
+        enriched = await asyncio.gather(*[_enrich_one(i) for i in items])
 
         return {
             "items": enriched,

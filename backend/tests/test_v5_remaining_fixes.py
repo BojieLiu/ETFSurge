@@ -19,7 +19,9 @@ from typing import Any
 @pytest.mark.asyncio
 async def test_get_asset_realtime_for_stock_returns_price():
     """Z22: get_asset_realtime should return price for stock symbols."""
-    from app.services.market_service import get_asset_realtime
+    from app.services.market_service import get_asset_realtime, _asset_realtime_cache
+
+    _asset_realtime_cache.clear()  # 测试隔离：清除 3s 短缓存，防全量运行时被前序测试污染
 
     mock_realtime = [{"symbol": "600519", "name": "贵州茅台", "price": 1500.0, "change_pct": 1.5, "volume": 1000000}]
     with patch("app.services.market_service._call", new_callable=AsyncMock) as mock_call:
@@ -30,13 +32,16 @@ async def test_get_asset_realtime_for_stock_returns_price():
         assert result["change_pct"] == 1.5
 
         from app.fetchers.china_market import fetch_a_stock_realtime
-        mock_call.assert_awaited_with(fetch_a_stock_realtime, "600519")
+        # N07: _call 带 timeout 关键字（"stock"≠"A" → 15s 放宽档）
+        mock_call.assert_awaited_with(fetch_a_stock_realtime, "600519", timeout=15)
 
 
 @pytest.mark.asyncio
 async def test_get_asset_realtime_for_a_asset():
     """Z22: get_asset_realtime should handle 'A' asset_type (same as stock)."""
-    from app.services.market_service import get_asset_realtime
+    from app.services.market_service import get_asset_realtime, _asset_realtime_cache
+
+    _asset_realtime_cache.clear()  # 测试隔离：同上
 
     mock_realtime = [{"symbol": "510300", "name": "沪深300ETF", "price": 3.8, "change_pct": 0.5}]
     with patch("app.services.market_service._call", new_callable=AsyncMock) as mock_call:

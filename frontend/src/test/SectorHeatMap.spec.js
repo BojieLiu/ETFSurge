@@ -53,6 +53,26 @@ describe('SectorHeatMap (F2-6/F2-7 §9.8)', () => {
     expect(wrapper.text()).toContain('↑5')
   })
 
+  it('renders sector heat with {items,total} contract shape (F6 R15)', async () => {
+    // 真实后端返回 {items, total}（hot-plates 契约 v2.0）——旧代码 Array.isArray
+    // 判定恒空 → 页面空白；F6 R14 双兼容后必须正常渲染
+    marketApi.getSectorHeat.mockResolvedValue({
+      data: {
+        items: [{
+          rank: 1, name: '半导体', heat_index: 13501.4, rank_change: 5, is_new: 0,
+        }],
+        total: 20,
+      },
+    })
+    const wrapper = mount(SectorHeatMap)
+    const tabs = wrapper.findAll('.tab-btn')
+    await tabs[1].trigger('click')
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+    expect(wrapper.text()).toContain('半导体')
+    expect(wrapper.text()).toContain('1.35万')
+  })
+
   it('renders stock row with price/sector/turnover/concept chips', async () => {
     marketApi.getStockHotRank.mockResolvedValue({
       data: [{

@@ -849,9 +849,11 @@ class FactorRegistry:
                         "total_mv": (
                             float((symbol_extra or {}).get(sym, {}).get("fund_scale", 0) or 0)
                             or float(rows[-1].get("total_mv", 0) or 0)
-                            or 100e9
+                            # F19 R70: 删除假市值 fallback（1000 亿）——全标的同值 →
+                            # z-score std≈0 → ln_mcap 无区分度 → 0 有效。缺数据返回 0，
+                            # _compute_ln_mcap 的 mv>0 守卫不会崩，gap 机制标注缺失。
                         ),
-                        "float_mv": float(rows[-1].get("float_mv", 80e9) or 80e9),
+                        "float_mv": float(rows[-1].get("float_mv", 0) or 0),
                         "close": closes[-60:],
                         "high": highs[-60:],
                         "low": lows[-60:],
@@ -978,13 +980,17 @@ class FactorRegistry:
         if _missing_nav:
             from ..core.async_utils import run_sync
             from ..services.market_data_hub import market_data_hub as _hub
-            for _sym in _missing_nav:
+            # U7/N08 R2: NAV 拉取并发（旧串行 for 循环）；fetch_fund_nav 已有
+            # 24h 缓存（U7 R3），并发 + 缓存使预热期累计 7.5s → ~1 次真实请求
+            async def _nav_one(_sym: str) -> None:
                 try:
                     _nav = await run_sync(_hub.get_fund_nav, _sym, timeout=6)
                     if _nav and _nav.get("nav"):
                         data.setdefault(_sym, {})["nav"] = _nav["nav"]
                 except Exception:
-                    continue
+                    pass
+
+            await asyncio.gather(*[_nav_one(s) for s in _missing_nav])
 
         # F3-5: 注入 sentiment 数据字段（panic_greed_diff 用 sentiment_index/history，
         # news_heat / news_direction 用 news_items）——此前只注入到 refresh_pool 的
@@ -999,6 +1005,10 @@ class FactorRegistry:
                     _d["sentiment_index"] = float(_sent["sentiment_index"])
                 if _sent.get("sentiment_history"):
                     _d["sentiment_history"] = _sent["sentiment_history"]
+                # F19 R69: 注入 advance_decline（stock_divergence 优先路径），
+                # 去掉脆弱的运行时 2s 兜底依赖（fetch_advance_decline）
+                if _sent.get("advance_ratio") is not None:
+                    _d["advance_decline"] = float(_sent["advance_ratio"])
                 if _news:
                     _d["news_items"] = _news[-30:]
         except Exception as _e:
@@ -1022,7 +1032,7 @@ class FactorRegistry:
         source_h.record_success(route="kline", operation="batch_fetch", target=",".join(symbols[:3]))
         _set_kline_cache(data)
 
-        # F3-4 步骤D: 记录 etf_specific 数据源缺口（factors/active no_data reason 区分用）
+        # F3-4 步骤D + F19 R70: 记录数据源缺口（factors/active no_data reason 区分用）
         self._data_source_gaps = {}
         for _code, _field in ET_SPECIFIC_GAP_CODES.items():
             if _field == "nav":
@@ -1040,6 +1050,14 @@ class FactorRegistry:
                 _missing = [s for s in symbols if (data.get(s) or {}).get("shares_change_20d") is None]
             if _missing:
                 self._data_source_gaps[_code] = _missing
+        # F19 R70: style.size.ln_mcap / ln_float_mcap 缺口（total_mv/float_mv 为空即缺失）——
+        # 删假市值后 ln_mcap 缺数据时必须落到"数据源未接入"而非模糊的"IC 未累积"
+        _mv_missing = [s for s in symbols if not (data.get(s) or {}).get("total_mv")]
+        if _mv_missing:
+            self._data_source_gaps["style.size.ln_mcap"] = _mv_missing
+        _float_mv_missing = [s for s in symbols if not (data.get(s) or {}).get("float_mv")]
+        if _float_mv_missing:
+            self._data_source_gaps["style.size.ln_float_mcap"] = _float_mv_missing
 
         return data
 
@@ -1215,26 +1233,41 @@ class FactorRegistry:
         try:
             if market_data is not None:
                 ic_batch = ic_tracker.compute_periodic_ic(result, market_data, window=1)
+                # U3/N06: 防全 0 覆盖——过滤 None 值；仅当新批次含任一有效 IC
+                # （abs(val) > 0.001）才覆盖 _last_ic_batch，否则保留旧值 + WARNING。
+                # 旧代码无条件覆盖：常量输入批次返回全 0 dict → 永久丢失有效 IC（Z06）。
                 if ic_batch:
-                    self._last_ic_batch = ic_batch
-                    # Z03: 记录样本数与最后计算时间（供 /factors/active 健康度展示）
-                    from datetime import datetime, timezone as _tz
-                    self._last_computed_at = datetime.now(_tz.utc).isoformat()
-                    self._sample_counts = {
-                        code: sum(
-                            1 for sym in result
-                            if abs((result[sym].get(code) or 0)) > 0.001
-                        )
-                        for code in ic_batch
+                    valid_entries = {
+                        code: val for code, val in ic_batch.items()
+                        if val is not None and not (isinstance(val, float) and val != val)
                     }
-                    # B3: IC threshold alerts
-                    for code, ic_val in ic_batch.items():
-                        definition = self._factors.get(code)
-                        if definition and 0 < abs(ic_val) < definition.ic_threshold:
-                            logger.warning(
-                                "[factor] IC below threshold for %s: ic=%.4f < threshold=%.4f",
-                                code, ic_val, definition.ic_threshold,
+                    has_signal = any(abs(v) > 0.001 for v in valid_entries.values())
+                    if has_signal:
+                        self._last_ic_batch = valid_entries
+                        # Z03: 记录样本数与最后计算时间（供 /factors/active 健康度展示）
+                        from datetime import datetime, timezone as _tz
+                        self._last_computed_at = datetime.now(_tz.utc).isoformat()
+                        self._sample_counts = {
+                            code: sum(
+                                1 for sym in result
+                                if abs((result[sym].get(code) or 0)) > 0.001
                             )
+                            for code in valid_entries
+                        }
+                        # B3: IC threshold alerts
+                        for code, ic_val in valid_entries.items():
+                            definition = self._factors.get(code)
+                            if definition and 0 < abs(ic_val) < definition.ic_threshold:
+                                logger.warning(
+                                    "[factor] IC below threshold for %s: ic=%.4f < threshold=%.4f",
+                                    code, ic_val, definition.ic_threshold,
+                                )
+                    else:
+                        logger.warning(
+                            "[factor] IC batch has no valid signal (all 0/None), "
+                            "keeping previous _last_ic_batch (%d entries)",
+                            len(self._last_ic_batch or {}),
+                        )
         except Exception as exc:
             logger.debug("[factor] IC batch compute failed: %s", exc)
 

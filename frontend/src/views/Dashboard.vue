@@ -69,6 +69,8 @@
             <p class="warmup-desc">{{ phaseDesc }}</p>
           </div>
         </div>
+        <!-- R54: 加载文案明确化，避免用户误以为卡死 -->
+        <p class="loading-hint">正在加载组合数据…</p>
         <div class="card skeleton-card">
           <Skeleton type="chart" height="260" />
         </div>
@@ -77,8 +79,9 @@
         </div>
       </div>
 
-      <!-- Empty State (fetch attempted, no allocations anywhere) -->
-      <div v-if="fetchAttempted && !allocationOn?.allocations?.length && !allocationOff?.allocations?.length" class="empty-state">
+      <!-- Empty State (fetch attempted, no allocations anywhere)
+           R53: 加 !loading 双保险——allocations 全空且仍在加载的中间态继续显示骨架而非空态 -->
+      <div v-if="fetchAttempted && !loading && !allocationOn?.allocations?.length && !allocationOff?.allocations?.length" class="empty-state">
         <div class="empty-icon" aria-hidden="true">📊</div>
         <h3 class="empty-title">暂无组合数据</h3>
         <p class="empty-description">请前往「组合与分析」添加 ETF</p>
@@ -181,7 +184,9 @@ onErrorCaptured((err) => {
 onMounted(async () => {
   // Start warmup polling (stops automatically when all_done or times out)
   startPolling()
-  await Promise.allSettled([fetchGlobalIndices(), fetchAllocations(), fetchPnl()])
+  // R52: 初始加载必须走 refreshAll（统一 fetchAttempted 置位），
+  // 旧 Promise.allSettled 路径永远不置位 → 骨架永久显示、空态无法出现
+  await refreshAll()
   fetchPnlHistory(activeTab.value)
   marketStore.connectWS((data) => {
     const indices = globalIndices.value
@@ -239,6 +244,12 @@ function onRetry() {
 }
 @media (max-width: 1024px) {
   .loading-grid { grid-template-columns: 1fr; }
+}
+.loading-hint {
+  grid-column: 1 / -1;
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
 }
 .skeleton-card {
   padding: var(--space-5);

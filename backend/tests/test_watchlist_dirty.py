@@ -260,5 +260,87 @@ class TestResolveSymbolToCode:
         assert code is None
 
 
+class TestR28R29AddWithName:
+    """F9 R28/R29: watchlist_add 优先用前端传入 name，realtime 空但不 422。"""
+
+    @pytest.mark.asyncio
+    async def test_add_with_provided_name_no_realtime(self, async_client, wl_db):
+        """R29: realtime 空但 name 已提供 → 200（不再 422），name 入库。"""
+        from app.services.market_data_hub import market_data_hub
+        original = market_data_hub.get_asset_realtime
+        market_data_hub.get_asset_realtime = AsyncMock(return_value=None)
+        try:
+            response = await async_client.post(
+                "/api/v1/market/watchlist",
+                json={"symbol": "159338", "name": "中证A500ETF", "asset_type": "A"},
+            )
+            assert response.status_code == 201, f"实际 {response.status_code}: {response.text}"
+            body = response.json()
+            assert body["name"] == "中证A500ETF"
+        finally:
+            market_data_hub.get_asset_realtime = original
+
+    @pytest.mark.asyncio
+    async def test_add_no_name_no_realtime_422(self, async_client, wl_db):
+        """R29: name 与 realtime 都拿不到 → 仍 422。"""
+        from app.services.market_data_hub import market_data_hub
+        original = market_data_hub.get_asset_realtime
+        market_data_hub.get_asset_realtime = AsyncMock(return_value=None)
+        try:
+            response = await async_client.post(
+                "/api/v1/market/watchlist",
+                json={"symbol": "159338", "asset_type": "A"},
+            )
+            assert response.status_code == 422
+        finally:
+            market_data_hub.get_asset_realtime = original
+
+    @pytest.mark.asyncio
+    async def test_add_realtime_name_fallback(self, async_client, wl_db):
+        """R29: 未传 name 时回退 realtime.name。"""
+        from app.services.market_data_hub import market_data_hub
+        original = market_data_hub.get_asset_realtime
+        market_data_hub.get_asset_realtime = AsyncMock(
+            return_value={"symbol": "510300", "name": "沪深300ETF", "price": 3.9}
+        )
+        try:
+            response = await async_client.post(
+                "/api/v1/market/watchlist",
+                json={"symbol": "510300", "asset_type": "A"},
+            )
+            assert response.status_code == 201
+            assert response.json()["name"] == "沪深300ETF"
+        finally:
+            market_data_hub.get_asset_realtime = original
+
+
+class TestR30NameAutoHeal:
+    """F9 R30: 合法代码但 name=脏数据（=symbol）时自动回填真实名称。"""
+
+    @pytest.mark.asyncio
+    async def test_list_heals_dirty_name(self, async_client, wl_db, mock_realtime):
+        """GET /watchlist: name==symbol（脏）→ 回填 realtime.name + DB UPDATE。"""
+        await _insert_watchlist(wl_db, "600519", "600519")  # 脏 name
+        response = await async_client.get("/api/v1/market/watchlist")
+        assert response.status_code == 200
+        item = response.json()["items"][0]
+        assert item["name"] == "贵州茅台"  # 显示真实名称
+
+        # DB 已回填
+        from app.models.search import Watchlist
+        from sqlalchemy import select
+        async with wl_db() as session:
+            row = (await session.execute(select(Watchlist))).scalar_one()
+            assert row.name == "贵州茅台"
+
+    @pytest.mark.asyncio
+    async def test_list_keeps_clean_name(self, async_client, wl_db, mock_realtime):
+        """R30: name 已是真实名称 → 不回填（保持）。"""
+        await _insert_watchlist(wl_db, "600519", "贵州茅台")  # 已干净
+        response = await async_client.get("/api/v1/market/watchlist")
+        assert response.status_code == 200
+        assert response.json()["items"][0]["name"] == "贵州茅台"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

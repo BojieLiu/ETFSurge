@@ -1,4 +1,5 @@
 import asyncio
+import asyncio
 import json
 import time
 from fastapi import APIRouter, Query, Depends
@@ -17,6 +18,8 @@ from ..analysis.llm import (
 )
 from ..analysis.registry import get_agent
 from ..services.market_data_hub import market_data_hub
+from ..services.llm_context import build_full_context
+from ..services.market_service import get_history
 
 from ..analysis.indicators import compute_all_indicators
 from ..services.market_data_hub import market_data_hub
@@ -49,6 +52,19 @@ def _sse_stream(agent_generator):
                 yield f"event: error\ndata: {json.dumps({'code': 'STREAM_ERROR', 'message': data})}\n\n"
     return StreamingResponse(
         event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+    )
+
+
+def _sse_error(message: str):
+    """R21: 结构化 SSE error 事件——前端 useLLMStream 抛错走 catch 显示。"""
+    return StreamingResponse(
+        iter([f"event: error\ndata: {json.dumps({'code': 'DATA_UNAVAILABLE', 'message': message})}\n\n"]),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -109,6 +125,8 @@ class SymbolAnalysisRequest(BaseModel):
     symbol: str
     name: str = ""
     asset_type: str = "A"
+    # F10 R35: 预设问题模板（技术面/操作建议等）——可选中个股后针对性分析
+    question: str = ""
 
 
 class NewsImpactRequest(BaseModel):
@@ -179,7 +197,16 @@ async def llm_report(req: LLMReportRequest):
     else:
         from app.core.market_context import resolve_market_context
         market_ctx = resolve_market_context(req.market)
-        market_data = [m for m in market_data if m.get("symbol", "") in market_ctx.major_symbols or m.get("asset_type", "") in ("index", "futures")]
+        # N04/U9: 只保留本市场 major_symbols + 本市场指数（旧 `asset_type in
+        # ("index","futures")` 无差别放行 A 股指数 → HK/US 报告混入 A 股数据）
+        market_data = [
+            m for m in market_data
+            if m.get("symbol", "") in market_ctx.major_symbols
+            or (
+                m.get("asset_type", "") in ("index", "futures")
+                and m.get("symbol", "") in market_ctx.index_symbols
+            )
+        ]
 
     indicators = {}
     for item in market_data[:5]:
@@ -206,7 +233,9 @@ async def llm_report(req: LLMReportRequest):
         if context:
             enriched_news = [{"title": "【市场背景】" + " | ".join(context)}] + all_news
     try:
-        report = await generate_market_report(indices, commodities, market_data, indicators, enriched_news, [])
+        report = await generate_market_report(
+            indices, commodities, market_data, indicators, enriched_news, [], market=req.market
+        )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM analysis failed: {e}")
     return {"report": report, "market_data": market_data[:10], "indices": indices[:10], "commodities": commodities[:6], "disclaimer": "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"}
@@ -289,8 +318,26 @@ async def llm_news_analysis():
 
 @router.post("/news-impact")
 async def news_impact(req: NewsImpactRequest):
-    """分析单条新闻对当前组合内各标的的具体影响。"""
-    result = await analyze_news_impact(req.news, req.portfolio)
+    """分析单条新闻对当前组合内各标的的具体影响。
+
+    R46: 路由层采集市场上下文（regime/指数/板块）注入 analyze_news_impact；
+    采集失败给空 dict（不阻断分析）。
+    """
+    market_context = {}
+    try:
+        market_context = await asyncio.wait_for(
+            build_full_context(
+                market_data_hub,
+                include_sentiment=False,
+                include_news=False,
+                include_fund_flow=False,
+                include_commodities=False,
+            ),
+            timeout=8,
+        )
+    except Exception:
+        logger.warning("[news-impact] market context 采集失败，使用空上下文", exc_info=True)
+    result = await analyze_news_impact(req.news, req.portfolio, market_context=market_context)
     result["disclaimer"] = "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
     return result
 
@@ -386,7 +433,16 @@ async def llm_report_stream(req: LLMReportRequest):
     if req.symbols:
         market_data = [m for m in market_data if m.get("symbol") in req.symbols]
     else:
-        market_data = [m for m in market_data if m.get("symbol", "") in market_ctx.major_symbols or m.get("asset_type", "") in ("index", "futures")]
+        # N04/U9: 只保留本市场 major_symbols + 本市场指数（旧 `asset_type in
+        # ("index","futures")` 无差别放行 A 股指数 → HK/US 报告混入 A 股数据）
+        market_data = [
+            m for m in market_data
+            if m.get("symbol", "") in market_ctx.major_symbols
+            or (
+                m.get("asset_type", "") in ("index", "futures")
+                and m.get("symbol", "") in market_ctx.index_symbols
+            )
+        ]
 
     indicators = {}
     for item in market_data[:5]:
@@ -501,9 +557,23 @@ def _normalize_sector_code(
         return code
     tables = list(industry or []) + list(concept or [])
     if name:
-        hit = next(
-            (s for s in tables if (s.get("sector_name") or "") == name), None
-        )
+        # R41: 名称匹配升级为"包含/前缀 + 大小写不敏感"——前端传板块中文名
+        # 可能带"板块"后缀或部分匹配（如"半导体"vs"半导体及元件"）
+        name_l = name.strip().lower()
+        hit = None
+        for s in tables:
+            sn = (s.get("sector_name") or "")
+            sn_l = sn.strip().lower()
+            if sn_l == name_l:
+                hit = s
+                break
+        if hit is None:
+            hit = next(
+                (s for s in tables
+                 if name_l and (name_l in (s.get("sector_name") or "").lower()
+                                or (s.get("sector_name") or "").lower() in name_l)),
+                None,
+            )
         if hit:
             return str(hit.get("sector_code") or code)
     if str(code).lower().startswith("cls"):
@@ -586,10 +656,18 @@ async def sector_analysis_stream(req: SectorAnalysisRequest):
 成分股：{json.dumps(constituents[:15], ensure_ascii=False)}
 资讯：{json.dumps(news[:10], ensure_ascii=False)}
 
-请输出：板块概况、资金面、技术面、催化因素、风险提示、核心标的推荐"""
+请输出：
+1. 板块概况
+2. 资金面
+3. 技术面
+4. 催化因素
+5. 风险提示
+6. 核心标的推荐"""
         
         agent = get_agent("sector_analysis")
         return _sse_stream(agent.run_stream(prompt))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM streaming failed: {e}")
 
@@ -603,6 +681,17 @@ async def symbol_analysis_stream(req: SymbolAnalysisRequest):
         asset_type = req.asset_type
         
         realtime = await market_data_hub.get_asset_realtime(symbol, asset_type) or {}
+        # R20: 中文名→代码兜底解析（前端漏解析时后端解析）——仅明显非代码输入才触发，
+        # 避免个股路径拉全量 akshare 列表的延迟
+        if not realtime and any(ch >= '\u4e00' and ch <= '\u9fff' for ch in symbol):
+            try:
+                from ..services.market_service import resolve_symbol_to_code
+                resolved = await resolve_symbol_to_code(symbol, asset_type)
+                if resolved:
+                    symbol = resolved
+                    realtime = await market_data_hub.get_asset_realtime(symbol, asset_type) or {}
+            except Exception:
+                pass
         hist = []
         try:
             hist = await asyncio.wait_for(get_history(symbol, asset_type, "daily"), timeout=30)
@@ -618,17 +707,31 @@ async def symbol_analysis_stream(req: SymbolAnalysisRequest):
             pass
         
         display_name = name or (realtime.get("name", "") if realtime else symbol)
-        
+
+        # F7 R21: 数据全空时不调 LLM——避免 LLM 用常识生成"伪分析"
+        # （用户明确要求：必要数据喂 LLM，非必要不报告缺失）
+        if not realtime and not hist:
+            return _sse_error("数据源暂不可用，请稍后重试")
+
+        # F10 R35: 预设问题模板——用户关注点拼入 prompt 做针对性分析
+        focus_line = f"\n用户关注：{req.question}" if (req.question or "").strip() else ""
         prompt = f"""深度分析标的 {display_name} ({symbol})：
 实时行情：{json.dumps(realtime, ensure_ascii=False)}
 技术指标：{json.dumps(indicators, ensure_ascii=False)}
 历史K线(最近30条)：{json.dumps(hist[-30:], ensure_ascii=False) if hist else '无'}
-资讯催化：{json.dumps(news[:10], ensure_ascii=False)}
+资讯催化：{json.dumps(news[:10], ensure_ascii=False)}{focus_line}
 
-请输出：基本面概览、技术面分析、资讯催化、风险提示、操作建议"""
+请输出：
+1. 基本面概览
+2. 技术面分析
+3. 资讯催化
+4. 风险提示
+5. 操作建议"""
         
         agent = get_agent("symbol_analysis")
         return _sse_stream(agent.run_stream(prompt))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM streaming failed: {e}")
 

@@ -37,7 +37,7 @@ async def test_news_impact_endpoint(monkeypatch):
     import app.routers.analysis as anmod
     from app.routers.analysis import NewsImpactRequest, news_impact
 
-    async def fake(news_item, holdings):
+    async def fake(news_item, holdings, market_context=None):
         return {"impact_scope": "scope", "affected_holdings": [], "summary": "ok"}
 
     monkeypatch.setattr(anmod, "analyze_news_impact", fake)

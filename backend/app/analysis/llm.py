@@ -681,10 +681,14 @@ def _build_market_overview(
     major_stocks: list[dict],
     news: list[dict],
     macro_news: list[dict],
+    market: str = "A",
 ) -> str:
-    prompt = """## 全市场概览
+    """N04/U9: 市场概览标题按 market 动态化（旧硬编码 "A股市场" → HK/US 报告误导）。"""
+    from app.core.market_context import resolve_market_context
+    market_title = resolve_market_context(market).title
+    prompt = f"""## 全市场概览
 
-### A股市场
+### {market_title}市场
 """
     a_stock_names = {"上证指数", "深证成指", "创业板指", "科创50", "沪深300", "上证50", "中证500", "中证1000"}
     for idx in indices:
@@ -731,8 +735,9 @@ async def generate_market_report(
     indicators: dict[str, Any],
     news: list[dict],
     macro_news: list[dict],
+    market: str = "A",
 ) -> str:
-    prompt = _build_report_prompt(indices, commodities, market_data, indicators, news, macro_news)
+    prompt = _build_report_prompt(indices, commodities, market_data, indicators, news, macro_news, market=market)
     return await get_agent("market_report").run(prompt)
 
 
@@ -897,6 +902,8 @@ async def generate_advice(
 - 用 `-` 符号列表组织内容
 - 保持回答精炼，控制在 600 字以内
 - 必须引用上述提供的具体数据，不要凭空編造数据
+- 如无必要不要使用表格，用 `-` 列表组织；如需表格必须使用标准 Markdown 表格语法（`| 列 | 列 |`）
+- 章节标题用 `##`/`###` 三级以内层级，不要用 `、` 编号（如"、四、风险提示"）
 """
 
     from ..analysis.registry import get_agent
@@ -940,10 +947,14 @@ async def generate_news_summary(title: str, content: str) -> str:
         return ""
 
 
-async def analyze_news_impact(news_item: dict, holdings: list[dict]) -> dict:
+async def analyze_news_impact(news_item: dict, holdings: list[dict], market_context: dict | None = None) -> dict:
     """分析单条新闻对当前组合内各标的的具体影响。
 
     Z32: 当组合为空时，改为分析对市场整体的影响。
+    R46: market_context（regime/指数/板块，由路由层采集注入）可选——传入时
+    在 prompt 中加入当前市场背景，使相关新闻能展开传导分析、无关新闻给出理由。
+    R48: 返回前用持仓白名单过滤 LLM 虚构标的并记 WARNING 日志。
+    R49: prompt 注入显式代码清单（affected_holdings 只能从清单中选）。
     返回 {"impact_scope": str, "affected_holdings": [...], "summary": str}。
     """
     has_holdings = bool(holdings and any(h.get('symbol') for h in holdings))
@@ -952,13 +963,49 @@ async def analyze_news_impact(news_item: dict, holdings: list[dict]) -> dict:
         f"({h.get('asset_type', '')}) 目标权重 {h.get('target_weight', '')}"
         for h in holdings
     ) if has_holdings else "（暂未持仓）"
+    # R49: 显式代码清单——LLM 只能从清单中选 affected_holdings.symbol
+    code_list = ", ".join(
+        str(h.get("symbol", "")).strip() for h in holdings if h.get("symbol")
+    ) if has_holdings else ""
+
+    # R46: 市场背景段（regime / 指数 / 板块热度），由路由层采集注入
+    background = ""
+    if market_context:
+        parts = []
+        # regime 可能是 dict {regime, confidence} 或 str（build_full_context 返回）
+        regime_raw = market_context.get("market_regime") or ""
+        regime = regime_raw.get("regime", "") if isinstance(regime_raw, dict) else str(regime_raw)
+        if regime:
+            parts.append(f"当前市场状态：{regime}")
+        indices = market_context.get("indices") or []
+        if indices:
+            idx_txt = "；".join(
+                f"{i.get('name', i.get('symbol', ''))} {i.get('price', '')}"
+                for i in indices[:6] if isinstance(i, dict)
+            )
+            if idx_txt:
+                parts.append(f"主要指数：{idx_txt}")
+        sectors = market_context.get("sectors") or []
+        if sectors:
+            hot = sorted(
+                (s for s in sectors if isinstance(s, dict) and s.get("change_pct") is not None),
+                key=lambda s: abs(s.get("change_pct") or 0), reverse=True,
+            )[:5]
+            if hot:
+                parts.append("板块热度："
+                             + "；".join(f"{s.get('name', '')} {s.get('change_pct', '')}%" for s in hot))
+        if parts:
+            background = "当前市场背景：\n" + "\n".join(parts) + "\n\n"
 
     if has_holdings:
         prompt = f"""新闻标题：{news_item.get('title', '')}
 新闻内容：{news_item.get('content', '')}
 
-当前组合持仓：
+{background}当前组合持仓：
 {holdings_text}
+
+当前组合持仓代码：{code_list}
+（affected_holdings 中的 symbol 必须严格从上述清单中选择，不得新增任何代码）
 
 请分析这条新闻对组合的影响，重点回答：
 (a) 影响范围（市场/板块）；
@@ -990,9 +1037,24 @@ async def analyze_news_impact(news_item: dict, holdings: list[dict]) -> dict:
         logger.warning("[news_impact] LLM analysis failed: %s", e)
         data = {}
 
+    # R48: 持仓白名单过滤——仅保留传入 holdings 代码集内的标的，LLM 虚构标的丢弃
+    affected = (data.get("affected_holdings") or []) if isinstance(data, dict) else []
+    if has_holdings and affected:
+        whitelist = {str(h.get("symbol", "")).strip() for h in holdings if h.get("symbol")}
+        filtered = [a for a in affected if str(a.get("symbol", "")).strip() in whitelist]
+        dropped = len(affected) - len(filtered)
+        if dropped:
+            fake_symbols = [a.get("symbol") for a in affected
+                            if str(a.get("symbol", "")).strip() not in whitelist]
+            logger.warning(
+                "[news_impact] LLM 虚构 %d 个持仓标的已过滤（不在持仓白名单）: %s",
+                dropped, fake_symbols,
+            )
+        affected = filtered
+
     return {
         "impact_scope": data.get("impact_scope", "") if isinstance(data, dict) else "",
-        "affected_holdings": (data.get("affected_holdings") or []) if isinstance(data, dict) else [],
+        "affected_holdings": affected,
         "summary": data.get("summary", "") if isinstance(data, dict) else "",
     }
 
@@ -1004,8 +1066,9 @@ def _build_report_prompt(
     indicators: dict[str, Any],
     news: list[dict],
     macro_news: list[dict],
+    market: str = "A",
 ) -> str:
-    overview = _build_market_overview(indices, commodities, market_data, news, macro_news)
+    overview = _build_market_overview(indices, commodities, market_data, news, macro_news, market=market)
 
     prompt = f"""{overview}
 
@@ -1013,30 +1076,30 @@ def _build_report_prompt(
 
 报告须使用 Markdown，包含以下 6 个一级章节（以 `##` 作为章节标题），章节之间用 `---` 分隔：
 
-## 0. 市场全景速览
+## 1. 市场全景速览
 - 一句话总结当前市场核心状态（趋势延续 / 横盘消化 / 趋势终结）
 - 关键数据速览：主要指数涨跌、成交量变化、涨跌家数比
 - 核心矛盾一句话概括
 
-## 1. 市场阶段与核心矛盾
+## 2. 市场阶段与核心矛盾
 - 市场阶段：趋势延续 / 横盘消化 / 趋势终结（须给出明确判断与依据）
 - 风格特征：单一主线 / 风格扩散 / 均衡
 - 资金行为：增量与存量资金在买什么、卖什么
 - 核心矛盾：当前最大的不确定性来源
 
-## 2. 宏观流动性与政策解读
+## 3. 宏观流动性与政策解读
 - 国内流动性：货币与利率信号
 - 海外流动性与地缘：美债、美元、油价、地缘冲突的传导
 - 政策信号：有无稳增长或行业政策出台
 
-## 3. 板块与风格轮动信号
+## 4. 板块与风格轮动信号
 - 强势板块 / 弱势板块及幅度
 - 风格切换迹象（价值 / 成长、大 / 小盘）
 
-## 4. 核心风险提示
+## 5. 核心风险提示
 - 按风险等级列出 2~4 条关键风险，并给出可观测的触发条件
 
-## 5. 操作建议
+## 6. 操作建议
 - 当前仓位建议（基于市态和风险敞口）
 - 关注方向：最看好的 1-2 个板块/风格方向
 - 规避方向：需要规避的 1-2 个板块/风格方向
@@ -1480,15 +1543,20 @@ def _build_design_report_prompt(
         _d -= _td(days=(_d.weekday() - 4)) if _d.weekday() >= 5 else _td(days=0)  # 跳到周五
         data_date_label = f"{_d.month}月{_d.day}日"
 
-    def _fmt_pct(v):
+    def _fmt_pct(v, as_percent: bool = False):
+        """N02: 显式单位参数，不再用 abs>1 启发式（round3 N02：指数 0.72 被误判为小数
+        比例 → ×100=72%）。
+
+        - as_percent=True: v 已是百分数值（0.72 = 0.72%），直接显示。
+        - as_percent=False（默认）: v 是小数比例（0.08 = 8%），×100。
+
+        数据管道约定：change_pct 类字段（指数/板块/benchmark）统一为百分数值；
+        expected_return/max_drawdown 等收益类字段为小数比例。
+        """
         if v is None:
             return "—"
-        if isinstance(v, float):
-            # P3.5: 如果已是原始百分比（abs > 1），不再 ×100
-            # 指数数据 (change_pct=-5.4) 和 benchmark 数据 (change_pct=-0.054) 单位不一致
-            if abs(v) > 1:
-                return f"{v:.1f}%"
-            return f"{v * 100:.1f}%"
+        if isinstance(v, (int, float)):
+            return f"{v:.1f}%" if as_percent else f"{v * 100:.1f}%"
         return str(v)
 
     # ── P5-a: 注入预生成的方案表格（引擎直接渲染，确保与方案卡片一致） ──
@@ -1511,6 +1579,10 @@ def _build_design_report_prompt(
             plan_tables,
             "",
             "---",
+            "",
+            # N02: prompt 防御——指数/板块涨跌幅已是百分数值，禁止 LLM 再 ×100 换算
+            "注意：本文档中「市场行情快照」「行业板块动量」的涨跌幅字段已是百分数值"
+            "（如 0.72 表示 0.72%），引用时直接使用，**禁止**再乘以 100 换算。",
             "",
         ]
         if _factor_table:
@@ -1536,7 +1608,7 @@ def _build_design_report_prompt(
         lines.append("### 市场行情快照（实时指数）")
         for idx in index_realtime:
             chg = idx.get("change_pct")
-            chg_txt = _fmt_pct(chg) if chg is not None else "—"
+            chg_txt = _fmt_pct(chg, as_percent=True) if chg is not None else "—"
             lines.append(
                 f"- {idx.get('name', idx.get('symbol', ''))}（{idx.get('symbol', '')}）: "
                 f"点位 {idx.get('price', '—')}，今日 {chg_txt}"
@@ -1558,7 +1630,7 @@ def _build_design_report_prompt(
         lines.append("### 核心指标股")
         for s in benchmark_stocks[:5]:
             lines.append(f"- {s.get('name', '')}({s.get('symbol', '')}): "
-                         f"涨跌{_fmt_pct(s.get('change_pct', 0))}, "
+                         f"涨跌{_fmt_pct(s.get('change_pct', 0), as_percent=True)}, "
                          f"信号: {s.get('signal', '')}")
         lines.append("")
 
@@ -1570,7 +1642,7 @@ def _build_design_report_prompt(
             rank = item.get("rank") or item.get("rank_current")
             total = item.get("total") or ""
             chg = item.get("change_pct")
-            chg_txt = _fmt_pct(chg) if chg is not None else ""
+            chg_txt = _fmt_pct(chg, as_percent=True) if chg is not None else ""
             rank_txt = f"第{rank}/{total}名" if rank is not None else ""
             lines.append(f"- {name}: {rank_txt} 当日{chg_txt}".rstrip())
         lines.append("")
@@ -1582,7 +1654,7 @@ def _build_design_report_prompt(
         for item in concept_items[:10]:
             name = item.get("sector_name") or item.get("sector") or ""
             chg = item.get("change_pct")
-            chg_txt = _fmt_pct(chg) if chg is not None else ""
+            chg_txt = _fmt_pct(chg, as_percent=True) if chg is not None else ""
             flow = item.get("main_inflow", "")
             flow_txt = f"  主力净流入: {flow}" if flow else ""
             lines.append(f"- {name}: {chg_txt}{flow_txt}")

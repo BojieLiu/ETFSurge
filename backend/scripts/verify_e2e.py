@@ -723,6 +723,25 @@ def section_analysis():
             check(label, False, str(e))
 
 
+    # F6 R16: 板块热度契约断言——/sectors/heat 返回 {items,total}（hot-plates 契约 v2.0），
+    # 断言 items 键存在且非空（旧检查只在 section_api_5xx_check 查 HTTP 200，防不住空数据）
+    try:
+        r = requests.get(f"{BASE}/api/v1/market/sectors/heat?limit=5", timeout=15)
+        check("GET /sectors/heat -> 200", r.status_code == 200, f"HTTP {r.status_code}")
+        if r.status_code == 200:
+            data = r.json()
+            if isinstance(data, dict):
+                items = data.get("items")
+                check("sectors/heat 含 items 键", items is not None)
+                check("sectors/heat items 非空", isinstance(items, list) and len(items) >= 1,
+                      f"{len(items) if isinstance(items, list) else 'non-list'} 条")
+            else:
+                check("sectors/heat 契约结构 {items,total}", False,
+                      f"返回 {type(data).__name__}（应为 dict）")
+    except Exception as e:
+        check("GET /sectors/heat", False, str(e))
+
+
 def check_sector_data():
     """板块/概念数据端点验证（Phase 6.1.8）。"""
     section("板块数据")
@@ -1005,6 +1024,19 @@ def section_admin():
                 healthy = sum(1 for v in sources
                               if isinstance(v, dict) and v.get("available", False))
                 check("数据源健康", healthy > 0, f"{healthy}/{len(sources)} 健康")
+                # S4: 内容级断言——threadpool_/非数据源探针不得混入数据源列表（F17 R60 回归防线）
+                # 数据源名必须匹配已知白名单模式（行情/资讯/LLM/因子/搜索等真实源）
+                import re as _re
+                bogus = [v.get("name", "?") for v in sources
+                         if isinstance(v, dict) and (str(v.get("name", "")).startswith("threadpool_") or
+                                                     str(v.get("name", "")).startswith("probe_"))]
+                check("数据源列表无 threadpool_/probe_ 探针", not bogus,
+                      f"混入: {bogus[:4]}" if bogus else "全部为真实数据源")
+                non_source = [v.get("name", "?") for v in sources
+                              if isinstance(v, dict) and v.get("kind") not in (None, "source") and
+                              str(v.get("name", "")).startswith("threadpool_")]
+                if non_source:
+                    check("threadpool 探针已标记非 source", False, f"kind 异常: {non_source[:4]}")
             else:
                 check("数据源健康端点", False, "响应结构非预期（非列表）")
         else:
@@ -1391,6 +1423,20 @@ def section_db_integrity():
                 check(f"{label}（{table}={n}）", n >= min_rows, f"actual={n}")
             except sqlite3.Error as e:
                 check(f"{label}", False, str(e))
+        # S4: 成本字段一致性（F18 R64/R65 回归防线）——有 avg_cost 无 shares_held 的持仓
+        # 属于"半成本状态"，前端需显示估算提示，不得静默按真实成本计算。
+        try:
+            cols = [r[1] for r in cur.execute("PRAGMA table_info(portfolio_etfs)").fetchall()]
+            if "avg_cost" in cols and "shares_held" in cols:
+                half_cost = cur.execute(
+                    "SELECT COUNT(*) FROM portfolio_etfs WHERE avg_cost IS NOT NULL "
+                    "AND avg_cost != 0 AND (shares_held IS NULL OR shares_held = 0)"
+                ).fetchone()[0]
+                check("无孤立 avg_cost（有成本必有份额）", half_cost == 0,
+                      f"半成本持仓 {half_cost} 条（前端按估算处理，勿静默当真实）"
+                      if half_cost else "成本字段成对出现")
+        except sqlite3.Error as e:
+            check("成本字段一致性", False, str(e))
         conn.close()
     except Exception as e:
         check("DB 完整性检查", False, str(e))
@@ -1457,8 +1503,9 @@ def section_factor_thresholds():
         except Exception:
             _ic_ready = False
         if not _ic_ready:
-            check("IC batch 就绪（数值门禁前提）", True,
-                  "IC 未累积（服务冷启动/数据源冷却），门禁待数据就绪后生效", skip=True)
+            # S3: 数据源故障不得静默 SKIP——门禁必须 FAIL（F20 薄弱点 3）
+            check("IC batch 就绪（数值门禁前提）", False,
+                  "IC 未累积（服务冷启动/数据源冷却）——数据源故障告警，禁止静默绿")
         else:
             for cname, max_nd in (("etf_specific", 2), ("sentiment", 0)):
                 c = cats.get(cname)
@@ -1468,6 +1515,15 @@ def section_factor_thresholds():
                 no_data = [f for f in c.get("factors", []) if f.get("status") == "no_data"]
                 check(f"{cname} no_data ≤ {max_nd}", len(no_data) <= max_nd,
                       f"no_data={len(no_data)}: {[f.get('code') for f in no_data][:4]}")
+            # S4: 因子状态分布——ln_mcap 不允许 0 有效（数据源缺失必须显式标注）
+            ln = [f for f in data.get("categories", [])
+                  for f in f.get("factors", []) if f.get("code") == "ln_mcap"]
+            if ln:
+                f0 = ln[0]
+                active_n = (f0.get("active") or 0) if isinstance(f0.get("active"), (int, float)) else None
+                if active_n is not None:
+                    check("ln_mcap 有效样本 > 0", active_n > 0,
+                          f"active={active_n}（0 有效=数据源缺失未标注）")
         # F3-4 步骤D 验收: no_data reason 必须标注缺失字段/IC 未累积（禁止统一「尚未计算 IC」）
         bad_reason = []
         for c in data.get("categories", []):
@@ -1512,6 +1568,40 @@ def section_design_quality_gate():
         check("方案质量门禁 5 项清单", not issues, "; ".join(issues[:3]) if issues else "全部通过")
         differ = check_strategies_differ(strategies)
         check("三套方案非机械缩放", differ, "层权重结构趋同" if not differ else "")
+        # M7: 核心层数量 ∈ [3,5]（含强制 510300/560600）且含宽基锚（中证A500/沪深300 之一）
+        for s in strategies:
+            # 兼容两种结构：engine 输出 allocations / 持久化详情用 etfs
+            allocs = s.get("allocations") or s.get("etfs") or []
+            core = [a for a in allocs if a.get("layer") == "core"]
+            n_core = len(core)
+            check(f"M7 {s.get('id', s.get('name', '?'))} 核心层 [{n_core}] ∈ [3,5]",
+                  3 <= n_core <= 5, f"core={n_core}")
+            core_syms = {a.get("symbol") for a in core}
+            core_names = " ".join((a.get("name") or "") for a in core)
+            has_anchor = bool(core_syms & {"510300", "560600", "159338"}) or "中证A500" in core_names or "沪深300" in core_names
+            check(f"M7 {s.get('id', s.get('name', '?'))} 含宽基锚(中证A500/沪深300)",
+                  has_anchor, f"core={sorted(core_syms)[:5]}")
+            # M7: 单只核心权重 ≥ 5%（engine 用 target_weight，持久化用 weight）
+            weak = [a for a in core if (a.get("target_weight") or a.get("weight") or 0) < 0.05]
+            check(f"M7 {s.get('id', s.get('name', '?'))} 核心单只权重 ≥5%",
+                  not weak, f"弱权重: {[a.get('symbol') for a in weak]}")
+        # F3 R10/R13: 报告文本质量断言——标题无重复 + 今日涨跌列非空 + 表格行数=标的数
+        import re as _re
+        report_text = detail.get("design_text") or detail.get("report_text") or ""
+        if report_text:
+            # R10: 一级章节标题无重复（LLM 拼接/前缀残留导致的重复标题）
+            heads = _re.findall(r"^## .+$", report_text, flags=_re.M)
+            dup = len(heads) - len(set(heads))
+            check("R10 报告标题无重复", dup == 0, f"重复标题 {dup} 个: {sorted(set(heads) - set(heads))[:3]}" if dup else "全部唯一")
+            # R13: 表格行数 = 方案标的数（每方案表格行数与 strategies 标的数一致）
+            table_rows = _re.findall(r"^\| 核心 \|", report_text, flags=_re.M)
+            alloc_total = sum(len(s.get("allocations") or s.get("etfs") or []) for s in strategies)
+            check("R13 表格行数=标的数", len(table_rows) >= len(strategies),
+                  f"表格行 {len(table_rows)} vs 方案 {len(strategies)}" if len(table_rows) < len(strategies) else f"{len(table_rows)} 行 × {len(strategies)} 方案")
+            # R10: 今日涨跌列非空——至少 1 只标的有真实涨跌幅（非 "—"）
+            change_cells = _re.findall(r"\| [+-]?[0-9.]+% \|", report_text)
+            check("R10 今日涨跌列非空", len(change_cells) >= 1,
+                  "无真实涨跌幅单元格" if not change_cells else f"{len(change_cells)} 个涨跌单元格")
     except Exception as e:
         check("方案质量门禁", False, str(e))
 
@@ -1522,6 +1612,12 @@ def print_summary():
     print(f"结果: {PASS}/{total} 通过", "ALL PASS" if FAIL == 0 else "HAS FAILURES")
     if SKIP:
         print(f"      {SKIP} 项跳过")
+    # S3: skip 超过阈值即 FAIL——防止门禁自我豁免蔓延（F20 薄弱点 3）。
+    # 白名单化后的合理 skip 仅 2 类：nginx 未运行 / websockets 未装（外加设计质量条件 skip 至多 1），
+    # 阈值 3 之上出现任何 skip 都视为异常豁免。
+    if SKIP > 3:
+        print(f"      [S3] SKIP={SKIP} 超过阈值 3 → 门禁 FAIL（防自我豁免蔓延）")
+        FAIL += 1
     if FAIL > 0:
         print(f"      {FAIL} 项失败")
         sys.exit(1)

@@ -376,7 +376,16 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
         await _notify(task_id, "quick_ready", progress=65, stage="保存方案")
 
         plan_tables = _build_plan_tables(strategies)
-        design_text = "# ETF 组合设计方案\n\n## 一、三种方案详解\n\n" + plan_tables
+        # F3 R1: 删除硬编码重复标题前缀——plan_tables 自带 "## 一、三种方案详解"，
+        # 旧代码前缀拼接后产生 2 个重复标题（task_manager Stage 4 路径不经过
+        # _validate_report_consistency → 从未去重）
+        design_text = "# ETF 组合设计方案\n" + plan_tables
+        # F3 R2: 写库前统一去重（所有写库路径都经过去重，不只 compose_and_push_report）
+        try:
+            from .design_report import _dedup_headers
+            design_text = _dedup_headers(design_text)
+        except Exception:
+            pass
 
         try:
             async with async_session() as db:

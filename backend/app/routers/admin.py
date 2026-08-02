@@ -29,21 +29,13 @@ async def get_token_timeseries(
 ):
     """返回 DeepSeek token 按小时/天/月的时间序列，供前端图表展示。"""
     if granularity == "month":
-        return {
-            "granularity": "month",
-            "series": await token_store.timeseries(days=months, granularity="month"),
-        }
+        ts = await token_store.timeseries(days=months, granularity="month")
+        return {"granularity": "month", "series": ts["series"], "total": ts["total"]}
     if granularity == "hour":
-        return {
-            "granularity": "hour",
-            "hours": hours,
-            "series": await token_store.timeseries(granularity="hour", hours=hours),
-        }
-    return {
-        "granularity": "day",
-        "days": days,
-        "series": await token_store.timeseries(days=days, granularity="day"),
-    }
+        ts = await token_store.timeseries(granularity="hour", hours=hours)
+        return {"granularity": "hour", "hours": hours, "series": ts["series"], "total": ts["total"]}
+    ts = await token_store.timeseries(days=days, granularity="day")
+    return {"granularity": "day", "days": days, "series": ts["series"], "total": ts["total"]}
 
 
 @router.get("/token-usage/failures")
@@ -65,6 +57,10 @@ async def get_sources_health():
     now = time.time()
     result = []
     for name, h in states.items():
+        # F17 R60: 过滤非数据源健康项（threadpool_* 探针）——线程池健康仍保留
+        # 探测与告警，但不作为"数据源"展示在前端数据源页
+        if name.startswith("threadpool_"):
+            continue
         import threading
         # Access health state via thread-safe snapshot
         with h._lock:

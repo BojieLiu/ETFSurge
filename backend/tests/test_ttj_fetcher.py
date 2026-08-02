@@ -66,11 +66,33 @@ class TestFetchEtfIopv:
         h.record_failure.assert_not_called()
 
 
-# ── fetch_etf_shares (stub) ─────────────────────────────────────────────
+# ── fetch_etf_shares (F17 R61 修复后走真实 push2delay API) ──────────────
 
 
 class TestFetchEtfShares:
     def test_stub_returns_none(self):
-        """Share fetcher stub currently returns None."""
-        result = fetch_etf_shares("510050")
+        """F17 R61: fetch_etf_shares 修复后不再因 import 缺失静默返回 None——
+        改为 mock 网络验证解析逻辑（真实网络不依赖）。"""
+        import urllib.request
+        from unittest.mock import MagicMock
+
+        fake_resp = MagicMock()
+        fake_resp.read.return_value = (
+            b'{"data": {"diff": [{"f85": 1234567.0}]}}'
+        )
+
+        with patch.object(urllib.request, "urlopen", return_value=fake_resp) as mock_open:
+            result = fetch_etf_shares("510050")
+
+        assert result == {"shares": 1234567.0, "shares_date": "latest"}
+        assert mock_open.call_count == 1
+        # 请求 URL 使用集中常量域名（F17 R61）
+        req = mock_open.call_args[0][0]
+        assert "push2delay.eastmoney.com" in req.full_url, req.full_url
+
+    def test_fetch_fails_returns_none(self):
+        """F17 R61: 网络失败/解析失败仍返回 None（fallback 路径保持）。"""
+        import urllib.request
+        with patch.object(urllib.request, "urlopen", side_effect=RuntimeError("down")):
+            result = fetch_etf_shares("510050")
         assert result is None

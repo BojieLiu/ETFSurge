@@ -145,8 +145,9 @@ export const useMarketStore = defineStore('market', () => {
     }
   }
 
-  async function addWatchlist(symbol, assetType = 'A', notes = '') {
-    const res = await marketApi.addWatchlist({ symbol, asset_type: assetType, notes })
+  async function addWatchlist(symbol, assetType = 'A', notes = '', name = '') {
+    // R28: 携带前端搜索到的真实名称——后端 realtime 失败时用 name 入库（不 422）
+    const res = await marketApi.addWatchlist({ symbol, asset_type: assetType, notes, name })
     await fetchWatchlist()
     return res.data
   }

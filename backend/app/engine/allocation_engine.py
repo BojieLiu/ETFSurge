@@ -72,10 +72,20 @@ def _normalize_segment(concept: str) -> str:
         "科创新能源" → "科创"
         "沪深300" → "沪深300"
         "中证A500" → "中证A500"
+        # M3: 同一指数家族归一化（风格/增强切片 → 基准指数）
+        "中证500价值" → "中证500"
+        "中证500成长" → "中证500"
+        "中证500增强" → "中证500"
+        "沪深300增强" → "沪深300"
     """
     for prefix in ["科创", "半导体", "芯片", "军工", "新能源"]:
         if concept.startswith(prefix):
             return prefix
+    # M3: 中证500/沪深300 家族归一化——同指数不同风格切片视为同一板块，
+    # 否则 _balance_by_industry 按 segment 分组无法合并 → 家族霸榜/伪分散
+    for base in ("中证500", "沪深300"):
+        if concept.startswith(base) and concept != base:
+            return base
     return concept
 
 
@@ -512,6 +522,10 @@ def allocate(
         # ── Core layer ──
         # Penalize symbols already used in prior strategies (P1)
         _penalize = _used_symbols_for_overlap.copy() if _used_symbols_for_overlap else set()
+        # M4: 核心层实际数量 = layer_count - 该层强制标的数（强制 510300/560600 在
+        # _select_and_weight 内额外叠加，导致核心层 5-6 只、单只权重被摊薄）。
+        mandatory_in_core = sum(1 for c in core_candidates if c.get("symbol") in MANDATORY_CODES)
+        core_max_count = max(int(meta.get("layer_count", {}).get("core", 4)) - mandatory_in_core, 1)
         core_alloc = _select_and_weight(
             [c for c in core_candidates if _dedup_segment(c)],
             factor_matrix,
@@ -519,10 +533,48 @@ def allocate(
             layer="core",
             regime=regime,
             strategy=profile_key,
-            max_count=meta.get("layer_count", {}).get("core", 4),
+            max_count=core_max_count,
             penalize_symbols=_penalize,
         )
         allocations.extend(core_alloc)
+
+        # U11 R1: 后续方案 core 与已用标的重叠过多（全部 ⊂ 前序已用）时，
+        # 从 core_candidates 未用者强制引入 ≥1 只新宽基（高分宽基只有 4-5 只，
+        # 纯靠 -1.5 惩罚无法避免三方案 core 重复）
+        if _used_symbols_for_overlap and core_alloc:
+            _core_syms = {a.get("symbol") for a in core_alloc if a.get("symbol") != "CASH"}
+            if _core_syms and _core_syms.issubset(_used_symbols_for_overlap):
+                _unused_core = [
+                    c for c in core_candidates
+                    if c.get("symbol") not in _used_symbols_for_overlap
+                    and not _is_tech_theme(c.get("name", ""))
+                ]
+                if _unused_core:
+                    def _cscore(c):
+                        _fs = factor_matrix.get(c.get("symbol", ""), {}) or {}
+                        return sum(_fs.get(k, 0.0) or 0.0
+                                   for k in ("technical", "momentum", "valuation", "sentiment"))
+                    _extra = max(_unused_core, key=_cscore)
+                    _core_non_cash = [a for a in core_alloc if a.get("symbol") != "CASH"]
+                    if _core_non_cash:
+                        _room = 0.0
+                        _cut = min(0.05 / len(_core_non_cash), 0.03)
+                        for _a in _core_non_cash:
+                            _a["weight"] = round(max(_a.get("weight", 0) - _cut, 0.01), 4)
+                            _room += _cut
+                        core_alloc.append({
+                            "symbol": _extra["symbol"],
+                            "name": _extra.get("name", _extra["symbol"]),
+                            "layer": "core",
+                            "weight": round(min(_room, 0.30), 4),
+                            "tracked_index": _extra.get("tracked_index", ""),
+                            "industry": _extra.get("industry", ""),
+                            "selection_rationale": (
+                                f"U11: 跨方案核心去重——引入新宽基 {_extra.get('name', '')} 分散核心层"
+                            ),
+                            "factor_score": round(_cscore(_extra), 3),
+                            "factor_breakdown": factor_matrix.get(_extra["symbol"], {}),
+                        })
 
         # ── Satellite layer — C1: 按 profile_key 差异化过滤 ──
         sat_pool = _filter_satellite_by_profile(sat_candidates, factor_matrix, profile_key)
@@ -548,6 +600,10 @@ def allocate(
             for c in core_candidates:
                 sym = c.get("symbol", "")
                 if sym in used_syms:
+                    continue
+                # M5: 卫星 backup 排除宽基（industry=宽基指数）——宽基是 core 属性，
+                # 混入卫星层使层属性混乱、行业集中度约束失真；宁可卫星 <4 也不引入
+                if c.get("industry") == "宽基指数":
                     continue
                 # 防御型：补足不引入科创系（科创集中度验收 ≤10%）
                 if profile_key == "defensive" and _is_tech_theme(c.get("name", "")):
@@ -624,7 +680,9 @@ def allocate(
         allocations.extend(def_alloc)
 
         # C: 强制标的权重下限后处理 — 低于 5% 的强制标的上调到 5%
-        # 从总现金仓等比例扣减
+        # 优先从总现金仓扣减；现金不足则从非强制标的中等比例扣减
+        # （M4 联动：现金不足时旧逻辑的 `if cash_weight < 0` 是死代码，强制标的
+        #   永远停在 3%，不满足验收「核心层单只权重 ≥5%」）。
         cash_allocs = [a for a in allocations if a.get("symbol") == "CASH"]
         cash_weight = sum(a.get("weight", 0) for a in cash_allocs)
         for a in allocations:
@@ -634,16 +692,24 @@ def allocate(
                 if cash_weight >= needed:
                     a["weight"] = 0.05
                     cash_weight -= needed
-        # 如果现金不够，从非强制标的中等比例扣减
-        if cash_weight < 0:
-            for a in allocations:
-                sym = a.get("symbol", "")
-                if sym not in MANDATORY_CODES and a.get("weight", 0) > 0.01 and sym != "CASH":
-                    reduction = min(a["weight"] * 0.1, abs(cash_weight) / 2)
-                    a["weight"] = round(a["weight"] - reduction, 4)
-                    cash_weight += reduction
-                    if cash_weight >= 0:
-                        break
+                else:
+                    if cash_weight > 1e-9:
+                        a["weight"] = round(a["weight"] + cash_weight, 4)
+                        needed -= cash_weight
+                        cash_weight = 0.0
+                    if needed > 1e-9:
+                        non_mandatory = [
+                            x for x in allocations
+                            if x.get("symbol") not in MANDATORY_CODES
+                            and x.get("symbol") != "CASH"
+                            and x.get("weight", 0) > 0.01
+                        ]
+                        total_non = sum(x.get("weight", 0) for x in non_mandatory)
+                        if total_non > 0:
+                            for x in non_mandatory:
+                                cut = needed * x.get("weight", 0) / total_non
+                                x["weight"] = round(x["weight"] - cut, 4)
+                            a["weight"] = round(a["weight"] + needed, 4)
 
         # ── Compute risk metrics (sector concentration as HHI) ──
         sector_weights: dict[str, float] = {}
@@ -651,6 +717,23 @@ def allocate(
             sec = a.get("layer", "其他")
             sector_weights[sec] = sector_weights.get(sec, 0.0) + a.get("weight", 0.0)
         hhi = sum(w ** 2 for w in sector_weights.values())
+
+        # U6 R1: 预算用满——层内分配不满（候选不足/配额裁剪）时剩余预算按
+        # factor_score 回补已选标的（旧逻辑：权重和 < 层预算和 → 剩余转 CASH，
+        # 实测 balanced 现金 19% > 理论 15%）
+        _total_budget = sum(budgets.values())
+        _alloc_total = sum(a.get("weight", 0.0) for a in allocations if a.get("symbol") != "CASH")
+        _shortfall = max(0.0, _total_budget - _alloc_total)
+        if _shortfall > 0.001:
+            _topup = sorted(
+                [a for a in allocations if a.get("symbol") != "CASH"],
+                key=lambda a: -float(a.get("factor_score", 0) or 0),
+            )
+            if _topup:
+                _per = _shortfall / len(_topup)
+                for _a in _topup:
+                    # 单只 ≤30% 风控（RISK_SETTINGS.max_single_weight 会在 apply_risk_controls 兜底）
+                    _a["weight"] = round(min(_a.get("weight", 0.0) + _per, 0.30), 4)
 
         risk_metrics = {
             "sector_concentration": round(hhi, 4),

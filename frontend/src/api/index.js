@@ -28,6 +28,7 @@ export const marketApi = {
   realtimePortfolio: () => api.get('/market/realtime/portfolio'),
   history: (symbol, assetType = 'A', period = 'daily') => api.get(`/market/history/${symbol}`, { params: { asset_type: assetType, period } }),
   search: (keyword, options = {}) => api.get('/market/search', { params: { keyword, ...options } }),
+  indicesMeta: () => api.get('/market/indices/meta'),
   indicators: (symbol, assetType = 'A') => api.get(`/market/indicators/${symbol}`, { params: { asset_type: assetType } }),
   signal: (symbol, assetType = 'A') => api.get(`/market/signal/${symbol}`, { params: { asset_type: assetType } }),
   chart: (symbol, assetType = 'A', period = 'daily') => api.get(`/market/chart/${symbol}`, { params: { asset_type: assetType, period } }),

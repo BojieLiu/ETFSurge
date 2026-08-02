@@ -73,6 +73,16 @@ describe('NewsView (F2-8 §9.9)', () => {
     expect(wrapper.text()).toContain('510300')
   })
 
+  it('R45: impact 区带"AI 智能分析"层级标签（与新闻卡视觉区分）', async () => {
+    newsApi.newsImpact.mockResolvedValue({ data: RESULT })
+    const wrapper = await mounted()
+    const btns = wrapper.findAll('.news-ai-btn')
+    await btns[0].trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.impact-header').exists()).toBe(true)
+    expect(wrapper.find('.impact-header').text()).toContain('AI 智能分析')
+  })
+
   it('shows loading text while analyzing, then result', async () => {
     let resolveFn
     newsApi.newsImpact.mockImplementation(() => new Promise((res) => { resolveFn = res }))
@@ -131,5 +141,43 @@ describe('NewsView (F2-8 §9.9)', () => {
     await flushPromises()
     expect(wrapper.find('.impact-summary').exists()).toBe(true)
     expect(wrapper.find('.impact-inline-error').exists()).toBe(false)
+  })
+
+  it('R50: 过滤组合外标的（LLM 幻觉不展示）', async () => {
+    // 后端返回含组合外标的（600000 幻觉）+ 组合内标的
+    newsApi.newsImpact.mockResolvedValue({
+      data: {
+        summary: '降准利好',
+        impact_scope: '市场整体',
+        affected_holdings: [
+          { symbol: '510300', name: '沪深300ETF', impact_reason: '直接受益' },
+          { symbol: '600000', name: '浦发银行', impact_reason: '幻觉标的' },
+        ],
+        disclaimer: '仅供参考',
+      },
+    })
+    const wrapper = await mounted()
+    const btns = wrapper.findAll('.news-ai-btn')
+    await btns[0].trigger('click')
+    await flushPromises()
+    // 组合内标的渲染，幻觉标的被过滤
+    expect(wrapper.text()).toContain('510300')
+    expect(wrapper.text()).toContain('直接受益')
+    expect(wrapper.text()).not.toContain('600000')
+    expect(wrapper.text()).not.toContain('浦发银行')
+  })
+
+  it('R50: 请求后组合变化不误过滤——按请求时刻快照', async () => {
+    newsApi.newsImpact.mockResolvedValue({ data: RESULT })
+    const wrapper = await mounted()
+    const btns = wrapper.findAll('.news-ai-btn')
+    await btns[0].trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('510300')
+    // 模拟请求后组合移除 510300（store 变化）——快照仍保留 → 不误过滤
+    const { usePortfolioStore } = await import('../stores/portfolio')
+    usePortfolioStore().etfs = [{ symbol: '518880', name: '黄金ETF' }]
+    await wrapper.vm.$nextTick()
+    expect(wrapper.text()).toContain('510300')
   })
 })

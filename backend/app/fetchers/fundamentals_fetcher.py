@@ -15,8 +15,10 @@ logger = get_logger(__name__)
 
 # --- fundamental_fetcher.py: Fund flow ---
 
+# F17 R61: 域名集中常量（实测 push2 502/HTTPS 连接关闭，保留 push2delay）
+from ..core.market_context import EM_PUSH_HOST
 from ..utils.decode import decode_df as _decode_df
-_PUSH2_SOURCE = "push2delay.eastmoney.com"
+_PUSH2_SOURCE = EM_PUSH_HOST
 _AKSHARE_SOURCE = "akshare"
 
 # 熔断器健康句柄（registry._health 返回稳定单例，供涨跌家数采集记录成功/失败）
@@ -26,6 +28,12 @@ _push2_h = _source_registry._health(_PUSH2_SOURCE)
 def _push2_available() -> bool:
     """检查 push2 数据源是否可用（熔断器未打开）。"""
     h = _source_registry._health(_PUSH2_SOURCE)
+    return h.available(_time.time())
+
+
+def _akshare_available() -> bool:
+    """F17 R62: 检查 akshare 数据源健康（熔断器未打开）。"""
+    h = _source_registry._health(_AKSHARE_SOURCE)
     return h.available(_time.time())
 
 
@@ -88,8 +96,10 @@ def fetch_fund_flow(symbol: str) -> dict | None:
     """
     if not _is_a_stock(symbol):
         return None
-    # OPT-01: 熔断器检查，push2 不可用时立即降级
-    if not _push2_available():
+    # OPT-01: 熔断器检查——F17 R62: fund_flow 实际走 akshare（stock_individual_fund_flow），
+    # 旧 gate 查 push2delay 健康是语义错位（fund_flow 被涨跌家数路径的熔断 gate 误伤），
+    # 改为检查 akshare 源健康
+    if not _akshare_available():
         return None
     try:
         market = _get_market(symbol)
@@ -137,8 +147,10 @@ def fetch_fund_flow_detailed(symbol: str) -> dict | None:
     """
     if not _is_a_stock(symbol):
         return None
-    # OPT-01: 熔断器检查，push2 不可用时立即降级
-    if not _push2_available():
+    # OPT-01: 熔断器检查——F17 R62: fund_flow 实际走 akshare（stock_individual_fund_flow），
+    # 旧 gate 查 push2delay 健康是语义错位（fund_flow 被涨跌家数路径的熔断 gate 误伤），
+    # 改为检查 akshare 源健康
+    if not _akshare_available():
         return None
     try:
         market = _get_market(symbol)
@@ -335,6 +347,7 @@ def fetch_fundamentals(symbol: str) -> dict:
 # --- margin_fetcher.py: Margin balance ---
 
 import json
+import os
 import urllib.request
 logger = logging.getLogger(__name__)
 
@@ -465,6 +478,38 @@ def _dynamic_weights(regime: str | None) -> dict[str, float]:
 # ── Momentum tracking for sentiment inertia correction ───────────
 # Stores (value, timestamp) for the three most recent calculations.
 _sentiment_history: list[tuple[float, float]] = []
+
+# F19 R68: 20 日 sentiment_index 滚动数组（供 panic_greed_diff 因子——
+# 该因子要求 sentiment_history 且 len >= 5，旧实现从不生成该字段 → 永远 no_data）
+_sentiment_rolling: list[float] = []
+
+_SENTIMENT_HISTORY_FILE = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "sentiment_history.json"
+)
+
+
+def _persist_sentiment_history(file_path: str, sentiment: dict) -> None:
+    """F19 R68: 将滚动数组落盘（进程重启后仍保留历史，冷启动即有样本）。"""
+    history = sentiment.get("sentiment_history") or []
+    try:
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(history, f, ensure_ascii=False)
+    except Exception:
+        pass  # 落盘失败不阻塞主流程
+
+
+def _load_sentiment_history(file_path: str) -> list[float]:
+    """F19 R68: 模块加载/刷新时读回滚动数组（上限 20 条，丢弃最旧）。"""
+    try:
+        if os.path.exists(file_path):
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                return [float(x) for x in data][-20:]
+    except Exception:
+        pass
+    return []
 
 
 def _momentum_correction(current: float) -> float:
@@ -736,11 +781,26 @@ async def fetch_market_sentiment() -> dict[str, Any]:
         margin_change=margin,
     )
 
-    return {
+    # F19 R68: 维护 20 日 sentiment_index 滚动数组并随返回附带——
+    # _compute_panic_greed_diff 要求 data["sentiment_history"] 且 len>=5，
+    # 旧实现从不生成该字段（结构性 bug → 因子永远 no_data）。
+    global _sentiment_rolling
+    if not _sentiment_rolling:
+        # 冷启动：从持久化文件恢复历史（跨进程保留，避免重启后需 20 日才累积样本）
+        _sentiment_rolling = _load_sentiment_history(_SENTIMENT_HISTORY_FILE)
+    _sentiment_rolling.append(float(index))
+    if len(_sentiment_rolling) > 20:
+        _sentiment_rolling = _sentiment_rolling[-20:]
+
+    result = {
         "sentiment_index": index,
         "sentiment_label": sentiment_label(index),
         "advance_ratio": round(advance, 4),
         "institutional_consensus": 0.0,  # placeholder, 调用方填充
         "volume_ratio": round(vr, 4),
         "margin_change": round(margin, 4),
+        "sentiment_history": list(_sentiment_rolling),
     }
+    # F19 R68: 落盘（进程重启后仍保留历史）
+    _persist_sentiment_history(_SENTIMENT_HISTORY_FILE, result)
+    return result

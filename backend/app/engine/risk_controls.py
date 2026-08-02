@@ -145,6 +145,16 @@ def remove_stale_candidates(
     return strategies
 
 
+def _is_dividend_etf(a: dict[str, Any]) -> bool:
+    """M1: 红利类 ETF 判定（防守型核心：红利低波 512890 / 中证红利 515080 等）。"""
+    sym = a.get("symbol", "")
+    if sym in ("512890", "515080"):
+        return True
+    name = a.get("name", "") or ""
+    tidx = a.get("tracked_index", "") or ""
+    return "红利" in name or "红利" in tidx
+
+
 def _consolidate_minnows(
     strategies: list[dict[str, Any]],
     min_weight: float = 0.02,
@@ -232,6 +242,16 @@ def apply_risk_controls(
             w = a.get("weight", 0.0)
             if w > RISK_SETTINGS.max_single_weight:
                 a["weight"] = RISK_SETTINGS.max_single_weight
+
+        # M1: 防御型方案红利类（防守型核心）合计权重上限 15%（用户决策 2026-08-01）
+        if strategy.get("id") == "defensive":
+            dividend_weight = sum(a.get("weight", 0.0) for a in allocations if _is_dividend_etf(a))
+            if dividend_weight > 0.15:
+                _scale = 0.15 / dividend_weight
+                for a in allocations:
+                    if _is_dividend_etf(a):
+                        a["weight"] = round(a.get("weight", 0.0) * _scale, 4)
+                logger.info("[risk] defensive dividend capped: %.1f%% -> 15%%", dividend_weight * 100)
 
         # 2. 层预算校验
         layer_actual: dict[str, float] = {}

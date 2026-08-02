@@ -284,7 +284,21 @@ async def indicators(
     period: str = Query("daily"),
 ) -> dict:
     hist = await market_data_hub.get_market_history(symbol, asset_type, period)
+    # F10 R32: K 线为空/不足（<30 根）时显式标记 data_available=false——
+    # 前端 TechnicalAnalysisModal 收到后显示空态，不再展示占位指标
+    if not hist or len(hist) < 30:
+        resp = {"data_available": False,
+                "reason": "K线数据不足（<30 交易日）或数据源缺失",
+                "symbol": symbol, "asset_type": asset_type}
+        # F0-4: stale 标记不因数据不足丢失（F0 回归：过期缓存仍须标注新鲜度）
+        try:
+            if market_data_hub.is_kline_stale(symbol):
+                resp["_stale"] = True
+        except Exception:
+            pass
+        return resp
     result = compute_all_indicators(hist)
+    result["data_available"] = True
     # F0-4: 全源失败走 stale 缓存兜底时，显式标记数据新鲜度
     try:
         if market_data_hub.is_kline_stale(symbol):
@@ -302,8 +316,20 @@ async def signal(
     period: str = Query("daily"),
 ) -> dict:
     hist = await market_data_hub.get_market_history(symbol, asset_type, period)
+    # F10 R32: K 线不足时显式拒绝（signal 对空指标的 hold 信号尤其误导）
+    if not hist or len(hist) < 30:
+        resp = {"data_available": False,
+                "reason": "K线数据不足（<30 交易日）或数据源缺失",
+                "symbol": symbol, "asset_type": asset_type}
+        try:
+            if market_data_hub.is_kline_stale(symbol):
+                resp["_stale"] = True
+        except Exception:
+            pass
+        return resp
     ind = compute_all_indicators(hist)
     result = generate_signal(ind)
+    result["data_available"] = True
     # F0-4: stale 标记透传
     try:
         if market_data_hub.is_kline_stale(symbol):
@@ -566,6 +592,23 @@ async def watchlist_list(
             if not display_name or not display_name.strip():
                 display_name = resolved_symbol
             
+            # R30: auto-heal name——合法代码但 name 为脏数据（=symbol/空）且 realtime 有真实名称时回填
+            rt_name = (resolved_realtime or {}).get("name") if resolved_realtime else None
+            is_dirty_name = (not (item.name or "").strip()
+                             or str(item.name).strip() == str(item.symbol).strip())
+            if is_dirty_name and rt_name and rt_name != item.name:
+                try:
+                    from sqlalchemy import update as sa_update
+                    async with async_session() as heal_session:
+                        await heal_session.execute(
+                            sa_update(Watchlist)
+                            .where(Watchlist.id == item.id)
+                            .values(name=rt_name)
+                        )
+                        await heal_session.commit()
+                except Exception as e:
+                    logger.warning("[watchlist] name auto-heal failed for id=%s: %s", item.id, e)
+            
             item_dict = {
                 "id": item.id,
                 "symbol": resolved_symbol,
@@ -608,12 +651,16 @@ async def watchlist_add(data: WatchlistCreate) -> dict[str, Any]:
 
         # Get realtime data to validate code exists and get name
         realtime = await market_data_hub.get_asset_realtime(data.symbol, data.asset_type)
-        if not realtime:
+        # R29: 优先用前端传入的 name（搜索已带真实名称）；仅当 name 与 realtime 都拿不到时才 422。
+        # 放宽旧逻辑——realtime 为空但前端已带合法 name 时不再拒绝（用传入 name 入库）。
+        provided_name = (data.name or "").strip()
+        has_provided_name = bool(provided_name) and provided_name != data.symbol
+        if not realtime and not has_provided_name:
             raise HTTPException(status_code=422, detail="无法解析该标的，请通过搜索选择")
 
-        # Name fallback: realtime.name or symbol
-        name = realtime.get("name", data.symbol)
-        if not name or not name.strip():
+        # Name fallback: 前端传入 name → realtime.name → symbol
+        name = provided_name or (realtime.get("name", "") if realtime else "") or data.symbol
+        if not name.strip():
             name = data.symbol
 
         item = Watchlist(

@@ -14,6 +14,7 @@
 """
 
 from typing import Any
+import time  # U7/N08: fetch_fund_nav 24h 缓存时间戳
 from ..core.logging import get_logger
 from ..utils.proxy import no_proxy
 from ..utils.decode import decode_df as _decode_df
@@ -654,6 +655,40 @@ def fetch_hk_stock_realtime(symbol: str | None = None) -> list[dict[str, Any]]:
     ], route_name="HK_stock_realtime", operation="realtime", target=symbol) or []
 
 
+# R27: spot 全量列表 single-flight——缓存 miss 时同 key 并发请求只 fetch 一次，
+# 其余调用等待共享结果（消除 thundering herd，补全响应不随并发搜索退化）
+import threading as _threading
+
+_spot_inflight: dict[str, _threading.Event] = {}
+_spot_inflight_lock = _threading.Lock()
+
+
+def _spot_single_flight(cache_key: str, fetch_fn) -> list[dict]:
+    """单飞执行 fetch_fn；同 key 并发调用等待首发起者完成并共享结果。
+
+    首发起者注册 Event 并执行 fetch；后续调用看到已有 Event 则阻塞等待
+    其完成（Event.set 后 fetch 已写缓存，直接读缓存返回）。
+    """
+    with _spot_inflight_lock:
+        evt = _spot_inflight.get(cache_key)
+        if evt is None:
+            evt = _threading.Event()
+            _spot_inflight[cache_key] = evt
+            is_leader = True
+        else:
+            is_leader = False
+    if not is_leader:
+        # 等待发起者完成（最多 15s，与 fetch 超时一致）
+        evt.wait(timeout=15)
+        return sync_memory_cache.get(cache_key) or []
+    try:
+        return fetch_fn()
+    finally:
+        evt.set()
+        with _spot_inflight_lock:
+            _spot_inflight.pop(cache_key, None)
+
+
 def fetch_hk_spot_list() -> list[dict[str, Any]]:
     """港股全量 spot 列表（akshare stock_hk_spot_em），6h 长 TTL 缓存，供搜索用。
 
@@ -665,6 +700,12 @@ def fetch_hk_spot_list() -> list[dict[str, Any]]:
     cached = sync_memory_cache.get(cache_key)
     if cached is not None:
         return cached
+    # R27: single-flight——缓存 miss 时同 key 并发只 fetch 一次，其余等待共享结果
+    return _spot_single_flight(cache_key, _fetch_hk_spot)
+
+
+def _fetch_hk_spot() -> list[dict[str, Any]]:
+    cache_key = "hk_spot_list"
     try:
         def _p():
             import akshare as ak
@@ -710,6 +751,12 @@ def fetch_us_spot_list() -> list[dict[str, Any]]:
     cached = sync_memory_cache.get(cache_key)
     if cached is not None:
         return cached
+    # R27: single-flight——缓存 miss 时同 key 并发只 fetch 一次
+    return _spot_single_flight(cache_key, _fetch_us_spot)
+
+
+def _fetch_us_spot() -> list[dict[str, Any]]:
+    cache_key = "us_spot_list"
     try:
         def _p():
             import akshare as ak
@@ -904,53 +951,64 @@ def fetch_sina_page_global_index(symbol: str) -> dict[str, Any] | None:
 def fetch_index_realtime() -> list[dict[str, Any]]:
     """Fetch major market indices via Sina(s_sh)→mootdx→Tencent(QQ) 三级降级。
 
+    R77 缺口 4：改为 registry.route（对齐 mootdx→Sina 模式）——熔断源被跳过、
+    成功/失败记录熔断状态；全失败返回 []（保持旧调用方兼容）。
     上证指数(000001/000300/000688 等)在 Sina 需用 s_sh 前缀（指数格式），
     否则会被当成深圳股票返回错误价格（如 000001=平安银行10.98）。
     """
-    with no_proxy():
-        indices = {"000001": "上证指数", "399001": "深证成指", "399006": "创业板指",
-                   "000688": "科创50", "000300": "沪深300", "000016": "上证50",
-                   "000905": "中证500", "000852": "中证1000"}
-        codes = list(indices.keys())
+    indices = {"000001": "上证指数", "399001": "深证成指", "399006": "创业板指",
+               "000688": "科创50", "000300": "沪深300", "000016": "上证50",
+               "000905": "中证500", "000852": "中证1000"}
+    codes = list(indices.keys())
 
-        # Tier 1: Sina（已修正 s_sh 前缀，返回正确指数数据）
-        try:
+    def _sina_index():
+        with no_proxy():
             sina_result = _sina_realtime(codes, "index")
+            # 指数价格 >100 校验：s_sh 前缀错误时返回的是股票价格（如 10.98），需跳过
             if sina_result and any(r.get("price", 0) > 100 for r in sina_result):
                 return sina_result
-        except Exception:
-            pass
+            return []
 
-        # Tier 2: mootdx
-        try:
+    def _mootdx_index():
+        with no_proxy():
             client = _mootdx()
             df = client.index(symbol=codes)
-            if df is not None and not df.empty:
-                results = []
-                for _, row in df.iterrows():
-                    code = str(row.get("code", ""))
-                    price = float(row.get("price", 0) or 0)
-                    prev = float(row.get("last_close", 0) or 0)
-                    results.append({
-                        "symbol": code, "name": indices.get(code, ""),
-                        "price": price,
-                        "change_pct": round((price - prev) / prev * 100, 2) if prev else 0,
-                        "change_amount": round(price - prev, 2),
-                        "volume": float(row.get("volume", 0) or 0),
-                        "turnover": 0,
-                        "asset_type": "index",
-                    })
-                return results
-        except Exception:
-            pass
+            if df is None or df.empty:
+                return []
+            results = []
+            for _, row in df.iterrows():
+                code = str(row.get("code", ""))
+                price = float(row.get("price", 0) or 0)
+                prev = float(row.get("last_close", 0) or 0)
+                results.append({
+                    "symbol": code, "name": indices.get(code, ""),
+                    "price": price,
+                    "change_pct": round((price - prev) / prev * 100, 2) if prev else 0,
+                    "change_amount": round(price - prev, 2),
+                    "volume": float(row.get("volume", 0) or 0),
+                    "turnover": 0,
+                    "asset_type": "index",
+                })
+            return results
 
-        # Tier 3: Tencent(QQ) 兜底
-        return _tencent_realtime(codes, "index")
+    def _tencent_index():
+        with no_proxy():
+            return _tencent_realtime(codes, "index")
+
+    result = registry.route(
+        [("sina", _sina_index), ("mootdx", _mootdx_index), ("tencent", _tencent_index)],
+        route_name="index_realtime", operation="realtime", target="CN_INDEX",
+    )
+    return result or []
 
 
 # Z05: Connection-pooled _session for fetch_fund_nav fallback
 # Avoid creating new HTTP connections on every call during warmup
 _fund_nav_session: "requests.Session | None" = None
+
+# U7/N08 R3: NAV 24h 内存缓存（日频数据，预热首拉后不再重复）
+_FUND_NAV_CACHE: dict[str, tuple[float, tuple[float, float] | None]] = {}
+_FUND_NAV_TTL = 24 * 3600.0
 
 
 def _get_nav_session() -> "requests.Session":
@@ -972,7 +1030,15 @@ def fetch_fund_nav(symbol: str) -> tuple[float, float] | None:
     返回 (unit_net_value, daily_growth_pct)，取最新一条记录；不可用返回 None。
 
     使用模块级 Session 复用 HTTP 连接减少 SSL 握手（Z05）。
+    U7/N08 R3: 24h 内存缓存（日频数据）——预热首次拉取后不再重复，
+    消除 cProfile 中 10 次 fund_open_fund_info_em 累计 7.5s 的预热瓶颈。
     """
+    _now = time.time()
+    _cached = _FUND_NAV_CACHE.get(symbol)
+    if _cached and (_now - _cached[0]) < _FUND_NAV_TTL:
+        return _cached[1]
+
+    result: tuple[float, float] | None = None
     try:
         def _p():
             import akshare as ak
@@ -985,21 +1051,24 @@ def fetch_fund_nav(symbol: str) -> tuple[float, float] | None:
             nav = float(last.get("单位净值") or last.get("unit_net_value") or 0)
             chg = float(last.get("日增长率") or last.get("daily_growth_rate") or 0)
             if nav:
-                return (nav, round(chg, 2))
+                result = (nav, round(chg, 2))
     except Exception:
         pass
 
     # Fallback: 天天基金 API (uses connection-pooled session, Z05)
-    try:
-        session = _get_nav_session()
-        # Inject session into fund_fetcher's fetch if it supports it
-        result = run_in_thread(lambda: fund_fetcher.fetch_fund_nav(symbol), timeout=8, executor="long")
-        if result and result.get("nav"):
-            return (result["nav"], result.get("daily_change_pct", 0.0))
-    except Exception:
-        pass
+    if result is None:
+        try:
+            session = _get_nav_session()
+            # Inject session into fund_fetcher's fetch if it supports it
+            fb = run_in_thread(lambda: fund_fetcher.fetch_fund_nav(symbol), timeout=8, executor="long")
+            if fb and fb.get("nav"):
+                result = (fb["nav"], fb.get("daily_change_pct", 0.0))
+        except Exception:
+            pass
 
-    return None
+    if result is not None:
+        _FUND_NAV_CACHE[symbol] = (_now, result)
+    return result
 
 
 def fetch_index_history(symbol: str, period: str = "daily") -> list[dict[str, Any]]:

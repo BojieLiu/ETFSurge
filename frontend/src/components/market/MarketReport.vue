@@ -11,7 +11,7 @@
           <button class="btn-report" @click="generate" :disabled="loading">
             <span v-if="!loading" class="btn-icon">🤖</span>
             <span v-else class="btn-spinner"></span>
-            <span>{{ loading ? 'AI 分析中...' : '生成市场研判' }}</span>
+            <span>{{ loading ? 'AI 分析中...' : (report ? '重新生成研判' : '生成市场研判') }}</span>
           </button>
           <p v-if="!loading && !report && !error" class="action-hint">点击按钮，AI 将综合分析当前市场环境生成报告</p>
         </div>

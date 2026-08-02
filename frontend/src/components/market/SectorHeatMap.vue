@@ -213,7 +213,9 @@ async function fetchData() {
         resp = await marketApi.getStockHotRank(50)
         break
     }
-    dataList.value = Array.isArray(resp.data) ? resp.data : []
+    // F6 R14: 双兼容——兼容数组（旧）与 {items,total}（hot-plates 契约 v2.0）
+    const d = resp.data
+    dataList.value = Array.isArray(d) ? d : (d?.items ?? [])
   } catch (e) {
     error.value = '加载失败: ' + (e?.message || '网络错误')
     dataList.value = []

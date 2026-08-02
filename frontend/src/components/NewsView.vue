@@ -58,6 +58,8 @@
 
            <!-- F2-8: 行内展开分析区（结果出现在该条卡片内，无滚动/跳转） -->
            <div v-if="impactTarget === item.id" class="impact-inline" aria-live="polite">
+             <!-- R45: 层级标签——与新闻卡视觉区分 -->
+             <div class="impact-header">🤖 AI 智能分析</div>
              <div v-if="analyzing" class="impact-loading">🤖 AI 分析中…</div>
              <div v-else-if="impactError" class="impact-inline-error">
                <span>AI 分析失败，请稍后重试</span>
@@ -70,10 +72,11 @@
                  <h4 class="impact-subtitle">影响范围</h4>
                  <p>{{ impactPanel.impact_scope }}</p>
                </div>
-               <div v-if="impactPanel.affected_holdings && impactPanel.affected_holdings.length" class="impact-block">
+               <div v-if="filteredAffectedHoldings.length" class="impact-block">
                  <h4 class="impact-subtitle">对组合内标的的影响</h4>
                  <ul class="impact-holdings">
-                   <li v-for="h in impactPanel.affected_holdings" :key="h.symbol" class="impact-holding">
+                   <!-- R50: 用请求时刻快照（requestHoldings）过滤——不能基于渲染时 store.etfs -->
+                   <li v-for="h in filteredAffectedHoldings" :key="h.symbol" class="impact-holding">
                      <span class="holding-symbol"><code>{{ h.symbol }}</code> {{ h.name }}</span>
                      <span class="holding-reason">{{ h.impact_reason }}</span>
                    </li>
@@ -108,6 +111,8 @@ const seenIds = ref(new Set())
 const impactTarget = ref(null) // F2-8: 当前展开分析的新闻 id
 const impactPanel = ref(null)  // F2-8: 最近一次分析结果
 const impactError = ref(false) // F2-8: 行内失败状态（展示重试）
+// R50: 请求时刻的组合代码集快照——渲染过滤用，避免组合变化后误过滤
+const requestHoldings = ref(new Set())
 const analyzing = ref(false)
 const minLevel = ref(1) // 1-5, minimum importance level to show
 
@@ -212,6 +217,8 @@ async function analyze(item) {
   impactPanel.value = null
   impactError.value = false
   analyzing.value = true
+  // R50: 发起请求时快照当前组合代码集（不能基于渲染时 store.etfs）
+  requestHoldings.value = new Set((store.etfs || []).map((e) => e.symbol))
   try {
     const portfolio = (store.etfs || []).map((e) => ({ symbol: e.symbol, name: e.name }))
     const res = await newsApi.newsImpact({
@@ -226,6 +233,12 @@ async function analyze(item) {
     analyzing.value = false
   }
 }
+// R50: 渲染前用请求时刻快照过滤——组合外标的（LLM 幻觉）不展示
+const filteredAffectedHoldings = computed(() => {
+  const list = impactPanel.value?.affected_holdings || []
+  if (!list.length) return []
+  return list.filter((h) => requestHoldings.value.has(h.symbol))
+})
 </script>
 
 <style scoped>
@@ -261,7 +274,8 @@ async function analyze(item) {
 .news-ai-btn--active { border-color: var(--color-primary); color: var(--color-primary); background: var(--color-bg-brand-subtle); }
 
 /* F2-8: 行内展开区 */
-.impact-inline { margin-top: var(--space-2); padding: var(--space-3); border: 1px solid var(--color-border); border-left: 3px solid var(--color-primary); border-radius: var(--radius-md); background: var(--color-surface-tertiary); animation: impact-fadein 0.2s ease; }
+.impact-inline { margin-top: var(--space-2); padding: var(--space-3); border-radius: var(--radius-md); background: var(--color-bg-brand-subtle); border-top: 2px solid var(--color-primary); animation: impact-fadein 0.2s ease; }
+.impact-header { display: flex; align-items: center; gap: var(--space-1); font-size: var(--font-size-sm); font-weight: 600; color: var(--color-primary-dark); margin-bottom: var(--space-2); }
 @keyframes impact-fadein { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 .impact-loading { color: var(--color-text-secondary); font-size: var(--font-size-sm); }
 .impact-inline-error { display: flex; align-items: center; gap: var(--space-2); color: var(--color-danger-700); font-size: var(--font-size-sm); }

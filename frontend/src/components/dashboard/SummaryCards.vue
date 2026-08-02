@@ -71,6 +71,8 @@
           </template>
           <span v-else class="text-muted">需输入成本</span>
         </p>
+        <!-- R66: 含估算份额 → 标注估算成本占比 -->
+        <p v-if="estimatedRatio('on_exchange') > 0" class="estimate-hint">含估算成本 {{ Math.round(estimatedRatio('on_exchange') * 100) }}%（按目标权重估算）</p>
       </AppCard>
 
       <AppCard v-if="activeTab !== 'on_exchange' && pnlHistory?.summary" layout="horizontal"
@@ -85,6 +87,8 @@
           </template>
           <span v-else class="text-muted">需输入成本</span>
         </p>
+        <!-- R66: 含估算份额 → 标注估算成本占比 -->
+        <p v-if="estimatedRatio('off_exchange') > 0" class="estimate-hint">含估算成本 {{ Math.round(estimatedRatio('off_exchange') * 100) }}%（按目标权重估算）</p>
       </AppCard>
 
       <AppCard v-if="activeTab === 'combined' && pnlHistory?.summary" layout="horizontal"
@@ -98,6 +102,10 @@
             <span class="pnl-pct">({{ pnlHistory.summary.total_cumulative_pnl_pct.toFixed(2) }}%)</span>
           </template>
           <span v-else class="text-muted">需输入成本</span>
+        </p>
+        <!-- R66: 总览含估算份额 → 标注 -->
+        <p v-if="(pnlHistory.summary.estimated_ratio || 0) > 0" class="estimate-hint">
+          含估算成本 {{ Math.round(pnlHistory.summary.estimated_ratio * 100) }}%（按目标权重估算）
         </p>
       </AppCard>
     </template>
@@ -139,6 +147,11 @@ function findCumulativePnlPct(type) {
   const h = props.pnlHistory?.summary?.by_type?.[type]
   return (h?.cumulative_pnl_pct || 0).toFixed(2)
 }
+
+// R66: by_type 估算占比（后端 R65 新增 estimated_ratio 字段）
+function estimatedRatio(type) {
+  return props.pnlHistory?.summary?.by_type?.[type]?.estimated_ratio || 0
+}
 </script>
 
 <style scoped>
@@ -172,6 +185,12 @@ function findCumulativePnlPct(type) {
 
 .pnl-pct {
   font: var(--text-body-sm);
+}
+
+.estimate-hint {
+  margin: var(--space-1) 0 0;
+  font: var(--text-body-xs);
+  color: var(--color-text-secondary);
 }
 
 .text-up { color: var(--color-text-up) !important; }

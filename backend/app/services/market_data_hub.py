@@ -600,6 +600,28 @@ class MarketDataHub:
         return diff
 
     @staticmethod
+    def _normalize_tracked_index(tidx: str) -> str:
+        """M3: tracked_index 家族归一化——同一指数的风格/增强切片合并为基准指数。
+
+        中证500价值/成长/增强 与 中证500 高度相关（同一指数的不同切片），
+        精确字符串去重把它们当 3 个独立指数 → 家族霸榜。此处归一化后只保留
+        fund_scale 最大者（复用 _deduplicate_by_index 的既有保留逻辑）。
+
+        Examples:
+            "中证500价值" → "中证500"
+            "中证500成长" → "中证500"
+            "中证500增强" → "中证500"
+            "沪深300增强" → "沪深300"
+            "沪深300价值" → "沪深300"
+        """
+        if not tidx:
+            return tidx
+        for base in ("中证500", "沪深300"):
+            if tidx.startswith(base) and tidx != base:
+                return base
+        return tidx
+
+    @staticmethod
     def _deduplicate_by_index(
         pool: dict[str, list[dict[str, Any]]],
     ) -> dict[str, list[dict[str, Any]]]:
@@ -641,6 +663,9 @@ class MarketDataHub:
             for item in items:
                 tidx = item.get("tracked_index", "") or ""
                 if tidx:
+                    # M3: 先做家族归一化再精确去重（中证500价值/成长/增强 → 中证500）
+                    tidx = MarketDataHub._normalize_tracked_index(tidx)
+                    item["tracked_index"] = tidx
                     # tracked_index 精确去重
                     existing = seen_indices.get(tidx)
                     if existing is None:
@@ -1079,7 +1104,12 @@ class MarketDataHub:
                     shares_data = cached[1]
                 else:
                     from ..core.async_utils import run_sync
-                    shares_data = await run_sync(fetch_etf_shares_outstanding, sym, timeout=10) or {}
+                    shares_data = await run_sync(fetch_etf_shares_outstanding, sym, timeout=10)
+                    # F19 R71: 失败/空结果不写 24h 成功缓存——旧代码 `or {}` 把失败变成
+                    # {} 写进缓存 → 后续 24h 命中 {} → gap 持续；akshare 恢复后还要再等
+                    # 24h 才重试（熔断恢复后自动补齐被缓存破绽阻断）
+                    if not shares_data or shares_data.get("shares_change_20d") is None:
+                        return
                     self._FUND_SHARES_CACHE[sym] = (time.time(), shares_data)
                 if shares_data.get("shares_change_20d") is not None:
                     out.setdefault(sym, {})["shares_change_20d"] = shares_data["shares_change_20d"]

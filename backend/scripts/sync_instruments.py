@@ -69,18 +69,29 @@ async def _fetch_akshare_list(fn_name: str, symbol_col: str, name_col: str, mark
 
 
 async def collect_all() -> list[dict]:
+    """N09: 收集全部 instruments。
+
+    每段（A 股个股 / ETF / 港股）独立统计行数；失败段打 ERROR 而非仅 WARN。
+    """
+    import logging
+    logger = logging.getLogger("sync_instruments")
+    segments = [
+        ("A股个股", "stock_zh_a_spot_em"),
+        ("A股ETF", "fund_etf_spot_em"),
+        ("港股", "stock_hk_main_board_spot_em"),
+    ]
     tasks = [
-        _fetch_akshare_list("stock_zh_a_spot_em", "代码", "名称", "A", "stock"),
-        _fetch_akshare_list("fund_etf_spot_em", "代码", "名称", "A", "etf"),
-        _fetch_akshare_list("stock_hk_main_board_spot_em", "代码", "名称", "HK", "stock"),
+        _fetch_akshare_list(fn, "代码", "名称", mkt, at)
+        for (_, fn), (mkt, at) in zip(segments, [("A", "stock"), ("A", "etf"), ("HK", "stock")])
     ]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     merged: list[dict] = []
     seen = set()
-    for res in results:
+    for (seg_name, _fn), res in zip(segments, results):
         if isinstance(res, Exception):
-            print(f"  [WARN] gather error: {res}")
+            logger.error("[sync_instruments] segment %s FAILED: %s", seg_name, res)
             continue
+        logger.info("[sync_instruments] segment %s: %d rows", seg_name, len(res))
         for row in res:
             key = (row["symbol"], row["market"])
             if key in seen:
@@ -101,6 +112,15 @@ async def sync():
 
     await init_db()
     async with async_session() as session:
+        # N09: 全量替换前校验至少一段成功——全部段失败时保留旧表
+        # （旧代码无条件 delete+add_all：akshare 熔断 → 表被清成只剩 0 行/空表）
+        if not rows:
+            import logging
+            logging.getLogger("sync_instruments").error(
+                "[sync_instruments] ALL segments failed — KEEPING existing table (got 0 rows)"
+            )
+            print("[sync_instruments] ERROR: 所有数据段均失败，保留旧表不替换")
+            return
         # 全量替换（简单可靠，数据量 ~6000 行无所谓）
         await session.execute(delete(Instrument))
         session.add_all([

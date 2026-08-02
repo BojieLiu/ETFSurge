@@ -162,7 +162,7 @@ const store = useMarketStore()
 const items = ref([])
 const loading = ref(false)
 const showAddModal = ref(false)
-const form = ref({ symbol: '', asset_type: 'A', notes: '' })
+const form = ref({ symbol: '', asset_type: 'A', notes: '', name: '' })
 const adding = ref(false)
 const addError = ref('')
 const suggestions = ref([])
@@ -243,6 +243,8 @@ function doSearch() {
 
 function selectSuggestion(s) {
   form.value.symbol = s.symbol
+  // R28: 选中项真实名称存入 form——入库优先用它（realtime 失败时不 422）
+  form.value.name = s.name || s.symbol
   // Z29: HK/US 结果回填市场类型；A 股结果回落 'A'
   // （否则先选 AAPL(US) 再选 A 股标的，会用错误市场类型入库、拿不到行情）
   if (s.market === 'HK' || s.market === 'US') {
@@ -259,9 +261,9 @@ async function addItem() {
   adding.value = true
   addError.value = ''
   try {
-    await store.addWatchlist(form.value.symbol, form.value.asset_type, form.value.notes)
+    await store.addWatchlist(form.value.symbol, form.value.asset_type, form.value.notes, form.value.name)
     showAddModal.value = false
-    form.value = { symbol: '', asset_type: 'A', notes: '' }
+    form.value = { symbol: '', asset_type: 'A', notes: '', name: '' }
     setTimeout(fetchItems, 500)
   } catch (e) {
     addError.value = '添加失败: ' + (e?.response?.data?.detail || e?.message || '网络错误')

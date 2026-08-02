@@ -182,16 +182,17 @@ def fetch_etf_shares(symbol: str) -> dict[str, Any] | None:
         {"shares": float, "shares_date": str} or None.
     """
     try:
-        from ..fetchers.etf_scanner import _PUSH2_URL, _HEADERS
+        # F17 R61/R63: 域名集中常量——旧代码 `from ..fetchers.etf_scanner import
+        # _PUSH2_URL, _HEADERS` 引用了 etf_scanner 中不存在的私有常量 → ImportError
+        # 被吞 → shares 路径静默失效（一直走 fallback）
+        from ..core.market_context import EM_PUSH_HOST
         import urllib.request
         import json
-        import re
 
-        url = _PUSH2_URL.replace(
-            "&fields=f2,f12",
-            "&fields=f2,f12,f84,f85"
-        ) + f"&f12={symbol}"
-        req = urllib.request.Request(url, headers=_HEADERS)
+        url = (f"http://{EM_PUSH_HOST}/api/qt/clist/get?"
+               f"pn=1&pz=50&po=1&np=1&fs=m:1+t:2&fields=f2,f12,f84,f85&fid=f12"
+               f"&f12={symbol}")
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
 
         def _do_fetch():
             resp = urllib.request.urlopen(req, timeout=8)
