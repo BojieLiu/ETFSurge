@@ -1,4 +1,4 @@
-# ETF Surge — 第五轮全链路诊断与优化修复方案 (v1.0)
+# ETF Surge — 第五轮全链路诊断与优化修复方案 (v1.6)
 
 > 诊断环境：Docker prod 集群（backend :8000 / frontend :80 / redis :6379），镜像 `etf_surge-backend:latest (58d441568575)`、`etf_surge-frontend:latest (67ef197df43c)`，2026-08-02 构建（工作树 HEAD `0ee4882`）。
 > 诊断方法：预热 profiler（PROFILE_WARMUP=1）、组合设计/策略检查实测（LLM opencode_zen 主 + deepseek 备）、A/HK/US 全链路 API 实测、Lighthouse 13.4.1、verify_e2e 全量 22 模块、契约系统排查、代码级修复状态核查。
@@ -172,7 +172,7 @@
 | P1-1 A500 未入核心 / P1-2 重叠 3 只 | **单测 mock 池与真实池结构脱节**（见 9.2） |
 | 候选池 0 / ETF 数据缺失×4 / 热门个股 0 / 池健康 None | 数据源熔断（非交易时段 + akshare/东财不可用）——真实反映，门禁正确 FAIL |
 | shared_executor 64/64 | 线程池饱和（性能回归，verify_e2e 新增强的运行时检查抓到了） |
-| etf_specific no_data=5 / sentiment no_data=4 | F19（R68-R72）未实施——内容语义断言（门禁已加） |
+| etf_specific no_data=5 / sentiment no_data=4 | **2026-08-03 复核：F19 R68/R69/R71 已在代码落地（见 R5-1-4）**——内容语义断言（门禁已加）；no_data 根因重定位中 |
 | LLM llm-report 30s 超时 | 外部依赖慢/限流（门禁正确 FAIL，阈值 30s 合理） |
 | 20 只持仓全估算（无 avg_cost） | 数据录入缺失，非系统 bug |
 
@@ -195,6 +195,13 @@
 ## 十、优化修复方案（P0-P2）
 
 > 按 AGENTS.md 契约先行 + TDD 流程执行；本轮**不实施**。
+>
+> **TDD 与验收统一约定（2026-08-03 审查补强，适用于本方案全部修复项）**：
+> 1. **TDD 顺序**：每项实施前先写失败测试 → 实现 → 测试转绿；未逐项注明测试文件/用例的，按该项首行标注的约定执行（每项至少 1 个失败用例先行）。
+> 2. **mock 引用基线（F21 R76）**：后端新增测试文件 mock 引用（`monkeypatch`+`MagicMock`+`AsyncMock`+`mock.patch`+`patch(` 原始出现次数）**>5 处必须抽 conftest 分层 fixture**（`mock_akshare`/`mock_hub`/`mock_run_sync`/`mock_registry_health`）；基线 857，新增后全量统计核对。
+> 3. **"数据源可用"判定标准**（本方案验收中出现该条件时统一按此）：被依赖的数据源（akshare/东财 push2/Sina/Tencent/mootdx）在验收执行时 **5s 内返回非空数据**（`registry.route` 任一 provider 成功即视为可用）；不可用时验收**不判 FAIL**，在实施记录标注"数据源不可用，待源恢复复验"。verify_e2e 门禁的"数据源可用时"断言同此口径（脚本内先探测源再断言）。
+> 4. **验收可测试性**：验收标准须可转为自动化断言（单测/verify_e2e/前端 spec）；涉及人工走查的（A10/A11、UI 视觉）标注"走查"并给出检查清单。
+> 5. **实施记录**：每批实施须在 commit message 与实施记录（本文件 §十一 批注或独立记录）写明：验收结果、mock 引用增量、数据源可用性快照。
 
 ### 🅿️0 阻断性（专业投资者可信度）
 
@@ -202,15 +209,18 @@
 - `market_data_hub._refresh_impl`：`_ensure_mandatory` 从"截断前"移到"截断后"（L535 → L544 之后），并在截断后对 `MANDATORY_CODES ∪ CORE_REQUIRED` 做二次校验（缺失 → 从 flat 找回注入 + WARNING，与 etf_scanner 层 `_log_missing_required` 对齐）。
 - 或在 `MAX_PER_LAYER` 截断时**保护强制标的**（`balanced[:max_n]` 前先剔除 MANDATORY_CODES，截断后再补回）。
 - 验收：`get_pool("core")` 恒含 560600/510300（数据源可用时）；verify_e2e design-quality 的 A500 断言 PASS（真实 design 复验，非单测 mock）。
+- TDD：`test_market_data_hub_*` 补 2 用例——①mock hub `_refresh_impl` 返回截断后不含强制标的的池 → 断言二次校验注入 560600；②截断逻辑单测：`MAX_PER_LAYER` 截断前剔除 MANDATORY_CODES（fixture：`mock_hub`，≤2 处 mock 无需抽 fixture）。
 
 **R5-0-2：核心层跨方案重叠修复（P1-2 真实链路复验）**
 - 在 allocation_engine 现有 `_prev_core_used` 去重逻辑（L554-565）基础上，补"兜底放宽"分支的回归用例：`_deduped_non_mandatory < 2` 时允许重叠的**豁免范围**应仅限"公共底仓 + 强制标的"，不能整体放开（当前 balanced/aggressive 重叠 3 只说明豁免过宽）。
 - 验收：真实 design 三方案任意两两核心层重叠（剔除公共底仓与强制标的）≤1；verify_e2e diversity 门禁 PASS。
+- TDD：`test_allocation_engine_fixes.py` 补"豁免过宽"回归——mock `_deduped_non_mandatory < 2` 场景断言仅公共底仓+强制标的豁免（fixture：现有 allocation fixture，≤3 处 mock）。
 
 **R5-0-3：首页 CLS 修复（P1-8 实施）**
-- 已定位：Dashboard `summary-grid`（指标卡容器，top 1489px 高 725px）无固定 min-height，数据注入后高度 0→725px 导致 CLS 0.388。
-- 实施：指标卡容器按内容上限预留 min-height（或骨架屏定高）；WS 行情推送改 `transform` 避免重排（P1-8 子步骤 2 原方案）。
+- **2026-08-03 技术复核（审查修正）**：`.summary-card`（components/dashboard/SummaryCards.vue）**已有** R4-19 实施的 `min-height: 96px`（注释明示"P0-4 (R4-19): 卡片固定最小高度……消除首屏数据到达时的布局偏移（CLS）"）——文档此前"summary-grid 无固定 min-height"表述不成立。实施前须**复核 CLS 0.388 的真实来源**：可能为 ①96px 仍不足（数据注入后卡片内容更高）；②`summary-grid` 容器本身无 min-height（顶部高度 725px 区域整体塌陷）；③WS 行情推送引发重排。不能按"从零加 min-height"推进。
+- 实施：①复核 CLS 来源（容器级 vs 卡片级 vs WS 推送）；②按定位结果定稿容器 min-height（或骨架屏定高）；WS 行情推送改 `transform` 避免重排（P1-8 子步骤 2 原方案）。
 - 验收：Lighthouse 首页 3 次采样中位数 P≥60、CLS≤0.1；LHCI 配置接入 CI（`npx lhci autorun`）。
+- TDD：前端组件测试断言容器存在 min-height（非 0）——mount SummaryCards 断言 `wrapper.attributes('style')`/class 含定高（jsdom 无法量 CLS，CLS 走 LHCI 实测；组件级只防"高度塌陷回归"）。
 
 **R5-0-4：红利类权重上限约束（M1 收敛，用户决策 D1）**
 - 现象：防御 core 563020 红利低波 16.96%、进攻卫星 563020 16.43%，均超 M1 红利类上限。
@@ -229,32 +239,37 @@
 - 现象：opencode_zen 预热期 3 次调用 + 任务并发 → 429；设计任务 45s DATA 超时、策略检查 60s LLM 超时。
 - 前置核实：`llm.py` **已有** 429 退避重试（`_rate_limit_wait()` F3-6：优先 Retry-After、cap 30s，否则指数退避 3s×2^attempt，重试 2 轮后降级）——本轮 429 持续 2 分钟且设计任务 45s 内失败，说明**现有退避在预热并发场景失效**（预热期多任务同时打满配额、45s DATA 预算内退避来不及），而非退避机制缺失。
 - 实施：①预热期 LLM 调用错峰（预热完成后再触发 news 摘要等）；②**评估现有 F3-6 退避失效原因**（预热并发打满配额 → 提高退避轮数或预热期静默跳过 LLM 附属调用）；③design/check 任务提交加**互斥或限流**（同一时间仅 1 个 LLM 任务）；④设计任务 DATA 阶段 45s 预算在数据源熔断期动态放宽或明确失败提示。
-- 验收（可自证，不依赖外部配额承诺）：①应用侧任意时刻至多 1 个 LLM 任务在跑（互斥生效，可观察 /portfolio/tasks 并发 LLM 阶段任务数）；②429 时任务按退避重试且**不失败降级**（除非超时预算耗尽）；③观察点：设计任务 completed 且非 rule 兜底、token-usage 管理接口无 429 级联失败。
+- 验收（可自证，不依赖外部配额承诺）：①应用侧任意时刻至多 1 个 LLM 任务在跑（互斥生效，可观察 /portfolio/tasks 并发 LLM 阶段任务数——判定规则：同一时刻仅 1 个 task 的 stage 为 LLM 相关阶段）；②429 时任务按退避重试且**不失败降级**（除非超时预算耗尽——判定规则：任务在 45s DATA/60s LLM 预算内重试 ≥1 轮且未超时）；③观察点：设计任务 completed 且非 rule 兜底、token-usage 管理接口无 429 级联失败。
+- TDD：`test_llm_rate_limit.py` 扩展——mock provider 连续 429 → 断言退避等待间隔按 Retry-After/cap；预热并发场景 mock 多任务 → 断言互斥（同一时间仅 1 个执行中）。
 
 **R5-1-2：策略检查兜底路径 holdings_analysis 补全（P0-1 收敛）**
 - rule 兜底路径（LLM 超时）目前 holdings_analysis 恒空 → 行业集中度检查静默跳过。
 - 实施：rule 兜底时**用 factor_breakdown/industry_map 生成 holdings_analysis 骨架**（symbol/name/weight/factor_summary/industry），使行业分布分析在兜底路径也存在（数量级正确，标注"规则引擎生成"）。
 - 验收：LLM 超时时 strategy-check 报告仍含逐标的持仓分析 + 行业覆盖提示（≥7 行业不再误报，缺失时 WARN+标注）。
+- TDD：`test_strategy_check_fallback.py` 扩展——mock LLM 超时走 rule 兜底 → 断言 holdings_analysis 非空且含 industry 字段、标注"规则引擎生成"（fixture：现有 strategy-check fixture）。
 
 **R5-1-3：llm-advice 上下文注入关键词扩展（R5-07）**
-- 根因：注入分支关键词（大盘/今天/最新/走势/行情/板块/行业…）覆盖不全，"当前A股市场怎么配置"不命中。
-- 实施：①关键词补"市场""A股""股票""指数""配置"等高频词；或②**无条件注入** market_snapshot（指数/市态/情绪/新闻摘要，成本为零——数据来自缓存）。
-- 验收：任意投顾问题回答含实时市场数据（数据源可用时），无"暂无数据"式全降级模板。
+- 根因：非 stream 版注入分支关键词表（analysis.py:298 `["大盘","今天","最新","走势","行情"]`）覆盖不全，"当前A股市场怎么配置"不命中（stream 版 `_inject_market_context` 已含"市场""指数"，但"A股/股票/配置/板块/行业"两版都缺）。
+- 实施：①关键词补"市场""A股""股票""指数""配置"等高频词（两版同步）；或②**无条件注入** market_snapshot（指数/市态/情绪/新闻摘要，成本为零——数据来自缓存）。
+- 验收：投顾问题样本集（覆盖类：含"市场/A股/配置"；不覆盖类：如"如何看待定投"）回答均含实时市场数据（数据源可用时），无"暂无数据"式全降级模板。
+- TDD：`test_llm_context_market.py` 或前端 llm-advice 契约测试——mock market_snapshot 非空 → 断言两类问题 prompt 均含 snapshot 段（覆盖类命中关键词、不覆盖类走无条件注入路径）。
 
 **R5-1-4：F19 因子 no_data 修复（R68-R72 实施）**
-- sentiment 4 因子全 no_data（panic_greed_diff/stock_divergence/news_heat/news_direction）——根因 1（sentiment_history 缺失）+ 根因 4（akshare 源）。
-- 实施：R68（fetch_market_sentiment 维护 20 日 sentiment_index 滚动数组持久化）；R69（注入 advance_decline）；R70 已部分实施（style 已 valid）；R71（_FUND_SHARES_CACHE 失败缓存破绽修复）。
+- **2026-08-03 技术复核（审查修正——重定位根因）**：R68/R69/R71 **已在代码落地**（F19 R* 注释齐全）：R68 sentiment 20 日滚动数组持久化（fundamentals_fetcher.py:482-512 `_sentiment_history` + L784-805 fetch_market_sentiment 维护+落盘，配套 test_sentiment_history_persist.py 存在）、R69 注入 advance_decline（factor_registry.py:1008-1011）、R70 style 缺口标注（factor_registry.py:852/1035-1055）、R71 `_FUND_SHARES_CACHE` 失败缓存破绽（market_data_hub.py:1118-1122 失败/空不写 24h 成功缓存）。→ **不能按"R68-R71 未实施"推进**；sentiment 4 因子仍全 no_data 需重查根因：①akshare 源熔断（sentiment 数据源为东财/akshare）；②`_sentiment_history` 20 日数组长度不足（样本<阈值 → no_data）；③注入链路（advance_decline/资金流）在降级期返回空。
+- 实施：按复核结果**先诊断后修复**——①确认 akshare sentiment 源当前可用性（非交易时段/限流）与熔断状态；②确认 `_sentiment_history` 长度与落盘数据；③对症修复（源降级时诚实标注 vs 样本不足时 WARN）。R68-R72 已实施部分不做重复改动。
 - 验收：数据源可用后 sentiment 因子 ≥2 个 valid/warn；verify_e2e factor-thresholds 的 sentiment 断言 PASS。
+- TDD（先诊断后写测试）：确认根因后——①若源问题：`test_sentiment_history_persist.py` 扩展源降级 → 断言诚实标注（WARN 非 no_data 静默）；②若样本不足：断言 20 日数组 <N 时 WARN + 原因。两者皆先写失败用例。
 
 **R5-1-5：IC 后台周期计算 + 启动恢复（factor-and-strategy-check R1 + 补充）**
 - 根因（完整链路）：①`_last_ic_batch` 仅带 market_data 的 compute 更新（请求驱动）；②`main.py:342-364` **已有** IC persistence loop（每 120s 把 `_last_ic_batch` 经 `ic_tracker.save_ic_batch_to_db` 持久化到 DB）；③但 `/factors/ic` 端点（factors.py:283-289）**只读内存 `_last_ic_batch`、不回读 DB** → 重启后内存态丢失 → IC 空（DB 中有历史数据但端点读不到）。
 - 实施：①**优先**启动钩子在 lifespan 末尾从 DB 恢复 `_last_ic_batch`（遵循 factor_registry.py:1237-1244 的覆盖保护：仅 abs(val)>0.001 才覆盖）；②补充 main.py 120s 循环内调 `factor_registry.compute(带 market_data 缓存)`（复用已有 K 线缓存，不触网）作为周期刷新。
 - 验收：容器重启后 /factors/ic 不依赖任何请求即返回非空（样本≥3 的因子，数据来自 DB 恢复或首次 compute）；B1 验收"非请求驱动"达标。
+- TDD：`test_ic_tracker.py` 扩展——①启动恢复：mock DB 含历史 IC → 断言 `_last_ic_batch` 被填充（含 abs≤0.001 不覆盖保护用例）；②周期 compute：mock compute 带缓存 → 断言 120s 循环内被调用（fixture：`mock_hub`）。
 
 **R5-1-6：策略检查 LLM 超时诊断与快速失败（用户反馈 #2，2026-08-02）**
 - 背景：策略检查把 LLM 调用包在 60s 预算（portfolio_service.py:576）；429 持续时 `_rate_limit_wait` 尊重 Retry-After（cap 30s）→ 每轮等待 30s × 3 轮 = 90s > 60s → 必超时走 rule 兜底；且超时 summary 只写"LLM 分析超时（60s 未返回）"，用户/日志**无法区分限流与真超时**（本轮用户实测仍触发该文案）。
-- 实施：①`llm.py` 新增模块级 `_last_llm_error` + `get_last_llm_error()`（每次 provider 失败记录 `{provider_id}: {exc}`，429 前缀 `[rate-limited]`/连接超时 `[timeout]`；成功清空）；②`_rate_limit_wait(attempt, resp_headers, cap=30.0)` 参数化 cap（默认 30 不变）；③**调用链透传（cap 生效路径须完整）**：`generate_strategy_check_report` 经 `get_agent("strategy_suggestions").run()` → `llm_complete_with_system`（runtime.py:55-81；**自包含实现，不调 `llm_complete`**，其签名已含 `max_retries`/`retry_delay` 参数，llm.py:556-654）——①agent run 层新增 `rate_limit_cap` 透传参数（默认不传行为不变），策略检查场景传 `max_retries=1, rate_limit_cap=10.0`；②**`llm_complete_with_system` 内部重试等待（当前固定 `retry_delay`，llm.py:650）须接入 `_rate_limit_wait(cap)`**——否则 cap 传了不生效，429 时仍按固定 3s 等待 ×2 轮 ≈ 6s（可接受但 cap 10s 约束落空）；最坏 2 轮×(调用2s×2源+等待≤10s)≈28s < 60s 预算，快速失败；④`portfolio_service.strategy_check` 超时兜底 summary 追加 `最后错误：{get_last_llm_error() or '未知'}`。契约：内部实现改动，不涉 API 契约。
-- TDD（新文件 `tests/test_strategy_check_llm_timeout.py`，6 用例）：429 时 summary 含 provider/429；连接超时含 [timeout]；`_rate_limit_wait(attempt=3, cap=10)` ≤10s；成功返回后 `get_last_llm_error()` 为空；mock agent run 断言 `rate_limit_cap=10` 透传到 `llm_complete_with_system`（mock 点 `app.analysis.runtime.llm_complete_with_system`，对齐 test_agent_registry.py:81）；既有 `test_llm_rate_limit.py` 不破坏（默认 cap 30 不变）。
+- 实施：①`llm.py` 新增模块级 `_last_llm_error` + `get_last_llm_error()`（每次 provider 失败记录 `{provider_id}: {exc}`，429 前缀 `[rate-limited]`/连接超时 `[timeout]`；成功清空）；②`_rate_limit_wait(attempt, resp_headers, cap=30.0)` 参数化 cap（默认 30 不变）；③**调用链透传（cap 生效路径须完整）**：`generate_strategy_check_report`（llm.py:1213）经 `get_agent("strategy_check").run_json(prompt)`（llm.py:1295，**非 `strategy_suggestions`/`run`**——后者属 `generate_strategy_suggestions`）→ `run`（runtime.py:55-81，内部重试循环）→ `llm_complete_with_system`（llm.py:556-654；**自包含实现，不调 `llm_complete`**，其签名已含 `max_retries`/`retry_delay` 参数）——①agent run/run_json 层新增 `rate_limit_cap` 透传参数（默认不传行为不变），策略检查场景传 `max_retries=1, rate_limit_cap=10.0`；②**`llm_complete_with_system` 内部重试等待（当前固定 `retry_delay`，llm.py:650）须接入 `_rate_limit_wait(cap)`**——否则 cap 传了不生效，429 时仍按固定 3s 等待 ×2 轮 ≈ 6s（可接受但 cap 10s 约束落空）；最坏 2 轮×(调用2s×2源+等待≤10s)≈28s < 60s 预算，快速失败；④`portfolio_service.strategy_check` 超时兜底 summary 追加 `最后错误：{get_last_llm_error() or '未知'}`。契约：内部实现改动，不涉 API 契约。
+- TDD（新文件 `tests/test_strategy_check_llm_timeout.py`，6 用例）：429 时 summary 含 provider/429；连接超时含 [timeout]；`_rate_limit_wait(attempt=3, cap=10)` ≤10s；成功返回后 `get_last_llm_error()` 为空；mock agent run 断言 `rate_limit_cap=10` 透传到 `llm_complete_with_system`（mock 点 `app.analysis.runtime.llm_complete_with_system`，对齐 test_agent_registry.py:81）；既有 `test_llm_rate_limit.py` 不破坏（默认 cap 30 不变）。**mock 引用预计 >5 处（6 用例×多个 mock 点）→ 须抽 conftest fixture（F21 R76）**，建议 `mock_llm_chain` fixture（mock `_rate_limit_wait`/`llm_complete_with_system`/`get_last_llm_error`）。
 - 验收：真实 429 时策略检查任务 ≤40s 完成（不 60s 干等），summary 含"最后错误：opencode_zen 429 Too Many Requests"；verify_e2e 策略检查 completed（LLM 失败时 rule 兜底但任务不 failed）。根治（全局 LLM 信号量 + 429 任务排队）见 R5-1-1 ③。
 
 ### 🅿️2 中优先级
@@ -262,16 +277,19 @@
 **R5-2-1：组合计算与 watchlist 提速（P2-1/P3-3 收敛）**
 - calculate 5.10s（门禁 3s）未改善；watchlist 4525ms（round4 2.27s 更慢）。
 - 实施：`_build_price_map_async` 单源 wait_for 3s 截断已存在但收益未达——查慢源具体标的；watchlist 实时行情改 `fetch_a_stock_batch` 批量拉取（P3-3 原案）。
-- 验收：calculate ≤3s、watchlist 首次 <800ms（verify_e2e 门禁收紧）。
+- 验收：calculate ≤3s、watchlist 首次 <800ms（verify_e2e 门禁收紧；"首次"口径：冷缓存——服务启动后首个 watchlist 请求，热缓存命中不计入）。
+- TDD：`test_watchlist_dirty.py`/性能测试扩展——mock 慢源 → 断言 `fetch_a_stock_batch` 被调用（批量路径）且总耗时 < 阈值。
 
 **R5-2-2：news/stock 键归一化收尾（P2-3）**
 - 现状双键并存（title/content/time/url + 关键词/文章来源残留）。
 - 实施：①**契约先行**——更新 `api-contracts/news/all.md`（stock 契约在其 L107-116，末尾 checklist L210 处打勾；删除中文键字段，声明键集 == headlines）+ 末尾 checklist 打勾；②`fetch_stock_news` 归一化后**只输出英文键**（删中文键）；③前后端逐字段核对。
 - 验收：`/news/stock/{symbol}` 键集 == headlines 键集（e2e 断言）。
+- TDD：`test_stock_news_keys.py` 扩展——mock akshare 返回中英文键并存 → 断言归一化后仅英文键（先写失败用例：断言无中文键残留）。契约先行：先合并契约变更再实现。
 
 **R5-2-3：warmup_global_indices 冷拉优化**
 - 预热新增热点 1.09s（round4 3.9ms）。实施：全球指数预热改为"缓存命中即跳过 + 失败快速降级"（与 R4-26 失败缓存模式一致）。
 - 验收：读 `backend/logs/warmup_timing.json` 的 `total_duration_ms` < 2500ms（手工或 CI 脚本直读 JSON；**勿依赖 `check_perf_budget.py`**——其路径拼接 `Path(__file__).parent.parent/'backend'/'logs'` 解析为 `backend/backend/logs/`（不存在）且读 `total_ms` 而 JSON 字段为 `total_duration_ms`，运行即"baseline not found"；若要用它需先修脚本）。**不改** verify_e2e A01 门禁——其阈值 20s/10s 用于 CI 泛化门禁，且 A01 仅在 PROFILE_WARMUP=1 时实测、未启用时恒 PASS，不承担 2.5s 断言。
+- TDD：无新测试（纯预热路径优化）；实施验证 = 跑 PROFILE_WARMUP=1 预热后直读 JSON 断言 <2500ms（一次性脚本，非门禁）。
 
 **R5-2-4：mootdx 依赖与降级链简化（C4-1，对应 R5-12）**
 - 背景：requirements 无 mootdx（`_mootdx()` lazy import 的 ImportError 被 warning 吞，降级链第一环空转）。
@@ -281,8 +299,8 @@
 - 验收：mootdx 成为实时/批量行情降级链**实际可用**的第一环（连接 + 数据有效）；Sina/Tencent 兜底仍保留；相关单测全过。
 
 **R5-2-5：llm_report 指数链路对齐（C4-2，对应 R5-13）**
-- 背景：`llm_report`/`llm_report_stream` 的 indices 用 `get_indices()`（Sina 三级降级，仅 A 股指数）→ HK/US 报告 indices 空；`get_global_indices()`（17 指数多源降级 + 24h 磁盘缓存，含港股/美股段）有数据未用。
-- 实施：indices 采集改 `get_global_indices()` 展平 → `_filter_indices_for_market`（P0-2 口径）按市场过滤；A/GLOBAL 保持全量。契约：indices 响应结构不变，契约先行核对即可（`api-contracts/analysis/llm-report.md` 无需改字段）。TDD：mock get_global_indices 返回 A/HK/US 段，断言 HK 报告仅注入 HK 段。
+- 背景：**非 stream 版** `llm_report`（analysis.py:191，L209）的 indices 用 `get_indices()`（Sina 三级降级，仅 A 股指数）→ HK/US 报告 indices 空；`get_global_indices()`（17 指数多源降级 + 24h 磁盘缓存，含港股/美股段）有数据未用。**stream 版 `llm_report_stream`（analysis.py:443）已走 `llm_context.build_full_context`（HK/US 已用 `get_global_indices()` L59-63、A 股用 `get_index_realtime()` L65）——不受本项影响**。
+- 实施：非 stream 版 indices 采集改 `get_global_indices()` 展平 → `_filter_indices_for_market`（P0-2 口径）按市场过滤；A/GLOBAL 保持全量。契约：indices 响应结构不变，契约先行核对即可（`api-contracts/analysis/llm-report.md` 无需改字段）。TDD：mock get_global_indices 返回 A/HK/US 段，断言 HK 报告仅注入 HK 段。
 - 验收：HK/US llm-report indices 非空（数据源可用时含对应市场指数）；verify_e2e 增 HK/US 报告指数非空断言。
 
 **R5-2-6：东财 API 抗限流（C4-3，对应 R5-14）**
@@ -329,13 +347,13 @@
 
 **R5-3-1：前端交互组件测试改「真实 composable + mock 网络」**
 - 目标组件：UnifiedAnalysis / AiAdvisor / MarketReport / WatchlistPanel / AnalysisView（5 个含输入/补全/切换的组件）。
-- 现状：spec 全 mock 业务 composable（如 `useMarketSearch` 返回 stub）→ 状态写回链路无人断言（#12/#13 接线断点静默通过的根因）。
-- 实施：改造现有 spec——**不再 mock 业务 composable**，用真实 `useMarketSearch` 等 + 只 mock `api` 层（axios）；断言模式：`input 事件 → searchQuery 写回 → debounce → api 调用参数` 全链路；新增「prop 变化（marketTab/activeTab/period）→ 状态重置/请求重发」断言矩阵。
-- TDD：对 5 个组件各补 1 个"真实输入流"用例（如 UnifiedAnalysis：`input.setValue('5100')` → 断言 api.search 以 `5100` 调用）；回归：#12/#13/#14/#15 的既有用例改造为走真实输入流。
-- 验收：5 组件 spec 无 mock composable；前端全量测试通过。
+- 现状：spec 全 mock 业务 composable（如 `useMarketSearch` 返回 stub）→ 状态写回链路无人断言（#12/#13 接线断点静默通过的根因）。**AiAdvisor 目前无单测 spec（仅 e2e/13-ai-advisor.spec.js Playwright），需新建而非"改造现有"**。
+- 实施：改造现有 spec（AiAdvisor 新建）——**不再 mock 业务 composable**，用真实 `useMarketSearch` 等 + 只 mock `api` 层（axios）；断言模式：`input 事件 → searchQuery 写回 → debounce → api 调用参数` 全链路；新增「prop 变化（marketTab/activeTab/period）→ 状态重置/请求重发」断言矩阵。
+- TDD：对 5 个组件各补 1 个"真实输入流"用例（如 UnifiedAnalysis：`input.setValue('5100')` → 断言 api.search 以 `5100` 调用；AiAdvisor 新建 spec 覆盖 market/symbol prop 重置）；回归：#12/#13/#14/#15 的既有用例改造为走真实输入流。
+- 验收：5 组件 spec 无 mock composable（AiAdvisor 含新建）；前端全量测试通过。
 
 **R5-3-2：后端 asset_type 分支参数化测试**
-- 现状：`get_asset_realtime` 测试只覆盖 A/HK/US，漏 index/gold 等（#8 指数错位未被捕获）。
+- 现状：`get_asset_realtime` 测试已覆盖 A/HK/US/stock 分支（test_market_service_hk.py、test_v5_remaining_fixes.py:41、test_v5_diagnosis_fixes.py:74），但**未参数化**，且漏 index/gold 等（#8 指数错位未被捕获）。
 - 实施：`@pytest.mark.parametrize` 覆盖 `A/ETF/HK/US/index` 全分支，断言「返回值与分支匹配」（index 不得返回股票价；HK 不走 A 股路径——U1/N03 回归）。
 - 验收：参数化用例全过；新增分支（如 gold/oil）时强制补参。
 
@@ -345,7 +363,7 @@
 - 验收：prompt 注入/降级两类断言存在且通过。
 
 **R5-3-4：路由层集成测试（覆盖调用处传参）**
-- 现状：`_normalize_sector_code` 有纯函数单测，但调用处传单表（#7 概念 404）测不到。
+- **2026-08-03 技术复核（审查修正）**：调用处已传合并双表——`sector_analysis_stream`（analysis.py:677-688）构造 `combined = industry + concept` 后传入 `_normalize_sector_code`（注释"R5: 概念映射兜底——前端 sector 模式固定传 sector_type='industry'，概念名在行业表找不到 → 404。取对侧表一起参与名称归一化"），且 test_analysis_gate_quality.py:40 已有 `test_normalize_sector_code_concept_name_in_combined_tables`。→ "#7 概念 404 调用处传单表"现状已修复，本项剩余价值是**路由层集成测试**。
 - 实施：对 `sector_analysis_stream` mock `market_data_hub`（行业+概念双表）+ `_sse_stream` 断言「概念名映射成功、SSE 首包含板块行情段、无 404」；对 `watchlist_list` mock `get_asset_realtime` 断言并行化（慢源不拖累）。
 - 验收：路由层集成测试存在且通过。
 
@@ -360,18 +378,44 @@
 批次 1（P0）            ← 本批先行（verify_e2e design-quality 门禁为验收基准）
   R5-0-1 (候选池强制标二次校验)  R5-0-2 (重叠修复)  R5-0-3 (首页 CLS + LHCI 接入)
   R5-0-4 (红利上限)  R5-0-5 (A7/A10/A11 复验)
+  验收方式：R5-0-1/0-2/0-4 → verify_e2e design-quality/diversity；R5-0-3 → LHCI（本地跑 3 次中位数）；
+           R5-0-5 → 单测运行 + design_text 走查（A10/A11 检查清单：理由列 ≤80 字、名称无 "…"）
 批次 2（P1）
   R5-1-1 (LLM 限流)  R5-1-2 (策略检查兜底持仓分析)  R5-1-3 (llm-advice 注入)
   R5-1-4 (F19 因子)  R5-1-5 (IC 后台计算)  R5-1-6 (LLM 超时诊断与快速失败)
+  验收方式：R5-1-1/1-6 → 单测 + 任务状态观察；R5-1-2/1-3 → verify_e2e 新断言 + 单测；
+           R5-1-4 → verify_e2e factor-thresholds；R5-1-5 → verify_e2e factor_ic（重启后非请求驱动）
 批次 3（P2）
   R5-2-1 (calculate/watchlist 提速)  R5-2-2 (news 键收尾)  R5-2-3 (预热优化)
   R5-2-4 (mootdx 降级链)  R5-2-5 (报告指数链路)  R5-2-6 (东财抗限流)
   R5-2-7 (商品签名)  R5-2-8 (PE/PB 备用源)  R5-2-9 (熔断器接线)
   R5-2-10 (国内宏观管道)  R5-2-11 (场外技研链路)
+  验收方式：R5-2-1 → verify_e2e 门禁收紧；R5-2-3 → 直读 warmup_timing.json <2500ms；
+           R5-2-4 → 单测 + 链路验证（mootdx 连接+数据有效）；R5-2-5~2-9 → 单测 + verify_e2e；
+           R5-2-10 → 单测 + e2e（domestic_macro 断言）；R5-2-11 → 前端 spec + 走查
 批次 4（测试防护弥补，见 §十 R5-3 节）
   R5-3-1 (前端真实 composable 测试)  R5-3-2 (asset_type 参数化)
   R5-3-3 (prompt 完整性断言)  R5-3-4 (路由集成测试)  R5-3-5 (性能预算门禁)
+  验收方式：R5-3-1 → 前端全量测试；R5-3-2/3/4 → 后端单测；R5-3-5 → 性能测试 + 前端单测
 ```
+
+**批次依赖与冲突提示（2026-08-03 审查补强）**：
+1. **数据源依赖倒挂**：批次 1 的 R5-0-1（候选池恒含强制标的）与批次 2 的 R5-1-4（sentiment 因子）验收依赖**数据源可用**，而数据源修复（R5-2-4~2-9）在批次 3——批次 1/2 验收窗口在批次 3 落地前可能受数据源降级影响。处理：按 §十 统一约定第 3 条"数据源可用判定"，不可用时验收标注"待源恢复复验"不判 FAIL；批次 1/2 实施时优先跑 verify_e2e 的"数据源可用"探测。
+2. **LLM 依赖倒挂**：批次 1 的 R5-0-1/0-2/0-4 验收需**真实 design**（LLM 生成），而 LLM 429 治理（R5-1-1/1-6）在批次 2——429 窗口内 design 任务可能失败/超时。处理：批次 1 实施时若 429 持续，design 复验顺延至批次 2 完成后补跑；批次 1 先行推进不依赖 LLM 的 R5-0-3/0-5。
+3. **spec 文件冲突**：R5-2-11（批次 3）新增/修改 `AnalysisView.spec.js` 用例，R5-3-1（批次 4）改造 AnalysisView 的 spec——**两批需在实施 AnalysisView 用例时合并处理**（先业务用例后真实输入流改造，避免重复编辑同一文件）。
+
+## 十一之补：风险与回滚预案（2026-08-03 审查补强）
+
+> 本方案含多个高影响改动。以下 6 项为高风险项，实施时须按预案准备回退；其余项失败可单独 revert commit 回退。
+
+| 修复项 | 风险 | 回滚/降级预案 |
+|---|---|---|
+| R5-0-1 候选池二次校验 | 截断逻辑移动影响全链路候选池，改错污染所有 design | 保持 `_ensure_mandatory` 原调用点不动，二次校验作为**新增独立步骤**（非移动）；失败仅 WARNING + 注入，不抛异常；revert 只需删除新增校验函数调用 |
+| R5-0-3 首页 CLS | 前端视觉回归无 CI 拦截（LHCI 新增后才有效） | min-height 改动为纯 CSS 增量，revert 单文件；实施时用 feature 分支 + Lighthouse 前后对比截图 |
+| R5-2-2 news 键收尾 | 契约先行删除中文键，前后端不同步发布会直接断 news 展示 | **分步顺序**：①契约合并（双键并存的过渡期声明）→ ②前端适配读英文键 → ③后端删中文键；每步可独立 revert，禁止一次 PR 全改 |
+| R5-2-6 push2 双源路由 | 熔断 gate 错位（源名 vs URL 不同步）→ 错误冷却/降级 | 双 provider 路由为**增量**（etf_scanner 内部），保留原单域路径常量；失败时 revert 到 `EM_PUSH_HOST` 单域；fundamentals_fetcher URL 与源名须同一 commit 同步改 |
+| R5-2-9 熔断器接线 | 误熔断扩大降级面（§4.2 已见"行业检查被静默跳过"类降级） | 熔断阈值参数化（默认 3 次/60s），可临时调大或关闭（config flag）；确认降级可逆——熔断冷却后自动恢复 |
+| R5-2-10 国内宏观管道 | llm-report 新增 `domestic_macro` 段，LLM 解析异常 | `include_macro` 参数默认 True 但支持 False 关闭；`unavailable=true` 时 LLM 显式降级文案（不编造）；契约字段为**可空对象**，前端兼容缺失 |
 
 ## 十二、验收总表
 
@@ -384,19 +428,19 @@
 | R5-0-5 | A7/A10/A11 复验结论记入实施记录（A10/A11 不达标并入 F3 R4/R5） | 单测 + 走查 |
 | R5-1-1 | 应用侧至多 1 个 LLM 任务并发；429 退避重试不失败降级（除非超时预算耗尽） | 单测 + 任务状态观察（completed 非 rule 兜底） |
 | R5-1-2 | LLM 超时报告含持仓分析+行业覆盖 | verify_e2e 新断言 |
-| R5-1-3 | 任意投顾问题含市场数据 | 单测 + e2e |
-| R5-1-4 | sentiment 因子 ≥2 valid/warn | verify_e2e factor-thresholds |
+| R5-1-3 | 投顾问题样本集（覆盖/不覆盖类）回答均含实时市场数据 | 单测 + e2e |
+| R5-1-4 | 数据源可用后 sentiment 因子 ≥2 valid/warn | verify_e2e factor-thresholds |
 | R5-1-5 | 重启后 /factors/ic 非请求驱动非空（DB 恢复或首轮 compute） | verify_e2e factor_ic |
+| R5-1-6 | 真实 429 时策略检查 ≤40s 完成；summary 含最后错误原因 | 单测 + 任务状态观察 |
 | R5-2-1 | calculate ≤3s；watchlist <800ms | verify_e2e 门禁收紧 |
 | R5-2-2 | news/stock 键集==headlines（契约先行更新） | 单测 + e2e |
-| R5-2-3 | warmup_timing.json total_duration_ms <2500ms | 直读 JSON（勿用 check_perf_budget.py，见 §P2 说明） |
-| R5-2-4 | 无 mootdx ImportError 噪音；实时/批量行情 Sina/Tencent 正常 | 单测 + 链路验证 |
+| R5-2-3 | warmup_timing.json total_duration_ms <2500ms | 直读 JSON（勿用 check_perf_budget.py，见 §十 🅿️2 R5-2-3） |
+| R5-2-4 | mootdx 成为实时/批量行情降级链实际可用的第一环（连接 + 数据有效）；Sina/Tencent 兜底保留 | 单测 + 链路验证 |
 | R5-2-5 | HK/US llm-report indices 非空（数据源可用时） | verify_e2e 新断言 + 单测 |
-| R5-2-6 | 东财限流窗口内重试/降级 push2delay 取数成功 | 单测 + 链路验证 |
+| R5-2-6 | push2 主源实时字段完整（ETF 列表 f2/f3 有值）；限流时降级 push2delay 取数成功 | 单测 + 链路验证 |
 | R5-2-7 | 商品行情非恒空（数据源可用时）、无 TypeError | 单测 + e2e |
 | R5-2-8 | akshare 挂时 PE/PB 备用源可用或显式标注 | 单测 + e2e |
 | R5-2-9 | 东财失败被熔断计数并冷却；health 如实反映 | verify_e2e sources + circuit-breakers |
-| R5-1-6 | 真实 429 时策略检查 ≤40s 完成；summary 含最后错误原因 | 单测 + 任务状态观察 |
 | R5-2-10 | A 股 llm-report domestic_macro 含 LPR+中美利差+M2；不可用时 unavailable=true | 单测 + e2e |
 | R5-2-11 | 场外基金**两入口**（组合展开 + AnalysisView 技术分析 tab）均显示数据（无"暂无数据"）；A 股场内不回归 | 前端 spec + 走查 |
 | R5-3-1 | 5 组件 spec 无 mock composable；真实输入流断言存在 | 前端全量测试 |
@@ -412,20 +456,20 @@
 - 老镜像已在构建时回收（本轮新镜像 58d441568575/67ef197df43c 保留）。
 - 诊断报告（warmup_timing.json / warmup_pyinstrument.* / warmup_cprofile.txt / perf_diag_results.json）保留在 `backend/logs/` 供回溯。
 
-## 附录 A：本轮问题清单（R5-01 ~ R5-10）
+## 附录 A：本轮问题清单（R5-01 ~ R5-15）
 
 - **R5-01 🔴** 设计真实链路 A500 未入核心层（560600 被 MAX_PER_LAYER[core]=8 截断挤出；_ensure_mandatory 在截断前执行；P1-1 门禁 FAIL）。
 - **R5-02 🔴** 核心层跨方案重叠（平衡∩进攻 3 只 [159915, 562000, 588000]；P1-2 门禁 FAIL；豁免放宽分支过宽）。
-- **R5-03 🔴** 首页 Lighthouse P56/CLS 0.388（summary-grid 无固定高度；P1-8 未实施；LHCI 未接入 CI）。
+- **R5-03 🔴** 首页 Lighthouse P56/CLS 0.388（summary-grid 无固定高度；P1-8 未实施；LHCI 未接入 CI；**2026-08-03 复核：.summary-card 已有 R4-19 min-height:96px，CLS 归因须复核，见 R5-0-3**）。
 - **R5-04 🔴** 组合计算 5.10s（P2-1 未达标）；watchlist 4525ms 劣化。
 - **R5-05 🟡** LLM 主 provider 429 限流（设计失败 + 策略检查降级；并发任务无互斥）。
-- **R5-06 🟡** sentiment 4 因子 no_data（F19 未实施）+ IC 仅请求驱动（R1 未实施）。
+- **R5-06 🟡** sentiment 4 因子 no_data（**2026-08-03 复核：F19 R68/R69/R71 已在代码落地，根因重定位为源可用性/样本长度，见 R5-1-4**）+ IC 仅请求驱动（R1 未实施）。
 - **R5-07 🟡** llm-advice 注入关键词覆盖不全（"市场"不在关键词表 → 无上下文回答）。
 - **R5-08 🟡** rule 兜底路径 holdings_analysis 恒空（行业检查静默跳过）。
 - **R5-09 🟡** news/stock 中文键残留（P2-3 部分修复，双键并存）。
-- **R5-10 🟢** 数据源降级面扩大（候选池 14 只、今日涨跌全缺、HK/US 报告指数缺失、US 个股搜索空、PE/PB 全缺）——详见附录 C 数据源归因专项：约 2/3 为外部数据源问题（东财 API 限流、mootdx/7709 端口不可达），约 1/3 为管道缺陷（llm_report 指数链路、商品签名、熔断器未接线等，可修复）。
+- **R5-10 🟢** 数据源降级面扩大（候选池 14 只、今日涨跌全缺、HK/US 报告指数缺失、US 个股搜索空、PE/PB 全缺）——详见附录 C 数据源归因专项：约 2/3 为外部数据源问题（东财 API 限流、**mootdx 依赖缺失（网络实为可达，2026-08-03 复测更正）**），约 1/3 为管道缺陷（llm_report 指数链路、商品签名、熔断器未接线等，可修复）。
 - **R5-11 🟡** 红利类权重超 M1 上限（防御 core 563020 16.96%、进攻卫星 16.43% > 15%；D1 决策未在引擎落地，修复项 R5-0-4）。
-- **R5-12 🟡** mootdx 依赖缺失：requirements.txt 无 mootdx 包，容器/生产从未真正连接（ImportError 被吞）；且 7709 端口当前网络不可达（官方服务器 IP 亦超时）——**修复项 R5-2-4**（§十）。
+- **R5-12 🟡** mootdx 依赖缺失：requirements.txt 无 mootdx 包，容器/生产从未真正连接（ImportError 被吞）（**2026-08-03 复测更正：7709 网络实为可达、数据可用，不可达为误判，见 R5-2-4**）——**修复项 R5-2-4**（§十）。
 - **R5-13 🟡** llm_report 指数链路不一致：用 `get_indices()`（Sina 主源的三级降级链，A 股指数）而非 `get_global_indices()`（17 指数多源降级 + 24h 磁盘缓存，含港股/美股段）→ HK/US 报告指数恒缺——**修复项 R5-2-5**（§十）。
 - **R5-14 🟡** 东财 API 限流无降级：push2 实时被拒时不降级同域 push2delay（已验证可用，1843 只 ETF）；无 UA/Referer/重试抗限流——**修复项 R5-2-6**（§十）。
 - **R5-15 🟡** akshare 接口签名变更未适配：`futures_foreign_commodity_realtime()` 现需 `symbol` 参数（旧调用 TypeError）→ 商品数据恒空——**修复项 R5-2-7**（§十）。
@@ -433,14 +477,15 @@
 ## 附录 B：修订记录
 
 - v1.0 (2026-08-02)：round5 全量诊断完成（15 项动作），形成 P0-P2 修复方案（未实施）。
-- v1.1 (2026-08-02)：多轮 review 修订——①R5-1-1 前置核实 llm.py 已有 F3-6 退避（改为评估失效原因）且验收去外部配额承诺；②P1-3 证据路径更正为 routers/analysis.py；③R5-1-5 根因补 DB 持久化存在但端点不回读 + 实施补启动恢复；④R5-2-3 验收改直读 warmup_timing.json（标注 check_perf_budget.py 路径/字段 bug）；⑤新增 §十三 诊断配置回收（PROFILE_WARMUP/logs volume 移除、LOG_LEVEL 保留说明）；⑥docker-compose 注释补 LOG_LEVEL 行为变更说明；⑦R5-2-2 补契约先行步骤；⑧新增 R5-0-4（M1 红利上限，含单测覆盖缺口警示）与 R5-0-5（A7/A10/A11 复验），同步补 §十一 批次 1、§十二 验收总表、附录 A R5-11；⑨8.2 表补 A7/A10/A11 未实测注记；⑩R5-0-4 决策范围显式化（D1 防御型 15% 扩展为全方案）；⑪R5-0-2 验收口径统一（剔除公共底仓与强制标的）。
+- v1.1 (2026-08-02)：多轮 review 修订——①R5-1-1 前置核实 llm.py 已有 F3-6 退避（改为评估失效原因）且验收去外部配额承诺；②P1-3 证据路径更正为 routers/analysis.py；③R5-1-5 根因补 DB 持久化存在但端点不回读 + 实施补启动恢复；④R5-2-3 验收改直读 warmup_timing.json（标注 check_perf_budget.py 路径/字段 bug）；⑤新增 §十三 诊断配置回收（PROFILE_WARMUP/logs volume 移除、LOG_LEVEL 保留说明）；⑥docker-compose 注释补 LOG_LEVEL 行为变更说明；⑦R5-2-2 补契约先行步骤；⑧新增 R5-0-4（M1 红利上限，含单测覆盖缺口警示）与 R5-0-5（A7/A10/A11 复验），同步补 §十一 批次 1、§十二 验收总表、附录 A R5-11；⑨8.2 表补 A7/A10/A11 未实测注记；⑩R5-0-4 决策范围记录（D1 防御型 15% 扩展为全方案——**当时为方案拟定，用户确认见 v1.5**）；⑪R5-0-2 验收口径统一（剔除公共底仓与强制标的）。
 - v1.2 (2026-08-02)：数据源归因专项（附录 C）——①三层实测（原始 akshare / 封装 fetcher / 管道产出）+ 宿主机 vs 容器网络对照；②更正两处误报：levistock 实为财联社通道（pip 包 levistock，`api.levistock.com` 为错误域名，源正常）、新浪 403 为缺 Referer（fetcher 已带，源正常）；③确认 mootdx 依赖缺失（requirements 无包）+ 7709 端口不可达（与交易时间无关）；④新增问题 R5-12~R5-15（mootdx 依赖、llm_report 指数链路、东财限流无降级、akshare 签名）与修复方向（§C.4，未纳入实施批次，待确认）。
 - v1.3 (2026-08-02)：数据源修复方案正式化——附录 C §C.4 修复方向升级为 §十 P2 正式修复项 **R5-2-4~R5-2-9**（mootdx 降级链简化 / llm_report 指数链路对齐 / 东财抗限流 / 商品签名适配 / PE/PB 备用源 / 熔断器接线），同步补 §十一 批次 3、§十二 验收总表 6 行、附录 A R5-12~15 修复项编号引用；仍为实施标准设计，未实施。
 - v1.4 (2026-08-02)：用户反馈批次方案正式化——新增 **R5-1-6**（策略检查 LLM 超时诊断与快速失败：原因留痕 + cap 参数化）、**R5-2-10**（国内宏观数据管道：macro_fetcher + domestic_macro 段 + 契约）、**R5-2-11**（场外基金技研链路：taTarget asset_type 修正）；新增 **🅿️3 测试防护弥补批次 R5-3-1~5**（前端真实 composable 测试 / asset_type 参数化 / prompt 完整性断言 / 路由集成测试 / 性能预算门禁，来源 user-feedback-fixes-review §5）；§十一 批次追加 1-6/2-10/2-11/批次 4；§十二 验收总表追加 8 行；仍为实施标准设计，未实施。
-- v1.5 (2026-08-03)：用户决策记录——①**R5-2-4 mootdx：选方案 A**，复测 7709（standard.mootdx.com + 3 官方 IP 全 TCP 超时）→ 不可达成立，**维持现有降级链不补依赖**（方案 B 移除改造不适用）；②**R5-0-4 红利上限：接受全方案扩展**（平衡/进攻卫星层同 15%）；③新增 **R5-3-6**（AnalysisView 技术分析"所有标的一样"真实 bug 修复——watch 守卫竞态 + fetchChart 竞态守卫 seq，见 user-feedback-fixes-review §三 #3 修复记录，前端已实施 +2 测试，属 R5 实时修复批次，非待实施项）；④实施启动决策：**暂不实施**（保持实施标准设计状态）。
+- v1.5 (2026-08-03)：用户决策记录——①**R5-2-4 mootdx：选方案 A**，复测 7709（standard.mootdx.com + 3 官方 IP 全 TCP 超时）→ 不可达成立，**维持现有降级链不补依赖**（方案 B 移除改造不适用；**注：v1.5.1 复测更正该结论**）；②**R5-0-4 红利上限：接受全方案扩展**（平衡/进攻卫星层同 15%）；③记录 **R5-3-6**（AnalysisView 技术分析"所有标的一样"真实 bug 修复——watch 守卫竞态 + fetchChart 竞态守卫 seq，见 user-feedback-fixes-review §三 #3 修复记录，前端已实施 +2 测试，**属已实施项，不在 §十/§十二 待实施清单列出**——编号仅用于追溯）；④实施启动决策：**暂不实施**（保持实施标准设计状态）。
 - v1.5.1 (2026-08-03)：**mootdx 复测修正**——用户要求排查 7709 之外调用方式，实测推翻旧结论：mootdx 内置 HQ_HOSTS 42 目标 16 个可达（含默认首个 110.41.147.114:7709），端到端实时行情 + 日 K（含当日）跑通；旧"不可达"判定基于退役老 IP，不成立；7719 不可达、7720 外盘接口已失效。R5-2-4 修订为**方案 A 可行**：补 `mootdx>=0.11.7` 依赖即启用降级链第一环（Docker py3.14 需验证 py-mini-racer wheel），待用户确认实施。
 - v1.5.2 (2026-08-03)：**push2 复测**——交易时段实测 push2.eastmoney.com 已恢复（HTTP/HTTPS stock/get + clist 均 200，实时字段 f2/f3 完整）；push2delay 延时源 clist 实时字段残缺（1617 只仅 3 只有价）。东财限流按时间波动（8-01 挂 / 8-03 恢复）。R5-2-6 更新：主源改回 push2、push2delay 作降级；market_context.py 注释同步修订（保留 push2delay 常量待实施）。
 - v1.5.3 (2026-08-03)：**R5-2-6 实施方向确认（用户）**——push2 优先、push2delay 兜底，**双源路由**而非改常量：etf_scanner `_fetch_em_etf_list(host)` 参数化 + registry.route 双 provider（对齐 mootdx→tencent→sina）；fundamentals_fetcher:632 硬编码 URL 必须与源名同步（避免 gate 错位）；熔断指数退避天然匹配限流波动。
+- v1.6 (2026-08-03)：**多轮审查修订（达实施标准）**——①新增 §十 开头「TDD 与验收统一约定」（mock 基线 F21 R76 / "数据源可用"判定标准 / 验收可测试性 / 实施记录）；②技术事实修正 8 处：R5-0-3（.summary-card 已有 R4-19 min-height:96px，CLS 归因须复核）、R5-1-3（stream 版已含"市场"关键词，样本集验收）、R5-1-4（R68/R69/R71 已在代码落地，重定位根因为源可用性/样本长度）、R5-1-6（agent 名更正 `strategy_check`/`run_json`）、R5-2-5（stream 版已走 build_full_context，仅非 stream 受影响）、R5-3-1（AiAdvisor 无 spec 须新建）、R5-3-2（已有 stock 分支测试）、R5-3-4（调用处已传合并双表，剩路由集成测试价值）；③11 个无 TDD 项补 TDD 描述（R5-0-1/0-2/0-3/1-1/1-2/1-3/1-4/1-5/2-1/2-2/2-3）+ R5-1-6 mock fixture 评估；④§十一 批次补验收方式标注 + 依赖倒挂/LLM 依赖/spec 冲突 3 项提示；⑤新增「十一之补：风险与回滚预案」6 项；⑥一致性修正：标题 v1.6、附录 A 标题 R5-01~R5-15、§十二 验收表 R5-1-6 行序归位、R5-2-4 验收行与 §十 统一、§P2 悬空引用改 §十 🅿️2、R5-3-6 标注"已实施不在待实施清单"、v1.1 时间线倒置更正；⑦附录 C mootdx 旧结论全面更正（C.2/C.3/C.4/R5-10）。仍为实施标准设计，未实施。
 
 ## 附录 C：数据源归因专项（2026-08-02 补充诊断）
 
@@ -458,8 +503,7 @@
 | 源 | 实测证据 | 判定 |
 |---|---|---|
 | 东财 push2 实时接口（A股 spot/全球指数/行业板块/个股信息 PE·PB/日K线） | 宿主机+容器均 `RemoteDisconnected`，重试 3 次稳定失败；同域 push2delay HTTP 200 正常；部分接口（新闻/热门股/基金净值/A股指数）间歇可用 | **出口 IP 被东财限流**（接口级、间歇性），非网络问题 |
-| mootdx `standard.mootdx.com:7709` + 通达信官方服务器 202.108.24.23/119.147.212.81/112.65.136.186:7709 | 全部 TCP 超时（宿主机 24s / 容器 8s / 官方 IP 5s） | **7709 端口网络不可达**（外部），与交易时间无关（非交易时段行情服务器 TCP 仍可连） |
-| 通达信官方行情服务器 7709 端口 | 同上 | 同上 |
+| mootdx `standard.mootdx.com:7709` + 通达信官方服务器 202.108.24.23/119.147.212.81/112.65.136.186:7709 | 全部 TCP 超时（宿主机 24s / 容器 8s / 官方 IP 5s） | **2026-08-03 复测更正**：上述 IP 为**退役老服务器**（不在 mootdx 0.11.7 内置 HQ_HOSTS 列表）；内置 42 目标实测 **16 个可达**（含默认 110.41.147.114:7709），端到端行情跑通——"7709 不可达"为误判，真实问题是**依赖缺失**（见 R5-2-4） |
 | akshare 港股/美股 spot | 5-6s 超时返回空 | 数据源无数据（源弱/限流） |
 
 **B. 管道缺陷（数据源可用但管道未接好，~1/3，可修复）**
@@ -468,7 +512,7 @@
 |---|---|---|
 | llm_report 指数链路不一致 | `llm_report` 用 `get_indices()`（Sina 主源三级降级，仅 A 股指数），`get_global_indices()`（17 指数多源降级+24h 磁盘缓存，含港股/美股段）有数据却不用 → HK/US 报告 `indices=[]` | HK/US 综合研判缺指数（round5 实测"暂无数据"；归因见 §五） |
 | 东财限流无降级 | push2delay（1843 只 ETF）可用但主链路不降级；fetcher 无 UA/Referer/重试 | 候选池缩小、今日涨跌缺失、PE/PB 缺 |
-| mootdx 依赖缺失 | requirements.txt 无 mootdx 包，`_mootdx()` ImportError 被吞；容器从未真正连接 | 降级链第一环空转（注释声称 mootdx→Sina→Tencent） |
+| mootdx 依赖缺失 | requirements.txt 无 mootdx 包，`_mootdx()` ImportError 被吞；容器从未真正连接（2026-08-03 复测：**网络与数据均可用**，仅依赖缺失；见 R5-2-4） | 降级链第一环空转（注释声称 mootdx→Sina→Tencent） |
 | akshare 商品签名变更 | `futures_foreign_commodity_realtime()` 现需 `symbol` 参数，旧调用 TypeError | 商品数据恒空 |
 | PE/PB 无备用源 | `fetch_current_pe_pb` 依赖 `ak.stock_zh_a_hist` 东财日线估值列（fundamentals_fetcher.py:270-312，东财挂 → None） | 估值指标缺（仅"数据源不可用"标注；修复项 R5-2-8） |
 | 熔断器未接线 akshare | akshare/dongfang 熔断器 `closed` 且失败计数 0，但实际大量失败 | 熔断防护形同虚设 |
@@ -483,12 +527,12 @@
 ### C.3 关键更正（上轮误报）
 - **levistock 正常**：`levistock` 是 pip 包，封装**财联社（cls.cn）签名接口**（`lv.news_telegraph_cls` / `market_emotion_cls` / `get_sector_heat` / `market_wind_cls` 全部实调正常）；上轮测的 `api.levistock.com` SSL EOF 是错误域名（与本项目无关）。
 - **新浪正常**：`hq.sinajs.cn` 强制要求 `Referer: https://finance.sina.com.cn/`，fetcher 已带（K 线降级链实测 240 条）；裸测 403 为缺 Referer 所致。
-- **mootdx 与交易时间无关**：非交易时段行情服务器 TCP 仍可连（数据为收盘快照）；当前不可达 = ①requirements 缺 mootdx 包（从未真正连接）+ ②7709 端口网络不可达（官方 IP 亦超时）。
+- **mootdx 与交易时间无关**：非交易时段行情服务器 TCP 仍可连（数据为收盘快照）；**2026-08-03 复测更正**：此前"7709 不可达"基于退役老 IP（standard.mootdx.com 等，不在内置列表），实际内置 HQ_HOSTS 16/42 可达、端到端行情可用——不可达为**误判**，当前不可用 = 仅 requirements 缺 mootdx 包（从未真正连接）；修复方向见 R5-2-4（方案 A：补依赖）。
 
 ### C.4 修复方案（已升级为正式修复项 R5-2-4~R5-2-9，见 §十/§十一批次 3/§十二验收总表）
 | 项 | 修复方向 | 验收 |
 |---|---|---|
-| C4-1 mootdx 依赖 | ①requirements 补 `mootdx`（需先确认宿主 7709 端口可达）；②或从降级链移除 mootdx 环节（从未生效，Sina/Tencent 兜底已实测正常），减少无谓超时 | 无 mootdx ImportError 噪音；或降级链直接 Sina/Tencent |
+| C4-1 mootdx 依赖 | ①requirements 补 `mootdx>=0.11.7`（**2026-08-03 复测：7709 可达、数据可用，方案 A 可行**；Docker py3.14 需验证 py-mini-racer wheel）；②若 wheel 不可用则固定版本或跳过（保持现状） | mootdx 成为实时/批量行情降级链实际可用的第一环（连接 + 数据有效）；Sina/Tencent 兜底保留 |
 | C4-2 llm_report 指数链路 | `llm_report` 的 indices 改取 `get_global_indices()` 按市场取段（对齐 market_data 的 N04 口径），HK/US 报告不再缺指数 | HK/US llm-report indices 非空（数据源可用时） |
 | C4-3 东财抗限流 | fetcher 补 `User-Agent`/`Referer` + 失败重试退避 + push2 被拒时降级 push2delay | 东财接口在限流窗口内仍能取数（或降级 push2delay 成功） |
 | C4-4 akshare 签名适配 | `futures_foreign_commodity_realtime(symbol=...)` 按新签名调用（或改用其他商品源） | 商品数据非恒空 |
