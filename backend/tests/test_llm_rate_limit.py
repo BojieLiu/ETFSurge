@@ -169,3 +169,55 @@ async def test_llm_stream_retries_on_429(monkeypatch):
     assert calls["n"] >= 3, f"流式应尝试 ≥3 次，实际 {calls['n']}"
     err = next((ev for ev in events if ev.get("type") == "error"), None)
     assert err and "LLM 限流，已降级" in err["error"], f"实际: {events}"
+
+
+# ── R5-1-1: design/check 任务 LLM 互斥（同一时间仅 1 个 LLM 任务在跑） ─────
+class _FakeMgr:
+    """最小 TaskManager mock：get_task / update_task 记录调用。"""
+
+    def __init__(self):
+        self.updated = []
+
+    async def get_task(self, task_id):
+        return {"task_id": task_id, "type": "check", "params": {"capital": 100000}}
+
+    async def update_task(self, task_id, **kw):
+        self.updated.append((task_id, kw))
+        return None
+
+
+async def test_strategy_check_worker_uses_shared_llm_semaphore(monkeypatch):
+    """R5-1-1: strategy_check_pipeline 与 design_pipeline 共享 LLM 互斥信号量。
+
+    预热期并发场景：两个 check 任务同时提交 → 同一时间仅 1 个进入 LLM 阶段
+    （asyncio.Semaphore(1) 串行化），不出现双任务并发打满 DeepSeek 配额。
+    """
+    from app.tasks import task_manager
+    from app.tasks import strategy_check_worker
+
+    concurrent = {"active": 0, "max_active": 0}
+
+    async def _fake_pipeline_body(mgr, task_id):
+        concurrent["active"] += 1
+        concurrent["max_active"] = max(concurrent["max_active"], concurrent["active"])
+        await asyncio.sleep(0.05)  # 模拟 LLM 调用耗时
+        concurrent["active"] -= 1
+        return {}
+
+    # 用真实 _design_semaphore 验证互斥生效（不替换信号量本体）
+    monkeypatch.setattr(strategy_check_worker, "_strategy_check_pipeline_guarded", _fake_pipeline_body)
+
+    mgr = _FakeMgr()
+    await asyncio.gather(
+        strategy_check_worker.strategy_check_pipeline(mgr, 1),
+        strategy_check_worker.strategy_check_pipeline(mgr, 2),
+    )
+    # 若互斥生效：两任务并发时同时活跃数 ≤1
+    assert concurrent["max_active"] == 1, \
+        f"R5-1-1 互斥失效：同时活跃 {concurrent['max_active']} 个任务"
+
+    # 互斥信号量来自 task_manager（design 与 check 共享同一把锁）
+    import inspect
+    src = inspect.getsource(strategy_check_worker.strategy_check_pipeline)
+    assert "_design_semaphore" in src, \
+        "check 任务必须复用 task_manager 的共享 LLM 互斥信号量（design/check 共用）"

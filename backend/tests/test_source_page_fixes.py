@@ -31,9 +31,11 @@ class TestR61DomainConstant:
             text = py.read_text(encoding="utf-8", errors="ignore")
             if "push2delay.eastmoney.com" in text:
                 hits.append(str(py.relative_to(root)))
-        # 允许: market_context.py（常量定义）、fundamentals_fetcher.py（注释/import）
+        # 允许: market_context.py（常量定义）、fundamentals_fetcher.py（注释/import）、
+        # etf_scanner.py（R5-2-6 双源路由：push2 优先 → push2delay 兜底，集中两处域名）
         allowed = {"core\\market_context.py", "core/market_context.py",
-                   "fetchers\\fundamentals_fetcher.py", "fetchers/fundamentals_fetcher.py"}
+                   "fetchers\\fundamentals_fetcher.py", "fetchers/fundamentals_fetcher.py",
+                   "fetchers\\etf_scanner.py", "fetchers/etf_scanner.py"}
         extra = [h for h in hits if h not in allowed]
         assert not extra, f"push2delay 硬编码散落在: {extra}"
 

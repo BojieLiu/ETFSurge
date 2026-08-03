@@ -1273,6 +1273,44 @@ class FactorRegistry:
 
         return result
 
+    async def restore_ic_from_db(self, session, min_abs: float = 0.001) -> int:
+        """R5-1-5: 启动时从 DB 恢复 _last_ic_batch（IC 非请求驱动）。
+
+        /factors/ic 端点只读内存 `_last_ic_batch`，重启后内存态丢失 → IC 空
+        （DB 中有历史数据但端点读不到）。本方法读取最近一批 IC 记录回填内存。
+        遵循 U3/N06 覆盖保护：仅 abs(val)>0.001 才写入（否则保留空/旧值）。
+        """
+        from sqlalchemy import select
+        from ..models.factor_ic import FactorICRecord
+
+        try:
+            rows = (
+                await session.execute(
+                    select(FactorICRecord)
+                    .order_by(FactorICRecord.computed_at.desc())
+                    .limit(200)
+                )
+            ).scalars().all()
+        except Exception as exc:
+            logger.warning("[factor] IC restore from DB failed: %s", exc)
+            return 0
+
+        if not rows:
+            return 0
+
+        # 取最近一批（computed_at 最新的记录组）
+        latest_ts = rows[0].computed_at
+        batch = {
+            r.factor_code: float(r.ic_value)
+            for r in rows
+            if r.computed_at == latest_ts
+        }
+        valid = {k: v for k, v in batch.items() if abs(v) > min_abs}
+        if valid:
+            self._last_ic_batch = valid
+            logger.info("[factor] restored %d IC entries from DB (R5-1-5)", len(valid))
+        return len(valid)
+
 
 # Global singleton
 registry = FactorRegistry()

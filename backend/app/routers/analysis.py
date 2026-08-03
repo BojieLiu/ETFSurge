@@ -74,43 +74,78 @@ def _sse_error(message: str):
     )
 
 
+def _build_advice_market_snapshot(query: str, hub) -> str:
+    """R5-1-3: 投顾市场快照统一构建——无条件注入基础数据（指数/市态/情绪），
+    关键词命中额外注入板块动量/新闻摘要。数据全部来自缓存，零采集成本。
+
+    旧逻辑按关键词表（["大盘","今天","最新","走势","行情"]）命中才注入，
+    "当前A股市场怎么配置"（含 A股/配置，不含旧词）不命中 → 全降级模板。
+    修复：无条件注入，任何问题都带实时市场数据。
+    """
+    q = (query or "").lower()
+    lines: list[str] = []
+
+    # 无条件基础注入：市态 + 情绪 + 指数（数据来自缓存）
+    try:
+        regime = hub.get_market_regime()
+        if regime:
+            lines.append(f"· 市场状态: {regime}")
+        sentiment = hub.get_market_sentiment()
+        if sentiment and isinstance(sentiment, dict):
+            lbl = sentiment.get("sentiment_label", "?")
+            idx = sentiment.get("sentiment_index", "?")
+            lines.append(f"· 市场情绪: {lbl} ({idx}/100)")
+        idx_data = hub.get_index_realtime() or []
+        for item in idx_data[:5]:
+            name = item.get("name", item.get("symbol", "?"))
+            price = item.get("price", "N/A")
+            chg = item.get("change_pct", 0)
+            if isinstance(chg, (int, float)):
+                lines.append(f"· {name}: {price} ({chg:+.2f}%)")
+            else:
+                lines.append(f"· {name}: {price}")
+    except Exception:
+        pass
+
+    # 关键词命中额外注入：板块/行业
+    sector_keywords = ["板块", "行业", "概念", "热点", "半导体", "新能源", "消费", "医药", "科技", "金融", "军工"]
+    if any(kw in q for kw in sector_keywords):
+        try:
+            sector = hub.get_sector_momentum() or []
+            for item in sector[:5]:
+                name = item.get("sector_name") or item.get("name", "?")
+                chg = item.get("change_pct", 0)
+                if isinstance(chg, (int, float)):
+                    lines.append(f"· {name}: 涨跌幅 {chg:+.2f}%")
+                else:
+                    lines.append(f"· {name}")
+        except Exception:
+            pass
+
+    # 关键词命中额外注入：新闻摘要
+    news_keywords = ["政策", "利好", "利空", "监管", "新闻", "资讯"]
+    if any(kw in q for kw in news_keywords):
+        try:
+            news = hub.get_news_headlines() or []
+            for n in news[:5]:
+                lines.append(f"· {(n.get('title', '') or '')[:100]}")
+        except Exception:
+            pass
+
+    return "\n".join(lines)
+
+
 def _inject_market_context(query: str, ctx: dict) -> dict:
     """根据 query 关键词智能注入市场数据到 context。
 
     Sector Phase 5: 流式和非流式路由共享的公共函数。
-    根据查询关键词识别用户意图，从 market_data_hub 缓存获取对应数据注入 ctx。
+    R5-1-3: 无条件注入 market_snapshot（指数/市态/情绪/板块/新闻，数据来自缓存），
+    旧关键词表覆盖不全（"A股/配置"缺失）导致"当前A股市场怎么配置"不命中。
     """
     from ..services.market_data_hub import market_data_hub
-    q = query.lower()
-    injection_lines = []
-
-    # 板块/行业/概念相关查询
-    sector_keywords = ["板块", "行业", "概念", "热点", "半导体", "新能源", "消费", "医药", "科技", "金融", "军工"]
-    if any(kw in q for kw in sector_keywords):
-        sector = market_data_hub.get_sector_momentum() or []
-        for item in sector[:5]:
-            name = item.get("sector_name") or item.get("name", "?")
-            chg = item.get("change_pct", 0)
-            if isinstance(chg, (int, float)):
-                injection_lines.append(f"· {name}: 涨跌幅 {chg:+.2f}%")
-            else:
-                injection_lines.append(f"· {name}")
-
-    # 大盘/行情相关查询
-    market_keywords = ["大盘", "今天", "最新", "市场", "行情", "指数"]
-    if any(kw in q for kw in market_keywords):
-        idx_data = market_data_hub.get_index_realtime() or []
-        for item in idx_data[:5]:
-            name = item.get("name", item.get("symbol", "?"))
-            price = item.get("price", "")
-            chg = item.get("change_pct", "")
-            if isinstance(chg, (int, float)):
-                injection_lines.append(f"· {name}: {price} ({chg:+.2f}%)")
-            else:
-                injection_lines.append(f"· {name}: {price}")
-
-    if injection_lines:
-        ctx["market_snapshot"] = "\n".join(injection_lines)
+    snapshot = _build_advice_market_snapshot(query, market_data_hub)
+    if snapshot:
+        ctx["market_snapshot"] = snapshot
     return ctx
 
 
@@ -203,10 +238,13 @@ async def llm_report(req: LLMReportRequest):
         sentiment = None
 
     try:
-                
         results = await asyncio.gather(
             asyncio.wait_for(market_data_hub.get_all_realtime(), timeout=15),
-            asyncio.wait_for(market_data_hub.get_indices(), timeout=15),
+            # R5-2-5: indices 采集改 get_global_indices()（17 指数多源降级 + 24h
+            # 磁盘缓存，含港股/美股段）——旧 get_indices()（Sina 三级降级）仅 A 股指数
+            # → HK/US 报告 indices 恒空；global 段展平后交给 _filter_indices_for_market
+            # 按市场过滤（A/GLOBAL 保持全量）。
+            asyncio.wait_for(market_data_hub.get_global_indices(), timeout=15),
             asyncio.wait_for(market_data_hub.get_commodities(), timeout=15),
             asyncio.to_thread(market_data_hub.get_news_headlines),
             asyncio.to_thread(market_data_hub.get_news_macro),
@@ -217,7 +255,17 @@ async def llm_report(req: LLMReportRequest):
             return r if isinstance(r, list) else fallback
 
         market_data = _safe(results[0], [])
-        indices = _safe(results[1], [])
+        # R5-2-5: get_global_indices() 返回 dict 分组 → 展平为 list（保序 A→HK→US→其他）
+        _global_idx = results[1]
+        if isinstance(_global_idx, dict):
+            indices = []
+            for _region in ("A股", "港股", "美股"):
+                indices.extend(_global_idx.get(_region, []) or [])
+            for _region, _items in _global_idx.items():
+                if _region not in ("A股", "港股", "美股"):
+                    indices.extend(_items or [])
+        else:
+            indices = _safe(results[1], [])
         commodities = _safe(results[2], [])
         news_items = _safe(results[3], [])
         macro_items = _safe(results[4], [])
@@ -290,46 +338,14 @@ async def llm_advice(req: LLMAdviceRequest):
     query = req.query
     ctx = dict(req.context or {})
 
-    # 根据 query 关键词智能注入管道数据（零额外采集成本）
+    # R5-1-3: 无条件注入市场快照（指数/市态/情绪/板块/新闻，数据来自缓存零成本）
+    # 旧关键词表（["大盘","今天","最新","走势","行情"]）覆盖不全，"A股/配置"缺失 →
+    # "当前A股市场怎么配置"不命中全降级模板；两版（stream/非 stream）统一走此函数。
     try:
-        q = query.lower()
-        injection_lines = []
-
-        if any(kw in q for kw in ["大盘", "今天", "最新", "走势", "行情"]):
-            regime = market_data_hub.get_market_regime()
-            sentiment = market_data_hub.get_market_sentiment()
-            if regime:
-                injection_lines.append(f"· 市场状态: {regime}")
-            if sentiment and isinstance(sentiment, dict):
-                idx = sentiment.get("sentiment_index", "?")
-                lbl = sentiment.get("sentiment_label", "?")
-                injection_lines.append(f"· 市场情绪: {lbl} ({idx}/100)")
-            # index_realtime from market_data_hub or fallback
-            idx_data = market_data_hub.get_index_realtime() or []
-            for item in idx_data[:5]:
-                injection_lines.append(
-                    f"· {item.get('name','?')}: {item.get('price','N/A')} ({item.get('change_pct',0):+.2f}%)"
-                )
-
-        if any(kw in q for kw in ["板块", "行业", "半导体", "新能源", "医药", "军工", "消费"]):
-            sector = market_data_hub.get_sector_momentum() or []
-            for item in sector[:5]:
-                injection_lines.append(
-                    f"· {item.get('name','?')}: 涨跌幅 {item.get('change_pct',0):+.2f}%"
-                )
-
-        if any(kw in q for kw in ["政策", "利好", "利空", "监管", "新闻", "资讯"]):
-            news = market_data_hub.get_news() or []
-            sentiment = market_data_hub.get_market_sentiment()
-            if sentiment and isinstance(sentiment, dict):
-                lbl = sentiment.get("sentiment_label", "?")
-                injection_lines.append(f"· 市场情绪: {lbl}")
-            for n in news[:5]:
-                title = n.get("title", "")[:100]
-                injection_lines.append(f"· {title}")
-
-        if injection_lines:
-            ctx["market_snapshot"] = "\n".join(injection_lines)
+        from ..services.market_data_hub import market_data_hub as _mhub
+        snapshot = _build_advice_market_snapshot(query, _mhub)
+        if snapshot:
+            ctx["market_snapshot"] = snapshot
     except Exception as e:
         logger.debug("[llm-advice] smart injection skipped: %s", e)
 

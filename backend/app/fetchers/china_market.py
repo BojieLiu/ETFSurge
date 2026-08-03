@@ -789,11 +789,25 @@ def _fetch_us_spot() -> list[dict[str, Any]]:
 
 
 def fetch_futures_realtime() -> list[dict[str, Any]]:
+    """外盘商品期货实时行情（akshare futures_foreign_commodity_realtime）。
+
+    R5-2-7: akshare 新签名需 symbol 参数（旧无参调用 TypeError → 商品恒空）。
+    传常用外盘品种（NYMEX 原油/COMEX 黄金白银等），失败静默（非交易时段允许为空）。
+    """
+    # 常用外盘品种（akshare 官方 symbol 表：NYMEX/COMEX/CBOT 等交易所品种代码）
+    _FOREIGN_COMMODITY_SYMBOLS = [
+        "CL", "GC", "SI", "HG",  # 原油(纽约)/黄金/白银/铜(COMEX)
+        "NQ", "ES", "YM",        # 纳指/标普/道指期货(CME)
+        "WTI", "BZ",             # WTI 原油/布伦特
+        "ZL", "ZSI", "ZC",       # 豆油/白银(大)/玉米(CBOT)
+        "ZW", "ZS", "ZR",        # 小麦/大豆/糙米(CBOT)
+    ]
     try:
         def _p():
             import akshare as ak
             with no_proxy():
-                return ak.futures_foreign_commodity_realtime()
+                # R5-2-7: 传 symbol 列表（akshare 新签名），避免无参 TypeError
+                return ak.futures_foreign_commodity_realtime(symbol=_FOREIGN_COMMODITY_SYMBOLS)
         df = run_in_thread(_p, timeout=8, executor="long")
         _decode_df(df)
         results = []

@@ -12,38 +12,8 @@ vi.mock('../composables/useLLMStream', () => ({
 vi.mock('../utils/markdown', () => ({ renderMarkdown: (s) => s }))
 
 const { searchApiMock } = vi.hoisted(() => ({ searchApiMock: vi.fn().mockResolvedValue({ data: [] }) }))
-// 用真实 ref 包装搜索状态——修改后才触发模板重渲染（与真实 useMarketSearch 行为一致）
-const searchState = vi.hoisted(() => {
-  const { ref } = require('vue')
-  return {
-    searchQuery: ref(''),
-    searchResults: ref([]),
-    showDropdown: ref(false),
-    activeIndex: ref(-1),
-    completionFull: ref(''),
-    selectedSearchItem: ref(null),
-    searchRef: ref(null),
-  }
-})
-
-vi.mock('../composables/useMarketSearch', () => ({
-  useMarketSearch: () => ({
-    searchQuery: searchState.searchQuery,
-    searchResults: searchState.searchResults,
-    showDropdown: searchState.showDropdown,
-    activeIndex: searchState.activeIndex,
-    completionFull: searchState.completionFull,
-    selectedSearchItem: searchState.selectedSearchItem,
-    searchRef: searchState.searchRef,
-    doSearch: vi.fn(),
-    onSearchInput: vi.fn(),
-    onSearchFocus: vi.fn(),
-    onSearchBlur: vi.fn(),
-    onSearchKeydown: vi.fn(),
-    selectSearchItem: vi.fn(),
-    clearSearchItem: vi.fn(),
-  }),
-}))
+// R5-3-1: 不再 mock useMarketSearch——改用真实 composable，只 mock api 层（axios）。
+// 断言模式：input 事件 → searchQuery 写回 → debounce → api.search 调用参数 全链路。
 
 vi.mock('../api', () => ({
   marketApi: {
@@ -72,10 +42,6 @@ describe('UnifiedAnalysis R40 (tab 切换重置)', () => {
     startMock.mockClear()
     searchApiMock.mockClear()
     searchApiMock.mockResolvedValue({ data: [] })
-    searchState.searchQuery.value = ''
-    searchState.searchResults.value = []
-    searchState.showDropdown.value = false
-    searchState.activeIndex.value = -1
   })
 
   it('switchMode 中止在途请求并重置全部状态', async () => {
@@ -148,7 +114,7 @@ describe('UnifiedAnalysis R40 (tab 切换重置)', () => {
     ] })
     const wrapper = mounted()
     wrapper.vm.activeMode = 'symbol'
-    searchState.searchQuery.value = '沪深300ETF'
+    wrapper.vm.search.searchQuery.value = '沪深300ETF'
     await wrapper.vm.doAnalyze()
     const body = startMock.mock.calls[0][1]
     expect(searchApiMock).toHaveBeenCalledWith('沪深300ETF', { include_stocks: true })
@@ -159,10 +125,10 @@ describe('UnifiedAnalysis R40 (tab 切换重置)', () => {
   it('F7 R18: symbol 模式输入显示自动补全下拉', async () => {
     const wrapper = mounted()
     wrapper.vm.activeMode = 'symbol'
-    searchState.searchResults.value = [
+    wrapper.vm.search.searchResults.value = [
       { symbol: '510050', name: '上证50ETF', market: 'A' },
     ]
-    searchState.showDropdown.value = true
+    wrapper.vm.search.showDropdown.value = true
     await nextTick()
     const opts = wrapper.findAll('.search-option')
     expect(opts.length).toBe(1)
@@ -174,7 +140,7 @@ describe('UnifiedAnalysis R40 (tab 切换重置)', () => {
     wrapper.vm.activeMode = 'symbol'
     const input = wrapper.find('input.text-input')
     await input.setValue('5100')
-    expect(searchState.searchQuery.value).toBe('5100')
+    expect(wrapper.vm.search.searchQuery.value).toBe('5100')
   })
 
   it('R5: 非 symbol 模式输入写入 query（不触发补全）', async () => {
@@ -183,7 +149,7 @@ describe('UnifiedAnalysis R40 (tab 切换重置)', () => {
     const input = wrapper.find('input.text-input')
     await input.setValue('BK0477')
     expect(wrapper.vm.query).toBe('BK0477')
-    expect(searchState.searchQuery.value).toBe('') // 补全输入未被污染
+    expect(wrapper.vm.search.searchQuery.value).toBe('') // 补全输入未被污染
   })
 
   it('R5: 补全选中后 searchQuery 同步（doAnalyze 与输入框读它）', async () => {
@@ -191,7 +157,7 @@ describe('UnifiedAnalysis R40 (tab 切换重置)', () => {
     wrapper.vm.activeMode = 'symbol'
     const item = { symbol: '510050', name: '上证50ETF', market: 'A' }
     wrapper.vm.pickSearchItem(item)
-    expect(searchState.searchQuery.value).toBe('510050') // 输入框显示选中项
+    expect(wrapper.vm.search.searchQuery.value).toBe('510050') // 输入框显示选中项
     expect(wrapper.vm.symbol).toBe('510050')
     expect(wrapper.vm.query).toBe('510050')
   })
@@ -199,7 +165,7 @@ describe('UnifiedAnalysis R40 (tab 切换重置)', () => {
   it('R5: 空输入点分析给出提示（旧实现静默无动作）', async () => {
     const wrapper = mounted()
     wrapper.vm.activeMode = 'symbol'
-    searchState.searchQuery.value = ''
+    wrapper.vm.search.searchQuery.value = ''
     wrapper.vm.doAnalyze()
     expect(wrapper.vm.error).toContain('请输入标的代码或名称')
   })
@@ -210,16 +176,16 @@ describe('UnifiedAnalysis R40 (tab 切换重置)', () => {
     wrapper.vm.result = '## A股标的分析报告'
     wrapper.vm.query = '510050'
     wrapper.vm.symbol = '510050'
-    searchState.searchQuery.value = '510050'
-    searchState.searchResults.value = [{ symbol: '510050' }]
-    searchState.showDropdown.value = true
+    wrapper.vm.search.searchQuery.value = '510050'
+    wrapper.vm.search.searchResults.value = [{ symbol: '510050' }]
+    wrapper.vm.search.showDropdown.value = true
     await wrapper.setProps({ marketTab: 'US' })
     await nextTick()
     expect(wrapper.vm.result).toBe('') // 旧报告清空
     expect(wrapper.vm.query).toBe('')
     expect(wrapper.vm.symbol).toBe('')
-    expect(searchState.searchQuery.value).toBe('')
-    expect(searchState.searchResults.value).toEqual([])
-    expect(searchState.showDropdown.value).toBe(false)
+    expect(wrapper.vm.search.searchQuery.value).toBe('')
+    expect(wrapper.vm.search.searchResults.value).toEqual([])
+    expect(wrapper.vm.search.showDropdown.value).toBe(false)
   })
 })

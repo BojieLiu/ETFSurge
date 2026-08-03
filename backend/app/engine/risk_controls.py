@@ -146,9 +146,9 @@ def remove_stale_candidates(
 
 
 def _is_dividend_etf(a: dict[str, Any]) -> bool:
-    """M1: 红利类 ETF 判定（防守型核心：红利低波 512890 / 中证红利 515080 等）。"""
+    """M1 (R5-0-4): 红利类 ETF 判定（防守型核心：红利低波 512890 / 中证红利 515080 / 红利低波 563020 等）。"""
     sym = a.get("symbol", "")
-    if sym in ("512890", "515080"):
+    if sym in ("512890", "515080", "563020"):
         return True
     name = a.get("name", "") or ""
     tidx = a.get("tracked_index", "") or ""
@@ -243,15 +243,16 @@ def apply_risk_controls(
             if w > RISK_SETTINGS.max_single_weight:
                 a["weight"] = RISK_SETTINGS.max_single_weight
 
-        # M1: 防御型方案红利类（防守型核心）合计权重上限 15%（用户决策 2026-08-01）
-        if strategy.get("id") == "defensive":
-            dividend_weight = sum(a.get("weight", 0.0) for a in allocations if _is_dividend_etf(a))
-            if dividend_weight > 0.15:
-                _scale = 0.15 / dividend_weight
-                for a in allocations:
-                    if _is_dividend_etf(a):
-                        a["weight"] = round(a.get("weight", 0.0) * _scale, 4)
-                logger.info("[risk] defensive dividend capped: %.1f%% -> 15%%", dividend_weight * 100)
+        # M1 (R5-0-4): 红利类合计权重上限 15%——全方案校验（用户决策 2026-08-01 D1，
+        # 2026-08-03 扩展：balanced/aggressive 卫星层红利同样收 15%，不再仅限 defensive）。
+        dividend_weight = sum(a.get("weight", 0.0) for a in allocations if _is_dividend_etf(a))
+        if dividend_weight > 0.15:
+            _scale = 0.15 / dividend_weight
+            for a in allocations:
+                if _is_dividend_etf(a):
+                    a["weight"] = round(a.get("weight", 0.0) * _scale, 4)
+            logger.info("[risk] %s dividend capped: %.1f%% -> 15%%",
+                        strategy.get("id", "?"), dividend_weight * 100)
 
         # 2. 层预算校验
         layer_actual: dict[str, float] = {}

@@ -47,6 +47,7 @@ import { usePortfolioStore } from '../stores/portfolio'
 import { marketApi } from '../api'
 import AppButton from './ui/AppButton.vue'
 import { chartColor, CHART_COLORS, CANDLE_UP, CANDLE_DOWN, histogramColor } from '../utils/chartColors'
+import { resolveTaTarget } from '../utils/taTarget'
 
 import ControlPanel from './analysis/ControlPanel.vue'
 import ChartPanel from './analysis/ChartPanel.vue'
@@ -120,16 +121,20 @@ const etfOptions = computed(() =>
 // Helpers
 function getActiveSymbol() {
   const info = etfInfoMap.value[selected.value]
+  // R5-2-11: 与 getActiveAssetType 同步——resolveTaTarget 决定 sym/assetType
+  //（场外 tracked_index 为场内 ETF 代码时查 ETF 自身 K 线）
   if (info && info.portfolio_type === 'off_exchange' && info.tracked_index) {
-    return info.tracked_index
+    return resolveTaTarget(info).sym
   }
   return selected.value
 }
 
 function getActiveAssetType() {
   const info = etfInfoMap.value[selected.value]
+  // R5-2-11: 场外 tracked_index 为场内 ETF 代码 → assetType='A'（查 ETF 自身 K 线），
+  // 仅真实指数代码才用 'index'（旧逻辑全走 index → 场外基金"暂无数据"）。
   if (info && info.portfolio_type === 'off_exchange' && info.tracked_index) {
-    return 'index'
+    return resolveTaTarget(info).assetType
   }
   return 'A'
 }

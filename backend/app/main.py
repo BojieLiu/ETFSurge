@@ -168,26 +168,40 @@ async def lifespan(app: FastAPI):
         with warmup_timer("warmup_global_indices", "warmup", "全球指数缓存预热"):
             _mark = app.state.warmup["global_indices"]
             try:
-                from .services.market_service import get_global_indices
-                # 先尝试加载本地持久化缓存，避免重复网络请求
+                from .services.market_service import (
+                    get_global_indices,
+                    _load_ok_cache,
+                    _global_indices_last_ok,
+                    _global_indices_cache,
+                    _global_indices_cache_ts,
+                    _GLOBAL_INDICES_OK_TTL,
+                )
+                # R5-2-3: 缓存命中即跳过（与 R4-26 失败缓存模式一致）——磁盘 last_ok
+                # 缓存 24h 内有效时直接复用，不触网（旧逻辑仅 1h 内跳过 → 冷拉 1.09s 热点）。
                 _persist_path = os.path.join(
                     os.path.dirname(os.path.dirname(__file__)),
                     "data", "indices_cache.json",
                 )
+                _cache_hit = False
                 if os.path.isfile(_persist_path):
                     _mtime = os.path.getmtime(_persist_path)
                     _age = time.time() - _mtime
-                    if _age < 3600:  # < 1 hour old
-                        logger.info(
-                            "全球指数本地缓存 %.1fs 内有效，跳过网络预热", _age
-                        )
-                        _mark["done"] = True
-                        _mark["success"] = True
-                        return
-                await asyncio.wait_for(get_global_indices(), timeout=15)
-                _mark["done"] = True
-                _mark["success"] = True
-                logger.info("全球指数缓存预热完成")
+                    if _age < _GLOBAL_INDICES_OK_TTL:
+                        _load_ok_cache()
+                        if _global_indices_last_ok:
+                            _cache_hit = True
+                            logger.info(
+                                "全球指数本地缓存 %.1fs 内有效（24h 缓存命中），跳过网络预热（R5-2-3）",
+                                _age,
+                            )
+                            _mark["done"] = True
+                            _mark["success"] = True
+                            return
+                if not _cache_hit:
+                    await asyncio.wait_for(get_global_indices(), timeout=15)
+                    _mark["done"] = True
+                    _mark["success"] = True
+                    logger.info("全球指数缓存预热完成（网络拉取）")
             except (Exception, asyncio.CancelledError):
                 _mark["done"] = True
                 _mark["success"] = False
@@ -272,8 +286,17 @@ async def lifespan(app: FastAPI):
             try:
                 from .services.market_data_hub import market_data_hub
                 await asyncio.wait_for(asyncio.to_thread(market_data_hub.refresh_news), timeout=20)
-                # Z18: 后台为重要新闻生成 AI 摘要（不阻塞刷新循环，失败静默）
-                asyncio.create_task(market_data_hub.enrich_news_summaries())
+                # R5-1-1: 预热期 LLM 错峰——预热完成前跳过 LLM 附属调用（news 摘要）。
+                # 旧逻辑启动即触发 enrich_news_summaries → 与设计任务并发打满 DeepSeek
+                # 配额 → 429（F3-6 退避在 45s DATA 预算内来不及）。预热完成后才恢复。
+                _warmup_done = all(
+                    v.get("done") for v in getattr(app.state, "warmup", {}).values()
+                )
+                if _warmup_done:
+                    # Z18: 后台为重要新闻生成 AI 摘要（不阻塞刷新循环，失败静默）
+                    asyncio.create_task(market_data_hub.enrich_news_summaries())
+                else:
+                    logger.info("[lifespan] warmup in progress — skipping LLM news summaries (R5-1-1)")
             except (Exception, asyncio.CancelledError):
                 logger.warning("[lifespan] news refresh cycle failed, will retry")
             await asyncio.sleep(120)
@@ -358,10 +381,42 @@ async def lifespan(app: FastAPI):
                     logger.debug("[ic_persistence] no IC data to persist")
             except Exception as exc:
                 logger.warning("[ic_persistence] cycle failed: %s", exc)
+            # R5-1-5: 周期 compute（复用 K 线缓存，不触网）——IC 非请求驱动，
+            # 重启后无请求也会更新 _last_ic_batch（B1 验收达标）。
+            try:
+                from .factors.factor_registry import registry as _reg
+                from .services.market_data_hub import market_data_hub as _hub
+                _pool = _hub.get_pool()
+                _syms = [it.get("symbol") for layer in _pool.values() if isinstance(_pool, dict)
+                         for it in layer if it.get("symbol") not in ("CASH",)]
+                # 复用列式 K 线缓存（_kline_cache，S5 同一数据源），不触网
+                _kline = getattr(_hub, "_kline_cache", None)
+                if _syms and _kline:
+                    await asyncio.wait_for(
+                        _reg.compute(_syms, market_data=_kline),
+                        timeout=30,
+                    )
+            except (Exception, asyncio.CancelledError) as exc:
+                logger.debug("[ic_persistence] periodic compute skipped: %s", exc)
             await asyncio.sleep(120)
 
     asyncio.create_task(_ic_persistence_loop())
     logger.info("IC 持久化循环已启动（120s）")
+
+    # R5-1-5: 启动时从 DB 恢复 _last_ic_batch（IC 非请求驱动——重启后
+    # /factors/ic 不依赖任何请求即返回非空）。失败仅 WARNING，不阻塞启动。
+    try:
+        from .factors.factor_registry import registry as _ic_registry
+        from .database import async_session as _ic_session
+
+        async with _ic_session() as _db:
+            _restored = await _ic_registry.restore_ic_from_db(_db)
+        if _restored:
+            logger.info("[ic_restore] restored %d IC entries at startup (R5-1-5)", _restored)
+        else:
+            logger.info("[ic_restore] no historical IC found at startup (R5-1-5)")
+    except Exception as exc:
+        logger.warning("[ic_restore] IC restore failed (non-fatal): %s", exc)
 
     # A1-A2: Wait for warmup tasks to complete before stopping profiler
     if _warmup_tasks:

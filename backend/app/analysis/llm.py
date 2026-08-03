@@ -19,17 +19,53 @@ LLM_MAX_RETRIES = 2
 LLM_RETRY_DELAY = 3.0
 _LLM_RATE_LIMIT_CAP = 30.0
 
+# R5-1-6: 最近一次 LLM provider 失败诊断信息（429 前缀 [rate-limited]，连接超时 [timeout]；
+# 成功调用后清空）。供策略检查超时兜底区分「限流」与「真超时」。
+_last_llm_error: str | None = None
 
-def _rate_limit_wait(attempt: int, resp_headers=None) -> float:
-    """429 限流等待时间：优先尊重 Retry-After（cap 30s），否则指数退避 3s*2^attempt（cap 30s）。"""
+
+def get_last_llm_error() -> str | None:
+    """R5-1-6: 返回最近一次 LLM 失败诊断（成功调用后为 None）。"""
+    return _last_llm_error
+
+
+def _record_llm_error(exc: BaseException) -> None:
+    """R5-1-6: 记录 provider 失败诊断，429 → [rate-limited]，连接超时 → [timeout]。"""
+    global _last_llm_error
+    try:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        if status == 429:
+            _last_llm_error = "[rate-limited] 429 Too Many Requests"
+        elif isinstance(exc, TimeoutError) or isinstance(exc, asyncio.TimeoutError):
+            _last_llm_error = "[timeout] connection timed out"
+        elif "timed out" in str(exc).lower() or "timeout" in str(exc).lower():
+            _last_llm_error = f"[timeout] {exc}"
+        else:
+            _last_llm_error = str(exc) or type(exc).__name__
+    except Exception:
+        _last_llm_error = str(exc) or type(exc).__name__
+
+
+def _clear_llm_error() -> None:
+    """R5-1-6: LLM 调用成功 → 清空错误诊断。"""
+    global _last_llm_error
+    _last_llm_error = None
+
+
+def _rate_limit_wait(attempt: int, resp_headers=None, cap: float = _LLM_RATE_LIMIT_CAP) -> float:
+    """429 限流等待时间：优先尊重 Retry-After（cap 默认 30s），否则指数退避 3s*2^attempt（cap 默认 30s）。
+
+    R5-1-6: cap 参数化——策略检查场景传 cap=10.0 实现快速失败（90s 预算内
+    3 轮等待会超 60s 上限，缩到 ≤10s/轮后 2 轮 ≈ 28s < 60s）。
+    """
     if resp_headers:
         ra = resp_headers.get("retry-after") or resp_headers.get("Retry-After")
         if ra:
             try:
-                return max(0.0, min(float(ra), _LLM_RATE_LIMIT_CAP))
+                return max(0.0, min(float(ra), cap))
             except (TypeError, ValueError):
                 pass
-    return min(LLM_RETRY_DELAY * (2 ** attempt), _LLM_RATE_LIMIT_CAP)
+    return min(LLM_RETRY_DELAY * (2 ** attempt), cap)
 
 # Keep the official DeepSeek URL for reference; the actual URL is now
 # per-provider and obtained from get_configured_providers().
@@ -560,8 +596,13 @@ async def llm_complete_with_system(
     force_json: bool = False,
     max_retries: int = LLM_MAX_RETRIES,
     retry_delay: float = LLM_RETRY_DELAY,
+    rate_limit_cap: float = _LLM_RATE_LIMIT_CAP,
 ) -> str:
-    """Call LLM with a custom system prompt, with provider failover + retry (F6)."""
+    """Call LLM with a custom system prompt, with provider failover + retry (F6).
+
+    R5-1-6: rate_limit_cap 参数化 429 退避上限（默认 30s 不变；策略检查传 10s 快速失败）；
+    每次 provider 失败记录诊断（_record_llm_error），成功清空。
+    """
     import httpx
     await _check_key()
 
@@ -606,6 +647,9 @@ async def llm_complete_with_system(
                     # 统一做泄漏过滤后再返回。
                     content = strip_internal_leak(content)
 
+                    # R5-1-6: 成功 → 清空错误诊断
+                    _clear_llm_error()
+
                     usage = data.get("usage", {})
                     _duration = (time.monotonic() - _start) * 1000
                     await token_store.record(UsageRecord(
@@ -622,6 +666,11 @@ async def llm_complete_with_system(
                     return content
             except Exception as _exc:
                 _duration = (time.monotonic() - _start) * 1000
+                # R5-1-6: 记录失败诊断（429 → [rate-limited]，超时 → [timeout]）
+                try:
+                    _record_llm_error(_exc)
+                except Exception:
+                    pass
                 await token_store.record(UsageRecord(
                     function_name=_caller,
                     prompt_tokens=0,
@@ -643,11 +692,14 @@ async def llm_complete_with_system(
 
         # All providers failed this attempt -> retry after a short delay
         if attempt < max_retries:
+            # R5-1-6: 429 时按 rate_limit_cap 退避（不再固定 retry_delay）——
+            # 否则 cap 参数传了也不生效（旧代码固定 retry_delay）。
+            wait = _rate_limit_wait(attempt, None, cap=rate_limit_cap)
             logger.warning(
                 "[LLM] all providers failed (attempt %d/%d), retrying in %.1fs",
-                attempt + 1, max_retries, retry_delay,
+                attempt + 1, max_retries, wait,
             )
-            await asyncio.sleep(retry_delay)
+            await asyncio.sleep(wait)
 
     if last_exc is None:
         raise RuntimeError("No LLM providers available")
@@ -1292,20 +1344,36 @@ async def generate_strategy_check_report(
     from ..analysis.registry import get_agent
     _start_ms = time.monotonic()
     try:
-        return await get_agent("strategy_check").run_json(prompt)
+        # R5-1-6: 策略检查场景快速失败——max_retries=1（2 轮尝试）+ rate_limit_cap=10
+        #（429 退避 ≤10s/轮）。最坏 2 轮×(调用2s×2源+等待≤10s)≈28s < 60s 预算；
+        # 旧逻辑 cap 30s × 3 轮 = 90s > 60s 必超时，且无法区分限流与真超时。
+        return await get_agent("strategy_check").run_json(
+            prompt,
+            max_retries=1,
+            rate_limit_cap=10.0,
+        )
     except BaseException as e:  # noqa: BLE001 — F1-9: 必须捕获 CancelledError（BaseException）
         # F1-9: asyncio.wait_for(20s) 超时取消内部任务时抛 CancelledError，
         # 它不是 Exception 子类，`except Exception` 捕获不到 → 失败记录写不进 usage、
         # fallback provider 从未轮到。这里捕获后立即构造规则兜底（同步操作，不允许再 await），
         # 使 wait_for 拿到兜底结果而不是让取消异常穿透。
         duration_s = time.monotonic() - _start_ms
+        # R5-1-6: 追加最后 LLM 错误诊断（区分限流/超时/其他），供用户/日志定位
+        _diag = ""
+        try:
+            from .llm import get_last_llm_error
+            _last_err = get_last_llm_error()
+            if _last_err:
+                _diag = f"（最后错误: {_last_err}）"
+        except Exception:
+            pass
         logger.warning(
-            "[strategy_check] LLM analysis interrupted after %.1fs (timed out or cancelled: %s) — rule fallback",
-            duration_s, type(e).__name__,
+            "[strategy_check] LLM analysis interrupted after %.1fs (timed out or cancelled: %s) — rule fallback%s",
+            duration_s, type(e).__name__, _diag,
         )
         return {
             "summary": (
-                f"LLM 分析超时（{duration_s:.0f}s 未返回，已用规则引擎兜底）"
+                f"LLM 分析超时（{duration_s:.0f}s 未返回，已用规则引擎兜底）{_diag}"
             ),
             "suggestions": [],
             "holdings_analysis": [],

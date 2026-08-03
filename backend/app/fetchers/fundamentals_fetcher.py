@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from ..core.async_utils import run_in_thread, run_sync
+from ..services.cache_service import sync_memory_cache  # R5-2-8: 失败缓存 1h（R4-26 模式）
 from ..config import settings
 from ..services.source_registry import registry as _source_registry
 from ..core.logging import get_logger
@@ -270,13 +271,40 @@ def fetch_hist_avg_volume(symbol: str, days: int = 20) -> dict | None:
 def fetch_current_pe_pb(symbol: str) -> dict | None:
     """获取 ETF 最新 PE/PB 估值（轻量版，仅拉最近 5 个交易日）。
 
+    R5-2-8: 主源（东财 stock_zh_a_hist 估值列）失败时走备用源 stock_value_em
+    （东财估值接口，含 市盈率(动态)/市净率 列）；失败/空缓存 1h（R4-26 模式），
+    避免反复触发慢源。
+
     返回:
       {"pe_ttm": float, "pb": float} | None
     """
     if not _is_a_stock(symbol):
         return None
+
+    # R5-2-8: 失败/空结果缓存 1h（成功结果由调用方缓存，此处只防慢源反复触发）
+    _FAIL_KEY = f"_pe_pb_fail:{symbol}"
     try:
-        market = _get_market(symbol)
+        if sync_memory_cache.get(_FAIL_KEY) is not None:
+            return None
+    except Exception:
+        pass
+
+    result = _fetch_pe_pb_primary(symbol)
+    if result is None:
+        # 备用源：stock_value_em（东财估值，列：市盈率-动态/市净率 等）
+        result = _fetch_pe_pb_fallback(symbol)
+    if result is None:
+        try:
+            sync_memory_cache.set(_FAIL_KEY, True, 3600)
+        except Exception:
+            pass
+    return result
+
+
+def _fetch_pe_pb_primary(symbol: str) -> dict | None:
+    """主源：stock_zh_a_hist 日线估值列（东财）。R5-2-9: 成功/失败记入 akshare 熔断计数。"""
+    _ak_h = _source_registry._health(_AKSHARE_SOURCE)
+    try:
         def _p(sym=symbol):
             import akshare as ak
             return ak.stock_zh_a_hist(symbol=sym, period="daily",
@@ -302,6 +330,7 @@ def fetch_current_pe_pb(symbol: str) -> dict | None:
                     pass
         if pe is None and pb_val is None:
             return None
+        _ak_h.record_success()
         result = {}
         if pe is not None:
             result["pe_ttm"] = pe
@@ -309,6 +338,46 @@ def fetch_current_pe_pb(symbol: str) -> dict | None:
             result["pb"] = pb_val
         return result
     except Exception:
+        _ak_h.record_failure(_time.time())
+        return None
+
+
+def _fetch_pe_pb_fallback(symbol: str) -> dict | None:
+    """R5-2-8 备用源：stock_value_em（东财估值接口，列含 市盈率-动态/市净率）。
+    R5-2-9: 成功/失败同样记入 akshare 熔断计数。"""
+    _ak_h = _source_registry._health(_AKSHARE_SOURCE)
+    try:
+        def _p(sym=symbol):
+            import akshare as ak
+            return ak.stock_value_em(symbol=sym)
+        df = run_in_thread(_p, timeout=8, executor="long")
+        if df is None or df.empty:
+            return None
+        df = _decode_df(df)
+        row = df.iloc[0]
+        result = {}
+        for col in df.columns:
+            cl = str(col).lower()
+            if "市盈率" in cl or "pe" in cl:
+                try:
+                    v = float(row[col])
+                    if v and abs(v) > 0:
+                        result.setdefault("pe_ttm", v)
+                except (ValueError, TypeError):
+                    pass
+            if "市净率" in cl or "pb" in cl:
+                try:
+                    v = float(row[col])
+                    if v and abs(v) > 0:
+                        result.setdefault("pb", v)
+                except (ValueError, TypeError):
+                    pass
+        if result:
+            _ak_h.record_success()
+            return result
+        return None
+    except Exception:
+        _ak_h.record_failure(_time.time())
         return None
 
 

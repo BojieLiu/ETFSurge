@@ -9,7 +9,12 @@ M4-M6 (docs/combination-design-review.md): 分配引擎层修正测试。
 纯函数测试，无 I/O。
 """
 
-from app.engine.allocation_engine import allocate, _select_and_weight
+from app.engine.allocation_engine import (
+    allocate,
+    _select_and_weight,
+    MANDATORY_CODES,
+    _COMMON_ANCHOR_SYMBOLS,
+)
 from app.engine.risk_controls import apply_risk_controls
 
 
@@ -226,6 +231,65 @@ class TestM1DividendCap:
             assert dividend <= 0.15 + 1e-6, f"防御型红利类合计 {dividend:.2%} > 15%"
 
 
+class TestM1DividendCapAllProfiles:
+    """R5-0-4: 红利类权重上限约束扩展为全方案校验（用户决策 2026-08-03）。
+
+    回归场景：balanced/aggressive 卫星层含红利类 ETF（563020 红利低波）时，
+    旧逻辑仅约束 defensive → 卫星层红利合计可超 15%。
+    修复后：任意方案红利类合计 ≤15%。
+    """
+
+    def _dividend_total(self, strategies, sid):
+        for s in strategies:
+            if s["id"] == sid:
+                return sum(
+                    a.get("weight", 0) for a in s["allocations"]
+                    if a.get("symbol") in ("563020", "512890", "515080")
+                )
+        return 0.0
+
+    def _assert_all_profiles_dividend_capped(self, risk_profile):
+        candidates = [
+            # core
+            {"symbol": "510300", "name": "沪深300ETF", "layer": "core",
+             "tracked_index": "沪深300", "segment": "沪深300"},
+            {"symbol": "560600", "name": "中证A500ETF", "layer": "core",
+             "tracked_index": "中证A500", "segment": "中证A500"},
+            # satellite（红利低波 563020 双份权重场景 → 合计必超 15% 若不受限）
+            {"symbol": "563020", "name": "红利低波ETF", "layer": "satellite",
+             "tracked_index": "红利低波", "segment": "红利低波"},
+            {"symbol": "512480", "name": "半导体ETF", "layer": "satellite",
+             "tracked_index": "半导体", "segment": "半导体"},
+            {"symbol": "515030", "name": "新能源ETF", "layer": "satellite",
+             "tracked_index": "新能源", "segment": "新能源"},
+            # defense
+            {"symbol": "518880", "name": "黄金ETF", "layer": "defense",
+             "tracked_index": "黄金", "segment": "黄金"},
+            {"symbol": "511090", "name": "30年国债ETF", "layer": "defense",
+             "tracked_index": "国债", "segment": "国债"},
+        ]
+        fm = _factor_matrix(candidates)
+        strategies = allocate(risk_profile=risk_profile, regime="range_bound",
+                              factor_matrix=fm, candidates=candidates)
+        strategies = apply_risk_controls(strategies, fm)
+        for s in strategies:
+            dividend = self._dividend_total(strategies, s["id"])
+            assert dividend <= 0.15 + 1e-6, \
+                f"R5-0-4 {risk_profile}/{s['id']} 红利类合计 {dividend:.2%} > 15%"
+
+    def test_balanced_satellite_dividend_capped(self):
+        """balanced 卫星层红利低波 563020 合计 ≤15%。"""
+        self._assert_all_profiles_dividend_capped("balanced")
+
+    def test_aggressive_satellite_dividend_capped(self):
+        """aggressive 卫星层红利低波 563020 合计 ≤15%。"""
+        self._assert_all_profiles_dividend_capped("aggressive")
+
+    def test_defensive_core_dividend_capped(self):
+        """defensive 核心层红利低波 563020 合计 ≤15%（R5-0-4 仍保留原约束）。"""
+        self._assert_all_profiles_dividend_capped("defensive")
+
+
 class TestMandatoryMissingErrors:
     def test_select_and_weight_mandatory_missing_still_works(self):
         """M8 联动: 候选池缺失强制标的时分配不崩溃（注入校验已在 etf_scanner 层打 WARNING）。"""
@@ -239,3 +303,92 @@ class TestMandatoryMissingErrors:
         allocs = _select_and_weight(cands, fm, budget=0.5, layer="core",
                                     regime="range_bound", strategy="balanced", max_count=4)
         assert isinstance(allocs, list)
+
+
+class TestR502OverlapFallbackNarrow:
+    """R5-0-2: 核心层跨方案重叠修复——兜底放宽仅限「公共底仓 + 强制标的」。
+
+    回归场景：核心层非强制候选不足（<2 只）触发兜底放宽时，
+    旧逻辑整体放开 → balanced/aggressive 与 defensive 核心层重叠 3 只
+    （159915/562000/588000）→ P1-2 门禁 FAIL。
+    修复后：只回补公共底仓（510300/560600/159338），其他已用标的一律不回补。
+    """
+
+    def _core_syms(self, strategies, sid):
+        for s in strategies:
+            if s["id"] == sid:
+                return {a["symbol"] for a in s["allocations"]
+                        if a.get("layer") == "core" and a.get("symbol") != "CASH"}
+        return set()
+
+    def test_fallback_only_common_anchor_and_mandatory(self):
+        """去重后非强制候选 <2 时，与前一方案核心层重叠（剔除强制+公共底仓）≤1。"""
+        cands = [
+            # core：2 强制 + 3 只非强制（共 5 只核心候选）
+            {"symbol": "510300", "name": "沪深300ETF", "layer": "core",
+             "tracked_index": "沪深300", "industry": "宽基指数", "segment": "沪深300"},
+            {"symbol": "560600", "name": "中证A500ETF", "layer": "core",
+             "tracked_index": "中证A500", "industry": "宽基指数", "segment": "中证A500"},
+            {"symbol": "588000", "name": "科创50ETF", "layer": "core",
+             "tracked_index": "科创50", "industry": "宽基指数", "segment": "科创"},
+            {"symbol": "159915", "name": "创业板ETF", "layer": "core",
+             "tracked_index": "创业板指", "industry": "宽基指数", "segment": "创业板"},
+            {"symbol": "510050", "name": "上证50ETF", "layer": "core",
+             "tracked_index": "上证50", "industry": "宽基指数", "segment": "上证50"},
+            # satellite
+            {"symbol": "512480", "name": "半导体ETF", "layer": "satellite",
+             "tracked_index": "半导体", "segment": "半导体"},
+            {"symbol": "515030", "name": "新能源ETF", "layer": "satellite",
+             "tracked_index": "新能源", "segment": "新能源"},
+            {"symbol": "512010", "name": "医药ETF", "layer": "satellite",
+             "tracked_index": "医药", "segment": "医药"},
+            {"symbol": "512880", "name": "证券ETF", "layer": "satellite",
+             "tracked_index": "证券", "segment": "证券"},
+            # defense
+            {"symbol": "518880", "name": "黄金ETF", "layer": "defense",
+             "tracked_index": "黄金", "segment": "黄金"},
+            {"symbol": "511090", "name": "30年国债ETF", "layer": "defense",
+             "tracked_index": "国债", "segment": "国债"},
+        ]
+        fm = _factor_matrix(cands)
+        strategies = allocate(risk_profile="balanced", regime="range_bound",
+                              factor_matrix=fm, candidates=cands)
+        defensive = self._core_syms(strategies, "defensive")
+        balanced = self._core_syms(strategies, "balanced")
+        aggressive = self._core_syms(strategies, "aggressive")
+        for name, a, b in [
+            ("defensive vs balanced", defensive, balanced),
+            ("defensive vs aggressive", defensive, aggressive),
+            ("balanced vs aggressive", balanced, aggressive),
+        ]:
+            overlap = (a & b) - MANDATORY_CODES - _COMMON_ANCHOR_SYMBOLS
+            assert len(overlap) <= 1, \
+                f"R5-0-2 {name} 核心层非公共底仓重叠 {overlap} > 1"
+
+    def test_fallback_keeps_core_count_lower_bound(self):
+        """兜底放宽后核心层仍满足 [3,5] 下限（M7 联动，不空核心）。"""
+        cands = [
+            {"symbol": "510300", "name": "沪深300ETF", "layer": "core",
+             "tracked_index": "沪深300", "industry": "宽基指数", "segment": "沪深300"},
+            {"symbol": "560600", "name": "中证A500ETF", "layer": "core",
+             "tracked_index": "中证A500", "industry": "宽基指数", "segment": "中证A500"},
+            {"symbol": "588000", "name": "科创50ETF", "layer": "core",
+             "tracked_index": "科创50", "industry": "宽基指数", "segment": "科创"},
+            {"symbol": "159915", "name": "创业板ETF", "layer": "core",
+             "tracked_index": "创业板指", "industry": "宽基指数", "segment": "创业板"},
+            {"symbol": "510050", "name": "上证50ETF", "layer": "core",
+             "tracked_index": "上证50", "industry": "宽基指数", "segment": "上证50"},
+            {"symbol": "512480", "name": "半导体ETF", "layer": "satellite",
+             "tracked_index": "半导体", "segment": "半导体"},
+            {"symbol": "518880", "name": "黄金ETF", "layer": "defense",
+             "tracked_index": "黄金", "segment": "黄金"},
+            {"symbol": "511090", "name": "30年国债ETF", "layer": "defense",
+             "tracked_index": "国债", "segment": "国债"},
+        ]
+        fm = _factor_matrix(cands)
+        strategies = allocate(risk_profile="balanced", regime="range_bound",
+                              factor_matrix=fm, candidates=cands)
+        for s in strategies:
+            core = [a for a in s["allocations"]
+                    if a.get("layer") == "core" and a.get("symbol") != "CASH"]
+            assert len(core) >= 3, f"R5-0-2 {s['id']} 核心层 {len(core)} 只 < 3"

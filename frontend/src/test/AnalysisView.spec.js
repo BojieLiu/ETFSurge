@@ -131,3 +131,40 @@ describe('AnalysisView 父组件切换标的 (R5 #3 修复)', () => {
     expect(chartOption.series[0].data[0][1]).toBe(5.0)
   })
 })
+
+describe('AnalysisView 场外基金技术分析 (R5-2-11)', () => {
+  async function mountWithOffExchange(trackedIndex) {
+    indicatorsMock.mockClear()
+    signalMock.mockClear()
+    const wrapper = mount(AnalysisView, {
+      global: { stubs: { ChartPanel: true, SignalPanel: true } },
+      props: { selectedSymbol: '' },
+    })
+    // 等 onMounted 完成（fetchEtfs 异步 → 否则其 etfInfoMap = {} 覆盖注入）
+    await nextTick()
+    await new Promise((r) => setTimeout(r, 50))
+    await nextTick()
+    // VTU wrapper.vm 对 ref 自动解包 → 直接整体赋值（不要 .value）
+    wrapper.vm.etfInfoMap = {
+      '021458': { symbol: '021458', name: '联接A', portfolio_type: 'off_exchange', tracked_index: trackedIndex },
+    }
+    wrapper.setProps({ selectedSymbol: '021458' })
+    await nextTick()
+    await new Promise((r) => setTimeout(r, 100))
+    await nextTick()
+    return wrapper
+  }
+
+  it('场外标的 tracked_index=场内 ETF 代码 → indicators/signal 以 assetType=A 请求', async () => {
+    // 021458 场外联接 → tracked_index=159545（场内 ETF）→ 查 ETF 自身 K 线（assetType="A"）
+    await mountWithOffExchange('159545')
+    expect(indicatorsMock).toHaveBeenLastCalledWith('159545', 'A', expect.anything())
+    expect(signalMock).toHaveBeenLastCalledWith('159545', 'A', expect.anything())
+  })
+
+  it('场外标的 tracked_index=真实指数代码 → assetType=index 不回归', async () => {
+    await mountWithOffExchange('000300')
+    expect(indicatorsMock).toHaveBeenLastCalledWith('000300', 'index', expect.anything())
+    expect(signalMock).toHaveBeenLastCalledWith('000300', 'index', expect.anything())
+  })
+})

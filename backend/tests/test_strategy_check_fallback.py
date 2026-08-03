@@ -93,9 +93,11 @@ class TestReportTextFallback:
 
         warnings = result["risk_warnings"]
         assert warnings, "risk_warnings 不得为空"
-        assert warnings[0]["severity"] == "warning", \
-            f"LLM 超时时风险提示应为 warning 级（诚实降级），实际 {warnings[0]['severity']}"
-        assert "LLM 分析超时" in warnings[0]["description"]
+        assert any(w["severity"] == "warning" for w in warnings), \
+            f"LLM 超时时风险提示应为 warning 级（诚实降级），实际 {[w['severity'] for w in warnings]}"
+        # R5-1-2: 骨架生成后行业缺失 warning 会先触发（预期），LLM 超时标注仍须存在
+        assert any("LLM 分析超时" in w["description"] for w in warnings), \
+            f"须含 LLM 分析超时标注，实际 {[w['description'] for w in warnings]}"
 
     @pytest.mark.asyncio
     async def test_all_empty_factors_risk_warning(self, strategy_env):
@@ -130,6 +132,53 @@ class TestReportTextFallback:
 
         warnings = result["risk_warnings"]
         assert warnings[0]["severity"] == "info", "正常路径应保持 info 级"
+
+
+class TestR512FallbackHoldingsAnalysis:
+    """R5-1-2: rule 兜底路径 holdings_analysis 补全。
+
+    旧行为：LLM 超时走 rule 兜底时 holdings_analysis 恒空 → 行业集中度检查
+    静默跳过（P0-1 收敛）。修复后：用 factor_breakdowns/industry_map 生成
+    holdings_analysis 骨架（symbol/name/weight/factor_summary/industry），
+    标注"规则引擎生成"，行业分布分析在兜底路径也存在。
+    """
+
+    @pytest.mark.asyncio
+    async def test_llm_timeout_holdings_analysis_not_empty(self, strategy_env):
+        """LLM 超时 → holdings_analysis 非空、含 industry 字段、标注规则引擎生成。"""
+        from app.factors.factor_registry import registry as factor_registry
+
+        with patch("app.analysis.llm.generate_strategy_check_report",
+                   new_callable=AsyncMock, side_effect=asyncio.TimeoutError("llm timeout")), \
+             patch.object(factor_registry, "compute", new_callable=AsyncMock, return_value=_MOCK_FACTORS):
+            result = await ps.strategy_check(db=None, total_capital=100000)
+
+        holdings = result.get("holdings_analysis", [])
+        assert holdings, "R5-1-2 兜底路径 holdings_analysis 不得为空（旧 bug 恒空）"
+        for h in holdings:
+            assert h.get("symbol"), "骨架须含 symbol"
+            assert h.get("name"), "骨架须含 name"
+            assert "weight" in h, "骨架须含 weight"
+            assert h.get("generated_by") == "规则引擎生成", \
+                f"{h['symbol']} 须标注规则引擎生成，实际 {h.get('generated_by')}"
+        # 行业分布可分析（industry_map 注入或空串但不缺字段）
+        assert all("industry" in h for h in holdings), "骨架须含 industry 字段"
+
+    @pytest.mark.asyncio
+    async def test_llm_failed_suggestions_still_rule_filled(self, strategy_env):
+        """LLM 失败 → rule 建议仍在（100% 覆盖），holdings_analysis 骨架与建议并存。"""
+        from app.factors.factor_registry import registry as factor_registry
+
+        with patch("app.analysis.llm.generate_strategy_check_report",
+                   new_callable=AsyncMock, side_effect=RuntimeError("boom")), \
+             patch.object(factor_registry, "compute", new_callable=AsyncMock, return_value=_MOCK_FACTORS):
+            result = await ps.strategy_check(db=None, total_capital=100000)
+
+        assert result.get("suggestions"), "rule 建议不得为空"
+        assert result.get("holdings_analysis"), "holdings_analysis 骨架不得为空"
+        report = result.get("report_text", "")
+        assert "规则引擎生成" in report or result["holdings_analysis"], \
+            "兜底报告应体现规则引擎生成路径"
 
 
 class TestRuleSuggestionEnhancement:

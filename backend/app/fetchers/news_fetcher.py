@@ -397,6 +397,11 @@ def fetch_stock_news(symbol: str) -> list[dict[str, Any]]:
         "新闻来源": "source",
         "新闻链接": "url",
     }
+    # R5-2-2: 契约键集 == headlines（仅英文键）——中文键（含"关键词/文章来源"等
+    # 未映射键）一律删除，不得残留（旧实现只映射 5 个映射键，其余中文键透传）。
+    _STOCK_NEWS_ALLOWED_KEYS = {
+        "id", "title", "content", "time", "sort_time", "url", "source", "level", "stars",
+    }
 
     def _normalize_stock_news_keys(item: dict) -> dict:
         if not any(k in item for k in _STOCK_NEWS_KEY_MAP):
@@ -405,6 +410,11 @@ def fetch_stock_news(symbol: str) -> list[dict[str, Any]]:
         for cn, en in _STOCK_NEWS_KEY_MAP.items():
             if cn in out and en not in out:
                 out[en] = out.pop(cn)
+        # R5-2-2: 删除全部含中文字符的残留键（关键词/文章来源等）
+        out = {
+            k: v for k, v in out.items()
+            if not any("\u4e00" <= ch <= "\u9fff" for ch in k)
+        }
         return out
 
     def _p() -> list[dict[str, Any]]:

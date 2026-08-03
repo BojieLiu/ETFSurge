@@ -237,7 +237,7 @@ def _tencent_gtimg_batch(codes: list[str]) -> dict[str, dict[str, Any]]:
     return result
 
 
-def _fetch_em_etf_list() -> list[dict] | None:
+def _fetch_em_etf_list(host: str | None = None) -> list[dict] | None:
     """直连东方财富 push2 API 获取全量 ETF 列表（免 akshare，纯 HTTP+JSON）。
 
     字段映射：f12=代码  f14=名称  f2=最新价  f3=涨跌幅
@@ -246,19 +246,26 @@ def _fetch_em_etf_list() -> list[dict] | None:
     使用 m:1+t:2 覆盖沪深两市全部 ETF（~1843 只），免 akshare 封装。
 
     2026-07-27 修复: 新增 f72=成交额, 修正 f62→换手率, f45→成交量
+    R5-2-6: host 参数化（push2 优先 → push2delay 兜底，双源路由）；两域名
+    响应结构一致，解析层零改动。
     """
     from ..utils.proxy import no_proxy
     import requests as _req
-    headers = {"User-Agent": "Mozilla/5.0"}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": "https://quote.eastmoney.com/",
+    }
     fields = "f12,f14,f2,f3,f62,f72,f84,f85,f184,f66,f45,f168,f20,f21,f115,f116"
     all_items = []
     total = None
     # F0-5 步骤 A: fid=f3（涨跌幅）→ fid=f6（成交额）排序，
     # 主流宽基成交额/规模恒居前列，天然留在池内（不再被题材股涨幅榜挤出）。
     for page in range(1, 20):
-        # F17 R61: 域名集中常量（实测 push2 502/HTTPS 连接关闭，保留 push2delay）
-        from ..core.market_context import EM_PUSH_HOST
-        url = (f"http://{EM_PUSH_HOST}/api/qt/clist/get?"
+        # R5-2-6: host 参数化（调用方经 registry.route 双源路由，传具体域名）
+        if host is None:
+            from ..core.market_context import EM_PUSH_HOST
+            host = EM_PUSH_HOST
+        url = (f"http://{host}/api/qt/clist/get?"
                f"pn={page}&pz=100&po=1&np=1&fs=m:1+t:2&fields={fields}&fid=f6")
         # F0-5 步骤 A: 分页失败重试 1 次，仍失败则记录 WARNING 继续下一页（不静默丢页）
         stop_paging = False
@@ -371,9 +378,14 @@ def fetch_all_etfs_base() -> list[dict[str, Any]]:
         logger.info("[etf_scanner] using Sina-only ETF list (no amount/scale filtering)")
         return sina_result
 
-    # Provider 2: East Money 直连 HTTP
+    # Provider 2: East Money 直连 HTTP（R5-2-6: push2 优先 → push2delay 兜底，双源路由。
+    # 指数退避匹配"限流按时段波动"：push2 连败 3 次冷却 60s → 自动用 push2delay；
+    # push2 恢复后下次 route 自动回主源。两域名响应结构一致，解析层零改动。）
     def _eastmoney_provider():
-        em_result = _fetch_em_etf_list()
+        em_result = registry.route([
+            ("em_push2", lambda: _fetch_em_etf_list("push2.eastmoney.com")),
+            ("em_push2delay", lambda: _fetch_em_etf_list("push2delay.eastmoney.com")),
+        ], route_name="em_etf_list", operation="list", target="etf_list") or []
         if em_result and len(em_result) >= 50:
             return em_result
         return None

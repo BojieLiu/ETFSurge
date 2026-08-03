@@ -94,8 +94,13 @@ async def test_llm_report_hk_prompt_receives_hk_only_indices():
                       return_value=[{"symbol": "513010", "name": "恒生科技ETF",
                                      "asset_type": "ETF", "price": 0.628,
                                      "change_pct": 0.5}]), \
-         patch.object(analysis_mod.market_data_hub, "get_indices",
-                      new_callable=AsyncMock, return_value=_INDICES_A_HK), \
+         patch.object(analysis_mod.market_data_hub, "get_global_indices",
+                      new_callable=AsyncMock, return_value={
+                          "A股": _INDICES_A_HK[:3],
+                          "港股": _INDICES_A_HK[3:],
+                          "美股": [{"symbol": "^GSPC", "name": "标普500",
+                                    "price": 5500.0, "change_pct": 0.2}],
+                      }), \
          patch.object(analysis_mod.market_data_hub, "get_commodities",
                       new_callable=AsyncMock,
                       return_value=[{"name": "沪金", "price": 800.0, "change_pct": 0.2}]), \
@@ -116,3 +121,84 @@ async def test_llm_report_hk_prompt_receives_hk_only_indices():
     idx_syms = {i["symbol"] for i in captured["indices"]}
     assert idx_syms == {"^HSI", "^HSTECH"}, f"prompt indices 应仅 HK: {idx_syms}"
     assert captured["commodities"] == [], "HK 报告不应注入 A 股期货商品"
+
+
+@pytest.mark.asyncio
+async def test_llm_report_us_gets_us_indices_from_global():
+    """R5-2-5: US llm_report indices 来自 get_global_indices() 展平的 US 段（旧 get_indices 恒空）。"""
+    from app.routers import analysis as analysis_mod
+
+    captured: dict = {}
+
+    async def _fake_report(indices, commodities, market_data, indicators, news, macro_news, market="A"):
+        captured["indices"] = indices
+        return "US 报告"
+
+    with patch.object(analysis_mod.market_data_hub, "get_all_realtime",
+                      new_callable=AsyncMock, return_value=[]), \
+         patch.object(analysis_mod.market_data_hub, "get_global_indices",
+                      new_callable=AsyncMock, return_value={
+                          "A股": [{"symbol": "000001", "name": "上证指数"}],
+                          "港股": [{"symbol": "^HSI", "name": "恒生指数"}],
+                          "美股": [{"symbol": "^GSPC", "name": "标普500", "price": 5500.0},
+                                  {"symbol": "^IXIC", "name": "纳斯达克", "price": 18000.0}],
+                      }), \
+         patch.object(analysis_mod.market_data_hub, "get_commodities",
+                      new_callable=AsyncMock, return_value=[]), \
+         patch.object(analysis_mod.market_data_hub, "get_news_headlines",
+                      new=MagicMock(return_value=[])), \
+         patch.object(analysis_mod.market_data_hub, "get_news_macro",
+                      new=MagicMock(return_value=[])), \
+         patch.object(analysis_mod.market_data_hub, "get_market_regime",
+                      return_value="range_bound"), \
+         patch.object(analysis_mod.market_data_hub, "get_market_sentiment",
+                      return_value={"sentiment_index": 50, "sentiment_label": "中性"}), \
+         patch.object(analysis_mod, "generate_market_report",
+                      new=AsyncMock(side_effect=_fake_report)):
+        resp = await analysis_mod.llm_report(analysis_mod.LLMReportRequest(
+            symbols=[], market="US"))
+
+    assert resp["report"] == "US 报告"
+    idx_syms = {i["symbol"] for i in captured["indices"]}
+    assert "^GSPC" in idx_syms and "^IXIC" in idx_syms, \
+        f"US 报告 indices 应含美股指数（R5-2-5），实际 {idx_syms}"
+    assert "000001" not in idx_syms, "US 报告不得混入 A 股指数"
+
+
+@pytest.mark.asyncio
+async def test_llm_report_a_keeps_all_global_indices():
+    """R5-2-5 回归: A/GLOBAL 报告 indices 保持全量（A 报告引用美股属正常关联信息）。"""
+    from app.routers import analysis as analysis_mod
+
+    captured: dict = {}
+
+    async def _fake_report(indices, commodities, market_data, indicators, news, macro_news, market="A"):
+        captured["indices"] = indices
+        return "A 报告"
+
+    with patch.object(analysis_mod.market_data_hub, "get_all_realtime",
+                      new_callable=AsyncMock, return_value=[]), \
+         patch.object(analysis_mod.market_data_hub, "get_global_indices",
+                      new_callable=AsyncMock, return_value={
+                          "A股": [{"symbol": "000001", "name": "上证指数"}],
+                          "美股": [{"symbol": "^GSPC", "name": "标普500"}],
+                      }), \
+         patch.object(analysis_mod.market_data_hub, "get_commodities",
+                      new_callable=AsyncMock, return_value=[]), \
+         patch.object(analysis_mod.market_data_hub, "get_news_headlines",
+                      new=MagicMock(return_value=[])), \
+         patch.object(analysis_mod.market_data_hub, "get_news_macro",
+                      new=MagicMock(return_value=[])), \
+         patch.object(analysis_mod.market_data_hub, "get_market_regime",
+                      return_value="range_bound"), \
+         patch.object(analysis_mod.market_data_hub, "get_market_sentiment",
+                      return_value={"sentiment_index": 50, "sentiment_label": "中性"}), \
+         patch.object(analysis_mod, "generate_market_report",
+                      new=AsyncMock(side_effect=_fake_report)):
+        resp = await analysis_mod.llm_report(analysis_mod.LLMReportRequest(
+            symbols=[], market="A"))
+
+    assert resp["report"] == "A 报告"
+    idx_syms = {i["symbol"] for i in captured["indices"]}
+    assert "000001" in idx_syms and "^GSPC" in idx_syms, \
+        f"A 报告 indices 应全量（R5-2-5），实际 {idx_syms}"

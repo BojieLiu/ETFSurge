@@ -142,6 +142,10 @@ def _is_wide_basis(c: dict[str, Any]) -> bool:
 # P1-3: 强制保留标的（权重不低于 3%，确保进入分配）
 # 5% ×4=20% 占用过多预算导致总持仓不足 8 只，调整为 3% ×4=12%
 MANDATORY_CODES = {"510300", "560600", "518880", "511090"}
+# R5-0-2: 公共底仓「宽基锚」——跨方案核心层重叠豁免仅限这些标的 + 强制标的
+#（与 verify_e2e M7/P1-1 口径一致：510300/560600/159338 为沪深300/中证A500 锚）。
+# 159338 为深市中证A500ETF（非强制），允许作为公共底仓跨方案回补。
+_COMMON_ANCHOR_SYMBOLS = {"510300", "560600", "159338"}
 MANDATORY_MIN_WEIGHT = 0.03
 
 # ── Default candidate pool (fallback if candidates list is empty) ──
@@ -563,6 +567,32 @@ def allocate(
             ]
             if len(_deduped_non_mandatory) >= 2:
                 _core_pool = _deduped_pool
+            else:
+                # R5-0-2: 兜底放宽——豁免范围仅限「公共底仓 + 强制标的」，不能整体放开。
+                # 旧逻辑整体放开导致 balanced/aggressive 核心层重叠 3 只
+                #（159915/562000/588000）→ P1-2 门禁 FAIL。修复：去重后非强制候选 <2
+                # 时，只回补「宽基锚」（510300/560600/159338）作为公共底仓 + 至多 1 只
+                # 高分非锚标的（保证核心层数量下限 [3,5]，重叠仍 ≤1）；其余已用标的一律不回补。
+                _deduped_syms = {c.get("symbol") for c in _deduped_pool}
+                _anchor_backfill = [
+                    c for c in _core_pool
+                    if c.get("symbol") in _COMMON_ANCHOR_SYMBOLS
+                    and c.get("symbol") not in _deduped_syms
+                ]
+                _pool_after_anchor = _deduped_pool + _anchor_backfill
+                # 高分非锚回补（至多 1 只）：保证核心层数量下限，重叠不超 1
+                _unused_non_anchor = [
+                    c for c in _core_pool
+                    if c.get("symbol") not in {x.get("symbol") for x in _pool_after_anchor}
+                ]
+                if _unused_non_anchor:
+                    def _cscore(c):
+                        _fs = factor_matrix.get(c.get("symbol", ""), {}) or {}
+                        return sum(_fs.get(k, 0.0) or 0.0
+                                   for k in ("technical", "momentum", "valuation", "sentiment"))
+                    _top = max(_unused_non_anchor, key=_cscore)
+                    _pool_after_anchor = _pool_after_anchor + [_top]
+                _core_pool = _pool_after_anchor
         core_alloc = _select_and_weight(
             _core_pool,
             factor_matrix,

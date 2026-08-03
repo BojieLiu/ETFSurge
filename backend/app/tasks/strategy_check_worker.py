@@ -62,7 +62,20 @@ async def _generate_check_llm_report(result: dict, capital: float) -> str | None
 
 
 async def strategy_check_pipeline(mgr, task_id: int) -> None:
-    """顺序 Pipeline：DATA → LLM → DB SAVE → NOTIFY"""
+    """顺序 Pipeline：DATA → LLM → DB SAVE → NOTIFY
+
+    R5-1-1: 与 design 任务共享 LLM 互斥信号量（同一时间仅 1 个 LLM 任务在跑），
+    防止预热期并发打满 DeepSeek 配额 → 429 级联超时。
+    """
+    # lazy import 避免循环依赖（task_manager 不反向依赖本模块）
+    from .task_manager import _design_semaphore
+
+    async with _design_semaphore:
+        return await _strategy_check_pipeline_guarded(mgr, task_id)
+
+
+async def _strategy_check_pipeline_guarded(mgr, task_id: int) -> None:
+    """实际管线（被 _design_semaphore 保护）。"""
     from ..services.portfolio_service import strategy_check
     from app.database import async_session
 

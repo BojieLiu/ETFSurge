@@ -567,6 +567,9 @@ async def watchlist_list(
 
         # Enrich with realtime data — R5: 并行拉取（原串行逐 item，多标的时响应数秒；
         # 单标的 3s 超时截断，慢源不拖累整体——对齐 P2-1/R4-16 模式）
+        # R5-2-1: A 股多标的改批量路径（fetch_a_stock_batch，P3-3 原案）——
+        # 逐标的 get_asset_realtime 对 5+ 标的仍要 5 次独立慢源调用（4525ms 退化）；
+        # 批量一次拉全，慢源只触发一次。
         async def _realtime_one(item):
             try:
                 return await asyncio.wait_for(
@@ -576,8 +579,27 @@ async def watchlist_list(
             except BaseException:
                 return None
 
+        _a_items = [it for it in items if (it.asset_type or "A") == "A"]
+        _batch_map: dict[str, dict] = {}
+        if len(_a_items) >= 2:
+            try:
+                from ..services.market_service import get_realtime_batch
+                _batch_rows = await asyncio.wait_for(
+                    get_realtime_batch([it.symbol for it in _a_items], "A"),
+                    timeout=8,
+                )
+                _batch_map = {r.get("symbol"): r for r in (_batch_rows or []) if r.get("symbol")}
+            except BaseException as _e:
+                logger.warning("[watchlist] batch realtime failed (fallback per-item): %s", _e)
+
         _realtimes = await asyncio.gather(
-            *(_realtime_one(it) for it in items), return_exceptions=True
+            *(
+                _realtime_one(it)
+                if it.symbol not in _batch_map or (it.asset_type or "A") != "A"
+                else asyncio.sleep(0, result=_batch_map[it.symbol])
+                for it in items
+            ),
+            return_exceptions=True,
         )
 
         enriched = []

@@ -22,11 +22,15 @@ async def build_full_context(
     include_fund_flow: bool = True,
     include_commodities: bool = True,
     include_global_liquidity: bool = True,
+    include_macro: bool = True,
 ) -> dict:
     """统一的 LLM 上下文数据采集。
 
     所有字段都有 try/except 保护，单源失败不污染整体。
     market_data_hub 参数是已初始化的 MarketDataHub 单例。
+
+    R5-2-10: include_macro=True 时（market="A"）注入 domestic_macro
+    （LPR/中美国债/M0-M2/CPI-PPI，四源并行；全失败 → {"unavailable": true}）。
 
     Returns:
         dict: 包含请求的上下文数据
@@ -184,6 +188,16 @@ async def build_full_context(
             errors.append(f"global_liquidity: {e}")
         if gl:
             context["global_liquidity"] = gl
+
+    # R5-2-10: 国内宏观/流动性（仅 A 股市场；HK/US 省略该段）
+    if include_macro and market.upper() in ("A", ""):
+        try:
+            from ..fetchers.macro_fetcher import fetch_all_domestic_macro
+            macro = await asyncio.wait_for(fetch_all_domestic_macro(), timeout=20)
+            context["domestic_macro"] = macro
+        except Exception as e:
+            context["domestic_macro"] = {"unavailable": True}
+            errors.append(f"domestic_macro: {e}")
 
     if errors:
         logger.debug("[llm_context] build_full_context partial errors: %s", errors)

@@ -14,6 +14,10 @@ pytest-timeout>=2.3
 tushare>=1.2.89
 requests>=2.28
 levistock>=0.1.0
+# R5-2-4: mootdx（通达信 TCP 行情，A 股实时/批量降级链第一环）。文档实测
+# 0.11.7 内置 42 目标 16 可达，默认首个 110.41.147.114:7709 延迟 60ms。
+# 注意：Docker python:3.14-slim 若 py-mini-racer 无 wheel 需固定版本或跳过。
+mootdx>=0.11.7
 
 scipy>=1.14.0
 # pandas_ta>=0.3.14b0  # 移除: numba 不支持 Python 3.14, Dockerfile 中用 --no-deps 安装

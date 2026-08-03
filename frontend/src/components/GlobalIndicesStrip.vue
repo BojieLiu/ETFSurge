@@ -236,9 +236,11 @@ function labelClass(region) {
 .cd-stale { font-size: 9px; color: var(--color-text-tertiary); background: var(--color-neutral-200); padding: 1px 5px; border-radius: 3px; line-height: 1.4; }
 
 .card-body { display: flex; flex-direction: column; gap: 4px; }
-.cd-price { font-size: 15px; font-weight: var(--font-weight-semibold); color: var(--color-text-primary); font-family: var(--font-family-mono); line-height: 1.2; }
+/* R5-0-3: WS 行情推送防重排——等宽数字（tabular-nums）+ 最小宽度，
+   价格从 1234.5 → 12345.6 等位数变化时不引发卡片宽度/换行抖动（CLS）。 */
+.cd-price { font-size: 15px; font-weight: var(--font-weight-semibold); color: var(--color-text-primary); font-family: var(--font-family-mono); line-height: 1.2; font-variant-numeric: tabular-nums; min-width: 3ch; }
 .cd-price.muted { color: var(--color-text-tertiary); }
-.cd-change { font-size: 12px; font-weight: var(--font-weight-medium); font-family: var(--font-family-mono); }
+.cd-change { font-size: 12px; font-weight: var(--font-weight-medium); font-family: var(--font-family-mono); font-variant-numeric: tabular-nums; }
 .cd-change.muted { color: var(--color-text-tertiary); }
 .ca { font-size: 8px; line-height: 1; }
 

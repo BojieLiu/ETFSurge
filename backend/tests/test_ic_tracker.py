@@ -200,3 +200,93 @@ class TestICContract:
         assert router.prefix == "/api/v1/factors"
         routes = [r.path for r in router.routes]
         assert any("/ic" in r for r in routes), f"Routes: {routes}"
+
+
+class TestR515ICRestoreFromDB:
+    """R5-1-5: 启动时从 DB 恢复 _last_ic_batch（IC 非请求驱动）。
+
+    旧问题：/factors/ic 只读内存 _last_ic_batch，重启后内存态丢失 → IC 空
+    （DB 有历史数据但端点读不到）。修复：restore_ic_from_db 回填内存。
+    """
+
+    @pytest.mark.asyncio
+    async def test_restore_populates_last_ic_batch(self):
+        """DB 含历史 IC → _last_ic_batch 被填充（含有效信号条目）。"""
+        from datetime import datetime
+        from app.factors.factor_registry import FactorRegistry
+        from app.models.factor_ic import FactorICRecord
+
+        reg = FactorRegistry()
+        reg._last_ic_batch = {}  # 模拟重启后内存空
+
+        class _FakeRow:
+            def __init__(self, code, val, ts):
+                self.factor_code = code
+                self.ic_value = val
+                self.computed_at = ts
+
+        ts = datetime.utcnow()
+
+        class _FakeResult:
+            def scalars(self):
+                return self
+
+            def all(self):
+                return [
+                    _FakeRow("momentum", 0.35, ts),
+                    _FakeRow("valuation", 0.12, ts),
+                    _FakeRow("technical", 0.0005, ts),  # abs ≤ 0.001 → 不恢复
+                ]
+
+        class _FakeExec:
+            def __init__(self, *a, **kw):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def execute(self, *a, **kw):
+                return _FakeResult()
+
+        restored = await reg.restore_ic_from_db(_FakeExec())
+        assert restored == 2, f"应恢复 2 条有效 IC，实际 {restored}"
+        assert reg._last_ic_batch.get("momentum") == pytest.approx(0.35)
+        assert reg._last_ic_batch.get("valuation") == pytest.approx(0.12)
+        # abs ≤ 0.001 的 technical 不恢复（U3/N06 覆盖保护）
+        assert "technical" not in reg._last_ic_batch, \
+            "abs(val)≤0.001 不应覆盖 _last_ic_batch（覆盖保护）"
+
+    @pytest.mark.asyncio
+    async def test_restore_empty_db_keeps_empty(self):
+        """DB 无历史记录 → 不抛异常、_last_ic_batch 保持空。"""
+        from app.factors.factor_registry import FactorRegistry
+
+        reg = FactorRegistry()
+        reg._last_ic_batch = {}
+
+        class _FakeExec:
+            def __init__(self, *a, **kw):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def execute(self, *a, **kw):
+                return _FakeEmpty()
+
+        class _FakeEmpty:
+            def scalars(self):
+                return self
+
+            def all(self):
+                return []
+
+        restored = await reg.restore_ic_from_db(_FakeExec())
+        assert restored == 0
+        assert reg._last_ic_batch == {}

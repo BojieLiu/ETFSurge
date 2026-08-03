@@ -100,6 +100,17 @@ describe('SummaryCards 累计盈亏估算标注 (R66/R67)', () => {
 })
 
 describe('SummaryCards UI 优化 (R5)', () => {
+  it('R5-0-3: summary-grid 容器存在 min-height（非 0）防 CLS', () => {
+    const wrapper = mountCards(null)
+    const grid = wrapper.find('.summary-grid')
+    expect(grid.exists()).toBe(true)
+    const style = grid.attributes('style') || ''
+    expect(style).toMatch(/min-height/i)
+    // jsdom 无法量 CLS；组件级断言防「高度塌陷回归」
+    const m = style.match(/min-height:\s*([^\s;]+)/i)
+    expect(m).toBeTruthy()
+    expect(parseFloat(m[1])).toBeGreaterThan(0)
+  })
   it('正负号：正数带 +，负数带 -，0 不带符号', () => {
     const wrapper = mountCards(null)
     const text = wrapper.text()

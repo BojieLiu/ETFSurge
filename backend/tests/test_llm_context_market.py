@@ -160,3 +160,61 @@ async def test_build_market_context_benchmark_stocks():
     bs = ctx.get("benchmark_stocks", [])
     assert len(bs) >= 1, f"benchmark_stocks 应有龙头股: {bs}"
     assert any("stock_name" in s or "name" in s for s in bs)
+
+
+# ── R5-1-3: llm-advice 上下文注入关键词扩展 ───────────────────────────────
+def _build_snapshot(query, hub=None):
+    """调用统一注入函数 _build_advice_market_snapshot（传入 mock hub）。"""
+    from app.routers.analysis import _build_advice_market_snapshot
+
+    if hub is None:
+        hub = _FakeHub()
+    return _build_advice_market_snapshot(query, hub)
+
+
+class TestR513AdviceContextInjection:
+    """R5-1-3: 投顾问题无论是否命中旧关键词，均注入 market_snapshot。
+
+    覆盖类（"当前A股市场怎么配置"）：旧关键词表缺 "A股/配置"，仅命中 "市场"。
+    不覆盖类（"如何看待定投"）：不命中任何旧关键词 → 走无条件注入路径。
+    两种都应含实时市场数据（指数/市态/情绪），无"暂无数据"式全降级模板。
+    """
+
+    def test_cover_class_query_injects_snapshot(self):
+        """覆盖类："当前A股市场怎么配置" → market_snapshot 含指数/市态。"""
+        snapshot = _build_snapshot("当前A股市场怎么配置")
+        assert snapshot, "R5-1-3 覆盖类问题应注入 market_snapshot（旧关键词表漏 'A股/配置'）"
+        assert "上证指数" in snapshot or "市场状态" in snapshot, \
+            f"snapshot 应含实时市场数据: {snapshot}"
+
+    def test_uncovered_class_query_injects_snapshot(self):
+        """不覆盖类："如何看待定投" → 无条件注入路径，仍含实时市场数据。"""
+        snapshot = _build_snapshot("如何看待定投")
+        assert snapshot, "R5-1-3 不覆盖类问题也应注入 market_snapshot（无条件注入）"
+        assert "上证指数" in snapshot or "市场状态" in snapshot, \
+            f"snapshot 应含实时市场数据: {snapshot}"
+
+    def test_sector_keyword_still_injects_sector(self):
+        """回归：板块类问题仍注入板块动量。"""
+        snapshot = _build_snapshot("半导体板块最近怎么样")
+        assert "半导体" in snapshot, f"板块问题应含板块数据: {snapshot}"
+
+    def test_inject_context_writes_snapshot(self):
+        """_inject_market_context 集成：snapshot 非空时写入 ctx['market_snapshot']。"""
+        from app.routers import analysis as analysis_router
+
+        ctx = {}
+        with patch.object(analysis_router, "_build_advice_market_snapshot",
+                          return_value="· 市场状态: range_bound\n· 上证指数: 3000.0"):
+            result = analysis_router._inject_market_context("任何问题", ctx)
+        assert result.get("market_snapshot", "").startswith("· 市场状态"), \
+            "无条件注入应写入 ctx.market_snapshot"
+
+    def test_non_stream_advice_unconditional_injection(self):
+        """非 stream 版 llm_advice 同样无条件注入（两版同步）。"""
+        from app.routers import analysis as analysis_router
+
+        # 直接测统一注入函数（非 stream 版 llm_advice 与其共享同一构建逻辑）
+        snapshot = _build_snapshot("如何看待定投")
+        assert snapshot, "非 stream 版也应无条件注入 market_snapshot"
+        assert "上证指数" in snapshot or "市场状态" in snapshot

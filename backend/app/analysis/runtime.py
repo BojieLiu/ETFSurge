@@ -57,15 +57,24 @@ class AgentRuntime:
 
         Supports optional ``system_override`` in **kwargs:
         when provided, it replaces ``self.system_prompt`` for this call.
+        R5-1-6: ``rate_limit_cap``/``max_retries``/``retry_delay`` 透传到
+        llm_complete_with_system（策略检查传 max_retries=1, rate_limit_cap=10 快速失败）。
         """
         system_prompt = kwargs.get("system_override", self.system_prompt)
         last_exc: Exception | None = None
+        # R5-1-6: 仅透传显式提供的参数（None 保持 llm_complete_with_system 默认值）
+        _llm_kwargs = {}
+        for _k in ("max_retries", "retry_delay", "rate_limit_cap"):
+            _v = kwargs.get(_k)
+            if _v is not None:
+                _llm_kwargs[_k] = _v
         for attempt in range(1, self.config.max_retries + 1):
             try:
                 return await llm_complete_with_system(
                     system_prompt=system_prompt,
                     prompt=prompt,
                     response_format=self._response_format(),
+                    **_llm_kwargs,
                 )
             except Exception as exc:  # transient / network / LLM errors
                 last_exc = exc
@@ -102,6 +111,9 @@ class AgentRuntime:
             yield {"event": "error", "data": {"code": "STREAM_ERROR", "message": str(exc)}}
 
     async def run_json(self, prompt: str, **kwargs) -> dict:
-        """Run the agent and parse the response as a JSON object."""
-        raw = await self.run(prompt)
+        """Run the agent and parse the response as a JSON object.
+
+        R5-1-6: kwargs（max_retries/rate_limit_cap）透传给 run → llm_complete_with_system。
+        """
+        raw = await self.run(prompt, **kwargs)
         return _extract_json(raw)

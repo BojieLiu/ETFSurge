@@ -565,6 +565,7 @@ async def strategy_check(
     # 必须与 TimeoutError 一起捕获，否则 usage 失败记录缺失、规则兜底文案丢失。
     _llm_failed = False
     _llm_start = _time.monotonic()
+    _llm_diag = ""
     try:
         llm_result = await asyncio.wait_for(
             generate_strategy_check_report(
@@ -578,9 +579,15 @@ async def strategy_check(
     except (asyncio.TimeoutError, asyncio.CancelledError) as e:
         _llm_failed = True
         _llm_dur = _time.monotonic() - _llm_start
+        # R5-1-6: 取 LLM 层最后失败诊断（区分限流/超时），供 summary 展示
+        try:
+            from ..analysis.llm import get_last_llm_error
+            _llm_diag = get_last_llm_error() or ""
+        except Exception:
+            _llm_diag = ""
         logger.warning(
-            "[strategy_check] LLM analysis timed out/cancelled after %.1fs (%s), using rule fallback",
-            _llm_dur, type(e).__name__,
+            "[strategy_check] LLM analysis timed out/cancelled after %.1fs (%s), using rule fallback. last_error=%s",
+            _llm_dur, type(e).__name__, _llm_diag,
         )
         # F1-9: 失败留痕 — 写 usage 失败记录（成功路径由 llm.py 写入）
         try:
@@ -598,6 +605,7 @@ async def strategy_check(
         llm_result = {
             "summary": (
                 f"LLM 分析超时（{_llm_dur:.0f}s 未返回，已用规则引擎兜底生成建议）"
+                f"（最后错误: {_llm_diag or '未知'}）"
             ),
             "suggestions": [],
             "holdings_analysis": [],
@@ -629,6 +637,18 @@ async def strategy_check(
             weight_map[sym] = float(w) if w else 0.0
 
     holdings_analysis = llm_result.get("holdings_analysis", [])
+
+    # R5-1-2: rule 兜底路径 holdings_analysis 补全——LLM 超时/失败时
+    # holdings_analysis 恒空 → 行业集中度检查静默跳过。用 factor_breakdowns/
+    # industry_map 生成骨架（symbol/name/weight/factor_summary/industry），
+    # 使行业分布分析在兜底路径也存在（数量级正确，标注"规则引擎生成"）。
+    if _llm_failed and not holdings_analysis:
+        holdings_analysis = _build_rule_fallback_holdings_analysis(
+            etfs=etfs,
+            market_data=market_data,
+            factor_breakdowns=factor_breakdowns,
+            weight_map={},  # 下面 P2-4 会统一回填
+        )
 
     # P0-1 (R4-01): 行业注入——从 market_data_hub 候选池构建 symbol→industry 映射
     # （与设计任务同一来源；候选池条目含 ETFClassifier 产出的 industry 字段）。
@@ -800,6 +820,52 @@ def _compute_confidence(filled_count: int, total_count: int) -> str:
     elif ratio >= 0.5:
         return "medium"
     return "low"
+
+
+def _build_rule_fallback_holdings_analysis(
+    etfs: list,
+    market_data: list[dict],
+    factor_breakdowns: dict[str, dict],
+    weight_map: dict[str, float],
+) -> list[dict]:
+    """R5-1-2: rule 兜底路径的 holdings_analysis 骨架生成。
+
+    LLM 超时/失败时 holdings_analysis 恒空 → 行业集中度检查静默跳过（P0-1 收敛）。
+    本函数用 market_data + factor_breakdowns 生成逐标的分析骨架：
+    symbol/name/weight/factor_summary/industry，标注 "规则引擎生成"。
+    后续 P0-1 行业注入 + P2-4 权重回填会统一覆盖/补全字段。
+    """
+    result: list[dict] = []
+    for e in etfs:
+        if isinstance(e, dict):
+            sym = e.get("symbol")
+            name = e.get("name", sym)
+        else:
+            sym = getattr(e, "symbol", None)
+            name = getattr(e, "name", sym)
+        if not sym or sym == "CASH":
+            continue
+        md = next((m for m in market_data if m.get("symbol") == sym), {})
+        fb = factor_breakdowns.get(sym, {}) or {}
+        fs = fb.get("factor_scores", {}) or {}
+        if isinstance(fs, dict) and any(v for v in fs.values()):
+            top = sorted(fs.items(), key=lambda x: -abs(x[1]))[:3]
+            factor_str = "；".join(f"{k}: {v:.2f}σ" for k, v in top)
+        else:
+            factor_str = "因子数据不足"
+        # industry 占位：P0-1 行业注入会 setdefault 填充真实行业（数据源可用时）
+        ind = ""
+        if isinstance(fb.get("technical_indicators"), dict):
+            ind = (fb["technical_indicators"].get("sector") or "")
+        result.append({
+            "symbol": sym,
+            "name": name or sym,
+            "weight": weight_map.get(sym),
+            "factor_summary": factor_str,
+            "industry": ind,
+            "generated_by": "规则引擎生成",
+        })
+    return result
 
 
 def _rule_based_suggestion(
@@ -999,6 +1065,12 @@ def _combine_risk_warnings(
         else:
             combined = [{"type": "general", "severity": "info",
                           "description": "当前组合风险指标正常，未触发自动警告。"}]
+    elif llm_failed:
+        # R5-1-2: 骨架生成后 combined 可能非空（行业缺失/超配 warning），
+        # LLM 超时标注仍须存在（诚实降级）——前置一条，不依赖 combined 为空。
+        if not any("LLM 分析超时" in w.get("description", "") for w in combined):
+            combined = [{"type": "general", "severity": "warning",
+                         "description": "LLM 分析超时，风险提示基于规则引擎部分数据，完整性受限。"}] + combined
     return combined
 
 

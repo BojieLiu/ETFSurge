@@ -115,6 +115,11 @@ GET /api/v1/news/stock/{symbol}
 
 **成功响应 / Success Response — `200 OK`:** Same structure as headlines, filtered to symbol.
 
+**键集声明（R5-2-2）**: `stock/{symbol}` 的键集与 headlines 完全一致——仅英文键
+`id/title/content/source/time/sort_time/url/level/stars`；akshare `stock_news_em`
+返回的中文键（新闻标题/新闻内容/发布时间/新闻来源/新闻链接/关键词等）在服务端
+归一化时**全部删除**，不得残留任何中文键。
+
 ---
 
 ## 6. Research Reports / 研究报告
@@ -206,8 +211,9 @@ Used for **individual hot-push** items. On connect, server sends a batch of indi
 
 | Item | Frontend | Backend | Notes |
 |------|----------|---------|-------|
-| All 5 endpoints return 200 | ☐ | ☐ | |
-| `stock/{symbol}` filters by symbol | ☐ | ☐ | |
+| All 5 endpoints return 200 | ☑ | ☑ | |
+| `stock/{symbol}` filters by symbol | ☑ | ☑ | |
+| `stock/{symbol}` 键集 == headlines（仅英文键，R5-2-2） | ☑ | ☑ | 中文键全部删除 |
 | Empty array on no news (not 404) | ☐ | ☐ | |
 | Loading skeleton | ☐ | N/A | |
 | Empty state "暂无资讯" | ☐ | N/A | |

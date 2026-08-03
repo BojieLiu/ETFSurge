@@ -393,6 +393,7 @@ import { usePortfolioStore } from '../stores/portfolio'
 import { portfolioApi, marketApi } from '../api'
 import { useToastStore } from '../stores/toast'
 import { changeClass } from '../utils/changeClass'
+import { resolveTaTarget } from '../utils/taTarget'
 import AppButton from './ui/AppButton.vue'
 import AppInput from './ui/AppInput.vue'
 import AppSelect from './ui/AppSelect.vue'
@@ -642,8 +643,9 @@ function fmt(v) {
   return typeof v === 'number' ? v.toFixed(2) : v
 }
 function taTarget(etf) {
-  if (etf.tracked_index) return { sym: etf.tracked_index, assetType: 'index' }
-  return { sym: etf.symbol, assetType: 'A' }
+  // R5-2-11: 统一走 resolveTaTarget——场外 tracked_index 为场内 ETF 代码时
+  // 查 ETF 自身 K 线（assetType='A'），仅真实指数代码才用 'index'（旧逻辑全走 index）。
+  return resolveTaTarget(etf)
 }
 async function loadTa(etf) {
   const t = taTarget(etf)

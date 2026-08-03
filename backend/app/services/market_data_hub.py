@@ -541,7 +541,13 @@ class MarketDataHub:
             max_n = MAX_PER_LAYER.get(layer, 10)
             # P4 fix-plan-pool: 行业均衡化后再截断
             balanced = self._balance_by_industry(new_pool[layer], max_n=max_n)
-            new_pool[layer] = balanced[:max_n]
+            # R5-0-1: 截断时保护强制标的——截断前剔除 MANDATORY_CODES，截断后再补回
+            #（P1-1 A500 缺失根因：_ensure_mandatory 在截断前执行，截断把 560600 挤出后无二次校验）
+            new_pool[layer] = self._truncate_with_mandatory_protection(balanced, max_n=max_n)
+
+        # 6b. R5-0-1: 截断后强制标的二次校验（对齐 etf_scanner._log_missing_required 口径）
+        # 失败仅 WARNING + 从 flat 找回注入，不抛异常；与 _ensure_mandatory 语义一致。
+        self._recheck_mandatory_after_truncate(new_pool, flat)
 
         # 7. 空池保护：如果刷新结果为空且存在上次成功数据，保留上次 pool 而非清空
         total_new = sum(len(v) for v in new_pool.values())
@@ -742,6 +748,53 @@ class MarketDataHub:
                     found["layer"] = target
                     pool[target].append(found)
                     logger.info("MarketDataHub: enforced mandatory %s -> %s", code, target)
+
+    @staticmethod
+    def _truncate_with_mandatory_protection(
+        balanced: list[dict[str, Any]], max_n: int
+    ) -> list[dict[str, Any]]:
+        """R5-0-1: MAX_PER_LAYER 截断时保护强制标的。
+
+        截断前剔除 MANDATORY_CODES，截断后再补回——避免 560600 等强制标的
+        因排名靠后被行业均衡/截断挤出（P1-1 A500 缺失根因之一）。
+        """
+        mandatory = [e for e in balanced if e.get("symbol") in MANDATORY_CODES]
+        rest = [e for e in balanced if e.get("symbol") not in MANDATORY_CODES]
+        return mandatory + rest[:max_n]
+
+    def _recheck_mandatory_after_truncate(
+        self,
+        pool: dict[str, list[dict[str, Any]]],
+        flat: list[dict[str, Any]],
+    ) -> None:
+        """R5-0-1: 截断后强制标的二次校验。
+
+        对齐 etf_scanner._log_missing_required 口径：截断后再次校验
+        MANDATORY_CODES ∪ CORE_REQUIRED 是否在池中，缺失时从 flat 找回注入。
+        失败仅 WARNING + 注入，不抛异常；revert 只需删除步骤 6b 的调用。
+        """
+        if not flat:
+            return  # 扫描失败，不强行注入（与 _ensure_mandatory 语义一致）
+        required = MANDATORY_CODES | set(getattr(etf_scanner, "CORE_REQUIRED", []))
+        for code in sorted(required):
+            in_pool = any(
+                e["symbol"] == code for layer in pool.values() for e in layer
+            )
+            if in_pool:
+                continue
+            found = next((e for e in flat if e.get("symbol") == code), None)
+            if not found:
+                continue
+            # 与 _ensure_mandatory 相同的定层逻辑
+            if code in ("510300", "560600"):
+                target = LAYER_CORE
+            elif code in ("518880", "511090"):
+                target = LAYER_DEFENSE
+            else:
+                target = LAYER_SATELLITE
+            found["layer"] = target
+            pool.setdefault(target, []).append(found)
+            logger.warning("MarketDataHub: re-injected mandatory %s -> %s after truncate", code, target)
 
     @staticmethod
     def _is_market_hours() -> bool:

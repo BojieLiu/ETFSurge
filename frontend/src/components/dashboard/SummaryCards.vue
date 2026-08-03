@@ -1,5 +1,7 @@
 <template>
-  <div class="summary-grid">
+  <!-- R5-0-3: summary-grid 容器级定高（防 CLS）——值来自 GRID_MIN_HEIGHT，
+       内联 style 绑定使组件测试可在 jsdom 中直接断言（scoped CSS 测试环境不可读） -->
+  <div class="summary-grid" :style="gridStyle">
     <!-- 总仓位（独占一行，突出显示） -->
     <AppCard v-if="activeTab === 'combined'" layout="horizontal" icon="💰" class="summary-card summary-card--total" bordered padded hoverable>
       <p class="summary-label">总仓位</p>
@@ -185,6 +187,11 @@ function findCumulativePnlPct(type) {
 function estimatedRatio(type) {
   return props.pnlHistory?.summary?.by_type?.[type]?.estimated_ratio || 0
 }
+
+// R5-0-3: 容器级定高防 CLS——总仓位卡(96) + 组标签(~24) + 当日盈亏组(96) + 累计盈亏组(96)
+// 首屏骨架（单行）与完成态（数字+估算提示）都在此高度内渲染，WS 行情推送不引发重排。
+const GRID_MIN_HEIGHT = '340px'
+const gridStyle = { minHeight: GRID_MIN_HEIGHT }
 </script>
 
 <style scoped>
