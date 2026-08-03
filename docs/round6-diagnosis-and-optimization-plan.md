@@ -448,7 +448,11 @@ round5 已补：设计质量门禁（P1-1/P1-2/M7——本轮全 PASS ✅）、�
 
 **根因**（portfolio_service.py:926-931 `_rule_based_suggestion` 决策表）：SELL→decrease 仅在 **avg_factor < -0.5** 时触发；159992 因子分 +3.57（强正）→ 决策表 fall-through 到默认 hold。**两套口径冲突无协调**：持仓明细 tech_signal（:704-706）是**实时技术信号**（真实信号），操作建议基于**因子评分决策表**——技术信号与因子分背离时，规则引擎直接忽略信号（除非因子分也负），且 reason 还暴露"信号 sell"造成文案自相矛盾。
 
-**修复方向（不实施）**：F10——①决策表增加"信号-因子背离"分支：`sig=sell 且 avg_factor ≥ +0.5` → 输出 hold 但 reason 明确解释"技术面偏空但因子分强正（+3.57），暂不追空，跌破 MA20 再降仓"；②或持仓明细 tech_signal 与操作建议 action 并列展示时标注口径（"技术信号：SELL（实时）｜操作建议：hold（因子分主导）"）；③rule 兜底 reason 禁止裸引用"信号 X"当依据而 action 与之相反（文案自洽门禁）。
+**修复方向（用户已决策：F10 两者都做——决策表背离分支 + 前端口径标注；不实施）**：
+1. **后端决策表加"信号-因子背离"分支**（`_rule_based_suggestion`，portfolio_service.py:926-931 之后）：`sig=sell 且 avg_factor ≥ +0.5` → 输出 hold 且 reason 明确解释"技术面偏空但因子分强正（+3.57），暂不追空，跌破 MA20 再降仓"；对称分支 `sig=buy 且 avg_factor ≤ -0.5` → hold 且解释"技术面偏多但因子分偏弱，不追高，站上 MA20 再加仓"；原 `avg_factor < -0.5 + sell → decrease` / `> +0.5 + buy → increase` 分支保留；
+2. **reason 文案自洽门禁**：rule 兜底 reason 禁止"引用信号 X 当依据而 action 与之相反"的裸写法（如"信号 sell，维持现状"）——背离时必须附带解释；新增单测断言背离场景 reason 不含该模式；
+3. **前端口径标注**（StrategyCheckResult）：持仓明细 tech_signal 与操作建议 action 并列展示时标注口径来源（技术信号列标"实时技术信号"，操作建议列标"因子分主导/规则引擎"），背离时高亮提示；
+4. **TDD**：后端单测——`sig=sell + avg_factor=+3.57` → action=hold 且 reason 含"技术面偏空/因子分强正"背离解释（当前为裸"信号 sell，维持现状"）；`sig=buy + avg_factor=-1.0` → hold 对称；既有 U2 R2 用例（buy+0.5→increase、sell-0.5→decrease）不回归；前端组件测试——action=hold 且 tech_signal=SELL 时显示口径标注与背离提示。**验收**：159992 类标的建议合理且文案自洽；页面可区分"实时信号"与"因子分主导"两个口径。
 
 ### 15.3 Q3：持仓明细"因子评分"栏抽象难懂
 
@@ -469,3 +473,191 @@ round5 已补：设计质量门禁（P1-1/P1-2/M7——本轮全 PASS ✅）、�
 ### 15.5 修订记录 v1.5
 
 - v1.5 (2026-08-03)：追加「十五、用户反馈补充诊断 3：策略检查」——①LLM 60s 满超时（R5-1-6 只覆盖快速 500/429，慢响应仍等满 60s，F9 降 30s+区分文案）；②操作建议 vs 技术信号矛盾（决策表 SELL 需 avg_factor<-0.5，因子分强正时 SELL 被忽略且 reason 自曝矛盾，F10 背离分支+口径标注+文案自洽门禁）；③因子评分栏抽象（factor_summary 裸拼因子键+σ，F11 中文名+方向解读）；④news_heat 全 100（注入全市场新闻到每个标的，无区分度+误导，F12 按标的新闻或降级市态级）。均未实施。
+
+---
+
+## 十六、用户反馈补充诊断 4：技术分析 / 行情分析 / 标的分析 / 标题布局（2026-08-03 晚）
+
+> 范围：用户反馈 4-7（4 组问题 + 1 组 UX 优化建议）。仅分析与定位，**不做实施**。
+> 证据：截图 000010-000020；前端/后端代码定位（子代理核实行号）。
+
+### 16.1 反馈 4a：技术分析所有标的综合信号一样
+
+**根因**：`AnalysisView.vue:18` `@update:selected="onSelectEtf"`，`onSelectEtf()`（433-439 行）**不接收 `$event`、不回写 `selected.value`** → `selected` 恒为初始值 → `fetchChart()` 恒请求同一 symbol → 切换任何标的下拉，评分/RSI/MACD/MA 都显示第一只标的的信号。对照：周期下拉有显式回写（19 行 `@update:period="period = $event"`）故正常——**标的与周期两条事件链不对称**。round5-ux #3 修复的是"持仓 tab 点击"路径的 watch 竞态，未覆盖此内部下拉断链。
+
+**修复 F13（不实施）**：`onSelectEtf($event)` 接收并写回 `selected.value`（对齐周期下拉写法）；组件测试：下拉切换 → fetchChart 请求带新 symbol。
+
+### 16.2 反馈 4b：K 线副图选择需求（成交量/MACD/KDJ/RSI/BOLL）未落地
+
+**现状**：`AnalysisView.vue` 已有 MACD/KDJ/RSI 副图复选框（showMACD/showKDJ/showRSI），但 **成交量副图绑定在 showMACD 上**（246 行 `volPct = showMACD.value ? ... : 0`；305 行 `if (showMACD.value)` 才建成交量 grid）——关 MACD 成交量副图一并消失；**无独立成交量开关、无成交额副图**（chart 数据仅 volume 序列，后端 `indicators.py:141` 把成交额列映射进 volume 字段）；BOLL 无独立副图。
+
+**修复 F14（不实施）**：成交量独立开关 `showVolume`（与 showMACD 解耦，`volPct`/成交量 grid 不再依赖 showMACD）；chart 数据补成交额序列（amount）+ 成交额副图；BOLL 副图选项。**TDD**：组件测试——①关闭 showMACD 时成交量 grid 仍显示（当前会消失）；②开启 showVolume 时成交量副图可见；③后端 chart 响应含 amount 序列（契约字段断言）。**验收**：AnalysisView 复选组可独立切换 成交量/MACD/KDJ/RSI/BOLL，关任一不影响其他副图。
+
+### 16.3 反馈 4c：周期下拉选择后显示为空
+
+**定位**：周期 options value 与 `period` 均为字符串（AnalysisView.vue:89-99/69），类型匹配无缺陷（有 spec 覆盖）——用户观察到的"下拉变空"最可能是 16.1 的标的切换回弹（selected 未回写 → 下拉 UI 回显错乱）的连带观感。
+
+**修复 F15（不实施）**：随 F13 一并验证；另在 K 线图标题区增加"当前周期"文本标注（日K/周K/月K），彻底消除歧义。
+
+### 16.4 反馈 5：行情分析切港股后热点板块/热门个股仍为 A 股
+
+**根因（双端）**：前端 `api/index.js:42-44` getHotPlates/getSectorHeat/getStockHotRank **不带 market 参数**；后端 `/market/hot-plates`（routers/market.py:498-501）、`/market/sectors/heat`（505-526）、`/market/stock-hot-rank`（530-533）**均无 market 参数**，分别硬编码财联社 A 股热点板块、财联社板块热度、同花顺 A 股热门个股。`SectorHeatMap.vue:194-198` 有 watch(marketTab) 重新 fetch，但 API 无市场维度 → 切港股/美股仍返回 A 股数据（技术弹窗另固定 asset-type="A"，119 行）。
+
+**修复 F16（用户已决策：港股先做，美股降级提示；不实施）**：
+1. 三端点加 market 参数（A/HK/US）；前端 `api/index.js` getHotPlates/getSectorHeat/getStockHotRank 透传 marketTab；
+2. **港股热点**（数据源调研结论见下）：新增 fetcher 走 **push2delay**（`fs=m:128` 全量港股 + `f100` 中文行业字段）——按 f100 聚合涨跌幅/成交额 → 港股行业热点板块；按 f6（成交额）排序取前 N → 港股热门个股。复用 R5-2-6 已落地的 `_fetch_em_etf_list(host)` 双源路由机制（push2 优先→push2delay 兜底 + 连败 3 次冷却 60s）；
+3. **美股**：按决策降级提示"该市场暂不支持热点排行"（不返回 A 股数据）；调研显示 push2delay `fs=m:105` 同样带 f100 行业字段（MU→"信息科技"），美股热点可低成本实现（与港股同构），留待后续决策；
+4. **TDD**：后端契约测试——`?market=HK` 返回港股域板块/个股（f100 聚合结果非空，mock push2delay 响应）或"暂不支持"结构化标记；`?market=US` 返回暂不支持提示（不得返回 A 股列表）；前端组件测试——marketTab 切 HK 后请求带 market=HK。**验收**：行情分析切港股后热点板块/热门个股不再显示 A 股数据，显示港股行业热点（数据源可用时）。
+
+**数据源调研结论（2026-08-03 实测）**：
+- **东财 push2 直连当前被限流**（RemoteDisconnected 实证：akshare `stock_hk_spot_em` / `stock_us_spot_em` / 直连 push2 clist 全部失败）——与 round6 R5-07 一致；
+- **push2delay 备用域名稳定可用**（实测：m:128/m:105 均正常返回，含 f2/f3/f5/f6/f12/f14/f100）；R5-2-6 双源路由机制已在 etf_scanner 落地（etf_scanner.py:240/381-387），F16 直接复用；
+- **行业字段覆盖**：A/HK/US 三市场 spot 均带 f100 中文行业（港股 09988→"专业服务"、美股 MU→"信息科技"）→ 三市场"行业热点聚合"路径同构；
+- **同花顺**：akshare ths 接口（stock_rank_*_ths）仅 A 股个股榜单，无 HK/US 板块；
+- **levistock**：`lv.sector_em` 仅 A 股行业/概念；
+- 结论：**国内免费稳定源中，东财 push2delay 是港股/美股热点唯一可行且可复用现有机制的数据源**；akshare 封装（绑 push2）不可靠。
+
+### 16.5 反馈 6a：标的分析自动补全仍慢（~2s）
+
+**根因（后端为主）**：①`useMarketSearch.js:63` 搜索不带 market 参数 → 后端 `/market/search` 走 global 跨市场分支（routers/market.py:145-175）并发拉 akshare 港股/美股全量 spot 列表（timeout=4s）；②A 股 `instruments` 本地表空（`sync_instruments.py` 仅脚本/每天 16:30 定时，日志无运行记录）→ search 降级全量拉取（Sina ETF 列表 ~3s / akshare 全 A 股）；③内存缓存 TTL 1h，冷缓存 miss。round5-ux #10 修的是前端 debounce（300→200ms），后端冷缓存慢未解决。
+
+**修复 F17（用户已决策：两者都做——启动自动同步 + scheduler 每日同步；不实施）**：
+1. 前端带 market 参数（A 场景只搜 A，短路 global 分支）；后端 search 加 market 分支短路（A 不拉 HK/US spot）；
+2. **启动自动同步**：lifespan 启动后台任务执行 instruments 同步（复用 `scripts/sync_instruments.py` 逻辑抽为 service 函数 `sync_instruments_table()`），**不阻塞启动/健康检查**（后台 task，与预热并行；同步失败静默，search 降级走内存缓存全量拉取一次兜底）；同步完成后 search 命中本地表（毫秒级）；
+3. **scheduler 每日同步**：`scripts/run_scheduler.py` 每日 16:30 定时保留，增加**防并发互斥锁**（启动同步与每日同步不得同时写表，避免双写竞态）；
+4. 表非空时 search 跳过全量降级（`fetch_all_stocks`/`fetch_etf_list` 不触发）；
+5. **TDD**：后端单测——①`market=A` 时 `search_hk_us` 不被调用（mock 断言）；②instruments 表非空时 `fetch_all_stocks`/`fetch_etf_list` 不触发（降级短路）；③启动同步与每日同步并发时互斥锁生效（mock 双调用断言串行）；契约测试——`/market/search?keyword=xx&market=A` 冷缓存响应 <1s（mock 慢源 4s 下仍短路）。**验收**：A 场景自动补全冷缓存 ≤500ms（不再等 HK/US spot）；启动后首次搜索即命中本地表；每日定时同步正常且无双写告警。
+
+### 16.6 反馈 6b：选择标的后只显示"已选择: xxx"、不触发分析
+
+**根因（两条路径）**：①**键盘 Enter 路径断**：UnifiedAnalysis.vue:31 `@keydown.enter` → `useMarketSearch.js:119-125` `selectSearchItem` **只更新 searchQuery（改成"名称 (代码)"）不触发 doAnalyze**（鼠标 mousedown 路径 275-286 行有 doAnalyze——交互不对称）；②**SSE 空转静默**：若后端 SSE 无 token 且 `done.full_text` 为空，`doAnalyze` 置 `result` 空串（352-355 行）→ 模板落入 `v-else-if="symbol && !loading"`（77-79 行）**静默显示"已选择: xxx"无错误提示**。
+
+**修复 F18（不实施）**：Enter 与 mousedown 统一触发 doAnalyze；SSE 空转/失败显示错误态（含失败原因）而非静默"已选择"；"已选择"态增加"点击分析"引导按钮。**TDD**：组件测试——①键盘 Enter 选择项后 doAnalyze 被调用（当前不触发）；②后端 SSE 返回空 full_text 时页面显示错误态非"已选择"静默分支；③"已选择"态有分析引导按钮。**验收**：键盘/鼠标选择一致触发分析；异常时可见错误文案。**联动**：SSE 空转断言与 R6-F20（LLM 端到端断言）互补。
+
+### 16.7 反馈 6c：板块/概念分析失败（"板块映射失败: BK0477《请用板块名称搜索》"）
+
+**根因链（传代码与传中文名同一根因）**：`sector_fetcher.py:261-282` 概念表加载对缺失热门概念（创新药/光模块/半导体设备/新能源汽车等，日志实证 `popular concept '创新药' not found in results — appending placeholder`）追加 **`sector_code=""` 的 placeholder 行（有名无码）** → `analysis.py:627-656` `_normalize_sector_code` 按名称匹配命中 placeholder → 返回 `sector_code or code`（`"" or code`）→ 原样返回 `"BK0477"` → `analysis.py:705-707` 按 sector_code 查 combined 无真实行 → 404「板块映射失败」。行业表同理存在 placeholder 污染。
+
+**修复 F19（不实施）**：①placeholder 行（sector_code=""）不进入 combined 匹配（跳过"有名无码"行）；②失败文案改"概念'创新药'数据源暂无数据"（区分"代码不存在"与"数据源缺失"）；③POPULAR_CONCEPTS 缺失时启动告警；④前端 EXAMPLES.A.sector 示例代码与后端实际板块代码对齐。**TDD**：后端单测——`_normalize_sector_code('创新药')` 命中 placeholder 时返回 None/明确缺失标记而非原代码；`sector_analysis_stream` 传 '创新药'/'BK0477' 时不再 404（mock 概念表含 placeholder 行）；契约测试——失败响应含 "数据源缺失" 语义字段。**验收**：板块/概念分析对缺失概念给出可理解的"数据源暂无数据"提示。
+
+### 16.8 反馈 6d：等待报告交互体验
+
+**修复 F20（不实施）**：加载页展示阶段进度（数据采集→LLM 分析→生成报告，对齐任务 stage 字段）+ 已选标的/维度高亮 + 取消按钮 + 超时预估文案。
+
+### 16.9 反馈 7：功能板块标题区域布局优化
+
+**方案 F21（UX，不实施）**：①标题放大加粗 + 描述缩小浅灰 + 间距拉开（层级分离）；②标题品牌主色 + 左侧图标；③标题下方细分隔线；④卡片式（轻阴影/圆角）；⑤描述精简（如"实时监控与组合分析"）；⑥与整体风格（圆角/字体）一致。
+
+---
+
+## 十七、政策静态展示优化 + 提交门禁卡死（2026-08-03 晚）
+
+### 17.1 政策因子"0 有效"展示优化（用户：静态数据 0 有效是误导信息）
+
+**现状**：§13.1 已定位政策因子 3 个为 Z03 静态设计（不计算 IC，非故障）；但页面显示"政策因子 3 因子 0 有效"——用户明确认为这是**误导**（把"静态设计"读成"因子失效"）。
+
+**细化方案 F22（不实施）**：
+1. stats-row 增加"静态标识 N"（读 `summary.static`），总览 33 = 23 有效 + 7 无数据 + 3 静态（消除"33 与 23+7 对不上"的困惑）；
+2. china_specific 分类行显示"3 静态"替代"0 有效"，static 因子行加"静态"徽标 + tooltip"静态标识因子（政策哑变量）不参与 IC 统计，非数据缺失"；
+3. IC 表 static 行"无效"→"静态"语义（当前 `abs(ic_value) >= threshold` 判定把 ic_value=null 的 static 归入"低于阈值/无效"侧）；
+4. 验收：页面断言 static 徽标可见、无"0 有效"字样、总览数字自洽（23+7+3=33）。
+
+### 17.2 提交门禁卡死（pre-commit pytest 挂起 ~1 小时）
+
+**现象**：commit 时 pre-commit 执行 `pytest -x` 卡死（本轮实测：pytest 进程 0 CPU I/O 阻塞 30min+ 被强制终止；用户反馈"有时候卡死将近一个小时"）。
+
+**根因（五层）**：
+1. `pytest.ini:5` `addopts = -m "not integration and not slow"` **无全局 `--timeout`**（pytest-timeout 已装于 requirements.txt:13 但未启用，仅 test_data_health.py:321 局部 `@pytest.mark.timeout(120)`）→ 挂起测试不被杀；
+2. `backend/conftest.py:21-31` 仅 `_test_mode = True` 抑制 teardown HTTP 泄漏，**无 socket 拦截** → 真实网络可自由访问（tests/conftest.py 只有 mock fixtures）；
+3. `factor_registry.py:872` `asyncio.gather(*tasks)` **无整体超时**（单任务最多 25s × N 符号 / 8 并发）；
+4. mootdx 线程内 socket 阻塞：`_run_mootdx_with_timeout` 8s 硬超时已缓解单点，但 `_MOOTDX_CLIENT` 全局单例线程不安全、`_MOOTDX_EXECUTOR` 单 worker（max_workers=1）超时后残留 future 持续占用；
+5. `tests/ROOT_CAUSE.md:10-39` 团队已记录此卡死模式：12 线程池被挂死 socket 占满 → 新 run_sync 排队 → gather 永不返回 → 进程卡死。
+
+**修复 F23（用户已决策：socket 拦截方案同意；不实施）**：
+1. `pytest.ini` addopts 加 `--timeout=180 --timeout-method=thread`（全局兜底，超时输出当前测试名便于定位）；
+2. `backend/conftest.py` 加 **autouse socket 拦截 fixture**：替换 `socket.socket` 为拦截版——默认抛 `NetworkBlockedError`（快速 FAIL 而非卡死），**白名单 localhost/127.0.0.1**；需要真实网络的测试用 `@pytest.mark.network` 显式标记放行；拦截错误信息明确（"测试访问真实网络 X，请 mock 或标记 @pytest.mark.network"）；
+3. `factor_registry.py:872` gather 加 `asyncio.wait_for(..., timeout=整体预算)`（联动根因层）；
+4. pre-commit pytest 外层套 timeout 命令（超时 kill 并报 FAIL 而非无限挂起）；
+5. **影响评估（2026-08-03 静态扫描 162 个测试文件）**：直接引用 akshare/requests/urllib/mootdx 的测试均有 `with patch(...)` / monkeypatch / skip 处理（抽查 test_optimization / test_phase2a_data_quality / test_market_data_hub_news / test_etf_data_sources 等 5 个代表文件确认，均为 patch 或"断言无直连 HTTP"类测试）→ **预期无现有测试需修改**；实施时以 `pytest --timeout=60` 全量跑一遍，socket 拦截后 FAIL 者即为漏 mock 的间接触网测试（正是 F23 要暴露的对象），补 mock 或标记即可；
+5. 本轮 commit 已实证：pre-commit 门禁在真实环境下不可用 → 门禁本身纳入 round6 §七 盲区清单（测试防护体系不可用=最大盲区）。**联动**：第 4 层 mootdx 单例/executor 残留与 R6-F1（mootdx 修复）相关，修复后应回归验证 12 线程池不再被挂死 socket 占满。
+
+### 17.3 文档归档（已执行：2026-08-03，review 通过后）
+
+- `docs/round5-diagnosis-and-optimization-plan.md` → `docs/archived/` ✅（四批次已实施完成，commit e4a59aa + 21edfbb；遗留项由 round6 §十三~§十七 F 系列承接）
+- `docs/user-feedback-fixes-review.md` → `docs/archived/` ✅（round5-ux 16 项已消化：12 修复 + 4 方案已实施；测试防护 §五 已并入 round5 R5-3）
+- `docs/round6-diagnosis-and-optimization-plan.md` 保持活跃（当前方案，未实施）
+
+### 17.4 首页 CLS 0.189 修复（用户已决策：纳入本轮；不实施）
+
+**现状**（§八 :171 记录）：round5 R5-0-3 未完全达标——首页 CLS 0.189（round5 0.388 改善，仍 >0.1）；归因坐实：`SummaryCards.vue:193` `GRID_MIN_HEIGHT='340px'`，数据注入后内容超高 → 偏移 0.18853（占 CLS 99.9%）；nav-links 0.00275 次因。R6-F21 是 LHCI 门禁（验收手段），本文为**修复本身**。
+
+**修复 F24（不实施）**：
+1. summary-grid 高度改**内容驱动**：移除/放宽固定 `min-height: 340px`，改为按最大卡片实际高度动态适配（grid 内卡片等高由 CSS grid `auto-rows` 或 ResizeObserver 保障）；加载态用**与最终内容等高的骨架屏**占位（数据注入前后容器高度不变 → 无 CLS）；
+2. 兜底：若内容驱动导致滚动跳动，退化为"首屏固定占位 + 数据就绪后原位更新"（不改变容器高度，仅更新内部数值——数值变化本身不产生布局偏移）；
+3. **TDD**：组件测试——①数据注入前后 grid 容器高度断言不变（骨架屏等高）；②max 卡片高度变化时容器自适应（无 340px 硬编码残留）；③GRID_MIN_HEIGHT 常量移除/替换断言；
+4. **验收**：Lighthouse 首页 CLS ≤0.1（与 R6-F21 LHCI 门禁联动）；P 评分不劣化（round5 P89 基线）。
+
+---
+
+## 十八、修订记录 v1.6
+
+- v1.6 (2026-08-03)：追加「十六、用户反馈补充诊断 4」（反馈 4-7：技术分析标的信号一致断链 F13 / K 线副图需求未落地 F14 / 周期下拉空 F15 / 热点板块不随市场 tab F16 / 补全慢 F17 / 只显示已选择 F18 / 板块映射失败 F19 / 等待交互 F20 / 标题布局 F21）+「十七」（政策静态 0 有效展示细化 F22 / 提交门禁卡死五层根因与 F23 / 文档归档 17.3 计划）。均未实施。
+- v1.7 (2026-08-03)：二轮 review 修订——①F14/F16/F17/F18/F19 补 TDD/验收（达到实施标准）；②17.2 conftest 路径明确为 backend/conftest.py；③17.3 归档改为"计划"（待 review 通过后执行），消除过度断言；④补联动引用（16.6 SSE 空转 ↔ R6-F20、17.2 mootdx ↔ R6-F1）。
+- v1.8 (2026-08-03)：三轮 review 最终放行（pass，无遗留 blocker）；执行 17.3 归档（round5-diagnosis-and-optimization-plan.md / user-feedback-fixes-review.md → docs/archived/）；本文档保持活跃。
+- v1.9 (2026-08-03)：F16 按用户决策细化（港股先做 push2delay m:128+f100 行业聚合、美股降级提示）并补**数据源调研结论**（实测：东财 push2 限流、push2delay 稳定可用、A/HK/US 三市场 spot 均带 f100 行业字段、akshare 封装绑 push2 不可靠、同花顺/levistock 无 HK/US 板块；美股热点同构可低成本实现，留待后续决策）。
+- v1.10 (2026-08-03)：F23 按用户决策细化（socket 拦截方案同意）——补 socket 拦截 fixture 实现细节（autouse + NetworkBlockedError + @pytest.mark.network 标记 + 白名单 localhost）与**影响评估结论**（静态扫描 162 个测试文件：直接触网均已有 patch/skip，抽查 5 个代表文件确认，预期无现有测试需修改；实施时 --timeout=60 全量验证，FAIL 者即漏 mock 对象）。
+- v1.11 (2026-08-03)：F10 按用户决策细化（两者都做）——后端决策表背离分支（sell+强正因子分→hold 带背离解释、buy+强负对称）+ reason 文案自洽门禁（禁"信号 X 维持现状"裸写法）+ 前端口径标注（实时技术信号 vs 因子分主导 + 背离高亮）+ TDD/验收（既有 U2 R2 用例不回归）。
+- v1.12 (2026-08-03)：F17 按用户决策细化（两者都做）——启动自动同步（lifespan 后台任务 + `sync_instruments_table()` service 函数，不阻塞启动/健康检查，失败静默）+ scheduler 每日 16:30 保留并加防并发互斥锁（双写竞态）+ search 表非空跳过全量降级 + TDD（market=A 短路、表非空不降级、互斥锁串行断言）+ 验收（冷缓存 ≤500ms、启动后首次搜索命中本地表）。
+- v1.13 (2026-08-03)：F24 新增（用户已决策：CLS 纳入本轮）——首页 summary-grid `min-height: 340px` 硬编码改内容驱动 + 等高骨架屏占位（数据注入前后容器高度不变），TDD（高度不变断言/无 340px 残留/常量替换），验收 CLS ≤0.1（与 R6-F21 LHCI 门禁联动）。
+- v1.14 (2026-08-03)：追加「十八、进一步排查结论（8 项只读实测）」——①allocation 裁剪无日志→F4 前置加裁剪日志；②BK0477 前端示例过时（真实半导体=BK1318）→F19-④ 坐实；③instruments 表不存在（比"表空"更严重）→F17 前置建表；④pytest 卡死定位信息已齐（F23 覆盖）；⑤news_heat=100 数值核实成立（30 条 stars sum≈100，同源全市场新闻）→§15.4 坐实；⑥chart 响应仅 volumes 无 amount→F14 前置补成交额序列；⑦**RSI 失真根因坐实**（rsi_14 zscore 值当原始 RSI + 30/70 阈值对 zscore 恒走"超卖"分支）→§14.5 升级为独立 bug、修复方向改为 raw 值或 zscore 语义阈值；⑧港股 push2delay 探测完成（F16 已用）。
+- v1.15 (2026-08-03)：追加「十九、实施路线图」（用户确认顺序，暂不实施）——Phase 0 门禁/测试基建（F23 + R6-F16/F17 + F4 日志）→ Phase 1 前端小改（F13/F15/F14/F2/F3/F22/F24）→ Phase 2 数据管道（F12/F17/F1 + R6-F1~F10）→ Phase 3 设计/策略质量（F4-F7/F10/F9/F11/F16/F19）→ Phase 4 体验收尾（F8/F18/F20/F21 + R6-F11~F15/F21）；实施纪律：每批 TDD + verify_e2e + 前端 build。
+
+---
+
+## 十八、进一步排查结论（2026-08-03 晚，只读实测）
+
+> 对应此前"需要进一步排查的 8 项"，全部完成；结论更新到各 F 项。
+
+| # | 排查项 | 结论（实测） | 对 F 项影响 |
+|---|---|---|---|
+| 1 | 14.1 版本差异复核（防御卫星科创 12% > tech_cap 8%） | `logs/backend.log` task 158 记录仅任务级（09:18:01→09:18:13，design_id=368 saved），**allocation 层无裁剪日志**（allocation_engine.py:342-385 裁剪逻辑无 logger）→ **无法从日志复核，且暴露"裁剪不可诊断"** | **F4 前置**：先给科技配额裁剪加日志（触发/裁剪量/回补结果），验收断言含日志复核项 |
+| 2 | BK0477 代码核对 | 前端示例 `UnifiedAnalysis.vue:190` `{code:'BK0477', label:'半导体'}`；push2delay 行业（m:90+t:2）与概念（m:90+t:3）板块表**均无 BK0477**；真实半导体板块代码=**BK1318**（round6 诊断 BK1318 分析成功过） | **F19-④ 坐实**：前端示例代码过时（旧代码表残留），需对齐真实板块代码（BK1318） |
+| 3 | instruments 表状态 | 本地 `data/portfolio.db` **无 instruments 表**（sqlite_master tables 为空）——比"表空"更严重：表从未创建/同步，search 恒降级全量拉取 | **F17 前置**：需先建表（sync_instruments 首次全量建表）+ 启动自动同步；验收含"表存在且非空"断言 |
+| 4 | pytest 卡死具体测试 | 未实跑定位（时间成本）——F23 根因已充分（pytest.ini:5 无全局 timeout 已确认 + conftest 无 socket 拦截 + factor_registry:872 gather 无超时）；实施时以 `--timeout=60` 全量定位 | F23 前置信息已齐（无需额外） |
+| 5 | news_heat=100 数值核实 | `get_news_headlines()` 实测返回 30 条全市场新闻（stars 1-5 混合），`sum(stars[-30:])≈100` 成立（平均 ~3.3 星）；且所有标的值相同（同源全市场新闻注入） | **§15.4 完全坐实**：非展示问题，是数据管道缺陷（全市场新闻当标的相关新闻） |
+| 6 | chart 接口 amount 字段 | `/market/chart/510300` 响应结构 `{dates, opens, highs, lows, closes, volumes, ma5..., bollinger, macd, kdj, rsi}`——**仅 volumes，无 amount（成交额）** | **F14 前置确认**：成交额副图需后端 chart 补 amount 序列（契约字段） |
+| 7 | RSI 失真根因 | **坐实**：`factor_matrix` 的 `technical.rsi.rsi_14` 是 **zscore 标准化值**（factor_registry.py:717/1087 对 factor 值做 standardization），`rationale.py:141-148` 把它当**原始 RSI（0-100）**展示，且阈值 `rsi<30 超卖 / rsi>70 超买` 对 zscore 值（-3~3）**恒走"超卖区域"分支** → 报告 RSI 0.2-2.4 全部"超卖区域" | **§14.5 更新**：修复方向改为"rationale 用原始 RSI（factor compute 内部保留 raw 值）或按 zscore 语义重设阈值（±1σ）"；连带 14.5 的"RSI 失真"从"连带发现"升级为"独立 bug" |
+| 8 | 港股热点数据源 | push2delay `m:128` 全量港股带 f100 中文行业（09988→"专业服务"）可用 | F16 已按此细化（v1.9），无需更新 |
+
+---
+
+## 十九、实施路线图（用户已确认顺序，2026-08-03；暂不实施）
+
+> 用户采纳建议顺序。40+ 修复项按阶段分批实施，每批完成后跑 verify_e2e + 前端 build 门禁。
+
+**Phase 0 —— 门禁/测试基建（最紧迫：当前 commit 会被卡死）**
+- F23（pytest 全局 timeout + socket 拦截 + gather 超时 + pre-commit 外层兜底）→ 先解决"commit 卡死"；
+- R6-F16/F17（Docker 构建冒烟门禁 + mootdx 全新环境冒烟，含本地 fresh venv 指引）——防止回归；
+- 前置联动：F4 裁剪日志（供后续验收复核）。
+
+**Phase 1 —— 前端小改（低风险快速见效）**
+- F13（onSelectEtf 回写 selected——技术分析标的切换）
+- F15（K 线标题区当前周期标注）
+- F14（成交量副图独立开关 + amount 序列——前置：后端 chart 补 amount 字段）
+- F2（IC 图负值柱 label position）、F3（因子模型 v-if 隐藏）、F22（政策 static 展示）、F24（CLS 0.189）
+
+**Phase 2 —— 数据管道**
+- F12（news_heat 按标的新闻或降级市态级）
+- F17（instruments 建表 + 启动自动同步 + search market 短路——前置：§十八-3 建表）
+- F1（mootdx 容器 config 修复，R6-02 根治）、R6-F1~F10（P0/P1 项）
+
+**Phase 3 —— 设计/策略质量**
+- F4/F5/F6/F7（卫星池扩充、红利禁落卫星、成长集中度、卫星数量门禁）
+- F10（决策表背离分支 + 口径标注）、F9（LLM 超时 30s）、F11（因子评分中文解读）
+- F16（港股热点 push2delay）、F19（placeholder 不参与匹配 + BK1318 对齐）
+
+**Phase 4 —— 体验与收尾**
+- F8（行情注入 R5-2-6/R6-F6）、F18/F20（标的分析交互）、F21（标题布局）
+- R6-F11~F15（P2 项）、R6-F21（LHCI 门禁，验收 F24）
+
+**实施纪律**：每批 TDD（先写失败单测→实现→补测）+ verify_e2e 全 PASS + 前端 build；不满足验收标准的 F 项顺延至下一批，不在本批混入。
