@@ -41,8 +41,12 @@ MARKET_REGIME_INDEX_MAP: dict[str, str | None] = {
 
 # F17 R61: 东财行情 API 主机集中常量。
 # 2026-08-01 实测（宿主机）：push2.eastmoney.com HTTP→502 错误网关、HTTPS→连接被关闭；
-# push2delay.eastmoney.com HTTP→200 正常。P1.7「push2delay 回退 push2」前提不满足
-# （P0.5 IPv4 优先已上线），故保留 push2delay 并集中管理，避免域名散落。
+# push2delay.eastmoney.com HTTP→200 正常。
+# 2026-08-03 交易时段复测：push2.eastmoney.com 已恢复（HTTP/HTTPS 均 200，
+# stock/get + clist 实时字段完整 f2/f3 有值）；push2delay 延时源 clist 实时字段
+# 残缺（1617 只仅 3 只有价）。东财限流按时间/时段波动。
+# → 待 R5-2-6 实施：主源改回 push2，push2delay 作降级；此处暂保留 push2delay 避免
+#   变更未实施时行为漂移（候选池/ETF 列表仍可用，实时字段弱）。
 EM_PUSH_HOST = "push2delay.eastmoney.com"
 
 # LLM 报告/分析中使用的"主要标的"符号集
