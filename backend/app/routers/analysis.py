@@ -801,7 +801,18 @@ async def symbol_analysis_stream(req: SymbolAnalysisRequest):
         except Exception as _fe:
             logger.debug("[symbol-analysis] fundamentals fetch failed (non-fatal): %s", _fe)
         
-        news = market_data_hub.get_news_headlines() or []
+        news = []
+        # R5: 个股新闻（东财 stock_news_em）替代全市场头条——头条含大量其他股票新闻，
+        # LLM 会引用无关标的导致「分析的是另一只股票」（用户反馈：002131 利欧股份被带偏）。
+        try:
+            from ..fetchers.news_fetcher import fetch_stock_news
+            news = await asyncio.to_thread(fetch_stock_news, symbol) or []
+        except Exception:
+            pass
+        if not isinstance(news, list):
+            news = []
+        if not news:
+            news = market_data_hub.get_news_headlines() or []
         try:
             macro = market_data_hub.get_news_macro() or []
             news.extend(macro)
@@ -809,6 +820,25 @@ async def symbol_analysis_stream(req: SymbolAnalysisRequest):
             pass
         
         display_name = name or (realtime.get("name", "") if realtime else symbol)
+
+        # R5: 注入个股所属板块实时快照（对齐 sector 模式 88f4b75 修复）——行业映射 +
+        # 行业板块成交额/主力净流入/换手率/涨跌家数，让报告资金面/技术面有定量依据，
+        # 消除「未提供主力资金流向」类诚实降级说明（数据源实际可获取）。
+        sector_line = ""
+        try:
+            from ..fetchers.sector_fetcher import get_stock_industry_map
+            industry_map = await asyncio.to_thread(get_stock_industry_map, [symbol]) or {}
+            industry = (industry_map.get(symbol) or "").strip()
+            if industry:
+                sectors = await asyncio.to_thread(market_data_hub.get_sector_industry, 200) or []
+                matched = next((s for s in sectors if s.get("sector_name") == industry), None)
+                if matched:
+                    snap = {k: matched.get(k) for k in
+                            ("sector_name", "price", "change_pct", "amount", "main_inflow",
+                             "turnover_rate", "up_count", "down_count")}
+                    sector_line = f"所属板块：{industry}；板块实时快照：{json.dumps(snap, ensure_ascii=False)}"
+        except Exception as _se:
+            logger.debug("[symbol-analysis] sector snapshot fetch failed (non-fatal): %s", _se)
 
         # F7 R21: 数据全空时不调 LLM——避免 LLM 用常识生成"伪分析"
         # （用户明确要求：必要数据喂 LLM，非必要不报告缺失）
@@ -822,6 +852,7 @@ async def symbol_analysis_stream(req: SymbolAnalysisRequest):
 技术指标：{json.dumps(indicators, ensure_ascii=False)}
 历史K线(最近30条)：{json.dumps(hist[-30:], ensure_ascii=False) if hist else '无'}
 基本面(PE/PB估值)：{fundamentals_text}
+{sector_line}
 资讯催化：{json.dumps(news[:10], ensure_ascii=False)}{focus_line}
 
 请输出：

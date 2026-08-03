@@ -84,7 +84,7 @@
             <span class="row-rank">{{ i + 1 }}</span>
             <div class="row-main">
               <span class="row-name">{{ item.name }}</span>
-              <span class="row-code">{{ item.symbol }}</span>
+              <span class="row-code">{{ item.code || item.symbol }}</span>
               <span class="row-stock-meta">
                 <span v-if="item.price" class="row-price">现价 {{ fmtPrice(item.price) }}</span>
                 <span v-if="item.sector" class="row-sector">{{ item.sector }}</span>

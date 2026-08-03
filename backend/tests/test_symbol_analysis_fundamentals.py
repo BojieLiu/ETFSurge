@@ -158,3 +158,104 @@ async def test_fundamentals_unavailable_marked(monkeypatch):
     await ar.symbol_analysis_stream(_FakeReq(asset_type="A"))
     assert "基本面(PE/PB估值)" in captured["prompt"]
     assert "数据源不可用" in captured["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_stock_news_preferred_over_headlines(monkeypatch):
+    """R5: 个股新闻优先——prompt 引用该股票新闻而非全市场头条（防 LLM 被无关标的带偏）。"""
+    captured, fake_agent = _make_prompt_capture()
+
+    async def _fake_realtime(symbol, asset_type):
+        return {"symbol": symbol, "name": "利欧股份", "price": 4.66}
+
+    async def _fake_history(symbol, asset_type, period="daily"):
+        return [{"日期": "2026-08-01", "收盘": 4.6, "开盘": 4.5,
+                 "最高": 4.7, "最低": 4.4, "成交量": 1000, "成交额": 1e7}]
+
+    async def _fake_to_thread(fn, *a, **k):
+        name = getattr(fn, "__name__", "")
+        if name == "fetch_stock_news":
+            return [{"title": "利欧股份获得新订单", "content": "公司公告"}]
+        if name == "get_stock_industry_map":
+            return {}
+        return {"pe_ttm": 28.5, "pb": 8.2}
+
+    monkeypatch.setattr(ar.market_data_hub, "get_asset_realtime", _fake_realtime)
+    monkeypatch.setattr(ar, "get_history", _fake_history)
+    monkeypatch.setattr(ar.market_data_hub, "get_news_headlines",
+                        lambda: [{"title": "某无关股票涨停"}])  # 不应被使用
+    monkeypatch.setattr(ar.market_data_hub, "get_news_macro", lambda: [])
+    monkeypatch.setattr(ar, "compute_all_indicators", lambda hist: {"rsi": 55.0})
+    monkeypatch.setattr(ar, "get_agent", fake_agent)
+    monkeypatch.setattr("app.routers.analysis.asyncio.to_thread", _fake_to_thread)
+
+    await ar.symbol_analysis_stream(_FakeReq(asset_type="A", symbol="002131", name="利欧股份"))
+    assert "利欧股份获得新订单" in captured["prompt"]
+    assert "某无关股票涨停" not in captured["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_sector_snapshot_injected_into_prompt(monkeypatch):
+    """R5: 个股分析注入所属板块实时快照（成交额/主力净流入等）——报告资金面有定量依据。"""
+    captured, fake_agent = _make_prompt_capture()
+
+    async def _fake_realtime(symbol, asset_type):
+        return {"symbol": symbol, "name": "贵州茅台", "price": 1700.0}
+
+    async def _fake_history(symbol, asset_type, period="daily"):
+        return [{"日期": "2026-08-01", "收盘": 1700.0, "开盘": 1690.0,
+                 "最高": 1710.0, "最低": 1680.0, "成交量": 1000, "成交额": 1.7e9}]
+
+    async def _fake_to_thread(fn, *a, **k):
+        name = getattr(fn, "__name__", "")
+        if name == "get_stock_industry_map":
+            return {"600519": "白酒"}
+        if name == "get_sector_industry":
+            return [{"sector_name": "白酒", "price": 1800.0, "change_pct": 1.2,
+                     "amount": 1.2e8, "main_inflow": 3.0e7, "turnover_rate": 2.5,
+                     "up_count": 30, "down_count": 5}]
+        return {"pe_ttm": 28.5, "pb": 8.2}
+
+    monkeypatch.setattr(ar.market_data_hub, "get_asset_realtime", _fake_realtime)
+    monkeypatch.setattr(ar, "get_history", _fake_history)
+    monkeypatch.setattr(ar.market_data_hub, "get_news_headlines", lambda: [])
+    monkeypatch.setattr(ar.market_data_hub, "get_news_macro", lambda: [])
+    monkeypatch.setattr(ar, "compute_all_indicators", lambda hist: {"rsi": 55.0})
+    monkeypatch.setattr(ar, "get_agent", fake_agent)
+    monkeypatch.setattr("app.routers.analysis.asyncio.to_thread", _fake_to_thread)
+
+    await ar.symbol_analysis_stream(_FakeReq(asset_type="A"))
+    assert "所属板块：白酒" in captured["prompt"]
+    assert "main_inflow" in captured["prompt"]
+    assert "3.0e+07" in captured["prompt"] or "30000000.0" in captured["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_sector_snapshot_missing_silently_skipped(monkeypatch):
+    """R5: 行业映射未命中（tushare 不可用/新标的）时 sector_line 为空，不破坏分析。"""
+    captured, fake_agent = _make_prompt_capture()
+
+    async def _fake_realtime(symbol, asset_type):
+        return {"symbol": symbol, "name": "贵州茅台", "price": 1700.0}
+
+    async def _fake_history(symbol, asset_type, period="daily"):
+        return [{"日期": "2026-08-01", "收盘": 1700.0, "开盘": 1690.0,
+                 "最高": 1710.0, "最低": 1680.0, "成交量": 1000, "成交额": 1.7e9}]
+
+    async def _fake_to_thread(fn, *a, **k):
+        name = getattr(fn, "__name__", "")
+        if name == "get_stock_industry_map":
+            return {}  # 未命中
+        return {"pe_ttm": 28.5, "pb": 8.2}
+
+    monkeypatch.setattr(ar.market_data_hub, "get_asset_realtime", _fake_realtime)
+    monkeypatch.setattr(ar, "get_history", _fake_history)
+    monkeypatch.setattr(ar.market_data_hub, "get_news_headlines", lambda: [])
+    monkeypatch.setattr(ar.market_data_hub, "get_news_macro", lambda: [])
+    monkeypatch.setattr(ar, "compute_all_indicators", lambda hist: {"rsi": 55.0})
+    monkeypatch.setattr(ar, "get_agent", fake_agent)
+    monkeypatch.setattr("app.routers.analysis.asyncio.to_thread", _fake_to_thread)
+
+    await ar.symbol_analysis_stream(_FakeReq(asset_type="A"))
+    assert "所属板块" not in captured["prompt"]
+    assert "基本面(PE/PB估值)" in captured["prompt"]

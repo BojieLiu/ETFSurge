@@ -380,12 +380,15 @@ def get_stock_industry_map(symbols: list[str]) -> dict[str, str]:
         try:
             from .global_markets_fetcher import fetch_stock_basic
             rows = fetch_stock_basic() or []
-            return {
+            mapping = {
                 str(r.get("symbol", "")).strip(): str(r.get("industry", "") or "").strip()
                 for r in rows if str(r.get("symbol", "")).strip()
             }
+            # R5: 空映射不缓存（返回 None）——避免 tushare 暂时失败时空映射污染 1h，
+            # 导致后续真实请求（如 symbol 分析板块注入）拿不到行业归属。
+            return mapping if mapping else None
         except Exception:
-            return {}
+            return None
     return _cached("stock_industry_map", _p, "stock_basic") or {}
 
 
