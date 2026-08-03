@@ -10,7 +10,7 @@
 |---|------|------|------|--------------------------|
 | 1 | 因子模型 30 因子无数据、政策因子 0 有效 | 后端数据 | 🟡 方案待实施 | IC 仅请求驱动（R1 未实施）→ round5 R5-1-5；政策因子为 Z03 静态设计 |
 | 2 | 策略检查 LLM 超时（429 限流→rule 兜底） | 后端稳定性 | 🟡 方案待实施 | 退避 cap 与 60s 预算冲突；P0 方案（对话中提出）：原因留痕 + cap 适配，见 §三 |
-| 3 | 持仓技术分析"所有标的一样" | 前端疑似 | ⚪ 误报/待确认 | 实测代码+数据源均正常（5 标的 signal 各异）；疑 PWA 旧缓存；顺带发现场外技研链路 bug（见 #17） |
+| 3 | 持仓技术分析"所有标的一样" | 前端确认 bug | ✅ 已修复 | **根因**：AnalysisView `watch(selectedSymbol)` 的 `etfInfoMap.value[sym]` 守卫——父组件点击发生在 etfInfoMap 构建完成前（fetchEtfs 异步无去重）时守卫失败，selected 永不更新，面板停留第一只 ETF；另 fetchChart 无竞态守卫，慢响应晚到会覆盖新标数据 |
 | 4 | 技术分析切换周期无效 | 前端交互 | ✅ 已修复 | `eb0afae`：indicators/signal 未传 period + 缺 watch(period) |
 | 5 | 自选添加后数据为空 | 前后端性能 | ✅ 已修复 | `804bd21`：watchlist 串行富化 + POST 无 realtime |
 | 6 | 板块分析报告"未提供 K线/成交额/资金流" | 后端 prompt | ✅ 已修复 | `88f4b75`：sector_data 行情快照未注入 prompt |
@@ -65,15 +65,31 @@
 | 入选理由不再截断（≤80 字 → 完整保留） | `581633a` | 旧 `_compress_rationale` 砍掉估值/资金流/市态尾部；竖线转义防表格拆裂 |
 | SummaryCards 优化（分组/正负号/tooltip/刷新指示） | `98f0bb6` | 修负数百分比丢负号 bug；CLS 安全（常驻占位） |
 
-## 三、待实施方案（4+1 项）
+## 三、待实施方案（4 项）
 
-> 以下 4 项已正式化为 `docs/round5-diagnosis-and-optimization-plan.md`（v1.4）§十 修复项，含文件/行级、TDD、验收——本文档仅作索引。
+> 以下 4 项已正式化为 `docs/round5-diagnosis-and-optimization-plan.md`（v1.4）§十 修复项，含文件/行级、TDD、验收——本文档仅作索引。~~第 5 项 #3 疑 PWA 缓存~~：已确认真实 bug 并修复（见下方 #3 修复记录），不再待实施。
 
 1. **#1 因子 IC 后台计算** → **R5-1-5**（round5 §十）：`_last_ic_batch` 仅请求驱动，重启后 30 因子全 no_data；启动恢复 + 120s 周期 compute。
 2. **#2 策略检查 LLM 超时** → **R5-1-6**（round5 §十）：①超时 summary 透传最后失败原因（429/超时区分，`get_last_llm_error()`）；②`_rate_limit_wait` cap 参数化（策略检查 cap 10s + max_retries=1）——60s 预算内快速失败。根治见 R5-1-1（全局 LLM 信号量 + 429 任务排队）。
 3. **#16 国内宏观数据管道** → **R5-2-10**（round5 §十）：`macro_fetcher.py`（LPR/中美利差/M2/CPI-PPI，akshare 实测）+ `llm_context` `domestic_macro` 段 + 契约补字段 + 8 用例。
 4. **#17 场外基金技术分析** → **R5-2-11**（round5 §十）：`taTarget` 对 tracked_index 为场内代码时改 `assetType='A'`（前缀与后端 `_is_etf_code` 对齐）。
-5. （顺带）**#3 疑 PWA 缓存**：确认用户强刷后是否恢复；若仍异常需浏览器 Network 抓包。
+
+### #3 修复记录（2026-08-03，真实 bug 确认并修复）
+
+**现象**：持仓页技术分析（AnalysisView）中，点击任意持仓标的，图表/指标/信号始终显示第一只 ETF 的数据（"所有标的一样"）。之前误判为 PWA 缓存（NetworkFirst api-cache），强刷后仍复现 → 按真实 bug 深挖。
+
+**根因（两个叠加）**：
+1. **watch 守卫竞态**：`watch(() => props.selectedSymbol)` 内要求 `etfInfoMap.value[sym]` 存在才更新 selected + fetchChart。`etfInfoMap` 在 onMounted 里异步构建（`store.fetchEtfs` 无请求去重，AnalysisView 与 PortfolioManager 各发一次），若用户点击持仓行发生在 map 构建完成**之前**，守卫失败 → selected 永不更新 → 面板停留第一只。map 构建完成后 selectedSymbol 不再变化，watch 不再触发。
+2. **fetchChart 无竞态守卫**：快速切换标的中，慢响应晚到会覆盖新标的的 chartData（且 loading 卡死）。
+
+**修复**（AnalysisView.vue）：
+- 放宽 watch 守卫：`if (sym)` 即切换 + fetchChart；`getActiveSymbol` 在 map 缺失时自然回退到 `selected.value`。
+- fetchChart 加 seq 竞态守卫：`++fetchSeq.value`，响应返回后 `seq !== fetchSeq.value` 则丢弃（含 catch 分支与 loading 复位）。
+
+**验证**：
+- 前端测试 +2（`AnalysisView.spec.js`）：父组件 selectedSymbol 变化触发 fetchChart（守卫竞态）；慢响应乱序不覆盖（断言最终 chartOption 数据为新标的）。
+- 前端全量 329 passed（34 文件）+ `npm run build` 通过。
+- 未改动后端；无关 mootdx 决策（方案 A 实测 7709 全超时，维持现状）。
 
 ## 四、测试防护体系漏洞分析——为何未发现这些 bug
 

@@ -214,7 +214,7 @@
 
 **R5-0-4：红利类权重上限约束（M1 收敛，用户决策 D1）**
 - 现象：防御 core 563020 红利低波 16.96%、进攻卫星 563020 16.43%，均超 M1 红利类上限。
-- 决策范围说明：用户决策 D1 原文为"防御型方案红利类权重上限 15%"；本方案**扩展为全方案校验**（平衡/进攻卫星层红利类同样收 15%）——实施时按此口径，并在实施记录中注明扩展决策（如需严格回到 D1 原文，仅约束防御型，则 8.2 表 M1 行需相应调整 FAIL 判定）。
+- 决策范围说明：用户决策 D1 原文为"防御型方案红利类权重上限 15%"；本方案**扩展为全方案校验**（平衡/进攻卫星层红利类同样收 15%）——**用户确认 2026-08-03：接受扩展**（与真实 FAIL 场景对齐：进攻卫星 563020 16.43%）。实施时按此口径，并在实施记录中注明扩展决策（如后续需严格回到 D1 原文，仅约束防御型，则 8.2 表 M1 行需相应调整 FAIL 判定）。
 - 实施：allocation_engine 分配后校验红利类（tracked_index 含"红利"或名称含"红利"）合计 ≤15%，超出时按比例下调并补足同层其他标的；risk_controls 补红利专项约束（行业集中度已有，红利类横跨核心/卫星两层，需层间合计校验）。
 - ⚠️ 既有单测 `test_defensive_dividend_cap_15`（test_allocation_engine_fixes.py:203）**仅覆盖防御型核心红利上限**（自带候选含 512890/515080 红利 ETF，防御型超 15% 时会 FAIL）——**未覆盖平衡/进攻卫星层红利约束**（本轮真实 FAIL 恰在进攻卫星 563020 16.43%），且真实链路选中的红利标的 563020 不在 mock 候选里（§九 9.2 "mock 池与真实池结构脱节"盲区的实例）；实施时补全方案（卫星层）用例 + 将 563020 纳入 mock 候选。勿向 `_base_candidates` 注入红利标的（会波及共用该池的 M4 测试）。
 - 验收：真实 design 三方案红利类合计 ≤15%（verify_e2e design-quality 新断言）。
@@ -275,8 +275,8 @@
 
 **R5-2-4：mootdx 依赖与降级链简化（C4-1，对应 R5-12）**
 - 背景：requirements 无 mootdx（`_mootdx()` lazy import 的 ImportError 被 warning 吞，降级链第一环空转）；7709 端口当前网络不可达（通达信官方 IP 亦超时，与交易时间无关）。
-- 实施（默认方案 B，按实施期宿主网络可达性决策）：**方案 B（推荐）**——从实时/批量行情降级链移除 mootdx 环节（从未生效，Sina/Tencent 兜底已实测正常），删除 `_MOOTDX_CLIENT`/`_MOOTDX_EXECUTOR` 等 mootdx 超时包装；**方案 A**——若宿主确认 7709 可达则 requirements 补 `mootdx` 并保留降级链。TDD：现有单测中 mock mootdx 环节的改为直接 mock Sina/Tencent，**点名更新 `tests/test_timeout_resilience.py:52`（`test_mootdx_has_socket_timeout` monkeypatch `_MOOTDX_CLIENT`，移除后会 AttributeError）**。契约：内部实现改动，不涉 API 契约。
-- 验收：无 mootdx ImportError 噪音；实时/批量行情在 Sina/Tencent 可达时正常；相关单测全过。
+- 实施（**用户决策 2026-08-03：方案 A**）：**方案 A**——先测 7709 可达性；**实测结果：standard.mootdx.com + 3 个官方 IP 全部 TCP 8s 超时（2026-08-03 复测，`socket.create_connection` timeout=8）** → 7709 不可达成立 → **不补 mootdx 依赖，维持现有降级链**（Sina/Tencent 兜底已实测正常），不做移除改造（避免改动已工作的兜底链路）；待网络环境可达后再评估补依赖。~~方案 B（推荐）~~——从实时/批量行情降级链移除 mootdx 环节（从未生效），删除 `_MOOTDX_CLIENT`/`_MOOTDX_EXECUTOR` 等 mootdx 超时包装——因用户选方案 A 且实测不可达，不适用。TDD：现有单测中 mock mootdx 环节的维持现状；若后续移除，**点名更新 `tests/test_timeout_resilience.py:52`（`test_mootdx_has_socket_timeout` monkeypatch `_MOOTDX_CLIENT`，移除后会 AttributeError）**。契约：内部实现改动，不涉 API 契约。
+- 验收：维持现状即达验收基线（无 mootdx 噪音已在现有代码中被 warning 吞，不影响链路）；实时/批量行情在 Sina/Tencent 可达时正常；相关单测全过。
 
 **R5-2-5：llm_report 指数链路对齐（C4-2，对应 R5-13）**
 - 背景：`llm_report`/`llm_report_stream` 的 indices 用 `get_indices()`（Sina 三级降级，仅 A 股指数）→ HK/US 报告 indices 空；`get_global_indices()`（17 指数多源降级 + 24h 磁盘缓存，含港股/美股段）有数据未用。
@@ -430,6 +430,7 @@
 - v1.2 (2026-08-02)：数据源归因专项（附录 C）——①三层实测（原始 akshare / 封装 fetcher / 管道产出）+ 宿主机 vs 容器网络对照；②更正两处误报：levistock 实为财联社通道（pip 包 levistock，`api.levistock.com` 为错误域名，源正常）、新浪 403 为缺 Referer（fetcher 已带，源正常）；③确认 mootdx 依赖缺失（requirements 无包）+ 7709 端口不可达（与交易时间无关）；④新增问题 R5-12~R5-15（mootdx 依赖、llm_report 指数链路、东财限流无降级、akshare 签名）与修复方向（§C.4，未纳入实施批次，待确认）。
 - v1.3 (2026-08-02)：数据源修复方案正式化——附录 C §C.4 修复方向升级为 §十 P2 正式修复项 **R5-2-4~R5-2-9**（mootdx 降级链简化 / llm_report 指数链路对齐 / 东财抗限流 / 商品签名适配 / PE/PB 备用源 / 熔断器接线），同步补 §十一 批次 3、§十二 验收总表 6 行、附录 A R5-12~15 修复项编号引用；仍为实施标准设计，未实施。
 - v1.4 (2026-08-02)：用户反馈批次方案正式化——新增 **R5-1-6**（策略检查 LLM 超时诊断与快速失败：原因留痕 + cap 参数化）、**R5-2-10**（国内宏观数据管道：macro_fetcher + domestic_macro 段 + 契约）、**R5-2-11**（场外基金技研链路：taTarget asset_type 修正）；新增 **🅿️3 测试防护弥补批次 R5-3-1~5**（前端真实 composable 测试 / asset_type 参数化 / prompt 完整性断言 / 路由集成测试 / 性能预算门禁，来源 user-feedback-fixes-review §5）；§十一 批次追加 1-6/2-10/2-11/批次 4；§十二 验收总表追加 8 行；仍为实施标准设计，未实施。
+- v1.5 (2026-08-03)：用户决策记录——①**R5-2-4 mootdx：选方案 A**，复测 7709（standard.mootdx.com + 3 官方 IP 全 TCP 超时）→ 不可达成立，**维持现有降级链不补依赖**（方案 B 移除改造不适用）；②**R5-0-4 红利上限：接受全方案扩展**（平衡/进攻卫星层同 15%）；③新增 **R5-3-6**（AnalysisView 技术分析"所有标的一样"真实 bug 修复——watch 守卫竞态 + fetchChart 竞态守卫 seq，见 user-feedback-fixes-review §三 #3 修复记录，前端已实施 +2 测试，属 R5 实时修复批次，非待实施项）；④实施启动决策：**暂不实施**（保持实施标准设计状态）。
 
 ## 附录 C：数据源归因专项（2026-08-02 补充诊断）
 

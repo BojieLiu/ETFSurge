@@ -90,3 +90,44 @@ describe('AnalysisView 周期切换 (R5)', () => {
     expect(signalMock).toHaveBeenLastCalledWith('510300', 'A', 'monthly')
   })
 })
+
+describe('AnalysisView 父组件切换标的 (R5 #3 修复)', () => {
+  it('selectedSymbol 变化时即使 etfInfoMap 尚未构建完成也触发 fetchChart（修复"所有标的一样"）', async () => {
+    // 模拟：onMounted 的 fetchEtfs 慢 → etfInfoMap 构建前用户已点击持仓行
+    const wrapper = mount(AnalysisView, {
+      props: { selectedSymbol: '510500' },
+      global: { stubs: { ChartPanel: true, SignalPanel: true } },
+    })
+    // 不 await 完成 onMounted（etfInfoMap 仍空），直接改 prop
+    wrapper.setProps({ selectedSymbol: '510300' })
+    await nextTick()
+    await nextTick()
+    // 旧实现：etfInfoMap 空 → 守卫失败 → 不 fetchChart → 面板停留第一只标的（"所有标的一样"）
+    // 新实现：守卫放宽 → 直接按新 symbol 请求
+    expect(chartMock).toHaveBeenCalledWith('510300', 'A', 'daily')
+    expect(indicatorsMock).toHaveBeenCalledWith('510300', 'A', 'daily')
+    expect(signalMock).toHaveBeenCalledWith('510300', 'A', 'daily')
+  })
+
+  it('快速连续切换标的时响应乱序不覆盖（fetchChart 竞态守卫）', async () => {
+    // chartMock 第 1 次调用（510300）慢返回，第 2 次调用（510500）快返回
+    chartMock
+      .mockImplementationOnce(() => new Promise((resolve) => setTimeout(() => resolve({ data: { dates: ['2026-07-30'], closes: [4.6], opens: [4.5], highs: [4.7], lows: [4.4] } }), 50)))
+      .mockResolvedValue({ data: { dates: ['2026-07-31'], closes: [5.0], opens: [4.9], highs: [5.1], lows: [4.8] } })
+    const wrapper = mount(AnalysisView, {
+      props: { selectedSymbol: '510300' },
+      global: { stubs: { ChartPanel: true, SignalPanel: true } },
+    })
+    await nextTick()
+    await nextTick()
+    wrapper.setProps({ selectedSymbol: '510500' })
+    await nextTick()
+    // 等慢响应返回后，最终显示的是最后一次请求（510500）的数据
+    await new Promise((r) => setTimeout(r, 100))
+    await nextTick()
+    expect(chartMock).toHaveBeenLastCalledWith('510500', 'A', 'daily')
+    // 慢的 510300 响应晚到不应覆盖 510500 的图表数据
+    const chartOption = wrapper.findComponent({ name: 'ChartPanel' }).props('chartOption')
+    expect(chartOption.series[0].data[0][1]).toBe(5.0)
+  })
+})

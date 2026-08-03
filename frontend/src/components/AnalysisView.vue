@@ -69,6 +69,7 @@ const period = ref('daily')
 const indicatorData = ref(null)
 const signal = ref(null)
 const loading = ref(false)
+const fetchSeq = ref(0)
 const etfs = ref([])
 const etfInfoMap = ref({})
 const chartMode = ref('kline')
@@ -437,28 +438,37 @@ async function fetchChart() {
   loading.value = true
   const sym = getActiveSymbol()
   const assetType = getActiveAssetType()
+  // R5 #3: 竞态守卫——快速切换标的过程中，丢弃过期请求的响应，避免慢响应
+  // 晚到覆盖新标的数据（"所有标的一样"的另一种来源）。
+  const seq = ++fetchSeq.value
   try {
     const [chartRes, indRes, sigRes] = await Promise.all([
       marketApi.chart(sym, assetType, period.value),
       marketApi.indicators(sym, assetType, period.value),
       marketApi.signal(sym, assetType, period.value),
     ])
+    if (seq !== fetchSeq.value) return
     chartData.value = chartRes.data
     indicatorData.value = indRes.data
     signal.value = sigRes.data
   } catch {
+    if (seq !== fetchSeq.value) return
     chartData.value = null
     indicatorData.value = null
     signal.value = null
   }
-  loading.value = false
+  if (seq === fetchSeq.value) loading.value = false
 }
 
 // Parent-driven selection (merged view)
+// R5 #3 修复：旧实现要求 etfInfoMap.value[sym] 存在才切换——当父组件点击发生在
+// etfInfoMap 构建完成前（fetchEtfs 异步无去重），守卫失败导致 selected 永不更新，
+// 面板停留第一只 ETF →"所有标的一样"。放宽守卫：只要 symbol 非空即切换，
+// getActiveSymbol 在 map 缺失时自然回退到 selected.value 本身。
 watch(
   () => props.selectedSymbol,
   (sym) => {
-    if (sym && etfInfoMap.value[sym]) {
+    if (sym) {
       selected.value = sym
       fetchChart()
     }
