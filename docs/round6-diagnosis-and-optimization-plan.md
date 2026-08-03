@@ -305,3 +305,124 @@ round5 已补：设计质量门禁（P1-1/P1-2/M7——本轮全 PASS ✅）、�
 - v1.0 (2026-08-03)：round6 全量诊断完成（15 项动作），形成 R6-01~16 问题清单与 P0-P2 修复方案（未实施，除 R6-01 构建回归为构建必要前置已修复）。
 - v1.1 (2026-08-03)：多轮 review 修订——①warmup 数字统一改为与留存 `backend/logs/warmup_timing.json` 一致（标注两次采样）；②R6-F16 dry-run 门禁改 docker build 冒烟（mootdx 已移出 requirements，dry-run 失效）；③R6-F17 补本地 fresh venv 安装指引（requirements 移除 mootdx 后的本地缺口）；④R6-F7 补容器/宿主机环境区分；⑤§九 回收说明限定 prod backend 段（backend-dev 的 PROFILE_WARMUP 为 round4 保留项）；⑥补 verify_e2e 结果留存建议。
 - v1.2 (2026-08-03)：二轮 review 修订——⑦R6-F17 命令补 `--no-deps`（与 Dockerfile 一致，避免 httpx 冲突致安装失败）；⑧测试数口径统一为"后端 1328 + 前端 342"并注明宿主机局限；⑨factor_availability 23/33 与 /factors/active status 统计口径差异注记。
+
+---
+
+## 十三、用户反馈补充诊断（round6-ux 第二轮，2026-08-03 晚）
+
+> 范围：用户再次反馈 3 项问题（因子数据、IC 图渲染、AI 工具页因子模型显示）。仅分析与定位，**不做实施**。
+> 定位环境：本地后端（uvicorn:8000）实时 API + 前端源码；留存证据见 `diag/out/market/factors_data.json`、`/api/v1/factors/active`、`/api/v1/factors/ic` 实时响应。
+
+### 13.1 反馈 1：因子 7 个无数据、政策因子 0 有效——数据管道是否还有问题？
+
+**实时状态（本地后端，2026-08-03 晚）**：`total 33 = valid 23 / warn 0 / no_data 7 / static 3`（留存 `diag/out/market/factors_active_local.json`）。**注**：round6 容器快照（`diag/out/market/factors_data.json`，09:24 UTC）为 `valid 17 / warn 2 / no_data 11 / static 3`（sentiment 4 + etf_specific 5 + style 2 no_data）——两口径差异源于**数据源可用性**（容器缺 nav/benchmark_close/shares_change_20d/fund_scale 字段，本地可拿），非代码差异；下文以本地实时口径为准。
+
+**结论：政策因子 0 有效 = 设计使然（非管道故障）；7 个 no_data 均为「IC 累计样本 <3 个交易日」（R5-1-5 于 2026-08-03 实施，累计表不足 3 天）——本地环境全部是时间未到，非管道故障。**（容器环境 etf 3 项另叠加 nav/benchmark_close/shares_change 字段缺失，R5-1-4 未收敛，见 §八）
+
+| 因子 | 状态 | 根因定位 | 性质 |
+|---|---|---|---|
+| `china.policy.*` ×3（五年规划/战略新兴/双循环） | static，valid 0 | `factor_registry.py:451-492` `_POLICY_ALIGNMENT` 静态映射（行业→0/1 哑变量），reason 明确"静态政策标识因子，不计算 IC"——横截面哑变量 IC 无统计意义，Z03 静态设计（round5-ux #1 已记录） | **设计，非故障** |
+| `sentiment.*` ×4（panic_greed_diff/stock_divergence/news_heat/news_direction） | no_data（"IC 未累计，样本 <3"） | R5-1-5（IC 启动恢复 + 120s 周期 compute）于 2026-08-03 实施，IC 累计表不足 3 个交易日；因子值注入链路已存在（`market_data_hub.py:464-487` news_items/sentiment_index 注入，panic_greed_diff 用新闻方向 `(news_dir-0.5)*2` 代理 sentiment_index） | **时间未到，非故障** |
+| `etf.premium_discount` / `etf.tracking_error` / `etf.shares_change` | no_data（"样本 <3"，本地实时口径） | 本地：因子值可算（NAV/份额数据可拿），仅 IC 累计 <3 天；容器快照：`nav/benchmark_close/shares_change_20d` 字段缺失 → 因子值 None（R5-1-4 未收敛，§八 143 行） | **本地=时间未到；容器=字段缺失（已记录）** |
+| `style.*` ×2 | 本地 valid 2（容器快照 no_data） | 依赖 fund_scale——本地数据源可拿，容器缺字段 | **本地正常** |
+
+**展示误导（本轮新发现）**：`/factors/active` summary 将 static 单列（static_count 3），但前端 `FactorModelView.vue` stats-row（25-52 行）只显示"已接入/有效/低于阈值/无数据/平均|IC|"，**static 未展示** → 用户看到"33 已接入 = 23 有效 + 7 无数据"，另 3 个去向不明；且 `china_specific` 分类行显示"0 有效"（static 因子不算 valid），用户误读为"政策因子全坏了"。
+
+**修复方向（不实施）**：
+- F1-A（展示）：`FactorModelView.vue` stats-row 增加"静态标识 N"项（读 `summary.static`）；分类行对 static 因子标注"静态"徽标 + tooltip 解释"静态标识因子不参与 IC 统计（如政策哑变量）"；IC 判定处（`:119 abs(ic_value) >= threshold`）将 static 因子（ic_value null）与"无效/低于阈值"语义区分开（当前 static 因子落入"低于阈值"侧，被算进 warn/无效口径）。
+- F1-B（数据）：容器环境 etf_specific 3 项随 R5-1-4（未收敛，fundamental 字段缺失）一并解决；本地 sentiment 4 + etf 3 无需处理，待 IC 累计满 3 个交易日后自动转 valid——可在 IC 端点 reason 注明"样本累计中"。
+
+### 13.2 反馈 2：因子 IC 表现图文字与图案重叠
+
+**定位**：`FactorModelView.vue:148-152` echarts BarChart（`ic-chart-container` 300px 高、容器尺寸正常，非容器问题）。
+
+**根因**：series `label: { position: 'right' }`（307-314 行）+ `grid.right: '10%'`（282 行）只为**正值柱**预留了右侧标签空间；**负值柱从 0 向左延伸**，`position:'right'` 仍把数值标签放在柱右端（贴近 0 轴处）→ 标签压在柱身上（"文字与图案重叠"）。当前图表 top15 含大量负 IC 因子（ATR -0.44、sma_20 -0.39、vwap -0.35 等），重叠必然出现。
+
+**修复方向（不实施）**：
+- F2：`label.position` 改函数：`(p) => p.value >= 0 ? 'right' : 'left'`（echarts 支持函数返回位置）；或负值柱 label 用 `position: 'left'` + 负值方向 padding。
+- 附加：`grid.right` 保持 10%（正值），负值 label 溢出由 `containLabel: true` 承接（282 行已有，配合 left 位置即可）；`labelLayout: { moveOverlap: 'shiftY' }` 防相邻柱标签互叠。
+
+### 13.3 反馈 3：具体 AI 工具打开时，因子模型仍显示在下方（"之前说过的，好像没改掉"）
+
+**定位**：`DashboardAiTools.vue:110` `<FactorModelView />` **无条件渲染**——无论 `activeCoreFeature` 为 null（工具列表/wizard）还是 strategy/design loading/result，因子模型概览始终显示在页面底部。
+
+**历史核实**：`docs/user-feedback-fixes-review.md` 16 项清单中**无此项记录**（round5-ux 索引里没有"因子模型隐藏"反馈）→ 属口头反馈**未入库、未实施**——这正是"用户反馈未固化为测试用例/文档"流程缺陷的实例（§七 盲区）。
+
+**修复方向（不实施）**：
+- F3：`DashboardAiTools.vue:110` 改 `<FactorModelView v-if="!activeCoreFeature" />`（仅工具列表/初始态显示；具体工具打开后隐藏）。
+- 补组件测试：`activeCoreFeature` 置为 'strategy'/'design' 时 FactorModelView 卸载、置 null 时挂载（真实输入流驱动，符合 round5-ux §5.1 模式）。
+
+### 13.4 测试防护关联
+
+- 反馈 1/2 暴露：**static 因子口径无测试断言**（summary.static_count 与前端展示一致性无人校验）；**图表 label 位置无快照/视觉断言**（echarts 配置正确性靠人眼）——与 §七 盲区③（mock 数据形态脱节）、盲区⑤（视觉类人工走查）同源。
+- 反馈 3 暴露：**口头反馈未入库 → 无测试用例 → 无实施**——流程缺陷（round5-ux §5.4 已提出"用户反馈即测试用例"，但口头反馈无记录通道）。
+
+### 13.5 修订记录 v1.3
+
+- v1.3 (2026-08-03)：追加「十三、用户反馈补充诊断」——①政策因子 0 有效=Z03 静态设计（非故障），但前端 static 口径展示误导（F1-A 展示修复方向）；②7 个 no_data 分解：sentiment 4 + etf_specific 3（本地口径均"IC 样本 <3 天"=时间未到；容器口径 etf 3 叠加字段缺失 R5-1-4 未收敛）；③IC 图重叠根因=负值柱 label position:'right' 压柱身（F2 修复方向）；④因子模型未隐藏=DashboardAiTools.vue:110 无条件渲染 + 该反馈从未入库（F3 修复方向）。均未实施。
+
+---
+
+## 十四、用户反馈补充诊断 2：组合设计方案质量（2026-08-03 晚）
+
+> 范围：用户对组合设计方案的 4 项设计合理性质疑 + 报告数据问题。仅分析与定位，**不做实施**。
+> 证据：设计 368（task 158）三方案（截图 + `diag/out/design_text_368.md`）；代码定位 `backend/app/engine/allocation_engine.py`、`budgets.py`、`risk_controls.py`、`services/strategy_design.py`。
+> 三方案结构（以留存 `diag/out/design_text_368.md` 总览取整值为准；OCR 截图精确权重未留存、且 OCR 数字不可靠，明细仅作参考）：防御 = 核心 51%（4 只：沪深300/A500/红利低波 15/上证50 21）+ 卫星 12%（2 只：科创新能源 7/科创创新药 5）+ 防御 15%（黄金/30年国债）+ 现金 21%；平衡 = 核心 46%（5 只）+ 卫星 29%（3 只：科创AI 8/科创芯片 7/红利低波 14）+ 防御 10% + 现金 15%；进攻 = 核心 42%（4 只：沪深300/A500/科创50 16/创业板 15）+ 卫星 31%（3 只：科创创新药 8/科创新能源 8/红利低波 15）+ 防御 11% + 现金 15%（留存总览 16%）。
+
+### 14.1 Q1：卫星层仍是科创为主——为什么？
+
+**现象**：三方案卫星层除红利低波外全部是科创主题（科创新能源/科创创新药/科创人工智能/科创芯片设计），与用户此前反馈一致（"卫星还是只有科创"）。
+
+**根因（三层叠加）**：
+1. **卫星候选池构成偏科技**：`scanner.full_pipeline`（market_data_hub.py:365）分类的 satellite 池中科创系主题 ETF 占比高；静态兜底池（strategy_design.py:21-40）卫星仅 159915/588000（宽基），又被 M5 `_is_wide_basis` 排除出卫星路径（allocation_engine.py:656）→ 卫星池只剩主题 ETF，科创主题在其中占多数。
+2. **非科技卫星候选评分不足**：进攻/平衡 composite 中 momentum 权重 0.45/0.3（allocation_engine.py:265），科创系动量因子显著更高（如科创创新药 momentum +1.20）→ 医药/AI/新能源等非科技卫星在排序中被碾压；防御型 C2 虽对科创 -1.5 惩罚，但 +1.2 动量仍净胜。
+3. **F0-5 步骤 C 科技配额裁剪后无可回补对象 → 权重丢失**（allocation_engine.py:353-385）：裁剪**必然执行**（科技合计超 `budget×40%`（防御）/50%（平衡/进攻）即按 composite 降序裁到 cap），但 `:374 non_tech_kept` 为空时**被裁权重直接丢弃、不回补**（`kept` 不含被裁项）→ 卫星权重缩水 → 现金膨胀。**注：防御方案输出科创 12% > tech_cap（layer_budget 0.20×40%=8%）的现象与当前代码裁剪逻辑不符，疑生成时镜像/分支版本差异，需以生成时 allocation 日志复核（见 F4 验收项）**。
+
+### 14.2 Q2：核心层/卫星层数量配比是否合理？
+
+**现象**：核心 4-5 只（符合 `layer_count.core=4-5` ✅）；卫星 2-3 只（`layer_count.satellite=6-8` 上限，**远未达标** ✗）；防御现金被动放大至 21%。
+
+**根因**：①卫星候选池窄（见 14.1-1）；②B3b 概念组去重（科创系归一化每组仅留 1 只）；③F0-5 步骤 D 补足逻辑（allocation_engine.py:673-718）从 `core_candidates` 取**非宽基**补足，但核心候选全部是宽基 → 补足为空（`backup_cands=[]`）；④配额裁剪后权重不回补 → 卫星预算未打满 → 现金膨胀。**层数量失衡使卫星层失去"多赛道分散"意义**（F0-5 注释自述目标），组合弹性不足。
+
+### 14.3 Q3：红利低波出现在卫星层是否合理？
+
+**现象**：平衡方案红利低波 14.4%、进攻方案 15% 均落在**卫星层**。
+
+**结论：不合理——层级错配**。红利低波是低波防御资产（R5-0-4 明确列为"防守型核心"），放卫星（进攻弹性仓位）违背资产属性。
+
+**根因（四个叠加）**：
+1. `_is_wide_basis` 关键词列表（allocation_engine.py:129：沪深300/上证50/科创50/创业板…）**不含"红利"** → 红利低波不被识别为防御/底仓属性，留在卫星池；
+2. `_SAFE_THEMES` 含"红利"（allocation_engine.py:279）→ 防御型 c2_bonus +0.8 反而**推高**其评分（与进攻型 -0.3 冲突，风格信号互相打架）；
+3. R5-0-4 红利上限 15% **只校验权重、不校验层归属**（risk_controls.py:246-255 仅按 weight 校验）→ 14%/15% 在卫星层不触发门禁；
+4. 默认池 `_DEFAULT_CANDIDATES` 中 515080 中证红利 layer=satellite（allocation_engine.py:161）——**设计上红利类被允许进卫星**。
+
+### 14.4 Q4：进攻核心层同时重仓科创50 + 创业板是否合理？
+
+**现象**：进攻方案核心层科创50 16.3% + 创业板 14.7% = 31%（高 beta 成长宽基），叠加卫星层科创主题 16.4% → **成长/科技风格合计约 47%**。
+
+**结论：不合理——风格集中度风险**。科创50 与创业板指同受成长/科技风格驱动，相关性高，双重暴露 + 卫星科创主题形成三重叠加。
+
+**根因（四个叠加）**：
+1. 核心层选择仅按 composite 排序（allocation_engine.py:268-273），进攻型 momentum 权重 0.45 → 科创50/创业板动量强、得分高，双双入选；
+2. B3b 概念去重中"科创50"→segment"科创"、"创业板"→"创业板"是**不同 segment**（allocation_engine.py:70-72/316-331），互不拦截；
+3. 行业集中度 HHI 按 `industry` 字段分组（risk_controls.py:272-277），两者 industry 均为"宽基" → 合计 31% < 40% 阈值不触发；
+4. **无风格/相关性约束**（成长 vs 价值、宽基间 beta 相关性矩阵缺失）。
+
+### 14.5 Q5：报告表格"今日涨跌"全为"数据源不可用"（+ RSI 失真连带）
+
+- **今日涨跌**：round6 §五 已记录（R5-07）：`get_index_realtime()` 空（东财 push2 限流 RemoteDisconnected）→ 设计报告行情快照"今日涨跌"缺。本轮截图（设计 368 全文报告表格）证实仍在——**"多因子评分"列有值、"今日涨跌"列全"数据源不可用"**（行情注入失败而因子评分正常）。
+- **RSI 失真（连带）**：报告内 RSI 值 0.2~2.4（上证50 RSI 0.2、红利低波 2.1、30年国债 2.4），真实 RSI 应在 0-100 区间——round6 §八 已记录（159338 RSI 1.5 vs 真实 39.8），本轮多标的再现。
+
+### 14.6 修复方向（不实施）
+
+| 编号 | 对应 | 方向 |
+|---|---|---|
+| F4 | 14.1/14.2 | 卫星池扩充：scanner 卫星分类补非科技主题配额（医药/消费/金融/红利/新能源）；科技配额裁剪改为"被裁权重回补非科技候选，无候选时转现金或空出预算"；**验收增加：生成日志断言科创合计 ≤ budget×40%/50%（复核 task 158 输出 12% > 8% 的版本差异）**，确保卫星层 ≥4 只 |
+| F5 | 14.3 | 层归属约束：`_is_dividend_etf`（512890/515080/563020）**禁止落卫星层**（layer=satellite 且红利 → 移 core 或剔除）；默认池 515080 layer 改 core；R5-0-4 校验扩展为"权重+层归属"双条件 |
+| F6 | 14.4 | 核心层风格/相关性约束：同风格高 beta 成长宽基（科创50/创业板/科创100 等）合计 ≤ 核心预算 40%（或引入宽基相关性矩阵）；行业集中度分组补充"宽基风格"维度（当前 industry 全"宽基"无法区分） |
+| F7 | 14.2 | verify_e2e design-quality 门禁增加"卫星层 ≥4 只且 ≥2 个非科技主题"断言（当前无数量下限断言，F0-5 步骤 D 仅代码注释层面） |
+| F8 | 14.5 | 随 R5-2-6 / R6-F6（指数实时多源降级）与 round6 §八 RSI 失真记录项一并实施 |
+
+### 14.7 修订记录 v1.4
+
+- v1.4 (2026-08-03)：追加「十四、用户反馈补充诊断 2：组合设计方案质量」——卫星层科创集中（卫星池窄+非科技候选评分不足+科技配额裁剪后无可回补→权重丢失）、层数量失衡（卫星 2-3 vs 6-8，补足逻辑空转致现金 21%）、红利低波层级错配（_is_wide_basis 不识别红利 + 15% 只校验权重不校验层）、进攻核心成长双重暴露（无风格/相关性约束 + 行业集中度按 industry 分组不拦截）、今日涨跌数据源不可用（R5-07 截图佐证）+ RSI 失真（round6 §八 佐证）；修复方向 F4-F8（均未实施）。

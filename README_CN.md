@@ -21,7 +21,7 @@
 - **WebSocket 推送**：行情、资讯、组合变更、任务进度、设计报告流式推送——无需轮询。
 - **LLM Token 用量监控**：追踪 DeepSeek/OpenCode Zen API 消耗，专用 TokenMonitor 页面——时序图表、按功能聚合、失败日志。
 - **PWA 支持**：可安装为桌面/移动端应用，带 Service Worker 缓存。
-- **多数据源容灾**：熔断器模式，自动降级链（mootdx → Sina → Tencent → akshare → yfinance → levistock），任一源失败自动切换。
+- **多数据源容灾**：各资产类别走独立的降级链，由统一熔断路由（`SourceRegistry`）调度——源连续失败自动冷却（指数退避），自动切换到健康备用源。
 
 ---
 
@@ -45,8 +45,8 @@
                     │ services  │ │ analysis    │ │ tasks         │
                     │ market/   │ │ indicators/ │ │ TaskManager   │
                     │ portfolio │ │ signal/llm  │ │ (design/check │
-                    │ pool_     │ │ text_       │ │  /report)     │
-                    │ manager   │ │ pipeline*   │ │ · worker_reg  │
+                    │ market_   │ │ text_       │ │  /report)     │
+                    │ data_hub  │ │ pipeline*   │ │ · worker_reg  │
                     │ strategy_ │ │ (DeepSeek/  │ │ · 90s 超时保护│
                     │ design    │ │  OpenCode)  │ └──────┬────────┘
                     │ source_   │ └─────────────┘        │WS 推送
@@ -59,13 +59,15 @@
                           │                     └────────────────┘
              ┌────────────┼──────────────────────────────┐
               ▼            ▼              ▼
-        china_market  yfinance       finnhub /        levistock
-        (mootdx/sina/  (美股)        twelvedata       (备用源)
-         tencent/                    (免费层)
-         akshare)
+        china_market  global_markets  twelvedata/     levistock
+        (mootdx/      (TwelveData →   finnhub        (板块)
+         sina/         Finnhub 美股/  (免费层)
+         tencent/      港股)
+         akshare/
+         东财)
              │
              ▼  news_fetcher → 财新 / 宏观 / 国际
-             ▼  sector_fetcher / fund_fetcher / fundamental_fetcher / sentiment_fetcher
+             ▼  sector_fetcher / fund_fetcher / fundamentals_fetcher / ttj_fetcher
                          ┌──────────────┐      ┌──────────────┐
                          │ L1 内存缓存   │◄────►│ L2 Redis     │
                          │ (TTL, 始终   │      │ (可选,       │
@@ -76,15 +78,32 @@
                          └───────────────────────────┘
 ```
 
+### 数据源降级链
+
+每条链都经 `SourceRegistry.route()` 调度——冷却中的源直接跳过，第一个返回有效数据的源胜出：
+
+| 资产 / 操作 | 降级链 |
+|---|---|
+| A 股实时（单只 & 批量） | mootdx → 腾讯(QQ) → 新浪 |
+| 港股实时 | 新浪 → 腾讯(QQ) → 东方财富(akshare) |
+| A 股日 K 线 | mootdx → 新浪 → akshare → 网易 |
+| A 股分钟 K 线（15m/30m/1h） | 新浪 → akshare（东财分钟线） |
+| A 股指数 | 新浪(s_sh) → mootdx → 腾讯(QQ) |
+| ETF 全量扫描（基础数据） | 新浪+腾讯 → 东财（push2 → push2delay）→ akshare spot |
+| 美股实时 | TwelveData → Finnhub |
+| 港股/美股历史 | akshare → Finnhub candles → AlphaVantage |
+| 板块 / 概念 | levistock → akshare |
+| 基金净值 / 场外 | akshare（东财） |
+
 ### 关键设计
 
 1. **纯函数策略引擎 (`engine/`)**：`allocation_engine.py`、`budgets.py`、`rationale.py`、`risk_controls.py` —— 零 I/O、零外部依赖。完全基于因子分数与市场状态的确定性分配逻辑。
-2. **统一数据管道 (`pool_manager.py`)**：单个入口获取因子矩阵、候选池、市场状态、情绪指数、板块动量与资讯缓存。
+2. **统一数据管道 (`market_data_hub.py`)**：单个入口获取因子矩阵、候选池、市场状态、情绪指数、板块动量与资讯缓存。
 3. **因子注册表 (`factors/factor_registry.py`)**：33 维核心因子（动量、成交量、波动率、KDJ、MACD、RSI、布林带、行业分散度、折溢价率、综合信号），带 IC 跟踪与熔断保护。
-4. **多数据源 + 熔断器 (`source_registry.py`)**：每个数据源维护失败计数与冷却时间。`route()` 按优先级依次尝试可用源；失败达到阈值即跳过，冷却后恢复。多个免费源互为补充。
+4. **多数据源 + 熔断器 (`source_registry.py`)**：每个数据源维护独立的失败计数与冷却时间。`route()` 按优先级依次尝试可用源；连续失败（≥3 次，或任意 HTTP 4xx/5xx，或 <500ms 快速失败）即进入冷却，冷却时长指数退避（60s → 120s → 240s → 480s → 600s 封顶）。**空结果记为「未命中」而非失败**——正常数据源不会被"查无此标的"污染熔断状态。多个免费源互为补充。
 5. **两级缓存 + 优雅降级**：L1 `MemoryCache`（进程内 TTL，始终可用）+ L2 `RedisCache`（跨进程，不可用时自动降级为无操作）。**没有 Redis 也能完整运行**。
 6. **LLM 故障切换**：首选 `opencode_zen` 提供商，降级至 `deepseek`，自动重试，超时可配置。
-7. **健康探针**：后台健康检查循环每 120s 检测 twelvedata 和 finnhub 数据源状态。
+7. **健康探针**：后台健康检查循环每 120s 探测 mootdx / sina / tencent / akshare / levistock / 东财 / 线程池，状态与熔断器共享。
 8. **异步任务系统 (`tasks/task_manager.py`)**：通用 TaskManager，支持 design / check / report 三种任务类型。通过 `worker_registry.py` 注册 worker，经 WebSocket (`/ws/task-notifications`) 推送进度，结果持久化至数据库。
 9. **交易日历** (`core/market_calendar.py`)：判断 A 股 / 港股是否处于交易时段，非交易时段返回净值估算值而非过时价。
 10. **一致性校验** (`tasks/design_report.py`)：`_validate_report_consistency()` 防止 LLM 引入候选池外的标的，违规时追加修正脚注。
@@ -96,7 +115,7 @@
 | 层 | 技术 |
 |---|---|
 | 后端 | Python 3.12 · FastAPI · SQLAlchemy 2.0 (async) · APScheduler · httpx |
-| 数据源 | china_market (mootdx/Sina/Tencent/akshare) · yfinance · tushare · finnhub · twelvedata · levistock · alphavantage |
+| 数据源 | china_market (mootdx/Sina/Tencent/akshare/网易/东财) · global_markets (TwelveData/Finnhub/AlphaVantage) · levistock · akshare（港股/美股/ETF） |
 | 缓存 | 进程内 MemoryCache（默认）+ 可选 Redis（自动降级） |
 | 数据库 | SQLite via aiosqlite（数据层已抽象，可切换其他 RDBMS） |
 | LLM | DeepSeek API / OpenCode Zen（OpenAI 兼容协议，自动故障切换） |
@@ -116,19 +135,18 @@ ETF_Surge/
 │   │   ├── config.py            # pydantic-settings（.env）
 │   │   ├── database.py          # 异步 SQLAlchemy / SQLite
 │   │   ├── models/              # ORM 模型 + Pydantic schemas
-│   │   ├── fetchers/            # 18 个数据源模块
-│   │   │   ├── china_market.py  # A/港/商品（mootdx→Sina→Tencent→akshare）
-│   │   │   ├── yfinance_fetcher.py
-│   │   │   ├── finnhub_fetcher.py / twelvedata_fetcher.py / alphavantage_fetcher.py
-│   │   │   ├── tushare_fetcher.py / levistock_fetcher.py
-│   │   │   ├── news_fetcher.py / sector_fetcher.py / sentiment_fetcher.py
-│   │   │   ├── fund_fetcher.py / fundamental_fetcher.py / margin_fetcher.py
-│   │   │   └── etf_scanner.py / benchmark_stocks.py
+│   │   ├── fetchers/            # 数据源模块
+│   │   │   ├── china_market.py  # A/港股/指数（mootdx→腾讯→新浪→akshare→网易）
+│   │   │   ├── global_markets_fetcher.py  # 美股/港股（TwelveData/Finnhub/yfinance-legacy）
+│   │   │   ├── etf_scanner.py   # ETF 全量扫描（新浪+腾讯→东财→akshare）
+│   │   │   ├── levistock_fetcher.py / sector_fetcher.py / news_fetcher.py
+│   │   │   ├── fundamentals_fetcher.py / fund_fetcher.py / macro_fetcher.py
+│   │   │   └── akshare_fetcher.py / ttj_fetcher.py / benchmark_stocks.py
 │   │   ├── services/            # 业务逻辑层
 │   │   │   ├── source_registry.py   # 熔断器 + 优先级路由
 │   │   │   ├── cache_service.py     # 二级缓存（内存 + Redis）
-│   │   │   ├── pool_manager.py      # 统一数据管道
-│   │   │   ├── strategy_design.py   # v5 轻量编排器（125 行）
+│   │   │   ├── market_data_hub.py   # 统一数据管道
+│   │   │   ├── strategy_design.py   # 轻量编排器（委派 engine/）
 │   │   │   ├── market_service.py    # 实时行情 / 全球指数
 │   │   │   ├── portfolio_service.py # 仓位计算 / 盈亏 / 净值估算
 │   │   │   ├── market_trends.py     # 市态判定 + ETF 趋势
@@ -147,13 +165,11 @@ ETF_Surge/
 │   │   │   ├── signal.py           # 聚合买卖信号
 │   │   │   ├── llm.py              # DeepSeek/OpenCode 集成
 │   │   │   ├── provider.py         # LLM 提供商故障切换
-│   │   │   ├── text_pipeline.py / text_pipeline_b.py
-│   │   │   └── registry.py / runtime.py
-│   │   ├── monitor/             # LLM token 用量追踪
-│   │   │   └── token_usage.py
+│   │   │   └── text_pipeline.py / registry.py / runtime.py
+│   │   ├── monitor/             # LLM token 用量追踪 + 健康探针
 │   │   ├── routers/             # REST + WebSocket 路由
 │   │   │   ├── market.py / portfolio.py / analysis.py
-│   │   │   ├── news.py / ws.py / admin.py
+│   │   │   ├── news.py / ws.py / admin.py / factors.py / system.py
 │   │   ├── tasks/               # 后台任务系统
 │   │   │   ├── task_manager.py       # 通用 TaskManager
 │   │   │   ├── worker_registry.py    # Worker 派发
@@ -161,11 +177,10 @@ ETF_Surge/
 │   │   │   ├── report_worker.py      # 异步市场报告
 │   │   │   ├── strategy_check_worker.py
 │   │   │   ├── design_report.py      # LLM 报告管道
-│   │   │   ├── market_refresh.py     # 15s 刷新调度
-│   │   │   └── news_refresh.py       # 30s 资讯刷新
+│   │   │   └── market_refresh.py     # 15s 刷新调度
 │   │   ├── core/                # 横切工具
-│   │   │   ├── ttl.py / async_utils.py / market_calendar.py
-│   │   │   └── logging.py
+│   │   │   ├── ttl.py / async_utils.py / market_calendar.py / market_context.py
+│   │   │   └── logging.py / config_manager.py
 │   │   └── utils/               # decode（latin1 解码）、proxy 工具
 │   ├── tests/                   # pytest 测试（mock 外部调用）
 │   ├── scripts/                 # verify_e2e.py, sync 脚本
@@ -174,15 +189,16 @@ ETF_Surge/
 │   └── .env.example
 ├── frontend/
 │   ├── src/
-│   │   ├── components/          # 约 30 个 Vue 组件
+│   │   ├── components/          # Vue 组件
 │   │   │   ├── layout/         # AppLayout, PageHeader, PageContainer, Section
 │   │   │   ├── dashboard/      # SummaryCards, AllocationPieChart, PnLBarChart 等
 │   │   │   ├── design/         # DesignWizard, DesignResult, DesignHistory 等
 │   │   │   ├── market/ / analysis/ / ui/  # 子组件目录
-│   │   │   ├── PortfolioAnalysis.vue / PortfolioManager.vue
+│   │   │   ├── PortfolioAnalysis.vue / PortfolioManager.vue / Dashboard.vue
 │   │   │   ├── NewsView.vue / GlobalIndicesStrip.vue
 │   │   │   ├── TaskIndicator.vue / TaskProgress.vue / TokenMonitor.vue
-│   │   ├── views/              # Dashboard.vue, DashboardAiTools.vue, MarketAnalysis.vue
+│   │   │   └── SourceMonitor.vue / FactorICView.vue / ConfigView.vue
+│   │   ├── views/              # 路由级页面（DashboardAiTools.vue、MarketAnalysis.vue 等）
 │   │   ├── stores/             # Pinia: market, portfolio, task, toast, loading
 │   │   ├── composables/        # useMarketWS, useNewsWS（WebSocket 客户端）
 │   │   ├── api/                # axios 客户端（/api/v1 基地址）
@@ -249,10 +265,10 @@ docker-compose up --build --profile prod
 | `CORS_ORIGINS` | 允许的前端源，逗号分隔 | `http://localhost:5173` |
 | `DEEPSEEK_API_KEY` | DeepSeek API Key（LLM 降级用） | 空 |
 | `OPENCODE_ZEN_API_KEY` | OpenCode Zen API Key（LLM 主用） | 空 |
-| `TUSHARE_TOKEN` | Tushare token（可选） | 空 |
-| `ALPHAVANTAGE_API_KEY` | Alpha Vantage key（可选） | 空 |
 | `FINNHUB_API_KEY` | Finnhub key（可选） | 空 |
 | `TWELVEDATA_API_KEY` | Twelve Data key（可选） | 空 |
+| `ALPHAVANTAGE_API_KEY` | Alpha Vantage key（可选） | 空 |
+| `TUSHARE_TOKEN` | Tushare token（可选） | 空 |
 | `FRED_API_KEY` | FRED key（可选） | 空 |
 | `LLM_PROVIDER` | 简单 LLM 提供商（设了 primary/fallback 后无效） | `deepseek` |
 | `LLM_PRIMARY_PROVIDER` | 主 LLM 提供商 | `opencode_zen` |
@@ -328,6 +344,32 @@ cd frontend && npm run test:e2e:smoke
 - 外部网络 / LLM（akshare、DeepSeek、yfinance 等）在单测中**必须 mock**
 - `verify_e2e.py` 检查链路：健康检查 → 行情数据 → 组合设计 → 资讯 → WebSocket → 管理端点
 - `api-contracts/` 中的 API 契约确保前后端对齐
+
+---
+
+## 已知问题（Known Issues）
+
+对当前局限性的诚实评估（详细记录见 `docs/`）：
+
+- **免费数据源天然限流 / 不稳定**：东财 `push2` / 指数接口限流（RemoteDisconnected）、akshare 进入冷却窗口、DeepSeek 高峰超时——降级链与熔断器能吸收大部分影响，持续故障期间部分端点返回「数据源不可用」的诚实降级，而非过时或假数据。（参考 `docs/round6-diagnosis-and-optimization-plan.md`）
+- **mootdx 在全新环境需要引导服务器**：首次连接依赖 `~/.mootdx/config.json` 的 BESTIP 缓存；容器 / CI 中可能空转后才降级到腾讯/新浪。计划做代码级修复（R6-F1）。
+- **板块 / 概念分析截断在 200 条**：当日跌幅大的板块（如半导体）可能落在 top-200 之外，返回 404「板块映射失败」（R6-04）。
+- **设计报告指标标注失真**：部分报告中的 RSI/MACD 数值来自归一化因子分而非原始指标值——尺度误导（R6-05）。
+- **两套独立信号系统**：`strategy-check` 的 tech_signal（因子注册表）与 `/market/signal`（规则信号）对同一标的结果可能不一致（R6-06）。
+- **LLM 流式偶发断流**：首次流式响应偶尔只含免责声明；自动重试尚未实现（R6-09）。
+- **情绪 / 风格因子（F19）在数据源冷却窗口返回 `no_data`**：属预期行为，非数据完整性缺陷。
+
+## 路线图（Roadmap）
+
+按优先级排序的后续计划（详细方案见 `docs/round6-diagnosis-and-optimization-plan.md`）：
+
+1. **P0 — 容器优先可靠性**：mootdx 代码级引导（容器 / CI 无需手动复制配置）；修复 `verify_e2e` 预热门禁字段不匹配；解除板块 / 概念 limit=200 截断。（R6-F1/F2/F3）
+2. **P1 — 报告质量**：设计报告 RSI/MACD 标注对齐原始指标值；统一两套信号系统；稳定跨方案因子分（方案内 z-score 归一化）。（R6-05/06/07）
+3. **P1 — LLM 韧性**：流式断流自动重试；保持 DeepSeek + OpenCode Zen 故障切换链路温热。（R6-09）
+4. **P2 — 启动性能**：`etf_list_cache.json` 持久化到挂载卷，预热跳过全量重扫；mootdx 修复后复查预热路径。（R6-08）
+5. **P3 — 测试防护护栏**：Docker 构建 + 全新环境冒烟测试纳入门禁；门禁断言元检查（断言必须是真实断言）；LLM 端到端真实链路断言。（R6-01/02/03 盲区）
+6. **P3 — 回测模块**：当前因子实时计算 + IC 跟踪；历史回测框架可长期验证因子有效性。
+7. **P3 — 数据库升级**：SQLite 满足单机；抽象到 PostgreSQL 可支持多用户 / 生产部署。
 
 ---
 
