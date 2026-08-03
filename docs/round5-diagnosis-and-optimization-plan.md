@@ -288,7 +288,11 @@
 **R5-2-6：东财 API 抗限流（C4-3，对应 R5-14）**
 - 背景：push2 实时接口曾被出口 IP 限流（RemoteDisconnected，宿主机+容器一致）；同域 push2delay（1843 只 ETF）可用但未降级。
 - **2026-08-03 交易时段复测（限流窗口变化）**：push2.eastmoney.com 已恢复——HTTPS/HTTP `stock/get` 均 200（0.31-0.41s），clist ETF 列表返回完整实时价格/涨幅（f2=0.845、f3=3.43 等）；push2delay 同接口 200 但 clist 1617 只仅 3 只有价、涨跌幅全 0（延时源实时字段残缺）。→ 东财限流**按时间/时段波动**（8-01 挂、8-03 恢复），不可一锤定音。
-- 实施：①东财/akshare 调用补 `User-Agent` + `Referer`（行情页）；②失败指数退避重试 2 次；③**主源改回 push2**（实时字段完整），push2 被拒时降级 push2delay（延迟接口字段兼容）——当前 `EM_PUSH_HOST = push2delay` 是 8-01 限流期遗留，恢复条件已满足；④与 R5-2-9 联动纳入熔断。契约：内部实现改动，不涉 API 契约。TDD：mock 东财失败 → 断言退避重试与 push2delay 降级。
+- 实施（**用户确认实施方向 2026-08-03：push2 优先 → push2delay 兜底，双源路由**）：**不能只改 EM_PUSH_HOST 常量**——当前代码是"单域名常量+硬编码"结构，改常量会丢兜底或造成 gate 错位。落地要点：
+  1. **etf_scanner**：`_fetch_em_etf_list(host)` 参数化，eastmoney 一环内部改 `registry.route([("em_push2", lambda: _fetch_em_etf_list("push2.eastmoney.com")), ("em_push2delay", lambda: _fetch_em_etf_list("push2delay.eastmoney.com"))])`——对齐 china_market 的 mootdx→tencent→sina 双源模式；两域名响应结构一致，解析层零改动。
+  2. **fundamentals_fetcher:632**：`fetch_advance_decline_ratio` 的 URL 硬编码 `https://push2delay.eastmoney.com`，且 `_PUSH2_SOURCE = EM_PUSH_HOST`（源名=域名字符串）——必须让 URL 与源名同步（走同一 host 参数），否则熔断 gate 查的源与实际请求的源错位（100/151 行注释警示过的坑）。
+  3. **熔断行为（registry 天然支持）**：push2 连败 3 次冷却 60s → 自动用 push2delay；push2 恢复后下次 route 自动回主源。指数退避正好匹配"限流按时段波动"。
+  4. **其余不变**：①东财/akshare 调用补 `User-Agent` + `Referer`（行情页）；②失败指数退避重试 2 次；③与 R5-2-9 联动纳入熔断。契约：内部实现改动，不涉 API 契约。TDD：mock push2 失败 → 断言自动切 push2delay；mock push2delay 失败 → 断言回落 akshare/缓存。
 - 验收：限流窗口内重试/降级后仍能取数（或降级 push2delay 成功）；候选池/ETF/今日涨跌不因东财限流而全缺（数据源可用时）；ETF 列表实时价格/涨幅字段完整（push2 主源）。
 
 **R5-2-7：akshare 商品接口签名适配（C4-4，对应 R5-15）**
@@ -436,6 +440,7 @@
 - v1.5 (2026-08-03)：用户决策记录——①**R5-2-4 mootdx：选方案 A**，复测 7709（standard.mootdx.com + 3 官方 IP 全 TCP 超时）→ 不可达成立，**维持现有降级链不补依赖**（方案 B 移除改造不适用）；②**R5-0-4 红利上限：接受全方案扩展**（平衡/进攻卫星层同 15%）；③新增 **R5-3-6**（AnalysisView 技术分析"所有标的一样"真实 bug 修复——watch 守卫竞态 + fetchChart 竞态守卫 seq，见 user-feedback-fixes-review §三 #3 修复记录，前端已实施 +2 测试，属 R5 实时修复批次，非待实施项）；④实施启动决策：**暂不实施**（保持实施标准设计状态）。
 - v1.5.1 (2026-08-03)：**mootdx 复测修正**——用户要求排查 7709 之外调用方式，实测推翻旧结论：mootdx 内置 HQ_HOSTS 42 目标 16 个可达（含默认首个 110.41.147.114:7709），端到端实时行情 + 日 K（含当日）跑通；旧"不可达"判定基于退役老 IP，不成立；7719 不可达、7720 外盘接口已失效。R5-2-4 修订为**方案 A 可行**：补 `mootdx>=0.11.7` 依赖即启用降级链第一环（Docker py3.14 需验证 py-mini-racer wheel），待用户确认实施。
 - v1.5.2 (2026-08-03)：**push2 复测**——交易时段实测 push2.eastmoney.com 已恢复（HTTP/HTTPS stock/get + clist 均 200，实时字段 f2/f3 完整）；push2delay 延时源 clist 实时字段残缺（1617 只仅 3 只有价）。东财限流按时间波动（8-01 挂 / 8-03 恢复）。R5-2-6 更新：主源改回 push2、push2delay 作降级；market_context.py 注释同步修订（保留 push2delay 常量待实施）。
+- v1.5.3 (2026-08-03)：**R5-2-6 实施方向确认（用户）**——push2 优先、push2delay 兜底，**双源路由**而非改常量：etf_scanner `_fetch_em_etf_list(host)` 参数化 + registry.route 双 provider（对齐 mootdx→tencent→sina）；fundamentals_fetcher:632 硬编码 URL 必须与源名同步（避免 gate 错位）；熔断指数退避天然匹配限流波动。
 
 ## 附录 C：数据源归因专项（2026-08-02 补充诊断）
 
