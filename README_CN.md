@@ -39,43 +39,58 @@
                          │  lifespan: 调度器 · 健康探针         │
                          │  路由: market / portfolio /          │
                          │    analysis / news / ws / admin      │
-                         └───┬───────────┬──────────────┬───────┘
-                             │           │              │
-                    ┌────────▼──┐ ┌──────▼──────┐ ┌────▼──────────┐
-                    │ services  │ │ analysis    │ │ tasks         │
-                    │ market/   │ │ indicators/ │ │ TaskManager   │
-                    │ portfolio │ │ signal/llm  │ │ (design/check │
-                    │ market_   │ │ text_       │ │  /report)     │
-                    │ data_hub  │ │ pipeline*   │ │ · worker_reg  │
-                    │ strategy_ │ │ (DeepSeek/  │ │ · 90s 超时保护│
-                    │ design    │ │  OpenCode)  │ └──────┬────────┘
-                    │ source_   │ └─────────────┘        │WS 推送
-                    │ registry  │                        ▼
-                    │ (熔断器)   │               ┌────────────────┐
-                    │ cache_    │               │ design_report  │
-                    │ service   │               │ compose_and_   │
-                    │ (二级缓存) │               │ push_report()  │
-                    └─────┬─────┘               │ 一致性校验     │
-                          │                     └────────────────┘
-             ┌────────────┼──────────────────────────────┐
-              ▼            ▼              ▼
-        china_market  global_markets  twelvedata/     levistock
-        (mootdx/      (TwelveData →   finnhub        (板块)
-         sina/         Finnhub 美股/  (免费层)
-         tencent/      港股)
-         akshare/
-         东财)
-             │
-             ▼  news_fetcher → 财新 / 宏观 / 国际
-             ▼  sector_fetcher / fund_fetcher / fundamentals_fetcher / ttj_fetcher
-                         ┌──────────────┐      ┌──────────────┐
-                         │ L1 内存缓存   │◄────►│ L2 Redis     │
-                         │ (TTL, 始终   │      │ (可选,       │
-                         │  可用)       │      │ 自动降级)    │
-                         └──────────────┘      └──────────────┘
-                         ┌───────────────────────────┐
-                         │ SQLite (SQLAlchemy 异步)   │ → data/portfolio.db
-                         └───────────────────────────┘
+                         └────────────┬────────────────────────┘
+                                      │
+                    ┌─────────────────▼────────────────────┐
+                    │  tasks (异步任务)                    │
+                    │  TaskManager · design / check /      │
+                    │  report workers · design_report      │
+                    │  (一致性校验)                        │
+                    │  WS 进度推送 ──► 前端                 │
+                    └─────────────────┬────────────────────┘
+                                      │
+                                      ▼
+                    ┌───────────────────────────────────────┐
+                    │  services · strategy_design           │
+                    │  (编排器)                             │
+                    │  portfolio · market · market_trends · │
+                    │  llm_context                          │
+                    └─────────────────┬─────────────────────┘
+                                      │ 调用
+                                      ▼
+                    ┌───────────────────────────────────────┐
+                    │  engine/ (纯函数, 无 I/O)             │
+                    │  allocation_engine · budgets ·        │
+                    │  rationale · risk_controls            │
+                    └─────────────────┬─────────────────────┘
+                                      │ 因子分数
+                                      ▼
+                    ┌───────────────────────────────────────┐
+                    │  market_data_hub (统一数据管道)       │
+                    │  因子矩阵 · 候选池 · 市态 ·           │
+                    │  情绪 · 资讯                          │
+                    └─────────────────┬─────────────────────┘
+                                      │ get_factor_matrix
+                                      ▼
+                    ┌───────────────────────────────────────┐
+                    │  factors/ · fetchers                  │
+                    │  factor_registry (33 维, IC)          │
+                    │  SourceRegistry (熔断路由 +           │
+                    │  优先级调度)                          │
+                    │  china_market (mootdx→腾讯→新浪→     │
+                    │  akshare→网易)                        │
+                    │  global_markets (TwelveData→Finnhub)  │
+                    │  · levistock · 资讯                   │
+                    └─────────────────┬─────────────────────┘
+                                      │
+            ┌─────────────────────────┼───────────────────┐
+            ▼                         ▼                   ▼
+    ┌────────────────┐      ┌────────────────┐   ┌───────────────────┐
+    │ L1 内存缓存     │      │ L2 Redis (可选,│   │ SQLite (异步      │
+    │ (TTL, 始终可用)│◄────►│ 自动降级)      │   │ SQLAlchemy)        │
+    │                 │      │                │   │ → data/portfolio  │
+    └────────────────┘      └────────────────┘   │   .db             │
+                                                 └───────────────────┘
 ```
 
 ### 数据源降级链

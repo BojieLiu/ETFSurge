@@ -39,44 +39,58 @@ Built with **FastAPI (async)** + **Vue 3 (Pinia + ECharts)**, pushing live data 
                          │  lifespan: scheduler · health probes │
                          │  routers: market / portfolio /      │
                          │    analysis / news / ws / admin      │
-                         └───┬───────────┬──────────────┬───────┘
-                             │           │              │
-                    ┌────────▼──┐ ┌──────▼──────┐ ┌────▼──────────┐
-                    │ services  │ │ analysis    │ │ tasks         │
-                    │ market/   │ │ indicators/ │ │ TaskManager   │
-                    │ portfolio │ │ signal/llm  │ │ (design/check │
-                    │ market_   │ │ text_       │ │  /report)     │
-                    │ data_hub  │ │ pipeline*   │ │ · worker_reg  │
-                    │ strategy_ │ │ (DeepSeek/  │ │ · 90s timeout │
-                    │ design    │ │  OpenCode)  │ └──────┬────────┘
-                    │ source_   │ └─────────────┘        │WS push
-                    │ registry  │                        ▼
-                    │ (circuit  │               ┌────────────────┐
-                    │  breaker) │               │ design_report  │
-                    │ cache_    │               │ compose_and_   │
-                    │ service   │               │ push_report()  │
-                    │ (2-level) │               │ consistency    │
-                    └─────┬─────┘               │  validation    │
-                          │                     └────────────────┘
-             ┌────────────┼──────────────────────────────┐
-              ▼            ▼              ▼
-        china_market  global_markets  twelvedata/     levistock
-        (mootdx/      (TwelveData →  finnhub         (sector)
-         sina/         Finnhub for   (free tiers)
-         tencent/      US/HK)
-         akshare/
-         eastmoney)
-             │
-             ▼  news_fetcher → Caixin / macro / global
-             ▼  sector_fetcher / fund_fetcher / fundamentals_fetcher / ttj_fetcher
-                         ┌──────────────┐      ┌──────────────┐
-                         │ L1 Memory    │◄────►│ L2 Redis     │
-                         │ Cache (TTL)  │      │ (optional,   │
-                         │ always avail │      │ auto-degrade)│
-                         └──────────────┘      └──────────────┘
-                         ┌───────────────────────────┐
-                         │ SQLite (SQLAlchemy async)  │ → data/portfolio.db
-                         └───────────────────────────┘
+                         └────────────┬────────────────────────┘
+                                      │
+                    ┌─────────────────▼────────────────────┐
+                    │  tasks (async)                       │
+                    │  TaskManager · design / check /      │
+                    │  report workers · design_report      │
+                    │  (consistency check)                 │
+                    │  WS progress push ──► frontend       │
+                    └─────────────────┬────────────────────┘
+                                      │
+                                      ▼
+                    ┌───────────────────────────────────────┐
+                    │  services · strategy_design           │
+                    │  (orchestrator)                       │
+                    │  portfolio · market · market_trends · │
+                    │  llm_context                          │
+                    └─────────────────┬─────────────────────┘
+                                      │ calls
+                                      ▼
+                    ┌───────────────────────────────────────┐
+                    │  engine/ (pure functions, no IO)      │
+                    │  allocation_engine · budgets ·        │
+                    │  rationale · risk_controls            │
+                    └─────────────────┬─────────────────────┘
+                                      │ factor scores
+                                      ▼
+                    ┌───────────────────────────────────────┐
+                    │  market_data_hub (unified pipeline)   │
+                    │  factor matrix · pool · regime ·      │
+                    │  sentiment · news                     │
+                    └─────────────────┬─────────────────────┘
+                                      │ get_factor_matrix
+                                      ▼
+                    ┌───────────────────────────────────────┐
+                    │  factors/ · fetchers                  │
+                    │  factor_registry (33-dim, IC)         │
+                    │  SourceRegistry (circuit breaker +    │
+                    │  priority routing)                    │
+                    │  china_market (mootdx→Tencent→Sina→   │
+                    │  akshare→NetEase)                     │
+                    │  global_markets (TwelveData→Finnhub)  │
+                    │  · levistock · news                   │
+                    └─────────────────┬─────────────────────┘
+                                      │
+            ┌─────────────────────────┼───────────────────┐
+            ▼                         ▼                   ▼
+    ┌────────────────┐      ┌────────────────┐   ┌───────────────────┐
+    │ L1 Memory      │      │ L2 Redis       │   │ SQLite (async     │
+    │ Cache (TTL)    │◄────►│ (optional,     │   │ SQLAlchemy)       │
+    │ always avail   │      │ auto-degrade)  │   │ → data/portfolio  │
+    └────────────────┘      └────────────────┘   │   .db             │
+                                                 └───────────────────┘
 ```
 
 ### Data Source Fallback Chains
