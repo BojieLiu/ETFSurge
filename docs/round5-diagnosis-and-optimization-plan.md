@@ -274,9 +274,11 @@
 - 验收：读 `backend/logs/warmup_timing.json` 的 `total_duration_ms` < 2500ms（手工或 CI 脚本直读 JSON；**勿依赖 `check_perf_budget.py`**——其路径拼接 `Path(__file__).parent.parent/'backend'/'logs'` 解析为 `backend/backend/logs/`（不存在）且读 `total_ms` 而 JSON 字段为 `total_duration_ms`，运行即"baseline not found"；若要用它需先修脚本）。**不改** verify_e2e A01 门禁——其阈值 20s/10s 用于 CI 泛化门禁，且 A01 仅在 PROFILE_WARMUP=1 时实测、未启用时恒 PASS，不承担 2.5s 断言。
 
 **R5-2-4：mootdx 依赖与降级链简化（C4-1，对应 R5-12）**
-- 背景：requirements 无 mootdx（`_mootdx()` lazy import 的 ImportError 被 warning 吞，降级链第一环空转）；7709 端口当前网络不可达（通达信官方 IP 亦超时，与交易时间无关）。
-- 实施（**用户决策 2026-08-03：方案 A**）：**方案 A**——先测 7709 可达性；**实测结果：standard.mootdx.com + 3 个官方 IP 全部 TCP 8s 超时（2026-08-03 复测，`socket.create_connection` timeout=8）** → 7709 不可达成立 → **不补 mootdx 依赖，维持现有降级链**（Sina/Tencent 兜底已实测正常），不做移除改造（避免改动已工作的兜底链路）；待网络环境可达后再评估补依赖。~~方案 B（推荐）~~——从实时/批量行情降级链移除 mootdx 环节（从未生效），删除 `_MOOTDX_CLIENT`/`_MOOTDX_EXECUTOR` 等 mootdx 超时包装——因用户选方案 A 且实测不可达，不适用。TDD：现有单测中 mock mootdx 环节的维持现状；若后续移除，**点名更新 `tests/test_timeout_resilience.py:52`（`test_mootdx_has_socket_timeout` monkeypatch `_MOOTDX_CLIENT`，移除后会 AttributeError）**。契约：内部实现改动，不涉 API 契约。
-- 验收：维持现状即达验收基线（无 mootdx 噪音已在现有代码中被 warning 吞，不影响链路）；实时/批量行情在 Sina/Tencent 可达时正常；相关单测全过。
+- 背景：requirements 无 mootdx（`_mootdx()` lazy import 的 ImportError 被 warning 吞，降级链第一环空转）。
+- **2026-08-03 复测修正（推翻"7709 不可达"旧结论）**：此前用 `standard.mootdx.com` 域名 + 3 个退役老 IP（119.147.212.81 等）判定"7709 不可达"——**测错了服务器列表**。mootdx 0.11.7 内置 `consts.HQ_HOSTS` 42 目标实测 **16 个可达**（15×7709 + 1×7720 外盘），默认首个 110.41.147.114:7709 延迟 60ms；**端到端跑通**：`Quotes.factory(market='std', timeout=6)`（项目 `_mootdx()` 原样用法）0.07s 连接，`quotes(['600000','510300','000001'])` 返回 3 条实时行情，`bars('600000', daily)` 返回 800 条日 K（含 2026-08-03 当日）→ **网络与数据均可用，唯一障碍是依赖缺失**。
+- 其它调用方式排查：①端口 7719（深圳双线主站8）不可达；②外盘 7720 扩展行情（银河 3 台）1 台可连但 mootdx 官方声明"扩展市场行情接口已失效"（`ExtQuotes.quotes` 不存在）→ 港股/美股不适用，维持新浪/腾讯链路；③`bestip=True` 自动测速（内置 16 台可用服务器中选最快）可作稳定性增强。
+- 实施（**用户决策 2026-08-03 修订：方案 A 可行**）：requirements 补 `mootdx>=0.11.7`（自动带依赖 click/httpx/prettytable/py-mini-racer/tdxpy/tenacity/tqdm/typing-extensions；tdxpy 0.2.7 为 TCP 协议实现）。`_mootdx()` 原样代码即可用；可选传 `bestip=True` 提升稳定性。**注意**：Docker 镜像为 `python:3.14-slim`，需实施时验证 mootdx 依赖（尤其 `py-mini-racer`）在 py3.14 有无 wheel，若无则考虑固定版本或跳过 mootdx（保持现状）。单测：补依赖后 `tests/test_timeout_resilience.py:52`（`test_mootdx_has_socket_timeout`）不再 AttributeError，可保留原断言或点名更新为真实连接路径。契约：内部实现改动，不涉 API 契约。
+- 验收：mootdx 成为实时/批量行情降级链**实际可用**的第一环（连接 + 数据有效）；Sina/Tencent 兜底仍保留；相关单测全过。
 
 **R5-2-5：llm_report 指数链路对齐（C4-2，对应 R5-13）**
 - 背景：`llm_report`/`llm_report_stream` 的 indices 用 `get_indices()`（Sina 三级降级，仅 A 股指数）→ HK/US 报告 indices 空；`get_global_indices()`（17 指数多源降级 + 24h 磁盘缓存，含港股/美股段）有数据未用。
@@ -431,6 +433,7 @@
 - v1.3 (2026-08-02)：数据源修复方案正式化——附录 C §C.4 修复方向升级为 §十 P2 正式修复项 **R5-2-4~R5-2-9**（mootdx 降级链简化 / llm_report 指数链路对齐 / 东财抗限流 / 商品签名适配 / PE/PB 备用源 / 熔断器接线），同步补 §十一 批次 3、§十二 验收总表 6 行、附录 A R5-12~15 修复项编号引用；仍为实施标准设计，未实施。
 - v1.4 (2026-08-02)：用户反馈批次方案正式化——新增 **R5-1-6**（策略检查 LLM 超时诊断与快速失败：原因留痕 + cap 参数化）、**R5-2-10**（国内宏观数据管道：macro_fetcher + domestic_macro 段 + 契约）、**R5-2-11**（场外基金技研链路：taTarget asset_type 修正）；新增 **🅿️3 测试防护弥补批次 R5-3-1~5**（前端真实 composable 测试 / asset_type 参数化 / prompt 完整性断言 / 路由集成测试 / 性能预算门禁，来源 user-feedback-fixes-review §5）；§十一 批次追加 1-6/2-10/2-11/批次 4；§十二 验收总表追加 8 行；仍为实施标准设计，未实施。
 - v1.5 (2026-08-03)：用户决策记录——①**R5-2-4 mootdx：选方案 A**，复测 7709（standard.mootdx.com + 3 官方 IP 全 TCP 超时）→ 不可达成立，**维持现有降级链不补依赖**（方案 B 移除改造不适用）；②**R5-0-4 红利上限：接受全方案扩展**（平衡/进攻卫星层同 15%）；③新增 **R5-3-6**（AnalysisView 技术分析"所有标的一样"真实 bug 修复——watch 守卫竞态 + fetchChart 竞态守卫 seq，见 user-feedback-fixes-review §三 #3 修复记录，前端已实施 +2 测试，属 R5 实时修复批次，非待实施项）；④实施启动决策：**暂不实施**（保持实施标准设计状态）。
+- v1.5.1 (2026-08-03)：**mootdx 复测修正**——用户要求排查 7709 之外调用方式，实测推翻旧结论：mootdx 内置 HQ_HOSTS 42 目标 16 个可达（含默认首个 110.41.147.114:7709），端到端实时行情 + 日 K（含当日）跑通；旧"不可达"判定基于退役老 IP，不成立；7719 不可达、7720 外盘接口已失效。R5-2-4 修订为**方案 A 可行**：补 `mootdx>=0.11.7` 依赖即启用降级链第一环（Docker py3.14 需验证 py-mini-racer wheel），待用户确认实施。
 
 ## 附录 C：数据源归因专项（2026-08-02 补充诊断）
 
