@@ -465,6 +465,7 @@ async def llm_complete_stream(
             prompt_tokens = 0
             completion_tokens = 0
             total_tokens = 0
+            _token_events = 0  # R6-F8: token 事件计数（断流判定用）
 
             try:
                 async with httpx.AsyncClient(
@@ -497,6 +498,7 @@ async def llm_complete_stream(
                                         token = delta.get("content") or ""
                                         if token:
                                             full_text += token
+                                            _token_events += 1
                                             yield {"type": "token", "token": token}
 
                                     if chunk.get("usage"):
@@ -556,6 +558,36 @@ async def llm_complete_stream(
                 duration_ms=round(_duration, 1),
                 provider=provider.id,
             ))
+
+            # R6-F8 (round6 §五 R6-09): 流式偶发断流——HTTP 成功但 token 事件
+            # <2（0 token / 仅 1 个 disclaimer token，如 events=1 仅 disclaimer）。
+            # 视同失败重试（continue → 下一 provider / 下一轮退避），不静默产出空报告。
+            if _token_events < 2:
+                logger.warning(
+                    "[LLM] Stream dropout: only %d token event(s) (provider=%s) — retrying",
+                    _token_events, provider.id,
+                )
+                last_exc = RuntimeError(f"stream dropout: only {_token_events} token event(s)")
+                await token_store.record(UsageRecord(
+                    function_name=_caller,
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                    total_tokens=0,
+                    model=provider.model,
+                    timestamp=time.time(),
+                    success=False,
+                    duration_ms=round(_duration, 1),
+                    error_message=str(last_exc),
+                    provider=provider.id,
+                ))
+                if attempt < max_retries:
+                    wait = LLM_RETRY_DELAY
+                    logger.warning(
+                        "[LLM] Stream retrying after dropout (attempt %d/%d) in %.1fs",
+                        attempt + 1, max_retries, wait,
+                    )
+                    await asyncio.sleep(wait)
+                continue
 
             yield {
                 "type": "done",

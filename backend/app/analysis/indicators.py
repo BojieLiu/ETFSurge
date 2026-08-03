@@ -138,7 +138,10 @@ def compute_bollinger(close, window=20, num_std=2) -> dict:
 
 
 # ── Chinese column name aliases ──────────────────────────────────
-COL_MAP = {"收盘": ["收盘", "close", "Close"], "最高": ["最高", "high", "High"], "最低": ["最低", "low", "Low"], "开盘": ["开盘", "open", "Open"], "成交量": ["成交量", "volume", "Volume", "成交额", "amount", "Amount"]}
+COL_MAP = {"收盘": ["收盘", "close", "Close"], "最高": ["最高", "high", "High"], "最低": ["最低", "low", "Low"], "开盘": ["开盘", "open", "Open"], "成交量": ["成交量", "volume", "Volume", "vol", "Vol"]}
+# F14 (round6 §16.2 + §十八-6): 成交额独立别名表——旧实现把"成交额"混入成交量
+# 别名，金额被当成交量返回；现分离，chart 响应补 amount（成交额）序列。
+AMOUNT_ALIASES = ["成交额", "amount", "Amount", "成交金额"]
 
 
 def _resolve_col(data, aliases):
@@ -216,6 +219,7 @@ def compute_chart_data(df: list[dict]) -> dict:
     if not df:
         return {
             "dates": [], "opens": [], "highs": [], "lows": [], "closes": [], "volumes": [],
+            "amount": [],
             "ma5": [], "ma10": [], "ma20": [], "ma60": [],
             "bollinger": {"upper": [], "middle": [], "lower": []},
             "macd": {"dif": [], "dea": [], "histogram": []},
@@ -226,12 +230,16 @@ def compute_chart_data(df: list[dict]) -> dict:
     low_col = _resolve_col(data, COL_MAP["最低"])
     open_col = _resolve_col(data, COL_MAP["开盘"])
     volume_col = _resolve_col(data, COL_MAP["成交量"])
+    # F14: 成交额独立解析（缺失时 None 填充，与 dates 等长）
+    amount_col = _resolve_col(data, AMOUNT_ALIASES)
     date_aliases = ["日期", "date", "Date", "datetime", "Datetime"]
 
     close = data[close_col].astype(float)
     high = data[high_col].astype(float) if high_col in data.columns else close
     low = data[low_col].astype(float) if low_col in data.columns else close
     volume = data[volume_col].astype(float) if volume_col in data.columns else pd.Series([0.0] * len(data))
+    # F14: amount 序列（成交额；无列时全 None——保持与 dates 等长，前端判空）
+    amount = data[amount_col].astype(float) if amount_col in data.columns else pd.Series([None] * len(data))
 
     # Resolve date column
     date_col = open_col  # default fallback
@@ -277,6 +285,8 @@ def compute_chart_data(df: list[dict]) -> dict:
         "lows": _to_list(low),
         "closes": _to_list(close),
         "volumes": _to_list(volume),
+        # F14: 成交额序列（与 dates 等长；无成交额列时全 None）
+        "amount": _to_list(amount),
         "ma5": ma5, "ma10": ma10, "ma20": ma20, "ma60": ma60,
         "bollinger": {"upper": boll_upper, "middle": boll_middle, "lower": boll_lower},
         "macd": {"dif": _to_list(dif), "dea": _to_list(dea), "histogram": _to_list(macd_hist)},

@@ -115,6 +115,22 @@ def _inject_static_wide_basis(
     return layer_items
 
 
+def _etf_cache_file() -> str:
+    """ETF 列表文件缓存路径（R6-F7, round6 §十 R6-08）。
+
+    优先级：①DATA_DIR 环境变量显式指定；②容器内 /app/data 挂载卷（与
+    portfolio.db 同卷，容器重建不丢——旧实现在镜像层 /app/app/data 必丢）；
+    ③宿主机开发回落 backend/data（现状路径）。
+    """
+    import os
+    data_dir = os.environ.get("DATA_DIR")
+    if data_dir:
+        return os.path.join(data_dir, "etf_list_cache.json")
+    if os.path.exists("/app/data"):
+        return os.path.join("/app/data", "etf_list_cache.json")
+    return os.path.join(os.path.dirname(__file__), "..", "data", "etf_list_cache.json")
+
+
 def _log_missing_required(layer: str, required: list[str], pool_items: list[dict[str, Any]]) -> None:
     """M2: 强制标的注入后校验——required 未命中打 WARNING，消除静默失效。"""
     if not required:
@@ -329,7 +345,7 @@ def fetch_all_etfs_base() -> list[dict[str, Any]]:
 
     # 0. 文件缓存：重启后加速首次加载
     import os, json, time
-    _cache_file = os.path.join(os.path.dirname(__file__), "..", "data", "etf_list_cache.json")
+    _cache_file = _etf_cache_file()
     if os.path.exists(_cache_file):
         try:
             with open(_cache_file, "r", encoding="utf-8") as _f:

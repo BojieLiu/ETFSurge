@@ -1,7 +1,6 @@
 <template>
-  <!-- R5-0-3: summary-grid 容器级定高（防 CLS）——值来自 GRID_MIN_HEIGHT，
-       内联 style 绑定使组件测试可在 jsdom 中直接断言（scoped CSS 测试环境不可读） -->
-  <div class="summary-grid" :style="gridStyle">
+  <!-- F24 (round6 §17.4): 容器内容驱动（无 340px 定高）——CLS 由卡片级等高骨架屏保障 -->
+  <div class="summary-grid">
     <!-- 总仓位（独占一行，突出显示） -->
     <AppCard v-if="activeTab === 'combined'" layout="horizontal" icon="💰" class="summary-card summary-card--total" bordered padded hoverable>
       <p class="summary-label">总仓位</p>
@@ -49,18 +48,22 @@
         <div class="summary-content">
           <p class="summary-label">场内累计盈亏</p>
           <span class="value-skeleton" aria-hidden="true"></span>
+          <!-- F24: 等高骨架——与完成态 estimate-hint 行同构占位 -->
+          <p class="estimate-hint"><span class="value-skeleton value-skeleton--sm" aria-hidden="true"></span></p>
         </div>
       </AppCard>
       <AppCard v-if="activeTab !== 'on_exchange'" layout="horizontal" class="summary-card" bordered padded>
         <div class="summary-content">
           <p class="summary-label">场外累计盈亏</p>
           <span class="value-skeleton" aria-hidden="true"></span>
+          <p class="estimate-hint"><span class="value-skeleton value-skeleton--sm" aria-hidden="true"></span></p>
         </div>
       </AppCard>
       <AppCard v-if="activeTab === 'combined'" layout="horizontal" class="summary-card" bordered padded>
         <div class="summary-content">
           <p class="summary-label">总累计盈亏</p>
           <span class="value-skeleton" aria-hidden="true"></span>
+          <p class="estimate-hint"><span class="value-skeleton value-skeleton--sm" aria-hidden="true"></span></p>
         </div>
       </AppCard>
     </template>
@@ -188,10 +191,9 @@ function estimatedRatio(type) {
   return props.pnlHistory?.summary?.by_type?.[type]?.estimated_ratio || 0
 }
 
-// R5-0-3: 容器级定高防 CLS——总仓位卡(96) + 组标签(~24) + 当日盈亏组(96) + 累计盈亏组(96)
-// 首屏骨架（单行）与完成态（数字+估算提示）都在此高度内渲染，WS 行情推送不引发重排。
-const GRID_MIN_HEIGHT = '340px'
-const gridStyle = { minHeight: GRID_MIN_HEIGHT }
+// F24 (round6 §17.4): 移除容器级定高 GRID_MIN_HEIGHT='340px'——
+// 旧实现容器定高 + 数据注入后内容超高 → CLS 0.189。
+// 现改为内容驱动：卡片 min-height + 加载/完成两态等高骨架（见 .estimate-hint 占位行）。
 </script>
 
 <style scoped>
@@ -202,9 +204,9 @@ const gridStyle = { minHeight: GRID_MIN_HEIGHT }
 }
 
 .summary-card {
-  /* P0-4 (R4-19): 卡片固定最小高度——加载态（单行骨架）与完成态（数字+估算提示）
-     高度一致，消除首屏数据到达时的布局偏移（CLS）。 */
-  min-height: 96px;
+  /* P0-4 (R4-19) + F24: 卡片固定最小高度——加载态（单行骨架 + 估算占位行）与完成态
+     （数字 + 估算提示）高度一致，消除首屏数据到达时的布局偏移（CLS）。 */
+  min-height: 110px;
   transition: var(--transition-fast);
 }
 
@@ -288,6 +290,13 @@ const gridStyle = { minHeight: GRID_MIN_HEIGHT }
   margin: var(--space-1) 0 0;
   font: var(--text-body-xs);
   color: var(--color-text-secondary);
+  min-height: 1rem; /* F24: 占位行恒有高度（加载骨架/完成文本同高） */
+}
+
+/* F24: 小号骨架——estimate-hint 占位行使用 */
+.value-skeleton--sm {
+  width: 80px;
+  height: 0.9rem;
 }
 
 /* 数据刷新指示器（常驻渲染，占位高度固定 → 加载完成零布局偏移） */

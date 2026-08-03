@@ -107,7 +107,8 @@
     </div>
   </section>
 
-  <FactorModelView />
+  <!-- F3 (round6 §13.3): 仅工具列表/初始态显示因子模型概览；具体工具打开后隐藏 -->
+  <FactorModelView v-if="!activeCoreFeature" />
   </div>
 </template>
 

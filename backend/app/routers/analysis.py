@@ -96,6 +96,16 @@ def _build_advice_market_snapshot(query: str, hub) -> str:
             idx = sentiment.get("sentiment_index", "?")
             lines.append(f"· 市场情绪: {lbl} ({idx}/100)")
         idx_data = hub.get_index_realtime() or []
+        if not idx_data:
+            # R6-F6 (round6 §十 R6-07'): 东财限流时 get_index_realtime 空 →
+            # 从 market_service 的全球指数同步缓存（A 股段）兜底——快照构建是
+            # 同步函数，不能 await async get_global_indices，读 30s TTL 缓存即可。
+            try:
+                from ..services import market_service as _ms
+                _cache = getattr(_ms, "_global_indices_cache", None) or {}
+                idx_data = list(_cache.get("A股") or [])
+            except Exception:
+                idx_data = []
         for item in idx_data[:5]:
             name = item.get("name", item.get("symbol", "?"))
             price = item.get("price", "N/A")
@@ -684,17 +694,22 @@ async def sector_analysis_stream(req: SectorAnalysisRequest):
             )
 
         if sector_type == "concept":
-            sectors = await asyncio.to_thread(market_data_hub.get_sector_concept, 200)
+            sectors = await asyncio.to_thread(market_data_hub.get_sector_concept, 500)
         else:
-            sectors = await asyncio.to_thread(market_data_hub.get_sector_industry, 200)
+            sectors = await asyncio.to_thread(market_data_hub.get_sector_industry, 500)
         # R5: 概念映射兜底——前端 sector 模式固定传 sector_type='industry'，
         # 概念名（芯片/光模块/CPO 等）在行业表找不到 → 404。
         # 取对侧表一起参与名称归一化（缓存命中，开销小），命中后按合并表定位 sector_data。
         if sector_type == "concept":
-            other = await asyncio.to_thread(market_data_hub.get_sector_industry, 200)
+            other = await asyncio.to_thread(market_data_hub.get_sector_industry, 500)
         else:
-            other = await asyncio.to_thread(market_data_hub.get_sector_concept, 200)
-        combined = list(sectors or []) + list(other or [])
+            other = await asyncio.to_thread(market_data_hub.get_sector_concept, 500)
+        combined = [
+            # F19 (round6 §16.7): 过滤 placeholder 行（sector_code=''，有名无码）——
+            # 它们不参与名称归一化匹配，避免命中后返回空代码 → 404「板块映射失败」
+            s for s in (list(sectors or []) + list(other or []))
+            if s.get("sector_code")
+        ]
         # F2-7 步骤F: 热板块 cls 前缀代码归一化（名称优先 → 数字段匹配）
         normalized = _normalize_sector_code(
             sector_code,
@@ -713,10 +728,14 @@ async def sector_analysis_stream(req: SectorAnalysisRequest):
                 (s for s in sectors if s.get("sector_code") == sector_code), None
             )
         if not sector_data:
-            # F2-7 步骤F: 映射失败返回结构化错误（前端降级为搜索）
+            # F2-7 步骤F + F19 (round6 §16.7): 映射失败返回结构化错误——
+            # 区分「代码不存在」与「数据源缺失」（placeholder 仅 → 数据源暂无数据）
             raise HTTPException(
                 status_code=404,
-                detail=f"板块映射失败：{req.sector_code}（请用板块名称搜索）",
+                detail=(
+                    f"板块「{req.sector_code}」数据源暂无数据"
+                    f"（板块表未收录或数据源缺失），请稍后重试或换用其他板块"
+                ),
             )
         name = sector_name or (sector_data.get("sector_name", "") if sector_data else sector_code)
         
@@ -846,7 +865,7 @@ async def symbol_analysis_stream(req: SymbolAnalysisRequest):
             industry_map = await asyncio.to_thread(get_stock_industry_map, [symbol]) or {}
             industry = (industry_map.get(symbol) or "").strip()
             if industry:
-                sectors = await asyncio.to_thread(market_data_hub.get_sector_industry, 200) or []
+                sectors = await asyncio.to_thread(market_data_hub.get_sector_industry, 500) or []
                 matched = next((s for s in sectors if s.get("sector_name") == industry), None)
                 if matched:
                     snap = {k: matched.get(k) for k in

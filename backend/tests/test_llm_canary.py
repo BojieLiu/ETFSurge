@@ -16,7 +16,10 @@ _has_key = bool(
     (settings.deepseek_api_key or settings.opencode_zen_api_key or "").strip()
 )
 
-pytestmark = pytest.mark.skipif(not _has_key, reason="无 LLM API key，金丝雀基线跳过")
+pytestmark = [
+    pytest.mark.skipif(not _has_key, reason="无 LLM API key，金丝雀基线跳过"),
+    pytest.mark.network,  # F23: 金丝雀依赖真实 LLM 可用性，显式放行
+]
 
 
 async def _try_llm(prompt: str) -> str:

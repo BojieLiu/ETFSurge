@@ -33,8 +33,12 @@ def test_eu_indices_have_sina_page_mapping():
         )
 
 
+@pytest.mark.network
 async def test_fetch_sina_page_eu_returns_valid_data():
-    """fetch_sina_page_global_index must parse title and return valid entry."""
+    """fetch_sina_page_global_index must parse title and return valid entry.
+
+    真实抓取新浪页面（F23 显式放行）。
+    """
     from app.fetchers.china_market import fetch_sina_page_global_index
 
     result = fetch_sina_page_global_index("^FTSE")
@@ -53,8 +57,12 @@ async def test_fetch_sina_page_eu_unknown_symbol_returns_none():
     assert result is None
 
 
+@pytest.mark.network
 async def test_sina_page_fallback_in_foreign():
-    """When Sina hq returns None for European index, Sina page should be tried."""
+    """When Sina hq returns None for European index, Sina page should be tried.
+
+    fallback 路径真实抓取新浪页面（F23 显式放行）。
+    """
     defs = [("^FTSE", "英国富时100", "欧洲")]
 
     # Clear cache

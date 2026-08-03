@@ -5,7 +5,7 @@
  * - 修复：api 层加 period 参数 + fetchChart 传入 period.value（+ watch(period) 兜底）。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
 // ECharts 在 jsdom 下不可渲染 → mock 入口
@@ -42,7 +42,15 @@ import AnalysisView from '../components/AnalysisView.vue'
 import AppSelect from '../components/ui/AppSelect.vue'
 
 beforeEach(() => {
-  chartMock.mockReset().mockResolvedValue({ data: { dates: ['2026-07-31'], closes: [4.65], opens: [4.6], highs: [4.7], lows: [4.5] } })
+  chartMock.mockReset().mockResolvedValue({
+    data: {
+      dates: ['2026-07-31'], closes: [4.65], opens: [4.6], highs: [4.7], lows: [4.5],
+      volumes: [1000], amount: [11420000],
+      macd: { histogram: [0.1], dif: [0.2], dea: [0.15] },
+      kdj: { k: [50], d: [48], j: [54] },
+      rsi: [42.5],
+    },
+  })
   indicatorsMock.mockReset().mockResolvedValue({ data: { data_available: true, ma5: 4.66, rsi: 43 } })
   signalMock.mockReset().mockResolvedValue({ data: { signal: 'hold', score: 0 } })
 })
@@ -129,6 +137,108 @@ describe('AnalysisView 父组件切换标的 (R5 #3 修复)', () => {
     // 慢的 510300 响应晚到不应覆盖 510500 的图表数据
     const chartOption = wrapper.findComponent({ name: 'ChartPanel' }).props('chartOption')
     expect(chartOption.series[0].data[0][1]).toBe(5.0)
+  })
+})
+
+describe('AnalysisView 内部下拉切换标的 (F13, round6 §16.1)', () => {
+  it('切换 ETF 下拉 → selected 回写并 fetchChart 带新 symbol（修复"所有标的一样"）', async () => {
+    // 当前 store mock 只有 510300；动态扩充 etfOptions 需要 store 数据。
+    // 直接通过 ControlPanel 的 AppSelect emit 新值，断言 fetchChart 以新 symbol 请求。
+    const wrapper = mount(AnalysisView, {
+      global: { stubs: { ChartPanel: true, SignalPanel: true } },
+    })
+    await nextTick()
+    await nextTick()
+    const selects = wrapper.findAllComponents(AppSelect)
+    // 第 1 个 AppSelect 是 ETF 选择器
+    selects[0].vm.$emit('update:model-value', '510500')
+    await nextTick()
+    await nextTick()
+    // 旧实现：onSelectEtf 不接收 $event、不回写 selected → 仍请求 510300
+    expect(chartMock).toHaveBeenLastCalledWith('510500', 'A', 'daily')
+    expect(indicatorsMock).toHaveBeenLastCalledWith('510500', 'A', 'daily')
+    expect(signalMock).toHaveBeenLastCalledWith('510500', 'A', 'daily')
+  })
+
+  it('切换标的后再切换周期 → 以新标的 + 新周期请求', async () => {
+    const wrapper = mount(AnalysisView, {
+      global: { stubs: { ChartPanel: true, SignalPanel: true } },
+    })
+    await nextTick()
+    await nextTick()
+    const selects = wrapper.findAllComponents(AppSelect)
+    selects[0].vm.$emit('update:model-value', '510500')
+    await nextTick()
+    selects[1].vm.$emit('update:model-value', 'weekly')
+    await nextTick()
+    await nextTick()
+    expect(chartMock).toHaveBeenLastCalledWith('510500', 'A', 'weekly')
+  })
+})
+
+describe('F14/F15 成交量独立开关 + 周期标注 (round6 §16.2/16.3)', () => {
+  async function mountChart() {
+    const wrapper = mount(AnalysisView, {
+      global: { stubs: { ChartPanel: true, SignalPanel: true } },
+    })
+    await flushPromises()
+    return wrapper
+  }
+
+  function chartOptionOf(wrapper) {
+    return wrapper.findComponent({ name: 'ChartPanel' }).props('chartOption')
+  }
+
+  it('F14: 关闭 MACD 时成交量副图仍显示（独立开关，旧实现会消失）', async () => {
+    const wrapper = await mountChart()
+    // 默认 showVolume=true, showMACD=true → 有成交量 series
+    expect(chartOptionOf(wrapper).series.some((s) => s.name === '成交量')).toBe(true)
+    // 关闭 MACD（不关成交量）
+    await wrapper.find('[data-testid="toggle-macd"]').setValue(false)
+    await nextTick()
+    const opt = chartOptionOf(wrapper)
+    // 成交量 grid 仍存在（旧实现 volPct 绑在 showMACD 上 → 关闭 MACD 成交量 grid 一并消失）
+    expect(opt.series.some((s) => s.name === '成交量')).toBe(true)
+    expect(opt.grid.length).toBeGreaterThanOrEqual(2)
+    // MACD series 消失
+    expect(opt.series.some((s) => s.name === 'MACD')).toBe(false)
+  })
+
+  it('F14: 关闭成交量开关 → 成交量副图消失（MACD 不受影响）', async () => {
+    const wrapper = await mountChart()
+    await wrapper.find('[data-testid="toggle-volume"]').setValue(false)
+    await nextTick()
+    const opt = chartOptionOf(wrapper)
+    expect(opt.series.some((s) => s.name === '成交量')).toBe(false)
+    // MACD 仍在
+    expect(opt.series.some((s) => s.name === 'MACD')).toBe(true)
+  })
+
+  it('F14: amount 有有效值时成交量副图叠加成交额线；无 amount 时不渲染', async () => {
+    // 默认 mock 数据带 amounts → 有成交额 series
+    const w1 = await mountChart()
+    expect(chartOptionOf(w1).series.some((s) => s.name === '成交额')).toBe(true)
+    // 无 amount（或全 null）→ 不渲染成交额 series
+    chartMock.mockResolvedValue({
+      data: {
+        dates: ['2026-07-31'], closes: [4.65], opens: [4.6], highs: [4.7], lows: [4.5],
+        volumes: [1000], amount: [null], macd: { histogram: [0.1], dif: [0.2], dea: [0.15] },
+      },
+    })
+    const w2 = await mountChart()
+    expect(chartOptionOf(w2).series.some((s) => s.name === '成交额')).toBe(false)
+  })
+
+  it('F15: K 线标题区标注当前周期（日/周/月），切换周期后更新', async () => {
+    const wrapper = await mountChart()
+    const t1 = chartOptionOf(wrapper).title
+    expect(t1.text).toContain('日')
+    const selects = wrapper.findAllComponents(AppSelect)
+    selects[1].vm.$emit('update:model-value', 'weekly')
+    await nextTick()
+    await nextTick()
+    const t2 = chartOptionOf(wrapper).title
+    expect(t2.text).toContain('周')
   })
 })
 

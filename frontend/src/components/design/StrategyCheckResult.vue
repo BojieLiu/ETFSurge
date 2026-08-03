@@ -49,7 +49,8 @@
       <!-- suggestions -->
       <div v-if="result.suggestions?.length" class="sr-section">
         <h4>&#128200; 操作建议</h4>
-        <div v-for="s in result.suggestions" :key="s.symbol + s.action" class="suggestion-card">
+        <div v-for="s in result.suggestions" :key="s.symbol + s.action" class="suggestion-card"
+             :class="{ 'sc-divergence': isDiverged(s) }">
           <div class="sc-header">
             <span class="action-badge" :class="'action-' + s.action">
               {{ actionLabel(s.action) }}
@@ -60,6 +61,9 @@
               {{ (s.current_weight * 100).toFixed(0) }}% &rarr; {{ (s.suggested_weight * 100).toFixed(0) }}%
             </span>
           </div>
+          <!-- F10 (round6 §十五): 操作建议口径标注——规则引擎基于因子分主导 -->
+          <span class="source-tag">因子分主导 · 规则引擎</span>
+          <span v-if="isDiverged(s)" class="divergence-tag">⚠ 技术信号与建议背离</span>
           <p class="sc-reason">{{ s.reason }}</p>
           <span class="confidence-tag" :class="'conf-' + (s.confidence || 'medium')">
             {{ confidenceLabel(s.confidence) }}
@@ -76,7 +80,7 @@
               <th>标的</th>
               <th>代码</th>
               <th>因子评分</th>
-              <th>技术信号</th>
+              <th>技术信号（实时）</th>
             </tr>
           </thead>
           <tbody>
@@ -126,6 +130,17 @@ function regimeLabel(regime) {
 function actionLabel(action) {
   return { increase: '增配', decrease: '减配', hold: '持有',
            add: '新增', remove: '剔除' }[action] || action
+}
+
+// F10 (round6 §十五): 信号-因子背离检测——建议 hold 但持仓明细实时技术信号
+// 为 SELL/BUY 时标注"背离"，让用户区分「实时信号」与「因子分主导」两个口径。
+function isDiverged(suggestion) {
+  const holdings = props.result?.holdings_analysis || []
+  const h = holdings.find((x) => x.symbol === suggestion.symbol)
+  if (!h || !h.tech_signal) return false
+  const sig = String(h.tech_signal).toUpperCase()
+  if (suggestion.action === 'hold' && (sig.includes('SELL') || sig.includes('BUY'))) return true
+  return false
 }
 
 function confidenceLabel(c) {
@@ -309,8 +324,30 @@ function signalClass(signal) {
   flex-wrap: wrap;
 }
 
-.action-badge {
-  font-size: var(--font-size-2xs);
+.source-tag {
+  display: inline-block;
+  font-size: 10px;
+  color: var(--color-text-tertiary);
+  background: var(--color-surface-tertiary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-full);
+  padding: 0.1rem 0.5rem;
+  margin-top: var(--space-1);
+}
+.divergence-tag {
+  display: inline-block;
+  font-size: 10px;
+  color: var(--color-warning-600);
+  background: var(--color-bg-warning-subtle);
+  border: 1px solid var(--color-warning-300);
+  border-radius: var(--radius-full);
+  padding: 0.1rem 0.5rem;
+  margin-left: var(--space-2);
+}
+.sc-divergence {
+  border-color: var(--color-warning-300);
+}
+.action-badge {  font-size: var(--font-size-2xs);
   padding: 2px var(--space-2);
   border-radius: var(--radius-full);
   font-weight: var(--font-weight-semibold);

@@ -179,6 +179,34 @@ if command -v mypy &> /dev/null; then
     fi
 fi
 
+# ── Docker 构建冒烟门禁（R6-F16） ────────────────────────────────
+# round6 诊断：R6-01 构建回归（mootdx httpx 冲突 + tenacity 漏装）在宿主机单测
+# 全绿时镜像无法构建——Docker 构建从未纳入门禁。requirements.txt / Dockerfile
+# 变更时必须实际构建 backend 镜像（pip --dry-run 无法捕获 --no-deps 序列问题）。
+# 跳过: SKIP_DOCKER_BUILD=1 git commit ...
+if [ "${SKIP_DOCKER_BUILD}" = "1" ]; then
+    echo "[pre-commit] SKIP_DOCKER_BUILD=1, 跳过 Docker 构建冒烟检查"
+else
+    DOCKER_STAGED=$(git diff --cached --name-only --diff-filter=ACM -- 'backend/requirements.txt' 'backend/Dockerfile' 2>/dev/null || true)
+    if [ -n "$DOCKER_STAGED" ]; then
+        if command -v docker >/dev/null 2>&1; then
+            echo "[pre-commit] 检测到 requirements.txt / Dockerfile 变更，正在执行 docker build backend 冒烟 ..."
+            if docker build -q -t etf_surge-backend-smoke ./backend 2>&1; then
+                echo "[pre-commit] ✅ docker build backend 冒烟通过"
+            else
+                echo ""
+                echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                echo "!  🚫 docker build backend 失败 — 构建回归（参见 round6 R6-01）!"
+                echo "!  如需跳过: SKIP_DOCKER_BUILD=1 git commit ...              !"
+                echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                exit 1
+            fi
+        else
+            echo "[pre-commit] ⚠️ docker 不可用，跳过 Docker 构建冒烟（CI 应覆盖此项）"
+        fi
+    fi
+fi
+
 # ── 后端测试门禁（P3-2） ──────────────────────────────────────────
 if [ "${SKIP_BACKEND_TESTS}" = "1" ]; then
     echo "[pre-commit] SKIP_BACKEND_TESTS=1, 跳过后端测试"
@@ -187,14 +215,17 @@ else
     if [ -n "$BACKEND_STAGED" ]; then
         echo "[pre-commit] 检测到后端文件变更，正在执行 pytest -x ..."
         cd backend
-        if python -m pytest -x 2>&1; then
+        # F23 (round6 §17.2): 外层 timeout 兜底——pytest 进程级超时（30min），
+        # 配合 pytest.ini 全局 --timeout=180（单测试级），任何一层挂起都会
+        # 报 FAIL 而非无限挂起（commit 曾卡死 ~1 小时）。
+        if timeout 1800 python -m pytest -x 2>&1; then
             echo "[pre-commit] ✅ pytest 通过"
             cd ..
         else
             cd ..
             echo ""
             echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
-            echo "!  🚫 pytest 失败 — 请修复后重试                               !"
+            echo "!  🚫 pytest 失败或超时 — 请修复后重试                           !"
             echo "!  如需跳过: SKIP_BACKEND_TESTS=1 git commit ...              !"
             echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
             exit 1

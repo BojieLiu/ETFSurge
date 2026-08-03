@@ -147,6 +147,20 @@ async def lifespan(app: FastAPI):
     # ── A1-A2: Collect warmup tasks for profiler to capture timing ──
     _warmup_tasks: list[asyncio.Task] = []
 
+    # F17 (round6 §16.5): instruments 表启动自动同步——后台任务不阻塞启动/健康检查，
+    # 失败静默（search 降级走内存缓存全量拉取一次兜底）；与每日 scheduler 同步
+    # 由 sync_instruments_table 内置互斥锁串行（SQLite 单写者兜底跨进程）。
+    async def _background_instruments_sync():
+        try:
+            from .services.instruments_sync import sync_instruments_table
+            n = await sync_instruments_table()
+            if n:
+                logger.info("[lifespan] instruments table auto-synced: %d rows", n)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[lifespan] instruments auto-sync failed (non-fatal): %s", e)
+
+    _warmup_tasks.append(asyncio.create_task(_background_instruments_sync()))
+
     # 启动时后台预热行情缓存（不阻塞启动，10s 超时 → 部分数据可接受）
     async def _warmup_market_cache():
         with warmup_timer("warmup_market_cache", "warmup", "行情缓存预热"):

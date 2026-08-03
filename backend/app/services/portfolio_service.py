@@ -436,6 +436,25 @@ def _is_failed_result(factor_scores: dict) -> bool:
             return False
     return True  # 所有标的因子分全为零或空
 
+def _build_llm_fail_summary(duration_s: float, diag: str) -> str:
+    """R6-F13: 策略检查 LLM 失败兜底文案——按诊断内容区分限流/超时/服务端错误。
+
+    旧实现恒写"LLM 分析超时（60s 未返回）"：500 快速失败（10s）时文案误导。
+    """
+    diag = diag or ""
+    low = diag.lower()
+    if "限流" in diag or "429" in low:
+        reason = "LLM 限流"
+    elif "timeout" in low or "timed out" in low or "超时" in diag:
+        reason = "LLM 响应超时"
+    else:
+        reason = "LLM 服务端错误"
+    return (
+        f"{reason}（{duration_s:.0f}s，已用规则引擎兜底生成建议）"
+        f"（最后错误: {diag or '未知'}）"
+    )
+
+
 async def strategy_check(
     db: AsyncSession,
     total_capital: float,
@@ -559,8 +578,9 @@ async def strategy_check(
     }
 
     # LLM 分析（Z26: 显式预算，超时走规则引擎兜底）
-    # U2 R3: 超时预算 20s → 60s（对齐设计任务 240s 的下限；20s 内 LLM 基本必超时，
-    # 3 条实测记录 208/209/210 全部超时）。
+    # U2 R3: 超时预算 20s → 60s → F9 (round6 §十五 R6-15.1): 60s → 30s——
+    # DeepSeek 慢响应（60s 无返回）只能等满 60s，用户等待减半；30s 内无响应
+    # 即兜底（R5-1-6 快速失败只覆盖快速 500/429）。
     # F1-9: wait_for 超时会取消内部协程，抛 CancelledError（BaseException），
     # 必须与 TimeoutError 一起捕获，否则 usage 失败记录缺失、规则兜底文案丢失。
     _llm_failed = False
@@ -574,7 +594,7 @@ async def strategy_check(
                 regime=regime,
                 data_quality=data_quality,
             ),
-            timeout=60,
+            timeout=30,  # F9 (round6 §十五): 60s → 30s，慢响应快速兜底
         )
     except (asyncio.TimeoutError, asyncio.CancelledError) as e:
         _llm_failed = True
@@ -603,10 +623,9 @@ async def strategy_check(
         except Exception as _ue:
             logger.debug("[strategy_check] usage record failed (non-fatal): %s", _ue)
         llm_result = {
-            "summary": (
-                f"LLM 分析超时（{_llm_dur:.0f}s 未返回，已用规则引擎兜底生成建议）"
-                f"（最后错误: {_llm_diag or '未知'}）"
-            ),
+            # R6-F13 (round6 §十五 R6-15): 文案区分限流/超时/快速失败——与
+            # get_last_llm_error 一致（旧模板恒写"超时 60s"，500 快速失败时误导）
+            "summary": _build_llm_fail_summary(_llm_dur, _llm_diag),
             "suggestions": [],
             "holdings_analysis": [],
             "risk_warnings": [],
@@ -923,6 +942,22 @@ def _rule_based_suggestion(
                 f"若跌破前期支撑位可加速离场，保留现金等待市态企稳"
             )
             suggested = max(target_weight, 0.0)
+    # F10 (round6 §十五, 用户已决策): 信号-因子背离分支——技术面与因子分冲突时
+    # hold 并解释，禁止裸"信号 X 维持现状"自相矛盾写法（159992 类：SELL + 强正因子）。
+    elif sig == "sell" and avg_factor >= 0.5:
+        action = "hold"
+        reason = (
+            f"技术面偏空但因子分强正（{avg_factor:.2f}），信号与因子背离——暂不追空；"
+            f"跌破 MA20 或因子分转负再降仓，市态{_regime_cn}下保持纪律"
+        )
+        suggested = cur
+    elif sig == "buy" and avg_factor <= -0.5:
+        action = "hold"
+        reason = (
+            f"技术面偏多但因子分偏弱（{avg_factor:.2f}），信号与因子背离——不追高；"
+            f"站上 MA20 且因子分转正再加仓，市态{_regime_cn}下保持纪律"
+        )
+        suggested = cur
     elif avg_factor > 0.5 and sig == "buy" and not bearish:
         action = "increase"
         reason = (
@@ -1155,19 +1190,13 @@ def _compute_risk_warnings(
 
 async def _compute_indicators(symbols: list[str]) -> dict:
     """并行计算每只持仓的技术指标 + 信号。
-    
-    从 market_data_hub 获取预计算的因子分矩阵传给 compute_all_indicators，
-    避免重复计算 RSI/KDJ/MACD。
+
+    R6-F5 (round6 §十 R6-06): 与 /market/signal 同口径——纯 K 线计算，不传
+    factor_scores（zscore 值会污染信号致两端分歧）。
     """
     from ..analysis.indicators import compute_all_indicators
     from ..analysis.signal import generate_signal
-
-    # 复用 market_data_hub 的因子分，免去重新计算 RSI/KDJ/MACD
-    try:
-        from ..services.market_data_hub import market_data_hub
-        factor_matrix = market_data_hub.get_factor_matrix()
-    except Exception:
-        factor_matrix = {}
+    from ..services.market_data_hub import market_data_hub
 
     results = {}
     hist_data = await asyncio.gather(
@@ -1177,8 +1206,10 @@ async def _compute_indicators(symbols: list[str]) -> dict:
     for sym, hist in zip(symbols, hist_data):
         if isinstance(hist, list) and hist:
             try:
-                sym_factors = factor_matrix.get(sym, {})
-                ind = compute_all_indicators(hist, factor_scores=sym_factors)
+                # R6-F5 (round6 §十 R6-06): 不传 factor_scores——factor_matrix 的
+                # zscore 值（如 MACD）会污染信号，与 /market/signal 的纯 K 线口径
+                # 产生分歧（518880 策略检查 BUY vs /market/signal hold）。
+                ind = compute_all_indicators(hist)
                 sig = generate_signal(ind)
                 ind["signal"] = sig
                 results[sym] = ind

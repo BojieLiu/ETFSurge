@@ -88,8 +88,6 @@ import { useMarketSearch } from '../../composables/useMarketSearch'
 import { marketApi } from '../../api'
 
 const { start: startStream, stop: stopStream } = useLLMStream()
-// F7 R18: symbol 模式自动补全（复用 useMarketSearch：200ms debounce + include_stocks）
-const search = useMarketSearch()
 
 // R5: 输入处理——symbol 模式必须先把值写回 search.searchQuery 再触发 onSearchInput。
 // 旧实现只调 onSearchInput() 不写回：onSearchInput 内部读 searchQuery.value（恒为空）
@@ -114,6 +112,9 @@ const props = defineProps({
 const activeMode = ref('symbol')
 const query = ref('')
 const symbol = ref('')
+// F7 R18: symbol 模式自动补全（复用 useMarketSearch：200ms debounce + include_stocks）
+// F17 (round6 §16.5): 带 marketTab——A 场景只搜 A，短路后端 global 分支
+const search = useMarketSearch({ market: props.marketTab })
 const loading = ref(false)
 const result = ref('')
 const error = ref('')
@@ -172,7 +173,7 @@ const currentModeLabel = computed(() => {
 const placeholders = {
   // R5: 精简文案——完整示例已由下方“快速输入”chips 提供；placeholder 过长在窄屏必被截断
   symbol: '输入代码或名称，如 510050',
-  sector: '输入板块代码/名称，如 BK0477',
+  sector: '输入板块代码/名称，如 BK1318',
   index: '输入指数代码，如 000001/HSI',
 }
 
@@ -187,7 +188,9 @@ const EXAMPLES = {
       { code: '513100', label: '纳指ETF' },
     ],
     sector: [
-      { code: 'BK0477', label: '半导体' },
+      // F19-④ (round6 §16.7): 真实半导体板块代码 BK1318（旧 BK0477 已过期，
+      // push2delay 板块表无此代码 → 板块分析 404）
+      { code: 'BK1318', label: '半导体' },
       { code: 'BK0445', label: '人工智能' },
       { code: 'BK0891', label: '新能源车' },
     ],

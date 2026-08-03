@@ -81,6 +81,7 @@ const showMA10 = ref(true)
 const showMA20 = ref(true)
 const showMA60 = ref(false)
 const showBoll = ref(false)
+const showVolume = ref(true)  // F14: 成交量副图独立开关（round6 §16.2）
 const showMACD = ref(true)
 const showKDJ = ref(false)
 const showRSI = ref(false)
@@ -105,6 +106,7 @@ const indicatorToggles = [
   { key: 'ma20', label: 'MA20', model: showMA20 },
   { key: 'ma60', label: 'MA60', model: showMA60 },
   { key: 'boll', label: '布林带', model: showBoll },
+  { key: 'volume', label: '成交量', model: showVolume },  // F14: 独立开关
   { key: 'macd', label: 'MACD', model: showMACD },
   { key: 'kdj', label: 'KDJ', model: showKDJ },
   { key: 'rsi', label: 'RSI', model: showRSI },
@@ -119,8 +121,7 @@ const etfOptions = computed(() =>
 )
 
 // Helpers
-function getActiveSymbol() {
-  const info = etfInfoMap.value[selected.value]
+function getActiveSymbol() {  const info = etfInfoMap.value[selected.value]
   // R5-2-11: 与 getActiveAssetType 同步——resolveTaTarget 决定 sym/assetType
   //（场外 tracked_index 为场内 ETF 代码时查 ETF 自身 K 线）
   if (info && info.portfolio_type === 'off_exchange' && info.tracked_index) {
@@ -138,6 +139,12 @@ function getActiveAssetType() {
   }
   return 'A'
 }
+
+// F15 (round6 §16.3): K 线标题区当前周期标注——消除"下拉周期回显错乱"歧义
+const periodLabel = computed(() => {
+  const p = periodOptions.find((o) => o.value === period.value)
+  return p ? p.label : period.value
+})
 
 function formatDate(d) {
   if (!d) return ''
@@ -243,7 +250,8 @@ const chartOption = computed(() => {
 
   const gridHeights = { main: 50, volume: 22, macd: 20, kdj: 18, rsi: 18 }
   const mainPct = gridHeights.main
-  let volPct = showMACD.value ? gridHeights.volume : 0
+  // F14: 成交量副图不再绑定 showMACD——独立 showVolume 开关
+  let volPct = showVolume.value ? gridHeights.volume : 0
   let macdPct = showMACD.value ? gridHeights.macd : 0
   let kdjPct = showKDJ.value && d.kdj ? gridHeights.kdj : 0
   let rsiPct = showRSI.value && d.rsi ? gridHeights.rsi : 0
@@ -301,8 +309,8 @@ const chartOption = computed(() => {
     })
   }
 
-  // Volume sub-chart
-  if (showMACD.value) {
+  // Volume sub-chart (F14: 独立开关，不再依赖 showMACD)
+  if (showVolume.value) {
     volPct = gridHeights.volume
     const volOffset = mainPct
     grids.push({ left: '6%', right: '3%', top: `${(volOffset / totalPct) * 100}%`, height: `${(volPct / totalPct) * 100}%` })
@@ -312,6 +320,15 @@ const chartOption = computed(() => {
       type: 'bar', data: volumes, xAxisIndex: 1, yAxisIndex: 1,
       name: '成交量', itemStyle: { color: (p) => volumeColors[p.dataIndex] },
     })
+    // F14: 成交额序列（amount 有有效值时叠加为量图右侧刻度线）
+    const amounts = d.amount || []
+    if (amounts.length && amounts.some((v) => v != null && v > 0)) {
+      yAxes.push({ gridIndex: 1, scale: true, splitNumber: 3, axisLabel: { show: false }, position: 'right' })
+      series.push({
+        type: 'line', data: amounts, xAxisIndex: 1, yAxisIndex: 2,
+        name: '成交额', symbol: 'none', lineStyle: { width: 1.2, color: chartColor('volume') },
+      })
+    }
   }
 
   // MACD sub-chart
@@ -386,6 +403,13 @@ const chartOption = computed(() => {
   }
 
   return {
+    // F15: 标题区标注当前周期（如 "日线"），切换周期后实时更新
+    title: {
+      text: periodLabel.value,
+      left: '2%',
+      top: 2,
+      textStyle: { fontSize: 12, fontWeight: 'medium', color: '#888' },
+    },
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'cross' },
@@ -430,7 +454,10 @@ const chartOption = computed(() => {
 })
 
 // Methods
-function onSelectEtf() {
+function onSelectEtf(sym) {
+  // F13 (round6 §16.1): 接收 $event 并回写 selected——旧实现不接参不回写，
+  // selected 恒为初始值 → 切换任何标的下拉都请求第一只标的（"所有标的一样"）。
+  if (sym) selected.value = sym
   const info = etfInfoMap.value[selected.value]
   if (info && info.portfolio_type === 'off_exchange') {
     period.value = 'daily'

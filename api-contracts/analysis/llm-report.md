@@ -47,13 +47,20 @@ POST /api/v1/analysis/llm-report
 POST /api/v1/analysis/llm-advice
 ```
 
-**查询参数 / Query Parameters:**
+**请求体 / Request Body** (R6-F11, round6 §十 R6-12: 实现为 body 字段，非查询参数):
+
+```json
+{
+  "query": "当前应该加仓还是减仓？",
+  "market": "A"
+}
+```
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | query | string | Yes | Natural language question |
-
-**请求体 / Request Body:** Arbitrary context data passed as JSON payload.
+| market | string | No | `A` \| `HK` \| `US` (default `A`) |
+| context | object | No | Arbitrary context data passed as JSON payload |
 
 **成功响应 / Success Response — `200 OK`:**
 

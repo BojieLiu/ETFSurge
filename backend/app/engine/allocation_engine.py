@@ -9,11 +9,14 @@ Pure function — no I/O, no database, no HTTP.
 
 from __future__ import annotations
 
+import logging
 import math
 from typing import Any
 
 from .budgets import STRATEGY_META, dynamic_layer_budget
 from .rationale import build_rationale
+
+logger = logging.getLogger(__name__)
 
 # ── Global single-position constraints ──────────────────────────
 MIN_WEIGHT = 0.01
@@ -351,6 +354,13 @@ def _select_and_weight(
         tech_cap_ratio = 0.4 if strategy == "defensive" else 0.5
         tech_cap = budget * tech_cap_ratio
         if tech_alloc_total > tech_cap + 1e-9:
+            # F4-前置 (round6 §14.6): 裁剪日志——触发/裁剪量/回补结果，
+            # 供验收复核「科创合计 ≤ budget×40%/50%」与 task 158 版本差异定位。
+            logger.info(
+                "[allocation] satellite tech trim triggered: tech_alloc=%.3f > cap=%.3f "
+                "(budget=%.3f, ratio=%.2f, strategy=%s)",
+                tech_alloc_total, tech_cap, budget, tech_cap_ratio, strategy,
+            )
             # 科技候选按 composite 降序，保留到预算上限
             kept: list[tuple] = []
             dropped: list[tuple] = []
@@ -370,6 +380,11 @@ def _select_and_weight(
                     kept.append((item, w))
             # 回收被裁剪的权重，按 composite 降序回补其余卫星（不引入 CASH 膨胀）
             reclaimed = sum(w for _, w in dropped)
+            logger.info(
+                "[allocation] satellite tech trim dropped %.3f weight across %d tech "
+                "candidates (kept tech=%.3f)",
+                reclaimed, len(dropped), acc,
+            )
             non_tech_kept = [(i, w) for i, w in kept if not _is_tech_theme(i[1].get("name", ""))]
             if reclaimed > 0 and non_tech_kept:
                 total_non_tech = sum(w for _, w in non_tech_kept)
@@ -381,6 +396,18 @@ def _select_and_weight(
                         else:
                             new_kept.append((i, w + reclaimed * w / total_non_tech))
                     kept = new_kept
+                logger.info(
+                    "[allocation] satellite tech trim reclaimed %.3f redistributed across "
+                    "%d non-tech candidates",
+                    reclaimed, len(non_tech_kept),
+                )
+            else:
+                logger.warning(
+                    "[allocation] satellite tech trim: no non-tech candidates to reclaim "
+                    "%.3f trimmed weight — weight converts to CASH (satellite budget "
+                    "underfill, %.3f of %.3f used)",
+                    reclaimed, sum(w for _, w in kept), budget,
+                )
             selected = [i for i, _ in kept]
             weights = [w for _, w in kept]
 

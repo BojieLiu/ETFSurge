@@ -121,8 +121,10 @@ def _build_plan_tables(strategies: list[dict]) -> str:
         def_pct = sum(e.get("weight") or e.get("target_weight") or 0 for e in allocs if e.get("layer") in ("defense", "defence")) * 100
         lines.append(f"\n### {label}")
         lines.append(f"资产结构：核心 {core_pct:.0f}% · 卫星 {sat_pct:.0f}% · 防御 {def_pct:.0f}%\n")
-        lines.append("| 资产类别 | 代码 | 名称 | 权重 | 多因子评分 | 今日涨跌 | 入选理由 |")
-        lines.append("|---------|------|------|:----:|:--------:|:-------:|---------|")
+        # R6-F15 (round6 §十一 R6-F15): 方案表格加「建仓建议」列——与文字建议对齐，
+        # 消除「表格与文字脱节、未标注建仓节奏」问题（§4.3 方案-文字张力）。
+        lines.append("| 资产类别 | 代码 | 名称 | 权重 | 多因子评分 | 今日涨跌 | 建仓建议 | 入选理由 |")
+        lines.append("|---------|------|------|:----:|:--------:|:-------:|:--------:|---------|")
 
         allocs = s.get("allocations") or s.get("etfs") or []
         for e in allocs:
@@ -139,6 +141,13 @@ def _build_plan_tables(strategies: list[dict]) -> str:
             rationale = raw.replace("|", "\\|").replace("\n", " ").replace("\r", "")
             layer_en = e.get("layer", "—")
             layer_cn = {"core": "核心", "satellite": "卫星", "sat": "卫星", "defense": "防御", "defence": "防御", "cash": "现金"}.get(layer_en, layer_en)
+            # R6-F15: 建仓建议按层语义（分批/等企稳/一次性），与报告文字建议一致
+            if layer_en in ("defense", "defence"):
+                advice = "可一次性配置"
+            elif layer_en == "core":
+                advice = "分 2-3 批建仓"
+            else:
+                advice = "等企稳分批，跌破 MA20 暂停"
             fs = e.get("factor_score", None)
             fs_txt = f"{fs:.2f}" if fs is not None else ""
             dcp = e.get("daily_change_pct")
@@ -149,7 +158,7 @@ def _build_plan_tables(strategies: list[dict]) -> str:
                 # P1-4 (R4-02): 涨跌数据缺失显性化——输出「数据源不可用」而非 "—"，
                 # 避免「数据源降级导致的数据缺失」被误读为「0% 涨跌」或静默缺失。
                 dcp_txt = "数据源不可用"
-            lines.append(f"| {layer_cn} | {code} | {name} | {w:.0f}% | {fs_txt} | {dcp_txt} | {rationale} |")
+            lines.append(f"| {layer_cn} | {code} | {name} | {w:.0f}% | {fs_txt} | {dcp_txt} | {advice} | {rationale} |")
 
     lines.append("\n> 注：多因子评分（0~1）基于资金流、估值、动量、流动性等维度综合计算，非涨跌幅。")
     return "\n".join(lines)

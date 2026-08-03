@@ -221,6 +221,23 @@ def _compute_panic_greed_diff(data: dict) -> float:
     return idx - statistics.mean(hist[-20:])
 
 
+def _safe_stock_news(hub, symbol: str, cache: dict) -> list:
+    """F12: 标的相关新闻（线程内调用 + 调用级缓存 + 异常静默）。
+
+    get_news_stock 是同步实时取数（可能触网失败/慢）——经 asyncio.to_thread
+    提交线程池避免阻塞事件循环；失败返回 [] 触发市态级降级。
+    cache 为调用级 dict（_fetch_market_data 单次调用内复用，避免跨请求 stale）。
+    """
+    if symbol in cache:
+        return cache[symbol]
+    try:
+        items = hub.get_news_stock(symbol) or []
+    except Exception:
+        items = []
+    cache[symbol] = items
+    return items
+
+
 def _compute_news_heat(data: dict) -> float:
     """News heat: weighted sum of stars over recent items."""
     items = data.get("news_items", [])
@@ -639,6 +656,15 @@ _kline_cache_ts: float = 0.0
 KLINE_CACHE_TTL: float = 300.0  # 300s 缓存，覆盖设计→检查之间的时间差
 
 
+def _fetch_history_budget(n_symbols: int) -> float:
+    """fetch_history gather 整体预算：单任务 25s × N / 8 并发 + 15s 缓冲，下限 30s。
+
+    F23 (round6 §17.2): 防止单个 mootdx socket 卡死把 gather 挂到无限——
+    整体 wait_for 保证最坏情况在预算内返回（线程残留由 R6-F1 mootdx 修复联动缓解）。
+    """
+    return max(30.0, 25.0 * n_symbols / 8 + 15.0)
+
+
 def _get_cached_kline(symbols: list[str]) -> dict[str, dict[str, Any]] | None:
     """如果缓存有效且包含所有请求的 symbol，返回缓存数据。"""
     global _kline_cache, _kline_cache_ts
@@ -767,6 +793,9 @@ class FactorRegistry:
             values = []
             for key, val in factor_scores.items():
                 if isinstance(val, (int, float)) and abs(val) > 0.001:
+                    # R6-F4: 排除 _raw 保留键（原始 RSI/MACD）——避免真实值污染分类均值
+                    if key.endswith("_raw"):
+                        continue
                     # F1-5: 纯价格键（etf.price）不算估值——它只是最新价本身
                     if top_key == "valuation" and key == "etf.price":
                         continue
@@ -869,7 +898,19 @@ class FactorRegistry:
                     return sym, {"_fetch_error": str(e)}
 
         tasks = [fetch_one(sym) for sym in symbols]
-        results = await asyncio.gather(*tasks)
+        # F23: 整体超时保护——单任务卡死不再把 gather 挂到无限（round6 §17.2 / ROOT_CAUSE.md）
+        try:
+            results = await asyncio.wait_for(
+                asyncio.gather(*tasks),
+                timeout=_fetch_history_budget(len(symbols)),
+            )
+        except asyncio.TimeoutError:
+            logger.error(
+                "[factor] fetch_history overall timeout after %.1fs for %d symbols — "
+                "returning empty data (degraded)",
+                _fetch_history_budget(len(symbols)), len(symbols),
+            )
+            results = []
         data = dict(results)
 
         # 2. 批量获取 IOPV 数据（Sina + QQ Tencent 双源降级）
@@ -1009,8 +1050,26 @@ class FactorRegistry:
                 # 去掉脆弱的运行时 2s 兜底依赖（fetch_advance_decline）
                 if _sent.get("advance_ratio") is not None:
                     _d["advance_decline"] = float(_sent["advance_ratio"])
-                if _news:
-                    _d["news_items"] = _news[-30:]
+                # F12 (round6 §15.4): news_heat 按标的新闻注入——旧实现把全市场
+                # 新闻写入每个标的 → 所有标的 news_heat 全 100 顶格（无区分度+误导）。
+                # 标的新闻可用（get_news_stock）→ news_scope=stock；不可用 →
+                # 市态级降级（news_scope=market，全市场热度仅作 regime 输入，
+                # 持仓明细展示时须标注"全市场新闻热度，非个股值"）。
+                # F12: 无条件尝试标的相关新闻（不可用则市态级降级）
+                _stock_cache: dict = {}
+                _stock_news: list = []
+                try:
+                    _stock_news = await asyncio.to_thread(
+                        _safe_stock_news, _hub2, _sym, _stock_cache)
+                except Exception:
+                    _stock_news = []
+                if _stock_news:
+                    _d["news_items"] = _stock_news[-30:]
+                    _d["news_scope"] = "stock"
+                else:
+                    if _news:
+                        _d["news_items"] = _news[-30:]
+                    _d["news_scope"] = "market"
         except Exception as _e:
             logger.warning("[factor] sentiment data inject failed: %s", _e)
 
@@ -1136,6 +1195,9 @@ class FactorRegistry:
 
         # ── 跨符号 z-score 标准化（用临时 dict 存储原始值） ──
         import statistics
+        # R6-F4 (round6 §十 R6-05): 报告展示用因子保留原始值（RSI 0-100 / MACD DIF），
+        # 供 rationale 展示真实指标——zscore 值被当原始 RSI 展示是数值失真根因（§十八-7）。
+        _RAW_KEEP = {"technical.macd.macd"}  # R6-F4: macd 为 zscore，需保留真实 DIF；rsi_14 已是 raw
         _raw: dict[str, list[tuple[str, float]]] = {}
         for code in codes:
             definition = self._factors.get(code)
@@ -1145,6 +1207,10 @@ class FactorRegistry:
             for sym in symbols:
                 val = result.get(sym, {}).get(code, 0.0)
                 _raw[code].append((sym, val))
+            # R6-F4: 原始值保留与样本数无关（单符号等场景标准化被跳过时 raw 仍可用）
+            if code in _RAW_KEEP:
+                for _sym, _val in _raw[code]:
+                    result[_sym][f"{code}_raw"] = _val
             all_v = [v for _, v in _raw[code]]
             if len(all_v) < 2:
                 continue

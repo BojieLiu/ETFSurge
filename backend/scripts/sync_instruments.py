@@ -89,7 +89,8 @@ async def collect_all() -> list[dict]:
     merged: list[dict] = []
     seen = set()
     for (seg_name, _fn), res in zip(segments, results):
-        if isinstance(res, Exception):
+        # mypy 收窄：BaseException 而非 Exception（CancelledError 继承 BaseException）
+        if isinstance(res, BaseException):
             logger.error("[sync_instruments] segment %s FAILED: %s", seg_name, res)
             continue
         logger.info("[sync_instruments] segment %s: %d rows", seg_name, len(res))

@@ -25,14 +25,16 @@ def _run(coro_fn):
 
 
 def main():
-    from scripts.sync_instruments import sync as sync_instruments
     from scripts.sync_sectors import sync as sync_sectors
+    # F17 (round6 §16.5): instruments 同步改走 service（内置互斥锁，
+    # 与后端启动自动同步串行，避免双写竞态）
+    from app.services.instruments_sync import sync_instruments_table
 
     sched = BlockingScheduler(timezone="Asia/Shanghai")
 
     # 每日收盘后同步标的
     sched.add_job(
-        lambda: _run(sync_instruments),
+        lambda: _run(sync_instruments_table),
         CronTrigger(hour=16, minute=30),
         id="sync_instruments",
         name="每日同步标的",

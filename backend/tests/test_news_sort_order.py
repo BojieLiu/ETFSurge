@@ -85,6 +85,7 @@ class TestSortTime:
         # 没有时间字段时，sort_time 应设为 0
         assert item.get("sort_time") == 0
 
+    @pytest.mark.network  # F23: 真实抓取财新新闻（集成验证 sort_time 契约）
     def test_headlines_all_have_sort_time(self):
         """fetch_news_headlines 的所有条目都应包含 sort_time。"""
         sync_memory_cache.clear()
@@ -94,6 +95,7 @@ class TestSortTime:
             assert "sort_time" in it, f"条目 {it.get('title', '?')} 缺少 sort_time"
             assert isinstance(it["sort_time"], int), f"sort_time 应为 int"
 
+    @pytest.mark.network  # F23: 真实抓取财新新闻（集成验证排序）
     def test_headlines_are_sorted_by_sort_time_desc(self):
         """fetch_news_headlines 按 sort_time 降序排列。"""
         sync_memory_cache.clear()
@@ -135,6 +137,7 @@ class TestSortTime:
         for it in result:
             assert "sort_time" in it
 
+    @pytest.mark.network  # F23: real news fetch (field contract)
     def test_field_contract_all_required_fields(self):
         """每个头条条目必须包含 id/title/time/sort_time/source/level/stars。"""
         sync_memory_cache.clear()
@@ -147,6 +150,7 @@ class TestSortTime:
             assert isinstance(it["sort_time"], int), f"sort_time 应为 int, got {type(it['sort_time'])}"
             assert isinstance(it["level"], int) and 1 <= it["level"] <= 5, f"level 超出范围: {it['level']}"
 
+    @pytest.mark.network  # F23: real news fetch (cross-source sorting)
     def test_sort_time_monotonic_across_mixed_sources(self):
         """跨来源合并后 sort_time 必须严格不增（允许相等）。"""
         sync_memory_cache.clear()

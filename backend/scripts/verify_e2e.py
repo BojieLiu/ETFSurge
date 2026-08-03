@@ -92,7 +92,12 @@ def section_health(host, port):
         wr = requests.get(f"{BASE}/api/v1/system/warmup", timeout=5)
         if wr.status_code == 200:
             wd = wr.json()
-            warmup_total = wd.get("total_elapsed", 0) or wd.get("duration_ms", 0) or 0
+            # R6-F2 (round6 §十 R6-03): 端点已补 total_elapsed（PROFILE_WARMUP=1 时
+            # profiler 分段求和 ms）——A01 仅在该值 >0（预热计时真正启用）时做真实断言；
+            # 非 PROFILE_WARMUP 时 total_elapsed=0 → 走"未启用"分支 PASS。
+            # 注意：不得用 elapsed_seconds（墙钟）兜底——启动含 instruments 自动同步等
+            # 后台任务，墙钟会误报预热超时（曾实测 839s 假 FAIL）。
+            warmup_total = wd.get("total_elapsed") or wd.get("duration_ms") or 0
             if warmup_total > 0:
                 is_ok = warmup_total < 20000  # F22: 20s failure line (tightened from 30s)
                 is_warn = warmup_total < 10000  # F22: 10s warning line (tightened from 15s)

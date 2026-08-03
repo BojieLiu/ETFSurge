@@ -15,6 +15,7 @@
 
 from typing import Any
 import time  # U7/N08: fetch_fund_nav 24h 缓存时间戳
+from pathlib import Path
 from ..core.logging import get_logger
 from ..utils.proxy import no_proxy
 from ..utils.decode import decode_df as _decode_df
@@ -78,6 +79,18 @@ _MOOTDX_CLIENT: "Quotes | None" = None
 # 单线程 executor 用于 mootdx 读操作的超时保护
 _MOOTDX_EXECUTOR = _cf.ThreadPoolExecutor(max_workers=1, thread_name_prefix="mootdx")
 
+# R6-F1 (round6 §三/§十 R6-02): 全新环境（容器/CI 无 ~/.mootdx/config.json）fallback 服务器。
+# 容器内实测 0.35s 返回真实行情；mootdx StdQuotes 显式 server 参数会跳过 BESTIP 缓存依赖。
+_MOOTDX_FALLBACK_SERVERS = [("180.153.18.172", 80)]
+
+
+def _has_mootdx_config() -> bool:
+    """~/.mootdx/config.json 是否存在（mootdx BESTIP 服务器缓存）。"""
+    try:
+        return (Path.home() / ".mootdx" / "config.json").exists()
+    except Exception:
+        return False
+
 
 def _run_mootdx_with_timeout(fn, timeout: int = _MOOTDX_READ_TIMEOUT):
     """在独立线程中执行 mootdx 读操作，带硬超时。
@@ -101,11 +114,21 @@ def _mootdx():
     mootdx 的 socket 连接并非线程安全，但由于 SourceRegistry
     已提供 Sina/Tencent 降级通道，即使 mootdx 并发崩溃也能
     秒级熔断。去掉全局锁避免线程池被阻塞线程填满。
+
+    R6-F1: 全新环境（容器/CI 无 ~/.mootdx/config.json BESTIP 缓存）时
+    显式传入已知可用 fallback server——避免 Quotes.factory 空转
+    （曾致 report A 309s / 策略检查持仓加载 55s / 预热 6.2s）。
     """
     global _MOOTDX_CLIENT
     if _MOOTDX_CLIENT is None:
         from mootdx.quotes import Quotes
-        _MOOTDX_CLIENT = Quotes.factory(market='std', timeout=_MOOTDX_TIMEOUT)
+        if _has_mootdx_config():
+            _MOOTDX_CLIENT = Quotes.factory(market='std', timeout=_MOOTDX_TIMEOUT)
+        else:
+            _MOOTDX_CLIENT = Quotes.factory(
+                market='std', server=_MOOTDX_FALLBACK_SERVERS[0],
+                timeout=_MOOTDX_TIMEOUT,
+            )
     return _MOOTDX_CLIENT
 
 

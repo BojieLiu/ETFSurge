@@ -49,8 +49,6 @@ ENDPOINTS = {
     ],
     "portfolio": [
         ("GET", "/api/v1/portfolio/etfs", "ETF list"),
-        ("GET", "/api/v1/portfolio/calculate", "Calculate allocation"),
-        ("GET", "/api/v1/portfolio/daily-pnl", "Daily PnL"),
         ("GET", "/api/v1/portfolio/pnl-history", "PnL history"),
         ("GET", "/api/v1/portfolio/designs", "Designs list"),
         ("GET", "/api/v1/portfolio/tasks", "Tasks list"),
@@ -59,12 +57,19 @@ ENDPOINTS = {
     ],
     "portfolio_write": [
         ("POST", "/api/v1/portfolio/apply-design", "Apply design", {"design_id": 224}),
+        # R6-F12 (round6 §十 R6-14): calculate/daily-pnl 为 POST——旧配置用 GET 测 POST 端点
+        # → 3 个假 FAIL
+        ("POST", "/api/v1/portfolio/calculate", "Calculate allocation", {"total_capital": 100000}),
+        ("POST", "/api/v1/portfolio/daily-pnl", "Daily PnL", {"total_capital": 100000}),
     ],
     "analysis": [
-        ("GET", "/api/v1/analysis/news-impact", "News impact"),
         ("GET", "/api/v1/factors/active", "Active factors"),
         ("GET", "/api/v1/factors/ic", "Factor IC"),
         ("GET", "/api/v1/factors/model", "Factor model"),
+    ],
+    "analysis_write": [
+        # R6-F12: news-impact 为 POST（复杂 body 最小化——422 也算快速响应，非假 FAIL）
+        ("POST", "/api/v1/analysis/news-impact", "News impact", {}),
     ],
     "news": [
         ("GET", "/api/v1/news/headlines", "News headlines"),

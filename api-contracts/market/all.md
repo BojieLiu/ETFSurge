@@ -181,16 +181,37 @@ GET /api/v1/market/chart/{symbol}?asset_type=A&period=daily
 
 ```json
 {
-  "symbol": "159338",
-  "period": "daily",
-  "bars": [
-    { "date": "2026-07-13", "open": 0.920, "close": 0.925, "high": 0.928, "low": 0.918, "volume": 12345678 }
-  ],
-  "ma_lines": [
-    { "name": "MA5", "values": [0.918, 0.915, ...] }
-  ]
+  "dates": ["2026-07-13", "2026-07-14"],
+  "opens": [0.918, 0.921],
+  "highs": [0.928, 0.930],
+  "lows": [0.915, 0.918],
+  "closes": [0.925, 0.927],
+  "volumes": [12345678, 9876543],
+  "amount": [11420000.0, 9120000.0],
+  "ma5": [0.920, 0.922],
+  "ma10": [0.915, 0.918],
+  "ma20": [0.910, 0.912],
+  "ma60": [0.900, 0.901],
+  "bollinger": { "upper": [0.940, 0.942], "middle": [0.910, 0.912], "lower": [0.880, 0.882] },
+  "macd": { "dif": [0.01, 0.012], "dea": [0.008, 0.009], "histogram": [0.004, 0.006] },
+  "kdj": { "k": [50.1, 51.2], "d": [48.9, 50.0], "j": [52.5, 53.6] },
+  "rsi": [42.5, 44.1]
 }
 ```
+
+> **字段口径（F14, round6 §16.2）**：`volumes` 为成交量序列（原"成交额"别名已从成交量列解析中分离，避免金额当成交量）；`amount` 为成交额序列，与 `dates` 等长，数据源无成交额列时全 `null` 填充（前端判空隐藏成交额副图）。所有序列与 `dates` 等长。
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| dates | string[] | 交易日（`YYYY-MM-DD`） |
+| opens/highs/lows/closes | number[] | OHLC |
+| volumes | number[] | 成交量（列缺失时 0 填充） |
+| amount | (number\|null)[] | 成交额（F14 新增；列缺失时 null 填充） |
+| ma5/ma10/ma20/ma60 | (number\|null)[] | 均线 |
+| bollinger | {upper, middle, lower} | 布林带 |
+| macd | {dif, dea, histogram} | MACD |
+| kdj | {k, d, j} | KDJ |
+| rsi | (number\|null)[] | RSI(14) |
 
 ---
 

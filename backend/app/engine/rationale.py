@@ -138,16 +138,23 @@ def build_rationale(
         parts.append(f"{asset_name} — {ind}方向")
 
     # 2. 技术面（使用 factor_scores 中实际存在的 RSI / MACD / KDJ 因子）
-    rsi = factor_scores.get("technical.rsi.rsi_14")
-    if rsi is not None and rsi > 0:
+    # R6-F4 (round6 §十 R6-05 + §十八-7): rsi_14 自 F1-5 起保留 raw 0-100 值——
+    # 按 0-100 真实值域做 30/70 阈值判断；兼容旧数据 _raw 键。MACD 用 _raw 保留的
+    # 真实 DIF（zscore 值尺度失真）。
+    rsi = factor_scores.get("technical.rsi.rsi_14_raw") or factor_scores.get("technical.rsi.rsi_14")
+    if rsi is not None and 0 < rsi <= 100:
         if rsi < 30:
             parts.append(f"RSI {rsi:.1f} 超卖区域")
         elif rsi > 70:
             parts.append(f"RSI {rsi:.1f} 超买区域")
         else:
             parts.append(f"RSI {rsi:.1f} 中性区间")
+    elif rsi is not None and rsi > 0:
+        # 异常值域（不应出现）：仅展示数值
+        parts.append(f"RSI {rsi:.1f}")
 
-    macd = factor_scores.get("technical.macd.macd")
+    macd_raw = factor_scores.get("technical.macd.macd_raw")
+    macd = macd_raw if macd_raw is not None else factor_scores.get("technical.macd.macd")
     if macd is not None and macd >= 0.001:
         parts.append(f"MACD 为正 {macd:.4f}，多头趋势")
     elif macd is not None and macd <= -0.001:

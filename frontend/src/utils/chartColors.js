@@ -35,6 +35,7 @@ const CHART_COLOR_MAP = {
   kdjD: CHART_COLORS[2],      // #f59e0b
   kdjJ: CHART_COLORS[4],      // #8b5cf6
   rsi: CHART_COLORS[3],       // #ef4444
+volume: CHART_COLORS[1],    // #22c55e — F14: 成交额副图线
   splitLine: '#e2e8f0',
 }
 

@@ -3,7 +3,7 @@ U2/N01 (round2-unfixed-fix-plan.md U2 / round3-diagnosis-and-optimization-plan.m
 + factor-and-strategy-check-review.md 问题3): 策略检查报告质量。
 
 - U2 R1: rule 兜底生成 report_text（市态/因子/风险/建议，长度 >500）。
-- U2 R3: LLM 超时 20s → 60s。
+- U2 R3: LLM 超时 20s → 60s → F9: 60s → 30s（慢响应快速兜底，用户等待减半）。
 - U2 R2: report_text 为空 → 任务 failed。
 - 问题3 R2: _rule_based_suggestion 决策表分档（hold 带因子分/信号依据）。
 - 问题3 R3: 风险兜底诚实化（LLM 超时/因子缺失 → warning 级）。

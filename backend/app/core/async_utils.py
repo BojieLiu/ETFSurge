@@ -14,6 +14,9 @@ DEFAULT_SYNC_TIMEOUT = 8
 # 全局共享线程池，替代各 fetcher 中频繁创建/销毁的 ThreadPoolExecutor
 # 64 workers：统一承载 run_sync + 各 fetcher 同步调用 + 数据管道负载
 # 原 32 workers 在高并发场景（多次 E2E 并行验证 + LLM 报告）下易耗尽，导致级联超时
+# R6-F10 (round6 §十 R6-11): 64/64 饱和根因 = mootdx 容器空转期 run_sync 任务积压
+# （R6-02）——R6-F1 修复 mootdx 后不应再饱和；不盲目扩容（>64 线程切换开销增加）。
+# 若未来数据管道扩展导致再次饱和，再评估 64→128。
 _shared_executor = concurrent.futures.ThreadPoolExecutor(max_workers=64)
 
 # 长任务专用线程池（设计、检查、报告），与快速 API 请求隔离

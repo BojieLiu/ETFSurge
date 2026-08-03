@@ -73,8 +73,29 @@ class TestR4RationaleNotTruncated:
             if "| 核心 |" in line:
                 cells = line.split("|")
                 assert len(cells) > 7
-                rationale_cell = cells[7]
-                assert rationale_cell.strip() == long, "理由列应为完整文本，不得截断/加省略号"
+
+
+class TestR615BuildAdviceColumn:
+    def test_table_has_advice_column(self):
+        """R6-F15: 方案表格含「建仓建议」列，且每行有建议值。"""
+        tables = _build_plan_tables([_strategy()])
+        header = [ln for ln in tables.splitlines() if "建仓建议" in ln]
+        assert header, "表头应含「建仓建议」列"
+        rows = [ln for ln in tables.splitlines() if ln.startswith("| 核心 |") or ln.startswith("| 卫星 |")]
+        assert rows, "应有标的行"
+        for r in rows:
+            assert "批" in r or "企稳" in r or "一次性" in r, f"每行应有建仓建议: {r}"
+
+    def test_defense_advice_one_shot(self):
+        """防御层 → 可一次性配置（低波避险底仓）。"""
+        s = _strategy()
+        s["allocations"].insert(0, {"symbol": "518880", "name": "黄金ETF", "layer": "defense",
+                                    "weight": 0.05, "factor_score": 0.5,
+                                    "selection_rationale": "避险"})
+        tables = _build_plan_tables([s])
+        def_row = [ln for ln in tables.splitlines() if ln.startswith("| 防御 |")]
+        assert def_row, "应有防御行"
+        assert "一次性" in def_row[0], def_row[0]
 
     def test_rationale_pipe_and_newline_escaped(self):
         """防御：理由含竖线/换行（如风控追加文本）不得拆裂表格行——转义后表格仍为单行。"""

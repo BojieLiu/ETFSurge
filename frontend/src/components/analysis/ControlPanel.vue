@@ -28,7 +28,11 @@
       <span class="toggles-label">叠加指标:</span>
       <div class="toggles-grid">
         <label class="toggle-item" v-for="ind in indicatorToggles" :key="ind.key">
-          <input type="checkbox" v-model="ind.model" @change="$emit('refresh')" />
+          <!-- F14 (round6 §16.2): 显式 ref .value 读写——v-model="ind.model" 对 ref 对象
+               不写回 .value（模板解包陷阱），开关状态与图表不同步 -->
+          <input type="checkbox" :data-testid="'toggle-' + ind.key"
+                 :checked="ind.model && ind.model.value === true"
+                 @change="ind.model.value = $event.target.checked; $emit('refresh')" />
           <span class="toggle-name">{{ ind.label }}</span>
         </label>
       </div>

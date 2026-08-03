@@ -46,6 +46,18 @@
             <span class="stat-lbl">无数据</span>
           </div>
           <div class="stat-item">
+            <span class="stat-num stat-num-static">{{ summary?.static ?? 0 }}</span>
+            <span class="stat-lbl">
+              <AppTooltip placement="top">
+                <span class="stat-icon stat-icon-static" aria-hidden="true">🔒</span>
+                静态标识
+                <template #content>
+                  <div class="tooltip-rich">静态标识因子（如政策哑变量）不参与 IC 统计，非数据缺失</div>
+                </template>
+              </AppTooltip>
+            </span>
+          </div>
+          <div class="stat-item">
             <span class="stat-num" :class="avgIcClass">{{ formattedAvgIc }}</span>
             <span class="stat-lbl">平均 |IC|</span>
           </div>
@@ -67,7 +79,12 @@
             <span class="cat-name">{{ catLabel(cat.name) }}</span>
             <span class="cat-count-badge">{{ cat.count }} 因子</span>
             <span class="cat-stats-detail">
-              <span class="cat-stat valid">
+              <!-- F22: valid=0 且含 static 时显示"N 静态"替代"0 有效"（消除"政策因子全坏了"误读） -->
+              <span v-if="cat.valid_count === 0 && cat.static_count > 0" class="cat-stat static">
+                <span class="stat-dot stat-dot-static"></span>
+                {{ cat.static_count }} 静态
+              </span>
+              <span v-else class="cat-stat valid">
                 <span class="stat-dot stat-dot-valid"></span>
                 {{ cat.valid_count }} 有效
               </span>
@@ -76,6 +93,10 @@
                 {{ cat.warn_count }} 待关注
               </span>
               <span v-if="cat.no_data_count > 0" class="cat-stat no-data">{{ cat.no_data_count }} 无数据</span>
+              <span v-if="cat.static_count > 0 && cat.valid_count > 0" class="cat-stat static">
+                <span class="stat-dot stat-dot-static"></span>
+                {{ cat.static_count }} 静态
+              </span>
             </span>
             <span v-if="cat.avg_ic !== null" class="cat-avg-ic" :class="avgIcColor(cat.avg_ic)">
               IC {{ cat.avg_ic.toFixed(4) }}
@@ -118,10 +139,22 @@
                           <span v-if="f.ic_value !== null" class="tip-status" :class="icStatusClass(f)">
                             {{ abs(f.ic_value) >= (f.ic_threshold || 0.02) ? '✅ 有效' : '⚠️ 低于阈值' }}
                           </span>
+                          <!-- F22: static 因子语义标注（不再落入"低于阈值/无效"侧） -->
+                          <span v-else-if="f.status === 'static'" class="tip-status status-static">
+                            🔒 静态标识（政策哑变量），不参与 IC 统计，非数据缺失
+                          </span>
                         </div>
                       </div>
                     </template>
                   </AppTooltip>
+                  <span v-if="f.status === 'static'" class="factor-static-badge">
+                    <AppTooltip placement="top">
+                      静态
+                      <template #content>
+                        <div class="tooltip-rich">静态标识因子（政策哑变量）不参与 IC 统计，非数据缺失</div>
+                      </template>
+                    </AppTooltip>
+                  </span>
                 </span>
                 <span class="factor-ic-bar-col">
                   <span v-if="f.ic_value !== null" class="ic-bar-wrap">
@@ -306,12 +339,16 @@ function renderChart() {
       barMaxWidth: 18,
       label: {
         show: true,
-        position: 'right',
+        // F2 (round6 §13.2): 正值 right / 负值 left——负值柱从 0 向左延伸，
+        // position:'right' 会把标签压在柱身上（文字与图案重叠）。
+        position: (p) => (p.value >= 0 ? 'right' : 'left'),
         fontSize: 11,
         fontWeight: 600,
         fontFamily: 'monospace',
         formatter: (p) => abs(p.value).toFixed(4),
       },
+      // F2: 相邻柱标签互叠时纵向错位
+      labelLayout: { moveOverlap: 'shiftY' },
     }],
   }
 
@@ -407,7 +444,7 @@ onBeforeUnmount(() => {
 /* ── Stats Row ── */
 .stats-row {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   gap: var(--space-3);
 }
 .stat-item {
@@ -434,6 +471,9 @@ onBeforeUnmount(() => {
 }
 .stat-num-brand {
   color: var(--color-brand-600);
+}
+.stat-num-static {
+  color: var(--color-text-tertiary);
 }
 .stat-lbl {
   font-size: var(--font-size-xs);
@@ -515,6 +555,21 @@ onBeforeUnmount(() => {
 }
 .stat-dot-valid { background: var(--color-success-500); }
 .stat-dot-warn { background: var(--color-warning-500); }
+.stat-dot-static { background: var(--color-text-tertiary); }
+.cat-stat.static { color: var(--color-text-tertiary); }
+.factor-static-badge {
+  display: inline-flex; align-items: center;
+  margin-left: var(--space-2);
+  font-size: 10px; color: var(--color-text-tertiary);
+  background: var(--color-surface-tertiary);
+  border: 1px solid var(--color-border-medium);
+  border-radius: var(--radius-full);
+  padding: 0.05rem 0.5rem;
+  font-weight: var(--font-weight-medium);
+  cursor: help;
+  flex-shrink: 0;
+}
+.status-static { color: var(--color-text-tertiary); }
 .cat-avg-ic {
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);

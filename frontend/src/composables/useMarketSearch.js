@@ -3,8 +3,12 @@ import { marketApi } from '../api'
 
 /**
  * Composable for market search with debounce, keyboard nav, completion
+ *
+ * F17 (round6 §16.5): 支持 market 选项——A 场景只搜 A（短路后端 global 分支，
+ * 不再并发拉 HK/US spot 列表）。
  */
-export function useMarketSearch() {
+export function useMarketSearch(options = {}) {
+  const marketFilter = options.market || ''
   const searchQuery = ref('')
   const searchResults = ref([])
   const showDropdown = ref(false)
@@ -60,7 +64,11 @@ export function useMarketSearch() {
     if (searchAbort) searchAbort.abort()
     searchAbort = new AbortController()
     try {
-      const res = await marketApi.search(q, { include_stocks: true }, { signal: searchAbort.signal })
+      const res = await marketApi.search(
+        q,
+        { include_stocks: true, ...(marketFilter ? { market: marketFilter } : {}) },
+        { signal: searchAbort.signal },
+      )
       if (seq !== searchSeq) return // 过期响应丢弃
       const results = (res.data || []).slice(0, 20)
       searchCache.set(cacheKey, { ts: Date.now(), results })

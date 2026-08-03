@@ -17,6 +17,23 @@ describe('useMarketSearch', () => {
     composable = useMarketSearch()
   })
 
+  it('F17: 传入 market 选项时请求携带 market 参数（A 场景短路 global 分支）', async () => {
+    marketApi.search.mockResolvedValue({ data: [{ symbol: '510300', name: '沪深300ETF' }] })
+    const compA = useMarketSearch({ market: 'A' })
+    compA.searchQuery.value = '510300'
+    await compA.doSearch()
+    expect(marketApi.search).toHaveBeenCalledWith(
+      '510300',
+      expect.objectContaining({ market: 'A' }),
+      expect.anything(),
+    )
+    // 无 market 选项 → 不传 market（global 跨市场，既有行为不回归）
+    composable.searchQuery.value = '510300'
+    await composable.doSearch()
+    const args = marketApi.search.mock.calls[marketApi.search.mock.calls.length - 1]
+    expect(args[1].market).toBeUndefined()
+  })
+
   it('returns initial state correctly', () => {
     expect(composable.searchQuery.value).toBe('')
     expect(composable.searchResults.value).toEqual([])

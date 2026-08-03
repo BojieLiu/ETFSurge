@@ -264,3 +264,47 @@ class TestComputeChartData:
         assert len(result["highs"]) == 60
         assert len(result["lows"]) == 60
         assert len(result["volumes"]) == 60
+
+    # F14 (round6 §16.2 + §十八-6): chart 响应补 amount（成交额）序列——
+    # 旧实现 COL_MAP 把"成交额"别名混入成交量，金额被当成交量返回。
+    def test_amount_series_from_amount_col(self, chart_df):
+        """有"成交额"列时：amount 序列存在且与 dates 等长；volume 不再吞成交额。"""
+        result = compute_chart_data(chart_df)
+        assert "amount" in result
+        assert len(result["amount"]) == len(result["dates"])
+        # chart_df fixture 只有"成交额"列（无"成交量"）→ volume 应 0 填充
+        assert all(v == 0.0 for v in result["volumes"]), "成交量列缺失时不应把金额当成交量"
+        assert any(v not in (None, 0) for v in result["amount"]), "成交额列应进入 amount"
+
+    def test_volume_and_amount_both_present(self, close_series, hl_series):
+        """成交量 + 成交额两列同时存在时各自解析正确（不再混列）。"""
+        high, low = hl_series
+        df = pd.DataFrame({
+            "日期": pd.date_range("2026-01-01", periods=60, freq="D"),
+            "开盘": close_series - 0.5,
+            "最高": high,
+            "最低": low,
+            "收盘": close_series,
+            "成交量": abs(np.random.randn(60) * 1e6),
+            "成交额": abs(np.random.randn(60) * 1e9),
+        })
+        result = compute_chart_data(df.to_dict("records"))
+        assert all(v > 0 for v in result["volumes"]), "成交量列应进入 volume"
+        assert all(v > 0 for v in result["amount"]), "成交额列应进入 amount"
+        # 数量级区分：amount（亿级）≈ volume（百万级）×价格（百级）
+        assert max(result["amount"]) > max(result["volumes"]) * 10
+
+    def test_amount_missing_uses_none_fill(self, close_series, hl_series):
+        """无成交额列时 amount 全 None 填充（与 dates 等长，不破坏列表等长断言）。"""
+        high, low = hl_series
+        df = pd.DataFrame({
+            "日期": pd.date_range("2026-01-01", periods=60, freq="D"),
+            "开盘": close_series - 0.5,
+            "最高": high,
+            "最低": low,
+            "收盘": close_series,
+            "成交量": abs(np.random.randn(60) * 1e6),
+        })
+        result = compute_chart_data(df.to_dict("records"))
+        assert len(result["amount"]) == 60
+        assert all(v is None for v in result["amount"])

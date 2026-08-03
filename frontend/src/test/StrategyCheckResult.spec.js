@@ -136,5 +136,59 @@ describe('StrategyCheckResult.vue', () => {
       expect(wrapper.text()).toContain('沪深300')
       expect(wrapper.text()).toContain('动量-0.8')
     })
+
+    // F10 (round6 §十五): 口径标注——技术信号列标"实时"、建议标"因子分主导"、背离高亮
+    it('F10: 技术信号列标注"实时"口径', () => {
+      const wrapper = mount(StrategyCheckResult, {
+        props: { result: mockResult },
+        global: { stubs },
+      })
+      expect(wrapper.text()).toContain('技术信号（实时）')
+    })
+
+    it('F10: 操作建议卡片标注"因子分主导 · 规则引擎"', () => {
+      const wrapper = mount(StrategyCheckResult, {
+        props: { result: mockResult },
+        global: { stubs },
+      })
+      expect(wrapper.find('.source-tag').exists()).toBe(true)
+      expect(wrapper.find('.source-tag').text()).toContain('因子分主导')
+    })
+
+    it('F10: action=hold 且实时信号 SELL → 背离高亮提示', () => {
+      const divergent = {
+        ...mockResult,
+        suggestions: [
+          { symbol: '159992', name: '创新药ETF', action: 'hold', current_weight: 0.1, suggested_weight: 0.1, reason: '因子分强正', confidence: 'medium' },
+        ],
+        holdings_analysis: [
+          { symbol: '159992', name: '创新药', factor_summary: '3.57', tech_signal: 'SELL' },
+        ],
+      }
+      const wrapper = mount(StrategyCheckResult, {
+        props: { result: divergent },
+        global: { stubs },
+      })
+      const card = wrapper.find('.suggestion-card')
+      expect(card.classes()).toContain('sc-divergence')
+      expect(wrapper.text()).toContain('技术信号与建议背离')
+    })
+
+    it('F10: 无背离（hold + 信号也 hold）→ 不高亮', () => {
+      const calm = {
+        ...mockResult,
+        suggestions: [
+          { symbol: '510300', name: '沪深300ETF', action: 'hold', current_weight: 0.1, suggested_weight: 0.1, reason: '中性', confidence: 'medium' },
+        ],
+        holdings_analysis: [
+          { symbol: '510300', name: '沪深300', factor_summary: '0.2', tech_signal: 'hold' },
+        ],
+      }
+      const wrapper = mount(StrategyCheckResult, {
+        props: { result: calm },
+        global: { stubs },
+      })
+      expect(wrapper.find('.suggestion-card').classes()).not.toContain('sc-divergence')
+    })
   })
 })

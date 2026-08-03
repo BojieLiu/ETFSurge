@@ -100,16 +100,30 @@ describe('SummaryCards 累计盈亏估算标注 (R66/R67)', () => {
 })
 
 describe('SummaryCards UI 优化 (R5)', () => {
-  it('R5-0-3: summary-grid 容器存在 min-height（非 0）防 CLS', () => {
+  it('F24 (round6 §17.4): summary-grid 内容驱动——无 340px 硬编码 min-height（旧实现定高致数据注入后 CLS）', () => {
     const wrapper = mountCards(null)
     const grid = wrapper.find('.summary-grid')
     expect(grid.exists()).toBe(true)
     const style = grid.attributes('style') || ''
-    expect(style).toMatch(/min-height/i)
-    // jsdom 无法量 CLS；组件级断言防「高度塌陷回归」
-    const m = style.match(/min-height:\s*([^\s;]+)/i)
-    expect(m).toBeTruthy()
-    expect(parseFloat(m[1])).toBeGreaterThan(0)
+    expect(style).not.toMatch(/min-height/i)
+  })
+
+  it('F24: 加载态累计卡骨架与完成态等高——estimate-hint 占位行恒渲染', () => {
+    // 加载态：累计卡骨架含 estimate-hint 占位行（与完成态数字+估算行同构）
+    const wLoading = mountCards(null, true)
+    const loadingHints = wLoading.findAll('.estimate-hint')
+    expect(loadingHints.length).toBeGreaterThanOrEqual(2) // 场内 + 场外/总览
+    // 完成态（含估算）：estimate-hint 文本行
+    const wDone = mountCards(summaryWithEstimate)
+    expect(wDone.findAll('.estimate-hint').length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('F24: 完成态卡片 min-height 兜底（加载/完成两态同高，不依赖容器定高）', () => {
+    const wrapper = mountCards(null)
+    const cards = wrapper.findAll('.summary-card')
+    expect(cards.length).toBeGreaterThan(0)
+    // jsdom 读不到 scoped CSS；断言无容器级定高即可（340px 移除 + 卡片 min-height 由 CSS 保障）
+    expect(wrapper.find('.summary-grid').attributes('style') || '').toBe('')
   })
   it('正负号：正数带 +，负数带 -，0 不带符号', () => {
     const wrapper = mountCards(null)

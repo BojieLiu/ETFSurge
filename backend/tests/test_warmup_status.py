@@ -114,3 +114,50 @@ async def test_warmup_elapsed_seconds_increases(warmup_app):
     assert resp.status_code == 200
     data = resp.json()
     assert data["elapsed_seconds"] == 5.0
+
+
+# ── R6-F2 (round6 §十 R6-03): total_elapsed 字段 ─────────────────
+# A01 门禁读 total_elapsed/duration_ms，端点此前只返回 elapsed_seconds →
+# 门禁恒走"未启用"分支恒 PASS。修复：端点补 total_elapsed（profiler 分段求和，
+# 与 warmup_timing.json 对齐）；verify_e2e 兜底读 elapsed_seconds。
+
+
+@pytest.mark.asyncio
+async def test_warmup_total_elapsed_from_profiler(warmup_app, monkeypatch):
+    """PROFILE_WARMUP=1 时 total_elapsed = profiler 各分段耗时之和（毫秒）。"""
+    import app.routers.system as sys_mod
+
+    class _FakeProfiler:
+        def __init__(self):
+            self.records = []
+            self.record = type("R", (), {"duration_ms": 6512.0})()
+            self.record2 = type("R", (), {"duration_ms": 6220.0})()
+
+    # 模拟 profiler 已记录两条耗时
+    fake = _FakeProfiler()
+    fake.records = [fake.record, fake.record2]
+    monkeypatch.setattr(sys_mod, "_get_profiler_records", lambda: fake.records)
+
+    transport = ASGITransport(app=warmup_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/system/warmup")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "total_elapsed" in data
+    assert data["total_elapsed"] == 6512.0 + 6220.0
+
+
+@pytest.mark.asyncio
+async def test_warmup_total_elapsed_zero_without_profiler(warmup_app, monkeypatch):
+    """无 profiler 记录（非 PROFILE_WARMUP）时 total_elapsed 为 0——verify_e2e 兜底 elapsed_seconds。"""
+    import app.routers.system as sys_mod
+
+    monkeypatch.setattr(sys_mod, "_get_profiler_records", lambda: [])
+    transport = ASGITransport(app=warmup_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/system/warmup")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total_elapsed"] == 0

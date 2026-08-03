@@ -772,6 +772,34 @@ async def search_hk_us(keyword: str = "", enrich: bool = True,
                     "market": mk, "asset_type": mk, "type": "stock",
                 })
 
+        # R6-F9 (round6 §十 R6-10): akshare US spot 不可用（限流/空）时，用本地
+        # instruments 表（US 段，F17 启动自动同步）补搜美股个股名称——旧实现
+        # apple 0 条（代码 AAPL 可搜但名称不可）。
+        if include_stocks and not (isinstance(spot_rows[1], list) and spot_rows[1]):
+            try:
+                from ..models.search import Instrument
+                from sqlalchemy import select, or_
+                # async_session 已模块级导入（market_service 头部）
+                async with async_session() as session:
+                    stmt = select(Instrument).where(
+                        Instrument.is_active == True,  # noqa: E712
+                        Instrument.market == "US",
+                    )
+                    if kw:
+                        stmt = stmt.where(or_(
+                            Instrument.symbol.ilike(f"%{kw}%"),
+                            Instrument.name.ilike(f"%{kw}%"),
+                        ))
+                    stmt = stmt.limit(30)
+                    rows = (await session.execute(stmt)).scalars().all()
+                    for r in rows:
+                        spot.append({
+                            "symbol": r.symbol, "name": r.name,
+                            "market": "US", "asset_type": "US", "type": "stock",
+                        })
+            except Exception as _e:
+                logger.warning("[search_hk_us] local US instruments fallback failed: %s", _e)
+
     # 去重（key 归一化处理 .HK/.US 后缀不一致；base 在前 → 基座优先天然成立）
     seen: set[tuple[str, str]] = set()
     merged: list[dict[str, Any]] = []
@@ -1270,6 +1298,22 @@ async def resolve_symbol_to_code(symbol: str, asset_type: str = "A") -> str | No
     kw = (symbol or "").strip()
     if not kw:
         return None
+
+    # ── 0. R6-F14 (round6 §十 R6-16): 指数名 → 指数代码（indices_meta 表优先）──
+    # 旧实现 instruments 包含匹配取 symbol 最短："沪深300" 命中 159656（4 位
+    # 沪深300成长ETF）而非 000300/510300（6 位）→ 指数/ETF 错位。
+    try:
+        from ..models.search import IndexMeta
+        async with async_session() as session:
+            stmt = select(IndexMeta.symbol).where(
+                IndexMeta.is_active == True,  # noqa: E712
+                IndexMeta.name == kw,
+            ).limit(5)
+            rows = (await session.execute(stmt)).scalars().all()
+            if rows:
+                return rows[0]
+    except Exception as e:
+        logger.warning("[watchlist] resolve_symbol_to_code indices_meta lookup failed: %s", e)
 
     # ── 1. ETF / 指数路径：本地 instruments 表 ─────────────────────
     try:

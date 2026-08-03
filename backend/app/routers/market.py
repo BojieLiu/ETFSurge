@@ -397,6 +397,7 @@ def _empty_chart_response() -> dict:
     """Return an empty but valid chart data structure."""
     return {
         "dates": [], "opens": [], "highs": [], "lows": [], "closes": [], "volumes": [],
+        "amount": [],  # F14: 成交额序列
         "ma5": [], "ma10": [], "ma20": [], "ma60": [],
         "bollinger": {"upper": [], "middle": [], "lower": []},
         "macd": {"dif": [], "dea": [], "histogram": []},

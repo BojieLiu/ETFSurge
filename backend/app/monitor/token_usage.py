@@ -342,6 +342,23 @@ class TokenUsageStore:
         for r in records:
             if r.timestamp < ts_cutoff:
                 continue
+            # 窗口 total 先累计——total 是 cutoff 窗口内全部记录，不受 series
+            # bucket 存在性限制（R56 ② off-by-one: bucket 仅生成 days 个自然日，
+            # 而 cutoff 窗口覆盖至 days+1 天前，最老一天记录必须计入 total）。
+            total["calls"] += 1
+            total["prompt_tokens"] += r.prompt_tokens
+            total["completion_tokens"] += r.completion_tokens
+            total["total_tokens"] += r.total_tokens
+            if not r.success:
+                total["errors"] += 1
+            m = r.model or "unknown"
+            tbm = total["by_model"].setdefault(
+                m, {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})
+            tbm["calls"] += 1
+            tbm["prompt_tokens"] += r.prompt_tokens
+            tbm["completion_tokens"] += r.completion_tokens
+            tbm["total_tokens"] += r.total_tokens
+
             key = datetime.fromtimestamp(r.timestamp).strftime(key_fmt)
             if key not in bucket:
                 continue
@@ -353,27 +370,12 @@ class TokenUsageStore:
             if not r.success:
                 b["errors"] += 1
             # R56 ②: bucket 内按 model 拆分
-            m = r.model or "unknown"
             bm = b["by_model"].setdefault(
                 m, {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})
             bm["calls"] += 1
             bm["prompt_tokens"] += r.prompt_tokens
             bm["completion_tokens"] += r.completion_tokens
             bm["total_tokens"] += r.total_tokens
-
-            # 窗口 total（含 by_model）
-            total["calls"] += 1
-            total["prompt_tokens"] += r.prompt_tokens
-            total["completion_tokens"] += r.completion_tokens
-            total["total_tokens"] += r.total_tokens
-            if not r.success:
-                total["errors"] += 1
-            tbm = total["by_model"].setdefault(
-                m, {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})
-            tbm["calls"] += 1
-            tbm["prompt_tokens"] += r.prompt_tokens
-            tbm["completion_tokens"] += r.completion_tokens
-            tbm["total_tokens"] += r.total_tokens
 
         series = []
         for date_str, data in bucket.items():
