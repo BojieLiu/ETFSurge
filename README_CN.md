@@ -366,7 +366,7 @@ cd frontend && npm run test:e2e:smoke
 
 对当前局限性的诚实评估（详细记录见 `docs/`）：
 
-- **免费数据源天然限流 / 不稳定**：东财 `push2` / 指数接口限流（RemoteDisconnected）、akshare 进入冷却窗口、DeepSeek 高峰超时——降级链与熔断器能吸收大部分影响，持续故障期间部分端点返回「数据源不可用」的诚实降级，而非过时或假数据。（参考 `docs/round6-diagnosis-and-optimization-plan.md`）
+- **免费数据源天然限流 / 不稳定**：东财 `push2` / 指数接口限流（RemoteDisconnected）、akshare 进入冷却窗口、DeepSeek 高峰超时——降级链与熔断器能吸收大部分影响，持续故障期间部分端点返回「数据源不可用」的诚实降级，而非过时或假数据。（参考 `docs/archived/round6-diagnosis-and-optimization-plan.md`）
 - **mootdx 在全新环境需要引导服务器**：首次连接依赖 `~/.mootdx/config.json` 的 BESTIP 缓存；容器 / CI 中可能空转后才降级到腾讯/新浪。计划做代码级修复（R6-F1）。
 - **板块 / 概念分析截断在 200 条**：当日跌幅大的板块（如半导体）可能落在 top-200 之外，返回 404「板块映射失败」（R6-04）。
 - **设计报告指标标注失真**：部分报告中的 RSI/MACD 数值来自归一化因子分而非原始指标值——尺度误导（R6-05）。
@@ -376,7 +376,7 @@ cd frontend && npm run test:e2e:smoke
 
 ## 路线图（Roadmap）
 
-按优先级排序的后续计划（详细方案见 `docs/round6-diagnosis-and-optimization-plan.md`）：
+按优先级排序的后续计划（详细方案见 `docs/archived/round6-diagnosis-and-optimization-plan.md`）：
 
 1. **P0 — 容器优先可靠性**：mootdx 代码级引导（容器 / CI 无需手动复制配置）；修复 `verify_e2e` 预热门禁字段不匹配；解除板块 / 概念 limit=200 截断。（R6-F1/F2/F3）
 2. **P1 — 报告质量**：设计报告 RSI/MACD 标注对齐原始指标值；统一两套信号系统；稳定跨方案因子分（方案内 z-score 归一化）。（R6-05/06/07）

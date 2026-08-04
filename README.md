@@ -366,7 +366,7 @@ cd frontend && npm run test:e2e:smoke
 
 Honest assessment of current limitations (tracked in `docs/`):
 
-- **Free data sources are rate-limited / flaky by nature**: EastMoney `push2` / index endpoints throttle (remote disconnect), akshare goes into cooldown windows, and DeepSeek can time out under load. The fallback chains and circuit breakers absorb most of this; during sustained outages some endpoints return honest "data source unavailable" degradations rather than stale or fake data. (ref: `docs/round6-diagnosis-and-optimization-plan.md`)
+- **Free data sources are rate-limited / flaky by nature**: EastMoney `push2` / index endpoints throttle (remote disconnect), akshare goes into cooldown windows, and DeepSeek can time out under load. The fallback chains and circuit breakers absorb most of this; during sustained outages some endpoints return honest "data source unavailable" degradations rather than stale or fake data. (ref: `docs/archived/round6-diagnosis-and-optimization-plan.md`)
 - **mootdx needs a bootstrap server in fresh environments** ~~— A code-level fix is planned (R6-F1).~~ **已修复（R6-F1, round6 §十）**: container fallback probes a known-good server when `~/.mootdx/config.json` BESTIP cache is empty, so first connection no longer spins in containers/CI.
 - **Sector/concept analysis truncates at 200** ~~(R6-04)~~ **已修复（R6-F3）**: `limit` raised to 500, large daily decliners (e.g. semiconductors) no longer fall outside the window.
 - **Design report metric labeling** ~~(R6-05)~~ **已修复（R6-F4）**: design reports now use raw RSI/MACD indicator values instead of normalized factor scores.
@@ -382,7 +382,7 @@ Honest assessment of current limitations (tracked in `docs/`):
 
 ## Roadmap
 
-Planned work, roughly in priority order (detailed plans in `docs/round6-diagnosis-and-optimization-plan.md`):
+Planned work, roughly in priority order (detailed plans in `docs/archived/round6-diagnosis-and-optimization-plan.md`):
 
 1. **P0 — Container-first reliability** ✅ 已实施: code-level mootdx bootstrap (R6-F1); `verify_e2e` warmup gate field (`total_elapsed`) (R6-F2); sector/concept `limit` 500 (R6-F3).
 2. **P1 — Report quality** ✅ 已实施: design-report RSI/MACD raw indicator alignment (R6-F4); unified signal source (R6-F5); design-quality gates (F4-F7); Chinese factor labels (F11); build-position column (R6-F15).
