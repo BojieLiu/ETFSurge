@@ -165,4 +165,23 @@ describe('SectorHeatMap (F2-6/F2-7 §9.8)', () => {
     expect(modal.text()).toContain('MACD偏多')
     expect(modal.text()).toContain('多头排列')
   })
+
+  it('F16: marketTab=HK 时请求带 market=HK（热点不再固定 A 股）', async () => {
+    marketApi.getHotPlates.mockResolvedValue({
+      data: [{ name: '专业服务', change_pct: 0.3, market: 'HK' }],
+    })
+    const wrapper = mount(SectorHeatMap, { props: { marketTab: 'HK' } })
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+    expect(marketApi.getHotPlates).toHaveBeenCalledWith(15, 'HK')
+    expect(wrapper.text()).toContain('专业服务')
+  })
+
+  it('F16: marketTab=US 时请求带 market=US（后端返回空列表）', async () => {
+    marketApi.getHotPlates.mockResolvedValue({ data: [] })
+    const wrapper = mount(SectorHeatMap, { props: { marketTab: 'US' } })
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+    expect(marketApi.getHotPlates).toHaveBeenCalledWith(15, 'US')
+  })
 })

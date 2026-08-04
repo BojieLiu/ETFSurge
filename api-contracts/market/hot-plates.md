@@ -24,6 +24,7 @@ GET /api/v1/market/hot-plates
 | Query | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | limit | int | No | 15 | 返回最大条数 |
+| market | str | No | A | 市场（A/HK/US）。F16: HK 走 push2delay 港股行业聚合（f100）；US 返回 `[]`（暂不支持） |
 
 **成功响应 — `200 OK`**（v2.0 归一化字段，前端契约稳定）：
 
@@ -53,6 +54,7 @@ GET /api/v1/market/sectors/heat
 | Query | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | limit | int | No | 20 | 返回最大条数 |
+| market | str | No | A | 市场（A/HK/US）。F16: HK 走港股行业聚合（heat_index=成交额/百万）；US 返回 `{items:[]}` |
 
 **成功响应 — `200 OK`**（v2.0 新增路由，`{items, total}` 结构）：
 
@@ -83,6 +85,7 @@ GET /api/v1/market/stock-hot-rank
 | Query | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | limit | int | No | 50 | 返回最大条数 |
+| market | str | No | A | 市场（A/HK/US）。F16: HK 走港股成交额榜（push2delay m:128）；US 返回 `[]` |
 
 **成功响应 — `200 OK`**（v2.0 补 `concept_tags`）：
 

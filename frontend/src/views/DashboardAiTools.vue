@@ -67,6 +67,9 @@
         :progress="loadingProgress"
         :step-label="loadingText"
         :failed="designFailed"
+        :task-stage="designTaskStage"
+        :selected-label="designSelectedLabel"
+        :elapsed-sec="designElapsedSec"
         @cancel="exitCoreFeature"
       />
 
@@ -145,6 +148,10 @@ const expandedPlan = ref(null)
 const applyingPlan = ref(null)
 const loadingProgress = ref(0)
 const loadingText = ref('正在采集数据...')
+// F20 (round6 §16.8): design 任务 stage / 已选标的 / 等待秒数（DesignLoading 展示）
+const designTaskStage = ref('')
+const designSelectedLabel = ref('')
+const designElapsedSec = ref(0)
 const checkingStrategy = ref(false)
 const strategyResult = ref(null)
 const strategyProgress = ref(0)
@@ -342,6 +349,10 @@ async function startDesign(capital) {
     loadingText.value = '正在请求 AI 设计方案...'
     const res = await portfolioApi.designAsync({ capital: capital })
     const taskData = res.data
+    // F20: 已选标的/维度高亮（发起时记录资本规模）
+    designSelectedLabel.value = `${(capital / 10000).toFixed(0)} 万元`
+    designTaskStage.value = ''
+    designElapsedSec.value = 0
     taskStore.addTask(taskData.task_id, '智能组合设计', 'design')
     const storedTask = taskStore.getTask(taskData.task_id)
     if (storedTask) storedTask.designId = taskData.design_id
@@ -379,10 +390,14 @@ async function startDesign(capital) {
       pollCount++
       loadingProgress.value = Math.min(30 + pollCount * 5, 90)
       loadingText.value = `AI 正在优化组合... (${pollCount * 5}s)`
+      // F20: 已等待秒数 → 超时预估文案
+      designElapsedSec.value = pollCount * 5
       try {
         const taskRes = await portfolioApi.getTask(taskData.task_id)
         const task = taskRes.data
         consecutiveErrors = 0  // Reset on success
+        // F20: 对齐任务 stage（数据采集→策略计算→LLM 报告→完成）
+        if (task?.stage) designTaskStage.value = task.stage
         if (task.status === 'completed') {
           clearInterval(designPollTimer); designPollTimer = null
           const did = task?.result?.design_id || taskData.design_id

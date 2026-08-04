@@ -142,6 +142,31 @@ def _is_wide_basis(c: dict[str, Any]) -> bool:
     text = f"{c.get('name', '') or ''}{c.get('tracked_index', '') or ''}"
     return any(k in text for k in _A_WIDE_BASIS_KEYWORDS)
 
+
+# F6 (round6 §14.4): 高 beta 成长宽基识别——核心层风格集中度约束用。
+# 科创50/创业板/科创100 等同受成长/科技风格驱动、相关性高，核心层合计
+# 不得超过核心预算 40%（与 F4 科技裁剪口径一致：budget × 40%）。
+# 注意与 _is_wide_basis 的区别：宽基指全部 A 股宽基，成长宽基仅指高 beta
+# 成长风格子集（沪深300/中证A500 等价值/均衡宽基不在此列）。
+_GROWTH_WIDE_BASIS_KEYWORDS = (
+    "科创50", "科创100", "科创200", "创业板50", "创业板",
+    "双创50", "双创", "科创创业",
+)
+
+
+def _is_growth_wide_basis(c: dict[str, Any]) -> bool:
+    """F6: 判断候选是否为高 beta 成长宽基（科创50/创业板/科创100 等）。
+
+    industry 字段能区分时（如"半导体"）直接判否——科创芯片 ETF 是主题 ETF
+    非宽基；名称/指数语义匹配关键词。
+    """
+    ind = (c.get("industry") or "").strip()
+    if ind and ind != "宽基指数" and "宽基" not in ind:
+        # 明确非宽基行业（半导体/医药等主题行业）→ 不是宽基
+        return False
+    text = f"{c.get('name', '') or ''}{c.get('tracked_index', '') or ''}"
+    return any(k in text for k in _GROWTH_WIDE_BASIS_KEYWORDS)
+
 # P1-3: 强制保留标的（权重不低于 3%，确保进入分配）
 # 5% ×4=20% 占用过多预算导致总持仓不足 8 只，调整为 3% ×4=12%
 MANDATORY_CODES = {"510300", "560600", "518880", "511090"}
@@ -161,7 +186,10 @@ _DEFAULT_CANDIDATES: list[dict[str, Any]] = [
     {"symbol": "512480", "name": "半导体ETF", "layer": "satellite"},
     {"symbol": "515030", "name": "新能源ETF", "layer": "satellite"},
     {"symbol": "512010", "name": "医药ETF", "layer": "satellite"},
-    {"symbol": "515080", "name": "中证红利ETF", "layer": "satellite"},
+    # F5 (round6 §14.3/§14.6): 中证红利 515080 层归属修正——红利低波是低波防御
+    # 资产（R5-0-4 明确列为"防守型核心"），默认 layer 从 satellite 改 core，
+    # 配合 risk_controls 层归属校验，杜绝红利进卫星的层级错配。
+    {"symbol": "515080", "name": "中证红利ETF", "layer": "core"},
     {"symbol": "561300", "name": "AI人工智能ETF", "layer": "satellite"},
     # Defense
     {"symbol": "518880", "name": "黄金ETF", "layer": "defense"},

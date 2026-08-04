@@ -738,6 +738,76 @@ def enrich_tracked_indices(etfs: list[dict], cache: dict[str, str] | None = None
     return etfs
 
 
+# ── F4 (round6 §14.6): 卫星层非科技主题配额 ─────────────────────────────
+# 卫星池被科创系包场的根因之一：纯规模排序 TOP N 被科创 ETF 占满，
+# 非科技主题（医药/消费/金融/红利/新能源）代表被挤出。
+# 主题配额：从全量卫星候选中按主题各保底 1 只（取规模最大者），
+# 若不在 TOP N 中则强制注入，保证卫星层多赛道分散。
+# 注：主题代表须排除科技系名称（科创医药ETF 是科创系，不算医药主题代表），
+# 否则 588106 科创医药 会冒充 512010 医药ETF 的位置（§14.1 同型误判）。
+_TECH_SATELLITE_KWS = ("科创", "半导体", "芯片", "AI", "人工智能")
+_SATELLITE_THEME_QUOTA = [
+    ("医药", ("医药", "医疗", "创新药")),
+    ("消费", ("消费", "食品饮料", "白酒")),
+    ("金融", ("金融", "银行", "券商", "证券")),
+    ("红利", ("红利", "股息")),
+    ("新能源", ("新能源", "光伏", "电池", "锂电", "碳中和")),
+]
+
+
+def _is_tech_satellite_name(name: str) -> bool:
+    return any(k in (name or "") for k in _TECH_SATELLITE_KWS)
+
+
+def _inject_satellite_theme_quota(
+    satellite: list[dict[str, Any]],
+    all_sat_cands: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """按非科技主题配额向卫星层注入代表（F4）。
+
+    - 已在 TOP 内的主题代表不重复注入（幂等，返回原列表引用安全）。
+    - 同一主题多只候选时取 fund_scale 最大者（排除科技系名称）。
+    - 候选池本身缺少某主题时静默跳过（不注入）。
+    """
+    if not all_sat_cands:
+        return satellite
+
+    in_pool = {e.get("symbol") for e in satellite}
+    result = list(satellite)
+    for theme_name, kws in _SATELLITE_THEME_QUOTA:
+        # 主题代表是否已在池中（名称匹配任一关键词，且非科技系）
+        already = any(
+            any(k in (e.get("name", "") or "") for k in kws)
+            and not _is_tech_satellite_name(e.get("name", "") or "")
+            for e in satellite
+        )
+        if already:
+            continue
+        # 从全量候选中找该主题规模最大者（排除科技系名称）
+        reps = [
+            e for e in all_sat_cands
+            if any(k in (e.get("name", "") or "") for k in kws)
+            and not _is_tech_satellite_name(e.get("name", "") or "")
+        ]
+        if not reps:
+            logger.info(
+                "[etf_scanner] satellite theme quota: no candidates for theme %s (skip)",
+                theme_name,
+            )
+            continue
+        best = max(reps, key=lambda e: e.get("fund_scale") or 0)
+        if best.get("symbol") not in in_pool:
+            best = dict(best)
+            best["layer"] = "satellite"
+            result.append(best)
+            in_pool.add(best.get("symbol"))
+            logger.info(
+                "[etf_scanner] satellite theme quota: injected %s %s (scale=%.0f)",
+                theme_name, best.get("name"), best.get("fund_scale") or 0,
+            )
+    return result
+
+
 def full_pipeline(raw_etfs: list[dict] | None = None) -> dict[str, list[dict]]:
     """完整管道: 全量扫描 → 过滤 → 三层分类 → 每层 TOP 15。
 
@@ -763,6 +833,11 @@ def full_pipeline(raw_etfs: list[dict] | None = None) -> dict[str, list[dict]]:
     core = layer_ranking(layers.get("core", []), top_n=25, required=CORE_REQUIRED)
     satellite = layer_ranking(layers.get("satellite", []), top_n=25)
     defense = layer_ranking(layers.get("defense", []), top_n=25, required=DEFENSE_REQUIRED)
+
+    # F4 (round6 §14.6): 卫星层非科技主题配额 — 纯规模排序被科创霸榜时，
+    # 从全量卫星候选按医药/消费/金融/红利/新能源各保底注入 1 只代表，
+    # 防止「卫星还是只有科创」（§14.1）。
+    satellite = _inject_satellite_theme_quota(satellite, layers.get("satellite", []))
 
     # F0-5 步骤 B: 主流宽基静态兜底注入 — 涨幅榜 Top25 缺主流宽基时补录，
     # 使 CORE_REQUIRED/DEFENSE_REQUIRED 真正生效（层内 required 注入只查候选池 items）。

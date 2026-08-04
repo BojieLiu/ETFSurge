@@ -25,7 +25,7 @@ async def test_sectors_heat_passes_change_pct(monkeypatch):
         {"rank": 2, "plate_name": "游戏", "cur_heat": 88.0, "rank_change": -1,
          "is_new": 0, "plate_code": "BK1047", "change_pct": -1.2},
     ]
-    monkeypatch.setattr(market_mod.market_data_hub, "get_sector_heat", lambda limit=20: rows)
+    monkeypatch.setattr(market_mod.market_data_hub, "get_sector_heat", lambda limit=20, market="A": rows)
     resp = await market_mod.sectors_heat(limit=20)
     assert resp["total"] == 2
     assert resp["items"][0]["change_pct"] == 2.35, "change_pct 应透传（旧白名单丢弃）"

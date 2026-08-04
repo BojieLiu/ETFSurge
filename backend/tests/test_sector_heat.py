@@ -32,7 +32,7 @@ def test_sectors_heat_route(monkeypatch):
         "plate_code": "cls82558", "rank": 1, "cur_heat": 13501.4,
         "rank_change": 5, "is_new": 0, "plate_name": "AI智能体",
     }]
-    monkeypatch.setattr(hub_mod.market_data_hub, "get_sector_heat", lambda limit=None: fake)
+    monkeypatch.setattr(hub_mod.market_data_hub, "get_sector_heat", lambda limit=None, market="A": fake)
     resp = client.get("/api/v1/market/sectors/heat?limit=20")
     assert resp.status_code == 200
     items = resp.json()["items"]

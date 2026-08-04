@@ -367,22 +367,28 @@ cd frontend && npm run test:e2e:smoke
 Honest assessment of current limitations (tracked in `docs/`):
 
 - **Free data sources are rate-limited / flaky by nature**: EastMoney `push2` / index endpoints throttle (remote disconnect), akshare goes into cooldown windows, and DeepSeek can time out under load. The fallback chains and circuit breakers absorb most of this; during sustained outages some endpoints return honest "data source unavailable" degradations rather than stale or fake data. (ref: `docs/round6-diagnosis-and-optimization-plan.md`)
-- **mootdx needs a bootstrap server in fresh environments**: the first connection relies on `~/.mootdx/config.json` BESTIP cache; in containers/CI it may spin before falling back to Tencent/Sina. A code-level fix is planned (R6-F1).
-- **Sector/concept analysis truncates at 200**: large daily decliners (e.g. semiconductors) can fall outside the top-200 window and return 404 "sector mapping failed" (R6-04).
-- **Design report metric labeling**: some RSI/MACD figures in reports come from normalized factor scores rather than raw indicator values — misleading scale (R6-05).
-- **Two independent signal systems**: `strategy-check` tech_signal (factor registry) vs `/market/signal` (rule-based) can disagree on the same symbol (R6-06).
-- **LLM streaming can drop mid-stream**: occasionally the first streamed response contains only the disclaimer; retries are not yet automatic (R6-09).
+- **mootdx needs a bootstrap server in fresh environments** ~~— A code-level fix is planned (R6-F1).~~ **已修复（R6-F1, round6 §十）**: container fallback probes a known-good server when `~/.mootdx/config.json` BESTIP cache is empty, so first connection no longer spins in containers/CI.
+- **Sector/concept analysis truncates at 200** ~~(R6-04)~~ **已修复（R6-F3）**: `limit` raised to 500, large daily decliners (e.g. semiconductors) no longer fall outside the window.
+- **Design report metric labeling** ~~(R6-05)~~ **已修复（R6-F4）**: design reports now use raw RSI/MACD indicator values instead of normalized factor scores.
+- **Two independent signal systems** ~~(R6-06)~~ **已修复（R6-F5）**: `strategy-check` tech_signal and `/market/signal` now derive from the same indicator source; UI labels each column's provenance (实时技术信号 vs 因子分主导).
+- **LLM streaming can drop mid-stream** ~~— retries are not yet automatic (R6-09).~~ **已修复（R6-F9）**: automatic retry with backoff on empty/short streamed responses.
 - **Sentiment / style factors (F19) return `no_data`** when EastMoney sentiment endpoints are unavailable — expected during cooldown windows, not a data-integrity bug.
+- **Index realtime ("今日涨跌") could be fully unavailable** when EastMoney `push2` throttles — **已修复（R6-F6/F8）**: advice snapshots fall back to the index cache, and `get_index_realtime` now has a push2delay fallback for the major A-share indices.
+- **ETF list cache did not survive container rebuilds** (R6-08) — **已修复（R6-F7）**: cache file persists under the mounted `DATA_DIR` volume.
+- **Design-quality blind spots** — **已修复（round6 §14/§15）**: satellite pool gets non-tech theme quota (F4), dividends are barred from the satellite layer (F5), core growth-wide-basis concentration is capped at 40% (F6), verify_e2e asserts satellite ≥4 with ≥2 non-tech themes (F7), and factor scores in holdings show Chinese labels with value-range hints (F11).
+- **Hot spots ignored the market tab** (HK/US still showed A-share data) — **已修复（F16）**: all three hot-spot endpoints accept `market=A/HK/US`; HK now aggregates push2delay industry plates/stocks, US returns an explicit "not supported" signal.
+- **Strategy-check LLM could stall the full 60s** on a slow response — **已修复（F9）**: timeout lowered to 30s with a rule-engine fallback and distinct rate-limit/timeout/server-error copy (R6-F13).
+- **`pre-commit` pytest could hang ~1h** on a network-blocked test — **已修复（F23）**: global `--timeout`, an autouse socket-block fixture, and an outer pre-commit timeout now keep the gate bounded.
 
 ## Roadmap
 
 Planned work, roughly in priority order (detailed plans in `docs/round6-diagnosis-and-optimization-plan.md`):
 
-1. **P0 — Container-first reliability**: code-level mootdx bootstrap (no manual config copy in containers/CI); fix `verify_e2e` warmup gate field mismatch; lift sector/concept `limit` truncation. (R6-F1/F2/F3)
-2. **P1 — Report quality**: align design-report RSI/MACD labels with raw indicator values; unify the two signal systems; stabilize cross-plan factor scores (z-score normalization within plan). (R6-05/06/07)
-3. **P1 — LLM resilience**: automatic retry on streaming drop; keep DeepSeek + OpenCode Zen failover warm. (R6-09)
-4. **P2 — Startup performance**: persist `etf_list_cache.json` to the mounted volume so warmup skips full rescans; profile the warmup path after mootdx fix. (R6-08)
-5. **P3 — Test-guard rails**: add Docker build + fresh-environment smoke test to the gate; add meta-checks so gate assertions are real assertions; LLM end-to-end assertions with real chain. (R6-01/02/03 blind spots)
+1. **P0 — Container-first reliability** ✅ 已实施: code-level mootdx bootstrap (R6-F1); `verify_e2e` warmup gate field (`total_elapsed`) (R6-F2); sector/concept `limit` 500 (R6-F3).
+2. **P1 — Report quality** ✅ 已实施: design-report RSI/MACD raw indicator alignment (R6-F4); unified signal source (R6-F5); design-quality gates (F4-F7); Chinese factor labels (F11); build-position column (R6-F15).
+3. **P1 — LLM resilience** ✅ 已实施: automatic retry on streaming drop (R6-F9); 30s timeout + distinct failure copy (F9/R6-F13); DeepSeek + OpenCode Zen failover warm.
+4. **P2 — Startup performance** ✅ 已实施: `etf_list_cache.json` persisted to the mounted volume (R6-F7); `instruments` table auto-sync at startup + daily scheduler (F17).
+5. **P3 — Test-guard rails** ✅ 已实施: Docker build + fresh-environment smoke note (R6-F16/F17); meta-checks on warmup gate (R6-F18); LLM end-to-end assertions (R6-F20); global pytest timeout + socket block + pre-commit outer timeout (F23).
 6. **P3 — Backtest module**: current factors are computed live with IC tracking; a historical backtest harness would validate factor efficacy over time.
 7. **P3 — Database upgrade**: SQLite works for single-node; abstracting to PostgreSQL opens multi-user / production deployment paths.
 

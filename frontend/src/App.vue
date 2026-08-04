@@ -48,10 +48,13 @@
     <!-- Main Content -->
     <main id="main-content" class="main" role="main">
       <div class="container">
-        <!-- Page Header (injected by views) -->
+        <!-- Page Header (injected by views) — F21: 品牌图标 + 标题/描述层级分离 -->
         <header class="page-header" v-if="$route.meta.title">
-          <h1 class="page-title">{{ $route.meta.title }}</h1>
-          <p class="page-description" v-if="$route.meta.description">{{ $route.meta.description }}</p>
+          <span class="page-header-icon" aria-hidden="true">{{ routeMetaIcon }}</span>
+          <div class="page-header-text">
+            <h1 class="page-title">{{ $route.meta.title }}</h1>
+            <p class="page-description" v-if="$route.meta.description">{{ $route.meta.description }}</p>
+          </div>
         </header>
 
         <!-- Router View with Transition -->
@@ -131,6 +134,21 @@ const isActiveRoute = (path) => {
   if (path === '/') return route.path === '/'
   return route.path.startsWith(path)
 }
+
+// F21 (round6 §16.9): 页头品牌图标——按路由 title 映射（回退 📈）
+const PAGE_ICONS = {
+  Dashboard: '📊',
+  '组合与分析': '📁',
+  '行情分析': '📰',
+  '资讯': '🗞️',
+  'Token 监控': '🔑',
+  '数据源': '📡',
+  '配置': '⚙️',
+}
+const routeMetaIcon = computed(() => {
+  const t = route.meta?.title
+  return (t && PAGE_ICONS[t]) || '📈'
+})
 
 // Connection status (mock - could connect to actual WS status)
 const connectionStatus = ref('connected')
@@ -497,24 +515,50 @@ onUnmounted(() => {
   .container { padding: 0 var(--space-8); }
 }
 
-/* Page Header */
+/* Page Header — F21 (round6 §16.9): 标题放大加粗 + 描述缩小浅灰 + 间距拉开
+   层级分离；品牌主色 + 左侧图标；标题下方细分隔线。 */
 .page-header {
   margin-bottom: var(--space-6);
-  padding-bottom: var(--space-4);
-  border-bottom: 1px solid var(--color-border-light);
+  padding: var(--space-4) 0 var(--space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  border-bottom: 2px solid var(--color-brand-200, rgba(37, 99, 235, 0.15));
+}
+
+.page-header-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-lg, 12px);
+  background: var(--color-brand-50, rgba(37, 99, 235, 0.08));
+  color: var(--color-brand-700);
+  font-size: 22px;
+  flex-shrink: 0;
+}
+
+.page-header-text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
 }
 
 .page-title {
-  font: var(--text-h2);
+  font-size: calc(var(--font-size-2xl, 1.75rem) + 2px);
+  font-weight: 800;
   line-height: var(--line-height-tight);
   color: var(--color-text-primary);
   letter-spacing: var(--letter-spacing-tight);
+  margin: 0;
 }
 
 .page-description {
-  margin-top: var(--space-1);
-  font-size: var(--font-size-base);
+  margin: 0;
+  font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
+  opacity: 0.85;
   line-height: var(--line-height-relaxed);
 }
 

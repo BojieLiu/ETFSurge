@@ -11,6 +11,10 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
+# F6 (round6 §14.4): 核心层成长风格集中度判定复用 allocation_engine 的
+# _is_growth_wide_basis（科创50/创业板/科创100 高 beta 成长宽基）。
+from .allocation_engine import _is_growth_wide_basis
+
 logger = logging.getLogger(__name__)
 
 
@@ -253,6 +257,46 @@ def apply_risk_controls(
                     a["weight"] = round(a.get("weight", 0.0) * _scale, 4)
             logger.info("[risk] %s dividend capped: %.1f%% -> 15%%",
                         strategy.get("id", "?"), dividend_weight * 100)
+
+        # F5 (round6 §14.3): 红利层归属约束——红利不得落 satellite 层（层级错配）。
+        # core 有容量（< 4 只）时移至 core，否则剔除（防核心层超配）。
+        # R5-0-4 校验扩展为"权重 + 层归属"双条件。
+        core_count = sum(1 for a in allocations if a.get("layer") == "core")
+        kept: list[dict[str, Any]] = []
+        for a in allocations:
+            if _is_dividend_etf(a) and a.get("layer") == "satellite":
+                if core_count < 4:
+                    a["layer"] = "core"
+                    core_count += 1
+                    logger.info("[risk] %s dividend %s moved satellite -> core (layer constraint)",
+                                strategy.get("id", "?"), a.get("symbol"))
+                else:
+                    logger.info("[risk] %s dividend %s removed from satellite (core full, layer constraint)",
+                                strategy.get("id", "?"), a.get("symbol"))
+                    continue  # 剔除（核心已满时防层级错配）
+            kept.append(a)
+        allocations = kept
+        strategy["allocations"] = allocations
+
+        # F6 (round6 §14.4): 核心层成长风格集中度——高 beta 成长宽基
+        # （科创50/创业板/科创100 等）合计 ≤ 核心层预算 40%，超限按比例压缩，
+        # 防止进攻方案"科创50+创业板双重暴露 + 卫星科创主题三重叠加"。
+        growth_core = [
+            a for a in allocations
+            if a.get("layer") == "core" and _is_growth_wide_basis(a)
+        ]
+        if growth_core:
+            core_budget = layer_budget.get("core", 0.4)
+            growth_cap = core_budget * 0.4
+            growth_sum = sum(a.get("weight", 0.0) for a in growth_core)
+            if growth_sum > growth_cap + 1e-9:
+                _scale = growth_cap / growth_sum
+                for a in growth_core:
+                    a["weight"] = round(a.get("weight", 0.0) * _scale, 4)
+                logger.info(
+                    "[risk] %s core growth-wide-basis capped: %.1f%% -> %.1f%% (core_budget=%.2f)",
+                    strategy.get("id", "?"), growth_sum * 100, growth_cap * 100, core_budget,
+                )
 
         # 2. 层预算校验
         layer_actual: dict[str, float] = {}

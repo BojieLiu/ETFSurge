@@ -13,6 +13,8 @@
       <div class="loading-spinner-pulse"></div>
       <h3 class="loading-title">智能组合设计生成中...</h3>
       <p class="loading-text">{{ stepLabel }}</p>
+      <!-- F20: 已选标的/维度高亮 -->
+      <p v-if="selectedLabel" class="loading-selected">已选：{{ selectedLabel }}</p>
       <div class="loading-progress">
         <div class="progress-bar">
           <div class="progress-fill" :style="{ width: progress + '%' }"></div>
@@ -21,25 +23,26 @@
       </div>
       <div class="loading-section">
         <div class="loading-steps">
-          <div class="loading-step" :class="{ done: progress >= 20 }">
+          <!-- F20: 步骤高亮对齐 task.stage（数据采集→策略计算→保存→LLM 报告→完成） -->
+          <div class="loading-step" :class="stepState(0)">
             <span class="step-icon">&#128200;</span> 采集全市场数据
-            <span v-if="progress >= 20" class="step-check">&#10003;</span>
+            <span v-if="stepState(0).done" class="step-check">&#10003;</span>
           </div>
-          <div class="loading-step" :class="{ done: progress >= 40 }">
+          <div class="loading-step" :class="stepState(1)">
             <span class="step-icon">&#128269;</span> 筛选候选标的
-            <span v-if="progress >= 40" class="step-check">&#10003;</span>
+            <span v-if="stepState(1).done" class="step-check">&#10003;</span>
           </div>
-          <div class="loading-step" :class="{ active: progress >= 40 && progress < 80 }">
+          <div class="loading-step" :class="stepState(2)">
             <span class="step-icon">&#9881;</span> 因子评分与权重分配
-            <span v-if="progress >= 80" class="step-check">&#10003;</span>
+            <span v-if="stepState(2).done" class="step-check">&#10003;</span>
           </div>
-          <div class="loading-step" :class="{ done: progress >= 80 }">
+          <div class="loading-step" :class="stepState(3)">
             <span class="step-icon">&#128221;</span> 生成组合方案
-            <span v-if="progress >= 80" class="step-check">&#10003;</span>
+            <span v-if="stepState(3).done" class="step-check">&#10003;</span>
           </div>
         </div>
         <div class="loading-hint" v-if="progress > 0">
-          方案生成中，完成后会通过通知栏提醒您
+          {{ timeoutHint }}
         </div>
       </div>
       <div class="panel-footer" style="margin-top:20px;text-align:center">
@@ -50,15 +53,56 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import AppButton from '../ui/AppButton.vue'
 
-defineProps({
+const props = defineProps({
   progress: { type: Number, default: 0 },
   stepLabel: { type: String, default: '正在采集数据...' },
-  failed: { type: String, default: '' }
+  failed: { type: String, default: '' },
+  // F20 (round6 §16.8): 后端任务 stage 对齐（数据采集→策略计算→LLM 报告→完成）
+  taskStage: { type: String, default: '' },
+  // F20: 已选标的/维度标签
+  selectedLabel: { type: String, default: '' },
+  // F20: 已等待秒数（超时预估文案）
+  elapsedSec: { type: Number, default: 0 },
 })
 
 defineEmits(['cancel'])
+
+// F20: task.stage → 当前步骤序号（0-3）。未知 stage 回退到 progress 推断。
+const STAGE_STEP = {
+  '数据采集与策略计算中': 0,
+  '策略计算完成': 1,
+  '保存方案': 2,
+  '方案已保存': 2,
+  'LLM 报告生成中': 3,
+  'LLM 报告暂不可用': 3,
+  '报告完成': 3,
+  '设计完成': 3,
+}
+
+function currentStep() {
+  const stage = (props.taskStage || '').trim()
+  if (STAGE_STEP[stage] !== undefined) return STAGE_STEP[stage]
+  // 回退：progress 推断（<20→0, <40→1, <80→2, else 3）
+  if (props.progress < 20) return 0
+  if (props.progress < 40) return 1
+  if (props.progress < 80) return 2
+  return 3
+}
+
+function stepState(idx) {
+  const cur = currentStep()
+  return { done: idx < cur, active: idx === cur }
+}
+
+const timeoutHint = computed(() => {
+  if (props.elapsedSec >= 60) {
+    return `已等待 ${Math.floor(props.elapsedSec / 60)} 分钟，预计还需 1-2 分钟`
+  }
+  return '方案生成中，完成后会通过通知栏提醒您'
+})
 </script>
 
 <style scoped>

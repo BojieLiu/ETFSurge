@@ -1541,6 +1541,22 @@ def section_factor_thresholds():
 
 # ── T14: 方案质量门禁（§8.5.3 清单自动化） ───────────────────────────────
 
+# F7 (round6 §14.2/§14.6): 卫星层数量门禁辅助函数——可独立单测。
+# 返回 (卫星层只数, 非科技主题只数, 科技系只数)。
+_TECH_THEME_KWS = ("科创", "半导体", "芯片", "AI", "人工智能")
+
+
+def _satellite_quality_check(strategy: dict) -> tuple[int, int, int]:
+    """统计单方案卫星层的数量与主题构成（F7 门禁数据源）。"""
+    allocs = strategy.get("allocations") or strategy.get("etfs") or []
+    sat = [a for a in allocs if a.get("layer") == "satellite"]
+    tech = [
+        a for a in sat
+        if any(k in ((a.get("name") or "") + (a.get("tracked_index") or ""))
+               for k in _TECH_THEME_KWS)
+    ]
+    return len(sat), len(sat) - len(tech), len(tech)
+
 
 def section_design_quality_gate():
     """T14: 最近设计方案经 validate_design_quality 校验（5 类问题）+ 三方案差异。"""
@@ -1624,6 +1640,17 @@ def section_design_quality_gate():
                 check(f"P1-1 {s.get('id', s.get('name', '?'))} 卫星层无宽基",
                       not _wide_sat,
                       f"卫星混入宽基: {[a.get('symbol') for a in _wide_sat]}" if _wide_sat else "卫星层纯主题/行业")
+            # F7 (round6 §14.2/§14.6): 卫星层数量门禁——≥4 只且 ≥2 个非科技主题
+            # （当前无数量下限断言，F0-5 步骤 D 仅代码注释层面；层数量失衡使卫星层
+            # 失去「多赛道分散」意义，见 14.2 层配比诊断）。
+            for s in strategies:
+                _sid = s.get('id', s.get('name', '?'))
+                _n_sat, _non_tech, _tech = _satellite_quality_check(s)
+                check(f"F7 {_sid} 卫星层 ≥4 只", _n_sat >= 4,
+                      f"卫星层仅 {_n_sat} 只" if _n_sat < 4 else f"{_n_sat} 只")
+                check(f"F7 {_sid} 卫星层 ≥2 个非科技主题", _non_tech >= 2,
+                      f"非科技卫星仅 {_non_tech} 只（科创系 {_tech} 只）"
+                      if _non_tech < 2 else f"{_non_tech} 只非科技卫星")
             # P1-2 (R4-14): 任意两方案核心层重叠（剔除公共底仓 510300 + 强制标的）≤1
             # 强制标的（MANDATORY_CODES: 510300/560600/518880/511090）各司其职允许
             # 跨方案重复，不计入重叠上限（重叠上限 = 公共底仓 1 只）。

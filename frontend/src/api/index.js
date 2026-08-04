@@ -39,9 +39,10 @@ export const marketApi = {
   removeWatchlist: (id) => api.delete(`/market/watchlist/${id}`),
   batchRemoveWatchlist: (ids) => api.delete('/market/watchlist', { data: { ids } }),
   getSectors: (params = {}) => api.get('/market/sectors', { params }),
-  getHotPlates: (limit = 15) => api.get('/market/hot-plates', { params: { limit } }),
-  getSectorHeat: (limit = 20) => api.get('/market/sectors/heat', { params: { limit } }),
-  getStockHotRank: (limit = 50) => api.get('/market/stock-hot-rank', { params: { limit } }),
+  // F16 (round6 §16.4): 三热点端点透传 market（A/HK/US）——切港股后热点不再显示 A 股数据
+  getHotPlates: (limit = 15, market = 'A') => api.get('/market/hot-plates', { params: { limit, market } }),
+  getSectorHeat: (limit = 20, market = 'A') => api.get('/market/sectors/heat', { params: { limit, market } }),
+  getStockHotRank: (limit = 50, market = 'A') => api.get('/market/stock-hot-rank', { params: { limit, market } }),
   // 说明（F2-4）：symbol/sector 分析是 SSE 流式端点（/analysis/*-analysis/stream），
   // 前端经 useLLMStream（fetch + ReadableStream）消费，因此不在 marketApi 定义
   // axios 方法 —— check_api_usage 门禁要求方法必有调用点，无调用点即删除。

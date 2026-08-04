@@ -204,13 +204,13 @@ async function fetchData() {
     let resp
     switch (activeTab.value) {
       case 'hot':
-        resp = await marketApi.getHotPlates(15)
+        resp = await marketApi.getHotPlates(15, props.marketTab)
         break
       case 'heat':
-        resp = await marketApi.getSectorHeat(20)
+        resp = await marketApi.getSectorHeat(20, props.marketTab)
         break
       case 'stock':
-        resp = await marketApi.getStockHotRank(50)
+        resp = await marketApi.getStockHotRank(50, props.marketTab)
         break
     }
     // F6 R14: 双兼容——兼容数组（旧）与 {items,total}（hot-plates 契约 v2.0）

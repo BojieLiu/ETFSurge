@@ -221,4 +221,29 @@ describe('App.vue', () => {
       window.WebSocket = origWS
     }
   })
+
+  // ── F21 (round6 §16.9): 页头标题区域布局优化 ─────────────────────
+  it('F21: 页头含品牌图标 + 标题 + 描述（层级分离结构）', async () => {
+    router.push('/')
+    await router.isReady()
+
+    const wrapper = mount(App, {
+      global: {
+        plugins: [router],
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          AppToast: { template: '<div />' },
+          Teleport: { template: '<div><slot /></div>' },
+          TaskIndicator: { template: '<div />' },
+          MarketMonitor: { template: '<div />' },
+        },
+      },
+    })
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('.page-header').exists()).toBe(true)
+    expect(wrapper.find('.page-header-icon').exists()).toBe(true)
+    expect(wrapper.find('.page-title').text()).toContain('Dashboard')
+    expect(wrapper.find('.page-description').exists()).toBe(true)
+  })
 })

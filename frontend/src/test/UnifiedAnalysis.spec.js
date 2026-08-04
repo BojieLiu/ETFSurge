@@ -189,3 +189,56 @@ describe('UnifiedAnalysis R40 (tab 切换重置)', () => {
     expect(wrapper.vm.search.showDropdown.value).toBe(false)
   })
 })
+
+// ── F18 (round6 §16.6): Enter/mousedown 统一触发 + SSE 错误态 ─────────────
+describe('UnifiedAnalysis F18 (交互一致性 + 错误态)', () => {
+  beforeEach(() => {
+    stopMock.mockClear()
+    startMock.mockClear()
+    searchApiMock.mockClear()
+    searchApiMock.mockResolvedValue({ data: [] })
+  })
+
+  it('F18: 键盘 Enter（选中下拉项）统一触发 doAnalyze', async () => {
+    const wrapper = mounted()
+    wrapper.vm.activeMode = 'symbol'
+    wrapper.vm.search.searchQuery.value = '510050'
+    wrapper.vm.search.searchResults.value = [
+      { symbol: '510050', name: '上证50ETF', market: 'A' },
+    ]
+    wrapper.vm.search.showDropdown.value = true
+    startMock.mockResolvedValue({ fullText: '## 报告' })
+
+    // 模拟输入框 Enter → onEnterKeydown → 下拉 Enter 分支消费 → doAnalyze
+    const input = wrapper.find('input.text-input')
+    await input.trigger('keydown.enter')
+    await nextTick()
+    await nextTick()
+    await nextTick()
+    expect(startMock).toHaveBeenCalled()
+  })
+
+  it('F18: SSE 返回空 fullText → 显示错误态（非"已选择"静默）', async () => {
+    startMock.mockResolvedValue({ fullText: '' })
+    const wrapper = mounted()
+    wrapper.vm.activeMode = 'symbol'
+    wrapper.vm.search.searchQuery.value = '510050'
+    wrapper.vm.doAnalyze()
+    await nextTick()
+    await nextTick()
+    expect(wrapper.vm.error).toContain('分析失败')
+    // 不落入"已选择"静默分支（result 空 + error 非空）
+    expect(wrapper.vm.result).toBe('')
+  })
+
+  it('F18: "已选择"态有"点击分析"引导按钮', async () => {
+    const wrapper = mounted()
+    wrapper.vm.activeMode = 'symbol'
+    wrapper.vm.symbol = '510050'
+    wrapper.vm.search.searchQuery.value = '510050'
+    wrapper.vm.result = ''
+    wrapper.vm.error = ''
+    await nextTick()
+    expect(wrapper.find('.result-area .btn-primary').exists()).toBe(true)
+  })
+})

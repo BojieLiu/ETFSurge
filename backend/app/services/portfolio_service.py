@@ -7,6 +7,94 @@ import time
 
 logger = logging.getLogger(__name__)
 
+# F11 (round6 §15.3): 因子键→中文名映射 + 方向/值域解读。
+# 覆盖 factor_registry 全部 34 维核心因子（_BUILTIN_COMPUTERS 键全集）。
+# 策略检查持仓明细"因子评分"栏不再裸拼因子代码，输出可读中文。
+FACTOR_LABELS: dict[str, str] = {
+    # 规模/风格
+    "style.size.ln_mcap": "对数市值",
+    "style.size.ln_float_mcap": "对数流通市值",
+    # 技术面
+    "technical.ma.sma_5": "MA5",
+    "technical.ma.sma_10": "MA10",
+    "technical.ma.sma_20": "MA20",
+    "technical.ma.sma_60": "MA60",
+    "technical.rsi.rsi_14": "RSI(14)",
+    "technical.macd.macd": "MACD",
+    "technical.bollinger.bandwidth": "布林带宽",
+    "technical.volume.vol_ratio": "量比",
+    "technical.volume.vwap": "VWAP",
+    "technical.atr.atr_14": "ATR(14)",
+    "technical.kdj.k_value": "KDJ.K",
+    "technical.kdj.d_value": "KDJ.D",
+    "technical.kdj.j_value": "KDJ.J",
+    "technical.signal.overall": "综合信号",
+    # ETF 基本面
+    "etf.amount_stability": "成交额稳定性",
+    "etf.change_pct": "涨跌幅",
+    "etf.return_1m": "近1月收益",
+    "etf.return_3m": "近3月收益",
+    "etf.price": "价格",
+    "etf.premium_discount": "溢价率",
+    "etf.tracking_error": "跟踪误差",
+    "etf.shares_change": "份额变化",
+    "etf.industry_diversification": "行业分散度",
+    "etf.institutional_holdings_change": "机构持仓变化",
+    # 情绪
+    "sentiment.panic_greed_diff": "恐慌贪婪差",
+    "sentiment.stock_divergence": "个股背离",
+    "sentiment.news_heat": "新闻热度",
+    "sentiment.news_direction": "新闻方向",
+    # 政策
+    "china.policy.five_year_plan": "十五五规划",
+    "china.policy.strategic_emerging": "战略性新兴",
+    "china.policy.dual_circulation": "双循环",
+}
+
+_RSI_HINT = (
+    ("超买", lambda v: v >= 70),
+    ("超卖", lambda v: v <= 30),
+)
+_KDJ_HINT = (
+    ("超卖区", lambda v: v < 0),
+)
+
+
+def _factor_hint(code: str, value: float) -> str:
+    """按因子键与值域给方向/含义解读；无规则返回空串。"""
+    if code == "technical.rsi.rsi_14":
+        for label, cond in _RSI_HINT:
+            if cond(value):
+                return f"（{label}）"
+        return "（中性）"
+    if code.startswith("technical.kdj.") and value < 0:
+        return "（超卖区）"
+    if code == "technical.signal.overall":
+        if value > 0:
+            return "（偏多）"
+        if value < 0:
+            return "（偏空）"
+    if code.startswith("sentiment."):
+        return "（情绪因子，正值偏多）" if value > 0 else "（情绪因子，负值偏空）" if value < 0 else ""
+    return ""
+
+
+def format_factor_summary(real_fs: dict[str, float], top_n: int = 3) -> str:
+    """F11: 因子分 → 中文解读字符串（保持 factor_summary 字符串契约不变）。
+
+    示例输入: {"technical.rsi.rsi_14": 39.53, "technical.kdj.d_value": -3.46}
+    输出: "RSI(14) 39.53（中性）；KDJ.D -3.46（超卖区）"
+    """
+    if not real_fs:
+        return ""
+    items = sorted(real_fs.items(), key=lambda x: -abs(x[1]))[:top_n]
+    parts = []
+    for k, v in items:
+        label = FACTOR_LABELS.get(k, k)
+        hint = _factor_hint(k, float(v))
+        parts.append(f"{label} {v:.2f}{hint}")
+    return "；".join(parts)
+
 from ..models.portfolio import PortfolioETF
 from ..models.schemas import PortfolioETFCreate, PortfolioETFUpdate
 from ..services.market_data_hub import market_data_hub
@@ -710,10 +798,8 @@ async def strategy_check(
         real_fs = fb.get("factor_scores", {})
         real_sig = fb.get("technical_signal", {})
         if real_fs and isinstance(real_fs, dict) and any(v != 0 for v in real_fs.values()):
-            # 用真实因子分覆盖 LLM 编造的因子描述
-            top_factors = sorted(real_fs.items(), key=lambda x: -abs(x[1]))[:3]
-            factor_str = "；".join(f"{k}: {v:.2f}σ" for k, v in top_factors)
-            h["factor_summary"] = f"{factor_str}"
+            # 用真实因子分覆盖 LLM 编造的因子描述（F11: 中文名+方向解读）
+            h["factor_summary"] = format_factor_summary(real_fs)
             # Phase 2.7.7: 注入因子级可用性详情
             filled = sum(1 for v in real_fs.values() if isinstance(v, (int, float)) and abs(v) > 0.01)
             total = len(real_fs)
@@ -868,8 +954,7 @@ def _build_rule_fallback_holdings_analysis(
         fb = factor_breakdowns.get(sym, {}) or {}
         fs = fb.get("factor_scores", {}) or {}
         if isinstance(fs, dict) and any(v for v in fs.values()):
-            top = sorted(fs.items(), key=lambda x: -abs(x[1]))[:3]
-            factor_str = "；".join(f"{k}: {v:.2f}σ" for k, v in top)
+            factor_str = format_factor_summary(fs)
         else:
             factor_str = "因子数据不足"
         # industry 占位：P0-1 行业注入会 setdefault 填充真实行业（数据源可用时）

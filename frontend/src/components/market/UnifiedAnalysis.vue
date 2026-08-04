@@ -28,7 +28,7 @@
               :placeholder="currentPlaceholder"
               :title="currentPlaceholder"
               class="text-input"
-              @keydown.enter="activeMode === 'symbol' ? search.onSearchKeydown($event) : doAnalyze()"
+              @keydown.enter="onEnterKeydown($event)"
               @focus="activeMode === 'symbol' && search.onSearchFocus()"
               @blur="activeMode === 'symbol' && search.onSearchBlur()"
             />
@@ -76,6 +76,8 @@
 
     <div v-else-if="symbol && !loading" class="result-area">
       <p>已选择: <strong>{{ symbol }}</strong> ({{ currentModeLabel }})</p>
+      <!-- F18 (round6 §16.6): "已选择"态增加"点击分析"引导按钮——明确下一步动作 -->
+      <button class="btn-primary" @click="doAnalyze">📊 点击分析</button>
     </div>
   </section>
 </template>
@@ -274,6 +276,26 @@ function quickSelect(ex) {
   doAnalyze()
 }
 
+// F18 (round6 §16.6): Enter 统一触发分析——symbol 模式下先处理下拉键
+// （选中项写回 searchQuery），再统一 doAnalyze；sector/index 直接分析。
+// 旧实现 Enter 只调 search.onSearchKeydown（选中不触发分析），键盘/鼠标不一致。
+function onEnterKeydown(e) {
+  if (activeMode.value === 'symbol') {
+    search.onSearchKeydown(e)
+    if (e.defaultPrevented) {
+      // 下拉 Enter 已消费（选中项）→ 同步触发分析
+      const q = search.searchQuery.value.trim()
+      if (q) {
+        nextTick(() => doAnalyze())
+      }
+      return
+    }
+    doAnalyze()
+    return
+  }
+  doAnalyze()
+}
+
 // F7 R18: 下拉选中 → 写入 query + 触发分析（名称→代码由 doAnalyze 内解析）
 function pickSearchItem(item) {
   query.value = item.symbol
@@ -356,6 +378,11 @@ async function doAnalyze() {
       result.value += token
     })
     result.value = fullText
+    // F18 (round6 §16.6): SSE 空转/失败——返回空 fullText 时显示错误态，
+    // 而非静默落入"已选择"分支（用户误以为已分析完成）。
+    if (!fullText || !fullText.trim()) {
+      error.value = '分析失败：AI 未返回内容，请稍后重试'
+    }
   } catch (e) {
     error.value = '分析失败：' + (e?.message || '网络错误')
   } finally {

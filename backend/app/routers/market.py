@@ -496,21 +496,19 @@ async def unified_sectors(
 
 
 # Phase 6: 前端已接入（marketApi.getHotPlates）
+# F16 (round6 §16.4): 加 market 参数（A/HK/US）——HK 走港股行业聚合，US 暂不支持。
 @router.get("/hot-plates")
-async def hot_plates(limit: int = Query(15)) -> list[dict[str, Any]]:
-    """热点板块及涨停股(财联社)。"""
-    return await asyncio.to_thread(market_data_hub.get_hot_plates, limit)
+async def hot_plates(limit: int = Query(15), market: str = "A") -> list[dict[str, Any]]:
+    """热点板块及涨停股(财联社)。market=HK 时返回港股行业热点；US 返回空列表。"""
+    return await asyncio.to_thread(market_data_hub.get_hot_plates, limit, market)
 
 
 # F2-3: 板块热度路由（数据源/hub 方法已存在，此前未暴露 → 前端 404）
+# F16: 加 market 参数（HK 走港股行业聚合；US 返回空 items）。
 @router.get("/sectors/heat")
-async def sectors_heat(limit: int = Query(20)) -> dict[str, Any]:
-    """板块热度排行(财联社)。
-
-    响应归一化对齐前端契约：plate_name→name、cur_heat→heat_index，
-    保留 rank_change / is_new / plate_code。
-    """
-    rows = await asyncio.to_thread(market_data_hub.get_sector_heat, limit)
+async def sectors_heat(limit: int = Query(20), market: str = "A") -> dict[str, Any]:
+    """板块热度排行(财联社)。market=HK 时返回港股行业热度；US 暂不支持。"""
+    rows = await asyncio.to_thread(market_data_hub.get_sector_heat, limit, market)
     items = []
     for r in rows or []:
         # P2-4 (R4-11a): 透传 change_pct（前端 SectorHeatMap 读 item.change_pct 显示涨跌幅，
@@ -528,10 +526,11 @@ async def sectors_heat(limit: int = Query(20)) -> dict[str, Any]:
 
 
 # Phase 6: 前端已接入（marketApi.getStockHotRank）
+# F16: 加 market 参数（HK 走港股成交额榜；US 返回空列表）。
 @router.get("/stock-hot-rank")
-async def stock_hot_rank(limit: int = Query(50)) -> list[dict[str, Any]]:
-    """A股热门个股排名(同花顺)。"""
-    return await asyncio.to_thread(market_data_hub.get_stock_hot_rank, limit)
+async def stock_hot_rank(limit: int = Query(50), market: str = "A") -> list[dict[str, Any]]:
+    """A股热门个股排名(同花顺)。market=HK 时返回港股热门个股；US 暂不支持。"""
+    return await asyncio.to_thread(market_data_hub.get_stock_hot_rank, limit, market)
 
 
 # Phase 6: 前端已接入（marketApi.getMarketWind）

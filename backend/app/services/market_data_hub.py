@@ -231,6 +231,13 @@ class MarketDataHub:
                     for item in items:
                         item["region"] = region
                         flat.append(item)
+                # F8 (round6 §14.5): 指数实时多源降级——get_global_indices 空时
+                # 用东财 push2delay 直连拉 A 股主要指数兜底，使设计报告"今日涨跌"
+                # 列不再全"数据源不可用"（东财 push2 限流 RemoteDisconnected 场景）。
+                if not flat:
+                    flat = self._fetch_a_index_rows()
+                    for item in flat:
+                        item["region"] = "A"
                 self._index_realtime_cache = flat
                 logger.info("[pool] refreshed %d index realtime entries", len(flat))
             except Exception as e:
@@ -252,6 +259,75 @@ class MarketDataHub:
 
         # 并发获取指数行情和板块动量（FIX-04）
         await asyncio.gather(_fetch_indices(), _fetch_sector())
+
+    async def _refresh_market_snapshot_indices_only(self) -> None:
+        """仅刷新指数缓存（F8 单测入口，逻辑与 _fetch_indices 一致）。"""
+        import asyncio
+        try:
+            from ..services.market_service import get_global_indices
+            indices = await asyncio.wait_for(get_global_indices(), timeout=15)
+            flat = []
+            for region, items in indices.items():
+                for item in items:
+                    item["region"] = region
+                    flat.append(item)
+            if not flat:
+                flat = self._fetch_a_index_rows()
+                for item in flat:
+                    item["region"] = "A"
+            self._index_realtime_cache = flat
+            logger.info("[pool] refreshed %d index realtime entries", len(flat))
+        except Exception as e:
+            logger.warning("[pool] indices refresh failed: %s", e)
+            if self._index_realtime_cache is None:
+                self._index_realtime_cache = []
+
+    def _fetch_a_index_rows(self) -> list[dict]:
+        """F8: 东财 push2delay 直连拉 A 股主要指数（沪深300/上证50/中证500/科创50/创业板）。
+
+        get_global_indices 空（东财 push2 限流）时的兜底源。push2delay 实测稳定。
+        """
+        from ..core.market_context import EM_PUSH_HOST
+        from ..utils.proxy import no_proxy
+        import requests as _req
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": "https://quote.eastmoney.com/",
+        }
+        fields = "f12,f14,f2,f3,f6"
+        # m:1+s:2=上证指数段, m:0+s:399=深证段（含创业板指）；一次拉取主要宽基
+        try:
+            with no_proxy():
+                r = _req.get(
+                    "http://%s/api/qt/clist/get"
+                    "?pn=1&pz=100&po=1&np=1&fs=m:1+s:2,m:0+s:399&fields=%s&fid=f6" % (EM_PUSH_HOST, fields),
+                    timeout=6, headers=headers,
+                )
+            rows = (r.json().get("data") or {}).get("diff") or []
+            out = []
+            for row in rows:
+                code = row.get("f12", "")
+                name = row.get("f14", "")
+                if not code or not name:
+                    continue
+                def _num(v: Any) -> float:
+                    try:
+                        return float(v)
+                    except (TypeError, ValueError):
+                        return 0.0
+                out.append({
+                    "symbol": f"{'sh' if code.startswith('0') or code.startswith('1') else 'sz'}{code}",
+                    "code": code,
+                    "name": name,
+                    "price": _num(row.get("f2")),
+                    "change_pct": _num(row.get("f3")),
+                    "amount": _num(row.get("f6")),
+                })
+            logger.info("[pool] F8 fallback: fetched %d A-share indices via push2delay", len(out))
+            return out
+        except Exception as e:
+            logger.warning("[pool] F8 fallback index fetch failed: %s", e)
+            return []
 
     async def update_sector_cache(self) -> None:
         """刷新行业+概念板块动量缓存（Phase 2 新增，60s 定时任务专用）。
@@ -1204,12 +1280,19 @@ class MarketDataHub:
             return self._sector_momentum_cache
         return self._sector_momentum_cache or []
 
-    def get_hot_plates(self, limit: int | None = None) -> list[dict]:
+    def get_hot_plates(self, limit: int | None = None, market: str = "A") -> list[dict]:
         """热点板块。默认返回缓存；传 limit 时实时取数（保持路由语义）。
 
         F2-6 步骤A: 输出统一归一化（secu_name→name / up_reason→reason /
         plate_stock_up_num→stock_count / stock_list→lead_stocks 数组）。
+        F16 (round6 §16.4): market=HK 走港股 push2delay 行业聚合；
+        market=US 返回「暂不支持」（不返回 A 股数据）。
         """
+        if market and market.upper() != "A":
+            from ..fetchers.hk_hot_fetcher import get_hk_hot_plates
+            if market.upper() == "HK":
+                return get_hk_hot_plates(limit or 15)
+            return []  # US 暂不支持（结构化提示由路由层处理）
         if limit is not None:
             try:
                 rows = sector_fetcher.fetch_hot_plates(limit) or []
@@ -1220,11 +1303,20 @@ class MarketDataHub:
             rows = self._hot_plates_cache or []
         return [_normalize_hot_plate(r) for r in rows]
 
-    def get_sector_heat(self, limit: int | None = None) -> list[dict]:
+    def get_sector_heat(self, limit: int | None = None, market: str = "A") -> list[dict]:
         """获取板块热度排行（Phase 6.1.6）。
 
         F2-3: limit 传值时实时取数（与 get_hot_plates 语义一致），否则返回缓存。
+        F16: market=HK 走港股行业聚合；market=US 暂不支持。
         """
+        if market and market.upper() != "A":
+            from ..fetchers.hk_hot_fetcher import get_hk_hot_plates
+            if market.upper() == "HK":
+                plates = get_hk_hot_plates(limit or 20)
+                return [{"rank": i + 1, "name": p["name"], "heat_index": round(p["amount"] / 1e6, 1),
+                         "change_pct": p["change_pct"], "plate_code": "HK"} 
+                        for i, p in enumerate(plates)]
+            return []
         if limit is not None:
             try:
                 return sector_fetcher.fetch_sector_heat(limit) or []
@@ -1649,8 +1741,16 @@ class MarketDataHub:
             logger.warning("[hub] get_market_wind failed: %s", e)
             return []
 
-    def get_stock_hot_rank(self, limit: int = 50) -> list[dict]:
-        """热门个股排行（Z25: 补全 volume/turnover/sector）。"""
+    def get_stock_hot_rank(self, limit: int = 50, market: str = "A") -> list[dict]:
+        """热门个股排行（Z25: 补全 volume/turnover/sector）。
+
+        F16: market=HK 走港股成交额榜；market=US 暂不支持。
+        """
+        if market and market.upper() != "A":
+            from ..fetchers.hk_hot_fetcher import get_hk_hot_stocks
+            if market.upper() == "HK":
+                return get_hk_hot_stocks(limit)
+            return []
         try:
             from ..fetchers.sector_fetcher import fetch_stock_hot_rank
             rows = fetch_stock_hot_rank(limit) or []
