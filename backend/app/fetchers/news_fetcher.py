@@ -332,11 +332,48 @@ def fetch_sina_roll_news(num: int = 15) -> list[dict[str, Any]]:
         return []
 
 
+# O7 (round7 §7 P9): 宏观 tab 内容过滤——宏观源（新浪滚动等）混入个股/营销软文。
+# 判定规则（按优先级）：
+# 1. 命中营销词（开户/红包/限时/抢购/下载APP 等）→ False（软文剔除）
+# 2. 命中个股特征（6 位数字代码、公司名+股价/涨停/主力资金/年报 等）→ False
+# 3. 命中宏观/政策词（央行/利率/汇率/CPI/非农/OPEC/政策 等）→ True
+# 4. 兜底：含「市场/经济/全球/国际/指数」等宏观语境词 → True；否则 False（宁缺毋滥）
+_MARKETING_KEYWORDS = (
+    "开户", "红包", "限时", "抢购", "下载APP", "送好礼", "免费领取",
+    "扫码", "添加微信", "点击链接", "专属优惠", "福利",
+)
+_STOCK_PATTERNS = (
+    "股价", "涨停", "跌停", "主力资金", "半年报", "年报预告", "业绩预告",
+    "股东", "高管", "重组", "并购", "回购股份",
+)
+_MACRO_KEYWORDS = (
+    "央行", "利率", "汇率", "逆回购", "MLF", "LPR", "CPI", "PPI", "PMI", "GDP",
+    "社融", "信贷", "通胀", "失业", "非农", "OPEC", "原油", "美联储", "欧央行",
+    "日本央行", "关税", "政策", "国务院", "发改委", "财政部", "商务部",
+    "稳增长", "经济", "市场", "全球", "国际", "指数", "债市", "股市", "宏观",
+)
+
+
+def _is_macro_relevant(title: str, content: str = "") -> bool:
+    """O7: 宏观新闻相关性判定——剔除个股新闻与营销软文。
+
+    P9: 宏观 tab 混入个股/营销内容。宏观源（新浪滚动）是泛财经流，
+    需按「宏观语境」过滤：个股/营销 → False，宏观/政策 → True。
+    """
+    text = f"{title or ''} {content or ''}"
+    if any(k in text for k in _MARKETING_KEYWORDS):
+        return False
+    if any(k in text for k in _STOCK_PATTERNS):
+        return False
+    return any(k in text for k in _MACRO_KEYWORDS)
+
+
 def fetch_macro_news() -> list[dict[str, Any]]:
     """宏观新闻——三级降级链：新浪(直连) → 东方财富宏观 → 财联社兜底。
 
     P1.4 重写：删除 akshare CCTV/百度（不稳定 + 24s 超时），新浪 HTTP 直连优先。
     改动前 ≤24s → 改动后 ~0.3s（新浪正常时）。
+    O7 (round7 §7 P9): 过滤个股/营销内容——宏观 tab 不再混入无关新闻。
     """
     def _p() -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
@@ -348,6 +385,8 @@ def fetch_macro_news() -> list[dict[str, Any]]:
         # 兜底：财联社快讯（纯文本，0.4s）
         if not items:
             items = fetch_cailian_telegraph(10)
+        # O7: 宏观相关性过滤（剔除个股/营销）
+        items = [it for it in items if _is_macro_relevant(it.get("title", ""), it.get("content", ""))]
         return _attach_level(_dedupe(items)[:25])
 
     return _cached("macro", _p, "news_macro")

@@ -22,7 +22,7 @@ class TestMacroNewsDegradationChain:
 
         # Mock 新浪源返回真实数据
         monkeypatch.setattr(nfmod, "fetch_sina_roll_news", lambda n: [
-            {"title": "宏观数据超预期", "content": "x", "time": "t", "source": "新浪财经"}
+            {"title": "宏观数据超预期，经济稳增长可期", "content": "x", "time": "t", "source": "新浪财经"}
         ])
         # Mock CLS 以确保不会被调用
         cls_called = False
@@ -46,7 +46,7 @@ class TestMacroNewsDegradationChain:
 
         monkeypatch.setattr(nfmod, "fetch_sina_roll_news", lambda n: [])
         monkeypatch.setattr(nfmod, "_ak", lambda fn: [
-            {"title": "东方财富宏观", "content": "x", "time": "t", "source": "东方财富"}
+            {"title": "东方财富宏观：央行逆回购操作", "content": "x", "time": "t", "source": "东方财富"}
         ])
         monkeypatch.setattr(nfmod, "fetch_cailian_telegraph", lambda n: [])
 
@@ -62,7 +62,7 @@ class TestMacroNewsDegradationChain:
         monkeypatch.setattr(nfmod, "fetch_sina_roll_news", lambda n: [])
         monkeypatch.setattr(nfmod, "_ak", lambda fn: [])
         monkeypatch.setattr(nfmod, "fetch_cailian_telegraph", lambda n: [
-            {"title": "财联社快讯", "content": "x", "time": "t", "source": "财联社"}
+            {"title": "财联社快讯：央行开展逆回购", "content": "x", "time": "t", "source": "财联社"}
         ])
 
         items = fetch_macro_news()

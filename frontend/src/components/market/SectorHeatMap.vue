@@ -16,9 +16,12 @@
       </div>
 
       <div class="card-body">
-        <!-- Loading -->
+        <!-- Loading skeleton: O30② (round7 §7 P30②) 行数对齐各 tab 数据量——
+             旧实现固定 5 行（48px×5≈240px），hot 加载后 15 条（≈840px）→
+             加载完成撑高 ~600px 把下方 AiAdvisor/UnifiedAnalysis 推下视口
+             （CLS 0.393 具体交互表现）。按 tab 对齐行数 + card-body min-height。 -->
         <div v-if="loading" class="loading-skeleton">
-          <div class="skeleton-row" v-for="i in 5" :key="i"></div>
+          <div class="skeleton-row" v-for="i in skeletonRows" :key="i"></div>
         </div>
 
         <!-- Error -->
@@ -124,7 +127,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { marketApi } from '../../api'
 import TechnicalAnalysisModal from './TechnicalAnalysisModal.vue'
 
@@ -145,6 +148,13 @@ const activeTab = ref('hot')
 const dataList = ref([])
 const loading = ref(false)
 const error = ref('')
+
+// O30②: 骨架行数按各 tab 数据量对齐（hot 15 / heat 20 / stock 50）——
+// 加载中与加载后高度级差消除，防布局抖动
+const skeletonRows = computed(() => {
+  const n = activeTab.value === 'stock' ? 50 : activeTab.value === 'heat' ? 20 : 15
+  return Math.min(n, 15) // 渲染上限 15 行（骨架对齐视觉即可，防止 50 行撑爆）
+})
 const techModal = ref(null)
 
 function fmtPrice(v) {
@@ -185,6 +195,10 @@ function leadStockNames(item) {
 
 async function switchTab(tab) {
   activeTab.value = tab
+  // O28 (round7 §7 P28①): 先置 loading 再拉数据——旧实现先 dataList=[] 再异步
+  // fetch（loading 未置 true）→ 切换瞬间落入「暂无板块数据」空态闪烁；数据源
+  // 冷却时空态持续，用户误以为卡片消失。loading 骨架占位避免闪烁。
+  loading.value = true
   dataList.value = []
   error.value = ''
   await fetchData()

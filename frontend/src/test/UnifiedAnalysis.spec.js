@@ -88,7 +88,8 @@ describe('UnifiedAnalysis R40 (tab 切换重置)', () => {
   it('R42/R43: index 模式中文/代码解析真实名称与 symbol', async () => {
     const wrapper = mounted()
     wrapper.vm.activeMode = 'index'
-    wrapper.vm.query = '000001'
+    // O30: sector/index 模式输入源 = activeSearch.searchQuery（三模式统一自动补全框）
+    wrapper.vm.activeSearch.searchQuery.value = '000001'
     await wrapper.vm.doAnalyze()
     const body = startMock.mock.calls[0][1]
     expect(body.asset_type).toBe('index')
@@ -100,7 +101,7 @@ describe('UnifiedAnalysis R40 (tab 切换重置)', () => {
   it('R42/R43: index 模式未命中解析 → 代码直传 name 置空（后端 realtime 回填）', async () => {
     const wrapper = mounted()
     wrapper.vm.activeMode = 'index'
-    wrapper.vm.query = '999999'
+    wrapper.vm.activeSearch.searchQuery.value = '999999'
     await wrapper.vm.doAnalyze()
     const body = startMock.mock.calls[0][1]
     expect(body.asset_type).toBe('index')
@@ -143,13 +144,15 @@ describe('UnifiedAnalysis R40 (tab 切换重置)', () => {
     expect(wrapper.vm.search.searchQuery.value).toBe('5100')
   })
 
-  it('R5: 非 symbol 模式输入写入 query（不触发补全）', async () => {
+  it('R5: 非 symbol 模式输入写入对应 search 实例（O30: sector/index 也走自动补全）', async () => {
     const wrapper = mounted()
     wrapper.vm.activeMode = 'sector'
     const input = wrapper.find('input.text-input')
     await input.setValue('BK0477')
-    expect(wrapper.vm.query).toBe('BK0477')
-    expect(wrapper.vm.search.searchQuery.value).toBe('') // 补全输入未被污染
+    // O30: sector 模式输入写入 sectorSearch.searchQuery（触发板块补全）
+    expect(wrapper.vm.activeSearch.searchQuery.value).toBe('BK0477')
+    // symbol 补全实例不被污染
+    expect(wrapper.vm.search.searchQuery.value).toBe('')
   })
 
   it('R5: 补全选中后 searchQuery 同步（doAnalyze 与输入框读它）', async () => {

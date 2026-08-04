@@ -56,6 +56,78 @@ CATEGORY_DESCRIPTIONS: dict[str, str] = {
 }
 
 
+# Z03: 静态政策标识因子（不计算 IC，status='static'）
+STATIC_FACTOR_CODES = {
+    "china.policy.five_year_plan",
+    "china.policy.strategic_emerging",
+    "china.policy.dual_circulation",
+}
+
+
+def _status_of(code: str, ic_val: float | None, ic_threshold: float) -> tuple[str, str]:
+    """Z03: 权威状态 + 原因说明（/active 与 /model 共用）。
+
+    O20 (round7 §7 P20): 常量因子（截面 std=0 → IC 无法计算）给独立标注——
+    与「数据源未接入」「IC 未累积」三分，消除「看起来像样本不足、实际是
+    数据全缺」的误导。
+    """
+    if code in STATIC_FACTOR_CODES:
+        return "static", "静态政策标识因子，不计算 IC"
+    if ic_val is None:
+        # F3-4 步骤D + F19 R70: 区分「数据源未接入（缺字段）」与「IC 未累积（样本不足）」
+        gaps = getattr(registry, "_data_source_gaps", {}) or {}
+        missing = gaps.get(code, [])
+        if missing:
+            field = GAP_FIELD_MAP.get(code, ET_SPECIFIC_GAP_CODES.get(code, "必要字段"))
+            return "no_data", f"数据源未接入（{len(missing)} 只样本缺 {field}）"
+        # O20: 常量因子独立标注——截面输出全 0/常量 → 无区分度，非样本不足
+        constant_gaps = getattr(registry, "_constant_factor_codes", set()) or set()
+        if code in constant_gaps:
+            return "no_data", "截面无差异（常量输出），检查底层数据"
+        return "no_data", "IC 未累积（样本 <3）"
+    threshold = ic_threshold if ic_threshold and ic_threshold > 0 else 0.02
+    if abs(ic_val) >= threshold:
+        return "valid", f"IC {ic_val:.4f} ≥ 阈值 {threshold}，样本数 {getattr(registry, '_sample_counts', {}).get(code, 0)}"
+    return "warn", f"IC {ic_val:.4f} < 阈值 {threshold}，样本数 {getattr(registry, '_sample_counts', {}).get(code, 0)}"
+
+
+def _build_health_summary() -> dict:
+    """O6: 计算因子模型健康度聚合（valid/warn/no_data/static/avg_ic）。
+
+    供 /factors/model 输出（与 /factors/active 的 summary 同口径）。
+    """
+    ic_batch = registry._last_ic_batch
+    sample_counts = getattr(registry, "_sample_counts", {}) or {}
+    total_valid = total_warn = total_no_data = total_static = 0
+    ic_vals: list[float] = []
+    for code in registry._computers:
+        definition = registry.get_factor(code)
+        ic_val = ic_batch.get(code)
+        ic_threshold = definition.ic_threshold if definition else 0.02
+        if code in STATIC_FACTOR_CODES:
+            ic_val = None
+            ic_threshold = 0.0
+        status, _ = _status_of(code, ic_val, ic_threshold)
+        if status == "valid":
+            total_valid += 1
+        elif status == "warn":
+            total_warn += 1
+        elif status == "no_data":
+            total_no_data += 1
+        else:
+            total_static += 1
+        if ic_val is not None:
+            ic_vals.append(ic_val)
+    avg_ic = round(sum(ic_vals) / len(ic_vals), 4) if ic_vals else None
+    return {
+        "valid": total_valid,
+        "warn": total_warn,
+        "no_data": total_no_data,
+        "static": total_static,
+        "avg_ic": avg_ic,
+    }
+
+
 @router.get("/model")
 async def get_factor_model() -> JSONResponse:
     """Return factor model overview: category breakdown, total counts, descriptions.
@@ -101,6 +173,8 @@ async def get_factor_model() -> JSONResponse:
     body = {
         "total": len(all_factors),
         "categories": categories,
+        # O6 (round7 §7 P8): 聚合健康度——前端可直接读模型 valid/no_data/warn/static
+        "summary": _build_health_summary(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     etag = f"\"{hash(str(body))}\""
@@ -135,30 +209,8 @@ async def get_active_factors() -> JSONResponse:
     categories: dict[str, dict[str, Any]] = {}
 
     # Z03: 静态政策标识因子（不计算 IC，status='static'）
-    STATIC_FACTOR_CODES = {
-        "china.policy.five_year_plan",
-        "china.policy.strategic_emerging",
-        "china.policy.dual_circulation",
-    }
     sample_counts = getattr(registry, "_sample_counts", {}) or {}
     last_computed_at = getattr(registry, "_last_computed_at", None)
-
-    def _status_of(code: str, ic_val: float | None, ic_threshold: float) -> tuple[str, str]:
-        """Z03: 权威状态 + 原因说明。"""
-        if code in STATIC_FACTOR_CODES:
-            return "static", "静态政策标识因子，不计算 IC"
-        if ic_val is None:
-            # F3-4 步骤D + F19 R70: 区分「数据源未接入（缺字段）」与「IC 未累积（样本不足）」
-            gaps = getattr(registry, "_data_source_gaps", {}) or {}
-            missing = gaps.get(code, [])
-            if missing:
-                field = GAP_FIELD_MAP.get(code, ET_SPECIFIC_GAP_CODES.get(code, "必要字段"))
-                return "no_data", f"数据源未接入（{len(missing)} 只样本缺 {field}）"
-            return "no_data", "IC 未累积（样本 <3）"
-        threshold = ic_threshold if ic_threshold and ic_threshold > 0 else 0.02
-        if abs(ic_val) >= threshold:
-            return "valid", f"IC {ic_val:.4f} ≥ 阈值 {threshold}，样本数 {sample_counts.get(code, 0)}"
-        return "warn", f"IC {ic_val:.4f} < 阈值 {threshold}，样本数 {sample_counts.get(code, 0)}"
 
     for code in registry._computers:
         definition = registry.get_factor(code)

@@ -23,26 +23,27 @@
           <div class="search-wrap">
             <input
               type="text"
-              :value="activeMode === 'symbol' ? search.searchQuery.value : query"
+              :value="activeSearch.searchQuery.value"
               @input="onInput"
               :placeholder="currentPlaceholder"
               :title="currentPlaceholder"
               class="text-input"
               @keydown.enter="onEnterKeydown($event)"
-              @focus="activeMode === 'symbol' && search.onSearchFocus()"
-              @blur="activeMode === 'symbol' && search.onSearchBlur()"
+              @focus="activeSearch.onSearchFocus()"
+              @blur="activeSearch.onSearchBlur()"
             />
-            <!-- F7 R18: 自动补全下拉 -->
-            <ul v-if="activeMode === 'symbol' && search.showDropdown.value" class="search-dropdown">
+            <!-- F7 R18 + O30 (round7 §7 P30①): 三模式自动补全下拉——sector/index 模式
+                 复用同一下拉（后端 /search kind 参数 + 键盘导航 + Enter 选中） -->
+            <ul v-if="activeSearch.showDropdown.value" class="search-dropdown">
               <li
-                v-for="(item, i) in search.searchResults.value"
+                v-for="(item, i) in activeSearch.searchResults.value"
                 :key="item.symbol + i"
-                :class="['search-option', { active: i === search.activeIndex.value }]"
+                :class="['search-option', { active: i === activeSearch.activeIndex.value }]"
                 @mousedown.prevent="pickSearchItem(item)"
               >
                 <span class="opt-name">{{ item.name }}</span>
                 <span class="opt-symbol">{{ item.symbol }}</span>
-                <span class="opt-type">{{ item.market || item.asset_type || '' }}</span>
+                <span class="opt-type">{{ item.market || item.asset_type || item.type || '' }}</span>
               </li>
             </ul>
           </div>
@@ -96,12 +97,9 @@ const { start: startStream, stop: stopStream } = useLLMStream()
 // → 永不触发搜索 → 自动补全完全不工作。
 function onInput(e) {
   const v = e.target.value
-  if (activeMode.value === 'symbol') {
-    search.searchQuery.value = v
-    search.onSearchInput()
-  } else {
-    query.value = v
-  }
+  // O30: 三模式统一走 search 实例（symbol/sector/index 各自 kind）
+  activeSearch.value.searchQuery.value = v
+  activeSearch.value.onSearchInput()
 }
 
 const props = defineProps({
@@ -116,7 +114,16 @@ const query = ref('')
 const symbol = ref('')
 // F7 R18: symbol 模式自动补全（复用 useMarketSearch：200ms debounce + include_stocks）
 // F17 (round6 §16.5): 带 marketTab——A 场景只搜 A，短路后端 global 分支
+// O30 (round7 §7 P30①): sector/index 模式各建一个 kind 实例——三模式复用同一套
+// 下拉/键盘导航/Enter 选中（后端 /search kind 参数，sector→板块表，index→指数表）
 const search = useMarketSearch({ market: props.marketTab })
+const sectorSearch = useMarketSearch({ market: props.marketTab, kind: 'sector' })
+const indexSearch = useMarketSearch({ market: props.marketTab, kind: 'index' })
+const activeSearch = computed(() => {
+  if (activeMode.value === 'sector') return sectorSearch
+  if (activeMode.value === 'index') return indexSearch
+  return search
+})
 const loading = ref(false)
 const result = ref('')
 const error = ref('')
@@ -278,32 +285,28 @@ function quickSelect(ex) {
 
 // F18 (round6 §16.6): Enter 统一触发分析——symbol 模式下先处理下拉键
 // （选中项写回 searchQuery），再统一 doAnalyze；sector/index 直接分析。
+// O30: sector/index 模式同样支持下拉 Enter 选中（复用 activeSearch）
 // 旧实现 Enter 只调 search.onSearchKeydown（选中不触发分析），键盘/鼠标不一致。
 function onEnterKeydown(e) {
-  if (activeMode.value === 'symbol') {
-    search.onSearchKeydown(e)
-    if (e.defaultPrevented) {
-      // 下拉 Enter 已消费（选中项）→ 同步触发分析
-      const q = search.searchQuery.value.trim()
-      if (q) {
-        nextTick(() => doAnalyze())
-      }
-      return
+  activeSearch.value.onSearchKeydown(e)
+  if (e.defaultPrevented) {
+    // 下拉 Enter 已消费（选中项）→ 同步触发分析
+    const q = activeSearch.value.searchQuery.value.trim()
+    if (q) {
+      nextTick(() => doAnalyze())
     }
-    doAnalyze()
     return
   }
   doAnalyze()
 }
 
 // F7 R18: 下拉选中 → 写入 query + 触发分析（名称→代码由 doAnalyze 内解析）
+// O30: 三模式统一用 activeSearch（sector/index 下拉选中板块/指数）
 function pickSearchItem(item) {
   query.value = item.symbol
-  // R5: 同步写回 searchQuery——doAnalyze(symbol 模式)与输入框显示都读它；
-  // 旧实现只写 query/symbol → 补全选中后 doAnalyze 读 searchQuery（旧输入/空）→ 请求错标或无动作
-  if (search.searchQuery) search.searchQuery.value = item.symbol
-  search.selectedSearchItem.value = item
-  search.showDropdown.value = false
+  activeSearch.value.searchQuery.value = item.symbol
+  activeSearch.value.selectedSearchItem.value = item
+  activeSearch.value.showDropdown.value = false
   symbol.value = item.symbol
   result.value = ''
   error.value = ''
@@ -311,8 +314,8 @@ function pickSearchItem(item) {
 }
 
 async function doAnalyze() {
-  // F7 R18: symbol 模式输入源为 search.searchQuery（自动补全框）；sector/index 仍用 query
-  const q = (activeMode.value === 'symbol' ? search.searchQuery.value : query.value).trim()
+  // F7 R18 + O30: 输入源统一为 activeSearch.searchQuery（三模式自动补全框）
+  const q = activeSearch.value.searchQuery.value.trim()
   if (!q) {
     // R5: 空输入点“分析”给出明确反馈（旧实现静默 return，页面无任何动作）
     error.value = '请输入标的代码或名称'

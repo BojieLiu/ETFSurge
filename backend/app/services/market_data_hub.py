@@ -1186,13 +1186,27 @@ class MarketDataHub:
 
     # F3-4 步骤B: 宽基 ETF → 指数代码（东财指数，benchmark_close 注入用）。
     # §9.10.7-4 已确认「宽基先行」：行业指数随 mapping 补全后跟进。
+    # O19 (round7 §7 P20-②): 补新宽基映射——A500/A50/A100/红利低波/公共底仓锚。
     _WIDE_BASIS_INDEX_CODES = {
         "510300": "sh000300",  # 沪深300
+        "159919": "sh000300",  # 沪深300（深市嘉实）
         "510500": "sh000905",  # 中证500
+        "159922": "sh000905",  # 中证500（深市）
         "510050": "sh000016",  # 上证50
         "588000": "sh000688",  # 科创50
         "159915": "sz399006",  # 创业板指
         "510880": "sh000015",  # 上证红利
+        "560600": "sh000510",  # 中证A500（O19）
+        "159338": "sh000510",  # 中证A500 深市（公共底仓锚，O19）
+        "563080": "sh932000",  # 中证A50（O19）
+        "562000": "sh000903",  # 中证A100（O19）
+        "563020": "sh000922",  # 红利低波（O19，中证红利低波动指数）
+        "512890": "sh000922",  # 红利低波ETF（O19，同指数）
+        "510180": "sh000010",  # 上证180（O19）
+        "159901": "sz399001",  # 深证100（O19）
+        "159800": "sh000906",  # 中证800（O19）
+        "159845": "sh000852",  # 中证1000（O19）
+        "159601": "sh932000",  # 中国A50ETF（O19，同 A50 指数）
     }
     # F3-4 步骤C: 份额数据 24h 缓存（fund_fund_shares_em 日更/周更）
     _FUND_SHARES_CACHE: dict[str, tuple[float, dict]] = {}
@@ -1419,16 +1433,24 @@ class MarketDataHub:
 
     # ── 因子矩阵 ──────────────────────────────────────────
     @staticmethod
-    def _normalize_matrix(matrix: dict[str, dict[str, float]]) -> dict[str, dict[str, float]]:
+    def _normalize_matrix(
+        matrix: dict[str, dict[str, float]],
+        raw_codes: set[str] | None = None,
+    ) -> dict[str, dict[str, float]]:
         """对因子矩阵做截面 z-score 归一化，消除量纲差异。
 
         排除 ln_mcap/ln_float_mcap（截面内无意义，所有大盘 ETF 都 ~25），
         排除仅有一两个非零值的因子（归一化会放大噪声）。
+        O4 (round7 §7 P6): `standardization=raw` 的因子（rsi_14/rsi_24 等，
+        factor_definitions.yaml 声明）跳过截面 z-score，保留真实 0-100 值——
+        rationale「RSI<30 超卖」等判断需要真实值而非相对分。
         """
         import statistics
         symbols = list(matrix.keys())
         if not symbols:
             return matrix
+
+        raw = raw_codes or set()
 
         # 收集所有因子键
         factor_keys: set[str] = set()
@@ -1451,6 +1473,9 @@ class MarketDataHub:
                 for s in symbols:
                     matrix[s][key] = (matrix[s].get(key, 0.0) - vmin) / (vmax - vmin) * 2.0 - 1.0
                 continue
+            if key in raw:
+                # O4: raw 因子（RSI 0-100 等）跳过截面 z-score——保留真实量纲
+                continue
             values = [matrix[s].get(key, 0.0) for s in symbols]
             # 跳过所有值相同的因子（无截面区分度）
             if max(values) - min(values) < 0.001:
@@ -1466,8 +1491,19 @@ class MarketDataHub:
 
         return matrix
 
+    def _raw_factor_codes(self) -> set[str]:
+        """O4: factor_definitions.yaml 中 standardization=raw 的因子 code 集合。"""
+        raw = set()
+        try:
+            for code, definition in factor_registry._factors.items():
+                if definition.standardization == "raw":
+                    raw.add(code)
+        except Exception:
+            pass
+        return raw
+
     def get_factor_matrix(self) -> dict[str, dict[str, float]]:
-        """从候选池提取因子分矩阵，并做 z-score 归一化。"""
+        """从候选池提取因子分矩阵，并做 z-score 归一化（raw 因子除外）。"""
         result: dict[str, dict[str, float]] = {}
         for layer_items in self._pool.values():
             for item in layer_items:
@@ -1479,7 +1515,7 @@ class MarketDataHub:
         if not result:
             logger.warning("[market_data_hub] get_factor_matrix() returned empty — pool may be empty or missing factor_scores")
             return result
-        return self._normalize_matrix(result)
+        return self._normalize_matrix(result, raw_codes=self._raw_factor_codes())
 
     # ── 新闻缓存 ──────────────────────────────────────────
     _news_cache: list[dict] | None = None

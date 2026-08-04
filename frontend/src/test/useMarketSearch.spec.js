@@ -24,7 +24,8 @@ describe('useMarketSearch', () => {
     await compA.doSearch()
     expect(marketApi.search).toHaveBeenCalledWith(
       '510300',
-      expect.objectContaining({ market: 'A' }),
+      // O30: kind='all' 加入参数（后端 /search kind 契约）
+      expect.objectContaining({ market: 'A', kind: 'all' }),
       expect.anything(),
     )
     // 无 market 选项 → 不传 market（global 跨市场，既有行为不回归）
@@ -211,7 +212,7 @@ describe('useMarketSearch', () => {
     marketApi.search.mockResolvedValue({ data: [{ symbol: '00700', name: '腾讯控股' }] })
     composable.searchQuery.value = '腾讯控股'
     await composable.doSearch()
-    expect(marketApi.search).toHaveBeenCalledWith('腾讯控股', { include_stocks: true }, expect.objectContaining({ signal: expect.anything() }))
+    expect(marketApi.search).toHaveBeenCalledWith('腾讯控股', { include_stocks: true, kind: 'all' }, expect.objectContaining({ signal: expect.anything() }))
     expect(composable.searchResults.value[0].symbol).toBe('00700')
   })
 })

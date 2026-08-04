@@ -93,6 +93,8 @@ def build_rationale(
     factor_scores: dict[str, float] | None = None,
     regime: str | None = None,
     industry: str | None = None,
+    industry_confidence: float = 0.85,
+    rank_info: dict | None = None,
 ) -> str:
     """
     为指定层级的 ETF 生成数据驱动的入选理由（纯函数）。
@@ -107,6 +109,10 @@ def build_rationale(
         factor_scores: {factor_name: score} 因子分
         regime: 市场状态
         industry: 行业分类
+        industry_confidence: 行业分类置信度（O23: <0.7 时保守描述，
+            不输出可能误导的具体行业语义）
+        rank_info: O24 归因链——{rank, total_candidates, dominant_factor}：
+            层内候选池排名 N/M + 主驱动因子，回答「为什么选中它而非同类」
 
     Returns:
         str: 中文入选理由
@@ -135,7 +141,22 @@ def build_rationale(
         parts.append("久期较长，若稳增长政策加码利率反弹则承压")
     else:
         ind = industry or meta.get("industry") or "行业"
-        parts.append(f"{asset_name} — {ind}方向")
+        # O23 (round7 §7 P23): 行业标签可信度校验——
+        # ① 名称/指数交叉校验：名称命中宽基语义关键词而 industry 被误标具体行业
+        #   （或 unknown）时，以「宽基指数」为准（562950 类误归不进入文案）；
+        # ② 分类置信度 <0.7 时保守描述（不输出可能误导的具体行业语义）。
+        _WIDE_BASIS_HINTS = (
+            "沪深300", "中证A500", "中证A50", "中证A100", "上证50", "上证180",
+            "深证100", "中证100", "中证800", "中证500", "科创50", "创业板",
+            "MSCI", "A50", "A100", "A500",
+        )
+        name_and_index = f"{asset_name}{meta.get('tracked_index') or meta.get('trackedIndex') or ''}"
+        if any(k in name_and_index for k in _WIDE_BASIS_HINTS):
+            parts.append(f"{asset_name} — 宽基指数方向")
+        elif industry_confidence < 0.7:
+            parts.append(f"{asset_name} — 主题方向（分类置信度低，标签待校准）")
+        else:
+            parts.append(f"{asset_name} — {ind}方向")
 
     # 2. 技术面（使用 factor_scores 中实际存在的 RSI / MACD / KDJ 因子）
     # R6-F4 (round6 §十 R6-05 + §十八-7): rsi_14 自 F1-5 起保留 raw 0-100 值——
@@ -216,5 +237,16 @@ def build_rationale(
     style = _style_probe(meta)
     layer_desc = _layer_phrase(layer, asset_name, code, style)
     parts.append(f"在{label}方案中{layer_desc}")
+
+    # 7. 归因链（O24, round7 §7 P24）——「为什么选中它而非同类」：
+    # 层内候选池排名 N/M + 主驱动因子。回答因子分在候选池的位次与主导因子。
+    if rank_info:
+        rank = rank_info.get("rank")
+        total = rank_info.get("total_candidates")
+        dom = rank_info.get("dominant_factor")
+        if rank is not None and total:
+            parts.append(f"同类候选池排名 {rank}/{total}")
+        if dom:
+            parts.append(f"主驱动因子：{dom}")
 
     return "；".join(parts) if parts else f"{asset_name} — 基于因子评分入选"

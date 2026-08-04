@@ -46,6 +46,7 @@
       <!-- History Panel -->
       <DesignHistory
         v-if="activeCoreFeature === 'history'"
+        :key="historyKey"
         :items="designHistoryList"
         :loading="historyLoading"
         :loaded="historyLoaded"
@@ -116,7 +117,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { portfolioApi } from '../api'
 import { usePortfolioStore } from '../stores/portfolio'
 import { useTaskStore } from '../stores/task'
@@ -131,7 +132,38 @@ import StrategyCheckResult from '../components/design/StrategyCheckResult.vue'
 import AppModal from '../components/ui/AppModal.vue'
 import FactorModelView from '../components/FactorModelView.vue'
 
+const props = defineProps({
+  // O15 (round7 §7 P17): 父级（PortfolioAnalysis）告知本组件是否处于激活 tab——
+  // 重新进入「AI工具」时复位到工具列表（activeCoreFeature=null），
+  // 消除 AppTabs :hidden 常驻导致的状态残留（历史方案/上次界面）。
+  active: { type: Boolean, default: false },
+})
 const emit = defineEmits(['applied'])
+
+// O15: DesignHistory 强制重挂载 key（复位其内部 statusFilter='all'）
+const historyKey = ref(0)
+
+function resetToTools() {
+  // O15: 重新进入 AI 工具 → 默认展示工具列表（智能设计/策略检查/任务列表三入口）
+  activeCoreFeature.value = null
+  designStep.value = 'wizard'
+  designTab.value = 'cards'
+  expandedPlan.value = null
+  showHistory.value = false
+  historyKey.value += 1
+}
+
+watch(
+  () => props.active,
+  (now, prev) => {
+    if (now && !prev) {
+      // 运行中 design 任务例外：有 running 任务保留现有恢复 loading 逻辑（任务不丢）
+      const runningTask = taskStore.tasks.find((t) => t.type === 'design' && t.status === 'running')
+      if (runningTask) return
+      resetToTools()
+    }
+  },
+)
 
 const store = usePortfolioStore()
 const toast = useToastStore()

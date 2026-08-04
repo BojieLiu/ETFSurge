@@ -262,9 +262,13 @@ async function addItem() {
   addError.value = ''
   try {
     await store.addWatchlist(form.value.symbol, form.value.asset_type, form.value.notes, form.value.name)
+    // O27 (round7 §7 P27①): 添加后主动 fetchItems——旧实现依赖 store 乐观插入
+    // （改 store.watchlist），组件本地 items 副本（fetchItems 内的浅拷贝）不响应 →
+    // 列表不出现新条目需手动刷新。主动拉取同时拿到批量 realtime（P12：新条目
+    // 后三列不再因单条 realtime 冷却为 null 而显示「—」）。
+    await fetchItems()
     showAddModal.value = false
     form.value = { symbol: '', asset_type: 'A', notes: '', name: '' }
-    // R5: store 已乐观插入（POST 带 realtime）并后台刷新——不再需要 500ms 延迟全量拉取
   } catch (e) {
     addError.value = '添加失败: ' + (e?.response?.data?.detail || e?.message || '网络错误')
   } finally {

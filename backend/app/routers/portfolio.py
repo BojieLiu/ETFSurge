@@ -22,12 +22,39 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/portfolio", tags=["portfolio"])
 
 
+async def _with_realtime_prices(etfs: list):
+    """O8 (round7 §7 P11): 批量补充实时 price/change_pct 到持仓列表。
+
+    GET /portfolio/etfs 返回 ORM 条目 price=null（realtime 端点有价）→ 前端持仓
+    表格价格列「—」。用 build_price_map 批量取实时价注入；失败静默保留原列表
+    （列表加载不因行情源失败而阻塞）。
+    """
+    if not etfs:
+        return etfs
+    try:
+        from ..services.portfolio_service import build_price_map
+        price_map = await build_price_map(etfs)
+        for e in etfs:
+            sym = getattr(e, "symbol", None)
+            if sym is None or sym not in price_map:
+                continue
+            price, change_pct = price_map[sym]
+            if price is not None:
+                e.price = price
+            if change_pct is not None:
+                e.change_pct = change_pct
+    except Exception as e:
+        logger.warning("[portfolio] realtime price enrich failed (non-fatal): %s", e)
+    return etfs
+
+
 @router.get("/etfs", response_model=list[PortfolioETFResponse])
 async def get_etfs(
     portfolio_type: str = Query(None, pattern="^(on_exchange|off_exchange)?$"),
     db: AsyncSession = Depends(get_db),
 ):
-    return await list_etfs(db, portfolio_type)
+    etfs = await list_etfs(db, portfolio_type)
+    return await _with_realtime_prices(etfs)
 
 
 @router.post("/etfs", response_model=PortfolioETFResponse, status_code=201)

@@ -344,14 +344,25 @@ def fetch_all_etfs_base() -> list[dict[str, Any]]:
         return cached
 
     # 0. 文件缓存：重启后加速首次加载
+    # O1 (round7 §7 P1): 快照宽容——文件快照（len>50）无论新旧先返回。
+    # 旧实现要求 ts < 14400s（4h）：容器重建/挂载卷时间戳跨阈值 → 每次启动
+    # 全量 1618 只扫描（预热 128s 根因之一）。现在旧快照直接命中启动，
+    # 数据新鲜度由 60s 周期刷新循环保证（内存缓存 TTL 过期后自然重扫）。
     import os, json, time
     _cache_file = _etf_cache_file()
     if os.path.exists(_cache_file):
         try:
             with open(_cache_file, "r", encoding="utf-8") as _f:
                 _fc = json.load(_f)
-            if time.time() - _fc.get("ts", 0) < 14400 and len(_fc.get("etfs", [])) > 50:
-                logger.info("[etf_scanner] file cache hit: %d ETFs", len(_fc["etfs"]))
+            if len(_fc.get("etfs", [])) > 50:
+                _age = time.time() - _fc.get("ts", 0)
+                if _age >= 14400:
+                    logger.info(
+                        "[etf_scanner] file cache stale (age=%.0fs) — using snapshot for fast start, refresh via cycle",
+                        _age,
+                    )
+                else:
+                    logger.info("[etf_scanner] file cache hit: %d ETFs", len(_fc["etfs"]))
                 sync_memory_cache.set("all_etfs", _fc["etfs"], CACHE_TTL["etf_list"])
                 return _fc["etfs"]
         except Exception:

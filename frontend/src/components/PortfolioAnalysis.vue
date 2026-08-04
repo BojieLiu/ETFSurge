@@ -21,7 +21,8 @@
         <AnalysisView :selected-symbol="selectedHolding" />
       </template>
       <template #tools>
-        <DashboardAiTools @applied="refreshData" />
+        <!-- O15 (round7 §7 P17): active 传参——重新进入 AI 工具 tab 时复位工具列表 -->
+        <DashboardAiTools @applied="refreshData" :active="activeTab === 'tools'" />
       </template>
     </AppTabs>
   </div>

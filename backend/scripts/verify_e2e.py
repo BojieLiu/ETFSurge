@@ -265,6 +265,29 @@ def section_market():
         except Exception as e:
             check(f"GET /market/search?market={_mkt}", False, str(e))
 
+    # O13 (round7 §7 P13): 名称维度搜索契约（茅台/apple/腾讯）——keyword 名称模糊匹配
+    # 语义门禁：0 结果 ≠ 代码缺陷时按「数据源冷却/未同步」SKIP 告警（不判 FAIL），
+    # 与 round6 环境类豁免口径一致（akshare/东财冷却时 instruments 表可能未灌入）。
+    for _mkt, _kw in [("A", "茅台"), ("HK", "腾讯"), ("US", "apple")]:
+        try:
+            _t0 = time.time()
+            _extra = "&include_stocks=true" if _mkt in ("HK", "US") else ""
+            r = requests.get(f"{BASE}/api/v1/market/search?keyword={_kw}&market={_mkt}{_extra}", timeout=20)
+            _elapsed = time.time() - _t0
+            _ok_code = r.status_code == 200
+            _hits = len(r.json()) if (_ok_code and isinstance(r.json(), list)) else 0
+            check(
+                f"GET /market/search?keyword={_kw}(名称)&market={_mkt} -> {r.status_code} ({_elapsed:.1f}s) 名称命中",
+                _ok_code and _hits > 0,
+                "" if _ok_code and _hits > 0
+                else (f"0 条（数据源冷却/未同步——O13 语义告警，非代码缺陷）" if _ok_code else f"HTTP {r.status_code}"),
+                skip=(_ok_code and _hits == 0),
+            )
+        except requests.Timeout:
+            check(f"GET /market/search?keyword={_kw}(名称)", False, "请求超时（20s）")
+        except Exception as e:
+            check(f"GET /market/search?keyword={_kw}(名称)", False, str(e))
+
 
 def section_portfolio():
     """组合设计端点"""

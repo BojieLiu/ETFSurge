@@ -17,6 +17,66 @@ from ..engine.risk_controls import apply_risk_controls
 
 logger = logging.getLogger(__name__)
 
+# O22 (round7 §7 P22): 快照兜底——etf_list_cache.json 的 symbol → 条目映射（懒加载 + 缓存）。
+# 真实 change_pct 为百分比形式（如 1.358 = +1.358%）；K 线兜底返回小数需 ×100。
+_snapshot_cache: dict[str, dict] | None = None
+
+
+def _etf_cache_file() -> str:
+    """ETF 列表文件缓存路径（委托 etf_scanner，含 DATA_DIR/容器卷优先级）。"""
+    try:
+        from ..fetchers.etf_scanner import _etf_cache_file as _scanner_path
+        return _scanner_path()
+    except Exception:
+        return ""
+
+
+def _load_snapshot_cache() -> dict[str, dict]:
+    """懒加载 etf_list_cache.json → {symbol: entry}。失败返回 {}（不阻塞主流程）。"""
+    global _snapshot_cache
+    if _snapshot_cache is not None:
+        return _snapshot_cache
+    _snapshot_cache = {}
+    try:
+        import json
+        import os
+        path = _etf_cache_file()
+        if path and os.path.exists(path):
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            for e in (data.get("etfs", []) if isinstance(data, dict) else (data or [])):
+                if isinstance(e, dict) and e.get("symbol"):
+                    _snapshot_cache[str(e["symbol"])] = e
+    except Exception as e:
+        logger.warning("[strategy_design] snapshot cache load failed: %s", e)
+    return _snapshot_cache
+
+
+def _snapshot_change_pct(symbol: str) -> float | None:
+    """快照兜底：etf_list_cache.json 的真实 change_pct（百分比，如 1.358）。
+
+    显式 None 判断（同 F3 R8：丢弃 falsy 的 0.0 会误伤真实 0 涨跌）。
+    """
+    entry = _load_snapshot_cache().get(symbol)
+    if not entry:
+        return None
+    dcp = entry.get("change_pct")
+    if dcp is None:
+        dcp = entry.get("daily_change_pct")
+    return dcp if isinstance(dcp, (int, float)) else None
+
+
+def _kline_change_pct(market_data_hub, symbol: str) -> float | None:
+    """K 线兜底：(close[-1]-close[-2])/close[-2]（返回小数，复用 _compute_change_pct 逻辑）。"""
+    try:
+        rows = market_data_hub.get_kline_rows_any(symbol) if hasattr(market_data_hub, "get_kline_rows_any") else None
+        closes = [float(r.get("close")) for r in (rows or []) if r.get("close") is not None]
+        if len(closes) >= 2 and closes[-2]:
+            return round((closes[-1] - closes[-2]) / closes[-2], 4)
+    except Exception as e:
+        logger.debug("[strategy_design] kline change_pct fallback failed for %s: %s", symbol, e)
+    return None
+
 # Z11: 静态兜底核心池（非交易时段 / 数据管道断裂时使用）
 STATIC_CORE_POOL = [
     {"symbol": "510300", "name": "沪深300ETF", "layer": "core",
@@ -255,16 +315,19 @@ async def generate_enhanced_design(
                     fs = pool_entry.get("factor_score")
                     if fs is not None:
                         a["factor_score"] = fs
-                # Fallback to factor_matrix
+                # O22 (round7 §7 P22): fallback 修复——旧代码查 factor_matrix["change_pct"]
+                # 键名不匹配（实际键是 "etf.change_pct"）且该值是 z-score 归一化值
+                # （恒 ≠ 真实涨跌幅）→ 删除该 fallback，改为「快照 → K 线」两级兜底：
+                # ① etf_list_cache.json 快照真实 change_pct（百分比，如 1.358）；
+                # ② K 线 close 序列 (close[-1]-close[-2])/close[-2]（×100 转百分比）。
                 if a.get("daily_change_pct") is None:
-                    fm = factor_matrix.get(code, {}) if isinstance(factor_matrix, dict) else {}
-                    if fm:
-                        # F3 R8: 显式 None 判断（同 pool_entry 路径）
-                        dcp = fm.get("change_pct")
-                        if dcp is None:
-                            dcp = fm.get("daily_change_pct")
-                        if dcp is not None:
-                            a["daily_change_pct"] = dcp
+                    dcp = _snapshot_change_pct(code)
+                    if dcp is not None:
+                        a["daily_change_pct"] = dcp
+                if a.get("daily_change_pct") is None:
+                    kcp = _kline_change_pct(market_data_hub, code)
+                    if kcp is not None:
+                        a["daily_change_pct"] = round(kcp * 100, 4)
 
             # Calculate cash
             total_weight = sum(a.get("weight", 0) for a in allocs if a.get("symbol") != "CASH")

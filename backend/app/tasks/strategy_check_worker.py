@@ -84,20 +84,22 @@ async def _strategy_check_pipeline_guarded(mgr, task_id: int) -> None:
         return
 
     try:
-        # FIX-21: 外层 120s 超时保护，防止整个管线无限制挂起
+        # FIX-21: 外层超时保护，防止整个管线无限制挂起
+        # O25 (round7 §7 P25): 120s → 150s——LLM 完整档 60s + 采集 2×25s + 余量，
+        # 避免「采集慢 + LLM 完整档」被外层提前截断。
         import asyncio
         return await asyncio.wait_for(
             _pipeline_body(mgr, task_id),  # type: ignore[arg-type]
-            timeout=120,
+            timeout=150,
         )
     except asyncio.TimeoutError:
-        logger.error("[strategy_check_pipeline] task %d timed out after 120s", task_id)
+        logger.error("[strategy_check_pipeline] task %d timed out after 150s", task_id)
         await mgr.update_task(
             task_id,
             status="failed",
             progress=100,
             stage="分析超时",
-            result={"error": "策略检查超时（120s）", "partial_data": {}},
+            result={"error": "策略检查超时（150s）", "partial_data": {}},
         )
         await _notify(task_id, "failed", progress=100, stage="分析超时")
     except Exception as e:

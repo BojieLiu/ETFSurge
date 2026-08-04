@@ -524,10 +524,11 @@ def _is_failed_result(factor_scores: dict) -> bool:
             return False
     return True  # 所有标的因子分全为零或空
 
-def _build_llm_fail_summary(duration_s: float, diag: str) -> str:
+def _build_llm_fail_summary(duration_s: float, diag: str, data_quality: dict | None = None) -> str:
     """R6-F13: 策略检查 LLM 失败兜底文案——按诊断内容区分限流/超时/服务端错误。
 
-    旧实现恒写"LLM 分析超时（60s 未返回）"：500 快速失败（10s）时文案误导。
+    O25③ (round7 §7 P25): 兜底文案携带数据质量摘要（N/M 因子可用 + 缺失原因），
+    不再固定「LLM 分析超时」——专业投资者可区分「数据缺失」与「LLM 慢」。
     """
     diag = diag or ""
     low = diag.lower()
@@ -537,10 +538,68 @@ def _build_llm_fail_summary(duration_s: float, diag: str) -> str:
         reason = "LLM 响应超时"
     else:
         reason = "LLM 服务端错误"
+    quality = ""
+    if data_quality:
+        filled = data_quality.get("filled_count", 0)
+        total = data_quality.get("total_count", 0)
+        if data_quality.get("all_empty"):
+            quality = f"，因子数据缺失（{filled}/{total} 可用，上下文不足快速兜底）"
+        else:
+            quality = f"，因子数据部分可用（{filled}/{total}）" if data_quality.get("partial") \
+                else f"，因子数据完整（{filled}/{total}）"
     return (
-        f"{reason}（{duration_s:.0f}s，已用规则引擎兜底生成建议）"
+        f"{reason}（{duration_s:.0f}s，已用规则引擎兜底生成建议{quality}）"
         f"（最后错误: {diag or '未知'}）"
     )
+
+
+def _llm_timeout_for(data_quality: dict) -> int:
+    """O25② (round7 §7 P25): LLM 超时按数据完整性分级。
+
+    - all_empty（上下文不足）→ 15s 快速兜底（快速失败更合理，不必等满）
+    - partial → 30s（有部分数据，多给 LLM 一点时间消化）
+    - 数据完整 → 60s（对齐设计报告 90s 的宽松档）
+    旧实现恒 30s：数据采集也占 30s，LLM 实际剩余不足 → 恒超时（round7 P5）。
+    """
+    if data_quality.get("all_empty"):
+        return 15
+    if data_quality.get("partial"):
+        return 30
+    return 60
+
+
+async def _collect_strategy_data(
+    symbols: list[str],
+    indicators_timeout: float = 25,
+    factor_timeout: float = 25,
+) -> tuple[dict, dict]:
+    """O25① (round7 §7 P25): 采集技术指标 + 因子分，各自独立超时。
+
+    旧实现 `wait_for(gather(ind, fac, return_exceptions=True), 30)` 超时会取消
+    整个 gather——部分完成的结果也拿不到（日志写「using partial results」实际
+    赋 {} 全空）→ data_quality.all_empty=True → LLM 收到空上下文。
+    现在任一任务失败/超时只丢该任务，另一任务结果保留（data_quality.partial
+    语义正确反映「部分可用」）。
+    """
+    from ..factors.factor_registry import registry as factor_registry
+
+    async def _guarded(coro, timeout: float, label: str):
+        try:
+            return await asyncio.wait_for(coro, timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.warning("[strategy_check] %s collection timed out after %ss", label, timeout)
+            return {}
+        except Exception as e:
+            logger.warning("[strategy_check] %s collection failed: %s", label, e)
+            return {}
+
+    indicators_task = _compute_indicators(symbols)
+    factor_task = factor_registry.compute(symbols)
+    indicators, factor_scores = await asyncio.gather(
+        _guarded(indicators_task, indicators_timeout, "indicators"),
+        _guarded(factor_task, factor_timeout, "factors"),
+    )
+    return indicators or {}, factor_scores or {}
 
 
 async def strategy_check(
@@ -595,18 +654,9 @@ async def strategy_check(
         else:
             logger.debug("[strategy_check] cache hit but result is failed/stale, re-fetching")
     
-    # 并行采集（带 30s 总超时，任一失败不影响整体结果）
-    indicators_task = _compute_indicators(symbols)
-    factor_task = factor_registry.compute(symbols)
-
-    try:
-        indicators, factor_scores = await asyncio.wait_for(
-            asyncio.gather(indicators_task, factor_task, return_exceptions=True),
-            timeout=30,
-        )
-    except asyncio.TimeoutError:
-        logger.warning("[strategy_check] data collection timed out after 30s, using partial results")
-        indicators, factor_scores = {}, {}
+    # O25① (round7 §7 P25): 并行采集（各自独立超时，任一失败保留另一部分——
+    # 旧 wait_for(gather) 超时会取消全部，部分完成结果被丢弃）
+    indicators, factor_scores = await _collect_strategy_data(symbols)
 
     indicators = indicators if isinstance(indicators, dict) else {}
     factor_scores = factor_scores if isinstance(factor_scores, dict) else {}
@@ -666,14 +716,14 @@ async def strategy_check(
     }
 
     # LLM 分析（Z26: 显式预算，超时走规则引擎兜底）
-    # U2 R3: 超时预算 20s → 60s → F9 (round6 §十五 R6-15.1): 60s → 30s——
-    # DeepSeek 慢响应（60s 无返回）只能等满 60s，用户等待减半；30s 内无响应
-    # 即兜底（R5-1-6 快速失败只覆盖快速 500/429）。
+    # O25② (round7 §7 P25): 超时按数据完整性分级——all_empty 15s / partial 30s /
+    # 数据完整 60s（旧 F9 恒 30s：采集也占 30s，LLM 实际剩余不足 → 恒超时兜底常态）。
     # F1-9: wait_for 超时会取消内部协程，抛 CancelledError（BaseException），
     # 必须与 TimeoutError 一起捕获，否则 usage 失败记录缺失、规则兜底文案丢失。
     _llm_failed = False
     _llm_start = _time.monotonic()
     _llm_diag = ""
+    _llm_timeout = _llm_timeout_for(data_quality)
     try:
         llm_result = await asyncio.wait_for(
             generate_strategy_check_report(
@@ -682,7 +732,7 @@ async def strategy_check(
                 regime=regime,
                 data_quality=data_quality,
             ),
-            timeout=30,  # F9 (round6 §十五): 60s → 30s，慢响应快速兜底
+            timeout=_llm_timeout,
         )
     except (asyncio.TimeoutError, asyncio.CancelledError) as e:
         _llm_failed = True
@@ -713,7 +763,8 @@ async def strategy_check(
         llm_result = {
             # R6-F13 (round6 §十五 R6-15): 文案区分限流/超时/快速失败——与
             # get_last_llm_error 一致（旧模板恒写"超时 60s"，500 快速失败时误导）
-            "summary": _build_llm_fail_summary(_llm_dur, _llm_diag),
+            # O25③: 携带 data_quality（N/M 因子可用 + 缺失原因）
+            "summary": _build_llm_fail_summary(_llm_dur, _llm_diag, data_quality),
             "suggestions": [],
             "holdings_analysis": [],
             "risk_warnings": [],

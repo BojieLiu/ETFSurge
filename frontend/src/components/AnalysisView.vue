@@ -178,7 +178,13 @@ const chartOption = computed(() => {
     const basePrice = d.closes[0]
 
     return {
-      title: { text: seriesName, left: 'center', textStyle: { fontSize: 14, fontWeight: 'bold' } },
+      title: {
+        // O26 (round7 §7 P26): 分时分支加「分时」类型标识——旧 title 仅标点名，
+        // 用户切到分时后图表内无从得知当前是分时图
+        text: `${seriesName} · 分时`,
+        left: 'center',
+        textStyle: { fontSize: 14, fontWeight: 'bold' },
+      },
       tooltip: {
         trigger: 'axis',
         axisPointer: { type: 'cross' },
@@ -404,8 +410,10 @@ const chartOption = computed(() => {
 
   return {
     // F15: 标题区标注当前周期（如 "日线"），切换周期后实时更新
+    // O26 (round7 §7 P26): 补标点名与图表类型（K线）——旧实现 12px 浅灰仅显示周期，
+    // 不含图表类型与标的名，视觉区分弱
     title: {
-      text: periodLabel.value,
+      text: `${seriesName} · K线 ${periodLabel.value}`,
       left: '2%',
       top: 2,
       textStyle: { fontSize: 12, fontWeight: 'medium', color: '#888' },

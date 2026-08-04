@@ -38,6 +38,10 @@ class PortfolioETFResponse(PortfolioETFBase):
     id: int
     is_active: bool
     cost_basis: Optional[float] = Field(default=None, description="Total cost basis = avg_cost * shares_held")
+    # O8 (round7 §7 P11): 实时行情补充——路由层 build_price_map 批量注入，
+    # 数据源不可用时为 None（前端显示「—」）
+    price: Optional[float] = Field(default=None, description="Realtime price (injected by route)")
+    change_pct: Optional[float] = Field(default=None, description="Realtime change percent (injected by route)")
 
     class Config:
         from_attributes = True

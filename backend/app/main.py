@@ -48,6 +48,21 @@ if _PROFILE_WARMUP:
     logger.info("[profiler] Warmup profiling ENABLED (PROFILE_WARMUP=1)")
 
 
+async def _run_warmup_sequence(tasks: list) -> None:
+    """O2 (round7 §7 P2): 预热任务串行执行——控并发峰值。
+
+    旧实现 4 个重 IO 预热任务同时 create_task，各自内部并发 run_sync + 全量
+    扫描 + akshare 分页叠加 → 预热高峰 shared_executor 64/64 饱和（P2 复现）。
+    串行执行（前一个完成后启动下一个），内部并发上限不变；单个任务异常
+    不阻断后续任务（预热失败静默，启动不阻塞）。
+    """
+    for _t in tasks:
+        try:
+            await _t
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[lifespan] warmup sequence step failed (non-fatal): %s", e)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
@@ -159,8 +174,6 @@ async def lifespan(app: FastAPI):
         except Exception as e:  # noqa: BLE001
             logger.warning("[lifespan] instruments auto-sync failed (non-fatal): %s", e)
 
-    _warmup_tasks.append(asyncio.create_task(_background_instruments_sync()))
-
     # 启动时后台预热行情缓存（不阻塞启动，10s 超时 → 部分数据可接受）
     async def _warmup_market_cache():
         with warmup_timer("warmup_market_cache", "warmup", "行情缓存预热"):
@@ -174,8 +187,6 @@ async def lifespan(app: FastAPI):
                 _mark["done"] = True
                 _mark["success"] = False
                 logger.exception("行情缓存预热失败（不影响启动）")
-
-    _warmup_tasks.append(asyncio.create_task(_warmup_market_cache()))
 
     # 启动时预热全球指数缓存（非阻塞，15s 超时）
     async def _warmup_global_indices():
@@ -242,7 +253,21 @@ async def lifespan(app: FastAPI):
                 _mark["done"] = True
                 _mark["success"] = False
                 logger.warning("ETF cache warmup failed: %s", e)
-    _warmup_tasks.append(asyncio.create_task(_warmup_etf_cache()))
+
+    # O2 (round7 §7 P2): 预热任务串行化——旧实现 4 个重 IO 任务（market_cache /
+    # etf_cache / global_indices / instruments_sync）同时 create_task，各自内部
+    # 8 并发 run_sync + 全量扫描 + akshare 分页叠加 → 预热高峰 shared_executor
+    # 64/64 饱和（round7 P2 复现）。改为一个编排任务按顺序串行执行（前一个
+    # 完成后启动下一个），内部并发上限不变；每个子任务自带超时/失败隔离。
+    async def _warmup_sequence_task():
+        await _run_warmup_sequence([
+            _warmup_market_cache(),
+            _warmup_etf_cache(),
+            _warmup_global_indices(),
+            _background_instruments_sync(),
+        ])
+
+    _warmup_tasks.append(asyncio.create_task(_warmup_sequence_task()))
 
     # Scheduler temporarily disabled for diagnostics (design-check-pipeline-redesign)
     # try:

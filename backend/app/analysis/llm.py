@@ -1069,6 +1069,24 @@ async def generate_news_summary(title: str, content: str) -> str:
         return ""
 
 
+def _news_body_text(news_item: dict) -> str:
+    """O5 (round7 §7 P16): news-impact 正文兜底——content → summary → title。
+
+    数据源冷却/快讯类头条 content 为空时，prompt 里「新闻内容：」段为空 →
+    LLM 收到空正文 → 返回「新闻内容为空」空洞结论。三级兜底保证正文段非空。
+    """
+    content = (news_item.get("content") or "").strip()
+    if content:
+        return content
+    summary = (news_item.get("summary") or "").strip()
+    if summary:
+        return summary
+    title = (news_item.get("title") or "").strip()
+    if title:
+        return f"（快讯）{title}"
+    return ""
+
+
 async def analyze_news_impact(news_item: dict, holdings: list[dict], market_context: dict | None = None) -> dict:
     """分析单条新闻对当前组合内各标的的具体影响。
 
@@ -1119,9 +1137,12 @@ async def analyze_news_impact(news_item: dict, holdings: list[dict], market_cont
         if parts:
             background = "当前市场背景：\n" + "\n".join(parts) + "\n\n"
 
+    # O5 (round7 §7 P16): 正文三级兜底——content 空时用 summary/title，
+    # 杜绝空正文段进 prompt（LLM 收到空正文会回「新闻内容为空」空洞结论）
+    news_body = _news_body_text(news_item) or "（无正文）"
     if has_holdings:
         prompt = f"""新闻标题：{news_item.get('title', '')}
-新闻内容：{news_item.get('content', '')}
+新闻内容：{news_body}
 
 {background}当前组合持仓：
 {holdings_text}
@@ -1140,7 +1161,7 @@ async def analyze_news_impact(news_item: dict, holdings: list[dict], market_cont
 - 若组合为空，回答对市场整体的影响。"""
     else:
         prompt = f"""新闻标题：{news_item.get('title', '')}
-新闻内容：{news_item.get('content', '')}
+新闻内容：{news_body}
 
 当前无持仓组合。
 

@@ -590,6 +590,9 @@ ET_SPECIFIC_GAP_CODES = {
     "etf.tracking_error": "benchmark_close",
     "etf.shares_change": "shares_change_20d",
     "etf.institutional_holdings_change": "shares_change_20d/institutional_holdings_change",
+    # O20 (round7 §7 P20-③): industry_diversification 依赖 concepts 标签——
+    # 上游 concepts 为空时 reason 走「数据源未接入（缺 concepts）」而非「IC 未累积」
+    "etf.industry_diversification": "concepts",
 }
 
 # 33 core factors for S1 (extend this list as implementation progresses)
@@ -665,6 +668,169 @@ def _fetch_history_budget(n_symbols: int) -> float:
     return max(30.0, 25.0 * n_symbols / 8 + 15.0)
 
 
+# ── O18 (round7 §7 P20-①): IOPV 三级降级链（Sina http → QQ http → 东财 https）──
+# Sina/QQ 均为 http 明文接口（用户环境 http 可能被禁/被墙 → 全失败）；
+# 东财 https（EM_PUSH_HOST push2delay）作为第三顺位（不替换现有降级链）。
+# 模块级定义（可单测）；TTJ 日净值由 _fetch_market_data 调用方保持末位兜底。
+
+def _iopv_sina_symbols(symbols: list[str]) -> list[str]:
+    """A 股 symbol → 新浪/QQ 带市场前缀（sh/sz）。"""
+    prefixes = {"5": "sh", "6": "sh", "0": "sz", "1": "sz", "3": "sz"}
+    return [f"{prefixes.get(s[0], 'sh')}{s}" for s in symbols]
+
+
+async def _fetch_iopv_from_sina(s_list: list[str]) -> dict[str, dict]:
+    """通过线程池获取新浪 IOPV 实时行情。"""
+    from ..core.async_utils import run_sync
+
+    def _sync_fetch():
+        import urllib.request
+        url = f"http://hq.sinajs.cn/list={','.join(s_list)}"
+        req = urllib.request.Request(
+            url, headers={"Referer": "http://finance.sina.com.cn"}
+        )
+        resp = urllib.request.urlopen(req, timeout=8)
+        return resp.read().decode("gbk")
+
+    raw = await run_sync(_sync_fetch, timeout=10)
+    parsed: dict[str, dict] = {}
+    for line in raw.strip().split("\n"):
+        if '"' not in line:
+            continue
+        parts = line.split('"')[1].split(",")
+        if len(parts) < 10:
+            continue
+        sym = parts[2] if parts[2] else ""
+        if not sym:
+            continue
+        try:
+            price = float(parts[3]) if parts[3] else None
+            nav = float(parts[8]) if parts[8] else None
+            parsed[sym] = {"price": price or 0.0, "nav": nav}
+        except (ValueError, IndexError):
+            pass
+    return parsed
+
+
+async def _fetch_iopv_from_qq(s_list: list[str]) -> dict[str, dict]:
+    """S8: 腾讯 QQ 行情作为 Sina IOPV 的降级源。
+
+    QQ 格式: v_sh510050="1~510050~50ETF~...~price~...~iopv..."
+    ETF 字段位置（~分隔）:
+      pos 3 = current price, pos 31 = IOPV (estimated NAV)
+    """
+    from ..core.async_utils import run_sync
+
+    def _sync_fetch():
+        import urllib.request
+        qq_symbols = ",".join(s_list)
+        url = f"http://qt.gtimg.cn/q={qq_symbols}"
+        req = urllib.request.Request(
+            url, headers={"User-Agent": "Mozilla/5.0"}
+        )
+        resp = urllib.request.urlopen(req, timeout=8)
+        return resp.read().decode("utf-8")
+
+    raw = await run_sync(_sync_fetch, timeout=10)
+    parsed: dict[str, dict] = {}
+    for line in raw.strip().split("\n"):
+        if "~" not in line or '"' not in line:
+            continue
+        parts = line.split('"')[1].split("~")
+        if len(parts) < 33:
+            continue
+        try:
+            price_str = parts[3] if len(parts) > 3 and parts[3] else ""
+            iopv_str = parts[31] if len(parts) > 31 and parts[31] else ""
+            code = parts[2] if len(parts) > 2 else ""
+            if not code:
+                continue
+            price = float(price_str) if price_str else None
+            iopv = float(iopv_str) if iopv_str else None
+            if iopv and iopv > 0:
+                parsed[code] = {"price": price or 0.0, "nav": iopv}
+        except (ValueError, IndexError):
+            pass
+    return parsed
+
+
+async def _fetch_iopv_from_em(s_list: list[str]) -> dict[str, dict]:
+    """O18: 东财 push2 https 行情 f236（ETF IOPV 估值字段）源。
+
+    ulist.np/get JSON: data.diff[] → f12=code, f2=price, f236=IOPV。
+    东财 secid: 1=沪市 0=深市（5/6 开头沪，0/1/3 深）。
+    """
+    from ..core.async_utils import run_sync
+    from ..core.market_context import EM_PUSH_HOST
+
+    def _sync_fetch():
+        import urllib.request
+        secids = []
+        for s in s_list:
+            market = "1" if s[0] in ("5", "6") else "0"
+            secids.append(f"{market}.{s}")
+        url = (
+            f"https://{EM_PUSH_HOST}/api/qt/ulist.np/get"
+            f"?secids={','.join(secids)}&fields=f12,f13,f2,f236"
+            f"&fltt=2&invt=2"
+        )
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        resp = urllib.request.urlopen(req, timeout=8)
+        return resp.read().decode("utf-8")
+
+    raw = await run_sync(_sync_fetch, timeout=10)
+    parsed: dict[str, dict] = {}
+    if not raw:
+        return parsed
+    try:
+        import json
+        payload = json.loads(raw)
+        diff = ((payload.get("data") or {}).get("diff")) or []
+        for row in diff:
+            code = str(row.get("f12", "") or "")
+            price = row.get("f2")
+            iopv = row.get("f236")
+            if not code:
+                continue
+            try:
+                price_f = float(price) if price not in (None, "-") else None
+                iopv_f = float(iopv) if iopv not in (None, "-") else None
+            except (ValueError, TypeError):
+                continue
+            if iopv_f and iopv_f > 0:
+                parsed[code] = {"price": price_f or 0.0, "nav": iopv_f}
+    except Exception as e:
+        logger.debug("[factor] EM IOPV parse failed: %s", e)
+    return parsed
+
+
+async def _fetch_iopv_chain(s_list: list[str], symbols: list[str]) -> tuple[dict[str, dict], str]:
+    """O18: IOPV 降级链——Sina → QQ → 东财 https，任一命中足够样本即停。
+
+    返回 (iopv_data, source_name)；全失败返回 ({}, "")（调用方走 TTJ 日净值兜底）。
+    """
+    try:
+        sina_data = await _fetch_iopv_from_sina(s_list)
+        if sum(1 for v in sina_data.values() if v.get("nav", 0) > 0) >= len(symbols) * 0.3:
+            return sina_data, "sina"
+    except Exception as e:
+        logger.debug("[factor] Sina IOPV failed: %s", e)
+    try:
+        qq_data = await _fetch_iopv_from_qq(s_list)
+        if sum(1 for v in qq_data.values() if v.get("nav", 0) > 0) >= len(symbols) * 0.3:
+            return qq_data, "qq"
+    except Exception as e:
+        logger.debug("[factor] QQ IOPV failed: %s", e)
+    try:
+        em_data = await _fetch_iopv_from_em(s_list)
+        if em_data:
+            logger.info("[factor] EM https IOPV fallback got %d values (O18)", len(em_data))
+            return em_data, "em"
+    except Exception as e:
+        logger.debug("[factor] EM IOPV failed: %s", e)
+    return {}, ""
+
+
 def _get_cached_kline(symbols: list[str]) -> dict[str, dict[str, Any]] | None:
     """如果缓存有效且包含所有请求的 symbol，返回缓存数据。"""
     global _kline_cache, _kline_cache_ts
@@ -707,6 +873,10 @@ class FactorRegistry:
         # F3-4 步骤D: 最近一次 _fetch_market_data 的 etf_specific 数据源缺口
         # （factor_code -> [缺失字段的 symbol 列表]；供 factors/active no_data reason 区分）
         self._data_source_gaps: dict[str, list[str]] = {}
+        # O20: 常量因子 code 集合（截面 std=0 → IC 无法计算）——
+        # factors/active reason 独立标注「截面无差异（常量输出）」，
+        # 与「数据源未接入」「IC 未累积」三分
+        self._constant_factor_codes: set[str] = set()
         self.load_definitions()
 
     def load_definitions(self, yaml_path: str | None = None) -> None:
@@ -913,101 +1083,24 @@ class FactorRegistry:
             results = []
         data = dict(results)
 
-        # 2. 批量获取 IOPV 数据（Sina + QQ Tencent 双源降级）
-        # 用于 premium_discount 因子计算 (S8: 腾讯QQ降级链)
+        # 2. 批量获取 IOPV 数据（Sina + QQ + 东财 https 三级降级链，O18）
+        # 用于 premium_discount 因子计算 (S8: 腾讯QQ降级链; O18: 东财 https 源)
         try:
-            prefixes = {"5": "sh", "6": "sh", "0": "sz", "1": "sz", "3": "sz"}
-            sina_list = [f"{prefixes.get(sym[0], chr(39)+sym+chr(39))}" for sym in symbols]
+            from .factor_registry import _iopv_sina_symbols, _fetch_iopv_chain
+            sina_list = _iopv_sina_symbols(symbols)
+            # O18: Sina → QQ → 东财 https 降级链（模块级实现，可单测）；
+            # 全失败时 iopv_data={} → 下方走 TTJ 日净值兜底
+            iopv_data, _iopv_source = await _fetch_iopv_chain(sina_list, symbols)
+            if not iopv_data:
+                logger.info('[factor] IOPV chain exhausted (sina/qq/em all failed), relying on TTJ daily nav fallback')
 
-            async def _fetch_iopv_from_sina(s_list: list[str]) -> dict[str, dict]:
-                """通过线程池获取新浪 IOPV 实时行情。"""
-                from ..core.async_utils import run_sync
+            for sym, values in iopv_data.items():
+                if sym in data and values.get('nav', 0) > 0:
+                    data[sym].setdefault('price', values.get('price', 0))
+                    data[sym]['nav'] = values.get('nav', 0)
+        except Exception as e:
+            logger.warning('[factor] batch NAV fetch failed: %s (proxy? — non-fatal)', e)
 
-                def _sync_fetch():
-                    import urllib.request
-                    url = f"http://hq.sinajs.cn/list={','.join(s_list)}"
-                    req = urllib.request.Request(
-                        url, headers={"Referer": "http://finance.sina.com.cn"}
-                    )
-                    resp = urllib.request.urlopen(req, timeout=8)
-                    return resp.read().decode("gbk")
-
-                raw = await run_sync(_sync_fetch, timeout=10)
-                parsed: dict[str, dict] = {}
-                for line in raw.strip().split("\n"):
-                    if '"' not in line:
-                        continue
-                    parts = line.split('"')[1].split(",")
-                    if len(parts) < 10:
-                        continue
-                    sym = parts[2] if parts[2] else ""
-                    if not sym:
-                        continue
-                    try:
-                        price = float(parts[3]) if parts[3] else None
-                        nav = float(parts[8]) if parts[8] else None
-                        parsed[sym] = {"price": price or 0.0, "nav": nav}
-                    except (ValueError, IndexError):
-                        pass
-                return parsed
-
-            async def _fetch_iopv_from_qq(s_list: list[str]) -> dict[str, dict]:
-                """S8: 腾讯 QQ 行情作为 Sina IOPV 的降级源。
-
-                QQ 格式: v_sh510050="1~510050~50ETF~...~price~...~iopv..."
-                ETF 字段位置（~分隔）:
-                  pos 3 = current price, pos 31 = IOPV (estimated NAV)
-                """
-                from ..core.async_utils import run_sync
-
-                def _sync_fetch():
-                    import urllib.request
-                    qq_symbols = ",".join(s_list)
-                    url = f"http://qt.gtimg.cn/q={qq_symbols}"
-                    req = urllib.request.Request(
-                        url, headers={"User-Agent": "Mozilla/5.0"}
-                    )
-                    resp = urllib.request.urlopen(req, timeout=8)
-                    return resp.read().decode("utf-8")
-
-                raw = await run_sync(_sync_fetch, timeout=10)
-                parsed: dict[str, dict] = {}
-                for line in raw.strip().split("\n"):
-                    if "~" not in line or '"' not in line:
-                        continue
-                    parts = line.split('"')[1].split("~")
-                    if len(parts) < 33:
-                        continue
-                    try:
-                        price_str = parts[3] if len(parts) > 3 and parts[3] else ""
-                        iopv_str = parts[31] if len(parts) > 31 and parts[31] else ""
-                        code = parts[2] if len(parts) > 2 else ""
-                        if not code:
-                            continue
-                        price = float(price_str) if price_str else None
-                        iopv = float(iopv_str) if iopv_str else None
-                        if iopv and iopv > 0:
-                            parsed[code] = {"price": price or 0.0, "nav": iopv}
-                    except (ValueError, IndexError):
-                        pass
-                return parsed
-
-            # 首先尝试 Sina
-            iopv_data = await _fetch_iopv_from_sina(sina_list)
-            sina_hit_count = sum(1 for v in iopv_data.values() if v.get("nav", 0) > 0)
-
-            # 如果 Sina 数据不足，降级到 QQ Tencent
-            if sina_hit_count < len(symbols) * 0.3:
-                logger.info("[factor] Sina IOPV only got %d/%d, trying QQ Tencent fallback (S8)",
-                            sina_hit_count, len(symbols))
-                try:
-                    qq_data = await _fetch_iopv_from_qq(sina_list)
-                    qq_hit_count = sum(1 for v in qq_data.values() if v.get("nav", 0) > 0)
-                    if qq_hit_count > sina_hit_count:
-                        logger.info("[factor] QQ Tencent fallback got %d IOPV values", qq_hit_count)
-                        iopv_data = qq_data
-                except Exception as qq_e:
-                    logger.debug("[factor] QQ Tencent IOPV fallback failed: %s", qq_e)
 
             for sym, values in iopv_data.items():
                 if sym in data and values.get("nav", 0) > 0:
@@ -1104,6 +1197,13 @@ class FactorRegistry:
                     if (data.get(s) or {}).get("shares_change_20d") is None
                     and (data.get(s) or {}).get("institutional_holdings_change") is None
                     and not (data.get(s) or {}).get("fund_scale")
+                ]
+            elif _field == "concepts":
+                # O20: industry_diversification 依赖 concepts 标签（或 industry_holdings）
+                _missing = [
+                    s for s in symbols
+                    if not (data.get(s) or {}).get("concepts")
+                    and not (data.get(s) or {}).get("industry_holdings")
                 ]
             else:
                 _missing = [s for s in symbols if (data.get(s) or {}).get("shares_change_20d") is None]
@@ -1217,6 +1317,9 @@ class FactorRegistry:
             mean_v = statistics.mean(all_v)
             std_v = statistics.stdev(all_v)
             if std_v < 1e-10:
+                # O20: 截面无差异（全 0/常量输出）→ IC 无法计算——记录常量因子，
+                # factors/active reason 独立标注「截面无差异（常量输出）」
+                self._constant_factor_codes.add(code)
                 continue
             # ── 混合归一化（Solution Design S2） ──
             # z-score（统计异常度）* 0.7 + min-max（相对排名）* 0.3

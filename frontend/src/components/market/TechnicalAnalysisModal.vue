@@ -23,6 +23,26 @@
           <p v-else-if="signalData.reason" class="ta-signal-reason">{{ signalData.reason }}</p>
         </div>
 
+        <!-- O28② (round7 §7 P28②): 今日涨跌 + 资金流区块——旧弹窗仅指标卡片
+             （RSI/MACD/KDJ/MA/BOLL + 信号），无 K 线涨跌、无资金流；
+             资金流后端 get_fund_flow 已实现但未接通。 -->
+        <div v-if="priceInfo" class="ta-price-row">
+          <span class="ta-cell-label">今日涨跌</span>
+          <span :class="priceInfo.change_pct >= 0 ? 'text-up' : 'text-down'">
+            {{ priceInfo.change_pct >= 0 ? '+' : '' }}{{ priceInfo.change_pct.toFixed(2) }}%
+          </span>
+          <span class="ta-price-val">收 {{ fmt(priceInfo.price) }}</span>
+        </div>
+        <div v-if="fundFlow && fundFlow.available" class="ta-price-row">
+          <span class="ta-cell-label">主力净流入</span>
+          <span :class="(fundFlow.main_net_inflow || 0) >= 0 ? 'text-up' : 'text-down'">
+            {{ fmtMoney(fundFlow.main_net_inflow) }}
+          </span>
+          <span v-if="fundFlow.main_net_inflow_pct != null" class="ta-price-val">
+            占成交 {{ fundFlow.main_net_inflow_pct >= 0 ? '+' : '' }}{{ fundFlow.main_net_inflow_pct.toFixed(2) }}%
+          </span>
+        </div>
+
         <!-- 关键指标 -->
         <div class="ta-grid">
           <div class="ta-cell">
@@ -82,9 +102,20 @@ const loading = ref(false)
 const error = ref('')
 const ind = ref({})
 const signalData = ref(null)
+// O28②: 今日涨跌（K 线 close 序列计算）+ 主力资金流（fund-flow 端点）
+const priceInfo = ref(null)
+const fundFlow = ref(null)
 
 function fmt(v) {
   return v === undefined || v === null ? '—' : Number(v).toFixed(2)
+}
+
+function fmtMoney(v) {
+  if (v === undefined || v === null) return '—'
+  const abs = Math.abs(v)
+  if (abs >= 100000000) return `${(v / 100000000).toFixed(2)} 亿`
+  if (abs >= 10000) return `${(v / 10000).toFixed(2)} 万`
+  return Number(v).toFixed(0)
 }
 
 // R4-25: signalText 从静态 const 改为 computed —— 旧实现 setup 时求值一次
@@ -129,17 +160,35 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [indRes, sigRes] = await Promise.all([
+    // O28②: 并行取指标/信号/K线/资金流——任一失败不阻塞其余（allSettled）
+    const [indRes, sigRes, chartRes, flowRes] = await Promise.allSettled([
       marketApi.indicators(props.symbol, props.assetType),
       marketApi.signal(props.symbol, props.assetType),
+      marketApi.chart(props.symbol, props.assetType),
+      marketApi.fundFlow(props.symbol),
     ])
-    ind.value = indRes.data || {}
-    signalData.value = sigRes.data || null
+    ind.value = indRes.status === 'fulfilled' ? (indRes.value.data || {}) : {}
+    signalData.value = sigRes.status === 'fulfilled' ? (sigRes.value.data || null) : null
+    // 今日涨跌：K 线 close[-1] vs close[-2]
+    const chartData = chartRes.status === 'fulfilled' ? (chartRes.value.data || null) : null
+    priceInfo.value = computeChangePct(chartData)
+    fundFlow.value = flowRes.status === 'fulfilled' ? (flowRes.value.data || null) : null
+    if (indRes.status === 'rejected' && sigRes.status === 'rejected') {
+      error.value = '指标加载失败：' + (indRes.reason?.message || '网络错误')
+    }
   } catch (e) {
     error.value = '指标加载失败：' + (e?.message || '网络错误')
   } finally {
     loading.value = false
   }
+}
+
+function computeChangePct(chart) {
+  if (!chart || !Array.isArray(chart.closes) || chart.closes.length < 2) return null
+  const last = chart.closes[chart.closes.length - 1]
+  const prev = chart.closes[chart.closes.length - 2]
+  if (last == null || prev == null || !prev) return null
+  return { price: last, change_pct: ((last - prev) / prev) * 100 }
 }
 
 function close() {

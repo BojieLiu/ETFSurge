@@ -60,11 +60,14 @@ async function send() {
   }
 }
 // R5: 市场切换重置——A→US 后旧市场的投顾回答/输入不应残留（交互优化）
+// O29 (round7 §7 P29): 补 query 清空——旧实现只清回答/错误，输入框残留
+// A 股问题切到美股后语义错乱（注释意图 vs 实现缺失）。
 watch(() => props.marketTab, () => {
   stopStream()
   response.value = ''
   error.value = ''
   loading.value = false
+  query.value = ''
 })
 
 </script>

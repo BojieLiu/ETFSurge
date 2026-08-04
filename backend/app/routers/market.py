@@ -75,6 +75,7 @@ async def search(
     keyword: str = Query(""),
     market: str | None = Query(None, description="Market filter: A/HK/US/global; null = 跨市场"),
     include_stocks: bool = Query(False, description="结果中是否包含个股"),
+    kind: str = Query("all", description="搜索类型: symbol(股票/ETF)/sector(板块)/index(指数)/all(全部)"),
 ) -> list[dict[str, Any]]:
     """统一搜索。
 
@@ -83,12 +84,23 @@ async def search(
       （include_stocks=false 仅静态 ETF 基座；true 静态基座 + akshare spot 个股）。
     - market=null/global → 跨市场合并：A股ETF →（include_stocks 时 A股个股）→ HK → US，
       各段 top 10、总计 ≤ 30、按 (market, symbol) 去重（Z29）。
+    - kind (O30, round7 §7 P30①)：sector → sectors 表（name ilike）；
+      index → indices_meta 表（name/pinyin/first_letter ilike）；all（默认）→
+      现有 symbol 段 + 尾部追加 sector/index 段（向后兼容，旧调用方不受影响）。
     """
     from ..models.search import Instrument
     from sqlalchemy import select, or_
 
-    mkt = market.upper() if market else None
+    mkt = str(market or "").upper() or None
+    kind = str(kind or "all").lower()
 
+    # O30: sector/index 专用分支（kind=sector|index 时忽略 market——板块/指数无市场维度）
+    if kind == "sector":
+        return await _search_sectors(keyword)
+    if kind == "index":
+        return await _search_indices(keyword)
+
+    # kind=symbol（或 all）：先走既有 symbol 逻辑
     if mkt == "A":
         # F3-2: 个股搜索优先（instruments 表）→ 空则降级 levistock 个股 → 再降 ETF
         try:
@@ -172,7 +184,72 @@ async def search(
         seen.add(key)
         dedup.append(it)
     # F3-2: 跨市场合并后全局精确匹配优先（symbol==kw 置顶，段序不再压住精确命中）
+    # O30: kind=all（默认）→ 尾部追加 sector/index 段（向后兼容：旧调用方不受影响）
+    if kind != "symbol":
+        try:
+            merged += await _search_sectors(keyword)
+        except Exception as e:
+            logger.warning("[search] sector segment failed: %s", e)
+        try:
+            merged += await _search_indices(keyword)
+        except Exception as e:
+            logger.warning("[search] index segment failed: %s", e)
+        for it in merged:
+            key = (it.get("market"), it.get("symbol"))
+            if key in seen:
+                continue
+            seen.add(key)
+            dedup.append(it)
     return _sort_search_results(dedup[:30], keyword)
+
+
+async def _search_sectors(keyword: str) -> list[dict[str, Any]]:
+    """O30: 板块搜索——sectors 表 name ilike %kw%（type='sector'，BK 码）。"""
+    from ..models.search import Sector
+    from sqlalchemy import select
+
+    kw = (keyword or "").strip()
+    if not kw:
+        return []
+    try:
+        async with async_session() as session:
+            stmt = select(Sector).where(Sector.name.ilike(f"%{kw}%")).limit(10)
+            rows = (await session.execute(stmt)).scalars().all()
+            return [{
+                "symbol": r.code, "name": r.name,
+                "type": "sector", "market": "A", "asset_type": "sector",
+            } for r in rows]
+    except Exception as e:
+        logger.warning("[search] sector search failed: %s", e)
+        return []
+
+
+async def _search_indices(keyword: str) -> list[dict[str, Any]]:
+    """O30: 指数搜索——indices_meta 表 name/pinyin/first_letter ilike（type='index'）。"""
+    from ..models.search import IndexMeta
+    from sqlalchemy import select, or_
+
+    kw = (keyword or "").strip()
+    if not kw:
+        return []
+    try:
+        async with async_session() as session:
+            stmt = select(IndexMeta).where(
+                IndexMeta.is_active == True,  # noqa: E712
+                or_(
+                    IndexMeta.name.ilike(f"%{kw}%"),
+                    IndexMeta.pinyin.ilike(f"%{kw}%"),
+                    IndexMeta.first_letter.ilike(f"%{kw}%"),
+                ),
+            ).limit(10)
+            rows = (await session.execute(stmt)).scalars().all()
+            return [{
+                "symbol": r.symbol, "name": r.name,
+                "type": "index", "market": r.market, "asset_type": "index",
+            } for r in rows]
+    except Exception as e:
+        logger.warning("[search] index search failed: %s", e)
+        return []
 
 
 async def _search_a_stocks(keyword: str) -> list[dict[str, Any]]:
@@ -413,6 +490,39 @@ async def fundamentals(symbol: str) -> dict:
         # Z16: 数据源不可用时返回结构化空响应而非 None (避免 response_model 校验 500)
         return {"symbol": symbol, "daily": [], "error": "fundamentals data unavailable"}
     return result
+
+
+@router.get("/fund-flow/{symbol}")
+async def fund_flow(symbol: str) -> dict[str, Any]:
+    """O28 (round7 §7 P28②): 单标的资金流——包装 market_data_hub.get_fund_flow。
+
+    契约: api-contracts/market/fund-flow.md——成功返回东财资金流字段
+    （snake_case 直通）；数据源不可用/异常返回 200 + available:false（不抛 500）。
+    """
+    try:
+        flow = market_data_hub.get_fund_flow(symbol)
+    except Exception as e:
+        logger.warning("[fund-flow] %s failed: %s", symbol, e)
+        flow = None
+    if not isinstance(flow, dict) or flow.get("main_net_inflow") is None:
+        return {
+            "symbol": symbol,
+            "main_net_inflow": None,
+            "main_net_inflow_pct": None,
+            "main_inflow": None,
+            "main_outflow": None,
+            "available": False,
+            "detail": "数据源不可用（get_fund_flow 返回空）",
+        }
+    return {
+        "symbol": symbol,
+        "main_net_inflow": flow.get("main_net_inflow"),
+        "main_net_inflow_pct": flow.get("main_net_inflow_pct"),
+        "main_inflow": flow.get("main_inflow"),
+        "main_outflow": flow.get("main_outflow"),
+        "update_time": flow.get("update_time"),
+        "available": True,
+    }
 
 
 # TODO: 未接入前端

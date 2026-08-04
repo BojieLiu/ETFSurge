@@ -143,6 +143,14 @@
                           <span v-else-if="f.status === 'static'" class="tip-status status-static">
                             🔒 静态标识（政策哑变量），不参与 IC 统计，非数据缺失
                           </span>
+                          <!-- O21 (round7 §7 P21): IC 定义/正负含义/阈值分档说明——用户看到
+                               0.07/-0.04 无法判断含义，补解读 -->
+                          <div class="tip-ic-explain">
+                            IC（信息系数）= 因子值与未来收益的截面相关性：正 IC 表示因子值越高未来收益越好（因子有效），
+                            负 IC 为反向指标（低因子值反而预示高收益），|IC| 越接近 1 预测力越强。
+                            判定：|IC| ≥ {{ f.ic_threshold || 0.02 }} 视为有效，低于阈值信号弱（⚠️），
+                            IC 为 null 表示数据不足或数据源未接入。
+                          </div>
                         </div>
                       </div>
                     </template>

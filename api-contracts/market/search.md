@@ -2,7 +2,7 @@
 
 > 关联方案: `docs/v5_z15_z29_implementation_design.md`（Z29 搜索自动补全不完善）
 > 变更类型: 既有端点行为修订（market=null 跨市场合并 + include_stocks 按分支生效 + asset_type 语义对齐）
-> 版本: v3.0（2026-07-31，Z29 实施修订）
+> 版本: v3.1（2026-08-04，round7 O30：新增 `kind` 参数 + 板块/指数段）
 
 ## 1. 概述 / Overview
 **功能描述**: 统一搜索。默认（无 `market` 参数）跨市场合并返回 A 股 ETF + 港股 ETF + 美股 ETF
@@ -11,7 +11,7 @@
 
 ## 2. 端点定义 / Endpoint
 ```
-GET /api/v1/market/search?keyword=<kw>[&market=<A|HK|US|global>][&include_stocks=<bool>]
+GET /api/v1/market/search?keyword=<kw>[&market=<A|HK|US|global>][&include_stocks=<bool>][&kind=<symbol|sector|index|all>]
 ```
 
 ### 查询参数
@@ -20,6 +20,7 @@ GET /api/v1/market/search?keyword=<kw>[&market=<A|HK|US|global>][&include_stocks
 | keyword | string | No | "" | 代码/名称/拼音/首字母模糊匹配 |
 | market | string | No | null | `A` / `HK` / `US` / `global`（`global` 与 null 同）；`null` = 跨市场合并 |
 | include_stocks | bool | No | false | 结果中是否包含个股（按分支生效，见行为契约 3） |
+| kind | string | No | "all" | `symbol`（默认：股票/ETF 段）/ `sector`（板块段）/ `index`（指数段）/ `all`（全部，symbol + sector + index） |
 
 ### 响应体（统一结构）
 ```json
@@ -54,6 +55,15 @@ GET /api/v1/market/search?keyword=<kw>[&market=<A|HK|US|global>][&include_stocks
 6. **enrich（实时价格补充）范围**：仅 `type=="etf"` 命中做 `get_asset_realtime` 补充（≤24 只基座 ETF）；
    个股命中一律不 enrich（HK 实时链路前缀 bug + spot 量大防限流），响应中个股无 `price`/`change_pct`。
 7. 任一路径异常均被捕获并记录 WARNING，最终返回 `[]`（HTTP 200，不抛 500）。
+8. **`kind` 参数（round7 O30，新增）**：
+   - `kind=sector`：仅查询 `sectors` 表（`name ilike %kw%`），返回
+     `{symbol: BK码, name, type: "sector"}`，独立于 market/stock 段（不影响现有 symbol 行为）。
+   - `kind=index`：仅查询 `indices_meta` 表（`name/pinyin/first_letter ilike %kw%`），返回
+     `{symbol: "sh000001", name, type: "index"}`。
+   - `kind=symbol`：现有行为（stock/etf/HK/US 段），不含板块/指数。
+   - `kind=all`（默认）：现有 stock/etf/HK/US 段 + **尾部追加** sector/index 段
+     （每段 top 10，总计上限由各段共享；向后兼容——旧调用方不受影响）。
+   - `market` 参数与 `kind` 正交：`kind=sector|index` 时忽略 `market`（板块/指数无市场维度）。
 
 ## 4. 错误与降级 / Error & Fallback
 | 情况 | 行为 |

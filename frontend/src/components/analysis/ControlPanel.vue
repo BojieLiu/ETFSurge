@@ -14,8 +14,12 @@
       <div class="control-group">
         <label class="control-label">图表类型</label>
         <div class="chart-mode-toggle" role="radiogroup">
-          <button :class="['mode-btn', { 'mode-btn--active': chartMode === 'kline' }]" @click="$emit('update:chartMode', 'kline')">📊 K线</button>
-          <button :class="['mode-btn', { 'mode-btn--active': chartMode === 'intraday' }]" @click="$emit('update:chartMode', 'intraday')">📈 分时</button>
+          <!-- O26 (round7 §7 P26): 模式按钮 aria-pressed 选中态——旧实现仅颜色差异，
+               视觉区分弱（用户反馈「没有标记展示当前选中哪个」） -->
+          <button :class="['mode-btn', { 'mode-btn--active': chartMode === 'kline' }]"
+                  :aria-pressed="chartMode === 'kline'" @click="$emit('update:chartMode', 'kline')">📊 K线</button>
+          <button :class="['mode-btn', { 'mode-btn--active': chartMode === 'intraday' }]"
+                  :aria-pressed="chartMode === 'intraday'" @click="$emit('update:chartMode', 'intraday')">📈 分时</button>
         </div>
       </div>
       <div class="control-group control-group--info" v-if="chartData">

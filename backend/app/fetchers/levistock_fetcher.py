@@ -54,6 +54,9 @@ _LEVEL_KEYWORDS: dict[int, tuple[str, ...]] = {
         "协议", "合作",
         # F3-1 步骤A: 地缘军事/制裁事件（组合直接相关才可能升 L5，其余归 L4）
         "冲突", "军事", "干预", "制裁", "战", "核",
+        # O7 (round7 §7 P9): 国际重磅宏观事件——利率决议/非农/OPEC
+        #（此前国际新闻无关键词命中 → 全 L1 1★，重磅国际事件被降级）
+        "利率决议", "非农", "OPEC",
         # 英文利好词
         "surge", "partnership", "breakthrough", "soar",
     ),
@@ -98,6 +101,9 @@ _LEVEL_KEYWORDS: dict[int, tuple[str, ...]] = {
         "营收", "净利润",
         "国务院", "发改委", "财政部", "商务部",
         "欧美", "欧央行", "鲍威尔",
+        # O7 (round7 §7 P9): 国际宏观数据词（重要但非紧急）——
+        # 通胀/失业/原油/海外央行 归 L2 而非 L1
+        "美联储", "失业", "通胀", "原油", "欧央行", "日本央行",
         # 重磅降级: 从 L5 移至 L2 (重要信号,非紧急)
         "重磅",
         # 公司采购/投资公告
@@ -127,7 +133,10 @@ def classify_news_level(title: str, content: str = "") -> int:
     """
     t = ((title or "") + " " + (content or "")[:200]).lower()
     for level in (5, 4, 3, 2):
-        if any(k in t for k in _LEVEL_KEYWORDS[level]):
+        # O7 (round7 §7 P9): 关键词统一 lower 再匹配——旧代码 t 已 lower 但
+        # 词表保留原始大小写（CPI/PMI/OPEC/FDA 等），大写英文词永不命中 →
+        # 国际重磅新闻全 L1（「美国5月CPI…」命中不到 "CPI"）。lower 后修复。
+        if any((k.lower() if isinstance(k, str) else k) in t for k in _LEVEL_KEYWORDS[level]):
             return level
     return 1
 

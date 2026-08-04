@@ -25,6 +25,8 @@ api.interceptors.response.use(
 )
 
 export const marketApi = {
+  // O28 (round7 §7 P28②): 单标的资金流端点封装（热点股票技术分析弹窗资金流区块）
+  fundFlow: (symbol) => api.get(`/market/fund-flow/${symbol}`),
   realtimePortfolio: () => api.get('/market/realtime/portfolio'),
   history: (symbol, assetType = 'A', period = 'daily') => api.get(`/market/history/${symbol}`, { params: { asset_type: assetType, period } }),
   search: (keyword, options = {}, config = {}) => api.get('/market/search', { params: { keyword, ...options }, ...config }),

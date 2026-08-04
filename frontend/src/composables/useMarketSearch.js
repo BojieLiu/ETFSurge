@@ -9,6 +9,8 @@ import { marketApi } from '../api'
  */
 export function useMarketSearch(options = {}) {
   const marketFilter = options.market || ''
+  // O30 (round7 §7 P30①): kind 透传——sector/index 模式复用同一下拉（后端 /search kind 参数）
+  const kindFilter = options.kind || 'all'
   const searchQuery = ref('')
   const searchResults = ref([])
   const showDropdown = ref(false)
@@ -64,9 +66,12 @@ export function useMarketSearch(options = {}) {
     if (searchAbort) searchAbort.abort()
     searchAbort = new AbortController()
     try {
+      // O30: kind 透传——symbol 模式默认 all（含板块/指数尾部段），
+      // sector/index 模式传对应 kind（后端只查对应表）
+      const kind = kindFilter === 'all' ? 'all' : kindFilter
       const res = await marketApi.search(
         q,
-        { include_stocks: true, ...(marketFilter ? { market: marketFilter } : {}) },
+        { include_stocks: true, kind, ...(marketFilter && kind === 'all' ? { market: marketFilter } : {}) },
         { signal: searchAbort.signal },
       )
       if (seq !== searchSeq) return // 过期响应丢弃

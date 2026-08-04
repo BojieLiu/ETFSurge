@@ -71,7 +71,9 @@ async def _fetch_akshare_list(fn_name: str, symbol_col: str, name_col: str, mark
 async def collect_all() -> list[dict]:
     """N09: 收集全部 instruments。
 
-    每段（A 股个股 / ETF / 港股）独立统计行数；失败段打 ERROR 而非仅 WARN。
+    每段（A 股个股 / ETF / 港股 / 美股）独立统计行数；失败段打 ERROR 而非仅 WARN。
+    O3 (round7 §7 P3): 补 US 段——此前只打包 A/HK，instruments 表 US=0 →
+    个股名称搜索（AAPL/苹果 等）空。
     """
     import logging
     logger = logging.getLogger("sync_instruments")
@@ -79,11 +81,12 @@ async def collect_all() -> list[dict]:
         ("A股个股", "stock_zh_a_spot_em"),
         ("A股ETF", "fund_etf_spot_em"),
         ("港股", "stock_hk_main_board_spot_em"),
+        ("美股", "stock_us_spot_em"),
     ]
     tasks = [
         (_fetch_a_stock_list() if fn == "stock_zh_a_spot_em"
          else _fetch_akshare_list(fn, "代码", "名称", mkt, at))
-        for (_, fn), (mkt, at) in zip(segments, [("A", "stock"), ("A", "etf"), ("HK", "stock")])
+        for (_, fn), (mkt, at) in zip(segments, [("A", "stock"), ("A", "etf"), ("HK", "stock"), ("US", "US")])
     ]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     merged: list[dict] = []

@@ -1,4 +1,4 @@
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import SectorHeatMap from '../components/market/SectorHeatMap.vue'
 import TechnicalAnalysisModal from '../components/market/TechnicalAnalysisModal.vue'
@@ -10,6 +10,9 @@ vi.mock('../api', () => ({
     getStockHotRank: vi.fn(),
     indicators: vi.fn(),
     signal: vi.fn(),
+    // O28②: 资金流端点（技术分析弹窗 load 并行调用）
+    fundFlow: vi.fn().mockResolvedValue({ data: { available: false, main_net_inflow: null } }),
+    chart: vi.fn().mockResolvedValue({ data: { closes: [] } }),
   },
 }))
 
@@ -135,8 +138,7 @@ describe('SectorHeatMap (F2-6/F2-7 §9.8)', () => {
     const wrapper = mount(SectorHeatMap)
     const tabs = wrapper.findAll('.tab-btn')
     await tabs[2].trigger('click')
-    await wrapper.vm.$nextTick()
-    await wrapper.vm.$nextTick()
+    await flushPromises()
     const techBtn = wrapper.findAll('.row-action')[0]
     await techBtn.trigger('click')
     expect(wrapper.findComponent(TechnicalAnalysisModal).exists()).toBe(true)
@@ -155,8 +157,7 @@ describe('SectorHeatMap (F2-6/F2-7 §9.8)', () => {
     const wrapper = mount(SectorHeatMap)
     const tabs = wrapper.findAll('.tab-btn')
     await tabs[2].trigger('click')
-    await wrapper.vm.$nextTick()
-    await wrapper.vm.$nextTick()
+    await flushPromises()
     await wrapper.findAll('.row-action')[0].trigger('click')
     await wrapper.vm.$nextTick()
     const modal = wrapper.findComponent(TechnicalAnalysisModal)
