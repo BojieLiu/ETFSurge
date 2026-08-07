@@ -1,0 +1,76 @@
+{
+ "Dashboard": {
+  "url": "/",
+  "load_sec": "8.1",
+  "console_errors": [],
+  "failed_requests": [],
+  "body_sample": "跳转到主内容 ETF Surge 📊 Dashboard 📁 组合与分析 📰 行情分析 🗞️ 资讯 🔑 Token 监控 📡 数据源 ⚙️ 配置 已连接 🔔 📊 Dashboard 实时行情监控、组合概览与盈亏明细 🌐 全球主流指数 自动刷新 A股 上证指数 3940.04 ▲ +1.02% 深证成指 14311.01 ▲ +1.42% 创业板指 3563.12 ▲ +1.35% 沪深300 4694.44 ▲ +0.93% 科创50 1744.02 ▲ +2.51% 港股 恒生指数 25668.03 ▲ +0.54% 恒生国企指数 8531.58 ▲ +0.39% 恒生科技指数 4858.29 ▲ +0.78% 美股 标普500 已收盘 7709.96 ▼ -0.18% 纳斯达克 已收盘 26348.35 ▼ -0.06% 道琼斯 已收盘 53885.10 ▼ -0.85% 日经·韩国 日经225 65606.64 ▼ -0.12% 韩国综合指数 6258.77 ▼ -0.60% 欧洲 英国富时100 已收盘 10918.77 ▲ +0.47% 德国DAX 已收盘 "
+ },
+ "行情分析": {
+  "url": "/market-analysis",
+  "load_sec": "8.0",
+  "console_errors": [],
+  "failed_requests": [],
+  "body_sample": "跳转到主内容 ETF Surge 📊 Dashboard 📁 组合与分析 📰 行情分析 🗞️ 资讯 🔑 Token 监控 📡 数据源 ⚙️ 配置 已连接 📰 行情分析 市场宏观研判、板块轮动分析与标的深度解读 A股 港股 美股 全球 📊 市场研判 ⭐ 自选 🔥 板块 💬 AI顾问 🔍 标的分析 📊 市场综合研判 基于实时行情与宏观数据的 AI 市场环境分析 🤖 生成A股研判 点击按钮，AI 将综合分析当前市场环境生成报告 ⭐ 自选/关注列表 快速查看自选标的的实时行情，支持添加/移除/备注 📋 自选标的 ➕ 添加自选 加载自选列表中... 🔥 热点板块排行 实时板块热度与资金流向监测 热点板块 板块热度 热门个股 💬 AI 投资顾问 向 AI 提问获取投资建议，结合实时行情与组合上下文 🤖 发送提问 💡 输入上方问题，AI 将结合实时行情与您的组合给出建议 🔍 标的分析 搜索股票/ETF/板块/指数，查看 AI 深度解读与行情数据 个股/ETF 板块/概念 指数 🔍 分析 快速输入: 上证50ETF 创业板ETF 黄金ETF 纳指ETF"
+ },
+ "组合管理": {
+  "url": "/portfolio-analysis",
+  "load_sec": "8.0",
+  "console_errors": [],
+  "failed_requests": [
+   "FAIL http://localhost/api/v1/market/watchlist?limit=100&offset=0",
+   "FAIL http://localhost/api/v1/market/hot-plates?limit=15&market=A",
+   "FAIL http://localhost/api/v1/portfolio/tasks?limit=10&offset=0"
+  ],
+  "body_sample": "跳转到主内容 ETF Surge 📊 Dashboard 📁 组合与分析 📰 行情分析 🗞️ 资讯 🔑 Token 监控 📡 数据源 ⚙️ 配置 已连接 预热中 投资本金 设置场内/场外可用资金，点击「重新分配」更新下方数据 场内仓位 场外仓位 全部重新分配 ⚡ AI工具 📋 持仓 📊 技术分析 组合管理 管理场内/场外 ETF 组合，设置目标权重，实时监控收益 场内 ETF 场外 ETF ➕ 添加 ETF 到 场内 搜索 ETF 市场 A股 港股 美股 成本价 (元/份) 持有份额/股数 权重 20% ➕ 添加 🏢 场内 ETF 列表 权重合计: 0.0% (不等于 100%) ⚖️ 均分权重 📤 导出 📥 导入 ⚖️ 偏离检查 📦 还没有 ETF 在上方搜索并添加 ETF 到组合 🧪 填充示例数据"
+ },
+ "资讯": {
+  "url": "/news",
+  "load_sec": "8.0",
+  "console_errors": [],
+  "failed_requests": [
+   "FAIL http://localhost/api/v1/portfolio/etfs?portfolio_type=on_exchange",
+   "FAIL http://localhost/api/v1/system/warmup",
+   "FAIL http://localhost/api/v1/portfolio/etfs?portfolio_type=off_exchange",
+   "FAIL http://localhost/api/v1/system/warmup",
+   "FAIL http://localhost/api/v1/portfolio/etfs?portfolio_type=on_exchange",
+   "FAIL http://localhost/api/v1/portfolio/tasks?limit=10&offset=0",
+   "FAIL http://localhost/api/v1/portfolio/etfs?portfolio_type=on_exchange",
+   "FAIL http://localhost/api/v1/factors/active"
+  ],
+  "body_sample": "跳转到主内容 ETF Surge 📊 Dashboard 📁 组合与分析 📰 行情分析 🗞️ 资讯 🔑 Token 监控 📡 数据源 ⚙️ 配置 已连接 预热中 📈 资讯监控 实时推送重要资讯，AI 智能分析对组合的影响 未连接 最低重要性： ★ 普通 ★★ 一般 ★★★ 关注 ★★★★ 重要 ★★★★ 重要 加载中..."
+ },
+ "因子IC": {
+  "url": "/factor-ic",
+  "load_sec": "8.0",
+  "console_errors": [],
+  "failed_requests": [
+   "FAIL http://localhost/api/v1/system/warmup",
+   "FAIL http://localhost/api/v1/portfolio/tasks?limit=10&offset=0",
+   "FAIL http://localhost/api/v1/news/headlines",
+   "FAIL http://localhost/api/v1/system/warmup"
+  ],
+  "body_sample": "跳转到主内容 ETF Surge 📊 Dashboard 📁 组合与分析 📰 行情分析 🗞️ 资讯 🔑 Token 监控 📡 数据源 ⚙️ 配置 已连接 🔔 📈 因子 IC 监控 核心因子 Information Coefficient 有效性追踪 因子数量 28 有效因子 26 无效因子 2 平均 |IC| 0.2620 更新时间 2026/8/7 18:45:26 🔍 因子 IC 排序 全部分类 风格 技术 情绪 A 股特有 ETF |IC| 降序 IC 降序 因子代码 分类 刷新 因子代码 分类 IC 值 有效性 样本数 etf.return_1m ETF_SPECIFIC 0.6743 有效 71 technical.macd.macd_raw TECHNICAL 0.6439 有效 67 technical.signal.overall TECHNICAL 0.6199 有效 71 technical.macd.macd TECHNICAL 0.6172 有效 71 technical.bollinger.bandwidth TECHNICAL -0.566"
+ },
+ "配置": {
+  "url": "/admin/config",
+  "load_sec": "8.0",
+  "console_errors": [],
+  "failed_requests": [],
+  "body_sample": "跳转到主内容 ETF Surge 📊 Dashboard 📁 组合与分析 📰 行情分析 🗞️ 资讯 🔑 Token 监控 📡 数据源 ⚙️ 配置 已连接 🔔 📈 系统配置 管理 API 密钥与服务配置 系统配置 管理 API 密钥与服务配置 — 保存后即时生效，无需重启服务 LLM 服务 DeepSeek API Key DeepSeek 官方 API 密钥，用于 LLM 分析和报告生成（降级线路） 显示 .env OpenCode Zen API Key OpenCode Zen 平台 API 密钥，用于 LLM 分析和报告生成（主力线路） 显示 .env 数据源 Tushare Token Tushare Pro 接口 Token，用于 A 股行情数据 显示 .env Alpha Vantage API Key Alpha Vantage API 密钥，用于美股实时行情（备用） 显示 .env Finnhub API Key Finnhub API 密钥，用于美股数据 显示 .env Twelve Data API Key Twelve Data API 密钥，用于"
+ },
+ "数据源监控": {
+  "url": "/source-monitor",
+  "load_sec": "8.0",
+  "console_errors": [],
+  "failed_requests": [],
+  "body_sample": "跳转到主内容 ETF Surge 📊 Dashboard 📁 组合与分析 📰 行情分析 🗞️ 资讯 🔑 Token 监控 📡 数据源 ⚙️ 配置 已连接 🔔 📈 数据源监控 数据源健康状态、事件趋势与失败记录 数据源总数 17 可用 15 熔断中 3 发生异常 0 最近失败 10 📈 事件趋势 (1h) 1小时 6小时 24小时 🔌 数据源状态 类型 数据源 状态 失败次数 冷却中 熔断器 数据 push2delay.eastmoney.com 可用 0 - 正常 数据 mootdx 可用 0 - 正常 数据 sina 可用 0 - 正常 数据 tencent 可用 0 - 正常 数据 akshare 不可用 0 383s 熔断 数据 levistock 可用 0 - 正常 数据 dongfang 不可用 0 383s 熔断 数据 all_stocks_lv 可用 0 - 正常 数据 all_stocks_ak 可用 0 - 正常 数据 factor.history 可用 0 - 正常 数据 sina_history 可用 0 - 正常 数据 china_marke"
+ },
+ "Token监控": {
+  "url": "/token-monitor",
+  "load_sec": "8.0",
+  "console_errors": [],
+  "failed_requests": [],
+  "body_sample": "跳转到主内容 ETF Surge 📊 Dashboard 📁 组合与分析 📰 行情分析 🗞️ 资讯 🔑 Token 监控 📡 数据源 ⚙️ 配置 已连接 🔔 📈 Token 用量监控 DeepSeek API Token 使用统计与趋势变化 总调用次数 14638 今日调用 828 本月 Token 789,495 错误率 33.5% 预估费用 (¥) 10.61 📈 Token 消耗趋势 按日 按月 按小时 🔧 各功能调用统计 功能 调用次数 PROMPT COMPLETION 总 TOKEN 平均耗时 错误 generate_news_summary 12714 5,336,774 1,197,035 6,533,809 3836.5ms 4073 run 991 2,195,323 2,310,791 4,506,114 27762.3ms 426 run_stream 654 415,274 1,014,622 1,429,896 19876.1ms 274 generate_portfolio_design 81 159,151 485,919 645,0"
+ }
+}

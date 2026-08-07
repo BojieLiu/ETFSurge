@@ -1,0 +1,23 @@
+{
+ "status": "ok",
+ "symbols": {
+  "510300": {
+   "total": 34,
+   "live": 23,
+   "ratio": "23/34",
+   "healthy": true
+  },
+  "518880": {
+   "total": 34,
+   "live": 23,
+   "ratio": "23/34",
+   "healthy": true
+  },
+  "511090": {
+   "total": 34,
+   "live": 24,
+   "ratio": "24/34",
+   "healthy": true
+  }
+ }
+}

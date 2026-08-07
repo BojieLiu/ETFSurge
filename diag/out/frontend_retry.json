@@ -1,0 +1,56 @@
+{
+ "组合管理": {
+  "wait_ms": 50000,
+  "api_requests": {
+   "/system/warmup": {
+    "status": 200,
+    "ms": -1
+   },
+   "/factors/active": {
+    "status": 200,
+    "ms": -1
+   },
+   "/portfolio/etfs": {
+    "status": 200,
+    "ms": -1
+   },
+   "/portfolio/tasks": {
+    "status": 200,
+    "ms": -1
+   },
+   "/portfolio/daily-pnl": {
+    "status": 200,
+    "ms": -1
+   },
+   "/market/chart/159338": {
+    "status": 200,
+    "ms": -1
+   },
+   "/market/signal/159338": {
+    "status": 200,
+    "ms": -1
+   },
+   "/market/indicators/159338": {
+    "status": 200,
+    "ms": -1
+   }
+  }
+ },
+ "资讯": {
+  "wait_ms": 30000,
+  "api_requests": {
+   "/system/warmup": {
+    "status": 200,
+    "ms": -1
+   },
+   "/news/headlines": {
+    "status": 200,
+    "ms": -1
+   },
+   "/portfolio/tasks": {
+    "status": 200,
+    "ms": -1
+   }
+  }
+ }
+}

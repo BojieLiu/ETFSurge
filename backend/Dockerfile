@@ -25,5 +25,8 @@ COPY . .
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "::", "--port", "8000"]  # O21 (round8): [::] 双栈监听（含 IPv4）
+# O21 (round8) 说明：`--host ::` 双栈仅在 Windows 本地生效（解决 localhost IPv6 慢路径 2s 延迟）；
+# 容器内 Linux 下 uvicorn 对 `::` 显式设置 IPV6_V6ONLY → 拒绝 IPv4 → Docker 端口映射（IPv4 转发）全部失效。
+# 容器内必须用 0.0.0.0（Docker Desktop 端口映射本身无 IPv6 回退问题）。
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 

@@ -34,6 +34,8 @@ services:
       # 覆盖 .env 的 LOG_LEVEL=DEBUG：生产日志级别收窄为 INFO（与 dev 对齐，省预热期 DEBUG 日志开销；
       # 排障需 DEBUG 时用 `docker compose run -e LOG_LEVEL=DEBUG` 临时覆盖）
       - LOG_LEVEL=INFO
+      # 性能诊断：启用预热 profiler（cProfile + pyinstrument），产物写容器内 /app/logs（与 dev 对齐）
+      - PROFILE_WARMUP=1
       # 覆盖 .env 中的 Windows 绝对路径（DATABASE_URL=sqlite+aiosqlite:///E:/...），
       # 适配容器内路径，否则 prod 容器会落到空数据库（instruments=0、持仓/自选全空）
       - DATABASE_URL=sqlite+aiosqlite:////app/data/portfolio.db
@@ -58,7 +60,9 @@ services:
     build:
       context: ./backend
     profiles: ["dev"]
-    command: uvicorn app.main:app --host :: --port 8000 --reload  # O21 (round8): [::] 双栈监听
+    # O21 (round8): 本地 `::` 双栈；容器内 Linux 下 `::` 拒 IPv4（uvicorn 设 V6ONLY），
+    # Docker 端口映射走 IPv4 → 容器内必须 0.0.0.0（list 形式避免 go-yaml 对 `::` 的解析歧义）
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     ports:
       - "8000:8000"
     env_file:

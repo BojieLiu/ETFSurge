@@ -1,0 +1,292 @@
+# Round9 容器化全链路复诊断与优化方案
+
+> 状态：**诊断完成 + 方案设计完成，未实施**（待 review 至实施标准后再落地）
+> 日期：2026-08-07
+> 范围：Docker prod 容器内全链路（构建/预热/设计/策略检查/行情分析/热点/自选/技术分析/资讯/因子/前端 Lighthouse/后端性能/测试防护）
+
+---
+
+## 0. 摘要
+
+本轮在 **Docker prod 容器内**（docker-compose --profile prod，镜像烘焙）对 ETF Surge 全链路做复诊断，与历轮"宿主 Windows 本地运行"的验证环境形成对照。核心结论：
+
+1. **容器化基础设施存在 5 个此前从未暴露的问题**（docker-compose.yml 无法解析、Dockerfile CMD 无法启动、容器内 IPv6 双栈失效、容器内东财 EM 数据源被 TLS 层拦截、mootdx 未配置），其中 EM 源被拦截导致**候选池为 0、A股个股搜索 0 命中、预热 37.4s 超阈值**——根因是历轮验证全部在宿主跑，**容器环境零测试覆盖**。
+2. **round8 O 项核对**：25 项（O13/O14 编号保留缺口）中 12 项确认修复、2 项未复现（O3/O10）、4 项部分修复、5 项未修复（O2 港股K线 / O4 个股搜索 / O6 IC淘汰 / O21 容器内双栈 / **O24 回归 bug——标的分析功能全挂**）、2 项未专项验证（O20/O27）。
+3. **性能**：前端 Lighthouse 90/100/99 优秀（O8 达成）；后端 8 个端点 >1s，`/market/watchlist` **29.9s** 灾难级且无任何门禁拦截。
+4. **报告质量**：组合设计可用但存在数据缺失仍入选、表格口径误差；**策略检查在 LLM 60s 超时后降级为全 hold 模板，专业投资者不可接受**。
+5. **测试防护体系**存在 4 类系统性盲区（stream 端点零契约测试、预热门禁口径错误、watchlist 只查 DB 不调 API、容器环境零覆盖），本轮所有新问题均落在盲区内。
+
+---
+
+## 1. 执行环境
+
+- Docker Desktop (Windows) + docker-compose v2，prod profile 三容器（redis / backend / frontend-nginx）。
+- backend: `python:3.14-slim` + uvicorn；frontend: node 24 构建 + nginx stable-alpine。
+- 诊断注入：prod backend 追加 `PROFILE_WARMUP=1`（与 dev 对齐）以启用 WarmupProfiler（cProfile + pyinstrument）。
+- 基线：`verify_e2e.py` 263/284 通过、21 项失败。
+
+---
+
+## 2. 容器化基础设施问题（P0 级，阻断/降级类）
+
+### C1. docker-compose.yml 无法被 go-yaml 解析（dev/prod 双模式全挂）
+- **现象**：`docker-compose --profile prod build` 报 `go-yaml load error at L61:C43: mapping values are not allowed in this context`。
+- **根因**：round8 O21 把 backend-dev 的 command 改为 `uvicorn app.main:app --host :: ...`，裸 `::` 后跟空格触发 go-yaml 严格解析报错；整个 compose 文件无法加载。
+- **影响**：dev 与 prod 全部无法编排（此前从未在 docker 跑过，故未暴露）。
+- **处置**：command 改为 YAML list 形式（本轮已实施，见 §12 追踪）。
+
+> 发现顺序说明：C1（compose 无法解析）在构建第一步即触发，**修复 C1 后**才观察到 C2（容器无法启动）与 C3（启动后端口不通）——三者递进暴露，本报告按根因类别排列而非发现时序。
+
+### C2. backend 容器无法启动：Dockerfile CMD 退化为 shell form（C1 修复后暴露）
+- **现象**：容器 `Restarting (127)`，日志 `/bin/sh: 1: [uvicorn,: not found`。
+- **根因**：Dockerfile 末行 `CMD ["uvicorn", ...]  # O21 (round8): [::] 双栈监听` —— **exec-form JSON 数组后追加行内注释**，Docker 解析为非法 JSON 后按 shell form 执行 `[uvicorn,` 命令 → exit 127。
+- **影响**：prod backend 无法启动（dev 因 compose command 覆盖未暴露）。
+- **处置**：注释移到 CMD 上一行（本轮已实施）。
+
+### C3. 容器内 uvicorn `--host ::` 只服务 IPv6 → Docker 端口映射全失效（O21 容器回归）
+- **现象**：容器内 `[::1]:8000` 200、`127.0.0.1:8000` Connection refused；宿主 127.0.0.1:8000 / localhost:8000 全失败，nginx 502。
+- **根因**：uvicorn 对 `--host ::` 在 Linux 容器内显式设置 `IPV6_V6ONLY` → 仅 IPv6 监听；Docker Desktop 端口映射走 IPv4 转发 → 全部失效。O21 在 Windows 本地跑通（Windows 的 AF_INET6 默认双栈），容器内从未验证。
+- **影响**：O21 方案"uvicorn 监听 [::]:8000"在容器场景不可用（且连基础启动都不行）。
+- **处置**：容器内改 `--host 0.0.0.0`（Docker 端口映射无 IPv6 回退问题，O21 意图仅本地需要；本轮已实施）。
+
+### C4. 容器内东方财富 EM 数据源被 TLS 层拦截（本轮最大环境性发现）
+- **现象**：
+  - 容器内 urllib/akshare 访问 `push2.eastmoney.com`（http/https）均 `RemoteDisconnected`，**宿主同一代码同一 UA 正常返回 1640 条**；
+  - baidu/qq/tencent 等外网从容器内访问正常 → 非全外网受限，指向 EM CDN/WAF 按 TLS 指纹拦截容器出口流量；
+  - 后果链：akshare EM 系接口（`fund_etf_spot_em`/`stock_zh_a_spot_em`/`stock_hk_spot_em`/`stock_us_spot_em`/`fund_open_fund_info_em`）全挂 → **候选池 0、ETF 数据质量 1 条、instruments A股个股段同步超时、A股/美股名称搜索 0 命中**。
+- **影响**：容器内行情数据管道大面积降级；宿主验证全绿的场景在容器内系统性失败。
+- **候选对策**（见 §12）：容器内为 akshare 换 TLS 指纹客户端（curl_cffi）；或调低 EM 优先级、把 mootdx/Sina/腾讯降级链补成主链；或容器出口走宿主代理。
+
+### C5. mootdx 未配置且 health 探针误报
+- **现象**：启动日志 `mootdx ERROR: 请手动运行 python -m mootdx bestip`（TDX 服务器未配置）；但 `/admin/sources/health` 显示 mootdx `available=true, failures=0`。
+- **根因**：source_health 探针只测连接池/配置存在性，不实测数据拉取；mootdx 无 bestip 配置时探针依然报可用。
+- **影响**：A股实时降级链第一环（mootdx）空转，浪费每次调用 1-2s；探针信息误导排障。
+
+### C6. 镜像烘焙携带历史日志（次要）
+- `backend/logs/backend.log.1-5`（各 ~10MB）被 COPY 进镜像，与 `./data` 挂载不同，logs 目录未挂载 → 预热 profiler 产物留在容器内需 docker cp 才能取（诊断路径缺陷）。
+
+---
+
+## 3. 预热性能诊断（PROFILE_WARMUP=1）
+
+### 3.1 数据
+| 指标 | 值 | 判定 |
+|---|---|---|
+| 墙钟启动→预热完成 | **37.4s** | 超 30s 阈值（日志告警 `Warmup took 37.4s (threshold 30s)`） |
+| profiler 标注段合计 | 12.6s（market_cache 12.46s 占大头） | 覆盖缺口 ~25s |
+| 未标注耗时段 | instruments 同步 A股段 30s TIMEOUT、IC 持久化首轮 19s | 未纳入任何计时 |
+
+### 3.2 cProfile 热点（37.3s 采样）
+- `requests`/akshare 网络 I/O 累计 **54.5s**（含重试）：`fund_etf_spot_em` 23.9s（分页 8 次）、`fund_open_fund_info_em` 12.2s（10 次）、`stock_zh_a_spot_em` 6.6s、`stock_us_spot_em` 5.4s —— **全部是被 EM 源拦截后的空等重试**（C4 直接后果）；
+- 线程锁等待 38.2s（run_sync 并发排队）、SSL 握手/读异常 14s（连接被拒后的特征）。
+
+### 3.3 结论
+预热超时的**主因不是代码逻辑，而是容器内 EM 源被拦后的超时重试**；次要原因是 mootdx 空转与 instruments 同步无段级超时。宿主环境预热正常（此前 R7/R8 已优化至 12s 内）。
+
+---
+
+## 4. 组合设计与策略检查质量审阅（专业投资者视角）
+
+### 4.1 组合设计（design #426，balanced / 50 万 / A 股）
+**产出**：防御 10 只 / 平衡 13 只 / 进攻 12 只（含现金），报告 8917 字，report_quality=full。
+
+**通过项**：
+- O18 已修复：510050 报 -0.23%（复诊基线 -23.40%）、518880 -0.11%（-10.70%）；全部 29 个涨跌样本在 ±10% 内；
+- 三层结构（核心/卫星/防御）+ 现金比例清晰，震荡市分批建仓/止损/再平衡纪律有量化标准；
+- M7/P1-1/P1-2 门禁通过（核心含宽基锚、卫星无宽基、核心层重叠 ≤1）；
+- O15 修复：562950 标注"电子方向"。
+
+**问题项（数据完整性）**：
+1. **560600 中证A500ETF "今日涨跌：数据源不可用"仍以 6% 权重入三套方案核心层**——数据缺失标的入选核心宽基，专业不可接受（应降级或剔除，标注原因）；
+2. 平衡型表格"核心 50%/卫星 24%/防御 11%" vs 实际权重 52%/22%/12%——1-2% 口径误差（防御 11% vs 12% 明显是笔误级）；
+3. 顶层 `market_regime=None` 而 `market_context.market_regime=range_bound`——接口字段断裂（前端若读顶层字段将显示空）；
+4. "多因子评分（0~1）"注释与数据矛盾（实际 ±5 范围值）——误导读者。
+
+**问题项（投资逻辑）**：
+5. 进攻型现金 38% 却标 16% 预期年化——62% 仓位要兑现 16% 需要权益部分 ~26% 年化，弹性假设激进；报告解释"留弹药"可自洽但应披露假设；
+6. 防御型卫星含证券 ETF 12%（高贝塔），与"防御"定位张力大，应有风控说明。
+
+### 4.2 场内策略检查（check #342，portfolio_type=on_exchange）
+**通过项**：
+- `portfolio_type=on_exchange` 过滤正确：DB 20 条持仓（10 场内 + 10 场外）只检查 10 只场内标的；
+- 兜底机制诚实：summary 明示"LLM 分析超时（60s 未返回，已用规则引擎兜底）"。
+
+**问题项（专业不可接受）**：
+1. **LLM 60s 超时 → 规则引擎兜底 → 10 只持仓全部 hold、理由为同一句模板、confidence 固定 0.7**——零增量信息，无法支撑"策略检查"价值主张；且与技术分析接口的信号（510880/513010/159869=buy、159545/512000=sell）直接矛盾；
+2. 因子分全部挤在 20-22（中性区间），区分度不足（与 §6.4 因子模型负 IC 问题同源）；
+3. 行业集中度检查因"数据源未覆盖 63% 权重标的"降级为空提示——容器内 EM 源被拦的直接后果；
+4. `StrategyCheckRecord` 持久化**未写 portfolio_type 字段**（模型有列），详情接口返回 None。
+
+**结论**：当前容器环境下，策略检查对专业投资者**不具可用性**；修复优先级 = LLM 超时（90s 对齐）> 模板化 hold 文案（个性化建议）> 行业数据完整性。
+
+---
+
+## 5. 行情分析功能测试（A股/港股/美股）
+
+| 功能 | 端点 | 结果 |
+|---|---|---|
+| 综合研判 A/HK/US | POST /analysis/llm-report | ✅ 3 市场全部成功（报告含指数/板块/情绪上下文） |
+| AI 投顾问答 | POST /analysis/llm-advice | ✅ 成功 |
+| 板块分析 | POST /analysis/sector-analysis/stream | ✅ 成功（558 events，含行情快照注入） |
+| 概念分析 | POST /analysis/sector-analysis/stream（与板块分析同一端点，以 `sector_type=concept` 区分） | ✅ 成功（686 events） |
+| **个股/ETF/指数分析（A股/港股/美股）** | POST /analysis/symbol-analysis/stream | ❌ **全挂：STREAM_ERROR** `llm_complete_stream() got an unexpected keyword argument 'rate_limit_cap'` |
+| 搜索自动补全 | GET /market/search | ✅ A/510→30 条、HK/0070→1、US/AAP→1（A股个股名称/代码 0 命中，见 O4） |
+
+**O24 回归 bug（本轮新增，P0）**：analysis.py:921-926 在 O24 实施时为 `agent.run_stream()` 透传 `max_retries=1, rate_limit_cap=10`，但 agent 底层调用 `llm_complete_stream()`（llm.py:415）签名**没有** `rate_limit_cap` 参数 → `/analysis/symbol-analysis/stream` 单一端点对**5 类标的**（A股个股/港股个股/美股个股/ETF/指数）全部 STREAM_ERROR，前端"🔍 标的分析"Tab 功能完全不可用。verify_e2e 的 section_analysis 只测 llm-report/advice，**不测 symbol-analysis/stream**，故回归零拦截。
+
+---
+
+## 6. 热点/自选/技术分析/资讯/因子验证
+
+### 6.1 热点板块与个股
+- hot-plates 11 条（医药/PCB/芯片产业链/AI应用…），含 `change`/`reason`/`lead_stocks` 完整字段（前端 hot tab 不消费 change，无断裂）；
+- sectors/heat 20 条，change_pct 兜底 0（O19 修复确认，无 console TypeError）；
+- stock-hot-rank 50 条真实数据（哈药股份 +9.97%、云南锗业 +10.0%），concept_tags 50/50 非空（O9 验收①通过）。
+- ⚠️ 板块分析报告出现"**单日暴涨 13.03%**"（医疗研发外包 BK1600）——A股板块单日 13% 极可疑，O5 值域校验未覆盖板块数据（应加板块级 ±10% 校验）。
+
+### 6.2 自选功能
+- 添加/列表/实时行情全部正常；**O22 修复确认**：sh688981 中芯国际 price=128.5 ✓；
+- ⚠️ POST /watchlist 不传 name 时 instruments 补名未生效（新增条目 name=代码）——根因疑似 instruments 表 `market` 字段与请求 `asset_type='A'` 不匹配（O9 部分未修复）。
+
+### 6.3 技术分析与综合信号
+- 10 只场内持仓 indicators/signal 全部有数据；信号分布 buy 3 / sell 2 / hold 5（有区分度）；
+- ⚠️ 与策略检查"全 hold 模板"直接矛盾（§4.2）；
+- ⚠️ MACD 接口返回 30 个历史 histogram 数组（冗余 5-10KB/标的，批量时放大延迟）。
+
+### 6.4 资讯页面
+- 头条 18 条，**level 分布 {2:7, 3:1, 4:1, 5:9}——L5（最重要）占 50% 且无 L1**，分级明显失真；
+- **stars 与 level 完全同分布**（2:7/3:1/4:1/5:9）——stars 无独立"新鲜度"信息维度；
+- 新闻智能分析（llm-news-analysis）1921 字结构完整（情绪/支撑/压制/综合判断），但 **AI 引用"情绪指数 60"与系统 sentiment 37.8 不一致**——LLM 自估值与系统口径脱节，专业读者会困惑。
+
+### 6.5 因子模型
+- summary：valid=23 / warn=1 / **no_data=6** / static=3 / avg_ic=0.0151；
+- O25 部分修复：no_data reason 已区分（etf 三因子"数据源未接入（缺 nav/benchmark_close/shares_change_20d）"、sentiment 三因子"截面无差异（常量输出）"）——不再笼统"IC 未累积"；但 **no_data 仍 6 项**（容器内 EM 源被拦为外部根因，宿主可能更好）；
+- **O6 未实施**：`/factors/ic` 端点返回的 28 条 IC 记录中 13 条为负（change_pct -0.449、bollinger.bandwidth -0.5661、atr_14 -0.4293、j_value -0.381…，口径：IC 端点仅收录已累积 IC 的因子，33 总数含 static/no_data），仍标 valid，且 reason 文案"IC -0.4490 ≥ 阈值 0.02"逻辑错误（负数不可能 ≥ 阈值，应取 |IC| 或显著性）。
+
+---
+
+## 7. 前后端数据断裂排查
+
+- 8 页面 playwright 走查：**无 JS console error**；Dashboard/行情/配置/数据源/Token 页零失败请求；
+- 组合管理页 3 个请求（watchlist/hot-plates/tasks）与资讯页 8 个请求在 8s 快照窗口内未完成（requestfailed）；**延长等待至 50s 后全部 200**——结论为**"慢后端→前端超时/空白"的软断裂**，非硬断链：
+  - 组合管理页 8s 时"场内 ETF 列表"空白（权重合计 0.0%），用户体验差；
+  - 慢主因 = `/market/watchlist` 29.9s（§10）；
+- hot-plates 字段（change）不被前端消费，无字段级断裂；heat/stock tab 字段匹配。
+
+---
+
+## 8. round8 三份文档问题清单核对
+
+见 `diag/out/round8_verification.md`（核对表全文）。摘要：
+
+- **确认修复（12）**：O5、O8、O11、O12、O15、O16、O17、O18、O19、O22、O23、O26；**未复现（2）**：O3、O10（热缓存/宿主正常态下未再触发，不计入修复）；
+- **部分修复（4）**：O1（后台化生效、A股段超时）、O7（兜底文案 OK、LLM 仍 60s 超时）、O9（concept_tags ✓、补名 ✗、watchlist 性能 ✗）、O25（reason ✓、no_data 仍 6）；
+- **未修复（5）**：O2（港股K线 0 条）、O4（A股/美股个股名称搜索 0 命中）、O6（负 IC 未淘汰）、O21（容器内双栈失效）、**O24（回归：标的分析全挂）**；
+- **未专项验证（2）**：O20（K线图渲染，需人工视觉）、O27（市值注入路径一致性）。
+- interaction-redesign（P1-P7 状态机）：前端 42 文件 388 用例全绿，达成；
+- frontend-theme-redesign（字号/铺满）：theme.css 已放大、Lighthouse 无劣化，达成。
+
+---
+
+## 9. 前端性能（Lighthouse 13.4.1，desktop preset）
+
+| 页面 | Performance | LCP | TBT | CLS | 附注 |
+|---|---|---|---|---|---|
+| 首页 / | 90 | — | — | — | a11y 96 / BP 96 / SEO 91 |
+| 行情分析 /market-analysis | **100** | 0.7s | 0ms | 0.004 | echarts 按需生效 |
+| 组合管理 /portfolio-analysis | 99 | 0.9s | 40ms | 0.042 | 数据加载期 CLS 可控 |
+
+**结论**：O8（echarts 按需 + CLS 治理）确认达成；F18 硬门禁（perf≥0.6、CLS≤0.1）远超。前端性能**无问题**。
+
+---
+
+## 10. 后端全链路性能（perf_diag.py，49 端点）
+
+48/49 通过（1 个 422 为 body 空预期行为）。**8 个端点 >1s**：
+
+| 端点 | 耗时 | 根因 |
+|---|---|---|
+| `/market/watchlist` | **29856ms** | 批量行情降级链在容器内逐源超时（10 条自选 × 多源重试），无整体超时 |
+| `/portfolio/calculate` | 5052ms | 全持仓因子/行情采集（EM 源被拦后重试） |
+| `/market/stock-hot-rank` | 4711ms | 东财热度接口被拦后降级 |
+| `/market/indices/global` | 4367ms | 全球指数多源降级 |
+| `/market/realtime` | 2314ms | 全市场快照 |
+| `/market/chart/510050` | 2092ms | K 线源降级 |
+| `/market/wind` | 1831ms | 同上 |
+| `/portfolio/tasks` | 1387ms | join 多表 |
+
+watchlist 29.9s 与 O9 验收④"<1s"差距 30 倍，且 verify_e2e 对该端点只查 DB 行数（§11），**性能黑洞零门禁**。
+
+---
+
+## 11. 测试防护体系为何未识别（4 类系统性盲区）
+
+1. **分析 stream 端点无契约测试**：verify_e2e `section_analysis`（720-758 行）只测 llm-report/llm-advice（stream 版也只断言 HTTP 200 不读 SSE 内容），**从不测 symbol-analysis/stream 与 sector-analysis/stream** → O24 回归（rate_limit_cap 参数错误）在 5 类标的分析（A股/港股/美股/ETF/指数）全挂的情况下零拦截；
+2. **预热门禁口径错误**：A01 门禁（98-120 行）用 `total_elapsed`（profiler 标注段求和 12.6s <20s → PASS），**刻意不用墙钟**（注释防 instruments 后台任务误报）→ 真实墙钟 37.4s 超 30s 阈值被"洗白"为 12.6s；预热的性能退化对门禁不可见；
+3. **watchlist 只查 DB 不调 API**：`section_db_integrity`（1435-1450 行）对 watchlist 断言"行数非空"，从不请求 `/market/watchlist` 测响应时间 → 29.9s 端点从未被拦截（O9 验收④形同虚设）；
+4. **容器环境零覆盖**：verify_e2e / perf_diag / 所有历轮验证都在宿主 Windows 本地 uvicorn 上跑，**从未在 docker 容器验证** → C1-C5（compose 解析、Dockerfile CMD、容器内 :: 拒 IPv4、EM TLS 拦截、mootdx 未配置）全部漏检；单测 mock 数据又是"完美形态"（round8 §6 已述，本轮未再扩大）。
+
+> 共同根因：**门禁验证的是"代码自述的行为"，不是"生产形态（容器）+ 真实数据链路 + 真实用户体验"的验收**。
+
+---
+
+## 12. 优化方案（按优先级，未实施）
+
+### P0（阻断/功能全挂，优先修复）
+| # | 问题 | 方案 | 验收 |
+|---|---|---|---|
+| P0-1 | O24 回归：symbol-analysis 全挂 | analysis.py:921-926 去掉向 `agent.run_stream` 透传的 `rate_limit_cap`（改走 `llm_complete_with_system` 或给 `llm_complete_stream` 加 kwargs）；补契约测试 | symbol-analysis/stream 对 5 类标的（A股/港股/美股/ETF/指数）SSE 正常出文 |
+| P0-2 | 容器内 EM 源被 TLS 拦截 | a) 容器内 akshare 请求换 curl_cffi（Chrome TLS 指纹）；b) 降级链升级：mootdx（配 bestip）/Sina/腾讯 提为主链，EM 置末；c) 容器出口走宿主代理；三选一 + 兼容组合 | 容器内候选池 ≥100、ETF 数据质量 ≥10 条、个股搜索命中 |
+| P0-3 | 容器内 `--host ::` 失效 | 容器内统一 0.0.0.0（已临时实施）；本地 O21 意图保留；新增"容器启动后 127.0.0.1 连通"的 docker 冒烟 | docker e2e 冒烟：容器内 IPv4 直连 200 |
+| P0-4 | watchlist 29.9s | 批量行情加整体超时（如 8s）+ 降级链短路（EM 冷却期跳过）；已有 batch 路径复用（market.py:696-703 的 get_realtime_batch）扩到 watchlist | watchlist ≤1s（10 条）；新增 verify_e2e watchlist 耗时门禁 |
+| P0-5 | 策略检查 LLM 60s 超时 + 全 hold 模板 | 超时对齐 90s（O7 验收）；规则引擎兜底输出个性化建议（按因子分区间生成差异化操作建议 + 引用技术信号），消除同模板；行业数据缺失时明示而非空转 | ①LLM 可用时 covered_by_llm>0；②无 LLM 时建议非模板化；③与 /signal 信号方向不矛盾 |
+
+### P1（数据完整性/正确性）
+| # | 问题 | 方案 | 验收 |
+|---|---|---|---|
+| P1-1 | O2 港股 K 线 0 条 | 修复港股历史数据源链（finnhub→alphavantage→akshare get_k_data），加源差异日志；对 K 线最新价与实时价做一致性校验 | `/history/00700?asset_type=HK` >100 根 |
+| P1-2 | O4 A股/美股个股搜索 0 命中 | 容器内 instruments 同步段级超时 + 降级（EM 挂时用 levistock/akshare 兜底）；重灌 instruments；名称搜索门禁从 SKIP 改 FAIL | 茅台/600519/apple 命中非空 |
+| P1-3 | O6 负 IC 因子未淘汰 + 文案错误 | 负 IC 且 |IC|≥阈值的因子降权/标记；reason 文案改 `|IC|=0.449 ≥ 0.02（负向）` | factors/active 无"负 IC 标 valid 且文案 ≥阈值"矛盾项 |
+| P1-4 | 预热门禁口径 | verify_e2e A01 增加墙钟 elapsed_seconds 的 WARN 线（如 40s）；PROFILE_WARMUP 报告补"未标注段"汇总 | 预热超 30s 时门禁告警（WARN 而非 PASS） |
+| P1-5 | 560600 数据缺失仍入核心 | 设计管道对"行情数据不可用"标的不给核心权重（或整仓剔除并标注）；值域/完整性 gate 前置 | design 核心层无数据缺失标的 |
+| P1-6 | design 顶层 market_regime 为空 | 详情接口补顶层 market_regime（复用 market_context） | 字段非空 |
+| P1-7 | instruments 补名失败（O9） | watchlist_add 的 instruments 查询放宽 market 匹配（如忽略大小写/映射 etf→A） | 不传 name 的新条目显示真实名称 |
+
+### P2（质量/体验）
+| # | 问题 | 方案 | 验收 |
+|---|---|---|---|
+| P2-1 | 资讯 level 分级失真（L5 占 50%、无 L1、stars=level） | 重新校准分级规则（来源权重/时效/量级），stars 加独立"新鲜度"维度 | 分布合理（L5 <30% 且有 L1）；stars≠level |
+| P2-2 | 新闻智能分析情绪指数与系统不一致 | llm-news-analysis 注入系统 sentiment（37.8）作为基准，要求 LLM 引用而非自估 | 报告情绪与系统口径一致 |
+| P2-3 | 板块"单日 13.03%"超界 | O5 值域校验扩展到板块/热度数据（±10% 外标"数据源异常"） | 无超界板块值透传 |
+| P2-4 | 策略检查记录缺 portfolio_type | worker 持久化补写字段 | 详情返回 on_exchange |
+| P2-5 | MACD histogram 冗余 | indicators 接口截断历史数组（如仅返回末值/短序列） | 响应体积下降 |
+| P2-6 | mootdx 探针误报 | source_health 对 mootdx 做实测拉取（或 bestip 未配置时标 unavailable） | 探针状态与实测一致 |
+| P2-7 | 镜像携带历史日志 + 预热产物不可取回 | backend/.dockerignore 排除 logs/；`./logs` 加入 volume 挂载（预热产物直接落宿主可见） | 镜像体积下降；预热报告宿主可见 |
+
+### P3（测试防护补强，防再犯）
+
+| # | 方案 | 验收 |
+|---|---|---|
+| P3-1 | verify_e2e 新增 `section_symbol_stream`：symbol-analysis/stream 对 5 类标的（A股/港股/美股/ETF/指数）断言 SSE 含 full_text 且无 STREAM_ERROR | 本轮 P0-1 修复后全绿；回归必拦 |
+| P3-2 | verify_e2e watchlist 加 API 耗时门禁（≤5s WARN / ≤10s FAIL） | 29.9s 必 FAIL |
+| P3-3 | A01 门禁加墙钟 WARN 线；预热报告覆盖未标注段 | 37.4s 必 WARN |
+| P3-4 | 新增 `docker-smoke` 脚本（compose up + 容器内 IPv4 探测 + 关键端点冒烟），进 CI/发布门禁 | 容器环境 C1-C5 类问题零漏检 |
+| P3-5 | 前端标的分析组件补"SSE STREAM_ERROR → 分类失败 + 重试"交互测试 | O24 类回归在组件层可拦 |
+| P3-6 | **诊断开关回滚**：`PROFILE_WARMUP=1` 本轮注入 prod backend 属诊断残留——常态运行前回滚该行（dev 侧保留），需要时用 `docker compose run -e PROFILE_WARMUP=1` 临时注入 | prod 无 profiler 开销；产物仅诊断期产生 |
+
+---
+
+## 13. 结论
+
+- 前端（Lighthouse 90-100、零 console error、388 单测绿）与设计引擎主体（O18/O19/O22/O26 等 12 项修复确认 + O3/O10 未复现）状态良好；
+- **当前阻塞项**：O24 回归（标的分析全挂，P0-1）、容器内 EM 源（P0-2）、watchlist 29.9s（P0-4）、策略检查全 hold 模板（P0-5）；
+- 基础设施层面，历轮"宿主验证"掩盖了容器环境的 5 个基础问题（C1-C5），P3-4（docker 冒烟门禁）是防再犯的关键投入；
+- 本方案未实施，等待 review 至实施标准。
+
+---
+
+## 附：本轮改动（诊断所需，均已落地并附注释）
+
+1. `docker-compose.yml`：backend-dev command 改 list 形式（修 C1）；prod backend 加 `PROFILE_WARMUP=1`（诊断）；两处 `--host` 容器内改 0.0.0.0（修 C3）；
+2. `backend/Dockerfile`：CMD 注释移到独立行（修 C2）+ 容器内 0.0.0.0（修 C3）；
+3. 诊断脚本/产物：`diag/` 下 run_design_check.py / run_market_analysis.py / run_hot_watchlist.py / run_step678.py / walk_frontend.cjs / check_round8_extra.py 等，产物在 `diag/out/`。

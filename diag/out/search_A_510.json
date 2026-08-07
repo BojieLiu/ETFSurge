@@ -1,0 +1,212 @@
+[
+ {
+  "symbol": "510020",
+  "name": "超大盘ETF博时",
+  "market": "A",
+  "asset_type": "etf",
+  "type": "etf"
+ },
+ {
+  "symbol": "510050",
+  "name": "上证50ETF华夏",
+  "market": "A",
+  "asset_type": "etf",
+  "type": "etf"
+ },
+ {
+  "symbol": "510100",
+  "name": "上证50ETF易方达",
+  "market": "A",
+  "asset_type": "etf",
+  "type": "etf"
+ },
+ {
+  "symbol": "510150",
+  "name": "消费ETF招商",
+  "market": "A",
+  "asset_type": "etf",
+  "type": "etf"
+ },
+ {
+  "symbol": "510170",
+  "name": "大宗商品ETF国联安",
+  "market": "A",
+  "asset_type": "etf",
+  "type": "etf"
+ },
+ {
+  "symbol": "510180",
+  "name": "上证180ETF华安",
+  "market": "A",
+  "asset_type": "etf",
+  "type": "etf"
+ },
+ {
+  "symbol": "510190",
+  "name": "上证50ETF华安",
+  "market": "A",
+  "asset_type": "etf",
+  "type": "etf"
+ },
+ {
+  "symbol": "510290",
+  "name": "上证380ETF南方",
+  "market": "A",
+  "asset_type": "etf",
+  "type": "etf"
+ },
+ {
+  "symbol": "510410",
+  "name": "资源ETF博时",
+  "market": "A",
+  "asset_type": "etf",
+  "type": "etf"
+ },
+ {
+  "symbol": "510500",
+  "name": "中证500ETF南方",
+  "market": "A",
+  "asset_type": "etf",
+  "type": "etf"
+ },
+ {
+  "symbol": "510510",
+  "name": "中证500ETF广发",
+  "market": "A",
+  "asset_type": "etf",
+  "type": "etf"
+ },
+ {
+  "symbol": "510530",
+  "name": "中证500ETF工银",
+  "market": "A",
+  "asset_type": "etf",
+  "type": "etf"
+ },
+ {
+  "symbol": "510550",
+  "name": "中证500ETF方正富邦",
+  "market": "A",
+  "asset_type": "etf",
+  "type": "etf"
+ },
+ {
+  "symbol": "510560",
+  "name": "中证500ETF国寿",
+  "market": "A",
+  "asset_type": "etf",
+  "type": "etf"
+ },
+ {
+  "symbol": "510570",
+  "name": "中证500ETF兴业",
+  "market": "A",
+  "asset_type": "etf",
+  "type": "etf"
+ },
+ {
+  "symbol": "510580",
+  "name": "中证500ETF易方达",
+  "market": "A",
+  "asset_type": "etf",
+  "type": "etf"
+ },
+ {
+  "symbol": "510590",
+  "name": "中证500ETF平安",
+  "market": "A",
+  "asset_type": "etf",
+  "type": "etf"
+ },
+ {
+  "symbol": "510660",
+  "name": "医药ETF华夏",
+  "market": "A",
+  "asset_type": "etf",
+  "type": "etf"
+ },
+ {
+  "symbol": "510710",
+  "name": "上证50ETF博时",
+  "market": "A",
+  "asset_type": "etf",
+  "type": "etf"
+ },
+ {
+  "symbol": "510760",
+  "name": "上证指数ETF国泰",
+  "market": "A",
+  "asset_type": "etf",
+  "type": "etf"
+ },
+ {
+  "symbol": "510770",
+  "name": "G60创新ETF申万菱信",
+  "market": "A",
+  "asset_type": "etf",
+  "type": "etf"
+ },
+ {
+  "symbol": "510800",
+  "name": "上证50ETF建信",
+  "market": "A",
+  "asset_type": "etf",
+  "type": "etf"
+ },
+ {
+  "symbol": "510850",
+  "name": "上证50ETF工银",
+  "market": "A",
+  "asset_type": "etf",
+  "type": "etf"
+ },
+ {
+  "symbol": "510950",
+  "name": "上证50ETF广发",
+  "market": "A",
+  "asset_type": "etf",
+  "type": "etf"
+ },
+ {
+  "symbol": "510980",
+  "name": "上证指数ETF汇添富",
+  "market": "A",
+  "asset_type": "etf",
+  "type": "etf"
+ },
+ {
+  "symbol": "510990",
+  "name": "180ESGETF工银",
+  "market": "A",
+  "asset_type": "etf",
+  "type": "etf"
+ },
+ {
+  "symbol": "512510",
+  "name": "中证500ETF华泰柏瑞",
+  "market": "A",
+  "asset_type": "etf",
+  "type": "etf"
+ },
+ {
+  "symbol": "520510",
+  "name": "港股通医疗ETF华夏",
+  "market": "A",
+  "asset_type": "etf",
+  "type": "etf"
+ },
+ {
+  "symbol": "560510",
+  "name": "中证A500ETF泰康",
+  "market": "A",
+  "asset_type": "etf",
+  "type": "etf"
+ },
+ {
+  "symbol": "561510",
+  "name": "中药ETF华泰柏瑞",
+  "market": "A",
+  "asset_type": "etf",
+  "type": "etf"
+ }
+]

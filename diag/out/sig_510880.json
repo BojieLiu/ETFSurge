@@ -1,0 +1,9 @@
+{
+ "signal": "buy",
+ "score": 2.0,
+ "reasons": [
+  "MACD金叉多头",
+  "MA5>MA20 多头排列"
+ ],
+ "data_available": true
+}

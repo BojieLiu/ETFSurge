@@ -1,0 +1,10 @@
+{
+ "signal": "hold",
+ "score": 0.5,
+ "reasons": [
+  "RSI=39.1 偏弱",
+  "MACD偏多",
+  "MA5<MA20 空头排列"
+ ],
+ "data_available": true
+}

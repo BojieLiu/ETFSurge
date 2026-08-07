@@ -56,3 +56,5 @@ opencode.json
 # Reasonix runtime artifacts
 .omo/
 
+
+diag/out/logs_container/

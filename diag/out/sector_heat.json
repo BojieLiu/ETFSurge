@@ -1,0 +1,185 @@
+{
+ "items": [
+  {
+   "rank": 1,
+   "name": "PCB",
+   "heat_index": 12036.5109672312,
+   "rank_change": 1,
+   "is_new": 0,
+   "plate_code": "cls80025",
+   "change_pct": 0
+  },
+  {
+   "rank": 2,
+   "name": "光通信",
+   "heat_index": 7940.518387054,
+   "rank_change": -1,
+   "is_new": 0,
+   "plate_code": "cls80189",
+   "change_pct": 0
+  },
+  {
+   "rank": 3,
+   "name": "铜箔/覆铜板",
+   "heat_index": 5484.274249229,
+   "rank_change": 11,
+   "is_new": 0,
+   "plate_code": "cls80445",
+   "change_pct": 0
+  },
+  {
+   "rank": 4,
+   "name": "半导体材料",
+   "heat_index": 5230.8736617725,
+   "rank_change": -1,
+   "is_new": 0,
+   "plate_code": "cls80455",
+   "change_pct": 0
+  },
+  {
+   "rank": 5,
+   "name": "CRO/CMO",
+   "heat_index": 3828.8917367829,
+   "rank_change": 135,
+   "is_new": 1,
+   "plate_code": "cls80481",
+   "change_pct": 0
+  },
+  {
+   "rank": 6,
+   "name": "稀土永磁",
+   "heat_index": 3451.0289673598,
+   "rank_change": 20,
+   "is_new": 1,
+   "plate_code": "cls80130",
+   "change_pct": 0
+  },
+  {
+   "rank": 7,
+   "name": "商业航天",
+   "heat_index": 3084.1636307298,
+   "rank_change": 3,
+   "is_new": 0,
+   "plate_code": "cls82517",
+   "change_pct": 0
+  },
+  {
+   "rank": 8,
+   "name": "氟化工",
+   "heat_index": 3038.789106,
+   "rank_change": -4,
+   "is_new": 0,
+   "plate_code": "cls80224",
+   "change_pct": 0
+  },
+  {
+   "rank": 9,
+   "name": "军工",
+   "heat_index": 2938.5289249562,
+   "rank_change": 0,
+   "is_new": 0,
+   "plate_code": "cls80222",
+   "change_pct": 0
+  },
+  {
+   "rank": 10,
+   "name": "5G产业链",
+   "heat_index": 2831.614768966,
+   "rank_change": 8,
+   "is_new": 0,
+   "plate_code": "cls80452",
+   "change_pct": 0
+  },
+  {
+   "rank": 11,
+   "name": "国企改革",
+   "heat_index": 2719.2549465866,
+   "rank_change": 6,
+   "is_new": 0,
+   "plate_code": "cls80218",
+   "change_pct": 0
+  },
+  {
+   "rank": 12,
+   "name": "量子科技",
+   "heat_index": 2684.2156584076,
+   "rank_change": 26,
+   "is_new": 1,
+   "plate_code": "cls80073",
+   "change_pct": 0
+  },
+  {
+   "rank": 13,
+   "name": "OLED",
+   "heat_index": 2648.7106555721,
+   "rank_change": 6,
+   "is_new": 0,
+   "plate_code": "cls80191",
+   "change_pct": 0
+  },
+  {
+   "rank": 14,
+   "name": "煤炭",
+   "heat_index": 2451.9897159037,
+   "rank_change": -7,
+   "is_new": 0,
+   "plate_code": "cls80056",
+   "change_pct": 0
+  },
+  {
+   "rank": 15,
+   "name": "创新药",
+   "heat_index": 2384.0091305513,
+   "rank_change": 220,
+   "is_new": 1,
+   "plate_code": "cls80044",
+   "change_pct": 0
+  },
+  {
+   "rank": 16,
+   "name": "医疗器械",
+   "heat_index": 2380.9214029097,
+   "rank_change": 49,
+   "is_new": 1,
+   "plate_code": "cls80576",
+   "change_pct": 0
+  },
+  {
+   "rank": 17,
+   "name": "农业种植",
+   "heat_index": 2247.4555103354,
+   "rank_change": 6,
+   "is_new": 1,
+   "plate_code": "cls80147",
+   "change_pct": 0
+  },
+  {
+   "rank": 18,
+   "name": "AMC",
+   "heat_index": 2234.1606844528,
+   "rank_change": -7,
+   "is_new": 0,
+   "plate_code": "cls80134",
+   "change_pct": 0
+  },
+  {
+   "rank": 19,
+   "name": "黄金概念",
+   "heat_index": 2151.3735748242,
+   "rank_change": 42,
+   "is_new": 1,
+   "plate_code": "cls81377",
+   "change_pct": 0
+  },
+  {
+   "rank": 20,
+   "name": "宁德时代概念",
+   "heat_index": 2083.6988546114,
+   "rank_change": 33,
+   "is_new": 1,
+   "plate_code": "cls80096",
+   "change_pct": 0
+  }
+ ],
+ "total": 20
+}

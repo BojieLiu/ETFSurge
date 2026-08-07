@@ -1,0 +1,273 @@
+{
+ "total": 188,
+ "categories": [
+  {
+   "name": "alternative",
+   "count": 20,
+   "description": "另类数据因子：基于信用卡消费、ESG、专利、招聘、供应链和网络流量等非传统数据源",
+   "subcategories": [
+    {
+     "name": "credit_card",
+     "count": 3
+    },
+    {
+     "name": "esg",
+     "count": 4
+    },
+    {
+     "name": "patent",
+     "count": 4
+    },
+    {
+     "name": "recruitment",
+     "count": 3
+    },
+    {
+     "name": "supply_chain",
+     "count": 3
+    },
+    {
+     "name": "web_traffic",
+     "count": 3
+    }
+   ]
+  },
+  {
+   "name": "china_specific",
+   "count": 13,
+   "description": "中国特有因子：针对 A 股市场的特殊特征，如股息质量、政策契合度、国企属性",
+   "subcategories": [
+    {
+     "name": "dividend_quality",
+     "count": 3
+    },
+    {
+     "name": "policy_alignment",
+     "count": 3
+    },
+    {
+     "name": "soe_ownership",
+     "count": 4
+    },
+    {
+     "name": "state_ownership",
+     "count": 3
+    }
+   ]
+  },
+  {
+   "name": "etf_specific",
+   "count": 10,
+   "description": "ETF 特有因子：针对 ETF 品类的专属分析维度，如折溢价率、规模、跟踪误差",
+   "subcategories": [
+    {
+     "name": "etf",
+     "count": 10
+    }
+   ]
+  },
+  {
+   "name": "microstructure",
+   "count": 10,
+   "description": "微观结构因子：基于日内交易数据的市场微观结构分析，如订单流、反转效应",
+   "subcategories": [
+    {
+     "name": "intraday",
+     "count": 4
+    },
+    {
+     "name": "order_flow",
+     "count": 3
+    },
+    {
+     "name": "reversal",
+     "count": 3
+    }
+   ]
+  },
+  {
+   "name": "sentiment",
+   "count": 4,
+   "description": "情绪因子：基于新闻舆情和市场情绪数据，捕捉投资者情绪变化对资产价格的影响",
+   "subcategories": [
+    {
+     "name": "news",
+     "count": 4
+    }
+   ]
+  },
+  {
+   "name": "style",
+   "count": 37,
+   "description": "风格因子：涵盖规模、价值、波动率、流动性、质量、成长六大类，对标 MSCI Barra 和华证因子体系，用于刻画个股的稳定特征",
+   "subcategories": [
+    {
+     "name": "growth",
+     "count": 5
+    },
+    {
+     "name": "leverage",
+     "count": 3
+    },
+    {
+     "name": "liquidity",
+     "count": 4
+    },
+    {
+     "name": "momentum",
+     "count": 5
+    },
+    {
+     "name": "quality",
+     "count": 6
+    },
+    {
+     "name": "size",
+     "count": 3
+    },
+    {
+     "name": "value",
+     "count": 6
+    },
+    {
+     "name": "volatility",
+     "count": 5
+    }
+   ]
+  },
+  {
+   "name": "technical",
+   "count": 65,
+   "description": "技术指标因子：基于价格和成交量的技术分析指标，如均线、MACD、RSI、KDJ、布林带等，用于捕捉价格趋势和反转信号",
+   "subcategories": [
+    {
+     "name": "aroon",
+     "count": 3
+    },
+    {
+     "name": "atr",
+     "count": 2
+    },
+    {
+     "name": "bollinger",
+     "count": 6
+    },
+    {
+     "name": "cci",
+     "count": 1
+    },
+    {
+     "name": "dmi",
+     "count": 4
+    },
+    {
+     "name": "donchian",
+     "count": 1
+    },
+    {
+     "name": "gap",
+     "count": 1
+    },
+    {
+     "name": "ichimoku",
+     "count": 5
+    },
+    {
+     "name": "kdj",
+     "count": 6
+    },
+    {
+     "name": "keltner",
+     "count": 2
+    },
+    {
+     "name": "ma",
+     "count": 6
+    },
+    {
+     "name": "macd",
+     "count": 3
+    },
+    {
+     "name": "pattern",
+     "count": 4
+    },
+    {
+     "name": "pivot",
+     "count": 2
+    },
+    {
+     "name": "psar",
+     "count": 1
+    },
+    {
+     "name": "rsi",
+     "count": 3
+    },
+    {
+     "name": "signal",
+     "count": 1
+    },
+    {
+     "name": "std",
+     "count": 2
+    },
+    {
+     "name": "stochastic",
+     "count": 2
+    },
+    {
+     "name": "volume",
+     "count": 8
+    },
+    {
+     "name": "williams_r",
+     "count": 1
+    },
+    {
+     "name": "zigzag",
+     "count": 1
+    }
+   ]
+  },
+  {
+   "name": "theme",
+   "count": 29,
+   "description": "主题因子：聚焦国家战略新兴产业的板块轮动和主题投资信号",
+   "subcategories": [
+    {
+     "name": "ai_computing",
+     "count": 5
+    },
+    {
+     "name": "data_element",
+     "count": 4
+    },
+    {
+     "name": "innovative_drug",
+     "count": 5
+    },
+    {
+     "name": "low_altitude",
+     "count": 5
+    },
+    {
+     "name": "new_energy",
+     "count": 5
+    },
+    {
+     "name": "semiconductor",
+     "count": 5
+    }
+   ]
+  }
+ ],
+ "summary": {
+  "valid": 23,
+  "warn": 1,
+  "no_data": 6,
+  "static": 3,
+  "avg_ic": 0.0151
+ },
+ "updated_at": "2026-08-07T10:40:43.489091+00:00"
+}
