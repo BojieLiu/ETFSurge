@@ -11,12 +11,12 @@
 本轮在 **Docker prod 容器内**（docker-compose --profile prod，镜像烘焙）对 ETF Surge 全链路做复诊断，与历轮"宿主 Windows 本地运行"的验证环境形成对照。核心结论：
 
 1. **容器化基础设施存在 5 个此前从未暴露的问题**（docker-compose.yml 无法解析、Dockerfile CMD 无法启动、容器内 IPv6 双栈失效、容器内东财 EM 数据源被 TLS 层拦截、mootdx 未配置），其中 EM 源被拦截导致**候选池为 0、A股个股搜索 0 命中、预热 37.4s 超阈值**——根因是历轮验证全部在宿主跑，**容器环境零测试覆盖**。
-2. **round8 O 项核对**：25 项（O13/O14 编号保留缺口）中 12 项确认修复、2 项未复现（O3/O10）、4 项部分修复、5 项未修复（O2 港股K线 / O4 个股搜索 / O6 IC淘汰 / O21 容器内双栈 / **O24 回归 bug——标的分析功能全挂，round9 §6.1-2 已实施修复，转为已修复**）、2 项未专项验证（O20/O27）。
+2. **round8 O 项核对**：25 项（O13/O14 编号保留缺口）中 12 项确认修复、2 项未复现（O3/O10）、4 项部分修复、**4 项未修复（O2 港股K线 / O4 个股搜索 / O6 IC淘汰 / O21 容器内双栈）+ O24 已修复（round9 §6.1-2：标的分析全挂回归 bug 已实施修复并实测出文）**、2 项未专项验证（O20/O27）。
 3. **性能**：前端 Lighthouse 90/100/99 优秀（O8 达成）；后端 8 个端点 >1s，`/market/watchlist` **29.9s** 灾难级且无任何门禁拦截。
 4. **报告质量**：组合设计可用但存在数据缺失仍入选、表格口径误差；**策略检查在 LLM 60s 超时后降级为全 hold 模板，专业投资者不可接受**。
 5. **因子模型 no_data 专项（宿主复诊，2026-08-07 补充）**：用户截图指出的 **7 个因子"没数据"（6 no_data + 1 warn）根因全部代码级定位**——IOPV 三级降级链 4 处解析 bug（sina 字段双错位+接口无 IOPV、qq GBK 解码崩溃、em 字段不匹配、TTJ 兜底 tuple/dict 契约错）导致折溢价率必然 no_data；benchmark_close/shares_change_20d 依赖链脆弱；sentiment 三因子是宏观单值作截面因子的设计缺陷；vol_ratio 为真实弱 IC。详见 §6.5.1。
 6. **设计报告涨跌与「数据源不可用」专项（宿主复诊，同日补充）**：涨跌幅与收盘对不上 = 报告无数据采集时刻标注（#427 生成于 11:58 盘中，收盘后对照必然错位，510050 报告 -0.23% vs 收盘 +1.22% 实证）；560600「数据源不可用」= **硬编码幽灵锚**——`MANDATORY_CODES` 写死的「中证A500ETF」锚实际对应医药白酒ETF/全源零成交/无此证券，真实 A500 应为 159338；另发现本地快照路径 bug 与因子/涨跌缓存口径不一致。详见 §4.3。
-7. **策略检查复诊（同日补充）**：LLM 超时（#344 60s 兜底）复用 P0-5；**技术信号空**根因 = indicators 空 dict 时 `technical_signal={}` 兜底失效 + 规则引擎骨架无该字段；**行业数据空** = industry_map 依赖候选池（池空则全空）；**「因子数据 10/10 正常」假正常** = RSI 50/KDJ 50 缺数据默认值被计入 filled；**「组合为空」为历史孤立记录（#343 无 task），后端实测正常（手动触发 10 只持仓）**。详见 §4.4/§4.5。
+7. **策略检查复诊（同日补充）**：LLM 超时（#344 60s 兜底）归入 P0-5；**技术信号空**根因 = indicators 空 dict 时 `technical_signal={}` 兜底失效 + 规则引擎骨架无该字段；**行业数据空** = industry_map 依赖候选池（池空则全空）；**「因子数据 10/10 正常」假正常** = RSI 50/KDJ 50 缺数据默认值被计入 filled；**「组合为空」为历史孤立记录（#343 无 task），后端实测正常（手动触发 10 只持仓）**。详见 §4.4/§4.5。
 8. **测试防护体系**存在 4 类系统性盲区（stream 端点零契约测试、预热门禁口径错误、watchlist 只查 DB 不调 API、容器环境零覆盖；本轮再添 **IOPV 链零单测、设计涨跌与策略检查完整性无断言**），本轮所有新问题均落在盲区内。
 
 **方案**：P0×9（阻断）/ P1×16（数据完整性）/ P2×11（质量体验）/ P3×11（测试防护补强）共 **47 项**，均附验收标准，未实施。
@@ -32,13 +32,13 @@
 
 ---
 
-## 2. 容器化基础设施问题（P0 级，阻断/降级类）
+## 2. 容器化基础设施问题（C1-C6；其中 C1-C5 为 P0 级阻断/降级类，C6 次要——摘要/结论计数「5 个基础设施问题」即指 C1-C5）
 
 ### C1. docker-compose.yml 无法被 go-yaml 解析（dev/prod 双模式全挂）
 - **现象**：`docker-compose --profile prod build` 报 `go-yaml load error at L61:C43: mapping values are not allowed in this context`。
 - **根因**：round8 O21 把 backend-dev 的 command 改为 `uvicorn app.main:app --host :: ...`，裸 `::` 后跟空格触发 go-yaml 严格解析报错；整个 compose 文件无法加载。
 - **影响**：dev 与 prod 全部无法编排（此前从未在 docker 跑过，故未暴露）。
-- **处置**：command 改为 YAML list 形式（本轮已实施，见 §12 追踪）。
+- **处置**：command 改为 YAML list 形式（本轮已实施，见「附改动」C1）。
 
 > 发现顺序说明：C1（compose 无法解析）在构建第一步即触发，**修复 C1 后**才观察到 C2（容器无法启动）与 C3（启动后端口不通）——三者递进暴露，本报告按根因类别排列而非发现时序。
 
@@ -111,6 +111,8 @@
 5. 进攻型现金 38% 却标 16% 预期年化——62% 仓位要兑现 16% 需要权益部分 ~26% 年化，弹性假设激进；报告解释"留弹药"可自洽但应披露假设；
 6. 防御型卫星含证券 ETF 12%（高贝塔），与"防御"定位张力大，应有风控说明。
 
+> **方案归口**：问题 1→P0-8（幽灵锚清点）/P1-5（数据缺失不入核心）；问题 3→P1-6（顶层 market_regime 补字段）；问题 2（表格口径误差）与问题 4（评分注释 0~1 vs ±5）→ 随 P0-9（报告数据时间戳/来源标注）一并修正报告模板口径；问题 5/6（投资假设披露类）记录在案，方案轮未单列条目——实施报告模板时并入假设披露段。
+
 ### 4.2 场内策略检查（check #342，portfolio_type=on_exchange）
 **通过项**：
 - `portfolio_type=on_exchange` 过滤正确：DB 20 条持仓（10 场内 + 10 场外）只检查 10 只场内标的；
@@ -160,7 +162,7 @@
 
 1. **后端实证**：手动触发 `POST /portfolio/strategy-check-async {portfolio_type: on_exchange}` → task 255（66s）→ check #346：**holdings 10 只**、summary「LLM 分析超时（60s 未返回，已用规则引擎兜底）」——**无「组合为空」**；
 2. **20:21 用户点击未创建任何任务**：DB tasks 表最新为 #254（12:01）、#255（本次手动触发 20:43）——用户点击时刻（20:21）**零任务落库**，前端请求未到达后端（或未发起）；
-3. **「组合为空」来源 = #343（2026-08-07 11:23 容器内）孤立记录**：holdings_json=[] / suggestions_json=[] / risk_warnings=[]，summary=「组合为空」；**tasks 表无对应任务**（11:23 无 task，10:26-10:33 有 #341/#342 且 11:57 起 #344 恢复 10 只持仓）——前端历史/任务列表（localStorage 持久化 + timeline）展示该记录，用户点开后看到「组合为空」，误以为是刚触发的检查结果；
+3. **「组合为空」来源 = #343（2026-08-07 11:23 容器内）孤立记录**：holdings_json=[] / suggestions_json=[] / risk_warnings=[]，summary=「组合为空」；**tasks 表无对应任务**（11:23 无 task，10:26-10:33 有 #341/#342，12:00 起 #344 恢复 10 只持仓）——前端历史/任务列表（localStorage 持久化 + timeline）展示该记录，用户点开后看到「组合为空」，误以为是刚触发的检查结果；
 4. **「组合为空」的判定路径**（portfolio_service.py:636-637）：`etfs = await list_etfs(db, portfolio_type)`（is_active=True + portfolio_type 过滤，108-111 行）返回空 → 直接返回 `{"summary": "组合为空..."}`——**不记录查询条件/原因**，裸文案无诊断信息；#343 的空组合为 11:23 容器内瞬时状态（前后 40 分钟均有 10 只持仓），成因不可追溯（无 task params 留存）。
 
 ---
@@ -173,7 +175,7 @@
 | AI 投顾问答 | POST /analysis/llm-advice | ✅ 成功 |
 | 板块分析 | POST /analysis/sector-analysis/stream | ✅ 成功（558 events，含行情快照注入） |
 | 概念分析 | POST /analysis/sector-analysis/stream（与板块分析同一端点，以 `sector_type=concept` 区分） | ✅ 成功（686 events） |
-| **个股/ETF/指数分析（A股/港股/美股）** | POST /analysis/symbol-analysis/stream | ❌ **全挂：STREAM_ERROR** `llm_complete_stream() got an unexpected keyword argument 'rate_limit_cap'` |
+| **个股/ETF/指数分析（A股/港股/美股）** | POST /analysis/symbol-analysis/stream | ❌ **全挂：STREAM_ERROR** `llm_complete_stream() got an unexpected keyword argument 'rate_limit_cap'` **（已修复，§6.1-2：删除 rate_limit_cap 透传，实测 5 类标的全出文）** |
 | 搜索自动补全 | GET /market/search | ✅ A/510→30 条、HK/0070→1、US/AAP→1（A股个股名称/代码 0 命中，见 O4） |
 
 **O24 回归 bug（本轮新增，P0）**：analysis.py:921-926 在 O24 实施时为 `agent.run_stream()` 透传 `max_retries=1, rate_limit_cap=10`，但 agent 底层调用 `llm_complete_stream()`（llm.py:415）签名**没有** `rate_limit_cap` 参数 → `/analysis/symbol-analysis/stream` 单一端点对**5 类标的**（A股个股/港股个股/美股个股/ETF/指数）全部 STREAM_ERROR，前端"🔍 标的分析"Tab 功能完全不可用。verify_e2e 的 section_analysis 只测 llm-report/advice，**不测 symbol-analysis/stream**，故回归零拦截。
@@ -215,7 +217,7 @@
 
 ### 6.5 因子模型
 - summary：valid=23 / warn=1 / **no_data=6** / static=3 / avg_ic=0.0151；
-- O25 部分修复：no_data reason 已区分（etf 三因子"数据源未接入（缺 nav/benchmark_close/shares_change_20d）"、sentiment 三因子"截面无差异（常量输出）"）——不再笼统"IC 未累积"；但 **no_data 仍 6 项**（容器内 EM 源被拦为外部根因，宿主可能更好）；
+- O25 部分修复：no_data reason 已区分（etf 三因子"数据源未接入（缺 nav/benchmark_close/shares_change_20d）"、sentiment 三因子"截面无差异（常量输出）"）——不再笼统"IC 未累积"；但 **no_data 仍 6 项**（容器内 EM 源被拦为外部根因；宿主复诊见 §6.5.1：根因全部代码级定位，与容器 TLS 无关，宿主下折溢价率等仍 no_data）；
 - **O6 未实施**：`/factors/ic` 端点返回的 28 条 IC 记录中 13 条为负（change_pct -0.449、bollinger.bandwidth -0.5661、atr_14 -0.4293、j_value -0.381…，口径：IC 端点仅收录已累积 IC 的因子，33 总数含 static/no_data），仍标 valid，且 reason 文案"IC -0.4490 ≥ 阈值 0.02"逻辑错误（负数不可能 ≥ 阈值，应取 |IC| 或显著性）。
 
 ### 6.5.1 因子模型 no_data 专项诊断（宿主环境，2026-08-07 补充）
@@ -302,12 +304,15 @@ watchlist 29.9s 与 O9 验收④"<1s"差距 30 倍，且 verify_e2e 对该端点
 
 ---
 
-## 11. 测试防护体系为何未识别（4 类系统性盲区）
+## 11. 测试防护体系为何未识别（4 类系统性盲区，本轮复诊再添 3 类）
 
 1. **分析 stream 端点无契约测试**：verify_e2e `section_analysis`（720-758 行）只测 llm-report/llm-advice（stream 版也只断言 HTTP 200 不读 SSE 内容），**从不测 symbol-analysis/stream 与 sector-analysis/stream** → O24 回归（rate_limit_cap 参数错误）在 5 类标的分析（A股/港股/美股/ETF/指数）全挂的情况下零拦截；
 2. **预热门禁口径错误**：A01 门禁（98-120 行）用 `total_elapsed`（profiler 标注段求和 12.6s <20s → PASS），**刻意不用墙钟**（注释防 instruments 后台任务误报）→ 真实墙钟 37.4s 超 30s 阈值被"洗白"为 12.6s；预热的性能退化对门禁不可见；
 3. **watchlist 只查 DB 不调 API**：`section_db_integrity`（1435-1450 行）对 watchlist 断言"行数非空"，从不请求 `/market/watchlist` 测响应时间 → 29.9s 端点从未被拦截（O9 验收④形同虚设）；
-4. **容器环境零覆盖**：verify_e2e / perf_diag / 所有历轮验证都在宿主 Windows 本地 uvicorn 上跑，**从未在 docker 容器验证** → C1-C5（compose 解析、Dockerfile CMD、容器内 :: 拒 IPv4、EM TLS 拦截、mootdx 未配置）全部漏检；单测 mock 数据又是"完美形态"（round8 §6 已述，本轮未再扩大）。
+4. **容器环境零覆盖**：verify_e2e / perf_diag / 所有历轮验证都在宿主 Windows 本地 uvicorn 上跑，**从未在 docker 容器验证** → C1-C5（compose 解析、Dockerfile CMD、容器内 :: 拒 IPv4、EM TLS 拦截、mootdx 未配置）全部漏检；单测 mock 数据又是"完美形态"（round8 §6 已述，本轮未再扩大）；
+5. **IOPV 三级链零单测（§6.5.1-A）**：`_fetch_iopv_from_sina/qq/em` + `fetch_etf_net_value` 是纯函数（输入输出可断言）却零单测 → sina 字段双错位、qq GBK 解码崩溃、em 字段不匹配、TTJ tuple/dict 契约错 4 处 bug 全部存活，折溢价率必然 no_data 而门禁不拦截；
+6. **设计报告涨跌数据无断言（§4.3-A）**：verify_e2e 只查「design_text 已持久化 + market_regime 已判定」，从不核对设计报告内涨跌值与行情源一致性 → 560600 幽灵锚、「今日涨跌」无时间戳等错误静默通过；
+7. **策略检查完整性无断言（§4.4/§4.5）**：verify_e2e 对 check 记录只查存在性，不查 holdings 每项 tech_signal/industry 非空、「因子数据 N/M 正常」真实性、孤立记录 → 规则引擎骨架缺字段、假正常、组合为空误导均零拦截。
 
 > 共同根因：**门禁验证的是"代码自述的行为"，不是"生产形态（容器）+ 真实数据链路 + 真实用户体验"的验收**。
 
@@ -327,14 +332,6 @@ watchlist 29.9s 与 O9 验收④"<1s"差距 30 倍，且 verify_e2e 对该端点
 | P0-7 | TTJ 兜底类型契约错：`fetch_fund_nav` 返回 tuple，调用方用 dict（§6.5.1-A-4） | 统一契约：`fetch_fund_nav` 改返回 dict（`{"nav", "daily_change_pct"}`）或调用方解包 tuple；两端改一处并加类型断言单测 | 兜底路径不再静默失败；单测覆盖 tuple/dict 两种历史形态 |
 | P0-8 | 560600 幽灵锚：硬编码「中证A500ETF」强制锚，实际为医药白酒ETF/零成交/全源无此证券（§4.3-B） | ①全量清点 560600 硬编码：`MANDATORY_CODES`（allocation_engine.py:218 / market_data_hub.py:107）、`_COMMON_ANCHOR_SYMBOLS`、硬编码锚条目、**定层分支 `code in ("510300","560600")`（market_data_hub.py:836/885/893）**、**prompt 候选锚列表（portfolio_design.md:14）**、**etf_scanner.py:55 的 CORE_REQUIRED**——全部改 159338（真实中证A500ETF华夏，行情可用），并补 159338 归核心层的定层分支；②锚代码加行情身份校验（腾讯/新浪名称 vs instruments，不一致即拦截并告警） | 设计报告无「数据源不可用」锚标的；159338 正确落核心层；强制锚在全部行情源身份一致 |
 | P0-9 | 报告「今日涨跌」无数据时间戳，收盘后对照必错位（§4.3-A） | 设计任务记录行情采集时刻；表格列改「今日涨跌（截至 HH:MM）」+ 涨跌来源标注（pool/快照/K线）；生成后修改告警 | 报告可追溯数据时间；与收盘对照差异有解释 |
-| P1-11 | 本地快照兜底失效：`etf_scanner._etf_cache_file()` 解析到 backend/app/data/（不存在）（§4.3-B 附带①） | 路径修正 `../../data`（去掉多余一层 app/）；补单测断言解析路径存在 | 宿主环境 `_snapshot_change_pct` 不再恒 None；快照兜底生效 |
-| P1-12 | 因子分与涨跌可用性缓存口径不一致：factor 用实时 fetch_history、change_pct 用缓存 get_kline_rows_any（§4.3-B 附带②） | K 线兜底改走同一数据通道（fetch_history 或刷新缓存后取数）；统一「有历史 ⇒ 涨跌可算」 | 因子有分的标的，涨跌不再莫名「数据源不可用」 |
-| P1-13 | 策略检查技术信号空：indicators 空 dict 时 technical_signal={}，注入跳过 + 骨架无字段（§4.4-1） | ①`technical_signal` 兜底改为显式 `{"signal": None, "reason": "技术指标不可用"}`（空 dict 也覆盖）；②860-862 注入无论有无真实信号都写 `tech_signal`（无则「数据不可用」）；③`_build_rule_fallback_holdings_analysis` 骨架补 tech_signal 字段 | 任何路径 holdings 每项都有非空 tech_signal（真实值或「数据不可用」标注） |
-| P1-14 | 策略检查行业数据空：industry_map 依赖候选池（空则全空）（§4.4-2） | industry_map 增加独立兜底链：候选池 → instruments/sector 表 → ETFClassifier 独立分类，候选池空时仍可注入；骨架 industry 同源 | 数据源可用时行业缺失权重 <20%；候选池空时仍有兜底行业标注 |
-| P1-15 | 「因子数据 N/M 正常」假正常：RSI 50/KDJ 50 缺数据默认值计入 filled（§4.4-3） | filled 判定排除兜底默认值（RSI/KDJ 恰为 50、ATR 恰为 0、vol_ratio 恰为 1 等中性默认）；真实值才算 filled；data_quality 增加「兜底占比」字段 | 全兜底时不报「10/10 正常」；报告明示真实数据覆盖率 |
-| P1-16 | 「组合为空」裸文案无诊断：strategy_check 空持仓直接返回，不记录查询条件/原因（§4.5-4） | 空持仓时在报告/日志记录诊断：portfolio_type 值、DB 查询行数、is_active 过滤、symbols 列表；区分「真空组合」与「查询条件异常」；孤立 check 记录（无 task）标注来源 | 「组合为空」报告附原因；孤立记录可追溯 |
-| P2-10 | 候选池零成交/身份错配标的不设防（560600 零成交仍入核心） | 候选池构建时按行情源交叉校验：零成交（量=0）或名称与 instruments 不一致的标的剔除/降级标注，不入核心层 | 候选池无身份错配标的；核心层全部有有效行情 |
-| P2-11 | 前端展示历史孤立 check 记录（#343 类）误导为当前结果（§4.5-3） | 历史/任务列表过滤无 task 关联的孤立 check 记录，或标注「历史异常记录（无任务关联）」；检查详情页展示记录生成时间 | 历史列表无孤立记录；详情时间戳明确 |
 
 ### P1（数据完整性/正确性）
 | # | 问题 | 方案 | 验收 |
@@ -349,6 +346,12 @@ watchlist 29.9s 与 O9 验收④"<1s"差距 30 倍，且 verify_e2e 对该端点
 | P1-8 | 跟踪误差缺 benchmark_close（§6.5.1-B） | 行业/主题 ETF 补跟踪指数映射（instruments 表加 benchmark 代码字段），宽基逻辑外扩；EM 指数源失败时降级腾讯/新浪指数 | 10 只样本 benchmark_close 命中 ≥6，跟踪误差出 IC |
 | P1-9 | 规模变化率缺 shares_change_20d（§6.5.1-B） | `fetch_etf_shares_outstanding` 加降级链：东财份额接口 → 天天基金规模 → 基金规模估算；列名乱码 `_decode_df` 加固；失败时 reason 明确标注"份额源不可用" | 10 只样本 shares_change_20d 命中 ≥6，规模变化率出 IC |
 | P1-10 | sentiment 三因子截面恒等（§6.5.1-C，设计缺陷） | ①`panic_greed_diff`/`stock_divergence` 属市场级因子——移出截面因子池（改 regime 输入/组合层因子，参照 static 政策因子不参与截面 IC）；②`news_direction` 在 news_scope=market 时标注"市态级降级，不计算截面 IC"，接入 ETF 级舆情（板块新闻→成分 ETF 映射）后恢复 | 截面因子池无宏观单值因子；因子页 reason 明示"市场级因子不参与截面 IC" |
+| P1-11 | 本地快照兜底失效：`etf_scanner._etf_cache_file()` 解析到 backend/app/data/（不存在）（§4.3-B 附带①） | 路径修正 `../../data`（去掉多余一层 app/）；补单测断言解析路径存在 | 宿主环境 `_snapshot_change_pct` 不再恒 None；快照兜底生效 |
+| P1-12 | 因子分与涨跌可用性缓存口径不一致：factor 用实时 fetch_history、change_pct 用缓存 get_kline_rows_any（§4.3-B 附带②） | K 线兜底改走同一数据通道（fetch_history 或刷新缓存后取数）；统一「有历史 ⇒ 涨跌可算」 | 因子有分的标的，涨跌不再莫名「数据源不可用」 |
+| P1-13 | 策略检查技术信号空：indicators 空 dict 时 technical_signal={}，注入跳过 + 骨架无字段（§4.4-1） | ①`technical_signal` 兜底改为显式 `{"signal": None, "reason": "技术指标不可用"}`（空 dict 也覆盖）；②860-862 注入无论有无真实信号都写 `tech_signal`（无则「数据不可用」）；③`_build_rule_fallback_holdings_analysis` 骨架补 tech_signal 字段 | 任何路径 holdings 每项都有非空 tech_signal（真实值或「数据不可用」标注） |
+| P1-14 | 策略检查行业数据空：industry_map 依赖候选池（空则全空）（§4.4-2） | industry_map 增加独立兜底链：候选池 → instruments/sector 表 → ETFClassifier 独立分类，候选池空时仍可注入；骨架 industry 同源 | 数据源可用时行业缺失权重 <20%；候选池空时仍有兜底行业标注 |
+| P1-15 | 「因子数据 N/M 正常」假正常：RSI 50/KDJ 50 缺数据默认值计入 filled（§4.4-3） | filled 判定排除兜底默认值（RSI/KDJ 恰为 50、ATR 恰为 0、vol_ratio 恰为 1 等中性默认）；真实值才算 filled；data_quality 增加「兜底占比」字段 | 全兜底时不报「10/10 正常」；报告明示真实数据覆盖率 |
+| P1-16 | 「组合为空」裸文案无诊断：strategy_check 空持仓直接返回，不记录查询条件/原因（§4.5-4） | 空持仓时在报告/日志记录诊断：portfolio_type 值、DB 查询行数、is_active 过滤、symbols 列表；区分「真空组合」与「查询条件异常」；孤立 check 记录（无 task）标注来源 | 「组合为空」报告附原因；孤立记录可追溯 |
 
 ### P2（质量/体验）
 | # | 问题 | 方案 | 验收 |
@@ -362,6 +365,8 @@ watchlist 29.9s 与 O9 验收④"<1s"差距 30 倍，且 verify_e2e 对该端点
 | P2-7 | 镜像携带历史日志 + 预热产物不可取回 | backend/.dockerignore 排除 logs/；`./logs` 加入 volume 挂载（预热产物直接落宿主可见） | 镜像体积下降；预热报告宿主可见 |
 | P2-8 | 前端"无数据"口径：7 项无 IC 值 vs summary 计数 6（§6.5.1 触发） | 因子行区分展示：no_data（数据源缺失，标 reason）与 warn（弱 IC，标 IC 值+阈值）；summary 卡片加"待关注（warn）"独立计数 | 页面 6 无数据 + 1 待关注 与 summary 一致，reason tooltip 可见 |
 | P2-9 | vol_ratio 弱 IC=0.001（§6.5.1-D） | 核对 IC 计算口径（横截面/时序、窗口、未来收益对齐），确认非方法偏差；确认后按 O6 淘汰线处理（|IC|<0.02 → warn → 降权/淘汰） | vol_ratio 状态与 IC 口径一致（warn 且 reason 含阈值说明，或按 O6 淘汰） |
+| P2-10 | 候选池零成交/身份错配标的不设防（560600 零成交仍入核心） | 候选池构建时按行情源交叉校验：零成交（量=0）或名称与 instruments 不一致的标的剔除/降级标注，不入核心层 | 候选池无身份错配标的；核心层全部有有效行情 |
+| P2-11 | 前端展示历史孤立 check 记录（#343 类）误导为当前结果（§4.5-3） | 历史/任务列表过滤无 task 关联的孤立 check 记录，或标注「历史异常记录（无任务关联）」；检查详情页展示记录生成时间 | 历史列表无孤立记录；详情时间戳明确 |
 
 ### P3（测试防护补强，防再犯）
 
@@ -389,7 +394,7 @@ watchlist 29.9s 与 O9 验收④"<1s"差距 30 倍，且 verify_e2e 对该端点
 - **设计报告涨跌与「数据源不可用」**：560600 硬编码幽灵锚（P0-8）、报告缺数据时间戳（P0-9）、本地快照路径 bug（P1-11）、因子/涨跌缓存口径不一致（P1-12）、候选池身份校验前置（P2-10）、涨跌真实性门禁（P3-9）；
 - **策略检查复诊**：LLM 超时（P0-5）、技术信号空与行业数据空（P1-13/P1-14）、因子假正常判定（P1-15）、「组合为空」诊断与孤立记录（P1-16/P2-11）、完整性门禁（P3-10/P3-11）；
 - 基础设施层面，历轮"宿主验证"掩盖了容器环境的 5 个基础问题（C1-C5），P3-4（docker 冒烟门禁）是防再犯的关键投入；
-- 本方案未实施（P0-P3 共 47 项），等待 review 至实施标准。
+- 本方案基线未实施（P0-P3 共 47 项，等待 review 至实施标准）；**例外**：P0-1（O24 回归）、P0-3（容器内 host 绑定）已在复诊轮实施，C1-C3（基础设施）已落地——均见「附改动」。
 
 ---
 
