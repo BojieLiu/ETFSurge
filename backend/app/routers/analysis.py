@@ -917,13 +917,13 @@ async def symbol_analysis_stream(req: SymbolAnalysisRequest):
 5. 操作建议"""
         
         agent = get_agent("symbol_analysis")
-        # O24 (round8 §7 §5.1K ④): 复用 llm.py 限流参数——max_retries=1 快速失败、
-        # rate_limit_cap=10s 限流退避上限，避免 429 长时间退避拖慢分析（旧实现
-        # run_stream 不透传，llm.py 重试机制在 stream 路径未生效）。
+        # O24 (round8 §7 §5.1K ④) 修复: 只透传 llm_complete_stream 支持的参数——
+        # max_retries=1 快速失败（429 退避上限由 llm.py 的 Retry-After 机制处理），
+        # 删除旧实现透传的 llm_complete_stream 不存在之参数（该参数名不在其签名内
+        # → TypeError → 全部 symbol-analysis/stream 请求 STREAM_ERROR 全挂）。
         return _sse_stream(agent.run_stream(
             prompt,
             max_retries=1,
-            rate_limit_cap=10,
         ))
     except HTTPException:
         raise

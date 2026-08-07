@@ -42,6 +42,41 @@ def test_sectors_heat_route(monkeypatch):
     assert resp.json()["total"] == 1
 
 
+def test_sectors_heat_change_pct_backfilled_by_em(monkeypatch):
+    """O19 补充：东财板块涨跌幅按名称回填 change_pct；未命中保持 0 兜底。"""
+    from app.services import market_data_hub as hub_mod
+    import app.fetchers.sector_fetcher as sector_fetcher
+
+    fake = [
+        {"plate_code": "cls1", "rank": 1, "cur_heat": 100, "rank_change": 0,
+         "is_new": 0, "plate_name": "AI智能体"},
+        {"plate_code": "cls2", "rank": 2, "cur_heat": 90, "rank_change": -1,
+         "is_new": 0, "plate_name": "CRO/CMO"},
+        {"plate_code": "cls3", "rank": 3, "cur_heat": 80, "rank_change": 0,
+         "is_new": 0, "plate_name": "无东财数据板块"},
+    ]
+    monkeypatch.setattr(hub_mod.market_data_hub, "get_sector_heat", lambda limit=None, market="A": fake)
+    monkeypatch.setattr(sector_fetcher, "fetch_em_sector_changes", lambda: {"AI智能体": 3.25, "CRO": 2.5})
+    resp = client.get("/api/v1/market/sectors/heat?limit=20")
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert items[0]["change_pct"] == 3.25, "东财精确命中应回填真实涨跌幅"
+    assert items[1]["change_pct"] == 2.5, "「/」分割首段（CRO/CMO → CRO）应回填"
+    assert items[2]["change_pct"] == 0, "未命中板块保持 0 兜底"
+
+
+def test_match_em_change_three_levels():
+    """_match_em_change 三级匹配：精确 / 包含 / 斜杠首段。"""
+    from app.routers.market import _match_em_change
+
+    em = {"印制电路板": 8.31, "CRO": 2.5, "AI智能体": 3.25, "创新药": -1.2}
+    assert _match_em_change("AI智能体", em) == 3.25          # 精确
+    assert _match_em_change("CRO/CMO", em) == 2.5            # 斜杠首段
+    assert _match_em_change("PCB", {"印制电路板": 8.31}) is None  # 无别名映射不误配
+    assert _match_em_change("不存在板块", em) is None         # 未命中
+    assert _match_em_change("", em) is None                  # 空名
+
+
 # ── 2. hot_plates 字段归一化（F2-6 步骤A，§9.8.4 用例2） ────────────────
 def test_hot_plates_normalized(monkeypatch):
     """原始字段 secu_name/up_reason/stock_list → name/reason/lead_stocks 数组。"""

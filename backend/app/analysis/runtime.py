@@ -92,13 +92,13 @@ class AgentRuntime:
     async def run_stream(self, prompt: str, **kwargs) -> AsyncGenerator[dict, None]:
         """Run the agent and yield SSE events (token, done, error).
 
-        O24 (round8 §7 §5.1K): max_retries/retry_delay/rate_limit_cap 透传到
-        llm_complete_stream（对齐 run() 的 R5-1-6）——symbol-analysis 传
-        max_retries=1, rate_limit_cap=10 快速失败，避免 429 长时间退避拖慢分析
-        （旧实现不透传 → llm.py 重试/限流机制在 stream 路径未生效）。
+        O24 (round8 §7 §5.1K) 修复: 只透传 llm_complete_stream 支持的参数
+        （max_retries/retry_delay）——rate_limit_cap 不在 llm_complete_stream
+        签名内，透传会 TypeError → STREAM_ERROR；429 退避由 llm.py 的
+        Retry-After/指数退避机制处理，无需额外 cap 参数。
         """
         _llm_kwargs = {}
-        for _k in ("max_retries", "retry_delay", "rate_limit_cap"):
+        for _k in ("max_retries", "retry_delay"):
             _v = kwargs.get(_k)
             if _v is not None:
                 _llm_kwargs[_k] = _v

@@ -619,22 +619,55 @@ async def hot_plates(limit: int = Query(15), market: str = "A") -> list[dict[str
 async def sectors_heat(limit: int = Query(20), market: str = "A") -> dict[str, Any]:
     """板块热度排行(财联社)。market=HK 时返回港股行业热度；US 暂不支持。"""
     rows = await asyncio.to_thread(market_data_hub.get_sector_heat, limit, market)
+    # O19 补充（round9 §6.1 专项）: 财联社热度无涨跌幅字段 → 东财板块行情按名称回填
+    # 真实涨跌幅（行业+概念板块 f3）；东财失败时保持 0 兜底（不抛错）。
+    changes: dict[str, float] = {}
+    if market and market.upper() == "A":
+        try:
+            from ..fetchers.sector_fetcher import fetch_em_sector_changes
+            changes = await asyncio.to_thread(fetch_em_sector_changes) or {}
+        except Exception as e:
+            get_logger("market").warning("[sectors_heat] em sector changes backfill failed: %s", e)
     items = []
     for r in rows or []:
+        name = r.get("plate_name") or r.get("name", "")
+        em_chg = _match_em_change(name, changes)
         # P2-4 (R4-11a): 透传 change_pct（前端 SectorHeatMap 读 item.change_pct 显示涨跌幅，
         # 旧白名单丢弃该字段 → 热度行涨跌幅恒不显示）
         # O19 (round8 §7 §5.1D): 财联社板块热度无涨跌幅字段 → null 兜底为 0——
         # 与前端 `!= null` 防御协同（「非 null 可为 0」口径，见 O9 验收②）。
+        # 东财回填优先：em_chg 命中用真实涨跌；未命中保持原逻辑（null → 0）。
         items.append({
             "rank": r.get("rank"),
-            "name": r.get("plate_name") or r.get("name", ""),
+            "name": name,
             "heat_index": r.get("cur_heat", r.get("heat_index", 0)),
             "rank_change": r.get("rank_change"),
             "is_new": r.get("is_new", 0),
             "plate_code": r.get("plate_code", ""),
-            "change_pct": r.get("change_pct") if r.get("change_pct") is not None else 0,
+            "change_pct": em_chg if em_chg is not None
+            else (r.get("change_pct") if r.get("change_pct") is not None else 0),
         })
     return {"items": items, "total": len(items)}
+
+
+def _match_em_change(cls_name: str, em_map: dict[str, float]) -> float | None:
+    """东财板块涨跌幅按名称匹配（财联社名 vs 东财名）。
+
+    财联社板块名（PCB/CRO/CMO/光通信）与东财板块名（印制电路板/CRO）不完全一致，
+    三级匹配：①精确相等；②包含（一方 ⊇ 另一方，长度 ≥2 防误配）；
+    ③「/」分割首段（CRO/CMO → CRO）。未命中返回 None（保持 0 兜底）。
+    """
+    if not cls_name or not em_map:
+        return None
+    if cls_name in em_map:
+        return em_map[cls_name]
+    for em_name, pct in em_map.items():
+        if len(em_name) >= 2 and len(cls_name) >= 2 and (em_name in cls_name or cls_name in em_name):
+            return pct
+    head = cls_name.split("/")[0].strip()
+    if len(head) >= 2 and head in em_map:
+        return em_map[head]
+    return None
 
 
 # Phase 6: 前端已接入（marketApi.getStockHotRank）

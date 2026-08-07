@@ -11,7 +11,7 @@
 本轮在 **Docker prod 容器内**（docker-compose --profile prod，镜像烘焙）对 ETF Surge 全链路做复诊断，与历轮"宿主 Windows 本地运行"的验证环境形成对照。核心结论：
 
 1. **容器化基础设施存在 5 个此前从未暴露的问题**（docker-compose.yml 无法解析、Dockerfile CMD 无法启动、容器内 IPv6 双栈失效、容器内东财 EM 数据源被 TLS 层拦截、mootdx 未配置），其中 EM 源被拦截导致**候选池为 0、A股个股搜索 0 命中、预热 37.4s 超阈值**——根因是历轮验证全部在宿主跑，**容器环境零测试覆盖**。
-2. **round8 O 项核对**：25 项（O13/O14 编号保留缺口）中 12 项确认修复、2 项未复现（O3/O10）、4 项部分修复、5 项未修复（O2 港股K线 / O4 个股搜索 / O6 IC淘汰 / O21 容器内双栈 / **O24 回归 bug——标的分析功能全挂**）、2 项未专项验证（O20/O27）。
+2. **round8 O 项核对**：25 项（O13/O14 编号保留缺口）中 12 项确认修复、2 项未复现（O3/O10）、4 项部分修复、5 项未修复（O2 港股K线 / O4 个股搜索 / O6 IC淘汰 / O21 容器内双栈 / **O24 回归 bug——标的分析功能全挂，round9 §6.1-2 已实施修复，转为已修复**）、2 项未专项验证（O20/O27）。
 3. **性能**：前端 Lighthouse 90/100/99 优秀（O8 达成）；后端 8 个端点 >1s，`/market/watchlist` **29.9s** 灾难级且无任何门禁拦截。
 4. **报告质量**：组合设计可用但存在数据缺失仍入选、表格口径误差；**策略检查在 LLM 60s 超时后降级为全 hold 模板，专业投资者不可接受**。
 5. **因子模型 no_data 专项（宿主复诊，2026-08-07 补充）**：用户截图指出的 **7 个因子"没数据"（6 no_data + 1 warn）根因全部代码级定位**——IOPV 三级降级链 4 处解析 bug（sina 字段双错位+接口无 IOPV、qq GBK 解码崩溃、em 字段不匹配、TTJ 兜底 tuple/dict 契约错）导致折溢价率必然 no_data；benchmark_close/shares_change_20d 依赖链脆弱；sentiment 三因子是宏观单值作截面因子的设计缺陷；vol_ratio 为真实弱 IC。详见 §6.5.1。
@@ -188,6 +188,11 @@
 - stock-hot-rank 50 条真实数据（哈药股份 +9.97%、云南锗业 +10.0%），concept_tags 50/50 非空（O9 验收①通过）。
 - ⚠️ 板块分析报告出现"**单日暴涨 13.03%**"（医疗研发外包 BK1600）——A股板块单日 13% 极可疑，O5 值域校验未覆盖板块数据（应加板块级 ±10% 校验）。
 
+**2026-08-07 用户反馈专项（已实施）**：用户指出"板块热度涨跌幅全是 0 + AI 按钮报错 + AI 文案抽象"。处置：
+1. **涨跌幅 0 → 东财板块行情回填（已实施）**：`sector_fetcher.fetch_em_sector_changes()`（新增）拉东财行业+概念板块 f3 涨跌幅（push2 → **push2delay 降级**——push2 对高频/大请求 RemoteDisconnected 限流，push2delay 稳定可用）；`sectors/heat` 端点按名称**三级匹配回填**（精确 → 包含 → `/` 分割首段，`_match_em_change`）；实测 20 板块 **8 个拿到真实涨跌幅**（CRO/CMO +10.84%、PCB +5.63%、创新药 +5.43%…），其余为东财无同名映射的财联社细分概念（铜箔/覆铜板、商业航天、氟化工等）保持 0 兜底不伪造；单测 8 用例（含三级匹配纯函数）全绿；
+2. **AI 按钮报错 = O24 回归**（symbol 模式 `rate_limit_cap` 透传）——**已实施修复**：analysis.py:923-926 删除 `rate_limit_cap=10`（`llm_complete_stream` 签名无此参数 → TypeError → STREAM_ERROR）；runtime.py `run_stream` 透传白名单去掉该参数（双保险）；实测 5 类标的 symbol-analysis/stream 正常出文（42.8KB 无 STREAM_ERROR）；回归测试同步更新（原测试固化 bug 行为，断言 `rate_limit_cap` 透传——修正为新契约）；**O24 从"未修复"转为"已修复"**；
+3. **AI 文案**（已实施）：`🤖 AI` → `🤖 AI 分析`（heat/symbol 两处按钮，与 title 一致，增强可读性）。
+
 ### 6.2 自选功能
 - 添加/列表/实时行情全部正常；**O22 修复确认**：sh688981 中芯国际 price=128.5 ✓；
 - ⚠️ POST /watchlist 不传 name 时 instruments 补名未生效（新增条目 name=代码）——根因疑似 instruments 表 `market` 字段与请求 `asset_type='A'` 不匹配（O9 部分未修复）。
@@ -253,7 +258,7 @@
 
 - **确认修复（12）**：O5、O8、O11、O12、O15、O16、O17、O18、O19、O22、O23、O26；**未复现（2）**：O3、O10（热缓存/宿主正常态下未再触发，不计入修复）；
 - **部分修复（4）**：O1（后台化生效、A股段超时）、O7（兜底文案 OK、LLM 仍 60s 超时）、O9（concept_tags ✓、补名 ✗、watchlist 性能 ✗）、O25（reason ✓、no_data 仍 6）；
-- **未修复（5）**：O2（港股K线 0 条）、O4（A股/美股个股名称搜索 0 命中）、O6（负 IC 未淘汰）、O21（容器内双栈失效）、**O24（回归：标的分析全挂）**；
+- **未修复（4）**：O2（港股K线 0 条）、O4（A股/美股个股名称搜索 0 命中）、O6（负 IC 未淘汰）、O21（容器内双栈失效）；**O24 已修复**（round9 §6.1-2：symbol-analysis/stream 删除 rate_limit_cap 透传 + runtime 白名单过滤，实测 5 类标的正常出文）；
 - **未专项验证（2）**：O20（K线图渲染，需人工视觉）、O27（市值注入路径一致性）。
 - interaction-redesign（P1-P7 状态机）：前端 42 文件 388 用例全绿，达成；
 - frontend-theme-redesign（字号/铺满）：theme.css 已放大、Lighthouse 无劣化，达成。
@@ -307,7 +312,7 @@ watchlist 29.9s 与 O9 验收④"<1s"差距 30 倍，且 verify_e2e 对该端点
 ### P0（阻断/功能全挂，优先修复）
 | # | 问题 | 方案 | 验收 |
 |---|---|---|---|
-| P0-1 | O24 回归：symbol-analysis 全挂 | analysis.py:921-926 去掉向 `agent.run_stream` 透传的 `rate_limit_cap`（改走 `llm_complete_with_system` 或给 `llm_complete_stream` 加 kwargs）；补契约测试 | symbol-analysis/stream 对 5 类标的（A股/港股/美股/ETF/指数）SSE 正常出文 |
+| P0-1 | ~~O24 回归：symbol-analysis 全挂~~ **已实施（round9 §6.1-2）** | 删除 `rate_limit_cap` 透传（llm_complete_stream 无此参数）+ runtime.py 透传白名单过滤（仅 max_retries/retry_delay）+ 回归测试更新 | symbol-analysis/stream 对 5 类标的 SSE 正常出文 ✅（实测 600519 42.8KB 无 STREAM_ERROR） |
 | P0-2 | 容器内 EM 源被 TLS 拦截 | a) 容器内 akshare 请求换 curl_cffi（Chrome TLS 指纹）；b) 降级链升级：mootdx（配 bestip）/Sina/腾讯 提为主链，EM 置末；c) 容器出口走宿主代理；三选一 + 兼容组合 | 容器内候选池 ≥100、ETF 数据质量 ≥10 条、个股搜索命中 |
 | P0-3 | 容器内 `--host ::` 失效 | 容器内统一 0.0.0.0（已临时实施）；本地 O21 意图保留；新增"容器启动后 127.0.0.1 连通"的 docker 冒烟 | docker e2e 冒烟：容器内 IPv4 直连 200 |
 | P0-4 | watchlist 29.9s | 批量行情加整体超时（如 8s）+ 降级链短路（EM 冷却期跳过）；已有 batch 路径复用（market.py:696-703 的 get_realtime_batch）扩到 watchlist | watchlist ≤1s（10 条）；新增 verify_e2e watchlist 耗时门禁 |
@@ -373,7 +378,7 @@ watchlist 29.9s 与 O9 验收④"<1s"差距 30 倍，且 verify_e2e 对该端点
 ## 13. 结论
 
 - 前端（Lighthouse 90-100、零 console error、388 单测绿）与设计引擎主体（O18/O19/O22/O26 等 12 项修复确认 + O3/O10 未复现）状态良好；
-- **当前阻塞项**：O24 回归（标的分析全挂，P0-1）、容器内 EM 源（P0-2）、watchlist 29.9s（P0-4）、策略检查全 hold 模板（P0-5）；
+- **当前阻塞项**：容器内 EM 源（P0-2）、watchlist 29.9s（P0-4）、策略检查全 hold 模板（P0-5）；**O24 已修复**（§6.1-2）；
 - **因子模型 7 个无数据因子**：非数据源问题——IOPV 链 4 处代码 bug（P0-6/P0-7）、benchmark/shares 依赖链（P1-8/P1-9）、sentiment 设计缺陷（P1-10）为修复主力，单测与完整性门禁（P3-7/P3-8）防再犯；
 - **设计报告涨跌与「数据源不可用」**：560600 硬编码幽灵锚（P0-8）、报告缺数据时间戳（P0-9）、本地快照路径 bug（P1-11）、因子/涨跌缓存口径不一致（P1-12）、候选池身份校验前置（P2-10）、涨跌真实性门禁（P3-9）；
 - **策略检查复诊**：LLM 超时（P0-5）、技术信号空与行业数据空（P1-13/P1-14）、因子假正常判定（P1-15）、「组合为空」诊断与孤立记录（P1-16/P2-11）、完整性门禁（P3-10/P3-11）；

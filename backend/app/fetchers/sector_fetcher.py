@@ -4,11 +4,15 @@
 """
 from typing import Any
 
+import logging
+
 import levistock as lv
 
 from ..core.ttl import CACHE_TTL
 from ..services.cache_service import sync_memory_cache
 from ..services.source_registry import registry
+
+_logger = logging.getLogger(__name__)
 
 _TRY = ["levistock", "akshare"]
 _TIMEOUT = 10
@@ -412,6 +416,42 @@ def fetch_sector_heat(limit: int = 20) -> list[dict[str, Any]]:
         rows = lv.get_sector_heat() or []
         return rows[:limit]
     return _cached("sector_heat", _p, "sector_heat")
+
+
+def fetch_em_sector_changes() -> dict[str, float]:
+    """东财行业+概念板块涨跌幅映射 {板块名称: 涨跌幅%}（板块热度 change_pct 补充源）。
+
+    财联社板块热度（fetch_sector_heat）无涨跌幅字段 → 热度行涨跌幅恒 0（O19）。
+    本函数用东财板块行情（clist/get fs=m:90+t:2 行业 + t:3 概念，f3 涨跌幅）
+    按板块名称构建映射，供 sectors/heat 端点回填真实涨跌幅。
+
+    失败返回 {}（调用方保持 0 兜底，不抛错）。走 _cached 60s TTL。
+    """
+    def _p():
+        import json as _json
+        import urllib.request
+        result: dict[str, float] = {}
+        # push2 对高频/大请求限流严格（RemoteDisconnected）→ push2delay 降级
+        # （延迟行情，板块 f3 一致；容器诊断证实 push2delay 可用）。
+        for host in ("push2.eastmoney.com", "push2delay.eastmoney.com"):
+            for fs in ("m:90+t:2", "m:90+t:3"):
+                url = (
+                    f"https://{host}/api/qt/clist/get?pn=1&pz=500&po=1&np=1"
+                    f"&fltt=2&invt=2&fid=f3&fs={fs}&fields=f12,f14,f3"
+                )
+                try:
+                    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                    raw = urllib.request.urlopen(req, timeout=8).read().decode()
+                    diff = ((_json.loads(raw) or {}).get("data") or {}).get("diff") or []
+                    for r in diff:
+                        name = (r.get("f14") or "").strip()
+                        chg = r.get("f3")
+                        if name and isinstance(chg, (int, float)) and name not in result:
+                            result[name] = float(chg)
+                except Exception as e:
+                    _logger.warning("[sector_fetcher] em sector changes fetch failed (%s %s): %s", host, fs, e)
+        return result
+    return _cached("em_sector_changes", _p, "sector_heat")
 
 
 def fetch_sector_popular_stocks(plate_code: str) -> list[dict[str, Any]]:

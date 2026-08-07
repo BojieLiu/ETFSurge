@@ -1,11 +1,13 @@
 """
-O24 (docs/round8-rediagnosis.md §7 §5.1K ④): symbol-analysis stream 复用限流参数。
+O24 (docs/archived/round8-rediagnosis.md §7 §5.1K ④) 修复回归测试。
 
-现状: runtime.run_stream 不透传 max_retries/rate_limit_cap → llm.py 重试/限流
-机制在 stream 路径未生效（429 时按默认 max_retries=2 + cap 30s 长时间退避）。
+根因: runtime.run_stream 把 rate_limit_cap 透传给 llm_complete_stream，
+但该函数签名（llm.py:415）没有 rate_limit_cap → TypeError →
+symbol-analysis/stream 对 5 类标的全 STREAM_ERROR。
 
-修复: run_stream 透传（对齐 run() 的 R5-1-6）；symbol_analysis_stream 调用处
-传 max_retries=1, rate_limit_cap=10 快速失败。
+修复: run_stream 只透传 llm_complete_stream 支持的参数（max_retries/
+retry_delay）；调用处只传 max_retries=1。429 退避由 llm.py 的
+Retry-After/指数退避机制处理。
 """
 
 import inspect
@@ -25,8 +27,9 @@ class _FakeConfig:
 
 class TestRunStreamPassesLimits:
     @pytest.mark.asyncio
-    async def test_run_stream_forwards_rate_limit_kwargs(self, monkeypatch):
-        """run_stream 透传 max_retries/rate_limit_cap 到 llm_complete_stream。"""
+    async def test_run_stream_forwards_supported_kwargs_only(self, monkeypatch):
+        """run_stream 只透传 llm_complete_stream 支持的参数（max_retries 过、
+        rate_limit_cap 过滤——透传会 TypeError → STREAM_ERROR，见 O24）。"""
         captured = {}
 
         async def fake_llm_stream(**kwargs):
@@ -45,7 +48,8 @@ class TestRunStreamPassesLimits:
             pass
 
         assert captured.get("max_retries") == 1
-        assert captured.get("rate_limit_cap") == 10
+        assert "rate_limit_cap" not in captured, \
+            "rate_limit_cap 不在 llm_complete_stream 签名内，透传必 STREAM_ERROR"
 
     @pytest.mark.asyncio
     async def test_run_stream_defaults_when_not_passed(self, monkeypatch):
@@ -69,8 +73,8 @@ class TestRunStreamPassesLimits:
 
         assert "max_retries" not in captured or captured["max_retries"] is None
 
-    def test_symbol_analysis_call_passes_limits(self):
-        """symbol_analysis_stream 调用处传 max_retries=1 + rate_limit_cap=10。"""
+    def test_symbol_analysis_call_passes_only_supported(self):
+        """symbol_analysis_stream 调用处只传 max_retries=1，不含 rate_limit_cap。"""
         src = inspect.getsource(analysis_router.symbol_analysis_stream)
         assert "max_retries=1" in src
-        assert "rate_limit_cap=10" in src
+        assert "rate_limit_cap" not in src

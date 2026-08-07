@@ -76,7 +76,7 @@
             <span v-if="item.rank_change != null" :class="['row-rank-chg', item.rank_change >= 0 ? 'text-up' : 'text-down']">
               {{ item.rank_change > 0 ? '↑' : (item.rank_change < 0 ? '↓' : '—') }}{{ item.rank_change ? Math.abs(item.rank_change) : '' }}
             </span>
-            <button class="row-action" @click="emitAnalyze('sector', item)" title="AI 分析">🤖 AI</button>
+            <button class="row-action" @click="emitAnalyze('sector', item)" title="AI 分析">🤖 AI 分析</button>
           </div>
         </div>
 
@@ -110,7 +110,7 @@
             </span>
             <div class="row-actions">
               <button class="row-action" @click="openTechnical(item)" title="技术分析">📈 技术</button>
-              <button class="row-action" @click="emitAnalyze('symbol', item)" title="AI 分析">🤖 AI</button>
+              <button class="row-action" @click="emitAnalyze('symbol', item)" title="AI 分析">🤖 AI 分析</button>
             </div>
           </div>
         </div>
