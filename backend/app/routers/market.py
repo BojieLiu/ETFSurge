@@ -623,6 +623,8 @@ async def sectors_heat(limit: int = Query(20), market: str = "A") -> dict[str, A
     for r in rows or []:
         # P2-4 (R4-11a): 透传 change_pct（前端 SectorHeatMap 读 item.change_pct 显示涨跌幅，
         # 旧白名单丢弃该字段 → 热度行涨跌幅恒不显示）
+        # O19 (round8 §7 §5.1D): 财联社板块热度无涨跌幅字段 → null 兜底为 0——
+        # 与前端 `!= null` 防御协同（「非 null 可为 0」口径，见 O9 验收②）。
         items.append({
             "rank": r.get("rank"),
             "name": r.get("plate_name") or r.get("name", ""),
@@ -630,7 +632,7 @@ async def sectors_heat(limit: int = Query(20), market: str = "A") -> dict[str, A
             "rank_change": r.get("rank_change"),
             "is_new": r.get("is_new", 0),
             "plate_code": r.get("plate_code", ""),
-            "change_pct": r.get("change_pct"),
+            "change_pct": r.get("change_pct") if r.get("change_pct") is not None else 0,
         })
     return {"items": items, "total": len(items)}
 
@@ -816,11 +818,28 @@ async def watchlist_add(data: WatchlistCreate) -> dict[str, Any]:
         # 放宽旧逻辑——realtime 为空但前端已带合法 name 时不再拒绝（用传入 name 入库）。
         provided_name = (data.name or "").strip()
         has_provided_name = bool(provided_name) and provided_name != data.symbol
-        if not realtime and not has_provided_name:
+        # O9 (round8 §7 P9-新): realtime name 空时从 instruments 本地表补名
+        # （F17 启动自动同步）——命中后视为已解析（不再 422），name 用真实名称。
+        _instrument_name = ""
+        if not realtime:
+            try:
+                from ..models.search import Instrument
+                from sqlalchemy import select as _sel
+                _inst = (await session.execute(
+                    _sel(Instrument).where(
+                        Instrument.symbol == data.symbol,
+                        Instrument.market == data.asset_type,
+                    )
+                )).scalar_one_or_none()
+                if _inst and _inst.name:
+                    _instrument_name = _inst.name
+            except Exception:
+                pass
+        if not realtime and not has_provided_name and not _instrument_name:
             raise HTTPException(status_code=422, detail="无法解析该标的，请通过搜索选择")
 
-        # Name fallback: 前端传入 name → realtime.name → symbol
-        name = provided_name or (realtime.get("name", "") if realtime else "") or data.symbol
+        # Name fallback: 前端传入 name（排除代码占位）→ instruments 补名 → realtime.name → symbol
+        name = (provided_name if has_provided_name else "") or _instrument_name or (realtime.get("name", "") if realtime else "") or data.symbol
         if not name.strip():
             name = data.symbol
 

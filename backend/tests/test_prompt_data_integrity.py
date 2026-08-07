@@ -31,8 +31,10 @@ class _FakeStream:
     def __init__(self, captured):
         self.captured = captured
 
-    async def run_stream(self, prompt):
+    async def run_stream(self, prompt, **kwargs):
+        # O24 (round8 §7): symbol_analysis 透传 max_retries/rate_limit_cap
         self.captured["prompt"] = prompt
+        self.captured["kwargs"] = kwargs
         yield {"type": "done"}
 
 

@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="token-monitor">
     <!-- Loading -->
     <div v-if="loading" class="loading-state">
@@ -341,7 +341,7 @@ onMounted(fetchData)
 
 <style scoped>
 .token-monitor {
-  max-width: 1100px;
+  max-width: 1400px /* O17: 1100→1400 铺满 */;
   margin: 0 auto;
 }
 
@@ -611,3 +611,5 @@ onMounted(fetchData)
   font-size: var(--font-size-xs);
 }
 </style>
+
+

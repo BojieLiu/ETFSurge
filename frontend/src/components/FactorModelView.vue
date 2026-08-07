@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <section class="card factor-model">
     <div class="card-header">
       <h2 class="card-title">
@@ -491,7 +491,7 @@ onBeforeUnmount(() => {
   gap: 0.25rem;
 }
 .stat-icon {
-  font-size: 10px;
+  font-size: 0.625rem /* O17 */;
 }
 .stat-icon-valid { color: var(--color-success-600); }
 .stat-icon-warn { color: var(--color-warning-600); }
@@ -568,7 +568,7 @@ onBeforeUnmount(() => {
 .factor-static-badge {
   display: inline-flex; align-items: center;
   margin-left: var(--space-2);
-  font-size: 10px; color: var(--color-text-tertiary);
+  font-size: 0.625rem /* O17 */; color: var(--color-text-tertiary);
   background: var(--color-surface-tertiary);
   border: 1px solid var(--color-border-medium);
   border-radius: var(--radius-full);
@@ -664,7 +664,7 @@ onBeforeUnmount(() => {
   background: linear-gradient(90deg, #fdba74, var(--color-warning-600));
 }
 .ic-bar-label {
-  font-size: 10px;
+  font-size: 0.625rem /* O17 */;
   font-family: monospace;
   font-weight: var(--font-weight-semibold);
   color: var(--color-text-tertiary);
@@ -748,3 +748,4 @@ onBeforeUnmount(() => {
 .btn-primary:hover { background: var(--color-brand-600); }
 .btn-sm { padding: 0.3rem 0.6rem; font-size: 0.8rem; }
 </style>
+

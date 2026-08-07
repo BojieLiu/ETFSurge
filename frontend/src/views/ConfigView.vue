@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="config-page">
     <div class="page-header">
       <h1>系统配置</h1>
@@ -137,7 +137,7 @@ onMounted(loadConfig)
 
 <style scoped>
 .config-page {
-  max-width: 960px;
+  max-width: 1280px /* O17: 960→1280 铺满 */;
   margin: 0 auto;
   padding: 24px 16px;
 }
@@ -297,3 +297,5 @@ onMounted(loadConfig)
   background: #444;
 }
 </style>
+
+

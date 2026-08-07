@@ -4,8 +4,11 @@
       <div class="error-icon">❌</div>
       <h3 class="loading-title">生成失败</h3>
       <p class="loading-text">{{ failed }}</p>
-      <p class="loading-hint">3 秒后将返回设置页，请检查后端服务是否正常运行</p>
-      <div class="panel-footer" style="margin-top:20px;text-align:center">
+      <!-- O11 (round8 §7 + interaction-redesign D1): 失败是终态、可停留查看原因，
+           一键「重试一次」（复用参数重提交）或「返回」退出；移除假承诺「3 秒后返回」。 -->
+      <p class="loading-hint">可重试一次，或返回后重新发起设计</p>
+      <div class="panel-footer" style="margin-top:20px;text-align:center;display:flex;gap:12px;justify-content:center">
+        <AppButton variant="primary" size="sm" @click="$emit('retry')">&#8635; 重试一次</AppButton>
         <AppButton variant="ghost" size="sm" @click="$emit('cancel')">&#8592; 返回</AppButton>
       </div>
     </div>
@@ -68,7 +71,7 @@ const props = defineProps({
   elapsedSec: { type: Number, default: 0 },
 })
 
-defineEmits(['cancel'])
+defineEmits(['cancel', 'retry'])
 
 // F20: task.stage → 当前步骤序号（0-3）。未知 stage 回退到 progress 推断。
 const STAGE_STEP = {

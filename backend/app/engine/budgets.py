@@ -34,7 +34,9 @@ STRATEGY_META: dict[str, dict[str, Any]] = {
         "expected_return": 0.11,
         "max_drawdown": -0.18,
         "sharpe_ratio": 1.0,
-        "layer_budget": {"core": 0.45, "satellite": 0.30, "defense": 0.10},
+        # §5.1C (round8 §7 拍板): 压卫星 ≤20%（0.30→0.20）、防御抬至 15%（0.10→0.15）、
+        # core 0.50 保持 85% 仓位（现金 15%，U6 现金收敛验收不变）
+        "layer_budget": {"core": 0.50, "satellite": 0.20, "defense": 0.15},
         "layer_count": {"core": 5, "satellite": 8, "defense": 1},
         "c2_adjust": {"safe_bonus": 0.5, "risky_penalty": 0.0},
         "expected_characteristics": "预期年化波动15-18%，最大回撤区间15-18%",
@@ -48,7 +50,9 @@ STRATEGY_META: dict[str, dict[str, Any]] = {
         "expected_return": 0.16,
         "max_drawdown": -0.35,
         "sharpe_ratio": 0.8,
-        "layer_budget": {"core": 0.40, "satellite": 0.35, "defense": 0.10},
+        # §5.1C (round8 §7 拍板): 压卫星 ≤20%（0.35→0.20）、防御抬至 15%（0.10→0.15）、
+        # core 0.50（仓位 85% 保持，现金 15%）
+        "layer_budget": {"core": 0.50, "satellite": 0.20, "defense": 0.15},
         "layer_count": {"core": 5, "satellite": 8, "defense": 1},
         "c2_adjust": {"safe_bonus": 0.0, "risky_penalty": 1.5},
         "expected_characteristics": "预期年化波动20-25%，最大回撤区间22-28%",

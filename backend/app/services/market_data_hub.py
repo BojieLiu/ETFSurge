@@ -48,22 +48,42 @@ def _parse_stock_list(s: Any) -> list:
 
 
 def _parse_concept_tags(tag: Any) -> list[str]:
-    """解析热门个股 tag 字符串为 concept_tags 数组（F2-6 步骤A）。"""
-    if isinstance(tag, list):
-        return [str(t) for t in tag if str(t).strip()][:6]
-    if not tag:
-        return []
+    """解析热门个股 tag 为 concept_tags 数组（F2-6 步骤A）。
+
+    O9 (round8 §7 P9-新): 数据源 tag 是嵌套 dict {"concept_tag": [...],
+    "popularity_tag": "..."}——旧实现对 dict 输入直接返回 [] → concept_tags
+    50/50 全空。统一平铺：dict 取 concept_tag 键，list 元素若是 dict 取内层
+    concept_tag，str dict 字面量走 ast.literal_eval。
+    """
+    def _flatten(value) -> list[str]:
+        out: list[str] = []
+        if isinstance(value, dict):
+            # 嵌套 dict：优先取 concept_tag 键（可再嵌套 list）
+            inner = value.get("concept_tag") or value.get("tags") or []
+            out.extend(_flatten(inner))
+        elif isinstance(value, list):
+            for t in value:
+                out.extend(_flatten(t))
+        elif isinstance(value, str):
+            s = value.strip()
+            if s:
+                out.append(s)
+        return out
+
     if isinstance(tag, str):
+        # 字符串可能是 dict/list 字面量（历史缓存格式）
         try:
             parsed = ast.literal_eval(tag)
-            if isinstance(parsed, list):
-                return [str(t) for t in parsed if str(t).strip()][:6]
+            if isinstance(parsed, (dict, list)):
+                return _flatten(parsed)[:6]
         except Exception:
             pass
         # 朴素逗号分隔兜底
         if "," in tag:
             return [t.strip() for t in tag.split(",") if t.strip()][:6]
-    return []
+        # O9: 无法解析的字符串不产出 tag（坏 tag 不落 concept_tags，保持旧行为）
+        return []
+    return _flatten(tag)[:6]
 
 
 def _normalize_hot_plate(r: dict) -> dict:

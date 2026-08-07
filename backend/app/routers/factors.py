@@ -356,7 +356,10 @@ async def get_factor_ic() -> JSONResponse:
             "name": _get_factor_name(code),
             "category": _get_factor_category(code),
             "ic_value": round(val, 4),
-            "sample_count": None,  # not available from current batch data
+            # O6 (round8 §7 P6-新): sample_count 来自 registry._sample_counts
+            # （compute() 在 IC 有信号时填充，line 1437）——不再硬编码 None，
+            # IC 列表携带样本量/显著性信息。
+            "sample_count": getattr(registry, "_sample_counts", {}).get(code, 0),
         }
         for code, val in sorted(ic_batch.items())
         if abs(val) > 0.0

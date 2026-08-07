@@ -45,9 +45,12 @@ export default defineConfig({
     port: 5173,
     proxy: {
       // 注意顺序：更具体的路径在前，否则 /api 会先匹配 /api/v1/ws
-      '/api/v1/ws': { target: process.env.VITE_WS_TARGET || 'ws://127.0.0.1:8000', ws: true, changeOrigin: true },
-      '/ws': { target: process.env.VITE_WS_TARGET || 'ws://127.0.0.1:8000', ws: true, changeOrigin: true },
-      '/api': { target: process.env.VITE_PROXY_TARGET || 'http://127.0.0.1:8000', changeOrigin: true },
+      // O21 (round8): 后端监听 [::]（uvicorn --host ::）——Windows 原生 :: 为 v6only，
+      // 代理 target 从 127.0.0.1 改 localhost（Node DNS verbatim 顺序 ::1 优先 → 直连）。
+      // Docker 内由容器名 backend 解析（Linux :: 双栈，IPv4 亦可达）。
+      '/api/v1/ws': { target: process.env.VITE_WS_TARGET || 'ws://localhost:8000', ws: true, changeOrigin: true },
+      '/ws': { target: process.env.VITE_WS_TARGET || 'ws://localhost:8000', ws: true, changeOrigin: true },
+      '/api': { target: process.env.VITE_PROXY_TARGET || 'http://localhost:8000', changeOrigin: true },
     },
   },
   build: {

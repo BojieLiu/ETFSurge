@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <section class="card global-indices-compact">
     <div class="card-header-compact">
       <h2 class="card-title">
@@ -173,7 +173,7 @@ function labelClass(region) {
 .region-row { margin-bottom: 10px; }
 
 .region-label {
-  font-size: 11px;
+  font-size: var(--font-size-xs) /* O17 */;
   font-weight: var(--font-weight-semibold);
   text-transform: uppercase;
   letter-spacing: var(--letter-spacing-wide);
@@ -232,17 +232,17 @@ function labelClass(region) {
 
 /* ── Card content ── */
 .card-top { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.cd-name { font-size: 12px; font-weight: var(--font-weight-medium); color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cd-stale { font-size: 9px; color: var(--color-text-tertiary); background: var(--color-neutral-200); padding: 1px 5px; border-radius: 3px; line-height: 1.4; }
+.cd-name { font-size: var(--font-size-xs) /* O17 */; font-weight: var(--font-weight-medium); color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cd-stale { font-size: 0.625rem /* O17 */; color: var(--color-text-tertiary); background: var(--color-neutral-200); padding: 1px 5px; border-radius: 3px; line-height: 1.4; }
 
 .card-body { display: flex; flex-direction: column; gap: 4px; }
 /* R5-0-3: WS 行情推送防重排——等宽数字（tabular-nums）+ 最小宽度，
    价格从 1234.5 → 12345.6 等位数变化时不引发卡片宽度/换行抖动（CLS）。 */
-.cd-price { font-size: 15px; font-weight: var(--font-weight-semibold); color: var(--color-text-primary); font-family: var(--font-family-mono); line-height: 1.2; font-variant-numeric: tabular-nums; min-width: 3ch; }
+.cd-price { font-size: var(--font-size-base) /* O17 */; font-weight: var(--font-weight-semibold); color: var(--color-text-primary); font-family: var(--font-family-mono); line-height: 1.2; font-variant-numeric: tabular-nums; min-width: 3ch; }
 .cd-price.muted { color: var(--color-text-tertiary); }
-.cd-change { font-size: 12px; font-weight: var(--font-weight-medium); font-family: var(--font-family-mono); font-variant-numeric: tabular-nums; }
+.cd-change { font-size: var(--font-size-xs) /* O17 */; font-weight: var(--font-weight-medium); font-family: var(--font-family-mono); font-variant-numeric: tabular-nums; }
 .cd-change.muted { color: var(--color-text-tertiary); }
-.ca { font-size: 8px; line-height: 1; }
+.ca { font-size: 0.625rem /* O17 */; line-height: 1; }
 
 /* ── Empty state ── */
 .indices-empty-compact {
@@ -264,3 +264,4 @@ function labelClass(region) {
 :deep(.text-up) { color: var(--color-text-up, #c62828); }
 :deep(.text-down) { color: var(--color-text-down, #2e7d32); }
 </style>
+

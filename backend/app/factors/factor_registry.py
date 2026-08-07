@@ -593,6 +593,11 @@ ET_SPECIFIC_GAP_CODES = {
     # O20 (round7 §7 P20-③): industry_diversification 依赖 concepts 标签——
     # 上游 concepts 为空时 reason 走「数据源未接入（缺 concepts）」而非「IC 未累积」
     "etf.industry_diversification": "concepts",
+    # O25 (round8 §7 P6-新): sentiment 三因子缺口键——此前不在任何缺口集合，
+    # no_data reason 落「IC 未累积（样本 <3）」兜底，无法区分「数据源未接入」。
+    "sentiment.panic_greed_diff": "sentiment_index/sentiment_history",
+    "sentiment.stock_divergence": "advance_decline",
+    "sentiment.news_direction": "news_items/news_scope",
 }
 
 # 33 core factors for S1 (extend this list as implementation progresses)
@@ -1204,6 +1209,19 @@ class FactorRegistry:
                     s for s in symbols
                     if not (data.get(s) or {}).get("concepts")
                     and not (data.get(s) or {}).get("industry_holdings")
+                ]
+            elif _field == "sentiment_index/sentiment_history":
+                # O25: panic_greed_diff 依赖市场情绪指数序列
+                _missing = [s for s in symbols if not (data.get(s) or {}).get("sentiment_index")]
+            elif _field == "advance_decline":
+                # O25: stock_divergence 依赖涨跌比（情绪源）
+                _missing = [s for s in symbols if not (data.get(s) or {}).get("advance_decline")]
+            elif _field == "news_items/news_scope":
+                # O25: news_direction 依赖个股级新闻（news_scope=market 时截面无区分度）
+                _missing = [
+                    s for s in symbols
+                    if not (data.get(s) or {}).get("news_items")
+                    or (data.get(s) or {}).get("news_scope") != "stock"
                 ]
             else:
                 _missing = [s for s in symbols if (data.get(s) or {}).get("shares_change_20d") is None]

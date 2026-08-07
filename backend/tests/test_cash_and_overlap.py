@@ -83,11 +83,14 @@ class TestU6CashBudget:
     def test_range_bound_balanced_budget_tweak(self):
         """U6 R2: range_bound + balanced → satellite +0.02 / defense -0.02。"""
         b = dynamic_layer_budget("balanced", "range_bound")
-        assert b["satellite"] == pytest.approx(0.32)
-        assert b["defense"] == pytest.approx(0.08)
-        # 其他 regime 不受影响（回归）
+        # §5.1C (round8): balanced 压卫星 0.30→0.20、防御 0.10→0.15 → range_bound
+        # 微调后 satellite 0.22 / defense 0.13
+        assert b["satellite"] == pytest.approx(0.22)
+        assert b["defense"] == pytest.approx(0.13)
+        # 其他 regime 不受影响（回归）：bull_strong 抬卫星（新 base 0.20 + 0.08 = 0.28）
         b2 = dynamic_layer_budget("balanced", "bull_strong")
-        assert b2["satellite"] > 0.32
+        assert b2["satellite"] > 0.20
+        assert b2["satellite"] == pytest.approx(0.28)
 
 
 class TestU11CoreOverlap:

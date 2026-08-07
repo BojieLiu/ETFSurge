@@ -155,14 +155,21 @@ describe('UnifiedAnalysis R40 (tab 切换重置)', () => {
     expect(wrapper.vm.search.searchQuery.value).toBe('')
   })
 
-  it('R5: 补全选中后 searchQuery 同步（doAnalyze 与输入框读它）', async () => {
+  it('O23: 补全选中后输入框显示「名称 (代码)」且 doAnalyze 解析混合串', async () => {
     const wrapper = mounted()
     wrapper.vm.activeMode = 'symbol'
     const item = { symbol: '510050', name: '上证50ETF', market: 'A' }
+    startMock.mockResolvedValue({ fullText: '## 报告' })
     wrapper.vm.pickSearchItem(item)
-    expect(wrapper.vm.search.searchQuery.value).toBe('510050') // 输入框显示选中项
+    // O23: 输入框显示「名称 (代码)」（旧断言固化 bug：只显示纯代码）
+    expect(wrapper.vm.search.searchQuery.value).toBe('上证50ETF (510050)')
     expect(wrapper.vm.symbol).toBe('510050')
-    expect(wrapper.vm.query).toBe('510050')
+    // query 反映用户输入（混合串），doAnalyze 从混合串正确取 symbol
+    expect(wrapper.vm.query).toBe('上证50ETF (510050)')
+    // doAnalyze 对混合串正确取 symbol
+    const body = startMock.mock.calls[0][1]
+    expect(body.symbol).toBe('510050')
+    expect(body.name).toBe('上证50ETF')
   })
 
   it('R5: 空输入点分析给出提示（旧实现静默无动作）', async () => {
@@ -243,5 +250,69 @@ describe('UnifiedAnalysis F18 (交互一致性 + 错误态)', () => {
     wrapper.vm.error = ''
     await nextTick()
     expect(wrapper.find('.result-area .btn-primary').exists()).toBe(true)
+  })
+
+  // ── O24 (round8 §7 §5.1K): SSE 空/异常 → 失败分类 + 重试入口 ──────────
+  it('O24: SSE 空 → 失败态显示错误 + 重试按钮', async () => {
+    startMock.mockResolvedValue({ fullText: '' })
+    const wrapper = mounted()
+    wrapper.vm.activeMode = 'symbol'
+    wrapper.vm.search.searchQuery.value = '510050'
+    wrapper.vm.doAnalyze()
+    await nextTick()
+    await nextTick()
+    expect(wrapper.vm.error).toContain('分析失败')
+    expect(wrapper.find('.btn-retry').exists()).toBe(true)
+  })
+
+  it('O24: 429 场景显示「请求过于频繁」分类文案（非笼统网络错误）', async () => {
+    startMock.mockRejectedValue(new Error('429 Too Many Requests'))
+    const wrapper = mounted()
+    wrapper.vm.activeMode = 'symbol'
+    wrapper.vm.search.searchQuery.value = '510050'
+    wrapper.vm.doAnalyze()
+    await nextTick()
+    await nextTick()
+    expect(wrapper.vm.error).toContain('请求过于频繁')
+    expect(wrapper.vm.error).not.toContain('网络错误')
+  })
+
+  it('O24: timeout 场景显示「数据源无响应」分类文案', async () => {
+    startMock.mockRejectedValue(new Error('[timeout] connection timed out'))
+    const wrapper = mounted()
+    wrapper.vm.activeMode = 'symbol'
+    wrapper.vm.search.searchQuery.value = '510050'
+    wrapper.vm.doAnalyze()
+    await nextTick()
+    await nextTick()
+    expect(wrapper.vm.error).toContain('数据源无响应')
+  })
+
+  it('O24: DATA_UNAVAILABLE（sh688981 前缀失败）显示「数据源暂不可用」', async () => {
+    startMock.mockRejectedValue(new Error('数据源暂不可用'))
+    const wrapper = mounted()
+    wrapper.vm.activeMode = 'symbol'
+    wrapper.vm.search.searchQuery.value = 'sh688981'
+    wrapper.vm.doAnalyze()
+    await nextTick()
+    await nextTick()
+    expect(wrapper.vm.error).toContain('数据源暂不可用')
+  })
+
+  it('O24: 失败后点「重试」重新发起分析（同输入）', async () => {
+    startMock.mockResolvedValueOnce({ fullText: '' }).mockResolvedValueOnce({ fullText: '## 报告' })
+    const wrapper = mounted()
+    wrapper.vm.activeMode = 'symbol'
+    wrapper.vm.search.searchQuery.value = '510050'
+    wrapper.vm.doAnalyze()
+    await nextTick()
+    await nextTick()
+    expect(wrapper.vm.error).toContain('分析失败')
+    await wrapper.find('.btn-retry').trigger('click')
+    await nextTick()
+    await nextTick()
+    expect(startMock).toHaveBeenCalledTimes(2)
+    expect(wrapper.vm.error).toBe('')
+    expect(wrapper.vm.result).toBe('## 报告')
   })
 })

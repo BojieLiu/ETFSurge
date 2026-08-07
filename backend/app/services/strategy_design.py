@@ -77,6 +77,44 @@ def _kline_change_pct(market_data_hub, symbol: str) -> float | None:
         logger.debug("[strategy_design] kline change_pct fallback failed for %s: %s", symbol, e)
     return None
 
+
+# O18/O5 (round8 §7 P5-新/R7-P22): 涨跌幅口径统一为「百分比」+ 值域校验。
+# 注入层三源（pool 缓存 / etf_list_cache 快照 / K 线差×100）均为百分比口径；
+# 渲染层（design_report.py）曾用 `abs(dcp)<1 → ×100` 猜测口径，把 ±1% 内的
+# 百分比值放大 100 倍（-0.234% → -23.40%）。此处按代码形态判定交易所涨跌幅限制，
+# 超范围视为「数据源异常」→ None（报告显示「数据源不可用/异常」而非透传荒谬数值）。
+def change_pct_limit(code: str) -> float:
+    """按代码形态判定涨跌幅限制（百分比值）：A 股 ±10%、港股 ±30%、美股 ±50%。"""
+    c = str(code or "").upper().strip()
+    for prefix in ("SH", "SZ", "BJ"):
+        if c.startswith(prefix) and c[len(prefix):].isdigit():
+            return 10.0  # A 股带交易所前缀（sh688981/sz000001/bj430047）
+    c = c.split(".")[0]
+    if any(ch.isalpha() for ch in c):
+        return 50.0  # US（含字母，如 AAPL）
+    if len(c) == 5 and c.isdigit():
+        return 30.0  # HK（5 位纯数字，如 00700/09988）
+    return 10.0      # A 股（6 位数字）
+
+
+def sanitize_change_pct(code: str, dcp) -> float | None:
+    """O5: 涨跌幅值域校验——超交易所限制视为数据源异常 → None。"""
+    if dcp is None:
+        return None
+    try:
+        val = float(dcp)
+    except (TypeError, ValueError):
+        return None
+    limit = change_pct_limit(code)
+    if abs(val) > limit:
+        logger.warning(
+            "[strategy_design] change_pct %.4f out of range (limit ±%.0f%%) for %s — treating as data-source anomaly",
+            val, limit, code,
+        )
+        return None
+    return val
+
+
 # Z11: 静态兜底核心池（非交易时段 / 数据管道断裂时使用）
 STATIC_CORE_POOL = [
     {"symbol": "510300", "name": "沪深300ETF", "layer": "core",
@@ -306,7 +344,8 @@ async def generate_enhanced_design(
                     if dcp is None:
                         dcp = pool_entry.get("daily_change_pct")
                     if dcp is not None:
-                        a["daily_change_pct"] = dcp
+                        # O5 (round8 §7): 值域校验——超交易所限制（A ±10%）视为数据源异常
+                        a["daily_change_pct"] = sanitize_change_pct(code, dcp)
                     price = pool_entry.get("price")
                     if price is None:
                         price = pool_entry.get("last_price")
@@ -323,11 +362,11 @@ async def generate_enhanced_design(
                 if a.get("daily_change_pct") is None:
                     dcp = _snapshot_change_pct(code)
                     if dcp is not None:
-                        a["daily_change_pct"] = dcp
+                        a["daily_change_pct"] = sanitize_change_pct(code, dcp)
                 if a.get("daily_change_pct") is None:
                     kcp = _kline_change_pct(market_data_hub, code)
                     if kcp is not None:
-                        a["daily_change_pct"] = round(kcp * 100, 4)
+                        a["daily_change_pct"] = sanitize_change_pct(code, round(kcp * 100, 4))
 
             # Calculate cash
             total_weight = sum(a.get("weight", 0) for a in allocs if a.get("symbol") != "CASH")

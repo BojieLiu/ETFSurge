@@ -65,6 +65,13 @@ WS /api/v1/ws/design-report/{session_id}
 }
 ```
 
+> **O24 (round8)**: 标的分析 SSE 的 `event: error` 数据携带 `code` 分类标识，
+> 前端据此显示差异化文案：
+> - `DATA_UNAVAILABLE` → 「数据源暂不可用」（标的信息不完整/取数失败）
+> - `[rate-limited]` / 消息含 `429` → 「请求过于频繁，请稍后重试」
+> - `[timeout]` / 消息含 `timeout` → 「数据源无响应，请稍后重试」
+> - 其他 → 「分析失败：{message}」
+
 ---
 
 ## 4. 数据流 / Data Flow

@@ -22,11 +22,11 @@ if ($Local -or -not $Docker) {
     if ($Silent) {
         # 静默:后台隐藏启动 uvicorn,不弹出可见窗口
         # 注意:不能用 RedirectStandardOutput/Error,否则父进程会等待子进程 stdout 关闭而挂起
-        Start-Process -FilePath "cmd.exe" -ArgumentList "/c","cd /d $PSScriptRoot\backend && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000" -WindowStyle Hidden
+        Start-Process -FilePath "cmd.exe" -ArgumentList "/c","cd /d $PSScriptRoot\backend && python -m uvicorn app.main:app --host :: --port 8000 # O21: [::] 双栈" -WindowStyle Hidden
         Write-Host "  后端已后台启动" -ForegroundColor Green
     } else {
         # 普通:启动可见窗口
-        Start-Process cmd -ArgumentList "/c", "cd /d $PSScriptRoot\backend && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000"
+        Start-Process cmd -ArgumentList "/c", "cd /d $PSScriptRoot\backend && python -m uvicorn app.main:app --host :: --port 8000 # O21: [::] 双栈"
         Write-Host "  后端已启动" -ForegroundColor Yellow
     }
 

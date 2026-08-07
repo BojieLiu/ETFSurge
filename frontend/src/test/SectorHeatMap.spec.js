@@ -3,6 +3,21 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import SectorHeatMap from '../components/market/SectorHeatMap.vue'
 import TechnicalAnalysisModal from '../components/market/TechnicalAnalysisModal.vue'
 
+// O20: ECharts 在 jsdom 下无 canvas → stub VChart 为普通组件（可读 option prop）
+vi.mock('vue-echarts', () => ({
+  default: {
+    name: 'VChart',
+    template: '<div data-testid="vchart"><slot /></div>',
+    props: { option: Object, autoresize: Boolean },
+  },
+}))
+vi.mock('echarts/core', () => ({ use: vi.fn() }))
+vi.mock('echarts/renderers', () => ({ CanvasRenderer: {} }))
+vi.mock('echarts/charts', () => ({ CandlestickChart: {}, BarChart: {}, LineChart: {} }))
+vi.mock('echarts/components', () => ({
+  TitleComponent: {}, TooltipComponent: {}, GridComponent: {}, LegendComponent: {}, DataZoomComponent: {},
+}))
+
 vi.mock('../api', () => ({
   marketApi: {
     getHotPlates: vi.fn(),
@@ -114,6 +129,44 @@ describe('SectorHeatMap (F2-6/F2-7 §9.8)', () => {
     expect(emitted[0][0]).toMatchObject({ mode: 'symbol', query: '688825' })
   })
 
+  // ── O19 (round8 §7 §5.1D): change_pct=null 不崩溃、卡片正常渲染 ──────────
+  it('O19: sector heat with change_pct=null renders without TypeError', async () => {
+    // 财联社板块热度无涨跌幅字段 → change_pct 恒 null；旧 `!== undefined` 守卫
+    // 不挡 null → null.toFixed 抛 TypeError → data-row 渲染中断 → 卡片消失。
+    marketApi.getSectorHeat.mockResolvedValue({
+      data: {
+        items: [{
+          rank: 1, name: '半导体', heat_index: 13501.4, rank_change: 5,
+          is_new: 0, change_pct: null,
+        }],
+        total: 20,
+      },
+    })
+    const wrapper = mount(SectorHeatMap)
+    const tabs = wrapper.findAll('.tab-btn')
+    await tabs[1].trigger('click')
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+    expect(wrapper.text()).toContain('半导体')
+    expect(wrapper.find('.data-row').exists()).toBe(true)
+    // 无涨跌幅渲染，但不抛错、卡片保留
+    expect(wrapper.find('.row-change').exists()).toBe(false)
+    expect(wrapper.text()).toContain('热度')
+  })
+
+  it('O19: stock row with change_pct=null renders without TypeError', async () => {
+    marketApi.getStockHotRank.mockResolvedValue({
+      data: [{ name: '海光信息', symbol: '688825', change_pct: null, price: 108.5 }],
+    })
+    const wrapper = mount(SectorHeatMap)
+    const tabs = wrapper.findAll('.tab-btn')
+    await tabs[2].trigger('click')
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.data-row').exists()).toBe(true)
+    expect(wrapper.text()).toContain('海光信息')
+  })
+
   it('emits analyze with sector mode when AI clicked on heat row', async () => {
     marketApi.getSectorHeat.mockResolvedValue({
       data: [{ rank: 1, name: 'AI智能体', heat_index: 13501.4, plate_code: 'cls82558' }],
@@ -144,6 +197,40 @@ describe('SectorHeatMap (F2-6/F2-7 §9.8)', () => {
     expect(wrapper.findComponent(TechnicalAnalysisModal).exists()).toBe(true)
     expect(marketApi.indicators).toHaveBeenCalledWith('688825', 'A')
     expect(marketApi.signal).toHaveBeenCalledWith('688825', 'A')
+  })
+
+  // ── O20 (round8 §7 §5.1E): 弹窗 K 线图渲染（数据已拉、此前未画图）─────
+  it('O20: technical modal renders kline chart from chart payload', async () => {
+    marketApi.getStockHotRank.mockResolvedValue({
+      data: [{ name: '海光信息', symbol: '688825', change_pct: 5.2 }],
+    })
+    marketApi.indicators.mockResolvedValue({ data: { rsi: 43.4 } })
+    marketApi.signal.mockResolvedValue({ data: { signal: 'hold' } })
+    marketApi.chart.mockResolvedValue({
+      data: {
+        dates: ['2026-08-01', '2026-08-04', '2026-08-05'],
+        opens: [10, 10.1, 10.2], closes: [10.1, 10.2, 10.3],
+        highs: [10.2, 10.3, 10.4], lows: [9.9, 10.0, 10.1],
+        volumes: [100, 120, 140], ma5: [10, 10.1, 10.2], ma10: [], ma20: [],
+      },
+    })
+    const wrapper = mount(SectorHeatMap)
+    const tabs = wrapper.findAll('.tab-btn')
+    await tabs[2].trigger('click')
+    await flushPromises()
+    await wrapper.findAll('.row-action')[0].trigger('click')
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+    const modal = wrapper.findComponent(TechnicalAnalysisModal)
+    expect(modal.vm.klineOption).toBeTruthy()
+    expect(modal.vm.klineOption.series || []).toBeTruthy()
+    // candlestick 主序列存在 + 量能副图
+    const types = modal.vm.klineOption.series.map((s) => s.type)
+    expect(types).toContain('candlestick')
+    expect(types).toContain('bar')
+    // 今日涨跌与 K 线一致（close[-1] vs close[-2]）
+    expect(modal.text()).toContain('+0.98%')
+    expect(modal.find('.ta-kline').exists()).toBe(true)
   })
 
   it('R4-25: 综合信号文本随响应动态渲染（非静态空值）', async () => {

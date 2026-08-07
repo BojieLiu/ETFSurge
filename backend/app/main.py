@@ -168,7 +168,9 @@ async def lifespan(app: FastAPI):
     async def _background_instruments_sync():
         try:
             from .services.instruments_sync import sync_instruments_table
-            n = await sync_instruments_table()
+            # O1 (round8 §7 P0-新): 整体超时兜底——即使某段 akshare 黑洞，
+            # 90s 内必然结束（线程池内继续、事件循环不阻塞），不拖累启动。
+            n = await asyncio.wait_for(sync_instruments_table(), timeout=90)
             if n:
                 logger.info("[lifespan] instruments table auto-synced: %d rows", n)
         except Exception as e:  # noqa: BLE001

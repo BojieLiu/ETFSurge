@@ -152,8 +152,17 @@ def _build_plan_tables(strategies: list[dict]) -> str:
             fs_txt = f"{fs:.2f}" if fs is not None else ""
             dcp = e.get("daily_change_pct")
             if dcp is not None:
-                dcp_txt = f"{dcp * 100:.2f}%" if abs(dcp) < 1 else f"{dcp:.2f}%"
-                dcp_txt = ("+" if dcp >= 0 else "") + dcp_txt
+                # O18 (round8 §7): 唯一口径 = 百分比。删除旧 `abs(dcp)<1 → ×100` 分支——
+                # 注入层三源（pool/快照/K线）均为百分比，±1% 内的值曾被放大 100 倍
+                # （-0.234% → -23.40%、0.85% → 85%）。
+                # O5 双保险：超交易所涨跌幅限制的值渲染为「数据源异常」而非透传。
+                from ..services.strategy_design import sanitize_change_pct as _sanitize_dcp
+                _dcp = _sanitize_dcp(code, dcp)
+                if _dcp is not None:
+                    dcp_txt = f"{_dcp:.2f}%"
+                    dcp_txt = ("+" if _dcp >= 0 else "") + dcp_txt
+                else:
+                    dcp_txt = "数据源异常"
             else:
                 # P1-4 (R4-02): 涨跌数据缺失显性化——输出「数据源不可用」而非 "—"，
                 # 避免「数据源降级导致的数据缺失」被误读为「0% 涨跌」或静默缺失。

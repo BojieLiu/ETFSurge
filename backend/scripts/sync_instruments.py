@@ -11,12 +11,28 @@
 """
 
 import asyncio
+import os
 import sys
 from pathlib import Path
 
 # 让脚本能 import app
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND_DIR))
+
+# O1 (round8 §7 P0-新): 段级超时——美股源（stock_us_spot_em）在当前网络环境黑洞，
+# 暴露面最短；其余段 30s。超时后该段降级，不阻塞整体启动。
+_SEGMENT_TIMEOUTS = {
+    "A股个股": 30.0,
+    "A股ETF": 30.0,
+    "港股": 30.0,
+    "美股": 20.0,
+}
+
+
+def _sync_disabled() -> bool:
+    """O1: 环境开关 INSTRUMENTS_SYNC_DISABLED=1 跳过 instruments 同步。"""
+    return os.environ.get("INSTRUMENTS_SYNC_DISABLED", "").strip().lower() in ("1", "true", "yes")
+
 
 try:
     from pypinyin import lazy_pinyin
@@ -35,10 +51,14 @@ def _to_pinyin(name: str) -> tuple[str, str]:
 
 
 async def _fetch_akshare_list(fn_name: str, symbol_col: str, name_col: str, market: str, asset_type: str) -> list[dict]:
-    """通用 akshare 列表拉取 + 归一化为 instruments 行。"""
+    """通用 akshare 列表拉取 + 归一化为 instruments 行。
+
+    O1 (round8 §7 P0-新): akshare 网络调用经 asyncio.to_thread 提交线程池——
+    裸同步调用会阻塞事件循环（stock_us_spot_em 卡死 → uvicorn 永不 bind 端口）。
+    """
     import akshare as ak
     try:
-        df = getattr(ak, fn_name)()
+        df = await asyncio.to_thread(getattr(ak, fn_name))
     except Exception as e:
         print(f"  [WARN] {fn_name} failed: {e}")
         return []
@@ -88,7 +108,20 @@ async def collect_all() -> list[dict]:
          else _fetch_akshare_list(fn, "代码", "名称", mkt, at))
         for (_, fn), (mkt, at) in zip(segments, [("A", "stock"), ("A", "etf"), ("HK", "stock"), ("US", "US")])
     ]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    # O1 (round8 §7 P0-新): 每段 asyncio.wait_for 超时（美股 20s / 其他 30s）——
+    # 黑洞段在超时窗口内必然结束，不占用事件循环；失败段仅降级（跳过），整体继续。
+    async def _guarded(name: str, coro):
+        timeout = _SEGMENT_TIMEOUTS.get(name, 30.0)
+        try:
+            return await asyncio.wait_for(coro, timeout=timeout)
+        except (asyncio.TimeoutError, asyncio.CancelledError) as e:
+            logger.error("[sync_instruments] segment %s TIMED OUT after %.1fs: %s", name, timeout, e)
+            raise
+
+    results = await asyncio.gather(
+        *[_guarded(seg_name, coro) for (seg_name, _fn), coro in zip(segments, tasks)],
+        return_exceptions=True,
+    )
     merged: list[dict] = []
     seen = set()
     for (seg_name, _fn), res in zip(segments, results):
@@ -133,6 +166,11 @@ async def sync():
     from app.database import async_session, init_db
     from app.models.search import Instrument
     from sqlalchemy import select, delete
+
+    # O1 (round8 §7): 环境开关——INSTRUMENTS_SYNC_DISABLED=1 跳过同步
+    if _sync_disabled():
+        print("[sync_instruments] INSTRUMENTS_SYNC_DISABLED=1 — skip sync")
+        return
 
     print("[sync_instruments] collecting from akshare...")
     rows = await collect_all()

@@ -33,7 +33,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PASS = 0
 FAIL = 0
 SKIP = 0
-BASE = "http://127.0.0.1:8000"
+# O21 (round8): 后端监听 [::]（uvicorn --host ::）——Windows 原生 :: 为 v6only，
+# 127.0.0.1 直连会被拒；localhost 经 DNS verbatim 顺序（::1 优先）可直连。
+BASE = "http://localhost:8000"
 
 
 def check(label, ok, detail="", skip=False):
@@ -62,18 +64,24 @@ def section_health(host, port):
     """服务存活检查：TCP 端口 + HTTP /health"""
     section("服务存活检查")
 
-    # TCP 端口可达
-    s = socket.socket()
-    s.settimeout(3)
-    try:
-        s.connect((host, port))
-        check(f"TCP 端口 {port} 可达", True)
-    except Exception as e:
-        check(f"TCP 端口 {port} 可达", False, str(e))
+    # TCP 端口可达 —— O21 (round8): 后端可能监听 [::] 双栈（uvicorn --host ::），
+    # 探测先 ::1 后 127.0.0.1（Windows 原生 :: 监听为 v6only，IPv4 探测会误报拒绝）。
+    _probe = None
+    for _h in ("::1", host):
+        try:
+            _probe = socket.socket(socket.AF_INET6 if ":" in _h else socket.AF_INET)
+            _probe.settimeout(3)
+            _probe.connect((_h, port))
+            check(f"TCP 端口 {port} 可达 ({_h})", True)
+            break
+        except Exception as e:
+            check(f"TCP 端口 {port} 可达 ({_h})", False, str(e))
+            _probe = None
+    if _probe is None:
         print(f"\n  [!] 服务未运行，无法继续验证。启动: cd backend && uvicorn app.main:app --port {port}")
         sys.exit(1)
-    finally:
-        s.close()
+    else:
+        _probe.close()
 
     # HTTP health with response time gate (7.5b)
     try:
@@ -280,8 +288,7 @@ def section_market():
                 f"GET /market/search?keyword={_kw}(名称)&market={_mkt} -> {r.status_code} ({_elapsed:.1f}s) 名称命中",
                 _ok_code and _hits > 0,
                 "" if _ok_code and _hits > 0
-                else (f"0 条（数据源冷却/未同步——O13 语义告警，非代码缺陷）" if _ok_code else f"HTTP {r.status_code}"),
-                skip=(_ok_code and _hits == 0),
+                else (f"0 条（O4 名称搜索门禁：instruments 表未同步/数据源不可用）" if _ok_code else f"HTTP {r.status_code}"),
             )
         except requests.Timeout:
             check(f"GET /market/search?keyword={_kw}(名称)", False, "请求超时（20s）")
@@ -1864,7 +1871,9 @@ def main():
     global BASE
     parser = argparse.ArgumentParser(description="端到端链路验证")
     parser.add_argument("--port", type=int, default=8000)
-    parser.add_argument("--host", default="127.0.0.1")
+    # O21 (round8): 默认 host 用 localhost（后端监听 [::]，Windows 原生 v6only，
+    # 127.0.0.1 直连会被拒；localhost 经 getaddrinfo ::1 优先可直连）
+    parser.add_argument("--host", default="localhost")
     parser.add_argument("--module", default=None,
                         help="运行指定模块组 (health,market,portfolio,news,admin,ws)，逗号分隔")
     parser.add_argument("--smoke", action="store_true",

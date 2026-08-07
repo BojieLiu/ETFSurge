@@ -71,7 +71,11 @@
         @click="setQuestion(tpl)">{{ tpl.label }}</button>
     </div>
 
-    <div v-if="error" class="error">{{ error }}</div>
+    <div v-if="error" class="error">
+      {{ error }}
+      <!-- O24 (round8 §7 §5.1K): 失败可重试——点击带退避重发同一输入 -->
+      <button class="btn-retry" @click="doAnalyze" :disabled="loading">重试</button>
+    </div>
 
     <div v-if="result" class="result" v-html="renderMarkdown(result)"></div>
 
@@ -302,15 +306,33 @@ function onEnterKeydown(e) {
 
 // F7 R18: 下拉选中 → 写入 query + 触发分析（名称→代码由 doAnalyze 内解析）
 // O30: 三模式统一用 activeSearch（sector/index 下拉选中板块/指数）
+// O23 (round8 §7 §5.1J): 复用 composable 的 selectSearchItem——回显「名称 (代码)」，
+// 旧实现只写 item.symbol → 输入框只显示代码、doAnalyze 拿不到名称。
 function pickSearchItem(item) {
   query.value = item.symbol
-  activeSearch.value.searchQuery.value = item.symbol
-  activeSearch.value.selectedSearchItem.value = item
-  activeSearch.value.showDropdown.value = false
+  activeSearch.value.selectSearchItem(item) // 写回 "名称 (代码)"
   symbol.value = item.symbol
   result.value = ''
   error.value = ''
   doAnalyze()
+}
+
+// O24 (round8 §7 §5.1K): SSE 失败分类文案——复用 llm.py 的 _last_llm_error 分级
+// （[rate-limited] 429 / [timeout]），前端据此显示差异化提示而非笼统「网络错误」。
+// 有错误对象时优先按 message 分类；无错误对象（SSE 空转）才判「AI 未返回内容」。
+function classifyError(e, fullText) {
+  const msg = ((e && e.message) || '').toString()
+  if (msg.includes('429') || msg.includes('[rate-limited]')) {
+    return '请求过于频繁，请稍后重试'
+  }
+  if (msg.includes('timeout') || msg.includes('[timeout]')) {
+    return '数据源无响应，请稍后重试'
+  }
+  if (msg.includes('DATA_UNAVAILABLE') || msg.includes('数据源暂不可用')) {
+    return '分析失败：数据源暂不可用'
+  }
+  if (!fullText || !fullText.trim()) return '分析失败：AI 未返回内容，请稍后重试'
+  return '分析失败：' + (msg || '网络错误')
 }
 
 async function doAnalyze() {
@@ -322,17 +344,46 @@ async function doAnalyze() {
     return
   }
   query.value = q
-  symbol.value = q
   loading.value = true
   error.value = ''
   result.value = ''
   lastAnalyzed.value = q
 
-  // R43: 代码输入（如 510050）时后端用 realtime 回填真实名称；中文名直接传原名
-  const looksLikeCode = /^[0-9A-Za-z.]+$/.test(q) && q.length <= 12
+  // O23 (round8 §7 §5.1J): 混合串解析——兼容两种回显格式：
+  //   「代码 名称」（acceptCompletion）→ 首个 token 为代码；
+  //   「名称 (代码)」（selectSearchItem）→ 括号内为代码。
+  // 旧 looksLikeCode 对整个串 test，含空格/中文的混合串解析失败。
+  const firstToken = q.split(/[\s(（]/)[0] || q
+  const parenMatch = q.match(/[（(]\s*([0-9A-Za-z.]+)\s*[)）]/)
+  let codeToken = firstToken
+  let namePart = ''
+  let looksLikeCode = /^[0-9A-Za-z.]+$/.test(firstToken) && firstToken.length <= 12
+  if (parenMatch && /^[0-9A-Za-z.]+$/.test(parenMatch[1]) && parenMatch[1].length <= 12) {
+    // 「名称 (代码)」格式：括号内为代码，括号前为名称
+    codeToken = parenMatch[1]
+    namePart = q.slice(0, q.indexOf(parenMatch[0])).trim() || ''
+    looksLikeCode = true
+  } else if (looksLikeCode) {
+    // 「代码 名称」格式：首个 token 为代码，其余为名称
+    namePart = q.slice(firstToken.length).replace(/[()（）]/g, '').trim()
+  }
   let reqSymbol = q
-  let reqName = looksLikeCode ? '' : q
+  let reqName = ''
   let assetType = props.marketTab === 'HK' ? 'HK' : (props.marketTab === 'US' ? 'US' : 'A')
+  if (activeMode.value === 'symbol') {
+    if (looksLikeCode) {
+      reqSymbol = codeToken
+      reqName = namePart
+    } else {
+      reqSymbol = q
+      reqName = q
+    }
+  } else {
+    reqSymbol = q
+    reqName = q
+  }
+  // O23: symbol 显示真实代码（混合串输入时取 codeToken，供「已选择」态展示）
+  symbol.value = looksLikeCode ? codeToken : q
 
   // F7 R19: symbol 模式名称→代码解析（命中下拉搜索结果首条则用其 symbol）
   if (activeMode.value === 'symbol' && !looksLikeCode) {
@@ -350,16 +401,20 @@ async function doAnalyze() {
   }
 
   // R42: index 模式先解析中文指数名（如"沪深300"）→ 真实 symbol + 名称，避免 404
+  // O23: 混合串（"上证指数 (000001)"）用 namePart/codeToken 匹配
   if (activeMode.value === 'index') {
     try {
       const meta = (await marketApi.indicesMeta()).data || []
       const hit = meta.find((i) => i.name === q)
         || meta.find((i) => i.symbol === q)
+        || meta.find((i) => namePart && i.name === namePart)
+        || meta.find((i) => looksLikeCode && i.symbol === codeToken)
         || meta.find((i) => (i.name || '').includes(q))
       if (hit) {
         reqSymbol = hit.symbol || q
         reqName = hit.name || q
       } else if (looksLikeCode) {
+        reqSymbol = codeToken
         reqName = '' // 代码直传，后端 realtime 回填
       }
       assetType = 'index'
@@ -373,7 +428,8 @@ async function doAnalyze() {
     ? '/sector-analysis/stream'
     : '/symbol-analysis/stream'
   const body = activeMode.value === 'sector'
-    ? { sector_code: q, sector_name: q, sector_type: 'industry', market: props.marketTab }
+    // O23: sector 模式同样从混合串提取 code/name
+    ? { sector_code: (looksLikeCode ? codeToken : q), sector_name: (namePart || q), sector_type: 'industry', market: props.marketTab }
     : { symbol: reqSymbol, name: reqName, asset_type: assetType, market: props.marketTab, question: selectedQuestion.value }
 
   try {
@@ -383,11 +439,12 @@ async function doAnalyze() {
     result.value = fullText
     // F18 (round6 §16.6): SSE 空转/失败——返回空 fullText 时显示错误态，
     // 而非静默落入"已选择"分支（用户误以为已分析完成）。
+    // O24 (round8 §7 §5.1K): 分类文案 + 可重试（失败态带「重试」按钮）。
     if (!fullText || !fullText.trim()) {
-      error.value = '分析失败：AI 未返回内容，请稍后重试'
+      error.value = classifyError(null, fullText)
     }
   } catch (e) {
-    error.value = '分析失败：' + (e?.message || '网络错误')
+    error.value = classifyError(e, result.value)
   } finally {
     loading.value = false
   }

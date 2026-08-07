@@ -460,6 +460,7 @@ async def get_timeline(
     """
     from ..models.portfolio_design import PortfolioDesign
     from ..models.strategy_check import StrategyCheckRecord
+    from ..models.task import TaskRecord
     from sqlalchemy import select
     import json
 
@@ -472,6 +473,17 @@ async def get_timeline(
     check_stmt = select(StrategyCheckRecord).order_by(StrategyCheckRecord.created_at.desc())
     check_result = await db.execute(check_stmt)
     checks = check_result.scalars().all()
+
+    # O12 (round8 §7 + interaction-redesign D2): join tasks 表——失败/运行中的
+    # design 任务在历史列表跨会话可见（不再"凭空消失"）。已成功且已有 design
+    # 记录的不重复（design_items 已覆盖）；失败/运行中任务并入。
+    task_stmt = select(TaskRecord).where(
+        TaskRecord.task_type == "design",
+    ).order_by(TaskRecord.created_at.desc())
+    task_result = await db.execute(task_stmt)
+    task_rows = task_result.scalars().all()
+
+    design_ids = {d.id for d in designs}
 
     # Build items from designs
     design_items = []
@@ -498,8 +510,24 @@ async def get_timeline(
             "error_message": None,
         })
 
+    # O12: tasks 表并入（失败/运行中任务可见）
+    task_items = []
+    for t in task_rows:
+        # 成功且已有 design 记录 → design_items 已覆盖，不重复
+        if t.status in ("completed", "completed_with_errors") and t.record_id and t.record_id in design_ids:
+            continue
+        task_items.append({
+            "id": t.record_id or t.id,
+            "_type": "design",
+            "created_at": t.created_at.isoformat() if t.created_at else "",
+            "status": t.status if t.status in ("completed", "completed_with_errors", "failed", "running") else "running",
+            "capital": None,
+            "error_message": t.error_message,
+            "task_id": t.id,
+        })
+
     # Merge and sort by created_at DESC
-    merged = sorted(design_items + check_items, key=lambda x: x["created_at"], reverse=True)
+    merged = sorted(design_items + check_items + task_items, key=lambda x: x["created_at"], reverse=True)
     total = len(merged)
 
     # Paginate

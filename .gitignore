@@ -52,3 +52,7 @@ opencode.json
 
 # Reasonix tooling
 .reasonix/
+
+# Reasonix runtime artifacts
+.omo/
+

@@ -43,6 +43,12 @@
           </span>
         </div>
 
+        <!-- O20 (round8 §7 §5.1E): K 线图——数据早已拉取（chart）却从未渲染；
+             接入 candlestick + 均线 + 量能 + dataZoom，与今日涨跌/资金流并列。 -->
+        <div v-if="klineOption && Object.keys(klineOption).length" class="ta-kline">
+          <v-chart :option="klineOption" autoresize class="ta-kline-chart" />
+        </div>
+
         <!-- 关键指标 -->
         <div class="ta-grid">
           <div class="ta-cell">
@@ -90,6 +96,14 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { marketApi } from '../../api'
+// O20 (round8 §7 §5.1E): echarts 按需注册——candlestick + bar + line + dataZoom
+import { use } from 'echarts/core'
+import { CanvasRenderer } from 'echarts/renderers'
+import { CandlestickChart, BarChart, LineChart } from 'echarts/charts'
+import { TitleComponent, TooltipComponent, GridComponent, LegendComponent, DataZoomComponent } from 'echarts/components'
+import VChart from 'vue-echarts'
+
+use([CanvasRenderer, CandlestickChart, BarChart, LineChart, TitleComponent, TooltipComponent, GridComponent, LegendComponent, DataZoomComponent])
 
 const props = defineProps({
   symbol: { type: String, required: true },
@@ -105,6 +119,64 @@ const signalData = ref(null)
 // O28②: 今日涨跌（K 线 close 序列计算）+ 主力资金流（fund-flow 端点）
 const priceInfo = ref(null)
 const fundFlow = ref(null)
+// O20: K 线原始数据（chart 端点早已拉取，此前仅用于算今日涨跌）
+const chartData = ref(null)
+
+// O20: K 线 echarts option——candlestick + MA5/10/20 + 量能 + dataZoom
+// （红涨绿跌：CANDLE_UP=红 / CANDLE_DOWN=绿，与项目主题一致）
+const CANDLE_UP = '#e53935'
+const CANDLE_DOWN = '#43A047'
+const klineOption = computed(() => {
+  const d = chartData.value
+  if (!d || !d.opens || !d.closes || !d.lows || !d.highs) return {}
+  const dates = (d.dates || []).map((t) => String(t).slice(0, 10))
+  const candlesticks = d.opens.map((_, i) => [d.opens[i], d.closes[i], d.lows[i], d.highs[i]])
+  const volumes = d.volumes || []
+  const volumeColors = d.closes.map((c, i) =>
+    i === 0 ? CANDLE_DOWN : c >= d.closes[i - 1] ? CANDLE_DOWN : CANDLE_UP
+  )
+  const series = [{
+    type: 'candlestick', name: `${props.name || props.symbol}`,
+    data: candlesticks, xAxisIndex: 0, yAxisIndex: 0,
+    itemStyle: { color: CANDLE_DOWN, color0: CANDLE_UP, borderColor: CANDLE_DOWN, borderColor0: CANDLE_UP },
+  }]
+  const maConfig = [
+    { key: 'ma5', name: 'MA5', color: '#f59e0b' },
+    { key: 'ma10', name: 'MA10', color: '#3b82f6' },
+    { key: 'ma20', name: 'MA20', color: '#8b5cf6' },
+  ]
+  for (const cfg of maConfig) {
+    const arr = d[cfg.key] || []
+    if (!arr.length) continue
+    series.push({
+      type: 'line', data: arr, smooth: true, xAxisIndex: 0, yAxisIndex: 0,
+      name: cfg.name, symbol: 'none', lineStyle: { width: 1.2, color: cfg.color },
+    })
+  }
+  series.push({
+    type: 'bar', data: volumes, xAxisIndex: 1, yAxisIndex: 1,
+    name: '成交量', itemStyle: { color: (p) => volumeColors[p.dataIndex] },
+  })
+  return {
+    title: { text: `${props.name || props.symbol} K线`, left: 'center', textStyle: { fontSize: 13, fontWeight: 600 } },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
+    legend: { top: 4, data: ['MA5', 'MA10', 'MA20', '成交量'], textStyle: { fontSize: 10 } },
+    grid: [
+      { left: '6%', right: '3%', top: 30, height: '58%' },
+      { left: '6%', right: '3%', top: '72%', height: '16%' },
+    ],
+    xAxis: [
+      { type: 'category', data: dates, gridIndex: 0, axisLabel: { show: true, rotate: 30, fontSize: 9 } },
+      { type: 'category', data: dates, gridIndex: 1, axisLabel: { show: false } },
+    ],
+    yAxis: [
+      { gridIndex: 0, scale: true, splitNumber: 4 },
+      { gridIndex: 1, scale: true, splitNumber: 3, axisLabel: { show: true, fontSize: 9 } },
+    ],
+    dataZoom: [{ type: 'inside', xAxisIndex: [0, 1], start: 40, end: 100 }],
+    series,
+  }
+})
 
 function fmt(v) {
   return v === undefined || v === null ? '—' : Number(v).toFixed(2)
@@ -169,9 +241,10 @@ async function load() {
     ])
     ind.value = indRes.status === 'fulfilled' ? (indRes.value.data || {}) : {}
     signalData.value = sigRes.status === 'fulfilled' ? (sigRes.value.data || null) : null
-    // 今日涨跌：K 线 close[-1] vs close[-2]
-    const chartData = chartRes.status === 'fulfilled' ? (chartRes.value.data || null) : null
-    priceInfo.value = computeChangePct(chartData)
+    // 今日涨跌：K 线 close[-1] vs close[-2]；O20: 同时保存 K 线数据供图表渲染
+    const chartPayload = chartRes.status === 'fulfilled' ? (chartRes.value.data || null) : null
+    chartData.value = chartPayload
+    priceInfo.value = computeChangePct(chartPayload)
     fundFlow.value = flowRes.status === 'fulfilled' ? (flowRes.value.data || null) : null
     if (indRes.status === 'rejected' && sigRes.status === 'rejected') {
       error.value = '指标加载失败：' + (indRes.reason?.message || '网络错误')
@@ -214,15 +287,17 @@ onMounted(load)
   padding: var(--space-4);
 }
 .ta-modal {
-  width: 420px;
+  width: 640px; /* O20: 加宽容纳 K 线图（旧 420px 只放指标卡） */
   max-width: 100%;
-  max-height: 80vh;
+  max-height: 85vh;
   overflow-y: auto;
   background: var(--color-surface-primary, #fff);
   border-radius: var(--radius-xl);
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
   padding: var(--space-4);
 }
+.ta-kline { margin: var(--space-3) 0; }
+.ta-kline-chart { width: 100%; height: 320px; }
 .ta-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-3); }
 .ta-title { margin: 0; font-size: var(--font-size-base); font-weight: 600; }
 .ta-close { background: none; border: none; cursor: pointer; font-size: var(--font-size-base); color: var(--color-text-muted); }

@@ -19,6 +19,11 @@ v3 (Z27 task-persistence-redesign):
 from __future__ import annotations
 
 import asyncio
+import os
+
+# O10 (round8 §7): DATA 预算弹性化——冷缓存首次全量建 K 线缓存实测 42-75s，
+# 45s 硬预算恒被截断；默认 90s（可用 DESIGN_DATA_TIMEOUT env 覆盖）。
+DESIGN_DATA_TIMEOUT = float(os.environ.get("DESIGN_DATA_TIMEOUT", "90"))
 import json
 import logging
 import warnings
@@ -282,13 +287,15 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
         constraints = params.get("constraints")
 
         # ── Stage 1&2: DATA + ENGINE (combined via generate_enhanced_design) ──
-        # OPT-06: 超时预算拆分，DATA 阶段 45s 上限
+        # OPT-06 + O10 (round8 §7): DATA 预算弹性化——45s 硬编码 → DESIGN_DATA_TIMEOUT
+        # env（默认 90s）。冷缓存首次全量建 K 线缓存实测 42-75s（Semaphore(5) ×
+        # 20s/只），45s 恒被截断报"方案生成超时"；热缓存时 ~10s 完成。
         result = await asyncio.wait_for(
             generate_enhanced_design(
                 capital=capital,
                 constraints=constraints,
             ),
-            timeout=45,  # OPT-06: DATA 阶段 45s 预算（原 90s 总预算拆分为三段）
+            timeout=DESIGN_DATA_TIMEOUT,
         )
 
         strategies = result.get("strategies", [])

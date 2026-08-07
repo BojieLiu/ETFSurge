@@ -145,14 +145,16 @@
   --font-family-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Monaco, Consolas, monospace;
   --font-family-display: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 
-  /* Font Sizes */
-  --font-size-xs: 0.6875rem;    /* 11px */
-  --font-size-sm: 0.8125rem;    /* 13px */
-  --font-size-base: 0.9375rem;  /* 15px */
-  --font-size-lg: 1.0625rem;    /* 17px */
-  --font-size-xl: 1.25rem;      /* 20px */
-  --font-size-2xl: 1.5rem;      /* 24px */
-  --font-size-3xl: 1.875rem;    /* 30px */
+  /* Font Sizes — O17 (round8 §7 + frontend-theme-redesign §2.1): 基准放大一档
+     （xs 11→12 / sm 13→14 / base 15→16 / lg 17→18 / xl 20→22 / 2xl 24→26 / 3xl 30→32）
+     组合令牌 --text-* 引用这些变量自动跟随；4xl/5xl（36/48px）仅 display 大标题不动。 */
+  --font-size-xs: 0.75rem;      /* 12px */
+  --font-size-sm: 0.875rem;     /* 14px */
+  --font-size-base: 1rem;       /* 16px */
+  --font-size-lg: 1.125rem;     /* 18px */
+  --font-size-xl: 1.375rem;     /* 22px */
+  --font-size-2xl: 1.625rem;    /* 26px */
+  --font-size-3xl: 2rem;        /* 32px */
   --font-size-4xl: 2.25rem;     /* 36px */
   --font-size-5xl: 3rem;        /* 48px */
 

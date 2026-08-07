@@ -222,8 +222,23 @@ def _akshare_history_fallback(symbol: str, period: str = "daily") -> list[dict[s
 
 # ── Sina helper ──────────────────────────────────────────────────
 
+def _strip_a_prefix(symbol: str) -> str:
+    """O22 (round8 §7 §5.1G): 剥离 A 股交易所前缀（sh688981 → 688981）。
+
+    底层源（tencent/sina/mootdx）只认纯数字代码，带 sh/sz/bj 前缀直接取数失败
+    （_exchange 把 sh688981 判成 sz → 拼出 szsh688981 → 恒空）。
+    """
+    s = str(symbol or "").lower()
+    for pref in ("sh", "sz", "bj"):
+        if s.startswith(pref):
+            return s[len(pref):]
+    return s
+
+
 def _exchange(symbol: str) -> str:
-    if symbol.startswith("6") or symbol.startswith("51") or symbol.startswith("5"):
+    # O22: 先剥 sh/sz/bj 前缀再判断（带前缀输入不再误判为 sz）
+    s = _strip_a_prefix(symbol)
+    if s.startswith("6") or s.startswith("51") or s.startswith("5"):
         return "sh"
     return "sz"
 
@@ -255,7 +270,8 @@ def _sina_realtime(symbols: list[str], asset_type: str) -> list[dict[str, Any]]:
                 sym_key = _normalize_hk_symbol(sym)
             else:
                 pref = "s_sh" if sym in _SH_INDEXES else _exchange(sym)
-                sym_key = sym
+                # O22: A 股前缀拼接使用纯数字（带 sh 前缀会拼出 shsh688981 → 空）
+                sym_key = _strip_a_prefix(sym)
             try:
                 r = s.get(f"https://hq.sinajs.cn/list={pref}{sym_key}", timeout=10)
                 text = r.text.strip()
@@ -400,7 +416,8 @@ def _tencent_realtime(symbols: list[str], asset_type: str) -> list[dict[str, Any
             if asset_type == "HK":
                 code_parts.append(f"hk{_normalize_hk_symbol(s)}")
             else:
-                code_parts.append(f"{_exchange(s)}{s}")
+                # O22: A 股前缀拼接使用纯数字（带 sh 前缀会拼出 szsh688981 → 空）
+                code_parts.append(f"{_exchange(s)}{_strip_a_prefix(s)}")
         codes = ",".join(code_parts)
         s = _session()
         r = s.get(f"http://qt.gtimg.cn/q={codes}", timeout=10)
@@ -595,13 +612,15 @@ def fetch_a_stock_realtime(symbol: str | None = None) -> list[dict[str, Any]]:
 
     F1-2: 与批量版 fetch_a_stock_batch 降级链对齐（补 tencent），
     修复 mootdx 熔断窗口期单只 A 股 realtime 间歇性为空的问题。
+    O22 (round8 §7): 入口剥 sh/sz/bj 前缀——底层源只认纯数字代码。
     """
     if not symbol:
         return []
+    clean = _strip_a_prefix(symbol)
     return registry.route([
-        ("mootdx", lambda: _filtered(_mootdx_realtime, [symbol])),
-        ("tencent", lambda: _filtered(_tencent_realtime, [symbol], "A")),
-        ("sina", lambda: _filtered(_sina_realtime, [symbol], "A")),
+        ("mootdx", lambda: _filtered(_mootdx_realtime, [clean])),
+        ("tencent", lambda: _filtered(_tencent_realtime, [clean], "A")),
+        ("sina", lambda: _filtered(_sina_realtime, [clean], "A")),
     ], route_name="A_stock_realtime", operation="realtime", target=symbol) or []
 
 
@@ -609,10 +628,12 @@ def fetch_a_stock_batch(symbols: list[str]) -> list[dict[str, Any]]:
     """批量 A 股实时行情：mootdx → Tencent(QQ) → Sina，通过 SourceRegistry 熔断路由。"""
     if not symbols:
         return []
+    # O22 (round8 §7): 批量入口同样剥 sh/sz/bj 前缀
+    clean_symbols = [_strip_a_prefix(s) for s in symbols]
     return registry.route([
-        ("mootdx", lambda: _filtered(_mootdx_realtime, symbols)),
-        ("tencent", lambda: _filtered(_tencent_realtime, symbols, "A")),
-        ("sina", lambda: _filtered(_sina_realtime, symbols, "A")),
+        ("mootdx", lambda: _filtered(_mootdx_realtime, clean_symbols)),
+        ("tencent", lambda: _filtered(_tencent_realtime, clean_symbols, "A")),
+        ("sina", lambda: _filtered(_sina_realtime, clean_symbols, "A")),
     ], route_name="A_stock_batch", operation="batch", target=",".join(symbols)) or []
 
 
@@ -1188,6 +1209,15 @@ def fetch_history(symbol: str, asset_type: str = "A", period: str = "daily") -> 
         return []
 
 
+def _alphavantage_symbol(symbol: str, asset_type: str) -> str:
+    """O2 (round8 §7 P1-新): Alpha Vantage 符号格式转换——港股需 4 位码 + .HK
+    （00700 → 0700.HK），传 "00700" 恒返回空 → HK K 线链断裂。"""
+    if asset_type == "HK":
+        s = _normalize_hk_symbol(symbol)  # 00700 / 09988
+        return f"{s[-4:].zfill(4)}.HK"
+    return symbol
+
+
 def _fetch_akshare_history(symbol: str, asset_type: str, period: str) -> list[dict[str, Any]]:
     try:
         import pandas as pd
@@ -1207,7 +1237,13 @@ def _fetch_akshare_history(symbol: str, asset_type: str, period: str) -> list[di
             fh_result = run_in_thread(lambda: global_markets_fetcher.fetch_candles(symbol, "D"), timeout=8, executor="long")
             if fh_result:
                 return fh_result
-            av_result = run_in_thread(lambda: global_markets_fetcher.fetch_daily_alphavantage(symbol), timeout=10, executor="long")
+            # O2: alphavantage 用转换后符号（0700.HK）——旧实现传裸 00700 恒空
+            av_result = run_in_thread(
+                lambda: global_markets_fetcher.fetch_daily_alphavantage(
+                    _alphavantage_symbol(symbol, asset_type)
+                ),
+                timeout=10, executor="long",
+            )
             if av_result:
                 return av_result
         return []

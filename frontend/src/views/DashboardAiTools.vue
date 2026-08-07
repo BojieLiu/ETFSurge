@@ -72,6 +72,7 @@
         :selected-label="designSelectedLabel"
         :elapsed-sec="designElapsedSec"
         @cancel="exitCoreFeature"
+        @retry="retryDesign"
       />
 
       <!-- Design Result -->
@@ -151,6 +152,9 @@ function resetToTools() {
   expandedPlan.value = null
   showHistory.value = false
   historyKey.value += 1
+  // O11 (round8 §7 + interaction-redesign): 复位失败态——失败不入 localStorage、
+  // 再次进入回到 idle（不残留失败卡）。
+  designFailed.value = ''
 }
 
 watch(
@@ -239,6 +243,9 @@ onMounted(() => {
 
 // Actions
 async function enterDesignMode() {
+  // O11 (round8 §7 + interaction-redesign §2 不变量2): 失败是终态、不入 localStorage——
+  // 进入设计工具时复位失败态（同 tab 失败后再次进入回到 idle，不残留失败卡）。
+  designFailed.value = ''
   // C: Clean up stale running tasks — if the backend restarted, in-memory tasks are dead
   const runningTask = taskStore.tasks.find(t => t.type === 'design' && t.status === 'running')
   if (runningTask) {
@@ -334,7 +341,11 @@ function clearStrategyTimers() {
 }
 
 function exitCoreFeature() {
-  if (designStep.value === 'loading' || designStep.value === 'result') {
+  // O11 (round8 §7 + interaction-redesign D3/P4): 只持久化可恢复的终态——
+  // running（续 loading）与 result；failed 是终态、不持久化（刷新后回到 idle，
+  // 不再出现「失败卡刷新后变加载中」的假象）。
+  const isFailed = !!designFailed.value
+  if (!isFailed && (designStep.value === 'loading' || designStep.value === 'result')) {
     taskStore.persistDesignState({
       designStep: designStep.value,
       designResult: designResult.value,
@@ -347,6 +358,18 @@ function exitCoreFeature() {
   clearStrategyTimers()
   activeCoreFeature.value = null
 }
+
+// O11 (round8 §7 + interaction-redesign D1): 失败卡「重试一次」——复用参数重提交。
+// 失败是终态，点击后重新走 running（新 taskId），可停留查看原因也可直接重试。
+async function retryDesign() {
+  const capital = designCapital.value || 500000
+  designFailed.value = ''
+  await startDesign(capital)
+}
+
+// O11 (round8 §7 + interaction-redesign P3): WS 完成回调与轮询收敛到单一
+// 「derive 完成」——finalizedDesignIds 防重复 finalize（fetchDesignDetail 只调一次）。
+const finalizedDesignIds = new Set()
 
 async function startDesign(capital) {
   designCapital.value = capital
@@ -404,6 +427,9 @@ async function startDesign(capital) {
         } catch {}
       }
       if (did) {
+        // O11: 幂等——WS 完成与轮询同时到达时只 finalize 一次
+        if (finalizedDesignIds.has(did)) return
+        finalizedDesignIds.add(did)
         try {
           await fetchDesignDetail(did)
           toast('组合方案生成完成！', 'success')
@@ -434,6 +460,9 @@ async function startDesign(capital) {
           clearInterval(designPollTimer); designPollTimer = null
           const did = task?.result?.design_id || taskData.design_id
           if (did) {
+            // O11: 幂等——WS 已 finalize 则轮询跳过（fetchDesignDetail 只调一次）
+            if (finalizedDesignIds.has(did)) return
+            finalizedDesignIds.add(did)
             await fetchDesignDetail(did)
             toast('组合方案生成完成！', 'success')
           }
@@ -452,16 +481,13 @@ async function startDesign(capital) {
     }, 5000)
 
     // Cleanup poll on 180s timeout
+    // O11 (interaction-redesign §5): 180s 推不到 result 转 failed(canRetry)，
+    // 不再「把用户踢回列表」（移除 180s 后 exitCoreFeature 行为）。
     if (designTimeoutTimer) clearTimeout(designTimeoutTimer)
     designTimeoutTimer = setTimeout(() => {
       if (designPollTimer) { clearInterval(designPollTimer); designPollTimer = null }
       if (designStep.value === 'loading' && !designFailed.value) {
-        loadingText.value = '方案生成中，您可稍后查看任务列表'
-        setTimeout(() => {
-          if (designStep.value === 'loading') {
-            exitCoreFeature()
-          }
-        }, 3000)
+        designFailed.value = '方案生成时间过长，请重试一次或稍后查看任务列表'
       }
     }, 180000)
   } catch (e) {

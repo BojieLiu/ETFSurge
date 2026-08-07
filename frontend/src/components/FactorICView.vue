@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="factor-ic-view">
     <!-- Loading -->
     <div v-if="loading" class="loading-state">
@@ -199,7 +199,7 @@ onMounted(fetchIC)
 <style scoped>
 .factor-ic-view {
   padding: 1rem;
-  max-width: 1200px;
+  max-width: 1440px /* O17: 1200→1440 铺满 */;
   margin: 0 auto;
 }
 
@@ -246,13 +246,13 @@ onMounted(fetchIC)
 
 .stat-label {
   display: block;
-  font-size: 0.8rem;
+  font-size: var(--font-size-xs) /* O17 */;
   color: var(--text-secondary, #888);
   margin-bottom: 0.3rem;
 }
 
 .stat-value {
-  font-size: 1.3rem;
+  font-size: var(--font-size-xl) /* O17 */;
   font-weight: 700;
 }
 
@@ -274,7 +274,7 @@ onMounted(fetchIC)
 }
 
 .card-title {
-  font-size: 1rem;
+  font-size: var(--font-size-base) /* O17 */;
   font-weight: 600;
   margin: 0;
 }
@@ -299,13 +299,13 @@ onMounted(fetchIC)
   border: 1px solid var(--border-color, #d0d0d0);
   border-radius: 4px;
   background: var(--input-bg, #fff);
-  font-size: 0.85rem;
+  font-size: var(--font-size-sm) /* O17 */;
 }
 
 .data-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.85rem;
+  font-size: var(--font-size-sm) /* O17 */;
 }
 
 .data-table th {
@@ -328,7 +328,7 @@ onMounted(fetchIC)
 
 .factor-code {
   font-family: 'Courier New', monospace;
-  font-size: 0.8rem;
+  font-size: var(--font-size-xs) /* O17 */;
   word-break: break-all;
 }
 
@@ -336,7 +336,7 @@ onMounted(fetchIC)
   display: inline-block;
   padding: 0.15rem 0.5rem;
   border-radius: 4px;
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs) /* O17 */;
   font-weight: 600;
   text-transform: uppercase;
 }
@@ -352,7 +352,7 @@ onMounted(fetchIC)
   display: inline-block;
   padding: 0.15rem 0.5rem;
   border-radius: 4px;
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs) /* O17 */;
   font-weight: 600;
 }
 
@@ -377,7 +377,7 @@ onMounted(fetchIC)
   border: 1px solid var(--border-color, #d0d0d0);
   border-radius: 4px;
   cursor: pointer;
-  font-size: 0.85rem;
+  font-size: var(--font-size-sm) /* O17 */;
   transition: background 0.15s;
 }
 
@@ -392,7 +392,7 @@ onMounted(fetchIC)
   color: var(--text-primary, #333);
 }
 
-.btn-sm { padding: 0.3rem 0.6rem; font-size: 0.8rem; }
+.btn-sm { padding: 0.3rem 0.6rem; font-size: var(--font-size-xs) /* O17 */; }
 
 @media (max-width: 640px) {
   .factor-ic-view { padding: 0.5rem; }
@@ -402,3 +402,5 @@ onMounted(fetchIC)
   .select-input { flex: 1; }
 }
 </style>
+
+

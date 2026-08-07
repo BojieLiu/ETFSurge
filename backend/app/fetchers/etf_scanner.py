@@ -169,14 +169,21 @@ INDEX_KEYWORDS = {
     "半导体": "半导体",
     "新能源": "新能源",
     "医药": "医药",
+    # O15 (round8 §7 §5.1A): 「消费电子」置于「消费」前——562950 名称含"消费"，
+    # 无此键时 tracked_index 回填为"消费"（丢"电子"）→ 分类误归食品饮料。
+    "消费电子": "消费电子",
     "消费": "消费",
     "军工": "军工",
 }
 
 
 def _extract_index_keyword(name: str) -> str:
-    """从 ETF 名称中提取跟踪指数关键词。"""
-    for kw, idx_name in INDEX_KEYWORDS.items():
+    """从 ETF 名称中提取跟踪指数关键词——O15 最长匹配优先。
+
+    旧实现按 dict 插入序遍历：'消费' 在 '消费电子' 前 → '消费电子ETF易方达'
+    被截成 '消费'（丢 '电子'）→ 562950 tracked_index='消费' → 误分类食品饮料。
+    """
+    for kw, idx_name in sorted(INDEX_KEYWORDS.items(), key=lambda kv: len(kv[0]), reverse=True):
         if kw in name:
             return idx_name
     return ""

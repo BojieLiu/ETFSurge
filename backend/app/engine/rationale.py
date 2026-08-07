@@ -13,14 +13,18 @@ _CORE_PHRASES = [
     lambda n: f"作为组合压舱石，低波动宽基{n}",
     lambda n: f"核心层选择——{n}，兼具流动性与分散性",
     lambda n: f"作为核心宽基{n}，提供市场β收益",
-    lambda n: f"{n}核心层配置，大盘价值代表性",
+    # O16 (round8 §7 §5.1B): 「大盘价值代表性」删除——中证500（中盘）等宽基被
+    # 套"大盘价值"语义错误；改中性「宽基底仓」描述。
+    lambda n: f"{n}核心层配置，作为宽基底仓",
     lambda n: f"以{n}作为组合压舱石，低波动宽基",
 ]
 
 _HIGH_GROWTH_PHRASES = [
     lambda n: f"高弹性成长指数{n}，波动较大但进攻性强",
     lambda n: f"成长风格{n}，高 Beta 品种适合进攻配置",
-    lambda n: f"主题弹性{n}，波动与收益空间同步放大",
+    # O16 (round8): 文案含「高弹性」——core 层过滤"卫星"句后此句仍体现高波成长
+    # 属性（round7 验收: 科创类 core 文案必须含 高弹性/高Beta/进攻 等关键词）。
+    lambda n: f"高弹性主题{n}，波动与收益空间同步放大",
     lambda n: f"高波动成长{n}，博取景气赛道超额收益",
     lambda n: f"科创成长{n}，弹性充足、适合卫星仓位",
 ]
@@ -65,8 +69,9 @@ def _style_probe(meta: dict | None = None) -> str:
     if any(t in combo for t in ("黄金", "白银", "国债", "债券", "货币", "商品",
                                 "原油", "豆粕", "标普", "纳指", "日经")):
         return "defensive"
-    if any(t in combo for t in ("红利", "低波", "价值", "上证50", "沪深300",
-                                "中证A", "中证500", "中证800", "创业板")):
+    if any(t in combo for t in ("红利", "低波", "价值", "上证50", "上证180", "沪深300",
+                                "中证A", "中证500", "中证800", "深证100", "深证50",
+                                "创业板", "MSCI", "A50", "A100", "A500")):
         return "low_vol_wide"
     return "theme_satellite"
 
@@ -76,11 +81,20 @@ def _layer_phrase(layer: str, asset_name: str, sym: str = "", style: str = "") -
 
     F1-8: 短语生成完整句式（不再以「在方案中」开头），调用方统一以
     「在{label}方案中{layer_desc}」拼装，杜绝「在方案中在方案中」重复。
+    O16 (round8 §7 §5.1B): core/defense 层禁用「卫星仓位/高弹性」语义短语——
+    短语池中过滤含"卫星"句，避免 core 宽基被误配卫星语义（562000 曾命中）。
     """
     pool = _STYLE_TO_POOL.get(style) or {
         "core": _CORE_PHRASES, "satellite": _THEME_SATELLITE_PHRASES,
         "defense": _DEFENSE_PHRASES,
     }.get(layer, _CORE_PHRASES)
+    if layer in ("core", "defense", "defence"):
+        # core/defense 是底仓角色：过滤掉"卫星"语义句（含高弹性偏卫星表述）
+        filtered = [fn for fn in pool if "卫星" not in fn(asset_name)]
+        if filtered:
+            pool = filtered
+        else:
+            pool = _CORE_PHRASES if layer != "defense" else _DEFENSE_PHRASES
     idx = int(hashlib.md5(sym.encode()).hexdigest(), 16) % len(pool) if sym else 0
     return pool[idx](asset_name)
 

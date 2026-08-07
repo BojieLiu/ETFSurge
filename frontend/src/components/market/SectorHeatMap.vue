@@ -60,17 +60,20 @@
             <span class="row-rank">{{ i + 1 }}</span>
             <div class="row-main">
               <span class="row-name">{{ item.sector_name || item.name }}</span>
+              <!-- O19 (round8 §7 §5.1D): v-if 改 `!= null` 同时挡 null/undefined——
+                   财联社板块热度 change_pct 恒 null，旧 `!== undefined` 不挡 null →
+                   null.toFixed 抛 TypeError → 卡片消失 -->
               <span
-                v-if="item.change_pct !== undefined"
+                v-if="item.change_pct != null"
                 :class="['row-change', item.change_pct >= 0 ? 'text-up' : 'text-down']"
               >
                 {{ item.change_pct >= 0 ? '+' : '' }}{{ item.change_pct.toFixed(2) }}%
               </span>
             </div>
-            <span class="row-heat" v-if="item.heat_index !== undefined">
+            <span class="row-heat" v-if="item.heat_index != null">
               热度: {{ fmtHeat(item.heat_index) }}
             </span>
-            <span v-if="item.rank_change !== undefined && item.rank_change !== null" :class="['row-rank-chg', item.rank_change >= 0 ? 'text-up' : 'text-down']">
+            <span v-if="item.rank_change != null" :class="['row-rank-chg', item.rank_change >= 0 ? 'text-up' : 'text-down']">
               {{ item.rank_change > 0 ? '↑' : (item.rank_change < 0 ? '↓' : '—') }}{{ item.rank_change ? Math.abs(item.rank_change) : '' }}
             </span>
             <button class="row-action" @click="emitAnalyze('sector', item)" title="AI 分析">🤖 AI</button>
@@ -100,7 +103,7 @@
               </span>
             </div>
             <span
-              v-if="item.change_pct !== undefined"
+              v-if="item.change_pct != null"
               :class="['row-change', item.change_pct >= 0 ? 'text-up' : 'text-down']"
             >
               {{ item.change_pct >= 0 ? '+' : '' }}{{ item.change_pct.toFixed(2) }}%

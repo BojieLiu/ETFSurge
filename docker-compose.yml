@@ -1,4 +1,4 @@
-# ETF Surge — 单文件双模式编排
+﻿# ETF Surge — 单文件双模式编排
 #
 # 开发态 (源码挂载 + 热更新):
 #   docker-compose up --build --profile dev
@@ -58,7 +58,7 @@ services:
     build:
       context: ./backend
     profiles: ["dev"]
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn app.main:app --host :: --port 8000 --reload  # O21 (round8): [::] 双栈监听
     ports:
       - "8000:8000"
     env_file:
@@ -93,3 +93,4 @@ services:
       - /app/node_modules   # 保留镜像内已安装的依赖, 不被挂载覆盖
     depends_on:
       - backend-dev
+

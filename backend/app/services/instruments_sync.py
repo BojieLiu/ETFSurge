@@ -6,12 +6,22 @@
 """
 import asyncio
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
 # F17: 防并发互斥锁 + 运行标志（启动同步与每日同步不得同时写表）
 _sync_lock = asyncio.Lock()
 _syncing = False
+
+# O1 (round8 §7 P0-新): 服务层整体超时——默认 120s（可 env 覆盖），
+# 覆盖 collect_all 内部所有段（含美股黑洞段），超时仅降级不阻塞启动。
+_INSTRUMENTS_SYNC_TIMEOUT = float(os.environ.get("INSTRUMENTS_SYNC_TIMEOUT", "120"))
+
+
+def _sync_disabled() -> bool:
+    """O1: 环境开关 INSTRUMENTS_SYNC_DISABLED=1 跳过 instruments 同步。"""
+    return os.environ.get("INSTRUMENTS_SYNC_DISABLED", "").strip().lower() in ("1", "true", "yes")
 
 
 async def _collect() -> list[dict]:
@@ -23,13 +33,17 @@ async def _collect() -> list[dict]:
 async def sync_instruments_table() -> int:
     """全量同步 instruments 表。成功返回行数；失败/被锁返回 0；永不抛异常。"""
     global _syncing
+    if _sync_disabled():
+        logger.info("[instruments-sync] INSTRUMENTS_SYNC_DISABLED=1 — skip")
+        return 0
     if _syncing:
         logger.info("[instruments-sync] already running — skip (mutex)")
         return 0
     async with _sync_lock:
         _syncing = True
         try:
-            rows = await _collect()
+            # O1: 整体超时保护——黑洞段（US）在窗口内必然结束，不阻塞事件循环
+            rows = await asyncio.wait_for(_collect(), timeout=_INSTRUMENTS_SYNC_TIMEOUT)
             if not rows:
                 logger.warning(
                     "[instruments-sync] all segments failed — keeping existing table"

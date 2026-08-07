@@ -35,7 +35,7 @@ async def test_symbol_analysis_stream_resolves_chinese_name(monkeypatch):
     def fake_indicators(hist):
         return {}
 
-    async def fake_stream(prompt):
+    async def fake_stream(prompt, **kwargs):
         yield "data: ok"
 
     agent = AsyncMock()
@@ -69,7 +69,7 @@ async def test_symbol_analysis_stream_no_resolve_when_realtime_ok(monkeypatch):
     def fake_indicators(hist):
         return {}
 
-    async def fake_stream(prompt):
+    async def fake_stream(prompt, **kwargs):
         yield "data: ok"
 
     agent = AsyncMock()
@@ -100,7 +100,7 @@ async def test_symbol_analysis_stream_code_input_skips_resolve(monkeypatch):
     def fake_indicators(hist):
         return {}
 
-    async def fake_stream(prompt):
+    async def fake_stream(prompt, **kwargs):
         yield "data: ok"
 
     agent = AsyncMock()
@@ -117,3 +117,4 @@ async def test_symbol_analysis_stream_code_input_skips_resolve(monkeypatch):
         )
         assert isinstance(resp, StreamingResponse)
         mock_resolve.assert_not_awaited()
+

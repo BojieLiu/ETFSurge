@@ -43,14 +43,14 @@ def test_real_change_percent_rendered():
     assert "| +0.00% |" in tables, "真实 0% 应渲染 +0.00% 而非降级标注"
     assert "数据源不可用" not in tables
 
-    tables2 = _build_plan_tables([_strategy(daily_change_pct=0.015)])
+    tables2 = _build_plan_tables([_strategy(daily_change_pct=1.5)])  # O18: 统一百分比口径
     assert "| +1.50% |" in tables2
 
 
 def test_mixed_missing_and_real():
     """P1-4: 部分缺失——缺失标的标注，有数据标的正常。"""
     s = _strategy(daily_change_pct=None)
-    s["allocations"][1]["daily_change_pct"] = -0.008  # -0.80%
+    s["allocations"][1]["daily_change_pct"] = -0.8  # O18: 统一百分比口径（-0.80%）
     tables = _build_plan_tables([s])
     assert "| 数据源不可用 |" in tables
     assert "| -0.80% |" in tables

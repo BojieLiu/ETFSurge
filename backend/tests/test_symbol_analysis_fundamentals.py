@@ -1,4 +1,4 @@
-"""
+﻿"""
 P1-3 (R4-09): 个股分析基本面注入 + asset_type 归一化。
 
 - asset_type='stock'（非标准值）→ 归一化为 'A'，get_history 不再静默返回 0 条。
@@ -34,7 +34,7 @@ def _make_prompt_capture():
 
     def _fake_agent(name):
         class _A:
-            def run_stream(self, prompt):
+            def run_stream(self, prompt, **kwargs):
                 captured["prompt"] = prompt
                 return iter([])
         return _A()
@@ -259,3 +259,4 @@ async def test_sector_snapshot_missing_silently_skipped(monkeypatch):
     await ar.symbol_analysis_stream(_FakeReq(asset_type="A"))
     assert "所属板块" not in captured["prompt"]
     assert "基本面(PE/PB估值)" in captured["prompt"]
+

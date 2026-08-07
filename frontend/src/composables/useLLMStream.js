@@ -72,7 +72,11 @@ export function useLLMStream() {
               streaming.value = false
               return { fullText: fullText.value, metadata: metadata.value, disclaimer: disclaimer.value }
             } else if (event === 'error') {
-              throw new Error(parsed.message || 'Stream error')
+              // O24 (round8 §7 §5.1K): SSE error 透传 code 标识——前端据此分类
+              // 文案（[rate-limited]/429 → 请求过于频繁，[timeout] → 无响应，
+              // DATA_UNAVAILABLE → 数据源暂不可用），而非笼统「网络错误」。
+              const code = parsed.code ? `[${parsed.code}] ` : ''
+              throw new Error(code + (parsed.message || 'Stream error'))
             }
           } catch (e) {
             logger.error('SSE parse error:', e, 'data:', data)

@@ -46,12 +46,13 @@ Returns a merged, chronologically-sorted list of portfolio design and strategy c
 ### Item fields (design type)
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | int | Design ID |
+| `id` | int | Design ID (or record_id for task-sourced items) |
 | `_type` | string | Always `"design"` |
 | `created_at` | string | ISO 8601 timestamp |
 | `status` | string | Task status: `"completed"`, `"failed"`, `"running"` |
-| `capital` | float | Portfolio capital |
-| `error_message` | string |null | Error details if failed |
+| `capital` | float \| null | Portfolio capital (null for task-sourced items) |
+| `error_message` | string \| null | Error details if failed |
+| `task_id` | int \| null | **O12**: task record id for task-sourced items (retry entry) |
 
 ### Item fields (check type)
 | Field | Type | Description |
@@ -66,14 +67,19 @@ Returns a merged, chronologically-sorted list of portfolio design and strategy c
 ## Implementation Notes
 
 - Queries both `portfolio_designs` and `strategy_check_records` tables
+- **O12 (round8)**: additionally joins `tasks` table (`task_type='design'`) —
+  failed / running design tasks appear with `status='failed'` + `error_message`
+  + `task_id`; completed tasks that already have a design record are NOT duplicated
 - Merged and sorted by `created_at` DESC
 - Pagination applied after merge sort
-- `total` equals the sum of both table record counts (unfiltered)
-- Running tasks are NOT included here (the frontend `taskStore` adds them locally)
+- `total` equals the sum of all merged records (designs + checks + design tasks)
+- Running tasks are included (previously frontend `taskStore` added them locally)
 
 ## Frontend-Backend Checklist
 
-- [ ] Backend: `GET /timeline` route added to `routers/portfolio.py`
-- [ ] Backend: Queries both tables, merges, sorts, paginates
-- [ ] Frontend: `portfolioApi.getTimeline(limit, offset)` method added
-- [ ] Frontend: `DashboardAiTools.vue` uses single timeline call instead of two parallel calls
+- [x] Backend: `GET /timeline` route added to `routers/portfolio.py`
+- [x] Backend: Queries both tables, merges, sorts, paginates
+- [x] Backend (O12): joins `tasks` table — failed/running design tasks visible with `status`/`error_message`/`task_id`
+- [x] Frontend: `portfolioApi.getTimeline(limit, offset)` method added
+- [x] Frontend: `DashboardAiTools.vue` uses single timeline call instead of two parallel calls
+- [x] Frontend: DesignHistory renders failed items with error detail + retry entry

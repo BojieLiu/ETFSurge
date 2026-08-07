@@ -225,7 +225,8 @@ hr {
 
 .container {
   width: 100%;
-  max-width: 1400px;
+  /* O17 (round8 §7 + frontend-theme-redesign §2.2): 1400 → 1600px 铺满宽屏 */
+  max-width: 1600px;
   margin: 0 auto;
   padding: 0 var(--space-4);
 }

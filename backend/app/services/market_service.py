@@ -772,6 +772,35 @@ async def search_hk_us(keyword: str = "", enrich: bool = True,
                     "market": mk, "asset_type": mk, "type": "stock",
                 })
 
+        # O4 (round8 §7 P4-新): HK spot 空时同样用本地 instruments 表（HK 段）补搜——
+        # 旧实现只有 US 段有本地表补搜，instruments HK 段（2613 条）从未被搜索使用，
+        # 导致 00700 等港股代码/名称在 spot 源不可用时搜索 0 条。
+        if include_stocks and not (isinstance(spot_rows[0], list) and spot_rows[0]):
+            try:
+                from ..models.search import Instrument
+                from sqlalchemy import select, or_
+                async with async_session() as session:
+                    stmt = select(Instrument).where(
+                        Instrument.is_active == True,  # noqa: E712
+                        Instrument.market == "HK",
+                    )
+                    if kw:
+                        stmt = stmt.where(or_(
+                            Instrument.symbol.ilike(f"%{kw}%"),
+                            Instrument.name.ilike(f"%{kw}%"),
+                            Instrument.pinyin.ilike(f"%{kw}%"),
+                            Instrument.first_letter.ilike(f"%{kw}%"),
+                        ))
+                    stmt = stmt.limit(30)
+                    rows = (await session.execute(stmt)).scalars().all()
+                    for r in rows:
+                        spot.append({
+                            "symbol": r.symbol, "name": r.name,
+                            "market": "HK", "asset_type": "HK", "type": "stock",
+                        })
+            except Exception as _e:
+                logger.warning("[search_hk_us] local HK instruments fallback failed: %s", _e)
+
         # R6-F9 (round6 §十 R6-10): akshare US spot 不可用（限流/空）时，用本地
         # instruments 表（US 段，F17 启动自动同步）补搜美股个股名称——旧实现
         # apple 0 条（代码 AAPL 可搜但名称不可）。
@@ -950,9 +979,14 @@ async def get_realtime_batch(
                 results.append(item)
         return results
     results = []
-    for sym in symbols:
-        item = await get_asset_realtime(sym, asset_type)
-        if item:
+    # O9 (round8 §7 P9-新): 非 A 资产（HK/US）批量改为并发 gather——
+    # 旧实现 for 串行逐条，watchlist 多 HK 标的自选列表线性变慢。
+    _batch = await asyncio.gather(
+        *[get_asset_realtime(sym, asset_type) for sym in symbols],
+        return_exceptions=True,
+    )
+    for _sym, item in zip(symbols, _batch):
+        if isinstance(item, dict) and item:
             results.append(item)
     return results
 
@@ -1090,6 +1124,22 @@ _asset_realtime_cache: dict[tuple[str, str], tuple[float, dict | None]] = {}
 _ASSET_REALTIME_CACHE_TTL = 3.0
 
 
+def _norm_asset_symbol(symbol: str) -> str:
+    """O22 (round8 §7 §5.1G): 归一化 symbol 用于实时行情比对。
+
+    剥 A 股 sh/sz/bj 交易所前缀 + 去 .HK/.US 后缀——请求方（自选存 sh688981/
+    00700.HK）与数据源返回（688981/00700）形态不一致时也能精确匹配。
+    """
+    s = str(symbol or "").lower()
+    for pref in ("sh", "sz", "bj"):
+        if s.startswith(pref):
+            return s[len(pref):]
+    for suf in (".hk", ".us"):
+        if s.endswith(suf):
+            return s[:-len(suf)]
+    return s
+
+
 async def get_asset_realtime(symbol: str, asset_type: str) -> dict | None:
     from ..fetchers.china_market import fetch_a_stock_realtime, fetch_hk_stock_realtime, fetch_index_realtime
 
@@ -1118,7 +1168,8 @@ async def get_asset_realtime(symbol: str, asset_type: str) -> dict | None:
         elif asset_type == "HK":
             all_hk = await _call(fetch_hk_stock_realtime, symbol, timeout=_timeout)
             for item in all_hk or []:
-                if item["symbol"] == symbol:
+                # O22 (round8 §7): 比对层归一化——'00700.HK' vs '00700' 可匹配
+                if _norm_asset_symbol(item["symbol"]) == _norm_asset_symbol(symbol):
                     result = item
                     break
         elif asset_type == "index":
@@ -1138,14 +1189,15 @@ async def get_asset_realtime(symbol: str, asset_type: str) -> dict | None:
         else:
             all_a = await _call(fetch_a_stock_realtime, symbol, timeout=_timeout)
             for item in all_a or []:
-                if item["symbol"] == symbol:
+                # O22 (round8 §7): 比对层归一化——sh688981（请求）vs 688981（返回）可匹配
+                if _norm_asset_symbol(item["symbol"]) == _norm_asset_symbol(symbol):
                     result = item
                     break
             # 非 A/HK/US 类型（或 A 股查无此标的）：保持旧行为尝试 HK 兜底
             if result is None and asset_type != "A":
                 all_hk = await _call(fetch_hk_stock_realtime, symbol, timeout=_timeout)
                 for item in all_hk or []:
-                    if item["symbol"] == symbol:
+                    if _norm_asset_symbol(item["symbol"]) == _norm_asset_symbol(symbol):
                         result = item
                         break
     except Exception:
@@ -1230,10 +1282,30 @@ async def get_history(
     except Exception:
         pass
 
-    from ..fetchers.china_market import fetch_history, get_k_data
+    from ..fetchers.china_market import fetch_history, get_k_data, fetch_hk_stock_realtime
 
     result = await _call(fetch_history, symbol, asset_type, period)
     if result:
+        # O2 (round8 §7 P1-新): HK K 线与实时价一致性校验——最高/最新价与实时价
+        # 差异 >50% 视为 K 线数据源错误（finnhub/alphavantage 符号错位曾产生
+        # 9.49 vs 492.2 的脱钩数据），丢弃返回空（调用方降级，不再喂 LLM 失真 K 线）。
+        if asset_type == "HK":
+            try:
+                _rt = await _call(fetch_hk_stock_realtime, symbol, timeout=8) or []
+                _rt_price = next((r.get("price") for r in _rt if r.get("price")), None)
+                if _rt_price:
+                    _last_close = result[-1].get("close")
+                    _high = max((r.get("high") or 0) for r in result)
+                    if (_last_close and abs(_last_close - _rt_price) / _rt_price > 0.5) \
+                            or (_high and abs(_high - _rt_price) / _rt_price > 0.5):
+                        logger.warning(
+                            "[market_service] HK kline %s inconsistent with realtime "
+                            "(last_close=%s high=%s realtime=%s) — discarding",
+                            symbol, _last_close, _high, _rt_price,
+                        )
+                        return []
+            except Exception as e:
+                logger.debug("[market_service] HK kline consistency check failed for %s: %s", symbol, e)
         return result
     # Fallback: 当 fetch_history 返回空时尝试 get_k_data（akshare 直查）
     logger.warning(

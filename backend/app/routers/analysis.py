@@ -98,12 +98,19 @@ def _build_advice_market_snapshot(query: str, hub) -> str:
         idx_data = hub.get_index_realtime() or []
         if not idx_data:
             # R6-F6 (round6 §十 R6-07'): 东财限流时 get_index_realtime 空 →
-            # 从 market_service 的全球指数同步缓存（A 股段）兜底——快照构建是
-            # 同步函数，不能 await async get_global_indices，读 30s TTL 缓存即可。
+            # 从 market_service 的全球指数缓存兜底——快照构建是同步函数，
+            # 不能 await async get_global_indices。
+            # O3 (round8 §7 P2-新): stale 分支会把 _global_indices_cache 各 region
+            # 重建为空 list 写回（与 /indices/global 的 last_ok 管道不同步）→
+            # 改为 24h 兜底 _global_indices_last_ok 优先（含磁盘持久化，可靠），
+            # 30s 缓存次之；两套缓存路径由此同步。
             try:
                 from ..services import market_service as _ms
                 _cache = getattr(_ms, "_global_indices_cache", None) or {}
-                idx_data = list(_cache.get("A股") or [])
+                _ok = getattr(_ms, "_global_indices_last_ok", None) or {}
+                # cache 有数据优先；cache 被 stale 分支清空（region=[]）时回退
+                # 24h 兜底 last_ok（与 /indices/global 同一管道，含磁盘持久化）。
+                idx_data = list(_cache.get("A股") or []) or list(_ok.get("A股") or [])
             except Exception:
                 idx_data = []
         for item in idx_data[:5]:
@@ -122,6 +129,13 @@ def _build_advice_market_snapshot(query: str, hub) -> str:
     if any(kw in q for kw in sector_keywords):
         try:
             sector = hub.get_sector_momentum() or []
+            # O3 (round8 §7 P2-新): 板块动量缓存空时回退行业板块实时数据，
+            # 投顾快照不再出现「板块热力全缺失」。
+            if not sector and hasattr(hub, "get_sector_industry"):
+                try:
+                    sector = hub.get_sector_industry() or []
+                except Exception:
+                    sector = []
             for item in sector[:5]:
                 name = item.get("sector_name") or item.get("name", "?")
                 chg = item.get("change_pct", 0)
@@ -765,15 +779,20 @@ async def sector_analysis_stream(req: SectorAnalysisRequest):
             if sector_data.get("top_drop_name") else None,
         }
 
+        # O26 (round8 §7 §5.1H): 点位口径显式标注——板块分析的点位是「板块指数
+        # （BKxxxx，东财板块行情）」自身点位，非成分股均价/沪深大盘；技术面注明
+        # 均线周期与数据区间，避免专业读者误读点位主体。
+        _sector_idx_label = f"板块指数（{sector_code}，东财板块行情）"
         prompt = f"""分析板块 {name} ({sector_code})：
 板块实时行情：{json.dumps(sector_snapshot, ensure_ascii=False)}
 成分股：{json.dumps(constituents[:15], ensure_ascii=False)}
 资讯：{json.dumps(news[:10], ensure_ascii=False)}
+{_sector_idx_label}点位为 {sector_data.get('price')} 点（本报告所有点位均为该板块指数点位，非成分股均价，亦非沪深大盘指数）。
 
 请输出：
 1. 板块概况
 2. 资金面（基于板块主力净流入、成交额等数据定量分析）
-3. 技术面（基于板块指数点位与涨跌幅）
+3. 技术面（基于{_sector_idx_label}点位；均线周期为最近 30 个交易日日线，支撑/压力位基于该区间推算）
 4. 催化因素
 5. 风险提示
 6. 核心标的推荐"""
@@ -898,7 +917,14 @@ async def symbol_analysis_stream(req: SymbolAnalysisRequest):
 5. 操作建议"""
         
         agent = get_agent("symbol_analysis")
-        return _sse_stream(agent.run_stream(prompt))
+        # O24 (round8 §7 §5.1K ④): 复用 llm.py 限流参数——max_retries=1 快速失败、
+        # rate_limit_cap=10s 限流退避上限，避免 429 长时间退避拖慢分析（旧实现
+        # run_stream 不透传，llm.py 重试机制在 stream 路径未生效）。
+        return _sse_stream(agent.run_stream(
+            prompt,
+            max_retries=1,
+            rate_limit_cap=10,
+        ))
     except HTTPException:
         raise
     except Exception as e:
