@@ -158,7 +158,8 @@ const klineOption = computed(() => {
     name: '成交量', itemStyle: { color: (p) => volumeColors[p.dataIndex] },
   })
   return {
-    title: { text: `${props.name || props.symbol} K线`, left: 'center', textStyle: { fontSize: 13, fontWeight: 600 } },
+    // 图内 title 已移除：弹窗 h3 标题已显示「名称 技术分析」，图内 title（居中顶部）
+    // 与 legend（top:4）重叠是「文字重叠」根因之一（round9 §6.x 用户反馈）。
     tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
     legend: { top: 4, data: ['MA5', 'MA10', 'MA20', '成交量'], textStyle: { fontSize: 10 } },
     grid: [
@@ -166,7 +167,10 @@ const klineOption = computed(() => {
       { left: '6%', right: '3%', top: '72%', height: '16%' },
     ],
     xAxis: [
-      { type: 'category', data: dates, gridIndex: 0, axisLabel: { show: true, rotate: 30, fontSize: 9 } },
+      // axisLabel interval 稀疏化：60 个日期标签全显必重叠（rotate 30 + 9px 在窄宽下
+      // 每格仅数 px）——按数据量每 ~10 个标 1 个，保留旋转防相邻短标签粘连。
+      { type: 'category', data: dates, gridIndex: 0,
+        axisLabel: { show: true, rotate: 30, fontSize: 9, interval: Math.max(1, Math.ceil(dates.length / 10)) } },
       { type: 'category', data: dates, gridIndex: 1, axisLabel: { show: false } },
     ],
     yAxis: [
