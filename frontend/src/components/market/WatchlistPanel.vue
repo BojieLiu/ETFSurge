@@ -235,7 +235,12 @@ function doSearch() {
   searchTimer = setTimeout(async () => {
     try {
       // Z29: 默认跨市场模式混入个股（AAPL/00700 等），自选可添加个股
-      const res = await marketApi.search(kw, { include_stocks: true })
+      // round9 §7 用户反馈：marketTab 非 global 时按 tab 过滤补全（HK tab 不再
+      // 混入 A 股标的）；global tab 保持跨市场（Z29 原语义）。
+      const res = await marketApi.search(kw, {
+        include_stocks: true,
+        market: props.marketTab === 'global' ? undefined : props.marketTab,
+      })
       suggestions.value = (res.data || []).slice(0, 10)
     } catch { suggestions.value = [] }
   }, 300)

@@ -27,15 +27,27 @@ describe('WatchlistPanel — Z29 asset_type backfill', () => {
     wrapper = mount(WatchlistPanel)
   })
 
-  it('doSearch passes include_stocks:true (自选可搜到个股)', async () => {
+  it('doSearch passes include_stocks:true + market 随 tab（默认 A tab 过滤为 A）', async () => {
     vi.useFakeTimers()
     apiMock.search.mockResolvedValue({ data: [{ market: 'US', symbol: 'AAPL', name: '苹果' }] })
     wrapper.vm.form.symbol = 'AAPL'
     await wrapper.vm.doSearch()
     vi.advanceTimersByTime(300)
     await flushPromises()
-    expect(apiMock.search).toHaveBeenCalledWith('AAPL', { include_stocks: true })
+    expect(apiMock.search).toHaveBeenCalledWith('AAPL', { include_stocks: true, market: 'A' })
     expect(wrapper.vm.suggestions.length).toBeGreaterThan(0)
+    vi.useRealTimers()
+  })
+
+  it('doSearch 在 HK tab 下传 market=HK（补全不再混入 A 股标的）', async () => {
+    vi.useFakeTimers()
+    apiMock.search.mockResolvedValue({ data: [{ market: 'HK', symbol: '00700', name: '腾讯控股' }] })
+    await wrapper.setProps({ marketTab: 'HK' })
+    wrapper.vm.form.symbol = '0070'
+    await wrapper.vm.doSearch()
+    vi.advanceTimersByTime(300)
+    await flushPromises()
+    expect(apiMock.search).toHaveBeenCalledWith('0070', { include_stocks: true, market: 'HK' })
     vi.useRealTimers()
   })
 
