@@ -39,19 +39,21 @@ describe('WatchlistPanel — Z29 asset_type backfill', () => {
     vi.useRealTimers()
   })
 
-  it('selectSuggestion 选中 US 标的 → form.asset_type 回填为 US', async () => {
+  it('selectSuggestion 选中 US 标的 → 输入框回填「代码+名称」且 form.asset_type 为 US', async () => {
     await flushPromises()
     wrapper.vm.suggestions = [{ market: 'US', symbol: 'AAPL', name: '苹果' }]
     wrapper.vm.selectSuggestion(wrapper.vm.suggestions[0])
-    expect(wrapper.vm.form.symbol).toBe('AAPL')
+    expect(wrapper.vm.form.symbol).toBe('AAPL 苹果') // 输入框显示「代码 + 名称」
+    expect(wrapper.vm.form.name).toBe('苹果')
     expect(wrapper.vm.form.asset_type).toBe('US')
   })
 
-  it('selectSuggestion 选中 HK 标的 → form.asset_type 回填为 HK', async () => {
+  it('selectSuggestion 选中 HK 标的 → 输入框回填「代码+名称」且 form.asset_type 为 HK', async () => {
     await flushPromises()
     wrapper.vm.suggestions = [{ market: 'HK', symbol: '00700', name: '腾讯控股' }]
     wrapper.vm.selectSuggestion(wrapper.vm.suggestions[0])
-    expect(wrapper.vm.form.symbol).toBe('00700')
+    expect(wrapper.vm.form.symbol).toBe('00700 腾讯控股')
+    expect(wrapper.vm.form.name).toBe('腾讯控股')
     expect(wrapper.vm.form.asset_type).toBe('HK')
   })
 

@@ -242,7 +242,9 @@ function doSearch() {
 }
 
 function selectSuggestion(s) {
-  form.value.symbol = s.symbol
+  // 输入框显示「代码 + 名称」：选中建议后回填 "510050 上证50ETF华夏"，
+  // 便于确认选中的标的（名称存 form.name，addItem 提交前解析纯代码）。
+  form.value.symbol = s.name && s.name !== s.symbol ? `${s.symbol} ${s.name}` : s.symbol
   // R28: 选中项真实名称存入 form——入库优先用它（realtime 失败时不 422）
   form.value.name = s.name || s.symbol
   // Z29: HK/US 结果回填市场类型；A 股结果回落 'A'
@@ -261,7 +263,9 @@ async function addItem() {
   adding.value = true
   addError.value = ''
   try {
-    await store.addWatchlist(form.value.symbol, form.value.asset_type, form.value.notes, form.value.name)
+    // 输入框可能为「代码 + 名称」格式（selectSuggestion 回填），提交前解析纯代码
+    const symbol = String(form.value.symbol).trim().split(/\s+/)[0]
+    await store.addWatchlist(symbol, form.value.asset_type, form.value.notes, form.value.name)
     // O27 (round7 §7 P27①): 添加后主动 fetchItems——旧实现依赖 store 乐观插入
     // （改 store.watchlist），组件本地 items 副本（fetchItems 内的浅拷贝）不响应 →
     // 列表不出现新条目需手动刷新。主动拉取同时拿到批量 realtime（P12：新条目
