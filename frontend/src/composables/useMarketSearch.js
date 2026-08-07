@@ -1,4 +1,4 @@
-import { ref, onUnmounted } from 'vue'
+import { ref, onUnmounted, computed, isRef } from 'vue'
 import { marketApi } from '../api'
 
 /**
@@ -6,10 +6,15 @@ import { marketApi } from '../api'
  *
  * F17 (round6 §16.5): 支持 market 选项——A 场景只搜 A（短路后端 global 分支，
  * 不再并发拉 HK/US spot 列表）。
+ * round9 §7 修复: market 选项支持 ref（toRef(props,'marketTab')）——旧实现 setup
+ * 时求值一次，切 tab 后 marketFilter 固定（港股 tab 下补全仍搜 A 股）。
  */
 export function useMarketSearch(options = {}) {
-  const marketFilter = options.market || ''
-  // O30 (round7 §7 P30①): kind 透传——sector/index 模式复用同一下拉（后端 /search kind 参数）
+  // market 可为字符串或 ref（响应式随 tab 变化）；doSearch 时实时取值
+  const marketFilter = computed(() => {
+    const m = options.market
+    return (isRef(m) ? m.value : m) || ''
+  })
   const kindFilter = options.kind || 'all'
   const searchQuery = ref('')
   const searchResults = ref([])
@@ -56,7 +61,9 @@ export function useMarketSearch(options = {}) {
   async function doSearch() {
     const q = searchQuery.value.trim()
     if (!q) return
-    const cacheKey = `stocks:${q}`
+    // 缓存 key 含 market/kind：切 tab 后同关键词不得命中旧市场缓存
+    // （round9 §7：A 搜「0070」→ 切港股再搜「0070」曾返回 A 股缓存结果）
+    const cacheKey = `stocks:${q}:${marketFilter.value || 'global'}:${kindFilter}`
     const hit = searchCache.get(cacheKey)
     if (hit && Date.now() - hit.ts < SEARCH_CACHE_TTL) {
       applyResults(hit.results)
@@ -69,9 +76,10 @@ export function useMarketSearch(options = {}) {
       // O30: kind 透传——symbol 模式默认 all（含板块/指数尾部段），
       // sector/index 模式传对应 kind（后端只查对应表）
       const kind = kindFilter === 'all' ? 'all' : kindFilter
+      const mkt = marketFilter.value
       const res = await marketApi.search(
         q,
-        { include_stocks: true, kind, ...(marketFilter && kind === 'all' ? { market: marketFilter } : {}) },
+        { include_stocks: true, kind, ...(mkt && kind === 'all' ? { market: mkt } : {}) },
         { signal: searchAbort.signal },
       )
       if (seq !== searchSeq) return // 过期响应丢弃

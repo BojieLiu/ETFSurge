@@ -7,6 +7,7 @@ vi.mock('../api', () => ({
 }))
 
 import { marketApi } from '../api'
+import { ref } from 'vue'
 import { useMarketSearch } from '../composables/useMarketSearch'
 
 describe('useMarketSearch', () => {
@@ -33,6 +34,23 @@ describe('useMarketSearch', () => {
     await composable.doSearch()
     const args = marketApi.search.mock.calls[marketApi.search.mock.calls.length - 1]
     expect(args[1].market).toBeUndefined()
+  })
+
+  it('round9 §7: market 支持 ref——ref 值变化后 doSearch 使用新 market（港股 tab 补全不再混入 A 股）', async () => {
+    marketApi.search.mockResolvedValue({ data: [{ symbol: '00700', name: '腾讯控股', market: 'HK' }] })
+    const marketTab = ref('A')
+    const compRef = useMarketSearch({ market: marketTab })
+    compRef.searchQuery.value = '0070'
+    await compRef.doSearch()
+    expect(marketApi.search).toHaveBeenCalledWith(
+      '0070',
+      expect.objectContaining({ market: 'A' }),
+      expect.anything(),
+    )
+    marketTab.value = 'HK' // 切 tab 后 marketFilter 应响应式更新
+    await compRef.doSearch()
+    const lastArgs = marketApi.search.mock.calls[marketApi.search.mock.calls.length - 1]
+    expect(lastArgs[1].market).toBe('HK')
   })
 
   it('returns initial state correctly', () => {

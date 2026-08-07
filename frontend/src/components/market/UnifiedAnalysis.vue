@@ -88,7 +88,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, toRef } from 'vue'
 import { renderMarkdown } from '../../utils/markdown'
 import { useLLMStream } from '../../composables/useLLMStream'
 import { useMarketSearch } from '../../composables/useMarketSearch'
@@ -120,9 +120,11 @@ const symbol = ref('')
 // F17 (round6 §16.5): 带 marketTab——A 场景只搜 A，短路后端 global 分支
 // O30 (round7 §7 P30①): sector/index 模式各建一个 kind 实例——三模式复用同一套
 // 下拉/键盘导航/Enter 选中（后端 /search kind 参数，sector→板块表，index→指数表）
-const search = useMarketSearch({ market: props.marketTab })
-const sectorSearch = useMarketSearch({ market: props.marketTab, kind: 'sector' })
-const indexSearch = useMarketSearch({ market: props.marketTab, kind: 'index' })
+// round9 §7 修复: market 传 toRef(props,'marketTab')（响应式）——旧实现 setup 求值
+// 一次，切到港股 tab 后 marketFilter 仍为 'A' → 补全只显示 A 股。
+const search = useMarketSearch({ market: toRef(props, 'marketTab') })
+const sectorSearch = useMarketSearch({ market: toRef(props, 'marketTab'), kind: 'sector' })
+const indexSearch = useMarketSearch({ market: toRef(props, 'marketTab'), kind: 'index' })
 const activeSearch = computed(() => {
   if (activeMode.value === 'sector') return sectorSearch
   if (activeMode.value === 'index') return indexSearch
