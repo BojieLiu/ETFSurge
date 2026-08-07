@@ -1,5 +1,5 @@
 """
-O7 (docs/round8-rediagnosis.md §7 P7-新/R7-P25): 策略检查 LLM 超时与降级文案。
+O7 (docs/archived/round8-rediagnosis.md §7 P7-新/R7-P25): 策略检查 LLM 超时与降级文案。
 
 验收③: 兜底 summary 含超时原因与数据摘要（而非固定「LLM 分析超时」文案）。
 """

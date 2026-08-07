@@ -1,5 +1,5 @@
 """
-O24 (docs/round7-rediagnosis.md §7 P24): 入选理由与入选决策的因果链。
+O24 (docs/archived/round7-rediagnosis.md §7 P24): 入选理由与入选决策的因果链。
 
 P24 问题: rationale 是描述型（行业 → 技术面 → 复合分 → 市场状态 → 层角色模板），
 无「为什么选中它而非同类」的归因——因子分排名、层内竞争、预算约束均未进理由。

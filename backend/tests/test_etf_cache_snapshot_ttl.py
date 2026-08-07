@@ -1,5 +1,5 @@
 """
-O1 (docs/round7-rediagnosis.md §7 P1): etf_list_cache 快照宽容——避免全量 1618 扫描。
+O1 (docs/archived/round7-rediagnosis.md §7 P1): etf_list_cache 快照宽容——避免全量 1618 扫描。
 
 P1 根因: 容器重建/挂载卷时间戳使 etf_list_cache.json 快照 ts 跨 4h 阈值
 （CACHE_TTL 14400s）→ fetch_all_etfs_base 不命中文件缓存 → 全量 1618 只扫描

@@ -1,5 +1,5 @@
 """
-O23 (docs/round7-rediagnosis.md §7 P23): 入选理由行业标签可信度校验。
+O23 (docs/archived/round7-rediagnosis.md §7 P23): 入选理由行业标签可信度校验。
 
 P23 根因: ETFClassifier 的 _match 是子串匹配——tracked_index="中证消费电子" 命中
 _INDEX_RULES 的 ("消费", "食品饮料") → 562950 消费电子被误归「食品饮料」

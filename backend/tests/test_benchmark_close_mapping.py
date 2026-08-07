@@ -1,5 +1,5 @@
 """
-O19 (docs/round7-rediagnosis.md §7 P20-②): tracking_error 指数映射补全。
+O19 (docs/archived/round7-rediagnosis.md §7 P20-②): tracking_error 指数映射补全。
 
 _WIDE_BASIS_INDEX_CODES 只映射 6 只老宽基（510300/510500/510050/588000/159915/510880），
 A50(563080)/A100(562000)/A500(560600) 等新宽基无指数映射 → benchmark_close 注入不到 →

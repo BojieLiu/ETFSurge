@@ -1,5 +1,5 @@
 """
-O6 (docs/round7-rediagnosis.md §7 P8): /factors/model 补输出 valid/no_data/warn/static 聚合汇总。
+O6 (docs/archived/round7-rediagnosis.md §7 P8): /factors/model 补输出 valid/no_data/warn/static 聚合汇总。
 
 P8 问题: /factors/active 有 summary（valid/warn/no_data/static/avg_ic），但 /factors/model
 端点只输出 total/categories/updated_at——前端无法直接读取模型健康度（实测 summary=null）。

@@ -1,5 +1,5 @@
 """
-O28 (docs/round7-rediagnosis.md §7 P28②): GET /market/fund-flow/{symbol} 端点。
+O28 (docs/archived/round7-rediagnosis.md §7 P28②): GET /market/fund-flow/{symbol} 端点。
 
 P28②: 后端 get_fund_flow 已实现（market_data_hub.py，东财 fetch_fund_flow）但无
 router 端点暴露、前端无 API 封装——热点股票技术分析弹窗「资金流入流出」未接通。

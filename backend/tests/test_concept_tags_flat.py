@@ -1,5 +1,5 @@
 """
-O9 (docs/round8-rediagnosis.md §7 P9-新): stock-hot-rank.concept_tags 平铺填充。
+O9 (docs/archived/round8-rediagnosis.md §7 P9-新): stock-hot-rank.concept_tags 平铺填充。
 
 现象: contract F2-6 声明 concept_tags 字段，实际 50/50 全空——数据源 tag 是嵌套
 dict {"concept_tag": [...], "popularity_tag": "..."}，_parse_concept_tags 对 dict

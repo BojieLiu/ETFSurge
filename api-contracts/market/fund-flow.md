@@ -1,6 +1,6 @@
 # Contract: /api/v1/market/fund-flow/{symbol} (round7 O28)
 
-> 关联方案: `docs/round7-rediagnosis.md` §7 O28（热点股票技术分析弹窗增强——资金流区块）
+> 关联方案: `docs/archived/round7-rediagnosis.md` §7 O28（热点股票技术分析弹窗增强——资金流区块）
 > 变更类型: 新增端点
 > 版本: v1.0（2026-08-04）
 

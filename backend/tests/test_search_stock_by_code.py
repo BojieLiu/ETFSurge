@@ -1,5 +1,5 @@
 """
-O4 (docs/round8-rediagnosis.md §7 P4-新): 个股名称/代码搜索修复。
+O4 (docs/archived/round8-rediagnosis.md §7 P4-新): 个股名称/代码搜索修复。
 
 验收:
 ① search?keyword=茅台 / 00700 / AAPL 均非空（数据源可用时——instruments 表重灌）；

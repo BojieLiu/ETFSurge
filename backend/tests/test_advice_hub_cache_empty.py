@@ -1,5 +1,5 @@
 """
-O3 (docs/round8-rediagnosis.md §7 P2-新): hub 缓存断裂——投顾快照空。
+O3 (docs/archived/round8-rediagnosis.md §7 P2-新): hub 缓存断裂——投顾快照空。
 
 P2 根因: market_service.py 非交易时段 stale 分支把 _global_indices_cache 各 region
 重建为空 list 写回；_build_advice_market_snapshot 兜底只读 30s TTL 的

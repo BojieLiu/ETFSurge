@@ -1,5 +1,5 @@
 """
-O2 (docs/round8-rediagnosis.md §7 P1-新): 港股 K 线全链路修复。
+O2 (docs/archived/round8-rediagnosis.md §7 P1-新): 港股 K 线全链路修复。
 
 现象: /market/history/00700?asset_type=HK 返回 0 根——finnhub 403 → alphavantage
 传 "00700"（需 "0700.HK"）恒空 → akshare get_k_data 是 A 股接口。且 symbol-analysis

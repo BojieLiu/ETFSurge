@@ -1,5 +1,5 @@
 """
-O25 (docs/round7-rediagnosis.md §7 P25): 策略检查数据管道 + LLM 超时分级。
+O25 (docs/archived/round7-rediagnosis.md §7 P25): 策略检查数据管道 + LLM 超时分级。
 
 P25 根因:
 ① 采集超时全丢弃——wait_for(gather) 超时取消整个 gather，部分完成的结果拿不到

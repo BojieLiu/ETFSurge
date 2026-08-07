@@ -1,5 +1,5 @@
 """
-O16 (docs/round7-rediagnosis.md §7): 核心层大盘宽基族互斥。
+O16 (docs/archived/round7-rediagnosis.md §7): 核心层大盘宽基族互斥。
 
 P18 问题: A500(强制) + A50 + A100 + 沪深300(强制) 同现核心层——4 个宽基中 3 个
 大盘/超大盘（相关性 ~0.95+），核心层权重押注同一「大盘 beta」，分散失效。

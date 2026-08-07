@@ -1,5 +1,5 @@
 """
-O26 (docs/round8-rediagnosis.md §7 §5.1H): 板块技术分析点位口径标注。
+O26 (docs/archived/round8-rediagnosis.md §7 §5.1H): 板块技术分析点位口径标注。
 
 现象: 板块分析报告报"指数报收 50118.43 点"，但全文无「板块指数点位」显式标签——
 专业读者易误读为成分股或沪深大盘。验收: 报告 prompt 首段含「板块指数（BKxxxx）

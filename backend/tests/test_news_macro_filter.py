@@ -1,5 +1,5 @@
 """
-O7 (docs/round7-rediagnosis.md §7 P9): 资讯分级合理——国际重磅分级 + 宏观 tab 过滤。
+O7 (docs/archived/round7-rediagnosis.md §7 P9): 资讯分级合理——国际重磅分级 + 宏观 tab 过滤。
 
 P9 问题:
 1. 国际重磅新闻（美联储/沙特阿美/BP/OPEC 等）全 level=1, stars=1——关键词表缺

@@ -1,5 +1,5 @@
 ﻿"""
-O9 (docs/round8-rediagnosis.md §7 P9-新): watchlist 新添条目 name 从 instruments 补名。
+O9 (docs/archived/round8-rediagnosis.md §7 P9-新): watchlist 新添条目 name 从 instruments 补名。
 
 现象: 自选添加 510050（realtime name 空/未命中）→ name='510050'（代码当名称入库）。
 验收③: watchlist 新条目 name 为真实名称（realtime name 空时从 instruments 本地表补）。

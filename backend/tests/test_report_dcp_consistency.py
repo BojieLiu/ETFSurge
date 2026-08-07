@@ -1,5 +1,5 @@
 """
-O18 (docs/round8-rediagnosis.md §7): 报告「今日涨跌」与实时行情一致性。
+O18 (docs/archived/round8-rediagnosis.md §7): 报告「今日涨跌」与实时行情一致性。
 
 验收③: 新增 test_report_dcp_consistency——报告 DCP 与 /realtime 偏差在阈值内
 （不再出现 510050 -23.40% vs 实时 +0.73% 的 ≥10 倍极端）。

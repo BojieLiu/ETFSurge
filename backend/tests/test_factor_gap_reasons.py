@@ -1,5 +1,5 @@
 """
-O25 (docs/round8-rediagnosis.md §7 P6-新): 因子模型 6 项数据缺失 + reason 补全。
+O25 (docs/archived/round8-rediagnosis.md §7 P6-新): 因子模型 6 项数据缺失 + reason 补全。
 
 现象: /factors/active no_data=6（etf.premium_discount / etf.tracking_error /
 etf.shares_change / sentiment.panic_greed_diff / sentiment.stock_divergence /

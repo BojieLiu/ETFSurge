@@ -1,5 +1,5 @@
 """
-O5 (docs/round7-rediagnosis.md §7 P16): news-impact 智能分析正文兜底。
+O5 (docs/archived/round7-rediagnosis.md §7 P16): news-impact 智能分析正文兜底。
 
 P16 根因: 数据源冷却/快讯类头条 content 为空时，prompt 里「新闻内容：」段为空
 → LLM 收到空正文 → 返回 summary="新闻内容为空" 的空洞结论（专业投资者认定

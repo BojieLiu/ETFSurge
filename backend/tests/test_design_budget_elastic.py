@@ -1,5 +1,5 @@
 """
-O10 (docs/round8-rediagnosis.md §7 §3): 设计任务 DATA 预算弹性化。
+O10 (docs/archived/round8-rediagnosis.md §7 §3): 设计任务 DATA 预算弹性化。
 
 现状: design_pipeline 的 DATA 阶段 asyncio.wait_for(timeout=45)（task_manager.py
 OPT-06）在冷缓存 + 本地慢源下实测 42-75s 被截断 → "方案生成超时"（用户本地首次

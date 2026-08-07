@@ -1,5 +1,5 @@
 """
-O17 (docs/round7-rediagnosis.md §7): 卫星层科创数量上限。
+O17 (docs/archived/round7-rediagnosis.md §7): 卫星层科创数量上限。
 
 P19 问题: 所有方案卫星层均出现多个科创系标的（design 398: balanced 8 只卫星中
 4 只科创，权重合计 14.6% < 配额 15% → 权重裁剪放行）——权重配额不防数量。

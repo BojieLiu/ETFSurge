@@ -1,4 +1,4 @@
-"""O4 (docs/round7-rediagnosis.md §7): get_factor_matrix 尊重 YAML standardization=raw。
+"""O4 (docs/archived/round7-rediagnosis.md §7): get_factor_matrix 尊重 YAML standardization=raw。
 
 P6 根因: factor_registry.factor_scores 已对 raw 因子（rsi_14/rsi_24）保留真实 0-100，
 但 market_data_hub.get_factor_matrix() 对 factor_scores 无条件做截面 z-score——

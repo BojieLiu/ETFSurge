@@ -1,5 +1,5 @@
 """
-O3 (docs/round7-rediagnosis.md §7 P3): sync_instruments 补 US 段。
+O3 (docs/archived/round7-rediagnosis.md §7 P3): sync_instruments 补 US 段。
 
 P3 根因: collect_all() 只打包 A 股/A股ETF/HK 三段，US 段未实现 →
 instruments 表 US=0 → 个股名称搜索（AAPL/苹果 等）空。

@@ -1,5 +1,5 @@
 """
-O30 (docs/round7-rediagnosis.md §7 P30①): /search 增加板块/指数段（kind 参数）。
+O30 (docs/archived/round7-rediagnosis.md §7 P30①): /search 增加板块/指数段（kind 参数）。
 
 P30① 问题: /search 只返回 stock/etf/HK/US 段——无板块（sectors 表 991 行）与
 指数（indices_meta 表 588 行）段；前端 sector/index 模式无下拉建议。

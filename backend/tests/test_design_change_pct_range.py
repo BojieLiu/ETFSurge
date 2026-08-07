@@ -1,5 +1,5 @@
 """
-O18 (docs/round8-rediagnosis.md §7 P5-新/R7-P22): 设计报告「今日涨跌」×100 单位 bug + O5 值域校验。
+O18 (docs/archived/round8-rediagnosis.md §7 P5-新/R7-P22): 设计报告「今日涨跌」×100 单位 bug + O5 值域校验。
 
 O18 根因: strategy_design.py 注入层三源（pool 缓存/快照/K线兜底）均为百分比口径，
 design_report.py:155 的 `abs(dcp)<1 → ×100` 分支把 ±1% 内的百分比值放大 100 倍

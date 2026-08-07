@@ -1,5 +1,5 @@
 """
-O20 (docs/round7-rediagnosis.md §7 P20-③): industry_diversification 数据语义 + no_data reason 修正。
+O20 (docs/archived/round7-rediagnosis.md §7 P20-③): industry_diversification 数据语义 + no_data reason 修正。
 
 P20-③ 根因: etf.industry_diversification 的 concepts fallback（1/n）上游 concepts 为空 →
 恒 0.0 常量 → IC 因零方差无法计算 → ic_val=None；且该因子不在 ET_SPECIFIC_GAP_CODES →

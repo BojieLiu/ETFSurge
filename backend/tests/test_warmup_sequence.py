@@ -1,5 +1,5 @@
 """
-O2 (docs/round7-rediagnosis.md §7 P2): 预热任务串行化——控并发峰值。
+O2 (docs/archived/round7-rediagnosis.md §7 P2): 预热任务串行化——控并发峰值。
 
 P2 根因: 启动预热高峰 shared_executor 64/64 饱和——market_cache（因子 K 线
 8 并发 run_sync）+ etf_cache（全量扫描）+ global_indices + instruments_sync

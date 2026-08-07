@@ -1,5 +1,5 @@
 """
-O22 (docs/round8-rediagnosis.md §7 §5.1G): 自选 A 股股票实时为空——sh/sz 前缀匹配失败。
+O22 (docs/archived/round8-rediagnosis.md §7 §5.1G): 自选 A 股股票实时为空——sh/sz 前缀匹配失败。
 
 根因（2026-08-07 容器实测）: fetch_a_stock_realtime('sh688981') → 空——带 sh/sz
 前缀在底层源（tencent/sina/mootdx）取数阶段就失败（_exchange 把 sh688981 判成 sz →

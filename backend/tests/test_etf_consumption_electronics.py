@@ -1,5 +1,5 @@
 """
-O15 (docs/round8-rediagnosis.md §7 §5.1A): 562950 消费电子不再误归「食品饮料」。
+O15 (docs/archived/round8-rediagnosis.md §7 §5.1A): 562950 消费电子不再误归「食品饮料」。
 
 根因: etf_scanner.INDEX_KEYWORDS 无「消费电子」键 + _extract_index_keyword 按
 dict 插入序遍历——'消费电子ETF易方达' 的 tracked_index 回填为 '消费'（丢 '电子'），

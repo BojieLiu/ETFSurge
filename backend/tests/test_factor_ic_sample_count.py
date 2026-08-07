@@ -1,5 +1,5 @@
 """
-O6 (docs/round8-rediagnosis.md §7 P6-新): /factors/ic 每条含非空 sample_count。
+O6 (docs/archived/round8-rediagnosis.md §7 P6-新): /factors/ic 每条含非空 sample_count。
 
 现状: factors.py:359 硬编码 "sample_count": None——IC 列表无样本量/显著性信息。
 registry._sample_counts 已在 compute() 填充（line 1437），端点直接读取即可。

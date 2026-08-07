@@ -1,5 +1,5 @@
 """
-O12 (docs/round8-rediagnosis.md §7 §7 O12 + interaction-redesign.md D2):
+O12 (docs/archived/round8-rediagnosis.md §7 §7 O12 + docs/archived/interaction-redesign.md D2):
 /portfolio/timeline join tasks 表——失败 design 任务在历史列表可见。
 
 验收:

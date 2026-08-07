@@ -1,5 +1,5 @@
 """
-O22 (docs/round7-rediagnosis.md §7 P22): 设计方案「今日涨跌」三级兜底。
+O22 (docs/archived/round7-rediagnosis.md §7 P22): 设计方案「今日涨跌」三级兜底。
 
 P22 根因:
 1. pool_entry 缺实时涨跌（数据源冷却时 pool 为兜底条目）；

@@ -1,5 +1,5 @@
 """
-O18 (docs/round7-rediagnosis.md §7 P20-①): premium_discount nav 源加固。
+O18 (docs/archived/round7-rediagnosis.md §7 P20-①): premium_discount nav 源加固。
 
 P20-①: 现有三级 nav 源（Sina http → QQ http → TTJ 日净值）在用户环境全失败
 （http 明文被禁/被墙）→ premium_discount 因子 no_data。方向修正：先诊断再补源——

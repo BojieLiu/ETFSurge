@@ -1,5 +1,5 @@
 """
-O27 (docs/round8-rediagnosis.md §7 §5.1I): 基本面/市值数据注入——compute 直调路径。
+O27 (docs/archived/round8-rediagnosis.md §7 §5.1I): 基本面/市值数据注入——compute 直调路径。
 
 验收:
 ① compute 直调路径 ln_mcap/ln_float_mcap 与 refresh 路径数值一致（同一 total_mv 注入逻辑）；

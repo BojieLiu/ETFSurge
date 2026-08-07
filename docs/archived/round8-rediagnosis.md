@@ -20,7 +20,7 @@
 总体判断：**round7 O 项修复使预热/线程池/资讯链路达标，但引入新启动阻塞（P0-新），且搜索/投顾/港股数据/因子表现/前端性能等硬伤未随 O 项收敛；测试防护体系（R7-O13 SKIP 豁免、无启动超时 gate、断言"有值"非"值域"）未能拦截。**
 
 > **编号约定（重要，防跨文档混淆）**：
-> - 本文问题编号 **P-新#**（§2 起，P0-新/P1-新/…）与方案编号 **O#**（§7，O1-O12、O15-O27；**O13/O14 未使用，编号保留缺口**）均为 **round8 独立序列**，与 `docs/round7-rediagnosis.md` 的 O1-O30 **同名但不同指**（例：本文 O15=消费电子分类，round7 的 O15=AI 工具落列表）。
+> - 本文问题编号 **P-新#**（§2 起，P0-新/P1-新/…）与方案编号 **O#**（§7，O1-O12、O15-O27；**O13/O14 未使用，编号保留缺口**）均为 **round8 独立序列**，与 `docs/archived/round7-rediagnosis.md` 的 O1-O30 **同名但不同指**（例：本文 O15=消费电子分类，round7 的 O15=AI 工具落列表）。
 > - 引用 **round7 文档**的问题/方案一律写 **`R7-P#` / `R7-O#`**（例：R7-O18=premium_discount nav 源加固、R7-P3=个股搜索）；未加 `R7-` 前缀的 P/O 编号均指本文。
 > - §0/§1/**§5** 对照表内圆括号编号（P1/P2/P9/P16…）为 round7 问题编号（该几节以对照 round7 为主，保留裸编号以减少噪音）。
 
@@ -30,7 +30,7 @@
 > | 1 | O1 instruments 同步改造方式 | **两者结合**：全改 `run_sync`/`to_thread`（线程池）+ 改独立后台任务 + 段级超时/环境开关（文档原推荐方案 A+B 全要） |
 > | 2 | O21 IPv6 修复 | **方案一**：uvicorn 监听 `[::]:8000`（同时覆盖 IPv4） |
 > | 3 | O9 concept_tags 契约 | **方案一**：后端平铺填充 `tag.concept_tag`（不改契约字段） |
-> | 4 | O17 视觉治理 | **合并实施**：连同 `docs/interaction-redesign.md` + `docs/frontend-theme-redesign.md` 一起做 |
+> | 4 | O17 视觉治理 | **合并实施**：连同 `docs/archived/interaction-redesign.md` + `docs/archived/frontend-theme-redesign.md` 一起做 |
 > | 5 | §5.1C 三方案专业审视"取向" | **落地**：压卫星 ≤20% + 精简 core 大盘叠加 + 防御抬至 15-20%，排入 O16 同批实施 |
 > | 6 | Lighthouse performance ≥0.7 | **软目标**（不设 pre-commit 硬门禁；仅作为实施效果衡量） |
 > | 7 | O25 premium_discount/tracking_error/shares_change | **接受"加降级链/换源"成本**（不再降级为 static，优先补齐数据源） |
@@ -389,8 +389,8 @@
   - **验收**：① 冷缓存首次设计在 DATA 预算内完成（不报"方案生成超时"）；② 热缓存设计 DATA <15s；③ 设计期间 `/portfolio/tasks/{id}` 始终可查询（事件循环不被占）；④ 新增单测覆盖冷/热缓存两态。
 
 ### O11（新：前端任务状态机纠偏——失败无法二次触发/残留）
-- **问题（实测）**：设计失败后 `designStep` 停 `'loading'` + `activeCoreFeature='design'`，`DashboardAiTools.vue:13` 的工具列表在 `activeCoreFeature` 非空时不渲染 → 失败界面无"重新生成"入口、无法二次触发；`exitCoreFeature:337` 把失败态当 loading 持久化；复位仅依赖 `docs/interaction-redesign.md` 所述组件 `active` 的 `true→false`（`resetToTools.spec.js` 未覆盖"同 tab 内失败后重复触发"）。
-- **设计状态机**（已单独成稿 `docs/interaction-redesign.md`，D1/D2/D3）：`idle→drafting→running→result|failed`，failed 是终态且带 `canRetry`，可停留/重试/返回；仅持久化 `result` 与暂存 `running{taskId}`，failed 不入 localStorage。
+- **问题（实测）**：设计失败后 `designStep` 停 `'loading'` + `activeCoreFeature='design'`，`DashboardAiTools.vue:13` 的工具列表在 `activeCoreFeature` 非空时不渲染 → 失败界面无"重新生成"入口、无法二次触发；`exitCoreFeature:337` 把失败态当 loading 持久化；复位仅依赖 `docs/archived/interaction-redesign.md` 所述组件 `active` 的 `true→false`（`resetToTools.spec.js` 未覆盖"同 tab 内失败后重复触发"）。
+- **设计状态机**（已单独成稿 `docs/archived/interaction-redesign.md`，D1/D2/D3）：`idle→drafting→running→result|failed`，failed 是终态且带 `canRetry`，可停留/重试/返回；仅持久化 `result` 与暂存 `running{taskId}`，failed 不入 localStorage。
 - **验收**：① 失败卡带「重试一次」+「返回」，二者均可操作；② 同 tab 内失败后再次进入回到 idle（不残留）；③ WS 完成 + 轮询只 finalize 一次（taskId 幂等）；④ 退出持久化 running，再进恢复 loading。
 
 ### O12（新：历史列表 join tasks——失败任务从"隐形"到可见）
@@ -408,7 +408,7 @@
 
 ### O17（新：前端可用性——字号过小 + 内容未铺满页面）【已拍板：合并实施 interaction-redesign.md + frontend-theme-redesign.md】
 - **问题（实测/用户反馈）**：全局默认字号偏小（实测根字号 14px，`global.css`/`theme.css` `--font-size-base` 及组件 px），财报密集区可读性差；多数页面有固定 `max-width`（约 1200-1280px，实测 Dashboard 主容器 1200px 且宽屏左右留白 >200px）；
-- **方向**：① 根字号 `--font-size-base` 提到 15-16px（实测 14px → 15px+），正文/表格/卡片统一优化；② 主内容容器放宽（`max-width: 1440px` + 无大留白）；③ 卡片网格改自适应填满；④ 保持红涨绿跌等既有主题符号不变。**细则见 `docs/interaction-redesign.md` 视觉治理段（字号 scale、容器 `width: min(100%, 1440px)`、网格 `repeat(auto-fill, minmax(...))`）。**
+- **方向**：① 根字号 `--font-size-base` 提到 15-16px（实测 14px → 15px+），正文/表格/卡片统一优化；② 主内容容器放宽（`max-width: 1440px` + 无大留白）；③ 卡片网格改自适应填满；④ 保持红涨绿跌等既有主题符号不变。**细则见 `docs/archived/interaction-redesign.md` 视觉治理段（字号 scale、容器 `width: min(100%, 1440px)`、网格 `repeat(auto-fill, minmax(...))`）。**
 - **验收**：① 核心页面（Dashboard/行情/组合/分析）正文 ≥15px 且内容宽度 ≥ 视口 92%；② `npm run build` 通过、样式不破坏现有红涨绿跌测试；③ Lighthouse 不劣化。
 
 ### O18（新：报告「今日涨跌」与实际行情脱节 + 100 倍单位 bug）

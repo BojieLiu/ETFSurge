@@ -1,5 +1,5 @@
 """
-O16 (docs/round8-rediagnosis.md §7 §5.1B): rationale 宽基风格统一。
+O16 (docs/archived/round8-rediagnosis.md §7 §5.1B): rationale 宽基风格统一。
 
 根因: _style_probe 宽基关键词缺 A100/A50/A500/深证100/MSCI/上证180 → 562000
 A100ETF 被误判 theme_satellite → core 层抽到「卫星仓位，高弹性品种」；

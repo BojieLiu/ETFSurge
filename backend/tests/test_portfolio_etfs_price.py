@@ -1,5 +1,5 @@
 """
-O8 (docs/round7-rediagnosis.md §7 P11): /portfolio/etfs 补充实时 price + change_pct。
+O8 (docs/archived/round7-rediagnosis.md §7 P11): /portfolio/etfs 补充实时 price + change_pct。
 
 P11 问题: GET /portfolio/etfs 返回 ORM 条目，price 字段为 null（realtime 端点有价）——
 前端持仓表格价格列「—」，与实时行情脱节。

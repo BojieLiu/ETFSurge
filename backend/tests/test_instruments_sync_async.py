@@ -1,5 +1,5 @@
 """
-O1 (docs/round8-rediagnosis.md §7 P0-新): instruments 同步全链路改造。
+O1 (docs/archived/round8-rediagnosis.md §7 P0-新): instruments 同步全链路改造。
 
 P0-新 根因: scripts/sync_instruments.py 的 `_fetch_akshare_list` 对 akshare 做裸同步调用
 （stock_us_spot_em 在当前网络环境永久卡死）→ 阻塞事件循环 → asyncio.wait(timeout=60)
