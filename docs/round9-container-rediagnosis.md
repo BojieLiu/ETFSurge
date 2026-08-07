@@ -14,7 +14,10 @@
 2. **round8 O 项核对**：25 项（O13/O14 编号保留缺口）中 12 项确认修复、2 项未复现（O3/O10）、4 项部分修复、5 项未修复（O2 港股K线 / O4 个股搜索 / O6 IC淘汰 / O21 容器内双栈 / **O24 回归 bug——标的分析功能全挂**）、2 项未专项验证（O20/O27）。
 3. **性能**：前端 Lighthouse 90/100/99 优秀（O8 达成）；后端 8 个端点 >1s，`/market/watchlist` **29.9s** 灾难级且无任何门禁拦截。
 4. **报告质量**：组合设计可用但存在数据缺失仍入选、表格口径误差；**策略检查在 LLM 60s 超时后降级为全 hold 模板，专业投资者不可接受**。
-5. **测试防护体系**存在 4 类系统性盲区（stream 端点零契约测试、预热门禁口径错误、watchlist 只查 DB 不调 API、容器环境零覆盖），本轮所有新问题均落在盲区内。
+5. **因子模型 no_data 专项（宿主复诊，2026-08-07 补充）**：用户截图指出的 **7 个因子"没数据"（6 no_data + 1 warn）根因全部代码级定位**——IOPV 三级降级链 4 处解析 bug（sina 字段双错位+接口无 IOPV、qq GBK 解码崩溃、em 字段不匹配、TTJ 兜底 tuple/dict 契约错）导致折溢价率必然 no_data；benchmark_close/shares_change_20d 依赖链脆弱；sentiment 三因子是宏观单值作截面因子的设计缺陷；vol_ratio 为真实弱 IC。详见 §6.5.1。
+6. **测试防护体系**存在 4 类系统性盲区（stream 端点零契约测试、预热门禁口径错误、watchlist 只查 DB 不调 API、容器环境零覆盖；本轮再添 **IOPV 链零单测**），本轮所有新问题均落在盲区内。
+
+**方案**：P0×7（阻断）/ P1×10（数据完整性）/ P2×9（质量体验）/ P3×8（测试防护补强）共 **34 项**，均附验收标准，未实施。
 
 ---
 
@@ -163,6 +166,34 @@
 - O25 部分修复：no_data reason 已区分（etf 三因子"数据源未接入（缺 nav/benchmark_close/shares_change_20d）"、sentiment 三因子"截面无差异（常量输出）"）——不再笼统"IC 未累积"；但 **no_data 仍 6 项**（容器内 EM 源被拦为外部根因，宿主可能更好）；
 - **O6 未实施**：`/factors/ic` 端点返回的 28 条 IC 记录中 13 条为负（change_pct -0.449、bollinger.bandwidth -0.5661、atr_14 -0.4293、j_value -0.381…，口径：IC 端点仅收录已累积 IC 的因子，33 总数含 static/no_data），仍标 valid，且 reason 文案"IC -0.4490 ≥ 阈值 0.02"逻辑错误（负数不可能 ≥ 阈值，应取 |IC| 或显著性）。
 
+### 6.5.1 因子模型 no_data 专项诊断（宿主环境，2026-08-07 补充）
+
+触发：用户截图因子模型页——**7 个因子"没数据"**。API 实证构成：**6 个 no_data（etf 三因子 + sentiment 三因子，ic_value 全 null）+ 1 个 warn（vol_ratio，IC=0.001 接近 0，avg_ic 亦 null）**——前端第 137 行 `ic_value !== null ? toFixed(4) : '无数据'` 把 7 个无 IC 值项都渲染成"无数据"，与用户观感吻合（summary 计数仍为 6，口径差 1 需前端澄清）。宿主（非容器）环境下逐源实测，**根因全部代码级定位，均与容器 TLS 拦截无关**：
+
+**(A) 折溢价率缺 nav —— IOPV 三级降级链 4 处代码 bug，实测全链 0 命中**
+- 数据源实测：`hq.sinajs.cn`（sina）、`qt.gtimg.cn`（qq）、`push2.eastmoney.com`（em）三者 HTTP 均 200 且有数据——**源可用，坏在解析**；
+- **sina（`_fetch_iopv_from_sina`，factor_registry.py:687-717）双错位**：`sym = parts[2]`（实际是昨收价，代码应从行前缀 `var hq_str_sh510050` 提取）；`nav = parts[8]`（实际是成交量 513471237）→ 解析出 `{'3.029': {'nav': 513471237.0}}` 这类 key/值全错的 dict → 与真实 symbol 永不匹配 → 0 命中；且实测 sina 该实时接口 **34 个字段根本没有 IOPV 字段**（到 `[30]=日期/[31]=时间/[32]=状态` 止）——接口选型本身就错；
+- **qq（`_fetch_iopv_from_qq`，720-759）解码崩溃**：`resp.read().decode("utf-8")` 遇 GBK 中文抛 UnicodeDecodeError → 整个源被外层 except 吞掉；且注释"pos 31 = IOPV"实测错误（`[31]=0.037` 是涨跌额）；
+- **em（`_fetch_iopv_from_em`，762-810）解析空**：`fields=f12,f13,f2,f236` 请求 `ulist.np/get` 返回体**不含 f236** → `row.get("f236")` None → 0 命中；且 push2 对高频重复请求时好时坏（本地实测 200 → RemoteDisconnected）；
+- **TTJ 兜底（factor_registry.py:1124-1132 → `hub.get_fund_nav` → `china_market.fetch_fund_nav`）类型契约错**：`fetch_fund_nav` 返回 `tuple[float, float]`（`(nav, chg)`，china_market.py:1086-1113），调用方却用 `_nav.get("nav")`（dict 契约）→ AttributeError 被 except 吞掉 → 兜底**永远静默失败**；
+- 四级链路（sina→qq→em→TTJ）代码全坏 + 零单测 → 折溢价率 no_data 是**必然结果**而非数据源问题。
+
+**(B) 跟踪误差缺 benchmark_close / 规模变化率缺 shares_change_20d（market_data_hub.py:1242-1292）**
+- benchmark_close：仅**宽基 ETF**（510050/510300/510880 等）从东财指数历史注入，行业/主题 ETF（159545/513120 等）无基准映射 → 全缺；且依赖 EM 源（容器被拦/宿主不稳定）；
+- shares_change_20d：`fetch_etf_shares_outstanding`（china_market.py:494-521）走 akshare `fund_etf_hist_em`（8s 超时 + EM 源脆弱 + "份额"列名匹配乱码风险）→ 失败率极高，10 只全缺；
+- 两字段均为"真数据源接入"工作（非 bug），但**依赖链脆弱且无失败降级**。
+
+**(C) sentiment 三因子"截面无差异（常量输出）"——设计缺陷，非数据问题**
+- `panic_greed_diff`/`stock_divergence`：注入的是**全市场单一值**（`sentiment_index`、`advance_decline`/`advance_ratio`，factor_registry.py:1134-1150）→ 10 只样本**完全相同** → 截面 std=0 → IC 不可计算 → 标 no_data（O20 常量检测生效）；
+- `news_direction`：`get_news_stock` 对 ETF 基本查不到 → 降级 `news_scope=market` 注入**同一批全市场新闻** → 同样截面恒等；
+- **本质**：宏观/市场级数据（情绪指数、涨跌家数比）作为"每只 ETF 打分"的截面因子天然无区分度——应改为 regime/组合层因子（不参与截面 IC），或换 ETF/板块级情绪数据源。
+
+**(D) vol_ratio 弱 IC（warn）——真实弱因子**
+- 71 样本、IC=0.001（非无数据）：量比对 ETF 收益截面预测力接近 0（ETF 同质化 + 量比差异小），或 IC 计算窗口/横截面方法偏差——需先核对 IC 口径（P2-9），再按 O6 淘汰线决策。
+
+**(E) 测试防护缺口**
+- IOPV 三级链 + sina 净值函数是**纯函数**（可 mock 响应文本断言解析），却**零单测** → 4 处解析 bug 全部存活；`fetch_fund_nav` 返回 tuple 与调用方 dict 契约不匹配亦无契约测试；verify_e2e 对因子只查"列表返回非空"（factors/active 200），从不断言 no_data 数量/数据完整性 → 因子页"7 个没数据"长期静默。
+
 ---
 
 ## 7. 前后端数据断裂排查
@@ -240,6 +271,8 @@ watchlist 29.9s 与 O9 验收④"<1s"差距 30 倍，且 verify_e2e 对该端点
 | P0-3 | 容器内 `--host ::` 失效 | 容器内统一 0.0.0.0（已临时实施）；本地 O21 意图保留；新增"容器启动后 127.0.0.1 连通"的 docker 冒烟 | docker e2e 冒烟：容器内 IPv4 直连 200 |
 | P0-4 | watchlist 29.9s | 批量行情加整体超时（如 8s）+ 降级链短路（EM 冷却期跳过）；已有 batch 路径复用（market.py:696-703 的 get_realtime_batch）扩到 watchlist | watchlist ≤1s（10 条）；新增 verify_e2e watchlist 耗时门禁 |
 | P0-5 | 策略检查 LLM 60s 超时 + 全 hold 模板 | 超时对齐 90s（O7 验收）；规则引擎兜底输出个性化建议（按因子分区间生成差异化操作建议 + 引用技术信号），消除同模板；行业数据缺失时明示而非空转 | ①LLM 可用时 covered_by_llm>0；②无 LLM 时建议非模板化；③与 /signal 信号方向不矛盾 |
+| P0-6 | 折溢价率缺 nav：IOPV 三级链 4 处解析 bug（§6.5.1-A） | ①sina：代码从行前缀 `var hq_str_(\w+)` 提取、IOPV 改用含真 IOPV 的接口（实测 sina 实时接口无 IOPV，需换源或删该级）；②qq：`decode("gbk")`；③em：核实 IOPV 字段名（ulist.np/get 返回无 f236，改用 clist/get 或换字段）并补防限流退避；④补单测（P3-7） | 宿主环境下 10 只样本 nav 命中 ≥8，折溢价率 no_data 消除 |
+| P0-7 | TTJ 兜底类型契约错：`fetch_fund_nav` 返回 tuple，调用方用 dict（§6.5.1-A-4） | 统一契约：`fetch_fund_nav` 改返回 dict（`{"nav", "daily_change_pct"}`）或调用方解包 tuple；两端改一处并加类型断言单测 | 兜底路径不再静默失败；单测覆盖 tuple/dict 两种历史形态 |
 
 ### P1（数据完整性/正确性）
 | # | 问题 | 方案 | 验收 |
@@ -251,6 +284,9 @@ watchlist 29.9s 与 O9 验收④"<1s"差距 30 倍，且 verify_e2e 对该端点
 | P1-5 | 560600 数据缺失仍入核心 | 设计管道对"行情数据不可用"标的不给核心权重（或整仓剔除并标注）；值域/完整性 gate 前置 | design 核心层无数据缺失标的 |
 | P1-6 | design 顶层 market_regime 为空 | 详情接口补顶层 market_regime（复用 market_context） | 字段非空 |
 | P1-7 | instruments 补名失败（O9） | watchlist_add 的 instruments 查询放宽 market 匹配（如忽略大小写/映射 etf→A） | 不传 name 的新条目显示真实名称 |
+| P1-8 | 跟踪误差缺 benchmark_close（§6.5.1-B） | 行业/主题 ETF 补跟踪指数映射（instruments 表加 benchmark 代码字段），宽基逻辑外扩；EM 指数源失败时降级腾讯/新浪指数 | 10 只样本 benchmark_close 命中 ≥6，跟踪误差出 IC |
+| P1-9 | 规模变化率缺 shares_change_20d（§6.5.1-B） | `fetch_etf_shares_outstanding` 加降级链：东财份额接口 → 天天基金规模 → 基金规模估算；列名乱码 `_decode_df` 加固；失败时 reason 明确标注"份额源不可用" | 10 只样本 shares_change_20d 命中 ≥6，规模变化率出 IC |
+| P1-10 | sentiment 三因子截面恒等（§6.5.1-C，设计缺陷） | ①`panic_greed_diff`/`stock_divergence` 属市场级因子——移出截面因子池（改 regime 输入/组合层因子，参照 static 政策因子不参与截面 IC）；②`news_direction` 在 news_scope=market 时标注"市态级降级，不计算截面 IC"，接入 ETF 级舆情（板块新闻→成分 ETF 映射）后恢复 | 截面因子池无宏观单值因子；因子页 reason 明示"市场级因子不参与截面 IC" |
 
 ### P2（质量/体验）
 | # | 问题 | 方案 | 验收 |
@@ -262,6 +298,8 @@ watchlist 29.9s 与 O9 验收④"<1s"差距 30 倍，且 verify_e2e 对该端点
 | P2-5 | MACD histogram 冗余 | indicators 接口截断历史数组（如仅返回末值/短序列） | 响应体积下降 |
 | P2-6 | mootdx 探针误报 | source_health 对 mootdx 做实测拉取（或 bestip 未配置时标 unavailable） | 探针状态与实测一致 |
 | P2-7 | 镜像携带历史日志 + 预热产物不可取回 | backend/.dockerignore 排除 logs/；`./logs` 加入 volume 挂载（预热产物直接落宿主可见） | 镜像体积下降；预热报告宿主可见 |
+| P2-8 | 前端"无数据"口径：7 项无 IC 值 vs summary 计数 6（§6.5.1 触发） | 因子行区分展示：no_data（数据源缺失，标 reason）与 warn（弱 IC，标 IC 值+阈值）；summary 卡片加"待关注（warn）"独立计数 | 页面 6 无数据 + 1 待关注 与 summary 一致，reason tooltip 可见 |
+| P2-9 | vol_ratio 弱 IC=0.001（§6.5.1-D） | 核对 IC 计算口径（横截面/时序、窗口、未来收益对齐），确认非方法偏差；确认后按 O6 淘汰线处理（|IC|<0.02 → warn → 降权/淘汰） | vol_ratio 状态与 IC 口径一致（warn 且 reason 含阈值说明，或按 O6 淘汰） |
 
 ### P3（测试防护补强，防再犯）
 
@@ -273,6 +311,8 @@ watchlist 29.9s 与 O9 验收④"<1s"差距 30 倍，且 verify_e2e 对该端点
 | P3-4 | 新增 `docker-smoke` 脚本（compose up + 容器内 IPv4 探测 + 关键端点冒烟），进 CI/发布门禁 | 容器环境 C1-C5 类问题零漏检 |
 | P3-5 | 前端标的分析组件补"SSE STREAM_ERROR → 分类失败 + 重试"交互测试 | O24 类回归在组件层可拦 |
 | P3-6 | **诊断开关回滚**：`PROFILE_WARMUP=1` 本轮注入 prod backend 属诊断残留——常态运行前回滚该行（dev 侧保留），需要时用 `docker compose run -e PROFILE_WARMUP=1` 临时注入 | prod 无 profiler 开销；产物仅诊断期产生 |
+| P3-7 | IOPV 链纯函数单测（§6.5.1-E）：`_fetch_iopv_from_sina/qq/em` + `fetch_etf_net_value` 用 mock 响应文本（含 GBK 字节、无 f236 等反例）断言解析结果 | 4 处解析 bug 类回归零漏检；测试含"接口无 IOPV 字段""GBK 中文""key 不匹配"反例 |
+| P3-8 | 因子数据完整性契约门禁：verify_e2e 新增因子断言——no_data ≤2 且 reason 分类正确（数据源缺失/截面无差异/样本不足 三类文案齐备）；`fetch_fund_nav` 返回类型契约断言 | 因子页"7 个没数据"类回归必 FAIL；契约两端类型不匹配必拦 |
 
 ---
 
@@ -280,8 +320,9 @@ watchlist 29.9s 与 O9 验收④"<1s"差距 30 倍，且 verify_e2e 对该端点
 
 - 前端（Lighthouse 90-100、零 console error、388 单测绿）与设计引擎主体（O18/O19/O22/O26 等 12 项修复确认 + O3/O10 未复现）状态良好；
 - **当前阻塞项**：O24 回归（标的分析全挂，P0-1）、容器内 EM 源（P0-2）、watchlist 29.9s（P0-4）、策略检查全 hold 模板（P0-5）；
+- **因子模型 7 个无数据因子**：非数据源问题——IOPV 链 4 处代码 bug（P0-6/P0-7）、benchmark/shares 依赖链（P1-8/P1-9）、sentiment 设计缺陷（P1-10）为修复主力，单测与完整性门禁（P3-7/P3-8）防再犯；
 - 基础设施层面，历轮"宿主验证"掩盖了容器环境的 5 个基础问题（C1-C5），P3-4（docker 冒烟门禁）是防再犯的关键投入；
-- 本方案未实施，等待 review 至实施标准。
+- 本方案未实施（P0-P3 共 34 项），等待 review 至实施标准。
 
 ---
 
@@ -289,4 +330,5 @@ watchlist 29.9s 与 O9 验收④"<1s"差距 30 倍，且 verify_e2e 对该端点
 
 1. `docker-compose.yml`：backend-dev command 改 list 形式（修 C1）；prod backend 加 `PROFILE_WARMUP=1`（诊断）；两处 `--host` 容器内改 0.0.0.0（修 C3）；
 2. `backend/Dockerfile`：CMD 注释移到独立行（修 C2）+ 容器内 0.0.0.0（修 C3）；
-3. 诊断脚本/产物：`diag/` 下 run_design_check.py / run_market_analysis.py / run_hot_watchlist.py / run_step678.py / walk_frontend.cjs / check_round8_extra.py 等，产物在 `diag/out/`。
+3. 诊断脚本/产物：`diag/` 下 run_design_check.py / run_market_analysis.py / run_hot_watchlist.py / run_step678.py / walk_frontend.cjs / check_round8_extra.py 等，产物在 `diag/out/`；
+4. **IOPV 链专项诊断脚本**（§6.5.1，宿主复验用）：`diag/iopv_probe.py` / `iopv_parse.py` / `iopv_parse2.py`（实测 sina/qq/em 三源响应 + 解析函数输出，定位 4 处解析 bug）。
