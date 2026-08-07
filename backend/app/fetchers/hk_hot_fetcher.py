@@ -28,7 +28,16 @@ _EM_HOSTS = ("push2.eastmoney.com", EM_PUSH_HOST)
 _EM_FALLBACK_SECONDS = 60
 _EM_FAIL_STREAK = 3
 
-_URL = "http://{host}/api/qt/clist/get?pn=1&pz=5000&po=1&np=1&fs=m:128&fields=f12,f14,f2,f3,f6,f100&fid=f6"
+# fltt=2&invt=2：东财 clist/get 不带该参数时 f2（价格）/f3（涨跌幅）返回 ×100 整数
+# （盈富基金 f2=26160/f3=62 实为 26.16 港元/+0.62%）——港股热门个股与板块
+# 热度曾全量 ×100 显示（用户反馈 round9 §7 港股涨跌幅异常），加参数修正语义。
+_URL = "http://{host}/api/qt/clist/get?pn=1&pz=5000&po=1&np=1&fs=m:128&fields=f12,f14,f2,f3,f6,f100&fid=f6&fltt=2&invt=2"
+
+# 60s TTL 缓存 + last_ok：板块/个股两个端点各自触发 pz=5000 全量拉取，
+# 同一分钟内多次大请求会触发东财限流（时好时坏 → 热门个股偶发 0 条）；
+# 缓存共享避免重复拉取，失败时回退 last_ok 保证不空。
+_HK_ROWS_CACHE: dict = {"ts": 0.0, "rows": [], "last_ok": []}
+_HK_ROWS_TTL = 60.0
 
 
 def _pick_host() -> str:
@@ -61,7 +70,14 @@ def _record_success(host: str) -> None:
 
 
 def _fetch_hk_rows() -> list[dict]:
-    """真实拉取港股全量 spot（push2 优先 → push2delay 兜底）。"""
+    """真实拉取港股全量 spot（push2 优先 → push2delay 兜底）。
+
+    60s TTL 缓存共享（板块/个股端点复用）+ 失败回退 last_ok——
+    东财 pz=5000 大请求限流严格，无缓存时同分钟两次拉取第二次必空。
+    """
+    now = time.time()
+    if now - _HK_ROWS_CACHE["ts"] < _HK_ROWS_TTL:
+        return _HK_ROWS_CACHE["rows"]
     from ..utils.proxy import no_proxy
     import requests as _req
     headers = {
@@ -78,12 +94,17 @@ def _fetch_hk_rows() -> list[dict]:
             diff = (data.get("data") or {}).get("diff") or []
             if diff:
                 _record_success(host)
+                _HK_ROWS_CACHE.update({"ts": now, "rows": diff, "last_ok": diff})
                 return diff
             last_exc = ValueError(f"empty diff from {host}")
         except Exception as e:  # noqa: BLE001
             last_exc = e
             _record_failure(host)
             logger.warning("[hk_hot] fetch via %s failed: %s", host, e)
+    # 全失败 → last_ok 兜底（保证板块/个股端点不空），10s 后允许重试
+    if _HK_ROWS_CACHE["last_ok"]:
+        _HK_ROWS_CACHE["ts"] = now - (_HK_ROWS_TTL - 10)
+        return _HK_ROWS_CACHE["last_ok"]
     if last_exc:
         logger.warning("[hk_hot] all hosts failed: %s", last_exc)
     return []

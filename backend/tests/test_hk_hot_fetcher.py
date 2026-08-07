@@ -47,6 +47,12 @@ class TestHkHotFetcher:
         assert stocks[1]["symbol"] == "00700"
         assert stocks[2]["symbol"] == "00941"
 
+    def test_url_has_fltt2(self):
+        """round9 §7: 东财 clist 不带 fltt=2 时 f2/f3 返回 ×100 整数（盈富基金
+        f2=26160/f3=62 实为 26.16 港元/+0.62%）→ 港股涨跌幅曾全量 ×100。
+        _URL 必须带 fltt=2&invt=2，防回归。"""
+        assert "fltt=2" in hk._URL and "invt=2" in hk._URL
+
     def test_route_hk_returns_plates(self, monkeypatch):
         """F16: 路由 HK → 港股行业热点（mock 网络响应注入）。"""
         def _fake_fetch_rows():
