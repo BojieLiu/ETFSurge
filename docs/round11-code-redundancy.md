@@ -12,7 +12,7 @@
 
 - **冗余总量**：可归档/删除/合并约 **1.8–1.9 万行代码** + **4.8–5.7 MB 文件体积**（含重复缓存 ~308 KB；不含 docs/archived 已有归档），占后端 app（~4.3 万行）+ 前端 src（~1.6 万行）+ 测试（~3.1 万行）合计的 **17–20%**；
 - **分布**：后端业务 ~2,300 行 / 前端 ~2,000–2,400 行 / 测试 ~3,200–3,900 行 / 杂项脚本+契约+临时 ~10,300–10,800 行 + 体积 ~4.8–5.7 MB（含缓存双份）；
-- **风险分级**：P0 纯删除（约 **1 万行**，含一次性脚本/diag 归档）→ P1 低风险抽取合并（约 1,300 行）→ P2 需产品/行为确认（约 700 行 + 2 项行为修复）→ P3 治理门禁（防再犯）；
+- **风险分级**：P0 纯删除（约 **1 万行**，含一次性脚本/diag 归档）→ P1 低风险抽取合并（约 1,300 行）→ P2 需产品/行为确认（约 650 行 + 2 项行为修复，**决策已定稿**）→ P3 治理门禁（防再犯）；
 - **5 项风险**（§6）：3 项 P0 级（空 DB 壳、diag 未入 gitignore、agents.md 过时）+ 2 项 P1 级注意（TTL 不一致、/indices/meta 误删风险）。
 
 ### 0.2 审计初报误判纠正（二次抽查验证后）
@@ -28,7 +28,7 @@
 |---|---|---|---|
 | **P0** | 纯删除（含联动删测试）：生产无引用文件（12 个，其中 design_quality 保留）、前端 14 个死组件/composables、废弃端点、空测试、一次性脚本、diag/ 残留、空 DB 壳 | ~1 万行 + 4.8–5.7 MB（含脚本/diag 归档） | 低（删测试需联动，先跑全量测试确认） |
 | **P1** | 低风险抽取合并：5 处 `_safe` 族、`_cached`×4、三源 `_sync_fetch`、ws 样板、`utils/format.js`、样式统一、测试 6+1 组合并、verify_e2e 去重、契约合并 | 表头 ~1,300 行（**仅指 P1-1..7 代码抽取；测试/契约合并量另计 ~6,400，见 §7 口径说明**） | 低（改调用点需回归） |
-| **P2** | 需产品/行为确认：FactorICView/FactorModelView 合并、useWarmupStatus 单例、App.vue 假连接、connectTaskWs 抽 useTaskWS、hk_hot_fetcher 走 SourceRegistry、缓存路径统一、scaffold 因子删除决策 | ~700 行 + 2 项行为修复 | 中（行为变化） |
+| **P2** | 需产品/行为确认（**2026-08-08 决策定稿**）：FactorICView/FactorModelView 合并（删独立路由）、useWarmupStatus 单例、App.vue 假连接、connectTaskWs 抽 useTaskWS、hk_hot_fetcher 走 SourceRegistry、缓存路径统一（根 data/）、scaffold 注释清理（函数保留） | ~650 行 + 2 项行为修复 | 中（行为变化） |
 | **P3** | 治理门禁（防再犯）：函数级 AST 未引用扫描进 CI、purgeCSS 死样式验证、.env.example 同步、diag/ 入 .gitignore、契约-路由一致性门禁 | 0 行（新增门禁） | 低（新增检查） |
 
 ---
@@ -99,7 +99,7 @@
 ### 2.5 双轨/遗留（保留或待决策）
 
 - `engine/` 纯函数引擎 vs 旧 LLM 路径：**新路径活跃**（strategy_design.py:14-17 调用 engine），旧路径已在 analysis.py:433-435 标注废弃并迁移到 `/portfolio/design-async`——无无人调用的旧引擎，仅废弃端点残留（§2.4 已覆盖）；
-- `factor_registry.py:403` `Scaffolding functions（保留待后续数据源接入）`：约 40 行，**需业务确认**是否仍计划接入，确认不接入则删（归 P2）；
+- `factor_registry.py:403` `Scaffolding functions` 标注——**⚠️ 2026-08-08 复核修正：该区内 `_compute_premium_discount`/`_compute_tracking_error` 已在 :567-568 注册进 `_FACTOR_FUNCTIONS` 且在用（round10 §5.5 确认折溢价率 IC=0.1321 生效），非待接入脚手架**。改为：保留函数，仅清理误导性的 `# --- Scaffolding functions ---` 注释标题（1 行，见 P2-7）；
 - **遗留待验证**（大文件函数级死代码，详见 §9——此处不展开）：`routers/admin.py`、`monitor/source_events.py`、`tasks/task_manager.py`、`analysis/llm.py`（82KB）、`factor_registry.py`、`market_data_hub.py`、`portfolio_service.py`——P3-1 的 AST 门禁跑通后自动覆盖。
 
 ---
@@ -304,7 +304,7 @@
 > **方案行数归口**（与 §8 对应）：
 > - **P0**（§8.1）≈ **1 万行** = P0-1（~1,644 联动删）+ P0-2（~1,700）+ P0-3（~320）+ P0-4（~100）+ **P0-5 归档（~6,300，含 scripts 1,363 + 根目录 1,506 + diag 3,000 + data/_diag 550 等）** + P0-6（契约，少量）；
 > - **P1**（§8.2）**实际冗余远超表头「~1,300 行」**——P1-8 测试合并 2,600 + P1-9 verify_e2e 300 + P1-10 契约 3,500–4,000 即 >6,000；「~1,300」仅指 P1-1..7 代码抽取合并（`_cached`/`_safe`/format.js 等）的净行数，**测试/契约合并的减少量在 §7 分项中已计入**（测试 3,200-3,900、契约 3,500-4,000）。**排期口径**：P1 总工作量按「P1-1..7 代码抽取 ~1,300 + P1-8 测试合并 ~2,600 + P1-9 ~300 + P1-10 ~3,500」执行，表头「~1,300」为笔误级误导，实施时以本说明为准。
-> - **P2/P3**：行为变更与门禁，不新增冗余清理量。
+> - **P2/P3**：行为变更与门禁。**P2 行数 700→650（2026-08-08 决策定稿）**：P2-7 从「删 scaffold 40 行」修正为「仅清注释 1 行」（函数在用，审计误判已修正），其余决策（P2-1 合并/删路由、P2-2 单例、P2-3 接真实、P2-5 根 data/、P2-6 SourceRegistry、P2-4 重构）均已定稿，见 §8.3。
 
 ---
 
@@ -340,17 +340,19 @@
 | P1-9 | verify_e2e 去重 | 按 §4.3 表执行（search 8→2、designs 9→3 等）；删 section_snapshot_health | verify_e2e 全 PASS；行数 ~2278→~1970 |
 | P1-10 | 契约合并 | search/search-sorting 合并、sectors 三份合并、watchlist/watchlist-v2 合并、source-events 移 admin/ | 契约-路由一致性通过 |
 
-### 8.3 P2 需产品/行为确认（约 700 行 + 2 项行为修复）
+### 8.3 P2 需产品/行为确认（约 650 行 + 2 项行为修复）——✅ 2026-08-08 决策定稿（用户采纳）
 
-| # | 内容 | 决策点 | 细化步骤 | 验收 |
+> **决策记录**：P2-1 合并到 FactorModelView 并删独立路由；P2-2 用 Pinia store 单例（接受进页不再强制刷新）；P2-3 接真实 wsConnected；P2-5 统一到根 data/；P2-6 走 SourceRegistry；P2-4 默认执行；**P2-7 已修正——不删函数，仅清注释（审计误判，函数在用）**。
+
+| # | 内容 | 决策（已定稿） | 细化步骤 | 验收 |
 |---|---|---|---|---|
-| P2-1 | FactorICView/FactorModelView 合并 | 产品确认保留哪个 UI（建议 FactorModelView 为唯一实现） | 保留 FactorModelView；FactorICView 路由 `/factor-ic` 改复用或移除；迁移特有功能（如有） | 因子页功能不丢；build 绿 |
-| P2-2 | useWarmupStatus 单例化 | 确认 warmup 轮询收敛到单实例 | App.vue 与 Dashboard.vue 共用模块级单例或 Pinia store | warmup 请求量减半；行为一致 |
-| P2-3 | App.vue 假「已连接」 | 确认接入真实 wsConnected 或删除 | connectionStatus 改读 stores/market.js wsConnected | 导航栏状态真实 |
-| P2-4 | connectTaskWs 抽 useTaskWS | 确认重构 | App.vue:201-296 抽 composable 与 useNewsWS 对齐 | 行为不变；代码一致 |
-| P2-5 | 缓存路径统一 | 确认统一到根 data/（DATA_DIR 或 CACHE_DIR） | config.py 定 CACHE_DIR；etf_scanner/market_service/main.py 改路径；删 backend/data 双份 + 空 DB 壳 | 本地/容器路径一致；无双份 |
-| P2-6 | hk_hot_fetcher 走 SourceRegistry | 确认熔断语义统一 | `_pick_host/_record_failure/_record_success` 改走 registry.route | 熔断行为一致；hk 单测绿 |
-| P2-7 | scaffold 因子删除 | 业务确认不再接入数据源则删 | factor_registry.py:403 附近 40 行确认后删 | 确认后删除 |
+| P2-1 | FactorICView/FactorModelView 合并 | **保留 FactorModelView 为唯一实现，删独立路由 `/factor-ic`**；⚠️ 复核修正：两组件**数据源不同**（ModelView 用 `getActive`、ICView 用 `getIC`），合并非同源去重，需把 IC 统计块并入 ModelView | ① 列两组件功能差异（ModelView 独有：分类折叠/IC 柱状图/reason tooltip；ICView 独有：重试按钮/简单表格）；② ModelView 增加 IC 统计展示块（复用 `factorsApi.getIC`）；③ 删 FactorICView.vue + router 路由；④ 迁移「重试」到 ModelView | 因子页功能不丢（active 列表 + IC 统计都在 ModelView）；build 绿 |
+| P2-2 | useWarmupStatus 单例化 | **Pinia store 共享单实例**（接受进页不再强制立即刷新语义） | 新建 warmup store；App.vue 与 Dashboard.vue 改读 store；仅 store 内跑一个 5s 轮询 | warmup 请求量减半；行为一致 |
+| P2-3 | App.vue 假「已连接」 | **接真实 wsConnected**（stores/market.js） | connectionStatus 改读 wsConnected；连接中断时显示「未连接」 | 导航栏状态真实 |
+| P2-4 | connectTaskWs 抽 useTaskWS | **默认执行（纯重构）** | App.vue:201-296 抽 composable 与 useNewsWS 对齐 | 行为不变；代码一致 |
+| P2-5 | 缓存路径统一 | **统一到根 data/**（CACHE_DIR 环境变量） | config.py 定 CACHE_DIR（默认根 data/）；etf_scanner/market_service/main.py 改路径；删 backend/data 双份缓存 + 空 portfolio.db 壳 | 本地/容器路径一致；无双份 |
+| P2-6 | hk_hot_fetcher 走 SourceRegistry | **统一熔断语义**（保留现有冷却参数） | `_pick_host/_record_failure/_record_success` 改走 registry.route；回归港股板块 | 熔断行为一致；hk 单测绿 |
+| P2-7 | scaffold 注释清理（原「因子删除」已修正） | **不删函数**——`_compute_premium_discount`/`_compute_tracking_error` 已在 _FACTOR_FUNCTIONS 注册在用；仅清误导性注释标题 | factor_registry.py:403 删除 `# --- Scaffolding functions (保留待后续数据源接入) ---` 注释行，改为说明「已注册在用」 | 注释不再误导；函数保留 |
 
 ### 8.4 P3 治理门禁（防再犯）
 
@@ -408,3 +410,19 @@
 - **L-4**：§4.4 复制实现 2 处补「归属 P1-8」；
 - **L-6**：§0.3/§8.2 P1 表头补「~1,300 仅指代码抽取，测试/契约另计」提示；
 - **L-2/L-5 归档**（措辞级，round12 复核）：L-2 占比 17-20% vs 20-21% 约数口径；L-5 §2.5 与 §9 文件列表仍重叠（已有「详见 §9」交叉引导，可接受）。
+
+### 第四轮（P2 决策定稿，2026-08-08 用户逐项采纳）
+
+与用户逐项讨论 P2 的 7 个决策点并全部定稿（§8.3 已更新为定稿版）：
+
+| 项 | 定稿决策 | 备注 |
+|---|---|---|
+| P2-1 | 合并到 FactorModelView，删独立路由 `/factor-ic` | ⚠️ 复核修正：两组件**数据源不同**（ModelView=`getActive`、ICView=`getIC`），合并非同源去重，需把 IC 统计块并入 ModelView |
+| P2-2 | Pinia store 单实例 | 接受「进页不再强制立即刷新」语义 |
+| P2-3 | 接真实 wsConnected（stores/market.js） | 删硬编码 'connected' |
+| P2-4 | 默认执行（纯重构抽 useTaskWS） | 无需产品决策 |
+| P2-5 | 统一缓存到根 data/（CACHE_DIR） | 删 backend/data 双份 + 空 DB 壳 |
+| P2-6 | hk_hot_fetcher 走 SourceRegistry | 保留现有冷却参数 |
+| P2-7 | **不删函数，仅清注释标题** | ⚠️ 审计误判修正：`_compute_premium_discount`/`_compute_tracking_error` 已在 `_FACTOR_FUNCTIONS` 注册在用（round10 §5.5 折溢价率 IC=0.1321 生效） |
+
+**连带修正**：§2.5 scaffold 描述（函数在用，非待接入）、§0.1/§0.3/§7 P2 行数 700→650（P2-7 删 40 行→清 1 行注释）。方案总数不变（P2 仍 7 项），总量口径不变（§7 审计冗余量不随方案行数变化）。
