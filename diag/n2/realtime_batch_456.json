@@ -1,0 +1,182 @@
+[
+  {
+    "symbol": "510300",
+    "name": "沪深300ETF华泰柏瑞",
+    "price": 4.751,
+    "change_pct": 0.89,
+    "change_amount": 0.042,
+    "volume": 9435356.0,
+    "turnover": 447469.0,
+    "asset_type": "A"
+  },
+  {
+    "symbol": "159338",
+    "name": "中证A500ETF国泰",
+    "price": 1.245,
+    "change_pct": 1.14,
+    "change_amount": 0.014,
+    "volume": 29726822.0,
+    "turnover": 369112.0,
+    "asset_type": "A"
+  },
+  {
+    "symbol": "510050",
+    "name": "上证50ETF华夏",
+    "price": 3.066,
+    "change_pct": 1.22,
+    "change_amount": 0.037,
+    "volume": 5134712.0,
+    "turnover": 156699.0,
+    "asset_type": "A"
+  },
+  {
+    "symbol": "563020",
+    "name": "红利低波ETF易方达",
+    "price": 1.151,
+    "change_pct": -0.78,
+    "change_amount": -0.009,
+    "volume": 2827663.0,
+    "turnover": 32552.0,
+    "asset_type": "A"
+  },
+  {
+    "symbol": "562870",
+    "name": "证券ETF嘉实",
+    "price": 0.93,
+    "change_pct": 0.11,
+    "change_amount": 0.001,
+    "volume": 123600.0,
+    "turnover": 1146.0,
+    "asset_type": "A"
+  },
+  {
+    "symbol": "589560",
+    "name": "科创人工智能ETF汇添富",
+    "price": 1.018,
+    "change_pct": 1.7,
+    "change_amount": 0.017,
+    "volume": 51106.0,
+    "turnover": 514.0,
+    "asset_type": "A"
+  },
+  {
+    "symbol": "589960",
+    "name": "科创新能源ETF易方达",
+    "price": 0.876,
+    "change_pct": 2.1,
+    "change_amount": 0.018,
+    "volume": 350385.0,
+    "turnover": 3036.0,
+    "asset_type": "A"
+  },
+  {
+    "symbol": "518880",
+    "name": "黄金ETF华安",
+    "price": 8.892,
+    "change_pct": 1.1,
+    "change_amount": 0.097,
+    "volume": 6963895.0,
+    "turnover": 615412.0,
+    "asset_type": "A"
+  },
+  {
+    "symbol": "511090",
+    "name": "30年国债ETF鹏扬",
+    "price": 118.735,
+    "change_pct": 0.36,
+    "change_amount": 0.425,
+    "volume": 396753.0,
+    "turnover": 470269.0,
+    "asset_type": "A"
+  },
+  {
+    "symbol": "510500",
+    "name": "中证500ETF南方",
+    "price": 7.987,
+    "change_pct": 1.98,
+    "change_amount": 0.155,
+    "volume": 3700689.0,
+    "turnover": 292672.0,
+    "asset_type": "A"
+  },
+  {
+    "symbol": "562000",
+    "name": "A100ETF华宝",
+    "price": 0.615,
+    "change_pct": 0.82,
+    "change_amount": 0.005,
+    "volume": 119249.0,
+    "turnover": 735.0,
+    "asset_type": "A"
+  },
+  {
+    "symbol": "562600",
+    "name": "医疗器械ETF华夏",
+    "price": 0.787,
+    "change_pct": 2.47,
+    "change_amount": 0.019,
+    "volume": 407198.0,
+    "turnover": 3162.0,
+    "asset_type": "A"
+  },
+  {
+    "symbol": "562990",
+    "name": "碳中和ETF易方达",
+    "price": 0.993,
+    "change_pct": 1.02,
+    "change_amount": 0.01,
+    "volume": 67255.0,
+    "turnover": 665.0,
+    "asset_type": "A"
+  },
+  {
+    "symbol": "562950",
+    "name": "消费电子ETF易方达",
+    "price": 1.632,
+    "change_pct": 3.55,
+    "change_amount": 0.056,
+    "volume": 612656.0,
+    "turnover": 9852.0,
+    "asset_type": "A"
+  },
+  {
+    "symbol": "589720",
+    "name": "科创创新药ETF国泰",
+    "price": 0.952,
+    "change_pct": 8.55,
+    "change_amount": 0.075,
+    "volume": 14304702.0,
+    "turnover": 131256.0,
+    "asset_type": "A"
+  },
+  {
+    "symbol": "589420",
+    "name": "科创芯片设计ETF永赢",
+    "price": 0.796,
+    "change_pct": 3.78,
+    "change_amount": 0.029,
+    "volume": 167685.0,
+    "turnover": 1316.0,
+    "asset_type": "A"
+  },
+  {
+    "symbol": "159915",
+    "name": "创业板ETF易方达",
+    "price": 3.586,
+    "change_pct": 1.3,
+    "change_amount": 0.046,
+    "volume": 21234975.0,
+    "turnover": 761315.0,
+    "asset_type": "A"
+  },
+  {
+    "symbol": "588000",
+    "name": "科创50ETF华夏",
+    "price": 1.84,
+    "change_pct": 2.56,
+    "change_amount": 0.046,
+    "volume": 42528943.0,
+    "turnover": 774023.0,
+    "asset_type": "A"
+  }
+]

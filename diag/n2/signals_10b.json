@@ -1,0 +1,97 @@
+{
+  "159338": {
+    "signal": "hold",
+    "score": -0.5,
+    "reasons": [
+      "MACD偏多",
+      "MA5<MA20 空头排列"
+    ],
+    "data_available": true
+  },
+  "510880": {
+    "signal": "buy",
+    "score": 2.0,
+    "reasons": [
+      "MACD金叉多头",
+      "MA5>MA20 多头排列"
+    ],
+    "data_available": true
+  },
+  "159545": {
+    "signal": "sell",
+    "score": -1.5,
+    "reasons": [
+      "MACD偏空",
+      "MA5<MA20 空头排列"
+    ],
+    "data_available": true
+  },
+  "159516": {
+    "signal": "hold",
+    "score": 0.5,
+    "reasons": [
+      "RSI=39.1 偏弱",
+      "MACD偏多",
+      "MA5<MA20 空头排列"
+    ],
+    "data_available": true
+  },
+  "159992": {
+    "signal": "hold",
+    "score": -1.0,
+    "reasons": [
+      "RSI=61.7 偏强",
+      "MACD金叉多头",
+      "MA5<MA20 空头排列"
+    ],
+    "data_available": true
+  },
+  "513120": {
+    "signal": "hold",
+    "score": 1.0,
+    "reasons": [
+      "RSI=64.9 偏强",
+      "MACD金叉多头",
+      "MA5>MA20 多头排列"
+    ],
+    "data_available": true
+  },
+  "513010": {
+    "signal": "buy",
+    "score": 2.0,
+    "reasons": [
+      "MACD金叉多头",
+      "MA5>MA20 多头排列"
+    ],
+    "data_available": true
+  },
+  "512000": {
+    "signal": "sell",
+    "score": -1.5,
+    "reasons": [
+      "MACD死叉空头",
+      "布林带宽窄(3.9%) 变盘前兆",
+      "MA5<MA20 空头排列"
+    ],
+    "data_available": true
+  },
+  "159869": {
+    "signal": "buy",
+    "score": 2.0,
+    "reasons": [
+      "MACD金叉多头",
+      "MA5>MA20 多头排列"
+    ],
+    "data_available": true
+  },
+  "518880": {
+    "signal": "hold",
+    "score": 1.0,
+    "reasons": [
+      "RSI=64.8 偏强",
+      "MACD金叉多头",
+      "MA5>MA20 多头排列"
+    ],
+    "data_available": true
+  }
+}

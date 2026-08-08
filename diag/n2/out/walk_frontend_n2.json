@@ -1,0 +1,53 @@
+{
+  "/": {
+    "page": "Dashboard",
+    "elapsed_s": "12.0",
+    "consoleErrors": [],
+    "failedReqs": []
+  },
+  "/market-analysis": {
+    "page": "行情分析",
+    "elapsed_s": "12.0",
+    "consoleErrors": [],
+    "failedReqs": []
+  },
+  "/portfolio-analysis": {
+    "page": "组合管理",
+    "elapsed_s": "12.0",
+    "consoleErrors": [],
+    "failedReqs": [
+      "FAIL http://localhost/api/v1/portfolio/tasks?limit=10&offset=0",
+      "FAIL http://localhost/api/v1/market/watchlist?limit=100&offset=0"
+    ]
+  },
+  "/news": {
+    "page": "资讯",
+    "elapsed_s": "12.0",
+    "consoleErrors": [],
+    "failedReqs": []
+  },
+  "/factor-ic": {
+    "page": "因子IC",
+    "elapsed_s": "12.0",
+    "consoleErrors": [],
+    "failedReqs": []
+  },
+  "/admin/config": {
+    "page": "配置",
+    "elapsed_s": "12.0",
+    "consoleErrors": [],
+    "failedReqs": []
+  },
+  "/source-monitor": {
+    "page": "数据源监控",
+    "elapsed_s": "12.0",
+    "consoleErrors": [],
+    "failedReqs": []
+  },
+  "/token-monitor": {
+    "page": "Token监控",
+    "elapsed_s": "12.0",
+    "consoleErrors": [],
+    "failedReqs": []
+  }
+}
