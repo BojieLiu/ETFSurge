@@ -130,13 +130,26 @@ def classify_news_level(title: str, content: str = "") -> int:
 
     F3-1 步骤D: 增加 content 双输入——正文关键词（如「军事行动」）同样计级，
     取标题与正文中的最高命中级别。
+
+    P2-1 (round9 §6.4): 分级校准——命中 L5/L4 关键词但标题含弱化词
+    （或将/可能/传闻/考虑/讨论/有望/预期/拟）→ 降一级（L5→L4，L4→L3）。
+    旧实现 L5 占 50%（实测 {2:7,3:1,4:1,5:9}、无 L1），「或将」「有望」类
+    未实现事件被虚高标注为重大/利好。
     """
+    # 弱化词降级（P2-1）：未实现/推测性事件不标重大或利好
+    # 弱化词降级（P2-1）：未实现/推测性事件不标重大或利好。
+    # 注意：不含「预期」——「业绩超预期」是已实现的利好词（L4 词表），
+    # 「预期」单独出现是中性，不能降级已确认的利好。
+    _WEAKENERS = ("或将", "可能", "传闻", "考虑", "讨论", "有望", "据悉", "拟")
     t = ((title or "") + " " + (content or "")[:200]).lower()
     for level in (5, 4, 3, 2):
         # O7 (round7 §7 P9): 关键词统一 lower 再匹配——旧代码 t 已 lower 但
         # 词表保留原始大小写（CPI/PMI/OPEC/FDA 等），大写英文词永不命中 →
         # 国际重磅新闻全 L1（「美国5月CPI…」命中不到 "CPI"）。lower 后修复。
         if any((k.lower() if isinstance(k, str) else k) in t for k in _LEVEL_KEYWORDS[level]):
+            if level >= 4 and any(w in (title or "") for w in _WEAKENERS):
+                # P2-1: 弱化词降级（L5→L4，L4→L3），不越过 3
+                return max(level - 1, 3)
             return level
     return 1
 
@@ -181,13 +194,15 @@ def fetch_cailian_telegraph(limit: int = 30) -> list[dict[str, Any]]:
         level = _level_of(r, title)
         if level_boost:
             level = min(level + level_boost, 5)
+        # P2-1: stars 走独立「新鲜度」维度（news_fetcher._compute_stars），与 level 解耦
+        from .news_fetcher import _compute_stars
         return {
             "title": title,
             "content": r.get("content", ""),
             "time": r.get("time", ""),
             "source": "财联社",
             "level": level,
-            "stars": level,
+            "stars": _compute_stars(level, r.get("time", "")),
         }
 
     def _p() -> list[dict[str, Any]]:

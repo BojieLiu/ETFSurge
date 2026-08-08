@@ -155,6 +155,9 @@ async def _pipeline_body(mgr, task_id: int) -> dict:
         async with async_session() as db:
             record = StrategyCheckRecord(
                 capital=capital,
+                # P2-4 (round9 §4.2-4): 持久化 portfolio_type——模型有列但 worker 一直未写，
+                # 详情接口返回 None（旧实现丢失查询条件，专业投资者无法区分场内/场外检查）
+                portfolio_type=portfolio_type,
                 summary=result.get("summary", ""),
                 market_regime=result.get("market_regime", ""),
                 suggestions_json=json.dumps(

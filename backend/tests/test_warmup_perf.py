@@ -27,22 +27,23 @@ class TestFundNavCache:
         import pandas as pd
         df = pd.DataFrame([{"单位净值": 1.234, "日增长率": 0.56}])
 
-        # 首次拉取：run_in_thread 模拟 akshare 成功
+        # 首次拉取：run_in_thread 模拟 akshare 成功（round9 P0-7: 契约统一为 dict）
         with patch.object(cm, "run_in_thread", side_effect=[df]) as mock_rt:
             first = fetch_fund_nav("022449")
-            assert first == (1.234, 0.56)
+            assert first == {"nav": 1.234, "daily_change_pct": 0.56, "nav_date": None}
             assert mock_rt.call_count == 1
 
         # 第二次调用应命中 24h 缓存（run_in_thread 不再被调用）
         with patch.object(cm, "run_in_thread", side_effect=RuntimeError("不应触发网络")) as mock_rt2:
             second = fetch_fund_nav("022449")
-            assert second == (1.234, 0.56)
+            assert second == {"nav": 1.234, "daily_change_pct": 0.56, "nav_date": None}
             mock_rt2.assert_not_called()
 
     def test_failure_not_cached(self):
         """R3 回归: 失败结果不写缓存（下次重试）。"""
         with patch.object(cm, "run_in_thread", side_effect=RuntimeError("down")), \
-             patch.object(cm, "fund_fetcher") as _ff:
+             patch.object(cm, "fund_fetcher") as _ff, \
+             patch.object(cm, "_fetch_ttj_lsjz", return_value=[]):
             _ff.fetch_fund_nav.return_value = None
             result = fetch_fund_nav("999999")
         assert result is None

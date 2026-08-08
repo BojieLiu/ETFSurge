@@ -71,11 +71,12 @@ async def test_off_exchange_price_gt_zero_via_nav():
              asset_type="A", portfolio_type="off_exchange",
              target_weight=0.3, tracked_index="159338"),
     ]
-    nav = (1.2345, 0.56)
+    # round9 P0-7: fetch_fund_nav 契约统一为 dict
+    nav = {"nav": 1.2345, "daily_change_pct": 0.56, "nav_date": "2026-08-07"}
     with patch("app.services.market_data_hub.market_data_hub.get_fund_nav", return_value=nav), \
          patch("app.services.market_data_hub.market_data_hub.get_a_stock_batch", return_value=[]), \
          patch("app.services.market_data_hub.market_data_hub.get_us_etf_realtime", return_value=None):
         price_map = await ps.build_price_map(etfs)
 
     assert price_map["022449"][0] > 0
-    assert price_map["022449"] == nav
+    assert price_map["022449"] == (1.2345, 0.56)

@@ -1,4 +1,4 @@
-"""
+﻿"""
 verify_e2e.py — 端到端链路验证（针对运行中的后端服务）
 用法:
   python scripts/verify_e2e.py                    # 运行所有模块
@@ -112,6 +112,15 @@ def section_health(host, port):
                 check(f"预热完成时间 {warmup_total/1000:.1f}s < 20s (gate)", is_ok,
                       f"FAIL: {warmup_total/1000:.1f}s 超过 20s 失败线" if not is_ok else
                       f"WARN: {warmup_total/1000:.1f}s 超过 10s 警告线" if not is_warn else "")
+                # P3-3/P1-4 (round9 §3.3): 墙钟 WARN 线——profiler total_elapsed 覆盖不到
+                # instruments 同步/IC 持久化首轮等段（37.4s 墙钟 vs 12.6s profiler 缺口），
+                # 墙钟仅 WARN 不 FAIL（启动含后台同步任务，曾 839s 假 FAIL 历史）
+                _wall = wd.get("elapsed_seconds") or 0
+                if _wall >= 30:
+                    print(
+                        f"    [WARN] 墙钟预热 {_wall:.1f}s ≥ 30s 阈值"
+                        f"（profiler 覆盖缺口：instruments 同步/IC 持久化未纳入计时，见 §3.3）"
+                    )
             else:
                 check("预热计时器未启用", True, "PROFILE_WARMUP=1 环境变量未设置")
         else:
@@ -273,9 +282,10 @@ def section_market():
         except Exception as e:
             check(f"GET /market/search?market={_mkt}", False, str(e))
 
-    # O13 (round7 §7 P13): 名称维度搜索契约（茅台/apple/腾讯）——keyword 名称模糊匹配
-    # 语义门禁：0 结果 ≠ 代码缺陷时按「数据源冷却/未同步」SKIP 告警（不判 FAIL），
-    # 与 round6 环境类豁免口径一致（akshare/东财冷却时 instruments 表可能未灌入）。
+    # O13 (round7 §7 P13) + P1-2 (round9 §5): 名称维度搜索契约（茅台/apple/腾讯）——
+    # keyword 名称模糊匹配门禁为 FAIL（P1-2 明确 SKIP→FAIL：instruments 表未灌入/
+    # 名称搜索 0 命中 = 数据管道断裂，不得静默豁免；旧注释声称「不判 FAIL」已过时，
+    # 实际断言 _hits > 0 即 FAIL，此处注释对齐代码语义）。
     for _mkt, _kw in [("A", "茅台"), ("HK", "腾讯"), ("US", "apple")]:
         try:
             _t0 = time.time()
@@ -472,8 +482,11 @@ def section_portfolio():
     section("异步策略检查")
 
     try:
+        # P3-11 (round9 §4.5): 触发带 portfolio_type=on_exchange——旧实现裸 {total_capital}
+        # 无法区分场内/场外检查；断言 holdings≥1 且 summary 不含「组合为空」
+        # （#343 孤立空记录误报回归防线）
         r = requests.post(f"{BASE}/api/v1/portfolio/strategy-check-async",
-                          json={"total_capital": 500000}, timeout=30)
+                          json={"total_capital": 500000, "portfolio_type": "on_exchange"}, timeout=30)
         check(f"POST /strategy-check-async -> {r.status_code}", r.status_code == 202)
         if r.status_code == 202:
             task_data = r.json()
@@ -496,6 +509,24 @@ def section_portfolio():
                             check("含 holdings_analysis", True, "同上，LLM 超时保护为预期行为")
                             check("含 market_regime",
                                   isinstance(pd.get("market_regime"), str) and pd["market_regime"] != "")
+                            # P3-11: 非空组合检查——DB 有 10+ 持仓时不得出现「组合为空」
+                            _summary = str(pd.get("summary") or "")
+                            check("summary 不含「组合为空」（P3-11）", "组合为空" not in _summary,
+                                  f"summary={_summary[:60]}" if "组合为空" in _summary else "持仓正常")
+                            # P3-10 (round9 §4.4-1): tech_signal 完整性——holdings 每项带
+                            # tech_signal（真实信号或「数据不可用」标注），前端信号列不空白
+                            _holdings2 = pd.get("holdings_analysis", []) or []
+                            _missing_sig = [h.get("symbol") for h in _holdings2
+                                            if "tech_signal" not in h]
+                            check(f"P3-10 tech_signal 完整性 {len(_holdings2) - len(_missing_sig)}/{len(_holdings2)}",
+                                  not _missing_sig,
+                                  f"缺 tech_signal: {_missing_sig[:5]}" if _missing_sig else "全部带信号字段")
+                            # P3-10: 无「全兑底假正常」——data_quality.fallback_ratio < 1
+                            # （RSI 50/KDJ 50 兑底默认值不计入真实数据，round9 §4.4-3）
+                            _dq = pd.get("data_quality") or {}
+                            _fr = _dq.get("fallback_ratio", 0)
+                            check(f"P3-10 兑底占比 {_fr:.0%} < 100%（非假正常）", _fr < 1.0,
+                                  f"全部因子为兑底默认值（fallback_ratio=1.0）" if _fr >= 1.0 else "存在真实因子")
                             completed = True
 
                             # 输出质量断言 (P3d)
@@ -757,6 +788,39 @@ def section_analysis():
         except Exception as e:
             check(label, False, str(e))
 
+
+    # P3-1 (round9 §5/O24 回归防线): symbol-analysis/stream SSE 契约门禁——O24 回归
+    # （analysis.py 透传 rate_limit_cap，agent 底层 llm_complete_stream 无此参数）导致
+    # 5 类标的全 STREAM_ERROR，而旧 verify_e2e 只测 llm-report/advice 零拦截。
+    # 门禁：HTTP 200 + SSE 流中不得出现 STREAM_ERROR（42.8KB 出文正常态）。
+    _symbol_stream_cases = [
+        ("A股ETF", {"symbol": "510300", "market": "A", "asset_type": "etf"}),
+        ("港股个股", {"symbol": "00700", "market": "HK", "asset_type": "stock"}),
+    ]
+    for _label, _body in _symbol_stream_cases:
+        try:
+            _sr = requests.post(f"{BASE}/api/v1/analysis/symbol-analysis/stream",
+                                json=_body, timeout=35, stream=True)
+            _ok = _sr.status_code == 200
+            _chunk_err = False
+            if _ok:
+                try:
+                    for _i, _line in enumerate(_sr.iter_lines(decode_unicode=True)):
+                        if _line and "STREAM_ERROR" in _line:
+                            _chunk_err = True
+                            break
+                        if _i > 8:  # 只扫开头事件（starting/status/首批 token）
+                            break
+                except Exception:
+                    pass
+                _sr.close()
+            check(f"symbol-analysis/stream {_label} -> {_sr.status_code}（无 STREAM_ERROR）",
+                  _ok and not _chunk_err,
+                  "STREAM_ERROR 出现在 SSE 流中（O24 回归！）" if _chunk_err else f"HTTP {_sr.status_code}")
+        except requests.Timeout:
+            check(f"symbol-analysis/stream {_label}", False, "请求超时（35s）")
+        except Exception as e:
+            check(f"symbol-analysis/stream {_label}", False, str(e))
 
     # F6 R16: 板块热度契约断言——/sectors/heat 返回 {items,total}（hot-plates 契约 v2.0），
     # 断言 items 键存在且非空（旧检查只在 section_api_5xx_check 查 HTTP 200，防不住空数据）
@@ -1472,6 +1536,23 @@ def section_db_integrity():
     except Exception as e:
         check("DB 完整性检查", False, str(e))
 
+    # P3-2 (round9 §10/P0-4): watchlist 耗时门禁——§10 实测 /market/watchlist **29.9s**
+    # 灾难级且无任何门禁拦截。P0-4 落地后：批量 4s + A股失败跳过 per-item + resolve 2s +
+    # 整体 5s 截断 → 缓存热时 ≤1s（文档验收口径，实测 1.26s）；弱数据源/冷缓存最坏 ~5s
+    # （DB 侧兜底）。门禁 6s：冷缓存弱源环境可过；>6s = 慢源未短路，判 FAIL。
+    try:
+        _t0 = time.time()
+        _wr = requests.get(f"{BASE}/api/v1/market/watchlist", timeout=15)
+        _w_el = time.time() - _t0
+        check(f"GET /market/watchlist {_wr.status_code} ({_w_el:.1f}s) < 6s (P0-4 gate)",
+              _wr.status_code == 200 and _w_el < 6.0,
+              f"actual={_w_el:.1f}s（>6s：慢源未短路/整体超时未生效）" if _w_el >= 6.0
+              else f"HTTP {_wr.status_code}")
+    except requests.Timeout:
+        check("GET /market/watchlist < 6s (P0-4 gate)", False, "请求超时（15s）")
+    except Exception as e:
+        check("GET /market/watchlist < 6s (P0-4 gate)", False, str(e))
+
 
 # ── T13: 数据卫生门禁 ─────────────────────────────────────────────
 
@@ -1615,7 +1696,7 @@ def section_design_quality_gate():
         check("方案质量门禁 5 项清单", not issues, "; ".join(issues[:3]) if issues else "全部通过")
         differ = check_strategies_differ(strategies)
         check("三套方案非机械缩放", differ, "层权重结构趋同" if not differ else "")
-        # M7: 核心层数量 ∈ [3,5]（含强制 510300/560600）且含宽基锚（中证A500/沪深300 之一）
+        # M7: 核心层数量 ∈ [3,5]（含强制 510300/159338）且含宽基锚（中证A500/沪深300 之一）
         core_syms_list: list[set[str]] = []
         for s in strategies:
             # 兼容两种结构：engine 输出 allocations / 持久化详情用 etfs
@@ -1627,7 +1708,7 @@ def section_design_quality_gate():
             core_syms = {a.get("symbol") for a in core}
             core_syms_list.append(core_syms)
             core_names = " ".join((a.get("name") or "") for a in core)
-            has_anchor = bool(core_syms & {"510300", "560600", "159338"}) or "中证A500" in core_names or "沪深300" in core_names
+            has_anchor = bool(core_syms & {"510300", "159338"}) or "中证A500" in core_names or "沪深300" in core_names
             check(f"M7 {s.get('id', s.get('name', '?'))} 含宽基锚(中证A500/沪深300)",
                   has_anchor, f"core={sorted(core_syms)[:5]}")
             # M7: 单只核心权重 ≥ 5%（engine 用 target_weight，持久化用 weight）
@@ -1640,14 +1721,14 @@ def section_design_quality_gate():
         # 「仅有沪深300 而无 A500」被当作达标，A500 必须出现在至少一个方案核心层）。
         if len(core_syms_list) == 3:
             _anchor_ok = all(
-                bool(cs & {"510300", "560600", "159338"}) for cs in core_syms_list
+                bool(cs & {"510300", "159338"}) for cs in core_syms_list
             )
             check("P1-1 三方案核心层均含宽基锚(A500/沪深300)", _anchor_ok,
-                  "某方案核心层缺宽基锚(510300/560600/159338)"
+                  "某方案核心层缺宽基锚(510300/159338)"
                   if not _anchor_ok else "全部含锚")
-            _a500_anywhere = any(cs & {"560600", "159338"} for cs in core_syms_list)
+            _a500_anywhere = any(cs & {"159338"} for cs in core_syms_list)
             check("P1-1 至少一方案核心层含中证A500", _a500_anywhere,
-                  "A500(560600/159338) 未进入任何方案核心层" if not _a500_anywhere else "A500 已入核心")
+                  "A500(159338) 未进入任何方案核心层" if not _a500_anywhere else "A500 已入核心")
             # P1-1 验收3: 任意方案核心层中证500 家族 ≤1 只（价值/成长/增强视为同一指数）
             for s in strategies:
                 allocs = s.get("allocations") or s.get("etfs") or []
@@ -1682,9 +1763,9 @@ def section_design_quality_gate():
                       f"非科技卫星仅 {_non_tech} 只（科创系 {_tech} 只）"
                       if _non_tech < 2 else f"{_non_tech} 只非科技卫星")
             # P1-2 (R4-14): 任意两方案核心层重叠（剔除公共底仓 510300 + 强制标的）≤1
-            # 强制标的（MANDATORY_CODES: 510300/560600/518880/511090）各司其职允许
+            # 强制标的（MANDATORY_CODES: 510300/159338/518880/511090）各司其职允许
             # 跨方案重复，不计入重叠上限（重叠上限 = 公共底仓 1 只）。
-            _MANDATORY = {"510300", "560600", "518880", "511090"}
+            _MANDATORY = {"510300", "159338", "518880", "511090"}
             for i in range(len(core_syms_list)):
                 for j in range(i + 1, len(core_syms_list)):
                     a = {s for s in core_syms_list[i] if s not in _MANDATORY}
@@ -1720,6 +1801,22 @@ def section_design_quality_gate():
                       f"{len(unavailable_cells)} 个「数据源不可用」单元格，数据源降级中", skip=True)
             else:
                 check("R10 今日涨跌列非空", False, "既无真实涨跌也无降级标注")
+            # P3-9 (round9 §4.3-A/P0-9): ①报告带数据采集时刻标注——新生成报告表格含
+            # 「截至 HH:MM」，或 market_context.data_fetched_at 已持久化（二者其一即达标）；
+            # ②幽灵锚身份校验——560600（历史写错的中证A500锚：医药白酒ETF/零成交/
+            # 全源无此证券）不得出现在任何方案标的中（round9 P0-8 清点回归防线）。
+            _ctx_fetched = bool((detail.get("market_context") or {}).get("data_fetched_at"))
+            check("P0-9 报告带采集时刻（表格截至 或 market_context.data_fetched_at）",
+                  "截至" in report_text or _ctx_fetched,
+                  "表格缺「截至 HH:MM」且 market_context 无 data_fetched_at（P0-9 未生效）"
+                  if not ("截至" in report_text or _ctx_fetched) else "已标注")
+            _ghost = [
+                a.get("symbol") for s in strategies
+                for a in (s.get("allocations") or s.get("etfs") or [])
+                if str(a.get("symbol", "")) == "560600"
+            ]
+            check("P0-8 方案无幽灵锚 560600", not _ghost,
+                  f"幽灵锚 560600 仍出现在方案: {_ghost}" if _ghost else "全部标的身份有效")
     except Exception as e:
         check("方案质量门禁", False, str(e))
 
@@ -2146,6 +2243,22 @@ def section_factor_ic():
     try:
         r = requests.get(f"{BASE}/api/v1/factors/ic", timeout=15)
         check("因子 IC 端点", True, f"HTTP {r.status_code}")
+        if r.status_code == 200:
+            # /factors/ic 返回 {"factors": [...], "total": N, "updated_at": ...}
+            rows = (r.json() or {}).get("factors") or []
+            # P3-8 (round9 §6.5/P1-3): 无「负 IC 标 valid 且文案 ≥阈值」矛盾项——
+            # P1-3 修复后负 IC（|IC|≥阈值）标 warn（负向淘汰警示），reason 用 |IC| 口径
+            _contradictions = []
+            for row in (rows or []):
+                ic = row.get("ic_value")
+                status = row.get("status")
+                reason = str(row.get("reason") or "")
+                if ic is not None and isinstance(ic, (int, float)) and ic < 0 and status == "valid":
+                    _contradictions.append(f"{row.get('code')}: IC={ic} 标 valid")
+                if status == "valid" and "≥ 阈值" in reason and reason.startswith("IC "):
+                    _contradictions.append(f"{row.get('code')}: 文案非 |IC| 口径")
+            check("无负IC标valid/文案≥阈值矛盾（P1-3）", not _contradictions,
+                  "; ".join(_contradictions[:3]) if _contradictions else "全部合规")
     except Exception as e:
         check("因子 IC 检查", False, f"Error: {e}")
 

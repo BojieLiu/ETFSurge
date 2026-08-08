@@ -259,6 +259,7 @@ async def get_design(
             ],
         })
 
+    _market_context = json.loads(record.market_snapshot_json) if record.market_snapshot_json else {}
     return {
         "id": record.id,
         "created_at": record.created_at.isoformat() if record.created_at else "",
@@ -271,7 +272,10 @@ async def get_design(
         "report_generated_at": record.report_generated_at.isoformat() if record.report_generated_at else None,
         "strategies": strategies,
         "plans": plans,
-        "market_context": json.loads(record.market_snapshot_json) if record.market_snapshot_json else {},
+        "market_context": _market_context,
+        # P1-6 (round9 §4.1-3): 顶层 market_regime 补字段——旧实现顶层无该键，
+        # 前端若读顶层字段将显示空（market_context 内已有 regime，复用之）
+        "market_regime": (_market_context or {}).get("market_regime"),
     }
 
 
@@ -477,6 +481,11 @@ async def get_timeline(
     # O12 (round8 §7 + interaction-redesign D2): join tasks 表——失败/运行中的
     # design 任务在历史列表跨会话可见（不再"凭空消失"）。已成功且已有 design
     # 记录的不重复（design_items 已覆盖）；失败/运行中任务并入。
+    # P2-11 (round9 §4.5-3): check 类型 task 关联查询——用于孤立 check 记录判定
+    # （顺序：design → check → check-task → design-task，见 test_timeline_joins_tasks._FakeDB）
+    check_task_stmt = select(TaskRecord).where(TaskRecord.task_type == "check")
+    check_task_rows = (await db.execute(check_task_stmt)).scalars().all()
+    linked_check_record_ids = {t.record_id for t in check_task_rows if t.record_id}
     task_stmt = select(TaskRecord).where(
         TaskRecord.task_type == "design",
     ).order_by(TaskRecord.created_at.desc())
@@ -499,6 +508,8 @@ async def get_timeline(
         })
 
     # Build items from checks
+    # P2-11 (round9 §4.5-3): 孤立 check 记录（无 task 关联，如 #343 空组合误报）标注 orphan——
+    # 前端历史列表过滤，避免「历史异常记录」被误读为当前检查结果
     check_items = []
     for c in checks:
         check_items.append({
@@ -508,6 +519,7 @@ async def get_timeline(
             "status": "completed",
             "summary": c.summary or "\u7b56\u7565\u68c0\u67e5\u5df2\u5b8c\u6210",
             "error_message": None,
+            "orphan": c.id not in linked_check_record_ids,
         })
 
     # O12: tasks 表并入（失败/运行中任务可见）

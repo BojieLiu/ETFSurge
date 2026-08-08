@@ -34,13 +34,15 @@ services:
       # 覆盖 .env 的 LOG_LEVEL=DEBUG：生产日志级别收窄为 INFO（与 dev 对齐，省预热期 DEBUG 日志开销；
       # 排障需 DEBUG 时用 `docker compose run -e LOG_LEVEL=DEBUG` 临时覆盖）
       - LOG_LEVEL=INFO
-      # 性能诊断：启用预热 profiler（cProfile + pyinstrument），产物写容器内 /app/logs（与 dev 对齐）
-      - PROFILE_WARMUP=1
+      # round9 P3-6: PROFILE_WARMUP 诊断开关回滚——本轮诊断注入的 profiler 残留已移除
+      # （常态运行无 profiler 开销；需要诊断时 `docker compose run -e PROFILE_WARMUP=1` 临时注入）
       # 覆盖 .env 中的 Windows 绝对路径（DATABASE_URL=sqlite+aiosqlite:///E:/...），
       # 适配容器内路径，否则 prod 容器会落到空数据库（instruments=0、持仓/自选全空）
       - DATABASE_URL=sqlite+aiosqlite:////app/data/portfolio.db
     volumes:
       - ./data:/app/data
+      # round9 P2-7: logs 挂载宿主可见——预热报告/诊断产物直接落宿主，免 docker cp
+      - ./logs:/app/logs
     depends_on:
       - redis
     restart: unless-stopped

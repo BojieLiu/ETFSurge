@@ -1,7 +1,7 @@
-"""
+﻿"""
 M1-M3 (docs/combination-design-review.md): 候选池口径修正测试。
 
-- M1: WIDE_BASIS_STATIC 补充 中证A500(560600/159338) 与红利(512890/515080)，
+- M1: WIDE_BASIS_STATIC 补充 中证A500(159338/159338) 与红利(512890/515080)，
       CORE_KEYWORDS 增加"红利低波/中证红利"（用户决策 2026-08-01：红利归 core 防守端）。
 - M2: _inject_static_wide_basis 注入后打 INFO 日志；required 未命中打 WARNING（消除静默失效）。
 - M3: tracked_index / segment 家族归一化——中证500价值/成长/增强 → 中证500，
@@ -31,9 +31,9 @@ from app.services.market_data_hub import MarketDataHub
 
 class TestM1StaticPool:
     def test_wide_basis_static_contains_a500(self):
-        """M1: WIDE_BASIS_STATIC 必须包含中证A500（沪市 560600 + 深市兜底 159338）。"""
+        """M1: WIDE_BASIS_STATIC 必须包含中证A500（沪市 159338 + 深市兜底 159338）。"""
         codes = {e["symbol"] for e in WIDE_BASIS_STATIC if e["layer"] == "core"}
-        assert "560600" in codes, "560600 中证A500ETF 必须在静态兜底清单（CORE_REQUIRED 依赖）"
+        assert "159338" in codes, "159338 中证A500ETF 必须在静态兜底清单（CORE_REQUIRED 依赖）"
         assert "159338" in codes, "159338 中证A500ETF（深市兜底）必须在静态兜底清单"
 
     def test_wide_basis_static_contains_dividend(self):
@@ -55,8 +55,8 @@ class TestM1StaticPool:
             assert e.get("change_pct") is None, f"{e['symbol']} 静态条目 change_pct 应为 None 而非 0.0"
 
     def test_a500_in_core_required(self):
-        """560600 是 CORE_REQUIRED 成员（注入校验会检查它）。"""
-        assert "560600" in CORE_REQUIRED
+        """159338 是 CORE_REQUIRED 成员（注入校验会检查它）。"""
+        assert "159338" in CORE_REQUIRED
 
 
 # ── M2: 注入校验日志 ──────────────────────────────────────────
@@ -70,9 +70,9 @@ class TestM2InjectionLogging:
             _inject_static_wide_basis(core, "core", [])
         assert any("WideBasisInject" in r.message for r in caplog.records), \
             "注入后必须打 INFO 日志（WideBasisInject）"
-        # 注入后 560600 必须进 core
+        # 注入后 159338 必须进 core
         codes = {e["symbol"] for e in core}
-        assert "560600" in codes and "512890" in codes
+        assert "159338" in codes and "512890" in codes
 
     def test_missing_required_warns(self, caplog):
         """M2: required 未命中打 WARNING（消除静默失效）。"""
@@ -134,7 +134,7 @@ class TestM3FamilyNormalization:
             "core": [
                 {"symbol": "510300", "name": "沪深300ETF", "tracked_index": "沪深300",
                  "fund_scale": 900.0},
-                {"symbol": "560600", "name": "中证A500ETF", "tracked_index": "中证A500",
+                {"symbol": "159338", "name": "中证A500ETF", "tracked_index": "中证A500",
                  "fund_scale": 550.0},
             ],
             "satellite": [],
@@ -142,7 +142,7 @@ class TestM3FamilyNormalization:
         }
         result = MarketDataHub._deduplicate_by_index(pool)
         core_syms = {e["symbol"] for e in result["core"]}
-        assert core_syms == {"510300", "560600"}
+        assert core_syms == {"510300", "159338"}
 
 
 # ── M1: full_pipeline 集成（mock 数据源）────────────────────────
@@ -160,7 +160,7 @@ class TestFullPipelineM1:
         monkeypatch.setattr("app.fetchers.etf_scanner.fetch_all_etfs_base", _fake_fetch_all)
         layers = full_pipeline()
         core_syms = {e["symbol"] for e in layers["core"]}
-        assert "560600" in core_syms, "560600 必须出现在 core 候选池"
+        assert "159338" in core_syms, "159338 必须出现在 core 候选池"
         assert "512890" in core_syms, "512890 红利低波必须出现在 core 候选池"
         assert "515080" in core_syms, "515080 中证红利必须出现在 core 候选池"
         # CORE_REQUIRED 全部命中（M2 无 WARNING 的前提）

@@ -83,8 +83,9 @@ class TestLlmTimeoutGrading:
     def test_partial_30s(self):
         assert _llm_timeout_for({"all_empty": False, "partial": True}) == 30
 
-    def test_full_60s(self):
-        assert _llm_timeout_for({"all_empty": False, "partial": False}) == 60
+    def test_full_90s(self):
+        """round9 P0-5: 完整档 60→90s（对齐设计报告 O7 验收）。"""
+        assert _llm_timeout_for({"all_empty": False, "partial": False}) == 90
 
 
 class TestFallbackSummaryWithQuality:

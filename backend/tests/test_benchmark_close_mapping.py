@@ -1,8 +1,8 @@
-"""
+﻿"""
 O19 (docs/archived/round7-rediagnosis.md §7 P20-②): tracking_error 指数映射补全。
 
 _WIDE_BASIS_INDEX_CODES 只映射 6 只老宽基（510300/510500/510050/588000/159915/510880），
-A50(563080)/A100(562000)/A500(560600) 等新宽基无指数映射 → benchmark_close 注入不到 →
+A50(563080)/A100(562000)/A500(159338) 等新宽基无指数映射 → benchmark_close 注入不到 →
 tracking_error 因「无基准序列」no_data。
 
 修复: 补新宽基映射 + 候选池宽基家族完整性门禁（防下次新增宽基漏配）。
@@ -20,7 +20,7 @@ from app.services.market_data_hub import market_data_hub
 class TestBenchmarkCloseMapping:
     @pytest.mark.asyncio
     async def test_new_wide_basis_injected(self, monkeypatch):
-        """560600/563080/562000 进 _enrich_symbol_extra → 注入 benchmark_close（close[-20:]）。"""
+        """159338/563080/562000 进 _enrich_symbol_extra → 注入 benchmark_close（close[-20:]）。"""
         calls = {"bench": 0}
 
         async def fake_get_market_history(symbol, asset_type="A", period="daily"):
@@ -39,10 +39,10 @@ class TestBenchmarkCloseMapping:
         market_data_hub._FUND_SHARES_CACHE.clear()
 
         out = await market_data_hub._enrich_symbol_extra(
-            ["560600", "563080", "562000", "563020"],
-            {s: {} for s in ("560600", "563080", "562000", "563020")},
+            ["159338", "563080", "562000", "563020"],
+            {s: {} for s in ("159338", "563080", "562000", "563020")},
         )
-        for sym in ("560600", "563080", "562000", "563020"):
+        for sym in ("159338", "563080", "562000", "563020"):
             assert "benchmark_close" in out[sym], f"{sym} 未注入 benchmark_close"
             assert len(out[sym]["benchmark_close"]) == 20, f"{sym} benchmark_close 长度 {len(out[sym]['benchmark_close'])}"
         assert calls["bench"] >= 4
@@ -50,7 +50,7 @@ class TestBenchmarkCloseMapping:
     def test_mapping_table_has_new_codes(self):
         """映射表直接包含新宽基符号。"""
         m = market_data_hub._WIDE_BASIS_INDEX_CODES
-        assert m.get("560600") == "sh000510", "560600 中证A500 → sh000510"
+        assert m.get("159338") == "sh000510", "159338 中证A500 → sh000510"
         assert m.get("563080") == "sh932000", "563080 中证A50 → sh932000"
         assert m.get("562000") == "sh000903", "562000 中证A100 → sh000903"
         assert "563020" in m, "563020 红利低波应已登记"

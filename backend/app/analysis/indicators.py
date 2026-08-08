@@ -267,6 +267,16 @@ def compute_chart_data(df: list[dict]) -> dict:
     dea = macd_pt["MACDs_12_26_9"]
     macd_hist = 2 * macd_pt["MACDh_12_26_9"]
 
+    # P2-5 (round9 §6.3): MACD 序列截断为最近 30 根——旧实现 dif/dea/histogram 全量返回
+    # （与 dates 等长，120+ 根 ≈ 5-10KB/标的，批量调用放大延迟）；前端 MACD 子图 x 轴用
+    # dates（category，按 index 对齐），截断后柱/线显示最近 30 根，无对齐问题。
+    _macd_tail = 30
+    macd_out = {
+        "dif": _to_list(dif)[-_macd_tail:],
+        "dea": _to_list(dea)[-_macd_tail:],
+        "histogram": _to_list(macd_hist)[-_macd_tail:],
+    }
+
     # P2-4 (R4-11b): KDJ/RSI 序列——前端 AnalysisView 读 d.kdj.k/d.rsi 渲染子图，
     # 旧实现只出 ma/bollinger/macd → KDJ/RSI 子图条件恒 false 静默不渲染。
     rsi_series = ta.rsi(close, length=14)
@@ -289,7 +299,7 @@ def compute_chart_data(df: list[dict]) -> dict:
         "amount": _to_list(amount),
         "ma5": ma5, "ma10": ma10, "ma20": ma20, "ma60": ma60,
         "bollinger": {"upper": boll_upper, "middle": boll_middle, "lower": boll_lower},
-        "macd": {"dif": _to_list(dif), "dea": _to_list(dea), "histogram": _to_list(macd_hist)},
+        "macd": macd_out,
         # P2-4: kdj/rsi 序列（与 dates 等长）
         "kdj": kdj,
         "rsi": _to_list(rsi_series) if rsi_series is not None else list(_empty_seq),

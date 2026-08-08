@@ -38,6 +38,8 @@ class StrategyCheckRecord(Base):
             "id": self.id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "capital": self.capital,
+            # P2-4 (round9 §4.2-4): 详情输出 portfolio_type（worker 持久化后不再是 None）
+            "portfolio_type": self.portfolio_type,
             "summary": self.summary,
             "market_regime": self.market_regime,
             "suggestions": json.loads(str(self.suggestions_json)) if self.suggestions_json else [],

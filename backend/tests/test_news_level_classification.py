@@ -31,12 +31,16 @@ def test_source_level_overridden_when_divergent(caplog):
     assert any("level 分歧" in r.message for r in caplog.records), "应记录 WARNING 漂移日志"
 
 
-# ── 4. stars = level（§9.10.4 用例4，选项 1 已确认） ─────────────────────
+# ── 4. stars = 新鲜度维度（round9 P2-1，替代旧「stars=level」语义） ──────
 def test_stars_equal_level():
-    """L3 新闻恒 3★（无论新鲜度）；L1 恒 1★。"""
-    assert nf._compute_stars(3, "") == 3
-    assert nf._compute_stars(3, "2026-07-01 00:00:00") == 3  # 旧新闻也 3★
-    assert nf._compute_stars(1, "2026-07-01 00:00:00") == 1
+    """P2-1 (round9 §6.4): stars 独立「新鲜度」维度——与 level 解耦。
+
+    旧语义「L3 恒 3★」已废弃：时间不可解析（如 "10:00"/空）回退 level（旧行为）；
+    可解析且距今 >72h → 1★（无论 level）。
+    """
+    assert nf._compute_stars(3, "") == 3            # 无时间 → 回退 level
+    assert nf._compute_stars(3, "10:00") == 3       # 无日期 → 回退 level
+    assert nf._compute_stars(3, "2026-07-01 00:00:00") == 1  # 旧新闻（>72h）→ 1★ 新鲜度
     assert nf._compute_stars(5, "") == 5
 
 

@@ -2,6 +2,7 @@ import asyncio
 
 from fastapi import APIRouter, Query
 from ..core.logging import get_logger
+from ..services.cache_service import sync_memory_cache  # P0-4: watchlist 端级 3s 缓存
 
 logger = get_logger(__name__)
 from typing import Any
@@ -16,7 +17,7 @@ from ..analysis.signal import generate_signal
 from ..services.market_data_hub import market_data_hub
 from ..models.search import Watchlist
 from ..models.schemas import WatchlistCreate, WatchlistUpdate, WatchlistResponse
-from sqlalchemy import select
+from sqlalchemy import func, select  # P1-7: func.upper 用于补名 market 大小写不敏感匹配
 from fastapi import HTTPException
 
 router = APIRouter(prefix="/api/v1/market", tags=["market"])
@@ -644,8 +645,10 @@ async def sectors_heat(limit: int = Query(20), market: str = "A") -> dict[str, A
             "rank_change": r.get("rank_change"),
             "is_new": r.get("is_new", 0),
             "plate_code": r.get("plate_code", ""),
+            # P2-3 (round9 §6.1): 板块涨跌幅 ±10% 值域校验（em 回填已过校验；非回填路径也拦）
             "change_pct": em_chg if em_chg is not None
-            else (r.get("change_pct") if r.get("change_pct") is not None else 0),
+            else (r.get("change_pct") if r.get("change_pct") is not None
+                  and abs(float(r.get("change_pct") or 0)) <= 10.0 else 0),
         })
     return {"items": items, "total": len(items)}
 
@@ -693,6 +696,141 @@ from ..services.market_service import resolve_symbol_to_code
 CODE_PATTERN = re.compile(r"^[0-9A-Za-z.\-]+$")
 
 
+async def _watchlist_enrich_items(items: list) -> list[dict]:
+    """P0-4 (round9 §10): watchlist 实时行情 enrich（批量 + per-item 降级 + auto-heal）。
+
+    从 watchlist_list 抽出以便整体加超时——旧实现批量 8s + per-item 3s×N +
+    resolve_symbol_to_code 无超时，10 条自选最坏 **29.9s**（§10 实测 29856ms）。
+    """
+    # Enrich with realtime data — R5: 并行拉取（原串行逐 item，多标的时响应数秒；
+    # 单标的 3s 超时截断，慢源不拖累整体——对齐 P2-1/R4-16 模式）
+    # R5-2-1: A 股多标的改批量路径（fetch_a_stock_batch，P3-3 原案）——
+    # 逐标的 get_asset_realtime 对 5+ 标的仍要 5 次独立慢源调用（4525ms 退化）；
+    # 批量一次拉全，慢源只触发一次。
+    async def _realtime_one(item):
+        try:
+            return await asyncio.wait_for(
+                market_data_hub.get_asset_realtime(item.symbol, item.asset_type),
+                timeout=3,
+            )
+        except BaseException:
+            return None
+
+    _a_items = [it for it in items if (it.asset_type or "A") == "A"]
+    _batch_map: dict[str, dict] = {}
+    if len(_a_items) >= 2:
+        try:
+            from ..services.market_service import get_realtime_batch
+            _batch_rows = await asyncio.wait_for(
+                get_realtime_batch([it.symbol for it in _a_items], "A"),
+                timeout=4,  # P0-4: 5→4s——批量慢源（mootdx 空转后）快速降级
+            )
+            _batch_map = {r.get("symbol"): r for r in (_batch_rows or []) if r.get("symbol")}
+        except BaseException as _e:
+            logger.warning("[watchlist] batch realtime failed (fallback per-item): %s", _e)
+
+    # P0-4 (round9 §10): 批量失败后 A 股**不再逐个 per-item 重试**——慢源时 10 条 ×
+    # 2.5s 串联把整体拖到 8s+（实测 8.4s）；A 股缺失直接 DB-only（realtime=None），
+    # 非 A（HK/US）少量条目保留 per-item（3s 内）。
+    _skip_a_per_item = bool(_a_items) and len(_a_items) >= 2 and not _batch_map
+    _realtimes = await asyncio.gather(
+        *(
+            asyncio.sleep(0, result=None)
+            if (_skip_a_per_item and (it.asset_type or "A") == "A")
+            else _realtime_one(it)
+            if it.symbol not in _batch_map or (it.asset_type or "A") != "A"
+            else asyncio.sleep(0, result=_batch_map[it.symbol])
+            for it in items
+        ),
+        return_exceptions=True,
+    )
+
+    enriched = []
+    for item, realtime in zip(items, _realtimes):
+        if isinstance(realtime, BaseException):
+            realtime = None
+
+        # Z22: Auto-heal dirty data - if symbol is not a valid code, try to resolve by name
+        resolved_symbol = item.symbol
+        resolved_realtime = realtime
+        # P0-4 (round9 §10): resolve 仅对**非法代码**（脏数据）触发——旧逻辑 `realtime is None`
+        # 也触发 resolve，批量失败后 10 条 A 股 realtime 全 None → 串行 resolve 死循环
+        # （每个 resolve 内部同步阻塞事件循环 → wait_for 整体超时失效 → 实测 9-15s）。
+        # 慢源时合法代码直接 DB-only（realtime=None），不再逐条 resolve。
+        if not CODE_PATTERN.match(item.symbol):
+            # Try to resolve symbol from name（P0-4: 加 2s 超时——旧实现无超时，脏数据可拖满整体）
+            try:
+                resolved = await asyncio.wait_for(
+                    resolve_symbol_to_code(item.symbol, item.asset_type), timeout=2)
+            except BaseException:
+                resolved = None
+            if resolved and resolved != item.symbol:
+                resolved_symbol = resolved
+                resolved_realtime = await market_data_hub.get_asset_realtime(resolved, item.asset_type)
+                # Auto-heal DB: update symbol if different
+                # 用独立短会话执行 UPDATE，避免 rollback 影响主循环 session 中已加载对象
+                if resolved_symbol != item.symbol:
+                    from sqlalchemy import update as sa_update
+                    resolved_name = resolved_realtime.get("name") if resolved_realtime else None
+                    try:
+                        async with async_session() as heal_session:
+                            await heal_session.execute(
+                                sa_update(Watchlist)
+                                .where(Watchlist.id == item.id)
+                                .values(
+                                    symbol=resolved_symbol,
+                                    name=resolved_name or item.name,
+                                )
+                            )
+                            await heal_session.commit()
+                    except Exception as e:
+                        # Unique constraint conflict - log warning, continue with resolved data
+                        logger.warning("[watchlist] auto-heal unique conflict for id=%s: %s", item.id, e)
+
+        # Name fallback: realtime.name or symbol
+        display_name = item.name
+        if resolved_realtime and resolved_realtime.get("name"):
+            display_name = resolved_realtime["name"]
+        if not display_name or not display_name.strip():
+            display_name = resolved_symbol
+
+        # R30: auto-heal name——合法代码但 name 为脏数据（=symbol/空）且 realtime 有真实名称时回填
+        rt_name = (resolved_realtime or {}).get("name") if resolved_realtime else None
+        is_dirty_name = (not (item.name or "").strip()
+                         or str(item.name).strip() == str(item.symbol).strip())
+        if is_dirty_name and rt_name and rt_name != item.name:
+            try:
+                from sqlalchemy import update as sa_update
+                async with async_session() as heal_session:
+                    await heal_session.execute(
+                        sa_update(Watchlist)
+                        .where(Watchlist.id == item.id)
+                        .values(name=rt_name)
+                    )
+                    await heal_session.commit()
+            except Exception as e:
+                logger.warning("[watchlist] name auto-heal failed for id=%s: %s", item.id, e)
+
+        item_dict = {
+            "id": item.id,
+            "symbol": resolved_symbol,
+            "name": display_name,
+            "asset_type": item.asset_type,
+            "notes": item.notes,
+            "created_at": item.created_at.isoformat() if item.created_at else None,
+            "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+        }
+        if resolved_realtime:
+            item_dict["realtime"] = {
+                "price": resolved_realtime.get("price"),
+                "change_pct": resolved_realtime.get("change_pct"),
+                "volume": resolved_realtime.get("volume"),
+            }
+        enriched.append(item_dict)
+
+    return enriched
+
+
 @router.get("/watchlist", response_model=dict)
 async def watchlist_list(
     limit: int = Query(100, ge=1, le=500),
@@ -710,124 +848,35 @@ async def watchlist_list(
         result = await session.execute(stmt)
         items = result.scalars().all()
 
-        # Enrich with realtime data — R5: 并行拉取（原串行逐 item，多标的时响应数秒；
-        # 单标的 3s 超时截断，慢源不拖累整体——对齐 P2-1/R4-16 模式）
-        # R5-2-1: A 股多标的改批量路径（fetch_a_stock_batch，P3-3 原案）——
-        # 逐标的 get_asset_realtime 对 5+ 标的仍要 5 次独立慢源调用（4525ms 退化）；
-        # 批量一次拉全，慢源只触发一次。
-        async def _realtime_one(item):
-            try:
-                return await asyncio.wait_for(
-                    market_data_hub.get_asset_realtime(item.symbol, item.asset_type),
-                    timeout=3,
-                )
-            except BaseException:
-                return None
+        # P0-4 (round9 §10): watchlist 端级 3s 短缓存——冷缓存首发慢（数据源弱：mootdx
+        # 空转/EM 冷却/新浪慢），缓存热后 ≤1s（实测 1.26s）；realtime 数据本身有 quote
+        # 5s TTL 缓存，端级缓存避免 resolve/auto-heal 路径绕过 quote 缓存重复走慢源链。
+        _wl_key = f"watchlist:{limit}:{offset}"
+        _cached = sync_memory_cache.get(_wl_key)
+        if _cached is not None:
+            return _cached
 
-        _a_items = [it for it in items if (it.asset_type or "A") == "A"]
-        _batch_map: dict[str, dict] = {}
-        if len(_a_items) >= 2:
-            try:
-                from ..services.market_service import get_realtime_batch
-                _batch_rows = await asyncio.wait_for(
-                    get_realtime_batch([it.symbol for it in _a_items], "A"),
-                    timeout=8,
-                )
-                _batch_map = {r.get("symbol"): r for r in (_batch_rows or []) if r.get("symbol")}
-            except BaseException as _e:
-                logger.warning("[watchlist] batch realtime failed (fallback per-item): %s", _e)
+        # P0-4 (round9 §10): watchlist 实时 enrich 整体超时 5s——批量 4s + per-item
+        # 2.5s×N + resolve 2s，慢源短路后再整体截断，DB 侧数据兜底返回。
+        try:
+            enriched = await asyncio.wait_for(_watchlist_enrich_items(items), timeout=5)
+        except asyncio.TimeoutError:
+            logger.warning("[watchlist] realtime enrich timed out after 5s — returning DB-only rows (P0-4)")
+            enriched = [{
+                "id": it.id, "symbol": it.symbol, "name": it.name,
+                "asset_type": it.asset_type, "notes": it.notes,
+                "created_at": it.created_at.isoformat() if it.created_at else None,
+                "updated_at": it.updated_at.isoformat() if it.updated_at else None,
+            } for it in items]
 
-        _realtimes = await asyncio.gather(
-            *(
-                _realtime_one(it)
-                if it.symbol not in _batch_map or (it.asset_type or "A") != "A"
-                else asyncio.sleep(0, result=_batch_map[it.symbol])
-                for it in items
-            ),
-            return_exceptions=True,
-        )
-
-        enriched = []
-        for item, realtime in zip(items, _realtimes):
-            if isinstance(realtime, BaseException):
-                realtime = None
-
-            # Z22: Auto-heal dirty data - if symbol is not a valid code, try to resolve by name
-            resolved_symbol = item.symbol
-            resolved_realtime = realtime
-            if not CODE_PATTERN.match(item.symbol) or realtime is None:
-                # Try to resolve symbol from name
-                resolved = await resolve_symbol_to_code(item.symbol, item.asset_type)
-                if resolved and resolved != item.symbol:
-                    resolved_symbol = resolved
-                    resolved_realtime = await market_data_hub.get_asset_realtime(resolved, item.asset_type)
-                    # Auto-heal DB: update symbol if different
-                    # 用独立短会话执行 UPDATE，避免 rollback 影响主循环 session 中已加载对象
-                    if resolved_symbol != item.symbol:
-                        from sqlalchemy import update as sa_update
-                        resolved_name = resolved_realtime.get("name") if resolved_realtime else None
-                        try:
-                            async with async_session() as heal_session:
-                                await heal_session.execute(
-                                    sa_update(Watchlist)
-                                    .where(Watchlist.id == item.id)
-                                    .values(
-                                        symbol=resolved_symbol,
-                                        name=resolved_name or item.name,
-                                    )
-                                )
-                                await heal_session.commit()
-                        except Exception as e:
-                            # Unique constraint conflict - log warning, continue with resolved data
-                            logger.warning("[watchlist] auto-heal unique conflict for id=%s: %s", item.id, e)
-            
-            # Name fallback: realtime.name or symbol
-            display_name = item.name
-            if resolved_realtime and resolved_realtime.get("name"):
-                display_name = resolved_realtime["name"]
-            if not display_name or not display_name.strip():
-                display_name = resolved_symbol
-            
-            # R30: auto-heal name——合法代码但 name 为脏数据（=symbol/空）且 realtime 有真实名称时回填
-            rt_name = (resolved_realtime or {}).get("name") if resolved_realtime else None
-            is_dirty_name = (not (item.name or "").strip()
-                             or str(item.name).strip() == str(item.symbol).strip())
-            if is_dirty_name and rt_name and rt_name != item.name:
-                try:
-                    from sqlalchemy import update as sa_update
-                    async with async_session() as heal_session:
-                        await heal_session.execute(
-                            sa_update(Watchlist)
-                            .where(Watchlist.id == item.id)
-                            .values(name=rt_name)
-                        )
-                        await heal_session.commit()
-                except Exception as e:
-                    logger.warning("[watchlist] name auto-heal failed for id=%s: %s", item.id, e)
-            
-            item_dict = {
-                "id": item.id,
-                "symbol": resolved_symbol,
-                "name": display_name,
-                "asset_type": item.asset_type,
-                "notes": item.notes,
-                "created_at": item.created_at.isoformat() if item.created_at else None,
-                "updated_at": item.updated_at.isoformat() if item.updated_at else None,
-            }
-            if resolved_realtime:
-                item_dict["realtime"] = {
-                    "price": resolved_realtime.get("price"),
-                    "change_pct": resolved_realtime.get("change_pct"),
-                    "volume": resolved_realtime.get("volume"),
-                }
-            enriched.append(item_dict)
-
-        return {
+        resp = {
             "items": enriched,
             "total": total,
             "limit": limit,
             "offset": offset,
         }
+        sync_memory_cache.set(_wl_key, resp, 3)
+        return resp
 
 
 @router.post("/watchlist", response_model=dict, status_code=201)
@@ -858,14 +907,30 @@ async def watchlist_add(data: WatchlistCreate) -> dict[str, Any]:
             try:
                 from ..models.search import Instrument
                 from sqlalchemy import select as _sel
-                _inst = (await session.execute(
+                # P1-7 (round9 §6.2): instruments 补名查询放宽 market 匹配——旧实现严格等值
+                # （Instrument.market == data.asset_type），asset_type='A' 与 instruments 表
+                # market 大小写/映射差异（etf→A 等）导致补名失效 → 新增条目 name=代码。
+                # 新逻辑：等值命中优先；miss 时大小写不敏感 + etf/ETF → A 映射回退。
+                _inst_row = None
+                _inst_row = (await session.execute(
                     _sel(Instrument).where(
                         Instrument.symbol == data.symbol,
                         Instrument.market == data.asset_type,
                     )
                 )).scalar_one_or_none()
-                if _inst and _inst.name:
-                    _instrument_name = _inst.name
+                if not _inst_row:
+                    _mkt = (data.asset_type or "").upper()
+                    if _mkt == "ETF":
+                        _mkt = "A"
+                    if _mkt:
+                        _inst_row = (await session.execute(
+                            _sel(Instrument).where(
+                                Instrument.symbol == data.symbol,
+                                func.upper(Instrument.market) == _mkt,
+                            )
+                        )).scalar_one_or_none()
+                if _inst_row and _inst_row.name:
+                    _instrument_name = _inst_row.name
             except Exception:
                 pass
         if not realtime and not has_provided_name and not _instrument_name:

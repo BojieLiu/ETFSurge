@@ -57,25 +57,26 @@ class TestStatusReason:
         assert "nav" in reason
 
     def test_sentiment_gap_reason_not_fallback(self, monkeypatch):
-        """sentiment 缺口 reason 为「数据源未接入（缺 对应字段）」而非「IC 未累积」。"""
+        """P1-10 (round9 §6.5.1-C): sentiment 三因子为市场级因子——截面恒等（全市场单一值）
+        不再标 no_data，改标 static 且 reason 明示「市场级因子不参与截面 IC」。"""
         import app.routers.factors as fr
         monkeypatch.setattr(fr, "registry", FakeRegistry(
             {"sentiment.panic_greed_diff": ["510300", "510500"]}
         ))
         status, reason = _status_of("sentiment.panic_greed_diff", None, 0.02)
-        assert status == "no_data"
-        assert "数据源未接入" in reason
-        assert "sentiment_index" in reason
-        assert "IC 未累积" not in reason
+        assert status == "static"
+        assert "市场级因子" in reason
+        assert "不参与截面 IC" in reason
 
     def test_stock_divergence_reason(self, monkeypatch):
+        """P1-10: stock_divergence 同为市场级因子 → static。"""
         import app.routers.factors as fr
         monkeypatch.setattr(fr, "registry", FakeRegistry(
             {"sentiment.stock_divergence": ["510300"]}
         ))
         status, reason = _status_of("sentiment.stock_divergence", None, 0.02)
-        assert status == "no_data"
-        assert "advance_decline" in reason
+        assert status == "static"
+        assert "市场级因子" in reason
 
     def test_no_gap_falls_back_to_ic_not_accumulated(self, monkeypatch):
         """无缺口记录 → 仍走「IC 未累积」兜底（不破坏既有语义）。"""

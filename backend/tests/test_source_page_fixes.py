@@ -35,7 +35,10 @@ class TestR61DomainConstant:
         # etf_scanner.py（R5-2-6 双源路由：push2 优先 → push2delay 兜底，集中两处域名）
         allowed = {"core\\market_context.py", "core/market_context.py",
                    "fetchers\\fundamentals_fetcher.py", "fetchers/fundamentals_fetcher.py",
-                   "fetchers\\etf_scanner.py", "fetchers/etf_scanner.py"}
+                   "fetchers\\etf_scanner.py", "fetchers/etf_scanner.py",
+                   # round9 P2-3: sector_fetcher.fetch_em_sector_changes 双源路由
+                   # （EM_PUSH_HOST 主源 + push2 备份）——注释与实现对齐后加入白名单
+                   "fetchers\\sector_fetcher.py", "fetchers/sector_fetcher.py"}
         extra = [h for h in hits if h not in allowed]
         assert not extra, f"push2delay 硬编码散落在: {extra}"
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import datetime
 from typing import Any
 
@@ -29,6 +30,19 @@ def _etf_cache_file() -> str:
         return _scanner_path()
     except Exception:
         return ""
+
+
+def _market_data_fetched_at(market_data_hub) -> str | None:
+    """P0-9 (round9 §4.3-A): 行情数据采集时刻（market_data_hub pool 刷新完成时刻）。
+
+    设计报告「今日涨跌」列标注「截至 HH:MM」即此值——盘中生成的值可追溯，
+    不再被误读为最新收盘（#427 11:58 生成 vs 收盘对照必错位）。
+    """
+    try:
+        ts = getattr(market_data_hub, "_last_refresh_ts", 0.0) or time.time()
+        return datetime.fromtimestamp(ts).strftime("%Y-%m-%dT%H:%M:%S")
+    except Exception:
+        return None
 
 
 def _load_snapshot_cache() -> dict[str, dict]:
@@ -67,9 +81,19 @@ def _snapshot_change_pct(symbol: str) -> float | None:
 
 
 def _kline_change_pct(market_data_hub, symbol: str) -> float | None:
-    """K 线兜底：(close[-1]-close[-2])/close[-2]（返回小数，复用 _compute_change_pct 逻辑）。"""
+    """K 线兜底：(close[-1]-close[-2])/close[-2]（返回小数，复用 _compute_change_pct 逻辑）。
+
+    P1-12 (round9 §4.3-B 附带②): 因子分用实时 `fetch_history`（300s 缓存）而涨跌用
+    `get_kline_rows_any`（任意年龄缓存）→ 口径不一致（因子有分的标的涨跌莫名
+    「数据源不可用」）。统一走 get_history 同通道：有历史 ⇒ 涨跌可算。
+    """
     try:
-        rows = market_data_hub.get_kline_rows_any(symbol) if hasattr(market_data_hub, "get_kline_rows_any") else None
+        rows = None
+        if hasattr(market_data_hub, "get_history"):
+            rows = market_data_hub.get_history(symbol, "A", "daily")
+        # 实时通道失败 → 降级任意年龄缓存（旧路径，最后兜底）
+        if not rows and hasattr(market_data_hub, "get_kline_rows_any"):
+            rows = market_data_hub.get_kline_rows_any(symbol)
         closes = [float(r.get("close")) for r in (rows or []) if r.get("close") is not None]
         if len(closes) >= 2 and closes[-2]:
             return round((closes[-1] - closes[-2]) / closes[-2], 4)
@@ -250,6 +274,12 @@ async def generate_enhanced_design(
 
     market_regime = market_data_hub.get_market_regime() or "range_bound"
     market_context = await _build_market_context(market_data_hub)
+    # P0-9: 行情采集时刻并入 market_context——随 market_snapshot_json 持久化，
+    # 详情接口可查（报告「今日涨跌（截至 HH:MM）」与表格标注同源）
+    try:
+        market_context.setdefault("data_fetched_at", _market_data_fetched_at(market_data_hub))
+    except Exception:
+        pass
 
     # Z11: 降级模式判定（normal / static_pool / partial_data）
     _now_iso = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -279,6 +309,8 @@ async def generate_enhanced_design(
                 "elapsed_seconds": round(elapsed, 1),
                 "regime": market_regime,
                 "fallback": True,
+                # P0-9: 行情数据采集时刻（market_data_hub pool 刷新完成时刻）
+                "data_fetched_at": _market_data_fetched_at(market_data_hub),
             },
             "degradation": _degradation(
                 "static_pool",
@@ -309,6 +341,7 @@ async def generate_enhanced_design(
 
         # 4. 转换为前端期望的 etfs 字段名
         strategies = []
+        _degraded_core: list[str] = []  # P1-5: 数据缺失被剔除核心权重的标的
         for s in strategies_raw:
             allocs = s.pop("allocations", [])
             # Apply risk controls before assembling
@@ -368,6 +401,30 @@ async def generate_enhanced_design(
                     if kcp is not None:
                         a["daily_change_pct"] = sanitize_change_pct(code, round(kcp * 100, 4))
 
+            # P1-5 (round9 §4.1-1/§4.3-B): 数据缺失标的不得带核心权重——候选池正常时，
+            # 三源（pool 缓存/快照/K线）全拿不到涨跌的核心层标的：权重清零（现金吸收）+
+            # data_unavailable 标注 + 理由追加说明。旧实现 560600 类幽灵锚永远以 6% 权重
+            # 入核心层且「今日涨跌：数据源不可用」——专业不可接受。
+            # 判定窗口：核心层涨跌命中率 ≥50% 才执行清零（数据源整体挂时保留权重+标注，
+            # 避免全方案变 CASH；个别缺失才剔除——幽灵锚场景命中率高，判定必触发）。
+            if not pool_empty:
+                _core_all = [a for a in allocs
+                             if a.get("symbol") != "CASH" and a.get("layer") == "core"]
+                _core_hit = sum(1 for a in _core_all if a.get("daily_change_pct") is not None)
+                _hit_ratio = (_core_hit / len(_core_all)) if _core_all else 1.0
+                if _hit_ratio >= 0.5:
+                    for a in allocs:
+                        if a.get("symbol") == "CASH" or a.get("layer") != "core":
+                            continue
+                        if a.get("daily_change_pct") is None:
+                            a["weight"] = 0.0
+                            a["data_unavailable"] = True
+                            a["selection_rationale"] = (
+                                (a.get("selection_rationale") or "")
+                                + "【数据缺失：行情源不可用，已剔除核心权重，标注不参与配置】"
+                            )
+                            _degraded_core.append(str(a.get("symbol", "")))
+
             # Calculate cash
             total_weight = sum(a.get("weight", 0) for a in allocs if a.get("symbol") != "CASH")
             cash_weight = round(1.0 - total_weight, 4)
@@ -409,6 +466,11 @@ async def generate_enhanced_design(
                 "version": "v5-engine",
                 "elapsed_seconds": round(elapsed, 1),
                 "regime": market_regime,
+                # P0-9: 行情数据采集时刻（market_data_hub pool 刷新完成时刻）——
+                # 报告「今日涨跌（截至 HH:MM）」与此对齐，盘中值可追溯
+                "data_fetched_at": _market_data_fetched_at(market_data_hub),
+                # P1-5: 数据缺失被剔除核心权重的标的清单（pool 正常时三源全拿不到涨跌）
+                "degraded_core_symbols": sorted(set(_degraded_core)),
             },
             # Z11: 正常路径也暴露 degradation（mode=normal / partial_data）
             "degradation": _degradation(
@@ -434,6 +496,7 @@ async def generate_enhanced_design(
                     "elapsed_seconds": round(elapsed, 1),
                     "regime": market_regime,
                     "fallback": True,
+                    "data_fetched_at": _market_data_fetched_at(market_data_hub),
                 },
                 "warning": "使用静态池兜底，因子数据不可用",
                 "degradation": _degradation(

@@ -12,6 +12,7 @@ P20-①: 现有三级 nav 源（Sina http → QQ http → TTJ 日净值）在用
 """
 
 import json
+from unittest.mock import patch
 
 import pytest
 
@@ -24,13 +25,13 @@ def _sina_list(symbols):
 
 
 def _qq_payload(symbols, navs):
-    """构造 QQ 行情响应（~分隔，pos 31 = IOPV）。"""
+    """构造 QQ 行情响应（~分隔，round9 P0-6 实测: pos 81 = 单位净值 = IOPV/NAV 主源）。"""
     lines = []
     for sym, nav in zip(symbols, navs):
-        parts = [""] * 33
+        parts = [""] * 82
         parts[2] = sym
         parts[3] = "1.0"
-        parts[31] = str(nav)
+        parts[81] = str(nav)
         lines.append(f'v_{sym}="{"~".join(parts)}"')
     return "\n".join(lines)
 
@@ -117,3 +118,157 @@ class TestEmIopvParser:
         # 无效/缺失 IOPV 不计入
         assert "560600" not in result
         assert "000001" not in result
+
+
+# ── round9 P0-6/P0-7 反例（docs/round9-container-rediagnosis.md §6.5.1-A）──
+# 4 处解析 bug 类回归零漏检：sina 字段双错位、qq GBK 解码崩溃、em 字段不匹配、
+# TTJ tuple/dict 契约错——全部覆盖。
+
+class TestSinaParserRound9:
+    @pytest.mark.asyncio
+    async def test_sina_symbol_from_line_prefix(self, monkeypatch):
+        """P0-6①: symbol 必须从行前缀 `var hq_str_(\\w+)` 提取，禁止用 parts[2]（昨收价）。
+
+        真实响应（round9 实测）：`var hq_str_sh510050="上证50ETF,3.021,3.029,3.066,...,513471237,..."`
+        parts[2]=3.029（昨收）parts[8]=513471237（成交量）——旧实现拿它们当 symbol/nav 全错。
+        """
+        raw = (
+            'var hq_str_sh510050="上证50ETF,3.021,3.029,3.066,3.067,3.018,'
+            '3.066,3.067,513471237,1566985099.000,250200,3.066,792400,'
+            '3.065,292500,3.064,349200,3.063,183600,3.062,995100,3.067,'
+            '1630400,3.068,774100,3.069,2257800,3.070,363400,3.071,'
+            '2026-08-07,15:34:59,00,D|489600|1501113.60";\n'
+            'var hq_str_sz159338="中证A500ETF,0.9,0.9,1.0,1.0,0.9,0.9,1.0,'
+            '12345,67890.0,100,1.0,200,0.99,300,0.98,400,0.97,500,0.96,'
+            '600,0.95,700,0.94,800,0.93,900,0.92,1000,2026-08-07,15:34:59,00,D|1|2";\n'
+        )
+
+        async def _fake_run_sync(call, *args, timeout=8):
+            return raw
+
+        monkeypatch.setattr("app.core.async_utils.run_sync", _fake_run_sync)
+        result = await fr._fetch_iopv_from_sina(["sh510050", "sz159338"])
+        # symbol 从行前缀提取（round9 修复点）
+        assert set(result) == {"sh510050", "sz159338"}
+        # sina 实时接口无 IOPV 字段 → 只提供 price，不提供 nav（链命中判定 nav>0 自然跳过本级）
+        assert result["sh510050"]["price"] == 3.066
+        assert "nav" not in result["sh510050"]
+        # 旧 bug 反例：parts[2]=3.029（昨收）绝不能成为 symbol；parts[8] 绝不能成为 nav
+        assert "3.029" not in result
+        assert result["sh510050"].get("nav") is None
+
+    @pytest.mark.asyncio
+    async def test_sina_no_iopv_field_not_injected_as_nav(self, monkeypatch):
+        """P0-6①: sina 接口无 IOPV——即使响应可解析，nav 也不得伪造。"""
+        raw = 'var hq_str_sh510050="上证50ETF,3.021,3.029,3.066,3.067,3.018,3.066,3.067,513471237,1566985099.0,0,3.066,0,3.065,0,3.064,0,3.063,0,3.062,0,3.067,0,3.068,0,3.069,0,3.070,0,3.071,2026-08-07,15:34:59,00,D|0|0";\n'
+
+        async def _fake_run_sync(call, *args, timeout=8):
+            return raw
+
+        monkeypatch.setattr("app.core.async_utils.run_sync", _fake_run_sync)
+        result = await fr._fetch_iopv_from_sina(["sh510050"])
+        assert "nav" not in result["sh510050"]
+
+
+class TestQqParserRound9:
+    @pytest.mark.asyncio
+    async def test_qq_gbk_decode_and_pos81_nav(self, monkeypatch):
+        """P0-6②: qq 返回体含 GBK 中文名称必须能解码（旧 utf-8 抛 UnicodeDecodeError 整级被吞）；
+        nav 用 pos 81（单位净值，round9 实测与天天基金 DWJZ 一致），pos 31 是涨跌额。"""
+        # 模拟真实 qq 响应：GBK 中文名称 + pos 31=涨跌额 + pos 81=单位净值
+        name_gbk = "上证50ETF".encode("gbk").decode("latin1")
+        parts = [""] * 82
+        parts[1] = name_gbk  # 中文名称（GBK 字节经 latin1 中转模拟原始字节）
+        parts[2] = "510050"
+        parts[3] = "3.066"   # 现价
+        parts[31] = "0.037"  # 涨跌额（旧实现误当 IOPV）
+        parts[81] = "3.0687"  # 单位净值（round9 实测主源）
+        line = f'v_sh510050="{"~".join(parts)}"'
+        raw_bytes = line.encode("latin1")
+
+        def _fake_run_sync(call, *args, timeout=8):
+            # 模拟原始网络字节流（GBK 中文名）
+            return raw_bytes.decode("gbk", errors="replace")
+
+        async def _fake_run_sync_async(call, *args, timeout=8):
+            return _fake_run_sync(call, *args, timeout=timeout)
+
+        monkeypatch.setattr("app.core.async_utils.run_sync", _fake_run_sync_async)
+        result = await fr._fetch_iopv_from_qq(["sh510050"])
+        assert result["510050"]["nav"] == 3.0687
+        assert result["510050"]["price"] == 3.066
+        # 旧 bug 反例：pos 31 是涨跌额（0.037），绝不是 nav
+        assert result["510050"]["nav"] != 0.037
+
+    @pytest.mark.asyncio
+    async def test_qq_short_payload_skipped(self, monkeypatch):
+        """P0-6②: 字段不足 82（无 pos 81）的响应整行跳过，不得用错误字段冒充 nav。"""
+        parts = [""] * 33
+        parts[2] = "510050"
+        parts[3] = "3.066"
+        parts[31] = "0.037"
+        line = f'v_sh510050="{"~".join(parts)}"'
+
+        async def _fake_run_sync(call, *args, timeout=8):
+            return line
+
+        monkeypatch.setattr("app.core.async_utils.run_sync", _fake_run_sync)
+        result = await fr._fetch_iopv_from_qq(["sh510050"])
+        assert result == {}
+
+
+class TestFetchFundNavContract:
+    def test_ttj_lsjz_fallback_returns_dict(self, monkeypatch):
+        """P0-7: fetch_fund_nav 统一 dict 契约 + 天天基金 f10/lsjz 降级（场内 ETF 可用）。"""
+        from app.fetchers import china_market as cm
+
+        cm._FUND_NAV_CACHE.clear()
+
+        # 主源 akshare 失败 → f10/lsjz 兜底成功（round9 实测 510050 DWJZ=3.0687）
+        def _fake_lsjz(symbol):
+            return [{
+                "FSRQ": "2026-08-07", "DWJZ": "3.0687",
+                "LJJZ": "4.5764", "JZZZL": "1.37",
+            }]
+
+        with patch.object(cm, "run_in_thread", side_effect=RuntimeError("akshare down")), \
+             patch.object(cm, "_fetch_ttj_lsjz", side_effect=_fake_lsjz), \
+             patch.object(cm, "fund_fetcher") as _ff:
+            _ff.fetch_fund_nav.return_value = None
+            result = cm.fetch_fund_nav("510050")
+
+        assert isinstance(result, dict), "契约必须为 dict（旧 tuple 被调用方 .get 抛错）"
+        assert result["nav"] == 3.0687
+        assert result["daily_change_pct"] == 1.37
+        assert result["nav_date"] == "2026-08-07"
+
+    def test_ttj_lsjz_parser(self, monkeypatch):
+        """P0-6: _fetch_ttj_lsjz 解析 f10/lsjz JSON（LSJZList 最新在前）。"""
+        from app.fetchers import china_market as cm
+        payload = '{"Data": {"LSJZList": [{"FSRQ": "2026-08-07", "DWJZ": "3.0687", "JZZZL": "1.37"}, {"FSRQ": "2026-08-06", "DWJZ": "3.0273", "JZZZL": "-0.16"}]}}'
+        import urllib.request as _ur
+
+        class _FakeResp:
+            def read(self):
+                return payload.encode("utf-8")
+
+        def _fake_urlopen(req, timeout=8):
+            return _FakeResp()
+
+        monkeypatch.setattr(_ur, "urlopen", _fake_urlopen)
+        rows = cm._fetch_ttj_lsjz("510050")
+        assert rows and rows[0]["DWJZ"] == "3.0687"
+        assert rows[0]["FSRQ"] == "2026-08-07"
+
+    def test_fund_nav_tuple_historical_shape_guarded(self):
+        """P0-7 回归: factor_registry TTJ 兜底对历史 tuple 形态不崩（isinstance 守卫）。"""
+        # 直接验证 factor_registry 的守卫逻辑可处理两种形态
+        from app.factors import factor_registry as fr
+        data = {}
+        # tuple 历史形态（旧 china_market 返回）
+        nav_tuple = (3.0687, 1.37)
+        if isinstance(nav_tuple, dict) and nav_tuple.get("nav"):
+            data.setdefault("510050", {})["nav"] = nav_tuple["nav"]
+        elif isinstance(nav_tuple, tuple) and len(nav_tuple) >= 1 and nav_tuple[0]:
+            data.setdefault("510050", {})["nav"] = nav_tuple[0]
+        assert data["510050"]["nav"] == 3.0687

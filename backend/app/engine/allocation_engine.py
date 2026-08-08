@@ -215,18 +215,25 @@ def _dominant_factor(factor_scores: dict[str, float], profile_weights: dict[str,
     return _FACTOR_LABELS.get(top, top)
 
 # P1-3: 强制保留标的（权重不低于 3%，确保进入分配）# 5% ×4=20% 占用过多预算导致总持仓不足 8 只，调整为 3% ×4=12%
-MANDATORY_CODES = {"510300", "560600", "518880", "511090"}
+# round9 P0-8: 560600（历史写错的中证A500锚：实际为医药白酒ETF/零成交/全源无此证券）
+# → 159338（真实中证A500ETF，行情可用），并补 159338 归核心层的定层分支（market_data_hub）
+# P2-10 (round9 §4.3-B): 候选池身份校验——强制锚在池层/设计层双防线：
+#   ①池层：etf_scanner filter 依赖真实行情成交额/规模（MIN_AVG_AMOUNT），幽灵锚（零成交/
+#     无此证券）过不了 filter 进不了候选池；静态兜底 WIDE_BASIS_STATIC 条目经 P0-8 清点后
+#     均为真实可成交标的；
+#   ②设计层：P1-5 gate——三源（pool/快照/K线）全拿不到涨跌的核心标的权重清零 + 标注；
+#   ③验收层：verify_e2e P0-8 断言（方案无幽灵锚 560600）。
+MANDATORY_CODES = {"510300", "159338", "518880", "511090"}
 # R5-0-2: 公共底仓「宽基锚」——跨方案核心层重叠豁免仅限这些标的 + 强制标的
-#（与 verify_e2e M7/P1-1 口径一致：510300/560600/159338 为沪深300/中证A500 锚）。
-# 159338 为深市中证A500ETF（非强制），允许作为公共底仓跨方案回补。
-_COMMON_ANCHOR_SYMBOLS = {"510300", "560600", "159338"}
+#（与 verify_e2e M7/P1-1 口径一致：510300/159338 为沪深300/中证A500 锚）。
+_COMMON_ANCHOR_SYMBOLS = {"510300", "159338"}
 MANDATORY_MIN_WEIGHT = 0.03
 
 # ── Default candidate pool (fallback if candidates list is empty) ──
 _DEFAULT_CANDIDATES: list[dict[str, Any]] = [
     # Core
     {"symbol": "510300", "name": "沪深300ETF", "layer": "core"},
-    {"symbol": "560600", "name": "中证A500ETF", "layer": "core"},
+    {"symbol": "159338", "name": "中证A500ETF", "layer": "core"},
     {"symbol": "512890", "name": "红利低波ETF", "layer": "core"},
     # Satellite
     {"symbol": "512480", "name": "半导体ETF", "layer": "satellite"},
@@ -668,7 +675,7 @@ def allocate(
         # ── Core layer ──
         # Penalize symbols already used in prior strategies (P1)
         _penalize = _used_symbols_for_overlap.copy() if _used_symbols_for_overlap else set()
-        # M4: 核心层实际数量 = layer_count - 该层强制标的数（强制 510300/560600 在
+        # M4: 核心层实际数量 = layer_count - 该层强制标的数（强制 510300/159338 在
         # _select_and_weight 内额外叠加，导致核心层 5-6 只、单只权重被摊薄）。
         mandatory_in_core = sum(1 for c in core_candidates if c.get("symbol") in MANDATORY_CODES)
         core_max_count = max(int(meta.get("layer_count", {}).get("core", 4)) - mandatory_in_core, 1)
@@ -690,7 +697,7 @@ def allocate(
                 # R5-0-2: 兜底放宽——豁免范围仅限「公共底仓 + 强制标的」，不能整体放开。
                 # 旧逻辑整体放开导致 balanced/aggressive 核心层重叠 3 只
                 #（159915/562000/588000）→ P1-2 门禁 FAIL。修复：去重后非强制候选 <2
-                # 时，只回补「宽基锚」（510300/560600/159338）作为公共底仓 + 至多 1 只
+                # 时，只回补「宽基锚」（510300/159338）作为公共底仓 + 至多 1 只
                 # 高分非锚标的（保证核心层数量下限 [3,5]，重叠仍 ≤1）；其余已用标的一律不回补。
                 _deduped_syms = {c.get("symbol") for c in _deduped_pool}
                 _anchor_backfill = [
@@ -723,7 +730,7 @@ def allocate(
             penalize_symbols=_penalize,
         )
         # O16 (round7 §7 P18): 核心层大盘宽基族互斥——非强制大盘宽基数量 ≤1
-        # （强制锚 510300/560600 已占 2 个名额；balanced/aggressive 建议 ≤0，
+        # （强制锚 510300/159338 已占 2 个名额；balanced/aggressive 建议 ≤0，
         # defensive 允许 ≤1 上证50 场景）。超出按 factor_score 降序剔除低分者，
         # 权重按其余核心权重占比回补；剔除后核心层 <3 只时放宽保留 ≤1 只。
         _core_non_anchor_large = [

@@ -319,15 +319,9 @@ async def _build_price_map_async(etfs):
                 # P2-1: NAV 单源 3s 截断
                 nav = await asyncio.wait_for(
                     run_sync(market_data_hub.get_fund_nav, s), timeout=3.0)
-                if nav:
-                    if isinstance(nav, tuple) and len(nav) >= 1:
-                        return s, (float(nav[0]), float(nav[1]) if len(nav) > 1 else 0.0)
-                    elif isinstance(nav, dict) and nav.get("nav") and nav.get("nav_date"):
-                        from datetime import datetime
-                        nav_v = float(nav["nav"])
-                        nav_date = datetime.strptime(nav["nav_date"], "%Y-%m-%d")
-                        if (datetime.now() - nav_date).days <= 3:
-                            return s, (nav_v, 0.0)
+                # round9 P0-7: fetch_fund_nav 契约统一为 dict {"nav","daily_change_pct","nav_date"}
+                if nav and isinstance(nav, dict) and nav.get("nav"):
+                    return s, (float(nav["nav"]), float(nav.get("daily_change_pct") or 0.0))
             except Exception:
                 pass
             return s, None
@@ -558,14 +552,15 @@ def _llm_timeout_for(data_quality: dict) -> int:
 
     - all_empty（上下文不足）→ 15s 快速兜底（快速失败更合理，不必等满）
     - partial → 30s（有部分数据，多给 LLM 一点时间消化）
-    - 数据完整 → 60s（对齐设计报告 90s 的宽松档）
+    - 数据完整 → 90s（round9 P0-5: 60→90 对齐设计报告 O7 验收；DeepSeek 偶发慢，
+      #344 60s 超时两分钟后重试即成功——专业场景宁可多等也不降级为全 hold 模板）
     旧实现恒 30s：数据采集也占 30s，LLM 实际剩余不足 → 恒超时（round7 P5）。
     """
     if data_quality.get("all_empty"):
         return 15
     if data_quality.get("partial"):
         return 30
-    return 60
+    return 90
 
 
 async def _collect_strategy_data(
@@ -634,7 +629,14 @@ async def strategy_check(
         etfs = await list_etfs(db, portfolio_type)
     
     if not etfs:
-        return {"summary": "组合为空，请先添加ETF或生成组合方案", "suggestions": []}
+        # P1-16 (round9 §4.5): 空组合附诊断——记录查询条件/行数/过滤明细，
+        # 区分「真空组合」与「查询条件异常」（旧裸文案无任何诊断信息）
+        diag = await _empty_portfolio_diagnosis(db, portfolio_type)
+        return {
+            "summary": "组合为空，请先添加ETF或生成组合方案",
+            "suggestions": [],
+            "empty_diagnosis": diag,
+        }
     
     # Build price map - handle both SQLAlchemy objects and dicts
     def _get_attr(e, attr, default=None):
@@ -698,14 +700,22 @@ async def strategy_check(
             factor_breakdowns[symbol] = {
                 "factor_scores": fb if isinstance(fb, dict) else {},
                 "technical_indicators": ind if isinstance(ind, dict) else {},
-                "technical_signal": sig if isinstance(sig, dict) else {"signal": "hold"},
+                # P1-13① (round9 §4.4-1): 空 dict 也显式兑底——`{"signal": None, "reason": "技术指标不可用"}`
+                # （旧实现仅兑底非 dict，空 dict 的 sig={} 穿透 → 真实信号注入被跳过 → 前端信号列空白）
+                "technical_signal": sig if (isinstance(sig, dict) and sig.get("signal")) else {"signal": None, "reason": "技术指标不可用"},
                 "weight_drift": drift,
             }
     
     # 统计因子数据质量
+    # P1-15 (round9 §4.4-3): filled 判定排除兑底默认值——RSI/KDJ 恰为 50、ATR 恰为 0、
+    # vol_ratio 恰为 1 等中性默认值是「缺数据兑底」而非真实值，计入 filled 会报「N/M 正常」假正常
     filled_factor_count = sum(
         1 for fb in factor_breakdowns.values()
-        if fb.get("factor_scores") and any(v != 0 for v in fb["factor_scores"].values())
+        if _has_real_factor_values(fb.get("factor_scores") or {})
+    )
+    fallback_factor_count = sum(
+        1 for fb in factor_breakdowns.values()
+        if not _has_real_factor_values(fb.get("factor_scores") or {})
     )
     total_factor_count = len(factor_breakdowns)
     data_quality = {
@@ -713,6 +723,9 @@ async def strategy_check(
         "total_count": total_factor_count,
         "all_empty": filled_factor_count == 0,
         "partial": 0 < filled_factor_count < total_factor_count,
+        # P1-15: 兑底占比（全中性默认值的标的）——报告明示真实数据覆盖率
+        "fallback_count": fallback_factor_count,
+        "fallback_ratio": round(fallback_factor_count / total_factor_count, 4) if total_factor_count else 0.0,
     }
 
     # LLM 分析（Z26: 显式预算，超时走规则引擎兜底）
@@ -829,8 +842,37 @@ async def strategy_check(
                     _ind = (_entry.get("industry") or "").strip()
                     if _ind and _ind != "unknown":
                         industry_map[_sym] = _ind
+        # P1-14 (round9 §4.4-2): 独立兑底链——候选池空（数据源弱/EM 被拦）时
+        # industry_map 仍能注入：instruments 表取名称 → ETFClassifier 独立分类
         if industry_map:
             logger.debug("[strategy_check] industry map built for %d symbols", len(industry_map))
+        _missing_ind = [s for s in (symbols or []) if s and s not in industry_map]
+        if _missing_ind:
+            try:
+                from ..services.etf_classifier import ETFClassifier
+                _classifier = ETFClassifier()
+                _inst_map: dict[str, str] = {}
+                try:
+                    from ..models.search import Instrument
+                    _inst_rows = list((await db.execute(
+                        select(Instrument).where(Instrument.symbol.in_(_missing_ind))
+                    )).scalars().all())
+                    for _r in _inst_rows:
+                        _inst_map[_r.symbol] = _r.name
+                except Exception as _ie:
+                    logger.debug("[strategy_check] instruments lookup failed (non-fatal): %s", _ie)
+                _cls_input = [{"symbol": s, "name": _inst_map.get(s, s),
+                               "tracked_index": ""} for s in _missing_ind]
+                _cls = _classifier.batch_classify(_cls_input) or {}
+                for _sym in _missing_ind:
+                    _c = _cls.get(_sym) or {}
+                    _ind = (_c.get("industry") or "").strip()
+                    if _ind and _ind != "unknown":
+                        industry_map[_sym] = _ind
+                if industry_map:
+                    logger.debug("[strategy_check] industry map backfilled via ETFClassifier for %d symbols", len(industry_map))
+            except Exception as _ce:
+                logger.debug("[strategy_check] industry classifier fallback failed (non-fatal): %s", _ce)
     except Exception as _e:
         logger.debug("[strategy_check] industry map build failed (non-fatal): %s", _e)
 
@@ -848,18 +890,22 @@ async def strategy_check(
         fb = factor_breakdowns.get(sym, {})
         real_fs = fb.get("factor_scores", {})
         real_sig = fb.get("technical_signal", {})
-        if real_fs and isinstance(real_fs, dict) and any(v != 0 for v in real_fs.values()):
+        if _has_real_factor_values(real_fs):
             # 用真实因子分覆盖 LLM 编造的因子描述（F11: 中文名+方向解读）
             h["factor_summary"] = format_factor_summary(real_fs)
-            # Phase 2.7.7: 注入因子级可用性详情
-            filled = sum(1 for v in real_fs.values() if isinstance(v, (int, float)) and abs(v) > 0.01)
+            # Phase 2.7.7: 注入因子级可用性详情（P1-15: 排除兑底默认值）
+            filled = sum(1 for k, v in real_fs.items()
+                         if isinstance(v, (int, float)) and _factor_value_real(k, v))
             total = len(real_fs)
             h["factor_availability"] = {"filled": filled, "total": total, "ratio": f"{filled}/{total}"}
         elif data_quality and data_quality.get("all_empty"):
             h["factor_availability"] = {"filled": 0, "total": 0, "ratio": "0/0"}
-        if real_sig and isinstance(real_sig, dict) and real_sig.get("signal"):
-            sig = real_sig["signal"]
-            h["tech_signal"] = f"{sig.upper()}，真实信号"
+        # P1-13② (round9 §4.4-1): 无论有无真实信号都写 tech_signal（无则「数据不可用」标注，
+        # 禁止字段缺失 → 前端信号列空白）
+        if isinstance(real_sig, dict) and real_sig.get("signal"):
+            h["tech_signal"] = f"{str(real_sig['signal']).upper()}，真实信号"
+        else:
+            h["tech_signal"] = "数据不可用"
 
         # FIX-10: 始终基于因子覆盖率计算 confidence，不依赖 LLM source_confidence
         filled_count = data_quality.get("filled_count", 0) if data_quality else 0
@@ -955,6 +1001,9 @@ async def strategy_check(
         "data_quality": {
             "filled_count": filled_count,
             "total_count": total_count,
+            # P1-15: 兜底占比（全中性默认值标的）——报告明示真实数据覆盖率，防「N/M 正常」假正常
+            "fallback_count": data_quality.get("fallback_count", 0),
+            "fallback_ratio": data_quality.get("fallback_ratio", 0.0),
         },
         "data_confidence": data_confidence,
         "coverage": coverage,
@@ -964,6 +1013,66 @@ async def strategy_check(
     if cache_key:
         _strategy_check_cache[cache_key] = (_time.monotonic(), result)
     return result
+
+
+def _factor_value_real(key: str, value: float) -> bool:
+    """P1-15 (round9 §4.4-3): 判断因子值是否为真实值（非中性兑底默认值）。
+
+    缺数据兑底默认值（factor_registry 对无历史/无数据的标的返回中性值）：
+      - RSI / KDJ 恰为 50（技术指标中性）
+      - vol_ratio 恰为 1（量比中性）
+      - 其他因子恰为 0（ATR/MACD 等缺数据）
+    这些值计入 filled 会造「因子数据 N/M 正常」假正常（#345: RSI(14)=50/KDJ=50 全兑底仍报 10/10）。
+    """
+    if not isinstance(value, (int, float)):
+        return False
+    key_l = (key or "").lower()
+    if ("rsi" in key_l or "kdj" in key_l) and abs(value - 50.0) < 1e-9:
+        return False
+    if "vol_ratio" in key_l and abs(value - 1.0) < 1e-9:
+        return False
+    if abs(value) < 1e-9:
+        return False
+    return True
+
+
+def _has_real_factor_values(fs: dict) -> bool:
+    """P1-15: 是否存在至少一个非中性兑底默认值的因子值。"""
+    if not isinstance(fs, dict) or not fs:
+        return False
+    return any(_factor_value_real(k, v) for k, v in fs.items())
+
+
+async def _empty_portfolio_diagnosis(db: AsyncSession, portfolio_type: str | None) -> dict:
+    """P1-16 (round9 §4.5-4): 空持仓诊断——记录查询条件/行数/过滤明细。
+
+    旧实现 `list_etfs` 空 → 直接返回裸文案「组合为空」，不记录查询条件/原因，
+    孤立 check 记录（#343 类）与真空组合无法区分。本函数补齐诊断信息。
+    """
+    try:
+        all_rows = list((await db.execute(select(PortfolioETF))).scalars().all())
+        total = len(all_rows)
+        active = [e for e in all_rows if e.is_active]
+        active_syms = [e.symbol for e in active]
+        if portfolio_type:
+            matched = [e.symbol for e in active if e.portfolio_type == portfolio_type]
+        else:
+            matched = active_syms
+        note = "真空组合（无任何持仓记录）"
+        if active:
+            note = ("查询条件异常（有 is_active 持仓但 portfolio_type 不匹配）"
+                    if not matched else "持仓存在但查询结果为空（异常）")
+        return {
+            "portfolio_type": portfolio_type,
+            "db_total_rows": total,
+            "is_active_rows": len(active),
+            "matched_rows": len(matched),
+            "all_symbols": active_syms[:50],
+            "matched_symbols": matched[:50],
+            "note": note,
+        }
+    except Exception as e:  # 诊断失败不影响主流程
+        return {"portfolio_type": portfolio_type, "diagnosis_error": str(e)}
 
 
 def _compute_confidence(filled_count: int, total_count: int) -> str:
@@ -1012,12 +1121,19 @@ def _build_rule_fallback_holdings_analysis(
         ind = ""
         if isinstance(fb.get("technical_indicators"), dict):
             ind = (fb["technical_indicators"].get("sector") or "")
+        # P1-13③ (round9 §4.4-1): 骨架也带 tech_signal（真实值或「数据不可用」标注）——
+        # 旧骨架无该字段 → 规则引擎兜底路径前端信号列空白
+        _tech_sig = "数据不可用"
+        _ts = (fb.get("technical_signal") or {})
+        if isinstance(_ts, dict) and _ts.get("signal"):
+            _tech_sig = f"{str(_ts['signal']).upper()}，真实信号"
         result.append({
             "symbol": sym,
             "name": name or sym,
             "weight": weight_map.get(sym),
             "factor_summary": factor_str,
             "industry": ind,
+            "tech_signal": _tech_sig,
             "generated_by": "规则引擎生成",
         })
     return result

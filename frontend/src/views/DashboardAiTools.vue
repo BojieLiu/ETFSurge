@@ -588,7 +588,9 @@ async function loadHistoryList() {
     const res = await portfolioApi.getTimeline(20, 0)
     const data = res.data || {}
     // Z27: /portfolio/timeline 已合并 design+check，直接使用 items（移除未定义的 checks 引用）
-    const items = (data.items || [])
+    // P2-11 (round9 §4.5-3): 过滤无 task 关联的孤立 check 记录（#343 类「组合为空」误报）——
+    // 避免历史异常记录被误读为当前检查结果；详情页仍可通过详情接口查看（含生成时间）
+    const items = (data.items || []).filter(it => !(it._type === 'check' && it.orphan))
 
     // 合并运行中的设计任务（追加到列表前）
     const runningTasks = taskStore.tasks

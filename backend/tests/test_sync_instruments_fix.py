@@ -27,12 +27,14 @@ class TestCollectAllSegments:
     async def test_partial_segment_failure_logs_error(self, caplog):
         """N09: 部分段失败打 ERROR，成功段数据保留。"""
         # P1-7: 个股段含降级链（东财 em 失败 → 新浪 spot 成功）
+        # P1-2 (round9): ETF 段也含降级链（fund_etf_spot_sina）——mock 两源都失败
+        # 才是真失败段（打 ERROR 日志）
         async def _side(fn_name, *a, **kw):
             if fn_name == "stock_zh_a_spot_em":
                 raise ConnectionError("akshare down")
             if fn_name == "stock_zh_a_spot":
                 return [_row("600519", "贵州茅台")]
-            if fn_name == "fund_etf_spot_em":
+            if fn_name in ("fund_etf_spot_em", "fund_etf_spot_sina"):
                 raise ConnectionError("ETF down")
             return [_row("00700", "腾讯控股", market="HK")]
 

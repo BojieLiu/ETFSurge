@@ -73,7 +73,10 @@ import concurrent.futures as _cf
 _MOOTDX_TIMEOUT = 6
 # mootdx 单次读操作超时（client.quotes / client.bars 的 socket read 超时）
 # 使用 concurrent.futures 实现，防止 mootdx socket 读挂死线程池
-_MOOTDX_READ_TIMEOUT = 8
+# P0-4 (round9 §10): mootdx 读超时 8→3s——容器内实测 0.35s 返回真实行情，
+# 3s 余量充足；数据源弱/EM 冷却期 mootdx 空转 8s 是 watchlist 29.9s 与批量 5.7s
+# 的稳定开销（每次调用链 mootdx→tencent→sina 都要先空等 mootdx 超时）。
+_MOOTDX_READ_TIMEOUT = 3
 
 _MOOTDX_CLIENT: "Quotes | None" = None
 # 单线程 executor 用于 mootdx 读操作的超时保护
@@ -491,11 +494,54 @@ def fetch_etf_net_value(symbol: str) -> dict | None:
     return None
 
 
+# P1-9 (round9 §6.5.1-B): fund_etf_spot_em 的「最新份额」降级缓存——全市场 ETF spot
+# 拉取 ~24s（分页），只能 1h 缓存后复用；仅当前份额（无历史，change_20d 不可算）。
+_SPOT_SHARES_CACHE: dict[str, float] = {}
+_SPOT_SHARES_TS = 0.0
+_SPOT_SHARES_TTL = 3600.0
+
+
+def _fetch_spot_shares() -> dict[str, float]:
+    """懒加载 fund_etf_spot_em 的 symbol→最新份额 映射（1h 内存缓存，失败回退旧值）。"""
+    global _SPOT_SHARES_CACHE, _SPOT_SHARES_TS
+    if _SPOT_SHARES_CACHE and (time.time() - _SPOT_SHARES_TS) < _SPOT_SHARES_TTL:
+        return _SPOT_SHARES_CACHE
+    try:
+        def _p():
+            import akshare as ak
+            return ak.fund_etf_spot_em()
+        df = run_in_thread(_p, timeout=25, executor="long")
+        _decode_df(df)
+        out: dict[str, float] = {}
+        if df is not None and len(df) > 0:
+            for _, r in df.iterrows():
+                code = str(r.get("代码", "") or "")
+                val = r.get("最新份额")
+                if code and val is not None:
+                    try:
+                        fv = float(val)
+                        if fv > 0:
+                            out[code] = fv
+                    except (TypeError, ValueError):
+                        pass
+        if out:
+            _SPOT_SHARES_CACHE = out
+            _SPOT_SHARES_TS = time.time()
+        return out
+    except Exception:
+        return dict(_SPOT_SHARES_CACHE)
+
+
 def fetch_etf_shares_outstanding(symbol: str) -> dict | None:
     """获取ETF份额数据（用于规模变化率计算）。
 
-    使用 akshare fund_etf_hist_em 获取份额数据。
-    返回: { "total_shares": float, "shares_change_20d": float }
+    round9 P1-9 (§6.5.1-B): 主源 fund_etf_hist_em 实测返回的列是行情字段
+    （日期/开盘/收盘/.../换手率），**无「份额/规模」列** → 主源恒 None（旧代码
+    静默失败无降级）。修复：新增降级源 fund_etf_spot_em 的「最新份额」列
+    （实测 510050=7107966720.0 可用，1h 缓存防 24s 全量拉取）；份额历史序列
+    无免费公开源 → shares_change_20d 无法计算时显式 None + reason 标注
+    （诚实降级，不再伪装有数据）。
+    返回: { "total_shares": float, "shares_change_20d": float|None, "reason": str|None }
     失败返回 None。
     """
     try:
@@ -505,17 +551,31 @@ def fetch_etf_shares_outstanding(symbol: str) -> dict | None:
         df = run_in_thread(_p, timeout=8, executor="long")
         if df is None or df.empty:
             return None
+        _decode_df(df)
         cols = [c for c in df.columns if "份额" in str(c) or "规模" in str(c)]
-        if not cols:
-            return None
-        shares_col = cols[0]
-        latest = float(df.iloc[-1][shares_col])
-        if len(df) >= 20:
-            prev = float(df.iloc[-20][shares_col])
-            change_20d = (latest - prev) / prev if prev > 0 else 0.0
-        else:
-            change_20d = 0.0
-        return {"total_shares": latest, "shares_change_20d": change_20d}
+        if cols:
+            shares_col = cols[0]
+            latest = float(df.iloc[-1][shares_col])
+            if len(df) >= 20:
+                prev = float(df.iloc[-20][shares_col])
+                change_20d = (latest - prev) / prev if prev > 0 else 0.0
+            else:
+                change_20d = 0.0
+            return {"total_shares": latest, "shares_change_20d": change_20d}
+    except Exception:
+        pass
+
+    # 降级 (P1-9): fund_etf_hist_em 无「份额」列 → 用 fund_etf_spot_em 的「最新份额」
+    #（当前份额，1h 缓存）；份额历史序列无公开源 → change_20d=None + reason 标注。
+    try:
+        shares_map = _fetch_spot_shares()
+        val = shares_map.get(symbol)
+        if val is not None and val > 0:
+            return {
+                "total_shares": val,
+                "shares_change_20d": None,
+                "reason": "份额历史源不可用（fund_etf_hist_em 无份额列），仅当前份额",
+            }
     except Exception:
         pass
     return None
@@ -1083,21 +1143,50 @@ def _get_nav_session() -> "requests.Session":
     return _fund_nav_session
 
 
-def fetch_fund_nav(symbol: str) -> tuple[float, float] | None:
-    """获取场外开放式基金的单位净值与日涨跌幅（用于 OTC 联接基金）。
+def _fetch_ttj_lsjz(symbol: str) -> list[dict[str, Any]]:
+    """天天基金 f10/lsjz 历史净值（round9 P0-6：场内 ETF 的可靠日净值源）。
 
-    返回 (unit_net_value, daily_growth_pct)，取最新一条记录；不可用返回 None。
+    实测（2026-08-07）：`api.fund.eastmoney.com/f10/lsjz?fundCode=510050` 返回
+    {"Data": {"LSJZList": [{"FSRQ":"2026-08-07","DWJZ":"3.0687","LJJZ":"4.5764","JZZZL":"1.37"}]}}
+    ——对场内 ETF 可用（akshare fund_open_fund_info_em 对场内 ETF 返回 0 行，见 P0-6 诊断）。
+    返回列表最新在前（pageIndex=1）。
+    """
+    try:
+        import urllib.request
+        import json
+        url = "https://api.fund.eastmoney.com/f10/lsjz?fundCode=%s&pageIndex=1&pageSize=2" % symbol
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "http://fundf10.eastmoney.com/",
+        })
+        resp = urllib.request.urlopen(req, timeout=8)
+        payload = json.loads(resp.read().decode("utf-8", errors="replace"))
+        rows = (payload.get("Data") or {}).get("LSJZList") or []
+        return [r for r in rows if r.get("DWJZ")]
+    except Exception:
+        return []
 
-    使用模块级 Session 复用 HTTP 连接减少 SSL 握手（Z05）。
-    U7/N08 R3: 24h 内存缓存（日频数据）——预热首次拉取后不再重复，
-    消除 cProfile 中 10 次 fund_open_fund_info_em 累计 7.5s 的预热瓶颈。
+
+def fetch_fund_nav(symbol: str) -> dict[str, Any] | None:
+    """获取基金单位净值与日涨跌幅（场外联接基金 + 场内 ETF 净值兜底）。
+
+    round9 P0-7: **契约统一为 dict** —— ``{"nav", "daily_change_pct", "nav_date"}``。
+    旧实现返回 ``tuple[float, float]``，与 factor_registry 调用方 ``_nav.get("nav")``
+    （dict 契约）不匹配 → AttributeError 被 except 吞掉 → TTJ 兜底永远静默失败；
+    此处统一为 dict（与 fund_fetcher.fetch_fund_nav 契约一致）。
+
+    round9 P0-6: 主源 akshare ``fund_open_fund_info_em``（场外基金）；对场内 ETF 该接口返回
+    0 行 → 新增降级源天天基金 f10/lsjz（实测 510050 DWJZ=3.0687 可用）——折溢价率因子
+    由此拿到可靠日净值口径。
+
+    24h 内存缓存（日频数据，预热首拉后不再重复）。
     """
     _now = time.time()
     _cached = _FUND_NAV_CACHE.get(symbol)
     if _cached and (_now - _cached[0]) < _FUND_NAV_TTL:
         return _cached[1]
 
-    result: tuple[float, float] | None = None
+    result: dict[str, Any] | None = None
     try:
         def _p():
             import akshare as ak
@@ -1109,19 +1198,41 @@ def fetch_fund_nav(symbol: str) -> tuple[float, float] | None:
             last = df.iloc[-1]
             nav = float(last.get("单位净值") or last.get("unit_net_value") or 0)
             chg = float(last.get("日增长率") or last.get("daily_growth_rate") or 0)
+            nav_date = str(last.get("净值日期") or last.get("nav_date") or "")
             if nav:
-                result = (nav, round(chg, 2))
+                result = {
+                    "nav": nav,
+                    "daily_change_pct": round(chg, 2),
+                    "nav_date": nav_date or None,
+                }
     except Exception:
         pass
 
-    # Fallback: 天天基金 API (uses connection-pooled session, Z05)
+    # Fallback 1 (round9 P0-6): 天天基金 f10/lsjz 历史净值——场内 ETF 可用
+    if result is None:
+        try:
+            rows = _fetch_ttj_lsjz(symbol)
+            if rows:
+                last = rows[0]
+                result = {
+                    "nav": float(last["DWJZ"]),
+                    "daily_change_pct": float(last.get("JZZZL") or 0),
+                    "nav_date": str(last.get("FSRQ") or ""),
+                }
+        except Exception:
+            pass
+
+    # Fallback 2: 天天基金 API (uses connection-pooled session, Z05)
     if result is None:
         try:
             session = _get_nav_session()
-            # Inject session into fund_fetcher's fetch if it supports it
             fb = run_in_thread(lambda: fund_fetcher.fetch_fund_nav(symbol), timeout=8, executor="long")
             if fb and fb.get("nav"):
-                result = (fb["nav"], fb.get("daily_change_pct", 0.0))
+                result = {
+                    "nav": float(fb["nav"]),
+                    "daily_change_pct": float(fb.get("daily_change_pct", 0.0)),
+                    "nav_date": fb.get("nav_date"),
+                }
         except Exception:
             pass
 
@@ -1218,6 +1329,40 @@ def _alphavantage_symbol(symbol: str, asset_type: str) -> str:
     return symbol
 
 
+def _fetch_tencent_hk_history(symbol: str) -> list[dict[str, Any]]:
+    """P1-1 (round9 §5/O2): 腾讯港股日 K 降级源（web.ifzq.gtimg.cn，非 EM）。
+
+    容器内 EM 被 TLS 拦截（round9 C4）时 stock_hk_hist（东财）恒空 → 腾讯港股
+    K 线兜底。返回 [{date, open, high, low, close, volume}, ...]（旧→新）。
+    """
+    try:
+        import json
+        import urllib.request
+        hk_code = symbol if symbol.startswith("hk") else f"hk{symbol}"
+        url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={hk_code},day,,,320,qfq"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        raw = urllib.request.urlopen(req, timeout=8).read().decode("utf-8", errors="replace")
+        payload = json.loads(raw)
+        data = (payload.get("data") or {}).get(hk_code) or {}
+        klines = data.get("qfqday") or data.get("day") or []
+        out = []
+        for row in klines:
+            if len(row) < 6:
+                continue
+            out.append({
+                "date": str(row[0]),
+                "open": float(row[1]), "close": float(row[2]),
+                "high": float(row[3]), "low": float(row[4]),
+                "volume": float(row[5]) if row[5] else 0,
+            })
+        # 统一旧→新（腾讯接口实测为旧→新；异常倒序时翻转）
+        if len(out) >= 2 and out[0]["date"] > out[-1]["date"]:
+            out.reverse()
+        return out
+    except Exception:
+        return []
+
+
 def _fetch_akshare_history(symbol: str, asset_type: str, period: str) -> list[dict[str, Any]]:
     try:
         import pandas as pd
@@ -1231,12 +1376,18 @@ def _fetch_akshare_history(symbol: str, asset_type: str, period: str) -> list[di
         df = run_in_thread(_p, timeout=8, executor="long")
         if df is not None and isinstance(df, pd.DataFrame) and not df.empty:
             _decode_df(df)
+            logger.debug("[history] %s %s: akshare main source hit (%d rows)", asset_type, symbol, len(df))
             return df.to_dict(orient="records")
-        # Fallback: Finnhub candles → Alpha Vantage
+        # P1-1: 逐源日志——旧实现静默降级，源链不可用时无任何痕迹
+        logger.warning("[history] %s %s: akshare %s empty/missing — fallback chain", asset_type, symbol,
+                       {"A": "stock_zh_a_hist", "HK": "stock_hk_hist", "US": "stock_us_hist"}.get(asset_type, "?"))
+        # Fallback: Finnhub candles → Alpha Vantage → Tencent HK（P1-1 新增，非 EM）
         if asset_type in ("HK", "US"):
             fh_result = run_in_thread(lambda: global_markets_fetcher.fetch_candles(symbol, "D"), timeout=8, executor="long")
             if fh_result:
+                logger.info("[history] %s %s: finnhub fallback hit (%d rows)", asset_type, symbol, len(fh_result))
                 return fh_result
+            logger.warning("[history] %s %s: finnhub fallback failed/empty", asset_type, symbol)
             # O2: alphavantage 用转换后符号（0700.HK）——旧实现传裸 00700 恒空
             av_result = run_in_thread(
                 lambda: global_markets_fetcher.fetch_daily_alphavantage(
@@ -1245,9 +1396,19 @@ def _fetch_akshare_history(symbol: str, asset_type: str, period: str) -> list[di
                 timeout=10, executor="long",
             )
             if av_result:
+                logger.info("[history] %s %s: alphavantage fallback hit (%d rows)", asset_type, symbol, len(av_result))
                 return av_result
+            logger.warning("[history] %s %s: alphavantage fallback failed/empty", asset_type, symbol)
+            # P1-1: 腾讯港股日 K（非 EM 源，容器 EM 被拦时唯一可用链）
+            if asset_type == "HK":
+                tx_result = _fetch_tencent_hk_history(symbol)
+                if tx_result:
+                    logger.info("[history] HK %s: tencent hk kline fallback hit (%d rows)", symbol, len(tx_result))
+                    return tx_result
+                logger.warning("[history] HK %s: tencent hk kline fallback failed/empty", symbol)
         return []
-    except Exception:
+    except Exception as e:
+        logger.warning("[history] %s %s history fetch failed: %s", asset_type, symbol, e)
         return []
 
 

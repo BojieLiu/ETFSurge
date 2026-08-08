@@ -54,6 +54,21 @@ def _try_two(name_lv, lv_fn, name_ak, ak_fn, default=None):
 # akshare 回退 (在独立线程中执行, 不会阻塞事件循环)
 # ---------------------------------------------------------------------------
 
+def _sector_change_pct(v) -> float | None:
+    """P2-3 (round9 §6.1): 板块涨跌幅值域校验——A股板块单日 ±10% 外视为数据源异常。
+
+    §6.1 实测「医疗研发外包 BK1600 单日暴涨 13.03%」极可疑（O5 值域校验未覆盖板块数据）；
+    超界返回 None（调用方标「数据源异常」或 0 兑底，不透传荒谬数值）。
+    """
+    try:
+        val = float(v or 0)
+    except (TypeError, ValueError):
+        return None
+    if abs(val) > 10.0:
+        return None
+    return val
+
+
 def _ak_industry_sectors():
     try:
         import akshare as ak
@@ -67,7 +82,8 @@ def _ak_industry_sectors():
                 "sector_code": r.get("板块代码", ""),
                 "sector_name": r.get("板块名称", ""),
                 "price": float(r.get("最新价", 0) or 0),
-                "change_pct": float(r.get("涨跌幅", 0) or 0),
+                # P2-3: 板块涨跌幅 ±10% 值域校验（超界→None→端点 0 兑底/标数据源异常）
+                "change_pct": _sector_change_pct(r.get("涨跌幅", 0)),
                 "change_amt": float(r.get("涨跌额", 0) or 0),
                 "volume": float(r.get("成交量", 0) or 0),
                 "amount": float(r.get("成交额", 0) or 0),
@@ -77,7 +93,7 @@ def _ak_industry_sectors():
                 "main_inflow": float(r.get("主力净流入", 0) or 0),
                 "lead_stock_name": str(r.get("领涨股票", "") or ""),
                 "lead_stock_code": str(r.get("领涨股票代码", "") or ""),
-                "lead_stock_chg": float(r.get("领涨股票涨跌幅", 0) or 0),
+                "lead_stock_chg": _sector_change_pct(r.get("领涨股票涨跌幅", 0)),
                 "up_count": int(r.get("上涨家数", 0) or 0),
                 "down_count": int(r.get("下跌家数", 0) or 0),
             })
@@ -99,7 +115,8 @@ def _ak_concept_sectors():
                 "sector_code": r.get("板块代码", ""),
                 "sector_name": r.get("板块名称", ""),
                 "price": float(r.get("最新价", 0) or 0),
-                "change_pct": float(r.get("涨跌幅", 0) or 0),
+                # P2-3: 板块涨跌幅 ±10% 值域校验（超界→None）
+                "change_pct": _sector_change_pct(r.get("涨跌幅", 0)),
                 "change_amt": float(r.get("涨跌额", 0) or 0),
                 "volume": float(r.get("成交量", 0) or 0),
                 "amount": float(r.get("成交额", 0) or 0),
@@ -109,7 +126,7 @@ def _ak_concept_sectors():
                 "main_inflow": float(r.get("主力净流入", 0) or 0),
                 "lead_stock_name": str(r.get("领涨股票", "") or ""),
                 "lead_stock_code": str(r.get("领涨股票代码", "") or ""),
-                "lead_stock_chg": float(r.get("领涨股票涨跌幅", 0) or 0),
+                "lead_stock_chg": _sector_change_pct(r.get("领涨股票涨跌幅", 0)),
                 "up_count": int(r.get("上涨家数", 0) or 0),
                 "down_count": int(r.get("下跌家数", 0) or 0),
             })
@@ -431,9 +448,11 @@ def fetch_em_sector_changes() -> dict[str, float]:
         import json as _json
         import urllib.request
         result: dict[str, float] = {}
-        # push2 对高频/大请求限流严格（RemoteDisconnected）→ push2delay 降级
-        # （延迟行情，板块 f3 一致；容器诊断证实 push2delay 可用）。
-        for host in ("push2.eastmoney.com", "push2delay.eastmoney.com"):
+        # 主源/降级源统一从 core.market_context 取（R61 门禁：禁止散落 push2delay 硬编码；
+        # P2-3: 回填值也过 ±10% 板块值域校验）
+        from ..core.market_context import EM_PUSH_HOST as _EM_HOST
+        hosts = (_EM_HOST, "push2.eastmoney.com" if "push2delay" in _EM_HOST else "push2delay.eastmoney.com")
+        for host in hosts:
             for fs in ("m:90+t:2", "m:90+t:3"):
                 url = (
                     f"https://{host}/api/qt/clist/get?pn=1&pz=500&po=1&np=1"
@@ -445,9 +464,9 @@ def fetch_em_sector_changes() -> dict[str, float]:
                     diff = ((_json.loads(raw) or {}).get("data") or {}).get("diff") or []
                     for r in diff:
                         name = (r.get("f14") or "").strip()
-                        chg = r.get("f3")
-                        if name and isinstance(chg, (int, float)) and name not in result:
-                            result[name] = float(chg)
+                        chg = _sector_change_pct(r.get("f3"))
+                        if name and chg is not None and name not in result:
+                            result[name] = chg
                 except Exception as e:
                     _logger.warning("[sector_fetcher] em sector changes fetch failed (%s %s): %s", host, fs, e)
         return result

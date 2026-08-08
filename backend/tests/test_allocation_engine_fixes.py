@@ -1,7 +1,7 @@
-"""
+﻿"""
 M4-M6 (docs/combination-design-review.md): 分配引擎层修正测试。
 
-- M4: 核心层数量 = layer_count - 强制标的数（强制 510300/560600 额外叠加 → 5-6 只被摊薄）。
+- M4: 核心层数量 = layer_count - 强制标的数（强制 510300/159338 额外叠加 → 5-6 只被摊薄）。
 - M5: 卫星 backup 补足排除宽基（industry=宽基指数）——宁可卫星 <4 也不混入宽基。
 - M6: 跨层同一指数家族最多 1 次（M3 归一化后 _dedup_segment 生效）。
 - M1 联动: 防御型方案红利类合计权重上限 15%（用户决策 2026-08-01）。
@@ -25,12 +25,12 @@ def _factor_matrix(candidates):
 
 
 def _base_candidates():
-    """含强制标的（510300/560600）+ 若干核心 + 卫星 + 防御。"""
+    """含强制标的（510300/159338）+ 若干核心 + 卫星 + 防御。"""
     return [
         # core（含 2 只强制标的）
         {"symbol": "510300", "name": "沪深300ETF", "layer": "core",
          "tracked_index": "沪深300", "industry": "宽基指数", "segment": "沪深300"},
-        {"symbol": "560600", "name": "中证A500ETF", "layer": "core",
+        {"symbol": "159338", "name": "中证A500ETF", "layer": "core",
          "tracked_index": "中证A500", "industry": "宽基指数", "segment": "中证A500"},
         {"symbol": "588000", "name": "科创50ETF", "layer": "core",
          "tracked_index": "科创50", "industry": "宽基指数", "segment": "科创"},
@@ -68,7 +68,7 @@ class TestM4CoreCount:
             assert len(core) <= 4, f"防御型核心层 {len(core)} 只，超上限 4（含强制）"
             # 强制标的必现
             core_syms = {a["symbol"] for a in core}
-            assert "510300" in core_syms and "560600" in core_syms
+            assert "510300" in core_syms and "159338" in core_syms
 
     def test_balanced_core_count_includes_mandatory(self):
         """M4: 平衡/进攻型 core 总数 = layer_count(5)，含 2 只强制 → 评分入选仅 3 只。"""
@@ -152,7 +152,7 @@ class TestM8FamilyDedupWithinLayer:
         candidates = [
             {"symbol": "510300", "name": "沪深300ETF", "layer": "core",
              "tracked_index": "沪深300", "industry": "宽基指数", "segment": "沪深300"},
-            {"symbol": "560600", "name": "中证A500ETF", "layer": "core",
+            {"symbol": "159338", "name": "中证A500ETF", "layer": "core",
              "tracked_index": "中证A500", "industry": "宽基指数", "segment": "中证A500"},
             {"symbol": "562330", "name": "中证500价值ETF", "layer": "satellite",
              "tracked_index": "中证500价值", "industry": "中证500价值", "segment": "中证500"},
@@ -181,7 +181,7 @@ class TestM8FamilyDedupWithinLayer:
         candidates = [
             {"symbol": "510300", "name": "沪深300ETF", "layer": "core",
              "tracked_index": "沪深300", "industry": "宽基指数", "segment": "沪深300"},
-            {"symbol": "560600", "name": "中证A500ETF", "layer": "core",
+            {"symbol": "159338", "name": "中证A500ETF", "layer": "core",
              "tracked_index": "中证A500", "industry": "宽基指数", "segment": "中证A500"},
             {"symbol": "512480", "name": "半导体ETF", "layer": "satellite",
              "tracked_index": "半导体", "industry": "半导体", "segment": "半导体"},
@@ -253,7 +253,7 @@ class TestM1DividendCapAllProfiles:
             # core
             {"symbol": "510300", "name": "沪深300ETF", "layer": "core",
              "tracked_index": "沪深300", "segment": "沪深300"},
-            {"symbol": "560600", "name": "中证A500ETF", "layer": "core",
+            {"symbol": "159338", "name": "中证A500ETF", "layer": "core",
              "tracked_index": "中证A500", "segment": "中证A500"},
             # satellite（红利低波 563020 双份权重场景 → 合计必超 15% 若不受限）
             {"symbol": "563020", "name": "红利低波ETF", "layer": "satellite",
@@ -311,7 +311,7 @@ class TestR502OverlapFallbackNarrow:
     回归场景：核心层非强制候选不足（<2 只）触发兜底放宽时，
     旧逻辑整体放开 → balanced/aggressive 与 defensive 核心层重叠 3 只
     （159915/562000/588000）→ P1-2 门禁 FAIL。
-    修复后：只回补公共底仓（510300/560600/159338），其他已用标的一律不回补。
+    修复后：只回补公共底仓（510300/159338/159338），其他已用标的一律不回补。
     """
 
     def _core_syms(self, strategies, sid):
@@ -327,7 +327,7 @@ class TestR502OverlapFallbackNarrow:
             # core：2 强制 + 3 只非强制（共 5 只核心候选）
             {"symbol": "510300", "name": "沪深300ETF", "layer": "core",
              "tracked_index": "沪深300", "industry": "宽基指数", "segment": "沪深300"},
-            {"symbol": "560600", "name": "中证A500ETF", "layer": "core",
+            {"symbol": "159338", "name": "中证A500ETF", "layer": "core",
              "tracked_index": "中证A500", "industry": "宽基指数", "segment": "中证A500"},
             {"symbol": "588000", "name": "科创50ETF", "layer": "core",
              "tracked_index": "科创50", "industry": "宽基指数", "segment": "科创"},
@@ -370,7 +370,7 @@ class TestR502OverlapFallbackNarrow:
         cands = [
             {"symbol": "510300", "name": "沪深300ETF", "layer": "core",
              "tracked_index": "沪深300", "industry": "宽基指数", "segment": "沪深300"},
-            {"symbol": "560600", "name": "中证A500ETF", "layer": "core",
+            {"symbol": "159338", "name": "中证A500ETF", "layer": "core",
              "tracked_index": "中证A500", "industry": "宽基指数", "segment": "中证A500"},
             {"symbol": "588000", "name": "科创50ETF", "layer": "core",
              "tracked_index": "科创50", "industry": "宽基指数", "segment": "科创"},

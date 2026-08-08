@@ -134,10 +134,20 @@
                         <div class="tip-ic">
                           当前 IC:
                           <strong :class="icColorClass(f.ic_value)">
-                            {{ f.ic_value !== null ? f.ic_value.toFixed(4) : '无数据' }}
+                            <!-- P2-8: no_data 显示 reason（数据源缺失原因）而非笼统「无数据」 -->
+                            {{ f.ic_value !== null ? f.ic_value.toFixed(4) : (f.status === 'no_data' ? '无数据' : '--') }}
                           </strong>
                           <span v-if="f.ic_value !== null" class="tip-status" :class="icStatusClass(f)">
                             {{ abs(f.ic_value) >= (f.ic_threshold || 0.02) ? '✅ 有效' : '⚠️ 低于阈值' }}
+                          </span>
+                          <!-- P2-8: no_data/warn 的 reason（数据源缺失 / 弱 IC 阈值说明）tooltip -->
+                          <span v-else-if="f.reason" class="tip-status status-no-data">
+                            <AppTooltip placement="top">
+                              ⚠️ {{ f.status === 'no_data' ? '无数据' : '待关注' }}
+                              <template #content>
+                                <div class="tooltip-rich">{{ f.reason }}</div>
+                              </template>
+                            </AppTooltip>
                           </span>
                           <!-- F22: static 因子语义标注（不再落入"低于阈值/无效"侧） -->
                           <span v-else-if="f.status === 'static'" class="tip-status status-static">
@@ -176,7 +186,15 @@
                   <span v-else class="ic-bar-empty">--</span>
                 </span>
                 <span class="factor-ic-val" :class="icColorClass(f.ic_value)">
-                  {{ f.ic_value !== null ? f.ic_value.toFixed(4) : '--' }}
+                  <!-- P2-8 (round9 §6.5.1 触发): 区分 no_data 与 warn——null → 「无数据」+ reason
+                       tooltip（数据源缺失原因）；warn（弱 IC，ic_value 非 null）→ 显示数值+阈值 -->
+                  <AppTooltip v-if="f.ic_value === null" placement="top" :disabled="!f.reason">
+                    <span class="factor-ic-no-data">{{ f.status === 'no_data' ? '无数据' : '--' }}</span>
+                    <template #content>
+                      <div class="tooltip-rich">{{ f.reason }}</div>
+                    </template>
+                  </AppTooltip>
+                  <template v-else>{{ f.ic_value.toFixed(4) }}</template>
                 </span>
                 <span class="factor-desc" :title="f.description">{{ truncate(f.description, 24) }}</span>
               </div>

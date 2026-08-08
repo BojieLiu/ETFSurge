@@ -1083,11 +1083,11 @@ async def get_portfolio_realtime() -> list[dict[str, Any]]:
                 "estimate_source": "tracked_index",
             })
         else:
-            # 盘后：尝试净值
+            # 盘后：尝试净值（round9 P0-7: fetch_fund_nav 契约统一为 dict）
             nav_data = await _call(fetch_fund_nav, sym, timeout=8)
             nav_price = None
-            if nav_data and isinstance(nav_data, tuple) and len(nav_data) >= 1:
-                nav_price = float(nav_data[0])
+            if nav_data and isinstance(nav_data, dict) and nav_data.get("nav"):
+                nav_price = float(nav_data["nav"])
             quotes.append({
                 "symbol": sym,
                 "name": name_map.get(sym, sym),

@@ -63,6 +63,18 @@ STATIC_FACTOR_CODES = {
     "china.policy.dual_circulation",
 }
 
+# P1-10 (round9 §6.5.1-C): 市场级因子——注入的是全市场单一值（sentiment_index/涨跌家数比/
+# 全市场新闻）→ 截面恒等（std=0 → IC 不可计算）→ 旧实现标 no_data 误导。
+# 设计缺陷：宏观/市场级数据不能作为「每只 ETF 打分」的截面因子。
+# 处置：移出截面因子池——不参与截面 IC 判定（参照 static 政策因子），仅作 regime/
+# 组合层输入；因子页 reason 明示「市场级因子不参与截面 IC」；待 ETF 级舆情/板块级
+# 情绪数据源接入后恢复截面计算。
+MARKET_LEVEL_FACTOR_CODES = {
+    "sentiment.panic_greed_diff",
+    "sentiment.stock_divergence",
+    "sentiment.news_direction",
+}
+
 
 def _status_of(code: str, ic_val: float | None, ic_threshold: float) -> tuple[str, str]:
     """Z03: 权威状态 + 原因说明（/active 与 /model 共用）。
@@ -73,6 +85,9 @@ def _status_of(code: str, ic_val: float | None, ic_threshold: float) -> tuple[st
     """
     if code in STATIC_FACTOR_CODES:
         return "static", "静态政策标识因子，不计算 IC"
+    if code in MARKET_LEVEL_FACTOR_CODES:
+        # P1-10: 市场级因子（全市场单一值/市态级降级）——截面恒等，移出截面 IC 池
+        return "static", "市场级因子（全市场单一值），不参与截面 IC，仅作市态/组合层输入"
     if ic_val is None:
         # F3-4 步骤D + F19 R70: 区分「数据源未接入（缺字段）」与「IC 未累积（样本不足）」
         gaps = getattr(registry, "_data_source_gaps", {}) or {}
@@ -86,9 +101,15 @@ def _status_of(code: str, ic_val: float | None, ic_threshold: float) -> tuple[st
             return "no_data", "截面无差异（常量输出），检查底层数据"
         return "no_data", "IC 未累积（样本 <3）"
     threshold = ic_threshold if ic_threshold and ic_threshold > 0 else 0.02
+    samples = getattr(registry, "_sample_counts", {}).get(code, 0)
+    # P1-3 (round9 §6.5): 文案统一 |IC| 口径——旧「IC -0.449 ≥ 阈值 0.02」负数不可能 ≥
+    # 正阈值，逻辑自相矛盾；负 IC（预测反向）且 |IC|≥阈值 → warn（负向淘汰警示）而非 valid，
+    # 满足「负 IC 标 valid 且文案 ≥阈值」矛盾项消除。
     if abs(ic_val) >= threshold:
-        return "valid", f"IC {ic_val:.4f} ≥ 阈值 {threshold}，样本数 {getattr(registry, '_sample_counts', {}).get(code, 0)}"
-    return "warn", f"IC {ic_val:.4f} < 阈值 {threshold}，样本数 {getattr(registry, '_sample_counts', {}).get(code, 0)}"
+        if ic_val < 0:
+            return "warn", f"|IC|={abs(ic_val):.4f} ≥ 阈值 {threshold}（负向），预测方向与收益反向，建议降权/淘汰，样本数 {samples}"
+        return "valid", f"|IC|={ic_val:.4f} ≥ 阈值 {threshold}，样本数 {samples}"
+    return "warn", f"|IC|={abs(ic_val):.4f} < 阈值 {threshold}，样本数 {samples}"
 
 
 def _build_health_summary() -> dict:
@@ -104,7 +125,8 @@ def _build_health_summary() -> dict:
         definition = registry.get_factor(code)
         ic_val = ic_batch.get(code)
         ic_threshold = definition.ic_threshold if definition else 0.02
-        if code in STATIC_FACTOR_CODES:
+        if code in STATIC_FACTOR_CODES or code in MARKET_LEVEL_FACTOR_CODES:
+            # P1-10: 市场级因子与政策静态因子一样不参与截面 IC 计数/平均
             ic_val = None
             ic_threshold = 0.0
         status, _ = _status_of(code, ic_val, ic_threshold)

@@ -52,7 +52,8 @@ MIN_FUND_SCALE = 1.0          # 亿元
 MIN_AVG_AMOUNT = 10_000_000   # 元 (1000万)
 
 # 强制保留的标的（即使不在 TOP N）
-CORE_REQUIRED = ["510300", "560600"]   # 沪深300ETF, 中证A500ETF
+# round9 P0-8: 560600（幽灵锚）→ 159338（真实中证A500ETF）
+CORE_REQUIRED = ["510300", "159338"]   # 沪深300ETF, 中证A500ETF
 DEFENSE_REQUIRED = ["518880", "511090"]  # 黄金ETF, 30年国债ETF
 
 # F0-5 步骤 B: 主流宽基静态兜底清单（不依赖当日涨幅榜，使 CORE_REQUIRED/
@@ -70,11 +71,9 @@ WIDE_BASIS_STATIC = [
      "fund_scale": 600.0, "amount": 800_000_000, "price": 0.0, "change_pct": None},
     {"symbol": "159915", "name": "创业板ETF", "layer": "core", "tracked_index": "创业板指",
      "fund_scale": 500.0, "amount": 700_000_000, "price": 0.0, "change_pct": None},
-    # M1: 中证A500（沪市主力 + 深市兜底）——CORE_REQUIRED 依赖其在池中
-    {"symbol": "560600", "name": "中证A500ETF", "layer": "core", "tracked_index": "中证A500",
-     "fund_scale": 550.0, "amount": 900_000_000, "price": 0.0, "change_pct": None},
+    # M1: 中证A500（round9 P0-8: 560600 幽灵锚删除，159338 真实可成交）
     {"symbol": "159338", "name": "中证A500ETF", "layer": "core", "tracked_index": "中证A500",
-     "fund_scale": 300.0, "amount": 500_000_000, "price": 0.0, "change_pct": None},
+     "fund_scale": 550.0, "amount": 900_000_000, "price": 0.0, "change_pct": None},
     # M1: 红利类归 core，作防守型核心（用户决策 2026-08-01，防御型红利合计上限 15% 见 risk_controls）
     {"symbol": "512890", "name": "红利低波ETF", "layer": "core", "tracked_index": "红利低波",
      "fund_scale": 200.0, "amount": 300_000_000, "price": 0.0, "change_pct": None},
@@ -128,7 +127,10 @@ def _etf_cache_file() -> str:
         return os.path.join(data_dir, "etf_list_cache.json")
     if os.path.exists("/app/data"):
         return os.path.join("/app/data", "etf_list_cache.json")
-    return os.path.join(os.path.dirname(__file__), "..", "data", "etf_list_cache.json")
+    # P1-11 (round9 §4.3-B 附带①): 宿主分支路径修正 `../../data`——旧实现
+    # `os.path.dirname(__file__)/../data` 解析到 backend/app/data/（多带一层 app/，
+    # 文件不存在）→ 宿主环境 _snapshot_change_pct 永远 None；正确为项目根 data/。
+    return os.path.join(os.path.dirname(__file__), "..", "..", "data", "etf_list_cache.json")
 
 
 def _log_missing_required(layer: str, required: list[str], pool_items: list[dict[str, Any]]) -> None:

@@ -1031,20 +1031,32 @@ async def generate_advice(
     from ..analysis.registry import get_agent
     return await get_agent("advice").run(prompt)
 
-async def analyze_news(news_list: list[dict]) -> str:
+async def analyze_news(news_list: list[dict], sentiment_index: float | None = None) -> str:
     """Z18: Enhance news analysis with structured sentiment scoring.
 
     Returns a markdown report with sentiment index, sector impacts,
     and risk warnings. Uses the first 15 news items for context.
     Introduced structured JSON output with score alignment check.
+
+    P2-2 (round9 §6.4): 注入系统 sentiment 作为基准——要求 LLM 引用而非自估
+    （旧实现 LLM 自估「情绪指数 60」vs 系统 sentiment 37.8，口径脱节）。
     """
     text = "\n".join([f"- {n.get('title', n.get('summary', ''))}" for n in news_list[:15]])
+    # P2-2: 系统情绪基准注入（None 时跳过，向后兼容）
+    sentiment_line = ""
+    if sentiment_index is not None:
+        sentiment_line = (
+            f"\n【系统市场情绪基准】sentiment_index = {sentiment_index}"
+            f"（0=极度悲观，100=极度乐观）。你输出的「情绪指数」必须引用此系统口径，"
+            f"不得自行另估；若新闻内容显示情绪正在变化，请说明偏离方向与幅度"
+            f"（如 '较系统基准 +5'）。\n"
+        )
     prompt = f"""分析以下财经新闻，提取关键信息：
-
+{sentiment_line}
 {text}
 
 请按以下维度输出：
-    1. 核心市场情绪：乐观/中性/悲观（附情绪指数0-100）
+    1. 核心市场情绪：乐观/中性/悲观（附情绪指数0-100，**必须引用系统基准值**）
     2. 影响板块及程度（列出受影响最大的3个板块，标注正面/负面）
     3. 对市场的潜在影响及启示
     4. 风险提示

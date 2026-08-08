@@ -60,10 +60,17 @@ class _FakeResult:
 
 
 class _FakeDB:
-    """顺序返回 designs / checks / tasks 三组结果。"""
+    """顺序返回 designs / checks / check-tasks / tasks 四组结果。
 
-    def __init__(self, designs, checks, tasks):
-        self.results = [_FakeResult(designs), _FakeResult(checks), _FakeResult(tasks)]
+    round9 P2-11: get_timeline 新增 check 类型 task 查询（判孤立 check 记录）→
+    第 3 个查询为 check 任务组（默认空）。
+    """
+
+    def __init__(self, designs, checks, tasks, check_tasks=None):
+        self.results = [
+            _FakeResult(designs), _FakeResult(checks),
+            _FakeResult(check_tasks or []), _FakeResult(tasks),
+        ]
         self.i = 0
 
     async def execute(self, stmt):

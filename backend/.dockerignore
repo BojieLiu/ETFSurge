@@ -1,0 +1,11 @@
+# round9 P2-7: 排除历史日志/缓存/测试产物进镜像（镜像体积下降）
+logs/
+__pycache__/
+*.pyc
+.pytest_cache/
+tests/
+diag/
+scripts/
+*.log
+data/
+.env

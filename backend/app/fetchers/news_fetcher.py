@@ -235,11 +235,39 @@ def _dedupe(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _compute_stars(level: int, time_str: str) -> int:
-    """stars = level（F3-1 步骤C，§9.10.7-1 已确认：纯语义化）。
+    """P2-1 (round9 §6.4): stars = 独立「新鲜度」维度，与 level 解耦。
 
-    重要性唯一锚点，新鲜度靠 time 字段展示；L3 恒 3★（无论新鲜度）。
+    旧实现 stars=level（纯语义），导致 stars 与 level 完全同分布、无独立信息量
+    （实测头条 {2:7,3:1,4:1,5:9} 与 level 一模一样）。新口径按时间新鲜度：
+      <1h → 5★、<6h → 4★、<24h → 3★、<72h → 2★、更旧 → 1★
+    时间不可解析时回退 level（旧行为，保证字段非空）。
     """
-    return max(1, min(int(level or 1), 5))
+    try:
+        from datetime import datetime
+        now = datetime.now()
+        t = (time_str or "").strip()
+        dt = None
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M",
+                    "%Y/%m/%d %H:%M:%S", "%Y/%m/%d %H:%M"):
+            try:
+                dt = datetime.strptime(t, fmt)
+                break
+            except (ValueError, TypeError):
+                continue
+        if dt is None:
+            return max(1, min(int(level or 1), 5))
+        hours = (now - dt).total_seconds() / 3600.0
+        if hours < 1:
+            return 5
+        if hours < 6:
+            return 4
+        if hours < 24:
+            return 3
+        if hours < 72:
+            return 2
+        return 1
+    except Exception:
+        return max(1, min(int(level or 1), 5))
 
 
 def _attach_level(items: list[dict[str, Any]]) -> list[dict[str, Any]]:

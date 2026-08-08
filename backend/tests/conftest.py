@@ -32,6 +32,16 @@ def _make_hist_df():
     })
 
 
+@pytest.fixture(autouse=True)
+def _clear_sync_memory_cache():
+    """P0-4 (round9): watchlist 端级 3s 缓存引入后，测试间共享 SyncMemoryCache 会串扰
+    （第一批测试缓存命中，后续测试读到旧数据）。每个测试前后清理缓存保证隔离。"""
+    from app.services.cache_service import sync_memory_cache
+    sync_memory_cache.clear()
+    yield
+    sync_memory_cache.clear()
+
+
 @pytest.fixture
 def mock_akshare(monkeypatch):
     """R73①: akshare 常用函数统一返回固定 DataFrame（走真实解析代码路径）。"""

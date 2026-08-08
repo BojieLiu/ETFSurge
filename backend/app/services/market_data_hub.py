@@ -104,7 +104,8 @@ def _normalize_hot_plate(r: dict) -> dict:
     return item
 
 # 强制保留标的（池刷新时永不出池）
-MANDATORY_CODES = {"510300", "560600", "518880", "511090"}
+# round9 P0-8: 560600（幽灵锚，实为医药白酒ETF/零成交）→ 159338（真实中证A500ETF）
+MANDATORY_CODES = {"510300", "159338", "518880", "511090"}
 
 # 层名
 LAYER_CORE = "core"
@@ -833,7 +834,8 @@ class MarketDataHub:
                 found = next((e for e in flat if e["symbol"] == code), None)
                 if found:
                     # 按代码推断层
-                    if code in ("510300", "560600"):
+                    # round9 P0-8: 定层分支 560600 → 159338（真实中证A500ETF 归核心层）
+                    if code in ("510300", "159338"):
                         target = LAYER_CORE
                     elif code in ("518880",):
                         target = LAYER_DEFENSE
@@ -851,8 +853,8 @@ class MarketDataHub:
     ) -> list[dict[str, Any]]:
         """R5-0-1: MAX_PER_LAYER 截断时保护强制标的。
 
-        截断前剔除 MANDATORY_CODES，截断后再补回——避免 560600 等强制标的
-        因排名靠后被行业均衡/截断挤出（P1-1 A500 缺失根因之一）。
+        截断前剔除 MANDATORY_CODES，截断后再补回——避免强制标的（510300/159338
+        等）因排名靠后被行业均衡/截断挤出（P1-1 A500 缺失根因之一）。
         """
         mandatory = [e for e in balanced if e.get("symbol") in MANDATORY_CODES]
         rest = [e for e in balanced if e.get("symbol") not in MANDATORY_CODES]
@@ -882,7 +884,7 @@ class MarketDataHub:
             if not found:
                 continue
             # 与 _ensure_mandatory 相同的定层逻辑
-            if code in ("510300", "560600"):
+            if code in ("510300", "159338"):
                 target = LAYER_CORE
             elif code in ("518880", "511090"):
                 target = LAYER_DEFENSE
@@ -1216,8 +1218,7 @@ class MarketDataHub:
         "588000": "sh000688",  # 科创50
         "159915": "sz399006",  # 创业板指
         "510880": "sh000015",  # 上证红利
-        "560600": "sh000510",  # 中证A500（O19）
-        "159338": "sh000510",  # 中证A500 深市（公共底仓锚，O19）
+        "159338": "sh000510",  # 中证A500（O19；round9 P0-8: 560600 → 159338）
         "563080": "sh932000",  # 中证A50（O19）
         "562000": "sh000903",  # 中证A100（O19）
         "563020": "sh000922",  # 红利低波（O19，中证红利低波动指数）
@@ -1227,6 +1228,12 @@ class MarketDataHub:
         "159800": "sh000906",  # 中证800（O19）
         "159845": "sh000852",  # 中证1000（O19）
         "159601": "sh932000",  # 中国A50ETF（O19，同 A50 指数）
+        # P1-8 (round9 §6.5.1-B): 主题 ETF 基准映射扩展——行业/主题 ETF 此前无基准映射
+        # → benchmark_close 全缺 → tracking_error no_data。仅收录实测（2026-08-07 腾讯行情
+        # 200 且名称非空）确认的指数代码；未确认的（半导体/新能源车等）宁缺毋滥
+        # （错误基准比缺失更误导，见 P2-10 幽灵锚教训）。
+        "512880": "sz399975",  # 证券ETF → 中证全指证券公司（实测）
+        "512010": "sh000933",  # 医药ETF → 中证医药（实测）
     }
     # F3-4 步骤C: 份额数据 24h 缓存（fund_fund_shares_em 日更/周更）
     _FUND_SHARES_CACHE: dict[str, tuple[float, dict]] = {}

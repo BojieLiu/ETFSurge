@@ -389,11 +389,19 @@ async def llm_news_analysis():
         news.extend(macro)
     except Exception:
         pass
+    # P2-2 (round9 §6.4): 系统 sentiment 注入（sentiment_index 基准）——LLM 引用而非自估
+    sentiment_index = None
     try:
-        analysis = await analyze_news(news)
+        _sent = market_data_hub.get_market_sentiment() or {}
+        sentiment_index = _sent.get("sentiment_index")
+    except Exception:
+        pass
+    try:
+        analysis = await analyze_news(news, sentiment_index=sentiment_index)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM news analysis failed: {e}")
-    return {"analysis": analysis, "news_count": len(news), "disclaimer": "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"}
+    return {"analysis": analysis, "news_count": len(news), "sentiment_index": sentiment_index,
+            "disclaimer": "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"}
 
 
 @router.post("/news-impact")

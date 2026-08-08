@@ -36,7 +36,11 @@ class TestLlmFailSummary:
 
 class TestLlmTimeoutGrading:
     def test_graded_timeouts(self):
-        """超时按数据完整性分级：all_empty 15s < partial 30s < 完整 60s。"""
+        """超时按数据完整性分级：all_empty 15s < partial 30s < 完整 90s。
+
+        round9 P0-5: 完整档 60→90s（对齐设计报告 O7 验收；#344 60s 超时两分钟后重试即成功，
+        专业场景宁可多等也不降级为全 hold 模板）。
+        """
         assert _llm_timeout_for({"all_empty": True}) == 15
         assert _llm_timeout_for({"all_empty": False, "partial": True}) == 30
-        assert _llm_timeout_for({"all_empty": False, "partial": False}) == 60
+        assert _llm_timeout_for({"all_empty": False, "partial": False}) == 90

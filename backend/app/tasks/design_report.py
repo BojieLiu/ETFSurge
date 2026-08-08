@@ -4,6 +4,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
+from datetime import datetime
 from typing import Any
 
 from ..analysis.llm import generate_design_report
@@ -50,9 +52,12 @@ class DesignReportManager:
 report_manager = DesignReportManager()
 
 
-def _build_plan_tables(strategies: list[dict]) -> str:
+def _build_plan_tables(strategies: list[dict], fetched_at: datetime | None = None) -> str:
     """P5-a: 从引擎 strategies 数据直接渲染方案详解 Markdown 表格。
     确保报告中的数据与方案卡片完全一致，杜绝 LLM 篡改标的。
+
+    P0-9 (round9 §4.3-A): 「今日涨跌」列加数据采集时刻标注「（截至 HH:MM）」——
+    旧实现表格无时间戳，盘中生成的值被误读为最新收盘（#427 11:58 生成 vs 收盘对照必错位）。
     """
     # F3 R6: 首行不带 \n\n 前导（避免与 task_manager 前缀拼接后 3 个连续空行）
     lines = ["## 一、三种方案详解"]
@@ -123,7 +128,9 @@ def _build_plan_tables(strategies: list[dict]) -> str:
         lines.append(f"资产结构：核心 {core_pct:.0f}% · 卫星 {sat_pct:.0f}% · 防御 {def_pct:.0f}%\n")
         # R6-F15 (round6 §十一 R6-F15): 方案表格加「建仓建议」列——与文字建议对齐，
         # 消除「表格与文字脱节、未标注建仓节奏」问题（§4.3 方案-文字张力）。
-        lines.append("| 资产类别 | 代码 | 名称 | 权重 | 多因子评分 | 今日涨跌 | 建仓建议 | 入选理由 |")
+        # P0-9: 「今日涨跌」列头带数据采集时刻（截至 HH:MM），盘中值不再被误读为收盘。
+        _ts_label = f"（截至 {fetched_at.strftime('%H:%M')}）" if fetched_at else ""
+        lines.append(f"| 资产类别 | 代码 | 名称 | 权重 | 多因子评分 | 今日涨跌{_ts_label} | 建仓建议 | 入选理由 |")
         lines.append("|---------|------|------|:----:|:--------:|:-------:|:--------:|---------|")
 
         allocs = s.get("allocations") or s.get("etfs") or []
@@ -466,7 +473,16 @@ async def compose_and_push_report(
         })
 
         # P5-a: 先生成策略表格（引擎直接渲染，确保与方案卡片一致）
-        plan_tables = _build_plan_tables(strategies)
+        # P0-9: 行情采集时刻取自 market_data_hub._last_refresh_ts（刷新完成时刻），
+        # 表格列「今日涨跌（截至 HH:MM）」使盘中值可追溯、不再被误读为收盘。
+        _fetched_at = None
+        try:
+            from ..services.market_data_hub import market_data_hub as _mhub
+            _ts = getattr(_mhub, "_last_refresh_ts", 0.0) or time.time()
+            _fetched_at = datetime.fromtimestamp(_ts)
+        except Exception:
+            _fetched_at = None
+        plan_tables = _build_plan_tables(strategies, fetched_at=_fetched_at)
 
         # 调用 LLM，注入预生成的策略表格，让 LLM 只写分析部分
         try:

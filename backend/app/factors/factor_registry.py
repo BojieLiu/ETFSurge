@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, ClassVar
@@ -685,7 +686,15 @@ def _iopv_sina_symbols(symbols: list[str]) -> list[str]:
 
 
 async def _fetch_iopv_from_sina(s_list: list[str]) -> dict[str, dict]:
-    """通过线程池获取新浪 IOPV 实时行情。"""
+    """通过线程池获取新浪实时行情（仅 price；round9 P0-6：实测 sina 实时接口 34 字段无 IOPV）。
+
+    round9 实测（2026-08-07）：`hq.sinajs.cn` 对 ETF 返回 34 字段，[0]=名称 [1]=今开
+    [2]=昨收 [3]=当前价 [4]=最高 [5]=最低 [6]=买一 [7]=卖一 [8]=成交量 [9]=成交额
+    ... [30]=日期 [31]=时间 [32]=状态——**无 IOPV/净值字段**。旧实现 `parts[2]` 当 symbol
+    （实为昨收价）、`parts[8]` 当 nav（实为成交量）双错位 → 解析 key/值全错、永不命中。
+    修复：symbol 从行前缀 `var hq_str_(\\w+)` 提取；仅提供 price，nav 不提供
+    （链命中判定 nav>0 自然跳过本级，IOPV/净值交由 QQ pos 81 / 东财 f236 / TTJ 日净值）。
+    """
     from ..core.async_utils import run_sync
 
     def _sync_fetch():
@@ -700,29 +709,34 @@ async def _fetch_iopv_from_sina(s_list: list[str]) -> dict[str, dict]:
     raw = await run_sync(_sync_fetch, timeout=10)
     parsed: dict[str, dict] = {}
     for line in raw.strip().split("\n"):
+        # symbol 从行前缀提取：`var hq_str_sh510050="..."`（round9 P0-6: 修复旧 parts[2] 错位）
+        m = re.match(r"var\s+hq_str_([a-zA-Z]+\d{6})\s*=", line)
+        if not m:
+            continue
+        sym = m.group(1)
         if '"' not in line:
             continue
         parts = line.split('"')[1].split(",")
         if len(parts) < 10:
             continue
-        sym = parts[2] if parts[2] else ""
-        if not sym:
-            continue
         try:
             price = float(parts[3]) if parts[3] else None
-            nav = float(parts[8]) if parts[8] else None
-            parsed[sym] = {"price": price or 0.0, "nav": nav}
+            parsed[sym] = {"price": price or 0.0}
         except (ValueError, IndexError):
             pass
     return parsed
 
 
 async def _fetch_iopv_from_qq(s_list: list[str]) -> dict[str, dict]:
-    """S8: 腾讯 QQ 行情作为 Sina IOPV 的降级源。
+    """S8: 腾讯 QQ 行情作为 Sina IOPV 的降级源（round9 P0-6 修复后为主 nav 源）。
 
-    QQ 格式: v_sh510050="1~510050~50ETF~...~price~...~iopv..."
-    ETF 字段位置（~分隔）:
-      pos 3 = current price, pos 31 = IOPV (estimated NAV)
+    QQ 格式: v_sh510050="1~510050~50ETF~...~price~...~unit_nav..."（~分隔，88 字段）。
+    round9 实测（2026-08-07）：
+      pos 3 = current price（现价）、pos 31 = 涨跌额（旧注释"IOPV"错误）、pos 32 = 涨跌幅；
+      **pos 81 = 单位净值**——与天天基金 f10/lsjz 的 DWJZ 完全一致（510050: 3.0687 双双命中），
+      是盘中可用的可靠 NAV 源（折溢价率分子/分母口径）。
+    修复：①`decode("gbk")`（旧 utf-8 遇 GBK 中文抛 UnicodeDecodeError 被整级吞掉）；
+          ②nav 改用 pos 81（需 len>=82 字段）；③price 用 pos 3。
     """
     from ..core.async_utils import run_sync
 
@@ -734,7 +748,8 @@ async def _fetch_iopv_from_qq(s_list: list[str]) -> dict[str, dict]:
             url, headers={"User-Agent": "Mozilla/5.0"}
         )
         resp = urllib.request.urlopen(req, timeout=8)
-        return resp.read().decode("utf-8")
+        # round9 P0-6: GBK 解码（返回体含中文名称，utf-8 解码必崩）
+        return resp.read().decode("gbk", errors="replace")
 
     raw = await run_sync(_sync_fetch, timeout=10)
     parsed: dict[str, dict] = {}
@@ -742,28 +757,31 @@ async def _fetch_iopv_from_qq(s_list: list[str]) -> dict[str, dict]:
         if "~" not in line or '"' not in line:
             continue
         parts = line.split('"')[1].split("~")
-        if len(parts) < 33:
+        if len(parts) < 82:
             continue
         try:
-            price_str = parts[3] if len(parts) > 3 and parts[3] else ""
-            iopv_str = parts[31] if len(parts) > 31 and parts[31] else ""
             code = parts[2] if len(parts) > 2 else ""
             if not code:
                 continue
+            price_str = parts[3] if len(parts) > 3 and parts[3] else ""
+            nav_str = parts[81] if len(parts) > 81 and parts[81] else ""
             price = float(price_str) if price_str else None
-            iopv = float(iopv_str) if iopv_str else None
-            if iopv and iopv > 0:
-                parsed[code] = {"price": price or 0.0, "nav": iopv}
+            nav = float(nav_str) if nav_str else None
+            if nav and nav > 0:
+                parsed[code] = {"price": price or 0.0, "nav": nav}
         except (ValueError, IndexError):
             pass
     return parsed
 
 
 async def _fetch_iopv_from_em(s_list: list[str]) -> dict[str, dict]:
-    """O18: 东财 push2 https 行情 f236（ETF IOPV 估值字段）源。
+    """O18: 东财 push2 https 行情 f236 源（round9 P0-6: 实测 f236 常为 "-"/0，仅极偶然兜底）。
 
     ulist.np/get JSON: data.diff[] → f12=code, f2=price, f236=IOPV。
     东财 secid: 1=沪市 0=深市（5/6 开头沪，0/1/3 深）。
+    round9 实测（2026-08-07）：push2 对容器/高频请求 RemoteDisconnected（用 push2delay 降级）；
+    clist/get 与 ulist.np/get 的 f236 返回值均为 "-"（fltt=2）或 0（无 fltt）——东财公开行情
+    接口实际不暴露可用 IOPV，本级的正数校验保证无效值不误收，真正 NAV 源为 QQ pos 81 / TTJ 日净值。
     """
     from ..core.async_utils import run_sync
     from ..core.market_context import EM_PUSH_HOST
@@ -1123,9 +1141,13 @@ class FactorRegistry:
             # 24h 缓存（U7 R3），并发 + 缓存使预热期累计 7.5s → ~1 次真实请求
             async def _nav_one(_sym: str) -> None:
                 try:
+                    # round9 P0-7: fetch_fund_nav 契约统一为 dict（旧 tuple 被 .get 抛 AttributeError
+                    # 吞掉 → 兜底永远静默失败）；此处加 isinstance 守卫兜住历史形态
                     _nav = await run_sync(_hub.get_fund_nav, _sym, timeout=6)
-                    if _nav and _nav.get("nav"):
+                    if isinstance(_nav, dict) and _nav.get("nav"):
                         data.setdefault(_sym, {})["nav"] = _nav["nav"]
+                    elif isinstance(_nav, tuple) and len(_nav) >= 1 and _nav[0]:
+                        data.setdefault(_sym, {})["nav"] = _nav[0]
                 except Exception:
                     pass
 

@@ -177,6 +177,12 @@ class ICTracker:
             for c, st in _stats.items()
         }
 
+        # P2-9 (round9 §6.5.1-D): IC 口径核对（2026-08-07）——Spearman 秩相关横截面 IC
+        # （单期全体标的截面相关），forward return window=1，常量输入/样本<3 返回 None
+        # （不写 0 防污染批次）——口径本身正确。vol_ratio IC=0.001 属真实弱因子（ETF 同质化
+        # + 量比差异小），非方法缺陷；按 P1-3 已标 warn（|IC|<阈值），待样本累积后按 O6
+        # 淘汰线决策，不因弱 IC 修改计算方法。
+
         # Compute IC per factor code
         ic_results: dict[str, float] = {}
         for code, values in factor_by_code.items():
