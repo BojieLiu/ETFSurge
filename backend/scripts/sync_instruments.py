@@ -101,15 +101,17 @@ async def collect_all() -> list[dict]:
         ("A股个股", "stock_zh_a_spot_em"),
         ("A股ETF", "fund_etf_spot_em"),
         ("港股", "stock_hk_main_board_spot_em"),
+        ("港股ETF", "fund_hk_etf_spot_em"),
         ("美股", "stock_us_spot_em"),
     ]
     tasks = [
         (_fetch_a_stock_list() if fn == "stock_zh_a_spot_em"
          else _fetch_etf_list() if fn == "fund_etf_spot_em"
          else _fetch_hk_list() if fn == "stock_hk_main_board_spot_em"
+         else _fetch_hk_etf_list() if fn == "fund_hk_etf_spot_em"
          else _fetch_us_list() if fn == "stock_us_spot_em"
          else _fetch_akshare_list(fn, "代码", "名称", mkt, at))
-        for (_, fn), (mkt, at) in zip(segments, [("A", "stock"), ("A", "etf"), ("HK", "stock"), ("US", "US")])
+        for (_, fn), (mkt, at) in zip(segments, [("A", "stock"), ("A", "etf"), ("HK", "stock"), ("HK", "etf"), ("US", "US")])
     ]
     # O1 (round8 §7 P0-新): 每段 asyncio.wait_for 超时（美股 20s / 其他 30s）——
     # 黑洞段在超时窗口内必然结束，不占用事件循环；失败段仅降级（跳过），整体继续。
@@ -206,6 +208,33 @@ async def _fetch_hk_list() -> list[dict]:
     except Exception as e:
         print(f"  [WARN] 港股 stock_hk_spot failed: {e}")
     raise RuntimeError("港股段全部数据源不可用（stock_hk_main_board_spot_em/stock_hk_spot）")
+
+
+async def _fetch_hk_etf_list() -> list[dict]:
+    """round10 P2-O: 港股 ETF 独立采集——akshare fund_hk_etf_spot_em
+    （东财港股 ETF 列表，asset_type='etf' 区分 stock）。
+
+    此前港股段只拉 stock_hk_main_board_spot_em（全标 stock）→ 盈富基金(02800)
+    等港股 ETF 被当普通标的（用户反馈 08/08）。此段将港股 ETF 显式标记 etf。
+    """
+    try:
+        rows = await _fetch_akshare_list("fund_hk_etf_spot_em", "代码", "名称", "HK", "etf")
+        if rows:
+            return rows
+    except Exception as e:
+        print(f"  [WARN] 港股ETF fund_hk_etf_spot_em failed: {e}")
+    # 降级：从东财港股主表按名称关键字识别 ETF（基金/ETF 后缀），不改 asset_type 则跳过
+    try:
+        rows = await _fetch_akshare_list("stock_hk_main_board_spot_em", "代码", "名称", "HK", "stock")
+        etf_rows = [r for r in rows if any(k in (r.get("name") or "") for k in ("ETF", "基金"))]
+        for r in etf_rows:
+            r["asset_type"] = "etf"
+        if etf_rows:
+            print(f"  [INFO] 港股ETF: 主表名称识别降级链生效（{len(etf_rows)} 只）")
+            return etf_rows
+    except Exception as e:
+        print(f"  [WARN] 港股ETF 名称识别降级失败: {e}")
+    return []
 
 
 async def _fetch_us_list() -> list[dict]:

@@ -797,9 +797,13 @@ async def search_hk_us(keyword: str = "", enrich: bool = True,
                     stmt = stmt.limit(30)
                     rows = (await session.execute(stmt)).scalars().all()
                     for r in rows:
+                        # round10 P2-O②: type 取 instruments 真实 asset_type（港股 ETF 段
+                        # sync 后 asset_type='etf'）——旧硬编码 'stock' 把盈富基金等当股票
+                        _r_at = (r.asset_type if hasattr(r, "asset_type") else None) or "stock"
                         spot.append({
                             "symbol": r.symbol, "name": r.name,
-                            "market": "HK", "asset_type": "HK", "type": "stock",
+                            "market": "HK", "asset_type": "HK",
+                            "type": "etf" if _r_at == "etf" else "stock",
                         })
             except Exception as _e:
                 logger.warning("[search_hk_us] local HK instruments fallback failed: %s", _e)
@@ -1146,6 +1150,22 @@ def _norm_asset_symbol(symbol: str) -> str:
     return s
 
 
+async def _lookup_instrument_type(symbol: str) -> str | None:
+    """round10 P2-O②: 查 instruments 表 asset_type（'etf'/'stock'）——港股 ETF 独立段
+    sync 后 asset_type='etf'；查不到返回 None（调用方按名称兜底）。"""
+    try:
+        from ..models.search import Instrument
+        from sqlalchemy import select
+        async with async_session() as session:
+            stmt = select(Instrument).where(Instrument.symbol == str(symbol)).limit(1)
+            row = (await session.execute(stmt)).scalars().first()
+            if row is not None and hasattr(row, "asset_type"):
+                return row.asset_type if row.asset_type in ("etf", "stock") else None
+    except Exception:
+        pass
+    return None
+
+
 async def get_asset_realtime(symbol: str, asset_type: str) -> dict | None:
     from ..fetchers.china_market import fetch_a_stock_realtime, fetch_hk_stock_realtime, fetch_index_realtime
 
@@ -1178,6 +1198,13 @@ async def get_asset_realtime(symbol: str, asset_type: str) -> dict | None:
                 if _norm_asset_symbol(item["symbol"]) == _norm_asset_symbol(symbol):
                     result = item
                     break
+            # round10 P2-O②: 回填 type（'etf'/'stock'）——查 instruments 表 asset_type，
+            # 未命中时按名称含 ETF/基金 判定；盈富基金(02800) 等港股 ETF 不再被当普通股票
+            if result is not None and result.get("type") is None:
+                _t = await _lookup_instrument_type(symbol)
+                if _t is None:
+                    _t = "etf" if "ETF" in (result.get("name") or "") or "基金" in (result.get("name") or "") else "stock"
+                result["type"] = _t
         elif asset_type == "index":
             # R5: 指数实时——fetch_index_realtime（新浪 s_sh 三级降级，8 个 A 股指数）。
             # 旧实现走 A 股股票路径：000001 被当成深市股票（平安银行 11.63）→
