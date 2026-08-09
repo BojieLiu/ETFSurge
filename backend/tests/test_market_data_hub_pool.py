@@ -9,6 +9,7 @@ R5-0-1: 候选池强制标的二次校验（docs/round5-diagnosis-and-optimizati
 纯函数/轻量 mock 测试，无网络。
 """
 import pytest
+from unittest.mock import AsyncMock, patch
 
 from app.services.market_data_hub import (
     MarketDataHub,
@@ -103,3 +104,216 @@ class TestRecheckMandatoryAfterTruncate:
         # 不应抛异常
         hub._recheck_mandatory_after_truncate(pool, flat)
         assert pool[LAYER_CORE] == []
+
+
+# ── News aggregation（合并自 test_market_data_hub_news.py）──────────────
+
+
+def _make_hub_news():
+    from app.services.market_data_hub import MarketDataHub
+    hub = MarketDataHub.__new__(MarketDataHub)
+    hub._news_cache = None
+    hub._news_buckets = None
+    hub._news_cache_ts = 0.0
+    hub.NEWS_TTL = 120
+    return hub
+
+
+def test_get_news_headlines_returns_bucket():
+    """get_news_headlines should return only headlines after refresh."""
+    hub = _make_hub_news()
+    mock_headlines = [{"title": "h1", "level": "利好"}]
+    mock_macro = [{"title": "m1", "level": "宏观"}]
+    mock_global = [{"title": "g1"}]
+
+    # Hub does lazy import inside refresh_news from ..fetchers.news_fetcher
+    with patch("app.fetchers.news_fetcher.fetch_news_headlines",
+               return_value=mock_headlines) as mh:
+        with patch("app.fetchers.news_fetcher.fetch_macro_news",
+                   return_value=mock_macro):
+            with patch("app.fetchers.news_fetcher.fetch_global_news",
+                       return_value=mock_global):
+                hub.refresh_news()
+                mh.assert_called_once()
+
+    assert hub.get_news_headlines() == mock_headlines
+    assert hub.get_news_macro() == mock_macro
+    assert hub.get_news_global() == mock_global
+    # Merged view backward compat
+    assert hub.get_news() == mock_headlines + mock_macro + mock_global
+    # Cache is now populated; getters should NOT re-fetch
+    with patch("app.fetchers.news_fetcher.fetch_news_headlines") as mh2:
+        assert hub.get_news_headlines() == mock_headlines
+        mh2.assert_not_called()
+
+
+def test_lazy_refresh_on_empty_bucket():
+    """_news_bucket should trigger a refresh when buckets are uninitialized."""
+    hub = _make_hub_news()
+    mock_headlines = [{"title": "fresh"}]
+
+    with patch("app.fetchers.news_fetcher.fetch_news_headlines",
+               return_value=mock_headlines):
+        with patch("app.fetchers.news_fetcher.fetch_macro_news",
+                   return_value=[]):
+            with patch("app.fetchers.news_fetcher.fetch_global_news",
+                       return_value=[]):
+                result = hub.get_news_headlines()
+
+    assert result == mock_headlines
+    assert hub._news_buckets is not None
+
+
+def test_news_bucket_returns_empty_on_fetch_failure():
+    """Buckets should be empty (not crash) when all fetchers fail."""
+    hub = _make_hub_news()
+    with patch("app.fetchers.news_fetcher.fetch_news_headlines",
+               side_effect=Exception("network down")):
+        with patch("app.fetchers.news_fetcher.fetch_macro_news",
+                   side_effect=Exception("network down")):
+            with patch("app.fetchers.news_fetcher.fetch_global_news",
+                       side_effect=Exception("network down")):
+                assert hub.get_news_headlines() == []
+                assert hub.get_news() == []
+
+
+def test_get_news_stock_delegates():
+    """get_news_stock should delegate to fetch_stock_news."""
+    hub = _make_hub_news()
+    with patch("app.fetchers.news_fetcher.fetch_stock_news",
+               return_value=[{"title": "s1"}]) as m:
+        assert hub.get_news_stock("510300") == [{"title": "s1"}]
+        m.assert_called_once_with("510300")
+
+
+def test_get_news_stock_returns_empty_on_failure():
+    """get_news_stock should return [] (not crash) on fetch failure."""
+    hub = _make_hub_news()
+    with patch("app.fetchers.news_fetcher.fetch_stock_news",
+               side_effect=Exception("down")):
+        assert hub.get_news_stock("510300") == []
+
+
+def test_get_akshare_pool_stats_delegates():
+    """get_akshare_pool_stats should delegate to fetcher."""
+    hub = _make_hub_news()
+    with patch("app.fetchers.news_fetcher.get_akshare_pool_stats",
+               return_value={"etf_count": 100}) as m:
+        assert hub.get_akshare_pool_stats() == {"etf_count": 100}
+        m.assert_called_once()
+
+
+def test_get_akshare_pool_stats_returns_empty_on_failure():
+    """get_akshare_pool_stats should return {} on fetch failure."""
+    hub = _make_hub_news()
+    with patch("app.fetchers.news_fetcher.get_akshare_pool_stats",
+               side_effect=Exception("down")):
+        assert hub.get_akshare_pool_stats() == {}
+
+
+# ── Realtime delegate（合并自 test_market_data_hub_realtime.py）─────────
+
+
+def _make_hub_realtime():
+    from app.services.market_data_hub import MarketDataHub
+    hub = MarketDataHub.__new__(MarketDataHub)
+    return hub
+
+
+@pytest.mark.asyncio
+async def test_get_realtime_forwards_to_market_service():
+    """hub.get_realtime -> market_service.get_realtime_batch."""
+    hub = _make_hub_realtime()
+    with patch("app.services.market_service.get_realtime_batch",
+               new=AsyncMock(return_value=[{"symbol": "510300"}])) as m:
+        result = await hub.get_realtime(["510300"], "A")
+        assert result == [{"symbol": "510300"}]
+        m.assert_awaited_once_with(["510300"], "A")
+
+
+@pytest.mark.asyncio
+async def test_get_all_realtime_forwards():
+    hub = _make_hub_realtime()
+    with patch("app.services.market_service.get_all_realtime",
+               new=AsyncMock(return_value=[])) as m:
+        result = await hub.get_all_realtime()
+        assert result == []
+        m.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_get_asset_realtime_forwards():
+    hub = _make_hub_realtime()
+    with patch("app.services.market_service.get_asset_realtime",
+               new=AsyncMock(return_value={"symbol": "600519"})) as m:
+        result = await hub.get_asset_realtime("600519", "stock")
+        assert result == {"symbol": "600519"}
+        m.assert_awaited_once_with("600519", "stock")
+
+
+@pytest.mark.asyncio
+async def test_get_portfolio_realtime_forwards():
+    hub = _make_hub_realtime()
+    with patch("app.services.market_service.get_portfolio_realtime",
+               new=AsyncMock(return_value=[])) as m:
+        result = await hub.get_portfolio_realtime()
+        assert result == []
+        m.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_get_indices_forwards():
+    hub = _make_hub_realtime()
+    with patch("app.services.market_service.get_indices",
+               new=AsyncMock(return_value=[])) as m:
+        result = await hub.get_indices()
+        assert result == []
+        m.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_get_global_indices_forwards():
+    hub = _make_hub_realtime()
+    with patch("app.services.market_service.get_global_indices",
+               new=AsyncMock(return_value={"A": []})) as m:
+        result = await hub.get_global_indices()
+        assert result == {"A": []}
+        m.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_get_commodities_forwards():
+    hub = _make_hub_realtime()
+    with patch("app.services.market_service.get_commodities",
+               new=AsyncMock(return_value=[])) as m:
+        result = await hub.get_commodities()
+        assert result == []
+        m.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_get_market_history_forwards():
+    hub = _make_hub_realtime()
+    with patch("app.services.market_service.get_history",
+               new=AsyncMock(return_value=[])) as m:
+        result = await hub.get_market_history("510300", "A", "daily")
+        assert result == []
+        m.assert_awaited_once_with("510300", "A", "daily")
+
+
+@pytest.mark.asyncio
+async def test_search_etf_forwards():
+    hub = _make_hub_realtime()
+    with patch("app.services.market_service.search_etf",
+               new=AsyncMock(return_value=[])) as m:
+        result = await hub.search_etf("300")
+        assert result == []
+        m.assert_awaited_once_with("300")
+
+
+def test_hub_has_no_circular_import():
+    """Importing both hub and market_service should not crash (lazy imports)."""
+    import app.services.market_data_hub
+    import app.services.market_service
+    assert app.services.market_data_hub.market_data_hub is not None
+    assert callable(app.services.market_service.get_all_realtime)
