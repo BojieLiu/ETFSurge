@@ -173,3 +173,7 @@ GET /api/v1/market/sectors/{plate_code}/popular
 | 降级路径字段名不一致风险 | ⚠️ | ⚠️ | 本地表返回 `sector_code`，akshare 返回 `plate_code`；前端已兼容 |
 | `market` 查询参数 | ✅ (URL拼入) | ❌ | 后端未实际消费 `market` 参数，仅前端拼接 URL |
 | 空列表时前端切换到手动输入模式 | ✅ | ☐ | |
+
+<!-- 路由登记（P3-5 check_routes 门禁） -->
+GET /api/v1/market/sectors
+GET /api/v1/market/sectors/rotation

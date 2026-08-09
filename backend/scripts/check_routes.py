@@ -23,11 +23,28 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 # ── Expected routes from api-contracts ──────────────────────────
 
 def _parse_contract_method(path: str) -> str | None:
-    """Parse an HTTP method from a contract file line like `GET /health`."""
-    m = re.match(r"\s*(GET|POST|PUT|DELETE|PATCH)\s+(/\S+)", path)
+    """Parse an HTTP method from a contract file line.
+
+    Contract files use varied formats: `GET /api/v1/x`, `### 2.1 GET /api/v1/x`,
+    `| GET /api/v1/x |` (table), `**GET** /api/v1/x`. Match the method token
+    anywhere before a /api/v1 path.
+    """
+    m = re.search(r"(GET|POST|PUT|DELETE|PATCH)[*`]*\s+`?(/api/v1/[^\s`|]*)", path)
     if m:
         return m.group(1), m.group(2)
     return None
+
+
+def _norm_path(path: str) -> str:
+    """Normalize a contract path: strip query string, Chinese/English notes,
+    and unify placeholder syntax ({id}/{item_id}/:id/<x> → {x})."""
+    path = path.split("?")[0]                       # 剥离 query 示例（?limit=10）
+    path = re.split(r"[（(]", path)[0]               # 剥离中文/英文注记
+    path = path.replace("${", "{")
+    path = re.sub(r"<[^>]+>", "{x}", path)
+    path = re.sub(r"\{[^}]*\}", "{x}", path)        # {id}/{item_id} 统一
+    path = re.sub(r":([A-Za-z_][A-Za-z0-9_]*)", "{x}", path)
+    return path.rstrip("/")
 
 
 def load_expected_routes(contracts_dir: str = None) -> list[tuple[str, str]]:
@@ -39,13 +56,15 @@ def load_expected_routes(contracts_dir: str = None) -> list[tuple[str, str]]:
     md_files = glob.glob(os.path.join(contracts_dir, "**", "*.md"), recursive=True)
 
     for md_file in md_files:
+        if os.path.basename(md_file) == "contract_template.md":
+            continue  # 模板占位非真实契约
         rel_path = os.path.relpath(md_file, contracts_dir)
         with open(md_file, "r", encoding="utf-8", errors="replace") as f:
             for line in f:
                 parsed = _parse_contract_method(line)
                 if parsed:
                     method, path = parsed
-                    expected.append((method.upper(), path))
+                    expected.append((method.upper(), _norm_path(path)))
 
     return expected
 
@@ -54,38 +73,31 @@ def load_expected_routes(contracts_dir: str = None) -> list[tuple[str, str]]:
 
 
 def load_actual_routes() -> list[tuple[str, str]]:
-    """Import the FastAPI app and extract all registered routes."""
-    # Import app module (this triggers lifespan but we don't start the server)
-    import sys
-    # Clear any cached module
-    for mod in list(sys.modules.keys()):
-        if "app.main" in mod or "app.config" in mod or "app.database" in mod:
-            del sys.modules[mod]
+    """Collect all registered API routes.
 
-    # Use an isolated import
-    from unittest.mock import patch
-
-    # Mock the lifespan to avoid side effects
-    with patch("app.main.lifespan"):
-        try:
-            from app.main import app
-        except Exception:
-            # Second attempt with broader mocking
-            import app.config
-            import app.database
-
-            try:
-                from app.main import app
-            except Exception as e:
-                print(f"[ERROR] Could not load app.main: {e}", file=sys.stderr)
-                return []
+    FastAPI >= 0.121 的 app.routes 含 _IncludedRouter 惰性占位（path=None、
+    无 methods），无法直接展开 —— 与 test_contract_auto.py 同法：直接遍历
+    8 个业务 router 的 routes（不含默认 /docs 等，契约也只需 API 路由）。
+    """
+    from app.routers import (
+        admin,
+        analysis,
+        factors,
+        market,
+        news,
+        portfolio,
+        system,
+        ws,
+    )
 
     routes: list[tuple[str, str]] = []
-    for route in app.routes:
-        if hasattr(route, "methods") and hasattr(route, "path"):
-            for method in route.methods:
+    for mod in (market, portfolio, analysis, news, ws, admin, factors, system):
+        for route in mod.router.routes:
+            p = getattr(route, "path", "") or ""
+            methods = getattr(route, "methods", None) or set()
+            for method in methods:
                 if method in ("GET", "POST", "PUT", "DELETE", "PATCH"):
-                    routes.append((method.upper(), route.path))
+                    routes.append((method.upper(), _norm_path(p)))
     return routes
 
 
@@ -172,7 +184,8 @@ def main():
         print(f"=== Route Summary ===")
         for method, path in sorted(set(actual)):
             is_documented = (method, path) in set(expected)
-            mark = "✓" if is_documented else "✗"
+            # 用 ASCII 标记避免 Windows GBK 控制台 UnicodeEncodeError
+            mark = "[OK]" if is_documented else "[??]"
             print(f"  {mark} {method:6s} {path}")
 
     return 1 if issues else 0

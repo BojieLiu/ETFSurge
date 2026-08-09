@@ -301,3 +301,9 @@ A:  mootdx → Tencent(QQ) → Sina   ← F1-2 补 tencent，与批量版对齐
 | Loading skeleton | ☐ | N/A | |
 | Error state on timeout (504) | ☐ | ☐ | |
 | Global indices horizontal scrolling | ☐ | N/A | flex-wrap per region |
+
+<!-- 路由登记（P3-5 check_routes 门禁） -->
+GET /api/v1/market/fundamentals/{symbol}
+GET /api/v1/market/indices/meta
+GET /api/v1/market/sentiment
+GET /api/v1/market/signal/debug/{symbol}

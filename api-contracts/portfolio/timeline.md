@@ -83,3 +83,6 @@ Returns a merged, chronologically-sorted list of portfolio design and strategy c
 - [x] Frontend: `portfolioApi.getTimeline(limit, offset)` method added
 - [x] Frontend: `DashboardAiTools.vue` uses single timeline call instead of two parallel calls
 - [x] Frontend: DesignHistory renders failed items with error detail + retry entry
+
+<!-- 路由登记（P3-5 check_routes 门禁） -->
+GET /api/v1/portfolio/timeline

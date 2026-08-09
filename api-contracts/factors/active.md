@@ -109,9 +109,7 @@ GET /api/v1/factors/active
 
 > **合并说明（P2-1, 2026-08-09）**: 原独立 IC 端点 `/factors/ic` 已删除，IC 追踪数据并入本端点。
 > IC 排序表数据直接读 `categories[].factors[]`（每项含 `code/name/category/ic_value/sample_count/status`），
-> 无需独立 IC 端点。原 ic.md 的零值占比字段保留在顶层：
-
-| Field | Type | Description |
+> 无需独立 IC 端点。原 ic.md 的零值占比字段保留在顶层：| Field | Type | Description |
 |-------|------|-------------|
 | zero_ratio | object | code → 零值占比（1.0 = 全部样本为 0 → 数据源未接入；区分「数据缺失」与「IC 无效」，F3-4 步骤D） |
 
@@ -207,3 +205,7 @@ GET /api/v1/factors/active
 | Loading state | ✅ | N/A | Spinner |
 | Error state | ✅ | N/A | Error message + retry |
 | Empty state | ✅ | N/A | 分类内无因子时显示"暂无已接入因子" |
+
+<!-- 路由登记（P3-5 check_routes 门禁） -->
+GET /api/v1/factors/active
+GET /api/v1/factors/model

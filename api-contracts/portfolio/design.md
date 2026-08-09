@@ -412,3 +412,7 @@ alanced/aggressive`
 - [ ] WS: `/api/v1/ws/design-report/{session_id}` 可连接
 - [ ] WS: 推送的 design_report 包含完整 Markdown
 - [ ] `GET /api/v1/portfolio/designs/{id}（原 /status 已移除，T11 校准）` implemented and tested
+
+<!-- 路由登记（P3-5 check_routes 门禁） -->
+GET /api/v1/portfolio/designs/{design_id}
+DELETE /api/v1/portfolio/designs/{design_id}

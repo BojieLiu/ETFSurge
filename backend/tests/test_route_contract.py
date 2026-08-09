@@ -18,8 +18,8 @@ from check_routes import compare_routes, _parse_contract_method, load_expected_r
 
 class TestParseContractMethod:
     def test_get_with_path(self):
-        result = _parse_contract_method("GET /health")
-        assert result == ("GET", "/health")
+        result = _parse_contract_method("GET /api/v1/health")
+        assert result == ("GET", "/api/v1/health")
 
     def test_post_with_path(self):
         result = _parse_contract_method("POST /api/v1/portfolio/calculate")
@@ -41,10 +41,26 @@ class TestParseContractMethod:
         result = _parse_contract_method("  GET /api/v1/market/realtime")
         assert result == ("GET", "/api/v1/market/realtime")
 
+    def test_section_heading_format(self):
+        """契约常用 `### 2.1 GET /api/v1/x` 标题格式。"""
+        result = _parse_contract_method("### 2.1 GET /api/v1/admin/config")
+        assert result == ("GET", "/api/v1/admin/config")
+
+    def test_table_row_format(self):
+        """契约表格行 `| GET /api/v1/x |` 也应匹配。"""
+        result = _parse_contract_method("| `GET /api/v1/admin/factor-health` | 因子健康 |")
+        assert result == ("GET", "/api/v1/admin/factor-health")
+
+    def test_bold_format(self):
+        """`**GET** /api/v1/x` 格式也应匹配。"""
+        result = _parse_contract_method("**GET** `/api/v1/portfolio/timeline`")
+        assert result == ("GET", "/api/v1/portfolio/timeline")
+
     def test_not_a_route(self):
         assert _parse_contract_method("## 目录") is None
         assert _parse_contract_method("") is None
         assert _parse_contract_method("| GET /health | ok |") is None
+        assert _parse_contract_method("GET /health") is None  # 非 /api/v1 前缀非契约路由
 
 
 # ── load_expected_routes ────────────────────────────────────────

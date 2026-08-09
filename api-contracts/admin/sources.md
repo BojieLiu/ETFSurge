@@ -176,3 +176,13 @@ GET /api/v1/admin/sources/circuit-breakers
 | Loading state | ✅ | N/A | 骨架屏/loading spinner |
 | Empty state | ✅ | N/A | "暂无数据" 占位 |
 | Error state | ✅ | N/A | 错误 toast / 信息展示 |
+
+<!-- 路由登记（P3-5 check_routes 门禁） -->
+GET /api/v1/admin/sources/health
+GET /api/v1/admin/sources/events/timeline
+GET /api/v1/admin/sources/events/failures
+GET /api/v1/admin/sources/circuit-breakers
+GET /api/v1/admin/sources/connection-pool
+GET /api/v1/admin/factor-health
+GET /api/v1/admin/metrics
+GET /api/v1/admin/thread-pool
