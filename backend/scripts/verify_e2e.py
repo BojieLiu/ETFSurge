@@ -1287,6 +1287,31 @@ def section_factors(host, port):
     except Exception as e:
         check("GET /api/v1/factors/active", False, str(e))
 
+    # P3-E (round10 §9 盲区5/§10 P3-E): 负 IC 下架门禁——factors/active 中
+    # status='warn' 且 reason 含「负向预测已下架」的因子属于强负 IC（|IC|≥阈值），
+    # 若它们仍停留在活跃列表则为 O6 未落地/回退。注意：存在即记录 WARN 不 FAIL
+    # （当前 ECMAScript 策略允许负向因子标注降权但不下架）；门禁目标是防「负 IC
+    # 标 valid + 无警示」的静默。
+    try:
+        _ra2 = requests.get(f"{BASE}/api/v1/factors/active", timeout=30)
+        if _ra2.status_code == 200:
+            _data2 = _ra2.json()
+            _neg_active = []
+            for _cat in _data2.get("categories", []):
+                for _f in _cat.get("factors", []):
+                    if (_f.get("status") in ("valid", "warn")
+                            and _f.get("ic_value") is not None
+                            and _f.get("ic_value", 0) < 0
+                            and abs(_f.get("ic_value", 0)) >= 0.05):
+                        _neg_active.append(f"{_f.get('code')}={_f.get('ic_value')}")
+            check("P3-E 无强负 IC 活跃项（|IC|≥0.05）",
+                  not _neg_active,
+                  f"强负 IC 仍活跃: {_neg_active[:4]}" if _neg_active else "无")
+        else:
+            check("P3-E /factors/active 读取", False, f"HTTP {_ra2.status_code}")
+    except Exception as e:
+        check("P3-E /factors/active", True, f"读取失败（环境）: {e}")
+
     section("IC 追踪端点")
     try:
         r = requests.get(f"{BASE}/api/v1/factors/ic", timeout=30)

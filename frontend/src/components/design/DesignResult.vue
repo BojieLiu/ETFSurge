@@ -66,6 +66,7 @@
                         <th>名称</th>
                         <th>权重</th>
                         <th>层</th>
+                        <th>今日涨跌</th>
                         <th>入选理由</th>
                       </tr>
                     </thead>
@@ -75,6 +76,12 @@
                         <td>{{ a.name }}</td>
                         <td>{{ (a.target_weight * 100).toFixed(1) }}%</td>
                         <td><span class="layer-badge" :class="a.layer || 'satellite'">{{ layerLabel(a.layer) }}</span></td>
+                        <td>
+                          <span v-if="a.daily_change_pct != null" :class="a.daily_change_pct >= 0 ? 'text-up' : 'text-down'">
+                            {{ a.daily_change_pct >= 0 ? '+' : '' }}{{ a.daily_change_pct.toFixed(2) }}%
+                          </span>
+                          <span v-else class="muted">—</span>
+                        </td>
                         <td class="rationale-cell">{{ a.rationale || '—' }}</td>
                       </tr>
                     </tbody>

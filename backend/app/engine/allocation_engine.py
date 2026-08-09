@@ -415,6 +415,11 @@ def _select_and_weight(
     scored = [group[0] for group in deduped]
     scored.sort(key=lambda x: x[0], reverse=True)
 
+    # P1-D (round10 §3.1-3/§10): 卫星层负 factor_score 不给权——因子分 ≤ -0.3
+    # （约当 |score| 显著为负区间）的标的不入卫星层，防负分标的侵占有限权重。
+    if layer == "satellite":
+        scored = [item for item in scored if item[0] > -0.3]
+
     # Keep top *max_count*
     selected = scored[:max_count]
     if not selected:

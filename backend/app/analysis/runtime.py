@@ -64,7 +64,7 @@ class AgentRuntime:
         last_exc: Exception | None = None
         # R5-1-6: 仅透传显式提供的参数（None 保持 llm_complete_with_system 默认值）
         _llm_kwargs = {}
-        for _k in ("max_retries", "retry_delay", "rate_limit_cap"):
+        for _k in ("max_retries", "retry_delay", "rate_limit_cap", "request_timeout"):
             _v = kwargs.get(_k)
             if _v is not None:
                 _llm_kwargs[_k] = _v

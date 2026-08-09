@@ -1,6 +1,7 @@
 """Admin 工具路由 — token 用量监控 / 数据源健康 / 事件记录等。"""
 
 from fastapi import APIRouter, Query
+import asyncio
 import time
 from typing import Any
 
@@ -146,31 +147,40 @@ async def get_factor_health():
     """#5: 因子计算健康检查 — 返回每个符号的非零因子比例。
 
     供 verify_e2e 和运维监控使用，不依赖 mock 环境。
+    round10 P1-A: 加并发锁——多个请求同时缓存 miss 时只计算一次（10.9s 黑洞
+    防抖），不阻塞各自返回（等待者直接等同一个计算）。
     """
     from ..factors.factor_registry import FactorRegistry
+    if not hasattr(get_factor_health, "_lock"):
+        get_factor_health._lock = asyncio.Lock()
     _cache = getattr(get_factor_health, "_cache", None)
     if _cache and time.time() - _cache["ts"] < 60:
         return _cache["data"]
-    try:
-        fr = FactorRegistry()
-        symbols = ["510300", "518880", "511090"]
-        result = await fr.compute(symbols)
-        report = {}
-        for sym in symbols:
-            if sym in result:
-                scores = result[sym]
-                non_zero = sum(1 for v in scores.values() if isinstance(v, (int, float)) and abs(v) > 0.01)
-                total = len(scores)
-                report[sym] = {
-                    "total": total, "live": non_zero,
-                    "ratio": f"{non_zero}/{total}",
-                    "healthy": non_zero >= max(10, total * 0.4),
-                }
-        cached = {"status": "ok", "symbols": report}
-        get_factor_health._cache = {"data": cached, "ts": time.time()}
-        return cached
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+    async with get_factor_health._lock:
+        # 双重检查：等锁期间可能已被其他请求填充
+        _cache2 = getattr(get_factor_health, "_cache", None)
+        if _cache2 and time.time() - _cache2["ts"] < 60:
+            return _cache2["data"]
+        try:
+            fr = FactorRegistry()
+            symbols = ["510300", "518880", "511090"]
+            result = await fr.compute(symbols)
+            report = {}
+            for sym in symbols:
+                if sym in result:
+                    scores = result[sym]
+                    non_zero = sum(1 for v in scores.values() if isinstance(v, (int, float)) and abs(v) > 0.01)
+                    total = len(scores)
+                    report[sym] = {
+                        "total": total, "live": non_zero,
+                        "ratio": f"{non_zero}/{total}",
+                        "healthy": non_zero >= max(10, total * 0.4),
+                    }
+            cached = {"status": "ok", "symbols": report}
+            get_factor_health._cache = {"data": cached, "ts": time.time()}
+            return cached
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
 
 
 # ── Runtime Config Management (Phase 6.1.3) ─────────────────────

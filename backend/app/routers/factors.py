@@ -107,7 +107,9 @@ def _status_of(code: str, ic_val: float | None, ic_threshold: float) -> tuple[st
     # 满足「负 IC 标 valid 且文案 ≥阈值」矛盾项消除。
     if abs(ic_val) >= threshold:
         if ic_val < 0:
-            return "warn", f"|IC|={abs(ic_val):.4f} ≥ 阈值 {threshold}（负向），预测方向与收益反向，建议降权/淘汰，样本数 {samples}"
+            # P1-C (round10 §5.5/§10): 负向因子降权警示——|IC|≥阈值且为负（预测反向）
+            # reason 明示「负向预测已下架」，供 P3-E 门禁断言无「强负 IC 活跃项」。
+            return "warn", f"负向预测已下架：|IC|={abs(ic_val):.4f} ≥ 阈值 {threshold}，预测方向与收益反向（建议降权/淘汰），样本数 {samples}"
         return "valid", f"|IC|={ic_val:.4f} ≥ 阈值 {threshold}，样本数 {samples}"
     return "warn", f"|IC|={abs(ic_val):.4f} < 阈值 {threshold}，样本数 {samples}"
 

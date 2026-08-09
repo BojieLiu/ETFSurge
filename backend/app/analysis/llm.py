@@ -629,11 +629,14 @@ async def llm_complete_with_system(
     max_retries: int = LLM_MAX_RETRIES,
     retry_delay: float = LLM_RETRY_DELAY,
     rate_limit_cap: float = _LLM_RATE_LIMIT_CAP,
+    request_timeout: float | None = None,
 ) -> str:
     """Call LLM with a custom system prompt, with provider failover + retry (F6).
 
     R5-1-6: rate_limit_cap 参数化 429 退避上限（默认 30s 不变；策略检查传 10s 快速失败）；
     每次 provider 失败记录诊断（_record_llm_error），成功清空。
+    round10 P1-I: request_timeout 可覆写单次 provider 调用超时（默认 None =
+    provider.timeout；策略检查场景传 30-40s，与 90s 外层预算匹配，防 fallback 饿死）。
     """
     import httpx
     await _check_key()
@@ -661,7 +664,7 @@ async def llm_complete_with_system(
             _start = time.monotonic()
             try:
                 async with httpx.AsyncClient(
-                    timeout=provider.timeout, trust_env=False
+                    timeout=(request_timeout if request_timeout is not None else provider.timeout), trust_env=False
                 ) as client:
                     resp = await client.post(
                         provider.api_url,
@@ -1416,6 +1419,10 @@ async def generate_strategy_check_report(
             prompt,
             max_retries=1,
             rate_limit_cap=10.0,
+            # round10 P1-I: 单次 provider 调用 35s 超时即切 fallback——与 P0-F 的
+            # 30s 外层预算配套，90s 预算内主 provider ×2 轮 + fallback ×1 都能轮到，
+            # 不再被 provider 240s 级超时饿死。
+            request_timeout=35.0,
         )
     except BaseException as e:  # noqa: BLE001 — F1-9: 必须捕获 CancelledError（BaseException）
         # F1-9: asyncio.wait_for(20s) 超时取消内部任务时抛 CancelledError，

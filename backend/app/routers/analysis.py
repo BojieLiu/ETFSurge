@@ -401,6 +401,9 @@ async def llm_advice_stream(req: LLMAdviceRequest):
     user_ctx["sector_momentum"] = sector_data[:10]
     user_ctx["fund_flow"] = ctx.get("fund_flow", {})
     user_ctx["news"] = ctx.get("news", [])
+    # P3-G (round10 §10 P3-G): portfolio 槽显式注入——prompt 消费该槽；用户
+    # 请求显式携带 portfolio 时透传，未带则为空列表（不凭空捏造持仓）。
+    user_ctx["portfolio"] = (req.context or {}).get("portfolio", []) or []
 
     # Sector Phase 5: 注入市场上下文
     user_ctx = _inject_market_context(req.query, user_ctx)

@@ -122,13 +122,13 @@
                 <td><strong>{{ item.name }}</strong></td>
                 <td><span class="type-badge" :class="item.asset_type.toLowerCase()">{{ item.asset_type }}</span></td>
                 <td v-if="item.realtime" class="mono">{{ item.realtime.price?.toFixed(2) }}</td>
-                <td v-else class="muted">—</td>
+                <td v-else class="muted" title="行情加载中（数据源弱）"><span class="loading-text">行情加载中</span></td>
                 <td v-if="item.realtime" :class="item.realtime.change_pct >= 0 ? 'up' : 'down'">
                   {{ formatPct(item.realtime.change_pct) }}
                 </td>
-                <td v-else class="muted">—</td>
+                <td v-else class="muted" title="行情加载中（数据源弱）"><span class="loading-text">行情加载中</span></td>
                 <td v-if="item.realtime" class="mono small">{{ formatVol(item.realtime.volume) }}</td>
-                <td v-else class="muted">—</td>
+                <td v-else class="muted" title="行情加载中（数据源弱）"><span class="loading-text">行情加载中</span></td>
                 <td class="notes-cell">
                   <span v-if="item.notes" class="notes-text">{{ item.notes }}</span>
                   <span v-else class="muted">—</span>
@@ -439,6 +439,7 @@ onMounted(fetchItems)
 .mono { font-family: monospace; }
 .small { font-size: var(--font-size-xs); }
 .muted { color: var(--color-text-tertiary); }
+.loading-text { font-size: var(--text-xs); color: var(--color-text-tertiary); }
 .up { color: var(--color-text-up); font-weight: var(--font-weight-semibold); }
 .down { color: var(--color-text-down); font-weight: var(--font-weight-semibold); }
 .notes-cell { max-width: 160px; }
