@@ -211,7 +211,7 @@ async def test_search_default_cross_market():
             {"symbol": "600519", "name": "贵州茅台", "market": "A", "asset_type": "stock", "type": "stock"},  # non-etf → filtered
         ]
 
-    async def _fake_search_hk_us(kw, enrich=True, include_stocks=False):
+    async def _fake_search_hk_us(kw, enrich=True, include_stocks=False, market=None):
         return [
             {"symbol": "02800.HK", "name": "盈富基金", "market": "HK", "asset_type": "HK", "type": "etf"},
             {"symbol": "SPY", "name": "SPDR S&P 500 ETF", "market": "US", "asset_type": "US", "type": "etf"},
@@ -239,7 +239,7 @@ async def test_search_include_stocks_true_adds_a_stocks():
     async def _fake_search_etf(kw):
         return [{"symbol": "510300", "name": "沪深300ETF", "market": "A", "asset_type": "etf", "type": "etf"}]
 
-    async def _fake_search_hk_us(kw, enrich=True, include_stocks=False):
+    async def _fake_search_hk_us(kw, enrich=True, include_stocks=False, market=None):
         return []
 
     fake_session = _FakeSession()  # instruments has no stock rows
@@ -260,7 +260,7 @@ async def test_search_include_stocks_true_adds_a_stocks():
 @pytest.mark.asyncio
 async def test_search_route_hk_us_nonempty():
     """GET /search?keyword=00700&market=HK&include_stocks=true → 200 + list (route level)."""
-    async def _fake_search_hk_us(kw, enrich=True, include_stocks=False):
+    async def _fake_search_hk_us(kw, enrich=True, include_stocks=False, market=None):
         return [{"symbol": "00700", "name": "腾讯控股", "market": "HK",
                  "asset_type": "HK", "type": "stock"}]
 

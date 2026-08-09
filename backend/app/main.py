@@ -206,7 +206,7 @@ async def lifespan(app: FastAPI):
                 # R5-2-3: 缓存命中即跳过（与 R4-26 失败缓存模式一致）——磁盘 last_ok
                 # 缓存 24h 内有效时直接复用，不触网（旧逻辑仅 1h 内跳过 → 冷拉 1.09s 热点）。
                 _persist_path = os.path.join(
-                    os.path.dirname(os.path.dirname(__file__)),
+                    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
                     "data", "indices_cache.json",
                 )
                 _cache_hit = False

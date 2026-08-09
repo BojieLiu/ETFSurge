@@ -88,9 +88,9 @@ async def search(
     mkt = str(market or "").upper() or None
     kind = str(kind or "all").lower()
 
-    # O30: sector/index 专用分支（kind=sector|index 时忽略 market——板块/指数无市场维度）
+    # O30: sector/index 专用分支（round10 P2-T: sector 现在带 market 过滤——US/HK 返回空）
     if kind == "sector":
-        return await _search_sectors(keyword)
+        return await _search_sectors(keyword, market=mkt)
     if kind == "index":
         return await _search_indices(keyword)
 
@@ -144,9 +144,9 @@ async def search(
         return []
 
     if mkt == "HK":
-        return await search_hk_us(keyword, include_stocks=include_stocks)
+        return await search_hk_us(keyword, include_stocks=include_stocks, market="HK")
     if mkt == "US":
-        return await search_hk_us(keyword, include_stocks=include_stocks)
+        return await search_hk_us(keyword, include_stocks=include_stocks, market="US")
 
     # 默认 / global：跨市场合并（A股ETF → A股个股(include_stocks) → HK → US）
     try:
@@ -196,8 +196,14 @@ async def search(
             dedup.append(it)
     return _sort_search_results(dedup[:30], keyword)
 
-async def _search_sectors(keyword: str) -> list[dict[str, Any]]:
-    """O30: 板块搜索——sectors 表 name ilike %kw%（type='sector'，BK 码）。"""
+async def _search_sectors(keyword: str, market: str | None = None) -> list[dict[str, Any]]:
+    """O30: 板块搜索——sectors 表 name ilike %kw%（type='sector'，BK 码）。
+
+    round10 P2-T: market 参数——US/HK 传入时返回空（美股/港股无板块数据源，
+    防美股 tab 展示 A 股板块）；A/None 行为不变。
+    """
+    if market and market.upper() in ("US", "HK"):
+        return []  # 美股/港股暂无板块数据源（round6 F16）
     from ..models.search import Sector
     from sqlalchemy import select
 
@@ -829,11 +835,24 @@ async def watchlist_add(data: WatchlistCreate) -> dict[str, Any]:
             raise HTTPException(status_code=409, detail="该标的已在自选列表中")
 
         # Get realtime data to validate code exists and get name
-        realtime = await market_data_hub.get_asset_realtime(data.symbol, data.asset_type)
-        # R29: 优先用前端传入的 name（搜索已带真实名称）；仅当 name 与 realtime 都拿不到时才 422。
-        # 放宽旧逻辑——realtime 为空但前端已带合法 name 时不再拒绝（用传入 name 入库）。
+        # P2-J (round10 §5.2): 前端已传合法 name 时直接跳过实时验证（慢源下
+        # 添加不再卡 8-15s）——R29 已允许 name 入库；
+        # 否则才做带超时的实时验证（A≤3s、港/指≤8s）降级 DB-only。
         provided_name = (data.name or "").strip()
         has_provided_name = bool(provided_name) and provided_name != data.symbol
+        if has_provided_name:
+            # 前端已带 name → 跳过实时验证直接入库（慢源下添加秒回）
+            realtime = {}
+        else:
+            # 带超时的实时验证：A≤3s、港/指≤8s，超时降级 DB-only（后续 name 补名逻辑接管）
+            try:
+                _rt_timeout = 3 if (data.asset_type or "A") == "A" else 8
+                realtime = await asyncio.wait_for(
+                    market_data_hub.get_asset_realtime(data.symbol, data.asset_type),
+                    timeout=_rt_timeout,
+                )
+            except BaseException:
+                realtime = None
         # O9 (round8 §7 P9-新): realtime name 空时从 instruments 本地表补名
         # （F17 启动自动同步）——命中后视为已解析（不再 422），name 用真实名称。
         _instrument_name = ""

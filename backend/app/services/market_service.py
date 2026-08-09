@@ -722,9 +722,12 @@ def _sort_search_results(items: list[dict], keyword: str) -> list[dict]:
 
 
 async def search_hk_us(keyword: str = "", enrich: bool = True,
-                       include_stocks: bool = False) -> list[dict[str, Any]]:
+                       include_stocks: bool = False,
+                       market: str | None = None) -> list[dict[str, Any]]:
     """三级搜索 HK/US：静态基座 →（include_stocks=True 时）akshare 全量 spot → ETF 实时 enrich。
 
+    round10 P2-Q: market 参数（'HK'/'US'/None）——指定时只返回该市场结果；
+    None（默认）保持 HK+US 合并（向后兼容）。消除「搜 AAPL 返回 30 条港股 ETF」。
     include_stocks=False 为默认（仅静态 ETF 基座，向后兼容，不触网——
     既有 F3 单测保持纯静态）；True 时启用 spot 动态补充（调用方显式传入）。
 
@@ -838,6 +841,9 @@ async def search_hk_us(keyword: str = "", enrich: bool = True,
             continue
         seen.add(key)
         merged.append(it)
+    # round10 P2-Q: market 指定时只保留该市场结果（消除 UK 混入 / US 查询被港股挤出）
+    if market:
+        merged = [it for it in merged if it.get("market") == market]
     results = merged[:30]
 
     if not enrich:

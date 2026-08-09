@@ -131,7 +131,7 @@ async def test_search_kind_all_appends_sector_index():
         return [{"symbol": "510300", "name": "沪深300ETF", "market": "A",
                  "asset_type": "etf", "type": "etf"}]
 
-    async def fake_search_hk_us(keyword, enrich=False, include_stocks=False):
+    async def fake_search_hk_us(keyword, enrich=False, include_stocks=False, market=None):
         return []
 
     with patch("app.routers.market.async_session", lambda: _SwitchingSession()), \
@@ -151,7 +151,7 @@ async def test_search_kind_symbol_no_sector():
         return [{"symbol": "510300", "name": "沪深300ETF", "market": "A",
                  "asset_type": "etf", "type": "etf"}]
 
-    async def fake_search_hk_us(keyword, enrich=False, include_stocks=False):
+    async def fake_search_hk_us(keyword, enrich=False, include_stocks=False, market=None):
         return []
 
     with patch("app.routers.market.async_session", lambda: _FakeSession([])), \

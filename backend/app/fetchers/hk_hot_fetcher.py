@@ -118,7 +118,7 @@ def parse_hk_plates(rows: list[dict]) -> list[dict]:
     """
     groups: dict[str, dict] = {}
     for r in rows or []:
-        ind = (r.get("f100") or "").strip() or "其他"
+        ind = _clean_industry(r.get("f100"))
         chg = _to_float(r.get("f3"))
         amt = _to_float(r.get("f6"))
         g = groups.setdefault(ind, {"name": ind, "amount": 0.0, "change_sum": 0.0, "stock_count": 0})
@@ -138,6 +138,15 @@ def parse_hk_plates(rows: list[dict]) -> list[dict]:
     return plates
 
 
+def _clean_industry(raw) -> str:
+    """P2-M (round10 §5.1): 东财 f100 无行业分类时返回 '-'（单连字符），
+    旧兜底只处理空串 → '-' 成为虚假板块名。统一归一为「其他」。"""
+    ind = (raw or "").strip()
+    if not ind or ind in ("-", "--", "—", "0", "None", "nan", "N/A"):
+        return "其他"
+    return ind
+
+
 def parse_hk_hot_stocks(rows: list[dict], top_n: int = 20) -> list[dict]:
     """按 f6（成交额）排序取前 N → 港股热门个股。"""
     stocks = []
@@ -148,7 +157,7 @@ def parse_hk_hot_stocks(rows: list[dict], top_n: int = 20) -> list[dict]:
             "price": _to_float(r.get("f2")),
             "change_pct": _to_float(r.get("f3")),
             "amount": _to_float(r.get("f6")),
-            "industry": r.get("f100") or "",
+            "industry": _clean_industry(r.get("f100")),
         })
     stocks.sort(key=lambda s: -s["amount"])
     return stocks[:top_n]

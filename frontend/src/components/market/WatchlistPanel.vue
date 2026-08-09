@@ -26,7 +26,7 @@
                   <input
                     type="text"
                     v-model="form.symbol"
-                    placeholder="搜索代码或名称，如 510050、贵州茅台..."
+                    :placeholder="placeholderText"
                     class="text-input"
                     @keydown.enter="addItem"
                     @input="doSearch"
@@ -46,7 +46,10 @@
               </div>
               <div class="form-group">
                 <label class="form-label">资产类型</label>
-                <select v-model="form.asset_type" class="select-input">
+                <!-- P2-L: 特定市场 tab（A/HK/US）时下拉改为只读「市场：xxx」标签——无需用户再选；
+                     global tab 保留下拉（跨市场需确认或依赖搜索选中自动设）。 -->
+                <div v-if="marketTab !== 'global'" class="readonly-market-tag">{{ marketTabLabel }}</div>
+                <select v-else v-model="form.asset_type" class="select-input">
                   <option v-for="opt in assetTypes" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
                 </select>
               </div>
@@ -180,7 +183,24 @@ const assetTypes = [
   { value: 'index', label: '指数' },
 ]
 
+// P2-L: 市场标签只读展示（A/HK/US tab 添加框不再让用户选资产类型）
+const marketTabLabel = computed(() => {
+  const map = { A: '市场：A股', HK: '市场：港股', US: '市场：美股', global: '市场：跨市场' }
+  return map[props.marketTab] || '市场：A股'
+})
+
 // Computed
+// P2-L10 (round10 §5.2 用户反馈): placeholder 示例随市场 tab 动态化
+const placeholderText = computed(() => {
+  const examples = {
+    A: '搜索代码或名称，如 510050、贵州茅台...',
+    HK: '搜索代码或名称，如 00700、腾讯控股...',
+    US: '搜索代码或名称，如 AAPL、Apple...',
+    global: '搜索代码或名称（跨市场）...',
+  }
+  return examples[props.marketTab] || examples.global
+})
+
 const displayList = computed(() => {
   if (!items.value.length) return []
   if (props.marketTab === 'global') return items.value

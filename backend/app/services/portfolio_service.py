@@ -82,12 +82,23 @@ def _factor_hint(code: str, value: float) -> str:
 def format_factor_summary(real_fs: dict[str, float], top_n: int = 3) -> str:
     """F11: 因子分 → 中文解读字符串（保持 factor_summary 字符串契约不变）。
 
+    round10 P2-I: 渲染前过滤中性兜底默认值（RSI/KDJ=50、vol_ratio=1、|v|≈0）——
+    无任何真实因子的标的渲染为空串（调用方显示「数据不可用」），不再把 50.00
+    「（中性）」伪装成真实计算结果。
+
     示例输入: {"technical.rsi.rsi_14": 39.53, "technical.kdj.d_value": -3.46}
     输出: "RSI(14) 39.53（中性）；KDJ.D -3.46（超卖区）"
     """
     if not real_fs:
         return ""
-    items = sorted(real_fs.items(), key=lambda x: -abs(x[1]))[:top_n]
+    real_items = [
+        (k, v) for k, v in real_fs.items()
+        if isinstance(v, (int, float)) and _factor_value_real(k, v)
+    ]
+    if not real_items:
+        # P2-I: 全为兜底默认值 → 空串（调用方已 fallback「数据不可用」文案）
+        return ""
+    items = sorted(real_items, key=lambda x: -abs(x[1]))[:top_n]
     parts = []
     for k, v in items:
         label = FACTOR_LABELS.get(k, k)

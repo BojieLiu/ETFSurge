@@ -55,16 +55,14 @@ def _try_two(name_lv, lv_fn, name_ak, ak_fn, default=None):
 # ---------------------------------------------------------------------------
 
 def _sector_change_pct(v) -> float | None:
-    """P2-3 (round9 §6.1): 板块涨跌幅值域校验——A股板块单日 ±10% 外视为数据源异常。
-
-    §6.1 实测「医疗研发外包 BK1600 单日暴涨 13.03%」极可疑（O5 值域校验未覆盖板块数据）；
-    超界返回 None（调用方标「数据源异常」或 0 兑底，不透传荒谬数值）。
-    """
+    """P2-3/P2-K (round10 §5.1): 板块涨跌幅值域校验——A股板块单日 ±10% 属合法
+    （round9 实测 CRO/CMO +10.84%、医疗研发外包 +13.03%）；±20% 外才视为数据源异常
+    （避免把真实大涨板块剔出回填 map 导致显示 0）。超界返回 None。"""
     try:
         val = float(v or 0)
     except (TypeError, ValueError):
         return None
-    if abs(val) > 10.0:
+    if abs(val) > 20.0:
         return None
     return val
 

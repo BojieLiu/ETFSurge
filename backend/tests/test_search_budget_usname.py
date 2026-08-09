@@ -22,7 +22,7 @@ def test_cross_market_exact_symbol_first(monkeypatch):
     async def fake_search_etf(kw):
         return []  # SPY 非 A 股
 
-    async def fake_search_hk_us(kw, enrich=False, include_stocks=False):
+    async def fake_search_hk_us(kw, enrich=False, include_stocks=False, market=None):
         # 模拟 US 段：模糊命中多个，SPY 不在首位（基座顺序）
         return [
             {"symbol": "SPYD", "name": "SPYD 分红ETF", "market": "US", "asset_type": "US", "type": "etf"},
@@ -47,7 +47,7 @@ def test_cross_market_global_sort_applied(monkeypatch):
     async def fake_search_etf(kw):
         return [{"symbol": "510050", "name": "上证50ETF", "market": "A", "asset_type": "etf", "type": "etf"}]
 
-    async def fake_search_hk_us(kw, enrich=False, include_stocks=False):
+    async def fake_search_hk_us(kw, enrich=False, include_stocks=False, market=None):
         return [
             {"symbol": "0050", "name": "元大台湾50", "market": "HK", "asset_type": "HK", "type": "etf"},
             {"symbol": "510050.HK", "name": "南方A50", "market": "HK", "asset_type": "HK", "type": "etf"},

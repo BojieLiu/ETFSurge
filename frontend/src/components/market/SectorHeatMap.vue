@@ -122,7 +122,7 @@
       v-if="techModal"
       :symbol="techModal.symbol"
       :name="techModal.name"
-      asset-type="A"
+      :asset-type="techModal.assetType || 'A'"
       @close="techModal = null"
       @ai="(p) => { techModal = null; emitAnalyze('symbol', p) }"
     />
@@ -188,7 +188,15 @@ function emitAnalyze(mode, item) {
 }
 
 function openTechnical(item) {
-  techModal.value = { symbol: item.symbol || item.code, name: item.name }
+  // P2-N (round10 §5.3): 弹窗 assetType 按条目市场推断——HK→'HK'、US→'US'、
+  // 其余→'A'（防港股被当 A 股查 K 线 → 指标全空）
+  const itemMarket = (item.market || item.asset_type || props.marketTab || 'A').toUpperCase()
+  const assetType = itemMarket === 'HK' || itemMarket === 'US' ? itemMarket : 'A'
+  techModal.value = {
+    symbol: item.symbol || item.code,
+    name: item.name,
+    assetType,
+  }
 }
 
 function leadStockNames(item) {

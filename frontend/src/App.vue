@@ -107,6 +107,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useToastStore } from './stores/toast'
 import { useLoadingStore } from './stores/loading'
 import { useTaskStore } from './stores/task'
+import { useMarketStore } from './stores/market'
 import { portfolioApi } from './api'
 import { useWarmupStatus } from './composables/useWarmupStatus'
 import TaskIndicator from './components/TaskIndicator.vue'
@@ -115,6 +116,7 @@ const router = useRouter()
 const route = useRoute()
 const toastStore = useToastStore()
 const loadingStore = useLoadingStore()
+const marketStore = useMarketStore()
 
 // Warmup status (global — used in nav-bar indicator)
 const { isWarmingUp, startPolling, stopPolling } = useWarmupStatus()
@@ -150,8 +152,11 @@ const routeMetaIcon = computed(() => {
   return (t && PAGE_ICONS[t]) || '📈'
 })
 
-// Connection status (mock - could connect to actual WS status)
-const connectionStatus = ref('connected')
+// P2-3 (round11 §3.6): connectionStatus 接真实 wsConnected（stores/market.js）——
+// 导航栏「已连接」不再硬编码假状态；Dashboard/主力行情 WS 断开时显示「离线」。
+const connectionStatus = computed(() => (
+  marketStore.wsConnected ? 'connected' : 'disconnected'
+))
 const connectionStatusText = computed(() => {
   switch (connectionStatus.value) {
     case 'connected': return '已连接'

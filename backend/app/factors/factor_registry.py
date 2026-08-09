@@ -400,7 +400,7 @@ def _compute_price(data: dict) -> float:
     return 0.0
 
 
-# --- Scaffolding functions (保留待后续数据源接入) ---
+# --- 已注册在用（round11 P2-7 复核：下列函数均在 _FACTOR_FUNCTIONS 注册并参与计算） ---
 def _compute_premium_discount(data: dict) -> float:
     """折溢价率：(ETF价格 - IOPV) / IOPV。正常范围 -0.03 ~ 0.03。"""
     nav = data.get("nav")

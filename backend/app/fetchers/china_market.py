@@ -880,6 +880,12 @@ def _fetch_us_spot() -> list[dict[str, Any]]:
                 "name": str(row.get("名称", row.get("name", ""))),
                 "name_en": str(row.get("英文名称", row.get("name_en", row.get("英文名", "")))),
                 "market": "US",
+                # P2-R (round10 §5.6): 补实时字段——美股热点排行（成交额榜）依赖。
+                # 东财 stock_us_spot_em 列：最新价/涨跌幅/成交量/成交额/总市值/流通市值。
+                "price": _to_float(row.get("最新价", row.get("price"))),
+                "change_pct": _to_float(row.get("涨跌幅", row.get("change_pct"))),
+                "amount": _to_float(row.get("成交额", row.get("amount"))),
+                "mcap": _to_float(row.get("总市值", row.get("total_mv"))),
             })
         sync_memory_cache.set(cache_key, rows, CACHE_TTL["us_spot_list"])
         return rows

@@ -1438,7 +1438,7 @@ class MarketDataHub:
                 self._sentiment_cache = sentiment
                 self._sentiment_cache_ts = time.time()
                 # A02: Persist sentiment cache to file for crash recovery
-                _cache_dir = os.path.join(os.path.dirname(__file__), "..", "data")
+                _cache_dir = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data")
                 os.makedirs(_cache_dir, exist_ok=True)
                 _cache_file = os.path.join(_cache_dir, "sentiment_cache.json")
                 with open(_cache_file, "w", encoding="utf-8") as f:
@@ -1448,7 +1448,7 @@ class MarketDataHub:
             logger.warning("[pool] refresh_sentiment_cache failed: %s", e)
             # A02: On failure, try to restore from persisted file
             try:
-                _cache_dir = os.path.join(os.path.dirname(__file__), "..", "data")
+                _cache_dir = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data")
                 _cache_file = os.path.join(_cache_dir, "sentiment_cache.json")
                 if os.path.exists(_cache_file):
                     with open(_cache_file, "r", encoding="utf-8") as f:
@@ -1823,13 +1823,39 @@ class MarketDataHub:
     def get_stock_hot_rank(self, limit: int = 50, market: str = "A") -> list[dict]:
         """热门个股排行（Z25: 补全 volume/turnover/sector）。
 
-        F16: market=HK 走港股成交额榜；market=US 暂不支持。
+        F16→P2-R (round10 §5.6): market=HK 走港股成交额榜；market=US 走东财
+        spot_em 成交额降序 TOP N（美股无涨跌停，成交额榜即"热度"）。
         """
-        if market and market.upper() != "A":
+        if market and market.upper() == "HK":
             from ..fetchers.hk_hot_fetcher import get_hk_hot_stocks
-            if market.upper() == "HK":
-                return get_hk_hot_stocks(limit)
-            return []
+            return get_hk_hot_stocks(limit)
+        if market and market.upper() == "US":
+            try:
+                from ..fetchers.china_market import _fetch_us_spot
+                us_rows = _fetch_us_spot() or []
+                # 按成交额降序（amount 缺失的排到尾），取 TOP N
+                ranked = sorted(
+                    [r for r in us_rows if r.get("amount") is not None],
+                    key=lambda r: -(r.get("amount") or 0),
+                )
+                head = ranked[:limit]
+                if not head:
+                    head = us_rows[:limit]
+                return [
+                    {
+                        "symbol": r.get("symbol"),
+                        "name": r.get("name"),
+                        "price": r.get("price"),
+                        "change_pct": r.get("change_pct"),
+                        "amount": r.get("amount"),
+                        "mcap": r.get("mcap"),
+                        "market": "US",
+                    }
+                    for r in head
+                ]
+            except Exception as e:
+                logger.warning("[hub] get_stock_hot_rank US failed: %s", e)
+                return []
         try:
             from ..fetchers.sector_fetcher import fetch_stock_hot_rank
             rows = fetch_stock_hot_rank(limit) or []
