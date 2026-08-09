@@ -208,6 +208,60 @@ class TestStrategyCheckCoverage:
             assert suggestion["confidence"] == 0.7
 
 
+# ── P2-F: 成功的 LLM 报告短缓存（同持仓重复检查第 2 次起命中，不再调 LLM）──
+class TestP2FLlmReportCache:
+    @pytest.mark.asyncio
+    async def test_second_call_hits_llm_report_cache(self, strategy_env):
+        """P2-F: 同持仓同 capital 重复 strategy_check——第 2 次命中 LLM 报告缓存，
+        不再调用 generate_strategy_check_report（旧实现每次 60-120s 重算）。"""
+        from app.services import portfolio_service as ps
+        from app.factors.factor_registry import registry as factor_registry
+
+        llm_calls = []
+
+        async def _fake_llm(**kw):
+            llm_calls.append(1)
+            return {"summary": "组合稳健", "suggestions": [],
+                    "holdings_analysis": [], "risk_warnings": []}
+
+        with patch("app.analysis.llm.generate_strategy_check_report",
+                   new=AsyncMock(side_effect=_fake_llm)), \
+             patch.object(factor_registry, "compute",
+                          new_callable=AsyncMock, return_value=_MOCK_FACTORS):
+            r1 = await ps.strategy_check(db=None, total_capital=100000)
+            r2 = await ps.strategy_check(db=None, total_capital=100000)
+
+        assert len(llm_calls) == 1, f"第 2 次应命中缓存不再调 LLM，实际 {len(llm_calls)} 次"
+        assert r2["summary"] == r1["summary"]
+        # 缓存命中时 raw_llm 同源（LLM 成功报告复用）
+        assert "组合稳健" in r1["summary"]
+
+    @pytest.mark.asyncio
+    async def test_llm_failure_not_cached(self, strategy_env):
+        """P2-F: LLM 超时兜底不写缓存——下次检查仍会重试 LLM（不得把降级当成功复用）。"""
+        from app.services import portfolio_service as ps
+        from app.factors.factor_registry import registry as factor_registry
+
+        llm_calls = []
+
+        async def _flaky_llm(**kw):
+            llm_calls.append(1)
+            if len(llm_calls) == 1:
+                raise asyncio.TimeoutError("llm slow")
+            return {"summary": "组合稳健", "suggestions": [],
+                    "holdings_analysis": [], "risk_warnings": []}
+
+        with patch("app.analysis.llm.generate_strategy_check_report",
+                   new=AsyncMock(side_effect=_flaky_llm)), \
+             patch.object(factor_registry, "compute",
+                          new_callable=AsyncMock, return_value=_MOCK_FACTORS):
+            r1 = await ps.strategy_check(db=None, total_capital=100000)
+            r2 = await ps.strategy_check(db=None, total_capital=100000)
+
+        assert len(llm_calls) == 2, f"失败不缓存，第 2 次应重试 LLM，实际 {len(llm_calls)} 次"
+        assert "组合稳健" in r2["summary"]
+
+
 if __name__ == "__main__":
     import asyncio
     pytest.main([__file__, "-v"])

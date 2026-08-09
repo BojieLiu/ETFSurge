@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Any
 import asyncio
 import logging
+import os
 import time
 
 logger = logging.getLogger(__name__)
@@ -744,69 +745,84 @@ async def strategy_check(
     # 数据完整 60s（旧 F9 恒 30s：采集也占 30s，LLM 实际剩余不足 → 恒超时兜底常态）。
     # F1-9: wait_for 超时会取消内部协程，抛 CancelledError（BaseException），
     # 必须与 TimeoutError 一起捕获，否则 usage 失败记录缺失、规则兜底文案丢失。
+    # P2-F: 成功的 LLM 报告短缓存（key=持仓+capital+provider，TTL 5min）——
+    # 同持仓重复检查第 2 次起命中 <1s，避免每次 60-120s 重算（round10 §3.3）。
+    _LLM_REPORT_TTL = 300.0
+    _llm_provider = os.environ.get("LLM_PRIMARY_PROVIDER", "opencode_zen")
+    _llm_cache_key = f"llm:{cache_key}:{int(total_capital)}:{_llm_provider}" if cache_key else ""
+    _llm_cached = _strategy_check_cache.get(_llm_cache_key) if _llm_cache_key else None
     _llm_failed = False
-    _llm_start = _time.monotonic()
-    _llm_diag = ""
-    _llm_timeout = _llm_timeout_for(data_quality)
-    try:
-        llm_result = await asyncio.wait_for(
-            generate_strategy_check_report(
-                market_data=market_data,
-                factor_breakdowns=factor_breakdowns,
-                regime=regime,
-                data_quality=data_quality,
-            ),
-            timeout=_llm_timeout,
-        )
-    except (asyncio.TimeoutError, asyncio.CancelledError) as e:
-        _llm_failed = True
-        _llm_dur = _time.monotonic() - _llm_start
-        # R5-1-6: 取 LLM 层最后失败诊断（区分限流/超时），供 summary 展示
+    if _llm_cached and _time.monotonic() - _llm_cached[0] < _LLM_REPORT_TTL:
+        # P2-F: 命中成功报告缓存——直接复用，不调 LLM
+        llm_result = _llm_cached[1]
+        logger.debug("[strategy_check] LLM report cache hit (P2-F, key=%s)", _llm_cache_key)
+    else:
+        _llm_start = _time.monotonic()
+        _llm_diag = ""
+        _llm_timeout = _llm_timeout_for(data_quality)
         try:
-            from ..analysis.llm import get_last_llm_error
-            _llm_diag = get_last_llm_error() or ""
-        except Exception:
-            _llm_diag = ""
-        logger.warning(
-            "[strategy_check] LLM analysis timed out/cancelled after %.1fs (%s), using rule fallback. last_error=%s",
-            _llm_dur, type(e).__name__, _llm_diag,
-        )
-        # F1-9: 失败留痕 — 写 usage 失败记录（成功路径由 llm.py 写入）
-        try:
-            from ..monitor.token_usage import token_store, UsageRecord
-            await token_store.record(UsageRecord(
-                function_name="generate_strategy_check_report",
-                prompt_tokens=0, completion_tokens=0, total_tokens=0,
-                model="", timestamp=_time.time(), success=False,
-                duration_ms=round(_llm_dur * 1000, 1),
-                error_message=f"wait_for timeout ({type(e).__name__})",
-                provider="",
-            ))
-        except Exception as _ue:
-            logger.debug("[strategy_check] usage record failed (non-fatal): %s", _ue)
-        llm_result = {
-            # R6-F13 (round6 §十五 R6-15): 文案区分限流/超时/快速失败——与
-            # get_last_llm_error 一致（旧模板恒写"超时 60s"，500 快速失败时误导）
-            # O25③: 携带 data_quality（N/M 因子可用 + 缺失原因）
-            "summary": _build_llm_fail_summary(_llm_dur, _llm_diag, data_quality),
-            "suggestions": [],
-            "holdings_analysis": [],
-            "risk_warnings": [],
-        }
-    except Exception as e:
-        _llm_failed = True
-        logger.warning("[strategy_check] LLM analysis failed: %s", e)
-        llm_result = {
-            "summary": f"LLM 分析暂不可用（{e}），返回因子数据摘要",
-            "suggestions": [],
-            "holdings_analysis": [],
-            "risk_warnings": [],
-        }
+            llm_result = await asyncio.wait_for(
+                generate_strategy_check_report(
+                    market_data=market_data,
+                    factor_breakdowns=factor_breakdowns,
+                    regime=regime,
+                    data_quality=data_quality,
+                ),
+                timeout=_llm_timeout,
+            )
+        except (asyncio.TimeoutError, asyncio.CancelledError) as e:
+            _llm_failed = True
+            _llm_dur = _time.monotonic() - _llm_start
+            # R5-1-6: 取 LLM 层最后失败诊断（区分限流/超时），供 summary 展示
+            try:
+                from ..analysis.llm import get_last_llm_error
+                _llm_diag = get_last_llm_error() or ""
+            except Exception:
+                _llm_diag = ""
+            logger.warning(
+                "[strategy_check] LLM analysis timed out/cancelled after %.1fs (%s), using rule fallback. last_error=%s",
+                _llm_dur, type(e).__name__, _llm_diag,
+            )
+            # F1-9: 失败留痕 — 写 usage 失败记录（成功路径由 llm.py 写入）
+            try:
+                from ..monitor.token_usage import token_store, UsageRecord
+                await token_store.record(UsageRecord(
+                    function_name="generate_strategy_check_report",
+                    prompt_tokens=0, completion_tokens=0, total_tokens=0,
+                    model="", timestamp=_time.time(), success=False,
+                    duration_ms=round(_llm_dur * 1000, 1),
+                    error_message=f"wait_for timeout ({type(e).__name__})",
+                    provider="",
+                ))
+            except Exception as _ue:
+                logger.debug("[strategy_check] usage record failed (non-fatal): %s", _ue)
+            llm_result = {
+                # R6-F13 (round6 §十五 R6-15): 文案区分限流/超时/快速失败——与
+                # get_last_llm_error 一致（旧模板恒写"超时 60s"，500 快速失败时误导）
+                # O25③: 携带 data_quality（N/M 因子可用 + 缺失原因）
+                "summary": _build_llm_fail_summary(_llm_dur, _llm_diag, data_quality),
+                "suggestions": [],
+                "holdings_analysis": [],
+                "risk_warnings": [],
+            }
+        except Exception as e:
+            _llm_failed = True
+            logger.warning("[strategy_check] LLM analysis failed: %s", e)
+            llm_result = {
+                "summary": f"LLM 分析暂不可用（{e}），返回因子数据摘要",
+                "suggestions": [],
+                "holdings_analysis": [],
+                "risk_warnings": [],
+            }
 
-    # F1-9 兜底识别：llm.py 内部捕获 CancelledError 返回兜底结构（wait_for 不抛异常），
-    # 此时 summary 以"LLM 分析超时"开头——同样视为 LLM 失败（风险兜底诚实化）
-    if not _llm_failed and str(llm_result.get("summary", "")).startswith("LLM 分析超时"):
-        _llm_failed = True
+        # F1-9 兜底识别：llm.py 内部捕获 CancelledError 返回兜底结构（wait_for 不抛异常），
+        # 此时 summary 以"LLM 分析超时"开头——同样视为 LLM 失败（风险兜底诚实化）
+        if not _llm_failed and str(llm_result.get("summary", "")).startswith("LLM 分析超时"):
+            _llm_failed = True
+
+        # P2-F: 仅缓存成功的 LLM 报告（失败/兜底不写——避免把降级结果当成功复用）
+        if _llm_cache_key and not _llm_failed:
+            _strategy_check_cache[_llm_cache_key] = (_time.monotonic(), llm_result)
     
     # P2-1+P2-2+P2-4: 后处理 — 回填 weight + 真实因子分 + factor_summary
     weight_map: dict[str, float] = {}
