@@ -17,6 +17,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.analysis import llm
+from app.services import portfolio_service as ps
+from app.services.portfolio_service import (
+    _build_llm_fail_summary,
+    _collect_strategy_data,
+)
 
 
 @pytest.fixture
@@ -88,14 +93,6 @@ class TestR516StrategyCheckFastFail:
         assert captured["rate_limit_cap"] == 10.0
 
     @pytest.mark.asyncio
-    async def test_strategy_check_report_fast_fail_params(self, llm_chain_env):
-        """generate_strategy_check_report 调 run_json 传 max_retries=1, rate_limit_cap=10。"""
-        import inspect
-        src = inspect.getsource(llm.generate_strategy_check_report)
-        assert "rate_limit_cap=10.0" in src, "必须传 rate_limit_cap=10 快速失败"
-        assert "max_retries=1" in src, "必须传 max_retries=1（2 轮尝试）"
-
-    @pytest.mark.asyncio
     async def test_timeout_summary_contains_last_error(self):
         """generate_strategy_check_report 超时兜底 summary 含最后错误诊断。"""
         from app.analysis import registry
@@ -131,3 +128,140 @@ def _make_429_exc():
     req = httpx.Request("POST", "http://llm.test/v1/chat/completions")
     resp = httpx.Response(429, request=req)
     return httpx.HTTPStatusError("429 Too Many Requests", request=req, response=resp)
+
+
+# ── O7 / R6-F13: _build_llm_fail_summary 文案分级（合并自 test_strategy_check_llm_fallback.py
+#    与 test_strategy_check_summary.py）──
+
+
+class TestLlmFailSummary:
+    def test_timeout_reason_with_data_summary(self):
+        """超时兜底文案含原因分类 + 数据摘要（N/M 可用）。"""
+        s = _build_llm_fail_summary(32.0, "connection timed out", {
+            "filled_count": 8, "total_count": 10, "partial": True, "all_empty": False,
+        })
+        assert "LLM 响应超时" in s
+        assert "32s" in s
+        assert "8/10" in s
+        assert "规则引擎兜底" in s
+
+    def test_rate_limited_reason(self):
+        s = _build_llm_fail_summary(5.0, "429 Too Many Requests", None)
+        assert "LLM 限流" in s
+        assert "429" in s
+
+    def test_all_empty_quality_note(self):
+        """数据全缺时文案注明「上下文不足快速兜底」。"""
+        s = _build_llm_fail_summary(15.0, "timeout", {
+            "filled_count": 0, "total_count": 10, "partial": False, "all_empty": True,
+        })
+        assert "数据缺失" in s
+        assert "0/10" in s
+
+
+def test_fail_summary_rate_limit():
+    """诊断含 429/限流 → "LLM 限流"。"""
+    s = _build_llm_fail_summary(10.0, "HTTP 429 Rate limit exceeded")
+    assert "LLM 限流" in s, s
+    assert "429" in s
+    assert "已用规则引擎兜底" in s
+
+
+def test_fail_summary_timeout():
+    """诊断含 timeout → "LLM 响应超时"。"""
+    s = _build_llm_fail_summary(60.0, "HTTPSConnectionPool timed out")
+    assert "LLM 响应超时" in s, s
+
+
+def test_fail_summary_server_error():
+    """5xx 快速失败（非超时非限流）→ "LLM 服务端错误"，旧"超时 60s"文案不出现。"""
+    s = _build_llm_fail_summary(10.0, "Server error '500 Internal Server Error'")
+    assert "LLM 服务端错误" in s, s
+    assert "超时（60s" not in s  # 旧文案残留不得出现
+
+
+def test_fail_summary_unknown_diag():
+    """无诊断 → 归类服务端错误且含"未知"。"""
+    s = _build_llm_fail_summary(30.0, "")
+    assert "服务端错误" in s
+    assert "未知" in s
+
+
+# ── O25: 部分采集结果保留 + 数据质量兜底（合并自 test_strategy_check_partial_data.py）──
+
+
+class TestPartialCollectionKept:
+    @pytest.mark.asyncio
+    async def test_indicator_timeout_keeps_factors(self):
+        """① 指标任务超时 → 因子结果保留（非全空）。"""
+        async def slow_indicators(symbols):
+            await asyncio.sleep(1.0)  # 远超 indicators_timeout
+            return {"510300": {"signal": {"signal": "buy"}}}
+
+        async def fast_factors(symbols):
+            return {"510300": {"technical": 0.5}, "560600": {"technical": 0.4}}
+
+        with patch.object(ps, "_compute_indicators", new=slow_indicators), \
+             patch("app.factors.factor_registry.registry.compute", new=fast_factors):
+            indicators, factor_scores = await _collect_strategy_data(
+                ["510300", "560600"], indicators_timeout=0.1, factor_timeout=5,
+            )
+        assert indicators == {}, "指标超时应返回 {}"
+        assert factor_scores == {"510300": {"technical": 0.5}, "560600": {"technical": 0.4}}, \
+            f"因子结果应保留（非全空）: {factor_scores}"
+
+    @pytest.mark.asyncio
+    async def test_factor_failure_keeps_indicators(self):
+        """因子任务失败 → 指标结果保留。"""
+        async def fast_indicators(symbols):
+            return {"510300": {"signal": {"signal": "hold"}}}
+
+        async def boom_factors(symbols):
+            raise RuntimeError("data source down")
+
+        with patch.object(ps, "_compute_indicators", new=fast_indicators), \
+             patch("app.factors.factor_registry.registry.compute", new=boom_factors):
+            indicators, factor_scores = await _collect_strategy_data(
+                ["510300"], indicators_timeout=5, factor_timeout=5,
+            )
+        assert indicators == {"510300": {"signal": {"signal": "hold"}}}
+        assert factor_scores == {}
+
+    @pytest.mark.asyncio
+    async def test_both_ok(self):
+        """正常路径：两任务均返回。"""
+        async def fast_indicators(symbols):
+            return {"510300": {"signal": {"signal": "hold"}}}
+
+        async def fast_factors(symbols):
+            return {"510300": {"technical": 0.5}}
+
+        with patch.object(ps, "_compute_indicators", new=fast_indicators), \
+             patch("app.factors.factor_registry.registry.compute", new=fast_factors):
+            indicators, factor_scores = await _collect_strategy_data(["510300"])
+        assert indicators["510300"]["signal"]["signal"] == "hold"
+        assert factor_scores["510300"]["technical"] == 0.5
+
+
+class TestFallbackSummaryWithQuality:
+    def test_summary_includes_data_quality(self):
+        """③ 兜底 summary 携带数据质量（N/M 因子可用 + 缺失原因）。"""
+        summary = _build_llm_fail_summary(
+            duration_s=30.0, diag="DeepSeek timeout",
+            data_quality={"filled_count": 2, "total_count": 3, "partial": True},
+        )
+        assert "2/3" in summary, f"summary 应含因子可用数: {summary}"
+        assert "因子" in summary
+
+    def test_summary_all_empty(self):
+        summary = _build_llm_fail_summary(
+            duration_s=15.0, diag="timeout",
+            data_quality={"filled_count": 0, "total_count": 3, "all_empty": True},
+        )
+        assert "0/3" in summary
+        assert "数据不足" in summary or "缺失" in summary
+
+    def test_summary_backward_compatible(self):
+        """不传 data_quality 时保持旧文案结构（兼容调用方）。"""
+        summary = _build_llm_fail_summary(duration_s=30.0, diag="timeout")
+        assert "规则引擎兜底" in summary

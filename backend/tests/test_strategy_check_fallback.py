@@ -18,7 +18,12 @@ import pytest
 
 from app.services import portfolio_service as ps
 from app.services.portfolio_service import (
+    _build_llm_fail_summary,
+    _build_rule_fallback_holdings_analysis,
     _combine_risk_warnings,
+    _factor_value_real,
+    _has_real_factor_values,
+    _llm_timeout_for,
     _rule_based_suggestion,
 )
 
@@ -286,3 +291,234 @@ class TestRiskCombineHonesty:
         """回归: 正常路径 info 级。"""
         warnings = _combine_risk_warnings([], [])
         assert warnings[0]["severity"] == "info"
+
+
+# ── round9 P1-13/14/15/16: 策略检查完整性专项（合并自 test_round9_strategy_check.py）──
+
+
+class TestP113TechSignalFallback:
+    def test_rule_fallback_holdings_has_tech_signal_field(self):
+        """P1-13③: 规则引擎骨架 holdings 每项带 tech_signal（真实值或「数据不可用」），
+        前端信号列不再空白（旧骨架无该字段）。"""
+        etfs = [
+            {"symbol": "510300", "name": "沪深300ETF", "target_weight": 0.2},
+            {"symbol": "518880", "name": "黄金ETF", "target_weight": 0.1},
+        ]
+        market_data = [
+            {"symbol": "510300", "name": "沪深300ETF", "target_weight": 0.2},
+            {"symbol": "518880", "name": "黄金ETF", "target_weight": 0.1},
+        ]
+        factor_breakdowns = {
+            "510300": {
+                "factor_scores": {"momentum": 0.5},
+                "technical_indicators": {"sector": "宽基"},
+                # 空 dict（P1-13① 兜底后）
+                "technical_signal": {"signal": None, "reason": "技术指标不可用"},
+            },
+            "518880": {
+                "factor_scores": {"sentiment": 0.3},
+                "technical_indicators": {},
+                "technical_signal": {"signal": "buy"},
+            },
+        }
+        result = _build_rule_fallback_holdings_analysis(etfs, market_data, factor_breakdowns, {})
+        by_sym = {h["symbol"]: h for h in result}
+        assert by_sym["510300"]["tech_signal"] == "数据不可用"
+        assert by_sym["518880"]["tech_signal"] == "BUY，真实信号"
+        assert all("tech_signal" in h for h in result), "骨架每项必须带 tech_signal 字段"
+
+
+class TestP115FilledExcludesNeutralDefaults:
+    def test_neutral_default_values_excluded(self):
+        """P1-15: RSI/KDJ 恰 50、vol_ratio 恰 1、ATR 恰 0 均不算真实值。"""
+        assert not _factor_value_real("technical.rsi.rsi_14", 50.0)
+        assert not _factor_value_real("technical.kdj.kdj_k", 50.0)
+        assert not _factor_value_real("technical.atr.atr_14", 0.0)
+        assert not _factor_value_real("vol_ratio", 1.0)
+        # 非中性值算真实
+        assert _factor_value_real("technical.rsi.rsi_14", 55.0)
+        assert _factor_value_real("momentum.mom_3m", 0.03)
+        assert _factor_value_real("technical.macd.macd", -0.3)
+
+    def test_has_real_factor_values(self):
+        """P1-15 + P0-F: 全兜底默认值 → False；技术因子（technical.* 前缀）真实 → True。"""
+        assert not _has_real_factor_values({"technical.rsi.rsi_14": 50.0,
+                                            "technical.kdj.k_value": 50.0,
+                                            "technical.volume.vol_ratio": 1.0})
+        assert _has_real_factor_values({"technical.rsi.rsi_14": 50.0,
+                                        "technical.ma.sma_5": 0.2,
+                                        "technical.signal.overall": 0.4})
+        assert not _has_real_factor_values({})
+        assert not _has_real_factor_values(None)
+
+    def test_fallback_ratio_in_data_quality(self):
+        """P1-15: data_quality 增加 fallback_count/fallback_ratio（报告明示兜底占比）。"""
+        factor_breakdowns = {
+            "510300": {"factor_scores": {"technical.ma.sma_5": 0.5}},  # 真实
+            "518880": {"factor_scores": {"technical.rsi.rsi_14": 50.0}},  # 兜底默认
+            "511090": {"factor_scores": {"technical.kdj.k_value": 50.0,
+                                         "technical.volume.vol_ratio": 1.0}},  # 兜底默认
+        }
+        filled = sum(1 for fb in factor_breakdowns.values()
+                     if _has_real_factor_values(fb.get("factor_scores") or {}))
+        fallback = sum(1 for fb in factor_breakdowns.values()
+                       if not _has_real_factor_values(fb.get("factor_scores") or {}))
+        assert filled == 1
+        assert fallback == 2
+        assert round(fallback / 3, 4) == round(2 / 3, 4)
+
+
+class TestP114IndustryFallbackChain:
+    def test_industry_map_fallback_uses_classifier(self, monkeypatch):
+        """P1-14: 候选池空时 industry_map 通过 ETFClassifier 独立分类兜底。"""
+        industry_map: dict[str, str] = {}
+        symbols = ["512480", "510300"]
+
+        # 模拟候选池 + get_by_code 全空 → 走 ETFClassifier 兜底
+        class _FakeHub:
+            def get_pool(self):
+                return {}
+
+            def get_by_code(self, sym):
+                return None
+
+        monkeypatch.setattr(ps, "market_data_hub", _FakeHub())
+        from app.services.etf_classifier import ETFClassifier
+
+        classifier = ETFClassifier()
+        # 名称来自 instruments 表查询（P1-14 兜底链第二步）
+        cls_input = [
+            {"symbol": "512480", "name": "半导体ETF", "tracked_index": "半导体"},
+            {"symbol": "510300", "name": "沪深300ETF", "tracked_index": "沪深300"},
+        ]
+        cls = classifier.batch_classify(cls_input) or {}
+        for sym in symbols:
+            c = cls.get(sym) or {}
+            ind = (c.get("industry") or "").strip()
+            if ind and ind != "unknown":
+                industry_map[sym] = ind
+        assert "512480" in industry_map, "ETFClassifier 应能按名称分类半导体ETF"
+        assert industry_map["512480"] == "电子", f"实测分类: {industry_map['512480']}"
+
+
+class TestP116EmptyPortfolioDiagnosis:
+    @pytest.mark.asyncio
+    async def test_empty_diagnosis_records_query_conditions(self, monkeypatch):
+        """P1-16: 空组合诊断记录 portfolio_type/行数/过滤明细，区分真空与查询条件异常。"""
+        class _FakeETF:
+            def __init__(self, symbol, is_active=True, portfolio_type="on_exchange"):
+                self.symbol = symbol
+                self.is_active = is_active
+                self.portfolio_type = portfolio_type
+
+        class _FakeResult:
+            def __init__(self, rows):
+                self._rows = rows
+
+            def scalars(self):
+                return self
+
+            def all(self):
+                return self._rows
+
+        class _FakeDb:
+            def __init__(self, rows):
+                self._rows = rows
+
+            async def execute(self, q):
+                return _FakeResult(self._rows)
+
+        # 真空组合：DB 无任何行
+        db = _FakeDb([])
+        diag = await ps._empty_portfolio_diagnosis(db, "on_exchange")
+        assert diag["db_total_rows"] == 0
+        assert diag["is_active_rows"] == 0
+        assert diag["note"] == "真空组合（无任何持仓记录）"
+
+        # 查询条件异常：有 is_active 持仓但 portfolio_type 不匹配
+        db2 = _FakeDb([
+            _FakeETF("510300", is_active=True, portfolio_type="off_exchange"),
+            _FakeETF("518880", is_active=False, portfolio_type="on_exchange"),
+        ])
+        diag2 = await ps._empty_portfolio_diagnosis(db2, "on_exchange")
+        assert diag2["db_total_rows"] == 2
+        assert diag2["is_active_rows"] == 1
+        assert diag2["matched_rows"] == 0
+        assert "查询条件异常" in diag2["note"]
+        assert diag2["all_symbols"] == ["510300"]
+
+
+# ── round10 P0-F / P3-H: _llm_timeout_for 静态因子门禁（合并自 test_strategy_check_p0f_timeout.py）──
+
+
+def _static_only_fs():
+    """仅 size/style 静态因子（无 technical.* 键）——P0-F 误判重灾区。"""
+    return {
+        "style.size.ln_mcap": 22.1,
+        "style.size.ln_float_mcap": 21.6,
+        "style.value.pe_ttm": 18.4,
+    }
+
+
+def _full_tech_fs():
+    """技术因子齐全（覆盖率 100%）。"""
+    return {
+        "technical.ma.sma_5": 0.8,
+        "technical.rsi.rsi_14": 58.2,
+        "technical.macd.macd": 0.3,
+        "technical.signal.overall": 0.4,
+        "style.size.ln_mcap": 22.1,
+    }
+
+
+def _partial_tech_fs():
+    """技术因子 5 个中 2 个真实（40% < 60%）→ 也判缺失。"""
+    return {
+        "technical.ma.sma_5": 0.8,
+        "technical.rsi.rsi_14": 58.2,
+        "technical.macd.macd": 0.0,       # 兜底 0
+        "technical.kdj.k_value": 50.0,    # 兜底 50
+        "technical.atr.atr_14": 0.0,      # 兜底 0
+        "style.size.ln_mcap": 22.1,
+    }
+
+
+def test_has_real_factor_values_static_only_false():
+    """仅静态因子 → filled=False（size 不再撑起"完整"）。"""
+    assert _has_real_factor_values(_static_only_fs()) is False
+
+
+def test_has_real_factor_values_full_tech_true():
+    assert _has_real_factor_values(_full_tech_fs()) is True
+
+
+def test_has_real_factor_values_partial_below_threshold_false():
+    """技术因子真实值占比 <60% → False。"""
+    assert _has_real_factor_values(_partial_tech_fs()) is False
+
+
+def test_llm_timeout_for_static_only_30s():
+    """全部标的仅静态因子 → all_empty=True → 15s（old 判 90s 的错已修复）。
+
+    注：_llm_timeout_for(data_quality) 按 all_empty/partial 分级——P0-F 的 30s
+    对应 `partial`（部分标的 filled）场景；本轮 fetch_history 全空且全部标的
+    仅有静态因子 → all_empty=True → 15s（比文档 30s 更保守，符合"不空耗"目标）。
+    文档 P3-H 断言口径是「仅静态因子→partial→30s」——这里验证 all_empty 与
+    partial 两分支都不返回 90s。
+    """
+    dq_empty = {
+        "filled_count": 0, "total_count": 3, "all_empty": True,
+        "partial": False, "fallback_count": 3, "fallback_ratio": 1.0,
+    }
+    dq_partial = {
+        "filled_count": 1, "total_count": 3, "all_empty": False,
+        "partial": True, "fallback_count": 2, "fallback_ratio": 0.67,
+    }
+    assert _llm_timeout_for(dq_empty) == 15
+    assert _llm_timeout_for(dq_partial) == 30
+    # 完整数据（全部技术因子 real）→ 90s 保留（真完整场景）
+    dq_full = {
+        "filled_count": 3, "total_count": 3, "all_empty": False,
+        "partial": False, "fallback_count": 0, "fallback_ratio": 0.0,
+    }
+    assert _llm_timeout_for(dq_full) == 90
