@@ -271,6 +271,21 @@ else
     fi
 fi
 
+# ════ 测试冗余基线门禁（P3-6，2026-08-09）═══════════════════════════════════
+# 测试文件数不再反弹：backend/tests/test_*.py ≤ 197（P1-8 合并后基线）。
+# 仅当 tests/ 或本脚本有变更时触发；新测试必须并入已有文件。
+TEST_BASELINE_STAGED=$(git diff --cached --name-only --diff-filter=ACM \
+    -- 'backend/tests/*.py' 'backend/scripts/check_test_baseline.py' 2>/dev/null || true)
+if [ -n "$TEST_BASELINE_STAGED" ]; then
+    echo "[pre-commit] 检测到测试文件变更，执行 P3-6 测试冗余基线检查 ..."
+    cd backend
+    if python scripts/check_test_baseline.py 2>&1; then
+        echo "[pre-commit] ✅ P3-6 基线检查通过（test_*.py ≤ 197）"; cd ..
+    else
+        cd ..; echo "🚨 P3-6 基线检查失败（测试文件数反弹）"; exit 1
+    fi
+fi
+
 # ── 后端启动冒烟测试（P3-3） ──────────────────────────────────
 if [ "${SKIP_SMOKE_STARTUP}" = "1" ]; then
     echo "[pre-commit] SKIP_SMOKE_STARTUP=1, 跳过启动冒烟测试"
