@@ -279,8 +279,9 @@ else
         # 报 FAIL 而非无限挂起（commit 曾卡死 ~1 小时）。
         # 2026-08-09: -n auto 并行（pytest-xdist）全量 220s → 90s；测试间隔离
         # 已验证（临时 DB + autouse 缓存清理 fixture）。xdist 缺失时回退串行。
+        # ⚠️ 检测用 import 而非 `pytest --version | grep`——version 输出不含 plugins 列表。
         XDIST_ARGS=""
-        if python -m pytest --version 2>&1 | grep -qi xdist; then
+        if python -c "import xdist" 2>/dev/null; then
             XDIST_ARGS="-n auto"
         else
             echo "[pre-commit] ⚠️ pytest-xdist 未安装，回退单进程（建议 pip install -r requirements.txt）"
