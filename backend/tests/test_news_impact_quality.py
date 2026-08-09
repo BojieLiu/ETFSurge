@@ -4,6 +4,7 @@
 prompt 硬约束「无直接关联须明确声明『无直接影响』，禁止强行关联」。
 """
 import pytest
+from unittest.mock import AsyncMock, MagicMock
 
 from app.analysis import llm
 
@@ -197,3 +198,99 @@ async def test_market_context_omitted_no_background(monkeypatch):
         [{"symbol": "159338", "name": "A500", "target_weight": 0.4}],
     )
     assert "当前市场背景" not in captured["prompt"]
+
+
+# ── O5: 正文三级兜底（合并自 test_news_impact_content_fallback.py）──
+
+from app.analysis.llm import _news_body_text  # noqa: E402
+
+
+class TestNewsBodyText:
+    def test_content_preferred(self):
+        assert _news_body_text({"title": "T", "content": "C", "summary": "S"}) == "C"
+
+    def test_summary_fallback(self):
+        assert _news_body_text({"title": "T", "content": "", "summary": "S"}) == "S"
+        assert _news_body_text({"title": "T", "summary": "S"}) == "S"
+
+    def test_title_fallback(self):
+        """content/summary 均空 → title 兜底（快讯类标题即正文）。"""
+        body = _news_body_text({"title": "央行降准0.5个百分点", "content": ""})
+        assert "央行降准0.5个百分点" in body
+
+    def test_empty_returns_empty(self):
+        assert _news_body_text({}) == ""
+
+
+@pytest.mark.asyncio
+async def test_analyze_news_impact_with_empty_content(monkeypatch):
+    """content 空时 prompt 仍含正文（title 兜底），LLM 不收到空正文。"""
+    captured = {}
+
+    async def fake_run_json(prompt):
+        captured["prompt"] = prompt
+        return {"impact_scope": "A股", "affected_holdings": [], "summary": "ok"}
+
+    mock_agent = MagicMock()
+    mock_agent.run_json = AsyncMock(side_effect=fake_run_json)
+    monkeypatch.setattr("app.analysis.llm.get_agent", lambda name: mock_agent)
+
+    await llm.analyze_news_impact(
+        {"title": "美联储宣布加息25个基点", "content": ""},
+        [],
+    )
+    prompt = captured["prompt"]
+    assert "美联储宣布加息25个基点" in prompt, "prompt 应含 title 兜底正文"
+    assert "新闻内容：\n\n" not in prompt, "空正文段不应出现"
+
+
+# ── issue 5/6: 结构化影响分析 + ws broadcast（合并自 test_news_impact.py）──
+
+from app.routers.ws import ConnectionManager, manager  # noqa: E402
+
+
+@pytest.mark.asyncio
+async def test_analyze_news_impact_structured(monkeypatch):
+    payload = {
+        "impact_scope": "A股宽基指数",
+        "affected_holdings": [
+            {"symbol": "159338", "name": "中证A500ETF", "impact_reason": "降准利好宽基"}
+        ],
+        "summary": "整体利好组合中的宽基ETF",
+    }
+    mock_agent = MagicMock()
+    mock_agent.run_json = AsyncMock(return_value=payload)
+    monkeypatch.setattr("app.analysis.llm.get_agent", lambda name: mock_agent)
+
+    result = await llm.analyze_news_impact(
+        {"title": "央行降准", "content": "全面降准0.5个百分点"},
+        [{"symbol": "159338", "name": "中证A500ETF", "asset_type": "A", "target_weight": 0.4}],
+    )
+    assert result["impact_scope"] == "A股宽基指数"
+    assert isinstance(result["affected_holdings"], list)
+    assert result["affected_holdings"][0]["symbol"] == "159338"
+    assert result["summary"]
+
+
+@pytest.mark.asyncio
+async def test_news_impact_endpoint(monkeypatch):
+    import app.routers.analysis as anmod
+    from app.routers.analysis import NewsImpactRequest, news_impact
+
+    async def fake(news_item, holdings, market_context=None):
+        return {"impact_scope": "scope", "affected_holdings": [], "summary": "ok"}
+
+    monkeypatch.setattr(anmod, "analyze_news_impact", fake)
+    result = await news_impact(NewsImpactRequest(
+        news={"title": "t", "content": "c"}, portfolio=[]))
+    assert result["impact_scope"] == "scope"
+
+
+@pytest.mark.asyncio
+async def test_manager_broadcast_callable():
+    assert callable(manager.broadcast)
+    # With no active connections the call must return gracefully.
+    await manager.broadcast("news", {"type": "news", "item": {"title": "x"}})
+
+    cm = ConnectionManager()
+    assert callable(cm.broadcast)

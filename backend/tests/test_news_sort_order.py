@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from app.fetchers import news_fetcher
 from app.fetchers.news_fetcher import (
     _normalize_time,
     _parse_time,
@@ -24,6 +25,7 @@ from app.fetchers.news_fetcher import (
     _attach_level,
     _filter_fresh,
 )
+from app.factors import factor_registry as fr
 from app.tasks.news_refresh import refresh_news_cache
 from app.services.cache_service import sync_memory_cache
 
@@ -296,3 +298,230 @@ class TestNewsRefreshBatch:
         assert "新闻A" not in titles, "不应重复广播已有条目"
         assert "新闻C" in titles, "应广播新增条目"
         assert len(batch_data["data"]) == 1
+
+
+# ── 新闻管道降级链（合并自 test_news_pipeline.py）──
+
+
+class TestMacroNewsDegradationChain:
+    """fetch_macro_news() 三级降级链：新浪 → CLS → 财联社。"""
+
+    def test_primary_source_sina_returns_results(self, monkeypatch):
+        """第一优先级新浪源返回数据时，不应触发降级。"""
+        import app.fetchers.news_fetcher as nfmod
+        sync_memory_cache.clear()
+
+        # Mock 新浪源返回真实数据
+        monkeypatch.setattr(nfmod, "fetch_sina_roll_news", lambda n: [
+            {"title": "宏观数据超预期，经济稳增长可期", "content": "x", "time": "t", "source": "新浪财经"}
+        ])
+        # Mock CLS 以确保不会被调用
+        cls_called = False
+        def _mock_cls():
+            nonlocal cls_called
+            cls_called = True
+            return []
+        monkeypatch.setattr(nfmod, "_ak", lambda fn: _mock_cls())
+        # Mock 财联社
+        monkeypatch.setattr(nfmod, "fetch_cailian_telegraph", lambda n: [])
+
+        items = fetch_macro_news()
+        assert len(items) >= 1
+        assert items[0]["source"] == "新浪财经"
+        assert not cls_called, "新浪有数据时不应调用 CLS 降级"
+
+    def test_fallback_to_cls_when_sina_empty(self, monkeypatch):
+        """新浪源返回空时，应降级到 CLS。"""
+        import app.fetchers.news_fetcher as nfmod
+        sync_memory_cache.clear()
+
+        monkeypatch.setattr(nfmod, "fetch_sina_roll_news", lambda n: [])
+        monkeypatch.setattr(nfmod, "_ak", lambda fn: [
+            {"title": "东方财富宏观：央行逆回购操作", "content": "x", "time": "t", "source": "东方财富"}
+        ])
+        monkeypatch.setattr(nfmod, "fetch_cailian_telegraph", lambda n: [])
+
+        items = fetch_macro_news()
+        assert len(items) >= 1
+        assert "东方财富" in items[0].get("source", "")
+
+    def test_fallback_to_cailian_when_all_empty(self, monkeypatch):
+        """新浪和 CLS 都空时，兜底到财联社。"""
+        import app.fetchers.news_fetcher as nfmod
+        sync_memory_cache.clear()
+
+        monkeypatch.setattr(nfmod, "fetch_sina_roll_news", lambda n: [])
+        monkeypatch.setattr(nfmod, "_ak", lambda fn: [])
+        monkeypatch.setattr(nfmod, "fetch_cailian_telegraph", lambda n: [
+            {"title": "财联社快讯：央行开展逆回购", "content": "x", "time": "t", "source": "财联社"}
+        ])
+
+        items = fetch_macro_news()
+        assert len(items) >= 1
+        assert items[0]["source"] == "财联社"
+
+    def test_all_sources_fail_returns_empty(self, monkeypatch):
+        """全部源失败时返回空列表。"""
+        import app.fetchers.news_fetcher as nfmod
+        sync_memory_cache.clear()
+
+        monkeypatch.setattr(nfmod, "fetch_sina_roll_news", lambda n: [])
+        monkeypatch.setattr(nfmod, "_ak", lambda fn: [])
+        monkeypatch.setattr(nfmod, "fetch_cailian_telegraph", lambda n: [])
+
+        items = fetch_macro_news()
+        # _attach_level + _dedupe + [] 最终返回空
+        assert items == [] or all(
+            not it.get("title") for it in items
+        )
+
+
+# ── P2-3: /news/stock/{symbol} 中文键归一化（合并自 test_stock_news_keys.py）──
+
+
+def test_stock_news_chinese_keys_normalized(monkeypatch):
+    """P2-3: 中文键输入 → 英文键输出。"""
+    cn_items = [
+        {"新闻标题": "半导体大涨", "新闻内容": "板块涨幅居前",
+         "发布时间": "2026-08-01 10:00:00", "新闻来源": "东方财富",
+         "新闻链接": "http://example.com/1"},
+        {"新闻标题": "黄金创新高", "新闻内容": "避险需求升温",
+         "发布时间": "2026-08-01 09:30:00", "新闻来源": "东方财富",
+         "新闻链接": "http://example.com/2"},
+    ]
+
+    def _fake_ak(fn, timeout=None):
+        return cn_items
+
+    def _fake_cached(key, producer, **kwargs):
+        return producer()
+
+    with patch.object(news_fetcher, "_ak", _fake_ak), \
+         patch.object(news_fetcher, "cached", _fake_cached), \
+         patch.object(news_fetcher, "fetch_cailian_telegraph", lambda n: []):
+        items = news_fetcher.fetch_stock_news("159338")
+
+    assert items, "应有归一化后的新闻"
+    first = items[0]
+    for en_key in ("title", "content", "time", "source", "url"):
+        assert en_key in first, f"缺失英文键 {en_key}: {list(first.keys())}"
+        assert first[en_key], f"英文键 {en_key} 值为空"
+    assert not any("新闻标题" in i for i in items), "中文键应全部替换"
+    # _attach_level 附加 level/stars
+    assert "level" in first and "stars" in first
+
+
+def test_english_keys_untouched(monkeypatch):
+    """P2-3: 已是英文键的输入原样保留。"""
+    en_items = [
+        {"title": "test", "content": "c", "time": "2026-08-01 10:00:00",
+         "source": "s", "url": "http://x"},
+    ]
+
+    def _fake_ak(fn, timeout=None):
+        return en_items
+
+    def _fake_cached(key, producer, **kwargs):
+        return producer()
+
+    with patch.object(news_fetcher, "_ak", _fake_ak), \
+         patch.object(news_fetcher, "cached", _fake_cached), \
+         patch.object(news_fetcher, "fetch_cailian_telegraph", lambda n: []):
+        items = news_fetcher.fetch_stock_news("159338")
+
+    assert items[0]["title"] == "test"
+    assert "新闻标题" not in items[0]
+
+
+def test_no_chinese_keys_remain_after_normalization(monkeypatch):
+    """R5-2-2: 归一化后只输出英文键——其他中文键（关键词等）全部删除，不得残留。"""
+    cn_items = [
+        {"新闻标题": "半导体大涨", "新闻内容": "板块涨幅居前",
+         "发布时间": "2026-08-01 10:00:00", "新闻来源": "东方财富",
+         "新闻链接": "http://example.com/1", "关键词": "半导体,芯片",
+         "文章来源": "东方财富网"},
+        {"新闻标题": "黄金创新高", "新闻内容": "避险需求升温",
+         "发布时间": "2026-08-01 09:30:00", "新闻来源": "东方财富",
+         "新闻链接": "http://example.com/2", "关键词": "黄金,避险"},
+    ]
+
+    def _fake_ak(fn, timeout=None):
+        return cn_items
+
+    def _fake_cached(key, producer, **kwargs):
+        return producer()
+
+    with patch.object(news_fetcher, "_ak", _fake_ak), \
+         patch.object(news_fetcher, "cached", _fake_cached), \
+         patch.object(news_fetcher, "fetch_cailian_telegraph", lambda n: []):
+        items = news_fetcher.fetch_stock_news("159338")
+
+    allowed = {"id", "title", "content", "time", "sort_time", "url",
+               "source", "level", "stars", "ai_summary"}
+    for item in items:
+        for key in item.keys():
+            # 任何含中文字符的键不得残留（契约：键集 == headlines 全英文键）
+            assert not any("\u4e00" <= ch <= "\u9fff" for ch in key), \
+                f"R5-2-2 中文键残留: {key!r} in {list(item.keys())}"
+            assert key in allowed, f"R5-2-2 非契约键残留: {key!r}"
+    # 归一化后关键英文键存在
+    first = items[0]
+    for en_key in ("title", "content", "time", "source", "url"):
+        assert en_key in first, f"缺失英文键 {en_key}: {list(first.keys())}"
+
+
+# ── F12: sentiment news_heat 标的相关/市态级降级（合并自 test_news_heat_scope.py）──
+
+
+def _news_items():
+    return [{"title": f"n{i}", "stars": i % 5 + 1, "level": "利好"} for i in range(10)]
+
+
+def _patch_kline(monkeypatch):
+    """K 线路径全 mock：run_sync 直连 + 无缓存 + 无网络。"""
+    from app.core import async_utils
+
+    def _fake_history(symbol, market="A", period="daily", timeout=20):
+        return [{"close": 4.0 + i * 0.01, "high": 4.1, "low": 3.9, "volume": 1e7,
+                 "total_mv": 5e9, "float_mv": 3e9} for i in range(30)]
+
+    async def _direct(call, *args, timeout=None, **kwargs):
+        # fetch_one 的 call 是 hub.get_history——直接返回 fake K 线（不触网）
+        return _fake_history(*args, **kwargs)
+
+    monkeypatch.setattr(async_utils, "run_sync", _direct)
+    monkeypatch.setattr(fr, "_get_cached_kline", lambda symbols: None)
+    return _fake_history
+
+
+async def _fetch_with_news(monkeypatch, stock_news):
+    """构造经真实 _fetch_market_data（K 线 mock、新闻 mock）后的单标的 data。"""
+    from app.services.market_data_hub import market_data_hub as hub_inst
+
+    monkeypatch.setattr(hub_inst, "get_news_stock", lambda sym: stock_news)
+    monkeypatch.setattr(hub_inst, "get_news_headlines", lambda: _news_items())
+    monkeypatch.setattr(hub_inst, "get_market_sentiment", lambda: {"sentiment_index": 50.0})
+    monkeypatch.setattr(hub_inst, "get_fund_nav", lambda sym, **kw: {})
+    _patch_kline(monkeypatch)
+    reg = fr.FactorRegistry()
+    data = await reg._fetch_market_data(["510300"])
+    return data.get("510300", {})
+
+
+async def test_stock_news_used_when_available(monkeypatch):
+    """标的新闻可用 → news_items 用标的新闻且 news_scope=stock。"""
+    stock_news = [{"title": "个股专属新闻", "stars": 5, "level": "利好"}] * 5
+    d = await _fetch_with_news(monkeypatch, stock_news)
+    assert d.get("news_scope") == "stock"
+    assert d.get("news_items") == stock_news[-30:]
+    # 标的新闻的 news_heat 有区分度来源
+    assert fr._compute_news_heat(d) > 0
+
+
+async def test_market_fallback_marks_scope(monkeypatch):
+    """标的新闻不可用 → 市态级降级 + news_scope=market 标注。"""
+    d = await _fetch_with_news(monkeypatch, [])
+    assert d.get("news_scope") == "market"
+    assert d.get("news_items"), "市态级降级仍应注入全市场新闻（供 regime 输入）"
+    # 全市场新闻注入时标注"非个股值"——前端/明细据此避免误导
+    assert d.get("news_items") == _news_items()[-30:]
