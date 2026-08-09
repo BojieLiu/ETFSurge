@@ -13,7 +13,6 @@ const PLACEHOLDERS = [
 
 const ROUTES = [
   { name: 'Dashboard', path: '/', expect: '总仓位' },
-  { name: '因子模型', path: '/factor-ic' },
   { name: 'Token 监控', path: '/token-monitor', expect: 'Token' },
   { name: '数据源', path: '/source-monitor' },
   { name: '标的分析', path: '/market-analysis' },

@@ -69,16 +69,25 @@ async def test_fetch_market_data_injects_sentiment(monkeypatch):
 
 # ── 3. factors/active sentiment 不再全 no_data（IC batch 含值） ──────────
 def test_zero_ratio_tracked():
-    """factors/ic 响应含 zero_ratio 字段（区分数据缺失与 IC 无效）。"""
+    """factors/active 响应含 zero_ratio 字段（区分数据缺失与 IC 无效）。
+
+    P2-1: /factors/ic 已删除，zero_ratio 并入 /factors/active 顶层。
+    """
     from fastapi.testclient import TestClient
     from app.main import app
+    from app.routers import factors as _factors_router
 
     fr.registry._zero_ratio = {"sentiment.news_heat": 1.0}
     client = TestClient(app)
-    resp = client.get("/api/v1/factors/ic")
-    assert resp.status_code == 200
-    zr = resp.json().get("zero_ratio", {})
-    assert zr.get("sentiment.news_heat") == 1.0, f"实际: {zr}"
+    try:
+        resp = client.get("/api/v1/factors/active")
+        assert resp.status_code == 200
+        zr = resp.json().get("zero_ratio", {})
+        assert zr.get("sentiment.news_heat") == 1.0, f"实际: {zr}"
+    finally:
+        # 清除填充的 active 缓存 + 恢复 _zero_ratio，避免污染同文件后续测试（P2-1 教训）
+        _factors_router._CACHE.clear()
+        fr.registry._zero_ratio = {}
 
 
 def test_factors_active_sentiment_not_no_data(monkeypatch):

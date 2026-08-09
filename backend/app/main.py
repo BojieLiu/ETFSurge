@@ -445,7 +445,7 @@ async def lifespan(app: FastAPI):
     logger.info("IC 持久化循环已启动（120s）")
 
     # R5-1-5: 启动时从 DB 恢复 _last_ic_batch（IC 非请求驱动——重启后
-    # /factors/ic 不依赖任何请求即返回非空）。失败仅 WARNING，不阻塞启动。
+    # /factors/active 不依赖任何请求即返回非空）。失败仅 WARNING，不阻塞启动。
     try:
         from .factors.factor_registry import registry as _ic_registry
         from .database import async_session as _ic_session

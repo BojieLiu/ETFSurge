@@ -38,12 +38,6 @@ const routes = [
     meta: { title: '数据源监控', description: '数据源健康状态、事件趋势与失败记录' },
   },
   {
-    path: '/factor-ic',
-    name: 'factor-ic',
-    component: () => import('../components/FactorICView.vue'),
-    meta: { title: '因子 IC 监控', description: '核心因子 Information Coefficient 有效性追踪' },
-  },
-  {
     path: '/admin/config',
     name: 'config',
     component: () => import('../views/ConfigView.vue'),

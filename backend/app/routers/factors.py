@@ -320,6 +320,9 @@ async def get_active_factors() -> JSONResponse:
             "static": total_static,
             "avg_ic": avg_all_ic,
         },
+        # P2-1: zero_ratio 从 /factors/ic 并入（F3-4 步骤D：零值占比
+        # 1.0 = 全部样本为 0 → 数据源未接入；区分「数据缺失」与「IC 无效」）
+        "zero_ratio": getattr(registry, "_zero_ratio", {}) or {},
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     etag = f"\"{hash(str(body))}\""
@@ -354,51 +357,3 @@ def _get_factor_category(code: str) -> str:
     return CATEGORY_PREFIX_MAP.get(raw, raw)
 
 
-@router.get("/ic")
-async def get_factor_ic() -> JSONResponse:
-    """Return current IC values for all core factors.
-
-    Data comes from FactorRegistry._last_ic_batch, which is updated
-    automatically after each compute() call when market_data is available.
-
-    Cached for 60s — data changes only on background compute cycle.
-    """
-    ck = _build_cache_key("/api/v1/factors/ic")
-    cached = _get_cached(ck, ttl=60)
-    if cached:
-        etag, body = cached
-        return JSONResponse(
-            content=body,
-            headers={"Cache-Control": "private, max-age=60", "ETag": etag},
-        )
-
-    ic_batch = registry._last_ic_batch
-
-    factors = [
-        {
-            "code": code,
-            "name": _get_factor_name(code),
-            "category": _get_factor_category(code),
-            "ic_value": round(val, 4),
-            # O6 (round8 §7 P6-新): sample_count 来自 registry._sample_counts
-            # （compute() 在 IC 有信号时填充，line 1437）——不再硬编码 None，
-            # IC 列表携带样本量/显著性信息。
-            "sample_count": getattr(registry, "_sample_counts", {}).get(code, 0),
-        }
-        for code, val in sorted(ic_batch.items())
-        if abs(val) > 0.0
-    ]
-
-    body = {
-        "factors": factors,
-        "total": len(factors),
-        # F3-4 步骤D: 零值占比（1.0 = 全部样本为 0 → 数据源未接入；区分「数据缺失」与「IC 无效」）
-        "zero_ratio": getattr(registry, "_zero_ratio", {}) or {},
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-    }
-    etag = f"\"{hash(str(body))}\""
-    _set_cache(ck, etag, body, ttl=60)
-    return JSONResponse(
-        content=body,
-        headers={"Cache-Control": "private, max-age=60", "ETag": etag},
-    )

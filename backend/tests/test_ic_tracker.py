@@ -192,14 +192,17 @@ class TestFactorRegistryIntegration:
 
 
 class TestICContract:
-    """Contract tests for GET /api/v1/factors/ic."""
+    """Contract tests for GET /api/v1/factors/active (P2-1: /factors/ic merged)."""
 
     async def test_router_importable(self):
         """Factors router is importable and has correct prefix."""
         from app.routers.factors import router
         assert router.prefix == "/api/v1/factors"
         routes = [r.path for r in router.routes]
-        assert any("/ic" in r for r in routes), f"Routes: {routes}"
+        assert any("/active" in r for r in routes), f"Routes: {routes}"
+        # P2-1: /factors/ic 已删除，IC 数据并入 /factors/active
+        assert not any(r == "/api/v1/factors/ic" for r in routes), \
+            "/factors/ic 应已删除（P2-1 合并）"
 
 
 class TestR515ICRestoreFromDB:

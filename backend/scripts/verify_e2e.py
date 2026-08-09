@@ -1262,21 +1262,22 @@ def section_factors(host, port):
 
     section("IC 追踪端点")
     try:
-        r = requests.get(f"{BASE}/api/v1/factors/ic", timeout=30)
+        # P2-1: /factors/ic 已删除，IC 数据并入 /factors/active（categories[].factors[]）
+        r = requests.get(f"{BASE}/api/v1/factors/active", timeout=30)
         if r.status_code == 200:
             data = r.json()
-            check("GET /api/v1/factors/ic -> 200", True)
-            factors = data.get("factors", [])
+            check("GET /api/v1/factors/active -> 200", True)
+            factors = [f for cat in data.get("categories", []) for f in cat.get("factors", [])]
             # T5: IC 数据就绪等待（IC 为周期计算，服务刚重启时为空——最多轮询 60s）
             for _i in range(12):
-                if factors:
+                if any(f.get("ic_value") is not None for f in factors):
                     break
                 time.sleep(5)
                 try:
-                    _r3 = requests.get(f"{BASE}/api/v1/factors/ic", timeout=30)
+                    _r3 = requests.get(f"{BASE}/api/v1/factors/active", timeout=30)
                     if _r3.status_code == 200:
                         data = _r3.json()
-                        factors = data.get("factors", [])
+                        factors = [f for cat in data.get("categories", []) for f in cat.get("factors", [])]
                 except Exception:
                     pass
             check(f"  factors array contains {len(factors)} entries", len(factors) > 0, f"count={len(factors)}")
@@ -1287,9 +1288,9 @@ def section_factors(host, port):
                 check(f"  first factor has code", bool(sample.get("code")), f"code={sample.get('code')}")
                 check(f"  first factor has ic_value", "ic_value" in sample, f"ic_value={sample.get('ic_value')}")
         else:
-            check("GET /api/v1/factors/ic", False, f"HTTP {r.status_code}")
+            check("GET /api/v1/factors/active", False, f"HTTP {r.status_code}")
     except Exception as e:
-        check(f"GET /api/v1/factors/ic", False, str(e))
+        check(f"GET /api/v1/factors/active", False, str(e))
 
 
 def section_circuit_breaker():
@@ -1636,9 +1637,14 @@ def section_factor_thresholds():
             return
         cats = {c.get("name"): c for c in data.get("categories", [])}
         # IC 就绪检查：IC batch 空 = 服务冷启动/数据源冷却中（周期计算未完成）→ 门禁 SKIP
+        # P2-1: /factors/ic 已删除 → 从 /factors/active 扁平化判断 IC 是否累积
         try:
-            _ic = requests.get(f"{BASE}/api/v1/factors/ic", timeout=15).json()
-            _ic_ready = bool(_ic.get("factors"))
+            _active = requests.get(f"{BASE}/api/v1/factors/active", timeout=15).json()
+            _ic_ready = any(
+                f.get("ic_value") is not None
+                for cat in _active.get("categories", [])
+                for f in cat.get("factors", [])
+            )
         except Exception:
             _ic_ready = False
         if not _ic_ready:
@@ -2262,11 +2268,12 @@ def section_factor_ic():
     """P3.7: Factor IC data quality check."""
     section("因子 IC 检查")
     try:
-        r = requests.get(f"{BASE}/api/v1/factors/ic", timeout=15)
+        # P2-1: /factors/ic 已删除，IC 数据并入 /factors/active（categories[].factors[]）
+        r = requests.get(f"{BASE}/api/v1/factors/active", timeout=15)
         check("因子 IC 端点", True, f"HTTP {r.status_code}")
         if r.status_code == 200:
-            # /factors/ic 返回 {"factors": [...], "total": N, "updated_at": ...}
-            rows = (r.json() or {}).get("factors") or []
+            data = r.json() or {}
+            rows = [f for cat in data.get("categories", []) for f in cat.get("factors", [])]
             # P3-8 (round9 §6.5/P1-3): 无「负 IC 标 valid 且文案 ≥阈值」矛盾项——
             # P1-3 修复后负 IC（|IC|≥阈值）标 warn（负向淘汰警示），reason 用 |IC| 口径
             _contradictions = []

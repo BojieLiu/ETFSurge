@@ -40,7 +40,6 @@ export const marketApi = {
   updateWatchlist: (id, data) => api.put(`/market/watchlist/${id}`, data),
   removeWatchlist: (id) => api.delete(`/market/watchlist/${id}`),
   batchRemoveWatchlist: (ids) => api.delete('/market/watchlist', { data: { ids } }),
-  getSectors: (params = {}) => api.get('/market/sectors', { params }),
   // F16 (round6 §16.4): 三热点端点透传 market（A/HK/US）——切港股后热点不再显示 A 股数据
   getHotPlates: (limit = 15, market = 'A') => api.get('/market/hot-plates', { params: { limit, market } }),
   getSectorHeat: (limit = 20, market = 'A') => api.get('/market/sectors/heat', { params: { limit, market } }),
@@ -92,7 +91,6 @@ export const newsApi = {
 }
 
 export const factorsApi = {
-  getIC: () => api.get('/factors/ic'),
   getActive: () => api.get('/factors/active'),
 }
 

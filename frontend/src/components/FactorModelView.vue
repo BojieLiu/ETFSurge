@@ -63,6 +63,66 @@
           </div>
         </div>
 
+        <!-- IC Sort Table (P2-1: merged from FactorICView.vue) -->
+        <div class="card ic-sort-card">
+          <div class="card-header ic-sort-header">
+            <h3 class="card-title">
+              <span class="card-title-icon" aria-hidden="true">🔍</span>
+              因子 IC 排序
+            </h3>
+            <div class="ic-sort-controls">
+              <select v-model="icCategoryFilter" class="select-input" aria-label="分类过滤">
+                <option value="">全部分类</option>
+                <option v-for="c in icCategories" :key="c" :value="c">{{ catLabel(c) }}</option>
+              </select>
+              <select v-model="icSortBy" class="select-input" aria-label="排序方式">
+                <option value="abs_ic">|IC| 降序</option>
+                <option value="ic_value">IC 降序</option>
+                <option value="code">因子代码</option>
+                <option value="category">分类</option>
+              </select>
+            </div>
+          </div>
+          <div class="ic-sort-stats">
+            <span class="ic-stat">有效 <b class="text-up">{{ icValidCount }}</b></span>
+            <span class="ic-stat">无效 <b class="text-down">{{ icInvalidCount }}</b></span>
+            <span class="ic-stat">平均 |IC| <b>{{ icAvgAbsIC.toFixed(4) }}</b></span>
+          </div>
+          <div class="ic-sort-table-wrap">
+            <table class="data-table ic-sort-table">
+              <thead>
+                <tr>
+                  <th>因子代码</th>
+                  <th>分类</th>
+                  <th>IC 值</th>
+                  <th>有效性</th>
+                  <th>样本数</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="f in icSortedFactors" :key="f.code" :class="icRowClass(f)">
+                  <td>
+                    <span class="factor-code" :title="f.code">{{ f.code }}</span>
+                  </td>
+                  <td><span class="category-badge" :class="'category-' + f.category">{{ catLabel(f.category) }}</span></td>
+                  <td :class="icValueClass(f.ic_value)">
+                    {{ f.ic_value === null || f.ic_value === undefined ? '--' : f.ic_value.toFixed(4) }}
+                  </td>
+                  <td>
+                    <span v-if="f.ic_value === null || f.ic_value === undefined" class="valid-badge no-data">无数据</span>
+                    <span v-else-if="abs(f.ic_value) >= 0.02" class="valid-badge valid">有效</span>
+                    <span v-else class="valid-badge invalid">无效</span>
+                  </td>
+                  <td>{{ f.sample_count ?? '-' }}</td>
+                </tr>
+                <tr v-if="icSortedFactors.length === 0">
+                  <td colspan="5" class="empty-row">暂无数据</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
         <!-- Section Divider -->
         <div class="section-divider">
           <span class="section-divider-label">因子分类</span>
@@ -394,6 +454,59 @@ function handleResize() {
   chartInstance?.resize()
 }
 
+/* ── IC Sort Table (P2-1: merged from FactorICView.vue) ── */
+const icSortBy = ref('abs_ic')
+const icCategoryFilter = ref('')
+
+const icSortedFactors = computed(() => {
+  const all = categories.value.flatMap(c => (c.factors || []))
+    .filter(f => f.status !== 'static')
+  let list = icCategoryFilter.value
+    ? all.filter(f => f.category === icCategoryFilter.value)
+    : all
+  const sortField = icSortBy.value
+  const sorted = [...list]
+  if (sortField === 'abs_ic') {
+    sorted.sort((a, b) => abs(b.ic_value ?? 0) - abs(a.ic_value ?? 0))
+  } else if (sortField === 'ic_value') {
+    sorted.sort((a, b) => (b.ic_value ?? 0) - (a.ic_value ?? 0))
+  } else if (sortField === 'code') {
+    sorted.sort((a, b) => a.code.localeCompare(b.code))
+  } else if (sortField === 'category') {
+    sorted.sort((a, b) => a.category.localeCompare(b.category))
+  }
+  return sorted
+})
+
+const icValidCount = computed(() => icSortedFactors.value.filter(f => abs(f.ic_value ?? 0) >= 0.02).length)
+const icInvalidCount = computed(() => icSortedFactors.value.filter(f => abs(f.ic_value ?? 0) < 0.02).length)
+const icAvgAbsIC = computed(() => {
+  const list = icSortedFactors.value.filter(f => f.ic_value !== null)
+  if (list.length === 0) return 0
+  return list.reduce((s, f) => s + abs(f.ic_value), 0) / list.length
+})
+const icCategories = computed(() => {
+  const set = new Set()
+  categories.value.forEach(c => { if (c.name) set.add(c.name) })
+  return [...set]
+})
+
+function icRowClass(f) {
+  const v = f.ic_value
+  if (v === null || v === undefined) return 'ic-row-null'
+  const av = abs(v)
+  if (av >= 0.05) return 'ic-row-strong'
+  if (av >= 0.02) return 'ic-row-valid'
+  return 'ic-row-weak'
+}
+
+function icValueClass(val) {
+  if (val === null || val === undefined) return ''
+  if (val > 0.01) return 'text-up'
+  if (val < -0.01) return 'text-down'
+  return ''
+}
+
 /* ── Data ── */
 async function fetchData() {
   loading.value = true
@@ -439,6 +552,66 @@ onBeforeUnmount(() => {
   animation: spin 0.8s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── IC Sort Table (P2-1) ── */
+.ic-sort-card {
+  margin-bottom: var(--space-2);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.ic-sort-header {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-surface-secondary);
+}
+.ic-sort-controls { display: flex; gap: var(--space-2); }
+.ic-sort-controls .select-input {
+  font-size: var(--font-size-xs);
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--color-border-medium);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-primary);
+  color: var(--color-text-primary);
+}
+.ic-sort-stats {
+  display: flex; gap: var(--space-4);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--color-border-light);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+.ic-sort-stats b { font-family: monospace; }
+.ic-sort-table-wrap { overflow-x: auto; padding: var(--space-3) var(--space-4); }
+.ic-sort-table { width: 100%; border-collapse: collapse; font-size: var(--font-size-xs); }
+.ic-sort-table th, .ic-sort-table td {
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--color-border-light);
+  text-align: left;
+}
+.ic-sort-table th {
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+}
+.ic-row-strong { background: var(--color-brand-50); }
+.ic-row-valid { background: transparent; }
+.ic-row-weak { opacity: 0.75; }
+.ic-row-null { color: var(--color-text-tertiary); }
+.valid-badge {
+  display: inline-block; padding: 0.05rem 0.5rem;
+  border-radius: var(--radius-full); font-size: 0.625rem;
+  font-weight: var(--font-weight-medium);
+}
+.valid-badge.valid { color: var(--color-success-700); background: var(--color-success-50); }
+.valid-badge.invalid { color: var(--color-warning-700); background: var(--color-warning-50); }
+.valid-badge.no-data { color: var(--color-text-tertiary); background: var(--color-surface-tertiary); }
+.category-badge {
+  display: inline-block; padding: 0.05rem 0.5rem;
+  border-radius: var(--radius-full); font-size: 0.625rem;
+  background: var(--color-surface-tertiary); color: var(--color-text-secondary);
+}
+.factor-code { font-family: monospace; font-size: 0.75rem; }
+.empty-row { text-align: center; padding: var(--space-6); color: var(--color-text-tertiary); }
 
 /* ── Section Divider ── */
 .section-divider {

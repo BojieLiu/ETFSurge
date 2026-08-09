@@ -105,6 +105,16 @@ GET /api/v1/factors/active
 | no_data | integer | IC 值为 NULL 的因子数 |
 | avg_ic | float or null | 所有有效 IC 值的绝对值均值，无数据时为 null |
 
+### 顶层新增字段（P2-1，合并自 ic.md） / Top-level Fields
+
+> **合并说明（P2-1, 2026-08-09）**: 原独立 IC 端点 `/factors/ic` 已删除，IC 追踪数据并入本端点。
+> IC 排序表数据直接读 `categories[].factors[]`（每项含 `code/name/category/ic_value/sample_count/status`），
+> 无需独立 IC 端点。原 ic.md 的零值占比字段保留在顶层：
+
+| Field | Type | Description |
+|-------|------|-------------|
+| zero_ratio | object | code → 零值占比（1.0 = 全部样本为 0 → 数据源未接入；区分「数据缺失」与「IC 无效」，F3-4 步骤D） |
+
 ### 错误响应 / Error Response
 
 | Status Code | Meaning | Description |
