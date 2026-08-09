@@ -198,6 +198,28 @@ describe('UnifiedAnalysis R40 (tab 切换重置)', () => {
     expect(wrapper.vm.search.searchResults.value).toEqual([])
     expect(wrapper.vm.search.showDropdown.value).toBe(false)
   })
+
+  it('round10 P2-T: US tab 下板块模式按钮禁用（美股无板块数据源）', async () => {
+    const wrapper = mounted()
+    const tabs = wrapper.findAll('button.analysis-tab')
+    expect(tabs.length).toBe(3)
+    // A tab: sector 可用
+    expect(tabs[1].attributes('disabled')).toBeUndefined()
+    // 切到 US: sector 按钮 disabled + tooltip
+    await wrapper.setProps({ marketTab: 'US' })
+    await nextTick()
+    const tabsUs = wrapper.findAll('button.analysis-tab')
+    expect(tabsUs[1].attributes('disabled')).toBeDefined()
+    expect(tabsUs[1].attributes('title')).toContain('暂不支持板块分析')
+  })
+
+  it('round10 P2-T: 已处板块模式时切到 US tab → 自动回落 symbol', async () => {
+    const wrapper = mounted()
+    wrapper.vm.activeMode = 'sector'
+    await wrapper.setProps({ marketTab: 'US' })
+    await nextTick()
+    expect(wrapper.vm.activeMode).toBe('symbol')
+  })
 })
 
 // ── F18 (round6 §16.6): Enter/mousedown 统一触发 + SSE 错误态 ─────────────

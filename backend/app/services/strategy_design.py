@@ -392,14 +392,16 @@ async def generate_enhanced_design(
                 # （恒 ≠ 真实涨跌幅）→ 删除该 fallback，改为「快照 → K 线」两级兜底：
                 # ① etf_list_cache.json 快照真实 change_pct（百分比，如 1.358）；
                 # ② K 线 close 序列 (close[-1]-close[-2])/close[-2]（×100 转百分比）。
-                if a.get("daily_change_pct") is None:
-                    dcp = _snapshot_change_pct(code)
-                    if dcp is not None:
-                        a["daily_change_pct"] = sanitize_change_pct(code, dcp)
+                # round10 P2-G: K 线差分（实时 K 线序列）优先于文件快照——快照可能滞后
+                # 多个交易日（非交易日/缓存 TTL 内），K 线总是拉最近交易日，更「新」。
                 if a.get("daily_change_pct") is None:
                     kcp = _kline_change_pct(market_data_hub, code)
                     if kcp is not None:
                         a["daily_change_pct"] = sanitize_change_pct(code, round(kcp * 100, 4))
+                if a.get("daily_change_pct") is None:
+                    dcp = _snapshot_change_pct(code)
+                    if dcp is not None:
+                        a["daily_change_pct"] = sanitize_change_pct(code, dcp)
 
             # P1-5 (round9 §4.1-1/§4.3-B): 数据缺失标的不得带核心权重——候选池正常时，
             # 三源（pool 缓存/快照/K线）全拿不到涨跌的核心层标的：权重清零（现金吸收）+

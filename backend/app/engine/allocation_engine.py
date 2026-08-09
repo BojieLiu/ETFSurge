@@ -417,8 +417,19 @@ def _select_and_weight(
 
     # P1-D (round10 §3.1-3/§10): 卫星层负 factor_score 不给权——因子分 ≤ -0.3
     # （约当 |score| 显著为负区间）的标的不入卫星层，防负分标的侵占有限权重。
+    # round12 修正: 若过滤后不足布局下限（2 只），从过滤前最高分回补——
+    # 三套策略顺序生成时，aggressive 阶段卫星候选常因「重叠惩罚 -1.5」全负
+    # （test_satellite_min_count aggressive 曾整层清空）；负分仅作排序降级，
+    # 不绝对清空，保卫星层下限。
     if layer == "satellite":
+        _before = scored  # item = (composite_score, candidate_dict, factor_scores)
         scored = [item for item in scored if item[0] > -0.3]
+        if len(scored) < 2 and _before:
+            _backfill = [
+                item for item in sorted(_before, key=lambda x: x[0], reverse=True)
+                if item[0] <= -0.3
+            ]
+            scored = scored + _backfill[: 2 - len(scored)]
 
     # Keep top *max_count*
     selected = scored[:max_count]

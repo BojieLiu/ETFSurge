@@ -129,7 +129,22 @@ def _build_plan_tables(strategies: list[dict], fetched_at: datetime | None = Non
         # R6-F15 (round6 §十一 R6-F15): 方案表格加「建仓建议」列——与文字建议对齐，
         # 消除「表格与文字脱节、未标注建仓节奏」问题（§4.3 方案-文字张力）。
         # P0-9: 「今日涨跌」列头带数据采集时刻（截至 HH:MM），盘中值不再被误读为收盘。
-        _ts_label = f"（截至 {fetched_at.strftime('%H:%M')}）" if fetched_at else ""
+        # round10 P2-G②: 非当日（周末/盘前/缓存 TTL 内命中旧快照）→ 表头明示「截至
+        # YYYY-MM-DD HH:MM（非当日，最近交易日）」而非仅 HH:MM——盘中值可追溯
+        _now = datetime.now()
+        if fetched_at:
+            _same_day = (
+                fetched_at.year == _now.year
+                and fetched_at.month == _now.month
+                and fetched_at.day == _now.day
+            )
+            _ts_label = (
+                f"（截至 {fetched_at.strftime('%H:%M')}）"
+                if _same_day
+                else f"（行情截至 {fetched_at.strftime('%Y-%m-%d %H:%M')}，非当日·最近交易日）"
+            )
+        else:
+            _ts_label = ""
         lines.append(f"| 资产类别 | 代码 | 名称 | 权重 | 多因子评分 | 今日涨跌{_ts_label} | 建仓建议 | 入选理由 |")
         lines.append("|---------|------|------|:----:|:--------:|:-------:|:--------:|---------|")
 

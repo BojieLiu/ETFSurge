@@ -60,15 +60,15 @@ async def test_symbol_extra_injects_benchmark_and_shares(monkeypatch):
     market_data_hub._FUND_SHARES_CACHE.clear()
 
     out = await market_data_hub._enrich_symbol_extra(
-        ["510300", "588000", "512480"],  # 512480 非宽基（无 index_code）
+        ["510300", "588000", "512480"],  # 512480 半导体ETF（P1-J 有基准映射 sh931071）
         {"510300": {"fund_scale": 100}, "588000": {"fund_scale": 50}, "512480": {}},
     )
-    assert calls["bench"] >= 2  # 两只宽基
+    assert calls["bench"] >= 3  # 510300/588000 宽基 + 512480 主题（P1-J 扩展后都有基准映射）
     assert len(out["510300"]["benchmark_close"]) == 20
     assert out["510300"]["shares_change_20d"] == 0.03
     assert abs(out["510300"]["institutional_holdings_change"] - 0.015) < 1e-9
-    # 非宽基不注入 benchmark_close 但注入份额
-    assert "benchmark_close" not in out["512480"]
+    # P1-J (round10 §5.5): 行业/主题 ETF 基准映射扩展——512480 半导体也有基准
+    assert "benchmark_close" in out["512480"]
     assert out["512480"]["shares_change_20d"] == 0.03
 
 

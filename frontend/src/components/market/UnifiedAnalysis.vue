@@ -9,9 +9,11 @@
     <div class="analysis-tabs" role="tablist">
       <button
         v-for="mode in modes" :key="mode.value"
-        :class="['analysis-tab', { active: activeMode === mode.value }]"
+        :class="['analysis-tab', { active: activeMode === mode.value, disabled: mode.disabled }]"
+        :disabled="mode.disabled"
         @click="switchMode(mode.value)"
         role="tab" :aria-selected="activeMode === mode.value"
+        :title="mode.disabled ? '美股/港股暂不支持板块分析' : mode.label"
       >
         {{ mode.label }}
       </button>
@@ -174,14 +176,30 @@ watch(() => props.marketTab, () => {
   search.showDropdown.value = false
 })
 
-const modes = [
-  { value: 'symbol', label: '个股/ETF' },
-  { value: 'sector', label: '板块/概念' },
-  { value: 'index', label: '指数' },
-]
+const unsupportedSectorMarkets = ['US', 'HK']
+
+const modes = computed(() => {
+  const base = [
+    { value: 'symbol', label: '个股/ETF' },
+    { value: 'sector', label: '板块/概念' },
+    { value: 'index', label: '指数' },
+  ]
+  // round10 P2-T: 美股/港股无板块数据源——板块模式禁用（避免展示 A 股板块）
+  return base.map(m => ({
+    ...m,
+    disabled: m.value === 'sector' && unsupportedSectorMarkets.includes(props.marketTab),
+  }))
+})
+
+// round10 P2-T: 切到 US/HK tab 时若停留在板块模式 → 回落 symbol（板块模式无数据源）
+watch(() => props.marketTab, (mkt) => {
+  if (activeMode.value === 'sector' && unsupportedSectorMarkets.includes(mkt)) {
+    activeMode.value = 'symbol'
+  }
+})
 
 const currentModeLabel = computed(() => {
-  const m = modes.find(m => m.value === activeMode.value)
+  const m = modes.value.find(m => m.value === activeMode.value)
   return m ? m.label : '标的'
 })
 
@@ -476,6 +494,12 @@ async function doAnalyze() {
   position: relative;
 }
 .analysis-tab:hover { color: var(--color-text-primary); background: var(--color-bg-secondary); }
+.analysis-tab.disabled {
+  color: var(--color-text-disabled, var(--color-text-tertiary, #aaa));
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.analysis-tab.disabled:hover { color: var(--color-text-disabled, #aaa); background: none; }
 .analysis-tab.active {
   color: var(--color-brand-600);
   font-weight: var(--font-weight-semibold);
