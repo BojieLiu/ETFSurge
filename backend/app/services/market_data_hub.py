@@ -1422,7 +1422,16 @@ class MarketDataHub:
         try:
             from .market_trends import detect_market_regime
             broad_index = {"A": "000001", "HK": "^HSI", "US": "^GSPC"}.get(market, "000001")
-            regime = detect_market_regime(broad_index_code=broad_index)
+            # round13 §3.1 P1: A 市场刷新市态时组装宏观快照（fetch_macro_snapshot，
+            # 24h 缓存；失败降级 None → detect_market_regime 行为与旧版一致）
+            macro = None
+            if market == "A":
+                try:
+                    from ..fetchers.macro_fetcher import fetch_macro_snapshot
+                    macro = await asyncio.to_thread(fetch_macro_snapshot)
+                except Exception as _me:
+                    logger.warning("[pool] macro snapshot fetch failed for regime: %s", _me)
+            regime = detect_market_regime(broad_index_code=broad_index, macro=macro)
             if regime:
                 self._regime_cache[market] = regime
                 self._regime_cache_ts = time.time()

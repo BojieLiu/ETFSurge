@@ -271,10 +271,11 @@ class TestMarketServiceRouting:
             result = await _route_us("SPY")
             assert result is None
 
-            # Verify registry was called with 4 sources in correct order
+            # Verify registry was called with 3 sources in correct order
+            # round13 §3.2 P1: 链尾加 tickflow（TwelveData 日额度耗尽/Finnhub 失败时切入）
             call_args = mock_registry.route.call_args[0][0]
             source_names = [p[0] for p in call_args]
-            assert source_names == ["twelvedata", "finnhub"]
+            assert source_names == ["twelvedata", "finnhub", "tickflow"]
 
 
 # ── 天天基金 Fetcher Tests ──────────────────────────────────────

@@ -29,6 +29,9 @@ def _patch_hub_quiet(monkeypatch):
     monkeypatch.setattr(hub, "get_market_sentiment", lambda: {})
     monkeypatch.setattr(hub, "get_news_headlines", lambda: [])
     monkeypatch.setattr(hub, "get_fund_nav", lambda sym, **kw: {})
+    # round13 §3.1 P2: mock macro 注入（_inject_macro_data）——避免真实 akshare 网络
+    monkeypatch.setattr("app.fetchers.macro_fetcher.fetch_macro_snapshot", lambda: None)
+    monkeypatch.setattr("app.fetchers.macro_fetcher.fetch_gdp_series", lambda n=8: [])
 
 
 def test_fetch_history_budget_bounds():

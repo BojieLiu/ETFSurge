@@ -313,6 +313,113 @@ def _tickflow_kline(symbol: str, period: str = "daily") -> list[dict[str, Any]]:
         return []
 
 
+# ── TickFlow 实时行情（round13 §3.2，降级链尾环）────────────────
+# 免费层 quotes.get 支持 ≤5 只/次实时快照（last_price/prev_close/OHLC/volume/amount/
+# ext.change_pct/turnover_rate/name），A/HK/US 三市场可用。定位尾环——平时主链
+# （A: tencent/sina；HK: sina/tencent/EM；US: TwelveData/Finnhub）失效才切，规避速率限制。
+
+def _tickflow_symbol(symbol: str) -> str:
+    """统一 → TickFlow 代码：A 510300→510300.SH/SZ（5/6→SH，其余→SZ）；HK 00700.HK；US AAPL.US。
+
+    显式后缀（.HK/.US/.SH/.SZ/.SS）直接使用；sh/sz/bj 前缀先剥除（与 _strip_a_prefix 同规则）；
+    纯数字按 5/6→SH 其余→SZ；字母 → US。港股由上层传带 .HK 后缀的代码。
+    """
+    s = str(symbol or "").strip()
+    s = _strip_a_prefix(s)
+    up = s.upper()
+    if up.endswith(".SS"):
+        up = up[:-3] + ".SH"
+    if up.endswith((".HK", ".US", ".SH", ".SZ")):
+        return up
+    if up.isdigit():
+        return f"{up}.SH" if up.startswith(("5", "6")) else f"{up}.SZ"
+    return f"{up}.US"
+
+
+def _tickflow_reverse_symbol(tf_sym: str, requested: list[str]) -> str:
+    """返回 symbol 与请求一致（契约：返回符号与请求对齐，避免前端匹配断裂）。"""
+    base = str(tf_sym or "").split(".")[0]
+    for req in requested:
+        if str(req).upper().split(".")[0] == base:
+            return req
+    return str(tf_sym or "")
+
+
+def _tickflow_asset_type(tf_sym: str) -> str:
+    s = str(tf_sym or "").upper()
+    if s.endswith(".HK"):
+        return "HK"
+    if s.endswith(".US"):
+        return "US"
+    return "A"
+
+
+def _tickflow_quotes(symbols: list[str]) -> list[dict[str, Any]]:
+    """TickFlow 实时行情快照（round13 §3.2，免费层 ≤5 只/次）。
+
+    无 key 短路返回 []；>5 只拒绝返回 []（诚实降级不拆分）；
+    run_in_thread + 8s 超时 + 异常隔离。字段映射: last_price→price、
+    ext.change_pct→change_pct（缺失时 (price-prev_close)/prev_close*100 兜底）。
+    """
+    try:
+        from ..config import settings
+        api_key = getattr(settings, "tickflow_api_key", "") or ""
+        if not api_key:
+            return []
+        if len(symbols) > 5:
+            return []
+        tf_symbols = [_tickflow_symbol(s) for s in symbols]
+
+        def _p():
+            from tickflow import TickFlow
+            client = TickFlow(api_key=api_key)
+            return client.quotes.get(symbols=tf_symbols) or []
+
+        quotes = run_in_thread(_p, timeout=8, executor="long")
+        if not quotes:
+            return []
+        out = []
+        for q in quotes:
+            if not isinstance(q, dict):
+                continue
+            try:
+                ext = q.get("ext") or {}
+                price = float(q.get("last_price", 0) or 0)
+                prev = float(q.get("prev_close", 0) or 0)
+                # change_pct 统一百分比单位：TickFlow ext.change_pct 为小数比例
+                # （0.0089 = 0.89%），×100 转百分比；缺失时 (price-prev)/prev*100 兜底
+                chg = ext.get("change_pct")
+                if chg is None:
+                    chg = round((price - prev) / prev * 100, 2) if prev else 0.0
+                else:
+                    chg = round(float(chg) * 100, 2)
+                chg_amt = ext.get("change_amount")
+                if chg_amt is None:
+                    chg_amt = round(price - prev, 2) if prev else 0.0
+                else:
+                    chg_amt = round(float(chg_amt), 2)
+                out.append({
+                    "symbol": _tickflow_reverse_symbol(q.get("symbol", ""), symbols),
+                    "name": ext.get("name", "") or q.get("name", ""),
+                    "price": price,
+                    "previous_close": round(prev, 4),
+                    "open": float(q.get("open", 0) or 0),
+                    "high": float(q.get("high", 0) or 0),
+                    "low": float(q.get("low", 0) or 0),
+                    "volume": float(q.get("volume", 0) or 0),
+                    "amount": float(q.get("amount", 0) or 0),
+                    "change_pct": chg,
+                    "change_amount": chg_amt,
+                    "turnover_rate": ext.get("turnover_rate"),
+                    "asset_type": _tickflow_asset_type(q.get("symbol", "")),
+                })
+            except (ValueError, TypeError):
+                continue
+        return out
+    except Exception:
+        return []
+
+
 # ── Sina helper ──────────────────────────────────────────────────
 
 def _strip_a_prefix(symbol: str) -> str:
@@ -771,6 +878,8 @@ def fetch_a_stock_realtime(symbol: str | None = None) -> list[dict[str, Any]]:
         ("mootdx", lambda: _filtered(_mootdx_realtime, [clean])),
         ("tencent", lambda: _filtered(_tencent_realtime, [clean], "A")),
         ("sina", lambda: _filtered(_sina_realtime, [clean], "A")),
+        # round13 §3.2 P3: TickFlow 尾环（免费层 ≤5 只/次，单只场景）——EM 反爬免疫
+        ("tickflow", lambda: _filtered(_tickflow_quotes, [clean])),
     ], route_name="A_stock_realtime", operation="realtime", target=symbol) or []
 
 
@@ -839,13 +948,16 @@ def _em_hk_realtime(symbols: list[str]) -> list[dict[str, Any]]:
 
 
 def fetch_hk_stock_realtime(symbol: str | None = None) -> list[dict[str, Any]]:
-    """港股实时行情：Sina → Tencent(QQ) → 东方财富三级降级，通过 SourceRegistry 熔断路由。"""
+    """港股实时行情：Sina → Tencent(QQ) → 东方财富 → TickFlow 四级降级，通过 SourceRegistry 熔断路由。"""
     if not symbol:
         return []
+    # round13 §3.2 P2: TickFlow 尾环——港股代码显式带 .HK（数字前缀无法区分 A/HK）
+    _tf_sym = symbol if str(symbol).upper().endswith(".HK") else f"{symbol}.HK"
     return registry.route([
         ("sina", lambda: _filtered(_sina_realtime, [symbol], "HK")),
         ("tencent", lambda: _filtered(_tencent_realtime, [symbol], "HK")),
         ("dongfang", lambda: _filtered(_em_hk_realtime, [symbol])),
+        ("tickflow", lambda: _filtered(_tickflow_quotes, [_tf_sym])),
     ], route_name="HK_stock_realtime", operation="realtime", target=symbol) or []
 
 

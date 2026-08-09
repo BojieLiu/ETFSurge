@@ -164,10 +164,14 @@ def detect_market_regime(
     adv_ratio: float = 0.5,
     index_realtime: list[dict] | None = None,  # P0.5: 实时指数兜底
     daily_change_pct: float | None = None,      # P1: 单日涨跌幅 (如 -0.0735 = -7.35%)
+    macro: dict | None = None,                  # round13 §3.1 P1: 宏观快照（PMI/M2/LPR 方向）
 ) -> str:
     """
     基于趋势数据和情绪指标判断当前市场状态。
     当趋势数据为空（外部数据源超时）时，自动降级使用 index_realtime 做判断。
+
+    round13 §3.1 P1: 可选 macro 参数（fetch_macro_snapshot 输出）做宏观修正——
+    同向叠加/顺势修正、冲突保持、缺失不动（宏观为辅助非主导）。默认 None，现有调用零影响。
 
     Args:
         trends: compute_etf_trends() 的输出（含主要宽基）
@@ -176,11 +180,74 @@ def detect_market_regime(
         adv_ratio: 上涨家数占比 0~1
         index_realtime: 实时指数行情快照（P0.5 fallback）
         daily_change_pct: 单日涨跌幅 (如 -0.0735)，优先于多周期趋势判断
+        macro: fetch_macro_snapshot() 输出（含 macro_direction -1/0/+1），默认 None
 
     Returns:
         "bull_strong" / "bull_weakening" / "range_bound" /
         "correction" / "bear" / "defensive_rotate" / "panic"
     """
+    core = _detect_regime_core(
+        trends=trends,
+        broad_index_code=broad_index_code,
+        sentiment_index=sentiment_index,
+        adv_ratio=adv_ratio,
+        index_realtime=index_realtime,
+        daily_change_pct=daily_change_pct,
+    )
+    return _apply_macro_adjustment(core, macro)
+
+
+# 宏观修正映射：市态 → 进攻/防御倾向等级（-3 恐慌 … +2 强牛）
+_MACRO_REGIME_LEVEL = {
+    "panic": -3,
+    "bear": -2,
+    "correction": -1,
+    "defensive_rotate": -1,
+    "range_bound": 0,
+    "bull_weakening": 1,
+    "bull_strong": 2,
+}
+_MACRO_LEVEL_TO_REGIME = {
+    -3: "panic",
+    -2: "bear",
+    -1: "correction",
+    0: "range_bound",
+    1: "bull_weakening",
+    2: "bull_strong",
+}
+
+
+def _apply_macro_adjustment(regime: str, macro: dict | None) -> str:
+    """round13 §3.1 P1: 宏观修正（同向叠加/顺势修正、冲突保持、缺失不动）。
+
+    规则（契约 market/macro-regime.md §2.3）:
+    - macro 缺失或 macro_direction=0 → 保持现有输出
+    - 中性市态（range_bound）+ 宏观方向 → 顺势给倾向（偏下→defensive_rotate，偏上→bull_weakening）
+    - 现有市态与宏观同向 → 强化一级（bull_weakening→bull_strong；defensive_rotate/correction→bear；bear→panic）
+    - 冲突（方向相反）→ 保持现有输出（宏观不主导日频快变量）
+    """
+    if not macro:
+        return regime
+    macro_dir = macro.get("macro_direction", 0)
+    if macro_dir == 0:
+        return regime
+    level = _MACRO_REGIME_LEVEL.get(regime, 0)
+    if level == 0:
+        return "defensive_rotate" if macro_dir < 0 else "bull_weakening"
+    if (level > 0) == (macro_dir > 0):
+        return _MACRO_LEVEL_TO_REGIME.get(level + macro_dir, regime)
+    return regime
+
+
+def _detect_regime_core(
+    trends: dict[str, dict[str, float]] | None = None,
+    broad_index_code: str = "000001",
+    sentiment_index: float = 50.0,
+    adv_ratio: float = 0.5,
+    index_realtime: list[dict] | None = None,  # P0.5: 实时指数兜底
+    daily_change_pct: float | None = None,      # P1: 单日涨跌幅 (如 -0.0735 = -7.35%)
+) -> str:
+    """市态核心判定（不含宏观修正）——由 detect_market_regime 包装调用。"""
     # 默认
     regime = "range_bound"
 

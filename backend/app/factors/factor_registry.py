@@ -518,6 +518,59 @@ def _compute_dual_circulation(data: dict) -> float:
     return 0.0
 
 
+# ── 宏观环境因子（round13 §3.1 P2，MARKET_LEVEL 类，不参与截面 IC）──
+# 数据来源：_fetch_market_data 注入的 data["macro_snapshot"]（fetch_macro_snapshot，
+# 24h 缓存）+ data["macro_gdp_series"]（fetch_gdp_series，季频序列）。
+# 定位：环境/市态维度慢变量——只做市态/组合层输入，不参与盘中高频决策；
+# 前视偏差红线：只用已发布值 + as_of 时间戳标注。
+
+def _compute_macro_m2_trend(data: dict) -> float:
+    """macro.m2_trend: M2 同比 3 月斜率方向（-1/0/+1），货币松紧趋势（月频）。"""
+    snap = data.get("macro_snapshot") or {}
+    d = snap.get("m2_direction")
+    return float(d) if isinstance(d, (int, float)) else 0.0
+
+
+def _compute_macro_pmi_level(data: dict) -> float:
+    """macro.pmi_level: PMI ≥50 → 1，<50 → 0（荣枯线水平，月频）。"""
+    snap = data.get("macro_snapshot") or {}
+    v = snap.get("pmi_value")
+    if v is None:
+        return 0.0
+    try:
+        return 1.0 if float(v) >= 50 else 0.0
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def _compute_macro_lpr_direction(data: dict) -> float:
+    """macro.lpr_direction: LPR 1Y 同比方向（-1/0/+1），降息周期=+1（月频）。"""
+    snap = data.get("macro_snapshot") or {}
+    d = snap.get("lpr_direction")
+    return float(d) if isinstance(d, (int, float)) else 0.0
+
+
+def _compute_macro_gdp_trend(data: dict) -> float:
+    """macro.gdp_trend: GDP 同比增速分位 → 环境分级 -1/0/+1（季频，一年仅 4 点）。
+
+    高于 75 分位 → +1（经济强劲）；低于 25 分位 → -1（走弱）；样本 <4 → 0（诚实降级）。
+    """
+    series = data.get("macro_gdp_series") or []
+    if len(series) < 4:
+        return 0.0
+    try:
+        arr = np.asarray([float(x) for x in series], dtype=float)
+    except (ValueError, TypeError):
+        return 0.0
+    p25, p75 = np.percentile(arr, [25.0, 75.0])
+    cur = arr[-1]
+    if cur > p75:
+        return 1.0
+    if cur < p25:
+        return -1.0
+    return 0.0
+
+
 def _compute_stock_divergence(data: dict) -> float:
     """Stock return divergence: use advance/decline ratio from sentiment_fetcher.
 
@@ -577,6 +630,11 @@ _BUILTIN_COMPUTERS: dict[str, Callable[[dict], float]] = {
     "china.policy.five_year_plan": _compute_five_year_plan,
     "china.policy.strategic_emerging": _compute_strategic_emerging,
     "china.policy.dual_circulation": _compute_dual_circulation,
+    # Macro environment (round13 §3.1 P2, MARKET_LEVEL 类)
+    "macro.m2_trend": _compute_macro_m2_trend,
+    "macro.pmi_level": _compute_macro_pmi_level,
+    "macro.lpr_direction": _compute_macro_lpr_direction,
+    "macro.gdp_trend": _compute_macro_gdp_trend,
     # KDJ (2026-07-20 从 indicators.py 注册)
     "technical.kdj.k_value": _compute_kdj_k,
     "technical.kdj.d_value": _compute_kdj_d,
@@ -643,6 +701,11 @@ _CORE_FACTORS = [
     "china.policy.five_year_plan",
     "china.policy.strategic_emerging",
     "china.policy.dual_circulation",
+    # Macro environment (round13 §3.1 P2, MARKET_LEVEL 类——static 标注不参与 IC)
+    "macro.m2_trend",
+    "macro.pmi_level",
+    "macro.lpr_direction",
+    "macro.gdp_trend",
     # KDJ
     "technical.kdj.k_value",
     "technical.kdj.d_value",
@@ -1016,6 +1079,24 @@ class FactorRegistry:
         """Register a custom computation function for a factor."""
         self._computers[code] = fn
 
+    async def _inject_macro_data(self, data: dict[str, dict[str, Any]], symbols: list[str]) -> None:
+        """round13 §3.1 P2: 注入宏观数据字段（macro_snapshot + GDP 序列）。
+
+        供 4 个 MARKET_LEVEL 宏观因子（macro.m2_trend / pmi_level / lpr_direction /
+        gdp_trend）读取——全市场单一值，与 sentiment 注入同模式（一次注入所有标的）。
+        snapshot 走 fetch_macro_snapshot（24h 缓存）；GDP 走 fetch_gdp_series（季频）。
+        数据不可用 → 注入 None/[] → compute 输出 0（诚实降级，不编造）。
+        """
+        import asyncio
+        from ..fetchers.macro_fetcher import fetch_macro_snapshot, fetch_gdp_series
+        snap = await asyncio.to_thread(fetch_macro_snapshot)
+        gdp_series = await asyncio.to_thread(fetch_gdp_series, 8)
+        for _sym in symbols:
+            _d = data.setdefault(_sym, {})
+            _d["macro_snapshot"] = snap
+            if gdp_series:
+                _d["macro_gdp_series"] = gdp_series
+
     async def _fetch_market_data(self, symbols: list[str], symbol_extra: dict[str, dict] | None = None) -> dict[str, dict[str, Any]]:
         """[DEPRECATED] S5: 仅在 Hub 缓存无数据时作为 fallback 使用。
 
@@ -1193,6 +1274,13 @@ class FactorRegistry:
                     _d["news_scope"] = "market"
         except Exception as _e:
             logger.warning("[factor] sentiment data inject failed: %s", _e)
+
+        # round13 §3.1 P2: 注入 macro 数据字段（4 个宏观因子用）——fetch_macro_snapshot
+        # 24h 缓存 + GDP 季频序列，一次注入所有标的（非每标的重复拉取）
+        try:
+            await self._inject_macro_data(data, symbols)
+        except Exception as _e:
+            logger.warning("[factor] macro data inject failed: %s", _e)
 
         # Z04: 注入 symbol_extra 中的 etf_specific 字段
         # 这些字段用于：industry/concepts → industry_diversification,

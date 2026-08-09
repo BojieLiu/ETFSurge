@@ -53,6 +53,7 @@ CATEGORY_DESCRIPTIONS: dict[str, str] = {
     "etf_specific": "ETF 特有因子：针对 ETF 品类的专属分析维度，如折溢价率、规模、跟踪误差",
     "microstructure": "微观结构因子：基于日内交易数据的市场微观结构分析，如订单流、反转效应",
     "theme": "主题因子：聚焦国家战略新兴产业的板块轮动和主题投资信号",
+    "macro": "宏观环境因子：基于宏观/政策数据的市场环境维度（M2 货币松紧 / PMI 荣枯线 / LPR 利率周期 / GDP 增速分位），慢变量调节快变量，仅作市态/组合层输入，不参与截面 IC",
 }
 
 
@@ -73,6 +74,12 @@ MARKET_LEVEL_FACTOR_CODES = {
     "sentiment.panic_greed_diff",
     "sentiment.stock_divergence",
     "sentiment.news_direction",
+    # round13 §3.1 P2: 宏观环境因子——全市场单一值（M2/PMI/LPR/GDP），截面恒等，
+    # 不参与截面 IC，仅作市态/组合层输入（与 sentiment 市场级因子同处置）
+    "macro.m2_trend",
+    "macro.pmi_level",
+    "macro.lpr_direction",
+    "macro.gdp_trend",
 }
 
 

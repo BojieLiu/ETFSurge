@@ -1234,15 +1234,18 @@ async def get_asset_realtime(symbol: str, asset_type: str) -> dict | None:
 
 
 async def _route_us(symbol: str) -> dict | None:
-    """美股/ETF: Twelve Data → Finnhub，通过 SourceRegistry 熔断路由。
+    """美股/ETF: Twelve Data → Finnhub → TickFlow，通过 SourceRegistry 熔断路由。
 
     v3: 移除 Stooq（CSV API 已关闭返回404 → Cloudflare）、
     AlphaVantage（25次/天额度太低）、yfinance（境内不稳定）。
+    round13 §3.2 P1: 链尾加 TickFlow 尾环——TwelveData 日额度耗尽或 Finnhub 失败时
+    切入（免费层单只查询完美适配 5 只/次上限；与 TD 日额度互补）。
 
     优先级设计理由:
     - TwelveData（1st）: 已配 API key，800次/天免费额度，支持全球指数。
       非交易时段有缓存数据，速度快（~0.5s）。
     - Finnhub（2nd）: 已配 API key，60次/分钟免费额度。TwelveData 失败时兜底。
+    - TickFlow（3rd, 尾环）: 免费 key 实时快照，EM 反爬免疫；低频调用规避速率限制。
     """
     from ..fetchers import global_markets_fetcher
 
@@ -1250,10 +1253,15 @@ async def _route_us(symbol: str) -> dict | None:
         return global_markets_fetcher.fetch_realtime_twelvedata(symbol)
     def _fh():
         return global_markets_fetcher.fetch_realtime(symbol)
+    def _tf():
+        from ..fetchers.china_market import _tickflow_quotes
+        rows = _tickflow_quotes([symbol])
+        return rows[0] if rows else None
 
     return registry.route([
         ("twelvedata", _td),
         ("finnhub", _fh),
+        ("tickflow", _tf),
     ], route_name="US_ETF", operation="realtime", target=symbol)
 
 

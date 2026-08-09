@@ -70,14 +70,21 @@ def test_bond_yields_spread_calc(monkeypatch):
 # ── fetch_cpi_ppi stale ─────────────────────────────────────
 def test_cpi_ppi_stale_when_nan(monkeypatch):
     _clear()
-    df = pd.DataFrame([
-        ["2026-07", float("nan"), float("nan")],
-    ], columns=["月份", "全国-同比增长", "当月同比增长"])
+    cpi_df = pd.DataFrame([
+        ["2026-07", 100.5, float("nan"), -0.1],
+    ], columns=["月份", "全国-价格", "全国-同比增长", "全国-环比增长"])
+    ppi_df = pd.DataFrame([
+        ["2026-07", 103.5, float("nan")],
+    ], columns=["月份", "指数", "当月同比增长"])
 
-    def _fake_ak():
-        return df
+    def _fake_cpi():
+        return cpi_df
 
-    with patch("akshare.macro_china_cpi_monthly", side_effect=_fake_ak), \
+    def _fake_ppi():
+        return ppi_df
+
+    with patch("akshare.macro_china_cpi", side_effect=_fake_cpi), \
+         patch("akshare.macro_china_ppi", side_effect=_fake_ppi), \
          patch.object(macro_fetcher, "run_in_thread", _rt):
         r = macro_fetcher.fetch_cpi_ppi()
     assert r is not None
@@ -87,18 +94,52 @@ def test_cpi_ppi_stale_when_nan(monkeypatch):
 
 def test_cpi_ppi_stale_when_old_date(monkeypatch):
     _clear()
-    df = pd.DataFrame([
-        ["2025-09", 0.2, -2.1],  # > 3 个月前
-    ], columns=["月份", "全国-同比增长", "当月同比增长"])
+    cpi_df = pd.DataFrame([
+        ["2025-09", 100.2, 0.2, -0.1],  # > 3 个月前
+    ], columns=["月份", "全国-价格", "全国-同比增长", "全国-环比增长"])
+    ppi_df = pd.DataFrame([
+        ["2025-09", 102.1, -2.1],
+    ], columns=["月份", "指数", "当月同比增长"])
 
-    def _fake_ak():
-        return df
+    def _fake_cpi():
+        return cpi_df
 
-    with patch("akshare.macro_china_cpi_monthly", side_effect=_fake_ak), \
+    def _fake_ppi():
+        return ppi_df
+
+    with patch("akshare.macro_china_cpi", side_effect=_fake_cpi), \
+         patch("akshare.macro_china_ppi", side_effect=_fake_ppi), \
          patch.object(macro_fetcher, "run_in_thread", _rt):
         r = macro_fetcher.fetch_cpi_ppi()
     assert r["stale"] is True, "日期>3个月 → stale=true"
     assert "2025-09" in r["note"], f"note 应含滞后日期: {r['note']}"
+
+
+def test_cpi_ppi_real_values_from_wide_tables(monkeypatch):
+    """round13 修正：宽表同比接口真实取值（cpi_yoy/ppi_yoy 各自独立，非共用月率）。
+
+    回归守护：旧实现错用 monthly 长表（今值=CPI 月率）导致 cpi_yoy==ppi_yoy 假数据；
+    此处 mock 降序宽表（最新行在首行）验证取值正确 + 升降序兼容。
+    """
+    _clear()
+    cpi_df = pd.DataFrame([
+        ["2026-07", 100.5, 0.5, -0.1],   # 最新（降序首行）
+        ["2026-06", 101.0, 1.0, -0.3],
+        ["2025-09", 100.2, 0.2, -0.1],   # 旧数据在后
+    ], columns=["月份", "全国-价格", "全国-同比增长", "全国-环比增长"])
+    ppi_df = pd.DataFrame([
+        ["2026-07", 103.5, 3.5],         # 最新（降序首行）
+        ["2026-06", 104.1, 4.1],
+    ], columns=["月份", "指数", "当月同比增长"])
+
+    with patch("akshare.macro_china_cpi", side_effect=lambda: cpi_df), \
+         patch("akshare.macro_china_ppi", side_effect=lambda: ppi_df), \
+         patch.object(macro_fetcher, "run_in_thread", _rt):
+        r = macro_fetcher.fetch_cpi_ppi()
+    assert r["cpi_yoy"] == 0.5, f"CPI 同比取最新行: {r}"
+    assert r["ppi_yoy"] == 3.5, f"PPI 同比取最新行: {r}"
+    assert r["cpi_yoy"] != r["ppi_yoy"], "cpi/ppi 必须独立取值（防月率共用假数据）"
+    assert r["date"] == "2026-07"
 
 
 # ── 失败缓存 / 成功缓存 ────────────────────────────────────
@@ -200,7 +241,10 @@ async def test_context_a_includes_domestic_macro(monkeypatch):
     with patch("akshare.macro_china_lpr", side_effect=_fake_lpr), \
          patch("akshare.bond_zh_us_rate", side_effect=RuntimeError("down")), \
          patch("akshare.macro_china_money_supply", side_effect=RuntimeError("down")), \
-         patch("akshare.macro_china_cpi_monthly", side_effect=RuntimeError("down")), \
+         patch("akshare.macro_china_cpi", side_effect=RuntimeError("down")), \
+         patch("akshare.macro_china_ppi", side_effect=RuntimeError("down")), \
+         patch("akshare.macro_china_pmi_yearly", side_effect=RuntimeError("down")), \
+         patch("akshare.macro_china_gdp_yearly", side_effect=RuntimeError("down")), \
          patch.object(macro_fetcher, "run_in_thread", _rt):
         ctx = await llm_context.build_full_context(
             _FakeHubMin(), market="A",
@@ -233,7 +277,10 @@ async def test_context_all_macro_sources_down_unavailable(monkeypatch):
     with patch("akshare.macro_china_lpr", side_effect=RuntimeError("down")), \
          patch("akshare.bond_zh_us_rate", side_effect=RuntimeError("down")), \
          patch("akshare.macro_china_money_supply", side_effect=RuntimeError("down")), \
-         patch("akshare.macro_china_cpi_monthly", side_effect=RuntimeError("down")), \
+         patch("akshare.macro_china_cpi", side_effect=RuntimeError("down")), \
+         patch("akshare.macro_china_ppi", side_effect=RuntimeError("down")), \
+         patch("akshare.macro_china_pmi_yearly", side_effect=RuntimeError("down")), \
+         patch("akshare.macro_china_gdp_yearly", side_effect=RuntimeError("down")), \
          patch.object(macro_fetcher, "run_in_thread", _rt):
         ctx = await llm_context.build_full_context(
             _FakeHubMin(), market="A",

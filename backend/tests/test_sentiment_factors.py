@@ -78,6 +78,9 @@ def test_zero_ratio_tracked():
     from app.routers import factors as _factors_router
 
     fr.registry._zero_ratio = {"sentiment.news_heat": 1.0}
+    # 进入时清 /factors/active 缓存（串行跑时前序测试可能已填充 60s TTL 缓存 → 命中旧响应，
+    # 否则 zero_ratio 断言读到旧值失败；round13 暴露的测试隔离缺陷）
+    _factors_router._CACHE.clear()
     client = TestClient(app)
     try:
         resp = client.get("/api/v1/factors/active")
