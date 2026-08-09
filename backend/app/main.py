@@ -35,6 +35,11 @@ logger = get_logger("lifespan")
 # ── Profiling (enabled via PROFILE_WARMUP=1 env var) ──────────
 _PROFILE_WARMUP = os.environ.get("PROFILE_WARMUP", "").lower() in ("1", "true", "yes")
 
+# ── Skip startup warmup (enabled via ETF_SURGE_SKIP_WARMUP=1) ──
+# smoke_startup 快速模式使用：跳过后台预热任务及其 60s 等待，
+# 仅验证「应用能启动 + 路由可响应」。默认不设，生产/开发启动行为不变。
+_SKIP_WARMUP = os.environ.get("ETF_SURGE_SKIP_WARMUP", "").lower() in ("1", "true", "yes")
+
 _profiler: WarmupProfiler | None = None
 warmup_timer = _noop_timer  # default: no-op
 if _PROFILE_WARMUP:
@@ -233,7 +238,8 @@ async def lifespan(app: FastAPI):
                 _mark["done"] = True
                 _mark["success"] = False
                 logger.exception("全球指数缓存预热失败（非交易时段正常）")
-    _warmup_tasks.append(asyncio.create_task(_warmup_global_indices()))
+    if not _SKIP_WARMUP:
+        _warmup_tasks.append(asyncio.create_task(_warmup_global_indices()))
 
     # 启动时预热 ETF 缓存（非阻塞），带超时保护
     async def _warmup_etf_cache():
@@ -269,7 +275,10 @@ async def lifespan(app: FastAPI):
             _background_instruments_sync(),
         ])
 
-    _warmup_tasks.append(asyncio.create_task(_warmup_sequence_task()))
+    if _SKIP_WARMUP:
+        logger.info("[lifespan] ETF_SURGE_SKIP_WARMUP=1, 跳过后台预热任务（快速启动模式）")
+    else:
+        _warmup_tasks.append(asyncio.create_task(_warmup_sequence_task()))
 
     # Scheduler temporarily disabled for diagnostics (design-check-pipeline-redesign)
     # try:

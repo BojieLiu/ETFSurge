@@ -7,10 +7,18 @@ smoke_startup.py — 后端启动冒烟测试
 用法:
     python scripts/smoke_startup.py              # 完整测试
     SKIP_NETWORK=1 python scripts/smoke_startup.py  # 跳过（网络不可用时）
+    SMOKE_FAST=1 python scripts/smoke_startup.py    # 快速模式（pre-commit 门禁用）
 
 退出码:
     0 = 全部通过
     1 = 任一检查失败
+
+快速模式（SMOKE_FAST=1，pre-commit 门禁专用）：
+    - 子进程设置 ETF_SURGE_SKIP_WARMUP=1，lifespan 跳过后台预热任务及
+      其 60s 等待（health 响应 ~18s → ~5s）。
+    - 跳过 POST /calculate（首次调用懒加载实时行情 ~30s，属业务链路，
+      由 verify_e2e.py 覆盖）；仍验证 health + ETF 列表 + 进程存活。
+    完整模式（默认）行为不变，保留 calculate 真实验证。
 """
 import os
 import sys
@@ -82,6 +90,8 @@ def main():
         print("[smoke] SKIP_NETWORK=1，跳过冒烟测试")
         sys.exit(0)
 
+    fast = os.environ.get("SMOKE_FAST") == "1"
+
     # 检查端口可用
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
@@ -92,12 +102,19 @@ def main():
         sys.exit(1)
 
     print(f"\n── 后端启动冒烟测试 ──────────────────────────────────")
-    print(f"  启动 uvicorn 到 {HOST}:{PORT} ...")
+    print(f"  启动 uvicorn 到 {HOST}:{PORT} ..."
+          + ("（SMOKE_FAST 快速模式：跳过预热 + calculate）" if fast else ""))
+
+    env = os.environ.copy()
+    if fast:
+        # 跳过后台预热任务及其 60s 等待（lifespan await asyncio.wait）
+        env["ETF_SURGE_SKIP_WARMUP"] = "1"
 
     proc = subprocess.Popen(
         [sys.executable, "-m", "uvicorn",
          "app.main:app", "--host", HOST, "--port", str(PORT)],
         cwd=BACKEND_DIR,
+        env=env,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
@@ -138,17 +155,22 @@ def main():
         check("GET /api/v1/portfolio/etfs", False, str(data))
 
     # 组合计算
-    status, data = http_post("/api/v1/portfolio/calculate",
-                             {"total_capital": 100000}, timeout=30)
-    if status == 200 and isinstance(data, dict):
-        allocs = data.get("allocations", [])
-        cash = data.get("cash_amount", "N/A")
-        check(f"POST /api/v1/portfolio/calculate -> {len(allocs)} allocs",
-              len(allocs) > 0, f"allocs={len(allocs)}, cash={cash}")
-    elif status is not None:
-        check(f"POST /api/v1/portfolio/calculate -> {status}", False, str(data)[:100])
+    if fast:
+        # 快速模式跳过：calculate 首次调用懒加载实时行情 ~30s，
+        # 属业务链路验证，由 verify_e2e.py 覆盖（pre-commit 只验启动+路由）。
+        print("  [SKIP] POST /api/v1/portfolio/calculate（SMOKE_FAST，由 verify_e2e 覆盖）")
     else:
-        check("POST /api/v1/portfolio/calculate", False, str(data))
+        status, data = http_post("/api/v1/portfolio/calculate",
+                                 {"total_capital": 100000}, timeout=30)
+        if status == 200 and isinstance(data, dict):
+            allocs = data.get("allocations", [])
+            cash = data.get("cash_amount", "N/A")
+            check(f"POST /api/v1/portfolio/calculate -> {len(allocs)} allocs",
+                  len(allocs) > 0, f"allocs={len(allocs)}, cash={cash}")
+        elif status is not None:
+            check(f"POST /api/v1/portfolio/calculate -> {status}", False, str(data)[:100])
+        else:
+            check("POST /api/v1/portfolio/calculate", False, str(data))
 
     # 二次确认 health
     status, data = http_get("/health", timeout=5)

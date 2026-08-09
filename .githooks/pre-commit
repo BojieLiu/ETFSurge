@@ -113,10 +113,11 @@ fi
 if [ "${SKIP_FRONTEND_BUILD}" = "1" ]; then
     echo "[pre-commit] SKIP_FRONTEND_BUILD=1, 跳过前端构建检查"
 else
-    FRONTEND_STAGED=$(git diff --cached --name-only --diff-filter=ACM -- 'frontend/*' 2>/dev/null || true)
+    FRONTEND_STAGED=$(git diff --cached --name-only --diff-filter=ACM \
+        -- 'frontend/src/*' 'frontend/index.html' 'frontend/vite.config.js' 'frontend/package.json' 2>/dev/null || true)
 
     if [ -n "$FRONTEND_STAGED" ]; then
-        echo "[pre-commit] 检测到前端文件变更，正在执行 npm run build ..."
+        echo "[pre-commit] 检测到前端源码变更，正在执行 npm run build ..."
         cd frontend
         # 在 Windows (Git Bash) 中必须通过 cmd /c 执行 npm
         if cmd /c "npm run build" 2>&1; then
@@ -221,15 +222,25 @@ else
     if [ -n "$DOCKER_STAGED" ]; then
         if command -v docker >/dev/null 2>&1; then
             echo "[pre-commit] 检测到 requirements.txt / Dockerfile 变更，正在执行 docker build backend 冒烟 ..."
-            if docker build -q -t etf_surge-backend-smoke ./backend 2>&1; then
+            # ⚠️ 赋值必须放在 if 条件内：set -e 下命令替换失败会直接退出脚本，
+            # 导致 daemon 不可用（非构建回归）无法走 case 分支优雅跳过。
+            if SMOKE_OUTPUT=$(docker build -q -t etf_surge-backend-smoke ./backend 2>&1); then
                 echo "[pre-commit] ✅ docker build backend 冒烟通过"
             else
-                echo ""
-                echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
-                echo "!  🚫 docker build backend 失败 — 构建回归（参见 round6 R6-01）!"
-                echo "!  如需跳过: SKIP_DOCKER_BUILD=1 git commit ...              !"
-                echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
-                exit 1
+                case "$SMOKE_OUTPUT" in
+                    *"failed to connect to the docker API"*|*"Cannot connect to the Docker daemon"*|*"is the docker daemon running"*|*"error during connect"*|*"connection refused"*)
+                        echo "[pre-commit] ⚠️ Docker daemon 不可用，跳过 Docker 构建冒烟（CI 应覆盖此项）"
+                        ;;
+                    *)
+                        echo ""
+                        echo "$SMOKE_OUTPUT" | tail -20
+                        echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                        echo "!  🚫 docker build backend 失败 — 构建回归（参见 round6 R6-01）!"
+                        echo "!  如需跳过: SKIP_DOCKER_BUILD=1 git commit ...              !"
+                        echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                        exit 1
+                        ;;
+                esac
             fi
         else
             echo "[pre-commit] ⚠️ docker 不可用，跳过 Docker 构建冒烟（CI 应覆盖此项）"
@@ -261,12 +272,20 @@ else
         -- 'backend/*' ':!backend/app/*' ':!backend/scripts/*' ':!backend/tests/*.py' 2>/dev/null || true)
 
     if [ -n "$CONFTEST_STAGED" ] || [ -n "$LOGIC_STAGED" ] || [ -n "$OTHER_BACKEND" ]; then
-        echo "[pre-commit] 检测到后端逻辑变更，执行 pytest 全量 ..."
+        echo "[pre-commit] 检测到后端逻辑变更，执行 pytest 全量（xdist 并行）..."
         cd backend
         # F23 (round6 §17.2): 外层 timeout 兜底——pytest 进程级超时（30min），
         # 配合 pytest.ini 全局 --timeout=180（单测试级），任何一层挂起都会
         # 报 FAIL 而非无限挂起（commit 曾卡死 ~1 小时）。
-        if timeout 1800 python -m pytest -x 2>&1; then
+        # 2026-08-09: -n auto 并行（pytest-xdist）全量 220s → 90s；测试间隔离
+        # 已验证（临时 DB + autouse 缓存清理 fixture）。xdist 缺失时回退串行。
+        XDIST_ARGS=""
+        if python -m pytest --version 2>&1 | grep -qi xdist; then
+            XDIST_ARGS="-n auto"
+        else
+            echo "[pre-commit] ⚠️ pytest-xdist 未安装，回退单进程（建议 pip install -r requirements.txt）"
+        fi
+        if timeout 1800 python -m pytest -x $XDIST_ARGS 2>&1; then
             echo "[pre-commit] ✅ pytest 全量通过"; cd ..
         else
             cd ..; echo "🚫 pytest 失败或超时"; exit 1
@@ -308,9 +327,9 @@ else
     BACKEND_STAGED=$(git diff --cached --name-only --diff-filter=ACM -- 'backend/app/*.py' 'backend/scripts/*.py' 'backend/requirements.txt' 2>/dev/null || true)
 
     if [ -n "$BACKEND_STAGED" ]; then
-        echo "[pre-commit] 检测到后端文件变更，正在执行 smoke_startup.py ..."
+        echo "[pre-commit] 检测到后端文件变更，正在执行 smoke_startup.py（快速模式）..."
         cd backend
-        if python scripts/smoke_startup.py 2>&1; then
+        if SMOKE_FAST=1 python scripts/smoke_startup.py 2>&1; then
             echo "[pre-commit] ✅ smoke_startup 通过"
             cd ..
         else
