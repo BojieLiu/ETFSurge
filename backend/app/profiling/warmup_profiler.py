@@ -171,25 +171,9 @@ def get_warmup_profiler() -> WarmupProfiler:
     return _profiler
 
 
-def reset_profiler():
-    global _profiler
-    _profiler = None
-
-
 @contextmanager
 def warmup_timer(label: str, category: str = "general", note: str = ""):
     """Context manager that times a warmup section."""
-    p = get_warmup_profiler()
-    start = time.perf_counter()
-    try:
-        yield
-    finally:
-        elapsed = (time.perf_counter() - start) * 1000
-        p.record(label, elapsed, category, note)
-
-
-async def async_warmup_timer(label: str, category: str = "general", note: str = ""):
-    """Async context manager that times a warmup section."""
     p = get_warmup_profiler()
     start = time.perf_counter()
     try:

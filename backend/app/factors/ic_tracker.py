@@ -259,32 +259,5 @@ class ICTracker:
         )
 
 
-def compute_ic_series_fast(
-    factor_values: pd.DataFrame,
-    forward_returns: pd.DataFrame,
-) -> pd.Series:
-    """Vectorized IC series computation (faster than loop).
-
-    Computes cross-sectional Spearman IC for each time period using
-    rank correlation across assets.
-    """
-    periods = factor_values.index.intersection(forward_returns.index)
-    if len(periods) < 2:
-        return pd.Series(dtype=float)
-
-    ic_list = []
-    for t in periods:
-        fv = factor_values.loc[t]
-        fr = forward_returns.loc[t]
-        mask = fv.notna() & fr.notna()
-        if mask.sum() < 3:
-            ic_list.append(0.0)
-            continue
-        corr, _ = spearmanr(fv[mask], fr[mask])
-        ic_list.append(float(corr) if not np.isnan(corr) else 0.0)
-
-    return pd.Series(ic_list, index=periods)
-
-
 # Global singleton
 ic_tracker = ICTracker()
