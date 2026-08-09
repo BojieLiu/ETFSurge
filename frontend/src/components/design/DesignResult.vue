@@ -66,7 +66,7 @@
                         <th>名称</th>
                         <th>权重</th>
                         <th>层</th>
-                        <th>今日涨跌</th>
+                        <th>今日涨跌<template v-if="fetchedAtLabel"> <span class="fetched-at">{{ fetchedAtLabel }}</span></template></th>
                         <th>入选理由</th>
                       </tr>
                     </thead>
@@ -119,6 +119,9 @@ const props = defineProps({
   createdAt: { type: String, default: '' },
   reportQuality: { type: String, default: 'pending' },
   reportError: { type: String, default: '' },
+  // round10 P2-D: 行情数据采集时刻（market_context.data_fetched_at，后端 P0-9 注入）——
+  // 表头「今日涨跌」后标注「截至 HH:MM」，盘中值可追溯、不被误读为收盘
+  dataFetchedAt: { type: String, default: '' },
 })
 
 const emit = defineEmits(['apply', 'regenerate', 'close', 'retry-report'])
@@ -134,6 +137,23 @@ const applying = ref(false)
 const expandedPlan = ref(null)
 
 const reportHtml = computed(() => props.designText ? renderMarkdown(props.designText) : '')
+
+// round10 P2-D: data_fetched_at → 「截至 HH:MM」标注（非当日显示完整日期）
+const fetchedAtLabel = computed(() => {
+  if (!props.dataFetchedAt) return ''
+  try {
+    const d = new Date(props.dataFetchedAt)
+    if (Number.isNaN(d.getTime())) return ''
+    const now = new Date()
+    const sameDay = d.getFullYear() === now.getFullYear()
+      && d.getMonth() === now.getMonth()
+      && d.getDate() === now.getDate()
+    const hhmm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+    return sameDay ? `截至 ${hhmm}` : `截至 ${d.getMonth() + 1}/${d.getDate()} ${hhmm}`
+  } catch {
+    return ''
+  }
+})
 
 function planStyleKey(style) {
   if (!style) return 'balanced'
@@ -199,6 +219,7 @@ function applyPlan(pf) {
 .alloc-table { width: 100%; border-collapse: collapse; font-size: var(--font-size-xs); }
 .alloc-table th, .alloc-table td { padding: var(--space-2) var(--space-3); text-align: left; border-bottom: 1px solid var(--color-border-light); }
 .alloc-table th { font-weight: var(--font-weight-semibold); color: var(--color-text-secondary); background: var(--color-surface-secondary); white-space: nowrap; }
+.alloc-table th .fetched-at { font-weight: var(--font-weight-regular); font-size: 0.85em; color: var(--color-text-tertiary, #999); }
 .alloc-table td code { font-family: var(--font-family-mono); background: var(--color-surface-tertiary); padding: 1px 4px; border-radius: var(--radius-sm); }
 .rationale-cell { max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-secondary); font-size: 0.9em; }
 .layer-badge { display: inline-flex; align-items: center; padding: var(--space-0.5) var(--space-2); font-size: var(--font-size-xs); font-weight: var(--font-weight-medium); border-radius: var(--radius-full); }

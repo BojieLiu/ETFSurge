@@ -83,6 +83,7 @@
         :is-history="designResult.is_history"
         :created-at="designResult.created_at"
         :report-quality="designResult.report_quality || 'none'"
+        :data-fetched-at="designResult.market_context?.data_fetched_at || designResult.data_fetched_at || ''"
         :report-error="reportError"
         @apply="applyPlan"
         @regenerate="regenerateDesign"
