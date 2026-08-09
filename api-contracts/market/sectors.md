@@ -38,6 +38,38 @@ GET /api/v1/market/sectors/industry
 
 > **注意**: 降级路径（`fetch_industry_sectors` from akshare）可能返回 `plate_code`/`plate_name` 而非 `sector_code`/`sector_name`。前端 `useSectorAnalysis.js` 使用 `s.sector_code || s.plate_code` 兼容两种格式。
 
+**增强响应（实时数据源可用时，合并自 sectors-industry.md）— `200 OK`:**
+
+```json
+[
+  {
+    "sector_code": "BK0447",
+    "sector_name": "半导体",
+    "change_pct": 2.35,
+    "price": 2850.5,
+    "main_inflow": 12.3,
+    "up_count": 85,
+    "down_count": 12,
+    "volume": 1250000000,
+    "amount": 8500000000
+  }
+]
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| sector_code | string | 板块代码 (BK开头) |
+| sector_name | string | 板块名称 |
+| change_pct | float | 涨跌幅（%） |
+| price | float | 板块指数点位 |
+| main_inflow | float | 主力净流入（亿元） |
+| up_count | int | 上涨家数 |
+| down_count | int | 下跌家数 |
+| volume | float | 成交量 |
+| amount | float | 成交额 |
+
+**降级响应**: 实时数据源不可用时，返回本地 sectors 表的基础数据（仅 code+name，见上）。
+
 ### 2.2 概念板块列表 / Concept Sectors
 
 ```
@@ -61,6 +93,38 @@ GET /api/v1/market/sectors/concept
 ```
 
 > **注意**: 本地表只返回 `sector_code`/`sector_name`（映射自 `Sector.code`/`Sector.name`）；降级路径返回 `plate_code`/`plate_name`。字段名不一致是已有断裂点，前端已做兼容。
+
+**增强响应（实时数据源可用时，合并自 sectors-concept.md）— `200 OK`:**
+
+```json
+[
+  {
+    "sector_code": "BK1645",
+    "sector_name": "AI大模型",
+    "change_pct": 3.12,
+    "price": 1850.5,
+    "main_inflow": 25.6,
+    "up_count": 45,
+    "down_count": 8,
+    "volume": 800000000,
+    "amount": 5200000000
+  }
+]
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| sector_code | string | 板块代码 |
+| sector_name | string | 板块名称 |
+| change_pct | float | 涨跌幅（%） |
+| price | float | 板块指数点位 |
+| main_inflow | float | 主力净流入（亿元） |
+| up_count | int | 上涨家数 |
+| down_count | int | 下跌家数 |
+| volume | float | 成交量 |
+| amount | float | 成交额 |
+
+**降级响应**: 实时数据源不可用时，仅返回 `sector_code`/`sector_name`（见上）。
 
 ### 2.3 行业板块实时行情(财联社) / Industry CLS
 
