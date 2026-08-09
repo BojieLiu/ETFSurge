@@ -44,6 +44,7 @@
 <script setup>
 import { computed } from 'vue'
 import { changeClass } from '../../utils/changeClass'
+import { formatNum, formatChange } from '../../utils/format'
 import AppCard from '../ui/AppCard.vue'
 
 const props = defineProps({
@@ -55,22 +56,6 @@ const props = defineProps({
 })
 
 const showTrackedIndex = computed(() => props.activeTab === 'off_exchange' || props.activeTab === 'combined')
-
-function formatNum(n) {
-  const v = n || 0
-  try {
-    return v.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-  } catch {
-    return v.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
-  }
-}
-
-function formatChange(n, isAmount = false) {
-  const val = n || 0
-  const prefix = val >= 0 && !isAmount ? '+' : ''
-  const suffix = isAmount ? '' : '%'
-  return `${prefix}${val.toFixed(2)}${suffix}`
-}
 </script>
 
 <style scoped>

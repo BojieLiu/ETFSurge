@@ -39,6 +39,7 @@
 
 <script setup>
 import { changeClass } from '../../utils/changeClass'
+import { formatNum, formatPrice, formatChange } from '../../utils/format'
 import AppCard from '../ui/AppCard.vue'
 
 defineProps({
@@ -47,23 +48,6 @@ defineProps({
   cashAmount: { type: Number, default: 0 },
   title: { type: String, required: true }
 })
-
-function formatNum(n) {
-  const v = n || 0
-  try {
-    return v.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-  } catch {
-    return v.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
-  }
-}
-
-function formatPrice(v) {
-  return v != null ? v.toFixed(2) : '—'
-}
-
-function formatChange(pct) {
-  return pct != null ? (pct > 0 ? '+' : '') + pct.toFixed(2) + '%' : '—'
-}
 </script>
 
 <style scoped>
