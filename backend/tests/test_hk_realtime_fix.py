@@ -151,7 +151,7 @@ async def test_fetch_hk_stock_realtime_falls_back_to_dongfang(monkeypatch):
 # ── 5. fetch_a_stock_realtime 含 tencent 降级 ──────────────────
 
 def test_fetch_a_stock_realtime_has_tencent_branch(monkeypatch):
-    """单只 A 股降级链应含 tencent（tencent→sina）。"""
+    """单只 A 股降级链应含 tencent（mootdx→tencent→sina）。"""
     from app.fetchers import china_market
 
     seen = []
@@ -164,7 +164,7 @@ def test_fetch_a_stock_realtime_has_tencent_branch(monkeypatch):
     monkeypatch.setattr(china_market.registry, "route", _fake_route)
     china_market.fetch_a_stock_realtime("510300")
     assert "tencent" in seen, f"降级链应含 tencent: {seen}"
-    assert seen.index("tencent") < seen.index("sina")
+    assert seen.index("mootdx") < seen.index("tencent") < seen.index("sina")
 
 
 def test_normalize_hk_symbol():

@@ -80,38 +80,49 @@ def test_route_all_fail_returns_none(monkeypatch):
 
 
 def test_fetch_index_realtime_routeified(monkeypatch):
-    """R77 缺口4: fetch_index_realtime 走 registry.route——Sina 失败自动降级 tencent。"""
+    """R77 缺口4: fetch_index_realtime 走 registry.route——Sina 失败自动降级 mootdx。"""
     reg = china_market.registry
     monkeypatch.setattr(china_market, "registry", reg)
 
     def _sina_broken(*a, **k):
         raise RuntimeError("sina 超时")
 
+    def _mootdx_ok(*a, **k):
+        import pandas as pd
+        return pd.DataFrame([
+            {"code": "000001", "price": 3200.5, "last_close": 3180.0,
+             "volume": 1000, "open": 3190.0, "high": 3210.0, "low": 3185.0},
+        ])
+
     monkeypatch.setattr(china_market, "_sina_realtime", _sina_broken)
-    monkeypatch.setattr(china_market, "_tencent_realtime",
-                        lambda *a, **k: [{"symbol": "000001", "price": 3200.5, "change_pct": 0.64}])
+    monkeypatch.setattr(china_market, "_mootdx", lambda: type("C", (), {"index": _mootdx_ok})())
+    monkeypatch.setattr(china_market, "_tencent_realtime", lambda *a, **k: [])
 
     result = china_market.fetch_index_realtime()
-    assert result, "Sina 熔断后 tencent 必须兜底输出"
+    assert result, "Sina 熔断后 mootdx 必须兜底输出"
     assert result[0]["symbol"] == "000001"
     assert result[0]["price"] == 3200.5
     assert reg._health("sina")._cool_until > 0, "失败源应已冷却"
-    assert reg._health("tencent")._cool_until == 0, "成功源不应冷却"
+    assert reg._health("mootdx")._cool_until == 0, "成功源不应冷却"
 
 
 def test_fetch_index_realtime_all_broken_returns_empty(monkeypatch):
     """R77 缺口4: 指数链全熔断 → []（调用方兜底不崩溃）。"""
     monkeypatch.setattr(china_market, "_sina_realtime",
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("sina")))
+    monkeypatch.setattr(china_market, "_mootdx",
+                        lambda: (_ for _ in ()).throw(RuntimeError("mootdx")))
     monkeypatch.setattr(china_market, "_tencent_realtime",
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("tencent")))
     assert china_market.fetch_index_realtime() == []
 
 
 def test_fetch_index_realtime_sina_bad_price_skips(monkeypatch):
-    """指数 s_sh 前缀校验：Sina 返回股票价（≤100）→ 跳过 Sina 用 tencent。"""
+    """指数 s_sh 前缀校验：Sina 返回股票价（≤100）→ 跳过 Sina 用 mootdx。"""
     monkeypatch.setattr(china_market, "_sina_realtime",
                         lambda *a, **k: [{"symbol": "000001", "price": 10.98}])
+    monkeypatch.setattr(china_market, "_mootdx",
+                        lambda: type("C", (), {"index": lambda **k: None})())
     monkeypatch.setattr(china_market, "_tencent_realtime",
                         lambda *a, **k: [{"symbol": "000001", "price": 3200.0}])
     result = china_market.fetch_index_realtime()

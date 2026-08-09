@@ -46,6 +46,30 @@ async def test_call_passthrough_on_success():
     assert result == 42
 
 
+# ── Fix 1: mootdx socket timeout ─────────────────────────────────
+
+
+def test_mootdx_has_socket_timeout(monkeypatch):
+    """_mootdx() must pass timeout to Quotes.factory.
+
+    The timeout (default 6 s) must be less than the async
+    _call timeout (8 s) so mootdx errors out before asyncio
+    cancels the future.
+    """
+    import app.fetchers.china_market as cm
+    from app.fetchers.china_market import _mootdx, _MOOTDX_TIMEOUT
+
+    # Reset singleton so a fresh client is created
+    monkeypatch.setattr(cm, "_MOOTDX_CLIENT", None)
+    # Quotes is lazy-imported inside _mootdx() → patch at source
+    mock_factory = MagicMock(return_value=MagicMock())
+    monkeypatch.setattr("mootdx.quotes.Quotes.factory", mock_factory)
+
+    _mootdx()
+    mock_factory.assert_called_once_with(market='std', timeout=_MOOTDX_TIMEOUT)
+    assert _MOOTDX_TIMEOUT < 8, "mootdx timeout must be less than _call timeout (8 s)"
+
+
 # ── Fix 2: _MOOTDX_LOCK non-blocking acquire ────────────────────
 
 
