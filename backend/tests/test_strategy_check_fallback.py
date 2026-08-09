@@ -36,9 +36,9 @@ _MOCK_INDICATORS = {
 }
 
 _MOCK_FACTORS = {
-    "510300": {"technical": 0.8, "momentum": 0.6},
-    "518880": {"technical": -0.7, "momentum": -0.5},
-    "511010": {"technical": 0.1, "momentum": 0.0},
+    "510300": {"technical.ma.sma_5": 0.8, "technical.rsi.rsi_14": 58.2, "technical.signal.overall": 0.4, "style.size.ln_mcap": 22.1},
+    "518880": {"technical.ma.sma_5": -0.7, "technical.rsi.rsi_14": 41.3, "technical.signal.overall": -0.5, "style.size.ln_mcap": 21.4},
+    "511010": {"technical.ma.sma_5": 0.1, "technical.rsi.rsi_14": 52.0, "technical.signal.overall": 0.0, "style.size.ln_mcap": 22.8},
 }
 
 _MOCK_PRICE = {"510300": (3.8, 1.2), "518880": (2.5, -0.5), "511010": (1.1, 0.1)}

@@ -81,19 +81,23 @@ class TestP115FilledExcludesNeutralDefaults:
         assert _factor_value_real("technical.macd.macd", -0.3)
 
     def test_has_real_factor_values(self):
-        """P1-15: 全兜底默认值 → False（旧实现 any(v != 0) 误判 filled → 报「10/10 正常」假正常）。"""
-        assert not _has_real_factor_values({"rsi_14": 50.0, "kdj_k": 50.0, "kdj_d": 50.0,
-                                            "vol_ratio": 1.0, "atr_14": 0.0})
-        assert _has_real_factor_values({"rsi_14": 50.0, "momentum": 0.2})
+        """P1-15 + P0-F: 全兜底默认值 → False；技术因子（technical.* 前缀）真实 → True。"""
+        assert not _has_real_factor_values({"technical.rsi.rsi_14": 50.0,
+                                            "technical.kdj.k_value": 50.0,
+                                            "technical.volume.vol_ratio": 1.0})
+        assert _has_real_factor_values({"technical.rsi.rsi_14": 50.0,
+                                        "technical.ma.sma_5": 0.2,
+                                        "technical.signal.overall": 0.4})
         assert not _has_real_factor_values({})
         assert not _has_real_factor_values(None)
 
     def test_fallback_ratio_in_data_quality(self):
         """P1-15: data_quality 增加 fallback_count/fallback_ratio（报告明示兜底占比）。"""
         factor_breakdowns = {
-            "510300": {"factor_scores": {"momentum": 0.5}},          # 真实
-            "518880": {"factor_scores": {"rsi_14": 50.0}},           # 兜底默认
-            "511090": {"factor_scores": {"kdj_k": 50.0, "vol_ratio": 1.0}},  # 兜底默认
+            "510300": {"factor_scores": {"technical.ma.sma_5": 0.5}},  # 真实
+            "518880": {"factor_scores": {"technical.rsi.rsi_14": 50.0}},  # 兜底默认
+            "511090": {"factor_scores": {"technical.kdj.k_value": 50.0,
+                                         "technical.volume.vol_ratio": 1.0}},  # 兜底默认
         }
         filled = sum(1 for fb in factor_breakdowns.values()
                      if _has_real_factor_values(fb.get("factor_scores") or {}))

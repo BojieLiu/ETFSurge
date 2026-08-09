@@ -1975,6 +1975,29 @@ def _build_advice_stream_prompt(query: str, ctx: dict) -> str:
             lines.append(f"- {name}: {cht}")
         lines.append("")
 
+    # P0-A (round10 §4.1/§10): hot_plates / sector_heat 槽——build_full_context 已
+    # 注入（include_sectors=True），补消费避免「暂无板块热力数据」回退。数据为空时
+    # 引擎显式降级文案，不再凭空捏造。
+    hot_plates = ctx.get("hot_plates", []) or []
+    if hot_plates:
+        lines.append("\n### 热点板块（涨停/封板）")
+        for item in hot_plates[:8]:
+            name = item.get("name") or item.get("plate_name") or "?"
+            chg = item.get("change_pct")
+            cht = f"({chg:+.2f}%)" if isinstance(chg, (int, float)) else ""
+            reason = item.get("reason") or ""
+            lines.append(f"- {name}: {cht}{(' ' + str(reason)[:60]) if reason else ''}")
+        lines.append("")
+    sector_heat = ctx.get("sector_heat", [])
+    if sector_heat:
+        lines.append("\n### 板块热力（涨幅榜）")
+        for item in sector_heat[:10]:
+            name = item.get("name") or item.get("sector_name") or "?"
+            chg = item.get("change_pct")
+            cht = f"({chg:+.2f}%)" if isinstance(chg, (int, float)) else ""
+            lines.append(f"- {name}: {cht}")
+        lines.append("")
+
     # F2: fund flow data
     fund_flow = ctx.get("fund_flow", {})
     if fund_flow.get("total_symbols", 0) > 0:

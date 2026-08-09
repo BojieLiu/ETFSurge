@@ -1309,16 +1309,29 @@ class FactorRegistry:
                 )
 
         result: dict[str, dict[str, float]] = {}
+        _data_sources: dict[str, str] = {}
         for sym in symbols:
             row: dict[str, float] = {}
             data = market_data.get(sym, {}) if market_data else {}
 
-            # Phase 2.7.4: 缓存降级 — 如果 data 为空，尝试降级到过期 K 线缓存
-            if not data:
+            # Phase 2.7.4: 缓存降级 (P0-C round10) — data 为空或采集失败
+            # （{"_fetch_error": ..} / 无 close / 全 0 占位）时，降级到上次成功的
+            # K 线缓存（_kline_cache 仅有成功时写入），并记录 data_source 标注。
+            _live_usable = isinstance(data, dict) and (
+                data.get("close")
+                or any(k in data for k in ("open", "high", "low"))
+            ) and "_fetch_error" not in data
+            if not _live_usable:
                 stale = _get_cached_kline([sym])
                 if stale and sym in stale:
-                    logger.warning("[factor] compute() — using stale cache for %s (live data empty)", sym)
+                    logger.warning(
+                        "[factor] compute() — using stale cache for %s (live data unusable: %s)",
+                        sym, "_fetch_error" in data if data else "empty",
+                    )
                     data = stale[sym]
+                    _data_sources[sym] = "stale"
+                else:
+                    _data_sources[sym] = "unavailable"
 
             for code in codes:
                 computer = self._computers.get(code)
@@ -1331,7 +1344,14 @@ class FactorRegistry:
                 except Exception as e:
                     logger.debug("Factor %s failed for %s: %s", code, sym, e)
                     row[code] = 0.0
+
             result[sym] = row
+
+        # P0-C (round10 §3.2 根因): 数据源状态冒泡到调用方——`data_source` 键标注
+        # stale（缓存兜底）或 unavailable（无缓存冷启动全空），供报告层明示
+        # 「数据源不可用」而非假装有数据。
+        for _sym, _src in _data_sources.items():
+            result[_sym] = {**result[_sym], "data_source": _src}  # type: ignore[dict-item]
 
         # ── 跨符号 z-score 标准化（用临时 dict 存储原始值） ──
         import statistics

@@ -262,7 +262,7 @@ class TestStrategyCheckPipeline:
             "risk_warnings": [],
             "market_regime": "range_bound",
             # U2 R2: report_text 非空 → 任务 completed（空则标记 failed）
-            "report_text": "## 策略检查报告\n\n**市态**：震荡\n\n**因子数据质量**：1/1 只持仓因子数据可用。\n\n### 逐标的因子/信号/建议\n\n| 代码 | 名称 | 因子分 | 信号 | 建议 | 理由 |\n\n|------|------|--------|------|------|------|\n\n| 510300 | 沪深300ETF | 0.50 | hold | hold | 估值合理 |\n\n### 风险提示\n\n- [info] 当前组合风险指标正常，未触发自动警告。\n\n### 操作建议\n\n- 510300 沪深300ETF：hold 40.0% → 40.0%｜估值合理\n",
+            "report_text": "## 策略检查报告\n\n**市态**：震荡\n\n**因子数据质量**：1/1 只持仓因子数据可用（无兜底）。\n\n### 逐标的因子/信号/建议\n\n| 代码 | 名称 | 因子分 | 信号 | 建议 | 理由 |\n\n|------|------|--------|------|------|------|\n\n| 510300 | 沪深300ETF | 0.50 | hold | hold | 估值合理 |\n\n### 风险提示\n\n- [info] 当前组合风险指标正常，未触发自动警告。\n\n### 操作建议\n\n- 510300 沪深300ETF：hold 40.0% → 40.0%｜估值合理\n",
         }
 
         mock_db_session.return_value = _make_mock_session(design_id=2001)

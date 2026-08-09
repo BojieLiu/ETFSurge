@@ -745,6 +745,23 @@ async def _watchlist_enrich_items(items: list) -> list[dict]:
                 "change_pct": resolved_realtime.get("change_pct"),
                 "volume": resolved_realtime.get("volume"),
             }
+        else:
+            # P0-E (round10 §5.2): 实时 enrich 失败/超时 → 降级到单标的轻量快照
+            # （5s TTL quote 缓存）。命中则回填 realtime 并标注 data_source=stale，
+            # 列表不再整体变空三列；缓存 miss 才保持 DB-only。
+            try:
+                from ..services.market_service import quote_key as _quote_key
+                from ..services.cache_service import cache_get as _cache_get
+                _q = await _cache_get(_quote_key(resolved_symbol, item.asset_type or "A"))
+                if _q and _q.get("price") is not None:
+                    item_dict["realtime"] = {
+                        "price": _q.get("price"),
+                        "change_pct": _q.get("change_pct"),
+                        "volume": _q.get("volume"),
+                        "data_source": "stale",
+                    }
+            except Exception as _e:
+                logger.debug("[watchlist] quote-cache fallback failed for %s: %s", resolved_symbol, _e)
         enriched.append(item_dict)
 
     return enriched

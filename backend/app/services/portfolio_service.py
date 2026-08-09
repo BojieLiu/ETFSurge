@@ -1037,10 +1037,21 @@ def _factor_value_real(key: str, value: float) -> bool:
 
 
 def _has_real_factor_values(fs: dict) -> bool:
-    """P1-15: 是否存在至少一个非中性兑底默认值的因子值。"""
+    """P1-15/P0-F: 是否存在『足够』非中性兑底默认值的因子值。
+
+    round10 P0-F：filled 判定不再用「任一真实因子」（size 静态因子会撑起
+    “完整”），改为**技术因子覆盖率 ≥60%**（realtime 类 factor 有 ≥60% 真实
+    值时该标才视为 filled）。技术因子的 key 以 `technical.` 前缀区分；
+    纯静态因子（style.size.* 等）不再计入“已填充”。
+    """
     if not isinstance(fs, dict) or not fs:
         return False
-    return any(_factor_value_real(k, v) for k, v in fs.items())
+    tech = {k: v for k, v in fs.items() if str(k).startswith("technical.")}
+    if not tech:
+        # 没有任何技术因子（冷启动纯静态场景）→ 视为缺失
+        return False
+    real = sum(1 for k, v in tech.items() if _factor_value_real(k, v))
+    return real / len(tech) >= 0.6
 
 
 async def _empty_portfolio_diagnosis(db: AsyncSession, portfolio_type: str | None) -> dict:
@@ -1281,8 +1292,22 @@ def _build_rule_fallback_report(
         lines.append("> ⚠️ LLM 分析超时/不可用，以下内容由规则引擎基于因子数据与信号生成。")
     filled = (data_quality or {}).get("filled_count", 0)
     total = (data_quality or {}).get("total_count", 0)
+    fallback_count = (data_quality or {}).get("fallback_count", 0)
+    fallback_ratio = (data_quality or {}).get("fallback_ratio", 0.0)
     lines.append("")
-    lines.append(f"**因子数据质量**：{filled}/{total} 只持仓因子数据可用。")
+    # P0-B (round10 §3.2-2): 标题必须如实反映真实覆盖率——`N/M 可用` 不再只在
+    # LLM 失败时才区分，而是把 fallback_count/ratio 也拼入（全兜底时明示），
+    # 避免「标题 10/10 可用、逐项 factor_availability 6/34」的假正常矛盾。
+    if fallback_count and total:
+        _ratio_pct = f"{fallback_ratio*100:.0f}%"
+        lines.append(
+            f"**因子数据质量**：{filled}/{total} 只持仓因子数据可用"
+            f"（其中 {fallback_count} 只技术因子缺数据兜底，占比 {_ratio_pct}）。"
+        )
+    elif total:
+        lines.append(f"**因子数据质量**：{filled}/{total} 只持仓因子数据可用（无兜底）。")
+    else:
+        lines.append("**因子数据质量**：无可计算持仓。")
     lines.append("")
     lines.append("### 逐标的因子/信号/建议")
     lines.append("| 代码 | 名称 | 因子分 | 信号 | 建议 | 理由 |")

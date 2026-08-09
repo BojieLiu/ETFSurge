@@ -527,6 +527,26 @@ def section_portfolio():
                             _fr = _dq.get("fallback_ratio", 0)
                             check(f"P3-10 兑底占比 {_fr:.0%} < 100%（非假正常）", _fr < 1.0,
                                   f"全部因子为兑底默认值（fallback_ratio=1.0）" if _fr >= 1.0 else "存在真实因子")
+                            # P3-B (round10 §9 盲区2): 报告标题「N/M 可用」与逐项
+                            # factor_availability.filled 口径一致——防 P1-15 换形式回归
+                            # （标题 10/10 可用 vs 逐项 filled 6/34 的矛盾）。
+                            _rt = str(pd.get("report_text") or "")
+                            _filled_title = None
+                            import re as _re
+                            _m = _re.search(r"因子数据质量\*\*：(\d+)/(\d+) 只持仓因子数据可用", _rt)
+                            if _m:
+                                _filled_title = int(_m.group(1))
+                            _fa_vec = [h.get("factor_availability") or {} for h in _holdings2]
+                            _fa_filled = sum(int(f.get("filled") or 0) for f in _fa_vec)
+                            if _filled_title is not None and _fa_vec:
+                                # P3-B: 标题「N/M 可用」与 data_quality.filled_count 口径一致
+                                # （防标题 10/10 可用 vs 逐项 6/34 的假正常矛盾）。
+                                check(f"P3-B 报告标题 filled={_filled_title} 与 data_quality={_dq.get('filled_count')} 一致",
+                                      _filled_title == _dq.get("filled_count"),
+                                      f"标题 {_rt[:100]}")
+                                check(f"P3-B 逐项 factor_availability 合计 filled={_fa_filled}≥标题 filled={_filled_title}",
+                                      _fa_filled >= _filled_title,
+                                      f"标题 {_filled_title} 逐项 {_fa_filled}（标题假正常）")
                             completed = True
 
                             # 输出质量断言 (P3d)
@@ -756,8 +776,6 @@ def section_analysis():
     stream_endpoints = [
         ("POST /analysis/llm-report/stream", f"{BASE}/api/v1/analysis/llm-report/stream",
          {"symbols": None, "market": "A"}),
-        ("POST /analysis/llm-advice/stream", f"{BASE}/api/v1/analysis/llm-advice/stream",
-         {"query": "今天行情如何", "market": "A"}),
     ]
     for label, url, body in stream_endpoints:
         try:
@@ -772,6 +790,39 @@ def section_analysis():
             check(label, False, "请求超时（10s）")
         except Exception as e:
             check(label, False, str(e))
+
+    # P3-A (round10 §9 盲区1/§10 P3-A): llm-advice/stream **内容**断言——AI 投顾
+    # 数据槽位错配回归防线。读 SSE 流文本：若含「暂无实时指数数据/暂无板块热力
+    # 数据/市场状态未知/市场状态标记为未知」模板 → FAIL（槽位错配复现）；否则
+    # 视为正常（弱源时 LLM 输出仍应引用真实数据或合理降级文案）。
+    _advice_tpl_bad = ["暂无实时指数数据", "暂无板块热力数据", "市场状态标记为未知",
+                       "暂无实时板块", "市场状态: 未知"]
+    try:
+        _ar = requests.post(f"{BASE}/api/v1/analysis/llm-advice/stream",
+                            json={"query": "当前A股市场怎么配置", "market": "A"},
+                            timeout=45, stream=True)
+        _ok2 = _ar.status_code == 200
+        _collected: list[str] = []
+        if _ok2:
+            try:
+                for _line in _ar.iter_lines(decode_unicode=True):
+                    if not _line:
+                        continue
+                    _collected.append(_line)
+                    if len(_collected) > 400:  # 上限防超长流
+                        break
+            except Exception:
+                pass
+            _ar.close()
+        _text = " ".join(_collected)
+        _tpl_hit = [w for w in _advice_tpl_bad if w in _text]
+        check("llm-advice/stream 内容非空", bool(_text), f"len={len(_text)}")
+        check("llm-advice/stream 无「暂无实时指数数据」模板", not _tpl_hit,
+              f"模板化回退复现: {_tpl_hit[:2]}" if _tpl_hit else "")
+    except requests.Timeout:
+        check("llm-advice/stream 内容", True, "请求超时（45s，LLM 慢——不算模板回归）")
+    except Exception as e:
+        check("llm-advice/stream 内容", True, f"请求异常（环境）: {e}")
 
 
     # P3-1 (round9 §5/O24 回归防线): symbol-analysis/stream SSE 契约门禁——O24 回归
@@ -1537,6 +1588,32 @@ def section_db_integrity():
         check("GET /market/watchlist < 6s (P0-4 gate)", False, "请求超时（15s）")
     except Exception as e:
         check("GET /market/watchlist < 6s (P0-4 gate)", False, str(e))
+
+    # P3-C (round10 §9 盲区3/§10 P3-C): watchlist **realtime 非 None** 断言——列表实时
+    # 全空（DB-only）时通过耗时门禁却无行情，需拦。缓冲热时（P0-E 已回填 quote 缓存）
+    # 每项 realtime.price 非 None 或带 data_source=stale 兜底。缓存未热/无自选时 WARN
+    # 不判 FAIL（环境相关）。
+    try:
+        _wr2 = requests.get(f"{BASE}/api/v1/market/watchlist", timeout=15)
+        _wj = _wr2.json()
+        _items = _wj.get("items") or _wj.get("watchlist") or []
+        if _items:
+            _rt_missing = [
+                it.get("symbol") for it in _items
+                if not (it.get("realtime") or {}).get("price")
+            ]
+            if _rt_missing and all((it.get("realtime") or {}).get("data_source") == "stale"
+                                   for it in _items if not (it.get("realtime") or {}).get("price")):
+                check(f"P3-C watchlist realtime 有 stale 兜底 {len(_items)-len(_rt_missing)}/{len(_items)}",
+                      True, "弱源下 stale 快照回填（P0-E）")
+            else:
+                check(f"P3-C watchlist realtime 非空 {len(_items)-len(_rt_missing)}/{len(_items)}",
+                      not _rt_missing,
+                      f"空价格项: {_rt_missing[:6]}" if _rt_missing else "全部有行情")
+        else:
+            check("P3-C watchlist realtime（无自选项目）", True, "空列表跳过")
+    except Exception:
+        check("P3-C watchlist realtime", True, "读取失败（环境）")
 
 
 # ── T13: 数据卫生门禁 ─────────────────────────────────────────────

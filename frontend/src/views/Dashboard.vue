@@ -21,7 +21,7 @@
       <AppTabs :tabs="tabs" v-model="activeTab" variant="soft" full-width ariaLabel="组合类型" class="dashboard-tabs">
         <template #combined>
           <div v-if="loading" class="content-grid" aria-busy="true">
-            <div class="card skeleton-card"><Skeleton type="chart" height="260" /></div>
+            <div class="card skeleton-card"><Skeleton type="chart" height="280" /></div>
             <div class="card skeleton-card"><Skeleton type="table" rows="6" /></div>
           </div>
           <template v-else>
@@ -37,7 +37,7 @@
         </template>
         <template #on_exchange>
           <div v-if="loading" class="content-grid" aria-busy="true">
-            <div class="card skeleton-card"><Skeleton type="chart" height="260" /></div>
+            <div class="card skeleton-card"><Skeleton type="chart" height="280" /></div>
             <div class="card skeleton-card"><Skeleton type="table" rows="6" /></div>
           </div>
           <template v-else>
@@ -49,7 +49,7 @@
         </template>
         <template #off_exchange>
           <div v-if="loading" class="content-grid" aria-busy="true">
-            <div class="card skeleton-card"><Skeleton type="chart" height="260" /></div>
+            <div class="card skeleton-card"><Skeleton type="chart" height="280" /></div>
             <div class="card skeleton-card"><Skeleton type="table" rows="6" /></div>
           </div>
           <template v-else>
@@ -76,7 +76,7 @@
         <!-- R54: 加载文案明确化，避免用户误以为卡死 -->
         <p class="loading-hint">正在加载组合数据…</p>
         <div class="card skeleton-card">
-          <Skeleton type="chart" height="260" />
+          <Skeleton type="chart" height="280" />
         </div>
         <div class="card skeleton-card">
           <Skeleton type="table" rows="6" />
