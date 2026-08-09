@@ -45,7 +45,7 @@ def test_v1a_tracked_index_in_em_fetch():
         }
     }
 
-    with patch("requests.get", return_value=mock_response):
+    with patch("curl_cffi.requests.get", return_value=mock_response):
         result = _fetch_em_etf_list()
 
     assert result is not None

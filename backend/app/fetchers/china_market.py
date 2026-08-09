@@ -1158,15 +1158,14 @@ def _fetch_ttj_lsjz(symbol: str) -> list[dict[str, Any]]:
     返回列表最新在前（pageIndex=1）。
     """
     try:
-        import urllib.request
-        import json
+        # EM 源换 curl_cffi（round11 EM 根因路线 A：浏览器 TLS 指纹绕容器侧 EM 拦截）
+        from curl_cffi import requests as _cffi
         url = "https://api.fund.eastmoney.com/f10/lsjz?fundCode=%s&pageIndex=1&pageSize=2" % symbol
-        req = urllib.request.Request(url, headers={
+        resp = _cffi.get(url, timeout=8, headers={
             "User-Agent": "Mozilla/5.0",
             "Referer": "http://fundf10.eastmoney.com/",
         })
-        resp = urllib.request.urlopen(req, timeout=8)
-        payload = json.loads(resp.read().decode("utf-8", errors="replace"))
+        payload = resp.json()
         rows = (payload.get("Data") or {}).get("LSJZList") or []
         return [r for r in rows if r.get("DWJZ")]
     except Exception:

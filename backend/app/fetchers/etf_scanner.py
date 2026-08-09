@@ -277,7 +277,8 @@ def _fetch_em_etf_list(host: str | None = None) -> list[dict] | None:
     响应结构一致，解析层零改动。
     """
     from ..utils.proxy import no_proxy
-    import requests as _req
+    # EM 源换 curl_cffi（round11 EM 根因路线 A：浏览器 TLS 指纹绕容器侧 EM 拦截）
+    from curl_cffi import requests as _req
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "Referer": "https://quote.eastmoney.com/",
@@ -668,7 +669,8 @@ def layer_ranking(
 
 
 # ── F10 tracked_index enrichment ──────────────────────────────────────────
-import requests as _requests
+# EM 源换 curl_cffi（round11 EM 根因路线 A：浏览器 TLS 指纹绕容器侧 EM 拦截，round9 C4/P0-2）
+from curl_cffi import requests as _requests
 import re as _re
 import json as _json
 import os as _os
