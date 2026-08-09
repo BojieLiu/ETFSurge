@@ -102,3 +102,53 @@ def test_route_hot_plates_market_us_unsupported(monkeypatch):
     resp = client.get("/api/v1/market/hot-plates?limit=5&market=US")
     assert resp.status_code == 200
     assert resp.json() == []
+
+
+# ── P2-6: 熔断接入 SourceRegistry（可观测/可复位，替代私有冷却计数器）──
+def test_hk_dual_source_breaker_registered(monkeypatch):
+    """P2-6: hk 双源失败 3 次 → SourceRegistry 熔断（hk_push2 冷却），
+    不再依赖私有 _em_host_health 计数器。"""
+    import time as _t
+
+    from app.services.source_registry import registry as sr
+
+    def _boom(host):
+        raise ConnectionError(f"{host} down")
+
+    monkeypatch.setattr(hk, "_fetch_from_host", _boom)
+    hk._HK_ROWS_CACHE.update({"ts": 0.0, "rows": [], "last_ok": []})
+    # 测试结束复位，避免熔断状态污染后续用例
+    try:
+        for _ in range(3):
+            assert hk._fetch_hk_rows() == []
+        states = sr.get_states()
+        h = states.get("hk_push2")
+        assert h is not None, "hk_push2 应注册到 SourceRegistry（P2-6）"
+        assert h._cool_until > _t.time(), "连败 3 次后 hk_push2 应进入冷却（熔断）"
+        assert h._failures >= 0
+    finally:
+        sr.reset_source("hk_push2")
+        sr.reset_source("hk_push2delay")
+        hk._HK_ROWS_CACHE.update({"ts": 0.0, "rows": [], "last_ok": []})
+
+
+def test_hk_success_resets_breaker(monkeypatch):
+    """P2-6: 单次成功即复位 SourceHealth（fail_streak 清零，不冷却）。"""
+    from app.services.source_registry import registry as sr
+
+    def _ok(host):
+        return [{"f12": "00700", "f14": "腾讯控股", "f2": 380.0,
+                 "f3": -0.5, "f6": 4.1e9, "f100": "专业服务"}]
+
+    monkeypatch.setattr(hk, "_fetch_from_host", _ok)
+    hk._HK_ROWS_CACHE.update({"ts": 0.0, "rows": [], "last_ok": []})
+    try:
+        rows = hk._fetch_hk_rows()
+        assert rows and rows[0]["f12"] == "00700"
+        h = sr.get_states().get("hk_push2")
+        assert h is not None
+        assert h._failures == 0, "成功后失败计数应清零"
+    finally:
+        sr.reset_source("hk_push2")
+        sr.reset_source("hk_push2delay")
+        hk._HK_ROWS_CACHE.update({"ts": 0.0, "rows": [], "last_ok": []})

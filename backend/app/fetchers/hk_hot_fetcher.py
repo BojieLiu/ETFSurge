@@ -19,11 +19,13 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# 双源路由状态（进程级单例，与 etf_scanner 冷却机制同构）
-_em_host_health: dict[str, dict] = {}
 # R61/R63: 域名不散落硬编码——统一引用 market_context 集中常量
 from ..core.market_context import EM_PUSH_HOST  # noqa: E402
+from ..services.source_registry import registry  # noqa: E402
 
+# P2-6: 双源路由 + 熔断由 SourceRegistry 统一接管（/admin/sources/circuit-breakers
+# 可观测、可复位，与 A 股板块 sector_fetcher 一致）。原私有 _em_host_health 冷却
+# 计数器删除——SourceHealth 指数退避（60s→120s→…→600s）接管同语义。
 _EM_HOSTS = ("push2.eastmoney.com", EM_PUSH_HOST)
 _EM_FALLBACK_SECONDS = 60
 _EM_FAIL_STREAK = 3
@@ -40,33 +42,22 @@ _HK_ROWS_CACHE: dict = {"ts": 0.0, "rows": [], "last_ok": []}
 _HK_ROWS_TTL = 60.0
 
 
-def _pick_host() -> str:
-    """双源路由：push2 优先，连败 3 次冷却 60s 后切 push2delay。"""
-    now = time.time()
-    for host in _EM_HOSTS:
-        h = _em_host_health.get(host)
-        if h is None:
-            return host
-        if h.get("cooldown_until", 0) <= now:
-            return host
-    # 全部冷却中 → 回到第一个（记录冷却结束最近者）
-    best = min(_EM_HOSTS, key=lambda h: _em_host_health.get(h, {}).get("cooldown_until", 0))
-    return best
-
-
-def _record_failure(host: str) -> None:
-    h = _em_host_health.setdefault(host, {"fail_streak": 0, "cooldown_until": 0.0})
-    h["fail_streak"] = h.get("fail_streak", 0) + 1
-    if h["fail_streak"] >= _EM_FAIL_STREAK:
-        h["cooldown_until"] = time.time() + _EM_FALLBACK_SECONDS
-        logger.warning("[hk_hot] %s failed %d times, cooling %ds",
-                       host, h["fail_streak"], _EM_FALLBACK_SECONDS)
-
-
-def _record_success(host: str) -> None:
-    h = _em_host_health.setdefault(host, {})
-    h["fail_streak"] = 0
-    h["cooldown_until"] = 0.0
+def _fetch_from_host(host: str) -> list[dict]:
+    """单 host 拉取港股全量 spot；空 diff 视为失败（计入熔断阈值）。"""
+    from ..utils.proxy import no_proxy
+    import requests as _req
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": "https://quote.eastmoney.com/",
+    }
+    with no_proxy():
+        r = _req.get(_URL.format(host=host), timeout=6, headers=headers)
+    data = r.json()
+    diff = (data.get("data") or {}).get("diff") or []
+    if diff:
+        return diff
+    # 空 diff = 限流/风控异常态（非「查无数据」）——按失败计入熔断（原语义）
+    raise ValueError(f"empty diff from {host}")
 
 
 def _fetch_hk_rows() -> list[dict]:
@@ -74,39 +65,28 @@ def _fetch_hk_rows() -> list[dict]:
 
     60s TTL 缓存共享（板块/个股端点复用）+ 失败回退 last_ok——
     东财 pz=5000 大请求限流严格，无缓存时同分钟两次拉取第二次必空。
+    P2-6: 双源路由与熔断经 SourceRegistry.route 统一接管（源名 hk_push2 /
+    hk_push2delay，route=HK_hot），失败 3 次指数退避冷却，状态可在
+    /admin/sources/circuit-breakers 观测与复位。
     """
     now = time.time()
     if now - _HK_ROWS_CACHE["ts"] < _HK_ROWS_TTL:
         return _HK_ROWS_CACHE["rows"]
-    from ..utils.proxy import no_proxy
-    import requests as _req
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Referer": "https://quote.eastmoney.com/",
-    }
-    last_exc: Exception | None = None
-    for _attempt in range(2):
-        host = _pick_host()
-        try:
-            with no_proxy():
-                r = _req.get(_URL.format(host=host), timeout=6, headers=headers)
-            data = r.json()
-            diff = (data.get("data") or {}).get("diff") or []
-            if diff:
-                _record_success(host)
-                _HK_ROWS_CACHE.update({"ts": now, "rows": diff, "last_ok": diff})
-                return diff
-            last_exc = ValueError(f"empty diff from {host}")
-        except Exception as e:  # noqa: BLE001
-            last_exc = e
-            _record_failure(host)
-            logger.warning("[hk_hot] fetch via %s failed: %s", host, e)
+    rows = registry.route(
+        [(f"hk_{host.split('.')[0]}", lambda h=host: _fetch_from_host(h))
+         for host in _EM_HOSTS],
+        route_name="HK_hot",
+        operation="batch",
+        target="m:128",
+    )
+    if rows:
+        _HK_ROWS_CACHE.update({"ts": now, "rows": rows, "last_ok": rows})
+        return rows
     # 全失败 → last_ok 兜底（保证板块/个股端点不空），10s 后允许重试
     if _HK_ROWS_CACHE["last_ok"]:
         _HK_ROWS_CACHE["ts"] = now - (_HK_ROWS_TTL - 10)
         return _HK_ROWS_CACHE["last_ok"]
-    if last_exc:
-        logger.warning("[hk_hot] all hosts failed: %s", last_exc)
+    logger.warning("[hk_hot] all hosts failed (registry.route returned None)")
     return []
 
 
