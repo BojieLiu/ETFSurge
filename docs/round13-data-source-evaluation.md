@@ -77,9 +77,9 @@
 | `fetch_bond_yields`（国债收益率） | ✅ 已实现 | 无风险利率 |
 | `fetch_all_domestic_macro` | ✅ 已实现聚合 | LLM 上下文（include_macro） |
 | **Shibor / 社融** | ❌ **已失效**（macro_fetcher.py:7 注释：接口失效不纳入） | — |
-| **PMI / GDP** | ⏳ 待新增（`macro_china_pmi_yearly` / `macro_china_gdp_yearly`，实测 250/61 行） | 荣枯线/经济周期 |
+| **PMI / GDP** | ⏳ 待新增（`macro_china_pmi_yearly` 月频 / `macro_china_gdp` **季度**，实测 250/82 行） | 荣枯线/经济周期（GDP 用季度接口，匹配季频因子与滞后标注） |
 
-> 实测（2026-08-09 非交易时段）：M2 222 行 1.3s、LPR 1574 行 1.9s、CPI 477 行 8.6s（yearly 接口实测值，仅作「akshare 东财源慢、需 15s+ 超时」佐证；月度沿用既有 `fetch_cpi_ppi`）、PMI 250 行 4.3s、GDP 61 行 1.6s——均来自东财数据中心/新浪（非 push2 反爬范围）。
+> 实测（2026-08-09 非交易时段）：M2 222 行 1.3s、LPR 1574 行 1.9s、CPI 477 行 8.6s（yearly 接口实测值，仅作「akshare 东财源慢、需 15s+ 超时」佐证；月度沿用既有 `fetch_cpi_ppi`）、PMI 250 行 4.3s、GDP 82 行（季频 2006-2026）1.6s——均来自东财数据中心/新浪（非 push2 反爬范围）。
 
 **P1：市态判定增强 `detect_market_regime`**
 
@@ -98,9 +98,9 @@
   - `factor_registry.py`（`register_computer`，~L1015）：注册 **4 个 compute 函数**——月频 3：`macro_m2_trend`（M2 同比 3 月斜率 → -1/0/+1）、`macro_pmi_level`（PMI ≥50 → 1，<50 → 0）、`macro_lpr_direction`（LPR 1Y 同比 → -1/0/+1）；**季频 1：`macro_gdp_trend`**（GDP 同比增速分位 → 环境分级 -1/0/+1，季度级）
   - `routers/factors.py:72`：把 4 个 code 加入 `MARKET_LEVEL_FACTOR_CODES` 集合（否则 `/factors/active` 不会以 static 标注，L130 过滤依赖该集合）
 - 标 static（与 sentiment 同处理：不参与截面 IC、不撑「数据完整」判定）
-- **扩展既有 `build_full_context` 宏观段**（llm_context.py L193 `include_macro` 已注入 domestic_macro）：补 PMI/GDP 两指标 + 方向标注（-1/0/+1）——LLM 报告可引用
+- **扩展既有 `build_full_context` 宏观段**（llm_context.py L193 `include_macro` 已注入 domestic_macro）：补 PMI/GDP 两指标 + 方向标注（-1/0/+1），并输出数据截至日期（含滞后标注）——LLM 报告可引用
 - **CPI 口径统一**：沿用既有 `fetch_cpi_ppi`（月度），不引入 `macro_china_cpi_yearly`（避免双口径）
-- 验收：因子出现在 /factors/active（static 标注）；LLM 上下文宏观段含 PMI/GDP 真实值（非占位）；全量测试绿
+- 验收：因子出现在 /factors/active（static 标注）；LLM 上下文宏观段含 PMI/GDP 真实值（非占位）；全量测试绿（含 macro_gdp_trend 滞后对齐单测断言：只用已发布值、季度对齐）
 
 **频率定位（月/季频慢变量，2026-08-09 讨论补充）**：
 - 慢变量驱动**月级市态**（牛熊切换是季度级现象）——定位「环境/市态维度」，与快变量（行情/技术/情绪日频）互补；标准量化实践 = 慢变量调节快变量（宏观恶化 → 降低进攻性权重/总仓位上限），非直接进选股池
