@@ -6,6 +6,12 @@
 #
 # 如果 frontend/ 下有文件变更，自动运行 npm run build 拦截 Vue 编译错误。
 # 跳过构建: SKIP_FRONTEND_BUILD=1 git commit ...
+#
+# ── 门禁治理约定（2026-08-09）────────────────────────────────────────
+# ① 新增门禁必须先说明与现有 13 段的差异化价值，否则不加入（防单调膨胀）；
+# ② 死代码/未引用审计共 3 个（check_api_usage 前端 API / audit_unused_symbols
+#    后端 AST / check_unused_styles CSS 类），对象互不相同，评估后保留各自脚本、
+#    不再新增同类审计；③ P3-6 测试文件基线已降级为提示（不阻断提交）。
 
 set -e
 
@@ -46,17 +52,15 @@ else
             for pat in "$PATTERN1" "$PATTERN2" "$PATTERN3" "$PATTERN4" "$PATTERN5"; do
                 MATCHES=$(grep -Hin "$pat" "$file" 2>/dev/null || true)
                 if [ -n "$MATCHES" ]; then
-                    CLEAN=1
-                    echo "$MATCHES" | while IFS= read -r line; do
-                        case "$line" in
-                            *sk-xxx*|*sk-xxxxxxxx*|*your_*|*YOUR_*|*_here*|*REDACTED*|*placeholder*)
-                                continue
-                                ;;
-                        esac
-                        echo "! [secret-leak] $file: <redacted>"
-                        CLEAN=0
-                    done
-                    if [ "$CLEAN" -eq 0 ]; then
+                    # ⚠️ 修复（2026-08-09）：旧实现 `echo | while ... CLEAN=0` 中
+                    # CLEAN 在管道子 shell 内赋值不传播到外层，HAS_LEAK 永为 0，
+                    # 门禁形同虚设（实测 sk- 密钥打印警告但不拦截 commit）。
+                    # 改为 grep -v 过滤占位符行后直接判定。
+                    REAL_MATCHES=$(echo "$MATCHES" | grep -viE 'sk-xxx|sk-xxxxxxxx|your_|YOUR_|_here|REDACTED|placeholder')
+                    if [ -n "$REAL_MATCHES" ]; then
+                        echo "$REAL_MATCHES" | while IFS= read -r line; do
+                            echo "! [secret-leak] $file: <redacted>"
+                        done
                         HAS_LEAK=1
                     fi
                 fi
@@ -361,6 +365,7 @@ fi
 # ════ 测试冗余基线门禁（P3-6，2026-08-09）═══════════════════════════════════
 # 测试文件数不再反弹：backend/tests/test_*.py ≤ 197（P1-8 合并后基线）。
 # 仅当 tests/ 或本脚本有变更时触发；新测试必须并入已有文件。
+# 2026-08-09 降级：从硬门禁改为提示（约束文件组织方式而非正确性，见门禁治理约定③）。
 TEST_BASELINE_STAGED=$(git diff --cached --name-only --diff-filter=ACM \
     -- 'backend/tests/*.py' 'backend/scripts/check_test_baseline.py' 2>/dev/null || true)
 if [ -n "$TEST_BASELINE_STAGED" ]; then
@@ -369,7 +374,8 @@ if [ -n "$TEST_BASELINE_STAGED" ]; then
     if python scripts/check_test_baseline.py 2>&1; then
         echo "[pre-commit] ✅ P3-6 基线检查通过（test_*.py ≤ 197）"; cd ..
     else
-        cd ..; echo "🚨 P3-6 基线检查失败（测试文件数反弹）"; exit 1
+        cd ..
+        echo "⚠️ [pre-commit] P3-6 提示：test_*.py 数量超过基线 197（新测试建议并入现有文件；确需新增可 review 后调整基线）——不阻断提交"
     fi
 fi
 
