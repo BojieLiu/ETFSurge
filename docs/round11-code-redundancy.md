@@ -31,6 +31,8 @@
 | **P2** | 需产品/行为确认（**2026-08-08 决策定稿**）：FactorICView/FactorModelView 合并（删独立路由）、useWarmupStatus 单例、App.vue 假连接、connectTaskWs 抽 useTaskWS、hk_hot_fetcher 走 SourceRegistry、缓存路径统一（根 data/）、scaffold 注释清理（函数保留） | ~650 行 + 2 项行为修复 | 中（行为变化） |
 | **P3** | 治理门禁（防再犯）：函数级 AST 未引用扫描进 CI、purgeCSS 死样式验证、.env.example 同步、diag/ 入 .gitignore、契约-路由一致性门禁 | 0 行（新增门禁） | 低（新增检查） |
 
+> **成因分析**：为何冗余这么多（高频迭代 × 无清理机制 × 无冗余门禁，五股力量拆解 + 根治建议）见补充附录 **`docs/round11-code-redundancy-analysis.md`**。
+
 ---
 
 ## 1. 审计方法与范围
