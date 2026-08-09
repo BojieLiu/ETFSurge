@@ -142,3 +142,20 @@
 ## 7. 结论
 
 76 项合并非简单累加——**关键裁决 5 处**：round10 P3-J、P2-H superseded（由 round11 承接）；round10 P0-A 对象**待重診**（非 stream 用户证据 vs stream 前端，红色待排查，§3 红线 2）；P3-A/G 门禁随端点删除**改 stream 断言**；P0-3 删非 stream **联动删 verify_e2e 检查段**。真实可执行批次 = 5 批（建议 4+1 commit）。**仅编排未实施**，随时可按批开做。
+
+## 8. 实施回写记录（2026-08-09 全部落地）
+
+> 按 §6 排期「实施者在对应项勾选『已实施』回写」——各批实际 commit 映射如下（全部已 push origin/main）：
+
+| 批次 | 实际 commit | 落地内容 |
+|---|---|---|
+| 批 1（round11 P0 纯删除） | `7d09833` | 12 死文件 / 14 死组件 / 5 废弃端点 / 测试归档 / diag 归档 / agents.md stream 化 |
+| 批 2（round10 P0 六项 + P3-A/B/C 门禁 + CLS） | `9c5971d` | AI 投顾槽位 / 报告标题诚实 / K 线 stale 兜底 / watchlist 缓存回填 / LLM 超时分级 / 门禁 |
+| 批 3（round10 P1 + round11 P1） | `23eb072` `25e81d4` | factor-health 并发锁 / 负 IC 降权 / 卫星负分 / provider_timeout / 表格今日涨跌 / TTL 3600 / format.js |
+| 批 4（round10 P2 + round11 P2） | `de120bb` `0e47586` `9e5039a` `5888a13` | US 搜索过滤 / 港股 f100 / assetType / 板块阈值 / 美股热点 / watchlist 超时 / useTaskWS / hk 熔断 |
+| 批 5（round10 P3 + round11 P3 门禁） | `1589b3e` `8b63e29` `96dd2d8` `93f1f0d` `5c7dd4f` `5bd42c3` | pre-commit 短路 / P3-6 基线 / .env.example / check_routes CI / 死样式审计 / 容器弱源 |
+| 追加（round12 收尾） | `616fd10` `6d0e9fa` `c5f8b3d` `d9e90a4` | 存量死代码清零 / LLM 报告短缓存 / EM 方案 A 评估回退 / §11 措辞 |
+
+**收口核对（§7 结论 5 裁决 + §4 清单 9 项）**：9/9 闭环（P3-J/P2-H 由 round11 承接落地、P0-A 裁决 stream、P3-A/G 改 stream 断言、P0-3 联动 verify_e2e；P0-F 技术因子 ≥60% 口径、etf_list TTL 3600、pytest 基线重签 1554 passed 等全部落地）。
+
+**遗留项（非本计划范围，另行排期）**：EM 根因方案 B（mootdx+bestip 主链，方案 A 容器实测无效已回退）；xdist 并行偶发竞态（未稳定复现）。
