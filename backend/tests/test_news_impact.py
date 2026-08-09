@@ -2,7 +2,6 @@
 
 LLM and external sources are mocked; no DB/network needed.
 """
-import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

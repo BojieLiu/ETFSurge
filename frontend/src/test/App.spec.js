@@ -41,8 +41,6 @@ describe('App.vue', () => {
       global: {
         plugins: [router],
         stubs: {
-          AppLayout: { template: '<div><slot /><slot name="page-header-actions" /></div>' },
-          AppToast: { template: '<div />' },
           Teleport: { template: '<div><slot /></div>' },
         },
       },
@@ -59,8 +57,6 @@ describe('App.vue', () => {
       global: {
         plugins: [router],
         stubs: {
-          AppLayout: { template: '<div><slot /><slot name="page-header-actions" /></div>' },
-          AppToast: { template: '<div />' },
           Teleport: { template: '<div><slot /></div>' },
         },
       },
@@ -82,8 +78,6 @@ describe('App.vue', () => {
       global: {
         plugins: [router],
         stubs: {
-          AppLayout: { template: '<div><slot /></div>' },
-          AppToast: { template: '<div />' },
           Teleport: { template: '<div><slot /></div>' },
           TaskIndicator: { template: '<div />' },
           MarketMonitor: { template: '<div />' },
@@ -125,9 +119,7 @@ describe('App.vue', () => {
         global: {
           plugins: [router],
           stubs: {
-            AppLayout: { template: '<div><slot /></div>' },
-            AppToast: { template: '<div />' },
-            Teleport: { template: '<div><slot /></div>' },
+                Teleport: { template: '<div><slot /></div>' },
             TaskIndicator: { template: '<div />' },
             MarketMonitor: { template: '<div />' },
           },
@@ -190,9 +182,7 @@ describe('App.vue', () => {
         global: {
           plugins: [router],
           stubs: {
-            AppLayout: { template: '<div><slot /></div>' },
-            AppToast: { template: '<div />' },
-            Teleport: { template: '<div><slot /></div>' },
+                Teleport: { template: '<div><slot /></div>' },
             TaskIndicator: { template: '<div />' },
             MarketMonitor: { template: '<div />' },
           },
@@ -231,8 +221,6 @@ describe('App.vue', () => {
       global: {
         plugins: [router],
         stubs: {
-          AppLayout: { template: '<div><slot /></div>' },
-          AppToast: { template: '<div />' },
           Teleport: { template: '<div><slot /></div>' },
           TaskIndicator: { template: '<div />' },
           MarketMonitor: { template: '<div />' },

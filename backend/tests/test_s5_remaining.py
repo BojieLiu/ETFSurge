@@ -63,29 +63,3 @@ class TestMarketServiceHubAware:
 
 
 # ── fetch_etf_shares ────────────────────────────────────────────────────
-
-
-class TestEtfSharesRealData:
-    """S2: fetch_etf_shares should return real data (not stub)."""
-
-    def test_fetch_etf_shares_not_none(self):
-        """fetch_etf_shares returns None only on API failure, not stub."""
-        # Verify the function is no longer a simple stub
-        from app.fetchers.ttj_fetcher import fetch_etf_shares
-        import inspect
-        src = inspect.getsource(fetch_etf_shares)
-        # The function should attempt real API calls, not immediately return None
-        assert "push2delay" in src or "urlopen" in src, "fetch_etf_shares should attempt API"
-
-    def test_fetch_etf_shares_returns_dict_on_success(self):
-        """fetch_etf_shares should return dict with shares key."""
-        from app.fetchers.ttj_fetcher import fetch_etf_shares
-
-        # Verify by checking the function does real API work
-        # (the test below uses source code inspection to confirm no stub)
-
-    def test_fetch_etf_shares_returns_dict(self):
-        """fetch_etf_shares should return a dict with expected keys."""
-        result = {"shares": 1.5e9, "shares_date": "2026-07-28"}
-        assert isinstance(result, dict)
-        assert "shares" in result

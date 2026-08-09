@@ -5,7 +5,6 @@ All external calls (etf_scanner, ETFClassifier, FactorRegistry) must be mocked.
 """
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
-from datetime import datetime
 
 
 class TestMarketDataHub:
@@ -182,11 +181,6 @@ class TestMarketDataHub:
         entry = market_data_hub.get_by_code("512480")
         assert entry is not None
         assert entry.get("industry") == "电子"
-
-    def test_pool_entry_structure(self, market_data_hub):
-        """PoolEntry 数据结构完整性"""
-        # After refresh, check internal structure
-        pass
 
 
 @pytest.mark.asyncio

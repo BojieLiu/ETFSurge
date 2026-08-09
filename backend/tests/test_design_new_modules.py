@@ -182,34 +182,3 @@ class TestSentimentFetcher:
             volume_ratio=-0.8, margin_change=-0.7,
         )
         assert low < 30
-
-
-# ─── Benchmark Stocks ──────────────────────────────────────────
-
-class TestBenchmarkStocks:
-    def test_core_benchmark_stocks_count(self):
-        """验证核心指标股固定为 10 只"""
-        from app.fetchers.benchmark_stocks import CORE_BENCHMARK_STOCKS
-        assert len(CORE_BENCHMARK_STOCKS) == 10
-        # 必须覆盖主要行业
-        sectors = {v["sector"] for v in CORE_BENCHMARK_STOCKS.values()}
-        assert "消费" in sectors
-        assert "金融" in sectors
-        assert "新能源" in sectors
-        assert "半导体" in sectors
-        assert "医药" in sectors
-
-    def test_institutional_consensus_signal(self):
-        """验证机构共识信号判断"""
-        from app.fetchers.benchmark_stocks import judge_signal
-        # 机构买入 > 散户买入 → 机构增配
-        assert judge_signal(inst=1.0, retail=0.2, change=0.6) == "机构增配"
-        # 机构卖出 > 散户卖出 → 机构出货
-        assert judge_signal(inst=-1.0, retail=-0.2, change=-0.6) == "机构出货"
-        # 机构买入 + 散户卖出 → 分歧看多
-        assert judge_signal(inst=0.5, retail=-0.3, change=1.0) == "分歧看多"
-        # 机构卖出 + 散户买入 → 分歧看空
-        assert judge_signal(inst=-0.5, retail=0.3, change=-0.6) == "分歧看空"
-        # 方向一致 → 温和上涨/温和下跌
-        assert judge_signal(inst=0.3, retail=0.2, change=1.0) == "温和上涨"
-        assert judge_signal(inst=-0.3, retail=-0.2, change=-1.0) == "温和下跌"

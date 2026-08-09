@@ -148,7 +148,7 @@ def test_analysis():
 
 def test_index():
     section("Index History (Off-exchange Analysis)")
-    from app.fetchers.akshare_fetcher import fetch_index_history, fetch_history
+    from app.fetchers.china_market import fetch_index_history, fetch_history
 
     data = timed("fetch_index_history(000300, daily)", lambda: fetch_index_history("000300", "daily"))
     if data and len(data) > 0:

@@ -1,9 +1,0 @@
-{
- "signal": "hold",
- "score": -0.5,
- "reasons": [
-  "MACD偏多",
-  "MA5<MA20 空头排列"
- ],
- "data_available": true
-}

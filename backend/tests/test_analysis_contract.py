@@ -85,34 +85,6 @@ def client():
         yield TestClient(app)
 
 
-def test_llm_report(client):
-    r = client.post("/api/v1/analysis/llm-report", json={"symbols": ["510050"]})
-    assert r.status_code == 200
-    body = r.json()
-    assert "report" in body
-    assert "market_data" in body and "indices" in body and "commodities" in body
-    assert "disclaimer" in body
-    assert body["disclaimer"] == "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
-
-
-def test_llm_advice(client):
-    r = client.post("/api/v1/analysis/llm-advice", json={"query": "现在该加仓吗"})
-    assert r.status_code == 200
-    body = r.json()
-    assert "advice" in body
-    assert "disclaimer" in body
-    assert body["disclaimer"] == "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
-
-
-def test_llm_news_analysis(client):
-    r = client.post("/api/v1/analysis/llm-news-analysis")
-    assert r.status_code == 200
-    body = r.json()
-    assert "analysis" in body and "news_count" in body
-    assert "disclaimer" in body
-    assert body["disclaimer"] == "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
-
-
 def test_news_impact(client):
     r = client.post(
         "/api/v1/analysis/news-impact",
@@ -131,31 +103,6 @@ def test_news_impact(client):
 # NOTE: portfolio-design endpoint was removed in refactor.
 # Portfolio design is now handled via the async task system
 # at POST /api/v1/portfolio/design-async (see test_portfolio_* in verify_e2e).
-
-
-def test_portfolio_review(client):
-    r = client.post(
-        "/api/v1/analysis/portfolio-review",
-        json={
-            "portfolio_type": "平衡型",
-            "last_rebalance_date": "2026-04-10",
-            "current_portfolio_holdings": [
-                {"ticker": "510300.SH", "name": "沪深300ETF", "weight_pct": 25.0}
-            ],
-            "new_market_snapshot": {
-                "macro": {}, "style_factor_zscore": {}, "risk_indicators": {}
-            },
-            "risk_budget": {"max_single_etf_weight_pct": 30.0},
-            "type_thresholds": {"平衡型": {}},
-            "meta_context": {"days_since_rebalance": 93},
-        },
-    )
-    assert r.status_code == 200
-    body = r.json()
-    # Mock returns portfolio_design response, so check for its structure
-    assert "plans" in body or "action" in body
-    assert "disclaimer" in body
-    assert body["disclaimer"] == "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
 
 
 def test_sector_analysis_stream(client):

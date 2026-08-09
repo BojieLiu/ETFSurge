@@ -154,44 +154,6 @@ class TestP0_1_StrategyCheckLLMImport:
 
 # ── P0.6: LLM Advice 422 fix ─────────────────────────────────
 
-class TestP0_6_LLMAdvice422:
-    """P0.6: Fix POST /llm-advice 422 error caused by Query() in POST body."""
-
-    def test_llm_advice_uses_pydantic_request_body(self):
-        """llm_advice endpoint should use Pydantic model, not Query(...)."""
-        import ast
-
-        import os
-        test_path = os.path.join(os.path.dirname(__file__), "..", "app", "routers", "analysis.py")
-        with open(test_path, "r", encoding="utf-8") as f:
-            tree = ast.parse(f.read())
-
-        # Find the llm_advice function definition
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "llm_advice":
-                # Check the first parameter is a request body (not Query)
-                args = node.args.args
-                if args:
-                    first_arg = args[0]
-                    # Should have a type annotation pointing to a class (not str with Query default)
-                    assert first_arg.arg == "req", (
-                        f"llm_advice should use 'req' parameter, got '{first_arg.arg}'"
-                    )
-                    # The first parameter should have NO default (body params can't have Query defaults)
-                    if node.args.defaults:
-                        for default in node.args.defaults:
-                            if isinstance(default, ast.Call):
-                                func = default.func
-                                if (isinstance(func, ast.Name) and func.id == "Query") or \
-                                   (isinstance(func, ast.Attribute) and func.attr == "Query"):
-                                    pytest.fail("llm_advice still uses Query() parameter")
-                return  # Found and checked
-
-        pytest.fail("Could not find llm_advice function definition")
-
-
-# ── P0.2: LLM Report Generation Transition ──────────────────
-
 class TestP0_2_DesignReportTransition:
     """P0.2: Ensure design_pipeline properly transitions to completed."""
 

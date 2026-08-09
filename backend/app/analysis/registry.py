@@ -31,12 +31,6 @@ AGENTS: dict[str, AgentConfig] = {
     "news_impact": AgentConfig(
         "新闻影响评估", "news_impact.md", response_format="json_object"
     ),
-    "portfolio_design": AgentConfig(
-        "组合设计", "portfolio_design.md", response_format="json_object"
-    ),
-    "portfolio_review": AgentConfig(
-        "组合检视/再平衡", "risk_officer.md", temperature=0.1, response_format="json_object"
-    ),
     "strategy_suggestions": AgentConfig(
         "策略建议", "general_analyst.md", response_format="json_object"
     ),

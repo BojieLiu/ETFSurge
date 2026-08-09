@@ -3,7 +3,6 @@ TDD: MarketDataHub Phase 3 - daily refresh audit + market data adapter.
 """
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
-from datetime import datetime
 
 
 class TestPoolAudit:
@@ -53,46 +52,6 @@ class TestPoolAudit:
         assert last["version"] == 5
 
 
-class TestMarketDataAdapter:
-    """市场数据适配器"""
-
-    @pytest.fixture
-    def adapter(self):
-        from app.services.market_data_adapter import MarketDataAdapter
-        return MarketDataAdapter()
-
-    def test_to_dataframe_basic(self, adapter):
-        """基本的 list[dict] → DataFrame 转换"""
-        data = [
-            {"日期": "2026-07-17", "开盘": 4.0, "最高": 4.1, "最低": 3.9, "收盘": 4.05, "成交量": 1000000},
-            {"日期": "2026-07-16", "开盘": 3.95, "最高": 4.05, "最低": 3.88, "收盘": 4.0, "成交量": 1200000},
-        ]
-        df = adapter.to_dataframe(data)
-        assert df is not None
-        assert len(df) == 2
-        assert "close" in df.columns or "收盘" in df.columns
-
-    def test_to_dataframe_empty(self, adapter):
-        """空列表应返回 None"""
-        assert adapter.to_dataframe([]) is None
-
-    def test_uniform_columns(self, adapter):
-        """列名统一化"""
-        data = [{"日期": "2026-07-17", "开盘": 4.0, "收盘": 4.05, "最高": 4.1, "最低": 3.9, "成交量": 1000000}]
-        df = adapter.to_dataframe(data)
-        if df is not None:
-            # Should have standard column names
-            assert any(c in df.columns for c in ["open", "开盘", "Open"])
-            assert any(c in df.columns for c in ["close", "收盘", "Close"])
-
-    def test_multi_index_format(self, adapter):
-        """多标的合并为 MultiIndex (symbol, date)"""
-        result = adapter.to_multi_index({
-            "510300": [{"日期": "2026-07-17", "收盘": 4.0}],
-            "518880": [{"日期": "2026-07-17", "收盘": 5.0}],
-        })
-        if result is not None:
-            assert result.index.names == ["symbol", "date"] or len(result.index.names) >= 2
 
 
 class TestDailyRefresh:

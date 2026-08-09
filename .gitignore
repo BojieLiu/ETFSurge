@@ -56,5 +56,6 @@ opencode.json
 # Reasonix runtime artifacts
 .omo/
 
-
+# Round10+ diagnostic artifacts (whole diag/ tree)
+diag/
 diag/out/logs_container/

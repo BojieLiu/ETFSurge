@@ -2,7 +2,6 @@
 
 Mocks Sina (first-tier) and Finnhub (fallback; TwelveData free tier doesn't support index symbols).
 """
-import json
 from unittest.mock import AsyncMock, patch
 
 import pytest

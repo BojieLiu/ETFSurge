@@ -298,25 +298,225 @@ class TestSectorAnalysisMarketAwareness:
         assert ctx.supports_sector_analysis is False
 
 
-# ─── Market Router Tests ───────────────────────────────────────
+# ─── Design Async Market Parameter Tests ──────────────────────
 
 
-class TestMarketRouter:
+class TestDesignAsyncMarketParam:
 
-    @pytest.mark.asyncio
-    async def test_get_market_indices_A(self):
-        """A market indices should route to get_indices."""
-        with patch("app.services.market_router.get_market_indices", new_callable=AsyncMock) as mock:
-            mock.return_value = [{"name": "上证指数", "symbol": "000001"}]
-            from app.core.market_context import resolve_market_context
-            ctx = resolve_market_context("A")
-            assert "000001" in ctx.index_symbols
+    async def test_task_params_contain_market(self, task_mgr):
+        """Task params dict must contain market field（Z27: DB-backed 注入测试库）。"""
+        t = await task_mgr.create_task(task_type="design", params={"capital": 500000, "market": "HK"})
+        assert t["params"].get("market") == "HK"
 
-    def test_get_market_realtime_routes_by_market(self):
-        """Realtime data should route by market."""
-        # Verify function exists with correct signature
-        from app.services.market_router import get_market_indices, get_market_realtime
-        import inspect
-        sig = inspect.signature(get_market_realtime)
-        params = list(sig.parameters.keys())
-        assert "market" in params
+
+# ─── LLM Report Stream Market Awareness ────────────────────────
+
+
+class TestLLMReportMarketAwareness:
+
+    @patch("app.services.market_data_hub.market_data_hub")
+    def test_llm_report_request_has_market(self, mock_pm):
+        """LLMReportRequest must have market field with default 'A'."""
+        from app.routers.analysis import LLMReportRequest
+        req = LLMReportRequest()
+        assert hasattr(req, "market")
+        assert req.market == "A"
+
+    def test_llm_report_filter_by_market_symbols(self):
+        """llm-report/stream must filter by market-specific major_symbols."""
+        from app.core.market_context import resolve_market_context
+
+        test_data = [
+            {"symbol": "000001", "name": "上证指数", "asset_type": "index"},
+            {"symbol": "HSI", "name": "恒生指数", "asset_type": "index"},
+            {"symbol": "SPX", "name": "标普500", "asset_type": "index"},
+            {"symbol": "510050", "name": "上证50ETF", "asset_type": "ETF"},
+            {"symbol": "00700", "name": "腾讯", "asset_type": "HK"},
+        ]
+
+        ctx_A = resolve_market_context("A")
+        filtered_A = [d for d in test_data if d.get("symbol") in ctx_A.major_symbols or d.get("asset_type") in ("index", "futures")]
+        assert any(d["symbol"] == "000001" for d in filtered_A)
+
+        ctx_HK = resolve_market_context("HK")
+        filtered_HK = [d for d in test_data if d.get("symbol") in ctx_HK.major_symbols or d.get("asset_type") in ("index", "futures")]
+        assert any(d["symbol"] == "HSI" for d in filtered_HK)
+
+        ctx_US = resolve_market_context("US")
+        filtered_US = [d for d in test_data if d.get("symbol") in ctx_US.major_symbols or d.get("asset_type") in ("index", "futures")]
+        assert any(d["symbol"] == "SPX" for d in filtered_US)
+
+
+# ─── Sector Analysis Market Awareness ──────────────────────────
+
+
+class TestSectorAnalysisMarketAwareness:
+
+    def test_sector_analysis_request_has_market(self):
+        """SectorAnalysisRequest must have market field with default 'A'."""
+        from app.routers.analysis import SectorAnalysisRequest
+        req = SectorAnalysisRequest(sector_code="test")
+        assert hasattr(req, "market")
+        assert req.market == "A"
+
+    def test_sector_analysis_non_A_empty(self):
+        """Non-A market sector analysis must return empty structured response."""
+        from app.core.market_context import resolve_market_context
+        ctx = resolve_market_context("HK")
+        assert ctx.supports_sector_analysis is False
+
+        ctx = resolve_market_context("US")
+        assert ctx.supports_sector_analysis is False
+
+        ctx = resolve_market_context("global")
+        assert ctx.supports_sector_analysis is False
+
+
+# ─── Design Async Market Parameter Tests ──────────────────────
+
+
+class TestDesignAsyncMarketParam:
+
+    async def test_task_params_contain_market(self, task_mgr):
+        """Task params dict must contain market field（Z27: DB-backed 注入测试库）。"""
+        t = await task_mgr.create_task(task_type="design", params={"capital": 500000, "market": "HK"})
+        assert t["params"].get("market") == "HK"
+
+
+# ─── LLM Report Stream Market Awareness ────────────────────────
+
+
+class TestLLMReportMarketAwareness:
+
+    @patch("app.services.market_data_hub.market_data_hub")
+    def test_llm_report_request_has_market(self, mock_pm):
+        """LLMReportRequest must have market field with default 'A'."""
+        from app.routers.analysis import LLMReportRequest
+        req = LLMReportRequest()
+        assert hasattr(req, "market")
+        assert req.market == "A"
+
+    def test_llm_report_filter_by_market_symbols(self):
+        """llm-report/stream must filter by market-specific major_symbols."""
+        from app.core.market_context import resolve_market_context
+
+        test_data = [
+            {"symbol": "000001", "name": "上证指数", "asset_type": "index"},
+            {"symbol": "HSI", "name": "恒生指数", "asset_type": "index"},
+            {"symbol": "SPX", "name": "标普500", "asset_type": "index"},
+            {"symbol": "510050", "name": "上证50ETF", "asset_type": "ETF"},
+            {"symbol": "00700", "name": "腾讯", "asset_type": "HK"},
+        ]
+
+        ctx_A = resolve_market_context("A")
+        filtered_A = [d for d in test_data if d.get("symbol") in ctx_A.major_symbols or d.get("asset_type") in ("index", "futures")]
+        assert any(d["symbol"] == "000001" for d in filtered_A)
+
+        ctx_HK = resolve_market_context("HK")
+        filtered_HK = [d for d in test_data if d.get("symbol") in ctx_HK.major_symbols or d.get("asset_type") in ("index", "futures")]
+        assert any(d["symbol"] == "HSI" for d in filtered_HK)
+
+        ctx_US = resolve_market_context("US")
+        filtered_US = [d for d in test_data if d.get("symbol") in ctx_US.major_symbols or d.get("asset_type") in ("index", "futures")]
+        assert any(d["symbol"] == "SPX" for d in filtered_US)
+
+
+# ─── Sector Analysis Market Awareness ──────────────────────────
+
+
+class TestSectorAnalysisMarketAwareness:
+
+    def test_sector_analysis_request_has_market(self):
+        """SectorAnalysisRequest must have market field with default 'A'."""
+        from app.routers.analysis import SectorAnalysisRequest
+        req = SectorAnalysisRequest(sector_code="test")
+        assert hasattr(req, "market")
+        assert req.market == "A"
+
+    def test_sector_analysis_non_A_empty(self):
+        """Non-A market sector analysis must return empty structured response."""
+        from app.core.market_context import resolve_market_context
+        ctx = resolve_market_context("HK")
+        assert ctx.supports_sector_analysis is False
+
+        ctx = resolve_market_context("US")
+        assert ctx.supports_sector_analysis is False
+
+        ctx = resolve_market_context("global")
+        assert ctx.supports_sector_analysis is False
+
+
+# ─── Design Async Market Parameter Tests ──────────────────────
+
+
+class TestDesignAsyncMarketParam:
+
+    async def test_task_params_contain_market(self, task_mgr):
+        """Task params dict must contain market field（Z27: DB-backed 注入测试库）。"""
+        t = await task_mgr.create_task(task_type="design", params={"capital": 500000, "market": "HK"})
+        assert t["params"].get("market") == "HK"
+
+
+# ─── LLM Report Stream Market Awareness ────────────────────────
+
+
+class TestLLMReportMarketAwareness:
+
+    @patch("app.services.market_data_hub.market_data_hub")
+    def test_llm_report_request_has_market(self, mock_pm):
+        """LLMReportRequest must have market field with default 'A'."""
+        from app.routers.analysis import LLMReportRequest
+        req = LLMReportRequest()
+        assert hasattr(req, "market")
+        assert req.market == "A"
+
+    def test_llm_report_filter_by_market_symbols(self):
+        """llm-report/stream must filter by market-specific major_symbols."""
+        from app.core.market_context import resolve_market_context
+
+        test_data = [
+            {"symbol": "000001", "name": "上证指数", "asset_type": "index"},
+            {"symbol": "HSI", "name": "恒生指数", "asset_type": "index"},
+            {"symbol": "SPX", "name": "标普500", "asset_type": "index"},
+            {"symbol": "510050", "name": "上证50ETF", "asset_type": "ETF"},
+            {"symbol": "00700", "name": "腾讯", "asset_type": "HK"},
+        ]
+
+        ctx_A = resolve_market_context("A")
+        filtered_A = [d for d in test_data if d.get("symbol") in ctx_A.major_symbols or d.get("asset_type") in ("index", "futures")]
+        assert any(d["symbol"] == "000001" for d in filtered_A)
+
+        ctx_HK = resolve_market_context("HK")
+        filtered_HK = [d for d in test_data if d.get("symbol") in ctx_HK.major_symbols or d.get("asset_type") in ("index", "futures")]
+        assert any(d["symbol"] == "HSI" for d in filtered_HK)
+
+        ctx_US = resolve_market_context("US")
+        filtered_US = [d for d in test_data if d.get("symbol") in ctx_US.major_symbols or d.get("asset_type") in ("index", "futures")]
+        assert any(d["symbol"] == "SPX" for d in filtered_US)
+
+
+# ─── Sector Analysis Market Awareness ──────────────────────────
+
+
+class TestSectorAnalysisMarketAwareness:
+
+    def test_sector_analysis_request_has_market(self):
+        """SectorAnalysisRequest must have market field with default 'A'."""
+        from app.routers.analysis import SectorAnalysisRequest
+        req = SectorAnalysisRequest(sector_code="test")
+        assert hasattr(req, "market")
+        assert req.market == "A"
+
+    def test_sector_analysis_non_A_empty(self):
+        """Non-A market sector analysis must return empty structured response."""
+        from app.core.market_context import resolve_market_context
+        ctx = resolve_market_context("HK")
+        assert ctx.supports_sector_analysis is False
+
+        ctx = resolve_market_context("US")
+        assert ctx.supports_sector_analysis is False
+
+        ctx = resolve_market_context("global")
+        assert ctx.supports_sector_analysis is False
+
+

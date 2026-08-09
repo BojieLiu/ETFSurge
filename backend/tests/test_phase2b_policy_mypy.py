@@ -124,20 +124,4 @@ class TestP1_6_MyPyTypeErrors:
             content = f.read()
         assert "scripts" not in content, ".mypy.ini should not have [mypy-scripts.*]"
 
-    def test_market_router_delegates_to_hub(self):
-        path = os.path.join(APP_DIR, "services", "market_router.py")
-        with open(path, "r", encoding="utf-8") as f:
-            content = f.read()
-        # v6 Phase 3/5: market_router delegates US/HK fetches to MarketDataHub
-        assert "from app.fetchers import global_markets_fetcher" not in content
-        assert "market_data_hub.get_us_stock_realtime" in content
-        assert "market_data_hub.get_hk_stock_realtime" in content
-        assert 'type: ignore[attr-defined]' not in content
 
-    def test_market_router_no_stooq_fetcher(self):
-        path = os.path.join(APP_DIR, "services", "market_router.py")
-        with open(path, "r", encoding="utf-8") as f:
-            content = f.read()
-        # Only check import/function call references, not comments
-        lines = [l for l in content.split(chr(10)) if "stooq" in l.lower() and "API closed" not in l and "# Stooq" not in l]
-        assert len(lines) == 0, f"stooq code references remain: {lines[:3]}"

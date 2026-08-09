@@ -289,26 +289,6 @@ class TestOpt10CallSiteAudit:
 # OPT-13: AST 审计脚本
 # ════════════════════════════════════════════════════════════════════
 
-class TestOpt13AuditScript:
-    """验证 AST 审计脚本能正常执行。"""
-
-    def test_audit_script_runs(self):
-        """审计脚本应能正常执行（不报错）。"""
-        import subprocess
-        import sys
-        script_path = os.path.join(os.path.dirname(__file__), "..", "scripts", "audit_pool_usage.py")
-        result = subprocess.run(
-            [sys.executable, script_path],
-            capture_output=True, text=True,
-        )
-        # 脚本不应报错
-        assert result.returncode in (0, 1), f"审计脚本执行失败: {result.stderr}"
-
-
-# ════════════════════════════════════════════════════════════════════
-# OPT-16: 红绿切换回归测试门禁
-# ════════════════════════════════════════════════════════════════════
-
 class TestOpt16RedGreenGate:
     """验证回归测试的"红绿切换"能力。
 

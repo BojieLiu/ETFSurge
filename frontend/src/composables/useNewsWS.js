@@ -8,7 +8,7 @@ const WS_BASE = (() => {
 })()
 
 // Connects to the `/ws/news` WebSocket stream and forwards incoming news
-// messages to the supplied handler. Mirrors useMarketWS: auto-reconnect with
+// messages to the supplied handler. Auto-reconnect with
 // exponential backoff + jitter, heartbeat ping, and a stop guard on unmount.
 export function useNewsWS(handler) {
   const connected = ref(false)

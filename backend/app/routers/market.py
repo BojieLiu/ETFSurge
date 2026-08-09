@@ -22,16 +22,13 @@ from fastapi import HTTPException
 
 router = APIRouter(prefix="/api/v1/market", tags=["market"])
 
-
 @router.get("/realtime")
 async def realtime_all() -> list[dict[str, Any]]:
     return await market_data_hub.get_all_realtime()
 
-
 @router.get("/realtime/portfolio")
 async def realtime_portfolio() -> list[dict[str, Any]]:
     return await market_data_hub.get_portfolio_realtime()
-
 
 @router.get("/realtime/batch")
 async def realtime_batch(
@@ -51,16 +48,13 @@ async def realtime_batch(
         return []
     return await market_data_hub.get_realtime(flat, asset_type)
 
-
 @router.get("/realtime/{symbol}")
 async def realtime_asset(symbol: str, asset_type: str = Query("A")) -> dict | None:
     return await market_data_hub.get_asset_realtime(symbol, asset_type)
 
-
 @router.get("/indices/global")
 async def global_indices() -> dict[str, Any]:
     return {"indices": await market_data_hub.get_global_indices()}
-
 
 @router.get("/history/{symbol}")
 async def history(
@@ -69,7 +63,6 @@ async def history(
     period: str = Query("daily"),
 ) -> list[dict[str, Any]]:
     return await market_data_hub.get_market_history(symbol, asset_type, period)
-
 
 @router.get("/search")
 async def search(
@@ -203,7 +196,6 @@ async def search(
             dedup.append(it)
     return _sort_search_results(dedup[:30], keyword)
 
-
 async def _search_sectors(keyword: str) -> list[dict[str, Any]]:
     """O30: 板块搜索——sectors 表 name ilike %kw%（type='sector'，BK 码）。"""
     from ..models.search import Sector
@@ -223,7 +215,6 @@ async def _search_sectors(keyword: str) -> list[dict[str, Any]]:
     except Exception as e:
         logger.warning("[search] sector search failed: %s", e)
         return []
-
 
 async def _search_indices(keyword: str) -> list[dict[str, Any]]:
     """O30: 指数搜索——indices_meta 表 name/pinyin/first_letter ilike（type='index'）。"""
@@ -251,7 +242,6 @@ async def _search_indices(keyword: str) -> list[dict[str, Any]]:
     except Exception as e:
         logger.warning("[search] index search failed: %s", e)
         return []
-
 
 async def _search_a_stocks(keyword: str) -> list[dict[str, Any]]:
     """A 股个股搜索：instruments 表（market=A, asset_type=stock）→ 空则 levistock 降级。
@@ -312,59 +302,11 @@ async def _search_a_stocks(keyword: str) -> list[dict[str, Any]]:
         logger.warning("[search] _search_a_stocks levistock fallback failed: %s", e)
         return []
 
-
-# TODO: 未接入前端
-@router.get("/search/stocks")
-async def search_stocks(keyword: str = Query("")) -> list[dict[str, Any]]:
-    """搜索 A 股个股。优先查本地 instruments 表（毫秒级）。"""
-    from ..models.search import Instrument
-    from sqlalchemy import select, or_
-
-    try:
-        async with async_session() as session:
-            stmt = select(Instrument).where(
-                Instrument.is_active == True,  # noqa: E712
-                Instrument.market == "A",
-                Instrument.asset_type == "stock",
-            )
-            if keyword:
-                kw = keyword.lower()
-                stmt = stmt.where(
-                    or_(
-                        Instrument.symbol.ilike(f"%{kw}%"),
-                        Instrument.name.ilike(f"%{kw}%"),
-                        Instrument.pinyin.ilike(f"%{kw}%"),
-                        Instrument.first_letter.ilike(f"%{kw}%"),
-                    )
-                )
-            stmt = stmt.limit(30)
-            rows = (await session.execute(stmt)).scalars().all()
-            if rows:
-                return [{"symbol": r.symbol, "name": r.name} for r in rows]
-    except Exception as e:
-        logger.warning(f"[search_stocks] local table failed: {e}")
-
-    # 降级：levistock 全量
-    full = await asyncio.to_thread(market_data_hub.get_all_stocks)
-    normalised = [
-        {"symbol": s.get("stock_code") or s.get("symbol", ""),
-         "name": s.get("stock_name") or s.get("name", "")}
-        for s in full
-    ]
-    if not keyword:
-        return normalised[:30]
-    kw = keyword.lower()
-    return [s for s in normalised if kw in s["symbol"].lower() or kw in s["name"].lower()][:30]
-
-
 # TODO: 未接入前端
 @router.get("/indices/meta")
 async def indices_meta() -> list[dict[str, Any]]:
     """获取所有指数元数据（用于下拉/分组展示）。"""
     return await market_data_hub.get_indices_meta()
-
-
-
 
 @router.get("/indicators/{symbol}")
 async def indicators(
@@ -397,7 +339,6 @@ async def indicators(
         pass
     return result
 
-
 @router.get("/signal/{symbol}")
 async def signal(
     symbol: str,
@@ -427,7 +368,6 @@ async def signal(
         pass
     return result
 
-
 @router.get("/signal/debug/{symbol}")
 async def signal_debug(
     symbol: str,
@@ -449,7 +389,6 @@ async def signal_debug(
         "signal": sig,
     }
 
-
 @router.get("/chart/{symbol}")
 async def chart(
     symbol: str,
@@ -470,7 +409,6 @@ async def chart(
         logger.exception("[chart] compute_chart_data failed for %s: %s", symbol, e)
         return _empty_chart_response()
 
-
 def _empty_chart_response() -> dict:
     """Return an empty but valid chart data structure."""
     return {
@@ -481,7 +419,6 @@ def _empty_chart_response() -> dict:
         "macd": {"dif": [], "dea": [], "histogram": []},
     }
 
-
 # TODO: 未接入前端
 @router.get("/fundamentals/{symbol}")
 async def fundamentals(symbol: str) -> dict:
@@ -491,7 +428,6 @@ async def fundamentals(symbol: str) -> dict:
         # Z16: 数据源不可用时返回结构化空响应而非 None (避免 response_model 校验 500)
         return {"symbol": symbol, "daily": [], "error": "fundamentals data unavailable"}
     return result
-
 
 @router.get("/fund-flow/{symbol}")
 async def fund_flow(symbol: str) -> dict[str, Any]:
@@ -525,15 +461,11 @@ async def fund_flow(symbol: str) -> dict[str, Any]:
         "available": True,
     }
 
-
 # TODO: 未接入前端
 @router.get("/sentiment")
 async def sentiment() -> dict:
     """市场情绪(财联社/东财):涨跌分布、封板率、连板梯队、赚钱效应。"""
     return await asyncio.to_thread(market_data_hub.get_market_emotion)
-
-
-
 
 @router.get("/sectors/industry")
 async def industry_sectors(limit: int = Query(500)) -> list[dict[str, Any]]:
@@ -546,7 +478,6 @@ async def industry_sectors(limit: int = Query(500)) -> list[dict[str, Any]]:
         return local[:limit]
     return []
 
-
 @router.get("/sectors/concept")
 async def concept_sectors(limit: int = Query(500)) -> list[dict[str, Any]]:
     """概念板块列表（含实时行情）：优先 sector_fetcher 实时数据，本地 sectors 表作降级。"""
@@ -558,13 +489,11 @@ async def concept_sectors(limit: int = Query(500)) -> list[dict[str, Any]]:
         return local[:limit]
     return []
 
-
 # TODO: 未接入前端
 @router.get("/sectors/industry-cls")
 async def sector_industry_cls_route(limit: int = Query(80)) -> list[dict[str, Any]]:
     """行业板块实时行情(财联社)。"""
     return await asyncio.to_thread(market_data_hub.get_sector_industry_cls, limit)
-
 
 # TODO: 未接入前端
 @router.get("/sectors/{sector_code}/stocks")
@@ -572,20 +501,17 @@ async def sector_stocks_route(sector_code: str) -> list[dict[str, Any]]:
     """板块成分股(东方财富)。"""
     return await asyncio.to_thread(market_data_hub.get_sector_stocks, sector_code)
 
-
 # TODO: 未接入前端
 @router.get("/sectors/{plate_code}/popular")
 async def sector_popular(plate_code: str) -> list[dict[str, Any]]:
     """板块热门个股(财联社)。"""
     return await asyncio.to_thread(market_data_hub.get_sector_popular_stocks, plate_code)
 
-
 # Z17: Add sector rotation endpoint
 @router.get("/sectors/rotation")
 async def sector_rotation(limit: int = Query(20)) -> list[dict[str, Any]]:
     """板块轮动数据 — 行业板块实时行情(财联社)，含涨跌幅、主力资金、涨跌家数。"""
     return await asyncio.to_thread(market_data_hub.get_sector_industry_cls, limit)
-
 
 @router.get("/sectors")
 async def unified_sectors(
@@ -605,14 +531,12 @@ async def unified_sectors(
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail=f"Invalid sector type: {type}. Use industry or concept.")
 
-
 # Phase 6: 前端已接入（marketApi.getHotPlates）
 # F16 (round6 §16.4): 加 market 参数（A/HK/US）——HK 走港股行业聚合，US 暂不支持。
 @router.get("/hot-plates")
 async def hot_plates(limit: int = Query(15), market: str = "A") -> list[dict[str, Any]]:
     """热点板块及涨停股(财联社)。market=HK 时返回港股行业热点；US 返回空列表。"""
     return await asyncio.to_thread(market_data_hub.get_hot_plates, limit, market)
-
 
 # F2-3: 板块热度路由（数据源/hub 方法已存在，此前未暴露 → 前端 404）
 # F16: 加 market 参数（HK 走港股行业聚合；US 返回空 items）。
@@ -652,7 +576,6 @@ async def sectors_heat(limit: int = Query(20), market: str = "A") -> dict[str, A
         })
     return {"items": items, "total": len(items)}
 
-
 def _match_em_change(cls_name: str, em_map: dict[str, float]) -> float | None:
     """东财板块涨跌幅按名称匹配（财联社名 vs 东财名）。
 
@@ -672,7 +595,6 @@ def _match_em_change(cls_name: str, em_map: dict[str, float]) -> float | None:
         return em_map[head]
     return None
 
-
 # Phase 6: 前端已接入（marketApi.getStockHotRank）
 # F16: 加 market 参数（HK 走港股成交额榜；US 返回空列表）。
 @router.get("/stock-hot-rank")
@@ -680,13 +602,11 @@ async def stock_hot_rank(limit: int = Query(50), market: str = "A") -> list[dict
     """A股热门个股排名(同花顺)。market=HK 时返回港股热门个股；US 暂不支持。"""
     return await asyncio.to_thread(market_data_hub.get_stock_hot_rank, limit, market)
 
-
 # Phase 6: 前端已接入（marketApi.getMarketWind）
 @router.get("/wind")
 async def wind() -> list[dict[str, Any]]:
     """今日风口/主线板块(财联社)。"""
     return await asyncio.to_thread(market_data_hub.get_market_wind)
-
 
 # ── Watchlist / 自选列表 ──────────────────────────────────────────────
 
@@ -694,7 +614,6 @@ import re
 from ..services.market_service import resolve_symbol_to_code
 
 CODE_PATTERN = re.compile(r"^[0-9A-Za-z.\-]+$")
-
 
 async def _watchlist_enrich_items(items: list) -> list[dict]:
     """P0-4 (round9 §10): watchlist 实时行情 enrich（批量 + per-item 降级 + auto-heal）。
@@ -830,7 +749,6 @@ async def _watchlist_enrich_items(items: list) -> list[dict]:
 
     return enriched
 
-
 @router.get("/watchlist", response_model=dict)
 async def watchlist_list(
     limit: int = Query(100, ge=1, le=500),
@@ -877,7 +795,6 @@ async def watchlist_list(
         }
         sync_memory_cache.set(_wl_key, resp, 3)
         return resp
-
 
 @router.post("/watchlist", response_model=dict, status_code=201)
 async def watchlist_add(data: WatchlistCreate) -> dict[str, Any]:
@@ -967,7 +884,6 @@ async def watchlist_add(data: WatchlistCreate) -> dict[str, Any]:
             },
         }
 
-
 @router.put("/watchlist/{item_id}", response_model=dict)
 async def watchlist_update(item_id: int, data: WatchlistUpdate) -> dict[str, Any]:
     """更新自选"""
@@ -996,7 +912,6 @@ async def watchlist_update(item_id: int, data: WatchlistUpdate) -> dict[str, Any
             "updated_at": item.updated_at.isoformat() if item.updated_at else None,
         }
 
-
 @router.delete("/watchlist/{item_id}", status_code=204)
 async def watchlist_remove(item_id: int):
     """删除自选"""
@@ -1008,7 +923,6 @@ async def watchlist_remove(item_id: int):
             raise HTTPException(status_code=404, detail="自选项不存在")
         await session.delete(item)
         await session.commit()
-
 
 @router.delete("/watchlist", response_model=dict)
 async def watchlist_batch_remove(ids: list[int]) -> dict[str, int]:

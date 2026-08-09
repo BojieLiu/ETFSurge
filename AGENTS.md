@@ -72,9 +72,7 @@ cd backend && python -m pytest
   - 后台异步循环：板块缓存刷新（60s）、市态+情绪刷新（120s）。
   - 挂载路由：`market` / `portfolio` / `analysis` / `news` / `ws` / `admin`（前缀在各 router 内，统一为 `/api/v1/...`）。
 - `backend/app/tasks/market_refresh.py` — 定时刷新行情 / 资讯缓存的调度包装。
-- `backend/app/tasks/task_manager.py` — 通用 TaskManager（支持 design / check / report 三种任务类型）。
-- `backend/app/tasks/worker_registry.py` — Worker 注册表，按 task_type 派发到对应 worker。
-- `backend/app/tasks/design_tasks.py` — 向后兼容层，注册 design / report worker。
+- `backend/app/tasks/task_manager.py` — 通用 TaskManager（支持 design / check / report 三种任务类型）+ `design_pipeline()`（即 design_worker 别名，round11 删除 design_tasks.py 向后兼容层后 worker 逻辑在 task_manager 内）。
 - `backend/app/tasks/report_worker.py` — 异步市场研判报告 worker（WS 推送进度 + 最终报告）。
 - `backend/app/tasks/strategy_check_worker.py` — 异步策略检查 worker。
 - `backend/app/tasks/design_report.py` — LLM 报告管道 `compose_and_push_report()`（WS 推送 + DB 持久化 + 90s 超时保护 + 一致性校验）。
@@ -91,7 +89,7 @@ cd backend && python -m pytest
   - `get_factor_matrix()` / `get_pool()` / `get_market_regime()` / `get_market_sentiment()` / `get_news()`。
 - `backend/app/factors/factor_registry.py` — FactorRegistry（33 维核心因子计算，含 KDJ / 综合信号 / industry_diversification / premium_discount，已删除假数据 fallback，带熔断保护）。
 - `backend/app/services/market_trends.py` — `detect_market_regime()`（含 index_realtime fallback）、`compute_etf_trends()`。
-- `backend/app/fetchers/akshare_fetcher.py` — A 股 / 港股 / 商品行情与资讯数据源（备用；主力为 `china_market.py` → mootdx/Sina 降级链）。
+- `backend/app/fetchers/china_market.py` — A 股 / 港股 / 商品行情与资讯主力数据源（mootdx/Sina 多源降级链；round11 删除 akshare_fetcher.py shim 后 `fetch_index_history`/`fetch_history` 直连本模块）。
 - `backend/app/fetchers/news_fetcher.py` — 资讯抓取（财新头条 / 宏观 / 国际），打 `level` / `stars`。
 - `backend/app/services/portfolio_service.py` — 组合计算（`calculate_allocation` / `calculate_daily_pnl`）。
 - `backend/app/services/market_service.py` — 实时行情 / 全球指数。

@@ -1,3 +1,0 @@
-[
- "{\"code\": \"STREAM_ERROR\", \"message\": {\"code\": \"STREAM_ERROR\", \"message\": \"llm_complete_stream() got an unexpected keyword argument 'rate_limit_cap'\"}}"
-]

@@ -752,21 +752,6 @@ def section_analysis():
     """AI 分析端点验证 — 仅检查状态码，不对 LLM 内容做断言。"""
     section(" AI 分析")
 
-    endpoints = [
-        ("POST /analysis/llm-report", f"{BASE}/api/v1/analysis/llm-report", {"symbols": None, "market": "A"}),
-        ("POST /analysis/llm-advice", f"{BASE}/api/v1/analysis/llm-advice", {"query": "今天行情如何"}),
-    ]
-    for label, url, body in endpoints:
-        try:
-            r = requests.post(url, json=body, timeout=30)
-            ok = r.status_code in (200, 400, 502)
-            check(f"{label} -> {r.status_code}", ok,
-                  "502 可接受（LLM key 或网络问题）" if r.status_code == 502 else "")
-        except requests.Timeout:
-            check(label, False, "请求超时（30s）")
-        except Exception as e:
-            check(label, False, str(e))
-
     # Streaming endpoints — 只检查 200
     stream_endpoints = [
         ("POST /analysis/llm-report/stream", f"{BASE}/api/v1/analysis/llm-report/stream",
@@ -1845,32 +1830,6 @@ def print_summary():
 # ── S9: 新增模块 ──────────────────────────────────────────────────
 
 
-def section_snapshot_health():
-    """S3: 本地快照服务健康检查。"""
-    section("快照服务检查")
-    import tempfile
-    import os
-    from pathlib import Path
-
-    try:
-        from app.services.snapshot_service import SnapshotService
-        tmp = tempfile.mkdtemp()
-        svc = SnapshotService(tmp)
-        svc.save_snapshot("e2e_test", {"hello": "world"})
-        loaded = svc.load_snapshot("e2e_test", max_age_hours=24)
-        check("快照保存/读取", loaded is not None and loaded.get("hello") == "world")
-        svc.clear_snapshot("e2e_test")
-        loaded2 = svc.load_snapshot("e2e_test", max_age_hours=24)
-        check("快照清除", loaded2 is None)
-        # Clean up
-        import shutil
-        shutil.rmtree(tmp, ignore_errors=True)
-    except ImportError as e:
-        check("快照模块导入", False, str(e))
-    except Exception as e:
-        check("快照服务测试", False, str(e))
-
-
 def section_factor_integrity(host="127.0.0.1", port=8000):
     """S9: 因子完整性检查 — 验证 key 因子不为全 0。"""
     section("因子完整性检查")
@@ -1951,7 +1910,6 @@ MODULES = {
     "5xx": section_api_5xx_check,
     "zscore": section_factor_zscore_check,
     "diversity": section_solution_diversity_check,
-    "snapshot": section_snapshot_health,
     "factor-integrity": section_factor_integrity,
     "indicator-quality": section_indicator_quality,
     "db-integrity": section_db_integrity,

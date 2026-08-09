@@ -21,8 +21,6 @@ EXPECTED_AGENTS = {
     "advice",
     "news_analysis",
     "news_impact",
-    "portfolio_design",
-    "portfolio_review",
     "strategy_suggestions",
     "sector_analysis",
     "symbol_analysis",
@@ -30,8 +28,9 @@ EXPECTED_AGENTS = {
 }
 
 
-def test_all_ten_agents_registered():
-    """Contract: exactly the 10 documented analysis chains exist."""
+def test_all_agents_registered():
+    """Contract: exactly the 8 documented analysis chains exist (round11
+    removed dead portfolio_design / portfolio_review agents)."""
     assert set(AGENTS.keys()) == EXPECTED_AGENTS
 
 
@@ -48,12 +47,10 @@ def test_unknown_agent_raises_keyerror():
 
 def test_prompts_loaded_from_versioned_files():
     """Contract: each agent resolves its system prompt from a markdown file."""
-    review = get_agent("portfolio_review")
-    assert "风控官" in review.system_prompt
     news = get_agent("news_impact")
     assert "impact_scope" in news.system_prompt
-    design = get_agent("portfolio_design")
-    assert "角色设定" in design.system_prompt
+    check = get_agent("strategy_check")
+    assert check.system_prompt.strip()
 
 
 def test_response_format_config():
@@ -61,8 +58,6 @@ def test_response_format_config():
     json_agents = {k for k, v in AGENTS.items() if v.response_format == "json_object"}
     assert json_agents == {
         "news_impact",
-        "portfolio_design",
-        "portfolio_review",
         "strategy_suggestions",
         "strategy_check",
     }

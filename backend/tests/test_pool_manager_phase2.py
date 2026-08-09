@@ -107,15 +107,6 @@ class TestMarketDataHubPhase2:
         if opp:
             assert any(e["symbol"] == "159995" for e in opp)
 
-    @pytest.mark.asyncio
-    async def test_composite_score_weighted_correctly(self, market_data_hub):
-        """综合得分应按层差异化计算"""
-        await market_data_hub.refresh()
-        core = market_data_hub.get_pool(layer="core")
-        if core:
-            # core 层应重 factor, 轻 amount
-            pass  # structural validation only
-
     def test_set_opportunistic_signals(self, market_data_hub):
         """set_opportunistic_signals 应存储外部信号"""
         signals = {"159995": {"signal": "policy_heat", "heat_score": 0.85}}

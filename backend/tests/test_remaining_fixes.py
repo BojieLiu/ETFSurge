@@ -83,20 +83,6 @@ def test_s05_fund_fetcher_exports():
     assert callable(fetch_fund_nav)
 
 
-# ─── FIX-P01: Frontend loading CSS ────────────────────────────
-
-
-def test_p01_theme_css_has_loading_styles():
-    """P01: theme.css should contain loading-container styles."""
-    import os
-    css_path = os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "src", "styles", "theme.css")
-    assert os.path.exists(css_path), f"theme.css not found at {css_path}"
-    with open(css_path, "r", encoding="utf-8") as f:
-        content = f.read()
-    assert "min-height" in content, "theme.css should have min-height for loading elements"
-    assert ".loading-container" in content or "loading" in content.lower(), "loading styles missing"
-
-
 # ─── FIX-P02: ETF scan warmup cache ───────────────────────────
 
 

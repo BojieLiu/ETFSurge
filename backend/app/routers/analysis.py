@@ -30,9 +30,7 @@ from fastapi.responses import StreamingResponse
 
 router = APIRouter(prefix="/api/v1/analysis", tags=["analysis"])
 
-
 FETCH_TIMEOUT = 45
-
 
 def _sse_stream(agent_generator):
     """Convert AgentRuntime async generator to SSE StreamingResponse."""
@@ -60,7 +58,6 @@ def _sse_stream(agent_generator):
         }
     )
 
-
 def _sse_error(message: str):
     """R21: 结构化 SSE error 事件——前端 useLLMStream 抛错走 catch 显示。"""
     return StreamingResponse(
@@ -72,7 +69,6 @@ def _sse_error(message: str):
             "X-Accel-Buffering": "no",
         }
     )
-
 
 def _build_advice_market_snapshot(query: str, hub) -> str:
     """R5-1-3: 投顾市场快照统一构建——无条件注入基础数据（指数/市态/情绪），
@@ -158,7 +154,6 @@ def _build_advice_market_snapshot(query: str, hub) -> str:
 
     return "\n".join(lines)
 
-
 def _inject_market_context(query: str, ctx: dict) -> dict:
     """根据 query 关键词智能注入市场数据到 context。
 
@@ -172,13 +167,11 @@ def _inject_market_context(query: str, ctx: dict) -> dict:
         ctx["market_snapshot"] = snapshot
     return ctx
 
-
 class SectorAnalysisRequest(BaseModel):
     sector_code: str
     sector_type: str = "industry"
     sector_name: str = ""
     market: str = "A"
-
 
 class SymbolAnalysisRequest(BaseModel):
     symbol: str
@@ -187,16 +180,13 @@ class SymbolAnalysisRequest(BaseModel):
     # F10 R35: 预设问题模板（技术面/操作建议等）——可选中个股后针对性分析
     question: str = ""
 
-
 class NewsImpactRequest(BaseModel):
     news: dict[str, Any]
     portfolio: list[dict[str, Any]] = []
 
-
 class LLMReportRequest(BaseModel):
     symbols: list[str] | None = None
     market: str = "A"
-
 
 def _filter_indices_for_market(market_ctx, indices: list[dict]) -> list[dict]:
     """P0-2 (R4-13 / N04 补全): 指数按市场过滤——HK/US 报告不再混入 A 股指数。
@@ -219,7 +209,6 @@ def _filter_indices_for_market(market_ctx, indices: list[dict]) -> list[dict]:
         )
     return filtered
 
-
 def _filter_commodities_for_market(market_ctx, commodities: list[dict]) -> list[dict]:
     """P0-2: 商品行情按市场过滤——HK/US 报告不注入 A 股期货市场数据。
 
@@ -230,179 +219,10 @@ def _filter_commodities_for_market(market_ctx, commodities: list[dict]) -> list[
         return []
     return commodities or []
 
-
 class LLMAdviceRequest(BaseModel):
     query: str
     market: str = "A"
     context: dict | None = None
-
-
-# _fetch_all_market 已废弃 — 数据管道统一在编排器中采集
-# 参见 strategy_design.py 或 market_data_hub.refresh()
-
-
-# --- Market Overview 已迁移到数据管道 ---
-# 不再使用独立缓存，统一由编排器提供
-
-
-# TODO: 未接入前端（前端使用 /llm-report/stream 流式版本）
-@router.post("/llm-report")
-async def llm_report(req: LLMReportRequest):
-    """市场综合研判报告 — 优先使用编排器缓存，降级才自采。"""
-    # 尝试从编排器取缓存数据
-    from ..services.market_data_hub import market_data_hub
-
-    try:
-        regime = market_data_hub.get_market_regime()
-        sentiment = market_data_hub.get_market_sentiment()
-        if regime:
-            logger.debug("[llm-report] using orchestrator cache: regime=%s", regime)
-    except Exception:
-        regime = None
-        sentiment = None
-
-    try:
-        results = await asyncio.gather(
-            asyncio.wait_for(market_data_hub.get_all_realtime(), timeout=15),
-            # R5-2-5: indices 采集改 get_global_indices()（17 指数多源降级 + 24h
-            # 磁盘缓存，含港股/美股段）——旧 get_indices()（Sina 三级降级）仅 A 股指数
-            # → HK/US 报告 indices 恒空；global 段展平后交给 _filter_indices_for_market
-            # 按市场过滤（A/GLOBAL 保持全量）。
-            asyncio.wait_for(market_data_hub.get_global_indices(), timeout=15),
-            asyncio.wait_for(market_data_hub.get_commodities(), timeout=15),
-            asyncio.to_thread(market_data_hub.get_news_headlines),
-            asyncio.to_thread(market_data_hub.get_news_macro),
-            return_exceptions=True,
-        )
-
-        def _safe(r, fallback):
-            return r if isinstance(r, list) else fallback
-
-        market_data = _safe(results[0], [])
-        # R5-2-5: get_global_indices() 返回 dict 分组 → 展平为 list（保序 A→HK→US→其他）
-        _global_idx = results[1]
-        if isinstance(_global_idx, dict):
-            indices = []
-            for _region in ("A股", "港股", "美股"):
-                indices.extend(_global_idx.get(_region, []) or [])
-            for _region, _items in _global_idx.items():
-                if _region not in ("A股", "港股", "美股"):
-                    indices.extend(_items or [])
-        else:
-            indices = _safe(results[1], [])
-        commodities = _safe(results[2], [])
-        news_items = _safe(results[3], [])
-        macro_items = _safe(results[4], [])
-        all_news = news_items + macro_items
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Market data fetch failed: {e}")
-
-    if req.symbols:
-        market_data = [m for m in market_data if m.get("symbol") in req.symbols]
-    else:
-        from app.core.market_context import resolve_market_context
-        market_ctx = resolve_market_context(req.market)
-        # N04/U9: 只保留本市场 major_symbols + 本市场指数（旧 `asset_type in
-        # ("index","futures")` 无差别放行 A 股指数 → HK/US 报告混入 A 股数据）
-        market_data = [
-            m for m in market_data
-            if m.get("symbol", "") in market_ctx.major_symbols
-            or (
-                m.get("asset_type", "") in ("index", "futures")
-                and m.get("symbol", "") in market_ctx.index_symbols
-            )
-        ]
-
-    # P0-2 (R4-13 / N04 补全): indices/commodities 同样按市场过滤——
-    # 旧实现只过滤了 market_data，indices 全量传入 → LLM 引用 A 股指数。
-    from app.core.market_context import resolve_market_context as _resolve_ctx
-    _mctx = _resolve_ctx(req.market)
-    indices = _filter_indices_for_market(_mctx, indices)
-    commodities = _filter_commodities_for_market(_mctx, commodities)
-
-    indicators = {}
-    for item in market_data[:5]:
-        if item.get("asset_type") in ("index", "futures"):
-            continue
-        try:
-            hist = await asyncio.wait_for(get_history(item["symbol"], item["asset_type"]), timeout=30)
-            ind = compute_all_indicators(hist)
-            if ind:
-                indicators[item["symbol"]] = ind
-        except Exception:
-            continue
-
-    # 注入编排器的市场状态和情绪数据
-    enriched_news = all_news
-    if regime or sentiment:
-        context = []
-        if regime:
-            context.append(f"市场状态: {regime}")
-        if sentiment and isinstance(sentiment, dict):
-            s_idx = sentiment.get("sentiment_index", "")
-            s_lbl = sentiment.get("sentiment_label", "")
-            context.append(f"市场情绪: {s_lbl} ({s_idx}/100)" if s_idx else f"市场情绪: {s_lbl}")
-        if context:
-            enriched_news = [{"title": "【市场背景】" + " | ".join(context)}] + all_news
-    try:
-        report = await generate_market_report(
-            indices, commodities, market_data, indicators, enriched_news, [], market=req.market
-        )
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"LLM analysis failed: {e}")
-    return {"report": report, "market_data": market_data[:10], "indices": indices[:10], "commodities": commodities[:6], "disclaimer": "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"}
-
-
-# TODO: 未接入前端（前端使用 /llm-advice/stream 流式版本）
-@router.post("/llm-advice")
-async def llm_advice(req: LLMAdviceRequest):
-    """AI 投资顾问 — 自动注入市场数据管道缓存。"""
-    from ..services.market_data_hub import market_data_hub
-
-    query = req.query
-    ctx = dict(req.context or {})
-
-    # R5-1-3: 无条件注入市场快照（指数/市态/情绪/板块/新闻，数据来自缓存零成本）
-    # 旧关键词表（["大盘","今天","最新","走势","行情"]）覆盖不全，"A股/配置"缺失 →
-    # "当前A股市场怎么配置"不命中全降级模板；两版（stream/非 stream）统一走此函数。
-    try:
-        from ..services.market_data_hub import market_data_hub as _mhub
-        snapshot = _build_advice_market_snapshot(query, _mhub)
-        if snapshot:
-            ctx["market_snapshot"] = snapshot
-    except Exception as e:
-        logger.debug("[llm-advice] smart injection skipped: %s", e)
-
-    try:
-        advice = await generate_advice(query, ctx)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"LLM advice failed: {e}")
-    return {"advice": advice, "disclaimer": "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"}
-
-
-# TODO: 未接入前端
-@router.post("/llm-news-analysis")
-async def llm_news_analysis():
-    news = market_data_hub.get_news_headlines() or []
-    try:
-        macro = market_data_hub.get_news_macro() or []
-        news.extend(macro)
-    except Exception:
-        pass
-    # P2-2 (round9 §6.4): 系统 sentiment 注入（sentiment_index 基准）——LLM 引用而非自估
-    sentiment_index = None
-    try:
-        _sent = market_data_hub.get_market_sentiment() or {}
-        sentiment_index = _sent.get("sentiment_index")
-    except Exception:
-        pass
-    try:
-        analysis = await analyze_news(news, sentiment_index=sentiment_index)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"LLM news analysis failed: {e}")
-    return {"analysis": analysis, "news_count": len(news), "sentiment_index": sentiment_index,
-            "disclaimer": "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"}
-
 
 @router.post("/news-impact")
 async def news_impact(req: NewsImpactRequest):
@@ -429,11 +249,9 @@ async def news_impact(req: NewsImpactRequest):
     result["disclaimer"] = "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
     return result
 
-
 # ── /portfolio-design 已废弃 ──
 # 组合设计功能已迁移到 POST /portfolio/design-async（引擎驱动）
 # 旧 LLM 路径不再维护
-
 
 class PortfolioReviewRequest(BaseModel):
     """组合检视请求体"""
@@ -445,47 +263,10 @@ class PortfolioReviewRequest(BaseModel):
     type_thresholds: dict  # 进攻型/防御型/平衡型各自的阈值
     meta_context: dict  # strategy_target_type, benchmark_index, last_rebalance_date, current_date, days_since_rebalance, total_portfolio_value_mn, current_annualized_volatility_pct
 
-
-# TODO: 未接入前端
-@router.post("/portfolio-review")
-async def portfolio_review(req: PortfolioReviewRequest):
-    """
-    ETF 组合动态检视/再平衡（Strategy Review Officer 模式）
-    
-    输入：完整的持仓快照 + 最新行情快照 + 风控预算 + 类型阈值
-    输出：REBALANCE（含买卖清单）或 HOLD（含未触发理由），严格 JSON 格式
-    """
-    # 构造完整输入
-    input_data = {
-        "portfolio_type": req.portfolio_type,
-        "last_rebalance_date": req.last_rebalance_date,
-        "current_portfolio_holdings_example": req.current_portfolio_holdings,
-        "new_market_snapshot_example": req.new_market_snapshot,
-        "risk_budget": req.risk_budget,
-        "type_thresholds": req.type_thresholds,
-        "meta_context": req.meta_context,
-    }
-    
-    # 使用 registry 中的 portfolio_review agent（risk_officer.md 提示词），强制 JSON 输出
-    from ..analysis.registry import get_agent
-
-    try:
-        result = await get_agent("portfolio_review").run_json(
-            json.dumps(input_data, ensure_ascii=False)
-        )
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"LLM portfolio review failed: {e}")
-
-    result["disclaimer"] = "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
-    return result
-
-
     #     )
     # except Exception as e:
     #     raise HTTPException(status_code=502, detail=f"LLM sector analysis failed: {e}")
     # return {"sector_name": name, "sector_code": sector_code, "report": report, "constituents_count": len(constituents), "disclaimer": "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"}
-
-
 
 @router.post("/llm-report/stream")
 async def llm_report_stream(req: LLMReportRequest):
@@ -577,7 +358,6 @@ async def llm_report_stream(req: LLMReportRequest):
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM streaming failed: {e}")
 
-
 @router.post("/llm-advice/stream")
 async def llm_advice_stream(req: LLMAdviceRequest):
     """流式投资建议问答 — 使用统一上下文管道 (Phase 2.9)。
@@ -633,10 +413,8 @@ async def llm_advice_stream(req: LLMAdviceRequest):
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM streaming failed: {e}")
 
-
 # ── /portfolio-design/stream 已废弃 ──
 # 组合设计流式端点已移除，使用 POST /portfolio/design-async
-
 
 def _normalize_sector_code(
     code: str,
@@ -687,7 +465,6 @@ def _normalize_sector_code(
             if hit:
                 return str(hit.get("sector_code") or code)
     return code
-
 
 @router.post("/sector-analysis/stream")
 async def sector_analysis_stream(req: SectorAnalysisRequest):
@@ -811,7 +588,6 @@ async def sector_analysis_stream(req: SectorAnalysisRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM streaming failed: {e}")
-
 
 @router.post("/symbol-analysis/stream")
 async def symbol_analysis_stream(req: SymbolAnalysisRequest):
@@ -937,7 +713,6 @@ async def symbol_analysis_stream(req: SymbolAnalysisRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM streaming failed: {e}")
-
 
 @router.post("/news-impact/stream")
 async def news_impact_stream(req: NewsImpactRequest):

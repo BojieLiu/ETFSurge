@@ -149,67 +149,6 @@ class PnLHistoryResponse(BaseModel):
 # AI Portfolio Design Response Models / AI 组合设计响应模型
 # =============================================================================
 
-# DEPRECATED: unused schema, kept for reference
-class PortfolioDesignAllocation(BaseModel):
-    """单个ETF在组合中的配置详情"""
-    symbol: str
-    name: str
-    asset_class: str
-    target_weight: float
-    selection_rationale: Optional[str] = None
-    weight_rationale: Optional[str] = None
-    tracked_index: Optional[str] = None
-    key_metrics: Optional[dict] = None
-
-
-# DEPRECATED: unused schema, kept for reference
-class PortfolioDesignPlan(BaseModel):
-    """单个风格组合方案"""
-    style: str  # "进攻型" | "平衡型" | "防御型"
-    style_label: str
-    portfolio_name: str
-    positioning: str
-    expected_return: float
-    max_drawdown: float
-    sharpe_ratio: float
-    expected_characteristics: str
-    weight_logic: list[dict]
-    allocations: list[PortfolioDesignAllocation]
-    market_analysis: dict = {}
-    allocation_rationale: dict = {}
-    risk_factors: list[str] = []
-    rebalance_rules: str = ""
-
-
-# DEPRECATED: unused schema, kept for reference
-class PortfolioComparisonItem(BaseModel):
-    """对比表单项"""
-    holdings_count: Optional[int] = None
-    equity_pct: Optional[float] = None
-    tech_pct: Optional[float] = None
-    defensive_pct: Optional[float] = None
-    cash_pct: Optional[float] = None
-    expected_volatility: Optional[str] = None
-    core_holdings: Optional[str] = None
-
-
-# DEPRECATED: unused schema, kept for reference
-class PortfolioDesignResponse(BaseModel):
-    """AI 组合设计完整响应"""
-    design_text: str
-    data_snapshot_time: str
-    market_environment: str
-    plans: list[PortfolioDesignPlan]
-    comparison_table: dict[str, PortfolioComparisonItem] = {}
-    indices: list[dict] = []
-    commodities: list[dict] = []
-
-
-# DEPRECATED: unused schema, kept for reference
-class PortfolioDesignRequest(BaseModel):
-    """组合设计请求体"""
-    capital: float = 500000
-
 
 # Portfolio Export/Import / 组合导出导入
 class ImportError(BaseModel):

@@ -44,8 +44,8 @@ async def _fetch_sina_a_indices():
         return []
     # 解码中文列
     try:
-        from app.fetchers.akshare_fetcher import _decode_df
-        df = _decode_df(df)
+        from app.utils.decode import decode_df
+        df = decode_df(df)
     except Exception:
         pass
     out = []

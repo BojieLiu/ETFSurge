@@ -1,9 +1,0 @@
-{
- "signal": "sell",
- "score": -1.5,
- "reasons": [
-  "MACD偏空",
-  "MA5<MA20 空头排列"
- ],
- "data_available": true
-}
