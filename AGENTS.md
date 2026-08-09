@@ -63,7 +63,12 @@ cd backend && python -m pytest
   - 已配置 `vitest.config.js` + `src/test/setup.js`（jsdom 环境）。
   - 组件测试用 `@vue/test-utils`。
 - **链路验证**：后端用 `verify_e2e.py`；前端用 `npm run build` + 浏览器走查关键页面。
-- **pre-commit 门禁**：`.githooks/pre-commit` 会在 frontend/ 有变更时自动执行 `npm run build`，拦截 Vue 编译错误（如 v-if/v-else-if 不连续）。跳过构建：`SKIP_FRONTEND_BUILD=1 git commit`。
+- **pre-commit 门禁**：`.githooks/pre-commit` 会执行密钥扫描 / check_routes / 前端 build / mypy / audit_async_blocking / pytest / smoke_startup 等检查（跳过方式见各段注释）。
+  - **pytest 全量用 `-n auto` 并行**（pytest-xdist，~220s → ~90s；xdist 缺失自动回退串行）；仅测试文件变更时只跑变更文件（秒级）。
+  - **smoke_startup 用 `SMOKE_FAST=1` 快速模式**（~50s → ~5s）：子进程设 `ETF_SURGE_SKIP_WARMUP=1` 跳过后台预热任务及其 60s 等待，并跳过 `/calculate` 懒加载（由 `verify_e2e.py` 覆盖）；完整模式 `python scripts/smoke_startup.py` 行为不变。
+  - 前端 build 仅当 `frontend/src/*`、`index.html`、`vite.config.js`、`package.json` 变更时触发（`frontend/public/` 静态资源不触发）。
+  - docker build 冒烟在 Docker daemon 不可用（Docker Desktop 未启动）时视为环境跳过，真实构建失败仍拦截。
+  - 跳过构建：`SKIP_FRONTEND_BUILD=1 git commit`。
 
 ## 会话记忆惯例（每轮结束必做，强制）
 
