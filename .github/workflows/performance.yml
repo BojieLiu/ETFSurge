@@ -87,3 +87,34 @@ jobs:
             echo "⚠️ Lighthouse CI checks triggered warnings (non-blocking for P3 baseline)"
           fi
           echo "✅ Performance baseline run completed"
+
+  # P3-F (round10 §10): 容器弱源集成测试门禁——compose prod 起容器，
+  # 容器内阻断东财域名（--weak-source），断言 pool/design/hot/signal/watchlist
+  # 降级链路 ≤10s 返回且不崩溃（P0-C/P1-G 类弱源问题在此可拦）。
+  container-weak-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create .env for backend
+        run: echo "DEEPSEEK_API_KEY=sk-dummy" > backend/.env
+
+      - name: Build & start prod compose
+        run: docker compose up -d --build --profile prod
+
+      - name: Wait for backend health
+        run: |
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/health || true)
+            [ "$code" = "200" ] && break
+            sleep 2
+          done
+          curl -s -o /dev/null -w "health=%{http_code}\n" http://localhost/health
+
+      - name: Run weak-source integration test (P2-E / P3-F)
+        run: docker compose exec -T backend python scripts/docker_smoke.py --weak-source
+
+      - name: Teardown
+        if: always()
+        run: docker compose down -v
