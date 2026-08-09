@@ -95,14 +95,18 @@
 **P2：宏观环境因子（MARKET_LEVEL 类）+ LLM 上下文**
 
 - **注册位置（两处，缺一不可）**：
-  - `factor_registry.py`（`register_computer`，~L1015）：注册 `macro_m2_trend`（M2 同比 3 月斜率 → -1/0/+1）、`macro_pmi_level`（PMI ≥50 → 1，<50 → 0）、`macro_lpr_direction`（LPR 1Y 同比 → -1/0/+1）三个 compute 函数
-  - `routers/factors.py:72`：把 3 个 code 加入 `MARKET_LEVEL_FACTOR_CODES` 集合（否则 `/factors/active` 不会以 static 标注，L130 过滤依赖该集合）
+  - `factor_registry.py`（`register_computer`，~L1015）：注册 **4 个 compute 函数**——月频 3：`macro_m2_trend`（M2 同比 3 月斜率 → -1/0/+1）、`macro_pmi_level`（PMI ≥50 → 1，<50 → 0）、`macro_lpr_direction`（LPR 1Y 同比 → -1/0/+1）；**季频 1：`macro_gdp_trend`**（GDP 同比增速分位 → 环境分级 -1/0/+1，季度级）
+  - `routers/factors.py:72`：把 4 个 code 加入 `MARKET_LEVEL_FACTOR_CODES` 集合（否则 `/factors/active` 不会以 static 标注，L130 过滤依赖该集合）
 - 标 static（与 sentiment 同处理：不参与截面 IC、不撑「数据完整」判定）
 - **扩展既有 `build_full_context` 宏观段**（llm_context.py L193 `include_macro` 已注入 domestic_macro）：补 PMI/GDP 两指标 + 方向标注（-1/0/+1）——LLM 报告可引用
 - **CPI 口径统一**：沿用既有 `fetch_cpi_ppi`（月度），不引入 `macro_china_cpi_yearly`（避免双口径）
 - 验收：因子出现在 /factors/active（static 标注）；LLM 上下文宏观段含 PMI/GDP 真实值（非占位）；全量测试绿
 
-**约束**：宏观月频 + 发布滞后（CPI 月后 10 天）→ 时间戳诚实标注（「数据截至 2026-07」）；**不参与**盘中高频决策；akshare 数据源（东财/新浪）需超时+熔断+缓存（延续既定模式）。
+**频率定位（月/季频慢变量，2026-08-09 讨论补充）**：
+- 慢变量驱动**月级市态**（牛熊切换是季度级现象）——定位「环境/市态维度」，与快变量（行情/技术/情绪日频）互补；标准量化实践 = 慢变量调节快变量（宏观恶化 → 降低进攻性权重/总仓位上限），非直接进选股池
+- 月频（M2/PMI/LPR）够做**斜率/拐点**（3 月窗口）；季频（GDP）一年仅 4 点，做**环境分级**（增速分位 -1/0/+1）而非连续数值
+
+**约束**：宏观月频/季频 + 发布滞后（CPI 月后 10 天、**GDP 季后 1.5 月**）→ ① **前视偏差红线：只用已发布值 + 滞后期**（GDP 因子用「数据截至 2026-Q2」标注，禁止用当季原始值当因子）；② 时间戳诚实标注（「数据截至 2026-07/Q2」）；③ **不参与**盘中高频决策；④ akshare 数据源（东财/新浪）需超时+熔断+缓存（延续既定模式）。
 
 ### 3.2 TickFlow 实时行情接入（P1 美股 / P2 港股 / P3 A 股）
 
