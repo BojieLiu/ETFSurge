@@ -129,6 +129,4 @@ defineProps({
   border-bottom: none;
   font-weight: var(--font-weight-semibold);
 }
-.text-up { color: var(--color-text-up) !important; }
-.text-down { color: var(--color-text-down) !important; }
 </style>

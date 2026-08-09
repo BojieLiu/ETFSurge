@@ -261,7 +261,5 @@ function labelClass(region) {
 @keyframes gis-pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.8; } }
 
 /* ── Red up / green down ── */
-:deep(.text-up) { color: var(--color-text-up, #c62828); }
-:deep(.text-down) { color: var(--color-text-down, #2e7d32); }
 </style>
 

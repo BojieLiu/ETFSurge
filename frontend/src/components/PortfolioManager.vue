@@ -1039,8 +1039,6 @@ onMounted(loadTab)
 .dropdown-enter-from, .dropdown-leave-to { opacity: 0; transform: translateY(-8px); }
 
 /* Text Color Utilities — uses Chinese convention: red = up/gain, green = down/loss */
-.text-up { color: var(--color-text-up) !important; }
-.text-down { color: var(--color-text-down) !important; }
 .text-warning { color: var(--color-text-warning) !important; }
 
 /* Focus Visible */

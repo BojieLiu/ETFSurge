@@ -309,8 +309,6 @@ function estimatedRatio(type) {
   text-align: right;
 }
 
-.text-up { color: var(--color-text-up) !important; }
-.text-down { color: var(--color-text-down) !important; }
 
 @media (max-width: 480px) {
   .summary-grid { grid-template-columns: 1fr; }

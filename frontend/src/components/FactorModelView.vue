@@ -747,8 +747,6 @@ onBeforeUnmount(() => {
 }
 
 /* ── Colors ── */
-.text-up { color: var(--color-brand-600); }
-.text-down { color: #f97316; }
 .text-warn { color: var(--color-warning-600); }
 .text-muted { color: var(--color-text-tertiary); }
 
@@ -761,9 +759,5 @@ onBeforeUnmount(() => {
   .model-body { padding: var(--space-4); }
 }
 
-.btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); padding: 0.5rem 1rem; font-size: var(--font-size-sm); font-weight: var(--font-weight-medium); border-radius: var(--radius-md); cursor: pointer; transition: var(--transition-fast); border: 1px solid transparent; }
-.btn-primary { background: var(--color-brand-500); color: #fff; border-color: var(--color-brand-500); }
-.btn-primary:hover { background: var(--color-brand-600); }
-.btn-sm { padding: 0.3rem 0.6rem; font-size: 0.8rem; }
 </style>
 

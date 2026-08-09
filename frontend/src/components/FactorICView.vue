@@ -369,31 +369,6 @@ onMounted(fetchIC)
   padding: 2rem !important;
 }
 
-.text-up { color: var(--up-color, #e74c3c); }
-.text-down { color: var(--down-color, #27ae60); }
-
-.btn {
-  padding: 0.4rem 0.8rem;
-  border: 1px solid var(--border-color, #d0d0d0);
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: var(--font-size-sm) /* O17 */;
-  transition: background 0.15s;
-}
-
-.btn-primary {
-  background: var(--primary, #409eff);
-  color: #fff;
-  border-color: var(--primary, #409eff);
-}
-
-.btn-secondary {
-  background: var(--btn-bg, #f5f5f5);
-  color: var(--text-primary, #333);
-}
-
-.btn-sm { padding: 0.3rem 0.6rem; font-size: var(--font-size-xs) /* O17 */; }
-
 @media (max-width: 640px) {
   .factor-ic-view { padding: 0.5rem; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
