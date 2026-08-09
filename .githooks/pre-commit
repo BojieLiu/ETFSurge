@@ -79,6 +79,21 @@ else
     fi
 fi
 
+# ── 纯文档/元数据短路（P4-new，2026-08-09） ──────────────────────
+# docs/（含 archived/）、api-contracts/ 为文档/契约，diag/ 为诊断产物——均不改变运行代码，
+# 跳过全部编译/测试门禁。注：diag/ 下是诊断脚本与产物（非运行代码），归类为"非逻辑"。
+# secret 扫描在上一段已执行（文档也可能泄漏 key），故短路的仅跳过 L82 及以后。
+# ⚠️ 收益说明：基线 backend/* 本来就不匹配 docs/（纯 docs 提交不触发 pytest），本段价值是
+#    ① 显式语义化（无歧义）；② 防未来在 docs/ 下新增 backend 同名目录导致的意外全量回归。
+DOCS_ONLY_STAGED=$(git diff --cached --name-only --diff-filter=ACM -- \
+    'docs/*' 'diag/*' 'api-contracts/*' 2>/dev/null || true)
+NON_DOCS_STAGED=$(git diff --cached --name-only --diff-filter=ACM -- \
+    ':!docs/*' ':!diag/*' ':!api-contracts/*' 2>/dev/null || true)
+if [ -n "$DOCS_ONLY_STAGED" ] && [ -z "$NON_DOCS_STAGED" ]; then
+    echo "[pre-commit] 纯文档/元数据提交（docs/diag/api-contracts），跳过编译与测试门禁（secret 已检查）"
+    exit 0
+fi
+
 # ── 前端构建检查 ──────────────────────────────────────────────────────
 if [ "${SKIP_FRONTEND_BUILD}" = "1" ]; then
     echo "[pre-commit] SKIP_FRONTEND_BUILD=1, 跳过前端构建检查"
@@ -207,28 +222,51 @@ else
     fi
 fi
 
-# ── 后端测试门禁（P3-2） ──────────────────────────────────────────
+# ── 后端测试门禁（收紧版，2026-08-09，round11/precommit-optimization） ──
+# 档 0：conftest/fixtures 变更 → 全量（影响所有测试场景）
+# 档 1：逻辑变更（backend/app 不限 .py、scripts/*.py、requirements.txt）→ 全量 pytest
+# 档 2：仅测试 .py 变更 → 只跑变更的测试文件（秒级，替代 1620/3:39）
 if [ "${SKIP_BACKEND_TESTS}" = "1" ]; then
     echo "[pre-commit] SKIP_BACKEND_TESTS=1, 跳过后端测试"
 else
-    BACKEND_STAGED=$(git diff --cached --name-only --diff-filter=ACM -- 'backend/*' 2>/dev/null || true)
-    if [ -n "$BACKEND_STAGED" ]; then
-        echo "[pre-commit] 检测到后端文件变更，正在执行 pytest -x ..."
+    # 档 0：conftest/fixtures 变更 → 全量（影响所有测试场景）
+    CONFTEST_STAGED=$(git diff --cached --name-only --diff-filter=ACM \
+        -- 'backend/tests/conftest.py' 'backend/tests/db_fixtures.py' 2>/dev/null || true)
+    # 档 1：逻辑变更 → 全量 pytest。
+    # ⚠️ backend/app/* 不限 .py：app 下含运行时非 .py（prompts/v1/*.md ×11、factors/factor_definitions.yaml），
+    #    改 LLM prompt 模板 / 因子定义也属逻辑变更，必须触发全量。
+    LOGIC_STAGED=$(git diff --cached --name-only --diff-filter=ACM \
+        -- 'backend/app/*' 'backend/scripts/*.py' 'backend/requirements.txt' 2>/dev/null || true)
+    # 档 2：仅测试 .py 变更 → 只跑变更的测试文件（秒级）
+    TEST_STAGED=$(git diff --cached --name-only --diff-filter=ACM \
+        -- 'backend/tests/*.py' 2>/dev/null || true)
+    # 其它 backend 变更：根级散件（.env.example/pytest.ini/*.py 骨架）+ tests 下非 .py
+    # （fixture 数据/快照）→ 全量保守不短路
+    OTHER_BACKEND=$(git diff --cached --name-only --diff-filter=ACM \
+        -- 'backend/*' ':!backend/app/*' ':!backend/scripts/*' ':!backend/tests/*.py' 2>/dev/null || true)
+
+    if [ -n "$CONFTEST_STAGED" ] || [ -n "$LOGIC_STAGED" ] || [ -n "$OTHER_BACKEND" ]; then
+        echo "[pre-commit] 检测到后端逻辑变更，执行 pytest 全量 ..."
         cd backend
         # F23 (round6 §17.2): 外层 timeout 兜底——pytest 进程级超时（30min），
         # 配合 pytest.ini 全局 --timeout=180（单测试级），任何一层挂起都会
         # 报 FAIL 而非无限挂起（commit 曾卡死 ~1 小时）。
         if timeout 1800 python -m pytest -x 2>&1; then
-            echo "[pre-commit] ✅ pytest 通过"
-            cd ..
+            echo "[pre-commit] ✅ pytest 全量通过"; cd ..
         else
-            cd ..
-            echo ""
-            echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
-            echo "!  🚫 pytest 失败或超时 — 请修复后重试                           !"
-            echo "!  如需跳过: SKIP_BACKEND_TESTS=1 git commit ...              !"
-            echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
-            exit 1
+            cd ..; echo "🚫 pytest 失败或超时"; exit 1
+        fi
+    elif [ -n "$TEST_STAGED" ]; then
+        # 纯测试文件 .py 变更（docstring/新增用例）→ 只跑变更的测试文件
+        echo "[pre-commit] 检测到仅测试文件变更，执行受影响测试 ..."
+        cd backend
+        # 只跑变更的测试文件（替换全量；git diff 输出 backend/tests/test_x.py → 相对路径）
+        TESTS_TO_RUN=$(printf '%s\n' "$TEST_STAGED" | sed 's#^backend/##' | tr '\n' ' ')
+        # ⚠️ 保留基线 -x 快速失败语义
+        if timeout 600 python -m pytest -x $TESTS_TO_RUN 2>&1; then
+            echo "[pre-commit] ✅ affected tests 通过"; cd ..
+        else
+            cd ..; echo "🚨 affected tests 失败（见上）"; exit 1
         fi
     fi
 fi
