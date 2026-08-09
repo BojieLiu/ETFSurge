@@ -65,6 +65,19 @@ cd backend && python -m pytest
 - **链路验证**：后端用 `verify_e2e.py`；前端用 `npm run build` + 浏览器走查关键页面。
 - **pre-commit 门禁**：`.githooks/pre-commit` 会在 frontend/ 有变更时自动执行 `npm run build`，拦截 Vue 编译错误（如 v-if/v-else-if 不连续）。跳过构建：`SKIP_FRONTEND_BUILD=1 git commit`。
 
+## 会话记忆惯例（每轮结束必做，强制）
+
+**目的**：避免每个新会话全量重读 docs/round*.md（几十万 token/轮），改用 `remember` 背景事实承接上下轮状态。
+
+- **每轮（round/诊断/实施批次）结束时**，用 `remember` 写/更新一条 project 事实：
+  - `name` 用轮次标识（如 `round10-容器复诊断完成-2026-08-08.md`），**更新用同 name 覆盖**（revision 递增），勿新建重复条目；
+  - 正文含：**结果一句话 + 关键 commit + 验收口径 + How to apply 指针**（对照既有 round 事实格式）；
+  - `description` 用可检索的一句话（将在下一会话自动召回注入）。
+- **状态变化的轮次**更新既有事实而非新建；**已过时/矛盾的旧事实**用 `forget` 归档（避免召回冲突浪费额度）。
+- 大段正文（方案细节）留在 docs/**（审计数据源），memory 只存结论/commit/指针。
+- 会话开始时如需了解上轮进度：**先 memory search/read**（只读、有预算）而不是直接 read_file 全量。
+- 重要长期规则（非「某轮状态」）放 AGENTS.md，勿放 memory（文档是常驻、memory 是有预算召回）。
+
 ## 关键路径
 
 - `backend/app/main.py` — FastAPI 入口 + lifespan：
