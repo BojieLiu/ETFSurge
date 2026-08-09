@@ -211,6 +211,32 @@ else
     fi
 fi
 
+# ── 前端死样式审计（P3-2，2026-08-09） ─────────────────────────
+# CSS 类存量基线 192（theme.css+global.css 中前端从未引用的类）；新增死类 FAIL。
+# 触发面：styles 变更或脚本本身；SKIP_STYLE_AUDIT=1 跳过。
+if [ "${SKIP_STYLE_AUDIT}" = "1" ]; then
+    echo "[pre-commit] SKIP_STYLE_AUDIT=1, 跳过前端死样式审计"
+else
+    STYLE_STAGED=$(git diff --cached --name-only --diff-filter=ACM \
+        -- 'frontend/src/styles/*' 'frontend/scripts/check_unused_styles.mjs' 2>/dev/null || true)
+    if [ -n "$STYLE_STAGED" ]; then
+        echo "[pre-commit] 检测到样式变更，执行 P3-2 死样式审计 ..."
+        cd frontend
+        if node scripts/check_unused_styles.mjs 2>&1; then
+            echo "[pre-commit] ✅ P3-2 死样式审计通过（无新增未使用类）"; cd ..
+        else
+            cd ..
+            echo ""
+            echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+            echo "!  🚫 P3-2 死样式审计失败 — 新增未使用的 CSS 类              !"
+            echo "!  删除死样式或补真实使用；存量清理后 --baseline 更新基线     !"
+            echo "!  如需跳过: SKIP_STYLE_AUDIT=1 git commit ...               !"
+            echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+            exit 1
+        fi
+    fi
+fi
+
 # ── 后端类型检查（mypy） ─────────────────────────────────────────
 if command -v mypy &> /dev/null; then
     if [ "${SKIP_MYPY}" = "1" ]; then
