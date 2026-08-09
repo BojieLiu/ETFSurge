@@ -108,8 +108,8 @@ import { useToastStore } from './stores/toast'
 import { useLoadingStore } from './stores/loading'
 import { useTaskStore } from './stores/task'
 import { useMarketStore } from './stores/market'
-import { portfolioApi } from './api'
 import { useWarmupStatus } from './composables/useWarmupStatus'
+import { useTaskWS } from './composables/useTaskWS'
 import TaskIndicator from './components/TaskIndicator.vue'
 
 const router = useRouter()
@@ -186,13 +186,11 @@ const dismissToast = (id) => {
   toastStore.dismiss(id)
 }
 
-// ── Global task-notification WebSocket (Plan B) ──────────────────
-// Single persistent connection driving the nav-bar task indicator.
-// Backend broadcasts { type: 'task_update', task_id, status, progress }.
+// ── Global task-notification WebSocket (P2-4: 收敛到 useTaskWS composable) ──
+// 单条持久连接驱动导航栏任务指示器；连接/回填/节流/自动建任务/重连逻辑
+// 已抽取至 composables/useTaskWS.js（对齐 useNewsWS 模式）。
 const taskStore = useTaskStore()
-let taskWs = null
-let taskWsReconnectTimer = null
-let taskWsClosedByUs = false
+const { connect: connectTaskWs, close: closeTaskWs } = useTaskWS()
 
 // Start warmup polling on mount, stop on unmount
 onMounted(() => {
@@ -203,91 +201,6 @@ onUnmounted(() => {
   stopPolling()
 })
 
-function connectTaskWs() {
-  if (taskWs && taskWs.readyState <= 1) return
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const wsUrl = protocol + '//' + window.location.host + '/api/v1/ws/task-notifications'
-  try {
-    taskWs = new WebSocket(wsUrl)
-  } catch (e) {
-    scheduleTaskWsReconnect()
-    return
-  }
-
-  taskWs.onopen = () => {
-    // Backfill: on (re)connect, fetch any tasks created while disconnected
-    taskStore.fetchAndMergeTasks()
-  }
-
-  // 节流：progress 更新每秒最多处理一次，减少主线程抖动
-  let _lastProgressTime = 0
-  const PROGRESS_THROTTLE_MS = 1000
-
-  taskWs.onmessage = (event) => {
-    try {
-      const msg = JSON.parse(event.data)
-      if (msg.type !== 'task_update') return
-      const taskId = msg.task_id
-
-      // 如果本地没有该任务，自动创建（避免 WS 消息早于 addTask 调用）
-      // Z27: 用 task_type 初始化任务类型与 label（否则 check 任务会被误建为 design）
-      if (!taskStore.getTask(taskId)) {
-        const type = msg.task_type || 'design'
-        const label = type === 'check' ? '策略检查与分析'
-          : type === 'report' ? '市场研判报告' : '智能组合设计'
-        taskStore.addTask(taskId, label, type)
-      }
-
-      // 节流：仅 progress 变化时限制频率
-      const now = Date.now()
-      if (msg.status === 'running' && now - _lastProgressTime < PROGRESS_THROTTLE_MS) {
-        // 跳过这次 progress 更新，但仍处理 non-progress 字段
-        return
-      }
-      _lastProgressTime = now
-
-      const patch = {
-        status: msg.status,
-        progress: typeof msg.progress === 'number' ? msg.progress : 0,
-      }
-      taskStore.updateTask(taskId, patch)
-      // Backend _notify carries design_id on completed — fetch it directly.
-      // Z27: 同时处理 record_id（check 任务无 design_id，只有 record_id）
-      if (msg.record_id || msg.design_id) {
-        taskStore.updateTask(taskId, {
-          recordId: msg.record_id || msg.design_id,
-          ...(msg.design_id ? { designId: msg.design_id } : {}),
-        })
-      } else if (msg.status === 'completed' || msg.status === 'completed_with_errors') {
-        // fallback
-        portfolioApi.getTask(taskId).then((res) => {
-          const did = res?.data?.result?.design_id
-          if (did) taskStore.updateTask(taskId, { designId: did })
-        }).catch(() => {})
-      }
-    } catch (e) {
-      // ignore malformed messages
-    }
-  }
-
-  taskWs.onclose = () => {
-    taskWs = null
-    if (!taskWsClosedByUs) scheduleTaskWsReconnect()
-  }
-
-  taskWs.onerror = () => {
-    // onclose will follow; reconnect handled there
-  }
-}
-
-function scheduleTaskWsReconnect() {
-  if (taskWsReconnectTimer) return
-  taskWsReconnectTimer = setTimeout(() => {
-    taskWsReconnectTimer = null
-    connectTaskWs()
-  }, 3000)
-}
-
 onMounted(() => {
   // Initial fetch: load any tasks that existed before this page load
   taskStore.fetchAndMergeTasks()
@@ -295,9 +208,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  taskWsClosedByUs = true
-  if (taskWsReconnectTimer) clearTimeout(taskWsReconnectTimer)
-  if (taskWs) taskWs.close()
+  closeTaskWs()
 })
 </script>
 
