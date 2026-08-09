@@ -223,6 +223,96 @@ def _akshare_history_fallback(symbol: str, period: str = "daily") -> list[dict[s
         return []
 
 
+def _baostock_history(symbol: str, period: str = "daily", bs_code: str | None = None) -> list[dict[str, Any]]:
+    """BaoStock 历史 K 线（免费开源正式数据服务，盘后 T+1 更新，非交易时段可用）。
+
+    接入背景（2026-08-09）：akshare stock_zh_a_hist 走东财（EM 反爬时失效），
+    BaoStock 是独立数据服务（bs.login 免费无 token），作日线链第三环备份。
+    限制：无实时行情、当日盘中数据为截至昨日的（诚实降级：只补历史缺口）。
+    bs_code: 显式通达信代码（sh.000001 等），指数/特殊标的用（自动规则判不了）。
+    """
+    try:
+        import pandas as pd
+        if bs_code is None:
+            code = symbol[2:] if symbol.startswith(("sh", "sz", "bj")) else symbol
+            pref = "sh" if code.startswith(("5", "6")) else "sz"
+            bs_code = f"{pref}.{code}"
+        freq = {"daily": "d", "weekly": "w", "monthly": "m"}.get(period, "d")
+        def _p():
+            import baostock as bs
+            lg = bs.login()
+            try:
+                rs = bs.query_history_k_data_plus(
+                    bs_code,
+                    "date,open,high,low,close,volume,amount,pctChg",
+                    frequency=freq, adjustflag="2",  # 前复权
+                )
+                rows = []
+                while rs.next():
+                    rows.append(rs.get_row_data())
+                return rows
+            finally:
+                bs.logout()
+        rows = run_in_thread(_p, timeout=12, executor="long")
+        if not rows:
+            return []
+        out = []
+        for r in rows:
+            try:
+                out.append({
+                    "日期": r[0], "开盘": float(r[1]), "最高": float(r[2]),
+                    "最低": float(r[3]), "收盘": float(r[4]),
+                    "成交量": float(r[5] or 0), "成交额": float(r[6] or 0),
+                })
+            except (ValueError, TypeError, IndexError):
+                continue
+        return out
+    except Exception:
+        return []
+
+
+def _tickflow_kline(symbol: str, period: str = "daily") -> list[dict[str, Any]]:
+    """TickFlow 历史日 K（2026-08-09 接入，免费层 key 从 .env 读）。
+
+    定位：日线链第四环（sina → netease → baostock → tickflow）——免费层提供
+    历史日/周/月 K（OHLCV 完整），无实时行情（盘后更新）。与 BaoStock 互为
+    独立备份（TickFlow 是商业 API，无 EM 反爬；BaoStock 是开源服务）。
+    """
+    try:
+        from ..config import settings
+        api_key = getattr(settings, "tickflow_api_key", "") or ""
+        if not api_key:
+            return []
+        code = symbol[2:] if symbol.startswith(("sh", "sz", "bj")) else symbol
+        tf_sym = f"{code}.SH" if code.startswith(("5", "6")) else f"{code}.SZ"
+        freq = {"daily": "1d", "weekly": "1w", "monthly": "1M"}.get(period, "1d")
+        def _p():
+            from tickflow import TickFlow
+            client = TickFlow(api_key=api_key)
+            df = client.klines.get(tf_sym, period=freq, count=500, as_dataframe=True)
+            return df
+        df = run_in_thread(_p, timeout=12, executor="long")
+        if df is None or getattr(df, "empty", True):
+            return []
+        out = []
+        for _, row in df.iterrows():
+            try:
+                out.append({
+                    "日期": str(row.get("trade_date") or ""),
+                    "开盘": float(row.get("open", 0)),
+                    "最高": float(row.get("high", 0)),
+                    "最低": float(row.get("low", 0)),
+                    "收盘": float(row.get("close", 0)),
+                    "成交量": float(row.get("volume", 0) or 0),
+                    "成交额": float(row.get("amount", 0) or 0),
+                })
+            except (ValueError, TypeError):
+                continue
+        return out
+    except Exception:
+        return []
+
+
 # ── Sina helper ──────────────────────────────────────────────────
 
 def _strip_a_prefix(symbol: str) -> str:
@@ -1260,7 +1350,8 @@ def fetch_index_history(symbol: str, period: str = "daily") -> list[dict[str, An
                 return ak.stock_zh_index_daily(symbol=f"sh{code}")
         df = run_in_thread(_p, timeout=8, executor="long")
         if df is None or df.empty:
-            return []
+            # BaoStock 备用（2026-08-09 接入）：akshare 走东财，EM 反爬时失效
+            return _baostock_history(symbol, period, bs_code=f"sh.{code}")
         rename = {"date": "日期", "open": "开盘", "high": "最高", "low": "最低",
                   "close": "收盘", "volume": "成交量"}
         df = df.rename(columns=rename)
@@ -1297,6 +1388,15 @@ def fetch_history(symbol: str, asset_type: str = "A", period: str = "daily") -> 
                     ne_rows = fetch_history_netease(symbol, "A", "daily")
                     if ne_rows:
                         return ne_rows
+                    # BaoStock 第三环（2026-08-09 接入）：akshare/网易失效时的
+                    # 独立历史服务备份（盘后更新，非交易时段可用）
+                    bs_rows = _baostock_history(symbol, period)
+                    if bs_rows:
+                        return bs_rows
+                    # TickFlow 第四环（2026-08-09 接入）：商业 API，与 BaoStock 互为备份
+                    tf_rows = _tickflow_kline(symbol, period)
+                    if tf_rows:
+                        return tf_rows
                 return []
             if period in ("15m", "30m", "1h"):
                 # Sina K 线为主力（稳定），akshare eastmoney 分钟线兜底

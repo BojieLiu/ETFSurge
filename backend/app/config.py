@@ -93,6 +93,9 @@ class Settings(BaseSettings):
     backend_port: int = 8000
     frontend_dev_port: int = 5173
 
+    # TickFlow (2026-08-09 接入)：免费历史日K/标的池来源，key 从 .env 读
+    tickflow_api_key: str = ""
+
     class Config:
         env_file = str(_ENV_FILE)
         env_file_encoding = "utf-8"

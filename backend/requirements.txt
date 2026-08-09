@@ -27,3 +27,5 @@ python-multipart>=0.0.9
 # ──── Dev / CI tools ────────────────────────────────────────────
 mypy>=2.0.0
 pyinstrument>=5.0.0
+baostock>=0.8.9
+tickflow>=0.1.17  # python 3.14 (container) has no 0.2.x wheel; 0.1.x same api_key/klines API

@@ -159,3 +159,52 @@ def test_indicators_router_stale_mark(monkeypatch):
     assert result.get("_stale") is True
 
     market_data_hub._kline_stale_flags.pop("510300", None)
+
+
+# ── 2026-08-09 接入：BaoStock / TickFlow 历史日 K 兜底环 ──────────
+
+def test_fetch_history_etf_baostock_fallback(monkeypatch):
+    """sina/netease 全空 → BaoStock 第三环兜底（独立历史服务，非交易时段可用）。"""
+    from app.fetchers import china_market as cm
+    monkeypatch.setattr(cm, "_is_etf_code", lambda s: True)
+    monkeypatch.setattr(cm, "_sina_history_cb", lambda s, p: [])
+    monkeypatch.setattr(cm, "fetch_history_netease", lambda *a, **k: [])
+    monkeypatch.setattr(cm, "_baostock_history",
+                        lambda s, p: [{"日期": "2026-08-07", "开盘": 4.7, "最高": 4.76,
+                                       "最低": 4.7, "收盘": 4.751, "成交量": 9435356}])
+    rows = cm.fetch_history("510300", "A", "daily")
+    assert rows and rows[0]["收盘"] == 4.751
+
+
+def test_fetch_history_etf_tickflow_fallback(monkeypatch):
+    """sina/netease/baostock 全空 → TickFlow 第四环兜底。"""
+    from app.fetchers import china_market as cm
+    monkeypatch.setattr(cm, "_is_etf_code", lambda s: True)
+    monkeypatch.setattr(cm, "_sina_history_cb", lambda s, p: [])
+    monkeypatch.setattr(cm, "fetch_history_netease", lambda *a, **k: [])
+    monkeypatch.setattr(cm, "_baostock_history", lambda s, p: [])
+    monkeypatch.setattr(cm, "_tickflow_kline",
+                        lambda s, p: [{"日期": "2026-08-07", "开盘": 4.7, "最高": 4.76,
+                                       "最低": 4.7, "收盘": 4.751, "成交量": 9435356}])
+    rows = cm.fetch_history("510300", "A", "daily")
+    assert rows and rows[0]["收盘"] == 4.751
+
+
+def test_tickflow_kline_no_key_returns_empty(monkeypatch):
+    """TICKFLOW_API_KEY 未配置 → _tickflow_kline 短路返回 []（不触网）。"""
+    from app.fetchers import china_market as cm
+    monkeypatch.setattr("app.config.settings.tickflow_api_key", "")
+    assert cm._tickflow_kline("510300") == []
+
+
+def test_tickflow_kline_ok(monkeypatch):
+    """_tickflow_kline 正常路径：返回中文 key 日 K（mock klines.get）。"""
+    from app.fetchers import china_market as cm
+    import pandas as pd
+    monkeypatch.setattr("app.config.settings.tickflow_api_key", "tk_test")
+    df = pd.DataFrame([{"trade_date": "2026-08-07", "open": 4.7, "high": 4.76,
+                        "low": 4.7, "close": 4.751, "volume": 9435356,
+                        "amount": 4474693300.0}])
+    monkeypatch.setattr(cm, "run_in_thread", lambda fn, **k: df)
+    rows = cm._tickflow_kline("510300")
+    assert rows and rows[0]["收盘"] == 4.751 and rows[0]["日期"] == "2026-08-07"
