@@ -1292,14 +1292,6 @@ def section_factors(host, port):
         check(f"GET /api/v1/factors/ic", False, str(e))
 
 
-def section_factor_health(host, port):
-    """Z15/C4: factor-health 别名 — 薄包装复用 section_factors 完整断言。"""
-    section_factors(host, port)
-
-
-# ── 数据源熔断器状态 ────────────────────────────────────────────
-
-
 def section_circuit_breaker():
     """#6: 数据源熔断器状态 — 检查 SourceRegistry 端点（OPT-07 E2E 降级场景）。"""
     section("数据源熔断器状态")
@@ -2003,7 +1995,7 @@ def main():
         print(f"[Full] 模式: 运行所有模块")
 
     for name in module_names:
-        if name in ("health", "factors", "factor-health"):
+        if name in ("health", "factors"):
             MODULES[name](args.host, args.port)
         else:
             MODULES[name]()
@@ -2301,7 +2293,6 @@ MODULES["factor_ic"] = section_factor_ic
 MODULES["fundamentals"] = section_fundamentals
 MODULES["hk-market"] = section_hk_market
 MODULES["us-market"] = section_us_market
-MODULES["factor-health"] = section_factor_health
 
 if __name__ == "__main__":
     main()
