@@ -9,12 +9,12 @@ Endpoint: https://api.fund.eastmoney.com/f10/lsjz
 
 from __future__ import annotations
 
+import json
 import logging
+import urllib.request
 from typing import Any
 
 from ..core.async_utils import run_in_thread
-# EM 源换 curl_cffi（round11 EM 根因路线 A：浏览器 TLS 指纹绕容器侧 EM 拦截）
-from curl_cffi import requests as _cffi
 
 logger = logging.getLogger(__name__)
 
@@ -33,9 +33,11 @@ _TIMEOUT = 8
 def _fetch_nav(symbol: str) -> dict[str, Any] | None:
     """Sync helper: call EastMoney API and parse NAV response."""
     url = f"{_API_BASE}?fundCode={symbol}&pageIndex=1&pageSize=1"
+    req = urllib.request.Request(url, headers=_HEADERS)
     try:
-        resp = _cffi.get(url, headers=_HEADERS, timeout=_TIMEOUT)
-        data: dict[str, Any] = resp.json()
+        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
+            raw = resp.read().decode("utf-8")
+            data: dict[str, Any] = json.loads(raw)
     except Exception as exc:
         logger.warning("[fund_fetcher] HTTP/JSON error for %s: %s", symbol, exc)
         return None

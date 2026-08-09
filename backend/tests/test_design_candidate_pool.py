@@ -35,7 +35,7 @@ def test_pool_sorted_by_amount(monkeypatch):
         def get(self, url, **kw):
             return _FakeResp(url)
 
-    with patch("curl_cffi.requests.get", side_effect=_FakeReq().get):
+    with patch("requests.get", side_effect=_FakeReq().get):
         result = etf_scanner._fetch_em_etf_list()
     assert result is not None
     assert any("fid=f6" in u for u in captured_urls), f"fid 未改成交额排序: {captured_urls[0]}"
@@ -62,7 +62,7 @@ def test_pool_page_fail_continues(monkeypatch, caplog):
                 raise RuntimeError("network down")
             return _FakeResp()
 
-    with patch("curl_cffi.requests.get", side_effect=_FakeReq().get):
+    with patch("requests.get", side_effect=_FakeReq().get):
         with caplog.at_level(logging.WARNING, logger="app.fetchers.etf_scanner"):
             result = etf_scanner._fetch_em_etf_list()
 

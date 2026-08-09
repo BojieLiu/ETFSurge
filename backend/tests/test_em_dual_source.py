@@ -36,7 +36,7 @@ def test_fetch_em_list_host_param_passed_to_url():
         seen_hosts.append(url)
         return _FakeResp(_diff(2))
 
-    with patch("curl_cffi.requests.get", side_effect=_fake_get):
+    with patch("requests.get", side_effect=_fake_get):
         etf_scanner._fetch_em_etf_list("push2.eastmoney.com")
         etf_scanner._fetch_em_etf_list("push2delay.eastmoney.com")
 
@@ -54,7 +54,7 @@ def test_fetch_em_list_pushes_user_agent_and_referer():
         seen["headers"] = headers
         return _FakeResp(_diff(1))
 
-    with patch("curl_cffi.requests.get", side_effect=_fake_get):
+    with patch("requests.get", side_effect=_fake_get):
         etf_scanner._fetch_em_etf_list("push2.eastmoney.com")
     h = seen.get("headers", {})
     assert "Mozilla" in h.get("User-Agent", ""), "应带浏览器 UA"
@@ -76,7 +76,7 @@ def test_fetch_em_list_delay_fallback_via_dual_source():
             return _FakeResp([], total=0)
         return _FakeResp(_diff(60))
 
-    with patch("curl_cffi.requests.get", side_effect=_fake_get):
+    with patch("requests.get", side_effect=_fake_get):
         r_push2 = etf_scanner._fetch_em_etf_list("push2.eastmoney.com")
         r_delay = etf_scanner._fetch_em_etf_list("push2delay.eastmoney.com")
 

@@ -14,8 +14,6 @@ pytest-timeout>=2.3
 pytest-xdist>=3.0
 tushare>=1.2.89
 requests>=2.28
-# round11 EM 根因路线 A: curl_cffi（浏览器 TLS 指纹）绕容器侧 EM 拦截；wheel 捆绑 libcurl，无系统依赖
-curl_cffi>=0.15.0
 levistock>=0.1.0
 # R5-2-4: mootdx（通达信 TCP 行情，A 股实时/批量降级链第一环）改由 Dockerfile 以 --no-deps 安装。
 # 原因：mootdx 0.11.7 依赖 httpx>=0.25,<0.26，与项目 httpx>=0.27 冲突，pip -r 直接装会 ResolutionImpossible；
