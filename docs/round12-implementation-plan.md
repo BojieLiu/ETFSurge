@@ -113,6 +113,8 @@
 
 ## 5. 每批验收断言（可执行 checklist）
 
+> **通用门槛（每批必做，与下方批次断言并列）**：DoD = 测试绿 + 现实证真——每项改动按 `AGENTS.md`「反假完成机制」过 reality check：① 新端点/函数有真实调用点（非测试引用）；② 输出含真实数据路径值（非纯 fallback/mock/占位）；③ 内容断言（非仅 HTTP 200/非空）；④ 引用同步（rg 无旧名残留）；⑤ 前端四态（loading/空/错/慢）齐全。**全量测试绿但上述不过 ≠ 完成**。
+
 **批 1**：`pytest` 删除相关测试后全绿（不删则红 → 回滚）；`rg` 验证 12 死文件引用为 0；`verify_e2e` 除数据源类 FAIL 全 PASS（design_quality_gate 仍在）——**注意 P0-3 删非 stream 端点时同步删验证该端点的 verify_e2e 段（756-757），否则 section_analysis 必红；若裁定保留 `/llm-advice` 非流端点（红线 2①），则 verify_e2e 段保留且仅删其余端点**。
 
 **批 2**：filled 不再骤降（P0-C，stale 缓存 ≥上轮）；`_llm_timeout_for` 单测（仅静态 → 30s）；llm-advice stream 无「暂无数据」回退（若确认保留）；首页 perf ≥60 & 3 页 CLS <0.1（**统一 dev 容器环境重测，注明基线环境避免漂移**）；watchlist 实时全非 None。
