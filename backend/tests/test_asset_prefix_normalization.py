@@ -35,18 +35,16 @@ class TestExchangeStripsPrefix:
 class TestFetchStripsPrefix:
     def test_fetch_a_stock_realtime_receives_pure_digit(self, monkeypatch):
         """fetch_a_stock_realtime('sh688981') → 底层源收到纯数字 '688981'（验收⑤）。"""
-        with patch.object(cm, "_mootdx_realtime", return_value=[]) as m_mootdx, \
-             patch.object(cm, "_tencent_realtime", return_value=[]) as m_tencent, \
+        with patch.object(cm, "_tencent_realtime", return_value=[]) as m_tencent, \
              patch.object(cm, "_sina_realtime", return_value=[]) as m_sina:
             cm.fetch_a_stock_realtime("sh688981")
-            assert m_mootdx.call_args[0][0] == ["688981"]
             assert m_tencent.call_args[0][0] == ["688981"]
             assert m_sina.call_args[0][0] == ["688981"]
 
     def test_fetch_a_stock_batch_strips_prefix(self, monkeypatch):
-        with patch.object(cm, "_mootdx_realtime", return_value=[]) as m_mootdx:
+        with patch.object(cm, "_tencent_realtime", return_value=[]) as m_tencent:
             cm.fetch_a_stock_batch(["sh688981", "sz000001"])
-            assert m_mootdx.call_args[0][0] == ["688981", "000001"]
+            assert m_tencent.call_args[0][0] == ["688981", "000001"]
 
     def test_tencent_sina_sym_key_stripped(self):
         """_tencent/_sina 的 A 股前缀拼接使用纯数字（不产生 szsh688981）。"""

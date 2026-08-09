@@ -31,8 +31,7 @@ def test_fetch_history_etf_netease_fallback(monkeypatch):
 def test_fetch_history_stock_netease_fallback(monkeypatch):
     """个股日线：mootdx 空 → sina 空 → netease 兜底。"""
     monkeypatch.setattr("app.fetchers.china_market._is_etf_code", lambda s: False)
-    monkeypatch.setattr("app.fetchers.china_market._mootdx_history",
-                       lambda s, p: [])
+    
     monkeypatch.setattr("app.fetchers.china_market._sina_history_cb",
                        lambda s, p: [])
     ne_rows = [{"date": "2026-01-05", "open": 1.0, "high": 1.1, "low": 0.9,

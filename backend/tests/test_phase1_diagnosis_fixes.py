@@ -279,7 +279,7 @@ class TestP1_4_ProbeAccuracy:
                         registered_sources.append(call.args[0].value)
 
         # Check for standard source names
-        expected_sources = ["mootdx", "sina", "tencent", "akshare", "levistock", "dongfang"]
+        expected_sources = ["sina", "tencent", "akshare", "levistock", "dongfang"]
         for source in expected_sources:
             assert source in registered_sources, (
                 f"Probe for {source} not found or not registered with proper name "

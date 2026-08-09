@@ -15,7 +15,6 @@
 
 from typing import Any
 import time  # U7/N08: fetch_fund_nav 24h 缓存时间戳
-from pathlib import Path
 from ..core.logging import get_logger
 from ..utils.proxy import no_proxy
 from ..utils.decode import decode_df as _decode_df
@@ -65,146 +64,7 @@ def _session():
     return _shared_session
 
 
-# ── mootdx helper ────────────────────────────────────────────────
 
-import concurrent.futures as _cf
-
-# mootdx 连接超时（Quotes.factory 的 TCP 连接超时）
-_MOOTDX_TIMEOUT = 6
-# mootdx 单次读操作超时（client.quotes / client.bars 的 socket read 超时）
-# 使用 concurrent.futures 实现，防止 mootdx socket 读挂死线程池
-# P0-4 (round9 §10): mootdx 读超时 8→3s——容器内实测 0.35s 返回真实行情，
-# 3s 余量充足；数据源弱/EM 冷却期 mootdx 空转 8s 是 watchlist 29.9s 与批量 5.7s
-# 的稳定开销（每次调用链 mootdx→tencent→sina 都要先空等 mootdx 超时）。
-_MOOTDX_READ_TIMEOUT = 3
-
-_MOOTDX_CLIENT: "Quotes | None" = None
-# 单线程 executor 用于 mootdx 读操作的超时保护
-_MOOTDX_EXECUTOR = _cf.ThreadPoolExecutor(max_workers=1, thread_name_prefix="mootdx")
-
-# R6-F1 (round6 §三/§十 R6-02): 全新环境（容器/CI 无 ~/.mootdx/config.json）fallback 服务器。
-# 容器内实测 0.35s 返回真实行情；mootdx StdQuotes 显式 server 参数会跳过 BESTIP 缓存依赖。
-_MOOTDX_FALLBACK_SERVERS = [("180.153.18.172", 80)]
-
-
-def _has_mootdx_config() -> bool:
-    """~/.mootdx/config.json 是否存在（mootdx BESTIP 服务器缓存）。"""
-    try:
-        return (Path.home() / ".mootdx" / "config.json").exists()
-    except Exception:
-        return False
-
-
-def _run_mootdx_with_timeout(fn, timeout: int = _MOOTDX_READ_TIMEOUT):
-    """在独立线程中执行 mootdx 读操作，带硬超时。
-
-    解决 P0 问题：mootdx TCP socket read 可能无限挂起 → 线程池耗尽。
-    asyncio.wait_for 无法中断同步阻塞的线程，因此用 ThreadPoolExecutor
-    的 future.result(timeout=N) 实现硬超时。
-    """
-    future = _MOOTDX_EXECUTOR.submit(fn)
-    try:
-        return future.result(timeout=timeout)
-    except _cf.TimeoutError:
-        logger.warning("[mootdx] read timed out after %ds — socket may be hung", timeout)
-        # future 继续在后台运行，但已超时返回 None；线程最终会被 executor 回收
-        return None
-
-
-def _mootdx():
-    """获取 mootdx 客户端（懒初始化，无需全局锁）。
-
-    mootdx 的 socket 连接并非线程安全，但由于 SourceRegistry
-    已提供 Sina/Tencent 降级通道，即使 mootdx 并发崩溃也能
-    秒级熔断。去掉全局锁避免线程池被阻塞线程填满。
-
-    R6-F1: 全新环境（容器/CI 无 ~/.mootdx/config.json BESTIP 缓存）时
-    显式传入已知可用 fallback server——避免 Quotes.factory 空转
-    （曾致 report A 309s / 策略检查持仓加载 55s / 预热 6.2s）。
-    """
-    global _MOOTDX_CLIENT
-    if _MOOTDX_CLIENT is None:
-        from mootdx.quotes import Quotes
-        if _has_mootdx_config():
-            _MOOTDX_CLIENT = Quotes.factory(market='std', timeout=_MOOTDX_TIMEOUT)
-        else:
-            _MOOTDX_CLIENT = Quotes.factory(
-                market='std', server=_MOOTDX_FALLBACK_SERVERS[0],
-                timeout=_MOOTDX_TIMEOUT,
-            )
-    return _MOOTDX_CLIENT
-
-
-def _mootdx_realtime(symbols: list[str]) -> list[dict[str, Any]]:
-    if not symbols:
-        return []
-    try:
-        client = _mootdx()
-        df = _run_mootdx_with_timeout(lambda: client.quotes(symbol=symbols))
-        if df is None:
-            logger.warning("_mootdx_realtime timed out for %s", symbols)
-            return []
-        if df.empty:
-            logger.warning("_mootdx_realtime returned empty for %s", symbols)
-            return []
-        results = []
-        for _, row in df.iterrows():
-            code = str(row.get("code", ""))
-            price = float(row.get("price", 0) or 0)
-            last_close = float(row.get("last_close", 0) or 0)
-            change_pct = round((price - last_close) / last_close * 100, 2) if last_close else 0
-            results.append({
-                "symbol": code,
-                "name": "",
-                "price": price,
-                "change_pct": change_pct,
-                "change_amount": round(price - last_close, 2),
-                "volume": float(row.get("volume", 0) or 0),
-                "turnover": float(row.get("amount", 0) or 0),
-                "asset_type": "A",
-            })
-        return results
-    except Exception:
-        logger.warning("_mootdx_realtime exception for %s", symbols)
-        return []
-
-
-def _mootdx_history(symbol: str, period: str = "daily") -> list[dict[str, Any]]:
-    freq_map = {"daily": 9, "weekly": 5, "monthly": 6}
-    freq = freq_map.get(period, 9)
-    count = 500
-    try:
-        client = _mootdx()
-        df = _run_mootdx_with_timeout(lambda: client.bars(symbol=symbol, frequency=freq, start=0, count=count))
-        if df is None:
-            logger.warning("_mootdx_history timed out for %s (period=%s)", symbol, period)
-            return _akshare_history_fallback(symbol, period)
-        if df.empty:
-            logger.warning("_mootdx_history returned empty for %s (period=%s)", symbol, period)
-            # Fallback to akshare stock_zh_a_hist
-            return _akshare_history_fallback(symbol, period)
-        results = []
-        for _, row in df.iterrows():
-            results.append({
-                # 中文 Key（兼容 indicators.py/chart_data）
-                "日期": str(row.get("date", "")),
-                "开盘": float(row.get("open", 0)),
-                "最高": float(row.get("high", 0)),
-                "最低": float(row.get("low", 0)),
-                "收盘": float(row.get("close", 0)),
-                "成交量": float(row.get("volume", 0) or 0),
-                # 英文 Key（兼容 factor_registry._fetch_market_data）
-                "day": str(row.get("date", "")),
-                "open": float(row.get("open", 0)),
-                "high": float(row.get("high", 0)),
-                "low": float(row.get("low", 0)),
-                "close": float(row.get("close", 0)),
-                "volume": float(row.get("volume", 0) or 0),
-            })
-        return results
-    except Exception:
-        logger.warning("_mootdx_history exception for %s (period=%s)", symbol, period)
-        return _akshare_history_fallback(symbol, period)
 
 
 def _akshare_history_fallback(symbol: str, period: str = "daily") -> list[dict[str, Any]]:
@@ -678,7 +538,6 @@ def fetch_a_stock_realtime(symbol: str | None = None) -> list[dict[str, Any]]:
         return []
     clean = _strip_a_prefix(symbol)
     return registry.route([
-        ("mootdx", lambda: _filtered(_mootdx_realtime, [clean])),
         ("tencent", lambda: _filtered(_tencent_realtime, [clean], "A")),
         ("sina", lambda: _filtered(_sina_realtime, [clean], "A")),
     ], route_name="A_stock_realtime", operation="realtime", target=symbol) or []
@@ -691,7 +550,6 @@ def fetch_a_stock_batch(symbols: list[str]) -> list[dict[str, Any]]:
     # O22 (round8 §7): 批量入口同样剥 sh/sz/bj 前缀
     clean_symbols = [_strip_a_prefix(s) for s in symbols]
     return registry.route([
-        ("mootdx", lambda: _filtered(_mootdx_realtime, clean_symbols)),
         ("tencent", lambda: _filtered(_tencent_realtime, clean_symbols, "A")),
         ("sina", lambda: _filtered(_sina_realtime, clean_symbols, "A")),
     ], route_name="A_stock_batch", operation="batch", target=",".join(symbols)) or []
@@ -1074,9 +932,9 @@ def fetch_sina_page_global_index(symbol: str) -> dict[str, Any] | None:
 
 
 def fetch_index_realtime() -> list[dict[str, Any]]:
-    """Fetch major market indices via Sina(s_sh)→mootdx→Tencent(QQ) 三级降级。
+    """Fetch major market indices via Sina(s_sh)→Tencent(QQ) 两级降级。
 
-    R77 缺口 4：改为 registry.route（对齐 mootdx→Sina 模式）——熔断源被跳过、
+    R77 缺口 4：改为 registry.route（对齐 Sina→Tencent 模式）——熔断源被跳过、
     成功/失败记录熔断状态；全失败返回 []（保持旧调用方兼容）。
     上证指数(000001/000300/000688 等)在 Sina 需用 s_sh 前缀（指数格式），
     否则会被当成深圳股票返回错误价格（如 000001=平安银行10.98）。
@@ -1094,34 +952,12 @@ def fetch_index_realtime() -> list[dict[str, Any]]:
                 return sina_result
             return []
 
-    def _mootdx_index():
-        with no_proxy():
-            client = _mootdx()
-            df = client.index(symbol=codes)
-            if df is None or df.empty:
-                return []
-            results = []
-            for _, row in df.iterrows():
-                code = str(row.get("code", ""))
-                price = float(row.get("price", 0) or 0)
-                prev = float(row.get("last_close", 0) or 0)
-                results.append({
-                    "symbol": code, "name": indices.get(code, ""),
-                    "price": price,
-                    "change_pct": round((price - prev) / prev * 100, 2) if prev else 0,
-                    "change_amount": round(price - prev, 2),
-                    "volume": float(row.get("volume", 0) or 0),
-                    "turnover": 0,
-                    "asset_type": "index",
-                })
-            return results
-
     def _tencent_index():
         with no_proxy():
             return _tencent_realtime(codes, "index")
 
     result = registry.route(
-        [("sina", _sina_index), ("mootdx", _mootdx_index), ("tencent", _tencent_index)],
+        [("sina", _sina_index), ("tencent", _tencent_index)],
         route_name="index_realtime", operation="realtime", target="CN_INDEX",
     )
     return result or []
@@ -1287,7 +1123,7 @@ def fetch_history(symbol: str, asset_type: str = "A", period: str = "daily") -> 
         if asset_type == "index":
             return fetch_index_history(symbol, period)
         if asset_type == "A":
-            # ETF 代码跳过 mootdx（不支持），直接走 Sina（快且稳定）
+            # ETF 代码直接走 Sina（快且稳定）
             if _is_etf_code(symbol):
                 rows = _sina_history_cb(symbol, period)
                 if rows:
@@ -1309,9 +1145,6 @@ def fetch_history(symbol: str, asset_type: str = "A", period: str = "daily") -> 
                 if not rows:
                     rows = _akshare_intraday_history(symbol, 60)
                 return _resample_4h(rows)
-            items = _mootdx_history(symbol, period)
-            if items:
-                return items
             rows = _sina_history_cb(symbol, period)
             if rows:
                 return rows
@@ -1525,6 +1358,5 @@ def fetch_etf_list() -> list[dict[str, Any]]:
             ]
         except Exception:
             return []
-
 
 

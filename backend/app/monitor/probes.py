@@ -8,21 +8,13 @@ from ..services.source_health import register_probe
 
 
 def register_all_probes() -> None:
-    """Register all 6 data-source health probes.
+    """Register all 5 data-source health probes.
 
     Each probe is a simple pass/fail check with an appropriate timeout.
     Probes run every 120s via the health_loop in main.py.
     """
 
-    # ── C1: mootdx (8s) ──────────────────────────────────────────
-    from ..fetchers.china_market import _mootdx_realtime
-
-    def _probe_mootdx():
-        result = _mootdx_realtime(["510050"])
-        return bool(result and any(r.get("price", 0) > 0 for r in result))
-    register_probe("mootdx", _probe_mootdx, timeout=8)
-
-    # ── C2: Sina (10s) ──────────────────────────────────────────
+    # ── C1: Sina (10s) ──────────────────────────────────────────
     from ..fetchers.china_market import _sina_realtime
 
     def _probe_sina():
@@ -30,7 +22,7 @@ def register_all_probes() -> None:
         return bool(result and any(r.get("price", 0) > 0 for r in result))
     register_probe("sina", _probe_sina, timeout=10)
 
-    # ── C3: Tencent / QQ (10s) ─────────────────────────────────
+    # ── C2: Tencent / QQ (10s) ─────────────────────────────────
     from ..fetchers.china_market import _tencent_realtime
 
     def _probe_tencent():
@@ -38,7 +30,7 @@ def register_all_probes() -> None:
         return bool(result and any(r.get("price", 0) > 0 for r in result))
     register_probe("tencent", _probe_tencent, timeout=10)
 
-    # ── C4: akshare (15s) — use sector endpoint (system-actual function) ──
+    # ── C3: akshare (15s) — use sector endpoint (system-actual function) ──
     def _probe_akshare():
         try:
             # Lazy import to avoid startup overhead
@@ -51,7 +43,7 @@ def register_all_probes() -> None:
             return False
     register_probe("akshare", _probe_akshare, timeout=15)
 
-    # ── C5: levistock (10s) — sector endpoint ──────────────────
+    # ── C4: levistock (10s) — sector endpoint ──────────────────
     def _probe_levistock():
         try:
             import levistock as lv  # type: ignore[import-untyped]
@@ -61,7 +53,7 @@ def register_all_probes() -> None:
             return False
     register_probe("levistock", _probe_levistock, timeout=10)
 
-    # ── C6: 东方财富 / dongfang (8s) — HK realtime ──────────
+    # ── C5: 东方财富 / dongfang (8s) — HK realtime ──────────
     from ..fetchers.china_market import _em_hk_realtime
 
     def _probe_dongfang():

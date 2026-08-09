@@ -25,7 +25,6 @@ _APP_PATH = os.path.join(os.path.dirname(__file__), "..", "app")
 _SYNC_PATTERNS = [
     "fetch_history",
     "fetch_a_stock_batch",
-    "_mootdx_",
     "_sina_",
     "_tencent_",
     "run_in_thread",
