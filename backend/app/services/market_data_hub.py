@@ -447,6 +447,32 @@ class MarketDataHub:
                 self._last_refresh_ts = 0.0
                 raise
 
+    def _assign_layer(self, base_layer: str, industry: str) -> str:
+        """行业→层映射（P1-2 防御层分类修复，R5 pool 归层）。
+
+        从 _refresh_impl 提取的纯函数，供单测直测（消除测试复制实现）：
+        - core（宽基指数）→ LAYER_CORE
+        - defense（商品/固收）→ LAYER_DEFENSE（跨境不落防御，P1-2）
+        - 跨境 → LAYER_SATELLITE
+        - unknown → LAYER_RESEARCH
+        - 其余 → LAYER_SATELLITE
+        """
+        base_layer = base_layer or LAYER_SATELLITE
+        industry = industry or "unknown"
+        # Core: 宽基指数
+        if base_layer == "core" or industry == "宽基指数":
+            return LAYER_CORE
+        # Defense: 商品/固收（注意：跨境归卫星层，P1-2 修复）
+        if base_layer == "defense" or industry in ("商品", "固收"):
+            return LAYER_DEFENSE
+        # 跨境 → 卫星层（非防御资产）
+        if industry == "跨境":
+            return LAYER_SATELLITE
+        # Research: unknown industry
+        if industry == "unknown":
+            return LAYER_RESEARCH
+        return LAYER_SATELLITE
+
     async def _refresh_impl(self) -> PoolDiff:
         """实际刷新逻辑（被 refresh() 的锁保护）。"""
         import time as _time
@@ -603,27 +629,12 @@ class MarketDataHub:
                 })
 
         for item in flat:
-            base_layer = item.get("layer", LAYER_SATELLITE)
-            industry = item.get("industry", "unknown")
-
-            # Core: 宽基指数
-            if base_layer == "core" or industry == "宽基指数":
-                target = LAYER_CORE
-            # Defense: 商品/固收（注意：跨境归卫星层，P1-2 修复）
-            elif base_layer == "defense" or industry in ("商品", "固收"):
-                target = LAYER_DEFENSE
-            # 跨境 → 卫星层（非防御资产）
-            elif industry == "跨境":
-                target = LAYER_SATELLITE
-            # Research: unknown industry
-            elif industry == "unknown":
-                target = LAYER_RESEARCH
-            else:
-                target = LAYER_SATELLITE
-
-            item["layer"] = target
+            item["layer"] = self._assign_layer(
+                item.get("layer", LAYER_SATELLITE),
+                item.get("industry", "unknown"),
+            )
             item["composite_score"] = 0.0
-            new_pool[target].append(item)
+            new_pool[item["layer"]].append(item)
 
         # 4c. B2: 同层同指数去重（依赖 tracked_index 字段）
         new_pool = self._deduplicate_by_index(new_pool)

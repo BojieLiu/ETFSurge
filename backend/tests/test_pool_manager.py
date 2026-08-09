@@ -6,6 +6,13 @@ All external calls (etf_scanner, ETFClassifier, FactorRegistry) must be mocked.
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
+from app.services.market_data_hub import (
+    LAYER_CORE,
+    LAYER_DEFENSE,
+    LAYER_RESEARCH,
+    LAYER_SATELLITE,
+)
+
 
 class TestMarketDataHub:
     """MarketDataHub: candidate pool lifecycle."""
@@ -246,3 +253,247 @@ async def test_market_context_getters_completeness():
     indices = pm.get_index_realtime()
     assert len(indices) >= 1
     assert indices[0]["name"] == "上证指数"
+
+
+# ── 层分配逻辑（合并自 test_pool_manager_layer.py，改测真实 _assign_layer）──
+
+
+class TestLayerAssignment:
+    """行业→层映射的准确性（P1-2 防御层分类修复）。
+
+    P1-8: 原手写 _apply_layer_assignment 复制实现已消除，改测
+    market_data_hub.MarketDataHub._assign_layer 真实函数。
+    """
+
+    @pytest.fixture
+    def hub(self):
+        from app.services.market_data_hub import MarketDataHub
+        return MarketDataHub.__new__(MarketDataHub)
+
+    def test_gold_etf_goes_to_defense(self, hub):
+        """黄金 ETF（商品行业）→ 防御层。"""
+        assert hub._assign_layer("satellite", "商品") == LAYER_DEFENSE
+
+    def test_treasury_etf_goes_to_defense(self, hub):
+        """国债 ETF（固收行业）→ 防御层。"""
+        assert hub._assign_layer("satellite", "固收") == LAYER_DEFENSE
+
+    def test_cross_border_etf_goes_to_satellite(self, hub):
+        """跨境 ETF（如纳指/标普）→ 卫星层（P1-2 修复）。"""
+        assert hub._assign_layer("satellite", "跨境") == LAYER_SATELLITE
+
+    def test_hk_etf_goes_to_satellite_not_defense(self, hub):
+        """港股 ETF（跨境行业）不应落入防御层。"""
+        result = hub._assign_layer("satellite", "跨境")
+        assert result == LAYER_SATELLITE, f"跨境ETF应归卫星层，实际为 {result}"
+        assert result != LAYER_DEFENSE, "跨境ETF不应归防御层"
+
+    def test_broad_index_goes_to_core(self, hub):
+        """宽基指数 ETF → 核心层。"""
+        assert hub._assign_layer("core", "宽基指数") == LAYER_CORE
+
+    def test_tech_etf_goes_to_satellite(self, hub):
+        """科技 ETF（无特殊行业）→ 卫星层。"""
+        assert hub._assign_layer("satellite", "信息技术") == LAYER_SATELLITE
+
+    def test_defense_etf_from_scanner_stays_defense(self, hub):
+        """扫描器标记为 defense 的标的，即使 industry 未知也走防御层。"""
+        assert hub._assign_layer("defense", "unknown") == LAYER_DEFENSE
+
+    def test_core_etf_stays_core(self, hub):
+        """扫描器标记为 core 的标的不被 industry 覆盖。"""
+        assert hub._assign_layer("core", "信息技术") == LAYER_CORE
+
+    def test_unknown_industry_goes_research(self, hub):
+        """industry unknown + 无 base 标记 → research 层。"""
+        assert hub._assign_layer("", "unknown") == LAYER_RESEARCH
+
+
+# ── Phase 2: 因子评分 + 第 4/5 层（合并自 test_pool_manager_phase2.py）──
+
+
+class TestMarketDataHubPhase2:
+    """MarketDataHub Phase 2: factor scoring + layer 4/5."""
+
+    @pytest.fixture
+    def mock_factor_registry_p2(self):
+        """Mock FactorRegistry returning per-symbol factor scores."""
+        reg = MagicMock()
+        reg.compute = AsyncMock(return_value={
+            "510300": {"style.momentum.mom_3m": 0.05, "style.quality.roe": 0.12},
+            "560600": {"style.momentum.mom_3m": 0.03, "style.quality.roe": 0.10},
+            "512480": {"style.momentum.mom_3m": 0.08, "style.quality.roe": 0.06},
+            "515030": {"style.momentum.mom_3m": 0.06, "style.quality.roe": 0.07},
+            "518880": {"style.momentum.mom_3m": -0.02, "style.quality.roe": 0.04},
+        })
+        reg.aggregate_factor_scores = MagicMock(side_effect=lambda raw_scores: {
+            **raw_scores,
+            "composite": sum(raw_scores.values()) / max(len(raw_scores), 1),
+        })
+        return reg
+
+    @pytest.fixture
+    def market_data_hub_p2(self, mock_factor_registry_p2):
+        from app.services.market_data_hub import MarketDataHub
+        pm = MarketDataHub()
+        # Inject mock dependencies
+        pm.scanner = MagicMock()
+        pm.scanner.full_pipeline.return_value = {
+            "core": [
+                {"symbol": "510300", "name": "沪深300ETF", "amount": 10e8, "fund_scale": 50e8},
+                {"symbol": "560600", "name": "中证A500ETF", "amount": 5e8, "fund_scale": 20e8},
+            ],
+            "satellite": [
+                {"symbol": "512480", "name": "半导体ETF", "amount": 8e8, "fund_scale": 30e8},
+                {"symbol": "515030", "name": "新能源ETF", "amount": 6e8, "fund_scale": 25e8},
+            ],
+            "defense": [
+                {"symbol": "518880", "name": "黄金ETF", "amount": 20e8, "fund_scale": 100e8},
+            ],
+        }
+        pm.classifier = MagicMock()
+        pm.classifier.batch_classify.return_value = {
+            "510300": {"industry": "宽基指数", "concepts": ["沪深300"], "confidence": 0.85},
+            "560600": {"industry": "宽基指数", "concepts": ["A500"], "confidence": 0.85},
+            "512480": {"industry": "电子", "concepts": ["半导体"], "confidence": 0.85},
+            "515030": {"industry": "电力设备", "concepts": ["新能源"], "confidence": 0.70},
+            "518880": {"industry": "商品", "concepts": ["黄金"], "confidence": 0.85},
+        }
+        pm.factor_registry = mock_factor_registry_p2
+        return pm
+
+    @pytest.mark.asyncio
+    async def test_refresh_calls_factor_registry(self, market_data_hub_p2, mock_factor_registry_p2):
+        """refresh() 应调用 FactorRegistry.compute()"""
+        await market_data_hub_p2.refresh()
+        mock_factor_registry_p2.compute.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_entries_have_factor_scores(self, market_data_hub_p2):
+        """候选池条目应包含 factor_scores 字段"""
+        await market_data_hub_p2.refresh()
+        entry = market_data_hub_p2.get_by_code("510300")
+        assert entry is not None
+        assert "factor_scores" in entry
+        assert "style.momentum.mom_3m" in entry["factor_scores"]
+
+    @pytest.mark.asyncio
+    async def test_layer_4_opportunistic_exists(self, market_data_hub_p2):
+        """第 4 层(Opportunistic)应存在"""
+        await market_data_hub_p2.refresh()
+        pool = market_data_hub_p2.get_pool()
+        assert "opportunistic" in pool
+
+    @pytest.mark.asyncio
+    async def test_layer_5_research_exists(self, market_data_hub_p2):
+        """第 5 层(Research)应存在"""
+        await market_data_hub_p2.refresh()
+        pool = market_data_hub_p2.get_pool()
+        assert "research" in pool
+
+    @pytest.mark.asyncio
+    async def test_sorted_by_factor_score_within_layer(self, market_data_hub_p2):
+        """同层内应因子得分高的排前面"""
+        await market_data_hub_p2.refresh()
+        satellite = market_data_hub_p2.get_pool(layer="satellite")
+        if len(satellite) >= 2:
+            fs0 = satellite[0].get("composite_score", 0)
+            fs1 = satellite[1].get("composite_score", 0)
+            assert fs0 >= fs1, "satellite layer should be sorted by composite score descending"
+
+    @pytest.mark.asyncio
+    async def test_opportunistic_added_via_text_signals(self, market_data_hub_p2):
+        """文本信号可触发 ETF 加入 opportunistic 层"""
+        market_data_hub_p2.set_opportunistic_signals({
+            "159995": {"signal": "policy_heat", "heat_score": 0.85, "reason": "半导体政策利好"},
+        })
+        await market_data_hub_p2.refresh()
+        opp = market_data_hub_p2.get_pool(layer="opportunistic")
+        if opp:
+            assert any(e["symbol"] == "159995" for e in opp)
+
+    def test_set_opportunistic_signals(self, market_data_hub_p2):
+        """set_opportunistic_signals 应存储外部信号"""
+        signals = {"159995": {"signal": "policy_heat", "heat_score": 0.85}}
+        market_data_hub_p2.set_opportunistic_signals(signals)
+        assert len(market_data_hub_p2._opportunistic_signals) == 1
+        assert market_data_hub_p2._opportunistic_signals["159995"]["heat_score"] == 0.85
+
+
+# ── Phase 3: 日频刷新审计 + pool_audit（合并自 test_pool_manager_phase3.py）──
+
+
+class TestPoolAudit:
+    """MarketDataHub 审计日志"""
+
+    @pytest.fixture
+    def audit(self):
+        from app.services.pool_audit import PoolAudit
+        return PoolAudit()
+
+    def test_log_refresh(self, audit):
+        """记录一次 refresh 事件"""
+        diff = MagicMock()
+        diff.version = 3
+        diff.added = [{"symbol": "159995", "name": "芯片ETF"}]
+        diff.removed = [{"symbol": "159999", "name": "僵尸ETF"}]
+        diff.changed = []
+        diff.timestamp = "2026-07-17T12:00:00"
+
+        audit.log_refresh(diff)
+        assert len(audit.get_history()) == 1
+
+    def test_get_history_returns_sorted(self, audit):
+        """历史记录应按时间倒序"""
+        diff1 = MagicMock(version=1, added=[], removed=[], changed=[], timestamp="2026-07-16")
+        diff2 = MagicMock(version=2, added=[], removed=[], changed=[], timestamp="2026-07-17")
+        audit.log_refresh(diff1)
+        audit.log_refresh(diff2)
+        history = audit.get_history(limit=2)
+        assert len(history) == 2
+        assert history[0]["version"] == 2  # newest first
+
+    def test_get_history_limit(self, audit):
+        """限制返回条数"""
+        for i in range(5):
+            d = MagicMock(version=i, added=[], removed=[], changed=[], timestamp=f"2026-07-{16+i}")
+            audit.log_refresh(d)
+        assert len(audit.get_history(limit=3)) == 3
+
+    def test_last_refresh(self, audit):
+        """返回最近一次 refresh 记录"""
+        assert audit.get_last_refresh() is None
+        diff = MagicMock(version=5, added=[], removed=[], changed=[], timestamp="2026-07-17")
+        audit.log_refresh(diff)
+        last = audit.get_last_refresh()
+        assert last is not None
+        assert last["version"] == 5
+
+
+class TestDailyRefresh:
+    """MarketDataHub 日频刷新调度"""
+
+    @pytest.mark.asyncio
+    async def test_refresh_and_audit(self):
+        """refresh() 后审计日志应有记录"""
+        from app.services.market_data_hub import market_data_hub
+        from app.services.pool_audit import pool_audit
+
+        with patch.object(market_data_hub, 'scanner') as mock_scanner:
+            mock_scanner.full_pipeline.return_value = {
+                "core": [{"symbol": "510300", "name": "沪深300ETF", "amount": 10e8, "fund_scale": 50e8}],
+                "satellite": [{"symbol": "512480", "name": "半导体ETF", "amount": 8e8, "fund_scale": 30e8}],
+                "defense": [{"symbol": "518880", "name": "黄金ETF", "amount": 20e8, "fund_scale": 100e8}],
+            }
+            market_data_hub.classifier = MagicMock()
+            market_data_hub.classifier.batch_classify.return_value = {
+                "510300": {"industry": "宽基指数", "concepts": [], "confidence": 0.85},
+                "512480": {"industry": "电子", "concepts": [], "confidence": 0.85},
+                "518880": {"industry": "商品", "concepts": [], "confidence": 0.85},
+            }
+
+            diff = await market_data_hub.refresh()
+            # 审计日志应有记录
+            log_entry = pool_audit.get_last_refresh()
+            assert log_entry is not None
+            assert log_entry["version"] > 0
