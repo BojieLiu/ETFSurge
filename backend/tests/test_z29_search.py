@@ -280,3 +280,359 @@ async def test_search_hk_us_legacy_default_still_etf_only_offline():
     res = await ms.search_hk_us("SPY", enrich=False)
     assert any(r["symbol"] == "SPY" for r in res)
     assert all(r["type"] == "etf" for r in res)
+
+
+# ─── R6-F9: US spot 失败 → 本地 instruments 补搜（合并自 test_us_search_fallback.py）─────
+
+
+def test_us_spot_failure_falls_back_to_local_instruments(monkeypatch):
+    """fetch_us_spot_list 失败/空 → 本地 instruments 表 US 段补搜（apple 非空）。"""
+    us_rows = [
+        type("R", (), {"symbol": "AAPL", "name": "苹果", "market": "US", "is_active": True})(),
+        type("R", (), {"symbol": "MSFT", "name": "微软", "market": "US", "is_active": True})(),
+    ]
+
+    class _FakeSessionUsRows:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def execute(self, stmt):
+            return self
+
+        def scalars(self):
+            return self
+
+        def all(self):
+            return us_rows
+
+    monkeypatch.setattr(ms, "async_session", lambda: _FakeSessionUsRows())
+    # HK spot 正常返回空，US spot 失败（模拟限流）——search_hk_us 内部
+    # `from ..fetchers.china_market import fetch_us_spot_list` 读模块属性
+    monkeypatch.setattr("app.fetchers.china_market.fetch_us_spot_list", lambda: [])
+    monkeypatch.setattr("app.fetchers.china_market.fetch_hk_spot_list", lambda: [])
+
+    async def _go():
+        # 直接调用 search_hk_us：include_stocks=True 触发 spot 段
+        return await ms.search_hk_us("apple", include_stocks=True, enrich=False)
+
+    import asyncio
+    results = asyncio.run(_go())
+    us_hits = [r for r in results if r.get("market") == "US" and r.get("type") == "stock"]
+    assert any("apple" in (r.get("name") or "").lower() or r.get("symbol") == "AAPL"
+               for r in us_hits), f"本地 US instruments 补搜应命中 apple, got {results[:5]}"
+
+
+# ─── O4: 个股代码/名称搜索 + HK 本地表补搜（合并自 test_search_stock_by_code.py）───
+
+
+class _FakeInstrument:
+    def __init__(self, symbol, name, market, asset_type="stock", pinyin="", first_letter=""):
+        self.symbol = symbol
+        self.name = name
+        self.market = market
+        self.asset_type = asset_type
+        self.pinyin = pinyin
+        self.first_letter = first_letter
+        self.is_active = True
+
+
+def _fake_session_rows(rows):
+    """构造 async_session 的 fake：execute → scalars().all() → rows。"""
+    session = AsyncMock()
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = rows
+    session.execute = AsyncMock(return_value=result)
+    cm = AsyncMock()
+    cm.__aenter__.return_value = session
+    cm.__aexit__.return_value = False
+    return cm
+
+
+class TestSearchHkUsLocalFallback:
+    @pytest.mark.asyncio
+    async def test_hk_instruments_fallback_when_spot_empty(self, monkeypatch):
+        """HK spot 空 → 本地 instruments 表（HK 段）补搜 → 00700 可命中。"""
+        from app.services.market_service import search_hk_us
+
+        rows = [
+            _FakeInstrument("00700", "腾讯控股", "HK", pinyin="tengxunkonggu", first_letter="tx"),
+            _FakeInstrument("09988", "阿里巴巴", "HK"),
+        ]
+        monkeypatch.setattr(ms, "async_session", _fake_session_rows(rows))
+        # 两段 spot 都空 → HK/US 均走本地表补搜
+        monkeypatch.setattr(ms, "_call", AsyncMock(return_value=[]))
+
+        results = await search_hk_us("00700", include_stocks=True)
+        hits = [r for r in results if r["symbol"] == "00700"]
+        assert hits, "HK 本地表补搜应命中 00700"
+        assert hits[0]["name"] == "腾讯控股"
+        assert hits[0]["market"] == "HK"
+
+    @pytest.mark.asyncio
+    async def test_hk_name_search_via_local_table(self, monkeypatch):
+        """HK 名称（腾讯）经本地 instruments 表命中。"""
+        from app.services.market_service import search_hk_us
+
+        rows = [
+            _FakeInstrument("00700", "腾讯控股", "HK", pinyin="tengxunkonggu", first_letter="tx"),
+        ]
+        monkeypatch.setattr(ms, "async_session", _fake_session_rows(rows))
+        monkeypatch.setattr(ms, "_call", AsyncMock(return_value=[]))
+
+        results = await search_hk_us("腾讯", include_stocks=True)
+        assert any(r["name"] == "腾讯控股" for r in results)
+
+
+# ─── F3-2/F3-3/F3-7: 搜索精确匹配 + 现金收紧 + 自选美股名称（合并自 test_search_budget_usname.py）───
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from app.main import app  # noqa: E402
+
+_client = TestClient(app)
+
+
+def test_cross_market_exact_symbol_first(monkeypatch):
+    """search?keyword=SPY 首条为 SPY（即使 HK/US 段内还有其他模糊命中）。"""
+    async def fake_search_etf(kw):
+        return []  # SPY 非 A 股
+
+    async def fake_search_hk_us(kw, enrich=False, include_stocks=False, market=None):
+        # 模拟 US 段：模糊命中多个，SPY 不在首位（基座顺序）
+        return [
+            {"symbol": "SPYD", "name": "SPYD 分红ETF", "market": "US", "asset_type": "US", "type": "etf"},
+            {"symbol": "SPY", "name": "SPDR S&P 500 ETF", "market": "US", "asset_type": "US", "type": "etf"},
+            {"symbol": "SPX", "name": "标普500指数", "market": "US", "asset_type": "US", "type": "etf"},
+        ]
+
+    monkeypatch.setattr(market_router.market_data_hub, "search_etf", fake_search_etf)
+    monkeypatch.setattr(market_router, "search_hk_us", fake_search_hk_us)
+    monkeypatch.setattr(market_router, "_search_a_stocks", lambda kw: [])
+
+    resp = _client.get("/api/v1/market/search?keyword=SPY")
+    assert resp.status_code == 200
+    items = resp.json()
+    assert items and items[0]["symbol"] == "SPY", f"精确匹配应排首位，实际: {items[:2]}"
+
+
+def test_cross_market_global_sort_applied(monkeypatch):
+    """跨市场合并结果经 _sort_search_results 排序（精确代码 tier1 置顶）。"""
+    async def fake_search_etf(kw):
+        return [{"symbol": "510050", "name": "上证50ETF", "market": "A", "asset_type": "etf", "type": "etf"}]
+
+    async def fake_search_hk_us(kw, enrich=False, include_stocks=False, market=None):
+        return [
+            {"symbol": "0050", "name": "元大台湾50", "market": "HK", "asset_type": "HK", "type": "etf"},
+            {"symbol": "510050.HK", "name": "南方A50", "market": "HK", "asset_type": "HK", "type": "etf"},
+        ]
+
+    monkeypatch.setattr(market_router.market_data_hub, "search_etf", fake_search_etf)
+    monkeypatch.setattr(market_router, "search_hk_us", fake_search_hk_us)
+    monkeypatch.setattr(market_router, "_search_a_stocks", lambda kw: [])
+
+    resp = _client.get("/api/v1/market/search?keyword=510050")
+    items = resp.json()
+    # 精确 symbol 命中（510050）应排在 HK 模糊命中之前
+    assert items and items[0]["symbol"] == "510050", f"实际首位: {items[0] if items else None}"
+
+
+def test_market_a_stock_levistock_fallback(monkeypatch):
+    """instruments 表不可用 → 降级 levistock 返回茅台（而非直接 ETF 模式）。"""
+    class _FakeSessionMaker:
+        def __call__(self):
+            raise RuntimeError("db down")
+
+    monkeypatch.setattr(market_router, "async_session", _FakeSessionMaker())
+    monkeypatch.setattr(market_router.market_data_hub, "get_all_stocks", lambda: [
+        {"stock_code": "600519", "stock_name": "贵州茅台"},
+        {"stock_code": "000001", "stock_name": "平安银行"},
+    ])
+
+    resp = _client.get("/api/v1/market/search?keyword=%E8%B4%B5%E5%B7%9E%E8%8C%85%E5%8F%B0&market=A")
+    items = resp.json()
+    assert resp.status_code == 200
+    assert any(it.get("symbol") == "600519" and it.get("name") == "贵州茅台" for it in items), f"实际: {items[:3]}"
+
+
+def test_budget_cash_within_15pct():
+    """STRATEGY_META 三档 layer_budget 和 ≥ 0.85（现金 ≤ 15%）。"""
+    from app.engine.budgets import STRATEGY_META
+
+    for profile, meta in STRATEGY_META.items():
+        total = sum(meta["layer_budget"].values())
+        cash = 1.0 - total
+        assert cash <= 0.1501, f"{profile} 现金 {cash:.1%} > 15%"
+
+
+def test_range_bound_balanced_cash_limit():
+    """range_bound 市态 balanced 方案现金 ≤ 15%（验收：balanced 方案现金 ≤ 15%）。"""
+    from app.engine.budgets import dynamic_layer_budget
+
+    budget = dynamic_layer_budget("balanced", "range_bound")
+    cash = 1.0 - sum(budget.values())
+    assert cash <= 0.1501, f"balanced range_bound 现金 {cash:.1%} 超限"
+
+
+@pytest.mark.asyncio
+async def test_us_realtime_name_filled(monkeypatch):
+    """get_asset_realtime US 分支返回数据缺 name 时，从静态基座补全。"""
+    async def fake_route_us(symbol):
+        return {"symbol": "SPY", "price": 500.0, "change_pct": 1.0}  # 无 name
+
+    monkeypatch.setattr(ms, "_route_us", fake_route_us)
+    data = await ms.get_asset_realtime("SPY", "US")
+    assert data is not None
+    assert data.get("name"), f"应补全 name，实际: {data}"
+    assert "SPY" in data["name"].upper() or "S&P" in data["name"].upper()
+
+
+@pytest.mark.asyncio
+async def test_us_realtime_keeps_existing_name(monkeypatch):
+    """US 分支已有 name 时保持原值不覆盖。"""
+    async def fake_route_us(symbol):
+        return {"symbol": "AAPL", "name": "Apple Inc.", "price": 180.0}
+
+    monkeypatch.setattr(ms, "_route_us", fake_route_us)
+    data = await ms.get_asset_realtime("AAPL", "US")
+    assert data["name"] == "Apple Inc."
+
+
+# ─── Z20: 搜索排序契约（合并自 test_z20_search_sort.py）───
+
+
+class TestSearchSorting:
+    """Z20: unified search sorting."""
+
+    def _items(self):
+        return [
+            {"symbol": "510300", "name": "沪深300ETF", "market": "A", "asset_type": "etf", "type": "etf"},
+            {"symbol": "510050", "name": "上证50ETF", "market": "A", "asset_type": "etf", "type": "etf"},
+            {"symbol": "510880", "name": "红利ETF", "market": "A", "asset_type": "etf", "type": "etf"},
+            {"symbol": "600519", "name": "贵州茅台", "market": "A", "asset_type": "stock", "type": "stock"},
+            {"symbol": "02800.HK", "name": "盈富基金", "market": "HK", "asset_type": "etf", "type": "etf"},
+            {"symbol": "SPY", "name": "SPDR S&P 500 ETF", "market": "US", "asset_type": "etf", "type": "etf"},
+        ]
+
+    def test_exact_code_ranks_first(self):
+        from app.services.market_service import _sort_search_results
+
+        items = self._items()
+        result = _sort_search_results(items, "600519")
+        assert result[0]["symbol"] == "600519"
+
+    def test_code_prefix_before_name_exact(self):
+        from app.services.market_service import _sort_search_results
+
+        # keyword "510300": symbol 510300 exact, but also matches 510 prefix for others
+        result = _sort_search_results(self._items(), "510300")
+        symbols = [i["symbol"] for i in result]
+        # 510300 exact code first, then 510050/510880 (code prefix)
+        assert symbols[0] == "510300"
+        assert symbols[1] == "510050"
+        assert symbols[2] == "510880"
+
+    def test_name_exact_before_name_prefix_before_contains(self):
+        from app.services.market_service import _sort_search_results
+
+        items = [
+            {"symbol": "A", "name": "沪深300ETF", "market": "A", "asset_type": "etf"},
+            {"symbol": "B", "name": "沪深300ETF联接A", "market": "A", "asset_type": "etf"},
+            {"symbol": "C", "name": "沪深300价值ETF", "market": "A", "asset_type": "etf"},
+            {"symbol": "D", "name": "中证沪深300指数", "market": "A", "asset_type": "etf"},
+        ]
+        result = _sort_search_results(items, "沪深300")
+        # exact name (沪深300ETF) first, then prefix (沪深300ETF联接A), then contains
+        assert result[0]["symbol"] == "A"
+        assert result[1]["symbol"] == "B"
+        # C and D are contains matches; 沪深300价值ETF vs 中证沪深300指数 both contain,
+        # symbol lexicographic decides: C before D
+        assert result[2]["symbol"] == "C"
+        assert result[3]["symbol"] == "D"
+
+    def test_etf_before_stock_same_tier(self):
+        """Z20: 同档（同 tier）内 ETF 优先于个股。"""
+        from app.services.market_service import _sort_search_results
+
+        items = [
+            {"symbol": "600519", "name": "贵州茅台股", "market": "A", "asset_type": "stock", "type": "stock"},
+            {"symbol": "510300", "name": "贵州茅台ETF", "market": "A", "asset_type": "etf", "type": "etf"},
+        ]
+        result = _sort_search_results(items, "贵州茅台")
+        # 两者都是名称前缀匹配（tier 4）→ 同档内 ETF 在前
+        assert result[0]["symbol"] == "510300"
+        assert result[1]["symbol"] == "600519"
+
+    def test_exact_name_beats_etf_priority(self):
+        """Z20: 档位优先于 ETF 规则 — 精确名称(股票)排在名称前缀(ETF)之前。"""
+        from app.services.market_service import _sort_search_results
+
+        items = [
+            {"symbol": "600519", "name": "贵州茅台", "market": "A", "asset_type": "stock", "type": "stock"},
+            {"symbol": "510300", "name": "贵州茅台ETF", "market": "A", "asset_type": "etf", "type": "etf"},
+        ]
+        result = _sort_search_results(items, "贵州茅台")
+        assert result[0]["symbol"] == "600519"  # tier 3 (exact name)
+        assert result[1]["symbol"] == "510300"  # tier 4 (name prefix)
+
+    def test_market_order_and_symbol_lexicographic(self):
+        from app.services.market_service import _sort_search_results
+
+        items = [
+            {"symbol": "SPY", "name": "SPDR 美股", "market": "US", "asset_type": "etf"},
+            {"symbol": "02800.HK", "name": "SPDR 港股", "market": "HK", "asset_type": "etf"},
+            {"symbol": "510300", "name": "SPDR 概念", "market": "A", "asset_type": "etf"},
+        ]
+        result = _sort_search_results(items, "SPDR")
+        markets = [i["market"] for i in result]
+        assert markets == ["A", "HK", "US"]
+
+    def test_ordering_deterministic(self):
+        """Same input twice -> same output."""
+        from app.services.market_service import _sort_search_results
+
+        items = self._items()
+        r1 = _sort_search_results(items, "510")
+        r2 = _sort_search_results(items, "510")
+        assert [i["symbol"] for i in r1] == [i["symbol"] for i in r2]
+
+
+class TestSearchEtfSorting:
+    """Z20: search_etf local-table path applies the sorting contract."""
+
+    @pytest.mark.asyncio
+    async def test_search_etf_sorted(self):
+        from app.services import market_service as _ms
+        from app.models.search import Instrument
+
+        rows = [
+            Instrument(symbol="510880", name="红利ETF", market="A", asset_type="etf"),
+            Instrument(symbol="510300", name="沪深300ETF", market="A", asset_type="etf"),
+            Instrument(symbol="510050", name="上证50ETF", market="A", asset_type="etf"),
+        ]
+
+        class FakeResult:
+            def scalars(self):
+                return self
+
+            def all(self):
+                return rows
+
+        class FakeSession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def execute(self, stmt):
+                return FakeResult()
+
+        with patch.object(_ms, "async_session", lambda: FakeSession()):
+            result = await _ms.search_etf("510")
+
+        symbols = [r["symbol"] for r in result]
+        # All three are code-prefix matches -> symbol lexicographic ascending
+        assert symbols == ["510050", "510300", "510880"]
