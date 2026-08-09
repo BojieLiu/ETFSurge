@@ -4,7 +4,7 @@ R5-2-10: 国内宏观/流动性数据管道（用户反馈 #16）。
 akshare 宏观接口（LPR / 中美国债收益率 / M0-M2 / CPI-PPI），
 带 24h 成功缓存 + 1h 失败缓存（R4-26 模式）；源不可用/数据滞后显式标注。
 
-注意：Shibor/社融接口已失效，不纳入（文档实测）。
+注意：R5-2-10 时代“Shibor/社融接口已失效”的评论已过时——2026-08-09 实测恢复可用：macro_china_shibor_all 2341 行 2.2s、macro_china_shrzgm（社融）136 行 1.5s。未纳入本模块（待 round13 接入）。
 """
 from __future__ import annotations
 

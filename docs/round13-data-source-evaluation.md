@@ -16,7 +16,7 @@
 | 5 | AlphaFeed 免费层 | ❌ 不可用（10/min 频率不够） | 已否决 |
 | 6 | 7 个财经 RSS | ❌ 全部失效（404/超时/非 XML） | 已否决 |
 | 7 | Finnhub 新闻 | ❌ 不适合（全英文、A 股覆盖稀疏） | 已否决 |
-| 8 | akshare 宏观接口 | ✅ 89 个中国宏观接口现成可用（M2/LPR/CPI/PMI/GDP 实测通） | ✅ 调研完成，待实施（见 §3.1） |
+| 8 | akshare 宏观接口 | ✅ 89 个中国宏观接口现成可用（M2/LPR/CPI/PMI/GDP 实测通；另 Shibor/社融恢复可用、两融接口现成，见 §3.1） | ✅ 调研完成，待实施（见 §3.1） |
 | 9 | 宏观增强因子模型 | ✅ 方向成立（市态/环境维度，非截面因子） | ⏳ 待实施（见 §3.1） |
 
 ---
@@ -67,7 +67,7 @@
 
 **背景**：政策/宏观源调研结论——官方 RSS 全失效（实测 404/超时）、官方页面解析成本高；**`macro_fetcher.py`（R5-2-10）已实现四源并行抓取**（`fetch_lpr` / `fetch_money_supply` / `fetch_cpi_ppi` / `fetch_bond_yields` + `fetch_all_domestic_macro` 聚合，24h 成功/1h 失败缓存），akshare 另有 89 个中国宏观接口可扩展。宏观数据与因子模型天然契合：全市场单一值 = 现有 `MARKET_LEVEL_FACTOR_CODES`（P1-10）同类，截面恒等、不参与截面 IC。
 
-**现状接口（macro_fetcher.py 已有，勿重复实现）**：
+**现状接口（macro_fetcher.py 已有实现 + 2026-08-09 实测补充）**：
 
 | 接口 | 状态 | 用途 |
 |---|---|---|
@@ -76,7 +76,9 @@
 | `fetch_cpi_ppi`（CPI/PPI 月度） | ✅ 已实现 | 通胀环境 |
 | `fetch_bond_yields`（国债收益率） | ✅ 已实现 | 无风险利率 |
 | `fetch_all_domestic_macro` | ✅ 已实现聚合 | LLM 上下文（include_macro） |
-| **Shibor / 社融** | ❌ **已失效**（macro_fetcher.py:7 注释：接口失效不纳入） | — |
+| **Shibor** | ✅ **2026-08-09 实测恢复、未接入**（`macro_china_shibor_all`，2341 行 2.2s；R5-2-10「失效」注释已过时，macro_fetcher.py:7 已更正） | 银行间流动性（比 LPR 灵敏） |
+| **社融** | ✅ **2026-08-09 实测恢复、未接入**（`macro_china_shrzgm`，136 行 1.5s） | 信用扩张信号（与 M2 互补） |
+| **两融（大盘级）** | ✅ 接口现成（`macro_china_market_margin_sh/sz`，沪深融资融券余额/买入额，3968/3770 行 0.7/0.5s；项目**未接入**，待 §3.1 纳入） | 杠杆资金情绪（日频数据、环境维度定位） |
 | **PMI / GDP** | ⏳ 待新增（`macro_china_pmi_yearly` 月频 / `macro_china_gdp` **季度**，实测 250/82 行） | 荣枯线/经济周期（GDP 用季度接口，匹配季频因子与滞后标注） |
 
 > 实测（2026-08-09 非交易时段）：M2 222 行 1.3s、LPR 1574 行 1.9s、CPI 477 行 8.6s（yearly 接口实测值，仅作「akshare 东财源慢、需 15s+ 超时」佐证；月度沿用既有 `fetch_cpi_ppi`）、PMI 250 行 4.3s、GDP 82 行（季频 2006-2026）1.6s——均来自东财数据中心/新浪（非 push2 反爬范围）。
@@ -95,16 +97,16 @@
 **P2：宏观环境因子（MARKET_LEVEL 类）+ LLM 上下文**
 
 - **注册位置（两处，缺一不可）**：
-  - `factor_registry.py`（`register_computer`，~L1015）：注册 **4 个 compute 函数**——月频 3：`macro_m2_trend`（M2 同比 3 月斜率 → -1/0/+1）、`macro_pmi_level`（PMI ≥50 → 1，<50 → 0）、`macro_lpr_direction`（LPR 1Y 同比 → -1/0/+1）；**季频 1：`macro_gdp_trend`**（GDP 同比增速分位 → 环境分级 -1/0/+1，季度级）
-  - `routers/factors.py:72`：把 4 个 code 加入 `MARKET_LEVEL_FACTOR_CODES` 集合（否则 `/factors/active` 不会以 static 标注，L130 过滤依赖该集合）
+  - `factor_registry.py`（`register_computer`，~L1015）：注册 **5 个 compute 函数**——月频 3：`macro_m2_trend`（M2 同比 3 月斜率 → -1/0/+1）、`macro_pmi_level`（PMI ≥50 → 1，<50 → 0）、`macro_lpr_direction`（LPR 1Y 同比 → -1/0/+1）；**季频 1：`macro_gdp_trend`**（GDP 同比增速分位 → 环境分级 -1/0/+1，季度级）；**日频数据/环境定位 1：`margin_leverage_trend`**（沪深融资余额合计 20 日变化率 → -1/0/+1，杠杆资金情绪，2026-08-09 补充）
+  - `routers/factors.py:72`：把 **5 个** code 加入 `MARKET_LEVEL_FACTOR_CODES` 集合（否则 `/factors/active` 不会以 static 标注，L130 过滤依赖该集合）
 - 标 static（与 sentiment 同处理：不参与截面 IC、不撑「数据完整」判定）
 - **扩展既有 `build_full_context` 宏观段**（llm_context.py L193 `include_macro` 已注入 domestic_macro）：补 PMI/GDP 两指标 + 方向标注（-1/0/+1），并输出数据截至日期（含滞后标注）——LLM 报告可引用
 - **CPI 口径统一**：沿用既有 `fetch_cpi_ppi`（月度），不引入 `macro_china_cpi_yearly`（避免双口径）
 - 验收：因子出现在 /factors/active（static 标注）；LLM 上下文宏观段含 PMI/GDP 真实值（非占位）；全量测试绿（含 macro_gdp_trend 滞后对齐单测断言：只用已发布值、季度对齐）
 
-**频率定位（月/季频慢变量，2026-08-09 讨论补充）**：
+**频率定位（月/季频慢变量 + 日频环境变量，2026-08-09 讨论补充）**：
 - 慢变量驱动**月级市态**（牛熊切换是季度级现象）——定位「环境/市态维度」，与快变量（行情/技术/情绪日频）互补；标准量化实践 = 慢变量调节快变量（宏观恶化 → 降低进攻性权重/总仓位上限），非直接进选股池
-- 月频（M2/PMI/LPR）够做**斜率/拐点**（3 月窗口）；季频（GDP）一年仅 4 点，做**环境分级**（增速分位 -1/0/+1）而非连续数值
+- 月频（M2/PMI/LPR）够做**斜率/拐点**（3 月窗口）；季频（GDP）一年仅 4 点，做**环境分级**（增速分位 -1/0/+1）而非连续数值；**两融为日频数据但作环境维度**（20 日斜率，非盘中决策）——杠杆资金情绪是经典风险偏好指标，与 sentiment 因子互补
 
 **约束**：宏观月频/季频 + 发布滞后（CPI 月后 10 天、**GDP 季后 1.5 月**）→ ① **前视偏差红线：只用已发布值 + 滞后期**（GDP 因子用「数据截至 2026-Q2」标注，禁止用当季原始值当因子）；② 时间戳诚实标注（「数据截至 2026-07/Q2」）；③ **不参与**盘中高频决策；④ akshare 数据源（东财/新浪）需超时+熔断+缓存（延续既定模式）。
 
@@ -166,3 +168,4 @@
 - 每项沿用既定规范：`run_in_thread` + 超时 + 熔断 + 缓存（宏观 24h）+ mock 测试 + 诚实降级 + 交易时段验证
 - 关键记忆指针：EM push2delay（`EM根因-双源路由天然解决`）、mootdx 回滚（`mootdx移除-2026-08-09`）、BaoStock/TickFlow（`BaoStockTickFlow接入-2026-08-09`）
 - **未决待用户确认**：§3.1 实施范围（P1 全做/部分）、§3.2 实施范围（P1/P2/P3）、mootdx 复测结果后的去留
+- **Shibor/社融去向待定**（2026-08-09 实测恢复但未接入）：可选① 进 P2 因子池（如 `shibor_trend` 流动性因子 / 社融增速因子）；② 仅进 LLM 上下文（build_full_context 宏观段补充，无因子）；③ 暂不接入——P1 市态判定保持三指标（M2/PMI/LPR）不变
