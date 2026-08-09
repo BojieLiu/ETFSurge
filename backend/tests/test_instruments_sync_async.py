@@ -47,9 +47,13 @@ class TestSegmentTimeout:
 
         try:
             monkeypatch.setattr(si, "_SEGMENT_TIMEOUTS",
-                                {"A股个股": 0.3, "A股ETF": 0.3, "港股": 0.3, "美股": 0.3})
+                                {"A股个股": 0.3, "A股ETF": 0.3, "港股": 0.3, "港股ETF": 0.3, "美股": 0.3})
             monkeypatch.setattr(si, "_fetch_akshare_list", slow_fetch)
             monkeypatch.setattr(si, "_fetch_a_stock_list", fast_a)
+            # round9 P1-2: _fetch_us_list 有新浪降级分支（真实 urllib 网络）——mock 走
+            # 超时降级路径，避免测试环境真实请求新浪（6 页 × 8s 最长 48s 卡顿）。
+            monkeypatch.setattr(si, "_fetch_us_list", slow_fetch)
+            monkeypatch.setattr(si, "_fetch_hk_etf_list", slow_fetch)
             results = await si.collect_all()
             # 慢段被超时降级，但 A 股个股段（fast）结果保留
             assert any(r["symbol"] == "600519" for r in results)

@@ -1,4 +1,4 @@
-"""
+﻿"""
 P2-3 (R4-06): /news/stock/{symbol} 中文键归一化。
 
 - fetch_stock_news 对东方财富 stock_news_em 的中文键（新闻标题/新闻内容/发布时间/
@@ -27,11 +27,11 @@ def test_stock_news_chinese_keys_normalized(monkeypatch):
     def _fake_ak(fn, timeout=None):
         return cn_items
 
-    def _fake_cached(key, producer, bucket):
+    def _fake_cached(key, producer, **kwargs):
         return producer()
 
     with patch.object(news_fetcher, "_ak", _fake_ak), \
-         patch.object(news_fetcher, "_cached", _fake_cached), \
+         patch.object(news_fetcher, "cached", _fake_cached), \
          patch.object(news_fetcher, "fetch_cailian_telegraph", lambda n: []):
         items = news_fetcher.fetch_stock_news("159338")
 
@@ -55,11 +55,11 @@ def test_english_keys_untouched(monkeypatch):
     def _fake_ak(fn, timeout=None):
         return en_items
 
-    def _fake_cached(key, producer, bucket):
+    def _fake_cached(key, producer, **kwargs):
         return producer()
 
     with patch.object(news_fetcher, "_ak", _fake_ak), \
-         patch.object(news_fetcher, "_cached", _fake_cached), \
+         patch.object(news_fetcher, "cached", _fake_cached), \
          patch.object(news_fetcher, "fetch_cailian_telegraph", lambda n: []):
         items = news_fetcher.fetch_stock_news("159338")
 
@@ -82,11 +82,11 @@ def test_no_chinese_keys_remain_after_normalization(monkeypatch):
     def _fake_ak(fn, timeout=None):
         return cn_items
 
-    def _fake_cached(key, producer, bucket):
+    def _fake_cached(key, producer, **kwargs):
         return producer()
 
     with patch.object(news_fetcher, "_ak", _fake_ak), \
-         patch.object(news_fetcher, "_cached", _fake_cached), \
+         patch.object(news_fetcher, "cached", _fake_cached), \
          patch.object(news_fetcher, "fetch_cailian_telegraph", lambda n: []):
         items = news_fetcher.fetch_stock_news("159338")
 

@@ -98,10 +98,11 @@ async def test_get_asset_realtime_returns_none_on_failure():
 def test_fetch_hot_plates_returns_empty_on_failure():
     """Z23: fetch_hot_plates should return [] when levistock fails."""
     from app.fetchers.sector_fetcher import fetch_hot_plates
-    with patch("app.fetchers.sector_fetcher.sync_memory_cache.get", return_value=None):
+    # P1-1: sector_fetcher 已改走 cache_service.cached——patch 底层缓存对象
+    with patch("app.services.cache_service.sync_memory_cache.get", return_value=None):
         with patch("app.fetchers.sector_fetcher.lv.get_sector_hot_plates",
                    side_effect=Exception("levistock API failed")):
-            with patch("app.fetchers.sector_fetcher.sync_memory_cache.set"):
+            with patch("app.services.cache_service.sync_memory_cache.set"):
                 result = fetch_hot_plates(15)
     assert result == []
 
@@ -110,9 +111,9 @@ def test_fetch_hot_plates_returns_data_on_success():
     """Z23: fetch_hot_plates should return data when levistock works."""
     from app.fetchers.sector_fetcher import fetch_hot_plates
     mock_data = [{"name": "板块A", "change_pct": 2.5}]
-    with patch("app.fetchers.sector_fetcher.sync_memory_cache.get", return_value=None):
+    with patch("app.services.cache_service.sync_memory_cache.get", return_value=None):
         with patch("app.fetchers.sector_fetcher.lv.get_sector_hot_plates", return_value=mock_data):
-            with patch("app.fetchers.sector_fetcher.sync_memory_cache.set"):
+            with patch("app.services.cache_service.sync_memory_cache.set"):
                 result = fetch_hot_plates(15)
     assert len(result) == 1
 

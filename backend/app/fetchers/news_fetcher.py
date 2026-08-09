@@ -20,9 +20,8 @@ logger = logging.getLogger(__name__)
 
 from ..utils.proxy import no_proxy
 from ..utils.decode import decode_df as _decode_df
-from ..services.cache_service import sync_memory_cache
-from ..core.ttl import CACHE_TTL
-from ..core.async_utils import run_in_thread
+from ..services.cache_service import cached
+from ..core.async_utils import run_in_thread, safe_call
 from .levistock_fetcher import classify_news_level, fetch_cailian_telegraph
 
 _SRC_TIMEOUT = 5
@@ -38,7 +37,8 @@ _http_session.headers.update({
 
 
 def _safe(fn, timeout: int = _SRC_TIMEOUT):
-    return run_in_thread(fn, timeout=timeout)
+    """线程池安全调用（P1-2：统一走 core.async_utils.safe_call）。"""
+    return safe_call(fn, timeout=timeout)
 
 
 _AK_TIMEOUT = 4
@@ -78,17 +78,6 @@ def _ak(fn, timeout: int = _AK_TIMEOUT) -> list[dict[str, Any]]:
         return []
     except Exception:
         return []
-
-
-def _cached(key: str, producer, ttl_key: str = "news_headlines") -> list[dict[str, Any]]:
-    """统一缓存包装，使用 sync_memory_cache 替代本地 _CACHE。"""
-    ttl = CACHE_TTL.get(ttl_key, 120)
-    hit = sync_memory_cache.get(key)
-    if hit is not None:
-        return hit
-    data = producer()
-    sync_memory_cache.set(key, data, ttl)
-    return data
 
 
 def _title_of(item: dict) -> str:
@@ -316,7 +305,7 @@ def fetch_news_headlines() -> list[dict[str, Any]]:
             it["id"] = hashlib.md5(dedup_key.encode()).hexdigest()[:12]
         return result
 
-    return _cached("headlines", _p)
+    return cached("headlines", _p, ttl_key="news_headlines")
 
 
 def fetch_sina_roll_news(num: int = 15) -> list[dict[str, Any]]:
@@ -417,7 +406,7 @@ def fetch_macro_news() -> list[dict[str, Any]]:
         items = [it for it in items if _is_macro_relevant(it.get("title", ""), it.get("content", ""))]
         return _attach_level(_dedupe(items)[:25])
 
-    return _cached("macro", _p, "news_macro")
+    return cached("macro", _p, ttl_key="news_macro")
 
 
 def fetch_global_news() -> list[dict[str, Any]]:
@@ -450,7 +439,7 @@ def fetch_global_news() -> list[dict[str, Any]]:
             logger.info("[news] akshare 全球资讯返回 %d 条（RSS 降级）", len(items))
         return _attach_level(_dedupe(items)[:25])
 
-    return _cached("global", _p, "news_global")
+    return cached("global", _p, ttl_key="news_global")
 
 
 def fetch_stock_news(symbol: str) -> list[dict[str, Any]]:
@@ -492,11 +481,11 @@ def fetch_stock_news(symbol: str) -> list[dict[str, Any]]:
         items = [_normalize_stock_news_keys(i) for i in items]
         return _attach_level(_dedupe(items)[:25])
 
-    return _cached("stock:" + symbol, _p, "news_stock")
+    return cached("stock:" + symbol, _p, ttl_key="news_stock")
 
 
 def fetch_research_reports(symbol: str) -> list[dict[str, Any]]:
     def _p() -> list[dict[str, Any]]:
         return _ak(lambda ak: ak.stock_research_report_em(symbol=symbol))
 
-    return _cached("research:" + symbol, _p, "news_stock")
+    return cached("research:" + symbol, _p, ttl_key="news_stock")

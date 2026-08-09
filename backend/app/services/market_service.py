@@ -12,7 +12,7 @@ import asyncio
 from sqlalchemy import select
 
 from ..database import async_session
-from ..core.async_utils import run_sync
+from ..core.async_utils import run_sync, safe_call_async
 from ..core.market_calendar import is_trading_time
 from ..core.ttl import CACHE_TTL
 from ..services.source_registry import registry
@@ -30,20 +30,13 @@ _simple_cache: dict[str, tuple[float, Any]] = {}
 
 
 async def _call(fn, *args, timeout: int = 8):
-    """包一层 run_sync，统一异常处理为返回 None。
+    """包一层 run_sync，统一异常处理为返回 None（P1-2：统一走 safe_call_async）。
 
-    显式捕获 CancelledError —— 在 Python 3.8+ 中它继承自
+    CancelledError 语义保留 —— 在 Python 3.8+ 中它继承自
     BaseException 而非 Exception，外层 wait_for 超时会触发它，
     漏接会导致异常冒泡到 APScheduler 任务边界。
     """
-    try:
-        return await run_sync(fn, *args, timeout=timeout)
-    except asyncio.CancelledError:
-        return None
-    except Exception as e:
-        fn_name = getattr(fn, '__name__', str(fn))
-        logger.warning("[market_service] _call failed for %s: %s", fn_name, e)
-        return None
+    return await safe_call_async(fn, *args, timeout=timeout)
 
 
 async def _call_with_cb(source_name: str, fn, *args,

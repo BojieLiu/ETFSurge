@@ -17,6 +17,7 @@ from unittest.mock import patch
 
 from app.fetchers import macro_fetcher
 from app.services import llm_context
+from app.services.cache_service import sync_memory_cache
 
 
 def _rt(fn, timeout=15):
@@ -24,7 +25,7 @@ def _rt(fn, timeout=15):
 
 
 def _clear():
-    macro_fetcher.sync_memory_cache.clear()
+    sync_memory_cache.clear()
 
 
 # ── fetch_lpr ───────────────────────────────────────────────

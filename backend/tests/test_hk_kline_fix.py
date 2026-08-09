@@ -46,6 +46,9 @@ class TestAvSymbolConversion:
                             lambda fn, timeout=8, executor="long": (
                                 calls.append(1) or (None if len(calls) == 1 else fn())
                             ))
+        # round9 P1-1: 腾讯港股日 K 兜底在测试之后加入——测试环境网络可达时返回真实
+        # 数据，破坏「链断裂 → 空」断言；补 mock 保持测试意图（只验符号转换）。
+        monkeypatch.setattr(cm, "_fetch_tencent_hk_history", lambda symbol: None)
 
         rows = cm._fetch_akshare_history("00700", "HK", "daily")
         assert captured.get("symbol") == "0700.HK", \

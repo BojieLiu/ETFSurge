@@ -26,6 +26,9 @@ async def test_sectors_heat_passes_change_pct(monkeypatch):
          "is_new": 0, "plate_code": "BK1047", "change_pct": -1.2},
     ]
     monkeypatch.setattr(market_mod.market_data_hub, "get_sector_heat", lambda limit=20, market="A": rows)
+    # O19 回填源（东财真实网络）在测试环境可达时覆盖 mock 的 change_pct——
+    # mock 为空保持 P2-4 透传意图（测试只验透传，不验东财回填）。
+    monkeypatch.setattr("app.fetchers.sector_fetcher.fetch_em_sector_changes", lambda: {})
     resp = await market_mod.sectors_heat(limit=20)
     assert resp["total"] == 2
     assert resp["items"][0]["change_pct"] == 2.35, "change_pct 应透传（旧白名单丢弃）"

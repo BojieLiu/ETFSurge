@@ -70,14 +70,23 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
+async def _ws_loop(websocket: WebSocket) -> None:
+    """WS 保活循环样板（round11 P1-4）：receive_text + ping/heartbeat → pong。
+
+    5 个端点此前各自复制该循环；抽取后端点只需处理注册/注销差异。
+    连接断开时 receive_text 抛 WebSocketDisconnect/异常，由调用方捕获处理。
+    """
+    while True:
+        data = await websocket.receive_text()
+        if data.strip().lower() in ("ping", "heartbeat"):
+            await websocket.send_text(json.dumps({"type": "pong"}, ensure_ascii=False))
+
+
 @router.websocket("/api/v1/ws/market/{symbol}")
 async def market_ws(websocket: WebSocket, symbol: str):
     await manager.connect(websocket, f"market:{symbol}")
     try:
-        while True:
-            data = await websocket.receive_text()
-            if data.strip().lower() in ("ping", "heartbeat"):
-                await websocket.send_text(json.dumps({"type": "pong"}, ensure_ascii=False))
+        await _ws_loop(websocket)
     except WebSocketDisconnect:
         await manager.disconnect(websocket, f"market:{symbol}")
     except Exception:
@@ -96,10 +105,7 @@ async def news_ws(websocket: WebSocket):
                 await websocket.send_text(json.dumps({"type": "news", "data": item}, ensure_ascii=False))
         except Exception:
             pass
-        while True:
-            data = await websocket.receive_text()
-            if data.strip().lower() in ("ping", "heartbeat"):
-                await websocket.send_text(json.dumps({"type": "pong"}, ensure_ascii=False))
+        await _ws_loop(websocket)
     except WebSocketDisconnect:
         await manager.disconnect(websocket, "news")
     except Exception:
@@ -111,10 +117,7 @@ async def portfolio_ws(websocket: WebSocket):
     await manager.connect(websocket, "portfolio")
     try:
         await websocket.send_text(json.dumps({"type": "hello", "data": "connected"}, ensure_ascii=False))
-        while True:
-            data = await websocket.receive_text()
-            if data.strip().lower() in ("ping", "heartbeat"):
-                await websocket.send_text(json.dumps({"type": "pong"}, ensure_ascii=False))
+        await _ws_loop(websocket)
     except WebSocketDisconnect:
         await manager.disconnect(websocket, "portfolio")
     except Exception:
@@ -131,10 +134,7 @@ async def design_report_ws(websocket: WebSocket, session_id: str):
 
     try:
         # 保持连接，等待后端推送 LLM 报告（由 REST API 后台任务触发）
-        while True:
-            data = await websocket.receive_text()
-            if data.strip().lower() in ("ping", "heartbeat"):
-                await websocket.send_text(json.dumps({"type": "pong"}, ensure_ascii=False))
+        await _ws_loop(websocket)
     except WebSocketDisconnect:
         pass
     except Exception as e:
@@ -151,10 +151,7 @@ async def task_notifications_ws(websocket: WebSocket):
     await websocket.accept()
     notify_manager.register(websocket)
     try:
-        while True:
-            data = await websocket.receive_text()
-            if data.strip().lower() in ("ping", "heartbeat"):
-                await websocket.send_text(json.dumps({"type": "pong"}, ensure_ascii=False))
+        await _ws_loop(websocket)
     except WebSocketDisconnect:
         pass
     except Exception:

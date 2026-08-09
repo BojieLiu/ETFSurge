@@ -7,28 +7,17 @@ from typing import Any
 import levistock as lv
 
 from ..core.logging import get_logger
-from ..core.ttl import CACHE_TTL
-from ..core.async_utils import run_in_thread
-from ..services.cache_service import sync_memory_cache
+from ..core.async_utils import safe_call
+from ..services.cache_service import cached
 
 logger = get_logger(__name__)
 _TIMEOUT = 8
 
 
 def _safe(fn, timeout: int = _TIMEOUT):
-    """在线程中执行 fn,超时/异常均返回 None,绝不挂起。"""
-    return run_in_thread(fn, timeout=timeout, executor="long")
+    """在线程中执行 fn,超时/异常均返回 None,绝不挂起（P1-2：统一走 safe_call,long 池）。"""
+    return safe_call(fn, timeout=timeout, executor="long")
 
-
-def _cached(key: str, producer, ttl_key: str = "news_telegraph"):
-    """统一缓存包装，使用 sync_memory_cache 替代本地 _CACHE。"""
-    ttl = CACHE_TTL.get(ttl_key, 120)
-    hit = sync_memory_cache.get(key)
-    if hit is not None:
-        return hit
-    data = producer()
-    sync_memory_cache.set(key, data, ttl)
-    return data
 
 
 _LEVEL_KEYWORDS: dict[int, tuple[str, ...]] = {
@@ -229,7 +218,7 @@ def fetch_cailian_telegraph(limit: int = 30) -> list[dict[str, Any]]:
 
         return result[:limit]
 
-    return _cached("telegraph", _p, "news_telegraph")
+    return cached("telegraph", _p, ttl_key="news_telegraph")
 
 
 def fetch_market_emotion() -> dict[str, Any]:
@@ -238,7 +227,7 @@ def fetch_market_emotion() -> dict[str, Any]:
     def _p() -> dict[str, Any]:
         return _safe(lv.market_emotion_cls, 8) or {}
 
-    return _cached("emotion", _p, "news_emotion")
+    return cached("emotion", _p, ttl_key="news_emotion")
 
 
 def fetch_sector_heat(limit: int = 20) -> list[dict[str, Any]]:
@@ -248,7 +237,7 @@ def fetch_sector_heat(limit: int = 20) -> list[dict[str, Any]]:
         rows = _safe(lv.get_sector_heat, 8) or []
         return rows[:limit]
 
-    return _cached("sectors", _p, "sector_heat")
+    return cached("sectors", _p, ttl_key="sector_heat")
 
 
 def fetch_market_wind() -> list[dict[str, Any]]:
@@ -257,4 +246,4 @@ def fetch_market_wind() -> list[dict[str, Any]]:
     def _p() -> list[dict[str, Any]]:
         return _safe(lv.market_wind_cls, 8) or []
 
-    return _cached("wind", _p, "news_wind")
+    return cached("wind", _p, ttl_key="news_wind")

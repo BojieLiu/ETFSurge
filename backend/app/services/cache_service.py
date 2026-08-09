@@ -198,3 +198,35 @@ class SyncMemoryCache:
 
 
 sync_memory_cache = SyncMemoryCache()
+
+
+def cached(
+    key: str,
+    producer,
+    ttl_key: str | None = None,
+    ttl: int | None = None,
+    fail_ttl: int | None = None,
+) -> Any:
+    """统一同步缓存包装（round11 P1-1，收敛 4 处复制粘贴的 _cached）。
+
+    - ttl_key: 从 CACHE_TTL 查表取 TTL（优先于 ttl 参数）
+    - ttl: 直接指定 TTL（ttl_key 为 None 时使用；默认 120）
+    - fail_ttl: 非 None 时启用「失败缓存」模式（macro_fetcher R4-26：
+      producer 异常写失败缓存返回 None，避免反复触发慢源；读取时解包
+      {"data": ...}）。None 时 producer 异常直接上抛（news/sector 语义）。
+    """
+    from ..core.ttl import CACHE_TTL
+
+    _ttl = ttl if ttl is not None else CACHE_TTL.get(ttl_key or "", 120)
+    hit = sync_memory_cache.get(key)
+    if hit is not None:
+        return hit.get("data") if fail_ttl is not None else hit
+    try:
+        data = producer()
+    except Exception:
+        if fail_ttl is not None:
+            sync_memory_cache.set(key, {"data": None}, fail_ttl)
+            return None
+        raise
+    sync_memory_cache.set(key, {"data": data} if fail_ttl is not None else data, _ttl)
+    return data

@@ -679,6 +679,20 @@ def _fetch_history_budget(n_symbols: int) -> float:
 # 东财 https（EM_PUSH_HOST push2delay）作为第三顺位（不替换现有降级链）。
 # 模块级定义（可单测）；TTJ 日净值由 _fetch_market_data 调用方保持末位兜底。
 
+def _http_get_sync(url: str, headers: dict | None = None,
+                   encoding: str = "utf-8", errors: str = "replace") -> str:
+    """同步 HTTP GET（urllib.request），超时 8s（round11 P1-3：统一 IOPV 三源拉取样板）。
+
+    三处 IOPV 源（新浪/腾讯/东财）原先各自内联 `urllib.request` + urlopen + decode，
+    仅 URL/header/编码不同——参数化收敛。失败/超时抛异常由调用方 run_sync 包裹。
+    """
+    import urllib.request
+
+    req = urllib.request.Request(url, headers=headers or {})
+    resp = urllib.request.urlopen(req, timeout=8)
+    return resp.read().decode(encoding, errors=errors)
+
+
 def _iopv_sina_symbols(symbols: list[str]) -> list[str]:
     """A 股 symbol → 新浪/QQ 带市场前缀（sh/sz）。"""
     prefixes = {"5": "sh", "6": "sh", "0": "sz", "1": "sz", "3": "sz"}
@@ -697,16 +711,11 @@ async def _fetch_iopv_from_sina(s_list: list[str]) -> dict[str, dict]:
     """
     from ..core.async_utils import run_sync
 
-    def _sync_fetch():
-        import urllib.request
-        url = f"http://hq.sinajs.cn/list={','.join(s_list)}"
-        req = urllib.request.Request(
-            url, headers={"Referer": "http://finance.sina.com.cn"}
-        )
-        resp = urllib.request.urlopen(req, timeout=8)
-        return resp.read().decode("gbk")
-
-    raw = await run_sync(_sync_fetch, timeout=10)
+    url = f"http://hq.sinajs.cn/list={','.join(s_list)}"
+    raw = await run_sync(
+        lambda: _http_get_sync(url, {"Referer": "http://finance.sina.com.cn"}, encoding="gbk", errors="strict"),
+        timeout=10,
+    )
     parsed: dict[str, dict] = {}
     for line in raw.strip().split("\n"):
         # symbol 从行前缀提取：`var hq_str_sh510050="..."`（round9 P0-6: 修复旧 parts[2] 错位）
@@ -740,18 +749,13 @@ async def _fetch_iopv_from_qq(s_list: list[str]) -> dict[str, dict]:
     """
     from ..core.async_utils import run_sync
 
-    def _sync_fetch():
-        import urllib.request
-        qq_symbols = ",".join(s_list)
-        url = f"http://qt.gtimg.cn/q={qq_symbols}"
-        req = urllib.request.Request(
-            url, headers={"User-Agent": "Mozilla/5.0"}
-        )
-        resp = urllib.request.urlopen(req, timeout=8)
-        # round9 P0-6: GBK 解码（返回体含中文名称，utf-8 解码必崩）
-        return resp.read().decode("gbk", errors="replace")
-
-    raw = await run_sync(_sync_fetch, timeout=10)
+    qq_symbols = ",".join(s_list)
+    url = f"http://qt.gtimg.cn/q={qq_symbols}"
+    # round9 P0-6: GBK 解码（返回体含中文名称，utf-8 解码必崩）
+    raw = await run_sync(
+        lambda: _http_get_sync(url, {"User-Agent": "Mozilla/5.0"}, encoding="gbk"),
+        timeout=10,
+    )
     parsed: dict[str, dict] = {}
     for line in raw.strip().split("\n"):
         if "~" not in line or '"' not in line:
@@ -786,22 +790,19 @@ async def _fetch_iopv_from_em(s_list: list[str]) -> dict[str, dict]:
     from ..core.async_utils import run_sync
     from ..core.market_context import EM_PUSH_HOST
 
-    def _sync_fetch():
-        import urllib.request
-        secids = []
-        for s in s_list:
-            market = "1" if s[0] in ("5", "6") else "0"
-            secids.append(f"{market}.{s}")
-        url = (
-            f"https://{EM_PUSH_HOST}/api/qt/ulist.np/get"
-            f"?secids={','.join(secids)}&fields=f12,f13,f2,f236"
-            f"&fltt=2&invt=2"
-        )
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        resp = urllib.request.urlopen(req, timeout=8)
-        return resp.read().decode("utf-8")
-
-    raw = await run_sync(_sync_fetch, timeout=10)
+    secids = []
+    for s in s_list:
+        market = "1" if s[0] in ("5", "6") else "0"
+        secids.append(f"{market}.{s}")
+    url = (
+        f"https://{EM_PUSH_HOST}/api/qt/ulist.np/get"
+        f"?secids={','.join(secids)}&fields=f12,f13,f2,f236"
+        f"&fltt=2&invt=2"
+    )
+    raw = await run_sync(
+        lambda: _http_get_sync(url, {"User-Agent": "Mozilla/5.0"}),
+        timeout=10,
+    )
     parsed: dict[str, dict] = {}
     if not raw:
         return parsed

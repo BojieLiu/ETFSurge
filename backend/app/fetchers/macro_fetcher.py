@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from ..core.async_utils import run_in_thread
-from ..services.cache_service import sync_memory_cache
+from ..services.cache_service import cached
 from ..utils.decode import decode_df as _decode_df
 
 logger = logging.getLogger(__name__)
@@ -21,21 +21,6 @@ logger = logging.getLogger(__name__)
 # 24h 成功缓存 / 1h 失败缓存（R4-26 模式）
 _SUCCESS_TTL = 86400
 _FAIL_TTL = 3600
-
-
-def _cached_fetch(key: str, producer, ttl_success: int = _SUCCESS_TTL) -> Any | None:
-    """带成功/失败缓存的同步拉取（R4-26：失败缓存 1h 防反复触发慢源）。"""
-    cached = sync_memory_cache.get(key)
-    if cached is not None:
-        return cached.get("data") if isinstance(cached, dict) else cached
-    try:
-        data = producer()
-    except Exception as e:
-        logger.warning("[macro] %s failed: %s", key, e)
-        sync_memory_cache.set(key, {"data": None}, _FAIL_TTL)
-        return None
-    sync_memory_cache.set(key, {"data": data}, ttl_success)
-    return data
 
 
 def _stale_note(date_str: str, source: str, months: int = 3) -> tuple[bool, str]:
@@ -62,7 +47,7 @@ def fetch_lpr() -> dict | None:
         import akshare as ak
         with _no_proxy():
             return ak.macro_china_lpr()
-    df = _cached_fetch("macro:lpr", _p)
+    df = cached("macro:lpr", _p, ttl=_SUCCESS_TTL, fail_ttl=_FAIL_TTL)
     if df is None or df.empty:
         return None
     df = _decode_df(df)
@@ -87,7 +72,7 @@ def fetch_bond_yields() -> dict | None:
         import akshare as ak
         with _no_proxy():
             return ak.bond_zh_us_rate()
-    df = _cached_fetch("macro:bond", _p)
+    df = cached("macro:bond", _p, ttl=_SUCCESS_TTL, fail_ttl=_FAIL_TTL)
     if df is None or df.empty:
         return None
     df = _decode_df(df)
@@ -116,7 +101,7 @@ def fetch_money_supply() -> dict | None:
         import akshare as ak
         with _no_proxy():
             return ak.macro_china_money_supply()
-    df = _cached_fetch("macro:money", _p)
+    df = cached("macro:money", _p, ttl=_SUCCESS_TTL, fail_ttl=_FAIL_TTL)
     if df is None or df.empty:
         return None
     df = _decode_df(df)
@@ -142,7 +127,7 @@ def fetch_cpi_ppi() -> dict | None:
         import akshare as ak
         with _no_proxy():
             return ak.macro_china_cpi_monthly()
-    df = _cached_fetch("macro:cpi", _p)
+    df = cached("macro:cpi", _p, ttl=_SUCCESS_TTL, fail_ttl=_FAIL_TTL)
     if df is None or df.empty:
         return None
     df = _decode_df(df)

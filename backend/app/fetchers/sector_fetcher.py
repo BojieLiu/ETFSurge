@@ -1,4 +1,4 @@
-"""板块/概念/个股 数据源封装: levistock → akshare 多源降级。
+﻿"""板块/概念/个股 数据源封装: levistock → akshare 多源降级。
 
 每个对外函数都有两条数据链路,一条挂起另一条自动接管,绝不阻塞接口。
 """
@@ -8,8 +8,7 @@ import logging
 
 import levistock as lv
 
-from ..core.ttl import CACHE_TTL
-from ..services.cache_service import sync_memory_cache
+from ..services.cache_service import cached
 from ..services.source_registry import registry
 
 _logger = logging.getLogger(__name__)
@@ -23,20 +22,10 @@ _TIMEOUT = 10
 # ---------------------------------------------------------------------------
 
 def _exec(fn, timeout: int = _TIMEOUT):
-    """在线程中执行 fn, 超时 / 异常返回 None。"""
-    from ..core.async_utils import run_in_thread
-    return run_in_thread(fn, timeout=timeout, executor="long")
+    """在线程中执行 fn, 超时 / 异常返回 None（P1-2：统一走 safe_call, long 池）。"""
+    from ..core.async_utils import safe_call
+    return safe_call(fn, timeout=timeout, executor="long")
 
-
-def _cached(key: str, producer, ttl_key: str = "sector_industry"):
-    """统一缓存包装，使用 sync_memory_cache 替代本地 _CACHE。"""
-    ttl = CACHE_TTL.get(ttl_key, 60)
-    hit = sync_memory_cache.get(key)
-    if hit is not None:
-        return hit
-    data = producer()
-    sync_memory_cache.set(key, data, ttl)
-    return data
 
 
 def _try_two(name_lv, lv_fn, name_ak, ak_fn, default=None):
@@ -245,7 +234,7 @@ def fetch_industry_sectors(limit: int = 80) -> list[dict[str, Any]]:
     def _ak():
         return _ak_industry_sectors()
     key = "industry_sectors"
-    rows = _cached(key, lambda: _try_two("sector_lv", _lv, "sector_ak", _ak), "sector_industry")
+    rows = cached(key, lambda: _try_two("sector_lv", _lv, "sector_ak", _ak), "sector_industry")
     return rows[:limit]
 
 
@@ -263,7 +252,7 @@ def fetch_concept_sectors(limit: int = 150) -> list[dict[str, Any]]:
 
     key = "concept_sectors"
     # Try three sources in order: levistock → akshare spot → akshare name (full list)
-    rows = _cached(key, lambda: _try_two("concept_lv", _lv, "concept_ak", _ak), "sector_concept")
+    rows = cached(key, lambda: _try_two("concept_lv", _lv, "concept_ak", _ak), "sector_concept")
 
     # If the two-source attempt returned few results, try third source as supplement
     if len(rows) < 60:
@@ -310,7 +299,7 @@ def fetch_sector_stocks(sector_code: str) -> list[dict[str, Any]]:
     def _ak():
         return _ak_sector_stocks(sector_code)
     key = f"sector_stocks:{sector_code}"
-    return _cached(key, lambda: _try_two("sector_stocks_lv", _lv, "sector_stocks_ak", _ak), "sector_stocks")
+    return cached(key, lambda: _try_two("sector_stocks_lv", _lv, "sector_stocks_ak", _ak), "sector_stocks")
 
 
 # ---------------------------------------------------------------------------
@@ -351,7 +340,7 @@ def fetch_sector_history(sector_code: str) -> list[dict[str, Any]]:
         # levistock sector k-line not available, fallback to None
         return None
     key = f"sector_hist:{sector_code}"
-    return _cached(key, lambda: _try_two("sector_hist_lv", _lv, "sector_hist_ak", _ak), "sector_history")
+    return cached(key, lambda: _try_two("sector_hist_lv", _lv, "sector_hist_ak", _ak), "sector_history")
 
 
 # ---------------------------------------------------------------------------
@@ -365,7 +354,7 @@ def fetch_all_stocks() -> list[dict[str, Any]]:
     def _ak():
         return _ak_all_stocks()
     key = "all_stocks"
-    return _cached(key, lambda: _try_two("all_stocks_lv", _lv, "all_stocks_ak", _ak), "all_stocks")
+    return cached(key, lambda: _try_two("all_stocks_lv", _lv, "all_stocks_ak", _ak), "all_stocks")
 
 
 # ---------------------------------------------------------------------------
@@ -377,14 +366,14 @@ def fetch_sector_industry_cls(limit: int = 80) -> list[dict[str, Any]]:
     def _p():
         rows = lv.sector_industry_cls() or []
         return rows[:limit]
-    return _cached("industry_cls", _p, "sector_industry")
+    return cached("industry_cls", _p, "sector_industry")
 
 
 def fetch_stock_hot_rank(limit: int = 50) -> list[dict[str, Any]]:
     """A 股热门个股排名 (同花顺)。"""
     def _p():
         return lv.stock_hot_rank_ths(limit)
-    return _cached("stock_hot_rank", _p, "sector_heat")
+    return cached("stock_hot_rank", _p, "sector_heat")
 
 
 def get_stock_industry_map(symbols: list[str]) -> dict[str, str]:
@@ -408,7 +397,7 @@ def get_stock_industry_map(symbols: list[str]) -> dict[str, str]:
             return mapping if mapping else None
         except Exception:
             return None
-    return _cached("stock_industry_map", _p, "stock_basic") or {}
+    return cached("stock_industry_map", _p, "stock_basic") or {}
 
 
 def fetch_hot_plates(limit: int = 15) -> list[dict[str, Any]]:
@@ -422,7 +411,7 @@ def fetch_hot_plates(limit: int = 15) -> list[dict[str, Any]]:
             return rows[:limit]
         except Exception:
             return []
-    return _cached("hot_plates", _p, "sector_hot_plates")
+    return cached("hot_plates", _p, "sector_hot_plates")
 
 
 def fetch_sector_heat(limit: int = 20) -> list[dict[str, Any]]:
@@ -430,7 +419,7 @@ def fetch_sector_heat(limit: int = 20) -> list[dict[str, Any]]:
     def _p():
         rows = lv.get_sector_heat() or []
         return rows[:limit]
-    return _cached("sector_heat", _p, "sector_heat")
+    return cached("sector_heat", _p, "sector_heat")
 
 
 def fetch_em_sector_changes() -> dict[str, float]:
@@ -468,7 +457,7 @@ def fetch_em_sector_changes() -> dict[str, float]:
                 except Exception as e:
                     _logger.warning("[sector_fetcher] em sector changes fetch failed (%s %s): %s", host, fs, e)
         return result
-    return _cached("em_sector_changes", _p, "sector_heat")
+    return cached("em_sector_changes", _p, "sector_heat")
 
 
 def fetch_sector_popular_stocks(plate_code: str) -> list[dict[str, Any]]:
@@ -476,4 +465,4 @@ def fetch_sector_popular_stocks(plate_code: str) -> list[dict[str, Any]]:
     def _p():
         return lv.get_sector_popular_stocks(plate_code) or []
     key = f"sector_popular:{plate_code}"
-    return _cached(key, _p, "sector_popular")
+    return cached(key, _p, "sector_popular")

@@ -71,6 +71,16 @@ def run_in_thread(fn, *args, timeout: int = DEFAULT_SYNC_TIMEOUT,
         return None
 
 
+def safe_call(fn, *args, timeout: int = DEFAULT_SYNC_TIMEOUT,
+              executor: str = "shared"):
+    """统一安全调用（round11 P1-2，收敛各 fetcher 的 _safe/_exec 复制）。
+
+    语义与 run_in_thread 相同：线程池执行 + 超时/异常 → None，绝不挂起。
+    不同模块通过 executor 参数选择池（news 用 shared，levistock/sector 用 long）。
+    """
+    return run_in_thread(fn, *args, timeout=timeout, executor=executor)
+
+
 async def run_sync(call, *args, timeout: int = DEFAULT_SYNC_TIMEOUT):
     """在线程池中执行同步函数，带超时保护。
 
@@ -118,6 +128,25 @@ async def run_sync_long(call, *args, timeout: int = 120):
         loop.run_in_executor(_long_running_executor, call, *args),
         timeout=timeout,
     )
+
+
+async def safe_call_async(call, *args, timeout: int = DEFAULT_SYNC_TIMEOUT):
+    """统一安全调用 async 版（round11 P1-2，收敛 market_service._call）。
+
+    await run_sync 执行同步函数，超时/异常 → None。
+    CancelledError 语义保留：外层 wait_for 超时会触发 CancelledError，
+    漏接会冒泡到任务边界（market_service._call 原始注释），故显式返回 None。
+    """
+    try:
+        return await run_sync(call, *args, timeout=timeout)
+    except asyncio.CancelledError:
+        return None
+    except Exception as e:
+        logging.getLogger(__name__).warning(
+            "[async_utils] safe_call_async failed for %s: %s",
+            getattr(call, '__name__', str(call)), e,
+        )
+        return None
 
 
 def _get_default_executor_max() -> int:

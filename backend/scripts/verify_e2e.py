@@ -251,60 +251,6 @@ def section_market():
     except Exception as e:
         check("GET /market/indices/global", False, str(e))
 
-    # /market/search with response time gate (D)
-    try:
-        _t0 = time.time()
-        r = requests.get(f"{BASE}/api/v1/market/search?keyword=510050", timeout=15)
-        _elapsed = time.time() - _t0
-        check(f"GET /market/search?keyword=510050 -> {r.status_code} ({_elapsed:.1f}s)", r.status_code == 200)
-        _check_response_time("/market/search", _elapsed, 10.0)
-        if r.status_code == 200:
-            data = r.json()
-            check(f"搜索结果 {len(data)} 条", isinstance(data, list))
-    except requests.Timeout:
-        check("GET /market/search", False, "请求超时（15s）")
-    except Exception as e:
-        check("GET /market/search", False, str(e))
-
-    # F15: cross-market search coverage (P1/P2 回归防护)
-    for _mkt, _kw in [("A", "510880"), ("HK", "00700"), ("US", "AAPL")]:
-        try:
-            _t0 = time.time()
-            _extra = "&include_stocks=true" if _mkt in ("HK", "US") else ""
-            r = requests.get(f"{BASE}/api/v1/market/search?keyword={_kw}&market={_mkt}{_extra}", timeout=20)
-            _elapsed = time.time() - _t0
-            ok = r.status_code == 200 and isinstance(r.json(), list) and len(r.json()) > 0
-            check(f"GET /market/search?keyword={_kw}&market={_mkt} -> {r.status_code} ({_elapsed:.1f}s) 有结果",
-                  ok, "" if ok else f"返回 {len(r.json()) if r.status_code == 200 else 'ERR'} 条")
-            _check_response_time(f"/market/search?market={_mkt}", _elapsed, 5.0)
-        except requests.Timeout:
-            check(f"GET /market/search?market={_mkt}", False, "请求超时（20s）")
-        except Exception as e:
-            check(f"GET /market/search?market={_mkt}", False, str(e))
-
-    # O13 (round7 §7 P13) + P1-2 (round9 §5): 名称维度搜索契约（茅台/apple/腾讯）——
-    # keyword 名称模糊匹配门禁为 FAIL（P1-2 明确 SKIP→FAIL：instruments 表未灌入/
-    # 名称搜索 0 命中 = 数据管道断裂，不得静默豁免；旧注释声称「不判 FAIL」已过时，
-    # 实际断言 _hits > 0 即 FAIL，此处注释对齐代码语义）。
-    for _mkt, _kw in [("A", "茅台"), ("HK", "腾讯"), ("US", "apple")]:
-        try:
-            _t0 = time.time()
-            _extra = "&include_stocks=true" if _mkt in ("HK", "US") else ""
-            r = requests.get(f"{BASE}/api/v1/market/search?keyword={_kw}&market={_mkt}{_extra}", timeout=20)
-            _elapsed = time.time() - _t0
-            _ok_code = r.status_code == 200
-            _hits = len(r.json()) if (_ok_code and isinstance(r.json(), list)) else 0
-            check(
-                f"GET /market/search?keyword={_kw}(名称)&market={_mkt} -> {r.status_code} ({_elapsed:.1f}s) 名称命中",
-                _ok_code and _hits > 0,
-                "" if _ok_code and _hits > 0
-                else (f"0 条（O4 名称搜索门禁：instruments 表未同步/数据源不可用）" if _ok_code else f"HTTP {r.status_code}"),
-            )
-        except requests.Timeout:
-            check(f"GET /market/search?keyword={_kw}(名称)", False, "请求超时（20s）")
-        except Exception as e:
-            check(f"GET /market/search?keyword={_kw}(名称)", False, str(e))
-
 
 def section_portfolio():
     """组合设计端点"""
@@ -2217,6 +2163,27 @@ def section_search():
                   f"无个股命中 (HTTP {r.status_code}, {len(data) if isinstance(data, list) else 'ERR'} 条)")
         except Exception as e:
             check(label, False, str(e))
+    # O13 (round7 §7 P13) + P1-2 (round9 §5): 名称维度搜索契约（茅台/腾讯/apple）——
+    # keyword 名称模糊匹配门禁为 FAIL（P1-2 明确 SKIP→FAIL：instruments 表未灌入/
+    # 名称搜索 0 命中 = 数据管道断裂，不得静默豁免）。
+    for _mkt, _kw in [("A", "茅台"), ("HK", "腾讯"), ("US", "apple")]:
+        try:
+            _t0 = time.time()
+            _extra = "&include_stocks=true" if _mkt in ("HK", "US") else ""
+            r = requests.get(f"{BASE}/api/v1/market/search?keyword={_kw}&market={_mkt}{_extra}", timeout=20)
+            _elapsed = time.time() - _t0
+            _ok_code = r.status_code == 200
+            _hits = len(r.json()) if (_ok_code and isinstance(r.json(), list)) else 0
+            check(
+                f"GET /market/search?keyword={_kw}(名称)&market={_mkt} -> {r.status_code} ({_elapsed:.1f}s) 名称命中",
+                _ok_code and _hits > 0,
+                "" if _ok_code and _hits > 0
+                else (f"0 条（O4 名称搜索门禁：instruments 表未同步/数据源不可用）" if _ok_code else f"HTTP {r.status_code}"),
+            )
+        except requests.Timeout:
+            check(f"GET /market/search?keyword={_kw}(名称)", False, "请求超时（20s）")
+        except Exception as e:
+            check(f"GET /market/search?keyword={_kw}(名称)", False, str(e))
 
 
 def section_hk_market():
