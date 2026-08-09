@@ -1,5 +1,5 @@
-"""
-round9 (docs/round9-container-rediagnosis.md §6.4) P2-1 资讯分级校准专项：
+﻿"""
+round9 (docs/archived/round9-container-rediagnosis.md §6.4) P2-1 资讯分级校准专项：
 
 - stars 独立「新鲜度」维度（与 level 解耦）
 - 弱化词降级（或将/可能/有望… 未实现事件不标 L5/L4）

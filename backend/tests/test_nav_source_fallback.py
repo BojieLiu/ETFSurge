@@ -1,4 +1,4 @@
-"""
+﻿"""
 O18 (docs/archived/round7-rediagnosis.md §7 P20-①): premium_discount nav 源加固。
 
 P20-①: 现有三级 nav 源（Sina http → QQ http → TTJ 日净值）在用户环境全失败
@@ -120,7 +120,7 @@ class TestEmIopvParser:
         assert "000001" not in result
 
 
-# ── round9 P0-6/P0-7 反例（docs/round9-container-rediagnosis.md §6.5.1-A）──
+# ── round9 P0-6/P0-7 反例（docs/archived/round9-container-rediagnosis.md §6.5.1-A）──
 # 4 处解析 bug 类回归零漏检：sina 字段双错位、qq GBK 解码崩溃、em 字段不匹配、
 # TTJ tuple/dict 契约错——全部覆盖。
 

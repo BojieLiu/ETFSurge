@@ -1,5 +1,5 @@
-"""
-round9 (docs/round9-container-rediagnosis.md §4.4/§4.5) 策略检查完整性专项：
+﻿"""
+round9 (docs/archived/round9-container-rediagnosis.md §4.4/§4.5) 策略检查完整性专项：
 
 - P1-13: technical_signal 空 dict 兜底 + holdings 每项 tech_signal 非空（真实值或「数据不可用」）
 - P1-14: industry_map 候选池 → instruments → ETFClassifier 独立兜底链
