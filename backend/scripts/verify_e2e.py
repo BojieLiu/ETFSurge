@@ -1353,9 +1353,12 @@ def section_api_5xx_check():
 
 
 # ── 因子 Z-score 门禁 ───────────────────────────────────────────
+# O21 (round8): 后端监听 [::]（uvicorn --host ::），Windows 原生 :: 为 v6only，
+# 127.0.0.1 直连会被拒——统一用 localhost（经 getaddrinfo ::1 优先可直连），
+# 与全局 BASE 对齐（round13 遗留待办：原硬编码 127.0.0.1 在 --host :: 下恒 refused）。
 
 
-def section_factor_zscore_check(host="127.0.0.1", port=8000):
+def section_factor_zscore_check(host="localhost", port=8000):
     """因子 Z-score 合理性校验 — 检查 factor-health 端点是否有极端 Z-score。"""
     section("因子 Z-score 合理性")
     try:
@@ -1878,7 +1881,7 @@ def print_summary():
 # ── S9: 新增模块 ──────────────────────────────────────────────────
 
 
-def section_factor_integrity(host="127.0.0.1", port=8000):
+def section_factor_integrity(host="localhost", port=8000):
     """S9: 因子完整性检查 — 验证 key 因子不为全 0。"""
     section("因子完整性检查")
 
