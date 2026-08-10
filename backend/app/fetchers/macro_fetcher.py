@@ -298,6 +298,58 @@ def fetch_gdp_series(n: int = 8) -> list[float]:
     return [float(v) for v in vals[-n:]]
 
 
+def fetch_margin_leverage_snapshot(n_days: int = 20) -> dict | None:
+    """两融杠杆资金情绪 snapshot（round13 两融因子 macro.margin_leverage_trend）。
+
+    沪深融资余额（macro_china_market_margin_sh/sz）按日期合并取交集（双方均有的
+    最新交易日），合计后算 n 日变化率：>+0.05 → +1（杠杆流入）；<-0.05 → -1；
+    中间 → 0。24h 成功 / 1h 失败缓存；任一源失败 → None（诚实降级，不编造）。
+    """
+    def _sh():
+        import akshare as ak
+        with _no_proxy():
+            return ak.macro_china_market_margin_sh()
+    def _sz():
+        import akshare as ak
+        with _no_proxy():
+            return ak.macro_china_market_margin_sz()
+    sh_df = cached("macro:margin_sh", _sh, ttl=_SUCCESS_TTL, fail_ttl=_FAIL_TTL)
+    sz_df = cached("macro:margin_sz", _sz, ttl=_SUCCESS_TTL, fail_ttl=_FAIL_TTL)
+    if sh_df is None or sz_df is None:
+        return None
+
+    def _balance_series(df) -> tuple[list, list]:
+        df = _decode_df(df)
+        dates = pd.to_datetime(df["日期"], errors="coerce")
+        bal = pd.to_numeric(df["融资余额"], errors="coerce")
+        pairs = sorted((d, b) for d, b in zip(dates, bal)
+                       if d is not None and pd.notna(d) and pd.notna(b))
+        return [d for d, _ in pairs], [float(b) for _, b in pairs]
+
+    sh_dates, sh_bal = _balance_series(sh_df)
+    sz_dates, sz_bal = _balance_series(sz_df)
+    # 按日期交集合并（沪深交易日对齐）
+    sh_map = {d: b for d, b in zip(sh_dates, sh_bal)}
+    sz_map = {d: b for d, b in zip(sz_dates, sz_bal)}
+    common = sorted(set(sh_map) & set(sz_map))
+    if len(common) < 2:
+        return None
+    total = [sh_map[d] + sz_map[d] for d in common]
+    if len(total) < n_days:
+        n_days = len(total) - 1  # 样本不足时用全部可用区间
+    change = (total[-1] - total[-n_days]) / total[-n_days]
+    change = round(change, 4)
+    direction = 1 if change > 0.05 else (-1 if change < -0.05 else 0)
+    return {
+        "margin_balance_total": round(total[-1], 2),
+        "margin_balance_n_days_ago": round(total[-n_days], 2),
+        "margin_leverage_change": change,
+        "margin_leverage_direction": direction,
+        "as_of": str(common[-1].date()),
+        "samples": len(total),
+    }
+
+
 def fetch_macro_snapshot() -> dict | None:
     """聚合 M2 同比 / PMI / LPR 1Y → 方向标注（round13 §3.1 P1，契约 market/macro-regime.md）。
 

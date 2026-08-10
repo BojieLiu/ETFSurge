@@ -345,8 +345,8 @@ class TestCoreFactorsConsistency:
 
     def test_core_factors_count(self):
         from app.factors import factor_registry as _fr_mod
-        # round13 §3.1 P2: 33 → 37（+4 宏观环境因子 macro.*）
-        assert len(_fr_mod._CORE_FACTORS) == 37, f"Got {len(_fr_mod._CORE_FACTORS)}"
+        # round13 §3.1 P2: 33 → 38（+5 宏观环境因子 macro.*，含两融 margin_leverage_trend）
+        assert len(_fr_mod._CORE_FACTORS) == 38, f"Got {len(_fr_mod._CORE_FACTORS)}"
 
 
 class TestSourceRegistryFactorSource:

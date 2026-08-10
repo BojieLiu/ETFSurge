@@ -167,5 +167,6 @@
 - **实施顺序建议**：§3.1 P1（市态增强，独立低风险）→ §3.1 P2（因子+LLM 上下文）→ §3.2 P1/P2（TickFlow 实时尾环）→ §4 mootdx 复测后决策
 - 每项沿用既定规范：`run_in_thread` + 超时 + 熔断 + 缓存（宏观 24h）+ mock 测试 + 诚实降级 + 交易时段验证
 - 关键记忆指针：EM push2delay（`EM根因-双源路由天然解决`）、mootdx 回滚（`mootdx移除-2026-08-09`）、BaoStock/TickFlow（`BaoStockTickFlow接入-2026-08-09`）
-- **未决待用户确认**：§3.1 实施范围（P1 全做/部分）、§3.2 实施范围（P1/P2/P3）、mootdx 复测结果后的去留
+- **未决待用户确认**：~~§3.1 实施范围~~（P1/P2 已全做，含两融 margin_leverage_trend，f691af3+ab89166）、§3.2 实施范围（P1/P2/P3 已全做）、mootdx 复测结果后的去留（**2026-08-10 交易时段复测：normal，保留**）
+- **两融已实施**（2026-08-10）：`margin_leverage_trend` 因子（沪深融资余额合计 20 日变化率 → -1/0/+1，`fetch_margin_leverage_snapshot`），注册两处（computers + MARKET_LEVEL_FACTOR_CODES）+ YAML（daily/环境定位）+ `/factors/active` static 标注；契约为 5 因子版（`api-contracts/factors/macro-factors.md`）
 - **Shibor/社融去向待定**（2026-08-09 实测恢复但未接入）：可选① 进 P2 因子池（如 `shibor_trend` 流动性因子 / 社融增速因子）；② 仅进 LLM 上下文（build_full_context 宏观段补充，无因子）；③ 暂不接入——P1 市态判定保持三指标（M2/PMI/LPR）不变

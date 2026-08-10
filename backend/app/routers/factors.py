@@ -74,12 +74,13 @@ MARKET_LEVEL_FACTOR_CODES = {
     "sentiment.panic_greed_diff",
     "sentiment.stock_divergence",
     "sentiment.news_direction",
-    # round13 §3.1 P2: 宏观环境因子——全市场单一值（M2/PMI/LPR/GDP），截面恒等，
+    # round13 §3.1 P2: 宏观环境因子——全市场单一值（M2/PMI/LPR/GDP/两融），截面恒等，
     # 不参与截面 IC，仅作市态/组合层输入（与 sentiment 市场级因子同处置）
     "macro.m2_trend",
     "macro.pmi_level",
     "macro.lpr_direction",
     "macro.gdp_trend",
+    "macro.margin_leverage_trend",
 }
 
 

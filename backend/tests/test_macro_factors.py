@@ -26,7 +26,21 @@ MACRO_CODES = {
     "macro.pmi_level",
     "macro.lpr_direction",
     "macro.gdp_trend",
+    "macro.margin_leverage_trend",
 }
+
+
+def _margin_df():
+    """沪深两融（macro_china_market_margin_sh/sz）——融资余额 7 列，日期升序。"""
+    import datetime as _dt
+    dates = [_dt.date(2026, 7, 21) + _dt.timedelta(days=i) for i in range(20)]
+    # 融资余额逐日递增（模拟杠杆资金流入）→ 20 日变化率 > +0.05 → +1
+    base = 1.0
+    rows = []
+    for i, d in enumerate(dates):
+        balance = base * (1 + 0.003 * i)  # 末值较初值 +5.7%
+        rows.append([d, balance * 0.02, balance, 100, 200, 300, balance * 1.02])
+    return pd.DataFrame(rows, columns=["日期", "融资买入额", "融资余额", "融券卖出量", "融券余量", "融券余额", "融资融券余额"])
 
 
 def _rt(fn, timeout=15):
@@ -82,6 +96,8 @@ def _macro_patch():
     stack.enter_context(patch("akshare.macro_china_pmi_yearly", side_effect=lambda: _pmi_df()))
     stack.enter_context(patch("akshare.macro_china_gdp_yearly", side_effect=lambda: _gdp_df()))
     stack.enter_context(patch("akshare.macro_china_lpr", side_effect=lambda: _lpr_df()))
+    stack.enter_context(patch("akshare.macro_china_market_margin_sh", side_effect=lambda: _margin_df()))
+    stack.enter_context(patch("akshare.macro_china_market_margin_sz", side_effect=lambda: _margin_df()))
     stack.enter_context(patch.object(macro_fetcher, "run_in_thread", _rt))
     return stack
 
@@ -152,6 +168,37 @@ def test_compute_gdp_trend_percentile():
     assert fn({"macro_gdp_series": series + [4.8]}) == 0.0, "中位 → 0"
     assert fn({}) == 0.0, "序列缺失 → 0"
     assert fn({"macro_gdp_series": [1.0, 2.0]}) == 0.0, "样本 <4 → 0（季频样本不足诚实降级）"
+
+
+# ── margin_leverage_trend（round13 两融因子，日频环境定位）──────
+def test_compute_margin_leverage_trend():
+    """两融杠杆：融资余额 20 日变化率 >+0.05 → +1（杠杆流入）；<-0.05 → -1；中间 → 0。"""
+    fn = registry._computers["macro.margin_leverage_trend"]
+    assert fn({"margin_leverage_change": 0.08}) == 1.0, "融资余额上升 → +1"
+    assert fn({"margin_leverage_change": -0.08}) == -1.0, "融资余额下降 → -1"
+    assert fn({"margin_leverage_change": 0.01}) == 0.0, "变化率小 → 0"
+    assert fn({}) == 0.0, "数据缺失 → 0（诚实降级）"
+
+
+@pytest.mark.asyncio
+async def test_fetch_margin_balance_aggregates():
+    """fetch_margin_balance：沪深融资余额按日期合并取交集，20 日变化率方向正确。"""
+    import asyncio
+    from app.fetchers import macro_fetcher
+    _clear()
+    with _macro_patch():
+        snap = await asyncio.to_thread(macro_fetcher.fetch_margin_leverage_snapshot)
+    assert snap is not None, "两融 snapshot 应返回"
+    assert snap["margin_leverage_change"] > 0.05, "测试数据融资余额递增 → 变化率应 > +5%"
+    assert snap["margin_leverage_direction"] == 1, "杠杆流入 → +1"
+
+
+def test_compute_margin_frequency_yaml():
+    """YAML：margin_leverage_trend category=macro、frequency=daily、subcategory=environment。"""
+    d = registry.get_factor("macro.margin_leverage_trend")
+    assert d is not None, "margin_leverage_trend 无 YAML 定义"
+    assert d.category == "macro"
+    assert d.frequency == "daily", "两融日频数据（环境定位）"
 
 
 # ── 数据注入（_fetch_market_data 组装 macro_snapshot）──────────

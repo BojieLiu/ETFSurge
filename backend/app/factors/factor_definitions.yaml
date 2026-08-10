@@ -2574,10 +2574,23 @@ factor_definitions:
   ic_threshold: 0.02
   ic_ir_threshold: 0.5
 
+- code: "macro.margin_leverage_trend"
+  name: "两融杠杆资金情绪"
+  category: "macro"
+  subcategory: "environment"
+  frequency: "daily"
+  standardization: "none"
+  lookback_window: 20
+  description: "沪深融资余额合计 20 日变化率：>+5% +1（杠杆流入）/ <-5% -1（杠杆流出）/ 中间 0；日频数据但作环境维度（非盘中决策），杠杆资金情绪与 sentiment 互补；市场级因子不参与截面 IC"
+  tags: ["macro", "regime", "sentiment"]
+  dependencies: ["margin_leverage_change"]
+  ic_threshold: 0.02
+  ic_ir_threshold: 0.5
+
 # =============================================================================
 # 统计摘要
 # =============================================================================
-# 总计: 143 个因子（+4 round13 宏观环境）
+# 总计: 144 个因子（+5 round13 宏观环境）
 # 版本: v1.0
 # 最后更新: 2025-01-17
 # =============================================================================

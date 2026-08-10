@@ -571,6 +571,33 @@ def _compute_macro_gdp_trend(data: dict) -> float:
     return 0.0
 
 
+def _compute_macro_margin_leverage_trend(data: dict) -> float:
+    """macro.margin_leverage_trend: 两融杠杆资金情绪（日频数据，环境定位）。
+
+    沪深融资余额合计 20 日变化率：>+0.05 → +1（杠杆流入/风险偏好升）；
+    <-0.05 → -1（杠杆流出/风险偏好降）；中间/缺失 → 0。
+    与 sentiment 因子互补（杠杆资金为经典风险偏好代理）。不参与盘中决策。
+    读取：优先 data["macro_snapshot"]["margin_leverage_*"]（注入路径），
+    兜底 data["margin_leverage_*"]（测试/直传路径）。
+    """
+    snap = data.get("macro_snapshot") or {}
+    direction = snap.get("margin_leverage_direction")
+    change = snap.get("margin_leverage_change")
+    if direction is None:
+        direction = data.get("margin_leverage_direction")
+    if change is None:
+        change = data.get("margin_leverage_change")
+    if direction is not None:
+        return float(direction)
+    if change is None:
+        return 0.0
+    try:
+        c = float(change)
+    except (ValueError, TypeError):
+        return 0.0
+    return 1.0 if c > 0.05 else (-1.0 if c < -0.05 else 0.0)
+
+
 def _compute_stock_divergence(data: dict) -> float:
     """Stock return divergence: use advance/decline ratio from sentiment_fetcher.
 
@@ -635,6 +662,7 @@ _BUILTIN_COMPUTERS: dict[str, Callable[[dict], float]] = {
     "macro.pmi_level": _compute_macro_pmi_level,
     "macro.lpr_direction": _compute_macro_lpr_direction,
     "macro.gdp_trend": _compute_macro_gdp_trend,
+    "macro.margin_leverage_trend": _compute_macro_margin_leverage_trend,
     # KDJ (2026-07-20 从 indicators.py 注册)
     "technical.kdj.k_value": _compute_kdj_k,
     "technical.kdj.d_value": _compute_kdj_d,
@@ -706,6 +734,7 @@ _CORE_FACTORS = [
     "macro.pmi_level",
     "macro.lpr_direction",
     "macro.gdp_trend",
+    "macro.margin_leverage_trend",
     # KDJ
     "technical.kdj.k_value",
     "technical.kdj.d_value",
@@ -1080,20 +1109,30 @@ class FactorRegistry:
         self._computers[code] = fn
 
     async def _inject_macro_data(self, data: dict[str, dict[str, Any]], symbols: list[str]) -> None:
-        """round13 §3.1 P2: 注入宏观数据字段（macro_snapshot + GDP 序列）。
+        """round13 §3.1 P2: 注入宏观数据字段（macro_snapshot + GDP 序列 + 两融方向）。
 
-        供 4 个 MARKET_LEVEL 宏观因子（macro.m2_trend / pmi_level / lpr_direction /
-        gdp_trend）读取——全市场单一值，与 sentiment 注入同模式（一次注入所有标的）。
-        snapshot 走 fetch_macro_snapshot（24h 缓存）；GDP 走 fetch_gdp_series（季频）。
+        供 5 个 MARKET_LEVEL 宏观因子（macro.m2_trend / pmi_level / lpr_direction /
+        gdp_trend / margin_leverage_trend）读取——全市场单一值，与 sentiment 注入
+        同模式（一次注入所有标的）。snapshot 走 fetch_macro_snapshot（24h 缓存）；
+        GDP 走 fetch_gdp_series（季频）；两融走 fetch_margin_leverage_snapshot（日频）。
         数据不可用 → 注入 None/[] → compute 输出 0（诚实降级，不编造）。
         """
         import asyncio
-        from ..fetchers.macro_fetcher import fetch_macro_snapshot, fetch_gdp_series
+        from ..fetchers.macro_fetcher import (
+            fetch_macro_snapshot, fetch_gdp_series, fetch_margin_leverage_snapshot,
+        )
         snap = await asyncio.to_thread(fetch_macro_snapshot)
         gdp_series = await asyncio.to_thread(fetch_gdp_series, 8)
+        margin = await asyncio.to_thread(fetch_margin_leverage_snapshot)
         for _sym in symbols:
             _d = data.setdefault(_sym, {})
             _d["macro_snapshot"] = snap
+            if margin:
+                # 两融方向并入 snapshot（margin_leverage_trend compute 读取）
+                _snap = dict(snap) if snap else {}
+                _snap["margin_leverage_direction"] = margin.get("margin_leverage_direction")
+                _snap["margin_leverage_change"] = margin.get("margin_leverage_change")
+                _d["macro_snapshot"] = _snap
             if gdp_series:
                 _d["macro_gdp_series"] = gdp_series
 
