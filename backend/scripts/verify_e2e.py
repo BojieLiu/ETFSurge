@@ -631,14 +631,34 @@ def section_portfolio():
     except Exception as e:
         check("GET /timeline", False, str(e))
 
-    # POST /portfolio/apply-design (with empty body to test schema validation)
+    # POST /portfolio/apply-design —— round14 P0-A: 空 symbols 应 400（修复前 200 空操作
+    # 前端假成功）；前端等效 payload（{portfolio_type, symbols, weights} 契约形态）
+    # 应用后 applied 非空（docs/round14 §6 验收口径 1/2）。
     try:
         r = requests.post(f"{BASE}/api/v1/portfolio/apply-design",
-                          json={"design": {}}, timeout=10)
-        check(f"POST /apply-design -> {r.status_code}",
-              r.status_code in (200, 422), "422 可接受（空 body 校验）" if r.status_code == 422 else "")
+                          json={"portfolio_type": "on_exchange", "symbols": [], "weights": {}}, timeout=10)
+        check(f"POST /apply-design 空 symbols -> {r.status_code}",
+              r.status_code == 400, f"应 400（空操作误导前端假成功），实际 {r.status_code}")
     except Exception as e:
-        check("POST /apply-design", False, str(e))
+        check("POST /apply-design 空 symbols", False, str(e))
+
+    # 契约 payload 真实链路：从现有组合取 1 只 ETF 构造 apply-design，断言 applied 非空
+    try:
+        _etfs_resp = requests.get(f"{BASE}/api/v1/portfolio/etfs", timeout=10)
+        _etfs = (_etfs_resp.json() if _etfs_resp.status_code == 200 else []) or []
+        _sym = _etfs[0].get("symbol") if _etfs else "510300"
+        _payload = {
+            "portfolio_type": "on_exchange",
+            "symbols": [_sym],
+            "weights": {_sym: 0.2},
+        }
+        r = requests.post(f"{BASE}/api/v1/portfolio/apply-design", json=_payload, timeout=10)
+        _applied = (r.json().get("applied") or []) if r.status_code == 200 else []
+        check(f"POST /apply-design 契约 payload -> {r.status_code} (applied={len(_applied)})",
+              r.status_code == 200 and len(_applied) > 0 and _applied[0].get("symbol") == _sym,
+              f"applied 应非空且 symbol 一致，实际 {r.text[:200]}")
+    except Exception as e:
+        check("POST /apply-design 契约 payload", False, str(e))
 
 
 def section_news():

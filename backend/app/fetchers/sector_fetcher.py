@@ -532,6 +532,14 @@ def _to_float(v) -> float:
         return 0.0
 
 
+def _clean_industry(raw) -> str:
+    """行业名归一（与 hk_hot_fetcher._clean_industry 同逻辑）——空/占位符 → 「其他」。"""
+    ind = (raw or "").strip()
+    if not ind or ind in ("-", "--", "—", "0", "None", "nan", "N/A"):
+        return "其他"
+    return ind
+
+
 def _fetch_us_spot_rich() -> list[dict[str, Any]]:
     """东财美股 spot（m:105 全量，含 industry/pe），60s TTL 共享（板块聚合 + PE 查询）。"""
     import time as _time
