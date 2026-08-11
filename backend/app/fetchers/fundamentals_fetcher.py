@@ -839,9 +839,16 @@ async def fetch_market_sentiment() -> dict[str, Any]:
         return_exceptions=True,
     )
 
-    advance = advance if isinstance(advance, float) and not isinstance(advance, Exception) else 0.5
-    vr = vr if isinstance(vr, float) and not isinstance(vr, Exception) else 1.0
-    margin = margin if isinstance(margin, float) and not isinstance(margin, Exception) else 0.0
+    # round15 基线 B（test-guard-baseline.md §2）: 降级路径显式标注——
+    # 任一数据源失败（fallback 默认值）时输出带 _degraded: true，
+    # 不冒充满血结果（R2: 降级标记语义，防「源全挂也恒绿」测试盲区）。
+    advance_ok = isinstance(advance, float) and not isinstance(advance, Exception)
+    vr_ok = isinstance(vr, float) and not isinstance(vr, Exception)
+    margin_ok = isinstance(margin, float) and not isinstance(margin, Exception)
+
+    advance = advance if advance_ok else 0.5
+    vr = vr if vr_ok else 1.0
+    margin = margin if margin_ok else 0.0
 
     index = calc_sentiment_index(
         advance_ratio=advance,
@@ -870,6 +877,9 @@ async def fetch_market_sentiment() -> dict[str, Any]:
         "margin_change": round(margin, 4),
         "sentiment_history": list(_sentiment_rolling),
     }
+    # round15 基线 B: 降级标记（任一源失败 → 输出非满血，前端/测试可感知）
+    if not (advance_ok and vr_ok and margin_ok):
+        result["_degraded"] = True
     # F19 R68: 落盘（进程重启后仍保留历史）
     _persist_sentiment_history(_SENTIMENT_HISTORY_FILE, result)
     return result
