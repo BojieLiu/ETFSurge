@@ -30,8 +30,7 @@ docker-compose up --build --profile prod
 ```
 
 > 注意：dev 模式依赖 `backend/.env` 已存在（含 DEEPSEEK_API_KEY）。
-> 前端 Vite 的 `/api`、`/ws` 代理在 Docker 内自动指向容器 `backend-dev`，
-> 本地非 Docker 开发回落到 `localhost:8000`，两种模式均无需改配置。
+> Docker 内 Vite 的 `/api`、`/ws` 代理自动指向容器 `backend-dev`；本地开发回落到 `localhost:8000`，无需改配置。
 
 ## 测试 / Testing（TDD 工作流）
 
@@ -64,8 +63,8 @@ cd backend && python -m pytest
   - 组件测试用 `@vue/test-utils`。
 - **链路验证**：后端用 `verify_e2e.py`；前端用 `npm run build` + 浏览器走查关键页面。
 - **pre-commit 门禁**：`.githooks/pre-commit` 会执行密钥扫描 / check_routes / 前端 build / mypy / audit_async_blocking / pytest / smoke_startup 等检查（跳过方式见各段注释）。
-  - **pytest 全量用 `-n auto` 并行**（pytest-xdist，~220s → ~90s；xdist 缺失自动回退串行）；仅测试文件变更时只跑变更文件（秒级）。
-  - **smoke_startup 用 `SMOKE_FAST=1` 快速模式**（~50s → ~5s）：子进程设 `ETF_SURGE_SKIP_WARMUP=1` 跳过后台预热任务及其 60s 等待，并跳过 `/calculate` 懒加载（由 `verify_e2e.py` 覆盖）；完整模式 `python scripts/smoke_startup.py` 行为不变。
+  - **pytest 全量用 `-n auto` 并行**（pytest-xdist，xdist 缺失自动回退串行）；仅测试文件变更时只跑变更文件。
+  - **smoke_startup 用 `SMOKE_FAST=1` 快速模式**：子进程设 `ETF_SURGE_SKIP_WARMUP=1` 跳过后台预热任务及其等待，并跳过 `/calculate` 懒加载（由 `verify_e2e.py` 覆盖）；完整模式 `python scripts/smoke_startup.py` 行为不变。
   - 前端 build 仅当 `frontend/src/*`、`index.html`、`vite.config.js`、`package.json` 变更时触发（`frontend/public/` 静态资源不触发）。
   - docker build 冒烟在 Docker daemon 不可用（Docker Desktop 未启动）时视为环境跳过，真实构建失败仍拦截。
   - **门禁治理约定（2026-08-09）**：新增门禁须说明与现有 13 段的差异化价值；死代码审计保留 3 个（check_api_usage / audit_unused_symbols / check_unused_styles，对象互不相同）不再新增同类；P3-6 测试文件基线为**提示不阻断**。
@@ -120,45 +119,18 @@ cd backend && python -m pytest
 
 ## 关键路径
 
-- `backend/app/main.py` — FastAPI 入口 + lifespan：
-  - 启动时预热 `refresh_market_cache()`（**25s** 超时）。
-  - 后台异步循环：板块缓存刷新（60s）、市态+情绪刷新（120s）。
-  - 挂载路由：`market` / `portfolio` / `analysis` / `news` / `ws` / `admin`（前缀在各 router 内，统一为 `/api/v1/...`）。
-- `backend/app/tasks/market_refresh.py` — 定时刷新行情 / 资讯缓存的调度包装。
-- `backend/app/tasks/task_manager.py` — 通用 TaskManager（支持 design / check / report 三种任务类型）+ `design_pipeline()`（即 design_worker 别名，round11 删除 design_tasks.py 向后兼容层后 worker 逻辑在 task_manager 内）。
-- `backend/app/tasks/report_worker.py` — 异步市场研判报告 worker（WS 推送进度 + 最终报告）。
-- `backend/app/tasks/strategy_check_worker.py` — 异步策略检查 worker。
-- `backend/app/tasks/design_report.py` — LLM 报告管道 `compose_and_push_report()`（WS 推送 + DB 持久化 + 90s 超时保护 + 一致性校验）。
-- `backend/app/routers/ws.py` — WebSocket 路由 + `ConnectionManager`（含 `broadcast(channel, msg)`）。
-  - 路径：`/ws/market/{symbol}`、`/ws/news`、`/ws/portfolio`、**`/ws/task-notifications`**、`/ws/design-report/{session_id}`。
-- `backend/app/engine/` — **纯函数策略引擎包**，无 I/O 无外部依赖：
-  - `budgets.py` — 层预算（`STRATEGY_META`、`dynamic_layer_budget()`）和预期收益调整。
-  - `allocation_engine.py` — 核心分配器 `allocate()`，基于因子分排序选择标的分配权重。
-  - `rationale.py` — 数据驱动的入选理由生成（因子分 + 市态感知 + 模板多样化）。
-  - `risk_controls.py` — 风控约束（单只 ≤30%、行业集中度 <40%、层预算不超标）。
-- `backend/app/services/strategy_design.py` — **轻量编排器（125 行，原 1092 行）**：
-  - `generate_enhanced_design()` — 编排器入口：调用 market_data_hub → engine/ 分配器 → 风控 → 返回三套方案。
-- `backend/app/services/market_data_hub.py` — **统一数据管道**（全市场扫描 + 因子计算 + 市场状态 + 新闻缓存）：
-  - `get_factor_matrix()` / `get_pool()` / `get_market_regime()` / `get_market_sentiment()` / `get_news()`。
-- `backend/app/factors/factor_registry.py` — FactorRegistry（33 维核心因子计算，含 KDJ / 综合信号 / industry_diversification / premium_discount，已删除假数据 fallback，带熔断保护）。
-- `backend/app/services/market_trends.py` — `detect_market_regime()`（含 index_realtime fallback）、`compute_etf_trends()`。
-- `backend/app/fetchers/china_market.py` — A 股 / 港股 / 商品行情与资讯主力数据源（mootdx/Sina 多源降级链；round11 删除 akshare_fetcher.py shim 后 `fetch_index_history`/`fetch_history` 直连本模块）。
-- `backend/app/fetchers/news_fetcher.py` — 资讯抓取（财新头条 / 宏观 / 国际），打 `level` / `stars`。
-- `backend/app/services/portfolio_service.py` — 组合计算（`calculate_allocation` / `calculate_daily_pnl`）。
-- `backend/app/services/market_service.py` — 实时行情 / 全球指数。
-- `backend/app/analysis/llm.py` — DeepSeek LLM 集成；`_build_design_report_prompt()`、`generate_design_report()` 在此。
-- `backend/app/services/llm_context.py` — LLM 上下文数据统一管道 `build_full_context()`（市场状态/情绪/指数/板块/资讯/资金流向）。
-- `frontend/src/main.js` — `createApp` + `pinia` + `router`，挂 `#app`。
-- `frontend/src/api/index.js` — axios 实例 `baseURL: '/api/v1'`，导出 `marketApi` / `portfolioApi` / `analysisApi` / `newsApi`。
-- `frontend/src/stores/portfolio.js` — 组合状态（Pinia）。
-- `frontend/src/stores/task.js` — 全局任务状态（运行中/完成/失败），持久化到 localStorage。
-- `frontend/src/components/DashboardAiTools.vue` — 智能组合设计主面板（wizard/loading/result 三态，含历史记录、方案卡片、完整报告 Tab）。
-- `frontend/src/components/PortfolioAnalysis.vue` — 组合管理 + 技术分析合并页。
-- `frontend/src/components/NewsView.vue` — 资讯模块。
-- `frontend/src/composables/useMarketWS.js` / `useNewsWS.js` — WebSocket 客户端。
-- `backend/scripts/verify_e2e.py` — 端到端验证脚本（见「测试」章节）。
-- `backend/scripts/encoding_diagnosis.py` — 数据库编码诊断工具（检查中文是否乱码）。
-- `backend/scripts/data_health_check.py` — 数据管道健康检查（5-section 检查）。
+按目录定位代码，函数签名级细节用符号索引/LSP 查：
+
+- `backend/app/main.py` — FastAPI 入口 + lifespan：启动预热 `refresh_market_cache()`（**25s** 超时）；后台异步循环刷新板块缓存（60s）、市态+情绪（120s）；挂载 `market` / `portfolio` / `analysis` / `news` / `ws` / `admin` 路由（统一前缀 `/api/v1/...`）。
+- `backend/app/tasks/` — 后台任务：`market_refresh.py` 行情/资讯缓存调度；`task_manager.py` 通用 TaskManager（design/check/report 三型）+ `design_pipeline()`（design worker 主体）；`report_worker.py` / `strategy_check_worker.py` 异步 worker（WS 进度 + 最终报告）；`design_report.py` LLM 报告管道（WS 推送 + DB 持久化 + 90s 超时 + 一致性校验）。
+- `backend/app/routers/ws.py` — WebSocket 路由 + `ConnectionManager.broadcast(channel, msg)`。路径见 §conventions。
+- `backend/app/engine/` — **纯函数策略引擎包**，无 I/O 无外部依赖：`budgets.py` 层预算、`allocation_engine.py` 核心分配器、`rationale.py` 入选理由、`risk_controls.py` 风控（单只 ≤30%、行业集中度 <40%、层预算不超标）。
+- `backend/app/services/` — 编排层：`strategy_design.py` 轻量编排器 `generate_enhanced_design()`（market_data_hub → engine/ 分配器 → 风控 → 三套方案）；`market_data_hub.py` 统一数据管道（`get_factor_matrix` / `get_pool` / `get_market_regime` / `get_market_sentiment` / `get_news`）；`market_service.py` 实时行情 / 全球指数；`portfolio_service.py` 组合与日盈亏计算；`llm_context.py` LLM 上下文管道 `build_full_context()`。
+- `backend/app/factors/factor_registry.py` — FactorRegistry（33 维核心因子，含 KDJ / 综合信号 / premium_discount，无假数据 fallback，带熔断）。
+- `backend/app/fetchers/` — 数据源：`china_market.py` A/港/商品行情资讯主力（mootdx/Sina 多源降级链）；`news_fetcher.py` 资讯抓取（财新头条 / 宏观 / 国际，打 `level` / `stars`）。
+- `backend/app/analysis/llm.py` — DeepSeek LLM 集成（prompt 构建 + `generate_design_report()`）。
+- `frontend/src/` — `main.js` 入口 + pinia + router；`api/index.js` axios `baseURL: '/api/v1'`（`marketApi`/`portfolioApi`/`analysisApi`/`newsApi`）；`stores/` 组合与任务状态；`components/` DashboardAiTools / PortfolioAnalysis / NewsView；`composables/useMarketWS.js`、`useNewsWS.js`。
+- `backend/scripts/` — `verify_e2e.py` 端到端验证（见「测试」）；`encoding_diagnosis.py` 数据库编码诊断；`data_health_check.py` 数据管道健康检查。
 
 ## LLM 配置
 
@@ -166,8 +138,6 @@ DeepSeek API key 放在 `backend/.env` 中:
 ```
 DEEPSEEK_API_KEY=sk-xxx
 ```
-
-key 也存在于 `E:\agent_workspace\deepseek_api_key.txt.txt`。
 
 ## conventions
 
@@ -186,14 +156,12 @@ key 也存在于 `E:\agent_workspace\deepseek_api_key.txt.txt`。
 - **Vue `<script setup>` 是纯 JavaScript（无 `lang="ts"`）**：禁止写 `ref<string | null>(null)` 这类 TS 泛型。需要类型提示时用 `ref(null)` + JSDoc。
 - **外部数据源会超时 / 限流**：akshare / yfinance / tushare / DeepSeek 任一都可能挂。用 `try/except` + `asyncio.wait_for`/`run_sync` 包裹，失败返回结构化错误而非崩溃。
 - **前端 dev server 启动方式**：见「启动命令」中的 Windows 坑。
-- **`/ws/news` 无广播**：光连上不会收到数据，需要后端任务周期性 `broadcast("news", payload)`。
 - **LLM prompt 规则 1 必须硬约束**：`design_report.md` 的规则 1 禁止 LLM 篡改 ETF 标的。若 LLM 仍引入候选池外代码，一致性校验 `_validate_report_consistency` 会在后处理中追加修正脚注 + 写 ERROR 日志。
 - **`async def` ≠ 非阻塞**：`async def` 只改了函数签名，不改变调用链底层的行为。任何 `async def` 函数内部若直接调用同步 I/O（akshare/requests/urllib/pandas），会阻塞整个事件循环。正确做法：用 `await run_sync(call, *args)` 提交到线程池。判断标准——函数体内出现 `.get(`、`ak.`、`urllib.request` 等调用时，必须检查是否经过 `run_sync`/`asyncio.to_thread` 包裹。
 
 ## API 契约流程（强制 / Mandatory）
 
 **所有新功能必须先写 API 契约，再编码。** 契约文件位于 `api-contracts/` 目录。
-**后端改动必须运行 `verify_e2e.py` 确认全 PASS 后才能 commit。**
 
 **流程:**
 1. 从 `api-contracts/contract_template.md` 复制模板到对应模块目录
@@ -244,4 +212,4 @@ docker-compose up -d    # 启动 backend + frontend(nginx)
 
 ## 关联 skill
 
-ETF 组合技能位于 `C:\Users\tiany\.agents\skills\etf-agent\`，可在 OpenCode 对话中直接使用。
+ETF 组合管理与多资产行情分析使用已注册的 `etf-agent` skill（技能索引可查），直接 `/etf-agent` 调用。
