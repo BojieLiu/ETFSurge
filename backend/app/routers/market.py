@@ -92,7 +92,8 @@ async def search(
     if kind == "sector":
         return await _search_sectors(keyword, market=mkt)
     if kind == "index":
-        return await _search_indices(keyword)
+        # round14 P2-AG: 透传 market（港股 tab 只出港股指数，防 A 股占满）
+        return await _search_indices(keyword, market=mkt)
 
     # kind=symbol（或 all）：先走既有 symbol 逻辑
     if mkt == "A":
@@ -181,11 +182,12 @@ async def search(
     # O30: kind=all（默认）→ 尾部追加 sector/index 段（向后兼容：旧调用方不受影响）
     if kind != "symbol":
         try:
-            merged += await _search_sectors(keyword)
+            merged += await _search_sectors(keyword, market=mkt)
         except Exception as e:
             logger.warning("[search] sector segment failed: %s", e)
         try:
-            merged += await _search_indices(keyword)
+            # round14 P2-AG: all 模式尾部段同样透传 market（否则港股指数仍不过滤）
+            merged += await _search_indices(keyword, market=mkt)
         except Exception as e:
             logger.warning("[search] index segment failed: %s", e)
         for it in merged:
@@ -222,8 +224,12 @@ async def _search_sectors(keyword: str, market: str | None = None) -> list[dict[
         logger.warning("[search] sector search failed: %s", e)
         return []
 
-async def _search_indices(keyword: str) -> list[dict[str, Any]]:
-    """O30: 指数搜索——indices_meta 表 name/pinyin/first_letter ilike（type='index'）。"""
+async def _search_indices(keyword: str, market: str | None = None) -> list[dict[str, Any]]:
+    """O30: 指数搜索——indices_meta 表 name/pinyin/first_letter ilike（type='index'）。
+
+    round14 P2-AG: 加 market 参数——market='HK' 时按 IndexMeta.market 过滤 + limit
+    10→20（放大港股指数命中面）；market='A' 只查 A；None 保持全市场。
+    """
     from ..models.search import IndexMeta
     from sqlalchemy import select, or_
 
@@ -239,7 +245,12 @@ async def _search_indices(keyword: str) -> list[dict[str, Any]]:
                     IndexMeta.pinyin.ilike(f"%{kw}%"),
                     IndexMeta.first_letter.ilike(f"%{kw}%"),
                 ),
-            ).limit(10)
+            )
+            if market and market.upper() == "HK":
+                stmt = stmt.where(IndexMeta.market == "HK")
+            elif market and market.upper() == "A":
+                stmt = stmt.where(IndexMeta.market == "A")
+            stmt = stmt.limit(20)  # P2-AG: 10→20（放大港股指数命中面）
             rows = (await session.execute(stmt)).scalars().all()
             return [{
                 "symbol": r.symbol, "name": r.name,
@@ -552,8 +563,16 @@ async def sectors_heat(limit: int = Query(20), market: str = "A") -> dict[str, A
     rows = await asyncio.to_thread(market_data_hub.get_sector_heat, limit, market)
     # O19 补充（round9 §6.1 专项）: 财联社热度无涨跌幅字段 → 东财板块行情按名称回填
     # 真实涨跌幅（行业+概念板块 f3）；东财失败时保持 0 兜底（不抛错）。
+    # round14 P2-AE: 财联社 plate_list 按 plate_code 精确 join 优先（实测 20/20 命中）——
+    # 东财名称回填仅命中 5/20（民爆/光通信等东财无此板块）；sign 失效时自动回退东财。
     changes: dict[str, float] = {}
+    cls_changes: dict[str, float] = {}
     if market and market.upper() == "A":
+        try:
+            from ..fetchers.sector_fetcher import fetch_cls_plate_changes
+            cls_changes = await asyncio.to_thread(fetch_cls_plate_changes) or {}
+        except Exception as e:
+            get_logger("market").warning("[sectors_heat] cls plate changes failed: %s", e)
         try:
             from ..fetchers.sector_fetcher import fetch_em_sector_changes
             changes = await asyncio.to_thread(fetch_em_sector_changes) or {}
@@ -562,7 +581,11 @@ async def sectors_heat(limit: int = Query(20), market: str = "A") -> dict[str, A
     items = []
     for r in rows or []:
         name = r.get("plate_name") or r.get("name", "")
+        plate_code = r.get("plate_code", "")
+        # plate_code join 优先（财联社同源同码）→ 东财名称回填兜底 → 0
+        cls_chg = cls_changes.get(plate_code)
         em_chg = _match_em_change(name, changes)
+        em_chg = cls_chg if cls_chg is not None else em_chg
         # P2-4 (R4-11a): 透传 change_pct（前端 SectorHeatMap 读 item.change_pct 显示涨跌幅，
         # 旧白名单丢弃该字段 → 热度行涨跌幅恒不显示）
         # O19 (round8 §7 §5.1D): 财联社板块热度无涨跌幅字段 → null 兜底为 0——
@@ -574,7 +597,7 @@ async def sectors_heat(limit: int = Query(20), market: str = "A") -> dict[str, A
             "heat_index": r.get("cur_heat", r.get("heat_index", 0)),
             "rank_change": r.get("rank_change"),
             "is_new": r.get("is_new", 0),
-            "plate_code": r.get("plate_code", ""),
+            "plate_code": plate_code,
             # P2-3 (round9 §6.1): 板块涨跌幅 ±10% 值域校验（em 回填已过校验；非回填路径也拦）
             "change_pct": em_chg if em_chg is not None
             else (r.get("change_pct") if r.get("change_pct") is not None
@@ -634,36 +657,58 @@ async def _watchlist_enrich_items(items: list) -> list[dict]:
     # 批量一次拉全，慢源只触发一次。
     async def _realtime_one(item):
         try:
+            # round14 P2-AF/AH: 超时分级——A/stock 5s（对齐批量 4s + 余量），
+            # HK/US 8s（对齐 get_asset_realtime 非 A _timeout=15 内的快速返回级）。
+            # 批量路径优先后 per-item 罕见触发，仅作兜底。
+            _t = 5 if (item.asset_type or "A") in ("A", "stock") else 8
             return await asyncio.wait_for(
                 market_data_hub.get_asset_realtime(item.symbol, item.asset_type),
-                timeout=3,
+                timeout=_t,
             )
         except BaseException:
             return None
 
-    _a_items = [it for it in items if (it.asset_type or "A") == "A"]
-    _batch_map: dict[str, dict] = {}
-    if len(_a_items) >= 2:
+    # round14 P2-AF/AH: 按 asset_type 分组批量——A/stock → get_realtime_batch("A")，
+    # HK → get_realtime_batch("HK")，US → get_realtime_batch("US")。
+    # 旧实现只对 asset_type=="A" 走批量：stock（江波龙 301317 搜索结果入库）与 HK
+    # 全部落 per-item 3s 截断（get_asset_realtime 内部 _timeout=15）→ 必超时 → 前端
+    # 「行情加载中」。去掉 len>=2 门槛（单只也走批量，批量并发远优于 per-item 截断）。
+    _a_items = [it for it in items if (it.asset_type or "A") in ("A", "stock")]
+    _hk_items = [it for it in items if (it.asset_type or "A") == "HK"]
+    _us_items = [it for it in items if (it.asset_type or "A") == "US"]
+
+    from ..services.market_service import get_realtime_batch
+
+    async def _batch_for(group: list, asset_type: str, timeout: float = 4) -> dict[str, dict]:
         try:
-            from ..services.market_service import get_realtime_batch
-            _batch_rows = await asyncio.wait_for(
-                get_realtime_batch([it.symbol for it in _a_items], "A"),
-                timeout=4,  # P0-4: 5→4s——批量慢源（mootdx 空转后）快速降级
+            _rows = await asyncio.wait_for(
+                get_realtime_batch([it.symbol for it in group], asset_type),
+                timeout=timeout,  # P0-4: 5→4s——批量慢源（mootdx 空转后）快速降级
             )
-            _batch_map = {r.get("symbol"): r for r in (_batch_rows or []) if r.get("symbol")}
+            return {r.get("symbol"): r for r in (_rows or []) if r.get("symbol")}
         except BaseException as _e:
-            logger.warning("[watchlist] batch realtime failed (fallback per-item): %s", _e)
+            logger.warning("[watchlist] %s batch realtime failed (fallback per-item): %s", asset_type, _e)
+            return {}
+
+    _batch_map: dict[str, dict] = {}
+    if _a_items:
+        _batch_map.update(await _batch_for(_a_items, "A"))
+    if _hk_items:
+        _batch_map.update(await _batch_for(_hk_items, "HK"))
+    if _us_items:
+        _batch_map.update(await _batch_for(_us_items, "US"))
 
     # P0-4 (round9 §10): 批量失败后 A 股**不再逐个 per-item 重试**——慢源时 10 条 ×
-    # 2.5s 串联把整体拖到 8s+（实测 8.4s）；A 股缺失直接 DB-only（realtime=None），
-    # 非 A（HK/US）少量条目保留 per-item（3s 内）。
-    _skip_a_per_item = bool(_a_items) and len(_a_items) >= 2 and not _batch_map
+    # 2.5s 串联把整体拖到 8s+（实测 8.4s）；A 股缺失直接 DB-only（realtime=None +
+    # _degraded 标记，P0-D），HK/US 少量条目保留 per-item（分级超时兜底）。
+    _a_hit = any((it.asset_type or "A") in ("A", "stock") and it.symbol in _batch_map for it in items)
+    _skip_a_per_item = bool(_a_items) and not _a_hit
     _realtimes = await asyncio.gather(
         *(
             asyncio.sleep(0, result=None)
-            if (_skip_a_per_item and (it.asset_type or "A") == "A")
+            if (_skip_a_per_item and (it.asset_type or "A") in ("A", "stock"))
             else _realtime_one(it)
-            if it.symbol not in _batch_map or (it.asset_type or "A") != "A"
+            if it.symbol not in _batch_map
             else asyncio.sleep(0, result=_batch_map[it.symbol])
             for it in items
         ),
@@ -768,6 +813,11 @@ async def _watchlist_enrich_items(items: list) -> list[dict]:
                     }
             except Exception as _e:
                 logger.debug("[watchlist] quote-cache fallback failed for %s: %s", resolved_symbol, _e)
+            # round14 P0-D/P2-AF: 降级注入显式标记——realtime 显式置 null + _degraded=true
+            #（旧实现直接丢 realtime 键，前端无法区分「加载中」与「已降级」）
+            if item_dict.get("realtime") is None:
+                item_dict["realtime"] = None
+                item_dict["_degraded"] = True
         enriched.append(item_dict)
 
     return enriched

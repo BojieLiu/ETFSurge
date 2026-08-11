@@ -166,7 +166,11 @@ class ICTracker:
             for code, val in factors.items():
                 st = _stats.setdefault(code, [0, 0])
                 st[1] += 1
-                if abs(val) < 0.001:
+                # round14 P2-Z 修复 3: tracking_error 合法值 0.001~0.02（_compute_tracking_error
+                # 注释 0~0.05）——abs<0.001 会把合法跟踪误差全判零（§2.11：有效样本<3 → 永不产 IC）；
+                # 按因子区分：tracking_error 仅排除真 0（1e-6），其余因子维持 0.001。
+                _zero_tol = 1e-6 if code == "etf.tracking_error" else 0.001
+                if abs(val) < _zero_tol:
                     st[0] += 1
                     continue
                 if code not in factor_by_code:

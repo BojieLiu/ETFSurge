@@ -90,3 +90,50 @@ class TestRationaleIndustrySanity:
             industry="电子",
         )
         assert "电子方向" in rationale
+
+    def test_rationale_length_under_100_chars(self):
+        """round14 P2-X: 入选理由 ≤100 字/条（验收口径）；含方向 + 核心技术因子。"""
+        rationale = build_rationale(
+            code="159995",
+            layer="satellite",
+            strategy="balanced",
+            meta={"name": "芯片ETF", "tracked_index": "芯片产业"},
+            factor_scores={
+                "technical.rsi.rsi_14": 59.6,
+                "technical.macd.macd": 0.012,
+                "momentum": 1.5,
+            },
+            regime="range_bound",
+            industry="电子",
+        )
+        assert len(rationale) <= 100, f"理由过长 {len(rationale)} 字：{rationale}"
+        assert "方向" in rationale
+        # 核心驱动因子保留（RSI 或 MACD 或动量）
+        assert any(k in rationale for k in ("RSI", "MACD", "动量")), rationale
+
+    def test_no_verbose_tech_score_sentence(self):
+        """round14 P2-X: 删除低信息量「技术面综合评分 X.XXX」句。"""
+        rationale = build_rationale(
+            code="510300",
+            layer="core",
+            strategy="balanced",
+            meta={"name": "沪深300ETF"},
+            factor_scores={"technical": 1.23, "technical.rsi.rsi_14": 55.0},
+            regime="neutral",
+            industry="宽基指数",
+        )
+        assert "技术面综合评分" not in rationale
+
+    def test_no_duplicated_regime_sentence(self):
+        """round14 P2-X: 删除「市场震荡」等重复市态句（市态在报告层级体现）。"""
+        rationale = build_rationale(
+            code="512480",
+            layer="satellite",
+            strategy="balanced",
+            meta={"name": "半导体ETF", "tracked_index": "半导体"},
+            factor_scores={},
+            regime="range_bound",
+            industry="电子",
+        )
+        assert "市场震荡" not in rationale
+        assert "当前市场强势" not in rationale

@@ -93,6 +93,7 @@
               <thead>
                 <tr>
                   <th>因子代码</th>
+                  <th>因子名称</th>
                   <th>分类</th>
                   <th>IC 值</th>
                   <th>有效性</th>
@@ -104,6 +105,8 @@
                   <td>
                     <span class="factor-code" :title="f.code">{{ f.code }}</span>
                   </td>
+                  <!-- round14 P2-Y: IC 排序表加中文名列（后端 /factors/active 已返回 name） -->
+                  <td><span class="factor-name">{{ f.name || f.code }}</span></td>
                   <td><span class="category-badge" :class="'category-' + f.category">{{ catLabel(f.category) }}</span></td>
                   <td :class="icValueClass(f.ic_value)">
                     {{ f.ic_value === null || f.ic_value === undefined ? '--' : f.ic_value.toFixed(4) }}
@@ -116,7 +119,7 @@
                   <td>{{ f.sample_count ?? '-' }}</td>
                 </tr>
                 <tr v-if="icSortedFactors.length === 0">
-                  <td colspan="5" class="empty-row">暂无数据</td>
+                  <td colspan="6" class="empty-row">暂无数据</td>
                 </tr>
               </tbody>
             </table>
@@ -668,6 +671,12 @@ onBeforeUnmount(() => {
   color: var(--color-text-primary);
   line-height: 1.1;
 }
+/* round14 P1-K: 有效数/平均|IC| 高值红涨绿跌——`.stat-num` (0,2,0) 覆盖全局
+   `.text-up/.text-down`；组合选择器 (0,3,0) 恢复语义色（docs/round14 §5 P1-K）。
+   `.stat-num.text-warn` 为防御性保留（L923 `.text-warn` 现状已生效，防宿主规则位置变动）。 */
+.stat-num.text-up { color: var(--color-text-up); }
+.stat-num.text-down { color: var(--color-text-down); }
+.stat-num.text-warn { color: var(--color-warning-600); }
 .stat-num-brand {
   color: var(--color-brand-600);
 }

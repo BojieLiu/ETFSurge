@@ -10,35 +10,35 @@ from app.engine import rationale as rt
 
 
 def test_rationale_rsi_raw_neutral():
-    """raw RSI 42.5 → "RSI 42.5 中性区间"（真实值，非因子分）。"""
+    """raw RSI 42.5 → "RSI 42.5 中性"（真实值，非因子分；round14 P2-X 合并句精简措辞）。"""
     text = rt.build_rationale(
         code="510300", layer="core", strategy="balanced",
         meta={"name": "沪深300ETF"}, regime="neutral",
         factor_scores={"technical.rsi.rsi_14_raw": 42.5, "technical.rsi.rsi_14": -0.215},
     )
     assert "RSI 42.5" in text
-    assert "中性区间" in text
+    assert "中性" in text
 
 
 def test_rationale_rsi_raw_oversold():
-    """raw RSI 25 → 超卖区域（旧实现 zscore 值恒走超卖，现按真实值判断）。"""
+    """raw RSI 25 → 超卖（旧实现 zscore 值恒走超卖，现按真实值判断）。"""
     text = rt.build_rationale(
         code="510300", layer="core", strategy="balanced",
         meta={"name": "沪深300ETF"}, regime="neutral",
         factor_scores={"technical.rsi.rsi_14_raw": 25.0},
     )
     assert "RSI 25.0" in text
-    assert "超卖区域" in text
+    assert "超卖" in text
 
 
 def test_rationale_rsi_raw_overbought():
-    """raw RSI 85 → 超买区域。"""
+    """raw RSI 85 → 超买。"""
     text = rt.build_rationale(
         code="510300", layer="core", strategy="balanced",
         meta={"name": "沪深300ETF"}, regime="neutral",
         factor_scores={"technical.rsi.rsi_14_raw": 85.0},
     )
-    assert "超买区域" in text
+    assert "超买" in text
 
 
 def test_rationale_rsi_raw_key_takes_priority():
@@ -59,7 +59,7 @@ def test_rationale_macd_raw():
         meta={"name": "沪深300ETF"}, regime="neutral",
         factor_scores={"technical.macd.macd_raw": 0.0123},
     )
-    assert "MACD 为正 0.0123" in text
+    assert "MACD 多头" in text
 
 
 async def test_compute_keeps_raw_rsi(monkeypatch):

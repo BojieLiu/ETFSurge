@@ -1522,7 +1522,21 @@ class FactorRegistry:
 
         if market_data is not None:
             # 使用外部注入的真实数据
-            pass
+            # round14 P2-Z 修复 1: 外部注入时同样合并 symbol_extra（Z04 同逻辑）——
+            # IC 循环传 market_data=_kline_cache（无 benchmark_close/shares_change_20d），
+            # 不合并则 tracking_error/shares_change 对每只 ETF 恒 0.0 → IC 永不产生
+            #（docs/round14 §2.11）。注意：market_data 实为 _kline_cache 引用，merge
+            # 会就地写回共享缓存——asyncio 单线程无并发撕裂，且「不覆盖已有字段」
+            # 语义与 Z04 一致（无害）。
+            if symbol_extra:
+                for sym in symbols:
+                    if sym in market_data and sym in symbol_extra:
+                        extra = symbol_extra[sym]
+                        for key in ("industry", "concepts", "benchmark_close",
+                                    "shares_change_20d", "institutional_holdings_change",
+                                    "shares_change", "fund_scale"):
+                            if key in extra and key not in market_data[sym]:
+                                market_data[sym][key] = extra[key]
         else:
             market_data = await self._fetch_market_data(symbols, symbol_extra=symbol_extra)
 

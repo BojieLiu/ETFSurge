@@ -363,6 +363,11 @@ async function doAnalyze() {
     error.value = '请输入标的代码或名称'
     return
   }
+  // round14 P2-AD: 点「分析」按钮路径必须关闭补全下拉（旧实现仅点下拉项
+  // selectSearchItem 才关；直接点按钮时下拉常驻遮挡页面）。分析开始即闭，
+  // 不依赖 SSE 完成；同时清空搜索结果防残留。
+  activeSearch.value.showDropdown.value = false
+  activeSearch.value.searchResults.value = []
   query.value = q
   loading.value = true
   error.value = ''

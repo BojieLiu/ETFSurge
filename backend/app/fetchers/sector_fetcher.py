@@ -460,6 +460,63 @@ def fetch_em_sector_changes() -> dict[str, float]:
     return cached("em_sector_changes", _p, "sector_heat")
 
 
+# round14 P2-AE: 财联社 plate_list 静态 sign（levistock 内部常量，站点仓库无签名逻辑）。
+# sign 失效（errno≠0 / 401 / 404）时 fetch_cls_plate_changes 返回 {} → sectors/heat
+# 回退东财名称回填（现状），不阻断 heat 展示——见 fetch_cls_plate_changes docstring。
+_CLS_SIGN = "ef1ec7886be706a0b722d7e7bf3c0054"
+
+
+def fetch_cls_plate_changes() -> dict[str, float]:
+    """round14 P2-AE: 财联社 plate_list 涨跌幅映射 {plate_code: change_pct%}。
+
+    plate_code 与 sectors/heat 的 rows.plate_code 同源同码（如 cls80424），
+    按 code 精确 join 覆盖 20/20（docs/round14 §2.13 实测）——东财名称回填仅
+    命中 5/20（民爆/光通信/冰雪产业等东财板块体系无此板块）。
+
+    - change 字段为小数涨跌幅（0.0186 → 1.86%），×100 并过 ±20 值域校验
+      （_sector_change_pct，P2-3/P2-K 口径）。
+    - sign 失效时返回 {}（调用方回退东财/0 兜底，不阻断）。
+    - 120s TTL（ttl_key='sector_heat'，与 fetch_sector_heat 同 key 族）。
+    """
+    def _p():
+        import json as _json
+        import urllib.request
+        result: dict[str, float] = {}
+        for t in ("industry", "concept"):
+            url = (
+                f"https://www.cls.cn/v3/plate/plate_list?app=CailianpressWeb&os=web"
+                f"&sv=7.7.5&sign={_CLS_SIGN}&type={t}&page=1&page_size=500"
+            )
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                raw = urllib.request.urlopen(req, timeout=8).read().decode("utf-8")
+                d = _json.loads(raw)
+                if d.get("errno") != 0:
+                    _logger.warning(
+                        "[sector_fetcher] cls plate_list errno=%s (sign 可能失效), type=%s",
+                        d.get("errno"), t,
+                    )
+                    continue
+                data = d.get("data") or {}
+                arr = data.get("plate_list") or data.get("list") or []
+                for r in arr:
+                    code = str(r.get("secu_code") or r.get("plate_code") or "").strip()
+                    chg_raw = r.get("change")
+                    if chg_raw is None:
+                        continue  # 无涨跌幅字段的板块不进入映射（None 不算 0）
+                    try:
+                        chg = float(chg_raw) * 100
+                    except (TypeError, ValueError):
+                        continue
+                    chg = _sector_change_pct(chg)  # ±20 值域校验
+                    if code and chg is not None and code not in result:
+                        result[code] = chg
+            except Exception as e:
+                _logger.warning("[sector_fetcher] cls plate_list fetch failed (%s): %s", t, e)
+        return result
+    return cached("cls_plate_changes", _p, "sector_heat")
+
+
 def fetch_sector_popular_stocks(plate_code: str) -> list[dict[str, Any]]:
     """板块热门个股 (财联社)。"""
     def _p():

@@ -127,7 +127,7 @@ import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { PieChart, BarChart } from 'echarts/charts'
 import { TitleComponent, TooltipComponent, LegendComponent, GridComponent } from 'echarts/components'
-import VChart from 'vue-echarts'
+// round11 P2-I / round14 §3: 删除未使用 VChart import（图表组件在 AllocationPieChart/PnLBarChart 内）
 import { useMarketStore } from '../stores/market'
 import { usePortfolioStore } from '../stores/portfolio'
 import { storeToRefs } from 'pinia'

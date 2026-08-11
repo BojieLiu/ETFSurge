@@ -338,3 +338,44 @@ describe('UnifiedAnalysis F18 (交互一致性 + 错误态)', () => {
     expect(wrapper.vm.result).toBe('## 报告')
   })
 })
+
+describe('UnifiedAnalysis round14 P2-AD（点「分析」按钮关闭补全下拉）', () => {
+  beforeEach(() => {
+    stopMock.mockClear()
+    startMock.mockClear()
+    searchApiMock.mockClear()
+    searchApiMock.mockResolvedValue({ data: [] })
+  })
+
+  it('负向：showDropdown=true + searchResults 非空 → doAnalyze 后 showDropdown===false（修复前 FAIL）', async () => {
+    const wrapper = mounted()
+    wrapper.vm.activeMode = 'symbol'
+    wrapper.vm.activeSearch.searchQuery.value = '510050'
+    wrapper.vm.activeSearch.searchResults.value = [{ symbol: '510050', name: '华夏上证50ETF' }]
+    wrapper.vm.activeSearch.showDropdown.value = true
+    await wrapper.vm.doAnalyze()
+    expect(wrapper.vm.activeSearch.showDropdown.value).toBe(false)
+    expect(wrapper.vm.activeSearch.searchResults.value).toEqual([])
+  })
+
+  it('保留既有 pickSearchItem 场景：点下拉项后下拉也关闭（防回退）', async () => {
+    const wrapper = mounted()
+    wrapper.vm.activeMode = 'symbol'
+    wrapper.vm.activeSearch.searchQuery.value = '510050'
+    wrapper.vm.activeSearch.searchResults.value = [{ symbol: '510050', name: '华夏上证50ETF' }]
+    wrapper.vm.activeSearch.showDropdown.value = true
+    wrapper.vm.pickSearchItem(wrapper.vm.activeSearch.searchResults.value[0])
+    expect(wrapper.vm.activeSearch.showDropdown.value).toBe(false)
+  })
+
+  it('搜索无结果 → 下拉空态不崩溃（基线 C 负向路径）', async () => {
+    searchApiMock.mockResolvedValue({ data: [] })
+    const wrapper = mounted()
+    wrapper.vm.activeMode = 'symbol'
+    wrapper.vm.activeSearch.searchQuery.value = '不存在的标的XYZ'
+    await wrapper.vm.activeSearch.onSearchInput()
+    await nextTick()
+    // 无结果 → 下拉不显示、不转圈、不崩溃
+    expect(wrapper.vm.activeSearch.showDropdown.value).toBe(false)
+  })
+})

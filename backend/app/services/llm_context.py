@@ -126,12 +126,22 @@ async def build_full_context(
     if include_news:
         try:
             from ..services.market_data_hub import market_data_hub
-            news_items = await asyncio.to_thread(market_data_hub.get_news_headlines) or []
-            try:
-                macro_items = await asyncio.to_thread(market_data_hub.get_news_macro) or []
-                news_items.extend(macro_items)
-            except Exception:
-                pass
+            # round14 P2-AJ: 按 market 选新闻源——US/HK 综合研判用全球新闻
+            #（道琼斯/CNBC 等，fetch_global_news），不再无条件注入 A 股财新/宏观
+            # 新闻（US/HK 与 A 报告内容雷同，实测首条均"工银瑞信史宝珖"，§2.18）。
+            if market and market.upper() in ("US", "HK"):
+                from ..fetchers.news_fetcher import fetch_global_news
+                news_items = await asyncio.wait_for(
+                    asyncio.to_thread(fetch_global_news),
+                    timeout=15,
+                ) or []
+            else:
+                news_items = await asyncio.to_thread(market_data_hub.get_news_headlines) or []
+                try:
+                    macro_items = await asyncio.to_thread(market_data_hub.get_news_macro) or []
+                    news_items.extend(macro_items)
+                except Exception:
+                    pass
             context["news"] = news_items[:15]
         except Exception as e:
             context["news"] = []

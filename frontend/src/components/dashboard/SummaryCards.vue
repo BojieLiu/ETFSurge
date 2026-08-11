@@ -277,6 +277,12 @@ function estimatedRatio(type) {
   overflow-wrap: anywhere;
 }
 
+/* round14 P1-K: 盈亏数字红涨绿跌——scoped `.summary-value` (0,2,0) 覆盖全局
+   `.text-up/.text-down` (0,1,0)，此处用更高特异性 (0,3,0) 组合选择器恢复
+   红涨绿跌（docs/round14 §2.9/§5 P1-K；删本规则即测试失败）。 */
+.summary-value.text-up { color: var(--color-text-up); }
+.summary-value.text-down { color: var(--color-text-down); }
+
 /* 总仓位主数字放大一档（--text-h2 → --text-h1）；须定义在 .summary-value 之后才能覆盖其 font shorthand */
 .summary-value--total {
   font: var(--text-h1);

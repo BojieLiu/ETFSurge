@@ -85,12 +85,30 @@ def _mock_realtime_dispatch(original):
 
 @pytest.fixture
 def mock_realtime():
-    """Patch market_data_hub.get_asset_realtime with deterministic dispatch."""
+    """Patch market_data_hub.get_asset_realtime + get_realtime_batch with deterministic dispatch.
+
+    round14 P2-AF/AH: watchlist enrich 单只也走批量（get_realtime_batch）——
+    批量路径须一并 mock，否则测试落真实网络（mootdx 超时）。
+    """
     from app.services.market_data_hub import market_data_hub
+    from app.services import market_service as market_service_mod
     original = market_data_hub.get_asset_realtime
-    market_data_hub.get_asset_realtime = _mock_realtime_dispatch(original)
+    original_batch = market_service_mod.get_realtime_batch
+    dispatch = _mock_realtime_dispatch(original)
+    market_data_hub.get_asset_realtime = dispatch
+
+    async def _fake_batch(symbols, asset_type="A"):
+        out = []
+        for s in symbols:
+            r = await dispatch(s, asset_type)
+            if r:
+                out.append(r)
+        return out
+
+    market_service_mod.get_realtime_batch = _fake_batch
     yield
     market_data_hub.get_asset_realtime = original
+    market_service_mod.get_realtime_batch = original_batch
 
 
 async def _insert_watchlist(session_factory, symbol, name, asset_type="A", notes=None):

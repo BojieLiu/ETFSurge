@@ -176,29 +176,34 @@ def build_rationale(
     # R6-F4 (round6 §十 R6-05 + §十八-7): rsi_14 自 F1-5 起保留 raw 0-100 值——
     # 按 0-100 真实值域做 30/70 阈值判断；兼容旧数据 _raw 键。MACD 用 _raw 保留的
     # 真实 DIF（zscore 值尺度失真）。
+    # round14 P2-X: RSI+MACD 合并为一句（删低信息量的「技术面综合评分」绝对值句）
     rsi = factor_scores.get("technical.rsi.rsi_14_raw") or factor_scores.get("technical.rsi.rsi_14")
+    rsi_desc = None
     if rsi is not None and 0 < rsi <= 100:
         if rsi < 30:
-            parts.append(f"RSI {rsi:.1f} 超卖区域")
+            rsi_desc = f"RSI {rsi:.1f} 超卖"
         elif rsi > 70:
-            parts.append(f"RSI {rsi:.1f} 超买区域")
+            rsi_desc = f"RSI {rsi:.1f} 超买"
         else:
-            parts.append(f"RSI {rsi:.1f} 中性区间")
+            rsi_desc = f"RSI {rsi:.1f} 中性"
     elif rsi is not None and rsi > 0:
         # 异常值域（不应出现）：仅展示数值
-        parts.append(f"RSI {rsi:.1f}")
+        rsi_desc = f"RSI {rsi:.1f}"
 
     macd_raw = factor_scores.get("technical.macd.macd_raw")
     macd = macd_raw if macd_raw is not None else factor_scores.get("technical.macd.macd")
+    macd_desc = None
     if macd is not None and macd >= 0.001:
-        parts.append(f"MACD 为正 {macd:.4f}，多头趋势")
+        macd_desc = "MACD 多头"
     elif macd is not None and macd <= -0.001:
-        parts.append(f"MACD 为负，空头趋势")
+        macd_desc = "MACD 空头"
 
-    # 3. 复合因子分
-    tech_score = factor_scores.get("technical")
-    if tech_score is not None and tech_score != 0:
-        parts.append(f"技术面综合评分 {tech_score:+.3f}")
+    tech_bits = [x for x in (rsi_desc, macd_desc) if x]
+    if tech_bits:
+        parts.append("、".join(tech_bits))
+
+    # 3. 复合因子分——round14 P2-X: 删「技术面综合评分 X.XXX」（低信息量绝对值），
+    # 保留动量/估值核心驱动因子
     momentum = factor_scores.get("momentum")
     if momentum is not None and momentum != 0:
         parts.append(f"动量因子 {momentum:+.3f}")
@@ -232,18 +237,8 @@ def build_rationale(
             else:
                 parts.append("综合信号中性")
 
-    # 5. 市场状态
-    regime_desc = {
-        "bull_strong": "当前市场强势",
-        "bull_weakening": "牛市趋弱",
-        "range_bound": "市场震荡",
-        "correction": "市场回调中",
-        "bear": "熊市环境",
-        "defensive_rotate": "防御轮动阶段",
-        "panic": "市场恐慌",
-    }
-    if regime and regime in regime_desc:
-        parts.append(regime_desc[regime])
+    # 5. 市场状态 —— round14 P2-X: 删除「市场震荡」等重复市态句（市态已在报告层级
+    # 与方案 header 体现，单条理由内重复冗余；保留层角色与归因链回答「为什么选它」）
 
     # 6. 层角色（F1-8/§9.7 R3: 按标的风格选池，完整句式一次生成，杜绝重复拼接）
     sl = {"defensive": "防御型", "balanced": "平衡型", "aggressive": "进攻型"}

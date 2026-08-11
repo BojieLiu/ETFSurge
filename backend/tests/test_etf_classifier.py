@@ -30,11 +30,27 @@ class TestETFClassifier:
         assert "半导体" in result["concepts"]
 
     def test_classify_by_name_new_energy(self, classifier):
-        """名称含"新能源"应归电力设备行业"""
+        """round14 P2-U: 名称含"新能源"应归「新能源」行业（旧「电力设备」概念粗映射已改）"""
         result = classifier._classify_by_name("新能源汽车ETF", "")
         assert result is not None
-        assert result["industry"] == "电力设备"
+        assert result["industry"] == "新能源"
         assert "新能源" in result["concepts"]
+
+    def test_classify_carbon_neutral_new_energy(self, classifier):
+        """round14 P2-U: 碳中和 → 新能源；医疗器械/科创创新药保持医药生物"""
+        r1 = classifier._classify_by_name("碳中和ETF", "")
+        assert r1["industry"] == "新能源"
+        r2 = classifier._classify_by_name("科创新能源ETF", "")
+        assert r2["industry"] == "新能源"
+        r3 = classifier._classify_by_name("医疗器械ETF", "")
+        assert r3["industry"] == "医药生物"
+        r4 = classifier._classify_by_name("科创创新药ETF", "科创创新药指数")
+        assert r4["industry"] == "医药生物"
+
+    def test_classify_new_energy_via_tracked_index(self, classifier):
+        """round14 P2-U: tracked_index 走 _INDEX_RULES（589960 等无 tracked_index 走 name）"""
+        r = classifier._classify_by_name("科创新能源ETF", "科创新能源指数")
+        assert r["industry"] == "新能源"
 
     def test_classify_by_name_medical(self, classifier):
         """名称含"医药"应归医药生物行业"""

@@ -449,8 +449,21 @@ async def lifespan(app: FastAPI):
                 # 复用列式 K 线缓存（_kline_cache，S5 同一数据源），不触网
                 _kline = getattr(_hub, "_kline_cache", None)
                 if _syms and _kline:
+                    # round14 P2-Z 修复 2: IC 循环补 symbol_extra 注入（benchmark_close/
+                    # shares_change_20d）——旧实现完全不调 enrich，tracking_error/shares_change
+                    # 两因子对每只 ETF 返回 0.0 → compute_periodic_ic 永不产出 IC（§2.11）。
+                    # 独立 try/except + 15s 短超时（_enrich_symbol_extra 内部 60s 预算 >
+                    # IC 循环 30s，防 enrich 触网慢耗尽整个 IC 循环预算连累其余 31 因子）。
+                    _symbol_extra = {}
+                    try:
+                        _symbol_extra = await asyncio.wait_for(
+                            _hub._enrich_symbol_extra(_syms, {}),
+                            timeout=15,
+                        )
+                    except (Exception, asyncio.CancelledError) as _exc:
+                        logger.debug("[ic_persistence] symbol_extra enrich skipped: %s", _exc)
                     await asyncio.wait_for(
-                        _reg.compute(_syms, market_data=_kline),
+                        _reg.compute(_syms, market_data=_kline, symbol_extra=_symbol_extra),
                         timeout=30,
                     )
             except (Exception, asyncio.CancelledError) as exc:

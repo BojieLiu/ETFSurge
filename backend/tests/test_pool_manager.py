@@ -46,7 +46,7 @@ class TestMarketDataHub:
             "510300": {"industry": "宽基指数", "concepts": ["沪深300"], "confidence": 0.85},
             "560600": {"industry": "宽基指数", "concepts": ["A500"], "confidence": 0.85},
             "512480": {"industry": "电子", "concepts": ["半导体", "芯片"], "confidence": 0.85},
-            "515030": {"industry": "电力设备", "concepts": ["新能源"], "confidence": 0.70},
+            "515030": {"industry": "新能源", "concepts": ["新能源"], "confidence": 0.70},  # round14 P2-U
             "512010": {"industry": "医药生物", "concepts": ["医药"], "confidence": 0.70},
             "518880": {"industry": "商品", "concepts": ["黄金"], "confidence": 0.85},
             "511090": {"industry": "固收", "concepts": ["国债"], "confidence": 0.85},
@@ -357,7 +357,7 @@ class TestMarketDataHubPhase2:
             "510300": {"industry": "宽基指数", "concepts": ["沪深300"], "confidence": 0.85},
             "560600": {"industry": "宽基指数", "concepts": ["A500"], "confidence": 0.85},
             "512480": {"industry": "电子", "concepts": ["半导体"], "confidence": 0.85},
-            "515030": {"industry": "电力设备", "concepts": ["新能源"], "confidence": 0.70},
+            "515030": {"industry": "新能源", "concepts": ["新能源"], "confidence": 0.70},  # round14 P2-U
             "518880": {"industry": "商品", "concepts": ["黄金"], "confidence": 0.85},
         }
         pm.factor_registry = mock_factor_registry_p2

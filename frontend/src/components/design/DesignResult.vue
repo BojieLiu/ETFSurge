@@ -45,13 +45,16 @@
                 <div class="plan-meta">
                   <h3 class="plan-name">{{ pf.style || pf.name }}方案</h3>
                   <div class="plan-stats">
-                    <span class="stat-item">{{ pf.allocations.length }} 只 ETF</span>
+                    <span class="stat-item">{{ etfCount(pf.allocations) }} 只 ETF</span>
                     <span class="stat-divider">·</span>
                     <span class="stat-item">核心 {{ calcLayerWeight(pf.allocations, 'core').toFixed(0) }}%</span>
                     <span class="stat-divider">·</span>
                     <span class="stat-item">卫星 {{ calcLayerWeight(pf.allocations, 'satellite').toFixed(0) }}%</span>
                     <span class="stat-divider">·</span>
                     <span class="stat-item">防御 {{ calcLayerWeight(pf.allocations, 'defense').toFixed(0) }}%</span>
+                    <!-- round14 P2-V: 现金仓位显性化（引擎表格已有汇总行，卡片 header 同步展示） -->
+                    <span v-if="cashWeight(pf.allocations) > 0" class="stat-divider">·</span>
+                    <span v-if="cashWeight(pf.allocations) > 0" class="stat-item">现金 {{ cashWeight(pf.allocations).toFixed(0) }}%</span>
                   </div>
                 </div>
                 <AppButton variant="primary" size="sm" @click.stop="applyPlan(pf)" :loading="applying">应用此方案</AppButton>
@@ -77,9 +80,14 @@
                         <td>{{ (a.target_weight * 100).toFixed(1) }}%</td>
                         <td><span class="layer-badge" :class="a.layer || 'satellite'">{{ layerLabel(a.layer) }}</span></td>
                         <td>
-                          <span v-if="a.daily_change_pct != null" :class="a.daily_change_pct >= 0 ? 'text-up' : 'text-down'">
-                            {{ a.daily_change_pct >= 0 ? '+' : '' }}{{ a.daily_change_pct.toFixed(2) }}%
-                          </span>
+                          <!-- round14 P2-W: 缺失原因显性化——dcp=null 显示「数据源不可用」
+                               而非可能误读为 0% 的「—」；CASH 行无涨跌幅语义，整行跳过 -->
+                          <template v-if="a.symbol !== 'CASH'">
+                            <span v-if="a.daily_change_pct != null" :class="a.daily_change_pct >= 0 ? 'text-up' : 'text-down'">
+                              {{ a.daily_change_pct >= 0 ? '+' : '' }}{{ a.daily_change_pct.toFixed(2) }}%
+                            </span>
+                            <span v-else class="muted data-unavailable">数据源不可用</span>
+                          </template>
                           <span v-else class="muted">—</span>
                         </td>
                         <td class="rationale-cell">{{ a.rationale || '—' }}</td>
@@ -170,6 +178,18 @@ function calcLayerWeight(allocations, layer) {
   if (total === 0) return 0
   const sum = allocations.filter(a => (a.layer || 'satellite') === layer).reduce((s, a) => s + (a.target_weight || 0), 0)
   return (sum / total) * 100
+}
+
+// round14 P2-V: ETF 计数排除 CASH（CASH 是现金仓位非 ETF，旧实现计入导致
+// 「10 只 ETF」实为 9 ETF + 1 CASH）；现金仓位单独展示
+function etfCount(allocations) {
+  if (!allocations) return 0
+  return allocations.filter(a => a.symbol !== 'CASH').length
+}
+function cashWeight(allocations) {
+  if (!allocations) return 0
+  const cash = allocations.find(a => a.symbol === 'CASH')
+  return cash ? (cash.target_weight || 0) * 100 : 0
 }
 
 function togglePlanExpand(pf) { expandedPlan.value = expandedPlan.value === pf.style ? null : pf.style }
