@@ -218,6 +218,60 @@ class TestTrackingErrorSharesChange:
         assert "etf.shares_change" in result
 
 
+# ── P2-AK/AN: 美股热点板块 + 美股 PE ──────────────────────────────────
+
+class TestUsPlatesAndPePb:
+    def test_us_plates_aggregated_by_industry(self):
+        """P2-AK: 美股 spot 按行业聚合板块（mock 数据）。"""
+        from app.fetchers import sector_fetcher as sf
+
+        rows = [
+            {"symbol": "NVDA", "name": "英伟达", "industry": "信息技术", "change_pct": 3.2, "amount": 1e9, "pe": 32.98},
+            {"symbol": "MSFT", "name": "微软", "industry": "信息技术", "change_pct": 1.0, "amount": 2e9, "pe": 28.1},
+            {"symbol": "XOM", "name": "埃克森美孚", "industry": "能源", "change_pct": -0.5, "amount": 5e8, "pe": 15.0},
+        ]
+        with patch.object(sf, "_fetch_us_spot_rich", return_value=rows), \
+             patch.object(sf, "cached", side_effect=lambda key, fn, ttl: fn()):
+            plates = sf.fetch_us_plates(limit=10)
+        by_name = {p["name"]: p for p in plates}
+        assert by_name["信息技术"]["stock_count"] == 2
+        assert by_name["信息技术"]["change_pct"] == pytest.approx(2.1)  # (3.2+1.0)/2
+        assert by_name["能源"]["stock_count"] == 1
+
+    def test_us_pe_pb_from_spot(self):
+        """P2-AN: 美股 PE 走东财美股 spot f9（PB 不可靠返回 None，不伪造）。"""
+        from app.fetchers import fundamentals_fetcher as ff
+        from app.fetchers import sector_fetcher as sf
+
+        rows = [{"symbol": "NVDA", "name": "英伟达", "industry": "信息技术",
+                 "change_pct": 3.2, "amount": 1e9, "pe": 32.98}]
+        with patch.object(sf, "_fetch_us_spot_rich", return_value=rows):
+            result = ff.fetch_current_pe_pb("NVDA", "US")
+        assert result == {"pe_ttm": 32.98, "pb": None}
+
+    def test_us_pe_missing_returns_none(self):
+        """P2-AN 负向: 美股 spot 无 PE/负 PE → None（报告诚实标注不可用）。"""
+        from app.fetchers import fundamentals_fetcher as ff
+        from app.fetchers import sector_fetcher as sf
+
+        with patch.object(sf, "_fetch_us_spot_rich", return_value=[
+                {"symbol": "QQQ", "name": "纳指100ETF", "industry": "-", "pe": None}]):
+            assert ff.fetch_current_pe_pb("QQQ", "US") is None
+        with patch.object(sf, "_fetch_us_spot_rich", return_value=[
+                {"symbol": "SPCX", "name": "SpaceX", "industry": "工业", "pe": -222.54}]):
+            assert ff.fetch_current_pe_pb("SPCX", "US") is None
+
+    def test_hot_plates_us_branch_returns_plates(self):
+        """P2-AK 接入: get_hot_plates(market=US) 返回板块（非「暂不支持」空）。"""
+        from app.services.market_data_hub import market_data_hub
+
+        with patch("app.fetchers.sector_fetcher.fetch_us_plates", return_value=[
+                {"name": "信息技术", "change_pct": 2.1, "amount": 3e9, "stock_count": 2}]):
+            plates = market_data_hub.get_hot_plates(limit=10, market="US")
+        assert len(plates) == 1
+        assert plates[0]["name"] == "信息技术"
+
+
 # ── P2-AE: 板块热度财联社 plate_code join ──────────────────────────────
 
 class TestSectorHeatPlateJoin:

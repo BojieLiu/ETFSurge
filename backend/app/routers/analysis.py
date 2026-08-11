@@ -636,7 +636,9 @@ async def symbol_analysis_stream(req: SymbolAnalysisRequest):
         fundamentals_text = "（数据源不可用，无法获取 PE/PB 等估值指标）"
         try:
             from ..fetchers.fundamentals_fetcher import fetch_current_pe_pb
-            fund_data = await asyncio.to_thread(fetch_current_pe_pb, symbol)
+            # round14 P2-AN: 透传 market——美股标的（asset_type=US）走东财美股 PE 分支
+            _fund_market = asset_type if isinstance(asset_type, str) else "A"
+            fund_data = await asyncio.to_thread(fetch_current_pe_pb, symbol, _fund_market)
             if fund_data and (fund_data.get("pe_ttm") is not None or fund_data.get("pb") is not None):
                 fundamentals_text = json.dumps(fund_data, ensure_ascii=False)
         except Exception as _fe:

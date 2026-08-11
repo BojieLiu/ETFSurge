@@ -268,16 +268,23 @@ def fetch_hist_avg_volume(symbol: str, days: int = 20) -> dict | None:
         return None
 
 
-def fetch_current_pe_pb(symbol: str) -> dict | None:
+def fetch_current_pe_pb(symbol: str, market: str = "A") -> dict | None:
     """获取 ETF 最新 PE/PB 估值（轻量版，仅拉最近 5 个交易日）。
 
     R5-2-8: 主源（东财 stock_zh_a_hist 估值列）失败时走备用源 stock_value_em
     （东财估值接口，含 市盈率(动态)/市净率 列）；失败/空缓存 1h（R4-26 模式），
     避免反复触发慢源。
 
+    round14 P2-AN: 加 market 参数——US 分支走东财美股 spot 的 f9（PE，实测 NVDA
+    32.98 合理）；PB 因东财美股接口 f115 与 f9 同值不可靠，返回 None（报告诚实
+    标注"数据源不可用"，不伪造值）。HK 分支数据源待实测（akshare stock_hk_hist
+    估值列或东财港股估值），当前仍返回 None。
+
     返回:
       {"pe_ttm": float, "pb": float} | None
     """
+    if market and market.upper() == "US":
+        return _fetch_us_pe_pb(symbol)
     if not _is_a_stock(symbol):
         return None
 
@@ -299,6 +306,29 @@ def fetch_current_pe_pb(symbol: str) -> dict | None:
         except Exception:
             pass
     return result
+
+
+def _fetch_us_pe_pb(symbol: str) -> dict | None:
+    """round14 P2-AN: 美股 PE——东财美股 spot（m:105）按 symbol 查 f9。
+
+    实测（2026-08-11 探针）：NVDA f9=32.98 合理；f115 与 f9 同值（PB 字段不可靠），
+    PB 返回 None 由报告层诚实标注"数据源不可用"。失败/未命中返回 None。
+    """
+    try:
+        from ..fetchers.sector_fetcher import _fetch_us_spot_rich
+        rows = _fetch_us_spot_rich()
+        hit = next((r for r in rows if str(r.get("symbol", "")).upper() == str(symbol).upper()), None)
+        if not hit or hit.get("pe") is None:
+            return None
+        try:
+            pe = float(hit["pe"])
+        except (TypeError, ValueError):
+            return None
+        if pe <= 0:
+            return None  # 负 PE（亏损）或 0 视为无有效估值
+        return {"pe_ttm": pe, "pb": None}
+    except Exception:
+        return None
 
 
 def _fetch_pe_pb_primary(symbol: str) -> dict | None:

@@ -517,6 +517,88 @@ def fetch_cls_plate_changes() -> dict[str, float]:
     return cached("cls_plate_changes", _p, "sector_heat")
 
 
+# round14 P2-AK/AN: 东财美股 spot（fs=m:105，含行业 f100 + PE f9）——60s TTL。
+# 实测（2026-08-11 探针）：m:105 返回美股个股（含行业字段），akshare
+# stock_us_industry_spot_em 方法已不存在——美股热点板块按「个股 spot 行业聚合」
+# 接入（与港股 get_hk_hot_plates 同型），美股 PE 取 f9（NVDA=32.98 实测合理）。
+_US_SPOT_RICH_TTL = 60.0
+_US_SPOT_RICH_CACHE: dict = {"ts": 0.0, "rows": []}
+
+
+def _to_float(v) -> float:
+    try:
+        return float(v or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _fetch_us_spot_rich() -> list[dict[str, Any]]:
+    """东财美股 spot（m:105 全量，含 industry/pe），60s TTL 共享（板块聚合 + PE 查询）。"""
+    import time as _time
+    now = _time.time()
+    if now - _US_SPOT_RICH_CACHE["ts"] < _US_SPOT_RICH_TTL:
+        return _US_SPOT_RICH_CACHE["rows"]
+    import json as _json
+    import urllib.request
+    rows: list[dict[str, Any]] = []
+    for host in ("push2delay.eastmoney.com", "push2.eastmoney.com"):
+        url = (
+            f"https://{host}/api/qt/clist/get?pn=1&pz=5000&po=1&np=1&fltt=2&invt=2"
+            f"&fid=f6&fs=m:105&fields=f12,f14,f3,f6,f100,f9"
+        )
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            raw = urllib.request.urlopen(req, timeout=8).read().decode("utf-8")
+            diff = ((_json.loads(raw) or {}).get("data") or {}).get("diff") or []
+            for r in diff:
+                rows.append({
+                    "symbol": str(r.get("f12", "")).strip(),
+                    "name": r.get("f14", ""),
+                    "industry": _clean_industry(r.get("f100")),
+                    "change_pct": _sector_change_pct(r.get("f3")),
+                    "amount": _to_float(r.get("f6")),
+                    "pe": r.get("f9"),
+                })
+            if rows:
+                break
+        except Exception as e:
+            _logger.warning("[sector_fetcher] us spot rich fetch failed (%s): %s", host, e)
+    if rows:
+        _US_SPOT_RICH_CACHE.update({"ts": now, "rows": rows})
+    return rows
+
+
+def fetch_us_plates(limit: int = 15) -> list[dict[str, Any]]:
+    """round14 P2-AK: 美股热点板块——东财美股 spot 按行业聚合涨跌幅/成交额。
+
+    实测结论：akshare stock_us_industry_spot_em 方法已删除，东财 fs=m:105 返回
+    美股**个股**（含 f100 行业字段）——接入形态为「个股 spot 按行业聚合」
+    （与港股 get_hk_hot_plates 同型）。返回按成交额降序
+    [{name, change_pct(加权), amount, stock_count}]。失败返回 []（路由层提示）。
+    """
+    def _p():
+        rows = _fetch_us_spot_rich()
+        groups: dict[str, dict] = {}
+        for r in rows:
+            ind = r.get("industry") or "其他"
+            g = groups.setdefault(ind, {"name": ind, "amount": 0.0, "change_sum": 0.0, "stock_count": 0})
+            g["amount"] += float(r.get("amount") or 0)
+            g["change_sum"] += float(r.get("change_pct") or 0)
+            g["stock_count"] += 1
+        plates = []
+        for g in groups.values():
+            n = max(g["stock_count"], 1)
+            plates.append({
+                "name": g["name"],
+                "change_pct": round(g["change_sum"] / n, 2),  # 简单平均涨跌幅
+                "amount": round(g["amount"], 2),
+                "stock_count": g["stock_count"],
+            })
+        plates.sort(key=lambda p: -p["amount"])
+        return plates[:limit]
+    return cached("us_hot_plates", _p, "sector_heat")
+
+
 def fetch_sector_popular_stocks(plate_code: str) -> list[dict[str, Any]]:
     """板块热门个股 (财联社)。"""
     def _p():

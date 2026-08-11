@@ -1412,7 +1412,10 @@ class MarketDataHub:
             from ..fetchers.hk_hot_fetcher import get_hk_hot_plates
             if market.upper() == "HK":
                 return get_hk_hot_plates(limit or 15)
-            return []  # US 暂不支持（结构化提示由路由层处理）
+            # round14 P2-AK: 美股热点板块——东财美股 spot 按行业聚合（实测 m:105 为个股
+            # 含行业字段，akshare stock_us_industry_spot_em 已删除，见 fetch_us_plates）
+            from ..fetchers.sector_fetcher import fetch_us_plates
+            return fetch_us_plates(limit or 15)
         if limit is not None:
             try:
                 rows = sector_fetcher.fetch_hot_plates(limit) or []
