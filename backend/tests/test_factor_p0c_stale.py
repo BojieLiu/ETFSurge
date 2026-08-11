@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """round10 P0-C: factor_registry.compute K 线多级降级 + stale 兜底 + data_source 标注。
 
-验收口径（docs/round10-container-rediagnosis.md §10 P0-C）：
+验收口径（docs/archived/round10-container-rediagnosis.md §10 P0-C）：
 - 容器弱源下 filled 不再骤降（有 stale 缓存时走缓存兜底，data_source='stale'）
 - 无缓存冷启动全空 → 明示「数据源不可用」（data_source='unavailable'）
 """

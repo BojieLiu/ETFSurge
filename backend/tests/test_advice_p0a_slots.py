@@ -3,7 +3,7 @@
 build_full_context 注入的全部槽位（market_regime/market_sentiment/market_data/
 hot_plates/sector_heat/news/fund_flow），空槽才显式降级。
 
-验收口径（docs/round10-container-rediagnosis.md §10 P0-A）：三市场投顾返回
+验收口径（docs/archived/round10-container-rediagnosis.md §10 P0-A）：三市场投顾返回
 不再出现「暂无实时指数数据/暂无板块热力数据/市场状态未知」模板；hot_plates /
 sector_heat 有数据时要进 prompt。
 """
