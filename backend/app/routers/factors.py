@@ -22,6 +22,10 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/v1/factors", tags=["factors"])
 
+# round14 P0-C: 因子 IC 最小样本保护——样本数 < MIN_IC_SAMPLES 时 IC 视为未累积
+#（强制 ic_val=None），防止「样本数 0 却有 |IC|≥0.02」的伪信号下架（§2.4）。
+MIN_IC_SAMPLES = 30
+
 # ── Simple TTL-based response cache (60s refresh) ──────────────
 _CACHE: dict[str, tuple[float, str, dict]] = {}  # key -> (expiry_ts, etag, body)
 
@@ -110,6 +114,10 @@ def _status_of(code: str, ic_val: float | None, ic_threshold: float) -> tuple[st
         return "no_data", "IC 未累积（样本 <3）"
     threshold = ic_threshold if ic_threshold and ic_threshold > 0 else 0.02
     samples = getattr(registry, "_sample_counts", {}).get(code, 0)
+    # round14 P0-C: 最小样本保护——样本数不足时 IC 视为未累积，不产生
+    # 「|IC|≥阈值 但样本数 0」的伪负向下架（§2.4：13/38 因子被误标 warn）。
+    if samples < MIN_IC_SAMPLES:
+        return "no_data", f"IC 未累积（样本 {samples} < {MIN_IC_SAMPLES}，数据积累中）"
     # P1-3 (round9 §6.5): 文案统一 |IC| 口径——旧「IC -0.449 ≥ 阈值 0.02」负数不可能 ≥
     # 正阈值，逻辑自相矛盾；负 IC（预测反向）且 |IC|≥阈值 → warn（负向淘汰警示）而非 valid，
     # 满足「负 IC 标 valid 且文案 ≥阈值」矛盾项消除。

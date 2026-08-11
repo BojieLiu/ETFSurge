@@ -516,9 +516,11 @@ def test_llm_timeout_for_static_only_30s():
     }
     assert _llm_timeout_for(dq_empty) == 15
     assert _llm_timeout_for(dq_partial) == 30
-    # 完整数据（全部技术因子 real）→ 90s 保留（真完整场景）
+    # 完整数据（全部技术因子 real）→ 75s（round14 P0-B 方案 b: 90→75，
+    # 对齐 max_retries=0 后最坏 2×35=70s + 余量——旧 90s 与 max_retries=1 的
+    # 140s 最坏不匹配，provider 35s 无响应时 1 轮双 provider 71.5s 即耗光预算）
     dq_full = {
         "filled_count": 3, "total_count": 3, "all_empty": False,
         "partial": False, "fallback_count": 0, "fallback_ratio": 0.0,
     }
-    assert _llm_timeout_for(dq_full) == 90
+    assert _llm_timeout_for(dq_full) == 75

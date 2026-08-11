@@ -564,15 +564,17 @@ def _llm_timeout_for(data_quality: dict) -> int:
 
     - all_empty（上下文不足）→ 15s 快速兜底（快速失败更合理，不必等满）
     - partial → 30s（有部分数据，多给 LLM 一点时间消化）
-    - 数据完整 → 90s（round9 P0-5: 60→90 对齐设计报告 O7 验收；DeepSeek 偶发慢，
-      #344 60s 超时两分钟后重试即成功——专业场景宁可多等也不降级为全 hold 模板）
+    - 数据完整 → 75s（round14 P0-B 方案 b: 90→75，对齐 max_retries=0 后的
+      最坏 2×35=70s 实测 + 余量；此前 90s 与 max_retries=1 的 140s 最坏不匹配，
+      provider 35s 无响应时 1 轮双 provider 71.5s 即耗光预算——预算-重试一致性见
+      tests/test_round14_llm_budget_consistency.py）
     旧实现恒 30s：数据采集也占 30s，LLM 实际剩余不足 → 恒超时（round7 P5）。
     """
     if data_quality.get("all_empty"):
         return 15
     if data_quality.get("partial"):
         return 30
-    return 90
+    return 75
 
 
 async def _collect_strategy_data(

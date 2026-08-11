@@ -90,9 +90,10 @@ def test_aggregate_ignores_raw_keys():
 
     scores = {
         "technical.rsi.rsi_14_raw": 42.5,
-        "technical.rsi.rsi_14": -0.2,
+        "technical.rsi.rsi_14": 55.0,   # round15 方案一: raw 0-100 口径（方向化 (50-55)/50=-0.1）
         "technical.ma.sma_5": 0.1,
     }
     agg = FR.aggregate_factor_scores(scores)
-    # technical 分类均值 = (-0.2 + 0.1) / 2，不含 42.5
-    assert abs(agg["technical"] - (-0.05)) < 1e-9
+    # technical 分类均值 = (-0.1 + 0.1) / 2 = 0.0，不含 42.5（_raw 键排除）
+    #（round15 方案一: rsi_14 raw 值先方向化再聚合，旧断言 -0.2 为 zscore 口径已更新）
+    assert abs(agg["technical"] - 0.0) < 1e-9

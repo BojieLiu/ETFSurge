@@ -36,6 +36,59 @@ class RiskSettings:
 RISK_SETTINGS = RiskSettings()
 
 
+# round15 9-F1: 市态归一化（与 market_data_hub._normalize_regime 同口径，
+# 供 apply_core_bear_growth_trim 判定熊市/回调/恐慌）
+_BEARISH_REGIMES = {"bear", "correction", "panic"}
+
+
+def apply_core_bear_growth_trim(
+    allocations: list[dict[str, Any]],
+    layer_budget: dict[str, float],
+    regime: str = "neutral",
+) -> list[dict[str, Any]]:
+    """round15 9-F1（docs §10.1）: core 层市态绝对防线。
+
+    熊市/回调/恐慌时，core 层负分成长宽基（科创50/创业板等，非强制锚）权重
+    压到 RISK_SETTINGS.min_weight（1%），释放额按权重比例回流 defense 层。
+
+    与 F6 互补（顺序不可反）：F6 先压成长宽基合计 ≤ core×40%，本函数再压
+    负分单只到 1%；层预算校验在后——defense 吸收释放额后若超预算会被压回
+    budget（L307-313），超限部分隐式转现金，行为可预期。
+
+    三个 factor_score 非 composite 特例必须排除：
+    - 强制标的（MANDATORY_CODES）直接跳过（其 factor_score 是 technical 单因子值）；
+    - U11 去重回补的新宽基（_cscore 四因子等权和）与 C2 引入标的（satellite 层）
+      不落 core_alloc 主路径——core 层只处理正常 composite 分标的。
+    """
+    from .allocation_engine import MANDATORY_CODES
+
+    if regime not in _BEARISH_REGIMES:
+        return allocations
+    released = 0.0
+    for a in allocations:
+        if a.get("layer") != "core":
+            continue
+        if a.get("symbol") in MANDATORY_CODES:  # 强制保底锚（510300/159338）豁免
+            continue
+        if _is_growth_wide_basis(a) and float(a.get("factor_score", 0) or 0) < 0:
+            _old_w = float(a.get("weight", 0.0) or 0)
+            released += _old_w - RISK_SETTINGS.min_weight
+            a["weight"] = RISK_SETTINGS.min_weight
+            logger.info(
+                "[risk] 9-F1 %s core growth-wide-basis %s trimmed to %.0f%% (bear regime, factor_score<0)",
+                regime, a.get("symbol"), RISK_SETTINGS.min_weight * 100,
+            )
+    # 回流：释放额按防御权重比例加到 defense（保持 Σ=1，防预算静默丢弃）
+    if released > 0:
+        defense = [a for a in allocations if a.get("layer") == "defense"]
+        defense_sum = sum(float(a.get("weight", 0.0) or 0) for a in defense)
+        if defense and defense_sum > 0:
+            for d in defense:
+                _d_w = float(d.get("weight", 0.0) or 0)
+                d["weight"] = round(_d_w + released * (_d_w / defense_sum), 4)
+    return allocations
+
+
 def _get_constraints() -> dict[str, float]:
     """Read current constraint values from RISK_SETTINGS."""
     return {
@@ -213,6 +266,7 @@ def _consolidate_minnows(
 def apply_risk_controls(
     strategies: list[dict[str, Any]],
     factor_matrix: dict[str, dict[str, float]] | None = None,
+    regime: str = "neutral",
 ) -> list[dict[str, Any]]:
     """
     对生成的方案应用风控约束（含质量检查管线）。
@@ -224,6 +278,7 @@ def apply_risk_controls(
     - 极端下跌过滤 #2
     - 防御有效性检查 #3
     - 候选池 Freshness 检查 #4
+    - round15 9-F1: 熊市 core 层成长宽基绝对防线（regime 参数）
     """
     factor_matrix = factor_matrix or {}
 
@@ -297,6 +352,11 @@ def apply_risk_controls(
                     "[risk] %s core growth-wide-basis capped: %.1f%% -> %.1f%% (core_budget=%.2f)",
                     strategy.get("id", "?"), growth_sum * 100, growth_cap * 100, core_budget,
                 )
+
+        # round15 9-F1: core 层市态绝对防线——F6（合计 40% 压缩）之后、层预算
+        # 校验之前插入；defense 吸收释放额后若超预算由下方层预算校验压回。
+        allocations = apply_core_bear_growth_trim(allocations, layer_budget, regime)
+        strategy["allocations"] = allocations
 
         # 2. 层预算校验
         layer_actual: dict[str, float] = {}

@@ -326,7 +326,8 @@ class TestMarketDataHubPhase2:
             "515030": {"style.momentum.mom_3m": 0.06, "style.quality.roe": 0.07},
             "518880": {"style.momentum.mom_3m": -0.02, "style.quality.roe": 0.04},
         })
-        reg.aggregate_factor_scores = MagicMock(side_effect=lambda raw_scores: {
+        # round15 方案一/三: aggregate_factor_scores 新增 definitions/ic_series 可选参数
+        reg.aggregate_factor_scores = MagicMock(side_effect=lambda raw_scores, **kwargs: {
             **raw_scores,
             "composite": sum(raw_scores.values()) / max(len(raw_scores), 1),
         })

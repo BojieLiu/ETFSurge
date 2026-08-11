@@ -55,8 +55,8 @@ def _clear_llm_error() -> None:
 def _rate_limit_wait(attempt: int, resp_headers=None, cap: float = _LLM_RATE_LIMIT_CAP) -> float:
     """429 限流等待时间：优先尊重 Retry-After（cap 默认 30s），否则指数退避 3s*2^attempt（cap 默认 30s）。
 
-    R5-1-6: cap 参数化——策略检查场景传 cap=10.0 实现快速失败（90s 预算内
-    3 轮等待会超 60s 上限，缩到 ≤10s/轮后 2 轮 ≈ 28s < 60s）。
+    R5-1-6: cap 参数化——策略检查场景传 cap=10.0 实现快速失败（round14 P0-B 后
+    外层预算 75s/30s/15s 分级；限流等待 ≤10s/轮，不挤占 provider 调用预算）。
     """
     if resp_headers:
         ra = resp_headers.get("retry-after") or resp_headers.get("Retry-After")
@@ -636,7 +636,8 @@ async def llm_complete_with_system(
     R5-1-6: rate_limit_cap 参数化 429 退避上限（默认 30s 不变；策略检查传 10s 快速失败）；
     每次 provider 失败记录诊断（_record_llm_error），成功清空。
     round10 P1-I: request_timeout 可覆写单次 provider 调用超时（默认 None =
-    provider.timeout；策略检查场景传 30-40s，与 90s 外层预算匹配，防 fallback 饿死）。
+    provider.timeout；策略检查场景传 35s，与 _llm_timeout_for 分级预算
+    75s/30s/15s 匹配——round14 P0-B 预算-重试一致性：2×35=70 ≤ 75）。
     """
     import httpx
     await _check_key()
@@ -1412,16 +1413,20 @@ async def generate_strategy_check_report(
     from ..analysis.registry import get_agent
     _start_ms = time.monotonic()
     try:
-        # R5-1-6: 策略检查场景快速失败——max_retries=1（2 轮尝试）+ rate_limit_cap=10
-        #（429 退避 ≤10s/轮）。最坏 2 轮×(调用2s×2源+等待≤10s)≈28s < 60s 预算；
-        # 旧逻辑 cap 30s × 3 轮 = 90s > 60s 必超时，且无法区分限流与真超时。
+        # round14 P0-B（方案 b）: 策略检查 LLM 超时根因 = provider 35s 无响应 + 预算-重试
+        # 不匹配。max_retries=1 时最坏 (1+1)×2providers×35s=140s > 0.9×90s=81s——
+        # 第 1 轮双 provider 失败耗时 71.5s 已耗光预算，第 2 轮开始即被外层截断
+        # （CancelledError 兜底）。改为 max_retries=0（1 轮双 provider 失败立即兜底，
+        # 不进入会超预算的重试），外层 _llm_timeout_for 完整档同步 90s→75s
+        # （对齐 71.5s 实测最坏 + 余量）：2×35=70 ≤ 75 通过一致性断言。
+        # 注释修正：旧注释「与 P0-F 的 30s 外层预算配套」过时——外层实际按
+        # _llm_timeout_for(data_quality) 分级（完整 75s / partial 30s / all_empty 15s）。
         return await get_agent("strategy_check").run_json(
             prompt,
-            max_retries=1,
+            max_retries=0,
             rate_limit_cap=10.0,
-            # round10 P1-I: 单次 provider 调用 35s 超时即切 fallback——与 P0-F 的
-            # 30s 外层预算配套，90s 预算内主 provider ×2 轮 + fallback ×1 都能轮到，
-            # 不再被 provider 240s 级超时饿死。
+            # round10 P1-I: 单次 provider 调用 35s 超时即切 fallback；max_retries=0
+            # 保证最坏 2×35=70s ≤ 75s 外层预算（round14 P0-B 预算-重试一致性）。
             request_timeout=35.0,
         )
     except BaseException as e:  # noqa: BLE001 — F1-9: 必须捕获 CancelledError（BaseException）

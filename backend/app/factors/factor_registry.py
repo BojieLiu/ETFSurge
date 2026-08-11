@@ -28,6 +28,42 @@ logger = logging.getLogger(__name__)
 # values like 16.22σ from distorting downstream allocation.
 ZSCORE_CLIP_BOUND = 5.0
 
+# round15 方案一: technical 显式聚合映射（前缀 → (方向, 变换模式)）。
+# direction/neutral_value 的单一来源是 FactorDefinition（yaml）；此表仅作
+# 默认/文档值——definitions 提供时以 FactorDefinition 为准（防两处配置漂移）。
+# 变换模式：symmetric50 = raw 区间因子 (neutral-val)/neutral；
+#          negate = zscore 均值回归因子取负（KDJ 超买为负分）。
+CATEGORY_AGG: dict[str, list[tuple[str, int, str | None]]] = {
+    "technical": [
+        ("technical.ma.", +1, None),
+        ("technical.macd.", +1, None),
+        ("technical.rsi.", -1, "symmetric50"),
+        ("technical.kdj.", -1, "negate"),
+        ("technical.signal.", +1, None),
+        ("technical.bollinger.", +1, None),
+        ("technical.volume.", +1, None),
+        ("technical.atr.", +1, None),
+    ],
+}
+
+# round15 方案三阶段一: IC 加权聚合参数（docs §5.3）
+IC_MIN_BATCHES = 5        # IC 样本 < 5 批 = 冷启动 → 回退等权（保持现有行为）
+IC_FLIP_THRESHOLD = 0.03  # mean_ic < 0 且 |mean_ic| > 阈值 → 因子值翻转后按 |mean_ic| 加权
+IC_HALF_LIFE = 20         # IC 半衰期（批数），λ = ln2/IC_HALF_LIFE
+
+
+def _ic_decay_mean(series: list[float], lam: float) -> float:
+    """近 N 批 IC 的衰减加权均值（最新批权重 1，越旧按 exp(-λ·age) 衰减）。"""
+    n = len(series)
+    if n == 0:
+        return 0.0
+    weights = [math.exp(-lam * (n - 1 - i)) for i in range(n)]
+    total = sum(weights)
+    if total <= 0:
+        return float(sum(series)) / n
+    return sum(w * v for w, v in zip(weights, series)) / total
+
+
 # Default YAML path relative to this file
 _DEFAULT_YAML = Path(__file__).parent / "factor_definitions.yaml"
 
@@ -44,6 +80,10 @@ class FactorDefinition:
     compute_fn: str = ""                     # Name of computation function
     dependencies: list[str] = field(default_factory=list)
     standardization: str = "zscore"          # zscore / rank / minmax / industry_neutral / none
+    # round15 方案一: 方向契约——+1 正向（动量）/ -1 反向（均值回归），聚合前
+    # 方向化用；neutral_value 为 raw 区间因子中性点（如 RSI 50），zscore 因子置 None。
+    direction: int = 1
+    neutral_value: float | None = None
     lookback_window: int = 1
     ic_threshold: float = 0.02
     ic_ir_threshold: float = 0.5
@@ -993,6 +1033,9 @@ class FactorRegistry:
         # factors/active reason 独立标注「截面无差异（常量输出）」，
         # 与「数据源未接入」「IC 未累积」三分
         self._constant_factor_codes: set[str] = set()
+        # round15 方案三阶段一: 各因子近 N 批 IC 序列内存缓存（refresh_ic_series 刷新，
+        # aggregate_factor_scores 读——IC 加权聚合用；未加载/冷启动回退等权）
+        self._ic_series_cache: dict[str, list[float]] = {}
         self.load_definitions()
 
     def load_definitions(self, yaml_path: str | None = None) -> None:
@@ -1027,6 +1070,8 @@ class FactorRegistry:
                 compute_fn=item.get("compute_fn", ""),
                 dependencies=item.get("dependencies", []),
                 standardization=item.get("standardization", "zscore"),
+                direction=int(item.get("direction", 1)),
+                neutral_value=item.get("neutral_value"),
                 lookback_window=item.get("lookback_window", 1),
                 ic_threshold=item.get("ic_threshold", 0.02),
                 ic_ir_threshold=item.get("ic_ir_threshold", 0.5),
@@ -1046,6 +1091,8 @@ class FactorRegistry:
     @staticmethod
     def aggregate_factor_scores(
         factor_scores: dict[str, float],
+        definitions: dict[str, "FactorDefinition"] | None = None,
+        ic_series: dict[str, list[float]] | None = None,
     ) -> dict[str, float]:
         """B1: 将点分键聚合为顶层分类键。
 
@@ -1054,6 +1101,14 @@ class FactorRegistry:
 
         聚合策略：对每个顶层分类，取下属所有因子值的均值。
         无下属因子的顶层键保持原值（如已存在则直接保留）。
+
+        round15 方案一/方案三（docs §5.1/§5.3）：
+        - 聚合前先「方向化」——按 FactorDefinition.direction/neutral_value（yaml 单一来源）
+          将语义统一为「越高越好」：raw 区间因子（RSI）→ (neutral-val)/neutral；
+          zscore 均值回归因子（KDJ）→ 取负。变换作用于副本，不写回 factor_scores
+          原始裸键（_raw 保留链路 / _normalize_matrix 的真实值展示不受污染）。
+        - 顶层键内按因子 IC 衰减加权聚合（近 N 批 IC），负 IC 翻转方向；冷启动
+          （IC 样本 < IC_MIN_BATCHES）回退等权，保持现有行为。
         """
         if not factor_scores:
             return factor_scores
@@ -1073,10 +1128,37 @@ class FactorRegistry:
         # 排除 ln_mcap/ln_float_mcap 从 valuation 聚合：市值维度不等于估值维度
         _EXCLUDE_FROM_VALUATION = {"ln_mcap", "ln_float_mcap"}
 
+        def _direction_rule(key: str) -> tuple[int, str | None, float | None]:
+            """返回 (direction, transform_mode, neutral_value)。
+
+            definitions（FactorDefinition）优先——yaml 是方向/中性点的单一来源；
+            未提供 definitions 时回退 CATEGORY_AGG 内置默认（rsi→symmetric50、
+            kdj→negate、其余 +1），保证静态调用/旧测试行为一致。
+            """
+            if definitions:
+                d = definitions.get(key)
+                if d is not None:
+                    if d.standardization == "raw" and d.neutral_value is not None:
+                        return (d.direction, "symmetric50", float(d.neutral_value))
+                    return (d.direction, "negate" if d.direction == -1 else None, None)
+            for _prefix, _direction, _mode in CATEGORY_AGG.get("technical", []):
+                if key.startswith(_prefix):
+                    return (_direction, _mode, 50.0 if _mode == "symmetric50" else None)
+            return (1, None, None)
+
+        def _directional(key: str, val: float) -> float:
+            """方向化（作用于副本）：raw 区间 (neutral-val)/neutral；-1 取负；+1 保持。"""
+            _direction, _mode, _neutral = _direction_rule(key)
+            if _mode == "symmetric50" and _neutral:
+                return (_neutral - val) / _neutral
+            if _direction == -1:
+                return -val
+            return val
+
         result = dict(factor_scores)  # 保留所有原始键
 
         for top_key, prefixes in CATEGORY_PREFIXES.items():
-            values = []
+            values: list[tuple[str, float]] = []  # (原始键, 方向化后值)
             for key, val in factor_scores.items():
                 if isinstance(val, (int, float)) and abs(val) > 0.001:
                     # R6-F4: 排除 _raw 保留键（原始 RSI/MACD）——避免真实值污染分类均值
@@ -1092,11 +1174,33 @@ class FactorRegistry:
                             continue
                     for prefix in prefixes:
                         if key.startswith(prefix):
-                            values.append(val)
+                            values.append((key, _directional(key, float(val))))
                             break
-            if values:
-                result[top_key] = sum(values) / len(values)
-            # 如果没有任何非零匹配子因子，不设置顶层键（让消费方 fallback 到 0.0）
+            if not values:
+                # 如果没有任何非零匹配子因子，不设置顶层键（让消费方 fallback 到 0.0）
+                continue
+            # round15 方案三阶段一: IC 衰减加权聚合（冷启动回退等权）
+            _lam = math.log(2) / IC_HALF_LIFE
+            weights: list[float] = []
+            directed: list[float] = []
+            for key, v in values:
+                series = (ic_series or {}).get(key)
+                if series and len(series) >= IC_MIN_BATCHES:
+                    mean_ic = _ic_decay_mean(series, _lam)
+                    if mean_ic < 0 and abs(mean_ic) > IC_FLIP_THRESHOLD:
+                        directed.append(-v)
+                        weights.append(abs(mean_ic))
+                    else:
+                        directed.append(v)
+                        weights.append(max(mean_ic, 0.0))
+                else:
+                    directed.append(v)
+                    weights.append(1.0)
+            total_w = sum(weights)
+            if total_w > 1e-12:
+                result[top_key] = sum(w * v for w, v in zip(weights, directed)) / total_w
+            else:  # Σw == 0（全部 IC≈0）→ 回退等权
+                result[top_key] = sum(directed) / len(directed)
 
         return result
 
@@ -1665,8 +1769,66 @@ class FactorRegistry:
         valid = {k: v for k, v in batch.items() if abs(v) > min_abs}
         if valid:
             self._last_ic_batch = valid
+            # round14 P0-C 配套: 同步恢复最近一批的 sample_count——否则重启后
+            # _sample_counts 为空，factors/active 的 IC 最小样本保护会把所有
+            # 恢复的 IC 判为「未累积（样本 0 < 30）」，与 DB 历史样本数矛盾。
+            restored_samples = {
+                r.factor_code: int(getattr(r, "sample_count", 0) or 0)
+                for r in rows
+                if r.computed_at == latest_ts
+            }
+            self._sample_counts.update({k: v for k, v in restored_samples.items() if v > 0})
             logger.info("[factor] restored %d IC entries from DB (R5-1-5)", len(valid))
         return len(valid)
+
+    async def refresh_ic_series(self, session, days: int = 20) -> int:
+        """round15 方案三阶段一: 从 DB 加载各因子近 `days` 批 IC 序列到内存缓存。
+
+        aggregate_factor_scores 用衰减加权 IC 做顶层键内聚合；IC 样本 < IC_MIN_BATCHES
+        视为冷启动回退等权。由 IC 持久化循环（main.py）与启动恢复路径调用。
+        失败仅 WARNING，不阻塞（回退等权 = 方案三未启用时的既有行为）。
+        """
+        from sqlalchemy import select
+        from ..models.factor_ic import FactorICRecord
+
+        try:
+            rows = (
+                await session.execute(
+                    select(
+                        FactorICRecord.factor_code,
+                        FactorICRecord.ic_value,
+                        FactorICRecord.computed_at,
+                    ).order_by(FactorICRecord.computed_at.desc())
+                )
+            ).all()
+        except Exception as exc:
+            logger.warning("[factor] IC series refresh failed: %s", exc)
+            return 0
+
+        if not rows:
+            self._ic_series_cache = {}
+            return 0
+
+        # 取最近 days 批（computed_at 去重后前 days 个时间戳）
+        _ts_order: list = []
+        for _, _, ts in rows:
+            if ts not in _ts_order:
+                _ts_order.append(ts)
+            if len(_ts_order) >= days:
+                break
+        allowed = set(_ts_order)
+
+        by_code: dict[str, list[float]] = {}
+        # rows 已按 computed_at 降序 → 序列顺序即最新在前
+        for code, val, ts in rows:
+            if ts not in allowed:
+                continue
+            if val is None:
+                continue
+            by_code.setdefault(code, []).append(float(val))
+        self._ic_series_cache = by_code
+        logger.debug("[factor] refreshed IC series for %d factors (%d batches)", len(by_code), len(_ts_order))
+        return len(by_code)
 
 
 # Global singleton

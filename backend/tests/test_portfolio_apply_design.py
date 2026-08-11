@@ -10,6 +10,7 @@ Verifies:
 """
 
 import pytest
+from fastapi import HTTPException
 from unittest.mock import AsyncMock, patch, MagicMock
 
 
@@ -129,7 +130,8 @@ async def test_apply_design_weight_clamped(mock_db):
 
 @pytest.mark.asyncio
 async def test_apply_design_empty_symbols(mock_db):
-    """空 symbols 时返回空结果."""
+    """round14 P0-A: 空 symbols 应 400（修复前返回 200 空操作 + 前端假成功，
+    前后端断裂根因——旧断言固化了 bug 行为，已更新）。"""
     session, existing_etfs = mock_db
     with patch("app.routers.portfolio.list_etfs", return_value=existing_etfs):
         with patch("app.routers.portfolio.apply_portfolio_design",
@@ -139,11 +141,11 @@ async def test_apply_design_empty_symbols(mock_db):
                        "message": "组合设计中没有指定持仓",
                    })):
             from app.routers.portfolio import apply_design
-            result = await apply_design(
-                design={"portfolio_type": "on_exchange",
-                        "symbols": [],
-                        "weights": {}},
-                db=session,
-            )
-            assert result["symbols"] == []
-            assert "message" in result
+            with pytest.raises(HTTPException) as exc:
+                await apply_design(
+                    design={"portfolio_type": "on_exchange",
+                            "symbols": [],
+                            "weights": {}},
+                    db=session,
+                )
+            assert exc.value.status_code == 400

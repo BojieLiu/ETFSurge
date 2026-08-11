@@ -101,6 +101,22 @@ async def apply_strategy(suggestions: list, db: AsyncSession = Depends(get_db)):
 
 @router.post("/apply-design")
 async def apply_design(design: dict, db: AsyncSession = Depends(get_db)):
+    """应用组合设计方案。
+
+    round14 P0-A: 空 symbols 返回 400（此前返回 200 空操作 + 前端假成功，
+    前后端断裂根因——见 docs/round14 §2.2/§5 P0-A）。
+    """
+    symbols = design.get("symbols") or []
+    weights = design.get("weights") or {}
+    if not symbols:
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=400,
+            detail="组合设计中没有指定持仓（symbols 为空）——请从前端 plan.allocations 构造 {symbols, weights} 后重试",
+        )
+    if not weights:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="组合设计缺少 weights（symbol→target_weight 映射）")
     return await apply_portfolio_design(db, design)
 
 

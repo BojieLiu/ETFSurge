@@ -102,8 +102,10 @@ def test_v3_aggregate_factor_scores():
     aggregated = FactorRegistry.aggregate_factor_scores(raw_scores)
 
     # Technical should be mean of all technical.* values
+    # round15 方案一: rsi_14 raw 0-100 方向化 (50-55)/50=-0.1 后再聚合——
+    # 修复前 55.0 直接进均值（raw 0-100 基底主导，超买反而加分），是文档 §4.1 缺陷。
     assert "technical" in aggregated, "technical key missing from aggregated scores"
-    expected_technical = (0.8 + 0.7 + 55.0 + 0.2 + 0.3 + 1.2) / 6
+    expected_technical = (0.8 + 0.7 + (50.0 - 55.0) / 50.0 + 0.2 + 0.3 + 1.2) / 6
     assert abs(aggregated["technical"] - expected_technical) < 0.001, (
         f"technical={aggregated['technical']}, expected ~{expected_technical}"
     )

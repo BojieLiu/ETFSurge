@@ -1612,6 +1612,10 @@ factor_definitions:
   # RSI 变为 ±5 相对分，与 /indicators 端点（真实 RSI）不一致，rationale 的
   # 「RSI<30 超卖」判断也失效（方案内 RSI 全部显示 <3）。
   standardization: "raw"
+  # round15 方案一: 方向契约——raw 区间因子超买为负（均值回归），聚合前
+  # 按 (neutral - val)/neutral 变换为 [-1,1] 语义分，与 signal.overall 对齐。
+  direction: "-1"
+  neutral_value: 50
   lookback_window: 14
   description: "14日相对强弱指标，标准RSI"
   tags: ["technical", "rsi", "oscillator", "standard"]
@@ -1626,6 +1630,10 @@ factor_definitions:
   frequency: "daily"
   # F1-5: 同 rsi_14，保留真实 0-100 值
   standardization: "raw"
+  # round15 方案一: 同 rsi_14 方向契约（虽不在 _CORE_FACTORS 生产链路，
+  # 声明后加入 compute 即自动生效，防未来启用时污染 technical 聚合）
+  direction: "-1"
+  neutral_value: 50
   lookback_window: 24
   description: "24日相对强弱指标，中长期强弱"
   tags: ["technical", "rsi", "oscillator", "medium_term"]
@@ -1639,6 +1647,8 @@ factor_definitions:
   subcategory: "kdj"
   frequency: "daily"
   standardization: "zscore"
+  # round15 方案一: 均值回归方向——超买（高位 zscore 正值）为负分，取负翻转
+  direction: "-1"
   lookback_window: 9
   description: "KDJ随机指标K值(快线)，反映短期价格动量，金叉死叉信号"
   tags: ["technical", "kdj", "stochastic", "oscillator"]
@@ -1652,6 +1662,8 @@ factor_definitions:
   subcategory: "kdj"
   frequency: "daily"
   standardization: "zscore"
+  # round15 方案一: 均值回归方向——超买为负分，取负翻转
+  direction: "-1"
   lookback_window: 9
   description: "KDJ随机指标D值(慢线)，K值的3日平滑，确认趋势方向"
   tags: ["technical", "kdj", "stochastic", "oscillator"]
@@ -1665,6 +1677,8 @@ factor_definitions:
   subcategory: "kdj"
   frequency: "daily"
   standardization: "zscore"
+  # round15 方案一: 均值回归方向——超买为负分，取负翻转
+  direction: "-1"
   lookback_window: 9
   description: "KDJ随机指标J值(3K-2D)，超买超卖更敏感"
   tags: ["technical", "kdj", "stochastic", "j_value"]
@@ -1678,6 +1692,8 @@ factor_definitions:
   subcategory: "kdj"
   frequency: "daily"
   standardization: "zscore"
+  # round15 方案一: 均值回归方向——超买为负分，取负翻转
+  direction: "-1"
   lookback_window: 9
   description: "短期KDJ随机指标K值，直接计算RSV的3日加权，较标准的KDJ K更敏感"
   tags: ["technical", "kdj", "stochastic", "fast"]
@@ -1691,6 +1707,8 @@ factor_definitions:
   subcategory: "kdj"
   frequency: "daily"
   standardization: "zscore"
+  # round15 方案一: 均值回归方向——超买为负分，取负翻转
+  direction: "-1"
   lookback_window: 9
   description: "KDJ D值由K值的3日平滑生成，确认趋势方向的可靠性更强"
   tags: ["technical", "kdj", "stochastic", "slow"]
@@ -1704,6 +1722,8 @@ factor_definitions:
   subcategory: "kdj"
   frequency: "daily"
   standardization: "zscore"
+  # round15 方案一: 均值回归方向——超买为负分，取负翻转
+  direction: "-1"
   lookback_window: 9
   description: "KDJ J值 = 3K - 2D，对超买超卖区间的探测比K/D更敏感"
   tags: ["technical", "kdj", "stochastic", "j_value"]

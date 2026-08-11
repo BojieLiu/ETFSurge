@@ -107,9 +107,10 @@ class TestR516StrategyCheckFastFail:
                 factor_breakdowns={},
                 regime="range_bound",
             )
-        # 快速失败参数必须透传
+        # 快速失败参数必须透传（round14 P0-B: max_retries 1→0——1 轮双 provider
+        # 失败立即兜底，不进入会超预算的重试；2×35=70 ≤ 75 预算一致）
         kwargs = fake_agent.run_json.call_args.kwargs
-        assert kwargs.get("max_retries") == 1, f"max_retries 未透传: {kwargs}"
+        assert kwargs.get("max_retries") == 0, f"max_retries 未透传: {kwargs}"
         assert kwargs.get("rate_limit_cap") == 10.0, f"rate_limit_cap 未透传: {kwargs}"
         assert "最后错误" in result["summary"] or "[timeout]" in result["summary"], \
             f"summary 应含错误诊断: {result['summary']}"

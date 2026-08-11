@@ -105,6 +105,12 @@ def test_factors_active_sentiment_not_no_data(monkeypatch):
         "sentiment.news_heat": 0.024,
         "sentiment.news_direction": 0.028,
     }
+    # round14 P0-C: IC 最小样本保护——样本 ≥30 才有效（否则视为未累积 no_data）
+    fr.registry._sample_counts = {
+        "sentiment.panic_greed_diff": 120,
+        "sentiment.news_heat": 120,
+        "sentiment.news_direction": 120,
+    }
     resp = client.get("/api/v1/factors/active")
     assert resp.status_code == 200
     body = resp.json()

@@ -211,7 +211,12 @@ def _tencent_gtimg_chunk(chunk: list[str]) -> dict[str, dict[str, Any]]:
             code = parts[2]
             code_key = code[2:] if code[:2].lower() in ("sh", "sz") else code
             try:
-                amount = float(parts[37] or 0)
+                # round15 方案四 (P0): 单位契约——gtimg parts[37] 成交额单位=万元，
+                # ×10000 统一为元。filter_etfs 的 MIN_AVG_AMOUNT=10_000_000（元）、
+                # layer_ranking 的 max_amount>100000（元）、composite 的 amount*1e-9
+                # 均按元口径（此前万元值被误当元比较 → 真实活跃 ETF 全被误杀，§4.6）。
+                amount_wan = float(parts[37] or 0)
+                amount = amount_wan * 10000.0
             except (ValueError, TypeError):
                 amount = 0
             try:
@@ -219,6 +224,8 @@ def _tencent_gtimg_chunk(chunk: list[str]) -> dict[str, dict[str, Any]]:
             except (ValueError, TypeError):
                 turnover = 0
             try:
+                # gtimg 总市值单位=亿，与 MIN_FUND_SCALE(亿) 匹配，无需换算；
+                # composite 的 scale*1e-9 对此单位≈0（round15 方案二 _pct_rank 根治）。
                 total_mv = float(parts[45] or 0)
             except (ValueError, TypeError):
                 total_mv = 0
@@ -235,6 +242,38 @@ def _tencent_gtimg_chunk(chunk: list[str]) -> dict[str, dict[str, Any]]:
     except Exception:
         return partial
     return partial
+
+
+def _cross_check_amount_scale(gtimg_map: dict[str, dict[str, Any]], em_list: list[dict] | None) -> None:
+    """round15 方案四: 跨源量级一致性校验（防单位错配复发）。
+
+    腾讯 amount（已 ×10000 为元）与 EM 源（元）同标的交叉比对，差 >100 倍即告警。
+    EM 列表获取失败/单标的缺失时静默跳过——校验是防御性的，不阻断主链路
+    （§4.6.3：多源降级链防「源挂」，防不了「源没挂但数据单位错了」）。
+    """
+    if not gtimg_map or not em_list:
+        return
+    em_map: dict[str, float] = {}
+    for row in em_list:
+        code = str(row.get("symbol") or row.get("代码") or "").strip()
+        amt = row.get("amount") or row.get("成交额") or 0
+        if code:
+            em_map[code] = float(amt or 0)
+    checked = 0
+    for code, gt in gtimg_map.items():
+        tencent_amt = float(gt.get("amount", 0) or 0)
+        em_amt = em_map.get(code, 0.0)
+        if tencent_amt <= 0 or em_amt <= 0:
+            continue
+        ratio = tencent_amt / em_amt if tencent_amt > em_amt else em_amt / tencent_amt
+        if ratio > 100:
+            logger.warning(
+                "[etf_scanner] 跨源量级不一致: %s 腾讯=%s元 EM=%s元 (ratio=%.0fx) — amount 单位契约被破坏",
+                code, tencent_amt, em_amt, ratio,
+            )
+        checked += 1
+        if checked >= 50:  # 抽样 50 只足够，避免全量比对日志
+            break
 
 
 def _tencent_gtimg_batch(codes: list[str]) -> dict[str, dict[str, Any]]:
@@ -409,6 +448,23 @@ def fetch_all_etfs_base() -> list[dict[str, Any]]:
                 item["pe"] = gt.get("pe", 0)
                 item["pb"] = 0
                 merged.append(item)
+            # round15 方案四: 绝对量级检查——修复后 amount 为元，正常 ETF 成交额
+            # 远大于 1e6；0<amount<1e6 说明万元口径残留（防 ×10000 被回退）。
+            _wan_residue = [
+                c for c, g in gtimg_map.items()
+                if 0 < float(g.get("amount", 0) or 0) < 1e6
+            ]
+            if _wan_residue:
+                logger.warning(
+                    "[etf_scanner] %d 标的 amount 疑似万元口径残留（<1e6 元，前 5: %s）",
+                    len(_wan_residue), _wan_residue[:5],
+                )
+            # round15 方案四: 跨源量级一致性校验（与 EM 元口径交叉比对）
+            try:
+                _em_spot = _fetch_em_etf_list("push2delay.eastmoney.com")
+                _cross_check_amount_scale(gtimg_map, _em_spot)
+            except Exception:
+                logger.debug("[etf_scanner] EM cross-check skipped (best-effort)", exc_info=True)
             logger.info("[etf_scanner] Sina+Tencent merged: %d ETFs", len(merged))
             return merged
 

@@ -345,7 +345,12 @@ async def generate_enhanced_design(
         for s in strategies_raw:
             allocs = s.pop("allocations", [])
             # Apply risk controls before assembling
-            risk_allocations = apply_risk_controls([{"allocations": allocs}], factor_matrix)
+            # round15 9-F1: 透传 regime 与 layer_budget（core 层市态绝对防线依赖）
+            risk_allocations = apply_risk_controls(
+                [{"allocations": allocs, "layer_budget": s.get("layer_budget", {})}],
+                factor_matrix,
+                regime=market_regime,
+            )
             allocs = risk_allocations[0]["allocations"] if risk_allocations else allocs
 
             # enrich rationale using engine/rationale.py

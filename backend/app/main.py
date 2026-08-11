@@ -431,6 +431,13 @@ async def lifespan(app: FastAPI):
                     logger.debug("[ic_persistence] no IC data to persist")
             except Exception as exc:
                 logger.warning("[ic_persistence] cycle failed: %s", exc)
+            # round15 方案三阶段一: 落库后刷新 IC 序列缓存（aggregate_factor_scores
+            # IC 加权聚合的数据源；失败回退等权，不阻塞）
+            try:
+                async with async_session() as db:
+                    await registry.refresh_ic_series(db)
+            except Exception as exc:
+                logger.warning("[ic_persistence] IC series refresh failed: %s", exc)
             # R5-1-5: 周期 compute（复用 K 线缓存，不触网）——IC 非请求驱动，
             # 重启后无请求也会更新 _last_ic_batch（B1 验收达标）。
             try:
@@ -461,6 +468,8 @@ async def lifespan(app: FastAPI):
 
         async with _ic_session() as _db:
             _restored = await _ic_registry.restore_ic_from_db(_db)
+            # round15 方案三阶段一: 启动时一并加载 IC 序列缓存（IC 加权聚合数据源）
+            await _ic_registry.refresh_ic_series(_db)
         if _restored:
             logger.info("[ic_restore] restored %d IC entries at startup (R5-1-5)", _restored)
         else:

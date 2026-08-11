@@ -686,11 +686,36 @@ async function applyPlan(plan) {
   if (applyingPlan.value) return
   applyingPlan.value = plan.style
   try {
-    await portfolioApi.applyPortfolioDesign(plan)
-    toast(`已应用 ${plan.style} 方案`, 'success')
-    emit('applied')
+    // round14 P0-A: 前端把 plan.allocations 构造为后端契约形态
+    // {portfolio_type, symbols, weights}——旧实现把整个 plan 对象原样 POST，
+    // 后端拿不到 symbols/weights → 200 空操作 + 前端假成功（docs/round14 §2.2）。
+    const allocations = (plan && plan.allocations) || []
+    const symbols = []
+    const weights = {}
+    for (const a of allocations) {
+      if (a.symbol && a.symbol !== 'CASH') {
+        symbols.push(a.symbol)
+        if (typeof a.target_weight === 'number') {
+          weights[a.symbol] = a.target_weight
+        }
+      }
+    }
+    const resp = await portfolioApi.applyPortfolioDesign({
+      portfolio_type: 'on_exchange',
+      symbols,
+      weights,
+    })
+    const applied = (resp.data && resp.data.applied) || []
+    if (applied.length > 0) {
+      toast(`已应用 ${plan.style} 方案`, 'success')
+      emit('applied')
+    } else {
+      // 后端 400 时走 catch；这里兜底 200 但 applied 为空（不应发生）→ 失败提示
+      toast((resp.data && resp.data.message) || '组合设计中没有指定持仓', 'error')
+    }
   } catch (e) {
-    toast('应用方案失败', 'error')
+    const detail = e.response && e.response.data && e.response.data.detail
+    toast(detail || '应用方案失败', 'error')
   } finally {
     applyingPlan.value = null
   }

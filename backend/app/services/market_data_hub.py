@@ -576,7 +576,12 @@ class MarketDataHub:
                     sym = item["symbol"]
                     raw_scores = factor_scores.get(sym, {})
                     # B1: 聚合点分键为顶层分类键
-                    item["factor_scores"] = self.factor_registry.aggregate_factor_scores(raw_scores)
+                    # round15 方案一/三: 传 definitions（yaml 方向单一来源）+ IC 序列缓存
+                    item["factor_scores"] = self.factor_registry.aggregate_factor_scores(
+                        raw_scores,
+                        definitions=self.factor_registry._factors,
+                        ic_series=getattr(self.factor_registry, "_ic_series_cache", None),
+                    )
             except Exception as e:
                 logger.exception("FactorRegistry compute failed: %s", e)
                 for item in flat:
@@ -644,8 +649,19 @@ class MarketDataHub:
 
         # 6. 层内复合评分 + 行业均衡化 + 截断
         for layer in ALL_LAYERS:
-            for item in new_pool[layer]:
-                item["composite_score"] = self._compute_composite(item, layer, regime=self.current_regime)
+            layer_items = new_pool[layer]
+            # round15 方案二: core/satellite/defense 层内先收集截面向量（amount/scale），
+            # 供 _compute_composite 的 _pct_rank 使用（量纲统一，消除 *1e-9 魔法数）
+            layer_amounts: list[float] | None = None
+            layer_scales: list[float] | None = None
+            if layer in ("core", "satellite", "defense") and layer_items:
+                layer_amounts = [float(it.get("amount", 0) or 0) for it in layer_items]
+                layer_scales = [float(it.get("fund_scale", 0) or 0) for it in layer_items]
+            for item in layer_items:
+                item["composite_score"] = self._compute_composite(
+                    item, layer, regime=self.current_regime,
+                    layer_amounts=layer_amounts, layer_scales=layer_scales,
+                )
             max_n = MAX_PER_LAYER.get(layer, 10)
             # P4 fix-plan-pool: 行业均衡化后再截断
             balanced = self._balance_by_industry(new_pool[layer], max_n=max_n)
@@ -937,11 +953,40 @@ class MarketDataHub:
         }
         return mapping.get(regime, "neutral")
 
-    def _compute_composite(self, item: dict[str, Any], layer: str, regime: str = "neutral") -> float:
+    @staticmethod
+    def _pct_rank(value: float, series: list[float]) -> float:
+        """层内截面百分位 [0,1]（含并列按半计）。
+
+        round15 方案二: 对绝对量级不敏感——同列同单位即可（amount 万元/元、
+        fund_scale 亿/元混用时百分位仍可比），彻底消除 composite 的量纲魔法数。
+        """
+        if not series:
+            return 0.0
+        n = len(series)
+        below = sum(1 for v in series if v < value)
+        equal = sum(1 for v in series if v == value)
+        return (below + 0.5 * equal) / n
+
+    def _compute_composite(
+        self,
+        item: dict[str, Any],
+        layer: str,
+        regime: str = "neutral",
+        layer_amounts: list[float] | None = None,
+        layer_scales: list[float] | None = None,
+    ) -> float:
         """按层+市况计算综合得分。
 
         非交易时段（P6 fix-plan-pool）: 流动性数据可能为昨日值，
         降低流动性权重，以规模排序为主。
+
+        round15 方案二（docs §5.2）: 分量统一量纲——core/satellite/defense 三层
+        传层内截面向量（layer_amounts/layer_scales）时用：
+            factor 项 = w.factor × tanh(factor_sum/6)      [-1,1]（防极端 z 支配）
+            liquidity = w.liquidity × _pct_rank(amount)    [0,1]
+            scale     = w.scale × _pct_rank(fund_scale)    [0,1]
+        向后兼容：layer_amounts=None 时回退旧 `*1e-9` 路径（research/opportunistic
+        与外部直接调用行为不变）。
         """
         factor_scores = item.get("factor_scores", {})
         # P0-4: 仅聚合顶层键求和（避免原始点分键双倍计数 + RSI=50 主导排序）
@@ -965,9 +1010,16 @@ class MarketDataHub:
             scale_weight = w.get("scale", 0)
 
         if layer in ("core", "satellite", "defense", "opportunistic"):
-            score = w["factor"] * factor_sum
-            score += liquidity_weight * amount * 1e-9
-            score += scale_weight * scale * 1e-9
+            # round15 方案二: 层内百分位量纲（仅 core/satellite/defense 三层启用）
+            if layer in ("core", "satellite", "defense") and layer_amounts is not None:
+                import math as _math
+                score = w["factor"] * _math.tanh(factor_sum / 6.0)
+                score += liquidity_weight * self._pct_rank(amount, layer_amounts)
+                score += scale_weight * self._pct_rank(scale, layer_scales or [])
+            else:
+                score = w["factor"] * factor_sum
+                score += liquidity_weight * amount * 1e-9
+                score += scale_weight * scale * 1e-9
             if layer != "core":
                 score += w.get("opp", 0) * opp_score
         else:
