@@ -85,4 +85,20 @@ describe('DesignResult P2-8 degradation 提示条', () => {
     const wrapper = await mountResult(makePlan(), { degradation: null })
     expect(wrapper.find('.degradation-banner').exists()).toBe(false)
   })
+
+  it('degradation mode=normal（Z11 正常路径）时不渲染提示条（不误报）', async () => {
+    // 后端正常数据管道也返回 degradation={mode:'normal',...}（Z11 设计）——
+    // 负向：mode=normal 渲染「数据源冷却」→ FAIL
+    const wrapper = await mountResult(makePlan(), {
+      degradation: { mode: 'normal', reason: '正常数据管道', pool_degraded: false },
+    })
+    expect(wrapper.find('.degradation-banner').exists()).toBe(false)
+  })
+
+  it('degradation pool_degraded=true 时即使 mode=normal 也渲染', async () => {
+    const wrapper = await mountResult(makePlan(), {
+      degradation: { mode: 'normal', pool_degraded: true, reason: '候选池冷却' },
+    })
+    expect(wrapper.find('.degradation-banner').exists()).toBe(true)
+  })
 })

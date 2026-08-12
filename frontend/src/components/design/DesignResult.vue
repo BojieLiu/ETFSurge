@@ -4,9 +4,10 @@
       &#128214; 历史方案（{{ formatDate(createdAt) }}）
     </div>
 
-    <!-- P2-8 (round17): 数据源冷却告警——degradation 存在时显式提示（非静默降级）；
-         正常路径无 degradation → 不渲染（不误报，负向断言覆盖） -->
-    <div v-if="degradation" class="degradation-banner" role="alert">
+    <!-- P2-8 (round17): 数据源冷却告警——degradation **实际降级**（mode≠normal 或
+         pool_degraded）时显式提示（非静默降级）；Z11 正常路径也返回
+         degradation={mode:'normal'} → 不渲染（不误报，负向断言覆盖） -->
+    <div v-if="degradation && (degradation.mode !== 'normal' || degradation.pool_degraded)" class="degradation-banner" role="alert">
       <span class="degradation-icon">⚠️</span>
       <div class="degradation-body">
         <span class="degradation-title">数据源冷却，部分标的为降级数据</span>
