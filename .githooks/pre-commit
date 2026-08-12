@@ -362,6 +362,23 @@ else
     fi
 fi
 
+# ════ 性能软门禁（P2-2，2026-08-09/round16 落地）════════════════════════════
+# verify_perf.py（round15 基线 E）接入 pre-commit：后端在线时跑热点路径耗时，
+# 超阈值仅 WARNING 登记台账不阻断（软门禁，AGENTS.md 性能验收）；后端不在线跳过。
+# 差异化价值（门禁治理约定①）：现有 13 段无任何性能段，本段补「性能债不消失」的
+# 登记机制；仅 backend/scripts/verify_perf.py 或本脚本变更时触发（不随每次提交跑）。
+PERF_STAGED=$(git diff --cached --name-only --diff-filter=ACM \
+    -- 'backend/scripts/verify_perf.py' '.githooks/pre-commit' 2>/dev/null || true)
+if [ -n "$PERF_STAGED" ] && [ -z "$SKIP_PERF_GATE" ]; then
+    echo "[pre-commit] 检测到性能脚本/门禁变更，尝试 verify_perf 软门禁（需后端在线）..."
+    if python -c "import socket; s=socket.create_connection(('localhost', 8000), timeout=2); s.close()" 2>/dev/null; then
+        (cd backend && python scripts/verify_perf.py --base http://localhost:8000 2>&1) || true
+        echo "[pre-commit] ✅ verify_perf 软门禁完成（超阈值仅登记台账，不阻断）"
+    else
+        echo "[pre-commit] ⏭️ 后端未在线（localhost:8000），跳过 verify_perf（软门禁，本地启动后手动验证）"
+    fi
+fi
+
 # ════ 测试冗余基线门禁（P3-6，2026-08-09）═══════════════════════════════════
 # 测试文件数不再反弹：backend/tests/test_*.py ≤ 197（P1-8 合并后基线）。
 # 仅当 tests/ 或本脚本有变更时触发；新测试必须并入已有文件。

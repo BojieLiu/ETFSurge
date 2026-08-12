@@ -273,6 +273,59 @@ class TestRuleSuggestionEnhancement:
         assert len(parts3) >= 3, s3["reason"]
         assert any("减幅不超过" in p for p in parts3), s3["reason"]
 
+    def test_increase_never_decreases_weight(self):
+        """P0-10① (round16 3.11): increase 时 suggested_weight 不得 < current_weight
+        （原实现 cur=0.5 → min(0.6, 0.30)=0.30，输出"增仓却降仓"矛盾）。"""
+        s = _rule_based_suggestion(
+            symbol="510300", name="沪深300ETF", target_weight=0.5,
+            factor_score={"technical": 0.8, "momentum": 0.6},
+            signal={"signal": "buy"}, regime="range_bound",
+            current_weight=0.5,
+        )
+        assert s["action"] == "increase"
+        assert s["suggested_weight"] >= s["current_weight"], (
+            f"负向：increase 不得输出 sug({s['suggested_weight']}) < cur({s['current_weight']})"
+        )
+        # 已达 30% 上限时应提示"已达/接近 30% 风控上限"而非给矛盾值
+        assert "30% 风控上限" in s["reason"], s["reason"]
+
+    def test_decrease_never_increases_weight(self):
+        """P0-10①: decrease 时 suggested_weight 不得 > current_weight。"""
+        s = _rule_based_suggestion(
+            symbol="510300", name="沪深300ETF", target_weight=0.2,
+            factor_score={"technical": -0.7, "momentum": -0.5},
+            signal={"signal": "sell"}, regime="range_bound",
+            current_weight=0.2,
+        )
+        assert s["action"] == "decrease"
+        assert s["suggested_weight"] <= s["current_weight"], (
+            f"负向：decrease 不得输出 sug({s['suggested_weight']}) > cur({s['current_weight']})"
+        )
+
+    def test_hold_keeps_weight(self):
+        """P0-10①: hold 时 suggested_weight == current_weight。"""
+        s = _rule_based_suggestion(
+            symbol="510300", name="沪深300ETF", target_weight=0.2,
+            factor_score={"technical": 0.05},
+            signal={"signal": "hold"}, regime="range_bound",
+            current_weight=0.2,
+        )
+        assert s["action"] == "hold"
+        assert s["suggested_weight"] == pytest.approx(s["current_weight"])
+
+    def test_high_factor_hold_reason_not_misleading(self):
+        """P0-3 (round16 3.2): 高分因子（如 6.32）但非 buy 信号 → hold 文案不得误称
+        '中性区间'（负向：高分描述为中性 → FAIL）。"""
+        s = _rule_based_suggestion(
+            symbol="518880", name="黄金ETF", target_weight=0.3,
+            factor_score={"technical": 6.32},
+            signal={"signal": "hold"}, regime="range_bound",
+            current_weight=0.3,
+        )
+        assert s["action"] == "hold"
+        assert "中性区间" not in s["reason"], f"高分因子误称中性区间: {s['reason']}"
+        assert "偏强" in s["reason"], f"高分因子应标注偏强: {s['reason']}"
+
 
 class TestRiskCombineHonesty:
     def test_llm_failed_warning(self):

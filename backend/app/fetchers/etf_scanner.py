@@ -276,9 +276,41 @@ def _cross_check_amount_scale(gtimg_map: dict[str, dict[str, Any]], em_list: lis
             break
 
 
+# P0-23 (round16 3.25): 快照成交额实时补查缓存（30s TTL）——快照 amount 可能
+# 低估 ~2000 倍（半日/盘中早段成交 vs 全天量）误杀活跃板块 ETF（159516/513010 等）。
+_AMOUNT_FIX_CACHE: dict = {"ts": 0.0, "map": {}}
+_AMOUNT_FIX_TTL = 30.0
+
+
+def _real_amount_override(codes: list[str]) -> dict[str, float]:
+    """P0-23①③: 对存疑成交额标的批量实时补查（gtimg），返回 code→真实成交额（元）。
+
+    快照 amount 存疑（<MIN_AVG_AMOUNT）时用实时 gtimg 成交额覆盖判定，
+    避免「虚拟低流动性」误杀活跃板块 ETF；失败返回 {}（调用方保持过滤）。
+    """
+    import os
+    import time as _t
+    if not codes:
+        return {}
+    # 测试隔离：ETF_SKIP_AMOUNT_OVERRIDE=1 时跳过网络补查（直接过滤存疑行）
+    if os.environ.get("ETF_SKIP_AMOUNT_OVERRIDE", "").strip().lower() in ("1", "true", "yes"):
+        return {}
+    now = _t.time()
+    if now - _AMOUNT_FIX_CACHE["ts"] > _AMOUNT_FIX_TTL:
+        try:
+            gt = _tencent_gtimg_batch(codes)
+            _AMOUNT_FIX_CACHE["map"] = {
+                c: float(g.get("amount", 0) or 0) for c, g in (gt or {}).items()
+            }
+            _AMOUNT_FIX_CACHE["ts"] = now
+        except Exception as e:
+            logger.warning("[etf_scanner] P0-23 real amount override failed: %s", e)
+            _AMOUNT_FIX_CACHE["ts"] = now  # 冷却，避免热循环重试
+    return {c: v for c, v in _AMOUNT_FIX_CACHE["map"].items() if c in codes}
+
+
 def _tencent_gtimg_batch(codes: list[str]) -> dict[str, dict[str, Any]]:
     """通过腾讯 gtimg 批量查询 ETF 行情，返回 code→{amount, turnover, fund_scale, pe} 映射。
-
     gtimg 免费、稳定、一次返回 88 个字段，无需 token。
 
     F9: 将原来「逐块串行 HTTP」改为「分块后线程池并发请求」，把 ~18 个串行
@@ -574,6 +606,9 @@ def filter_etfs(raw_list: list[dict] | Any) -> list[dict[str, Any]]:
 
     results = []
     seen = set()
+    # P0-23: 存疑成交额标的（快照 amount < MIN_AVG_AMOUNT）先收集，循环后批量
+    # 实时补查再判定——不静默按低值过滤（防「虚拟流动性误杀」活跃板块 ETF）。
+    _suspicious: list[tuple[str, dict]] = []
     for row in raw_list:
         code = ""
         for k in CODE_NAMES:
@@ -607,7 +642,9 @@ def filter_etfs(raw_list: list[dict] | Any) -> list[dict[str, Any]]:
 
         amount = _get_col(row, *AMOUNT_NAMES)
         # 降级模式：当 amount=0（新浪源无此字段）时跳过金额过滤
+        # P0-23①: amount>0 且 <MIN_AVG_AMOUNT → 存疑，收集后实时补查（不直接过滤）
         if amount > 0 and amount < MIN_AVG_AMOUNT:
+            _suspicious.append((code, row))
             continue
 
         scale = _get_col(row, *SCALE_NAMES)
@@ -626,6 +663,47 @@ def filter_etfs(raw_list: list[dict] | Any) -> list[dict[str, Any]]:
             "pb": _get_col(row, "市净率", "pb"),
             "fund_scale": scale,
         })
+
+    # P0-23①③: 存疑成交额标的实时补查——真实成交额 ≥ MIN_AVG_AMOUNT 则保留
+    #（快照低估 ~2000 倍场景），仍低则过滤 + WARNING 护栏。
+    if _suspicious:
+        _susp_codes = [c for c, _ in _suspicious]
+        _real_map = _real_amount_override(_susp_codes)
+        _rescued = 0
+        for code, row in _suspicious:
+            _real = _real_map.get(code, 0) or 0
+            if _real >= MIN_AVG_AMOUNT:
+                _rescued += 1
+                name = ""
+                for k in NAME_NAMES:
+                    v = row.get(k)
+                    if v is not None and str(v).strip():
+                        name = str(v).strip()
+                        break
+                scale = _get_col(row, *SCALE_NAMES)
+                if scale > 0 and scale < MIN_FUND_SCALE:
+                    continue
+                results.append({
+                    "symbol": code,
+                    "name": name,
+                    "price": _get_col(row, "最新价", "price"),
+                    "change_pct": _get_col(row, "涨跌幅", "change_pct"),
+                    "amount": _real,  # 用实时成交额覆盖快照
+                    "turnover": _get_col(row, "换手率", "turnover_rate"),
+                    "pe": _get_col(row, "市盈率-动态", "pe_ttm", "pe"),
+                    "pb": _get_col(row, "市净率", "pb"),
+                    "fund_scale": scale,
+                })
+            else:
+                logger.warning(
+                    "[etf_scanner] P0-23: %s 快照成交额 %.0f 元，实时补查仍 %.0f 元 < %d — 过滤（真实低流动性）",
+                    code, _get_col(row, *AMOUNT_NAMES), _real, MIN_AVG_AMOUNT,
+                )
+        if _rescued:
+            logger.info(
+                "[etf_scanner] P0-23: %d 只存疑成交额标的经实时补查保留（快照低估误杀防护）",
+                _rescued,
+            )
 
     logger.info("[etf_scanner] filter_etfs: %d -> %d", len(raw_list), len(results))
     # P4-b: 候选池为空时输出 ERROR 日志

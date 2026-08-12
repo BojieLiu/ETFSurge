@@ -160,9 +160,19 @@ function switchMode(mode) {
   error.value = ''
   loading.value = false
   lastAnalyzed.value = ''  // 重置旧去重状态，避免干扰下次 selectedSymbol 触发
+  // P1-8② (round16 3.23 R2): 切换模式后清空新激活实例的输入（防"切模式不清"同类残留）
+  _resetSearchInstance(activeSearch.value)
 }
 
 // R5: 市场切换重置——A→US 后旧市场的标的分析结果/输入不应残留（交互优化）
+// P1-8 (round16 3.23 R1): 三实例统一清空——旧实现只清 search（symbol 实例），
+// sectorSearch/indexSearch 的 searchQuery 无任何清空点 → 指数/板块模式输入残留。
+function _resetSearchInstance(s) {
+  if (!s) return
+  if (s.searchQuery) s.searchQuery.value = ''
+  if (s.searchResults) s.searchResults.value = []
+  if (s.showDropdown) s.showDropdown.value = false
+}
 watch(() => props.marketTab, () => {
   stopStream()
   query.value = ''
@@ -171,9 +181,9 @@ watch(() => props.marketTab, () => {
   error.value = ''
   loading.value = false
   lastAnalyzed.value = ''
-  if (search.searchQuery) search.searchQuery.value = ''
-  search.searchResults.value = []
-  search.showDropdown.value = false
+  _resetSearchInstance(search)
+  _resetSearchInstance(sectorSearch)
+  _resetSearchInstance(indexSearch)
 })
 
 const unsupportedSectorMarkets = ['US', 'HK']

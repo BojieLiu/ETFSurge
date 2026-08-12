@@ -176,7 +176,8 @@ describe('SectorHeatMap (F2-6/F2-7 §9.8)', () => {
     await tabs[1].trigger('click')
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
-    const aiBtn = wrapper.findAll('.row-action')[0]
+    // P0-18: heat 行双按钮（技术在前），AI 按钮是 [1]
+    const aiBtn = wrapper.findAll('.row-action')[1]
     await aiBtn.trigger('click')
     const emitted = wrapper.emitted('analyze')
     expect(emitted[0][0]).toMatchObject({ mode: 'sector', query: 'cls82558', name: 'AI智能体' })
@@ -271,5 +272,49 @@ describe('SectorHeatMap (F2-6/F2-7 §9.8)', () => {
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
     expect(marketApi.getHotPlates).toHaveBeenCalledWith(15, 'US')
+  })
+
+  it('P0-18: heat 条目技术按钮点击 → 请求领涨股 K 线（非 undefined）', async () => {
+    // sectors/heat 条目自身无 symbol，但带 lead_stocks[].symbol（EM 源）——旧实现
+    // openTechnical 用 item.symbol||item.code=undefined → /market/chart/undefined 404
+    marketApi.getSectorHeat.mockResolvedValue({
+      data: [{
+        rank: 1, name: '半导体', heat_index: 13501.4, rank_change: 5, is_new: 0,
+        change_pct: 2.3,
+        lead_stocks: [{ symbol: '688825', name: '海光信息', change_pct: 5.1 }],
+      }],
+    })
+    marketApi.indicators.mockResolvedValue({ data: { rsi: 43.4 } })
+    marketApi.signal.mockResolvedValue({ data: { signal: 'hold' } })
+    marketApi.chart.mockResolvedValue({ data: { closes: [] } })
+    const wrapper = mount(SectorHeatMap)
+    const tabs = wrapper.findAll('.tab-btn')
+    await tabs[1].trigger('click')
+    await flushPromises()
+    const techBtn = wrapper.findAll('.row-action')[0]
+    await techBtn.trigger('click')
+    await flushPromises()
+    // 负向：undefined symbol 不得发请求
+    expect(marketApi.indicators).toHaveBeenCalledWith('688825', 'A')
+    expect(marketApi.signal).toHaveBeenCalledWith('688825', 'A')
+    expect(marketApi.indicators.mock.calls[0][0]).not.toBe('undefined')
+  })
+
+  it('P0-18: 无领涨股条目技术按钮禁用（不发 undefined 请求）', async () => {
+    marketApi.getSectorHeat.mockResolvedValue({
+      data: [{
+        rank: 1, name: '无领涨板块', heat_index: 100, rank_change: 0, is_new: 0,
+        change_pct: 0, lead_stocks: [],
+      }],
+    })
+    const wrapper = mount(SectorHeatMap)
+    const tabs = wrapper.findAll('.tab-btn')
+    await tabs[1].trigger('click')
+    await flushPromises()
+    const techBtn = wrapper.findAll('.row-action')[0]
+    expect(techBtn.attributes('disabled')).toBeDefined()
+    // 点击被禁用按钮不触发请求
+    await techBtn.trigger('click')
+    expect(marketApi.indicators).not.toHaveBeenCalled()
   })
 })

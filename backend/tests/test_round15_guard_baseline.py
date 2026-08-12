@@ -64,14 +64,13 @@ class TestBaselineANewsGrading:
 
     def test_unknown_keyword_not_high_stars(self):
         """未知新闻（词典外）不得拿 highest stars——落到默认级。"""
-        from app.fetchers import news_fetcher
+        from app.fetchers.levistock_fetcher import classify_news_level
 
-        # 探测分级函数名（按 round14 §5 基线 B 首个用例语义：未知关键词 → 合理默认级）
-        grader = getattr(news_fetcher, "_grade_news", None) or getattr(news_fetcher, "grade_news", None)
-        if grader is None:
-            pytest.skip("news 分级函数名未匹配（实现可能在 news_fetcher 其它命名）")
-        level, stars = grader("某某完全不存在的冷门词汇XYZ 123")
-        assert stars <= 3, f"未知新闻不应拿高星（stars={stars}）"
+        # P2-1 (round16 §5 盲区②): 探测旧函数名 _grade_news/grade_news 不存在 →
+        # 恒 SKIP 从不生效。真实函数是 classify_news_level(title, content) 返回 int 1-5。
+        level = classify_news_level("某某完全不存在的冷门词汇XYZ 123")
+        assert isinstance(level, int) and 1 <= level <= 5
+        assert level <= 3, f"未知新闻不应拿高星（level={level}）"
 
 
 class TestBaselineAFetchHistory:

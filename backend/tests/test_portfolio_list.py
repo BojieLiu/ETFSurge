@@ -18,6 +18,9 @@ from datetime import datetime
 def mock_db_session():
     """Create a fully mocked AsyncSession that returns test records."""
     import sqlalchemy.ext.asyncio
+    from app.routers import portfolio as _port
+    # P0-8: 清空列表 TTL 缓存，避免跨测试串缓存致断言失效
+    _port._DESIGNS_LIST_CACHE.clear()
 
     # Create mock records that look like PortfolioDesign ORM instances
     class MockDesign:
@@ -184,9 +187,102 @@ async def test_list_designs_error_message_preserved():
     session = AsyncMock(spec=sqlalchemy.ext.asyncio.AsyncSession)
     session.execute = mock_execute
 
-    from app.routers.portfolio import list_designs
+    from app.routers.portfolio import list_designs, _DESIGNS_LIST_CACHE
+    _DESIGNS_LIST_CACHE.clear()  # P0-8: 防跨测试串缓存
 
     result = await list_designs(limit=10, offset=0, db=session)
     assert len(result) == 1
     assert result[0]["error_message"] == "Provider timeout; no response from LLM"
     assert result[0]["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_list_designs_ttl_cache_hit():
+    """P0-8 (round16 2.3): designs_list 内存 TTL 缓存——同 (limit,offset) 二次调用
+    命中缓存不再触发 DB 查询（负向：二次仍查 DB → FAIL）。"""
+    import sqlalchemy.ext.asyncio
+    from unittest.mock import AsyncMock
+
+    class MockDesign:
+        id = 1
+        created_at = datetime(2024, 1, 15, 10, 30, 0)
+        capital = 500000.0
+        risk_profile = "balanced"
+        status = "completed"
+        error_message = None
+        report_quality = "full"
+        report_generated_at = None
+        strategies_json = '[{"etfs": [{"symbol": "510300", "name": "沪深300ETF", "layer": "core"}]}]'
+
+    class MockScalars:
+        def all(self):
+            return [MockDesign()]
+
+    class MockResult:
+        def scalars(self):
+            return MockScalars()
+
+    mock_execute = AsyncMock()
+    mock_execute.return_value = MockResult()
+    session = AsyncMock(spec=sqlalchemy.ext.asyncio.AsyncSession)
+    session.execute = mock_execute
+
+    from app.routers.portfolio import list_designs, _DESIGNS_LIST_CACHE
+    _DESIGNS_LIST_CACHE.clear()
+
+    r1 = await list_designs(limit=10, offset=0, db=session)
+    assert len(r1) == 1
+    assert mock_execute.await_count == 1, "首次调用应执行 DB 查询"
+    # 二次调用：30s TTL 内命中缓存，不再触发 DB 查询
+    r2 = await list_designs(limit=10, offset=0, db=session)
+    assert len(r2) == 1
+    assert r2[0]["etf_count"] == 1
+    assert mock_execute.await_count == 1, f"负向：二次调用应命中缓存而非再查 DB（当前 {mock_execute.await_count}）"
+
+    _DESIGNS_LIST_CACHE.clear()
+
+
+
+@pytest.mark.asyncio
+async def test_get_design_allocations_include_market_fields():
+    """P0-4 (round16 3.9 B3): get_design plans[].allocations[] 转换层白名单
+    必须透传 daily_change_pct/price/factor_score——旧实现丢弃 → 设计详情「今日涨跌」
+    列恒显示"数据源不可用"（负向：字段缺失 → FAIL）。"""
+    import sqlalchemy.ext.asyncio
+    from unittest.mock import AsyncMock
+
+    class MockRecord:
+        id = 506
+        created_at = datetime(2026, 8, 11, 12, 0, 0)
+        capital = 500000.0
+        risk_profile = "balanced"
+        design_text = "## 一、方案概览"
+        status = "completed"
+        error_message = None
+        report_quality = "full"
+        report_generated_at = None
+        strategies_json = ('[{"label": "平衡型", "portfolio_name": "平衡", "positioning": "均衡", '
+                           '"expected_return": 0.12, "max_drawdown": 0.15, "sharpe_ratio": 1.2, '
+                           '"etfs": [{"symbol": "510300", "name": "沪深300ETF", "layer": "core", '
+                           '"weight": 0.3, "selection_rationale": "宽基", '
+                           '"daily_change_pct": -0.65, "price": 4.728, "factor_score": 0.75}]}]')
+        market_snapshot_json = '{"market_regime": "range_bound"}'
+
+    class MockResult:
+        def scalar_one_or_none(self):
+            return MockRecord()
+
+    mock_execute = AsyncMock()
+    mock_execute.return_value = MockResult()
+    session = AsyncMock(spec=sqlalchemy.ext.asyncio.AsyncSession)
+    session.execute = mock_execute
+
+    from app.routers.portfolio import get_design
+
+    result = await get_design(design_id=506, db=session)
+    plans = result["plans"]
+    assert len(plans) == 1
+    alloc = plans[0]["allocations"][0]
+    assert alloc["daily_change_pct"] == -0.65, f"daily_change_pct 被转换层丢弃: {alloc}"
+    assert alloc["price"] == 4.728
+    assert alloc["factor_score"] == 0.75

@@ -126,6 +126,11 @@ async def list_etfs(db: AsyncSession, portfolio_type: str | None = None) -> list
 
 
 async def add_etf(db: AsyncSession, data: PortfolioETFCreate) -> PortfolioETF:
+    # P0-14① (round16 3.15 R1): 场内 ETF 添加时补 tracked_index——前端不传 → 旧实现
+    # 恒 None，持仓表「跟踪指数」列场内全空。从候选池 _by_code + ETF 基座缓存兜底查真实指数名。
+    _tidx = data.tracked_index
+    if not _tidx and (data.asset_type or "").upper() in ("ETF", "A", "A-SHARE", ""):
+        _tidx = _resolve_tracked_index(str(data.symbol))
     etf = PortfolioETF(
         symbol=data.symbol,
         name=data.name,
@@ -133,12 +138,49 @@ async def add_etf(db: AsyncSession, data: PortfolioETFCreate) -> PortfolioETF:
         asset_type=data.asset_type,
         target_weight=data.target_weight,
         portfolio_type=data.portfolio_type,
-        tracked_index=data.tracked_index,
+        tracked_index=_tidx,
     )
     db.add(etf)
     await db.commit()
     await db.refresh(etf)
     return etf
+
+
+def _resolve_tracked_index(symbol: str) -> str | None:
+    """P0-14: 从候选池/ETF 基座缓存解析场内 ETF 的真实跟踪指数名（510300→沪深300）。"""
+    try:
+        from ..services.market_data_hub import market_data_hub
+        _entry = market_data_hub.get_by_code(symbol)
+        _t = (_entry or {}).get("tracked_index") or ""
+        if _t and _t != "unknown":
+            return str(_t)
+    except Exception:
+        pass
+    try:
+        from ..fetchers.etf_scanner import (
+            _load_tracked_index_cache,
+            _extract_index_keyword,
+        )
+        _tidx_map = _load_tracked_index_cache() or {}
+        if symbol in _tidx_map and _tidx_map[symbol]:
+            return str(_tidx_map[symbol])
+        # 名称关键词兜底（510300 → ±300）
+        baseline = None
+        try:
+            from ..fetchers.etf_scanner import fetch_all_etfs_base
+            for _it in (fetch_all_etfs_base() or []):
+                if str(_it.get("symbol", "")).zfill(6) == str(symbol).zfill(6):
+                    baseline = _it.get("name") or ""
+                    break
+        except Exception:
+            pass
+        if baseline:
+            _kw = _extract_index_keyword(baseline)
+            if _kw:
+                return str(_kw)
+    except Exception:
+        pass
+    return None
 
 
 async def update_etf(db: AsyncSession, symbol: str, data: PortfolioETFUpdate) -> PortfolioETF | None:
@@ -719,6 +761,46 @@ async def strategy_check(
                 "technical_signal": sig if (isinstance(sig, dict) and sig.get("signal")) else {"signal": None, "reason": "技术指标不可用"},
                 "weight_drift": drift,
             }
+
+    # P0-2 (round16 3.2): 名称回退修复——DB 持仓里历史保存的默认名 "510300 ETF"
+    # （apply-design 未命中真实名时生成）在策略报告中回退为真实名。
+    # 查 instruments / ETF 基座缓存，标 refresh 时异步更新；查不到保持原名（诚实，不打假名）。
+    try:
+        _ghost = [m for m in market_data
+                  if m.get("name") == f"{m.get('symbol')} ETF"
+                  and m.get("symbol") not in (None, "CASH")]
+        if _ghost:
+            _name_map: dict[str, str] = {}
+            try:
+                from ..models.search import Instrument
+                _rows = list((await db.execute(
+                    select(Instrument).where(Instrument.symbol.in_([g["symbol"] for g in _ghost]))
+                )).scalars().all())
+                for _r in _rows:
+                    _name_map[_r.symbol] = _r.name
+            except Exception:
+                pass
+            _missing = [g["symbol"] for g in _ghost if g["symbol"] not in _name_map]
+            if _missing:
+                try:
+                    from ..fetchers.etf_scanner import fetch_all_etfs_base
+                    # P0-11 (round16 3.12): 同步读取走线程池，不阻塞事件循环
+                    _base = await asyncio.to_thread(fetch_all_etfs_base) or []
+                    for _it in _base:
+                        _s = str(_it.get("symbol") or "").zfill(6)
+                        _n = _it.get("name") or ""
+                        if _s in _missing and _n:
+                            _name_map[_s] = _n
+                except Exception:
+                    pass
+            for g in _ghost:
+                _real = _name_map.get(str(g["symbol"]).zfill(6)) or _name_map.get(g["symbol"], "")
+                if _real:
+                    g["name"] = _real
+                    g["name_resolved"] = True
+                    logger.info("[strategy_check] P0-2 resolved ghost name %s -> %s", g["symbol"], _real)
+    except Exception as _pe:
+        logger.debug("[strategy_check] ghost name resolution skipped (non-fatal): %s", _pe)
     
     # 统计因子数据质量
     # P1-15 (round9 §4.4-3): filled 判定排除兑底默认值——RSI/KDJ 恰为 50、ATR 恰为 0、
@@ -1276,11 +1358,32 @@ def _rule_based_suggestion(
         suggested = cur
     else:
         action = "hold"
+        _fcorr = ("偏强" if avg_factor >= 0.5 else
+                  "偏弱" if avg_factor <= -0.5 else
+                  "中性")
         reason = (
-            f"因子分 {avg_factor:.2f}（中性区间），信号 {sig or '中性'}，维持现状；"
+            f"因子分 {avg_factor:.2f}（{_fcorr}），信号 {sig or '中性'}，维持现状；"
             f"持有逻辑不变，跟踪因子与信号变化；"
             f"关注 RSI 进入超卖区（<30）或因子转正后的加仓机会，市态{_regime_cn}不追涨杀跌"
         )
+        suggested = cur
+
+    # P0-10① (round16 3.11): action/suggested 方向一致性校验——增仓不得降仓、减仓不得升仓。
+    # 单只 30% 风控上限仅作"已达上限"提示，不输出"increase 0.5→0.3"这类矛盾值。
+    if action == "increase":
+        if suggested < cur:
+            reason_append = (
+                f"；当前仓 {cur:.1%} 已达/接近 30% 风控上限，suggested 维持 {cur:.1%} 不再上探"
+                if cur >= 0.299
+                else f"；suggested 按 {cur:.1%} 保底（原目标 {suggested:.1%} 被 30% 上限截断）"
+            )
+            reason = reason + reason_append
+            suggested = max(suggested, cur)
+    elif action == "decrease":
+        if suggested > cur:
+            reason = reason + f"；suggested 按 {cur:.1%} 封顶（减仓不得升仓）"
+            suggested = min(suggested, cur)
+    elif action == "hold":
         suggested = cur
 
     return {
@@ -1587,6 +1690,22 @@ async def apply_portfolio_design(db: AsyncSession, design: dict) -> dict[str, An
         if not symbols:
             return {"symbols": [], "message": "组合设计中没有指定持仓"}
 
+        # P0-10② (round16 3.11): 幽灵标的名称回填——新增标的先查 ETF 基座缓存补真实名，
+        # 查不到才用默认名并打 _degraded 标记（前端可提示）。
+        _degraded = False
+        _code_name_map: dict[str, str] = {}
+        try:
+            from ..fetchers.etf_scanner import fetch_all_etfs_base
+            # P0-11 (round16 3.12): 同步读取走线程池，不阻塞事件循环
+            _base = await asyncio.to_thread(fetch_all_etfs_base) or []
+            _code_name_map = {
+                str(e.get("symbol", "")).zfill(6): str(e.get("name") or "")
+                for e in _base
+                if e.get("symbol") and e.get("name")
+            }
+        except Exception as _e:
+            logger.warning("[apply_portfolio_design] etf base name lookup failed (non-fatal): %s", _e)
+
         etfs = await list_etfs(db)
         etf_dict = {e.symbol: e for e in etfs}
         applied = []
@@ -1598,14 +1717,22 @@ async def apply_portfolio_design(db: AsyncSession, design: dict) -> dict[str, An
                 e.portfolio_type = portfolio_type
                 applied.append({"symbol": symbol, "name": e.name, "target_weight": w, "portfolio_type": portfolio_type, "action": "updated"})
             else:
-                new_etf = PortfolioETF(symbol=symbol, name=f"{symbol} ETF", short_name=symbol, asset_type="ETF",
+                real_name = _code_name_map.get(str(symbol).zfill(6)) or _code_name_map.get(str(symbol), "")
+                if real_name:
+                    name = real_name
+                    short_name = real_name
+                else:
+                    name = f"{symbol} ETF"
+                    short_name = symbol
+                    _degraded = True
+                new_etf = PortfolioETF(symbol=symbol, name=name, short_name=short_name, asset_type="ETF",
                     target_weight=w, portfolio_type=portfolio_type, tracked_index=None, is_active=True)
                 db.add(new_etf)
-                applied.append({"symbol": symbol, "name": new_etf.name, "target_weight": w, "portfolio_type": portfolio_type, "action": "added"})
+                applied.append({"symbol": symbol, "name": new_etf.name, "target_weight": w, "portfolio_type": portfolio_type, "action": "added", "_degraded": _degraded})
 
         await db.commit()
         updated = await list_etfs(db)
-        return {"symbols": [{"symbol": e.symbol, "name": e.name, "target_weight": e.target_weight, "portfolio_type": e.portfolio_type} for e in updated], "applied": applied}
+        return {"symbols": [{"symbol": e.symbol, "name": e.name, "target_weight": e.target_weight, "portfolio_type": e.portfolio_type} for e in updated], "applied": applied, "degraded": _degraded}
     except Exception as e:
         await db.rollback()
         raise e

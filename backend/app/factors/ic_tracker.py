@@ -11,7 +11,7 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import numpy as np
@@ -242,7 +242,7 @@ class ICTracker:
             record = FactorICRecord(
                 factor_code=code,
                 ic_value=round(float(ic_val), 4),
-                sample_count=self._get_ic_sample_count(code),
+                sample_count=await self._get_ic_sample_count_db(session, code),
                 computed_at=now,
             )
             session.add(record)
@@ -251,12 +251,29 @@ class ICTracker:
         await session.commit()
         return count
 
-    def _get_ic_sample_count(self, factor_code: str) -> int:
-        """Count occurrences of *factor_code* in internal records.
+    async def _get_ic_sample_count_db(self, session: AsyncSession, factor_code: str) -> int:
+        """P0-12 (round16 3.13 R2/R3): 样本数统计「IC 累积周期数」而非单批非零符号数。
 
-        self._records is list[dict], not a dict indexed by factor_code,
-        so we must sum matches rather than doing a direct key lookup.
+        旧实现 `sum(self._records ...)` 只统计本批内存 records（候选池空时恒 0），
+        且语义是「非零符号数」（恒 <30）→ P0-C 永远误标 no_data。现改为从 DB
+        factor_ic_records 按 factor_code 分组 count——即该因子已累积的 IC 周期数，
+        MIN_IC_SAMPLES=30 对齐「≥30 个 IC 周期」。
         """
+        from ..models.factor_ic import FactorICRecord  # lazy import 防循环依赖
+
+        try:
+            stmt = select(func.count()).select_from(FactorICRecord).where(
+                FactorICRecord.factor_code == factor_code
+            )
+            total = (await session.execute(stmt)).scalar_one_or_none() or 0
+            # 本批刚插入的行尚未在本次查询内（session 未 flush），+1 代表即将落库的这一条
+            return int(total) + 1
+        except Exception as e:  # noqa: BLE001 - DB 不可用时回退内存计数
+            logger.warning("[ic_tracker] DB sample count failed (fallback memory): %s", e)
+            return self._get_ic_sample_count(factor_code) + 1
+
+    def _get_ic_sample_count(self, factor_code: str) -> int:
+        """Count occurrences of *factor_code* in internal records（内存语义，兼容旧调用）。"""
         return sum(
             1 for r in self._records
             if isinstance(r, dict) and r.get("factor_code") == factor_code

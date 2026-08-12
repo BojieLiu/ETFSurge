@@ -182,6 +182,8 @@ class MarketDataHub:
         self.factor_registry = factor_registry
         self._opportunistic_signals: dict[str, dict] = {}
         self.current_regime: str = "neutral"
+        # P0-13② (round16 3.14): 候选池冷却期/受限 refresh 时置 True，供设计链路消费
+        self._degraded: bool = False
         # 外部缓存（由 scheduler 或 refresh() 更新）
         self._sector_momentum_cache: list[dict] | None = None
         self._sector_momentum_cache_ts: float = 0
@@ -675,15 +677,32 @@ class MarketDataHub:
 
         # 7. 空池保护：如果刷新结果为空且存在上次成功数据，保留上次 pool 而非清空
         total_new = sum(len(v) for v in new_pool.values())
-        if total_new == 0:
+        _last_good_total = sum(len(v) for v in _last_good.values()) if _last_good else 0
+        # P0-13① (round16 3.14 R1): 冷却期 last-good 保护扩展——refresh 产出显著
+        # 低于上次成功 pool（<50%）且上次非空时，保留 last-good 而非覆盖，
+        # 避免「候选池昙花一现」依赖数据源冷却状态（mootdx/akshare 冷却时受限产出）。
+        _shrink_protected = bool(
+            _last_good is not None
+            and _last_good_total > 0
+            and total_new > 0
+            and total_new < _last_good_total * 0.5
+        )
+        if total_new == 0 or _shrink_protected:
             if _last_good is not None:
-                logger.warning("[market_data_hub] refresh produced empty pool — keeping last good pool (v%d, %d total)",
-                               self._version, sum(len(v) for v in _last_good.values()))
+                logger.warning(
+                    "[market_data_hub] refresh produced %s pool (%d total vs last-good %d) — keeping last good pool (v%d, %d total)%s",
+                    "empty" if total_new == 0 else "severely-shrunk",
+                    total_new, _last_good_total, self._version,
+                    _last_good_total, " [P0-13 degrade]" if _shrink_protected else "",
+                )
+                # P0-13②: 冷却期/受限 refresh 打 degraded 标记供设计降级链路消费
+                self._degraded = True
                 # 不改变 self._pool 和 self._version，返回一个空 diff
                 _elapsed = _time.time() - _start_ts
                 pool_audit.log_refresh(PoolDiff(added=[], removed=[], changed=[], version=self._version,
                                                  timestamp=datetime.now().isoformat()))
-                logger.info("MarketDataHub: refresh skipped (empty result) in %.1fs", _elapsed)
+                logger.info("MarketDataHub: refresh skipped (%s) in %.1fs",
+                            "empty" if total_new == 0 else "shrunk<50%", _elapsed)
                 return PoolDiff(added=[], removed=[], changed=[], version=self._version,
                                 timestamp=datetime.now().isoformat())
             else:
@@ -709,6 +728,8 @@ class MarketDataHub:
         self._version += 1
         # 7.1: 重置连续失败计数（本次刷新成功）
         self._consecutive_failures = 0
+        # P0-13②: 本次刷新成功 → 清除 cooling 降级标记
+        self._degraded = False
 
         # 8. 计算 diff
         diff = self._compute_diff(old_by_code)
@@ -1442,6 +1463,12 @@ class MarketDataHub:
             return []
         if limit is not None:
             try:
+                # P0-17① (round16 3.19 R1): A 股热度优先走东财行业板块 spot
+                # （自带真实涨跌幅+领涨股）——财联社 sign 失效后名称回填命中率仅 5/20。
+                rows = sector_fetcher.fetch_sector_heat_em(limit)
+                if rows:
+                    return rows
+                # EM 源失败 → 回退财联社 + 端点名称回填链
                 return sector_fetcher.fetch_sector_heat(limit) or []
             except Exception as e:
                 logger.warning("[hub] get_sector_heat(%s) failed: %s", limit, e)

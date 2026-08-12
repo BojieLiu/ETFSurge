@@ -631,24 +631,24 @@ HKUS_STOCK_MAP: list[dict[str, str]] = [
     {"symbol": "00939", "name": "建设银行", "market": "HK"},
     {"symbol": "01398", "name": "工商银行", "market": "HK"},
     # 美股个股
-    {"symbol": "AAPL", "name": "苹果", "market": "US"},
-    {"symbol": "MSFT", "name": "微软", "market": "US"},
-    {"symbol": "NVDA", "name": "英伟达", "market": "US"},
-    {"symbol": "GOOGL", "name": "谷歌-A", "market": "US"},
-    {"symbol": "AMZN", "name": "亚马逊", "market": "US"},
-    {"symbol": "TSLA", "name": "特斯拉", "market": "US"},
-    {"symbol": "META", "name": "Meta平台", "market": "US"},
-    {"symbol": "BRK.B", "name": "伯克希尔哈撒韦-B", "market": "US"},
-    {"symbol": "LLY", "name": "礼来", "market": "US"},
-    {"symbol": "AVGO", "name": "博通", "market": "US"},
-    {"symbol": "JPM", "name": "摩根大通", "market": "US"},
-    {"symbol": "V", "name": "Visa", "market": "US"},
-    {"symbol": "XOM", "name": "埃克森美孚", "market": "US"},
-    {"symbol": "COST", "name": "好市多", "market": "US"},
-    {"symbol": "ORCL", "name": "甲骨文", "market": "US"},
-    {"symbol": "PG", "name": "宝洁", "market": "US"},
-    {"symbol": "HD", "name": "家得宝", "market": "US"},
-    {"symbol": "NFLX", "name": "奈飞", "market": "US"},
+    {"symbol": "AAPL", "name": "苹果", "name_en": "Apple", "market": "US"},
+    {"symbol": "MSFT", "name": "微软", "name_en": "Microsoft", "market": "US"},
+    {"symbol": "NVDA", "name": "英伟达", "name_en": "NVIDIA", "market": "US"},
+    {"symbol": "GOOGL", "name": "谷歌-A", "name_en": "Alphabet", "market": "US"},
+    {"symbol": "AMZN", "name": "亚马逊", "name_en": "Amazon", "market": "US"},
+    {"symbol": "TSLA", "name": "特斯拉", "name_en": "Tesla", "market": "US"},
+    {"symbol": "META", "name": "Meta平台", "name_en": "Meta", "market": "US"},
+    {"symbol": "BRK.B", "name": "伯克希尔哈撒韦-B", "name_en": "Berkshire Hathaway", "market": "US"},
+    {"symbol": "LLY", "name": "礼来", "name_en": "Eli Lilly", "market": "US"},
+    {"symbol": "AVGO", "name": "博通", "name_en": "Broadcom", "market": "US"},
+    {"symbol": "JPM", "name": "摩根大通", "name_en": "JPMorgan", "market": "US"},
+    {"symbol": "V", "name": "Visa", "name_en": "Visa", "market": "US"},
+    {"symbol": "XOM", "name": "埃克森美孚", "name_en": "Exxon Mobil", "market": "US"},
+    {"symbol": "COST", "name": "好市多", "name_en": "Costco", "market": "US"},
+    {"symbol": "ORCL", "name": "甲骨文", "name_en": "Oracle", "market": "US"},
+    {"symbol": "PG", "name": "宝洁", "name_en": "Procter & Gamble", "market": "US"},
+    {"symbol": "HD", "name": "家得宝", "name_en": "Home Depot", "market": "US"},
+    {"symbol": "NFLX", "name": "奈飞", "name_en": "Netflix", "market": "US"},
 ]
 
 
@@ -734,16 +734,31 @@ async def search_hk_us(keyword: str = "", enrich: bool = True,
     kw = keyword.lower().strip()
     # ① 静态基座: HKUS_ETF_MAP（恒有）+ HKUS_STOCK_MAP（仅 include_stocks 时，参数语义一致）
     base_pool = HKUS_ETF_MAP + (HKUS_STOCK_MAP if include_stocks else [])
-    base = [{
-        "symbol": e["symbol"], "name": e["name"], "market": e["market"],
-        "asset_type": e["market"],
-        "type": "etf" if e["symbol"] in _HKUS_ETF_SYMBOLS else "stock",
-    } for e in base_pool
-        if not kw or kw in e["symbol"].lower() or kw in e["name"].lower()]
+    # P0-6 (round16 3.3): 静态基座补 name_en——美股英文名（Apple/Tesla/Netflix...）
+    # 可离线命中，不依赖 akshare spot 源（当前网络环境黑洞）。
+    base: list[dict[str, Any]] = []
+    for e in base_pool:
+        _symbol_l = e["symbol"].lower()
+        _name_l = e["name"].lower()
+        _name_en_l = (e.get("name_en") or "").lower()
+        if kw and kw not in _symbol_l and kw not in _name_l and kw not in _name_en_l:
+            continue
+        base.append({
+            "symbol": e["symbol"], "name": e["name"],
+            "name_en": e.get("name_en") or "",
+            "market": e["market"],
+            "asset_type": e["market"],
+            "type": "etf" if e["symbol"] in _HKUS_ETF_SYMBOLS else "stock",
+        })
 
     # ② 动态补充: akshare 全量 spot（尽力而为；与基座按归一化 symbol 去重，基座优先）
     spot: list[dict[str, Any]] = []
-    if include_stocks:
+    # P0-16① (round16 3.18 R1): 静态基座命中即提前返回——旧实现无条件并发拉 spot
+    #（各 4s 超时），即使代码/名称已在基座命中（00700/09988/腾讯 都慢在 spot 等待）。
+    # 基座命中 → 跳过 spot（毫秒级返回），spot 仅作基座未命中时的补充。
+    _base_hit = bool(base)
+    # 空关键词（全量列表浏览）仍走 spot 补充全量；仅具体关键词且基座命中时提前返回
+    if include_stocks and not (_base_hit and kw):
         # 函数内局部导入 + 每次调用重新解析模块属性 → 测试 patch 模块属性即生效
         from ..fetchers.china_market import fetch_hk_spot_list, fetch_us_spot_list
         # 并发拉取两个市场的 spot（单个最坏 10s 超时，串行会翻倍阻塞搜索）
@@ -1175,7 +1190,9 @@ async def get_asset_realtime(symbol: str, asset_type: str) -> dict | None:
     result: dict | None = None
     try:
         if asset_type == "US":
-            data = await _route_us(symbol)
+            # P0-11② (round16 3.12): _route_us 已改线程池执行，补 wait_for 硬限时
+            # 兜底——避免线程池繁忙时单个请求无限等待（TD 免费层正常 0.5s）。
+            data = await asyncio.wait_for(_route_us(symbol), timeout=8)
             # F3-7: 美股实时数据源（TwelveData/Finnhub）可能无 name →
             # 用静态基座映射补全（自选 SPY 显示 "SPDR S&P 500 ETF"）
             if data and not data.get("name"):
@@ -1202,16 +1219,27 @@ async def get_asset_realtime(symbol: str, asset_type: str) -> dict | None:
             # R5: 指数实时——fetch_index_realtime（新浪 s_sh 三级降级，8 个 A 股指数）。
             # 旧实现走 A 股股票路径：000001 被当成深市股票（平安银行 11.63）→
             # 指数分析 prompt 拿到错位行情（LLM 报告"数据缺失/不匹配"）。
-            idx_rows = await _call(fetch_index_realtime, timeout=_timeout)
-            result = next((r for r in (idx_rows or []) if str(r.get("symbol")) == symbol), None)
-            if result is None:
-                # 兜底：本地指数缓存（定时刷新）
-                try:
-                    from .market_data_hub import market_data_hub
-                    idx_cached = market_data_hub.get_index_realtime() or []
-                    result = next((r for r in idx_cached if str(r.get("symbol")) == symbol), None)
-                except Exception:
-                    pass
+            # P0-22④ (round16 3.24 R4): 跨市场指数防护——US/HK 指数显式报「暂不支持」
+            # 而非裸失败（旧实现：美股 tab 选 GEM 港股指数 → A 股路径查无 → 前端报错）。
+            _idx_market = await _lookup_index_market(symbol)
+            if _idx_market in ("US", "HK"):
+                logger.warning(
+                    "[market_service] index realtime for %s (market=%s) not supported — A 股指数源仅支持 A",
+                    symbol, _idx_market,
+                )
+                result = {"symbol": symbol, "unsupported_market": _idx_market,
+                          "error": "该市场指数暂不支持"}
+            else:
+                idx_rows = await _call(fetch_index_realtime, timeout=_timeout)
+                result = next((r for r in (idx_rows or []) if str(r.get("symbol")) == symbol), None)
+                if result is None:
+                    # 兜底：本地指数缓存（定时刷新）
+                    try:
+                        from .market_data_hub import market_data_hub
+                        idx_cached = market_data_hub.get_index_realtime() or []
+                        result = next((r for r in idx_cached if str(r.get("symbol")) == symbol), None)
+                    except Exception:
+                        pass
         else:
             all_a = await _call(fetch_a_stock_realtime, symbol, timeout=_timeout)
             for item in all_a or []:
@@ -1258,11 +1286,20 @@ async def _route_us(symbol: str) -> dict | None:
         rows = _tickflow_quotes([symbol])
         return rows[0] if rows else None
 
-    return registry.route([
-        ("twelvedata", _td),
-        ("finnhub", _fh),
-        ("tickflow", _tf),
-    ], route_name="US_ETF", operation="realtime", target=symbol)
+    # P0-11 (round16 3.12): registry.route 同步执行 provider，闭包内同步 HTTP
+    # 会阻塞事件循环（py-spy 实证 MainThread 卡 _td→run_in_thread）。整段路由
+    # 提交线程池执行，事件循环保持响应（AGENTS.md async gotcha 修复）。
+    return await asyncio.to_thread(
+        registry.route,
+        [
+            ("twelvedata", _td),
+            ("finnhub", _fh),
+            ("tickflow", _tf),
+        ],
+        route_name="US_ETF",
+        operation="realtime",
+        target=symbol,
+    )
 
 
 def _us_static_name(symbol: str) -> str:
@@ -1274,6 +1311,54 @@ def _us_static_name(symbol: str) -> str:
         if e.get("market") == "US" and str(e.get("symbol", "")).upper() == sym:
             return str(e.get("name", ""))
     return ""
+
+
+# P0-22④ (round16 3.24): 指数 → 市场映射（indices_meta 表优先，静态基座兜底）。
+_INDEX_MARKET_CACHE: dict[str, str] = {}
+_INDEX_MARKET_CACHE_TS = 0.0
+_INDEX_MARKET_TTL = 300.0
+
+
+def _lookup_index_market_sync(symbol: str) -> str:
+    """同步查询指数市场（仅读缓存；未命中返回 '' 不强依赖 DB）。"""
+    sym = (symbol or "").upper()
+    if not sym:
+        return ""
+    return _INDEX_MARKET_CACHE.get(sym, "")
+
+
+async def _lookup_index_market(symbol: str) -> str:
+    """返回指数代码所属市场（'A'/'HK'/'US'/'' 未知）——跨市场 realtime 防护用。
+
+    查 indices_meta 表（P0-20 已补 US/HK 静态段）；未知返回 ''（调用方走 A 路径）。
+    """
+    import time as _t
+    global _INDEX_MARKET_CACHE, _INDEX_MARKET_CACHE_TS
+    sym = (symbol or "").upper()
+    if not sym:
+        return ""
+    now = _t.time()
+    if now - _INDEX_MARKET_CACHE_TS > _INDEX_MARKET_TTL or not _INDEX_MARKET_CACHE:
+        rows = await _load_index_meta_rows()
+        if rows:
+            _INDEX_MARKET_CACHE = {str(r[0]).upper(): r[1] for r in rows}
+        _INDEX_MARKET_CACHE_TS = now  # 冷却，避免热循环重试
+    return _INDEX_MARKET_CACHE.get(sym, "")
+
+
+async def _load_index_meta_rows() -> list[tuple[str, str]]:
+    """从 indices_meta 表读 (symbol, market) 列表。失败返回 []。"""
+    try:
+        from ..models.search import IndexMeta
+        from sqlalchemy import select
+        async with async_session() as session:
+            rows = (await session.execute(
+                select(IndexMeta.symbol, IndexMeta.market)
+            )).all()
+            return [(r.symbol, r.market) for r in rows]
+    except Exception as e:
+        logger.debug("[market_service] indices_meta read failed: %s", e)
+        return []
 
 
 async def get_us_batch(symbols: list[str]) -> list[dict[str, Any]]:
@@ -1290,9 +1375,15 @@ async def get_us_batch(symbols: list[str]) -> list[dict[str, Any]]:
                 out.append(d)
         return out or None
 
-    result = registry.route([
-        ("twelvedata", _td_batch),
-    ], route_name="US_batch", operation="batch", target=",".join(symbols))
+    # P0-11 (round16 3.12): 与 _route_us 同源——批量美股实时同步 HTTP 会阻塞事件循环，
+    # 整段路由提交线程池执行。
+    result = await asyncio.to_thread(
+        registry.route,
+        [("twelvedata", _td_batch)],
+        route_name="US_batch",
+        operation="batch",
+        target=",".join(symbols),
+    )
     return result or []
 
 
@@ -1318,7 +1409,10 @@ async def get_history(
 
     from ..fetchers.china_market import fetch_history, get_k_data, fetch_hk_stock_realtime
 
-    result = await _call(fetch_history, symbol, asset_type, period)
+    # P0-19② (round16 3.20 R1): HK/US 链 4 源串行（akshare+finnhub+alphavantage+腾讯）
+    # 最坏 ~20s——旧默认 8s 截断在腾讯 fallback 前 → chart 空。HK/US 放宽到 20s。
+    _hist_timeout = 20 if asset_type in ("HK", "US") else 8
+    result = await _call(fetch_history, symbol, asset_type, period, timeout=_hist_timeout)
     if result:
         # O2 (round8 §7 P1-新): HK K 线与实时价一致性校验——最高/最新价与实时价
         # 差异 >50% 视为 K 线数据源错误（finnhub/alphavantage 符号错位曾产生
@@ -1349,6 +1443,19 @@ async def get_history(
     k_data = await _call(get_k_data, symbol, period, timeout=15) or []
     if k_data:
         return k_data
+
+    # P0-19③ (round16 3.20 R2): get_k_data（akshare 直查）与主链同源，akshare 熔断
+    # 时同样空 → 补腾讯 HK K 线独立兜底（不依赖 akshare 链，与主链解耦）。
+    if asset_type == "HK":
+        try:
+            from ..fetchers.china_market import _fetch_tencent_hk_history
+            tx_rows = await asyncio.to_thread(_fetch_tencent_hk_history, symbol) or []
+            if tx_rows:
+                logger.info("[market_service] get_history HK %s: tencent independent fallback hit (%d rows)",
+                            symbol, len(tx_rows))
+                return tx_rows
+        except Exception as e:
+            logger.debug("[market_service] get_history HK tencent independent fallback failed for %s: %s", symbol, e)
 
     # F0-4: akshare 熔断 / 数据源全线失败时，从 Hub K 线缓存取任意年龄的过期数据
     # 兜底（stale 标记），避免 history/indicators/signal 全线 insufficient_data。

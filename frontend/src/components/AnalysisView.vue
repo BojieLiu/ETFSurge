@@ -21,6 +21,15 @@
       @refresh="fetchChart"
     />
 
+    <!-- P0-15 R3: 今日涨跌显式区块（红涨绿跌，text-up/text-down）→ 与 ChartPanel 并列 -->
+    <section v-if="changePctInfo" class="price-summary-row" aria-label="今日涨跌">
+      <span class="price-summary-label">今日涨跌</span>
+      <span class="price-change" :class="changePctInfo.change_pct >= 0 ? 'text-up' : 'text-down'">
+        {{ changePctInfo.change_pct >= 0 ? '+' : '' }}{{ changePctInfo.change_pct.toFixed(2) }}%
+      </span>
+      <span class="price-close">收 {{ Number(changePctInfo.price).toFixed(3) }}</span>
+    </section>
+
     <!-- Chart -->
     <ChartPanel :chart-option="chartOption" :loading="loading" />
 
@@ -153,6 +162,17 @@ function formatDate(d) {
   return s
 }
 
+// P0-15 R3 (round16 3.16): 今日涨跌区块——K 线 close[-1] vs close[-2]
+//（与 TechnicalAnalysisModal.computeChangePct 同口径），顶部显式展示 + 红涨绿跌着色。
+const changePctInfo = computed(() => {
+  const d = chartData.value
+  if (!d || !Array.isArray(d.closes) || d.closes.length < 2) return null
+  const last = d.closes[d.closes.length - 1]
+  const prev = d.closes[d.closes.length - 2]
+  if (last == null || prev == null || !prev) return null
+  return { price: last, change_pct: ((last - prev) / prev) * 100 }
+})
+
 // Chart Option
 const chartOption = computed(() => {
   const d = chartData.value
@@ -251,7 +271,7 @@ const chartOption = computed(() => {
   const candlesticks = d.opens.map((_, i) => [d.opens[i], d.closes[i], d.lows[i], d.highs[i]])
   const volumes = d.volumes || []
   const volumeColors = d.closes.map((c, i) =>
-    i === 0 ? CANDLE_DOWN : c >= d.closes[i - 1] ? CANDLE_DOWN : CANDLE_UP
+    i === 0 ? CANDLE_UP : c >= d.closes[i - 1] ? CANDLE_UP : CANDLE_DOWN
   )
 
   const gridHeights = { main: 50, volume: 22, macd: 20, kdj: 18, rsi: 18 }
@@ -274,7 +294,7 @@ const chartOption = computed(() => {
   series.push({
     type: 'candlestick', name: seriesName, data: candlesticks,
     xAxisIndex: 0, yAxisIndex: 0,
-    itemStyle: { color: CANDLE_DOWN, color0: CANDLE_UP, borderColor: CANDLE_DOWN, borderColor0: CANDLE_UP },
+    itemStyle: { color: CANDLE_UP, color0: CANDLE_DOWN, borderColor: CANDLE_UP, borderColor0: CANDLE_DOWN },
   })
 
   // MA lines
@@ -416,7 +436,9 @@ const chartOption = computed(() => {
       text: `${seriesName} · K线 ${periodLabel.value}`,
       left: '2%',
       top: 2,
-      textStyle: { fontSize: 12, fontWeight: 'medium', color: '#888' },
+      // P0-15 R2 (round16 3.16): 周期标注增强——12px 浅灰(#888)几乎不可见
+      // → 14px 深色加粗（#333/600）
+      textStyle: { fontSize: 14, fontWeight: '600', color: '#333' },
     },
     tooltip: {
       trigger: 'axis',
@@ -573,4 +595,19 @@ onMounted(async () => {
 .empty-icon { font-size: var(--font-size-5xl); line-height: 1; margin-bottom: var(--space-4); }
 .empty-title { margin: 0 0 var(--space-2); font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
 .empty-description { margin: 0 0 var(--space-6); font-size: var(--font-size-base); color: var(--color-text-secondary); }
+
+/* P0-15 R3: 今日涨跌区块样式 */
+.price-summary-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin: var(--space-2) 0 var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-surface-secondary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+}
+.price-summary-label { font-size: var(--font-size-sm); color: var(--color-text-secondary); white-space: nowrap; }
+.price-change { font-size: var(--font-size-2xl); font-weight: var(--font-weight-bold); font-family: var(--font-family-mono); }
+.price-close { font-size: var(--font-size-sm); color: var(--color-text-tertiary); font-family: var(--font-family-mono); }
 </style>

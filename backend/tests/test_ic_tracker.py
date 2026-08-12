@@ -293,3 +293,49 @@ class TestR515ICRestoreFromDB:
         restored = await reg.restore_ic_from_db(_FakeExec())
         assert restored == 0
         assert reg._last_ic_batch == {}
+
+
+class TestP012DbBackedSampleCount:
+    """P0-12 (round16 3.13 R2/R3): _get_ic_sample_count 从 DB 数 IC 累积周期数，
+    而非内存 _records（候选池空时恒 0）的「单批非零符号数」。"""
+
+    @pytest.mark.asyncio
+    async def test_db_backed_count_counts_periods(self):
+        """DB 已有 29 条 factor_code=technical 历史记录 → 新批 sample_count=30。"""
+        from app.factors.ic_tracker import ICTracker
+
+        tracker = ICTracker()
+
+        class _FakeRow:
+            def __init__(self, n):
+                self.n = n
+
+        class _FakeResult:
+            def scalar_one_or_none(self):
+                return 29
+
+        class _FakeSession:
+            async def execute(self, *a, **kw):
+                return _FakeResult()
+
+        n = await tracker._get_ic_sample_count_db(_FakeSession(), "technical")
+        # 29 条历史 + 本批 1 条 = 30（≥ MIN_IC_SAMPLES → 不再误判 no_data）
+        assert n == 30, f"样本数应按 IC 周期数累计，实际 {n}"
+
+    @pytest.mark.asyncio
+    async def test_db_count_fallback_on_error_uses_records(self):
+        """DB 查询异常时回退内存计数（不崩溃）。"""
+        from app.factors.ic_tracker import ICTracker
+
+        tracker = ICTracker()
+        tracker._records = [
+            {"factor_code": "technical", "value": 1.0},
+            {"factor_code": "momentum", "value": 0.5},
+        ]
+
+        class _BoomSession:
+            async def execute(self, *a, **kw):
+                raise RuntimeError("db down")
+
+        n = await tracker._get_ic_sample_count_db(_BoomSession(), "technical")
+        assert n == 2, f"DB 异常时应回退内存计数+1，实际 {n}"

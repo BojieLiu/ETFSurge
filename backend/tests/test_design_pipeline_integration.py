@@ -205,6 +205,36 @@ class TestDesignPipeline:
         assert final["record_id"] == 1003
         assert final["task_type"] == "design"
 
+    @patch("app.tasks.task_manager.async_session")
+    @patch("app.analysis.llm.generate_design_report", new_callable=AsyncMock)
+    @patch("app.services.strategy_design.generate_enhanced_design", new_callable=AsyncMock)
+    async def test_pipeline_llm_placeholder_not_full(self, mock_gen_design, mock_llm, mock_db_session, task_mgr):
+        """P0-1 反假完成：LLM 返回"报告生成失败"占位符 → quality=partial 绝非 full.
+
+        负向断言：全兜底/占位符时不得标 full（即使 len>0）。
+        """
+        from app.tasks.task_manager import design_pipeline
+
+        mock_gen_design.return_value = {
+            "strategies": _mock_strategies(),
+            "market_context": _mock_market_context(),
+        }
+        # LLM 空响应被 llm.py:1646 兜底为 "报告生成失败"（6 字符，len>0）
+        mock_llm.return_value = "报告生成失败"
+        mock_db_session.side_effect = [
+            _make_mock_session(design_id=1005),  # Stage 3: initial write
+            _make_mock_session(design_id=1005),  # Stage 4: partial update
+        ]
+
+        t = await task_mgr.create_task(task_type="design", params={"capital": 500000})
+        await design_pipeline(task_mgr, task_id=t["task_id"])
+
+        got = await task_mgr.get_task(t["task_id"])
+        assert got["status"] == "completed"
+        assert got["result"]["report_quality"] == "partial"
+        # 占位符不得进入最终报告文本（跳过 LLM 段落）
+        assert "报告生成失败" not in got["result"].get("design_text", "")
+
     @patch("app.services.strategy_design.generate_enhanced_design", new_callable=AsyncMock)
     async def test_pipeline_engine_error(self, mock_gen_design, task_mgr):
         """Scenario: generate_enhanced_design raises exception → task failed."""

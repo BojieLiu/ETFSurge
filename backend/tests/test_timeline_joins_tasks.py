@@ -35,9 +35,9 @@ def _check(id_):
     )
 
 
-def _task(id_, status, record_id=None, error=None, created_minute=0):
+def _task(id_, status, record_id=None, error=None, created_minute=0, task_type="design"):
     return _Row(
-        id=id_, task_type="design", status=status, record_id=record_id,
+        id=id_, task_type=task_type, status=status, record_id=record_id,
         error_message=error,
         created_at=datetime(2026, 8, 7, 11, created_minute),
     )
@@ -131,3 +131,31 @@ class TestTimelineJoinsTasks:
         )
         body = await get_timeline(limit=20, offset=0, db=db)
         assert any(i.get("task_id") == 204 for i in body["items"])
+
+    @pytest.mark.asyncio
+    async def test_running_check_task_visible(self):
+        """P0-9 (round16 3.10 R1): check 类型 running 任务在 timeline 可见——
+        旧实现 task_items 只查 design，策略检查运行中不可见。"""
+        db = _FakeDB(
+            designs=[],
+            checks=[],
+            tasks=[_task(388, "running", task_type="check")],
+        )
+        body = await get_timeline(limit=20, offset=0, db=db)
+        running_checks = [i for i in body["items"] if i["_type"] == "check" and i["status"] == "running"]
+        assert running_checks, "check 类型 running 任务应在 timeline 可见"
+        assert running_checks[0]["task_id"] == 388
+
+    @pytest.mark.asyncio
+    async def test_completed_check_task_not_duplicated(self):
+        """P0-9: 已完成且已落 strategy_check_records 的 check 任务不重复（check_items 已覆盖）。"""
+        db = _FakeDB(
+            designs=[],
+            checks=[_check(3)],
+            tasks=[_task(389, "completed", record_id=3, task_type="check")],
+        )
+        body = await get_timeline(limit=20, offset=0, db=db)
+        check_items = [i for i in body["items"] if i["_type"] == "check"]
+        # 只有 1 条 check（check_items 覆盖，task 行被去重），且不是来自 task 的独立 ghost
+        assert len(check_items) == 1
+        assert check_items[0]["id"] == 3

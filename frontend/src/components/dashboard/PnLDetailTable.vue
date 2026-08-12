@@ -24,7 +24,7 @@
             <td :class="changeClass(item.change_pct)">{{ formatChange(item.change_pct) }}</td>
             <td class="amount-cell">¥{{ formatNum(item.target_amount) }}</td>
             <td :class="changeClass(item.daily_pnl)">{{ formatChange(item.daily_pnl, true) }}</td>
-            <td v-if="showTrackedIndex">{{ item.tracked_index || '—' }}</td>
+            <td v-if="showTrackedIndex">{{ indexLabel(item) }}</td>
           </tr>
         </tbody>
         <tfoot>
@@ -56,6 +56,30 @@ const props = defineProps({
 })
 
 const showTrackedIndex = computed(() => props.activeTab === 'off_exchange' || props.activeTab === 'combined')
+
+// P0-14② (round16 3.15 R2): 「跟踪指数」列统一为真实指数名——场内直接显示
+// tracked_index（后端已回填真实指数名）；场外 tracked_index 是场内 ETF 代码，
+// 经同列表场内持仓反查该 ETF 的真实指数名（如 022449→159338→"中证A500"）。
+const onExchangeTidx = computed(() => {
+  const m = {}
+  for (const it of props.items) {
+    if (it.portfolio_type === 'on_exchange' && it.symbol && it.tracked_index) {
+      m[String(it.symbol).replace(/\.HK$/, '').toUpperCase()] = it.tracked_index
+    }
+  }
+  return m
+})
+function indexLabel(item) {
+  const raw = item.tracked_index
+  if (!raw) return '—'
+  if (item.portfolio_type === 'on_exchange') {
+    return raw // 场内：真实指数名（后端已回填）
+  }
+  // 场外：tracked_index 是场内 ETF 代码 → 反查真实指数名
+  const resolved = onExchangeTidx.value[String(raw).replace(/\.HK$/, '').toUpperCase()]
+  if (resolved) return resolved
+  return `联接：${raw}`
+}
 </script>
 
 <style scoped>

@@ -290,6 +290,8 @@ async def generate_enhanced_design(
             "reason": reason,
             "factor_matrix_empty": factor_matrix_empty,
             "pool_empty": pool_empty,
+            # P0-13②: 候选池冷却期/受限 refresh 降级标记（last-good 保留时非空但降级）
+            "pool_degraded": bool(getattr(market_data_hub, "_degraded", False)),
             "static_pool_used": static_pool_used if mode == "static_pool" else [],
             "timestamp": _now_iso,
         }

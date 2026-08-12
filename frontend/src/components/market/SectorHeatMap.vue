@@ -76,7 +76,14 @@
             <span v-if="item.rank_change != null" :class="['row-rank-chg', item.rank_change >= 0 ? 'text-up' : 'text-down']">
               {{ item.rank_change > 0 ? '↑' : (item.rank_change < 0 ? '↓' : '—') }}{{ item.rank_change ? Math.abs(item.rank_change) : '' }}
             </span>
-            <button class="row-action" @click="emitAnalyze('sector', item)" title="AI 分析">🤖 AI 分析</button>
+            <!-- P0-18 (round16 3.19 R4): 板块热度行补「📈 技术」按钮——技术分析对象=
+                 领涨个股（heat 条目无自身 symbol，EM 源带 lead_stocks[].symbol）；
+                 无领涨股时禁用（旧实现发 /market/chart/undefined 404） -->
+            <div class="row-actions">
+              <button class="row-action" @click="openTechnical(item)"
+                      :disabled="!leadStockSymbol(item)" title="技术分析">📈 技术</button>
+              <button class="row-action" @click="emitAnalyze('sector', item)" title="AI 分析">🤖 AI 分析</button>
+            </div>
           </div>
         </div>
 
@@ -109,7 +116,10 @@
               {{ item.change_pct >= 0 ? '+' : '' }}{{ item.change_pct.toFixed(2) }}%
             </span>
             <div class="row-actions">
-              <button class="row-action" @click="openTechnical(item)" title="技术分析">📈 技术</button>
+              <!-- P0-18 (round16 3.19 R4): 技术分析对象=领涨个股——sectors/heat 条目无
+                   symbol/code，旧实现发 /market/chart/undefined 404；无领涨股时禁用 -->
+              <button class="row-action" @click="openTechnical(item)"
+                      :disabled="!leadStockSymbol(item)" title="技术分析">📈 技术</button>
               <button class="row-action" @click="emitAnalyze('symbol', item)" title="AI 分析">🤖 AI 分析</button>
             </div>
           </div>
@@ -192,11 +202,31 @@ function openTechnical(item) {
   // 其余→'A'（防港股被当 A 股查 K 线 → 指标全空）
   const itemMarket = (item.market || item.asset_type || props.marketTab || 'A').toUpperCase()
   const assetType = itemMarket === 'HK' || itemMarket === 'US' ? itemMarket : 'A'
+  // P0-18 (round16 3.19 R4): 技术分析对象改为领涨个股（sectors/heat 条目无自身
+  // symbol；EM 源条目带 lead_stocks[].symbol）——旧实现 symbol=undefined → 404。
+  const leadSym = leadStockSymbol(item)
+  if (!leadSym) return // 无领涨股 → 按钮已禁用，双保险
   techModal.value = {
-    symbol: item.symbol || item.code,
-    name: item.name,
+    symbol: leadSym,
+    name: leadStockName(item),
     assetType,
   }
+}
+
+// P0-18: 领涨股 symbol（条目自身无 symbol 时用领涨股）；无 → null（按钮禁用）
+function leadStockSymbol(item) {
+  if (item.symbol || item.code) return item.symbol || item.code
+  const stocks = item.lead_stocks || item.stocks || []
+  const first = stocks[0]
+  if (!first) return null
+  return first.symbol || first.secu_code || first.code || null
+}
+
+function leadStockName(item) {
+  const stocks = item.lead_stocks || item.stocks || []
+  const first = stocks[0]
+  if (!first) return item.name
+  return first.name || first.secu_name || item.name
 }
 
 function leadStockNames(item) {

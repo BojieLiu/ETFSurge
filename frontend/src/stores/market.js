@@ -61,6 +61,23 @@ export const useMarketStore = defineStore('market', () => {
         const msg = JSON.parse(ev.data)
         if (msg.type === 'pong') return
         wsData.value = msg
+        // P1-1 (round16 3.9 B4): 行情 WS 推送消费——market_refresh 广播
+        // {type:'realtime', data:[{symbol,price,change_pct},...]}，旧实现只处理
+        // 顶层 msg.symbol → 推送不消费、行情更新受 TTL 缓存节流。
+        if (msg.type === 'realtime' && Array.isArray(msg.data)) {
+          for (const quote of msg.data) {
+            if (!quote || !quote.symbol) continue
+            const idx = realtimeData.value.findIndex(item => item.symbol === quote.symbol)
+            if (idx >= 0) {
+              realtimeData.value[idx] = {
+                ...realtimeData.value[idx],
+                price: quote.price ?? realtimeData.value[idx].price,
+                change_pct: quote.change_pct ?? realtimeData.value[idx].change_pct,
+              }
+              realtimeData.value = [...realtimeData.value]
+            }
+          }
+        }
         if (msg.symbol) {
           const idx = realtimeData.value.findIndex(item => item.symbol === msg.symbol)
           if (idx >= 0) {

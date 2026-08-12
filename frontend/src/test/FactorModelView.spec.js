@@ -143,3 +143,31 @@ describe('FactorModelView — F2 IC 图负值柱 label', () => {
     expect(opt.series[0].labelLayout).toEqual({ moveOverlap: 'shiftY' })
   })
 })
+
+describe('FactorModelView - P0-7 数据积累期引导', () => {
+  it('valid=0 且 no_data>0 显示数据积累中 banner', async () => {
+    const data = makeData()
+    data.summary = { valid: 0, warn: 0, no_data: 27, static: 3, avg_ic: 0.05 }
+    data.categories = data.categories.map((c) => ({
+      ...c, valid_count: 0, no_data_count: 27, static_count: 3,
+      factors: [{ code: c.code || 'x', name: 'x', status: 'no_data', ic_value: null,
+                  ic_threshold: 0.02, description: 'd', standardization: 'zscore', category: c.name }],
+    }))
+    getActiveMock.mockReset().mockResolvedValue({ data })
+    const wrapper = mount(FactorModelView, { attachTo: document.body })
+    await flushPromises()
+    const banner = wrapper.find('.accumulate-banner')
+    expect(banner.exists()).toBe(true)
+    expect(banner.text()).toContain('数据积累中')
+    expect(banner.text()).toContain('27')
+    wrapper.unmount()
+  })
+
+  it('valid>0 时不显示数据积累中 banner', async () => {
+    getActiveMock.mockReset().mockResolvedValue({ data: makeData() })
+    const wrapper = mount(FactorModelView, { attachTo: document.body })
+    await flushPromises()
+    expect(wrapper.find('.accumulate-banner').exists()).toBe(false)
+    wrapper.unmount()
+  })
+})

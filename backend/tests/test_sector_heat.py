@@ -77,6 +77,69 @@ def test_match_em_change_three_levels():
     assert _match_em_change("", em) is None                  # 空名
 
 
+# ── P0-17 (round16 3.19): EM 源切换 + 非零率监控 + lead_stocks 透传 ──
+def test_sectors_heat_em_source_nonzero_ratio(monkeypatch):
+    """P0-17①/③: A股热度走东财行业 spot——自带真实涨跌幅，非零率 ≥50%；
+    全 0（源失败/回退链断裂）时 degraded=True（负向：全 0 不报 degraded → FAIL）。"""
+    from app.services import market_data_hub as hub_mod
+
+    fake = [
+        {"plate_code": "BK1", "rank": i + 1, "cur_heat": 100 - i, "rank_change": 0,
+         "is_new": 0, "plate_name": f"板块{i}", "change_pct": chg,
+         "lead_stocks": [{"symbol": "600000", "name": "领涨股", "change_pct": 2.0}] if chg else []}
+        for i, chg in enumerate([3.2, -1.5, 2.1, 0.8, -0.4, 1.1, 2.2, -0.9, 0.5, 1.8,
+                                 0.6, -0.3, 1.2, 0.9, 0.4, -0.2, 0.7, 0.3, 0.1, 0.2])
+    ]
+    monkeypatch.setattr(hub_mod.market_data_hub, "get_sector_heat", lambda limit=None, market="A": fake)
+    resp = client.get("/api/v1/market/sectors/heat?limit=20")
+    assert resp.status_code == 200
+    body = resp.json()
+    nonzero = sum(1 for it in body["items"] if it.get("change_pct"))
+    assert nonzero >= 10, f"非零率应 ≥50%（20 条至少 10 条非零），实际 {nonzero}"
+    assert body.get("degraded") is False
+    # P0-18: lead_stocks 透传
+    assert body["items"][0]["lead_stocks"][0]["symbol"] == "600000"
+
+
+def test_sectors_heat_degraded_flag_when_all_zero(monkeypatch):
+    """P0-17③: 全部涨跌幅 0（回退链断裂）→ degraded=True + 告警。"""
+    from app.services import market_data_hub as hub_mod
+
+    fake = [
+        {"plate_code": f"BK{i}", "rank": i + 1, "cur_heat": 50, "rank_change": 0,
+         "is_new": 0, "plate_name": f"板块{i}", "change_pct": 0, "lead_stocks": []}
+        for i in range(20)
+    ]
+    monkeypatch.setattr(hub_mod.market_data_hub, "get_sector_heat", lambda limit=None, market="A": fake)
+    resp = client.get("/api/v1/market/sectors/heat?limit=20")
+    assert resp.status_code == 200
+    assert resp.json().get("degraded") is True, "全 0 时应显式标记 degraded 而非静默"
+
+
+def test_get_sector_heat_em_first_then_cls_fallback(monkeypatch):
+    """P0-17①: hub.get_sector_heat A 股优先 EM 源；EM 空 → 回退财联社。"""
+    import app.fetchers.sector_fetcher as sector_fetcher
+    from app.services.market_data_hub import MarketDataHub
+
+    hub = MarketDataHub()
+    hub._test_mode = True
+    em_rows = [{"rank": 1, "name": "半导体", "heat_index": 100, "rank_change": 0,
+                "is_new": 0, "plate_code": "BK0447", "change_pct": 2.3,
+                "lead_stocks": [{"symbol": "688825", "name": "海光信息", "change_pct": 5.1}]}]
+    cls_rows = [{"rank": 1, "cur_heat": 90, "plate_name": "财联社板块"}]
+
+    monkeypatch.setattr(sector_fetcher, "fetch_sector_heat_em", lambda limit=20: em_rows)
+    monkeypatch.setattr(sector_fetcher, "fetch_sector_heat", lambda limit=20: cls_rows)
+    out = hub.get_sector_heat(20)
+    assert out == em_rows, "EM 源有数据时应优先返回（非财联社）"
+    assert out[0]["lead_stocks"], "EM 条目应带 lead_stocks（P0-18 依赖）"
+
+    # EM 空 → 回退财联社
+    monkeypatch.setattr(sector_fetcher, "fetch_sector_heat_em", lambda limit=20: [])
+    out2 = hub.get_sector_heat(20)
+    assert out2 == cls_rows, "EM 空时应回退财联社热度"
+
+
 # ── 2. hot_plates 字段归一化（F2-6 步骤A，§9.8.4 用例2） ────────────────
 def test_hot_plates_normalized(monkeypatch):
     """原始字段 secu_name/up_reason/stock_list → name/reason/lead_stocks 数组。"""

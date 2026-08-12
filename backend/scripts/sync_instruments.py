@@ -25,7 +25,9 @@ _SEGMENT_TIMEOUTS = {
     "A股个股": 30.0,
     "A股ETF": 30.0,
     "港股": 30.0,
-    "美股": 20.0,
+    # P0-6 (round16 3.3): 美股段 20→30s——EM 主源已独立 5s 超时，余量留给
+    # 新浪降级链（6 页 × 8s/页 上限 48s，实际首 6 页通常 <15s；30s 为保守上限）
+    "美股": 30.0,
 }
 
 
@@ -243,11 +245,21 @@ async def _fetch_us_list() -> list[dict]:
     round9 P0-4 实测修正: 新浪 `stock_us_spot` 全量分页 **897 页**（20s 段超时后
     线程无法取消 → 后台残留 20+ 分钟占满线程池 → watchlist 等 API 尾部延迟）。
     降级改为直接拉新浪美股**前 6 页**（120 只，足够名称搜索），不触发全量分页。
+
+    P0-6 (round16 3.3): 主源与降级链独立超时——`_guarded` 用 20s 包整个 coro，
+    EM 主源卡满 20s 时 CancelledError（BaseException）不被 except Exception 捕获
+    → 新浪降级链与主源一起被取消、永不执行 → instruments US 段空置。
+    现在 EM 主源内部 5s 独立超时，失败即切新浪（每页 8s 超时），降级链可完成。
     """
     try:
-        rows = await _fetch_akshare_list("stock_us_spot_em", "代码", "名称", "US", "US")
+        rows = await asyncio.wait_for(
+            _fetch_akshare_list("stock_us_spot_em", "代码", "名称", "US", "US"),
+            timeout=5.0,
+        )
         if rows:
             return rows
+    except (asyncio.TimeoutError, asyncio.CancelledError) as e:
+        print(f"  [WARN] 美股 stock_us_spot_em 主源 {type(e).__name__}（5s 内未返回，切新浪降级）")
     except Exception as e:
         print(f"  [WARN] 美股 stock_us_spot_em failed: {e}")
     # 新浪美股分页（受限页数，防 897 页后台残留）

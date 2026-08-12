@@ -241,6 +241,9 @@ async def _search_indices(keyword: str, market: str | None = None) -> list[dict[
             stmt = select(IndexMeta).where(
                 IndexMeta.is_active == True,  # noqa: E712
                 or_(
+                    # P0-22① (round16 3.24 R1): 指数代码（symbol）可搜——SPX/道琼斯
+                    # 代码输入 0 命中（旧实现仅 name/pinyin/first_letter）。
+                    IndexMeta.symbol.ilike(f"%{kw}%"),
                     IndexMeta.name.ilike(f"%{kw}%"),
                     IndexMeta.pinyin.ilike(f"%{kw}%"),
                     IndexMeta.first_letter.ilike(f"%{kw}%"),
@@ -250,6 +253,10 @@ async def _search_indices(keyword: str, market: str | None = None) -> list[dict[
                 stmt = stmt.where(IndexMeta.market == "HK")
             elif market and market.upper() == "A":
                 stmt = stmt.where(IndexMeta.market == "A")
+            # P0-22① (round16 3.24 R2): market=US 分支缺失 → 美股 tab 名称搜索
+            # 混入港股/A 股指数（标普→GEM/HKL）。
+            elif market and market.upper() == "US":
+                stmt = stmt.where(IndexMeta.market == "US")
             stmt = stmt.limit(20)  # P2-AG: 10→20（放大港股指数命中面）
             rows = (await session.execute(stmt)).scalars().all()
             return [{
@@ -598,12 +605,24 @@ async def sectors_heat(limit: int = Query(20), market: str = "A") -> dict[str, A
             "rank_change": r.get("rank_change"),
             "is_new": r.get("is_new", 0),
             "plate_code": plate_code,
+            # P0-18 (round16 3.19 R4): 透传领涨股数组（EM 源自带；财联社回退为空）
+            "lead_stocks": r.get("lead_stocks") or [],
             # P2-3 (round9 §6.1): 板块涨跌幅 ±10% 值域校验（em 回填已过校验；非回填路径也拦）
             "change_pct": em_chg if em_chg is not None
             else (r.get("change_pct") if r.get("change_pct") is not None
                   and abs(float(r.get("change_pct") or 0)) <= 10.0 else 0),
         })
-    return {"items": items, "total": len(items)}
+    # P0-17③ (round16 3.19): 非零率监控——低于 50% 时告警 + 端点返回 degraded 标记
+    nonzero = sum(1 for it in items if it.get("change_pct"))
+    total = len(items) or 1
+    nonzero_ratio = nonzero / total
+    degraded = nonzero_ratio < 0.5
+    if degraded:
+        get_logger("market").warning(
+            "[sectors_heat] change_pct non-zero ratio %.0f%% < 50%% (degraded)",
+            nonzero_ratio * 100,
+        )
+    return {"items": items, "total": len(items), "degraded": degraded}
 
 def _match_em_change(cls_name: str, em_map: dict[str, float]) -> float | None:
     """东财板块涨跌幅按名称匹配（财联社名 vs 东财名）。
@@ -691,12 +710,23 @@ async def _watchlist_enrich_items(items: list) -> list[dict]:
             return {}
 
     _batch_map: dict[str, dict] = {}
+    # P1-7 (round16 3.18 R2): 三市场批量并行化——旧实现 A→HK→US 顺序执行
+    #（各 4s 超时，19 只混合自选最坏 12s+per-item 叠加 = 19.2s）。asyncio.gather
+    # 并发拉取，最坏 4s（慢源超时兜底），per-item 兜底保留。
+    _batch_tasks = []
     if _a_items:
-        _batch_map.update(await _batch_for(_a_items, "A"))
+        _batch_tasks.append(("A", _batch_for(_a_items, "A")))
     if _hk_items:
-        _batch_map.update(await _batch_for(_hk_items, "HK"))
+        _batch_tasks.append(("HK", _batch_for(_hk_items, "HK")))
     if _us_items:
-        _batch_map.update(await _batch_for(_us_items, "US"))
+        _batch_tasks.append(("US", _batch_for(_us_items, "US")))
+    if _batch_tasks:
+        _batch_results = await asyncio.gather(
+            *(t[1] for t in _batch_tasks), return_exceptions=True
+        )
+        for (mkt, _t), res in zip(_batch_tasks, _batch_results):
+            if isinstance(res, dict) and res:
+                _batch_map.update(res)
 
     # P0-4 (round9 §10): 批量失败后 A 股**不再逐个 per-item 重试**——慢源时 10 条 ×
     # 2.5s 串联把整体拖到 8s+（实测 8.4s）；A 股缺失直接 DB-only（realtime=None +

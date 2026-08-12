@@ -63,6 +63,19 @@
           </div>
         </div>
 
+        <!-- P0-7 (round16 3.8): 数据积累期引导——valid=0 & no_data>0 时给出引导文案，
+             防用户误判「因子全部失效」（IC 样本需 ≥30 个周期才发布）。 -->
+        <div v-if="isAccumulating" class="accumulate-banner" role="status">
+          <span class="accumulate-icon" aria-hidden="true">🕒</span>
+          <div class="accumulate-text">
+            <strong>数据积累中</strong>
+            <span>
+              因子 IC 需累积 {{ summary?.min_samples ?? 30 }} 个样本周期才发布有效结论。
+              当前「无数据」多为样积累未满（{{ summary?.no_data ?? 0 }} 个），非因子失效；静态标识因子不参与 IC 统计。
+            </span>
+          </div>
+        </div>
+
         <!-- IC Sort Table (P2-1: merged from FactorICView.vue) -->
         <div class="card ic-sort-card">
           <div class="card-header ic-sort-header">
@@ -112,8 +125,12 @@
                     {{ f.ic_value === null || f.ic_value === undefined ? '--' : f.ic_value.toFixed(4) }}
                   </td>
                   <td>
-                    <span v-if="f.ic_value === null || f.ic_value === undefined" class="valid-badge no-data">无数据</span>
-                    <span v-else-if="abs(f.ic_value) >= 0.02" class="valid-badge valid">有效</span>
+                    <!-- P0-12③ (round16 3.13 R1): 排序表与分类「无数据」口径统一——
+                         用后端 status（no_data 含 sample<30 的积累中）而非仅 ic_value===null，
+                         消除「排序表 6 无数据 / 分类 27 无数据」双视图不一致。 -->
+                    <span v-if="f.status === 'no_data'" class="valid-badge no-data">无数据</span>
+                    <span v-else-if="f.status === 'static'" class="valid-badge no-data">静态</span>
+                    <span v-else-if="abs(f.ic_value ?? 0) >= 0.02" class="valid-badge valid">有效</span>
                     <span v-else class="valid-badge invalid">无效</span>
                   </td>
                   <td>{{ f.sample_count ?? '-' }}</td>
@@ -302,6 +319,15 @@ let chartInstance = null
 const summary = computed(() => data.value?.summary ?? null)
 const categories = computed(() => data.value?.categories ?? [])
 
+// P0-7 (round16 3.8): 数据积累期引导——valid=0 且 no_data>0 时页面呈现
+// 「数据积累中（样本 N/30）」而非「因子全部失效」误判。
+const isAccumulating = computed(() => {
+  const s = summary.value
+  if (!s) return false
+  const totalNoData = (s.no_data ?? 0) + (s.static ?? 0)
+  return (s.valid ?? 0) === 0 && (s.no_data ?? 0) > 0 && totalNoData > 0
+})
+
 const formattedAvgIc = computed(() => {
   const v = summary.value?.avg_ic
   return v !== null && v !== undefined ? v.toFixed(4) : '--'
@@ -481,8 +507,8 @@ const icSortedFactors = computed(() => {
   return sorted
 })
 
-const icValidCount = computed(() => icSortedFactors.value.filter(f => abs(f.ic_value ?? 0) >= 0.02).length)
-const icInvalidCount = computed(() => icSortedFactors.value.filter(f => abs(f.ic_value ?? 0) < 0.02).length)
+const icValidCount = computed(() => icSortedFactors.value.filter(f => f.status === 'valid').length)
+const icInvalidCount = computed(() => icSortedFactors.value.filter(f => f.status !== 'no_data' && f.status !== 'valid').length)
 const icAvgAbsIC = computed(() => {
   const list = icSortedFactors.value.filter(f => f.ic_value !== null)
   if (list.length === 0) return 0
@@ -615,6 +641,24 @@ onBeforeUnmount(() => {
 }
 .factor-code { font-family: monospace; font-size: 0.75rem; }
 .empty-row { text-align: center; padding: var(--space-6); color: var(--color-text-tertiary); }
+
+/* ── P0-7 数据积累期引导 banner ── */
+.accumulate-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  margin: var(--space-3) 0;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-brand-50);
+  border: 1px solid var(--color-brand-200);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-normal);
+}
+.accumulate-icon { font-size: 1rem; }
+.accumulate-text { display: flex; flex-direction: column; gap: var(--space-1); }
+.accumulate-text strong { color: var(--color-brand-700); font-weight: var(--font-weight-semibold); }
 
 /* ── Section Divider ── */
 .section-divider {

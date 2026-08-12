@@ -593,13 +593,20 @@ async function loadHistoryList() {
     // 避免历史异常记录被误读为当前检查结果；详情页仍可通过详情接口查看（含生成时间）
     const items = (data.items || []).filter(it => !(it._type === 'check' && it.orphan))
 
-    // 合并运行中的设计任务（追加到列表前）
+    // P0-9 (round16 3.10 R2/R3): 合并运行中的 design/check 任务
+    // ① 放宽过滤为 design+check（旧只 design——策略检查运行中不可见）
+    // ② 合成条目 _type 用 task 真实类型
+    // ③ 去重：timeline items 已含同一 task 的（task_id 相同）→ 不重复合成，
+    //    消除「一个运行中任务双显示」
+    const timelineTaskIds = new Set(items.filter(it => it.task_id).map(it => it.task_id))
     const runningTasks = taskStore.tasks
-        .filter(t => t.type === 'design' && t.status === 'running')
+        .filter(t => (t.type === 'design' || t.type === 'check') && t.status === 'running'
+                     && !(t.taskId && timelineTaskIds.has(t.taskId)))
         .map(t => ({
-            id: null, _type: 'design', status: 'running',
+            id: t.taskId || null, _type: t.type === 'check' ? 'check' : 'design', status: 'running',
             created_at: t.createdAt || new Date().toISOString(),
             capital: '-',
+            task_id: t.taskId || undefined,
         }))
 
     designHistoryList.value = [...runningTasks, ...items].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))

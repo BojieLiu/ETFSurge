@@ -211,3 +211,49 @@ class TestPoolResilience:
                 assert code in all_symbols, (
                     f"Mandatory code {code} should be in pool, got: {all_symbols}"
                 )
+
+
+class TestP013ShrinkProtection:
+    """P0-13 (round16 3.14 R1): 冷却期 refresh 产出显著 <50% → 保留 last-good + degraded。"""
+
+    def _hub_with_large_pool(self):
+        mgr = MarketDataHub()
+        mgr._pool = {
+            "core": [{"symbol": f"5103{i:02d}", "name": f"ETF{i}", "fund_scale": 1e9} for i in range(10)],
+            "satellite": [{"symbol": f"1599{i:02d}", "name": f"ETF{i}", "fund_scale": 5e8} for i in range(10)],
+            "defense": [{"symbol": "518880", "name": "黄金ETF", "fund_scale": 5e8}],
+            "opportunistic": [],
+            "research": [],
+        }
+        mgr._version = 8
+        mgr._test_mode = True
+        return mgr
+
+    @pytest.mark.asyncio
+    async def test_shrunk_refresh_keeps_last_good_and_marks_degraded(self):
+        """refresh 产出 <50% 上次 pool → 保留 last-good（不清空不覆盖）+ _degraded=True。"""
+        pm = self._hub_with_large_pool()  # 21 只
+        initial_version = pm._version
+        # scanner 仅返回 1 只（受限产出，远 <50%）
+        valid_layers = {
+            "core": [{"symbol": "510300", "name": "沪深300ETF", "amount": 1e8, "fund_scale": 1e9}],
+            "satellite": [],
+            "defense": [],
+        }
+        with patch.object(pm.scanner, 'full_pipeline', return_value=valid_layers):
+            with patch.object(pm, 'classifier') as mock_cls:
+                mock_cls.batch_classify.return_value = {
+                    "510300": {"industry": "宽基指数", "concepts": [], "confidence": 0.9}
+                }
+                with patch.object(pm, 'factor_registry') as mock_fr:
+                    mock_fr.compute = MagicMock(return_value={"510300": {"technical": 0.5}})
+                    mock_fr.aggregate_factor_scores = MagicMock(side_effect=lambda x: x)
+                    async def _run_sync_side_effect(fn, *args, **kwargs):
+                        return fn(*args)
+                    with patch('app.core.async_utils.run_sync', side_effect=_run_sync_side_effect):
+                        await pm.refresh()
+
+        # pool 保留（未覆盖为 1 只）、version 不变、degraded=True
+        assert sum(len(v) for v in pm._pool.values()) == 21, "last-good pool 应被保留"
+        assert pm._version == initial_version, "受限 refresh 不应自增 version"
+        assert pm._degraded is True, "受限 refresh 应置 _degraded=True"

@@ -6,6 +6,7 @@ Tests mock the underlying HTTP calls to avoid rate limit consumption.
 from unittest.mock import patch, MagicMock
 import pytest
 import json
+import asyncio
 
 
 # ── Twelve Data Fetcher Tests ────────────────────────────────────
@@ -276,6 +277,33 @@ class TestMarketServiceRouting:
             call_args = mock_registry.route.call_args[0][0]
             source_names = [p[0] for p in call_args]
             assert source_names == ["twelvedata", "finnhub", "tickflow"]
+
+    @pytest.mark.asyncio
+    async def test_route_us_does_not_block_event_loop(self):
+        """P0-11 (round16 3.12): _route_us 改 asyncio.to_thread——慢源同步阻塞时
+        事件循环保持响应（负向：同步阻塞则并发 ping 延迟>1s → FAIL）。"""
+        import time
+        from app.services.market_service import _route_us
+
+        def _slow_route(*args, **kwargs):
+            time.sleep(2.0)  # 模拟慢源同步阻塞
+            return None
+
+        async def _probe():
+            t0 = time.monotonic()
+            await asyncio.sleep(0.2)  # 事件循环轮转任务
+            return time.monotonic() - t0
+
+        with patch("app.services.market_service.registry") as mock_registry:
+            mock_registry.route.side_effect = _slow_route
+            # 并发发起慢 _route_us + 快速 probe
+            res = await asyncio.gather(
+                _route_us("SPY"),
+                _probe(),
+            )
+        _blocked_cost = res[1]
+        assert _blocked_cost < 1.0, \
+            f"负向：_route_us 同步阻塞事件循环，probe 延迟 {_blocked_cost:.2f}s"
 
 
 # ── 天天基金 Fetcher Tests ──────────────────────────────────────

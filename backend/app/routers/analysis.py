@@ -177,6 +177,9 @@ class SymbolAnalysisRequest(BaseModel):
     symbol: str
     name: str = ""
     asset_type: str = "A"
+    # P2-9 B1 (round16 3.9): 补 market 字段显式声明——前端 UnifiedAnalysis 传 market
+    # 旧实现无该字段 → Pydantic 忽略 extra 静默丢弃（HK/US 上下文丢失靠 asset_type 兜底）。
+    market: str = "A"
     # F10 R35: 预设问题模板（技术面/操作建议等）——可选中个股后针对性分析
     question: str = ""
 

@@ -7,6 +7,7 @@ include_stocks per-branch semantics, asset_type = market code).
 All external network / DB access is mocked — no real akshare / requests / SQLite.
 """
 import pytest
+import asyncio
 from contextlib import contextmanager, ExitStack
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -127,6 +128,51 @@ async def test_search_hk_us_static_fallback_when_spot_fails():
         res = await ms.search_hk_us("00700", include_stocks=True, enrich=False)
     assert any(r["symbol"] == "00700" for r in res)
     assert all(r["market"] == "HK" for r in res)
+
+
+@pytest.mark.asyncio
+async def test_search_hk_us_english_static_base_no_spot():
+    """P0-6 (round16 3.3): 英文名（Apple）在 spot 源不可用时仍能命中静态基座（name_en 兜底）。
+
+    负向：静态基座无 name_en → Apple 搜索 0 命中 → FAIL。
+    """
+    with patch("app.fetchers.china_market.fetch_hk_spot_list",
+               side_effect=RuntimeError("network down")), \
+         patch("app.fetchers.china_market.fetch_us_spot_list",
+               side_effect=RuntimeError("network down")):
+        res = await ms.search_hk_us("Apple", include_stocks=True, enrich=False)
+    assert any(r["symbol"] == "AAPL" for r in res), f"Apple 英文名静态基座未命中: {res}"
+    hit = next(r for r in res if r["symbol"] == "AAPL")
+    assert hit["market"] == "US"
+
+
+@pytest.mark.asyncio
+async def test_search_hk_us_etf_enrich_does_not_block_event_loop():
+    """P0-21 (round16 3.22): US ETF 搜索 enrich 走 get_asset_realtime（P0-11 已改
+    _route_us 线程池化）——enrich 期间事件循环保持响应（负向：同步阻塞则并发
+    probe 延迟>1s → FAIL）。"""
+    import time
+    from app.services.market_service import search_hk_us
+
+    async def _slow_realtime(symbol, asset_type):
+        # 模拟慢实时源（async 等待，不阻塞事件循环——旧实现在此同步阻塞）
+        await asyncio.sleep(1.5)
+        return {"symbol": symbol, "price": 500.0, "change_pct": 1.2}
+
+    async def _probe():
+        t0 = time.monotonic()
+        await asyncio.sleep(0.2)
+        return time.monotonic() - t0
+
+    with _patch_spot(us=_us_spot_rows()), \
+         patch.object(ms, "get_asset_realtime", new=_slow_realtime):
+        res, probe_cost = await asyncio.gather(
+            search_hk_us("SPY", include_stocks=True, enrich=True),
+            _probe(),
+        )
+    assert any(r["symbol"] == "SPY" for r in res), "SPY 应命中"
+    assert probe_cost < 1.0, \
+        f"负向：US ETF enrich 阻塞事件循环，probe 延迟 {probe_cost:.2f}s"
 
 
 @pytest.mark.asyncio

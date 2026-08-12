@@ -113,3 +113,69 @@ class TestHkKlineRealtimeConsistency:
 
         result = await ms.get_history("00700", "HK", "daily")
         assert len(result) == 2, "一致 K 线应保留"
+
+
+class TestP019HkKlineTencentFirst:
+    """P0-19 (round16 3.20): HK K 线降级链 8s 截断——腾讯前置 + 超时放宽。"""
+
+    def test_fetch_history_hk_tries_tencent_first(self, monkeypatch):
+        """fetch_history HK 分支先试腾讯——腾讯命中即返回，不走 akshare 长链
+        （负向：腾讯可命中却被 akshare 8s 超时截断 → FAIL）。"""
+        tx_rows = [{"date": "2026-08-01", "open": 490, "close": 492.2, "high": 495, "low": 485, "volume": 100}]
+        called = {"akshare": False}
+
+        monkeypatch.setattr(cm, "_fetch_tencent_hk_history", lambda symbol: tx_rows)
+
+        def fake_akshare_history(*a, **k):
+            called["akshare"] = True
+            return []
+
+        monkeypatch.setattr(cm, "_fetch_akshare_history", fake_akshare_history)
+
+        rows = cm.fetch_history("00700", "HK", "daily")
+        assert rows == tx_rows, "腾讯前置命中应直接返回"
+        assert called["akshare"] is False, "腾讯命中后不得再走 akshare 长链"
+
+    @pytest.mark.asyncio
+    async def test_get_history_hk_timeout_broadened(self, monkeypatch):
+        """get_history HK/US 调用 fetch_history 超时放宽到 20s（旧 8s 截断腾讯前）。"""
+        import app.services.market_service as ms_mod
+        captured = {"timeouts": [], "args": []}
+
+        async def fake_call(fn, *args, timeout=8):
+            captured["timeouts"].append(timeout)
+            captured["args"].append(args)
+            return [{"date": "2026-08-01", "open": 1, "close": 1, "high": 1, "low": 1, "volume": 1}]
+
+        monkeypatch.setattr(ms_mod, "_call", fake_call)
+        from app.services.market_data_hub import market_data_hub as _hub
+        monkeypatch.setattr(_hub, "get_kline_rows", lambda *a, **k: [])
+        monkeypatch.setattr(_hub, "get_kline_rows_any", lambda *a, **k: [])
+
+        result = await ms.get_history("00700", "HK", "daily")
+        # 第一次调用是 fetch_history（HK 链应放宽到 20s）；后续为一致性校验（8s）
+        assert captured["timeouts"][0] == 20, \
+            f"HK fetch_history 超时应放宽到 20s，首次调用实得 {captured['timeouts'][0]}"
+        assert result
+
+    @pytest.mark.asyncio
+    async def test_get_history_hk_tencent_independent_fallback(self, monkeypatch):
+        """get_k_data 空后 HK 补腾讯独立兜底（不依赖 akshare 链）。"""
+        import app.services.market_service as ms_mod
+        tx_rows = [{"date": "2026-08-01", "open": 1, "close": 1, "high": 1, "low": 1, "volume": 1}]
+        calls = {"n": 0}
+
+        async def fake_call(fn, *args, timeout=8):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return []  # fetch_history 空
+            return []  # get_k_data 空
+
+        monkeypatch.setattr(ms_mod, "_call", fake_call)
+        monkeypatch.setattr(cm, "_fetch_tencent_hk_history", lambda symbol: tx_rows)
+        from app.services.market_data_hub import market_data_hub as _hub
+        monkeypatch.setattr(_hub, "get_kline_rows", lambda *a, **k: [])
+        monkeypatch.setattr(_hub, "get_kline_rows_any", lambda *a, **k: [])
+
+        result = await ms.get_history("09988", "HK", "daily")
+        assert result == tx_rows, "get_k_data 空后应走腾讯独立兜底"

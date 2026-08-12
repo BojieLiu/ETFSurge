@@ -220,6 +220,35 @@ describe('UnifiedAnalysis R40 (tab 切换重置)', () => {
     await nextTick()
     expect(wrapper.vm.activeMode).toBe('symbol')
   })
+
+  it('P1-8: 切换 marketTab 清空 sector/index 实例输入（不残留）', async () => {
+    const wrapper = mounted()
+    // 用户停留在指数模式输入"恒生港股通"（indexSearch.searchQuery 有值）
+    wrapper.vm.activeMode = 'index'
+    wrapper.vm.indexSearch.searchQuery.value = '恒生港股通'
+    wrapper.vm.indexSearch.searchResults.value = [{ symbol: 'HSI' }]
+    wrapper.vm.indexSearch.showDropdown.value = true
+    // sector 实例也残留
+    wrapper.vm.sectorSearch.searchQuery.value = '半导体'
+    await wrapper.setProps({ marketTab: 'US' })
+    await nextTick()
+    // 负向：残留内容 → FAIL
+    expect(wrapper.vm.indexSearch.searchQuery.value).toBe('')
+    expect(wrapper.vm.indexSearch.searchResults.value).toEqual([])
+    expect(wrapper.vm.indexSearch.showDropdown.value).toBe(false)
+    expect(wrapper.vm.sectorSearch.searchQuery.value).toBe('')
+  })
+
+  it('P1-8②: switchMode 切换后新激活实例 searchQuery 为空', async () => {
+    const wrapper = mounted()
+    // 在 symbol 模式输入，然后切到 index 模式
+    wrapper.vm.activeMode = 'symbol'
+    wrapper.vm.search.searchQuery.value = '510300'
+    wrapper.vm.switchMode('index')
+    await nextTick()
+    expect(wrapper.vm.activeMode).toBe('index')
+    expect(wrapper.vm.indexSearch.searchQuery.value).toBe('')
+  })
 })
 
 // ── F18 (round6 §16.6): Enter/mousedown 统一触发 + SSE 错误态 ─────────────

@@ -15,6 +15,15 @@ import pandas as pd
 import pytest
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _disable_amount_override_network():
+    """P0-23 (round16 3.25): 测试环境默认跳过 filter_etfs 实时成交额网络补查
+    （避免测试触发 gtimg 网络请求）；P0-23 专项测试显式关闭该开关 + mock 验证。"""
+    import os
+    os.environ.setdefault("ETF_SKIP_AMOUNT_OVERRIDE", "1")
+    yield
+
+
 def _make_hist_df():
     """与 akshare fund_etf_hist_em 真实列对齐的固定 DataFrame。"""
     return pd.DataFrame({

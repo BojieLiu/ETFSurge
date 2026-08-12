@@ -126,7 +126,7 @@
                 <td><span class="type-badge" :class="item.asset_type.toLowerCase()">{{ item.asset_type }}</span></td>
                 <td v-if="item.realtime" class="mono">{{ item.realtime.price?.toFixed(2) }}</td>
                 <td v-else class="muted" title="行情加载中（数据源弱）"><span class="loading-text">行情加载中</span></td>
-                <td v-if="item.realtime" :class="item.realtime.change_pct >= 0 ? 'up' : 'down'">
+                <td v-if="item.realtime" :class="item.realtime.change_pct != null && item.realtime.change_pct >= 0 ? 'up' : 'down'">
                   {{ formatPct(item.realtime.change_pct) }}
                 </td>
                 <td v-else class="muted" title="行情加载中（数据源弱）"><span class="loading-text">行情加载中</span></td>
@@ -138,6 +138,11 @@
                 </td>
                 <td>
                   <div class="row-actions">
+                    <!-- P1-6 (round16 3.17): 行内技术分析 + AI 分析按钮——复用
+                         SectorHeatMap 双按钮模式（assetType 按 item.asset_type 推断，
+                         A/HK/US 混合自选必须）；AI 经 emit analyze 交给上层 UnifiedAnalysis -->
+                    <button class="btn-icon-only" @click.stop="openTechnical(item)" title="技术分析">📈</button>
+                    <button class="btn-icon-only" @click.stop="emit('analyze', { mode: 'symbol', query: item.symbol, name: item.name })" title="AI 分析">🤖</button>
                     <button class="btn-icon-only" @click.stop="editItem(item)" title="编辑备注">✏️</button>
                     <button class="btn-icon-only danger" @click.stop="removeItem(item)" title="移除">🗑️</button>
                   </div>
@@ -148,6 +153,16 @@
         </div>
       </div>
     </div>
+
+    <!-- P1-6 (round16 3.17): 自选行技术分析弹窗（复用 SectorHeatMap 模式） -->
+    <TechnicalAnalysisModal
+      v-if="techModal"
+      :symbol="techModal.symbol"
+      :name="techModal.name"
+      :asset-type="techModal.assetType || 'A'"
+      @close="techModal = null"
+      @ai="(p) => { techModal = null; emit('analyze', { mode: 'symbol', query: p.symbol, name: p.name }) }"
+    />
   </section>
 </template>
 
@@ -155,11 +170,22 @@
 import { ref, computed, onMounted } from 'vue'
 import { marketApi } from '../../api'
 import { useMarketStore } from '../../stores/market'
+import TechnicalAnalysisModal from './TechnicalAnalysisModal.vue'
 
 const props = defineProps({ marketTab: { type: String, default: 'A' } })
-const emit = defineEmits(['select-symbol'])
+const emit = defineEmits(['select-symbol', 'analyze'])
 
 const store = useMarketStore()
+
+// P1-6: 技术分析弹窗状态
+const techModal = ref(null)
+
+// P1-6: 技术分析入口——assetType 按 item.asset_type/market 推断（A/HK/US 混合）
+function openTechnical(item) {
+  const mkt = (item.asset_type || item.market || props.marketTab || 'A').toUpperCase()
+  const assetType = mkt === 'HK' || mkt === 'US' ? mkt : 'A'
+  techModal.value = { symbol: item.symbol, name: item.name, assetType }
+}
 
 // State
 const items = ref([])

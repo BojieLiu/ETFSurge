@@ -142,6 +142,33 @@ async def _fetch_ths_concept_indices():
     return out
 
 
+# P0-20/P0-22 (round16 3.21/3.24): 静态兜底指数段——「恒生港股通」系列 + 主流
+# 港股指数 + 美股主流指数。数据源失败/未接入时仍保证入表（搜索/分析入口可用）。
+_STATIC_EXTRA_INDICES: list[dict] = [
+    # ── 恒生港股通系列（中证指数官网/东财指数列表真实存在） ──
+    {"symbol": "H11146", "name": "恒生港股通中国内地银行指数", "market": "HK", "category": "broad", "index_type": "price", "source": "static"},
+    {"symbol": "H11145", "name": "恒生港股通高股息率指数", "market": "HK", "category": "broad", "index_type": "price", "source": "static"},
+    {"symbol": "H11141", "name": "恒生港股通央企指数", "market": "HK", "category": "broad", "index_type": "price", "source": "static"},
+    {"symbol": "H11144", "name": "恒生港股通科技指数", "market": "HK", "category": "broad", "index_type": "price", "source": "static"},
+    {"symbol": "H11142", "name": "恒生港股通中国内地100指数", "market": "HK", "category": "broad", "index_type": "price", "source": "static"},
+    {"symbol": "H11143", "name": "恒生港股通医疗保健指数", "market": "HK", "category": "broad", "index_type": "price", "source": "static"},
+    # ── 主流港股指数补充（恒生家族 + 港股通宽基） ──
+    {"symbol": "HSI", "name": "恒生指数", "market": "HK", "category": "broad", "index_type": "price", "source": "static"},
+    {"symbol": "HSCEI", "name": "恒生中国企业指数", "market": "HK", "category": "broad", "index_type": "price", "source": "static"},
+    {"symbol": "HSTECH", "name": "恒生科技指数", "market": "HK", "category": "broad", "index_type": "price", "source": "static"},
+    {"symbol": "HSCCI", "name": "恒生中国内地地产指数", "market": "HK", "category": "broad", "index_type": "price", "source": "static"},
+    {"symbol": "CES100", "name": "中证港股通精选100指数", "market": "HK", "category": "broad", "index_type": "price", "source": "static"},
+    # ── 美股主流指数（P0-22：US tab 指数搜索） ──
+    {"symbol": "SPX", "name": "标普500指数", "market": "US", "category": "broad", "index_type": "price", "source": "static"},
+    {"symbol": "SPY", "name": "SPDR标普500ETF", "market": "US", "category": "broad", "index_type": "price", "source": "static"},
+    {"symbol": "DJI", "name": "道琼斯工业平均指数", "market": "US", "category": "broad", "index_type": "price", "source": "static"},
+    {"symbol": "IXIC", "name": "纳斯达克综合指数", "market": "US", "category": "broad", "index_type": "price", "source": "static"},
+    {"symbol": "NDX", "name": "纳斯达克100指数", "market": "US", "category": "broad", "index_type": "price", "source": "static"},
+    {"symbol": "VIX", "name": "CBOE波动率指数", "market": "US", "category": "broad", "index_type": "price", "source": "static"},
+    {"symbol": "RUT", "name": "罗素2000指数", "market": "US", "category": "broad", "index_type": "price", "source": "static"},
+]
+
+
 async def collect_all() -> list[dict]:
     print("[sync_indices_meta] collecting from all sources...")
     tasks = [
@@ -155,7 +182,7 @@ async def collect_all() -> list[dict]:
     merged = []
     seen = set()
     for res in results:
-        if isinstance(res, Exception):
+        if not isinstance(res, (list, tuple)):
             print(f"  [WARN] gather error: {res}")
             continue
         for item in res:
@@ -164,6 +191,17 @@ async def collect_all() -> list[dict]:
                 continue
             seen.add(key)
             merged.append(item)
+
+    # P0-20/P0-22 (round16 3.21/3.24): 静态兜底段——「恒生港股通」系列与主流
+    # 港股/美股指数（SPX/道琼斯/纳斯达克等）。新浪港股指数仅 ~38 条且恒缺
+    # 「恒生港股通」系列；美股段数据源从未接入。静态段保证这些指数必然入表
+    # （不依赖外部源状态），搜索/分析入口可用。
+    for _s in _STATIC_EXTRA_INDICES:
+        key = (_s["symbol"], _s["market"])
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(_s)
     print(f"[sync_indices_meta] collected {len(merged)} indices")
     return merged
 

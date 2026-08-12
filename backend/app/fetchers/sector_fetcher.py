@@ -422,6 +422,44 @@ def fetch_sector_heat(limit: int = 20) -> list[dict[str, Any]]:
     return cached("sector_heat", _p, "sector_heat")
 
 
+def fetch_sector_heat_em(limit: int = 20) -> list[dict[str, Any]]:
+    """P0-17① (round16 3.19 R1): A股板块热度改走东财行业板块 spot（akshare）。
+
+    财联社热度无涨跌幅字段、且 plate_list 静态 sign 已失效（errno=50101）时名称
+    回填命中率仅 5/20 → 15/20 板块涨跌幅 0。东财行业板块 spot 自带真实涨跌幅 +
+    领涨股 + 成交额，热度与涨跌幅同源一致。输出与 fetch_sector_heat 兼容的条目
+    格式（rank/name/heat_index/rank_change/is_new/plate_code/change_pct/lead_stocks）。
+
+    失败返回 []（调用方回退财联社 + 名称回填链）。
+    """
+    def _p():
+        rows = _ak_industry_sectors()
+        if not rows:
+            return []
+        # 按成交额降序作为热度排序（heat_index 语义≈板块活跃度）
+        rows_sorted = sorted(rows, key=lambda r: (r.get("amount") or 0), reverse=True)
+        out = []
+        for i, r in enumerate(rows_sorted[:limit]):
+            lead_code = str(r.get("lead_stock_code") or "")
+            out.append({
+                "rank": i + 1,
+                "name": r.get("sector_name", ""),
+                "heat_index": round((r.get("amount") or 0) / 1e6, 1),
+                "rank_change": 0,
+                "is_new": 0,
+                "plate_code": str(r.get("sector_code") or ""),
+                "change_pct": r.get("change_pct"),
+                # P0-18: 领涨股数组（技术分析按钮 + 领涨股列）
+                "lead_stocks": [{
+                    "symbol": lead_code,
+                    "name": str(r.get("lead_stock_name") or ""),
+                    "change_pct": r.get("lead_stock_chg"),
+                }] if lead_code else [],
+            })
+        return out
+    return cached("sector_heat_em", _p, "sector_heat")
+
+
 def fetch_em_sector_changes() -> dict[str, float]:
     """东财行业+概念板块涨跌幅映射 {板块名称: 涨跌幅%}（板块热度 change_pct 补充源）。
 

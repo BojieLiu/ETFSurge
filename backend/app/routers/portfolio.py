@@ -1,9 +1,13 @@
 import asyncio
 import json
 import logging
+import time
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
+
+# P0-8 (round16 2.3): 设计历史列表 TTL 缓存（key=(limit,offset)，30s 失效）
+_DESIGNS_LIST_CACHE: dict[tuple[int, int], tuple[float, list]] = {}
 
 from ..database import get_db
 from ..models.schemas import (
@@ -190,6 +194,14 @@ async def list_designs(
     from sqlalchemy.orm import load_only
     from ..models.portfolio_design import PortfolioDesign
 
+    # P0-8 (round16 2.3): designs_list 热态 660-890ms 不降——DB 查询无缓存。
+    # 加内存 TTL 缓存（30s），列表频繁刷新（如切换分页、返回）不重复全表查询。
+    _cache_key = (limit, offset)
+    _now = time.monotonic()
+    _cached = _DESIGNS_LIST_CACHE.get(_cache_key)
+    if _cached and _now - _cached[0] < 30.0:
+        return _cached[1]
+
     # UX3: 只加载元数据字段，避免 market_snapshot_json / design_text 大字段拖慢查询
     stmt = (
         select(PortfolioDesign)
@@ -211,7 +223,7 @@ async def list_designs(
     result = await db.execute(stmt)
     records = result.scalars().all()
 
-    return [
+    out = [
         {
             "id": r.id,
             "created_at": r.created_at.isoformat() if r.created_at else "",
@@ -229,6 +241,8 @@ async def list_designs(
         }
         for r in records
     ]
+    _DESIGNS_LIST_CACHE[_cache_key] = (_now, out)
+    return out
 
 
 @router.get("/designs/{design_id}")
@@ -270,6 +284,11 @@ async def get_design(
                     "layer": e.get("layer", ""),
                     "target_weight": e.get("weight", 0),
                     "selection_rationale": e.get("selection_rationale") or "",
+                    # P0-4 (round16 3.9 B3): 补 daily_change_pct/price/factor_score——
+                    # 旧实现白名单缺失 → 设计详情「今日涨跌」列恒显示"数据源不可用"
+                    "daily_change_pct": e.get("daily_change_pct"),
+                    "price": e.get("price"),
+                    "factor_score": e.get("factor_score"),
                 }
                 for e in etfs
             ],
@@ -315,6 +334,7 @@ async def delete_design(
 
     await db.delete(record)
     await db.commit()
+    _DESIGNS_LIST_CACHE.clear()  # P0-8: 删除后列表立即失效，避免返回已删方案
     return {"detail": "deleted"}
 
 # ── 异步任务 ──────────────────────────────────
@@ -367,7 +387,12 @@ async def portfolio_design_async(
     asyncio.create_task(design_worker(task_manager, t["task_id"]))
     return JSONResponse(
         status_code=202,
-        content={"task_id": t["task_id"], "status": "pending", "created_at": t["created_at"]},
+        content={
+            "task_id": t["task_id"], "status": "pending", "created_at": t["created_at"],
+            # P2-9 B2 (round16 3.9): 响应补 design_id（任务刚创建恒 null）——前端
+            # DashboardAiTools 读 taskData.design_id 旧实现无此字段（靠 WS/轮询兜底）。
+            "design_id": None,
+        },
     )
 
 
@@ -502,11 +527,15 @@ async def get_timeline(
     check_task_stmt = select(TaskRecord).where(TaskRecord.task_type == "check")
     check_task_rows = (await db.execute(check_task_stmt)).scalars().all()
     linked_check_record_ids = {t.record_id for t in check_task_rows if t.record_id}
+    # P0-9 (round16 3.10 R1): task_items 查询放宽为 design+check——旧实现只查 design，
+    # check 类型 running/pending/failed 任务（尚未落 strategy_check_records 表）永不进 timeline，
+    # 用户点"策略检查"后运行中任务不可见。
     task_stmt = select(TaskRecord).where(
-        TaskRecord.task_type == "design",
+        TaskRecord.task_type.in_(["design", "check"]),
     ).order_by(TaskRecord.created_at.desc())
     task_result = await db.execute(task_stmt)
     task_rows = task_result.scalars().all()
+    check_record_ids = {c.id for c in checks}
 
     design_ids = {d.id for d in designs}
 
@@ -541,12 +570,16 @@ async def get_timeline(
     # O12: tasks 表并入（失败/运行中任务可见）
     task_items = []
     for t in task_rows:
-        # 成功且已有 design 记录 → design_items 已覆盖，不重复
-        if t.status in ("completed", "completed_with_errors") and t.record_id and t.record_id in design_ids:
-            continue
+        _type = t.task_type if t.task_type in ("design", "check") else "design"
+        # 已完成且已有对应落库记录（design/check_items 已覆盖）→ 不重复
+        if t.status in ("completed", "completed_with_errors") and t.record_id:
+            if _type == "design" and t.record_id in design_ids:
+                continue
+            if _type == "check" and t.record_id in check_record_ids:
+                continue
         task_items.append({
             "id": t.record_id or t.id,
-            "_type": "design",
+            "_type": _type,
             "created_at": t.created_at.isoformat() if t.created_at else "",
             "status": t.status if t.status in ("completed", "completed_with_errors", "failed", "running") else "running",
             "capital": None,

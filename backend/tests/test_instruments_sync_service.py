@@ -81,3 +81,28 @@ async def test_sync_table_mutex_serializes():
         assert n1 == 1
     # DB 写只发生一次
     assert mock_ctx.return_value is not None
+
+
+class TestP24SegmentGuard:
+    """P2-4 (round16 §5 盲区⑥): 依赖表同步守卫——instruments 五段含 US/HK 段。"""
+
+    def test_collect_all_has_us_and_hk_segments(self):
+        """sync_instruments.collect_all 段清单含美股/港股段（US/HK 搜索依赖表非空）。"""
+        from scripts.sync_instruments import collect_all
+        import inspect
+
+        src = inspect.getsource(collect_all)
+        # 五段收集：A股个股/ETF/港股/港股ETF/美股
+        assert "stock_us_spot_em" in src, "美股段缺失 → instruments US=0 → 英文名搜索恒断"
+        assert "stock_hk_main_board_spot_em" in src, "港股段缺失 → instruments HK=0"
+        # 主源 + 降级链（新浪）双保险
+        assert "stock_us_spot" in src, "美股新浪降级链缺失（EM 被拦时 US 段恒空）"
+
+    def test_fetch_us_list_has_primary_and_fallback(self):
+        """_fetch_us_list 主源 5s 独立超时 + 新浪降级（P0-6 修复防 CancelledError 截断）。"""
+        import inspect
+        from scripts.sync_instruments import _fetch_us_list
+
+        src = inspect.getsource(_fetch_us_list)
+        assert "timeout=5.0" in src, "美股主源应独立 5s 超时（旧实现整段 20s 取消降级链）"
+        assert "新浪" in src or "sina" in src.lower(), "美股降级链（新浪受限分页）应存在"

@@ -182,8 +182,11 @@ class TestStrategyCheckCoverage:
 
         by_symbol = {s["symbol"]: s for s in result["suggestions"]}
         assert by_symbol["510300"]["action"] == "increase"
-        # increase: min(current*1.2, 0.30 风控上限) = 0.30
-        assert by_symbol["510300"]["suggested_weight"] == pytest.approx(0.30)
+        # P0-10 (round16 3.11): increase 不得输出 sug<cur 矛盾值——cur=0.5 已达 30%
+        # 风控上限 → suggested 维持 0.5 并提示"已达/接近 30% 风控上限"（旧实现 0.30 降仓矛盾）。
+        assert by_symbol["510300"]["suggested_weight"] == pytest.approx(0.5), \
+            f"increase 不得降仓: {by_symbol['510300']}"
+        assert "30% 风控上限" in by_symbol["510300"]["reason"], by_symbol["510300"]["reason"]
         assert by_symbol["518880"]["action"] == "decrease"
         # decrease: max(current*0.7, 0) = 0.21
         assert by_symbol["518880"]["suggested_weight"] == pytest.approx(0.21)

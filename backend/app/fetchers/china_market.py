@@ -1534,6 +1534,13 @@ def fetch_history(symbol: str, asset_type: str = "A", period: str = "daily") -> 
                     return ne_rows
             return []
         if asset_type in ("HK", "US"):
+            # P0-19① (round16 3.20 R3): HK 分支先试腾讯 K 线（容器内唯一可用 HK 链，
+            # 0.3s/320 根实测）——旧实现腾讯在 _fetch_akshare_history 内部最末，
+            # 被 akshare(8s)+finnhub(8s)+alphavantage(10s) 串行拖累、外层 8s 截断在腾讯前。
+            if asset_type == "HK":
+                tx_rows = _fetch_tencent_hk_history(symbol)
+                if tx_rows:
+                    return tx_rows
             return _fetch_akshare_history(symbol, asset_type, period)
         return []
 

@@ -133,12 +133,13 @@ const klineOption = computed(() => {
   const candlesticks = d.opens.map((_, i) => [d.opens[i], d.closes[i], d.lows[i], d.highs[i]])
   const volumes = d.volumes || []
   const volumeColors = d.closes.map((c, i) =>
-    i === 0 ? CANDLE_DOWN : c >= d.closes[i - 1] ? CANDLE_DOWN : CANDLE_UP
+    i === 0 ? CANDLE_UP : c >= d.closes[i - 1] ? CANDLE_UP : CANDLE_DOWN
   )
   const series = [{
     type: 'candlestick', name: `${props.name || props.symbol}`,
     data: candlesticks, xAxisIndex: 0, yAxisIndex: 0,
-    itemStyle: { color: CANDLE_DOWN, color0: CANDLE_UP, borderColor: CANDLE_DOWN, borderColor0: CANDLE_UP },
+    // P0-15①: candlestick color=阳线(涨/红), color0=阴线(跌/绿)——旧实现赋反 → 涨绿跌红
+    itemStyle: { color: CANDLE_UP, color0: CANDLE_DOWN, borderColor: CANDLE_UP, borderColor0: CANDLE_DOWN },
   }]
   const maConfig = [
     { key: 'ma5', name: 'MA5', color: '#f59e0b' },

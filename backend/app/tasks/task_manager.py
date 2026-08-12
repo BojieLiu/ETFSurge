@@ -442,7 +442,14 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
                 timeout=240,
             )
 
-            if llm_analysis and len(llm_analysis.strip()) > 0:
+            # P0-1 反假完成：LLM 空响应兜底文案（"报告生成失败"）不得标 quality=full。
+            _FAIL_PLACEHOLDERS = ("报告生成失败",)
+            _analysis_is_placeholder = bool(
+                llm_analysis
+                and len(llm_analysis.strip()) > 0
+                and any(p in llm_analysis for p in _FAIL_PLACEHOLDERS)
+            )
+            if llm_analysis and len(llm_analysis.strip()) > 0 and not _analysis_is_placeholder:
                 full_text = design_text + "\n\n## 二、市场环境与配置建议\n\n" + llm_analysis
                 try:
                     async with async_session() as db:
@@ -464,12 +471,12 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
                     logger.warning("[design_pipeline] DB update for LLM report failed: %s", e)
                 report_quality = "full"
             else:
-                logger.warning("[design_pipeline] LLM returned empty report for design_id=%s", design_id)
+                logger.warning("[design_pipeline] LLM returned empty/placeholder report for design_id=%s", design_id)
                 try:
                     async with async_session() as db:
                         d = await db.get(PortfolioDesign, design_id)
                         if d:
-                            # Q03: LLM timed out but allocation succeeded → partial
+                            # Q03: LLM timed out / returned placeholder → partial
                             d.report_quality = "partial"
                             await db.commit()
                 except Exception as e:

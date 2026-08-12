@@ -181,6 +181,18 @@ async def lifespan(app: FastAPI):
         except Exception as e:  # noqa: BLE001
             logger.warning("[lifespan] instruments auto-sync failed (non-fatal): %s", e)
 
+    # P0-20 (round16 3.21): indices_meta 表接入启动同步（round14 P2-AG 未落地）——
+    # 表此前是静态快照无增量机制，"恒生港股通"系列从未进表 → 搜索恒缺。
+    # 与 instruments 同模式：后台任务 + 超时 + 失败静默（表已有历史数据不覆盖清空）。
+    async def _background_indices_meta_sync():
+        try:
+            from .services.indices_meta_sync import sync_indices_meta_table
+            n = await asyncio.wait_for(sync_indices_meta_table(), timeout=120)
+            if n:
+                logger.info("[lifespan] indices_meta table auto-synced: %d rows", n)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[lifespan] indices_meta auto-sync failed (non-fatal): %s", e)
+
     # 启动时后台预热行情缓存（不阻塞启动，10s 超时 → 部分数据可接受）
     async def _warmup_market_cache():
         with warmup_timer("warmup_market_cache", "warmup", "行情缓存预热"):
@@ -273,6 +285,7 @@ async def lifespan(app: FastAPI):
             _warmup_etf_cache(),
             _warmup_global_indices(),
             _background_instruments_sync(),
+            _background_indices_meta_sync(),
         ])
 
     if _SKIP_WARMUP:
