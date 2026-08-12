@@ -15,9 +15,12 @@
       :etf-options="etfOptions"
       :period-options="periodOptions"
       :indicator-toggles="indicatorToggles"
+      :indicator-options="indicatorOptions"
+      :active-indicator="activeIndicator"
       @update:selected="onSelectEtf"
       @update:period="period = $event"
       @update:chart-mode="chartMode = $event"
+      @update:active-indicator="activeIndicator = $event"
       @refresh="fetchChart"
     />
 
@@ -90,10 +93,10 @@ const showMA10 = ref(true)
 const showMA20 = ref(true)
 const showMA60 = ref(false)
 const showBoll = ref(false)
-const showVolume = ref(true)  // F14: 成交量副图独立开关（round6 §16.2）
-const showMACD = ref(true)
-const showKDJ = ref(false)
-const showRSI = ref(false)
+// round19 P5-② (2026-08-12): 成交量固定展示（移除独立开关，F14 语义保留恒 true）；
+// 指标副图改三选一单选（用户原话「当中的一个」），showMACD/KDJ/RSI 三 bool → activeIndicator
+const showVolume = ref(true)
+const activeIndicator = ref('macd')
 
 // Period Options
 const periodOptions = [
@@ -108,17 +111,21 @@ const periodOptions = [
   { value: 'monthly', label: '月线' },
 ]
 
-// Indicator Toggles
+// Indicator Toggles（主图叠加指标；volume/macd/kdj/rsi 移出——成交量固定、
+// 指标副图三选一）
 const indicatorToggles = [
   { key: 'ma5', label: 'MA5', model: showMA5 },
   { key: 'ma10', label: 'MA10', model: showMA10 },
   { key: 'ma20', label: 'MA20', model: showMA20 },
   { key: 'ma60', label: 'MA60', model: showMA60 },
   { key: 'boll', label: '布林带', model: showBoll },
-  { key: 'volume', label: '成交量', model: showVolume },  // F14: 独立开关
-  { key: 'macd', label: 'MACD', model: showMACD },
-  { key: 'kdj', label: 'KDJ', model: showKDJ },
-  { key: 'rsi', label: 'RSI', model: showRSI },
+]
+
+// round19 P5-②: 指标副图三选一单选组（默认 MACD）
+const indicatorOptions = [
+  { key: 'macd', label: 'MACD' },
+  { key: 'kdj', label: 'KDJ' },
+  { key: 'rsi', label: 'RSI' },
 ]
 
 // Computed
@@ -274,14 +281,13 @@ const chartOption = computed(() => {
     i === 0 ? CANDLE_UP : c >= d.closes[i - 1] ? CANDLE_UP : CANDLE_DOWN
   )
 
-  const gridHeights = { main: 50, volume: 22, macd: 20, kdj: 18, rsi: 18 }
+  // round19 P5-②: 高度提升（macd/kdj/rsi = 22/24/24，RSI yAxis 固定 0-100 需最高）；
+  // 成交量固定展示（volPct 恒在）；仅一个指标副图（三选一）
+  const gridHeights = { main: 50, volume: 22, macd: 22, kdj: 24, rsi: 24 }
   const mainPct = gridHeights.main
-  // F14: 成交量副图不再绑定 showMACD——独立 showVolume 开关
-  let volPct = showVolume.value ? gridHeights.volume : 0
-  let macdPct = showMACD.value ? gridHeights.macd : 0
-  let kdjPct = showKDJ.value && d.kdj ? gridHeights.kdj : 0
-  let rsiPct = showRSI.value && d.rsi ? gridHeights.rsi : 0
-  const totalPct = mainPct + volPct + macdPct + kdjPct + rsiPct + 10
+  const volPct = gridHeights.volume
+  const indPct = gridHeights[activeIndicator.value] || gridHeights.macd
+  const totalPct = mainPct + volPct + indPct + 10
 
   const grids = [
     { left: '6%', right: '3%', top: 8, height: `${(mainPct / totalPct) * 100}%` },
@@ -335,9 +341,8 @@ const chartOption = computed(() => {
     })
   }
 
-  // Volume sub-chart (F14: 独立开关，不再依赖 showMACD)
-  if (showVolume.value) {
-    volPct = gridHeights.volume
+  // Volume sub-chart（round19 P5-②: 成交量固定展示——移除独立开关后恒渲染）
+  {
     const volOffset = mainPct
     grids.push({ left: '6%', right: '3%', top: `${(volOffset / totalPct) * 100}%`, height: `${(volPct / totalPct) * 100}%` })
     xAxes.push({ type: 'category', data: dates, gridIndex: 1, axisLabel: { show: false } })
@@ -357,66 +362,55 @@ const chartOption = computed(() => {
     }
   }
 
-  // MACD sub-chart
-  if (showMACD.value && d.macd && d.macd.histogram && d.macd.dif && d.macd.dea) {
-    macdPct = gridHeights.macd
-    const macdOffset = mainPct + volPct + 2
-    grids.push({ left: '6%', right: '3%', top: `${(macdOffset / totalPct) * 100}%`, height: `${(macdPct / totalPct) * 100}%` })
-    xAxes.push({ type: 'category', data: dates, gridIndex: 2, axisLabel: { rotate: 30, fontSize: 10 } })
-    yAxes.push({ gridIndex: 2, scale: true, splitNumber: 3, axisLabel: { show: true, fontSize: 10 } })
+  // 指标副图（round19 P5-②: 三选一单选——activeIndicator；gridIndex 动态，volume
+  // 恒在时 = 2，与 KDJ/RSI 同模式）
+  const indOffset = mainPct + volPct + 2
+  const indGridIdx = grids.length
+  if (activeIndicator.value === 'macd' && d.macd && d.macd.histogram && d.macd.dif && d.macd.dea) {
+    grids.push({ left: '6%', right: '3%', top: `${(indOffset / totalPct) * 100}%`, height: `${(indPct / totalPct) * 100}%` })
+    xAxes.push({ type: 'category', data: dates, gridIndex: indGridIdx, axisLabel: { rotate: 30, fontSize: 10 } })
+    yAxes.push({ gridIndex: indGridIdx, scale: true, splitNumber: 3, axisLabel: { show: true, fontSize: 10 } })
     const histColors = d.macd.histogram.map((v) => histogramColor(v))
     series.push({
-      type: 'bar', data: d.macd.histogram, xAxisIndex: 2, yAxisIndex: 2,
+      type: 'bar', data: d.macd.histogram, xAxisIndex: indGridIdx, yAxisIndex: indGridIdx,
       name: 'MACD', itemStyle: { color: (p) => histColors[p.dataIndex] },
     })
     series.push({
       type: 'line', data: d.macd.dif, smooth: true,
-      xAxisIndex: 2, yAxisIndex: 2,
+      xAxisIndex: indGridIdx, yAxisIndex: indGridIdx,
       name: 'DIF', symbol: 'none', lineStyle: { width: 1.2, color: chartColor('macdDif') },
     })
     series.push({
       type: 'line', data: d.macd.dea, smooth: true,
-      xAxisIndex: 2, yAxisIndex: 2,
+      xAxisIndex: indGridIdx, yAxisIndex: indGridIdx,
       name: 'DEA', symbol: 'none', lineStyle: { width: 1.2, color: chartColor('macdDea') },
     })
-  }
-
-  // KDJ sub-chart
-  if (showKDJ.value && d.kdj && d.kdj.k && d.kdj.d && d.kdj.j) {
-    kdjPct = gridHeights.kdj
-    const kdjOffset = mainPct + volPct + (showMACD.value ? macdPct : 0) + 2
-    const kdjGridIdx = grids.length
-    grids.push({ left: '6%', right: '3%', top: `${(kdjOffset / totalPct) * 100}%`, height: `${(kdjPct / totalPct) * 100}%` })
-    xAxes.push({ type: 'category', data: dates, gridIndex: kdjGridIdx, axisLabel: { show: false } })
-    yAxes.push({ gridIndex: kdjGridIdx, scale: true, splitNumber: 3, axisLabel: { show: true, fontSize: 10 } })
+  } else if (activeIndicator.value === 'kdj' && d.kdj && d.kdj.k && d.kdj.d && d.kdj.j) {
+    grids.push({ left: '6%', right: '3%', top: `${(indOffset / totalPct) * 100}%`, height: `${(indPct / totalPct) * 100}%` })
+    xAxes.push({ type: 'category', data: dates, gridIndex: indGridIdx, axisLabel: { show: false } })
+    yAxes.push({ gridIndex: indGridIdx, scale: true, splitNumber: 3, axisLabel: { show: true, fontSize: 10 } })
     series.push({
       type: 'line', data: d.kdj.k, smooth: true,
-      xAxisIndex: kdjGridIdx, yAxisIndex: kdjGridIdx,
+      xAxisIndex: indGridIdx, yAxisIndex: indGridIdx,
       name: 'KDJ-K', symbol: 'none', lineStyle: { width: 1.2, color: chartColor('kdjK') },
     })
     series.push({
       type: 'line', data: d.kdj.d, smooth: true,
-      xAxisIndex: kdjGridIdx, yAxisIndex: kdjGridIdx,
+      xAxisIndex: indGridIdx, yAxisIndex: indGridIdx,
       name: 'KDJ-D', symbol: 'none', lineStyle: { width: 1.2, color: chartColor('kdjD') },
     })
     series.push({
       type: 'line', data: d.kdj.j, smooth: true,
-      xAxisIndex: kdjGridIdx, yAxisIndex: kdjGridIdx,
+      xAxisIndex: indGridIdx, yAxisIndex: indGridIdx,
       name: 'KDJ-J', symbol: 'none', lineStyle: { width: 1.2, color: chartColor('kdjJ') },
     })
-  }
-
-  // RSI sub-chart
-  if (showRSI.value && d.rsi) {
-    rsiPct = gridHeights.rsi
-    const rsiOffset = mainPct + volPct + (showMACD.value ? macdPct : 0) + (showKDJ.value && d.kdj ? kdjPct : 0) + 2
-    const rsiGridIdx = grids.length
-    grids.push({ left: '6%', right: '3%', top: `${(rsiOffset / totalPct) * 100}%`, height: `${(rsiPct / totalPct) * 100}%` })
-    xAxes.push({ type: 'category', data: dates, gridIndex: rsiGridIdx, axisLabel: { show: false } })
-    yAxes.push({ gridIndex: rsiGridIdx, scale: true, splitNumber: 3, axisLabel: { show: true, fontSize: 10 }, min: 0, max: 100 })
+  } else if (activeIndicator.value === 'rsi' && d.rsi) {
+    grids.push({ left: '6%', right: '3%', top: `${(indOffset / totalPct) * 100}%`, height: `${(indPct / totalPct) * 100}%` })
+    xAxes.push({ type: 'category', data: dates, gridIndex: indGridIdx, axisLabel: { show: false } })
+    yAxes.push({ gridIndex: indGridIdx, scale: true, splitNumber: 3, axisLabel: { show: true, fontSize: 10 }, min: 0, max: 100 })
     series.push({
       type: 'line', data: d.rsi, smooth: true,
-      xAxisIndex: rsiGridIdx, yAxisIndex: rsiGridIdx,
+      xAxisIndex: indGridIdx, yAxisIndex: indGridIdx,
       name: 'RSI(14)', symbol: 'none', lineStyle: { width: 1.2, color: chartColor('rsi') },
       markLine: {
         silent: true,

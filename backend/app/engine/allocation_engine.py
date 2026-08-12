@@ -26,6 +26,9 @@ MAX_WEIGHT = 0.30
 # 去除基金公司名 + ETF/联接 后缀 → 余下字符串即为指数概念
 # 示例："科创100ETF汇添富" → "科创100"，"沪深300ETF华夏" → "沪深300"
 _COMPANY_NAMES = [
+    # round19 P1-②: 长公司名优先（先剥「华泰柏瑞」整体，避免子串「华泰」误剥成
+    # 「A500ETF柏瑞」→ 指数概念提取失败 → 同指数双持有漏判）
+    "华泰柏瑞", "柏瑞", "天弘基金", "广发基金",
     "华夏", "易方达", "汇添富", "嘉实", "富国", "招商", "博时", "南方",
     "广发", "华安", "国泰", "鹏华", "天弘", "工银", "建信", "中欧",
     "景顺", "长城", "泰康", "海富通", "光大", "兴全", "东证", "华宝",
@@ -131,6 +134,8 @@ _A_WIDE_BASIS_KEYWORDS = (
     "中证A100", "A100", "中证A500", "中证A50", "中证500", "中证800",
     "沪深300", "上证50", "上证180", "上证综指", "科创50", "创业板",
     "中证100", "深证100", "MSCI中国",
+    # round19 P1-②: 裸 A500/A50——「A500ETF华泰柏瑞」等无「中证」前缀漏判
+    "A500", "A50",
 )
 
 
@@ -176,6 +181,8 @@ def _is_growth_wide_basis(c: dict[str, Any]) -> bool:
 _LARGE_CAP_WIDE_BASIS_KEYWORDS = (
     "沪深300", "中证A500", "中证A50", "中证A100",
     "上证50", "上证180", "深证100", "中证100", "中证800", "MSCI中国",
+    # round19 P1-②: 裸 A500/A50——「A500ETF华泰柏瑞」无「中证」前缀漏判 → 不触发互斥
+    "A500", "A50",
 )
 
 # 大盘宽基排除词——「中证1000」（中盘小盘指数）含 "中证100" 子串会被误判，
@@ -610,6 +617,79 @@ def _filter_satellite_by_profile(
     return [item for _, item in scored[:keep_count]]
 
 
+def _dedup_same_index(allocations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """round19 P1-② (2026-08-12): 同指数双持有硬约束（堵 563360 漏判）。
+
+    判定: tracked_index 相同 或 _extract_index_concept(name) 归一化后相同——
+    名称先剥公司名/后缀（_extract_index_concept）再去「中证」前缀，归一到裸指数名
+    （"中证A500ETF国泰" → "A500" == "A500ETF华泰柏瑞" → "A500"）。
+    处理: 同指数仅保留 factor_score 高者；剔除方权重按同层其余标的权重比例回补；
+    强制锚（MANDATORY_CODES）豁免剔除（如 510300+159338 双锚，保留并进报告提示）。
+    """
+    def _norm(name: str) -> str:
+        n = str(name or "").strip()
+        if n.startswith("中证"):
+            n = n[2:]
+        return n
+
+    groups: dict[str, list] = {}
+    for a in allocations:
+        if a.get("symbol") == "CASH":
+            continue
+        tidx = _norm(a.get("tracked_index") or "")
+        concept = _norm(_extract_index_concept(a.get("name") or ""))
+        key = tidx or concept or str(a.get("symbol", ""))
+        groups.setdefault(key, []).append(a)
+
+    removed_syms: set[str] = set()
+    for key, members in groups.items():
+        if len(members) < 2:
+            continue
+        anchors = [m for m in members if m.get("symbol") in MANDATORY_CODES]
+        others = [m for m in members if m.get("symbol") not in MANDATORY_CODES]
+        if not others:
+            continue  # 全是强制锚（如 510300+159338）→ 豁免剔除，进报告提示
+        if anchors:
+            # 有锚：强制锚已代表该指数 → 非锚全部剔除（文档：强制锚豁免剔除，
+            # 但指数不重复覆盖——159338+563360 场景剔 563360，锚进报告提示）
+            removed_syms.update(m.get("symbol") for m in others)
+        else:
+            keep = max(members, key=lambda m: m.get("factor_score", 0.0) or 0.0)
+            removed_syms.update(
+                m.get("symbol") for m in members if m.get("symbol") != keep.get("symbol")
+            )
+
+    if not removed_syms:
+        return allocations
+
+    kept = [a for a in allocations if a.get("symbol") not in removed_syms]
+    # 剔除权重按同层其余标的权重比例回补
+    for r in allocations:
+        if r.get("symbol") not in removed_syms:
+            continue
+        _w = r.get("weight", 0.0) or 0.0
+        if _w <= 1e-9:
+            continue
+        _layer = r.get("layer", "satellite")
+        same_layer = [
+            a for a in kept
+            if a.get("layer") == _layer and a.get("symbol") not in (None, "CASH")
+        ]
+        _total = sum((a.get("weight", 0.0) or 0.0) for a in same_layer)
+        if _total > 1e-9:
+            for a in same_layer:
+                a["weight"] = round(
+                    (a.get("weight", 0.0) or 0.0)
+                    + _w * ((a.get("weight", 0.0) or 0.0) / _total),
+                    4,
+                )
+    logger.info(
+        "[allocation] P1-② same-index dedup removed %s (weights reclaimed in-layer)",
+        sorted(removed_syms),
+    )
+    return kept
+
+
 def allocate(
     risk_profile: str,
     regime: str,
@@ -974,6 +1054,11 @@ def allocate(
             penalize_symbols=_penalize,
         )
         allocations.extend(def_alloc)
+
+        # round19 P1-②: 同指数双持有硬约束——合并后跨层去重
+        # （aggressive 159338 中证A500 core + 563360 A500 satellite = 同一指数；
+        # 强制锚豁免，非锚低分者剔除、权重按同层比例回补）
+        allocations = _dedup_same_index(allocations)
 
         # C: 强制标的权重下限后处理 — 低于 5% 的强制标的上调到 5%
         # 优先从总现金仓扣减；现金不足则从非强制标的中等比例扣减

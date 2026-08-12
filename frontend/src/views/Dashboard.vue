@@ -179,6 +179,20 @@ const tabs = [
 const marketTimer = ref(null)
 const marketStore = useMarketStore()
 
+// round19 P6-①: WS 行情消息消费——更新 globalIndices 内对应指数的实时价
+// （连接生命周期在 App.vue 全站常驻，本页面仅注册/注销消费回调）
+function updateGlobalIndicesFromWS(data) {
+  if (!data || !data.symbol) return
+  const indices = globalIndices.value
+  for (const region of Object.keys(indices)) {
+    const list = indices[region]
+    const i = list.findIndex(m => m.symbol === data.symbol)
+    if (i >= 0) {
+      list[i] = { ...list[i], price: data.price, change_pct: data.change_pct, available: true }
+    }
+  }
+}
+
 // 数据刷新指示器：refreshAll 完成后记录时间戳（SummaryCards 右下角展示）
 const lastUpdated = ref(null)
 function markUpdated() {
@@ -199,21 +213,13 @@ onMounted(async () => {
   await refreshAll()
   markUpdated()
   fetchPnlHistory(activeTab.value)
-  marketStore.connectWS((data) => {
-    const indices = globalIndices.value
-    for (const region of Object.keys(indices)) {
-      const list = indices[region]
-      const i = list.findIndex(m => m.symbol === data.symbol)
-      if (i >= 0) {
-        list[i] = { ...list[i], price: data.price, change_pct: data.change_pct, available: true }
-      }
-    }
-  })
+  // round19 P6-①: 连接职责移交 App.vue（全站常驻）——此处只注册指数更新消费回调
+  marketStore.onWSMessage(updateGlobalIndicesFromWS)
   marketTimer.value = setInterval(fetchGlobalIndices, 30000)
 })
 
 onUnmounted(() => {
-  marketStore.disconnectWS()
+  marketStore.offWSMessage(updateGlobalIndicesFromWS)
   if (marketTimer.value) clearInterval(marketTimer.value)
 })
 

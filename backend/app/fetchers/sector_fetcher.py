@@ -422,20 +422,81 @@ def fetch_sector_heat(limit: int = 20) -> list[dict[str, Any]]:
     return cached("sector_heat", _p, "sector_heat")
 
 
+def fetch_em_industry_sectors(limit: int | None = None) -> list[dict[str, Any]] | None:
+    """round19 P4-① (2026-08-12): push2delay 直连行业板块（绕过 akshare）。
+
+    背景: akshare `stock_board_industry_spot_em` 硬编码 push2.eastmoney.com，
+    被 EM 域名级风控断连（实测 8.5s RemoteDisconnected）→ 主路径静默失败、
+    回退全面失效的财联社链（sign 失效 + 名称回填命中率 5%）→ 板块热度大量 0。
+    push2delay 通道实测可用（历史 1843 行）：pn 分页循环（pz=200 服务端实回
+    100，拉到 <100 为止，共 300 个行业板块）拉全，f3 涨跌幅真实。
+
+    输出字段与 _ak_industry_sectors 兼容（sector_code/sector_name/change_pct/
+    amount/main_inflow/total_market）；clist 无领涨股字段 → 降级空（与财联社
+    回退路径一致）。失败返回 None（调用方走 akshare 兜底）；网络错误打 ERROR
+    日志（不再静默吞异常）。
+    """
+    def _p():
+        import json as _json
+        import urllib.request
+        from ..core.market_context import EM_PUSH_HOST as _EM_HOST
+        rows: list[dict[str, Any]] = []
+        pn = 1
+        while True:
+            url = (
+                f"https://{_EM_HOST}/api/qt/clist/get?pn={pn}&pz=200&po=1&np=1"
+                f"&fltt=2&invt=2&fid=f6&fs=m:90+t:2&fields=f12,f14,f3,f6,f62,f20"
+            )
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                raw = urllib.request.urlopen(req, timeout=8).read().decode()
+                diff = ((_json.loads(raw) or {}).get("data") or {}).get("diff") or []
+            except Exception as e:
+                _logger.error("[sector_fetcher] fetch_em_industry_sectors pn=%s failed: %s", pn, e)
+                break
+            if not diff:
+                break
+            for r in diff:
+                rows.append({
+                    "sector_code": str(r.get("f12") or ""),
+                    "sector_name": str(r.get("f14") or "").strip(),
+                    # P2-3: 板块涨跌幅 ±20 值域校验（与 akshare 路径同口径）
+                    "change_pct": _sector_change_pct(r.get("f3")),
+                    "amount": float(r.get("f6") or 0),
+                    "main_inflow": float(r.get("f62") or 0),
+                    "total_market": float(r.get("f20") or 0),
+                    # clist 无领涨股字段 → 降级空（与财联社回退路径一致）
+                    "lead_stock_name": "", "lead_stock_code": "", "lead_stock_chg": None,
+                })
+            if len(diff) < 100:
+                break
+            pn += 1
+        if limit:
+            rows = rows[:limit]
+        return rows
+    return cached("em_industry_sectors", _p, "sector_heat")
+
+
 def fetch_sector_heat_em(limit: int = 20) -> list[dict[str, Any]]:
     """P0-17① (round16 3.19 R1): A股板块热度改走东财行业板块 spot（akshare）。
 
-    财联社热度无涨跌幅字段、且 plate_list 静态 sign 已失效（errno=50101）时名称
-    回填命中率仅 5/20 → 15/20 板块涨跌幅 0。东财行业板块 spot 自带真实涨跌幅 +
-    领涨股 + 成交额，热度与涨跌幅同源一致。输出与 fetch_sector_heat 兼容的条目
-    格式（rank/name/heat_index/rank_change/is_new/plate_code/change_pct/lead_stocks）。
+    round19 P4-① (2026-08-12): 主源切 push2delay 直连（fetch_em_industry_sectors，
+    绕过 akshare 的 EM 域名级风控断连）——akshare 降至兜底；两者均空才回退
+    财联社链（fetch_sector_heat 调用方处理），且任一环节失败打 ERROR 日志
+    （不再静默——「修了没修好」无人发现）。
 
+    输出与 fetch_sector_heat 兼容的条目格式
+    （rank/name/heat_index/rank_change/is_new/plate_code/change_pct/lead_stocks）。
     失败返回 []（调用方回退财联社 + 名称回填链）。
     """
     def _p():
-        rows = _ak_industry_sectors()
+        rows = fetch_em_industry_sectors() or []
         if not rows:
-            return []
+            _logger.error("[sector_fetcher] fetch_sector_heat_em: push2delay 直连 0 行，尝试 akshare 兜底")
+            rows = _ak_industry_sectors() or []
+            if not rows:
+                _logger.error("[sector_fetcher] fetch_sector_heat_em: push2delay + akshare 均无数据（回退财联社链）")
+                return []
         # 按成交额降序作为热度排序（heat_index 语义≈板块活跃度）
         rows_sorted = sorted(rows, key=lambda r: (r.get("amount") or 0), reverse=True)
         out = []
@@ -449,7 +510,7 @@ def fetch_sector_heat_em(limit: int = 20) -> list[dict[str, Any]]:
                 "is_new": 0,
                 "plate_code": str(r.get("sector_code") or ""),
                 "change_pct": r.get("change_pct"),
-                # P0-18: 领涨股数组（技术分析按钮 + 领涨股列）
+                # P0-18: 领涨股数组（技术分析按钮 + 领涨股列）；clist 无 → 空
                 "lead_stocks": [{
                     "symbol": lead_code,
                     "name": str(r.get("lead_stock_name") or ""),

@@ -62,7 +62,8 @@ def test_sectors_heat_change_pct_backfilled_by_em(monkeypatch):
     items = resp.json()["items"]
     assert items[0]["change_pct"] == 3.25, "东财精确命中应回填真实涨跌幅"
     assert items[1]["change_pct"] == 2.5, "「/」分割首段（CRO/CMO → CRO）应回填"
-    assert items[2]["change_pct"] == 0, "未命中板块保持 0 兜底"
+    # round19 P4-③: 未命中兜底从 0 改 None（涨跌幅未知不冒充 0%）
+    assert items[2]["change_pct"] is None, "未命中板块保持 null 兜底（不冒充 0%）"
 
 
 def test_match_em_change_three_levels():

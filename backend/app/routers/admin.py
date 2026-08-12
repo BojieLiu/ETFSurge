@@ -228,6 +228,13 @@ async def delete_config_override(key: str):
 # ── System Metrics (7.2c) ────────────────────────────────────────
 
 
+# P0-2 (round18 2.3/§7): metrics 热态 1.7s 恒定——拉 20 条完整 strategies_json +
+# 每条 json.loads 遍历 + 2 次全表 count。修复：① 查询只取 strategies_json 列
+# （不物化 design_text/market_snapshot_json 等大字段）；② 设计统计加内存 TTL 缓存
+# 30s（对标 P0-8 designs_list 模式）。metrics 供 verify_e2e 使用，不能删。
+_METRICS_CACHE: dict = {}
+
+
 @router.get("/metrics")
 async def get_system_metrics():
     """返回系统运行指标：池健康、设计成功率、并发失败计数等。
@@ -238,6 +245,12 @@ async def get_system_metrics():
     from ..database import async_session
     from ..models.portfolio_design import PortfolioDesign
     from sqlalchemy import select, func
+
+    # P0-2: 30s TTL 缓存——DB 统计结果短时不变，热态命中缓存（负向：每次都重查 → FAIL）
+    _now = time.monotonic()
+    _cached = _METRICS_CACHE.get("metrics")
+    if _cached and _now - _cached[0] < 30.0:
+        return _cached[1]
 
     # 候选池健康
     pool = market_data_hub.get_pool()
@@ -254,15 +267,17 @@ async def get_system_metrics():
     recent_total = 0
     try:
         async with async_session() as db:
-            # 近期设计成功率
+            # 近期设计成功率（P0-2: 只取 strategies_json 列，不物化其它大字段）
             result = await db.execute(
-                select(PortfolioDesign).order_by(PortfolioDesign.id.desc()).limit(20)
+                select(PortfolioDesign.strategies_json)
+                .order_by(PortfolioDesign.id.desc())
+                .limit(20)
             )
             recent = result.scalars().all()
             recent_total = len(recent)
-            for d in recent:
+            for sjson in recent:
                 import json
-                strategies = json.loads(d.strategies_json) if d.strategies_json else []
+                strategies = json.loads(sjson) if sjson else []
                 non_cash = 0
                 for s in strategies:
                     etfs = s.get("etfs", [])
@@ -286,7 +301,7 @@ async def get_system_metrics():
     except Exception as e:
         logger.warning("[admin/metrics] DB query failed: %s", e)
 
-    return {
+    result = {
         "pool": {
             "healthy": pool_healthy,
             "total_candidates": total_candidates,
@@ -300,6 +315,8 @@ async def get_system_metrics():
         },
         "status": "ok" if (pool_healthy or total_designs > 0) else "degraded",
     }
+    _METRICS_CACHE["metrics"] = (_now, result)
+    return result
 
 
 import logging

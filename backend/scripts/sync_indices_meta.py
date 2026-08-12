@@ -158,6 +158,29 @@ _STATIC_EXTRA_INDICES: list[dict] = [
     {"symbol": "HSTECH", "name": "恒生科技指数", "market": "HK", "category": "broad", "index_type": "price", "source": "static"},
     {"symbol": "HSCCI", "name": "恒生中国内地地产指数", "market": "HK", "category": "broad", "index_type": "price", "source": "static"},
     {"symbol": "CES100", "name": "中证港股通精选100指数", "market": "HK", "category": "broad", "index_type": "price", "source": "static"},
+    # ── round19 P8-① (2026-08-12): 恒生行业/综合指数静态段扩展——新浪源 ~38 条
+    # 无行业/主题细分；恒生行业分类（金融/地产/公用/工商）+ 综合行业 10 项 +
+    # 主题指数。symbol 以腾讯 hk{sym} K 线可拉验证（HSCI/HSF 已实测 320 根）。
+    # HSAHC（恒生医疗保健）腾讯不覆盖，仍入表供搜索（行情层标注「暂无行情」）。
+    {"symbol": "HSCI", "name": "恒生综合指数", "market": "HK", "category": "broad", "index_type": "price", "source": "static"},
+    {"symbol": "HSF", "name": "恒生金融分类指数", "market": "HK", "category": "industry", "index_type": "price", "source": "static"},
+    {"symbol": "HSP", "name": "恒生地产分类指数", "market": "HK", "category": "industry", "index_type": "price", "source": "static"},
+    {"symbol": "HSU", "name": "恒生公用事业分类指数", "market": "HK", "category": "industry", "index_type": "price", "source": "static"},
+    {"symbol": "HSC", "name": "恒生工商业分类指数", "market": "HK", "category": "industry", "index_type": "price", "source": "static"},
+    {"symbol": "HSCIE", "name": "恒生综合能源业指数", "market": "HK", "category": "industry", "index_type": "price", "source": "static"},
+    {"symbol": "HSCIM", "name": "恒生综合原材料业指数", "market": "HK", "category": "industry", "index_type": "price", "source": "static"},
+    {"symbol": "HSCII", "name": "恒生综合工业指数", "market": "HK", "category": "industry", "index_type": "price", "source": "static"},
+    {"symbol": "HSCICD", "name": "恒生综合非必需性消费业指数", "market": "HK", "category": "industry", "index_type": "price", "source": "static"},
+    {"symbol": "HSCICS", "name": "恒生综合必需性消费业指数", "market": "HK", "category": "industry", "index_type": "price", "source": "static"},
+    {"symbol": "HSCIH", "name": "恒生综合医疗保健业指数", "market": "HK", "category": "industry", "index_type": "price", "source": "static"},
+    {"symbol": "HSCIF", "name": "恒生综合金融业指数", "market": "HK", "category": "industry", "index_type": "price", "source": "static"},
+    {"symbol": "HSCIPC", "name": "恒生综合地产建筑业指数", "market": "HK", "category": "industry", "index_type": "price", "source": "static"},
+    {"symbol": "HSCIT", "name": "恒生综合资讯科技业指数", "market": "HK", "category": "industry", "index_type": "price", "source": "static"},
+    {"symbol": "HSCIC", "name": "恒生综合企业指数", "market": "HK", "category": "industry", "index_type": "price", "source": "static"},
+    {"symbol": "HSAHC", "name": "恒生医疗保健指数", "market": "HK", "category": "theme", "index_type": "price", "source": "static"},
+    {"symbol": "HSII", "name": "恒生互联网科技业指数", "market": "HK", "category": "theme", "index_type": "price", "source": "static"},
+    {"symbol": "HSHYLDI", "name": "恒生高股息率指数", "market": "HK", "category": "theme", "index_type": "price", "source": "static"},
+    {"symbol": "HSHKBIO", "name": "恒生香港上市生物科技指数", "market": "HK", "category": "theme", "index_type": "price", "source": "static"},
     # ── 美股主流指数（P0-22：US tab 指数搜索） ──
     {"symbol": "SPX", "name": "标普500指数", "market": "US", "category": "broad", "index_type": "price", "source": "static"},
     {"symbol": "SPY", "name": "SPDR标普500ETF", "market": "US", "category": "broad", "index_type": "price", "source": "static"},

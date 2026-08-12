@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { marketApi } from '../api'
+import { usePortfolioStore } from './portfolio'
 import logger from '../utils/logger'
 
 const WS_BASE = (() => {
@@ -15,6 +16,9 @@ export const useMarketStore = defineStore('market', () => {
   const history = ref([])
   const wsConnected = ref(false)
   const wsData = ref(null)
+  // round19 P6-② (2026-08-12): 状态机细分——'idle'|'connecting'|'connected'|
+  // 'reconnecting'|'stopped'，导航栏不再把「主动断开（按需连接）」混同为「离线」。
+  const wsStatus = ref('idle')
 
   // Watchlist
   const watchlist = ref([])
@@ -26,18 +30,37 @@ export const useMarketStore = defineStore('market', () => {
   let heartbeatTimer = null
   let reconnectDelay = 1000
   let stopped = false
-  let onMessageCallback = null
+  // round19 P6-①: 连接生命周期提升至 App.vue 全站常驻后，Dashboard 等页面仍要
+  // 消费行情消息——回调由单例改为多注册者数组（connect 只建连，页面各自注册/注销）。
+  const onMessageCallbacks = []
+  // round19 P2-②: portfolio_changed 广播消费防抖（批量操作触发多次广播 → 1s 合并刷新）
+  let portfolioChangedTimer = null
 
   function connectWS(onMsg) {
     if (typeof onMsg === 'function') {
-      onMessageCallback = onMsg
+      onMessageCallbacks.push(onMsg)
+    }
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      return // 幂等：已存在可用连接时不重复建连（全站常驻后重复调用场景）
     }
     stopped = false
     doConnect()
   }
 
+  function onWSMessage(cb) {
+    if (typeof cb === 'function' && !onMessageCallbacks.includes(cb)) {
+      onMessageCallbacks.push(cb)
+    }
+  }
+
+  function offWSMessage(cb) {
+    const i = onMessageCallbacks.indexOf(cb)
+    if (i >= 0) onMessageCallbacks.splice(i, 1)
+  }
+
   function doConnect() {
     if (stopped) return
+    wsStatus.value = 'connecting'
     try {
       ws = new WebSocket(`${WS_BASE}/portfolio`)
     } catch (e) {
@@ -48,6 +71,7 @@ export const useMarketStore = defineStore('market', () => {
 
     ws.onopen = () => {
       wsConnected.value = true
+      wsStatus.value = 'connected'
       reconnectDelay = 1000
       heartbeatTimer = setInterval(() => {
         if (ws && ws.readyState === WebSocket.OPEN) {
@@ -78,6 +102,15 @@ export const useMarketStore = defineStore('market', () => {
             }
           }
         }
+        // round19 P2-②: 组合结构变更广播——任一标签页/页面增删改标的，
+        // 其它已挂载页面与多标签页自动刷新（防抖 1s 合并批量操作）。
+        if (msg.type === 'portfolio_changed') {
+          if (portfolioChangedTimer) clearTimeout(portfolioChangedTimer)
+          portfolioChangedTimer = setTimeout(() => {
+            usePortfolioStore().fetchEtfs('on_exchange').catch(() => {})
+            usePortfolioStore().fetchEtfs('off_exchange').catch(() => {})
+          }, 1000)
+        }
         if (msg.symbol) {
           const idx = realtimeData.value.findIndex(item => item.symbol === msg.symbol)
           if (idx >= 0) {
@@ -85,7 +118,9 @@ export const useMarketStore = defineStore('market', () => {
             realtimeData.value = [...realtimeData.value]
           }
         }
-        if (onMessageCallback) onMessageCallback(msg)
+        for (const cb of onMessageCallbacks) {
+          try { cb(msg) } catch (e) { logger.error('Market WS 消费回调失败:', e) }
+        }
       } catch (e) {
         logger.error('Market WS 消息解析失败:', e)
       }
@@ -93,6 +128,8 @@ export const useMarketStore = defineStore('market', () => {
 
     ws.onclose = () => {
       wsConnected.value = false
+      // round19 P6-②: 主动断开（disconnectWS）触发的 onclose 不显示「重连中」
+      wsStatus.value = stopped ? 'stopped' : 'reconnecting'
       clearInterval(heartbeatTimer)
       scheduleReconnect()
     }
@@ -116,7 +153,12 @@ export const useMarketStore = defineStore('market', () => {
   function disconnectWS() {
     stopped = true
     wsConnected.value = false
+    wsStatus.value = 'stopped'
     clearInterval(heartbeatTimer)
+    if (portfolioChangedTimer) {
+      clearTimeout(portfolioChangedTimer)
+      portfolioChangedTimer = null
+    }
     if (reconnectTimer) {
       clearTimeout(reconnectTimer)
       reconnectTimer = null
@@ -197,8 +239,9 @@ export const useMarketStore = defineStore('market', () => {
   }
 
   return { 
-    realtimeData, indicators, signal, history, wsConnected, wsData, 
-    connectWS, disconnectWS, fetchRealtime, fetchIndicators, fetchSignal, fetchHistory, getQuote,
+    realtimeData, indicators, signal, history, wsConnected, wsStatus, wsData, 
+    connectWS, disconnectWS, onWSMessage, offWSMessage,
+    fetchRealtime, fetchIndicators, fetchSignal, fetchHistory, getQuote,
     // Watchlist
     watchlist, watchlistLoading, watchlistTotal,
     fetchWatchlist, addWatchlist, updateWatchlist, removeWatchlist, batchRemoveWatchlist,

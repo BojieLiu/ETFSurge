@@ -597,7 +597,9 @@ async def sectors_heat(limit: int = Query(20), market: str = "A") -> dict[str, A
         # 旧白名单丢弃该字段 → 热度行涨跌幅恒不显示）
         # O19 (round8 §7 §5.1D): 财联社板块热度无涨跌幅字段 → null 兜底为 0——
         # 与前端 `!= null` 防御协同（「非 null 可为 0」口径，见 O9 验收②）。
-        # 东财回填优先：em_chg 命中用真实涨跌；未命中保持原逻辑（null → 0）。
+        # 东财回填优先：em_chg 命中用真实涨跌；未命中保持原逻辑。
+        # round19 P4-③ (2026-08-12): 全失败兜底从 0 改 None——涨跌幅未知不再冒充 0%
+        # （反假完成）；前端 SectorHeatMap 显示「—」+ 整行 tooltip「数据源异常」。
         items.append({
             "rank": r.get("rank"),
             "name": name,
@@ -610,7 +612,7 @@ async def sectors_heat(limit: int = Query(20), market: str = "A") -> dict[str, A
             # P2-3 (round9 §6.1): 板块涨跌幅 ±10% 值域校验（em 回填已过校验；非回填路径也拦）
             "change_pct": em_chg if em_chg is not None
             else (r.get("change_pct") if r.get("change_pct") is not None
-                  and abs(float(r.get("change_pct") or 0)) <= 10.0 else 0),
+                  and abs(float(r.get("change_pct") or 0)) <= 10.0 else None),
         })
     # P0-17③ (round16 3.19): 非零率监控——低于 50% 时告警 + 端点返回 degraded 标记
     nonzero = sum(1 for it in items if it.get("change_pct"))
@@ -923,6 +925,15 @@ async def watchlist_add(data: WatchlistCreate) -> dict[str, Any]:
     # Z22: Validate symbol format - must be alphanumeric/dot/dash, no Chinese
     if not CODE_PATTERN.match(data.symbol):
         raise HTTPException(status_code=422, detail="无法解析该标的，请通过搜索选择")
+    # round19 P7-③ (2026-08-12): 入库统一归一化——手动输入带 sh/sz/bj 前缀（如
+    # sz301308）原样入库会导致 fetch_history 0 行、技术分析空数据（底层源不认前缀）。
+    # 仅 A 股剥前缀：US 字母代码（SHOP/SHW）剥后语义会变（review 修复）。
+    _at = str(getattr(data, "asset_type", "") or "").upper()
+    if _at in ("ETF", "FUND", "A-SHARE"):
+        _at = "A"
+    _s = str(data.symbol).lower()
+    if _at == "A" and _s.startswith(("sh", "sz", "bj")) and len(_s) > 2:
+        data.symbol = _s[2:]
     
     async with async_session() as session:
         # Check if already exists

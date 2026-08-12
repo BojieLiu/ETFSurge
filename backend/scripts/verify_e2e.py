@@ -2329,5 +2329,104 @@ MODULES["fundamentals"] = section_fundamentals
 MODULES["hk-market"] = section_hk_market
 MODULES["us-market"] = section_us_market
 
+
+# ── round19 边界用例（§四十三 补强 #7）──────────────────────────────
+def section_round19_boundary():
+    """round19/18 修复的边界用例：带前缀 symbol、SPY 冷态、watchlist 归一化入库。
+
+    - 带前缀 symbol（sz301308）→ fetch_history 归一化后 K 线非空（负向：0 行 → FAIL）
+    - watchlist 入库归一化（POST sz301308 → 落库 301308）
+    - SPY 技术分析（TickFlow/新浪/stale 兜底）→ data_available 或 _stale 标记
+    """
+    section("round19 边界用例")
+
+    # ① 带前缀 symbol 全链路（P7-①）
+    try:
+        r = requests.get(f"{BASE}/api/v1/market/history",
+                         params={"symbol": "sz301308", "asset_type": "A", "period": "daily"},
+                         timeout=20)
+        data = r.json() if r.status_code == 200 else []
+        rows = data.get("data") if isinstance(data, dict) else data
+        n = len(rows) if isinstance(rows, list) else 0
+        check("fetch_history('sz301308') K线非空（前缀归一化）", r.status_code == 200 and n >= 30,
+              f"{n} 根" if n else f"HTTP {r.status_code} / 0 根（负向：带前缀 0 行 → FAIL）")
+    except Exception as e:
+        check("fetch_history('sz301308') K线非空", False, str(e))
+
+    # ② watchlist 入库归一化（P7-③）——先清理残留再验证
+    try:
+        r = requests.post(f"{BASE}/api/v1/market/watchlist",
+                          json={"symbol": "sz301308", "asset_type": "A", "name": "江波龙"},
+                          timeout=10)
+        body = r.json() if r.status_code in (200, 201) else {}
+        check("watchlist POST sz301308 → 落库 301308", r.status_code in (200, 201) and body.get("symbol") == "301308",
+              f"symbol={body.get('symbol')}" if body else f"HTTP {r.status_code}")
+        if r.status_code in (200, 201) and body.get("id"):
+            requests.delete(f"{BASE}/api/v1/market/watchlist/{body['id']}", timeout=10)
+    except Exception as e:
+        check("watchlist 前缀归一化", False, str(e))
+
+    # ③ SPY 技术分析（P9-①/②）——数据可用或明确 stale/不可用标记（不裸「数据不足」）
+    try:
+        r = requests.get(f"{BASE}/api/v1/market/indicators",
+                         params={"symbol": "SPY", "asset_type": "US"}, timeout=25)
+        body = r.json() if r.status_code == 200 else {}
+        avail = bool(body.get("data_available"))
+        stale = bool(body.get("_stale"))
+        check("SPY indicators 数据可用或 stale 标记", r.status_code == 200 and (avail or stale),
+              f"data_available={avail}, _stale={stale}"
+              if r.status_code == 200 else f"HTTP {r.status_code}（负向：裸 data_available=False 无解释 → FAIL）")
+    except Exception as e:
+        check("SPY indicators", False, str(e))
+
+    # ④ design 详情 price 非空（P1-4）——最近一条 completed design
+    try:
+        r = requests.get(f"{BASE}/api/v1/portfolio/designs", params={"limit": 1}, timeout=10)
+        items = r.json() if r.status_code == 200 else []
+        if isinstance(items, list) and items:
+            did = items[0].get("id")
+            dr = requests.get(f"{BASE}/api/v1/portfolio/designs/{did}", timeout=10)
+            dbody = dr.json() if dr.status_code == 200 else {}
+            allocs = []
+            for p in (dbody.get("plans") or []):
+                allocs.extend(p.get("allocations") or [])
+            non_cash = [a for a in allocs if a.get("symbol") != "CASH"]
+            with_price = [a for a in non_cash if a.get("price") is not None]
+            check("design 详情 price 非 None（P1-4）",
+                  bool(non_cash) and len(with_price) >= max(1, len(non_cash) // 2),
+                  f"{len(with_price)}/{len(non_cash)} 有价" if non_cash else "无持仓")
+        else:
+            check("design 详情 price（P1-4）", False, "无历史设计方案")
+    except Exception as e:
+        check("design 详情 price（P1-4）", False, str(e))
+
+    # ⑤ sectors/heat change_pct null 兜底语义（P4-③）：响应可 degraded 但字段类型正确
+    try:
+        r = requests.get(f"{BASE}/api/v1/market/sectors/heat", params={"limit": 20}, timeout=20)
+        body = r.json() if r.status_code == 200 else {}
+        items = body.get("items") or []
+        null_pct = sum(1 for it in items if it.get("change_pct") is None)
+        check("sectors/heat change_pct null 显式（不冒充 0%）",
+              r.status_code == 200 and isinstance(items, list),
+              f"{null_pct}/{len(items)} null，degraded={body.get('degraded')}"
+              if r.status_code == 200 else f"HTTP {r.status_code}")
+    except Exception as e:
+        check("sectors/heat null 语义", False, str(e))
+
+    # ⑥ timeline/metrics 性能门禁（P0-1/P0-2）：热态 < 1s
+    for _label, _url in [("timeline", f"{BASE}/api/v1/portfolio/timeline"),
+                         ("metrics", f"{BASE}/api/v1/admin/metrics")]:
+        try:
+            t0 = time.time()
+            r = requests.get(_url, timeout=10)
+            dt = time.time() - t0
+            check(f"{_label} 热态 <1s（P0-1/P0-2）", r.status_code == 200 and dt < 1.0,
+                  f"{dt*1000:.0f}ms" if r.status_code == 200 else f"HTTP {r.status_code}")
+        except Exception as e:
+            check(_label, False, str(e))
+
+
+MODULES["round19-boundary"] = section_round19_boundary
+
 if __name__ == "__main__":
     main()

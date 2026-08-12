@@ -14,7 +14,11 @@ from app.services.portfolio_service import format_factor_summary
 
 class TestFactorSummaryChinese:
     def test_key_mapping_chinese_name(self):
-        """F11: 因子键映射中文名（新闻热度/RSI(14)/KDJ.D）。"""
+        """F11: 因子键映射中文名（新闻热度/RSI(14)/KDJ.D）。
+
+        round18 P0-3: KDJ 归一化负值需 tech_ind 原始值才展示（对齐 indicators 口径）——
+        无 tech_ind 时 KDJ 键排除，其余键正常映射。
+        """
         s = format_factor_summary({
             "sentiment.news_heat": 100.0,
             "technical.rsi.rsi_14": 39.53,
@@ -22,10 +26,18 @@ class TestFactorSummaryChinese:
         })
         assert "新闻热度" in s, f"应含中文名'新闻热度', got {s}"
         assert "RSI(14)" in s or "RSI" in s, f"应含 RSI 名, got {s}"
-        assert "KDJ" in s, f"应含 KDJ 名, got {s}"
+        assert "KDJ" not in s, f"无 tech_ind 时 KDJ 归一化键应排除, got {s}"
         # 原键名不应裸露出现
         assert "sentiment.news_heat" not in s, f"不应裸拼因子键, got {s}"
         assert "technical.rsi.rsi_14" not in s
+
+    def test_key_mapping_kdj_with_tech_ind(self):
+        """round18 P0-3: 传 tech_ind 时 KDJ 以原始值映射中文名。"""
+        s = format_factor_summary({
+            "sentiment.news_heat": 100.0,
+            "technical.kdj.d_value": -3.46,
+        }, tech_ind={"kdj": {"d": 84.77}})
+        assert "KDJ.D 84.77" in s, f"应含原始 KDJ.D 84.77, got {s}"
 
     def test_rsi_value_range_interpretation(self):
         """F11: RSI 值域解读——39.5 中性、85 超买、15 超卖。"""
@@ -37,9 +49,32 @@ class TestFactorSummaryChinese:
         assert "超卖" in s_lo, f"RSI 15 应解读超卖, got {s_lo}"
 
     def test_kdj_negative_oversold(self):
-        """F11: KDJ D 负值 → 超卖区解读。"""
+        """F11: KDJ D 负值 → 超卖区解读。
+
+        round18 P0-3 更新: KDJ 归一化负值不再冒充原始值——无 tech_ind（原始指标）
+        时排除 KDJ 键（负向: 负数出现在 factor_summary → FAIL）。
+        """
         s = format_factor_summary({"technical.kdj.d_value": -3.46})
-        assert "超卖" in s, f"KDJ D -3.46 应解读超卖, got {s}"
+        assert "KDJ" not in s, f"归一化负值应被排除, got {s}"
+
+    def test_kdj_aligned_with_tech_indicators(self):
+        """round18 P0-3: 传 tech_ind 时 KDJ 显示指标源原始值（0-100，对齐
+        /market/indicators）；负向: 仍显示归一化负值 → FAIL。"""
+        tech_ind = {"kdj": {"k": 84.77, "d": 14.74, "j": 70.0}}
+        s = format_factor_summary(
+            {"technical.kdj.k_value": -1.9, "technical.kdj.d_value": -3.46},
+            tech_ind=tech_ind,
+        )
+        assert "KDJ.K 84.77" in s, f"应显示原始 KDJ.K 84.77, got {s}"
+        assert "KDJ.D 14.74" in s, f"应显示原始 KDJ.D 14.74, got {s}"
+        assert "-3.46" not in s and "-1.90" not in s, f"归一化负值不应出现, got {s}"
+
+    def test_kdj_original_oversold_hint(self):
+        """round18 P0-3: 原始 KDJ <20 → 超卖区解读（0-100 口径）。"""
+        tech_ind = {"kdj": {"d": 14.74}}
+        s = format_factor_summary({"technical.kdj.d_value": -3.46}, tech_ind=tech_ind)
+        assert "KDJ.D 14.74" in s
+        assert "超卖" in s, f"KDJ 14.74 应判超卖, got {s}"
 
     def test_unknown_key_fallback(self):
         """F11: 未知键回退为原样（不崩溃、不丢失信息）。"""

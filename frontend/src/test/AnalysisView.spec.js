@@ -189,29 +189,34 @@ describe('F14/F15 成交量独立开关 + 周期标注 (round6 §16.2/16.3)', ()
     return wrapper.findComponent({ name: 'ChartPanel' }).props('chartOption')
   }
 
-  it('F14: 关闭 MACD 时成交量副图仍显示（独立开关，旧实现会消失）', async () => {
+  it('round19 P5-②: 成交量固定展示 + 指标副图三选一（切换 RSI → MACD 消失，互斥）', async () => {
     const wrapper = await mountChart()
-    // 默认 showVolume=true, showMACD=true → 有成交量 series
+    // 成交量固定渲染（无独立开关，恒显示）
     expect(chartOptionOf(wrapper).series.some((s) => s.name === '成交量')).toBe(true)
-    // 关闭 MACD（不关成交量）
-    await wrapper.find('[data-testid="toggle-macd"]').setValue(false)
+    // 默认 MACD 副图
+    expect(chartOptionOf(wrapper).series.some((s) => s.name === 'MACD')).toBe(true)
+    expect(chartOptionOf(wrapper).grid.length).toBeGreaterThanOrEqual(3)
+    // 切换 RSI → MACD 副图消失、RSI 出现（单选互斥）
+    await wrapper.find('[data-testid="indicator-rsi"]').setValue(true)
     await nextTick()
     const opt = chartOptionOf(wrapper)
-    // 成交量 grid 仍存在（旧实现 volPct 绑在 showMACD 上 → 关闭 MACD 成交量 grid 一并消失）
-    expect(opt.series.some((s) => s.name === '成交量')).toBe(true)
-    expect(opt.grid.length).toBeGreaterThanOrEqual(2)
-    // MACD series 消失
+    expect(opt.series.some((s) => s.name === 'RSI(14)')).toBe(true)
     expect(opt.series.some((s) => s.name === 'MACD')).toBe(false)
+    // 成交量仍固定
+    expect(opt.series.some((s) => s.name === '成交量')).toBe(true)
   })
 
-  it('F14: 关闭成交量开关 → 成交量副图消失（MACD 不受影响）', async () => {
+  it('round19 P5-②: 指标 series gridIndex 动态——不引用越界 grid（渲染位置断言，负向：写死越界 → FAIL）', async () => {
     const wrapper = await mountChart()
-    await wrapper.find('[data-testid="toggle-volume"]').setValue(false)
     await nextTick()
     const opt = chartOptionOf(wrapper)
-    expect(opt.series.some((s) => s.name === '成交量')).toBe(false)
-    // MACD 仍在
-    expect(opt.series.some((s) => s.name === 'MACD')).toBe(true)
+    // volume 恒在 → 主图(0) + 量(1) + 指标(2)；gridIndex 必须指向存在的 xAxis/grid
+    const macd = opt.series.find((s) => s.name === 'MACD')
+    expect(macd).toBeTruthy()
+    expect(macd.xAxisIndex).toBeLessThan(opt.xAxis.length)
+    expect(macd.yAxisIndex).toBeLessThan(opt.yAxis.length)
+    expect(macd.xAxisIndex).toBeLessThan(opt.grid.length)
+    expect(opt.grid.length).toBeGreaterThanOrEqual(3) // 主图 + 量图 + 指标副图
   })
 
   it('F14: amount 有有效值时成交量副图叠加成交额线；无 amount 时不渲染', async () => {

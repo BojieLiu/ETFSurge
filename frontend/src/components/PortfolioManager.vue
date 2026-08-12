@@ -100,7 +100,7 @@
             <AppInput
               type="number"
               v-model.number="form.avg_cost"
-              placeholder="可选"
+              placeholder="默认自动填入当前价"
               :min="0"
               :step="0.001"
               size="md"
@@ -213,7 +213,7 @@
       </div>
 
       <!-- Empty State -->
-      <div v-if="!cachedEtfs.length" class="empty-state">
+      <div v-if="!currentEtfs.length" class="empty-state">
         <div class="empty-icon" aria-hidden="true">📦</div>
         <h3 class="empty-title">还没有 ETF</h3>
         <p class="empty-description">在上方搜索并添加 ETF 到组合</p>
@@ -293,8 +293,20 @@
                 </span>
               </td>
               <td class="shares-cell">
+                <!-- round19 P3-③: 「调整仓位（买卖）」——份额列 dblclick 进入
+                     输入 delta 份额 + 成交价（默认现价），按加权平均重算成本 -->
+                <div v-if="etf.adjustShares !== undefined" class="adjust-shares" @dblclick.stop>
+                  <AppInput v-model.number="etf.adjustShares" size="sm" type="number"
+                            :step="100" placeholder="±份额" aria-label="操作份额"
+                            @keydown.enter="saveAdjustShares(etf)" />
+                  <AppInput v-model.number="etf.adjustPrice" size="sm" type="number"
+                            :step="0.01" :min="0" placeholder="成交价" aria-label="成交价"
+                            @keydown.enter="saveAdjustShares(etf)" />
+                  <AppButton size="sm" @click.stop="saveAdjustShares(etf)" title="确认调整">✓</AppButton>
+                  <AppButton size="sm" variant="secondary" @click.stop="cancelAdjustShares(etf)" title="取消">✕</AppButton>
+                </div>
                 <AppInput
-                  v-if="etf.editShares !== undefined"
+                  v-else-if="etf.editShares !== undefined"
                   v-model.number="etf.editShares"
                   size="sm"
                   type="number"
@@ -303,7 +315,7 @@
                   @blur="saveCostBasis(etf)"
                   @keydown.enter="saveCostBasis(etf)"
                 />
-                <span v-else class="shares-value text-mono" @dblclick="startEditShares(etf)" :title="etf.shares_held != null ? '' : '基于目标权重估算'">
+                <span v-else class="shares-value text-mono" @dblclick="startAdjustShares(etf)" :title="etf.shares_held != null ? '双击调整仓位（买卖）' : '基于目标权重估算；双击调整仓位'">
                   {{ formatShares(etf.shares_held, etf) }}
                 </span>
               </td>
@@ -380,7 +392,7 @@
             <span v-else-if="p === currentPage - 3 || p === currentPage + 3" class="page-ellipsis">…</span>
           </template>
           <button class="page-btn" :disabled="currentPage >= totalPages || paginating" @click="nextPage" aria-label="下一页">›</button>
-          <span class="page-info">共 {{ cachedEtfs.length }} 条，{{ totalPages }} 页</span>
+          <span class="page-info">共 {{ currentEtfs.length }} 条，{{ totalPages }} 页</span>
         </div>
       </div>
     </section>
@@ -422,17 +434,17 @@ const pnlData = ref({ items: [] })
 const pnlLoading = ref(false)
 const adding = ref(false)
 
-// Pagination
+// Pagination（round19 P2-①: 移除 cachedEtfs 快照层——分页直接由响应式 currentEtfs 派生，
+// 消除「store 已更新、快照未同步」整类问题；loadTab/refreshPnl 不再需要快照同步行）
 const currentPage = ref(1)
 const pageSize = ref(10)
 const paginating = ref(false)
-const cachedEtfs = ref([])
 
-const totalPages = computed(() => Math.max(1, Math.ceil(cachedEtfs.value.length / pageSize.value)))
+const totalPages = computed(() => Math.max(1, Math.ceil(currentEtfs.value.length / pageSize.value)))
 
 const paginatedEtfs = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value
-  return cachedEtfs.value.slice(start, start + pageSize.value)
+  return currentEtfs.value.slice(start, start + pageSize.value)
 })
 
 function goToPage(page) {
@@ -552,7 +564,9 @@ function onSearchBlur() {
 }
 
 function selectSearch(r) {
-  form.value = { symbol: r.symbol, name: r.name, asset_type: r.asset_type, weight: form.value.weight, tracked_index: form.value.tracked_index }
+  // round19 P3-②: 搜索选中自动填当前价即成本（搜索响应带 realtime.price，可编辑覆盖）
+  const curPrice = r?.realtime?.price ?? null
+  form.value = { symbol: r.symbol, name: r.name, asset_type: r.asset_type, weight: form.value.weight, tracked_index: form.value.tracked_index, avg_cost: curPrice, shares_held: null }
   searchQuery.value = `${r.symbol} ${r.name}`
   searchResults.value = []
   showDropdown.value = false
@@ -595,6 +609,8 @@ async function onAdd() {
     toast(`已添加 ${form.value.name}`, 'success')
     form.value = { symbol: '', name: '', asset_type: 'A', weight: 20, tracked_index: form.value.tracked_index, avg_cost: null, shares_held: null }
     searchQuery.value = ''
+    // round19 P2-①: 增删后同步 PnL 数据（列表响应式自动更新；PnL 需重新拉取）
+    await loadTab()
   } finally {
     adding.value = false
   }
@@ -615,6 +631,8 @@ async function onUpdate(etf) {
 async function onRemove(symbol) {
   await store.removeEtf(symbol)
   toast('ETF 已删除', 'info')
+  // round19 P2-①: 增删后同步 PnL 数据
+  await loadTab()
 }
 
 async function autoDistributeWeights() {
@@ -679,8 +697,6 @@ async function refreshPnl() {
     pnlData.value = res.data || { items: [] }
   } catch { pnlData.value = { items: [] } }
   finally { pnlLoading.value = false }
-  // Ensure cachedEtfs is updated with latest store data after PnL refresh
-  cachedEtfs.value = currentEtfs.value
   if (currentPage.value > totalPages.value) currentPage.value = 1
 }
 
@@ -690,7 +706,6 @@ async function loadTab() {
   for (let attempt = 0; attempt <= 2; attempt++) {
     try {
       await store.fetchEtfs(activeTab.value)
-      cachedEtfs.value = currentEtfs.value
       if (currentPage.value > totalPages.value) currentPage.value = 1
       break
     } catch (e) {
@@ -799,6 +814,49 @@ function startEditCost(etf) {
 
 function startEditShares(etf) {
   etf.editShares = etf.shares_held
+}
+
+// round19 P3-③: 「调整仓位（买卖）」——份额列 dblclick 进入（非直接改值）
+function startAdjustShares(etf) {
+  etf.adjustShares = 0
+  etf.adjustPrice = pnlMap.value[etf.symbol]?.current_price ?? etf.avg_cost ?? null
+  delete etf.editShares
+}
+
+function cancelAdjustShares(etf) {
+  delete etf.adjustShares
+  delete etf.adjustPrice
+}
+
+async function saveAdjustShares(etf) {
+  const delta = Number(etf.adjustShares)
+  if (!delta || Number.isNaN(delta)) {
+    toast('请输入操作份额（正=增持 / 负=减持）', 'warning')
+    return
+  }
+  const price = Number(etf.adjustPrice)
+  if (!price || price <= 0) {
+    toast('成交价缺失/无效（请填成交价）', 'error')
+    return
+  }
+  try {
+    const res = await store.updateEtf(etf.symbol, { delta_shares: delta, price })
+    const d = res || {}
+    const side = d.trade?.side === 'sell' ? '减持' : '增持'
+    let msg = `${side}成功：新成本 ¥${Number(d.avg_cost ?? etf.avg_cost).toFixed(3)}`
+    if (d.realized_pnl != null && d.realized_pnl !== 0) {
+      msg += `，已实现盈亏 ${d.realized_pnl >= 0 ? '+' : ''}¥${Number(d.realized_pnl).toFixed(2)}`
+    }
+    if (d.target_weight != null) {
+      msg += `，权重联动至 ${(Number(d.target_weight) * 100).toFixed(1)}%`
+    }
+    toast(msg, 'success')
+    delete etf.adjustShares
+    delete etf.adjustPrice
+    await loadTab()
+  } catch (e) {
+    toast('调整失败：' + (e?.response?.data?.detail || e?.message || '请检查输入'), 'error')
+  }
 }
 
 async function saveCostBasis(etf) {
@@ -983,6 +1041,9 @@ onMounted(loadTab)
 .text-muted { color: var(--color-text-tertiary); }
 
 .action-buttons { display: flex; gap: var(--space-2); }
+/* round19 P3-③: 「调整仓位（买卖）」内联编辑（份额 + 成交价） */
+.adjust-shares { display: flex; align-items: center; gap: var(--space-1); flex-wrap: wrap; }
+.adjust-shares :deep(.app-input) { width: 84px; }
 
 /* Pagination */
 .pagination-bar {

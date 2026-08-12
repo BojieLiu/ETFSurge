@@ -28,6 +28,10 @@ THRESHOLDS = {
     "factor-health": 2.0,      # GET /api/v1/factors/active
     "symbol-analysis": 5.0,    # POST /api/v1/analysis/symbol/510050（SSE 仅测首包）
     "indices-global": 5.0,     # GET /api/v1/market/indices/global
+    # round18 §5 盲区②/§7 P0-1/P0-2: timeline/metrics 热态恒定 2.3s/1.7s 无门禁——
+    # 补阈值 ≤1s（修复后目标 ≤300ms，门禁留裕量）
+    "timeline": 1.0,           # GET /api/v1/portfolio/timeline
+    "metrics": 1.0,            # GET /api/v1/admin/metrics
 }
 
 DEBT_LOG = "已知性能债台账（软门禁预警登记，不阻断）"
@@ -78,6 +82,12 @@ def main():
         elif label == "symbol-analysis":
             url = f"{args.base}/api/v1/analysis/symbol/510050"
             status, dur = _http("POST", url)
+        elif label == "timeline":
+            url = f"{args.base}/api/v1/portfolio/timeline"
+            status, dur = _http("GET", url)
+        elif label == "metrics":
+            url = f"{args.base}/api/v1/admin/metrics"
+            status, dur = _http("GET", url)
         else:  # indices-global
             url = f"{args.base}/api/v1/market/indices/global"
             status, dur = _http("GET", url)

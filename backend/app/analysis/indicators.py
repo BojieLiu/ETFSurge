@@ -267,14 +267,14 @@ def compute_chart_data(df: list[dict]) -> dict:
     dea = macd_pt["MACDs_12_26_9"]
     macd_hist = 2 * macd_pt["MACDh_12_26_9"]
 
-    # P2-5 (round9 §6.3): MACD 序列截断为最近 30 根——旧实现 dif/dea/histogram 全量返回
-    # （与 dates 等长，120+ 根 ≈ 5-10KB/标的，批量调用放大延迟）；前端 MACD 子图 x 轴用
-    # dates（category，按 index 对齐），截断后柱/线显示最近 30 根，无对齐问题。
-    _macd_tail = 30
+    # round19 P5 (2026-08-12): 移除 P2-5 的 MACD 30 根截断——截断后 series 长度与
+    # dates 不等长，ECharts 按 index 对齐会把「最近 30 天值」画到「最前 30 根 x 位置」
+    # （错位）；且弹窗副图（round19 三选一）与 AnalysisView 均按全量 dates 渲染。
+    # MACD 与 KDJ/RSI 一致全量返回（负载回弹登记性能软门禁，必要时前端滚动截取）。
     macd_out = {
-        "dif": _to_list(dif)[-_macd_tail:],
-        "dea": _to_list(dea)[-_macd_tail:],
-        "histogram": _to_list(macd_hist)[-_macd_tail:],
+        "dif": _to_list(dif),
+        "dea": _to_list(dea),
+        "histogram": _to_list(macd_hist),
     }
 
     # P2-4 (R4-11b): KDJ/RSI 序列——前端 AnalysisView 读 d.kdj.k/d.rsi 渲染子图，

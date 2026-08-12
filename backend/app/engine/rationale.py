@@ -76,13 +76,18 @@ def _style_probe(meta: dict | None = None) -> str:
     return "theme_satellite"
 
 
-def _layer_phrase(layer: str, asset_name: str, sym: str = "", style: str = "") -> str:
+def _layer_phrase(layer: str, asset_name: str, sym: str = "", style: str = "",
+                  correlation_median: float | None = None) -> str:
     """从风格短语池中选择一条完整描述，用 symbol hash 保证稳定性。
 
     F1-8: 短语生成完整句式（不再以「在方案中」开头），调用方统一以
     「在{label}方案中{layer_desc}」拼装，杜绝「在方案中在方案中」重复。
     O16 (round8 §7 §5.1B): core/defense 层禁用「卫星仓位/高弹性」语义短语——
     短语池中过滤含"卫星"句，避免 core 宽基被误配卫星语义（562000 曾命中）。
+    round19 P1-③ (2026-08-12): 「低相关性」措辞条件化——防御层短语池中
+    「N与权益低相关」「低相关性N」两句仅在 correlation_median < 0.3 时允许；
+    None（相关矩阵不可用）或中位数 ≥0.3 时回退中性防御文案（杜绝无数据
+    冒充低相关——对照反假完成 §2）。
     """
     pool = _STYLE_TO_POOL.get(style) or {
         "core": _CORE_PHRASES, "satellite": _THEME_SATELLITE_PHRASES,
@@ -95,6 +100,11 @@ def _layer_phrase(layer: str, asset_name: str, sym: str = "", style: str = "") -
             pool = filtered
         else:
             pool = _CORE_PHRASES if layer != "defense" else _DEFENSE_PHRASES
+    # round19 P1-③: 低相关措辞守卫——仅真实低相关（中位数 < 0.3）才保留
+    if correlation_median is None or correlation_median >= 0.3:
+        pool = [fn for fn in pool if "低相关" not in fn(asset_name)]
+        if not pool:
+            pool = _DEFENSE_PHRASES
     idx = int(hashlib.md5(sym.encode()).hexdigest(), 16) % len(pool) if sym else 0
     return pool[idx](asset_name)
 
@@ -109,6 +119,7 @@ def build_rationale(
     industry: str | None = None,
     industry_confidence: float = 0.85,
     rank_info: dict | None = None,
+    correlation_median: float | None = None,
 ) -> str:
     """
     为指定层级的 ETF 生成数据驱动的入选理由（纯函数）。
@@ -127,6 +138,8 @@ def build_rationale(
             不输出可能误导的具体行业语义）
         rank_info: O24 归因链——{rank, total_candidates, dominant_factor}：
             层内候选池排名 N/M + 主驱动因子，回答「为什么选中它而非同类」
+        correlation_median: round19 P1-③ 该标的与组合其它标的中位数 r
+            （None = 相关矩阵不可用 → 「低相关性」措辞禁用，回退中性文案）
 
     Returns:
         str: 中文入选理由
@@ -142,7 +155,9 @@ def build_rationale(
     elif "红利" in asset_name:
         parts.append(f"{asset_name} — 高股息低波动，适合底仓配置")
     elif "黄金" in asset_name:
-        parts.append(f"{asset_name} — 贵金属避险资产，与权益低相关")
+        # round19 P1-③: 黄金「与权益低相关」不再硬编码声称——低相关措辞统一交给
+        # _layer_phrase 条件逻辑（该标的中位数 r < 0.3 才允许出现）
+        parts.append(f"{asset_name} — 贵金属避险资产")
         # B1: 使用动量因子作为近期跌幅的代理指标
         momentum_val = factor_scores.get("momentum")
         if momentum_val is not None and momentum_val < -0.5:
@@ -244,7 +259,8 @@ def build_rationale(
     sl = {"defensive": "防御型", "balanced": "平衡型", "aggressive": "进攻型"}
     label = sl.get(strategy, strategy)
     style = _style_probe(meta)
-    layer_desc = _layer_phrase(layer, asset_name, code, style)
+    # round19 P1-③: 低相关措辞条件化（真实中位数 < 0.3 才允许「低相关性」）
+    layer_desc = _layer_phrase(layer, asset_name, code, style, correlation_median)
     parts.append(f"在{label}方案中{layer_desc}")
 
     # 7. 归因链（O24, round7 §7 P24）——「为什么选中它而非同类」：

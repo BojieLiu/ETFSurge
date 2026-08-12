@@ -109,3 +109,14 @@ def _migrate(conn):
     # Q02: strategy_check_records.report_text
     if "report_text" not in columns_check:
         conn.execute(text("ALTER TABLE strategy_check_records ADD COLUMN report_text TEXT"))
+    # round19 P7-③ (2026-08-12): watchlist 存量清洗——历史手动输入可能带 sh/sz/bj
+    # 前缀（如 sz301308）导致 fetch_history 0 行；统一为不带前缀规范（幂等）。
+    try:
+        conn.execute(text(
+            "UPDATE watchlist SET symbol = substr(symbol, 3) "
+            "WHERE lower(symbol) LIKE 'sh%' AND length(symbol) > 2 "
+            "OR lower(symbol) LIKE 'sz%' AND length(symbol) > 2 "
+            "OR lower(symbol) LIKE 'bj%' AND length(symbol) > 2"
+        ))
+    except Exception:
+        pass  # watchlist 表不存在（首次建库）时跳过

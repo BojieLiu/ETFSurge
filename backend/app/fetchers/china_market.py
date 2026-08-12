@@ -283,8 +283,10 @@ def _tickflow_kline(symbol: str, period: str = "daily") -> list[dict[str, Any]]:
         api_key = getattr(settings, "tickflow_api_key", "") or ""
         if not api_key:
             return []
-        code = symbol[2:] if symbol.startswith(("sh", "sz", "bj")) else symbol
-        tf_sym = f"{code}.SH" if code.startswith(("5", "6")) else f"{code}.SZ"
+        # round19 P9-② (2026-08-12): 复用 _tickflow_symbol 统一映射——旧实现硬编码
+        # SH/SZ（仅 A 股）；现支持 US（AAPL→AAPL.US）/HK（00700.HK 显式后缀）分支，
+        # 与实时行情 _tickflow_quotes 同构。
+        tf_sym = _tickflow_symbol(symbol)
         freq = {"daily": "1d", "weekly": "1w", "monthly": "1M"}.get(period, "1d")
         def _p():
             from tickflow import TickFlow
@@ -1451,7 +1453,17 @@ def fetch_fund_nav(symbol: str) -> dict[str, Any] | None:
 
 def fetch_index_history(symbol: str, period: str = "daily") -> list[dict[str, Any]]:
     """获取指数历史 K 线（日线/周线/月线），使用 akshare stock_zh_index_daily。
-    akshare 返回格式: 日期,开盘,最高,最低,收盘,成交量,成交额。"""
+    akshare 返回格式: 日期,开盘,最高,最低,收盘,成交量,成交额。
+
+    round19 P8-③ (2026-08-12): 增加 HK 指数分支——字母代码（HSCI/HSF/HSI/
+    HSTECH 等恒生指数）走腾讯 hk{code} K 线（复用 _fetch_tencent_hk_history，
+    实测 hkHSI/hkHSTECH/hkHSCI/hkHSF = 320 根）。腾讯不覆盖的（如 HSAHC 恒生
+    医疗保健）返回 []（前端标注「暂无行情」而非空白）。A 股数字指数保持原链。
+    """
+    if str(symbol).isalpha():
+        # HK 指数：腾讯 hk{sym}（含当日、320 根）——新浪/东财均无 HK 指数 K 线
+        tx_rows = _fetch_tencent_hk_history(symbol)
+        return tx_rows  # 空 = 腾讯不覆盖（HSAHC 等），调用方标注「暂无行情」
     try:
         import pandas as pd
         # 处理已带前缀的 symbol（如 sh000001、sz399001）
@@ -1487,6 +1499,20 @@ def _is_etf_code(symbol: str) -> bool:
 
 def fetch_history(symbol: str, asset_type: str = "A", period: str = "daily") -> list[dict[str, Any]]:
     with no_proxy():
+        # round18 P2-1 (2026-08-12): asset_type 归一化——'etf'/'fund' 等非标准值
+        # 归一到 'A'（此前静默 return [] → 第三方调用方拿空数据），其余未知类型
+        # 保持空（由调用方显式标注，不伪造）。
+        if str(asset_type).upper() in ("ETF", "FUND", "A-SHARE"):
+            asset_type = "A"
+        # round19 P7-① (2026-08-12): 入口统一归一化——watchlist/自选/搜索/深链可能带
+        # sh/sz/bj 前缀（如 sz301308），内部各源均不认前缀 → 0 行。剥前缀仅限 A 股：
+        # US 字母代码（SHOP/SHW/SJM）与 HK 数字代码剥后语义会变（review 修复）。
+        if (
+            asset_type == "A"
+            and str(symbol).lower().startswith(("sh", "sz", "bj"))
+            and len(str(symbol)) > 2
+        ):
+            symbol = str(symbol)[2:]
         if asset_type == "index":
             return fetch_index_history(symbol, period)
         if asset_type == "A":
@@ -1588,6 +1614,41 @@ def _fetch_tencent_hk_history(symbol: str) -> list[dict[str, Any]]:
         return []
 
 
+def _fetch_sina_us_daily(symbol: str) -> list[dict[str, Any]]:
+    """round19 P9-② (2026-08-12): akshare stock_us_daily（新浪源）——US 日 K 全量兜底。
+
+    实测 SPY 6438 行 / AAPL 10008 行（T+1，无限额，国内可达）；列名英文
+    （date/open/high/low/close/volume）→ 系统格式（日期/开盘/最高/最低/收盘/成交量）。
+    需纯代码（带 105. 前缀会 IndexError——新浪按纯 ticker）。失败返回 []。
+    """
+    try:
+        import pandas as pd
+
+        def _p():
+            import akshare as ak
+            return ak.stock_us_daily(symbol=symbol)
+
+        df = run_in_thread(_p, timeout=12, executor="long")
+        if df is None or getattr(df, "empty", True):
+            return []
+        out = []
+        for _, r in df.iterrows():
+            try:
+                out.append({
+                    "日期": str(r.get("date") or ""),
+                    "开盘": float(r.get("open", 0)),
+                    "最高": float(r.get("high", 0)),
+                    "最低": float(r.get("low", 0)),
+                    "收盘": float(r.get("close", 0)),
+                    "成交量": float(r.get("volume", 0) or 0),
+                })
+            except (ValueError, TypeError):
+                continue
+        return out
+    except Exception:
+        return []
+
+
 def _fetch_akshare_history(symbol: str, asset_type: str, period: str) -> list[dict[str, Any]]:
     try:
         import pandas as pd
@@ -1598,7 +1659,10 @@ def _fetch_akshare_history(symbol: str, asset_type: str, period: str) -> list[di
             if not fn:
                 return None
             return fn(symbol=symbol, period=period, adjust="qfq") if asset_type == "A" else fn(symbol=symbol, period=period)
-        df = run_in_thread(_p, timeout=8, executor="long")
+        # round19 P9-③ (2026-08-12): US akshare（stock_us_hist 走东财）被 EM 域名级风控
+        # 断连必 8s 超时——降为 3s 快速失败（避免「空转源」拖慢冷态响应）；A/HK 保持 8s。
+        _ak_timeout = 3 if asset_type == "US" else 8
+        df = run_in_thread(_p, timeout=_ak_timeout, executor="long")
         if df is not None and isinstance(df, pd.DataFrame) and not df.empty:
             _decode_df(df)
             logger.debug("[history] %s %s: akshare main source hit (%d rows)", asset_type, symbol, len(df))
@@ -1606,13 +1670,17 @@ def _fetch_akshare_history(symbol: str, asset_type: str, period: str) -> list[di
         # P1-1: 逐源日志——旧实现静默降级，源链不可用时无任何痕迹
         logger.warning("[history] %s %s: akshare %s empty/missing — fallback chain", asset_type, symbol,
                        {"A": "stock_zh_a_hist", "HK": "stock_hk_hist", "US": "stock_us_hist"}.get(asset_type, "?"))
-        # Fallback: Finnhub candles → Alpha Vantage → Tencent HK（P1-1 新增，非 EM）
+        # round19 P9-③ (2026-08-12): US 链重排——TickFlow（主修复）→ alphavantage
+        # → 新浪 stock_us_daily（全量兜底）→ finnhub（恒败，3s 短超时）；
+        # HK 保持 finnhub → alphavantage → 腾讯独立兜底。
         if asset_type in ("HK", "US"):
-            fh_result = run_in_thread(lambda: global_markets_fetcher.fetch_candles(symbol, "D"), timeout=8, executor="long")
-            if fh_result:
-                logger.info("[history] %s %s: finnhub fallback hit (%d rows)", asset_type, symbol, len(fh_result))
-                return fh_result
-            logger.warning("[history] %s %s: finnhub fallback failed/empty", asset_type, symbol)
+            if asset_type == "US":
+                # TickFlow 主修复：实测 AAPL.US/SPY.US 各 500 根（含当日收盘）
+                tf_rows = _tickflow_kline(symbol, period)
+                if tf_rows:
+                    logger.info("[history] US %s: tickflow fallback hit (%d rows)", symbol, len(tf_rows))
+                    return tf_rows
+                logger.warning("[history] US %s: tickflow fallback empty", symbol)
             # O2: alphavantage 用转换后符号（0700.HK）——旧实现传裸 00700 恒空
             av_result = run_in_thread(
                 lambda: global_markets_fetcher.fetch_daily_alphavantage(
@@ -1624,8 +1692,26 @@ def _fetch_akshare_history(symbol: str, asset_type: str, period: str) -> list[di
                 logger.info("[history] %s %s: alphavantage fallback hit (%d rows)", asset_type, symbol, len(av_result))
                 return av_result
             logger.warning("[history] %s %s: alphavantage fallback failed/empty", asset_type, symbol)
-            # P1-1: 腾讯港股日 K（非 EM 源，容器 EM 被拦时唯一可用链）
-            if asset_type == "HK":
+            if asset_type == "US":
+                # 新浪全量兜底（T+1、无限额；SPY 自 2001 年）
+                sina_us = _fetch_sina_us_daily(symbol)
+                if sina_us:
+                    logger.info("[history] US %s: sina stock_us_daily fallback hit (%d rows)", symbol, len(sina_us))
+                    return sina_us
+                logger.warning("[history] US %s: sina stock_us_daily fallback empty", symbol)
+                # finnhub 恒败（免费额度/无该 ticker）——最后兜底，3s 短超时
+                fh_result = run_in_thread(lambda: global_markets_fetcher.fetch_candles(symbol, "D"), timeout=3, executor="long")
+                if fh_result:
+                    logger.info("[history] US %s: finnhub fallback hit (%d rows)", symbol, len(fh_result))
+                    return fh_result
+                logger.warning("[history] US %s: finnhub fallback failed/empty", symbol)
+            else:  # HK
+                fh_result = run_in_thread(lambda: global_markets_fetcher.fetch_candles(symbol, "D"), timeout=8, executor="long")
+                if fh_result:
+                    logger.info("[history] HK %s: finnhub fallback hit (%d rows)", symbol, len(fh_result))
+                    return fh_result
+                logger.warning("[history] HK %s: finnhub fallback failed/empty", symbol)
+                # P1-1: 腾讯港股日 K（非 EM 源，容器 EM 被拦时唯一可用链）
                 tx_result = _fetch_tencent_hk_history(symbol)
                 if tx_result:
                     logger.info("[history] HK %s: tencent hk kline fallback hit (%d rows)", symbol, len(tx_result))

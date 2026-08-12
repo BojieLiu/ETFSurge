@@ -293,8 +293,9 @@ class TestSectorHeatPlateJoin:
         assert item["change_pct"] == pytest.approx(1.86), "plate_code join 应命中财联社真实涨跌"
 
     @pytest.mark.asyncio
-    async def test_plate_code_miss_falls_back_em_and_zero(self):
-        """P2-AE 负向: plate_code 未命中 → 东财名称兜底 → 仍未命中保持 0（现有行为）。"""
+    async def test_plate_code_miss_falls_back_em_and_null(self):
+        """P2-AE 负向: plate_code 未命中 → 东财名称兜底 → 仍未命中显式 null（round19 P4-③:
+        0 改 null——0 会被前端显示成「平盘 0%」冒充真实涨跌）。"""
         from app.routers import market as m
 
         rows = [{"rank": 1, "plate_name": "民爆概念", "plate_code": "cls99999",
@@ -306,7 +307,8 @@ class TestSectorHeatPlateJoin:
                  {},    # em 也未命中
              ])):
             resp = await m.sectors_heat(limit=20, market="A")
-        assert resp["items"][0]["change_pct"] == 0
+        assert resp["items"][0]["change_pct"] is None, \
+            "未命中涨跌幅应显式 null（不冒充 0% 平盘）"
 
     def test_cls_plate_changes_parses_decimal_to_pct(self):
         """fetch_cls_plate_changes: change 小数（0.0186）→ ×100（1.86）。"""

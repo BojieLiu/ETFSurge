@@ -8,7 +8,7 @@ Covers:
 5. last_computed_at present for computed factors, None for static
 """
 import pytest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from httpx import AsyncClient, ASGITransport
 
 
@@ -48,7 +48,7 @@ class TestFactorsActive:
              patch.object(registry, "_last_ic_batch", fake_ic_batch), \
              patch.object(registry, "_sample_counts", {}), \
              patch.object(registry, "_last_computed_at", "2026-07-31T15:00:00Z"):
-            body = await factors_router.get_active_factors()
+            body = await factors_router.get_active_factors(db=MagicMock())
             data = body.body if hasattr(body, "body") else body
 
         import json
@@ -93,12 +93,16 @@ class TestFactorsActive:
         }
 
         factors_router._CACHE.clear()
+        # round18 P0-4: 端点改读 DB IC 周期计数——mock _db_ic_sample_counts 为
+        # DB 计数源（保留「样本 <30 → no_data」原断言语义，迁移自内存 _sample_counts）
+        mock_db = MagicMock()
+        factors_router._db_ic_sample_counts = AsyncMock(return_value=fake_sample_counts)
         with patch.object(registry, "_computers", fake_computers), \
              patch.object(registry, "_factors", fake_factors), \
              patch.object(registry, "_last_ic_batch", fake_ic_batch), \
              patch.object(registry, "_sample_counts", fake_sample_counts), \
              patch.object(registry, "_last_computed_at", "2026-07-31T15:00:00Z"):
-            body = await factors_router.get_active_factors()
+            body = await factors_router.get_active_factors(db=mock_db)
             data = body.body if hasattr(body, "body") else body
 
         import json
@@ -147,6 +151,8 @@ class TestFactorsActive:
              patch.object(registry, "_last_ic_batch", {"technical.ma.sma_5": 0.0321}), \
              patch.object(registry, "_sample_counts", {"technical.ma.sma_5": 240}), \
              patch.object(registry, "_last_computed_at", "2026-07-31T15:00:00Z"):
+            # round18 P0-4: HTTP 契约测试经 FastAPI DI 注入真实 get_db（测试库）——
+            # DB 无 IC 记录时回退内存计数，status 断言保持
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 resp = await client.get("/api/v1/factors/active")

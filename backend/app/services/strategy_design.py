@@ -355,6 +355,10 @@ async def generate_enhanced_design(
             )
             allocs = risk_allocations[0]["allocations"] if risk_allocations else allocs
 
+            # round19 P1-② (2026-08-12): 方案内标的与同方案其它持仓的中位数相关性
+            # （低相关措辞数据源，缺失/失败时为空 dict → correlation_median=None 不影响）
+            corr_medians = _correlation_medians_for(allocs, candidates)
+
             # enrich rationale using engine/rationale.py
             for a in allocs:
                 if a.get("symbol") == "CASH":
@@ -369,6 +373,7 @@ async def generate_enhanced_design(
                     factor_scores=a.get("factor_breakdown", {}),
                     regime=market_regime,
                     industry=sym_meta.get("industry", "") if sym_meta else None,
+                    correlation_median=corr_medians.get(code),
                 )
 
             # S6: Inject daily_change_pct and price from market_data_hub market data
@@ -393,8 +398,7 @@ async def generate_enhanced_design(
                         a["price"] = price
                     fs = pool_entry.get("factor_score")
                     if fs is not None:
-                        a["factor_score"] = fs
-                # O22 (round7 §7 P22): fallback 修复——旧代码查 factor_matrix["change_pct"]
+                        a["factor_score"] = fs                # O22 (round7 §7 P22): fallback 修复——旧代码查 factor_matrix["change_pct"]
                 # 键名不匹配（实际键是 "etf.change_pct"）且该值是 z-score 归一化值
                 # （恒 ≠ 真实涨跌幅）→ 删除该 fallback，改为「快照 → K 线」两级兜底：
                 # ① etf_list_cache.json 快照真实 change_pct（百分比，如 1.358）；
@@ -409,6 +413,27 @@ async def generate_enhanced_design(
                     dcp = _snapshot_change_pct(code)
                     if dcp is not None:
                         a["daily_change_pct"] = sanitize_change_pct(code, dcp)
+
+            # round18 P1-4 (2026-08-12): design etfs[].price=None——候选池条目无
+            # price 字段（S6 取 pool_entry.price/last_price 均 None）→ 前端持仓表
+            # 价格列「—」。批量回查实时价（缺失标的统一 gather，单只超时 3s）。
+            _missing_price = [
+                a["symbol"] for a in allocs
+                if a.get("symbol") != "CASH" and a.get("price") is None
+            ]
+            if _missing_price:
+                async def _rt_price(code: str):
+                    try:
+                        _rt = await market_data_hub.get_asset_realtime(code, "A")
+                        _p = (_rt or {}).get("price") if _rt else None
+                        return code, float(_p) if _p else None
+                    except Exception:
+                        return code, None
+                _prices = dict(await asyncio.gather(*[_rt_price(c) for c in _missing_price]))
+                for a in allocs:
+                    if a.get("symbol") != "CASH" and a.get("price") is None and a["symbol"] in _prices:
+                        if _prices[a["symbol"]] is not None:
+                            a["price"] = _prices[a["symbol"]]
 
             # P1-5 (round9 §4.1-1/§4.3-B): 数据缺失标的不得带核心权重——候选池正常时，
             # 三源（pool 缓存/快照/K线）全拿不到涨跌的核心层标的：权重清零（现金吸收）+
@@ -693,3 +718,63 @@ def _find_candidate_meta(symbol: str, candidates: dict) -> dict | None:
             if c.get("symbol") == symbol:
                 return c
     return None
+
+
+def _correlation_medians_for(allocs: list[dict], candidates: dict) -> dict[str, float | None]:
+    """round19 P1-② (2026-08-12): 方案内非 CASH 标的与同方案其它持仓的中位数相关性。
+
+    数据源：market_data_hub.get_history（日 K，含 fallback 链）→ engine/correlation.py
+    correlation_matrix。供 build_rationale 的 correlation_median 参数——黄金/防御型
+    标的「与组合低相关」措辞依赖它（此前参数恒 None → 措辞恒禁用，review 接线）。
+    性能控制：会话内缓存 closes（5min）+ 4 并发拉取（design 冷态不逐标的串行 5s），
+    失败跳过（缺失标的不参与，返回空 dict → correlation_median=None 不影响）。
+    """
+    from ..engine.correlation import correlation_matrix, median_correlation_for
+    from ..fetchers.china_market import run_in_thread
+    import concurrent.futures
+
+    codes = [a.get("symbol") for a in allocs if a.get("symbol") not in (None, "CASH")]
+    if len(codes) < 2:
+        return {}
+
+    global _CORR_CLOSES_CACHE, _CORR_CLOSES_TS
+    _now = time.time()
+    if _now - _CORR_CLOSES_TS > 300:
+        _CORR_CLOSES_CACHE = {}
+        _CORR_CLOSES_TS = _now
+
+    missing = [c for c in codes if c not in _CORR_CLOSES_CACHE]
+    if missing:
+
+        def _fetch(code: str) -> tuple[str, list[float]]:
+            try:
+                meta = _find_candidate_meta(code, candidates) or {}
+                mkt = str(meta.get("asset_type") or "A").upper()
+                if mkt in ("ETF", "FUND", "A-SHARE"):
+                    mkt = "A"
+                rows = run_in_thread(
+                    lambda c=code, m=mkt: market_data_hub.get_history(c, market=m),
+                    timeout=5, executor="short",
+                ) or []
+                closes = [float(r.get("close")) for r in rows if r.get("close") is not None]
+                return code, closes
+            except Exception:
+                return code, []
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as _ex:
+            for _code, _closes in _ex.map(_fetch, missing):
+                if len(_closes) >= 20:
+                    _CORR_CLOSES_CACHE[_code] = _closes
+
+    closes_by_symbol = {c: _CORR_CLOSES_CACHE[c] for c in codes if c in _CORR_CLOSES_CACHE}
+    if len(closes_by_symbol) < 2:
+        return {}
+    try:
+        matrix = correlation_matrix(closes_by_symbol, window=60, min_samples=20)
+    except Exception:
+        return {}
+    return {c: median_correlation_for(c, matrix) for c in codes}
+
+
+_CORR_CLOSES_CACHE: dict[str, list[float]] = {}
+_CORR_CLOSES_TS = 0.0

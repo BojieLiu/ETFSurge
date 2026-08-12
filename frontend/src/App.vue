@@ -31,7 +31,7 @@
         <!-- Connection Status -->
         <div class="nav-status" aria-live="polite" aria-atomic="true">
           <span class="status-indicator" :class="connectionStatus" aria-hidden="true"></span>
-          <span class="status-text">{{ connectionStatusText }}</span>
+          <span class="status-text" v-if="connectionStatusText">{{ connectionStatusText }}</span>
         </div>
 
         <!-- Warmup Indicator -->
@@ -152,17 +152,26 @@ const routeMetaIcon = computed(() => {
   return (t && PAGE_ICONS[t]) || '📈'
 })
 
-// P2-3 (round11 §3.6): connectionStatus 接真实 wsConnected（stores/market.js）——
-// 导航栏「已连接」不再硬编码假状态；Dashboard/主力行情 WS 断开时显示「离线」。
-const connectionStatus = computed(() => (
-  marketStore.wsConnected ? 'connected' : 'disconnected'
-))
+// round19 P6-① (2026-08-12 方案 A，用户已确认): 连接生命周期提升至 App.vue——
+// WS 全站常驻（轻量单连接 + 30s heartbeat），导航栏状态真实反映通道健康，
+// 非首页页面不再显示「离线」（旧实现连接绑定 Dashboard 挂载，离开首页即断连）。
+// 展示与连接同生命周期；Dashboard 等页面通过 onWSMessage 注册/注销消费回调。
+const connectionStatus = computed(() => {
+  switch (marketStore.wsStatus) {
+    case 'connected': return 'connected'
+    case 'connecting':
+    case 'reconnecting': return 'connecting'
+    default: return 'idle' // idle / stopped —— 中性态，不渲染「离线」
+  }
+})
 const connectionStatusText = computed(() => {
-  switch (connectionStatus.value) {
+  switch (marketStore.wsStatus) {
     case 'connected': return '已连接'
     case 'connecting': return '连接中...'
-    case 'disconnected': return '离线'
-    default: return '未知'
+    case 'reconnecting': return '连接中...'
+    case 'stopped': return '行情连接未启用'
+    case 'idle': return ''
+    default: return '行情通道异常'
   }
 })
 
@@ -205,10 +214,13 @@ onMounted(() => {
   // Initial fetch: load any tasks that existed before this page load
   taskStore.fetchAndMergeTasks()
   connectTaskWs()
+  // round19 P6-①: 全站常驻行情连接（方案 A）——Dashboard 不再 connect/disconnect
+  marketStore.connectWS()
 })
 
 onUnmounted(() => {
   closeTaskWs()
+  marketStore.disconnectWS()
 })
 </script>
 
@@ -372,6 +384,12 @@ onUnmounted(() => {
 
 .status-indicator.disconnected {
   background: var(--color-danger-600);
+}
+
+/* round19 P6-②: 中性态（idle/stopped）——灰点，不再以红色「离线」暗示故障 */
+.status-indicator.idle {
+  background: var(--color-text-tertiary);
+  opacity: 0.55;
 }
 
 @keyframes pulse {

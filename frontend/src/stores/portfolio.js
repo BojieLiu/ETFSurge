@@ -30,8 +30,10 @@ export const usePortfolioStore = defineStore('portfolio', () => {
   }
 
   async function updateEtf(symbol, data) {
-    await portfolioApi.update(symbol, data)
+    const res = await portfolioApi.update(symbol, data)
     await Promise.all([fetchEtfs(), fetchEtfs('on_exchange'), fetchEtfs('off_exchange')])
+    // round19 P3-③: adjust 语义响应（realized_pnl/trade/新 avg_cost）返回给调用方
+    return res.data || res
   }
 
   async function removeEtf(symbol) {

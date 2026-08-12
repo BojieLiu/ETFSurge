@@ -1631,6 +1631,17 @@ async def add_watchlist(symbol: str, asset_type: str, notes: str | None = None) 
     from ..models.search import Watchlist
     from sqlalchemy import select
 
+    # round19 P7-③ (2026-08-12): 入库统一归一化——手动输入带 sh/sz/bj 前缀（如
+    # sz301308）原样入库会导致 fetch_history 0 行、技术分析空数据。搜索/热点等
+    # 规范化路径返回不带前缀 symbol，此归一化只兜底手动输入。仅 A 股剥前缀——
+    # US 字母代码（SHOP/SHW）剥后语义会变（review 修复）。
+    _at = str(asset_type or "").upper()
+    if _at in ("ETF", "FUND", "A-SHARE"):
+        _at = "A"
+    _s = str(symbol or "").lower()
+    if _at == "A" and _s.startswith(("sh", "sz", "bj")) and len(_s) > 2:
+        symbol = _s[2:]
+
     async with async_session() as session:
         # Check if already exists
         existing = await session.execute(

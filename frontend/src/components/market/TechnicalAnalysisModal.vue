@@ -44,8 +44,23 @@
         </div>
 
         <!-- O20 (round8 §7 §5.1E): K 线图——数据早已拉取（chart）却从未渲染；
-             接入 candlestick + 均线 + 量能 + dataZoom，与今日涨跌/资金流并列。 -->
+             接入 candlestick + 均线 + 量能 + dataZoom，与今日涨跌/资金流并列。
+             round19 P5-①: 副图三选一切换器（RSI/KDJ/MACD，数据不足项禁用） -->
         <div v-if="klineOption && Object.keys(klineOption).length" class="ta-kline">
+          <div class="ta-indicator-switch" role="radiogroup" aria-label="指标副图切换">
+            <button
+              v-for="opt in INDICATOR_OPTIONS"
+              :key="opt.key"
+              :class="['ta-ind-btn', { active: activeIndicator === opt.key, disabled: !indicatorAvailable[opt.key] }]"
+              :disabled="!indicatorAvailable[opt.key]"
+              :title="!indicatorAvailable[opt.key] ? '该指标数据不足' : ''"
+              role="radio"
+              :aria-checked="activeIndicator === opt.key"
+              @click="activeIndicator = opt.key"
+            >
+              {{ opt.label }}
+            </button>
+          </div>
           <v-chart :option="klineOption" autoresize class="ta-kline-chart" />
         </div>
 
@@ -126,6 +141,23 @@ const chartData = ref(null)
 // （红涨绿跌：CANDLE_UP=红 / CANDLE_DOWN=绿，与项目主题一致）
 const CANDLE_UP = '#e53935'
 const CANDLE_DOWN = '#43A047'
+// round19 P5-① (2026-08-12): 副图三选一（K 线 + 成交量固定，指标互斥单选）
+const activeIndicator = ref('macd')
+const INDICATOR_OPTIONS = [
+  { key: 'macd', label: 'MACD' },
+  { key: 'kdj', label: 'KDJ' },
+  { key: 'rsi', label: 'RSI' },
+]
+// 数据不足守卫：chartData 无对应序列时该项禁用（不渲染空副图/假指标）
+const indicatorAvailable = computed(() => {
+  const d = chartData.value
+  if (!d) return { macd: false, kdj: false, rsi: false }
+  return {
+    macd: !!(d.macd && Array.isArray(d.macd.dif) && d.macd.dif.length && d.macd.dea && d.macd.histogram),
+    kdj: !!(d.kdj && Array.isArray(d.kdj.k) && d.kdj.k.length && d.kdj.d && d.kdj.j),
+    rsi: !!(Array.isArray(d.rsi) && d.rsi.length),
+  }
+})
 const klineOption = computed(() => {
   const d = chartData.value
   if (!d || !d.opens || !d.closes || !d.lows || !d.highs) return {}
@@ -158,27 +190,73 @@ const klineOption = computed(() => {
     type: 'bar', data: volumes, xAxisIndex: 1, yAxisIndex: 1,
     name: '成交量', itemStyle: { color: (p) => volumeColors[p.dataIndex] },
   })
+  // ── round19 P5-①: 第三 grid 指标副图（三选一，数据从 chart 端点序列取） ──
+  const grid = [
+    { left: '6%', right: '3%', top: 30, height: '44%' },
+    { left: '6%', right: '3%', top: '48%', height: '13%' },
+    { left: '6%', right: '3%', top: '64%', height: '20%' },
+  ]
+  const xAxes = [
+    { type: 'category', data: dates, gridIndex: 0,
+      axisLabel: { show: true, rotate: 30, fontSize: 9, interval: Math.max(1, Math.ceil(dates.length / 10)) } },
+    { type: 'category', data: dates, gridIndex: 1, axisLabel: { show: false } },
+  ]
+  const yAxes = [
+    { gridIndex: 0, scale: true, splitNumber: 4 },
+    { gridIndex: 1, scale: true, splitNumber: 3, axisLabel: { show: true, fontSize: 9 } },
+  ]
+  const indKey = activeIndicator.value
+  const indLegend = []
+  if (indicatorAvailable.value[indKey]) {
+    const indGridIdx = 2
+    xAxes.push({ type: 'category', data: dates, gridIndex: indGridIdx,
+      axisLabel: { show: true, rotate: 30, fontSize: 9, interval: Math.max(1, Math.ceil(dates.length / 10)) } })
+    if (indKey === 'macd') {
+      const m = d.macd
+      const histColors = m.histogram.map((v) => (v >= 0 ? CANDLE_UP : CANDLE_DOWN))
+      yAxes.push({ gridIndex: indGridIdx, scale: true, splitNumber: 3, axisLabel: { show: true, fontSize: 9 } })
+      series.push({ type: 'bar', data: m.histogram, xAxisIndex: indGridIdx, yAxisIndex: indGridIdx,
+        name: 'MACD', itemStyle: { color: (p) => histColors[p.dataIndex] } })
+      series.push({ type: 'line', data: m.dif, smooth: true, xAxisIndex: indGridIdx, yAxisIndex: indGridIdx,
+        name: 'DIF', symbol: 'none', lineStyle: { width: 1.2, color: '#f59e0b' } })
+      series.push({ type: 'line', data: m.dea, smooth: true, xAxisIndex: indGridIdx, yAxisIndex: indGridIdx,
+        name: 'DEA', symbol: 'none', lineStyle: { width: 1.2, color: '#3b82f6' } })
+      indLegend.push('MACD', 'DIF', 'DEA')
+    } else if (indKey === 'kdj') {
+      const k = d.kdj
+      yAxes.push({ gridIndex: indGridIdx, scale: true, splitNumber: 3, axisLabel: { show: true, fontSize: 9 } })
+      series.push({ type: 'line', data: k.k, smooth: true, xAxisIndex: indGridIdx, yAxisIndex: indGridIdx,
+        name: 'KDJ-K', symbol: 'none', lineStyle: { width: 1.2, color: '#f59e0b' } })
+      series.push({ type: 'line', data: k.d, smooth: true, xAxisIndex: indGridIdx, yAxisIndex: indGridIdx,
+        name: 'KDJ-D', symbol: 'none', lineStyle: { width: 1.2, color: '#3b82f6' } })
+      series.push({ type: 'line', data: k.j, smooth: true, xAxisIndex: indGridIdx, yAxisIndex: indGridIdx,
+        name: 'KDJ-J', symbol: 'none', lineStyle: { width: 1.2, color: '#8b5cf6' } })
+      indLegend.push('KDJ-K', 'KDJ-D', 'KDJ-J')
+    } else { // rsi
+      yAxes.push({ gridIndex: indGridIdx, scale: true, splitNumber: 3, axisLabel: { show: true, fontSize: 9 }, min: 0, max: 100 })
+      series.push({
+        type: 'line', data: d.rsi, smooth: true, xAxisIndex: indGridIdx, yAxisIndex: indGridIdx,
+        name: 'RSI(14)', symbol: 'none', lineStyle: { width: 1.2, color: '#f59e0b' },
+        markLine: {
+          silent: true,
+          data: [
+            { yAxis: 70, label: { formatter: '70 超买', fontSize: 9, color: CANDLE_UP }, lineStyle: { color: CANDLE_UP, type: 'dashed', width: 1 } },
+            { yAxis: 30, label: { formatter: '30 超卖', fontSize: 9, color: CANDLE_DOWN }, lineStyle: { color: CANDLE_DOWN, type: 'dashed', width: 1 } },
+          ],
+        },
+      })
+      indLegend.push('RSI(14)')
+    }
+  }
   return {
     // 图内 title 已移除：弹窗 h3 标题已显示「名称 技术分析」，图内 title（居中顶部）
     // 与 legend（top:4）重叠是「文字重叠」根因之一（round9 §6.x 用户反馈）。
     tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
-    legend: { top: 4, data: ['MA5', 'MA10', 'MA20', '成交量'], textStyle: { fontSize: 10 } },
-    grid: [
-      { left: '6%', right: '3%', top: 30, height: '58%' },
-      { left: '6%', right: '3%', top: '72%', height: '16%' },
-    ],
-    xAxis: [
-      // axisLabel interval 稀疏化：60 个日期标签全显必重叠（rotate 30 + 9px 在窄宽下
-      // 每格仅数 px）——按数据量每 ~10 个标 1 个，保留旋转防相邻短标签粘连。
-      { type: 'category', data: dates, gridIndex: 0,
-        axisLabel: { show: true, rotate: 30, fontSize: 9, interval: Math.max(1, Math.ceil(dates.length / 10)) } },
-      { type: 'category', data: dates, gridIndex: 1, axisLabel: { show: false } },
-    ],
-    yAxis: [
-      { gridIndex: 0, scale: true, splitNumber: 4 },
-      { gridIndex: 1, scale: true, splitNumber: 3, axisLabel: { show: true, fontSize: 9 } },
-    ],
-    dataZoom: [{ type: 'inside', xAxisIndex: [0, 1], start: 40, end: 100 }],
+    legend: { top: 4, data: ['MA5', 'MA10', 'MA20', '成交量', ...indLegend], textStyle: { fontSize: 10 } },
+    grid,
+    xAxis: xAxes,
+    yAxis: yAxes,
+    dataZoom: [{ type: 'inside', xAxisIndex: [0, 1, 2], start: 40, end: 100 }],
     series,
   }
 })
@@ -302,7 +380,32 @@ onMounted(load)
   padding: var(--space-4);
 }
 .ta-kline { margin: var(--space-3) 0; }
-.ta-kline-chart { width: 100%; height: 320px; }
+.ta-kline-chart { width: 100%; height: 340px; }
+/* round19 P5-①: 指标副图三选一切换器 */
+.ta-indicator-switch {
+  display: flex;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+}
+.ta-ind-btn {
+  padding: 2px 12px;
+  font: var(--text-caption);
+  color: var(--color-text-secondary);
+  background: var(--color-surface-secondary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+.ta-ind-btn.active {
+  color: #fff;
+  background: var(--color-brand-600);
+  border-color: var(--color-brand-600);
+}
+.ta-ind-btn.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
 .ta-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-3); }
 .ta-title { margin: 0; font-size: var(--font-size-base); font-weight: 600; }
 .ta-close { background: none; border: none; cursor: pointer; font-size: var(--font-size-base); color: var(--color-text-muted); }

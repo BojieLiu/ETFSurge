@@ -40,6 +40,16 @@
           <span class="toggle-name">{{ ind.label }}</span>
         </label>
       </div>
+      <!-- round19 P5-②: 指标副图三选一单选组（默认 MACD）——原 macd/kdj/rsi checkbox 移除 -->
+      <div class="indicator-radio-group" v-if="indicatorOptions && indicatorOptions.length" role="radiogroup" aria-label="指标副图">
+        <span class="toggles-label">副图指标:</span>
+        <label class="toggle-item" v-for="opt in indicatorOptions" :key="opt.key">
+          <input type="radio" name="active-indicator" :data-testid="'indicator-' + opt.key"
+                 :checked="activeIndicator === opt.key"
+                 @change="activeIndicator === opt.key || $emit('update:active-indicator', opt.key); $emit('refresh')" />
+          <span class="toggle-name">{{ opt.label }}</span>
+        </label>
+      </div>
     </div>
   </section>
 </template>
@@ -55,8 +65,11 @@ defineProps({
   etfOptions: Array,
   periodOptions: Array,
   indicatorToggles: Array,
+  // round19 P5-②: 指标副图单选组
+  indicatorOptions: Array,
+  activeIndicator: String,
 })
-defineEmits(['update:selected', 'update:period', 'update:chartMode', 'refresh'])
+defineEmits(['update:selected', 'update:period', 'update:chartMode', 'update:active-indicator', 'refresh'])
 </script>
 
 <style scoped>

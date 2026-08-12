@@ -75,6 +75,8 @@
               >
                 {{ item.change_pct >= 0 ? '+' : '' }}{{ item.change_pct.toFixed(2) }}%
               </span>
+              <!-- round19 P4-③: change_pct=null（数据源异常）显示「—」，不再冒充 0% -->
+              <span v-else class="row-change row-change--na" title="涨跌幅数据源异常">—</span>
             </div>
             <span class="row-heat" v-if="item.heat_index != null">
               热度: {{ fmtHeat(item.heat_index) }}
@@ -121,6 +123,8 @@
             >
               {{ item.change_pct >= 0 ? '+' : '' }}{{ item.change_pct.toFixed(2) }}%
             </span>
+            <!-- round19 P4-③: change_pct=null（数据源异常）显示「—」 -->
+            <span v-else class="row-change row-change--na" title="涨跌幅数据源异常">—</span>
             <div class="row-actions">
               <!-- P0-18 (round16 3.19 R4): 技术分析对象=领涨个股——sectors/heat 条目无
                    symbol/code，旧实现发 /market/chart/undefined 404；无领涨股时禁用 -->
@@ -327,6 +331,8 @@ onMounted(() => { fetchData() })
 .row-stocks { font-size: var(--text-xs); color: var(--color-text-secondary); }
 .row-code { font-size: var(--text-xs); color: var(--color-text-tertiary); }
 .row-change { font-size: var(--text-sm); font-weight: 500; white-space: nowrap; }
+/* round19 P4-③: 数据源异常（change_pct=null）占位——浅灰「—」不冒充 0% */
+.row-change--na { color: var(--color-text-tertiary); }
 .row-heat { font-size: var(--text-xs); color: var(--color-text-secondary); white-space: nowrap; }
 .row-rank-chg { font-size: var(--text-xs); white-space: nowrap; }
 .row-actions { display: flex; gap: var(--space-1); flex-wrap: wrap; }

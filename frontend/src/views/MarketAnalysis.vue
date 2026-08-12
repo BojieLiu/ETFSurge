@@ -42,7 +42,7 @@
     <MarketReport :marketTab="marketTab" />
 
     <div ref="anchorWatch" class="section-anchor"></div>
-    <WatchlistPanel :marketTab="marketTab" @select-symbol="onSelectSymbol" />
+    <WatchlistPanel :marketTab="marketTab" @select-symbol="onSelectSymbol" @analyze="onQuickAnalyze" />
 
     <div ref="anchorSector" class="section-anchor"></div>
     <SectorHeatMap :marketTab="marketTab" @analyze="onQuickAnalyze" />

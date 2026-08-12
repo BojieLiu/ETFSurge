@@ -149,8 +149,10 @@ describe('SectorHeatMap (F2-6/F2-7 §9.8)', () => {
     await wrapper.vm.$nextTick()
     expect(wrapper.text()).toContain('半导体')
     expect(wrapper.find('.data-row').exists()).toBe(true)
-    // 无涨跌幅渲染，但不抛错、卡片保留
-    expect(wrapper.find('.row-change').exists()).toBe(false)
+    // round19 P4-③: change_pct=null 显示「—」占位（row-change--na），不冒充 0%、
+    // 不抛错、卡片保留
+    expect(wrapper.find('.row-change--na').exists()).toBe(true)
+    expect(wrapper.find('.row-change--na').text()).toContain('—')
     expect(wrapper.text()).toContain('热度')
   })
 

@@ -6,10 +6,12 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.logging import get_logger
+from ..database import get_db
 from ..factors.factor_registry import registry, ET_SPECIFIC_GAP_CODES
 
 # F19 R70: code → 缺失字段名映射（泛化：ln_mcap 等非 etf_specific 因子也有缺口标注）
@@ -88,12 +90,17 @@ MARKET_LEVEL_FACTOR_CODES = {
 }
 
 
-def _status_of(code: str, ic_val: float | None, ic_threshold: float) -> tuple[str, str]:
+def _status_of(code: str, ic_val: float | None, ic_threshold: float, sample_count: int | None = None) -> tuple[str, str]:
     """Z03: 权威状态 + 原因说明（/active 与 /model 共用）。
 
     O20 (round7 §7 P20): 常量因子（截面 std=0 → IC 无法计算）给独立标注——
     与「数据源未接入」「IC 未累积」三分，消除「看起来像样本不足、实际是
     数据全缺」的误导。
+
+    round18 P0-4 (P0-12 补完): sample_count 改读 DB IC 周期计数
+    （ic_tracker._get_ic_sample_count_db 同源）——旧实现读 registry._sample_counts
+    （内存非零符号数 ≈11）→ no_data 恒判，与事实（IC 实际有效）不符。
+    sample_count 为 None 时回退内存计数（兼容同步调用路径）。
     """
     if code in STATIC_FACTOR_CODES:
         return "static", "静态政策标识因子，不计算 IC"
@@ -113,7 +120,10 @@ def _status_of(code: str, ic_val: float | None, ic_threshold: float) -> tuple[st
             return "no_data", "截面无差异（常量输出），检查底层数据"
         return "no_data", "IC 未累积（样本 <3）"
     threshold = ic_threshold if ic_threshold and ic_threshold > 0 else 0.02
-    samples = getattr(registry, "_sample_counts", {}).get(code, 0)
+    if sample_count is not None:
+        samples = sample_count
+    else:
+        samples = getattr(registry, "_sample_counts", {}).get(code, 0)
     # round14 P0-C: 最小样本保护——样本数不足时 IC 视为未累积，不产生
     # 「|IC|≥阈值 但样本数 0」的伪负向下架（§2.4：13/38 因子被误标 warn）。
     if samples < MIN_IC_SAMPLES:
@@ -130,13 +140,30 @@ def _status_of(code: str, ic_val: float | None, ic_threshold: float) -> tuple[st
     return "warn", f"|IC|={abs(ic_val):.4f} < 阈值 {threshold}，样本数 {samples}"
 
 
-def _build_health_summary() -> dict:
+async def _db_ic_sample_counts(db) -> dict[str, int]:
+    """round18 P0-4: 一次查询取全因子 DB IC 周期计数（factor_ic_records 按 code
+    group count，与 ic_tracker._get_ic_sample_count_db 同源）。DB 不可用回退空 dict
+    （调用方回退内存计数）。"""
+    try:
+        from ..models.factor_ic import FactorICRecord
+        from sqlalchemy import select, func
+        rows = (await db.execute(
+            select(FactorICRecord.factor_code, func.count())
+            .group_by(FactorICRecord.factor_code)
+        )).all()
+        return {r[0]: int(r[1]) for r in rows}
+    except Exception as e:  # noqa: BLE001 - DB 查询失败不阻断端点
+        logger.warning("[factors] DB IC sample counts failed: %s", e)
+        return {}
+
+
+def _build_health_summary(sample_counts: dict[str, int] | None = None) -> dict:
     """O6: 计算因子模型健康度聚合（valid/warn/no_data/static/avg_ic）。
 
     供 /factors/model 输出（与 /factors/active 的 summary 同口径）。
+    round18 P0-4: sample_counts 传 DB IC 周期计数（None 回退内存）。
     """
     ic_batch = registry._last_ic_batch
-    sample_counts = getattr(registry, "_sample_counts", {}) or {}
     total_valid = total_warn = total_no_data = total_static = 0
     ic_vals: list[float] = []
     for code in registry._computers:
@@ -147,7 +174,8 @@ def _build_health_summary() -> dict:
             # P1-10: 市场级因子与政策静态因子一样不参与截面 IC 计数/平均
             ic_val = None
             ic_threshold = 0.0
-        status, _ = _status_of(code, ic_val, ic_threshold)
+        _sc = (sample_counts or {}).get(code) if sample_counts is not None else None
+        status, _ = _status_of(code, ic_val, ic_threshold, _sc)
         if status == "valid":
             total_valid += 1
         elif status == "warn":
@@ -169,7 +197,7 @@ def _build_health_summary() -> dict:
 
 
 @router.get("/model")
-async def get_factor_model() -> JSONResponse:
+async def get_factor_model(db: AsyncSession = Depends(get_db)) -> JSONResponse:
     """Return factor model overview: category breakdown, total counts, descriptions.
 
     Provides a structured view of the registered factor definitions for
@@ -213,8 +241,9 @@ async def get_factor_model() -> JSONResponse:
     body = {
         "total": len(all_factors),
         "categories": categories,
-        # O6 (round7 §7 P8): 聚合健康度——前端可直接读模型 valid/no_data/warn/static
-        "summary": _build_health_summary(),
+        # O6 (round7 §7 P8): 聚合健康度——前端可直接读模型 valid/no_data/warn/static；
+        # round18 P0-4: summary 用 DB IC 周期计数（对齐 /active）
+        "summary": _build_health_summary(await _db_ic_sample_counts(db)),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     etag = f"\"{hash(str(body))}\""
@@ -226,7 +255,7 @@ async def get_factor_model() -> JSONResponse:
 
 
 @router.get("/active")
-async def get_active_factors() -> JSONResponse:
+async def get_active_factors(db: AsyncSession = Depends(get_db)) -> JSONResponse:
     """Return actively computed factors with IC values, grouped by category.
 
     Only includes factors that have a registered compute function
@@ -249,7 +278,10 @@ async def get_active_factors() -> JSONResponse:
     categories: dict[str, dict[str, Any]] = {}
 
     # Z03: 静态政策标识因子（不计算 IC，status='static'）
-    sample_counts = getattr(registry, "_sample_counts", {}) or {}
+    # round18 P0-4: sample_count 改读 DB IC 周期计数（factor_ic_records 按 code 分组）；
+    # DB 不可用/无记录时回退内存计数（registry._sample_counts）
+    db_sample_counts = await _db_ic_sample_counts(db)
+    memory_sample_counts = getattr(registry, "_sample_counts", {}) or {}
     last_computed_at = getattr(registry, "_last_computed_at", None)
 
     for code in registry._computers:
@@ -270,7 +302,10 @@ async def get_active_factors() -> JSONResponse:
             # Z03: 静态因子 ic_value=null（不再硬编码 0）、threshold=0
             ic_val = None
             ic_threshold = 0.0
-        status, reason = _status_of(code, ic_val, ic_threshold)
+        _db_count = db_sample_counts.get(code) if db_sample_counts else None
+        # round18 P0-4: 优先 DB IC 周期计数，DB 无记录/不可用回退内存计数
+        _sample_count = _db_count if _db_count is not None else memory_sample_counts.get(code, 0)
+        status, reason = _status_of(code, ic_val, ic_threshold, _db_count)
         factor_entry = {
             "code": code,
             "name": definition.name if definition and definition.name else _get_factor_name(code),
@@ -286,7 +321,8 @@ async def get_active_factors() -> JSONResponse:
             # Z03 新增字段
             "status": status,
             "reason": reason,
-            "sample_count": 0 if code in STATIC_FACTOR_CODES else sample_counts.get(code, 0),
+            # round18 P0-4: sample_count 用 DB IC 周期数（P0-12 语义：≥30 周期 → valid）
+            "sample_count": 0 if code in STATIC_FACTOR_CODES else _sample_count,
             "last_computed_at": None if code in STATIC_FACTOR_CODES else last_computed_at,
         }
         categories[cat_name]["factors"].append(factor_entry)

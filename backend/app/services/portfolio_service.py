@@ -1,3 +1,4 @@
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Any
@@ -57,7 +58,8 @@ _RSI_HINT = (
     ("超卖", lambda v: v <= 30),
 )
 _KDJ_HINT = (
-    ("超卖区", lambda v: v < 0),
+    ("超买区", lambda v: v >= 80),
+    ("超卖区", lambda v: v <= 20),
 )
 
 
@@ -68,8 +70,13 @@ def _factor_hint(code: str, value: float) -> str:
             if cond(value):
                 return f"（{label}）"
         return "（中性）"
-    if code.startswith("technical.kdj.") and value < 0:
-        return "（超卖区）"
+    if code.startswith("technical.kdj."):
+        # round18 P0-3: 值域按原始 0-100（>80 超买 / <20 超卖）；
+        # 负值（历史归一化兜底）仍判超卖区，但正常路径已不产出归一化负值。
+        for label, cond in _KDJ_HINT:
+            if cond(value):
+                return f"（{label}）"
+        return ""
     if code == "technical.signal.overall":
         if value > 0:
             return "（偏多）"
@@ -80,22 +87,48 @@ def _factor_hint(code: str, value: float) -> str:
     return ""
 
 
-def format_factor_summary(real_fs: dict[str, float], top_n: int = 3) -> str:
+def format_factor_summary(real_fs: dict[str, float], top_n: int = 3, tech_ind: dict | None = None) -> str:
     """F11: 因子分 → 中文解读字符串（保持 factor_summary 字符串契约不变）。
 
     round10 P2-I: 渲染前过滤中性兜底默认值（RSI/KDJ=50、vol_ratio=1、|v|≈0）——
     无任何真实因子的标的渲染为空串（调用方显示「数据不可用」），不再把 50.00
     「（中性）」伪装成真实计算结果。
 
+    round18 P0-3 (2026-08-12): KDJ 显示对齐指标源原始值——factor_scores 里的
+    technical.kdj.* 是归一化 zscore（可负/异常，如 -3.46），而 /market/indicators
+    返回原始 KDJ（0-100）。传入 tech_ind（compute_all_indicators 产物，含
+    kdj.{k,d,j} 原始值）时 KDJ 显示原始值；无原始值（或未传）时排除 KDJ 键，
+    **禁止把归一化负值冒充原始 KDJ 展示**（负向：KDJ 负数 → 不出现在输出）。
+
     示例输入: {"technical.rsi.rsi_14": 39.53, "technical.kdj.d_value": -3.46}
-    输出: "RSI(14) 39.53（中性）；KDJ.D -3.46（超卖区）"
+    示例输出(tech_ind={"kdj":{"d": 84.77}}): "RSI(14) 39.53（中性）；KDJ.D 84.77"
+    示例输出(无 tech_ind): "RSI(14) 39.53（中性）"
     """
     if not real_fs:
         return ""
-    real_items = [
-        (k, v) for k, v in real_fs.items()
-        if isinstance(v, (int, float)) and _factor_value_real(k, v)
-    ]
+
+    def _resolve(k: str, v):
+        """round18 P0-3: KDJ 归一化键 → tech_ind 原始值；无原始值返回 None（排除）。"""
+        if k.startswith("technical.kdj."):
+            if isinstance(tech_ind, dict):
+                kdj_raw = tech_ind.get("kdj") or {}
+                part = k.rsplit(".", 1)[-1]  # 'k_value'/'d_value'/'j_value'
+                raw = kdj_raw.get(part[0].replace("_value", "")) if part else None
+                if isinstance(raw, (int, float)):
+                    return float(raw)
+            return None  # 无原始 KDJ → 排除该键，不显示归一化假值
+        return v
+
+    real_items = []
+    for k, v in real_fs.items():
+        if not isinstance(v, (int, float)):
+            continue
+        resolved = _resolve(k, v)
+        if resolved is None:
+            continue  # KDJ 无原始值 → 排除
+        if not _factor_value_real(k, resolved):
+            continue
+        real_items.append((k, resolved))
     if not real_items:
         # P2-I: 全为兜底默认值 → 空串（调用方已 fallback「数据不可用」文案）
         return ""
@@ -115,6 +148,50 @@ from ..analysis.signal import generate_signal
 from ..core.async_utils import run_sync
 
 PORTFOLIO_TYPES = {"on_exchange": "场内", "off_exchange": "场外"}
+
+
+def recompute_cost_after_trade(
+    old_shares: float | None,
+    old_avg_cost: float | None,
+    delta_shares: float,
+    price: float,
+) -> dict:
+    """round19 P3-③ (2026-08-12): 仓位变更 = 买卖操作，加权平均重算成本价。
+
+    - 买入（delta>0）: new_avg_cost = (old*old_avg + delta*price) / (old + delta)；realized_pnl = 0
+    - 卖出（delta<0，new_shares ≥ 0）: new_avg_cost 不变；realized_pnl = (price - old_avg_cost) * (-delta)
+    - 首仓（old_shares 空/0）: new_avg_cost = price
+    - 边界: 卖出超份额 → ValueError（调用方 400）；price 缺失/无效 → ValueError（不用假价）
+
+    纯函数无 I/O，供 PUT /etfs/{symbol} adjust 语义与存量迁移复用。
+    """
+    if delta_shares == 0:
+        raise ValueError("delta_shares 不能为 0")
+    if price is None or price <= 0:
+        raise ValueError("成交价缺失/无效（不用假价兜底）")
+    old_shares = old_shares or 0.0
+    old_avg_cost = old_avg_cost or 0.0
+    if delta_shares < 0 and old_shares + delta_shares < 0:
+        raise ValueError(f"卖出份额 {abs(delta_shares)} 超过持仓 {old_shares}")
+    if old_shares <= 0:
+        # 首仓：成本 = 成交价
+        new_avg_cost = price
+        new_shares = delta_shares if delta_shares > 0 else 0.0
+        realized_pnl = 0.0
+    elif delta_shares > 0:
+        new_avg_cost = (old_shares * old_avg_cost + delta_shares * price) / (old_shares + delta_shares)
+        new_shares = old_shares + delta_shares
+        realized_pnl = 0.0
+    else:  # 卖出
+        new_avg_cost = old_avg_cost
+        new_shares = old_shares + delta_shares
+        realized_pnl = (price - old_avg_cost) * (-delta_shares)
+    return {
+        "new_avg_cost": round(float(new_avg_cost), 6),
+        "new_shares": round(float(new_shares), 6),
+        "realized_pnl": round(float(realized_pnl), 4),
+        "side": "buy" if delta_shares > 0 else "sell",
+    }
 
 
 async def list_etfs(db: AsyncSession, portfolio_type: str | None = None) -> list[PortfolioETF]:
@@ -139,6 +216,12 @@ async def add_etf(db: AsyncSession, data: PortfolioETFCreate) -> PortfolioETF:
         target_weight=data.target_weight,
         portfolio_type=data.portfolio_type,
         tracked_index=_tidx,
+        # round19 P3-① (2026-08-12): 落库 avg_cost/shares_held——此前前端传值被静默
+        # 丢弃，乐观更新掩盖「界面显示成功、刷新还原」bug。
+        avg_cost=data.avg_cost,
+        shares_held=data.shares_held,
+        first_buy_date=data.first_buy_date,
+        last_trade_date=data.last_trade_date,
     )
     db.add(etf)
     await db.commit()
@@ -190,9 +273,40 @@ async def update_etf(db: AsyncSession, symbol: str, data: PortfolioETFUpdate) ->
     etf = result.scalar_one_or_none()
     if not etf:
         return None
+    # round19 P3-③ (2026-08-12): 「调整仓位（买卖）」语义——delta_shares 非 None 时
+    # 走加权平均重算（增持/减持），并联动 target_weight（新市值÷组合总市值）。
+    # 与 avg_cost/shares_held 直接覆盖态互斥（同传抛 400 语义）。
+    _adjust_meta: dict | None = None
+    if data.delta_shares is not None:
+        if data.avg_cost is not None or data.shares_held is not None:
+            raise HTTPException(status_code=400, detail="delta_shares 与 avg_cost/shares_held 互斥，不可同传")
+        _price = data.price
+        if _price is None:
+            # 实时价兜底（拿不到 → 400，不用假价）
+            _price = await _fetch_realtime_price(db, etf)
+        if _price is None:
+            raise HTTPException(status_code=400, detail="成交价缺失且实时价不可用")
+        _r = recompute_cost_after_trade(
+            etf.shares_held, etf.avg_cost, data.delta_shares, float(_price)
+        )
+        etf.shares_held = _r["new_shares"]
+        etf.avg_cost = _r["new_avg_cost"]
+        _new_weight = await _recompute_target_weight(
+            db, symbol, _r["new_shares"], float(_price)
+        )
+        if _new_weight is not None:
+            etf.target_weight = _new_weight
+        _adjust_meta = {
+            "realized_pnl": _r["realized_pnl"],
+            "trade": {
+                "delta_shares": data.delta_shares,
+                "price": _price,
+                "side": _r["side"],
+            },
+        }
     if data.name is not None:
         etf.name = data.name
-    if data.target_weight is not None:
+    if data.target_weight is not None and data.delta_shares is None:
         etf.target_weight = data.target_weight
     if data.is_active is not None:
         etf.is_active = data.is_active
@@ -202,9 +316,70 @@ async def update_etf(db: AsyncSession, symbol: str, data: PortfolioETFUpdate) ->
         etf.short_name = data.short_name
     if data.tracked_index is not None:
         etf.tracked_index = data.tracked_index
+    # round19 P3-① (2026-08-12): update_etf 补落库成本/份额——此前传了也不生效
+    # （前端编辑成本被静默丢弃，刷新还原）。
+    if data.avg_cost is not None:
+        etf.avg_cost = data.avg_cost
+    if data.shares_held is not None:
+        etf.shares_held = data.shares_held
+    if data.first_buy_date is not None:
+        etf.first_buy_date = data.first_buy_date
+    if data.last_trade_date is not None:
+        etf.last_trade_date = data.last_trade_date
     await db.commit()
     await db.refresh(etf)
+    if _adjust_meta is not None:
+        # 路由层读取注入响应（realized_pnl/trade 不属于 ORM 列）
+        setattr(etf, "_adjust_meta", _adjust_meta)
     return etf
+
+
+async def _fetch_realtime_price(db: AsyncSession, etf: PortfolioETF) -> float | None:
+    """round19 P3-②/③: 实时价取价（adjust 语义 price 缺省时兜底；拿不到 None）。"""
+    try:
+        from ..services.market_data_hub import market_data_hub
+        rt = await market_data_hub.get_asset_realtime(etf.symbol, etf.asset_type)
+        p = (rt or {}).get("price") if rt else None
+        return float(p) if p else None
+    except Exception:
+        return None
+
+
+async def _recompute_target_weight(
+    db: AsyncSession, symbol: str, new_shares: float, price: float
+) -> float | None:
+    """round19 P3-③ (用户已确认联动): 新 target_weight = 新市值 ÷ 组合总市值
+    （分母 = Σ active 持仓 shares×price，含操作后当前标的；拿不到价返回 None
+    不强制联动——保持原权重。shares_held 为 NULL 的持仓不参与分母——未知市值
+    不冒充 0（否则分母偏小、新权重虚高）。"""
+    try:
+        etfs = await list_etfs(db)
+        price_map = await build_price_map(etfs)
+        total = 0.0
+        skipped_null_shares = 0
+        for e in etfs:
+            if e.symbol == symbol:
+                # 操作后当前标的市值 = 新份额 × 成交价（口径：新市值 = 操作后 shares×price）
+                _p = price
+                _sh = new_shares
+            else:
+                _p = price_map.get(e.symbol, (None, None))[0] if e.symbol in price_map else None
+                _sh = e.shares_held
+            if _sh is None:
+                skipped_null_shares += 1
+                continue
+            if _p and _sh > 0:
+                total += _sh * float(_p)
+        if skipped_null_shares:
+            logger.info(
+                "[portfolio] _recompute_target_weight skipped %d holding(s) with NULL shares_held",
+                skipped_null_shares,
+            )
+        if total <= 0:
+            return None
+        return round((new_shares * price) / total, 4)
+    except Exception:
+        return None
 
 
 async def remove_etf(db: AsyncSession, symbol: str) -> bool:
@@ -1002,8 +1177,11 @@ async def strategy_check(
         real_fs = fb.get("factor_scores", {})
         real_sig = fb.get("technical_signal", {})
         if _has_real_factor_values(real_fs):
-            # 用真实因子分覆盖 LLM 编造的因子描述（F11: 中文名+方向解读）
-            h["factor_summary"] = format_factor_summary(real_fs)
+            # 用真实因子分覆盖 LLM 编造的因子描述（F11: 中文名+方向解读）；
+            # round18 P0-3: KDJ 用 technical_indicators 原始值对齐 /market/indicators
+            h["factor_summary"] = format_factor_summary(
+                real_fs, tech_ind=fb.get("technical_indicators") if isinstance(fb, dict) else None
+            )
             # Phase 2.7.7: 注入因子级可用性详情（P1-15: 排除兑底默认值）
             filled = sum(1 for k, v in real_fs.items()
                          if isinstance(v, (int, float)) and _factor_value_real(k, v))
@@ -1068,6 +1246,8 @@ async def strategy_check(
             factor_score=fb.get("factor_scores", {}),
             signal=fb.get("technical_signal"),
             regime=regime,
+            # round18 P2-7: confidence 按因子填充率分级
+            factor_availability=fb.get("factor_availability"),
         ))
     covered_by_rule = len(rule_suggestions)
 
@@ -1236,7 +1416,9 @@ def _build_rule_fallback_holdings_analysis(
         fb = factor_breakdowns.get(sym, {}) or {}
         fs = fb.get("factor_scores", {}) or {}
         if isinstance(fs, dict) and any(v for v in fs.values()):
-            factor_str = format_factor_summary(fs)
+            factor_str = format_factor_summary(
+                fs, tech_ind=fb.get("technical_indicators") if isinstance(fb, dict) else None
+            )
         else:
             factor_str = "因子数据不足"
         # industry 占位：P0-1 行业注入会 setdefault 填充真实行业（数据源可用时）
@@ -1269,14 +1451,19 @@ def _rule_based_suggestion(
     signal: dict | None,
     regime: str,
     current_weight: float | None = None,
+    factor_availability: dict | None = None,
 ) -> dict:
     """Z26: 规则引擎兜底建议 — 基于因子分 + 技术信号 + regime 决策表。
 
-    仅输出 increase/decrease/hold 枚举（契约硬约束），source='rule'，
-    confidence 固定 0.7。suggested_weight 调整：
+    仅输出 increase/decrease/hold 枚举（契约硬约束），source='rule'。
+    suggested_weight 调整：
       increase -> min(current * 1.2, 0.30)（单只 ≤30% 风控）
-      decrease -> max(current * 0.7, 0.0)
+      decrease -> max(current * 0.7, 0.0）
       hold     -> 维持当前权重
+
+    round18 P2-7 (2026-08-12): confidence 不再固定 0.7——按因子填充率分级：
+      填充率 <70% → confidence=0.5（medium，说明数据不完整）；
+      填充率 ≥70% → confidence=0.7（保留）。负向：填充率低仍 high → FAIL。
 
     U2 R2 (factor-and-strategy-check-review 问题3 R2): 决策表分档——
       - avg_factor > 0.5 + buy 且非 bearish → increase
@@ -1335,7 +1522,9 @@ def _rule_based_suggestion(
     elif avg_factor > 0.5 and sig == "buy" and not bearish:
         action = "increase"
         reason = (
-            f"因子评分优({avg_factor:.2f})、技术面买入信号，基本面与动量共振，建议增仓；"
+            # round18 P1-1: 规则引擎无基本面数据——「基本面与动量共振」失真，
+            # 改为「因子评分 + 技术信号」共振（措辞与数据支撑匹配）
+            f"因子评分优({avg_factor:.2f})、技术面买入信号，因子与技术信号共振，建议增仓；"
             f"分 2 次执行、单次加仓不超过目标权重的 20%，留出回调加仓空间；"
             f"若市态转空或跌破 MA20 则暂停加仓，不逆势硬扛"
         )
@@ -1361,10 +1550,17 @@ def _rule_based_suggestion(
         _fcorr = ("偏强" if avg_factor >= 0.5 else
                   "偏弱" if avg_factor <= -0.5 else
                   "中性")
+        # round18 P1-1 (D8 同修): 技术卖出信号下的 hold 不再提示「加仓机会」
+        # （sell + hold + 加仓暗示 = 逻辑矛盾）
+        _follow_up = (
+            "技术信号偏空，暂不加仓；待信号转多或因子转正再评估"
+            if sig == "sell"
+            else "关注 RSI 进入超卖区（<30）或因子转正后的加仓机会"
+        )
         reason = (
             f"因子分 {avg_factor:.2f}（{_fcorr}），信号 {sig or '中性'}，维持现状；"
             f"持有逻辑不变，跟踪因子与信号变化；"
-            f"关注 RSI 进入超卖区（<30）或因子转正后的加仓机会，市态{_regime_cn}不追涨杀跌"
+            f"{_follow_up}，市态{_regime_cn}不追涨杀跌"
         )
         suggested = cur
 
@@ -1386,6 +1582,14 @@ def _rule_based_suggestion(
     elif action == "hold":
         suggested = cur
 
+    # round18 P2-7: confidence 按因子填充率分级（<70% → medium 0.5，负向：低填充仍 0.7 → FAIL）
+    _filled = ((factor_availability or {}).get("filled")) or 0
+    _total = ((factor_availability or {}).get("total")) or 0
+    if _total > 0 and _filled / _total < 0.7:
+        _confidence = 0.5
+    else:
+        _confidence = 0.7
+
     return {
         "symbol": symbol,
         "name": name,
@@ -1393,7 +1597,7 @@ def _rule_based_suggestion(
         "current_weight": round(float(cur or 0), 4),
         "suggested_weight": round(float(suggested), 4),
         "reason": reason,
-        "confidence": 0.7,
+        "confidence": _confidence,
         "source": "rule",
     }
 

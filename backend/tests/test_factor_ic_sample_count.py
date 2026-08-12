@@ -7,7 +7,7 @@ sample_count）。此测试改测 get_active_factors() 的扁平化结果。
 import json
 
 import pytest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from app.routers import factors as factors_router
 
@@ -23,7 +23,7 @@ class TestFactorIcSampleCount:
             with patch.object(factors_router.registry, "_last_ic_batch", fake_ic), \
                  patch.object(factors_router.registry, "_sample_counts", fake_counts), \
                  patch.object(factors_router.registry, "_last_computed_at", "2026-08-07T10:00:00Z"):
-                resp = await factors_router.get_active_factors()
+                resp = await factors_router.get_active_factors(db=MagicMock())
                 data = json.loads(resp.body) if isinstance(resp.body, bytes) else resp.body
 
             factors = [f for cat in data.get("categories", []) for f in cat.get("factors", [])]

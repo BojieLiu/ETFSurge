@@ -32,6 +32,11 @@ class PortfolioETFUpdate(BaseModel):
     shares_held: Optional[float] = Field(default=None, ge=0)
     first_buy_date: Optional[date] = None
     last_trade_date: Optional[date] = None
+    # round19 P3-③ (2026-08-12): 「调整仓位（买卖）」语义——delta_shares>0 增持 /
+    # <0 减持，price 缺省取实时价（拿不到 400）；与 avg_cost/shares_held 态互斥
+    # （同传 400）；存在时按加权平均重算成本 + 联动 target_weight（新市值÷总市值）。
+    delta_shares: Optional[float] = Field(default=None, description="买卖调整份额（正=增持 / 负=减持）")
+    price: Optional[float] = Field(default=None, ge=0, description="成交价（缺省取实时价）")
 
 
 class PortfolioETFResponse(PortfolioETFBase):

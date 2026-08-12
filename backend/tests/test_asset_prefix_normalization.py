@@ -59,6 +59,105 @@ class TestFetchStripsPrefix:
             assert "q=sh688981" in url
 
 
+class TestFetchHistoryPrefixNormalized:
+    """round19 P7-① (2026-08-12): fetch_history 入口剥 sh/sz/bj 前缀。
+
+    现象: watchlist 存 sz301308（带前缀）→ fetch_history 主路径不归一化 → 0 行
+    （实测 301308=800 行 vs sz301308=0 行）→ indicators data_available=False。
+    负向断言: 带前缀 symbol 内部源收到纯数字代码（现状透传前缀 → FAIL）。
+    """
+
+    def _rows(self, n=30):
+        return [
+            {"date": f"2026-0{i % 9 + 1}-0{(i % 28) + 1}", "open": 1, "high": 2, "low": 0.5,
+             "close": 1.5, "volume": 1000} for i in range(n)
+        ]
+
+    def test_fetch_history_stock_strips_prefix(self, monkeypatch):
+        """非 ETF A 股（301308 走 mootdx→sina）带 sz 前缀 → 内部源收到 '301308'。"""
+        calls = []
+
+        def fake_mootdx(symbol, period="daily"):
+            calls.append(symbol)
+            return self._rows()
+
+        def fake_sina(symbol, period="daily"):
+            return []
+
+        monkeypatch.setattr(cm, "_mootdx_history", fake_mootdx)
+        monkeypatch.setattr(cm, "_sina_history_cb", fake_sina)
+        rows = cm.fetch_history("sz301308", "A", "daily")
+        assert len(rows) >= 30, f"带前缀应返回数据，实得 {len(rows)} 行"
+        assert calls and calls[0] == "301308", f"内部源应收到纯数字 301308，实得 {calls}"
+
+    def test_fetch_history_etf_strips_prefix(self, monkeypatch):
+        """ETF（510300 走 sina 快链）带 sh 前缀 → _sina_history_cb 收到 '510300'。"""
+        calls = []
+
+        def fake_sina(symbol, period="daily"):
+            calls.append(symbol)
+            return self._rows()
+
+        monkeypatch.setattr(cm, "_sina_history_cb", fake_sina)
+        rows = cm.fetch_history("sh510300", "A", "daily")
+        assert len(rows) >= 30
+        assert calls and calls[0] == "510300", f"内部源应收到纯数字 510300，实得 {calls}"
+
+    def test_fetch_history_prefix_consistent_with_pure(self, monkeypatch):
+        """带前缀与纯数字结果一致（同一输入下走同源）。"""
+        calls = []
+
+        def fake_sina(symbol, period="daily"):
+            calls.append(symbol)
+            return self._rows(30)
+
+        monkeypatch.setattr(cm, "_sina_history_cb", fake_sina)
+        cm.fetch_history("sz301308", "A", "daily")
+        pure = calls[-1]
+        assert pure == "301308"
+
+    def test_fetch_history_us_not_stripped(self, monkeypatch):
+        """review 修复: 前缀剥离仅限 A 股——US 字母代码 SHOP/SHW/SJM 剥后语义会变
+        （SHOP→OP），US 分支必须收到原代码（负向: 剥成 OP → FAIL）。"""
+        calls = []
+
+        def fake_ak(symbol, asset_type, period="daily"):
+            calls.append(symbol)
+            return self._rows()
+
+        monkeypatch.setattr(cm, "_fetch_akshare_history", fake_ak)
+        rows = cm.fetch_history("SHOP", "US", "daily")
+        assert len(rows) >= 30
+        assert calls and calls[0] == "SHOP", f"US 分支应收到原代码 SHOP，实得 {calls}"
+
+    def test_fetch_history_hk_not_stripped(self, monkeypatch):
+        """review 修复: HK 分支同样不受前缀剥离影响（字母前缀不命中 5 位数字，双保险）。"""
+        calls = []
+
+        def fake_tx(symbol):
+            calls.append(symbol)
+            return self._rows()
+
+        monkeypatch.setattr(cm, "_fetch_tencent_hk_history", fake_tx)
+        rows = cm.fetch_history("00700", "HK", "daily")
+        assert len(rows) >= 30
+        assert calls and calls[0] == "00700", f"HK 分支应收到原代码 00700，实得 {calls}"
+
+    def test_fetch_history_bj_stripped_only_for_a(self, monkeypatch):
+        """bj 前缀在 A 股剥离；asset_type='index' 时带 sh 前缀由 fetch_index_history
+        内部处理（不在此处剥成数字）。"""
+        calls = []
+
+        def fake_index(symbol, period="daily"):
+            calls.append(symbol)
+            return self._rows()
+
+        monkeypatch.setattr(cm, "fetch_index_history", fake_index)
+        rows = cm.fetch_history("sh000001", "index", "daily")
+        assert len(rows) >= 30
+        assert calls and calls[0] == "sh000001", f"index 分支应收到原代码，实得 {calls}"
+
+
 class TestGetAssetRealtimeMatch:
     @pytest.mark.asyncio
     async def test_prefixed_symbol_matches_pure_digit_result(self, monkeypatch):

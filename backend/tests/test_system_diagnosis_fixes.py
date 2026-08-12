@@ -352,7 +352,8 @@ async def test_Z03_china_specific_ic_not_none():
     old_batch = registry._last_ic_batch
     registry._last_ic_batch = {}
     try:
-        resp = await factors_mod.get_active_factors()
+        # round18 P0-4: 端点新增 db 依赖（DB IC 周期计数）——测试传 mock db
+        resp = await factors_mod.get_active_factors(db=MagicMock())
         body = json.loads(resp.body) if isinstance(resp.body, bytes) else resp.body
         for cat in body.get("categories", []):
             if cat["name"] == "china_specific":

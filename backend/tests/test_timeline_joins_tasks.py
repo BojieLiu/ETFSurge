@@ -58,6 +58,11 @@ class _FakeResult:
     def scalars(self):
         return _FakeScalars(self._rows)
 
+    # round18 P0-1: timeline 显式列查询改用 result.all()（返回 Row）——
+    # 兼容测试双接口
+    def all(self):
+        return self._rows
+
 
 class _FakeDB:
     """顺序返回 designs / checks / check-tasks / tasks 四组结果。

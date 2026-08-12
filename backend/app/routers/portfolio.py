@@ -26,6 +26,20 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/portfolio", tags=["portfolio"])
 
 
+async def _broadcast_portfolio_changed(portfolio_type: str | None, symbol: str | None = None):
+    """round19 P2-②: 组合结构变更广播——POST/PUT/DELETE /apply-design 写库后通知
+    所有已挂载页面与多标签页刷新（前端 market.js onmessage 分流 + 1s 防抖）。
+    广播失败不影响写库响应（5s 超时保护在 ws.py 内部）。"""
+    try:
+        from ..routers.ws import manager
+        await manager.broadcast("portfolio", {
+            "type": "portfolio_changed",
+            "data": {"portfolio_type": portfolio_type, "symbol": symbol},
+        })
+    except Exception as e:
+        logger.warning("[portfolio] broadcast portfolio_changed failed (non-fatal): %s", e)
+
+
 async def _with_realtime_prices(etfs: list):
     """O8 (round7 §7 P11): 批量补充实时 price/change_pct 到持仓列表。
 
@@ -63,7 +77,9 @@ async def get_etfs(
 
 @router.post("/etfs", response_model=PortfolioETFResponse, status_code=201)
 async def create_etf(data: PortfolioETFCreate, db: AsyncSession = Depends(get_db)):
-    return await add_etf(db, data)
+    result = await add_etf(db, data)
+    await _broadcast_portfolio_changed(result.portfolio_type, result.symbol)
+    return result
 
 
 @router.put("/etfs/{symbol}", response_model=PortfolioETFResponse)
@@ -71,6 +87,15 @@ async def update_etf_route(symbol: str, data: PortfolioETFUpdate, db: AsyncSessi
     result = await update_etf(db, symbol, data)
     if not result:
         raise HTTPException(status_code=404, detail="ETF not found")
+    # round19 P3-③: adjust 语义响应携带 realized_pnl/trade（非 ORM 列，动态注入）
+    _adj = getattr(result, "_adjust_meta", None)
+    if _adj is not None:
+        _resp = PortfolioETFResponse.model_validate(result).model_dump()
+        _resp["realized_pnl"] = _adj["realized_pnl"]
+        _resp["trade"] = _adj["trade"]
+        await _broadcast_portfolio_changed(result.portfolio_type, symbol)
+        return _resp
+    await _broadcast_portfolio_changed(result.portfolio_type, symbol)
     return result
 
 
@@ -79,6 +104,7 @@ async def delete_etf(symbol: str, db: AsyncSession = Depends(get_db)):
     success = await remove_etf(db, symbol)
     if not success:
         raise HTTPException(status_code=404, detail="ETF not found")
+    await _broadcast_portfolio_changed(None, symbol)
 
 
 @router.post("/calculate")
@@ -121,7 +147,9 @@ async def apply_design(design: dict, db: AsyncSession = Depends(get_db)):
     if not weights:
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="组合设计缺少 weights（symbol→target_weight 映射）")
-    return await apply_portfolio_design(db, design)
+    result = await apply_portfolio_design(db, design)
+    await _broadcast_portfolio_changed(None)
+    return result
 
 
 @router.get("/pnl-history")
@@ -164,7 +192,9 @@ async def import_portfolio_file(
     """导入组合持仓 CSV 文件"""
     content = await file.read()
     csv_content = content.decode("utf-8")
-    return await import_portfolio(db, csv_content, portfolio_type, mode, skip_invalid)
+    result = await import_portfolio(db, csv_content, portfolio_type, mode, skip_invalid)
+    await _broadcast_portfolio_changed(portfolio_type)
+    return result
 
 
 @router.get("/drift-check")
@@ -512,32 +542,45 @@ async def get_timeline(
     from sqlalchemy import select
     import json
 
-    # Query designs
-    design_stmt = select(PortfolioDesign).order_by(PortfolioDesign.created_at.desc())
+    # P0-1 (round18 2.3/§7): timeline 热态 2.3s 恒定——无 limit 全表查询 +
+    # strategies_json 大字段物化 + 每条 json.loads（结果丢弃）。修复：
+    # ① 显式列查询（不取 strategies_json/holdings_json/params_json 等大字段）；
+    # ② 删除 :570 无用 json.loads（strategies 变量从未使用）。
+    # Query designs（列裁剪：timeline 只用 id/created_at/status/capital/error_message）
+    design_stmt = select(
+        PortfolioDesign.id, PortfolioDesign.created_at, PortfolioDesign.status,
+        PortfolioDesign.capital, PortfolioDesign.error_message,
+    ).order_by(PortfolioDesign.created_at.desc())
     design_result = await db.execute(design_stmt)
-    designs = design_result.scalars().all()
+    designs = design_result.all()
 
-    # Query checks
-    check_stmt = select(StrategyCheckRecord).order_by(StrategyCheckRecord.created_at.desc())
+    # Query checks（列裁剪：只用 id/created_at/summary）
+    check_stmt = select(
+        StrategyCheckRecord.id, StrategyCheckRecord.created_at, StrategyCheckRecord.summary,
+    ).order_by(StrategyCheckRecord.created_at.desc())
     check_result = await db.execute(check_stmt)
-    checks = check_result.scalars().all()
+    checks = check_result.all()
 
     # O12 (round8 §7 + interaction-redesign D2): join tasks 表——失败/运行中的
     # design 任务在历史列表跨会话可见（不再"凭空消失"）。已成功且已有 design
     # 记录的不重复（design_items 已覆盖）；失败/运行中任务并入。
     # P2-11 (round9 §4.5-3): check 类型 task 关联查询——用于孤立 check 记录判定
     # （顺序：design → check → check-task → design-task，见 test_timeline_joins_tasks._FakeDB）
-    check_task_stmt = select(TaskRecord).where(TaskRecord.task_type == "check")
-    check_task_rows = (await db.execute(check_task_stmt)).scalars().all()
+    # P0-1: tasks 查询同样列裁剪（排除 params_json/result_json 大字段）
+    check_task_stmt = select(TaskRecord.id, TaskRecord.record_id).where(TaskRecord.task_type == "check")
+    check_task_rows = (await db.execute(check_task_stmt)).all()
     linked_check_record_ids = {t.record_id for t in check_task_rows if t.record_id}
     # P0-9 (round16 3.10 R1): task_items 查询放宽为 design+check——旧实现只查 design，
     # check 类型 running/pending/failed 任务（尚未落 strategy_check_records 表）永不进 timeline，
     # 用户点"策略检查"后运行中任务不可见。
-    task_stmt = select(TaskRecord).where(
+    task_stmt = select(
+        TaskRecord.id, TaskRecord.task_type, TaskRecord.status, TaskRecord.record_id,
+        TaskRecord.error_message, TaskRecord.created_at,
+    ).where(
         TaskRecord.task_type.in_(["design", "check"]),
     ).order_by(TaskRecord.created_at.desc())
     task_result = await db.execute(task_stmt)
-    task_rows = task_result.scalars().all()
+    task_rows = task_result.all()
     check_record_ids = {c.id for c in checks}
 
     design_ids = {d.id for d in designs}
@@ -545,7 +588,6 @@ async def get_timeline(
     # Build items from designs
     design_items = []
     for d in designs:
-        strategies = json.loads(d.strategies_json) if d.strategies_json else []
         design_items.append({
             "id": d.id,
             "_type": "design",
