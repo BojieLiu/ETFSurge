@@ -1582,6 +1582,8 @@ def section_db_integrity():
     # 全空（DB-only）时通过耗时门禁却无行情，需拦。缓冲热时（P0-E 已回填 quote 缓存）
     # 每项 realtime.price 非 None 或带 data_source=stale 兜底。缓存未热/无自选时 WARN
     # 不判 FAIL（环境相关）。
+    # P1-2 (round17): 批量失败市场显式降级（realtime=null + _degraded=true，P2-8 前端
+    # 可区分「加载中」与「已降级」）视为合格弱源行为——冷却期快速返回而非 7.4s 卡死。
     try:
         _wr2 = requests.get(f"{BASE}/api/v1/market/watchlist", timeout=15)
         _wj = _wr2.json()
@@ -1591,10 +1593,13 @@ def section_db_integrity():
                 it.get("symbol") for it in _items
                 if not (it.get("realtime") or {}).get("price")
             ]
-            if _rt_missing and all((it.get("realtime") or {}).get("data_source") == "stale"
-                                   for it in _items if not (it.get("realtime") or {}).get("price")):
-                check(f"P3-C watchlist realtime 有 stale 兜底 {len(_items)-len(_rt_missing)}/{len(_items)}",
-                      True, "弱源下 stale 快照回填（P0-E）")
+            if _rt_missing and all(
+                (it.get("realtime") or {}).get("data_source") == "stale"
+                or it.get("_degraded")
+                for it in _items if not (it.get("realtime") or {}).get("price")
+            ):
+                check(f"P3-C watchlist realtime 有 stale/显式降级兜底 {len(_items)-len(_rt_missing)}/{len(_items)}",
+                      True, "弱源下 stale 快照回填（P0-E）/批量失败显式降级（P1-2）")
             else:
                 check(f"P3-C watchlist realtime 非空 {len(_items)-len(_rt_missing)}/{len(_items)}",
                       not _rt_missing,

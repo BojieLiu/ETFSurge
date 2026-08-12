@@ -12,9 +12,9 @@
         <button class="ta-retry" @click="load">重试</button>
       </div>
       <div v-else class="ta-body">
-        <!-- 综合信号 -->
+        <!-- 技术信号（K 线技术指标口径，与因子模型口径相区分） -->
         <div v-if="signalData" class="ta-signal" :class="`ta-signal--${signalData.signal}`">
-          <span class="ta-signal-label">综合信号</span>
+          <span class="ta-signal-label">技术信号</span>
           <span class="ta-signal-value">{{ signalText }}</span>
           <span v-if="signalData.score !== undefined" class="ta-signal-score">得分 {{ signalData.score }}</span>
           <ul v-if="signalData.reasons?.length" class="ta-signal-reasons">
@@ -196,7 +196,7 @@ function fmtMoney(v) {
 }
 
 // R4-25: signalText 从静态 const 改为 computed —— 旧实现 setup 时求值一次
-// （signalData 尚为 null），导致「综合信号」永远显示「—」。
+// （signalData 尚为 null），导致「技术信号」永远显示「—」。
 const signalText = computed(() => {
   const s = signalData.value?.signal
   return ({ buy: '🟢 买入', hold: '🟡 持有', sell: '🔴 卖出' })[s] || s || '—'

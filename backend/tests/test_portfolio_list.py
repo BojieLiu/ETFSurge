@@ -286,3 +286,44 @@ async def test_get_design_allocations_include_market_fields():
     assert alloc["daily_change_pct"] == -0.65, f"daily_change_pct 被转换层丢弃: {alloc}"
     assert alloc["price"] == 4.728
     assert alloc["factor_score"] == 0.75
+
+
+# ── P2-9 B2/B6 (round16 3.9, 自 test_p29_contract_bias.py 拆入) ────────────────
+# 契约偏差收口：B2（design-async 响应含 design_id）入 portfolio 域；
+# B6（WatchlistPanel change_pct=null 不标红，前端源码级断言）随 B2 并入本文件
+# ——B6 为前端源码断言，勿因「后端文件」误删（来源 round16 §3.9/P2-9）。
+
+
+@pytest.mark.asyncio
+async def test_design_async_response_has_design_id():
+    """B2: design-async 202 响应含 design_id 字段（null 允许，前端读字段不 undefined）。"""
+    from unittest.mock import AsyncMock, patch
+
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    class _FakeTaskMgr:
+        async def create_task(self, task_type="design", params=None):
+            return {"task_id": 999, "created_at": "2026-08-11T12:00:00Z"}
+
+    with patch("app.tasks.task_manager.task_manager", _FakeTaskMgr()), \
+         patch("app.tasks.task_manager.design_worker", new=AsyncMock()):
+        client = TestClient(app)
+        resp = client.post("/api/v1/portfolio/design-async", json={"capital": 500000})
+    assert resp.status_code == 202
+    body = resp.json()
+    assert "design_id" in body, f"design-async 响应应含 design_id: {body}"
+    assert body["task_id"] == 999
+
+
+def test_watchlist_panel_null_change_pct_not_red():
+    """B6: WatchlistPanel 涨跌着色判空——change_pct=null 不渲染红涨（源码级断言）。"""
+    import os
+    path = os.path.join(os.path.dirname(__file__), "..", "frontend", "src",
+                        "components", "market", "WatchlistPanel.vue")
+    if not os.path.exists(path):
+        path = os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "src",
+                            "components", "market", "WatchlistPanel.vue")
+    src = open(path, encoding="utf-8").read()
+    assert "change_pct != null && item.realtime.change_pct >= 0" in src, \
+        "change_pct=null 时应判空（不得误判红涨）"

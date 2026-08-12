@@ -11,7 +11,10 @@
     </div>
   </section>
   <section class="card signal-section" v-if="signal && !loading">
-    <div class="card-header"><h2 class="card-title">🎯 综合信号</h2></div>
+    <div class="card-header">
+      <h2 class="card-title">📈 技术信号</h2>
+    </div>
+    <p class="signal-caption">基于 K 线技术指标（RSI/KDJ/MACD/MA），不含因子与基本面</p>
     <div class="signal-content">
       <div :class="['signal-badge', signal.signal]" role="status">
         <span class="signal-icon">{{ signalIcon }}</span>
@@ -55,6 +58,7 @@ const indicatorItems = computed(() => {
 .card-header { display: flex; align-items: center; justify-content: space-between; padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--color-border-light); }
 .card-title { font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); margin: 0; }
 .card-title-icon { font-size: var(--font-size-xl); line-height: 1; }
+.signal-caption { margin: 0; padding: 0 var(--space-5); font-size: var(--font-size-xs); color: var(--color-text-tertiary); text-align: center; }
 .indicators-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--space-3); padding: var(--space-4); }
 .indicator-item { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-3); background: var(--color-surface-secondary); border: 1px solid var(--color-border-light); border-radius: var(--radius-lg); }
 .indicator-label { font-size: var(--font-size-xs); font-weight: var(--font-weight-medium); color: var(--color-text-tertiary); text-transform: uppercase; }

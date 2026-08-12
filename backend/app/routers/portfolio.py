@@ -311,6 +311,9 @@ async def get_design(
         # P1-6 (round9 §4.1-3): 顶层 market_regime 补字段——旧实现顶层无该键，
         # 前端若读顶层字段将显示空（market_context 内已有 regime，复用之）
         "market_regime": (_market_context or {}).get("market_regime"),
+        # P2-8 (round17): 数据源降级标记透传（从 market_snapshot_json 读出，历史设计可查）——
+        # 前端 DesignResult 据此显示「数据源冷却」提示条；无该键时前端不渲染（不误报）。
+        "degradation": (_market_context or {}).get("degradation"),
     }
 
 

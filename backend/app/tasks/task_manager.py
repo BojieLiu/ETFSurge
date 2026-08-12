@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 
 # O10 (round8 §7): DATA 预算弹性化——冷缓存首次全量建 K 线缓存实测 42-75s，
 # 45s 硬预算恒被截断；默认 90s（可用 DESIGN_DATA_TIMEOUT env 覆盖）。
@@ -301,6 +302,14 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
         strategies = result.get("strategies", [])
         market_context = result.get("market_context", {})
 
+        # P2-8 (round17): 顶层 degradation 并入 market_context —— generate_enhanced_design
+        # 的 degradation 位于 result 顶层（mode/static_pool/pool_degraded 等），旧实现只取
+        # market_context → degradation 未持久化，历史设计无法查询数据源降级状态（仅新设计
+        # 内存可见）。并入后随 :350/:403 的 market_snapshot_json 落库，get_design 可透传。
+        if result.get("degradation"):
+            market_context = dict(market_context)
+            market_context["degradation"] = result["degradation"]
+
         # 检查结果是否有效
         error_info = result.get("error")
         if error_info:
@@ -432,6 +441,7 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
 
             # OPT-06/Z28: LLM 阶段 240s 预算（与 design_report 内层 240s、provider
             # timeout 240s 三层对齐；免费模型高峰排队常 >90s，过紧预算必然 partial）
+            _llm_start = time.monotonic()
             llm_analysis = await asyncio.wait_for(
                 generate_design_report(
                     strategies=strategies,
@@ -441,6 +451,15 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
                 ),
                 timeout=240,
             )
+            _llm_elapsed = time.monotonic() - _llm_start
+            # LLM-1 (round17): 排队超时预警——>150s 时 WARN + 供监控（不缩减预算：
+            # 过紧预算必然 partial，见 :433-434 注释）；超时降级仍由 P0-1 partial 兜底
+            if _llm_elapsed > 150:
+                logger.warning(
+                    "[design_pipeline] LLM report took %.1fs (>150s queueing threshold) — "
+                    "queueing or slow provider, quality may degrade to partial",
+                    _llm_elapsed,
+                )
 
             # P0-1 反假完成：LLM 空响应兜底文案（"报告生成失败"）不得标 quality=full。
             _FAIL_PLACEHOLDERS = ("报告生成失败",)

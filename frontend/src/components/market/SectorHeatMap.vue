@@ -15,6 +15,12 @@
         >{{ tab.label }}</button>
       </div>
 
+      <!-- P2-8 (round17): 板块热度数据源冷却提示——sectors/heat 返回 degraded=true
+           （非零率 <50%）时显式标注；正常时不渲染（不误报，负向断言覆盖） -->
+      <div v-if="degraded && activeTab === 'heat'" class="degraded-banner" role="alert">
+        ⚠️ 部分板块涨跌幅数据源冷却（非零率 &lt;50%），涨跌幅可能缺失
+      </div>
+
       <div class="card-body">
         <!-- Loading skeleton: O30② (round7 §7 P30②) 行数对齐各 tab 数据量——
              旧实现固定 5 行（48px×5≈240px），hot 加载后 15 条（≈840px）→
@@ -161,6 +167,8 @@ const activeTab = ref('hot')
 const dataList = ref([])
 const loading = ref(false)
 const error = ref('')
+// P2-8 (round17): sectors/heat 响应 degraded 标记（非零率 <50% → 数据源冷却）
+const degraded = ref(false)
 
 // O30②: 骨架行数按各 tab 数据量对齐（hot 15 / heat 20 / stock 50）——
 // 加载中与加载后高度级差消除，防布局抖动
@@ -241,6 +249,7 @@ async function switchTab(tab) {
   // 冷却时空态持续，用户误以为卡片消失。loading 骨架占位避免闪烁。
   loading.value = true
   dataList.value = []
+  degraded.value = false // P2-8: 切换 tab 复位降级标记（避免旧 tab 状态残留）
   error.value = ''
   await fetchData()
 }
@@ -248,6 +257,7 @@ async function switchTab(tab) {
 // Z31: Re-fetch when market tab changes
 watch(() => props.marketTab, () => {
   dataList.value = []
+  degraded.value = false // P2-8: 市场切换复位降级标记（防旧市场 banner 残留）
   error.value = ''
   fetchData()
 })
@@ -271,9 +281,13 @@ async function fetchData() {
     // F6 R14: 双兼容——兼容数组（旧）与 {items,total}（hot-plates 契约 v2.0）
     const d = resp.data
     dataList.value = Array.isArray(d) ? d : (d?.items ?? [])
+    // P2-8 (round17): sectors/heat 降级标记透传——heat tab 且响应带 degraded=true
+    // 时显示冷却提示（hot/stock tab 无此字段 → 恒 false 不误报）
+    degraded.value = activeTab.value === 'heat' && !Array.isArray(d) && !!d?.degraded
   } catch (e) {
     error.value = '加载失败: ' + (e?.message || '网络错误')
     dataList.value = []
+    degraded.value = false // P2-8: 失败复位降级标记（防 error + banner 同时残留）
   } finally {
     loading.value = false
   }
@@ -292,6 +306,9 @@ onMounted(() => { fetchData() })
 .tab-btn { padding: var(--space-1) var(--space-3); border: none; background: none; cursor: pointer; font-size: var(--text-sm); color: var(--color-text-secondary); border-radius: var(--radius-sm); }
 .tab-btn.active { color: var(--color-primary); background: var(--color-bg-hover); font-weight: 600; }
 .tab-btn:hover { background: var(--color-bg-hover); }
+
+/* P2-8 (round17): 数据源冷却提示条（黄色警示，非零率 <50% 时显示） */
+.degraded-banner { margin-bottom: var(--space-3); padding: var(--space-2) var(--space-3); background: #fff8e1; border: 1px solid #ffe082; border-radius: var(--radius-md); font-size: var(--text-xs); color: #8d6e00; }
 
 .card-body { min-height: 120px; }
 .loading-skeleton { display: flex; flex-direction: column; gap: var(--space-2); }

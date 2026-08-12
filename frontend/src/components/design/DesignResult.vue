@@ -4,6 +4,18 @@
       &#128214; 历史方案（{{ formatDate(createdAt) }}）
     </div>
 
+    <!-- P2-8 (round17): 数据源冷却告警——degradation 存在时显式提示（非静默降级）；
+         正常路径无 degradation → 不渲染（不误报，负向断言覆盖） -->
+    <div v-if="degradation" class="degradation-banner" role="alert">
+      <span class="degradation-icon">⚠️</span>
+      <div class="degradation-body">
+        <span class="degradation-title">数据源冷却，部分标的为降级数据</span>
+        <span v-if="degradation.mode" class="degradation-detail">
+          （{{ degradation.mode }}<template v-if="degradation.pool_degraded"> · 候选池降级</template>）
+        </span>
+      </div>
+    </div>
+
     <AppTabs :tabs="appTabs" v-model="tab" variant="line" size="sm" ariaLabel="设计结果" class="design-result-tabs">
       <template #report>
         <div class="design-report">
@@ -70,6 +82,7 @@
                         <th>权重</th>
                         <th>层</th>
                         <th>今日涨跌<template v-if="fetchedAtLabel"> <span class="fetched-at">{{ fetchedAtLabel }}</span></template></th>
+                        <th><span class="factor-col-head" title="因子综合分（区别于技术信号，基于 33 维因子模型）">因子分</span></th>
                         <th>入选理由</th>
                       </tr>
                     </thead>
@@ -88,6 +101,14 @@
                             </span>
                             <span v-else class="muted data-unavailable">数据源不可用</span>
                           </template>
+                          <span v-else class="muted">—</span>
+                        </td>
+                        <td>
+                          <!-- P2-6 (round17): 因子综合分连续值（可为负，如 -0.17 中性）——
+                               区别于技术信号（buy/hold/sell），列头 tooltip 已注明口径 -->
+                          <span v-if="a.factor_score != null" :class="a.factor_score >= 0 ? 'text-up' : 'text-down'">
+                            {{ a.factor_score >= 0 ? '+' : '' }}{{ a.factor_score.toFixed(2) }}
+                          </span>
                           <span v-else class="muted">—</span>
                         </td>
                         <td class="rationale-cell">{{ a.rationale || '—' }}</td>
@@ -130,6 +151,9 @@ const props = defineProps({
   // round10 P2-D: 行情数据采集时刻（market_context.data_fetched_at，后端 P0-9 注入）——
   // 表头「今日涨跌」后标注「截至 HH:MM」，盘中值可追溯、不被误读为收盘
   dataFetchedAt: { type: String, default: '' },
+  // P2-8 (round17): 数据源降级标记（get_design 顶层透传 / market_context.degradation）——
+  // 存在时顶部显示冷却提示；undefined/null 不渲染（不误报）
+  degradation: { type: Object, default: null },
 })
 
 const emit = defineEmits(['apply', 'regenerate', 'close', 'retry-report'])
@@ -204,6 +228,13 @@ function applyPlan(pf) {
 .design-result-tabs { margin-bottom: var(--space-4); }
 
 .history-badge { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); margin-bottom: var(--space-3); background: #fff3e0; border: 1px solid #ffcc80; border-radius: var(--radius-md); font-size: var(--font-size-sm); color: #e65100; font-weight: var(--font-weight-medium); }
+
+/* P2-8 (round17): 数据源冷却告警条——黄色警示（不阻断查看方案，仅显式标注降级） */
+.degradation-banner { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); margin-bottom: var(--space-3); background: #fff8e1; border: 1px solid #ffe082; border-radius: var(--radius-md); font-size: var(--font-size-sm); color: #8d6e00; }
+.degradation-icon { font-size: var(--font-size-base); }
+.degradation-body { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); }
+.degradation-title { font-weight: var(--font-weight-medium); }
+.degradation-detail { font-size: var(--font-size-xs); color: #a0820a; }
 
 .design-report { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .report-waiting { text-align: center; padding: var(--space-8) var(--space-4); }

@@ -15,6 +15,7 @@ Z27 适配（结构重写，见 docs/z27-task-persistence-redesign.md §8.2）�
   - 断言目标从「task 内存 dict」改为「DB 读回」
 """
 import asyncio
+import json
 import pytest
 from unittest.mock import patch, AsyncMock, MagicMock, ANY
 
@@ -273,6 +274,42 @@ class TestDesignPipeline:
         got = await task_mgr.get_task(t["task_id"])
         assert got["status"] == "completed"
         assert "market_context" in got["result"]
+
+    @patch("app.tasks.task_manager.async_session")
+    @patch("app.analysis.llm.generate_design_report", new_callable=AsyncMock)
+    @patch("app.services.strategy_design.generate_enhanced_design", new_callable=AsyncMock)
+    async def test_pipeline_persists_degradation(self, mock_gen_design, mock_llm, mock_db_session, task_mgr):
+        """P2-8 (round17): generate_enhanced_design 顶层 degradation 并入 market_context，
+        随 market_snapshot_json 持久化（历史设计可查，而非仅新设计内存可见）。"""
+        from app.tasks.task_manager import design_pipeline
+
+        mock_gen_design.return_value = {
+            "strategies": _mock_strategies(),
+            "market_context": _mock_market_context(),
+            "degradation": {
+                "mode": "partial_data",
+                "pool_degraded": True,
+                "reason": "部分候选标的缺因子分",
+            },
+        }
+        mock_llm.return_value = "LLM report content"
+        stage3_session = _make_mock_session(design_id=1005)
+        mock_db_session.side_effect = [
+            stage3_session,  # Stage 3: initial write
+            _make_mock_session(design_id=1005),  # Stage 4: LLM result update
+        ]
+
+        t = await task_mgr.create_task(task_type="design", params={"capital": 500000})
+        await design_pipeline(task_mgr, task_id=t["task_id"])
+
+        got = await task_mgr.get_task(t["task_id"])
+        assert got["status"] == "completed"
+
+        # Stage 3 写入的 PortfolioDesign.market_snapshot_json 必须含 degradation
+        record = stage3_session.add.call_args[0][0]
+        snapshot = json.loads(record.market_snapshot_json)
+        assert snapshot.get("degradation", {}).get("mode") == "partial_data"
+        assert snapshot["degradation"].get("pool_degraded") is True
 
 
 # ── Strategy Check Pipeline Tests ─────────────────────────────────

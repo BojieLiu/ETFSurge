@@ -126,3 +126,14 @@ def test_symbol_analysis_stream(client):
     assert r.status_code == 200
     assert r.headers.get("content-type", "").startswith("text/event-stream")
     assert "event:" in r.text
+
+
+# ── P2-9 B1 (round16 3.9, 自 test_p29_contract_bias.py 并入): SymbolAnalysisRequest ──
+# 契约字段完备性：B1 入 analysis 域（权威来源 round16 §3.9/P2-9）。
+class TestP29ContractFieldCompleteness:
+    def test_symbol_analysis_request_parses_market(self):
+        """B1: SymbolAnalysisRequest 接受 market 字段（Pydantic 显式声明）。"""
+        from app.routers.analysis import SymbolAnalysisRequest
+
+        req = SymbolAnalysisRequest(symbol="00700", name="腾讯控股", asset_type="HK", market="HK")
+        assert req.market == "HK", "market 字段应被 Pydantic 解析（旧实现 extra 静默忽略）"

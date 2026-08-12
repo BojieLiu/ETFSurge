@@ -101,6 +101,18 @@ function stepState(idx) {
 }
 
 const timeoutHint = computed(() => {
+  // LLM-1 (round17): LLM 阶段进度分级——卡 80%「LLM 报告生成中」超 60s 提示排队，
+  // 超 150s 提示接近超时将降级为方案表格（对照后端 240s 预算 + P0-1 partial 语义）。
+  // 非 LLM 阶段保持原「已等待 X 分钟」通用提示。
+  const inLLM = props.taskStage === 'LLM 报告生成中' || props.progress >= 80
+  if (inLLM) {
+    if (props.elapsedSec > 150) {
+      return '已接近超时，将降级为方案表格（无 LLM 分析）'
+    }
+    if (props.elapsedSec > 60) {
+      return 'LLM 排队中，可能需要更长时间（免费模型高峰 90s+）'
+    }
+  }
   if (props.elapsedSec >= 60) {
     return `已等待 ${Math.floor(props.elapsedSec / 60)} 分钟，预计还需 1-2 分钟`
   }

@@ -698,15 +698,21 @@ async def _watchlist_enrich_items(items: list) -> list[dict]:
 
     from ..services.market_service import get_realtime_batch
 
-    async def _batch_for(group: list, asset_type: str, timeout: float = 4) -> dict[str, dict]:
+    _batch_ok: dict[str, bool] = {}  # P1-2: 各市场批量调用是否成功（非空）——skip 判定依据
+
+    async def _batch_for(group: list, asset_type: str, timeout: float = 2) -> dict[str, dict]:
         try:
             _rows = await asyncio.wait_for(
                 get_realtime_batch([it.symbol for it in group], asset_type),
-                timeout=timeout,  # P0-4: 5→4s——批量慢源（mootdx 空转后）快速降级
+                timeout=timeout,  # P1-2 (round17): 4→2s——数据源冷却期批量快速降级，
+                                  # 不再等满 4s（实测冷/热态均 7.4s，批量+per-item 叠加）
             )
-            return {r.get("symbol"): r for r in (_rows or []) if r.get("symbol")}
+            _rows = _rows or []
+            _batch_ok[asset_type] = bool(_rows)
+            return {r.get("symbol"): r for r in _rows if r.get("symbol")}
         except BaseException as _e:
             logger.warning("[watchlist] %s batch realtime failed (fallback per-item): %s", asset_type, _e)
+            _batch_ok[asset_type] = False
             return {}
 
     _batch_map: dict[str, dict] = {}
@@ -731,12 +737,24 @@ async def _watchlist_enrich_items(items: list) -> list[dict]:
     # P0-4 (round9 §10): 批量失败后 A 股**不再逐个 per-item 重试**——慢源时 10 条 ×
     # 2.5s 串联把整体拖到 8s+（实测 8.4s）；A 股缺失直接 DB-only（realtime=None +
     # _degraded 标记，P0-D），HK/US 少量条目保留 per-item（分级超时兜底）。
-    _a_hit = any((it.asset_type or "A") in ("A", "stock") and it.symbol in _batch_map for it in items)
-    _skip_a_per_item = bool(_a_items) and not _a_hit
+    # P1-2 (round17): per-item 兜底**按市场统一判定**——批量**调用失败**（超时/异常/
+    # 空结果，见 _batch_ok）的市场全部跳过 per-item 直接 DB-only。实测 19 只自选含
+    # 3 只美股（AAPL/SPY/QQQ）：US 批量失败（twelvedata 429）→ 逐美股串行重试
+    # 429 + finnhub 各 2-5s → 叠加撞 5s 外层超时 → 冷/热态均 7.4s 卡死。
+    # ⚠️ 判定依据是「批量调用失败」而非「精确 symbol 命中」——HK 自选可能存
+    # "02800.HK"（HKUS_ETF_MAP 格式）而批量返回 "02800"，精确匹配必然 0 命中，
+    # 若据此 skip 会把健康市场误判为降级（review 修复，round17 P1-2）。
+    def _group_of(item):
+        _at = item.asset_type or "A"
+        return "A" if _at in ("A", "stock") else _at  # HK / US
+    _skip_markets: set[str] = set()
+    for _mkt, _mkt_items in (("A", _a_items), ("HK", _hk_items), ("US", _us_items)):
+        if _mkt_items and _batch_ok.get(_mkt) is False:
+            _skip_markets.add(_mkt)
     _realtimes = await asyncio.gather(
         *(
             asyncio.sleep(0, result=None)
-            if (_skip_a_per_item and (it.asset_type or "A") in ("A", "stock"))
+            if _group_of(it) in _skip_markets
             else _realtime_one(it)
             if it.symbol not in _batch_map
             else asyncio.sleep(0, result=_batch_map[it.symbol])

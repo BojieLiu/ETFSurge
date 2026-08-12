@@ -234,7 +234,7 @@ describe('SectorHeatMap (F2-6/F2-7 §9.8)', () => {
     expect(modal.find('.ta-kline').exists()).toBe(true)
   })
 
-  it('R4-25: 综合信号文本随响应动态渲染（非静态空值）', async () => {
+  it('R4-25: 技术信号文本随响应动态渲染（非静态空值）', async () => {
     marketApi.getStockHotRank.mockResolvedValue({
       data: [{ name: '海光信息', symbol: '688825', change_pct: 5.2 }],
     })
@@ -316,5 +316,41 @@ describe('SectorHeatMap (F2-6/F2-7 §9.8)', () => {
     // 点击被禁用按钮不触发请求
     await techBtn.trigger('click')
     expect(marketApi.indicators).not.toHaveBeenCalled()
+  })
+
+  // ── P2-8 (round17): sectors/heat degraded 标记前端消费 ──────────────
+  it('P2-8: heat 响应 degraded=true 显示冷却提示（负向：无提示 → FAIL）', async () => {
+    marketApi.getSectorHeat.mockResolvedValue({
+      data: { items: [{ rank: 1, name: '半导体', change_pct: 0 }], total: 1, degraded: true },
+    })
+    const wrapper = mount(SectorHeatMap)
+    const tabs = wrapper.findAll('.tab-btn')
+    await tabs[1].trigger('click')
+    await flushPromises()
+    const banner = wrapper.find('.degraded-banner')
+    expect(banner.exists()).toBe(true)
+    expect(banner.text()).toContain('数据源冷却')
+  })
+
+  it('P2-8: degraded=false 不显示提示（不误报）', async () => {
+    marketApi.getSectorHeat.mockResolvedValue({
+      data: { items: [{ rank: 1, name: '半导体', change_pct: 2.3 }], total: 1, degraded: false },
+    })
+    const wrapper = mount(SectorHeatMap)
+    const tabs = wrapper.findAll('.tab-btn')
+    await tabs[1].trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.degraded-banner').exists()).toBe(false)
+  })
+
+  it('P2-8: 数组响应（旧格式，无 degraded 字段）不显示提示', async () => {
+    marketApi.getSectorHeat.mockResolvedValue({
+      data: [{ rank: 1, name: '半导体', change_pct: 2.3 }],
+    })
+    const wrapper = mount(SectorHeatMap)
+    const tabs = wrapper.findAll('.tab-btn')
+    await tabs[1].trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.degraded-banner').exists()).toBe(false)
   })
 })

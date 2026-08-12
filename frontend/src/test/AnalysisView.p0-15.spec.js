@@ -42,4 +42,10 @@ describe('P0-15 持仓 K 线红涨绿跌（源码级断言）', () => {
     expect(avSrc).toContain('price-summary-row')
     expect(avSrc).toContain('今日涨跌')
   })
+
+  it('P2-6: TechnicalAnalysisModal 信号标签为「技术信号」（负向：含「综合信号」 → FAIL）', () => {
+    // 源码级断言：弹窗信号标签与 SignalPanel 口径一致（K 线技术指标，非因子综合）
+    expect(taSrc).toContain('ta-signal-label">技术信号')
+    expect(taSrc).not.toContain('综合信号')
+  })
 })
