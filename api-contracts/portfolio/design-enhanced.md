@@ -93,7 +93,8 @@ POST /api/v1/portfolio/design-async（原 /design-enhanced 已迁移，T11 校�
         "sector_concentration": 0.35,
         "max_drawdown_est": -0.12,
         "volatility_est": 0.11,
-        "correlation_warning": null
+        "correlation_warning": null,
+        "correlation_unchecked": false
       }
     }
   ],
@@ -161,6 +162,8 @@ POST /api/v1/portfolio/design-async（原 /design-enhanced 已迁移，T11 校�
 | `max_drawdown_est` | float | 预估最大回撤 |
 | `volatility_est` | float | 预估年化波动率 |
 | `correlation_warning` | string | 相关性预警信息 (null=正常) |
+| `correlation_unchecked` | boolean | round22 E5：相关性约束**未校验**显式标注。非交易时段 / K 线相关性矩阵缺失（`_correlation_matrix_for` 返回空）时，`enforce_max_correlation` 无法执行，**不得静默跳过**——置 `true` 并透传前端提示「关联度未校验」。交易时段真实矩阵可用时为 `false`/缺省。不阻塞主链路。 |
+| `plans[].risk_metrics` | object | 与 `strategies[].risk_metrics` 同结构（含 `correlation_unchecked`），便于前端方案卡片直接消费「关联度未校验」提示。 |
 
 #### `market_context.market_regime`
 

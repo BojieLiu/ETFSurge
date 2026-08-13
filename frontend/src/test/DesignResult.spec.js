@@ -128,3 +128,27 @@ describe('DesignResult round21 #14 report_quality 降级标签', () => {
     expect(wrapper.find('.quality-banner').exists()).toBe(false)
   })
 })
+
+describe('DesignResult round22 E5 correlation_unchecked 提示', () => {
+  it('plan.risk_metrics.correlation_unchecked=true 时显示「关联度未校验」提示（负向：静默跳过无标注 → FAIL）', async () => {
+    const wrapper = await mountResult(makePlan({
+      risk_metrics: { correlation_unchecked: true },
+    }))
+    const note = wrapper.find('.corr-unchecked-note')
+    expect(note.exists()).toBe(true)
+    expect(note.text()).toContain('关联度未校验')
+    expect(note.text()).toContain('相关性约束已跳过')
+  })
+
+  it('correlation_unchecked 缺失时不渲染提示（不误报已校验）', async () => {
+    const wrapper = await mountResult(makePlan({ risk_metrics: { correlation_warning: null } }))
+    expect(wrapper.find('.corr-unchecked-note').exists()).toBe(false)
+  })
+
+  it('correlation_unchecked=false 时不渲染提示', async () => {
+    const wrapper = await mountResult(makePlan({
+      risk_metrics: { correlation_unchecked: false },
+    }))
+    expect(wrapper.find('.corr-unchecked-note').exists()).toBe(false)
+  })
+})

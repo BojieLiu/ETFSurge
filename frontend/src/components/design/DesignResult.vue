@@ -81,6 +81,12 @@
               </div>
 
               <div v-if="expandedPlan === pf.style" class="plan-detail">
+                <!-- round22 E5: 关联度未校验提示——非交易窗口/行情缺失时后端置
+                     risk_metrics.correlation_unchecked=True，前端显式标注（不静默、不阻断） -->
+                <div v-if="pf.risk_metrics && pf.risk_metrics.correlation_unchecked" class="corr-unchecked-note" role="status">
+                  <span class="corr-unchecked-icon">ⓘ</span>
+                  <span class="corr-unchecked-text">关联度未校验——非交易时段或行情缺失，相关性约束已跳过，请以方案卡片为准</span>
+                </div>
                 <div class="plan-allocation">
                   <table class="alloc-table">
                     <thead>
@@ -297,6 +303,12 @@ function applyPlan(pf) {
 .stat-divider { color: var(--color-text-tertiary); }
 
 .plan-detail { margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--color-border-light); }
+
+/* round22 E5: 关联度未校验提示条——蓝色 info 样式（与 quality-info 同款），
+   区别于 report_quality 的 warn，标明相关性约束被跳过但不阻断查看方案 */
+.corr-unchecked-note { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); margin-bottom: var(--space-3); background: #e3f2fd; border: 1px solid #90caf9; border-radius: var(--radius-md); font-size: var(--font-size-sm); color: #1565c0; }
+.corr-unchecked-icon { font-size: var(--font-size-base); }
+.corr-unchecked-text { font-weight: var(--font-weight-medium); }
 .alloc-table { width: 100%; border-collapse: collapse; font-size: var(--font-size-xs); }
 .alloc-table th, .alloc-table td { padding: var(--space-2) var(--space-3); text-align: left; border-bottom: 1px solid var(--color-border-light); }
 .alloc-table th { font-weight: var(--font-weight-semibold); color: var(--color-text-secondary); background: var(--color-surface-secondary); white-space: nowrap; }

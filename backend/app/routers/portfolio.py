@@ -311,6 +311,9 @@ async def get_design(
             "max_drawdown": s.get("max_drawdown"),
             "sharpe_ratio": s.get("sharpe_ratio"),
             "risk_factors": s.get("risk_factors") or [],
+            # round22 E5: 透传 risk_metrics（含 correlation_unchecked）供方案卡片消费
+            # 「关联度未校验」提示，与 strategies[].risk_metrics 同结构。
+            "risk_metrics": s.get("risk_metrics") or {},
             "rebalance_rules": "月度检视",
             "allocations": [
                 {
