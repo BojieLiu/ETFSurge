@@ -13,9 +13,11 @@
       </div>
     </div>
 
-    <!-- F2-2: 首屏/刷新骨架（固定高度消除 CLS） -->
+<!-- F2-2: 首屏/刷新骨架（固定高度消除 CLS） -->
+    <!-- P0-2 (round20 §五 P0-2): 骨架行数对齐实际 region 数（5：A股/港股/美股/日经韩国/欧洲）——
+         旧实现 2 行骨架 vs 实际 5 行 → 数据加载后高度 2→5 行，下方内容下移 → CLS 0.3885 -->
     <div v-if="loading" class="gis-skeleton" aria-busy="true">
-      <div class="gis-skeleton-row" v-for="i in 2" :key="i">
+      <div class="gis-skeleton-row" v-for="i in 5" :key="i">
         <div class="gis-skeleton-label"></div>
         <div class="gis-skeleton-cards">
           <div class="gis-skeleton-card" v-for="j in 6" :key="j"></div>
@@ -256,7 +258,8 @@ function labelClass(region) {
 .gis-skeleton { padding: var(--space-2) 0; }
 .gis-skeleton-row { margin-bottom: var(--space-3); }
 .gis-skeleton-label { width: 56px; height: 14px; border-radius: var(--radius-sm); background: var(--color-bg-hover); margin-bottom: var(--space-2); animation: gis-pulse 1.5s infinite; }
-.gis-skeleton-cards { display: flex; gap: var(--space-2); overflow: hidden; }
+/* P0-2: 骨架卡片对齐 .indices-grid 行间距（row-gap 16px + padding）——数据替换时零重排 */
+.gis-skeleton-cards { display: flex; gap: 14px; overflow: hidden; padding: var(--space-2) 0; }
 .gis-skeleton-card { min-width: 140px; flex: 1; height: 64px; border-radius: var(--radius-md); background: var(--color-bg-hover); animation: gis-pulse 1.5s infinite; }
 @keyframes gis-pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.8; } }
 

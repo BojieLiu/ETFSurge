@@ -34,18 +34,27 @@
           :class="[`news-item--${mapNewsLevel(item.level).color}`, { 'news-item--important': isImportant(item.level) }]"
         >
           <div class="news-item-head">
-            <span
-              class="news-level-badge"
-              :class="`news-level-badge--${mapNewsLevel(item.level).color}`"
-              :style="{ color: levelColor(item.level) }"
-            >
-              <span class="news-stars" aria-hidden="true">{{ mapNewsLevel(item.level).stars }}</span>
-              <span class="news-level-label">{{ mapNewsLevel(item.level).label }}</span>
-            </span>
-            <h3 class="news-title" :style="{ color: levelColor(item.level) }">{{ item.title }}</h3>
-          </div>
+              <span
+                class="news-level-badge"
+                :class="`news-level-badge--${mapNewsLevel(item.level).color}`"
+                :style="{ color: levelColor(item.level) }"
+              >
+                <!-- P2-3 (round20 §五 P2-3): 星数显示后端 stars（新鲜度维度，round9 P2-1）——
+                     与 level 解耦：5★=<1h / 4★=<6h / 3★=<24h / 2★=<72h / 1★=更旧；
+                     旧实现用 level 映射星数（与 level 同分布，无独立信息量）。 -->
+                <span class="news-stars" aria-hidden="true" :title="`新鲜度 ${item.stars ?? '-'} 星（<1h=5★）`">{{ item.stars ?? mapNewsLevel(item.level).stars }}</span>
+                <span class="news-level-label">{{ mapNewsLevel(item.level).label }}</span>
+              </span>
+              <h3 class="news-title" :style="{ color: levelColor(item.level) }">{{ item.title }}</h3>
+            </div>
 
           <p v-if="item.content" class="news-content">{{ item.content }}</p>
+
+          <!-- P1-4 (round20 §五 P1-4): 消费后端预生成的 ai_summary（列表内联展示，
+               消除「生成但不消费」冗余）——仅当后端已生成摘要时展示 -->
+          <p v-if="item.ai_summary" class="news-ai-summary" :style="{ color: levelColor(item.level) }">
+            <span class="ai-summary-tag" aria-hidden="true">🤖</span> {{ item.ai_summary }}
+          </p>
 
             <div class="news-meta">
              <span v-if="item.source" class="news-source">{{ item.source }}</span>
@@ -267,6 +276,8 @@ const filteredAffectedHoldings = computed(() => {
 .news-stars { letter-spacing: 1px; }
 .news-title { margin: 0; font-size: var(--font-size-base); font-weight: 600; }
 .news-content { margin: var(--space-2) 0 0; color: var(--color-text-secondary); font-size: var(--font-size-sm); line-height: 1.6; }
+.news-ai-summary { margin: var(--space-1) 0 0; background: var(--color-surface-primary); border: 1px dashed var(--color-border); border-radius: var(--radius-sm); padding: 6px 8px; font-size: var(--font-size-xs); line-height: 1.6; }
+.ai-summary-tag { margin-right: 2px; }
 .news-meta { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-2); font-size: var(--font-size-xs); color: var(--color-text-muted); }
 .news-ai-btn { margin-left: auto; border: 1px solid var(--color-border); background: var(--color-surface-primary); border-radius: var(--radius-md); padding: 4px 10px; cursor: pointer; font-size: var(--font-size-xs); }
 .news-ai-btn:hover { border-color: var(--color-primary); }
