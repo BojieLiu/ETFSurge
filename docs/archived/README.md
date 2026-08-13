@@ -3,10 +3,21 @@
 本目录存放**已完成使命**的历史文档（诊断计划、评审产物、交接、根因分析），保留审计价值但不再作为活跃依据。
 
 ## 归档原则
-- **已实施完成的计划**：如 `round2`-`round13` 各轮诊断与优化计划（round13 宏观 5 因子于 commit `5a7e336` 落地；round12 全部批次于 2026-08-09 落地；round9 于 commit `b2fd04c` 落地；round8 的 O 项 + interaction/theme 重设计于 commit `b300bfa` 落地；round7 于 `3c7906d`、round6 的 F/R 项于 `0c78db8`）——活跃计划见 `docs/round14` 与 `docs/round15*`
+- **已实施完成的计划**：如 `round2`-`round19` 各轮诊断与优化计划（round19 关联度 P1 于 commit `a842bb2` 落地、round18 于 `a3f6643`、round17 于 `2e5da5c`+`bcee936`、round16 于 `fab74d1`、round14/15 于 2026-08-11 批次、round13 宏观 5 因子于 commit `5a7e336` 落地；round12 全部批次于 2026-08-09 落地；round9 于 commit `b2fd04c` 落地；round8 的 O 项 + interaction/theme 重设计于 commit `b300bfa` 落地；round7 于 `3c7906d`、round6 的 F/R 项于 `0c78db8`）——活跃计划见 `docs/round20-container-acceptance-diagnosis.md`
 - **一次性诊断/评审产物**：方案评审（design_225/227、combination-design-review 等）、diag 日志（`logs/diag/*`、`diag/out/*` 迁入）、单标的诊断输出
 - **被后续轮次覆盖的交接/根因**：`handoff.md`（2026-07-25）、`ROOT_CAUSE.md`
-- **不归档**：`api-contracts/`（活跃契约）、`backend/app/analysis/prompts/`（运行时）、`.sisyphus/`（工具私有状态）、README/AGENTS（项目说明）、`docs/round14-container-acceptance-diagnosis.md`（P0-A~P3-J 方案未实施）、`docs/round15-*.md`（最新评估/规范）
+- **不归档**：`api-contracts/`（活跃契约）、`backend/app/analysis/prompts/`（运行时）、`.sisyphus/`（工具私有状态）、README/AGENTS（项目说明）、`docs/round20-container-acceptance-diagnosis.md`（P0-1~P2-5 方案未实施，当前活跃实施依据）、`docs/design-checklist.md`（常驻设计清单）
+
+## 最近一次归档（2026-08-13，round20 诊断完成、round18/19 落地核对后）
+并入本目录：
+- `round19-asset-correlation-analysis.md`（round19 组合诊断：关联度/持仓刷新/K线指标副图/成本价买卖重算/板块热度0/导航栏离线/自选技术分析空数据/港股指数补全/美股技术分析数据不足/测试防护盲区复盘；P1 correlation 引擎 + 同指数去重 + 低相关措辞接线已实施 commit `a842bb2`；未落地项 max_correlation 约束等由 round20 §5.2/§8 承接）
+- `round18-container-acceptance-diagnosis.md`（round18 容器验收诊断：性能/数据质量/断裂/测试盲区；P0-1~P2-7 方案大部分已实施 `a3f6643`；剩余项 timeline 缓存/D1/D4/D7/D9 由 round20 §5.1/§8 承接）
+- `round17-pending-items.md`（round17 待排期项 P2-6/P2-8/P1-2/LLM-1/P3-6，已实施 `2e5da5c`+`bcee936`）
+- `round16-container-acceptance-diagnosis.md`（round16 容器验收诊断 P0 22 项 + P1 8 项 + P2 9 项，已实施 `fab74d1`）
+- `round15-factor-pool-selection-evaluation.md` / `round15-process-review.md` / `round15-test-guard-baseline.md`（round15 三份：因子池评估/过程审查/测试防护基线，均已实施 2026-08-11）
+- `round14-container-acceptance-diagnosis.md`（round14 容器验收诊断 P0-A~P3-J，已实施 2026-08-11）
+
+> 归档后引用统一指向 `docs/archived/roundXX-*.md` 等（仓库根相对路径）。同步更新：`backend/tests/test_round14_*.py`、`backend/tests/test_round15_*.py`、`backend/scripts/verify_perf.py`、`backend/scripts/verify_e2e.py`、`backend/scripts/check_test_baseline.py`、`frontend/src/**`（DashboardAiTools/useMarketSearch/FactorModelView/SummaryCards/p1k-pnl-color.spec 等）的 docstring/注释路径引用。
 
 ## 最近一次归档（2026-08-11，round13 实施完成后）
 并入本目录：

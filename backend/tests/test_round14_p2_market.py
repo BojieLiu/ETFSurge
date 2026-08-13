@@ -1,7 +1,7 @@
 """round14 P2 行情批次测试：P2-AF/AH（watchlist 分组批量 + 降级标记）、P0-D、
 P2-AG（港股指数过滤）、P2-AI（港股热门过滤）、P2-Z（tracking_error/shares_change）。
 
-对应 docs/round14-container-acceptance-diagnosis.md §5：
+对应 docs/archived/round14-container-acceptance-diagnosis.md §5：
 - P2-AF: asset_type="stock"（江波龙 301317）归入 A 股批量 → 走 get_realtime_batch
   （修复前被 _a_items 排除走 per-item 3s 截断）
 - P2-AH: HK 标的三只走 get_realtime_batch(...,'HK')（修复前 per-item）

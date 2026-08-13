@@ -78,7 +78,7 @@ export function useMarketSearch(options = {}) {
       const kind = kindFilter === 'all' ? 'all' : kindFilter
       const mkt = marketFilter.value
       // round14 P2-AG: index/sector 模式也传 market——旧实现仅 kind==='all' 传，
-      // 港股 tab 搜指数不过滤 HK → A 股指数占满前 10（docs/round14 §2.15）
+      // 港股 tab 搜指数不过滤 HK → A 股指数占满前 10（docs/archived/round14 §2.15）
       const res = await marketApi.search(
         q,
         { include_stocks: true, kind, ...(mkt ? { market: mkt } : {}) },

@@ -1,6 +1,6 @@
 """round15 方案一（raw 方向化 + 显式聚合映射）与方案三阶段一（IC 加权聚合）测试。
 
-对应 docs/round15-factor-pool-selection-evaluation.md §5.1/§5.3/§7：
+对应 docs/archived/round15-factor-pool-selection-evaluation.md §5.1/§5.3/§7：
 - 负向断言 1：构造 RSI=75 与 RSI=50 两只标的（其余 technical 因子=0），断言
   technical(RSI=75) < technical(RSI=50)——修复前 RSI raw 0-100 贡献 ≈75/15=5 分而更高
   （防方向化缺失回归）

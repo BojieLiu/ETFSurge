@@ -25,7 +25,7 @@ TESTS_DIR = pathlib.Path(__file__).resolve().parent.parent / "tests"
 #   test_analysis_contract + test_portfolio_list），不回退为独立文件。
 #   208 仍 >197：剩余 11 个缺口为「既有小文件合并」候选（test_warmup_parallel+sequence
 #   → test_warmup_perf；test_factor_* 系列互并；test_sentiment_* 系列互并；report 系列
-#   等，审计清单见 docs/round17-pending-items.md §七 + 实施记录），因主题零散、单文件
+#   等，审计清单见 docs/archived/round17-pending-items.md §七 + 实施记录），因主题零散、单文件
 #   风险/收益比低，经 conscious review 决定 bump BASELINE 并登记清单，留待后续轮次合并。
 BASELINE = 208
 

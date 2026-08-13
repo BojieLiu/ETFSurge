@@ -1,6 +1,6 @@
 """round15 方案四（P0）: amount 单位统一 + 单位契约 + 跨源一致性校验。
 
-对应 docs/round15-factor-pool-selection-evaluation.md §5.4/§7：
+对应 docs/archived/round15-factor-pool-selection-evaluation.md §5.4/§7：
 - gtimg parts[37] 成交额单位=万元 → 统一 ×10000 为元（filter 阈值 MIN_AVG_AMOUNT 是元）
 - 以 data/etf_list_cache.json（2026-08-07 快照，1624 只）为固定输入做快照回归：
   真实活跃 ETF（510300/159516/159869/512480）必须通过 filter_etfs（修复前被误杀）

@@ -1,4 +1,4 @@
-﻿"""板块/概念/个股 数据源封装: levistock → akshare 多源降级。
+"""板块/概念/个股 数据源封装: levistock → akshare 多源降级。
 
 每个对外函数都有两条数据链路,一条挂起另一条自动接管,绝不阻塞接口。
 """
@@ -569,7 +569,7 @@ def fetch_cls_plate_changes() -> dict[str, float]:
     """round14 P2-AE: 财联社 plate_list 涨跌幅映射 {plate_code: change_pct%}。
 
     plate_code 与 sectors/heat 的 rows.plate_code 同源同码（如 cls80424），
-    按 code 精确 join 覆盖 20/20（docs/round14 §2.13 实测）——东财名称回填仅
+    按 code 精确 join 覆盖 20/20（docs/archived/round14 §2.13 实测）——东财名称回填仅
     命中 5/20（民爆/光通信/冰雪产业等东财板块体系无此板块）。
 
     - change 字段为小数涨跌幅（0.0186 → 1.86%），×100 并过 ±20 值域校验

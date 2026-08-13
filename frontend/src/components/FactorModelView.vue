@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <section class="card factor-model">
     <div class="card-header">
       <h2 class="card-title">
@@ -716,7 +716,7 @@ onBeforeUnmount(() => {
   line-height: 1.1;
 }
 /* round14 P1-K: 有效数/平均|IC| 高值红涨绿跌——`.stat-num` (0,2,0) 覆盖全局
-   `.text-up/.text-down`；组合选择器 (0,3,0) 恢复语义色（docs/round14 §5 P1-K）。
+   `.text-up/.text-down`；组合选择器 (0,3,0) 恢复语义色（docs/archived/round14 §5 P1-K）。
    `.stat-num.text-warn` 为防御性保留（L923 `.text-warn` 现状已生效，防宿主规则位置变动）。 */
 .stat-num.text-up { color: var(--color-text-up); }
 .stat-num.text-down { color: var(--color-text-down); }

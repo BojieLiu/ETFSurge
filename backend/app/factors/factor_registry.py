@@ -1525,7 +1525,7 @@ class FactorRegistry:
             # round14 P2-Z 修复 1: 外部注入时同样合并 symbol_extra（Z04 同逻辑）——
             # IC 循环传 market_data=_kline_cache（无 benchmark_close/shares_change_20d），
             # 不合并则 tracking_error/shares_change 对每只 ETF 恒 0.0 → IC 永不产生
-            #（docs/round14 §2.11）。注意：market_data 实为 _kline_cache 引用，merge
+            #（docs/archived/round14 §2.11）。注意：market_data 实为 _kline_cache 引用，merge
             # 会就地写回共享缓存——asyncio 单线程无并发撕裂，且「不覆盖已有字段」
             # 语义与 Z04 一致（无害）。
             if symbol_extra:

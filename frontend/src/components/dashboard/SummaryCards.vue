@@ -279,7 +279,7 @@ function estimatedRatio(type) {
 
 /* round14 P1-K: 盈亏数字红涨绿跌——scoped `.summary-value` (0,2,0) 覆盖全局
    `.text-up/.text-down` (0,1,0)，此处用更高特异性 (0,3,0) 组合选择器恢复
-   红涨绿跌（docs/round14 §2.9/§5 P1-K；删本规则即测试失败）。 */
+   红涨绿跌（docs/archived/round14 §2.9/§5 P1-K；删本规则即测试失败）。 */
 .summary-value.text-up { color: var(--color-text-up); }
 .summary-value.text-down { color: var(--color-text-down); }
 

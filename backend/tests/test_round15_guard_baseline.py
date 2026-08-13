@@ -1,4 +1,4 @@
-"""round15 测试防护基线 A/B/E 用例（docs/round15-test-guard-baseline.md §5 优先级 2/4/5）。
+"""round15 测试防护基线 A/B/E 用例（docs/archived/round15-test-guard-baseline.md §5 优先级 2/4/5）。
 
 - 基线 A（降级链三态）：fetch_history(US) mock akshare 挂 → Finnhub/AlphaVantage 降级
   且返回 ≥N 行；mock 全挂 → 返回空且日志标 fallback chain

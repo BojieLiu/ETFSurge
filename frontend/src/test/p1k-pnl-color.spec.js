@@ -1,7 +1,7 @@
 /**
  * round14 P1-K: 盈亏数字红涨绿跌（scoped CSS 覆盖修复）。
  *
- * 三层次验证（docs/round14 §5 P1-K 测试 1+2）：
+ * 三层次验证（docs/archived/round14 §5 P1-K 测试 1+2）：
  * 1. 组件行为断言：pnlOn>0 → 元素 class 含 text-up；pnlOff<0 → text-down
  * 2. 源码级覆盖规则断言（唯一能抓 CSS 特异性覆盖的方式——jsdom css:false 不层叠）：
  *    fs.readFileSync 读 .vue style 块，断言 `.summary-value.text-up` /

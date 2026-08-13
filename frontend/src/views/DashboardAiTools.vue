@@ -696,7 +696,7 @@ async function applyPlan(plan) {
   try {
     // round14 P0-A: 前端把 plan.allocations 构造为后端契约形态
     // {portfolio_type, symbols, weights}——旧实现把整个 plan 对象原样 POST，
-    // 后端拿不到 symbols/weights → 200 空操作 + 前端假成功（docs/round14 §2.2）。
+    // 后端拿不到 symbols/weights → 200 空操作 + 前端假成功（docs/archived/round14 §2.2）。
     const allocations = (plan && plan.allocations) || []
     const symbols = []
     const weights = {}

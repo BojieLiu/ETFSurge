@@ -35,7 +35,7 @@ _EM_FAIL_STREAK = 3
 # 热度曾全量 ×100 显示（用户反馈 round9 §7 港股涨跌幅异常），加参数修正语义。
 # round14 P2-AI: fs=m:128 → fs=m:128+t:3（港股主板股票——排除基金/ETF/权证；
 # t:1=基金/ETF、t:2=债券、t:6=权证）。热门个股榜曾混入盈富 02800/南方恒生科技 03033
-# /杠杆做多 07709 等（docs/round14 §2.17）。
+# /杠杆做多 07709 等（docs/archived/round14 §2.17）。
 _URL = "http://{host}/api/qt/clist/get?pn=1&pz=5000&po=1&np=1&fs=m:128+t:3&fields=f12,f14,f2,f3,f6,f100&fid=f6&fltt=2&invt=2"
 
 # round14 P2-AI: 名称关键词兜底过滤（防东财 t:3 参数变更后基金/ETF 混入）。

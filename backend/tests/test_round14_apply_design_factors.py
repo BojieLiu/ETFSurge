@@ -1,6 +1,6 @@
 """round14 P0-A（apply-design 前后端断裂）+ P0-C（因子 IC 最小样本保护）测试。
 
-对应 docs/round14-container-acceptance-diagnosis.md §2.2/§2.4/§5 P0-A/P0-C：
+对应 docs/archived/round14-container-acceptance-diagnosis.md §2.2/§2.4/§5 P0-A/P0-C：
 - P0-A: 后端 apply-design 对空 symbols/weights 返回 400（修复前 200 空操作）；
   前端等效 payload（{portfolio_type, symbols, weights} 契约形态）应用后 applied 非空
 - P0-C: 样本数 < MIN_IC_SAMPLES(30) 时 IC 视为未累积（no_data），不产生
