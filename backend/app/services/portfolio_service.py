@@ -1105,6 +1105,7 @@ async def strategy_check(
             market_data=market_data,
             factor_breakdowns=factor_breakdowns,
             weight_map={},  # 下面 P2-4 会统一回填
+            regime=regime,
         )
 
     # P0-1 (R4-01): 行业注入——从 market_data_hub 候选池构建 symbol→industry 映射
@@ -1200,6 +1201,27 @@ async def strategy_check(
         filled_count = data_quality.get("filled_count", 0) if data_quality else 0
         total_count = data_quality.get("total_count", 0) if data_quality else 0
         h["confidence"] = _compute_confidence(filled_count, total_count)
+
+        # P1-8 (round20 §五 P1-8②): holdings_analysis 补 action/suggested_weight——
+        # 与 suggestions 同源（复用规则引擎决策表），修复 LLM 路径 D-B2 割裂
+        # （LLM 返回的 holdings_analysis 无 action 字段，前端无法联动）。
+        if h.get("action") is None:
+            _h_w = h.get("weight")
+            if _h_w is None:
+                _h_w = weight_map.get(sym, 0.0)
+            _h_fb = factor_breakdowns.get(sym, {})
+            _h_rule = _rule_based_suggestion(
+                symbol=sym,
+                name=h.get("name", sym),
+                target_weight=_h_w,
+                factor_score=_h_fb.get("factor_scores", {}) if isinstance(_h_fb, dict) else {},
+                signal=_h_fb.get("technical_signal") if isinstance(_h_fb, dict) else None,
+                regime=regime,
+                current_weight=_h_w,
+                factor_availability=h.get("factor_availability"),
+            )
+            h["action"] = _h_rule["action"]
+            h["suggested_weight"] = _h_rule["suggested_weight"]
 
     # P2-3: 增强摘要 — 纳入市态 + 数据质量
     regime_label = {"range_bound": "震荡", "bullish": "偏多", "bearish": "偏空",
@@ -1394,6 +1416,7 @@ def _build_rule_fallback_holdings_analysis(
     market_data: list[dict],
     factor_breakdowns: dict[str, dict],
     weight_map: dict[str, float],
+    regime: str = "range_bound",
 ) -> list[dict]:
     """R5-1-2: rule 兜底路径的 holdings_analysis 骨架生成。
 
@@ -1431,6 +1454,16 @@ def _build_rule_fallback_holdings_analysis(
         _ts = (fb.get("technical_signal") or {})
         if isinstance(_ts, dict) and _ts.get("signal"):
             _tech_sig = f"{str(_ts['signal']).upper()}，真实信号"
+        # P1-8 (round20 §五 P1-8②): 骨架补 action/suggested_weight——与 suggestions
+        # 同源（复用 _rule_based_suggestion 决策表），修复 D-B2 holdings_analysis
+        # action=None 与 suggestions 割裂。
+        _weight = weight_map.get(sym) or md.get("target_weight") or 0.0
+        _rule = _rule_based_suggestion(
+            symbol=sym, name=name or sym, target_weight=_weight,
+            factor_score=fs if isinstance(fs, dict) else {},
+            signal=_ts, regime=regime, current_weight=_weight,
+            factor_availability=fb.get("factor_availability"),
+        )
         result.append({
             "symbol": sym,
             "name": name or sym,
@@ -1438,6 +1471,8 @@ def _build_rule_fallback_holdings_analysis(
             "factor_summary": factor_str,
             "industry": ind,
             "tech_signal": _tech_sig,
+            "action": _rule["action"],
+            "suggested_weight": _rule["suggested_weight"],
             "generated_by": "规则引擎生成",
         })
     return result

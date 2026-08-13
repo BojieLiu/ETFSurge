@@ -1,4 +1,4 @@
-﻿"""
+"""
 verify_e2e.py — 端到端链路验证（针对运行中的后端服务）
 用法:
   python scripts/verify_e2e.py                    # 运行所有模块
@@ -627,13 +627,13 @@ def section_portfolio():
         r = requests.get(f"{BASE}/api/v1/portfolio/timeline?days=30", timeout=10)
         _elapsed = time.time() - _t0
         check(f"GET /timeline -> {r.status_code}", r.status_code == 200)
-        _check_response_time("/portfolio/timeline", _elapsed, 5.0)
+        _check_response_time("/portfolio/timeline", _elapsed, 1.0)  # round20 P0-1: 5.0→1.0（热态 ≤300ms 目标）
     except Exception as e:
         check("GET /timeline", False, str(e))
 
     # POST /portfolio/apply-design —— round14 P0-A: 空 symbols 应 400（修复前 200 空操作
     # 前端假成功）；前端等效 payload（{portfolio_type, symbols, weights} 契约形态）
-    # 应用后 applied 非空（docs/round14 §6 验收口径 1/2）。
+    # 应用后 applied 非空（docs/archived/round14 §6 验收口径 1/2）。
     try:
         r = requests.post(f"{BASE}/api/v1/portfolio/apply-design",
                           json={"portfolio_type": "on_exchange", "symbols": [], "weights": {}}, timeout=10)

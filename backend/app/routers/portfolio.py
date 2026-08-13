@@ -9,6 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 # P0-8 (round16 2.3): 设计历史列表 TTL 缓存（key=(limit,offset)，30s 失效）
 _DESIGNS_LIST_CACHE: dict[tuple[int, int], tuple[float, list]] = {}
 
+# P0-1 (round20 §五 P0-1): timeline 30s TTL 缓存——对齐 admin_metrics 模式。
+# 热态 2.9s 恒定（全表查询无缓存）；key=(limit,offset)，value=(monotonic_ts, body)。
+_TIMELINE_CACHE: dict[tuple[int, int], tuple[float, dict]] = {}
+_TIMELINE_TTL = 30.0
+
 from ..database import get_db
 from ..models.schemas import (
     PortfolioETFCreate, PortfolioETFUpdate, PortfolioETFResponse,
@@ -134,7 +139,7 @@ async def apply_design(design: dict, db: AsyncSession = Depends(get_db)):
     """应用组合设计方案。
 
     round14 P0-A: 空 symbols 返回 400（此前返回 200 空操作 + 前端假成功，
-    前后端断裂根因——见 docs/round14 §2.2/§5 P0-A）。
+    前后端断裂根因——见 docs/archived/round14 §2.2/§5 P0-A）。
     """
     symbols = design.get("symbols") or []
     weights = design.get("weights") or {}
@@ -542,22 +547,30 @@ async def get_timeline(
     from sqlalchemy import select
     import json
 
+    # P0-1 (round20 §五 P0-1): 30s TTL 缓存命中——热态不再重复全表查询。
+    # 对齐 _DESIGNS_LIST_CACHE / admin._METRICS_CACHE 模式，按 (limit, offset) 键控。
+    _cache_key = (limit, offset)
+    _cached = _TIMELINE_CACHE.get(_cache_key)
+    if _cached and time.monotonic() - _cached[0] < _TIMELINE_TTL:
+        return _cached[1]
+
     # P0-1 (round18 2.3/§7): timeline 热态 2.3s 恒定——无 limit 全表查询 +
     # strategies_json 大字段物化 + 每条 json.loads（结果丢弃）。修复：
     # ① 显式列查询（不取 strategies_json/holdings_json/params_json 等大字段）；
-    # ② 删除 :570 无用 json.loads（strategies 变量从未使用）。
+    # ② 删除 :570 无用 json.loads（strategies 变量从未使用）；
+    # ③ round20 P0-1: 三表查询统一 limit(limit+1) 裁剪（防全表扫描）。
     # Query designs（列裁剪：timeline 只用 id/created_at/status/capital/error_message）
     design_stmt = select(
         PortfolioDesign.id, PortfolioDesign.created_at, PortfolioDesign.status,
         PortfolioDesign.capital, PortfolioDesign.error_message,
-    ).order_by(PortfolioDesign.created_at.desc())
+    ).order_by(PortfolioDesign.created_at.desc()).limit(limit + 1)
     design_result = await db.execute(design_stmt)
     designs = design_result.all()
 
     # Query checks（列裁剪：只用 id/created_at/summary）
     check_stmt = select(
         StrategyCheckRecord.id, StrategyCheckRecord.created_at, StrategyCheckRecord.summary,
-    ).order_by(StrategyCheckRecord.created_at.desc())
+    ).order_by(StrategyCheckRecord.created_at.desc()).limit(limit + 1)
     check_result = await db.execute(check_stmt)
     checks = check_result.all()
 
@@ -567,7 +580,7 @@ async def get_timeline(
     # P2-11 (round9 §4.5-3): check 类型 task 关联查询——用于孤立 check 记录判定
     # （顺序：design → check → check-task → design-task，见 test_timeline_joins_tasks._FakeDB）
     # P0-1: tasks 查询同样列裁剪（排除 params_json/result_json 大字段）
-    check_task_stmt = select(TaskRecord.id, TaskRecord.record_id).where(TaskRecord.task_type == "check")
+    check_task_stmt = select(TaskRecord.id, TaskRecord.record_id).where(TaskRecord.task_type == "check").limit(limit + 1)
     check_task_rows = (await db.execute(check_task_stmt)).all()
     linked_check_record_ids = {t.record_id for t in check_task_rows if t.record_id}
     # P0-9 (round16 3.10 R1): task_items 查询放宽为 design+check——旧实现只查 design，
@@ -578,7 +591,7 @@ async def get_timeline(
         TaskRecord.error_message, TaskRecord.created_at,
     ).where(
         TaskRecord.task_type.in_(["design", "check"]),
-    ).order_by(TaskRecord.created_at.desc())
+    ).order_by(TaskRecord.created_at.desc()).limit(limit + 1)
     task_result = await db.execute(task_stmt)
     task_rows = task_result.all()
     check_record_ids = {c.id for c in checks}
@@ -639,4 +652,7 @@ async def get_timeline(
     # Paginate
     items = merged[offset:offset + limit]
 
-    return {"items": items, "total": total}
+    # P0-1 (round20): 30s TTL 缓存写回（对齐 admin_metrics 模式）
+    _body = {"items": items, "total": total}
+    _TIMELINE_CACHE[_cache_key] = (time.monotonic(), _body)
+    return _body

@@ -105,6 +105,12 @@ def _layer_phrase(layer: str, asset_name: str, sym: str = "", style: str = "",
         pool = [fn for fn in pool if "低相关" not in fn(asset_name)]
         if not pool:
             pool = _DEFENSE_PHRASES
+    else:
+        # P1-2 (round20): median<0.3 → 强制从低相关措辞池中选（覆盖 md5 随机选取），
+        # 保证低相关标的的 rationale 必含「低相关」措辞（确定性，非概率性出现）。
+        _low_pool = [fn for fn in pool if "低相关" in fn(asset_name)]
+        if _low_pool:
+            pool = _low_pool
     idx = int(hashlib.md5(sym.encode()).hexdigest(), 16) % len(pool) if sym else 0
     return pool[idx](asset_name)
 

@@ -1,10 +1,13 @@
-"""round14 P0-B: 策略检查 LLM 超时——预算-重试一致性断言。
+"""round14 P0-B + round20 P0-5: 策略检查 LLM 超时——预算-重试一致性断言。
 
-对应 docs/round14-container-acceptance-diagnosis.md §2.1/§5 P0-B：
+对应 docs/archived/round14-container-acceptance-diagnosis.md §2.1/§5 P0-B +
+docs/round20-container-acceptance-diagnosis.md §五 P0-5：
 - 根因 = provider 35s 无响应 + 预算-重试不匹配（1 轮双 provider 71.5s 耗光 90s，
   max_retries=1 的第 2 轮开始即被外层截断 → CancelledError 兜底）
 - 修复（方案 b）: max_retries=0（1 轮双 provider 失败立即兜底）+ _llm_timeout_for
   完整档 90→75s（2×35=70 ≤ 75）
+- round20 P0-5: 单次 provider 调用超时 35s→15s（task 417 ReadTimeout 38s = 35s +
+  429 退避；缩到 15s 后最坏 2×15=30s ≤ 各档预算）
 - 断言：max_retries≥1 时 (max_retries+1)×providers×request_timeout ≤ 0.9×预算
   必须成立——当前若有人把 max_retries 改回 1，本测试 FAIL（防回归）
 """
@@ -18,11 +21,11 @@ from app.services.portfolio_service import _llm_timeout_for
 
 # 与 generate_strategy_check_report 的 run_json 配置一致（llm.py L1421-1427）
 STRATEGY_CHECK_MAX_RETRIES = 0
-STRATEGY_CHECK_REQUEST_TIMEOUT = 35.0
+STRATEGY_CHECK_REQUEST_TIMEOUT = 15.0  # round20 P0-5: 35→15（ReadTimeout 38s 根因）
 PROVIDER_COUNT = 2  # opencode_zen + deepseek（双 provider 并行）
 
 
-def _consistency(max_retries: int, budget: int, request_timeout: float = 35.0) -> bool:
+def _consistency(max_retries: int, budget: int, request_timeout: float = 15.0) -> bool:
     """预算-重试一致性：max_retries=0 时免 0.9 系数直接 providers×timeout ≤ 预算；
     max_retries≥1 时 (max_retries+1)×providers×timeout ≤ 0.9×预算
     （0.9 系数兜 rate_limit_cap=10 退避与 retry_delay=3s 容差）。"""
@@ -34,24 +37,27 @@ def _consistency(max_retries: int, budget: int, request_timeout: float = 35.0) -
 
 class TestBudgetRetryConsistency:
     def test_full_quality_budget_consistent(self):
-        """完整档 75s：max_retries=0 时 2×35=70 ≤ 75 PASS。"""
+        """完整档 75s：max_retries=0 时 2×15=30 ≤ 75 PASS（round20 P0-5 后余量更大）。"""
         budget = _llm_timeout_for({"all_empty": False, "partial": False})
         assert budget == 75, "完整档预算应为 75s（round14 P0-B 方案 b）"
         assert _consistency(STRATEGY_CHECK_MAX_RETRIES, budget, STRATEGY_CHECK_REQUEST_TIMEOUT)
 
     def test_max_retries_regression_flagged(self):
-        """防回归：max_retries 改回 1 时 140 > 0.9×75=67.5 → 一致性 FAIL。
-        （这就是 round14 §2.1 的核心 bug 形态——第 2 轮永远没机会跑完。）"""
+        """防回归：max_retries 改回 1 时 60 > 0.9×75=67.5 仍 FAIL（round20 P0-5 后
+        timeout=15 使 1 轮重试 60s ≤ 67.5s 理论可过——但 429 退避/慢响应容差
+        rate_limit_cap=10 会挤占，保持 max_retries=0 是纪律，见 llm.py 注释）。"""
         budget = _llm_timeout_for({"all_empty": False, "partial": False})
-        assert not _consistency(1, budget, 35.0), "max_retries=1 时预算-重试不一致，必须 FAIL"
+        assert not _consistency(1, budget, 35.0), "max_retries=1+旧35s 时预算-重试不一致，必须 FAIL"
+        # round20 P0-5 后 15s×1 轮重试=60s ≤ 67.5s——但仍禁止（429 退避容差被挤占）
+        assert STRATEGY_CHECK_MAX_RETRIES == 0, "max_retries 必须保持 0（429 退避/慢响应容差）"
 
     def test_partial_budget_consistent_with_no_retry(self):
-        """partial 30s：max_retries=0 时 2×35=70 > 30 仍超——设计取舍
-        （partial 档数据不全，30s 快速兜底；max_retries=0 保证不重试叠加）。"""
+        """partial 30s：max_retries=0 时 2×15=30 ≤ 30 PASS（round20 P0-5 后 partial
+        档也一致——旧 2×35=70 > 30 仅靠不重试兜底）。"""
         budget = _llm_timeout_for({"all_empty": False, "partial": True})
         assert budget == 30
-        # 70 > 30：partial 档天然超预算——由 max_retries=0 保证只有 1 轮，可接受
-        assert STRATEGY_CHECK_MAX_RETRIES == 0
+        assert _consistency(STRATEGY_CHECK_MAX_RETRIES, budget, STRATEGY_CHECK_REQUEST_TIMEOUT), \
+            "partial 档 2×15=30 ≤ 30 应一致（round20 P0-5 后）"
 
     def test_all_empty_budget_15(self):
         assert _llm_timeout_for({"all_empty": True}) == 15
@@ -59,7 +65,7 @@ class TestBudgetRetryConsistency:
 
 class TestStrategyCheckLlMCallParams:
     def test_run_json_uses_max_retries_zero(self):
-        """generate_strategy_check_report 的 run_json 必须 max_retries=0 + 35s。"""
+        """generate_strategy_check_report 的 run_json 必须 max_retries=0 + 15s（round20 P0-5）。"""
         fake_agent = MagicMock()
         fake_agent.run_json = AsyncMock(return_value={"summary": "ok"})
         holdings = [{"symbol": "510300", "name": "沪深300ETF", "target_weight": 0.2}]
@@ -69,7 +75,8 @@ class TestStrategyCheckLlMCallParams:
         assert result.get("summary") == "ok"
         kwargs = fake_agent.run_json.call_args.kwargs
         assert kwargs.get("max_retries") == 0, f"max_retries 应为 0（防重试超预算），实际 {kwargs.get('max_retries')}"
-        assert kwargs.get("request_timeout") == 35.0
+        assert kwargs.get("request_timeout") == 15.0, \
+            f"request_timeout 应为 15s（round20 P0-5 ReadTimeout 38s 根因），实际 {kwargs.get('request_timeout')}"
 
     def test_provider_slow_within_budget_no_cancelled_error(self):
         """负向：mock provider 慢响应 → 兜底在预算内完成，不抛 CancelledError 穿透

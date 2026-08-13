@@ -125,12 +125,17 @@
                 <td><strong>{{ item.name }}</strong></td>
                 <td><span class="type-badge" :class="item.asset_type.toLowerCase()">{{ item.asset_type }}</span></td>
                 <td v-if="item.realtime" class="mono">{{ item.realtime.price?.toFixed(2) }}</td>
+                <!-- P0-3 (round20 §五 P0-3): 后端 _degraded=true 为永久降级（批量 realtime 失败），
+                     显示「行情暂不可用」而非「加载中」——加载态另有 loading 分支，语义不混淆 -->
+                <td v-else-if="item._degraded" class="muted" title="行情暂不可用（数据源弱）"><span class="degraded-text">行情暂不可用</span></td>
                 <td v-else class="muted" title="行情加载中（数据源弱）"><span class="loading-text">行情加载中</span></td>
                 <td v-if="item.realtime" :class="item.realtime.change_pct != null && item.realtime.change_pct >= 0 ? 'up' : 'down'">
                   {{ formatPct(item.realtime.change_pct) }}
                 </td>
+                <td v-else-if="item._degraded" class="muted" title="行情暂不可用（数据源弱）"><span class="degraded-text">行情暂不可用</span></td>
                 <td v-else class="muted" title="行情加载中（数据源弱）"><span class="loading-text">行情加载中</span></td>
                 <td v-if="item.realtime" class="mono small">{{ formatVol(item.realtime.volume) }}</td>
+                <td v-else-if="item._degraded" class="muted" title="行情暂不可用（数据源弱）"><span class="degraded-text">行情暂不可用</span></td>
                 <td v-else class="muted" title="行情加载中（数据源弱）"><span class="loading-text">行情加载中</span></td>
                 <td class="notes-cell">
                   <span v-if="item.notes" class="notes-text">{{ item.notes }}</span>

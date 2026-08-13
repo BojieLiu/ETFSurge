@@ -11,7 +11,11 @@ import time
 from datetime import datetime
 from typing import Any
 
-from ..engine.allocation_engine import allocate as engine_allocate
+from ..engine.allocation_engine import (
+    allocate as engine_allocate,
+    enforce_max_correlation,
+    check_structure_reasonableness,
+)
 from ..engine.budgets import STRATEGY_META
 from ..engine.rationale import build_rationale
 from ..engine.risk_controls import apply_risk_controls
@@ -359,6 +363,10 @@ async def generate_enhanced_design(
             # （低相关措辞数据源，缺失/失败时为空 dict → correlation_median=None 不影响）
             corr_medians = _correlation_medians_for(allocs, candidates)
 
+            # round20 P1-1: 方案内两两相关性矩阵（复用 _correlation_medians_for 预热缓存，
+            # 不重复拉 K 线）——供 enforce_max_correlation 高相关对权重约束
+            corr_matrix = _correlation_matrix_for(allocs, candidates)
+
             # enrich rationale using engine/rationale.py
             for a in allocs:
                 if a.get("symbol") == "CASH":
@@ -375,6 +383,34 @@ async def generate_enhanced_design(
                     industry=sym_meta.get("industry", "") if sym_meta else None,
                     correlation_median=corr_medians.get(code),
                 )
+
+            # round20 P1-1: 高相关对（r>=0.9）合计权重约束——削减低因子分标的并回补。
+            # 注意：allocs 是 s.pop 出来的独立引用，enforce/check 在代理 dict 上写
+            # risk_metrics；需把 warning 回写到真实 s（报告/前端消费）。
+            _strat_proxy: dict[str, Any] = {"id": s.get("id"), "allocations": allocs}
+            if corr_matrix:
+                try:
+                    enforce_max_correlation([_strat_proxy], corr_matrix)
+                except Exception as _e:
+                    logger.debug("[strategy_design] enforce_max_correlation skipped: %s", _e)
+
+            # round20 P2-5: 结构合理性检查——负信号防御层/进攻现金/防御层 median_r 标注
+            try:
+                check_structure_reasonableness(
+                    [_strat_proxy], correlation_medians=corr_medians,
+                )
+            except Exception as _e:
+                logger.debug("[strategy_design] structure check skipped: %s", _e)
+            if _strat_proxy.get("risk_metrics"):
+                s.setdefault("risk_metrics", {})
+                for _k, _v in _strat_proxy["risk_metrics"].items():
+                    if _k not in s["risk_metrics"]:
+                        s["risk_metrics"][_k] = _v
+                if s["risk_metrics"].get("correlation_warnings"):
+                    logger.info(
+                        "[strategy_design] %s correlation_warnings=%d",
+                        s.get("id"), len(s["risk_metrics"]["correlation_warnings"]),
+                    )
 
             # S6: Inject daily_change_pct and price from market_data_hub market data
             for a in allocs:
@@ -780,6 +816,31 @@ def _correlation_medians_for(allocs: list[dict], candidates: dict) -> dict[str, 
         return {}
     others_by_code: dict[str, list[str]] = {c: [x for x in codes if x != c] for c in codes}
     return {c: median_correlation_for(matrix, c, others_by_code[c]) for c in codes}
+
+
+def _correlation_matrix_for(allocs: list[dict], candidates: dict) -> dict[tuple[str, str], float | None]:
+    """round20 P1-1: 方案内两两标的的相关性矩阵（复用 _correlation_medians_for 的
+    _CORR_CLOSES_CACHE，不重复拉 K 线）。供 enforce_max_correlation 高相关对约束。
+
+    数据缺失（缓存空 / <2 只 / 计算失败）→ 返回 {}，enforce_max_correlation 静默跳过
+    （correlation_warnings 不出现，不影响方案有效性）。
+    """
+    from ..engine.correlation import correlation_matrix as _cm
+
+    codes = [
+        str(a.get("symbol")) for a in allocs
+        if a.get("symbol") not in (None, "CASH")
+    ]
+    if len(codes) < 2:
+        return {}
+    closes_by_symbol = {c: _CORR_CLOSES_CACHE[c] for c in codes if c in _CORR_CLOSES_CACHE}
+    if len(closes_by_symbol) < 2:
+        return {}
+    try:
+        matrix = _cm(closes_by_symbol, window=60)
+    except Exception:
+        return {}
+    return matrix
 
 
 _CORR_CLOSES_CACHE: dict[str, list[float]] = {}

@@ -1,5 +1,5 @@
 """
-verify_perf.py — 热点路径性能软门禁（round15 基线 E，docs/round15-test-guard-baseline.md §2-E）
+verify_perf.py — 热点路径性能软门禁（round15 基线 E，docs/archived/round15-test-guard-baseline.md §2-E）
 
 用法:
   python scripts/verify_perf.py           # 针对运行中的后端（默认 localhost:8000）
@@ -93,11 +93,17 @@ def main():
             status, dur = _http("GET", url)
 
         ok = status is not None and dur <= threshold
-        mark = "OK" if ok else "WARN"  # 软门禁：超阈值仅预警登记
+        # round20 P0-1: timeline/metrics 为纯 DB 内部端点（不依赖外部行情），
+        # 改硬门禁——超阈值即退出码 1（CI 阻断）；外部数据端点保持软门禁（防外部源抖动误伤）。
+        hard = label in ("timeline", "metrics")
+        mark = "OK" if ok else ("FAIL" if hard else "WARN")
         report.append({"path": label, "status": status, "dur_s": round(dur, 2), "threshold_s": threshold, "mark": mark})
         print(f"  [{mark}] {label} {dur:.2f}s (阈值 {threshold}s, HTTP {status})")
         if not ok:
-            print(f"        → 性能债登记（{DEBT_LOG}）——软门禁不阻断，排期优化")
+            if hard:
+                print(f"        → 硬门禁 FAIL（{label} 为纯 DB 端点，不应超阈值）")
+            else:
+                print(f"        → 性能债登记（{DEBT_LOG}）——软门禁不阻断，排期优化")
 
     # 登记台账（控制台 + 可追加文件）
     out = {"ts": time.strftime("%Y-%m-%d %H:%M:%S"), "report": report,
@@ -107,9 +113,11 @@ def main():
             f.write(json.dumps(out, ensure_ascii=False) + "\n")
     except Exception:
         pass
-    print(f"性能软门禁完成：{sum(1 for r in report if r['mark']=='OK')} OK / "
-          f"{sum(1 for r in report if r['mark']=='WARN')} WARN（台账已登记）")
-    return 0  # 软门禁：恒 0 退出码
+    print(f"性能校验完成：{sum(1 for r in report if r['mark']=='OK')} OK / "
+          f"{sum(1 for r in report if r['mark']=='WARN')} WARN / "
+          f"{sum(1 for r in report if r['mark']=='FAIL')} FAIL（台账已登记）")
+    # round20 P0-1: 硬门禁端点超阈值 → 退出码 1（CI 阻断）；其余软门禁恒 0
+    return 1 if any(r["mark"] == "FAIL" for r in report) else 0
 
 
 if __name__ == "__main__":

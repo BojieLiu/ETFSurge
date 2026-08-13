@@ -12,7 +12,15 @@ from datetime import datetime, timezone
 
 import pytest
 
-from app.routers.portfolio import get_timeline
+from app.routers.portfolio import get_timeline, _TIMELINE_CACHE
+
+
+@pytest.fixture(autouse=True)
+def _clear_timeline_cache():
+    """round20 P0-1: get_timeline 新增 30s TTL 缓存——每用例清空，防跨用例脏数据。"""
+    _TIMELINE_CACHE.clear()
+    yield
+    _TIMELINE_CACHE.clear()
 
 
 class _Row:

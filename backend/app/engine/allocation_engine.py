@@ -748,8 +748,13 @@ def allocate(
 
     # Build each risk-profile strategy
     strategies: list[dict[str, Any]] = []
-    # Track symbol usage across profiles to reduce overlap (P1)
-    _used_symbols_for_overlap: set[str] = set()
+    # Track per-layer symbol usage across profiles to reduce overlap (P2-6 plan A):
+    # per-layer penalty (aggressive satellite no longer penalized by prior core/defense
+    # picks) fixes the satellite-underfill / cash-inflation bug where non-tech backup
+    # candidates were wiped by a cross-layer -1.5 penalty (round20 D-A6).
+    _used_core: set[str] = set()
+    _used_satellite: set[str] = set()
+    _used_defense: set[str] = set()
     # P1-2 (R4-14): 前序方案核心层已占用的「非强制」标的——每方案核心层选取时
     # 排除它们，保证任意两方案核心层重叠（剔除公共底仓 510300 与强制标的）≤1。
     # 强制标的（MANDATORY_CODES）各司其职允许跨方案重复，不计入重叠上限。
@@ -774,8 +779,10 @@ def allocate(
             return True
 
         # ── Core layer ──
-        # Penalize symbols already used in prior strategies (P1)
-        _penalize = _used_symbols_for_overlap.copy() if _used_symbols_for_overlap else set()
+        # P2-6 plan A: penalize only PRIOR CORE-layer symbols (per-layer overlap),
+        # not all layers. The old cross-layer penalty applied every prior profile's
+        # core/defense picks to the satellite layer too, wiping non-tech backups.
+        _penalize_core = _used_core.copy() if _used_core else set()
         # M4: 核心层实际数量 = layer_count - 该层强制标的数（强制 510300/159338 在
         # _select_and_weight 内额外叠加，导致核心层 5-6 只、单只权重被摊薄）。
         mandatory_in_core = sum(1 for c in core_candidates if c.get("symbol") in MANDATORY_CODES)
@@ -828,7 +835,7 @@ def allocate(
             regime=regime,
             strategy=profile_key,
             max_count=core_max_count,
-            penalize_symbols=_penalize,
+            penalize_symbols=_penalize_core,
         )
         # O16 (round7 §7 P18): 核心层大盘宽基族互斥——非强制大盘宽基数量 ≤1
         # （强制锚 510300/159338 已占 2 个名额；balanced/aggressive 建议 ≤0，
@@ -912,12 +919,12 @@ def allocate(
         # U11 R1: 后续方案 core 与已用标的重叠过多（全部 ⊂ 前序已用）时，
         # 从 core_candidates 未用者强制引入 ≥1 只新宽基（高分宽基只有 4-5 只，
         # 纯靠 -1.5 惩罚无法避免三方案 core 重复）
-        if _used_symbols_for_overlap and core_alloc:
+        if _used_core and core_alloc:
             _core_syms = {a.get("symbol") for a in core_alloc if a.get("symbol") != "CASH"}
-            if _core_syms and _core_syms.issubset(_used_symbols_for_overlap):
+            if _core_syms and _core_syms.issubset(_used_core):
                 _unused_core = [
                     c for c in core_candidates
-                    if c.get("symbol") not in _used_symbols_for_overlap
+                    if c.get("symbol") not in _used_core
                     and not _is_tech_theme(c.get("name", ""))
                 ]
                 if _unused_core:
@@ -953,6 +960,10 @@ def allocate(
         # 原始卫星候选混入宽基（588000 科创50 / 562000 A100 曾入选）导致层属性混乱、
         # 行业集中度约束失真（verify_e2e design-quality 门禁同口径断言）。
         sat_pool = [c for c in sat_pool if not _is_wide_basis(c)]
+        # P2-6 plan A: satellite overlap penalty uses ONLY prior SATELLITE-layer symbols
+        # (not cross-layer), so non-tech backup candidates aren't wiped by a prior
+        # core/defense pick's -1.5 penalty (round20 D-A6 satellite-underfill fix).
+        _penalize_sat = _used_satellite.copy() if _used_satellite else set()
         sat_alloc = _select_and_weight(
             [c for c in sat_pool if _dedup_segment(c)],
             factor_matrix,
@@ -961,7 +972,7 @@ def allocate(
             regime=regime,
             strategy=profile_key,
             max_count=meta.get("layer_count", {}).get("satellite", 8),
-            penalize_symbols=_penalize,
+            penalize_symbols=_penalize_sat,
         )
         allocations.extend(sat_alloc)
 
@@ -1012,7 +1023,7 @@ def allocate(
                     regime=regime,
                     strategy=profile_key,
                     max_count=need,
-                    penalize_symbols=_penalize,
+                    penalize_symbols=_penalize_sat,
                 )
                 allocations.extend(backup_alloc)
 
@@ -1043,6 +1054,8 @@ def allocate(
             allocations.append(tech_etf)
 
         # ── Defense layer ──
+        # P2-6 plan A: defense overlap penalty uses ONLY prior DEFENSE-layer symbols.
+        _penalize_def = _used_defense.copy() if _used_defense else set()
         def_alloc = _select_and_weight(
             [c for c in def_candidates if _dedup_segment(c)],
             factor_matrix,
@@ -1051,7 +1064,7 @@ def allocate(
             regime=regime,
             strategy=profile_key,
             max_count=meta.get("layer_count", {}).get("defense", 2),
-            penalize_symbols=_penalize,
+            penalize_symbols=_penalize_def,
         )
         allocations.extend(def_alloc)
 
@@ -1159,6 +1172,163 @@ def allocate(
         for alloc in allocations:
             sym = alloc.get("symbol", "")
             if sym and sym != "CASH":
-                _used_symbols_for_overlap.add(sym)
+                _lay = alloc.get("layer")
+                if _lay == "core":
+                    _used_core.add(sym)
+                elif _lay == "satellite":
+                    _used_satellite.add(sym)
+                elif _lay == "defense":
+                    _used_defense.add(sym)
 
     return strategies
+
+
+def enforce_max_correlation(
+    strategies: list[dict[str, Any]],
+    correlation_matrix: dict[tuple[str, str], float | None],
+    threshold: float = 0.9,
+    max_combined_weight: float = 0.25,
+) -> list[dict[str, Any]]:
+    """P1-1 (round20): 方案内高相关对（r >= threshold）合计权重不得超 max_combined_weight。
+
+    纯函数，无 I/O。数据源为 engine/correlation.py 的 correlation_matrix（由 strategy_design
+    用真实 K 线闭源计算，不在此处获取）。对每套方案的两两非 CASH 持仓：若 r >= threshold 且
+    合计权重超标，则削减低 factor_score 一方（降到「合计 = 阈值」，下限 MIN_WEIGHT），被削减
+    权重按其余标的比例回补（保持 Σ=1），并在 risk_metrics.correlation_warnings 标注。
+
+    验收：高相关对合计权重从 >阈值 降到 <=阈值；被削减标的为低因子分一方；报告含关联度提示。
+    """
+    for s in strategies:
+        allocs = [a for a in s.get("allocations", []) if a.get("symbol") != "CASH"]
+        if len(allocs) < 2:
+            continue
+        reduced_syms: set[str] = set()
+        reduced_total = 0.0
+        warnings: list[dict[str, Any]] = []
+        for i in range(len(allocs)):
+            for j in range(i + 1, len(allocs)):
+                a, b = allocs[i], allocs[j]
+                sa, sb = a.get("symbol"), b.get("symbol")
+                r = correlation_matrix.get((sa, sb))
+                if r is None:
+                    r = correlation_matrix.get((sb, sa))
+                if r is None or r < threshold:
+                    continue
+                wa, wb = a.get("weight", 0.0), b.get("weight", 0.0)
+                if wa + wb <= max_combined_weight:
+                    continue
+                fa = a.get("factor_score", 0.0) or 0.0
+                fb = b.get("factor_score", 0.0) or 0.0
+                low, high = (a, b) if fa <= fb else (b, a)
+                # 削减低因子分一方：目标使「合计 = 阈值」。若 low 被削到 MIN_WEIGHT 下限后
+                # 合计仍超标（high 本身已 >= 阈值），则继续削 high 补足差额。
+                target_low = max(MIN_WEIGHT, max_combined_weight - high.get("weight", 0.0))
+                cut = max(0.0, low.get("weight", 0.0) - target_low)
+                if cut <= 1e-9:
+                    continue
+                low["weight"] = round(target_low, 4)
+                reduced_total += cut
+                reduced_syms.add(low.get("symbol"))
+                # low 触底后仍超标 → 削 high（差额进 reduced_total，同样回补）
+                if target_low == MIN_WEIGHT:
+                    over = (low.get("weight", 0.0) + high.get("weight", 0.0)) - max_combined_weight
+                    if over > 1e-9:
+                        high["weight"] = round(max(MIN_WEIGHT, high.get("weight", 0.0) - over), 4)
+                        reduced_total += over
+                        reduced_syms.add(high.get("symbol"))
+                warnings.append({
+                    "pair": [sa, sb],
+                    "correlation": round(float(r), 3),
+                    "combined_weight": round(wa + wb, 4),
+                    "reduced_symbol": low.get("symbol"),
+                    "note": "高相关对合计权重超阈值，已削减低因子分标的（关联度提示）",
+                })
+                logger.info(
+                    "[allocation] P1-1 high-correlation pair %s (r=%.2f) combined %.3f > %.3f, "
+                    "reduced %s", [sa, sb], r, wa + wb, max_combined_weight, low.get("symbol"),
+                )
+        if reduced_total > 1e-9:
+            # 被削减权重按其余（非被削减、非高相关对另一方）标的比例回补，保持 Σ=1。
+            # 关键：不得回补给 high 一方——否则该对合计又涨回超阈值。
+            pair_high: set[str] = set()
+            for i in range(len(allocs)):
+                for j in range(i + 1, len(allocs)):
+                    a, b = allocs[i], allocs[j]
+                    sa, sb = a.get("symbol"), b.get("symbol")
+                    r = correlation_matrix.get((sa, sb))
+                    if r is None:
+                        r = correlation_matrix.get((sb, sa))
+                    if r is None or r < threshold:
+                        continue
+                    if a.get("symbol") in reduced_syms:
+                        pair_high.add(b.get("symbol"))
+                    elif b.get("symbol") in reduced_syms:
+                        pair_high.add(a.get("symbol"))
+            others = [
+                x for x in allocs
+                if x.get("symbol") not in reduced_syms
+                and x.get("symbol") not in pair_high
+                and x.get("weight", 0.0) > 1e-9
+            ]
+            total_w = sum(x.get("weight", 0.0) for x in others)
+            if total_w > 1e-9:
+                for x in others:
+                    x["weight"] = round(
+                        x.get("weight", 0.0) + reduced_total * (x.get("weight", 0.0) / total_w), 4,
+                    )
+        if warnings:
+            s.setdefault("risk_metrics", {})
+            s["risk_metrics"]["correlation_warnings"] = warnings
+    return strategies
+
+
+def check_structure_reasonableness(
+    strategies: list[dict[str, Any]],
+    correlation_medians: dict[str, float | None] | None = None,
+) -> list[dict[str, Any]]:
+    """P2-5 (round20): 方案结构合理性检查（防御层归属 / 现金 / 关联度一致性）。
+
+    纯函数，无 I/O。对每套方案：
+      - 防御层含综合信号明显负面（factor_score <= -0.5）的标的 → 在 rationale 追加
+        「负信号防御标的」提示（验收：负信号防御层 rationale 必含说明，不再静默）；
+      - 防御层标的 median_r >= 0.35 却在 rationale 称「避险/低相关」→ 追加高相关提示
+        （覆盖 D-A7 跨市场成长误当低相关对冲）；
+      - 进攻型现金 > 20% → 记录 structure_warning（aggressive cash 自洽校验）。
+
+    返回原策略列表（就地修正 rationale / 写入 risk_metrics.structure_warnings）。
+    """
+    correlation_medians = correlation_medians or {}
+    for s in strategies:
+        sid = s.get("id") or s.get("risk_profile")
+        allocs = s.get("allocations", [])
+        warnings: list[dict[str, Any]] = []
+        for a in allocs:
+            if a.get("symbol") == "CASH":
+                continue
+            sym = a.get("symbol")
+            lay = a.get("layer")
+            fs = a.get("factor_score", 0.0) or 0.0
+            # P2-5-A: 负信号标的不得静默作防御层
+            if lay == "defense" and fs <= -0.5:
+                note = f"【结构提示：综合信号 {fs:+.2f} 为负，作防御层配置需谨慎——负信号防御标的】"
+                a["selection_rationale"] = (a.get("selection_rationale") or "") + note
+                warnings.append({"type": "negative_signal_in_defense", "symbol": sym, "factor_score": fs})
+            # P2-5-B: 防御层跨市场高相关成长（median_r>=0.35）不得称「避险/低相关」
+            if lay == "defense":
+                med = correlation_medians.get(sym)
+                rat = a.get("selection_rationale") or ""
+                if med is not None and med >= 0.35 and ("避险" in rat or "低相关" in rat):
+                    note = f"【结构提示：该防御层标的与组合 median r={med:.2f} 偏高，非低相关对冲资产】"
+                    a["selection_rationale"] = rat + note
+                    warnings.append({"type": "defense_high_median_r", "symbol": sym, "median_r": med})
+        # P2-5-C: 进攻型现金 <= 20%
+        if sid == "aggressive":
+            non_cash = sum(a.get("weight", 0.0) for a in allocs if a.get("symbol") != "CASH")
+            cash = round(1.0 - non_cash, 4)
+            if cash > 0.20 + 1e-9:
+                warnings.append({"type": "aggressive_cash_over_20pct", "cash": cash})
+        if warnings:
+            s.setdefault("risk_metrics", {})
+            s["risk_metrics"]["structure_warnings"] = warnings
+    return strategies
+

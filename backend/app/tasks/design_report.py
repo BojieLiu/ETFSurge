@@ -191,7 +191,9 @@ def _build_plan_tables(strategies: list[dict], fetched_at: datetime | None = Non
                 dcp_txt = "数据源不可用"
             lines.append(f"| {layer_cn} | {code} | {name} | {w:.0f}% | {fs_txt} | {dcp_txt} | {advice} | {rationale} |")
 
-    lines.append("\n> 注：多因子评分（0~1）基于资金流、估值、动量、流动性等维度综合计算，非涨跌幅。")
+    # P2-4 (round20 §五 P2-4): 注释与数值范围一致——多因子综合分可负可超 1
+    # （实测 511090=-2.31 超旧注释「0~1」），区别于技术信号（0~1）。
+    lines.append("\n> 注：多因子综合分（可负可超 1，区别于技术信号）基于资金流、估值、动量、流动性等维度综合计算，非涨跌幅。")
     return "\n".join(lines)
 
 

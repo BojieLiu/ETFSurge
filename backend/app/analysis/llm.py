@@ -645,9 +645,14 @@ async def llm_complete_with_system(
     _caller = sys._getframe(1).f_code.co_name
     providers = get_configured_providers()
     last_exc: Exception | None = None
+    # round20 P0-5: 429 限流的 provider 标记跳过——后续 attempt 不再重试该 provider，
+    # 立即走 fallback（task 417 日志实证 opencode_zen 每 2-3s 失败一次反复重试）。
+    _rate_limited: set[str] = set()
 
     for attempt in range(max_retries + 1):
         for provider in providers:
+            if provider.id in _rate_limited:
+                continue
             body = {
                 "model": provider.model,
                 "messages": [
@@ -707,6 +712,18 @@ async def llm_complete_with_system(
                     _record_llm_error(_exc)
                 except Exception:
                     pass
+                # round20 P0-5: 429 → 标记跳过，后续 attempt 不再重试该 provider
+                _resp = getattr(_exc, "response", None)
+                if (
+                    isinstance(_exc, httpx.HTTPStatusError)
+                    and _resp is not None
+                    and getattr(_resp, "status_code", None) == 429
+                ):
+                    _rate_limited.add(provider.id)
+                    logger.warning(
+                        "[LLM] Provider %s rate-limited (429) — skipped for remaining attempts",
+                        provider.id,
+                    )
                 await token_store.record(UsageRecord(
                     function_name=_caller,
                     prompt_tokens=0,
@@ -1425,9 +1442,10 @@ async def generate_strategy_check_report(
             prompt,
             max_retries=0,
             rate_limit_cap=10.0,
-            # round10 P1-I: 单次 provider 调用 35s 超时即切 fallback；max_retries=0
-            # 保证最坏 2×35=70s ≤ 75s 外层预算（round14 P0-B 预算-重试一致性）。
-            request_timeout=35.0,
+            # round20 P0-5: 单次 provider 调用超时 35s→15s（对齐 round15 P2 超时保护）——
+            # task 417 ReadTimeout 38s = 35s 调用 + 429 退避等待；缩到 15s 后最坏
+            # 2×15=30s ≤ 外层分级预算（partial 30s / all_empty 15s 亦覆盖）。
+            request_timeout=15.0,
         )
     except BaseException as e:  # noqa: BLE001 — F1-9: 必须捕获 CancelledError（BaseException）
         # F1-9: asyncio.wait_for(20s) 超时取消内部任务时抛 CancelledError，

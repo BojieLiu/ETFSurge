@@ -54,6 +54,7 @@ def generate_signal(indicators: dict) -> dict[str, Any]:
 
     score = 0.0
     reasons = []
+    overbought = False  # P1-3/P1-6: 超买钝化标志（KDJ.J>100 / RSI>80）
 
     rsi = indicators.get("rsi", 50)
     if rsi is not None and rsi != 50:
@@ -69,6 +70,11 @@ def generate_signal(indicators: dict) -> dict[str, Any]:
         elif rsi > 60:
             score -= 1
             reasons.append(f"RSI={rsi:.1f} 偏强")
+        # P1-3/P1-6 (round20 D-B1): RSI>80 极端超买钝化——不得给 BUY 信号
+        if rsi > 80:
+            score -= 2
+            reasons.append(f"RSI={rsi:.1f} 极端超买钝化")
+            overbought = True
 
     macd = indicators.get("macd", {})
     if macd:
@@ -96,6 +102,12 @@ def generate_signal(indicators: dict) -> dict[str, Any]:
         elif k < d and k > 70:
             score -= 1
             reasons.append("KDJ超买区死叉")
+        # P1-3/P1-6 (round20 D-B1): KDJ.J>100 极端超买钝化——不得给 BUY 信号。
+        # 旧逻辑仅判 k<d&k>70 死叉，J 高位钝化（如 J=101.67）仍可能判 BUY。
+        if j > 100:
+            score -= 2
+            reasons.append(f"KDJ超买钝化(J={j:.1f})")
+            overbought = True
 
     boll = indicators.get("bollinger", {})
     if boll:
@@ -139,6 +151,12 @@ def generate_signal(indicators: dict) -> dict[str, Any]:
         signal = "sell"
     else:
         signal = "hold"
+
+    # P1-3/P1-6 (round20 D-B1): 超买钝化（KDJ.J>100 / RSI>80）不得给 BUY——降级为 hold，
+    # 并追加「超买回落风险」提示，避免「超买仍买入」的逻辑矛盾。
+    if overbought and signal == "buy":
+        signal = "hold"
+        reasons.append("超买钝化，信号降级为持有（超买回落风险）")
 
     return {
         "signal": signal,
