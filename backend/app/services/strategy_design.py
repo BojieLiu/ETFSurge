@@ -731,9 +731,14 @@ def _correlation_medians_for(allocs: list[dict], candidates: dict) -> dict[str, 
     """
     from ..engine.correlation import correlation_matrix, median_correlation_for
     from ..fetchers.china_market import run_in_thread
+    from ..services.market_data_hub import market_data_hub
     import concurrent.futures
 
-    codes = [a.get("symbol") for a in allocs if a.get("symbol") not in (None, "CASH")]
+    codes: list[str] = [
+        str(a.get("symbol"))
+        for a in allocs
+        if a.get("symbol") not in (None, "CASH")
+    ]
     if len(codes) < 2:
         return {}
 
@@ -770,10 +775,11 @@ def _correlation_medians_for(allocs: list[dict], candidates: dict) -> dict[str, 
     if len(closes_by_symbol) < 2:
         return {}
     try:
-        matrix = correlation_matrix(closes_by_symbol, window=60, min_samples=20)
+        matrix = correlation_matrix(closes_by_symbol, window=60)
     except Exception:
         return {}
-    return {c: median_correlation_for(c, matrix) for c in codes}
+    others_by_code: dict[str, list[str]] = {c: [x for x in codes if x != c] for c in codes}
+    return {c: median_correlation_for(matrix, c, others_by_code[c]) for c in codes}
 
 
 _CORR_CLOSES_CACHE: dict[str, list[float]] = {}

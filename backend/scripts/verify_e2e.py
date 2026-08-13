@@ -2342,9 +2342,8 @@ def section_round19_boundary():
 
     # ① 带前缀 symbol 全链路（P7-①）
     try:
-        r = requests.get(f"{BASE}/api/v1/market/history",
-                         params={"symbol": "sz301308", "asset_type": "A", "period": "daily"},
-                         timeout=20)
+        r = requests.get(f"{BASE}/api/v1/market/history/sz301308",
+                         params={"asset_type": "A", "period": "daily"}, timeout=20)
         data = r.json() if r.status_code == 200 else []
         rows = data.get("data") if isinstance(data, dict) else data
         n = len(rows) if isinstance(rows, list) else 0
@@ -2353,8 +2352,13 @@ def section_round19_boundary():
     except Exception as e:
         check("fetch_history('sz301308') K线非空", False, str(e))
 
-    # ② watchlist 入库归一化（P7-③）——先清理残留再验证
+    # ② watchlist 入库归一化（P7-③）——先清理残留再验证（避免既有 409 误判）
     try:
+        _existing = requests.get(f"{BASE}/api/v1/market/watchlist", timeout=10)
+        _wl = _existing.json() if _existing.status_code == 200 else {}
+        for _it in (_wl.get("items") or []):
+            if _it.get("symbol") in ("301308", "sz301308") and _it.get("id"):
+                requests.delete(f"{BASE}/api/v1/market/watchlist/{_it['id']}", timeout=10)
         r = requests.post(f"{BASE}/api/v1/market/watchlist",
                           json={"symbol": "sz301308", "asset_type": "A", "name": "江波龙"},
                           timeout=10)
@@ -2368,8 +2372,8 @@ def section_round19_boundary():
 
     # ③ SPY 技术分析（P9-①/②）——数据可用或明确 stale/不可用标记（不裸「数据不足」）
     try:
-        r = requests.get(f"{BASE}/api/v1/market/indicators",
-                         params={"symbol": "SPY", "asset_type": "US"}, timeout=25)
+        r = requests.get(f"{BASE}/api/v1/market/indicators/SPY",
+                         params={"asset_type": "US"}, timeout=25)
         body = r.json() if r.status_code == 200 else {}
         avail = bool(body.get("data_available"))
         stale = bool(body.get("_stale"))
@@ -2413,10 +2417,12 @@ def section_round19_boundary():
     except Exception as e:
         check("sectors/heat null 语义", False, str(e))
 
-    # ⑥ timeline/metrics 性能门禁（P0-1/P0-2）：热态 < 1s
+    # ⑥ timeline/metrics 性能门禁（P0-1/P0-2）：热态 < 1s（二次调用取热态——
+    # 首次冷态含 DB 连接/缓存未命中，round18 修复目标是热态恒定不降）
     for _label, _url in [("timeline", f"{BASE}/api/v1/portfolio/timeline"),
                          ("metrics", f"{BASE}/api/v1/admin/metrics")]:
         try:
+            requests.get(_url, timeout=10)  # 预热（写缓存）
             t0 = time.time()
             r = requests.get(_url, timeout=10)
             dt = time.time() - t0
