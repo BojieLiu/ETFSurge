@@ -230,11 +230,31 @@ def _dominant_factor(factor_scores: dict[str, float], profile_weights: dict[str,
 #     均为真实可成交标的；
 #   ②设计层：P1-5 gate——三源（pool/快照/K线）全拿不到涨跌的核心标的权重清零 + 标注；
 #   ③验收层：verify_e2e P0-8 断言（方案无幽灵锚 560600）。
-MANDATORY_CODES = {"510300", "159338", "518880", "511090"}
+# round22 (#13): 强制标的拆分为「核心锚」与「防御锚」——防御锚受 layer_count.defense 门控，
+# 杜绝进攻型防御层被债/金撑爆（round21 #13 实证 进攻防御 19%）。
+CORE_ANCHORS = {"510300", "159338"}       # 核心层强制锚（沪深300/中证A500）
+DEFENSE_ANCHORS = {"518880", "511090"}     # 防御层强制锚（黄金/30年国债），按 defense_count 注入
+MANDATORY_CODES = CORE_ANCHORS | DEFENSE_ANCHORS
 # R5-0-2: 公共底仓「宽基锚」——跨方案核心层重叠豁免仅限这些标的 + 强制标的
 #（与 verify_e2e M7/P1-1 口径一致：510300/159338 为沪深300/中证A500 锚）。
 _COMMON_ANCHOR_SYMBOLS = {"510300", "159338"}
 MANDATORY_MIN_WEIGHT = 0.03
+
+
+def _defense_anchors_for(profile_key: str) -> set[str]:
+    """round22 (#13): 防御锚注入受 layer_count.defense 门控。
+
+    defense_count>=1 → 注入黄金 518880；defense_count>=2 → 再注入 30年国债 511090。
+    进攻/平衡 defense_count=1 → 仅黄金（511090 不进进攻防御层）。防御层按
+    defense_count 目标组成（资产递减：进攻仅黄金，防御可含债/金）。
+    """
+    dc = STRATEGY_META.get(profile_key, {}).get("layer_count", {}).get("defense", 1)
+    anchors: set[str] = set()
+    if dc >= 1:
+        anchors.add("518880")
+    if dc >= 2:
+        anchors.add("511090")
+    return anchors
 
 # ── Default candidate pool (fallback if candidates list is empty) ──
 _DEFAULT_CANDIDATES: list[dict[str, Any]] = [
@@ -286,6 +306,8 @@ def _select_and_weight(
     max_count: int = 5,
     exclude_tracked_indices: set[str] | None = None,
     penalize_symbols: set[str] | None = None,
+    sector_momentum: list[dict] | None = None,
+    mandatory_codes: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Internal helper: score candidates, keep top *max_count*,
@@ -294,18 +316,23 @@ def _select_and_weight(
     Each returned dict has symbol, name, layer, weight, selection_rationale,
     factor_score, and factor_breakdown.
 
-    B3: exclude_tracked_indices — 跳过已选指数的标的，防止同指数多头持仓。
+    B3: exclude_tracked_indices — 跳过已选指数的标的，防止同指数多头持仓.
+    P1-7 (round20): sector_momentum — 当日板块涨幅榜；aggressive 对强势板块
+    对应 ETF 给动态 c2_bonus（替代 _RISKY_THEMES 静态科技关键词判定）。
     """
     exclude_indices = exclude_tracked_indices or set()
     if not candidates or budget <= 0:
         return []
 
     # P1-3: 强制标的从候选池中注入（确保进入分配结果）
+    # round22 (#13): mandatory_codes 由调用方按层传入（核心锚 / 防御锚），
+    # 默认回退 MANDATORY_CODES（向后兼容）。
+    _mandatory = mandatory_codes if mandatory_codes is not None else MANDATORY_CODES
     mandatory_assignments = []
     remaining_candidates = []
     for c in candidates:
         sym = c.get("symbol", "")
-        if sym in MANDATORY_CODES:
+        if sym in _mandatory:
             mandatory_assignments.append({
                 "symbol": sym,
                 "name": c.get("name", sym),
@@ -397,8 +424,41 @@ def _select_and_weight(
                 elif any(t in name for t in _RISKY_THEMES):
                     c2_bonus = -1.5
             elif strategy == "aggressive":
-                # 进攻型：偏好高风险主题，惩罚安全主题
-                if any(t in name for t in _RISKY_THEMES):
+                # P1-7 (round20): 当日强势板块动态奖励——涨幅前 3 板块对应 ETF +1.5
+                # （医药/CRO 等非科技板块当日 +7% 也获奖励；替代 _RISKY_THEMES 静态列表
+                # 的「只奖科技」盲区，与 P2-6 方案 A 层内惩罚配套）。
+                _strong_bonus = 0.0
+                if sector_momentum:
+                    _top = sorted(
+                        [s for s in sector_momentum
+                         if isinstance(s.get("change_pct"), (int, float))],
+                        key=lambda s: -s["change_pct"],
+                    )[:3]
+                    _strong_names = [
+                        str(s.get("sector_name") or s.get("name") or "")
+                        for s in _top if (s.get("sector_name") or s.get("name"))
+                    ]
+                    _cand_text = f"{name} {cand.get('industry', '')} {cand.get('tracked_index', '')}"
+                    # 双向宽松匹配：板块名与 ETF 文本（名称/行业/跟踪指数）存在 ≥2 字
+                    # 公共子串即命中——「医疗服务」vs「医疗ETF」公共子串「医疗」；
+                    # 严格包含会漏（板块名带后缀，ETF 名带 ETF 字样）。
+                    if _strong_names and _cand_text.strip():
+                        def _has_shared_ngram(sec: str, text: str, n: int = 2) -> bool:
+                            sec_ng = {sec[i:i + n] for i in range(max(1, len(sec) - n + 1))}
+                            txt_ng = {text[i:i + n] for i in range(max(1, len(text) - n + 1))}
+                            return bool(sec_ng & txt_ng)
+                        if any(
+                            _sn and _has_shared_ngram(_sn, _cand_text)
+                            for _sn in _strong_names
+                        ):
+                            _strong_bonus = 1.5
+                            logger.debug(
+                                "[allocation] P1-7 %s %s 命中当日强势板块 %s → +1.5",
+                                strategy, sym, _strong_names[:3],
+                            )
+                if _strong_bonus:
+                    c2_bonus = _strong_bonus
+                elif any(t in name for t in _RISKY_THEMES):
                     c2_bonus = 1.5
                 elif any(t in name for t in _SAFE_THEMES):
                     c2_bonus = -0.3
@@ -427,21 +487,13 @@ def _select_and_weight(
     scored = [group[0] for group in deduped]
     scored.sort(key=lambda x: x[0], reverse=True)
 
-    # P1-D (round10 §3.1-3/§10): 卫星层负 factor_score 不给权——因子分 ≤ -0.3
-    # （约当 |score| 显著为负区间）的标的不入卫星层，防负分标的侵占有限权重。
-    # round12 修正: 若过滤后不足布局下限（2 只），从过滤前最高分回补——
-    # 三套策略顺序生成时，aggressive 阶段卫星候选常因「重叠惩罚 -1.5」全负
-    # （test_satellite_min_count aggressive 曾整层清空）；负分仅作排序降级，
-    # 不绝对清空，保卫星层下限。
+    # round22 (#11): 废除卫星层负分绝对排除（原 P1-D score>-0.3 过滤）。该过滤在
+    # 跨方案重叠惩罚 -1.5 下把 aggressive 卫星候选全判负 → 整层清空 → 卫星数倒挂
+    # （2/6/2）。卫星数量完全由 max_count=layer_count.satellite（单调 4/6/8）门控，
+    # 负分仅作排序降级、不绝对清空（与防御/平衡同机制）。回退阶梯质量地板（factor_score
+    # 显著为负）在候选池不足时由 _select_and_weight 的 max_count 自然约束，不引入劣质标的。
     if layer == "satellite":
-        _before = scored  # item = (composite_score, candidate_dict, factor_scores)
-        scored = [item for item in scored if item[0] > -0.3]
-        if len(scored) < 2 and _before:
-            _backfill = [
-                item for item in sorted(_before, key=lambda x: x[0], reverse=True)
-                if item[0] <= -0.3
-            ]
-            scored = scored + _backfill[: 2 - len(scored)]
+        scored = [item for item in scored if item[0] > -2.0]
 
     # Keep top *max_count*
     selected = scored[:max_count]
@@ -575,17 +627,37 @@ def _filter_satellite_by_profile(
     candidates: list[dict[str, Any]],
     factor_matrix: dict[str, dict[str, float]],
     profile_key: str,
+    sector_momentum: list[dict] | None = None,
 ) -> list[dict[str, Any]]:
     """C1: 按风险偏好过滤卫星层候选列表，使三方案差异化。
 
-    - defensive: 偏好低波动/防御性行业，剔除高 beta 卫星候选
+    - defensive: 偏好低波动/防御性行业（由 _select_and_weight 的 c2_bonus 实现差异化）
     - aggressive: 偏好高动量/成长性行业
-    - balanced: 全量候选，不做特殊过滤
+    - 三方案统一返回全量候选，数量由 _select_and_weight 的 max_count=layer_count.satellite
+      门控（单调 4/6/8），不再做 KEEP_RATIO 不对称裁剪（round22 #11 倒挂根因）。
+
+    P1-7 (round20): aggressive 下当日强势板块（涨幅前 3）对应 ETF 保底保留——
+    动态奖励在 c2_bonus 阶段才 +1.5，若在此先被 KEEP_RATIO 裁掉则奖励无意义
+    （医药 +7% 当日最强主线曾因同分排序落选，见 round20 D-A3）。
     """
-    if not candidates or profile_key == "balanced":
+    if not candidates:
         return list(candidates)
 
-    scored: list[tuple[float, dict[str, Any]]] = []
+    scored: list[tuple[float, dict[str, Any], bool]] = []
+    # P1-7: 强势板块名集合（供 aggressive 保底判定，复用 _select_and_weight 的
+    # 公共子串匹配，避免重复实现——此处仅做「是否强势」布尔判定）
+    strong_hits: set[str] = set()
+    if profile_key == "aggressive" and sector_momentum:
+        _top = sorted(
+            [s for s in sector_momentum
+             if isinstance(s.get("change_pct"), (int, float))],
+            key=lambda s: -s["change_pct"],
+        )[:3]
+        strong_hits = {
+            str(s.get("sector_name") or s.get("name") or "")
+            for s in _top if (s.get("sector_name") or s.get("name"))
+        }
+
     for c in candidates:
         sym = c.get("symbol", "")
         fs = factor_matrix.get(sym, {})
@@ -601,20 +673,32 @@ def _filter_satellite_by_profile(
             # 积极型：偏好高 momentum + 高 technical 的标的
             suitability = momentum * 0.5 + technical * 0.3 + valuation * 0.2
 
-        scored.append((suitability, c))
+        # P1-7: aggressive 强势板块命中标记（供排序后保底）
+        _is_strong = False
+        if strong_hits:
+            _text = f"{c.get('name', '')} {c.get('industry', '')} {c.get('tracked_index', '')}"
+            if _text.strip():
+                def _shared(sn: str, txt: str, n: int = 2) -> bool:
+                    sn_ng = {sn[i:i + n] for i in range(max(1, len(sn) - n + 1))}
+                    tx_ng = {txt[i:i + n] for i in range(max(1, len(txt) - n + 1))}
+                    return bool(sn_ng & tx_ng)
+                _is_strong = any(_shared(h, _text) for h in strong_hits)
+        scored.append((suitability, c, _is_strong))
 
-    # 排序并按风偏裁剪候选数量（P1-1: 非仅排序，提高比例达 8-15 只总持仓）
+    # 排序（保留评分，便于后续日志/扩展）
     scored.sort(key=lambda x: x[0], reverse=True)
-    KEEP_RATIO = {
-        "defensive": 0.6,
-        "aggressive": 0.7,
-        "balanced": 0.8,
-    }
-    # F0-5 步骤 D: 卫星数量下限 ≥ 4（预算允许时），防止候选池窄时
-    # 卫星层被裁剪到只剩 2 只、失去「多赛道分散」意义。
-    keep_count = max(4, int(len(scored) * KEEP_RATIO.get(profile_key, 1.0)))
-    keep_count = min(keep_count, len(scored))
-    return [item for _, item in scored[:keep_count]]
+    # round22 (#11): 废除 KEEP_RATIO 不对称裁剪——三方案统一返回全量候选，
+    # 卫星数量由 _select_and_weight 的 max_count=layer_count.satellite（单调 4/6/8）门控，
+    # 风偏差异化由 c2_bonus 实现。此举消除「balanced 全量 / def-agg 裁剪」倒挂（2/6/2）。
+    kept = [item for _, item, _ in scored]
+    # P1-7: 强势板块命中保底补入（全量时恒为 no-op，保留兼容）
+    _kept_syms = {c.get("symbol") for c in kept}
+    for _, item, is_strong in scored:
+        if is_strong and item.get("symbol") not in _kept_syms:
+            kept.append(item)
+            _kept_syms.add(item.get("symbol"))
+            logger.debug("[allocation] P1-7 强势板块候选 %s 保底入卫星层", item.get("symbol"))
+    return kept
 
 
 def _dedup_same_index(allocations: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -690,11 +774,74 @@ def _dedup_same_index(allocations: list[dict[str, Any]]) -> list[dict[str, Any]]
     return kept
 
 
+def _cap_core_growth_wide_basis(
+    core_alloc: list[dict[str, Any]],
+    cap: float,
+) -> list[dict[str, Any]]:
+    """round22 (#10 INV-4): 核心层高 beta 成长宽基（创业板/科创50/科创100 等）合计
+    权重不得超过 核心预算 × cap（core_growth_cap）。
+
+    用 `_is_growth_wide_basis` 关键词分类器作 beta 代理（round21 #10 探针 P1 确认
+    无 raw β 数据源，不造假）。超出 cap 时按 factor_score 降序逐个移除最低分成长
+    宽基，被移除权重按其余核心占比回补（保持核心预算闭合，不归现金虚胀）。
+    返回修正后的核心层分配（就地修改权重，返回同一 list）。
+    """
+    core_non_cash = [a for a in core_alloc if a.get("symbol") != "CASH"]
+    if not core_non_cash:
+        return core_alloc
+    core_w = sum(a.get("weight", 0.0) or 0.0 for a in core_non_cash)
+    if core_w <= 0:
+        return core_alloc
+    cap_w = core_w * cap
+    growth = [a for a in core_non_cash if _is_growth_wide_basis(a)]
+    growth_w = sum(a.get("weight", 0.0) or 0.0 for a in growth)
+    # 核心层数量下限 [3,5]（M7 联动 / O16）：成长宽基占比 cap 是「软偏好」，
+    # 不得为压 cap 把核心层削到 <3 只（否则单层集中 + 现金虚胀）。核心仅剩 3 只时
+    # 停止移除——cap 让位于数量下限（真实候选池充足时 cap 仍生效）。
+    _core_count = len(core_non_cash)
+    while growth and growth_w > cap_w + 1e-9 and _core_count > 3:
+        # 移除最低 factor_score 的成长宽基（保留高分成长宽基，压低占比至 ≤ cap）
+        low = min(growth, key=lambda a: a.get("factor_score", 0.0) or 0.0)
+        reclaim = low.get("weight", 0.0) or 0.0
+        core_alloc = [a for a in core_alloc if a.get("symbol") != low.get("symbol")]
+        growth.remove(low)
+        growth_w -= reclaim
+        _core_count -= 1
+        # 回补必须「预算守恒」：被移除权重按其余核心剩余容量（MAX_WEIGHT - 当前权重）
+        # 做水填充（water-filling），单只不超 MAX_WEIGHT。容量不足无法吸收的部分才落
+        # 现金（罕见）——避免「单只承接全部回补 → 超 30% 被钳制 → 权重凭空消失 → 现金虚胀」
+        # （round22 回归：defensive 现金 28% 根因）。
+        _reclaim = reclaim
+        _guard = 0
+        while _reclaim > 1e-9 and _guard < 50:
+            _guard += 1
+            _remain = [a for a in core_alloc if a.get("symbol") != "CASH"]
+            _cap_left = [
+                (a, max(0.0, MAX_WEIGHT - (a.get("weight", 0.0) or 0.0)))
+                for a in _remain
+            ]
+            _total_cap = sum(c for _, c in _cap_left)
+            if _total_cap <= 1e-9:
+                break  # 其余核心均封顶，残余权重无法吸收（极小概率落现金）
+            _add = min(_reclaim, _total_cap)
+            for a, c in _cap_left:
+                a["weight"] = round(
+                    (a.get("weight", 0.0) or 0.0) + _add * (c / _total_cap), 4,
+                )
+            _reclaim -= _add
+        logger.info(
+            "[allocation] #10 core growth-wide-basis cap: removed %s (reclaim %.3f, "
+            "growth_w now %.3f / cap %.3f)", low.get("symbol"), reclaim, growth_w, cap_w,
+        )
+    return core_alloc
+
+
 def allocate(
     risk_profile: str,
     regime: str,
     factor_matrix: dict[str, dict[str, float]],
     candidates: list[dict[str, Any]] | None = None,
+    sector_momentum: list[dict] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Build three investment strategies (defensive / balanced / aggressive) using
@@ -707,6 +854,8 @@ def allocate(
         candidates:    List of candidate dicts, each with at least
                        {"symbol": str, "name": str, "layer": str}.
                        If empty/None, a built-in default pool is used.
+        sector_momentum: P1-7 (round20) 当日板块涨幅榜 [{sector_name, change_pct}];
+                       aggressive 对强势板块（前 3）对应 ETF 动态 +1.5 c2_bonus.
 
     Returns:
         A list of 3 strategy dicts, one per risk profile:
@@ -836,6 +985,8 @@ def allocate(
             strategy=profile_key,
             max_count=core_max_count,
             penalize_symbols=_penalize_core,
+            sector_momentum=sector_momentum,
+            mandatory_codes=CORE_ANCHORS,
         )
         # O16 (round7 §7 P18): 核心层大盘宽基族互斥——非强制大盘宽基数量 ≤1
         # （强制锚 510300/159338 已占 2 个名额；balanced/aggressive 建议 ≤0，
@@ -909,6 +1060,11 @@ def allocate(
                 _core_budget - _core_w_now - _gap, _core_budget - _core_w_now, profile_key,
                 len(core_alloc),
             )
+        # round22 (#10 INV-4): 核心层高 beta 成长宽基占比上限——核心选完后校验，
+        # 超出 core_growth_cap 按 factor_score 逐个移除最低分成长宽基并回补权重。
+        # 平衡型核心成长占比压到 ≤40%（round21 #10 实证 67% → ≤40%）。
+        _core_growth_cap = STRATEGY_META.get(profile_key, {}).get("core_growth_cap", 0.40)
+        core_alloc = _cap_core_growth_wide_basis(core_alloc, _core_growth_cap)
         allocations.extend(core_alloc)
         # P1-2: 记录本方案核心层非强制标的（供后续方案去重）
         _prev_core_used |= {
@@ -955,7 +1111,9 @@ def allocate(
                         })
 
         # ── Satellite layer — C1: 按 profile_key 差异化过滤 ──
-        sat_pool = _filter_satellite_by_profile(sat_candidates, factor_matrix, profile_key)
+        sat_pool = _filter_satellite_by_profile(
+            sat_candidates, factor_matrix, profile_key, sector_momentum=sector_momentum,
+        )
         # P1-1 验收4 (R4-15): 卫星层原始候选也排除宽基——M5 只覆盖 backup 补足路径，
         # 原始卫星候选混入宽基（588000 科创50 / 562000 A100 曾入选）导致层属性混乱、
         # 行业集中度约束失真（verify_e2e design-quality 门禁同口径断言）。
@@ -973,6 +1131,8 @@ def allocate(
             strategy=profile_key,
             max_count=meta.get("layer_count", {}).get("satellite", 8),
             penalize_symbols=_penalize_sat,
+            sector_momentum=sector_momentum,
+            mandatory_codes=set(),
         )
         allocations.extend(sat_alloc)
 
@@ -1024,6 +1184,8 @@ def allocate(
                     strategy=profile_key,
                     max_count=need,
                     penalize_symbols=_penalize_sat,
+                    sector_momentum=sector_momentum,
+                    mandatory_codes=set(),
                 )
                 allocations.extend(backup_alloc)
 
@@ -1056,6 +1218,12 @@ def allocate(
         # ── Defense layer ──
         # P2-6 plan A: defense overlap penalty uses ONLY prior DEFENSE-layer symbols.
         _penalize_def = _used_defense.copy() if _used_defense else set()
+        # round22 (#13): 防御锚按 layer_count.defense 门控——defense_count=1 → 仅黄金 518880；
+        # =2 → 黄金+30年国债。max_count 取剩余名额（defense_count - 锚数），保证防御层
+        # 实际数量 = defense_count（资产递减：进攻仅黄金，防御含债/金）。
+        _def_anchors = _defense_anchors_for(profile_key)
+        _defense_count = meta.get("layer_count", {}).get("defense", 1)
+        _def_max = max(0, _defense_count - len(_def_anchors))
         def_alloc = _select_and_weight(
             [c for c in def_candidates if _dedup_segment(c)],
             factor_matrix,
@@ -1063,8 +1231,10 @@ def allocate(
             layer="defense",
             regime=regime,
             strategy=profile_key,
-            max_count=meta.get("layer_count", {}).get("defense", 2),
+            max_count=_def_max,
             penalize_symbols=_penalize_def,
+            sector_momentum=sector_momentum,
+            mandatory_codes=_def_anchors,
         )
         allocations.extend(def_alloc)
 
@@ -1119,8 +1289,11 @@ def allocate(
         _alloc_total = sum(a.get("weight", 0.0) for a in allocations if a.get("symbol") != "CASH")
         _shortfall = max(0.0, _total_budget - _alloc_total)
         if _shortfall > 0.001:
+            # round22 (#13): 强制锚（黄金/国债等）已按后处理抬到 5% 目标，不必再参与
+            # 预算回补——否则会被 top-up 推过 0.05（如进攻黄金 0.052 > INV-6 钳制）。
             _topup = sorted(
-                [a for a in allocations if a.get("symbol") != "CASH"],
+                [a for a in allocations
+                 if a.get("symbol") != "CASH" and a.get("symbol") not in MANDATORY_CODES],
                 key=lambda a: -float(a.get("factor_score", 0) or 0),
             )
             if _topup:
@@ -1285,50 +1458,131 @@ def enforce_max_correlation(
 def check_structure_reasonableness(
     strategies: list[dict[str, Any]],
     correlation_medians: dict[str, float | None] | None = None,
+    cross_profile_only: bool = False,
 ) -> list[dict[str, Any]]:
-    """P2-5 (round20): 方案结构合理性检查（防御层归属 / 现金 / 关联度一致性）。
+    """P2-5 (round20) + round22 INV-3/4/5/6: 方案结构合理性检查。
 
-    纯函数，无 I/O。对每套方案：
-      - 防御层含综合信号明显负面（factor_score <= -0.5）的标的 → 在 rationale 追加
-        「负信号防御标的」提示（验收：负信号防御层 rationale 必含说明，不再静默）；
-      - 防御层标的 median_r >= 0.35 却在 rationale 称「避险/低相关」→ 追加高相关提示
-        （覆盖 D-A7 跨市场成长误当低相关对冲）；
-      - 进攻型现金 > 20% → 记录 structure_warning（aggressive cash 自洽校验）。
+    纯函数，无 I/O。
+
+    逐方案（cross_profile_only=False 时）：
+      - 防御层含综合信号明显负面（factor_score <= -0.5）的标的 → rationale 追加提示；
+      - 防御层标的 median_r >= 0.35 却称「避险/低相关」→ 追加高相关提示；
+      - 进攻型现金 > 20% → structure_warning；
+      - round22 INV-4: 核心层高 beta 成长宽基占比 > core_growth_cap → structure_warning。
+
+    cross_profile_only=True（或输入含全部三方案）：
+      - round22 INV-3: 卫星数单调（防御<平衡<进攻）、防御数反向（防御≥平衡≥进攻）；
+      - round22 INV-5: 总标的数单调（防御<平衡<进攻）；
+      - round22 INV-6: 进攻型 现金 >0.10（bear >0.15）/ 防御权重 >0.05 → structure_warning。
 
     返回原策略列表（就地修正 rationale / 写入 risk_metrics.structure_warnings）。
     """
     correlation_medians = correlation_medians or {}
-    for s in strategies:
-        sid = s.get("id") or s.get("risk_profile")
-        allocs = s.get("allocations", [])
-        warnings: list[dict[str, Any]] = []
-        for a in allocs:
-            if a.get("symbol") == "CASH":
-                continue
-            sym = a.get("symbol")
-            lay = a.get("layer")
-            fs = a.get("factor_score", 0.0) or 0.0
-            # P2-5-A: 负信号标的不得静默作防御层
-            if lay == "defense" and fs <= -0.5:
-                note = f"【结构提示：综合信号 {fs:+.2f} 为负，作防御层配置需谨慎——负信号防御标的】"
-                a["selection_rationale"] = (a.get("selection_rationale") or "") + note
-                warnings.append({"type": "negative_signal_in_defense", "symbol": sym, "factor_score": fs})
-            # P2-5-B: 防御层跨市场高相关成长（median_r>=0.35）不得称「避险/低相关」
-            if lay == "defense":
-                med = correlation_medians.get(sym)
-                rat = a.get("selection_rationale") or ""
-                if med is not None and med >= 0.35 and ("避险" in rat or "低相关" in rat):
-                    note = f"【结构提示：该防御层标的与组合 median r={med:.2f} 偏高，非低相关对冲资产】"
-                    a["selection_rationale"] = rat + note
-                    warnings.append({"type": "defense_high_median_r", "symbol": sym, "median_r": med})
-        # P2-5-C: 进攻型现金 <= 20%
-        if sid == "aggressive":
-            non_cash = sum(a.get("weight", 0.0) for a in allocs if a.get("symbol") != "CASH")
-            cash = round(1.0 - non_cash, 4)
-            if cash > 0.20 + 1e-9:
-                warnings.append({"type": "aggressive_cash_over_20pct", "cash": cash})
-        if warnings:
-            s.setdefault("risk_metrics", {})
-            s["risk_metrics"]["structure_warnings"] = warnings
+    _profiles = {"defensive", "balanced", "aggressive"}
+    _have_all = _profiles <= {s.get("id") or s.get("risk_profile") for s in strategies}
+
+    if not cross_profile_only:
+        for s in strategies:
+            sid = s.get("id") or s.get("risk_profile")
+            allocs = s.get("allocations", [])
+            warnings: list[dict[str, Any]] = []
+            for a in allocs:
+                if a.get("symbol") == "CASH":
+                    continue
+                sym = a.get("symbol")
+                lay = a.get("layer")
+                fs = a.get("factor_score", 0.0) or 0.0
+                # P2-5-A: 负信号标的不得静默作防御层
+                if lay == "defense" and fs <= -0.5:
+                    note = f"【结构提示：综合信号 {fs:+.2f} 为负，作防御层配置需谨慎——负信号防御标的】"
+                    a["selection_rationale"] = (a.get("selection_rationale") or "") + note
+                    warnings.append({"type": "negative_signal_in_defense", "symbol": sym, "factor_score": fs})
+                # P2-5-B: 防御层跨市场高相关成长（median_r>=0.35）不得称「避险/低相关」
+                if lay == "defense":
+                    med = correlation_medians.get(sym)
+                    rat = a.get("selection_rationale") or ""
+                    if med is not None and med >= 0.35 and ("避险" in rat or "低相关" in rat):
+                        note = f"【结构提示：该防御层标的与组合 median r={med:.2f} 偏高，非低相关对冲资产】"
+                        a["selection_rationale"] = rat + note
+                        warnings.append({"type": "defense_high_median_r", "symbol": sym, "median_r": med})
+            # P2-5-C: 进攻型现金 <= 20%
+            if sid == "aggressive":
+                non_cash = sum(a.get("weight", 0.0) for a in allocs if a.get("symbol") != "CASH")
+                cash = round(1.0 - non_cash, 4)
+                if cash > 0.20 + 1e-9:
+                    warnings.append({"type": "aggressive_cash_over_20pct", "cash": cash})
+            # round22 INV-4: 核心层成长宽基占比上限（占核心预算）
+            _cap = STRATEGY_META.get(sid, {}).get("core_growth_cap", 0.40) if sid else 0.40
+            _core = [a for a in allocs if a.get("layer") == "core" and a.get("symbol") != "CASH"]
+            _core_w = sum(a.get("weight", 0.0) or 0.0 for a in _core)
+            if _core_w > 0:
+                _growth_w = sum(
+                    a.get("weight", 0.0) or 0.0 for a in _core if _is_growth_wide_basis(a)
+                )
+                if _growth_w > _core_w * _cap + 1e-9:
+                    warnings.append({
+                        "type": "core_growth_exceeds_cap",
+                        "profile": sid,
+                        "growth_weight": round(_growth_w, 4),
+                        "core_weight": round(_core_w, 4),
+                        "cap": _cap,
+                    })
+            if warnings:
+                s.setdefault("risk_metrics", {})
+                s["risk_metrics"].setdefault("structure_warnings", [])
+                s["risk_metrics"]["structure_warnings"].extend(warnings)
+
+    # round22 INV-3/5/6 cross-profile（仅当三方案齐全时校验；单方案调用不做跨方案比较）
+    if _have_all:
+        _by = {s.get("id"): s for s in strategies}
+        _d, _b, _a = _by.get("defensive"), _by.get("balanced"), _by.get("aggressive")
+
+        def _layer_count(s, layer):
+            return sum(
+                1 for a in s.get("allocations", [])
+                if a.get("layer") == layer and a.get("symbol") != "CASH"
+            )
+
+        def _total_count(s):
+            return sum(1 for a in s.get("allocations", []) if a.get("symbol") != "CASH")
+
+        _xwarnings: list[dict[str, Any]] = []
+        # INV-3: 卫星数单调 防御<平衡<进攻
+        _sat = {p: _layer_count(_by[p], "satellite") for p in ("defensive", "balanced", "aggressive")}
+        if not (_sat["defensive"] < _sat["balanced"] < _sat["aggressive"]):
+            _xwarnings.append({"type": "inv3_satellite_not_monotonic",
+                               "satellite_counts": _sat})
+        # INV-3: 防御数反向 防御>=平衡>=进攻
+        _def = {p: _layer_count(_by[p], "defense") for p in ("defensive", "balanced", "aggressive")}
+        if not (_def["defensive"] >= _def["balanced"] >= _def["aggressive"]):
+            _xwarnings.append({"type": "inv3_defense_not_reverse_monotonic",
+                               "defense_counts": _def})
+        # INV-5: 总标的数单调 防御<平衡<进攻
+        _tot = {p: _total_count(_by[p]) for p in ("defensive", "balanced", "aggressive")}
+        if not (_tot["defensive"] < _tot["balanced"] < _tot["aggressive"]):
+            _xwarnings.append({"type": "inv5_total_not_monotonic",
+                               "total_counts": _tot})
+        # INV-6: 进攻压舱——现金 <=0.10（bear <=0.15）、防御权重 <=0.05
+        if _a is None:
+            logger.warning("[allocation] INV-3/5/6: aggressive 方案缺失，跳过 INV-6 校验")
+        else:
+            _a_allocs = _a.get("allocations", [])
+            _a_non_cash = sum(a.get("weight", 0.0) for a in _a_allocs if a.get("symbol") != "CASH")
+            _a_cash = round(1.0 - _a_non_cash, 4)
+            _a_def_w = sum(a.get("weight", 0.0) for a in _a_allocs if a.get("layer") == "defense")
+            if _a_cash > 0.10 + 1e-9:
+                _xwarnings.append({"type": "inv6_aggressive_cash_over", "cash": _a_cash,
+                                   "clamp": 0.10})
+            if _a_def_w > 0.05 + 1e-9:
+                _xwarnings.append({"type": "inv6_aggressive_defense_over", "defense_weight": _a_def_w,
+                                   "clamp": 0.05})
+            if _xwarnings:
+                _a.setdefault("risk_metrics", {})
+                _a["risk_metrics"].setdefault("structure_warnings", [])
+                _a["risk_metrics"]["structure_warnings"].extend(_xwarnings)
+                logger.warning(
+                    "[allocation] INV-3/5/6 cross-profile violations: %s",
+                    [w["type"] for w in _xwarnings],
+                )
     return strategies
 

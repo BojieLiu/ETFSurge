@@ -102,3 +102,29 @@ describe('DesignResult P2-8 degradation 提示条', () => {
     expect(wrapper.find('.degradation-banner').exists()).toBe(true)
   })
 })
+
+describe('DesignResult round21 #14 report_quality 降级标签', () => {
+  it('report_quality=partial 时显示「部分生成」标签（负向：静默展示为完整 → FAIL）', async () => {
+    const wrapper = await mountResult(makePlan(), { reportQuality: 'partial', designText: '# 报告' })
+    const banner = wrapper.find('.quality-banner')
+    expect(banner.exists()).toBe(true)
+    expect(banner.text()).toContain('部分生成')
+    expect(banner.classes()).toContain('quality-warn')
+  })
+
+  it('report_quality=fallback 时显示降级标签', async () => {
+    const wrapper = await mountResult(makePlan(), { reportQuality: 'fallback', designText: '# 报告' })
+    expect(wrapper.find('.quality-banner').exists()).toBe(true)
+    expect(wrapper.find('.quality-banner').text()).toContain('降级为方案表格')
+  })
+
+  it('report_quality=full 时不渲染降级标签（不误报完整报告）', async () => {
+    const wrapper = await mountResult(makePlan(), { reportQuality: 'full', designText: '# 报告' })
+    expect(wrapper.find('.quality-banner').exists()).toBe(false)
+  })
+
+  it('report_quality=none 时不渲染降级标签', async () => {
+    const wrapper = await mountResult(makePlan(), { reportQuality: 'none', designText: '# 报告' })
+    expect(wrapper.find('.quality-banner').exists()).toBe(false)
+  })
+})

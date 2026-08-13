@@ -17,6 +17,13 @@
       </div>
     </div>
 
+    <!-- round21 #14: LLM 报告静默降级治理——report_quality 非 full 时显式标注，
+         不再把 partial/fallback/empty 报告静默展示为完整报告。full/none/pending 不渲染。 -->
+    <div v-if="reportQualityBadge" class="quality-banner" :class="reportQualityBadge.cls" role="status">
+      <span class="quality-icon">{{ reportQualityBadge.icon }}</span>
+      <span class="quality-text">{{ reportQualityBadge.text }}</span>
+    </div>
+
     <AppTabs :tabs="appTabs" v-model="tab" variant="line" size="sm" ariaLabel="设计结果" class="design-result-tabs">
       <template #report>
         <div class="design-report">
@@ -188,6 +195,20 @@ const fetchedAtLabel = computed(() => {
   }
 })
 
+// round21 #14: report_quality → 降级标签（非 full 才提示，避免静默降级）。
+// 取值：full（完整，不提示）/ partial（部分生成）/ fallback（降级为方案表格）/
+// empty（LLM 未返回）/ pending（生成中）/ none（无报告，不提示）。
+const reportQualityBadge = computed(() => {
+  const q = props.reportQuality
+  const map = {
+    partial: { icon: '⚠️', cls: 'quality-warn', text: 'AI 报告为部分生成——部分内容可能缺失，请以方案卡片为准' },
+    fallback: { icon: '⚠️', cls: 'quality-warn', text: 'AI 报告降级为方案表格（LLM 生成未成功完成），方案数据已保存' },
+    empty: { icon: '⚠️', cls: 'quality-warn', text: 'AI 报告为空（LLM 未返回内容），可重新生成报告' },
+    pending: { icon: '⏳', cls: 'quality-info', text: 'AI 报告生成中…' },
+  }
+  return map[q] || null
+})
+
 function planStyleKey(style) {
   if (!style) return 'balanced'
   const m = { '防御型': 'defensive', '防御': 'defensive', defensive: 'defensive', '平衡型': 'balanced', '平衡': 'balanced', '进攻型': 'aggressive', '进攻': 'aggressive' }
@@ -236,6 +257,14 @@ function applyPlan(pf) {
 .degradation-body { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); }
 .degradation-title { font-weight: var(--font-weight-medium); }
 .degradation-detail { font-size: var(--font-size-xs); color: #a0820a; }
+
+/* round21 #14: report_quality 降级标签——与 degradation-banner 同款警示样式，
+   确保 partial/fallback/empty 报告不再被静默展示为完整报告 */
+.quality-banner { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); margin-bottom: var(--space-3); border-radius: var(--radius-md); font-size: var(--font-size-sm); }
+.quality-icon { font-size: var(--font-size-base); }
+.quality-warn { background: #fff8e1; border: 1px solid #ffe082; color: #8d6e00; }
+.quality-info { background: #e3f2fd; border: 1px solid #90caf9; color: #1565c0; }
+.quality-text { font-weight: var(--font-weight-medium); }
 
 .design-report { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .report-waiting { text-align: center; padding: var(--space-8) var(--space-4); }

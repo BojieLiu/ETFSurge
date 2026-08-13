@@ -334,11 +334,18 @@ async def generate_enhanced_design(
         if _t3 - start_time > 0.2:
             logger.info("[strategy_design] pre-allocate %.2fs candidates=%d",
                          _t3 - start_time, len(flat_candidates))
+        # P1-7 (round20): 当日板块涨幅榜传给引擎——aggressive 对强势板块 ETF 动态奖励
+        # （医药/CRO 等非科技板块当日领涨不再被静态 _RISKY_THEMES 盲区忽略）
+        try:
+            _sector_momentum = market_data_hub.get_sector_momentum() or []
+        except Exception:
+            _sector_momentum = []
         strategies_raw = engine_allocate(
             risk_profile="balanced",
             factor_matrix=factor_matrix,
             candidates=flat_candidates,
             regime=market_regime,
+            sector_momentum=_sector_momentum,
         )
 
         _t4 = time.monotonic()
@@ -512,6 +519,14 @@ async def generate_enhanced_design(
 
         # 5. target_amount 一致性校验
         _validate_target_amount_consistency(strategies, capital)
+
+        # round22: 跨方案不变量 INV-3/5/6 校验（需三方案齐全；INV-4 已在逐方案
+        # check_structure_reasonableness 内校验）。倒挂组合（卫星/标的数/进攻压舱）
+        # 在此被捕获并写入 aggressive 的 risk_metrics.structure_warnings。
+        try:
+            check_structure_reasonableness(strategies, cross_profile_only=True)
+        except Exception as _e:
+            logger.debug("[strategy_design] cross-profile structure check skipped: %s", _e)
 
         # 6. 组装返回
         elapsed = time.monotonic() - start_time
@@ -715,6 +730,46 @@ async def _build_market_context(market_data_hub) -> dict:
     except Exception as e:
         logger.debug("[strategy_design] benchmark_stocks build failed: %s", e)
 
+    # P1-7 (round20): 池层覆盖对照——当日强势板块（涨幅前 3）vs 候选池 ETF 覆盖。
+    # 当日领涨板块（如医药 +7%）若无对应主题 ETF 在候选池 → 报告显性标注
+    # （「强势板块无对应候选 → WARN」），避免「板块榜进 market_context 但不参与
+    # 候选筛选」的隐形脱节（round20 D-A3）。
+    _pool_coverage: list[dict] = []
+    try:
+        _pool = market_data_hub.get_pool()
+        _pool_flat = [it for lst in (_pool or {}).values() for it in (lst or [])]
+        _pool_texts = [
+            f"{it.get('name', '')} {it.get('industry', '')} {it.get('tracked_index', '')}"
+            for it in _pool_flat
+        ]
+        _sm = market_data_hub.get_sector_momentum() or []
+        _top3 = sorted(
+            [s for s in _sm if isinstance(s.get("change_pct"), (int, float))],
+            key=lambda s: -s["change_pct"],
+        )[:3]
+        for _sec in _top3:
+            _sn = str(_sec.get("sector_name") or _sec.get("name") or "")
+            if not _sn:
+                continue
+
+            def _cov(texts, sn, n=2):
+                sn_ng = {sn[i:i + n] for i in range(max(1, len(sn) - n + 1))}
+                for _t in texts:
+                    tx_ng = {_t[i:i + n] for i in range(max(1, len(_t) - n + 1))}
+                    if sn_ng & tx_ng:
+                        return True
+                return False
+
+            _covered = _cov(_pool_texts, _sn) if _pool_texts else False
+            _pool_coverage.append({
+                "sector_name": _sn,
+                "change_pct": _sec.get("change_pct"),
+                "covered_in_pool": _covered,
+                "note": "" if _covered else "强势板块无对应候选ETF（WARN）",
+            })
+    except Exception as _e:
+        logger.debug("[strategy_design] pool coverage report failed (non-fatal): %s", _e)
+
     return {
         "market_regime": market_data_hub.get_market_regime() or "range_bound",
         "market_sentiment": market_data_hub.get_market_sentiment() or {"sentiment_index": 50, "sentiment_label": "中性"},
@@ -722,7 +777,65 @@ async def _build_market_context(market_data_hub) -> dict:
         "sector_momentum": market_data_hub.get_sector_momentum() or [],
         "fund_flow": fund_flow,
         "benchmark_stocks": benchmark_stocks[:9],
+        # P1-7: 强势板块 vs 候选池覆盖对照（D-A3 显性化）
+        "strong_sector_pool_coverage": _pool_coverage,
+        # P1-9 (round20 §五 P1-9): 因子数据完整性降级标注——valid 率 < 60% 时
+        # 方案显式标注「因子数据不完整，方案仅供参考」；基准样本 < MIN 时不标注
+        # （避免数据积累期误报）。
+        "factor_data_quality": _factor_data_quality_report(),
     }
+
+
+def _factor_data_quality_report() -> dict:
+    """P1-9 (round20 §五 P1-9): 因子 valid 率统计 + 完整性降级标注。
+
+    复用 factors router 的 _status_of 判定（权威状态来源），统计 valid/warn/
+    static/no_data 分布；valid 率 = valid / 非 static 因子数（static 为「设计为
+    静态」，不参与有效性评估）。valid 率 < 60% → degraded=True + 降级说明。
+    纯计算，无 I/O（IC 值从 registry 内存/DB 读）。
+    """
+    try:
+        from ..factors.factor_registry import registry as _freg
+        from ..routers.factors import _status_of, STATIC_FACTOR_CODES, MARKET_LEVEL_FACTOR_CODES
+
+        _factors = getattr(_freg, "_factors", {}) or {}
+        _design_static = STATIC_FACTOR_CODES | MARKET_LEVEL_FACTOR_CODES
+        _ic_series = getattr(_freg, "_ic_series_cache", {}) or {}
+        counts = {"valid": 0, "warn": 0, "static": 0, "no_data": 0}
+        for _code in _factors:
+            _ic = _ic_series.get(_code)
+            _icv = None
+            if isinstance(_ic, dict):
+                _icv = _ic.get("ic")
+            elif isinstance(_ic, (list, tuple)) and _ic:
+                # 真实结构：{code: [ic_float, ...]}（最新在前）；取最近一个非 None
+                for _v in reversed(_ic):
+                    if _v is not None:
+                        _icv = float(_v)
+                        break
+            _st, _ = _status_of(_code, _icv, 0.02)
+            counts[_st] = counts.get(_st, 0) + 1
+        _non_static = counts["valid"] + counts["warn"] + counts["no_data"]
+        _valid_rate = round(counts["valid"] / _non_static, 4) if _non_static else 0.0
+        _degraded = _non_static > 0 and _valid_rate < 0.6
+        return {
+            "total": len(_factors),
+            "valid": counts["valid"],
+            "warn": counts["warn"],
+            "static": counts["static"],
+            "no_data": counts["no_data"],
+            "valid_rate": _valid_rate,
+            "degraded": _degraded,
+            "note": (
+                f"因子数据完整性降级：valid 率 {_valid_rate:.0%} < 60%，方案仅供参考"
+                if _degraded else
+                f"因子数据完整性正常（valid 率 {_valid_rate:.0%}）"
+            ),
+        }
+    except Exception as _e:
+        logger.debug("[strategy_design] factor data quality report failed (non-fatal): %s", _e)
+        return {"total": 0, "valid": 0, "warn": 0, "static": 0, "no_data": 0,
+                "valid_rate": 0.0, "degraded": False, "note": "因子数据质量统计不可用"}
 
 
 def _validate_target_amount_consistency(strategies: list[dict], capital: float) -> list[str]:
