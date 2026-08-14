@@ -77,7 +77,9 @@ def test_zero_ratio_tracked():
     from app.main import app
     from app.routers import factors as _factors_router
 
-    fr.registry._zero_ratio = {"sentiment.news_heat": 1.0}
+    from app.factors.ic_tracker import ic_tracker as _ic_tracker
+
+    _ic_tracker._zero_ratio = {"sentiment.news_heat": 1.0}
     # 进入时清 /factors/active 缓存（串行跑时前序测试可能已填充 60s TTL 缓存 → 命中旧响应，
     # 否则 zero_ratio 断言读到旧值失败；round13 暴露的测试隔离缺陷）
     _factors_router._CACHE.clear()
@@ -90,7 +92,7 @@ def test_zero_ratio_tracked():
     finally:
         # 清除填充的 active 缓存 + 恢复 _zero_ratio，避免污染同文件后续测试（P2-1 教训）
         _factors_router._CACHE.clear()
-        fr.registry._zero_ratio = {}
+        _ic_tracker._zero_ratio = {}
 
 
 def test_factors_active_sentiment_not_no_data(monkeypatch):

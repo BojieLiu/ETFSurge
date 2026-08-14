@@ -457,7 +457,7 @@ def test_no_chinese_keys_remain_after_normalization(monkeypatch):
         items = news_fetcher.fetch_stock_news("159338")
 
     allowed = {"id", "title", "content", "time", "sort_time", "url",
-               "source", "level", "stars", "ai_summary"}
+               "source", "level", "category", "stars", "ai_summary"}
     for item in items:
         for key in item.keys():
             # 任何含中文字符的键不得残留（契约：键集 == headlines 全英文键）

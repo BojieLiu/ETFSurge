@@ -9,7 +9,13 @@ import hashlib
 import logging
 import re
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, tzinfo
+
+# F24 (round23 P0-A): 统一资讯时间戳为北京时间（Asia/Shanghai, UTC+8）。
+# 东财/新浪等源返回 Unix epoch（UTC 绝对时），旧实现按 UTC 直显 → 比北京时间慢 8h，
+# 且与财联社（已为北京字符串）两套时区并存。统一在此转北京，sort_time 保留原始 epoch
+# （排序与时区无关，且存储安全）。
+_SHA_TZ = timezone(timedelta(hours=8))
 from email.utils import parsedate_to_datetime
 import feedparser
 import requests
@@ -22,7 +28,7 @@ from ..utils.proxy import no_proxy
 from ..utils.decode import decode_df as _decode_df
 from ..services.cache_service import cached
 from ..core.async_utils import run_in_thread, safe_call
-from .levistock_fetcher import classify_news_level, fetch_cailian_telegraph
+from .levistock_fetcher import classify_news, classify_news_category, classify_news_level, fetch_cailian_telegraph
 
 _SRC_TIMEOUT = 5
 
@@ -95,7 +101,8 @@ def _parse_time(val: Any) -> datetime | None:
     """尝试将各种日期格式解析为 datetime，失败返回 None。"""
     if isinstance(val, (int, float)):
         try:
-            return datetime.fromtimestamp(val, tz=timezone.utc).replace(tzinfo=None)
+            # F24: epoch 为 UTC 绝对时，转为北京 naive 显示（旧实现按 UTC 直显 → 慢 8h）
+            return datetime.fromtimestamp(val, tz=timezone.utc).astimezone(_SHA_TZ).replace(tzinfo=None)
         except (OSError, ValueError, OverflowError):
             pass
 
@@ -173,7 +180,9 @@ def _normalize_time(item: dict) -> None:
     dt = _parse_time(raw)
     if dt:
         item["time"] = dt.strftime("%Y-%m-%d %H:%M:%S")
-        item["sort_time"] = int(dt.timestamp())
+        # F24: sort_time 用北京时间语义计算 epoch（与时区无关排序 + 存储一致，
+        # 不受运行机本地时区影响）
+        item["sort_time"] = int(dt.replace(tzinfo=_SHA_TZ).timestamp())
     else:
         item["sort_time"] = 0
 
@@ -260,17 +269,19 @@ def _compute_stars(level: int, time_str: str) -> int:
 
 
 def _attach_level(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """为条目补充 level/stars 并统一 time 字段格式。"""
+    """为条目补充 level/stars/category 并统一 time 字段格式。"""
     for it in items:
         _normalize_time(it)                        # 统一时间格式
         if "level" not in it:                      # 财联社已经在源头打标
             title = it.get("title", "")
             # F3-1 步骤D: 标题+正文双输入（正文前 200 字）
-            level = classify_news_level(title, it.get("content", ""))
+            cat, level = classify_news(title, it.get("content", ""))
             it["level"] = level
+            it["category"] = cat
             it["stars"] = _compute_stars(level, it.get("time", ""))
         else:
-            # 财联社源已有 level，更新 stars 加入时间新鲜度
+            # 财联社源已有 level，更新 stars 加入时间新鲜度；category 亦在源头打标
+            it.setdefault("category", classify_news_category(it.get("title", "")))
             it["stars"] = _compute_stars(it.get("level", 1), it.get("time", ""))
         it.setdefault("ai_summary", None)  # Z18: AI 摘要字段，由后台管道 enrich_news_summaries 填充
     return items
@@ -332,7 +343,8 @@ def fetch_sina_roll_news(num: int = 15) -> list[dict[str, Any]]:
             ctime = entry.get("ctime", "")
             try:
                 ts = int(ctime)
-                time_str = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+                # F24: epoch → 北京时间显示（与 _parse_time 一致）
+                time_str = datetime.fromtimestamp(ts, tz=timezone.utc).astimezone(_SHA_TZ).strftime("%Y-%m-%d %H:%M:%S")
             except (ValueError, TypeError, OSError):
                 time_str = str(ctime)
             items.append({

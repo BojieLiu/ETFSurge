@@ -171,3 +171,28 @@ describe('FactorModelView - P0-7 数据积累期引导', () => {
     wrapper.unmount()
   })
 })
+
+describe('FactorModelView — F12 因子数据完整性降级横幅', () => {
+  it('valid_rate < 60% 时显示降级横幅（红字提示，方案仅供参考）', async () => {
+    const data = makeData()
+    data.summary = { valid: 2, warn: 5, no_data: 25, static: 3, avg_ic: 0.03 }
+    getActiveMock.mockReset().mockResolvedValue({ data })
+    const wrapper = mount(FactorModelView, { attachTo: document.body })
+    await flushPromises()
+    const banner = wrapper.find('.factor-degraded-banner')
+    expect(banner.exists()).toBe(true)
+    expect(banner.text()).toContain('因子数据完整性降级')
+    expect(banner.text()).toContain('仅供参考')
+    wrapper.unmount()
+  })
+
+  it('valid_rate >= 60% 时不显示降级横幅（不误报）', async () => {
+    const data = makeData()
+    data.summary = { valid: 10, warn: 0, no_data: 0, static: 3, avg_ic: 0.05 }
+    getActiveMock.mockReset().mockResolvedValue({ data })
+    const wrapper = mount(FactorModelView, { attachTo: document.body })
+    await flushPromises()
+    expect(wrapper.find('.factor-degraded-banner').exists()).toBe(false)
+    wrapper.unmount()
+  })
+})

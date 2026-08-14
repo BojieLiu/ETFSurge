@@ -65,7 +65,15 @@ def get_configured_providers() -> list[ProviderConfig]:
                         "(OPENCODE_ZEN_API_KEY not configured)")
 
     # ── Fallback: DeepSeek Official ────────────────────────────
-    if settings.deepseek_api_key:
+    # F7b: LLM_FALLBACK_PROVIDER 必须真正生效（旧代码从不读取，属死配置）。
+    # 仅当 fallback 配置为 deepseek（或空=默认）时才挂载官方 DeepSeek。
+    fallback_id = (settings.llm_fallback_provider or "deepseek").strip().lower()
+    if fallback_id and fallback_id != "deepseek":
+        logger.warning(
+            "[provider] LLM_FALLBACK_PROVIDER=%r 不受支持（仅 'deepseek'），已忽略",
+            settings.llm_fallback_provider,
+        )
+    if settings.deepseek_api_key and fallback_id in ("", "deepseek"):
         models = str(settings.llm_model or "")
         # deepseek-chat/deepseek-reasoner 已于 2026/07/24 废弃，统一使用 deepseek-v4-flash
         # 'deepseek-v4-flash-free' 仅对 OpenCode Zen 有效，官方 API 用 deepseek-v4-flash

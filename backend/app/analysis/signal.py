@@ -102,11 +102,12 @@ def generate_signal(indicators: dict) -> dict[str, Any]:
         elif k < d and k > 70:
             score -= 1
             reasons.append("KDJ超买区死叉")
-        # P1-3/P1-6 (round20 D-B1): KDJ.J>100 极端超买钝化——不得给 BUY 信号。
-        # 旧逻辑仅判 k<d&k>70 死叉，J 高位钝化（如 J=101.67）仍可能判 BUY。
-        if j > 100:
+        # round23 F10: KDJ 超买（J>=80，与 _KDJ_HINT「超买区 v>=80」同源）不得给 BUY。
+        # 旧逻辑仅判 J>100，导致 J∈[80,100] 超买区（如 159338 J=85.7、159516 J=98.7）
+        # 仍判 BUY/increase，与「超买应谨慎/卖出」矛盾。阈值下移到 80 覆盖整个超买区。
+        if j >= 80:
             score -= 2
-            reasons.append(f"KDJ超买钝化(J={j:.1f})")
+            reasons.append(f"KDJ超买区(J={j:.1f})")
             overbought = True
 
     boll = indicators.get("bollinger", {})

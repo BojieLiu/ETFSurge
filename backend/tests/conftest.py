@@ -51,6 +51,19 @@ def _clear_sync_memory_cache():
     sync_memory_cache.clear()
 
 
+@pytest.fixture(autouse=True)
+def _reset_llm_circuit():
+    """round23 F7 (LLM 模块级 TTL 熔断): 熔断状态为模块级共享状态（_circuit dict）。
+
+    测试隔离：模拟 429/5xx 的测试会打开对应 provider 的熔断，若不复位会污染
+    后序真实/模拟 LLM 测试（所有 provider 被跳过 → `No LLM providers available`）。
+    每个测试结束后清空 _circuit，保证各测试独立观测熔断行为。
+    """
+    yield
+    from app.analysis import llm
+    llm.reset_circuit()
+
+
 @pytest.fixture
 def mock_akshare(monkeypatch):
     """R73①: akshare 常用函数统一返回固定 DataFrame（走真实解析代码路径）。"""

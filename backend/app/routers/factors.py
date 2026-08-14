@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..core.logging import get_logger
 from ..database import get_db
 from ..factors.factor_registry import registry, ET_SPECIFIC_GAP_CODES
+from ..factors.ic_tracker import ic_tracker as _ic_tracker
 
 # F19 R70: code → 缺失字段名映射（泛化：ln_mcap 等非 etf_specific 因子也有缺口标注）
 GAP_FIELD_MAP = {
@@ -186,7 +187,8 @@ def _build_health_summary(sample_counts: dict[str, int] | None = None) -> dict:
             total_static += 1
         if ic_val is not None:
             ic_vals.append(ic_val)
-    avg_ic = round(sum(ic_vals) / len(ic_vals), 4) if ic_vals else None
+    # F26: 「平均 |IC|」应为绝对值均值，旧实现为带符号均值（与同屏 IC 卡差 5.3×）。
+    avg_ic = round(sum(abs(v) for v in ic_vals) / len(ic_vals), 4) if ic_vals else None
     return {
         "valid": total_valid,
         "warn": total_warn,
@@ -335,7 +337,8 @@ async def get_active_factors(db: AsyncSession = Depends(get_db)) -> JSONResponse
         # Z03: 静态因子不计入 valid/warn/no_data/avg_ic 统计，但单独计数
         computed = [f for f in factors if f["status"] != "static"]
         vals = [f["ic_value"] for f in computed if f["ic_value"] is not None]
-        avg_ic = round(sum(vals) / len(vals), 4) if vals else None
+        # F26: 「平均 |IC|」= 绝对值均值（非带符号均值）
+        avg_ic = round(sum(abs(v) for v in vals) / len(vals), 4) if vals else None
         valid_count = sum(1 for f in computed if f["status"] == "valid")
         warn_count = sum(1 for f in computed if f["status"] == "warn")
         no_data_count = sum(1 for f in computed if f["status"] == "no_data")
@@ -374,7 +377,9 @@ async def get_active_factors(db: AsyncSession = Depends(get_db)) -> JSONResponse
         },
         # P2-1: zero_ratio 从 /factors/ic 并入（F3-4 步骤D：零值占比
         # 1.0 = 全部样本为 0 → 数据源未接入；区分「数据缺失」与「IC 无效」）
-        "zero_ratio": getattr(registry, "_zero_ratio", {}) or {},
+        # F27: zero_ratio 实际挂在 ic_tracker 实例上（ic_tracker.py:179），
+        # 旧代码误读 registry → 恒 {}，使「区分数据缺失 vs IC 无效」能力永久失效。
+        "zero_ratio": getattr(_ic_tracker, "_zero_ratio", {}) or {},
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     etag = f"\"{hash(str(body))}\""

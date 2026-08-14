@@ -52,6 +52,75 @@ def _clear_llm_error() -> None:
     _last_llm_error = None
 
 
+# ── F8/F9: 模块级 TTL 熔断状态机（CLOSED/OPEN/HALF_OPEN）─────────────────
+# round23 §4.1: opencode_zen 作 primary 但 FreeUsageLimitError 额度耗尽时，
+# 旧的 _rate_limited 是函数局部变量 → 每次调用都重探死 primary 缴 2.1-2.4s 过路费。
+# 改为模块级、跨调用共享的熔断：zen 持久 429 时 OPEN 态零探测直接走 deepseek，
+# TTL 到期 HALF_OPEN 复探，成功回 CLOSED、又 429 回 OPEN（自动复探）。
+_CIRCUIT_TTL = 300.0          # HALF_OPEN 复探间隔（秒），默认 5min
+_CIRCUIT_FAIL_THRESHOLD = 2   # 瞬态失败累计达此数 → OPEN
+_circuit: dict[str, dict] = {}  # provider_id -> {state, fail_count, opened_at}
+
+
+def _circuit_state(provider_id: str) -> str:
+    """返回 provider 当前熔断态（未登记即 CLOSED）。"""
+    return _circuit.get(provider_id, {}).get("state", "CLOSED")
+
+
+def _circuit_allow(provider_id: str) -> bool:
+    """该 provider 本次是否允许尝试（OPEN 且未到 TTL → 跳过；HALF_OPEN 允许复探）。"""
+    entry = _circuit.get(provider_id)
+    if entry is None:
+        return True  # CLOSED
+    now = time.monotonic()
+    if entry["state"] == "OPEN":
+        if now - entry["opened_at"] >= _CIRCUIT_TTL:
+            entry["state"] = "HALF_OPEN"
+            entry["opened_at"] = now
+            return True
+        return False
+    # CLOSED / HALF_OPEN 均允许
+    return True
+
+
+def _circuit_record_failure(provider_id: str, is_quota_error: bool) -> None:
+    """记录一次失败。
+    - 429/FreeUsageLimitError（额度类，持久）→ 立即 OPEN，零复试（F9c）。
+    - 5xx/timeout（瞬态）→ 累计达阈值才 OPEN，保留有限重试。
+    """
+    now = time.monotonic()
+    entry = _circuit.get(provider_id)
+    if entry is None:
+        entry = {"state": "CLOSED", "fail_count": 0, "opened_at": 0.0}
+        _circuit[provider_id] = entry
+    if is_quota_error:
+        entry["state"] = "OPEN"
+        entry["opened_at"] = now
+        entry["fail_count"] = 0
+        logger.warning("[circuit] provider %s quota-exhausted → OPEN (skip until HALF_OPEN)", provider_id)
+        return
+    entry["fail_count"] = entry.get("fail_count", 0) + 1
+    if entry["fail_count"] >= _CIRCUIT_FAIL_THRESHOLD:
+        entry["state"] = "OPEN"
+        entry["opened_at"] = now
+
+
+def _circuit_record_success(provider_id: str) -> None:
+    """记录一次成功：OPEN/HALF_OPEN → CLOSED，清零计数。"""
+    entry = _circuit.get(provider_id)
+    if entry is None:
+        return
+    if entry["state"] in ("OPEN", "HALF_OPEN"):
+        logger.info("[circuit] provider %s recovered → CLOSED", provider_id)
+    entry["state"] = "CLOSED"
+    entry["fail_count"] = 0
+
+
+def reset_circuit() -> None:
+    """测试/运维用：清空熔断状态。"""
+    _circuit.clear()
+
+
 def _rate_limit_wait(attempt: int, resp_headers=None, cap: float = _LLM_RATE_LIMIT_CAP) -> float:
     """429 限流等待时间：优先尊重 Retry-After（cap 默认 30s），否则指数退避 3s*2^attempt（cap 默认 30s）。
 
@@ -316,7 +385,12 @@ async def llm_complete(
     _last_429_headers = None
 
     for attempt in range(max_retries + 1):
+        _attempted_any = False
         for provider in providers:
+            # F8: 熔断 OPEN 态直接跳过（零探测）
+            if not _circuit_allow(provider.id):
+                continue
+            _attempted_any = True
             body = {
                 "model": provider.model,
                 "messages": [
@@ -350,6 +424,9 @@ async def llm_complete(
                     # 统一做泄漏过滤后再返回。
                     content = strip_internal_leak(content)
 
+                    # F8: 成功 → 熔断恢复
+                    _circuit_record_success(provider.id)
+
                     usage = data.get("usage", {})
                     _duration = (time.monotonic() - _start) * 1000
                     await token_store.record(UsageRecord(
@@ -376,6 +453,8 @@ async def llm_complete(
                 if _is_429:
                     _any_429 = True
                     _last_429_headers = getattr(_resp, "headers", None)
+                # F8/F9: 429→立即 OPEN；其它异常→累计失败
+                _circuit_record_failure(provider.id, _is_429)
                 await token_store.record(UsageRecord(
                     function_name=_caller,
                     prompt_tokens=0,
@@ -395,6 +474,12 @@ async def llm_complete(
                 )
                 continue
 
+        # 本轮所有 provider 均被熔断跳过 → 直接跳出
+        if not _attempted_any:
+            break
+        # 所有 provider 均已 OPEN（熔断）→ 下一轮也全跳过，避免白等退避
+        if all(_circuit.get(p.id, {}).get("state") == "OPEN" for p in providers):
+            break
         # All providers failed this attempt -> retry after a short delay
         if attempt < max_retries:
             wait = _rate_limit_wait(attempt, _last_429_headers) if _any_429 else retry_delay
@@ -444,7 +529,12 @@ async def llm_complete_stream(
     _last_429_headers = None
 
     for attempt in range(max_retries + 1):
+        _attempted_any = False
         for provider in providers:
+            # F8: 熔断 OPEN 态直接跳过（零探测）
+            if not _circuit_allow(provider.id):
+                continue
+            _attempted_any = True
             body = {
                 "model": provider.model,
                 "messages": [
@@ -521,6 +611,8 @@ async def llm_complete_stream(
                 if _is_429:
                     _any_429 = True
                     _last_429_headers = getattr(_resp, "headers", None)
+                # F8/F9: 429→立即 OPEN；其它异常→累计失败
+                _circuit_record_failure(provider.id, _is_429)
                 await token_store.record(UsageRecord(
                     function_name=_caller,
                     prompt_tokens=0,
@@ -547,6 +639,8 @@ async def llm_complete_stream(
 
             # Success: record and yield done
             _duration = (time.monotonic() - _start) * 1000
+            # F8: 成功 → 熔断恢复
+            _circuit_record_success(provider.id)
             await token_store.record(UsageRecord(
                 function_name=_caller,
                 prompt_tokens=prompt_tokens,
@@ -602,6 +696,12 @@ async def llm_complete_stream(
             }
             return
 
+        # 本轮所有 provider 均被熔断跳过 → 直接跳出
+        if not _attempted_any:
+            break
+        # 所有 provider 均已 OPEN（熔断）→ 下一轮也全跳过，避免白等退避
+        if all(_circuit.get(p.id, {}).get("state") == "OPEN" for p in providers):
+            break
         # 本轮所有 provider 失败 → 退避后重试（F3-6）
         if attempt < max_retries:
             wait = _rate_limit_wait(attempt, _last_429_headers) if _any_429 else LLM_RETRY_DELAY
@@ -645,14 +745,14 @@ async def llm_complete_with_system(
     _caller = sys._getframe(1).f_code.co_name
     providers = get_configured_providers()
     last_exc: Exception | None = None
-    # round20 P0-5: 429 限流的 provider 标记跳过——后续 attempt 不再重试该 provider，
-    # 立即走 fallback（task 417 日志实证 opencode_zen 每 2-3s 失败一次反复重试）。
-    _rate_limited: set[str] = set()
 
     for attempt in range(max_retries + 1):
+        _attempted_any = False
         for provider in providers:
-            if provider.id in _rate_limited:
+            # F8: 模块级 TTL 熔断——OPEN 态直接跳过该 provider（零探测零过路费）。
+            if not _circuit_allow(provider.id):
                 continue
+            _attempted_any = True
             body = {
                 "model": provider.model,
                 "messages": [
@@ -690,6 +790,8 @@ async def llm_complete_with_system(
 
                     # R5-1-6: 成功 → 清空错误诊断
                     _clear_llm_error()
+                    # F8: 成功 → 熔断恢复（OPEN/HALF_OPEN → CLOSED）
+                    _circuit_record_success(provider.id)
 
                     usage = data.get("usage", {})
                     _duration = (time.monotonic() - _start) * 1000
@@ -712,18 +814,18 @@ async def llm_complete_with_system(
                     _record_llm_error(_exc)
                 except Exception:
                     pass
-                # round20 P0-5: 429 → 标记跳过，后续 attempt 不再重试该 provider
+                # F8/F9: 429/FreeUsageLimitError（额度类，持久）→ 立即 OPEN 零复试；
+                # 其它异常（5xx/timeout，瞬态）→ 累计失败达阈值才 OPEN。
                 _resp = getattr(_exc, "response", None)
-                if (
+                _is_429 = (
                     isinstance(_exc, httpx.HTTPStatusError)
                     and _resp is not None
                     and getattr(_resp, "status_code", None) == 429
-                ):
-                    _rate_limited.add(provider.id)
-                    logger.warning(
-                        "[LLM] Provider %s rate-limited (429) — skipped for remaining attempts",
-                        provider.id,
-                    )
+                )
+                if _is_429:
+                    _circuit_record_failure(provider.id, True)
+                else:
+                    _circuit_record_failure(provider.id, False)
                 await token_store.record(UsageRecord(
                     function_name=_caller,
                     prompt_tokens=0,
@@ -743,6 +845,12 @@ async def llm_complete_with_system(
                 )
                 continue
 
+        # 本轮所有 provider 均被熔断跳过（如全部 OPEN）→ 无重试意义，直接跳出
+        if not _attempted_any:
+            break
+        # 所有 provider 均已 OPEN（熔断）→ 下一轮也全跳过，避免白等退避
+        if all(_circuit.get(p.id, {}).get("state") == "OPEN" for p in providers):
+            break
         # All providers failed this attempt -> retry after a short delay
         if attempt < max_retries:
             # R5-1-6: 429 时按 rate_limit_cap 退避（不再固定 retry_delay）——

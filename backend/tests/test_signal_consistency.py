@@ -80,3 +80,26 @@ async def test_compute_indicators_does_not_pass_factor_scores(monkeypatch):
     assert calls["factor_scores"] is None, (
         "compute_all_indicators 不应收到 factor_scores——zscore 值污染信号是 R6-06 根因"
     )
+
+
+@pytest.mark.parametrize("j, expected", [
+    # round23 F10: KDJ 超买区（J>=80）不得给 BUY 信号
+    (85.7, "hold"),   # 159338 实锤：J=85.7 超买 → 不得 BUY
+    (98.7, "hold"),   # 159516 实锤：J=98.7 极端超买 + RSI 弱 → 不得 BUY/increase
+    (50.0, "buy"),    # 非超买（其它指标偏多）→ 正常 BUY
+])
+def test_kdj_overbought_not_buy(j, expected):
+    """round23 F10: 其它指标偏多时，KDJ 超买区 J>=80 必须把 BUY 降级为 HOLD。
+
+    背景：旧逻辑仅判 J>100，J∈[80,100] 超买区仍判 BUY（159338/159516 实锤误判）。
+    """
+    indicators = {
+        "kdj": {"k": 90.0, "d": 80.0, "j": j},
+        "ma5": 11.0, "ma20": 10.0,            # MA5>MA20 多头 (+1)
+        "macd": {"dif": 1.0, "dea": 0.0},     # 金叉 (+1)
+        "bollinger": {"bandwidth": 3.0},       # 带宽窄 (+0.5)
+    }
+    sig = generate_signal(indicators)
+    assert sig["signal"] == expected, (
+        f"KDJ J={j}: 期望 {expected}，实际 {sig['signal']}（score={sig['score']}）"
+    )

@@ -94,10 +94,14 @@ def test_he_zuo_level_4():
     assert level == 4, f"战略合作应为 Level 4，实际为 {level}"
 
 
-def test_english_sanctions_level_3():
-    """P2.6: 英文 'sanctions' 应命中 L3 (利空)."""
-    level = classify_news_level("US announces new sanctions on Iran")
-    assert level == 3, f"制裁新闻应为 Level 3，实际为 {level}"
+def test_english_sanctions_risk_not_negative():
+    """F23 (round23 P0-A): 英文 'sanctions' 应归 risk 类别（地缘/制裁），
+    不得标为利好(red)；重要性 level>=4（独立重要维度）。"""
+    from app.fetchers.levistock_fetcher import classify_news, classify_news_category
+    cat, level = classify_news("US announces new sanctions on Iran")
+    assert cat == "risk", f"制裁新闻应为 risk 类别，实际为 {cat}"
+    assert level >= 4, f"制裁新闻重要性应 >=4，实际为 {level}"
+    assert cat != "positive", "制裁不得标为利好"
 
 
 def test_english_airstrike_level_5():
@@ -209,16 +213,94 @@ def test_content_keyword_matches():
     assert classify_news_level("某公司发布公告") == 1
 
 
-def test_keywords_no_cross_level_duplicate():
-    """每个词只属于一个 level（跨级重复 = 0）。"""
-    # 词表本身已去重（_LEVEL_WORD_OWNERSHIP 构造时后者覆盖前者）；
-    # 验证高频冲突词仅出现在预期 level：
-    assert lvmod._LEVEL_WORD_OWNERSHIP.get("停牌") == 2
-    assert lvmod._LEVEL_WORD_OWNERSHIP.get("违约") == 3
-    assert lvmod._LEVEL_WORD_OWNERSHIP.get("制裁") == 4
-    # 机构名不在 L4（步骤A: 从 L4 移除，仅 L2 作上下文）
-    assert lvmod._LEVEL_WORD_OWNERSHIP.get("国务院") == 2
-    assert lvmod._LEVEL_WORD_OWNERSHIP.get("发改委") == 2
+def test_keywords_no_cross_category_duplicate():
+    """F22/F23: 每个词只属于一个 category；高频冲突词归位正确。"""
+    # 词表本身已去重（_CATEGORY_WORD_OWNERSHIP 构造时后者覆盖前者）
+    assert lvmod._CATEGORY_WORD_OWNERSHIP.get("停牌") == "neutral"
+    assert lvmod._CATEGORY_WORD_OWNERSHIP.get("违约") == "negative"
+    # F23: 制裁归 risk（地缘/军事/制裁），不再归 positive(利好)
+    assert lvmod._CATEGORY_WORD_OWNERSHIP.get("制裁") == "risk"
+    assert lvmod._CATEGORY_WORD_OWNERSHIP.get("冲突") == "risk"
+    assert lvmod._CATEGORY_WORD_OWNERSHIP.get("利好") == "positive"
+    assert lvmod._CATEGORY_WORD_OWNERSHIP.get("利空") == "negative"
+    # 机构名归 neutral（提醒/关注上下文）
+    assert lvmod._CATEGORY_WORD_OWNERSHIP.get("国务院") == "neutral"
+    assert lvmod._CATEGORY_WORD_OWNERSHIP.get("发改委") == "neutral"
+
+
+# ── round23 F22/F23: T11 方向性偏置 / 子串误命中 可失败断言 ──
+
+def test_war_not_positive():
+    """F23: 战争类不得标为利好(positive)。战争/开战/宣战属重大(major, 深红紧急)
+    亦非利好红——核心是「战争不被误判为利好」。"""
+    from app.fetchers.levistock_fetcher import classify_news_category
+    for title in ("突发：两国爆发战争", "军方宣布开战", "国会批准宣战决议"):
+        cat = classify_news_category(title)
+        assert cat != "positive", f"'{title}' 不得标利好，实际 {cat}"
+    # 地缘/军事/制裁（risk-only 词，不在 major 列表）明确归 risk
+    assert classify_news_category("伊朗冲突推高油价") == "risk"
+    assert classify_news_category("对华半导体制裁升级") == "risk"
+    assert classify_news_category("军方介入干预市场") == "risk"
+
+
+def test_geo_military_sanction_risk_not_positive():
+    """F23: 地缘/军事/制裁 → risk，不得标利好。"""
+    from app.fetchers.levistock_fetcher import classify_news_category
+    for title in ("伊朗冲突推高油价", "军方介入干预市场", "对华半导体制裁升级",
+                  "边境局势紧张", "多国联合军演", "国防预算上调"):
+        assert classify_news_category(title) == "risk", \
+            f"'{title}' 应归 risk，实际 {classify_news_category(title)}"
+        assert classify_news_category(title) != "positive"
+
+
+def test_substring_no_false_positive():
+    """F23: 裸 '战'/'核' 误命中防护——挑战/战略/核查 不得归 risk/positive。"""
+    from app.fetchers.levistock_fetcher import classify_news_category
+    for title in ("公司挑战行业技术瓶颈", "企业制定长期发展战略", "审计核查未发现异常"):
+        cat = classify_news_category(title)
+        assert cat not in ("risk", "positive"), f"'{title}' 误命中为 {cat}"
+
+
+def test_enrich_news_summaries_int_level_targets(monkeypatch):
+    """F28 (round23 P0-A): AI 摘要重要性分支按 int level>=4 判定。
+
+    旧实现 `str(level) in ("重大","利好")`（level 已是 int）恒 False →
+    重要性维度永久失效；修复后 level=5 的新闻进入生成目标、level=1 的不进入。
+    """
+    import asyncio
+
+    from app.services.market_data_hub import market_data_hub as hub_inst
+
+    items = [
+        {"title": "重大利空崩盘", "level": 5, "stars": 2, "ai_summary": None},  # level5 → 生成
+        {"title": "普通新闻", "level": 1, "stars": 3, "ai_summary": None},       # 均<4 → 不生成
+    ]
+    monkeypatch.setattr(hub_inst, "_news_bucket", lambda key: items)
+
+    async def _fake_summary(title, content):
+        return f"AI:{title}"
+
+    monkeypatch.setattr("app.analysis.llm.generate_news_summary", _fake_summary)
+
+    n = asyncio.run(hub_inst.enrich_news_summaries())
+    assert n == 1, f"应仅对 level>=4 生成 1 条，实际 {n}"
+    assert items[0]["ai_summary"].startswith("AI:")
+    assert items[1]["ai_summary"] is None
+
+
+def test_negative_category_reachable():
+    """F22/T11: 利空词归 negative 类别（非 positive/risk）。"""
+    from app.fetchers.levistock_fetcher import classify_news_category
+    assert classify_news_category("利空：指数暴跌") == "negative"
+    assert classify_news_category("某公司暴雷违约") == "negative"
+
+
+def test_important_negative_reaches_push_threshold():
+    """F22: 重大利空（崩盘类）importance>=4，可进入 level>=4 推送/筛选。"""
+    from app.fetchers.levistock_fetcher import classify_news_level
+    # 崩盘属 major（L5），即便语义是利空也达重要性阈值 → 可推送
+    assert classify_news_level("市场崩盘 千股跌停") >= 4
+
 
 
 # ── round9 P2-1: stars 新鲜度 + 弱化词降级（合并自 test_round9_news_level.py）──

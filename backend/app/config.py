@@ -79,11 +79,12 @@ class Settings(BaseSettings):
     pool_connections: int = 30
     pool_maxsize: int = 60
 
-    # 降级策略（Z28: 与 task_manager/design_report 240s 三层对齐，免费模型高峰排队 >90s）
+    # 降级策略（round23 F9b: 收紧单请求超时，使 timeout×(retries+1)+退避 ≤ 外层预算；
+    # 旧值 240s 远超策略检查 15/30/75s 分级预算，zen 持久 429 时每次白等 240s）。
     llm_primary_provider: str = "opencode_zen"
     llm_fallback_provider: str = "deepseek"
-    llm_primary_timeout: int = 240
-    llm_fallback_timeout: int = 240
+    llm_primary_timeout: int = 20
+    llm_fallback_timeout: int = 45
 
     # 日志：级别（DEBUG/INFO/WARNING/ERROR）与可选日志文件路径
     log_level: str = "INFO"

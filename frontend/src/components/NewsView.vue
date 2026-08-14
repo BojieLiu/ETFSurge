@@ -31,28 +31,28 @@
           v-for="item in filteredNews"
           :key="item.id"
           class="news-item"
-          :class="[`news-item--${mapNewsLevel(item.level).color}`, { 'news-item--important': isImportant(item.level) }]"
+          :class="[`news-item--${categoryColorClass(item.category, item.level)}`, { 'news-item--important': isImportant(item.level) }]"
         >
           <div class="news-item-head">
               <span
                 class="news-level-badge"
-                :class="`news-level-badge--${mapNewsLevel(item.level).color}`"
-                :style="{ color: levelColor(item.level) }"
+                :class="`news-level-badge--${categoryColorClass(item.category, item.level)}`"
+                :style="{ color: levelColor(item) }"
               >
                 <!-- P2-3 (round20 §五 P2-3): 星数显示后端 stars（新鲜度维度，round9 P2-1）——
                      与 level 解耦：5★=<1h / 4★=<6h / 3★=<24h / 2★=<72h / 1★=更旧；
                      旧实现用 level 映射星数（与 level 同分布，无独立信息量）。 -->
                 <span class="news-stars" aria-hidden="true" :title="`新鲜度 ${item.stars ?? '-'} 星（<1h=5★）`">{{ item.stars ?? mapNewsLevel(item.level).stars }}</span>
-                <span class="news-level-label">{{ mapNewsLevel(item.level).label }}</span>
+                <span class="news-level-label">{{ mapNewsCategory(item.category, item.level).label }}</span>
               </span>
-              <h3 class="news-title" :style="{ color: levelColor(item.level) }">{{ item.title }}</h3>
+              <h3 class="news-title" :style="{ color: levelColor(item) }">{{ item.title }}</h3>
             </div>
 
           <p v-if="item.content" class="news-content">{{ item.content }}</p>
 
           <!-- P1-4 (round20 §五 P1-4): 消费后端预生成的 ai_summary（列表内联展示，
                消除「生成但不消费」冗余）——仅当后端已生成摘要时展示 -->
-          <p v-if="item.ai_summary" class="news-ai-summary" :style="{ color: levelColor(item.level) }">
+          <p v-if="item.ai_summary" class="news-ai-summary" :style="{ color: levelColor(item) }">
             <span class="ai-summary-tag" aria-hidden="true">🤖</span> {{ item.ai_summary }}
           </p>
 
@@ -109,7 +109,7 @@ import { newsApi } from '../api'
 import { useNewsWS } from '../composables/useNewsWS'
 import { useToastStore } from '../stores/toast'
 import { usePortfolioStore } from '../stores/portfolio'
-import { mapNewsLevel, isImportant } from '../utils/newsLevel'
+import { mapNewsLevel, mapNewsCategory, categoryColor, categoryColorClass, isImportant } from '../utils/newsLevel'
 
 const { show: toast } = useToastStore()
 const store = usePortfolioStore()
@@ -130,10 +130,12 @@ const LEVEL_COLORS = {
   orange: '#f5901e',
   blue: '#3b82f6',
   gray: '#8a8f98',
+  green: '#1aa260',
 }
 
-function levelColor(level) {
-  return LEVEL_COLORS[mapNewsLevel(level).color] || LEVEL_COLORS.gray
+// F22: 着色改用 category（极性），level 仅表重要性。category 缺省时回退 level 语义。
+function levelColor(item) {
+  return categoryColor(item.category, item.level)
 }
 
 const filteredNews = computed(() => {
@@ -269,6 +271,7 @@ const filteredAffectedHoldings = computed(() => {
 .news-item--red { border-left-color: #e5484d; }
 .news-item--orange { border-left-color: #f5901e; }
 .news-item--blue { border-left-color: #3b82f6; }
+.news-item--green { border-left-color: #1aa260; }
 .news-item--gray { border-left-color: #8a8f98; }
 .news-item--important { box-shadow: 0 0 0 1px rgba(229, 72, 77, 0.25); background: rgba(229, 72, 77, 0.04); }
 .news-item-head { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }

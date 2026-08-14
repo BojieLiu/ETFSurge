@@ -21,6 +21,12 @@
       </div>
 
       <template v-else>
+        <!-- F12 (round23 P0): 因子数据完整性降级横幅——valid 率 < 60% 时强制红字提示，
+             方案仅供参考，不得伪装精确决策（AGENTS.md 反假完成）。 -->
+        <div v-if="dataDegraded" class="factor-degraded-banner" role="alert">
+          ⚠️ 因子数据完整性降级：有效因子仅占 {{ Math.round(validRate * 100) }}%，方案仅供参考
+        </div>
+
         <!-- Stats Overview Row -->
         <div class="stats-row">
           <div class="stat-item stat-item-primary">
@@ -318,6 +324,16 @@ let chartInstance = null
 /* ── Computed ── */
 const summary = computed(() => data.value?.summary ?? null)
 const categories = computed(() => data.value?.categories ?? [])
+
+// F12 (round23 P0): 因子数据完整性 valid_rate = valid / (valid+warn+no_data)，
+// < 60% 时显示降级横幅（方案仅供参考，不伪装精确决策）。
+const validRate = computed(() => {
+  const s = summary.value
+  if (!s) return 1
+  const denom = (s.valid ?? 0) + (s.warn ?? 0) + (s.no_data ?? 0)
+  return denom > 0 ? (s.valid ?? 0) / denom : 1
+})
+const dataDegraded = computed(() => validRate.value < 0.6)
 
 // P0-7 (round16 3.8): 数据积累期引导——valid=0 且 no_data>0 时页面呈现
 // 「数据积累中（样本 N/30）」而非「因子全部失效」误判。
@@ -685,6 +701,19 @@ onBeforeUnmount(() => {
 .section-divider-chart {
   margin-top: 0;
   margin-bottom: var(--space-4);
+}
+
+/* ── F12 (round23 P0): 因子数据完整性降级横幅 ── */
+.factor-degraded-banner {
+  margin-bottom: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: #fdecea;
+  border: 1px solid #f5b5ae;
+  border-left: 4px solid #c0392b;
+  border-radius: var(--radius-md);
+  font-size: var(--text-xs);
+  color: #8a1f18;
+  font-weight: 600;
 }
 
 /* ── Stats Row ── */

@@ -20,8 +20,12 @@ def _safe(fn, timeout: int = _TIMEOUT):
 
 
 
-_LEVEL_KEYWORDS: dict[int, tuple[str, ...]] = {
-    5: (  # 重大/紧急 — 市场剧烈变动或突发性事件
+# F22/F23 (round23 P0-A): 将「level 既表重要性又表分类」拆分为两个正交维度——
+# category（极性/类型）+ level（重要性 1-5，单调）。旧实现 level=4 同时是「利好」与
+# 「重要」阈值，导致利空(3)永不推送、战争被标红为利好（F22/F23）。
+# 词表按 category 组织；分类优先级 major > risk > positive > negative > neutral。
+_CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "major": (  # 重大/紧急 — 市场剧烈变动或突发性事件
         "重大", "紧急", "突发", "urgent", "特急",
         "崩盘", "熔断", "退市", "破产",
         "战争", "军事行动", "恐怖袭击", "台风", "地震", "疫情",
@@ -29,7 +33,15 @@ _LEVEL_KEYWORDS: dict[int, tuple[str, ...]] = {
         # F3-1 步骤A: 补地缘军事事件词（明确攻击/宣战级）
         "袭击", "空袭", "开战", "宣战", "airstrike", "collapse", "killed", "fatal",
     ),
-    4: (  # 利好/重要正面 — 政策宽松、大涨、超预期
+    "risk": (  # F23: 地缘/军事/制裁（独立类别，不得标利好红）
+        # 自 L4(利好) 移出：冲突/军事/干预/制裁/战/核；自 L3(利空) 移出：边境/军演/国防
+        "冲突", "军事", "干预", "制裁", "sanctions",
+        # 显式多字 token，避免裸 "战"/"核" 误命中 挑战/战略/核查
+        "战争", "开战", "宣战", "战事", "交战", "停战",
+        "核冲突", "核威胁", "核武", "核威慑", "核弹",
+        "边境", "军演", "国防", "地缘", "导弹", "演习", "博弈",
+    ),
+    "positive": (  # 利好/重要正面 — 政策宽松、大涨、超预期
         "利好", "上调", "降准", "降息", "positive", "超预期",
         "大涨", "涨停", "创新高", "突破", "新高",
         "大幅增长", "大幅上升", "飙升", "暴涨", "证监会", "央行",
@@ -41,15 +53,12 @@ _LEVEL_KEYWORDS: dict[int, tuple[str, ...]] = {
         "降息预期", "量化宽松",
         # 正面商业合作
         "协议", "合作",
-        # F3-1 步骤A: 地缘军事/制裁事件（组合直接相关才可能升 L5，其余归 L4）
-        "冲突", "军事", "干预", "制裁", "战", "核",
         # O7 (round7 §7 P9): 国际重磅宏观事件——利率决议/非农/OPEC
-        #（此前国际新闻无关键词命中 → 全 L1 1★，重磅国际事件被降级）
         "利率决议", "非农", "OPEC",
         # 英文利好词
         "surge", "partnership", "breakthrough", "soar",
     ),
-    3: (  # 利空/重要负面 — 政策收紧、大跌、风险暴露
+    "negative": (  # 利空/重要负面 — 政策收紧、大跌、风险暴露
         "利空", "下调", "暴跌", "negative",
         "大跌", "跌停", "创新低", "跌破", "新低",
         "减持", "净卖出", "流出", "出逃",
@@ -60,12 +69,10 @@ _LEVEL_KEYWORDS: dict[int, tuple[str, ...]] = {
         "做空", "抛售", "空头", "撤离",
         "加息", "缩表", "收紧",
         "暴雷", "爆雷", "踩雷", "违约",
-        # F3-1 步骤A: 边境/军演/国防（日常军事动态归 L3）
-        "边境", "军演", "国防",
         # 英文利空词
-        "sanctions", "layoffs", "downgrade",
+        "layoffs", "downgrade",
     ),
-    2: (  # 提醒/关注 — 数据发布、市场异动
+    "neutral": (  # 提醒/关注 — 数据发布、市场异动
         "提醒", "关注", "注意", "风险", "watch",
         "通知", "披露", "预告",
         "展望", "提示", "预警",
@@ -90,8 +97,7 @@ _LEVEL_KEYWORDS: dict[int, tuple[str, ...]] = {
         "营收", "净利润",
         "国务院", "发改委", "财政部", "商务部",
         "欧美", "欧央行", "鲍威尔",
-        # O7 (round7 §7 P9): 国际宏观数据词（重要但非紧急）——
-        # 通胀/失业/原油/海外央行 归 L2 而非 L1
+        # O7 (round7 §7 P9): 国际宏观数据词（重要但非紧急）
         "美联储", "失业", "通胀", "原油", "欧央行", "日本央行",
         # 重磅降级: 从 L5 移至 L2 (重要信号,非紧急)
         "重磅",
@@ -102,45 +108,61 @@ _LEVEL_KEYWORDS: dict[int, tuple[str, ...]] = {
     ),
 }
 
+# category → 重要性 level（F22：level 单调，与前端点推送/筛选对齐）
+_CATEGORY_LEVEL: dict[str, int] = {
+    "major": 5,
+    "risk": 4,
+    "positive": 4,
+    "negative": 3,
+    "neutral": 2,
+    "other": 1,
+}
 
-# F3-1 步骤A: 跨级去重（每个词只属于一个 level；供单测断言）
-_LEVEL_WORD_OWNERSHIP: dict[str, int] = {
-    _word: _lv
-    for _lv, _words in _LEVEL_KEYWORDS.items()
+# F22: 跨级去重（每个词只属于一个 category；供单测断言）
+_CATEGORY_WORD_OWNERSHIP: dict[str, str] = {
+    _word: _cat
+    for _cat, _words in _CATEGORY_KEYWORDS.items()
     for _word in _words
 }
 
+# 弱化词降级（P2-1 round9 §6.4）：未实现/推测性事件不标重大或利好
+_WEAKENERS = ("或将", "可能", "传闻", "考虑", "讨论", "有望", "据悉", "拟")
+
+
+def classify_news(title: str, content: str = "") -> tuple[str, int]:
+    """F22/F23 (round23 P0-A): 关键词法将快讯归类为 (category, level)。
+
+    - category ∈ {major, risk, positive, negative, neutral, other}（极性/类型）
+    - level ∈ 1~5（重要性，单调；前端按 level>=4 推送/筛选）
+
+    分类优先级 major > risk > positive > negative > neutral，命中最高优先级 category。
+    命中 level>=4 关键词但标题含弱化词（或将/可能/…）→ 降一级（不低于 3）。
+
+    F3-1 步骤D: content 双输入（正文前 200 字同样计级）。
+    O7 (round7 §7 P9): 关键词统一 lower 再匹配（CPI/PMI/OPEC/FDA 等大写英文词）。
+    """
+    t = ((title or "") + " " + (content or "")[:200]).lower()
+    cat = "other"
+    for c in ("major", "risk", "positive", "negative", "neutral"):
+        # O7: 词表统一 lower 再匹配，避免大写英文词永不命中
+        if any((k.lower() if isinstance(k, str) else k) in t for k in _CATEGORY_KEYWORDS[c]):
+            cat = c
+            break
+    level = _CATEGORY_LEVEL[cat]
+    if level >= 4 and any(w in (title or "") for w in _WEAKENERS):
+        # P2-1: 弱化词降级（5→4，4→3），不越过 3
+        level = max(level - 1, 3)
+    return (cat, level)
+
 
 def classify_news_level(title: str, content: str = "") -> int:
-    """关键词法将快讯标题/正文归类为 1~5 级重要性。
+    """返回资讯重要性 1-5（category 推导出的 level 维度）。"""
+    return classify_news(title, content)[1]
 
-    5=重大/紧急, 4=利好, 3=利空, 2=提醒/关注, 1=其他。
-    以标题中匹配到的最高级别为准。
 
-    F3-1 步骤D: 增加 content 双输入——正文关键词（如「军事行动」）同样计级，
-    取标题与正文中的最高命中级别。
-
-    P2-1 (round9 §6.4): 分级校准——命中 L5/L4 关键词但标题含弱化词
-    （或将/可能/传闻/考虑/讨论/有望/预期/拟）→ 降一级（L5→L4，L4→L3）。
-    旧实现 L5 占 50%（实测 {2:7,3:1,4:1,5:9}、无 L1），「或将」「有望」类
-    未实现事件被虚高标注为重大/利好。
-    """
-    # 弱化词降级（P2-1）：未实现/推测性事件不标重大或利好
-    # 弱化词降级（P2-1）：未实现/推测性事件不标重大或利好。
-    # 注意：不含「预期」——「业绩超预期」是已实现的利好词（L4 词表），
-    # 「预期」单独出现是中性，不能降级已确认的利好。
-    _WEAKENERS = ("或将", "可能", "传闻", "考虑", "讨论", "有望", "据悉", "拟")
-    t = ((title or "") + " " + (content or "")[:200]).lower()
-    for level in (5, 4, 3, 2):
-        # O7 (round7 §7 P9): 关键词统一 lower 再匹配——旧代码 t 已 lower 但
-        # 词表保留原始大小写（CPI/PMI/OPEC/FDA 等），大写英文词永不命中 →
-        # 国际重磅新闻全 L1（「美国5月CPI…」命中不到 "CPI"）。lower 后修复。
-        if any((k.lower() if isinstance(k, str) else k) in t for k in _LEVEL_KEYWORDS[level]):
-            if level >= 4 and any(w in (title or "") for w in _WEAKENERS):
-                # P2-1: 弱化词降级（L5→L4，L4→L3），不越过 3
-                return max(level - 1, 3)
-            return level
-    return 1
+def classify_news_category(title: str, content: str = "") -> str:
+    """返回资讯类型 category（major/risk/positive/negative/neutral/other）。"""
+    return classify_news(title, content)[0]
 
 
 def _level_of(row: dict[str, Any], title: str) -> int:
@@ -183,6 +205,8 @@ def fetch_cailian_telegraph(limit: int = 30) -> list[dict[str, Any]]:
         level = _level_of(r, title)
         if level_boost:
             level = min(level + level_boost, 5)
+        # F22: category 维度（极性/类型），与 level（重要性）正交
+        category = classify_news_category(title)
         # P2-1: stars 走独立「新鲜度」维度（news_fetcher._compute_stars），与 level 解耦
         from .news_fetcher import _compute_stars
         return {
@@ -191,6 +215,7 @@ def fetch_cailian_telegraph(limit: int = 30) -> list[dict[str, Any]]:
             "time": r.get("time", ""),
             "source": "财联社",
             "level": level,
+            "category": category,
             "stars": _compute_stars(level, r.get("time", "")),
         }
 

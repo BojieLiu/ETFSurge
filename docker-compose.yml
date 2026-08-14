@@ -31,6 +31,9 @@ services:
       - ./backend/.env
     environment:
       - REDIS_URL=redis://redis:6379/0
+      # F24 (round23 P0-A): 容器统一时区为北京时间，避免 datetime.utcnow()/fromtimestamp()
+      # 受运行机本地时区影响，与资讯北京时间显示口径一致。
+      - TZ=Asia/Shanghai
       # 覆盖 .env 的 LOG_LEVEL=DEBUG：生产日志级别收窄为 INFO（与 dev 对齐，省预热期 DEBUG 日志开销；
       # 排障需 DEBUG 时用 `docker compose run -e LOG_LEVEL=DEBUG` 临时覆盖）
       - LOG_LEVEL=INFO
@@ -71,6 +74,7 @@ services:
       - ./backend/.env
     environment:
       - REDIS_URL=redis://redis:6379/0
+      - TZ=Asia/Shanghai
       - PROFILE_WARMUP=1
       # U7/N08 R4: DEBUG → INFO（预热期 DEBUG 日志开销 ~1.9s；预热计时由 PROFILE_WARMUP 保留）
       - LOG_LEVEL=INFO

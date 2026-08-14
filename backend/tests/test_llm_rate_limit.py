@@ -31,8 +31,12 @@ def _make_429_exc(headers=None):
 
 
 @pytest.mark.asyncio
-async def test_llm_complete_retries_twice_on_429(monkeypatch):
-    """429 时至少重试 2 次（共 3 轮尝试）后才放弃，并抛「LLM 限流，已降级」。"""
+async def test_llm_complete_429_opens_circuit_no_retry(monkeypatch):
+    """round23 F8/F9: 429（额度耗尽）立即 OPEN，不再重复探测白等退避。
+
+    旧行为：429 后指数退避重试 ≥2 次（每调用缴 2.1-2.4s 过路费）。
+    新行为：收到 429 立即置 OPEN，本轮后续 attempt 直接跳过，快速失败。
+    """
     calls = {"n": 0}
 
     class _FakeClient:
@@ -54,17 +58,23 @@ async def test_llm_complete_retries_twice_on_429(monkeypatch):
     monkeypatch.setattr(llm.token_store, "record", _noop)
     monkeypatch.setattr("httpx.AsyncClient", _FakeClient)
     monkeypatch.setattr(asyncio, "sleep", _noop)
+    llm.reset_circuit()
 
     with pytest.raises(RuntimeError, match="LLM 限流，已降级"):
         await llm.llm_complete("prompt")
-    # LLM_MAX_RETRIES=2 → 3 轮尝试（失败前重试 ≥2 次）
-    assert calls["n"] >= 3, f"应尝试 ≥3 次，实际 {calls['n']}"
+    # 429 → 立即 OPEN → 下一 attempt 直接跳过，不再重试
+    assert calls["n"] == 1, f"429 不应重试，实际 {calls['n']} 次"
+    assert llm._circuit_state("test") == "OPEN"
 
 
 @pytest.mark.asyncio
-async def test_llm_complete_respects_retry_after(monkeypatch):
-    """429 响应带 Retry-After 头 → 退避等待使用 Retry-After 值（cap 30s）。"""
+async def test_llm_complete_transient_5xx_flat_backoff(monkeypatch):
+    """round23 F8/F9: 瞬态 5xx 保留有限重试，退避为固定 retry_delay（非 429 指数退避）。
+
+    阈值 2：前 2 次实际调用，第 3 次被 OPEN 跳过 → 2 次退避，每次 3.0s（flat）。
+    """
     sleeps = []
+    attempts = {"n": 0}
 
     class _FakeClient:
         def __init__(self, *a, **kw):
@@ -77,7 +87,13 @@ async def test_llm_complete_respects_retry_after(monkeypatch):
             return False
 
         async def post(self, *a, **kw):
-            raise _make_429_exc(headers={"retry-after": "2"})
+            attempts["n"] += 1
+            raise _make_5xx_exc()
+
+    def _make_5xx_exc():
+        req = httpx.Request("POST", "http://llm.test/v1/chat/completions")
+        resp = httpx.Response(500, request=req)
+        return httpx.HTTPStatusError("500", request=req, response=resp)
 
     monkeypatch.setattr(llm, "get_configured_providers", lambda: [_make_provider()])
     monkeypatch.setattr(llm, "_check_key", _noop)
@@ -88,16 +104,18 @@ async def test_llm_complete_respects_retry_after(monkeypatch):
         sleeps.append(secs)
 
     monkeypatch.setattr(asyncio, "sleep", _fake_sleep)
+    llm.reset_circuit()
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(Exception):
         await llm.llm_complete("prompt")
-    assert sleeps, "应发生退避等待"
-    assert all(w == 2.0 for w in sleeps), f"应尊重 Retry-After=2s，实际 {sleeps}"
+    assert attempts["n"] == 2, f"瞬态应重试至阈值，实际 {attempts['n']}"
+    # 阈值 2：第 2 次失败后 OPEN，第 3 次 attempt 直接跳过 → 仅 1 次退避
+    assert sleeps == [3.0], f"瞬态退避应为固定 3.0s（1 次），实际 {sleeps}"
 
 
 @pytest.mark.asyncio
-async def test_llm_complete_exponential_backoff_cap(monkeypatch):
-    """无 Retry-After 时指数退避（3s, 6s），cap ≤30s。"""
+async def test_llm_complete_no_exponential_backoff_on_429(monkeypatch):
+    """回归：429 不再触发指数退避（3s→6s），立即 OPEN 无退避等待。"""
     sleeps = []
 
     class _FakeClient:
@@ -122,17 +140,16 @@ async def test_llm_complete_exponential_backoff_cap(monkeypatch):
         sleeps.append(secs)
 
     monkeypatch.setattr(asyncio, "sleep", _fake_sleep)
+    llm.reset_circuit()
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="LLM 限流，已降级"):
         await llm.llm_complete("prompt")
-    # 3 轮尝试间 2 次退避：3s（attempt 0）→ 6s（attempt 1）
-    assert len(sleeps) == 2, f"实际退避 {sleeps}"
-    assert sleeps[0] == 3.0 and sleeps[1] == 6.0, f"指数退避错误: {sleeps}"
+    assert sleeps == [], f"429 不应有任何退避等待，实际 {sleeps}"
 
 
 @pytest.mark.asyncio
-async def test_llm_stream_retries_on_429(monkeypatch):
-    """流式版本 429 → 重试 ≥2 次后 error 事件带「LLM 限流，已降级」。"""
+async def test_llm_stream_429_opens_circuit(monkeypatch):
+    """round23 F9: 流式版本 429 → 立即 OPEN，不再重复探测，error 事件带「LLM 限流，已降级」。"""
     calls = {"n": 0}
 
     class _FakeClient:
@@ -164,9 +181,10 @@ async def test_llm_stream_retries_on_429(monkeypatch):
     monkeypatch.setattr(llm.token_store, "record", _noop)
     monkeypatch.setattr("httpx.AsyncClient", _FakeClient)
     monkeypatch.setattr(asyncio, "sleep", _noop)
+    llm.reset_circuit()
 
     events = [ev async for ev in llm.llm_complete_stream("sys", "prompt")]
-    assert calls["n"] >= 3, f"流式应尝试 ≥3 次，实际 {calls['n']}"
+    assert calls["n"] == 1, f"流式 429 不应重试，实际 {calls['n']}"
     err = next((ev for ev in events if ev.get("type") == "error"), None)
     assert err and "LLM 限流，已降级" in err["error"], f"实际: {events}"
 

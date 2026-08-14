@@ -1702,7 +1702,9 @@ class MarketDataHub:
         targets = [
             n for n in items
             if not n.get("ai_summary")
-            and (int(n.get("stars", 0) or 0) >= 4 or str(n.get("level", "")) in ("重大", "利好"))
+            # F28 (round23 P0-A): 旧实现 `str(level) in ("重大","利好")` 因 level 已是 int 恒 False，
+            # 重要性维度永久失效。改为按 int 重要性判定（level>=4 或 新鲜度 stars>=4 → 重要）。
+            and (int(n.get("stars", 0) or 0) >= 4 or int(n.get("level", 0) or 0) >= 4)
         ]
         enriched = 0
         for n in targets[:5]:
