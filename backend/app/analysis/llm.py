@@ -1504,6 +1504,7 @@ async def generate_strategy_check_report(
 请按 strategy_check.md 要求的 JSON 格式输出分析报告。
 """
     from ..analysis.registry import get_agent
+    import httpx  # round23 遗留修复: request_timeout 用 httpx.Timeout(connect/read 分离)
     _start_ms = time.monotonic()
     try:
         # round14 P0-B（方案 b）: 策略检查 LLM 超时根因 = provider 35s 无响应 + 预算-重试
@@ -1518,10 +1519,14 @@ async def generate_strategy_check_report(
             prompt,
             max_retries=0,
             rate_limit_cap=10.0,
-            # round20 P0-5: 单次 provider 调用超时 35s→15s（对齐 round15 P2 超时保护）——
-            # task 417 ReadTimeout 38s = 35s 调用 + 429 退避等待；缩到 15s 后最坏
-            # 2×15=30s ≤ 外层分级预算（partial 30s / all_empty 15s 亦覆盖）。
-            request_timeout=15.0,
+            # round20 P0-5: 单次 provider 调用 connect 超时 35s→15s（对齐 round15 P2
+            # 超时保护）——task 417 ReadTimeout 38s = 35s 调用 + 429 退避等待。
+            # round23 遗留修复（2026-08-14）：read 超时与 connect 分离——deepseek
+            # 长报告生成实测 21.8s（4004 SSE chunks），统一 float 15s 的 read 侧
+            # ReadTimeout → LLM 报告永远走规则兜底。connect 15s 防 429/连接挂起，
+            # read 90s 容纳长生成；max_retries=0 最坏 2×connect15 = 30s ≤ 外层
+            # 分级预算（partial 30s / all_empty 15s 亦覆盖 connect 侧）。
+            request_timeout=httpx.Timeout(connect=15.0, read=90.0, write=15.0, pool=15.0),
         )
     except BaseException as e:  # noqa: BLE001 — F1-9: 必须捕获 CancelledError（BaseException）
         # F1-9: asyncio.wait_for(20s) 超时取消内部任务时抛 CancelledError，

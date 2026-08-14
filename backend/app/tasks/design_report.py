@@ -52,6 +52,19 @@ class DesignReportManager:
 report_manager = DesignReportManager()
 
 
+def _pct_num(v):
+    """round23 遗留修复（2026-08-14）：静态池兜底方案的 expected_return 曾为
+    str 展示串（"8-12%"），数值格式化 f"{v*100:.0f}" 抛 ValueError → 设计任务
+    failed（task 468）。统一安全数值化：None / str / 非数值 → None。
+    """
+    if v is None or isinstance(v, str):
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
 def _build_plan_tables(strategies: list[dict], fetched_at: datetime | None = None) -> str:
     """P5-a: 从引擎 strategies 数据直接渲染方案详解 Markdown 表格。
     确保报告中的数据与方案卡片完全一致，杜绝 LLM 篡改标的。
@@ -94,11 +107,11 @@ def _build_plan_tables(strategies: list[dict], fetched_at: datetime | None = Non
     for s in strategies:
         allocs = s.get("allocations") or s.get("etfs") or []
         cash = next((e for e in allocs if e.get("symbol") == "CASH"), None)
-        w = (cash.get("weight") or cash.get("target_weight") or 0) * 100 if cash else 10
+        w = (_pct_num(cash.get("weight") or cash.get("target_weight") or 0)) * 100 if cash else 10
         cashes.append(f"{w:.0f}%")
-        r = s.get("expected_return")
+        r = _pct_num(s.get("expected_return"))
         rets.append(f"{r * 100:.0f}%" if r is not None else "—")
-        rc = s.get("expected_return_current")
+        rc = _pct_num(s.get("expected_return_current"))
         rets_current.append(f"{rc * 100:.0f}%" if rc is not None else "—")
     lines.append("| 现金仓位 | " + " | ".join(cashes) + " |")
     lines.append("| 预期年化 | " + " | ".join(rets) + " |")
@@ -106,10 +119,15 @@ def _build_plan_tables(strategies: list[dict], fetched_at: datetime | None = Non
     # P2-6 (R4-03): 「当前预期年化 == 预期年化」显式说明——避免默认同值被误读为
     # 「系统评估过当前市态且收益不变」；range_bound 市态 dynamic_layer_budget
     # 调整系数为 0（budgets.py adjust_expected_return），相等是设计行为。
+    # round23 遗留修复：expected_return 可能为 str/None（静态池兜底），须经
+    # _pct_num 归一化后再比较，否则 abs(str - float) 抛 TypeError。
     _no_adjust = bool(strategies) and all(
-        s.get("expected_return_current") is None
-        or (s.get("expected_return") is not None
-            and abs((s.get("expected_return_current") or 0) - (s.get("expected_return") or 0)) < 1e-9)
+        _pct_num(s.get("expected_return_current")) is None
+        or (
+            _pct_num(s.get("expected_return")) is not None
+            and abs((_pct_num(s.get("expected_return_current")) or 0)
+                    - (_pct_num(s.get("expected_return")) or 0)) < 1e-9
+        )
         for s in strategies
     )
     if _no_adjust:

@@ -123,3 +123,41 @@ class TestR8FalsyFix:
         src = inspect.getsource(sd)
         assert 'dcp = pool_entry.get("change_pct")\n                    if dcp is None:' in src, \
             "pool_entry 路径必须显式 None 判断（F3 R8）"
+
+
+
+class TestStaticPoolStrReturnGuard:
+    """round23 遗留修复（2026-08-14）：静态池兜底方案的 expected_return 是 str
+    （"10%-14%" 区间展示串），_build_plan_tables 用数值格式化 → ValueError:
+    Unknown format code 'f' for object of type 'str' → 设计任务 failed。
+    验收：任何来源的策略都不应让 _build_plan_tables 崩溃；静态池策略应产出数值/None。
+    """
+
+    def _static_style(self):
+        return {
+            "id": "balanced", "label": "均衡型",
+            "expected_return": "10%-14%",
+            "expected_return_current": "10%-14%",
+            "expected_volatility": "12-20%",
+            "allocations": [
+                {"symbol": "510300", "name": "沪深300", "layer": "core", "weight": 0.2},
+                {"symbol": "CASH", "name": "现金", "layer": "cash", "weight": 0.1},
+            ],
+        }
+
+    def test_plan_tables_survives_str_expected_return(self):
+        """str 收益率（静态池兜底旧形态）→ 不抛异常，表格显示 — 而非崩溃。"""
+        tables = _build_plan_tables([self._static_style()])
+        assert "—" in tables, f"str 收益率应渲染为占位符 —，实得: {tables[:200]}"
+
+    def test_static_pool_strategy_expected_return_is_numeric(self):
+        """根源：静态池策略 expected_return 必须是 float/None（数值语义），非 str。"""
+        from app.services.strategy_design import _build_static_pool_strategies
+        strategies = _build_static_pool_strategies(500000)
+        assert strategies, "静态池应产出 3 套方案"
+        for st in strategies:
+            v = st.get("expected_return")
+            assert v is None or isinstance(v, (int, float)), \
+                f"{st['id']} expected_return 应为数值/None，实得 {type(v).__name__}: {v!r}"
+            assert "%" not in str(st.get("expected_return", "")), \
+                f"{st['id']} expected_return 不得是展示串"

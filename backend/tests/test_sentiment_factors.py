@@ -119,6 +119,10 @@ def test_factors_active_sentiment_not_no_data(monkeypatch):
     factors_router._db_ic_series_stats = AsyncMock(return_value={
         "sentiment.news_heat": {"ic_mean": 0.024, "ic_std": 0.03, "ir": 0.8, "t_stat": 3.1},
     })
+    # F25① 后 sample_count 走 DB（distinct trade_date）优先——本地 DB 已有真实日频
+    # 记录（如 news_heat 1 条）会覆盖 memory mock → mock 空 DB 使判定回到
+    # registry._sample_counts（260 天）路径，测「交易日 + t/IR」判据而非 DB 状态。
+    factors_router._db_ic_sample_counts = AsyncMock(return_value={})
     resp = client.get("/api/v1/factors/active")
     assert resp.status_code == 200
     body = resp.json()

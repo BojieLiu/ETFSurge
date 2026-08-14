@@ -75,8 +75,14 @@ class TestStrategyCheckLlMCallParams:
         assert result.get("summary") == "ok"
         kwargs = fake_agent.run_json.call_args.kwargs
         assert kwargs.get("max_retries") == 0, f"max_retries 应为 0（防重试超预算），实际 {kwargs.get('max_retries')}"
-        assert kwargs.get("request_timeout") == 15.0, \
-            f"request_timeout 应为 15s（round20 P0-5 ReadTimeout 38s 根因），实际 {kwargs.get('request_timeout')}"
+        # round23 遗留修复（2026-08-14）：request_timeout 由 float 15 改为 httpx.Timeout
+        #（connect=15s 防 429/连接挂起，read=90s 容纳 deepseek 长报告生成——实测
+        # 21.8s，float 15s 的 read 侧 ReadTimeout → LLM 报告永远走规则兜底）。
+        to = kwargs.get("request_timeout")
+        assert hasattr(to, "connect") and hasattr(to, "read"), \
+            f"request_timeout 应为 httpx.Timeout(connect短/read长)，实际 {to!r}"
+        assert to.connect <= 15.0, f"connect 超时应 ≤15s（防 429 挂起），实际 {to.connect}"
+        assert to.read >= 60.0, f"read 超时应 ≥60s（容纳长报告生成），实际 {to.read}"
 
     def test_provider_slow_within_budget_no_cancelled_error(self):
         """负向：mock provider 慢响应 → 兜底在预算内完成，不抛 CancelledError 穿透

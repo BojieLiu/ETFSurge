@@ -579,7 +579,16 @@ async def get_timeline(
     # P2-11 (round9 §4.5-3): check 类型 task 关联查询——用于孤立 check 记录判定
     # （顺序：design → check → check-task → design-task，见 test_timeline_joins_tasks._FakeDB）
     # P0-1: tasks 查询同样列裁剪（排除 params_json/result_json 大字段）
-    check_task_stmt = select(TaskRecord.id, TaskRecord.record_id).where(TaskRecord.task_type == "check").limit(limit + 1)
+    # round23 遗留修复：必须按 created_at 降序——缺 order_by 时 SQLite 按 rowid
+    # 返回最旧 limit+1 条 check 任务，linked record_id 集合不含最新 check 记录 →
+    # 最新策略检查全被误标 orphan=true → 前端历史列表过滤掉（「策略检查成功但不显示」）。
+    check_task_stmt = select(
+        TaskRecord.id, TaskRecord.record_id,
+    ).where(
+        TaskRecord.task_type == "check",
+    ).order_by(
+        TaskRecord.created_at.desc(), TaskRecord.id.desc(),
+    ).limit(limit + 1)
     check_task_rows = (await db.execute(check_task_stmt)).all()
     linked_check_record_ids = {t.record_id for t in check_task_rows if t.record_id}
     # P0-9 (round16 3.10 R1): task_items 查询放宽为 design+check——旧实现只查 design，

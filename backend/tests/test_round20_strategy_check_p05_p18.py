@@ -43,9 +43,16 @@ class TestP0_5LLMTimeout:
                 data_quality={"all_empty": True, "partial": False},
             )
         _, kwargs = run_json_mock.call_args
-        assert kwargs.get("request_timeout", 35.0) <= 15.0, (
-            f"LLM 单次调用超时应为 15s（ReadTimeout 38s 根因），实际 {kwargs.get('request_timeout')}"
+        # round20 P0-5: 单次调用 connect 超时 ≤15s（防 429/连接挂起拖长）；
+        # round23 遗留修复（2026-08-14）：read 超时必须 ≥60s——deepseek 长报告
+        # 生成实测 21.8s（4004 chunks），15s read timeout → ReadTimeout → 规则兜底，
+        # LLM 报告永远出不来。connect 与 read 分离：float 15 已废弃。
+        to = kwargs.get("request_timeout", 35.0)
+        assert hasattr(to, "connect") and hasattr(to, "read"), (
+            f"request_timeout 应为 httpx.Timeout(connect短/read长)，实际 {to!r}"
         )
+        assert to.connect <= 15.0, f"connect 超时应 ≤15s（防 429 挂起），实际 {to.connect}"
+        assert to.read >= 60.0, f"read 超时应 ≥60s（容纳长报告生成），实际 {to.read}"
 
 
 # ─── P0-5②: 429 立即降级，不再反复重试 ───────────────────────────

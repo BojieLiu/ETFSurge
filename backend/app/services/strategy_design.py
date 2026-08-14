@@ -210,9 +210,12 @@ def _build_static_pool_strategies(capital: float) -> list[dict]:
         strategies.append({
             "id": profile,
             "name": meta.get("label", profile),
-            "description": f"{meta.get('positioning', '')}（静态池兜底方案）",
+            "description": f"{meta.get('positioning', '')}（静态池兜底方案，预期收益未测算）",
             "risk_profile": profile,
-            "expected_return": f"{meta.get('expected_return', 0.1)*100:.0f}-{meta.get('expected_return', 0.1)*100+4:.0f}%",
+            # round23 遗留修复：原为 f"{...*100:.0f}-{...}%" str 展示串——数值消费方
+            # （design_report._build_plan_tables）会 ValueError → 设计任务 failed。
+            # 改为 None（诚实：兜底方案无历史收益测算），展示层渲染 "—"。
+            "expected_return": None,
             "expected_volatility": "12-20%",
             "etfs": allocs,
         })

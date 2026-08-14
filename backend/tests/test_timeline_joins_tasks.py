@@ -172,3 +172,63 @@ class TestTimelineJoinsTasks:
         # 只有 1 条 check（check_items 覆盖，task 行被去重），且不是来自 task 的独立 ghost
         assert len(check_items) == 1
         assert check_items[0]["id"] == 3
+
+
+
+class _StmtCapturingDB:
+    """捕获 get_timeline 执行的所有 stmt 字符串（用于断言 SQL 形态）。"""
+
+    def __init__(self, results):
+        self.results = list(results)
+        self.i = 0
+        self.statements = []
+
+    async def execute(self, stmt):
+        self.statements.append(str(stmt))
+        r = self.results[self.i]
+        self.i += 1
+        return r
+
+
+class TestCheckTaskQueryOrdering:
+    """round23 遗留修复（2026-08-14）：/timeline 的 check-task 关联查询
+    （check_task_stmt）缺 order_by——SQLite 按 rowid 返回最旧 21 条 check 任务，
+    其 record_id 集合不含最新 check 记录 → 最新策略检查全被标 orphan=true →
+    前端历史列表过滤掉 → 「策略检查成功但不显示」。验收：该查询必须按
+    created_at 降序（与 checks/tasks 查询对齐，都取最近）。"""
+
+    @pytest.mark.asyncio
+    async def test_check_task_stmt_ordered_by_created_at_desc(self):
+        """check-task 关联查询必须带 ORDER BY created_at DESC（取最近任务，防误标 orphan）。"""
+        # 复用模块级 _design/_check/_task 构造器；results 顺序:
+        # designs / checks / check-tasks / tasks
+        db = _StmtCapturingDB([
+            _FakeResult([_design(1)]),
+            _FakeResult([_check(5)]),
+            _FakeResult([_task(240, "completed", record_id=240, task_type="check")]),
+            _FakeResult([_task(470, "completed", record_id=5, task_type="check")]),
+        ])
+        await get_timeline(limit=20, offset=0, db=db)
+        # 第 3 条 stmt = check_task_stmt
+        assert len(db.statements) >= 3, f"应执行 >=3 条查询，实得 {len(db.statements)}"
+        check_stmt = db.statements[2].upper()
+        assert "ORDER BY" in check_stmt, \
+            f"check-task 查询必须按时间降序（防取最旧记录误标 orphan），实得: {db.statements[2][:200]}"
+        assert "CREATED_AT" in check_stmt, \
+            f"check-task 查询须按 created_at 排序，实得: {db.statements[2][:200]}"
+
+    @pytest.mark.asyncio
+    async def test_orphan_false_when_record_linked_to_recent_task(self):
+        """行为回归：最新 check 记录有 task 关联时 orphan 必须 False（否则前端过滤掉）。"""
+        db = _StmtCapturingDB([
+            _FakeResult([_design(1)]),
+            _FakeResult([_check(5)]),                       # 最新 check 记录
+            _FakeResult([_task(470, "completed", record_id=5, task_type="check")]),  # 关联任务
+            _FakeResult([]),
+        ])
+        items = await get_timeline(limit=20, offset=0, db=db)
+        items = items.get("items", items) if isinstance(items, dict) else items
+        check_items = [it for it in items if it.get("_type") == "check"]
+        assert check_items, "timeline 应包含 check 记录"
+        assert check_items[0].get("orphan") is False, \
+            f"有关联 task 的 check 记录不得标 orphan（前端会过滤），实得: {check_items[0]}"
