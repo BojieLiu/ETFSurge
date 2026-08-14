@@ -136,3 +136,20 @@ class TestActiveFactorsEndpoint:
         body = resp.json()
         names = [c["name"] for c in body["categories"]]
         assert names == sorted(names)
+
+    def test_avg_ic_is_abs_mean(self):
+        """T10 (round23): summary.avg_ic == mean(|ic_value|)（绝对值均值，非带符号均值）。
+
+        旧实现全局/分类两处带符号均值 → 同屏两个相差 5× 的「平均|IC|」（F26/F25-④）。
+        负值 IC 因子（如 ATR=-0.39）会暴露带符号均值低估：abs 均值 ≥ 带符号均值。
+        """
+        resp = client.get("/api/v1/factors/active")
+        body = resp.json()
+        s = body["summary"]
+        vals = [f["ic_value"] for cat in body["categories"] for f in cat["factors"]
+                if f["status"] != "static" and f["ic_value"] is not None]
+        if not vals:
+            assert s["avg_ic"] is None
+            return
+        calc = round(sum(abs(v) for v in vals) / len(vals), 4)
+        assert s["avg_ic"] == calc, f"avg_ic={s['avg_ic']} 应为 mean(|ic|)={calc}"

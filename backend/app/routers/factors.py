@@ -363,7 +363,9 @@ async def get_active_factors(db: AsyncSession = Depends(get_db)) -> JSONResponse
     total_warn = sum(c["warn_count"] for c in cat_list)
     total_no_data = sum(c["no_data_count"] for c in cat_list)
     total_static = sum(c["static_count"] for c in cat_list)
-    avg_all_ic = round(sum(all_ic_vals) / len(all_ic_vals), 4) if all_ic_vals else None
+    # F26 (round23 P0-B): 全局 avg_ic 同样必须为绝对值均值——与同屏 IC 卡/per-category 一致，
+    # 否则再次出现「同屏两个相差 5× 的 平均|IC|」（实测 0.0449 vs 0.2461）。
+    avg_all_ic = round(sum(abs(v) for v in all_ic_vals) / len(all_ic_vals), 4) if all_ic_vals else None
 
     body = {
         "total": len(registry._computers),
