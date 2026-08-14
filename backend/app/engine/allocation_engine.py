@@ -239,6 +239,9 @@ MANDATORY_CODES = CORE_ANCHORS | DEFENSE_ANCHORS
 #（与 verify_e2e M7/P1-1 口径一致：510300/159338 为沪深300/中证A500 锚）。
 _COMMON_ANCHOR_SYMBOLS = {"510300", "159338"}
 MANDATORY_MIN_WEIGHT = 0.03
+# round24 R2/R24⑤: 强制锚（沪深300/中证A500/黄金/国债）关联度削减地板——永不被
+# enforce_max_correlation 削减到该值以下（与 allocate 内 ≥5% 后处理地板一致，M7 达标）。
+MANDATORY_FLOOR = 0.05
 
 
 def _defense_anchors_for(profile_key: str) -> set[str]:
@@ -1377,14 +1380,19 @@ def enforce_max_correlation(
     threshold: float = 0.9,
     max_combined_weight: float = 0.25,
 ) -> list[dict[str, Any]]:
-    """P1-1 (round20): 方案内高相关对（r >= threshold）合计权重不得超 max_combined_weight。
+    """P1-1 (round20) + round24 R2/R24⑤: 方案内高相关对（r >= threshold）合计权重不得超 max_combined_weight。
 
     纯函数，无 I/O。数据源为 engine/correlation.py 的 correlation_matrix（由 strategy_design
     用真实 K 线闭源计算，不在此处获取）。对每套方案的两两非 CASH 持仓：若 r >= threshold 且
-    合计权重超标，则削减低 factor_score 一方（降到「合计 = 阈值」，下限 MIN_WEIGHT），被削减
+    合计权重超标，则削减低因子分一方（降到「合计 = 阈值」，下限 MIN_WEIGHT），被削减
     权重按其余标的比例回补（保持 Σ=1），并在 risk_metrics.correlation_warnings 标注。
 
-    验收：高相关对合计权重从 >阈值 降到 <=阈值；被削减标的为低因子分一方；报告含关联度提示。
+    round24 R2/R24⑤ 修正：强制锚（MANDATORY_CODES，沪深300/中证A500/黄金/国债）永不被关联度
+    削减击穿 ≥5% 地板——allocate 内已有的 ≥5% 后处理地板会被本函数（后于 allocate 运行）击穿，
+    故此处必须继承豁免：
+      · 双方强制锚 → 仅标注，不削减（避免 A500/300 互削到 1% 违反 M7）；
+      · 单方强制锚 → 强制锚永作 keep 方（不被削减），削非强制一方；
+      · over-block 中若 keep 为强制锚 → 不进一步削减（仅标注，诚实暴露约束部分未达）。
     """
     for s in strategies:
         allocs = [a for a in s.get("allocations", []) if a.get("symbol") != "CASH"]
@@ -1405,11 +1413,29 @@ def enforce_max_correlation(
                 wa, wb = a.get("weight", 0.0), b.get("weight", 0.0)
                 if wa + wb <= max_combined_weight:
                     continue
-                fa = a.get("factor_score", 0.0) or 0.0
-                fb = b.get("factor_score", 0.0) or 0.0
-                low, high = (a, b) if fa <= fb else (b, a)
-                # 削减低因子分一方：目标使「合计 = 阈值」。若 low 被削到 MIN_WEIGHT 下限后
-                # 合计仍超标（high 本身已 >= 阈值），则继续削 high 补足差额。
+                a_mand = sa in MANDATORY_CODES
+                b_mand = sb in MANDATORY_CODES
+                if a_mand and b_mand:
+                    # 双方强制锚：不可削减任一，仅标注豁免（R2，防止 A500/300 互削击穿 5% 地板）
+                    warnings.append({
+                        "pair": [sa, sb],
+                        "correlation": round(float(r), 3),
+                        "combined_weight": round(wa + wb, 4),
+                        "reduced_symbol": None,
+                        "note": "双方均为强制锚（沪深300/中证A500/黄金/国债），关联度超阈但按豁免不削减",
+                    })
+                    continue
+                # 确定削减方：强制锚永不作削减目标；否则削低因子分一方。
+                if a_mand:
+                    low, high = b, a          # high=强制锚（keep），削 low
+                elif b_mand:
+                    low, high = a, b
+                else:
+                    fa = a.get("factor_score", 0.0) or 0.0
+                    fb = b.get("factor_score", 0.0) or 0.0
+                    low, high = (a, b) if fa <= fb else (b, a)
+                high_mand = high.get("symbol") in MANDATORY_CODES
+                # 削 low 使「合计 = 阈值」（low 下限 MIN_WEIGHT；keep 方若为强制锚地板 0.05）
                 target_low = max(MIN_WEIGHT, max_combined_weight - high.get("weight", 0.0))
                 cut = max(0.0, low.get("weight", 0.0) - target_low)
                 if cut <= 1e-9:
@@ -1417,8 +1443,8 @@ def enforce_max_correlation(
                 low["weight"] = round(target_low, 4)
                 reduced_total += cut
                 reduced_syms.add(low.get("symbol"))
-                # low 触底后仍超标 → 削 high（差额进 reduced_total，同样回补）
-                if target_low == MIN_WEIGHT:
+                # low 触底后仍超标 → 削 high 补足；但 high 为强制锚时不可削，仅标注诚实暴露
+                if target_low == MIN_WEIGHT and not high_mand:
                     over = (low.get("weight", 0.0) + high.get("weight", 0.0)) - max_combined_weight
                     if over > 1e-9:
                         high["weight"] = round(max(MIN_WEIGHT, high.get("weight", 0.0) - over), 4)
@@ -1429,7 +1455,11 @@ def enforce_max_correlation(
                     "correlation": round(float(r), 3),
                     "combined_weight": round(wa + wb, 4),
                     "reduced_symbol": low.get("symbol"),
-                    "note": "高相关对合计权重超阈值，已削减低因子分标的（关联度提示）",
+                    "note": (
+                        "高相关对合计权重超阈值，已削减低因子分标的（关联度提示，强制锚豁免不削减）"
+                        if not high_mand else
+                        "高相关对合计权重超阈，非强制方已削至下限；强制锚方受限未进一步削减"
+                    ),
                 })
                 logger.info(
                     "[allocation] P1-1 high-correlation pair %s (r=%.2f) combined %.3f > %.3f, "

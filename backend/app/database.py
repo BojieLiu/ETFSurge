@@ -109,6 +109,13 @@ def _migrate(conn):
     # Q02: strategy_check_records.report_text
     if "report_text" not in columns_check:
         conn.execute(text("ALTER TABLE strategy_check_records ADD COLUMN report_text TEXT"))
+    # round24 R5: 结构化兜底标识（llm_layer_ok / is_fallback / report_quality）
+    if "llm_layer_ok" not in columns_check:
+        conn.execute(text("ALTER TABLE strategy_check_records ADD COLUMN llm_layer_ok VARCHAR(8) DEFAULT 'true'"))
+    if "is_fallback" not in columns_check:
+        conn.execute(text("ALTER TABLE strategy_check_records ADD COLUMN is_fallback VARCHAR(8) DEFAULT 'false'"))
+    if "report_quality" not in columns_check:
+        conn.execute(text("ALTER TABLE strategy_check_records ADD COLUMN report_quality VARCHAR(16) DEFAULT 'full'"))
     # round19 P7-③ (2026-08-12): watchlist 存量清洗——历史手动输入可能带 sh/sz/bj
     # 前缀（如 sz301308）导致 fetch_history 0 行；统一为不带前缀规范（幂等）。
     try:

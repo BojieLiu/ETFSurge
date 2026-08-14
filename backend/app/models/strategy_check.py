@@ -32,6 +32,12 @@ class StrategyCheckRecord(Base):
     # Q02: Full LLM-generated report text (matching portfolio_designs.design_text)
     report_text = Column(Text, nullable=True)
 
+    # round24 R5: 结构化兜底标识——兜底不再只能靠逐条 source=rule 或 summary 文本识读。
+    # llm_layer_ok=False + is_fallback=True 时前端显式标注「LLM 层降级，规则引擎兜底」。
+    llm_layer_ok = Column(String(8), nullable=True, default="true")
+    is_fallback = Column(String(8), nullable=True, default="false")
+    report_quality = Column(String(16), nullable=True, default="full")
+
     def to_dict(self) -> dict:
         import json
         return {
@@ -47,4 +53,8 @@ class StrategyCheckRecord(Base):
             "risk_warnings": json.loads(str(self.risk_warnings_json)) if self.risk_warnings_json else [],
             "report_text": self.report_text or "",
             "type": "check",
+            # round24 R5: 结构化兜底标识透传
+            "llm_layer_ok": (self.llm_layer_ok or "true") == "true",
+            "is_fallback": (self.is_fallback or "false") == "true",
+            "report_quality": self.report_quality or "full",
         }

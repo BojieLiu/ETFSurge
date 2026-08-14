@@ -104,30 +104,33 @@ class TestP1_1MaxCorrelation:
         return [{"id": "balanced", "allocations": allocs}]
 
     def test_high_corr_pair_reduced(self):
-        """P1-1: r=0.95 的一对合计权重 0.45 超阈值 → 削到 <=0.25，且削低因子分一方。"""
+        """P1-1: r=0.95 的一对（非强制锚）合计权重 0.45 超阈值 → 削到 <=0.25，削低因子分一方。
+
+        注：用非强制锚代码（半导体 512480 / 芯片 512760）以隔离「强制锚豁免」逻辑（见 R2）。
+        """
         allocs = [
-            {"symbol": "510300", "name": "沪深300", "layer": "core",
+            {"symbol": "512480", "name": "半导体", "layer": "satellite",
              "weight": 0.25, "factor_score": 0.8, "factor_breakdown": {}},
-            {"symbol": "159338", "name": "中证A500", "layer": "core",
+            {"symbol": "512760", "name": "芯片", "layer": "satellite",
              "weight": 0.20, "factor_score": 0.4, "factor_breakdown": {}},
             {"symbol": "518880", "name": "黄金", "layer": "defense",
              "weight": 0.15, "factor_score": 0.6, "factor_breakdown": {}},
             {"symbol": "CASH", "weight": 0.40},
         ]
-        matrix = {("510300", "159338"): 0.95}
+        matrix = {("512480", "512760"): 0.95}
         strategies = enforce_max_correlation(self._mk_strategy(allocs), matrix,
                                              threshold=0.9, max_combined_weight=0.25)
         s = strategies[0]
         pair = {a["symbol"]: a["weight"] for a in s["allocations"]
-                if a["symbol"] in ("510300", "159338")}
+                if a["symbol"] in ("512480", "512760")}
         # 合计 <= 阈值（0.25）
-        assert pair["510300"] + pair["159338"] <= 0.25 + 1e-9
-        # 低因子分一方（159338, fs=0.4）被削减
-        assert pair["159338"] < 0.20 + 1e-9
+        assert pair["512480"] + pair["512760"] <= 0.25 + 1e-9
+        # 低因子分一方（512760, fs=0.4）被削减
+        assert pair["512760"] < 0.20 + 1e-9
         # 报告标注 correlation_warnings
         warnings = s["risk_metrics"]["correlation_warnings"]
         assert len(warnings) == 1
-        assert warnings[0]["reduced_symbol"] == "159338"
+        assert warnings[0]["reduced_symbol"] == "512760"
         assert "关联度提示" in warnings[0]["note"]
         # Σ 权重保持 = 1
         assert abs(sum(a["weight"] for a in s["allocations"] if a["symbol"] != "CASH") - 0.60) < 0.01
@@ -135,15 +138,93 @@ class TestP1_1MaxCorrelation:
     def test_low_corr_pair_untouched(self):
         """r=0.5 < 0.9 → 不动，无 warning。"""
         allocs = [
-            {"symbol": "510300", "weight": 0.30, "factor_score": 0.8},
-            {"symbol": "518880", "weight": 0.30, "factor_score": 0.6},
+            {"symbol": "512480", "weight": 0.30, "factor_score": 0.8},
+            {"symbol": "512760", "weight": 0.30, "factor_score": 0.6},
             {"symbol": "CASH", "weight": 0.40},
         ]
-        matrix = {("510300", "518880"): 0.5}
+        matrix = {("512480", "512760"): 0.5}
         s = enforce_max_correlation([{"id": "x", "allocations": allocs}], matrix)[0]
         assert "correlation_warnings" not in s.get("risk_metrics", {})
         weights = {a["symbol"]: a["weight"] for a in s["allocations"]}
-        assert weights["510300"] == 0.30
+        assert weights["512480"] == 0.30
+
+
+# ─── round24 R2/R24⑤: 强制锚关联度削减豁免 ─────────────────────────
+
+class TestR2MandatoryCorrelationExemption:
+    """R2: 强制锚（沪深300/中证A500/黄金/国债）永不被关联度削减击穿 ≥5% 地板。
+
+    design 570 实证：balanced 方案 159338 中证A500（强制锚）被 enforce_max_correlation
+    削到 1%，违反 M7「核心单只 ≥5%」。根因是削减未继承 MANDATORY_CODES 豁免。
+    """
+
+    def _mk(self, allocs):
+        return [{"id": "balanced", "allocations": allocs}]
+
+    def test_both_mandatory_anchors_not_reduced(self):
+        """双方强制锚（510300↔159338，r=0.98）合计 0.45 超阈 → 仅标注、不削减，各自 ≥5%。"""
+        allocs = [
+            {"symbol": "510300", "name": "沪深300", "layer": "core",
+             "weight": 0.25, "factor_score": 0.8},
+            {"symbol": "159338", "name": "中证A500", "layer": "core",
+             "weight": 0.20, "factor_score": -0.96},  # 原 R2 触发方（深负因子分）
+            {"symbol": "518880", "name": "黄金", "layer": "defense",
+             "weight": 0.15, "factor_score": 0.6},
+            {"symbol": "CASH", "weight": 0.40},
+        ]
+        matrix = {("510300", "159338"): 0.98}
+        # 即便 159338 因子分极深负，也不得被削到 1%
+        s = enforce_max_correlation(self._mk(allocs), matrix,
+                                    threshold=0.9, max_combined_weight=0.25)[0]
+        weights = {a["symbol"]: a["weight"] for a in s["allocations"]}
+        assert weights["159338"] >= 0.05 - 1e-9, f"强制锚 159338 被削到 {weights['159338']}"
+        assert weights["510300"] >= 0.05 - 1e-9
+        # 标注存在且不含被削减标的
+        warnings = s["risk_metrics"]["correlation_warnings"]
+        assert len(warnings) == 1
+        assert warnings[0]["reduced_symbol"] is None
+        assert "豁免" in warnings[0]["note"]
+        # 双方强制锚权重不变
+        assert weights["159338"] == 0.20
+        assert weights["510300"] == 0.25
+
+    def test_one_mandatory_anchor_kept(self):
+        """单方强制锚（510300, r=0.95 与非强制 512480 高相关，合计 0.30）→ 削非强制方，强制方 ≥5%。"""
+        allocs = [
+            {"symbol": "510300", "name": "沪深300", "layer": "core",
+             "weight": 0.10, "factor_score": 0.9},
+            {"symbol": "512480", "name": "半导体", "layer": "satellite",
+             "weight": 0.20, "factor_score": 0.3},
+            {"symbol": "CASH", "weight": 0.70},
+        ]
+        matrix = {("510300", "512480"): 0.95}
+        s = enforce_max_correlation(self._mk(allocs), matrix,
+                                    threshold=0.9, max_combined_weight=0.25)[0]
+        weights = {a["symbol"]: a["weight"] for a in s["allocations"]}
+        # 强制锚不被削减
+        assert weights["510300"] == 0.10
+        # 非强制方被削到合计 <= 阈值
+        assert weights["510300"] + weights["512480"] <= 0.25 + 1e-9
+        assert weights["512480"] < 0.20 + 1e-9
+        warnings = s["risk_metrics"]["correlation_warnings"]
+        assert warnings[0]["reduced_symbol"] == "512480"
+
+    def test_defense_anchor_not_reduced(self):
+        """防御强制锚（518880 黄金）与非强制高相关 → 黄金不被削，非强制方被削。"""
+        allocs = [
+            {"symbol": "518880", "name": "黄金", "layer": "defense",
+             "weight": 0.20, "factor_score": 0.7},
+            {"symbol": "159985", "name": "豆粕", "layer": "defense",
+             "weight": 0.20, "factor_score": 0.2},
+            {"symbol": "CASH", "weight": 0.60},
+        ]
+        matrix = {("518880", "159985"): 0.93}
+        s = enforce_max_correlation(self._mk(allocs), matrix,
+                                    threshold=0.9, max_combined_weight=0.25)[0]
+        weights = {a["symbol"]: a["weight"] for a in s["allocations"]}
+        assert weights["518880"] == 0.20          # 强制锚不动
+        # 非强制方被削
+        assert weights["518880"] + weights["159985"] <= 0.25 + 1e-9
 
 
 # ─── P2-5: 结构合理性检查 ─────────────────────────────────────────

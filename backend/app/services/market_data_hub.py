@@ -107,6 +107,111 @@ def _normalize_hot_plate(r: dict) -> dict:
 # round9 P0-8: 560600（幽灵锚，实为医药白酒ETF/零成交）→ 159338（真实中证A500ETF）
 MANDATORY_CODES = {"510300", "159338", "518880", "511090"}
 
+# round24 R1: 强板块 → 代表 ETF 映射（行业/概念板块名称 → 候选池代表 ETF）。
+# 用途：候选池构建时，把动量最强的板块映射成其代表 ETF 注入候选池，避免「强板块未进池、
+# 方案与市场热点脱节」（design 570 实证 strong_sector_pool_coverage=[]）。
+# 键为 compute_sector_momentum 返回的板块名称（板块名称）；值为 (symbol, name, layer, tracked_index)。
+SECTOR_ETF_MAP: dict[str, dict] = {
+    "半导体": {"symbol": "512480", "name": "半导体ETF", "layer": "satellite", "tracked_index": "半导体"},
+    "芯片": {"symbol": "159995", "name": "芯片ETF", "layer": "satellite", "tracked_index": "芯片"},
+    "人工智能": {"symbol": "515980", "name": "人工智能ETF", "layer": "satellite", "tracked_index": "人工智能"},
+    "AI": {"symbol": "515980", "name": "人工智能ETF", "layer": "satellite", "tracked_index": "人工智能"},
+    "5G": {"symbol": "515050", "name": "5G通信ETF", "layer": "satellite", "tracked_index": "5G"},
+    "通信": {"symbol": "515880", "name": "通信ETF", "layer": "satellite", "tracked_index": "通信"},
+    "云计算": {"symbol": "516630", "name": "云计算ETF", "layer": "satellite", "tracked_index": "云计算"},
+    "大数据": {"symbol": "516630", "name": "大数据ETF", "layer": "satellite", "tracked_index": "大数据"},
+    "机器人": {"symbol": "562500", "name": "机器人ETF", "layer": "satellite", "tracked_index": "机器人"},
+    "新能源车": {"symbol": "515030", "name": "新能源车ETF", "layer": "satellite", "tracked_index": "新能源车"},
+    "新能源": {"symbol": "516160", "name": "新能源ETF", "layer": "satellite", "tracked_index": "新能源"},
+    "光伏": {"symbol": "515790", "name": "光伏ETF", "layer": "satellite", "tracked_index": "光伏"},
+    "电池": {"symbol": "159755", "name": "电池ETF", "layer": "satellite", "tracked_index": "电池"},
+    "军工": {"symbol": "512660", "name": "军工ETF", "layer": "satellite", "tracked_index": "军工"},
+    "证券": {"symbol": "512880", "name": "证券ETF", "layer": "satellite", "tracked_index": "证券公司"},
+    "券商": {"symbol": "512880", "name": "证券ETF", "layer": "satellite", "tracked_index": "证券公司"},
+    "银行": {"symbol": "512800", "name": "银行ETF", "layer": "satellite", "tracked_index": "银行"},
+    "保险": {"symbol": "512070", "name": "保险ETF", "layer": "satellite", "tracked_index": "保险"},
+    "地产": {"symbol": "512200", "name": "地产ETF", "layer": "satellite", "tracked_index": "房地产"},
+    "医药": {"symbol": "512010", "name": "医药ETF", "layer": "satellite", "tracked_index": "医药"},
+    "创新药": {"symbol": "159992", "name": "创新药ETF", "layer": "satellite", "tracked_index": "创新药"},
+    "中药": {"symbol": "560080", "name": "中药ETF", "layer": "satellite", "tracked_index": "中药"},
+    "医疗器械": {"symbol": "159883", "name": "医疗器械ETF", "layer": "satellite", "tracked_index": "医疗器械"},
+    "消费": {"symbol": "159928", "name": "消费ETF", "layer": "satellite", "tracked_index": "消费"},
+    "白酒": {"symbol": "161725", "name": "白酒基金", "layer": "satellite", "tracked_index": "中证白酒"},
+    "食品饮料": {"symbol": "515170", "name": "食品饮料ETF", "layer": "satellite", "tracked_index": "食品饮料"},
+    "煤炭": {"symbol": "515220", "name": "煤炭ETF", "layer": "satellite", "tracked_index": "煤炭"},
+    "有色": {"symbol": "159980", "name": "有色ETF", "layer": "satellite", "tracked_index": "有色金属"},
+    "稀土": {"symbol": "516780", "name": "稀土ETF", "layer": "satellite", "tracked_index": "稀土"},
+    "化工": {"symbol": "159870", "name": "化工ETF", "layer": "satellite", "tracked_index": "化工"},
+    "钢铁": {"symbol": "515210", "name": "钢铁ETF", "layer": "satellite", "tracked_index": "钢铁"},
+    "石油": {"symbol": "561760", "name": "石油ETF", "layer": "satellite", "tracked_index": "石油"},
+    "电力": {"symbol": "561560", "name": "电力ETF", "layer": "satellite", "tracked_index": "电力"},
+    "传媒": {"symbol": "512980", "name": "传媒ETF", "layer": "satellite", "tracked_index": "传媒"},
+    "游戏": {"symbol": "159869", "name": "游戏ETF", "layer": "satellite", "tracked_index": "游戏"},
+    "养殖": {"symbol": "159865", "name": "养殖ETF", "layer": "satellite", "tracked_index": "养殖"},
+    "农业": {"symbol": "159825", "name": "农业ETF", "layer": "satellite", "tracked_index": "农业"},
+    "软件": {"symbol": "159899", "name": "软件ETF", "layer": "satellite", "tracked_index": "软件"},
+    "计算机": {"symbol": "159998", "name": "计算机ETF", "layer": "satellite", "tracked_index": "计算机"},
+    "汽车": {"symbol": "516110", "name": "汽车ETF", "layer": "satellite", "tracked_index": "汽车"},
+    "家电": {"symbol": "561120", "name": "家电ETF", "layer": "satellite", "tracked_index": "家电"},
+    "港股通": {"symbol": "513180", "name": "恒生科技ETF", "layer": "satellite", "tracked_index": "恒生科技"},
+    "恒生科技": {"symbol": "513180", "name": "恒生科技ETF", "layer": "satellite", "tracked_index": "恒生科技"},
+    "恒生": {"symbol": "513660", "name": "恒生ETF", "layer": "satellite", "tracked_index": "恒生指数"},
+    "红利": {"symbol": "510880", "name": "红利ETF", "layer": "satellite", "tracked_index": "红利"},
+    "沪深300": {"symbol": "510300", "name": "沪深300ETF", "layer": "core", "tracked_index": "沪深300"},
+    "中证500": {"symbol": "510500", "name": "中证500ETF", "layer": "core", "tracked_index": "中证500"},
+    "中证1000": {"symbol": "512100", "name": "中证1000ETF", "layer": "satellite", "tracked_index": "中证1000"},
+    "创业板": {"symbol": "159915", "name": "创业板ETF", "layer": "core", "tracked_index": "创业板指"},
+    "科创50": {"symbol": "588000", "name": "科创50ETF", "layer": "core", "tracked_index": "科创50"},
+    "科创板": {"symbol": "588000", "name": "科创50ETF", "layer": "core", "tracked_index": "科创50"},
+    "黄金": {"symbol": "518880", "name": "黄金ETF", "layer": "defense", "tracked_index": "黄金"},
+    "国债": {"symbol": "511010", "name": "国债ETF", "layer": "defense", "tracked_index": "国债"},
+}
+
+
+def _strong_sector_etfs(sector_momentum, existing_symbols=None, top_n=8, min_change_pct=0.0):
+    """round24 R1: 强板块动量 TopN → 代表性 ETF 候选（注入 flat/候选池）。
+
+    纯函数，无 I/O。输入 sector_momentum 为 compute_sector_momentum 的输出
+    （[{sector, sector_code, type, change_pct, ...}]）；按 change_pct 降序取 TopN，
+    经 SECTOR_ETF_MAP 映射其代表 ETF，跳过已存在的标的，返回需追加进 flat 的候选 dict
+    （hot_sector=True，composite_score 保底值防被截断挤出）。
+
+    验收：强板块（change_pct 居前）的代表 ETF 进入候选池；熔断/无板块动量时返回 []。
+    """
+    if not sector_momentum:
+        return []
+    ranked = sorted(
+        sector_momentum,
+        key=lambda x: (x.get("change_pct", 0) or 0),
+        reverse=True,
+    )
+    out = []
+    seen = set(existing_symbols or set())
+    for sec in ranked[:top_n]:
+        name = (sec.get("sector") or "").strip()
+        if (sec.get("change_pct", 0) or 0) < min_change_pct:
+            continue
+        etf = SECTOR_ETF_MAP.get(name)
+        if not etf:
+            continue
+        sym = etf["symbol"]
+        if sym in seen:
+            continue
+        seen.add(sym)
+        out.append({
+            "symbol": sym,
+            "name": etf["name"],
+            "amount": 0,
+            "fund_scale": 0,
+            "fund_shares": 0,
+            "layer": etf.get("layer", "satellite"),
+            "tracked_index": etf.get("tracked_index", ""),
+            "hot_sector": True,
+            "composite_score": 0.6,  # 保底值：确保强板块不被后续截断挤出候选池
+            "sector_source": name,
+        })
+    return out
+
 # 层名
 LAYER_CORE = "core"
 LAYER_SATELLITE = "satellite"
@@ -523,6 +628,19 @@ class MarketDataHub:
                 await run_sync(_enrich, flat)
             except Exception:
                 logger.warning("[market_data_hub] F10 tracked_index enrichment failed", exc_info=True)
+
+        # 2.6 round24 R1: 强板块动量注入候选池——避免强板块未进池、方案与市场热点脱节。
+        # 读板块动量缓存（交易时段由 _refresh_market_snapshot 填充；盘后为空 → R26 快照兜底），
+        # 取 TopN 经 SECTOR_ETF_MAP 映射代表 ETF 追加进 flat（hot_sector 标记 + composite_score 保底）。
+        try:
+            _sectors = self.get_sector_momentum()
+            _existing = {f.get("symbol") for f in flat if f.get("symbol")}
+            _injected = _strong_sector_etfs(_sectors, _existing, top_n=8)
+            if _injected:
+                flat.extend(_injected)
+                logger.info("[pool] R1 injected %d strong-sector ETFs into candidate pool", len(_injected))
+        except Exception as _e:
+            logger.warning("[market_data_hub] R1 strong-sector injection failed: %s", _e)
 
         # 3. ETFClassifier 添加行业/概念
         if flat:

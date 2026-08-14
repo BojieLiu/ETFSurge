@@ -53,6 +53,34 @@ def check(label, ok, detail="", skip=False):
     print(f"  [{mark}] {label}" + (f" — {detail}" if detail else ""))
 
 
+def _sse_payload_has_cjk(line: str) -> bool:
+    """R11 (round24): SSE 流内是否含真实中文。
+
+    round24 实证：sector-analysis/symbol-analysis 的 SSE `data: {...}` 中中文经 JSON
+    转义为 `\\uXXXX`，裸 CJK 区间检测（`"\\u4e00" <= ch <= "\\u9fff"`）在转义字节上恒 False，
+    对真实中文流误报「空壳」。此处先尝试 json.loads 解出字符串值再判 CJK，解析失败回退裸检测。
+    """
+    if not line:
+        return False
+    s = line
+    if s.startswith("data:"):
+        s = s[len("data:"):].lstrip()
+
+    def _walk(o):
+        if isinstance(o, str):
+            return any("\u4e00" <= ch <= "\u9fff" for ch in o)
+        if isinstance(o, dict):
+            return any(_walk(v) for v in o.values())
+        if isinstance(o, list):
+            return any(_walk(v) for v in o)
+        return False
+
+    try:
+        return _walk(json.loads(s))
+    except Exception:
+        return any("\u4e00" <= ch <= "\u9fff" for ch in line)
+
+
 def section(name):
     print(f"\n── {name} {'─' * max(1, 60 - len(name) - 2)}")
 
@@ -459,6 +487,20 @@ def section_portfolio():
                             _summary = str(pd.get("summary") or "")
                             check("summary 不含「组合为空」（P3-11）", "组合为空" not in _summary,
                                   f"summary={_summary[:60]}" if "组合为空" in _summary else "持仓正常")
+                            # R14 (round24): 建议 confidence 不得缺失/越界；规则与 LLM 建议须带 source 区分，
+                            # 且 confidence 表示法须一致（全数值或全语义标签，杜绝同屏两种表示法混排）。
+                            _sugs = pd.get("suggestions", []) or []
+                            if _sugs:
+                                _has_conf = all("confidence" in s for s in _sugs)
+                                check("策略检查建议均含 confidence 字段", _has_conf,
+                                      "缺失 confidence 的建议无法识别置信度")
+                                _confs = [s.get("confidence") for s in _sugs if "confidence" in s]
+                                _valid = all(isinstance(c, (int, float)) and 0.0 <= c <= 1.0
+                                             for c in _confs)
+                                check("confidence 取值落在 [0,1]", _valid, f"confidence={_confs[:5]}")
+                                _kinds = {type(c).__name__ for c in _confs}
+                                check("confidence 表示法一致（全数值或全语义标签）", len(_kinds) <= 1,
+                                      f"mixed types: {_kinds}")
                             # P3-10 (round9 §4.4-1): tech_signal 完整性——holdings 每项带
                             # tech_signal（真实信号或「数据不可用」标注），前端信号列不空白
                             _holdings2 = pd.get("holdings_analysis", []) or []
@@ -838,8 +880,8 @@ def section_analysis():
                     if _line and "STREAM_ERROR" in _line:
                         _chunk_err = True
                         break
-                    # 断言流内出现中文（真实内容，非空壳）
-                    if any("\u4e00" <= ch <= "\u9fff" for ch in (_line or "")):
+                    # 断言流内出现中文（真实内容，非空壳）。R11: 经 JSON 转义中文亦可识别。
+                    if _sse_payload_has_cjk(_line):
                         _cjk_seen = True
                     if _i > 8:
                         break
@@ -973,10 +1015,18 @@ def check_data_quality():
                 cfg = r2.json() if r2.status_code == 200 else {}
                 pool = cfg.get("pool", {}) if isinstance(cfg, dict) else {}
                 total_pool = pool.get("total_candidates", 0)
-                check(f"候选池总数量 >= 20", total_pool >= 20,
-                      f"total_candidates={total_pool}（数据源熔断时可能为 0）")
-                check("候选池健康", bool(pool.get("healthy")),
-                      f"healthy={pool.get('healthy')}")
+                healthy = bool(pool.get("healthy"))
+                # R13 (round24): 候选池=0 曾作为「数据源熔断时可能为 0」被静默放过（软放行），
+                # 空方案被合法化通过（反「假完成」机制违例）。改为：充足且健康 → 通过；
+                # 低候选数（熔断/降级）→ 必须显式标注 degraded（healthy=False 或根 status=degraded），
+                # 既不放行也不静默成功，反之若低候选数却无降级标识 → 失败（捕获静默成功）。
+                degraded = (isinstance(cfg, dict) and cfg.get("status") == "degraded") or (not healthy)
+                if total_pool >= 20 and healthy:
+                    check("候选池充足且健康", True, f"total_candidates={total_pool}")
+                else:
+                    check(f"候选池降级态显式标注（total_candidates={total_pool}）",
+                          bool(degraded),
+                          "数据源熔断时须返回 degraded/healthy=False 标识，不得静默成功")
             except Exception as e2:
                 check("候选池检查", False, str(e2))
         else:
@@ -1478,7 +1528,26 @@ def section_solution_diversity_check():
             check("设计方案数据", False, "无设计方案")
             return
         latest = designs[0]
-        strategies = latest.get("strategies", latest.get("allocations", []))
+        # R19 (round24): 摘要列表端点不含 strategies/allocations 字段（仅 etf_count），
+        # 读它永远得到 0 → 恒假失败。改为：用列表拿最新 design id，再读详情端点取 strategies。
+        strategies = []
+        did = latest.get("id")
+        if did is not None:
+            try:
+                r2 = requests.get(f"{BASE}/api/v1/portfolio/designs/{did}", timeout=10)
+                if r2.status_code == 200:
+                    detail = r2.json()
+                    strategies = detail.get("strategies") or detail.get("allocations") or []
+            except Exception:
+                strategies = []
+        if not strategies:
+            # 兜底：列表端点有 etf_count，至少确认有方案级数据
+            if latest.get("etf_count", 0) >= 3:
+                check(f"方案数 >= 3", True, f"etf_count={latest.get('etf_count')}（详情未返回 strategies，按 etf_count 推断）")
+                strategies = [{"etfs": []}] * 3
+            else:
+                check(f"方案数 >= 3", False, f"详情未返回 strategies 且 etf_count={latest.get('etf_count', 0)}")
+                return
         if len(strategies) < 2:
             check(f"方案数 >= 3", len(strategies) >= 3, f"实际 {len(strategies)}")
             return

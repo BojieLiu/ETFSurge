@@ -1331,6 +1331,12 @@ async def strategy_check(
         "data_confidence": data_confidence,
         "coverage": coverage,
         "raw_llm": str(llm_result),
+        # round24 R5: 结构化兜底标识——兜底不再只能靠逐条 source=rule 或 summary 文本识读。
+        # llm_layer_ok=False 且 is_fallback=True 时前端可显式标注「LLM 层降级，规则引擎兜底」，
+        # report_quality 提供与 design 管线一致的枚举口径（full/partial/fallback/empty）。
+        "llm_layer_ok": (not _llm_failed),
+        "is_fallback": bool(_llm_failed),
+        "report_quality": ("fallback" if _llm_failed else "full"),
     }
     # 缓存 60s
     if cache_key:

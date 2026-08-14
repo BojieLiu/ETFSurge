@@ -170,6 +170,10 @@ async def _pipeline_body(mgr, task_id: int) -> dict:
                     result.get("risk_warnings", []), ensure_ascii=False, default=str
                 ),
                 report_text=result.get("report_text", "") or "",
+                # round24 R5: 结构化兜底标识持久化
+                llm_layer_ok=str(bool(result.get("llm_layer_ok", True))).lower(),
+                is_fallback=str(bool(result.get("is_fallback", False))).lower(),
+                report_quality=result.get("report_quality", "full") or "full",
             )
             db.add(record)
             await db.commit()
