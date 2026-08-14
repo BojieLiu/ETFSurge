@@ -23,7 +23,7 @@ from ..services.portfolio_service import (
     list_etfs, add_etf, update_etf, remove_etf,
     calculate_allocation, calculate_daily_pnl, calculate_cumulative_pnl,
     export_portfolio, import_portfolio, calculate_weight_drift,
-    apply_strategy_suggestions, apply_portfolio_design,
+    apply_portfolio_design,
 )
 
 logger = logging.getLogger(__name__)
@@ -129,10 +129,6 @@ async def daily_pnl(
 ):
     return await calculate_daily_pnl(db, req.total_capital, portfolio_type)
 
-
-@router.post("/apply-strategy")
-async def apply_strategy(suggestions: list, db: AsyncSession = Depends(get_db)):
-    return await apply_strategy_suggestions(db, suggestions)
 
 @router.post("/apply-design")
 async def apply_design(design: dict, db: AsyncSession = Depends(get_db)):

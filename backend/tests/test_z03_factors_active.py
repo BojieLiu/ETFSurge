@@ -73,7 +73,8 @@ class TestFactorsActive:
 
     @pytest.mark.asyncio
     async def test_computed_factor_statuses(self):
-        """valid/warn/no_data statuses with reason + sample_count."""
+        """F25②: valid/warn/no_data 分档——samples≥250 且 t≥2 且 |IR|≥0.5 → valid；
+        样本不足 → no_data（积累中）；t/IR 不显著 → warn。"""
         from app.routers import factors as factors_router
         from app.factors.factor_registry import registry
 
@@ -83,20 +84,23 @@ class TestFactorsActive:
             c: self._make_fake_definition(c, c.split(".")[0], ic_threshold=0.02) for c in codes
         }
         fake_ic_batch = {
-            "technical.ma.sma_5": 0.0321,   # valid (>= 0.02)
-            "technical.ma.sma_10": 0.001,   # warn (< 0.02)
+            "technical.ma.sma_5": 0.0321,   # 250+ 天 + 显著 → valid
+            "technical.ma.sma_10": 0.001,   # 250+ 天但不显著（t<2）→ warn
             # style.size.ln_cap missing -> no_data
         }
         fake_sample_counts = {
-            "technical.ma.sma_5": 240,
-            "technical.ma.sma_10": 240,
+            "technical.ma.sma_5": 250,
+            "technical.ma.sma_10": 250,
+        }
+        fake_series_stats = {
+            "technical.ma.sma_5": {"ic_mean": 0.032, "ic_std": 0.05, "ir": 0.64, "t_stat": 2.3},
+            "technical.ma.sma_10": {"ic_mean": 0.001, "ic_std": 0.05, "ir": 0.02, "t_stat": 0.3},
         }
 
         factors_router._CACHE.clear()
-        # round18 P0-4: 端点改读 DB IC 周期计数——mock _db_ic_sample_counts 为
-        # DB 计数源（保留「样本 <30 → no_data」原断言语义，迁移自内存 _sample_counts）
         mock_db = MagicMock()
         factors_router._db_ic_sample_counts = AsyncMock(return_value=fake_sample_counts)
+        factors_router._db_ic_series_stats = AsyncMock(return_value=fake_series_stats)
         with patch.object(registry, "_computers", fake_computers), \
              patch.object(registry, "_factors", fake_factors), \
              patch.object(registry, "_last_ic_batch", fake_ic_batch), \
@@ -114,14 +118,18 @@ class TestFactorsActive:
             for f in cat["factors"]:
                 flat[f["code"]] = f
 
+        # F25②: 250 天 + t≥2 + |IR|≥0.5 → valid（统计显著）
         assert flat["technical.ma.sma_5"]["status"] == "valid"
-        assert flat["technical.ma.sma_5"]["sample_count"] == 240
+        assert flat["technical.ma.sma_5"]["sample_count"] == 250
         assert flat["technical.ma.sma_5"]["ic_value"] == 0.0321
         assert flat["technical.ma.sma_5"]["last_computed_at"] == "2026-07-31T15:00:00Z"
-        assert "≥" in flat["technical.ma.sma_5"]["reason"] or "阈值" in flat["technical.ma.sma_5"]["reason"]
+        assert flat["technical.ma.sma_5"]["t_stat"] == 2.3
+        assert flat["technical.ma.sma_5"]["ir"] == 0.64
+        assert "统计显著" in flat["technical.ma.sma_5"]["reason"]
 
+        # F25②: 250 天但 t<2 → warn（有样本但统计不显著）
         assert flat["technical.ma.sma_10"]["status"] == "warn"
-        assert "阈值" in flat["technical.ma.sma_10"]["reason"]
+        assert "不显著" in flat["technical.ma.sma_10"]["reason"]
 
         assert flat["style.size.ln_cap"]["status"] == "no_data"
         assert flat["style.size.ln_cap"]["ic_value"] is None
@@ -131,10 +139,14 @@ class TestFactorsActive:
         assert data["summary"]["valid"] == 1
         assert data["summary"]["warn"] == 1
         assert data["summary"]["no_data"] == 1
+        # F25②④/F32: summary 门槛与分档
+        assert data["summary"]["min_samples"] == 250
+        assert data["summary"]["observable_days"] == 60
+        assert data["summary"]["significant"] == 1
 
     @pytest.mark.asyncio
     async def test_active_endpoint_http_contract(self):
-        """HTTP contract: /api/v1/factors/active has all Z03 fields."""
+        """HTTP contract: /api/v1/factors/active has all Z03 + F25 fields."""
         from app.main import app
         from app.routers import factors as factors_router
         from app.factors.factor_registry import registry
@@ -146,13 +158,17 @@ class TestFactorsActive:
             codes[1]: self._make_fake_definition(codes[1], "china_specific", name="五年计划"),
         }
         factors_router._CACHE.clear()
+        # F25②: HTTP 契约测试经 FastAPI DI 注入真实 get_db——mock DB 序列统计，
+        # 避免依赖本地 dev DB 的 factor_ic_records 迁移状态（隔离外部状态）
+        factors_router._db_ic_sample_counts = AsyncMock(return_value={"technical.ma.sma_5": 250})
+        factors_router._db_ic_series_stats = AsyncMock(return_value={
+            "technical.ma.sma_5": {"ic_mean": 0.032, "ic_std": 0.05, "ir": 0.64, "t_stat": 2.3},
+        })
         with patch.object(registry, "_computers", fake_computers), \
              patch.object(registry, "_factors", fake_factors), \
              patch.object(registry, "_last_ic_batch", {"technical.ma.sma_5": 0.0321}), \
-             patch.object(registry, "_sample_counts", {"technical.ma.sma_5": 240}), \
+             patch.object(registry, "_sample_counts", {"technical.ma.sma_5": 250}), \
              patch.object(registry, "_last_computed_at", "2026-07-31T15:00:00Z"):
-            # round18 P0-4: HTTP 契约测试经 FastAPI DI 注入真实 get_db（测试库）——
-            # DB 无 IC 记录时回退内存计数，status 断言保持
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 resp = await client.get("/api/v1/factors/active")
@@ -167,10 +183,14 @@ class TestFactorsActive:
                 flat[f["code"]] = f
         # Z03 fields present on every factor
         for f in flat.values():
-            for field in ("status", "reason", "sample_count", "last_computed_at", "ic_value"):
+            for field in ("status", "reason", "sample_count", "last_computed_at", "ic_value",
+                          "ic_mean", "ic_std", "ir", "t_stat"):
                 assert field in f, f"missing field {field} in {f['code']}"
-        # Static factor excluded from summary
+        # sma_5: 250 天 + 显著 → valid；static 因子不计入 summary
+        assert flat["technical.ma.sma_5"]["status"] == "valid"
+        assert data["summary"]["valid"] == 1
         assert data["summary"]["no_data"] == 0
+        assert data["summary"]["min_samples"] == 250  # F32
 
 
 if __name__ == "__main__":

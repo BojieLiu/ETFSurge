@@ -32,7 +32,6 @@ STRATEGY_META: dict[str, dict[str, Any]] = {
         "layer_budget": {"core": 0.50, "satellite": 0.20, "defense": 0.15},
         "layer_count": {"core": 4, "satellite": 4, "defense": 2},
         "core_growth_cap": 0.20,
-        "c2_adjust": {"safe_bonus": 0.8, "risky_penalty": -1.5},
         "expected_characteristics": "预期年化波动10-12%，最大回撤区间10-12%",
     },
     "balanced": {
@@ -49,7 +48,6 @@ STRATEGY_META: dict[str, dict[str, Any]] = {
         "layer_budget": {"core": 0.50, "satellite": 0.20, "defense": 0.15},
         "layer_count": {"core": 5, "satellite": 6, "defense": 1},
         "core_growth_cap": 0.40,
-        "c2_adjust": {"safe_bonus": 0.5, "risky_penalty": 0.0},
         "expected_characteristics": "预期年化波动15-18%，最大回撤区间15-18%",
     },
     "aggressive": {
@@ -66,7 +64,6 @@ STRATEGY_META: dict[str, dict[str, Any]] = {
         "layer_budget": {"core": 0.60, "satellite": 0.30, "defense": 0.05},
         "layer_count": {"core": 6, "satellite": 8, "defense": 1},
         "core_growth_cap": 0.60,
-        "c2_adjust": {"safe_bonus": 0.0, "risky_penalty": 1.5},
         "expected_characteristics": "预期年化波动20-25%，最大回撤区间22-28%",
     },
 }
@@ -92,9 +89,7 @@ class ProfileSpec:
     layer_count: dict[str, int]         # {core, satellite, defense}，目标数量
     core_growth_cap: float              # INV-4：核心层成长宽基占比上限（占 core 预算）
     expected_characteristics: str
-    # c2_adjust：现状为死配置（引擎从未消费）；C2 逻辑用硬编码 _RISKY/_SAFE_THEMES。
-    # 重构中标记 deprecated，保留字段不消费，后续清理。
-    c2_adjust: dict[str, float] | None = None
+    # round23 §6.2c: c2_adjust 死配置已删除（引擎从不消费；C2 逻辑用硬编码 _RISKY/_SAFE_THEMES）
 
 
 def build_profile_specs() -> dict[str, ProfileSpec]:
@@ -114,7 +109,6 @@ def build_profile_specs() -> dict[str, ProfileSpec]:
             layer_count=dict(meta["layer_count"]),
             core_growth_cap=float(meta.get("core_growth_cap", 0.40)),
             expected_characteristics=meta["expected_characteristics"],
-            c2_adjust=meta.get("c2_adjust"),
         )
     return specs
 

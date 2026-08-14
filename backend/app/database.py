@@ -120,3 +120,37 @@ def _migrate(conn):
         ))
     except Exception:
         pass  # watchlist 表不存在（首次建库）时跳过
+    # F15 (round23 §3.3): 存量孤立 avg_cost 清洗——「有成本无份额」（verify_e2e 曾实锤
+    # 20 条半成本持仓）落库路径已拦截，此处清历史残留（幂等，可反复执行）。
+    try:
+        conn.execute(text(
+            "UPDATE portfolio_etfs SET avg_cost = NULL "
+            "WHERE avg_cost IS NOT NULL AND (shares_held IS NULL OR shares_held <= 0)"
+        ))
+    except Exception:
+        pass  # portfolio_etfs 表不存在（首次建库）时跳过
+    # F25① (round23 §8): factor_ic_records 日频重构——trade_date/signal_absent 列 +
+    # (factor_code, trade_date) 唯一索引 + 旧注水数据清空重建。
+    # 决策（2026-08-14 §8 F25 设计要点②）：旧 4306 行 × 18 天是「刷新次数冒充交易日」
+    # 的注水数据，无统计含义，必须清空，否则污染 count(distinct trade_date) 与 t/IR。
+    try:
+        ic_cols = [c["name"] for c in inspector.get_columns("factor_ic_records")]
+        if "trade_date" not in ic_cols:
+            conn.execute(text("ALTER TABLE factor_ic_records ADD COLUMN trade_date DATE"))
+        if "signal_absent" not in ic_cols:
+            conn.execute(text("ALTER TABLE factor_ic_records ADD COLUMN signal_absent BOOLEAN DEFAULT 0"))
+        # 旧格式行（trade_date 为 NULL）→ 清空重建（F25 决策②）
+        legacy = conn.execute(text(
+            "SELECT COUNT(*) FROM factor_ic_records WHERE trade_date IS NULL"
+        )).scalar()
+        if legacy:
+            conn.execute(text("DELETE FROM factor_ic_records"))
+        try:
+            conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_factor_ic_code_date "
+                "ON factor_ic_records (factor_code, trade_date)"
+            ))
+        except Exception:
+            pass  # 索引已存在/不支持时幂等跳过
+    except Exception:
+        pass  # factor_ic_records 表不存在（首次建库）时跳过

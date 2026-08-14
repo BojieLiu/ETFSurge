@@ -110,23 +110,6 @@ GET /api/v1/market/stock-hot-rank
 > `concept_tags` 由数据源 `tag` 字符串（`ast.literal_eval`）解析为数组；非法字符串返回 `[]`。
 > `sector` 优先取批量行情自带字段，其次行业映射，最后空串。
 
-### 2.4 市场风向 / Market Wind
-
-```
-GET /api/v1/market/wind
-```
-
-**成功响应 — `200 OK`:**
-
-```json
-[
-  {
-    "plate_name": "科技主线",
-    "description": "AI算力、半导体等持续走强"
-  }
-]
-```
-
 ---
 
 ## 3. 变更记录 / Changelog
@@ -142,6 +125,5 @@ GET /api/v1/market/wind
 | /hot-plates route | ✅ | ✅ | GET /api/v1/market/hot-plates（v2.0 归一化） |
 | /sectors/heat route | ✅ | ✅ | GET /api/v1/market/sectors/heat（v2.0 新增） |
 | /stock-hot-rank route | ✅ | ✅ | GET /api/v1/market/stock-hot-rank（含 concept_tags） |
-| /wind route | ☐ | ✅ | GET /api/v1/market/wind |
 | SectorHeatMap component | ✅ | N/A | 展示 name/reason/lead_stocks + 个股 price/sector/turnover/chip |
 | Cache layer get_hot_plates/get_sector_heat | N/A | ✅ | market_data_hub（limit 传值时实时取数） |

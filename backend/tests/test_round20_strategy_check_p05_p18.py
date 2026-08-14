@@ -319,25 +319,30 @@ class TestP1_9FactorDataQuality:
         assert "降级" in report["note"], "降级时应含降级说明"
 
     def test_not_degraded_when_valid_high(self, monkeypatch):
-        """valid 率 >=60% → 不降级。"""
+        """valid 率 >=60% → 不降级（F25②: 260 交易日 + t≥2 + |IR|≥0.5 才计 valid）。"""
         from app.services import strategy_design as sd
         from app.factors import factor_registry as freg
 
         fake_factors = {f"test.factor_{i}": {"name": f"F{i}"} for i in range(10)}
-        # 8 个有效 IC（真实结构 {code: [ic, ...]}，样本 ≥MIN_IC_SAMPLES）+ 2 个 no_data
-        fake_ic = {f"test.factor_{i}": [0.05] for i in range(8)}
+        # 8 个统计显著 IC 序列（均值 ~0.05、低方差 → t 高/IR 高）+ 2 个 no_data。
+        # 注意不能用常量序列（std=0 → t=0 不显著），须带微小波动使 NW-t 显著。
+        fake_ic = {
+            f"test.factor_{i}": [0.05 + (i % 7) * 0.002 for i in range(260)]
+            for i in range(8)
+        }
         fake_ic.update({f"test.factor_{i}": None for i in range(8, 10)})
 
         monkeypatch.setattr(freg.registry, "_factors", fake_factors)
         monkeypatch.setattr(freg.registry, "_ic_series_cache", fake_ic)
         monkeypatch.setattr(freg.registry, "_data_source_gaps", {})
         monkeypatch.setattr(freg.registry, "_constant_factor_codes", set())
-        # 样本 ≥ MIN_IC_SAMPLES(30) → IC 视为已累积 → valid
+        # F25②: 样本 ≥ MIN_TRADING_DAYS(250) + 序列统计显著 → valid
         monkeypatch.setattr(freg.registry, "_sample_counts",
-                            {f"test.factor_{i}": 40 for i in range(8)})
+                            {f"test.factor_{i}": 260 for i in range(8)})
 
         report = sd._factor_data_quality_report()
-        assert report["valid_rate"] >= 0.6
+        assert report["valid"] >= 8, f"显著因子数应 ≥8，实际 {report}"
+        assert report["valid_rate"] >= 0.6, f"valid 率应 ≥0.6，实际 {report}"
         assert report["degraded"] is False
 
 

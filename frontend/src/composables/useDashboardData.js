@@ -90,8 +90,8 @@ export function useDashboardData(capitalOn, capitalOff, activeTab) {
   async function fetchPnl() {
     try {
       const [onRes, offRes] = await Promise.all([
-        portfolioApi.getPnl('on_exchange', capitalOn.value),
-        portfolioApi.getPnl('off_exchange', capitalOff.value)
+        portfolioApi.dailyPnl(capitalOn.value, 'on_exchange'),
+        portfolioApi.dailyPnl(capitalOff.value, 'off_exchange')
       ])
       pnlOnData.value = onRes.data || { items: [] }
       pnlOffData.value = offRes.data || { items: [] }

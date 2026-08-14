@@ -9,7 +9,7 @@ import asyncio
 import time
 from collections.abc import Callable
 from ..core.logging import get_logger
-from ..services.source_registry import registry
+from ..core.source_registry import registry
 
 logger = get_logger(__name__)
 
@@ -36,13 +36,13 @@ async def run_probes():
             )
             elapsed = (time.perf_counter() - t0) * 1000
             if result:
-                registry._health(name).record_success(
+                registry.health(name).record_success(
                     route="probe", operation="probe", target="",
                     duration_ms=elapsed
                 )
                 logger.debug(f"[health] {name} OK ({elapsed:.0f}ms)")
             else:
-                registry._health(name).record_failure(
+                registry.health(name).record_failure(
                     now, route="probe", operation="probe", target="",
                     duration_ms=elapsed,
                     error_message=f"probe returned empty for {name}"
@@ -50,7 +50,7 @@ async def run_probes():
                 logger.warning(f"[health] {name} returned empty → cooling")
         except Exception as e:
             elapsed = (time.perf_counter() - t0) * 1000
-            registry._health(name).record_failure(
+            registry.health(name).record_failure(
                 now, route="probe", operation="probe", target="",
                 duration_ms=elapsed,
                 error_message=str(e)[:200]

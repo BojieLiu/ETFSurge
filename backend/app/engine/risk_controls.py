@@ -29,16 +29,16 @@ class RiskSettings:
     min_weight: float = 0.01
     # Reserve for future constraints (e.g., correlation, turnover)
     max_correlation: float = 0.95
-    max_turnover_rate: float = 0.50
+    # round23 §6.2: max_turnover_rate 零调用已删除（死配置，引擎从不消费）
 
 
 # Global settings singleton — importers can modify as needed
 RISK_SETTINGS = RiskSettings()
 
 
-# round15 9-F1: 市态归一化（与 market_data_hub._normalize_regime 同口径，
-# 供 apply_core_bear_growth_trim 判定熊市/回调/恐慌）
-_BEARISH_REGIMES = {"bear", "correction", "panic"}
+# round15 9-F1: 市态归一化——E2 (round23 §10.2): 提取 core/regime 单一口径
+#（market_data_hub._normalize_regime 与 risk_controls 熊市判定共用），不再注释式同步。
+from ..core.regime import is_bearish_regime
 
 
 def apply_core_bear_growth_trim(
@@ -62,7 +62,7 @@ def apply_core_bear_growth_trim(
     """
     from .allocation_engine import MANDATORY_CODES
 
-    if regime not in _BEARISH_REGIMES:
+    if not is_bearish_regime(regime):
         return allocations
     released = 0.0
     for a in allocations:

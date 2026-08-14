@@ -8,10 +8,11 @@ including them in portfolio design weights.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, update
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import numpy as np
@@ -19,6 +20,63 @@ import pandas as pd
 from scipy.stats import spearmanr
 
 logger = logging.getLogger(__name__)
+
+
+def _beijing_today() -> Any:
+    """F25①: 交易日取北京时间（UTC+8）——容器 TZ 未设时进程为 UTC，直接 utcnow()
+    会把交易日算成前一天，且与 news 时间戳时区修复（F24）口径不一致。"""
+    return (datetime.now(timezone.utc) + timedelta(hours=8)).date()
+
+
+def _newey_west_se(values: np.ndarray, lag: int = 1) -> float:
+    """Newey-West 标准误（lag=1，日频 IC 自相关调整）。
+
+    文档 F25②: naive √T 低估日频 IC 自相关导致的 SE，t 检验需 NW 调整。
+    var_nw = γ0 + 2·Σ_{l=1..lag} (1 - l/(lag+1))·γl，其中 γl = (1/T)Σ u_t·u_{t-l}。
+    """
+    n = len(values)
+    mean = float(values.mean())
+    resid = values - mean
+    var = float((resid ** 2).sum()) / n
+    for l in range(1, lag + 1):
+        cov = float((resid[:-l] * resid[l:]).sum()) / n
+        var += 2.0 * (1.0 - l / (lag + 1.0)) * cov
+    if var <= 0:
+        return 0.0
+    return float(np.sqrt(var / n))
+
+
+def compute_series_stats(ic_values: list[float]) -> dict[str, float | None] | None:
+    """F25②: IC 序列统计——IC_mean/IC_std/IR/t（Newey-West lag=1 SE）。
+
+    业内判据（docs/round23 §8 F25②）:
+    - IC_mean = mean(ic)；IC_std = std(ic)（样本标准差）
+    - IR = IC_mean / IC_std；t = IC_mean / SE(NW) （等价 IC_mean×√T/IC_std_NW）
+    - 有效需 t≥2 且 |IR|≥0.5，样本 ≥ MIN_TRADING_DAYS。
+
+    Returns:
+        {"ic_mean","ic_std","ir","t_stat"}（ir 可为 None——恒常序列无 IR）或 None。
+    """
+    arr = np.asarray([float(v) for v in ic_values if v is not None and v == v], dtype=float)
+    if len(arr) < 2:
+        return None
+    ic_mean = float(arr.mean())
+    ic_std = float(arr.std(ddof=1))
+    if ic_std == 0:
+        # 恒常 IC 序列：无方差 → IR 无定义、t=0（不显著），不抛异常
+        return {"ic_mean": round(ic_mean, 4), "ic_std": 0.0, "ir": None, "t_stat": 0.0}
+    ir = ic_mean / ic_std
+    se = _newey_west_se(arr, lag=1)
+    if se > 0:
+        t_stat = ic_mean / se
+    else:
+        t_stat = float("inf") if ic_mean != 0 else 0.0
+    return {
+        "ic_mean": round(ic_mean, 4),
+        "ic_std": round(ic_std, 4),
+        "ir": round(ir, 4),
+        "t_stat": round(t_stat, 4),
+    }
 
 
 def build_forward_returns(
@@ -217,60 +275,94 @@ class ICTracker:
             return float('inf')
         return float(ic_series.mean() / std)
 
-    async def save_ic_batch_to_db(self, session: AsyncSession, ic_batch: dict[str, float]) -> int:
-        """Persist the current IC batch to the database.
+    async def save_ic_batch_to_db(self, session: AsyncSession, ic_batch: dict[str, float],
+                                  trade_date=None) -> int:
+        """Persist the current IC batch to the database（F25① 日频 upsert）。
+
+        F25① (round23 §8): 存储粒度改为「日频 1 行/因子」——(factor_code, trade_date)
+        唯一，同一天多次刷新只 upsert 覆盖、不追加。旧实现每 120s 刷新存 1 行
+        （4306 行/18 天 ≈240× 虚高 sample_count），被 MIN_IC_SAMPLES=30 在开机 1h
+        内全部跨过 →「有效 16」无统计含义。
+
+        F25③/F30: 近零 IC（abs<0.0001）不再丢弃——标记 signal_absent=True 仍落库
+        （IC 记 0），修复生存者偏差（旧 `continue` 使落库序列系统性高估 |IC|）。
 
         Args:
             session: SQLAlchemy async session
             ic_batch: {factor_code: ic_value} dict from registry._last_ic_batch
+            trade_date: 交易日（默认北京时间当天；测试可注入固定日期）
 
         Returns:
-            Number of records saved
+            Number of records upserted
         """
         from ..models.factor_ic import FactorICRecord  # lazy import to avoid circular dependency
 
+        if not ic_batch:
+            return 0
+        trade_date = trade_date or _beijing_today()
+        now = datetime.now(timezone.utc)
         count = 0
-        now = datetime.utcnow()
         for code, ic_val in ic_batch.items():
-            # U3/N06: 过滤 None / NaN / 0 值（旧逻辑只过滤 0，NaN 会落库）
+            # U3/N06: 过滤 None / NaN（常量输入/不可计算）——signal_absent 只标近零，
+            # 不标「不可计算」（那类本就无 IC 语义，不占日频行）
             if ic_val is None:
                 continue
             if isinstance(ic_val, float) and (ic_val != ic_val):  # NaN 自比较
                 continue
-            if abs(ic_val) < 0.0001:
-                continue
-            record = FactorICRecord(
+            signal_absent = abs(ic_val) < 0.0001
+            stored_ic = 0.0 if signal_absent else round(float(ic_val), 4)
+            stmt = sqlite_insert(FactorICRecord).values(
                 factor_code=code,
-                ic_value=round(float(ic_val), 4),
-                sample_count=await self._get_ic_sample_count_db(session, code),
+                ic_value=stored_ic,
+                ic_ir=0.0,
+                signal_absent=signal_absent,
                 computed_at=now,
+                trade_date=trade_date,
             )
-            session.add(record)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["factor_code", "trade_date"],
+                set_={
+                    "ic_value": stored_ic,
+                    "signal_absent": signal_absent,
+                    "computed_at": now,
+                },
+            )
+            await session.execute(stmt)
             count += 1
+
+        # F25①: sample_count 语义 = count(distinct trade_date)（累计交易日数）
+        for code in ic_batch:
+            sc = await self._get_ic_sample_count_db(session, code)
+            await session.execute(
+                update(FactorICRecord)
+                .where(
+                    FactorICRecord.factor_code == code,
+                    FactorICRecord.trade_date == trade_date,
+                )
+                .values(sample_count=sc)
+            )
 
         await session.commit()
         return count
 
     async def _get_ic_sample_count_db(self, session: AsyncSession, factor_code: str) -> int:
-        """P0-12 (round16 3.13 R2/R3): 样本数统计「IC 累积周期数」而非单批非零符号数。
+        """P0-12 (round16 3.13 R2/R3): 样本数统计「IC 累积周期数」。
 
-        旧实现 `sum(self._records ...)` 只统计本批内存 records（候选池空时恒 0），
-        且语义是「非零符号数」（恒 <30）→ P0-C 永远误标 no_data。现改为从 DB
-        factor_ic_records 按 factor_code 分组 count——即该因子已累积的 IC 周期数，
-        MIN_IC_SAMPLES=30 对齐「≥30 个 IC 周期」。
+        F25① (round23): 周期数语义修正——由 `count(*)`（刷新次数，240× 虚高）改为
+        `count(distinct trade_date)`（日频交易日数，1 天 1 期）。合理值现 ≈运行天数，
+        随运行增长；`MIN_TRADING_DAYS=250` 为有效门槛（对齐业内 t≥2 所需样本量）。
         """
         from ..models.factor_ic import FactorICRecord  # lazy import 防循环依赖
 
         try:
-            stmt = select(func.count()).select_from(FactorICRecord).where(
-                FactorICRecord.factor_code == factor_code
-            )
+            stmt = select(func.count(func.distinct(FactorICRecord.trade_date))).select_from(
+                FactorICRecord
+            ).where(FactorICRecord.factor_code == factor_code)
             total = (await session.execute(stmt)).scalar_one_or_none() or 0
-            # 本批刚插入的行尚未在本次查询内（session 未 flush），+1 代表即将落库的这一条
-            return int(total) + 1
+            return int(total)
         except Exception as e:  # noqa: BLE001 - DB 不可用时回退内存计数
             logger.warning("[ic_tracker] DB sample count failed (fallback memory): %s", e)
-            return self._get_ic_sample_count(factor_code) + 1
+            return self._get_ic_sample_count(factor_code)
 
     def _get_ic_sample_count(self, factor_code: str) -> int:
         """Count occurrences of *factor_code* in internal records（内存语义，兼容旧调用）。"""

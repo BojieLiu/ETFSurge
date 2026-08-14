@@ -9,7 +9,7 @@
 import time
 import pytest
 from typing import Any, Callable
-from app.services.source_registry import SourceRegistry
+from app.core.source_registry import SourceRegistry
 
 
 def _make_fn(return_value, fail_count=0):
@@ -92,7 +92,7 @@ class TestRouteFallback:
     def test_circuit_breaker_skips_unhealthy_source(self, fresh_registry):
         """熔断器打开后跳过该源，直接尝试下一个。"""
         source_name = "breaker_skip"
-        h = fresh_registry._health(source_name)
+        h = fresh_registry.health(source_name)
         now = time.time()
         for _ in range(3):
             h.record_failure(now, route="test_route")
@@ -109,7 +109,7 @@ class TestRouteFallback:
     def test_circuit_breaker_recovers_after_cooldown(self, fresh_registry):
         """熔断器冷却后恢复可用。"""
         source_name = "breaker_recover"
-        h = fresh_registry._health(source_name)
+        h = fresh_registry.health(source_name)
         now = time.time()
         for _ in range(3):
             h.record_failure(now, route="test_route")
@@ -159,7 +159,7 @@ class TestRouteFallback:
     def test_route_records_success_metrics(self, fresh_registry):
         """route 成功后更新健康指标。"""
         source_name = "metric_source"
-        h = fresh_registry._health(source_name)
+        h = fresh_registry.health(source_name)
         now = time.time()
         assert h.available(now)
 
@@ -190,7 +190,7 @@ class TestTryCallFallback:
     def test_try_call_records_failure(self, fresh_registry):
         """try_call 异常后该源应变为不可用（熔断/冷却）。"""
         source_name = "try_fail_count"
-        h = fresh_registry._health(source_name)
+        h = fresh_registry.health(source_name)
         assert h.available(time.time())
 
         fresh_registry.try_call(source_name, _make_fail_fn())
@@ -203,7 +203,7 @@ class TestSourceHealthIndicators:
     def test_health_resets_on_success(self, fresh_registry):
         """成功后失败计数器归零。"""
         source_name = "reset_test"
-        h = fresh_registry._health(source_name)
+        h = fresh_registry.health(source_name)
 
         now = time.time()
         h.record_failure(now, route="test")
@@ -219,7 +219,7 @@ class TestSourceHealthIndicators:
     def test_failure_threshold_triggers_circuit(self, fresh_registry):
         """达到失败阈值后触发熔断。"""
         source_name = "threshold_test"
-        h = fresh_registry._health(source_name)
+        h = fresh_registry.health(source_name)
         now = time.time()
 
         assert h.available(now)
@@ -235,7 +235,7 @@ class TestSourceHealthIndicators:
     def test_success_after_failure_resets(self, fresh_registry):
         """失败后的一次成功应重置计数器。"""
         source_name = "reset_after_failure"
-        h = fresh_registry._health(source_name)
+        h = fresh_registry.health(source_name)
 
         h.record_failure(time.time(), route="test")
         assert h._failures == 1
@@ -247,7 +247,7 @@ class TestSourceHealthIndicators:
     def test_circuit_breaker_status(self, fresh_registry):
         """circuit_breaker_status() 返回各源熔断状态列表。"""
         source_name = "status_test"
-        h = fresh_registry._health(source_name)
+        h = fresh_registry.health(source_name)
 
         status = fresh_registry.circuit_breaker_status()
         assert isinstance(status, (list, tuple))

@@ -6,6 +6,7 @@
 import asyncio
 
 import pytest
+from unittest.mock import AsyncMock
 
 from app.factors import factor_registry as fr
 
@@ -99,6 +100,7 @@ def test_factors_active_sentiment_not_no_data(monkeypatch):
     """IC batch 含 sentiment 因子 → factors/active 该因子不再 no_data。"""
     from fastapi.testclient import TestClient
     from app.main import app
+    from app.routers import factors as factors_router
 
     client = TestClient(app)
     # 模拟 IC batch 含 sentiment 值（注入后 compute 产出非 0 → 进 batch）
@@ -107,12 +109,16 @@ def test_factors_active_sentiment_not_no_data(monkeypatch):
         "sentiment.news_heat": 0.024,
         "sentiment.news_direction": 0.028,
     }
-    # round14 P0-C: IC 最小样本保护——样本 ≥30 才有效（否则视为未累积 no_data）
+    # F25②: 显著性判据 = 交易日 ≥250 且 t≥2 且 |IR|≥0.5。mock 260 交易日 +
+    # 显著序列统计；news_heat 非市场级因子 → valid，另两个为市场级 → static。
     fr.registry._sample_counts = {
-        "sentiment.panic_greed_diff": 120,
-        "sentiment.news_heat": 120,
-        "sentiment.news_direction": 120,
+        "sentiment.panic_greed_diff": 260,
+        "sentiment.news_heat": 260,
+        "sentiment.news_direction": 260,
     }
+    factors_router._db_ic_series_stats = AsyncMock(return_value={
+        "sentiment.news_heat": {"ic_mean": 0.024, "ic_std": 0.03, "ir": 0.8, "t_stat": 3.1},
+    })
     resp = client.get("/api/v1/factors/active")
     assert resp.status_code == 200
     body = resp.json()
@@ -123,5 +129,6 @@ def test_factors_active_sentiment_not_no_data(monkeypatch):
             for f in cat.get("factors", []):
                 if f.get("code") in target:
                     found.add(f.get("code"))
-                    assert f.get("status") != "no_data", f"{f['code']} 仍 no_data"
+                    # F25②: news_heat 260 天 + 显著 → valid（非 no_data）；两个市场级因子 → static
+                    assert f.get("status") in ("valid", "static"), f"{f['code']} 状态异常: {f['status']}"
     assert found == target

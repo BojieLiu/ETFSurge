@@ -34,10 +34,14 @@ vi.mock('../stores/portfolio', () => ({
   }),
 }))
 
-const apiMock = vi.hoisted(() => ({ headlines: vi.fn(), newsImpact: vi.fn() }))
+const apiMock = vi.hoisted(() => ({ headlines: vi.fn(), newsImpact: vi.fn(), macro: vi.fn(), globalNews: vi.fn(), stockNews: vi.fn(), research: vi.fn() }))
 vi.mock('../api', () => ({
   newsApi: {
     headlines: (...a) => apiMock.headlines(...a),
+    macro: (...a) => apiMock.macro(...a),
+    globalNews: (...a) => apiMock.globalNews(...a),
+    stockNews: (...a) => apiMock.stockNews(...a),
+    research: (...a) => apiMock.research(...a),
     newsImpact: (...a) => apiMock.newsImpact(...a),
   },
 }))
@@ -262,5 +266,83 @@ describe('NewsView', () => {
     expect(wrapper.find('.impact-inline').exists()).toBe(true)
     expect(wrapper.text()).toContain('全市场')
     expect(wrapper.text()).toContain('上证50ETF')
+  })
+
+  // ── F29 (round23 §2.4 A4): 资讯分类 tab ──
+  it('renders five news category tabs (F29)', async () => {
+    apiMock.headlines.mockResolvedValue({ data: SAMPLE })
+    const wrapper = mount(NewsView, { global: { stubs: { VChart: true } } })
+    await flushPromises()
+
+    const tabs = wrapper.findAll('.news-tab')
+    expect(tabs.map(t => t.text())).toEqual(['头条', '宏观', '国际', '个股', '研报'])
+  })
+
+  it('switches to macro tab and loads macro endpoint (F29)', async () => {
+    apiMock.headlines.mockResolvedValue({ data: SAMPLE })
+    apiMock.macro.mockResolvedValue({ data: [{ id: 'm1', title: '央行降准', level: 4, time: '11:00' }] })
+    const wrapper = mount(NewsView, { global: { stubs: { VChart: true } } })
+    await flushPromises()
+
+    await wrapper.findAll('.news-tab')[1].trigger('click')
+    await flushPromises()
+
+    expect(apiMock.macro).toHaveBeenCalled()
+    expect(wrapper.findAll('.news-item').length).toBe(1)
+    expect(wrapper.text()).toContain('央行降准')
+  })
+
+  it('switches to research tab with symbol input (F29)', async () => {
+    apiMock.headlines.mockResolvedValue({ data: [] })
+    apiMock.research.mockResolvedValue({ data: [{ id: 'r1', title: '研报：维持买入', level: 3, time: '09:00' }] })
+    const wrapper = mount(NewsView, { global: { stubs: { VChart: true } } })
+    await flushPromises()
+
+    await wrapper.findAll('.news-tab')[4].trigger('click')
+    await flushPromises()
+
+    expect(apiMock.research).toHaveBeenCalledWith('600519')
+    expect(wrapper.text()).toContain('研报：维持买入')
+  })
+
+  it('WS push ignored outside headlines tab (F29)', async () => {
+    apiMock.headlines.mockResolvedValue({ data: [] })
+    apiMock.macro.mockResolvedValue({ data: [{ id: 'm1', title: '宏观新闻', level: 4, time: '11:00' }] })
+    const wrapper = mount(NewsView, { global: { stubs: { VChart: true } } })
+    await flushPromises()
+
+    // 切到宏观 tab
+    await wrapper.findAll('.news-tab')[1].trigger('click')
+    await flushPromises()
+
+    // WS 推送不应混入宏观列表
+    h.getHandler()({ type: 'news', data: { id: 99, title: '头条突发', level: 5 } })
+    await wrapper.vm.$nextTick()
+
+    const items = wrapper.findAll('.news-item')
+    expect(items.length).toBe(1)
+    expect(items[0].text()).toContain('宏观新闻')
+    expect(items[0].text()).not.toContain('头条突发')
+  })
+
+  // ── F31 (round23 §2.4 A4): 冷启动 partial 标识 ──
+  it('shows partial banner when X-News-Partial header is true (F31)', async () => {
+    apiMock.headlines.mockResolvedValue({
+      data: [{ id: 'p1', title: '仅一条', level: 3, time: '11:00' }],
+      headers: { 'x-news-partial': 'true' },
+    })
+    const wrapper = mount(NewsView, { global: { stubs: { VChart: true } } })
+    await flushPromises()
+
+    expect(wrapper.find('.news-partial-banner').exists()).toBe(true)
+    expect(wrapper.text()).toContain('数据刷新中')
+  })
+
+  it('no partial banner when header absent (F31)', async () => {
+    apiMock.headlines.mockResolvedValue({ data: SAMPLE, headers: {} })
+    const wrapper = mount(NewsView, { global: { stubs: { VChart: true } } })
+    await flushPromises()
+
+    expect(wrapper.find('.news-partial-banner').exists()).toBe(false)
   })
 })

@@ -126,41 +126,12 @@ GET /api/v1/market/sectors/concept
 
 **降级响应**: 实时数据源不可用时，仅返回 `sector_code`/`sector_name`（见上）。
 
-### 2.3 行业板块实时行情(财联社) / Industry CLS
+### 2.4 板块成分股 / Sector Stocks（round23 §6.1 已删路由，保留文档占位说明）
 
-```
-GET /api/v1/market/sectors/industry-cls
-```
-
-| Query | Type | Required | Default | Description |
-|-------|------|----------|---------|-------------|
-| limit | int | No | 80 | 返回最大条数 |
-
-**成功响应 — `200 OK`:** 财联社行业板块实时行情数据（数组，每项含板块代码、涨跌幅等）。
-
-### 2.4 板块成分股 / Sector Stocks
-
-```
-GET /api/v1/market/sectors/{sector_code}/stocks
-```
-
-| Path | Type | Required | Description |
-|------|------|----------|-------------|
-| sector_code | string | Yes | 板块代码（如 `BK0447`） |
-
-**成功响应 — `200 OK`:** 东方财富板块成分股列表（数组）。
-
-### 2.5 板块热门个股 / Sector Popular Stocks
-
-```
-GET /api/v1/market/sectors/{plate_code}/popular
-```
-
-| Path | Type | Required | Description |
-|------|------|----------|-------------|
-| plate_code | string | Yes | 板块代码 |
-
-**成功响应 — `200 OK`:** 财联社板块热门个股列表（数组）。
+> **round23 §6.1（2026-08-14）**: `GET /sectors/industry-cls`、`GET /sectors/{sector_code}/stocks`、
+> `GET /sectors/{plate_code}/popular` 三路由为死端点（0 生产调用方），已删除。
+> 底层能力由保留端点提供：`GET /sectors/rotation`（板块轮动）、`GET /sectors`（统一板块列表）。
+> 底层 service 函数 `get_sector_stocks`/`get_sector_popular_stocks` 仍被 strategy_design/analysis 调用。
 
 ---
 

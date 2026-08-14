@@ -123,16 +123,19 @@ class TestP04FactorsDbSampleCount:
                                 standardization="zscore", ic_threshold=0.02)
 
     @pytest.mark.asyncio
-    async def test_db_count_over_30_status_valid(self):
-        """DB 计数 40（>30）+ |IC|≥阈值 → status=valid（负向: 内存计数 ≈11 →
-        no_data → FAIL——旧实现误标「数据积累中」）。"""
+    async def test_db_count_over_250_significant_valid(self):
+        """F25②: DB 日频交易日 260（≥250）+ t≥2 + |IR|≥0.5 → status=valid
+        （负向: 40 天 → no_data 积累中——旧「30 周期即 valid」判据已废弃）。"""
         from app.routers import factors as factors_router
         from app.factors.factor_registry import registry
 
         code = "technical.ma.sma_5"
         factors_router._CACHE.clear()
         mock_db = MagicMock()
-        factors_router._db_ic_sample_counts = AsyncMock(return_value={code: 40})
+        factors_router._db_ic_sample_counts = AsyncMock(return_value={code: 260})
+        factors_router._db_ic_series_stats = AsyncMock(return_value={
+            code: {"ic_mean": 0.032, "ic_std": 0.05, "ir": 0.64, "t_stat": 2.3},
+        })
         with patch.object(registry, "_computers", {code: (lambda x: 0.0)}), \
              patch.object(registry, "_factors", {code: self._make_def(code, "technical")}), \
              patch.object(registry, "_last_ic_batch", {code: 0.0321}), \
@@ -144,29 +147,35 @@ class TestP04FactorsDbSampleCount:
         data = json.loads(body.body) if isinstance(body.body, bytes) else body.body
         flat = {f["code"]: f for cat in data["categories"] for f in cat["factors"]}
         f = flat[code]
-        assert f["status"] == "valid", f"DB 计数 40 > 30 应 valid，实得 {f['status']}: {f['reason']}"
-        assert f["sample_count"] == 40
+        assert f["status"] == "valid", f"260 交易日 + 显著应 valid，实得 {f['status']}: {f['reason']}"
+        assert f["sample_count"] == 260
+        assert f["t_stat"] == 2.3
         factors_router._CACHE.clear()
 
     @pytest.mark.asyncio
-    async def test_db_count_below_30_still_no_data(self):
-        """DB 计数 10 < 30 → 仍 no_data（保留「样本 <30 → no_data」原断言）。"""
+    async def test_db_count_40_days_still_no_data(self):
+        """F25②: 40 个交易日（积累中，未达可观察下限 60）→ no_data，
+        即使 |IC| 高（旧「40>30 → valid」判据已废弃——40 天无统计含义）。"""
         from app.routers import factors as factors_router
         from app.factors.factor_registry import registry
 
         code = "technical.ma.sma_5"
         factors_router._CACHE.clear()
         mock_db = MagicMock()
-        factors_router._db_ic_sample_counts = AsyncMock(return_value={code: 10})
+        factors_router._db_ic_sample_counts = AsyncMock(return_value={code: 40})
+        factors_router._db_ic_series_stats = AsyncMock(return_value={
+            code: {"ic_mean": 0.032, "ic_std": 0.05, "ir": 0.64, "t_stat": 1.1},
+        })
         with patch.object(registry, "_computers", {code: (lambda x: 0.0)}), \
              patch.object(registry, "_factors", {code: self._make_def(code, "technical")}), \
              patch.object(registry, "_last_ic_batch", {code: 0.0321}), \
-             patch.object(registry, "_sample_counts", {code: 10}), \
+             patch.object(registry, "_sample_counts", {code: 40}), \
              patch.object(registry, "_last_computed_at", "2026-07-31T15:00:00Z"):
             body = await factors_router.get_active_factors(db=mock_db)
 
         import json
         data = json.loads(body.body) if isinstance(body.body, bytes) else body.body
         flat = {f["code"]: f for cat in data["categories"] for f in cat["factors"]}
-        assert flat[code]["status"] == "no_data", "样本 <30 仍应 no_data（数据积累中）"
+        assert flat[code]["status"] == "no_data", "40 交易日仍应 no_data（积累中）"
+        assert "积累" in flat[code]["reason"]
         factors_router._CACHE.clear()

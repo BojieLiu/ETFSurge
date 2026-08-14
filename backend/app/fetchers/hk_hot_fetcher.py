@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 # R61/R63: 域名不散落硬编码——统一引用 market_context 集中常量
 from ..core.market_context import EM_PUSH_HOST  # noqa: E402
-from ..services.source_registry import registry  # noqa: E402
+from ..core.source_registry import registry  # noqa: E402
 
 # P2-6: 双源路由 + 熔断由 SourceRegistry 统一接管（/admin/sources/circuit-breakers
 # 可观测、可复位，与 A 股板块 sector_fetcher 一致）。原私有 _em_host_health 冷却

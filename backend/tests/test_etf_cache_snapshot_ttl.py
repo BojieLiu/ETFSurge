@@ -36,7 +36,7 @@ def test_stale_snapshot_used_without_full_scan(tmp_path, monkeypatch):
     def _boom(*args, **kwargs):
         raise AssertionError("不应触发全量扫描（旧快照应直接命中）")
 
-    monkeypatch.setattr("app.services.source_registry.registry.route", _boom)
+    monkeypatch.setattr("app.core.source_registry.registry.route", _boom)
 
     result = es.fetch_all_etfs_base()
     assert len(result) == 100, "旧快照应直接返回 100 只 ETF"
@@ -53,7 +53,7 @@ def test_fresh_snapshot_still_hit(tmp_path, monkeypatch):
     def _boom(*args, **kwargs):
         raise AssertionError("新鲜快照不应触发扫描")
 
-    monkeypatch.setattr("app.services.source_registry.registry.route", _boom)
+    monkeypatch.setattr("app.core.source_registry.registry.route", _boom)
     result = es.fetch_all_etfs_base()
     assert len(result) == 100
 
@@ -75,6 +75,6 @@ def test_empty_snapshot_still_scans(tmp_path, monkeypatch):
         scanned["called"] = True
         return None
 
-    monkeypatch.setattr("app.services.source_registry.registry.route", _fake_route)
+    monkeypatch.setattr("app.core.source_registry.registry.route", _fake_route)
     result = es.fetch_all_etfs_base()
     assert scanned["called"], "无效快照应触发扫描"

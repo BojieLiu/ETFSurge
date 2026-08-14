@@ -87,8 +87,8 @@ async def test_fetch_market_data_semaphore_limits_concurrency():
     )
     _kline_cache.clear()
     _kline_cache_ts = 0.0
-    from app.services.source_registry import registry as _sr
-    factor_h = _sr._health("factor.history")
+    from app.core.source_registry import registry as _sr
+    factor_h = _sr.health("factor.history")
     factor_h._failures = 0
     factor_h._cool_until = 0.0
     factor_h._consecutive_cycles = 0

@@ -77,6 +77,10 @@ def safe_call(fn, *args, timeout: int = DEFAULT_SYNC_TIMEOUT,
 
     语义与 run_in_thread 相同：线程池执行 + 超时/异常 → None，绝不挂起。
     不同模块通过 executor 参数选择池（news 用 shared，levistock/sector 用 long）。
+
+    round23 §10.2 D1: safe_call/safe_call_async 是 run_in_thread/run_sync 的零逻辑
+    透传——标记 deprecated 别名（短期保留控制改动面，后续轮次移除；新代码直接用
+    run_in_thread / run_sync）。
     """
     return run_in_thread(fn, *args, timeout=timeout, executor=executor)
 

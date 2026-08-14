@@ -9,7 +9,7 @@ R78：provider 返回 (data, 200) 正常成功、(data, 0) 非 HTTP 成功。
 import pytest
 
 from app.fetchers import china_market
-from app.services import source_registry
+from app.core import source_registry
 
 
 @pytest.fixture(autouse=True)
@@ -45,7 +45,7 @@ def test_route_skips_broken_source_and_uses_next(monkeypatch):
         return [{"symbol": "000001", "price": 3200.1}]
 
     # 手动让 sina 进入 cooldown（模拟已熔断）
-    monkeypatch.setattr(china_market.registry._health("sina"), "_cool_until", 10**10)
+    monkeypatch.setattr(china_market.registry.health("sina"), "_cool_until", 10**10)
     result = china_market.registry.route(
         [("sina", _sina), ("mootdx", _mootdx)],
         route_name="test_skip", operation="realtime", target="X",
@@ -64,8 +64,8 @@ def test_route_records_success_and_failure(monkeypatch):
                        route_name="t3", operation="realtime", target="Y")
     assert result == {"ok": 1}
     # 快失败检测：duration_ms<500ms 自动转硬失败 → 直接冷却（_failures 重置为 0）
-    assert reg._health("sina")._cool_until > 0, "失败源应已进入冷却"
-    assert reg._health("mootdx")._cool_until == 0, "成功源不应冷却"
+    assert reg.health("sina")._cool_until > 0, "失败源应已进入冷却"
+    assert reg.health("mootdx")._cool_until == 0, "成功源不应冷却"
 
 
 def test_route_all_fail_returns_none(monkeypatch):
@@ -102,8 +102,8 @@ def test_fetch_index_realtime_routeified(monkeypatch):
     assert result, "Sina 熔断后 mootdx 必须兜底输出"
     assert result[0]["symbol"] == "000001"
     assert result[0]["price"] == 3200.5
-    assert reg._health("sina")._cool_until > 0, "失败源应已冷却"
-    assert reg._health("mootdx")._cool_until == 0, "成功源不应冷却"
+    assert reg.health("sina")._cool_until > 0, "失败源应已冷却"
+    assert reg.health("mootdx")._cool_until == 0, "成功源不应冷却"
 
 
 def test_fetch_index_realtime_all_broken_returns_empty(monkeypatch):
@@ -136,7 +136,7 @@ def test_route_tuple_data_200_success(monkeypatch):
     result = reg.route([("sina", _make_provider("sina", {"ok": 1}, tuple_status=200))],
                        route_name="t78a", operation="realtime", target="T")
     assert result == {"ok": 1}
-    assert reg._health("sina")._failures == 0
+    assert reg.health("sina")._failures == 0
 
 
 def test_route_tuple_data_0_non_http_success(monkeypatch):
@@ -145,7 +145,7 @@ def test_route_tuple_data_0_non_http_success(monkeypatch):
     result = reg.route([("sina", _make_provider("sina", {"ok": 2}, tuple_status=0))],
                        route_name="t78b", operation="realtime", target="T")
     assert result == {"ok": 2}
-    assert reg._health("sina")._failures == 0
+    assert reg.health("sina")._failures == 0
 
 
 def test_route_tuple_data_500_hard_failure(monkeypatch):
@@ -158,7 +158,7 @@ def test_route_tuple_data_500_hard_failure(monkeypatch):
     )
     assert result == {"ok": 3}
     # (None, 500) → record_hard_failure：直接冷却（_failures 重置为 0）
-    assert reg._health("sina")._cool_until > 0, "HTTP 500 应触发硬冷却"
+    assert reg.health("sina")._cool_until > 0, "HTTP 500 应触发硬冷却"
 
 
 async def test_get_asset_realtime_index_not_stock_misresolved(monkeypatch):

@@ -49,6 +49,9 @@ class TestAvSymbolConversion:
         # round9 P1-1: 腾讯港股日 K 兜底在测试之后加入——测试环境网络可达时返回真实
         # 数据，破坏「链断裂 → 空」断言；补 mock 保持测试意图（只验符号转换）。
         monkeypatch.setattr(cm, "_fetch_tencent_hk_history", lambda symbol: None)
+        # round20 P0-4: HK 分支 akshare 空后先走 TickFlow（真实网络）——补 mock 返回
+        # 空，避免网络可达时提前返回真实数据（pre-existing flaky：全量 -n4 过、单独跑挂）。
+        monkeypatch.setattr(cm, "_tickflow_kline", lambda symbol, period, asset_type: None)
 
         rows = cm._fetch_akshare_history("00700", "HK", "daily")
         assert captured.get("symbol") == "0700.HK", \

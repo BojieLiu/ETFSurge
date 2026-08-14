@@ -73,7 +73,7 @@ async def test_q02_worker_receives_report_text():
 
 def test_s05_source_registry_available():
     """S05: SourceRegistry should be importable from fund_fetcher context."""
-    from app.services.source_registry import registry
+    from app.core.source_registry import registry
     assert registry is not None
 
 

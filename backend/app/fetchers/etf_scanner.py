@@ -458,7 +458,7 @@ def fetch_all_etfs_base() -> list[dict[str, Any]]:
         except Exception:
             pass
 
-    from ..services.source_registry import registry
+    from ..core.source_registry import registry
 
     # Provider 1: Sina ETF 列表 + Tencent gtimg 补充指标
     def _sina_tencent_provider():

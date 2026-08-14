@@ -306,4 +306,3 @@ A:  mootdx → Tencent(QQ) → Sina   ← F1-2 补 tencent，与批量版对齐
 GET /api/v1/market/fundamentals/{symbol}
 GET /api/v1/market/indices/meta
 GET /api/v1/market/sentiment
-GET /api/v1/market/signal/debug/{symbol}

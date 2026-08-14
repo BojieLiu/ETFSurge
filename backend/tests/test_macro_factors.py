@@ -131,7 +131,7 @@ def test_macro_codes_static_status():
     """4 code 在 /factors/active 语义中为 static + 市场级因子 reason。"""
     from app.routers.factors import _status_of
     for code in MACRO_CODES:
-        status, reason = _status_of(code, None, 0.02)
+        status, reason = _status_of(code, samples=0, t_stat=None, ir=None, ic_val=None)
         assert status == "static", f"{code} 应为 static，实际 {status}"
         assert "市场级因子" in reason, f"{code} reason 应含「市场级因子」: {reason}"
 

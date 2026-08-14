@@ -256,11 +256,15 @@ function labelClass(region) {
 
 /* ── F2-2: Loading skeleton（固定高度，消除 CLS） ── */
 .gis-skeleton { padding: var(--space-2) 0; }
-.gis-skeleton-row { margin-bottom: var(--space-3); }
-.gis-skeleton-label { width: 56px; height: 14px; border-radius: var(--radius-sm); background: var(--color-bg-hover); margin-bottom: var(--space-2); animation: gis-pulse 1.5s infinite; }
+/* F35 (round23 P0-2 补完): 骨架每行高度与数据态对齐——真实 index-card 高度
+   ≈ padding(12×2) + card-top(~16) + gap(8) + card-body(price 20 + gap 4 + change 16)
+   ≈ 88px；旧骨架卡片 64px → 数据替换骨架时每行 +24px × 5 行 ≈ +120px 下方下移（CLS 0.39 恒定源之一）。 */
+.gis-skeleton-row { margin-bottom: 10px; }  /* 对齐 .region-row margin-bottom */
+.gis-skeleton-label { width: 56px; height: 18px; border-radius: var(--radius-sm); background: var(--color-bg-hover); margin-bottom: 6px; animation: gis-pulse 1.5s infinite; }
 /* P0-2: 骨架卡片对齐 .indices-grid 行间距（row-gap 16px + padding）——数据替换时零重排 */
 .gis-skeleton-cards { display: flex; gap: 14px; overflow: hidden; padding: var(--space-2) 0; }
-.gis-skeleton-card { min-width: 140px; flex: 1; height: 64px; border-radius: var(--radius-md); background: var(--color-bg-hover); animation: gis-pulse 1.5s infinite; }
+/* F35: 高度对齐真实 index-card（88px，含 padding 12px 14px 结构与数据态一致） */
+.gis-skeleton-card { min-width: 140px; flex: 1; height: 88px; border-radius: var(--radius-md); background: var(--color-bg-hover); animation: gis-pulse 1.5s infinite; }
 @keyframes gis-pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.8; } }
 
 /* ── Red up / green down ── */

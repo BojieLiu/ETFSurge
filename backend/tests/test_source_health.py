@@ -33,8 +33,8 @@ def test_run_probes_records_success():
             import asyncio
             asyncio.run(run_probes())
 
-    mock_reg._health.assert_called_once_with("good_source")
-    mock_reg._health.return_value.record_success.assert_called_once()
+    mock_reg.health.assert_called_once_with("good_source")
+    mock_reg.health.return_value.record_success.assert_called_once()
 
 
 def test_run_probes_records_failure_on_empty_result():
@@ -48,8 +48,8 @@ def test_run_probes_records_failure_on_empty_result():
             asyncio.run(run_probes())
 
     # record_failure now called with route/operation/duration_ms params
-    mock_reg._health.return_value.record_failure.assert_called_once()
-    args, kwargs = mock_reg._health.return_value.record_failure.call_args
+    mock_reg.health.return_value.record_failure.assert_called_once()
+    args, kwargs = mock_reg.health.return_value.record_failure.call_args
     assert args[0] == 100.0  # first arg is still `now`
 
 
@@ -67,8 +67,8 @@ def test_run_probes_records_failure_on_exception():
             import asyncio
             asyncio.run(run_probes())
 
-    mock_reg._health.return_value.record_failure.assert_called_once()
-    args, kwargs = mock_reg._health.return_value.record_failure.call_args
+    mock_reg.health.return_value.record_failure.assert_called_once()
+    args, kwargs = mock_reg.health.return_value.record_failure.call_args
     assert args[0] == 100.0
 
 
@@ -84,7 +84,7 @@ def test_run_probes_handles_multiple_sources():
             asyncio.run(run_probes())
 
     # src_a should succeed, src_b should fail
-    calls = mock_reg._health.call_args_list
+    calls = mock_reg.health.call_args_list
     assert len(calls) == 2
 
     def _name(call):

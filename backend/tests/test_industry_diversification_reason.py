@@ -45,7 +45,7 @@ class TestIndustryDiversificationReason:
         registry._constant_factor_codes.add("etf.industry_diversification")
         try:
             from app.routers.factors import _status_of
-            status, reason = _status_of("etf.industry_diversification", None, 0.02)
+            status, reason = _status_of("etf.industry_diversification", samples=0, t_stat=None, ir=None, ic_val=None)
             assert status == "no_data"
             assert "截面无差异" in reason, f"常量因子 reason 应独立标注: {reason}"
         finally:
@@ -57,7 +57,7 @@ class TestIndustryDiversificationReason:
         registry._data_source_gaps["etf.industry_diversification"] = ["510300", "560600"]
         try:
             from app.routers.factors import _status_of
-            status, reason = _status_of("etf.industry_diversification", None, 0.02)
+            status, reason = _status_of("etf.industry_diversification", samples=0, t_stat=None, ir=None, ic_val=None)
             assert status == "no_data"
             assert "数据源未接入" in reason and "concepts" in reason, f"reason 应含缺 concepts: {reason}"
         finally:

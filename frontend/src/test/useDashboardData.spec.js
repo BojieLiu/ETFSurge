@@ -9,7 +9,7 @@ vi.mock('../api', () => ({
   },
   portfolioApi: {
     getAllocation: vi.fn(),
-    getPnl: vi.fn(),
+    dailyPnl: vi.fn(),
     getPnLHistory: vi.fn(),
   },
 }))
@@ -56,7 +56,7 @@ describe('useDashboardData', () => {
       },
     })
 
-    portfolioApi.getPnl.mockResolvedValue({
+    portfolioApi.dailyPnl.mockResolvedValue({
       data: {
         items: [
           { symbol: '510300', daily_pnl: 300, target_amount: 30000 },
@@ -261,10 +261,10 @@ describe('useDashboardData', () => {
   })
 
   // ── fetchPnl ────────────────────────────────────────────
-  it('fetchPnl calls getPnl for both types', async () => {
+  it('fetchPnl calls dailyPnl for both types', async () => {
     const dash = useDashboardData(capitalOn, capitalOff, activeTab)
     await dash.fetchPnl()
-    expect(portfolioApi.getPnl).toHaveBeenCalledTimes(2)
+    expect(portfolioApi.dailyPnl).toHaveBeenCalledTimes(2)
   })
 
   it('fetchPnl sets pnl data from responses', async () => {
@@ -317,7 +317,7 @@ describe('useDashboardData', () => {
     await dash.refreshAll()
     expect(marketApi.indicesGlobal).toHaveBeenCalledTimes(1)
     expect(portfolioApi.getAllocation).toHaveBeenCalledTimes(2)
-    expect(portfolioApi.getPnl).toHaveBeenCalledTimes(2)
+    expect(portfolioApi.dailyPnl).toHaveBeenCalledTimes(2)
   })
 
   it('R52: fetchAttempted set only after refreshAll completes (not per-fetch)', async () => {

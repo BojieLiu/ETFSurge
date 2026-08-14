@@ -36,15 +36,25 @@
           <div class="stat-item">
             <span class="stat-num text-up">{{ summary?.valid ?? 0 }}</span>
             <span class="stat-lbl">
-              <span class="stat-icon stat-icon-valid" aria-hidden="true">✓</span>
-              有效
+              <AppTooltip placement="top">
+                <span class="stat-icon stat-icon-valid" aria-hidden="true">✓</span>
+                统计显著
+                <template #content>
+                  <div class="tooltip-rich">F25 判据：IC 累计 ≥{{ summary?.min_samples ?? 250 }} 个交易日，且 t≥2、|IR|≥0.5（Newey-West 调整）</div>
+                </template>
+              </AppTooltip>
             </span>
           </div>
           <div class="stat-item">
             <span class="stat-num text-warn">{{ summary?.warn ?? 0 }}</span>
             <span class="stat-lbl">
-              <span class="stat-icon stat-icon-warn" aria-hidden="true">⚠</span>
-              低于阈值
+              <AppTooltip placement="top">
+                <span class="stat-icon stat-icon-warn" aria-hidden="true">⚠</span>
+                不显著
+                <template #content>
+                  <div class="tooltip-rich">有 ≥{{ summary?.min_samples ?? 250 }} 个交易日样本，但 t&lt;2 或 |IR|&lt;0.5，统计不显著</div>
+                </template>
+              </AppTooltip>
             </span>
           </div>
           <div class="stat-item">
@@ -69,15 +79,15 @@
           </div>
         </div>
 
-        <!-- P0-7 (round16 3.8): 数据积累期引导——valid=0 & no_data>0 时给出引导文案，
-             防用户误判「因子全部失效」（IC 样本需 ≥30 个周期才发布）。 -->
+        <!-- F25④ (round23): 数据积累期引导——IC 需累积 ≥250 个交易日 + t/IR 显著才发布。
+             当前「无数据」多为积累未满（<60 或 <250 交易日），非因子失效。 -->
         <div v-if="isAccumulating" class="accumulate-banner" role="status">
           <span class="accumulate-icon" aria-hidden="true">🕒</span>
           <div class="accumulate-text">
             <strong>数据积累中</strong>
             <span>
-              因子 IC 需累积 {{ summary?.min_samples ?? 30 }} 个样本周期才发布有效结论。
-              当前「无数据」多为样积累未满（{{ summary?.no_data ?? 0 }} 个），非因子失效；静态标识因子不参与 IC 统计。
+              因子 IC 需累积 {{ summary?.min_samples ?? 250 }} 个交易日且 t≥2、|IR|≥0.5 才发布「统计显著」结论。
+              当前「无数据」多为积累未满（{{ summary?.no_data ?? 0 }} 个），非因子失效；静态标识因子不参与 IC 统计。
             </span>
           </div>
         </div>
@@ -103,8 +113,8 @@
             </div>
           </div>
           <div class="ic-sort-stats">
-            <span class="ic-stat">有效 <b class="text-up">{{ icValidCount }}</b></span>
-            <span class="ic-stat">无效 <b class="text-down">{{ icInvalidCount }}</b></span>
+            <span class="ic-stat">统计显著 <b class="text-up">{{ icValidCount }}</b></span>
+            <span class="ic-stat">不显著 <b class="text-down">{{ icInvalidCount }}</b></span>
             <span class="ic-stat">平均 |IC| <b>{{ icAvgAbsIC.toFixed(4) }}</b></span>
           </div>
           <div class="ic-sort-table-wrap">
@@ -115,8 +125,9 @@
                   <th>因子名称</th>
                   <th>分类</th>
                   <th>IC 值</th>
-                  <th>有效性</th>
-                  <th>样本数</th>
+                  <th>t / IR</th>
+                  <th>显著性</th>
+                  <th>交易日</th>
                 </tr>
               </thead>
               <tbody>
@@ -130,19 +141,37 @@
                   <td :class="icValueClass(f.ic_value)">
                     {{ f.ic_value === null || f.ic_value === undefined ? '--' : f.ic_value.toFixed(4) }}
                   </td>
-                  <td>
-                    <!-- P0-12③ (round16 3.13 R1): 排序表与分类「无数据」口径统一——
-                         用后端 status（no_data 含 sample<30 的积累中）而非仅 ic_value===null，
-                         消除「排序表 6 无数据 / 分类 27 无数据」双视图不一致。 -->
-                    <span v-if="f.status === 'no_data'" class="valid-badge no-data">无数据</span>
-                    <span v-else-if="f.status === 'static'" class="valid-badge no-data">静态</span>
-                    <span v-else-if="abs(f.ic_value ?? 0) >= 0.02" class="valid-badge valid">有效</span>
-                    <span v-else class="valid-badge invalid">无效</span>
+                  <!-- F25②④: 序列统计（IC_mean/IC_std/IR/t，Newey-West 调整）——
+                       显著性判据，替换旧「|IC|≥0.02 即有效」 -->
+                  <td class="ic-sig-cell">
+                    <template v-if="f.t_stat != null">
+                      {{ fmtSig(f) }}
+                      <AppTooltip placement="top">
+                        <span class="sig-dot" aria-hidden="true">ⓘ</span>
+                        <template #content>
+                          <div class="tooltip-rich">
+                            IC_mean={{ f.ic_mean ?? '--' }} · IC_std={{ f.ic_std ?? '--' }}<br/>
+                            t={{ f.t_stat }}（需 ≥2，95% 置信，Newey-West 调整）· |IR|={{ fmtIr(f) }}（需 ≥0.5）
+                          </div>
+                        </template>
+                      </AppTooltip>
+                    </template>
+                    <span v-else class="text-muted">--</span>
                   </td>
-                  <td>{{ f.sample_count ?? '-' }}</td>
+                  <td>
+                    <!-- F25②: 显著性列直接映射后端 status（valid=统计显著 / warn=不显著 /
+                         no_data=无数据/积累中 / static=静态）——与分类视图同源，消除双视图口径差 -->
+                    <span v-if="f.status === 'no_data'" class="valid-badge no-data" :title="f.reason">积累中</span>
+                    <span v-else-if="f.status === 'static'" class="valid-badge no-data">静态</span>
+                    <span v-else-if="f.status === 'valid'" class="valid-badge valid">显著</span>
+                    <span v-else class="valid-badge invalid">不显著</span>
+                  </td>
+                  <td>
+                    <span :title="f.sample_count + ' 个交易日'">{{ f.sample_count ?? '-' }}</span>
+                  </td>
                 </tr>
                 <tr v-if="icSortedFactors.length === 0">
-                  <td colspan="6" class="empty-row">暂无数据</td>
+                  <td colspan="7" class="empty-row">暂无数据</td>
                 </tr>
               </tbody>
             </table>
@@ -524,7 +553,7 @@ const icSortedFactors = computed(() => {
 })
 
 const icValidCount = computed(() => icSortedFactors.value.filter(f => f.status === 'valid').length)
-const icInvalidCount = computed(() => icSortedFactors.value.filter(f => f.status !== 'no_data' && f.status !== 'valid').length)
+const icInvalidCount = computed(() => icSortedFactors.value.filter(f => f.status === 'warn').length)
 const icAvgAbsIC = computed(() => {
   const list = icSortedFactors.value.filter(f => f.ic_value !== null)
   if (list.length === 0) return 0
@@ -535,6 +564,16 @@ const icCategories = computed(() => {
   categories.value.forEach(c => { if (c.name) set.add(c.name) })
   return [...set]
 })
+
+// F25②④: t/IR 展示（序列统计；t 需 ≥2、|IR| 需 ≥0.5 才显著）
+function fmtIr(f) {
+  const v = f.ir
+  if (v === null || v === undefined) return '--'
+  return v.toFixed(2)
+}
+function fmtSig(f) {
+  return `t=${f.t_stat?.toFixed(2)} / |IR|=${fmtIr(f)}`
+}
 
 function icRowClass(f) {
   const v = f.ic_value

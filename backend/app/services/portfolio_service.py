@@ -208,6 +208,10 @@ async def add_etf(db: AsyncSession, data: PortfolioETFCreate) -> PortfolioETF:
     _tidx = data.tracked_index
     if not _tidx and (data.asset_type or "").upper() in ("ETF", "A", "A-SHARE", ""):
         _tidx = _resolve_tracked_index(str(data.symbol))
+    # F15 (round23 §3.3): 孤立 avg_cost 拦截——「有成本无份额」是导入/落库脏数据
+    #（verify_e2e 曾实锤 20 条半成本持仓），shares_held 缺失/≤0 时强制 avg_cost=None。
+    _shares = data.shares_held or 0
+    _avg_cost = data.avg_cost if _shares > 0 else None
     etf = PortfolioETF(
         symbol=data.symbol,
         name=data.name,
@@ -218,8 +222,8 @@ async def add_etf(db: AsyncSession, data: PortfolioETFCreate) -> PortfolioETF:
         tracked_index=_tidx,
         # round19 P3-① (2026-08-12): 落库 avg_cost/shares_held——此前前端传值被静默
         # 丢弃，乐观更新掩盖「界面显示成功、刷新还原」bug。
-        avg_cost=data.avg_cost,
-        shares_held=data.shares_held,
+        avg_cost=_avg_cost,
+        shares_held=_shares,
         first_buy_date=data.first_buy_date,
         last_trade_date=data.last_trade_date,
     )
@@ -318,10 +322,16 @@ async def update_etf(db: AsyncSession, symbol: str, data: PortfolioETFUpdate) ->
         etf.tracked_index = data.tracked_index
     # round19 P3-① (2026-08-12): update_etf 补落库成本/份额——此前传了也不生效
     # （前端编辑成本被静默丢弃，刷新还原）。
+    # F15 (round23 §3.3): 孤立 avg_cost 拦截——有成本无份额不落库（脏数据）：
+    # ① avg_cost 仅在份额 >0 时写入；② 份额清零/缺失时同步清 avg_cost。
     if data.avg_cost is not None:
-        etf.avg_cost = data.avg_cost
+        _sh = data.shares_held if data.shares_held is not None else (etf.shares_held or 0)
+        if _sh > 0:
+            etf.avg_cost = data.avg_cost
     if data.shares_held is not None:
         etf.shares_held = data.shares_held
+        if (data.shares_held or 0) <= 0:
+            etf.avg_cost = None
     if data.first_buy_date is not None:
         etf.first_buy_date = data.first_buy_date
     if data.last_trade_date is not None:
@@ -2296,6 +2306,10 @@ async def import_portfolio(
             target_weight = float(row["target_weight"]) if row.get("target_weight") else 0.1
             avg_cost = float(row["avg_cost"]) if row.get("avg_cost") else None
             shares_held = float(row["shares_held"]) if row.get("shares_held") else None
+            # F15 (round23 §3.3): 导入路径孤立 avg_cost 拦截——有成本无份额的 CSV
+            # 行不落脏数据（verify_e2e「孤立 avg_cost 20 条」根因之一是导入路径）。
+            if shares_held is None or shares_held <= 0:
+                avg_cost = None
             first_buy_date = None
             last_trade_date = None
             

@@ -9,7 +9,7 @@ import logging
 import levistock as lv
 
 from ..services.cache_service import cached
-from ..services.source_registry import registry
+from ..core.source_registry import registry
 
 _logger = logging.getLogger(__name__)
 

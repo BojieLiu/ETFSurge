@@ -1,0 +1,7 @@
+# 临时诊断 override —— 仅用于本轮预热性能诊断（任务1/12）
+# 用法: docker compose -f docker-compose.yml -f docker-compose.diag.yml --profile prod up -d
+# 完成后无需删除文件，但容器会带 profiler 重启（诊断产物写 /app/logs -> 宿主 ./logs）
+services:
+  backend:
+    environment:
+      - PROFILE_WARMUP=1

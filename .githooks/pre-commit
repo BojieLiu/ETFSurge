@@ -422,4 +422,24 @@ else
     fi
 fi
 
+# ════ engine 纯度门禁（round23 §10.5 A2，2026-08-14）══════════════════════════
+# 差异化价值（门禁治理约定①）：现有 13 段无任何「分层/纯度」守护——check_routes
+# （路由↔契约）/audit_unused_symbols（符号）/check_unused_styles（样式）对象互不相同，
+# 本段对象为「engine 层 import 边界 + 零 I/O」：把 AGENTS.md 文档声明的
+# 「engine 无 I/O 纯函数」变成可执行硬约束（实测泄漏 1 处，A1 已参数化修复）。
+# 触发：engine 或本脚本变更时执行（纯 AST，无网络/DB）。
+ENGINE_STAGED=$(git diff --cached --name-only --diff-filter=ACM \
+    -- 'backend/app/engine/*.py' 'backend/scripts/check_engine_purity.py' 2>/dev/null || true)
+if [ -n "$ENGINE_STAGED" ]; then
+    echo "[pre-commit] 检测到 engine/门禁变更，执行 engine 纯度检查 ..."
+    cd backend
+    if python scripts/check_engine_purity.py 2>&1; then
+        echo "[pre-commit] ✅ engine 纯度通过（无上层 import / 无 I/O）"; cd ..
+    else
+        cd ..
+        echo "🚨 engine 纯度失败 — engine 层不得 import services/fetchers/tasks/analysis/factors/routers，不得 open()/urllib/requests/sqlite3/aiohttp/httpx（参数化注入替代全局态）"
+        exit 1
+    fi
+fi
+
 exit 0

@@ -1,5 +1,30 @@
 <template>
   <div class="news-view">
+    <!-- F29 (round23 §2.4 A4): 资讯分类 tab——旧实现仅 headlines 可达，
+         macro/global/stock/research 四端点 UI 不可达（事实死功能）。 -->
+    <div class="news-tabs" role="tablist" aria-label="资讯分类">
+      <button
+        v-for="t in tabs"
+        :key="t.value"
+        type="button"
+        role="tab"
+        class="news-tab"
+        :class="{ active: activeTab === t.value }"
+        :aria-selected="activeTab === t.value"
+        @click="switchTab(t.value)"
+      >
+        {{ t.label }}
+      </button>
+      <input
+        v-if="activeTab === 'stock' || activeTab === 'research'"
+        v-model="stockSymbol"
+        class="symbol-input"
+        placeholder="标的代码（如 600519 / 510300）"
+        aria-label="标的代码"
+        @keyup.enter="loadNews()"
+      />
+    </div>
+
     <div class="news-toolbar">
       <div class="news-status" aria-live="polite">
         <span class="status-dot" :class="{ 'status-dot--on': connected }" aria-hidden="true"></span>
@@ -25,6 +50,10 @@
 
     <!-- News List -->
     <section class="card news-card">
+      <!-- F31: 半成品不静默上屏——冷启动/数据源熔断时显示不完整提示 -->
+      <div v-if="partial && !loading" class="news-partial-banner" role="status">
+        ⚠️ 数据刷新中（当前仅部分数据，稍后自动补全）
+      </div>
       <div v-if="loading && !filteredNews.length" class="news-empty">加载中...</div>
       <ul v-else class="news-list">
         <li
@@ -125,6 +154,23 @@ const requestHoldings = ref(new Set())
 const analyzing = ref(false)
 const minLevel = ref(1) // 1-5, minimum importance level to show
 
+// F29 (round23 §2.4 A4): 资讯分类 tab（headlines/macro/global/stock/research）
+const tabs = [
+  { value: 'headlines', label: '头条' },
+  { value: 'macro', label: '宏观' },
+  { value: 'global', label: '国际' },
+  { value: 'stock', label: '个股' },
+  { value: 'research', label: '研报' },
+]
+const activeTab = ref('headlines')
+const stockSymbol = ref('600519')
+const partial = ref(false) // F31: 冷启动/数据源熔断 partial 标识
+
+function switchTab(v) {
+  activeTab.value = v
+  loadNews()
+}
+
 const LEVEL_COLORS = {
   red: '#e5484d',
   orange: '#f5901e',
@@ -145,16 +191,35 @@ const filteredNews = computed(() => {
 async function loadNews() {
   loading.value = true
   try {
-    const res = await newsApi.headlines()
-    const items = res.data || []
+    // F29: 按当前 tab 加载对应端点（旧实现仅 headlines）
+    const t = activeTab.value
+    let res = null
+    if (t === 'headlines') {
+      res = await newsApi.headlines()
+    } else if (t === 'macro') {
+      res = await newsApi.macro()
+    } else if (t === 'global') {
+      res = await newsApi.globalNews()
+    } else if (t === 'stock') {
+      res = await newsApi.stockNews(stockSymbol.value.trim() || '600519')
+    } else if (t === 'research') {
+      res = await newsApi.research(stockSymbol.value.trim() || '600519')
+    }
+    const items = (res && res.data) || []
+    // F31 (round23 §2.4 A4): 冷启动/数据源熔断时后端以 X-News-Partial 标记不完整，
+    // 前端显示「数据刷新中（部分数据）」而非静默上屏残缺列表。
+    partial.value = !!(res && res.headers && String(res.headers['x-news-partial']).toLowerCase() === 'true')
     news.value = items
     items.forEach((it) => { if (it.id != null) seenIds.value.add(it.id) })
     // Toast reminder for important items when entering the news page from elsewhere.
-    items.filter((it) => isImportant(it.level)).forEach((it) => {
-      toast(`重要资讯：${it.title}`, 'warning')
-    })
+    if (t === 'headlines') {
+      items.filter((it) => isImportant(it.level)).forEach((it) => {
+        toast(`重要资讯：${it.title}`, 'warning')
+      })
+    }
   } catch {
     news.value = []
+    partial.value = false
   } finally {
     loading.value = false
   }
@@ -170,6 +235,9 @@ function sortNews(arr) {
 }
 
 function handleNews(msg) {
+  // F29: WS 实时推送仅作用于头条 tab——其它 tab（宏观/国际/个股/研报）为
+  // 独立数据源视图，混入 WS 快讯会污染列表（切 tab 即重载，无需合并）。
+  if (activeTab.value !== 'headlines') return
   // news_batch: array of pre-sorted items
   if (msg && msg.type === 'news_batch' && Array.isArray(msg.data)) {
     let added = 0
@@ -254,6 +322,31 @@ const filteredAffectedHoldings = computed(() => {
 
 <style scoped>
 .news-view { display: flex; flex-direction: column; gap: var(--space-6); }
+/* F29: 资讯分类 tab 条 */
+.news-tabs {
+  display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2);
+  padding: var(--space-2); background: var(--color-surface-secondary);
+  border-radius: var(--radius-lg); border: 1px solid var(--color-border-light);
+}
+.news-tab {
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-border-light); border-radius: var(--radius-md);
+  background: transparent; color: var(--color-text-secondary);
+  cursor: pointer; font-size: var(--font-size-sm);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.news-tab:hover { background: var(--color-surface-tertiary); }
+.news-tab.active {
+  background: var(--color-brand-500); border-color: var(--color-brand-500);
+  color: #fff; font-weight: 600;
+}
+.symbol-input {
+  margin-left: auto; padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-light); border-radius: var(--radius-md);
+  background: var(--color-surface); color: var(--color-text);
+  font-size: var(--font-size-sm); width: 180px;
+}
+.symbol-input:focus { outline: none; border-color: var(--color-brand-500); }
 .news-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-3); padding: var(--space-3); background: var(--color-surface-secondary); border-radius: var(--radius-lg); border: 1px solid var(--color-border-light); }
 .news-status { display: flex; align-items: center; gap: var(--space-2); color: var(--color-text-secondary); font-size: var(--font-size-sm); }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-text-muted); }
@@ -267,6 +360,14 @@ const filteredAffectedHoldings = computed(() => {
 .news-card { padding: var(--space-4); }
 .news-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-3); }
 .news-empty { color: var(--color-text-muted); padding: var(--space-4); text-align: center; }
+/* F31: partial（不完整）提示条 */
+.news-partial-banner {
+  padding: var(--space-2) var(--space-4);
+  background: var(--color-warning-50, #fffbeb);
+  color: var(--color-warning-600, #b45309);
+  font-size: var(--font-size-sm);
+  border-bottom: 1px solid var(--color-border-light);
+}
 .news-item { border: 1px solid var(--color-border-light); border-left-width: 4px; border-radius: var(--radius-lg); padding: var(--space-3); background: var(--color-surface-secondary); }
 .news-item--red { border-left-color: #e5484d; }
 .news-item--orange { border-left-color: #f5901e; }

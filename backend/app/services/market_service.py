@@ -15,7 +15,7 @@ from ..database import async_session
 from ..core.async_utils import run_sync, safe_call_async
 from ..core.market_calendar import is_trading_time
 from ..core.ttl import CACHE_TTL
-from ..services.source_registry import registry
+from ..core.source_registry import registry
 from ..models.search import Index
 from .cache_service import cache_get, cache_mget, cache_set
 from ..core.logging import get_logger
@@ -71,7 +71,7 @@ async def _call_with_cb(source_name: str, fn, *args,
                 return value
 
     # Check circuit breaker
-    source_h = registry._health(source_name)
+    source_h = registry.health(source_name)
     now = time.time()
     fn_name = getattr(fn, '__name__', str(fn))
     if not source_h.available(now):

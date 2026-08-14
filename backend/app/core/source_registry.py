@@ -163,7 +163,7 @@ class SourceRegistry:
                     pass
         return _wrapped
 
-    def _health(self, name: str) -> SourceHealth:
+    def health(self, name: str) -> SourceHealth:
         if name not in self._states:
             h = SourceHealth(on_event=self._make_source_callback(name))
             self._states[name] = h
@@ -189,7 +189,7 @@ class SourceRegistry:
         - 失败时自动检测 fast-fail（<500ms）并调用 record_hard_failure
         - 超时时调用 record_failure
         """
-        h = self._health(name)
+        h = self.health(name)
         now = time.time()
         if not h.available(now):
             return None
@@ -232,7 +232,7 @@ class SourceRegistry:
         now = time.time()
         last_exc: Optional[BaseException] = None
         for name, fn in providers:
-            h = self._health(name)
+            h = self.health(name)
             if not h.available(now):
                 continue
             t0 = time.perf_counter()
@@ -298,7 +298,7 @@ class SourceRegistry:
 
     def reset_source(self, name: str) -> None:
         """手动重置指定数据源的熔断器状态。"""
-        h = self._health(name)
+        h = self.health(name)
         with h._lock:
             h._failures = 0
             h._cool_until = 0.0

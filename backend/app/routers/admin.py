@@ -7,7 +7,7 @@ from typing import Any
 
 from ..monitor.token_usage import token_store
 from ..monitor.source_events import source_event_store
-from ..services.source_registry import registry
+from ..core.source_registry import registry
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 

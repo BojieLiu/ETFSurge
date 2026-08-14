@@ -64,23 +64,34 @@ def asyncio_run(coro):
 
 
 class TestFactorMinSampleProtection:
-    """P0-C: 最小样本保护——样本不足不产生 warn 下架。"""
+    """F25②: 显著性判据（交易日 + t/IR）替换旧「样本 ≥30 + |IC|≥阈值」。"""
 
     def test_low_samples_no_downlisting(self):
-        """样本 0 但 |IC|=0.45 → no_data「未累积」，不是 warn「负向预测已下架」。"""
+        """样本 0 但 |IC|=0.45 → no_data（未累积/常量无差异），不是 warn。"""
         with patch.object(factors_router.registry, "_last_ic_batch", {"technical.ma.sma_5": -0.45}):
             with patch.object(factors_router.registry, "_sample_counts", {"technical.ma.sma_5": 0}):
-                status, reason = factors_router._status_of("technical.ma.sma_5", -0.45, 0.02)
+                status, reason = factors_router._status_of(
+                    "technical.ma.sma_5", samples=0, t_stat=None, ir=None, ic_val=-0.45)
         assert status == "no_data", f"样本不足应 no_data（实际 {status}）"
-        assert "未累积" in reason
+        # 文案可为「未累积」或「常量无差异」（取决于全局 registry 的 constant 记录状态）
+        assert any(k in reason for k in ("未累积", "常量", "无差异", "未接入")), reason
 
-    def test_enough_samples_normal_evaluation(self):
-        """样本 ≥30 时正常评估：|IC|≥阈值 → valid/warn。"""
-        with patch.object(factors_router.registry, "_sample_counts", {"technical.ma.sma_5": 120}):
-            status_neg, _ = factors_router._status_of("technical.ma.sma_5", -0.45, 0.02)
-            status_pos, _ = factors_router._status_of("technical.ma.sma_5", 0.45, 0.02)
-        assert status_neg == "warn"  # 负向且 |IC|≥阈值 → 淘汰警示（样本足够时成立）
+    def test_enough_samples_significant_valid(self):
+        """F25②: 260 交易日 + t≥2 + |IR|≥0.5 → valid（含负向显著）；t<2 → warn。"""
+        with patch.object(factors_router.registry, "_sample_counts", {"technical.ma.sma_5": 260}):
+            status_neg, _ = factors_router._status_of(
+                "technical.ma.sma_5", samples=260, t_stat=2.4, ir=-0.6, ic_val=-0.45)
+            status_pos, _ = factors_router._status_of(
+                "technical.ma.sma_5", samples=260, t_stat=2.4, ir=0.6, ic_val=0.45)
+            status_weak, _ = factors_router._status_of(
+                "technical.ma.sma_5", samples=260, t_stat=1.2, ir=0.3, ic_val=0.45)
+        # F25②: |IR|≥0.5 且 t≥2 → valid（负向显著 = 预测方向与收益反向，仍统计显著）；
+        # t<2 → warn（有样本但统计不显著）
+        assert status_neg == "valid"
         assert status_pos == "valid"
+        assert status_weak == "warn"
 
-    def test_min_ic_samples_constant(self):
-        assert factors_router.MIN_IC_SAMPLES == 30
+    def test_min_trading_days_constant(self):
+        """F25②: 有效门槛 250 交易日 / 可观察下限 60。"""
+        assert factors_router.MIN_TRADING_DAYS == 250
+        assert factors_router.MIN_OBSERVABLE_DAYS == 60

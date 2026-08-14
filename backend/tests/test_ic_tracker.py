@@ -297,18 +297,17 @@ class TestR515ICRestoreFromDB:
 
 class TestP012DbBackedSampleCount:
     """P0-12 (round16 3.13 R2/R3): _get_ic_sample_count 从 DB 数 IC 累积周期数，
-    而非内存 _records（候选池空时恒 0）的「单批非零符号数」。"""
+    而非内存 _records（候选池空时恒 0）的「单批非零符号数」。
+
+    F25① (round23 §8): 周期数语义由 `count(*)`（刷新次数，240× 虚高）改为
+    `count(distinct trade_date)`（日频交易日数）——不再 +1（upsert 本批不新增行）。"""
 
     @pytest.mark.asyncio
-    async def test_db_backed_count_counts_periods(self):
-        """DB 已有 29 条 factor_code=technical 历史记录 → 新批 sample_count=30。"""
+    async def test_db_backed_count_counts_distinct_dates(self):
+        """DB 已有 29 个不同交易日 → sample_count=29（distinct date，非 count(*)+1）。"""
         from app.factors.ic_tracker import ICTracker
 
         tracker = ICTracker()
-
-        class _FakeRow:
-            def __init__(self, n):
-                self.n = n
 
         class _FakeResult:
             def scalar_one_or_none(self):
@@ -319,8 +318,8 @@ class TestP012DbBackedSampleCount:
                 return _FakeResult()
 
         n = await tracker._get_ic_sample_count_db(_FakeSession(), "technical")
-        # 29 条历史 + 本批 1 条 = 30（≥ MIN_IC_SAMPLES → 不再误判 no_data）
-        assert n == 30, f"样本数应按 IC 周期数累计，实际 {n}"
+        # F25①: distinct trade_date 计数，不再 +1（旧实现把本批刚插入行也算进去）
+        assert n == 29, f"样本数应按日频交易日数累计，实际 {n}"
 
     @pytest.mark.asyncio
     async def test_db_count_fallback_on_error_uses_records(self):
@@ -338,4 +337,4 @@ class TestP012DbBackedSampleCount:
                 raise RuntimeError("db down")
 
         n = await tracker._get_ic_sample_count_db(_BoomSession(), "technical")
-        assert n == 2, f"DB 异常时应回退内存计数+1，实际 {n}"
+        assert n == 1, f"DB 异常时应回退内存计数，实际 {n}"

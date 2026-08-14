@@ -13,10 +13,8 @@ from ..services.cache_service import cached
 logger = get_logger(__name__)
 _TIMEOUT = 8
 
-
-def _safe(fn, timeout: int = _TIMEOUT):
-    """在线程中执行 fn,超时/异常均返回 None,绝不挂起（P1-2：统一走 safe_call,long 池）。"""
-    return safe_call(fn, timeout=timeout, executor="long")
+# round23 §10.2 D1: 原 _safe 二次包装（safe_call 的零逻辑透传）已删——调用点直接
+# 调 core.async_utils.safe_call(fn, timeout=..., executor="long")。
 
 
 
@@ -221,7 +219,7 @@ def fetch_cailian_telegraph(limit: int = 30) -> list[dict[str, Any]]:
 
     def _p() -> list[dict[str, Any]]:
         # 第一优先级: important 分类（编辑筛选）+1 level boost
-        important_rows = _safe(lambda: lv.news_telegraph_cls(category="important"), 6) or []
+        important_rows = safe_call(lambda: lv.news_telegraph_cls(category="important"), timeout=6, executor="long") or []
         result: list[dict[str, Any]] = []
         seen: set[str] = set()
         for r in important_rows:
@@ -232,7 +230,7 @@ def fetch_cailian_telegraph(limit: int = 30) -> list[dict[str, Any]]:
 
         # 第二优先级: all 分类补充（无 boost, 去重）
         if len(result) < limit:
-            all_rows = _safe(lambda: lv.news_telegraph_cls(category="all"), 6) or []
+            all_rows = safe_call(lambda: lv.news_telegraph_cls(category="all"), timeout=6, executor="long") or []
             for r in all_rows:
                 if len(result) >= limit:
                     break
@@ -247,10 +245,19 @@ def fetch_cailian_telegraph(limit: int = 30) -> list[dict[str, Any]]:
 
 
 def fetch_market_emotion() -> dict[str, Any]:
-    """市场情绪:涨跌分布、封板率、连板梯队、赚钱效应等。"""
+    """市场情绪:涨跌分布、封板率、连板梯队、赚钱效应等。
+
+    F20 (round23 §2.3): levistock 直传的 `up_ratio` 实为「涨停封板率」（如 65%）
+    而非「上涨占比」（真实约 26%）——命名歧义易误导投资者。重命名透明化为
+    `limit_up_seal_rate`（保留原 up_ratio 兼容既有消费者）。
+    """
 
     def _p() -> dict[str, Any]:
-        return _safe(lv.market_emotion_cls, 8) or {}
+        data = safe_call(lv.market_emotion_cls, timeout=8, executor="long") or {}
+        if data and "up_ratio" in data and "limit_up_seal_rate" not in data:
+            data["limit_up_seal_rate"] = data["up_ratio"]
+            data["limit_up_seal_rate_note"] = "涨停封板率 = 涨停家数/(涨停家数+开板家数)，非上涨占比"
+        return data
 
     return cached("emotion", _p, ttl_key="news_emotion")
 
@@ -259,7 +266,7 @@ def fetch_sector_heat(limit: int = 20) -> list[dict[str, Any]]:
     """板块热度排行(财联社)。"""
 
     def _p() -> list[dict[str, Any]]:
-        rows = _safe(lv.get_sector_heat, 8) or []
+        rows = safe_call(lv.get_sector_heat, timeout=8, executor="long") or []
         return rows[:limit]
 
     return cached("sectors", _p, ttl_key="sector_heat")
@@ -269,6 +276,6 @@ def fetch_market_wind() -> list[dict[str, Any]]:
     """今日风口/主线板块(财联社)。"""
 
     def _p() -> list[dict[str, Any]]:
-        return _safe(lv.market_wind_cls, 8) or []
+        return safe_call(lv.market_wind_cls, timeout=8, executor="long") or []
 
     return cached("wind", _p, ttl_key="news_wind")

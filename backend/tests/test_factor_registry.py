@@ -360,16 +360,16 @@ class TestSourceRegistryFactorSource:
     def test_factor_history_available_by_default(self):
         """factor.history source starts as available."""
         import time
-        from app.services.source_registry import registry
-        h = registry._health("factor.history")
+        from app.core.source_registry import registry
+        h = registry.health("factor.history")
         assert h.available(time.time()) is True
 
     def test_factor_history_opens_after_failures(self):
         """After threshold failures, source enters cooldown (unavailable)."""
-        from app.services.source_registry import registry
+        from app.core.source_registry import registry
         import time
 
-        h = registry._health("factor.history")
+        h = registry.health("factor.history")
         h._failures = h.failure_threshold - 1  # one more to trigger
         h._cool_until = 0.0
 
@@ -379,10 +379,10 @@ class TestSourceRegistryFactorSource:
 
     def test_factor_history_recovers_after_cooldown(self):
         """After cooldown elapses, source becomes available again."""
-        from app.services.source_registry import registry
+        from app.core.source_registry import registry
         import time
 
-        h = registry._health("factor.history")
+        h = registry.health("factor.history")
         h._failures = 0
         h._cool_until = time.time() - 1  # cooldown already passed
 
@@ -390,10 +390,10 @@ class TestSourceRegistryFactorSource:
 
     def test_factor_history_success_resets_failures(self):
         """record_success resets failures and clears cooldown."""
-        from app.services.source_registry import registry
+        from app.core.source_registry import registry
         import time
 
-        h = registry._health("factor.history")
+        h = registry.health("factor.history")
         h._failures = 5
         h._cool_until = 9999999999.0
 
@@ -403,8 +403,8 @@ class TestSourceRegistryFactorSource:
 
     def test_factor_history_threshold(self):
         """Default failure threshold should be >= 3."""
-        from app.services.source_registry import registry
-        h = registry._health("factor.history")
+        from app.core.source_registry import registry
+        h = registry.health("factor.history")
         assert h.failure_threshold >= 3
 
     def test_etf_specific_factors_registered(self):

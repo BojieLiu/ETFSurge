@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch, AsyncMock
 import pytest
 
 from app.core.async_utils import run_in_thread, run_sync
-from app.services.source_registry import SourceRegistry, SourceHealth
+from app.core.source_registry import SourceRegistry, SourceHealth
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -71,7 +71,7 @@ class TestOpt02FundFlowDegradation:
             "satellite": [{"symbol": "159338"}],
         }
 
-        with patch("app.services.source_registry.registry._health",
+        with patch("app.core.source_registry.registry.health",
                    return_value=mock_h) as mock_health:
             result = await _compute_fund_flow(mock_pm)
             assert result["total_net_inflow"] == 0.0
@@ -90,7 +90,7 @@ class TestOpt02FundFlowDegradation:
         mock_pm = MagicMock()
         mock_pm.get_pool.return_value = {"core": [{"symbol": "510300"}]}
 
-        with patch("app.services.source_registry.registry._health",
+        with patch("app.core.source_registry.registry.health",
                    return_value=mock_h):
             with patch("app.fetchers.fundamentals_fetcher.fetch_fund_flow",
                        return_value={"main_net_inflow": 1000000.0, "main_net_inflow_pct": 2.5}):
@@ -165,7 +165,7 @@ class TestOpt04SemaphoreRegression:
             "core": [{"symbol": f"51{i:04d}"} for i in range(10)]
         }
 
-        with patch("app.services.source_registry.registry._health",
+        with patch("app.core.source_registry.registry.health",
                    return_value=mock_h):
             with patch("app.fetchers.fundamentals_fetcher.fetch_fund_flow",
                        return_value={"main_net_inflow": 100.0, "main_net_inflow_pct": 1.0}):
@@ -185,7 +185,7 @@ class TestOpt15RegistryRegression:
         """熔断时 try_call 返回 None（不等超时）。"""
         registry = SourceRegistry()
         fn = MagicMock(return_value="data")
-        h = registry._health("test_source")
+        h = registry.health("test_source")
         t = time.time()
         h.record_failure(t, duration_ms=1000)
         h.record_failure(t, duration_ms=1000)
@@ -214,10 +214,10 @@ class TestOpt15RegistryRegression:
     def test_reset_source_clears_exponential_backoff(self):
         """reset_source 重置指数退避计数。"""
         registry = SourceRegistry()
-        h = registry._health("test_source")
+        h = registry.health("test_source")
         h.max_cooldown = 600
 
-        with patch("app.services.source_registry.time.time", return_value=1000.0):
+        with patch("app.core.source_registry.time.time", return_value=1000.0):
             for _ in range(3):
                 h.record_failure(1000.0, duration_ms=1000)
 
@@ -304,10 +304,10 @@ class TestOpt16RedGreenGate:
         """
         registry = SourceRegistry()
         fn = MagicMock(return_value="should_not_be_called")
-        h = registry._health("cb_test_source")
+        h = registry.health("cb_test_source")
         h.max_cooldown = 3600
 
-        with patch("app.services.source_registry.time.time", return_value=1000.0):
+        with patch("app.core.source_registry.time.time", return_value=1000.0):
             for _ in range(3):
                 h.record_failure(1000.0, duration_ms=1000)
 

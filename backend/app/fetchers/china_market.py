@@ -21,7 +21,7 @@ from ..utils.proxy import no_proxy
 from ..utils.decode import decode_df as _decode_df
 from ..core.ttl import CACHE_TTL
 from ..services.cache_service import sync_memory_cache
-from ..services.source_registry import registry
+from ..core.source_registry import registry
 from ..core.async_utils import run_in_thread
 from ..fetchers import global_markets_fetcher
 from ..fetchers import global_markets_fetcher
@@ -551,7 +551,7 @@ def _sina_history(symbol: str, period: str = "daily") -> list[dict[str, Any]]:
 
 def _sina_history_cb(symbol: str, period: str = "daily") -> list[dict[str, Any]]:
     """P1-6: Circuit-breaker aware Sina history via SourceRegistry."""
-    from ..services.source_registry import registry
+    from ..core.source_registry import registry
     scale = {"daily": "240", "weekly": "1200", "monthly": "7200",
              "15m": "15", "30m": "30", "1h": "60"}.get(period, "240")
     pref = _exchange(symbol)

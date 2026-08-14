@@ -56,7 +56,7 @@ export const portfolioApi = {
   remove: (symbol) => api.delete(`/portfolio/etfs/${symbol}`),
   dailyPnl: (totalCapital, type) => api.post('/portfolio/daily-pnl', { total_capital: totalCapital }, { params: type ? { portfolio_type: type } : {} }),
   getAllocation: (type, totalCapital) => api.post('/portfolio/calculate', { total_capital: totalCapital }, { params: type ? { portfolio_type: type } : {} }),
-  getPnl: (type, totalCapital) => api.post('/portfolio/daily-pnl', { total_capital: totalCapital }, { params: type ? { portfolio_type: type } : {} }),
+  // round23 §6.2: getPnl 与 dailyPnl 重复（入参顺序相反）已合并——统一用 dailyPnl(totalCapital, type)
   strategyCheck: (data) => api.post('/portfolio/strategy-check-async', data),
   getStrategyCheckResult: (taskId) => api.get(`/portfolio/strategy-check-result/${taskId}`),
   getStrategyCheckDetail: (id) => api.get(`/portfolio/strategy-checks/${id}`),
@@ -82,11 +82,14 @@ export const portfolioApi = {
   getTimeline: (limit = 20, offset = 0) => api.get('/portfolio/timeline', { params: { limit, offset } }),
 }
 
-export const analysisApi = {
-}
-
 export const newsApi = {
   headlines: () => api.get('/news/headlines'),
+  // F29 (round23 §2.4 A4): 资讯页接入 macro/global/stock/research 四端点——
+  // 旧实现仅 headlines 可达，其余 4 端点 UI 不可达（事实死功能）。
+  macro: () => api.get('/news/macro'),
+  globalNews: () => api.get('/news/global'),
+  stockNews: (symbol) => api.get(`/news/stock/${encodeURIComponent(symbol)}`),
+  research: (symbol) => api.get(`/news/research/${encodeURIComponent(symbol)}`),
   newsImpact: (payload) => api.post('/analysis/news-impact', payload),
 }
 

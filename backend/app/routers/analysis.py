@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Any
 
 from ..analysis.llm import (
-    generate_market_report, generate_advice, analyze_news, analyze_news_impact,
+    generate_market_report, generate_advice, analyze_news_impact,
     generate_sector_analysis, generate_symbol_analysis,
     _build_report_prompt,
 )
@@ -256,20 +256,7 @@ async def news_impact(req: NewsImpactRequest):
 # 组合设计功能已迁移到 POST /portfolio/design-async（引擎驱动）
 # 旧 LLM 路径不再维护
 
-class PortfolioReviewRequest(BaseModel):
-    """组合检视请求体"""
-    portfolio_type: str  # 进攻型 | 防御型 | 平衡型
-    last_rebalance_date: str
-    current_portfolio_holdings: list[dict]  # 包含 ticker, weight_pct, cost_basis_price, current_price, return_since_rebalance_pct, liquidity_tier, avg_daily_turnover_mn, tracking_error_annualized, dividend_yield_ttm
-    new_market_snapshot: dict  # 包含 macro, style_factor_zscore, sector_performance_1m_pct, risk_indicators
-    risk_budget: dict  # 包含 max_single_etf_weight_pct, max_sector_deviation_from_benchmark_pct, max_annualized_tracking_error_pct, max_drawdown_alert_threshold_pct, min_avg_daily_turnover_mn, min_aum_bn, max_illiquid_etf_proportion_pct, rebalance_trigger_band
-    type_thresholds: dict  # 进攻型/防御型/平衡型各自的阈值
-    meta_context: dict  # strategy_target_type, benchmark_index, last_rebalance_date, current_date, days_since_rebalance, total_portfolio_value_mn, current_annualized_volatility_pct
-
-    #     )
-    # except Exception as e:
-    #     raise HTTPException(status_code=502, detail=f"LLM sector analysis failed: {e}")
-    # return {"sector_name": name, "sector_code": sector_code, "report": report, "constituents_count": len(constituents), "disclaimer": "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"}
+# round23 §6.2: PortfolioReviewRequest 零调用已删除（旧 LLM 组合检视遗留）
 
 @router.post("/llm-report/stream")
 async def llm_report_stream(req: LLMReportRequest):
@@ -722,28 +709,3 @@ async def symbol_analysis_stream(req: SymbolAnalysisRequest):
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM streaming failed: {e}")
 
-@router.post("/news-impact/stream")
-async def news_impact_stream(req: NewsImpactRequest):
-    """流式单条新闻影响分析"""
-    try:
-        holdings_text = "\n".join(
-            f"- {h.get('symbol', '')} {h.get('name', '')} "
-            f"({h.get('asset_type', '')}) 目标权重 {h.get('target_weight', '')}"
-            for h in req.portfolio
-        ) or "（组合为空）"
-        
-        prompt = f"""新闻标题：{req.news.get('title', '')}
-新闻内容：{req.news.get('content', '')}
-
-当前组合持仓：
-{holdings_text}
-
-请分析这条新闻对组合的影响，重点回答：
-(a) 影响范围（市场/板块）；
-(b) 组合内哪些标的会受到影响、具体如何受影响。
-只返回约定结构的 JSON。"""
-        
-        agent = get_agent("news_impact")
-        return _sse_stream(agent.run_stream(prompt))
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"LLM streaming failed: {e}")

@@ -118,7 +118,7 @@ def mock_registry_health(monkeypatch):
 
     默认全部可用（cooldown_until=0）；测试可改 healthy_names 控制失败源。
     """
-    from app.services import source_registry
+    from app.core import source_registry
 
     def _make_health():
         h = source_registry.SourceHealth()
@@ -127,5 +127,5 @@ def mock_registry_health(monkeypatch):
         return h
 
     registry = source_registry.registry
-    monkeypatch.setattr(registry, "_health", lambda name: _make_health())
+    monkeypatch.setattr(registry, "health", lambda name: _make_health())
     return registry

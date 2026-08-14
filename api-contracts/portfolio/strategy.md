@@ -114,76 +114,9 @@ GET /api/v1/portfolio/strategy-check-result/{task_id}
 
 ---
 
-### 2.2 应用策略 / Apply Strategy Suggestions
-
-```
-POST /api/v1/portfolio/apply-strategy
-```
-
-**请求体 / Request Body:**
-
-```json
-{
-  "suggestions": [
-    {
-      "symbol": "159338",
-      "action": "adjust_weight",
-      "weight": -0.03,
-      "reason": "降低A500权重以控制集中度"
-    }
-  ]
-}
-```
-
-**字段说明 / Request Fields:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| suggestions | array | Yes | List of strategy actions |
-| suggestions[].symbol | string | Yes | ETF trading code |
-| suggestions[].action | string | Yes | `adjust_weight` \| `replace` \| `add` |
-| suggestions[].weight | float | No | Weight change value (absolute for `replace`/`add`, delta for `adjust_weight`) |
-| suggestions[].reason | string | No | Human-readable reason |
-
-**成功响应 / Success Response — `200 OK`:**
-
-```json
-{
-  "symbols": [
-    {
-      "symbol": "159338",
-      "name": "国泰中证A500ETF",
-      "target_weight": 0.23
-    }
-  ],
-  "applied": [
-    {
-      "symbol": "159338",
-      "action": "adjust_weight",
-      "status": "success",
-      "message": "已调整 159338 权重"
-    }
-  ]
-}
-```
-
-**字段说明 / Response Fields:**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| symbols | array | Updated ETF list after applying suggestions |
-| applied | array | Per-suggestion execution results |
-| applied[].status | string | `success` \| `error` |
-| applied[].message | string | Human-readable execution message |
-
-**错误 / Error Codes:**
-
-| Code | Meaning | When |
-|------|---------|------|
-| 400 | Bad Request | Empty suggestions list or invalid action type |
-| 500 | Internal Server Error | DB commit failure |
-
----
+> **round23 §6.1（2026-08-14）**: `POST /portfolio/apply-strategy` 为死端点（0 生产调用方，
+> 前端实际走 `/strategy-check-async`），已删除。建议应用改经 `apply-design`（round14 P0-A
+> 契约）或策略检查结果手动应用。
 
 ## 3. 前后端检查表 / Frontend-Backend Checklist
 
@@ -193,8 +126,6 @@ POST /api/v1/portfolio/apply-strategy
 | `strategy-check-result/{task_id}` returns summary + suggestions | ✅ | ✅ | frontend polls with `getStrategyCheckResult(taskId)` |
 | `strategy-checks` history list | ✅ | ✅ | frontend calls `listStrategyChecks(20,0)` |
 | `strategy-check-async` handles empty portfolio | ☐ | ☐ | Returns "组合为空" message |
-| `apply-strategy` accepts suggestions array | ☐ | ☐ | |
-| `apply-strategy` returns updated symbols | ☐ | ☐ | |
 | Suggestion action `adjust_weight` adjusts weight correctly | ☐ | ☐ | |
 | Suggestion action `replace` sets new weight | ☐ | ☐ | |
 | Suggestion action `add` activates ETF | ☐ | ☐ | |

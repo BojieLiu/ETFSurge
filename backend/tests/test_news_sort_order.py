@@ -226,7 +226,7 @@ class TestIndividualFetcherSortTime:
                 MockEntry("Global 2", "s2", "Tue, 14 Jul 2026 09:00:00 GMT", "https://x.com/2"),
             ]
 
-        monkeypatch.setattr(nfmod, "_safe", lambda fn, t: MockFeed())
+        monkeypatch.setattr(nfmod, "safe_call", lambda fn, **kw: MockFeed())
         monkeypatch.setattr(nfmod, "_ak", lambda fn: [])
 
         items = fetch_global_news()

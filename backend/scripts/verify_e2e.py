@@ -824,6 +824,54 @@ def section_analysis():
         except Exception as e:
             check(f"symbol-analysis/stream {_label}", False, str(e))
 
+    # T5 (round23 §5 缺口6): sector-analysis/stream 三端点冒烟补全——llm-advice 与
+    # symbol-analysis 已覆盖，此处补 sector-analysis（中文体 + 断言流非空且含 CJK）。
+    try:
+        _sr = requests.post(f"{BASE}/api/v1/analysis/sector-analysis/stream",
+                            json={"sector_code": "BK0735"}, timeout=35, stream=True)
+        _ok = _sr.status_code == 200
+        _chunk_err = False
+        _cjk_seen = False
+        if _ok:
+            try:
+                for _i, _line in enumerate(_sr.iter_lines(decode_unicode=True)):
+                    if _line and "STREAM_ERROR" in _line:
+                        _chunk_err = True
+                        break
+                    # 断言流内出现中文（真实内容，非空壳）
+                    if any("\u4e00" <= ch <= "\u9fff" for ch in (_line or "")):
+                        _cjk_seen = True
+                    if _i > 8:
+                        break
+            except Exception:
+                pass
+            _sr.close()
+        check("sector-analysis/stream 中文体 200（无 STREAM_ERROR）", _ok and not _chunk_err,
+              "STREAM_ERROR 出现在 SSE 流中" if _chunk_err else f"HTTP {_sr.status_code}")
+        check("sector-analysis/stream 流含 CJK（非空壳）", _ok and _cjk_seen,
+              "流内未出现中文（空壳/模板）" if _ok else "未请求")
+    except requests.Timeout:
+        check("sector-analysis/stream", False, "请求超时（35s）")
+    except Exception as e:
+        check("sector-analysis/stream", False, str(e))
+
+    # T8 (round23 §5 缺口10/§2.3 方法论): 审计 harness 编码自检——中文体必须用 Python
+    # requests（显式 UTF-8），shell-quoted curl 会破坏 UTF-8（round23 4 个假 P0 误报根源）。
+    # 用非 LLM 端点自检「中文回显一致」：search 中文关键词 → 断言回显名称含 CJK。
+    try:
+        _sr = requests.get(f"{BASE}/api/v1/market/search", params={"keyword": "银", "market": "A"},
+                           timeout=10)
+        _sr.raise_for_status()
+        _items = _sr.json() if isinstance(_sr.json(), list) else []
+        _any_cjk = any(
+            any("\u4e00" <= ch <= "\u9fff" for ch in str(it.get("name", "")))
+            for it in _items
+        )
+        check("中文回显一致（search 银 → 含 CJK 名称，UTF-8 未破坏）", _any_cjk,
+              "中文关键词回显无 CJK（harness 编码被破坏——必须用 Python requests/urllib）")
+    except Exception as e:
+        check("中文回显一致（search 银）", False, str(e))
+
     # F6 R16: 板块热度契约断言——/sectors/heat 返回 {items,total}（hot-plates 契约 v2.0），
     # 断言 items 键存在且非空（旧检查只在 section_api_5xx_check 查 HTTP 200，防不住空数据）
     try:
@@ -1752,11 +1800,9 @@ def section_design_quality_gate():
         if not strategies:
             check("设计方案含 strategies", True, "无 strategies（LLM 报告未生成时方案仍可评估）", skip=True)
             return
-        from app.engine.design_quality import validate_design_quality, check_strategies_differ
-        issues = validate_design_quality(strategies)
-        check("方案质量门禁 5 项清单", not issues, "; ".join(issues[:3]) if issues else "全部通过")
-        differ = check_strategies_differ(strategies)
-        check("三套方案非机械缩放", differ, "层权重结构趋同" if not differ else "")
+        # round23 §10.2 C1: design_quality 模块已删（生产 0 调用，质量逻辑与
+        # tasks/design_report._validate_report_consistency 重叠）——以下 M7/P1-1
+        # 结构断言不依赖该模块，保留为 verify_e2e 端到端检查。
         # M7: 核心层数量 ∈ [3,5]（含强制 510300/159338）且含宽基锚（中证A500/沪深300 之一）
         core_syms_list: list[set[str]] = []
         for s in strategies:

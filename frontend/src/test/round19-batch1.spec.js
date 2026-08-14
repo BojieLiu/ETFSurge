@@ -46,6 +46,8 @@ describe('fetch_history 入口归一化（round19 P7-①）', () => {
     const fnStart = src.indexOf('def fetch_history(')
     const fnBody = src.slice(fnStart, fnStart + 1200)
     expect(fnBody).toMatch(/startswith\(\("sh", "sz", "bj"\)/)
-    expect(fnBody).toMatch(/symbol = symbol\[2:\]/)
+    // review 修复（round23 审计前）：剥前缀仅限 A 股且用 str() 包裹（US 字母代码
+    // SHOP/SHW 等不得剥）——断言放宽为匹配 str(symbol)[2:] 形式
+    expect(fnBody).toMatch(/symbol = str\(symbol\)\[2:\]/)
   })
 })

@@ -392,27 +392,6 @@ async def signal(
         pass
     return result
 
-@router.get("/signal/debug/{symbol}")
-async def signal_debug(
-    symbol: str,
-    asset_type: str = Query("A"),
-    period: str = Query("daily"),
-) -> dict:
-    """信号诊断端点：返回完整的链路数据（history → indicators → signal），用于调试。
-    #11 数据链静默失败时，通过此端点确认哪一步返回空。"""
-    hist = await market_data_hub.get_market_history(symbol, asset_type, period)
-    ind = compute_all_indicators(hist) if hist else {}
-    sig = generate_signal(ind) if ind else {"signal": "hold", "score": 0, "debug": "indicators_empty"}
-    return {
-        "symbol": symbol,
-        "asset_type": asset_type,
-        "period": period,
-        "history_count": len(hist),
-        "history_last": hist[-1] if hist else None,
-        "indicators": ind,
-        "signal": sig,
-    }
-
 @router.get("/chart/{symbol}")
 async def chart(
     symbol: str,
@@ -514,24 +493,7 @@ async def concept_sectors(limit: int = Query(500)) -> list[dict[str, Any]]:
     return []
 
 # TODO: 未接入前端
-@router.get("/sectors/industry-cls")
-async def sector_industry_cls_route(limit: int = Query(80)) -> list[dict[str, Any]]:
-    """行业板块实时行情(财联社)。"""
-    return await asyncio.to_thread(market_data_hub.get_sector_industry_cls, limit)
-
-# TODO: 未接入前端
-@router.get("/sectors/{sector_code}/stocks")
-async def sector_stocks_route(sector_code: str) -> list[dict[str, Any]]:
-    """板块成分股(东方财富)。"""
-    return await asyncio.to_thread(market_data_hub.get_sector_stocks, sector_code)
-
-# TODO: 未接入前端
-@router.get("/sectors/{plate_code}/popular")
-async def sector_popular(plate_code: str) -> list[dict[str, Any]]:
-    """板块热门个股(财联社)。"""
-    return await asyncio.to_thread(market_data_hub.get_sector_popular_stocks, plate_code)
-
-# Z17: Add sector rotation endpoint
+# Z17: Add sector rotation endpoint（round23 §6.2c：非死代码，verify_e2e/tests 覆盖，保留）
 @router.get("/sectors/rotation")
 async def sector_rotation(limit: int = Query(20)) -> list[dict[str, Any]]:
     """板块轮动数据 — 行业板块实时行情(财联社)，含涨跌幅、主力资金、涨跌家数。"""
@@ -651,12 +613,6 @@ def _match_em_change(cls_name: str, em_map: dict[str, float]) -> float | None:
 async def stock_hot_rank(limit: int = Query(50), market: str = "A") -> list[dict[str, Any]]:
     """A股热门个股排名(同花顺)。market=HK 时返回港股热门个股；US 暂不支持。"""
     return await asyncio.to_thread(market_data_hub.get_stock_hot_rank, limit, market)
-
-# Phase 6: 前端已接入（marketApi.getMarketWind）
-@router.get("/wind")
-async def wind() -> list[dict[str, Any]]:
-    """今日风口/主线板块(财联社)。"""
-    return await asyncio.to_thread(market_data_hub.get_market_wind)
 
 # ── Watchlist / 自选列表 ──────────────────────────────────────────────
 

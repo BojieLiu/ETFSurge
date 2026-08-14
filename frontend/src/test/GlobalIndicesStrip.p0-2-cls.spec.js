@@ -35,4 +35,22 @@ describe('GlobalIndicesStrip 骨架行数对齐（round20 P0-2 CLS）', () => {
     expect(skeletonCards).toBeTruthy()
     expect(skeletonCards[0]).toContain('padding: var(--space-2) 0')
   })
+
+  it('F35: 骨架卡片高度对齐真实 index-card（~88px，消除每行高度差）', () => {
+    // round23 F35 (P0-2 补完): 行数对齐只消除「2→5 行」增量，每行高度差
+    // （骨架 64px vs 真实 ~88px）仍使数据替换时下方下移 → CLS 0.39 恒定。
+    const card = src.match(/\.gis-skeleton-card\s*\{[^}]+\}/)
+    expect(card).toBeTruthy()
+    const h = card[0].match(/height:\s*(\d+)px/)
+    expect(h).toBeTruthy()
+    const height = Number(h[1])
+    expect(height).toBeGreaterThanOrEqual(84)
+    expect(height).toBeLessThanOrEqual(96)
+  })
+
+  it('F35: 骨架行 margin 对齐 .region-row（10px）', () => {
+    const row = src.match(/\.gis-skeleton-row\s*\{[^}]+\}/)
+    expect(row).toBeTruthy()
+    expect(row[0]).toContain('margin-bottom: 10px')
+  })
 })

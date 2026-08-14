@@ -49,3 +49,22 @@ class TestFactorModelSummary:
         assert isinstance(body["categories"], list)
         assert all("name" in c and "count" in c and "subcategories" in c
                    for c in body["categories"])
+
+    def test_model_implemented_planned_f33(self):
+        """F33 (round23 §8): 宣称=可用——total 为 YAML 定义数，implemented 为已接入数，
+        planned 为未实现（规划中）数；整类零实现（alternative/theme/microstructure）
+        的 implemented_count=0。"""
+        resp = client.get("/api/v1/factors/model")
+        body = resp.json()
+        assert "implemented" in body, "/factors/model 缺 implemented 字段"
+        assert "planned" in body, "/factors/model 缺 planned 字段"
+        assert body["implemented"] + body["planned"] == body["total"], \
+            f"implemented({body['implemented']}) + planned({body['planned']}) != total({body['total']})"
+        assert body["implemented"] <= body["total"]
+        for c in body["categories"]:
+            assert "implemented_count" in c and "planned_count" in c
+            assert c["implemented_count"] + c["planned_count"] == c["count"], \
+                f"{c['name']}: implemented({c['implemented_count']}) + planned({c['planned_count']}) != count({c['count']})"
+        # alternative/theme/microstructure 当前整类零实现（无 compute 函数）
+        zero_impl = {c["name"] for c in body["categories"] if c["implemented_count"] == 0}
+        assert {"alternative", "theme", "microstructure"} <= zero_impl, f"零实现类应含三整类，实际 {zero_impl}"

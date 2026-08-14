@@ -110,7 +110,7 @@ def test_hk_dual_source_breaker_registered(monkeypatch):
     不再依赖私有 _em_host_health 计数器。"""
     import time as _t
 
-    from app.services.source_registry import registry as sr
+    from app.core.source_registry import registry as sr
 
     def _boom(host):
         raise ConnectionError(f"{host} down")
@@ -134,7 +134,7 @@ def test_hk_dual_source_breaker_registered(monkeypatch):
 
 def test_hk_success_resets_breaker(monkeypatch):
     """P2-6: 单次成功即复位 SourceHealth（fail_streak 清零，不冷却）。"""
-    from app.services.source_registry import registry as sr
+    from app.core.source_registry import registry as sr
 
     def _ok(host):
         return [{"f12": "00700", "f14": "腾讯控股", "f2": 380.0,

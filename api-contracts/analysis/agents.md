@@ -20,7 +20,6 @@ Agent 配置集中在 `analysis/registry.py` 的 `AGENTS` 字典中；系统提�
 | POST | `/api/v1/analysis/llm-report/stream` | market_report | 市场研判报告（SSE 流式） |
 | POST | `/api/v1/analysis/llm-advice/stream` | advice | 投资建议（SSE 流式，带市场上下文注入） |
 | POST | `/api/v1/analysis/news-impact` | news_impact | 单条新闻对组合的影响 |
-| POST | `/api/v1/analysis/news-impact/stream` | news_impact | 单条新闻对组合的影响（SSE 流式） |
 | POST | `/api/v1/analysis/sector-analysis/stream` | sector_analysis | 行业/概念板块分析（SSE 流式） |
 | POST | `/api/v1/analysis/symbol-analysis/stream` | symbol_analysis | 个股/ETF/指数分析（SSE 流式） |
 

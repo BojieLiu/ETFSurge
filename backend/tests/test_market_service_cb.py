@@ -16,7 +16,7 @@ class TestCallWithCb:
         with patch("app.services.market_service.registry") as mock_reg:
             h_mock = MagicMock()
             h_mock.available.return_value = True
-            mock_reg._health.return_value = h_mock
+            mock_reg.health.return_value = h_mock
             yield mock_reg, h_mock
 
     @pytest.mark.asyncio

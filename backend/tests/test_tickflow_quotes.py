@@ -134,7 +134,7 @@ def test_hk_stock_realtime_has_tickflow_tail():
 
 def test_route_us_has_tickflow_tail():
     """market_service._route_us 链尾含 tickflow（twelvedata → finnhub → tickflow）。"""
-    from app.services import source_registry
+    from app.core import source_registry
     patch_route, captured = _capture_route(market_service, {"price": 313.33})
     with patch_route:
         asyncio_run(market_service._route_us("AAPL"))

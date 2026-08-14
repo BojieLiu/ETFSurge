@@ -961,18 +961,12 @@ class MarketDataHub:
 
         外部 detect_market_regime() 返回的值可能包含 `bull_strong`、`range_bound` 等，
         但 _LAYER_WEIGHTS 表使用 `bull`、`neutral` 等简化 key。
+
+        E2 (round23 §10.2): 归一化逻辑提取 core/regime.normalize_regime 为单一口径
+        （与 risk_controls 的熊市判定共用本模块），本方法保留为兼容委托。
         """
-        mapping = {
-            "bull_strong": "bull",
-            "bull_weakening": "bull",
-            "range_bound": "neutral",
-            "neutral": "neutral",
-            "correction": "correction",
-            "bear": "bear",
-            "defensive_rotate": "neutral",
-            "panic": "bear",
-        }
-        return mapping.get(regime, "neutral")
+        from ..core.regime import normalize_regime
+        return normalize_regime(regime)
 
     @staticmethod
     def _pct_rank(value: float, series: list[float]) -> float:

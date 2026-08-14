@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.services.market_service import get_asset_realtime
-from app.services.source_registry import SourceRegistry
+from app.core.source_registry import SourceRegistry
 
 
 class TestGetAssetRealtimeRouting:
@@ -102,7 +102,7 @@ class TestRouteEmptyResultMiss:
             result = reg.route([("src_a", lambda: [])], route_name="test", target="00700")
             assert result is None
 
-        h = reg._health("src_a")
+        h = reg.health("src_a")
         with h._lock:
             assert h._failures == 0, "空结果不应增加失败计数"
             assert h._cool_until == 0.0, "空结果不应触发熔断"
@@ -117,7 +117,7 @@ class TestRouteEmptyResultMiss:
         for _ in range(3):
             reg.route([("src_b", _boom)], route_name="test", target="x")
 
-        h = reg._health("src_b")
+        h = reg.health("src_b")
         with h._lock:
             assert h._failures == 0  # 达到阈值后已熔断并清零
             assert h._cool_until > 0, "异常累计到阈值必须熔断"
@@ -127,7 +127,7 @@ class TestRouteEmptyResultMiss:
         reg = SourceRegistry()
         reg.route([("src_c", lambda: (None, 500))], route_name="test", target="x")
 
-        h = reg._health("src_c")
+        h = reg.health("src_c")
         with h._lock:
             assert h._cool_until > 0, "HTTP 500 必须立即冷却"
 

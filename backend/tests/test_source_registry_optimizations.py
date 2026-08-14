@@ -7,7 +7,7 @@ import time
 import pytest
 from unittest.mock import MagicMock, patch
 
-from app.services.source_registry import SourceRegistry, SourceHealth
+from app.core.source_registry import SourceRegistry, SourceHealth
 
 
 # ── OPT-15.1: try_call 包装器 ──────────────────────────────────────
@@ -19,7 +19,7 @@ class TestTryCall:
         """当熔断器打开时，try_call 直接返回 None，不执行 fn。"""
         registry = SourceRegistry()
         fn = MagicMock(return_value="data")
-        h = registry._health("test_source")
+        h = registry.health("test_source")
         # 触发熔断（用非快速失败，正常计数）
         t = time.time()
         h.record_failure(t, duration_ms=1000)  # >500ms, normal path
@@ -35,7 +35,7 @@ class TestTryCall:
         """try_call 成功时返回 fn 结果并记录 success。"""
         registry = SourceRegistry()
         fn = MagicMock(return_value={"price": 100})
-        h = registry._health("test_source")
+        h = registry.health("test_source")
 
         result = registry.try_call("test_source", fn, timeout=0)
         assert result == {"price": 100}, "应返回 fn 的结果"
@@ -47,7 +47,7 @@ class TestTryCall:
         """try_call 失败时返回 None 并记录 failure。"""
         registry = SourceRegistry()
         fn = MagicMock(side_effect=ConnectionError("timeout"))
-        h = registry._health("test_source")
+        h = registry.health("test_source")
 
         result = registry.try_call("test_source", fn, timeout=0)
         assert result is None, "失败时 try_call 应返回 None"
@@ -66,11 +66,11 @@ class TestTryCall:
         """非快速失败连续达到阈值后，try_call 应跳过后续调用。"""
         registry = SourceRegistry()
         fn = MagicMock(side_effect=ConnectionError("fail"))
-        h = registry._health("test_source")
+        h = registry.health("test_source")
         h.max_cooldown = 3600
 
-        with patch("app.services.source_registry.time.time", return_value=100.0):
-            with patch("app.services.source_registry.time.perf_counter") as mock_pc:
+        with patch("app.core.source_registry.time.time", return_value=100.0):
+            with patch("app.core.source_registry.time.perf_counter") as mock_pc:
                 # 模拟非快速失败：让 elapsed > 500ms
                 mock_pc.side_effect = [100.0, 100.6, 100.0, 100.6, 100.0, 100.6, 100.0, 100.6]
                 for _ in range(3):
@@ -115,10 +115,10 @@ class TestFastFailDetection:
         """try_call 内部检测 fast-fail 并记录 hard_failure。"""
         registry = SourceRegistry()
         fn = MagicMock(side_effect=ConnectionError("fast fail"))
-        h = registry._health("test_source")
+        h = registry.health("test_source")
 
-        with patch("app.services.source_registry.time.time", return_value=100.0):
-            with patch("app.services.source_registry.time.perf_counter") as mock_pc:
+        with patch("app.core.source_registry.time.time", return_value=100.0):
+            with patch("app.core.source_registry.time.perf_counter") as mock_pc:
                 # elapsed = 100ms < 500ms → fast-fail
                 mock_pc.side_effect = [100.0, 100.1]
                 registry.try_call("test_source", fn, timeout=0)
@@ -199,11 +199,11 @@ class TestExponentialBackoff:
         """通过 try_call 触发的熔断也使用指数退避。"""
         registry = SourceRegistry()
         fn = MagicMock(side_effect=ConnectionError("fail"))
-        h = registry._health("test_source")
+        h = registry.health("test_source")
         h.max_cooldown = 600
 
-        with patch("app.services.source_registry.time.time", return_value=1000.0):
-            with patch("app.services.source_registry.time.perf_counter") as mock_pc:
+        with patch("app.core.source_registry.time.time", return_value=1000.0):
+            with patch("app.core.source_registry.time.perf_counter") as mock_pc:
                 mock_pc.side_effect = [1000.0, 1000.6] * 3  # 3次，每次 >500ms
                 for _ in range(3):
                     registry.try_call("test_source", fn, timeout=0)
@@ -218,10 +218,10 @@ class TestCircuitBreakerStatus:
     def test_circuit_breaker_status_includes_cooldown_info(self):
         """circuit_breaker_status 返回包含详细冷却信息的列表。"""
         registry = SourceRegistry()
-        h = registry._health("test_source")
+        h = registry.health("test_source")
         h.max_cooldown = 600
 
-        with patch("app.services.source_registry.time.time", return_value=1000.0):
+        with patch("app.core.source_registry.time.time", return_value=1000.0):
             for _ in range(3):
                 h.record_failure(1000.0, duration_ms=1000)
 
@@ -236,7 +236,7 @@ class TestCircuitBreakerStatus:
     def test_circuit_breaker_status_returned_by_endpoint_shape(self):
         """验证熔断器状态 API 返回的 JSON 结构。"""
         registry = SourceRegistry()
-        h = registry._health("sina")
+        h = registry.health("sina")
         h.cooldown = 30
 
         result = registry.circuit_breaker_status()
@@ -257,13 +257,13 @@ class TestRegistryCleanup:
     def test_reset_source_clears_state(self):
         """reset_source 应清除指定源的状态。"""
         registry = SourceRegistry()
-        h = registry._health("test_source")
+        h = registry.health("test_source")
         h.record_failure(0, duration_ms=1000)
         h.record_failure(0, duration_ms=1000)
         h.record_failure(0, duration_ms=1000)
 
         registry.reset_source("test_source")
-        h2 = registry._health("test_source")
+        h2 = registry.health("test_source")
         # 重置后状态应清除
         assert h2._failures == 0
         assert h2._cool_until == 0.0

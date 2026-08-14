@@ -327,6 +327,8 @@ async def generate_enhanced_design(
     try:
         # 3. 策略引擎：一次调用生成所有方案
         _t3 = time.monotonic()
+        # A1 (round23 §10.1): 引擎纯度——definitions/ic_series 在此从 registry 读一次注入
+        from ..factors.factor_registry import registry as _freg_global
         # 扁平化候选池：allocate() 预期 list[dict]，每项含 layer 字段
         flat_candidates: list = []
         for layer_list in candidates.values():
@@ -346,6 +348,10 @@ async def generate_enhanced_design(
             candidates=flat_candidates,
             regime=market_regime,
             sector_momentum=_sector_momentum,
+            # A1 (round23 §10.1): engine 纯度参数化——从 registry 读一次注入
+            #（definitions/ic_series），engine 内不再 import factor_registry 私有态。
+            factor_definitions=getattr(_freg_global, "_factors", None) or {},
+            ic_series=getattr(_freg_global, "_ic_series_cache", None),
         )
 
         _t4 = time.monotonic()
@@ -623,11 +629,11 @@ async def _compute_fund_flow(market_data_hub) -> dict:
     # OPT-02: 熔断器检查——F17 R62: fund_flow 走 market_data_hub.get_fund_flow（akshare），
     # 旧 gate 查 push2delay 健康是语义错位（fund_flow 被涨跌家数路径熔断 gate 误伤），
     # 改为检查 akshare 源健康；push2delay gate 仅适用于直接走 HTTP 的路径
-    from ..services.source_registry import registry as _source_registry
+    from ..core.source_registry import registry as _source_registry
     import time
     from ..core.market_context import EM_PUSH_HOST
     _ = EM_PUSH_HOST  # 域名集中常量引用（避免散落）
-    akshare_h = _source_registry._health("akshare")
+    akshare_h = _source_registry.health("akshare")
     if not akshare_h.available(time.time()):
         logger.info("[strategy_design] _compute_fund_flow: akshare circuit open, returning empty")
         return {"total_net_inflow": 0.0, "positive_flow_count": 0,
@@ -798,18 +804,25 @@ def _factor_data_quality_report() -> dict:
     static/no_data 分布；valid 率 = valid / 非 static 因子数（static 为「设计为
     静态」，不参与有效性评估）。valid 率 < 60% → degraded=True + 降级说明。
     纯计算，无 I/O（IC 值从 registry 内存/DB 读）。
+
+    F25② (round23 §8): _status_of 判定改用「交易日数 + t/IR」——样本 <60 天
+    全部 no_data（积累中），故数据积累期 valid_rate=0 → 恒 degraded（诚实的
+    降级：方案仅供参考），随运行满 250 交易日且 t≥2/|IR|≥0.5 逐步翻绿。
     """
     try:
         from ..factors.factor_registry import registry as _freg
         from ..routers.factors import _status_of, STATIC_FACTOR_CODES, MARKET_LEVEL_FACTOR_CODES
+        from ..factors.ic_tracker import compute_series_stats
 
         _factors = getattr(_freg, "_factors", {}) or {}
         _design_static = STATIC_FACTOR_CODES | MARKET_LEVEL_FACTOR_CODES
         _ic_series = getattr(_freg, "_ic_series_cache", {}) or {}
+        _sample_counts = getattr(_freg, "_sample_counts", {}) or {}
         counts = {"valid": 0, "warn": 0, "static": 0, "no_data": 0}
         for _code in _factors:
             _ic = _ic_series.get(_code)
             _icv = None
+            _ser = None
             if isinstance(_ic, dict):
                 _icv = _ic.get("ic")
             elif isinstance(_ic, (list, tuple)) and _ic:
@@ -818,7 +831,15 @@ def _factor_data_quality_report() -> dict:
                     if _v is not None:
                         _icv = float(_v)
                         break
-            _st, _ = _status_of(_code, _icv, 0.02)
+                _ser = compute_series_stats([float(v) for v in _ic if v is not None])
+            # F25②: samples 取内存 IC 周期计数（无 DB 时降级标注用），t/IR 从序列估算
+            _st, _ = _status_of(
+                _code,
+                samples=int(_sample_counts.get(_code, 0)),
+                t_stat=_ser.get("t_stat") if _ser else None,
+                ir=_ser.get("ir") if _ser else None,
+                ic_val=_icv,
+            )
             counts[_st] = counts.get(_st, 0) + 1
         _non_static = counts["valid"] + counts["warn"] + counts["no_data"]
         _valid_rate = round(counts["valid"] / _non_static, 4) if _non_static else 0.0

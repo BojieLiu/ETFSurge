@@ -140,16 +140,20 @@ class TestLastIcBatchGuard:
         assert reg._last_ic_batch.get("f1") == 0.31, "有效批次应覆盖旧值"
 
     def test_save_ic_batch_filters_nan_and_none(self):
-        """U3: 落库过滤 None/NaN/0。"""
+        """U3 + F25③: 落库过滤 None/NaN；近零（f2=0.0）不再丢弃——signal_absent 落库。"""
         tracker = ICTracker()
         # 用内存会话替代 DB——save_ic_batch_to_db 需要 AsyncSession，
-        # 此处只验证过滤逻辑可通过 mock 会话计数。
-        class _FakeSession:
-            def __init__(self):
-                self.added = []
+        # 此处只验证过滤/标记逻辑可通过 mock 会话计数。
+        executed = []
 
-            def add(self, record):
-                self.added.append(record)
+        class _FakeResult:
+            def scalar_one_or_none(self):
+                return 0
+
+        class _FakeSession:
+            async def execute(self, stmt, *a, **kw):
+                executed.append(stmt)
+                return _FakeResult()
 
             async def commit(self):
                 pass
@@ -157,7 +161,8 @@ class TestLastIcBatchGuard:
         import asyncio
         sess = _FakeSession()
         batch = {"f1": 0.25, "f2": 0.0, "f3": None, "f4": float("nan")}
-        count = asyncio.run(tracker.save_ic_batch_to_db(sess, batch))
-        assert count == 1, "只有 f1 有效"
-        assert len(sess.added) == 1
-        assert sess.added[0].factor_code == "f1"
+        count = asyncio.run(tracker.save_ic_batch_to_db(sess, batch, trade_date=__import__("datetime").date(2026, 8, 14)))
+        # F25③: f2=0.0（近零）标记 signal_absent 落库不再丢弃 → 有效 2 条（f1 + f2）；
+        # f3=None / f4=NaN 仍过滤
+        assert count == 2, "f1 有效 + f2 近零标记落库，f3/f4 过滤"
+        assert len(executed) >= 2  # 1 insert + 1 sample_count 回填（f1/f2 同批）

@@ -5,12 +5,12 @@ import time
 import pytest
 
 from app.fetchers import china_market as cm
-from app.services.source_registry import registry
+from app.core.source_registry import registry
 
 
 @pytest.fixture(autouse=True)
 def _restore_mootdx():
-    h = registry._health("mootdx")
+    h = registry.health("mootdx")
     _saved = h._cool_until
     yield
     h._cool_until = _saved
@@ -18,7 +18,7 @@ def _restore_mootdx():
 
 def test_circuit_trip_mootdx_degradation_serves(monkeypatch):
     """T6: mootdx 熔断 → registry.route 跳过 mootdx → tencent 降级输出非空。"""
-    h = registry._health("mootdx")
+    h = registry.health("mootdx")
     h._cool_until = time.time() + 3600  # 强制熔断 1h
 
     def boom(symbols):
@@ -40,7 +40,7 @@ def test_circuit_trip_mootdx_degradation_serves(monkeypatch):
 
 def test_circuit_trip_batch_degradation_serves(monkeypatch):
     """T6: 批量版同样熔断短路 → tencent 降级。"""
-    h = registry._health("mootdx")
+    h = registry.health("mootdx")
     h._cool_until = time.time() + 3600
 
     def boom(symbols):
@@ -58,7 +58,7 @@ def test_circuit_trip_batch_degradation_serves(monkeypatch):
 
 def test_circuit_recovery_after_cooldown(monkeypatch):
     """T6: 冷却期结束后 mootdx 恢复可用（熔断自愈）。"""
-    h = registry._health("mootdx")
+    h = registry.health("mootdx")
     h._cool_until = time.time() - 1  # 冷却已过
 
     called = {"mootdx": False}

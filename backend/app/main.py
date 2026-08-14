@@ -132,7 +132,7 @@ async def lifespan(app: FastAPI):
 
     # Wire SourceEventStore to SourceRegistry for event recording
     from .monitor.source_events import source_event_store
-    from .services.source_registry import registry
+    from .core.source_registry import registry
     import asyncio
 
     def _make_event_callback():

@@ -2,7 +2,7 @@
 """F21 R73-R74 验收：共享 fixture 分层可用 + 降级链工厂参数化。"""
 import pytest
 
-from app.services import source_registry
+from app.core import source_registry
 
 
 def test_mock_akshare_fixture(mock_akshare):
@@ -28,8 +28,8 @@ def test_mock_hub_fixture(mock_hub):
 
 
 def test_mock_registry_health_fixture(mock_registry_health):
-    """R73④: registry._health 返回可控 SourceHealth（默认可用）。"""
-    h = source_registry.registry._health("akshare")
+    """R73④: registry.health 返回可控 SourceHealth（默认可用）。"""
+    h = source_registry.registry.health("akshare")
     assert h.cooldown_until == 0.0
     assert h.failures == 0
 

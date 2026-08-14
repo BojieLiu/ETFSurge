@@ -94,16 +94,32 @@ GET /api/v1/factors/active
 | description | string | yes | 因子简介，来自 factor_definitions.yaml |
 | standardization | string | no | 标准化方法：`zscore` / `rank` / `minmax` / `none` |
 | ic_threshold | float | no | IC 阈值，低于此值视为无效 |
-| ic_value | float | yes | 实时 IC 值，NULL 表示尚未计算（无数据） |
+| ic_value | float | yes | 实时 IC 值（当前批次），NULL 表示尚未计算（无数据） |
+| ic_mean | float or null | yes | IC 序列均值（带符号，日频 `factor_ic_records` 序列），无序列时为 null。**F25②** |
+| ic_std | float or null | yes | IC 序列标准差（样本标准差），无序列时为 null。**F25②** |
+| ir | float or null | yes | IR = ic_mean / ic_std（信息比率），无序列时为 null。**F25②** |
+| t_stat | float or null | yes | t 值 = ic_mean × √T / SE(Newey-West lag=1)，无序列时为 null。**F25②** |
+| sample_count | integer | no | IC 累计**交易日数**（`count(distinct trade_date)`，日频 1 行/因子）。旧实现为刷新次数（240×虚高），F25① 修正 |
 
 #### summary / 汇总
 
 | Field | Type | Description |
 |-------|------|-------------|
-| valid | integer | `\|IC\| >= threshold` 的因子数 |
-| warn | integer | 有 IC 但 `\|IC\| < threshold` 的因子数 |
-| no_data | integer | IC 值为 NULL 的因子数 |
+| valid | integer | 统计显著因子数（交易日 ≥250 且 t≥2 且 \|IR\|≥0.5）。F25② 替换旧「\|IC\|≥阈值」判据 |
+| warn | integer | 有样本但统计不显著（交易日 ≥250 但 t<2 或 \|IR\|<0.5）的因子数 |
+| no_data | integer | IC 值缺失或交易日 <250（积累中，含可观察档）的因子数 |
+| static | integer | 静态/市场级因子数（不参与 IC 统计） |
 | avg_ic | float or null | 所有有效 IC 值的绝对值均值，无数据时为 null |
+| min_samples | integer | 有效门槛交易日数（`MIN_TRADING_DAYS=250`）。**F32**：前端读此键而非硬编码 30 |
+| observable_days | integer | 可观察下限交易日数（`MIN_OBSERVABLE_DAYS=60`）。**F25②** |
+| significant | integer | 与 `valid` 同值（统计显著数，兼容前端 IC 卡「统计显著因子 N」标签）。**F25②④** |
+| observable | integer | 交易日 ≥60 但 <250（可观察、未达有效门槛）的因子数。**F25②④** |
+
+> **状态语义（F25②，2026-08-14 决策）**：
+> - `no_data`：交易日 <60 →「积累中」；60 ≤ 交易日 <250 →「积累中（可观察）」
+> - `warn`：交易日 ≥250 但 t<2 或 \|IR\|<0.5 →「有样本但统计不显著」
+> - `valid`：交易日 ≥250 且 t≥2 且 \|IR\|≥0.5 →「统计显著」
+> - 旧 `MIN_IC_SAMPLES=30`（刷新次数冒充样本）判据已废弃。
 
 ### 顶层新增字段（P2-1，合并自 ic.md） / Top-level Fields
 

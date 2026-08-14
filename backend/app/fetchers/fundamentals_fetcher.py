@@ -9,7 +9,7 @@ from typing import Any
 from ..core.async_utils import run_in_thread, run_sync
 from ..services.cache_service import sync_memory_cache  # R5-2-8: 失败缓存 1h（R4-26 模式）
 from ..config import settings
-from ..services.source_registry import registry as _source_registry
+from ..core.source_registry import registry as _source_registry
 from ..core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -23,18 +23,18 @@ _PUSH2_SOURCE = EM_PUSH_HOST
 _AKSHARE_SOURCE = "akshare"
 
 # 熔断器健康句柄（registry._health 返回稳定单例，供涨跌家数采集记录成功/失败）
-_push2_h = _source_registry._health(_PUSH2_SOURCE)
+_push2_h = _source_registry.health(_PUSH2_SOURCE)
 
 
 def _push2_available() -> bool:
     """检查 push2 数据源是否可用（熔断器未打开）。"""
-    h = _source_registry._health(_PUSH2_SOURCE)
+    h = _source_registry.health(_PUSH2_SOURCE)
     return h.available(_time.time())
 
 
 def _akshare_available() -> bool:
     """F17 R62: 检查 akshare 数据源健康（熔断器未打开）。"""
-    h = _source_registry._health(_AKSHARE_SOURCE)
+    h = _source_registry.health(_AKSHARE_SOURCE)
     return h.available(_time.time())
 
 
@@ -333,7 +333,7 @@ def _fetch_us_pe_pb(symbol: str) -> dict | None:
 
 def _fetch_pe_pb_primary(symbol: str) -> dict | None:
     """主源：stock_zh_a_hist 日线估值列（东财）。R5-2-9: 成功/失败记入 akshare 熔断计数。"""
-    _ak_h = _source_registry._health(_AKSHARE_SOURCE)
+    _ak_h = _source_registry.health(_AKSHARE_SOURCE)
     try:
         def _p(sym=symbol):
             import akshare as ak
@@ -375,7 +375,7 @@ def _fetch_pe_pb_primary(symbol: str) -> dict | None:
 def _fetch_pe_pb_fallback(symbol: str) -> dict | None:
     """R5-2-8 备用源：stock_value_em（东财估值接口，列含 市盈率-动态/市净率）。
     R5-2-9: 成功/失败同样记入 akshare 熔断计数。"""
-    _ak_h = _source_registry._health(_AKSHARE_SOURCE)
+    _ak_h = _source_registry.health(_AKSHARE_SOURCE)
     try:
         def _p(sym=symbol):
             import akshare as ak

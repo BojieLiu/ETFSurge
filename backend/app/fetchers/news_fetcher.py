@@ -42,11 +42,6 @@ _http_session.headers.update({
 })
 
 
-def _safe(fn, timeout: int = _SRC_TIMEOUT):
-    """线程池安全调用（P1-2：统一走 core.async_utils.safe_call）。"""
-    return safe_call(fn, timeout=timeout)
-
-
 _AK_TIMEOUT = 4
 
 # akshare 专用线程池（4 workers），隔离僵尸线程以防堵塞主共享线程池
@@ -304,7 +299,9 @@ def fetch_news_headlines() -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
         items += fetch_cailian_telegraph(15)        # 财联社快讯（主源，0.4s 稳定）
         items += fetch_eastmoney_news()              # 东方财富头条（Z18 新增源，4s 超时）
-        items += fetch_macro_news()                  # 宏观：新浪 + 东方财富 + 财联社
+        # F29 (round23 §2.4 A4): 不再混入 fetch_macro_news()——旧实现使 headlines
+        # 与 macro tab 内容重复（实测 macro 3 条全与 headlines 重复）。宏观新闻
+        # 归 macro tab 独立呈现（fetch_macro_news 有专门宏观源与过滤）。
         # 统一打标 level/stars（含财联社源的 stars 时间新鲜度刷新）
         items = _attach_level(items)
         items = _filter_fresh(items, max_age_hours=48)  # 剔除旧闻
@@ -425,6 +422,8 @@ def fetch_global_news() -> list[dict[str, Any]]:
     """全球新闻——二级降级链：RSS → akshare 全球资讯。
 
     P1.5 重写：增加独立 try/except + 日志，akshare 超时保持 15s 给降级留缓冲。
+    F29 (round23 §2.4 A4): 补 id（与 headlines 同款 md5 去重键）——旧实现 id 全缺，
+    前端 :key 与去重失效；source 取 feedparser 真实源名（缺省保底 "RSS"）。
     """
     def _p() -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
@@ -433,13 +432,16 @@ def fetch_global_news() -> list[dict[str, Any]]:
             "https://www.cnbc.com/id/100003114/device/rss/rss.html",
         ]
         for f in feeds:
-            d = _safe(lambda: feedparser.parse(f), 8)
+            d = safe_call(lambda: feedparser.parse(f), timeout=8)
             if d:
                 for e in (d.entries or [])[:8]:
+                    _src = getattr(e, "source", None)
+                    _src_name = (_src.get("title") if isinstance(_src, dict) else
+                                 getattr(_src, "title", None)) or "RSS"
                     items.append({
                         "title": e.get("title", ""),
                         "content": e.get("summary", ""),
-                        "source": "RSS",
+                        "source": _src_name,
                         "time": e.get("published", ""),
                         "url": e.get("link", ""),
                     })
@@ -449,7 +451,12 @@ def fetch_global_news() -> list[dict[str, Any]]:
             # 降级：akshare 全球资讯（15s 超时）
             items += _ak(lambda ak: ak.stock_info_global_cls())
             logger.info("[news] akshare 全球资讯返回 %d 条（RSS 降级）", len(items))
-        return _attach_level(_dedupe(items)[:25])
+        items = _attach_level(_dedupe(items)[:25])
+        # F29: 统一补 id（全局新闻无独立 id 字段，用去重键派生，与 headlines 契约一致）
+        for it in items:
+            dedup_key = f"{it.get('sort_time', '')}_{it.get('title', '')}"
+            it["id"] = hashlib.md5(dedup_key.encode()).hexdigest()[:12]
+        return items
 
     return cached("global", _p, ttl_key="news_global")
 
@@ -498,6 +505,14 @@ def fetch_stock_news(symbol: str) -> list[dict[str, Any]]:
 
 def fetch_research_reports(symbol: str) -> list[dict[str, Any]]:
     def _p() -> list[dict[str, Any]]:
-        return _ak(lambda ak: ak.stock_research_report_em(symbol=symbol))
+        # F29 (round23 §2.4 A4): 旧实现仅走 stock_research_report_em，对 ETF/新代码
+        # 常返回空数组（research tab 全空）。加二级降级链：
+        # 东财个股研报 → 东财个股新闻（无研报时至少给出相关资讯）→ 空。
+        items = _ak(lambda ak: ak.stock_research_report_em(symbol=symbol)) or []
+        if items:
+            return _attach_level(_dedupe(items)[:25])
+        # 降级：该标的无研报 → 返回个股新闻（相关资讯），避免 research tab 静默全空
+        items = fetch_stock_news(symbol) or []
+        return _attach_level(_dedupe(items)[:25])
 
     return cached("research:" + symbol, _p, ttl_key="news_stock")

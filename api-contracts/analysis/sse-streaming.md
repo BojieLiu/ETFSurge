@@ -123,6 +123,5 @@ WS /api/v1/ws/design-report/{session_id}
 - [ ] 前端: 断连后自动重连
 
 <!-- 路由登记（P3-5 check_routes 门禁） -->
-POST /api/v1/analysis/news-impact/stream
 POST /api/v1/analysis/symbol-analysis/stream
 POST /api/v1/analysis/sector-analysis/stream

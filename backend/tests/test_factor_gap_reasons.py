@@ -51,7 +51,7 @@ class TestStatusReason:
         """etf 缺口 reason 含对应字段（nav）。"""
         import app.routers.factors as fr
         monkeypatch.setattr(fr, "registry", FakeRegistry({"etf.premium_discount": ["510300"]}))
-        status, reason = _status_of("etf.premium_discount", None, 0.02)
+        status, reason = _status_of("etf.premium_discount", samples=0, t_stat=None, ir=None, ic_val=None)
         assert status == "no_data"
         assert "数据源未接入" in reason
         assert "nav" in reason
@@ -63,7 +63,7 @@ class TestStatusReason:
         monkeypatch.setattr(fr, "registry", FakeRegistry(
             {"sentiment.panic_greed_diff": ["510300", "510500"]}
         ))
-        status, reason = _status_of("sentiment.panic_greed_diff", None, 0.02)
+        status, reason = _status_of("sentiment.panic_greed_diff", samples=0, t_stat=None, ir=None, ic_val=None)
         assert status == "static"
         assert "市场级因子" in reason
         assert "不参与截面 IC" in reason
@@ -74,7 +74,7 @@ class TestStatusReason:
         monkeypatch.setattr(fr, "registry", FakeRegistry(
             {"sentiment.stock_divergence": ["510300"]}
         ))
-        status, reason = _status_of("sentiment.stock_divergence", None, 0.02)
+        status, reason = _status_of("sentiment.stock_divergence", samples=0, t_stat=None, ir=None, ic_val=None)
         assert status == "static"
         assert "市场级因子" in reason
 
@@ -82,7 +82,7 @@ class TestStatusReason:
         """无缺口记录 → 仍走「IC 未累积」兜底（不破坏既有语义）。"""
         import app.routers.factors as fr
         monkeypatch.setattr(fr, "registry", FakeRegistry({}))
-        status, reason = _status_of("technical.rsi.rsi_14", None, 0.02)
+        status, reason = _status_of("technical.rsi.rsi_14", samples=0, t_stat=None, ir=None, ic_val=None)
         assert status == "no_data"
         assert "IC 未累积" in reason
 

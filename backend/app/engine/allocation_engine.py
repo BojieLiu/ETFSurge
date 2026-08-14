@@ -308,6 +308,9 @@ def _select_and_weight(
     penalize_symbols: set[str] | None = None,
     sector_momentum: list[dict] | None = None,
     mandatory_codes: set[str] | None = None,
+    # A1 (round23 §10.1): 引擎纯度参数（allocate 透传，None = 跳过分类聚合）
+    factor_definitions: dict | None = None,
+    ic_series: dict | None = None,
 ) -> list[dict[str, Any]]:
     """
     Internal helper: score candidates, keep top *max_count*,
@@ -374,13 +377,17 @@ def _select_and_weight(
         # ROOT CAUSE FIX: aggregate_factor_scores converts flat keys
         # (e.g. "technical.ma.sma_5") into category-level scores
         # (e.g. "technical", "momentum") before the composite calculation.
-        from app.factors.factor_registry import FactorRegistry as _FR, registry as _fr_registry
-        # round15 方案一/三: 传 definitions（yaml 方向单一来源）+ IC 序列缓存（聚合前方向化 + IC 加权）
-        factor_scores = _FR.aggregate_factor_scores(
-            factor_scores,
-            definitions=_fr_registry._factors,
-            ic_series=getattr(_fr_registry, "_ic_series_cache", None),
-        )
+        # A1 (round23 §10.1 P1-A): definitions/ic_series 由调用方注入（strategy_design 从
+        # registry 读一次传入）；聚合逻辑已下沉 core/factor_aggregate——engine 不再
+        # import factor_registry 私有态（纯函数可重放/可测）。
+        if factor_definitions is not None:
+            from app.core.factor_aggregate import aggregate_factor_scores
+            # round15 方案一/三: 传 definitions（yaml 方向单一来源）+ IC 序列缓存（聚合前方向化 + IC 加权）
+            factor_scores = aggregate_factor_scores(
+                factor_scores,
+                definitions=factor_definitions,
+                ic_series=ic_series,
+            )
         # B: 风偏差异化因子权重 — 按策略调整
         _PROFILE_WEIGHTS = {
             "defensive": {"technical": 0.4, "sentiment": 0.25, "momentum": 0.15, "valuation": 0.2},
@@ -842,6 +849,11 @@ def allocate(
     factor_matrix: dict[str, dict[str, float]],
     candidates: list[dict[str, Any]] | None = None,
     sector_momentum: list[dict] | None = None,
+    # A1 (round23 §10.1 P1-A): 引擎纯度参数化——definitions/ic_series 由调用方
+    # （strategy_design）从 factor_registry 读取一次注入，engine 内不再 import
+    # factor_registry 读私有全局态（纯函数可重放/可测）。
+    factor_definitions: dict | None = None,
+    ic_series: dict | None = None,
 ) -> list[dict[str, Any]]:
     """
     Build three investment strategies (defensive / balanced / aggressive) using
@@ -987,6 +999,9 @@ def allocate(
             penalize_symbols=_penalize_core,
             sector_momentum=sector_momentum,
             mandatory_codes=CORE_ANCHORS,
+            # A1: 透传引擎纯度参数（definitions/ic_series 由 allocate 注入）
+            factor_definitions=factor_definitions,
+            ic_series=ic_series,
         )
         # O16 (round7 §7 P18): 核心层大盘宽基族互斥——非强制大盘宽基数量 ≤1
         # （强制锚 510300/159338 已占 2 个名额；balanced/aggressive 建议 ≤0，
