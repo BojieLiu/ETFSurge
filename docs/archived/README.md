@@ -2,11 +2,21 @@
 
 本目录存放**已完成使命**的历史文档（诊断计划、评审产物、交接、根因分析），保留审计价值但不再作为活跃依据。
 
+## 最近一次归档（2026-08-14，round22 落地 + round21 被 round23 覆盖 + round20 合并至 round23 后）
+并入本目录（均已完成使命，无活跃实施依据身份）：
+- `engine-refactor-spec-round22.md`（round22 引擎重设计实现批次：E1–E5 5/5 落地，commit `3269c8b` + `4eb2d4d`；实现已合流，规格退出活跃）
+- `design-portfolio-engine-redesign.md`（round22 引擎重设计 v2 设计规格：#10–#14（INV-1~6）5/5 实现，commit `3269c8b`）
+- `round21-container-acceptance-diagnosis.md`（纯诊断文档，声明"本轮未做代码改动"；其未修复项 KDJ超买→BUY / confidence=0.7 / 因子 valid_rate / 美股 hot-rank 已由 round23 §8（F10/F11/F12…）实锤并承接）
+- `round20-container-acceptance-diagnosis.md`（纯诊断文档，自声明"本份只设计不实施"；20 项问题中 13 项已在后续 round21/22/23 代码提交中落地、6 项由 round23 §8/§6 跟踪（仅 F35 home CLS 为净新增开放项）；已无活跃实施依据身份，归并至本目录，承接映射见 `docs/round23-system-audit-optimization.md` §11）
+
+> 归档后引用统一指向 `docs/archived/...`。同步更新：`docs/round23-system-audit-optimization.md` §7 三处表格引用、`backend/app/services/strategy_design.py:404` 与 `backend/app/engine/budgets.py:15` 的 docstring 路径引用（均改指 `docs/archived/`）。
+> 不归档保留于 `docs/` 顶层：`round23-system-audit-optimization.md`（当前活跃，§10 架构整改未实施）、`design-checklist.md`（常驻设计清单）。
+
 ## 归档原则
-- **已实施完成的计划**：如 `round2`-`round19` 各轮诊断与优化计划（round19 关联度 P1 于 commit `a842bb2` 落地、round18 于 `a3f6643`、round17 于 `2e5da5c`+`bcee936`、round16 于 `fab74d1`、round14/15 于 2026-08-11 批次、round13 宏观 5 因子于 commit `5a7e336` 落地；round12 全部批次于 2026-08-09 落地；round9 于 commit `b2fd04c` 落地；round8 的 O 项 + interaction/theme 重设计于 commit `b300bfa` 落地；round7 于 `3c7906d`、round6 的 F/R 项于 `0c78db8`）——活跃计划见 `docs/round20-container-acceptance-diagnosis.md`
+- **已实施完成的计划**：如 `round2`-`round19` 各轮诊断与优化计划（round19 关联度 P1 于 commit `a842bb2` 落地、round18 于 `a3f6643`、round17 于 `2e5da5c`+`bcee936`、round16 于 `fab74d1`、round14/15 于 2026-08-11 批次、round13 宏观 5 因子于 commit `5a7e336` 落地；round12 全部批次于 2026-08-09 落地；round9 于 commit `b2fd04c` 落地；round8 的 O 项 + interaction/theme 重设计于 commit `b300bfa` 落地；round7 于 `3c7906d`、round6 的 F/R 项于 `0c78db8`）——活跃计划见 `docs/round23-system-audit-optimization.md`
 - **一次性诊断/评审产物**：方案评审（design_225/227、combination-design-review 等）、diag 日志（`logs/diag/*`、`diag/out/*` 迁入）、单标的诊断输出
 - **被后续轮次覆盖的交接/根因**：`handoff.md`（2026-07-25）、`ROOT_CAUSE.md`
-- **不归档**：`api-contracts/`（活跃契约）、`backend/app/analysis/prompts/`（运行时）、`.sisyphus/`（工具私有状态）、README/AGENTS（项目说明）、`docs/round20-container-acceptance-diagnosis.md`（P0-1~P2-5 方案未实施，当前活跃实施依据）、`docs/design-checklist.md`（常驻设计清单）
+- **不归档**：`api-contracts/`（活跃契约）、`backend/app/analysis/prompts/`（运行时）、`.sisyphus/`（工具私有状态）、README/AGENTS（项目说明）、`docs/design-checklist.md`（常驻设计清单）
 
 ## 最近一次归档（2026-08-13，round20 诊断完成、round18/19 落地核对后）
 并入本目录：

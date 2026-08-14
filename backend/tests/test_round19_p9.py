@@ -30,15 +30,17 @@ class TestTickflowKlineUsHk:
         monkeypatch.setattr("app.config.settings.tickflow_api_key", "tk_test")
 
     def test_tickflow_kline_us_returns_rows(self, monkeypatch):
-        """_tickflow_kline('SPY','US') → 500 行（负向：US 分支不支持 → [] → FAIL）。"""
+        """_tickflow_kline('SPY','US') → 500 行（负向：US 分支不支持 → [] → FAIL）。
+        round20 P0-4/P1-5: 输出统一英文 key（date/close...），契约对齐。"""
         from app.fetchers import china_market as cm
         self._patch_key(monkeypatch)
         df = _us_df(500)
         monkeypatch.setattr(cm, "run_in_thread", lambda fn, **k: df)
         rows = cm._tickflow_kline("SPY", "daily")
         assert len(rows) >= 30, f"US 应返回 ≥30 行，实得 {len(rows)}"
-        assert rows[0]["收盘"] == pytest.approx(100.5, rel=1e-6)
-        assert rows[-1]["日期"]  # 日期非空
+        assert rows[0]["close"] == pytest.approx(100.5, rel=1e-6)
+        assert rows[-1]["date"]  # 日期非空
+        assert "收盘" not in rows[0], "不得输出中文 key（round20 契约对齐）"
 
     def test_tickflow_kline_hk_symbol_mapped(self, monkeypatch):
         """港股显式后缀 00700.HK → tf_sym=00700.HK（不误映射 SZ）。"""
@@ -116,7 +118,8 @@ class TestAkshareHistoryUsChain:
             return fn()
 
         monkeypatch.setattr(cm, "run_in_thread", _run_in_thread)
-        monkeypatch.setattr(cm, "_tickflow_kline", lambda s, p: (calls.append(("tickflow", s)) or tickflow or []))
+        monkeypatch.setattr(cm, "_tickflow_kline",
+                            lambda s, p, asset_type="A": (calls.append(("tickflow", s)) or tickflow or []))
         monkeypatch.setattr(cm, "_fetch_sina_us_daily", lambda s: (calls.append(("sina", s)) or sina or []))
         monkeypatch.setattr(gmf, "fetch_daily_alphavantage",
                             lambda s: (calls.append(("av", s)) or av or []))
@@ -152,7 +155,7 @@ class TestAkshareHistoryUsChain:
     def test_us_chain_order_akshare_3s_then_fallback(self, monkeypatch):
         """akshare 空 → TickFlow 命中（不继续往下）；akshare 超时 3s。"""
         from app.fetchers import china_market as cm
-        tf_rows = [{"日期": "2026-08-12", "收盘": 771.9}]
+        tf_rows = [{"date": "2026-08-12", "close": 771.9}]  # round20: 英文 key 契约
         cm, calls = self._setup(monkeypatch, akshare_df=pd.DataFrame(), tickflow=tf_rows)
         out = cm._fetch_akshare_history("SPY", "US", "daily")
         assert out == tf_rows
@@ -183,7 +186,7 @@ class TestAkshareHistoryUsChain:
     def test_hk_chain_tencent_preserved(self, monkeypatch):
         """HK 链保持 finnhub → av → 腾讯独立兜底（不引入新浪/变更语义）。"""
         from app.fetchers import china_market as cm
-        tx_rows = [{"日期": "2026-08-12", "收盘": 461.6}]
+        tx_rows = [{"date": "2026-08-12", "close": 461.6}]  # round20: 英文 key 契约
         calls = []
 
         def _run_in_thread(fn, timeout=8, executor="long"):

@@ -1,7 +1,7 @@
 """round14 P0-B + round20 P0-5: 策略检查 LLM 超时——预算-重试一致性断言。
 
 对应 docs/archived/round14-container-acceptance-diagnosis.md §2.1/§5 P0-B +
-docs/round20-container-acceptance-diagnosis.md §五 P0-5：
+docs/archived/round20-container-acceptance-diagnosis.md §五 P0-5：
 - 根因 = provider 35s 无响应 + 预算-重试不匹配（1 轮双 provider 71.5s 耗光 90s，
   max_retries=1 的第 2 轮开始即被外层截断 → CancelledError 兜底）
 - 修复（方案 b）: max_retries=0（1 轮双 provider 失败立即兜底）+ _llm_timeout_for

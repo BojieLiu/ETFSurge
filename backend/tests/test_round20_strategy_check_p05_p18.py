@@ -1,5 +1,5 @@
 """
-round20 P0-5 + P1-8 (docs/round20-container-acceptance-diagnosis.md §五):
+round20 P0-5 + P1-8 (docs/archived/round20-container-acceptance-diagnosis.md §五):
 策略检查 LLM 超时优化 + 规则引擎 reason/action/confidence 与数据支持匹配。
 
 TDD 顺序：本文件为「先写失败单测」阶段——以下断言当前实现必然 FAIL：
@@ -194,6 +194,152 @@ class TestP2_4FactorScoreNote:
 
 
 # ─── P2-4 结束 ──────────────────────────────────────────────────
+
+
+# ─── P1-7 (round20): 强势板块 vs 候选池覆盖对照 ────────────────
+
+class TestP1_7StrongSectorCoverage:
+    def test_covered_sector_true_uncovered_false(self):
+        """P1-7 池层：market_context 含 strong_sector_pool_coverage——
+        强势板块有对应 ETF 候选 → covered=True；无 → False + WARN 标注。"""
+        import asyncio
+        from unittest.mock import MagicMock
+        from app.services.strategy_design import _build_market_context
+
+        hub = MagicMock()
+        hub.get_sector_momentum.return_value = [
+            {"sector_name": "医疗服务", "change_pct": 7.2},
+            {"sector_name": "化学制药", "change_pct": 5.1},
+            {"sector_name": "半导体", "change_pct": 4.0},
+        ]
+        hub.get_pool.return_value = {
+            "satellite": [
+                {"symbol": "512170", "name": "医疗ETF", "industry": "医药"},
+                {"symbol": "512480", "name": "半导体ETF", "industry": "半导体"},
+            ],
+        }
+        hub.get_market_regime.return_value = "range_bound"
+        hub.get_market_sentiment.return_value = {"sentiment_index": 50}
+        hub.get_index_realtime.return_value = []
+        hub.get_global_indices = MagicMock(return_value={})
+        hub._by_code = {}
+
+        ctx = asyncio.run(_build_market_context(hub))
+        cov = ctx.get("strong_sector_pool_coverage", [])
+        assert cov, "market_context 应含 strong_sector_pool_coverage"
+        by_name = {c["sector_name"]: c for c in cov}
+        assert by_name["医疗服务"]["covered_in_pool"] is True, "医疗ETF 应覆盖医疗服务板块"
+        # 化学制药：候选池无对应 → covered=False + WARN（负向断言）
+        assert by_name["化学制药"]["covered_in_pool"] is False
+        assert "WARN" in by_name["化学制药"]["note"], "无对应候选应标注 WARN"
+
+
+# ─── P0-4 / P1-5 (round20): HK/US K 线 TickFlow 兜底 + key 契约 ─
+
+class TestP0_4P1_5TickflowKline:
+    def test_tickflow_kline_outputs_english_keys(self, monkeypatch):
+        """P0-4/P1-5: _tickflow_kline 输出英文 key（date/open/...）——
+        旧实现输出中文 key（日期/开盘…），US 端点（TickFlow 主修复）返回的中文
+        key 前端/下游无法解析（round19 P9-③ 遗留契约 bug）。"""
+        import pandas as pd
+        from app.fetchers import china_market as cm
+
+        fake_df = pd.DataFrame([
+            {"trade_date": "2026-08-01", "open": 100.0, "high": 105.0,
+             "low": 99.0, "close": 103.5, "volume": 100000},
+        ])
+        monkeypatch.setattr(cm, "run_in_thread", lambda fn, timeout=12, executor="long": fake_df)
+        monkeypatch.setattr(cm, "settings", type("S", (), {"tickflow_api_key": "k"})(), raising=False)
+
+        rows = cm._tickflow_kline("AAPL", "daily", asset_type="US")
+        assert rows, "TickFlow 应返回数据"
+        assert "date" in rows[0] and "close" in rows[0], \
+            f"TickFlow 必须输出英文 key（date/close...），实际 {sorted(rows[0].keys())}"
+        assert "日期" not in rows[0], "不得再输出中文 key（契约断裂）"
+        assert rows[0]["close"] == 103.5
+
+    def test_tickflow_kline_hk_symbol_gets_hk_suffix(self, monkeypatch):
+        """P0-4: HK 纯数字 symbol（00700）在 asset_type=HK 时映射 00700.HK
+        （旧 _tickflow_symbol("00700") 误判为 A 股 00700.SZ）。"""
+        captured = {}
+        monkeypatch.setattr(
+            "app.fetchers.china_market._tickflow_symbol",
+            lambda s: captured.setdefault("called", 0) or captured.setdefault("sym", s),
+        )
+        from app.fetchers import china_market as cm
+
+        monkeypatch.setattr(cm, "run_in_thread", lambda fn, timeout=12, executor="long": None)
+        monkeypatch.setattr(cm, "settings", type("S", (), {"tickflow_api_key": "k"})(), raising=False)
+
+        rows = cm._tickflow_kline("00700", "daily", asset_type="HK")
+        # 返回空（run_in_thread→None）但 tf_sym 构建不应依赖 _tickflow_symbol 误判：
+        # 直接验证 asset_type=HK 分支不调用 _tickflow_symbol（已短路为 00700.HK）
+        assert "called" not in captured, "HK 分支不应走 _tickflow_symbol（防 00700→00700.SZ 误判）"
+
+    def test_fetch_history_hk_akshare_chain_tries_tickflow(self, monkeypatch):
+        """P0-4: akshare HK 空后 TickFlow 兜底被调用（对齐 US 分支模式）。"""
+        from app.fetchers import china_market as cm
+        tf_rows = [{"date": "2026-08-01", "open": 490, "close": 492.2,
+                    "high": 495, "low": 485, "volume": 100}]
+        called = {"tf": False}
+
+        monkeypatch.setattr(cm, "_fetch_tencent_hk_history", lambda symbol: [])
+        monkeypatch.setattr(cm, "_tickflow_kline",
+                            lambda *a, **k: (called.__setitem__("tf", True) or tf_rows))
+        monkeypatch.setattr(cm, "run_in_thread", lambda fn, timeout=8, executor="long": None)
+        monkeypatch.setattr(cm, "global_markets_fetcher",
+                            type("F", (), {"fetch_daily_alphavantage": staticmethod(lambda *a, **k: None)})())
+
+        rows = cm.fetch_history("00700", "HK", "daily")
+        assert called["tf"] is True, "腾讯空后应调用 TickFlow 兜底"
+        assert rows == tf_rows
+
+
+# ─── P1-9 (round20): 因子数据完整性降级标注 ──────────────────────
+
+class TestP1_9FactorDataQuality:
+    def test_degraded_when_valid_rate_low(self, monkeypatch):
+        """P1-9: valid 率 <60% → factor_data_quality.degraded=True + 降级说明。
+        负向断言：valid 率低仍报「正常」→ FAIL。"""
+        from app.services import strategy_design as sd
+        from app.factors import factor_registry as freg
+
+        # 构造低 valid 率场景：38 因子，多数 no_data（IC 未累积）
+        fake_factors = {f"test.factor_{i}": {"name": f"F{i}"} for i in range(38)}
+        fake_ic = {f"test.factor_{i}": None for i in range(38)}  # 全无 IC → no_data
+
+        monkeypatch.setattr(freg.registry, "_factors", fake_factors)
+        monkeypatch.setattr(freg.registry, "_ic_series_cache", fake_ic)
+        monkeypatch.setattr(freg.registry, "_data_source_gaps", {})
+        monkeypatch.setattr(freg.registry, "_constant_factor_codes", set())
+        monkeypatch.setattr(freg.registry, "_sample_counts", {})
+
+        report = sd._factor_data_quality_report()
+        assert report["degraded"] is True, f"valid 率低应降级，实际 {report}"
+        assert "降级" in report["note"], "降级时应含降级说明"
+
+    def test_not_degraded_when_valid_high(self, monkeypatch):
+        """valid 率 >=60% → 不降级。"""
+        from app.services import strategy_design as sd
+        from app.factors import factor_registry as freg
+
+        fake_factors = {f"test.factor_{i}": {"name": f"F{i}"} for i in range(10)}
+        # 8 个有效 IC（真实结构 {code: [ic, ...]}，样本 ≥MIN_IC_SAMPLES）+ 2 个 no_data
+        fake_ic = {f"test.factor_{i}": [0.05] for i in range(8)}
+        fake_ic.update({f"test.factor_{i}": None for i in range(8, 10)})
+
+        monkeypatch.setattr(freg.registry, "_factors", fake_factors)
+        monkeypatch.setattr(freg.registry, "_ic_series_cache", fake_ic)
+        monkeypatch.setattr(freg.registry, "_data_source_gaps", {})
+        monkeypatch.setattr(freg.registry, "_constant_factor_codes", set())
+        # 样本 ≥ MIN_IC_SAMPLES(30) → IC 视为已累积 → valid
+        monkeypatch.setattr(freg.registry, "_sample_counts",
+                            {f"test.factor_{i}": 40 for i in range(8)})
+
+        report = sd._factor_data_quality_report()
+        assert report["valid_rate"] >= 0.6
+        assert report["degraded"] is False
+
 
 class TestP1_8ReasonAndConfidence:
     def test_reason_no_basics_when_factor_sparse(self):

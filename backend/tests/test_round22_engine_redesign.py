@@ -1,5 +1,5 @@
 """
-round22 引擎重构（docs/design-portfolio-engine-redesign.md / docs/engine-refactor-spec-round22.md）
+round22 引擎重构（docs/archived/design-portfolio-engine-redesign.md / docs/archived/engine-refactor-spec-round22.md）
 验收测试 —— TDD 负向断言（反例能失败，正例断言真实引擎输出）。
 
 设计 §6 口径：所有测试 pin regime="range_bound"（dynamic_layer_budget≈恒等，断言确定）。

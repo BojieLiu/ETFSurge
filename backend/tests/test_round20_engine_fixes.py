@@ -1,5 +1,5 @@
 """
-round20 (docs/round20-container-acceptance-diagnosis.md) 引擎层修正测试。
+round20 (docs/archived/round20-container-acceptance-diagnosis.md) 引擎层修正测试。
 
 TDD 顺序说明：P2-6 / P1-1 / P2-5 / P1-2 / P1-3·P1-6 的实现代码因子代理不可用
 由主代理先行落地，本文件为回归固化（实现先行、测试补锁）；P0-1/P0-3/P0-5/P1-8
@@ -254,3 +254,54 @@ class TestP1_3OverboughtGuard:
             "ma": {"ma5": 10, "ma20": 9.8},     # 多头排列
         })
         assert res["signal"] != "sell", f"超卖+多头不应判 sell，实际 {res}"
+
+
+# ─── P1-7 (round20): 引擎 c2_bonus 动态板块奖励 ──────────────────
+
+class TestP1_7DynamicSectorReward:
+    def test_strong_sector_etf_rewarded_in_aggressive(self):
+        """P1-7: 当日强势板块（医药 +7%）对应 ETF 在 aggressive 卫星层应获动态奖励
+        （非 _RISKY_THEMES 静态科技列表）——composite 不被 -0.3 过滤、可入选。
+
+        负向断言（验收）：强势板块 ETF 无奖励且被过滤 → FAIL。
+        场景：医药 ETF 估值/情绪数据缺失（valuation=0 → valuation_missing=True →
+        c2_bonus 分支生效），强势板块动态奖励 +1.5 使 composite 为正。
+        """
+        from app.engine.allocation_engine import allocate
+
+        cands = _base_candidates()
+        # 加入医药/创新药主题 ETF（非科技，_RISKY_THEMES 不含）
+        cands.append({"symbol": "159992", "name": "创新药ETF", "layer": "satellite",
+                      "tracked_index": "创新药", "segment": "创新药",
+                      "industry": "医药"})
+        cands.append({"symbol": "512170", "name": "医疗ETF", "layer": "satellite",
+                      "tracked_index": "医疗", "segment": "医疗",
+                      "industry": "医药"})
+        # 当日强势板块：医药 +7%（涨幅前 3）
+        sector_momentum = [
+            {"sector_name": "医疗服务", "name": "医疗服务", "change_pct": 7.2},
+            {"sector_name": "化学制药", "name": "化学制药", "change_pct": 5.1},
+            {"sector_name": "半导体", "name": "半导体", "change_pct": 4.0},
+        ]
+        # 医药 ETF 估值缺失（valuation=0）→ c2_bonus 分支触发；其余估值正常
+        fm = _factor_matrix(cands)
+        for sym in ("159992", "512170"):
+            fm[sym] = {"technical": 0.5, "momentum": 0.5,
+                       "valuation": 0.0, "sentiment": 0.0}
+        strategies = allocate(
+            risk_profile="aggressive", regime="range_bound",
+            factor_matrix=fm, candidates=cands,
+            sector_momentum=sector_momentum,
+        )
+        for s in strategies:
+            if s["id"] != "aggressive":
+                continue
+            sat = [a for a in s["allocations"] if a.get("layer") == "satellite"]
+            sat_syms = {a["symbol"] for a in sat}
+            # 医药/医疗至少一只入选（强势板块动态奖励，非科技静态列表）
+            assert sat_syms & {"159992", "512170"}, (
+                f"强势板块（医药+7%）ETF 未入选 aggressive 卫星层（无动态奖励被过滤）: {sat_syms}"
+            )
+            # 卫星层 ≥2 只（P2-6 配套验收）
+            assert len(sat) >= 2, f"aggressive 卫星层仅 {len(sat)} 只"
+

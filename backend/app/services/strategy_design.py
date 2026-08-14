@@ -401,7 +401,7 @@ async def generate_enhanced_design(
                 except Exception as _e:
                     logger.debug("[strategy_design] enforce_max_correlation skipped: %s", _e)
             else:
-                # round22 E5 (engine-refactor-spec-round22.md §1 E5): 非交易窗口 / K 线相关性
+                # round22 E5 (docs/archived/engine-refactor-spec-round22.md §1 E5): 非交易窗口 / K 线相关性
                 # 矩阵缺失（_correlation_matrix_for 返回空）——相关性约束**不得静默跳过**，
                 # 降级标注 correlation_unchecked=True（前端提示「关联度未校验」），不阻塞主链路。
                 _strat_proxy.setdefault("risk_metrics", {})["correlation_unchecked"] = True

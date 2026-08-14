@@ -1,4 +1,4 @@
-"""round22 E5 (docs/engine-refactor-spec-round22.md §1 E5): 设计路径相关性约束
+"""round22 E5 (docs/archived/engine-refactor-spec-round22.md §1 E5): 设计路径相关性约束
 在非交易窗口 / K 线相关性矩阵缺失时**不得静默跳过**——降级标注
 risk_metrics.correlation_unchecked=True，供前端提示「关联度未校验」。
 

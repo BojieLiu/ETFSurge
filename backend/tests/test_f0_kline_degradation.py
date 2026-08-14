@@ -170,10 +170,10 @@ def test_fetch_history_etf_baostock_fallback(monkeypatch):
     monkeypatch.setattr(cm, "_sina_history_cb", lambda s, p: [])
     monkeypatch.setattr(cm, "fetch_history_netease", lambda *a, **k: [])
     monkeypatch.setattr(cm, "_baostock_history",
-                        lambda s, p: [{"日期": "2026-08-07", "开盘": 4.7, "最高": 4.76,
-                                       "最低": 4.7, "收盘": 4.751, "成交量": 9435356}])
+                        lambda s, p: [{"date": "2026-08-07", "open": 4.7, "high": 4.76,
+                                       "low": 4.7, "close": 4.751, "volume": 9435356}])
     rows = cm.fetch_history("510300", "A", "daily")
-    assert rows and rows[0]["收盘"] == 4.751
+    assert rows and rows[0]["close"] == 4.751
 
 
 def test_fetch_history_etf_tickflow_fallback(monkeypatch):
@@ -184,10 +184,10 @@ def test_fetch_history_etf_tickflow_fallback(monkeypatch):
     monkeypatch.setattr(cm, "fetch_history_netease", lambda *a, **k: [])
     monkeypatch.setattr(cm, "_baostock_history", lambda s, p: [])
     monkeypatch.setattr(cm, "_tickflow_kline",
-                        lambda s, p: [{"日期": "2026-08-07", "开盘": 4.7, "最高": 4.76,
-                                       "最低": 4.7, "收盘": 4.751, "成交量": 9435356}])
+                        lambda s, p: [{"date": "2026-08-07", "open": 4.7, "high": 4.76,
+                                       "low": 4.7, "close": 4.751, "volume": 9435356}])
     rows = cm.fetch_history("510300", "A", "daily")
-    assert rows and rows[0]["收盘"] == 4.751
+    assert rows and rows[0]["close"] == 4.751
 
 
 def test_tickflow_kline_no_key_returns_empty(monkeypatch):
@@ -198,7 +198,7 @@ def test_tickflow_kline_no_key_returns_empty(monkeypatch):
 
 
 def test_tickflow_kline_ok(monkeypatch):
-    """_tickflow_kline 正常路径：返回中文 key 日 K（mock klines.get）。"""
+    """_tickflow_kline 正常路径：返回英文 key 日 K（round20 P0-4 契约对齐）。"""
     from app.fetchers import china_market as cm
     import pandas as pd
     monkeypatch.setattr("app.config.settings.tickflow_api_key", "tk_test")
@@ -207,4 +207,5 @@ def test_tickflow_kline_ok(monkeypatch):
                         "amount": 4474693300.0}])
     monkeypatch.setattr(cm, "run_in_thread", lambda fn, **k: df)
     rows = cm._tickflow_kline("510300")
-    assert rows and rows[0]["收盘"] == 4.751 and rows[0]["日期"] == "2026-08-07"
+    assert rows and rows[0]["close"] == 4.751 and rows[0]["date"] == "2026-08-07"
+    assert "日期" not in rows[0], "不得输出中文 key（契约断裂）"

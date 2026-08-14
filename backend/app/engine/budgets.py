@@ -12,7 +12,7 @@ from typing import Any
 
 # ── Strategy metadata ───────────────────────────────────────────────
 # 「单一可校验真相源」：budgets 配置是引擎消费的唯一真相源（非动态涌现）。
-# round22 重构（docs/design-portfolio-engine-redesign.md）新增字段：
+# round22 重构（docs/archived/design-portfolio-engine-redesign.md）新增字段：
 #   - core_growth_cap: INV-4 核心层「高 beta 成长宽基」占核心预算的上限
 #     （def 0.20 / bal 0.40 / agg 0.60，用 _is_growth_wide_basis 代理 beta）。
 #   - layer_count 卫星目标随风险档次单调递增（def 4 < bal 6 < agg 8），核心

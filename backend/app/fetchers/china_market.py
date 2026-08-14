@@ -271,12 +271,15 @@ def _baostock_history(symbol: str, period: str = "daily", bs_code: str | None = 
         return []
 
 
-def _tickflow_kline(symbol: str, period: str = "daily") -> list[dict[str, Any]]:
+def _tickflow_kline(symbol: str, period: str = "daily", asset_type: str = "A") -> list[dict[str, Any]]:
     """TickFlow 历史日 K（2026-08-09 接入，免费层 key 从 .env 读）。
 
     定位：日线链第四环（sina → netease → baostock → tickflow）——免费层提供
     历史日/周/月 K（OHLCV 完整），无实时行情（盘后更新）。与 BaoStock 互为
     独立备份（TickFlow 是商业 API，无 EM 反爬；BaoStock 是开源服务）。
+
+    round20 P0-4: 新增 asset_type 参数——HK 纯数字（00700）无显式后缀时
+    _tickflow_symbol 会误判为 A 股 .SZ；传 asset_type="HK" 强制 .HK 后缀。
     """
     try:
         from ..config import settings
@@ -286,7 +289,13 @@ def _tickflow_kline(symbol: str, period: str = "daily") -> list[dict[str, Any]]:
         # round19 P9-② (2026-08-12): 复用 _tickflow_symbol 统一映射——旧实现硬编码
         # SH/SZ（仅 A 股）；现支持 US（AAPL→AAPL.US）/HK（00700.HK 显式后缀）分支，
         # 与实时行情 _tickflow_quotes 同构。
-        tf_sym = _tickflow_symbol(symbol)
+        # round20 P0-4: asset_type 优先——HK 纯数字强制 .HK（否则 00700→00700.SZ 错）
+        if str(asset_type).upper() == "HK":
+            tf_sym = f"{str(symbol).strip().split('.')[0]}.HK"
+        elif str(asset_type).upper() == "US":
+            tf_sym = f"{str(symbol).strip().split('.')[0]}.US"
+        else:
+            tf_sym = _tickflow_symbol(symbol)
         freq = {"daily": "1d", "weekly": "1w", "monthly": "1M"}.get(period, "1d")
         def _p():
             from tickflow import TickFlow
@@ -299,14 +308,16 @@ def _tickflow_kline(symbol: str, period: str = "daily") -> list[dict[str, Any]]:
         out = []
         for _, row in df.iterrows():
             try:
+                # round20 P0-4/P1-5: 统一输出英文 key（date/open/high/low/close/volume）
+                # 契约——旧实现输出中文 key（日期/开盘…），US 端点（TickFlow 主修）
+                # 返回的中文 key 前端/下游无法解析（round19 P9-③ 遗留契约 bug）。
                 out.append({
-                    "日期": str(row.get("trade_date") or ""),
-                    "开盘": float(row.get("open", 0)),
-                    "最高": float(row.get("high", 0)),
-                    "最低": float(row.get("low", 0)),
-                    "收盘": float(row.get("close", 0)),
-                    "成交量": float(row.get("volume", 0) or 0),
-                    "成交额": float(row.get("amount", 0) or 0),
+                    "date": str(row.get("trade_date") or ""),
+                    "open": float(row.get("open", 0)),
+                    "high": float(row.get("high", 0)),
+                    "low": float(row.get("low", 0)),
+                    "close": float(row.get("close", 0)),
+                    "volume": float(row.get("volume", 0) or 0),
                 })
             except (ValueError, TypeError):
                 continue
@@ -1674,13 +1685,14 @@ def _fetch_akshare_history(symbol: str, asset_type: str, period: str) -> list[di
         # → 新浪 stock_us_daily（全量兜底）→ finnhub（恒败，3s 短超时）；
         # HK 保持 finnhub → alphavantage → 腾讯独立兜底。
         if asset_type in ("HK", "US"):
-            if asset_type == "US":
-                # TickFlow 主修复：实测 AAPL.US/SPY.US 各 500 根（含当日收盘）
-                tf_rows = _tickflow_kline(symbol, period)
-                if tf_rows:
-                    logger.info("[history] US %s: tickflow fallback hit (%d rows)", symbol, len(tf_rows))
-                    return tf_rows
-                logger.warning("[history] US %s: tickflow fallback empty", symbol)
+            # round20 P0-4: HK 分支也接入 TickFlow（对齐 US 分支模式）——腾讯
+            # 兜底在 fetch_history 顶层已试过；此处 akshare 空后补 TickFlow
+            # （hk00700 / AAPL.US，实测各 320/500 根）。
+            tf_rows = _tickflow_kline(symbol, period, asset_type=asset_type)
+            if tf_rows:
+                logger.info("[history] %s %s: tickflow fallback hit (%d rows)", asset_type, symbol, len(tf_rows))
+                return tf_rows
+            logger.warning("[history] %s %s: tickflow fallback empty", asset_type, symbol)
             # O2: alphavantage 用转换后符号（0700.HK）——旧实现传裸 00700 恒空
             av_result = run_in_thread(
                 lambda: global_markets_fetcher.fetch_daily_alphavantage(

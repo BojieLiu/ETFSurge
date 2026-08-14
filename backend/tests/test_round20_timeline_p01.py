@@ -1,5 +1,5 @@
 """
-round20 P0-1 (docs/round20-container-acceptance-diagnosis.md §五 P0-1):
+round20 P0-1 (docs/archived/round20-container-acceptance-diagnosis.md §五 P0-1):
 /portfolio/timeline 补 30s TTL 缓存 + limit 分页。
 
 TDD 顺序：本文件为「先写失败单测」阶段——以下断言当前实现必然 FAIL：
