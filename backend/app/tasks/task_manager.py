@@ -462,11 +462,18 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
                 )
 
             # P0-1 反假完成：LLM 空响应兜底文案（"报告生成失败"）不得标 quality=full。
+            # round23 遗留修复：generate_design_report 在 LLM 失败时返回
+            # _build_engine_fallback（含 "AI深度分析当前不可用" 标记）——非空但
+            # 不是 LLM 报告，同样不得标 full（引擎兜底冒充 LLM 报告 = 假完成）。
             _FAIL_PLACEHOLDERS = ("报告生成失败",)
+            _ENGINE_FALLBACK_MARKERS = ("AI深度分析当前不可用", "策略引擎基于实时因子数据")
             _analysis_is_placeholder = bool(
                 llm_analysis
                 and len(llm_analysis.strip()) > 0
-                and any(p in llm_analysis for p in _FAIL_PLACEHOLDERS)
+                and (
+                    any(p in llm_analysis for p in _FAIL_PLACEHOLDERS)
+                    or any(m in llm_analysis for m in _ENGINE_FALLBACK_MARKERS)
+                )
             )
             if llm_analysis and len(llm_analysis.strip()) > 0 and not _analysis_is_placeholder:
                 full_text = design_text + "\n\n## 二、市场环境与配置建议\n\n" + llm_analysis

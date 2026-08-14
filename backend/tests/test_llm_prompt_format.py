@@ -10,6 +10,8 @@ N02 (round3-diagnosis-and-optimization-plan.md N02): 设计报告指数涨跌幅
 """
 
 import inspect
+import pytest
+from unittest.mock import MagicMock, AsyncMock, patch
 
 from app.analysis.llm import _build_design_report_prompt, generate_design_report
 
@@ -82,3 +84,32 @@ class TestGenerateDesignReportSignature:
         """generate_design_report 可导入且签名含 benchmark_stocks（回归保护）。"""
         sig = inspect.signature(generate_design_report)
         assert "benchmark_stocks" in sig.parameters
+
+
+
+class TestGenerateDesignReportTimeout:
+    """round23 遗留修复（2026-08-14）：design 链路 LLM 调用（symbol_analysis agent）
+    默认 provider.timeout=45s——deepseek 生成完整设计报告实测 >46s（9613 字）被
+    ReadTimeout 掐断 → _build_engine_fallback 兜底 → task_manager 误标 full。
+    验收：generate_design_report 必须向 run() 传 read ≥90s 的 httpx.Timeout。
+    """
+
+    @pytest.mark.asyncio
+    async def test_run_passes_long_read_timeout(self):
+        from app.analysis import llm as llm_mod
+
+        agent_mock = MagicMock()
+        agent_mock.run = AsyncMock(return_value="真实 LLM 报告")
+        with patch("app.analysis.llm.get_agent", return_value=agent_mock), \
+             patch.object(llm_mod, "load_prompt", return_value="sys"):
+            await llm_mod.generate_design_report(
+                strategies=[{"id": "balanced", "etfs": []}],
+                market_context={"market_regime": "neutral"},
+                plan_tables="| 表 |",
+            )
+        _, kwargs = agent_mock.run.call_args
+        to = kwargs.get("request_timeout")
+        assert to is not None, \
+            "generate_design_report 必须传 request_timeout（防 deepseek 长报告 45s read 超时）"
+        assert hasattr(to, "read") and to.read >= 90.0, \
+            f"read 超时应 ≥90s（完整设计报告实测 >46s），实际 {to!r}"

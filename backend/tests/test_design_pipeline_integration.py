@@ -363,3 +363,34 @@ class TestStrategyCheckPipeline:
 
         got = await task_mgr.get_task(t["task_id"])
         assert got["status"] == "completed"
+
+
+    @patch("app.tasks.task_manager.async_session")
+    @patch("app.analysis.llm.generate_design_report", new_callable=AsyncMock)
+    @patch("app.services.strategy_design.generate_enhanced_design", new_callable=AsyncMock)
+    async def test_pipeline_engine_fallback_not_full(self, mock_gen_design, mock_llm, mock_db_session, task_mgr):
+        """round23 遗留修复：LLM 返回引擎兜底文案（"AI深度分析当前不可用"）→
+        report_quality=partial 绝非 full（兜底冒充 LLM 报告 = 反假完成违规）。"""
+        from app.tasks.task_manager import design_pipeline
+
+        mock_gen_design.return_value = {
+            "strategies": _mock_strategies(),
+            "market_context": _mock_market_context(),
+        }
+        mock_llm.return_value = (
+            "# ETF 组合设计方案（引擎分析摘要）\n"
+            "> ⚠️ AI深度分析当前不可用，以下为策略引擎基于实时因子数据的自动分析。\n"
+            "**当前市态**: range_bound\n## 方案概览\n..."
+        )
+        mock_db_session.side_effect = [
+            _make_mock_session(design_id=1006),
+            _make_mock_session(design_id=1006),
+        ]
+
+        t = await task_mgr.create_task(task_type="design", params={"capital": 500000})
+        await design_pipeline(task_mgr, task_id=t["task_id"])
+
+        got = await task_mgr.get_task(t["task_id"])
+        assert got["status"] == "completed"
+        assert got["result"]["report_quality"] == "partial", \
+            f"引擎兜底不得标 full，实际 {got['result'].get('report_quality')}"

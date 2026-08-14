@@ -1736,11 +1736,16 @@ async def generate_design_report(
     # 方案一（plan v1.2）: Provider failover 是充分的防护层，
     # 熔断器检查已移除（它会误伤正常 Provider 导致空报告）。
     # _build_engine_fallback() 作为 last-resort fallback 保留。
+    # round23 遗留修复（2026-08-14）：必须传 read 长超时——默认 provider.timeout=45s
+    # 对 deepseek 完整设计报告（9613 字，实测 >46s 才生成完）不够 → ReadTimeout →
+    # 引擎兜底 + task_manager 误标 full。connect 15s 防 429/挂起，read 120s 容纳长生成。
+    import httpx
     try:
         # 使用"symbol_analysis" agent 的通用上下文，但传入设计报告 prompt
         result = await get_agent("symbol_analysis").run(
             prompt,
             system_override=load_prompt("design_report.md"),
+            request_timeout=httpx.Timeout(connect=15.0, read=120.0, write=15.0, pool=15.0),
         )
         return result or "报告生成失败"
     except Exception as e:
