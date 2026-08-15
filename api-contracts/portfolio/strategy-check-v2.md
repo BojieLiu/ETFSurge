@@ -67,7 +67,7 @@ GET /api/v1/portfolio/tasks/{task_id}
         "current_weight": 0.15,
         "suggested_weight": 0.18,
         "reason": "核心宽基配置偏低，当前估值处于低位区间",
-        "confidence": 0.85,
+        "confidence": "medium",  // round24 R4：全站语义标签 high | medium | low（不再混排数值）
         "source": "rule"  // 新增：rule | llm
       }
     ],
@@ -100,7 +100,7 @@ GET /api/v1/portfolio/tasks/{task_id}
 | result.suggestions[].current_weight | number | 当前权重（0-1） |
 | result.suggestions[].suggested_weight | number | 建议权重（0-1） |
 | result.suggestions[].source | string | `rule`（规则引擎）\| `llm`（大模型） |
-| result.suggestions[].confidence | number | 置信度 0-1，规则引擎输出默认 0.7 |
+| result.suggestions[].confidence | string | **round24 R4**：置信度语义标签，**必须为** `high` \| `medium` \| `low`（全站统一表示法）。规则路径按因子填充率分档（≥90%→high、≥70%→medium、<70%→low）；LLM 路径数值（0-1）/中文（高/中/低）一律归一化为同一枚举。**禁止**同屏混排「数值 0.7」与「high」两种表示法 |
 | result.suggestions[].reason | string | **丰富化（R4-22）**：2-3 句完整逻辑，按「触发依据；操作节奏；风险纪律」三段式组织，用「；」分隔；规则引擎与 LLM 均须遵守 |
 | result.coverage | object | **新增** 覆盖率统计，确保 100% |
 | result.coverage.coverage_pct | number | 必须为 1.0（100%） |
@@ -163,7 +163,10 @@ GET /api/v1/portfolio/strategy-checks
 | weight_drift < -0.05 | increase | `target_weight` | "权重低于目标超 5%，建议补仓至目标权重" |
 | 其余 | hold | `current_weight` | "维持现状" |
 
-3. **confidence**: 规则引擎输出固定 0.7；LLM 输出保留原值（默认 0.8）。
+3. **confidence（round24 R4 修订）**: 全站语义标签 `high`/`medium`/`low`，两条路径统一：
+   - 规则路径按因子填充率分档：填充率 ≥90% → `high`、≥70% → `medium`、<70% → `low`（**不再输出 0.5/0.7 裸数值**；旧「0.7」语义实为「中等」，易被误读为高置信）；
+   - LLM 路径归一化：数值 ≥0.8 → `high`、≥0.5 → `medium`、<0.5 → `low`；中文「高/中/低」及大小写变体同映射；无法识别 → `medium`。
+   - 前端 `StrategyCheckResult.vue` `confidenceLabel()` 只需处理三档标签（`conf-high/medium/low` 样式恒命中）。
 4. **去重**: 同一 symbol 只保留一条建议（LLM 优先，规则兜底补充）。
 
 ### 3.2 覆盖率校验补齐

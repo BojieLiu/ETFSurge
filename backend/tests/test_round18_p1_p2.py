@@ -46,7 +46,12 @@ class TestP21AssetTypeNormalization:
 
 
 class TestP27ConfidenceScaling:
-    """round18 P2-7: confidence 按因子填充率分级。"""
+    """round18 P2-7: confidence 按因子填充率分级。
+
+    round24 R4 修订：表示法由裸数值（0.5/0.7）改为全站统一语义标签
+    （<70%→low、≥70%→medium、≥90%→high）——原「随填充率变化、非恒定值」的意图不变
+    （契约 api-contracts/portfolio/strategy-check-v2.md §3.1-3）。
+    """
 
     def _suggestion(self, filled, total):
         from app.services.portfolio_service import _rule_based_suggestion
@@ -58,13 +63,14 @@ class TestP27ConfidenceScaling:
         )
 
     def test_low_fill_ratio_confidence_downgraded(self):
-        """因子填充率 10/39（<70%）→ confidence=0.5（负向：仍 0.7/high → FAIL）。"""
+        """因子填充率 10/39（26% <70%）→ low（负向：medium/high 即未降级 → FAIL）。"""
         s = self._suggestion(10, 39)
-        assert s["confidence"] == 0.5, f"低填充率应降级 confidence，实得 {s['confidence']}"
+        assert s["confidence"] == "low", f"低填充率应降级 confidence，实得 {s['confidence']}"
 
     def test_high_fill_ratio_keeps_confidence(self):
+        """填充率 30/39（77% ≥70%）→ medium（R4：旧 0.7 的真实语义就是「中等」）。"""
         s = self._suggestion(30, 39)
-        assert s["confidence"] == 0.7
+        assert s["confidence"] == "medium"
 
     def test_no_availability_keeps_default(self):
         from app.services.portfolio_service import _rule_based_suggestion
@@ -73,7 +79,7 @@ class TestP27ConfidenceScaling:
             factor_score={"technical.rsi.rsi_14": 0.7},
             signal={"signal": "buy"}, regime="range_bound",
         )
-        assert s["confidence"] == 0.7
+        assert s["confidence"] == "medium"
 
 
 class TestP14DesignPrice:

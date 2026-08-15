@@ -1497,6 +1497,13 @@ def enforce_max_correlation(
         if warnings:
             s.setdefault("risk_metrics", {})
             s["risk_metrics"]["correlation_warnings"] = warnings
+    # round24 R2: 强制锚地板安全网——任一强制锚（沪深300/中证A500/黄金/国债）权重
+    # 不得低于 MANDATORY_FLOOR，杜绝关联度控制（或任何上游路径）击穿 M7「核心单只 ≥5%」。
+    # allocate 后处理已保证该地板，此处为防御性兜底（正常为 no-op，不改变 Σ）。
+    for s in strategies:
+        for a in s.get("allocations", []):
+            if a.get("symbol") in MANDATORY_CODES and a.get("weight", 0.0) < MANDATORY_FLOOR - 1e-9:
+                a["weight"] = MANDATORY_FLOOR
     return strategies
 
 

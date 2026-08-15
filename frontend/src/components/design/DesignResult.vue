@@ -17,6 +17,13 @@
       </div>
     </div>
 
+    <!-- round24 R3: 精度降级红字——因子 valid 率 < 60% 时权重/因子分不得再精确呈现
+         （契约 api-contracts/portfolio/design-precision.md）。exact / 缺字段不渲染。 -->
+    <div v-if="isCoarse" class="precision-banner" role="alert">
+      <span class="precision-icon">⚠️</span>
+      <span class="precision-text">{{ dataPrecision.note || ('因子数据缺失 ' + missingPctText + '，权重与因子分为粗略呈现') }}</span>
+    </div>
+
     <!-- round21 #14: LLM 报告静默降级治理——report_quality 非 full 时显式标注，
          不再把 partial/fallback/empty 报告静默展示为完整报告。full/none/pending 不渲染。 -->
     <div v-if="reportQualityBadge" class="quality-banner" :class="reportQualityBadge.cls" role="status">
@@ -104,7 +111,10 @@
                       <tr v-for="a in pf.allocations" :key="a.symbol">
                         <td><code>{{ a.symbol }}</code></td>
                         <td>{{ a.name }}</td>
-                        <td>{{ (a.target_weight * 100).toFixed(1) }}%</td>
+                        <!-- round24 R3: 降级态权重按 5% 档位（≈20%），title 保留精确值供核对 -->
+                        <td :title="coarseWeight ? ('精确值 ' + (a.target_weight * 100).toFixed(2) + '%（因子数据降级，仅供核对）') : ''">
+                          {{ weightText(a) }}
+                        </td>
                         <td><span class="layer-badge" :class="a.layer || 'satellite'">{{ layerLabel(a.layer) }}</span></td>
                         <td>
                           <!-- round14 P2-W: 缺失原因显性化——dcp=null 显示「数据源不可用」
@@ -120,8 +130,12 @@
                         <td>
                           <!-- P2-6 (round17): 因子综合分连续值（可为负，如 -0.17 中性）——
                                区别于技术信号（buy/hold/sell），列头 tooltip 已注明口径 -->
-                          <span v-if="a.factor_score != null" :class="a.factor_score >= 0 ? 'text-up' : 'text-down'">
-                            {{ a.factor_score >= 0 ? '+' : '' }}{{ a.factor_score.toFixed(2) }}
+                          <!-- round24 R3: 降级态因子分只显示强弱分档（偏强/中性/偏弱），
+                               不呈现两位小数假精确；title 保留原值供核对 -->
+                          <span v-if="a.factor_score != null" :class="a.factor_score >= 0 ? 'text-up' : 'text-down'"
+                            :title="bucketFactor ? ('原始因子分 ' + a.factor_score.toFixed(2) + '（因子数据降级，仅供核对）') : ''">
+                            <template v-if="bucketFactor">{{ factorBucket(a.factor_score) }}</template>
+                            <template v-else>{{ a.factor_score >= 0 ? '+' : '' }}{{ a.factor_score.toFixed(2) }}</template>
                           </span>
                           <span v-else class="muted">—</span>
                         </td>
@@ -168,6 +182,10 @@ const props = defineProps({
   // P2-8 (round17): 数据源降级标记（get_design 顶层透传 / market_context.degradation）——
   // 存在时顶部显示冷却提示；undefined/null 不渲染（不误报）
   degradation: { type: Object, default: null },
+  // round24 R3: 呈现精度标识（get_design 顶层 / market_context.data_precision）——
+  // mode=coarse 时权重按 5% 档位、因子分按强弱分档呈现 + 红字缺失百分比；
+  // null/缺失（历史设计）按 exact 渲染，不误报降级
+  dataPrecision: { type: Object, default: null },
 })
 
 const emit = defineEmits(['apply', 'regenerate', 'close', 'retry-report'])
@@ -214,6 +232,31 @@ const reportQualityBadge = computed(() => {
   }
   return map[q] || null
 })
+
+// round24 R3: 精度降级呈现——降级态（mode=coarse）权重按 weight_step_pct 档位、
+// 因子分按强弱分档；缺字段/exact 保持精确值（不误报降级）。
+const isCoarse = computed(() => props.dataPrecision?.mode === 'coarse')
+const coarseWeight = computed(() => props.dataPrecision?.weight_display === 'coarse')
+const bucketFactor = computed(() => props.dataPrecision?.factor_score_display === 'bucket')
+const missingPctText = computed(() => {
+  const p = props.dataPrecision?.factor_missing_pct
+  return typeof p === 'number' ? `${p}%` : '未知比例'
+})
+
+function weightText(a) {
+  const pct = (a.target_weight || 0) * 100
+  if (!coarseWeight.value) return `${pct.toFixed(1)}%`
+  const step = props.dataPrecision?.weight_step_pct || 5
+  // 非零权重至少落在 1 个档位（防 5.2% → ≈0% 抹成「未配置」）
+  const bucket = Math.max(pct > 0 ? step : 0, Math.round(pct / step) * step)
+  return `≈${bucket.toFixed(0)}%`
+}
+
+function factorBucket(score) {
+  if (score >= 0.5) return '偏强'
+  if (score <= -0.5) return '偏弱'
+  return '中性'
+}
 
 function planStyleKey(style) {
   if (!style) return 'balanced'
@@ -263,6 +306,12 @@ function applyPlan(pf) {
 .degradation-body { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); }
 .degradation-title { font-weight: var(--font-weight-medium); }
 .degradation-detail { font-size: var(--font-size-xs); color: #a0820a; }
+
+/* round24 R3: 精度降级红字——比 degradation-banner 更强的红色警示（数据可信度问题，
+   非仅数据源冷却）；主题 token 优先，缺色值时回落固定红系 */
+.precision-banner { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); margin-bottom: var(--space-3); background: #ffebee; border: 1px solid #ef9a9a; border-radius: var(--radius-md); font-size: var(--font-size-sm); color: #c62828; }
+.precision-icon { font-size: var(--font-size-base); }
+.precision-text { font-weight: var(--font-weight-medium); }
 
 /* round21 #14: report_quality 降级标签——与 degradation-banner 同款警示样式，
    确保 partial/fallback/empty 报告不再被静默展示为完整报告 */

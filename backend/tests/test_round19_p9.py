@@ -195,6 +195,9 @@ class TestAkshareHistoryUsChain:
 
         import app.fetchers.global_markets_fetcher as gmf
         monkeypatch.setattr(cm, "run_in_thread", _run_in_thread)
+        # round20 P0-4: HK 分支引入 TickFlow（china_market.py:1691）——测试必须 mock
+        # 为空，否则 TickFlow 可达时返回真实数据、测试依赖网络状态（曾间歇失败）。
+        monkeypatch.setattr(cm, "_tickflow_kline", lambda s, p, asset_type="A": [])
         monkeypatch.setattr(gmf, "fetch_daily_alphavantage", lambda s: [])
         monkeypatch.setattr(gmf, "fetch_candles", lambda s, p: [])
         monkeypatch.setattr(cm, "_fetch_tencent_hk_history", lambda s: tx_rows)

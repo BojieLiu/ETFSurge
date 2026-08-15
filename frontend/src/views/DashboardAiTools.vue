@@ -85,6 +85,7 @@
         :report-quality="designResult.report_quality || 'none'"
         :data-fetched-at="designResult.market_context?.data_fetched_at || designResult.data_fetched_at || ''"
         :degradation="designResult.degradation || designResult.market_context?.degradation || null"
+        :data-precision="designResult.data_precision || designResult.market_context?.data_precision || null"
         :report-error="reportError"
         @apply="applyPlan"
         @regenerate="regenerateDesign"

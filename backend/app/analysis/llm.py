@@ -1493,7 +1493,8 @@ async def generate_strategy_check_report(
 ## 输出硬约束（Z26）
 - 每条建议的 action 字段必须为小写枚举之一: increase / decrease / hold（禁止 BUY/SELL/HOLD 大写形式）
 - 每条建议必须包含 current_weight 与 suggested_weight（0-1 小数）
-- 每条建议必须包含 reason 与 confidence（0-1 小数）
+- 每条建议必须包含 reason 与 confidence；confidence 必须为语义标签之一: high / medium / low
+  （round24 R4：全站统一表示法，禁止输出 0.7 这类裸数值——数值会与规则引擎建议同屏混排）
 - reason 必须为 2-3 句完整逻辑（R4-22），按「触发依据；操作节奏；风险纪律」三段式组织，
   禁止单句理由（如仅"建议增仓"）
 

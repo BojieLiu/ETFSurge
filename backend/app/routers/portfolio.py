@@ -348,6 +348,10 @@ async def get_design(
         # P2-8 (round17): 数据源降级标记透传（从 market_snapshot_json 读出，历史设计可查）——
         # 前端 DesignResult 据此显示「数据源冷却」提示条；无该键时前端不渲染（不误报）。
         "degradation": (_market_context or {}).get("degradation"),
+        # round24 R3: 呈现精度标识透传（契约 api-contracts/portfolio/design-precision.md）——
+        # coarse 时前端把权重降为 5% 档位、因子分降为强弱分档 + 红字缺失百分比；
+        # 无该键（历史设计）时前端按 exact 渲染，不误报降级。
+        "data_precision": (_market_context or {}).get("data_precision"),
     }
 
 

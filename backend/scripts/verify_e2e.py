@@ -333,6 +333,27 @@ def section_portfolio():
                       f"空" if not dt else f"长度={len(dt)}" if len(dt) <= 200 else "内容完整")
                 strategies = detail.get("strategies", [])
                 check(f"strategies 含方案", len(strategies) > 0, f"{len(strategies)} 套")
+                # R3 (round24): 呈现精度标识——降级态（因子 valid 率 <60%）必须标 coarse，
+                # 前端据此把权重降为 5% 档位、因子分降为强弱分档（杜绝「仅供参考横幅 +
+                # 21.0% 精确权重」并存）。历史设计（快照无该键）允许 None。
+                _dp = detail.get("data_precision")
+                _fdq = ((detail.get("market_context") or {}).get("factor_data_quality") or {})
+                if _dp is None:
+                    check("R3 data_precision（历史设计快照无此键）", True,
+                          "旧快照允许缺失，新设计须存在")
+                else:
+                    check("R3 data_precision.mode ∈ {exact, coarse}",
+                          _dp.get("mode") in ("exact", "coarse"), f"mode={_dp.get('mode')}")
+                    if _fdq.get("degraded"):
+                        check("R3 因子降级态 → mode=coarse（不得呈现精确权重）",
+                              _dp.get("mode") == "coarse"
+                              and _dp.get("weight_display") == "coarse"
+                              and _dp.get("factor_score_display") == "bucket",
+                              f"degraded=True 但 data_precision={_dp}")
+                        check("R3 降级态带缺失百分比（红字口径）",
+                              isinstance(_dp.get("factor_missing_pct"), (int, float))
+                              and _dp["factor_missing_pct"] > 0,
+                              f"factor_missing_pct={_dp.get('factor_missing_pct')}")
                 if strategies:
                     for s in strategies:
                         allocs = s.get("allocations") or s.get("etfs") or []
@@ -487,19 +508,20 @@ def section_portfolio():
                             _summary = str(pd.get("summary") or "")
                             check("summary 不含「组合为空」（P3-11）", "组合为空" not in _summary,
                                   f"summary={_summary[:60]}" if "组合为空" in _summary else "持仓正常")
-                            # R14 (round24): 建议 confidence 不得缺失/越界；规则与 LLM 建议须带 source 区分，
-                            # 且 confidence 表示法须一致（全数值或全语义标签，杜绝同屏两种表示法混排）。
+                            # R14 + R4 (round24): 建议 confidence 不得缺失；表示法须全站统一为
+                            # 语义标签 high/medium/low（旧实现规则路径裸数值 0.5/0.7 与 LLM 的
+                            # high/medium 同屏混排，0.7 被误读为高置信）。
                             _sugs = pd.get("suggestions", []) or []
                             if _sugs:
                                 _has_conf = all("confidence" in s for s in _sugs)
                                 check("策略检查建议均含 confidence 字段", _has_conf,
                                       "缺失 confidence 的建议无法识别置信度")
                                 _confs = [s.get("confidence") for s in _sugs if "confidence" in s]
-                                _valid = all(isinstance(c, (int, float)) and 0.0 <= c <= 1.0
-                                             for c in _confs)
-                                check("confidence 取值落在 [0,1]", _valid, f"confidence={_confs[:5]}")
+                                _labels_ok = all(c in ("high", "medium", "low") for c in _confs)
+                                check("R4 confidence 为统一语义标签 high/medium/low",
+                                      _labels_ok, f"confidence={_confs[:5]}（裸数值即回归）")
                                 _kinds = {type(c).__name__ for c in _confs}
-                                check("confidence 表示法一致（全数值或全语义标签）", len(_kinds) <= 1,
+                                check("confidence 表示法一致（无数值/标签混排）", len(_kinds) <= 1,
                                       f"mixed types: {_kinds}")
                             # P3-10 (round9 §4.4-1): tech_signal 完整性——holdings 每项带
                             # tech_signal（真实信号或「数据不可用」标注），前端信号列不空白

@@ -1262,6 +1262,9 @@ async def strategy_check(
         # 契约硬约束: action 仅允许 increase/decrease/hold
         if s.get("action") not in ("increase", "decrease", "hold"):
             s["action"] = "hold"
+        # round24 R4: confidence 表示法统一——LLM 可能返数值(0.85)/中文(高)/标签(high)，
+        # 一律归一化为 high/medium/low，杜绝与规则路径同屏两种表示法
+        s["confidence"] = _normalize_confidence(s.get("confidence"))
 
     covered_symbols = {s.get("symbol") for s in llm_suggestions if s.get("symbol")}
     covered_by_llm = len(covered_symbols)
@@ -1413,6 +1416,49 @@ async def _empty_portfolio_diagnosis(db: AsyncSession, portfolio_type: str | Non
         }
     except Exception as e:  # 诊断失败不影响主流程
         return {"portfolio_type": portfolio_type, "diagnosis_error": str(e)}
+
+
+def _normalize_confidence(value) -> str:
+    """round24 R4: confidence 表示法统一为语义标签 high/medium/low。
+
+    问题：规则路径输出裸数值（0.5/0.7）、LLM 路径输出 high/medium 标签，**同屏两种
+    表示法混排**——前端 `confidenceLabel()` 对 0.7 回落显示「0.7」、class 变
+    `conf-0.7` 无样式，且 0.7 实为「中等」却易被读作「高置信」（round24 §2.2 残留 1）。
+
+    映射（契约 api-contracts/portfolio/strategy-check-v2.md §3.1-3）：
+      数值 ≥0.8 → high、≥0.5 → medium、<0.5 → low；
+      字符串 high/medium/low（不区分大小写）、中文 高/中/低（含「高置信」等前缀）同映射；
+      数字字符串（"0.85"）按数值处理；无法识别（None/空/乱值）→ medium（不冒充 high）。
+    """
+    if isinstance(value, bool):
+        return "medium"
+    if isinstance(value, (int, float)):
+        if value >= 0.8:
+            return "high"
+        return "medium" if value >= 0.5 else "low"
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return "medium"
+        try:
+            return _normalize_confidence(float(s))
+        except ValueError:
+            pass
+        low = s.lower()
+        for label in ("high", "medium", "low"):
+            if low.startswith(label):
+                return label
+        if s.startswith("高"):
+            return "high"
+        if s.startswith("中"):
+            return "medium"
+        if s.startswith("低"):
+            return "low"
+    return "medium"
+
+
+# round24 R4: confidence 中文展示（报告正文/前端标签同口径，避免正文出现裸 "medium"）
+_CONFIDENCE_ZH = {"high": "高", "medium": "中", "low": "低"}
 
 
 def _compute_confidence(filled_count: int, total_count: int) -> str:
@@ -1633,13 +1679,22 @@ def _rule_based_suggestion(
     elif action == "hold":
         suggested = cur
 
-    # round18 P2-7: confidence 按因子填充率分级（<70% → medium 0.5，负向：低填充仍 0.7 → FAIL）
+    # round18 P2-7 + round24 R4: confidence 按因子填充率分档，且表示法与 LLM 路径统一
+    # 为语义标签（旧实现输出裸数值 0.5/0.7 与 LLM 的 high/medium 同屏混排，0.7 易被
+    # 误读为「高置信」——实为「中等」）。分档：≥90%→high、≥70%→medium、<70%→low；
+    # 无可用度信息（total=0）→ medium（不冒充 high）。
     _filled = ((factor_availability or {}).get("filled")) or 0
     _total = ((factor_availability or {}).get("total")) or 0
-    if _total > 0 and _filled / _total < 0.7:
-        _confidence = 0.5
+    if _total <= 0:
+        _confidence = "medium"
     else:
-        _confidence = 0.7
+        _fill_rate = _filled / _total
+        if _fill_rate >= 0.9:
+            _confidence = "high"
+        elif _fill_rate >= 0.7:
+            _confidence = "medium"
+        else:
+            _confidence = "low"
 
     return {
         "symbol": symbol,
@@ -1730,7 +1785,8 @@ def _build_rule_fallback_report(
             sym = s.get("symbol", "")
             cw = s.get("current_weight", 0)
             sw = s.get("suggested_weight", 0)
-            conf = s.get("confidence", "medium")
+            # round24 R4: 正文置信度用中文档位（旧实现直出 0.7/medium 混排不可读）
+            conf = _CONFIDENCE_ZH[_normalize_confidence(s.get("confidence"))]
             reason = (s.get("reason", "") or "").replace("|", "｜")
             lines.append(f"**{sym} {s.get('name', sym)}**：`{action}` {cw:.1%} → {sw:.1%}（置信度 {conf}）")
             # R4-22: reason 为 3 句结构化文本（依据/操作/纪律），分点列出提升可读性

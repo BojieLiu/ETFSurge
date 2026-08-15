@@ -784,6 +784,7 @@ async def _build_market_context(market_data_hub) -> dict:
     except Exception as _e:
         logger.debug("[strategy_design] pool coverage report failed (non-fatal): %s", _e)
 
+    _fdq = _factor_data_quality_report()
     return {
         "market_regime": market_data_hub.get_market_regime() or "range_bound",
         "market_sentiment": market_data_hub.get_market_sentiment() or {"sentiment_index": 50, "sentiment_label": "中性"},
@@ -796,7 +797,69 @@ async def _build_market_context(market_data_hub) -> dict:
         # P1-9 (round20 §五 P1-9): 因子数据完整性降级标注——valid 率 < 60% 时
         # 方案显式标注「因子数据不完整，方案仅供参考」；基准样本 < MIN 时不标注
         # （避免数据积累期误报）。
-        "factor_data_quality": _factor_data_quality_report(),
+        "factor_data_quality": _fdq,
+        # round24 R3: 精度降级标识——降级态不得再以「精确到 1% 的权重 + 两位小数因子分」
+        # 呈现（契约 api-contracts/portfolio/design-precision.md）。只影响呈现，
+        # allocations[].target_weight 原值不变。
+        "data_precision": _data_precision_report(_fdq),
+    }
+
+
+# round24 R3: 因子 valid 率降级阈值（与 _factor_data_quality_report 的 0.6 同源）
+_PRECISION_VALID_RATE_FLOOR = 0.6
+# round24 R3: 降级态权重呈现档位（百分点）——5% 步进，杜绝「21.0%」假精确
+_COARSE_WEIGHT_STEP_PCT = 5.0
+
+
+def _data_precision_report(factor_quality: dict | None) -> dict:
+    """round24 R3: 由因子数据质量派生「呈现精度」标识（纯函数，无 I/O）。
+
+    背景（round24 §2.1 实证）：design 570 `valid_rate=0.0%` + 「方案仅供参考」横幅，
+    但 UI 仍给出 5%/15%/21% 精确权重与 -0.99/-0.96 精确因子分——降级诚实了、数字
+    没诚实，专业投资者无法分辨「哪个数字可信」。
+
+    判定：`degraded=True` 或 `valid_rate < 0.6` → mode=coarse（权重按 5% 档位、
+    因子分按强弱分档呈现 + 缺失百分比红字）；否则 exact（现状不变）。
+    输入缺失/不可用（None/空 dict/无 valid_rate）→ exact，**不误报降级**。
+    """
+    _fq = factor_quality if isinstance(factor_quality, dict) else {}
+    _rate_raw = _fq.get("valid_rate")
+    if not isinstance(_rate_raw, (int, float)):
+        # 统计不可用：无从判断完整性，按 exact 处理（负向：不得误报降级）
+        return {
+            "mode": "exact",
+            "factor_valid_rate": None,
+            "factor_missing_pct": None,
+            "weight_display": "exact",
+            "weight_step_pct": None,
+            "factor_score_display": "exact",
+            "note": "因子数据质量统计不可用，权重与因子分按原值呈现",
+        }
+    _rate = max(0.0, min(1.0, float(_rate_raw)))
+    _missing_pct = round((1.0 - _rate) * 100, 1)
+    _degraded = bool(_fq.get("degraded")) or _rate < _PRECISION_VALID_RATE_FLOOR
+    if _degraded:
+        return {
+            "mode": "coarse",
+            "factor_valid_rate": _rate,
+            "factor_missing_pct": _missing_pct,
+            "weight_display": "coarse",
+            "weight_step_pct": _COARSE_WEIGHT_STEP_PCT,
+            "factor_score_display": "bucket",
+            "note": (
+                f"因子数据缺失 {_missing_pct:g}%：权重按 "
+                f"{_COARSE_WEIGHT_STEP_PCT:g}% 档位粗略呈现、因子分仅显示强弱分档，"
+                "不代表精确配置"
+            ),
+        }
+    return {
+        "mode": "exact",
+        "factor_valid_rate": _rate,
+        "factor_missing_pct": _missing_pct,
+        "weight_display": "exact",
+        "weight_step_pct": None,
+        "factor_score_display": "exact",
+        "note": f"因子数据完整性正常（valid 率 {_rate:.0%}），权重与因子分为精确值",
     }
 
 

@@ -78,7 +78,8 @@ class TestStrategyCheckCoverage:
         for s in result["suggestions"]:
             assert s["source"] == "rule"
             assert s["action"] in ("increase", "decrease", "hold")
-            assert s["confidence"] == 0.7
+            # R4: confidence unified to semantic labels high/medium/low (was raw 0-1 number)
+            assert s["confidence"] == "medium"
             assert "current_weight" in s and "suggested_weight" in s
             assert s["reason"]
 
@@ -208,7 +209,8 @@ class TestStrategyCheckCoverage:
             )
             assert suggestion["action"] in ("increase", "decrease", "hold")
             assert suggestion["source"] == "rule"
-            assert suggestion["confidence"] == 0.7
+            # R4: confidence unified to semantic labels high/medium/low (was raw 0-1 number)
+            assert suggestion["confidence"] == "medium"
 
 
 # ── P2-F: 成功的 LLM 报告短缓存（同持仓重复检查第 2 次起命中，不再调 LLM）──
