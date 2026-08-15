@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 TDD integration tests for design_pipeline and strategy_check_pipeline.
 
@@ -394,3 +395,29 @@ class TestStrategyCheckPipeline:
         assert got["status"] == "completed"
         assert got["result"]["report_quality"] == "partial", \
             f"引擎兜底不得标 full，实际 {got['result'].get('report_quality')}"
+
+
+# ===== folded from test_phase1_diagnosis_fixes.py =====
+import socket
+import sys
+from unittest.mock import AsyncMock, MagicMock, patch
+from tests.db_fixtures import task_mgr  # noqa: F401
+class TestP3_E2EEnhancements:
+    """P3.x: E2E test enhancements for Phase 1 verification."""
+
+    def test_verify_e2e_has_llm_import_check(self):
+        """verify_e2e.py should check LLM import works."""
+        import os
+        e2e_path = os.path.join(os.path.dirname(__file__), "..", "scripts", "verify_e2e.py")
+        with open(e2e_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        # Check for LLM-related imports or check functions
+        has_llm_check = (
+            "from app.analysis.llm" in content
+            or "llm_complete" in content
+            or "generate_design_report" in content
+            or "llm_import" in content
+            or "LLM" in content
+        )
+        assert has_llm_check, "verify_e2e.py should have LLM-related checks"

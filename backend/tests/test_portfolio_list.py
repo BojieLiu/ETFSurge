@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Tests for GET /portfolio/designs endpoint (P4-2).
 
@@ -330,3 +331,67 @@ def test_watchlist_panel_null_change_pct_not_red():
     # 语义等价且更健壮——断言实际生效的判空守卫。
     assert "item.realtime?.change_pct != null" in src, \
         "change_pct=null 时应判空（不得误判红涨）"
+
+
+# ===== folded from test_round19_batch1.py =====
+from unittest.mock import AsyncMock, MagicMock
+from fastapi import HTTPException
+class TestWatchlistAddPrefixNormalized:
+    """round19 P7-③: watchlist 入库统一归一化（手动输入带前缀不原样入库）。"""
+
+    def _fake_session(self):
+        """execute 顺序: ①查重 scalar_one_or_none → None（未重复）②instruments 补名 → None。"""
+        session = AsyncMock()
+        session.execute = AsyncMock(
+            side_effect=[
+                MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+                MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+            ]
+        )
+        session.add = AsyncMock()
+        session.commit = AsyncMock()
+        session.refresh = AsyncMock()
+        cm = AsyncMock()
+        cm.__aenter__.return_value = session
+        cm.__aexit__.return_value = False
+        return cm, session
+
+    @pytest.mark.asyncio
+    async def test_add_watchlist_with_prefix_stored_pure(self, monkeypatch):
+        """POST watchlist 'sz301308'（带前缀）→ 落库 symbol 为 '301308'（负向：原样入库 → FAIL）。"""
+        import app.routers.market as mr
+
+        fake_cm, session = self._fake_session()
+        monkeypatch.setattr(mr, "async_session", lambda: fake_cm)
+        monkeypatch.setattr(mr.market_data_hub, "get_asset_realtime", AsyncMock(return_value=None))
+        monkeypatch.setattr(mr, "CODE_PATTERN", __import__("re").compile(r"^[0-9A-Za-z.\-]+$"))
+
+        data = MagicMock()
+        data.symbol = "sz301308"
+        data.asset_type = "A"
+        data.name = "江波龙"  # 前端搜索已带 name → 跳过实时验证
+        data.notes = None
+
+        resp = await mr.watchlist_add(data)
+
+        assert resp["symbol"] == "301308", f"应归一化为 301308，实得 {resp['symbol']}"
+        added = session.add.call_args[0][0]
+        assert added.symbol == "301308", f"落库 symbol 应为 301308，实得 {added.symbol}"
+
+    @pytest.mark.asyncio
+    async def test_add_watchlist_pure_symbol_unchanged(self, monkeypatch):
+        """不带前缀的规范 symbol 不受影响（回归：正常路径不误改）。"""
+        import app.routers.market as mr
+
+        fake_cm, session = self._fake_session()
+        monkeypatch.setattr(mr, "async_session", lambda: fake_cm)
+        monkeypatch.setattr(mr.market_data_hub, "get_asset_realtime", AsyncMock(return_value=None))
+
+        data = MagicMock()
+        data.symbol = "510300"
+        data.asset_type = "A"
+        data.name = "沪深300ETF"
+        data.notes = None
+
+        resp = await mr.watchlist_add(data)
+        assert resp["symbol"] == "510300"

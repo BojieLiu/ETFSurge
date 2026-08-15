@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Tests for the decode_df function that handles latin1 double-encoding issues."""
 import pandas as pd
 import pytest
@@ -130,3 +131,37 @@ class TestDecodeDfGeneral:
 
         assert "名称" in result.columns
         assert result["代码"].iloc[0] == "510300"
+
+
+# ===== folded from test_phase2a_data_quality.py =====
+import ast
+import os
+class TestP0_4_Encoding:
+    """P0.4: Unified UTF-8 encoding."""
+
+    def test_config_has_utf8_encoding(self):
+        """config.py should set env_file_encoding = 'utf-8'."""
+        probes_path = os.path.join(
+            os.path.dirname(__file__), "..", "app", "config.py"
+        )
+        with open(probes_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        assert "env_file_encoding" in content, "config.py should set env_file_encoding"
+        assert "utf-8" in content.lower(), "config.py should use utf-8 encoding"
+
+    def test_no_latin1_default_encoding(self):
+        """No Python file should rely on latin1 default encoding."""
+        import glob
+        issues = []
+        py_files = glob.glob(
+            os.path.join(os.path.dirname(__file__), "..", "app", "**", "*.py"),
+            recursive=True,
+        )
+        for pf in py_files[:30]:  # Check first 30 files as sample
+            with open(pf, "r", encoding="utf-8") as f:
+                try:
+                    f.read()
+                except UnicodeDecodeError:
+                    issues.append(pf)
+        assert len(issues) == 0, f"Files with encoding issues: {issues}"

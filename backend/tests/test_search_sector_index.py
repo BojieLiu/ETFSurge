@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 O30 (docs/archived/round7-rediagnosis.md §7 P30①): /search 增加板块/指数段（kind 参数）。
 
@@ -255,3 +256,25 @@ def test_lookup_index_market_recognizes_us_hk(monkeypatch):
     assert ms_mod._lookup_index_market_sync("hsi") == "HK"  # 大小写不敏感
     assert ms_mod._lookup_index_market_sync("SH000300") == "A"
     assert ms_mod._lookup_index_market_sync("UNKNOWN") == ""
+
+
+# ===== folded from test_phase2a_data_quality.py =====
+import ast
+import os
+class TestP0_3_HKUSSearch:
+    """P0.3: Ensure search supports HK/US stocks."""
+
+    def test_search_includes_hk_and_us_fallbacks(self):
+        """Search function should include HK/US data source fallbacks."""
+        probes_path = os.path.join(
+            os.path.dirname(__file__), "..", "app", "services", "market_service.py"
+        )
+        with open(probes_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        # Should mention HK/US market handling
+        hk_refs = sum(1 for ref in ["港股", "hongkong", "hong_kong", "hsi", "HK"] if ref.lower() in content.lower())
+        us_refs = sum(1 for ref in ["美股", "us stock", "spy", "qqq"] if ref.lower() in content.lower())
+        assert hk_refs > 0 or us_refs > 0, (
+            "market_service should handle HK/US stock fallbacks in search"
+        )

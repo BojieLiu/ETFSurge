@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 U2/N01 (round2-unfixed-fix-plan.md U2 / round3-diagnosis-and-optimization-plan.md N01
 + factor-and-strategy-check-review.md 问题3): 策略检查报告质量。
@@ -577,3 +578,291 @@ def test_llm_timeout_for_static_only_30s():
         "partial": False, "fallback_count": 0, "fallback_ratio": 0.0,
     }
     assert _llm_timeout_for(dq_full) == 75
+
+
+# ===== folded from test_round20_strategy_check_p05_p18.py =====
+from unittest.mock import AsyncMock, MagicMock, patch
+import httpx
+class TestP1_8HoldingsAction:
+    def test_rule_fallback_holdings_analysis_has_action(self):
+        """P1-8: 规则兜底 holdings_analysis 骨架必须带 action/suggested_weight（D-B2 割裂）。"""
+        from app.services.portfolio_service import _build_rule_fallback_holdings_analysis
+
+        etfs = [{"symbol": "510300", "name": "沪深300", "target_weight": 0.3}]
+        market_data = [{"symbol": "510300", "name": "沪深300", "target_weight": 0.3,
+                        "price": 4.0, "change_pct": 0.5}]
+        factor_breakdowns = {
+            "510300": {
+                "factor_scores": {"technical.momentum": 0.6},
+                "technical_signal": {"signal": "buy"},
+                "technical_indicators": {},
+            }
+        }
+        rows = _build_rule_fallback_holdings_analysis(
+            etfs=etfs, market_data=market_data,
+            factor_breakdowns=factor_breakdowns, weight_map={"510300": 0.3},
+        )
+        assert rows, "应生成 holdings_analysis 骨架"
+        h = rows[0]
+        assert h.get("action") in ("increase", "decrease", "hold"), (
+            f"holdings_analysis 缺 action（与 suggestions 割裂）: {h}"
+        )
+        assert h.get("suggested_weight") is not None, "holdings_analysis 缺 suggested_weight"
+class TestP2_4FactorScoreNote:
+    def test_factor_score_note_not_claiming_0_1(self):
+        """P2-4: 报告注释不得称「0~1」（实测 511090=-2.31 超范围）；
+        应改为「可负可超 1，区别于技术信号」。"""
+        from app.tasks.design_report import _build_plan_tables
+
+        strategies = [{
+            "label": "稳健型", "positioning": "稳健", "expected_return": 0.08,
+            "expected_return_current": 0.08, "max_drawdown": 0.1, "sharpe_ratio": 1.0,
+            "expected_characteristics": "", "id": "balanced",
+            "allocations": [{
+                "symbol": "511090", "name": "30年国债ETF", "layer": "defense",
+                "weight": 0.2, "factor_score": -2.31, "factor_breakdown": {},
+                "daily_change_pct": 0.1, "selection_rationale": "低相关对冲",
+            }],
+        }]
+        md = _build_plan_tables(strategies)
+        assert "多因子综合分（可负可超 1" in md, "注释应明示可负可超 1"
+        assert "（0~1）" not in md, f"注释不得再声称 0~1 范围（511090=-2.31 实测超范围）: {md}"
+class TestP1_7StrongSectorCoverage:
+    def test_covered_sector_true_uncovered_false(self):
+        """P1-7 池层：market_context 含 strong_sector_pool_coverage——
+        强势板块有对应 ETF 候选 → covered=True；无 → False + WARN 标注。"""
+        import asyncio
+        from unittest.mock import MagicMock
+        from app.services.strategy_design import _build_market_context
+
+        hub = MagicMock()
+        hub.get_sector_momentum.return_value = [
+            {"sector_name": "医疗服务", "change_pct": 7.2},
+            {"sector_name": "化学制药", "change_pct": 5.1},
+            {"sector_name": "半导体", "change_pct": 4.0},
+        ]
+        hub.get_pool.return_value = {
+            "satellite": [
+                {"symbol": "512170", "name": "医疗ETF", "industry": "医药"},
+                {"symbol": "512480", "name": "半导体ETF", "industry": "半导体"},
+            ],
+        }
+        hub.get_market_regime.return_value = "range_bound"
+        hub.get_market_sentiment.return_value = {"sentiment_index": 50}
+        hub.get_index_realtime.return_value = []
+        hub.get_global_indices = MagicMock(return_value={})
+        hub._by_code = {}
+
+        ctx = asyncio.run(_build_market_context(hub))
+        cov = ctx.get("strong_sector_pool_coverage", [])
+        assert cov, "market_context 应含 strong_sector_pool_coverage"
+        by_name = {c["sector_name"]: c for c in cov}
+        assert by_name["医疗服务"]["covered_in_pool"] is True, "医疗ETF 应覆盖医疗服务板块"
+        # 化学制药：候选池无对应 → covered=False + WARN（负向断言）
+        assert by_name["化学制药"]["covered_in_pool"] is False
+        assert "WARN" in by_name["化学制药"]["note"], "无对应候选应标注 WARN"
+class TestP1_8ReasonAndConfidence:
+    def test_reason_no_basics_when_factor_sparse(self):
+        """P1-8: 因子填充率<50% 时 reason 不得含「基本面」（无基本面数据拼「基本面共振」= 失真）。"""
+        from app.services.portfolio_service import _rule_based_suggestion
+
+        s = _rule_based_suggestion(
+            symbol="510300", name="沪深300", target_weight=0.3,
+            factor_score={"technical.momentum": 0.6, "technical.rsi": 0.4},
+            signal={"signal": "buy"}, regime="range_bound",
+            current_weight=0.25, factor_availability={"filled": 1, "total": 3},
+        )
+        assert "基本面" not in s["reason"], f"无基本面数据时 reason 不得含「基本面」: {s['reason']}"
+
+    def test_confidence_medium_when_fill_below_70(self):
+        """P1-8: factor_availability 填充率 <70% → confidence 不得为 high（应 medium）。"""
+        from app.services.portfolio_service import _rule_based_suggestion
+
+        s = _rule_based_suggestion(
+            symbol="512480", name="半导体", target_weight=0.2,
+            factor_score={"technical.momentum": 0.8},
+            signal={"signal": "buy"}, regime="range_bound",
+            current_weight=0.2, factor_availability={"filled": 2, "total": 5},
+        )
+        assert s["confidence"] != "high", (
+            f"填充率 2/5=40%<70% 不得 high，实际 {s['confidence']}"
+        )
+
+
+# ===== folded from test_z26_strategy_check_coverage.py =====
+_MOCK_ETFS = [
+    {"symbol": "510300", "name": "沪深300ETF", "short_name": "300ETF",
+     "asset_type": "ETF", "portfolio_type": "on_exchange", "target_weight": 0.5},
+    {"symbol": "518880", "name": "黄金ETF", "short_name": "黄金ETF",
+     "asset_type": "ETF", "portfolio_type": "on_exchange", "target_weight": 0.3},
+    {"symbol": "511010", "name": "国债ETF", "short_name": "国债ETF",
+     "asset_type": "ETF", "portfolio_type": "on_exchange", "target_weight": 0.2},
+]
+_MOCK_FACTORS_Z26 = {
+    "510300": {"trend_1m": 0.8, "momentum_20d": 0.6, "volatility_20d": 0.1},
+    "518880": {"trend_1m": -0.8, "momentum_20d": -0.7, "volatility_20d": -0.1},
+    "511010": {"trend_1m": 0.1, "momentum_20d": 0.0, "volatility_20d": -0.2},
+}
+_MOCK_INDICATORS = {
+    "510300": {"signal": {"signal": "buy"}},
+    "518880": {"signal": {"signal": "sell"}},
+    "511010": {"signal": {"signal": "hold"}},
+}
+_MOCK_PRICE = {"510300": (3.8, 1.2), "518880": (2.5, -0.5), "511010": (1.1, 0.1)}
+class TestStrategyCheckCoverage:
+    """Z26: strategy check rule fallback."""
+
+    @pytest.mark.asyncio
+    async def test_llm_timeout_rule_covers_all(self, strategy_env):
+        """Z26: LLM timeout -> rule engine suggestions for every holding."""
+        from app.services import portfolio_service as ps
+        from app.analysis.llm import generate_strategy_check_report
+        from app.factors.factor_registry import registry as factor_registry
+
+        with patch.object(generate_strategy_check_report, "__module__"):
+            with patch("app.analysis.llm.generate_strategy_check_report",
+                       new_callable=AsyncMock, side_effect=asyncio.TimeoutError("llm timeout")):
+                with patch.object(factor_registry, "compute", new_callable=AsyncMock, return_value=_MOCK_FACTORS_Z26):
+                    result = await ps.strategy_check(db=None, total_capital=100000)
+
+        assert result["suggestions"], "suggestions should not be empty"
+        # Coverage must be 100%
+        assert result["coverage"]["coverage_pct"] == 1.0
+        assert result["coverage"]["total_holdings"] == 3
+        # All suggestions are rule-generated
+        for s in result["suggestions"]:
+            assert s["source"] == "rule"
+            assert s["action"] in ("increase", "decrease", "hold")
+            # R4: confidence unified to semantic labels high/medium/low (was raw 0-1 number)
+            assert s["confidence"] == "medium"
+            assert "current_weight" in s and "suggested_weight" in s
+            assert s["reason"]
+
+    @pytest.mark.asyncio
+    async def test_llm_partial_coverage_rule_fills_gap(self, strategy_env):
+        """Z26: LLM covers 1 of 3 -> rule fills remaining 2, coverage 100%."""
+        from app.services import portfolio_service as ps
+        from app.factors.factor_registry import registry as factor_registry
+
+        llm_result = {
+            "summary": "组合整体稳健",
+            "suggestions": [{
+                "symbol": "510300", "name": "沪深300ETF",
+                "action": "increase", "current_weight": 0.5,
+                "suggested_weight": 0.55, "reason": "LLM 建议",
+                "confidence": 0.8,
+            }],
+            "holdings_analysis": [],
+            "risk_warnings": [],
+        }
+        with patch("app.analysis.llm.generate_strategy_check_report",
+                   new_callable=AsyncMock, return_value=llm_result):
+            with patch.object(factor_registry, "compute", new_callable=AsyncMock, return_value=_MOCK_FACTORS_Z26):
+                result = await ps.strategy_check(db=None, total_capital=100000)
+
+        suggestions = result["suggestions"]
+        assert len(suggestions) == 3, f"expected 3 suggestions, got {len(suggestions)}"
+        assert result["coverage"]["coverage_pct"] == 1.0
+        assert result["coverage"]["covered_by_llm"] == 1
+        assert result["coverage"]["covered_by_rule"] == 2
+
+        by_symbol = {s["symbol"]: s for s in suggestions}
+        assert by_symbol["510300"]["source"] == "llm"
+        assert by_symbol["518880"]["source"] == "rule"
+        assert by_symbol["511010"]["source"] == "rule"
+        # 518880: factor score negative + sell signal -> decrease
+        assert by_symbol["518880"]["action"] == "decrease"
+        # 511010: neutral -> hold
+        assert by_symbol["511010"]["action"] == "hold"
+
+    @pytest.mark.asyncio
+    async def test_llm_full_coverage_no_rule_needed(self, strategy_env):
+        """Z26: LLM covers all -> no rule suggestions, coverage 100%."""
+        from app.services import portfolio_service as ps
+        from app.factors.factor_registry import registry as factor_registry
+
+        llm_result = {
+            "summary": "组合整体稳健",
+            "suggestions": [
+                {"symbol": "510300", "name": "沪深300ETF", "action": "increase",
+                 "current_weight": 0.5, "suggested_weight": 0.55, "reason": "a", "confidence": 0.8},
+                {"symbol": "518880", "name": "黄金ETF", "action": "hold",
+                 "current_weight": 0.3, "suggested_weight": 0.3, "reason": "b", "confidence": 0.8},
+                {"symbol": "511010", "name": "国债ETF", "action": "hold",
+                 "current_weight": 0.2, "suggested_weight": 0.2, "reason": "c", "confidence": 0.8},
+            ],
+            "holdings_analysis": [],
+            "risk_warnings": [],
+        }
+        with patch("app.analysis.llm.generate_strategy_check_report",
+                   new_callable=AsyncMock, return_value=llm_result):
+            with patch.object(factor_registry, "compute", new_callable=AsyncMock, return_value=_MOCK_FACTORS_Z26):
+                result = await ps.strategy_check(db=None, total_capital=100000)
+
+        assert result["coverage"]["coverage_pct"] == 1.0
+        assert result["coverage"]["covered_by_rule"] == 0
+        assert all(s["source"] == "llm" for s in result["suggestions"])
+
+    @pytest.mark.asyncio
+    async def test_rule_suggestion_decision_table(self, strategy_env):
+        """Z26: rule decision table — strong factor + buy -> increase; weak + sell -> decrease."""
+        from app.services import portfolio_service as ps
+        from app.factors.factor_registry import registry as factor_registry
+
+        # 510300: factor > 0.5 + buy -> increase
+        factors = {
+            "510300": {"trend_1m": 0.9, "momentum_20d": 0.8},
+            "518880": {"trend_1m": -0.9, "momentum_20d": -0.8},
+        }
+        indicators = {
+            "510300": {"signal": {"signal": "buy"}},
+            "518880": {"signal": {"signal": "sell"}},
+        }
+        etfs = [
+            {"symbol": "510300", "name": "沪深300ETF", "asset_type": "ETF",
+             "portfolio_type": "on_exchange", "target_weight": 0.5},
+            {"symbol": "518880", "name": "黄金ETF", "asset_type": "ETF",
+             "portfolio_type": "on_exchange", "target_weight": 0.3},
+        ]
+        from app.services import portfolio_service as ps_mod
+        ps_mod._strategy_check_cache.clear()
+        with patch.object(ps_mod, "list_etfs", new_callable=AsyncMock, return_value=etfs), \
+             patch.object(ps_mod, "_compute_indicators", new_callable=AsyncMock, return_value=indicators), \
+             patch.object(ps_mod, "build_price_map", new_callable=AsyncMock,
+                          return_value={"510300": (3.8, 1.0), "518880": (2.5, -1.0)}), \
+             patch("app.services.market_data_hub.market_data_hub.get_market_regime", return_value="range_bound"), \
+             patch.object(factor_registry, "compute", new_callable=AsyncMock, return_value=factors), \
+             patch("app.analysis.llm.generate_strategy_check_report",
+                   new_callable=AsyncMock, side_effect=asyncio.TimeoutError("timeout")):
+            result = await ps_mod.strategy_check(db=None, total_capital=100000)
+
+        by_symbol = {s["symbol"]: s for s in result["suggestions"]}
+        assert by_symbol["510300"]["action"] == "increase"
+        # P0-10 (round16 3.11): increase 不得输出 sug<cur 矛盾值——cur=0.5 已达 30%
+        # 风控上限 → suggested 维持 0.5 并提示"已达/接近 30% 风控上限"（旧实现 0.30 降仓矛盾）。
+        assert by_symbol["510300"]["suggested_weight"] == pytest.approx(0.5), \
+            f"increase 不得降仓: {by_symbol['510300']}"
+        assert "30% 风控上限" in by_symbol["510300"]["reason"], by_symbol["510300"]["reason"]
+        assert by_symbol["518880"]["action"] == "decrease"
+        # decrease: max(current*0.7, 0) = 0.21
+        assert by_symbol["518880"]["suggested_weight"] == pytest.approx(0.21)
+        assert result["coverage"]["coverage_pct"] == 1.0
+
+    def test_action_enum_restricted(self):
+        """Z26: rule engine only emits increase/decrease/hold."""
+        from app.services.portfolio_service import _rule_based_suggestion
+
+        for scenario in [
+            ({"a": 0.9}, {"signal": "buy"}, "range_bound"),
+            ({"a": -0.9}, {"signal": "sell"}, "range_bound"),
+            ({"a": 0.1}, {"signal": "hold"}, "range_bound"),
+            ({"a": 0.9}, {"signal": "buy"}, "bearish"),
+        ]:
+            suggestion = _rule_based_suggestion(
+                symbol="X", name="X", target_weight=0.3,
+                factor_score=scenario[0], signal=scenario[1], regime=scenario[2],
+            )
+            assert suggestion["action"] in ("increase", "decrease", "hold")
+            assert suggestion["source"] == "rule"
+            # R4: confidence unified to semantic labels high/medium/low (was raw 0-1 number)
+            assert suggestion["confidence"] == "medium"

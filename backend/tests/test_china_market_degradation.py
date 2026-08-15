@@ -1,3 +1,4 @@
+from __future__ import annotations
 # -*- coding: utf-8 -*-
 """F21 R77/R78：china_market 多源熔断降级链自动化测试。
 
@@ -176,3 +177,83 @@ async def test_get_asset_realtime_index_not_stock_misresolved(monkeypatch):
     assert result is not None
     assert result["price"] == 3832.26, "指数应返回上证指数点位，而非深市股票价格"
     assert result["name"] == "上证指数"
+
+
+# ===== folded from test_round19_p4.py =====
+import json
+import logging
+class TestFetchSectorHeatEmPriority:
+    """round19 P4-①: fetch_sector_heat_em push2delay 优先 → akshare 兜底。"""
+
+    def test_push2delay_first_akshare_fallback(self, monkeypatch):
+        import app.fetchers.sector_fetcher as sf
+
+        em_rows = [
+            {"sector_code": "BK1", "sector_name": "半导体", "change_pct": 2.3,
+             "amount": 1e9, "lead_stock_code": "", "lead_stock_name": "",
+             "lead_stock_chg": None},
+        ]
+        ak_rows = [{"sector_code": "BK2", "sector_name": "白酒", "change_pct": -1.2,
+                    "amount": 5e8, "lead_stock_code": "600519",
+                    "lead_stock_name": "茅台", "lead_stock_chg": 1.0}]
+        calls = []
+
+        def fake_em(limit=None):
+            calls.append("em")
+            return em_rows
+
+        def fake_ak():
+            calls.append("ak")
+            return ak_rows
+
+        monkeypatch.setattr(sf, "fetch_em_industry_sectors", fake_em)
+        monkeypatch.setattr(sf, "_ak_industry_sectors", fake_ak)
+        # 绕过 cached() 60s TTL（测试内连续两次调用独立场景）
+        monkeypatch.setattr(sf, "cached", lambda key, fn, ttl_key: fn())
+        out = sf.fetch_sector_heat_em(limit=5)
+        assert calls == ["em"], "push2delay 有数据时不应调 akshare"
+        assert out and out[0]["name"] == "半导体" and out[0]["change_pct"] == 2.3
+
+        # push2delay 空 → akshare 兜底
+        calls.clear()
+
+        def fake_em_empty(limit=None):
+            calls.append("em")
+            return []
+
+        monkeypatch.setattr(sf, "fetch_em_industry_sectors", fake_em_empty)
+        out2 = sf.fetch_sector_heat_em(limit=5)
+        assert calls == ["em", "ak"], "push2delay 空时应走 akshare 兜底"
+        assert out2[0]["name"] == "白酒"
+        assert out2[0]["lead_stocks"][0]["symbol"] == "600519", "akshare 路径保留领涨股"
+
+    def test_both_empty_logs_error(self, monkeypatch, caplog):
+        """push2delay + akshare 均空 → ERROR 日志（负向：静默 → FAIL）。"""
+        import app.fetchers.sector_fetcher as sf
+
+        monkeypatch.setattr(sf, "fetch_em_industry_sectors", lambda limit=None: [])
+        monkeypatch.setattr(sf, "_ak_industry_sectors", lambda: None)
+        with caplog.at_level(logging.ERROR, logger="app.fetchers.sector_fetcher"):
+            out = sf.fetch_sector_heat_em(limit=5)
+        assert out == []
+        assert any("均无数据" in r.message for r in caplog.records), "双源均空应打 ERROR 日志"
+class TestSectorHeatMapNullChangePct:
+    """round19 P4-③: 前端 SectorHeatMap change_pct=null 显示「—」不冒充 0%。"""
+
+    def _src(self):
+        import os
+        p = os.path.join(os.path.dirname(__file__), "..", "frontend", "src",
+                         "components", "market", "SectorHeatMap.vue")
+        if not os.path.exists(p):
+            p = os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "src",
+                             "components", "market", "SectorHeatMap.vue")
+        return open(p, encoding="utf-8").read()
+
+    def test_null_change_pct_shows_dash(self):
+        src = self._src()
+        assert "row-change--na" in src, "null 涨跌幅应有「—」占位样式"
+        assert "涨跌幅数据源异常" in src, "「—」应有 tooltip 说明"
+
+    def test_degraded_banner_consumed(self):
+        src = self._src()
+        assert 'v-if="degraded && activeTab === \'heat\'"' in src, "degraded=true 应有提示条"

@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 R5-1-6: 策略检查 LLM 超时诊断与快速失败（docs/round5-diagnosis-and-optimization-plan.md §十 P1）。
 
@@ -266,3 +267,93 @@ class TestFallbackSummaryWithQuality:
         """不传 data_quality 时保持旧文案结构（兼容调用方）。"""
         summary = _build_llm_fail_summary(duration_s=30.0, diag="timeout")
         assert "规则引擎兜底" in summary
+
+
+# ===== folded from test_z26_strategy_check_coverage.py =====
+@pytest.fixture
+def strategy_env():
+    """Patch all strategy_check data dependencies; yield a helper to set LLM result."""
+    from app.services import portfolio_service as ps
+
+    ps._strategy_check_cache.clear()
+    patches = [
+        patch.object(ps, "list_etfs", new_callable=AsyncMock, return_value=_MOCK_ETFS),
+        patch.object(ps, "_compute_indicators", new_callable=AsyncMock, return_value=_MOCK_INDICATORS),
+        patch.object(ps, "build_price_map", new_callable=AsyncMock, return_value=_MOCK_PRICE),
+        patch("app.services.market_data_hub.market_data_hub.get_market_regime", return_value="range_bound"),
+    ]
+    for p in patches:
+        p.start()
+    yield
+    for p in patches:
+        p.stop()
+_MOCK_ETFS = [
+    {"symbol": "510300", "name": "沪深300ETF", "short_name": "300ETF",
+     "asset_type": "ETF", "portfolio_type": "on_exchange", "target_weight": 0.5},
+    {"symbol": "518880", "name": "黄金ETF", "short_name": "黄金ETF",
+     "asset_type": "ETF", "portfolio_type": "on_exchange", "target_weight": 0.3},
+    {"symbol": "511010", "name": "国债ETF", "short_name": "国债ETF",
+     "asset_type": "ETF", "portfolio_type": "on_exchange", "target_weight": 0.2},
+]
+_MOCK_FACTORS = {
+    "510300": {"trend_1m": 0.8, "momentum_20d": 0.6, "volatility_20d": 0.1},
+    "518880": {"trend_1m": -0.8, "momentum_20d": -0.7, "volatility_20d": -0.1},
+    "511010": {"trend_1m": 0.1, "momentum_20d": 0.0, "volatility_20d": -0.2},
+}
+_MOCK_INDICATORS = {
+    "510300": {"signal": {"signal": "buy"}},
+    "518880": {"signal": {"signal": "sell"}},
+    "511010": {"signal": {"signal": "hold"}},
+}
+_MOCK_PRICE = {"510300": (3.8, 1.2), "518880": (2.5, -0.5), "511010": (1.1, 0.1)}
+class TestP2FLlmReportCache:
+    @pytest.mark.asyncio
+    async def test_second_call_hits_llm_report_cache(self, strategy_env):
+        """P2-F: 同持仓同 capital 重复 strategy_check——第 2 次命中 LLM 报告缓存，
+        不再调用 generate_strategy_check_report（旧实现每次 60-120s 重算）。"""
+        from app.services import portfolio_service as ps
+        from app.factors.factor_registry import registry as factor_registry
+
+        llm_calls = []
+
+        async def _fake_llm(**kw):
+            llm_calls.append(1)
+            return {"summary": "组合稳健", "suggestions": [],
+                    "holdings_analysis": [], "risk_warnings": []}
+
+        with patch("app.analysis.llm.generate_strategy_check_report",
+                   new=AsyncMock(side_effect=_fake_llm)), \
+             patch.object(factor_registry, "compute",
+                          new_callable=AsyncMock, return_value=_MOCK_FACTORS):
+            r1 = await ps.strategy_check(db=None, total_capital=100000)
+            r2 = await ps.strategy_check(db=None, total_capital=100000)
+
+        assert len(llm_calls) == 1, f"第 2 次应命中缓存不再调 LLM，实际 {len(llm_calls)} 次"
+        assert r2["summary"] == r1["summary"]
+        # 缓存命中时 raw_llm 同源（LLM 成功报告复用）
+        assert "组合稳健" in r1["summary"]
+
+    @pytest.mark.asyncio
+    async def test_llm_failure_not_cached(self, strategy_env):
+        """P2-F: LLM 超时兜底不写缓存——下次检查仍会重试 LLM（不得把降级当成功复用）。"""
+        from app.services import portfolio_service as ps
+        from app.factors.factor_registry import registry as factor_registry
+
+        llm_calls = []
+
+        async def _flaky_llm(**kw):
+            llm_calls.append(1)
+            if len(llm_calls) == 1:
+                raise asyncio.TimeoutError("llm slow")
+            return {"summary": "组合稳健", "suggestions": [],
+                    "holdings_analysis": [], "risk_warnings": []}
+
+        with patch("app.analysis.llm.generate_strategy_check_report",
+                   new=AsyncMock(side_effect=_flaky_llm)), \
+             patch.object(factor_registry, "compute",
+                          new_callable=AsyncMock, return_value=_MOCK_FACTORS):
+            r1 = await ps.strategy_check(db=None, total_capital=100000)
+            r2 = await ps.strategy_check(db=None, total_capital=100000)
+
+        assert len(llm_calls) == 2, f"失败不缓存，第 2 次应重试 LLM，实际 {len(llm_calls)} 次"
+        assert "组合稳健" in r2["summary"]

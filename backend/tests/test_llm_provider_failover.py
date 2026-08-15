@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 TDD tests for LLM provider dual-tier failover (OpenCode Zen → DeepSeek).
 
@@ -311,3 +312,82 @@ class TestMissingApiKey:
                 await llm_complete_with_system("system", "prompt")
         finally:
             await self._restore_keys(old)
+
+
+# ===== folded from test_phase5_architecture.py =====
+import asyncio
+import os
+import time
+from datetime import datetime, timedelta, timezone
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
+from tests.db_fixtures import task_mgr  # noqa: F401
+class TestP4_1_LLMProviderStrategy:
+    """P4.1: Verify LLM provider strategy pattern is already implemented."""
+
+    def test_provider_config_dataclass_exists(self):
+        """ProviderConfig dataclass should exist with all required fields."""
+        from app.analysis.provider import ProviderConfig
+
+        config = ProviderConfig(
+            id="test", name="Test", api_url="http://test",
+            api_key="key", model="test-model",
+        )
+        assert config.id == "test"
+        assert config.timeout == 120  # default
+
+    def test_get_configured_providers_returns_list(self):
+        """get_configured_providers() should return a list (possibly empty)."""
+        from app.analysis.provider import get_configured_providers
+
+        providers = get_configured_providers()
+        assert isinstance(providers, list)
+
+    def test_call_with_failover_raises_on_empty_providers(self):
+        """call_with_failover should raise ValueError for empty provider list."""
+        from app.analysis.provider import call_with_failover
+
+        with pytest.raises(ValueError, match="No LLM providers configured"):
+            asyncio.run(call_with_failover(lambda p, **kw: "resp", []))
+
+    def test_llm_complete_accepts_prompt(self):
+        """llm_complete should accept a prompt string (smoke test)."""
+        from app.analysis.llm import llm_complete
+
+        # Just verify the function signature and that it exists
+        import inspect
+        sig = inspect.signature(llm_complete)
+        assert "prompt" in sig.parameters
+
+    def test_provider_failover_chain_defined(self):
+        """provider.py should define primary and fallback providers."""
+        from app.analysis.provider import get_configured_providers
+        assert hasattr(get_configured_providers, "__call__")
+class TestP4_2_ConnectionPoolConfig:
+    """P4.2: Connection pool settings should come from config.py."""
+
+    def test_config_has_pool_settings(self):
+        """config.py should have pool_connections and pool_maxsize settings."""
+        from app.config import settings
+
+        assert hasattr(settings, "pool_connections")
+        assert hasattr(settings, "pool_maxsize")
+        assert settings.pool_connections >= 10
+        assert settings.pool_maxsize >= 20
+
+    def test_china_market_uses_config_pool_settings(self):
+        """china_market.py should read pool settings from config."""
+        probes_path = os.path.join(
+            os.path.dirname(__file__), "..", "app", "fetchers", "china_market.py"
+        )
+        with open(probes_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        assert "settings.pool_connections" in content
+        assert "settings.pool_maxsize" in content
+
+    def test_pool_settings_have_reasonable_defaults(self):
+        """Default pool settings should be >= 20 connections."""
+        from app.config import settings
+
+        assert settings.pool_connections >= 10
+        assert settings.pool_maxsize >= 20

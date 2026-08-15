@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 N02 (round3-diagnosis-and-optimization-plan.md N02): 设计报告指数涨跌幅放大 100 倍 bug。
 
@@ -113,3 +114,74 @@ class TestGenerateDesignReportTimeout:
             "generate_design_report 必须传 request_timeout（防 deepseek 长报告 45s read 超时）"
         assert hasattr(to, "read") and to.read >= 90.0, \
             f"read 超时应 ≥90s（完整设计报告实测 >46s），实际 {to!r}"
+
+
+# ===== folded from test_phase1_diagnosis_fixes.py =====
+import asyncio
+import socket
+import sys
+from unittest.mock import AsyncMock, MagicMock, patch
+from tests.db_fixtures import task_mgr  # noqa: F401
+class TestP0_2_DesignReportTransition:
+    """P0.2: Ensure design_pipeline properly transitions to completed."""
+
+    async def test_design_pipeline_transitions_to_completed(self, task_mgr):
+        """After successful LLM report, task should reach 'completed' status."""
+        # We're testing the pipeline logic, not running the full pipeline
+        mgr = task_mgr
+        task = await mgr.create_task("design", {"capital": 500000})
+        task_id = task["task_id"]
+
+        # Simulate the final stages
+        await mgr.update_task(
+            task_id,
+            progress=100,
+            status="completed",
+            result={
+                "strategies": [],
+                "design_id": 1,
+                "report_quality": "full",
+            },
+        )
+
+        updated = await mgr.get_task(task_id)
+        assert updated["status"] == "completed"
+        assert updated["progress"] == 100
+        assert updated["result"]["report_quality"] == "full"
+
+    async def test_design_report_has_fallback_on_llm_failure(self, task_mgr):
+        """When LLM fails, pipeline should set completed_with_errors not hang."""
+        mgr = task_mgr
+        task = await mgr.create_task("design", {"capital": 500000})
+        task_id = task["task_id"]
+
+        await mgr.update_task(
+            task_id,
+            progress=100,
+            status="completed_with_errors",
+            result={
+                "strategies": [],
+                "design_id": 1,
+                "report_quality": "partial",
+            },
+        )
+
+        updated = await mgr.get_task(task_id)
+        assert updated["status"] == "completed_with_errors"
+        assert updated["result"]["report_quality"] == "partial"
+
+    async def test_design_report_has_timeout_fallback(self, task_mgr):
+        """When LLM times out, task should be marked failed."""
+        mgr = task_mgr
+        task = await mgr.create_task("design", {"capital": 500000})
+        task_id = task["task_id"]
+
+        await mgr.update_task(
+            task_id,
+            progress=0,
+            status="failed",
+            error_message="方案生成超时，数据源响应过慢，请稍后重试",
+        )
+
+        updated = await mgr.get_task(task_id)
+        assert updated["status"] == "failed"

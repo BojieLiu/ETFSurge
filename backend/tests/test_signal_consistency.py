@@ -1,3 +1,4 @@
+from __future__ import annotations
 """R6-F5 (round6 §十 R6-06): 信号口径统一——策略检查 tech_signal 与 /market/signal 同源。
 
 背景：_compute_indicators 给 compute_all_indicators 传 factor_scores（factor_matrix
@@ -103,3 +104,43 @@ def test_kdj_overbought_not_buy(j, expected):
     assert sig["signal"] == expected, (
         f"KDJ J={j}: 期望 {expected}，实际 {sig['signal']}（score={sig['score']}）"
     )
+
+
+# ===== folded from test_round20_engine_fixes.py =====
+from app.engine.allocation_engine import (
+    allocate,
+    enforce_max_correlation,
+    check_structure_reasonableness,
+)
+from app.engine.rationale import build_rationale
+class TestP1_3OverboughtGuard:
+    def test_kdj_j_over_100_no_buy(self):
+        """D-B1: KDJ.J=101.67 超买钝化 → 不得给 BUY。"""
+        res = generate_signal({
+            "rsi": 60,
+            "macd": {"dif": 0.5, "dea": 0.3},
+            "kdj": {"k": 80, "d": 70, "j": 101.67},
+            "ma": {"ma5": 10, "ma20": 9.5},
+        })
+        assert res["signal"] != "buy", f"J>100 超买钝化不得 BUY，实际 {res}"
+        assert any("超买" in r for r in res["reasons"])
+
+    def test_rsi_over_80_no_buy(self):
+        """RSI>80 极端超买 → 不得给 BUY。"""
+        res = generate_signal({
+            "rsi": 85,
+            "macd": {"dif": 0.8, "dea": 0.5},
+            "kdj": {"k": 60, "d": 55, "j": 70},
+            "ma": {"ma5": 10, "ma20": 9.0},
+        })
+        assert res["signal"] != "buy", f"RSI>80 不得 BUY，实际 {res}"
+
+    def test_oversold_rsi_not_blind_decrease(self):
+        """P1-6: RSI<30 超卖 + 技术面偏多 → 不得盲目给 decrease（方向一致才降）。"""
+        res = generate_signal({
+            "rsi": 25,
+            "macd": {"dif": 0.2, "dea": 0.1},   # 多头
+            "kdj": {"k": 20, "d": 25, "j": 18},  # 超卖区
+            "ma": {"ma5": 10, "ma20": 9.8},     # 多头排列
+        })
+        assert res["signal"] != "sell", f"超卖+多头不应判 sell，实际 {res}"

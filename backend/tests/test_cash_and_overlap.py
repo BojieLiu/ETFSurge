@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 U6 (round2-unfixed-fix-plan.md U6): 设计现金仓位偏高（19-24% > 验收 15%）。
 U11 (round2-unfixed-fix-plan.md U11): 核心层跨方案重叠 >1。
@@ -160,3 +161,94 @@ class TestU11CoreOverlap:
         for i in (1, 2):
             assert not core_sets[i].issubset(core_sets[0]), \
                 f"方案 {i+1} core {core_sets[i]} 全部复用方案 1（U11 应引入新宽基）"
+
+
+# ===== folded from test_round22_engine_redesign.py =====
+from app.engine.allocation_engine import (
+    allocate,
+    check_structure_reasonableness,
+    _is_growth_wide_basis,
+)
+from app.engine.budgets import (
+    PROFILE_SPECS,
+    validate_profile_specs,
+    STRATEGY_META,
+)
+def _factor_matrix(candidates):
+    return {
+        c["symbol"]: {
+            "technical": 0.6,
+            "momentum": 0.6,
+            "valuation": 0.5,
+            "sentiment": 0.5,
+            "composite": 0.55,
+        }
+        for c in candidates
+    }
+def _candidate_pool():
+    """充足候选池：核心 7 只（含 2 只成长宽基 588000/159915），卫星 10 只，防御 2 只。
+
+    成长宽基（industry=宽基指数 + 名称/指数含 创业板/科创50）触发 _is_growth_wide_basis。
+    """
+    return [
+        # ── core (7) ──
+        {"symbol": "510300", "name": "沪深300ETF", "layer": "core",
+         "tracked_index": "沪深300", "industry": "宽基指数", "segment": "沪深300"},
+        {"symbol": "159338", "name": "中证A500ETF", "layer": "core",
+         "tracked_index": "中证A500", "industry": "宽基指数", "segment": "中证A500"},
+        {"symbol": "588000", "name": "科创50ETF", "layer": "core",
+         "tracked_index": "科创50", "industry": "宽基指数", "segment": "科创"},
+        {"symbol": "159915", "name": "创业板ETF", "layer": "core",
+         "tracked_index": "创业板指", "industry": "宽基指数", "segment": "创业板"},
+        {"symbol": "510050", "name": "上证50ETF", "layer": "core",
+         "tracked_index": "上证50", "industry": "宽基指数", "segment": "上证50"},
+        {"symbol": "510500", "name": "中证500ETF", "layer": "core",
+         "tracked_index": "中证500", "industry": "宽基指数", "segment": "中证500"},
+        {"symbol": "159922", "name": "中证500ETF嘉实", "layer": "core",
+         "tracked_index": "中证500", "industry": "宽基指数", "segment": "中证500"},
+        # ── satellite (10) ──
+        {"symbol": "512480", "name": "半导体ETF", "layer": "satellite",
+         "tracked_index": "半导体", "segment": "半导体"},
+        {"symbol": "515030", "name": "新能源ETF", "layer": "satellite",
+         "tracked_index": "新能源", "segment": "新能源"},
+        {"symbol": "512010", "name": "医药ETF", "layer": "satellite",
+         "tracked_index": "医药", "segment": "医药"},
+        {"symbol": "512880", "name": "证券ETF", "layer": "satellite",
+         "tracked_index": "证券", "segment": "证券"},
+        {"symbol": "515790", "name": "光伏ETF", "layer": "satellite",
+         "tracked_index": "光伏", "segment": "光伏"},
+        {"symbol": "516160", "name": "新能源设备ETF", "layer": "satellite",
+         "tracked_index": "新能源设备", "segment": "新能源"},
+        {"symbol": "512660", "name": "军工ETF", "layer": "satellite",
+         "tracked_index": "军工", "segment": "军工"},
+        {"symbol": "159869", "name": "游戏ETF", "layer": "satellite",
+         "tracked_index": "游戏", "segment": "游戏"},
+        {"symbol": "561790", "name": "有色ETF", "layer": "satellite",
+         "tracked_index": "有色金属", "segment": "有色"},
+        {"symbol": "515250", "name": "煤炭ETF", "layer": "satellite",
+         "tracked_index": "煤炭", "segment": "煤炭"},
+        # ── defense (2) ──
+        {"symbol": "518880", "name": "黄金ETF", "layer": "defense",
+         "tracked_index": "黄金", "segment": "黄金"},
+        {"symbol": "511090", "name": "30年国债ETF", "layer": "defense",
+         "tracked_index": "国债", "segment": "国债"},
+    ]
+def _allocs_by_id(strategies):
+    return {s["id"]: s for s in strategies}
+def _total_count(s):
+    return sum(1 for a in s.get("allocations", []) if a.get("symbol") != "CASH")
+class TestTotalInstrumentMonotonic:
+    def test_total_count_def_lt_bal_lt_agg(self):
+        """#12 / INV-5：总标的数 防御 < 平衡 < 进攻。"""
+        cands = _candidate_pool()
+        strategies = allocate(
+            risk_profile="all", regime="range_bound",
+            factor_matrix=_factor_matrix(cands), candidates=cands,
+        )
+        by = _allocs_by_id(strategies)
+        tot = {p: _total_count(by[p]) for p in ("defensive", "balanced", "aggressive")}
+        assert tot["defensive"] < tot["balanced"] < tot["aggressive"], (
+            f"总标的数未单调: {tot}"
+        )
+        # 进攻 ≥ 防御（文档 #12 直接要求）
+        assert tot["aggressive"] >= tot["defensive"]

@@ -1,19 +1,15 @@
-"""Tests for Phase 2b - Policy Factors (P1.2c) + mypy fixes (P1.6)."""
 from __future__ import annotations
+"""Folded business tests (from early-round audit)."""
 
+# folded-from audit: docs/test-redundancy-audit-and-plan.md
+
+
+# ===== folded from test_phase2b_policy_mypy.py =====
 import ast
 import os
 import subprocess
-
 import pytest
-
-# Project paths from tests/
 APP_DIR = os.path.join(os.path.dirname(__file__), "..", "app")
-
-
-# ---- P1.2c: Policy Factors ----
-
-
 class TestP1_2c_PolicyFactors:
     """P1.2c: Policy factor compute functions + mappings."""
 
@@ -101,11 +97,6 @@ class TestP1_2c_PolicyFactors:
         assert "china.policy.five_year_plan" in content
         assert "china.policy.strategic_emerging" in content
         assert "china.policy.dual_circulation" in content
-
-
-# ---- P1.6: mypy type errors ----
-
-
 class TestP1_6_MyPyTypeErrors:
     """P1.6: mypy errors should be zero."""
 
@@ -123,5 +114,3 @@ class TestP1_6_MyPyTypeErrors:
         with open(ini_path, "r", encoding="utf-8") as f:
             content = f.read()
         assert "scripts" not in content, ".mypy.ini should not have [mypy-scripts.*]"
-
-

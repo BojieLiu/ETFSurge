@@ -1,3 +1,4 @@
+from __future__ import annotations
 """TDD tests for P1: HK East Money data source.
 
 All akshare calls are mocked; no network needed.
@@ -54,4 +55,42 @@ def test_em_hk_returns_empty_for_no_match():
     assert results == []
 
 
+# ===== folded from test_round19_p8.py =====
+class TestFetchIndexHistoryHkBranch:
+    """round19 P8-③: fetch_index_history 字母代码（HK 指数）走腾讯。"""
 
+    def test_hk_alpha_code_uses_tencent(self, monkeypatch):
+        """fetch_index_history('HSCI') → 腾讯 hk{code}（负向：走 A 股 akshare 链
+        失败返回空 → FAIL）。"""
+        from app.fetchers import china_market as cm
+
+        tx_rows = [{"date": f"2026-08-{i:02d}", "open": 20000 + i, "high": 20100 + i,
+                    "low": 19900 + i, "close": 20050 + i, "volume": 1e8} for i in range(1, 8)]
+        calls = []
+        monkeypatch.setattr(cm, "_fetch_tencent_hk_history",
+                            lambda s: (calls.append(s) or tx_rows))
+        rows = cm.fetch_index_history("HSCI", "daily")
+        assert rows == tx_rows
+        assert calls == ["HSCI"], f"应传 'HSCI'（内部拼 hkHSCI），实得 {calls}"
+
+    def test_hk_uncovered_returns_empty(self, monkeypatch):
+        """腾讯不覆盖（HSAHC）→ 返回 []（前端标注「暂无行情」，负向：走 A 股链报错 → FAIL）。"""
+        from app.fetchers import china_market as cm
+        monkeypatch.setattr(cm, "_fetch_tencent_hk_history", lambda s: [])
+        assert cm.fetch_index_history("HSAHC", "daily") == []
+
+    def test_a_index_keeps_akshare_chain(self, monkeypatch):
+        """数字代码（A 股指数）保持原 akshare 链（不误入 HK 分支）。"""
+        from app.fetchers import china_market as cm
+        import pandas as pd
+
+        a_rows = [{"date": "2026-08-11", "open": 3900.0, "high": 3910.0, "low": 3890.0,
+                   "close": 3905.0, "volume": 1e9}]
+        monkeypatch.setattr(cm, "_fetch_tencent_hk_history",
+                            lambda s: pytest.fail("A 股指数不应走腾讯 HK 分支"))
+
+        df = pd.DataFrame([{"date": "2026-08-11", "open": 3900.0, "high": 3910.0,
+                            "low": 3890.0, "close": 3905.0, "volume": 1e9}])
+        monkeypatch.setattr(cm, "run_in_thread", lambda fn, **k: df)
+        rows = cm.fetch_index_history("000001", "daily")
+        assert rows and rows[0]["收盘"] == pytest.approx(3905.0)

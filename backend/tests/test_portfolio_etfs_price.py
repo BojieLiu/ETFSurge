@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 O8 (docs/archived/round7-rediagnosis.md §7 P11): /portfolio/etfs 补充实时 price + change_pct。
 
@@ -66,3 +67,40 @@ class TestEtfsWithRealtimePrice:
                   new=AsyncMock(side_effect=RuntimeError("source down"))):
             result = await _with_realtime_prices(etfs)
         assert result == etfs
+
+
+# ===== folded from test_round19_p3.py =====
+from unittest.mock import AsyncMock, MagicMock
+from app.services.portfolio_service import recompute_cost_after_trade
+class TestP3FrontendSource:
+    """round19 P3-②: 前端 selectSearch 自动填当前价即成本（源码断言）。"""
+
+    def _src(self):
+        import os
+        p = os.path.join(os.path.dirname(__file__), "..", "frontend", "src",
+                         "components", "PortfolioManager.vue")
+        if not os.path.exists(p):
+            p = os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "src",
+                             "components", "PortfolioManager.vue")
+        return open(p, encoding="utf-8").read()
+
+    def test_select_search_fills_avg_cost_from_realtime(self):
+        src = self._src()
+        assert "r?.realtime?.price ?? null" in src, "selectSearch 应自动填当前价即成本"
+        assert "默认自动填入当前价" in src, "成本价 placeholder 应提示自动填入"
+
+    def test_adjust_shares_entry_exists(self):
+        src = self._src()
+        assert "saveAdjustShares" in src
+        assert "startAdjustShares" in src
+        assert "delta_shares" in src, "adjust 语义应传 delta_shares/price"
+
+    def test_store_update_returns_response(self):
+        import os
+        p = os.path.join(os.path.dirname(__file__), "..", "frontend", "src",
+                         "stores", "portfolio.js")
+        if not os.path.exists(p):
+            p = os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "src",
+                             "stores", "portfolio.js")
+        src = open(p, encoding="utf-8").read()
+        assert "return res.data || res" in src, "updateEtf 应返回 adjust 响应（realized_pnl）"

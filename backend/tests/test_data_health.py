@@ -1,3 +1,4 @@
+from __future__ import annotations
 #!/usr/bin/env python3
 """Pytest-based Data Quality gate: verifies factor data completeness.
 
@@ -330,3 +331,73 @@ def test_factor_data_health_pytest():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
+# ===== folded from test_round18_p04.py =====
+from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, patch
+class TestP04FactorsDbSampleCount:
+    """round18 P0-4: /factors/active status 读 DB IC 周期计数。"""
+
+    def _make_def(self, code, cat):
+        from app.factors.factor_registry import FactorDefinition
+        return FactorDefinition(code=code, name="F", category=cat, subcategory="",
+                                standardization="zscore", ic_threshold=0.02)
+
+    @pytest.mark.asyncio
+    async def test_db_count_over_250_significant_valid(self):
+        """F25②: DB 日频交易日 260（≥250）+ t≥2 + |IR|≥0.5 → status=valid
+        （负向: 40 天 → no_data 积累中——旧「30 周期即 valid」判据已废弃）。"""
+        from app.routers import factors as factors_router
+        from app.factors.factor_registry import registry
+
+        code = "technical.ma.sma_5"
+        factors_router._CACHE.clear()
+        mock_db = MagicMock()
+        factors_router._db_ic_sample_counts = AsyncMock(return_value={code: 260})
+        factors_router._db_ic_series_stats = AsyncMock(return_value={
+            code: {"ic_mean": 0.032, "ic_std": 0.05, "ir": 0.64, "t_stat": 2.3},
+        })
+        with patch.object(registry, "_computers", {code: (lambda x: 0.0)}), \
+             patch.object(registry, "_factors", {code: self._make_def(code, "technical")}), \
+             patch.object(registry, "_last_ic_batch", {code: 0.0321}), \
+             patch.object(registry, "_sample_counts", {code: 11}), \
+             patch.object(registry, "_last_computed_at", "2026-07-31T15:00:00Z"):
+            body = await factors_router.get_active_factors(db=mock_db)
+
+        import json
+        data = json.loads(body.body) if isinstance(body.body, bytes) else body.body
+        flat = {f["code"]: f for cat in data["categories"] for f in cat["factors"]}
+        f = flat[code]
+        assert f["status"] == "valid", f"260 交易日 + 显著应 valid，实得 {f['status']}: {f['reason']}"
+        assert f["sample_count"] == 260
+        assert f["t_stat"] == 2.3
+        factors_router._CACHE.clear()
+
+    @pytest.mark.asyncio
+    async def test_db_count_40_days_still_no_data(self):
+        """F25②: 40 个交易日（积累中，未达可观察下限 60）→ no_data，
+        即使 |IC| 高（旧「40>30 → valid」判据已废弃——40 天无统计含义）。"""
+        from app.routers import factors as factors_router
+        from app.factors.factor_registry import registry
+
+        code = "technical.ma.sma_5"
+        factors_router._CACHE.clear()
+        mock_db = MagicMock()
+        factors_router._db_ic_sample_counts = AsyncMock(return_value={code: 40})
+        factors_router._db_ic_series_stats = AsyncMock(return_value={
+            code: {"ic_mean": 0.032, "ic_std": 0.05, "ir": 0.64, "t_stat": 1.1},
+        })
+        with patch.object(registry, "_computers", {code: (lambda x: 0.0)}), \
+             patch.object(registry, "_factors", {code: self._make_def(code, "technical")}), \
+             patch.object(registry, "_last_ic_batch", {code: 0.0321}), \
+             patch.object(registry, "_sample_counts", {code: 40}), \
+             patch.object(registry, "_last_computed_at", "2026-07-31T15:00:00Z"):
+            body = await factors_router.get_active_factors(db=mock_db)
+
+        import json
+        data = json.loads(body.body) if isinstance(body.body, bytes) else body.body
+        flat = {f["code"]: f for cat in data["categories"] for f in cat["factors"]}
+        assert flat[code]["status"] == "no_data", "40 交易日仍应 no_data（积累中）"
+        assert "积累" in flat[code]["reason"]
+        factors_router._CACHE.clear()

@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 F15/F20 (round23-system-audit-optimization §3.3/§2.3): 数据完整性修复。
 
@@ -202,3 +203,75 @@ class TestF20UpRatioRename:
             mock_lv.market_emotion_cls = lambda: {}
             data = lf.fetch_market_emotion()
         assert data == {}
+
+
+# ===== folded from test_round19_batch1.py =====
+from unittest.mock import AsyncMock, MagicMock
+from fastapi import HTTPException
+class TestPortfolioEtfPersistCost:
+    """round19 P3-①: add_etf / update_etf 落库 avg_cost/shares_held（负向：丢弃 → FAIL）。"""
+
+    @pytest.mark.asyncio
+    async def test_add_etf_persists_avg_cost_and_shares(self):
+        """add_etf 传 avg_cost/shares_held → 构造对象落库一致值（此前静默丢弃）。"""
+        from app.services.portfolio_service import add_etf
+
+        db = AsyncMock()
+        db.refresh = AsyncMock()
+        data = MagicMock()
+        data.symbol = "510300"
+        data.name = "沪深300ETF"
+        data.short_name = None
+        data.asset_type = "HK"  # 非 A 分支，避免 _resolve_tracked_index 网络依赖
+        data.target_weight = 0.1
+        data.portfolio_type = "on_exchange"
+        data.tracked_index = None
+        data.avg_cost = 4.62
+        data.shares_held = 5000
+        data.first_buy_date = None
+        data.last_trade_date = None
+
+        etf = await add_etf(db, data)
+        assert etf.avg_cost == 4.62, f"avg_cost 应落库，实得 {etf.avg_cost}"
+        assert etf.shares_held == 5000, f"shares_held 应落库，实得 {etf.shares_held}"
+
+    @pytest.mark.asyncio
+    async def test_update_etf_persists_avg_cost_and_shares(self):
+        """update_etf 传 avg_cost/shares_held → 对象更新一致值（此前传了不生效）。"""
+        from app.services.portfolio_service import update_etf
+
+        class FakeEtf:
+            avg_cost = None
+            shares_held = None
+            name = "沪深300ETF"
+            target_weight = 0.1
+            is_active = True
+            portfolio_type = "on_exchange"
+            short_name = None
+            tracked_index = None
+            first_buy_date = None
+            last_trade_date = None
+
+        etf_obj = FakeEtf()
+        db = AsyncMock()
+        db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=etf_obj))
+        db.refresh = AsyncMock()
+
+        data = MagicMock()
+        data.name = None
+        data.target_weight = None
+        data.is_active = None
+        data.portfolio_type = None
+        data.short_name = None
+        data.tracked_index = None
+        data.avg_cost = 4.5
+        data.shares_held = 1000
+        data.first_buy_date = None
+        data.last_trade_date = None
+        data.delta_shares = None  # round19 P3-③: adjust 语义未启用（MagicMock 属性默认非 None）
+        data.price = None
+
+        result = await update_etf(db, "510300", data)
+        assert result is not None
+        assert result.avg_cost == 4.5, f"avg_cost 应更新，实得 {result.avg_cost}"
+        assert result.shares_held == 1000, f"shares_held 应更新，实得 {result.shares_held}"

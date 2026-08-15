@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Tests for system-diagnosis-and-optimization-plan.md fixes.
 
 Covers the verifiable (unit-testable) fixes:
@@ -479,3 +480,198 @@ async def test_Z11_design_fallback_handles_failure_gracefully():
         # Should not be empty (fallback provides strategies)
         assert len(result.get("strategies", [])) > 0
 
+
+# ===== folded from test_phase1_diagnosis_fixes.py =====
+import asyncio
+import socket
+import sys
+from tests.db_fixtures import task_mgr  # noqa: F401
+class TestP0_5_IPv4Priority:
+    """P0.5: Global IPv4 priority monkey-patch in config.py"""
+
+    def test_enable_ipv4_only_creates_monkey_patch(self):
+        """enable_ipv4_only() should patch socket.getaddrinfo to force AF_INET."""
+        from app.config import enable_ipv4_only, disable_ipv4_only
+
+        original = socket.getaddrinfo
+        try:
+            enable_ipv4_only()
+            # Test that it forces IPv4
+            result = socket.getaddrinfo("127.0.0.1", 80)
+            assert all(r[0] == socket.AF_INET for r in result)
+        finally:
+            socket.getaddrinfo = original
+
+    def test_disable_ipv4_only_restores_original(self):
+        """disable_ipv4_only() should restore the original socket.getaddrinfo."""
+        from app.config import enable_ipv4_only, disable_ipv4_only
+
+        # Capture the patched version, then enable again
+        enable_ipv4_only()
+        patched = socket.getaddrinfo
+        
+        # Save original BEFORE restore for verification
+        import socket as _socket
+        orig = _socket._original_getaddrinfo if hasattr(_socket, '_original_getaddrinfo') else None
+        # Actually just verify behavior: after disable, IPv6 results should be possible
+        # (but we can't guarantee since it depends on DNS resolution)
+        
+        disable_ipv4_only()
+        assert socket.getaddrinfo is not patched, "disable should change getaddrinfo"
+
+    def test_ipv4_only_ignores_AF_INET6(self):
+        """The patched getaddrinfo should ignore AF_INET6 requests."""
+        from app.config import enable_ipv4_only, disable_ipv4_only
+
+        original = socket.getaddrinfo
+        try:
+            enable_ipv4_only()
+            # Running with AF_INET6 should still return IPv4 results
+            result = socket.getaddrinfo("127.0.0.1", 80, socket.AF_INET6)
+            assert all(r[0] == socket.AF_INET for r in result)
+        finally:
+            socket.getaddrinfo = original
+class TestP0_1_StrategyCheckLLMImport:
+    """P0.1: Fix 'from app.analysis.llm import llm_provider' error."""
+
+    async def test_generate_check_llm_comment_uses_llm_complete(self):
+        """_generate_check_llm_comment should use llm_complete not llm_provider.
+        
+        Verify by patching llm_complete at the import path used inside the function.
+        """
+        with patch("app.analysis.llm.llm_complete", new_callable=AsyncMock) as mock_llm:
+            # Re-import to pick up the patch
+            import importlib
+            from app.tasks import strategy_check_worker
+            importlib.reload(strategy_check_worker)
+            from app.tasks.strategy_check_worker import _generate_check_llm_comment
+
+            mock_llm.return_value = "test analysis response"
+
+            result = await _generate_check_llm_comment({
+                "positions": [
+                    {"symbol": "510050", "name": "华夏上证50", "weight": 0.3, "change_pct": 0.5, "market_value": 150000},
+                    {"symbol": "510300", "name": "华泰300", "weight": 0.2, "change_pct": -0.3, "market_value": 100000},
+                ]
+            })
+
+            assert result is not None
+            assert isinstance(result, str)
+            assert mock_llm.await_count >= 1
+
+    async def test_generate_check_llm_comment_empty_positions(self):
+        """Empty positions should return None without calling any LLM."""
+        from app.tasks.strategy_check_worker import _generate_check_llm_comment
+
+        result = await _generate_check_llm_comment({"positions": []})
+        assert result is None
+
+    async def test_generate_check_llm_comment_no_positions_key(self):
+        """Missing positions key should return None."""
+        from app.tasks.strategy_check_worker import _generate_check_llm_comment
+
+        result = await _generate_check_llm_comment({})
+        assert result is None
+
+    async def test_generate_check_llm_report_empty_positions(self):
+        """_generate_check_llm_report should return None for empty positions."""
+        from app.tasks.strategy_check_worker import _generate_check_llm_report
+
+        result = await _generate_check_llm_report({"positions": []}, capital=500000)
+        assert result is None
+
+    def test_no_llm_provider_import_error(self):
+        """strategy_check_worker should NOT import llm_provider anymore."""
+        import ast
+
+        import os
+        test_path = os.path.join(os.path.dirname(__file__), "..", "app", "tasks", "strategy_check_worker.py")
+        with open(test_path, "r", encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+
+        llm_provider_found = False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                for alias in node.names:
+                    if alias.name == "llm_provider":
+                        llm_provider_found = True
+                        break
+        
+        if llm_provider_found:
+            # Check if it's inside a conditional or try/except where it's a fallback
+            pytest.fail("strategy_check_worker still imports llm_provider")
+        
+        # Instead, verify llm_complete IS imported somewhere
+        llm_complete_found = False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                for alias in node.names:
+                    if alias.name == "llm_complete":
+                        llm_complete_found = True
+                        break
+        
+        assert llm_complete_found, "strategy_check_worker should import llm_complete"
+class TestP1_4_ProbeAccuracy:
+    """P1.4: Fix data source probe accuracy."""
+
+    def test_akshare_probe_uses_actual_function(self):
+        """akshare probe should use a function actually used by the system."""
+        import ast
+
+        import os
+        probes_path = os.path.join(os.path.dirname(__file__), "..", "app", "monitor", "probes.py")
+        with open(probes_path, "r", encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+
+        # Find the _probe_akshare function
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and "akshare" in node.name.lower():
+                # Check the AST body for actual function calls (not comments)
+                has_old_func = any(
+                    isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) 
+                    and n.func.attr == "stock_zh_a_hist"
+                    for n in ast.walk(node)
+                )
+                assert not has_old_func, (
+                    "akshare probe still uses stock_zh_a_hist, "
+                    "should use system-actual function"
+                )
+                # Check it uses stock_sector_spot_em (the actual system function)
+                has_new_func = any(
+                    isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) 
+                    and n.func.attr == "stock_sector_spot_em"
+                    for n in ast.walk(node)
+                )
+                assert has_new_func, (
+                    "akshare probe should use stock_sector_spot_em "
+                    "(the function used by sector_fetcher)"
+                )
+                return
+
+        pytest.fail("Could not find akshare probe function")
+
+    def test_probe_names_match_source_registry(self):
+        """Probe names should match SourceRegistry source names."""
+        import ast
+
+        import os
+        probes_path = os.path.join(os.path.dirname(__file__), "..", "app", "monitor", "probes.py")
+        with open(probes_path, "r", encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+
+        # Find all register_probe calls and extract the source names
+        registered_sources = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
+                call = node.value
+                if isinstance(call.func, ast.Name) and call.func.id == "register_probe":
+                    if call.args and isinstance(call.args[0], ast.Constant):
+                        registered_sources.append(call.args[0].value)
+
+        # Check for standard source names
+        expected_sources = ["mootdx", "sina", "tencent", "akshare", "levistock", "dongfang"]
+        for source in expected_sources:
+            assert source in registered_sources, (
+                f"Probe for {source} not found or not registered with proper name "
+                f"(found: {registered_sources})"
+            )

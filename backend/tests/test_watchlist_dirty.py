@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Test Z22: Watchlist dirty data fix (symbol stored as name).
 
 Tests cover:
@@ -377,3 +378,114 @@ class TestR30NameAutoHeal:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# ===== folded from test_round14_p2_market.py =====
+import asyncio
+from types import SimpleNamespace
+from app.factors import factor_registry as fr_mod
+from app.factors.factor_registry import FactorRegistry
+from app.fetchers import hk_hot_fetcher
+from app.routers import market as market_router
+def _item(symbol, asset_type, name="x"):
+    return SimpleNamespace(id=1, symbol=symbol, name=name, asset_type=asset_type,
+                           notes="", created_at=None, updated_at=None)
+class TestWatchlistGroupedBatch:
+    @pytest.mark.asyncio
+    async def test_stock_asset_type_routes_to_a_batch(self):
+        """P2-AF: asset_type='stock'（301317 江波龙）→ 走 A 股批量 get_realtime_batch。"""
+        items = [_item("301317", "stock", "江波龙")]
+        calls = {"a": 0, "hk": 0, "us": 0}
+
+        async def _fake_batch(symbols, asset_type):
+            calls[asset_type.lower()] += 1
+            return [{"symbol": s, "price": 42.0, "change_pct": 0.5, "volume": 100} for s in symbols]
+
+        with patch("app.routers.market.market_data_hub.get_asset_realtime", new=AsyncMock(return_value=None)), \
+             patch("app.services.market_service.get_realtime_batch", side_effect=_fake_batch), \
+             patch("app.routers.market.async_session"):
+            result = await market_router._watchlist_enrich_items(items)
+        assert calls["a"] == 1, "stock 应走 A 股批量路径"
+        assert result[0]["realtime"]["price"] == 42.0
+
+    @pytest.mark.asyncio
+    async def test_hk_symbols_use_hk_batch(self):
+        """P2-AH: HK 标的三只 → get_realtime_batch(...,'HK')（修复前 per-item 截断）。"""
+        items = [_item("00700", "HK"), _item("09988", "HK"), _item("03690", "HK")]
+        calls = {"a": 0, "hk": 0, "us": 0}
+
+        async def _fake_batch(symbols, asset_type):
+            calls[asset_type.lower()] += 1
+            return [{"symbol": s, "price": 100.0, "change_pct": 0.1, "volume": 1000} for s in symbols]
+
+        with patch("app.routers.market.market_data_hub.get_asset_realtime", new=AsyncMock(return_value=None)), \
+             patch("app.services.market_service.get_realtime_batch", side_effect=_fake_batch):
+            result = await market_router._watchlist_enrich_items(items)
+        assert calls["hk"] == 1
+        assert all(it["realtime"]["price"] == 100.0 for it in result)
+
+    @pytest.mark.asyncio
+    async def test_degraded_marker_injected_when_all_sources_fail(self):
+        """P0-D: 全源失败 → realtime 显式 null + _degraded:true（不再丢键）。"""
+        items = [_item("600519", "A", "贵州茅台")]
+
+        async def _fail_batch(symbols, asset_type):
+            raise asyncio.TimeoutError("slow source")
+
+        with patch("app.routers.market.market_data_hub.get_asset_realtime", new=AsyncMock(return_value=None)), \
+             patch("app.services.market_service.get_realtime_batch", side_effect=_fail_batch), \
+             patch("app.services.cache_service.cache_get", new=AsyncMock(return_value=None)):
+            result = await market_router._watchlist_enrich_items(items)
+        item = result[0]
+        assert item["realtime"] is None
+        assert item["_degraded"] is True
+
+    @pytest.mark.asyncio
+    async def test_single_a_symbol_still_batches(self):
+        """P2-AF/AH: 去掉 len>=2 门槛——单只也走批量（不落 per-item）。"""
+        items = [_item("510300", "A")]
+        calls = {"a": 0}
+
+        async def _fake_batch(symbols, asset_type):
+            calls["a"] += 1
+            return [{"symbol": s, "price": 3.8, "change_pct": 0.0, "volume": 1} for s in symbols]
+
+        with patch("app.routers.market.market_data_hub.get_asset_realtime", new=AsyncMock(return_value=None)), \
+             patch("app.services.market_service.get_realtime_batch", side_effect=_fake_batch):
+            result = await market_router._watchlist_enrich_items(items)
+        assert calls["a"] == 1
+        assert result[0]["realtime"]["price"] == 3.8
+class TestSearchIndicesMarketFilter:
+    @pytest.mark.asyncio
+    async def test_hk_market_filters_indices(self):
+        """P2-AG: _search_indices(kw, market='HK') 只返回 HK 指数。"""
+        class _FakeIndex:
+            symbol = "HSI"
+            name = "恒生指数"
+            market = "HK"
+            is_active = True
+            pinyin = "hangsheng"
+            first_letter = "HS"
+
+        class _FakeResult:
+            def scalars(self):
+                return self
+            def all(self):
+                return [_FakeIndex()]
+
+        class _FakeSession:
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *a):
+                return False
+            async def execute(self, stmt):
+                # 捕获 SQL 以断言 market 过滤
+                self._sql = str(stmt)
+                return _FakeResult()
+
+        sess = _FakeSession()
+        with patch("app.routers.market.async_session", return_value=sess):
+            result = await market_router._search_indices("恒生", market="HK")
+        assert len(result) == 1
+        assert result[0]["market"] == "HK"
+        assert "market = :market_1" in sess._sql or "market = :" in sess._sql or "='HK'" in sess._sql

@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 U7/N08 (round2-unfixed-fix-plan.md U7 / round3-diagnosis-and-optimization-plan.md N08):
 预热性能——fetch_fund_nav 24h 缓存 + 并发。
@@ -72,3 +73,67 @@ class TestNavConcurrency:
 def _null_cm():
     import contextlib
     return contextlib.nullcontext()
+
+
+# ===== folded from test_round19_p4.py =====
+import json
+import logging
+class _FakeUrl:
+    def __init__(self, text):
+        self._text = text
+
+    def read(self):
+        return self._text.encode()
+
+    def decode(self):
+        return self._text
+class TestFetchEmIndustrySectors:
+    """round19 P4-①: push2delay 直连行业板块分页拉全。"""
+
+    def _diff(self, start, n):
+        return [
+            {"f12": f"BK{1000 + i}", "f14": f"行业板块{i}", "f3": 1.23,
+             "f6": 1e8 + i, "f62": 1e6 + i, "f20": 1e10 + i}
+            for i in range(start, start + n)
+        ]
+
+    def test_pagination_loops_until_under_100(self, monkeypatch):
+        """pn 递增循环，服务端实回 100/页 → 拉 3 页 300 条；字段与 akshare 兼容。"""
+        import app.fetchers.sector_fetcher as sf
+
+        calls = []
+
+        def fake_urlopen(req, timeout=8):
+            from urllib.parse import urlparse, parse_qs
+            qs = parse_qs(urlparse(req.full_url).query)
+            pn = int(qs["pn"][0])
+            calls.append(pn)
+            n = 100 if pn < 3 else 50  # 第 3 页不足 100 → 停止
+            payload = {"data": {"diff": self._diff((pn - 1) * 100, n)}}
+            return _FakeUrl(json.dumps(payload))
+
+        monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+        rows = sf.fetch_em_industry_sectors()
+        assert calls == [1, 2, 3], f"pn 应递增到 <100 为止，实得 {calls}"
+        assert len(rows) >= 250, f"应拉全 300（3 页），实得 {len(rows)}"
+        first = rows[0]
+        # 与 _ak_industry_sectors 兼容的键
+        for key in ("sector_code", "sector_name", "change_pct", "amount",
+                    "main_inflow", "total_market", "lead_stock_name", "lead_stock_code"):
+            assert key in first, f"缺兼容键 {key}: {first}"
+        assert first["sector_name"] == "行业板块0"
+        assert first["change_pct"] == 1.23
+
+    def test_failure_logs_error_not_silent(self, monkeypatch, caplog):
+        """网络失败打 ERROR 日志（负向：静默吞异常 → FAIL）。"""
+        import app.fetchers.sector_fetcher as sf
+
+        def fake_urlopen(req, timeout=8):
+            raise ConnectionError("RemoteDisconnected")
+
+        monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+        with caplog.at_level(logging.ERROR, logger="app.fetchers.sector_fetcher"):
+            rows = sf.fetch_em_industry_sectors()
+        assert rows == [], "全失败返回空列表（调用方走 akshare 兜底）"
+        assert any("fetch_em_industry_sectors" in r.message for r in caplog.records), \
+            "网络失败应打 ERROR 日志而非静默"

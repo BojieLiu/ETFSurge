@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 round13 §3.2: TickFlow 实时行情尾环。
 
@@ -144,3 +145,122 @@ def test_route_us_has_tickflow_tail():
 def asyncio_run(coro):
     import asyncio
     return asyncio.run(coro)
+
+
+# ===== folded from test_round19_p9.py =====
+import pandas as pd
+from unittest.mock import MagicMock
+def _us_df(n=500):
+    import datetime as dt
+    rows = []
+    base = dt.date(2024, 1, 1)
+    for i in range(n):
+        d = base + dt.timedelta(days=i)
+        rows.append({"trade_date": d.strftime("%Y-%m-%d"), "open": 100 + i * 0.01,
+                     "high": 101 + i * 0.01, "low": 99 + i * 0.01,
+                     "close": 100.5 + i * 0.01, "volume": 1e6, "amount": 1e8})
+    return pd.DataFrame(rows)
+class TestTickflowKlineUsHk:
+    """round19 P9-②: _tickflow_kline 支持 US/HK 分支（复用 _tickflow_symbol）。"""
+
+    def _patch_key(self, monkeypatch):
+        monkeypatch.setattr("app.config.settings.tickflow_api_key", "tk_test")
+
+    def test_tickflow_kline_us_returns_rows(self, monkeypatch):
+        """_tickflow_kline('SPY','US') → 500 行（负向：US 分支不支持 → [] → FAIL）。
+        round20 P0-4/P1-5: 输出统一英文 key（date/close...），契约对齐。"""
+        from app.fetchers import china_market as cm
+        self._patch_key(monkeypatch)
+        df = _us_df(500)
+        monkeypatch.setattr(cm, "run_in_thread", lambda fn, **k: df)
+        rows = cm._tickflow_kline("SPY", "daily")
+        assert len(rows) >= 30, f"US 应返回 ≥30 行，实得 {len(rows)}"
+        assert rows[0]["close"] == pytest.approx(100.5, rel=1e-6)
+        assert rows[-1]["date"]  # 日期非空
+        assert "收盘" not in rows[0], "不得输出中文 key（round20 契约对齐）"
+
+    def test_tickflow_kline_hk_symbol_mapped(self, monkeypatch):
+        """港股显式后缀 00700.HK → tf_sym=00700.HK（不误映射 SZ）。"""
+        from app.fetchers import china_market as cm
+        self._patch_key(monkeypatch)
+        captured = {}
+
+        class _FakeKlines:
+            def get(self, sym, period="1d", count=500, as_dataframe=True):
+                captured["sym"] = sym
+                return _us_df(30)
+
+        class _FakeTickFlow:
+            class TickFlow:
+                def __init__(self, api_key):
+                    self.klines = _FakeKlines()
+
+        import sys
+        monkeypatch.setitem(sys.modules, "tickflow", _FakeTickFlow)
+        monkeypatch.setattr(cm, "run_in_thread", lambda fn, **k: fn())
+        rows = cm._tickflow_kline("00700.HK", "daily")
+        assert captured.get("sym") == "00700.HK", f"HK 应映射为 00700.HK，实得 {captured}"
+        assert len(rows) >= 30
+
+    def test_tickflow_kline_exception_returns_empty(self, monkeypatch):
+        """TickFlow 抛异常 → []（降级链继续，负向：抛异常中断 → FAIL）。"""
+        from app.fetchers import china_market as cm
+        self._patch_key(monkeypatch)
+
+        def boom(fn, **k):
+            raise RuntimeError("tickflow down")
+
+        monkeypatch.setattr(cm, "run_in_thread", boom)
+        assert cm._tickflow_kline("SPY", "daily") == []
+
+
+# ===== folded from test_round20_strategy_check_p05_p18.py =====
+from unittest.mock import AsyncMock, MagicMock, patch
+import httpx
+class TestP1_9FactorDataQuality:
+    def test_degraded_when_valid_rate_low(self, monkeypatch):
+        """P1-9: valid 率 <60% → factor_data_quality.degraded=True + 降级说明。
+        负向断言：valid 率低仍报「正常」→ FAIL。"""
+        from app.services import strategy_design as sd
+        from app.factors import factor_registry as freg
+
+        # 构造低 valid 率场景：38 因子，多数 no_data（IC 未累积）
+        fake_factors = {f"test.factor_{i}": {"name": f"F{i}"} for i in range(38)}
+        fake_ic = {f"test.factor_{i}": None for i in range(38)}  # 全无 IC → no_data
+
+        monkeypatch.setattr(freg.registry, "_factors", fake_factors)
+        monkeypatch.setattr(freg.registry, "_ic_series_cache", fake_ic)
+        monkeypatch.setattr(freg.registry, "_data_source_gaps", {})
+        monkeypatch.setattr(freg.registry, "_constant_factor_codes", set())
+        monkeypatch.setattr(freg.registry, "_sample_counts", {})
+
+        report = sd._factor_data_quality_report()
+        assert report["degraded"] is True, f"valid 率低应降级，实际 {report}"
+        assert "降级" in report["note"], "降级时应含降级说明"
+
+    def test_not_degraded_when_valid_high(self, monkeypatch):
+        """valid 率 >=60% → 不降级（F25②: 260 交易日 + t≥2 + |IR|≥0.5 才计 valid）。"""
+        from app.services import strategy_design as sd
+        from app.factors import factor_registry as freg
+
+        fake_factors = {f"test.factor_{i}": {"name": f"F{i}"} for i in range(10)}
+        # 8 个统计显著 IC 序列（均值 ~0.05、低方差 → t 高/IR 高）+ 2 个 no_data。
+        # 注意不能用常量序列（std=0 → t=0 不显著），须带微小波动使 NW-t 显著。
+        fake_ic = {
+            f"test.factor_{i}": [0.05 + (i % 7) * 0.002 for i in range(260)]
+            for i in range(8)
+        }
+        fake_ic.update({f"test.factor_{i}": None for i in range(8, 10)})
+
+        monkeypatch.setattr(freg.registry, "_factors", fake_factors)
+        monkeypatch.setattr(freg.registry, "_ic_series_cache", fake_ic)
+        monkeypatch.setattr(freg.registry, "_data_source_gaps", {})
+        monkeypatch.setattr(freg.registry, "_constant_factor_codes", set())
+        # F25②: 样本 ≥ MIN_TRADING_DAYS(250) + 序列统计显著 → valid
+        monkeypatch.setattr(freg.registry, "_sample_counts",
+                            {f"test.factor_{i}": 260 for i in range(8)})
+
+        report = sd._factor_data_quality_report()
+        assert report["valid"] >= 8, f"显著因子数应 ≥8，实际 {report}"
+        assert report["valid_rate"] >= 0.6, f"valid 率应 ≥0.6，实际 {report}"
+        assert report["degraded"] is False

@@ -1,4 +1,5 @@
-﻿"""
+from __future__ import annotations
+"""
 O16 (docs/archived/round7-rediagnosis.md §7): 核心层大盘宽基族互斥。
 
 P18 问题: A500(强制) + A50 + A100 + 沪深300(强制) 同现核心层——4 个宽基中 3 个
@@ -198,3 +199,160 @@ class TestLargeCapWideBasisExclusion:
             for a in core:
                 assert a.get("weight", 0) <= 0.30 + 1e-9, \
                     f"{s['id']} 核心 {a['symbol']} 权重 {a['weight']} 超 30%"
+
+
+# ===== folded from test_round19_p1.py =====
+import pytest
+from app.engine.correlation import (
+    correlation_matrix, high_correlation_pairs, avg_correlation,
+    median_correlation_for,
+)
+from app.engine.rationale import build_rationale
+from app.engine.allocation_engine import (
+    _dedup_same_index, _is_large_cap_wide_basis, MANDATORY_CODES,
+)
+class TestDedupSameIndex:
+    """round19 P1-②: 同指数双持有硬约束。"""
+
+    def _alloc(self, symbol, name, layer, weight, fs, tidx=None):
+        return {"symbol": symbol, "name": name, "layer": layer,
+                "weight": weight, "factor_score": fs, "tracked_index": tidx}
+
+    def test_aggressive_no_dual_a500(self):
+        """159338 中证A500（强制锚 core）+ 563360 A500ETF（satellite）→ 剔除非锚低分者
+        （负向：同仓双 A500 → FAIL）。"""
+        allocs = [
+            self._alloc("159338", "中证A500ETF国泰", "core", 0.05, 0.8, "中证A500"),
+            self._alloc("563360", "A500ETF华泰柏瑞", "satellite", 0.2064, 0.3, ""),
+            self._alloc("510300", "沪深300ETF", "core", 0.1, 0.7, "沪深300"),
+        ]
+        out = _dedup_same_index(allocs)
+        syms = {a["symbol"] for a in out}
+        assert "563360" not in syms, "非锚低分 A500 应被剔除（双持有）"
+        assert "159338" in syms, "强制锚豁免剔除"
+        # 剔除权重回补同层——satellite 层只有 563360 一只被剔、无同层可回补 →
+        # 权重丢弃（allocate 主流程转为现金 = 1 - Σ权重）
+        total = sum(a["weight"] for a in out)
+        assert abs(total - 0.15) < 1e-6, f"剔除权重应转为现金，实得 {total}"
+
+    def test_mandatory_anchor_pair_exempt(self):
+        """510300 + 159338 双强制锚（r=0.983）→ 豁免剔除（不报错）。"""
+        allocs = [
+            self._alloc("510300", "沪深300ETF", "core", 0.06, 0.7, "沪深300"),
+            self._alloc("159338", "中证A500ETF国泰", "core", 0.05, 0.8, "中证A500"),
+        ]
+        out = _dedup_same_index(allocs)
+        assert {a["symbol"] for a in out} == {"510300", "159338"}
+
+    def test_same_layer_weight_reclaim(self):
+        """同层双持有（无锚）→ 低分者剔除、权重按同层其余标的权重比例回补。"""
+        allocs = [
+            self._alloc("588200", "科创芯片ETF", "satellite", 0.03, 0.6, "芯片"),
+            self._alloc("159995", "芯片ETF", "satellite", 0.05, 0.2, "芯片"),
+            self._alloc("515880", "通信ETF", "satellite", 0.05, 0.5, "通信"),
+        ]
+        out = _dedup_same_index(allocs)
+        syms = {a["symbol"] for a in out}
+        assert "159995" not in syms, "低分芯片应剔除"
+        # 剔除 0.05 → 按同层剩余权重比例回补：588200(0.03) 与 515880(0.05)
+        kept_comm = next(a for a in out if a["symbol"] == "515880")
+        kept_chip = next(a for a in out if a["symbol"] == "588200")
+        # round(…,4) 精度 → 断言放宽 1e-3
+        assert kept_comm["weight"] == pytest.approx(0.05 + 0.05 * 0.05 / 0.08, abs=1e-3)
+        assert kept_chip["weight"] == pytest.approx(0.03 + 0.05 * 0.03 / 0.08, abs=1e-3)
+        # 权重守恒（不含 CASH；round(…,4) 累计误差放宽）
+        assert abs(sum(a["weight"] for a in out) - 0.13) < 1e-3
+
+
+# ===== folded from test_round22_engine_redesign.py =====
+from app.engine.allocation_engine import (
+    allocate,
+    check_structure_reasonableness,
+    _is_growth_wide_basis,
+)
+from app.engine.budgets import (
+    PROFILE_SPECS,
+    validate_profile_specs,
+    STRATEGY_META,
+)
+def _candidate_pool():
+    """充足候选池：核心 7 只（含 2 只成长宽基 588000/159915），卫星 10 只，防御 2 只。
+
+    成长宽基（industry=宽基指数 + 名称/指数含 创业板/科创50）触发 _is_growth_wide_basis。
+    """
+    return [
+        # ── core (7) ──
+        {"symbol": "510300", "name": "沪深300ETF", "layer": "core",
+         "tracked_index": "沪深300", "industry": "宽基指数", "segment": "沪深300"},
+        {"symbol": "159338", "name": "中证A500ETF", "layer": "core",
+         "tracked_index": "中证A500", "industry": "宽基指数", "segment": "中证A500"},
+        {"symbol": "588000", "name": "科创50ETF", "layer": "core",
+         "tracked_index": "科创50", "industry": "宽基指数", "segment": "科创"},
+        {"symbol": "159915", "name": "创业板ETF", "layer": "core",
+         "tracked_index": "创业板指", "industry": "宽基指数", "segment": "创业板"},
+        {"symbol": "510050", "name": "上证50ETF", "layer": "core",
+         "tracked_index": "上证50", "industry": "宽基指数", "segment": "上证50"},
+        {"symbol": "510500", "name": "中证500ETF", "layer": "core",
+         "tracked_index": "中证500", "industry": "宽基指数", "segment": "中证500"},
+        {"symbol": "159922", "name": "中证500ETF嘉实", "layer": "core",
+         "tracked_index": "中证500", "industry": "宽基指数", "segment": "中证500"},
+        # ── satellite (10) ──
+        {"symbol": "512480", "name": "半导体ETF", "layer": "satellite",
+         "tracked_index": "半导体", "segment": "半导体"},
+        {"symbol": "515030", "name": "新能源ETF", "layer": "satellite",
+         "tracked_index": "新能源", "segment": "新能源"},
+        {"symbol": "512010", "name": "医药ETF", "layer": "satellite",
+         "tracked_index": "医药", "segment": "医药"},
+        {"symbol": "512880", "name": "证券ETF", "layer": "satellite",
+         "tracked_index": "证券", "segment": "证券"},
+        {"symbol": "515790", "name": "光伏ETF", "layer": "satellite",
+         "tracked_index": "光伏", "segment": "光伏"},
+        {"symbol": "516160", "name": "新能源设备ETF", "layer": "satellite",
+         "tracked_index": "新能源设备", "segment": "新能源"},
+        {"symbol": "512660", "name": "军工ETF", "layer": "satellite",
+         "tracked_index": "军工", "segment": "军工"},
+        {"symbol": "159869", "name": "游戏ETF", "layer": "satellite",
+         "tracked_index": "游戏", "segment": "游戏"},
+        {"symbol": "561790", "name": "有色ETF", "layer": "satellite",
+         "tracked_index": "有色金属", "segment": "有色"},
+        {"symbol": "515250", "name": "煤炭ETF", "layer": "satellite",
+         "tracked_index": "煤炭", "segment": "煤炭"},
+        # ── defense (2) ──
+        {"symbol": "518880", "name": "黄金ETF", "layer": "defense",
+         "tracked_index": "黄金", "segment": "黄金"},
+        {"symbol": "511090", "name": "30年国债ETF", "layer": "defense",
+         "tracked_index": "国债", "segment": "国债"},
+    ]
+def _allocs_by_id(strategies):
+    return {s["id"]: s for s in strategies}
+def _layer_counts(s):
+    allocs = s.get("allocations", [])
+    return {
+        "core": sum(1 for a in allocs if a.get("layer") == "core" and a.get("symbol") != "CASH"),
+        "satellite": sum(1 for a in allocs if a.get("layer") == "satellite" and a.get("symbol") != "CASH"),
+        "defense": sum(1 for a in allocs if a.get("layer") == "defense" and a.get("symbol") != "CASH"),
+    }
+class TestLayerCountMonotonic:
+    def test_satellite_count_def_lt_bal_lt_agg(self):
+        """#11 / INV-3：卫星数 防御 < 平衡 < 进攻（候选充足时严格单调）。"""
+        cands = _candidate_pool()
+        strategies = allocate(
+            risk_profile="all", regime="range_bound",
+            factor_matrix=_factor_matrix(cands), candidates=cands,
+        )
+        by = _allocs_by_id(strategies)
+        sat = {p: _layer_counts(by[p])["satellite"] for p in ("defensive", "balanced", "aggressive")}
+        assert sat["defensive"] < sat["balanced"] < sat["aggressive"], (
+            f"卫星数未单调: {sat}"
+        )
+
+    def test_defense_count_reverse_monotonic(self):
+        """#13/INV-3：防御数反向 防御(2) ≥ 平衡(1) = 进攻(1)。"""
+        cands = _candidate_pool()
+        strategies = allocate(
+            risk_profile="all", regime="range_bound",
+            factor_matrix=_factor_matrix(cands), candidates=cands,
+        )
+        by = _allocs_by_id(strategies)
+        d = {p: _layer_counts(by[p])["defense"] for p in ("defensive", "balanced", "aggressive")}
+        assert d["defensive"] >= d["balanced"] >= d["aggressive"], f"防御数未反向单调: {d}"

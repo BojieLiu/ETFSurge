@@ -1,3 +1,4 @@
+from __future__ import annotations
 # -*- coding: utf-8 -*-
 """F3-5: sentiment 3 因子数据管道（panic_greed_diff / news_heat / news_direction）。
 
@@ -136,3 +137,91 @@ def test_factors_active_sentiment_not_no_data(monkeypatch):
                     # F25②: news_heat 260 天 + 显著 → valid（非 no_data）；两个市场级因子 → static
                     assert f.get("status") in ("valid", "static"), f"{f['code']} 状态异常: {f['status']}"
     assert found == target
+
+
+# ===== folded from test_phase2a_data_quality.py =====
+import ast
+import os
+class TestP1_2e_SentimentWeights:
+    """P1.2e: Replace north_flow with volume_ratio in sentiment weights."""
+
+    def test_no_north_flow_in_weights(self):
+        """SENTIMENT_WEIGHTS should NOT contain north_flow."""
+        probes_path = os.path.join(
+            os.path.dirname(__file__), "..", "app", "fetchers", "fundamentals_fetcher.py"
+        )
+        with open(probes_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        assert "north_flow" not in content, (
+            "fundamentals_fetcher still references north_flow"
+        )
+
+    def test_volume_ratio_in_weights(self):
+        """SENTIMENT_WEIGHTS should contain volume_ratio."""
+        probes_path = os.path.join(
+            os.path.dirname(__file__), "..", "app", "fetchers", "fundamentals_fetcher.py"
+        )
+        with open(probes_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        assert "volume_ratio" in content, (
+            "fundamentals_fetcher should reference volume_ratio"
+        )
+
+    def test_calc_sentiment_index_no_north_flow(self):
+        """calc_sentiment_index should NOT take north_flow parameter."""
+        probes_path = os.path.join(
+            os.path.dirname(__file__), "..", "app", "fetchers", "fundamentals_fetcher.py"
+        )
+        with open(probes_path, "r", encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == "calc_sentiment_index":
+                # Get all parameter names
+                param_names = [a.arg for a in node.args.args]
+                assert "north_flow" not in param_names, (
+                    "calc_sentiment_index still has north_flow parameter"
+                )
+                assert "volume_ratio" in param_names, (
+                    "calc_sentiment_index should have volume_ratio parameter"
+                )
+                return
+        pytest.fail("calc_sentiment_index function not found")
+
+    def test_new_sentiment_weights_sum_to_one(self):
+        """New 4-dim weights should sum to 1.0."""
+        # advance_ratio=0.30, margin_change=0.30, volume_ratio=0.20, inst_consensus=0.20
+        weights = {
+            "advance_ratio": 0.30,
+            "margin_change": 0.30,
+            "volume_ratio": 0.20,
+            "inst_consensus": 0.20,
+        }
+        total = sum(weights.values())
+        assert abs(total - 1.0) < 0.001, f"Sentiment weights sum to {total}, expected 1.0"
+
+    def test_regime_weights_have_volume_ratio(self):
+        """All regime weight configs should use volume_ratio not north_flow."""
+        probes_path = os.path.join(
+            os.path.dirname(__file__), "..", "app", "fetchers", "fundamentals_fetcher.py"
+        )
+        with open(probes_path, "r", encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+
+        # Find _REGIME_WEIGHTS dict
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id == "_REGIME_WEIGHTS":
+                        dict_str = ast.get_source_segment(
+                            open(probes_path, encoding="utf-8").read(), node
+                        )
+                        assert "north_flow" not in dict_str, (
+                            "_REGIME_WEIGHTS still uses north_flow"
+                        )
+                        assert "volume_ratio" in dict_str, (
+                            "_REGIME_WEIGHTS should use volume_ratio"
+                        )
+                        return

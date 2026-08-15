@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Tests for GET /api/v1/factors/active endpoint.
 
@@ -16,6 +17,13 @@ client = TestClient(app)
 
 class TestActiveFactorsEndpoint:
     """Contract tests for GET /api/v1/factors/active."""
+
+    def setup_method(self):
+        # 清除 /factors/active 的 60s 模块级缓存：串行跑时前序测试（如本文件折叠来的
+        # TestFactorsActive 在 patch._computers 为 2 项时调用该端点并缓存 total=2）会污染
+        #缓存，导致本类断言命中旧响应。与 test_sentiment_factors.py:85 同源处理。
+        from app.routers import factors as factors_router
+        factors_router._CACHE.clear()
 
     def test_status_and_top_level_fields(self):
         """Response has 200 + required top-level fields: total, categories, summary, updated_at."""
@@ -153,3 +161,43 @@ class TestActiveFactorsEndpoint:
             return
         calc = round(sum(abs(v) for v in vals) / len(vals), 4)
         assert s["avg_ic"] == calc, f"avg_ic={s['avg_ic']} 应为 mean(|ic|)={calc}"
+
+
+# ===== folded from test_round14_apply_design_factors.py =====
+from fastapi import HTTPException
+from unittest.mock import AsyncMock, MagicMock, patch
+from app.routers import factors as factors_router
+from app.routers.portfolio import apply_design
+from app.services.portfolio_service import apply_portfolio_design
+class TestFactorMinSampleProtection:
+    """F25②: 显著性判据（交易日 + t/IR）替换旧「样本 ≥30 + |IC|≥阈值」。"""
+
+    def test_low_samples_no_downlisting(self):
+        """样本 0 但 |IC|=0.45 → no_data（未累积/常量无差异），不是 warn。"""
+        with patch.object(factors_router.registry, "_last_ic_batch", {"technical.ma.sma_5": -0.45}):
+            with patch.object(factors_router.registry, "_sample_counts", {"technical.ma.sma_5": 0}):
+                status, reason = factors_router._status_of(
+                    "technical.ma.sma_5", samples=0, t_stat=None, ir=None, ic_val=-0.45)
+        assert status == "no_data", f"样本不足应 no_data（实际 {status}）"
+        # 文案可为「未累积」或「常量无差异」（取决于全局 registry 的 constant 记录状态）
+        assert any(k in reason for k in ("未累积", "常量", "无差异", "未接入")), reason
+
+    def test_enough_samples_significant_valid(self):
+        """F25②: 260 交易日 + t≥2 + |IR|≥0.5 → valid（含负向显著）；t<2 → warn。"""
+        with patch.object(factors_router.registry, "_sample_counts", {"technical.ma.sma_5": 260}):
+            status_neg, _ = factors_router._status_of(
+                "technical.ma.sma_5", samples=260, t_stat=2.4, ir=-0.6, ic_val=-0.45)
+            status_pos, _ = factors_router._status_of(
+                "technical.ma.sma_5", samples=260, t_stat=2.4, ir=0.6, ic_val=0.45)
+            status_weak, _ = factors_router._status_of(
+                "technical.ma.sma_5", samples=260, t_stat=1.2, ir=0.3, ic_val=0.45)
+        # F25②: |IR|≥0.5 且 t≥2 → valid（负向显著 = 预测方向与收益反向，仍统计显著）；
+        # t<2 → warn（有样本但统计不显著）
+        assert status_neg == "valid"
+        assert status_pos == "valid"
+        assert status_weak == "warn"
+
+    def test_min_trading_days_constant(self):
+        """F25②: 有效门槛 250 交易日 / 可观察下限 60。"""
+        assert factors_router.MIN_TRADING_DAYS == 250
+        assert factors_router.MIN_OBSERVABLE_DAYS == 60

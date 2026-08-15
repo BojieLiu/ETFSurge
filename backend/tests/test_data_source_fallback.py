@@ -1,3 +1,4 @@
+from __future__ import annotations
 """数据源降级链路测试 — Data source fallback chain tests.
 
 验证 SourceRegistry 的 route() 和 try_call() 能正确执行降级：
@@ -260,3 +261,129 @@ class TestSourceHealthIndicators:
 
         status = fresh_registry.circuit_breaker_status()
         assert len(status) > 0
+
+
+# ===== folded from test_phase2a_data_quality.py =====
+import ast
+import os
+class TestP1_2d_MarginSwap:
+    """P1.2d: Replace _fetch_szse/_fetch_sse direct HTTP with akshare."""
+
+    def test_no_direct_szse_http(self):
+        """_fetch_szse should NOT use urllib.request directly."""
+        probes_path = os.path.join(
+            os.path.dirname(__file__), "..", "app", "fetchers", "fundamentals_fetcher.py"
+        )
+        with open(probes_path, "r", encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == "_fetch_szse":
+                body = ast.dump(node)
+                assert "urllib.request" not in body, (
+                    "_fetch_szse still uses urllib.request directly"
+                )
+                # Should use akshare
+                assert "stock_margin_szse" in body, (
+                    "_fetch_szse should use stock_margin_szse()"
+                )
+                return
+        pytest.fail("_fetch_szse function not found")
+
+    def test_no_direct_sse_http(self):
+        """_fetch_sse should NOT use urllib.request directly."""
+        probes_path = os.path.join(
+            os.path.dirname(__file__), "..", "app", "fetchers", "fundamentals_fetcher.py"
+        )
+        with open(probes_path, "r", encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == "_fetch_sse":
+                body = ast.dump(node)
+                assert "urllib.request" not in body, (
+                    "_fetch_sse still uses urllib.request directly"
+                )
+                # Should use akshare
+                assert "stock_margin_sse" in body, (
+                    "_fetch_sse should use stock_margin_sse()"
+                )
+                return
+        pytest.fail("_fetch_sse function not found")
+
+    def test_fetch_margin_balance_uses_akshare(self):
+        """fetch_margin_balance should call through to akshare-based functions."""
+        probes_path = os.path.join(
+            os.path.dirname(__file__), "..", "app", "fetchers", "fundamentals_fetcher.py"
+        )
+        with open(probes_path, "r", encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == "fetch_margin_balance":
+                body = ast.get_source_segment(
+                    open(probes_path, encoding="utf-8").read(), node
+                )
+                # Should call both SZSE and SSE akshare functions
+                assert "_fetch_szse" in body, "fetch_margin_balance should call _fetch_szse"
+                assert "_fetch_sse" in body, "fetch_margin_balance should call _fetch_sse"
+                return
+class TestP1_2a_NewsFactorPipeline:
+    """P1.2a: Ensure news factors receive data from pipeline."""
+
+    def test_news_heat_factor_exists(self):
+        """news_heat factor function should exist in factor_registry."""
+        probes_path = os.path.join(
+            os.path.dirname(__file__), "..", "app", "factors", "factor_registry.py"
+        )
+        with open(probes_path, "r", encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if node.name == "_compute_news_heat":
+                    return
+        pytest.fail("_compute_news_heat function not found in factor_registry.py")
+
+    def test_news_direction_factor_exists(self):
+        """news_direction factor function should exist in factor_registry."""
+        probes_path = os.path.join(
+            os.path.dirname(__file__), "..", "app", "factors", "factor_registry.py"
+        )
+        with open(probes_path, "r", encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if node.name == "_compute_news_direction":
+                    return
+        pytest.fail("_compute_news_direction function not found in factor_registry.py")
+class TestP1_5_ConnectionPool:
+    """P1.5: HTTP connection pool capacity."""
+
+    def test_china_market_session_has_pool_config(self):
+        """china_market.py session should configure pool_connections/pool_maxsize."""
+        probes_path = os.path.join(
+            os.path.dirname(__file__), "..", "app", "fetchers", "china_market.py"
+        )
+        with open(probes_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        # Should configure pool_connections and pool_maxsize
+        assert "pool_connections" in content or "pool_maxsize" in content or "Adapter" in content or "HTTPAdapter" in content, (
+            "china_market.py should configure HTTP connection pool"
+        )
+
+    def test_pool_sizes_adequate(self):
+        """Pool sizes should be at least 20 connections."""
+        probes_path = os.path.join(
+            os.path.dirname(__file__), "..", "app", "fetchers", "china_market.py"
+        )
+        with open(probes_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        # Check for pool sizes >= 20
+        has_pool_size = any(str(n) in content for n in [20, 25, 30, 40, 50, 60])
+        assert has_pool_size, (
+            "Connection pool size should be >= 20"
+        )

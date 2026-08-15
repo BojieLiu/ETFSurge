@@ -1,15 +1,12 @@
-"""Test Z05: SSL connection pool reuse in global markets fetcher.
+from __future__ import annotations
+"""Folded business tests (from early-round audit)."""
 
-Covers:
-1. Shared httpx.Client singleton (same instance across calls)
-2. _http_get_json routes through shared client
-3. Connection pool stats exposed (handshakes/reused)
-4. /admin/sources/connection-pool endpoint exists and returns stats
-"""
+# folded-from audit: docs/test-redundancy-audit-and-plan.md
+
+
+# ===== folded from test_z05_ssl_pool.py =====
 import pytest
 from unittest.mock import MagicMock, patch
-
-
 class _FakeResponse:
     def __init__(self, data=None):
         self._data = data or {}
@@ -20,8 +17,6 @@ class _FakeResponse:
 
     def json(self):
         return self._data
-
-
 class TestSharedClient:
     """Z05: shared httpx.Client singleton."""
 
@@ -90,8 +85,6 @@ class TestSharedClient:
             stats = gmf.get_connection_pool_stats()
         assert stats["handshakes"] == 0
         assert stats["reused"] == 0
-
-
 class TestAdminEndpoint:
     """Z05: /admin/sources/connection-pool endpoint."""
 
@@ -112,7 +105,3 @@ class TestAdminEndpoint:
             result = await get_connection_pool()
         assert result["handshakes"] == 2
         assert result["reused"] == 5
-
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
