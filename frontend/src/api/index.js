@@ -111,4 +111,6 @@ export const adminApi = {
   sourcesCircuitBreakers: () => api.get('/admin/sources/circuit-breakers'),
   getConfig: () => api.get('/admin/config'),
   updateConfig: (payload) => api.put('/admin/config', payload),
+  // R18 (round24): 重置单个 override 回 .env 值（闭环 DELETE /admin/config/{key} 生命周期）
+  resetConfigKey: (key) => api.delete(`/admin/config/${encodeURIComponent(key)}`),
 }

@@ -415,4 +415,3 @@ alanced/aggressive`
 
 <!-- 路由登记（P3-5 check_routes 门禁） -->
 GET /api/v1/portfolio/designs/{design_id}
-DELETE /api/v1/portfolio/designs/{design_id}

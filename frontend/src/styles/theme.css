@@ -453,10 +453,13 @@
     --color-border-strong: var(--color-neutral-500);
 
     --color-text-primary: var(--color-neutral-50);
-    --color-text-secondary: var(--color-neutral-400);
-    --color-text-tertiary: var(--color-neutral-500);
+    /* R10 (round24): 深色模式下 neutral-400/500 在 neutral-800/900 表面对比度
+       < 4.5:1（a11y 不达标，portfolio-analysis Lighthouse a11y=82）。
+       提升次要/弱化文字亮度以满足 WCAG AA。*/
+    --color-text-secondary: var(--color-neutral-300);
+    --color-text-tertiary: var(--color-neutral-400);
     --color-text-inverse: var(--color-neutral-900);
-    --color-text-disabled: var(--color-neutral-600);
+    --color-text-disabled: var(--color-neutral-500);
 
     --color-bg-primary: var(--color-neutral-950);
     --color-bg-secondary: var(--color-neutral-900);

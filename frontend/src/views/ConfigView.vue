@@ -34,6 +34,15 @@
             <div class="config-badge">
               <span v-if="item.from_env" class="badge badge-env">.env</span>
               <span v-else class="badge badge-db">已修改</span>
+              <button
+                v-if="!item.from_env"
+                class="btn-reset-key"
+                :disabled="resetting === item.key"
+                :title="`重置 ${item.key} 为 .env 值`"
+                @click="resetKey(item.key)"
+              >
+                {{ resetting === item.key ? '重置中...' : '重置为 .env' }}
+              </button>
             </div>
           </div>
         </div>
@@ -60,6 +69,7 @@ const loading = ref(true)
 const saving = ref(false)
 const saved = ref(false)
 const saveError = ref('')
+const resetting = ref('')
 
 const groupedItems = computed(() => {
   const groups = {}
@@ -129,6 +139,21 @@ async function saveConfig() {
     saveError.value = '保存失败: ' + (e.message || e)
   } finally {
     saving.value = false
+  }
+}
+
+// R18 (round24): 单键重置为 .env（闭环 override 生命周期，DELETE /admin/config/{key}）
+async function resetKey(key) {
+  resetting.value = key
+  saveError.value = ''
+  try {
+    await adminApi.resetConfigKey(key)
+    saved.value = false
+    await loadConfig()
+  } catch (e) {
+    saveError.value = `重置 ${key} 失败: ` + (e.message || e)
+  } finally {
+    resetting.value = ''
   }
 }
 
@@ -263,6 +288,26 @@ onMounted(loadConfig)
 .badge-db {
   background: #3a2a1a;
   color: #ffb74d;
+}
+.btn-reset-key {
+  display: block;
+  margin-top: 6px;
+  padding: 3px 8px;
+  border: 1px solid #555;
+  border-radius: 4px;
+  background: #2a2a2a;
+  color: #bbb;
+  cursor: pointer;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+.btn-reset-key:hover {
+  background: #3a3a3a;
+  color: #eee;
+}
+.btn-reset-key:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .config-actions {
   display: flex;

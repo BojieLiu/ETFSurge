@@ -50,8 +50,10 @@
 
     <!-- News List -->
     <section class="card news-card">
-      <!-- F31: 半成品不静默上屏——冷启动/数据源熔断时显示不完整提示 -->
-      <div v-if="partial && !loading" class="news-partial-banner" role="status">
+      <!-- F31: 半成品不静默上屏——冷启动/数据源熔断时显示不完整提示。
+           R8 (round24): 横幅改为脱离文档流（absolute），出现/消失不再下移列表，
+           消除布局偏移（CLS）。-->
+      <div class="news-partial-banner" :class="{ 'news-partial-banner--show': partial && !loading }" role="status">
         ⚠️ 数据刷新中（当前仅部分数据，稍后自动补全）
       </div>
       <div v-if="loading && !filteredNews.length" class="news-empty">加载中...</div>
@@ -357,17 +359,21 @@ const filteredAffectedHoldings = computed(() => {
 .filter-btn:hover { border-color: var(--color-primary); color: var(--color-primary); }
 .filter-btn.active { background: var(--color-primary); border-color: var(--color-primary); color: white; }
 .filter-btn.active:hover { background: var(--color-primary-dark); }
-.news-card { padding: var(--space-4); }
+.news-card { position: relative; padding: var(--space-4); min-height: 320px; }
 .news-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-3); }
 .news-empty { color: var(--color-text-muted); padding: var(--space-4); text-align: center; }
-/* F31: partial（不完整）提示条 */
+/* F31: partial（不完整）提示条；R8: 脱离文档流避免布局偏移 */
 .news-partial-banner {
+  display: none;
+  position: absolute; top: 0; left: 0; right: 0;
   padding: var(--space-2) var(--space-4);
   background: var(--color-warning-50, #fffbeb);
   color: var(--color-warning-600, #b45309);
   font-size: var(--font-size-sm);
   border-bottom: 1px solid var(--color-border-light);
+  z-index: 1;
 }
+.news-partial-banner--show { display: block; }
 .news-item { border: 1px solid var(--color-border-light); border-left-width: 4px; border-radius: var(--radius-lg); padding: var(--space-3); background: var(--color-surface-secondary); }
 .news-item--red { border-left-color: #e5484d; }
 .news-item--orange { border-left-color: #f5901e; }

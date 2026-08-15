@@ -305,4 +305,3 @@ A:  mootdx → Tencent(QQ) → Sina   ← F1-2 补 tencent，与批量版对齐
 <!-- 路由登记（P3-5 check_routes 门禁） -->
 GET /api/v1/market/fundamentals/{symbol}
 GET /api/v1/market/indices/meta
-GET /api/v1/market/sentiment

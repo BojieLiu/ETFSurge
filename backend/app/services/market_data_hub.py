@@ -1913,37 +1913,50 @@ class MarketDataHub:
         return []
 
     def _news_bucket(self, key: str) -> list[dict]:
-        """按分类返回新闻桶；缓存过期或未初始化时懒刷新一次。"""
+        """按分类返回新闻桶；缓存过期或未初始化时懒刷新一次。
+
+        R23 (round24): 懒刷新走 `_refresh_news_buckets_safe`——加锁避免并发刷新，
+        且刷新失败/空桶时回退上次非空桶，杜绝高负载下 headlines/macro/global
+        瞬态返 0。
+        """
         import time
         now = time.time()
         if self._news_buckets is None or (now - self._news_cache_ts) > self.NEWS_TTL:
-            self.refresh_news()
+            self._refresh_news_buckets_safe()
         return (self._news_buckets or {}).get(key, [])
 
     def get_news_headlines(self) -> list[dict]:
         """财联社头条（分类缓存）。"""
         return self._news_bucket("headlines")
 
-    async def enrich_news_summaries(self) -> int:
-        """Z18: 为重要新闻(level>=3 或 stars>=4)生成 AI 摘要并写回缓存。
+    async def enrich_news_summaries(self, cap: int = 6) -> int:
+        """Z18/R17 (round24): 为重要新闻生成 AI 摘要并写回缓存。
 
-        LLM 失败静默保留 None；单轮最多 5 条控制成本；改的是缓存内 dict 引用，
-        因此 write-back 对 get_news_headlines 立即可见。
+        Z18: level>=4 或 stars>=4 的重要新闻才生成；LLM 失败静默保留 None；
+        改的是缓存内 dict 引用，write-back 对 get_news_* 立即可见。
+        R17 (round24): 覆盖三桶（headlines/macro/global），不再仅 headlines——
+        按重要性合并去重后截断到 cap 控制成本（默认 6）。
         """
         try:
             from ..analysis.llm import generate_news_summary
         except Exception:
             return 0
-        items = self._news_bucket("headlines")
-        targets = [
-            n for n in items
-            if not n.get("ai_summary")
-            # F28 (round23 P0-A): 旧实现 `str(level) in ("重大","利好")` 因 level 已是 int 恒 False，
-            # 重要性维度永久失效。改为按 int 重要性判定（level>=4 或 新鲜度 stars>=4 → 重要）。
-            and (int(n.get("stars", 0) or 0) >= 4 or int(n.get("level", 0) or 0) >= 4)
-        ]
+        # R17: 三桶合并（headlines 优先），去重，按重要性挑 cap 条
+        targets: list[dict] = []
+        seen_ids: set = set()
+        for bucket in ("headlines", "macro", "global"):
+            for n in self._news_bucket(bucket):
+                if n.get("ai_summary"):
+                    continue
+                # F28 (round23 P0-A): 按 int 重要性判定（level>=4 或 stars>=4 → 重要）
+                if (int(n.get("stars", 0) or 0) >= 4 or int(n.get("level", 0) or 0) >= 4):
+                    nid = n.get("id") or n.get("title")
+                    if nid in seen_ids:
+                        continue
+                    seen_ids.add(nid)
+                    targets.append(n)
         enriched = 0
-        for n in targets[:5]:
+        for n in targets[:cap]:
             try:
                 summary = await generate_news_summary(n.get("title", ""), n.get("content", ""))
                 if summary:
@@ -1980,27 +1993,65 @@ class MarketDataHub:
             return {}
 
     def refresh_news(self) -> None:
-        """同步刷新新闻分类缓存（headlines/macro/global 分别入桶）。"""
+        """同步刷新新闻分类缓存（headlines/macro/global 分别入桶）。
+
+        R23 (round24): 委托 `_refresh_news_buckets_safe`——加锁 + 失败/空桶回退上次非空。
+        """
+        self._refresh_news_buckets_safe()
+
+    def _refresh_news_buckets_safe(self) -> None:
+        """R23 (round24): 安全刷新新闻桶。
+
+        - 加锁：避免懒刷新与后台任务并发刷新互相踩踏（高负载下瞬态返 0 的根因之一）。
+        - 回退：单个桶抓取失败/空（数据源冷却）时保留上次非空桶，而非整体置空导致
+          该分类瞬态返 0 条。
+        - 失败时：若历史上无任何桶，则保留上次（可能为空的）桶并刷新时间戳，
+          避免立即重试风暴。
+        """
         import time
+        import threading
+
+        lock = getattr(self, "_news_refresh_lock", None)
+        if lock is None:
+            lock = threading.Lock()
+            self._news_refresh_lock = lock
+        # 非阻塞抢锁：抢不到说明别的协程/任务正在刷新，直接复用当前桶（可能略旧但不为空）
+        if not lock.acquire(blocking=False):
+            return
         try:
-            from ..fetchers.news_fetcher import (
-                fetch_news_headlines,
-                fetch_macro_news,
-                fetch_global_news,
-            )
-            headlines = fetch_news_headlines() or []
-            macro = fetch_macro_news() or []
-            global_news = fetch_global_news() or []
-            self._news_buckets = {
-                "headlines": headlines,
-                "macro": macro,
-                "global": global_news,
-            }
-            self._news_cache = headlines + macro + global_news  # 合并视图兼容
-            self._news_cache_ts = time.time()
-            logger.info("[hub] refreshed %d news items", len(self._news_cache))
-        except Exception as e:
-            logger.exception("[hub] refresh_news failed: %s", e)
+            prev = self._news_buckets or {}
+            try:
+                from ..fetchers.news_fetcher import (
+                    fetch_news_headlines,
+                    fetch_macro_news,
+                    fetch_global_news,
+                )
+                headlines = fetch_news_headlines() or []
+                macro = fetch_macro_news() or []
+                global_news = fetch_global_news() or []
+                # R23: 空桶回退上次非空，避免数据源冷却时瞬态 0 条
+                merged = {
+                    "headlines": headlines or prev.get("headlines", []),
+                    "macro": macro or prev.get("macro", []),
+                    "global": global_news or prev.get("global", []),
+                }
+                self._news_buckets = merged
+                self._news_cache = merged["headlines"] + merged["macro"] + merged["global"]
+                self._news_cache_ts = time.time()
+                logger.info(
+                    "[hub] refreshed news buckets h=%d m=%d g=%d (fallback h=%d m=%d g=%d)",
+                    len(merged["headlines"]), len(merged["macro"]), len(merged["global"]),
+                    len(prev.get("headlines", [])), len(prev.get("macro", [])),
+                    len(prev.get("global", [])),
+                )
+            except Exception as e:
+                logger.exception("[hub] refresh_news failed: %s", e)
+                # 失败时保留上次非空桶，避免整体置空
+                if self._news_buckets is None:
+                    self._news_buckets = prev
+                self._news_cache_ts = time.time()
+        finally:
+            lock.release()
 
     # ── Phase 2: sector / fundamental / history aggregation ──
 
@@ -2141,15 +2192,6 @@ class MarketDataHub:
 
 
     # ── Phase 5a: remaining fetcher delegates (DoD single-source) ──
-
-    def get_market_emotion(self) -> dict:
-        """市场情绪（levistock）。"""
-        try:
-            from ..fetchers.levistock_fetcher import fetch_market_emotion
-            return fetch_market_emotion() or {}
-        except Exception as e:
-            logger.warning("[hub] get_market_emotion failed: %s", e)
-            return {}
 
     def get_market_wind(self) -> list[dict]:
         """市场风控（levistock）。"""

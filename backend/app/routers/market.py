@@ -464,12 +464,6 @@ async def fund_flow(symbol: str) -> dict[str, Any]:
         "available": True,
     }
 
-# TODO: 未接入前端
-@router.get("/sentiment")
-async def sentiment() -> dict:
-    """市场情绪(财联社/东财):涨跌分布、封板率、连板梯队、赚钱效应。"""
-    return await asyncio.to_thread(market_data_hub.get_market_emotion)
-
 @router.get("/sectors/industry")
 async def industry_sectors(limit: int = Query(500)) -> list[dict[str, Any]]:
     """行业板块列表（含实时行情）：优先 sector_fetcher 实时数据，本地 sectors 表作降级。"""
@@ -498,24 +492,6 @@ async def concept_sectors(limit: int = Query(500)) -> list[dict[str, Any]]:
 async def sector_rotation(limit: int = Query(20)) -> list[dict[str, Any]]:
     """板块轮动数据 — 行业板块实时行情(财联社)，含涨跌幅、主力资金、涨跌家数。"""
     return await asyncio.to_thread(market_data_hub.get_sector_industry_cls, limit)
-
-@router.get("/sectors")
-async def unified_sectors(
-    type: str = Query("industry", description="Sector type: industry or concept"),
-    limit: int = Query(200, description="Max results"),
-    market: str = Query("A", description="Market filter"),
-) -> list[dict[str, Any]]:
-    """Unified sector endpoint. Delegates to industry or concept routes.
-
-    Z17: type 参数改为非必需（默认 industry），避免前端未传参时 422。
-    """
-    if type == "industry":
-        return await industry_sectors(limit)
-    elif type == "concept":
-        return await concept_sectors(limit)
-    else:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=400, detail=f"Invalid sector type: {type}. Use industry or concept.")
 
 # Phase 6: 前端已接入（marketApi.getHotPlates）
 # F16 (round6 §16.4): 加 market 参数（A/HK/US）——HK 走港股行业聚合，US 暂不支持。

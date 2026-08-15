@@ -87,6 +87,29 @@ def _factor_hint(code: str, value: float) -> str:
     return ""
 
 
+def _factor_strength_band(value: float) -> str:
+    """R21 (round24): 通用因子分无量纲 → 强度分档，投资者可解读（偏强/偏弱 等）。
+
+    原始因子分（如「政策规划因子 +8.97」「战略新兴 +8.14」）量纲不统一、裸数值
+    不可解读。多数因子分为方向性标准化值，按符号+量级分档给出相对强弱提示
+    （非精确百分位）。
+    """
+    a = abs(value)
+    if value > 0:
+        if a >= 3:
+            return "强"
+        if a >= 0.5:
+            return "偏强"
+        return "中性偏强"
+    if value < 0:
+        if a >= 3:
+            return "弱"
+        if a >= 0.5:
+            return "偏弱"
+        return "中性偏弱"
+    return "中性"
+
+
 def format_factor_summary(real_fs: dict[str, float], top_n: int = 3, tech_ind: dict | None = None) -> str:
     """F11: 因子分 → 中文解读字符串（保持 factor_summary 字符串契约不变）。
 
@@ -137,7 +160,13 @@ def format_factor_summary(real_fs: dict[str, float], top_n: int = 3, tech_ind: d
     for k, v in items:
         label = FACTOR_LABELS.get(k, k)
         hint = _factor_hint(k, float(v))
-        parts.append(f"{label} {v:.2f}{hint}")
+        if hint:
+            # 已有因子专属语义（RSI/KDJ/情绪等）→ 保留原样
+            parts.append(f"{label} {v:.2f}{hint}")
+        else:
+            # R21: 无量纲通用因子 → 强度分档，避免裸数值（如 +8.97）不可解读
+            band = _factor_strength_band(float(v))
+            parts.append(f"{label} {v:.2f}（{band}）")
     return "；".join(parts)
 
 from ..models.portfolio import PortfolioETF
@@ -2022,38 +2051,6 @@ async def _detect_regime(symbols: list[str]) -> tuple[dict, list, str]:
 
 
 # 应用策略
-async def apply_strategy_suggestions(db: AsyncSession, suggestions: list) -> dict[str, Any]:
-    """应用策略建议到持仓"""
-    try:
-        # 获取所有持仓
-        etfs = await list_etfs(db)
-        if not etfs:
-            return {"symbols": [], "applied_suggestions": suggestions, "message": "无持仓可应用策略"}
-
-        etf_dict = {etf.symbol: etf for etf in etfs}
-
-        applied = []
-        for s in suggestions:
-            action = s.get("action")
-            symbol = s.get("symbol")
-            suggested_weight = s.get("suggested_weight", s.get("target_weight", 0))
-            if symbol in etf_dict:
-                e = etf_dict[symbol]
-                if action == "increase" or action == "decrease" or action == "adjust_weight":
-                    e.target_weight = max(0, min(0.5, suggested_weight))
-                    applied.append({"symbol": symbol, "name": e.name, "target_weight": e.target_weight, "portfolio_type": e.portfolio_type, "action": "updated"})
-                elif action == "remove":
-                    e.is_active = False
-                    applied.append({"symbol": symbol, "name": e.name, "portfolio_type": e.portfolio_type, "action": "removed"})
-
-        await db.commit()
-        updated = await list_etfs(db)
-        return {"symbols": [{"symbol": e.symbol, "name": e.name, "target_weight": e.target_weight, "portfolio_type": e.portfolio_type} for e in updated], "applied": applied}
-    except Exception as e:
-        await db.rollback()
-        raise e
-
-
 async def apply_portfolio_design(db: AsyncSession, design: dict) -> dict[str, Any]:
     """根据组合设计应用持仓"""
     try:

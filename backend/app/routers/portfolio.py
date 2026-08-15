@@ -357,27 +357,6 @@ async def get_design(
 
 
 
-@router.delete("/designs/{design_id}")
-async def delete_design(
-    design_id: int,
-    db: AsyncSession = Depends(get_db),
-):
-    """删除某次方案记录"""
-    from sqlalchemy import select
-    from ..models.portfolio_design import PortfolioDesign
-
-    stmt = select(PortfolioDesign).where(PortfolioDesign.id == design_id)
-    result = await db.execute(stmt)
-    record = result.scalar_one_or_none()
-
-    if not record:
-        raise HTTPException(status_code=404, detail="Design not found")
-
-    await db.delete(record)
-    await db.commit()
-    _DESIGNS_LIST_CACHE.clear()  # P0-8: 删除后列表立即失效，避免返回已删方案
-    return {"detail": "deleted"}
-
 # ── 异步任务 ──────────────────────────────────
 @router.get("/tasks/{task_id}")
 async def get_task_status(task_id: int):

@@ -378,6 +378,12 @@ _MACRO_KEYWORDS = (
     "日本央行", "关税", "政策", "国务院", "发改委", "财政部", "商务部",
     "稳增长", "经济", "市场", "全球", "国际", "指数", "债市", "股市", "宏观",
 )
+# R15 (round24): 基金营销/ETF日报 类软文——宏观 tab 混入此类非宏观内容（「ETF日报：
+# 产业趋势没有变…」）会污染宏观视图。这些短语即便夹带宏观词也不应入宏观 tab。
+_MACRO_EXCLUDE = (
+    "ETF日报", "基金日报", "基金发售", "基金产品", "公募基金", "私募基金",
+    "基金经理", "净值", "募集", "认购", "申购", "赎回", "定投",
+)
 
 
 def _is_macro_relevant(title: str, content: str = "") -> bool:
@@ -385,11 +391,15 @@ def _is_macro_relevant(title: str, content: str = "") -> bool:
 
     P9: 宏观 tab 混入个股/营销内容。宏观源（新浪滚动）是泛财经流，
     需按「宏观语境」过滤：个股/营销 → False，宏观/政策 → True。
+    R15: 追加基金营销/ETF日报 排除短语，避免宏观 tab 混非宏观软文。
     """
     text = f"{title or ''} {content or ''}"
     if any(k in text for k in _MARKETING_KEYWORDS):
         return False
     if any(k in text for k in _STOCK_PATTERNS):
+        return False
+    # R15: 基金营销/ETF日报 软文即便含宏观词也排除
+    if any(k in text for k in _MACRO_EXCLUDE):
         return False
     return any(k in text for k in _MACRO_KEYWORDS)
 

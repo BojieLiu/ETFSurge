@@ -130,7 +130,9 @@ GET /api/v1/market/sectors/concept
 
 > **round23 §6.1（2026-08-14）**: `GET /sectors/industry-cls`、`GET /sectors/{sector_code}/stocks`、
 > `GET /sectors/{plate_code}/popular` 三路由为死端点（0 生产调用方），已删除。
-> 底层能力由保留端点提供：`GET /sectors/rotation`（板块轮动）、`GET /sectors`（统一板块列表）。
+> 底层能力由保留端点提供：`GET /sectors/rotation`（板块轮动）、`GET /sectors/industry`、`GET /sectors/concept`。
+> **round24 R18**: `GET /sectors`（统一 wrapper）亦为死端点（0 生产调用方，前端仅用 industry/concept/rotation/heat 子路径），
+> 已删除，能力由 industry/concept 子路由覆盖。
 > 底层 service 函数 `get_sector_stocks`/`get_sector_popular_stocks` 仍被 strategy_design/analysis 调用。
 
 ---
@@ -146,5 +148,4 @@ GET /api/v1/market/sectors/concept
 | 空列表时前端切换到手动输入模式 | ✅ | ☐ | |
 
 <!-- 路由登记（P3-5 check_routes 门禁） -->
-GET /api/v1/market/sectors
 GET /api/v1/market/sectors/rotation

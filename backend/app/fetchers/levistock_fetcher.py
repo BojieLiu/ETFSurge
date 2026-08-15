@@ -126,6 +126,32 @@ _CATEGORY_WORD_OWNERSHIP: dict[str, str] = {
 # 弱化词降级（P2-1 round9 §6.4）：未实现/推测性事件不标重大或利好
 _WEAKENERS = ("或将", "可能", "传闻", "考虑", "讨论", "有望", "据悉", "拟")
 
+# R16 (round24): 英文标题分类器——全球资讯多为英文 RSS（道琼斯/CNBC），
+# 中文词表永远不命中，导致 global 7/8 落入「other」。按优先级 major>risk>
+# positive>negative>neutral 命中英文关键词。
+_ENGLISH_CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "major": ("fed", "fomc", "ecb", "boj", "rate decision", "rate cut", "rate hike",
+              "central bank", "stimulus", "bailout", "quantitative easing"),
+    "risk": ("war", "conflict", "sanction", "tariff", "recession", "crash", "selloff",
+             "plunge", "crisis", "default", "geopolitical", "bankruptcy", "layoffs"),
+    "positive": ("rally", "surge", "gain", "beats", "record high", "recovery", "boom",
+                 "upgrade", "soar", "jumps", "rises", "advance"),
+    "negative": ("falls", "drop", "loss", "miss", "downgrade", "slump", "decline",
+                 "slides", "tumbles", "sinks", "cut jobs"),
+    "neutral": ("inflation", "cpi", "ppi", "pmi", "gdp", "jobs", "nonfarm", "earnings",
+                "economy", "market", "oil", "crude", "yield", "treasury", "bond",
+                "stocks", "shares", "rate", "trade", "growth", "index"),
+}
+
+
+def _classify_news_english(title: str, content: str = "") -> str:
+    """R16 (round24): 英文标题/正文分类器，补中文词表对 global RSS 的覆盖空白。"""
+    t = ((title or "") + " " + (content or "")[:200]).lower()
+    for c in ("major", "risk", "positive", "negative", "neutral"):
+        if any(k in t for k in _ENGLISH_CATEGORY_KEYWORDS[c]):
+            return c
+    return "other"
+
 
 def classify_news(title: str, content: str = "") -> tuple[str, int]:
     """F22/F23 (round23 P0-A): 关键词法将快讯归类为 (category, level)。
@@ -138,6 +164,7 @@ def classify_news(title: str, content: str = "") -> tuple[str, int]:
 
     F3-1 步骤D: content 双输入（正文前 200 字同样计级）。
     O7 (round7 §7 P9): 关键词统一 lower 再匹配（CPI/PMI/OPEC/FDA 等大写英文词）。
+    R16 (round24): 中文未命中（英文标题）→ 英文分类器兜底，避免 global 全 other。
     """
     t = ((title or "") + " " + (content or "")[:200]).lower()
     cat = "other"
@@ -146,6 +173,9 @@ def classify_news(title: str, content: str = "") -> tuple[str, int]:
         if any((k.lower() if isinstance(k, str) else k) in t for k in _CATEGORY_KEYWORDS[c]):
             cat = c
             break
+    # R16: 中文词表未命中（多为英文 RSS 标题）→ 英文分类器兜底
+    if cat == "other" and any(ch.isalpha() and ord(ch) < 128 for ch in (title or "")):
+        cat = _classify_news_english(title, content)
     level = _CATEGORY_LEVEL[cat]
     if level >= 4 and any(w in (title or "") for w in _WEAKENERS):
         # P2-1: 弱化词降级（5→4，4→3），不越过 3
