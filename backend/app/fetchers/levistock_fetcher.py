@@ -133,14 +133,17 @@ _ENGLISH_CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
     "major": ("fed", "fomc", "ecb", "boj", "rate decision", "rate cut", "rate hike",
               "central bank", "stimulus", "bailout", "quantitative easing"),
     "risk": ("war", "conflict", "sanction", "tariff", "recession", "crash", "selloff",
-             "plunge", "crisis", "default", "geopolitical", "bankruptcy", "layoffs"),
+             "plunge", "crisis", "default", "geopolitical", "bankruptcy", "layoffs",
+             "hormuz", "strait", "missile", "invasion", "attacked", "struck",
+             "warship", "embargo", "blockade", "ceasefire", "deploy"),
     "positive": ("rally", "surge", "gain", "beats", "record high", "recovery", "boom",
                  "upgrade", "soar", "jumps", "rises", "advance"),
     "negative": ("falls", "drop", "loss", "miss", "downgrade", "slump", "decline",
                  "slides", "tumbles", "sinks", "cut jobs"),
     "neutral": ("inflation", "cpi", "ppi", "pmi", "gdp", "jobs", "nonfarm", "earnings",
                 "economy", "market", "oil", "crude", "yield", "treasury", "bond",
-                "stocks", "shares", "rate", "trade", "growth", "index"),
+                "stocks", "shares", "rate", "trade", "growth", "index", "bank",
+                "election", "elections", "reform", "charter", "crypto", "currency"),
 }
 
 
