@@ -711,6 +711,119 @@ def _filter_satellite_by_profile(
     return kept
 
 
+# round24 R24②: 近替代品「主题族」识别——同主题不同发行商的 ETF 判定为近替代品。
+# 独立于 K 线相关系数（降级盲时 r=None 也能识别）；关键词语义 + 归一化概念双路。
+_SUBSTITUTE_FAMILIES: list[tuple[str, tuple[str, ...]]] = [
+    # (族名, 触发关键词)——顺序优先：先匹配更具体的族
+    ("半导体", ("科创半导体", "科创芯片", "芯片", "半导体")),
+    ("医药生物", ("创新药", "生物科技", "生物医药", "医药")),
+    ("券商", ("证券", "券商")),
+    ("大盘宽基", ("沪深300", "上证50", "中证A500", "中证100", "上证180")),
+    ("科创成长", ("科创50", "科创100", "创业板", "双创")),
+    ("黄金", ("黄金",)),
+    ("国债", ("国债", "利率债", "政金债")),
+]
+
+
+def _substitute_family(c: dict[str, Any]) -> str | None:
+    """round24 R24②: 判定标的是否属于某「近替代品族」（纯函数，无 I/O）。
+
+    双路判定：① 名称/行业/tracked_index 文本匹配 _SUBSTITUTE_FAMILIES 关键词族；
+    ② 归一化概念兜底（_normalize_segment 科创/半导体/芯片/军工/新能源 前缀族）。
+    返回族名或 None（无主题可归——黄金 vs 科创 不误报）。
+    """
+    text = f"{c.get('name', '') or ''} {c.get('industry', '') or ''} {c.get('tracked_index', '') or ''}"
+    for fam, keywords in _SUBSTITUTE_FAMILIES:
+        if any(k in text for k in keywords):
+            return fam
+    # 兜底：科创/半导体/芯片/军工/新能源 归一化概念族（_normalize_segment 同源）
+    seg = _normalize_segment(_extract_index_concept(c.get("name") or ""))
+    if seg in ("科创", "半导体", "芯片", "军工", "新能源"):
+        return seg
+    return None
+
+
+def near_substitute_pairs(allocs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """round24 R24②: 近替代品双路检测——同主题不同发行商（纯函数，无 I/O）。
+
+    背景（R24 实证）：设计 570 漏抓主题级冗余——588170/588200（科创半导体）、
+    513120/159570（港股药）、512880/513090（券商 A/H）。旧控制仅依赖 K 线相关系数，
+    降级盲（r=None）时静默跳过；近替代品即便 r 略<0.9 或价格缺失也应约束/合并。
+
+    实现：对非 CASH 两两，若属于同一主题族（_substitute_family）→ 返回告警条目，
+    含族名与合计权重。与 enforce_max_correlation 的高相关削减正交（独立一层），
+    r 缺失/偏低不影响判定。
+    """
+    pairs: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    non_cash = [a for a in allocs if a.get("symbol") not in (None, "CASH")]
+    for i in range(len(non_cash)):
+        for j in range(i + 1, len(non_cash)):
+            a, b = non_cash[i], non_cash[j]
+            sa, sb = a.get("symbol"), b.get("symbol")
+            if sa == sb:
+                continue
+            fam_a = _substitute_family(a)
+            if not fam_a:
+                continue
+            fam_b = _substitute_family(b)
+            if fam_b != fam_a:
+                continue
+            # 符号恒为字符串（non_cash 已过滤 None/CASH），str() 兜底防 None 比较
+            sa_s, sb_s = (str(sa), str(sb))
+            key: tuple[str, str] = (sa_s, sb_s) if sa_s < sb_s else (sb_s, sa_s)
+            if key in seen:
+                continue
+            seen.add(key)
+            pairs.append({
+                "type": "near_substitute",
+                "pair": [sa, sb],
+                "family": fam_a,
+                "combined_weight": round((a.get("weight", 0.0) or 0.0) + (b.get("weight", 0.0) or 0.0), 4),
+                "note": f"同主题近替代品（{fam_a}族）：不同发行商同一板块，关联度约束不依赖 K 线相关系数",
+            })
+    return pairs
+
+
+def portfolio_concentration_check(
+    allocs: list[dict[str, Any]],
+    correlation_matrix: dict[tuple[str, str], float | None],
+    avg_threshold: float = 0.8,
+    min_symbols: int = 3,
+) -> dict[str, Any] | None:
+    """round24 R24⑥: 组合级分散约束——平均 pairwise r 过高且标的够多 → concentration。
+
+    背景（R24 实证）：仅 pairwise 0.9 封顶 25% 时，「3 只大盘各自受限仍集体冗余」可过
+    （510300+159338+510050 ≈31%，两两 r≥0.91 却无告警）。本检查补组合级视角：
+    非 CASH 标的 ≥ min_symbols 且有效对平均 r > avg_threshold → 返回告警。
+    有效对不足 / 平均不超标 → None（不误报）。
+    """
+    non_cash = [a for a in allocs if a.get("symbol") not in (None, "CASH")]
+    if len(non_cash) < min_symbols:
+        return None
+    syms = {a.get("symbol") for a in non_cash}
+    vals: list[float] = []
+    for (a, b), r in correlation_matrix.items():
+        if r is None or a not in syms or b not in syms:
+            continue
+        vals.append(float(r))
+    if len(vals) < min_symbols:
+        return None
+    avg_r = sum(vals) / len(vals)
+    if avg_r <= avg_threshold:
+        return None
+    return {
+        "type": "concentration",
+        "symbols": sorted(syms),
+        "avg_correlation": round(avg_r, 4),
+        "pair_count": len(vals),
+        "note": (
+            f"组合级分散不足：{len(syms)} 只标的两两平均相关 {avg_r:.2f} > {avg_threshold:.1f}，"
+            "集体冗余（即使单对相关系数未超阈值）"
+        ),
+    }
+
+
 def _dedup_same_index(allocations: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """round19 P1-② (2026-08-12): 同指数双持有硬约束（堵 563360 漏判）。
 
@@ -1494,6 +1607,35 @@ def enforce_max_correlation(
                     x["weight"] = round(
                         x.get("weight", 0.0) + reduced_total * (x.get("weight", 0.0) / total_w), 4,
                     )
+        if warnings:
+            s.setdefault("risk_metrics", {})
+            s["risk_metrics"]["correlation_warnings"] = warnings
+
+        # round24 R24②④⑥: 近替代品 + 无价格对 + 组合级分散——独立于 K 线相关系数的
+        # 冗余控制层（r 缺失/偏低也能识别，杜绝降级盲静默漏报）。
+        if allocs:
+            # ① 近替代品（同主题不同发行商）——即便 r<0.9 或价格缺失也告警
+            for np in near_substitute_pairs(allocs):
+                # 近替代品对若无有效相关系数（r=None，价格缺失/降级盲）→ unevaluated
+                sa, sb = np["pair"]
+                r = correlation_matrix.get((sa, sb))
+                if r is None:
+                    r = correlation_matrix.get((sb, sa))
+                entry = dict(np)
+                if r is None:
+                    entry["correlation"] = None
+                    entry["type"] = "unevaluated"
+                    entry["note"] = (
+                        f"同主题近替代品（{np['family']}族）但相关系数缺失（无价格序列/降级），"
+                        "冗余风险未量化——待交易时段复算"
+                    )
+                else:
+                    entry["correlation"] = round(float(r), 3)
+                warnings.append(entry)
+            # ② 组合级分散约束（平均 pairwise r 过高且标的够多）
+            conc = portfolio_concentration_check(allocs, correlation_matrix)
+            if conc:
+                warnings.append(conc)
         if warnings:
             s.setdefault("risk_metrics", {})
             s["risk_metrics"]["correlation_warnings"] = warnings

@@ -1,6 +1,16 @@
 from typing import Any
 
 
+def _cap(v: float) -> float:
+    """round24 R25: 单因子极端值封顶 |score| ≤ 1.0（原 composite_signal 内嵌实现
+    提升为模块级——composite_signal_with_gate 降级分支也需复用，防单项拉平）。"""
+    try:
+        f = float(v or 0.0)
+    except (TypeError, ValueError):
+        f = 0.0
+    return max(-1.0, min(1.0, f))
+
+
 def composite_signal(
     technical: float = 0.0,
     valuation: float = 0.0,
@@ -19,13 +29,6 @@ def composite_signal(
         {"signal": "buy"|"hold"|"sell", "score": float,
          "components": {"technical": t, "valuation": v, "momentum": m}}
     """
-    def _cap(v: float) -> float:
-        try:
-            f = float(v or 0.0)
-        except (TypeError, ValueError):
-            f = 0.0
-        return max(-1.0, min(1.0, f))
-
     t, v, m = _cap(technical), _cap(valuation), _cap(momentum)
     w = weights or (0.4, 0.4, 0.2)
     score = w[0] * t + w[1] * v + w[2] * m
@@ -46,6 +49,90 @@ def composite_signal(
         "score": round(score, 3),
         "components": {"technical": t, "valuation": v, "momentum": m},
     }
+
+
+# round24 R25: 综合信号降级门禁阈值（与 R3 data_precision 的 0.6 同源）
+_COMPOSITE_VALID_RATE_FLOOR = 0.6
+
+
+def composite_signal_with_gate(
+    technical: float = 0.0,
+    valuation: float = 0.0,
+    momentum: float = 0.0,
+    factor_valid_rate: float | None = None,
+    weights: tuple[float, float, float] | None = None,
+) -> dict[str, Any]:
+    """round24 R25: 综合信号 + 降级门禁（纯函数，无 I/O）。
+
+    背景（R25 实证）：策略检查/标的分析已把 33 维因子分 + 基本面（PE/PB）纳入展示列
+    与 LLM 叙述，但未聚合进结构化 buy/sell/hold 决策信号——持仓技术面板纯技术、
+    另两面因子基本面只展示不决策，三面口径不一致。
+
+    本函数把 0.4技术+0.4估值+0.2动量 聚合成综合信号（复用 composite_signal），
+    但应用 R3 式降级门禁：`factor_valid_rate < 0.6`（盘后/熔断 valid_rate=0%）时
+    **拒绝合成结论**（signal=None, degraded=true）——否则会复现 R3「仅供参考横幅 +
+    精确数字」的假精确（因子缺失时综合信号无统计意义）。
+
+    Args:
+        technical/valuation/momentum: 三个维度的分项分数（-1..1，内部 cap）
+        factor_valid_rate: 因子有效比例 0-1；None = 未提供（不做门禁，保持原语义）
+        weights: 三因子权重，默认 (0.4, 0.4, 0.2)
+
+    Returns:
+        {"signal": "buy"|"hold"|"sell"|None, "score": float|None, "degraded": bool,
+         "reason": str, "components": {...}}
+    """
+    if factor_valid_rate is not None and factor_valid_rate < _COMPOSITE_VALID_RATE_FLOOR:
+        missing_pct = round((1.0 - max(0.0, min(1.0, float(factor_valid_rate)))) * 100, 1)
+        return {
+            "signal": None,
+            "score": None,
+            "degraded": True,
+            "reason": (
+                f"因子数据缺失 {missing_pct:g}%：综合信号不可用"
+                "（退化为纯技术信号，不合成因子/基本面结论）"
+            ),
+            "components": {
+                "technical": _cap(technical), "valuation": _cap(valuation),
+                "momentum": _cap(momentum),
+            },
+        }
+    out = composite_signal(technical, valuation, momentum, weights)
+    return {
+        "signal": out["signal"],
+        "score": out["score"],
+        "degraded": False,
+        "reason": "综合信号正常（技术+估值+动量聚合）",
+        "components": out["components"],
+    }
+
+
+def neutral_zone_info(indicators: dict, reasons: list[str]) -> str | None:
+    """round24 R25: 中性区 info reason 补充（消除 Q1「caption 承诺 RSI/KDJ 但 reason
+    只显 MACD/MA」的误导）。
+
+    generate_signal 的 reason 只在极端区 emit RSI/KDJ（RSI<40/>60、KDJ 超买超卖）；
+    calm 市（RSI 40-60、KDJ 中段）无相关条目，用户误以为「不含 RSI/KDJ」。
+    本函数在**无极端 reason** 且 RSI 处于中性区时补一条 info（纯函数，无 I/O）。
+
+    Returns:
+        补充文案（如「RSI=52 中性、KDJ 中段，无极端信号」）；无指标/已有极端 reason → None。
+    """
+    if not isinstance(indicators, dict):
+        return None
+    if reasons:
+        # 已有任一极端 reason → 不补（避免重复/矛盾）
+        return None
+    rsi = indicators.get("rsi")
+    if isinstance(rsi, (int, float)) and 40 <= rsi <= 60:
+        kdj = indicators.get("kdj") or {}
+        k, d = kdj.get("k"), kdj.get("d")
+        parts = [f"RSI={rsi:.1f} 中性"]
+        if isinstance(k, (int, float)) and isinstance(d, (int, float)):
+            parts.append("KDJ 中段")
+        parts.append("无极端信号")
+        return "、".join(parts)
+    return None
 
 
 def generate_signal(indicators: dict) -> dict[str, Any]:

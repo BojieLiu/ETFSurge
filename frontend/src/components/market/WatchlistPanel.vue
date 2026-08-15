@@ -124,17 +124,31 @@
                 <td><code>{{ item.symbol }}</code></td>
                 <td><strong>{{ item.name }}</strong></td>
                 <td><span class="type-badge" :class="item.asset_type.toLowerCase()">{{ item.asset_type }}</span></td>
-                <td v-if="item.realtime" class="mono">{{ item.realtime.price?.toFixed(2) }}</td>
+                <td v-if="item.realtime?.price != null" class="mono">
+                  {{ item.realtime.price.toFixed(2) }}
+                  <!-- round24 R20: 实时不可用时的 T-1 收盘兜底（is_estimated）——显式
+                       标「估」，杜绝静默当作实时价（用户误以为「没波动」） -->
+                  <span v-if="item.realtime.is_estimated" class="estimated-badge" title="实时行情不可用，显示最近收盘价（估）">估</span>
+                </td>
+                <!-- round24 R20: 美股/HK 实时不可用显式标注「暂无实时」（非静默 null）——
+                     旧实现 <td v-else> 显示「行情加载中」，用户无法分辨「没波动」vs「没数据」 -->
+                <td v-else-if="item.realtime_unavailable" class="muted" :title="item.realtime_note || '该市场暂无实时行情'">
+                  <span class="unavailable-text">暂无实时</span>
+                </td>
                 <!-- P0-3 (round20 §五 P0-3): 后端 _degraded=true 为永久降级（批量 realtime 失败），
                      显示「行情暂不可用」而非「加载中」——加载态另有 loading 分支，语义不混淆 -->
                 <td v-else-if="item._degraded" class="muted" title="行情暂不可用（数据源弱）"><span class="degraded-text">行情暂不可用</span></td>
                 <td v-else class="muted" title="行情加载中（数据源弱）"><span class="loading-text">行情加载中</span></td>
-                <td v-if="item.realtime" :class="item.realtime.change_pct != null && item.realtime.change_pct >= 0 ? 'up' : 'down'">
+                <td v-if="item.realtime?.change_pct != null" :class="item.realtime.change_pct >= 0 ? 'up' : 'down'">
                   {{ formatPct(item.realtime.change_pct) }}
                 </td>
+                <td v-else-if="item.realtime?.is_estimated" class="muted" title="收盘价，无实时涨跌幅">—</td>
+                <td v-else-if="item.realtime_unavailable" class="muted" :title="item.realtime_note || '该市场暂无实时行情'"><span class="unavailable-text">暂无实时</span></td>
                 <td v-else-if="item._degraded" class="muted" title="行情暂不可用（数据源弱）"><span class="degraded-text">行情暂不可用</span></td>
                 <td v-else class="muted" title="行情加载中（数据源弱）"><span class="loading-text">行情加载中</span></td>
-                <td v-if="item.realtime" class="mono small">{{ formatVol(item.realtime.volume) }}</td>
+                <td v-if="item.realtime?.volume != null" class="mono small">{{ formatVol(item.realtime.volume) }}</td>
+                <td v-else-if="item.realtime?.is_estimated" class="muted small">—</td>
+                <td v-else-if="item.realtime_unavailable" class="muted small" :title="item.realtime_note || '该市场暂无实时行情'"><span class="unavailable-text">暂无实时</span></td>
                 <td v-else-if="item._degraded" class="muted" title="行情暂不可用（数据源弱）"><span class="degraded-text">行情暂不可用</span></td>
                 <td v-else class="muted" title="行情加载中（数据源弱）"><span class="loading-text">行情加载中</span></td>
                 <td class="notes-cell">
@@ -491,6 +505,10 @@ onMounted(fetchItems)
 .small { font-size: var(--font-size-xs); }
 .muted { color: var(--color-text-tertiary); }
 .loading-text { font-size: var(--text-xs); color: var(--color-text-tertiary); }
+/* round24 R20: 实时不可用显式标注——黄色警示（区别于「加载中」灰色，语义=数据源不可用
+   而非仍在加载）；「估」徽标 = T-1 收盘价兜底 */
+.unavailable-text { font-size: var(--text-xs); color: var(--color-warning-700); font-weight: var(--font-weight-medium); }
+.estimated-badge { display: inline-block; margin-left: 4px; padding: 0 4px; border-radius: var(--radius-full); font-size: var(--font-size-xs); color: var(--color-warning-700); background: var(--color-bg-warning-subtle); border: 1px solid var(--color-warning-300); }
 .up { color: var(--color-text-up); font-weight: var(--font-weight-semibold); }
 .down { color: var(--color-text-down); font-weight: var(--font-weight-semibold); }
 .notes-cell { max-width: 160px; }

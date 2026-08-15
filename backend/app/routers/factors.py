@@ -187,6 +187,31 @@ async def _db_ic_series_stats(db) -> dict[str, dict[str, float]]:
         return {}
 
 
+def _global_avg_ic(ic_batch: dict[str, float] | None,
+                   exclude_static: bool = True,
+                   exclude_market: bool = True) -> float | None:
+    """round24 R22: 统一 summary.avg_ic 口径 —— /factors/active 与 /factors/model 此前
+    各算各的聚合（/active 取 status!=static 的 ic_value 绝对值均值，/model 取
+    _build_health_summary 的 ic_vals 绝对值均值），同一时刻同屏两值不一致
+    （实测 0.2134 vs 0.3221，docs/round24-reverification-and-fixes.md §12.3 R22）。
+
+    口径：非 static 非 market-level 且当前 _last_ic_batch 有 ic_value 的因子，取绝对值均值
+    （F26：「平均 |IC|」= 绝对值均值，非带符号均值）。两端点统一调用本函数 → 同一时刻一致。
+    """
+    if not ic_batch:
+        return None
+    vals: list[float] = []
+    for code, ic_val in ic_batch.items():
+        if ic_val is None:
+            continue
+        if exclude_static and code in STATIC_FACTOR_CODES:
+            continue
+        if exclude_market and code in MARKET_LEVEL_FACTOR_CODES:
+            continue
+        vals.append(abs(float(ic_val)))
+    return round(sum(vals) / len(vals), 4) if vals else None
+
+
 def _build_health_summary(sample_counts: dict[str, int] | None = None,
                           series_stats: dict[str, dict[str, float]] | None = None) -> dict:
     """O6: 计算因子模型健康度聚合（valid/warn/no_data/static/avg_ic）。
@@ -198,7 +223,6 @@ def _build_health_summary(sample_counts: dict[str, int] | None = None,
     ic_batch = registry._last_ic_batch
     total_valid = total_warn = total_no_data = total_static = 0
     total_observable = 0
-    ic_vals: list[float] = []
     for code in registry._computers:
         definition = registry.get_factor(code)
         ic_val = ic_batch.get(code)
@@ -224,10 +248,9 @@ def _build_health_summary(sample_counts: dict[str, int] | None = None,
             total_static += 1
         if MIN_OBSERVABLE_DAYS <= _sc < MIN_TRADING_DAYS:
             total_observable += 1
-        if ic_val is not None:
-            ic_vals.append(ic_val)
-    # F26: 「平均 |IC|」应为绝对值均值，旧实现为带符号均值（与同屏 IC 卡差 5.3×）。
-    avg_ic = round(sum(abs(v) for v in ic_vals) / len(ic_vals), 4) if ic_vals else None
+    # round24 R22: avg_ic 统一走 _global_avg_ic（与 /active 同口径：非 static 非
+    # market-level 且有当前 ic_value 的因子，绝对值均值）
+    avg_ic = _global_avg_ic(ic_batch)
     return {
         "valid": total_valid,
         "warn": total_warn,
@@ -432,8 +455,6 @@ async def get_active_factors(db: AsyncSession = Depends(get_db)) -> JSONResponse
         })
 
     # Compute global summary
-    all_ic_vals = [f["ic_value"] for cat in cat_list for f in cat["factors"]
-                   if f["status"] != "static" and f["ic_value"] is not None]
     total_valid = sum(c["valid_count"] for c in cat_list)
     total_warn = sum(c["warn_count"] for c in cat_list)
     total_no_data = sum(c["no_data_count"] for c in cat_list)
@@ -443,9 +464,10 @@ async def get_active_factors(db: AsyncSession = Depends(get_db)) -> JSONResponse
         1 for cat in cat_list for f in cat["factors"]
         if f["status"] != "static" and MIN_OBSERVABLE_DAYS <= (f["sample_count"] or 0) < MIN_TRADING_DAYS
     )
-    # F26 (round23 P0-B): 全局 avg_ic 同样必须为绝对值均值——与同屏 IC 卡/per-category 一致，
-    # 否则再次出现「同屏两个相差 5× 的 平均|IC|」（实测 0.0449 vs 0.2461）。
-    avg_all_ic = round(sum(abs(v) for v in all_ic_vals) / len(all_ic_vals), 4) if all_ic_vals else None
+    # round24 R22: 全局 avg_ic 统一走 _global_avg_ic —— 与 /factors/model 同口径
+    # （非 static 非 market-level 且当前有 ic_value 的因子，绝对值均值），修复同屏两值
+    # 不一致（实测 /active 0.2134 vs /model 0.3221）；F26：绝对值均值，非带符号均值。
+    avg_all_ic = _global_avg_ic(ic_batch)
 
     body = {
         "total": len(registry._computers),

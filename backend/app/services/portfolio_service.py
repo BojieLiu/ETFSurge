@@ -1009,6 +1009,14 @@ async def strategy_check(
         "fallback_ratio": round(fallback_factor_count / total_factor_count, 4) if total_factor_count else 0.0,
     }
 
+    # round24 R25: 结构化综合决策信号——每个持仓的 factor_breakdowns 附加
+    # composite_decision（技术+因子聚合，因子填充率 <60% 时降级门禁）。必须在
+    # LLM 报告生成前附加，使 LLM 输入与决策信号同源（展示一致性）。
+    try:
+        _attach_composite_decisions(factor_breakdowns, data_quality)
+    except Exception as _cde:
+        logger.debug("[strategy_check] composite_decision attach skipped (non-fatal): %s", _cde)
+
     # LLM 分析（Z26: 显式预算，超时走规则引擎兜底）
     # O25② (round7 §7 P25): 超时按数据完整性分级——all_empty 15s / partial 30s /
     # 数据完整 60s（旧 F9 恒 30s：采集也占 30s，LLM 实际剩余不足 → 恒超时兜底常态）。
@@ -1471,6 +1479,60 @@ def _compute_confidence(filled_count: int, total_count: int) -> str:
     elif ratio >= 0.5:
         return "medium"
     return "low"
+
+
+# round24 R25: 因子分 → composite_signal 分项映射（technical/valuation/momentum）
+_COMPOSITE_FACTOR_MAP = {
+    "technical": ("technical", "technical.momentum", "technical.rsi"),
+    "valuation": ("valuation", "valuation.pe", "valuation.pb"),
+    "momentum": ("momentum", "momentum.recent_return", "momentum.vol_ratio"),
+}
+
+
+def _attach_composite_decisions(
+    factor_breakdowns: dict[str, dict],
+    data_quality: dict | None = None,
+) -> None:
+    """round24 R25: 给每个持仓的 factor_breakdowns 附加结构化 `composite_decision`。
+
+    背景（R25 实证）：持仓技术面板（SignalPanel）纯技术，策略检查/标的分析已把 33 维
+    因子分 + 基本面纳入展示列与 LLM 叙述，但未聚合进结构化 buy/sell/hold 决策——
+    三面口径不一致。本函数把「技术信号 + 因子分」聚合成独立综合信号（不替换技术信号，
+    与展示的因子数据同源 → 决策信号与展示一致）。
+
+    降级门禁（R3 同源）：因子填充率 <60% → composite_decision.degraded=true、
+    signal=None（不合成因子/基本面结论，杜绝盘后 valid_rate=0% 时假精确）。
+    """
+    from ..analysis.signal import composite_signal_with_gate
+
+    filled = ((data_quality or {}).get("filled_count")) or 0
+    total = ((data_quality or {}).get("total_count")) or 0
+    valid_rate = (filled / total) if total > 0 else None
+
+    for sym, fb in factor_breakdowns.items():
+        if not isinstance(fb, dict):
+            continue
+        fs = fb.get("factor_scores") or {}
+        fs = fs if isinstance(fs, dict) else {}
+        tech_sig = fb.get("technical_signal") or {}
+        tech_score = tech_sig.get("score")
+        if not isinstance(tech_score, (int, float)):
+            tech_score = 0.0
+
+        # 因子分 → 分项聚合（各分项取命中键均值，缺失记 0——由 valid_rate 门禁兜底诚实）
+        components: dict[str, float] = {}
+        for comp, keys in _COMPOSITE_FACTOR_MAP.items():
+            vals = [fs[k] for k in keys if isinstance(fs.get(k), (int, float))]
+            components[comp] = round(sum(vals) / len(vals), 3) if vals else 0.0
+
+        cd = composite_signal_with_gate(
+            technical=tech_score * 0.5 + components.get("technical", 0.0),
+            valuation=components.get("valuation", 0.0),
+            momentum=components.get("momentum", 0.0),
+            factor_valid_rate=valid_rate,
+        )
+        cd["technical_signal"] = tech_sig.get("signal") or "hold"
+        fb["composite_decision"] = cd
 
 
 def _build_rule_fallback_holdings_analysis(

@@ -21,9 +21,35 @@
         <span class="signal-text">{{ signalText }}</span>
       </div>
       <div class="signal-score">评分: <strong>{{ signal.score }}</strong></div>
-      <ul class="signal-reasons" v-if="signal.reasons?.length">
-        <li v-for="(r, i) in signal.reasons" :key="i">{{ r }}</li>
+      <ul class="signal-reasons" v-if="signalReasons.length">
+        <li v-for="(r, i) in signalReasons" :key="i">{{ r }}</li>
       </ul>
+      <!-- round24 R25: calm 市下 RSI/KDJ 中性区补 info reason——caption 承诺 RSI/KDJ
+           但旧实现极端区才 emit，中性区只显 MACD/MA（Q1 误导） -->
+      <p v-else-if="neutralInfo" class="signal-neutral-info">{{ neutralInfo }}</p>
+    </div>
+  </section>
+  <!-- round24 R25: 独立「综合信号」卡——技术+因子+基本面聚合决策（不替换技术信号）。
+       降级门禁：因子缺失时 composite_decision.degraded=true，显式标「因子缺失」 -->
+  <section class="card composite-section" v-if="compositeDecision && !loading">
+    <div class="card-header">
+      <h2 class="card-title">🧮 综合信号</h2>
+    </div>
+    <p class="signal-caption">技术 + 因子 + 基本面聚合（因子数据完整时）</p>
+    <div class="signal-content">
+      <template v-if="compositeDecision.degraded">
+        <div class="composite-degraded" role="alert">
+          <span class="composite-icon">⚠️</span>
+          <span class="composite-text">{{ compositeDecision.reason || '因子数据缺失，综合信号不可用' }}</span>
+        </div>
+      </template>
+      <template v-else>
+        <div :class="['signal-badge', compositeDecision.signal]" role="status">
+          <span class="signal-icon">{{ compositeIcon }}</span>
+          <span class="signal-text">{{ compositeText }}</span>
+        </div>
+        <div class="signal-score">评分: <strong>{{ compositeDecision.score }}</strong></div>
+      </template>
     </div>
   </section>
 </template>
@@ -31,10 +57,30 @@
 <script setup>
 import { computed } from 'vue'
 
-const props = defineProps({ indicatorData: Object, signal: Object, loading: Boolean })
+const props = defineProps({ indicatorData: Object, signal: Object, loading: Boolean, compositeDecision: Object })
 
 const signalText = computed(() => ({ buy: '买入', sell: '卖出', hold: '持有' })[props.signal?.signal] || '')
 const signalIcon = computed(() => ({ buy: '⬆️', sell: '⬇️', hold: '➡️' })[props.signal?.signal] || '')
+const compositeText = computed(() => ({ buy: '买入', sell: '卖出', hold: '持有' })[props.compositeDecision?.signal] || '')
+const compositeIcon = computed(() => ({ buy: '⬆️', sell: '⬇️', hold: '➡️' })[props.compositeDecision?.signal] || '')
+
+// round24 R25: 中性区 info reason——calm 市（RSI 40-60、KDJ 中段）下 reasons 为空，
+// 补「RSI=52 中性」info（消除 caption 承诺 RSI/KDJ 但 reason 只显 MACD/MA 的误导）。
+const neutralInfo = computed(() => {
+  const d = props.indicatorData
+  if (!d || props.signal?.reasons?.length) return ''
+  const rsi = d.rsi
+  if (typeof rsi !== 'number' || rsi < 40 || rsi > 60) return ''
+  const kdj = d.kdj || {}
+  const k = typeof kdj.k === 'number' && typeof kdj.d === 'number' ? '、KDJ 中段' : ''
+  return `RSI=${rsi.toFixed(1)} 中性${k}，无极端信号`
+})
+
+const signalReasons = computed(() => {
+  const list = props.signal?.reasons || []
+  // reasons 非空时用原列表；空时才显示中性 info
+  return list.length ? list : []
+})
 
 const indicatorItems = computed(() => {
   if (!props.indicatorData) return []
@@ -74,4 +120,8 @@ const indicatorItems = computed(() => {
 .signal-score { font-size: var(--font-size-base); color: var(--color-text-secondary); }
 .signal-reasons { list-style: none; padding: 0; margin: var(--space-4) 0 0; display: flex; flex-direction: column; gap: var(--space-2); width: 100%; max-width: 400px; }
 .signal-reasons li { padding: var(--space-2) var(--space-3); font-size: var(--font-size-sm); color: var(--color-text-secondary); background: var(--color-surface-secondary); border: 1px solid var(--color-border-light); border-radius: var(--radius-md); text-align: left; }
+.signal-neutral-info { margin: 0; padding: var(--space-2) var(--space-3); font-size: var(--font-size-xs); color: var(--color-text-tertiary); background: var(--color-surface-secondary); border-radius: var(--radius-md); }
+.composite-degraded { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-radius: var(--radius-lg); font-size: var(--font-size-sm); color: var(--color-warning-700); background: var(--color-bg-warning-subtle); border: 1px solid var(--color-warning-300); }
+.composite-icon { font-size: var(--font-size-base); }
+.composite-text { font-weight: var(--font-weight-medium); }
 </style>

@@ -26,8 +26,79 @@ from ..fetchers import sector_fetcher
 from ..factors.factor_registry import registry as factor_registry
 from .etf_classifier import classifier as etf_classifier
 from .pool_audit import pool_audit
+from ..core.market_calendar import market_session
 
 logger = logging.getLogger(__name__)
+
+
+# ── round24 R26: 盘后/熔断快照持久化（last-good 落盘，重启兜底） ──────────────
+def _snapshot_db_path() -> str:
+    """快照 SQLite 文件路径（与 database.py 同源）。"""
+    from ..config import settings
+    return settings.database_url.replace("sqlite+aiosqlite:///", "")
+
+
+def _snapshot_as_of_for(dt: datetime | None = None) -> str | None:
+    """R26: 返回快照 as_of 时点；盘中返回 None（实时源，不写快照）。
+
+    - after_hours (15:05-15:30): as_of=当日 15:00（盘中最后快照，盘后固定价格交易未结束）
+    - post_market (≥15:30):      as_of=当日 15:30（含盘后成交量，完整当日数据）
+    - open / pre_market / closed: None（盘中实时或无可写新数据）
+
+    语义（round24 §12.1 R26）：盘后快照 as_of 用 15:30 而非 15:00——
+    A股盘后固定价格交易 2026-07-06 起扩展到全市场，窗口 15:05-15:30 以收盘价
+    逐笔撮合，成交量计入当日总量，故「完整当日数据」要等到 15:30。
+    """
+    if dt is None:
+        dt = datetime.now()
+    session = market_session(dt)
+    if session == "after_hours":
+        return dt.replace(hour=15, minute=0, second=0, microsecond=0).isoformat(sep="T")
+    if session == "post_market":
+        return dt.replace(hour=15, minute=30, second=0, microsecond=0).isoformat(sep="T")
+    return None
+
+
+def _persist_snapshot_sync(kind: str, payload: Any, as_of: str) -> None:
+    """落盘快照（同步 raw sqlite）。同一 kind 仅保留最近 2 条。"""
+    import json
+    import sqlite3
+    try:
+        db_path = _snapshot_db_path()
+        payload_json = json.dumps(payload, ensure_ascii=False)
+        with sqlite3.connect(db_path, timeout=10) as conn:
+            conn.execute(
+                "INSERT INTO market_snapshots (kind, payload, as_of, created_at) "
+                "VALUES (?, ?, ?, ?)",
+                (kind, payload_json, as_of, datetime.utcnow().isoformat()),
+            )
+            # 仅保留最近 2 条同 kind（幂等刷新不会无限增长）
+            conn.execute(
+                "DELETE FROM market_snapshots WHERE kind=? AND id NOT IN "
+                "(SELECT id FROM market_snapshots WHERE kind=? ORDER BY id DESC LIMIT 2)",
+                (kind, kind),
+            )
+    except Exception as e:
+        logger.warning("[hub] _persist_snapshot_sync(%s) failed: %s", kind, e)
+
+
+def _load_latest_snapshot_sync(kind: str) -> dict | None:
+    """读最近一条同 kind 快照 payload（同步 raw sqlite）。失败返回 None。"""
+    import json
+    import sqlite3
+    try:
+        db_path = _snapshot_db_path()
+        with sqlite3.connect(db_path, timeout=10) as conn:
+            row = conn.execute(
+                "SELECT payload FROM market_snapshots WHERE kind=? "
+                "ORDER BY id DESC LIMIT 1",
+                (kind,),
+            ).fetchone()
+        if row:
+            return json.loads(row[0])
+    except Exception as e:
+        logger.warning("[hub] _load_latest_snapshot_sync(%s) failed: %s", kind, e)
+    return None
 
 
 def _parse_stock_list(s: Any) -> list:
@@ -824,7 +895,23 @@ class MarketDataHub:
                 return PoolDiff(added=[], removed=[], changed=[], version=self._version,
                                 timestamp=datetime.now().isoformat())
             else:
-                # 7.1: 首次刷新生效 — 无上次成功数据可回退，记录 CRITICAL
+                # 7.1: 首次刷新生效 — 无 last-good 内存可回退 → 尝试盘后 T-1 快照兜底
+                # （round24 R26：last-good 内存重启即丢，盘后重启必须能读 T-1 快照）。
+                _snap_pool = self._load_pool_snapshot()
+                if _snap_pool:
+                    self._pool = _snap_pool
+                    self._rebuild_index()
+                    self._degraded = True
+                    self._consecutive_failures = 0
+                    _elapsed = _time.time() - _start_ts
+                    logger.warning(
+                        "MarketDataHub: first-run refresh empty — loaded T-1 snapshot pool (%d total) as fallback",
+                        sum(len(v) for v in _snap_pool.values()),
+                    )
+                    pool_audit.log_refresh(PoolDiff(added=[], removed=[], changed=[], version=self._version,
+                                                     timestamp=datetime.now().isoformat()))
+                    return PoolDiff(added=[], removed=[], changed=[], version=self._version,
+                                    timestamp=datetime.now().isoformat())
                 self._consecutive_failures += 1
                 logger.critical(
                     "[market_data_hub] FIRST-RUN refresh produced empty pool — "
@@ -848,6 +935,9 @@ class MarketDataHub:
         self._consecutive_failures = 0
         # P0-13②: 本次刷新成功 → 清除 cooling 降级标记
         self._degraded = False
+        # round24 R26②: 刷新成功（盘后/熔断也会成功写 last-good）→ 落盘快照，
+        # 使「盘后重启」能读 T-1 快照兜底（last-good 内存重启即丢）。
+        await self._persist_snapshot_after_refresh(new_pool)
 
         # 8. 计算 diff
         diff = self._compute_diff(old_by_code)
@@ -1268,6 +1358,40 @@ class MarketDataHub:
     def get_by_code(self, symbol: str) -> dict[str, Any] | None:
         """按代码查询单个 ETF。"""
         return self._by_code.get(symbol)
+
+    # ── round24 R26②: 盘后快照落盘 / 盘后重启读兜底 ───────────────────────
+    async def _persist_snapshot_after_refresh(self, new_pool: dict) -> None:
+        """round24 R26②: 盘后/熔断刷新成功 → 落盘候选池 + 板块动量快照（last-good 之上再一层）。
+
+        仅在 post_market / after_hours 写（实时源时效场景不写，避免快照盖过实时）。
+        同步 sqlite 经 asyncio.to_thread 执行，不阻塞事件循环（符合 async def ≠ 阻塞）。
+        """
+        try:
+            from ..core.market_calendar import market_session
+            session = market_session()
+            if session not in ("post_market", "after_hours"):
+                return
+            as_of = _snapshot_as_of_for()
+            if not as_of:
+                return
+            pool_payload = {k: [dict(x) for x in v] for k, v in (new_pool or {}).items()}
+            if pool_payload:
+                await asyncio.to_thread(_persist_snapshot_sync, "pool", pool_payload, as_of)
+            sm = self.get_sector_momentum() or []
+            if sm:
+                await asyncio.to_thread(_persist_snapshot_sync, "sector_momentum", list(sm), as_of)
+        except Exception as e:
+            logger.debug("[hub] snapshot persist skipped (non-fatal): %s", e)
+
+    def _load_pool_snapshot(self) -> dict | None:
+        """round24 R26②: 读最近一条 pool 快照（盘后重启兜底，last-good 内存重启即丢）。"""
+        try:
+            snap = _load_latest_snapshot_sync("pool")
+            if snap and isinstance(snap, dict):
+                return snap
+        except Exception:
+            pass
+        return None
 
     # ── S5: MarketDataHub K 线缓存 ────────────────────────────────────
 

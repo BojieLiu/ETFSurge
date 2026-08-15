@@ -11,6 +11,7 @@ import time
 from datetime import datetime
 from typing import Any
 
+from ..core.market_calendar import market_session
 from ..engine.allocation_engine import (
     allocate as engine_allocate,
     enforce_max_correlation,
@@ -785,6 +786,14 @@ async def _build_market_context(market_data_hub) -> dict:
         logger.debug("[strategy_design] pool coverage report failed (non-fatal): %s", _e)
 
     _fdq = _factor_data_quality_report()
+    # round24 R26③: 显式盘后模式 + 数据时效——透传 session 与 data_as_of（反 R3 假实时）。
+    # 盘后/熔断设计必须标注「数据截至 T-1（15:30）」，避免精确数字冒充实时。
+    try:
+        from ..services.market_data_hub import _snapshot_as_of_for
+        data_as_of = _snapshot_as_of_for()
+    except Exception:
+        data_as_of = None
+    _session = market_session()
     return {
         "market_regime": market_data_hub.get_market_regime() or "range_bound",
         "market_sentiment": market_data_hub.get_market_sentiment() or {"sentiment_index": 50, "sentiment_label": "中性"},
@@ -792,6 +801,9 @@ async def _build_market_context(market_data_hub) -> dict:
         "sector_momentum": market_data_hub.get_sector_momentum() or [],
         "fund_flow": fund_flow,
         "benchmark_stocks": benchmark_stocks[:9],
+        # round24 R26③: 显式盘后模式与数据时效
+        "session": _session,
+        "data_as_of": data_as_of,
         # P1-7: 强势板块 vs 候选池覆盖对照（D-A3 显性化）
         "strong_sector_pool_coverage": _pool_coverage,
         # P1-9 (round20 §五 P1-9): 因子数据完整性降级标注——valid 率 < 60% 时

@@ -127,11 +127,12 @@ class TestP1_1MaxCorrelation:
         assert pair["512480"] + pair["512760"] <= 0.25 + 1e-9
         # 低因子分一方（512760, fs=0.4）被削减
         assert pair["512760"] < 0.20 + 1e-9
-        # 报告标注 correlation_warnings
+        # 报告标注 correlation_warnings（round24 R24②: 半导体/芯片同族 → 附加 near_substitute 层）
         warnings = s["risk_metrics"]["correlation_warnings"]
-        assert len(warnings) == 1
+        assert len(warnings) == 2
         assert warnings[0]["reduced_symbol"] == "512760"
         assert "关联度提示" in warnings[0]["note"]
+        assert any(w.get("type") == "near_substitute" for w in warnings)
         # Σ 权重保持 = 1
         assert abs(sum(a["weight"] for a in s["allocations"] if a["symbol"] != "CASH") - 0.60) < 0.01
 
@@ -179,11 +180,12 @@ class TestR2MandatoryCorrelationExemption:
         weights = {a["symbol"]: a["weight"] for a in s["allocations"]}
         assert weights["159338"] >= 0.05 - 1e-9, f"强制锚 159338 被削到 {weights['159338']}"
         assert weights["510300"] >= 0.05 - 1e-9
-        # 标注存在且不含被削减标的
+        # 标注存在且不含被削减标的（round24 R24②: 沪深300/中证A500 同族 → 附加 near_substitute 层）
         warnings = s["risk_metrics"]["correlation_warnings"]
-        assert len(warnings) == 1
+        assert len(warnings) == 2
         assert warnings[0]["reduced_symbol"] is None
         assert "豁免" in warnings[0]["note"]
+        assert any(w.get("type") == "near_substitute" for w in warnings)
         # 双方强制锚权重不变
         assert weights["159338"] == 0.20
         assert weights["510300"] == 0.25

@@ -1313,6 +1313,42 @@ def _us_static_name(symbol: str) -> str:
     return ""
 
 
+async def _last_close_fallback(symbol: str, asset_type: str) -> dict | None:
+    """round24 R20: 美股/HK 自选实时不可用时的 T-1 收盘价兜底。
+
+    复用 F39 已打通的 HK/US K 线源（china_market.fetch_history fallback 链），
+    取最近一根 close 作为「估」价格（is_estimated=True + as_of 标注），
+    让自选列表不至于空白。失败返回 None（前端显示「暂无实时」，不编造数据）。
+    """
+    try:
+        from ..fetchers.china_market import fetch_history
+        # run_sync 已导入（async_utils）——同步 fetcher 经线程池执行，不阻塞事件循环
+        hist = await asyncio.wait_for(
+            run_sync(fetch_history, symbol, asset_type, "daily", timeout=8),
+            timeout=10,
+        )
+        rows = hist or []
+        if not rows:
+            return None
+        last = rows[-1]
+        close = last.get("close") or last.get("收盘")
+        if close is None:
+            return None
+        return {
+            "symbol": symbol,
+            "price": float(close),
+            "change_pct": None,
+            "change_amount": None,
+            "volume": None,
+            "asset_type": asset_type,
+            "is_estimated": True,
+            "estimate_source": "last_close",
+            "as_of": str(last.get("date") or last.get("日期") or ""),
+        }
+    except Exception:
+        return None
+
+
 # P0-22④ (round16 3.24): 指数 → 市场映射（indices_meta 表优先，静态基座兜底）。
 _INDEX_MARKET_CACHE: dict[str, str] = {}
 _INDEX_MARKET_CACHE_TS = 0.0
@@ -1601,23 +1637,7 @@ async def get_watchlist(limit: int = 100, offset: int = 0) -> dict[str, Any]:
         items = result.scalars().all()
 
         # Enrich with realtime data (N07: 串行 → asyncio.gather 并发)
-        async def _enrich_one(item):
-            try:
-                realtime = await get_asset_realtime(item.symbol, item.asset_type)
-            except Exception:
-                realtime = None
-            return {
-                "id": item.id,
-                "symbol": item.symbol,
-                "name": item.name,
-                "asset_type": item.asset_type,
-                "notes": item.notes,
-                "created_at": item.created_at.isoformat() if item.created_at else None,
-                "updated_at": item.updated_at.isoformat() if item.updated_at else None,
-                "realtime": realtime,
-            }
-
-        enriched = await asyncio.gather(*[_enrich_one(i) for i in items])
+        enriched = await asyncio.gather(*[_enrich_watchlist_item(i) for i in items])
 
         return {
             "items": enriched,
@@ -1625,6 +1645,40 @@ async def get_watchlist(limit: int = 100, offset: int = 0) -> dict[str, Any]:
             "limit": limit,
             "offset": offset,
         }
+
+
+async def _enrich_watchlist_item(item) -> dict[str, Any]:
+    """round24 R20: 模块级自选条目实时行情 enrich（从 get_watchlist 闭包提取，可单测）。
+
+    美股/HK 实时不可用（QQQ/AAPL/SPY realtime=null）时——① 显式标注
+    realtime_unavailable（前端「暂无实时」，杜绝静默 null 被误读为「没波动」）；
+    ② 尝试 T-1 收盘价兜底（F39 K 线源已可用），标注 is_estimated。
+    """
+    try:
+        realtime = await get_asset_realtime(item.symbol, item.asset_type)
+    except Exception:
+        realtime = None
+    out = {
+        "id": item.id,
+        "symbol": item.symbol,
+        "name": item.name,
+        "asset_type": item.asset_type,
+        "notes": item.notes,
+        "created_at": item.created_at.isoformat() if item.created_at else None,
+        "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+        "realtime": realtime,
+    }
+    if (realtime is None or realtime.get("price") is None) and item.asset_type in ("US", "HK"):
+        out["realtime_unavailable"] = True
+        out["realtime_note"] = "该市场数据源暂不可用（无实时行情）"
+        if realtime is None:
+            try:
+                lc = await _last_close_fallback(item.symbol, item.asset_type)
+                if lc:
+                    out["realtime"] = lc
+            except Exception:
+                pass
+    return out
 
 
 async def add_watchlist(symbol: str, asset_type: str, notes: str | None = None) -> dict[str, Any]:
