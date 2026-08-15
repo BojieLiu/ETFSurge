@@ -193,7 +193,7 @@ def _global_avg_ic(ic_batch: dict[str, float] | None,
     """round24 R22: 统一 summary.avg_ic 口径 —— /factors/active 与 /factors/model 此前
     各算各的聚合（/active 取 status!=static 的 ic_value 绝对值均值，/model 取
     _build_health_summary 的 ic_vals 绝对值均值），同一时刻同屏两值不一致
-    （实测 0.2134 vs 0.3221，docs/round24-reverification-and-fixes.md §12.3 R22）。
+    （实测 0.2134 vs 0.3221，docs/archived/round24-reverification-and-fixes.md §12.3 R22）。
 
     口径：非 static 非 market-level 且当前 _last_ic_batch 有 ic_value 的因子，取绝对值均值
     （F26：「平均 |IC|」= 绝对值均值，非带符号均值）。两端点统一调用本函数 → 同一时刻一致。

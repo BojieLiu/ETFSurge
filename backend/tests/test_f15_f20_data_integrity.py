@@ -1,6 +1,6 @@
 from __future__ import annotations
 """
-F15/F20 (round23-system-audit-optimization §3.3/§2.3): 数据完整性修复。
+F15/F20 (docs/archived/round23-system-audit-optimization.md §3.3/§2.3): 数据完整性修复。
 
 F15: 孤立 avg_cost（有成本无份额）落库拦截——add_etf / update_etf / import_portfolio
      三条路径统一：shares_held 缺失/≤0 时 avg_cost 强制 None（不落脏数据）。

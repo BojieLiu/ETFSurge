@@ -1,5 +1,5 @@
 """
-T 系列测试防护（round23-system-audit-optimization §5/§8.1 落地）。
+T 系列测试防护（archived/round23-system-audit-optimization.md §5/§8.1 落地）。
 
 T7: 跨字段一致性断言——KDJ 超买(J≥80) 不得 BUY；score 与 signal 标签同源。
 T10: 统计口径不变式——factor_ic_records 行数 == 去重日数（F25① 已落地，此处显式守护）。

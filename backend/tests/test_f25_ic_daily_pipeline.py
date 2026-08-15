@@ -1,7 +1,7 @@
 """
-F25/F30 (round23-system-audit-optimization §8): IC 统计管线业内对齐。
+F25/F30 (archived/round23-system-audit-optimization.md §8): IC 统计管线业内对齐。
 
-背景（docs/round23-system-audit-optimization.md §2.5 B1）:
+背景（docs/archived/archived/round23-system-audit-optimization.md.md §2.5 B1）:
 - 旧 `sample_count` 统计「刷新次数」（4306 行/18 天 ≈240× 虚高），MIN_IC_SAMPLES=30
   开机 1h 即被跨过 →「有效 16」无统计含义。
 - 旧 `abs(ic_val) < 0.0001 → continue` 丢弃近零批次 → 生存者偏差（F30）。

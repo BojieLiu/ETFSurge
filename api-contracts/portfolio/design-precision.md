@@ -1,6 +1,6 @@
 # API 契约: 设计精度降级契约 (round24 R3)
 
-> 关联方案: `docs/round24-reverification-and-fixes.md` R3（P0「仅供参考」横幅 + 精确数字并存）
+> 关联方案: `docs/archived/round24-reverification-and-fixes.md` R3（P0「仅供参考」横幅 + 精确数字并存）
 > 变更类型: 响应增强（`data_precision` 字段）+ 前端呈现约束
 > 版本: v1.0
 

@@ -1,6 +1,6 @@
 """round24 R22 (P2): /factors/active 与 /factors/model 的 summary.avg_ic 口径统一。
 
-背景 (docs/round24-reverification-and-fixes.md §5.2/§12.3 R22):
+背景 (docs/archived/round24-reverification-and-fixes.md §5.2/§12.3 R22):
 同屏两个「平均 |IC|」不一致——/factors/active 实测 0.2134 vs /factors/model 0.3221。
 根因: 两处聚合口径不同:
 - /active: status != static 因子的 ic_value 绝对值均值（market-level 因子经 status=static 过滤）

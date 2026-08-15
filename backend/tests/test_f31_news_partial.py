@@ -1,5 +1,5 @@
 """
-F31 (round23-system-audit-optimization §2.4 A4/§8): 冷启动 headlines/macro partial 标识。
+F31 (archived/round23-system-audit-optimization.md §2.4 A4/§8): 冷启动 headlines/macro partial 标识。
 
 背景: 冷启动/数据源熔断时 headlines 与 macro 各只返回 1 条且是同一条，无「不完整」
 标识 → 半成品静默上屏。修复: 端点条数 < PARTIAL_THRESHOLD(5) 时响应头

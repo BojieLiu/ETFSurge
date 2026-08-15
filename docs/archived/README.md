@@ -2,6 +2,14 @@
 
 本目录存放**已完成使命**的历史文档（诊断计划、评审产物、交接、根因分析），保留审计价值但不再作为活跃依据。
 
+## 最近一次归档（2026-08-16，round25 验收完成 + round23/24 被 round25 承接后）
+并入本目录（均已完成使命，无活跃实施依据身份）：
+- `round23-system-audit-optimization.md`（round23 系统审计设计文档：P0 正确性 12 项 F7-F28 + 架构 6 项已在 round23/24 落地并实证；残余 F1/F2/F3/F13/F21/E1/F11/T3 已由 round24 R1-R26 与 round25 R27-R39 承接）
+- `round24-reverification-and-fixes.md`（round24 复验审计 + R1-R26 修复设计：26 项已全部实施并推送（d9a734e/98b98a7/8841dda/6b13948/0272150），round25 复验 22 项生效；残余 R6/R7/R9/R10/R17/R25/R26 由 `docs/round25-container-acceptance-and-optimization.md` R27-R39 承接）
+
+> 归档后引用统一指向 `docs/archived/...`。同步更新：`backend/app/routers/factors.py`、`backend/tests/test_f15_f20_data_integrity.py`、`test_f25_ic_daily_pipeline.py`、`test_f31_news_partial.py`、`test_round24_r22_avg_ic.py`、`test_t_series_guards.py`、`api-contracts/portfolio/design-precision.md` 的 docstring/注释路径引用。
+> 不归档保留于 `docs/` 顶层：`round25-container-acceptance-and-optimization.md`（当前活跃，R27-R39 达实施标准待实施）、`design-checklist.md`（常驻设计清单）、`test-redundancy-audit-and-plan.md`（测试冗余规划，round24 折叠待执行）。
+
 ## 最近一次归档（2026-08-14，round22 落地 + round21 被 round23 覆盖 + round20 合并至 round23 后）
 并入本目录（均已完成使命，无活跃实施依据身份）：
 - `engine-refactor-spec-round22.md`（round22 引擎重设计实现批次：E1–E5 5/5 落地，commit `3269c8b` + `4eb2d4d`；实现已合流，规格退出活跃）
