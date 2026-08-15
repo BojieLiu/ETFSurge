@@ -1618,69 +1618,6 @@ async def resolve_symbol_to_code(symbol: str, asset_type: str = "A") -> str | No
     return None
 
 
-async def get_watchlist(limit: int = 100, offset: int = 0) -> dict[str, Any]:
-    from ..models.search import Watchlist
-    from sqlalchemy import select, func
-
-    async with async_session() as session:
-        # Get total count
-        total_result = await session.execute(select(func.count(Watchlist.id)))
-        total = total_result.scalar() or 0
-
-        # Get items
-        result = await session.execute(
-            select(Watchlist)
-            .order_by(Watchlist.created_at.desc())
-            .limit(limit)
-            .offset(offset)
-        )
-        items = result.scalars().all()
-
-        # Enrich with realtime data (N07: 串行 → asyncio.gather 并发)
-        enriched = await asyncio.gather(*[_enrich_watchlist_item(i) for i in items])
-
-        return {
-            "items": enriched,
-            "total": total,
-            "limit": limit,
-            "offset": offset,
-        }
-
-
-async def _enrich_watchlist_item(item) -> dict[str, Any]:
-    """round24 R20: 模块级自选条目实时行情 enrich（从 get_watchlist 闭包提取，可单测）。
-
-    美股/HK 实时不可用（QQQ/AAPL/SPY realtime=null）时——① 显式标注
-    realtime_unavailable（前端「暂无实时」，杜绝静默 null 被误读为「没波动」）；
-    ② 尝试 T-1 收盘价兜底（F39 K 线源已可用），标注 is_estimated。
-    """
-    try:
-        realtime = await get_asset_realtime(item.symbol, item.asset_type)
-    except Exception:
-        realtime = None
-    out = {
-        "id": item.id,
-        "symbol": item.symbol,
-        "name": item.name,
-        "asset_type": item.asset_type,
-        "notes": item.notes,
-        "created_at": item.created_at.isoformat() if item.created_at else None,
-        "updated_at": item.updated_at.isoformat() if item.updated_at else None,
-        "realtime": realtime,
-    }
-    if (realtime is None or realtime.get("price") is None) and item.asset_type in ("US", "HK"):
-        out["realtime_unavailable"] = True
-        out["realtime_note"] = "该市场数据源暂不可用（无实时行情）"
-        if realtime is None:
-            try:
-                lc = await _last_close_fallback(item.symbol, item.asset_type)
-                if lc:
-                    out["realtime"] = lc
-            except Exception:
-                pass
-    return out
-
-
 async def add_watchlist(symbol: str, asset_type: str, notes: str | None = None) -> dict[str, Any]:
     from ..models.search import Watchlist
     from sqlalchemy import select

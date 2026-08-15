@@ -9,7 +9,7 @@ from typing import Any
 
 from ..database import async_session
 from ..services.market_service import (
-    get_watchlist, add_watchlist, update_watchlist, remove_watchlist, batch_remove_watchlist, search_hk_us,
+    add_watchlist, update_watchlist, remove_watchlist, batch_remove_watchlist, search_hk_us,
     _sort_search_results,
 )
 from ..analysis.indicators import compute_all_indicators, compute_chart_data
@@ -823,7 +823,21 @@ async def _watchlist_enrich_items(items: list) -> list[dict]:
             #（旧实现直接丢 realtime 键，前端无法区分「加载中」与「已降级」）
             if item_dict.get("realtime") is None:
                 item_dict["realtime"] = None
-                item_dict["_degraded"] = True
+                _at = item.asset_type or "A"
+                if _at in ("US", "HK"):
+                    # round24 R20: 美股/HK 无实时源 → 显式「暂无实时」（非静默 null，
+                    # 避免误读为「没波动」）+ 尝试 T-1 收盘兜底（F39 K 线源，is_estimated 标「估」）
+                    item_dict["realtime_unavailable"] = True
+                    item_dict["realtime_note"] = "该市场数据源暂不可用（无实时行情）"
+                    try:
+                        from ..services.market_service import _last_close_fallback
+                        _lc = await _last_close_fallback(resolved_symbol, _at)
+                        if _lc:
+                            item_dict["realtime"] = _lc
+                    except Exception:
+                        pass
+                else:
+                    item_dict["_degraded"] = True
         enriched.append(item_dict)
 
     return enriched

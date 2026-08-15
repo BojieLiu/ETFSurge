@@ -135,8 +135,14 @@ class TestWatchlistCoolingDegrade:
             return {"symbol": symbol, "price": 1.0, "change_pct": 0.0,
                     "volume": 1, "asset_type": asset_type}
 
+        async def _no_close_fallback(symbol, asset_type):
+            # round24 R20: T-1 收盘兜底（_last_close_fallback）走外部 K 线源，
+            # 单测中桩掉以避免网络耗时影响「冷却期快速返回 <3s」断言。
+            return None
+
         with patch("app.services.market_service.get_realtime_batch", _fail_batch), \
-             patch("app.routers.market.market_data_hub.get_asset_realtime", _unexpected_realtime):
+             patch("app.routers.market.market_data_hub.get_asset_realtime", _unexpected_realtime), \
+             patch("app.services.market_service._last_close_fallback", _no_close_fallback):
             _start = time.monotonic()
             resp = await async_client.get("/api/v1/market/watchlist")
             _dur = time.monotonic() - _start
@@ -148,10 +154,12 @@ class TestWatchlistCoolingDegrade:
         assert per_item_calls["n"] == 0, "P1-2 冷却期应跳过 per-item 直接 DB-only"
         # 冷却期快速返回 < 3s（verify_perf watchlist ≤3s 阈值）
         assert _dur < 3.0, f"watchlist 冷却期耗时 {_dur:.2f}s ≥ 3s（未快速降级）"
-        # 批量失败市场标的显式 _degraded（realtime=null，前端可区分「加载中」与「已降级」）
+        # 批量失败市场标的显式降级标记：round24 R20 后 US/HK 用 realtime_unavailable
+        # （「暂无实时」），不再复用 _degraded（_degraded 仅 A 股降级语义）。
         us_items = [it for it in body["items"] if it["asset_type"] == "US"]
         assert len(us_items) == 2
-        assert all(it.get("_degraded") for it in us_items), "US 批量失败应标记 _degraded"
+        assert all(it.get("realtime_unavailable") for it in us_items), \
+            "US 批量失败应标记 realtime_unavailable（R20）"
 
     @pytest.mark.asyncio
     async def test_batch_timeout_reduced_to_2s(self, async_client, wl_db):

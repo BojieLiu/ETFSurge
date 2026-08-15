@@ -55,10 +55,14 @@ async def test_get_asset_realtime_for_a_asset():
 
 
 def test_watchlist_fields_use_english():
-    """Z28: Watchlist response should use English field names, not Chinese."""
-    from app.services.market_service import get_watchlist
+    """Z28: Watchlist response should use English field names, not Chinese.
+
+    Repointed to the live serving route routers/market.watchlist_list (the old
+    market_service.get_watchlist was dead code and removed in round24 R20).
+    """
+    from app.routers.market import watchlist_list
     import inspect
-    sig = inspect.signature(get_watchlist)
+    sig = inspect.signature(watchlist_list)
     assert "limit" in sig.parameters
     assert "offset" in sig.parameters
 

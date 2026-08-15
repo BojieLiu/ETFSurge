@@ -325,5 +325,8 @@ def test_watchlist_panel_null_change_pct_not_red():
         path = os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "src",
                             "components", "market", "WatchlistPanel.vue")
     src = open(path, encoding="utf-8").read()
-    assert "change_pct != null && item.realtime.change_pct >= 0" in src, \
+    # B6: change_pct=null 必须判空（不得误判红涨）。round24 R20 改为可选链
+    # `item.realtime?.change_pct != null`（realtime 可能为 null：美股/HK 无实时源），
+    # 语义等价且更健壮——断言实际生效的判空守卫。
+    assert "item.realtime?.change_pct != null" in src, \
         "change_pct=null 时应判空（不得误判红涨）"

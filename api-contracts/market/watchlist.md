@@ -42,6 +42,30 @@ GET /api/v1/market/watchlist
         "change_pct": 1.25,
         "volume": 123456789
       }
+    },
+    {
+      "id": 2,
+      "symbol": "TSLA",
+      "name": "特斯拉",
+      "asset_type": "US",
+      "added_at": "2024-01-15T10:30:00Z",
+      "notes": "",
+      "realtime": null,
+      "realtime_unavailable": true,
+      "realtime_note": "该市场数据源暂不可用（无实时行情）"
+    },
+    {
+      "id": 3,
+      "symbol": "AAPL",
+      "asset_type": "US",
+      "realtime": {
+        "price": 189.5,
+        "change_pct": -0.42,
+        "volume": 54321098,
+        "is_estimated": true
+      },
+      "realtime_unavailable": true,
+      "realtime_note": "该市场数据源暂不可用（无实时行情）"
     }
   ],
   "total": 1,
@@ -56,6 +80,11 @@ GET /api/v1/market/watchlist
 2. **重查行情**: 解析成功得到真实代码后，用真实代码重新查询实时行情。
 3. **自愈回写**: 解析成功且真实代码与原 symbol 不同时，执行 `UPDATE watchlist SET symbol=:resolved, name=COALESCE(NULLIF(name,''), :realname) WHERE id=:id`。遇唯一约束冲突时仅记 warning，不阻塞响应，本次响应仍使用解析后的行情。
 4. **name 空串兜底**: 无论写入还是读取，`name = (realtime.get("name") or "").strip() or symbol`。
+5. **round24 R20 — 美股/HK 无实时源显式标记**（合约新增字段 `realtime_unavailable` / `realtime_note`）：
+   - 当条目 `asset_type in ("US", "HK")` 且实时行情解析为 None（批量失败/超时/无源）时，**不再静默置 `realtime: null`**，而是置 `realtime_unavailable: true` + `realtime_note: "该市场数据源暂不可用（无实时行情）"`，前端据此渲染「暂无实时」徽标（红涨绿跌语义下杜绝被误读为「没波动」）。
+   - 同时尝试 T-1 收盘兜底 `_last_close_fallback(symbol, asset_type)`（F39 K 线源）；命中则在 `realtime` 中回填 `{price, change_pct, volume, is_estimated: true}`，并仍保留 `realtime_unavailable: true`（说明这是估值非实时）。
+   - A 股（`asset_type` 其他值）无实时源时仅置 `_degraded: true`（兼容既有降级语义），不置 `realtime_unavailable`。
+   - 端点整体 5s 超时（P0-4）时直接返回 DB-only 行（无 `realtime`/`realtime_unavailable`/`_degraded` 键）——属超时降级，非字段语义，前端应识别 loading/慢数据态。
 
 **合法代码形态判断**:
 
@@ -203,7 +232,10 @@ DELETE /api/v1/market/watchlist
 | asset_type | string | `A` \| `HK` \| `US` \| `index` \| `commodity` |
 | added_at | string (ISO datetime) | 添加时间 |
 | notes | string \| null | 用户备注 |
-| realtime | object \| null | 实时行情快照（可选，含 price, change_pct, volume） |
+| realtime | object \| null | 实时行情快照（可选，含 price, change_pct, volume；T-1 兜底时含 `is_estimated: true`） |
+| realtime_unavailable | boolean \| null | round24 R20：美股/HK 实时源不可用显式标记（true=暂无实时，非静默 null） |
+| realtime_note | string \| null | round24 R20：无实时源说明文案 |
+| _degraded | boolean \| null | A 股等无实时源时的兼容降级标记 |
 
 ### WatchlistCreate (请求)
 
