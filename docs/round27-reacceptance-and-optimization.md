@@ -9,14 +9,14 @@
 ## 0. 执行摘要
 
 ### 0.1 本轮性质
-round25（`docs/round25-container-acceptance-and-optimization.md`）与 round26（`docs/round26-search-autocomplete-data-gaps.md`）的 R27-R41 / Q1-Q7 已在 `cd70cdf`（数据可信度+搜索缺口）与 `2fce555`（R39 LLMQuotaGate + R27 单标的口径 + R28-b 接线 + R37）两 commit 中实施。本轮用**全新 Docker 镜像 + 16 项动作**复验落地情况，并识别出**实施后仍残留的 10 项问题（R42-R51）**。
+round25（`docs/round25-container-acceptance-and-optimization.md`）与 round26（`docs/round26-search-autocomplete-data-gaps.md`）的 R27-R41 / Q1-Q7 已在 `cd70cdf`（数据可信度+搜索缺口）与 `2fce555`（R39 LLMQuotaGate + R27 单标的口径 + R28-b 接线 + R37）两 commit 中实施。本轮用**全新 Docker 镜像 + 16 项动作**复验落地情况，并识别出**实施后仍残留的 11 项问题（R42-R52）**。
 
 ### 0.2 验证动作与结果
 | # | 动作 | 结果 |
 |---|---|---|
 | 1 | Docker 构建 + 回收老镜像 | ✅ 新镜像 backend `57f4f62f6946` / frontend `9023f33bda60`，老镜像被同名 tag 替换回收 |
 | 2 | 预热性能诊断（PROFILE_WARMUP=1） | ⚠️ **预热 34.5s（round25 为 20s，回归）**；cProfile/pyinstrument 定位 F1/F2 未实施 + R32 新增 12.8s 失败路径（R44） |
-| 3 | 组合设计 600 + 场内策略检查 537（on_exchange） | ✅ R28 综合信号接通、R41-a 近替代品解耦、R2/R4/R5/R21/R24 生效；⚠️ R27 方向仍相反（R42）、策略检查 LLM 恒 75s 超时（R43） |
+| 3 | 组合设计 600 + 场内策略检查 537（on_exchange） | ✅ R28 综合信号接通、R41-a 近替代品解耦、R2/R4/R5/R21/R24 生效；⚠️ R27 方向仍相反（R42）、策略检查 LLM 恒 75s 超时（R43）、综合信号恒 hold（R52） |
 | 4 | A/HK/US 行情分析全能力 | ✅ 三地个股/板块/综合研判/搜索/指数全真实可用，Q2/Q3/Q4/Q6 修复实证；⚠️ first_byte 34-78s（R49） |
 | 5 | 热点 + 自选 | ✅ 热点加载成功、自选 add/get 正常；⚠️ watchlist 收盘兜底周末全 None → 0/23 带 realtime（R45） |
 | 6 | 持仓技术信号 | ✅ 6 只 data_available + reasons 自洽；✅ R28 综合信号已接通 |
@@ -28,7 +28,7 @@ round25（`docs/round25-container-acceptance-and-optimization.md`）与 round26�
 | 12 | 后端链路性能（冷/热） | ✅ 热态全 <0.21s；⚠️ 冷态 watchlist 5.86s/stock-hot-rank 4.89s/indices 4.07s/search 6.87s |
 | 13 | 测试防护缺口分析 | ⚠️ 7 类缺口（§13）——R27 跨屏方向、R29 兜底失败、R36 结构化字段、R40 首启空窗均无测试拦截 |
 | 14 | 冗余代码 | ✅ backend 根 scratch 0；⚠️ logs/*.py 224 个残留、测试文件 220 个 |
-| 15 | 综合结论 + 修复方案 | 本文档（R42-R51 修复设计，达实施标准不实施） |
+| 15 | 综合结论 + 修复方案 | 本文档（R42-R52 修复设计，达实施标准不实施） |
 | 16 | 回收容器 + 归档 + commit/push | 见 §15 与结尾 |
 
 ### 0.3 问题分级（本轮新发现，危害驱动）
@@ -39,12 +39,13 @@ round25（`docs/round25-container-acceptance-and-optimization.md`）与 round26�
   3. **R44 — 预热 34.5s 回归（R32 反噬 + F1/F2 未实施）**：`warmup_timing.json` 总耗时 34513ms（round25 为 20s）。R32 新增 `warmup_sector_cache` 12.8s，但其底层 `_compute_industry_momentum` 本轮**失败**（`Connection aborted`，日志）→ 12.8s 纯空转；F1（fund NAV 16.7s）+ F2（SSL 握手 15s 无 Session 复用）仍未实施。详见 §1。
   4. **R45 — R29 残余：收盘快照兜底周末落空**：R29 的 5s 超时回退改走 `_last_close_fallback`（T-1 收盘），但该函数依赖历史 K 线源；周末/源冷却时**兜底自身也返回 None** → watchlist 实测 **0/23 条带 realtime**、0 条带 `is_estimated`（「估」徽标永不出现），前端仍显示「行情暂不可用」/「暂无实时」。R29 的「收盘快照兜底」在快照源也断时无第二层兜底。详见 §2.6。
   5. **R46 — R40 残余：首启空窗无快照可读**：R40-a 读取兜底代码已落地（`get_sector_momentum` `market_data_hub.py:1658`），但快照只在**成功刷新时写入**（R40-b 仅放宽「非空才写」，未解决「首启 live 源失败则永无快照」）。本轮 fresh 容器首启 live 源失败（Connection aborted）→ 磁盘无快照 → `sector_momentum=[]`、`strong_sector_pool_coverage=[]`，设计强板块注入失效。详见 §2.3。
+  6. **R52 — 综合信号结构性恒 hold（用户 review 驱动新增）**：本轮 13 只持仓 `composite_decision.signal` **全部 hold**，即便 `technical_signal` 有 buy（513120/159869）也有 sell（512890/159545/512000/561560）。根因两层（代码级）：①**结构性**——`composite_signal`（`signal.py:34`）`score=0.4技术+0.4估值+0.2动量`，估值/动量分项在周末因子缺失时恒 0（`_COMPOSITE_FACTOR_MAP` `portfolio_service.py:1533-1537` 的 `valuation.*`/`momentum.*` 键无命中 → `_attach_composite_decisions:1571-1574` 记 0.0），只剩 `0.4×技术 ∈ [-0.4,+0.4]`，永远够不到 ±0.5 的 buy/sell 阈值（`signal.py:40-45`）；②**门禁失效**——`composite_signal_with_gate` 的 `factor_valid_rate<0.6` 降级门禁（`signal.py:85`）本应拦住，但 `_attach_composite_decisions:1556-1558` 把 valid_rate 算成 `filled_count/total_count`（「有真实因子值的持仓数」=13/13=100%，技术类因子即算 filled），而非「估值/动量分项覆盖率」→ 门禁误判「数据完整」，放行估值/动量恒 0 的假综合信号，还标 `degraded=false`。专业投资者看到「综合信号恒持有」= 一个永不给出方向的假信号。详见 §2.8。
 - **P2（治理/呈现）**
-  6. **R47 — R36 残余：结构化字段仍精确小数**：`data_precision` 元数据标注 `factor_score_display=bucket`/`weight_display=coarse`，design_text LLM 表格已桶化（≈5%/偏弱），但**结构化 API `etfs[].factor_score`（-0.9855288495104011）与 `etfs[].weight`（0.2067）仍精确小数**，与元数据矛盾。
-  7. **R48 — R41-c 未实现**：近替代品仅告警（R41-a/b 已生效），不合并/留一。平衡型仍双持「588170 科创半导体 + 588200 科创芯片」「159570/513120 医药生物」，防御型仍三持大盘宽基（510300+159338+510050）。
-  8. **R49 — LLM 流式 first_byte 34-78s**：无进度心跳之外的可视化，专业投资者不可接受。
-  9. **R50 — logs/*.py 224 个 scratch 残留**：R38 删了 backend 根 20 个，但 `logs/round{8,16,18,20}/*.py` 224 个未清理（已 gitignore，磁盘残留）。
-  10. **R51 — R34 残余**：root perf 75（<90，round25 为 69）、portfolio-analysis a11y 82（<90），F4/F5 未实施。
+  7. **R47 — R36 残余：结构化字段仍精确小数**：`data_precision` 元数据标注 `factor_score_display=bucket`/`weight_display=coarse`，design_text LLM 表格已桶化（≈5%/偏弱），但**结构化 API `etfs[].factor_score`（-0.9855288495104011）与 `etfs[].weight`（0.2067）仍精确小数**，与元数据矛盾。
+  8. **R48 — R41-c 未实现**：近替代品仅告警（R41-a/b 已生效），不合并/留一。平衡型仍双持「588170 科创半导体 + 588200 科创芯片」「159570/513120 医药生物」，防御型仍三持大盘宽基（510300+159338+510050）。
+  9. **R49 — LLM 流式 first_byte 34-78s**：无进度心跳之外的可视化，专业投资者不可接受。
+  10. **R50 — logs/*.py 224 个 scratch 残留**：R38 删了 backend 根 20 个，但 `logs/round{8,16,18,20}/*.py` 224 个未清理（已 gitignore，磁盘残留）。
+  11. **R51 — R34 残余**：root perf 75（<90，round25 为 69）、portfolio-analysis a11y 82（<90），F4/F5 未实施。
 
 ### 0.4 验证窗口标注（D3）
 本轮执行于 2026-08-16 19:29-20:00（北京时间，**周日盘后**）。以下结论含盘后/数据源冷却成分，属「待交易时段（9:30-11:30/13:00-15:00）复测」：sector_momentum=[]、watchlist realtime 0/23、factor valid_rate=0%、ai_summary null。但「因子分两屏方向相反（R42）」「策略检查 LLM 75s 超时（R43）」「预热 34.5s（R44）」「R29/R40 兜底链断裂（R45/R46）」均为**代码级结构事实，不受窗口影响**。
@@ -130,6 +131,17 @@ R41-a（解耦）与 R41-b（前端渲染）已生效，但 R41-c（平衡/防�
 - **方法已统一（均 z-score），但参考群体不同（全池 vs 持仓）** → 同一标的在两屏方向仍相反。R27 验收口径「两屏方向一致」未达成。策略检查对「相对全池的强弱」无感知——一只在全池垫底（-0.958）的标的，若其持仓组合整体更弱，会在持仓截面里显示「中性偏正」（+0.16）。
 
 **修复设计**：见 §15.1 R42。
+
+### 2.8 综合信号结构性恒 hold（R52，用户 review 驱动新增）
+**现象（用户提问）**：「现在组合持仓里的标的，所有综合信号都是持有，这合理吗？」——经查，本轮 13 只持仓 `composite_decision.signal` **全部 hold**（`degraded=false`），即便 `technical_signal` 有 buy（513120/159869）也有 sell（512890/159545/512000/561560）。「综合信号」等于一个永不给出方向的假信号。
+
+**根因（代码级，两层）**：
+1. **结构性：估值/动量恒 0 → 技术单项永远够不到阈值**。`composite_signal`（`app/analysis/signal.py:34`）聚合公式 `score = 0.4×技术 + 0.4×估值 + 0.2×动量`，buy 阈值 +0.5、sell 阈值 -0.5（`:40-45`）。`_attach_composite_decisions`（`portfolio_service.py:1571-1574`）按 `_COMPOSITE_FACTOR_MAP`（`:1533-1537`）聚合三分项——但周末 `factor_scores` 只有技术类因子（RSI/KDJ/MACD），`valuation.*`/`momentum.*` 键无命中 → `components["valuation"]=0.0`、`components["momentum"]=0.0`。于是 `score = 0.4×技术 ∈ [-0.4, +0.4]`，即使技术封顶 +1.0（最强买）也只有 0.4 < 0.5 → **数学上永远 hold**。
+2. **门禁失效：valid_rate 口径错**。`composite_signal_with_gate` 有降级门禁（`signal.py:85`：`factor_valid_rate<0.6` → `degraded=true, signal=None`，避免「因子缺失仍合成假结论」）。但 `_attach_composite_decisions:1556-1558` 把 valid_rate 算成 `filled_count/total_count`（`:1022-1030` 的「有真实因子值的**持仓数**/持仓总数」= 13/13 = 100%，技术类因子即算 filled），**而非「估值/动量分项覆盖率」** → 门禁看到 valid_rate=100% ≥ 60%，误判「数据完整」，放行估值/动量恒 0 的假综合信号，标 `degraded=false`。
+
+**与 R28 的关系**：R28（round25）把综合信号从「前后端死代码」接成了「真实渲染」，但接通后暴露出「内容质量缺陷」——R28 解决了「看不看得到」，R52 是「看到的内容是恒 hold 的假信号」。两者不矛盾，R52 是 R28 接通的下一层问题。
+
+**修复设计**：见 §15.1 R52。
 
 ---
 
@@ -253,7 +265,7 @@ R41-a（解耦）与 R41-b（前端渲染）已生效，但 R41-c（平衡/防�
 
 ---
 
-## 15. 修复方案总表（R42-R51，不实施）
+## 15. 修复方案总表（R42-R52，不实施）
 
 ### 15.1 正确性 / 数据可信度
 
@@ -262,6 +274,7 @@ R41-a（解耦）与 R41-b（前端渲染）已生效，但 R41-c（平衡/防�
 | R42 | P0 | 因子分两屏方向相反：设计=全池截面 z（159338=-0.958），检查=13 持仓截面 z（+0.16） | **采纳方案(a) 统一参考群体（决定）：** 策略检查的「因子分」不再用 13 持仓截面 z（`_cross_sectional_factor_composite`，`portfolio_service.py:1586`），改为复用设计同源的全池截面复合分——`market_data_hub.get_factor_matrix()` 已产出的全池截面 z（即设计 `allocation_engine:401-405/:623` 的输入），对每只**场内持仓**按其 symbol 查全池 z 行做 `aggregate_factor_scores` 分类加权复合。**场外联接基金（不在池内，如 022449）**回落 `_within_symbol_factor_composite`（`:1628`，绝对口径），并在 reason 显式标注「因子分（单标的口径，场外联接无池内截面）」诚实降级。**方案(b) 标签补全（配套）：** 两屏 reason 均加参考群体字样——设计「因子分（相对候选池）」，策略检查场内持仓「因子分（相对候选池）」，场外「因子分（单标的）」。删除 `_cross_sectional_factor_composite` 的持仓截面语义（或保留仅供单测但不再被 `_rule_based_suggestion` 主路径调用）。 | ①单测（抓假负向）：同标的（场内）design `etfs[].factor_score` 与 strategy_check「因子分」**方向一致**（159338 两屏同负，禁再出现「设计 -0.958 vs 检查 +0.16」）；②场外持仓 reason 含「单标的口径」标注；③负向断言：禁止对持仓子集重做截面 z 冒充全池 z | `portfolio_service.py:1586-1625/:1628/:1675/:1775-1779`、`market_data_hub.get_factor_matrix`、`allocation_engine.py:401-405/:623` |
 | R45 | P1 | watchlist 收盘兜底周末落空（`_last_close_fallback` 自身失败） | ①`_watchlist_close_fallback`（`market.py:952`）加第二层兜底：`_last_close_fallback` None 时回退 Redis last-good 报价（`cache_service.py:105` 已支持 Redis，`quote_key` 写入侧延长 TTL 至 24h 使其跨周末存活）；②双断（realtime + 快照 + last-good 全无）时，前端 `WatchlistPanel.vue:140/147` 的「行情暂不可用」文案升级为「非交易时段无行情（数据源维护中）」+ 显式时间戳，诚实区分「没波动」vs「没数据」；③last-good 命中时标注 `data_source="stale"` + `as_of`（与 `_degraded` 区分） | ①单测（抓假负向）：mock `_last_close_fallback` 返 None + 注入 Redis last-good → 行 realtime 非 None 且 `data_source=stale`；②三断场景断言「诚实的维护中标注 + 时间戳」而非空白冒充；③Redis last-good TTL 24h 断言 | `market.py:952-992`、`cache_service.py:105`、`market_service.py:_last_close_fallback`、`WatchlistPanel.vue:127-153` |
 | R46 | P1 | R40 首启空窗：live 源失败 → 永无快照可读 | ①首启 `refresh` 失败时，从 akshare 日频板块涨跌（`stock_sector_spot`/`stock_board_industry_name_em`，盘后可得日频，不依赖实时源）**单独兜底拉一次**写 `sector_momentum` 快照（**D1 探针前置**：验证该 akshare 接口在盘后可用且字段含 change_pct）；②快照 as_of 非今日时，设计链路/报告显式标注 `sector_momentum.as_of`（诚实呈现快照时效，替代当前 `data_as_of=None`）；③写侧已放宽「非空即写」（R40-b），补「首启失败路径也尝试写」 | ①单测：mock live 源失败 + 注入日频板块数据 → 快照非空写入；②盘后首启 `verify_e2e` 设计链路 `sector_momentum` 非 []；③快照 as_of 非今日时前端/报告显式标注 | `market_data_hub.py:1658/:1363`、`market_trends.py:68` |
+| R52 | P1 | 综合信号结构性恒 hold（估值/动量恒 0 + 门禁 valid_rate 口径错）：`composite_signal`（`signal.py:34`）`0.4技术+0.4估值+0.2动量`，周末估值/动量恒 0 → `0.4×技术∈[-0.4,+0.4]` 永不够 ±0.5 阈值 → 恒 hold；且 `_attach_composite_decisions:1556-1558` 的 valid_rate=「持仓级填充率」13/13=100% 而非「分项覆盖率」→ 门禁不降级、标 `degraded=false` | **采纳「分项覆盖率门禁 + 诚实降级」：** ①`_attach_composite_decisions` 改算**分项覆盖率**——对 `_COMPOSITE_FACTOR_MAP` 三分项（technical/valuation/momentum）统计「有真实因子值（非 0、非兜底默认）的分项数 / 3」，作为 `factor_valid_rate` 传入 `composite_signal_with_gate`；估值/动量分项全缺（周末）→ valid_rate=1/3<0.6 → `degraded=true, signal=None`（诚实「综合信号不可用，退化为纯技术信号」，技术 buy/sell/hold 仍由 `technical_signal` 字段独立呈现，不丢信息）。②（配套）分项缺失但未达降级阈值（≥2 分项可用）时，对可用分项**权重归一**（如缺估值 → `score=0.4技术+0.2动量 / 0.6`），避免缺失分项静默稀释分数；③前端 `SignalPanel` 的 `degraded` 徽标（round24 R25 已渲染）在 `signal=None` 时显示「因子缺失，综合信号不可用」而非「hold」 | ①单测（抓假负向）：mock 估值/动量分项无值（仅技术类因子）→ `composite_decision.degraded=true` 且 `signal=None`（禁再出现「degraded=false + signal=hold」的假综合信号）；②单测：三面齐全（技术+估值+动量均有真实值）→ 综合信号**能产出 buy/sell**（负向：三面齐全仍恒 hold → FAIL）；③权重归一单测：缺估值时 score 不被 0.4 权重稀释（断言与归一后一致） | `portfolio_service.py:1556-1558/:1571-1574/:1022-1030`、`app/analysis/signal.py:34/:40-45/:85`、`SignalPanel.vue` |
 
 ### 15.2 性能
 
@@ -284,10 +297,10 @@ R41-a（解耦）与 R41-b（前端渲染）已生效，但 R41-c（平衡/防�
 
 ## 16. 分三批实施建议（不实施，等待指令）
 - **批1（P0 数据可信度）**：R42（因子分跨屏方向统一）。
-- **批2（P1 正确性/性能）**：R43（策略检查 LLM 超时）、R44（预热回归 + F1/F2）、R45（watchlist 兜底链）、R46（首启空窗）。
+- **批2（P1 正确性/性能）**：R43（策略检查 LLM 超时）、R44（预热回归 + F1/F2）、R45（watchlist 兜底链）、R46（首启空窗）、**R52（综合信号分项覆盖率门禁 + 诚实降级）**。
 - **批3（P2 治理）**：R47（结构化字段桶化）、R48（近替代品合并）、R49（first_byte 进度）、R50（logs 清理）、R51（root perf/a11y）。
 
-> **当前状态：等待「开始实施」指令，不写任何修复代码。**（R42-R51 设计就绪）
+> **当前状态：等待「开始实施」指令，不写任何修复代码。**（R42-R52 设计就绪）
 
 ---
 
@@ -318,5 +331,8 @@ R41-a（解耦）与 R41-b（前端渲染）已生效，但 R41-c（平衡/防�
 | R49 | — | analysis:_sse_stream、llm.py | 否 | 是（真进度） | SSE 链路 | 进度条 | 无新 IO | 首字节慢 |
 | R50 | — | logs/ | 否 | — | — | — | 磁盘清理 | 残留 |
 | R51 | — | vite.config、index.html、PortfolioAnalysis | 否 | 是（critical CSS） | 首屏链路 | loading 态 | 内联 CSS | 未达标 |
+| R52 | — | signal.py:34/40-45/85、portfolio_service:1556-1558/1571-1574/1022-1030 | 否 | 是（真分项覆盖率） | composite_decision 链路 | degraded 徽标 | 纯计算，无新 IO | 门禁口径错 + 权重稀释 |
 
-> **当前状态（Round 1-4 完成）**：R42-R51 均达实施标准（精确 file:line + 修复片段 + 验收 + 测试断言）；R42 由「多选项」升级为「方案(a) 决定」；R43/R48 file:line 经核查修正；R45/R46 含 D1 探针前置标注。本文档**不写任何修复代码**，等待「开始实施」指令。
+- **Round 5（R52 新增，用户 review 驱动，本次完成）**：用户提问「组合持仓所有综合信号都是持有，这合理吗？」触发。经 code 复核确认两层根因：①`composite_signal`（`signal.py:34`）权重 0.4/0.4/0.2，周末估值/动量恒 0 → `0.4×技术∈[-0.4,+0.4]` 永不够 ±0.5 阈值；②`_attach_composite_decisions:1556-1558` 的 valid_rate=「持仓级填充率」13/13=100%（`_has_real_factor_values` 把技术类因子算 filled）而非「分项覆盖率」→ 门禁不降级、标 `degraded=false`。实测 13/13 持仓 signal 全 hold、components valuation/momentum 全 0。已补 §0.3 P1-6、§2.8、§15.1 R52、§16 批2。修复采纳「分项覆盖率门禁 + 权重归一 + 诚实降级」，验收含负向断言「三面齐全仍恒 hold → FAIL」。file:line 经 grep 确认：`_COMPOSITE_FACTOR_MAP:1533-1537`、`filled_factor_count:1022-1025`、`_attach_composite_decisions:1540`、`composite_signal_with_gate:58`、`composite_signal:14` 全部准确。
+
+> **当前状态（Round 1-5 完成）**：R42-R52 均达实施标准（精确 file:line + 修复片段 + 验收 + 测试断言）；R42 由「多选项」升级为「方案(a) 决定」；R43/R48 file:line 经核查修正；R45/R46 含 D1 探针前置标注；R52 为用户 review 驱动新增（综合信号结构性恒 hold）。本文档**不写任何修复代码**，等待「开始实施」指令。
