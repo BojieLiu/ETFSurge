@@ -1210,6 +1210,14 @@ async def strategy_check(
     except Exception as _e:
         logger.debug("[strategy_check] industry map build failed (non-fatal): %s", _e)
 
+    # round25 R27: 策略检查因子分口径统一——先算跨持仓截面 z-score 复合分，
+    # 供 _rule_based_suggestion 决策表使用（与设计路径同量纲，两屏方向一致）。
+    _factor_composites: dict[str, float] = {}
+    try:
+        _factor_composites = _cross_sectional_factor_composite(factor_breakdowns)
+    except Exception as _fce:
+        logger.debug("[strategy_check] cross-sectional factor composite failed (non-fatal): %s", _fce)
+
     for h in holdings_analysis:
         sym = h.get("symbol", "")
         # P0-1: 注入 sector/industry（缺失时由 _compute_risk_warnings 空行业保护兜底）
@@ -1243,6 +1251,12 @@ async def strategy_check(
             h["tech_signal"] = f"{str(real_sig['signal']).upper()}，真实信号"
         else:
             h["tech_signal"] = "数据不可用"
+        # round25 R28: 拷贝结构化综合信号（R25 已由 _attach_composite_decisions 附加到
+        # factor_breakdowns[sym]，但序列化循环从未拷贝进响应 → 前端综合信号卡恒不渲染，
+        # 前后端双断死代码）。字段缺失时整字段不出现（诚实降级，不填默认冒充）。
+        _cd = fb.get("composite_decision") if isinstance(fb, dict) else None
+        if isinstance(_cd, dict):
+            h["composite_decision"] = _cd
 
         # FIX-10: 始终基于因子覆盖率计算 confidence，不依赖 LLM source_confidence
         filled_count = data_quality.get("filled_count", 0) if data_quality else 0
@@ -1257,6 +1271,8 @@ async def strategy_check(
             if _h_w is None:
                 _h_w = weight_map.get(sym, 0.0)
             _h_fb = factor_breakdowns.get(sym, {})
+            # round25 R27: 截面 z-score 复合分（跨持仓统一口径，与设计路径同量纲）——
+            # 避免「KDJ 原始值均值冒充 z-score 强度」导致两屏因子分方向相反。
             _h_rule = _rule_based_suggestion(
                 symbol=sym,
                 name=h.get("name", sym),
@@ -1266,6 +1282,7 @@ async def strategy_check(
                 regime=regime,
                 current_weight=_h_w,
                 factor_availability=h.get("factor_availability"),
+                factor_composite=_factor_composites.get(sym),
             )
             h["action"] = _h_rule["action"]
             h["suggested_weight"] = _h_rule["suggested_weight"]
@@ -1320,6 +1337,8 @@ async def strategy_check(
             regime=regime,
             # round18 P2-7: confidence 按因子填充率分级
             factor_availability=fb.get("factor_availability"),
+            # round25 R27: 截面 z-score 复合分（与设计路径同量纲）
+            factor_composite=_factor_composites.get(sym),
         ))
     covered_by_rule = len(rule_suggestions)
 
@@ -1564,6 +1583,48 @@ def _attach_composite_decisions(
         fb["composite_decision"] = cd
 
 
+def _cross_sectional_factor_composite(
+    factor_breakdowns: dict[str, dict],
+) -> dict[str, float]:
+    """round25 R27: 截面 z-score 复合分——每只持仓的因子强度（跨持仓可比口径）。
+
+    背景（R27 实证）：策略检查「因子分」用 `_rule_based_suggestion` 的原始因子值均值
+    （avg_factor），被 KDJ≈77 等量纲大的技术因子主导（159338 报「1.68 偏强」），而
+    设计路径用 `market_data_hub` 截面 z-score 复合分（同一标的 -0.958 深负）——两屏
+    方向相反。本函数对每个因子键在**组合内所有持仓**上做 z-score 归一（跨持仓截面，
+    非单标的内部），再按持仓平均，得到与设计同量纲的复合分。
+
+    无 I/O 纯函数。某因子全部相同（std=0）→ z=0（中性，不引入噪声）。
+    """
+    out: dict[str, float] = {}
+    if not isinstance(factor_breakdowns, dict) or not factor_breakdowns:
+        return out
+    # 每因子键收集所有持仓的值（真实数值）
+    by_key: dict[str, list[tuple[str, float]]] = {}
+    for sym, fb in factor_breakdowns.items():
+        fs = fb.get("factor_scores") if isinstance(fb, dict) else None
+        if not isinstance(fs, dict):
+            continue
+        for k, v in fs.items():
+            if isinstance(v, (int, float)) and v != 0:
+                by_key.setdefault(k, []).append((sym, float(v)))
+    # 每键 z-score → 每持仓平均
+    comps: dict[str, list[float]] = {}
+    for vals in by_key.values():
+        if len(vals) < 2:
+            continue
+        mean = sum(v for _, v in vals) / len(vals)
+        var = sum((v - mean) ** 2 for _, v in vals) / len(vals)
+        std = var ** 0.5
+        if std <= 1e-9:
+            continue
+        for sym, v in vals:
+            comps.setdefault(sym, []).append((v - mean) / std)
+    for sym, zs in comps.items():
+        out[sym] = round(sum(zs) / len(zs), 3)
+    return out
+
+
 def _build_rule_fallback_holdings_analysis(
     etfs: list,
     market_data: list[dict],
@@ -1579,6 +1640,12 @@ def _build_rule_fallback_holdings_analysis(
     后续 P0-1 行业注入 + P2-4 权重回填会统一覆盖/补全字段。
     """
     result: list[dict] = []
+    # round25 R27: 骨架路径内部计算截面 z-score 复合分（函数独立可测，无需外部传入）
+    _factor_composites: dict[str, float] = {}
+    try:
+        _factor_composites = _cross_sectional_factor_composite(factor_breakdowns)
+    except Exception:
+        _factor_composites = {}
     for e in etfs:
         if isinstance(e, dict):
             sym = e.get("symbol")
@@ -1616,6 +1683,8 @@ def _build_rule_fallback_holdings_analysis(
             factor_score=fs if isinstance(fs, dict) else {},
             signal=_ts, regime=regime, current_weight=_weight,
             factor_availability=fb.get("factor_availability"),
+            # round25 R27: 骨架路径同样使用截面 z-score 复合分（调用方已算好传入）
+            factor_composite=_factor_composites.get(sym),
         )
         result.append({
             "symbol": sym,
@@ -1628,6 +1697,12 @@ def _build_rule_fallback_holdings_analysis(
             "suggested_weight": _rule["suggested_weight"],
             "generated_by": "规则引擎生成",
         })
+        # round25 R28: 规则兜底骨架同样拷贝 composite_decision（_attach_composite_decisions
+        # 在 LLM 报告生成前已附加到 factor_breakdowns）——保证 LLM 路径与兜底路径的
+        # holdings_analysis 结构一致（字段缺失不出现，诚实降级）。
+        _cd = fb.get("composite_decision") if isinstance(fb, dict) else None
+        if isinstance(_cd, dict):
+            result[-1]["composite_decision"] = _cd
     return result
 
 
@@ -1640,6 +1715,7 @@ def _rule_based_suggestion(
     regime: str,
     current_weight: float | None = None,
     factor_availability: dict | None = None,
+    factor_composite: float | None = None,
 ) -> dict:
     """Z26: 规则引擎兜底建议 — 基于因子分 + 技术信号 + regime 决策表。
 
@@ -1662,6 +1738,9 @@ def _rule_based_suggestion(
     fs_vals = [v for v in (factor_score or {}).values()
                if isinstance(v, (int, float)) and v != 0]
     avg_factor = sum(fs_vals) / len(fs_vals) if fs_vals else 0.0
+    # round25 R27: 因子分口径统一——调用方传入截面 z-score 复合分（与设计路径同量纲）
+    # 时优先使用；未传（单标的/历史调用方）回落原始均值（量纲不一，仅方向参考）。
+    _score = factor_composite if factor_composite is not None else avg_factor
     sig = ""
     if isinstance(signal, dict):
         sig = signal.get("signal", "hold") or "hold"
@@ -1693,50 +1772,50 @@ def _rule_based_suggestion(
             suggested = max(target_weight, 0.0)
     # F10 (round6 §十五, 用户已决策): 信号-因子背离分支——技术面与因子分冲突时
     # hold 并解释，禁止裸"信号 X 维持现状"自相矛盾写法（159992 类：SELL + 强正因子）。
-    elif sig == "sell" and avg_factor >= 0.5:
+    elif sig == "sell" and _score >= 0.5:
         action = "hold"
         reason = (
-            f"技术面偏空但因子分强正（{avg_factor:.2f}），信号与因子背离——暂不追空；"
+            f"技术面偏空但因子分强正（{_score:.2f}），信号与因子背离——暂不追空；"
             f"跌破 MA20 或因子分转负再降仓，市态{_regime_cn}下保持纪律"
         )
         suggested = cur
-    elif sig == "buy" and avg_factor <= -0.5:
+    elif sig == "buy" and _score <= -0.5:
         action = "hold"
         reason = (
-            f"技术面偏多但因子分偏弱（{avg_factor:.2f}），信号与因子背离——不追高；"
+            f"技术面偏多但因子分偏弱（{_score:.2f}），信号与因子背离——不追高；"
             f"站上 MA20 且因子分转正再加仓，市态{_regime_cn}下保持纪律"
         )
         suggested = cur
-    elif avg_factor > 0.5 and sig == "buy" and not bearish:
+    elif _score > 0.5 and sig == "buy" and not bearish:
         action = "increase"
         reason = (
             # round18 P1-1: 规则引擎无基本面数据——「基本面与动量共振」失真，
             # 改为「因子评分 + 技术信号」共振（措辞与数据支撑匹配）
-            f"因子评分优({avg_factor:.2f})、技术面买入信号，因子与技术信号共振，建议增仓；"
+            f"因子评分优({_score:.2f})、技术面买入信号，因子与技术信号共振，建议增仓；"
             f"分 2 次执行、单次加仓不超过目标权重的 20%，留出回调加仓空间；"
             f"若市态转空或跌破 MA20 则暂停加仓，不逆势硬扛"
         )
         suggested = min(cur * 1.2, 0.30)
-    elif avg_factor < -0.5 and sig == "sell":
+    elif _score < -0.5 and sig == "sell":
         action = "decrease"
         reason = (
-            f"因子评分弱({avg_factor:.2f})+技术卖出信号，趋势转弱，建议减仓；"
+            f"因子评分弱({_score:.2f})+技术卖出信号，趋势转弱，建议减仓；"
             f"分批执行、单次减幅不超过当前仓位的 30%，避免一次性冲击成本；"
             f"若继续破位（跌破 MA60 或前期低点）加速离场，市态{_regime_cn}下优先控制回撤"
         )
         suggested = max(cur * 0.7, 0.0)
-    elif avg_factor > 0.2 and sig == "buy":
+    elif _score > 0.2 and sig == "buy":
         action = "hold"
         reason = (
-            f"偏多（因子分 {avg_factor:.2f} 未达增仓阈值 0.5），维持现状；"
+            f"偏多（因子分 {_score:.2f} 未达增仓阈值 0.5），维持现状；"
             f"继续持有观察，若因子分突破 0.5 或放量突破关键阻力位再转增配；"
             f"止损纪律：跌破 MA20 或买入逻辑破坏即减仓一半"
         )
         suggested = cur
     else:
         action = "hold"
-        _fcorr = ("偏强" if avg_factor >= 0.5 else
-                  "偏弱" if avg_factor <= -0.5 else
+        _fcorr = ("偏强" if _score >= 0.5 else
+                  "偏弱" if _score <= -0.5 else
                   "中性")
         # round18 P1-1 (D8 同修): 技术卖出信号下的 hold 不再提示「加仓机会」
         # （sell + hold + 加仓暗示 = 逻辑矛盾）
@@ -1746,7 +1825,7 @@ def _rule_based_suggestion(
             else "关注 RSI 进入超卖区（<30）或因子转正后的加仓机会"
         )
         reason = (
-            f"因子分 {avg_factor:.2f}（{_fcorr}），信号 {sig or '中性'}，维持现状；"
+            f"因子分 {_score:.2f}（{_fcorr}），信号 {sig or '中性'}，维持现状；"
             f"持有逻辑不变，跟踪因子与信号变化；"
             f"{_follow_up}，市态{_regime_cn}不追涨杀跌"
         )

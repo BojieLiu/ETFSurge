@@ -18,11 +18,23 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 if ($Local -or -not $Docker) {
     Write-Host "=== ETF Surge 启动(本地) ===" -ForegroundColor Cyan
 
+    # 日志目录 + 轮转：上一会话日志保留为 .1（崩溃现场可查），当前会话写新文件
+    $logDir = Join-Path $PSScriptRoot "logs"
+    New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+    foreach ($lf in @("frontend.log", "backend_stdout.log")) {
+        $p = Join-Path $logDir $lf
+        if (Test-Path $p) {
+            Remove-Item "$p.1" -Force -ErrorAction SilentlyContinue
+            Move-Item $p "$p.1" -Force -ErrorAction SilentlyContinue
+        }
+    }
+
     Write-Host "[1] 启动后端 (:8000) ..." -ForegroundColor Yellow
     if ($Silent) {
-        # 静默:后台隐藏启动 uvicorn,不弹出可见窗口
+# 静默:后台隐藏启动 uvicorn,不弹出可见窗口
         # 注意:不能用 RedirectStandardOutput/Error,否则父进程会等待子进程 stdout 关闭而挂起
-        Start-Process -FilePath "cmd.exe" -ArgumentList "/c","cd /d $PSScriptRoot\backend && python -m uvicorn app.main:app --host :: --port 8000" -WindowStyle Hidden
+        # stdout/stderr 重定向到 logs\backend_stdout.log,崩溃 traceback 与 uvicorn 启动/关闭信息可查
+        Start-Process -FilePath "cmd.exe" -ArgumentList "/c","cd /d `"$PSScriptRoot\backend`" && python -m uvicorn app.main:app --host :: --port 8000 > `"$PSScriptRoot\logs\backend_stdout.log`" 2>&1" -WindowStyle Hidden
         Write-Host "  后端已后台启动" -ForegroundColor Green
     } else {
         # 普通:启动可见窗口
@@ -34,7 +46,9 @@ if ($Local -or -not $Docker) {
 
     Write-Host "[2] 启动前端 (:5173) ..." -ForegroundColor Yellow
     if ($Silent) {
-        Start-Process -FilePath "cmd.exe" -ArgumentList "/c","cd /d $PSScriptRoot\frontend && npm run dev" -WindowStyle Minimized
+        # 静默:最小化窗口启动 vite,输出重定向到 logs\frontend.log
+        # 进程消失/启动失败时从日志定位,而非黑盒
+        Start-Process -FilePath "cmd.exe" -ArgumentList "/c","cd /d `"$PSScriptRoot\frontend`" && npm run dev > `"$PSScriptRoot\logs\frontend.log`" 2>&1" -WindowStyle Minimized
         Write-Host "  前端已后台启动" -ForegroundColor Green
     } else {
         Start-Process cmd -ArgumentList "/c", "cd /d $PSScriptRoot\frontend && npm run dev"
@@ -44,9 +58,9 @@ if ($Local -or -not $Docker) {
 
     Write-Host "`n=== 检查服务状态 ===" -ForegroundColor Cyan
 
-    # 健康检查：等待后端就绪（最多 10 秒）
+# 健康检查：等待后端就绪（最多 90 秒 —— warmup 含基金净值同步等预热任务，30s 不够）
     $backendOk = $false
-    for ($i = 0; $i -lt 30; $i++) {
+    for ($i = 0; $i -lt 90; $i++) {
         try {
             $resp = Invoke-WebRequest -Uri "http://127.0.0.1:8000/health" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
             if ($resp.StatusCode -eq 200) { $backendOk = $true; break }
@@ -57,7 +71,8 @@ if ($Local -or -not $Docker) {
         Write-Host "  后端 http://localhost:8000  ✅" -ForegroundColor Green
     } else {
         Write-Host "  后端 http://localhost:8000  ❌ 无法连接" -ForegroundColor Red
-        Write-Host "  可能原因：端口被占用或 uvicorn 启动异常。尝试手动运行:" -ForegroundColor Yellow
+        Write-Host "  可能原因：端口被占用或 uvicorn 启动异常。查看日志: logs\backend_stdout.log" -ForegroundColor Yellow
+        Write-Host "  尝试手动运行:" -ForegroundColor Yellow
         Write-Host "  cd $PSScriptRoot\backend && python -m uvicorn app.main:app --port 8000 --reload" -ForegroundColor Gray
     }
 

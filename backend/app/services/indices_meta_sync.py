@@ -23,8 +23,13 @@ def _sync_disabled() -> bool:
 
 
 async def _collect() -> list[dict]:
-    """复用 scripts.sync_indices_meta 的收集逻辑（A/HK/行业/概念 + 静态兜底段）。"""
-    from scripts.sync_indices_meta import collect_all
+    """复用 app.fetchers.sync_indices_meta 的收集逻辑（A/HK/行业/概念 + 静态兜底段）。
+
+    round25 R30: 原 `from scripts.sync_indices_meta import collect_all`——scripts/ 被
+    .dockerignore 排除出容器镜像，容器内启动同步静默失败（No module named 'scripts'）；
+    生产代码已移入 app/fetchers/。
+    """
+    from ..fetchers.sync_indices_meta import collect_all
     return await collect_all()
 
 
@@ -64,7 +69,8 @@ async def sync_indices_meta_table() -> int:
                     first_letter = r.get("first_letter") or ""
                     if not pinyin:
                         try:
-                            from scripts.sync_indices_meta import _to_pinyin
+                            # round25 R30: 同 R30——生产代码自 scripts/ 移入 app/fetchers/
+                            from ..fetchers.sync_indices_meta import _to_pinyin
                             pinyin, first_letter = _to_pinyin(r.get("name", ""))
                         except Exception:
                             pass

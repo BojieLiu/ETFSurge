@@ -137,6 +137,54 @@ describe('StrategyCheckResult.vue', () => {
       expect(wrapper.text()).toContain('动量-0.8')
     })
 
+    // round25 R28: 综合信号列——composite_decision 存在 → 渲染徽标（健康/降级）；
+    // 缺失 → 「—」（诚实降级，负向：不渲染/空白冒充 → FAIL）
+    it('R28: composite_decision 健康 → 渲染综合信号徽标', () => {
+      const withComposite = {
+        ...mockResult,
+        holdings_analysis: [
+          { symbol: '510300', name: '沪深300', factor_summary: '动量-0.8', tech_signal: '卖出',
+            composite_decision: { signal: 'sell', score: -0.62, degraded: false } },
+        ],
+      }
+      const wrapper = mount(StrategyCheckResult, {
+        props: { result: withComposite },
+        global: { stubs },
+      })
+      expect(wrapper.text()).toContain('综合信号')
+      expect(wrapper.find('.composite-sell').exists()).toBe(true)
+      expect(wrapper.find('.composite-sell').text()).toContain('卖出')
+    })
+
+    it('R28: composite_decision.degraded → 「因子缺失」降级徽标（无合成结论）', () => {
+      const degraded = {
+        ...mockResult,
+        holdings_analysis: [
+          { symbol: '510300', name: '沪深300', factor_summary: '动量-0.8', tech_signal: '卖出',
+            composite_decision: { signal: null, score: null, degraded: true, reason: '因子数据缺失 100%：综合信号不可用' } },
+        ],
+      }
+      const wrapper = mount(StrategyCheckResult, {
+        props: { result: degraded },
+        global: { stubs },
+      })
+      expect(wrapper.find('.composite-degraded').exists()).toBe(true)
+      expect(wrapper.find('.composite-degraded').text()).toContain('因子缺失')
+      expect(wrapper.find('.composite-degraded').text()).not.toMatch(/买入|卖出|持有/)
+    })
+
+    it('R28: composite_decision 缺失 → 「—」（不渲染合成结论）', () => {
+      const wrapper = mount(StrategyCheckResult, {
+        props: { result: mockResult },
+        global: { stubs },
+      })
+      // mockResult 无 composite_decision → 综合信号单元格应为「—」
+      const cells = wrapper.findAll('.td-composite')
+      expect(cells.length).toBeGreaterThanOrEqual(1)
+      expect(cells[0].text()).toContain('—')
+      expect(wrapper.find('.composite-badge').exists()).toBe(false)
+    })
+
     // F10 (round6 §十五): 口径标注——技术信号列标"实时"、建议标"因子分主导"、背离高亮
     it('F10: 技术信号列标注"实时"口径', () => {
       const wrapper = mount(StrategyCheckResult, {

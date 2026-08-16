@@ -1,4 +1,4 @@
-"""F17 (round6 §16.5): instruments 启动自动同步 service + 防并发互斥锁。
+﻿"""F17 (round6 §16.5): instruments 启动自动同步 service + 防并发互斥锁。
 
 背景：instruments 表从未创建/同步（§十八-3）→ search 恒降级全量拉取；
 启动自动同步（lifespan 后台，不阻塞启动）+ scheduler 每日 16:30 保留 +
@@ -88,7 +88,7 @@ class TestP24SegmentGuard:
 
     def test_collect_all_has_us_and_hk_segments(self):
         """sync_instruments.collect_all 段清单含美股/港股段（US/HK 搜索依赖表非空）。"""
-        from scripts.sync_instruments import collect_all
+        from app.fetchers.sync_instruments import collect_all
         import inspect
 
         src = inspect.getsource(collect_all)
@@ -101,7 +101,7 @@ class TestP24SegmentGuard:
     def test_fetch_us_list_has_primary_and_fallback(self):
         """_fetch_us_list 主源 5s 独立超时 + 新浪降级（P0-6 修复防 CancelledError 截断）。"""
         import inspect
-        from scripts.sync_instruments import _fetch_us_list
+        from app.fetchers.sync_instruments import _fetch_us_list
 
         src = inspect.getsource(_fetch_us_list)
         assert "timeout=5.0" in src, "美股主源应独立 5s 超时（旧实现整段 20s 取消降级链）"

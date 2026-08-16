@@ -140,7 +140,13 @@ class TestEnforceMaxCorrelationR24:
     """R24 集成：近替代品无价格对告警 + 强制锚豁免不变式。"""
 
     def test_near_substitute_no_price_emits_unevaluated(self):
-        """同主题近替代品但 r=None（价格缺失/降级盲）→ unevaluated 告警，非静默跳过。"""
+        """同主题近替代品但 r=None（价格缺失/降级盲）→ unevaluated 告警，非静默跳过。
+
+        round25 R41-a: 近替代品检测已从 enforce_max_correlation 解耦为独立层
+        apply_near_substitute_warnings（无条件执行，不依赖 corr_matrix）——本测试改测
+        该独立层（enforce 内不再包裹近替代品）。
+        """
+        from app.engine.allocation_engine import apply_near_substitute_warnings
         allocs = [
             _alloc("588170", "科创半导体ETF", 0.15, "satellite"),
             _alloc("588200", "科创芯片ETF", 0.15, "satellite"),
@@ -149,7 +155,7 @@ class TestEnforceMaxCorrelationR24:
         strat = {"id": "balanced", "allocations": [dict(a) for a in allocs]}
         # 矩阵只有 588170↔588200 缺失（r=None），其余对不存在
         matrix = {}
-        out = enforce_max_correlation([strat], matrix)
+        out = apply_near_substitute_warnings([strat], matrix)
         warnings = out[0].get("risk_metrics", {}).get("correlation_warnings", [])
         unevaluated = [w for w in warnings if w.get("type") == "unevaluated"]
         assert len(unevaluated) == 1

@@ -81,6 +81,9 @@
               <th>代码</th>
               <th>因子评分</th>
               <th>技术信号（实时）</th>
+              <!-- round25 R28: 综合信号列——R25 后端已计算 composite_decision 但前端
+                   从未渲染（死输出）；本列呈现技术+因子聚合决策 -->
+              <th>综合信号</th>
             </tr>
           </thead>
           <tbody>
@@ -90,6 +93,21 @@
               <td class="td-factor">{{ h.factor_summary }}</td>
               <td :class="'td-signal signal-' + signalClass(h.tech_signal)">
                 {{ h.tech_signal }}
+              </td>
+              <td class="td-composite">
+                <template v-if="h.composite_decision">
+                  <span v-if="h.composite_decision.degraded" class="composite-badge composite-degraded"
+                        :title="h.composite_decision.reason || '因子数据缺失，综合信号不可用'">
+                    ⚠️ 因子缺失
+                  </span>
+                  <span v-else :class="'composite-badge composite-' + h.composite_decision.signal">
+                    {{ compositeLabel(h.composite_decision.signal) }}
+                    <span class="composite-score" v-if="h.composite_decision.score != null">
+                      {{ h.composite_decision.score.toFixed(2) }}
+                    </span>
+                  </span>
+                </template>
+                <span v-else class="muted">—</span>
               </td>
             </tr>
           </tbody>
@@ -163,6 +181,11 @@ function signalClass(signal) {
   if (signal.includes('买入') || signal.includes('看多') || signal.includes('positive')) return 'bullish'
   if (signal.includes('卖出') || signal.includes('看空') || signal.includes('negative')) return 'bearish'
   return 'neutral'
+}
+
+// round25 R28: 综合信号标签——红涨绿跌（buy=红/增、sell=绿/减、hold=黄）
+function compositeLabel(signal) {
+  return { buy: '买入', sell: '卖出', hold: '持有' }[signal] || signal || '—'
 }
 </script>
 
@@ -422,6 +445,26 @@ function signalClass(signal) {
   font-size: var(--font-size-xs);
   color: var(--color-text-tertiary);
 }
+
+/* round25 R28: 综合信号列徽标——红涨绿跌（buy 红/增、sell 绿/减、hold 黄），
+   与全站 text-up/text-down 语义一致 */
+.td-composite {
+  white-space: nowrap;
+}
+.composite-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-2xs);
+  font-weight: var(--font-weight-semibold);
+}
+.composite-buy { background: #ffebee; color: #e53935; }
+.composite-sell { background: #e8f5e9; color: #43A047; }
+.composite-hold { background: #fff3e0; color: #e65100; }
+.composite-degraded { background: var(--color-bg-warning-subtle); color: var(--color-warning-700); }
+.composite-score { font-weight: var(--font-weight-medium); opacity: 0.85; }
 
 .td-signal {
   font-weight: var(--font-weight-semibold);

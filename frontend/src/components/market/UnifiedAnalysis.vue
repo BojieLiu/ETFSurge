@@ -217,7 +217,8 @@ const placeholders = {
   // R5: 精简文案——完整示例已由下方“快速输入”chips 提供；placeholder 过长在窄屏必被截断
   symbol: '输入代码或名称，如 510050',
   sector: '输入板块代码/名称，如 BK1318',
-  index: '输入指数代码，如 000001/HSI',
+  // round26 Q1: 指数模式引导——指数名才在此搜（红利低波ETF 属 ETF，切「个股/ETF」模式）
+  index: '输入指数名/代码，ETF 请切个股/ETF 模式',
 }
 
 const currentPlaceholder = computed(() => placeholders[activeMode.value] || placeholders.symbol)
@@ -310,11 +311,19 @@ watch(() => props.externalTrigger, (trig) => {
 })
 
 function quickSelect(ex) {
-  query.value = ex.code
-  symbol.value = ex.code
-  result.value = ''
-  error.value = ''
-  doAnalyze()
+  // round26 Q5: 快速选项必须写回 activeSearch.searchQuery——doAnalyze 读该值
+  //（:370），旧实现只写 query/symbol 两个展示 ref，点「标普500」chip 时 searchQuery
+  // 为空 → 命中「请输入标的代码或名称」报错（R5 symbol 模式同类缺陷）。
+  if (ex && ex.code) {
+    query.value = ex.code
+    symbol.value = ex.code
+    if (activeSearch.value.searchQuery) activeSearch.value.searchQuery.value = ex.code
+    if (activeSearch.value.searchResults) activeSearch.value.searchResults.value = []
+    if (activeSearch.value.showDropdown) activeSearch.value.showDropdown.value = false
+    result.value = ''
+    error.value = ''
+    doAnalyze()
+  }
 }
 
 // F18 (round6 §16.6): Enter 统一触发分析——symbol 模式下先处理下拉键

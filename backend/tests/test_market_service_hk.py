@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 """
 U1/N03 (round2-unfixed-fix-plan.md U1 / round3-diagnosis-and-optimization-plan.md N03):
 港股路由分流 + 熔断空结果语义。
@@ -394,7 +394,7 @@ class TestStaticExtraIndicesHk:
     """round19 P8-①: 静态兜底段 HK 指数扩展。"""
 
     def test_hk_segment_has_industry_and_theme(self):
-        from scripts.sync_indices_meta import _STATIC_EXTRA_INDICES
+        from app.fetchers.sync_indices_meta import _STATIC_EXTRA_INDICES
 
         hk = [i for i in _STATIC_EXTRA_INDICES if i.get("market") == "HK"]
         symbols = {i["symbol"] for i in hk}

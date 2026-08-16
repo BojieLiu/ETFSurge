@@ -1,4 +1,4 @@
-"""TDD tests for global indices — HK 3 major indices + expanded global coverage.
+﻿"""TDD tests for global indices — HK 3 major indices + expanded global coverage.
 
 Mocks Sina (first-tier) and Finnhub (fallback; TwelveData free tier doesn't support index symbols).
 """
@@ -439,7 +439,7 @@ async def test_sina_page_does_not_break_us_indices():
 class TestP020StaticIndexBackfill:
 
     def _collect_all_static(self):
-        from scripts.sync_indices_meta import collect_all, _STATIC_EXTRA_INDICES
+        from app.fetchers.sync_indices_meta import collect_all, _STATIC_EXTRA_INDICES
         return _STATIC_EXTRA_INDICES, collect_all
 
     def test_static_extra_has_hs_connect_series(self):
@@ -490,6 +490,6 @@ class TestP020SyncService:
 
     def test_static_extra_us_segment_guard(self):
         """P2-4: indices_meta 美股段守卫——静态兜底含 US 指数（P0-22 搜索依赖）。"""
-        from scripts.sync_indices_meta import _STATIC_EXTRA_INDICES
+        from app.fetchers.sync_indices_meta import _STATIC_EXTRA_INDICES
         us = [s for s in _STATIC_EXTRA_INDICES if s["market"] == "US"]
         assert len(us) >= 5, f"美股指数静态段应 ≥5（P0-22 搜索依赖），实得 {len(us)}"

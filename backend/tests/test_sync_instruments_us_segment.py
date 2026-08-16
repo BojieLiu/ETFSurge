@@ -1,4 +1,4 @@
-"""
+﻿"""
 O3 (docs/archived/round7-rediagnosis.md §7 P3): sync_instruments 补 US 段。
 
 P3 根因: collect_all() 只打包 A 股/A股ETF/HK 三段，US 段未实现 →
@@ -13,7 +13,7 @@ import asyncio
 import pytest
 from unittest.mock import AsyncMock, patch
 
-from scripts.sync_instruments import collect_all
+from app.fetchers.sync_instruments import collect_all
 
 
 async def test_collect_all_includes_us_segment():
@@ -30,8 +30,8 @@ async def test_collect_all_includes_us_segment():
             return us_rows
         return []
 
-    with patch("scripts.sync_instruments._fetch_a_stock_list", new=fake_fetch_a), \
-         patch("scripts.sync_instruments._fetch_akshare_list", new=fake_fetch_akshare):
+    with patch("app.fetchers.sync_instruments._fetch_a_stock_list", new=fake_fetch_a), \
+         patch("app.fetchers.sync_instruments._fetch_akshare_list", new=fake_fetch_akshare):
         merged = await collect_all()
 
     markets = {r["market"] for r in merged}
@@ -54,8 +54,8 @@ async def test_us_segment_failure_isolated():
             raise RuntimeError("us source down")
         return []
 
-    with patch("scripts.sync_instruments._fetch_a_stock_list", new=fake_fetch_a), \
-         patch("scripts.sync_instruments._fetch_akshare_list", new=fake_fetch_akshare):
+    with patch("app.fetchers.sync_instruments._fetch_a_stock_list", new=fake_fetch_a), \
+         patch("app.fetchers.sync_instruments._fetch_akshare_list", new=fake_fetch_akshare):
         merged = await collect_all()
 
     assert any(r["market"] == "A" for r in merged), "A 段应保留"

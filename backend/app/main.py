@@ -279,11 +279,24 @@ async def lifespan(app: FastAPI):
     # 8 并发 run_sync + 全量扫描 + akshare 分页叠加 → 预热高峰 shared_executor
     # 64/64 饱和（round7 P2 复现）。改为一个编排任务按顺序串行执行（前一个
     # 完成后启动下一个），内部并发上限不变；每个子任务自带超时/失败隔离。
+    # round25 R32: 预热覆盖冷拉取路径——板块缓存（sectors/heat + 板块动量 +
+    # 热点板块）首个请求不再冷拉 4.7s（旧实现 60s 循环首次触发在启动后 ~10s+，
+    # 首个用户请求仍可能撞冷缓存）。
+    async def _warmup_sector_cache():
+        with warmup_timer("warmup_sector_cache", "warmup", "板块缓存预热"):
+            try:
+                from .tasks.sector_refresh import refresh_sector_cache
+                await asyncio.wait_for(refresh_sector_cache(), timeout=15)
+                logger.info("板块缓存预热完成")
+            except (Exception, asyncio.CancelledError):
+                logger.debug("板块缓存预热失败（非阻塞）")
+
     async def _warmup_sequence_task():
         await _run_warmup_sequence([
             _warmup_market_cache(),
             _warmup_etf_cache(),
             _warmup_global_indices(),
+            _warmup_sector_cache(),
             _background_instruments_sync(),
             _background_indices_meta_sync(),
         ])

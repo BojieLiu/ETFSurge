@@ -1487,6 +1487,52 @@ def allocate(
     return strategies
 
 
+def apply_near_substitute_warnings(
+    strategies: list[dict[str, Any]],
+    correlation_matrix: dict[tuple[str, str], float | None],
+) -> list[dict[str, Any]]:
+    """round25 R41-a: 近替代品冗余控制——独立冗余控制层，**无条件执行**。
+
+    背景（R25 §2.4 实证）：`near_substitute_pairs` 原嵌套在 `enforce_max_correlation`
+    内部，而后者只在 `if corr_matrix:` 时调用（strategy_design）→ 盘后/非交易窗口
+    corr_matrix 为空 → 近替代品检测整体跳过（「芯片+半导体设备」「港股创新药+港股通
+    创新药」同主题双入选无告警）。设计意图是「独立于 K 线相关系数、降级盲（r=None）
+    也能识别」，却被门控在「必须有 corr_matrix」的调用里——最该在盘后工作的控制恰好
+    在盘后被关掉。
+
+    本函数：对每套方案的 non-CASH 两两跑文本/主题族检测（纯函数，无 I/O），r 缺失
+    （无价格序列/降级）→ 标 `unevaluated`；r 可算 → 标 `near_substitute` + correlation。
+    结果并入 `risk_metrics.correlation_warnings`。调用方（strategy_design）**始终**调用。
+    """
+    for s in strategies:
+        allocs = [a for a in s.get("allocations", []) if a.get("symbol") not in (None, "CASH")]
+        if len(allocs) < 2:
+            continue
+        warnings: list[dict[str, Any]] = []
+        for np in near_substitute_pairs(allocs):
+            sa, sb = np["pair"]
+            r = correlation_matrix.get((sa, sb))
+            if r is None:
+                r = correlation_matrix.get((sb, sa))
+            entry = dict(np)
+            if r is None:
+                entry["correlation"] = None
+                entry["type"] = "unevaluated"
+                entry["note"] = (
+                    f"同主题近替代品（{np['family']}族）但相关系数缺失（无价格序列/降级），"
+                    "冗余风险未量化——待交易时段复算"
+                )
+            else:
+                entry["correlation"] = round(float(r), 3)
+            warnings.append(entry)
+        if warnings:
+            s.setdefault("risk_metrics", {})
+            s["risk_metrics"]["correlation_warnings"] = (
+                s["risk_metrics"].get("correlation_warnings", []) + warnings
+            )
+    return strategies
+
+
 def enforce_max_correlation(
     strategies: list[dict[str, Any]],
     correlation_matrix: dict[tuple[str, str], float | None],
@@ -1611,28 +1657,11 @@ def enforce_max_correlation(
             s.setdefault("risk_metrics", {})
             s["risk_metrics"]["correlation_warnings"] = warnings
 
-        # round24 R24②④⑥: 近替代品 + 无价格对 + 组合级分散——独立于 K 线相关系数的
-        # 冗余控制层（r 缺失/偏低也能识别，杜绝降级盲静默漏报）。
+        # round25 R41-a: 近替代品检测已从本函数移出为独立层 `apply_near_substitute_warnings`
+        #（strategy_design 无条件调用）——本函数仅保留 K 线相关系数相关控制：
+        # 高相关削减 + 组合级分散约束（后者依赖 corr_matrix，天然随本函数门控）。
         if allocs:
-            # ① 近替代品（同主题不同发行商）——即便 r<0.9 或价格缺失也告警
-            for np in near_substitute_pairs(allocs):
-                # 近替代品对若无有效相关系数（r=None，价格缺失/降级盲）→ unevaluated
-                sa, sb = np["pair"]
-                r = correlation_matrix.get((sa, sb))
-                if r is None:
-                    r = correlation_matrix.get((sb, sa))
-                entry = dict(np)
-                if r is None:
-                    entry["correlation"] = None
-                    entry["type"] = "unevaluated"
-                    entry["note"] = (
-                        f"同主题近替代品（{np['family']}族）但相关系数缺失（无价格序列/降级），"
-                        "冗余风险未量化——待交易时段复算"
-                    )
-                else:
-                    entry["correlation"] = round(float(r), 3)
-                warnings.append(entry)
-            # ② 组合级分散约束（平均 pairwise r 过高且标的够多）
+            # 组合级分散约束（平均 pairwise r 过高且标的够多）
             conc = portfolio_concentration_check(allocs, correlation_matrix)
             if conc:
                 warnings.append(conc)

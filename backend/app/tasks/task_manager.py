@@ -391,7 +391,11 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
         await mgr.update_task(task_id, progress=65, stage="保存方案")
         await _notify(task_id, "quick_ready", progress=65, stage="保存方案")
 
-        plan_tables = _build_plan_tables(strategies)
+        plan_tables = _build_plan_tables(
+            strategies,
+            # round25 R36: 降级态（coarse）表格权重/因子分按档位渲染（与前端一致）
+            precision=(market_context or {}).get("data_precision"),
+        )
         # F3 R1: 删除硬编码重复标题前缀——plan_tables 自带 "## 一、三种方案详解"，
         # 旧代码前缀拼接后产生 2 个重复标题（task_manager Stage 4 路径不经过
         # _validate_report_consistency → 从未去重）

@@ -260,6 +260,29 @@ describe('UnifiedAnalysis F18 (交互一致性 + 错误态)', () => {
     searchApiMock.mockResolvedValue({ data: [] })
   })
 
+  // round26 Q5: 快速选项（「标普500」chip 等）必须写回 activeSearch.searchQuery——
+  // doAnalyze 读该值，旧实现只写 query/symbol 展示 ref → 点 chip 报「请输入标的代码或名称」
+  it('Q5: quickSelect 写回 searchQuery 并触发分析（不再报空输入）', async () => {
+    const wrapper = mounted()
+    wrapper.vm.activeMode = 'index'
+    wrapper.vm.quickSelect({ code: 'SPX', label: '标普500' })
+    await nextTick()
+    await nextTick()
+    expect(wrapper.vm.activeSearch.searchQuery.value).toBe('SPX')
+    expect(wrapper.vm.query).toBe('SPX')
+    expect(wrapper.vm.symbol).toBe('SPX')
+    expect(startMock).toHaveBeenCalled()
+    const body = startMock.mock.calls[0][1]
+    expect(body.symbol).toBe('SPX')
+    expect(body.asset_type).toBe('index')
+  })
+
+  it('Q5: quickSelect 空参数不触发（防御）', () => {
+    const wrapper = mounted()
+    wrapper.vm.quickSelect(null)
+    expect(startMock).not.toHaveBeenCalled()
+  })
+
   it('F18: 键盘 Enter（选中下拉项）统一触发 doAnalyze', async () => {
     const wrapper = mounted()
     wrapper.vm.activeMode = 'symbol'

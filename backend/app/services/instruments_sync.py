@@ -25,8 +25,13 @@ def _sync_disabled() -> bool:
 
 
 async def _collect() -> list[dict]:
-    """复用 scripts.sync_instruments 的收集逻辑（A 股/ETF/港股分段）。"""
-    from scripts.sync_instruments import collect_all
+    """复用 app.fetchers.sync_instruments 的收集逻辑（A 股/ETF/港股分段）。
+
+    round25 R30: 原 `from scripts.sync_instruments import collect_all`——scripts/ 被
+    .dockerignore 排除出容器镜像，容器内启动同步静默失败（No module named 'scripts'）；
+    生产代码已移入 app/fetchers/。
+    """
+    from ..fetchers.sync_instruments import collect_all
     return await collect_all()
 
 

@@ -65,12 +65,20 @@ def _pct_num(v):
         return None
 
 
-def _build_plan_tables(strategies: list[dict], fetched_at: datetime | None = None) -> str:
+def _build_plan_tables(
+    strategies: list[dict],
+    fetched_at: datetime | None = None,
+    precision: dict | None = None,
+) -> str:
     """P5-a: 从引擎 strategies 数据直接渲染方案详解 Markdown 表格。
     确保报告中的数据与方案卡片完全一致，杜绝 LLM 篡改标的。
 
     P0-9 (round9 §4.3-A): 「今日涨跌」列加数据采集时刻标注「（截至 HH:MM）」——
     旧实现表格无时间戳，盘中生成的值被误读为最新收盘（#427 11:58 生成 vs 收盘对照必错位）。
+
+    round25 R36: `precision`（data_precision，mode=coarse）时因子分列与权重列按
+    **强弱分档/5% 档位**渲染（与前端 DesignResult 的 bucket 呈现一致）——旧实现表格
+    恒精确小数（-0.99/3.07），与 data_precision 标注的 bucket 矛盾（R3 残余）。
     """
     # F3 R6: 首行不带 \n\n 前导（避免与 task_manager 前缀拼接后 3 个连续空行）
     lines = ["## 一、三种方案详解"]
@@ -173,7 +181,6 @@ def _build_plan_tables(strategies: list[dict], fetched_at: datetime | None = Non
             code = e.get("symbol", "")
             # F3 R5: 名称不截断（旧 [:12] 产生"中证500增强ETF易方"类残句）
             name = e.get("name", "")
-            w = (e.get("weight") or e.get("target_weight") or 0) * 100
             raw = e.get("selection_rationale") or ""
             # F3 R4 用户决策更新（2026-08-02）：理由不再截断——与 R5 名称处理一致，
             # markdown 表格渲染自动换行；完整理由保留估值/资金流/市态等关键尾部。
@@ -190,6 +197,17 @@ def _build_plan_tables(strategies: list[dict], fetched_at: datetime | None = Non
                 advice = "等企稳分批，跌破 MA20 暂停"
             fs = e.get("factor_score", None)
             fs_txt = f"{fs:.2f}" if fs is not None else ""
+            # round25 R36: 降级态（mode=coarse）因子分按强弱分档 + 权重按 5% 档位——
+            # 与前端 bucket 呈现一致，杜绝表格精确小数冒充「数据可信」
+            _coarse = bool(precision and precision.get("mode") == "coarse")
+            if _coarse and fs is not None:
+                fs_txt = ("偏强" if fs >= 0.5 else "偏弱" if fs <= -0.5 else "中性")
+            w = (e.get("weight") or e.get("target_weight") or 0) * 100
+            if _coarse:
+                _step = float((precision or {}).get("weight_step_pct") or 5.0)
+                w_txt = f"≈{max(0.0, round(w / _step) * _step):.0f}%"
+            else:
+                w_txt = f"{w:.0f}%"
             dcp = e.get("daily_change_pct")
             if dcp is not None:
                 # O18 (round8 §7): 唯一口径 = 百分比。删除旧 `abs(dcp)<1 → ×100` 分支——
@@ -207,7 +225,7 @@ def _build_plan_tables(strategies: list[dict], fetched_at: datetime | None = Non
                 # P1-4 (R4-02): 涨跌数据缺失显性化——输出「数据源不可用」而非 "—"，
                 # 避免「数据源降级导致的数据缺失」被误读为「0% 涨跌」或静默缺失。
                 dcp_txt = "数据源不可用"
-            lines.append(f"| {layer_cn} | {code} | {name} | {w:.0f}% | {fs_txt} | {dcp_txt} | {advice} | {rationale} |")
+            lines.append(f"| {layer_cn} | {code} | {name} | {w_txt} | {fs_txt} | {dcp_txt} | {advice} | {rationale} |")
 
     # P2-4 (round20 §五 P2-4): 注释与数值范围一致——多因子综合分可负可超 1
     # （实测 511090=-2.31 超旧注释「0~1」），区别于技术信号（0~1）。
@@ -517,7 +535,13 @@ async def compose_and_push_report(
             _fetched_at = datetime.fromtimestamp(_ts)
         except Exception:
             _fetched_at = None
-        plan_tables = _build_plan_tables(strategies, fetched_at=_fetched_at)
+        plan_tables = _build_plan_tables(
+            strategies,
+            fetched_at=_fetched_at,
+            # round25 R36: 透传 data_precision——降级态（coarse）表格权重/因子分
+            # 按 5% 档位 + 强弱分档渲染（与前端 DesignResult 的 bucket 一致）
+            precision=(market_context or {}).get("data_precision"),
+        )
 
         # 调用 LLM，注入预生成的策略表格，让 LLM 只写分析部分
         try:

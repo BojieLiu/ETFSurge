@@ -229,6 +229,10 @@ async def _search_indices(keyword: str, market: str | None = None) -> list[dict[
 
     round14 P2-AG: 加 market 参数——market='HK' 时按 IndexMeta.market 过滤 + limit
     10→20（放大港股指数命中面）；market='A' 只查 A；None 保持全市场。
+
+    round26 Q4/Q6: 表数据不足（indices_meta US=7/HK=63 极不全，费城/SOX/恒生港股通
+    低波动变体缺失）时加 **akshare 运行时兜底**（仿 symbol 模式 search_etf 兜底）——
+    本地表 0 命中时回退实时指数列表（指数代码/名称搜不到不再恒空）。
     """
     from ..models.search import IndexMeta
     from sqlalchemy import select, or_
@@ -236,6 +240,7 @@ async def _search_indices(keyword: str, market: str | None = None) -> list[dict[
     kw = (keyword or "").strip()
     if not kw:
         return []
+    rows = []
     try:
         async with async_session() as session:
             stmt = select(IndexMeta).where(
@@ -259,13 +264,116 @@ async def _search_indices(keyword: str, market: str | None = None) -> list[dict[
                 stmt = stmt.where(IndexMeta.market == "US")
             stmt = stmt.limit(20)  # P2-AG: 10→20（放大港股指数命中面）
             rows = (await session.execute(stmt)).scalars().all()
-            return [{
-                "symbol": r.symbol, "name": r.name,
-                "type": "index", "market": r.market, "asset_type": "index",
-            } for r in rows]
     except Exception as e:
         logger.warning("[search] index search failed: %s", e)
-        return []
+        rows = []
+
+    out = [{
+        "symbol": r.symbol, "name": r.name,
+        "type": "index", "market": r.market, "asset_type": "index",
+    } for r in rows]
+
+    # round26 Q4/Q6: 本地表命中不足 → akshare 运行时兜底（索引不全时的最后防线）。
+    # 仅当本地 0 命中才触发（避免每次都触网）；失败静默（保持空结果，诚实降级）。
+    if not out:
+        try:
+            out = await _search_indices_akshare_fallback(kw, market)
+        except Exception as e:
+            logger.debug("[search] index akshare fallback failed (non-fatal): %s", e)
+    return out
+
+
+async def _search_indices_akshare_fallback(
+    keyword: str, market: str | None = None
+) -> list[dict[str, Any]]:
+    """round26 Q4/Q6: akshare 指数列表运行时兜底（索引不全时的补充命中）。
+
+    覆盖：A 股（新浪指数 spot）、港股（新浪港股指数 + 静态扩展）、美股（Sina US 指数）。
+    本地 indices_meta 表缺失的指数（费城半导体/SOX、恒生港股通低波动变体等）在表 0 命中
+    时经此兜底可搜到。失败返回 []（诚实降级，不编造）。
+    """
+    import asyncio as _aio
+    from ..core.async_utils import run_sync
+
+    kw = (keyword or "").strip().lower()
+    mkt = str(market or "").upper()
+    results: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+
+    async def _match_and_collect(rows: list[dict], m: str) -> list[dict]:
+        got = []
+        for r in rows or []:
+            sym = str(r.get("symbol", "")).strip()
+            name = str(r.get("name", "")).strip()
+            if not sym or not name:
+                continue
+            if kw and kw not in sym.lower() and kw not in name.lower():
+                continue
+            key = (sym, m)
+            if key in seen:
+                continue
+            seen.add(key)
+            got.append({"symbol": sym, "name": name,
+                        "type": "index", "market": m, "asset_type": "index"})
+        return got
+
+    try:
+        import akshare as ak
+
+        # A 股：新浪指数 spot（含行业/概念指数代码）
+        if mkt in ("", "A"):
+            try:
+                df = await _aio.to_thread(ak.stock_zh_index_spot_sina)
+                rows = []
+                if df is not None and not getattr(df, "empty", True):
+                    for _, r in df.iterrows():
+                        rows.append({"symbol": str(r.get("代码", "")).strip(),
+                                     "name": str(r.get("名称", "")).strip()})
+                results.extend(await _match_and_collect(rows, "A"))
+            except Exception as e:
+                logger.debug("[search] index akshare fallback A failed: %s", e)
+
+        # 港股：新浪港股指数（含恒生家族）
+        if mkt in ("", "HK"):
+            try:
+                df = await _aio.to_thread(ak.stock_hk_index_spot_sina)
+                rows = []
+                if df is not None and not getattr(df, "empty", True):
+                    for _, r in df.iterrows():
+                        rows.append({"symbol": str(r.get("代码", "")).strip(),
+                                     "name": str(r.get("名称", "")).strip()})
+                results.extend(await _match_and_collect(rows, "HK"))
+            except Exception as e:
+                logger.debug("[search] index akshare fallback HK failed: %s", e)
+
+        # 美股：Sina US 指数列表（标普/纳斯达克/道琼斯家族）
+        if mkt in ("", "US"):
+            try:
+                df = await _aio.to_thread(ak.index_us_stock_sina)
+                rows = []
+                if df is not None and not getattr(df, "empty", True):
+                    for _, r in df.iterrows():
+                        rows.append({"symbol": str(r.get("symbol", "")).strip(),
+                                     "name": str(r.get("name", "")).strip()})
+                results.extend(await _match_and_collect(rows, "US"))
+            except Exception as e:
+                logger.debug("[search] index akshare fallback US failed: %s", e)
+    except Exception as e:
+        logger.debug("[search] index akshare fallback fetch failed: %s", e)
+
+    # 静态兜底段（sync_indices_meta._STATIC_EXTRA_INDICES 同源扩展，含恒生港股通
+    # 低波动等变体）——**独立于 akshare 状态**（akshare 冷却/失败也必执行），
+    # 保证本地表缺失的指数至少可被静态段命中。
+    if mkt in ("", "HK"):
+        try:
+            from app.fetchers.sync_indices_meta import _STATIC_EXTRA_INDICES
+            results.extend(await _match_and_collect(
+                [{"symbol": s["symbol"], "name": s["name"]}
+                 for s in _STATIC_EXTRA_INDICES if s.get("market") == "HK"], "HK"))
+        except Exception:
+            pass
+
+    return results[:20]
 
 async def _search_a_stocks(keyword: str) -> list[dict[str, Any]]:
     """A 股个股搜索：instruments 表（market=A, asset_type=stock）→ 空则 levistock 降级。
@@ -597,6 +705,18 @@ from ..services.market_service import resolve_symbol_to_code
 
 CODE_PATTERN = re.compile(r"^[0-9A-Za-z.\-]+$")
 
+
+def _norm_watchlist_symbol(symbol: str) -> str:
+    """round25 R29-c②: 自选 symbol 归一化用于批量匹配——自选存 `"02800.HK"`（HKUS_ETF_MAP
+    格式）而批量刷新返 `"02800"`，精确匹配 0 命中 → 健康标的被误甩进 8s per-item 慢路径。
+    归一化：去 `.HK`/`.US` 后缀 + 统一大写。仅用于**匹配键**，不改入库 symbol。"""
+    s = str(symbol or "").strip().upper()
+    for suffix in (".HK", ".US", ".SS", ".SZ"):
+        if s.endswith(suffix):
+            s = s[: -len(suffix)]
+            break
+    return s
+
 async def _watchlist_enrich_items(items: list) -> list[dict]:
     """P0-4 (round9 §10): watchlist 实时行情 enrich（批量 + per-item 降级 + auto-heal）。
 
@@ -643,7 +763,9 @@ async def _watchlist_enrich_items(items: list) -> list[dict]:
             )
             _rows = _rows or []
             _batch_ok[asset_type] = bool(_rows)
-            return {r.get("symbol"): r for r in _rows if r.get("symbol")}
+            # round25 R29-c②: 批量映射键归一化（去掉 .HK/.US 后缀）——自选存 "02800.HK"
+            # 而批量返 "02800"，精确匹配 0 命中会把健康标的误甩进 8s per-item 慢路径。
+            return {_norm_watchlist_symbol(r.get("symbol")): r for r in _rows if r.get("symbol")}
         except BaseException as _e:
             logger.warning("[watchlist] %s batch realtime failed (fallback per-item): %s", asset_type, _e)
             _batch_ok[asset_type] = False
@@ -690,8 +812,8 @@ async def _watchlist_enrich_items(items: list) -> list[dict]:
             asyncio.sleep(0, result=None)
             if _group_of(it) in _skip_markets
             else _realtime_one(it)
-            if it.symbol not in _batch_map
-            else asyncio.sleep(0, result=_batch_map[it.symbol])
+            if _norm_watchlist_symbol(it.symbol) not in _batch_map
+            else asyncio.sleep(0, result=_batch_map[_norm_watchlist_symbol(it.symbol)])
             for it in items
         ),
         return_exceptions=True,
@@ -711,6 +833,10 @@ async def _watchlist_enrich_items(items: list) -> list[dict]:
         # 慢源时合法代码直接 DB-only（realtime=None），不再逐条 resolve。
         if not CODE_PATTERN.match(item.symbol):
             # Try to resolve symbol from name（P0-4: 加 2s 超时——旧实现无超时，脏数据可拖满整体）
+            # round25 R29-c③: resolve_symbol_to_code 内部 `get_all_stocks()` 是同步阻塞
+            # 调用（网络拉全量列表），裸 await 时 asyncio.wait_for(2s) 无法中断它（实测
+            # 9-15s 卡死）——内部已改经 asyncio.to_thread 提交线程池（async def ≠ 非阻塞
+            # 铁律），此处 wait_for 对 await 点真实生效。
             try:
                 resolved = await asyncio.wait_for(
                     resolve_symbol_to_code(item.symbol, item.asset_type), timeout=2)
@@ -800,23 +926,71 @@ async def _watchlist_enrich_items(items: list) -> list[dict]:
             if item_dict.get("realtime") is None:
                 item_dict["realtime"] = None
                 _at = item.asset_type or "A"
+                # round25 R29-b: 放开资产类型门控——A 股超时同样走 T-1 收盘兜底
+                #（_last_close_fallback 本就资产类型无关；旧实现仅 US/HK 有兜底，
+                # A 股超时直接空白 → 前端「行情加载中」）。US/HK 额外标注
+                # realtime_unavailable（无实时行情），A 股仅 _degraded。
                 if _at in ("US", "HK"):
-                    # round24 R20: 美股/HK 无实时源 → 显式「暂无实时」（非静默 null，
-                    # 避免误读为「没波动」）+ 尝试 T-1 收盘兜底（F39 K 线源，is_estimated 标「估」）
                     item_dict["realtime_unavailable"] = True
                     item_dict["realtime_note"] = "该市场数据源暂不可用（无实时行情）"
-                    try:
-                        from ..services.market_service import _last_close_fallback
-                        _lc = await _last_close_fallback(resolved_symbol, _at)
-                        if _lc:
-                            item_dict["realtime"] = _lc
-                    except Exception:
-                        pass
-                else:
+                try:
+                    from ..services.market_service import _last_close_fallback
+                    _lc = await _last_close_fallback(resolved_symbol, _at)
+                    if _lc:
+                        item_dict["realtime"] = _lc
+                except Exception:
+                    pass
+                if item_dict.get("realtime") is None:
                     item_dict["_degraded"] = True
         enriched.append(item_dict)
 
     return enriched
+
+# round25 R29: 5s 超时回退不再返裸 DB 行——改为 T-1 收盘快照兜底（跨 A/HK/US，
+# 资产类型无关，复用 market_service._last_close_fallback），前端显示「估」徽标
+# 而非「行情加载中」永不翻回。失败/无历史 → 诚实降级标记。
+async def _watchlist_close_fallback(items: list) -> list[dict]:
+    from ..services.market_service import _last_close_fallback
+
+    async def _one(item) -> dict:
+        row = {
+            "id": item.id,
+            "symbol": item.symbol,
+            "name": item.name,
+            "asset_type": item.asset_type,
+            "notes": item.notes,
+            "created_at": item.created_at.isoformat() if item.created_at else None,
+            "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+            "realtime": None,
+        }
+        _at = item.asset_type or "A"
+        try:
+            _lc = await asyncio.wait_for(
+                # 0.8s 单条兜底：5s enrich 超时 + 0.8s 收盘兜底 ≈ 5.8s < 6s 门禁
+                _last_close_fallback(item.symbol, _at), timeout=0.8
+            )
+        except BaseException:
+            _lc = None
+        if _lc:
+            row["realtime"] = _lc  # is_estimated=True + as_of=T-1 收盘（「估」徽标）
+        if _at in ("US", "HK"):
+            # US/HK 无实时 → 显式「暂无实时」（即使有收盘兜底也标注数据源不可用）
+            row["realtime_unavailable"] = True
+            row["realtime_note"] = "该市场数据源暂不可用（无实时行情）"
+        elif row.get("realtime") is None:
+            # A 股：仅当收盘兜底也失败才标 _degraded（有估值时前端显示「估」徽标，
+            # 不误报「行情暂不可用」）
+            row["_degraded"] = True
+        return row
+
+    rows = await asyncio.gather(*(_one(it) for it in items), return_exceptions=True)
+    out = []
+    for r in rows:
+        if isinstance(r, BaseException):
+            continue
+        out.append(r)
+    return out
+
 
 @router.get("/watchlist", response_model=dict)
 async def watchlist_list(
@@ -844,17 +1018,23 @@ async def watchlist_list(
             return _cached
 
         # P0-4 (round9 §10): watchlist 实时 enrich 整体超时 5s——批量 4s + per-item
-        # 2.5s×N + resolve 2s，慢源短路后再整体截断，DB 侧数据兜底返回。
+        # 2.5s×N + resolve 2s，慢源短路后再整体截断。
+        # round25 R29: 超时回退不再返裸 DB 行（前端「行情加载中」永不翻回）——
+        # 改走 T-1 收盘快照兜底（realtime.is_estimated=True + as_of），前端「估」徽标。
         try:
             enriched = await asyncio.wait_for(_watchlist_enrich_items(items), timeout=5)
         except asyncio.TimeoutError:
-            logger.warning("[watchlist] realtime enrich timed out after 5s — returning DB-only rows (P0-4)")
-            enriched = [{
-                "id": it.id, "symbol": it.symbol, "name": it.name,
-                "asset_type": it.asset_type, "notes": it.notes,
-                "created_at": it.created_at.isoformat() if it.created_at else None,
-                "updated_at": it.updated_at.isoformat() if it.updated_at else None,
-            } for it in items]
+            logger.warning("[watchlist] realtime enrich timed out after 5s — returning T-1 close fallback rows (R29)")
+            try:
+                enriched = await _watchlist_close_fallback(items)
+            except Exception as _e:
+                logger.warning("[watchlist] close-snapshot fallback failed: %s — returning DB-only rows", _e)
+                enriched = [{
+                    "id": it.id, "symbol": it.symbol, "name": it.name,
+                    "asset_type": it.asset_type, "notes": it.notes,
+                    "created_at": it.created_at.isoformat() if it.created_at else None,
+                    "updated_at": it.updated_at.isoformat() if it.updated_at else None,
+                } for it in items]
 
         resp = {
             "items": enriched,

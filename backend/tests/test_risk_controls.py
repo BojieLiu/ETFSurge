@@ -247,12 +247,20 @@ class TestR2MandatoryCorrelationExemption:
         weights = {a["symbol"]: a["weight"] for a in s["allocations"]}
         assert weights["159338"] >= 0.05 - 1e-9, f"强制锚 159338 被削到 {weights['159338']}"
         assert weights["510300"] >= 0.05 - 1e-9
-        # 标注存在且不含被削减标的（round24 R24②: 沪深300/中证A500 同族 → 附加 near_substitute 层）
+        # 标注存在且不含被削减标的（round24 R24②: 沪深300/中证A500 同族 → near_substitute 层）
         warnings = s["risk_metrics"]["correlation_warnings"]
-        assert len(warnings) == 2
+        assert len(warnings) == 1
         assert warnings[0]["reduced_symbol"] is None
         assert "豁免" in warnings[0]["note"]
-        assert any(w.get("type") == "near_substitute" for w in warnings)
+        # round25 R41-a: 近替代品检测已解耦为独立层 apply_near_substitute_warnings——
+        # enforce_max_correlation 不再包裹它；同族告警由独立层（strategy_design 无条件调用）
+        # 负责，此处单独验证独立层仍识别沪深300/中证A500 同族。
+        from app.engine.allocation_engine import apply_near_substitute_warnings
+        s2 = apply_near_substitute_warnings(self._mk(list(allocs)), matrix)[0]
+        w2 = s2["risk_metrics"]["correlation_warnings"]
+        assert any(w.get("type") == "near_substitute" for w in w2), (
+            "沪深300/中证A500 同族近替代品须由独立层识别（R41-a）"
+        )
         # 双方强制锚权重不变
         assert weights["159338"] == 0.20
         assert weights["510300"] == 0.25

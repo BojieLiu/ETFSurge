@@ -6,6 +6,12 @@
 > 推荐使用 `restart.bat`（一键重启前后端）或 `start.ps1` 启动、`stop.ps1` 停止。
 > 如果手动启动：
 
+> **日志位置（Silent/restart 模式）**：`start.ps1 -Silent` 将前后端 stdout/stderr 重定向到项目根
+> `logs/frontend.log`（vite 输出）与 `logs/backend_stdout.log`（uvicorn banner + 崩溃 traceback）。
+> 每次重启旧文件轮转为 `.1`（上一会话现场保留）。后端应用级日志另有 `backend/logs/backend.log`
+> （LOG_FILE 配置）。**进程消失/启动失败先查这两个文件**——前端静默退出无任何痕迹，必须靠日志定位。
+> 后端 warmup 含基金净值同步等任务，可能需 60s+ 才就绪（start.ps1 健康检查窗口 90s）。
+
 ### 本地开发（无需 Docker）
 
 ```bash

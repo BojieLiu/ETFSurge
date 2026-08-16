@@ -37,14 +37,14 @@ THRESHOLDS = {
 DEBT_LOG = "已知性能债台账（软门禁预警登记，不阻断）"
 
 
-def _http(method, url, timeout=20):
+def _http(method, url, timeout=20, json_body=None):
     import requests
     _t0 = time.monotonic()
     try:
         if method == "GET":
             resp = requests.get(url, timeout=timeout)
         else:
-            resp = requests.post(url, json={}, timeout=timeout, stream=True)
+            resp = requests.post(url, json=json_body or {}, timeout=timeout, stream=True)
             if resp.status_code == 200:
                 # SSE 流：读首行即断（首包延迟 ≈ 分析启动耗时）
                 resp.iter_lines().__next__()
@@ -80,8 +80,10 @@ def main():
             url = f"{args.base}/api/v1/factors/active"
             status, dur = _http("GET", url)
         elif label == "symbol-analysis":
-            url = f"{args.base}/api/v1/analysis/symbol/510050"
-            status, dur = _http("POST", url)
+            # round25 R35: 旧路径 /analysis/symbol/510050 恒 404 → 恒 0.00s 假 OK
+            #（性能软门禁盲区）。真路径 POST /analysis/symbol-analysis/stream（SSE 首包）。
+            url = f"{args.base}/api/v1/analysis/symbol-analysis/stream"
+            status, dur = _http("POST", url, json_body={"symbol": "510050", "asset_type": "A"})
         elif label == "timeline":
             url = f"{args.base}/api/v1/portfolio/timeline"
             status, dur = _http("GET", url)

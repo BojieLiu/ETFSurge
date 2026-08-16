@@ -152,3 +152,51 @@ describe('DesignResult round22 E5 correlation_unchecked 提示', () => {
     expect(wrapper.find('.corr-unchecked-note').exists()).toBe(false)
   })
 })
+
+// round25 R41-b: 近替代品冗余告警——correlation_warnings 中 near_substitute/unevaluated
+// 条目必须渲染（旧实现后端有计算、前端完全不渲染 → 死输出）。负向：不渲染 → FAIL。
+describe('DesignResult round25 R41-b 近替代品告警', () => {
+  it('near_substitute 条目渲染（含族/对信息）', async () => {
+    const wrapper = await mountResult(makePlan({
+      risk_metrics: {
+        correlation_warnings: [
+          { type: 'near_substitute', pair: ['588200', '588170'], family: '半导体',
+            correlation: 0.12, note: '同主题近替代品（半导体族）：不同发行商同一板块，关联度约束不依赖 K 线相关系数' },
+        ],
+      },
+    }))
+    const note = wrapper.find('.corr-substitute-note')
+    expect(note.exists()).toBe(true)
+    expect(note.text()).toContain('半导体')
+    expect(note.text()).toContain('近替代品')
+  })
+
+  it('unevaluated 条目渲染（r 缺失标注待复算）', async () => {
+    const wrapper = await mountResult(makePlan({
+      risk_metrics: {
+        correlation_warnings: [
+          { type: 'unevaluated', pair: ['513120', '159570'], family: '医药生物',
+            correlation: null, note: '同主题近替代品（医药生物族）但相关系数缺失（无价格序列/降级），冗余风险未量化——待交易时段复算' },
+        ],
+      },
+    }))
+    expect(wrapper.find('.corr-substitute-note').exists()).toBe(true)
+    expect(wrapper.find('.corr-substitute-note').text()).toContain('医药生物')
+  })
+
+  it('无 correlation_warnings → 不渲染告警条（不误报）', async () => {
+    const wrapper = await mountResult(makePlan())
+    expect(wrapper.find('.corr-substitute-note').exists()).toBe(false)
+  })
+
+  it('concentration 类警告不渲染（仅 near_substitute/unevaluated）', async () => {
+    const wrapper = await mountResult(makePlan({
+      risk_metrics: {
+        correlation_warnings: [
+          { type: 'concentration', symbols: ['a', 'b'], avg_correlation: 0.85 },
+        ],
+      },
+    }))
+    expect(wrapper.find('.corr-substitute-note').exists()).toBe(false)
+  })
+})

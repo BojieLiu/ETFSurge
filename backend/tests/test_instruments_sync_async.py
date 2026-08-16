@@ -1,4 +1,4 @@
-"""
+﻿"""
 O1 (docs/archived/round8-rediagnosis.md §7 P0-新): instruments 同步全链路改造。
 
 P0-新 根因: scripts/sync_instruments.py 的 `_fetch_akshare_list` 对 akshare 做裸同步调用
@@ -16,7 +16,7 @@ import inspect
 
 import pytest
 
-from scripts import sync_instruments as si
+from app.fetchers import sync_instruments as si
 from app.services import instruments_sync as ins
 
 

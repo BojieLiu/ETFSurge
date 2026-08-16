@@ -1363,20 +1363,26 @@ class MarketDataHub:
     async def _persist_snapshot_after_refresh(self, new_pool: dict) -> None:
         """round24 R26②: 盘后/熔断刷新成功 → 落盘候选池 + 板块动量快照（last-good 之上再一层）。
 
-        仅在 post_market / after_hours 写（实时源时效场景不写，避免快照盖过实时）。
+        原语义：仅在 post_market / after_hours 写（实时源时效场景不写，避免快照盖过实时）。
+        round25 R40-b 放宽：**sector_momentum 只要 refresh 成功且非空即落盘**（盘中/收盘任一
+        时点成功刷新都留下 last-good 快照，封堵「收盘后才首次启动 → 磁盘无快照 → 盘后兜底
+        无物可兜」的首启空窗）；空 `[]` 不写（防空壳污染兜底）。读取侧仅在无 live 缓存时
+        回退快照，故放宽写入不违反「快照盖过实时」意图。pool 快照保持盘后语义（pool 语义
+        与 sector 不同，盘中实时池不该被快照盖过）。
         同步 sqlite 经 asyncio.to_thread 执行，不阻塞事件循环（符合 async def ≠ 阻塞）。
         """
         try:
-            from ..core.market_calendar import market_session
             session = market_session()
-            if session not in ("post_market", "after_hours"):
-                return
             as_of = _snapshot_as_of_for()
             if not as_of:
-                return
+                # R40-b: as_of 为 None（盘中/盘前）时 sector_momentum 快照仍可落盘——
+                # 用当前时间戳代替（last-good 语义，仅作兜底不冒充收盘）
+                as_of = datetime.now().isoformat(sep="T")
             pool_payload = {k: [dict(x) for x in v] for k, v in (new_pool or {}).items()}
-            if pool_payload:
+            # pool 快照：保持盘后语义（post_market/after_hours 才写）
+            if pool_payload and session in ("post_market", "after_hours"):
                 await asyncio.to_thread(_persist_snapshot_sync, "pool", pool_payload, as_of)
+            # sector_momentum 快照：R40-b 放宽——refresh 成功且非空即落盘（防空壳）
             sm = self.get_sector_momentum() or []
             if sm:
                 await asyncio.to_thread(_persist_snapshot_sync, "sector_momentum", list(sm), as_of)
@@ -1650,11 +1656,32 @@ class MarketDataHub:
         return out
 
     def get_sector_momentum(self) -> list[dict]:
-        """获取板块动量，120s 缓存 TTL。"""
+        """获取板块动量，120s 缓存 TTL。
+
+        round25 R40-a: 读取兜底闭环——缓存过期/空 且 盘后/收盘后（post_market /
+        after_hours）时，读已落盘的 `sector_momentum` 快照（写入侧 `_persist_snapshot_
+        after_refresh` 已有）；盘中缓存失效**不**用快照（避免昨日收盘冒充盘中实时），
+        保持 `[]` 触发既有降级。旧实现只返内存缓存或 `[]`，从不读快照（「写了不读」）。
+        """
         import time
         now = time.time()
         if self._sector_momentum_cache and (now - self._sector_momentum_cache_ts) < 120:
             return self._sector_momentum_cache
+        # 缓存过期/空：盘后才回退快照（注入收盘动量）；盘中保持 []（诚实降级）
+        try:
+            session = market_session()
+            if session in ("post_market", "after_hours"):
+                snap = _load_latest_snapshot_sync("sector_momentum")
+                if isinstance(snap, list) and snap:
+                    self._sector_momentum_cache = snap
+                    self._sector_momentum_cache_ts = time.time()
+                    logger.info(
+                        "[hub] sector momentum loaded from post-market snapshot (%d rows)",
+                        len(snap),
+                    )
+                    return snap
+        except Exception as e:
+            logger.debug("[hub] sector momentum snapshot read failed (non-fatal): %s", e)
         return self._sector_momentum_cache or []
 
     def get_hot_plates(self, limit: int | None = None, market: str = "A") -> list[dict]:
@@ -1934,18 +1961,33 @@ class MarketDataHub:
 
         Z18: level>=4 或 stars>=4 的重要新闻才生成；LLM 失败静默保留 None；
         改的是缓存内 dict 引用，write-back 对 get_news_* 立即可见。
-        R17 (round24): 覆盖三桶（headlines/macro/global），不再仅 headlines——
-        按重要性合并去重后截断到 cap 控制成本（默认 6）。
+        R17 (round24): 覆盖三桶（headlines/macro/global），不再仅 headlines。
+        round25 R31: 旧实现三桶合并后按重要性取前 cap 条 → headlines 恒占满
+        （macro/global 0 摘要，R17 验收未达）——改为**分桶配额**：
+        headlines=ceil(cap*0.5)、macro=ceil(cap*0.33)、global=剩余
+        （cap=6 → 3/2/1），保证三桶均有摘要覆盖。
         """
         try:
             from ..analysis.llm import generate_news_summary
         except Exception:
             return 0
-        # R17: 三桶合并（headlines 优先），去重，按重要性挑 cap 条
-        targets: list[dict] = []
+        # R31: 分桶配额——headlines 最多一半，macro/global 保底
+        import math
+        _head_q = max(1, math.ceil(cap * 0.5))
+        _macro_q = max(1, math.ceil(cap * 0.33)) if cap >= 3 else 0
+        _global_q = max(0, cap - _head_q - _macro_q)
+        quotas = {"headlines": _head_q, "macro": _macro_q, "global": _global_q}
+
+        enriched = 0
         seen_ids: set = set()
         for bucket in ("headlines", "macro", "global"):
+            q = quotas.get(bucket, 0)
+            if q <= 0:
+                continue
+            bucket_count = 0
             for n in self._news_bucket(bucket):
+                if bucket_count >= q:
+                    break
                 if n.get("ai_summary"):
                     continue
                 # F28 (round23 P0-A): 按 int 重要性判定（level>=4 或 stars>=4 → 重要）
@@ -1954,16 +1996,16 @@ class MarketDataHub:
                     if nid in seen_ids:
                         continue
                     seen_ids.add(nid)
-                    targets.append(n)
-        enriched = 0
-        for n in targets[:cap]:
-            try:
-                summary = await generate_news_summary(n.get("title", ""), n.get("content", ""))
-                if summary:
-                    n["ai_summary"] = summary
-                    enriched += 1
-            except Exception:
-                continue
+                    try:
+                        summary = await generate_news_summary(n.get("title", ""), n.get("content", ""))
+                        if summary:
+                            n["ai_summary"] = summary
+                            enriched += 1
+                            bucket_count += 1
+                    except Exception:
+                        continue
+            logger.debug("[hub] enrich_news_summaries bucket=%s quota=%d done=%d",
+                         bucket, q, bucket_count)
         return enriched
 
     def get_news_macro(self) -> list[dict]:

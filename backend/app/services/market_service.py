@@ -1453,6 +1453,10 @@ async def get_history(
         # O2 (round8 §7 P1-新): HK K 线与实时价一致性校验——最高/最新价与实时价
         # 差异 >50% 视为 K 线数据源错误（finnhub/alphavantage 符号错位曾产生
         # 9.49 vs 492.2 的脱钩数据），丢弃返回空（调用方降级，不再喂 LLM 失真 K 线）。
+        # round25 Q2/Q3: 收紧剔除条件——旧实现 close 或 high 任一差 >50% 即整体丢弃，
+        # 实时源返 stale/错位价（00700/09988/03690/01810 场景）会把真实 K 线一并误删。
+        # 现要求 close 与 high **双双**偏离 >50% 才判源错误（单字段漂移不再整链误杀），
+        # 且剔除前必打 WARNING 日志（验收口径：一致性校验剔除时有日志可查）。
         if asset_type == "HK":
             try:
                 _rt = await _call(fetch_hk_stock_realtime, symbol, timeout=8) or []
@@ -1460,11 +1464,12 @@ async def get_history(
                 if _rt_price:
                     _last_close = result[-1].get("close")
                     _high = max((r.get("high") or 0) for r in result)
-                    if (_last_close and abs(_last_close - _rt_price) / _rt_price > 0.5) \
-                            or (_high and abs(_high - _rt_price) / _rt_price > 0.5):
+                    _close_off = _last_close and abs(_last_close - _rt_price) / _rt_price > 0.5
+                    _high_off = _high and abs(_high - _rt_price) / _rt_price > 0.5
+                    if _close_off and _high_off:
                         logger.warning(
                             "[market_service] HK kline %s inconsistent with realtime "
-                            "(last_close=%s high=%s realtime=%s) — discarding",
+                            "(last_close=%s high=%s realtime=%s both >50%% off) — discarding",
                             symbol, _last_close, _high, _rt_price,
                         )
                         return []
@@ -1599,7 +1604,10 @@ async def resolve_symbol_to_code(symbol: str, asset_type: str = "A") -> str | No
     try:
         from ..services.market_data_hub import market_data_hub
 
-        full = market_data_hub.get_all_stocks() or []
+        # round25 R29-c③: get_all_stocks() 是同步网络调用（全量股票列表拉取）——
+        # 裸调用会阻塞事件循环，使调用方 asyncio.wait_for(2s) 无法中断（实测 9-15s 卡死）。
+        # 经 asyncio.to_thread 提交线程池，wait_for 对 await 点真实生效（async def ≠ 非阻塞）。
+        full = await asyncio.to_thread(market_data_hub.get_all_stocks) or []
         for item in full:
             stock_name = item.get("stock_name") or item.get("name") or ""
             if stock_name == kw:

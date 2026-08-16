@@ -1,4 +1,4 @@
-"""
+﻿"""
 N09 (round3-diagnosis-and-optimization-plan.md N09): 拼音搜索无数据。
 
 - collect_all: 失败段打 ERROR 日志 + 每段行数统计（旧仅 WARN print）。
@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from scripts import sync_instruments as si
+from app.fetchers import sync_instruments as si
 
 
 def _row(symbol, name, market="A", asset_type="stock"):

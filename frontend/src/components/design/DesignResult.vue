@@ -94,6 +94,14 @@
                   <span class="corr-unchecked-icon">ⓘ</span>
                   <span class="corr-unchecked-text">关联度未校验——非交易时段或行情缺失，相关性约束已跳过，请以方案卡片为准</span>
                 </div>
+                <!-- round25 R41-b: 近替代品冗余告警——后端 correlation_warnings 中
+                     type ∈ {near_substitute, unevaluated} 条目此前完全不渲染（死输出）；
+                     现显式呈现「同主题近替代品」提示（与 correlation_unchecked 并列） -->
+                <div v-for="(cw, cwi) in nearSubstituteWarnings(pf)" :key="'cw-' + cwi"
+                     class="corr-substitute-note" role="status">
+                  <span class="corr-unchecked-icon">🧩</span>
+                  <span class="corr-substitute-text">{{ substituteText(cw) }}</span>
+                </div>
                 <div class="plan-allocation">
                   <table class="alloc-table">
                     <thead>
@@ -292,6 +300,19 @@ function applyPlan(pf) {
   applying.value = true
   emit('apply', pf)
 }
+
+// round25 R41-b: 近替代品/未评估冗余告警——risk_metrics.correlation_warnings 中
+// type ∈ {near_substitute, unevaluated} 条目（此前后端有计算但前端完全不渲染）。
+function nearSubstituteWarnings(pf) {
+  const cw = pf?.risk_metrics?.correlation_warnings
+  if (!Array.isArray(cw)) return []
+  return cw.filter(w => w.type === 'near_substitute' || w.type === 'unevaluated')
+}
+function substituteText(cw) {
+  if (cw && cw.note) return cw.note
+  if (cw && Array.isArray(cw.pair)) return `同主题近替代品：${cw.pair.join(' / ')}，建议保留其一`
+  return '存在同主题近替代品，建议检查持仓集中度'
+}
 </script>
 
 <style scoped>
@@ -358,6 +379,10 @@ function applyPlan(pf) {
 .corr-unchecked-note { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); margin-bottom: var(--space-3); background: #e3f2fd; border: 1px solid #90caf9; border-radius: var(--radius-md); font-size: var(--font-size-sm); color: #1565c0; }
 .corr-unchecked-icon { font-size: var(--font-size-base); }
 .corr-unchecked-text { font-weight: var(--font-weight-medium); }
+/* round25 R41-b: 近替代品冗余告警——紫色系（区别于蓝色关联度未校验），
+   强调「同主题双持有」主题集中风险 */
+.corr-substitute-note { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); margin-bottom: var(--space-3); background: #f3e5f5; border: 1px solid #ce93d8; border-radius: var(--radius-md); font-size: var(--font-size-sm); color: #6a1b9a; }
+.corr-substitute-text { font-weight: var(--font-weight-medium); }
 .alloc-table { width: 100%; border-collapse: collapse; font-size: var(--font-size-xs); }
 .alloc-table th, .alloc-table td { padding: var(--space-2) var(--space-3); text-align: left; border-bottom: 1px solid var(--color-border-light); }
 .alloc-table th { font-weight: var(--font-weight-semibold); color: var(--color-text-secondary); background: var(--color-surface-secondary); white-space: nowrap; }

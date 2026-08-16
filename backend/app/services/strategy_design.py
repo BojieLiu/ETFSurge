@@ -15,6 +15,7 @@ from ..core.market_calendar import market_session
 from ..engine.allocation_engine import (
     allocate as engine_allocate,
     enforce_max_correlation,
+    apply_near_substitute_warnings,
     check_structure_reasonableness,
 )
 from ..engine.budgets import STRATEGY_META
@@ -415,6 +416,15 @@ async def generate_enhanced_design(
                 # 矩阵缺失（_correlation_matrix_for 返回空）——相关性约束**不得静默跳过**，
                 # 降级标注 correlation_unchecked=True（前端提示「关联度未校验」），不阻塞主链路。
                 _strat_proxy.setdefault("risk_metrics", {})["correlation_unchecked"] = True
+
+            # round25 R41-a: 近替代品冗余控制——独立冗余控制层，**无条件执行**（不依赖
+            # corr_matrix）。盘后/非交易窗口 corr_matrix 为空时近替代品检测不再被连带跳过
+            #（旧实现嵌套在 enforce_max_correlation 内，该函数只在 `if corr_matrix:` 时
+            # 调用 → 盘后「芯片+半导体设备」等同主题双入选无告警）。r 缺失标 unevaluated。
+            try:
+                apply_near_substitute_warnings([_strat_proxy], corr_matrix or {})
+            except Exception as _e:
+                logger.debug("[strategy_design] near-substitute warnings skipped: %s", _e)
 
             # round20 P2-5: 结构合理性检查——负信号防御层/进攻现金/防御层 median_r 标注
             try:

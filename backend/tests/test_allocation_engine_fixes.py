@@ -465,12 +465,16 @@ class TestP1_1MaxCorrelation:
         assert pair["512480"] + pair["512760"] <= 0.25 + 1e-9
         # 低因子分一方（512760, fs=0.4）被削减
         assert pair["512760"] < 0.20 + 1e-9
-        # 报告标注 correlation_warnings（round24 R24②: 半导体/芯片同族 → 附加 near_substitute 层）
+        # 报告标注 correlation_warnings（round24 R24② 语义：半导体/芯片同族告警已解耦
+        # 至独立层 apply_near_substitute_warnings（round25 R41-a）——此处断言高相关削减
+        # 标注；同族告警由独立层单独验证）
         warnings = s["risk_metrics"]["correlation_warnings"]
-        assert len(warnings) == 2
+        assert len(warnings) == 1
         assert warnings[0]["reduced_symbol"] == "512760"
         assert "关联度提示" in warnings[0]["note"]
-        assert any(w.get("type") == "near_substitute" for w in warnings)
+        from app.engine.allocation_engine import apply_near_substitute_warnings
+        s2 = apply_near_substitute_warnings(self._mk_strategy(list(allocs)), matrix)[0]
+        assert any(w.get("type") == "near_substitute" for w in s2["risk_metrics"]["correlation_warnings"])
         # Σ 权重保持 = 1
         assert abs(sum(a["weight"] for a in s["allocations"] if a["symbol"] != "CASH") - 0.60) < 0.01
 
