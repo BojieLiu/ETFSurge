@@ -9,7 +9,7 @@
 ## 0. 执行摘要
 
 ### 0.1 本轮性质
-round25（`docs/round25-container-acceptance-and-optimization.md`）与 round26（`docs/round26-search-autocomplete-data-gaps.md`）的 R27-R41 / Q1-Q7 已在 `cd70cdf`（数据可信度+搜索缺口）与 `2fce555`（R39 LLMQuotaGate + R27 单标的口径 + R28-b 接线 + R37）两 commit 中实施。本轮用**全新 Docker 镜像 + 16 项动作**复验落地情况，并识别出**实施后仍残留的 11 项问题（R42-R52）**。
+round25（`docs/round25-container-acceptance-and-optimization.md`）与 round26（`docs/round26-search-autocomplete-data-gaps.md`）的 R27-R41 / Q1-Q7 已在 `cd70cdf`（数据可信度+搜索缺口）与 `2fce555`（R39 LLMQuotaGate + R27 单标的口径 + R28-b 接线 + R37）两 commit 中实施。本轮用**全新 Docker 镜像 + 16 项动作**复验落地情况，并识别出**实施后仍残留的 13 项问题（R42-R54）**。
 
 ### 0.2 验证动作与结果
 | # | 动作 | 结果 |
@@ -28,7 +28,7 @@ round25（`docs/round25-container-acceptance-and-optimization.md`）与 round26�
 | 12 | 后端链路性能（冷/热） | ✅ 热态全 <0.21s；⚠️ 冷态 watchlist 5.86s/stock-hot-rank 4.89s/indices 4.07s/search 6.87s |
 | 13 | 测试防护缺口分析 | ⚠️ 7 类缺口（§13）——R27 跨屏方向、R29 兜底失败、R36 结构化字段、R40 首启空窗均无测试拦截 |
 | 14 | 冗余代码 | ✅ backend 根 scratch 0；⚠️ logs/*.py 224 个残留、测试文件 220 个 |
-| 15 | 综合结论 + 修复方案 | 本文档（R42-R52 修复设计，达实施标准不实施） |
+| 15 | 综合结论 + 修复方案 | 本文档（R42-R54 修复设计，达实施标准不实施） |
 | 16 | 回收容器 + 归档 + commit/push | 见 §15 与结尾 |
 
 ### 0.3 问题分级（本轮新发现，危害驱动）
@@ -40,12 +40,14 @@ round25（`docs/round25-container-acceptance-and-optimization.md`）与 round26�
   4. **R45 — R29 残余：收盘快照兜底周末落空**：R29 的 5s 超时回退改走 `_last_close_fallback`（T-1 收盘），但该函数依赖历史 K 线源；周末/源冷却时**兜底自身也返回 None** → watchlist 实测 **0/23 条带 realtime**、0 条带 `is_estimated`（「估」徽标永不出现），前端仍显示「行情暂不可用」/「暂无实时」。R29 的「收盘快照兜底」在快照源也断时无第二层兜底。详见 §2.6。
   5. **R46 — R40 残余：首启空窗无快照可读**：R40-a 读取兜底代码已落地（`get_sector_momentum` `market_data_hub.py:1658`），但快照只在**成功刷新时写入**（R40-b 仅放宽「非空才写」，未解决「首启 live 源失败则永无快照」）。本轮 fresh 容器首启 live 源失败（Connection aborted）→ 磁盘无快照 → `sector_momentum=[]`、`strong_sector_pool_coverage=[]`，设计强板块注入失效。详见 §2.3。
   6. **R52 — 综合信号结构性恒 hold（用户 review 驱动新增）**：本轮 13 只持仓 `composite_decision.signal` **全部 hold**，即便 `technical_signal` 有 buy（513120/159869）也有 sell（512890/159545/512000/561560）。根因两层（代码级）：①**结构性**——`composite_signal`（`signal.py:34`）`score=0.4技术+0.4估值+0.2动量`，估值/动量分项在周末因子缺失时恒 0（`_COMPOSITE_FACTOR_MAP` `portfolio_service.py:1533-1537` 的 `valuation.*`/`momentum.*` 键无命中 → `_attach_composite_decisions:1571-1574` 记 0.0），只剩 `0.4×技术 ∈ [-0.4,+0.4]`，永远够不到 ±0.5 的 buy/sell 阈值（`signal.py:40-45`）；②**门禁失效**——`composite_signal_with_gate` 的 `factor_valid_rate<0.6` 降级门禁（`signal.py:85`）本应拦住，但 `_attach_composite_decisions:1556-1558` 把 valid_rate 算成 `filled_count/total_count`（「有真实因子值的持仓数」=13/13=100%，技术类因子即算 filled），而非「估值/动量分项覆盖率」→ 门禁误判「数据完整」，放行估值/动量恒 0 的假综合信号，还标 `degraded=false`。专业投资者看到「综合信号恒持有」= 一个永不给出方向的假信号。详见 §2.8。
+  7. **R53 — 美股/港股指数分析数据源未路由（用户 review 驱动新增）**：美股指数 tab 选「标普500」(SPX) → symbol-analysis 返回 `unsupported_market: US`，技术指标/K线/PE/PB 全退化（LLM 诚实降级为「仅资讯定性分析」）。根因（代码级）：`get_asset_realtime`（`market_service.py:1233-1246`）对 `asset_type=index` 的 US/HK 分支**显式返回「该市场指数暂不支持」**（round16 P0-22④ 的「过防护」，当时防「美股 tab 选 GEM 港股指数 → A 股路径报错」），但**美股指数实时数据源其实存在**——`_GLOBAL_INDEX_DEFS`（`:141-163`）含标普500（`^GSPC`）/纳斯达克（`^IXIC`）/道琼斯（`^DJI`）/恒生（`^HSI`），`get_global_indices`（`:269`）经 `_foreign`（`:361`）真实拉取；且**符号错位**：`indices_meta` 存 `SPX`，global indices 用 `^GSPC`。K 线（`chart` → `get_market_history`）对美股指数亦未接 yfinance/alphavantage（美股个股 AAPL 有 500 行，指数无）。PE/PB 指数级估值无源，保持诚实降级正确。详见 §2.9。
 - **P2（治理/呈现）**
-  7. **R47 — R36 残余：结构化字段仍精确小数**：`data_precision` 元数据标注 `factor_score_display=bucket`/`weight_display=coarse`，design_text LLM 表格已桶化（≈5%/偏弱），但**结构化 API `etfs[].factor_score`（-0.9855288495104011）与 `etfs[].weight`（0.2067）仍精确小数**，与元数据矛盾。
-  8. **R48 — R41-c 未实现**：近替代品仅告警（R41-a/b 已生效），不合并/留一。平衡型仍双持「588170 科创半导体 + 588200 科创芯片」「159570/513120 医药生物」，防御型仍三持大盘宽基（510300+159338+510050）。
-  9. **R49 — LLM 流式 first_byte 34-78s**：无进度心跳之外的可视化，专业投资者不可接受。
-  10. **R50 — logs/*.py 224 个 scratch 残留**：R38 删了 backend 根 20 个，但 `logs/round{8,16,18,20}/*.py` 224 个未清理（已 gitignore，磁盘残留）。
-  11. **R51 — R34 残余**：root perf 75（<90，round25 为 69）、portfolio-analysis a11y 82（<90），F4/F5 未实施。
+  8. **R47 — R36 残余：结构化字段仍精确小数**：`data_precision` 元数据标注 `factor_score_display=bucket`/`weight_display=coarse`，design_text LLM 表格已桶化（≈5%/偏弱），但**结构化 API `etfs[].factor_score`（-0.9855288495104011）与 `etfs[].weight`（0.2067）仍精确小数**，与元数据矛盾。
+  9. **R48 — R41-c 未实现**：近替代品仅告警（R41-a/b 已生效），不合并/留一。平衡型仍双持「588170 科创半导体 + 588200 科创芯片」「159570/513120 医药生物」，防御型仍三持大盘宽基（510300+159338+510050）。
+  10. **R49 — LLM 流式 first_byte 34-78s**：无进度心跳之外的可视化，专业投资者不可接受。
+  11. **R50 — logs/*.py 224 个 scratch 残留**：R38 删了 backend 根 20 个，但 `logs/round{8,16,18,20}/*.py` 224 个未清理（已 gitignore，磁盘残留）。
+  12. **R51 — R34 残余**：root perf 75（<90，round25 为 69）、portfolio-analysis a11y 82（<90），F4/F5 未实施。
+  13. **R54 — 美股指数种子表混入 ETF + 彭博代码重复（用户 review 驱动新增）**：美股指数 tab 搜索「标普」同时冒出「标普500指数」(SPX)、「SPDR标普500ETF」(SPY)、「标普500指数(彭博代码)」(^GSPC)——**指数搜索污染了 ETF**。根因（代码级）：`_STATIC_EXTRA_INDICES`（`sync_indices_meta.py:153-209`）美股段混入 3 条 ETF（`:192` SPY=SPDR标普500ETF、`:200` SOXX=iShares半导体ETF、`:204` XLB=SPDR材料指数ETF，均 `index_type=price` 冒充指数）+ 3 条重复（`:201-203` ^GSPC/^DJI/^IXIC 与 SPX/DJI/IXIC 重复，仅「彭博代码」后缀）；而 SOXX/XLB **不在** `HKUS_ETF_MAP`（`market_service.py:600-626`，美股 ETF 基座仅 SPY/QQQ/IVV/VOO/VTI/GLD/SLV/FXI/KWEB/EEM/DIA/IWM）→ 个股/ETF tab 搜 SOXX/XLB 反而搜不到（双向错位）。详见 §2.10。
 
 ### 0.4 验证窗口标注（D3）
 本轮执行于 2026-08-16 19:29-20:00（北京时间，**周日盘后**）。以下结论含盘后/数据源冷却成分，属「待交易时段（9:30-11:30/13:00-15:00）复测」：sector_momentum=[]、watchlist realtime 0/23、factor valid_rate=0%、ai_summary null。但「因子分两屏方向相反（R42）」「策略检查 LLM 75s 超时（R43）」「预热 34.5s（R44）」「R29/R40 兜底链断裂（R45/R46）」均为**代码级结构事实，不受窗口影响**。
@@ -142,6 +144,29 @@ R41-a（解耦）与 R41-b（前端渲染）已生效，但 R41-c（平衡/防�
 **与 R28 的关系**：R28（round25）把综合信号从「前后端死代码」接成了「真实渲染」，但接通后暴露出「内容质量缺陷」——R28 解决了「看不看得到」，R52 是「看到的内容是恒 hold 的假信号」。两者不矛盾，R52 是 R28 接通的下一层问题。
 
 **修复设计**：见 §15.1 R52。
+
+### 2.9 美股/港股指数分析数据源未路由（R53，用户 review 驱动新增）
+**现象（用户提问）**：美股标的分析「指数」tab 选「标普500」→ 输出 `unsupported_market: US`，技术指标、最近 30 条 K 线、PE/PB 估值均不可用，报告退化为「基于有限资讯的定性分析」。诚实降级本身正确（不虚构指标、正确识别资讯里 SPX=Shopee Express 并剔除），但**美股指数实时数据源其实存在、只是没路由**。
+
+**根因（代码级，两层）**：
+1. **过防护切断数据源**：`get_asset_realtime`（`market_service.py:1233-1246`）对 `asset_type=index` 的 US/HK 分支显式返回 `{"unsupported_market": _idx_market, "error": "该市场指数暂不支持"}`——这是 round16 P0-22④ 的「过防护」（当时防「美股 tab 选 GEM 港股指数 → A 股路径查无 → 前端报错」），对所有 US/HK 指数一刀切。但 `_GLOBAL_INDEX_DEFS`（`:141-163`）已含标普500（`^GSPC`）/纳斯达克（`^IXIC`）/道琼斯（`^DJI`）/恒生（`^HSI`），`get_global_indices`（`:269`）经 `_foreign`（`:361`）真实拉取这些指数实时价/涨跌幅——**数据源是通的，只是 `asset_type=index` 路径没去查它**。
+2. **符号错位**：`indices_meta` 表存 `SPX`（标普500），global indices 用 `^GSPC`（Yahoo 代码）——即便把路由接上，也需 `SPX→^GSPC`、`IXIC→^IXIC`、`DJI→^DJI`、`HSI→^HSI` 的符号映射。
+
+**K线/PE/PB 单独说明**：K 线（`chart` → `get_market_history`）对美股指数未接 yfinance/alphavantage（美股个股 AAPL 实测 500 行，指数无）；PE/PB 指数级估值无可靠源，保持诚实降级正确，不应硬凑。
+
+**修复设计**：见 §15.1 R53。
+
+### 2.10 美股指数种子表混入 ETF + 彭博代码重复（R54，用户 review 驱动新增）
+**现象（用户提问）**：美股「指数」tab 搜「标普」同时冒出「标普500指数」(SPX)、「SPDR标普500ETF」(SPY)、「标普500指数(彭博代码)」(^GSPC)——指数搜索被 ETF 污染；反向在「个股/ETF」tab 搜 SOXX/XLB 却搜不到（它们被错放进了指数表）。
+
+**根因（代码级）**：`_STATIC_EXTRA_INDICES`（`sync_indices_meta.py:153-209`）美股段混入：
+- **3 条 ETF 冒充指数**：`:192` `SPY`（SPDR标普500ETF）、`:200` `SOXX`（iShares半导体ETF）、`:204` `XLB`（SPDR材料指数ETF），均 `index_type=price`、`source=static`，被 `indices_meta` 同步入库 → 指数搜索污染。
+- **3 条彭博代码重复**：`:201-203` `^GSPC`/`^DJI`/`^IXIC` 与 `:191/:193/:194` 的 `SPX`/`DJI`/`IXIC` 完全重复（仅「(彭博代码)」后缀）。
+- **双向错位**：SOXX/XLB 不在 `HKUS_ETF_MAP`（`market_service.py:600-626`，美股 ETF 基座仅 SPY/QQQ/IVV/VOO/VTI/GLD/SLV/FXI/KWEB/EEM/DIA/IWM）→ 个股/ETF tab 搜不到这两个真 ETF。
+
+**为何不建议合并 tab（用户追问）**：合并是治标——指数与个股/ETF 是不同资产类型（基准 vs 可交易标的）、数据源与分析语义都不同，且 A 股侧本就分开。根治 R53（指数分析接源）+ R54（种子表卫生）后，两 tab 语义清晰且各自可用。
+
+**修复设计**：见 §15.1 R54。
 
 ---
 
@@ -265,7 +290,7 @@ R41-a（解耦）与 R41-b（前端渲染）已生效，但 R41-c（平衡/防�
 
 ---
 
-## 15. 修复方案总表（R42-R52，不实施）
+## 15. 修复方案总表（R42-R54，不实施）
 
 ### 15.1 正确性 / 数据可信度
 
@@ -275,6 +300,8 @@ R41-a（解耦）与 R41-b（前端渲染）已生效，但 R41-c（平衡/防�
 | R45 | P1 | watchlist 收盘兜底周末落空（`_last_close_fallback` 自身失败） | ①`_watchlist_close_fallback`（`market.py:952`）加第二层兜底：`_last_close_fallback` None 时回退 Redis last-good 报价（`cache_service.py:105` 已支持 Redis，`quote_key` 写入侧延长 TTL 至 24h 使其跨周末存活）；②双断（realtime + 快照 + last-good 全无）时，前端 `WatchlistPanel.vue:140/147` 的「行情暂不可用」文案升级为「非交易时段无行情（数据源维护中）」+ 显式时间戳，诚实区分「没波动」vs「没数据」；③last-good 命中时标注 `data_source="stale"` + `as_of`（与 `_degraded` 区分） | ①单测（抓假负向）：mock `_last_close_fallback` 返 None + 注入 Redis last-good → 行 realtime 非 None 且 `data_source=stale`；②三断场景断言「诚实的维护中标注 + 时间戳」而非空白冒充；③Redis last-good TTL 24h 断言 | `market.py:952-992`、`cache_service.py:105`、`market_service.py:_last_close_fallback`、`WatchlistPanel.vue:127-153` |
 | R46 | P1 | R40 首启空窗：live 源失败 → 永无快照可读 | ①首启 `refresh` 失败时，从 akshare 日频板块涨跌（`stock_sector_spot`/`stock_board_industry_name_em`，盘后可得日频，不依赖实时源）**单独兜底拉一次**写 `sector_momentum` 快照（**D1 探针前置**：验证该 akshare 接口在盘后可用且字段含 change_pct）；②快照 as_of 非今日时，设计链路/报告显式标注 `sector_momentum.as_of`（诚实呈现快照时效，替代当前 `data_as_of=None`）；③写侧已放宽「非空即写」（R40-b），补「首启失败路径也尝试写」 | ①单测：mock live 源失败 + 注入日频板块数据 → 快照非空写入；②盘后首启 `verify_e2e` 设计链路 `sector_momentum` 非 []；③快照 as_of 非今日时前端/报告显式标注 | `market_data_hub.py:1658/:1363`、`market_trends.py:68` |
 | R52 | P1 | 综合信号结构性恒 hold（估值/动量恒 0 + 门禁 valid_rate 口径错）：`composite_signal`（`signal.py:34`）`0.4技术+0.4估值+0.2动量`，周末估值/动量恒 0 → `0.4×技术∈[-0.4,+0.4]` 永不够 ±0.5 阈值 → 恒 hold；且 `_attach_composite_decisions:1556-1558` 的 valid_rate=「持仓级填充率」13/13=100% 而非「分项覆盖率」→ 门禁不降级、标 `degraded=false` | **采纳「分项覆盖率门禁 + 诚实降级」：** ①`_attach_composite_decisions` 改算**分项覆盖率**——对 `_COMPOSITE_FACTOR_MAP` 三分项（technical/valuation/momentum）统计「有真实因子值（非 0、非兜底默认）的分项数 / 3」，作为 `factor_valid_rate` 传入 `composite_signal_with_gate`；估值/动量分项全缺（周末）→ valid_rate=1/3<0.6 → `degraded=true, signal=None`（诚实「综合信号不可用，退化为纯技术信号」，技术 buy/sell/hold 仍由 `technical_signal` 字段独立呈现，不丢信息）。②（配套）分项缺失但未达降级阈值（≥2 分项可用）时，对可用分项**权重归一**（如缺估值 → `score=0.4技术+0.2动量 / 0.6`），避免缺失分项静默稀释分数；③前端 `SignalPanel` 的 `degraded` 徽标（round24 R25 已渲染）在 `signal=None` 时显示「因子缺失，综合信号不可用」而非「hold」 | ①单测（抓假负向）：mock 估值/动量分项无值（仅技术类因子）→ `composite_decision.degraded=true` 且 `signal=None`（禁再出现「degraded=false + signal=hold」的假综合信号）；②单测：三面齐全（技术+估值+动量均有真实值）→ 综合信号**能产出 buy/sell**（负向：三面齐全仍恒 hold → FAIL）；③权重归一单测：缺估值时 score 不被 0.4 权重稀释（断言与归一后一致） | `portfolio_service.py:1556-1558/:1571-1574/:1022-1030`、`app/analysis/signal.py:34/:40-45/:85`、`SignalPanel.vue` |
+| R53 | P1 | 美股/港股指数分析数据源未路由：`get_asset_realtime`（`market_service.py:1233-1246`）对 `asset_type=index` 的 US/HK 显式返回「该市场指数暂不支持」（round16 P0-22④ 过防护），但 `_GLOBAL_INDEX_DEFS`（`:141-163`）已含 ^GSPC/^IXIC/^DJI/^HSI、`get_global_indices`（`:269`）经 `_foreign`（`:361`）真实拉取；符号错位（indices_meta 存 SPX vs global 用 ^GSPC）；K 线对美股指数未接 yfinance/alphavantage | ①`get_asset_realtime` 的 US/HK 指数分支改查 `get_global_indices`（**符号映射** SPX→^GSPC、IXIC→^IXIC、DJI→^DJI、HSI→^HSI 等，`_GLOBAL_INDEX_DEFS` 已含全表）；②美股指数 K 线接 yfinance/alphavantage（**D1 探针前置**：验证 ^GSPC 历史可得，复用 AAPL 的 US 股票源）；③PE/PB 指数级估值保持诚实降级（无源不虚构）；④指数 tab 选标普500 → 出真实指数分析（非 `unsupported_market`） | ①单测（抓假负向）：mock `_lookup_index_market` 返 US + 注入 get_global_indices ^GSPC → realtime 非 None 且无 `unsupported_market`；②符号映射单测：SPX→^GSPC 命中；③美股指数 K 线 ≥30 行（探针通过后） | `market_service.py:1233-1246/:141-163/:269/:361`、`market.py:503`（chart）、`market_data_hub.get_market_history` |
+| R54 | P2 | 美股指数种子表混入 ETF + 彭博代码重复：`_STATIC_EXTRA_INDICES`（`sync_indices_meta.py:153-209`）美股段混入 SPY/SOXX/XLB 三条 ETF（`:192/:200/:204`）+ ^GSPC/^DJI/^IXIC 三条重复（`:201-203`）；SOXX/XLB 不在 `HKUS_ETF_MAP`（`market_service.py:600-626`）→ 双向错位 | ①`_STATIC_EXTRA_INDICES` 删 SPY/SOXX/XLB 三条 ETF + ^GSPC/^DJI/^IXIC 三条重复（保留 SPX/DJI/IXIC 即可）；②SOXX/XLB 补进 `HKUS_ETF_MAP`（个股/ETF tab 正确命中）；③`indices_meta` 同步后指数搜索不含 `type=etf` 条目 | ①单测（抓假负向）：美股指数搜索「标普」只出 SPX 一条（不含 SPY/^GSPC）；②个股/ETF 搜索 SOXX/XLB 命中（type=etf）；③`_STATIC_EXTRA_INDICES` 无 `index_type` 伪装的 ETF 条目 | `sync_indices_meta.py:153-209`、`market_service.py:600-626`（HKUS_ETF_MAP）、`market.py:227`（_search_indices） |
 
 ### 15.2 性能
 
@@ -297,10 +324,10 @@ R41-a（解耦）与 R41-b（前端渲染）已生效，但 R41-c（平衡/防�
 
 ## 16. 分三批实施建议（不实施，等待指令）
 - **批1（P0 数据可信度）**：R42（因子分跨屏方向统一）。
-- **批2（P1 正确性/性能）**：R43（策略检查 LLM 超时）、R44（预热回归 + F1/F2）、R45（watchlist 兜底链）、R46（首启空窗）、**R52（综合信号分项覆盖率门禁 + 诚实降级）**。
-- **批3（P2 治理）**：R47（结构化字段桶化）、R48（近替代品合并）、R49（first_byte 进度）、R50（logs 清理）、R51（root perf/a11y）。
+- **批2（P1 正确性/性能）**：R43（策略检查 LLM 超时）、R44（预热回归 + F1/F2）、R45（watchlist 兜底链）、R46（首启空窗）、R52（综合信号分项覆盖率门禁 + 诚实降级）、**R53（美股/港股指数分析数据源路由）**。
+- **批3（P2 治理）**：R47（结构化字段桶化）、R48（近替代品合并）、R49（first_byte 进度）、R50（logs 清理）、R51（root perf/a11y）、**R54（指数种子表卫生）**。
 
-> **当前状态：等待「开始实施」指令，不写任何修复代码。**（R42-R52 设计就绪）
+> **当前状态：等待「开始实施」指令，不写任何修复代码。**（R42-R54 设计就绪）
 
 ---
 
@@ -332,7 +359,11 @@ R41-a（解耦）与 R41-b（前端渲染）已生效，但 R41-c（平衡/防�
 | R50 | — | logs/ | 否 | — | — | — | 磁盘清理 | 残留 |
 | R51 | — | vite.config、index.html、PortfolioAnalysis | 否 | 是（critical CSS） | 首屏链路 | loading 态 | 内联 CSS | 未达标 |
 | R52 | — | signal.py:34/40-45/85、portfolio_service:1556-1558/1571-1574/1022-1030 | 否 | 是（真分项覆盖率） | composite_decision 链路 | degraded 徽标 | 纯计算，无新 IO | 门禁口径错 + 权重稀释 |
+| R53 | 探针前置（^GSPC 历史） | market_service:1233-1246/141-163/269/361、market.py:503 | 是（盘后） | 是（global indices 真源） | index realtime/K线链路 | 诚实降级保留 | 复用 get_global_indices | 过防护 + 符号错位 |
+| R54 | — | sync_indices_meta:153-209、market_service:600-626、market.py:227 | 否 | 是（删 ETF/补基座） | 指数搜索/个股ETF搜索 | 类型正确标注 | 纯数据修复 | 种子表污染 |
 
 - **Round 5（R52 新增，用户 review 驱动，本次完成）**：用户提问「组合持仓所有综合信号都是持有，这合理吗？」触发。经 code 复核确认两层根因：①`composite_signal`（`signal.py:34`）权重 0.4/0.4/0.2，周末估值/动量恒 0 → `0.4×技术∈[-0.4,+0.4]` 永不够 ±0.5 阈值；②`_attach_composite_decisions:1556-1558` 的 valid_rate=「持仓级填充率」13/13=100%（`_has_real_factor_values` 把技术类因子算 filled）而非「分项覆盖率」→ 门禁不降级、标 `degraded=false`。实测 13/13 持仓 signal 全 hold、components valuation/momentum 全 0。已补 §0.3 P1-6、§2.8、§15.1 R52、§16 批2。修复采纳「分项覆盖率门禁 + 权重归一 + 诚实降级」，验收含负向断言「三面齐全仍恒 hold → FAIL」。file:line 经 grep 确认：`_COMPOSITE_FACTOR_MAP:1533-1537`、`filled_factor_count:1022-1025`、`_attach_composite_decisions:1540`、`composite_signal_with_gate:58`、`composite_signal:14` 全部准确。
 
-> **当前状态（Round 1-5 完成）**：R42-R52 均达实施标准（精确 file:line + 修复片段 + 验收 + 测试断言）；R42 由「多选项」升级为「方案(a) 决定」；R43/R48 file:line 经核查修正；R45/R46 含 D1 探针前置标注；R52 为用户 review 驱动新增（综合信号结构性恒 hold）。本文档**不写任何修复代码**，等待「开始实施」指令。
+- **Round 6（R53/R54 新增，用户 review 驱动，本次完成）**：用户两次追问触发——①美股指数 tab 选「标普500」返回 `unsupported_market: US`；②美股个股/ETF 搜 SOX 无补全、指数搜索却冒出 ETF。经 code 复核确认：R53 根因=`get_asset_realtime`（`market_service.py:1233-1246`）对 `asset_type=index` 的 US/HK 分支 round16 P0-22④ 过防护「暂不支持」，但 `_GLOBAL_INDEX_DEFS`（`:141-163`）已含 ^GSPC/^IXIC/^DJI/^HSI 且 `get_global_indices`（`:269`）真实拉取，外加 SPX↔^GSPC 符号错位；R54 根因=`_STATIC_EXTRA_INDICES`（`sync_indices_meta.py:153-209`）美股段混入 SPY/SOXX/XLB 三条 ETF（`:192/:200/:204`）+ ^GSPC/^DJI/^IXIC 三条重复（`:201-203`），而 SOXX/XLB 不在 `HKUS_ETF_MAP`（`market_service.py:600-626`）→ 双向错位。已补 §0.3 P1-7（R53）/P2-13（R54）、§2.9/§2.10、§15.1 R53/R54、§16 批2/批3。R53 含 D1 探针前置（^GSPC 历史 K 线可得性），R54 纯数据修复无外部依赖。file:line 经 grep 确认：`_GLOBAL_INDEX_DEFS:141`、`get_global_indices:269`、`_foreign:361`、`get_asset_realtime index 分支:1233`、`HKUS_ETF_MAP:600`、`_STATIC_EXTRA_INDICES:153` 全部准确。
+
+> **当前状态（Round 1-6 完成）**：R42-R54 均达实施标准（精确 file:line + 修复片段 + 验收 + 测试断言）；R42 由「多选项」升级为「方案(a) 决定」；R43/R48 file:line 经核查修正；R45/R46/R53 含 D1 探针前置标注；R52/R53/R54 为用户 review 驱动新增（综合信号恒 hold / 指数分析未接源 / 指数种子表污染）。本文档**不写任何修复代码**，等待「开始实施」指令。
