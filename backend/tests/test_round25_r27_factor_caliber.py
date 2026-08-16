@@ -101,7 +101,7 @@ class TestRuleBasedSuggestionFactorComposite:
         assert out["action"] == "decrease"
 
     def test_no_composite_falls_back_to_raw_mean(self):
-        """未传 factor_composite → 回落原始均值（向后兼容既有调用方）。"""
+        """未传 factor_composite 且因子键非真实分类键 → 回落原始均值（向后兼容）。"""
         out = _rule_based_suggestion(
             symbol="X", name="X", target_weight=0.1,
             factor_score={"a": 0.9, "b": 0.5}, signal={"signal": "buy"},
@@ -109,3 +109,17 @@ class TestRuleBasedSuggestionFactorComposite:
         )
         # 原始均值 (0.9+0.5)/2 = 0.7 > 0.5 + buy → increase
         assert out["action"] == "increase"
+
+    def test_single_symbol_real_factors_use_within_symbol_composite(self):
+        """单标的真实因子（factor_composite=None）→ 用 within-symbol z 复合分，
+        不得把异构量纲原始政策因子（+8.97）当 z 强度（R27 单标的场景修复）。"""
+        fs = {"china.policy.monetary": 8.97, "technical.rsi": 50.0}
+        out = _rule_based_suggestion(
+            symbol="159338", name="中证A500", target_weight=0.1,
+            factor_score=fs, signal={"signal": "hold"},
+            regime="range_bound", current_weight=0.1,
+        )
+        # 负向断言：异构原始值不得冒充 z 强度出现在因子分描述里
+        assert "8.97" not in out["reason"]
+        # raw 朴素均值 ≈ (8.97+50)/2 量级极大，z 复合分应远小于此（不被拉正到偏强级）
+        assert "29.49" not in out["reason"] and "29.5" not in out["reason"]

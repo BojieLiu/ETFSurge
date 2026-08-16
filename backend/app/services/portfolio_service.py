@@ -1625,6 +1625,35 @@ def _cross_sectional_factor_composite(
     return out
 
 
+def _within_symbol_factor_composite(fs: dict) -> float | None:
+    """round25 R27: 单标的因子复合分（与设计屏同口径）。
+
+    设计路径用 ``aggregate_factor_scores``（方向化 + 分类加权）得到 composite；
+    策略检查旧实现用 raw 因子值朴素均值（被 ``china.policy.* +8.97`` 等异构量纲
+    原始值拉偏，159338 报「1.68 偏强」与设计 -0.958 方向相反）。本函数对单标的复用
+    同一 ``aggregate_factor_scores``（与设计同口径；缺 IC 序列→回退等权，不改变方向），
+    使两屏因子分方向一致。无因子 → None（回落原始均值仅方向参考）。
+    """
+    if not isinstance(fs, dict) or not fs:
+        return None
+    try:
+        from app.core.factor_aggregate import aggregate_factor_scores
+        from app.factors.factor_registry import factor_registry
+        agg = aggregate_factor_scores(fs, definitions=factor_registry._factors)
+    except Exception:
+        return None
+    if not isinstance(agg, dict):
+        return None
+    _cats = ("technical", "momentum", "valuation", "sentiment")
+    # 无任何真实分类键匹配（如 {"a":0.9,"b":0.5} 这类非因子键）→ 返回 None，
+    # 回落 raw 均值（仅方向参考），避免把 0.0 当「中性复合分」强行覆盖。
+    if not any(k in agg for k in _cats):
+        return None
+    pw = {"technical": 0.3, "momentum": 0.3, "valuation": 0.2, "sentiment": 0.2}
+    comp = sum(agg.get(k, 0.0) * w for k, w in pw.items())
+    return float(round(comp, 3))
+
+
 def _build_rule_fallback_holdings_analysis(
     etfs: list,
     market_data: list[dict],
@@ -1740,6 +1769,13 @@ def _rule_based_suggestion(
     avg_factor = sum(fs_vals) / len(fs_vals) if fs_vals else 0.0
     # round25 R27: 因子分口径统一——调用方传入截面 z-score 复合分（与设计路径同量纲）
     # 时优先使用；未传（单标的/历史调用方）回落原始均值（量纲不一，仅方向参考）。
+    # 单标的场景跨截面复合分退化为 None → 用「与设计同口径」的 within-symbol z 复合分
+    # 替代原始均值（避免 china.policy.* 等异构量纲原始值朴素均值冒充 z 强度，导致与
+    # 设计屏因子分方向相反）。
+    if factor_composite is None and fs_vals:
+        _wc = _within_symbol_factor_composite(factor_score)
+        if _wc is not None:
+            factor_composite = _wc
     _score = factor_composite if factor_composite is not None else avg_factor
     sig = ""
     if isinstance(signal, dict):

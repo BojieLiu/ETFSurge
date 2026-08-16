@@ -484,6 +484,13 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
             return merged
         else:
             # 非交易时段：所有源返回空，使用 OK 缓存（如果存在且未过期）
+            # round25 R37: 冷启动内存 last_ok 为空（模块 import 时磁盘缓存未生成）→
+            # 懒加载磁盘缓存补上（warmup 落盘后端点即可读 T-1 数据，而非 0 条）
+            if not _global_indices_last_ok:
+                try:
+                    _load_ok_cache()
+                except Exception:
+                    pass
             if _global_indices_last_ok and (time.time() - _global_indices_last_ok_ts) < _GLOBAL_INDICES_OK_TTL:
                 stale = {}
                 for region, items in _global_indices_last_ok.items():
@@ -502,6 +509,14 @@ async def get_global_indices() -> dict[str, list[dict[str, Any]]]:
 
     except Exception as e:
         logger.error("[get_global_indices] Unexpected error: %s", e, exc_info=True)
+        # round25 R37: 异常路径不得静默返空——内存 last_ok 为空（冷启动）时尝试懒加载
+        # 磁盘缓存（模块 import 时 _load_ok_cache 若文件尚不存在会错过，稍后 warmup 落盘
+        # 后此处应能补上），仍空才返 {}（诚实降级，不编造）。
+        if not _global_indices_last_ok:
+            try:
+                _load_ok_cache()
+            except Exception:
+                pass
         if _global_indices_last_ok:
             return _global_indices_last_ok
         return {}

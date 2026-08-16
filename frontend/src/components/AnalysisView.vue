@@ -45,7 +45,12 @@
     </section>
 
     <!-- Signal Panel (indicators + signal) -->
-    <SignalPanel :indicator-data="indicatorData" :signal="signal" :loading="loading" />
+    <SignalPanel
+      :indicator-data="indicatorData"
+      :signal="signal"
+      :loading="loading"
+      :composite-decision="compositeDecision"
+    />
   </div>
 </template>
 
@@ -74,6 +79,10 @@ const store = usePortfolioStore()
 // for that holding are auto-loaded.
 const props = defineProps({
   selectedSymbol: { type: String, default: '' },
+  // round25 R28-b: 持仓综合信号（来自持仓分析 holdings_analysis 的 composite_decision）。
+  // 由父组件（如 PortfolioAnalysis）在持有该标的持仓信号时传入；缺省 undefined →
+  // SignalPanel 的「🧮 综合信号」卡不渲染（诚实降级，非空白冒充）。
+  compositeDecision: { type: Object, default: undefined },
 })
 
 // State

@@ -283,3 +283,24 @@ describe('AnalysisView 场外基金技术分析 (R5-2-11)', () => {
     expect(signalMock).toHaveBeenLastCalledWith('000300', 'index', expect.anything())
   })
 })
+
+describe('round25 R28-b: compositeDecision 透传 SignalPanel', () => {
+  it('compositeDecision prop 透传给 SignalPanel（缺省不渲染，诚实降级）', async () => {
+    let captured = 'UNSET'
+    const SignalPanelCapture = {
+      props: ['indicatorData', 'signal', 'loading', 'compositeDecision'],
+      template: '<div class="sp-capture"></div>',
+      setup(p) {
+        captured = p.compositeDecision
+      },
+    }
+    const wrapper = mount(AnalysisView, {
+      props: { compositeDecision: { signal: 'buy', score: 0.72, degraded: false, reason: 'ok' } },
+      global: { stubs: { ChartPanel: true, SignalPanel: SignalPanelCapture } },
+    })
+    await flushPromises()
+    await nextTick()
+    // 断点 B：AnalysisView 必须把 composite_decision 传给 SignalPanel（否则「🧮 综合信号」卡恒不渲染）
+    expect(captured).toEqual({ signal: 'buy', score: 0.72, degraded: false, reason: 'ok' })
+  })
+})

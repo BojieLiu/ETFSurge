@@ -209,7 +209,7 @@ async def test_global_indices_all_sources_fail_graceful():
     assert hk[0].get("available") is False
 
 
-async def test_a_share_indices_have_placeholder_when_no_data():
+async def test_a_share_indices_have_placeholder_when_no_data(tmp_path):
     """When A-share data sources fail, placeholder entries must still be present."""
     defs = [
         ("000001", "上证指数", "A股"),
@@ -223,7 +223,9 @@ async def test_a_share_indices_have_placeholder_when_no_data():
 
     with patch.object(ms, "_global_index_defs", new=AsyncMock(return_value=defs)), \
          patch("app.fetchers.china_market.fetch_index_realtime",
-               return_value=[]):  # Simulate no data from any source
+               return_value=[]), \
+         patch.object(ms, "_get_cache_db_path",
+                      return_value=str(tmp_path / "no_such_cache.json")):  # 隔离 R37 磁盘懒加载
         regions = await ms.get_global_indices()
 
     a_share = regions.get("A股", [])

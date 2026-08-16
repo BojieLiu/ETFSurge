@@ -98,6 +98,8 @@ def _circuit_record_failure(provider_id: str, is_quota_error: bool) -> None:
         entry["opened_at"] = now
         entry["fail_count"] = 0
         logger.warning("[circuit] provider %s quota-exhausted → OPEN (skip until HALF_OPEN)", provider_id)
+        # round25 R39: 额度耗尽 → 跨任务配额门禁全局暂停（后续 LLM 调用直落兜底不硬撞）
+        llm_quota_gate.mark_exhausted()
         return
     entry["fail_count"] = entry.get("fail_count", 0) + 1
     if entry["fail_count"] >= _CIRCUIT_FAIL_THRESHOLD:
@@ -119,6 +121,41 @@ def _circuit_record_success(provider_id: str) -> None:
 def reset_circuit() -> None:
     """测试/运维用：清空熔断状态。"""
     _circuit.clear()
+    # round25 R39: 同步复位跨任务配额门禁（单例 _last 跨测试持久，避免冷却污染）
+    llm_quota_gate._last = 0.0
+    llm_quota_gate._exhausted_until = 0.0
+
+
+# ── round25 R39: 跨任务 LLM 配额门禁（集中式单例）──────────────────────
+# 现有 _circuit 是「按 provider 的熔断态」，非「跨任务配额协调」。design↔
+# strategy_check 已被 _design_semaphore 串行，但无冷却/预算，信号量释放即发；
+# enrich_news_summaries 更在信号量之外独立发 LLM 调用。本 gate 在 llm_complete*
+# 三入口统一插入 acquire()，保证任意两次 LLM 调用间隔 ≥ inter_call_cooldown，
+# 429 后全局暂停 quota_cooldown（后续调用直落兜底不硬撞配额）。
+class LLMQuotaGate:
+    inter_call_cooldown = 8.0   # 任意两次 LLM 调用最小间隔（跨任务，秒）
+    quota_cooldown = 60.0       # 429 后全局暂停时长（秒）
+    _last = 0.0
+    _exhausted_until = 0.0
+
+    async def acquire(self, min_gap: float | None = None) -> None:
+        gap = min_gap or self.inter_call_cooldown
+        now = time.monotonic()
+        wait = max(0.0, self._last + gap - now, self._exhausted_until - now)
+        if wait > 0:
+            logger.info("[llm_quota_gate] throttling LLM call by %.1fs", wait)
+            await asyncio.sleep(wait)
+        self._last = time.monotonic()
+
+    def mark_exhausted(self, secs: float | None = None) -> None:
+        self._exhausted_until = time.monotonic() + (secs or self.quota_cooldown)
+        logger.warning(
+            "[llm_quota_gate] LLM quota exhausted → global pause for %.1fs",
+            self._exhausted_until - time.monotonic(),
+        )
+
+
+llm_quota_gate = LLMQuotaGate()
 
 
 def _rate_limit_wait(attempt: int, resp_headers=None, cap: float = _LLM_RATE_LIMIT_CAP) -> float:
@@ -375,6 +412,8 @@ async def llm_complete(
 ) -> str:
     import httpx
     await _check_key()
+    # round25 R39: 跨任务配额门禁——任意两次 LLM 调用间隔 ≥ inter_call_cooldown
+    await llm_quota_gate.acquire()
 
     _caller = sys._getframe(1).f_code.co_name
     providers = get_configured_providers()
@@ -522,6 +561,8 @@ async def llm_complete_stream(
     """
     import httpx
     await _check_key()
+    # round25 R39: 跨任务配额门禁——任意两次 LLM 调用间隔 ≥ inter_call_cooldown
+    await llm_quota_gate.acquire()
 
     providers = get_configured_providers()
     last_exc: Exception | None = None
@@ -741,6 +782,8 @@ async def llm_complete_with_system(
     """
     import httpx
     await _check_key()
+    # round25 R39: 跨任务配额门禁——任意两次 LLM 调用间隔 ≥ inter_call_cooldown
+    await llm_quota_gate.acquire()
 
     _caller = sys._getframe(1).f_code.co_name
     providers = get_configured_providers()
