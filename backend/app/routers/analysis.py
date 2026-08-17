@@ -14,7 +14,7 @@ from typing import Any
 from ..analysis.llm import (
     generate_market_report, generate_advice, analyze_news_impact,
     generate_sector_analysis, generate_symbol_analysis,
-    _build_report_prompt,
+    _build_report_prompt, run_stream_with_cache,
 )
 from ..analysis.registry import get_agent
 from ..services.market_data_hub import market_data_hub
@@ -33,8 +33,18 @@ router = APIRouter(prefix="/api/v1/analysis", tags=["analysis"])
 FETCH_TIMEOUT = 45
 
 def _sse_stream(agent_generator):
-    """Convert AgentRuntime async generator to SSE StreamingResponse."""
+    """Convert AgentRuntime async generator to SSE StreamingResponse.
+    R49: 首字节（first_byte 34-78s）前先发「正在调用模型」progress 事件，避免空白 spinner。
+    """
     async def event_generator():
+        # R49: 首字节前的可见进度（非空白 spinner）——前端据此渲染进度条
+        yield (
+            'event: progress\n'
+            'data: ' + json.dumps({
+                'phase': 'calling_model',
+                'message': '正在调用模型生成分析，请稍候…',
+            }) + '\n\n'
+        )
         async for item in agent_generator:
             event = item.get("event")
             data = item.get("data")
@@ -48,6 +58,9 @@ def _sse_stream(agent_generator):
                 yield f"event: done\ndata: {json.dumps({'full_text': full_text_with_disclaimer, 'metadata': data.get('usage', {}), 'disclaimer': disclaimer})}\n\n"
             elif event == "error":
                 yield f"event: error\ndata: {json.dumps({'code': 'STREAM_ERROR', 'message': data})}\n\n"
+            elif event == "progress":
+                # 透传 LLM 管道的进度事件（如缓存命中 cache_hit）
+                yield f"event: progress\ndata: {json.dumps({'phase': data.get('phase'), 'message': data.get('message', '')})}\n\n"
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
@@ -344,7 +357,7 @@ async def llm_report_stream(req: LLMReportRequest):
         prompt = _build_report_prompt(indices, commodities, market_data, indicators,
                                       enriched_news, [], global_liquidity=_gl)
         agent = get_agent("market_report")
-        return _sse_stream(agent.run_stream(prompt))
+        return _sse_stream(run_stream_with_cache(agent, prompt, query="market_report", data_as_of=None))
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM streaming failed: {e}")
 
@@ -402,7 +415,7 @@ async def llm_advice_stream(req: LLMAdviceRequest):
         prompt = _build_advice_stream_prompt(req.query, user_ctx)
         from ..analysis.registry import get_agent
         agent = get_agent("advice")
-        return _sse_stream(agent.run_stream(prompt))
+        return _sse_stream(run_stream_with_cache(agent, prompt, query=f"advice:{req.query}", data_as_of=None))
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM streaming failed: {e}")
 
@@ -576,7 +589,7 @@ async def sector_analysis_stream(req: SectorAnalysisRequest):
 6. 核心标的推荐"""
         
         agent = get_agent("sector_analysis")
-        return _sse_stream(agent.run_stream(prompt))
+        return _sse_stream(run_stream_with_cache(agent, prompt, query=f"sector:{sector_code}:{name}", data_as_of=None))
     except HTTPException:
         raise
     except Exception as e:
@@ -700,8 +713,11 @@ async def symbol_analysis_stream(req: SymbolAnalysisRequest):
         # max_retries=1 快速失败（429 退避上限由 llm.py 的 Retry-After 机制处理），
         # 删除旧实现透传的 llm_complete_stream 不存在之参数（该参数名不在其签名内
         # → TypeError → 全部 symbol-analysis/stream 请求 STREAM_ERROR 全挂）。
-        return _sse_stream(agent.run_stream(
+        return _sse_stream(run_stream_with_cache(
+            agent,
             prompt,
+            query=f"symbol:{symbol}:{req.question or ''}",
+            data_as_of=None,
             max_retries=1,
         ))
     except HTTPException:

@@ -79,6 +79,11 @@
       <button class="btn-retry" @click="doAnalyze" :disabled="loading">重试</button>
     </div>
 
+    <div v-if="progress && !result" class="stream-progress">
+      <div class="progress-bar"><div class="progress-fill"></div></div>
+      <span class="progress-text">{{ progress.message }}</span>
+    </div>
+
     <div v-if="result" class="result" v-html="renderMarkdown(result)"></div>
 
     <div v-else-if="symbol && !loading" class="result-area">
@@ -96,7 +101,7 @@ import { useLLMStream } from '../../composables/useLLMStream'
 import { useMarketSearch } from '../../composables/useMarketSearch'
 import { marketApi } from '../../api'
 
-const { start: startStream, stop: stopStream } = useLLMStream()
+const { start: startStream, stop: stopStream, progress } = useLLMStream()
 
 // R5: 输入处理——symbol 模式必须先把值写回 search.searchQuery 再触发 onSearchInput。
 // 旧实现只调 onSearchInput() 不写回：onSearchInput 内部读 searchQuery.value（恒为空）
@@ -585,6 +590,11 @@ async function doAnalyze() {
 .btn-primary:hover { background: var(--color-brand-700); }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 .error { margin: var(--space-3); padding: var(--space-2) var(--space-3); color: var(--color-danger-700); background: var(--color-bg-danger-subtle); border-radius: var(--radius-md); font-size: var(--font-size-sm); }
+.stream-progress { display: flex; align-items: center; gap: var(--space-3); margin: var(--space-3); }
+.progress-bar { flex: 1; height: 4px; background: var(--color-border-light); border-radius: 999px; overflow: hidden; }
+.progress-fill { width: 40%; height: 100%; background: var(--color-primary); border-radius: 999px; margin-left: -40%; animation: progress-indeterminate 1.1s ease-in-out infinite; }
+.progress-text { font-size: var(--font-size-sm); color: var(--color-text-secondary); white-space: nowrap; }
+@keyframes progress-indeterminate { 0% { margin-left: -40%; } 100% { margin-left: 100%; } }
 .result { margin-top: var(--space-4); line-height: 1.8; }
 .quick-chips { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-3); padding: 0 var(--space-1); }
 .question-chips { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-2); padding: 0 var(--space-1); }

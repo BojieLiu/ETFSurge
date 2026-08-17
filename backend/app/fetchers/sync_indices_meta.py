@@ -189,19 +189,16 @@ _STATIC_EXTRA_INDICES: list[dict] = [
     {"symbol": "HSHKBIO", "name": "恒生香港上市生物科技指数", "market": "HK", "category": "theme", "index_type": "price", "source": "static"},
     # ── 美股主流指数（P0-22：US tab 指数搜索） ──
     {"symbol": "SPX", "name": "标普500指数", "market": "US", "category": "broad", "index_type": "price", "source": "static"},
-    {"symbol": "SPY", "name": "SPDR标普500ETF", "market": "US", "category": "broad", "index_type": "price", "source": "static"},
     {"symbol": "DJI", "name": "道琼斯工业平均指数", "market": "US", "category": "broad", "index_type": "price", "source": "static"},
     {"symbol": "IXIC", "name": "纳斯达克综合指数", "market": "US", "category": "broad", "index_type": "price", "source": "static"},
     {"symbol": "NDX", "name": "纳斯达克100指数", "market": "US", "category": "broad", "index_type": "price", "source": "static"},
     {"symbol": "VIX", "name": "CBOE波动率指数", "market": "US", "category": "broad", "index_type": "price", "source": "static"},
     {"symbol": "RUT", "name": "罗素2000指数", "market": "US", "category": "broad", "index_type": "price", "source": "static"},
     # ── round26 Q4/Q6: 美股指数索引补全（旧表仅 7 条，费城/SOX 等搜不到） ──
+    # 注: iShares半导体ETF(SOXX)/SPDR材料ETF(XLB) 为 ETF，非指数——移出指数种子表，
+    # 改入 market_service.HKUS_ETF_MAP（个股/ETF tab 命中），避免 index_type 伪装成指数。
     {"symbol": "SOX", "name": "费城半导体指数", "market": "US", "category": "theme", "index_type": "price", "source": "static"},
-    {"symbol": "SOXX", "name": "iShares半导体ETF", "market": "US", "category": "theme", "index_type": "price", "source": "static"},
-    {"symbol": "^GSPC", "name": "标普500指数(彭博代码)", "market": "US", "category": "broad", "index_type": "price", "source": "static"},
-    {"symbol": "^DJI", "name": "道琼斯工业平均指数(彭博代码)", "market": "US", "category": "broad", "index_type": "price", "source": "static"},
-    {"symbol": "^IXIC", "name": "纳斯达克综合指数(彭博代码)", "market": "US", "category": "broad", "index_type": "price", "source": "static"},
-    {"symbol": "XLB", "name": "SPDR材料指数ETF", "market": "US", "category": "theme", "index_type": "price", "source": "static"},
+    # 彭博代码 ^GSPC/^DJI/^IXIC 与 SPX/DJI/IXIC 重复，仅后缀不同——删除避免重复命中。
     # ── round26 Q4: 恒生港股通「低波动」变体 + 主题补充（旧表恒缺该变体） ──
     {"symbol": "H11148", "name": "恒生港股通高股息低波动指数", "market": "HK", "category": "broad", "index_type": "price", "source": "static"},
     {"symbol": "H11149", "name": "恒生港股通高股息低波动指数(HKD)", "market": "HK", "category": "broad", "index_type": "price", "source": "static"},

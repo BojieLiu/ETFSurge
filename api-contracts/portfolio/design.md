@@ -415,3 +415,33 @@ alanced/aggressive`
 
 <!-- 路由登记（P3-5 check_routes 门禁） -->
 GET /api/v1/portfolio/designs/{design_id}
+
+## 6. 精度降级与近替代品合并（R47 / R48）
+
+> 关联：精度契约 `design-precision.md`；近替代品检测 `_SUBSTITUTE_FAMILIES`（`allocation_engine.py`）。
+
+### 6.1 结构化字段桶化（R47）
+
+`market_context.data_precision.mode == "coarse"`（因子数据缺失率 ≥ 60%）时，`strategies[].etfs[]`
+的结构化字段须与元数据（`factor_score_display=bucket` / `weight_display=coarse`）一致，不得再返回精确小数：
+
+- `etfs[].weight` → 5% 档位（0.2067 → 0.20）；`target_weight`（路由映射自 `weight`）同步档位化；
+- `etfs[].factor_score` → 强弱分档字符串（偏强 / 中性 / 偏弱）；
+- `target_amount` 随桶后 `weight` 重算，保持 `target_amount = capital × weight` 一致（不破坏「权重不归一化」）；
+- `mode == "exact"` → `weight` / `factor_score` 原精确值不变。
+
+> `design_text` LLM 表格（`_build_plan_tables`）与前端 `factorBucket` 对分档字符串幂等透传。
+
+### 6.2 近替代品合并留一（R48 / R41-c）
+
+防御 / 平衡 / 进攻三型对 `_SUBSTITUTE_FAMILIES` 同族近替代品**统一合并留一**（进攻型不豁免）：
+保留流动性更好 / 更宽基者（market_cap 大 → 权重高 → 出现序），其余标的权重并入保留者并从
+`etfs` 移除，保留者打 `merged_from` 标记。
+
+`risk_metrics` 输出：
+
+- `correlation_warnings[]`：同族近替代品条目 `status == "merged"`，`note` 追加「（已合并留一）」；
+- `risk_metrics.merged_substitutes[]`：合并标注列表——`family` / `kept_symbol` / `merged_symbols` /
+  `combined_weight` / `note`（「已合并留一」）。
+
+前端 `DesignResult.vue` 的近替代品告警据此从「仅提示」升级为「已合并」标注。

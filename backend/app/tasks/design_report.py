@@ -196,11 +196,16 @@ def _build_plan_tables(
             else:
                 advice = "等企稳分批，跌破 MA20 暂停"
             fs = e.get("factor_score", None)
-            fs_txt = f"{fs:.2f}" if fs is not None else ""
+            # round27 R47: 结构化字段在 coarse 态已是分档字符串（偏强/中性/偏弱），
+            # 此处幂等透传；exact 态仍为数字按原值渲染。字符串分支防止 f"{fs:.2f}" 崩溃。
+            if isinstance(fs, str):
+                fs_txt = fs
+            else:
+                fs_txt = f"{fs:.2f}" if fs is not None else ""
             # round25 R36: 降级态（mode=coarse）因子分按强弱分档 + 权重按 5% 档位——
             # 与前端 bucket 呈现一致，杜绝表格精确小数冒充「数据可信」
             _coarse = bool(precision and precision.get("mode") == "coarse")
-            if _coarse and fs is not None:
+            if _coarse and isinstance(fs, (int, float)):
                 fs_txt = ("偏强" if fs >= 0.5 else "偏弱" if fs <= -0.5 else "中性")
             w = (e.get("weight") or e.get("target_weight") or 0) * 100
             if _coarse:

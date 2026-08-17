@@ -7,6 +7,23 @@ import { visualizer } from 'rollup-plugin-visualizer'
 export default defineConfig({
   plugins: [
     vue(),
+    // R51 (round27) F4: 消除 render-blocking 外部 CSS —— 生产构建中 Vite 注入的
+    // <link rel="stylesheet"> 会阻塞首屏渲染。改用 media="print" onload 交换为
+    // 'all' 的非阻塞加载（<noscript> 兜底），配合 index.html 已内联的 critical CSS，
+    // 缩短 FCP/LCP → 提升 root Lighthouse perf。仅作用于构建产物，dev 模式 Vite 走
+    // JS 注入 style 不匹配，无副作用。enforce:'post' 确保晚于 VitePWA 的 html 注入。
+    {
+      name: 'non-blocking-stylesheet',
+      enforce: 'post',
+      transformIndexHtml(html) {
+        return html.replace(
+          /<link rel="stylesheet"[^>]*href="([^"]+\.css)"[^>]*>/g,
+          (_, href) =>
+            `<link rel="stylesheet" href="${href}" media="print" onload="this.media='all'">` +
+            `<noscript><link rel="stylesheet" href="${href}"></noscript>`
+        )
+      },
+    },
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico'],

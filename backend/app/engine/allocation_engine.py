@@ -785,6 +785,76 @@ def near_substitute_pairs(allocs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return pairs
 
 
+def _merge_substitute_family(allocs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """R48 (R41-c): 同族近替代品合并留一（无 I/O；**就地修改入参 allocs**）。
+
+    背景（round27 R48 / R41-c）：R41-a/b 只告警不合并，方案仍双持同主题标的
+    （「芯片+半导体设备」「港股创新药+港股通创新药」）。用户决策：追求集中应优先
+    重仓单只而非分多个同主题标的，故防御/平衡/进攻三型均不豁免。
+
+    副作用（调用方须知）：本函数直接修改传入的 allocs 列表——把被合并标的从列表中
+    `remove`（留一），并把并入权重写回保留标的 `keep["weight"]`、打 `keep["merged_from"]`
+    标记。因此**不要传入与其它结构共享 dict 对象的列表**（否则会污染共享引用）。
+    生产调用点 `strategy_design.generate_enhanced_design` 传入的是每次方案 `s.pop`
+    出的独立 allocs，无别名问题。返回值为合并标注列表（供告警升级为「已合并」）。
+
+    实现：对 _SUBSTITUTE_FAMILIES 同族 ≥2 只，保留流动性更好/更宽基者
+    （market_cap 大 → 原始权重高 → 出现序），其余标的权重并入保留者并从 allocs
+    移除（留一），给保留者打 `merged_from` 标记，并返回合并标注列表
+    （供 apply_near_substitute_warnings 把对应 near_substitute 告警升级为「已合并」）。
+    """
+    non_cash = [a for a in allocs if a.get("symbol") not in (None, "CASH")]
+    by_family: dict[str, list[dict[str, Any]]] = {}
+    for a in non_cash:
+        fam = _substitute_family(a)
+        if not fam:
+            continue
+        by_family.setdefault(fam, []).append(a)
+    merges: list[dict[str, Any]] = []
+    for fam, group in by_family.items():
+        if len(group) < 2:
+            continue
+        # 保留方：流动性(规模)优先 → 原始权重优先 → 出现序（max 稳定）
+        keep = max(
+            group,
+            key=lambda a: (a.get("market_cap") or 0.0, a.get("weight") or 0.0),
+        )
+        removed = [a for a in group if a is not keep]
+        merged_symbols: list[str] = []
+        for a in removed:
+            sym = a.get("symbol")
+            if sym is None:
+                continue
+            merged_symbols.append(str(sym))
+            keep["weight"] = round(
+                (keep.get("weight", 0.0) or 0.0) + (a.get("weight", 0.0) or 0.0), 4
+            )
+            # 从真实 allocs 移除被合并标的（留一）
+            if a in allocs:
+                allocs.remove(a)
+        if merged_symbols:
+            keep.setdefault("merged_from", [])
+            for m in merged_symbols:
+                if m not in keep["merged_from"]:
+                    keep["merged_from"].append(m)
+            keep["merged"] = True
+            merges.append({
+                "type": "near_substitute_merged",
+                "family": fam,
+                "kept_symbol": keep.get("symbol"),
+                "kept_name": keep.get("name"),
+                "merged_symbols": merged_symbols,
+                "combined_weight": keep.get("weight"),
+                "note": (
+                    f"同主题近替代品（{fam}族）已合并留一：保留 "
+                    f"{keep.get('name') or keep.get('symbol')}"
+                    f"（权重并入至 {keep.get('weight'):.4f}），"
+                    f"移除 {', '.join(merged_symbols)}"
+                ),
+            })
+    return merges
+
+
 def portfolio_concentration_check(
     allocs: list[dict[str, Any]],
     correlation_matrix: dict[tuple[str, str], float | None],
@@ -1500,9 +1570,14 @@ def apply_near_substitute_warnings(
     也能识别」，却被门控在「必须有 corr_matrix」的调用里——最该在盘后工作的控制恰好
     在盘后被关掉。
 
-    本函数：对每套方案的 non-CASH 两两跑文本/主题族检测（纯函数，无 I/O），r 缺失
+    本函数：对每套方案的 non-CASH 两两跑文本/主题族检测（无 I/O，r 缺失
     （无价格序列/降级）→ 标 `unevaluated`；r 可算 → 标 `near_substitute` + correlation。
     结果并入 `risk_metrics.correlation_warnings`。调用方（strategy_design）**始终**调用。
+
+    副作用（调用方须知）：R48 起本函数会**就地修改每套方案的 `s["allocations"]`**——
+    通过 `_merge_substitute_family` 把同族近替代品合并留一（移除被合并标的、权重并入保留方）。
+    因为结果是排序后的最终持仓（直接流向 API `etfs`），就地改入参是设计意图；
+    测试构造共享 dict 引用的分配列表时须 `copy.deepcopy` 隔离，避免污染外部引用。
     """
     for s in strategies:
         allocs = [a for a in s.get("allocations", []) if a.get("symbol") not in (None, "CASH")]
@@ -1529,6 +1604,19 @@ def apply_near_substitute_warnings(
             s.setdefault("risk_metrics", {})
             s["risk_metrics"]["correlation_warnings"] = (
                 s["risk_metrics"].get("correlation_warnings", []) + warnings
+            )
+        # round27 R48 (R41-c): 同族近替代品合并留一——在告警检测之后执行（三型统一，
+        # 进攻型不豁免）。合并后把对应 near_substitute 告警升级为「已合并」标注。
+        merges = _merge_substitute_family(s.get("allocations", []))
+        _merged_families = {m["family"] for m in merges}
+        for w in warnings:
+            if w.get("family") in _merged_families:
+                w["status"] = "merged"
+                w["note"] = (w.get("note") or "") + "（已合并留一）"
+        if merges:
+            s.setdefault("risk_metrics", {})
+            s["risk_metrics"]["merged_substitutes"] = (
+                s["risk_metrics"].get("merged_substitutes", []) + merges
             )
     return strategies
 

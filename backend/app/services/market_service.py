@@ -633,6 +633,9 @@ HKUS_ETF_MAP: list[dict[str, str]] = [
     {"symbol": "EEM", "name": "iShares MSCI Emerging Markets", "market": "US"},
     {"symbol": "DIA", "name": "SPDR Dow Jones Industrial", "market": "US"},
     {"symbol": "IWM", "name": "iShares Russell 2000", "market": "US"},
+    # R54 (round27): SOXX/XLB 移出指数种子表后补入此处——个股/ETF tab 正确命中
+    {"symbol": "SOXX", "name": "iShares Semiconductor ETF", "market": "US"},
+    {"symbol": "XLB", "name": "SPDR Materials Sector ETF", "market": "US"},
 ]
 
 

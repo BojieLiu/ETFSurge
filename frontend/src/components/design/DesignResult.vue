@@ -140,10 +140,10 @@
                                区别于技术信号（buy/hold/sell），列头 tooltip 已注明口径 -->
                           <!-- round24 R3: 降级态因子分只显示强弱分档（偏强/中性/偏弱），
                                不呈现两位小数假精确；title 保留原值供核对 -->
-                          <span v-if="a.factor_score != null" :class="a.factor_score >= 0 ? 'text-up' : 'text-down'"
-                            :title="bucketFactor ? ('原始因子分 ' + a.factor_score.toFixed(2) + '（因子数据降级，仅供核对）') : ''">
+                          <span v-if="a.factor_score != null" :class="typeof a.factor_score === 'number' ? (a.factor_score >= 0 ? 'text-up' : 'text-down') : ''"
+                            :title="bucketFactor ? ('原始因子分 ' + (typeof a.factor_score === 'number' ? a.factor_score.toFixed(2) : a.factor_score) + '（因子数据降级，仅供核对）') : ''">
                             <template v-if="bucketFactor">{{ factorBucket(a.factor_score) }}</template>
-                            <template v-else>{{ a.factor_score >= 0 ? '+' : '' }}{{ a.factor_score.toFixed(2) }}</template>
+                            <template v-else>{{ typeof a.factor_score === 'number' ? (a.factor_score >= 0 ? '+' : '') + a.factor_score.toFixed(2) : a.factor_score }}</template>
                           </span>
                           <span v-else class="muted">—</span>
                         </td>
@@ -261,6 +261,8 @@ function weightText(a) {
 }
 
 function factorBucket(score) {
+  // round27 R47: coarse 态 factor_score 已是分档字符串，直接透传（幂等）
+  if (typeof score === 'string') return score
   if (score >= 0.5) return '偏强'
   if (score <= -0.5) return '偏弱'
   return '中性'

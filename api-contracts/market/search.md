@@ -64,6 +64,12 @@ GET /api/v1/market/search?keyword=<kw>[&market=<A|HK|US|global>][&include_stocks
    - `kind=all`（默认）：现有 stock/etf/HK/US 段 + **尾部追加** sector/index 段
      （每段 top 10，总计上限由各段共享；向后兼容——旧调用方不受影响）。
    - `market` 参数与 `kind` 正交：`kind=sector|index` 时忽略 `market`（板块/指数无市场维度）。
+   - **R54（round27）指数 vs ETF 边界**：`indices_meta` 表**只存指数**，`_STATIC_EXTRA_INDICES`
+     种子表不得混入 ETF（标普 500 的 SPY、半导体 SOXX、材料 XLB 等 `index_type=price` 伪装的 ETF 行
+     已移除），也不得与彭博代码（`^GSPC`/`^DJI`/`^IXIC`）重复（仅保留 SPX/DJI/IXIC）。
+     因此 `kind=index` 美股搜索「标普」**只返回 `SPX` 一条**，绝不含 SPY/^GSPC。
+     上述 ETF（SOXX/XLB 等）改入 `market_service.HKUS_ETF_MAP`，在 `market=US` 个股/ETF tab
+     （`search_hk_us`）以 `type="etf"`、`market="US"` 正确命中，与指数 tab 互不串场。
 
 ## 4. 错误与降级 / Error & Fallback
 | 情况 | 行为 |

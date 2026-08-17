@@ -17,6 +17,7 @@ from app.engine.allocation_engine import (
     _COMMON_ANCHOR_SYMBOLS,
 )
 from app.engine.risk_controls import apply_risk_controls
+import copy
 
 
 def _factor_matrix(candidates):
@@ -473,7 +474,9 @@ class TestP1_1MaxCorrelation:
         assert warnings[0]["reduced_symbol"] == "512760"
         assert "关联度提示" in warnings[0]["note"]
         from app.engine.allocation_engine import apply_near_substitute_warnings
-        s2 = apply_near_substitute_warnings(self._mk_strategy(list(allocs)), matrix)[0]
+        # deepcopy：apply_near_substitute_warnings (R48) 会就地合并权重并移除被合并标的，
+        # 若用 list(allocs) 浅拷贝会共享 dict 对象、污染上方 s["allocations"] 导致 Σ 权重虚高
+        s2 = apply_near_substitute_warnings(self._mk_strategy(copy.deepcopy(allocs)), matrix)[0]
         assert any(w.get("type") == "near_substitute" for w in s2["risk_metrics"]["correlation_warnings"])
         # Σ 权重保持 = 1
         assert abs(sum(a["weight"] for a in s["allocations"] if a["symbol"] != "CASH") - 0.60) < 0.01

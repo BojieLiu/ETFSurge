@@ -174,6 +174,10 @@ class TestMarketDataHub:
         pm.scanner = MagicMock()
         pm.scanner.full_pipeline.return_value = {"core": [], "satellite": [], "defense": []}
         pm.classifier = mock_classifier
+        # 隔离外部依赖：强板块动量注入（真实网络）+ T-1 快照兜底（读/写磁盘）
+        pm.get_sector_momentum = MagicMock(return_value=[])
+        pm._load_pool_snapshot = MagicMock(return_value=None)
+        pm._persist_snapshot_after_refresh = AsyncMock()
         diff = await pm.refresh()
         pool = pm.get_pool()
         total = sum(len(v) for v in pool.values())

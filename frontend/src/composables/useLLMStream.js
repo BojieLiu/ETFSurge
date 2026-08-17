@@ -11,6 +11,8 @@ export function useLLMStream() {
   const error = ref(null)
   const metadata = ref(null)
   const disclaimer = ref('')
+  // R49: 首字节前的可见进度事件（phase=calling_model / cache_hit）
+  const progress = ref(null)
 
   let abortController = null
 
@@ -20,6 +22,7 @@ export function useLLMStream() {
     error.value = null
     metadata.value = null
     disclaimer.value = ''
+    progress.value = null
 
     abortController = new AbortController()
     const signal = abortController.signal
@@ -63,8 +66,12 @@ export function useLLMStream() {
             const parsed = JSON.parse(data)
             
             if (event === 'token' && onToken) {
+              progress.value = null
               onToken(parsed.token)
               fullText.value += parsed.token
+            } else if (event === 'progress') {
+              // R49: 首字节前的可见进度（正在调用模型 / 缓存命中），不静默丢弃
+              progress.value = parsed
             } else if (event === 'done') {
               fullText.value = parsed.full_text || fullText.value
               metadata.value = parsed.metadata || {}
@@ -107,6 +114,7 @@ export function useLLMStream() {
     error,
     metadata,
     disclaimer,
+    progress,
     start,
     stop,
   }

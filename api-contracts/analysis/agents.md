@@ -151,6 +151,26 @@ POST /api/v1/analysis/symbol-analysis/stream
 
 ---
 
+## 6.1 SSE 事件协议 / SSE Event Protocol（R49 新增 progress）
+
+所有 `* /stream` 端点返回 `text/event-stream`，`_sse_stream`（routers/analysis.py）
+按 `event:` / `data:` 帧推送，前端 `useLLMStream.js` 按事件类型消费。
+
+| event | data 字段 | 说明 |
+|-------|-----------|------|
+| `progress` | `phase`: `calling_model`；`message`: 进度文案 | R49：首字节（first_byte 34-78s）前必发的可见进度，前端据此渲染进度条（不可静默丢弃）。`phase=calling_model`（正在调用模型） |
+| `token` | `token`: 增量文本 | LLM 流式增量；首个 `token` 到达后前端清除 progress 条 |
+| `done` | `full_text`, `metadata`, `disclaimer`, `cached?` | 结束帧；`cached=true` 表示命中交易日内结果缓存（秒级返回），否则为 LLM 实时生成 |
+| `error` | `code`, `message` | 错误帧（STREAM_ERROR / DATA_UNAVAILABLE / [rate-limited] / [timeout]） |
+
+**缓存（R49 可选优化）**：相同 `(query, data_as_of)` 的二次请求按 prompt 指纹命中
+模块级交易日内缓存（TTL 8h），直接回放 `done`（`cached=true`），不调用 LLM。
+首字节前的 `progress` 事件契约对所有路径（含缓存命中）保持一致。
+
+**前端四态**：progress（调用中）/ token（流式渲染）/ done（完成+免责声明）/ error（降级文案）。
+
+---
+
 ## 7. 错误码 / Error Codes（与 stream 段共用）
 
 | Code | Meaning | When |
@@ -173,4 +193,6 @@ POST /api/v1/analysis/symbol-analysis/stream
 | llm-advice 注入槽与引擎消费槽一致 | ☐ | ☐ | round10 P3-G 契约单测 |
 | 错误码 400/502/500 处理 | ☐ | N/A | 前端 toast |
 | 加载态 / 空态 / 错误态 | ☐ | N/A | SSE 连接中/无数据/error |
+| 首字节前 `progress` 进度条可见（非空白 spinner） | ☐ | ☐ | R49：calling_model 事件 |
+| `done.cached=true` 缓存命中路径前端可感知 | ☐ | ☐ | R49：交易日内二次同请求秒级返回 |
 | 前端在 AI 输出下方显示免责声明 | ☐ | N/A | |

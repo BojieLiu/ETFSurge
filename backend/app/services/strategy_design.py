@@ -537,6 +537,11 @@ async def generate_enhanced_design(
                 })
 
             s["etfs"] = allocs
+            # round27 R47: coarse 态结构化字段桶化（与 data_precision 一致）；
+            # exact 态原值不变。此后按桶后权重重算 target_amount 保持内部一致。
+            _prec = market_context.get("data_precision") or {}
+            if _prec.get("mode") == "coarse":
+                _apply_precision_bucketing(allocs, _prec)
             # Add target_amount for each allocation
             for a in s["etfs"]:
                 a["target_amount"] = round(capital * a.get("weight", 0), 2)
@@ -950,6 +955,39 @@ def _factor_data_quality_report() -> dict:
         logger.debug("[strategy_design] factor data quality report failed (non-fatal): %s", _e)
         return {"total": 0, "valid": 0, "warn": 0, "static": 0, "no_data": 0,
                 "valid_rate": 0.0, "degraded": False, "note": "因子数据质量统计不可用"}
+
+
+# round27 R47: 降级态（coarse）结构化字段桶化——etfs[].weight / etfs[].factor_score
+# 须与 data_precision（coarse/bucket）保持一致（此前 design_text 已桶化、结构化字段仍精确，
+# 与元数据矛盾）。exact 态原值不变。target_amount 由调用方按桶后权重重算以保持一致。
+def _bucket_factor_score_label(fs: float) -> str:
+    """因子分强弱分档（与 design_report._build_plan_tables / 前端 factorBucket 同源）。"""
+    if fs >= 0.5:
+        return "偏强"
+    if fs <= -0.5:
+        return "偏弱"
+    return "中性"
+
+
+def _apply_precision_bucketing(etfs: list[dict], precision: dict) -> None:
+    """R47: mode=coarse 时把结构化字段按呈现精度桶化（in-place，无 I/O）。
+
+    - etfs[].weight → 5% 档位（0.2067 → 0.20）；
+    - etfs[].factor_score → 强弱分档字符串（偏强/中性/偏弱）。
+    exact 态（或字段缺失/非数字）原值不变。
+    """
+    if not isinstance(precision, dict) or precision.get("mode") != "coarse":
+        return
+    step = (precision.get("weight_step_pct") or 5.0) / 100.0
+    for a in etfs:
+        if a.get("symbol") == "CASH":
+            continue
+        w = a.get("weight")
+        if isinstance(w, (int, float)):
+            a["weight"] = round(round(w / step) * step, 4)
+        fs = a.get("factor_score")
+        if isinstance(fs, (int, float)):
+            a["factor_score"] = _bucket_factor_score_label(fs)
 
 
 def _validate_target_amount_consistency(strategies: list[dict], capital: float) -> list[str]:

@@ -104,9 +104,13 @@
   /* Text Colors - 文本色 */
   --color-text-primary: var(--color-neutral-900);
   --color-text-secondary: var(--color-neutral-600);
-  --color-text-tertiary: var(--color-neutral-400);
+  /* R51 (round27): 浅色模式下 neutral-400 (#94a3b8) 在白/浅表面仅有 2.45:1，
+     远低于 WCAG AA 4.5:1，导致 portfolio-analysis Lighthouse a11y=82（次要/弱化文字、
+     表头、caption 大量使用 tertiary/muted token）。提升至 neutral-600 (#475569)
+     达 7.24:1，满足 AA；深色模式覆盖（neutral-400=6.96:1）本已达标，保持不变。*/
+  --color-text-tertiary: var(--color-neutral-600);
   --color-text-inverse: var(--color-neutral-0);
-  --color-text-disabled: var(--color-neutral-400);
+  --color-text-disabled: var(--color-neutral-600);
   --color-text-link: var(--color-brand-600);
   --color-text-link-hover: var(--color-brand-700);
   --color-text-success: var(--color-success-700);

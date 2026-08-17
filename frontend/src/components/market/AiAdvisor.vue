@@ -21,8 +21,12 @@
         </div>
 
         <div v-if="error" class="error">{{ error }}</div>
+        <div v-if="progress && !response" class="stream-progress">
+          <div class="progress-bar"><div class="progress-fill"></div></div>
+          <span class="progress-text">{{ progress.message }}</span>
+        </div>
         <div v-if="response" class="response" v-html="renderMarkdown(response)"></div>
-        <div v-if="!response && !loading && !error" class="hint">
+        <div v-if="!response && !loading && !error && !progress" class="hint">
           💡 输入上方问题，AI 将结合实时行情与您的组合给出建议
         </div>
       </div>
@@ -41,7 +45,7 @@ const query = ref('')
 const response = ref('')
 const loading = ref(false)
 const error = ref('')
-const { start: startStream, stop: stopStream } = useLLMStream()
+const { start: startStream, stop: stopStream, progress } = useLLMStream()
 
 async function send() {
   const q = query.value.trim()
@@ -107,6 +111,11 @@ watch(() => props.marketTab, () => {
 .btn-primary:hover { background: var(--color-brand-700); }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 .error { margin-top: var(--space-3); padding: var(--space-2) var(--space-3); color: var(--color-danger-700); background: var(--color-bg-danger-subtle); border-radius: var(--radius-md); font-size: var(--font-size-sm); }
+.stream-progress { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-3); }
+.progress-bar { flex: 1; height: 4px; background: var(--color-border-light); border-radius: 999px; overflow: hidden; }
+.progress-fill { width: 40%; height: 100%; background: var(--color-primary); border-radius: 999px; margin-left: -40%; animation: progress-indeterminate 1.1s ease-in-out infinite; }
+.progress-text { font-size: var(--font-size-sm); color: var(--color-text-secondary); white-space: nowrap; }
+@keyframes progress-indeterminate { 0% { margin-left: -40%; } 100% { margin-left: 100%; } }
 .response { margin-top: var(--space-4); line-height: 1.8; }
 .hint { margin-top: var(--space-4); padding: var(--space-4); text-align: center; color: var(--color-text-secondary); font-size: var(--font-size-sm); }
 </style>

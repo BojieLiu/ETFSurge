@@ -2,6 +2,8 @@ import json
 import time
 import sys
 import asyncio
+import threading
+import hashlib
 from typing import Any, AsyncGenerator
 
 from ..config import settings
@@ -534,6 +536,93 @@ async def llm_complete(
     if last_exc is None:
         raise RuntimeError("No LLM providers available")
     raise last_exc
+
+
+# ── R49: 热点问题交易日内结果缓存（按 query/data_as_of 复用）────────────────
+# 解决 LLM 流式 first_byte 34-78s 的空白等待：相同 (query, data_as_of) 的二次
+# 请求直接回放缓存（秒级），不影响首次真实 LLM 调用。dict 操作受 LOCK 保护，
+# 并发安全；流式累积在 per-call 内完成，缓存写入仅在 done 时一次性发生。
+_REPORT_CACHE_LOCK = threading.Lock()
+_REPORT_CACHE: dict[str, dict] = {}
+_REPORT_CACHE_TTL = 8 * 3600  # 交易日内有效窗口（8h）
+
+
+def _report_cache_key(query: str | None, data_as_of: str | None, prompt: str) -> str:
+    """缓存键 = (query, data_as_of) + prompt 指纹。
+
+    prompt 指纹捕获市场数据快照内容，保证「同 query + 同市场数据」才命中
+    （交易日同源复用），避免不同市场上下文被同一 query 串味。
+    """
+    ph = hashlib.sha256((prompt or "").encode("utf-8")).hexdigest()[:24]
+    return f"{query or 'q'}|{data_as_of or 'live'}|{ph}"
+
+
+def get_cached_report(query: str | None, data_as_of: str | None, prompt: str) -> dict | None:
+    """命中且未过期返回缓存条目（含 text/usage/ts），否则 None。"""
+    key = _report_cache_key(query, data_as_of, prompt)
+    with _REPORT_CACHE_LOCK:
+        entry = _REPORT_CACHE.get(key)
+        if entry and (time.monotonic() - entry["ts"]) < _REPORT_CACHE_TTL:
+            return entry
+    return None
+
+
+def put_cached_report(
+    query: str | None, data_as_of: str | None, prompt: str, text: str, usage: dict
+) -> None:
+    """写入缓存条目（线程安全）。"""
+    key = _report_cache_key(query, data_as_of, prompt)
+    with _REPORT_CACHE_LOCK:
+        _REPORT_CACHE[key] = {"text": text, "usage": usage, "ts": time.monotonic()}
+
+
+def run_stream_with_cache(
+    agent_runtime,
+    prompt: str,
+    query: str | None = None,
+    data_as_of: str | None = None,
+    **kwargs,
+) -> AsyncGenerator[dict, None]:
+    """R49: 带交易日内结果缓存的流式包装（返回 async generator）。
+
+    设计为普通函数（非 async 生成器），以便 ``agent_runtime.run_stream`` 在
+    端点函数执行期被**立即调用**（同步副作用，如单测捕获 prompt），而非推迟到
+    流式消费时。缓存命中判定同样在调用期同步完成。
+
+    - 命中缓存：直接回放 done（带 ``cached=true`` 标记），不调用 LLM，秒级返回。
+    - 未命中：透传 ``agent_runtime.run_stream``，累积全文并在 done 时写入缓存。
+
+    首字节前的 ``progress`` 进度事件由 ``_sse_stream`` 负责发出，缓存命中路径
+    同样保留该契约（先 progress 后 done），前端可见「命中缓存」前的瞬时进度。
+    """
+    cached = get_cached_report(query, data_as_of, prompt)
+    if cached is not None:
+        async def _cached_stream():
+            yield {
+                "event": "done",
+                "data": {
+                    "type": "done",
+                    "full_text": cached["text"],
+                    "usage": cached.get("usage", {}),
+                    "cached": True,
+                },
+            }
+        return _cached_stream()
+
+    # 立即调用 agent.run_stream（同步副作用在端点执行期发生）
+    ag = agent_runtime.run_stream(prompt, **kwargs)
+
+    async def _wrap_stream():
+        chunks: list[str] = []
+        async for ev in ag:
+            if ev.get("event") == "token":
+                chunks.append(ev.get("data", {}).get("token", ""))
+            yield ev
+            if ev.get("event") == "done":
+                full = "".join(chunks)
+                put_cached_report(query, data_as_of, prompt, full, ev.get("data", {}).get("usage", {}))
+
+    return _wrap_stream()
 
 
 async def llm_complete_stream(
@@ -2048,7 +2137,10 @@ def _build_design_report_prompt(
                 name = e.get("name", "")[:10]
                 fs = e.get("factor_score", None)
                 if fs is not None:
-                    lines.append(f"  - {name}({code}) 评分: {fs:.2f}")
+                    # round27 R47: coarse 态 factor_score 已是分档字符串（偏强/中性/偏弱），
+                    # 容忍字符串避免 f"{fs:.2f}" 崩溃；数字仍按原精度渲染
+                    fs_txt = f"{fs:.2f}" if isinstance(fs, (int, float)) else str(fs)
+                    lines.append(f"  - {name}({code}) 评分: {fs_txt}")
                     # 取 top-3 factor_scores 子项（如有 breakdown）
                     fs_detail = e.get("factor_scores", {})
                     if isinstance(fs_detail, dict) and fs_detail:

@@ -10,7 +10,7 @@ These tests verify that:
 """
 import asyncio
 import logging
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 
 import pytest
 
@@ -22,6 +22,13 @@ def pm():
     """Fresh MarketDataHub with empty pool (simulates first-run state)."""
     mgr = MarketDataHub()
     mgr._test_mode = True
+    # 隔离外部依赖，避免空扫描被误判为成功：
+    #  - get_sector_momentum: round24 R1 强板块注入的真实网络源
+    #  - _load_pool_snapshot: round24 R26 T-1 快照兜底（读磁盘）
+    #  - _persist_snapshot_after_refresh: 成功后落盘快照，避免测试写真实文件
+    mgr.get_sector_momentum = MagicMock(return_value=[])
+    mgr._load_pool_snapshot = MagicMock(return_value=None)
+    mgr._persist_snapshot_after_refresh = AsyncMock()
     return mgr
 
 
@@ -39,6 +46,10 @@ def pm_with_data():
     mgr._cached_pool = dict(mgr._pool)
     mgr._version = 5
     mgr._test_mode = True
+    # 隔离外部依赖（同 pm fixture）
+    mgr.get_sector_momentum = MagicMock(return_value=[])
+    mgr._load_pool_snapshot = MagicMock(return_value=None)
+    mgr._persist_snapshot_after_refresh = AsyncMock()
     return mgr
 
 
@@ -55,7 +66,7 @@ class TestPoolResilience:
             with patch.object(pm, 'classifier') as mock_cls:
                 mock_cls.batch_classify.return_value = {}
                 with patch.object(pm, 'factor_registry') as mock_fr:
-                    mock_fr.compute = MagicMock(return_value={})
+                    mock_fr.compute = AsyncMock(return_value={})
 
                     diff = await pm.refresh()
 
@@ -79,7 +90,7 @@ class TestPoolResilience:
             with patch.object(pm, 'classifier') as mock_cls:
                 mock_cls.batch_classify.return_value = {}
                 with patch.object(pm, 'factor_registry') as mock_fr:
-                    mock_fr.compute = MagicMock(return_value={})
+                    mock_fr.compute = AsyncMock(return_value={})
 
                     await pm.refresh()
                     assert pm._consecutive_failures == 1
@@ -92,7 +103,7 @@ class TestPoolResilience:
             with patch.object(pm, 'classifier') as mock_cls:
                 mock_cls.batch_classify.return_value = {}
                 with patch.object(pm, 'factor_registry') as mock_fr:
-                    mock_fr.compute = MagicMock(return_value={})
+                    mock_fr.compute = AsyncMock(return_value={})
 
                     await pm.refresh()
                     assert pm._consecutive_failures == 2
@@ -108,7 +119,7 @@ class TestPoolResilience:
             with patch.object(pm, 'classifier') as mock_cls:
                 mock_cls.batch_classify.return_value = {}
                 with patch.object(pm, 'factor_registry') as mock_fr:
-                    mock_fr.compute = MagicMock(return_value={})
+                    mock_fr.compute = AsyncMock(return_value={})
 
                     diff = await pm.refresh()
 
@@ -131,7 +142,7 @@ class TestPoolResilience:
             with patch.object(pm, 'classifier') as mock_cls:
                 mock_cls.batch_classify.return_value = {}
                 with patch.object(pm, 'factor_registry') as mock_fr:
-                    mock_fr.compute = MagicMock(return_value={})
+                    mock_fr.compute = AsyncMock(return_value={})
                     await pm.refresh()
 
         assert pm._consecutive_failures == 1
@@ -148,7 +159,7 @@ class TestPoolResilience:
                     "510300": {"industry": "宽基指数", "concepts": [], "confidence": 0.9}
                 }
                 with patch.object(pm, 'factor_registry') as mock_fr:
-                    mock_fr.compute = MagicMock(return_value={
+                    mock_fr.compute = AsyncMock(return_value={
                         "510300": {"technical": 0.5, "momentum": 0.3, "valuation": 0.2}
                     })
                     mock_fr.aggregate_factor_scores = MagicMock(side_effect=lambda x: x)
@@ -189,7 +200,7 @@ class TestPoolResilience:
                     "560600": {"industry": "医药", "concepts": [], "confidence": 0.8},
                 }
                 with patch.object(pm, 'factor_registry') as mock_fr:
-                    mock_fr.compute = MagicMock(return_value={
+                    mock_fr.compute = AsyncMock(return_value={
                         "510300": {"technical": 0.5},
                         "560600": {"technical": 0.3},
                     })
@@ -246,7 +257,7 @@ class TestP013ShrinkProtection:
                     "510300": {"industry": "宽基指数", "concepts": [], "confidence": 0.9}
                 }
                 with patch.object(pm, 'factor_registry') as mock_fr:
-                    mock_fr.compute = MagicMock(return_value={"510300": {"technical": 0.5}})
+                    mock_fr.compute = AsyncMock(return_value={"510300": {"technical": 0.5}})
                     mock_fr.aggregate_factor_scores = MagicMock(side_effect=lambda x: x)
                     async def _run_sync_side_effect(fn, *args, **kwargs):
                         return fn(*args)

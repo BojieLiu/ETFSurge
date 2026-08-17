@@ -221,6 +221,11 @@ async def test_p2_empty_scanner_preserves_pool():
     pm.classifier.batch_classify.return_value = {
         "510300": {"industry": "宽基指数", "concepts": ["沪深300"], "confidence": 0.95},
     }
+    # 隔离外部依赖：强板块动量注入（真实网络）+ T-1 快照兜底（读/写磁盘），
+    # 否则空扫描会被误判为成功、污染"空扫描保留 last-good"断言
+    pm.get_sector_momentum = MagicMock(return_value=[])
+    pm._load_pool_snapshot = MagicMock(return_value=None)
+    pm._persist_snapshot_after_refresh = AsyncMock()
     diff1 = await pm.refresh()
     assert diff1.version == 1
     pool_before = pm.get_pool()

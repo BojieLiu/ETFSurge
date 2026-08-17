@@ -63,7 +63,11 @@ POST /api/v1/portfolio/design-async   （异步任务结果同结构）
 | `coarse` | `factor_data_quality.degraded == true`（valid 率 < 60%，含盘后 0%） | 权重 `≈20%`（5% 档位）、因子分 `偏弱`、卡片红字「因子数据缺失 100%」 |
 
 > **不变式**：`data_precision` **始终存在**（正常态 `mode="exact"`），前端无该键时按 `exact` 处理（不误报降级）。
-> **不变式**：`data_precision` 只影响**呈现**，`allocations[].target_weight` / `target_amount` **原值不变**（后端不得为了「粗略呈现」篡改真实权重，否则破坏 `target_amount = capital × weight` 一致性与「权重不归一化」约定）。
+> **不变式（round27 R47 演化）**：`mode="coarse"` 时后端**直接桶化结构化字段**——
+> `etfs[].weight` 按 `weight_step_pct` 档位（如 0.2067 → 0.20）、`etfs[].factor_score` 按强弱分档
+> （偏强/中性/偏弱）；`target_amount` 随桶后 `weight` **重算**以保持 `target_amount = capital × weight`
+> 一致（不破坏「权重不归一化」）。`mode="exact"` 时 `weight` / `factor_score` 原精确值不变。
+> 前端 `weightText` / `factorBucket` 对分档值幂等透传（字符串因子分直接显示，数字档位再呈现）。
 
 ---
 
@@ -72,8 +76,8 @@ POST /api/v1/portfolio/design-async   （异步任务结果同结构）
 `frontend/src/components/design/DesignResult.vue`：
 
 1. **红字横幅**（`mode === 'coarse'`）：显示 `note`，样式 `precision-banner`（红字 `--color-down` 系），`role="alert"`。
-2. **权重列**：`weight_display === 'coarse'` → `≈{round(weight*100 / step) * step}%`，`title` 属性保留精确值供核对；否则 `{(weight*100).toFixed(1)}%`。
-3. **因子分列**：`factor_score_display === 'bucket'` → `偏强`（≥0.5）/ `偏弱`（≤-0.5）/ `中性`（其余），`title` 保留原值；否则精确 2 位小数。
+2. **权重列**：`weight_display === 'coarse'` → `≈{round(weight*100 / step) * step}%`（后端 `etfs[].weight` 已为档位值，前端幂等再呈现），`title` 属性保留精确值供核对；否则 `{(weight*100).toFixed(1)}%`。
+3. **因子分列**：`factor_score_display === 'bucket'` → `偏强`（≥0.5）/ `偏弱`（≤-0.5）/ `中性`（其余）；round27 R47 后端 `etfs[].factor_score` 在 coarse 态已为分档字符串，`factorBucket` 直接透传（幂等）；exact 态为数字时精确 2 位小数。
 4. **四态**：`data_precision` 缺失/为 `null` → 按 `exact` 渲染（不出现空白、不误报降级）。
 
 ---

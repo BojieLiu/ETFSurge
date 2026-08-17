@@ -15,6 +15,20 @@ import pandas as pd
 import pytest
 
 
+# ── round27 隔离加固：捕获模块级单例原始实现（在任意测试 mutate 之前） ──────
+# 以下模块级函数/单例常被测试直接替换（如 factors_router._db_ic_sample_counts =
+# AsyncMock(...) 后无还原），跨测试串扰表现为 sample_count 取到泄漏的 mock 值、
+# strategy_check 因子分取到 market_data_hub 的真实池数据而非 patch 值。
+# 这里在 conftest 导入期（任何测试运行前）捕获原始引用，供隔离 fixture 复位。
+from app.routers import factors as _FACTORS_ROUTER_MOD  # noqa: E402
+_ORIG_DB_IC_SAMPLE_COUNTS = _FACTORS_ROUTER_MOD._db_ic_sample_counts
+_ORIG_DB_IC_SERIES_STATS = _FACTORS_ROUTER_MOD._db_ic_series_stats
+from app.services.market_data_hub import (  # noqa: E402
+    market_data_hub as _HUB_MOD,
+    ALL_LAYERS as _ALL_LAYERS_MOD,
+)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _disable_amount_override_network():
     """P0-23 (round16 3.25): 测试环境默认跳过 filter_etfs 实时成交额网络补查
@@ -59,11 +73,89 @@ async def _clear_sync_memory_cache():
     from app.factors.factor_registry import registry as _fr
     _fr._constant_factor_codes = set()
     _fr._data_source_gaps = {}
+    # round27 后续: 因子管线运行期累加的单例状态同样会跨测试串扰——
+    # registry._sample_counts / _last_ic_batch / _last_computed_at 在 compute() 期间被填充，
+    # 前序测试（真实/半真实因子计算）写入后，后序测试若依赖 clean 状态即读到陈旧值
+    # （表现为 sample_count 取到真实累加值而非 patch 值，或 strategy_check 取到真实因子分）。
+    # 每测试前后复位，保证 /factors/active、strategy_check 等端点测试隔离。
+    _fr._sample_counts = {}
+    _fr._last_ic_batch = {}
+    _fr._last_computed_at = None
+    from app.routers import factors as _factors_router
+    from app.services import portfolio_service as _ps
+    _factors_router._CACHE.clear()
+    _ps._strategy_check_cache.clear()
+    # 还原被测试直接替换的模块级函数（factors_router._db_ic_sample_counts /
+    # _db_ic_series_stats 常被 AsyncMock(...) 替换后无还原，跨测试串扰 →
+    # test_factor_ic_sample_count 的 sample_count 取到泄漏的 mock 值而非 patch 值）。
+    _factors_router._db_ic_sample_counts = _ORIG_DB_IC_SAMPLE_COUNTS
+    _factors_router._db_ic_series_stats = _ORIG_DB_IC_SERIES_STATS
+    # 复位 market_data_hub 可变缓存（池 / 因子矩阵 / 市态 / K 线 / 资讯 / 情绪）。
+    # 前序测试填充 _pool 后，get_factor_matrix() 返回非空 →
+    # _full_pool_factor_composite 用真实池截面 z 覆盖 strategy_check 的 patch 因子分
+    # （test_strategy_check_fallback 'hold')，同时污染 test_pool_manager / test_pool_resilience。
+    _h = _HUB_MOD
+    _h._pool = {layer: [] for layer in _ALL_LAYERS_MOD}
+    _h._by_code = {}
+    _h._version = 0
+    _h._cached_pool = None
+    _h._cached_ts = 0.0
+    _h._regime_cache = {}
+    _h._regime_cache_ts = 0
+    _h._kline_cache_rows = {}
+    _h._kline_cache = {}
+    _h._kline_cache_ts = 0.0
+    _h._kline_cache_symbols = []
+    _h._sector_momentum_cache = None
+    _h._sector_momentum_cache_ts = 0
+    _h._hot_plates_cache = None
+    _h._sector_heat_cache = None
+    _h._index_realtime_cache = None
+    _h._sentiment_cache = None
+    _h._sentiment_cache_ts = 0
+    _h._news_cache = None
+    _h._news_buckets = None
+    _h._news_cache_ts = 0
+    _h._opportunistic_signals = {}
+    _h._degraded = False
+    _h._consecutive_failures = 0
     yield
     sync_memory_cache.clear()
     await memory_cache.clear()
     _fr._constant_factor_codes = set()
     _fr._data_source_gaps = {}
+    _fr._sample_counts = {}
+    _fr._last_ic_batch = {}
+    _fr._last_computed_at = None
+    _factors_router._CACHE.clear()
+    _ps._strategy_check_cache.clear()
+    _factors_router._db_ic_sample_counts = _ORIG_DB_IC_SAMPLE_COUNTS
+    _factors_router._db_ic_series_stats = _ORIG_DB_IC_SERIES_STATS
+    _h = _HUB_MOD
+    _h._pool = {layer: [] for layer in _ALL_LAYERS_MOD}
+    _h._by_code = {}
+    _h._version = 0
+    _h._cached_pool = None
+    _h._cached_ts = 0.0
+    _h._regime_cache = {}
+    _h._regime_cache_ts = 0
+    _h._kline_cache_rows = {}
+    _h._kline_cache = {}
+    _h._kline_cache_ts = 0.0
+    _h._kline_cache_symbols = []
+    _h._sector_momentum_cache = None
+    _h._sector_momentum_cache_ts = 0
+    _h._hot_plates_cache = None
+    _h._sector_heat_cache = None
+    _h._index_realtime_cache = None
+    _h._sentiment_cache = None
+    _h._sentiment_cache_ts = 0
+    _h._news_cache = None
+    _h._news_buckets = None
+    _h._news_cache_ts = 0
+    _h._opportunistic_signals = {}
+    _h._degraded = False
+    _h._consecutive_failures = 0
 
 
 @pytest.fixture(autouse=True)
