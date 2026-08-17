@@ -426,7 +426,14 @@ class TestWatchlistGroupedBatch:
 
     @pytest.mark.asyncio
     async def test_degraded_marker_injected_when_all_sources_fail(self):
-        """P0-D: 全源失败 → realtime 显式 null + _degraded:true（不再丢键）。"""
+        """P0-D: 全源失败 → realtime 显式 null + _degraded:true（不再丢键）。
+
+        加固（防 xdist 并行污染）：同一 worker 内其他测试可能把真实行情写进
+        cache_service 单例 _store / market_service._asset_realtime_cache，导致
+        get_realtime_batch 命中真实缓存返回 600519 实时价（1293.09）而非走 mock。
+        此处再阻断 cache_mget（强制 miss）+ 网络叶子 fetch_a_stock_batch（强制抛错），
+        无论 get_realtime_batch 绑定是否被污染，批量必失败 → 走降级，断言稳定。
+        """
         items = [_item("600519", "A", "贵州茅台")]
 
         async def _fail_batch(symbols, asset_type):
@@ -434,7 +441,9 @@ class TestWatchlistGroupedBatch:
 
         with patch("app.routers.market.market_data_hub.get_asset_realtime", new=AsyncMock(return_value=None)), \
              patch("app.services.market_service.get_realtime_batch", side_effect=_fail_batch), \
-             patch("app.services.cache_service.cache_get", new=AsyncMock(return_value=None)):
+             patch("app.services.cache_service.cache_get", new=AsyncMock(return_value=None)), \
+             patch("app.services.cache_service.cache_mget", new=AsyncMock(return_value=[None])), \
+             patch("app.fetchers.china_market.fetch_a_stock_batch", side_effect=asyncio.TimeoutError("slow source")):
             result = await market_router._watchlist_enrich_items(items)
         item = result[0]
         assert item["realtime"] is None

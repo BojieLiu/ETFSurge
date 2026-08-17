@@ -463,7 +463,10 @@
     --color-text-secondary: var(--color-neutral-300);
     --color-text-tertiary: var(--color-neutral-400);
     --color-text-inverse: var(--color-neutral-900);
-    --color-text-disabled: var(--color-neutral-500);
+    /* R51 (round27): 深色模式 disabled 文字 neutral-500 (#6b7280) 在 neutral-950
+       表面约 4.0:1，低于 WCAG AA 4.5:1（Lighthouse a11y 扣分）。提亮至 neutral-400
+       (#9ca3af ≈ 8:1) 满足 AA，与 tertiary 对齐，disabled 文字仍明显弱于主文字。*/
+    --color-text-disabled: var(--color-neutral-400);
 
     --color-bg-primary: var(--color-neutral-950);
     --color-bg-secondary: var(--color-neutral-900);

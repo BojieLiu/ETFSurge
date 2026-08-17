@@ -193,19 +193,33 @@ async def lifespan(app: FastAPI):
         except Exception as e:  # noqa: BLE001
             logger.warning("[lifespan] indices_meta auto-sync failed (non-fatal): %s", e)
 
-    # 启动时后台预热行情缓存（不阻塞启动，10s 超时 → 部分数据可接受）
+    # 启动时预热行情缓存——F3 (round27): 改后台异步，不再阻塞 startup 就绪。
+    # 旧实现 `await refresh_market_cache(timeout=10)` 仍占 10s 启动关键路径
+    # （A 股全市场快照 stock_zh_a_spot 实测 ~24s，10s 超时截断仍拖慢启动）。
+    # 改为后台填充（与 sector cache 同模式，R44 已验证安全）：startup 不被拖长；
+    # market cache 缺失时首个请求会触发按需刷新（refresh_market_cache 亦被
+    # 运行时周期/按需调用），不丢数据。
     async def _warmup_market_cache():
-        with warmup_timer("warmup_market_cache", "warmup", "行情缓存预热"):
-            _mark = app.state.warmup["market_cache"]
-            try:
-                await asyncio.wait_for(refresh_market_cache(), timeout=10)
-                _mark["done"] = True
-                _mark["success"] = True
-                logger.info("行情缓存预热完成")
-            except (Exception, asyncio.CancelledError):
-                _mark["done"] = True
-                _mark["success"] = False
-                logger.exception("行情缓存预热失败（不影响启动）")
+        try:
+            async def _do_market_warmup():
+                _mark = app.state.warmup["market_cache"]
+                with warmup_timer("warmup_market_cache", "warmup", "行情缓存预热"):
+                    try:
+                        await asyncio.wait_for(refresh_market_cache(), timeout=10)
+                        _mark["done"] = True
+                        _mark["success"] = True
+                        logger.info("行情缓存预热完成（后台）")
+                    except (Exception, asyncio.CancelledError) as exc:
+                        _mark["done"] = True
+                        _mark["success"] = False
+                        logger.debug("行情缓存预热失败（后台，非阻塞）：%s", exc)
+
+            # 不 await：立即返回让 startup 就绪；实际刷新在后台进行
+            task = asyncio.create_task(_do_market_warmup())
+            app.state._market_warmup_task = task  # 强引用防 GC 回收未完成任务
+            logger.info("行情缓存预热已在后台启动（非阻塞，F3）")
+        except (Exception, asyncio.CancelledError) as exc:
+            logger.warning("行情缓存预热任务启动失败（非阻塞）：%s", exc)
 
     # 启动时预热全球指数缓存（非阻塞，15s 超时）
     async def _warmup_global_indices():
@@ -307,14 +321,33 @@ async def lifespan(app: FastAPI):
             logger.warning("板块缓存预热任务启动失败（非阻塞）：%s", exc)
 
     async def _warmup_sequence_task():
-        await _run_warmup_sequence([
-            _warmup_market_cache(),
-            _warmup_etf_cache(),
-            _warmup_global_indices(),
-            _warmup_sector_cache(),
-            _background_instruments_sync(),
-            _background_indices_meta_sync(),
-        ])
+        # F3b (round27): 预热预算门禁——非阻塞 WARN。round27 §13.6 指出预热 profiler
+        # 只写报告、无预算断言，导致 20s→34.5s 回归未被拦截。此处记录总耗时，超过
+        # 阈值即结构化告警（不阻断启动、不影响请求），便于后续回归被捕获。
+        # 阈值 30s：给 etf/instruments 冷拉（各自 90-120s 超时上限）留余量，
+        # 同时能抓到「24s 快照 + 12.8s 空转」这类异常膨胀（34.5s 必触发）。
+        _seq_start = time.time()
+        try:
+            await _run_warmup_sequence([
+                _warmup_market_cache(),
+                _warmup_etf_cache(),
+                _warmup_global_indices(),
+                _warmup_sector_cache(),
+                _background_instruments_sync(),
+                _background_indices_meta_sync(),
+            ])
+        finally:
+            _seq_elapsed = time.time() - _seq_start
+            _WARMUP_BUDGET_S = float(os.environ.get("WARMUP_BUDGET_S", "30"))
+            if _seq_elapsed > _WARMUP_BUDGET_S:
+                logger.warning(
+                    "[warmup-budget] 预热总耗时 %.1fs 超过预算阈值 %.1fs，可能存在回归"
+                    "（盘后/源冷却或某数据源空转）——见 logs/warmup_timing.json（PROFILE_WARMUP=1）",
+                    _seq_elapsed, _WARMUP_BUDGET_S,
+                )
+            else:
+                logger.info("[warmup-budget] 预热总耗时 %.1fs（阈值 %.1fs，达标）",
+                            _seq_elapsed, _WARMUP_BUDGET_S)
 
     if _SKIP_WARMUP:
         logger.info("[lifespan] ETF_SURGE_SKIP_WARMUP=1, 跳过后台预热任务（快速启动模式）")
