@@ -98,18 +98,21 @@ class TestStrategyCheckCompositeDecision:
         # 因子全空 → filled 少 → 降级门禁可能触发；但必须有字段且诚实
         assert "degraded" in cd2
 
-    def test_low_fill_rate_gates_composite(self):
-        """因子填充率 <60% → composite_decision.degraded=true（不报合成结论）。"""
+    def test_low_component_coverage_gates_composite(self):
+        """R52: 分项覆盖率 <60% → composite_decision.degraded=true（不报合成结论）。
+
+        round27 R52 把门禁口径从「持仓级填充率」改为「技术/估值/动量分项覆盖率」：
+        仅技术信号有值、估值/动量因子键缺失 → 覆盖 1/3 < 0.6 → 诚实降级。
+        """
         from app.services.portfolio_service import _attach_composite_decisions
 
         fbs = {
             "159338": {
-                "factor_scores": {"momentum": 0.9, "valuation": 0.8},
+                "factor_scores": {"technical.momentum": 0.9},  # 仅技术类因子键
                 "technical_signal": {"signal": "buy", "score": 2.0, "reasons": ["MA5>MA20"]},
             },
         }
-        data_quality = {"filled_count": 2, "total_count": 39}
-        _attach_composite_decisions(fbs, data_quality)
+        _attach_composite_decisions(fbs)
         cd = fbs["159338"]["composite_decision"]
         assert cd["degraded"] is True
         assert cd["signal"] is None

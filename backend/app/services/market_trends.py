@@ -66,79 +66,125 @@ async def compute_etf_trends(
 
 
 async def _compute_industry_momentum(top_n: int = 15) -> list[dict[str, Any]]:
-    """计算申万一级行业板块动量。
-    
+    """计算申万一级行业板块动量（push2delay 直连，绕过 akshare 硬编码 push2 阻断）。
+
     返回:
       [{sector, sector_code, type:"industry", rank_current, change_pct, main_inflow, up_count, down_count}]
+
+    round27 R46: 旧实现用 akshare `stock_board_industry_name_em`（硬编码 push2.eastmoney.com，
+    被 EM 域名级风控 ProxyError 断连）→ live 源失败 → 首启无快照可写（R40 首启空窗）。
+    改用项目自有 `fetch_em_industry_sectors`（EM_PUSH_HOST=push2delay，实测 496 行可用），
+    live 源恢复正常 → 快照正常写入。push2delay 空时回退 akshare（防御性）。
     """
+    # 主源：push2delay 直连（绕过 akshare 的 push2 阻断）
     try:
-        import akshare as ak
-        from ..utils.decode import decode_df
-        from ..core.async_utils import run_sync
-
-        df = await run_sync(ak.stock_board_industry_name_em)
-        if df is None or df.empty:
-            return []
-        decode_df(df)
-
-        current = []
-        for _, row in df.iterrows():
-            current.append({
-                "sector": str(row.get("板块名称", "")),
-                "sector_code": str(row.get("板块代码", "")),
-                "type": "industry",
-                "change_pct": float(row.get("涨跌幅", 0) or 0),
-                "main_inflow": float(row.get("主力净流入", 0) or 0),
-                "up_count": int(row.get("上涨家数", 0) or 0),
-                "down_count": int(row.get("下跌家数", 0) or 0),
-            })
-
-        current.sort(key=lambda x: x["change_pct"], reverse=True)  # type: ignore[arg-type,return-value]
-        for rank, item in enumerate(current, 1):
-            item["rank_current"] = rank
-
-        return current[:top_n]
+        from ..fetchers.sector_fetcher import fetch_em_industry_sectors
+        rows = fetch_em_industry_sectors(limit=top_n) or []
     except Exception as e:
-        logger.warning("[market_trends] _compute_industry_momentum failed: %s", e)
-        return []
+        logger.warning("[market_trends] fetch_em_industry_sectors failed: %s", e)
+        rows = []
+
+    # 防御性兜底：push2delay 也空时回退 akshare（盘后冷却等异常场景）
+    if not rows:
+        try:
+            import akshare as ak
+            from ..utils.decode import decode_df
+            from ..core.async_utils import run_sync
+            df = await run_sync(ak.stock_board_industry_name_em)
+            if df is not None and not df.empty:
+                decode_df(df)
+                rows = [
+                    {
+                        "sector_name": str(row.get("板块名称", "")),
+                        "sector_code": str(row.get("板块代码", "")),
+                        "change_pct": float(row.get("涨跌幅", 0) or 0),
+                        "main_inflow": float(row.get("主力净流入", 0) or 0),
+                        "up_count": int(row.get("上涨家数", 0) or 0),
+                        "down_count": int(row.get("下跌家数", 0) or 0),
+                    }
+                    for _, row in df.iterrows()
+                ]
+        except Exception as e:
+            logger.warning("[market_trends] _compute_industry_momentum akshare fallback failed: %s", e)
+
+    current = []
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        current.append({
+            "sector": str(r.get("sector_name", "")),
+            "sector_code": str(r.get("sector_code", "")),
+            "type": "industry",
+            "change_pct": float(r.get("change_pct") or 0),
+            "main_inflow": float(r.get("main_inflow") or 0),
+            "up_count": int(r.get("up_count") or 0),
+            "down_count": int(r.get("down_count") or 0),
+        })
+
+    current.sort(key=lambda x: x["change_pct"], reverse=True)  # type: ignore[arg-type,return-value]
+    for rank, item in enumerate(current, 1):
+        item["rank_current"] = rank
+
+    return current[:top_n]
 
 
 async def _compute_concept_momentum(top_n: int = 15) -> list[dict[str, Any]]:
-    """计算概念板块动量（东方财富概念板块行情）。
-    
+    """计算概念板块动量（push2delay 直连，绕过 akshare 硬编码 push2 阻断）。
+
     返回:
       [{sector, sector_code, type:"concept", rank_current, change_pct, main_inflow, up_count, down_count}]
+
+    round27 R46: 同 `_compute_industry_momentum`，改调项目自有 `fetch_em_concept_sectors`
+    （fs=m:90+t:3，push2delay）。akshare `stock_board_concept_name_em` 同样被 push2 阻断。
     """
     try:
-        import akshare as ak
-        from ..utils.decode import decode_df
-        from ..core.async_utils import run_sync
-
-        df = await run_sync(ak.stock_board_concept_name_em)
-        if df is None or df.empty:
-            return []
-        decode_df(df)
-
-        current = []
-        for _, row in df.iterrows():
-            current.append({
-                "sector": str(row.get("板块名称", "")),
-                "sector_code": str(row.get("板块代码", "")),
-                "type": "concept",
-                "change_pct": float(row.get("涨跌幅", 0) or 0),
-                "main_inflow": float(row.get("主力净流入", 0) or 0),
-                "up_count": int(row.get("上涨家数", 0) or 0),
-                "down_count": int(row.get("下跌家数", 0) or 0),
-            })
-
-        current.sort(key=lambda x: x["change_pct"], reverse=True)  # type: ignore[arg-type,return-value]
-        for rank, item in enumerate(current, 1):
-            item["rank_current"] = rank
-
-        return current[:top_n]
+        from ..fetchers.sector_fetcher import fetch_em_concept_sectors
+        rows = fetch_em_concept_sectors(limit=top_n) or []
     except Exception as e:
-        logger.warning("[market_trends] _compute_concept_momentum failed: %s", e)
-        return []
+        logger.warning("[market_trends] fetch_em_concept_sectors failed: %s", e)
+        rows = []
+
+    if not rows:
+        try:
+            import akshare as ak
+            from ..utils.decode import decode_df
+            from ..core.async_utils import run_sync
+            df = await run_sync(ak.stock_board_concept_name_em)
+            if df is not None and not df.empty:
+                decode_df(df)
+                rows = [
+                    {
+                        "sector_name": str(row.get("板块名称", "")),
+                        "sector_code": str(row.get("板块代码", "")),
+                        "change_pct": float(row.get("涨跌幅", 0) or 0),
+                        "main_inflow": float(row.get("主力净流入", 0) or 0),
+                        "up_count": int(row.get("上涨家数", 0) or 0),
+                        "down_count": int(row.get("下跌家数", 0) or 0),
+                    }
+                    for _, row in df.iterrows()
+                ]
+        except Exception as e:
+            logger.warning("[market_trends] _compute_concept_momentum akshare fallback failed: %s", e)
+
+    current = []
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        current.append({
+            "sector": str(r.get("sector_name", "")),
+            "sector_code": str(r.get("sector_code", "")),
+            "type": "concept",
+            "change_pct": float(r.get("change_pct") or 0),
+            "main_inflow": float(r.get("main_inflow") or 0),
+            "up_count": int(r.get("up_count") or 0),
+            "down_count": int(r.get("down_count") or 0),
+        })
+
+    current.sort(key=lambda x: x["change_pct"], reverse=True)  # type: ignore[arg-type,return-value]
+    for rank, item in enumerate(current, 1):
+        item["rank_current"] = rank
+
+    return current[:top_n]
 
 
 async def compute_sector_momentum(top_n: int = 15) -> list[dict[str, Any]]:

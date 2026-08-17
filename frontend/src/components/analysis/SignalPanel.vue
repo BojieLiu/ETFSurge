@@ -37,10 +37,10 @@
     </div>
     <p class="signal-caption">技术 + 因子 + 基本面聚合（因子数据完整时）</p>
     <div class="signal-content">
-      <template v-if="compositeDecision.degraded">
+      <template v-if="compositeDecision.degraded || compositeUnavailable">
         <div class="composite-degraded" role="alert">
           <span class="composite-icon">⚠️</span>
-          <span class="composite-text">{{ compositeDecision.reason || '因子数据缺失，综合信号不可用' }}</span>
+          <span class="composite-text">{{ compositeUnavailable ? '因子缺失，综合信号不可用' : (compositeDecision.reason || '因子数据缺失，综合信号不可用') }}</span>
         </div>
       </template>
       <template v-else>
@@ -63,6 +63,9 @@ const signalText = computed(() => ({ buy: '买入', sell: '卖出', hold: '持�
 const signalIcon = computed(() => ({ buy: '⬆️', sell: '⬇️', hold: '➡️' })[props.signal?.signal] || '')
 const compositeText = computed(() => ({ buy: '买入', sell: '卖出', hold: '持有' })[props.compositeDecision?.signal] || '')
 const compositeIcon = computed(() => ({ buy: '⬆️', sell: '⬇️', hold: '➡️' })[props.compositeDecision?.signal] || '')
+// round27 R52: signal 为 null（分项覆盖率不足，门禁降级）→ 显示「因子缺失，综合信号不可用」，
+// 不再把 null 误渲染为「持有」徽标
+const compositeUnavailable = computed(() => props.compositeDecision?.signal === null)
 
 // round24 R25: 中性区 info reason——calm 市（RSI 40-60、KDJ 中段）下 reasons 为空，
 // 补「RSI=52 中性」info（消除 caption 承诺 RSI/KDJ 但 reason 只显 MACD/MA 的误导）。

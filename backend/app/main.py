@@ -283,13 +283,28 @@ async def lifespan(app: FastAPI):
     # 热点板块）首个请求不再冷拉 4.7s（旧实现 60s 循环首次触发在启动后 ~10s+，
     # 首个用户请求仍可能撞冷缓存）。
     async def _warmup_sector_cache():
-        with warmup_timer("warmup_sector_cache", "warmup", "板块缓存预热"):
-            try:
-                from .tasks.sector_refresh import refresh_sector_cache
-                await asyncio.wait_for(refresh_sector_cache(), timeout=15)
-                logger.info("板块缓存预热完成")
-            except (Exception, asyncio.CancelledError):
-                logger.debug("板块缓存预热失败（非阻塞）")
+        # R44 (round27): 板块缓存预热改后台异步——不再阻塞 startup 就绪。
+        # 旧实现 await refresh_sector_cache()，非交易时段/源冷却时该调用失败
+        # （Connection aborted）仍耗 12.8s 空转，拖长整体预热（34.5s 回归）。
+        # 改为：启动后台任务填充 sector cache，本函数立即返回，startup 不被拖长；
+        # 失败仅 DEBUG/WARNING，不崩溃、不影响其它预热步骤。
+        try:
+            from .tasks.sector_refresh import refresh_sector_cache
+
+            async def _do_sector_warmup():
+                try:
+                    await asyncio.wait_for(refresh_sector_cache(), timeout=15)
+                    logger.info("板块缓存预热完成（后台）")
+                except (Exception, asyncio.CancelledError) as exc:
+                    logger.debug("板块缓存预热失败（后台，非阻塞）：%s", exc)
+
+            # 不 await：立即返回让 startup 就绪；实际刷新在后台进行
+            task = asyncio.create_task(_do_sector_warmup())
+            # 持有强引用防止事件循环 GC 回收未完成的后台任务
+            app.state._sector_warmup_task = task
+            logger.info("板块缓存预热已在后台启动（非阻塞，R44）")
+        except (Exception, asyncio.CancelledError) as exc:
+            logger.warning("板块缓存预热任务启动失败（非阻塞）：%s", exc)
 
     async def _warmup_sequence_task():
         await _run_warmup_sequence([
@@ -498,6 +513,107 @@ async def lifespan(app: FastAPI):
 
     asyncio.create_task(_ic_persistence_loop())
     logger.info("IC 持久化循环已启动（120s）")
+
+    # R55 (round27): 一次性 IC 历史回填（startup-once，非阻塞）。
+    # 复用 K 线缓存时光回溯重放因子分，对每个历史交易日算截面 IC 批量落库，
+    # 使 factor_ic_records.distinct trade_date 从 3 跳升至 ~239（≥60 →「可观察」，
+    # 自然积累到 250 →「有效」，符合用户「接受等自然积累」决策）。
+    # MIN_TRADING_DAYS 门槛不变（诚实，不谎报 valid）。
+    # 仅当 K 线缓存就绪且尚未回填时执行；失败仅 WARNING，不影响启动。
+    async def _backfill_ic_history_task():
+        from .factors.ic_tracker import ic_tracker
+        from .factors.factor_registry import registry as _reg
+        from .services.market_data_hub import market_data_hub as _hub
+        from .database import async_session
+
+        # 等 K 线缓存就绪（refresh_kline 在行情预热中填充，约 10-20s）
+        await asyncio.sleep(20)
+        try:
+            rows = _hub._kline_cache_rows
+            if not rows:
+                logger.info("[ic_backfill] K 线缓存未就绪，跳过历史回填")
+                return
+            # 防重复回填：已回填（≥200 交易日）则跳过
+            async with async_session() as db:
+                _existing = await ic_tracker.count_distinct_trade_dates(db)
+            if _existing >= 200:
+                logger.info("[ic_backfill] 已回填（%d 交易日），跳过", _existing)
+                return
+            # 取池内 symbol（与持久化循环一致）
+            _pool = _hub.get_pool()
+            _syms = [it.get("symbol") for layer in _pool.values() if isinstance(_pool, dict)
+                     for it in layer if it.get("symbol") not in ("CASH",)]
+            if not _syms:
+                logger.info("[ic_backfill] 组合池为空，跳过")
+                return
+            # 构造列式 K 线（时序升序）+ dates
+            kline: dict[str, dict] = {}
+            for sym, rws in rows.items():
+                if sym not in _syms or not isinstance(rws, list) or not rws:
+                    continue
+                closes = [r.get("close") for r in rws if r.get("close") is not None]
+                dates = [r.get("date") for r in rws if r.get("close") is not None]
+                if len(closes) >= 5:
+                    kline[sym] = {"close": closes, "dates": dates}
+            if len(kline) < 3:
+                logger.info("[ic_backfill] K 线标的不足 3 只，跳过")
+                return
+            # symbol_extra（静态，不时光回溯；触网失败则空，因子分降级但可算）
+            _symbol_extra: dict = {}
+            try:
+                _symbol_extra = await asyncio.wait_for(
+                    _hub._enrich_symbol_extra(_syms, {}), timeout=15
+                )
+            except (Exception, asyncio.CancelledError) as _e:
+                logger.debug("[ic_backfill] symbol_extra enrich skipped: %s", _e)
+            # 时光回溯：逐历史交易日重放因子分
+            n = max(len(k["close"]) for k in kline.values())
+            factor_scores_by_index: dict[int, dict] = {}
+            # 快照实时 IC 状态，回填后还原（避免 240 次 compute 污染 _last_ic_batch）
+            _snap_batch = getattr(_reg, "_last_ic_batch", None)
+            _snap_at = getattr(_reg, "_last_computed_at", None)
+            try:
+                for i in range(n - 1, 0, -1):
+                    truncated: dict[str, dict] = {}
+                    for sym, kd in kline.items():
+                        if i < len(kd["close"]):
+                            # 同 _slice_market_data_day 取向：时序升序切片 recent-first 传入 compute
+                            tail = kd["close"][: i + 1]
+                            truncated[sym] = {
+                                "close": list(reversed(tail)),
+                                "open": list(reversed(kd["open"][: i + 1])) if kd.get("open") else [],
+                                "high": list(reversed(kd["high"][: i + 1])) if kd.get("high") else [],
+                                "low": list(reversed(kd["low"][: i + 1])) if kd.get("low") else [],
+                                "volume": list(reversed(kd["volume"][: i + 1])) if kd.get("volume") else [],
+                            }
+                    if len(truncated) < 3:
+                        continue
+                    try:
+                        fs = await asyncio.wait_for(
+                            _reg.compute(_syms, market_data=truncated, symbol_extra=_symbol_extra),
+                            timeout=10,
+                        )
+                    except (Exception, asyncio.CancelledError):
+                        continue
+                    factor_scores_by_index[i] = {s: fs[s] for s in truncated}
+            finally:
+                _reg._last_ic_batch = _snap_batch
+                _reg._last_computed_at = _snap_at
+            # 批量落库
+            async with async_session() as db:
+                cnt = await ic_tracker.backfill_ic_history(db, kline, factor_scores_by_index)
+            logger.info("[ic_backfill] 历史回填完成：%d 个交易日", cnt)
+            # 回填后刷新 IC 序列缓存（供 /factors/active 加权聚合）
+            try:
+                async with async_session() as db:
+                    await _reg.refresh_ic_series(db)
+            except Exception as _e:
+                logger.debug("[ic_backfill] refresh_ic_series failed: %s", _e)
+        except Exception as exc:
+            logger.warning("[ic_backfill] 历史回填失败（非致命）：%s", exc)
+
+    asyncio.create_task(_backfill_ic_history_task())
+    logger.info("IC 历史回填任务已启动（startup-once，非阻塞，R55）")
 
     # R5-1-5: 启动时从 DB 恢复 _last_ic_batch（IC 非请求驱动——重启后
     # /factors/active 不依赖任何请求即返回非空）。失败仅 WARNING，不阻塞启动。

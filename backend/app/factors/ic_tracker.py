@@ -7,8 +7,9 @@ including them in portfolio design weights.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date
 from typing import Any
 
 from sqlalchemy import select, func, update
@@ -344,6 +345,135 @@ class ICTracker:
 
         await session.commit()
         return count
+
+    async def count_distinct_trade_dates(self, session: AsyncSession) -> int:
+        """R55 (round27): 当前 factor_ic_records 中 distinct trade_date 总数。
+
+        用于判断是否需要历史回填（已回填则跳过，避免重复）。0 表示从未计算 IC。
+        """
+        from ..models.factor_ic import FactorICRecord  # lazy import 防循环依赖
+
+        try:
+            stmt = select(func.count(func.distinct(FactorICRecord.trade_date)))
+            total = (await session.execute(stmt)).scalar_one_or_none() or 0
+            return int(total)
+        except Exception as e:  # noqa: BLE001 - DB 不可用时回退 0
+            logger.warning("[ic_tracker] count distinct trade_date failed: %s", e)
+            return 0
+
+    @staticmethod
+    def _slice_market_data_day(kline: dict[str, dict[str, Any]], i: int, window: int = 60) -> dict[str, dict[str, Any]]:
+        """R55: 从列式 K 线缓存截取「截至第 i 个交易日」的截面 K 线。
+
+        约定与实时 compute 一致——`_kline_cache` 的 close 为**时序升序（旧→新）**
+        （`_rows_to_columns` 取 `rows[-days:]` 后仍升序），故 `close[i]` 即第 i 日、
+        `close[i-1]` 为前一日；`compute_periodic_ic` 内部 `build_forward_returns` 据此
+        计算第 i 日的截面 IC（与实时 IC 同一统计口径，仅时光回溯到历史日）。
+
+        Args:
+            kline: {symbol: {"close":[c0..cN-1] 升序, "dates":[d0..dN-1], 可选 open/high/...}}
+            i: 目标交易日索引（0=最早，N-1=最新）
+            window: 因子计算所需回溯窗口（默认 60，覆盖慢变量因子）
+
+        Returns:
+            {symbol: {"close":[...], ...}} 时序升序切片（同 _kline_cache 取向）
+        """
+        md: dict[str, dict[str, Any]] = {}
+        for sym, kd in kline.items():
+            if not isinstance(kd, dict):
+                continue
+            close = kd.get("close")
+            if not close or i >= len(close):
+                continue
+            start = max(0, i - window + 1)
+            if len(close[start:i + 1]) < 2:
+                # 前 1 日不足以算前收益率，跳过
+                continue
+            cols: dict[str, Any] = {}
+            for key in ("close", "open", "high", "low", "volume", "change_pct"):
+                arr = kd.get(key)
+                if arr and len(arr) >= i + 1:
+                    cols[key] = list(arr[start:i + 1])
+            if "close" not in cols:
+                continue
+            md[sym] = cols
+        return md
+
+    async def backfill_ic_history(
+        self,
+        session: AsyncSession,
+        kline: dict[str, dict[str, Any]],
+        factor_scores_by_index: dict[int, dict[str, dict[str, float]]],
+        max_days: int = 400,
+    ) -> int:
+        """R55 (round27): 一次性批量回填历史截面 IC（非请求驱动，startup-once）。
+
+        根因：IC 由 `_ic_persistence_loop` 增量计算（`save_ic_batch_to_db` 用
+        `_beijing_today()` 打当天日期），fresh 库仅 3 个 distinct trade_date → 27 因子
+        恒 no_data。本方法复用 K 线缓存，对每个历史交易日 T（kline 索引 i）用「截至 T 的
+        因子分」(`factor_scores_by_index[i]`) 计算截面 IC，按 `trade_date=dates[i]` 落库，
+        使 distinct trade_date 跳升至 N（回填后先到「可观察」，自然积累 ~11 交易日到
+        「有效」，符合用户「接受等自然积累」决策）。
+
+        设计要点：
+        - 复用现有 `compute_periodic_ic` / `save_ic_batch_to_db`，口径与实时 IC 完全一致；
+        - `MIN_TRADING_DAYS` 门槛**不变**（诚实：不谎报 valid，自然积累到 250 才翻绿）；
+        - 一次性批量计算，**无请求路径 IO**（不触网、不依赖 HTTP 请求）；
+        - `factor_scores_by_index` 由调用方注入（生产=时光回溯重放 K 线算因子分；
+          测试=直接注入历史因子分）。
+
+        Args:
+            session: AsyncSession
+            kline: {symbol: {"close":[升序], "dates":[升序]}} K 线缓存
+            factor_scores_by_index: {i: {symbol: {factor_code: value}}} 截至第 i 日因子分
+            max_days: 最多回填天数（防极端长序列）
+
+        Returns:
+            实际回填交易日数（≥0）
+        """
+        if not kline or not factor_scores_by_index:
+            return 0
+        n = max((len(kd.get("close", [])) for kd in kline.values() if isinstance(kd, dict)), default=0)
+        if n < 2:
+            return 0
+        # 取任一含 dates 的 symbol 作为日期基准
+        dates_ref = next((kd["dates"] for kd in kline.values()
+                          if isinstance(kd, dict) and kd.get("dates")), None)
+
+        processed = 0
+        for i in range(1, min(n, max_days) + 1):
+            scores = factor_scores_by_index.get(i)
+            if not scores:
+                continue
+            md = self._slice_market_data_day(kline, i)
+            if len(md) < 3:
+                # 截面标的不足 3 只 → compute_periodic_ic 不产生 IC，跳过该日
+                continue
+            try:
+                ic_batch = self.compute_periodic_ic(scores, md, window=1)
+            except (Exception, asyncio.CancelledError) as exc:
+                logger.debug("[ic_backfill] compute_periodic_ic failed at %d: %s", i, exc)
+                ic_batch = {}
+            if not ic_batch:
+                # 历史回填只写有 IC 的日子；全空（常量/样本不足）跳过
+                continue
+            trade_date = None
+            if dates_ref and len(dates_ref) > i:
+                trade_date = dates_ref[i]
+            if trade_date is None:
+                continue
+            # SQLite DATE 列接受 date 或 ISO 字符串；统一规整为 date
+            if isinstance(trade_date, str):
+                try:
+                    trade_date = datetime.strptime(trade_date[:10], "%Y-%m-%d").date()
+                except ValueError:
+                    continue
+            try:
+                await self.save_ic_batch_to_db(session, ic_batch, trade_date=trade_date)
+                processed += 1
+            except Exception as exc:
+                logger.warning("[ic_backfill] save failed for %s: %s", trade_date, exc)
+        return processed
 
     async def _get_ic_sample_count_db(self, session: AsyncSession, factor_code: str) -> int:
         """P0-12 (round16 3.13 R2/R3): 样本数统计「IC 累积周期数」。

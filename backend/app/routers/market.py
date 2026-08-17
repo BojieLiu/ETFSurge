@@ -941,7 +941,13 @@ async def _watchlist_enrich_items(items: list) -> list[dict]:
                 except Exception:
                     pass
                 if item_dict.get("realtime") is None:
+                    # R45 (round27): 三层全失败（realtime 缺 + 快照 stale + 收盘兜底 None）
+                    # → 诚实标注「维护中」+ 显式时间戳，区分「没波动」vs「没数据」。
+                    from datetime import datetime, timezone
                     item_dict["_degraded"] = True
+                    item_dict["data_unavailable"] = True
+                    item_dict["data_unavailable_since"] = datetime.now(timezone.utc).isoformat()
+                    item_dict["realtime_note"] = "非交易时段无行情（数据源维护中）"
         enriched.append(item_dict)
 
     return enriched
@@ -973,14 +979,40 @@ async def _watchlist_close_fallback(items: list) -> list[dict]:
             _lc = None
         if _lc:
             row["realtime"] = _lc  # is_estimated=True + as_of=T-1 收盘（「估」徽标）
-        if _at in ("US", "HK"):
-            # US/HK 无实时 → 显式「暂无实时」（即使有收盘兜底也标注数据源不可用）
+        else:
+            # R45 (round27): 第二层兜底——Redis last-good 报价（quote_key，24h TTL）。
+            # _last_close_fallback 周末/源冷却自身也返 None（R29 根因）时，从最近
+            # 交易日的 last-good 真实收盘价回退，避免整行 realtime=None。
+            try:
+                from ..services.market_service import quote_key as _qk
+                from ..services.cache_service import cache_get as _cg
+                _lg = await _cg(_qk(item.symbol, _at))
+                if _lg and _lg.get("price") is not None:
+                    row["realtime"] = {
+                        "price": _lg.get("price"),
+                        "change_pct": _lg.get("change_pct"),
+                        "volume": _lg.get("volume"),
+                        "data_source": "stale",
+                        "as_of": _lg.get("as_of") or "",
+                        "estimate_source": "last_good",
+                    }
+            except Exception as _e:
+                logger.debug("[watchlist] last-good fallback failed for %s: %s", item.symbol, _e)
+        # 三层全失败（realtime 缺 + 收盘兜底 None + last-good None）→ 诚实标注
+        # 「维护中」+ 显式时间戳，区分「没波动」vs「没数据」，杜绝空白冒充。
+        if row.get("realtime") is None:
+            from datetime import datetime, timezone
+            _now = datetime.now(timezone.utc).isoformat()
+            row["_degraded"] = True
+            row["data_unavailable"] = True
+            row["data_unavailable_since"] = _now
+            row["realtime_note"] = "非交易时段无行情（数据源维护中）"
+            if _at in ("US", "HK"):
+                row["realtime_unavailable"] = True
+        elif _at in ("US", "HK"):
+            # US/HK 无实时 → 显式「暂无实时」（即使有收盘/last-good 兜底也标注数据源不可用）
             row["realtime_unavailable"] = True
             row["realtime_note"] = "该市场数据源暂不可用（无实时行情）"
-        elif row.get("realtime") is None:
-            # A 股：仅当收盘兜底也失败才标 _degraded（有估值时前端显示「估」徽标，
-            # 不误报「行情暂不可用」）
-            row["_degraded"] = True
         return row
 
     rows = await asyncio.gather(*(_one(it) for it in items), return_exceptions=True)

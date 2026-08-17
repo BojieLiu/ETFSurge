@@ -42,13 +42,28 @@ def _make_hist_df():
 
 
 @pytest.fixture(autouse=True)
-def _clear_sync_memory_cache():
+async def _clear_sync_memory_cache():
     """P0-4 (round9): watchlist 端级 3s 缓存引入后，测试间共享 SyncMemoryCache 会串扰
-    （第一批测试缓存命中，后续测试读到旧数据）。每个测试前后清理缓存保证隔离。"""
-    from app.services.cache_service import sync_memory_cache
+    （第一批测试缓存命中，后续测试读到旧数据）。每个测试前后清理缓存保证隔离。
+
+    round27 R45: 同模块的 `memory_cache`（L1 TTL 缓存，last-good 报价用 24h TTL 写入）
+    也是模块级全局——若不清，前序测试写入的 last-good 报价会跨测试串扰（watchlist
+    回退读到陈旧 realtime，破坏 realtime_unavailable 断言）。此处一并清理。
+    """
+    from app.services.cache_service import sync_memory_cache, memory_cache
     sync_memory_cache.clear()
+    await memory_cache.clear()
+    # round27 R55: factor_registry 的派生全局（常量因子集 / 数据源缺口）在 compute()
+    # 期间被填充，属模块级单例状态——前序测试填充后跨测试串扰（_status_of 据此返回
+    # "截面无差异"而非"IC 未累积"）。每测试前后复位为出厂空值，保证隔离。
+    from app.factors.factor_registry import registry as _fr
+    _fr._constant_factor_codes = set()
+    _fr._data_source_gaps = {}
     yield
     sync_memory_cache.clear()
+    await memory_cache.clear()
+    _fr._constant_factor_codes = set()
+    _fr._data_source_gaps = {}
 
 
 @pytest.fixture(autouse=True)

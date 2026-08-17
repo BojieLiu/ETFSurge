@@ -144,18 +144,21 @@ def _consistency(max_retries: int, budget: int, request_timeout: float = 15.0) -
     return worst <= budget
 class TestBudgetRetryConsistency:
     def test_full_quality_budget_consistent(self):
-        """完整档 75s：max_retries=0 时 2×15=30 ≤ 75 PASS（round20 P0-5 后余量更大）。"""
+        """完整档 180s：max_retries=0 时 2×15=30 ≤ 180 PASS（round27 R43: 75→180）。"""
         budget = _llm_timeout_for({"all_empty": False, "partial": False})
-        assert budget == 75, "完整档预算应为 75s（round14 P0-B 方案 b）"
+        assert budget == 180, "完整档预算应为 180s（round27 R43: 75→180）"
         assert _consistency(STRATEGY_CHECK_MAX_RETRIES, budget, STRATEGY_CHECK_REQUEST_TIMEOUT)
 
     def test_max_retries_regression_flagged(self):
-        """防回归：max_retries 改回 1 时 60 > 0.9×75=67.5 仍 FAIL（round20 P0-5 后
-        timeout=15 使 1 轮重试 60s ≤ 67.5s 理论可过——但 429 退避/慢响应容差
-        rate_limit_cap=10 会挤占，保持 max_retries=0 是纪律，见 llm.py 注释）。"""
+        """防回归：预算已放宽到 180s（round27 R43），但 max_retries 仍必须保持 0
+        （429 退避/慢响应容差纪律，见 llm.py 注释）。一致性公式下 180s 已能容纳
+        max_retries=1，故此处不再用「不一致」做负向断言，而直接断言 max_retries==0
+        的硬纪律（若被改回 1，下面断言 FAIL）。"""
         budget = _llm_timeout_for({"all_empty": False, "partial": False})
-        assert not _consistency(1, budget, 35.0), "max_retries=1+旧35s 时预算-重试不一致，必须 FAIL"
-        # round20 P0-5 后 15s×1 轮重试=60s ≤ 67.5s——但仍禁止（429 退避容差被挤占）
+        assert budget == 180, "完整档预算应为 180s（round27 R43: 75→180）"
+        # max_retries=0 下预算-重试一致（2×15=30 ≤ 180）
+        assert _consistency(STRATEGY_CHECK_MAX_RETRIES, budget, STRATEGY_CHECK_REQUEST_TIMEOUT), \
+            "max_retries=0 时预算-重试应一致"
         assert STRATEGY_CHECK_MAX_RETRIES == 0, "max_retries 必须保持 0（429 退避/慢响应容差）"
 
     def test_partial_budget_consistent_with_no_retry(self):

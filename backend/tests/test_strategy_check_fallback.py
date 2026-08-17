@@ -570,14 +570,13 @@ def test_llm_timeout_for_static_only_30s():
     }
     assert _llm_timeout_for(dq_empty) == 15
     assert _llm_timeout_for(dq_partial) == 30
-    # 完整数据（全部技术因子 real）→ 75s（round14 P0-B 方案 b: 90→75，
-    # 对齐 max_retries=0 后最坏 2×35=70s + 余量——旧 90s 与 max_retries=1 的
-    # 140s 最坏不匹配，provider 35s 无响应时 1 轮双 provider 71.5s 即耗光预算）
+    # 完整数据（全部技术因子 real）→ 180s（round27 R43: 75→180，对齐 DeepSeek
+    # 流式首字节实测 34-78s + 报告 token 更长，避免恒超时落规则兜底）
     dq_full = {
         "filled_count": 3, "total_count": 3, "all_empty": False,
         "partial": False, "fallback_count": 0, "fallback_ratio": 0.0,
     }
-    assert _llm_timeout_for(dq_full) == 75
+    assert _llm_timeout_for(dq_full) == 180
 
 
 # ===== folded from test_round20_strategy_check_p05_p18.py =====
@@ -831,6 +830,11 @@ class TestStrategyCheckCoverage:
              patch.object(ps_mod, "build_price_map", new_callable=AsyncMock,
                           return_value={"510300": (3.8, 1.0), "518880": (2.5, -1.0)}), \
              patch("app.services.market_data_hub.market_data_hub.get_market_regime", return_value="range_bound"), \
+             patch("app.services.market_data_hub.market_data_hub.get_factor_matrix",
+                   return_value={
+                       "510300": {"trend_1m": 0.9, "momentum_20d": 0.8},
+                       "518880": {"trend_1m": -0.9, "momentum_20d": -0.8},
+                   }), \
              patch.object(factor_registry, "compute", new_callable=AsyncMock, return_value=factors), \
              patch("app.analysis.llm.generate_strategy_check_report",
                    new_callable=AsyncMock, side_effect=asyncio.TimeoutError("timeout")):

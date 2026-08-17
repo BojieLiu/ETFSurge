@@ -477,6 +477,55 @@ def fetch_em_industry_sectors(limit: int | None = None) -> list[dict[str, Any]] 
     return cached("em_industry_sectors", _p, "sector_heat")
 
 
+def fetch_em_concept_sectors(limit: int | None = None) -> list[dict[str, Any]] | None:
+    """round27 R46: push2delay 直连概念板块（绕过 akshare 硬编码 push2 阻断）。
+
+    与 `fetch_em_industry_sectors` 同源（EM_PUSH_HOST=push2delay），仅 fs 用
+    `m:90+t:3`（概念）替代 `m:90+t:2`（行业）。akshare 的
+    `stock_board_concept_name_em` 同样硬编码 push2 被 EM 域名级风控断连（实测
+    ProxyError），故概念动量也改走本函数。字段与 `fetch_em_industry_sectors` 兼容
+    （sector_code/sector_name/change_pct/amount/main_inflow/total_market）。
+    失败返回 None（调用方走 akshare 兜底）。
+    """
+    def _p():
+        import json as _json
+        import urllib.request
+        from ..core.market_context import EM_PUSH_HOST as _EM_HOST
+        rows: list[dict[str, Any]] = []
+        pn = 1
+        while True:
+            url = (
+                f"https://{_EM_HOST}/api/qt/clist/get?pn={pn}&pz=200&po=1&np=1"
+                f"&fltt=2&invt=2&fid=f6&fs=m:90+t:3&fields=f12,f14,f3,f6,f62,f20"
+            )
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                raw = urllib.request.urlopen(req, timeout=8).read().decode()
+                diff = ((_json.loads(raw) or {}).get("data") or {}).get("diff") or []
+            except Exception as e:
+                _logger.error("[sector_fetcher] fetch_em_concept_sectors pn=%s failed: %s", pn, e)
+                break
+            if not diff:
+                break
+            for r in diff:
+                rows.append({
+                    "sector_code": str(r.get("f12") or ""),
+                    "sector_name": str(r.get("f14") or "").strip(),
+                    "change_pct": _sector_change_pct(r.get("f3")),
+                    "amount": float(r.get("f6") or 0),
+                    "main_inflow": float(r.get("f62") or 0),
+                    "total_market": float(r.get("f20") or 0),
+                    "lead_stock_name": "", "lead_stock_code": "", "lead_stock_chg": None,
+                })
+            if len(diff) < 100:
+                break
+            pn += 1
+        if limit:
+            rows = rows[:limit]
+        return rows
+    return cached("em_concept_sectors", _p, "sector_heat")
+
+
 def fetch_sector_heat_em(limit: int = 20) -> list[dict[str, Any]]:
     """P0-17① (round16 3.19 R1): A股板块热度改走东财行业板块 spot（akshare）。
 

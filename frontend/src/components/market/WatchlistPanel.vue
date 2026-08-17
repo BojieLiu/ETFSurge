@@ -137,6 +137,10 @@
                 </td>
                 <!-- P0-3 (round20 §五 P0-3): 后端 _degraded=true 为永久降级（批量 realtime 失败），
                      显示「行情暂不可用」而非「加载中」——加载态另有 loading 分支，语义不混淆 -->
+                <!-- R45 (round27): 三层全失败（realtime+收盘兜底+last-good 全无）→
+                     诚实标注「维护中」+ 显式时间戳，区分「没波动」vs「没数据」，
+                     杜绝空白冒充「行情加载中」。 -->
+                <td v-else-if="item.data_unavailable_since" class="muted" :title="'数据源维护中，最后可用时间：' + item.data_unavailable_since"><span class="maintenance-text">非交易时段无行情（数据源维护中）</span></td>
                 <td v-else-if="item._degraded" class="muted" title="行情暂不可用（数据源弱）"><span class="degraded-text">行情暂不可用</span></td>
                 <td v-else class="muted" title="行情加载中（数据源弱）"><span class="loading-text">行情加载中</span></td>
                 <td v-if="item.realtime?.change_pct != null" :class="item.realtime.change_pct >= 0 ? 'up' : 'down'">
@@ -144,11 +148,19 @@
                 </td>
                 <td v-else-if="item.realtime?.is_estimated" class="muted" title="收盘价，无实时涨跌幅">—</td>
                 <td v-else-if="item.realtime_unavailable" class="muted" :title="item.realtime_note || '该市场暂无实时行情'"><span class="unavailable-text">暂无实时</span></td>
+                <!-- R45 (round27): 三层全失败（realtime+收盘兜底+last-good 全无）→
+                     诚实标注「维护中」+ 显式时间戳，区分「没波动」vs「没数据」，
+                     杜绝空白冒充「行情加载中」。 -->
+                <td v-else-if="item.data_unavailable_since" class="muted" :title="'数据源维护中，最后可用时间：' + item.data_unavailable_since"><span class="maintenance-text">非交易时段无行情（数据源维护中）</span></td>
                 <td v-else-if="item._degraded" class="muted" title="行情暂不可用（数据源弱）"><span class="degraded-text">行情暂不可用</span></td>
                 <td v-else class="muted" title="行情加载中（数据源弱）"><span class="loading-text">行情加载中</span></td>
                 <td v-if="item.realtime?.volume != null" class="mono small">{{ formatVol(item.realtime.volume) }}</td>
                 <td v-else-if="item.realtime?.is_estimated" class="muted small">—</td>
                 <td v-else-if="item.realtime_unavailable" class="muted small" :title="item.realtime_note || '该市场暂无实时行情'"><span class="unavailable-text">暂无实时</span></td>
+                <!-- R45 (round27): 三层全失败（realtime+收盘兜底+last-good 全无）→
+                     诚实标注「维护中」+ 显式时间戳，区分「没波动」vs「没数据」，
+                     杜绝空白冒充「行情加载中」。 -->
+                <td v-else-if="item.data_unavailable_since" class="muted" :title="'数据源维护中，最后可用时间：' + item.data_unavailable_since"><span class="maintenance-text">非交易时段无行情（数据源维护中）</span></td>
                 <td v-else-if="item._degraded" class="muted" title="行情暂不可用（数据源弱）"><span class="degraded-text">行情暂不可用</span></td>
                 <td v-else class="muted" title="行情加载中（数据源弱）"><span class="loading-text">行情加载中</span></td>
                 <td class="notes-cell">

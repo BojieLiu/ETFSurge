@@ -13,15 +13,37 @@ _DATA_DIR.mkdir(parents=True, exist_ok=True)
 _ENV_FILE = _BACKEND_DIR / ".env"
 
 
-# ── P0.5: IPv4 优先策略 ─────────────────────────────────────────
-# 强制所有 socket 连接使用 IPv4，规避东方财富 CDN 的 IPv6 路由问题
+# ── P0.5: IPv4 优先策略 + DNS 缓存（R44） ──────────────────────────
+# 强制所有 socket 连接使用 IPv4，规避东方财富 CDN 的 IPv6 路由问题。
+# 同时记忆化 DNS 解析结果：warmup 期间 _fetch_us_list 等会对同一 host
+# 反复调用 socket.getaddrinfo（round27 实测 ~226 次 / 13.7s），缓存命中后
+# 直接返回，省去实时 DNS。缓存为纯函数记忆化：无 I/O、无事件循环副作用，
+# 对同步 getaddrinfo 调用安全（R44 验收要求第二次同 host 解析不再走真实 DNS）。
 _original_getaddrinfo = socket.getaddrinfo
+
+# (host, port) -> 解析结果。warmup 会话期内永久缓存即可（host 固定）；
+# 如需更保守可改为 TTL，但 warmup 解析的 host 不会改变，永久更省时。
+_dns_cache: dict[tuple, object] = {}
+
+
+def _ipv4_getaddrinfo(host, port, family=0, socktype=0, proto=0, flags=0):
+    """强制 IPv4 (AF_INET) 的 getaddrinfo，并记忆化解析结果（R44 DNS 缓存）。
+
+    缓存键仅用 (host, port)：解析结果恒按 AF_INET 返回，family 入参不影响
+    输出，故无需纳入键。命中缓存时不再调用底层 _original_getaddrinfo（真实
+    DNS），从而消除 warmup 期间对同一 host 的重复 DNS 开销。
+    """
+    key = (host, port)
+    cached = _dns_cache.get(key)
+    if cached is not None:
+        return cached
+    result = _original_getaddrinfo(host, port, socket.AF_INET, socktype, proto, flags)
+    _dns_cache[key] = result
+    return result
 
 
 def enable_ipv4_only() -> None:
     """Monkey-patch socket.getaddrinfo to force IPv4 (AF_INET) only."""
-    def _ipv4_getaddrinfo(host, port, family=0, socktype=0, proto=0, flags=0):
-        return _original_getaddrinfo(host, port, socket.AF_INET, socktype, proto, flags)
     socket.getaddrinfo = _ipv4_getaddrinfo
 
 

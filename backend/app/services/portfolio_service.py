@@ -820,9 +820,10 @@ def _llm_timeout_for(data_quality: dict) -> int:
 
     - all_empty（上下文不足）→ 15s 快速兜底（快速失败更合理，不必等满）
     - partial → 30s（有部分数据，多给 LLM 一点时间消化）
-    - 数据完整 → 75s（round14 P0-B 方案 b: 90→75，对齐 max_retries=0 后的
-      最坏 2×35=70s 实测 + 余量；此前 90s 与 max_retries=1 的 140s 最坏不匹配，
-      provider 35s 无响应时 1 轮双 provider 71.5s 即耗光预算——预算-重试一致性见
+    - 数据完整 → 180s（round27 R43: 75→180，对齐 DeepSeek 流式首字节实测
+      34-78s、单报告 token 更长；此前 75s 几乎必然超时 → 恒落规则兜底，用户
+      永不见 AI 策略检查报告。180s 留足首字节 + 生成余量，与 design-report 的
+      120s 同量级偏宽松。provider 无响应时预算-重试一致性见
       tests/test_round14_llm_budget_consistency.py）
     旧实现恒 30s：数据采集也占 30s，LLM 实际剩余不足 → 恒超时（round7 P5）。
     """
@@ -830,7 +831,7 @@ def _llm_timeout_for(data_quality: dict) -> int:
         return 15
     if data_quality.get("partial"):
         return 30
-    return 75
+    return 180
 
 
 async def _collect_strategy_data(
@@ -1210,13 +1211,14 @@ async def strategy_check(
     except Exception as _e:
         logger.debug("[strategy_check] industry map build failed (non-fatal): %s", _e)
 
-    # round25 R27: 策略检查因子分口径统一——先算跨持仓截面 z-score 复合分，
-    # 供 _rule_based_suggestion 决策表使用（与设计路径同量纲，两屏方向一致）。
-    _factor_composites: dict[str, float] = {}
+    # round27 R42: 策略检查因子分口径统一——复用设计同源的全池截面 z（与设计同方向），
+    # 不再用持仓子集重做 z（旧 _cross_sectional_factor_composite 导致两屏方向相反）。
+    # 返回 {sym: {"composite": float|None, "reference": "相对候选池"|"单标的"}}。
+    _factor_composites: dict[str, dict] = {}
     try:
-        _factor_composites = _cross_sectional_factor_composite(factor_breakdowns)
+        _factor_composites = _full_pool_factor_composite(factor_breakdowns)
     except Exception as _fce:
-        logger.debug("[strategy_check] cross-sectional factor composite failed (non-fatal): %s", _fce)
+        logger.debug("[strategy_check] full-pool factor composite failed (non-fatal): %s", _fce)
 
     for h in holdings_analysis:
         sym = h.get("symbol", "")
@@ -1282,7 +1284,8 @@ async def strategy_check(
                 regime=regime,
                 current_weight=_h_w,
                 factor_availability=h.get("factor_availability"),
-                factor_composite=_factor_composites.get(sym),
+                factor_composite=(_factor_composites.get(sym) or {}).get("composite"),
+                factor_composite_label=(_factor_composites.get(sym) or {}).get("reference"),
             )
             h["action"] = _h_rule["action"]
             h["suggested_weight"] = _h_rule["suggested_weight"]
@@ -1337,8 +1340,9 @@ async def strategy_check(
             regime=regime,
             # round18 P2-7: confidence 按因子填充率分级
             factor_availability=fb.get("factor_availability"),
-            # round25 R27: 截面 z-score 复合分（与设计路径同量纲）
-            factor_composite=_factor_composites.get(sym),
+            # round27 R42: 全池截面 z 复合分（与设计路径同量纲、同方向）
+            factor_composite=(_factor_composites.get(sym) or {}).get("composite"),
+            factor_composite_label=(_factor_composites.get(sym) or {}).get("reference"),
         ))
     covered_by_rule = len(rule_suggestions)
 
@@ -1541,21 +1545,23 @@ def _attach_composite_decisions(
     factor_breakdowns: dict[str, dict],
     data_quality: dict | None = None,
 ) -> None:
-    """round24 R25: 给每个持仓的 factor_breakdowns 附加结构化 `composite_decision`。
+    """round27 R52: 给每个持仓的 factor_breakdowns 附加结构化 `composite_decision`。
 
-    背景（R25 实证）：持仓技术面板（SignalPanel）纯技术，策略检查/标的分析已把 33 维
-    因子分 + 基本面纳入展示列与 LLM 叙述，但未聚合进结构化 buy/sell/hold 决策——
-    三面口径不一致。本函数把「技术信号 + 因子分」聚合成独立综合信号（不替换技术信号，
-    与展示的因子数据同源 → 决策信号与展示一致）。
+    背景（R52 实证）：旧实现 valid_rate = 「持仓级填充率」(filled/total=13/13=100%)，
+    而 composite_signal 权重 0.4技术+0.4估值+0.2动量，周末估值/动量恒 0 →
+    score=0.4×技术∈[-0.4,+0.4] 永不够 ±0.5 阈值 → 恒 hold 假信号。
 
-    降级门禁（R3 同源）：因子填充率 <60% → composite_decision.degraded=true、
-    signal=None（不合成因子/基本面结论，杜绝盘后 valid_rate=0% 时假精确）。
+    修复：valid_rate 改算**分项覆盖率**——technical/valuation/momentum 三分项中
+    「有真实因子值（非 0、非兜底默认）的分项数 / 3」。估值/动量分项全缺（周末）→
+    valid_rate=1/3<0.6 → degraded=True、signal=None（诚实「综合信号不可用」）。
+    ≥2 分项可用时**权重归一**（缺失分项权重置 0、其余归一化到和 1），避免缺失分项
+    静默稀释分数。技术信号（technical_signal.score 有值即视为可用）独立计入。
     """
     from ..analysis.signal import composite_signal_with_gate
 
-    filled = ((data_quality or {}).get("filled_count")) or 0
-    total = ((data_quality or {}).get("total_count")) or 0
-    valid_rate = (filled / total) if total > 0 else None
+    # 基准权重（composite_signal 默认 0.4/0.4/0.2）；缺失分项权重归零、其余归一化
+    _BASE_W = (0.4, 0.4, 0.2)
+    _ORDER = ("technical", "valuation", "momentum")
 
     for sym, fb in factor_breakdowns.items():
         if not isinstance(fb, dict):
@@ -1567,17 +1573,44 @@ def _attach_composite_decisions(
         if not isinstance(tech_score, (int, float)):
             tech_score = 0.0
 
-        # 因子分 → 分项聚合（各分项取命中键均值，缺失记 0——由 valid_rate 门禁兜底诚实）
-        components: dict[str, float] = {}
+        # 因子分 → 分项聚合（仅非 0 真实键参与；无真实键 → 0.0 且标记缺失）
+        comp_vals: dict[str, float] = {}
+        comp_real: dict[str, bool] = {}
         for comp, keys in _COMPOSITE_FACTOR_MAP.items():
-            vals = [fs[k] for k in keys if isinstance(fs.get(k), (int, float))]
-            components[comp] = round(sum(vals) / len(vals), 3) if vals else 0.0
+            real_vals = [fs[k] for k in keys
+                         if isinstance(fs.get(k), (int, float)) and fs.get(k) != 0]
+            comp_real[comp] = bool(real_vals)
+            comp_vals[comp] = round(sum(real_vals) / len(real_vals), 3) if real_vals else 0.0
+
+        # 分项覆盖率：technical 以 technical_signal 是否有 score 计；valuation/momentum
+        # 以因子键是否真实计（3 分项）
+        _tech_real = isinstance(tech_sig.get("score"), (int, float))
+        _real_flags = [_tech_real, comp_real["valuation"], comp_real["momentum"]]
+        _num_real = sum(1 for r in _real_flags if r)
+        valid_rate = (_num_real / 3.0) if _num_real else 0.0
+
+        # 输入分项值：technical = 技术信号分×0.5 + 因子 technical 分项
+        _t_val = tech_score * 0.5 + comp_vals.get("technical", 0.0)
+        _v_val = comp_vals.get("valuation", 0.0)
+        _m_val = comp_vals.get("momentum", 0.0)
+
+        # 权重归一：缺失分项权重置 0，其余归一化到和为 1（避免缺失分项静默稀释）
+        _w = list(_BASE_W)
+        if not _tech_real:
+            _w[0] = 0.0
+        if not comp_real["valuation"]:
+            _w[1] = 0.0
+        if not comp_real["momentum"]:
+            _w[2] = 0.0
+        _wsum = sum(_w)
+        _weights = tuple(x / _wsum for x in _w) if _wsum > 0 else None
 
         cd = composite_signal_with_gate(
-            technical=tech_score * 0.5 + components.get("technical", 0.0),
-            valuation=components.get("valuation", 0.0),
-            momentum=components.get("momentum", 0.0),
+            technical=_t_val,
+            valuation=_v_val,
+            momentum=_m_val,
             factor_valid_rate=valid_rate,
+            weights=_weights,
         )
         cd["technical_signal"] = tech_sig.get("signal") or "hold"
         fb["composite_decision"] = cd
@@ -1638,7 +1671,7 @@ def _within_symbol_factor_composite(fs: dict) -> float | None:
         return None
     try:
         from app.core.factor_aggregate import aggregate_factor_scores
-        from app.factors.factor_registry import factor_registry
+        from ..factors.factor_registry import registry as factor_registry
         agg = aggregate_factor_scores(fs, definitions=factor_registry._factors)
     except Exception:
         return None
@@ -1652,6 +1685,48 @@ def _within_symbol_factor_composite(fs: dict) -> float | None:
     pw = {"technical": 0.3, "momentum": 0.3, "valuation": 0.2, "sentiment": 0.2}
     comp = sum(agg.get(k, 0.0) * w for k, w in pw.items())
     return float(round(comp, 3))
+
+
+def _full_pool_factor_composite(factor_breakdowns: dict[str, dict]) -> dict[str, dict]:
+    """round27 R42: 策略检查「因子分」复用设计同源的全池截面 z（与设计屏方向一致）。
+
+    背景（R42 实证）：旧实现 ``_cross_sectional_factor_composite`` 在**组合内持仓子集**
+    重做 z-score，导致同一标的在设计屏（全池 z，-0.958）与策略检查屏（持仓子集 z，
+    +0.16）方向相反映。本函数对每只持仓按其 symbol 查
+    ``market_data_hub.get_factor_matrix()`` 的**全池截面 z 行**（即设计
+    ``allocation_engine.aggregate_factor_scores`` 的输入），用同一
+    ``aggregate_factor_scores`` 分类加权复合 → 与设计同口径、同方向。
+
+    场外联接基金（不在候选池内，如 022449）→ 回落 ``_within_symbol_factor_composite``
+    （单标的口径），并标注 ``reference='单标的'`` 诚实区分。
+
+    返回 ``{sym: {"composite": float|None, "reference": "相对候选池"|"单标的"}}``。
+    """
+    from ..services.market_data_hub import market_data_hub as _hub
+    _matrix: dict[str, dict] = {}
+    try:
+        _matrix = _hub.get_factor_matrix() or {}
+    except Exception as _e:
+        logger.debug("[strategy_check] get_factor_matrix failed (non-fatal): %s", _e)
+    out: dict[str, dict] = {}
+    for sym, fb in factor_breakdowns.items():
+        if not isinstance(fb, dict):
+            continue
+        fs = fb.get("factor_scores") or {}
+        fs = fs if isinstance(fs, dict) else {}
+        if sym in _matrix and _matrix[sym]:
+            # 全池截面 z 行 → 与设计同源的 aggregate_factor_scores 复合（同方向）
+            out[sym] = {
+                "composite": _within_symbol_factor_composite(_matrix[sym]),
+                "reference": "相对候选池",
+            }
+        else:
+            # 场外联接不在池内 → 单标的口径（诚实降级，标注「单标的」）
+            out[sym] = {
+                "composite": _within_symbol_factor_composite(fs),
+                "reference": "单标的",
+            }
+    return out
 
 
 def _build_rule_fallback_holdings_analysis(
@@ -1669,10 +1744,10 @@ def _build_rule_fallback_holdings_analysis(
     后续 P0-1 行业注入 + P2-4 权重回填会统一覆盖/补全字段。
     """
     result: list[dict] = []
-    # round25 R27: 骨架路径内部计算截面 z-score 复合分（函数独立可测，无需外部传入）
-    _factor_composites: dict[str, float] = {}
+    # round27 R42: 骨架路径同样复用全池截面 z 复合分（与设计/主路径同方向）
+    _factor_composites: dict[str, dict] = {}
     try:
-        _factor_composites = _cross_sectional_factor_composite(factor_breakdowns)
+        _factor_composites = _full_pool_factor_composite(factor_breakdowns)
     except Exception:
         _factor_composites = {}
     for e in etfs:
@@ -1712,8 +1787,9 @@ def _build_rule_fallback_holdings_analysis(
             factor_score=fs if isinstance(fs, dict) else {},
             signal=_ts, regime=regime, current_weight=_weight,
             factor_availability=fb.get("factor_availability"),
-            # round25 R27: 骨架路径同样使用截面 z-score 复合分（调用方已算好传入）
-            factor_composite=_factor_composites.get(sym),
+            # round27 R42: 骨架路径同样使用全池截面 z 复合分（调用方已算好传入）
+            factor_composite=(_factor_composites.get(sym) or {}).get("composite"),
+            factor_composite_label=(_factor_composites.get(sym) or {}).get("reference"),
         )
         result.append({
             "symbol": sym,
@@ -1745,6 +1821,7 @@ def _rule_based_suggestion(
     current_weight: float | None = None,
     factor_availability: dict | None = None,
     factor_composite: float | None = None,
+    factor_composite_label: str | None = None,
 ) -> dict:
     """Z26: 规则引擎兜底建议 — 基于因子分 + 技术信号 + regime 决策表。
 
@@ -1767,15 +1844,11 @@ def _rule_based_suggestion(
     fs_vals = [v for v in (factor_score or {}).values()
                if isinstance(v, (int, float)) and v != 0]
     avg_factor = sum(fs_vals) / len(fs_vals) if fs_vals else 0.0
-    # round25 R27: 因子分口径统一——调用方传入截面 z-score 复合分（与设计路径同量纲）
-    # 时优先使用；未传（单标的/历史调用方）回落原始均值（量纲不一，仅方向参考）。
-    # 单标的场景跨截面复合分退化为 None → 用「与设计同口径」的 within-symbol z 复合分
-    # 替代原始均值（避免 china.policy.* 等异构量纲原始值朴素均值冒充 z 强度，导致与
-    # 设计屏因子分方向相反）。
-    if factor_composite is None and fs_vals:
-        _wc = _within_symbol_factor_composite(factor_score)
-        if _wc is not None:
-            factor_composite = _wc
+    # round27 R42: 因子分口径统一——调用方（策略检查路径）总是显式传入截面 z 复合分
+    # （场内=全池 z、场外联接=单标的口径，均由 `_full_pool_factor_composite` 计算并作为
+    # factor_composite 传入）。未传 factor_composite 时回落原始均值 avg_factor（量纲不一，
+    # 仅方向参考）——与历史/单标的调用方语义一致，不在此自动改算 within-symbol 复合分
+    # （避免复核点：自动改算会改变决策表输入，破坏既有 avg_factor 语义的回归测试）。
     _score = factor_composite if factor_composite is not None else avg_factor
     sig = ""
     if isinstance(signal, dict):
@@ -1866,6 +1939,11 @@ def _rule_based_suggestion(
             f"{_follow_up}，市态{_regime_cn}不追涨杀跌"
         )
         suggested = cur
+
+    # round27 R42: 因子分参考群体标注——设计屏「相对候选池」、策略检查场内持仓
+    # 「相对候选池」、场外联接「单标的（场外联接无池内截面）」——两屏口径可比对。
+    if factor_composite_label:
+        reason = f"{reason}（因子分口径：{factor_composite_label}）"
 
     # P0-10① (round16 3.11): action/suggested 方向一致性校验——增仓不得降仓、减仓不得升仓。
     # 单只 30% 风控上限仅作"已达上限"提示，不输出"increase 0.5→0.3"这类矛盾值。

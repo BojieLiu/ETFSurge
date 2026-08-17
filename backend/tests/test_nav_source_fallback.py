@@ -244,19 +244,23 @@ class TestFetchFundNavContract:
         assert result["nav_date"] == "2026-08-07"
 
     def test_ttj_lsjz_parser(self, monkeypatch):
-        """P0-6: _fetch_ttj_lsjz 解析 f10/lsjz JSON（LSJZList 最新在前）。"""
+        """P0-6: _fetch_ttj_lsjz 解析 f10/lsjz JSON（LSJZList 最新在前）。
+
+        R44 F2 (round27): 改用 requests.Session（连接池 + keep-alive）替代
+        urllib.urlopen，故此处 monkeypatch 落到 requests.Session.get，仍验证
+        LSJZList 解析与"最新在前"排序——网络库属实现细节，解析契约不变。
+        """
         from app.fetchers import china_market as cm
         payload = '{"Data": {"LSJZList": [{"FSRQ": "2026-08-07", "DWJZ": "3.0687", "JZZZL": "1.37"}, {"FSRQ": "2026-08-06", "DWJZ": "3.0273", "JZZZL": "-0.16"}]}}'
-        import urllib.request as _ur
+        import requests as _req
 
         class _FakeResp:
-            def read(self):
-                return payload.encode("utf-8")
+            text = payload
 
-        def _fake_urlopen(req, timeout=8):
+        def _fake_get(self, url, headers=None, timeout=8, **kw):
             return _FakeResp()
 
-        monkeypatch.setattr(_ur, "urlopen", _fake_urlopen)
+        monkeypatch.setattr(_req.Session, "get", _fake_get)
         rows = cm._fetch_ttj_lsjz("510050")
         assert rows and rows[0]["DWJZ"] == "3.0687"
         assert rows[0]["FSRQ"] == "2026-08-07"

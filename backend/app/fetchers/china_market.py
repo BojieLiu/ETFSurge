@@ -1373,22 +1373,23 @@ def _fetch_ttj_lsjz(symbol: str) -> list[dict[str, Any]]:
     返回列表最新在前（pageIndex=1）。
     """
     try:
-        import urllib.request
         import json
+        # R44 F2 (round27): 复用模块级 requests.Session（_session()，HTTP keep-alive +
+        # 连接池），避免每次 urllib.urlopen 重复 TCP/TLS 握手（预热期 ~15s 空转源）。
+        # requests.Session 线程安全（仅调用 .get，无并发写），在 run_in_thread 内调用安全。
         url = "https://api.fund.eastmoney.com/f10/lsjz?fundCode=%s&pageIndex=1&pageSize=2" % symbol
-        req = urllib.request.Request(url, headers={
+        resp = _session().get(url, headers={
             "User-Agent": "Mozilla/5.0",
             "Referer": "http://fundf10.eastmoney.com/",
-        })
-        resp = urllib.request.urlopen(req, timeout=8)
-        payload = json.loads(resp.read().decode("utf-8", errors="replace"))
+        }, timeout=8)
+        payload = json.loads(resp.text)
         rows = (payload.get("Data") or {}).get("LSJZList") or []
         return [r for r in rows if r.get("DWJZ")]
     except Exception:
         return []
 
 
-def fetch_fund_nav(symbol: str) -> dict[str, Any] | None:
+def fetch_fund_nav(symbol: str, limit: int | None = None) -> dict[str, Any] | None:
     """获取基金单位净值与日涨跌幅（场外联接基金 + 场内 ETF 净值兜底）。
 
     round9 P0-7: **契约统一为 dict** —— ``{"nav", "daily_change_pct", "nav_date"}``。
@@ -1400,12 +1401,33 @@ def fetch_fund_nav(symbol: str) -> dict[str, Any] | None:
     0 行 → 新增降级源天天基金 f10/lsjz（实测 510050 DWJZ=3.0687 可用）——折溢价率因子
     由此拿到可靠日净值口径。
 
+    R44 F1 (round27): ``limit`` 参数——预热等后台任务调用时传入（background/cheap 模式），
+    直接走轻量近期净值源（天天基金 f10/lsjz，仅返回最近 1-2 条），**跳过 akshare
+    fund_open_fund_info_em 全量历史拉取**（预热期 13 次累计 16.7s 的主要开销）。
+    仅作净值兜底（非全量回填），使该函数可安全放入后台任务而不拖长 startup。
+
     24h 内存缓存（日频数据，预热首拉后不再重复）。
     """
     _now = time.time()
     _cached = _FUND_NAV_CACHE.get(symbol)
     if _cached and (_now - _cached[0]) < _FUND_NAV_TTL:
         return _cached[1]
+
+    # R44 F1 (round27): background/cheap 模式——仅取近期净值，跳过 akshare 全量历史拉取。
+    if limit is not None:
+        try:
+            _rows = _fetch_ttj_lsjz(symbol)
+            if _rows:
+                _last = _rows[0]
+                _res = {
+                    "nav": float(_last["DWJZ"]),
+                    "daily_change_pct": float(_last.get("JZZZL") or 0),
+                    "nav_date": str(_last.get("FSRQ") or ""),
+                }
+                _FUND_NAV_CACHE[symbol] = (_now, _res)
+                return _res
+        except Exception:
+            pass
 
     result: dict[str, Any] | None = None
     try:
@@ -1470,7 +1492,17 @@ def fetch_index_history(symbol: str, period: str = "daily") -> list[dict[str, An
     HSTECH 等恒生指数）走腾讯 hk{code} K 线（复用 _fetch_tencent_hk_history，
     实测 hkHSI/hkHSTECH/hkHSCI/hkHSF = 320 根）。腾讯不覆盖的（如 HSAHC 恒生
     医疗保健）返回 []（前端标注「暂无行情」而非空白）。A 股数字指数保持原链。
+
+    R53 (round27): 增加 US 指数分支——新浪 stock_us_daily（探针 ^GSPC→.INX 5693 行）。
+    旧实现 only 处理 HK（腾讯）与 A（akshare），US 指数被误路由：
+      "SPX" 字母→走 HK 腾讯→空；"^GSPC" 非字母→走 A akshare→空。
     """
+    sym_u = str(symbol).upper()
+    # R53 (round27): US 指数 K 线——符号映射后走新浪 stock_us_daily。
+    # 必须在 isalpha() 的 HK 分支之前判断，否则 "^GSPC" 因含 ^ 不走 HK 分支、
+    # "SPX" 因是字母误走 HK 腾讯（均返空）。
+    if sym_u in _US_INDEX_HISTORY_MAP:
+        return _fetch_us_index_history(sym_u, period)
     if str(symbol).isalpha():
         # HK 指数：腾讯 hk{sym}（含当日、320 根）——新浪/东财均无 HK 指数 K 线
         tx_rows = _fetch_tencent_hk_history(symbol)
@@ -1496,6 +1528,54 @@ def fetch_index_history(symbol: str, period: str = "daily") -> list[dict[str, An
         df = df[[c for c in keep if c in df.columns]]
         _decode_df(df)
         return df.to_dict(orient="records")
+    except Exception:
+        return []
+
+
+# R53 (round27): 美股指数历史 K 线符号映射（indices_meta 用 SPX，新浪 stock_us_daily
+# 用 .INX/.IXIC/.DJI 纯代码；^GSPC 等 Yahoo 代码也映射到新浪纯代码）。
+_US_INDEX_HISTORY_MAP = {
+    "^GSPC": ".INX", "SPX": ".INX",
+    "^IXIC": ".IXIC", "IXIC": ".IXIC",
+    "^DJI": ".DJI", "DJI": ".DJI",
+}
+
+
+def _fetch_us_index_history(symbol: str, period: str = "daily") -> list[dict[str, Any]]:
+    """R53 (round27): 美股指数日 K 走新浪 stock_us_daily（探针 ^GSPC→.INX 5693 行）。
+
+    映射：^GSPC/.INX、^IXIC/.IXIC、^DJI/.DJI。新浪源列名为英文
+    （date/open/high/low/close/volume）→ 系统格式（日期/开盘/最高/最低/收盘/成交量）。
+    需纯代码（带 ^ 前缀新浪不认，故先映射到 .INX 等纯代码）。失败返回 []。
+    """
+    sina_code = _US_INDEX_HISTORY_MAP.get(str(symbol).upper())
+    if not sina_code:
+        return []
+    try:
+        import pandas as pd
+
+        def _p():
+            import akshare as ak
+            with no_proxy():
+                return ak.stock_us_daily(symbol=sina_code)
+
+        df = run_in_thread(_p, timeout=15, executor="long")
+        if df is None or (hasattr(df, "empty") and df.empty):
+            return []
+        out = []
+        for _, r in df.iterrows():
+            try:
+                out.append({
+                    "日期": str(r.get("date") or ""),
+                    "开盘": float(r.get("open", 0) or 0),
+                    "最高": float(r.get("high", 0) or 0),
+                    "最低": float(r.get("low", 0) or 0),
+                    "收盘": float(r.get("close", 0) or 0),
+                    "成交量": float(r.get("volume", 0) or 0),
+                })
+            except (ValueError, TypeError):
+                continue
+        return out
     except Exception:
         return []
 

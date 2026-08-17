@@ -85,6 +85,11 @@ GET /api/v1/market/watchlist
    - 同时尝试 T-1 收盘兜底 `_last_close_fallback(symbol, asset_type)`（F39 K 线源）；命中则在 `realtime` 中回填 `{price, change_pct, volume, is_estimated: true}`，并仍保留 `realtime_unavailable: true`（说明这是估值非实时）。
    - A 股（`asset_type` 其他值）无实时源时仅置 `_degraded: true`（兼容既有降级语义），不置 `realtime_unavailable`。
    - 端点整体 5s 超时（P0-4）时直接返回 DB-only 行（无 `realtime`/`realtime_unavailable`/`_degraded` 键）——属超时降级，非字段语义，前端应识别 loading/慢数据态。
+6. **round27 R45 — 三层兜底 + 诚实「维护中」标注**：实时行情缺失时按 `实时源 → T-1 收盘兜底(_last_close_fallback) → Redis last-good 报价(quote_key, 24h TTL)` 三层回退。
+   - 前两层任一命中即回填 `realtime`；**第二层 last-good 命中**时 `realtime` 额外带 `data_source: "stale"` + `as_of`（最近交易日真实收盘价，区别于 `_degraded`）。
+   - **三层全失败**（realtime 缺 + 收盘兜底 None + last-good 无）→ 置 `_degraded: true` + `data_unavailable: true` + `realtime_note: "非交易时段无行情（数据源维护中）"` + `data_unavailable_since: <ISO 时间戳>`，诚实区分「没波动」vs「没数据」，杜绝空白冒充「行情加载中」。
+   - last-good 报价写入：每次 `get_asset_realtime` 成功取到真实价即写入 `quote_key(symbol, asset_type)`（TTL 24h），使其在周末（无交易日）仍存活。
+7. **round27 R53 — 美股/港股指数实时路由接通**：`get_asset_realtime(symbol, "index")` 对 `asset_type=index` 且 `_lookup_index_market` 返回 `US`/`HK` 的标的，不再返回 `{"unsupported_market", "error"}`（round16 P0-22④ 过防护），改为路由到 `get_global_indices()`（经 `_GLOBAL_INDEX_DEFS` 的 ^GSPC/^IXIC/^DJI/^HSI），符号映射 `SPX→^GSPC / IXIC→^IXIC / DJI→^DJI / HSI→^HSI`。成功返回标准实时对象 `{symbol, name, price, change_pct, change_amount, asset_type:"index", market, available}`；仅当 global indices 中确实无该标的时才返回 `unsupported_market`。
 
 **合法代码形态判断**:
 
@@ -232,10 +237,12 @@ DELETE /api/v1/market/watchlist
 | asset_type | string | `A` \| `HK` \| `US` \| `index` \| `commodity` |
 | added_at | string (ISO datetime) | 添加时间 |
 | notes | string \| null | 用户备注 |
-| realtime | object \| null | 实时行情快照（可选，含 price, change_pct, volume；T-1 兜底时含 `is_estimated: true`） |
+| realtime | object \| null | 实时行情快照（可选，含 price, change_pct, volume；T-1 兜底时含 `is_estimated: true`；last-good 兜底时含 `data_source: "stale"` + `as_of`） |
 | realtime_unavailable | boolean \| null | round24 R20：美股/HK 实时源不可用显式标记（true=暂无实时，非静默 null） |
-| realtime_note | string \| null | round24 R20：无实时源说明文案 |
+| realtime_note | string \| null | round24 R20：无实时源说明文案；round27 R45 三层全失败时升级为「非交易时段无行情（数据源维护中）」 |
 | _degraded | boolean \| null | A 股等无实时源时的兼容降级标记 |
+| data_unavailable | boolean \| null | round27 R45：三层兜底全失败（realtime+收盘+last-good 均缺失）诚实标记 |
+| data_unavailable_since | string (ISO datetime) \| null | round27 R45：三层全失败时的显式时间戳，前端据此展示「维护中」而非空白 |
 
 ### WatchlistCreate (请求)
 

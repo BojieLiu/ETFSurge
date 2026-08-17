@@ -162,6 +162,16 @@ _GLOBAL_INDEX_DEFS = [
     ("^STOXX50E", "欧洲斯托克50", "欧洲"),
 ]
 
+# R53 (round27): indices_meta 用 SPX/DJI/IXIC/HSI，而 _GLOBAL_INDEX_DEFS 用
+# ^GSPC/^DJI/^IXIC/^HSI（Yahoo/新浪代码）——指数分析路由需做符号映射，否则
+# 前端选「标普500」(SPX) 查不到 global indices 的 ^GSPC。
+_INDEX_GLOBAL_MAP = {
+    "SPX": "^GSPC",
+    "IXIC": "^IXIC",
+    "DJI": "^DJI",
+    "HSI": "^HSI",
+}
+
 
 # ── 全局指数缓存（30s 防重复采集，非交易时段复用上次成功值） ──
 _global_indices_cache: dict[str, Any] = {}
@@ -986,6 +996,13 @@ def quote_key(symbol: str, asset_type: str = "A") -> str:
     return f"quote:{asset_type}:{symbol}"
 
 
+# R45 (round27): last-good 实时报价缓存 TTL。每次成功取到实时价就把报价写入
+# quote_key（与 stale 兜底同源），TTL 延长到 24h 使其在周末（无交易日）仍存活——
+# 这样 watchlist 周末回退时仍能从 last-good 读到最近一个交易日的真实收盘价，
+# 而非整体空白（R29 周末全 None 的根因）。
+_LAST_GOOD_TTL = 24 * 3600
+
+
 async def get_realtime_batch(
     symbols: list[str], asset_type: str = "A"
 ) -> list[dict[str, Any]]:
@@ -1234,19 +1251,46 @@ async def get_asset_realtime(symbol: str, asset_type: str) -> dict | None:
             # R5: 指数实时——fetch_index_realtime（新浪 s_sh 三级降级，8 个 A 股指数）。
             # 旧实现走 A 股股票路径：000001 被当成深市股票（平安银行 11.63）→
             # 指数分析 prompt 拿到错位行情（LLM 报告"数据缺失/不匹配"）。
-            # P0-22④ (round16 3.24 R4): 跨市场指数防护——US/HK 指数显式报「暂不支持」
-            # 而非裸失败（旧实现：美股 tab 选 GEM 港股指数 → A 股路径查无 → 前端报错）。
+            # R53 (round27): US/HK 指数路由到 get_global_indices（_GLOBAL_INDEX_DEFS
+            # 已含 ^GSPC/^IXIC/^DJI/^HSI，经 _foreign 真实拉取）——撤销 round16 P0-22④
+            # 的过防护（裸 US/HK 指数一刀切「暂不支持」），数据源是通的只是没接。
             _idx_market = await _lookup_index_market(symbol)
             if _idx_market in ("US", "HK"):
-                logger.warning(
-                    "[market_service] index realtime for %s (market=%s) not supported — A 股指数源仅支持 A",
-                    symbol, _idx_market,
-                )
-                result = {"symbol": symbol, "unsupported_market": _idx_market,
-                          "error": "该市场指数暂不支持"}
+                _gi_sym = _INDEX_GLOBAL_MAP.get(str(symbol).upper(), str(symbol))
+                try:
+                    gi = await get_global_indices()
+                except Exception:
+                    gi = {}
+                _found = None
+                for _region, _items in (gi or {}).items():
+                    for _it in _items:
+                        _s = str(_it.get("symbol", "")).upper()
+                        if _s == _gi_sym.upper() or _s == str(symbol).upper():
+                            _found = _it
+                            break
+                    if _found:
+                        break
+                if _found:
+                    result = {
+                        "symbol": symbol,
+                        "name": _found.get("name"),
+                        "price": _found.get("price"),
+                        "change_pct": _found.get("change_pct"),
+                        "change_amount": _found.get("change_amount"),
+                        "asset_type": "index",
+                        "market": _idx_market,
+                        "available": _found.get("available", True),
+                    }
+                else:
+                    logger.warning(
+                        "[market_service] index realtime for %s (market=%s) not in global indices — A 股指数源仅支持 A",
+                        symbol, _idx_market,
+                    )
+                    result = {"symbol": symbol, "unsupported_market": _idx_market,
+                              "error": "该市场指数暂不支持"}
             else:
                 idx_rows = await _call(fetch_index_realtime, timeout=_timeout)
-                result = next((r for r in (idx_rows or []) if str(r.get("symbol")) == symbol), None)
+                result = next((r for _r in [idx_rows or []] for r in _r if str(r.get("symbol")) == symbol), None)
                 if result is None:
                     # 兜底：本地指数缓存（定时刷新）
                     try:
@@ -1271,6 +1315,19 @@ async def get_asset_realtime(symbol: str, asset_type: str) -> dict | None:
                         break
     except Exception:
         pass
+
+    # R45 (round27): 成功取到实时价 → 写入 last-good 报价（quote_key，24h TTL）。
+    # 周末/非交易时段回退时，watchlist 从此读取最近交易日的真实收盘价（stale），
+    # 不再整体空白。仅在确有价格时写，避免把 None/占位覆盖掉既有 last-good。
+    if result and isinstance(result, dict) and result.get("price") is not None:
+        try:
+            from datetime import datetime, timezone
+
+            _lg = dict(result)
+            _lg["as_of"] = datetime.now(timezone.utc).isoformat()
+            await cache_set(quote_key(symbol, asset_type), _lg, _LAST_GOOD_TTL)
+        except Exception:
+            pass
 
     _asset_realtime_cache[_ckey] = (time.time(), result)
     return result
