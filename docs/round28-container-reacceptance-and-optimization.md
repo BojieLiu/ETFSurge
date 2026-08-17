@@ -77,7 +77,7 @@ round27 的 R42-R55 及 F1/F2/F3/F3b 已在 `0c3a1b4`（P0+P1）+ `f57583e`（P2
 - DNS 首次解析 4.4s（`_ipv4_getaddrinfo`，R44 缓存命中后缓解，但每个新 host 首次仍慢）。
 - `_backfill_ic_history_task` 4.25s（R55 回填，见 R58）。
 
-**修复设计**：R56（删重复 task）见 §15.2；其余见 §15.2。
+**修复设计**：R56（删重复 task）见 §14.2；其余见 §14.2。
 
 ---
 
@@ -88,7 +88,7 @@ round27 的 R42-R55 及 F1/F2/F3/F3b 已在 `0c3a1b4`（P0+P1）+ `f57583e`（P2
 
 > ⚠️ **证据口径说明**：本轮设计任务失败，无新鲜设计样本。§2.4 R66 及 §9 矩阵中引用的 design 605（`factor_score=-0.9007` 等）为**上一容器会话 12:01 创建的历史设计**（`created_at=2026-08-17T04:01:44Z`，早于 R47 commit `f57583e` 12:14）。R47（结构化字段桶化）据此判定需谨慎——代码级已实施（`_apply_precision_bucketing`），但历史样本为 pre-R47，不能作为「未生效」证据。
 
-**修复设计**：见 §15.1 R59。
+**修复设计**：见 §14.1 R59（详细五项设计见 §14.4）。
 
 ### 2.2 场内策略检查（on_exchange，13 只持仓，R57）
 策略检查 45.3s 完成，但 summary =「**LLM 分析超时（15s 未返回，已用规则引擎兜底）**（市态：震荡；因子数据0/13正常）」。
@@ -100,7 +100,7 @@ round27 的 R42-R55 及 F1/F2/F3/F3b 已在 `0c3a1b4`（P0+P1）+ `f57583e`（P2
 
 **R43/R57 根因（代码级）**：`portfolio_service.py:1071` `asyncio.wait_for(generate_strategy_check_report(...), timeout=180)`（外层已 180s）→ `generate_strategy_check_report`（`llm.py:1640-1690`）→ `get_agent("strategy_check").run_json(..., request_timeout=httpx.Timeout(connect=15.0, read=90.0, ...))`。DeepSeek 连接/响应 >15s → 内层 connect 超时先触发 `CancelledError` → `except BaseException`（`llm.py:1664`）捕获 → 返回「LLM 分析超时（15s 未返回）」。**外层 180s 从未有机会生效。**
 
-**修复设计**：见 §15.1 R57。
+**修复设计**：见 §14.1 R57。
 
 ### 2.3 综合信号诚实降级（R52 已修复，本轮实证）
 `composite_decision.signal=null + degraded=true + reason 含缺失占比`——R52 修复真实生效，专业投资者不再被「恒 hold」误导。
@@ -249,7 +249,7 @@ round27 的 R42-R55 及 F1/F2/F3/F3b 已在 `0c3a1b4`（P0+P1）+ `f57583e`（P2
 | R57 | P0 | 策略检查 LLM 仍 15s 失败（内层 connect=15s 先于外层 180s） | ①`llm.py:1662` 的 `httpx.Timeout(connect=15.0)` → **connect=60.0**（对齐 DeepSeek 慢连接/慢首字节实测 34-78s，read 保持 90s）；②或改为「外层 180s + 内层 connect 用 provider.timeout」双口径；③LLM 失败 summary 已区分 timeout/rate_limited（R5-1-6），保留 | ①交易时段背靠背 design→strategy-check 至少一次产出真 LLM 报告（非规则兜底）；②负向：connect=15s 不再先于外层触发 | `llm.py:1655-1662`、`portfolio_service.py:1071-1079` |
 | R56 | P1 | 全球指数预热双重执行（F3 重构遗留） | 删除 `main.py:267-268` 独立 `asyncio.create_task(_warmup_global_indices())`（sequence 内 `:334` 已覆盖） | ①单测：warmup_timing 仅 1 条 global_indices 记录；②负向：禁止 `_warmup_global_indices` 被 create_task 两次 | `main.py:267-268` |
 | R58 | P1 | R55 回填启动时 K 线未就绪跳过且不重试 | ①回填任务改为**延迟执行 + 重试**（K 线缓存就绪后触发，或预热完成后再次尝试，失败退避重试 ≤3 次）；②或回填改为「预热 sequence 末尾」执行（此刻 K 线已就绪） | ①单测（抓假负向）：mock K 线缓存未就绪 → 回填「稍后重试」而非「永久跳过」；②生产库 factor_ic_records distinct trade_date ≥ 60（可观察） | `main.py:556/_backfill_ic_history_task`、`ic_tracker.py` |
-| R59 | P1 | 组合设计盘后/冷启动超时失败 | ①设计链路数据采集阶段加「盘后/冷缓存」降级（数据源超时→用 Redis last-good/快照兜底，而非整体超时失败）；②`design-async` 失败时保留已采集的部分上下文（result 含 design 上下文），前端可展示降级方案 | ①盘后首呼 design 不「整体超时失败」，产出降级方案或明确「数据源维护中」；②负向：不得用「方案生成超时」掩盖数据源冷却 | `strategy_design.py`、`design_report.py`、`portfolio_service.py` |
+| R59 | P1 | 组合设计盘后/冷启动超时失败（根因与优化详见 §14.4） | ①采集并发化 + 单源快速失败降级；②超时→降级而非失败；③K 线缓存持久化；④预热覆盖设计数据（五项完整设计见 §14.4） | ①盘后/冷启动首呼 design 产出降级方案（非「方案生成超时」失败）；②冷启动数据采集 ≤30s；③负向：不得用「方案生成超时」掩盖数据源冷却 | `market_data_hub.refresh`、`strategy_design.py`、`task_manager.py`、`china_market.py` |
 | R60 | P1 | symbol-analysis K线/指标注入断裂（指标端点有数据、分析端点没注入） | ①symbol-analysis 数据采集统一走 `/market/indicators` 同源 fetcher（`fetch_history`/`compute_indicators`），确保 A 股/美股个股 K 线注入 LLM prompt；②采集失败才诚实降级（保留当前诚实标注） | ①交易时段 600519/AAPL 分析正文含 MA/RSI/KDJ 数值；②负向：指标端点有数据时分析端点不得「K线为空」 | `analysis/llm.py:generate_symbol_analysis` 采集段、`market_service.py` |
 | R61 | P1 | 港股 00700 整链 DATA_UNAVAILABLE | ①排查港股实时/历史数据源冷却（腾讯 hk{code}/akshare 港股）的降级链；②港股 realtime 失败回退 last-good/收盘快照（同 R45 模式）；③analysis 采集不到港股数据时给「港股数据源维护中」而非泛化 DATA_UNAVAILABLE | ①交易时段 00700 realtime 非 null；②盘后至少 last_close 快照兜底 | `market_service.py:get_asset_realtime`、`market.py:_last_close_fallback` |
 | R66 | P2 | R42 部分：因子分跨屏数值仍不一致（design -0.9007 vs check -0.08，待同窗口复测） | ①明确 design `etfs[].factor_score` 与策略检查「因子分」**共用同一复合函数**（`aggregate_factor_scores` + 同一参考群体）；②加跨屏一致性单测：同标的 design vs check 因子分方向一致且量级一致 | ①负向：159338 两屏数值量级一致（禁 -0.9007 vs -0.08）；②单测断言两屏 | `allocation_engine.py`、`portfolio_service.py:1586` |
@@ -271,6 +271,51 @@ round27 的 R42-R55 及 F1/F2/F3/F3b 已在 `0c3a1b4`（P0+P1）+ `f57583e`（P2
 | R67 | P2 | backend 根 4 个 git-tracked scratch | ①删除 `add_filtered_tab.py`/`fix_dashboard_ui.py`/`fix_market_tabs.py`/`verify_design.py` 或移 `scripts/scratch/` | ①backend 根无 scratch .py | `backend/` |
 | R50 | P2 | logs/*.py 224 个 | ①删除 `logs/round{8,16,18,20}/*.py`（磁盘清理） | ①磁盘无 logs/*.py | `logs/` |
 
+### 14.4 R59 设计链路优化详细设计（P1，用户追问驱动展开）
+
+> 本节为 R59 的实施级展开，含「为何之前未出现」的历史对照证据，与五项优化（①→⑤）的设计 + 验收 + 负向断言。
+
+#### 14.4.0 根因回顾（代码级 + 日志实证）
+
+**现象**：本轮（2026-08-17 23:48，周一深夜）`POST /design-async` → task 559 在数据采集阶段超时失败（`task_manager.py:294` 的 `asyncio.wait_for(generate_enhanced_design(), timeout=DESIGN_DATA_TIMEOUT=90s)` 触发 `TimeoutError` → `task_manager.py:570-571` 报「方案生成超时，数据源响应过慢」）。
+
+**日志证据（`logs/backend.log`，23:48:32 → 23:50:26）**：
+- `23:48:32 MarketDataHub: scanned 79 ETFs`
+- `23:48:34 get_history fetch_history empty for sz399975/sz399812/sh931071... → trying get_k_data`（冷 K 线缓存 + 慢降级路径）
+- `23:48:48 _mootdx_realtime exception + mootdx returned empty → cooling + akshare returned empty → cooling`
+- `23:48:52 em sector changes fetch failed (push2.eastmoney.com ... Remote end closed) + cls plate_list errno=50101 (sign 失效)`
+- `23:48:58 _mootdx_history exception for 688981/600519 (period=daily)` ← **此后 88s 无任何日志**（采集阻塞在慢数据源）
+- `23:50:26 [design_pipeline] task 559 timed out`
+
+**三层根因**：①盘后数据源大面积冷却（mootdx/akshare/push2/cls 四源同时失败）；②冷 K 线缓存全量建库（`market_data_hub.refresh` → `refresh_kline` 42-75s，`task_manager.py:292-293` 注释预警）；③采集**串行累积**——每个失败源各自等到内部超时才轮到下一个，无「快速失败降级」，总耗时 = 各源之和而非最慢单源。
+
+#### 14.4.1 为何之前未出现（历史对照，`logs/backend.log.1`）
+
+**结论：不是新引入的重大回归，而是 90s 硬预算在「冷启动 + 深夜」下余量极薄（历史实测 88s），round27 修复叠加了一点延迟把余量吃掉了。**
+
+历史对照（2026-08-14 02:20 深夜冷启动，`logs/backend.log.1`）：
+- 同样大面积数据源冷却（`mootdx returned empty → cooling`、`akshare returned empty → cooling`、`_compute_industry_momentum failed: Connection aborted`）。
+- 但设计**成功**：`02:20:58 MarketDataHub: refresh complete (v1, 38 total) in 51.1s`，`[strategy_design] refresh took 51.13s`——数据采集 51.1s + 后续步骤 ~37s ≈ **88s，只差 2s 就超 90s**。
+
+**本轮为何从 88s 涨到 >90s**：round27 的 3 个「修复」各加了一点延迟，累积吃掉 2s 余量：
+1. **R46**（sector momentum 换 push2delay）：旧代码 `_compute_industry_momentum` 用 akshare 硬编码 push2（被阻断）→ **15s 内快速失败**（`Connection aborted`）；R46 改为 push2delay 能返回数据（本轮 30 momentum rows），但**引入了额外的 push2 sector changes fetch**（`23:48:52 em sector changes fetch failed (push2.eastmoney.com m:90+t:2/:3)` 带重试）。
+2. **F3**（sector cache 后台化，`5b0c2fa`）：设计时可能撞未就绪的冷 sector cache → 设计链路自行触发 `update_sector_cache`（`23:48:50`）。
+3. **R55**（IC 回填任务）：启动时多一个后台任务，占线程池/网络。
+
+**本质**：90s 是「热缓存 ~10s / 冷缓存 42-75s」之间留的余量，但「冷缓存 + 深夜四源冷却」的叠加从未在历史窗口被精确触发过（历史深夜设计都在热缓存窗口，历史冷启动设计都在数据源健康窗口）。本轮首次同时满足两者，把 88s 的历史极限推过 90s。
+
+#### 14.4.2 五项优化设计（治本 + 配套）
+
+| # | 优先级 | 优化 | 设计 | 验收（含负向断言） | 文件指向 |
+|---|---|---|---|---|---|
+| ① | P0 | **采集并发化 + 单源快速失败降级** | `market_data_hub._refresh_impl` 内相互独立的步骤（indices / sector momentum / kline 缓存 / factor matrix）从串行改为 `asyncio.gather(..., return_exceptions=True)`，每个源各自 `asyncio.wait_for(短超时)`；单源失败**立即降级**（Redis last-good / 磁盘快照），不再各自等到内部超时上限 | ①冷启动 `refresh` ≤30s（当前 51-88s+）；②负向：任一源超时不得阻塞其它源（单源失败 ≤ 其短超时即返回）；③单测 mock 四源并发，断言总耗时 = max(单源) 非 sum | `market_data_hub.py:573/619/460`、`strategy_design.py:246` |
+| ② | P0 | **超时→降级而非失败** | `task_manager.py:294` 的 `wait_for` 超时路径不再直接 `TimeoutError → failed`，改为：捕获超时后，用已采集的部分数据 + 快照兜底产出**降级方案**（复用 `degradation.mode/static_pool_used` 机器），标注「盘后数据源冷却，部分数据为快照」 | ①盘后首呼 design 返回降级方案（`degradation.mode=degraded`）而非 failed；②负向：禁止「方案生成超时」空响应掩盖数据源冷却 | `task_manager.py:570-577`、`strategy_design.py` |
+| ③ | P1 | **K 线缓存持久化** | `_kline_cache_rows`（`market_data_hub.py:370`）落盘 `data/kline_cache.json`，启动加载、24h 内复用（同 `indices_cache.json` / sector momentum 快照模式）；消除重启后 42-75s 冷建库 | ①重启后首次 design 不触发全量 `refresh_kline`（K 线缓存命中）；②负向：24h 过期后诚实重建而非复用过期数据 | `market_data_hub.py:370/754-764` |
+| ④ | P1 | **预热覆盖设计数据** | 预热 sequence 增「因子矩阵 + 候选池 K 线缓存」预热（后台 + 预算，复用 F3 模式），使启动后首呼 design 即热 | ①启动后首呼 design `refresh` ≤10s（热缓存）；②负向：预热不阻塞 startup 就绪 | `main.py:_warmup_sequence_task` |
+| ⑤ | P2 | **盘后显式降级策略** | 检测非交易时段（复用 D3 窗口判断）→ design 数据采集主动走快照/缓存路径，不尝试实时源干等超时 | ①盘后 design 秒级返回降级方案；②负向：不得用实时源超时冒充「正在采集」 | `strategy_design.py`、`market_data_hub.refresh` |
+
+**优先级关系**：②见效最快（失败→可用降级方案，用户永远能拿到东西）；①是治本（「会超时」→「不会超时」）；③消除 42-75s 冷建库（治冷启动的根）；④⑤是配套（缩短窗口、减少触发）。①②③合起来即 R59 的完整落地形态。
+
 ---
 
 ## 15. 分两批实施建议（不实施，等待指令）
@@ -290,4 +335,6 @@ round27 的 R42-R55 及 F1/F2/F3/F3b 已在 `0c3a1b4`（P0+P1）+ `f57583e`（P2
 
 - **Round 3（证据时效核查，本次完成）**：发现 design 605 证据为**历史样本**（`created_at=2026-08-17T04:01:44Z` = 12:01 北京，早于 R47 commit `f57583e` 12:14）。据此修正 3 处：①§2.1 增「证据口径说明」标注 design 605 为 pre-R47 历史设计；②§9 矩阵 R47 从「⚠️ 未生效」更正为「✅ 代码级（待复测）」（`_apply_precision_bucketing` strategy_design.py:972/990 已实施）；③R66 增「待同窗口复测」限定（design 12:01 vs check 23:48 因子矩阵可能漂移）。避免把「历史样本」误当「当前代码行为」。
 
-> **当前状态（Round 1-3 完成）**：R56-R67 均达实施标准（精确 file:line + 根因 + 验收 + 负向断言）；证据时效已核查（design 605 历史样本已标注）。本文档**不写任何修复代码**，等待「开始实施」指令。
+- **Round 4（R59 展开 + 「为何之前未出现」历史对照，本次完成）**：用户追问「组合设计为何超时 + 后续如何优化」触发。深挖 `logs/backend.log`（task 559 时间线）定位三层根因（盘后四源冷却 + 冷 K 线缓存建库 42-75s + 串行累积超时）。历史对照 `logs/backend.log.1`（2026-08-14 02:20 深夜冷启动设计 task 454）发现：**同样的大面积数据源冷却下设计却成功**——`refresh complete in 51.1s`，数据采集 ~88s，只差 2s 就超 90s。结论：**非新引入重大回归，而是 90s 硬预算余量极薄（历史 88s），round27 的 R46/F3/R55 三个修复各加一点延迟把 2s 余量吃掉了**。据此把 R59 展开为五项优化（§14.4.2：①采集并发化+快速失败 ②超时→降级而非失败 ③K线缓存持久化 ④预热覆盖设计数据 ⑤盘后显式降级），并补充「为何之前未出现」证据链（§14.4.1）。file:line 经 grep 确认：`task_manager.py:294/570-571`、`market_data_hub.py:370/460/573/619/754-764`、`strategy_design.py:246/500/694`。
+
+> **当前状态（Round 1-4 完成）**：R56-R67 均达实施标准（精确 file:line + 根因 + 验收 + 负向断言）；R59 已展开为五项实施级优化设计并附历史对照证据。本文档**不写任何修复代码**，等待「开始实施」指令。
