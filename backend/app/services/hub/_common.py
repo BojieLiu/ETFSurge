@@ -12,7 +12,18 @@ from app.core.market_calendar import market_session
 
 logger = logging.getLogger(__name__)
 
-MANDATORY_CODES = {"510300", "159338", "518880", "511090"}
+# Layer/pool constants live in the pure engine modules (single source of truth,
+# dependency direction engine/ <- hub/ <- facade); re-exported here.
+from app.engine.pool_balancing import (  # noqa: E402
+    ALL_LAYERS,
+    LAYER_CORE,
+    LAYER_SATELLITE,
+    LAYER_DEFENSE,
+    LAYER_OPPORTUNISTIC,
+    LAYER_RESEARCH,
+    MANDATORY_CODES,
+)
+from app.engine.composite_signal import _LAYER_WEIGHTS, _BASE_WEIGHTS  # noqa: E402
 
 
 SECTOR_ETF_MAP: dict[str, dict] = {
@@ -70,49 +81,6 @@ SECTOR_ETF_MAP: dict[str, dict] = {
     "黄金": {"symbol": "518880", "name": "黄金ETF", "layer": "defense", "tracked_index": "黄金"},
     "国债": {"symbol": "511010", "name": "国债ETF", "layer": "defense", "tracked_index": "国债"},
 }
-
-
-LAYER_CORE = "core"
-
-
-LAYER_SATELLITE = "satellite"
-
-
-LAYER_DEFENSE = "defense"
-
-
-LAYER_OPPORTUNISTIC = "opportunistic"
-
-
-LAYER_RESEARCH = "research"
-
-
-ALL_LAYERS = [LAYER_CORE, LAYER_SATELLITE, LAYER_DEFENSE, LAYER_OPPORTUNISTIC, LAYER_RESEARCH]
-
-
-_LAYER_WEIGHTS = {
-    "satellite": {
-        "bull":       {"factor": 0.55, "liquidity": 0.10, "scale": 0.05, "opp": 0.30},
-        "bear":       {"factor": 0.25, "liquidity": 0.10, "scale": 0.05, "opp": 0.60},
-        "correction": {"factor": 0.35, "liquidity": 0.15, "scale": 0.10, "opp": 0.40},
-        "neutral":    {"factor": 0.40, "liquidity": 0.15, "scale": 0.10, "opp": 0.35},
-    },
-    "core": {
-        "bull":       {"factor": 0.55, "liquidity": 0.20, "scale": 0.25},
-        "bear":       {"factor": 0.40, "liquidity": 0.30, "scale": 0.30},
-        "correction": {"factor": 0.45, "liquidity": 0.25, "scale": 0.30},
-        "neutral":    {"factor": 0.50, "liquidity": 0.25, "scale": 0.25},
-    },
-    "defense": {
-        "bull":       {"factor": 0.35, "liquidity": 0.25, "scale": 0.15, "opp": 0.25},
-        "bear":       {"factor": 0.25, "liquidity": 0.20, "scale": 0.15, "opp": 0.40},
-        "correction": {"factor": 0.30, "liquidity": 0.25, "scale": 0.20, "opp": 0.25},
-        "neutral":    {"factor": 0.30, "liquidity": 0.20, "scale": 0.20, "opp": 0.30},
-    },
-}
-
-
-_BASE_WEIGHTS = {"factor": 0.40, "liquidity": 0.15, "scale": 0.10, "opp": 0.35}
 
 
 MAX_PER_LAYER = {

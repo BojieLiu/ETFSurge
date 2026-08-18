@@ -705,147 +705,25 @@ class MarketDataHub(
 
 
     def _assign_layer(self, base_layer: str, industry: str) -> str:
-        """行业→层映射（P1-2 防御层分类修复，R5 pool 归层）。
-
-        从 _refresh_impl 提取的纯函数，供单测直测（消除测试复制实现）：
-        - core（宽基指数）→ LAYER_CORE
-        - defense（商品/固收）→ LAYER_DEFENSE（跨境不落防御，P1-2）
-        - 跨境 → LAYER_SATELLITE
-        - unknown → LAYER_RESEARCH
-        - 其余 → LAYER_SATELLITE
-        """
-        base_layer = base_layer or LAYER_SATELLITE
-        industry = industry or "unknown"
-        # Core: 宽基指数
-        if base_layer == "core" or industry == "宽基指数":
-            return LAYER_CORE
-        # Defense: 商品/固收（注意：跨境归卫星层，P1-2 修复）
-        if base_layer == "defense" or industry in ("商品", "固收"):
-            return LAYER_DEFENSE
-        # 跨境 → 卫星层（非防御资产）
-        if industry == "跨境":
-            return LAYER_SATELLITE
-        # Research: unknown industry
-        if industry == "unknown":
-            return LAYER_RESEARCH
-        return LAYER_SATELLITE
+        """行业→层映射（P1-2 防御层分类修复，Batch 4 提取到 engine/pool_balancing）。"""
+        from app.engine.pool_balancing import assign_layer
+        return assign_layer(base_layer, industry)
 
 
     @staticmethod
     def _normalize_tracked_index(tidx: str) -> str:
-        """M3: tracked_index 家族归一化——同一指数的风格/增强切片合并为基准指数。
-
-        中证500价值/成长/增强 与 中证500 高度相关（同一指数的不同切片），
-        精确字符串去重把它们当 3 个独立指数 → 家族霸榜。此处归一化后只保留
-        fund_scale 最大者（复用 _deduplicate_by_index 的既有保留逻辑）。
-
-        Examples:
-            "中证500价值" → "中证500"
-            "中证500成长" → "中证500"
-            "中证500增强" → "中证500"
-            "沪深300增强" → "沪深300"
-            "沪深300价值" → "沪深300"
-        """
-        if not tidx:
-            return tidx
-        for base in ("中证500", "沪深300"):
-            if tidx.startswith(base) and tidx != base:
-                return base
-        return tidx
+        """M3: tracked_index 家族归一化（Batch 4 提取到 engine/pool_balancing）。"""
+        from app.engine.pool_balancing import normalize_tracked_index
+        return normalize_tracked_index(tidx)
 
 
     @staticmethod
     def _deduplicate_by_index(
         pool: dict[str, list[dict[str, Any]]],
     ) -> dict[str, list[dict[str, Any]]]:
-        """B2: 候选池去重——同层同 tracked_index 的 ETF 只保留 fund_scale 最大的。
-
-        当 tracked_index 为空时（Sina 源无此字段），使用名称推断去重（ETF + 联接C 合并）。
-        """
-        # 名称中常见的"联接"类后缀
-        _LINK_FUND_SUFFIXES = ("联接", "联", "LOF", "C")
-
-        def _extract_index_concept(name: str) -> str:
-            """从 ETF 名提取指数概念（去除基金公司名和联接/ETF 后缀）。"""
-            # 去除基金公司名
-            _COMPANY_NAMES = [
-                "华夏", "易方达", "汇添富", "嘉实", "富国", "招商", "博时", "南方",
-                "广发", "华安", "国泰", "鹏华", "天弘", "工银", "建信", "中欧",
-                "景顺", "长城", "泰康", "海富通", "光大", "兴全", "东证", "华宝",
-                "银华", "大成", "长信", "国联", "申万", "上投", "中信", "华泰",
-                "万家", "兴业", "民生", "浦银", "方正", "太平", "前海", "创金",
-                "银河", "诺安", "交银", "融通", "泓德", "中加", "永赢", "西部",
-                "浙商", "新华", "红土", "安信", "国寿", "英大", "汇丰", "恒生",
-                "中银", "国投", "德邦", "华富", "金元", "国金", "九泰", "东方",
-                "中泰", "湘财", "国融", "江信", "蜂巢", "东海", "中邮", "华融",
-                "金鹰", "长城", "同泰", "红塔", "华润", "格林", "瑞达", "明亚",
-                "惠升", "华宸", "富荣", "易米", "长江", "渤海",
-            ]
-            for company in sorted(_COMPANY_NAMES, key=len, reverse=True):
-                name = name.replace(company, "")
-            # 去除常见后缀
-            for suffix in ("ETF", "联接", "联", "LOF"):
-                name = name.replace(suffix, "")
-            return name.strip()
-
-        result: dict[str, list[dict[str, Any]]] = {layer: [] for layer in ALL_LAYERS}
-        for layer, items in pool.items():
-            seen_indices: dict[str, dict[str, Any]] = {}
-            # 记录已按名称去重的 code，避免 name-based 重复
-            name_seen: dict[str, dict[str, Any]] = {}
-            for item in items:
-                tidx = item.get("tracked_index", "") or ""
-                if tidx:
-                    # M3: 先做家族归一化再精确去重（中证500价值/成长/增强 → 中证500）
-                    tidx = MarketDataHub._normalize_tracked_index(tidx)
-                    item["tracked_index"] = tidx
-                    # tracked_index 精确去重
-                    existing = seen_indices.get(tidx)
-                    if existing is None:
-                        seen_indices[tidx] = item
-                    else:
-                        existing_scale = float(existing.get("fund_scale", 0) or 0)
-                        new_scale = float(item.get("fund_scale", 0) or 0)
-                        if new_scale > existing_scale:
-                            seen_indices[tidx] = item
-                else:
-                    # 无 tracked_index → 按名称推断的概念去重（联接C 合并）
-                    raw_name = item.get("name", item.get("symbol", ""))
-                    concept = _extract_index_concept(raw_name)
-                    if not concept:
-                        # 完全无法推断概念，直接保留
-                        result[layer].append(item)
-                        continue
-                    existing = name_seen.get(concept)
-                    if existing is None:
-                        name_seen[concept] = item
-                    else:
-                        existing_scale = float(existing.get("fund_scale", 0) or 0)
-                        new_scale = float(item.get("fund_scale", 0) or 0)
-                        # 没有联接后缀的优先（即 ETF 优先于联接C）
-                        existing_is_etf = not any(s in existing.get("name", "") for s in _LINK_FUND_SUFFIXES)
-                        new_is_etf = not any(s in item.get("name", "") for s in _LINK_FUND_SUFFIXES)
-                        if new_is_etf and not existing_is_etf:
-                            name_seen[concept] = item
-                        elif existing_is_etf and not new_is_etf:
-                            pass  # keep existing
-                        elif new_scale > existing_scale:
-                            name_seen[concept] = item
-
-            # 合并：tracked_index 精确去重 + name-based 去重
-            result[layer].extend(seen_indices.values())
-            # name_seen 中那些没有 tracked_index 的也要加入
-            for concept, item in name_seen.items():
-                code = item.get("symbol", item.get("code", ""))
-                # 检查是否已经被 tracked_index 去重包含了
-                already_in = any(
-                    e.get("symbol") == code or e.get("code") == code
-                    for e in result[layer]
-                )
-                if not already_in:
-                    result[layer].append(item)
-
-        return result
+        """B2: 候选池去重（Batch 4 提取到 engine/pool_balancing）。"""
+        from app.engine.pool_balancing import deduplicate_by_index
+        return deduplicate_by_index(pool)
 
 
     def _ensure_mandatory(
@@ -853,44 +731,18 @@ class MarketDataHub(
         pool: dict[str, list[dict[str, Any]]],
         flat: list[dict[str, Any]],
     ) -> None:
-        """确保 MANDATORY_CODES 在池中（如果全市场扫描有结果）。"""
-        if not flat:
-            return  # 扫描失败，不强行注入（直接报错）
-        for code in MANDATORY_CODES:
-            in_pool = any(
-                e["symbol"] == code for layer in pool.values() for e in layer
-            )
-            if not in_pool:
-                # 从 flat 中找回
-                found = next((e for e in flat if e["symbol"] == code), None)
-                if found:
-                    # 按代码推断层
-                    # round9 P0-8: 定层分支 560600 → 159338（真实中证A500ETF 归核心层）
-                    if code in ("510300", "159338"):
-                        target = LAYER_CORE
-                    elif code in ("518880",):
-                        target = LAYER_DEFENSE
-                    elif code == "511090":
-                        target = LAYER_DEFENSE
-                    else:
-                        target = LAYER_SATELLITE
-                    found["layer"] = target
-                    pool[target].append(found)
-                    logger.info("MarketDataHub: enforced mandatory %s -> %s", code, target)
+        """确保 MANDATORY_CODES 在池中（Batch 4 提取到 engine/pool_balancing）。"""
+        from app.engine.pool_balancing import ensure_mandatory
+        ensure_mandatory(pool, flat)
 
 
     @staticmethod
     def _truncate_with_mandatory_protection(
         balanced: list[dict[str, Any]], max_n: int
     ) -> list[dict[str, Any]]:
-        """R5-0-1: MAX_PER_LAYER 截断时保护强制标的。
-
-        截断前剔除 MANDATORY_CODES，截断后再补回——避免强制标的（510300/159338
-        等）因排名靠后被行业均衡/截断挤出（P1-1 A500 缺失根因之一）。
-        """
-        mandatory = [e for e in balanced if e.get("symbol") in MANDATORY_CODES]
-        rest = [e for e in balanced if e.get("symbol") not in MANDATORY_CODES]
-        return mandatory + rest[:max_n]
+        """R5-0-1: MAX_PER_LAYER 截断时保护强制标的（Batch 4 提取到 engine）。"""
+        from app.engine.pool_balancing import truncate_with_mandatory_protection
+        return truncate_with_mandatory_protection(balanced, max_n)
 
 
     def _recheck_mandatory_after_truncate(
@@ -898,49 +750,17 @@ class MarketDataHub(
         pool: dict[str, list[dict[str, Any]]],
         flat: list[dict[str, Any]],
     ) -> None:
-        """R5-0-1: 截断后强制标的二次校验。
-
-        对齐 etf_scanner._log_missing_required 口径：截断后再次校验
-        MANDATORY_CODES ∪ CORE_REQUIRED 是否在池中，缺失时从 flat 找回注入。
-        失败仅 WARNING + 注入，不抛异常；revert 只需删除步骤 6b 的调用。
-        """
-        if not flat:
-            return  # 扫描失败，不强行注入（与 _ensure_mandatory 语义一致）
+        """R5-0-1: 截断后强制标的二次校验（Batch 4 提取到 engine/pool_balancing）。"""
+        from app.engine.pool_balancing import recheck_mandatory_after_truncate
         required = MANDATORY_CODES | set(getattr(etf_scanner, "CORE_REQUIRED", []))
-        for code in sorted(required):
-            in_pool = any(
-                e["symbol"] == code for layer in pool.values() for e in layer
-            )
-            if in_pool:
-                continue
-            found = next((e for e in flat if e.get("symbol") == code), None)
-            if not found:
-                continue
-            # 与 _ensure_mandatory 相同的定层逻辑
-            if code in ("510300", "159338"):
-                target = LAYER_CORE
-            elif code in ("518880", "511090"):
-                target = LAYER_DEFENSE
-            else:
-                target = LAYER_SATELLITE
-            found["layer"] = target
-            pool.setdefault(target, []).append(found)
-            logger.warning("MarketDataHub: re-injected mandatory %s -> %s after truncate", code, target)
+        recheck_mandatory_after_truncate(pool, flat, required_codes=required)
 
 
     @staticmethod
     def _pct_rank(value: float, series: list[float]) -> float:
-        """层内截面百分位 [0,1]（含并列按半计）。
-
-        round15 方案二: 对绝对量级不敏感——同列同单位即可（amount 万元/元、
-        fund_scale 亿/元混用时百分位仍可比），彻底消除 composite 的量纲魔法数。
-        """
-        if not series:
-            return 0.0
-        n = len(series)
-        below = sum(1 for v in series if v < value)
-        equal = sum(1 for v in series if v == value)
-        return (below + 0.5 * equal) / n
+        """层内截面百分位（Batch 4 提取到 engine/composite_signal）。"""
+        from app.engine.composite_signal import pct_rank
+        return pct_rank(value, series)
 
 
     def _compute_composite(
@@ -951,57 +771,18 @@ class MarketDataHub(
         layer_amounts: list[float] | None = None,
         layer_scales: list[float] | None = None,
     ) -> float:
-        """按层+市况计算综合得分。
+        """按层+市况计算综合得分（Batch 4 提取到 engine/composite_signal）。
 
-        非交易时段（P6 fix-plan-pool）: 流动性数据可能为昨日值，
-        降低流动性权重，以规模排序为主。
-
-        round15 方案二（docs §5.2）: 分量统一量纲——core/satellite/defense 三层
-        传层内截面向量（layer_amounts/layer_scales）时用：
-            factor 项 = w.factor × tanh(factor_sum/6)      [-1,1]（防极端 z 支配）
-            liquidity = w.liquidity × _pct_rank(amount)    [0,1]
-            scale     = w.scale × _pct_rank(fund_scale)    [0,1]
-        向后兼容：layer_amounts=None 时回退旧 `*1e-9` 路径（research/opportunistic
-        与外部直接调用行为不变）。
+        注入实例辅助方法（_is_market_hours/_normalize_regime/_pct_rank）以保留
+        门面上的 mock.patch 语义；缺省用 engine 内纯实现。
         """
-        factor_scores = item.get("factor_scores", {})
-        # P0-4: 仅聚合顶层键求和（避免原始点分键双倍计数 + RSI=50 主导排序）
-        AGGREGATE_KEYS = {"technical", "momentum", "valuation", "sentiment"}
-        factor_sum = sum(v for k, v in factor_scores.items() if k in AGGREGATE_KEYS) if factor_scores else 0
-        amount = float(item.get("amount", 0) or 0)
-        scale = float(item.get("fund_scale", 0) or 0)
-        opp_score = float(item.get("composite_score", 0.5))
-
-        layer_weights = _LAYER_WEIGHTS.get(layer, {})
-        regime_key = self._normalize_regime(regime)
-        w = layer_weights.get(regime_key, layer_weights.get("neutral", _BASE_WEIGHTS))
-
-        # P6: 非交易时段，流动性权重减半（数据可能为昨日值）
-        is_market_open = self._is_market_hours()
-        liquidity_weight = w.get("liquidity", 0)
-        if not is_market_open:
-            liquidity_weight *= 0.5
-            scale_weight = w.get("scale", 0) + w.get("liquidity", 0) * 0.5
-        else:
-            scale_weight = w.get("scale", 0)
-
-        if layer in ("core", "satellite", "defense", "opportunistic"):
-            # round15 方案二: 层内百分位量纲（仅 core/satellite/defense 三层启用）
-            if layer in ("core", "satellite", "defense") and layer_amounts is not None:
-                import math as _math
-                score = w["factor"] * _math.tanh(factor_sum / 6.0)
-                score += liquidity_weight * self._pct_rank(amount, layer_amounts)
-                score += scale_weight * self._pct_rank(scale, layer_scales or [])
-            else:
-                score = w["factor"] * factor_sum
-                score += liquidity_weight * amount * 1e-9
-                score += scale_weight * scale * 1e-9
-            if layer != "core":
-                score += w.get("opp", 0) * opp_score
-        else:
-            score = amount * 1e-9  # research: liquidity only
-
-        return score
+        from app.engine.composite_signal import compute_composite
+        return compute_composite(
+            item, layer, regime, layer_amounts, layer_scales,
+            is_market_hours=self._is_market_hours,
+            normalize_regime=self._normalize_regime,
+            pct_rank=self._pct_rank,
+        )
 
 
     @staticmethod
@@ -1009,45 +790,9 @@ class MarketDataHub(
         items: list[dict[str, Any]],
         max_n: int = 10,
     ) -> list[dict[str, Any]]:
-        """P4 fix-plan-pool: 按行业/segment 均衡化候选池。
-
-        确保同一层内覆盖多个行业，避免某行业一家独大。
-        策略：
-          1. 按 segment 分组
-          2. 每个 segment 取 composite_score 最高的 1 只
-          3. 若还有余量，从剩余高分中补齐
-        """
-        if not items:
-            return []
-        if len(items) <= max_n:
-            return items
-
-        from collections import defaultdict
-        # 按 segment 分组
-        groups: dict[str, list[dict]] = defaultdict(list)
-        for item in items:
-            seg = item.get("segment", "") or item.get("industry", "unknown")
-            groups[seg].append(item)
-
-        # 每个 segment 排序，取 top 1
-        selected: list[dict] = []
-        selected_codes: set[str] = set()
-        for seg, group in groups.items():
-            group_sorted = sorted(group, key=lambda x: x.get("composite_score", 0), reverse=True)
-            top = group_sorted[0]
-            selected.append(top)
-            selected_codes.add(top.get("symbol", ""))
-
-        # 如果还不够，从剩余中按得分补齐
-        if len(selected) < max_n:
-            remaining = []
-            for item in items:
-                if item.get("symbol", "") not in selected_codes:
-                    remaining.append(item)
-            remaining.sort(key=lambda x: x.get("composite_score", 0), reverse=True)
-            selected.extend(remaining[:max_n - len(selected)])
-
-        return selected[:max_n]
+        """P4 fix-plan-pool: 按行业/segment 均衡化候选池（Batch 4 提取到 engine）。"""
+        from app.engine.pool_balancing import balance_by_industry
+        return balance_by_industry(items, max_n)
 
 
 # Global singleton

@@ -34,7 +34,9 @@ TESTS_DIR = pathlib.Path(__file__).resolve().parent.parent / "tests"
 #   （方案 C Step 1 结构契约测试，随 app/analysis/llm/ 拆分新增）。
 # 2026-08-18 (giant-file split Batch 3): 229. +1 = tests/test_market_data_hub_structure.py
 #   （方案 A Step 1 结构契约测试，随 app/services/hub/ 拆分新增）。
-BASELINE = 229
+# 2026-08-18 (giant-file split Batch 4): 230. +1 = tests/test_engine_pure_functions.py
+#   （方案 A Step 2 engine 纯函数单测，覆盖 composite_signal+pool_balancing ≥90%）。
+BASELINE = 230
 
 
 def count_test_files() -> int:
