@@ -147,7 +147,9 @@ defineEmits(['update:capitalOn', 'update:capitalOff', 'refresh', 'refresh-on', '
 .capital-desc {
   margin: 0 0 0 auto;
   font-size: var(--font-size-xs);
-  color: var(--color-brand-400);
+  /* R64 (round28): 对比度修复——brand-400(#60a5fa) 在 brand-50 背景上 <4.5:1
+     （Lighthouse a11y 82）。改 brand-700 达标。 */
+  color: var(--color-brand-700);
   line-height: 1.4;
 }
 
@@ -191,7 +193,8 @@ defineEmits(['update:capitalOn', 'update:capitalOff', 'refresh', 'refresh-on', '
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--color-brand-400);
+  /* R64 (round28): 对比度修复——brand-400 在浅色背景 <4.5:1，改 brand-600 达标 */
+  color: var(--color-brand-600);
   cursor: pointer;
   transition: all var(--duration-fast);
   flex-shrink: 0;

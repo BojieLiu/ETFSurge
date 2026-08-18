@@ -1023,8 +1023,9 @@ onMounted(loadTab)
 }
 .row-check { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; margin-right: 4px; border-radius: 50%; background: var(--color-brand-600); color: #fff; font-size: 11px; font-weight: 700; }
 .exchange-badge { display: inline-flex; align-items: center; margin-left: var(--space-2); padding: 2px var(--space-2); font-size: var(--font-size-xs); font-weight: var(--font-weight-semibold); border-radius: var(--radius-full); vertical-align: middle; }
-.exchange-badge.on { color: #1d6fe0; background: rgba(29, 111, 224, 0.12); }
-.exchange-badge.off { color: #b8860b; background: rgba(184, 134, 11, 0.14); }
+/* R64 (round28): 对比度修复——旧 on=#1d6fe0 off=#b8860b 在浅色背景上 <4.5:1（Lighthouse a11y 82）。改深一档（brand-700/warning-700）达标。 */
+.exchange-badge.on { color: var(--color-brand-700); background: rgba(29, 78, 216, 0.12); }
+.exchange-badge.off { color: var(--color-warning-700); background: rgba(180, 83, 9, 0.14); }
 
 .weight-cell { min-width: 120px; }
 .weight-control { width: 100%; }

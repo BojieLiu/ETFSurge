@@ -11,6 +11,7 @@ from ..database import async_session
 from ..services.market_service import (
     add_watchlist, update_watchlist, remove_watchlist, batch_remove_watchlist, search_hk_us,
     _sort_search_results,
+    infer_market_from_symbol,  # R62 (round28): indicators/signal asset_type 按 symbol 推断
 )
 from ..analysis.indicators import compute_all_indicators, compute_chart_data
 from ..analysis.signal import generate_signal
@@ -446,6 +447,13 @@ async def indicators(
     asset_type: str = Query("A"),
     period: str = Query("daily"),
 ) -> dict:
+    # R62 (round28): asset_type 按 symbol 推断市场——旧实现默认 "A"，对 US/HK 标的
+    # （AAPL/00700）错标导致数据源路由错位（indicators 恒返 asset_type:"A"）。
+    # 仅当调用方未显式传非 A 值时推断（显式传了尊重调用方）。
+    if str(asset_type).upper() == "A":
+        _inferred = infer_market_from_symbol(symbol)
+        if _inferred != "A":
+            asset_type = _inferred
     hist = await market_data_hub.get_market_history(symbol, asset_type, period)
     # F10 R32: K 线为空/不足（<30 根）时显式标记 data_available=false——
     # 前端 TechnicalAnalysisModal 收到后显示空态，不再展示占位指标
@@ -462,6 +470,7 @@ async def indicators(
         return resp
     result = compute_all_indicators(hist)
     result["data_available"] = True
+    result["asset_type"] = asset_type
     # F0-4: 全源失败走 stale 缓存兜底时，显式标记数据新鲜度
     try:
         if market_data_hub.is_kline_stale(symbol):
@@ -477,6 +486,11 @@ async def signal(
     asset_type: str = Query("A"),
     period: str = Query("daily"),
 ) -> dict:
+    # R62 (round28): 同 indicators——按 symbol 推断市场避免 US/HK 错标
+    if str(asset_type).upper() == "A":
+        _inferred = infer_market_from_symbol(symbol)
+        if _inferred != "A":
+            asset_type = _inferred
     hist = await market_data_hub.get_market_history(symbol, asset_type, period)
     # F10 R32: K 线不足时显式拒绝（signal 对空指标的 hold 信号尤其误导）
     if not hist or len(hist) < 30:
@@ -492,6 +506,7 @@ async def signal(
     ind = compute_all_indicators(hist)
     result = generate_signal(ind)
     result["data_available"] = True
+    result["asset_type"] = asset_type
     # F0-4: stale 标记透传
     try:
         if market_data_hub.is_kline_stale(symbol):

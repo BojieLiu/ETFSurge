@@ -51,7 +51,9 @@ describe('SignalPanel R25 中性区 info + 综合信号卡', () => {
     })
     const degraded = wrapper.find('.composite-degraded')
     expect(degraded.exists()).toBe(true)
-    expect(degraded.text()).toContain('因子数据缺失')
+    // round27 R52: 组件渲染「因子缺失，综合信号不可用」（signal=null → compositeUnavailable），
+    // 断言公共子串「因子缺失」覆盖两种文案（含兜底 reason「因子数据缺失，综合信号不可用」）
+    expect(degraded.text()).toContain('因子缺失')
     // 负向：降级态不得出现「买入/卖出/持有」合成结论
     expect(degraded.text()).not.toMatch(/买入|卖出|持有/)
   })

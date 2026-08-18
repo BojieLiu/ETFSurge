@@ -71,18 +71,30 @@ class TestDesignBudgetElastic:
         importlib.reload(tm)
 
     @pytest.mark.asyncio
-    async def test_small_budget_still_errors_gracefully(self, monkeypatch):
-        """预算极小（0.2s）且源慢 → failed + 超时文案（不崩溃、可重试）。"""
+    async def test_small_budget_times_out_then_degrade_retry(self, monkeypatch):
+        """R59②: 预算极小且源慢 → 超时后触发 skip_refresh 降级重试；重试仍空 → 诚实失败。
+
+        旧行为：首次 wait_for 超时即 failed（"方案生成超时"）——掩盖数据源冷却。
+        round28 R59②: 超时 → 以 skip_refresh=True 降级重试（用缓存快照）；重试也拿不到
+        策略才诚实 failed（错误文案为「策略生成为空」而非「方案生成超时」）。
+        """
+        calls = []
+
         async def slow_generate(**kwargs):
-            await asyncio.sleep(10)
+            calls.append(dict(kwargs))
+            await asyncio.sleep(0.5)  # 每次调用都慢
             return {"strategies": [], "market_context": {}, "error": None}
 
         mgr = FakeMgr()
-        monkeypatch.setattr(tm, "DESIGN_DATA_TIMEOUT", 0.2)
+        monkeypatch.setattr(tm, "DESIGN_DATA_TIMEOUT", 0.1)
         monkeypatch.setattr("app.services.strategy_design.generate_enhanced_design", slow_generate)
         monkeypatch.setattr(tm, "_notify", lambda *a, **k: asyncio.sleep(0))
         monkeypatch.setattr(tm, "TaskManager", FakeMgr)
 
         await tm._design_pipeline_with_semaphore(mgr, mgr.task_id)
-        assert mgr.failed, "超时预算内应标记 failed（可重试）"
-        assert "超时" in str(mgr.failed.get("error_message", ""))
+        assert mgr.failed, "重试后仍无策略 → 应标记 failed（诚实失败，不崩溃）"
+        # R59② 负向：不得用「方案生成超时」空响应掩盖数据源冷却
+        assert "方案生成超时" not in str(mgr.failed.get("error_message", "")), \
+            "R59② 负向：禁止「方案生成超时」掩盖数据源冷却（应报策略生成为空）"
+        assert len(calls) == 2 and calls[1].get("skip_refresh") is True, \
+            f"超时后应降级重试（skip_refresh=True），实际 calls={calls}"

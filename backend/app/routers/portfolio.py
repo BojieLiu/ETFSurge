@@ -471,6 +471,12 @@ async def get_strategy_check_result(task_id: int):
         "risk_warnings": result.get("risk_warnings", []),
         "market_regime": result.get("market_regime", ""),
         "record_id": task.get("record_id"),
+        # round28 R57 验收: 契约 strategy-check-v2.md 要求 coverage 字段
+        # （coverage.coverage_pct 必须 = 1.0）——旧实现未透传，前端拿不到覆盖率。
+        "coverage": result.get("coverage"),
+        "llm_layer_ok": result.get("llm_layer_ok"),
+        "is_fallback": result.get("is_fallback"),
+        "report_quality": result.get("report_quality"),
     }
 
 

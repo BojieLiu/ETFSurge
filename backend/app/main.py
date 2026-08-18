@@ -68,6 +68,61 @@ async def _run_warmup_sequence(tasks: list) -> None:
             logger.warning("[lifespan] warmup sequence step failed (non-fatal): %s", e)
 
 
+# R58 (round28): IC 回填「K 线缓存未就绪」重试逻辑——提取为模块级可测函数。
+# 旧实现（main.py 内嵌）等 20s 检查一次，未就绪即 return（startup-once 永不重试）；
+# 生产库 factor_ic_records 恒 4 个 trade_date（round28 §7 R58）。现改为延迟 + 退避
+# 重试 ≤max_retries 次，K 线就绪或预热完成后补跑；仍不就绪才返回空（调用方诚实放弃）。
+async def _wait_for_kline_rows(
+    market_data_hub,
+    *,
+    initial_sleep: float = 20.0,
+    retry_delays: tuple[float, ...] = (30.0, 60.0, 120.0),
+    max_retries: int = 3,
+) -> dict:
+    """等待 MarketDataHub 的 K 线缓存就绪（含退避重试）。
+
+    Returns:
+        就绪后的 _kline_cache_rows dict；重试耗尽仍空 → {}（调用方决定是否放弃）。
+    """
+    import asyncio as _aio
+    rows: dict = {}
+    for _attempt in range(max_retries + 1):
+        await _aio.sleep(initial_sleep if _attempt == 0 else retry_delays[_attempt - 1])
+        rows = getattr(market_data_hub, "_kline_cache_rows", None) or {}
+        if rows:
+            break
+        if _attempt < max_retries:
+            logger.info(
+                "[ic_backfill] K 线缓存未就绪（第 %d 次检查），%.0fs 后重试（R58）",
+                _attempt + 1, retry_delays[_attempt],
+            )
+    return rows
+
+
+# R58 延伸 (round28): 等组合池就绪——磁盘 K 线缓存使 kline 门秒过，但启动时组合池
+# 尚未由设计数据预热填充（refresh() 60-90s），旧实现「组合池为空，跳过」恒跳过。
+# 提取为模块级可测函数：轮询 get_pool() 直至非空（≤checks×interval），超时返回空。
+async def _wait_for_pool_symbols(
+    market_data_hub,
+    *,
+    checks: int = 6,
+    interval: float = 20.0,
+) -> list[str]:
+    """等待 MarketDataHub 候选池就绪，返回池内 symbol 列表（不含 CASH）。"""
+    for _attempt in range(checks):
+        try:
+            _pool = market_data_hub.get_pool()
+            _syms = [it.get("symbol") for layer in _pool.values()
+                     if isinstance(_pool, dict)
+                     for it in layer if it.get("symbol") not in ("CASH",)]
+        except Exception:
+            _syms = []
+        if _syms:
+            return _syms
+        await asyncio.sleep(interval)
+    return []
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
@@ -264,8 +319,11 @@ async def lifespan(app: FastAPI):
                 _mark["done"] = True
                 _mark["success"] = False
                 logger.exception("全球指数缓存预热失败（非交易时段正常）")
-    if not _SKIP_WARMUP:
-        _warmup_tasks.append(asyncio.create_task(_warmup_global_indices()))
+    # R56 (round28): 删除独立启动 global_indices 预热 task（旧逻辑残留）——
+    # _warmup_sequence_task 的 sequence 内已包含 global_indices 预热（:334）。
+    # 两者并发启动、同时 miss 24h 缓存 → 各自网络拉取 → 预热 18.4s 双重执行回归
+    # （warmup_timing.json 两条记录）。F3 重构（5b0c2fa）时遗漏删除旧独立 task
+    # 是「重构遗漏」典型；此处只保留 sequence 调用。
 
     # 启动时预热 ETF 缓存（非阻塞），带超时保护
     async def _warmup_etf_cache():
@@ -320,6 +378,74 @@ async def lifespan(app: FastAPI):
         except (Exception, asyncio.CancelledError) as exc:
             logger.warning("板块缓存预热任务启动失败（非阻塞）：%s", exc)
 
+    # R59④ (round28): 设计链路数据预热——候选池 K 线缓存 + 因子矩阵。
+    # 旧实现 design 首呼撞冷 K 线缓存（refresh_kline 42-75s 全量建库）+ 数据源冷却
+    # → 90s 硬预算被吃光（round28 §14.4 task 559 超时失败）。sequence 末尾执行
+    # （此刻 pool 已由 _warmup_market_cache 填充），预算 25s 内完成 K 线缓存刷新，
+    # 使启动后首呼 design refresh ≤10s（热缓存）。后台 + 失败仅 WARNING 不阻塞启动。
+    async def _warmup_design_data():
+        try:
+            from .services.market_data_hub import market_data_hub
+
+            async def _do_design_warmup():
+                _mark = app.state.warmup.setdefault("design_data", {
+                    "done": False, "success": False, "label": "设计数据（K线/因子）",
+                })
+                try:
+                    # 0. 等行情缓存预热任务收敛（refresh_market_cache 只刷实时报价，不填
+                    #    pool——但先让它跑完可减少启动期数据源并发争抢；150s 上限，超时
+                    #    仅 DEBUG，不阻塞 startup）。
+                    _mkt_task = getattr(app.state, "_market_warmup_task", None)
+                    if _mkt_task is not None:
+                        try:
+                            await asyncio.wait_for(asyncio.shield(_mkt_task), timeout=150)
+                        except (Exception, asyncio.CancelledError):
+                            logger.debug("[warmup] market warmup task wait timed out/failed (non-fatal)")
+                    # 1. refresh() 填充候选池——**唯一真实入口**（round28 实测：等 market
+                    #    warmup + 轮询 pool 恒空跳过，因为 refresh_market_cache 不写 _pool）。
+                    #    预算 150s 覆盖 scanner(≤90s)+分类+索引重建；失败仅降级跳过。
+                    try:
+                        await asyncio.wait_for(market_data_hub.refresh(), timeout=150)
+                    except (Exception, asyncio.CancelledError) as exc:
+                        logger.debug("[warmup] design-data refresh failed/timed out (non-fatal): %s", exc)
+                    # 2. 候选池读取（refresh 完成后 pool 已填充；冷却/TTL 跳过则用旧 pool）
+                    _syms: list[str] = []
+                    for _attempt in range(4):
+                        try:
+                            _pool = market_data_hub.get_pool()
+                            _syms = list({str(it.get("symbol")) for layer in _pool.values()
+                                          if isinstance(_pool, dict) and isinstance(layer, list)
+                                          for it in layer if it.get("symbol") not in ("CASH",)})
+                        except Exception:
+                            _syms = []
+                        if _syms:
+                            break
+                        await asyncio.sleep(2.0)
+                    if not _syms:
+                        logger.debug("[warmup] design-data warmup skipped: pool empty after refresh")
+                        _mark["done"] = True
+                        _mark["success"] = False
+                        return
+                    # 3. K 线缓存（磁盘缓存命中时秒级返回；miss 时 Semaphore(5) 并发拉取）
+                    await asyncio.wait_for(market_data_hub.refresh_kline(_syms[:30]), timeout=25)
+                    # 4. 因子矩阵预计算（factor_scores 随 pool 项挂载，无需单独预热——
+                    #    refresh_kline 已使 get_factor_matrix 首个调用命中缓存）
+                    _mark["done"] = True
+                    _mark["success"] = True
+                    logger.info("[warmup] design-data warmup done: %d pool symbols kline cached (R59④)",
+                                len(_syms))
+                except (Exception, asyncio.CancelledError) as exc:
+                    _mark["done"] = True
+                    _mark["success"] = False
+                    logger.debug("[warmup] design-data warmup failed (non-fatal): %s", exc)
+
+            # 不 await：立即返回让 startup 就绪；实际预热在后台进行
+            task = asyncio.create_task(_do_design_warmup())
+            app.state._design_warmup_task = task
+            logger.info("设计数据预热已在后台启动（非阻塞，R59④）")
+        except (Exception, asyncio.CancelledError) as exc:
+            logger.warning("设计数据预热任务启动失败（非阻塞）：%s", exc)
+
     async def _warmup_sequence_task():
         # F3b (round27): 预热预算门禁——非阻塞 WARN。round27 §13.6 指出预热 profiler
         # 只写报告、无预算断言，导致 20s→34.5s 回归未被拦截。此处记录总耗时，超过
@@ -335,6 +461,12 @@ async def lifespan(app: FastAPI):
                 _warmup_sector_cache(),
                 _background_instruments_sync(),
                 _background_indices_meta_sync(),
+                # R59④ (round28): 设计链路数据预热——候选池 K 线缓存 + 因子矩阵。
+                # 旧实现 design 首呼撞冷 K 线缓存（refresh_kline 42-75s 全量建库）
+                # + 预热未完成时数据源冷却 → 90s 硬预算被吃光（task 559 超时失败）。
+                # 预热 sequence 末尾执行（此刻 pool 已由 _warmup_market_cache 填充），
+                # 后台 + 短预算（不阻塞 startup 就绪，失败仅 WARNING）。
+                _warmup_design_data(),
             ])
         finally:
             _seq_elapsed = time.time() - _seq_start
@@ -560,11 +692,27 @@ async def lifespan(app: FastAPI):
         from .database import async_session
 
         # 等 K 线缓存就绪（refresh_kline 在行情预热中填充，约 10-20s）
-        await asyncio.sleep(20)
+        # R58 (round28): 旧实现等 20s 后只检查一次，未就绪即「永久跳过」——
+        # startup 时 K 线预热未完成（refresh_kline 42-75s 冷建库），回填任务
+        # 跳过即永不再试，factor_ic_records 恒 4 个 trade_date。改为**延迟 + 重试**：
+        # 未就绪时退避等待（30s/60s/120s）重试 ≤3 次，K 线就绪或预热完成后补跑。
+        # 仍不就绪才诚实放弃（WARNING），不静默跳过。重试逻辑提取为模块级
+        # _wait_for_kline_rows（可单测，round28 §12 防护缺口 3）。
+        _IC_BACKFILL_MAX_RETRIES = 3
+        _IC_BACKFILL_RETRY_DELAYS = (30.0, 60.0, 120.0)
+        rows = await _wait_for_kline_rows(
+            _hub,
+            initial_sleep=20.0,
+            retry_delays=_IC_BACKFILL_RETRY_DELAYS,
+            max_retries=_IC_BACKFILL_MAX_RETRIES,
+        )
         try:
-            rows = _hub._kline_cache_rows
             if not rows:
-                logger.info("[ic_backfill] K 线缓存未就绪，跳过历史回填")
+                logger.warning(
+                    "[ic_backfill] K 线缓存未就绪（重试 %d 次后放弃），历史回填跳过——"
+                    "预热未完成或 refresh_kline 未执行（R58）",
+                    _IC_BACKFILL_MAX_RETRIES,
+                )
                 return
             # 防重复回填：已回填（≥200 交易日）则跳过
             async with async_session() as db:
@@ -572,12 +720,12 @@ async def lifespan(app: FastAPI):
             if _existing >= 200:
                 logger.info("[ic_backfill] 已回填（%d 交易日），跳过", _existing)
                 return
-            # 取池内 symbol（与持久化循环一致）
-            _pool = _hub.get_pool()
-            _syms = [it.get("symbol") for layer in _pool.values() if isinstance(_pool, dict)
-                     for it in layer if it.get("symbol") not in ("CASH",)]
+            # 取池内 symbol（与持久化循环一致）——R58 延伸：磁盘 K 线缓存使 kline 门
+            # 秒过，但启动时组合池尚未由设计数据预热填充（refresh() 60-90s），旧实现
+            # 「组合池为空，跳过」恒跳过。改为轮询等待 pool 就绪（≤6×20s=120s）。
+            _syms = await _wait_for_pool_symbols(_hub)
             if not _syms:
-                logger.info("[ic_backfill] 组合池为空，跳过")
+                logger.info("[ic_backfill] 组合池长时间为空（等待后放弃），跳过")
                 return
             # 构造列式 K 线（时序升序）+ dates
             kline: dict[str, dict] = {}
@@ -607,6 +755,10 @@ async def lifespan(app: FastAPI):
             _snap_at = getattr(_reg, "_last_computed_at", None)
             try:
                 for i in range(n - 1, 0, -1):
+                    # R58 修复延伸: compute() 在 market_data 注入时是纯同步 CPU 计算
+                    #（无 await，因子 pandas 数学），499 次迭代连续执行会长时间独占事件
+                    # 循环 → /health 等请求超时。每次迭代让出控制权，保持服务可响应。
+                    await asyncio.sleep(0)
                     truncated: dict[str, dict] = {}
                     for sym, kd in kline.items():
                         if i < len(kd["close"]):

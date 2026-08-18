@@ -291,13 +291,35 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
         # OPT-06 + O10 (round8 §7): DATA 预算弹性化——45s 硬编码 → DESIGN_DATA_TIMEOUT
         # env（默认 90s）。冷缓存首次全量建 K 线缓存实测 42-75s（Semaphore(5) ×
         # 20s/只），45s 恒被截断报"方案生成超时"；热缓存时 ~10s 完成。
-        result = await asyncio.wait_for(
-            generate_enhanced_design(
-                capital=capital,
-                constraints=constraints,
-            ),
-            timeout=DESIGN_DATA_TIMEOUT,
-        )
+        # R59② (round28): 超时不再直接失败——捕获 TimeoutError 后以 skip_refresh=True
+        # 重试（跳过 refresh() 撞慢源），用内存 last-good / T-1 快照 / 静态池产出
+        # 降级方案（degradation.mode=degraded），盘后/冷启动首呼永远能拿到方案。
+        try:
+            result = await asyncio.wait_for(
+                generate_enhanced_design(
+                    capital=capital,
+                    constraints=constraints,
+                ),
+                timeout=DESIGN_DATA_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "[design_pipeline] task %d data collection timed out after %.0fs — "
+                "retrying with skip_refresh degrade (R59②)",
+                task_id, DESIGN_DATA_TIMEOUT,
+            )
+            await mgr.update_task(task_id, progress=15,
+                                  stage="数据源超时，降级重试（使用缓存快照）")
+            await _notify(task_id, "running", progress=15,
+                          stage="数据源超时，降级重试（使用缓存快照）")
+            result = await asyncio.wait_for(
+                generate_enhanced_design(
+                    capital=capital,
+                    constraints=constraints,
+                    skip_refresh=True,
+                ),
+                timeout=30,
+            )
 
         strategies = result.get("strategies", [])
         market_context = result.get("market_context", {})

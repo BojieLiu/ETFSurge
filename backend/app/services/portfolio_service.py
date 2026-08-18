@@ -1672,7 +1672,14 @@ def _within_symbol_factor_composite(fs: dict) -> float | None:
     try:
         from app.core.factor_aggregate import aggregate_factor_scores
         from ..factors.factor_registry import registry as factor_registry
-        agg = aggregate_factor_scores(fs, definitions=factor_registry._factors)
+        # R66 (round28): 与设计屏共用同一复合函数——传 ic_series（IC 加权聚合）。
+        # 旧实现不传 ic_series → 等权回退，而 allocation_engine 传 ic_series
+        # （IC 加权），同标的聚合值不同 → 两屏数值量级不一致（-0.9007 vs -0.08）。
+        agg = aggregate_factor_scores(
+            fs,
+            definitions=factor_registry._factors,
+            ic_series=getattr(factor_registry, "_ic_series_cache", None),
+        )
     except Exception:
         return None
     if not isinstance(agg, dict):

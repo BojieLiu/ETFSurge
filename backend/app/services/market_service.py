@@ -1193,6 +1193,35 @@ def _norm_asset_symbol(symbol: str) -> str:
     return s
 
 
+# R62 (round28): 按 symbol 推断市场（HK/US/A）——indicators/signal/history 等
+# 端点 asset_type 参数默认 "A"，但对 US/HK 标的（AAPL/00700）错标导致数据源
+# 路由错位。推断规则（纯启发式，同步无 IO）：
+#   - 显式 .HK/.US 后缀 → 对应市场
+#   - 纯字母代码（AAPL/SPY/QQQ）→ US（A 股代码全数字）
+#   - 5 位数字且以 0 开头（00700/02800）→ HK（A 股 ETF/股票为 6 位）
+#   - 其余 → A
+def infer_market_from_symbol(symbol: str) -> str:
+    """按 symbol 形态推断市场代码（'A'/'HK'/'US'），用于 asset_type 缺省/错标兜底。
+
+    规则保守：无法确定时返回 'A'（保持旧行为，不引入新错位）。
+    """
+    s = str(symbol or "").strip().upper()
+    if not s:
+        return "A"
+    if s.endswith(".HK"):
+        return "HK"
+    if s.endswith(".US"):
+        return "US"
+    # 纯字母（≥2 位）→ US（A 股代码恒为数字）
+    if s.isalpha() and len(s) >= 2:
+        return "US"
+    # 去交易所前缀后判断：sh688981 → 688981（A 股）；00700（5 位 0 开头）→ HK
+    _norm = _norm_asset_symbol(s)
+    if _norm.isdigit() and len(_norm) == 5 and _norm.startswith("0"):
+        return "HK"
+    return "A"
+
+
 async def _lookup_instrument_type(symbol: str) -> str | None:
     """round10 P2-O②: 查 instruments 表 asset_type（'etf'/'stock'）——港股 ETF 独立段
     sync 后 asset_type='etf'；查不到返回 None（调用方按名称兜底）。"""
@@ -1318,6 +1347,26 @@ async def get_asset_realtime(symbol: str, asset_type: str) -> dict | None:
                         break
     except Exception:
         pass
+
+    # R61 (round28): 港股 realtime 整链降级——数据源冷却时 fetch_hk_stock_realtime 返回
+    # 空 → result=None → 前端 DATA_UNAVAILABLE（00700 整链不可用）。补 last-good
+    # 报价（quote_key，24h TTL，R45 成功时写入）兜底：读到则返回 is_estimated 标注，
+    # 前端展示「估」而非整链空白；HK 专属（A 股已有 watchlist 层 T-1 收盘兜底）。
+    if result is None and asset_type == "HK":
+        try:
+            _lg = await cache_get(quote_key(symbol, asset_type))
+            if _lg and _lg.get("price") is not None:
+                _lg = dict(_lg)
+                _lg["is_estimated"] = True
+                _lg["estimate_source"] = "last_good"
+                result = _lg
+                logger.info(
+                    "[market_service] HK %s realtime sources empty — last-good quote fallback "
+                    "(price=%s, as_of=%s, R61)",
+                    symbol, _lg.get("price"), _lg.get("as_of"),
+                )
+        except Exception:
+            pass
 
     # R45 (round27): 成功取到实时价 → 写入 last-good 报价（quote_key，24h TTL）。
     # 周末/非交易时段回退时，watchlist 从此读取最近交易日的真实收盘价（stale），

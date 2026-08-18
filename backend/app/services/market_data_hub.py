@@ -17,6 +17,9 @@ from __future__ import annotations
 import asyncio
 import ast
 import logging
+import os
+import time
+import json
 from dataclasses import dataclass, field
 from typing import Any
 from datetime import datetime
@@ -335,6 +338,26 @@ class PoolDiff:
     timestamp: str = ""
 
 
+def _rule_news_summary(item: dict) -> str | None:
+    """R65 (round28): 规则摘要兜底——LLM 失败/配额空窗时保证重要条目 ai_summary 非 null。
+
+    取 content 首句（≤80 字截断）；无 content 回落标题。确定性纯函数，无 IO，
+    供 enrich_news_summaries 在 LLM 调用失败后降级使用（来源标注 ai_summary_source="rule"）。
+    """
+    content = str(item.get("content") or "").strip()
+    if content:
+        import re as _re
+        _first = _re.split(r"[。！？!?\n]", content)[0].strip()
+        if len(_first) > 80:
+            _first = _first[:80] + "…"
+        if _first:
+            return _first
+    title = str(item.get("title") or "").strip()
+    if title:
+        return title
+    return None
+
+
 class MarketDataHub:
     """候选池管理器。
 
@@ -371,6 +394,12 @@ class MarketDataHub:
         self._kline_cache_ts: float = 0.0
         self._kline_cache_symbols: list[str] = []
         self._kline_cache_lock: asyncio.Lock = asyncio.Lock()  # R3: 单锁保护
+
+        # R59③ (round28): K 线缓存持久化——重启后首呼 design 不再全量冷建库
+        # （refresh_kline 42-75s，round28 §14.4 冷启动超时根因之一）。与
+        # indices_cache.json / pool 快照同模式：24h 内磁盘缓存启动即加载复用；
+        # 过期诚实重建（不复用过期数据）。加载失败静默（缓存缺失正常）。
+        self._load_kline_cache_sync()
 
         # 兼容旧字段名（get_kline 仍可读）
         self._kline_cache: dict[str, dict[str, Any]] = {}
@@ -412,6 +441,89 @@ class MarketDataHub:
             "volume": vols,
             "change_pct": change_pct,
         }
+
+    # ── R59③ (round28): K 线缓存持久化 ────────────────────────────────────
+    # 与 _persist_snapshot_sync（round24 R26）同模式：落盘 data/kline_cache.json，
+    # 24h 内启动加载复用（消除重启后 refresh_kline 42-75s 冷建库），过期诚实重建。
+    _KLINE_CACHE_PERSIST_PATH: str | None = None
+    _KLINE_CACHE_TTL: float = 86400.0  # 24h
+
+    def _kline_cache_path(self) -> str:
+        """磁盘缓存文件路径（data/kline_cache.json）。"""
+        if self._KLINE_CACHE_PERSIST_PATH:
+            return self._KLINE_CACHE_PERSIST_PATH
+        try:
+            from ..config import settings
+            _data_dir = getattr(settings, "data_dir", None) or os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data"
+            )
+        except Exception:
+            _data_dir = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data"
+            )
+        self._KLINE_CACHE_PERSIST_PATH = os.path.join(_data_dir, "kline_cache.json")
+        return self._KLINE_CACHE_PERSIST_PATH
+
+    def _load_kline_cache_sync(self) -> None:
+        """启动加载磁盘 K 线缓存（24h 内复用；过期/缺失/损坏 → 静默空，诚实重建）。
+
+        仅填充行式缓存 + 时间戳；列式缓存由 _sync_columnar_cache 懒重建（避免
+        __init__ 阶段重复计算——refresh_kline/首个 get_kline 都会触发）。
+        """
+        import time as _t
+        import json as _json
+        try:
+            _path = self._kline_cache_path()
+            if not os.path.isfile(_path):
+                return
+            _mtime = os.path.getmtime(_path)
+            if _t.time() - _mtime > self._KLINE_CACHE_TTL:
+                logger.info("[hub] kline cache on disk %.1fh old — expired, rebuilding (R59③)",
+                            (_t.time() - _mtime) / 3600.0)
+                return
+            with open(_path, "r", encoding="utf-8") as f:
+                _data = _json.load(f)
+            if not isinstance(_data, dict):
+                return
+            _rows = _data.get("rows")
+            _ts = float(_data.get("ts") or 0.0)
+            _syms = _data.get("symbols") or []
+            if not isinstance(_rows, dict) or not _rows:
+                return
+            self._kline_cache_rows = {str(k): v for k, v in _rows.items()
+                                      if isinstance(v, list) and v}
+            self._kline_cache_ts = _ts
+            self._kline_cache_symbols = [str(s) for s in _syms]
+            if self._kline_cache_rows:
+                # 列式缓存同步重建（get_kline 旧调用方兼容）
+                try:
+                    self._sync_columnar_cache()
+                except Exception:
+                    pass
+                logger.info(
+                    "[hub] kline cache loaded from disk: %d symbols (age=%.1fh, R59③)",
+                    len(self._kline_cache_rows), (_t.time() - _ts) / 3600.0,
+                )
+        except Exception as _e:
+            logger.debug("[hub] kline cache load failed (non-fatal): %s", _e)
+
+    def _persist_kline_cache_sync(self) -> None:
+        """落盘 K 线缓存（refresh_kline 更新后调用；失败静默，不影响主流程）。"""
+        import json as _json
+        try:
+            if not self._kline_cache_rows:
+                return
+            _path = self._kline_cache_path()
+            _tmp = f"{_path}.tmp"
+            with open(_tmp, "w", encoding="utf-8") as f:
+                _json.dump({
+                    "rows": self._kline_cache_rows,
+                    "ts": self._kline_cache_ts,
+                    "symbols": self._kline_cache_symbols,
+                }, f, ensure_ascii=False)
+            os.replace(_tmp, _path)
+        except Exception as _e:
+            logger.debug("[hub] kline cache persist failed (non-fatal): %s", _e)
 
     async def _refresh_market_snapshot(self) -> None:
         """A3: 写入市场快照缓存（指数 + 板块动量）。
@@ -661,12 +773,65 @@ class MarketDataHub:
         _last_good = dict(self._pool) if self._pool and any(v for v in self._pool.values()) else None
 
         # 1. 扫描全市场 → 3 层基础池（走长任务线程池，不与 API 请求争抢）
+        # R59① (round28): 采集并发化——K 线缓存预热（冷启动 42-75s 建库）与全市场扫描
+        # 相互独立，串行执行使总耗时 = 两者之和（round28 §14.4：scanner 90s + kline 75s
+        # 叠加吃光 DESIGN_DATA_TIMEOUT）。改为 asyncio.gather 并发：扫描跑线程池的同时
+        # 后台预热 last-good 池的 K 线（扫描完成时缓存已就绪，factor compute 不再触发
+        # 42-75s 冷建库）。单源失败立即降级（return_exceptions + 各自短超时）。
         try:
             from ..core.async_utils import run_sync_long, run_sync
-            raw_layers = await asyncio.wait_for(
-                run_sync_long(self.scanner.full_pipeline, timeout=60),
-                timeout=90,
+
+            async def _scan_pipeline():
+                return await asyncio.wait_for(
+                    run_sync_long(self.scanner.full_pipeline, timeout=60),
+                    timeout=90,
+                )
+
+            async def _warm_kline_concurrent():
+                # 用 last-good 池 symbol 预热 K 线（与扫描无依赖）；无 last-good 或
+                # 缓存已就绪则空转。短预算 45s（Semaphore(5)×20s 内部并发），超时
+                # 静默（扫描完成后 factor compute 会按需补齐缺失标的）。
+                try:
+                    _known = list(self._by_code.keys())
+                    if not _known:
+                        # R59① fix: 冷启动/重启时扫描尚未完成，_by_code 为空——
+                        # 回退到 last-good 池（_pool，重启后由 T-1 快照/前轮成功刷新
+                        # 填充），否则预热线恒空转、冷建库仍打在 factor compute 上。
+                        _last_pool = getattr(self, "_pool", None) or {}
+                        if isinstance(_last_pool, dict):
+                            for _lst in _last_pool.values():
+                                if not isinstance(_lst, list):
+                                    continue
+                                _known.extend(
+                                    str(it.get("symbol")) for it in _lst
+                                    if it.get("symbol") not in ("CASH",)
+                                )
+                        _known = list(dict.fromkeys(_known))
+                    if not _known:
+                        return
+                    await asyncio.wait_for(self.refresh_kline(_known[:40]), timeout=45)
+                    logger.info("[pool] kline pre-warm finished concurrently (%d symbols, R59①)",
+                                len(_known))
+                except (Exception, asyncio.CancelledError) as _e:
+                    logger.debug("[pool] kline pre-warm skipped/failed (non-fatal): %s", _e)
+
+            # 并发执行：扫描（主） + K 线预热（副）——互不阻塞，各自短超时快速失败
+            _scan_task = asyncio.create_task(_scan_pipeline())
+            _kline_task = asyncio.create_task(_warm_kline_concurrent())
+            _scan_result: Any
+            _kline_result: Any
+            _scan_result, _kline_result = await asyncio.gather(
+                _scan_task, _kline_task, return_exceptions=True
             )
+            raw_layers: dict[str, list[dict[str, Any]]]
+            if isinstance(_scan_result, BaseException):
+                raw_layers = {"core": [], "satellite": [], "defense": []}
+                logger.warning(
+                    "[market_data_hub] scanner.full_pipeline failed or timed out; raw_count=0, exception: %s",
+                    _scan_result,
+                )
+            else:
+                raw_layers = _scan_result
         except (Exception, asyncio.TimeoutError) as e:
             logger.warning("[market_data_hub] scanner.full_pipeline failed or timed out")
             raw_layers = {"core": [], "satellite": [], "defense": []}
@@ -1508,6 +1673,9 @@ class MarketDataHub:
                 self._kline_cache_symbols = list(set(self._kline_cache_symbols + symbols))
                 # 同步更新列式缓存（向后兼容 get_kline 旧调用方）
                 self._sync_columnar_cache()
+                # R59③ (round28): 更新后落盘——重启后首呼 design 直接加载磁盘缓存，
+                # 消除 42-75s 冷建库（round28 §14.4 冷启动超时根因）。失败静默。
+                self._persist_kline_cache_sync()
                 logger.debug("[pool] refresh_kline updated %d/%d symbols", updated, len(symbols))
 
     def _sync_columnar_cache(self):
@@ -1988,7 +2156,10 @@ class MarketDataHub:
             for n in self._news_bucket(bucket):
                 if bucket_count >= q:
                     break
-                if n.get("ai_summary"):
+                # R65 (round28): 仅 LLM 来源跳过——rule 兜底摘要下轮继续重试 LLM
+                # （配额空窗后补跑真摘要）；旧实现 `if n.get("ai_summary")` 把 rule
+                # 摘要当已生成，永不回填 LLM。
+                if n.get("ai_summary") and n.get("ai_summary_source") == "llm":
                     continue
                 # F28 (round23 P0-A): 按 int 重要性判定（level>=4 或 stars>=4 → 重要）
                 if (int(n.get("stars", 0) or 0) >= 4 or int(n.get("level", 0) or 0) >= 4):
@@ -2000,10 +2171,23 @@ class MarketDataHub:
                         summary = await generate_news_summary(n.get("title", ""), n.get("content", ""))
                         if summary:
                             n["ai_summary"] = summary
+                            n["ai_summary_source"] = "llm"
                             enriched += 1
                             bucket_count += 1
+                            continue
                     except Exception:
-                        continue
+                        pass
+                    # R65 (round28): LLM 失败/配额空窗 → 规则摘要兜底（非 null）。
+                    # 旧实现 except 后直接 continue → 重要条目 ai_summary 恒 null
+                    # （LLM 配额门禁让位主链路 + 无回填，round28 §6 R65）。
+                    # 兜底标注 ai_summary_source="rule"，前端可区分「LLM 生成/规则截取」；
+                    # 下一轮 enrich 仍会重试 LLM（仅 rule 来源允许覆盖，见上方 continue 条件）。
+                    _rule = _rule_news_summary(n)
+                    if _rule:
+                        n["ai_summary"] = _rule
+                        n["ai_summary_source"] = "rule"
+                        enriched += 1
+                        bucket_count += 1
             logger.debug("[hub] enrich_news_summaries bucket=%s quota=%d done=%d",
                          bucket, q, bucket_count)
         return enriched

@@ -229,7 +229,9 @@ class ICTracker:
                 # 注释 0~0.05）——abs<0.001 会把合法跟踪误差全判零（§2.11：有效样本<3 → 永不产 IC）；
                 # 按因子区分：tracking_error 仅排除真 0（1e-6），其余因子维持 0.001。
                 _zero_tol = 1e-6 if code == "etf.tracking_error" else 0.001
-                if abs(val) < _zero_tol:
+                # R58（round28 延伸）: 数据源异常时 factor value 可能为 str，
+                # abs(str) → TypeError 使整批 IC 计算失败。非数值视为零分跳过。
+                if not isinstance(val, (int, float)) or abs(val) < _zero_tol:
                     st[0] += 1
                     continue
                 if code not in factor_by_code:
@@ -309,6 +311,9 @@ class ICTracker:
             if ic_val is None:
                 continue
             if isinstance(ic_val, float) and (ic_val != ic_val):  # NaN 自比较
+                continue
+            # R58（round28 延伸）: 防御非数值（数据源异常时 factor 可能为 str）
+            if not isinstance(ic_val, (int, float)):
                 continue
             signal_absent = abs(ic_val) < 0.0001
             stored_ic = 0.0 if signal_absent else round(float(ic_val), 4)

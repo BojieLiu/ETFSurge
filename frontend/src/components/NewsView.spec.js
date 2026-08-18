@@ -326,6 +326,8 @@ describe('NewsView', () => {
   })
 
   // ── F31 (round23 §2.4 A4): 冷启动 partial 标识 ──
+  // R8: banner div 常驻 DOM（absolute + display:none）避免显隐造成布局偏移（CLS），
+  // 断言类切换 `--show`（jsdom 不计算 scoped CSS 的 display，不能用 isVisible）。
   it('shows partial banner when X-News-Partial header is true (F31)', async () => {
     apiMock.headlines.mockResolvedValue({
       data: [{ id: 'p1', title: '仅一条', level: 3, time: '11:00' }],
@@ -334,7 +336,7 @@ describe('NewsView', () => {
     const wrapper = mount(NewsView, { global: { stubs: { VChart: true } } })
     await flushPromises()
 
-    expect(wrapper.find('.news-partial-banner').exists()).toBe(true)
+    expect(wrapper.find('.news-partial-banner').classes()).toContain('news-partial-banner--show')
     expect(wrapper.text()).toContain('数据刷新中')
   })
 
@@ -343,6 +345,6 @@ describe('NewsView', () => {
     const wrapper = mount(NewsView, { global: { stubs: { VChart: true } } })
     await flushPromises()
 
-    expect(wrapper.find('.news-partial-banner').exists()).toBe(false)
+    expect(wrapper.find('.news-partial-banner').classes()).not.toContain('news-partial-banner--show')
   })
 })

@@ -125,11 +125,15 @@ GET /api/v1/market/search?keyword=红利
 GET /api/v1/market/indicators/{symbol}?asset_type=A
 ```
 
+**asset_type 按 symbol 推断（round28 R62）**: 当调用方未显式传非 `A` 值（默认 `A`）时，后端按 symbol 形态自动推断市场——`AAPL`/`SPY`（纯字母）→ `US`，`00700`/`02800`（5 位 0 开头）→ `HK`，`600519`/`510300`（6 位数字/交易所前缀）→ `A`。显式传 `US`/`HK` 时尊重调用方。响应含 `asset_type` 字段（实际路由使用的市场代码）与 `data_available` 标记。
+
 **成功响应 / Success Response — `200 OK`:**
 
 ```json
 {
   "symbol": "159338",
+  "asset_type": "A",
+  "data_available": true,
   "ma5": 0.918,
   "ma10": 0.912,
   "ma20": 0.905,
@@ -142,6 +146,9 @@ GET /api/v1/market/indicators/{symbol}?asset_type=A
 }
 ```
 
+> 空/不足 K 线（<30 根）时返回 `data_available: false`（F10 R32），前端据此渲染空态。
+> 全源失败走 stale 缓存兜底时含 `stale: true` 标记（F0-4）。
+
 ---
 
 ## 6. Signal / 交易信号
@@ -149,6 +156,8 @@ GET /api/v1/market/indicators/{symbol}?asset_type=A
 ```
 GET /api/v1/market/signal/{symbol}?asset_type=A
 ```
+
+**asset_type 推断规则同 Indicators（round28 R62）**，响应亦含 `asset_type` 字段。
 
 **成功响应 / Success Response — `200 OK`:**
 

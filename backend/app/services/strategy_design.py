@@ -228,11 +228,17 @@ async def generate_enhanced_design(
     capital: float = 500000,
     constraints: dict | None = None,
     market: str = "A",
+    skip_refresh: bool = False,
 ) -> dict:
     """
     v5 编排器：数据管道 → 策略引擎 → 持久化返回。
 
     Phase 5.1: 增加 market 参数入口，当前仅 A 股有候选池。
+    R59② (round28): 增加 skip_refresh 参数——数据采集超时后的**降级重试**路径。
+    task_manager 的 DESIGN_DATA_TIMEOUT 超时后不再直接 failed，而是以
+    skip_refresh=True 重试：跳过 market_data_hub.refresh()（避免再次撞慢源），
+    用内存 last-good pool / T-1 快照 / 静态池产出降级方案（degradation 标记），
+    使盘后/冷启动首呼 design 永远能拿到「可用方案」而非「方案生成超时」失败。
     """
     import time
     start_time = time.monotonic()
@@ -242,11 +248,41 @@ async def generate_enhanced_design(
     # 1. 刷新数据管道（pipeline Stage 1 负责超时保护）
     from ..services.market_data_hub import market_data_hub
     _t1 = time.monotonic()
-    try:
-        await market_data_hub.refresh()
-    except Exception as e:
-        logger.warning("[strategy_design] market_data_hub.refresh failed — pool may be stale; _by_code=%d: %s",
-                       len(market_data_hub._by_code), e)
+    if skip_refresh:
+        # R59② (round28): 降级重试路径——跳过 refresh()（避免再次撞慢源/超时），
+        # 直接用内存 last-good pool；若内存为空则靠 T-1 快照/静态池兜底（下方 2b）。
+        # 标记 degraded 供 degradation 输出与前端「数据源冷却」提示。
+        market_data_hub._degraded = True
+        logger.info("[strategy_design] skip_refresh=True — using last-good/snapshot pool (R59② degrade retry)")
+    else:
+        # R59⑤ (round28): 盘后显式降级——非交易时段且已有 last-good pool 时，
+        # 主动走快照/缓存路径（不尝试实时源干等超时，避免盘后四源冷却叠加冷缓存
+        # 把 90s 预算吃光）。仅当 pool 为空（首启）才尝试 refresh()（内部有 T-1
+        # 快照兜底）。is_market_hours 复用 market_data_hub 的 A 股交易时段判断。
+        _off_hours = True
+        try:
+            _off_hours = not market_data_hub._is_market_hours()
+        except Exception:
+            _off_hours = False
+        # R59⑤: 用 getattr 防御——测试注入的假 hub 可能无 _pool 属性
+        #（test_portfolio_precision / test_round25_r41 用 _FakeHub 替换单例）
+        _pool_nonempty = bool(
+            getattr(market_data_hub, "_pool", None)
+            and any(v for v in (getattr(market_data_hub, "_pool", None) or {}).values() if v)
+        )
+        if _off_hours and _pool_nonempty:
+            market_data_hub._degraded = True
+            logger.info(
+                "[strategy_design] off-hours + pool cached — skipping realtime refresh, "
+                "using last-good pool (R59⑤ off-hours degrade, %d by_code)",
+                len(market_data_hub._by_code),
+            )
+        else:
+            try:
+                await market_data_hub.refresh()
+            except Exception as e:
+                logger.warning("[strategy_design] market_data_hub.refresh failed — pool may be stale; _by_code=%d: %s",
+                               len(market_data_hub._by_code), e)
     _t2 = time.monotonic()
     if _t2 - _t1 > 0.1:
         logger.info("[strategy_design] refresh took %.2fs, elapsed_total=%.2fs",
@@ -587,11 +623,13 @@ async def generate_enhanced_design(
                 # P1-5: 数据缺失被剔除核心权重的标的清单（pool 正常时三源全拿不到涨跌）
                 "degraded_core_symbols": sorted(set(_degraded_core)),
             },
-            # Z11: 正常路径也暴露 degradation（mode=normal / partial_data）
+            # Z11: 正常路径也暴露 degradation（mode=normal / partial_data / degraded）
             "degradation": _degradation(
-                "partial_data" if partial_data else "normal",
-                "部分候选标的缺因子分：缺失因子按 0 填充"
-                if partial_data else "正常数据管道",
+                "degraded" if skip_refresh else ("partial_data" if partial_data else "normal"),
+                "盘后数据源冷却/采集超时，使用最近缓存快照（R59② 降级重试）"
+                if skip_refresh
+                else ("部分候选标的缺因子分：缺失因子按 0 填充"
+                      if partial_data else "正常数据管道"),
             ),
         }
     except (asyncio.TimeoutError, ValueError, KeyError, ConnectionError, OSError, RuntimeError) as e:

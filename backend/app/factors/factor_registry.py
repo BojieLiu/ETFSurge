@@ -1549,7 +1549,11 @@ class FactorRegistry:
                 sma20 = result[sym].get("technical.ma.sma_20", 0)
                 last_close = enriched.get("close", [None])[-1] if enriched.get("close") else None
                 macd_val = result[sym].get("technical.macd.macd", 0)
-                if macd_val is not None and abs(macd_val) > 0.001:
+                # R58（round28 延伸）: 数据源异常时 factor computer 可能返回 str（而非
+                # float），abs(str) → TypeError，整批 IC 回填失败（round28 实测
+                # 「bad operand type for abs(): 'str'」）。防御性 isinstance 守卫。
+                if macd_val is not None and isinstance(macd_val, (int, float)) \
+                        and abs(macd_val) > 0.001:
                     enriched["macd"] = macd_val
                 if sma20 != 0 and last_close and last_close > 0:
                     enriched["ma_bias_20"] = (last_close - sma20) / sma20
@@ -1580,7 +1584,9 @@ class FactorRegistry:
             for sym in symbols:
                 if sym in result and result[sym]:
                     for code, value in result[sym].items():
-                        if abs(value) > 0.001:
+                        # R58（round28 延伸）: 数据源异常时 value 可能为 str，
+                        # abs(str) → TypeError。非数值跳过（不记录 IC）。
+                        if isinstance(value, (int, float)) and abs(value) > 0.001:
                             ic_tracker.record(sym, code, value)
         except Exception as e:
             # P0 fix-plan-master: bare except was silently swallowing errors
@@ -1594,9 +1600,13 @@ class FactorRegistry:
                 # （abs(val) > 0.001）才覆盖 _last_ic_batch，否则保留旧值 + WARNING。
                 # 旧代码无条件覆盖：常量输入批次返回全 0 dict → 永久丢失有效 IC（Z06）。
                 if ic_batch:
+                    # R58（round28 延伸）: 数据源异常时 factor value 可能是 str（而非
+                    # float），abs(str) → TypeError。防御性过滤：仅保留数值。
                     valid_entries = {
                         code: val for code, val in ic_batch.items()
-                        if val is not None and not (isinstance(val, float) and val != val)
+                        if val is not None
+                        and isinstance(val, (int, float))
+                        and not (isinstance(val, float) and val != val)
                     }
                     has_signal = any(abs(v) > 0.001 for v in valid_entries.values())
                     if has_signal:
@@ -1607,7 +1617,8 @@ class FactorRegistry:
                         self._sample_counts = {
                             code: sum(
                                 1 for sym in result
-                                if abs((result[sym].get(code) or 0)) > 0.001
+                                if isinstance((result[sym].get(code) or 0), (int, float))
+                                and abs((result[sym].get(code) or 0)) > 0.001
                             )
                             for code in valid_entries
                         }

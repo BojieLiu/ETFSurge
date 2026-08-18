@@ -631,6 +631,25 @@ async def symbol_analysis_stream(req: SymbolAnalysisRequest):
                 hist = await asyncio.wait_for(get_history(symbol, "A", "daily"), timeout=30)
             except Exception:
                 pass
+        # R60 (round28): K 线注入统一数据源——/market/indicators/{symbol} 与
+        # /market/history/{symbol} 同源（market_data_hub.get_market_history →
+        # get_history 全降级链），而 symbol-analysis 此前仅走 get_history 首层，
+        # 盘后/源冷却时返回空（「历史K线为空」）而 indicators 端点从 Hub K 线
+        # 缓存/过期缓存兜底有数据——两路径数据源不一致。补 **Hub 缓存兜底**：
+        # get_history 全链失败后，从 Hub K 线缓存取任意年龄数据（F0-4 同款），
+        # 保证「指标端点有数据时分析端点不得 K线为空」；仍为空才诚实降级。
+        if not hist:
+            try:
+                _stale_rows = market_data_hub.get_kline_rows_any(symbol)
+                if _stale_rows:
+                    hist = _stale_rows
+                    logger.info(
+                        "[symbol-analysis] %s history all sources empty — fell back to Hub kline cache "
+                        "(age=%.0fs, rows=%d, R60)",
+                        symbol, market_data_hub.get_kline_age_seconds(symbol) or -1, len(_stale_rows),
+                    )
+            except Exception:
+                pass
         indicators = compute_all_indicators(hist) if hist else {}
         
         # P1-3 (R4-09): 基本面估值数据注入——PE/PB（akshare 日线估值列），

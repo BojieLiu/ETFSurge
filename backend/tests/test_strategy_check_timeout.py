@@ -277,8 +277,13 @@ async def test_strategy_check_injects_industry_from_hub_pool():
 import httpx
 class TestP0_5LLMTimeout:
     @pytest.mark.asyncio
-    async def test_strategy_check_report_uses_15s_timeout(self):
-        """P0-5: generate_strategy_check_report 单次 provider 调用超时必须 15s（非 35s）。"""
+    async def test_strategy_check_report_uses_60s_connect_timeout(self):
+        """R57 (round28): 内层 connect 15s→60s——外层 180s 才有机会生效。
+
+        round27 R43 只改外层 _llm_timeout_for(180s)，内层 connect=15s 仍先触发
+        CancelledError → 真 LLM 报告永不可见（DeepSeek 慢首字节实测 34-78s）。
+        R57 对齐实测上沿 60s；read 保持 90s 容纳长报告生成。
+        """
         from app.analysis import llm as llm_mod
 
         run_json_mock = AsyncMock(return_value={
@@ -296,16 +301,14 @@ class TestP0_5LLMTimeout:
                 data_quality={"all_empty": True, "partial": False},
             )
         _, kwargs = run_json_mock.call_args
-        # round20 P0-5: 单次调用 connect 超时 ≤15s（防 429/连接挂起拖长）；
-        # round23 遗留修复（2026-08-14）：read 超时必须 ≥60s——deepseek 长报告
-        # 生成实测 21.8s（4004 chunks），15s read timeout → ReadTimeout → 规则兜底，
-        # LLM 报告永远出不来。connect 与 read 分离：float 15 已废弃。
         to = kwargs.get("request_timeout", 35.0)
         assert hasattr(to, "connect") and hasattr(to, "read"), (
-            f"request_timeout 应为 httpx.Timeout(connect短/read长)，实际 {to!r}"
+            f"request_timeout 应为 httpx.Timeout(connect/read 分离)，实际 {to!r}"
         )
-        assert to.connect <= 15.0, f"connect 超时应 ≤15s（防 429 挂起），实际 {to.connect}"
+        assert to.connect == 60.0, f"内层 connect 应为 60s（R57 对齐慢首字节），实际 {to.connect}"
         assert to.read >= 60.0, f"read 超时应 ≥60s（容纳长报告生成），实际 {to.read}"
+        # R57 负向：connect 不得回到 15s（旧值先于外层 180s 触发 → 真报告永不可见）
+        assert to.connect > 15.0, "connect 不得回退到 15s（R57 内层超时修复回归）"
 class TestP0_5RateLimitFailover:
     @pytest.mark.asyncio
     async def test_429_primary_skipped_on_retry_attempt(self):

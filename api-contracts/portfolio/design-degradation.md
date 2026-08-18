@@ -59,6 +59,9 @@ POST /api/v1/portfolio/design-async
 | `normal` | 因子矩阵非空 + 候选池非空 | 正常全量流程 |
 | `static_pool` | `total_candidates == 0`（候选池空） | 使用静态核心池（6 只：沪深300/上证50/黄金/国债/创业板/科创50）按层预算分配 |
 | `partial_data` | 因子矩阵部分为空/异常但候选池非空 | 可用因子计算分数，缺失因子按 0 填充，正常分配器跑通 |
+| `degraded` | **round28 R59②**：数据采集超时（`DESIGN_DATA_TIMEOUT`）后以 `skip_refresh=True` 降级重试——跳过 `refresh()` 撞慢源，用内存 last-good / T-1 快照 / 静态池产出方案 | 返回可用方案（非 failed）；`reason` 标注「盘后数据源冷却/采集超时，使用最近缓存快照」；`pool_degraded=true`。**禁止**用「方案生成超时」空响应掩盖数据源冷却 |
+
+> **round28 R59⑤**：非交易时段 + 已有 last-good 池时，`generate_enhanced_design` 主动跳过实时 `refresh()`（不尝试实时源干等超时）——`degradation.mode` 保持 `normal`/`partial_data`，但 `pool_degraded=true`（池为最近缓存快照），前端据此提示「数据源冷却」。唯一例外：池为空（首启）才尝试 `refresh()`（内部有 T-1 快照兜底）。
 
 ---
 

@@ -56,7 +56,16 @@
       <div class="news-partial-banner" :class="{ 'news-partial-banner--show': partial && !loading }" role="status">
         ⚠️ 数据刷新中（当前仅部分数据，稍后自动补全）
       </div>
-      <div v-if="loading && !filteredNews.length" class="news-empty">加载中...</div>
+      <div v-if="loading && !filteredNews.length" class="news-skeleton" role="status" aria-label="加载中">
+        <!-- R63 (round28): 骨架屏占位——旧实现单个「加载中...」文本 div 在数据到达后
+             被整列表替换，高度从 1 行跳到 N 项 → CLS 0.198 回归（round27 为 0.001）。
+             改用固定高度骨架项（与真实 news-item 同高），加载→数据切换不再位移。 -->
+        <div v-for="i in 3" :key="i" class="news-skeleton-item">
+          <div class="news-skeleton-line news-skeleton-line--badge"></div>
+          <div class="news-skeleton-line news-skeleton-line--title"></div>
+          <div class="news-skeleton-line news-skeleton-line--content"></div>
+        </div>
+      </div>
       <ul v-else class="news-list">
         <li
           v-for="item in filteredNews"
@@ -361,6 +370,33 @@ const filteredAffectedHoldings = computed(() => {
 .filter-btn.active:hover { background: var(--color-primary-dark); }
 .news-card { position: relative; padding: var(--space-4); min-height: 320px; }
 .news-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-3); }
+/* R63 (round28): 骨架屏（加载态占位）——与真实 news-item 同高，加载→数据切换无位移（CLS） */
+.news-skeleton { display: flex; flex-direction: column; gap: var(--space-3); }
+.news-skeleton-item {
+  border: 1px solid var(--color-border-light);
+  border-left-width: 4px;
+  border-radius: var(--radius-lg);
+  padding: var(--space-3);
+  background: var(--color-surface-secondary);
+  min-height: 96px;
+}
+.news-skeleton-line {
+  height: 12px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(90deg, var(--color-surface-tertiary) 25%, var(--color-border-light) 50%, var(--color-surface-tertiary) 75%);
+  background-size: 200% 100%;
+  animation: news-skeleton-shimmer 1.4s ease-in-out infinite;
+  margin-bottom: var(--space-2);
+}
+.news-skeleton-line--badge { width: 30%; height: 10px; }
+.news-skeleton-line--title { width: 70%; height: 14px; }
+.news-skeleton-line--content { width: 100%; }
+@keyframes news-skeleton-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+/* R63 (round28): news-item 最小高度——ai_summary 异步出现时避免高度跳变（CLS） */
+.news-item { min-height: 84px; }
 .news-empty { color: var(--color-text-muted); padding: var(--space-4); text-align: center; }
 /* F31: partial（不完整）提示条；R8: 脱离文档流避免布局偏移 */
 .news-partial-banner {

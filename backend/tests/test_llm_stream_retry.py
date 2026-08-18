@@ -132,48 +132,56 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 from app.services.portfolio_service import _llm_timeout_for
 STRATEGY_CHECK_MAX_RETRIES = 0
-STRATEGY_CHECK_REQUEST_TIMEOUT = 15.0  # round20 P0-5: 35→15（ReadTimeout 38s 根因）
+STRATEGY_CHECK_REQUEST_TIMEOUT = 60.0  # round28 R57: 15→60（DeepSeek 慢首字节实测 34-78s）
 PROVIDER_COUNT = 2  # opencode_zen + deepseek（双 provider 并行）
-def _consistency(max_retries: int, budget: int, request_timeout: float = 15.0) -> bool:
+def _consistency(max_retries: int, budget: int, request_timeout: float = 60.0) -> bool:
     """预算-重试一致性：max_retries=0 时免 0.9 系数直接 providers×timeout ≤ 预算；
     max_retries≥1 时 (max_retries+1)×providers×timeout ≤ 0.9×预算
-    （0.9 系数兜 rate_limit_cap=10 退避与 retry_delay=3s 容差）。"""
+    （0.9 系数兜 rate_limit_cap=10 退避与 retry_delay=3s 容差）。
+
+    R57 (round28): 仅对**完整档**适用——partial 30s / all_empty 15s 档由外层
+    asyncio.wait_for 在 inner connect(60s) 完成前取消（外层预算 < 60s），
+    内层 connect 只在完整档（180s）才有机会跑满。故低档一致性由「外层先取消」
+    保证，而非静态 worst-case ≤ budget（见 test_low_tiers_outer_cancels_first）。
+    """
     worst = (max_retries + 1) * PROVIDER_COUNT * request_timeout
     if max_retries >= 1:
         return worst <= 0.9 * budget
     return worst <= budget
 class TestBudgetRetryConsistency:
     def test_full_quality_budget_consistent(self):
-        """完整档 180s：max_retries=0 时 2×15=30 ≤ 180 PASS（round27 R43: 75→180）。"""
+        """完整档 180s：max_retries=0 时 2×60=120 ≤ 180 PASS（round28 R57: connect 15→60）。"""
         budget = _llm_timeout_for({"all_empty": False, "partial": False})
         assert budget == 180, "完整档预算应为 180s（round27 R43: 75→180）"
         assert _consistency(STRATEGY_CHECK_MAX_RETRIES, budget, STRATEGY_CHECK_REQUEST_TIMEOUT)
 
     def test_max_retries_regression_flagged(self):
-        """防回归：预算已放宽到 180s（round27 R43），但 max_retries 仍必须保持 0
-        （429 退避/慢响应容差纪律，见 llm.py 注释）。一致性公式下 180s 已能容纳
-        max_retries=1，故此处不再用「不一致」做负向断言，而直接断言 max_retries==0
-        的硬纪律（若被改回 1，下面断言 FAIL）。"""
+        """防回归：预算 180s + inner connect 60s（R57），max_retries 仍必须保持 0
+        （429 退避/慢响应容差纪律，见 llm.py 注释）。max_retries=0 下最坏 2×60=120
+        ≤ 180 一致；若改回 1，下面断言 FAIL。"""
         budget = _llm_timeout_for({"all_empty": False, "partial": False})
         assert budget == 180, "完整档预算应为 180s（round27 R43: 75→180）"
-        # max_retries=0 下预算-重试一致（2×15=30 ≤ 180）
+        # max_retries=0 下预算-重试一致（2×60=120 ≤ 180）
         assert _consistency(STRATEGY_CHECK_MAX_RETRIES, budget, STRATEGY_CHECK_REQUEST_TIMEOUT), \
             "max_retries=0 时预算-重试应一致"
         assert STRATEGY_CHECK_MAX_RETRIES == 0, "max_retries 必须保持 0（429 退避/慢响应容差）"
 
-    def test_partial_budget_consistent_with_no_retry(self):
-        """partial 30s：max_retries=0 时 2×15=30 ≤ 30 PASS（round20 P0-5 后 partial
-        档也一致——旧 2×35=70 > 30 仅靠不重试兜底）。"""
-        budget = _llm_timeout_for({"all_empty": False, "partial": True})
-        assert budget == 30
-        assert _consistency(STRATEGY_CHECK_MAX_RETRIES, budget, STRATEGY_CHECK_REQUEST_TIMEOUT), \
-            "partial 档 2×15=30 ≤ 30 应一致（round20 P0-5 后）"
+    def test_low_tiers_outer_cancels_before_inner_connect(self):
+        """R57: partial 30s / all_empty 15s 档——外层 wait_for 预算 < inner connect(60s)，
+        外层先取消（诚实快速兜底），无需 inner connect 跑满。断言外层预算恒 < 60s。"""
+        for desc, q in (("partial", {"all_empty": False, "partial": True}),
+                        ("all_empty", {"all_empty": True, "partial": False})):
+            budget = _llm_timeout_for(q)
+            assert budget < STRATEGY_CHECK_REQUEST_TIMEOUT, (
+                f"{desc} 档外层预算 {budget}s 应 < inner connect {STRATEGY_CHECK_REQUEST_TIMEOUT}s"
+                f"（外层先取消兜底，R57）"
+            )
 
     def test_all_empty_budget_15(self):
         assert _llm_timeout_for({"all_empty": True}) == 15
 class TestStrategyCheckLlMCallParams:
     def test_run_json_uses_max_retries_zero(self):
-        """generate_strategy_check_report 的 run_json 必须 max_retries=0 + 15s（round20 P0-5）。"""
+        """generate_strategy_check_report 的 run_json 必须 max_retries=0 + connect=60s（round28 R57）。"""
         fake_agent = MagicMock()
         fake_agent.run_json = AsyncMock(return_value={"summary": "ok"})
         holdings = [{"symbol": "510300", "name": "沪深300ETF", "target_weight": 0.2}]
@@ -183,13 +191,14 @@ class TestStrategyCheckLlMCallParams:
         assert result.get("summary") == "ok"
         kwargs = fake_agent.run_json.call_args.kwargs
         assert kwargs.get("max_retries") == 0, f"max_retries 应为 0（防重试超预算），实际 {kwargs.get('max_retries')}"
-        # round23 遗留修复（2026-08-14）：request_timeout 由 float 15 改为 httpx.Timeout
-        #（connect=15s 防 429/连接挂起，read=90s 容纳 deepseek 长报告生成——实测
-        # 21.8s，float 15s 的 read 侧 ReadTimeout → LLM 报告永远走规则兜底）。
+        # R57 (round28): connect 15s→60s——旧 connect=15s 先于外层 180s 触发
+        # CancelledError → 真 LLM 报告永不可见（DeepSeek 慢首字节实测 34-78s）。
+        # read=90s 容纳长报告生成（实测 21.8s/4004 chunks）。
         to = kwargs.get("request_timeout")
         assert hasattr(to, "connect") and hasattr(to, "read"), \
-            f"request_timeout 应为 httpx.Timeout(connect短/read长)，实际 {to!r}"
-        assert to.connect <= 15.0, f"connect 超时应 ≤15s（防 429 挂起），实际 {to.connect}"
+            f"request_timeout 应为 httpx.Timeout(connect/read 分离)，实际 {to!r}"
+        assert to.connect == 60.0, f"内层 connect 应为 60s（R57），实际 {to.connect}"
+        assert to.connect > 15.0, "connect 不得回退到 15s（R57 内层超时修复回归）"
         assert to.read >= 60.0, f"read 超时应 ≥60s（容纳长报告生成），实际 {to.read}"
 
     def test_provider_slow_within_budget_no_cancelled_error(self):

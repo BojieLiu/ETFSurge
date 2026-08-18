@@ -104,6 +104,7 @@ GET /api/v1/portfolio/tasks/{task_id}
 | result.suggestions[].reason | string | **丰富化（R4-22）**：2-3 句完整逻辑，按「触发依据；操作节奏；风险纪律」三段式组织，用「；」分隔；规则引擎与 LLM 均须遵守 |
 | result.coverage | object | **新增** 覆盖率统计，确保 100% |
 | result.coverage.coverage_pct | number | 必须为 1.0（100%） |
+| coverage（顶层透传） | object | **round28 R57**：`GET /strategy-check-result/{task_id}` 顶层透传 `coverage`（含 `covered_by_llm`/`covered_by_rule`/`coverage_pct`，与 `result.coverage` 同源）；另透传 `llm_layer_ok`（LLM 层是否成功）/`is_fallback`（是否规则兜底）/`report_quality`（`full`/`partial`/`fallback`）——前端可展示「AI 参与度」而非仅有规则兜底 |
 
 ---
 

@@ -1659,7 +1659,13 @@ async def generate_strategy_check_report(
             # ReadTimeout → LLM 报告永远走规则兜底。connect 15s 防 429/连接挂起，
             # read 90s 容纳长生成；max_retries=0 最坏 2×connect15 = 30s ≤ 外层
             # 分级预算（partial 30s / all_empty 15s 亦覆盖 connect 侧）。
-            request_timeout=httpx.Timeout(connect=15.0, read=90.0, write=15.0, pool=15.0),
+            # R57 (round28): 内层 connect 15s→60s——round27 R43 只改外层 _llm_timeout_for
+            # (75s→180s)，内层 httpx.Timeout(connect=15.0) 仍先于外层触发 CancelledError
+            # （DeepSeek 慢连接/慢首字节实测 34-78s），专业投资者永远看不到真 LLM 报告。
+            # 对齐实测上沿 60s；read 保持 90s 容纳长生成；max_retries=0 最坏 2×connect60=120s
+            # ≤ 外层完整档 180s（partial 30s / all_empty 15s 分级不受影响——connect 只在
+            # 数据完整档才有机会跑满，低档本就该快速兜底）。
+            request_timeout=httpx.Timeout(connect=60.0, read=90.0, write=15.0, pool=15.0),
         )
     except BaseException as e:  # noqa: BLE001 — F1-9: 必须捕获 CancelledError（BaseException）
         # F1-9: asyncio.wait_for(20s) 超时取消内部任务时抛 CancelledError，
