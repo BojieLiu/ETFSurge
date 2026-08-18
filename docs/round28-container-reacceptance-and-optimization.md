@@ -181,7 +181,7 @@ round27 的 R42-R55 及 F1/F2/F3/F3b 已在 `0c3a1b4`（P0+P1）+ `f57583e`（P2
 | R47 结构化字段桶化 | 待实施 | 代码级已实施（`_apply_precision_bucketing` strategy_design.py:972/990）；本轮设计失败无新鲜样本 | ✅ 代码级（待复测） |
 | R48 近替代品合并 | 待实施 | 未实测（设计本轮失败） | 待复测 |
 | R49 first_byte 进度 | 待实施 | first_byte 26-111s（SSE 有 progress 事件） | ⚠️ 部分 |
-| R50 logs 清理 | 待实施 | logs/*.py 仍 224 | ❌ 未做 |
+| R50 logs 清理 | 待实施 | logs/*.py 仍 224 | ✅ 已清理（2026-08-18：round{8,16,18,20} 目录已删，logs/ 递归 0 个 .py） |
 | F1/F2 预热优化 | 待实施 | Session 复用 + NAV 后台化已落地，预热仍 54s | ⚠️ 部分 |
 
 **核验结论**：round27 的 14 项修复中 **5 项真正生效**（R44/R45/R52/R53/R54）、**2 项无效**（R43 只改外层、R55 前置未就绪）、**1 项部分**（R42 标签一致数值异）、**1 项未达**（R51）、**1 项未做**（R50）。R43/R55 的「修复」是**「方法已应用但目标未达成」的典型**——代码改了、测试绿了，但运行时结果与修复前相同。
@@ -233,7 +233,7 @@ round27 的 R42-R55 及 F1/F2/F3/F3b 已在 `0c3a1b4`（P0+P1）+ `f57583e`（P2
 
 ## 13. 冗余代码
 
-- ⚠️ `logs/round{8,16,18,20}/*.py`：**224 个**（R50 未清理，gitignore 磁盘残留）。
+- ✅ `logs/round{8,16,18,20}/*.py`：~~**224 个**~~ **已清理（2026-08-18）**——round{8,16,18,20} 目录整删，`logs/` 递归 0 个 .py（R50 达成）。
 - ⚠️ **backend 根 4 个 git-tracked scratch（R67）**：`add_filtered_tab.py`、`fix_dashboard_ui.py`、`fix_market_tabs.py`、`verify_design.py`——一次性调试脚本已提交进 git。
 - ⚠️ 测试文件 225 个（round27 为 220）。
 - ✅ backend/app 生产模块 91 个 py、scripts/archive 12 个已归档。
@@ -269,7 +269,7 @@ round27 的 R42-R55 及 F1/F2/F3/F3b 已在 `0c3a1b4`（P0+P1）+ `f57583e`（P2
 |---|---|---|---|---|---|
 | R62 | P2 | indicators asset_type 恒 "A" | ①`/market/indicators/{symbol}` 按 symbol 推断市场（HK/US/A），正确返回 asset_type；②补 US/HK 标的单测 | ①00700 → asset_type=HK、AAPL → asset_type=US | `market_service.py:get_indicators` |
 | R67 | P2 | backend 根 4 个 git-tracked scratch | ①删除 `add_filtered_tab.py`/`fix_dashboard_ui.py`/`fix_market_tabs.py`/`verify_design.py` 或移 `scripts/scratch/` | ①backend 根无 scratch .py | `backend/` |
-| R50 | P2 | logs/*.py 224 个 | ①删除 `logs/round{8,16,18,20}/*.py`（磁盘清理） | ①磁盘无 logs/*.py | `logs/` |
+| R50 | P2 | logs/*.py 224 个 | ①删除 `logs/round{8,16,18,20}/*.py`（磁盘清理） | ①磁盘无 logs/*.py — ✅ 达成（2026-08-18，round 目录整删 + 递归 0 py） | `logs/` |
 
 ### 14.4 R59 设计链路优化详细设计（P1，用户追问驱动展开）
 
