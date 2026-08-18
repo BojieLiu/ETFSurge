@@ -356,8 +356,8 @@ app/analysis/llm/
 | FE-1 | ~~`src/utils/chartColors.js`~~ | ~25 行 | **证伪**：`AnalysisView.vue:66` import `chartColor/CHART_COLORS/CANDLE_UP/CANDLE_DOWN/histogramColor` | 活跃，保留 |
 | FE-2 | ~~`src/utils/pricing.js`~~ | ~40 行 | **证伪**：`TokenMonitor.vue:153` import `calcCost/modelCostFromBuckets` | 活跃，保留 |
 | FE-3 | ~~`src/utils/newsLevel.js`~~ | ~35 行 | **证伪**：`NewsView.vue:152` import 5 个导出；遗留双 spec 归位问题见 §7.2 | 活跃，保留 |
-| FE-4 | theme.css 死类 | 94 个类 | 全库（vue/css/html）0 引用，见 §7.1.1 | 清理（round11 P3 已计划，未落地） |
-| FE-5 | global.css 死类 | 29 个类 | `animate-*` 11 个（fade/pulse/shimmer/wiggle/spin/slide）+ `flex-*` 4 个 + `grid-cols-*` 7 个 + `items-stretch`/`justify-start`/`ml-auto`/`mr-auto`/`no-print`/`print-only`/`stagger-children` 7 个——全库 0 引用（round11 已列） | 清理 |
+| FE-4 | theme.css 死类 | 94 个类 | 全库（vue/css/html）0 引用，见 §7.1.1 | ✅ 已清理（commit `4de0222`，P3-2 baseline 归 0） |
+| FE-5 | global.css 死类 | 29 个类 | `animate-*` 11 个（fade/pulse/shimmer/wiggle/spin/slide）+ `flex-*` 4 个 + `grid-cols-*` 7 个 + `items-stretch`/`justify-start`/`ml-auto`/`mr-auto`/`no-print`/`print-only`/`stagger-children` 7 个——全库 0 引用（round11 已列） | ✅ 已清理（同 `4de0222`） |
 
 **排除项**（初检误报，已复核为活跃）：
 - `NewsView`/`SourceMonitor`/`TokenMonitor`：初检 0 引用，实为 **router 懒加载**（`src/router/index.js:25/37/31`），活跃。
@@ -419,7 +419,7 @@ app/analysis/llm/
 
 **已落地（round11 清理项复核）**：14 个前端死组件/文件、`scripts/archive/` 一次性诊断脚本归档、`layout/` 目录删除、`FactorModelView` 独立路由删除——均已提交（round12-28 间清理）。
 
-**未落地（round11 残留）**：CSS 死类（FE-4/FE-5）、`stores/task.js` 两处 `console.warn` 改 logger（`task.js:60/122`）、`App.vue` 假连接（**round19 已修复**，用真实 `marketStore.wsStatus`）。
+**未落地（round11 残留）→ 已全部落地**：CSS 死类（FE-4/FE-5）已在 `4de0222` 清理（P3-2 baseline 归 0）；`App.vue` 假连接 round19 已修复（真实 `marketStore.wsStatus`）；`stores/task.js` 两处 `console.warn` 改 logger（`task.js:60/122`）已在 `c053097` 完成。round11 残留清理项至此全部清零。
 
 ### 7.4 后端生产代码冗余（backend/app/）系统检测（2026-08-18 补）
 
