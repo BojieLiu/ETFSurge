@@ -19,7 +19,7 @@ async def test_llm_failure_returns_engine_fallback():
     """When LLM call fails, generate_design_report should return engine fallback."""
     from app.analysis.llm import generate_design_report
 
-    with patch("app.analysis.llm.get_agent") as mock_get_agent:
+    with patch("app.analysis.llm.reports.get_agent") as mock_get_agent:
         mock_agent = AsyncMock()
         mock_agent.run.side_effect = Exception("API Error")
         mock_get_agent.return_value = mock_agent
@@ -49,7 +49,7 @@ async def test_llm_success_returns_llm_content():
     """When LLM call succeeds, generate_design_report should return LLM content."""
     from app.analysis.llm import generate_design_report
 
-    with patch("app.analysis.llm.get_agent") as mock_get_agent:
+    with patch("app.analysis.llm.reports.get_agent") as mock_get_agent:
         mock_agent = AsyncMock()
         mock_agent.run.return_value = "LLM analysis with good content"
         mock_get_agent.return_value = mock_agent

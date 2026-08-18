@@ -27,7 +27,12 @@ TESTS_DIR = pathlib.Path(__file__).resolve().parent.parent / "tests"
 #   → test_warmup_perf；test_factor_* 系列互并；test_sentiment_* 系列互并；report 系列
 #   等，审计清单见 docs/archived/round17-pending-items.md §七 + 实施记录），因主题零散、单文件
 #   风险/收益比低，经 conscious review 决定 bump BASELINE 并登记清单，留待后续轮次合并。
-BASELINE = 208
+# 2026-08-18 (giant-file split Batch 1): 227. +1 = tests/test_portfolio_module_structure.py
+#   （方案 B Step 1 结构契约测试，随 app/services/portfolio/ 拆分新增；后续 Batch 5 测试
+#   重组会把 strategy_check 三文件合并，净减 2，届时回退 baseline）。
+# 2026-08-18 (giant-file split Batch 2): 228. +1 = tests/test_llm_module_structure.py
+#   （方案 C Step 1 结构契约测试，随 app/analysis/llm/ 拆分新增）。
+BASELINE = 228
 
 
 def count_test_files() -> int:

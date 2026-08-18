@@ -52,8 +52,8 @@ async def _call_llm_with_response(payload):
             captured["body"] = json
             return _Resp(payload)
 
-    with patch.object(llm_mod, "get_configured_providers", return_value=[_fake_provider()]), \
-         patch.object(llm_mod, "_check_key", new=AsyncMock()), \
+    with patch("app.analysis.llm.client.get_configured_providers", return_value=[_fake_provider()]), \
+         patch("app.analysis.llm.client._check_key", new=AsyncMock()), \
          patch("httpx.AsyncClient", _Client):
         content = await llm_mod.llm_complete("hello world")
     return content, captured.get("body", {})
@@ -162,9 +162,9 @@ async def _run_health_check(ok_providers, timeout=15.0):
             ok = queue.pop(0) if queue else False
             return _Resp(ok)
 
-    with patch.object(llm_mod, "get_configured_providers",
-                      return_value=[_fake_provider(), _fake_provider()]), \
-         patch.object(llm_mod, "has_any_api_key", return_value=True), \
+    with patch("app.analysis.llm.health.get_configured_providers",
+               return_value=[_fake_provider(), _fake_provider()]), \
+         patch("app.analysis.llm.health.has_any_api_key", return_value=True), \
          patch("httpx.AsyncClient", _Client):
         return await llm_mod.llm_health_check(timeout=timeout)
 
@@ -198,7 +198,7 @@ async def test_F7_health_ok_if_any_provider_up():
 @pytest.mark.asyncio
 async def test_F7_health_no_key():
     from app.analysis import llm as llm_mod
-    with patch.object(llm_mod, "has_any_api_key", return_value=False):
+    with patch("app.analysis.llm.health.has_any_api_key", return_value=False):
         report = await llm_mod.llm_health_check()
     assert report["status"] == "no_key"
     assert report["has_api_key"] is False

@@ -186,7 +186,7 @@ class TestStrategyCheckLlMCallParams:
         fake_agent.run_json = AsyncMock(return_value={"summary": "ok"})
         holdings = [{"symbol": "510300", "name": "沪深300ETF", "target_weight": 0.2}]
         with patch("app.analysis.registry.get_agent", return_value=fake_agent):
-            with patch.object(llm_mod, "get_last_llm_error", return_value=None):
+            with patch("app.analysis.llm.reports.get_last_llm_error", return_value=None):
                 result = asyncio.run(llm_mod.generate_strategy_check_report(holdings, {}, "neutral"))
         assert result.get("summary") == "ok"
         kwargs = fake_agent.run_json.call_args.kwargs
@@ -212,7 +212,7 @@ class TestStrategyCheckLlMCallParams:
         fake_agent.run_json = AsyncMock(side_effect=_slow_run_json)
         holdings = [{"symbol": "510300", "name": "沪深300ETF", "target_weight": 0.2}]
         with patch("app.analysis.registry.get_agent", return_value=fake_agent):
-            with patch.object(llm_mod, "get_last_llm_error", return_value="timeout"):
+            with patch("app.analysis.llm.reports.get_last_llm_error", return_value="timeout"):
                 # 外层 wait_for 60ms < provider 50ms×2 → 触发 CancelledError 兜底路径
                 result = asyncio.run(
                     asyncio.wait_for(

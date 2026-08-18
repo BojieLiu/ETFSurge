@@ -85,8 +85,8 @@ def _reset_circuit():
 async def test_429_primary_opens_circuit_and_fails_fast(monkeypatch):
     """单一 provider 持续 429 → 立即 OPEN，不再重试（旧逻辑白等 3 轮）。"""
     client = _FakeClient([_make_429_exc()])
-    monkeypatch.setattr(llm, "get_configured_providers", lambda: [_prov("opencode_zen")])
-    monkeypatch.setattr(llm, "_check_key", _noop)
+    monkeypatch.setattr(llm.client, "get_configured_providers", lambda: [_prov("opencode_zen")])
+    monkeypatch.setattr(llm.client, "_check_key", _noop)
     monkeypatch.setattr(llm.token_store, "record", _noop)
     monkeypatch.setattr("httpx.AsyncClient", lambda *a, **k: client)
     monkeypatch.setattr(asyncio, "sleep", _noop)
@@ -103,10 +103,10 @@ async def test_429_primary_skipped_after_open_fallback_used(monkeypatch):
     """zen 429 → OPEN；deepseek 成功；zen 全程仅被探测 1 次（零过路费）。"""
     client = _FakeClient([_make_429_exc(), _make_200("fallback-ok")])
     monkeypatch.setattr(
-        llm, "get_configured_providers",
+        llm.client, "get_configured_providers",
         lambda: [_prov("opencode_zen"), _prov("deepseek")],
     )
-    monkeypatch.setattr(llm, "_check_key", _noop)
+    monkeypatch.setattr(llm.client, "_check_key", _noop)
     monkeypatch.setattr(llm.token_store, "record", _noop)
     monkeypatch.setattr("httpx.AsyncClient", lambda *a, **k: client)
     monkeypatch.setattr(asyncio, "sleep", _noop)
@@ -123,10 +123,10 @@ async def test_open_primary_not_reprobed_in_second_call(monkeypatch):
     """zen 仍 OPEN 时第二轮调用直接走 deepseek，zen 探测次数保持 1。"""
     client = _FakeClient([_make_429_exc(), _make_200("fb1"), _make_200("fb2")])
     monkeypatch.setattr(
-        llm, "get_configured_providers",
+        llm.client, "get_configured_providers",
         lambda: [_prov("opencode_zen"), _prov("deepseek")],
     )
-    monkeypatch.setattr(llm, "_check_key", _noop)
+    monkeypatch.setattr(llm.client, "_check_key", _noop)
     monkeypatch.setattr(llm.token_store, "record", _noop)
     monkeypatch.setattr("httpx.AsyncClient", lambda *a, **k: client)
     monkeypatch.setattr(asyncio, "sleep", _noop)
@@ -141,8 +141,8 @@ async def test_open_primary_not_reprobed_in_second_call(monkeypatch):
 async def test_transient_5xx_retries_until_threshold(monkeypatch):
     """瞬态 5xx：保留有限重试（累计达阈值才 OPEN），非 429 不立即 OPEN。"""
     client = _FakeClient([_make_5xx_exc(), _make_5xx_exc()])
-    monkeypatch.setattr(llm, "get_configured_providers", lambda: [_prov("opencode_zen")])
-    monkeypatch.setattr(llm, "_check_key", _noop)
+    monkeypatch.setattr(llm.client, "get_configured_providers", lambda: [_prov("opencode_zen")])
+    monkeypatch.setattr(llm.client, "_check_key", _noop)
     monkeypatch.setattr(llm.token_store, "record", _noop)
     monkeypatch.setattr("httpx.AsyncClient", lambda *a, **k: client)
     monkeypatch.setattr(asyncio, "sleep", _noop)
@@ -161,10 +161,10 @@ async def test_half_open_recovers_after_ttl(monkeypatch):
     client = _FakeClient([_make_429_exc(), _make_200("fb1"),
                           _make_429_exc(), _make_200("fb2")])
     monkeypatch.setattr(
-        llm, "get_configured_providers",
+        llm.client, "get_configured_providers",
         lambda: [_prov("opencode_zen"), _prov("deepseek")],
     )
-    monkeypatch.setattr(llm, "_check_key", _noop)
+    monkeypatch.setattr(llm.client, "_check_key", _noop)
     monkeypatch.setattr(llm.token_store, "record", _noop)
     monkeypatch.setattr("httpx.AsyncClient", lambda *a, **k: client)
     monkeypatch.setattr(asyncio, "sleep", _noop)
@@ -189,10 +189,10 @@ async def test_all_providers_open_fails_without_toll(monkeypatch):
     """两个 provider 都 429 → 各自 OPEN，快速失败（不再相互重试白等）。"""
     client = _FakeClient([_make_429_exc(), _make_429_exc()])
     monkeypatch.setattr(
-        llm, "get_configured_providers",
+        llm.client, "get_configured_providers",
         lambda: [_prov("opencode_zen"), _prov("deepseek")],
     )
-    monkeypatch.setattr(llm, "_check_key", _noop)
+    monkeypatch.setattr(llm.client, "_check_key", _noop)
     monkeypatch.setattr(llm.token_store, "record", _noop)
     monkeypatch.setattr("httpx.AsyncClient", lambda *a, **k: client)
     monkeypatch.setattr(asyncio, "sleep", _noop)

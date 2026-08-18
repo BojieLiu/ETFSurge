@@ -53,8 +53,8 @@ async def test_llm_complete_429_opens_circuit_no_retry(monkeypatch):
             calls["n"] += 1
             raise _make_429_exc()
 
-    monkeypatch.setattr(llm, "get_configured_providers", lambda: [_make_provider()])
-    monkeypatch.setattr(llm, "_check_key", _noop)
+    monkeypatch.setattr(llm.client, "get_configured_providers", lambda: [_make_provider()])
+    monkeypatch.setattr(llm.client, "_check_key", _noop)
     monkeypatch.setattr(llm.token_store, "record", _noop)
     monkeypatch.setattr("httpx.AsyncClient", _FakeClient)
     monkeypatch.setattr(asyncio, "sleep", _noop)
@@ -95,8 +95,8 @@ async def test_llm_complete_transient_5xx_flat_backoff(monkeypatch):
         resp = httpx.Response(500, request=req)
         return httpx.HTTPStatusError("500", request=req, response=resp)
 
-    monkeypatch.setattr(llm, "get_configured_providers", lambda: [_make_provider()])
-    monkeypatch.setattr(llm, "_check_key", _noop)
+    monkeypatch.setattr(llm.client, "get_configured_providers", lambda: [_make_provider()])
+    monkeypatch.setattr(llm.client, "_check_key", _noop)
     monkeypatch.setattr(llm.token_store, "record", _noop)
     monkeypatch.setattr("httpx.AsyncClient", _FakeClient)
 
@@ -131,8 +131,8 @@ async def test_llm_complete_no_exponential_backoff_on_429(monkeypatch):
         async def post(self, *a, **kw):
             raise _make_429_exc()
 
-    monkeypatch.setattr(llm, "get_configured_providers", lambda: [_make_provider()])
-    monkeypatch.setattr(llm, "_check_key", _noop)
+    monkeypatch.setattr(llm.client, "get_configured_providers", lambda: [_make_provider()])
+    monkeypatch.setattr(llm.client, "_check_key", _noop)
     monkeypatch.setattr(llm.token_store, "record", _noop)
     monkeypatch.setattr("httpx.AsyncClient", _FakeClient)
 
@@ -176,8 +176,8 @@ async def test_llm_stream_429_opens_circuit(monkeypatch):
         def raise_for_status(self):
             raise _make_429_exc()
 
-    monkeypatch.setattr(llm, "get_configured_providers", lambda: [_make_provider()])
-    monkeypatch.setattr(llm, "_check_key", _noop)
+    monkeypatch.setattr(llm.client, "get_configured_providers", lambda: [_make_provider()])
+    monkeypatch.setattr(llm.client, "_check_key", _noop)
     monkeypatch.setattr(llm.token_store, "record", _noop)
     monkeypatch.setattr("httpx.AsyncClient", _FakeClient)
     monkeypatch.setattr(asyncio, "sleep", _noop)

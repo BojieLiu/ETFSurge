@@ -29,7 +29,7 @@ from app.services.portfolio_service import (
 @pytest.fixture
 def llm_chain_env(monkeypatch):
     """R5-1-6 fixture: mock LLM 调用链（对齐 test_agent_registry.py:81）。"""
-    monkeypatch.setattr(llm, "_check_key", AsyncMock(return_value=None))
+    monkeypatch.setattr(llm.client, "_check_key", AsyncMock(return_value=None))
     monkeypatch.setattr(llm.token_store, "record", AsyncMock(return_value=None))
     monkeypatch.setattr(asyncio, "sleep", AsyncMock(return_value=None))
     return llm

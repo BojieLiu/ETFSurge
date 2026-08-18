@@ -95,7 +95,7 @@ def test_router_injected_keys_cover_prompt_consumed_keys():
     from pathlib import Path
 
     router_src = Path(__file__).resolve().parent.parent / "app" / "routers" / "analysis.py"
-    llm_src = Path(__file__).resolve().parent.parent / "app" / "analysis" / "llm.py"
+    llm_src = Path(__file__).resolve().parent.parent / "app" / "analysis" / "llm" / "reports.py"
 
     # 收集 llm_advice_stream 中写入 ctx_key 的 key（"user_ctx[\"x\"] = ..." 与 ctx.get）
     _r_text = router_src.read_text(encoding="utf-8")

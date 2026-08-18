@@ -104,8 +104,8 @@ async def test_stream_ignores_reasoning_content():
         "timeout": 30, "id": "test", "name": "test",
     })()]
 
-    with patch("app.analysis.llm._check_key", new=AsyncMock()), \
-         patch("app.analysis.llm.get_configured_providers", return_value=fake_providers), \
+    with patch("app.analysis.llm.client._check_key", new=AsyncMock()), \
+         patch("app.analysis.llm.client.get_configured_providers", return_value=fake_providers), \
          patch("httpx.AsyncClient", return_value=_ClientCtx()), \
          patch("app.analysis.llm.token_store.record", new=AsyncMock()):
         tokens = []
@@ -150,8 +150,8 @@ async def test_llm_complete_filters_leak():
         "timeout": 30, "id": "test", "name": "test",
     })()]
 
-    with patch("app.analysis.llm._check_key", new=AsyncMock()), \
-         patch("app.analysis.llm.get_configured_providers", return_value=fake_providers), \
+    with patch("app.analysis.llm.client._check_key", new=AsyncMock()), \
+         patch("app.analysis.llm.client.get_configured_providers", return_value=fake_providers), \
          patch("httpx.AsyncClient", return_value=_ClientCtx()), \
          patch("app.analysis.llm.token_store.record", new=AsyncMock()):
         out = await llm_complete("prompt")

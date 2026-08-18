@@ -385,8 +385,8 @@ class TestP0_5RateLimitFailover:
                 return _FakeClient("deepseek")
 
         with patch("httpx.AsyncClient", side_effect=_factory), \
-             patch.object(llm_mod, "get_configured_providers", return_value=providers), \
-             patch.object(llm_mod, "_check_key", new=AsyncMock()):
+             patch("app.analysis.llm.client.get_configured_providers", return_value=providers), \
+             patch("app.analysis.llm.client._check_key", new=AsyncMock()):
             # max_retries=1：修复前第 2 轮会再打 opencode_zen（calls>=2），修复后只 1 次
             result = await llm_mod.llm_complete_with_system(
                 system_prompt="s", prompt="p", max_retries=1, rate_limit_cap=1.0,

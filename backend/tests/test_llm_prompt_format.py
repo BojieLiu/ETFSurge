@@ -101,8 +101,8 @@ class TestGenerateDesignReportTimeout:
 
         agent_mock = MagicMock()
         agent_mock.run = AsyncMock(return_value="真实 LLM 报告")
-        with patch("app.analysis.llm.get_agent", return_value=agent_mock), \
-             patch.object(llm_mod, "load_prompt", return_value="sys"):
+        with patch("app.analysis.llm.reports.get_agent", return_value=agent_mock), \
+             patch("app.analysis.llm.reports.load_prompt", return_value="sys"):
             await llm_mod.generate_design_report(
                 strategies=[{"id": "balanced", "etfs": []}],
                 market_context={"market_regime": "neutral"},

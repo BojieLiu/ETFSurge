@@ -108,8 +108,8 @@ async def test_generate_market_report_default_fetch(monkeypatch):
             captured["prompt"] = prompt
             return "OK"
 
-    monkeypatch.setattr(llm, "_fetch_global_liquidity", _fake_fetch)
-    monkeypatch.setattr(llm, "get_agent", lambda name: _FakeAgent())
+    monkeypatch.setattr(llm.reports, "_fetch_global_liquidity", _fake_fetch)
+    monkeypatch.setattr(llm.reports, "get_agent", lambda name: _FakeAgent())
 
     await generate_market_report([], [], [], {}, [], [], market="A")
     assert "### 海外流动性" in captured["prompt"]

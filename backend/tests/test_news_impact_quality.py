@@ -23,7 +23,7 @@ async def test_no_direct_link_explicitly_says(monkeypatch):
             "summary": "该新闻与组合内标的无直接影响。",
         }
 
-    monkeypatch.setattr(llm, "get_agent", lambda name: _FakeAgent(fake_run_json))
+    monkeypatch.setattr(llm.news, "get_agent", lambda name: _FakeAgent(fake_run_json))
     res = await llm.analyze_news_impact(
         {"title": "某地出台自然保护条例", "content": "与金融市场无直接关联。"},
         [{"symbol": "510300", "name": "沪深300ETF", "target_weight": 0.3}],
@@ -54,7 +54,7 @@ async def test_irrelevant_news_not_forced_into_holdings(monkeypatch):
             "summary": "仅半导体产业链受直接冲击。",
         }
 
-    monkeypatch.setattr(llm, "get_agent", lambda name: _FakeAgent(fake_run_json))
+    monkeypatch.setattr(llm.news, "get_agent", lambda name: _FakeAgent(fake_run_json))
     res = await llm.analyze_news_impact(
         {"title": "某半导体工厂停产", "content": "影响芯片供给。"}, holdings
     )
@@ -76,7 +76,7 @@ async def test_empty_portfolio_market_scope(monkeypatch):
             "summary": "市场整体影响分析。",
         }
 
-    monkeypatch.setattr(llm, "get_agent", lambda name: _FakeAgent(fake_run_json))
+    monkeypatch.setattr(llm.news, "get_agent", lambda name: _FakeAgent(fake_run_json))
     res = await llm.analyze_news_impact(
         {"title": "央行降准", "content": "释放流动性。"}, []
     )
@@ -114,7 +114,7 @@ async def test_whitelist_filters_fabricated_holdings(monkeypatch, caplog):
             "summary": "利好宽基。",
         }
 
-    monkeypatch.setattr(llm, "get_agent", lambda name: _FakeAgent(fake_run_json))
+    monkeypatch.setattr(llm.news, "get_agent", lambda name: _FakeAgent(fake_run_json))
     with caplog.at_level(logging.WARNING, logger="app.analysis.llm"):
         res = await llm.analyze_news_impact(
             {"title": "四部门发文", "content": "严禁金融机构向股东利益输送。"}, holdings
@@ -134,7 +134,7 @@ async def test_whitelist_no_holdings_no_filter(monkeypatch):
             "summary": "市场影响有限。",
         }
 
-    monkeypatch.setattr(llm, "get_agent", lambda name: _FakeAgent(fake_run_json))
+    monkeypatch.setattr(llm.news, "get_agent", lambda name: _FakeAgent(fake_run_json))
     res = await llm.analyze_news_impact({"title": "t", "content": "c"}, [])
     assert res["affected_holdings"] == []
 
@@ -148,7 +148,7 @@ async def test_prompt_contains_explicit_code_list(monkeypatch):
         captured["prompt"] = prompt
         return {"impact_scope": "x", "affected_holdings": [], "summary": "y"}
 
-    monkeypatch.setattr(llm, "get_agent", lambda name: _FakeAgent(fake_run_json))
+    monkeypatch.setattr(llm.news, "get_agent", lambda name: _FakeAgent(fake_run_json))
     await llm.analyze_news_impact(
         {"title": "t", "content": "c"},
         [{"symbol": "159338", "name": "A500", "target_weight": 0.4},
@@ -169,7 +169,7 @@ async def test_market_context_injected_when_provided(monkeypatch):
         captured["prompt"] = prompt
         return {"impact_scope": "x", "affected_holdings": [], "summary": "y"}
 
-    monkeypatch.setattr(llm, "get_agent", lambda name: _FakeAgent(fake_run_json))
+    monkeypatch.setattr(llm.news, "get_agent", lambda name: _FakeAgent(fake_run_json))
     await llm.analyze_news_impact(
         {"title": "t", "content": "c"},
         [{"symbol": "159338", "name": "A500", "target_weight": 0.4}],
@@ -192,7 +192,7 @@ async def test_market_context_omitted_no_background(monkeypatch):
         captured["prompt"] = prompt
         return {"impact_scope": "x", "affected_holdings": [], "summary": "y"}
 
-    monkeypatch.setattr(llm, "get_agent", lambda name: _FakeAgent(fake_run_json))
+    monkeypatch.setattr(llm.news, "get_agent", lambda name: _FakeAgent(fake_run_json))
     await llm.analyze_news_impact(
         {"title": "t", "content": "c"},
         [{"symbol": "159338", "name": "A500", "target_weight": 0.4}],
@@ -233,7 +233,7 @@ async def test_analyze_news_impact_with_empty_content(monkeypatch):
 
     mock_agent = MagicMock()
     mock_agent.run_json = AsyncMock(side_effect=fake_run_json)
-    monkeypatch.setattr("app.analysis.llm.get_agent", lambda name: mock_agent)
+    monkeypatch.setattr("app.analysis.llm.news.get_agent", lambda name: mock_agent)
 
     await llm.analyze_news_impact(
         {"title": "美联储宣布加息25个基点", "content": ""},
@@ -260,7 +260,7 @@ async def test_analyze_news_impact_structured(monkeypatch):
     }
     mock_agent = MagicMock()
     mock_agent.run_json = AsyncMock(return_value=payload)
-    monkeypatch.setattr("app.analysis.llm.get_agent", lambda name: mock_agent)
+    monkeypatch.setattr("app.analysis.llm.news.get_agent", lambda name: mock_agent)
 
     result = await llm.analyze_news_impact(
         {"title": "央行降准", "content": "全面降准0.5个百分点"},
