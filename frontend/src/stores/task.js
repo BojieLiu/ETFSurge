@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { useToastStore } from './toast'
+import { logger } from '../utils/logger'
 
 // designState 仍用 localStorage 持久化（导航恢复用），但任务状态走后端 API
 const LS_DESIGN_KEY = 'etf_surge_design'
@@ -57,7 +58,7 @@ export const useTaskStore = defineStore('task', () => {
         taskHasMore.value = remoteTasks.length >= PAGE_SIZE
         _pageTotal = remoteTasks.length
       } catch (e) {
-        console.warn('[taskStore] fetch tasks failed:', e)
+        logger.warn('[taskStore] fetch tasks failed:', e)
       }
     })()
     _fetchPromise.finally(() => { _fetchPromise = null })
@@ -119,7 +120,7 @@ export const useTaskStore = defineStore('task', () => {
     if (changes.status === 'completed' || changes.status === 'failed') {
       const cb = _completionCallbacks[taskId]
       if (cb) {
-        try { cb({ taskId, ...changes }) } catch (e) { console.warn('[taskStore] completion callback error:', e) }
+        try { cb({ taskId, ...changes }) } catch (e) { logger.warn('[taskStore] completion callback error:', e) }
         delete _completionCallbacks[taskId]
       }
     }
