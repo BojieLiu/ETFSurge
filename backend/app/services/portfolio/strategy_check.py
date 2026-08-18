@@ -388,7 +388,7 @@ async def strategy_check(
         logger.debug("[strategy_check] industry map build failed (non-fatal): %s", _e)
 
     # round27 R42: 策略检查因子分口径统一——复用设计同源的全池截面 z（与设计同方向），
-    # 不再用持仓子集重做 z（旧 _cross_sectional_factor_composite 导致两屏方向相反）。
+    # 不再用持仓子集重做 z（旧截面复合分实现导致两屏方向相反）。
     # 返回 {sym: {"composite": float|None, "reference": "相对候选池"|"单标的"}}。
     _factor_composites: dict[str, dict] = {}
     try:
@@ -782,53 +782,6 @@ def _attach_composite_decisions(
         fb["composite_decision"] = cd
 
 
-def _cross_sectional_factor_composite(
-    factor_breakdowns: dict[str, dict],
-) -> dict[str, float]:
-    """round25 R27: 截面 z-score 复合分——每只持仓的因子强度（跨持仓可比口径）。
-
-    .. legacy:: 遗留实现（giant-file split Batch 5, 2026-08-18）——0 生产调用点
-       （R42 弃用，round28 起组合内方向已改 _full_pool_factor_composite），
-       仅被测试直测保留（test_round25_r27_factor_caliber.py 等）。不删除以维持
-       测试引用完整；新代码不得调用。
-
-    背景（R27 实证）：策略检查「因子分」用 `_rule_based_suggestion` 的原始因子值均值
-    （avg_factor），被 KDJ≈77 等量纲大的技术因子主导（159338 报「1.68 偏强」），而
-    设计路径用 `market_data_hub` 截面 z-score 复合分（同一标的 -0.958 深负）——两屏
-    方向相反。本函数对每个因子键在**组合内所有持仓**上做 z-score 归一（跨持仓截面，
-    非单标的内部），再按持仓平均，得到与设计同量纲的复合分。
-
-    无 I/O 纯函数。某因子全部相同（std=0）→ z=0（中性，不引入噪声）。
-    """
-    out: dict[str, float] = {}
-    if not isinstance(factor_breakdowns, dict) or not factor_breakdowns:
-        return out
-    # 每因子键收集所有持仓的值（真实数值）
-    by_key: dict[str, list[tuple[str, float]]] = {}
-    for sym, fb in factor_breakdowns.items():
-        fs = fb.get("factor_scores") if isinstance(fb, dict) else None
-        if not isinstance(fs, dict):
-            continue
-        for k, v in fs.items():
-            if isinstance(v, (int, float)) and v != 0:
-                by_key.setdefault(k, []).append((sym, float(v)))
-    # 每键 z-score → 每持仓平均
-    comps: dict[str, list[float]] = {}
-    for vals in by_key.values():
-        if len(vals) < 2:
-            continue
-        mean = sum(v for _, v in vals) / len(vals)
-        var = sum((v - mean) ** 2 for _, v in vals) / len(vals)
-        std = var ** 0.5
-        if std <= 1e-9:
-            continue
-        for sym, v in vals:
-            comps.setdefault(sym, []).append((v - mean) / std)
-    for sym, zs in comps.items():
-        out[sym] = round(sum(zs) / len(zs), 3)
-    return out
-
-
 def _within_symbol_factor_composite(fs: dict) -> float | None:
     """round25 R27: 单标的因子复合分（与设计屏同口径）。
 
@@ -868,7 +821,7 @@ def _within_symbol_factor_composite(fs: dict) -> float | None:
 def _full_pool_factor_composite(factor_breakdowns: dict[str, dict]) -> dict[str, dict]:
     """round27 R42: 策略检查「因子分」复用设计同源的全池截面 z（与设计屏方向一致）。
 
-    背景（R42 实证）：旧实现 ``_cross_sectional_factor_composite`` 在**组合内持仓子集**
+    背景（R42 实证）：旧截面复合分实现在**组合内持仓子集**
     重做 z-score，导致同一标的在设计屏（全池 z，-0.958）与策略检查屏（持仓子集 z，
     +0.16）方向相反映。本函数对每只持仓按其 symbol 查
     ``market_data_hub.get_factor_matrix()`` 的**全池截面 z 行**（即设计

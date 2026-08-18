@@ -39,7 +39,7 @@
   6. **T-MOCK-SURFACE — market_data_hub 测试依赖面过大**（§3.4）：79 个测试文件直接 import hub 单例，任何签名/行为改动需同步 79 处。
 - **P2（覆盖率真空，正确性风险）**
   7. **C-VOID — 低覆盖文件清单**（§3.1）：`main.py` 15%（520 stmts / 443 miss，启动/预热/任务编排全裸奔）、`database.py` 20%、`fetchers/global_markets_fetcher.py` 45%（247 miss，美股/港股/商品数据源是业务核心）、`services/market_trends.py` 50%、`routers/ws.py` 49%、`monitor/source_events.py` 33%。
-  8. **DEAD-CODE — 三处死代码/滞留函数**（§5.5）：① `llm_context.py:168-175` import 不存在的 `portfolio_service` 符号（try/except 吞错恒落空列表，从未工作）；② `_detect_regime`（`portfolio_service.py:2232`）0 生产调用 + 0 测试引用（真死代码）；③ `_cross_sectional_factor_composite`（`portfolio_service.py:1619`）0 生产调用但测试直测 4 处（仅测试引用的滞留函数）。均随方案 B 一并处理，不静默留存。
+  8. **DEAD-CODE — 三处死代码/滞留函数**（§5.5）：① `llm_context.py:168-175` import 不存在的 `portfolio_service` 符号（try/except 吞错恒落空列表，从未工作）；② `_detect_regime`（`portfolio_service.py:2232`）0 生产调用 + 0 测试引用（真死代码）；③ `_cross_sectional_factor_composite`（**2026-08-18 已按方案 ② 删除**：函数定义 + 两处 re-export + 测试引用一并清理）。均不静默留存。
 - **P2（前端/生成代码冗余，见 §7）**
   9. **FE-DEAD — 前端死 utils：0 个（初检 3 个，Review 8 全数证伪）**（§7.1）：`chartColors.js`（`AnalysisView.vue:66` import）、`pricing.js`（`TokenMonitor.vue:153` import）、`newsLevel.js`（`NewsView.vue:152` import）**全部活跃**——初检用 `grep -v "utils/$name"` 误伤了含 `../utils/xxx` 的 import 行（round11 H1 同型教训）。前端生产代码死代码实际仅 CSS 死类（FE-CSS）。
   10. **FE-CSS — 前端死样式类 ~123 个**（§7.1.1）：theme.css 94 个 0 引用类 + global.css 29 个（round11 已列未落地）。
@@ -293,7 +293,7 @@ app/services/portfolio/
 | `routers/portfolio.py` import 11 个函数 | Step 1 re-export 保持零变化；Step 3 一次性改 1 个文件的 import |
 | **`llm_context.py:171` 引用不存在的 `portfolio_service` 对象（死代码）** | **实证**：`rg "portfolio_service = "` 全 app 无定义；`llm_context.py:168-175` 段 try/except 吞掉 ImportError 后恒落 `context["portfolio"] = []`——**该段从未工作过**。**测试联动（Review 10 补）**：`include_portfolio` 参数有 **15 处调用点**（生产 `analysis.py:319/414` + 测试 5 文件 `test_llm_context_market/test_macro_factors/test_macro_fetcher/test_market_isolation/test_market_service_hk`），且 `rg` 确认**无任何调用方依赖 `context["portfolio"]` 返回值**（生产/测试均无断言该键）。**删除方案（二选一，均需同步 15 处调用点）**：①**保留参数签名、标注 deprecated**（改动面最小，参数保留但段删除后恒不注入该键）；②删参数 + 同步清理 15 处调用点（彻底，但需改 2 生产 + 5 测试文件）。**推荐 ①**（低风险，符合「绝不一刀切」）。 |
 | **`_detect_regime`（`portfolio_service.py:2232`）无调用点（死代码）** | **实证**：全文件仅 2232 定义一行，0 调用；`rg "_detect_regime" tests/` 0 引用。`_collect_strategy_data` 内市态取自 `market_data_hub.get_market_regime`（非本函数）。随方案 B Step 3 删除；**删除前 DoD**：`rg "_detect_regime"` 全库（含 tests/）0 残留后再删 |
-| **`_cross_sectional_factor_composite`（`portfolio_service.py:1619`）无生产调用点，仅测试引用** | **实证**：生产代码 0 调用（1215/1700 注释确认弃用，round28 R42）；但 `test_round25_r27_factor_caliber.py` 有 4 处断言直测其行为——**属「仅测试引用的滞留函数」**，不得直接删。方案 B Step 3 时三选一：①接通回 `_attach_composite_decisions`（若 R42 语义允许）；②标注 `# dead` 移入待清理清单（测试随之迁/删）；③保留并在新模块测试中显式标注「遗留实现」。**不静默留存**（AGENTS.md 脚手架零容忍） |
+| ~~`_cross_sectional_factor_composite`~~（**已删除 2026-08-18，方案 ②**） | 原属「仅测试引用的滞留函数」（生产 0 调用，R42 弃用）。已执行方案 ②：删除 `strategy_check.py` 函数定义 + `portfolio/__init__.py`、`portfolio_service.py` 两处 re-export，并删除 `test_strategy_check_timeout_matrix.py` 的 `TestCrossSectionalFactorComposite` 整类与 R42 负向控制中对它的引用（保留 R42 两屏同号回归断言）、移除 `test_portfolio_module_structure.py` 的 STRUCTURE_PARITY 元组项。167 相关测试 + 79 portfolio 测试全过。R42 历史注释已改写为不点名已删符号。 |
 | ~~strategy_check 与 apply_design 共享 `_collect_strategy_data`~~ | **已证伪**（Review 5）：`rg` 确认 `_collect_strategy_data`（932）仅被 `strategy_check` 内部调用，`apply_portfolio_design`（2254-2312）不使用——**无需跨簇共享安排**，随 `strategy_check.py` 内聚即可 |
 | 28 个测试文件 | 与方案 A 相同：Step 1 不动测试；Step 3 按 `rg` 结果迁移 |
 

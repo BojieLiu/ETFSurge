@@ -63,7 +63,6 @@ STRUCTURE_PARITY = [
     ("app.services.portfolio_service", "app.services.portfolio.strategy_check", "_collect_strategy_data"),
     ("app.services.portfolio_service", "app.services.portfolio.strategy_check", "_empty_portfolio_diagnosis"),
     ("app.services.portfolio_service", "app.services.portfolio.strategy_check", "_attach_composite_decisions"),
-    ("app.services.portfolio_service", "app.services.portfolio.strategy_check", "_cross_sectional_factor_composite"),
     ("app.services.portfolio_service", "app.services.portfolio.strategy_check", "_within_symbol_factor_composite"),
     ("app.services.portfolio_service", "app.services.portfolio.strategy_check", "_full_pool_factor_composite"),
     ("app.services.portfolio_service", "app.services.portfolio.strategy_check", "_build_rule_fallback_holdings_analysis"),
