@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatDate, formatDateOnly } from './formatDate'
+import { formatDate, formatDateOnly } from '../utils/formatDate'
 
 describe('formatDate', () => {
   it('converts UTC to Beijing time correctly', () => {

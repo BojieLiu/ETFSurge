@@ -1,9 +1,11 @@
 /**
- * round19 批次 2 测试（2026-08-12）：
- * - P6-①/② WS 全站常驻（App.vue 建连）+ wsStatus 五态状态机（market.js）
- * - P2-② portfolio_changed 广播消费（防抖 1s 触发 portfolio store 刷新）
+ * WS 状态机 + 源码级链路守卫（§7.2 归位合并，2026-08-18）。
  *
- * 对照 §二十六 T1/T2（负向：disconnectWS 后仍 connected → FAIL；stopped 时仍渲染「离线」→ FAIL）。
+ * 合并自 round19-batch1/batch2：
+ * - MarketAnalysis @analyze 绑定（P7-②）+ fetch_history 前缀归一化（P7-①）
+ * - market store wsStatus 五态状态机 + portfolio_changed 广播消费（P6-②/P2-②）
+ * - App.vue 全站 WS 建连 + 导航栏状态文案（P6-①/②）
+ * - PortfolioManager 快照层移除（P2-①）
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
@@ -12,6 +14,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const srcRoot = path.resolve(__dirname, '..')
 
 vi.mock('../api', () => ({ marketApi: {}, portfolioApi: { list: vi.fn() } }))
 vi.mock('../utils/logger', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } }))
@@ -30,6 +33,48 @@ class FakeWebSocket {
   send() {}
   close() { this.onclose && this.onclose() }
 }
+
+// ── round19 P7-②: MarketAnalysis @analyze 绑定 ──
+
+describe('MarketAnalysis @analyze 绑定（round19 P7-②）', () => {
+  const src = fs.readFileSync(path.join(srcRoot, 'views', 'MarketAnalysis.vue'), 'utf-8')
+
+  it('WatchlistPanel 组件行绑定 @analyze="onQuickAnalyze"', () => {
+    const line = src.split('\n').find((l) => l.includes('<WatchlistPanel'))
+    expect(line).toBeTruthy()
+    expect(line).toContain('@analyze="onQuickAnalyze"')
+  })
+
+  it('onQuickAnalyze 实现存在（滚动到分析区 + 触发 UnifiedAnalysis）', () => {
+    expect(src).toContain('function onQuickAnalyze({ mode, query, name })')
+    expect(src).toContain('externalTrigger.value = { mode, query, name }')
+  })
+
+  it('SectorHeatMap 对照绑定仍在（回归）', () => {
+    const line = src.split('\n').find((l) => l.includes('<SectorHeatMap'))
+    expect(line).toContain('@analyze="onQuickAnalyze"')
+  })
+})
+
+// ── round19 P7-①: fetch_history 入口归一化 ──
+
+describe('fetch_history 入口归一化（round19 P7-①）', () => {
+  const src = fs.readFileSync(
+    path.join(srcRoot, '..', '..', 'backend', 'app', 'fetchers', 'china_market.py'),
+    'utf-8',
+  )
+
+  it('fetch_history 函数体首段含前缀剥离逻辑', () => {
+    const fnStart = src.indexOf('def fetch_history(')
+    const fnBody = src.slice(fnStart, fnStart + 1200)
+    expect(fnBody).toMatch(/startswith\(\("sh", "sz", "bj"\)/)
+    // review 修复（round23 审计前）：剥前缀仅限 A 股且用 str() 包裹（US 字母代码
+    // SHOP/SHW 等不得剥）——断言放宽为匹配 str(symbol)[2:] 形式
+    expect(fnBody).toMatch(/symbol = str\(symbol\)\[2:\]/)
+  })
+})
+
+// ── round19 P6-②: market store wsStatus 五态状态机 ──
 
 describe('market store — wsStatus 五态状态机（round19 P6-②）', () => {
   beforeEach(() => {
@@ -69,6 +114,8 @@ describe('market store — wsStatus 五态状态机（round19 P6-②）', () => 
     store.disconnectWS() // 清理重连定时器，避免测试悬挂
   })
 })
+
+// ── round19 P2-②: portfolio_changed 广播消费 ──
 
 describe('market store — portfolio_changed 广播消费（round19 P2-②）', () => {
   beforeEach(() => {
@@ -120,6 +167,8 @@ describe('market store — portfolio_changed 广播消费（round19 P2-②）', 
   })
 })
 
+// ── round19 P6-①/②: App.vue 导航栏状态文案 ──
+
 describe('App.vue 导航栏状态文案（round19 P6-①/②，源码断言）', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'App.vue'), 'utf-8')
 
@@ -142,6 +191,8 @@ describe('App.vue 导航栏状态文案（round19 P6-①/②，源码断言）',
     expect(dSrc).toMatch(/marketStore\.offWSMessage\(updateGlobalIndicesFromWS\)/)
   })
 })
+
+// ── round19 P2-①: PortfolioManager 快照层移除 ──
 
 describe('PortfolioManager 快照层移除（round19 P2-①，源码断言）', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'components', 'PortfolioManager.vue'), 'utf-8')

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
-import { changeClass } from './changeClass'
+import { changeClass } from '../utils/changeClass'
 
 // --- Issue 1: P&L color convention (红涨绿跌) ---
 // Positive / zero values must map to the UP (red) class.

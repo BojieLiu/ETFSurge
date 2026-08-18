@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { useNewsWS } from './useNewsWS'
+import { useNewsWS } from '../composables/useNewsWS'
 
 // Fake WebSocket that captures handlers and lets tests drive lifecycle events.
 class FakeWebSocket {

@@ -1,3 +1,9 @@
+/**
+ * PortfolioManager 测试矩阵（§7.2 归位合并，2026-08-18）。
+ *
+ * - UX 改进：搜索 placeholder/热门建议/表单校验/等权分配/权重滑块/成功 toast
+ * - 选择指示：aria-selected 高亮 + select emit + 场内/场外徽标
+ */
 import { describe, it, expect, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 
@@ -146,5 +152,46 @@ describe('PortfolioManager UX improvements', () => {
 
     expect(storeMock.addEtf).toHaveBeenCalled()
     expect(toastShow).toHaveBeenCalledWith(expect.stringContaining('科创50ETF'), 'success')
+  })
+})
+
+describe('PortfolioManager selection indicator', () => {
+  it('applies the active class + aria-selected to the selected row', async () => {
+    const wrapper = mount(PortfolioManager, {
+      props: { selectedSymbol: '510300' },
+      global: { stubs: { AppButton: true, AppInput: true, AppSelect: true } },
+    })
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    const selectedRows = wrapper.findAll('tr[aria-selected="true"]')
+    expect(selectedRows.length).toBe(1)
+    expect(selectedRows[0].classes()).toContain('etf-row--selected')
+    expect(selectedRows[0].text()).toContain('510300')
+  })
+
+  it('emits "select" with the holding when its row is clicked', async () => {
+    const wrapper = mount(PortfolioManager, {
+      props: { selectedSymbol: '' },
+      global: { stubs: { AppButton: true, AppInput: true, AppSelect: true } },
+    })
+    await flushPromises()
+
+    // click the first holding row (not an action button)
+    const firstRow = wrapper.findAll('tbody tr')[0]
+    await firstRow.trigger('click')
+
+    const ev = wrapper.emitted('select')
+    expect(ev).toBeTruthy()
+    expect(ev[0][0].symbol).toBe('510050')
+  })
+
+  it('renders an on-exchange badge distinguishing 场内 vs 场外', async () => {
+    const wrapper = mount(PortfolioManager, {
+      props: { selectedSymbol: '' },
+      global: { stubs: { AppButton: true, AppInput: true, AppSelect: true } },
+    })
+    await flushPromises()
+    expect(wrapper.find('.exchange-badge.on').exists()).toBe(true)
   })
 })
