@@ -239,27 +239,11 @@ hr {
   .container { padding: 0 var(--space-8); }
 }
 
-.section {
-  padding: var(--space-8) 0;
-}
-
-.section-sm { padding: var(--space-4) 0; }
-.section-lg { padding: var(--space-12) 0; }
-.section-xl { padding: var(--space-16) 0; }
-
 /* Grid */
 .grid {
   display: grid;
   gap: var(--space-4);
 }
-
-.grid-cols-1 { grid-template-columns: repeat(1, 1fr); }
-.grid-cols-2 { grid-template-columns: repeat(2, 1fr); }
-.grid-cols-3 { grid-template-columns: repeat(3, 1fr); }
-.grid-cols-4 { grid-template-columns: repeat(4, 1fr); }
-.grid-cols-5 { grid-template-columns: repeat(5, 1fr); }
-.grid-cols-6 { grid-template-columns: repeat(6, 1fr); }
-.grid-cols-12 { grid-template-columns: repeat(12, 1fr); }
 
 @media (min-width: 640px) {
   .sm\:grid-cols-2 { grid-template-columns: repeat(2, 1fr); }
@@ -281,41 +265,6 @@ hr {
   .lg\:grid-cols-5 { grid-template-columns: repeat(5, 1fr); }
   .lg\:grid-cols-6 { grid-template-columns: repeat(6, 1fr); }
 }
-
-/* Flex */
-.flex { display: flex; }
-.inline-flex { display: inline-flex; }
-.flex-col { flex-direction: column; }
-.flex-wrap { flex-wrap: wrap; }
-.flex-1 { flex: 1 1 0%; }
-.flex-auto { flex: 1 1 auto; }
-.flex-initial { flex: 0 1 auto; }
-.flex-none { flex: none; }
-.items-center { align-items: center; }
-.items-start { align-items: flex-start; }
-.items-end { align-items: flex-end; }
-.items-stretch { align-items: stretch; }
-.justify-center { justify-content: center; }
-.justify-between { justify-content: space-between; }
-.justify-end { justify-content: flex-end; }
-.justify-start { justify-content: flex-start; }
-.gap-1 { gap: var(--space-1); }
-.gap-2 { gap: var(--space-2); }
-.gap-3 { gap: var(--space-3); }
-.gap-4 { gap: var(--space-4); }
-.gap-5 { gap: var(--space-5); }
-.gap-6 { gap: var(--space-6); }
-.gap-8 { gap: var(--space-8); }
-
-/* Spacing */
-.m-0 { margin: 0; }
-.m-auto { margin: auto; }
-.mx-auto { margin-left: auto; margin-right: auto; }
-.my-auto { margin-top: auto; margin-bottom: auto; }
-.mt-auto { margin-top: auto; }
-.mb-auto { margin-bottom: auto; }
-.ml-auto { margin-left: auto; }
-.mr-auto { margin-right: auto; }
 
 /* ==========================================
    ANIMATION KEYFRAMES
@@ -376,38 +325,14 @@ hr {
   50% { transform: rotate(3deg); }
 }
 
-.animate-fade-in { animation: fade-in var(--duration-normal) var(--ease-out); }
-.animate-fade-out { animation: fade-out var(--duration-normal) var(--ease-in); }
-.animate-slide-in-top { animation: slide-in-from-top var(--duration-normal) var(--ease-out); }
-.animate-slide-in-bottom { animation: slide-in-from-bottom var(--duration-normal) var(--ease-out); }
-.animate-slide-in-left { animation: slide-in-from-left var(--duration-normal) var(--ease-out); }
-.animate-slide-in-right { animation: slide-in-from-right var(--duration-normal) var(--ease-out); }
-.animate-scale-in { animation: scale-in var(--duration-normal) var(--ease-spring); }
-.animate-spin { animation: spin 1s linear infinite; }
-.animate-pulse { animation: pulse 2s ease-in-out infinite; }
-.animate-shimmer { animation: shimmer 2s linear infinite; }
-.animate-wiggle { animation: wiggle 0.5s ease-in-out; }
-
-/* Stagger children */
-.stagger-children > * { opacity: 0; animation: fade-in var(--duration-normal) var(--ease-out) forwards; }
-.stagger-children > *:nth-child(1) { animation-delay: 0ms; }
-.stagger-children > *:nth-child(2) { animation-delay: 50ms; }
-.stagger-children > *:nth-child(3) { animation-delay: 100ms; }
-.stagger-children > *:nth-child(4) { animation-delay: 150ms; }
-.stagger-children > *:nth-child(5) { animation-delay: 200ms; }
-.stagger-children > *:nth-child(6) { animation-delay: 250ms; }
-.stagger-children > *:nth-child(7) { animation-delay: 300ms; }
-.stagger-children > *:nth-child(8) { animation-delay: 350ms; }
-
 /* ==========================================
    PRINT STYLES
    ========================================== */
 
 @media print {
-  .no-print { display: none !important; }
-  .print-only { display: block !important; }
+
   body { background: white; color: black; }
-  .shadow-sm, .shadow-md, .shadow-lg, .shadow-xl, .shadow-2xl { box-shadow: none !important; }
   a { text-decoration: underline; }
   a[href^="http"]::after { content: " (" attr(href) ")"; }
+
 }
