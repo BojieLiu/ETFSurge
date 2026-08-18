@@ -56,38 +56,6 @@ def _extract_call_name(node: ast.Call) -> str:
     return '.'.join(reversed(parts))
 
 
-def _is_in_await_context(tree: ast.AST, target_node: ast.AST) -> bool:
-    """判断 target_node 是否被 await 表达式包裹。
-
-    通过遍历 AST 时维护 in_await 标志栈实现。
-    """
-    class AwaitFinder(ast.NodeVisitor):
-        def __init__(self):
-            self.in_await = 0
-            self.found = False
-
-        def visit_Await(self, node):
-            self.in_await += 1
-            if node is target_node or node == target_node:
-                self.found = True
-            elif hasattr(node, 'value'):
-                # 检查 await xxx 中 xxx 是否就是目标节点
-                inner = node.value
-                if inner is target_node or inner == target_node:
-                    self.found = True
-            self.generic_visit(node)
-            self.in_await -= 1
-
-        def generic_visit(self, node):
-            if node is target_node and self.in_await > 0:
-                self.found = True
-            super().generic_visit(node)
-
-    finder = AwaitFinder()
-    finder.visit(tree)
-    return finder.found
-
-
 def _is_exempted_await(node: ast.Await, tree: ast.AST) -> bool:
     """检查 await 调用是否已经是安全的线程池包装。
 
@@ -120,61 +88,72 @@ def _defined_as_async(name: str, tree: ast.AST) -> bool:
     return False
 
 
-def _is_inside_nested_def(node: ast.AST, func_node: ast.AsyncFunctionDef) -> bool:
-    """判断 node 是否在 async def 内部嵌套的同步 def 中。"""
-    for parent in ast.walk(func_node):
-        if isinstance(parent, ast.FunctionDef) and not isinstance(parent, ast.AsyncFunctionDef):
-            # 检查 node 是否在这个 nested def 的子树中
-            for child in ast.walk(parent):
-                if child is node:
-                    return True
-    return False
+class _CallScanner(ast.NodeVisitor):
+    """单遍扫描异步函数体内的直接同步阻塞调用。
 
-
-def scan_async_function(func_node: ast.AsyncFunctionDef, file_path: str) -> list[str]:
-    """扫描单个 async def 函数，返回违规列表。
-    
-    只报告直接位于 async 函数体的同步调用，
-    跳过嵌套同步 def 中的调用（它们应被外层 def 的扫描覆盖）。
+    原实现对每个 Call 节点都整树 walk 一遍（O(调用数 × AST节点数)），在大型
+    app/ 树累积到 30s+。这里改为单遍遍历：用访问栈维护「是否在 await 表达式内」
+    「是否在嵌套同步 def 内」两个上下文标志，对每个 Call 仅做 O(1) 判定。
+    语义与原实现完全等价（同样的阻塞/白名单模式、同样的 await/嵌套跳过）。
     """
-    violations = []
 
-    for node in ast.walk(func_node):
-        # 跳过嵌套在同步 def 中的节点
-        if _is_inside_nested_def(node, func_node):
-            continue
+    def __init__(self, func_node: ast.AsyncFunctionDef, file_path: str):
+        self.func_node = func_node
+        self.file_path = file_path
+        self.violations: list[str] = []
+        self._in_nested_sync = 0   # 嵌套同步 def 深度（顶层 async def 不计入）
+        self._await_depth = 0      # 祖先 Await 深度
 
-        # 检查直接同步调用（非 await 包裹）
-        if isinstance(node, ast.Call):
+    def visit_FunctionDef(self, node):
+        if node is self.func_node:
+            self.generic_visit(node)
+            return
+        self._in_nested_sync += 1
+        self.generic_visit(node)
+        self._in_nested_sync -= 1
+
+    def visit_AsyncFunctionDef(self, node):
+        # 嵌套 async def 不计入「嵌套同步 def」，其体内调用仍需检查
+        if node is self.func_node:
+            self.generic_visit(node)
+            return
+        self.generic_visit(node)
+
+    def visit_Await(self, node):
+        self._await_depth += 1
+        self.generic_visit(node)
+        self._await_depth -= 1
+
+    def visit_Call(self, node):
+        if self._in_nested_sync == 0 and self._await_depth == 0:
             call_name = _extract_call_name(node)
-
-            # 检查是否是阻塞模式
             is_blocking = any(
                 call_name.startswith(p) or call_name == p.rstrip('.')
                 for p in _BLOCKING_PATTERNS
             )
-            if not is_blocking:
-                continue
+            if is_blocking:
+                is_allowed = any(
+                    call_name.startswith(p) or call_name == p.rstrip('.')
+                    for p in _ALLOWED_PATTERNS
+                )
+                if not is_allowed:
+                    rel = os.path.relpath(self.file_path, _APP_PATH)
+                    self.violations.append(
+                        f"{rel}:{node.lineno}: async def '{self.func_node.name}' "
+                        f"contains direct sync call '{call_name}'"
+                    )
+        self.generic_visit(node)
 
-            # 检查是否被 await 包裹（await 包裹的是安全的）
-            if _is_in_await_context(func_node, node):
-                continue
 
-            # 检查是否是白名单
-            is_allowed = any(
-                call_name.startswith(p) or call_name == p.rstrip('.')
-                for p in _ALLOWED_PATTERNS
-            )
-            if is_allowed:
-                continue
+def scan_async_function(func_node: ast.AsyncFunctionDef, file_path: str) -> list[str]:
+    """扫描单个 async def 函数，返回违规列表（单遍，O(AST节点数)）。
 
-            rel = os.path.relpath(file_path, _APP_PATH)
-            violations.append(
-                f"{rel}:{node.lineno}: async def '{func_node.name}' "
-                f"contains direct sync call '{call_name}'"
-            )
-
-    return violations
+    只报告直接位于 async 函数体的同步调用，
+    跳过嵌套同步 def 中的调用（它们应被外层 def 的扫描覆盖）。
+    """
+    scanner = _CallScanner(func_node, file_path)
+    scanner.visit(func_node)
+    return scanner.violations
 
 
 def _scan_to_thread_misuse(tree: ast.AST, file_path: str) -> list[str]:

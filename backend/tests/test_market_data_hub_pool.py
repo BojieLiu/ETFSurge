@@ -419,7 +419,10 @@ class TestStrategyDesignSessionPropagation:
         # 冻结时间：周五 18:00（盘后）
         frozen = datetime(2026, 8, 14, 18, 0)
         monkeypatch.setattr(mc, "datetime", _FrozenDatetime(frozen))
-        # _snapshot_as_of_for 用 market_data_hub.datetime（非 market_calendar.datetime）——两者都冻
+        # _snapshot_as_of_for 现位于 hub/_common.py，使用自身 `from datetime import datetime`
+        # 的模块级绑定（非 market_data_hub.datetime），需冻结 _common.datetime 才生效
+        from app.services.hub import _common as _common_mod
+        monkeypatch.setattr(_common_mod, "datetime", _FrozenDatetime(frozen))
         from app.services import market_data_hub as mh
         monkeypatch.setattr(mh, "datetime", _FrozenDatetime(frozen))
         monkeypatch.setattr(sd, "market_session", lambda dt=None: mc.market_session(dt))

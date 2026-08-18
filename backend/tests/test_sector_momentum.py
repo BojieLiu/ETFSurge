@@ -82,7 +82,7 @@ class TestPersistSnapshotAfterRefresh:
         hub._sector_momentum_cache = [{"name": "半导体", "change_pct": 2.1}]
         hub._sector_momentum_cache_ts = time.time()
         calls = []
-        monkeypatch.setattr(_sector_mod, "market_session", lambda dt=None: "open")
+        monkeypatch.setattr(_snapshot_mod, "market_session", lambda dt=None: "open")
         monkeypatch.setattr(_snapshot_mod, "_snapshot_as_of_for", lambda dt=None: "2026-08-14T15:30:00")
         def _fake_persist(kind, payload, as_of):
             calls.append((kind, payload, as_of))
@@ -99,7 +99,7 @@ class TestPersistSnapshotAfterRefresh:
         hub._sector_momentum_cache = None
         hub._sector_momentum_cache_ts = 0
         calls = []
-        monkeypatch.setattr(_sector_mod, "market_session", lambda dt=None: "post_market")
+        monkeypatch.setattr(_snapshot_mod, "market_session", lambda dt=None: "post_market")
         monkeypatch.setattr(_snapshot_mod, "_snapshot_as_of_for", lambda dt=None: "2026-08-14T15:30:00")
         # 防污染：清空磁盘快照兜底，确保「缓存=None + 无快照」即空 []（否则会读到历史快照被误判非空）。
         monkeypatch.setattr(_sector_mod, "_load_latest_snapshot_sync", lambda kind: None)
@@ -116,7 +116,7 @@ class TestPersistSnapshotAfterRefresh:
         hub._sector_momentum_cache = [{"name": "半导体", "change_pct": 2.1}]
         hub._sector_momentum_cache_ts = time.time()
         calls = []
-        monkeypatch.setattr(_sector_mod, "market_session", lambda dt=None: "post_market")
+        monkeypatch.setattr(_snapshot_mod, "market_session", lambda dt=None: "post_market")
         monkeypatch.setattr(_snapshot_mod, "_snapshot_as_of_for", lambda dt=None: "2026-08-14T15:30:00")
         def _fake_persist(kind, payload, as_of):
             calls.append(kind)
