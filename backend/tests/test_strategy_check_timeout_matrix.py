@@ -1722,3 +1722,346 @@ class TestP0_5RateLimitFailover:
             f"429 后不应再重试 opencode_zen（反复 429 重试即 task 417 根因），实际 {calls['opencode_zen']} 次"
         )
         assert calls["deepseek"] >= 1, "429 后应立即降级 deepseek"
+
+
+# ===================================================================
+# merged from test_round24_rule_confidence.py (S3.3 de-round migration, 2026-08-18)
+# ===================================================================
+"""round24 R4/R14: confidence 表示法统一 + 规则路径分档非硬编码。
+
+R14：verify_e2e 对「规则建议 confidence=0.7」无断言，回归可能把分级改回恒定值。
+R4（本轮修订）：规则路径旧输出裸数值 0.5/0.7，与 LLM 的 high/medium 语义标签**同屏
+混排**（`StrategyCheckResult.vue:146` `confidenceLabel` 对 0.7 直接回落显示「0.7」、
+class 变 `conf-0.7` 无样式），且 0.7 实为「中等」却易读作「高置信」。
+
+契约：`api-contracts/portfolio/strategy-check-v2.md` §关键字段契约 / §3.1-3。
+统一后：全站 `high`/`medium`/`low` 三档语义标签；规则路径按因子填充率分档
+（≥90%→high、≥70%→medium、<70%→low），LLM 数值/中文标签一律归一化。
+"""
+
+import pytest
+
+from app.services.portfolio_service import (
+    _normalize_confidence,
+    _rule_based_suggestion,
+)
+
+
+def _call(fill_ratio: float | None):
+    """fill_ratio=None 模拟无因子可用度信息（total=0）。"""
+    fa = None if fill_ratio is None else {"filled": int(100 * fill_ratio), "total": 100}
+    return _rule_based_suggestion(
+        symbol="159992",
+        name="创新药",
+        target_weight=0.10,
+        factor_score={"technical.rsi.rsi_14": 0.6},
+        signal={"signal": "buy"},
+        regime="range_bound",
+        current_weight=0.08,
+        factor_availability=fa,
+    )
+
+
+# ── R4：规则路径三档语义标签 ──────────────────────────────────────────
+
+
+def test_low_fill_rate_gives_low_label():
+    """填充率 50% (<70%) → low（旧实现为裸数值 0.5）。"""
+    s = _call(0.50)
+    assert s["source"] == "rule"
+    assert s["confidence"] == "low"
+
+
+def test_mid_fill_rate_gives_medium_label():
+    """填充率 80% (≥70%, <90%) → medium（旧 0.7 的真实语义就是「中等」）。"""
+    assert _call(0.80)["confidence"] == "medium"
+
+
+def test_high_fill_rate_gives_high_label():
+    """填充率 95% (≥90%) → high（因子输入近乎完整）。"""
+    assert _call(0.95)["confidence"] == "high"
+
+
+def test_missing_availability_defaults_to_medium():
+    """无因子可用度信息（total=0）→ medium，不得冒充 high。"""
+    assert _call(None)["confidence"] == "medium"
+
+
+def test_confidence_is_multi_tier_not_constant():
+    """三档必须互不相同——若回归成恒值，本断言失败（抓「假修复」）。"""
+    labels = {_call(r)["confidence"] for r in (0.40, 0.80, 0.95)}
+    assert labels == {"low", "medium", "high"}
+
+
+def test_rule_confidence_is_never_raw_number():
+    """负向断言：规则路径不得再输出裸数值（0.5/0.7）表示法。"""
+    for ratio in (0.0, 0.40, 0.69, 0.70, 0.90, 1.0, None):
+        c = _call(ratio)["confidence"]
+        assert isinstance(c, str), f"fill={ratio} 输出非标签: {c!r}"
+        assert c in ("high", "medium", "low")
+
+
+def test_rule_suggestion_action_enum_only():
+    """规则路径仅输出 increase/decrease/hold 枚举（契约硬约束）。"""
+    for ratio in (0.40, 0.80, None):
+        assert _call(ratio)["action"] in ("increase", "decrease", "hold")
+
+
+# ── R4：LLM 路径归一化（数值/中文/大小写 → 同一枚举） ──────────────────
+
+
+@pytest.mark.parametrize("raw,expected", [
+    (0.85, "high"), (0.8, "high"), (1, "high"),
+    (0.7, "medium"), (0.5, "medium"),
+    (0.49, "low"), (0.0, "low"),
+    ("high", "high"), ("HIGH", "high"), ("Medium", "medium"), ("low", "low"),
+    ("高", "high"), ("中", "medium"), ("低", "low"),
+    ("高置信", "high"), ("0.85", "high"),
+])
+def test_normalize_confidence(raw, expected):
+    assert _normalize_confidence(raw) == expected
+
+
+def test_normalize_confidence_unknown_falls_back_to_medium():
+    """无法识别（None/空/乱值）→ medium，不得静默丢字段或冒充 high。"""
+    for bad in (None, "", "  ", "很高吧", {}, []):
+        assert _normalize_confidence(bad) == "medium"
+
+
+# ===================================================================
+# merged from test_round25_r27_factor_caliber.py (S3.3 de-round migration, 2026-08-18)
+# ===================================================================
+"""round25 R27: 因子分两路径口径统一——截面 z-score 复合分。
+
+问题（round25 §2.2 实证）：同一标的 159338 在组合设计路径 composite z-score = -0.958
+（深负），在策略检查路径「因子分 1.68（偏强）」——两屏方向相反。根因：策略检查
+`_rule_based_suggestion` 用原始因子值均值（avg_factor），被 KDJ≈77 等量纲大的技术因子
+主导；设计用截面 z-score。
+
+修复（round25 R27）：
+- `_cross_sectional_factor_composite`：对每个因子键在组合内所有持仓上 z-score 归一，
+  再按持仓平均 → 与设计同量纲的复合分；
+- `_rule_based_suggestion` 新增 `factor_composite` 参数，传入时优先使用（回落原始均值）。
+"""
+
+import pytest
+
+from app.services.portfolio_service import (
+    _cross_sectional_factor_composite,
+    _rule_based_suggestion,
+)
+
+
+class TestCrossSectionalFactorComposite:
+    """R27: 截面 z-score 复合分（跨持仓可比口径）。"""
+
+    def test_kdj_dominated_symbol_gets_negative_composite(self):
+        """KDJ≈77（量纲大）的标的不得再得正分——z-score 归一后与截面相对位置一致。"""
+        fbs = {
+            "510300": {
+                "factor_scores": {
+                    "technical.rsi.rsi_14": 58.0,
+                    "technical.kdj.k": 55.0,
+                    "momentum.recent_return": 0.05,
+                },
+            },
+            "159338": {
+                "factor_scores": {
+                    "technical.rsi.rsi_14": 42.0,
+                    "technical.kdj.k": 77.0,
+                    "momentum.recent_return": 0.03,
+                },
+            },
+            "511090": {
+                "factor_scores": {
+                    "technical.rsi.rsi_14": 35.0,
+                    "technical.kdj.k": 30.0,
+                    "momentum.recent_return": 0.01,
+                },
+            },
+        }
+        comps = _cross_sectional_factor_composite(fbs)
+        assert "510300" in comps and "159338" in comps and "511090" in comps
+        # 159338 KDJ 最高（77）但 RSI/动量均偏低 → 复合分应显著低于 510300
+        assert comps["159338"] < comps["510300"], (
+            f"159338 复合分 {comps['159338']} 应 < 510300 {comps['510300']}"
+        )
+        # 511090（全低）复合分应为负或最低
+        assert comps["511090"] <= comps["159338"]
+
+    def test_single_symbol_returns_empty(self):
+        """单只持仓无法构成截面 → 返回空 dict（调用方回落原始均值，诚实）。"""
+        fbs = {"510300": {"factor_scores": {"technical.rsi.rsi_14": 50.0}}}
+        assert _cross_sectional_factor_composite(fbs) == {}
+
+    def test_std_zero_key_skipped(self):
+        """某因子全部相同（std=0）→ 不引入噪声（跳过该键）。"""
+        fbs = {
+            "A": {"factor_scores": {"technical.rsi.rsi_14": 50.0, "x": 0.1}},
+            "B": {"factor_scores": {"technical.rsi.rsi_14": 50.0, "x": 0.9}},
+        }
+        comps = _cross_sectional_factor_composite(fbs)
+        # rsi 全 50 → std=0 跳过；只有 x 参与 → 方向明确
+        assert comps["A"] < 0 < comps["B"]
+        assert abs(comps["A"]) == pytest.approx(abs(comps["B"]), abs=0.01)
+
+
+class TestRuleBasedSuggestionFactorComposite:
+    """R27: _rule_based_suggestion 使用截面复合分（替代原始均值）。"""
+
+    def test_composite_overrides_raw_mean(self):
+        """传 factor_composite → 决策用复合分，reason 呈现复合值而非 KDJ 原始均值。"""
+        fs = {"technical.kdj.k": 77.0, "momentum.recent_return": 0.03}
+        out = _rule_based_suggestion(
+            symbol="159338", name="中证A500", target_weight=0.1,
+            factor_score=fs, signal={"signal": "sell"},
+            regime="range_bound", current_weight=0.1,
+            factor_composite=-0.9,
+        )
+        assert out["action"] in ("decrease", "hold")
+        # reason 应含复合分（-0.90），不得出现「77」冒充强度
+        assert "-0.90" in out["reason"] or "因子分 -0.9" in out["reason"]
+        assert "77" not in out["reason"], "KDJ 原始值不得出现在因子分表述中（R27）"
+
+    def test_negative_composite_with_sell_gives_decrease(self):
+        """复合分 < -0.5 + sell → decrease（决策表分档作用于同量纲 z-score）。"""
+        out = _rule_based_suggestion(
+            symbol="X", name="X", target_weight=0.1,
+            factor_score={}, signal={"signal": "sell"},
+            regime="range_bound", current_weight=0.1,
+            factor_composite=-0.8,
+        )
+        assert out["action"] == "decrease"
+
+    def test_no_composite_falls_back_to_raw_mean(self):
+        """未传 factor_composite 且因子键非真实分类键 → 回落原始均值（向后兼容）。"""
+        out = _rule_based_suggestion(
+            symbol="X", name="X", target_weight=0.1,
+            factor_score={"a": 0.9, "b": 0.5}, signal={"signal": "buy"},
+            regime="range_bound", current_weight=0.1,
+        )
+        # 原始均值 (0.9+0.5)/2 = 0.7 > 0.5 + buy → increase
+        assert out["action"] == "increase"
+
+    def test_single_symbol_real_factors_use_within_symbol_composite(self):
+        """单标的真实因子（factor_composite=None）→ 用 within-symbol z 复合分，
+        不得把异构量纲原始政策因子（+8.97）当 z 强度（R27 单标的场景修复）。"""
+        fs = {"china.policy.monetary": 8.97, "technical.rsi": 50.0}
+        out = _rule_based_suggestion(
+            symbol="159338", name="中证A500", target_weight=0.1,
+            factor_score=fs, signal={"signal": "hold"},
+            regime="range_bound", current_weight=0.1,
+        )
+        # 负向断言：异构原始值不得冒充 z 强度出现在因子分描述里
+        assert "8.97" not in out["reason"]
+        # raw 朴素均值 ≈ (8.97+50)/2 量级极大，z 复合分应远小于此（不被拉正到偏强级）
+        assert "29.49" not in out["reason"] and "29.5" not in out["reason"]
+
+
+# ===================================================================
+# merged from test_round28_fixes.py::TestR57StrategyCheckInnerTimeout (S3.3 de-round, 2026-08-18)
+# ===================================================================
+import asyncio
+import os
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+import app.main as main_mod
+from app.services import market_service as ms
+from app.services.market_data_hub import _rule_news_summary
+from app.services.market_service import infer_market_from_symbol
+
+
+class TestR57StrategyCheckInnerTimeout:
+    @pytest.mark.asyncio
+    async def test_inner_request_timeout_connect_is_60(self):
+        """generate_strategy_check_report 的 httpx.Timeout(connect=60.0)。
+
+        round28 §2.2: round27 R43 只改外层 _llm_timeout_for(180s)，内层 connect=15s
+        先触发 CancelledError → 真 LLM 报告永不可见。内层 connect 须 ≥60s（对齐
+        DeepSeek 慢首字节实测 34-78s），使外层 180s 有机会生效。
+        """
+        import httpx
+        from app.analysis import registry
+
+        captured = {}
+
+        async def _fake_run_json(*args, **kwargs):
+            captured["request_timeout"] = kwargs.get("request_timeout")
+            return {"summary": "ok", "suggestions": [], "holdings_analysis": [],
+                    "risk_warnings": []}
+
+        fake_agent = MagicMock()
+        fake_agent.run_json = _fake_run_json
+        with patch.object(registry, "get_agent", return_value=fake_agent):
+            from app.analysis import llm
+            await llm.generate_strategy_check_report(
+                market_data=[{"symbol": "510300", "name": "x", "target_weight": 0.5}],
+                factor_breakdowns={},
+                regime="range_bound",
+            )
+        rt = captured.get("request_timeout")
+        assert rt is not None, "request_timeout 必须透传到 run_json"
+        assert rt.connect == 60.0, f"内层 connect 应为 60s（对齐慢首字节实测），实际 {rt.connect}"
+        assert rt.read == 90.0, f"read 应保持 90s 容纳长生成，实际 {rt.read}"
+
+    def test_outer_budget_still_dominant(self):
+        """外层 _llm_timeout_for 数据完整档仍为 180s（内外层超时层级不变）。"""
+        from app.services.portfolio_service import _llm_timeout_for
+        assert _llm_timeout_for({"all_empty": False, "partial": False}) == 180
+        assert _llm_timeout_for({"all_empty": True}) == 15
+        assert _llm_timeout_for({"all_empty": False, "partial": True}) == 30
+
+
+# ===================================================================
+# merged from test_round28_fixes.py::TestR66FactorCompositeIcSeries (S3.3 de-round, 2026-08-18)
+# ===================================================================
+import asyncio
+import os
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+import app.main as main_mod
+from app.services import market_service as ms
+from app.services.market_data_hub import _rule_news_summary
+from app.services.market_service import infer_market_from_symbol
+
+
+class TestR66FactorCompositeIcSeries:
+    def test_within_symbol_composite_passes_ic_series(self):
+        """_within_symbol_factor_composite 必须透传 ic_series（与 design 同口径）。
+
+        round28 §2.4: 策略检查旧实现不传 ic_series → 等权回退，而 allocation_engine
+        传 ic_series（IC 加权）→ 同标的数值量级不一致（-0.9007 vs -0.08）。
+        """
+        from app.services import portfolio_service as ps
+        from app.factors.factor_registry import registry as _reg
+
+        captured = {}
+        fake_ic = {"technical.ma.sma_5": [0.1, 0.2]}
+        _reg._ic_series_cache = fake_ic
+
+        def _fake_aggregate(fs, **kwargs):
+            captured["ic_series"] = kwargs.get("ic_series")
+            return {"technical": 0.5, "momentum": 0.3, "valuation": 0.2,
+                    "sentiment": 0.1}
+
+        with patch("app.core.factor_aggregate.aggregate_factor_scores",
+                   side_effect=_fake_aggregate):
+            comp = ps._within_symbol_factor_composite(
+                {"technical.ma.sma_5": 0.6, "momentum.20d": 0.4}
+            )
+        assert captured.get("ic_series") == fake_ic, \
+            "策略检查因子复合必须透传 ic_series（与设计同口径，R66）"
+        assert comp is not None and comp > 0
+
+    def test_full_pool_composite_labels_match(self):
+        """_full_pool_factor_composite 返回 reference 标签（相对候选池/单标的）。"""
+        from app.services import portfolio_service as ps
+        out = ps._full_pool_factor_composite({
+            "510300": {"factor_scores": {"technical.ma.sma_5": 0.6}},
+        })
+        assert "510300" in out
+        assert out["510300"].get("reference") in ("相对候选池", "单标的")

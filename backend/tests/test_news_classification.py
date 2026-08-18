@@ -413,3 +413,210 @@ class TestMacroFilter:
         """营销软文 → 过滤。"""
         assert nf._is_macro_relevant("限时抢购！开户送好礼") is False
         assert nf._is_macro_relevant("下载APP领红包，新手专享") is False
+
+
+# ===================================================================
+# merged from test_round25_r31_news_bucket_cap.py (S3.3 de-round migration, 2026-08-18)
+# ===================================================================
+"""round25 R31: 三桶 AI 摘要分桶配额——headlines 不再独占 cap。
+
+问题（round25 §5.1 实证）：R17 `enrich_news_summaries(cap=6)` 三桶合并后按重要性取前 6
+→ headlines 恒占满，macro 0/3、global 0/8 摘要——R17 验收「三桶均有摘要覆盖」未达。
+
+修复（round25 R31）：分桶配额 headlines=ceil(cap*0.5) / macro=ceil(cap*0.33) / global
+=剩余（cap=6 → 3/2/1），保证三桶均有摘要覆盖。
+"""
+
+import asyncio
+from unittest.mock import patch
+
+import pytest
+
+from app.services.market_data_hub import MarketDataHub
+
+
+def _news(title, stars=4, level=0, nid=None):
+    return {"id": nid or title, "title": title, "content": f"{title} content",
+            "stars": stars, "level": level}
+
+
+class TestEnrichNewsSummariesBucketQuota:
+    """R31: 分桶配额——三桶均有摘要覆盖。"""
+
+    @pytest.mark.asyncio
+    async def test_macro_and_global_get_summaries(self):
+        """cap=6：headlines 6 条重要 + macro 3 条重要 + global 8 条重要 →
+        macro/global 至少各 1 条摘要（负向：全在 headlines → FAIL）。"""
+        hub = MarketDataHub()
+        hub._news_buckets = {
+            "headlines": [_news(f"h{i}", stars=5) for i in range(6)],
+            "macro": [_news(f"m{i}", stars=4) for i in range(3)],
+            "global": [_news(f"g{i}", stars=4) for i in range(8)],
+        }
+        hub._news_cache_ts = 0
+
+        async def _fake_gen(title, content):
+            return f"summary:{title}"
+        with patch("app.analysis.llm.generate_news_summary", side_effect=_fake_gen):
+            total = await hub.enrich_news_summaries(cap=6)
+
+        assert total <= 6, "cap=6 摘要总数不得超过 6"
+        macro_ok = [n for n in hub._news_buckets["macro"] if n.get("ai_summary")]
+        global_ok = [n for n in hub._news_buckets["global"] if n.get("ai_summary")]
+        assert len(macro_ok) >= 1, f"macro 桶必须至少 1 条摘要（R31 分桶配额），实际 0"
+        assert len(global_ok) >= 1, f"global 桶必须至少 1 条摘要（R31 分桶配额），实际 0"
+        # headlines 拿配额 3（不独占）
+        head_ok = [n for n in hub._news_buckets["headlines"] if n.get("ai_summary")]
+        assert len(head_ok) == 3, f"headlines 配额 3（cap=6 → 3/2/1），实际 {len(head_ok)}"
+
+    @pytest.mark.asyncio
+    async def test_headlines_cap_balanced(self):
+        """headlines 不再占满 cap——只拿一半配额（cap=6 → 3）。"""
+        hub = MarketDataHub()
+        hub._news_buckets = {
+            "headlines": [_news(f"h{i}", stars=5) for i in range(10)],
+            "macro": [_news(f"m{i}", stars=4) for i in range(2)],
+            "global": [],
+        }
+        hub._news_cache_ts = 0
+
+        async def _fake_gen(title, content):
+            return "s"
+        with patch("app.analysis.llm.generate_news_summary", side_effect=_fake_gen):
+            await hub.enrich_news_summaries(cap=6)
+
+        head_ok = [n for n in hub._news_buckets["headlines"] if n.get("ai_summary")]
+        assert len(head_ok) == 3, f"headlines 不得独占 cap（R31），实际 {len(head_ok)}"
+
+    @pytest.mark.asyncio
+    async def test_cap_one_still_works(self):
+        """cap=1 极端：headlines 配额 1，macro/global 0（不炸）。"""
+        hub = MarketDataHub()
+        hub._news_buckets = {
+            "headlines": [_news("h1", stars=5)],
+            "macro": [_news("m1", stars=4)],
+            "global": [],
+        }
+        hub._news_cache_ts = 0
+
+        async def _fake_gen(title, content):
+            return "s"
+        with patch("app.analysis.llm.generate_news_summary", side_effect=_fake_gen):
+            total = await hub.enrich_news_summaries(cap=1)
+        assert total == 1
+
+    @pytest.mark.asyncio
+    async def test_llm_failure_does_not_crash(self):
+        """LLM 失败静默跳过（continue），不中断其它桶。"""
+        hub = MarketDataHub()
+        hub._news_buckets = {
+            "headlines": [_news("h1", stars=5), _news("h2", stars=5)],
+            "macro": [_news("m1", stars=4)],
+            "global": [],
+        }
+        hub._news_cache_ts = 0
+        calls = {"n": 0}
+
+        async def _fake_gen(title, content):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("llm down")
+            return "s"
+        with patch("app.analysis.llm.generate_news_summary", side_effect=_fake_gen):
+            total = await hub.enrich_news_summaries(cap=4)
+        assert total >= 1, "LLM 单条失败不得中断整个 enrich"
+
+
+# ===================================================================
+# merged from test_round28_fixes.py::TestR65RuleNewsSummary (S3.3 de-round, 2026-08-18)
+# ===================================================================
+import asyncio
+import os
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+import app.main as main_mod
+from app.services import market_service as ms
+from app.services.market_data_hub import _rule_news_summary
+from app.services.market_service import infer_market_from_symbol
+
+
+class TestR65RuleNewsSummary:
+    def test_content_first_sentence(self):
+        """content 存在 → 取首句（截断 ≤80 字）。"""
+        item = {"title": "重磅", "content": "央行宣布降息。市场反应积极。后续关注。"}
+        s = _rule_news_summary(item)
+        assert s == "央行宣布降息", f"应取 content 首句，实际 {s!r}"
+
+    def test_long_content_truncated(self):
+        """超长首句截断到 80 字 + 省略号。"""
+        item = {"title": "x", "content": "长" * 200 + "。"}
+        s = _rule_news_summary(item)
+        assert s.endswith("…"), f"超长应截断加省略号，实际 {s[-5:]!r}"
+        assert len(s) <= 81
+
+    def test_no_content_falls_back_title(self):
+        """content 空 → 回落 title。"""
+        item = {"title": "美联储议息会议", "content": ""}
+        assert _rule_news_summary(item) == "美联储议息会议"
+
+    def test_empty_item_returns_none(self):
+        assert _rule_news_summary({}) is None
+
+
+# merged from test_round24_batch3.py (R15/R16, S3.3, 2026-08-18)
+from app.fetchers.news_fetcher import _is_macro_relevant
+from app.fetchers.levistock_fetcher import classify_news, classify_news_category
+
+# ── R15: 宏观 tab 过滤收紧 ──────────────────────────────────────────────
+
+
+def test_r15_macro_excludes_etf_daily():
+    """R15: 「ETF日报」类软文即便含宏观词也不得入宏观 tab。"""
+    assert _is_macro_relevant("ETF日报：产业趋势没有变，长期配置价值凸显") is False
+    assert _is_macro_relevant("基金发售：新发ETF正在募集中") is False
+    assert _is_macro_relevant("某ETF净值创新高，申购火爆") is False
+
+
+def test_r15_macro_keeps_genuine_macro():
+    """R15: 真实宏观/政策新闻仍应入宏观 tab（无回归）。"""
+    assert _is_macro_relevant("央行开展5000亿元逆回购操作") is True
+    assert _is_macro_relevant("美联储维持利率不变，表态偏鸽") is True
+    assert _is_macro_relevant("国务院常务会议部署稳经济政策") is True
+
+
+def test_r15_macro_excludes_stock_promo():
+    """R15: 个股/营销内容仍排除（O7 既有语义保留）。"""
+    assert _is_macro_relevant("贵州茅台股价再创新高") is False
+    assert _is_macro_relevant("限时抢购！开户送好礼") is False
+
+
+# ── R16: 全球英文标题分类器 ────────────────────────────────────────────
+
+
+def test_r16_global_english_classified_not_other():
+    """R16: 英文 RSS 标题应分到非 other 类别。"""
+    risk_title = "Treasury yields rise as U.S. threatens new tariffs on imports"
+    cat, _ = classify_news(risk_title)
+    assert cat != "other", f"英文标题应被分类，实得 other: {risk_title}"
+    assert cat == "risk", f"含 tariff 应归 risk，实得 {cat}"
+
+    neutral_title = "U.S. inflation cools to 3% as consumer prices ease"
+    cat2, _ = classify_news(neutral_title)
+    assert cat2 != "other", f"英文标题应被分类，实得 other: {neutral_title}"
+    assert cat2 == "neutral", f"含 inflation 应归 neutral，实得 {cat2}"
+
+
+def test_r16_english_positive_and_negative():
+    """R16: 英文利好/利空词也能命中。"""
+    pos, _ = classify_news("Stocks rally as tech earnings beat expectations")
+    assert pos == "positive"
+    neg, _ = classify_news("Shares slump after company posts weak results")
+    assert neg == "negative"
+
+
+def test_r16_chinese_no_regression():
+    """R16: 中文标题分类不受影响（英文兜底仅对英文标题生效）。"""
+    cat = classify_news_category("央行降准释放流动性")
+    assert cat != "other"

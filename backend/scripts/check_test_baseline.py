@@ -39,7 +39,10 @@ TESTS_DIR = pathlib.Path(__file__).resolve().parent.parent / "tests"
 # 2026-08-18 (S3.2 strategy_check 三文件合并): 230 -> 228. -2 = test_strategy_check_fallback/
 #   llm_timeout/timeout 三文件并入 test_strategy_check_timeout_matrix.py（83 tests 全保留，
 #   仅模块级 _MOCK_* 常量加来源前缀），回退 Batch 1 注释中预告的净减 2。
-BASELINE = 228
+# 2026-08-18 (S3.3 round 命名测试迁移): 228 -> 210. -18 = 全部 test_round*.py 按被测单元
+#   并入业务模块测试文件（round24_batch3 拆 news/hub/factor、round28_fixes 拆 12 类到
+#   10 个目标、r20_watchlist_us 并入 watchlist_close_fallback 等），round 命名清零。
+BASELINE = 210
 
 
 def count_test_files() -> int:

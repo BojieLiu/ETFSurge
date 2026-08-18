@@ -102,3 +102,63 @@ class TestGetAllRealtime:
 
                 result = await get_all_realtime()
                 assert result == []
+
+
+# ===================================================================
+# merged from test_round28_fixes.py::TestR62InferMarketFromSymbol (S3.3 de-round, 2026-08-18)
+# ===================================================================
+import asyncio
+import os
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+import app.main as main_mod
+from app.services import market_service as ms
+from app.services.market_data_hub import _rule_news_summary
+from app.services.market_service import infer_market_from_symbol
+
+
+class TestR62InferMarketFromSymbol:
+    @pytest.mark.parametrize("symbol,expected", [
+        ("00700", "HK"),          # 5 位数字 0 开头 → 港股
+        ("02800", "HK"),
+        ("00700.HK", "HK"),       # 显式后缀优先
+        ("AAPL", "US"),           # 纯字母 → 美股
+        ("SPY", "US"),
+        ("510300", "A"),          # 6 位数字 → A 股
+        ("600519", "A"),
+        ("sh688981", "A"),        # 交易所前缀剥除后仍 A
+        ("", "A"),                # 空 → 保守 A
+    ])
+    def test_infer(self, symbol, expected):
+        assert infer_market_from_symbol(symbol) == expected, \
+            f"{symbol} → 应推断为 {expected}"
+
+    @pytest.mark.asyncio
+    async def test_indicators_endpoint_infers_us_asset_type(self, monkeypatch):
+        """/market/indicators/AAPL 默认 asset_type='A' → 自动推断为 US（R62）。"""
+        from app.routers import market as market_router
+
+        async def _fake_history(symbol, asset_type, period):
+            # 40 根 K 线（≥30 满足 data_available）
+            rows = [{"date": f"2026-08-{i:02d}", "open": 10 + i * 0.1,
+                     "close": 10 + i * 0.1, "high": 10 + i * 0.2,
+                     "low": 10 - i * 0.05, "volume": 1000} for i in range(1, 41)]
+            return rows
+
+        captured = {}
+
+        async def _fake_get_market_history(symbol, asset_type, period):
+            captured["asset_type"] = asset_type
+            return await _fake_history(symbol, asset_type, period)
+
+        with patch.object(market_router.market_data_hub,
+                          "get_market_history", _fake_get_market_history), \
+             patch.object(market_router.market_data_hub, "is_kline_stale",
+                          lambda *a: False):
+            result = await market_router.indicators("AAPL", asset_type="A")
+        assert captured["asset_type"] == "US", \
+            f"indicators(AAPL) 应推断 asset_type=US，实际 {captured['asset_type']}"
+        assert result.get("asset_type") == "US", \
+            f"响应 asset_type 应为 US，实际 {result.get('asset_type')}"

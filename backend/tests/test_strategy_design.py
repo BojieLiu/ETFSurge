@@ -281,3 +281,184 @@ class TestDesignDegradation:
 
         assert len(result["strategies"]) == 3
         assert result["degradation"]["mode"] == "static_pool"
+
+
+# ===================================================================
+# merged from test_round24_data_precision.py (S3.3 de-round migration, 2026-08-18)
+# ===================================================================
+"""round24 R3: 降级态「精确数字」治理——data_precision 精度标识。
+
+问题（round24 §2.1 实证）：design 570 `factor_data_quality.valid_rate=0.0%` +
+「方案仅供参考」横幅，但 UI 仍呈现 5%/15%/21% 精确权重与 -0.99/-0.96 精确因子分
+→ 降级诚实了、数字没诚实，专业投资者无法分辨可信边界。
+
+契约：`api-contracts/portfolio/design-precision.md`。
+本测试锁定 `_data_precision_report` 纯函数：降级→coarse（权重 5% 档位 + 因子分分档
++ 缺失百分比），正常→exact，输入缺失→exact（不误报降级）。
+"""
+
+from app.services.strategy_design import _data_precision_report
+
+
+def test_degraded_gives_coarse_mode():
+    """valid_rate=0 + degraded=True → coarse：权重档位 5%、因子分分档、缺失 100%。"""
+    p = _data_precision_report({"valid_rate": 0.0, "degraded": True})
+    assert p["mode"] == "coarse"
+    assert p["weight_display"] == "coarse"
+    assert p["weight_step_pct"] == 5.0
+    assert p["factor_score_display"] == "bucket"
+    assert p["factor_missing_pct"] == 100.0
+    assert "100%" in p["note"]
+
+
+def test_healthy_gives_exact_mode():
+    """valid 率 82% 且未降级 → exact：呈现精确权重/因子分（现状不变）。"""
+    p = _data_precision_report({"valid_rate": 0.82, "degraded": False})
+    assert p["mode"] == "exact"
+    assert p["weight_display"] == "exact"
+    assert p["weight_step_pct"] is None
+    assert p["factor_score_display"] == "exact"
+    assert p["factor_missing_pct"] == 18.0
+
+
+def test_missing_input_defaults_to_exact():
+    """统计不可用（空 dict / None）→ exact，不得误报降级（负向断言）。"""
+    for bad in (None, {}, {"note": "因子数据质量统计不可用"}):
+        p = _data_precision_report(bad)
+        assert p["mode"] == "exact", f"输入 {bad!r} 误报降级"
+
+
+def test_partial_valid_rate_below_threshold_is_coarse():
+    """valid 率 40% < 60% 阈值 → coarse（即使调用方未显式传 degraded）。"""
+    p = _data_precision_report({"valid_rate": 0.40})
+    assert p["mode"] == "coarse"
+    assert p["factor_missing_pct"] == 60.0
+
+
+def test_precision_never_mutates_weights():
+    """data_precision 只影响呈现——函数为纯计算，不含任何 allocations 字段。"""
+    p = _data_precision_report({"valid_rate": 0.0, "degraded": True})
+    assert "allocations" not in p and "target_weight" not in p
+    assert set(p) == {
+        "mode", "factor_valid_rate", "factor_missing_pct",
+        "weight_display", "weight_step_pct", "factor_score_display", "note",
+    }
+
+
+# ===================================================================
+# merged from test_round28_fixes.py::TestR59DesignDegradeRetry (S3.3 de-round, 2026-08-18)
+# ===================================================================
+import asyncio
+import os
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+import app.main as main_mod
+from app.services import market_service as ms
+from app.services.market_data_hub import _rule_news_summary
+from app.services.market_service import infer_market_from_symbol
+
+
+class TestR59DesignDegradeRetry:
+    """round28 §14.4.2 ②: 数据采集超时后以 skip_refresh=True 重试（缓存快照兜底），
+    产出降级方案（degradation.mode=degraded）而非「方案生成超时」失败。"""
+
+    @staticmethod
+    def _apply_engine_path_mocks(monkeypatch):
+        """打桩 generate_enhanced_design 引擎路径所需全部依赖（池非空 → 走 engine 分支）。"""
+        from app.services.market_data_hub import market_data_hub as hub
+        from app.services import strategy_design as sd
+
+        pool = {
+            "core": [{"symbol": "510300", "name": "沪深300ETF", "layer": "core"}],
+            "satellite": [{"symbol": "159915", "name": "创业板ETF", "layer": "satellite"}],
+            "defense": [{"symbol": "511010", "name": "国债ETF", "layer": "defense"}],
+        }
+
+        def _fake_get_pool(layer=None):
+            return pool.get(layer, []) if layer else pool
+
+        monkeypatch.setattr(hub, "get_factor_matrix", lambda: {
+            "510300": {"technical.ma.sma_5": 0.5},
+            "159915": {"momentum.20d": 0.4},
+            "511010": {"valuation.pe": -0.3},
+        })
+        monkeypatch.setattr(hub, "get_pool", _fake_get_pool)
+        monkeypatch.setattr(hub, "get_market_regime", lambda: "range_bound")
+        monkeypatch.setattr(hub, "get_sector_momentum", lambda: [])
+        monkeypatch.setattr(hub, "get_by_code", lambda *a: {})
+        monkeypatch.setattr(hub, "get_asset_realtime",
+                            AsyncMock(return_value=None))
+        monkeypatch.setattr(sd, "_build_market_context", AsyncMock(return_value={}))
+        monkeypatch.setattr(sd, "_market_data_fetched_at", lambda *a: "2026-08-18T00:00:00Z")
+        monkeypatch.setattr(sd, "engine_allocate", lambda **kw: [{
+            "id": "balanced", "label": "平衡型", "layer_budget": {},
+            "allocations": [
+                {"symbol": "510300", "name": "沪深300ETF", "weight": 0.3, "layer": "core"},
+                {"symbol": "159915", "name": "创业板ETF", "weight": 0.2, "layer": "satellite"},
+            ],
+        }])
+        monkeypatch.setattr(sd, "apply_risk_controls",
+                            lambda allocs, fm, **kw: allocs)
+        monkeypatch.setattr(sd, "_correlation_medians_for", lambda *a: {})
+        monkeypatch.setattr(sd, "_correlation_matrix_for", lambda *a: {})
+        monkeypatch.setattr(sd, "build_rationale", lambda **kw: "理由")
+        monkeypatch.setattr(sd, "_find_candidate_meta", lambda *a: {})
+        monkeypatch.setattr(sd, "_kline_change_pct", lambda *a: None)
+        monkeypatch.setattr(sd, "_snapshot_change_pct", lambda *a: None)
+        monkeypatch.setattr(sd, "_validate_target_amount_consistency", lambda *a: None)
+
+    @pytest.mark.asyncio
+    async def test_skip_refresh_skips_refresh_and_marks_degraded(self, monkeypatch):
+        """skip_refresh=True → refresh() 不调用、hub._degraded=True、degradation.mode='degraded'。"""
+        from app.services.market_data_hub import market_data_hub as hub
+        self._apply_engine_path_mocks(monkeypatch)
+
+        refresh_calls = []
+
+        async def _no_refresh():
+            refresh_calls.append(1)
+        monkeypatch.setattr(hub, "refresh", _no_refresh)
+
+        try:
+            from app.services.strategy_design import generate_enhanced_design
+            result = await generate_enhanced_design(capital=500000, skip_refresh=True)
+        finally:
+            hub._degraded = False  # 重置单例状态防串扰
+
+        assert refresh_calls == [], f"skip_refresh 时不得调用 refresh()，实际 {len(refresh_calls)} 次"
+        assert result["degradation"]["mode"] == "degraded", \
+            f"skip_refresh 降级重试应标注 degradation.mode=degraded，实际 {result['degradation']['mode']}"
+        assert "降级" in result["degradation"]["reason"]
+        assert result["degradation"]["pool_degraded"] is True
+        assert len(result["strategies"]) >= 1, "降级重试仍应产出可用方案（非失败）"
+
+    @pytest.mark.asyncio
+    async def test_off_hours_with_pool_skips_realtime_refresh(self, monkeypatch):
+        """R59⑤: 非交易时段 + last-good 池 → 主动走快照（不调 refresh 干等实时源）。"""
+        from app.services.market_data_hub import market_data_hub as hub
+        self._apply_engine_path_mocks(monkeypatch)
+
+        refresh_calls = []
+
+        async def _no_refresh():
+            refresh_calls.append(1)
+        monkeypatch.setattr(hub, "refresh", _no_refresh)
+        monkeypatch.setattr(hub, "_is_market_hours", lambda: False)
+        # R59⑤ 判定依赖 _pool 非空（last-good 池存在）——注入假池（monkeypatch 自动还原）
+        monkeypatch.setattr(hub, "_pool", {
+            "core": [{"symbol": "510300", "name": "沪深300ETF", "layer": "core"}],
+            "satellite": [{"symbol": "159915", "name": "创业板ETF", "layer": "satellite"}],
+            "defense": [{"symbol": "511010", "name": "国债ETF", "layer": "defense"}],
+        })
+
+        try:
+            from app.services.strategy_design import generate_enhanced_design
+            result = await generate_enhanced_design(capital=500000)
+        finally:
+            hub._degraded = False
+
+        assert refresh_calls == [], f"盘后 + 池非空时应跳过 refresh，实际 {len(refresh_calls)} 次"
+        assert result["degradation"]["pool_degraded"] is True
+        assert len(result["strategies"]) >= 1

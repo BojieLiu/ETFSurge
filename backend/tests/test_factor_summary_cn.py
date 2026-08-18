@@ -86,3 +86,37 @@ class TestFactorSummaryChinese:
         """F11: 空输入不崩溃。"""
         s = format_factor_summary({})
         assert s == "" or "因子" in s
+
+
+# merged from test_round24_batch3.py (R21, S3.3, 2026-08-18)
+from app.services.portfolio_service import format_factor_summary
+
+# ── R21: 通用因子分强度分档 ────────────────────────────────────────────
+
+
+def test_r21_generic_factor_shows_band():
+    """R21: 无创专属语义的通用因子分应渲染为强度分档（可解读），不裸数值。"""
+    # 文档示例「政策规划因子 +8.97」「战略新兴 +8.14」→ 对应真实因子键
+    s = format_factor_summary({
+        "china.policy.five_year_plan": 8.97,
+        "china.policy.strategic_emerging": 8.14,
+    })
+    assert "十五五规划" in s
+    assert "战略性新兴" in s
+    # 裸数值不得单独出现（应配分档括号）
+    assert "（强）" in s, f"通用因子应带强度分档，实得: {s}"
+    # 不应再是「+8.97」式裸数值（带分档）
+    assert "+8.97" not in s, f"裸因子值不应直接暴露，实得: {s}"
+
+
+def test_r21_rsi_keeps_semantic_hint():
+    """R21: RSI 等已有专属语义的因子保持原样（无回归）。"""
+    s = format_factor_summary({"technical.rsi.rsi_14": 85.0})
+    assert "超买" in s
+    assert "（强）" not in s, f"RSI 已有语义不应再叠加分档，实得: {s}"
+
+
+def test_r21_weak_factor_band():
+    """R21: 负向通用因子分档为「弱」。"""
+    s = format_factor_summary({"factor.momentum": -3.5})
+    assert "（弱）" in s, f"负向大值应判弱，实得: {s}"

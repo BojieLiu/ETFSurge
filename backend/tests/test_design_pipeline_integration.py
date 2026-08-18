@@ -421,3 +421,60 @@ class TestP3_E2EEnhancements:
             or "LLM" in content
         )
         assert has_llm_check, "verify_e2e.py should have LLM-related checks"
+
+
+# ===================================================================
+# merged from test_round28_fixes.py::TestR59PipelineTimeoutDegradeRetry (S3.3 de-round, 2026-08-18)
+# ===================================================================
+import asyncio
+import os
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+import app.main as main_mod
+from app.services import market_service as ms
+from app.services.market_data_hub import _rule_news_summary
+from app.services.market_service import infer_market_from_symbol
+
+
+class TestR59PipelineTimeoutDegradeRetry:
+    """task_manager 层：DESIGN_DATA_TIMEOUT 超时 → skip_refresh=True 重试 → 任务完成。"""
+
+    @patch("app.tasks.task_manager.async_session")
+    @patch("app.analysis.llm.generate_design_report", new_callable=AsyncMock)
+    @patch("app.services.strategy_design.generate_enhanced_design", new_callable=AsyncMock)
+    async def test_timeout_triggers_skip_refresh_retry(self, mock_gen, mock_llm, mock_db, task_mgr):
+        """首次调用超时 → 二次调用 skip_refresh=True → 任务 completed（非 failed）。"""
+        from app.tasks.task_manager import design_pipeline
+        from tests.test_design_pipeline_integration import (
+            _mock_strategies, _mock_market_context, _make_mock_session,
+        )
+
+        calls = []
+        first = True
+
+        async def _flaky(**kwargs):
+            calls.append(dict(kwargs))
+            nonlocal first
+            if first:
+                first = False
+                raise asyncio.TimeoutError("数据源响应过慢")
+            return {"strategies": _mock_strategies(), "market_context": _mock_market_context()}
+
+        mock_gen.side_effect = _flaky
+        mock_llm.return_value = "## 市场分析\n当前市场处于震荡阶段。"
+        mock_db.side_effect = [
+            _make_mock_session(design_id=1101),  # Stage 3 写库
+            _make_mock_session(design_id=1101),  # Stage 4 回填
+        ]
+
+        t = await task_mgr.create_task(task_type="design", params={"capital": 500000})
+        await design_pipeline(task_mgr, t["task_id"])
+
+        got = await task_mgr.get_task(t["task_id"])
+        assert got["status"] == "completed", f"降级重试应完成任务，实际 {got['status']}"
+        assert len(calls) == 2, f"应重试一次（共 2 次调用），实际 {len(calls)}"
+        assert calls[0].get("skip_refresh") is None, "首次调用不得带 skip_refresh"
+        assert calls[1].get("skip_refresh") is True, \
+            f"超时后二次调用必须 skip_refresh=True（降级重试），实际 {calls[1]}"
