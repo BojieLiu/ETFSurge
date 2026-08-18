@@ -167,16 +167,16 @@ class TestP1_1_MarketContext:
     """P1.1: Ensure market_data_hub properly populates market context."""
 
     def test_pool_manager_has_market_context(self):
-        """market_data_hub should export market context data functions."""
-        probes_path = os.path.join(
-            os.path.dirname(__file__), "..", "app", "services", "market_data_hub.py"
-        )
-        with open(probes_path, "r", encoding="utf-8") as f:
-            content = f.read()
+        """market_data_hub should export market context data functions.
 
-        required_keys = ["index_realtime", "sector_momentum", "market_sentiment"]
-        for key in required_keys:
-            assert key in content, f"market_data_hub missing {key}"
+        Batch 3 (giant-file split): implementation moved into app/services/hub/
+        mixins, so the check is behavioral (methods present on the singleton)
+        instead of scanning the facade module source text.
+        """
+        from app.services.market_data_hub import market_data_hub as hub
+
+        for method in ["get_index_realtime", "get_sector_momentum", "get_market_sentiment"]:
+            assert callable(getattr(hub, method, None)), f"market_data_hub missing {method}"
 
     def test_market_context_has_fallback(self):
         """Market context should have fallback defaults to avoid empty data."""

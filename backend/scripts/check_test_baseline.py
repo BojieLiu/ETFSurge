@@ -32,7 +32,9 @@ TESTS_DIR = pathlib.Path(__file__).resolve().parent.parent / "tests"
 #   重组会把 strategy_check 三文件合并，净减 2，届时回退 baseline）。
 # 2026-08-18 (giant-file split Batch 2): 228. +1 = tests/test_llm_module_structure.py
 #   （方案 C Step 1 结构契约测试，随 app/analysis/llm/ 拆分新增）。
-BASELINE = 228
+# 2026-08-18 (giant-file split Batch 3): 229. +1 = tests/test_market_data_hub_structure.py
+#   （方案 A Step 1 结构契约测试，随 app/services/hub/ 拆分新增）。
+BASELINE = 229
 
 
 def count_test_files() -> int:

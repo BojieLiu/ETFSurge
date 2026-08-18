@@ -1,7 +1,11 @@
 # 代码健康审计：覆盖率 + 冗余测试 + 巨型文件拆分方案（2026-08-18）
 
 > 依据 AGENTS.md「反假完成机制」「性能软门禁」「设计流程（design-checklist.md 8 项）」撰写。
-> **本文档仅设计修复方案与拆分方案，不实施。**
+> **实施状态（2026-08-18 更新）**：本方案正在另一会话中实施——
+> - **方案 C（llm.py 拆分）已实施**：commit `8f47a9d`，`app/analysis/llm/` 包（client/gates/cache/reports/news/health/prompts）落地，旧 `llm.py` 删除，消费者已迁移；
+> - **方案 B（portfolio_service 拆分）已实施**：commit `3044587`，`app/services/portfolio/` 包落地；
+> - **方案 A（market_data_hub 拆分）进行中**：`app/services/hub/` 新建未提交 + `_split_hub_tmp.py` 临时脚本在 `backend/scripts/`；
+> - 下列章节标记为「✅ 已实施」的拆分设计为完成记录，其余设计供实施方案参考。
 > 数据来源：全量 `pytest --cov`（2026-08-18 07:57-08:02 跑批，2149 passed / 8 skipped / 3 deselected / 16 warnings in 301.35s）。
 > 覆盖数据文件：`backend/.coverage`（`/tmp/cov_backend.coverage` 备份）；报告：`/tmp/coverage_report.txt`。
 
@@ -41,6 +45,7 @@
   10. **FE-CSS — 前端死样式类 ~123 个**（§7.1.1）：theme.css 94 个 0 引用类 + global.css 29 个（round11 已列未落地）。
   11. **FE-TEST-ORG — 前端测试组织错位**（§7.2）：60 个 spec，同一被测对象分散多文件（DashboardAiTools 7 个/869 行、WatchlistPanel 4 个、NewsView 3 个）且散落 `src/components/` 与 `src/test/` 两目录；批次命名（round19-batch1/2、AppComponents2）与后端 `test_roundNN_*` 同型。
   12. **BE-SCRIPTS — 后端生成/工具代码冗余**（§7.3）：`start_backend_profiled.py`/`ipv4_forward_proxy.py` 0 引用（round16/14 已标记删除未执行）；`backfill_avg_cost.py`/`run_scheduler.py`/`docker_smoke.py`/`sync_sectors.py` **2026-08-18 用户确认全部删除**（0 测试引用，`sync_sectors` 唯一生产引用在 run_scheduler 内，同批联动删）。
+  13. **BP-DEAD — 后端生产代码（app/）13 个真死私有符号**（§7.4）：AST 全量扫描（覆盖 P3-1 门禁的 `_` 前缀盲区）发现——`_sina_history`（旧实现被 `_sina_history_cb` 替代）、`_fetch_szse_sync`/`_fetch_sse_sync`（async 变体弃用）、`_get_cache`/`_get_constraints`（0 引用）、`_default_executor_lock`/`_get_default_executor_max`（过渡期监控代码，注释自述应移除）、`_EM_FALLBACK_SECONDS`/`_EM_FAIL_STREAK`/`_SRC_TIMEOUT`/`_TRY`/`_SNAPSHOT_KINDS`/`_FETCH_TIMEOUT`（0 引用常量）。全部 0 测试引用，删除无联动面。
 
 ### 0.4 验证窗口标注（D3）
 
@@ -168,7 +173,7 @@ cd backend && python -m pytest --cov=app --cov-report=term-missing -q
 
 ---
 
-## 4. 方案 A：market_data_hub.py 拆分（P0，最高优先）
+## 4. 方案 A：market_data_hub.py 拆分（P0，最高优先）——🔄 实施中（另一会话）
 
 ### 4.1 现状
 
@@ -244,7 +249,7 @@ app/engine/
 
 ---
 
-## 5. 方案 B：portfolio_service.py 拆分（P0）
+## 5. 方案 B：portfolio_service.py 拆分（P0）——✅ 已实施（commit `3044587`，另一会话）
 
 ### 5.1 现状
 
@@ -292,7 +297,7 @@ app/services/portfolio/
 
 ---
 
-## 6. 方案 C：analysis/llm.py 拆分（P0）
+## 6. 方案 C：analysis/llm.py 拆分（P0）——✅ 已实施（commit `8f47a9d`，另一会话）
 
 ### 6.1 现状
 
@@ -414,6 +419,35 @@ app/analysis/llm/
 
 **未落地（round11 残留）**：CSS 死类（FE-4/FE-5）、`stores/task.js` 两处 `console.warn` 改 logger（`task.js:60/122`）、`App.vue` 假连接（**round19 已修复**，用真实 `marketStore.wsStatus`）。
 
+### 7.4 后端生产代码冗余（backend/app/）系统检测（2026-08-18 补）
+
+> **背景**：此前的审计只覆盖了巨型文件内顺带发现的 3 处死代码（§5.5 DEAD-CODE），未对 `backend/app/` 做**系统性**生产冗余扫描。本节用 AST 全量扫描补上。
+> **工具基线**：`scripts/audit_unused_symbols.py`（P3-1 pre-commit 门禁）只审计**非私有符号**（`_` 前缀被设计排除，`--print` 当前输出 `{}`，即非私有符号 0 未引用）；**私有符号是工具盲区**——本节用自定义 AST 扫描覆盖。
+
+**检测方法**：AST 遍历 `backend/app/` 全部顶层 `_` 前缀 def/class/const，统计「定义文件内（定义行之外）+ 全库其他文件（app/tests/scripts）」引用，**总和为 0 判定为死符号**。
+
+**检测结果（13 个真死私有符号）**：
+
+| # | 符号 | 位置 | 性质 | 处理 |
+|---|---|---|---|---|
+| BP-1 | `_sina_history` | `fetchers/china_market.py:527` | **旧实现被回调版替代**：`_sina_history_cb`（552 行）被 1612/1632/1637/1644 真实调用，旧版无引用 | 删除 |
+| BP-2 | `_fetch_szse_sync` | `fetchers/fundamentals_fetcher.py:478` | 同步变体被弃用：async 版 `_fetch_szse`（457 行）经 `run_in_thread` 被 538 行调用 | 删除 |
+| BP-3 | `_fetch_sse_sync` | `fetchers/fundamentals_fetcher.py:514` | 同上，async 版 `_fetch_sse`（493 行）被 543 行调用 | 删除 |
+| BP-4 | `_get_cache` | `database.py:18` | 0 引用（勿与 `_get_cached_kline`/`_get_cached`/`_get_cache_db_path` 混淆，那些是不同符号且活跃） | 删除 |
+| BP-5 | `_get_constraints` | `engine/risk_controls.py:92` | 0 引用 | 删除 |
+| BP-6 | `_default_executor_lock` | `core/async_utils.py:27` | **过渡期默认 executor 监控代码**（注释自述「P1 统一后移除」），0 引用 | 删除 |
+| BP-7 | `_get_default_executor_max` | `core/async_utils.py:156` | 同上过渡代码，仅被自身函数体引用；**连带删除全局变量 `_default_executor_max`（`:28`，仅被本函数引用）** | 删除 |
+| BP-8 | `_EM_FALLBACK_SECONDS` | `fetchers/hk_hot_fetcher.py:30` | 0 引用常量 | 删除 |
+| BP-9 | `_EM_FAIL_STREAK` | `fetchers/hk_hot_fetcher.py:31` | 0 引用常量 | 删除 |
+| BP-10 | `_SRC_TIMEOUT` | `fetchers/news_fetcher.py:33` | 0 引用常量 | 删除 |
+| BP-11 | `_TRY` | `fetchers/sector_fetcher.py:16` | 0 引用常量 | 删除 |
+| BP-12 | `_SNAPSHOT_KINDS` | `models/market_snapshot.py:18` | 0 引用常量 | 删除 |
+| BP-13 | `_FETCH_TIMEOUT` | `services/market_trends.py:23` | 0 引用常量 | 删除 |
+
+**测试联动验证（Review 12 严格重验）**：13 个符号逐一 `rg "\b<符号>\b" tests/`（词边界，防相似名误匹配）**全部 0 命中**——**无对应测试需同步删除**（符合 §8.1 通用规则分类①）。**保留活跃相似名**：BP-1 保留 `_sina_history_cb`（1612/1632/1637/1644 真实调用，独立实现无互相引用）；BP-2/BP-3 保留 async 版 `_fetch_szse`/`_fetch_sse`（被 `tests/test_data_source_fallback.py`/`tests/test_free_sources.py` 多处 patch 引用，仅删 `_sync` 后缀废弃变体）。**关联项**：BP-7 删除 `_get_default_executor_max` 函数时，**连带删除其唯一引用的全局变量 `_default_executor_max`（`async_utils.py:28`，仅被该函数体 158/163/166 引用）**。**删除后回归**：相关文件测试需全绿（async 版 `_fetch_szse`/`_fetch_sse` 测试不受影响）。
+
+**与 round11 的关系**：round11 §2 声称后端 app 冗余约 2,300 行，但未在本文档审计范围；本节是对其「生产无引用文件（12 个）」结论的**增量补充**（round11 已清理的文件不再复检）。
+
 ---
 
 ## 8. 前端/生成代码冗余优化方案（并入实施批次）
@@ -421,6 +455,7 @@ app/analysis/llm/
 ### 8.1 处理原则
 
 - **死代码删除**（BE-1/BE-2/BE-3/BE-4/BE-5/BE-6）：直接删，`rg` 确认 0 引用；**BE-2/BE-4/BE-5/BE-6 用户已确认删除（2026-08-18）**，无待决策项。**前端生产代码无死 utils**（Review 8 证伪初检误报）。
+- **后端 app 生产死代码**（BP-1~BP-13，§7.4）：删除前**保留活跃相似名**——BP-1 保留 `_sina_history_cb`、BP-2/BP-3 保留 `_fetch_szse`/`_fetch_sse`（测试有 patch 引用）。全部 0 测试引用，属 §8.1 通用规则分类①。
 - **测试归位**（§7.2）：移动+合并，测试数不变，覆盖不变。
 - **CSS 清理**（FE-4/FE-5）：按 §7.1.1 三类逐类二次确认（工具类/语义类/z-index 类），确认后删除。**CSS 无对应 spec 断言死类**（Review 10 实证 `rg "sr-only|focus-ring|mt-1|grid-cols-2"` 在 spec 目录 0 命中）——清理无测试联动面。
 - **⚠️ 通用规则（Review 10 补）——「删除生产代码 = 先扫测试、再联动」**：删除任何生产符号（函数/参数/模块/脚本）前，**必须执行 `rg "<符号>" tests/` 反向扫描**，按命中分三类处理：①0 测试命中 → 直接删；②测试命中但为「仅测试引用的滞留函数」（如 `_cross_sectional_factor_composite`）→ 三选一（见 §5.5）；③测试命中且为参数/API 变更（如 `include_portfolio`）→ 同步更新测试调用点或保留参数签名标注 deprecated（见 §5.5 llm_context）。**禁止「删生产、留测试」造成 ImportError/断言悬空**——这与 AGENTS.md「引用同步」反假完成检查同源。
@@ -431,6 +466,7 @@ app/analysis/llm/
 |---|---|---|
 | **Batch 5b**（随 Batch 5 或独立） | 前端测试归位合并（§7.2，含 newsLevel 双 spec 去重）；CSS 死类清理（FE-4/FE-5） | 前端 `npm test` 全绿 + `npm run build` 通过 |
 | **Batch 6**（独立，低风险） | 后端生成代码清理：BE-1~BE-6 全部删除（**用户已确认**）；`sync_sectors`（BE-6）与 `run_scheduler`（BE-4）同批删，避免残留死链 | 后端 pytest 全绿 + `verify_e2e.py` 全 PASS + `rg "backfill_avg_cost|run_scheduler|docker_smoke|sync_sectors|start_backend_profiled|ipv4_forward_proxy"` 0 残留 |
+| **Batch 6b**（独立，低风险） | 后端 app 生产死代码清理：BP-1~BP-13 删除（§7.4）；**保留活跃相似名**（`_sina_history_cb`/`_fetch_szse`/`_fetch_sse`）；BP-7 连带删全局变量 `_default_executor_max` | 后端 pytest 全绿 + `verify_e2e.py` 全 PASS + `rg "\b(_sina_history|_fetch_szse_sync|_fetch_sse_sync|_get_cache|_get_constraints|_default_executor_lock|_get_default_executor_max|_default_executor_max|_EM_FALLBACK_SECONDS|_EM_FAIL_STREAK|_SRC_TIMEOUT|_TRY|_SNAPSHOT_KINDS|_FETCH_TIMEOUT)\b"` 0 残留（**词边界**防相似名误匹配；`_sina_history_cb`/`_fetch_szse`/`_fetch_sse` 不匹配） |
 
 ### 8.3 每批 DoD（反假完成双证）
 
@@ -544,7 +580,18 @@ app/analysis/llm/
 - **发现 35**：§9 子标题遗留「### 7.1」编号错误，已修正为「### 9.1」。
 - **用户决策（2026-08-18）**：BE-2/BE-4/BE-5/BE-6 确认**全部删除**——§0.3/§7.3/§8.1/§8.2/§12 已同步。
 
-### Review 完成：10 轮，35 项发现，全部修订落地。文档达实施标准，待用户指令后实施。
+### Review 11（2026-08-18，后端生产冗余系统检测）
+- **发现 36**：`scripts/audit_unused_symbols.py`（P3-1 门禁）只审非私有符号（`--print` 输出 `{}`），**`_` 前缀私有符号是工具盲区**——本节用自定义 AST 扫描补全，发现 **13 个真死私有符号**（BP-1~BP-13，§7.4）。
+- **发现 37**：BP-1 `_sina_history` 是 `_sina_history_cb`（被 1612/1632/1637/1644 真实调用）的旧实现；BP-2/BP-3 `_fetch_szse_sync`/`_fetch_sse_sync` 是被 async 版替代的同步变体——**删除时保留活跃相似名**，且 `_fetch_szse`/`_fetch_sse` 被测试 patch 引用（`test_data_source_fallback.py`/`test_free_sources.py`），严禁误删。
+- **发现 38**：BP-6/BP-7 `_default_executor_lock`/`_get_default_executor_max` 是注释自述「过渡期监控，P1 统一后移除」的死代码——清理符合原设计意图。
+- **发现 39**：13 个符号 `rg` 反向扫描 `tests/` 均 0 命中，删除无测试联动面（§8.1 分类①）。
+
+### Review 12（2026-08-18，测试联动严格重验 + 关联项）
+- **发现 40**：13 个 BP 符号用 `rg "\b<符号>\b" tests/`（词边界）**严格重验全部 0 命中**——确认无对应测试需同步删除（先前文档的 0 引用结论升级为「词边界 + 每符号单独计数」的证据链）。
+- **发现 41**：BP-7 补关联项——`_default_executor_max` 全局变量（`async_utils.py:28`）仅被 `_get_default_executor_max` 函数体引用，删除函数须连带删变量，否则残留孤立变量。§7.4/§8.2 Batch 6b 已补。
+- **发现 42**：BP-1/BP-2/BP-3 的「保留活跃相似名」提示在 Review 12 重写中一度丢失，已补回并明确 `_sina_history_cb` 与 `_sina_history` 无互相引用（可独立删除）。
+
+### Review 完成：12 轮，42 项发现，全部修订落地。文档达实施标准，待用户指令后实施。
 
 ---
 
@@ -554,5 +601,6 @@ app/analysis/llm/
 - **后端测试冗余**不是「测试过多」而是「组织错位」：3 个 strategy_check 文件重叠 + 18 个 round 命名文件游离 + hub 79 测试依赖面。
 - **前端冗余**以「CSS 死类 + 测试组织错位」为主：~123 个死 CSS 类（theme.css 94 + global.css 29）、同一组件 spec 分散多文件（DashboardAiTools 7 个）——多为 round11 已列项未落地 + round12-28 新积；**前端生产代码无死 utils/组件/API 方法**（Review 8 证伪初检 3 个死 utils 误报）。
 - **后端生成/工具代码**：**BE-1~BE-6 全部删除（2026-08-18 用户确认）**——`start_backend_profiled.py`/`ipv4_forward_proxy.py`（确认死）+ `backfill_avg_cost`/`run_scheduler`/`docker_smoke`/`sync_sectors`（0 测试引用，`sync_sectors` 随 `run_scheduler` 联动删），其中 `docker_smoke.py` 已被 pre-commit 内联替代。
+- **后端 app 生产代码**：**BP-1~BP-13 共 13 个真死私有符号**（§7.4 AST 全量扫描，覆盖 P3-1 门禁 `_` 前缀盲区）——含 2 处「旧实现/变体被替代」（`_sina_history`→`_sina_history_cb`、`_sync`→async 版）、2 处过渡期监控代码、9 处 0 引用常量/函数；全部 0 测试引用，删除无联动面。
 - **巨型文件拆分**采用「门面保留 + 实现拆协作 + 策略逻辑归 engine + re-export 兼容层」四件套，**不偏离统一数据管线原设计**；按 Batch 1-5 分步实施，每批可回滚；前端/生成代码冗余并入 Batch 5b/6。
-- **本文档仅设计，不实施**。实施需用户明确指令。
+- **本文档为设计 + 实施状态跟踪**：方案 B/C 已由另一会话实施，方案 A 实施中；BP/BE 清理项待实施。实施需用户明确指令。

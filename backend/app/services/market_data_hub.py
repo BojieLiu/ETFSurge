@@ -1,25 +1,19 @@
-"""
-MarketDataHub: unified market-data entry point for the ETF Surge system.
+"""MarketDataHub facade — split implementations into app/services/hub/ (Batch 3).
 
-Replaces the hardcoded CANDIDATE_POOL with a dynamic, 5-layer pool
-backed by etf_scanner, ETFClassifier, and FactorRegistry.
+The facade keeps the singleton, shared-state initialization and orchestration
+methods (``refresh`` / ``_refresh_impl`` / snapshot warmers / sector cache) plus
+the pure-strategy helpers (moved to ``engine/`` in Batch 4). Cluster methods are
+inherited from the mixin classes defined in ``app/services/hub/``.
 
-Lifecycle:
-  1. refresh() called daily (or on-demand)
-  2. Scanner fetches all ETFs → filters → ranks into 3 base layers
-  3. ETFClassifier adds industry/concept metadata
-  4. MarketDataHub assigns 5 layers (core/satellite/defense/opportunistic/research)
-  5. MANDATORY_CODES enforced
-  6. PoolDiff generated for audit trail
+Public API and the ``market_data_hub`` singleton are unchanged.
 """
+
 from __future__ import annotations
 
 import asyncio
-import ast
-import logging
-import os
-import time
 import json
+import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any
 from datetime import datetime
@@ -31,346 +25,56 @@ from .etf_classifier import classifier as etf_classifier
 from .pool_audit import pool_audit
 from ..core.market_calendar import market_session
 
+from app.services.hub._common import (
+    MANDATORY_CODES,
+    SECTOR_ETF_MAP,
+    LAYER_CORE,
+    LAYER_SATELLITE,
+    LAYER_DEFENSE,
+    LAYER_OPPORTUNISTIC,
+    LAYER_RESEARCH,
+    ALL_LAYERS,
+    _LAYER_WEIGHTS,
+    _BASE_WEIGHTS,
+    MAX_PER_LAYER,
+    _snapshot_db_path,
+    _snapshot_as_of_for,
+    _persist_snapshot_sync,
+    _load_latest_snapshot_sync,
+    _parse_stock_list,
+    _parse_concept_tags,
+    _normalize_hot_plate,
+    _strong_sector_etfs,
+    _rule_news_summary,
+    PoolDiff,
+)
+from app.services.hub._snapshot import SnapshotMixin
+from app.services.hub._kline import KlineMixin
+from app.services.hub._realtime import RealtimeMixin
+from app.services.hub._sector import SectorMixin
+from app.services.hub._news import NewsMixin
+from app.services.hub._regime_sentiment import RegimeSentimentMixin
+from app.services.hub._pool import PoolMixin
+from app.services.hub._fundamentals import FundamentalsMixin
+
 logger = logging.getLogger(__name__)
 
 
-# ── round24 R26: 盘后/熔断快照持久化（last-good 落盘，重启兜底） ──────────────
-def _snapshot_db_path() -> str:
-    """快照 SQLite 文件路径（与 database.py 同源）。"""
-    from ..config import settings
-    return settings.database_url.replace("sqlite+aiosqlite:///", "")
-
-
-def _snapshot_as_of_for(dt: datetime | None = None) -> str | None:
-    """R26: 返回快照 as_of 时点；盘中返回 None（实时源，不写快照）。
-
-    - after_hours (15:05-15:30): as_of=当日 15:00（盘中最后快照，盘后固定价格交易未结束）
-    - post_market (≥15:30):      as_of=当日 15:30（含盘后成交量，完整当日数据）
-    - open / pre_market / closed: None（盘中实时或无可写新数据）
-
-    语义（round24 §12.1 R26）：盘后快照 as_of 用 15:30 而非 15:00——
-    A股盘后固定价格交易 2026-07-06 起扩展到全市场，窗口 15:05-15:30 以收盘价
-    逐笔撮合，成交量计入当日总量，故「完整当日数据」要等到 15:30。
-    """
-    if dt is None:
-        dt = datetime.now()
-    session = market_session(dt)
-    if session == "after_hours":
-        return dt.replace(hour=15, minute=0, second=0, microsecond=0).isoformat(sep="T")
-    if session == "post_market":
-        return dt.replace(hour=15, minute=30, second=0, microsecond=0).isoformat(sep="T")
-    return None
-
-
-def _persist_snapshot_sync(kind: str, payload: Any, as_of: str) -> None:
-    """落盘快照（同步 raw sqlite）。同一 kind 仅保留最近 2 条。"""
-    import json
-    import sqlite3
-    try:
-        db_path = _snapshot_db_path()
-        payload_json = json.dumps(payload, ensure_ascii=False)
-        with sqlite3.connect(db_path, timeout=10) as conn:
-            conn.execute(
-                "INSERT INTO market_snapshots (kind, payload, as_of, created_at) "
-                "VALUES (?, ?, ?, ?)",
-                (kind, payload_json, as_of, datetime.utcnow().isoformat()),
-            )
-            # 仅保留最近 2 条同 kind（幂等刷新不会无限增长）
-            conn.execute(
-                "DELETE FROM market_snapshots WHERE kind=? AND id NOT IN "
-                "(SELECT id FROM market_snapshots WHERE kind=? ORDER BY id DESC LIMIT 2)",
-                (kind, kind),
-            )
-    except Exception as e:
-        logger.warning("[hub] _persist_snapshot_sync(%s) failed: %s", kind, e)
-
-
-def _load_latest_snapshot_sync(kind: str) -> dict | None:
-    """读最近一条同 kind 快照 payload（同步 raw sqlite）。失败返回 None。"""
-    import json
-    import sqlite3
-    try:
-        db_path = _snapshot_db_path()
-        with sqlite3.connect(db_path, timeout=10) as conn:
-            row = conn.execute(
-                "SELECT payload FROM market_snapshots WHERE kind=? "
-                "ORDER BY id DESC LIMIT 1",
-                (kind,),
-            ).fetchone()
-        if row:
-            return json.loads(row[0])
-    except Exception as e:
-        logger.warning("[hub] _load_latest_snapshot_sync(%s) failed: %s", kind, e)
-    return None
-
-
-def _parse_stock_list(s: Any) -> list:
-    """安全解析 stock_list 字符串为数组（F2-6 步骤A；§9.8.3 伪代码）。
-
-    数据源以字符串化列表存于行内，前端无解析层 → 在此统一转数组。
-    非法字符串返回 []，绝不 eval。
-    """
-    if isinstance(s, list):
-        return s
-    if not s:
-        return []
-    try:
-        parsed = ast.literal_eval(s)
-        return parsed if isinstance(parsed, list) else []
-    except Exception:
-        return []
-
-
-def _parse_concept_tags(tag: Any) -> list[str]:
-    """解析热门个股 tag 为 concept_tags 数组（F2-6 步骤A）。
-
-    O9 (round8 §7 P9-新): 数据源 tag 是嵌套 dict {"concept_tag": [...],
-    "popularity_tag": "..."}——旧实现对 dict 输入直接返回 [] → concept_tags
-    50/50 全空。统一平铺：dict 取 concept_tag 键，list 元素若是 dict 取内层
-    concept_tag，str dict 字面量走 ast.literal_eval。
-    """
-    def _flatten(value) -> list[str]:
-        out: list[str] = []
-        if isinstance(value, dict):
-            # 嵌套 dict：优先取 concept_tag 键（可再嵌套 list）
-            inner = value.get("concept_tag") or value.get("tags") or []
-            out.extend(_flatten(inner))
-        elif isinstance(value, list):
-            for t in value:
-                out.extend(_flatten(t))
-        elif isinstance(value, str):
-            s = value.strip()
-            if s:
-                out.append(s)
-        return out
-
-    if isinstance(tag, str):
-        # 字符串可能是 dict/list 字面量（历史缓存格式）
-        try:
-            parsed = ast.literal_eval(tag)
-            if isinstance(parsed, (dict, list)):
-                return _flatten(parsed)[:6]
-        except Exception:
-            pass
-        # 朴素逗号分隔兜底
-        if "," in tag:
-            return [t.strip() for t in tag.split(",") if t.strip()][:6]
-        # O9: 无法解析的字符串不产出 tag（坏 tag 不落 concept_tags，保持旧行为）
-        return []
-    return _flatten(tag)[:6]
-
-
-def _normalize_hot_plate(r: dict) -> dict:
-    """热点板块行字段归一化（F2-6 步骤A，保持前端契约稳定）。
-
-    secu_name→name、up_reason→reason、plate_stock_up_num→stock_count、
-    stock_list(字符串)→lead_stocks(数组)。
-    """
-    item = dict(r)
-    if "secu_name" in item and "name" not in item:
-        item["name"] = item.pop("secu_name")
-    if "up_reason" in item and "reason" not in item:
-        item["reason"] = item.pop("up_reason")
-    if "plate_stock_up_num" in item and "stock_count" not in item:
-        item["stock_count"] = item.pop("plate_stock_up_num")
-    if "stock_list" in item:
-        item["lead_stocks"] = _parse_stock_list(item.pop("stock_list"))
-    return item
-
-# 强制保留标的（池刷新时永不出池）
-# round9 P0-8: 560600（幽灵锚，实为医药白酒ETF/零成交）→ 159338（真实中证A500ETF）
-MANDATORY_CODES = {"510300", "159338", "518880", "511090"}
-
-# round24 R1: 强板块 → 代表 ETF 映射（行业/概念板块名称 → 候选池代表 ETF）。
-# 用途：候选池构建时，把动量最强的板块映射成其代表 ETF 注入候选池，避免「强板块未进池、
-# 方案与市场热点脱节」（design 570 实证 strong_sector_pool_coverage=[]）。
-# 键为 compute_sector_momentum 返回的板块名称（板块名称）；值为 (symbol, name, layer, tracked_index)。
-SECTOR_ETF_MAP: dict[str, dict] = {
-    "半导体": {"symbol": "512480", "name": "半导体ETF", "layer": "satellite", "tracked_index": "半导体"},
-    "芯片": {"symbol": "159995", "name": "芯片ETF", "layer": "satellite", "tracked_index": "芯片"},
-    "人工智能": {"symbol": "515980", "name": "人工智能ETF", "layer": "satellite", "tracked_index": "人工智能"},
-    "AI": {"symbol": "515980", "name": "人工智能ETF", "layer": "satellite", "tracked_index": "人工智能"},
-    "5G": {"symbol": "515050", "name": "5G通信ETF", "layer": "satellite", "tracked_index": "5G"},
-    "通信": {"symbol": "515880", "name": "通信ETF", "layer": "satellite", "tracked_index": "通信"},
-    "云计算": {"symbol": "516630", "name": "云计算ETF", "layer": "satellite", "tracked_index": "云计算"},
-    "大数据": {"symbol": "516630", "name": "大数据ETF", "layer": "satellite", "tracked_index": "大数据"},
-    "机器人": {"symbol": "562500", "name": "机器人ETF", "layer": "satellite", "tracked_index": "机器人"},
-    "新能源车": {"symbol": "515030", "name": "新能源车ETF", "layer": "satellite", "tracked_index": "新能源车"},
-    "新能源": {"symbol": "516160", "name": "新能源ETF", "layer": "satellite", "tracked_index": "新能源"},
-    "光伏": {"symbol": "515790", "name": "光伏ETF", "layer": "satellite", "tracked_index": "光伏"},
-    "电池": {"symbol": "159755", "name": "电池ETF", "layer": "satellite", "tracked_index": "电池"},
-    "军工": {"symbol": "512660", "name": "军工ETF", "layer": "satellite", "tracked_index": "军工"},
-    "证券": {"symbol": "512880", "name": "证券ETF", "layer": "satellite", "tracked_index": "证券公司"},
-    "券商": {"symbol": "512880", "name": "证券ETF", "layer": "satellite", "tracked_index": "证券公司"},
-    "银行": {"symbol": "512800", "name": "银行ETF", "layer": "satellite", "tracked_index": "银行"},
-    "保险": {"symbol": "512070", "name": "保险ETF", "layer": "satellite", "tracked_index": "保险"},
-    "地产": {"symbol": "512200", "name": "地产ETF", "layer": "satellite", "tracked_index": "房地产"},
-    "医药": {"symbol": "512010", "name": "医药ETF", "layer": "satellite", "tracked_index": "医药"},
-    "创新药": {"symbol": "159992", "name": "创新药ETF", "layer": "satellite", "tracked_index": "创新药"},
-    "中药": {"symbol": "560080", "name": "中药ETF", "layer": "satellite", "tracked_index": "中药"},
-    "医疗器械": {"symbol": "159883", "name": "医疗器械ETF", "layer": "satellite", "tracked_index": "医疗器械"},
-    "消费": {"symbol": "159928", "name": "消费ETF", "layer": "satellite", "tracked_index": "消费"},
-    "白酒": {"symbol": "161725", "name": "白酒基金", "layer": "satellite", "tracked_index": "中证白酒"},
-    "食品饮料": {"symbol": "515170", "name": "食品饮料ETF", "layer": "satellite", "tracked_index": "食品饮料"},
-    "煤炭": {"symbol": "515220", "name": "煤炭ETF", "layer": "satellite", "tracked_index": "煤炭"},
-    "有色": {"symbol": "159980", "name": "有色ETF", "layer": "satellite", "tracked_index": "有色金属"},
-    "稀土": {"symbol": "516780", "name": "稀土ETF", "layer": "satellite", "tracked_index": "稀土"},
-    "化工": {"symbol": "159870", "name": "化工ETF", "layer": "satellite", "tracked_index": "化工"},
-    "钢铁": {"symbol": "515210", "name": "钢铁ETF", "layer": "satellite", "tracked_index": "钢铁"},
-    "石油": {"symbol": "561760", "name": "石油ETF", "layer": "satellite", "tracked_index": "石油"},
-    "电力": {"symbol": "561560", "name": "电力ETF", "layer": "satellite", "tracked_index": "电力"},
-    "传媒": {"symbol": "512980", "name": "传媒ETF", "layer": "satellite", "tracked_index": "传媒"},
-    "游戏": {"symbol": "159869", "name": "游戏ETF", "layer": "satellite", "tracked_index": "游戏"},
-    "养殖": {"symbol": "159865", "name": "养殖ETF", "layer": "satellite", "tracked_index": "养殖"},
-    "农业": {"symbol": "159825", "name": "农业ETF", "layer": "satellite", "tracked_index": "农业"},
-    "软件": {"symbol": "159899", "name": "软件ETF", "layer": "satellite", "tracked_index": "软件"},
-    "计算机": {"symbol": "159998", "name": "计算机ETF", "layer": "satellite", "tracked_index": "计算机"},
-    "汽车": {"symbol": "516110", "name": "汽车ETF", "layer": "satellite", "tracked_index": "汽车"},
-    "家电": {"symbol": "561120", "name": "家电ETF", "layer": "satellite", "tracked_index": "家电"},
-    "港股通": {"symbol": "513180", "name": "恒生科技ETF", "layer": "satellite", "tracked_index": "恒生科技"},
-    "恒生科技": {"symbol": "513180", "name": "恒生科技ETF", "layer": "satellite", "tracked_index": "恒生科技"},
-    "恒生": {"symbol": "513660", "name": "恒生ETF", "layer": "satellite", "tracked_index": "恒生指数"},
-    "红利": {"symbol": "510880", "name": "红利ETF", "layer": "satellite", "tracked_index": "红利"},
-    "沪深300": {"symbol": "510300", "name": "沪深300ETF", "layer": "core", "tracked_index": "沪深300"},
-    "中证500": {"symbol": "510500", "name": "中证500ETF", "layer": "core", "tracked_index": "中证500"},
-    "中证1000": {"symbol": "512100", "name": "中证1000ETF", "layer": "satellite", "tracked_index": "中证1000"},
-    "创业板": {"symbol": "159915", "name": "创业板ETF", "layer": "core", "tracked_index": "创业板指"},
-    "科创50": {"symbol": "588000", "name": "科创50ETF", "layer": "core", "tracked_index": "科创50"},
-    "科创板": {"symbol": "588000", "name": "科创50ETF", "layer": "core", "tracked_index": "科创50"},
-    "黄金": {"symbol": "518880", "name": "黄金ETF", "layer": "defense", "tracked_index": "黄金"},
-    "国债": {"symbol": "511010", "name": "国债ETF", "layer": "defense", "tracked_index": "国债"},
-}
-
-
-def _strong_sector_etfs(sector_momentum, existing_symbols=None, top_n=8, min_change_pct=0.0):
-    """round24 R1: 强板块动量 TopN → 代表性 ETF 候选（注入 flat/候选池）。
-
-    纯函数，无 I/O。输入 sector_momentum 为 compute_sector_momentum 的输出
-    （[{sector, sector_code, type, change_pct, ...}]）；按 change_pct 降序取 TopN，
-    经 SECTOR_ETF_MAP 映射其代表 ETF，跳过已存在的标的，返回需追加进 flat 的候选 dict
-    （hot_sector=True，composite_score 保底值防被截断挤出）。
-
-    验收：强板块（change_pct 居前）的代表 ETF 进入候选池；熔断/无板块动量时返回 []。
-    """
-    if not sector_momentum:
-        return []
-    ranked = sorted(
-        sector_momentum,
-        key=lambda x: (x.get("change_pct", 0) or 0),
-        reverse=True,
-    )
-    out = []
-    seen = set(existing_symbols or set())
-    for sec in ranked[:top_n]:
-        name = (sec.get("sector") or "").strip()
-        if (sec.get("change_pct", 0) or 0) < min_change_pct:
-            continue
-        etf = SECTOR_ETF_MAP.get(name)
-        if not etf:
-            continue
-        sym = etf["symbol"]
-        if sym in seen:
-            continue
-        seen.add(sym)
-        out.append({
-            "symbol": sym,
-            "name": etf["name"],
-            "amount": 0,
-            "fund_scale": 0,
-            "fund_shares": 0,
-            "layer": etf.get("layer", "satellite"),
-            "tracked_index": etf.get("tracked_index", ""),
-            "hot_sector": True,
-            "composite_score": 0.6,  # 保底值：确保强板块不被后续截断挤出候选池
-            "sector_source": name,
-        })
-    return out
-
-# 层名
-LAYER_CORE = "core"
-LAYER_SATELLITE = "satellite"
-LAYER_DEFENSE = "defense"
-LAYER_OPPORTUNISTIC = "opportunistic"
-LAYER_RESEARCH = "research"
-ALL_LAYERS = [LAYER_CORE, LAYER_SATELLITE, LAYER_DEFENSE, LAYER_OPPORTUNISTIC, LAYER_RESEARCH]
-
-# Regime-based weights for each layer
-_LAYER_WEIGHTS = {
-    "satellite": {
-        "bull":       {"factor": 0.55, "liquidity": 0.10, "scale": 0.05, "opp": 0.30},
-        "bear":       {"factor": 0.25, "liquidity": 0.10, "scale": 0.05, "opp": 0.60},
-        "correction": {"factor": 0.35, "liquidity": 0.15, "scale": 0.10, "opp": 0.40},
-        "neutral":    {"factor": 0.40, "liquidity": 0.15, "scale": 0.10, "opp": 0.35},
-    },
-    "core": {
-        "bull":       {"factor": 0.55, "liquidity": 0.20, "scale": 0.25},
-        "bear":       {"factor": 0.40, "liquidity": 0.30, "scale": 0.30},
-        "correction": {"factor": 0.45, "liquidity": 0.25, "scale": 0.30},
-        "neutral":    {"factor": 0.50, "liquidity": 0.25, "scale": 0.25},
-    },
-    "defense": {
-        "bull":       {"factor": 0.35, "liquidity": 0.25, "scale": 0.15, "opp": 0.25},
-        "bear":       {"factor": 0.25, "liquidity": 0.20, "scale": 0.15, "opp": 0.40},
-        "correction": {"factor": 0.30, "liquidity": 0.25, "scale": 0.20, "opp": 0.25},
-        "neutral":    {"factor": 0.30, "liquidity": 0.20, "scale": 0.20, "opp": 0.30},
-    },
-}
-_BASE_WEIGHTS = {"factor": 0.40, "liquidity": 0.15, "scale": 0.10, "opp": 0.35}
-
-# 层内最大数量
-MAX_PER_LAYER = {
-    LAYER_CORE: 8,
-    LAYER_SATELLITE: 20,
-    LAYER_DEFENSE: 10,
-    LAYER_OPPORTUNISTIC: 8,
-    LAYER_RESEARCH: 10,
-}
-
-
-@dataclass
-class PoolDiff:
-    """差异报告：跟踪两次 refresh 之间的变化。"""
-
-    added: list[dict[str, Any]] = field(default_factory=list)
-    removed: list[dict[str, Any]] = field(default_factory=list)
-    changed: list[dict[str, Any]] = field(default_factory=list)
-    version: int = 0
-    timestamp: str = ""
-
-
-def _rule_news_summary(item: dict) -> str | None:
-    """R65 (round28): 规则摘要兜底——LLM 失败/配额空窗时保证重要条目 ai_summary 非 null。
-
-    取 content 首句（≤80 字截断）；无 content 回落标题。确定性纯函数，无 IO，
-    供 enrich_news_summaries 在 LLM 调用失败后降级使用（来源标注 ai_summary_source="rule"）。
-    """
-    content = str(item.get("content") or "").strip()
-    if content:
-        import re as _re
-        _first = _re.split(r"[。！？!?\n]", content)[0].strip()
-        if len(_first) > 80:
-            _first = _first[:80] + "…"
-        if _first:
-            return _first
-    title = str(item.get("title") or "").strip()
-    if title:
-        return title
-    return None
-
-
-class MarketDataHub:
-    """候选池管理器。
-
-    Usage:
-        pm = MarketDataHub()
-        await pm.refresh()           # 日频刷新
-        pool = pm.get_pool()         # 获取全池
-        entry = pm.get_by_code("510300")  # 按 code 查询
-    """
-
-    # Dynamic attributes set via setattr/hasattr in _refresh — declare here for mypy
+class MarketDataHub(
+    KlineMixin,
+    RealtimeMixin,
+    SectorMixin,
+    NewsMixin,
+    RegimeSentimentMixin,
+    PoolMixin,
+    FundamentalsMixin,
+    SnapshotMixin,
+):
     _last_refresh_ts: float = 0.0
+
+
     _refresh_lock: asyncio.Lock | None = None
+
 
     def __init__(self):
         self._pool: dict[str, list[dict[str, Any]]] = {layer: [] for layer in ALL_LAYERS}
@@ -411,276 +115,6 @@ class MarketDataHub:
         # 7.1: consecutive refresh failure counter for observability
         self._consecutive_failures: int = 0
 
-    @staticmethod
-    def _rows_to_columns(rows: list[dict], days: int = 60) -> dict[str, list[float]]:
-        """R3: 将行式 K 线数据转为列式（懒转换）。
-
-        Input:  [{date, open, high, low, close, volume}, ...]
-        Output: {close: [3.45, ...], high: [3.5, ...], low: [3.3, ...], volume: [1e7, ...],
-                 change_pct: [0.5, ...]}
-        """
-        if not rows:
-            return {"close": [], "high": [], "low": [], "volume": [], "change_pct": []}
-        tail = rows[-days:]
-        closes = [r.get("close", r.get("close", 0)) for r in tail]
-        highs = [r.get("high", r.get("high", r.get("close", 0))) for r in tail]
-        lows = [r.get("low", r.get("low", r.get("close", 0))) for r in tail]
-        vols = [r.get("volume", r.get("volume", 0)) for r in tail]
-
-        change_pct = [0.0]
-        for i in range(1, len(closes)):
-            if closes[i - 1]:
-                change_pct.append(round((closes[i] - closes[i - 1]) / closes[i - 1] * 100, 2))
-            else:
-                change_pct.append(0.0)
-
-        return {
-            "close": closes,
-            "high": highs,
-            "low": lows,
-            "volume": vols,
-            "change_pct": change_pct,
-        }
-
-    # ── R59③ (round28): K 线缓存持久化 ────────────────────────────────────
-    # 与 _persist_snapshot_sync（round24 R26）同模式：落盘 data/kline_cache.json，
-    # 24h 内启动加载复用（消除重启后 refresh_kline 42-75s 冷建库），过期诚实重建。
-    _KLINE_CACHE_PERSIST_PATH: str | None = None
-    _KLINE_CACHE_TTL: float = 86400.0  # 24h
-
-    def _kline_cache_path(self) -> str:
-        """磁盘缓存文件路径（data/kline_cache.json）。"""
-        if self._KLINE_CACHE_PERSIST_PATH:
-            return self._KLINE_CACHE_PERSIST_PATH
-        try:
-            from ..config import settings
-            _data_dir = getattr(settings, "data_dir", None) or os.path.join(
-                os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data"
-            )
-        except Exception:
-            _data_dir = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data"
-            )
-        self._KLINE_CACHE_PERSIST_PATH = os.path.join(_data_dir, "kline_cache.json")
-        return self._KLINE_CACHE_PERSIST_PATH
-
-    def _load_kline_cache_sync(self) -> None:
-        """启动加载磁盘 K 线缓存（24h 内复用；过期/缺失/损坏 → 静默空，诚实重建）。
-
-        仅填充行式缓存 + 时间戳；列式缓存由 _sync_columnar_cache 懒重建（避免
-        __init__ 阶段重复计算——refresh_kline/首个 get_kline 都会触发）。
-        """
-        import time as _t
-        import json as _json
-        try:
-            _path = self._kline_cache_path()
-            if not os.path.isfile(_path):
-                return
-            _mtime = os.path.getmtime(_path)
-            if _t.time() - _mtime > self._KLINE_CACHE_TTL:
-                logger.info("[hub] kline cache on disk %.1fh old — expired, rebuilding (R59③)",
-                            (_t.time() - _mtime) / 3600.0)
-                return
-            with open(_path, "r", encoding="utf-8") as f:
-                _data = _json.load(f)
-            if not isinstance(_data, dict):
-                return
-            _rows = _data.get("rows")
-            _ts = float(_data.get("ts") or 0.0)
-            _syms = _data.get("symbols") or []
-            if not isinstance(_rows, dict) or not _rows:
-                return
-            self._kline_cache_rows = {str(k): v for k, v in _rows.items()
-                                      if isinstance(v, list) and v}
-            self._kline_cache_ts = _ts
-            self._kline_cache_symbols = [str(s) for s in _syms]
-            if self._kline_cache_rows:
-                # 列式缓存同步重建（get_kline 旧调用方兼容）
-                try:
-                    self._sync_columnar_cache()
-                except Exception:
-                    pass
-                logger.info(
-                    "[hub] kline cache loaded from disk: %d symbols (age=%.1fh, R59③)",
-                    len(self._kline_cache_rows), (_t.time() - _ts) / 3600.0,
-                )
-        except Exception as _e:
-            logger.debug("[hub] kline cache load failed (non-fatal): %s", _e)
-
-    def _persist_kline_cache_sync(self) -> None:
-        """落盘 K 线缓存（refresh_kline 更新后调用；失败静默，不影响主流程）。"""
-        import json as _json
-        try:
-            if not self._kline_cache_rows:
-                return
-            _path = self._kline_cache_path()
-            _tmp = f"{_path}.tmp"
-            with open(_tmp, "w", encoding="utf-8") as f:
-                _json.dump({
-                    "rows": self._kline_cache_rows,
-                    "ts": self._kline_cache_ts,
-                    "symbols": self._kline_cache_symbols,
-                }, f, ensure_ascii=False)
-            os.replace(_tmp, _path)
-        except Exception as _e:
-            logger.debug("[hub] kline cache persist failed (non-fatal): %s", _e)
-
-    async def _refresh_market_snapshot(self) -> None:
-        """A3: 写入市场快照缓存（指数 + 板块动量）。
-
-        调用外部 API 刷新 _index_realtime_cache 和 _sector_momentum_cache，
-        供 LLM 报告等消费方使用。
-        """
-        import asyncio
-        import time
-        async def _fetch_indices():
-            try:
-                from ..services.market_service import get_global_indices
-                indices = await asyncio.wait_for(get_global_indices(), timeout=15)
-                flat = []
-                for region, items in indices.items():
-                    for item in items:
-                        item["region"] = region
-                        flat.append(item)
-                # F8 (round6 §14.5): 指数实时多源降级——get_global_indices 空时
-                # 用东财 push2delay 直连拉 A 股主要指数兜底，使设计报告"今日涨跌"
-                # 列不再全"数据源不可用"（东财 push2 限流 RemoteDisconnected 场景）。
-                if not flat:
-                    flat = self._fetch_a_index_rows()
-                    for item in flat:
-                        item["region"] = "A"
-                self._index_realtime_cache = flat
-                logger.info("[pool] refreshed %d index realtime entries", len(flat))
-            except Exception as e:
-                logger.warning("[pool] _refresh_market_snapshot indices failed: %s", e)
-                if self._index_realtime_cache is None:
-                    self._index_realtime_cache = []
-
-        async def _fetch_sector():
-            try:
-                from ..services.market_trends import compute_sector_momentum
-                sector_data = await asyncio.wait_for(compute_sector_momentum(top_n=10), timeout=15)
-                self._sector_momentum_cache = sector_data
-                self._sector_momentum_cache_ts = time.time()
-                logger.info("[pool] refreshed %d sector momentum entries", len(sector_data))
-            except Exception as e:
-                logger.warning("[pool] _refresh_market_snapshot sector failed: %s", e)
-                if self._sector_momentum_cache is None:
-                    self._sector_momentum_cache = []
-
-        # 并发获取指数行情和板块动量（FIX-04）
-        await asyncio.gather(_fetch_indices(), _fetch_sector())
-
-    async def _refresh_market_snapshot_indices_only(self) -> None:
-        """仅刷新指数缓存（F8 单测入口，逻辑与 _fetch_indices 一致）。"""
-        import asyncio
-        try:
-            from ..services.market_service import get_global_indices
-            indices = await asyncio.wait_for(get_global_indices(), timeout=15)
-            flat = []
-            for region, items in indices.items():
-                for item in items:
-                    item["region"] = region
-                    flat.append(item)
-            if not flat:
-                flat = self._fetch_a_index_rows()
-                for item in flat:
-                    item["region"] = "A"
-            self._index_realtime_cache = flat
-            logger.info("[pool] refreshed %d index realtime entries", len(flat))
-        except Exception as e:
-            logger.warning("[pool] indices refresh failed: %s", e)
-            if self._index_realtime_cache is None:
-                self._index_realtime_cache = []
-
-    def _fetch_a_index_rows(self) -> list[dict]:
-        """F8: 东财 push2delay 直连拉 A 股主要指数（沪深300/上证50/中证500/科创50/创业板）。
-
-        get_global_indices 空（东财 push2 限流）时的兜底源。push2delay 实测稳定。
-        """
-        from ..core.market_context import EM_PUSH_HOST
-        from ..utils.proxy import no_proxy
-        import requests as _req
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": "https://quote.eastmoney.com/",
-        }
-        fields = "f12,f14,f2,f3,f6"
-        # m:1+s:2=上证指数段, m:0+s:399=深证段（含创业板指）；一次拉取主要宽基
-        try:
-            with no_proxy():
-                r = _req.get(
-                    "http://%s/api/qt/clist/get"
-                    "?pn=1&pz=100&po=1&np=1&fs=m:1+s:2,m:0+s:399&fields=%s&fid=f6" % (EM_PUSH_HOST, fields),
-                    timeout=6, headers=headers,
-                )
-            rows = (r.json().get("data") or {}).get("diff") or []
-            out = []
-            for row in rows:
-                code = row.get("f12", "")
-                name = row.get("f14", "")
-                if not code or not name:
-                    continue
-                def _num(v: Any) -> float:
-                    try:
-                        return float(v)
-                    except (TypeError, ValueError):
-                        return 0.0
-                out.append({
-                    "symbol": f"{'sh' if code.startswith('0') or code.startswith('1') else 'sz'}{code}",
-                    "code": code,
-                    "name": name,
-                    "price": _num(row.get("f2")),
-                    "change_pct": _num(row.get("f3")),
-                    "amount": _num(row.get("f6")),
-                })
-            logger.info("[pool] F8 fallback: fetched %d A-share indices via push2delay", len(out))
-            return out
-        except Exception as e:
-            logger.warning("[pool] F8 fallback index fetch failed: %s", e)
-            return []
-
-    async def update_sector_cache(self) -> None:
-        """刷新行业+概念板块动量缓存（Phase 2 新增，60s 定时任务专用）。
-
-        与 _refresh_market_snapshot 中的 sector 刷新分离，独立定时刷新。
-        同时刷新热点板块和板块热度排行。
-        """
-        import asyncio
-        import time
-        from .market_trends import compute_sector_momentum
-
-        try:
-            # 1. 行业+概念动量
-            momentum = await asyncio.wait_for(compute_sector_momentum(top_n=30), timeout=15)
-            if momentum:
-                self._sector_momentum_cache = momentum
-                self._sector_momentum_cache_ts = time.time()
-                logger.info("[pool] update_sector_cache: %d momentum rows", len(momentum))
-
-            # 2. 热点板块（异步，失败不影响主流程）
-            try:
-                from ..fetchers.sector_fetcher import fetch_hot_plates
-                from ..core.async_utils import run_sync
-                hot = await run_sync(fetch_hot_plates, 15, timeout=20)
-                if hot:
-                    self._hot_plates_cache = hot
-                    logger.info("[pool] update_sector_cache: %d hot plates", len(hot))
-            except Exception as e:
-                logger.debug("[pool] update_sector_cache hot_plates skipped: %s", e)
-
-            # 3. 板块热度排行
-            try:
-                from ..fetchers.sector_fetcher import fetch_sector_heat
-                from ..core.async_utils import run_sync
-                heat = await run_sync(fetch_sector_heat, timeout=20)
-                if heat:
-                    self._sector_heat_cache = heat
-            except Exception as e:
-                logger.debug("[pool] update_sector_cache sector_heat skipped: %s", e)
-
-        except Exception as e:
-            logger.warning("[pool] update_sector_cache failed: %s", e)
 
     async def refresh(self) -> PoolDiff:
         """全量刷新候选池。
@@ -737,31 +171,6 @@ class MarketDataHub:
                 self._last_refresh_ts = 0.0
                 raise
 
-    def _assign_layer(self, base_layer: str, industry: str) -> str:
-        """行业→层映射（P1-2 防御层分类修复，R5 pool 归层）。
-
-        从 _refresh_impl 提取的纯函数，供单测直测（消除测试复制实现）：
-        - core（宽基指数）→ LAYER_CORE
-        - defense（商品/固收）→ LAYER_DEFENSE（跨境不落防御，P1-2）
-        - 跨境 → LAYER_SATELLITE
-        - unknown → LAYER_RESEARCH
-        - 其余 → LAYER_SATELLITE
-        """
-        base_layer = base_layer or LAYER_SATELLITE
-        industry = industry or "unknown"
-        # Core: 宽基指数
-        if base_layer == "core" or industry == "宽基指数":
-            return LAYER_CORE
-        # Defense: 商品/固收（注意：跨境归卫星层，P1-2 修复）
-        if base_layer == "defense" or industry in ("商品", "固收"):
-            return LAYER_DEFENSE
-        # 跨境 → 卫星层（非防御资产）
-        if industry == "跨境":
-            return LAYER_SATELLITE
-        # Research: unknown industry
-        if industry == "unknown":
-            return LAYER_RESEARCH
-        return LAYER_SATELLITE
 
     async def _refresh_impl(self) -> PoolDiff:
         """实际刷新逻辑（被 refresh() 的锁保护）。"""
@@ -1123,6 +532,205 @@ class MarketDataHub:
                      _elapsed)
         return diff
 
+
+    def set_opportunistic_signals(self, signals: dict[str, dict]) -> None:
+        """设置外部机会信号（用于 Layer 4）。
+
+        Args:
+            signals: {symbol: {"signal": str, "heat_score": float, ...}}
+        """
+        self._opportunistic_signals = signals
+        logger.info("MarketDataHub: set %d opportunistic signals", len(signals))
+
+
+    async def update_sector_cache(self) -> None:
+        """刷新行业+概念板块动量缓存（Phase 2 新增，60s 定时任务专用）。
+
+        与 _refresh_market_snapshot 中的 sector 刷新分离，独立定时刷新。
+        同时刷新热点板块和板块热度排行。
+        """
+        import asyncio
+        import time
+        from .market_trends import compute_sector_momentum
+
+        try:
+            # 1. 行业+概念动量
+            momentum = await asyncio.wait_for(compute_sector_momentum(top_n=30), timeout=15)
+            if momentum:
+                self._sector_momentum_cache = momentum
+                self._sector_momentum_cache_ts = time.time()
+                logger.info("[pool] update_sector_cache: %d momentum rows", len(momentum))
+
+            # 2. 热点板块（异步，失败不影响主流程）
+            try:
+                from ..fetchers.sector_fetcher import fetch_hot_plates
+                from ..core.async_utils import run_sync
+                hot = await run_sync(fetch_hot_plates, 15, timeout=20)
+                if hot:
+                    self._hot_plates_cache = hot
+                    logger.info("[pool] update_sector_cache: %d hot plates", len(hot))
+            except Exception as e:
+                logger.debug("[pool] update_sector_cache hot_plates skipped: %s", e)
+
+            # 3. 板块热度排行
+            try:
+                from ..fetchers.sector_fetcher import fetch_sector_heat
+                from ..core.async_utils import run_sync
+                heat = await run_sync(fetch_sector_heat, timeout=20)
+                if heat:
+                    self._sector_heat_cache = heat
+            except Exception as e:
+                logger.debug("[pool] update_sector_cache sector_heat skipped: %s", e)
+
+        except Exception as e:
+            logger.warning("[pool] update_sector_cache failed: %s", e)
+
+
+    async def _refresh_market_snapshot(self) -> None:
+        """A3: 写入市场快照缓存（指数 + 板块动量）。
+
+        调用外部 API 刷新 _index_realtime_cache 和 _sector_momentum_cache，
+        供 LLM 报告等消费方使用。
+        """
+        import asyncio
+        import time
+        async def _fetch_indices():
+            try:
+                from ..services.market_service import get_global_indices
+                indices = await asyncio.wait_for(get_global_indices(), timeout=15)
+                flat = []
+                for region, items in indices.items():
+                    for item in items:
+                        item["region"] = region
+                        flat.append(item)
+                # F8 (round6 §14.5): 指数实时多源降级——get_global_indices 空时
+                # 用东财 push2delay 直连拉 A 股主要指数兜底，使设计报告"今日涨跌"
+                # 列不再全"数据源不可用"（东财 push2 限流 RemoteDisconnected 场景）。
+                if not flat:
+                    flat = self._fetch_a_index_rows()
+                    for item in flat:
+                        item["region"] = "A"
+                self._index_realtime_cache = flat
+                logger.info("[pool] refreshed %d index realtime entries", len(flat))
+            except Exception as e:
+                logger.warning("[pool] _refresh_market_snapshot indices failed: %s", e)
+                if self._index_realtime_cache is None:
+                    self._index_realtime_cache = []
+
+        async def _fetch_sector():
+            try:
+                from ..services.market_trends import compute_sector_momentum
+                sector_data = await asyncio.wait_for(compute_sector_momentum(top_n=10), timeout=15)
+                self._sector_momentum_cache = sector_data
+                self._sector_momentum_cache_ts = time.time()
+                logger.info("[pool] refreshed %d sector momentum entries", len(sector_data))
+            except Exception as e:
+                logger.warning("[pool] _refresh_market_snapshot sector failed: %s", e)
+                if self._sector_momentum_cache is None:
+                    self._sector_momentum_cache = []
+
+        # 并发获取指数行情和板块动量（FIX-04）
+        await asyncio.gather(_fetch_indices(), _fetch_sector())
+
+
+    async def _refresh_market_snapshot_indices_only(self) -> None:
+        """仅刷新指数缓存（F8 单测入口，逻辑与 _fetch_indices 一致）。"""
+        import asyncio
+        try:
+            from ..services.market_service import get_global_indices
+            indices = await asyncio.wait_for(get_global_indices(), timeout=15)
+            flat = []
+            for region, items in indices.items():
+                for item in items:
+                    item["region"] = region
+                    flat.append(item)
+            if not flat:
+                flat = self._fetch_a_index_rows()
+                for item in flat:
+                    item["region"] = "A"
+            self._index_realtime_cache = flat
+            logger.info("[pool] refreshed %d index realtime entries", len(flat))
+        except Exception as e:
+            logger.warning("[pool] indices refresh failed: %s", e)
+            if self._index_realtime_cache is None:
+                self._index_realtime_cache = []
+
+
+    def _fetch_a_index_rows(self) -> list[dict]:
+        """F8: 东财 push2delay 直连拉 A 股主要指数（沪深300/上证50/中证500/科创50/创业板）。
+
+        get_global_indices 空（东财 push2 限流）时的兜底源。push2delay 实测稳定。
+        """
+        from ..core.market_context import EM_PUSH_HOST
+        from ..utils.proxy import no_proxy
+        import requests as _req
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": "https://quote.eastmoney.com/",
+        }
+        fields = "f12,f14,f2,f3,f6"
+        # m:1+s:2=上证指数段, m:0+s:399=深证段（含创业板指）；一次拉取主要宽基
+        try:
+            with no_proxy():
+                r = _req.get(
+                    "http://%s/api/qt/clist/get"
+                    "?pn=1&pz=100&po=1&np=1&fs=m:1+s:2,m:0+s:399&fields=%s&fid=f6" % (EM_PUSH_HOST, fields),
+                    timeout=6, headers=headers,
+                )
+            rows = (r.json().get("data") or {}).get("diff") or []
+            out = []
+            for row in rows:
+                code = row.get("f12", "")
+                name = row.get("f14", "")
+                if not code or not name:
+                    continue
+                def _num(v: Any) -> float:
+                    try:
+                        return float(v)
+                    except (TypeError, ValueError):
+                        return 0.0
+                out.append({
+                    "symbol": f"{'sh' if code.startswith('0') or code.startswith('1') else 'sz'}{code}",
+                    "code": code,
+                    "name": name,
+                    "price": _num(row.get("f2")),
+                    "change_pct": _num(row.get("f3")),
+                    "amount": _num(row.get("f6")),
+                })
+            logger.info("[pool] F8 fallback: fetched %d A-share indices via push2delay", len(out))
+            return out
+        except Exception as e:
+            logger.warning("[pool] F8 fallback index fetch failed: %s", e)
+            return []
+
+
+    def _assign_layer(self, base_layer: str, industry: str) -> str:
+        """行业→层映射（P1-2 防御层分类修复，R5 pool 归层）。
+
+        从 _refresh_impl 提取的纯函数，供单测直测（消除测试复制实现）：
+        - core（宽基指数）→ LAYER_CORE
+        - defense（商品/固收）→ LAYER_DEFENSE（跨境不落防御，P1-2）
+        - 跨境 → LAYER_SATELLITE
+        - unknown → LAYER_RESEARCH
+        - 其余 → LAYER_SATELLITE
+        """
+        base_layer = base_layer or LAYER_SATELLITE
+        industry = industry or "unknown"
+        # Core: 宽基指数
+        if base_layer == "core" or industry == "宽基指数":
+            return LAYER_CORE
+        # Defense: 商品/固收（注意：跨境归卫星层，P1-2 修复）
+        if base_layer == "defense" or industry in ("商品", "固收"):
+            return LAYER_DEFENSE
+        # 跨境 → 卫星层（非防御资产）
+        if industry == "跨境":
+            return LAYER_SATELLITE
+        # Research: unknown industry
+        if industry == "unknown":
+            return LAYER_RESEARCH
+        return LAYER_SATELLITE
+
+
     @staticmethod
     def _normalize_tracked_index(tidx: str) -> str:
         """M3: tracked_index 家族归一化——同一指数的风格/增强切片合并为基准指数。
@@ -1144,6 +752,7 @@ class MarketDataHub:
             if tidx.startswith(base) and tidx != base:
                 return base
         return tidx
+
 
     @staticmethod
     def _deduplicate_by_index(
@@ -1238,6 +847,7 @@ class MarketDataHub:
 
         return result
 
+
     def _ensure_mandatory(
         self,
         pool: dict[str, list[dict[str, Any]]],
@@ -1268,6 +878,7 @@ class MarketDataHub:
                     pool[target].append(found)
                     logger.info("MarketDataHub: enforced mandatory %s -> %s", code, target)
 
+
     @staticmethod
     def _truncate_with_mandatory_protection(
         balanced: list[dict[str, Any]], max_n: int
@@ -1280,6 +891,7 @@ class MarketDataHub:
         mandatory = [e for e in balanced if e.get("symbol") in MANDATORY_CODES]
         rest = [e for e in balanced if e.get("symbol") not in MANDATORY_CODES]
         return mandatory + rest[:max_n]
+
 
     def _recheck_mandatory_after_truncate(
         self,
@@ -1315,31 +927,6 @@ class MarketDataHub:
             pool.setdefault(target, []).append(found)
             logger.warning("MarketDataHub: re-injected mandatory %s -> %s after truncate", code, target)
 
-    @staticmethod
-    def _is_market_hours() -> bool:
-        """检查当前是否为A股交易时段。
-
-        非交易时段：成交额数据可能为昨日值，应降低流动性权重。
-        """
-        from datetime import datetime as _dt
-        now = _dt.now()
-        if now.weekday() >= 5:  # 周末
-            return False
-        t = now.strftime("%H:%M")
-        return "09:30" <= t <= "11:30" or "13:00" <= t <= "15:00"
-
-    @staticmethod
-    def _normalize_regime(regime: str) -> str:
-        """C2: 将市场状态值映射到 _LAYER_WEIGHTS 表的 key。
-
-        外部 detect_market_regime() 返回的值可能包含 `bull_strong`、`range_bound` 等，
-        但 _LAYER_WEIGHTS 表使用 `bull`、`neutral` 等简化 key。
-
-        E2 (round23 §10.2): 归一化逻辑提取 core/regime.normalize_regime 为单一口径
-        （与 risk_controls 的熊市判定共用本模块），本方法保留为兼容委托。
-        """
-        from ..core.regime import normalize_regime
-        return normalize_regime(regime)
 
     @staticmethod
     def _pct_rank(value: float, series: list[float]) -> float:
@@ -1354,6 +941,7 @@ class MarketDataHub:
         below = sum(1 for v in series if v < value)
         equal = sum(1 for v in series if v == value)
         return (below + 0.5 * equal) / n
+
 
     def _compute_composite(
         self,
@@ -1415,6 +1003,7 @@ class MarketDataHub:
 
         return score
 
+
     @staticmethod
     def _balance_by_industry(
         items: list[dict[str, Any]],
@@ -1459,1190 +1048,6 @@ class MarketDataHub:
             selected.extend(remaining[:max_n - len(selected)])
 
         return selected[:max_n]
-
-    def set_opportunistic_signals(self, signals: dict[str, dict]) -> None:
-        """设置外部机会信号（用于 Layer 4）。
-
-        Args:
-            signals: {symbol: {"signal": str, "heat_score": float, ...}}
-        """
-        self._opportunistic_signals = signals
-        logger.info("MarketDataHub: set %d opportunistic signals", len(signals))
-
-    def _rebuild_index(self) -> None:
-        """重建 symbol → entry 索引。"""
-        self._by_code = {}
-        for layer_items in self._pool.values():
-            for item in layer_items:
-                sym = item.get("symbol", "")
-                if sym:
-                    self._by_code[sym] = item
-
-    def _compute_diff(
-        self,
-        old_by_code: dict[str, dict[str, Any]],
-    ) -> PoolDiff:
-        """计算新旧池之间的差异。"""
-        new_by_code = self._by_code
-        added = []
-        removed = []
-        changed = []
-
-        for sym, entry in new_by_code.items():
-            if sym not in old_by_code:
-                added.append(entry)
-            elif entry.get("layer") != old_by_code[sym].get("layer"):
-                changed.append(entry)
-
-        for sym, entry in old_by_code.items():
-            if sym not in new_by_code:
-                removed.append(entry)
-
-        return PoolDiff(added=added, removed=removed, changed=changed)
-
-    # 应急池已移除 — 数据源不可用时应报错而非用硬编码数据
-
-    def get_pool(self, layer: str | None = None) -> dict[str, list[dict[str, Any]]] | list[dict[str, Any]]:
-        """获取候选池。
-
-        Args:
-            layer: 指定层名。None 返回全池。
-        """
-        # Check if main pool is empty → try emergency fallback
-        if layer:
-            pool = self._pool.get(layer, [])
-            if not pool:
-                logger.warning("[market_data_hub] get_pool('%s') returned empty — main pool may be stale", layer)
-            return pool
-
-        total = sum(len(v) for v in self._pool.values())
-        if total == 0:
-            logger.warning("[market_data_hub] get_pool() called but main pool is empty — data source unavailable")
-        return self._pool
-
-    def get_by_code(self, symbol: str) -> dict[str, Any] | None:
-        """按代码查询单个 ETF。"""
-        return self._by_code.get(symbol)
-
-    # ── round24 R26②: 盘后快照落盘 / 盘后重启读兜底 ───────────────────────
-    async def _persist_snapshot_after_refresh(self, new_pool: dict) -> None:
-        """round24 R26②: 盘后/熔断刷新成功 → 落盘候选池 + 板块动量快照（last-good 之上再一层）。
-
-        原语义：仅在 post_market / after_hours 写（实时源时效场景不写，避免快照盖过实时）。
-        round25 R40-b 放宽：**sector_momentum 只要 refresh 成功且非空即落盘**（盘中/收盘任一
-        时点成功刷新都留下 last-good 快照，封堵「收盘后才首次启动 → 磁盘无快照 → 盘后兜底
-        无物可兜」的首启空窗）；空 `[]` 不写（防空壳污染兜底）。读取侧仅在无 live 缓存时
-        回退快照，故放宽写入不违反「快照盖过实时」意图。pool 快照保持盘后语义（pool 语义
-        与 sector 不同，盘中实时池不该被快照盖过）。
-        同步 sqlite 经 asyncio.to_thread 执行，不阻塞事件循环（符合 async def ≠ 阻塞）。
-        """
-        try:
-            session = market_session()
-            as_of = _snapshot_as_of_for()
-            if not as_of:
-                # R40-b: as_of 为 None（盘中/盘前）时 sector_momentum 快照仍可落盘——
-                # 用当前时间戳代替（last-good 语义，仅作兜底不冒充收盘）
-                as_of = datetime.now().isoformat(sep="T")
-            pool_payload = {k: [dict(x) for x in v] for k, v in (new_pool or {}).items()}
-            # pool 快照：保持盘后语义（post_market/after_hours 才写）
-            if pool_payload and session in ("post_market", "after_hours"):
-                await asyncio.to_thread(_persist_snapshot_sync, "pool", pool_payload, as_of)
-            # sector_momentum 快照：R40-b 放宽——refresh 成功且非空即落盘（防空壳）
-            sm = self.get_sector_momentum() or []
-            if sm:
-                await asyncio.to_thread(_persist_snapshot_sync, "sector_momentum", list(sm), as_of)
-        except Exception as e:
-            logger.debug("[hub] snapshot persist skipped (non-fatal): %s", e)
-
-    def _load_pool_snapshot(self) -> dict | None:
-        """round24 R26②: 读最近一条 pool 快照（盘后重启兜底，last-good 内存重启即丢）。"""
-        try:
-            snap = _load_latest_snapshot_sync("pool")
-            if snap and isinstance(snap, dict):
-                return snap
-        except Exception:
-            pass
-        return None
-
-    # ── S5: MarketDataHub K 线缓存 ────────────────────────────────────
-
-    def get_kline(self, symbol: str, max_age: int = 300) -> dict[str, Any] | None:
-        """R3: 从行式缓存懒转换返回列式 K 线数据。
-
-        Args:
-            symbol: ETF 代码。
-            max_age: 缓存最大时效（秒），默认 300s（5 分钟）。
-
-        Returns:
-            列式 K 线数据 {close:[], high:[], ...}，或 None。
-        """
-        rows = self.get_kline_rows(symbol, max_age=max_age)
-        if rows is None or not rows:
-            return None
-        return self._rows_to_columns(rows)
-
-    def get_kline_symbols(self) -> list[str]:
-        """返回缓存中有 K 线数据的 ETF 代码列表。"""
-        return list(self._kline_cache_rows.keys())
-
-    def get_history(self, symbol: str, market: str = "A", period: str = "daily") -> list[dict] | None:
-        """实时取历史 K 线（委托 china_market.fetch_history，含 fallback 链）。"""
-        try:
-            from ..fetchers.china_market import fetch_history
-            return fetch_history(symbol, market, period) or []
-        except Exception as e:
-            logger.warning("[hub] get_history(%s) failed: %s", symbol, e)
-            return None
-
-    def get_kline_rows(self, symbol: str, max_age: int = 300) -> list[dict] | None:
-        """R3: 获取行式 K 线数据（直接读缓存，无转换）。
-
-        Args:
-            symbol: ETF 代码。
-            max_age: 缓存最大时效（秒）。
-
-        Returns:
-            行式 K 线 [{date, open, high, low, close, volume}, ...]，或 None。
-        """
-        import time
-        rows = self._kline_cache_rows.get(symbol)
-        if rows and (time.time() - self._kline_cache_ts) < max_age:
-            return rows
-        return None
-
-    # F0-4: 过期 K 线缓存兜底（akshare 熔断 / 全源失败时仍有数据）
-    _kline_stale_flags: dict[str, bool] = {}
-
-    def get_kline_rows_any(self, symbol: str) -> list[dict] | None:
-        """F0-4: 返回任意年龄的 K 线缓存（不检查新鲜度）。"""
-        return self._kline_cache_rows.get(symbol) or None
-
-    def get_kline_age_seconds(self, symbol: str) -> float | None:
-        """F0-4: 缓存数据龄（秒），无缓存返回 None。"""
-        import time
-        if symbol in self._kline_cache_rows:
-            return max(0.0, time.time() - self._kline_cache_ts)
-        return None
-
-    def mark_kline_stale(self, symbol: str, stale: bool = True) -> None:
-        """F0-4: 记录该 symbol 最近一次 history 是否走了 stale 兜底。"""
-        self._kline_stale_flags[symbol] = stale
-
-    def is_kline_stale(self, symbol: str) -> bool:
-        """F0-4: 查询该 symbol 是否最近一次 history 走了 stale 兜底。"""
-        return self._kline_stale_flags.get(symbol, False)
-
-    async def refresh_kline(self, symbols: list[str]) -> None:
-        """S5: 增量刷新 K 线缓存（R3: 直接 fetch_history + Semaphore 并发）。
-
-        不再经过 factor_registry._fetch_market_data（消除循环依赖）。
-        统一存储行式格式，get_kline() 时懒转换为列式。
-
-        Args:
-            symbols: 需要刷新的 ETF 代码列表。
-        """
-        if not symbols:
-            return
-        from ..fetchers.china_market import fetch_history
-        from ..core.async_utils import run_sync
-
-        sem = asyncio.Semaphore(5)  # R3: 并发控制
-
-        async def _fetch_one(sym: str) -> tuple[str, list[dict] | None]:
-            async with sem:
-                try:
-                    rows = await run_sync(fetch_history, sym, "A", "daily", timeout=20)
-                    return sym, rows
-                except Exception as e:
-                    logger.debug("[pool] refresh_kline fetch_history(%s) failed: %s", sym, e)
-                    return sym, None
-
-        tasks = [_fetch_one(sym) for sym in symbols]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        async with self._kline_cache_lock:
-            updated = 0
-            for r in results:
-                if isinstance(r, tuple) and len(r) == 2:
-                    sym, rows = r
-                    if isinstance(rows, list) and rows:
-                        self._kline_cache_rows[sym] = rows
-                        updated += 1
-            if updated > 0:
-                self._kline_cache_ts = __import__('time').time()
-                self._kline_cache_symbols = list(set(self._kline_cache_symbols + symbols))
-                # 同步更新列式缓存（向后兼容 get_kline 旧调用方）
-                self._sync_columnar_cache()
-                # R59③ (round28): 更新后落盘——重启后首呼 design 直接加载磁盘缓存，
-                # 消除 42-75s 冷建库（round28 §14.4 冷启动超时根因）。失败静默。
-                self._persist_kline_cache_sync()
-                logger.debug("[pool] refresh_kline updated %d/%d symbols", updated, len(symbols))
-
-    def _sync_columnar_cache(self):
-        """R3: 从行式缓存重建列式缓存（兼容旧 get_kline 调用方）。"""
-        self._kline_cache = {}
-        for sym, rows in self._kline_cache_rows.items():
-            cols = self._rows_to_columns(rows)
-            if cols and cols.get("close"):
-                self._kline_cache[sym] = cols
-
-    def _build_symbol_extra(self, symbols: list[str]) -> dict[str, dict]:
-        """构建 symbol_extra 字典，供 factor_registry 使用。"""
-        result = {}
-        for sym in symbols:
-            entry = self._by_code.get(sym, {})
-            result[sym] = {
-                "fund_scale": entry.get("fund_scale", 0),
-                "fund_shares": entry.get("fund_shares", 0),
-                # F19: carry industry/concepts for china_specific factors
-                "industry": entry.get("industry", "unknown"),
-                "concepts": entry.get("concepts", []),
-            }
-        return result
-
-    # F3-4 步骤B: 宽基 ETF → 指数代码（东财指数，benchmark_close 注入用）。
-    # §9.10.7-4 已确认「宽基先行」：行业指数随 mapping 补全后跟进。
-    # O19 (round7 §7 P20-②): 补新宽基映射——A500/A50/A100/红利低波/公共底仓锚。
-    _WIDE_BASIS_INDEX_CODES = {
-        "510300": "sh000300",  # 沪深300
-        "159919": "sh000300",  # 沪深300（深市嘉实）
-        "510500": "sh000905",  # 中证500
-        "159922": "sh000905",  # 中证500（深市）
-        "510050": "sh000016",  # 上证50
-        "588000": "sh000688",  # 科创50
-        "159915": "sz399006",  # 创业板指
-        "510880": "sh000015",  # 上证红利
-        "159338": "sh000510",  # 中证A500（O19；round9 P0-8: 560600 → 159338）
-        "563080": "sh932000",  # 中证A50（O19）
-        "562000": "sh000903",  # 中证A100（O19）
-        "563020": "sh000922",  # 红利低波（O19，中证红利低波动指数）
-        "512890": "sh000922",  # 红利低波ETF（O19，同指数）
-        "510180": "sh000010",  # 上证180（O19）
-        "159901": "sz399001",  # 深证100（O19）
-        "159800": "sh000906",  # 中证800（O19）
-        "159845": "sh000852",  # 中证1000（O19）
-        "159601": "sh932000",  # 中国A50ETF（O19，同 A50 指数）
-        # P1-8 (round9 §6.5.1-B): 主题 ETF 基准映射扩展——行业/主题 ETF 此前无基准映射
-        # → benchmark_close 全缺 → tracking_error no_data。仅收录实测（2026-08-07 腾讯行情
-        # 200 且名称非空）确认的指数代码；未确认的（半导体/新能源车等）宁缺毋滥
-        # （错误基准比缺失更误导，见 P2-10 幽灵锚教训）。
-        "512880": "sz399975",  # 证券ETF → 中证全指证券公司（实测）
-        "512010": "sh000933",  # 医药ETF → 中证医药（实测）
-        # P1-J (round10 §5.5/§10): benchmark_close 映射扩到候选池主要行业/主题
-        # ETF（东财/腾讯行情实测 2026-08-09 名称匹配 + 指数对应，消除 tracking_error
-        # 0 命中）。未收录仍保持「宁缺毋滥」——只加能确认对应的。
-        "512690": "sh000932",  # 酒ETF → 中证白酒
-        "512170": "sh000933",  # 医疗ETF → 中证医疗（同医药基准）
-        "512760": "sh000733",  # 芯片ETF → 中华半导体芯片
-        "159995": "sz399812",  # 芯片ETF → 国证半导体芯片
-        "512480": "sh931071",  # 半导体ETF → 中证全指半导体
-        "515790": "sh930997",  # 光伏ETF → 中证光伏产业
-        "515030": "sh930714",  # 新能源汽车ETF → 中证新能源汽车
-        "516160": "sh931151",  # 新能源ETF → 中证新能源
-        "512400": "sh000819",  # 有色金属ETF → 中证有色金属
-        "512800": "sh000806",  # 银行ETF → 中证银行
-        "512000": "sh930791",  # 券商ETF → 中证全指证券公司（沪市）
-        "159920": "sz399933",  # 恒生ETF（港）→ 恒生指数
-        "513050": "sh000856",  # 中概互联ETF → 中证海外中国互联网
-    }
-    # F3-4 步骤C: 份额数据 24h 缓存（fund_fund_shares_em 日更/周更）
-    _FUND_SHARES_CACHE: dict[str, tuple[float, dict]] = {}
-    _FUND_SHARES_TTL = 86400.0
-    # P2-1 延伸 (R4-16): symbol_extra enrich 总超时（数据源慢时降级部分数据，不阻塞刷新）
-    _ENRICH_TOTAL_TIMEOUT = 60.0
-
-    async def _enrich_symbol_extra(
-        self,
-        symbols: list[str],
-        base_extra: dict[str, dict],
-    ) -> dict[str, dict]:
-        """F3-4 步骤B/C: 注入 benchmark_close（宽基指数历史 close）与 shares_change_20d（份额变化）。
-
-        - benchmark_close → tracking_error（§9.5.4 步骤B，宽基先行）
-        - shares_change_20d → shares_change 直接生效 + institutional_holdings_change ×0.5 折扣代理
-        - 任一失败静默（不阻塞主流程），份额数据 24h 缓存
-        """
-        import time
-        from ..fetchers.china_market import fetch_etf_shares_outstanding
-
-        out = {s: dict(base_extra.get(s) or {}) for s in symbols}
-
-        # P2-1 延伸 (R4-16): 并发限制 + 总超时——66 只 × 2 个任务无限制并发
-        # 会在 NAV/份额数据源慢时打满线程池（POOL SATURATION，get_fund_nav 6s 超时
-        # × 大量堆积）→ 候选池刷新永远失败 → verify_e2e 候选池类检查全 FAIL。
-        # Semaphore(8) 控制并发 + wait_for 总超时（超时降级为部分数据，不阻塞刷新）。
-        _sem = asyncio.Semaphore(8)
-
-        async def _bench(sym: str):
-            async with _sem:
-                idx_code = self._WIDE_BASIS_INDEX_CODES.get(sym)
-                if not idx_code:
-                    return
-                try:
-                    hist = await self.get_market_history(idx_code, "index", "daily")
-                    closes = [float(r.get("close", 0)) for r in (hist or []) if r.get("close")]
-                    if len(closes) >= 5:
-                        out.setdefault(sym, {})["benchmark_close"] = closes[-20:]
-                except Exception as e:
-                    logger.debug("[hub] benchmark_close for %s failed: %s", sym, e)
-
-        async def _shares(sym: str):
-            async with _sem:
-                try:
-                    cached = self._FUND_SHARES_CACHE.get(sym)
-                    if cached and (time.time() - cached[0]) < self._FUND_SHARES_TTL:
-                        shares_data = cached[1]
-                    else:
-                        from ..core.async_utils import run_sync
-                        shares_data = await run_sync(fetch_etf_shares_outstanding, sym, timeout=10)
-                        # F19 R71: 失败/空结果不写 24h 成功缓存——旧代码 `or {}` 把失败变成
-                        # {} 写进缓存 → 后续 24h 命中 {} → gap 持续；akshare 恢复后还要再等
-                        # 24h 才重试（熔断恢复后自动补齐被缓存破绽阻断）
-                        if not shares_data or shares_data.get("shares_change_20d") is None:
-                            return
-                        self._FUND_SHARES_CACHE[sym] = (time.time(), shares_data)
-                    if shares_data.get("shares_change_20d") is not None:
-                        out.setdefault(sym, {})["shares_change_20d"] = shares_data["shares_change_20d"]
-                        # §9.10.7-5 确认: institutional_holdings_change 用 ×0.5 折扣代理
-                        out[sym]["institutional_holdings_change"] = float(shares_data["shares_change_20d"]) * 0.5
-                except Exception as e:
-                    logger.debug("[hub] shares_change_20d for %s failed: %s", sym, e)
-
-        try:
-            await asyncio.wait_for(
-                asyncio.gather(
-                    *(_bench(s) for s in symbols),
-                    *(_shares(s) for s in symbols),
-                ),
-                timeout=self._ENRICH_TOTAL_TIMEOUT,
-            )
-        except asyncio.TimeoutError:
-            logger.warning(
-                "[hub] symbol_extra enrich timed out after %ss (partial: %d/%d symbols)",
-                self._ENRICH_TOTAL_TIMEOUT, len(out), len(symbols),
-            )
-        return out
-
-    def get_sector_momentum(self) -> list[dict]:
-        """获取板块动量，120s 缓存 TTL。
-
-        round25 R40-a: 读取兜底闭环——缓存过期/空 且 盘后/收盘后（post_market /
-        after_hours）时，读已落盘的 `sector_momentum` 快照（写入侧 `_persist_snapshot_
-        after_refresh` 已有）；盘中缓存失效**不**用快照（避免昨日收盘冒充盘中实时），
-        保持 `[]` 触发既有降级。旧实现只返内存缓存或 `[]`，从不读快照（「写了不读」）。
-        """
-        import time
-        now = time.time()
-        if self._sector_momentum_cache and (now - self._sector_momentum_cache_ts) < 120:
-            return self._sector_momentum_cache
-        # 缓存过期/空：盘后才回退快照（注入收盘动量）；盘中保持 []（诚实降级）
-        try:
-            session = market_session()
-            if session in ("post_market", "after_hours"):
-                snap = _load_latest_snapshot_sync("sector_momentum")
-                if isinstance(snap, list) and snap:
-                    self._sector_momentum_cache = snap
-                    self._sector_momentum_cache_ts = time.time()
-                    logger.info(
-                        "[hub] sector momentum loaded from post-market snapshot (%d rows)",
-                        len(snap),
-                    )
-                    return snap
-        except Exception as e:
-            logger.debug("[hub] sector momentum snapshot read failed (non-fatal): %s", e)
-        return self._sector_momentum_cache or []
-
-    def get_hot_plates(self, limit: int | None = None, market: str = "A") -> list[dict]:
-        """热点板块。默认返回缓存；传 limit 时实时取数（保持路由语义）。
-
-        F2-6 步骤A: 输出统一归一化（secu_name→name / up_reason→reason /
-        plate_stock_up_num→stock_count / stock_list→lead_stocks 数组）。
-        F16 (round6 §16.4): market=HK 走港股 push2delay 行业聚合；
-        market=US 返回「暂不支持」（不返回 A 股数据）。
-        """
-        if market and market.upper() != "A":
-            from ..fetchers.hk_hot_fetcher import get_hk_hot_plates
-            if market.upper() == "HK":
-                return get_hk_hot_plates(limit or 15)
-            # round14 P2-AK: 美股热点板块——东财美股 spot 按行业聚合（实测 m:105 为个股
-            # 含行业字段，akshare stock_us_industry_spot_em 已删除，见 fetch_us_plates）
-            from ..fetchers.sector_fetcher import fetch_us_plates
-            return fetch_us_plates(limit or 15)
-        if limit is not None:
-            try:
-                rows = sector_fetcher.fetch_hot_plates(limit) or []
-            except Exception as e:
-                logger.warning("[hub] get_hot_plates(limit) failed: %s", e)
-                return []
-        else:
-            rows = self._hot_plates_cache or []
-        return [_normalize_hot_plate(r) for r in rows]
-
-    def get_sector_heat(self, limit: int | None = None, market: str = "A") -> list[dict]:
-        """获取板块热度排行（Phase 6.1.6）。
-
-        F2-3: limit 传值时实时取数（与 get_hot_plates 语义一致），否则返回缓存。
-        F16: market=HK 走港股行业聚合；market=US 暂不支持。
-        """
-        if market and market.upper() != "A":
-            from ..fetchers.hk_hot_fetcher import get_hk_hot_plates
-            if market.upper() == "HK":
-                plates = get_hk_hot_plates(limit or 20)
-                return [{"rank": i + 1, "name": p["name"], "heat_index": round(p["amount"] / 1e6, 1),
-                         "change_pct": p["change_pct"], "plate_code": "HK"} 
-                        for i, p in enumerate(plates)]
-            return []
-        if limit is not None:
-            try:
-                # P0-17① (round16 3.19 R1): A 股热度优先走东财行业板块 spot
-                # （自带真实涨跌幅+领涨股）——财联社 sign 失效后名称回填命中率仅 5/20。
-                rows = sector_fetcher.fetch_sector_heat_em(limit)
-                if rows:
-                    return rows
-                # EM 源失败 → 回退财联社 + 端点名称回填链
-                return sector_fetcher.fetch_sector_heat(limit) or []
-            except Exception as e:
-                logger.warning("[hub] get_sector_heat(%s) failed: %s", limit, e)
-                return []
-        return self._sector_heat_cache or []
-
-    def get_index_realtime(self) -> list[dict]:
-        """获取 A 股大盘实时行情缓存。"""
-        return self._index_realtime_cache or []
-
-    # ── 市场状态缓存（Phase 5.1: dict[str,str] 支持多市场） ──
-    _regime_cache: dict[str, str] = {}
-    _regime_cache_ts: float = 0
-    REGIME_TTL = 60
-
-    def get_market_regime(self, market: str = "A") -> str:
-        """获取市场状态，60s 缓存。支持多市场（Phase 5.1）。"""
-        import time
-        now = time.time()
-        cached = self._regime_cache.get(market)
-        if cached and (now - self._regime_cache_ts) < self.REGIME_TTL:
-            return cached
-        # Cache miss — regime 由外部定时刷新，返回旧值或默认
-        return self._regime_cache.get(market, "range_bound")
-
-    async def update_market_regime(self, market: str = "A") -> None:
-        """异步刷新市场状态（由 refresh() 或外部调度器调用）。
-        
-        Phase 5.1: 支持按市场刷新。
-        C2: 同步更新 self.current_regime 以便 _compute_composite 使用最新市态。
-        """
-        import time
-        try:
-            from .market_trends import detect_market_regime
-            broad_index = {"A": "000001", "HK": "^HSI", "US": "^GSPC"}.get(market, "000001")
-            # round13 §3.1 P1: A 市场刷新市态时组装宏观快照（fetch_macro_snapshot，
-            # 24h 缓存；失败降级 None → detect_market_regime 行为与旧版一致）
-            macro = None
-            if market == "A":
-                try:
-                    from ..fetchers.macro_fetcher import fetch_macro_snapshot
-                    macro = await asyncio.to_thread(fetch_macro_snapshot)
-                except Exception as _me:
-                    logger.warning("[pool] macro snapshot fetch failed for regime: %s", _me)
-            regime = detect_market_regime(broad_index_code=broad_index, macro=macro)
-            if regime:
-                self._regime_cache[market] = regime
-                self._regime_cache_ts = time.time()
-                if market == "A":
-                    self.current_regime = regime  # C2: 同步更新
-                logger.info("[pool] regime updated for %s: %s", market, regime)
-        except Exception as e:
-            logger.exception("[pool] update_market_regime failed for %s: %s", market, e)
-
-    # ── 情绪缓存 ──────────────────────────────────────────
-    _sentiment_cache: dict | None = None
-    _sentiment_cache_ts: float = 0
-    SENTIMENT_TTL = 120
-
-    async def refresh_sentiment_cache(self) -> None:
-        """异步刷新市场情绪缓存（2.7.9）。"""
-        import time
-        import json
-        import os
-        try:
-            from ..fetchers.fundamentals_fetcher import fetch_market_sentiment
-            sentiment = await fetch_market_sentiment()
-            if sentiment:
-                self._sentiment_cache = sentiment
-                self._sentiment_cache_ts = time.time()
-                # A02: Persist sentiment cache to file for crash recovery
-                _cache_dir = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data")
-                os.makedirs(_cache_dir, exist_ok=True)
-                _cache_file = os.path.join(_cache_dir, "sentiment_cache.json")
-                with open(_cache_file, "w", encoding="utf-8") as f:
-                    json.dump({"sentiment": sentiment, "ts": time.time()}, f, ensure_ascii=False)
-                logger.info("[pool] sentiment cache refreshed and persisted")
-        except Exception as e:
-            logger.warning("[pool] refresh_sentiment_cache failed: %s", e)
-            # A02: On failure, try to restore from persisted file
-            try:
-                _cache_dir = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data")
-                _cache_file = os.path.join(_cache_dir, "sentiment_cache.json")
-                if os.path.exists(_cache_file):
-                    with open(_cache_file, "r", encoding="utf-8") as f:
-                        cached = json.load(f)
-                    if isinstance(cached, dict) and "sentiment" in cached:
-                        self._sentiment_cache = cached["sentiment"]
-                        self._sentiment_cache_ts = cached.get("ts", 0)
-                        logger.info("[pool] restored sentiment from persisted cache file")
-            except Exception as restore_e:
-                logger.warning("[pool] failed to restore sentiment from cache file: %s", restore_e)
-
-    def get_market_sentiment(self) -> dict:
-        """获取市场情绪，120s 缓存。"""
-        import time
-        now = time.time()
-        if self._sentiment_cache and (now - self._sentiment_cache_ts) < self.SENTIMENT_TTL:
-            return self._sentiment_cache
-        try:
-            from ..fetchers.fundamentals_fetcher import fetch_market_sentiment
-            # Can't directly await here — cache miss just returns default
-            pass
-        except Exception:
-            pass
-        return self._sentiment_cache or {"sentiment_index": 50, "sentiment_label": "中性"}
-
-    # ── 因子矩阵 ──────────────────────────────────────────
-    @staticmethod
-    def _normalize_matrix(
-        matrix: dict[str, dict[str, float]],
-        raw_codes: set[str] | None = None,
-    ) -> dict[str, dict[str, float]]:
-        """对因子矩阵做截面 z-score 归一化，消除量纲差异。
-
-        排除 ln_mcap/ln_float_mcap（截面内无意义，所有大盘 ETF 都 ~25），
-        排除仅有一两个非零值的因子（归一化会放大噪声）。
-        O4 (round7 §7 P6): `standardization=raw` 的因子（rsi_14/rsi_24 等，
-        factor_definitions.yaml 声明）跳过截面 z-score，保留真实 0-100 值——
-        rationale「RSI<30 超卖」等判断需要真实值而非相对分。
-        """
-        import statistics
-        symbols = list(matrix.keys())
-        if not symbols:
-            return matrix
-
-        raw = raw_codes or set()
-
-        # 收集所有因子键
-        factor_keys: set[str] = set()
-        for scores in matrix.values():
-            factor_keys.update(k for k, v in scores.items())
-
-        EXCLUDE = {"style.size.ln_mcap", "style.size.ln_float_mcap"}
-
-        for key in factor_keys:
-            if key in EXCLUDE:
-                # Z09: size 因子做 min-max 归一化（保留截面相对排序、消除量纲），
-                # 而非完全跳过——否则原始 ln(mcap)≈25 会作为“25σ”离群值进入 factor_breakdown
-                values = [matrix[s].get(key, 0.0) for s in symbols]
-                vmin, vmax = min(values), max(values)
-                if vmax - vmin < 1e-10:
-                    # 截面无区分度（如 total_mv 未注入导致全同）时置中性 0，不泄漏原始量纲值
-                    for s in symbols:
-                        matrix[s][key] = 0.0
-                    continue
-                for s in symbols:
-                    matrix[s][key] = (matrix[s].get(key, 0.0) - vmin) / (vmax - vmin) * 2.0 - 1.0
-                continue
-            if key in raw:
-                # O4: raw 因子（RSI 0-100 等）跳过截面 z-score——保留真实量纲
-                continue
-            values = [matrix[s].get(key, 0.0) for s in symbols]
-            # 跳过所有值相同的因子（无截面区分度）
-            if max(values) - min(values) < 0.001:
-                continue
-            # 跳过只有一两个非零值的因子（归一化后噪声膨胀）
-            non_zero = sum(1 for v in values if abs(v) > 0.001)
-            if non_zero < 3:
-                continue
-            mean = statistics.mean(values)
-            std = statistics.stdev(values) or 1.0
-            for s in symbols:
-                matrix[s][key] = (matrix[s].get(key, 0.0) - mean) / std
-
-        return matrix
-
-    def _raw_factor_codes(self) -> set[str]:
-        """O4: factor_definitions.yaml 中 standardization=raw 的因子 code 集合。"""
-        raw = set()
-        try:
-            for code, definition in factor_registry._factors.items():
-                if definition.standardization == "raw":
-                    raw.add(code)
-        except Exception:
-            pass
-        return raw
-
-    def get_factor_matrix(self) -> dict[str, dict[str, float]]:
-        """从候选池提取因子分矩阵，并做 z-score 归一化（raw 因子除外）。"""
-        result: dict[str, dict[str, float]] = {}
-        for layer_items in self._pool.values():
-            for item in layer_items:
-                sym = item.get("symbol", "")
-                if not sym:
-                    continue
-                fs = item.get("factor_scores", {})
-                result[sym] = {k: v for k, v in fs.items() if isinstance(v, (int, float))}
-        if not result:
-            logger.warning("[market_data_hub] get_factor_matrix() returned empty — pool may be empty or missing factor_scores")
-            return result
-        return self._normalize_matrix(result, raw_codes=self._raw_factor_codes())
-
-    # ── 新闻缓存 ──────────────────────────────────────────
-    _news_cache: list[dict] | None = None
-    _news_buckets: dict | None = None
-    _news_cache_ts: float = 0
-    NEWS_TTL = 120
-
-    def get_news(self) -> list[dict]:
-        """获取缓存新闻（合并视图），120s TTL。"""
-        import time
-        now = time.time()
-        if self._news_cache is not None and (now - self._news_cache_ts) < self.NEWS_TTL:
-            return self._news_cache
-        return []
-
-    def _news_bucket(self, key: str) -> list[dict]:
-        """按分类返回新闻桶；缓存过期或未初始化时懒刷新一次。
-
-        R23 (round24): 懒刷新走 `_refresh_news_buckets_safe`——加锁避免并发刷新，
-        且刷新失败/空桶时回退上次非空桶，杜绝高负载下 headlines/macro/global
-        瞬态返 0。
-        """
-        import time
-        now = time.time()
-        if self._news_buckets is None or (now - self._news_cache_ts) > self.NEWS_TTL:
-            self._refresh_news_buckets_safe()
-        return (self._news_buckets or {}).get(key, [])
-
-    def get_news_headlines(self) -> list[dict]:
-        """财联社头条（分类缓存）。"""
-        return self._news_bucket("headlines")
-
-    async def enrich_news_summaries(self, cap: int = 6) -> int:
-        """Z18/R17 (round24): 为重要新闻生成 AI 摘要并写回缓存。
-
-        Z18: level>=4 或 stars>=4 的重要新闻才生成；LLM 失败静默保留 None；
-        改的是缓存内 dict 引用，write-back 对 get_news_* 立即可见。
-        R17 (round24): 覆盖三桶（headlines/macro/global），不再仅 headlines。
-        round25 R31: 旧实现三桶合并后按重要性取前 cap 条 → headlines 恒占满
-        （macro/global 0 摘要，R17 验收未达）——改为**分桶配额**：
-        headlines=ceil(cap*0.5)、macro=ceil(cap*0.33)、global=剩余
-        （cap=6 → 3/2/1），保证三桶均有摘要覆盖。
-        """
-        try:
-            from ..analysis.llm import generate_news_summary
-        except Exception:
-            return 0
-        # R31: 分桶配额——headlines 最多一半，macro/global 保底
-        import math
-        _head_q = max(1, math.ceil(cap * 0.5))
-        _macro_q = max(1, math.ceil(cap * 0.33)) if cap >= 3 else 0
-        _global_q = max(0, cap - _head_q - _macro_q)
-        quotas = {"headlines": _head_q, "macro": _macro_q, "global": _global_q}
-
-        enriched = 0
-        seen_ids: set = set()
-        for bucket in ("headlines", "macro", "global"):
-            q = quotas.get(bucket, 0)
-            if q <= 0:
-                continue
-            bucket_count = 0
-            for n in self._news_bucket(bucket):
-                if bucket_count >= q:
-                    break
-                # R65 (round28): 仅 LLM 来源跳过——rule 兜底摘要下轮继续重试 LLM
-                # （配额空窗后补跑真摘要）；旧实现 `if n.get("ai_summary")` 把 rule
-                # 摘要当已生成，永不回填 LLM。
-                if n.get("ai_summary") and n.get("ai_summary_source") == "llm":
-                    continue
-                # F28 (round23 P0-A): 按 int 重要性判定（level>=4 或 stars>=4 → 重要）
-                if (int(n.get("stars", 0) or 0) >= 4 or int(n.get("level", 0) or 0) >= 4):
-                    nid = n.get("id") or n.get("title")
-                    if nid in seen_ids:
-                        continue
-                    seen_ids.add(nid)
-                    try:
-                        summary = await generate_news_summary(n.get("title", ""), n.get("content", ""))
-                        if summary:
-                            n["ai_summary"] = summary
-                            n["ai_summary_source"] = "llm"
-                            enriched += 1
-                            bucket_count += 1
-                            continue
-                    except Exception:
-                        pass
-                    # R65 (round28): LLM 失败/配额空窗 → 规则摘要兜底（非 null）。
-                    # 旧实现 except 后直接 continue → 重要条目 ai_summary 恒 null
-                    # （LLM 配额门禁让位主链路 + 无回填，round28 §6 R65）。
-                    # 兜底标注 ai_summary_source="rule"，前端可区分「LLM 生成/规则截取」；
-                    # 下一轮 enrich 仍会重试 LLM（仅 rule 来源允许覆盖，见上方 continue 条件）。
-                    _rule = _rule_news_summary(n)
-                    if _rule:
-                        n["ai_summary"] = _rule
-                        n["ai_summary_source"] = "rule"
-                        enriched += 1
-                        bucket_count += 1
-            logger.debug("[hub] enrich_news_summaries bucket=%s quota=%d done=%d",
-                         bucket, q, bucket_count)
-        return enriched
-
-    def get_news_macro(self) -> list[dict]:
-        """宏观政策新闻（分类缓存）。"""
-        return self._news_bucket("macro")
-
-    def get_news_global(self) -> list[dict]:
-        """国际宏观新闻（分类缓存）。"""
-        return self._news_bucket("global")
-
-    def get_news_stock(self, symbol: str) -> list[dict]:
-        """个股新闻（实时取数，无缓存）。"""
-        try:
-            from ..fetchers.news_fetcher import fetch_stock_news
-            return fetch_stock_news(symbol) or []
-        except Exception as e:
-            logger.warning("[hub] get_news_stock(%s) failed: %s", symbol, e)
-            return []
-
-    def get_akshare_pool_stats(self) -> dict:
-        """akshare 池统计（直接委托）。"""
-        try:
-            from ..fetchers.news_fetcher import get_akshare_pool_stats
-            return get_akshare_pool_stats()
-        except Exception as e:
-            logger.warning("[hub] get_akshare_pool_stats failed: %s", e)
-            return {}
-
-    def refresh_news(self) -> None:
-        """同步刷新新闻分类缓存（headlines/macro/global 分别入桶）。
-
-        R23 (round24): 委托 `_refresh_news_buckets_safe`——加锁 + 失败/空桶回退上次非空。
-        """
-        self._refresh_news_buckets_safe()
-
-    def _refresh_news_buckets_safe(self) -> None:
-        """R23 (round24): 安全刷新新闻桶。
-
-        - 加锁：避免懒刷新与后台任务并发刷新互相踩踏（高负载下瞬态返 0 的根因之一）。
-        - 回退：单个桶抓取失败/空（数据源冷却）时保留上次非空桶，而非整体置空导致
-          该分类瞬态返 0 条。
-        - 失败时：若历史上无任何桶，则保留上次（可能为空的）桶并刷新时间戳，
-          避免立即重试风暴。
-        """
-        import time
-        import threading
-
-        lock = getattr(self, "_news_refresh_lock", None)
-        if lock is None:
-            lock = threading.Lock()
-            self._news_refresh_lock = lock
-        # 非阻塞抢锁：抢不到说明别的协程/任务正在刷新，直接复用当前桶（可能略旧但不为空）
-        if not lock.acquire(blocking=False):
-            return
-        try:
-            prev = self._news_buckets or {}
-            try:
-                from ..fetchers.news_fetcher import (
-                    fetch_news_headlines,
-                    fetch_macro_news,
-                    fetch_global_news,
-                )
-                headlines = fetch_news_headlines() or []
-                macro = fetch_macro_news() or []
-                global_news = fetch_global_news() or []
-                # R23: 空桶回退上次非空，避免数据源冷却时瞬态 0 条
-                merged = {
-                    "headlines": headlines or prev.get("headlines", []),
-                    "macro": macro or prev.get("macro", []),
-                    "global": global_news or prev.get("global", []),
-                }
-                self._news_buckets = merged
-                self._news_cache = merged["headlines"] + merged["macro"] + merged["global"]
-                self._news_cache_ts = time.time()
-                logger.info(
-                    "[hub] refreshed news buckets h=%d m=%d g=%d (fallback h=%d m=%d g=%d)",
-                    len(merged["headlines"]), len(merged["macro"]), len(merged["global"]),
-                    len(prev.get("headlines", [])), len(prev.get("macro", [])),
-                    len(prev.get("global", [])),
-                )
-            except Exception as e:
-                logger.exception("[hub] refresh_news failed: %s", e)
-                # 失败时保留上次非空桶，避免整体置空
-                if self._news_buckets is None:
-                    self._news_buckets = prev
-                self._news_cache_ts = time.time()
-        finally:
-            lock.release()
-
-    # ── Phase 2: sector / fundamental / history aggregation ──
-
-    def get_sector_industry(self, limit: int = 80) -> list[dict]:
-        """行业板块列表（实时取数）。"""
-        try:
-            from ..fetchers.sector_fetcher import fetch_industry_sectors
-            return fetch_industry_sectors(limit) or []
-        except Exception as e:
-            logger.warning("[hub] get_sector_industry failed: %s", e)
-            return []
-
-    def get_sector_concept(self, limit: int = 150) -> list[dict]:
-        """概念板块列表（实时取数）。"""
-        try:
-            from ..fetchers.sector_fetcher import fetch_concept_sectors
-            return fetch_concept_sectors(limit) or []
-        except Exception as e:
-            logger.warning("[hub] get_sector_concept failed: %s", e)
-            return []
-
-    def get_sector_stocks(self, sector_code: str) -> list[dict]:
-        """板块成分股（实时取数）。"""
-        try:
-            from ..fetchers.sector_fetcher import fetch_sector_stocks
-            return fetch_sector_stocks(sector_code) or []
-        except Exception as e:
-            logger.warning("[hub] get_sector_stocks(%s) failed: %s", sector_code, e)
-            return []
-
-    def get_fund_flow(self, symbol: str) -> dict | None:
-        """个股资金流。"""
-        try:
-            from ..fetchers.fundamentals_fetcher import fetch_fund_flow
-            return fetch_fund_flow(symbol)
-        except Exception as e:
-            logger.warning("[hub] get_fund_flow(%s) failed: %s", symbol, e)
-            return None
-
-    def get_hist_avg_volume(self, symbol: str, days: int = 20) -> dict | None:
-        """历史平均成交量。"""
-        try:
-            from ..fetchers.fundamentals_fetcher import fetch_hist_avg_volume
-            return fetch_hist_avg_volume(symbol, days)
-        except Exception as e:
-            logger.warning("[hub] get_hist_avg_volume(%s) failed: %s", symbol, e)
-            return None
-
-    def get_fundamentals(self, symbol: str) -> dict:
-        """基本面数据（Tushare）。"""
-        try:
-            from ..fetchers.fundamentals_fetcher import fetch_fundamentals
-            return fetch_fundamentals(symbol) or {}
-        except Exception as e:
-            logger.warning("[hub] get_fundamentals(%s) failed: %s", symbol, e)
-            return {}
-
-    def get_advance_decline(self) -> float:
-        """涨跌家数比（因子用）。"""
-        try:
-            from ..fetchers.fundamentals_fetcher import fetch_advance_decline_ratio
-            return fetch_advance_decline_ratio()
-        except Exception as e:
-            logger.warning("[hub] get_advance_decline failed: %s", e)
-            return 0.0
-
-
-    # ── Phase 3: realtime / indices / commodities (delegate market_service) ──
-
-    async def get_realtime(self, symbols: list[str], asset_type: str = "A") -> list[dict]:
-        """批量实时行情（委托 market_service.get_realtime_batch）。"""
-        from ..services.market_service import get_realtime_batch
-        return await get_realtime_batch(symbols, asset_type)
-
-    async def get_all_realtime(self) -> list[dict]:
-        """全量实时行情（委托 market_service.get_all_realtime）。"""
-        from ..services.market_service import get_all_realtime
-        return await get_all_realtime()
-
-    async def get_asset_realtime(self, symbol: str, asset_type: str) -> dict | None:
-        """单标的实时行情（委托 market_service.get_asset_realtime）。"""
-        from ..services.market_service import get_asset_realtime
-        return await get_asset_realtime(symbol, asset_type)
-
-    async def get_portfolio_realtime(self) -> list[dict]:
-        """组合实时行情（委托 market_service.get_portfolio_realtime）。"""
-        from ..services.market_service import get_portfolio_realtime
-        return await get_portfolio_realtime()
-
-    async def get_indices(self) -> list[dict]:
-        """全球指数（委托 market_service.get_indices）。"""
-        from ..services.market_service import get_indices
-        return await get_indices()
-
-    async def get_global_indices(self) -> dict[str, list[dict]]:
-        """全球指数分组（委托 market_service.get_global_indices）。"""
-        from ..services.market_service import get_global_indices
-        return await get_global_indices()
-
-    async def get_commodities(self) -> list[dict]:
-        """商品行情（委托 market_service.get_commodities）。"""
-        from ..services.market_service import get_commodities
-        return await get_commodities()
-
-
-    # ── Phase 3b: search / meta / history (delegate market_service) ──
-
-    async def get_market_history(self, symbol: str, asset_type: str = "A", period: str = "daily") -> list[dict]:
-        """历史 K 线（完整 fallback 链，委托 market_service.get_history）。"""
-        from ..services.market_service import get_history as _get_history
-        return await _get_history(symbol, asset_type, period)
-
-    async def search_etf(self, keyword: str) -> list[dict]:
-        """ETF 搜索（委托 market_service.search_etf）。"""
-        from ..services.market_service import search_etf as _search_etf
-        return await _search_etf(keyword)
-
-    async def get_sectors_local(self, sector_type: str) -> list[dict]:
-        """本地板块列表（委托 market_service.get_sectors_local）。"""
-        from ..services.market_service import get_sectors_local as _get
-        return await _get(sector_type)
-
-    async def get_indices_meta(self) -> list[dict]:
-        """指数元数据（委托 market_service.get_indices_meta）。"""
-        from ..services.market_service import get_indices_meta as _get
-        return await _get()
-
-    async def search_indices(self, keyword: str) -> list[dict]:
-        """指数搜索（委托 market_service.search_indices）。"""
-        from ..services.market_service import search_indices as _search
-        return await _search(keyword)
-
-
-    async def get_market_fundamentals(self, symbol: str) -> dict | None:
-        """基本面（market_service 版：返回 {symbol, daily} 结构）。"""
-        from ..services.market_service import get_fundamentals as _get
-        return await _get(symbol)
-
-
-    # ── Phase 5a: remaining fetcher delegates (DoD single-source) ──
-
-    def get_market_wind(self) -> list[dict]:
-        """市场风控（levistock）。"""
-        try:
-            from ..fetchers.levistock_fetcher import fetch_market_wind
-            return fetch_market_wind() or []
-        except Exception as e:
-            logger.warning("[hub] get_market_wind failed: %s", e)
-            return []
-
-    def get_stock_hot_rank(self, limit: int = 50, market: str = "A") -> list[dict]:
-        """热门个股排行（Z25: 补全 volume/turnover/sector）。
-
-        F16→P2-R (round10 §5.6): market=HK 走港股成交额榜；market=US 走东财
-        spot_em 成交额降序 TOP N（美股无涨跌停，成交额榜即"热度"）。
-        """
-        if market and market.upper() == "HK":
-            from ..fetchers.hk_hot_fetcher import get_hk_hot_stocks
-            return get_hk_hot_stocks(limit)
-        if market and market.upper() == "US":
-            try:
-                from ..fetchers.china_market import _fetch_us_spot
-                us_rows = _fetch_us_spot() or []
-                # 按成交额降序（amount 缺失的排到尾），取 TOP N
-                ranked = sorted(
-                    [r for r in us_rows if r.get("amount") is not None],
-                    key=lambda r: -(r.get("amount") or 0),
-                )
-                head = ranked[:limit]
-                if not head:
-                    head = us_rows[:limit]
-                return [
-                    {
-                        "symbol": r.get("symbol"),
-                        "name": r.get("name"),
-                        "price": r.get("price"),
-                        "change_pct": r.get("change_pct"),
-                        "amount": r.get("amount"),
-                        "mcap": r.get("mcap"),
-                        "market": "US",
-                    }
-                    for r in head
-                ]
-            except Exception as e:
-                logger.warning("[hub] get_stock_hot_rank US failed: %s", e)
-                return []
-        try:
-            from ..fetchers.sector_fetcher import fetch_stock_hot_rank
-            rows = fetch_stock_hot_rank(limit) or []
-        except Exception as e:
-            logger.warning("[hub] get_stock_hot_rank failed: %s", e)
-            return []
-        if not rows:
-            return []
-        try:
-            return self._enrich_stock_hot_rank(rows)
-        except Exception as e:
-            logger.warning("[hub] stock_hot_rank enrich failed: %s", e)
-            return rows
-
-    def _enrich_stock_hot_rank(self, rows: list[dict]) -> list[dict]:
-        """Z25: 热门个股补全 volume/turnover（批量行情）+ sector（行业映射）。
-
-        任一补全步骤失败不阻塞主流程，缺失字段留默认值。
-        """
-        codes = [str(r.get("code") or r.get("symbol") or "").strip() for r in rows]
-        codes = [c for c in codes if c]
-        if not codes:
-            return rows
-
-        # 1) volume/turnover via batch realtime
-        batch_map: dict[str, dict] = {}
-        try:
-            from ..fetchers.china_market import fetch_a_stock_batch
-            batch = fetch_a_stock_batch(codes) or []
-            for b in batch:
-                sym = str(b.get("symbol", "")).strip()
-                if sym:
-                    batch_map[sym] = b
-        except Exception as e:
-            logger.warning("[hub] stock_hot_rank batch realtime failed: %s", e)
-
-        # 2) sector via industry map
-        sector_map: dict[str, str] = {}
-        try:
-            from ..fetchers.sector_fetcher import get_stock_industry_map
-            sector_map = get_stock_industry_map(codes) or {}
-        except Exception as e:
-            logger.warning("[hub] stock_hot_rank industry map failed: %s", e)
-
-        out: list[dict] = []
-        for rank, row in enumerate(rows, start=1):
-            code = str(row.get("code") or row.get("symbol") or "").strip()
-            b = batch_map.get(code) or {}
-            item = dict(row)
-            item["rank"] = rank
-            item["symbol"] = code
-            item["volume"] = b.get("volume", item.get("volume", 0))
-            item["turnover"] = b.get("turnover", item.get("turnover", 0))
-            if b:
-                if b.get("price") is not None:
-                    item["price"] = b["price"]
-                if b.get("change_pct") is not None:
-                    item["change_pct"] = b["change_pct"]
-                if b.get("change_amount") is not None:
-                    item["change_amount"] = b["change_amount"]
-            # 批量行情自带 sector 优先，其次行业映射，最后空串
-            item["sector"] = b.get("sector") or sector_map.get(code) or ""
-            item["asset_type"] = "A"
-            # F2-6 步骤A: tag 字符串解析为 concept_tags 数组（前端 chip 展示）
-            item["concept_tags"] = _parse_concept_tags(row.get("tag"))
-            out.append(item)
-        return out
-
-    def get_sector_popular_stocks(self, plate_code: str) -> list[dict]:
-        """板块热门个股。"""
-        try:
-            from ..fetchers.sector_fetcher import fetch_sector_popular_stocks
-            return fetch_sector_popular_stocks(plate_code) or []
-        except Exception as e:
-            logger.warning("[hub] get_sector_popular_stocks(%s) failed: %s", plate_code, e)
-            return []
-
-    def get_all_stocks(self) -> list[dict]:
-        """全市场股票列表。"""
-        try:
-            from ..fetchers.sector_fetcher import fetch_all_stocks
-            return fetch_all_stocks() or []
-        except Exception as e:
-            logger.warning("[hub] get_all_stocks failed: %s", e)
-            return []
-
-    def get_sector_history(self, sector_code: str) -> list[dict]:
-        """板块历史行情。"""
-        try:
-            from ..fetchers.sector_fetcher import fetch_sector_history
-            return fetch_sector_history(sector_code) or []
-        except Exception as e:
-            logger.warning("[hub] get_sector_history(%s) failed: %s", sector_code, e)
-            return []
-
-    def get_sector_industry_cls(self, limit: int = 80) -> list[dict]:
-        """行业板块分类（轮动）。"""
-        try:
-            from ..fetchers.sector_fetcher import fetch_sector_industry_cls
-            return fetch_sector_industry_cls(limit) or []
-        except Exception as e:
-            logger.warning("[hub] get_sector_industry_cls failed: %s", e)
-            return []
-
-    def get_a_stock_batch(self, symbols: list[str]) -> list[dict]:
-        """A 股批量实时行情。"""
-        try:
-            from ..fetchers.china_market import fetch_a_stock_batch
-            return fetch_a_stock_batch(symbols) or []
-        except Exception as e:
-            logger.warning("[hub] get_a_stock_batch failed: %s", e)
-            return []
-
-    def get_fund_nav(self, symbol: str):
-        """基金净值。"""
-        try:
-            from ..fetchers.china_market import fetch_fund_nav
-            return fetch_fund_nav(symbol)
-        except Exception as e:
-            logger.warning("[hub] get_fund_nav(%s) failed: %s", symbol, e)
-            return None
-
-    def get_hk_stock_realtime(self, symbol: str | None = None) -> list[dict]:
-        """港股实时行情。"""
-        try:
-            from ..fetchers.china_market import fetch_hk_stock_realtime
-            return fetch_hk_stock_realtime(symbol) or []
-        except Exception as e:
-            logger.warning("[hub] get_hk_stock_realtime failed: %s", e)
-            return []
-
-    def get_us_etf_realtime(self, symbol: str):
-        """美股 ETF 实时行情。"""
-        try:
-            from ..fetchers.global_markets_fetcher import fetch_us_etf_realtime
-            return fetch_us_etf_realtime(symbol)
-        except Exception as e:
-            logger.warning("[hub] get_us_etf_realtime(%s) failed: %s", symbol, e)
-            return None
-
-    def get_research_reports(self, symbol: str) -> list[dict]:
-        """个股研报。"""
-        try:
-            from ..fetchers.news_fetcher import fetch_research_reports
-            return fetch_research_reports(symbol) or []
-        except Exception as e:
-            logger.warning("[hub] get_research_reports(%s) failed: %s", symbol, e)
-            return []
-
-
-    # ── Phase 5c: US realtime / history (global_markets_fetcher) ──
-
-    def get_us_stock_realtime(self, symbol: str):
-        """美股个股实时（TwelveData 降级链）。"""
-        try:
-            from ..fetchers.global_markets_fetcher import fetch_realtime
-            return fetch_realtime(symbol)
-        except Exception as e:
-            logger.warning("[hub] get_us_stock_realtime(%s) failed: %s", symbol, e)
-            return None
-
-    def get_us_history(self, symbol: str, days: int = 60) -> list[dict]:
-        """美股历史 K 线（TwelveData）。"""
-        try:
-            from ..fetchers.global_markets_fetcher import fetch_history
-            return fetch_history(symbol, days) or []
-        except Exception as e:
-            logger.warning("[hub] get_us_history(%s) failed: %s", symbol, e)
-            return []
-
-    def get_us_candles(self, symbol: str, resolution: str = "D") -> list[dict]:
-        """美股蜡烛图（Finnhub）。"""
-        try:
-            from ..fetchers.global_markets_fetcher import fetch_candles
-            return fetch_candles(symbol, resolution) or []
-        except Exception as e:
-            logger.warning("[hub] get_us_candles(%s) failed: %s", symbol, e)
-            return []
-
 
 
 # Global singleton

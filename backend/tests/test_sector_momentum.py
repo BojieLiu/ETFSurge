@@ -18,6 +18,8 @@ from unittest.mock import patch
 import pytest
 
 from app.services import market_data_hub as mh
+from app.services.hub import _sector as _sector_mod
+from app.services.hub import _snapshot as _snapshot_mod
 
 
 class TestGetSectorMomentumSnapshotFallback:
@@ -28,7 +30,7 @@ class TestGetSectorMomentumSnapshotFallback:
         hub = mh.MarketDataHub()
         hub._sector_momentum_cache = [{"name": "半导体", "change_pct": 2.1}]
         hub._sector_momentum_cache_ts = time.time()
-        monkeypatch.setattr(mh, "_load_latest_snapshot_sync",
+        monkeypatch.setattr(_sector_mod, "_load_latest_snapshot_sync",
                             lambda kind: (_ for _ in ()).throw(AssertionError("不应读快照")))
         out = hub.get_sector_momentum()
         assert len(out) == 1
@@ -40,8 +42,8 @@ class TestGetSectorMomentumSnapshotFallback:
         hub._sector_momentum_cache_ts = 0
         snap = [{"name": "半导体", "change_pct": 2.1},
                 {"name": "券商", "change_pct": 1.4}]
-        monkeypatch.setattr(mh, "market_session", lambda dt=None: "post_market")
-        monkeypatch.setattr(mh, "_load_latest_snapshot_sync", lambda kind: snap)
+        monkeypatch.setattr(_sector_mod, "market_session", lambda dt=None: "post_market")
+        monkeypatch.setattr(_sector_mod, "_load_latest_snapshot_sync", lambda kind: snap)
         out = hub.get_sector_momentum()
         assert len(out) == 2, "盘后快照兜底必须返回非空（R40-a）"
         assert out[0]["name"] == "半导体"
@@ -54,8 +56,8 @@ class TestGetSectorMomentumSnapshotFallback:
         hub._sector_momentum_cache = None
         hub._sector_momentum_cache_ts = 0
         snap = [{"name": "半导体", "change_pct": 2.1}]
-        monkeypatch.setattr(mh, "market_session", lambda dt=None: "open")
-        monkeypatch.setattr(mh, "_load_latest_snapshot_sync", lambda kind: snap)
+        monkeypatch.setattr(_sector_mod, "market_session", lambda dt=None: "open")
+        monkeypatch.setattr(_sector_mod, "_load_latest_snapshot_sync", lambda kind: snap)
         out = hub.get_sector_momentum()
         assert out == [], "盘中缓存失效不得回退快照（避免昨日收盘冒充实时）"
 
@@ -64,8 +66,8 @@ class TestGetSectorMomentumSnapshotFallback:
         hub = mh.MarketDataHub()
         hub._sector_momentum_cache = None
         hub._sector_momentum_cache_ts = 0
-        monkeypatch.setattr(mh, "market_session", lambda dt=None: "post_market")
-        monkeypatch.setattr(mh, "_load_latest_snapshot_sync", lambda kind: None)
+        monkeypatch.setattr(_sector_mod, "market_session", lambda dt=None: "post_market")
+        monkeypatch.setattr(_sector_mod, "_load_latest_snapshot_sync", lambda kind: None)
         out = hub.get_sector_momentum()
         assert out == []
 
@@ -80,11 +82,11 @@ class TestPersistSnapshotAfterRefresh:
         hub._sector_momentum_cache = [{"name": "半导体", "change_pct": 2.1}]
         hub._sector_momentum_cache_ts = time.time()
         calls = []
-        monkeypatch.setattr(mh, "market_session", lambda dt=None: "open")
-        monkeypatch.setattr(mh, "_snapshot_as_of_for", lambda dt=None: "2026-08-14T15:30:00")
+        monkeypatch.setattr(_sector_mod, "market_session", lambda dt=None: "open")
+        monkeypatch.setattr(_snapshot_mod, "_snapshot_as_of_for", lambda dt=None: "2026-08-14T15:30:00")
         def _fake_persist(kind, payload, as_of):
             calls.append((kind, payload, as_of))
-        monkeypatch.setattr(mh, "_persist_snapshot_sync", _fake_persist)
+        monkeypatch.setattr(_snapshot_mod, "_persist_snapshot_sync", _fake_persist)
         await hub._persist_snapshot_after_refresh({})
         kinds = [c[0] for c in calls]
         assert "sector_momentum" in kinds, "盘中非空 sector_momentum 也应落盘（R40-b）"
@@ -97,13 +99,13 @@ class TestPersistSnapshotAfterRefresh:
         hub._sector_momentum_cache = None
         hub._sector_momentum_cache_ts = 0
         calls = []
-        monkeypatch.setattr(mh, "market_session", lambda dt=None: "post_market")
-        monkeypatch.setattr(mh, "_snapshot_as_of_for", lambda dt=None: "2026-08-14T15:30:00")
+        monkeypatch.setattr(_sector_mod, "market_session", lambda dt=None: "post_market")
+        monkeypatch.setattr(_snapshot_mod, "_snapshot_as_of_for", lambda dt=None: "2026-08-14T15:30:00")
         # 防污染：清空磁盘快照兜底，确保「缓存=None + 无快照」即空 []（否则会读到历史快照被误判非空）。
-        monkeypatch.setattr(mh, "_load_latest_snapshot_sync", lambda kind: None)
+        monkeypatch.setattr(_sector_mod, "_load_latest_snapshot_sync", lambda kind: None)
         def _fake_persist(kind, payload, as_of):
             calls.append(kind)
-        monkeypatch.setattr(mh, "_persist_snapshot_sync", _fake_persist)
+        monkeypatch.setattr(_snapshot_mod, "_persist_snapshot_sync", _fake_persist)
         await hub._persist_snapshot_after_refresh({})
         assert "sector_momentum" not in calls, "空 [] 不写快照（防空壳）"
 
@@ -114,11 +116,11 @@ class TestPersistSnapshotAfterRefresh:
         hub._sector_momentum_cache = [{"name": "半导体", "change_pct": 2.1}]
         hub._sector_momentum_cache_ts = time.time()
         calls = []
-        monkeypatch.setattr(mh, "market_session", lambda dt=None: "post_market")
-        monkeypatch.setattr(mh, "_snapshot_as_of_for", lambda dt=None: "2026-08-14T15:30:00")
+        monkeypatch.setattr(_sector_mod, "market_session", lambda dt=None: "post_market")
+        monkeypatch.setattr(_snapshot_mod, "_snapshot_as_of_for", lambda dt=None: "2026-08-14T15:30:00")
         def _fake_persist(kind, payload, as_of):
             calls.append(kind)
-        monkeypatch.setattr(mh, "_persist_snapshot_sync", _fake_persist)
+        monkeypatch.setattr(_snapshot_mod, "_persist_snapshot_sync", _fake_persist)
         await hub._persist_snapshot_after_refresh({"core": [{"symbol": "510300"}]})
         assert set(calls) == {"pool", "sector_momentum"}
 
