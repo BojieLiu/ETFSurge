@@ -1,26 +1,18 @@
-"""Portfolio service facade — re-exports the split ``app.services.portfolio`` package.
+"""Portfolio service package — split from portfolio_service.py (Batch 1).
 
-Batch 1 (Step 1) of the giant-file split: implementations moved into
-``app/services/portfolio/``; this module only re-exports the original symbols so
-every existing ``from app.services.portfolio_service import X`` keeps working
-with zero behavior change. The re-export layer is removed in Batch 5 (Step 3)
-after consumers migrate to the new sub-module paths.
+Each sub-module implements one responsibility cluster. This ``__init__`` re-exports
+every public + private symbol that historically lived in
+``app.services.portfolio_service`` so existing imports keep working unchanged.
+
+Import order matters: ``crud`` lazily imports ``recompute_cost_after_trade`` from
+``allocation`` inside ``update_etf`` to break the crud <-> allocation cycle.
 """
 
-import logging
-
-from app.services.portfolio import (
-    # constants
+from app.services.portfolio.formatting import (
     FACTOR_LABELS,
     _RSI_HINT,
     _KDJ_HINT,
     _CONFIDENCE_ZH,
-    _PRICE_MAP_CACHE,
-    _PRICE_MAP_TTL,
-    _FUNDAMENTALS_CACHE,
-    _strategy_check_cache,
-    _COMPOSITE_FACTOR_MAP,
-    # formatting
     _factor_hint,
     _factor_strength_band,
     format_factor_summary,
@@ -28,28 +20,38 @@ from app.services.portfolio import (
     _has_real_factor_values,
     _normalize_confidence,
     _compute_confidence,
-    # pricing
+)
+from app.services.portfolio.pricing import (
+    _PRICE_MAP_CACHE,
+    _PRICE_MAP_TTL,
+    _FUNDAMENTALS_CACHE,
     build_price_map,
     _build_price_map_async,
     _get_etf_attr,
     _split_symbols,
     _fetch_realtime_price,
     _clear_price_map_cache,
-    # crud
+)
+from app.services.portfolio.crud import (
     list_etfs,
     add_etf,
     update_etf,
     remove_etf,
     _resolve_tracked_index,
     _recompute_target_weight,
-    # allocation
+)
+from app.services.portfolio.allocation import (
     calculate_allocation,
     recompute_cost_after_trade,
     calculate_weight_drift,
-    # pnl
+)
+from app.services.portfolio.pnl import (
     calculate_daily_pnl,
     calculate_cumulative_pnl,
-    # strategy check
+)
+from app.services.portfolio.strategy_check import (
+    _strategy_check_cache,
+    _COMPOSITE_FACTOR_MAP,
     strategy_check,
     _is_failed_result,
     _build_llm_fail_summary,
@@ -66,16 +68,16 @@ from app.services.portfolio import (
     _combine_risk_warnings,
     _compute_risk_warnings,
     _compute_indicators,
-    # design / transfer
-    apply_portfolio_design,
+)
+from app.services.portfolio.design import apply_portfolio_design
+from app.services.portfolio.transfer import (
     export_portfolio,
     import_portfolio,
-    market_data_hub,
 )
-
-logger = logging.getLogger(__name__)
+from app.services.market_data_hub import market_data_hub
 
 __all__ = [
+    # constants
     "FACTOR_LABELS",
     "_RSI_HINT",
     "_KDJ_HINT",
@@ -85,6 +87,7 @@ __all__ = [
     "_FUNDAMENTALS_CACHE",
     "_strategy_check_cache",
     "_COMPOSITE_FACTOR_MAP",
+    # formatting
     "_factor_hint",
     "_factor_strength_band",
     "format_factor_summary",
@@ -92,23 +95,28 @@ __all__ = [
     "_has_real_factor_values",
     "_normalize_confidence",
     "_compute_confidence",
+    # pricing
     "build_price_map",
     "_build_price_map_async",
     "_get_etf_attr",
     "_split_symbols",
     "_fetch_realtime_price",
     "_clear_price_map_cache",
+    # crud
     "list_etfs",
     "add_etf",
     "update_etf",
     "remove_etf",
     "_resolve_tracked_index",
     "_recompute_target_weight",
+    # allocation
     "calculate_allocation",
     "recompute_cost_after_trade",
     "calculate_weight_drift",
+    # pnl
     "calculate_daily_pnl",
     "calculate_cumulative_pnl",
+    # strategy check
     "strategy_check",
     "_is_failed_result",
     "_build_llm_fail_summary",
@@ -125,6 +133,7 @@ __all__ = [
     "_combine_risk_warnings",
     "_compute_risk_warnings",
     "_compute_indicators",
+    # design / transfer
     "apply_portfolio_design",
     "export_portfolio",
     "import_portfolio",
