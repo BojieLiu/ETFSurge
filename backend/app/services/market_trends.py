@@ -20,9 +20,6 @@ import pandas_ta as ta
 
 logger = logging.getLogger(__name__)
 
-_FETCH_TIMEOUT = 30  # seconds
-
-
 # ── 公开接口 ──────────────────────────────────────────────────
 
 async def compute_etf_trends(

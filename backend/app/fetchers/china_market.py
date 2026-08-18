@@ -524,31 +524,6 @@ def _sina_realtime(symbols: list[str], asset_type: str) -> list[dict[str, Any]]:
         return []
 
 
-def _sina_history(symbol: str, period: str = "daily") -> list[dict[str, Any]]:
-    scale = {"daily": "240", "weekly": "1200", "monthly": "7200", "15m": "15", "30m": "30", "1h": "60"}.get(period, "240")
-    try:
-        import json
-        s = _session()
-        s.headers.update({"Referer": "https://finance.sina.com.cn"})
-        pref = _exchange(symbol)
-        url = (f"https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/"
-               f"CN_MarketData.getKLineData?symbol={pref}{symbol}&scale={scale}&datalen=240")
-        r = s.get(url, timeout=15)
-        data = json.loads(r.text)
-        if isinstance(data, list) and data:
-            return [{
-                # 中文 Key（兼容 indicators.py/chart_data）
-                "日期": d["day"], "开盘": float(d["open"]), "最高": float(d["high"]),
-                "最低": float(d["low"]), "收盘": float(d["close"]), "成交量": float(d.get("volume", 0)),
-                # 英文 Key（兼容 factor_registry._fetch_market_data）
-                "day": d["day"], "open": float(d["open"]), "high": float(d["high"]),
-                "low": float(d["low"]), "close": float(d["close"]), "volume": float(d.get("volume", 0)),
-            } for d in data if isinstance(d, dict)]
-    except Exception:
-        pass
-    return []
-
-
 def _sina_history_cb(symbol: str, period: str = "daily") -> list[dict[str, Any]]:
     """P1-6: Circuit-breaker aware Sina history via SourceRegistry."""
     from ..core.source_registry import registry

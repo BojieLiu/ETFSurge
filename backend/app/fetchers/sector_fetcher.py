@@ -13,7 +13,6 @@ from ..core.source_registry import registry
 
 _logger = logging.getLogger(__name__)
 
-_TRY = ["levistock", "akshare"]
 _TIMEOUT = 10
 
 

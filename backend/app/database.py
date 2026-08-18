@@ -15,19 +15,6 @@ def _set_cache(key: str, value: object, ttl_seconds: int = 300) -> None:
     _memory_cache[key] = (value, time.time() + ttl_seconds)
 
 
-def _get_cache(key: str) -> object | None:
-    """Retrieve value from cache. Returns None if missing/expired."""
-    import time
-    entry = _memory_cache.get(key)
-    if entry is None:
-        return None
-    value, expiry = entry
-    if time.time() > expiry:
-        _memory_cache.pop(key, None)
-        return None
-    return value
-
-
 def _clear_cache() -> None:
     """Clear all cached entries."""
     _memory_cache.clear()

@@ -15,9 +15,6 @@ from sqlalchemy import Column, Integer, String, Text, DateTime
 from ..database import Base
 
 
-_SNAPSHOT_KINDS = ("pool", "sector_momentum", "fund_flow")
-
-
 class MarketSnapshot(Base):
     """市场数据快照（T-1 真实数据的 last-good 落盘）。
 

@@ -27,9 +27,6 @@ from ..core.source_registry import registry  # noqa: E402
 # 可观测、可复位，与 A 股板块 sector_fetcher 一致）。原私有 _em_host_health 冷却
 # 计数器删除——SourceHealth 指数退避（60s→120s→…→600s）接管同语义。
 _EM_HOSTS = ("push2.eastmoney.com", EM_PUSH_HOST)
-_EM_FALLBACK_SECONDS = 60
-_EM_FAIL_STREAK = 3
-
 # fltt=2&invt=2：东财 clist/get 不带该参数时 f2（价格）/f3（涨跌幅）返回 ×100 整数
 # （盈富基金 f2=26160/f3=62 实为 26.16 港元/+0.62%）——港股热门个股与板块
 # 热度曾全量 ×100 显示（用户反馈 round9 §7 港股涨跌幅异常），加参数修正语义。

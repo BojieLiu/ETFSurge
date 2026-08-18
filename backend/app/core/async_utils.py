@@ -24,9 +24,6 @@ _shared_executor = concurrent.futures.ThreadPoolExecutor(max_workers=64)
 _long_running_executor = concurrent.futures.ThreadPoolExecutor(max_workers=8)
 
 # 默认 executor 监控（过渡期记录，P1 统一后移除）
-_default_executor_lock = threading.Lock()
-_default_executor_max = 0
-
 # 队列深度峰值计数器 — 累积记录超过 ERROR 阈值的次数
 _queue_depth_spike_count = 0
 _queue_depth_spike_lock = threading.Lock()
@@ -151,19 +148,6 @@ async def safe_call_async(call, *args, timeout: int = DEFAULT_SYNC_TIMEOUT):
             getattr(call, '__name__', str(call)), e,
         )
         return None
-
-
-def _get_default_executor_max() -> int:
-    """获取默认 executor 的最大 worker 数（仅用于过渡期监控）。"""
-    global _default_executor_max
-    try:
-        loop = asyncio.get_event_loop()
-        default_exec = getattr(loop, '_default_executor', None)
-        if default_exec is not None and hasattr(default_exec, '_max_workers'):
-            _default_executor_max = default_exec._max_workers
-    except RuntimeError:
-        pass
-    return _default_executor_max
 
 
 def _executor_stats(executor) -> dict:

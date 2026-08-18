@@ -81,7 +81,7 @@ services:
       # 覆盖 .env 中的 Windows 绝对路径，适配容器内路径
       - DATABASE_URL=sqlite+aiosqlite:////app/data/portfolio.db
       # EM 根因方案 C（宿主代理，2026-08-09）：默认空 = 直连（无代理开发体验不变）；
-      # 启用方式：起宿主机 `python backend/scripts/ipv4_forward_proxy.py 8081` 后
+      # 启用方式：起宿主机任意 IPv4 转发代理到 8081 后
       # 设 `EM_PROXY=http://host.docker.internal:8081` 再 `docker compose up`。
       # 容器内 requests/urllib 走宿主机 IPv4 出口 → 绕过 EM 对容器出口的断连
       # （push2 首个直连请求可通，见 docs/round10-container-rediagnosis.md §10）。

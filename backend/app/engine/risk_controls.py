@@ -89,15 +89,6 @@ def apply_core_bear_growth_trim(
     return allocations
 
 
-def _get_constraints() -> dict[str, float]:
-    """Read current constraint values from RISK_SETTINGS."""
-    return {
-        "max_single_weight": RISK_SETTINGS.max_single_weight,
-        "max_sector_concentration": RISK_SETTINGS.max_sector_concentration,
-        "min_weight": RISK_SETTINGS.min_weight,
-    }
-
-
 def filter_extreme_drawdown(
     strategies: list[dict[str, Any]],
     factor_matrix: dict[str, dict[str, float]] | None = None,

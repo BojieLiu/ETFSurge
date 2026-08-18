@@ -475,19 +475,6 @@ def _fetch_szse() -> float | None:
         return None
 
 
-def _fetch_szse_sync() -> float | None:
-    """Synchronous version for direct calls without thread pool."""
-    try:
-        import akshare as ak
-        df = ak.stock_margin_szse()
-        if df is not None and not df.empty:
-            return float(df['融资余额'].iloc[-1])
-        return None
-    except Exception as exc:
-        logger.warning("[margin_fetcher] SZSE akshare sync failed: %s", exc)
-        return None
-
-
 # ── SSE ────────────────────────────────────────────────────────────
 
 def _fetch_sse() -> float | None:
@@ -508,19 +495,6 @@ def _fetch_sse() -> float | None:
         return result
     except Exception as exc:
         logger.warning("[margin_fetcher] SSE akshare failed: %s", exc)
-        return None
-
-
-def _fetch_sse_sync() -> float | None:
-    """Synchronous version for direct calls without thread pool."""
-    try:
-        import akshare as ak
-        df = ak.stock_margin_sse()
-        if df is not None and not df.empty:
-            return float(df['融资余额'].iloc[-1])
-        return None
-    except Exception as exc:
-        logger.warning("[margin_fetcher] SSE akshare sync failed: %s", exc)
         return None
 
 

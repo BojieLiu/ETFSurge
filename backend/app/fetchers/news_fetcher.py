@@ -30,8 +30,6 @@ from ..services.cache_service import cached
 from ..core.async_utils import run_in_thread, safe_call
 from .levistock_fetcher import classify_news, classify_news_category, classify_news_level, fetch_cailian_telegraph
 
-_SRC_TIMEOUT = 5
-
 # HTTP session reuse: avoid SSL handshake overhead on every request
 _http_session = requests.Session()
 _http_session.headers.update({
