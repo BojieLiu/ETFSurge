@@ -2,7 +2,13 @@
  * F22/F23 (round23 P0-A): 资讯分级双维度——category(极性, 着色) + level(重要性, 推送/筛选)。
  */
 import { describe, it, expect } from 'vitest'
-import { mapNewsCategory, categoryColor, categoryColorClass, isImportant } from '../utils/newsLevel'
+import {
+  mapNewsCategory,
+  categoryColor,
+  categoryColorClass,
+  mapNewsLevel,
+  isImportant,
+} from '../utils/newsLevel'
 
 describe('newsLevel — F22 category/level 双维度', () => {
   it('利空/风险/利好 均可 importance>=4 进重要推送（不再只推利好）', () => {
@@ -20,5 +26,26 @@ describe('newsLevel — F22 category/level 双维度', () => {
 
   it('category 缺失时回退 level 语义', () => {
     expect(mapNewsCategory(null, 5).label).toBeTruthy()
+  })
+})
+
+describe('mapNewsLevel (level -> {color, stars})', () => {
+  it('maps level >= 4 to red + 4 stars (重要)', () => {
+    expect(mapNewsLevel(4)).toEqual({ color: 'red', stars: '★★★★', label: '重要' })
+    expect(mapNewsLevel(5)).toEqual({ color: 'red', stars: '★★★★', label: '重要' })
+  })
+
+  it('maps level 3 to orange + 3 stars (关注)', () => {
+    expect(mapNewsLevel(3)).toEqual({ color: 'orange', stars: '★★★', label: '关注' })
+  })
+
+  it('maps level 2 to blue + 2 stars (一般)', () => {
+    expect(mapNewsLevel(2)).toEqual({ color: 'blue', stars: '★★', label: '一般' })
+  })
+
+  it('maps level 1 (and 0/garbage) to gray + 1 star (普通)', () => {
+    expect(mapNewsLevel(1)).toEqual({ color: 'gray', stars: '★', label: '普通' })
+    expect(mapNewsLevel(0)).toEqual({ color: 'gray', stars: '★', label: '普通' })
+    expect(mapNewsLevel('oops')).toEqual({ color: 'gray', stars: '★', label: '普通' })
   })
 })
