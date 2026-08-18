@@ -36,7 +36,7 @@ async def test_symbol_analysis_stream_resolves_chinese_name(monkeypatch):
         return {}
 
     async def fake_stream(prompt, **kwargs):
-        yield "data: ok"
+        yield {"event": "done", "data": {"full_text": "ok", "usage": {}}}
 
     agent = AsyncMock()
     agent.run_stream = fake_stream
@@ -51,7 +51,9 @@ async def test_symbol_analysis_stream_resolves_chinese_name(monkeypatch):
         resp = await anmod.symbol_analysis_stream(
             anmod.SymbolAnalysisRequest(symbol="沪深300ETF", name="沪深300ETF", asset_type="A", market="A")
         )
-        assert isinstance(resp, StreamingResponse)
+        # R49: 兜底解析发生在 body_iterator 消费期间——先消费再断言
+        async for _chunk in resp.body_iterator:
+            pass
         mock_resolve.assert_awaited_once_with("沪深300ETF", "A")
     # 兜底后第二次取数用解析出的代码
     assert captured["called_with"] == ("510300", "A")

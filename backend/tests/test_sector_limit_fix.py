@@ -76,7 +76,11 @@ async def test_sector_analysis_semiconductor_beyond_200(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_sector_analysis_still_404_for_unknown(monkeypatch):
-    """真实不存在的板块代码仍应 404（回归防护）。"""
+    """真实不存在的板块代码仍应失败（回归防护）。
+
+    R49: 板块 404 预检延后到流式消费时 → 转为 SSE `event: error`（DATA_UNAVAILABLE），
+    不再抛 HTTPException（HTTP 仍 200，前端 useLLMStream 按 error 事件显示）。
+    """
     from app.routers import analysis as an
     from app.services import market_data_hub as mdh
 
@@ -86,10 +90,19 @@ async def test_sector_analysis_still_404_for_unknown(monkeypatch):
     monkeypatch.setattr(mdh.market_data_hub, "get_sector_stocks", lambda code: [])
     monkeypatch.setattr(mdh.market_data_hub, "get_news_headlines", lambda: [])
 
-    from fastapi import HTTPException
     req = an.SectorAnalysisRequest(
         sector_code="BK9999", sector_type="industry", sector_name="不存在的板块", market="A",
     )
-    with pytest.raises(HTTPException) as exc_info:
-        await an.sector_analysis_stream(req)
-    assert exc_info.value.status_code == 404
+    response = await an.sector_analysis_stream(req)
+    text = await _collect_sse(response)
+    assert "event: error" in text, f"板块未收录应返回 SSE error 事件，实际: {text[:200]!r}"
+    assert "DATA_UNAVAILABLE" in text, f"板块 404 应转 DATA_UNAVAILABLE，实际: {text[:200]!r}"
+    # 错误 message 经 JSON 转义（中文为 \uXXXX）——解析 error 事件 data 行断言原文案
+    _msg = ""
+    for _block in text.split("\n\n"):
+        _lines = _block.split("\n")
+        _ev = next((l[len("event: "):] for l in _lines if l.startswith("event: ")), "")
+        _dl = next((l[len("data: "):] for l in _lines if l.startswith("data: ")), "")
+        if _ev == "error" and _dl:
+            _msg = json.loads(_dl).get("message", "")
+    assert _msg and "板块「BK9999」数据源暂无数据" in _msg, f"error 文案应含板块代码，实际: {_msg[:120]!r}"

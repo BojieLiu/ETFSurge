@@ -16,7 +16,7 @@ class TestSectorPromptAnnotation:
     def test_sector_prompt_annotates_index_point(self):
         """prompt 首段含「板块指数（BKxxxx，东财板块行情）点位」显式口径。"""
         src = inspect.getsource(analysis_router.sector_analysis_stream)
-        assert "板块指数（{sector_code}，东财板块行情）" in src
+        assert "板块指数（{resolved_code}，东财板块行情）" in src
         assert "点位为" in src
         assert "非成分股均价" in src
         assert "亦非沪深大盘指数" in src

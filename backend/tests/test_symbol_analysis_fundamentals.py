@@ -34,9 +34,11 @@ def _make_prompt_capture():
 
     def _fake_agent(name):
         class _A:
-            def run_stream(self, prompt, **kwargs):
+            async def run_stream(self, prompt, **kwargs):
+                # R49: 重 I/O 延后到流式消费时执行——mock 须为 async generator，
+                # 且 prompt 捕获发生在 body_iterator 消费期间（先 _collect 再断言）。
                 captured["prompt"] = prompt
-                return iter([])
+                yield {"event": "done", "data": {"full_text": "ok", "usage": {}}}
         return _A()
 
     return captured, _fake_agent
@@ -69,7 +71,8 @@ async def test_asset_type_stock_normalized_to_a(monkeypatch):
         return None
     monkeypatch.setattr("app.routers.analysis.asyncio.to_thread", _no_fund)
 
-    await ar.symbol_analysis_stream(_FakeReq(asset_type="stock"))
+    resp = await ar.symbol_analysis_stream(_FakeReq(asset_type="stock"))
+    await _collect(resp)
     assert history_calls and history_calls[0] == ("600519", "A"), \
         f"get_history 应收到归一化 ('600519','A')，实际 {history_calls}"
 
@@ -100,7 +103,8 @@ async def test_history_retry_with_a_when_asset_type_fails(monkeypatch):
         return None
     monkeypatch.setattr("app.routers.analysis.asyncio.to_thread", _no_fund)
 
-    await ar.symbol_analysis_stream(_FakeReq(asset_type="HK"))
+    resp = await ar.symbol_analysis_stream(_FakeReq(asset_type="HK"))
+    await _collect(resp)
     assert ("600519", "A") in history_calls, f"应触发 A 重试，实际 {history_calls}"
 
 
@@ -127,7 +131,8 @@ async def test_fundamentals_injected_into_prompt(monkeypatch):
     monkeypatch.setattr(ar, "get_agent", fake_agent)
     monkeypatch.setattr("app.routers.analysis.asyncio.to_thread", _fake_to_thread)
 
-    await ar.symbol_analysis_stream(_FakeReq(asset_type="A"))
+    resp = await ar.symbol_analysis_stream(_FakeReq(asset_type="A"))
+    await _collect(resp)
     assert "基本面(PE/PB估值)" in captured["prompt"]
     assert "pe_ttm" in captured["prompt"] and "28.5" in captured["prompt"]
 
@@ -155,7 +160,8 @@ async def test_fundamentals_unavailable_marked(monkeypatch):
     monkeypatch.setattr(ar, "get_agent", fake_agent)
     monkeypatch.setattr("app.routers.analysis.asyncio.to_thread", _fake_to_thread)
 
-    await ar.symbol_analysis_stream(_FakeReq(asset_type="A"))
+    resp = await ar.symbol_analysis_stream(_FakeReq(asset_type="A"))
+    await _collect(resp)
     assert "基本面(PE/PB估值)" in captured["prompt"]
     assert "数据源不可用" in captured["prompt"]
 
@@ -189,7 +195,8 @@ async def test_stock_news_preferred_over_headlines(monkeypatch):
     monkeypatch.setattr(ar, "get_agent", fake_agent)
     monkeypatch.setattr("app.routers.analysis.asyncio.to_thread", _fake_to_thread)
 
-    await ar.symbol_analysis_stream(_FakeReq(asset_type="A", symbol="002131", name="利欧股份"))
+    resp = await ar.symbol_analysis_stream(_FakeReq(asset_type="A", symbol="002131", name="利欧股份"))
+    await _collect(resp)
     assert "利欧股份获得新订单" in captured["prompt"]
     assert "某无关股票涨停" not in captured["prompt"]
 
@@ -224,7 +231,8 @@ async def test_sector_snapshot_injected_into_prompt(monkeypatch):
     monkeypatch.setattr(ar, "get_agent", fake_agent)
     monkeypatch.setattr("app.routers.analysis.asyncio.to_thread", _fake_to_thread)
 
-    await ar.symbol_analysis_stream(_FakeReq(asset_type="A"))
+    resp = await ar.symbol_analysis_stream(_FakeReq(asset_type="A"))
+    await _collect(resp)
     assert "所属板块：白酒" in captured["prompt"]
     assert "main_inflow" in captured["prompt"]
     assert "3.0e+07" in captured["prompt"] or "30000000.0" in captured["prompt"]
@@ -256,7 +264,8 @@ async def test_sector_snapshot_missing_silently_skipped(monkeypatch):
     monkeypatch.setattr(ar, "get_agent", fake_agent)
     monkeypatch.setattr("app.routers.analysis.asyncio.to_thread", _fake_to_thread)
 
-    await ar.symbol_analysis_stream(_FakeReq(asset_type="A"))
+    resp = await ar.symbol_analysis_stream(_FakeReq(asset_type="A"))
+    await _collect(resp)
     assert "所属板块" not in captured["prompt"]
     assert "基本面(PE/PB估值)" in captured["prompt"]
 

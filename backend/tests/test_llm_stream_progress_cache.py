@@ -34,7 +34,10 @@ async def test_progress_event_before_first_token():
 
     from app.routers.analysis import _sse_stream
 
-    resp = _sse_stream(slow_agent_stream("p"))
+    async def _factory():
+        return slow_agent_stream("p")
+
+    resp = _sse_stream(_factory)
     events = []
     async for chunk in resp.body_iterator:
         if not isinstance(chunk, str):
@@ -46,6 +49,36 @@ async def test_progress_event_before_first_token():
     assert events[0] == "progress", f"首事件应为 progress，实际 {events}"
     assert "token" in events, "应存在 token 事件"
     assert events.index("progress") < events.index("token"), "progress 必须早于首个 token"
+
+
+@pytest.mark.asyncio
+async def test_progress_before_prefetch_io():
+    """R49: 重 I/O（上下文采集/取数）在 factory 内、首字节(progress) 之后发生——
+    即便采集很慢，首 SSE 事件仍是 progress（反假：禁止重 I/O 阻塞首字节）。
+
+    实现契约：_sse_stream(agent_gen_factory) 先 yield progress，再 await factory；
+    若 factory 在返回 agent 生成器前 sleep，first_byte 不应被该 sleep 阻塞。
+    """
+    async def slow_factory():
+        await asyncio.sleep(0.2)  # 模拟 build_full_context / 历史 K 线取数等重 I/O
+        async def agent_gen():
+            yield {"event": "token", "data": {"token": "结"}}
+            yield {"event": "done", "data": {"full_text": "分析结果", "usage": {}}}
+        return agent_gen()
+
+    from app.routers.analysis import _sse_stream
+
+    resp = _sse_stream(slow_factory)
+    events = []
+    async for chunk in resp.body_iterator:
+        if not isinstance(chunk, str):
+            chunk = chunk.decode("utf-8", errors="replace")
+        for line in chunk.split("\n"):
+            if line.startswith("event: "):
+                events.append(line[len("event: "):].strip())
+
+    assert events[0] == "progress", f"首事件应为 progress（未被重 I/O 阻塞），实际 {events}"
+    assert "token" in events and "done" in events
 
 
 @pytest.mark.asyncio

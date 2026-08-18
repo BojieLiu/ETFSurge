@@ -112,8 +112,14 @@ def test_sector_prompt_no_dunhao():
 
 
 def test_sector_404_not_wrapped_as_502():
-    """R41: except 先 re-raise HTTPException——404 不被包装成 502。"""
+    """R41 延续: 板块 404 由 _sse_stream 统一转为 DATA_UNAVAILABLE error 事件（不包装成 502）。
+
+    R49 重构后 sector_analysis_stream 不再直接抛 HTTPException（重 I/O 延后到
+    流式消费），404 → SSE `event: error` 的转换落在 _sse_stream 内——守卫该转换：
+    except HTTPException 分支必须产出 DATA_UNAVAILABLE（404）而非 STREAM_ERROR。
+    """
     import inspect
-    body = inspect.getsource(analysis_router.sector_analysis_stream)
-    assert "except HTTPException:" in body
-    assert "raise" in body.split("except HTTPException:")[1].split("except Exception")[0]
+    src = inspect.getsource(analysis_router._sse_stream)
+    assert "except HTTPException" in src, "_sse_stream 应捕获预检 HTTPException"
+    segment = src.split("except HTTPException")[1].split("except Exception")[0]
+    assert "DATA_UNAVAILABLE" in segment, "404 应转 DATA_UNAVAILABLE，不得包装成 502/STREAM_ERROR"

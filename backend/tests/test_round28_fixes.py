@@ -573,12 +573,18 @@ class TestR60SymbolAnalysisKlineFallback:
 
         def _fake_agent(name):
             class _A:
-                def run_stream(self, prompt, **kwargs):
+                async def run_stream(self, prompt, **kwargs):
+                    # R49: prompt 捕获发生在 body_iterator 消费期间（async generator）
                     captured["prompt"] = prompt
-                    return iter([])
+                    yield {"event": "done", "data": {"full_text": "ok", "usage": {}}}
             return _A()
 
         return captured, _fake_agent
+
+    @staticmethod
+    async def _collect(resp):
+        async for chunk in resp.body_iterator:
+            pass
 
     @pytest.mark.asyncio
     async def test_history_empty_falls_back_to_hub_kline_cache(self, monkeypatch):
@@ -611,7 +617,8 @@ class TestR60SymbolAnalysisKlineFallback:
         monkeypatch.setattr(ar, "get_agent", fake_agent)
         monkeypatch.setattr("app.routers.analysis.asyncio.to_thread", lambda *a, **k: None)
 
-        await ar.symbol_analysis_stream(self._fake_req())
+        resp = await ar.symbol_analysis_stream(self._fake_req())
+        await self._collect(resp)
         assert "历史K线" in captured["prompt"]
         assert "2026-08-15" in captured["prompt"], "prompt 应含 Hub 缓存 K 线（不得「K线为空」）"
         assert "技术指标" in captured["prompt"] and "rsi" in captured["prompt"]
@@ -639,6 +646,7 @@ class TestR60SymbolAnalysisKlineFallback:
         monkeypatch.setattr(ar, "get_agent", fake_agent)
         monkeypatch.setattr("app.routers.analysis.asyncio.to_thread", lambda *a, **k: None)
 
-        await ar.symbol_analysis_stream(self._fake_req())
+        resp = await ar.symbol_analysis_stream(self._fake_req())
+        await self._collect(resp)
         assert "历史K线(最近30条)：无" in captured["prompt"], \
             "两源均空时应诚实标注「无」，不得伪造 K 线"

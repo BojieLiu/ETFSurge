@@ -620,7 +620,10 @@ def run_stream_with_cache(
             yield ev
             if ev.get("event") == "done":
                 full = "".join(chunks)
-                put_cached_report(query, data_as_of, prompt, full, ev.get("data", {}).get("usage", {}))
+                # 空文不缓存：agent 若 done 前未产任何 token（异常路径/mock），
+                # 缓存空文本会毒化 8h 窗口内同 (query, prompt) 请求（空报告）。
+                if full:
+                    put_cached_report(query, data_as_of, prompt, full, ev.get("data", {}).get("usage", {}))
 
     return _wrap_stream()
 

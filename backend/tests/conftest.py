@@ -90,6 +90,13 @@ async def _clear_sync_memory_cache():
     # test_factor_ic_sample_count 的 sample_count 取到泄漏的 mock 值而非 patch 值）。
     _factors_router._db_ic_sample_counts = _ORIG_DB_IC_SAMPLE_COUNTS
     _factors_router._db_ic_series_stats = _ORIG_DB_IC_SERIES_STATS
+    # R49 (round28): _REPORT_CACHE（llm.py 交易日内结果缓存）为模块级单例——测试
+    # 消费流式 body 后 _wrap_stream 的 done 会写入缓存（key=query+prompt 指纹），
+    # 前序测试的同 prompt 条目会被后序测试命中 → agent 被跳过 → prompt 未捕获。
+    # 每测试前后清理，保证流式端点测试隔离。
+    from app.analysis.llm import _REPORT_CACHE as _rc, _REPORT_CACHE_LOCK as _rc_lock
+    with _rc_lock:
+        _rc.clear()
     # 复位 market_data_hub 可变缓存（池 / 因子矩阵 / 市态 / K 线 / 资讯 / 情绪）。
     # 前序测试填充 _pool 后，get_factor_matrix() 返回非空 →
     # _full_pool_factor_composite 用真实池截面 z 覆盖 strategy_check 的 patch 因子分
@@ -131,6 +138,13 @@ async def _clear_sync_memory_cache():
     _ps._strategy_check_cache.clear()
     _factors_router._db_ic_sample_counts = _ORIG_DB_IC_SAMPLE_COUNTS
     _factors_router._db_ic_series_stats = _ORIG_DB_IC_SERIES_STATS
+    # R49 (round28): _REPORT_CACHE（llm.py 交易日内结果缓存）为模块级单例——测试
+    # 消费流式 body 后 _wrap_stream 的 done 会写入缓存（key=query+prompt 指纹），
+    # 前序测试的同 prompt 条目会被后序测试命中 → agent 被跳过 → prompt 未捕获。
+    # 每测试前后清理，保证流式端点测试隔离。
+    from app.analysis.llm import _REPORT_CACHE as _rc, _REPORT_CACHE_LOCK as _rc_lock
+    with _rc_lock:
+        _rc.clear()
     _h = _HUB_MOD
     _h._pool = {layer: [] for layer in _ALL_LAYERS_MOD}
     _h._by_code = {}

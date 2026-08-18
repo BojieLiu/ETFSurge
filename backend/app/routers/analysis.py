@@ -32,12 +32,34 @@ router = APIRouter(prefix="/api/v1/analysis", tags=["analysis"])
 
 FETCH_TIMEOUT = 45
 
-def _sse_stream(agent_generator):
+class _SSEPreError(Exception):
+    """R49: 预取数/预检失败，在流式首字节之后以 SSE error 事件透传（与 R21 一致）。
+
+    用于在 agent_gen_factory 内表达「数据源暂不可用」等非流式前置错误，
+    由 event_generator 捕获后转为 ``event: error``（而非抛出 HTTPException 中断连接）。
+    """
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+def _sse_stream(agent_gen_factory):
     """Convert AgentRuntime async generator to SSE StreamingResponse.
-    R49: 首字节（first_byte 34-78s）前先发「正在调用模型」progress 事件，避免空白 spinner。
+
+    R49: 首字节即时返回 ``event: progress``（"正在调用模型"），所有重 I/O
+    （上下文采集 / 历史 K 线 / 指标计算 / 取数）与 LLM 调用延后到首字节之后，
+    在 ``agent_gen_factory`` 内发生——确保首字节不受上游延迟影响（旧实现首字节
+    26-111s，空白 spinner）。
+
+    ``agent_gen_factory``: 0 参 async 函数，返回 agent 的 async generator
+    （其内部完成重 I/O 并调用 run_stream_with_cache）。
+    若 factory 抛 ``HTTPException`` / ``_SSEPreError`` → 转为 SSE error 事件（保留文案）；
+    其余异常 → STREAM_ERROR 事件。
     """
     async def event_generator():
-        # R49: 首字节前的可见进度（非空白 spinner）——前端据此渲染进度条
+        # 首字节：可见进度（非空白 spinner）——前端据此渲染进度条
         yield (
             'event: progress\n'
             'data: ' + json.dumps({
@@ -45,6 +67,21 @@ def _sse_stream(agent_generator):
                 'message': '正在调用模型生成分析，请稍候…',
             }) + '\n\n'
         )
+        # 重 I/O + LLM 调用：首字节之后发生，first_byte 不受其阻塞
+        try:
+            agent_generator = await agent_gen_factory()
+        except _SSEPreError as e:
+            yield f"event: error\ndata: {json.dumps({'code': e.code, 'message': e.message})}\n\n"
+            return
+        except HTTPException as he:
+            # 预检失败（如板块未收录）→ 转为 DATA_UNAVAILABLE error 事件，保留原 detail
+            code = 'DATA_UNAVAILABLE' if he.status_code == 404 else 'STREAM_ERROR'
+            yield f"event: error\ndata: {json.dumps({'code': code, 'message': he.detail})}\n\n"
+            return
+        except Exception as e:
+            logger.exception("[sse] 流式前置采集失败")
+            yield f"event: error\ndata: {json.dumps({'code': 'STREAM_ERROR', 'message': str(e)})}\n\n"
+            return
         async for item in agent_generator:
             event = item.get("event")
             data = item.get("data")
@@ -63,18 +100,6 @@ def _sse_stream(agent_generator):
                 yield f"event: progress\ndata: {json.dumps({'phase': data.get('phase'), 'message': data.get('message', '')})}\n\n"
     return StreamingResponse(
         event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        }
-    )
-
-def _sse_error(message: str):
-    """R21: 结构化 SSE error 事件——前端 useLLMStream 抛错走 catch 显示。"""
-    return StreamingResponse(
-        iter([f"event: error\ndata: {json.dumps({'code': 'DATA_UNAVAILABLE', 'message': message})}\n\n"]),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -273,79 +298,83 @@ async def news_impact(req: NewsImpactRequest):
 
 @router.post("/llm-report/stream")
 async def llm_report_stream(req: LLMReportRequest):
-    """流式市场研判报告 — 使用统一上下文管道 (Phase 2.9)。"""
+    """流式市场研判报告 — 使用统一上下文管道 (Phase 2.9)。
+
+    R49: 上下文采集 / 历史 K 线 / 指标计算等重 I/O 全部延后到流式首字节
+    （event: progress）之后，在 _build 工厂内完成，确保首字节即时可见进度。
+    """
     from ..services.market_data_hub import market_data_hub
     from ..services.llm_context import build_full_context
 
-    # 使用统一上下文管道采集数据
-    ctx = await build_full_context(
-        market_data_hub,
-        market=req.market,  # Z31: 按 marketTab 采集对应市场数据
-        include_regime=True,
-        include_sentiment=True,
-        include_indices=True,
-        include_sectors=True,
-        include_news=True,
-        include_portfolio=False,
-        include_fund_flow=False,
-        include_commodities=True,
-    )
+    async def _build():
+        # 使用统一上下文管道采集数据
+        ctx = await build_full_context(
+            market_data_hub,
+            market=req.market,  # Z31: 按 marketTab 采集对应市场数据
+            include_regime=True,
+            include_sentiment=True,
+            include_indices=True,
+            include_sectors=True,
+            include_news=True,
+            include_portfolio=False,
+            include_fund_flow=False,
+            include_commodities=True,
+        )
 
-    regime = ctx.get("market_regime", "")
-    sentiment = ctx.get("market_sentiment", {})
-    market_data = ctx.get("market_data", [])
-    indices = ctx.get("index_realtime", [])
-    commodities = ctx.get("commodities", [])
-    all_news = ctx.get("news", [])
+        regime = ctx.get("market_regime", "")
+        sentiment = ctx.get("market_sentiment", {})
+        market_data = ctx.get("market_data", [])
+        indices = ctx.get("index_realtime", [])
+        commodities = ctx.get("commodities", [])
+        all_news = ctx.get("news", [])
 
-    # Phase 5.1: 使用 MarketContext 按市场过滤主要标的
-    from app.core.market_context import resolve_market_context
+        # Phase 5.1: 使用 MarketContext 按市场过滤主要标的
+        from app.core.market_context import resolve_market_context
 
-    market_ctx = resolve_market_context(req.market)
-    if req.symbols:
-        market_data = [m for m in market_data if m.get("symbol") in req.symbols]
-    else:
-        # N04/U9: 只保留本市场 major_symbols + 本市场指数（旧 `asset_type in
-        # ("index","futures")` 无差别放行 A 股指数 → HK/US 报告混入 A 股数据）
-        market_data = [
-            m for m in market_data
-            if m.get("symbol", "") in market_ctx.major_symbols
-            or (
-                m.get("asset_type", "") in ("index", "futures")
-                and m.get("symbol", "") in market_ctx.index_symbols
-            )
-        ]
+        market_ctx = resolve_market_context(req.market)
+        if req.symbols:
+            market_data = [m for m in market_data if m.get("symbol") in req.symbols]
+        else:
+            # N04/U9: 只保留本市场 major_symbols + 本市场指数（旧 `asset_type in
+            # ("index","futures")` 无差别放行 A 股指数 → HK/US 报告混入 A 股数据）
+            market_data = [
+                m for m in market_data
+                if m.get("symbol", "") in market_ctx.major_symbols
+                or (
+                    m.get("asset_type", "") in ("index", "futures")
+                    and m.get("symbol", "") in market_ctx.index_symbols
+                )
+            ]
 
-    # P0-2 (R4-13 / N04 补全): indices/commodities 同样按市场过滤（对齐 llm_report）
-    indices = _filter_indices_for_market(market_ctx, indices)
-    commodities = _filter_commodities_for_market(market_ctx, commodities)
+        # P0-2 (R4-13 / N04 补全): indices/commodities 同样按市场过滤（对齐 llm_report）
+        indices = _filter_indices_for_market(market_ctx, indices)
+        commodities = _filter_commodities_for_market(market_ctx, commodities)
 
-    indicators = {}
-    for item in market_data[:5]:
-        if item.get("asset_type") in ("index", "futures"):
-            continue
-        try:
-            hist = await asyncio.wait_for(get_history(item["symbol"], item["asset_type"]), timeout=30)
-            ind = compute_all_indicators(hist) if hist else {}
-            if ind:
-                indicators[item["symbol"]] = ind
-        except Exception:
-            continue
+        indicators = {}
+        for item in market_data[:5]:
+            if item.get("asset_type") in ("index", "futures"):
+                continue
+            try:
+                hist = await asyncio.wait_for(get_history(item["symbol"], item["asset_type"]), timeout=30)
+                ind = compute_all_indicators(hist) if hist else {}
+                if ind:
+                    indicators[item["symbol"]] = ind
+            except Exception:
+                continue
 
-    # 注入编排器的市场状态和情绪数据
-    enriched_news = all_news
-    if regime or sentiment:
-        context = []
-        if regime:
-            context.append(f"市场状态: {regime}")
-        if sentiment and isinstance(sentiment, dict):
-            s_idx = sentiment.get("sentiment_index", "")
-            s_lbl = sentiment.get("sentiment_label", "")
-            context.append(f"市场情绪: {s_lbl} ({s_idx}/100)" if s_idx else f"市场情绪: {s_lbl}")
-        if context:
-            enriched_news = [{"title": "【市场背景】" + " | ".join(context)}] + all_news
+        # 注入编排器的市场状态和情绪数据
+        enriched_news = all_news
+        if regime or sentiment:
+            context = []
+            if regime:
+                context.append(f"市场状态: {regime}")
+            if sentiment and isinstance(sentiment, dict):
+                s_idx = sentiment.get("sentiment_index", "")
+                s_lbl = sentiment.get("sentiment_label", "")
+                context.append(f"市场情绪: {s_lbl} ({s_idx}/100)" if s_idx else f"市场情绪: {s_lbl}")
+            if context:
+                enriched_news = [{"title": "【市场背景】" + " | ".join(context)}] + all_news
 
-    try:
         # Phase E(2): True streaming — 使用 agent.run_stream 实时推送 LLM token
         # P1-5 (R4-23): 采集海外流动性（FRED）注入 prompt；失败静默不注入
         _gl = None
@@ -357,67 +386,68 @@ async def llm_report_stream(req: LLMReportRequest):
         prompt = _build_report_prompt(indices, commodities, market_data, indicators,
                                       enriched_news, [], global_liquidity=_gl)
         agent = get_agent("market_report")
-        return _sse_stream(run_stream_with_cache(agent, prompt, query="market_report", data_as_of=None))
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"LLM streaming failed: {e}")
+        return run_stream_with_cache(agent, prompt, query="market_report", data_as_of=None)
+
+    return _sse_stream(_build)
 
 @router.post("/llm-advice/stream")
 async def llm_advice_stream(req: LLMAdviceRequest):
     """流式投资建议问答 — 使用统一上下文管道 (Phase 2.9)。
 
     Phase D(1): 新增 market 参数，传递给 build_full_context() 按市场获取数据。
+    R49: 上下文采集等重 I/O 延后到首字节（progress）之后在 _build 内完成。
     """
     from ..services.market_data_hub import market_data_hub
     from ..services.llm_context import build_full_context
     from ..analysis.llm import _build_advice_stream_prompt
 
-    # 使用统一上下文管道（按市场获取数据）
-    ctx = await build_full_context(
-        market_data_hub,
-        market=req.market,
-        include_regime=True,
-        include_sentiment=True,
-        include_indices=True,
-        include_sectors=True,
-        include_news=True,
-        include_portfolio=False,
-        include_fund_flow=True,
-        include_commodities=False,
-    )
+    async def _build():
+        # 使用统一上下文管道（按市场获取数据）
+        ctx = await build_full_context(
+            market_data_hub,
+            market=req.market,
+            include_regime=True,
+            include_sentiment=True,
+            include_indices=True,
+            include_sectors=True,
+            include_news=True,
+            include_portfolio=False,
+            include_fund_flow=True,
+            include_commodities=False,
+        )
 
-    # Merge with user-provided context
-    user_ctx = dict(req.context or {})
-    user_ctx.update(ctx)
+        # Merge with user-provided context
+        user_ctx = dict(req.context or {})
+        user_ctx.update(ctx)
 
-    # Build market_data for advice from index_realtime + sector_momentum
-    market_data = list(ctx.get("index_realtime", []) or [])
-    sector_data = ctx.get("sector_momentum", []) or []
-    for s in sector_data[:5]:
-        market_data.append({
-            "name": s.get("sector_name") or s.get("name", "?"),
-            "change_pct": s.get("change_pct"),
-            "asset_type": "sector",
-        })
-    user_ctx["market_data"] = market_data
-    user_ctx["market_regime"] = ctx.get("market_regime", "")
-    user_ctx["market_sentiment"] = ctx.get("market_sentiment", {})
-    user_ctx["sector_momentum"] = sector_data[:10]
-    user_ctx["fund_flow"] = ctx.get("fund_flow", {})
-    user_ctx["news"] = ctx.get("news", [])
-    # P3-G (round10 §10 P3-G): portfolio 槽显式注入——prompt 消费该槽；用户
-    # 请求显式携带 portfolio 时透传，未带则为空列表（不凭空捏造持仓）。
-    user_ctx["portfolio"] = (req.context or {}).get("portfolio", []) or []
+        # Build market_data for advice from index_realtime + sector_momentum
+        market_data = list(ctx.get("index_realtime", []) or [])
+        sector_data = ctx.get("sector_momentum", []) or []
+        for s in sector_data[:5]:
+            market_data.append({
+                "name": s.get("sector_name") or s.get("name", "?"),
+                "change_pct": s.get("change_pct"),
+                "asset_type": "sector",
+            })
+        user_ctx["market_data"] = market_data
+        user_ctx["market_regime"] = ctx.get("market_regime", "")
+        user_ctx["market_sentiment"] = ctx.get("market_sentiment", {})
+        user_ctx["sector_momentum"] = sector_data[:10]
+        user_ctx["fund_flow"] = ctx.get("fund_flow", {})
+        user_ctx["news"] = ctx.get("news", [])
+        # P3-G (round10 §10 P3-G): portfolio 槽显式注入——prompt 消费该槽；用户
+        # 请求显式携带 portfolio 时透传，未带则为空列表（不凭空捏造持仓）。
+        user_ctx["portfolio"] = (req.context or {}).get("portfolio", []) or []
 
-    # Sector Phase 5: 注入市场上下文
-    user_ctx = _inject_market_context(req.query, user_ctx)
+        # Sector Phase 5: 注入市场上下文
+        user_ctx = _inject_market_context(req.query, user_ctx)
 
-    try:
         prompt = _build_advice_stream_prompt(req.query, user_ctx)
         from ..analysis.registry import get_agent
         agent = get_agent("advice")
-        return _sse_stream(run_stream_with_cache(agent, prompt, query=f"advice:{req.query}", data_as_of=None))
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"LLM streaming failed: {e}")
+        return run_stream_with_cache(agent, prompt, query=f"advice:{req.query}", data_as_of=None)
+
+    return _sse_stream(_build)
 
 # ── /portfolio-design/stream 已废弃 ──
 # 组合设计流式端点已移除，使用 POST /portfolio/design-async
@@ -474,30 +504,35 @@ def _normalize_sector_code(
 
 @router.post("/sector-analysis/stream")
 async def sector_analysis_stream(req: SectorAnalysisRequest):
-    """流式板块分析 — Phase 5.1: 非 A 市场返回友好提示。"""
-    try:
-        sector_code = req.sector_code
-        sector_type = req.sector_type
-        sector_name = req.sector_name
+    """流式板块分析 — Phase 5.1: 非 A 市场返回友好提示。
 
-        # Phase 5.1: 非 A 市场不支持板块分析
-        from app.core.market_context import resolve_market_context
-        market_ctx = resolve_market_context(req.market)
-        if not market_ctx.supports_sector_analysis:
-            prompt = f"当前市场为 {market_ctx.title}，该市场暂无板块分析数据。请切换到 A 股市场查看板块分析。"
-            disclaimer = "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
-            async def empty_generator():
-                yield f"event: done\ndata: {json.dumps({'full_text': prompt, 'disclaimer': disclaimer})}\n\n"
-            return StreamingResponse(
-                empty_generator(),
-                media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "Connection": "keep-alive",
-                    "X-Accel-Buffering": "no",
-                }
-            )
+    R49: 板块表取数 / 成分股 / 资讯等重 I/O 延后到首字节（progress）之后在
+    _build 内完成；板块未收录的 404 预检改为在 _build 内抛出，由 _sse_stream
+    转为 SSE error 事件（保留原文案，前端 useLLMStream 已处理 event: error）。
+    """
+    sector_code = req.sector_code
+    sector_type = req.sector_type
+    sector_name = req.sector_name
 
+    # Phase 5.1: 非 A 市场不支持板块分析（轻量预检，无重 I/O）
+    from app.core.market_context import resolve_market_context
+    market_ctx = resolve_market_context(req.market)
+    if not market_ctx.supports_sector_analysis:
+        prompt = f"当前市场为 {market_ctx.title}，该市场暂无板块分析数据。请切换到 A 股市场查看板块分析。"
+        disclaimer = "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
+        async def empty_generator():
+            yield f"event: done\ndata: {json.dumps({'full_text': prompt, 'disclaimer': disclaimer})}\n\n"
+        return StreamingResponse(
+            empty_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            }
+        )
+
+    async def _build():
         if sector_type == "concept":
             sectors = await asyncio.to_thread(market_data_hub.get_sector_concept, 500)
         else:
@@ -525,8 +560,9 @@ async def sector_analysis_stream(req: SectorAnalysisRequest):
         sector_data = next(
             (s for s in combined if s.get("sector_code") == normalized), None
         )
+        resolved_code = sector_code
         if sector_data:
-            sector_code = sector_data.get("sector_code", sector_code)
+            resolved_code = sector_data.get("sector_code", sector_code)
         elif normalized != sector_code:
             # 归一化后未命中 → 用原值兜底再查一次
             sector_data = next(
@@ -542,16 +578,16 @@ async def sector_analysis_stream(req: SectorAnalysisRequest):
                     f"（板块表未收录或数据源缺失），请稍后重试或换用其他板块"
                 ),
             )
-        name = sector_name or (sector_data.get("sector_name", "") if sector_data else sector_code)
-        
-        constituents = await asyncio.to_thread(market_data_hub.get_sector_stocks, sector_code)
+        name = sector_name or (sector_data.get("sector_name", "") if sector_data else resolved_code)
+
+        constituents = await asyncio.to_thread(market_data_hub.get_sector_stocks, resolved_code)
         news = market_data_hub.get_news_headlines() or []
         try:
             macro = market_data_hub.get_news_macro() or []
             news.extend(macro)
         except Exception:
             pass
-        
+
         # R5: 注入板块实时行情快照（get_sector_industry 已含成交额/主力净流入/换手率/涨跌家数
         # ——旧实现只喂 name/成分股/资讯，LLM 无行情数据 → 报告出现
         # 「未提供板块K线、成交额、主力资金流向、北向持仓」的诚实降级说明）。
@@ -573,8 +609,8 @@ async def sector_analysis_stream(req: SectorAnalysisRequest):
         # O26 (round8 §7 §5.1H): 点位口径显式标注——板块分析的点位是「板块指数
         # （BKxxxx，东财板块行情）」自身点位，非成分股均价/沪深大盘；技术面注明
         # 均线周期与数据区间，避免专业读者误读点位主体。
-        _sector_idx_label = f"板块指数（{sector_code}，东财板块行情）"
-        prompt = f"""分析板块 {name} ({sector_code})：
+        _sector_idx_label = f"板块指数（{resolved_code}，东财板块行情）"
+        prompt = f"""分析板块 {name} ({resolved_code})：
 板块实时行情：{json.dumps(sector_snapshot, ensure_ascii=False)}
 成分股：{json.dumps(constituents[:15], ensure_ascii=False)}
 资讯：{json.dumps(news[:10], ensure_ascii=False)}
@@ -587,18 +623,21 @@ async def sector_analysis_stream(req: SectorAnalysisRequest):
 4. 催化因素
 5. 风险提示
 6. 核心标的推荐"""
-        
+
         agent = get_agent("sector_analysis")
-        return _sse_stream(run_stream_with_cache(agent, prompt, query=f"sector:{sector_code}:{name}", data_as_of=None))
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"LLM streaming failed: {e}")
+        return run_stream_with_cache(agent, prompt, query=f"sector:{resolved_code}:{name}", data_as_of=None)
+
+    return _sse_stream(_build)
 
 @router.post("/symbol-analysis/stream")
 async def symbol_analysis_stream(req: SymbolAnalysisRequest):
-    """流式标的深度解读"""
-    try:
+    """流式标的深度解读
+
+    R49: 实时行情 / 历史 K 线 / 指标 / 基本面 / 资讯 / 板块快照等重 I/O 全部
+    延后到首字节（progress）之后在 _build 内完成；数据全空时不调 LLM，改为
+    抛出 _SSEPreError 经 _sse_stream 转为 DATA_UNAVAILABLE error 事件。
+    """
+    async def _build():
         symbol = req.symbol
         name = req.name
         asset_type = req.asset_type
@@ -607,7 +646,7 @@ async def symbol_analysis_stream(req: SymbolAnalysisRequest):
         # 归一化到 A/ETF 等标准市场代码后再取数。
         _asset_norm = {"stock": "A", "sh": "A", "sz": "A", "fund": "ETF", "etf": "ETF"}
         asset_type = _asset_norm.get(str(asset_type or "").lower(), asset_type or "A")
-        
+
         realtime = await market_data_hub.get_asset_realtime(symbol, asset_type) or {}
         # R20: 中文名→代码兜底解析（前端漏解析时后端解析）——仅明显非代码输入才触发，
         # 避免个股路径拉全量 akshare 列表的延迟
@@ -651,7 +690,7 @@ async def symbol_analysis_stream(req: SymbolAnalysisRequest):
             except Exception:
                 pass
         indicators = compute_all_indicators(hist) if hist else {}
-        
+
         # P1-3 (R4-09): 基本面估值数据注入——PE/PB（akshare 日线估值列），
         # 缺失时明确标注数据源不可用（不再静默缺失，LLM 不再误报
         # 「输入数据未包含 PE、PB、ROE 等财务指标」）
@@ -665,7 +704,7 @@ async def symbol_analysis_stream(req: SymbolAnalysisRequest):
                 fundamentals_text = json.dumps(fund_data, ensure_ascii=False)
         except Exception as _fe:
             logger.debug("[symbol-analysis] fundamentals fetch failed (non-fatal): %s", _fe)
-        
+
         news = []
         # R5: 个股新闻（东财 stock_news_em）替代全市场头条——头条含大量其他股票新闻，
         # LLM 会引用无关标的导致「分析的是另一只股票」（用户反馈：002131 利欧股份被带偏）。
@@ -683,7 +722,7 @@ async def symbol_analysis_stream(req: SymbolAnalysisRequest):
             news.extend(macro)
         except Exception:
             pass
-        
+
         display_name = name or (realtime.get("name", "") if realtime else symbol)
 
         # R5: 注入个股所属板块实时快照（对齐 sector 模式 88f4b75 修复）——行业映射 +
@@ -708,7 +747,7 @@ async def symbol_analysis_stream(req: SymbolAnalysisRequest):
         # F7 R21: 数据全空时不调 LLM——避免 LLM 用常识生成"伪分析"
         # （用户明确要求：必要数据喂 LLM，非必要不报告缺失）
         if not realtime and not hist:
-            return _sse_error("数据源暂不可用，请稍后重试")
+            raise _SSEPreError("DATA_UNAVAILABLE", "数据源暂不可用，请稍后重试")
 
         # F10 R35: 预设问题模板——用户关注点拼入 prompt 做针对性分析
         focus_line = f"\n用户关注：{req.question}" if (req.question or "").strip() else ""
@@ -726,21 +765,19 @@ async def symbol_analysis_stream(req: SymbolAnalysisRequest):
 3. 资讯催化
 4. 风险提示
 5. 操作建议"""
-        
+
         agent = get_agent("symbol_analysis")
         # O24 (round8 §7 §5.1K ④) 修复: 只透传 llm_complete_stream 支持的参数——
         # max_retries=1 快速失败（429 退避上限由 llm.py 的 Retry-After 机制处理），
         # 删除旧实现透传的 llm_complete_stream 不存在之参数（该参数名不在其签名内
         # → TypeError → 全部 symbol-analysis/stream 请求 STREAM_ERROR 全挂）。
-        return _sse_stream(run_stream_with_cache(
+        return run_stream_with_cache(
             agent,
             prompt,
             query=f"symbol:{symbol}:{req.question or ''}",
             data_as_of=None,
             max_retries=1,
-        ))
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"LLM streaming failed: {e}")
+        )
+
+    return _sse_stream(_build)
 

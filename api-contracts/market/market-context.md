@@ -95,8 +95,12 @@ POST /api/v1/analysis/sector-analysis/stream
 SSE stream. When market != "A", returns empty sector data with prompt noting "该市场暂无板块分析数据".
 
 > **v2.0 (F2-7 步骤F)**: `sector_code` 支持热板块/热度的 `cls` 前缀代码（如 `cls82558`）。
-> 后端按「名称优先 → cls 数字段匹配 BK」归一化；映射失败返回 `404 {"detail": "板块映射失败：..."}`，
-> 前端降级为板块搜索。
+> 后端按「名称优先 → cls 数字段匹配 BK」归一化。
+>
+> **v2.1 (R49 round28)**: 板块映射失败（代码未收录/数据源缺失）不再返回 HTTP 404——
+> 连接建立后由 `_sse_stream` 转为 SSE `event: error`（`code: DATA_UNAVAILABLE`，
+> `message` 含「板块「{code}」数据源暂无数据（板块表未收录或数据源缺失）」），HTTP 仍 200；
+> 前端 `useLLMStream` 按 error 事件降级为板块搜索/提示。
 
 ---
 
