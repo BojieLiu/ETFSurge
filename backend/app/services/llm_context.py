@@ -165,14 +165,11 @@ async def build_full_context(
             context["fund_flow"] = {}
             errors.append(f"fund_flow: {e}")
 
-    # 9. Portfolio holdings
-    if include_portfolio:
-        try:
-            from ..services.portfolio_service import portfolio_service  # type: ignore[attr-defined]
-            # Use get_holdings or similar if available
-            context["portfolio"] = []
-        except Exception:
-            context["portfolio"] = []
+    # 9. Portfolio holdings — deprecated (giant-file split Batch 5, 2026-08-18).
+    # The `portfolio_service` symbol this segment imported never existed; the
+    # try/except swallowed the ImportError and always produced an empty list, so
+    # the segment never worked. The `include_portfolio` parameter is kept for
+    # signature compatibility but the dead injection is removed.
 
     # 10. 海外流动性（P1-5 / R4-23）——FRED 美债10Y/VIX/联邦基金利率。
     # 任一指标失败静默（该键不注入）；全部失败时不注入该段，不影响主报告。

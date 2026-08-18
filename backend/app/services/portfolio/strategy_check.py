@@ -787,6 +787,11 @@ def _cross_sectional_factor_composite(
 ) -> dict[str, float]:
     """round25 R27: 截面 z-score 复合分——每只持仓的因子强度（跨持仓可比口径）。
 
+    .. legacy:: 遗留实现（giant-file split Batch 5, 2026-08-18）——0 生产调用点
+       （R42 弃用，round28 起组合内方向已改 _full_pool_factor_composite），
+       仅被测试直测保留（test_round25_r27_factor_caliber.py 等）。不删除以维持
+       测试引用完整；新代码不得调用。
+
     背景（R27 实证）：策略检查「因子分」用 `_rule_based_suggestion` 的原始因子值均值
     （avg_factor），被 KDJ≈77 等量纲大的技术因子主导（159338 报「1.68 偏强」），而
     设计路径用 `market_data_hub` 截面 z-score 复合分（同一标的 -0.958 深负）——两屏
