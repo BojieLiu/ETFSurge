@@ -259,7 +259,7 @@ app/engine/
 ### 5.2 目标结构
 
 ```
-app/services/portfolio_service.py       ← 门面 re-export（Step 1 保持，Step 3 删除）
+app/services/portfolio_service.py       ← 门面 re-export（Step 1 保持）；Step 3 已取消（2026-08-18 用户决策，保留为测试兼容层）
 app/services/portfolio/
     __init__.py                         ← re-export 全部原符号（Step 1-2 兼容层）
     crud.py                             ← list_etfs/add_etf/update_etf/remove_etf/_resolve_tracked_index
@@ -284,6 +284,8 @@ app/services/portfolio/
 2. Step 2：内部依赖梳理——`strategy_check.py` 内 `_build_llm_fail_summary`/`_llm_timeout_for`/`_collect_strategy_data` 等私有辅助随簇搬迁，确认无跨簇私有引用。
 3. Step 3：消费者改 import 路径（`routers/portfolio.py` 从 `portfolio_service` 改到 `portfolio/` 子模块）+ 删 `__init__.py` re-export。
 
+> **2026-08-18 用户决策**：Step 3（删门面）**不再执行**——`portfolio_service.py` 门面 + `_facade_refs.py` 延迟代理作为**测试兼容层刻意保留**（~58 测试文件依赖其 mock.patch 语义；删除需连锁迁移 ~28 测试文件 patch 目标，零功能收益、高风险）。生产消费者继续走门面路径，门面为透明兼容层。
+
 ### 5.5 风险与对策
 
 | 风险 | 对策 |
@@ -307,7 +309,7 @@ app/services/portfolio/
 ### 6.2 目标结构
 
 ```
-app/analysis/llm.py                    ← re-export 门面（Step 1-2），Step 3 删除
+app/analysis/llm.py                    ← re-export 门面（Step 1-2）；Step 3 已取消（2026-08-18 用户决策，保留为测试兼容层）
 app/analysis/llm/
     __init__.py                         ← re-export（Step 1-2）
     client.py                           ← llm_complete/llm_complete_stream/llm_complete_with_system/_check_key/run_stream_with_cache/_rate_limit_wait
@@ -495,6 +497,8 @@ app/analysis/llm/
 | **Batch 3** | 方案 A market_data_hub Step 1（最高风险放后，先积累前两批经验） | 全量 pytest + verify_e2e + verify_perf 对比 |
 | **Batch 4** | 方案 A/B/C Step 2（策略逻辑外移 engine/ + 内部依赖梳理） | pytest + 新增 engine 纯函数单测 |
 | **Batch 5** | 方案 A/B/C Step 3（消费者迁移 + 删 re-export）+ §3.2/§3.3 测试重组 | `rg` 旧引用清零 + 全量 pytest |
+
+> **2026-08-18 修订**：Batch 5 范围收窄——§3.2（strategy_check 三测试合并）与 §3.3（18 个 round 命名测试迁移）已执行；**Step 3 删门面取消**（用户决策，见 §5.4/§6.4 注：门面保留为测试兼容层，`portfolio_service.py` + `llm/__init__.py` re-export + `_facade_refs.py` 不再删除）。
 
 > 理由：先小后大、先低风险后高风险、每批可独立回滚。市场_data_hub 放 Batch 3 是因为其 79 测试依赖面最大，前两批可验证「re-export 兼容层」策略在本项目是否顺畅。
 
