@@ -36,7 +36,10 @@ TESTS_DIR = pathlib.Path(__file__).resolve().parent.parent / "tests"
 #   （方案 A Step 1 结构契约测试，随 app/services/hub/ 拆分新增）。
 # 2026-08-18 (giant-file split Batch 4): 230. +1 = tests/test_engine_pure_functions.py
 #   （方案 A Step 2 engine 纯函数单测，覆盖 composite_signal+pool_balancing ≥90%）。
-BASELINE = 230
+# 2026-08-18 (S3.2 strategy_check 三文件合并): 230 -> 228. -2 = test_strategy_check_fallback/
+#   llm_timeout/timeout 三文件并入 test_strategy_check_timeout_matrix.py（83 tests 全保留，
+#   仅模块级 _MOCK_* 常量加来源前缀），回退 Batch 1 注释中预告的净减 2。
+BASELINE = 228
 
 
 def count_test_files() -> int:
