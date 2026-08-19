@@ -768,6 +768,11 @@ def _fetch_us_suggest_sync(keyword: str) -> list[dict[str, Any]]:
         line = line.strip()
         if not line:
             continue
+        # R84: 新浪返回 `var suggestvalue="TQQQ,41,tqqq,...";` ——去除 JS 变量前缀、
+        # 外层引号与尾部分号，否则 parts[0] 是 `var suggestvalue="TQQQ`（实测真实响应）。
+        if "suggestvalue=" in line:
+            line = line.split("suggestvalue=", 1)[1]
+        line = line.strip().strip('"').strip(";").strip()
         parts = line.split(",")
         if len(parts) < 5:
             continue

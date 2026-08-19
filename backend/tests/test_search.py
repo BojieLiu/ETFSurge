@@ -625,8 +625,10 @@ class TestSearchUsSinaSuggestR84:
         from app.services import market_service as _ms
         import urllib.request as _ur_req
 
-        fake_line = ("TQQQ,41,tqqq,tqqq,纳斯达克指数ETF-ProShares三倍做多,,"
-                     "纳斯达克指数ETF-ProShares三倍做多,99,1,,,")
+        # R84: 真实响应带 `var suggestvalue="` 前缀 + 尾部分号/引号——解析必须剥离，
+        # 否则 symbol 是 `var suggestvalue="TQQQ`（本地实测复现的 bug）。
+        fake_line = ('var suggestvalue="TQQQ,41,tqqq,tqqq,纳斯达克指数ETF-ProShares三倍做多,,'
+                     '纳斯达克指数ETF-ProShares三倍做多,99,1,,,";')
 
         class _Resp:
             def __enter__(self):
@@ -642,4 +644,5 @@ class TestSearchUsSinaSuggestR84:
 
         rows = _ms._fetch_us_suggest_sync("TQQ")
         assert any(r["symbol"] == "TQQQ" and r["type"] == "etf" for r in rows), rows
+        assert not any("suggestvalue" in (r["symbol"] or "") for r in rows), rows
 
