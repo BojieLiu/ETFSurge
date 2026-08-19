@@ -37,6 +37,38 @@ logger = logging.getLogger(__name__)
 # values like 16.22σ from distorting downstream allocation.
 ZSCORE_CLIP_BOUND = 5.0
 
+# ── R75 修复: advance_decline 缓存（消除 compute() 内同步阻塞事件循环）──
+# 原 _compute_stock_divergence 在每只 symbol 的同步计算里各自 run_in_thread 阻塞事件循环
+# 最多 2s；回填 500 个交易日累计 ~16 分钟卡死后端（/health 排队 50s+）。advance_decline
+# 是全市场共用指标，改为模块级 TTL 缓存 + 单次非阻塞获取（await run_sync），TTL 内复用，
+# 由 compute() 注入每只 symbol 的 data，彻底消除每符号阻塞。
+_AD_CACHE_TTL = 60.0
+_AD_CACHE_VAL: float | None = None
+_AD_CACHE_TS: float = 0.0
+
+
+async def _cached_advance_decline() -> float | None:
+    """非阻塞获取涨跌家数比（带 TTL 缓存）。
+
+    原同步阻塞版（run_in_thread + future.result()）会冻结事件循环；此处改用
+    await run_sync（loop.run_in_executor + await），永不阻塞事件循环线程。
+    """
+    global _AD_CACHE_VAL, _AD_CACHE_TS
+    _now = time.monotonic()
+    if _AD_CACHE_VAL is not None and (_now - _AD_CACHE_TS) < _AD_CACHE_TTL:
+        return _AD_CACHE_VAL
+    try:
+        from ..core.async_utils import run_sync
+        from ..services.market_data_hub import market_data_hub as _hub
+        _val = await run_sync(_hub.get_advance_decline, timeout=2)
+    except Exception:
+        _val = None
+    if _val is not None:
+        _AD_CACHE_VAL = _val
+        _AD_CACHE_TS = _now
+    return _AD_CACHE_VAL
+
+
 # round15 方案一: technical 显式聚合映射（前缀 → (方向, 变换模式)）。
 # direction/neutral_value 的单一来源是 FactorDefinition（yaml）；此表仅作
 # 默认/文档值——definitions 提供时以 FactorDefinition 为准（防两处配置漂移）。
@@ -620,28 +652,19 @@ def _compute_macro_margin_leverage_trend(data: dict) -> float:
 
 
 def _compute_stock_divergence(data: dict) -> float:
-    """Stock return divergence: use advance/decline ratio from sentiment_fetcher.
+    """Stock return divergence: use advance/decline ratio from market data.
 
     When AD ratio < 0.5 (more decliners), divergence is negative (panic).
     When AD ratio > 1.5 (more advancers), divergence is positive (greed).
     Normalized to -1.0 ~ 1.0 range with neutral at AD=1.0.
+
+    R75: advance_decline 由 compute() 经 _cached_advance_decline() 单次非阻塞获取后
+    注入 data，本函数只读取，不再触网/阻塞事件循环。
     """
     ad = data.get("advance_decline")
     if ad is not None and ad > 0:
         # AD=1.0 → 0, AD=0.5 → -0.5, AD=2.0 → +0.5
         return min(max((ad - 1.0) * 2.0, -1.0), 1.0)
-    try:
-        from ..core.async_utils import run_in_thread
-        from ..services.market_data_hub import market_data_hub
-        import asyncio
-        loop = asyncio.get_running_loop()
-        if loop and loop.is_running():
-            # S02: Reduced timeout from 5s to 2s to prevent 5s blocking loops
-            ad_val = run_in_thread(market_data_hub.get_advance_decline, timeout=2)
-            if ad_val is not None and ad_val > 0:
-                return min(max((ad_val - 1.0) * 2.0, -1.0), 1.0)
-    except Exception:
-        pass
     return 0.0
 
 
@@ -1422,6 +1445,10 @@ class FactorRegistry:
         else:
             market_data = await self._fetch_market_data(symbols, symbol_extra=symbol_extra)
 
+        # R75 修复: 单次非阻塞获取 advance_decline（TTL 缓存），注入每只 symbol 的 data，
+        # 替代原 _compute_stock_divergence 内同步 run_in_thread 阻塞事件循环。
+        _ad = await _cached_advance_decline()
+
         # Phase 2.7.2: 空数据告警 — 所有 symbol 的 data 均为空时发出错误日志
         if market_data:
             empty_symbols = [sym for sym in symbols if not market_data.get(sym)]
@@ -1460,6 +1487,11 @@ class FactorRegistry:
                     _data_sources[sym] = "stale"
                 else:
                     _data_sources[sym] = "unavailable"
+
+            # R75: 注入 advance_decline（全市场共用，已单次获取），避免每只 symbol 同步阻塞。
+            # 不就地改写共享 K 线缓存，用副本注入。
+            if _ad is not None and "advance_decline" not in data:
+                data = {**data, "advance_decline": _ad}
 
             for code in codes:
                 computer = self._computers.get(code)
