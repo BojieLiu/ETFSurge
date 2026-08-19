@@ -22,10 +22,19 @@
 未收到明确指令，不得进入实施/写修复代码/commit/push。
 
 # 环境步骤
-1. 构建并启动生产态镜像：`docker-compose up --build --profile prod`（迭代验证可用 dev profile）
-2. 记录：镜像构建耗时、容器启动耗时、后端就绪时间（warmup 需 60s+，看 backend.log）
-3. 确认前后端存活：`docker-compose ps` + 浏览器访问 http://localhost
-4. 全程只起这一次容器，所有诊断在这一实例内完成，不反复重启
+1. 停止上一轮遗留容器（若在运行）：`docker-compose down`（防旧容器占端口/资源）
+2. 构建并启动生产态镜像：`docker-compose up --build --profile prod`（迭代验证可用 dev profile）
+3. 记录：镜像构建耗时、容器启动耗时、后端就绪时间（warmup 需 60s+，看 backend.log）
+4. 确认前后端存活：`docker-compose ps` + 浏览器访问 http://localhost
+5. **回收老版本镜像**：`docker image prune -f`（构建完成后上一轮镜像层变 dangling，清掉；只清 dangling，不动其他项目镜像）
+6. 全程只起这一次容器，所有诊断在这一实例内完成，不反复重启
+
+# 资源回收（诊断分析完成后，收尾）
+在阶段 4 完成后、且确认本轮无需再进容器复测时执行；最迟在最终汇报前：
+1. **停止并移除当前容器**：`docker-compose down`
+2. 核对：`docker ps` 应无本项目容器
+3. 回收前确认诊断证据已留存（日志 / 接口响应 / DB 快照），防证据随容器消失
+注意：若 review 阶段发现需在容器内复测的 FAIL 项，先复测再回收
 
 # 全链路诊断清单（逐项打点，不许遗漏）
 - [ ] 后端存活：/health 及 /api/v1 核心路由
