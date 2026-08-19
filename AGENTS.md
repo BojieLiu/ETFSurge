@@ -48,6 +48,13 @@ docker-compose up --build --profile prod
 > （构建镜像 → 起容器 → 全链路诊断 → 对照 round 文档验证 → 四问法质量审查 → 修复方案 → 三轮 review，
 > 未收到「开始实施」指令不写修复代码）。
 
+> **实施轮（触发词）**：用户说 `round实施，文档 = docs/roundXX-xxx.md` 时，读取
+> `docs/prompt-templates/round-implementation.md` 并按模板执行
+> （读方案 → TDD 逐项实施 → 验收全量只跑一次 + patrol → 运行时验证 → 英文 commit message → push）。
+> 关键节奏：**开发期只跑受影响测试 + mypy，验收期全量 1 次**；patrol L1 全量通过时自动写
+> 全量测试凭据（`scripts/tests_ok_marker.py --mark`），pre-commit 凭据有效时跳过重复全量
+> （方案 B，2026-08-19 落地）。
+
 > **巡检编排（patrol）**：`cd backend && python scripts/patrol.py --diff` 作为日常开发循环入口
 > （把 pytest / verify_e2e / data_health_check / verify_perf / 静态门禁 / npm test+build 串成一条命令）；
 > 交付前跑 `python scripts/patrol.py --full` 全量巡检。详见 `docs/patrol-orchestration-plan.md`。

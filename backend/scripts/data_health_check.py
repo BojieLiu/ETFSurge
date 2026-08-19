@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 PASS = 0
 FAIL = 0
-ERRORS = []
+ERRORS: list[str] = []
 
 
 def check(name: str, ok: bool, detail: str = ""):

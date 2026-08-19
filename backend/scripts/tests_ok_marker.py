@@ -100,7 +100,7 @@ def mark(marker_path: str = MARKER_PATH, project_root: str = PROJECT_ROOT,
     os.makedirs(os.path.dirname(marker_path), exist_ok=True)
     with open(marker_path, "w", encoding="utf-8") as f:
         json.dump(data, f)
-    print(f"[tests_ok] 凭据已写入 {marker_path}（files_hash={data['files_hash'][:12]}）")
+    print(f"[tests_ok] 凭据已写入 {marker_path}（files_hash={str(data['files_hash'])[:12]}）")
 
 
 def check(marker_path: str = MARKER_PATH, ttl: float = TTL_SECONDS,
@@ -137,12 +137,19 @@ def check(marker_path: str = MARKER_PATH, ttl: float = TTL_SECONDS,
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="全量测试通过凭据 mark/check（round30 方案 B）")
-    ap.add_argument("action", choices=("mark", "check"), help="mark=写入凭据；check=校验可复用")
+    # 兼容两种调用形态：位置参数 `mark|check` 与 `--mark|--check` flag
+    ap.add_argument("action", nargs="?", choices=("mark", "check"),
+                    help="mark=写入凭据；check=校验可复用")
+    ap.add_argument("--mark", action="store_true", help="写入凭据")
+    ap.add_argument("--check", action="store_true", help="校验可复用（0=有效，1=需全量）")
     args = ap.parse_args()
-    if args.action == "mark":
+    if args.mark or args.action == "mark":
         mark()
         return 0
-    return 0 if check() else 1
+    if args.check or args.action == "check":
+        return 0 if check() else 1
+    ap.print_usage()
+    return 2
 
 
 if __name__ == "__main__":
