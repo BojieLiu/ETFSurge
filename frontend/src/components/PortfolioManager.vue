@@ -83,6 +83,7 @@
               v-model="form.asset_type"
               :options="assetTypeOptions"
               size="md"
+              aria-label="市场"
             />
           </div>
 
@@ -212,6 +213,12 @@
         </div>
       </div>
 
+      <!-- Tab Panel: aria-controls 指向此容器（R64 a11y: tab → tabpanel 关联） -->
+      <div
+        :id="`panel-${activeTab}`"
+        role="tabpanel"
+        :aria-labelledby="`tab-${activeTab}`"
+      >
       <!-- Empty State -->
       <div v-if="!currentEtfs.length" class="empty-state">
         <div class="empty-icon" aria-hidden="true">📦</div>
@@ -272,6 +279,7 @@
                     :max="100"
                     step="5"
                     class="slider"
+                    :aria-label="`${etf.name} 目标权重（当前 ${etf.editWeight != null ? etf.editWeight : (etf.target_weight * 100).toFixed(0)}%）`"
                     @input="etf.editWeight = Math.min(100, Math.max(0, etf.editWeight))"
                   />
                   <span class="weight-val">{{ etf.editWeight != null ? etf.editWeight : (etf.target_weight * 100).toFixed(0) }}%</span>
@@ -395,6 +403,7 @@
           <span class="page-info">共 {{ currentEtfs.length }} 条，{{ totalPages }} 页</span>
         </div>
       </div>
+      </div><!-- /tabpanel -->
     </section>
   </div>
 </template>

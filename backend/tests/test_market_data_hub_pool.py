@@ -649,6 +649,84 @@ def test_r17_cost_cap_respected():
     assert n == 4, f"cap=4 应仅生成 4 条，实际 {n}"
 
 
+# ── R65 (round28): LLM 失败/配额空窗 → 规则摘要兜底非 null ──────────────
+
+
+def test_r65_rule_fallback_on_llm_failure_macro_bucket():
+    """R65: macro 桶重要条目在 LLM 失败时兜底为规则摘要（非 null）。
+
+    round28 §6 R65 实证：LLM 配额门禁让位主链路后 enrich 永不回填 →
+    高重要性条目 ai_summary 恒 null。修复：LLM 失败 → `_rule_news_summary`
+    取 content 首句兜底，标注 ai_summary_source="rule"，保证非 null；
+    下一轮 enrich 仍重试 LLM（仅 rule 来源允许覆盖）。
+    """
+    from app.services.market_data_hub import market_data_hub as hub_inst
+
+    buckets = {
+        "headlines": [],
+        "macro": [
+            {
+                "title": "央行降准 0.5 个百分点 释放长期流动性",
+                "content": "中国人民银行宣布下调金融机构存款准备金率 0.5 个百分点。"
+                           "本次降准预计释放长期资金约 1 万亿元。专家表示这是稳增长的重要信号。",
+                "level": 5,
+                "stars": 4,
+                "ai_summary": None,
+            },
+        ],
+        "global": [],
+    }
+
+    def _fake_bucket(key):
+        return buckets.get(key, [])
+
+    async def _explode(title, content):
+        raise RuntimeError("LLM 配额耗尽 / 调用失败")
+
+    monkeypatch_bucket = patch.object(hub_inst, "_news_bucket", side_effect=_fake_bucket)
+
+    with monkeypatch_bucket, patch(
+        "app.analysis.llm.generate_news_summary", side_effect=_explode
+    ):
+        n = asyncio.run(hub_inst.enrich_news_summaries(cap=6))
+
+    macro_item = buckets["macro"][0]
+    assert n >= 1, "LLM 失败后仍应有 rule 兜底摘要"
+    assert macro_item["ai_summary"] is not None, "macro 高重要性条目 ai_summary 不得为 null（R65）"
+    assert macro_item["ai_summary_source"] == "rule", "rule 兜底须标注来源"
+    assert "存款准备金率" in macro_item["ai_summary"], "rule 摘要应含 content 首句真实内容（非占位）"
+
+
+def test_r65_rule_fallback_macro_and_global_both_nonnull():
+    """R65: macro + global 两桶高重要性条目在 LLM 全失败时均兜底非 null。"""
+    from app.services.market_data_hub import market_data_hub as hub_inst
+
+    buckets = {
+        "headlines": [],
+        "macro": [
+            {"title": "宏观头条", "content": "宏观内容甲。更多细节。", "level": 5, "stars": 1, "ai_summary": None},
+        ],
+        "global": [
+            {"title": "国际要闻", "content": "国际内容乙。更多细节。", "level": 4, "stars": 1, "ai_summary": None},
+        ],
+    }
+
+    def _fake_bucket(key):
+        return buckets.get(key, [])
+
+    async def _explode(title, content):
+        raise RuntimeError("配额空窗")
+
+    with patch.object(hub_inst, "_news_bucket", side_effect=_fake_bucket), patch(
+        "app.analysis.llm.generate_news_summary", side_effect=_explode
+    ):
+        n = asyncio.run(hub_inst.enrich_news_summaries(cap=6))
+
+    assert buckets["macro"][0]["ai_summary"] is not None
+    assert buckets["global"][0]["ai_summary"] is not None
+    assert buckets["macro"][0]["ai_summary_source"] == "rule"
+    assert buckets["global"][0]["ai_summary_source"] == "rule"
+    assert n >= 2
 
 
 # ── R23: news 懒刷新锁 + 回退 ──────────────────────────────────────────

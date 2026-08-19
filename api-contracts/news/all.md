@@ -1,6 +1,6 @@
 # News API / 资讯接口
 
-> **v3.0 (F3-1/§9.10)**: ① `stars` 纯语义化 = `level`（新鲜度靠 `time` 字段，不再混入星级）；② 分级双输入（标题 + 正文前 200 字）；③ 双轨交叉校验（本地关键词分类与源 level 差值 ≥2 时以本地为准 + WARNING 日志）；④ 词表治理（「停牌」L5→L2、「违约」L5→L3、机构名移出 L4；补地缘军事词：袭击/空袭/开战/宣战=L5，冲突/军事/干预/制裁/战/核=L4，边境/军演/国防=L3；删高频泛词「公告/发布/数据/政策/指数/板块/业绩/财报/重组/美联储」）。
+> **v3.0 (F3-1/§9.10)**: ① `stars` 纯新鲜度维度（round9 P2-1 与 `level` 解耦：<1h→5★、<6h→4★、<24h→3★、<72h→2★、更旧→1★；时间不可解析时回退 level）；② 分级双输入（标题 + 正文前 200 字）；③ 双轨交叉校验（本地关键词分类与源 level 差值 ≥2 时以本地为准 + WARNING 日志）；④ 词表治理（「停牌」L5→L2、「违约」L5→L3、机构名移出 L4；补地缘军事词：袭击/空袭/开战/宣战=L5，冲突/军事/干预/制裁/战/核=L4，边境/军演/国防=L3；删高频泛词「公告/发布/数据/政策/指数/板块/业绩/财报/重组/美联储」）。
 
 ## 1. All endpoints overview / 所有端点一览
 
@@ -51,7 +51,7 @@ GET /api/v1/news/headlines
 | url | string | Source link |
 | level | int | **Importance 1-5 (单调性, F22)** — 5=紧急/重大, 4=重要(利好/利空/风险均可), 3=中等, 2=一般, 1=其他。**前端按 level>=4 推送/筛选**，不再混入极性。 |
 | category | string | **Polarity/type (F22, additive)** — `major`(重大/紧急) / `positive`(利好) / `negative`(利空) / `risk`(地缘/军事/制裁) / `neutral`(提醒) / `other`。**前端按 category 着色（红涨绿跌）**；`risk` 为警告色非利好红（F23）。 |
-| stars | int | Combined score = level + freshness bonus (within 1h +2, 2h +1), capped at 5 |
+| stars | int | **纯新鲜度维度**（round9 P2-1，与 level 解耦）— <1h→5★、<6h→4★、<24h→3★、<72h→2★、更旧→1★；时间不可解析时回退 level |
 
 ### Classification rules / 分级规则 (F22/F23)
 
@@ -81,7 +81,7 @@ GET /api/v1/news/headlines
 
 **Level 1 (其他)** — default level for unmatched items
 
-**Stars formula:** `stars = min(level + freshness, 5)` where `freshness = 2` (within 1h), `1` (within 2h), `0` (older)
+**Stars formula:** `stars` = **纯新鲜度维度**，与 `level` 解耦（round9 P2-1）：`<1h → 5★`、`<6h → 4★`、`<24h → 3★`、`<72h → 2★`、更旧 → `1★`；时间字段不可解析时回退 `level`（保证字段非空）。无 level 加成、无「level + freshness」混合公式。
 
 **财联社 editorial boost:** Items from 财联社's "important" category receive a +1 level boost (capped at 5), reflecting editorial curation.
 

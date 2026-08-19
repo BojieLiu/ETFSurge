@@ -535,6 +535,50 @@ class TestR55OneShotNoPerRequestIO:
         assert processed2 == processed1
 
 
+# ── R75 残余 (round29 §14.2): IC 回填时光回溯循环让出事件循环 ──────────
+
+
+class TestR75BackfillYield:
+    """R75 残余（round29 §14.2 / §14.4.1 ③）：回填时光回溯循环必须让出事件循环。
+
+    R75 主根因已修（`13839b3`：advance_decline 同步阻塞消除），此测试防护残余——
+    回填 500 日 × 每只 symbol compute（纯同步 CPU 数学）不得重新独占事件循环。
+    """
+
+    def test_backfill_loop_has_yield_sleep0(self):
+        """main.py `_backfill_ic_history_task` 时光回溯循环内须有 `await asyncio.sleep(0)`。
+
+        R58/R75 教训：499 次迭代连续同步 compute 会独占事件循环（/health 50s+）。
+        源码断言（与 R59 测试同模式）：循环体第一行有 sleep(0) 让出。
+        """
+        import os
+        import app.main as main_mod
+
+        src = open(
+            os.path.join(os.path.dirname(main_mod.__file__), "main.py"),
+            encoding="utf-8",
+        ).read()
+        # 回填循环：`for i in range(n - 1, 0, -1):` → 循环体含 `await asyncio.sleep(0)`
+        assert "for i in range(n - 1, 0, -1):" in src, "时光回溯循环须存在（R55）"
+        assert "await asyncio.sleep(0)" in src, "回填循环须每轮让出事件循环（R75 残余）"
+        # 让出须在 compute 之前（循环体开头），而非仅在失败/跳过分支
+        _loop_segment = src.split("for i in range(n - 1, 0, -1):")[1]
+        _head = _loop_segment.split("truncated:")[0]
+        assert "await asyncio.sleep(0)" in _head, "sleep(0) 须在循环体 compute 前让出"
+
+    def test_compute_wrapped_in_wait_for_timeout(self):
+        """回填中单次 compute 有 10s 超时防护（慢 compute 不无限阻塞回填）。"""
+        import os
+        import app.main as main_mod
+
+        src = open(
+            os.path.join(os.path.dirname(main_mod.__file__), "main.py"),
+            encoding="utf-8",
+        ).read()
+        assert "await asyncio.wait_for(" in src
+        assert "timeout=10" in src, "单次 compute 须有 10s 超时（慢 compute 不拖死回填）"
+
+
 # ===================================================================
 # merged from test_round24_r22_avg_ic.py (S3.3 de-round migration, 2026-08-18)
 # ===================================================================

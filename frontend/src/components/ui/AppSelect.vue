@@ -9,6 +9,7 @@
         :required="required"
         :multiple="multiple"
         :size="multiple ? 4 : undefined"
+        :aria-label="ariaLabel"
         :aria-describedby="describedBy"
         :aria-invalid="error ? 'true' : 'false'"
         :class="selectClasses"
@@ -48,6 +49,7 @@ const props = defineProps({
   modelValue: [String, Number, Array],
   options: { type: Array, default: () => [] },
   label: String,
+  ariaLabel: String,
   placeholder: String,
   disabled: Boolean,
   required: Boolean,

@@ -617,3 +617,10 @@ TQQQ,41,tqqq,tqqq,纳斯达克指数ETF-ProShares三倍做多,,纳斯达克指�
   - **R84**（`market_service.py`）：suggest 兜底函数改名 `_us_suggest_fallback`/`_fetch_us_suggest_sync` 规避 async-lint 误报。
   - **R81**（前端 `UnifiedAnalysis.vue`）：externalTrigger 写回（前轮已落地，31 测试全绿）。
   - **验证**：后端 2376 passed / 0 failed（全量，网络/性能类排除）；前端 497 passed + `vite build` 通过。回归校准：`test_watchlist_realtime_parallel_slow_source_not_blocking` 阈值 7→10s（R78 收盘兜底 3s 预算，并行性断言不变）。
+
+- **Round 15（2026-08-19 续轮：剩余软债落地——R73 契约对齐 / R65 兜底测试 / R75 残余防护 / R64 a11y）**：Round 14 后剩余四项非阻塞软债，按 TDD 补齐：
+  - **R73**（契约对齐，`api-contracts/news/all.md`）：三处口径统一为「纯新鲜度」——`:3` v3.0 注记（原「stars=level」）、`:54` 字段表（原「Combined score = level + freshness」）、`:84` Stars formula（原 `min(level+freshness,5)`，负向断言要求不再出现）；`classification.md` 已一致无改。新增 `tests/test_news_contract_stars_r73.py` 9 测试（负向：契约无旧混合公式；正向：三处纯新鲜度口径；实现一致：任意 level + <1h → 5★、更旧 → 1★）。
+  - **R65**（`_news.py` 实现已在，补测试）：`enrich_news_summaries` 的 rule 兜底路径缺直接测试——新增 2 测试（`test_r65_rule_fallback_on_llm_failure_macro_bucket`：LLM 抛异常 → macro 重要条目 `ai_summary` 非 null + `ai_summary_source="rule"` + 含 content 首句真实内容；`test_r65_rule_fallback_macro_and_global_both_nonnull`：macro+global 两桶 LLM 全失败均兜底非 null）。
+  - **R75 残余**（`main.py` `sleep(0)` 已在，补防护测试）：新增 `tests/test_ic_tracker.py::TestR75BackfillYield` 2 测试（源码断言：时光回溯循环 `for i in range(n-1,0,-1)` 体 compute 前有 `await asyncio.sleep(0)` 让出；单次 compute 有 `wait_for(..., timeout=10)` 超时）。
+  - **R64**（portfolio a11y，Lighthouse 实测）：本地跑 Lighthouse 13.4.1 headless 审计 `/portfolio-analysis` → **a11y 86 分**，三个失败项定位修复：① `aria-valid-attr-value`——tab `aria-controls="panel-*"` 指向不存在的面板，`PortfolioManager.vue` 包 `role="tabpanel"` + `:id="panel-${activeTab}"` + `aria-labelledby` 容器（v-if/v-else 两分支外包）；② `label`——持仓表 weight `input[type=range].slider` 无标签，补 `:aria-label`（含 ETF 名 + 当前权重）；③ `select-name`——`AppSelect` 未传 label（根元素是 div，attribute fallthrough 不达 select），组件补 `ariaLabel` prop + select 绑定，`PortfolioManager.vue` 市场选择传 `aria-label="市场"`。**复测 a11y 86→100**。前端 497 passed + `vite build` 通过。
+  - **验证**：新增 13 后端测试（9 R73 + 2 R65 + 2 R75 残余）；后端全量通过；前端 497 passed。
