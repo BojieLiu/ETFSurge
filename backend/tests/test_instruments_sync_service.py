@@ -189,3 +189,38 @@ class TestScriptsShimBackCompat:
         from app.fetchers.sync_instruments import collect_all as app_collect
         from scripts.sync_instruments import collect_all as shim_collect
         assert app_collect is shim_collect, "shim 应 re-export app.fetchers 同一函数"
+
+
+class TestSyncIndicesMovedToApp:
+    """round29 续轮: sync_indices 对齐 R30 模式（逻辑入 app/fetchers + scripts 留 shim）。"""
+
+    def test_import_sync_indices_in_app(self):
+        from app.fetchers.sync_indices import sync
+        assert callable(sync)
+
+    def test_moved_file_is_in_app_package(self):
+        """真身物理位于 app/fetchers/，且不再有 sys.path 手工 bootstrap。"""
+        import inspect
+        import app.fetchers.sync_indices as si
+        path_si = inspect.getfile(si).replace("\\", "/")
+        assert "/app/fetchers/sync_indices.py" in path_si, f"应在 app/fetchers：{path_si}"
+        assert "sys.path.insert" not in inspect.getsource(si)
+
+    def test_scripts_shim_reexports_fetchers(self):
+        """scripts/sync_indices shim 与 app.fetchers 同源（同一函数对象）。"""
+        from app.fetchers.sync_indices import sync as app_sync
+        from scripts.sync_indices import sync as shim_sync
+        assert app_sync is shim_sync, "shim 应 re-export app.fetchers 同一函数"
+
+    def test_scripts_shim_has_main_block(self):
+        """shim 保留 `__main__` 块——`python -m scripts.sync_indices` 本地 CLI 仍可执行。
+
+        （与 sync_instruments / sync_indices_meta 两个 shim 不同——那两个 shim 缺失
+        `__main__` 块，`python -m scripts.sync_*` 实际只 import 不执行 sync()，是本轮
+        顺带发现的既有小瑕疵。）
+        """
+        import inspect
+        import scripts.sync_indices as shim
+        src = inspect.getsource(shim)
+        assert "__main__" in src, "shim 应保留 __main__ 块供本地 CLI 执行 sync()"
+
