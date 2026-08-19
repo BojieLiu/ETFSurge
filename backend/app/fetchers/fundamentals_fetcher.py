@@ -12,7 +12,6 @@ from ..services.cache_service import sync_memory_cache  # R5-2-8: 失败缓存 1
 from ..config import settings
 from ..core.source_registry import registry as _source_registry
 from ..core.logging import get_logger
-from ..utils.proxy import no_proxy
 
 logger = get_logger(__name__)
 
@@ -296,8 +295,8 @@ def fetch_current_pe_pb(symbol: str, market: str = "A") -> dict | None:
     估值列或东财港股估值），当前仍返回 None。
 
     round30: 美股指数（SPX/IXIC/DJI 等）符号优先走指数估值分支——SPX 用 multpl
-    （真实指数口径），其余用 yfinance ETF 代理；成功缓存 6h / 失败缓存 1h
-    （R4-26 模式），防 yfinance 限流反复触发。
+    （真实指数口径），其余用 Yahoo ETF 代理（直连 quoteSummary，绕开 yfinance
+    库会话限流）；成功缓存 6h / 失败缓存 1h（R4-26 模式）。
 
     返回:
       {"pe_ttm": float, "pb": float} | None
@@ -330,9 +329,9 @@ def fetch_current_pe_pb(symbol: str, market: str = "A") -> dict | None:
 
 
 def _fetch_us_index_pe_pb_cached(symbol: str) -> dict | None:
-    """round30: 美股指数估值（multpl / yfinance ETF 代理）+ 缓存——成功 6h / 失败 1h（R4-26）。
+    """round30: 美股指数估值（multpl / Yahoo ETF 代理）+ 缓存——成功 6h / 失败 1h（R4-26）。
 
-    估值变化慢 + yfinance 境内有被限流风险：成功结果缓存 6h，失败缓存 1h，
+    估值变化慢 + 外部源有被限流风险：成功结果缓存 6h，失败缓存 1h，
     避免 symbol-analysis 每次请求都触发慢源/限流。
     """
     norm = str(symbol).upper()
@@ -358,13 +357,13 @@ def _fetch_us_index_pe_pb_cached(symbol: str) -> dict | None:
 
 
 def _fetch_us_index_pe_pb(symbol: str) -> dict | None:
-    """round30: 美股指数 PE/PB——SPX 走 multpl（指数官方口径），其余指数 yfinance ETF 代理。
+    """round30: 美股指数 PE/PB——SPX 走 multpl（指数官方口径），其余指数 Yahoo ETF 代理。
 
     探针（2026-08-19）：
     - multpl s-p-500-pe-ratio / s-p-500-price-to-book：S&P 500 自身 trailing PE=29.65 /
       PB=6.11（真实指数口径，非 ETF 代理；multpl 仅覆盖标普500）；
-    - yfinance ^GSPC.info 无 trailingPE（指数不披露估值），SPY/QQQ/DIA.info 有
-      trailingPE/priceToBook（SPY=25.85/1.79），作为 IXIC/DJI 的指数组合口径代理。
+    - Yahoo quoteSummary：SPY/QQQ/DIA 的 trailingPE=25.85/30.68/22.13（指数组合口径
+      代理；yfinance 库会话限流，改为直连）。ETF 的 priceToBook 为空 → PB=None。
     全部失败/无有效值返回 None（报告诚实降级为「数据源不可用」，不伪造值）。
     """
     norm = str(symbol).upper()
@@ -372,7 +371,7 @@ def _fetch_us_index_pe_pb(symbol: str) -> dict | None:
         result = _fetch_spx_pe_pb_multpl()
         if result:
             return result
-        # multpl 失败时回落到 yfinance SPY 代理（保证 SPX 报告仍可出估值）
+        # multpl 失败时回落到 Yahoo SPY 代理（保证 SPX 报告仍可出估值）
         return _fetch_us_etf_proxy_pe_pb(norm)
     return _fetch_us_etf_proxy_pe_pb(norm)
 
@@ -388,7 +387,7 @@ def _fetch_spx_pe_pb_multpl() -> dict | None:
 
     解析 meta description（'...Current S&P 500 PE Ratio is 29.65, a change...'）
     与页面显示（'Current S&P 500 PE Ratio : 29.65 -0.21 ...'）双兜底。
-    任一请求失败返回 None（调用方回落到 yfinance ETF 代理）。
+    任一请求失败返回 None（调用方回落到 Yahoo ETF 代理）。
     """
     def _load():
         import re as _re
@@ -439,47 +438,100 @@ def _fetch_spx_pe_pb_multpl() -> dict | None:
 
 
 def _fetch_us_etf_proxy_pe_pb(norm: str) -> dict | None:
-    """round30: 美股指数估值备用源——yfinance ETF 代理（指数自身 info 无估值字段）。
+    """round30: 美股指数估值备用源——直连 Yahoo quoteSummary 取 ETF 代理估值。
 
-    SPY/QQQ/DIA（对应指数基金）.info 的 trailingPE/priceToBook 即指数组合口径估值；
-    yfinance 失败/无有效值返回 None（报告诚实降级，不伪造值）。
+    SPY/QQQ/DIA（对应指数基金）的 trailingPE 即指数组合口径估值。yfinance 库在
+    本环境会持续 YFRateLimitError（2026-08-19 实测 40+ 分钟未恢复，crumb/会话
+    握手坏），改为手动 crumb 流程直连 query1.finance.yahoo.com quoteSummary
+    （探针连续 4 次稳定返回）。ETF 的 priceToBook Yahoo 返回空 → PB 诚实置 None。
+    失败/无有效值返回 None（报告诚实降级，不伪造值）。
     """
     etf = _US_INDEX_ETF_PROXY.get(norm)
     if not etf:
         return None
-
-    def _load(etf=etf):
-        proxy = os.environ.get("YFINANCE_PROXY", "")
-        if proxy:
-            import yfinance as yf
-            return yf.Ticker(etf).info or {}
-        with no_proxy():
-            import yfinance as yf
-            return yf.Ticker(etf).info or {}
-
     try:
-        info = run_in_thread(_load, timeout=15, executor="long")
+        data = run_in_thread(_fetch_yahoo_quote_summary, etf, timeout=15, executor="long")
     except Exception:
         return None
-    if not isinstance(info, dict):
+    if not isinstance(data, dict):
         return None
     result = {}
     try:
-        pe = info.get("trailingPE")
+        pe = data.get("pe")
         if pe is not None and float(pe) > 0:
             result["pe_ttm"] = round(float(pe), 2)
     except (TypeError, ValueError):
         pass
     try:
-        pb = info.get("priceToBook")
+        pb = data.get("pb")
         if pb is not None and float(pb) > 0:
             result["pb"] = round(float(pb), 2)
     except (TypeError, ValueError):
         pass
     if not result:
         return None
-    result["source"] = f"{_US_INDEX_ETF_NAME.get(norm, norm)}估值取{etf}ETF代理(yfinance)"
+    result["source"] = f"{_US_INDEX_ETF_NAME.get(norm, norm)}估值取{etf}ETF代理(yahoo)"
     return result
+
+
+def _fetch_yahoo_quote_summary(etf: str) -> dict | None:
+    """直连 Yahoo quoteSummary（手动 crumb 流程）→ {'pe','pb'} | None。
+
+    yfinance 库的 cookie/crumb 会话在本环境持续 YFRateLimitError；此实现每次
+    新会话取 crumb 再请求 quoteSummary（summaryDetail→trailingPE，
+    defaultKeyStatistics→priceToBook），探针验证稳定。
+    """
+    import json as _json
+    import urllib.parse
+    import urllib.request
+
+    import http.cookiejar
+
+    cj = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+    opener.addheaders = [
+        ("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                       "Chrome/126.0 Safari/537.36"),
+    ]
+
+    def _get(url: str) -> str:
+        with opener.open(url, timeout=10) as r:
+            return r.read().decode("utf-8", "ignore")
+
+    try:
+        # 1) fc.yahoo.com 建会话 cookie（404 无妨，crumb 仍可用）
+        try:
+            _get("https://fc.yahoo.com")
+        except Exception:
+            pass
+        # 2) crumb
+        crumb = _get("https://query1.finance.yahoo.com/v1/test/getcrumb")
+        if not crumb:
+            return None
+        # 3) quoteSummary
+        url = (
+            "https://query1.finance.yahoo.com/v10/finance/quoteSummary/"
+            + urllib.parse.quote(etf)
+            + "?modules=summaryDetail,defaultKeyStatistics&crumb=" + crumb
+        )
+        body = _get(url)
+    except Exception:
+        return None
+    return _parse_yahoo_quote_summary(body)
+
+
+def _parse_yahoo_quote_summary(body: str) -> dict | None:
+    """从 Yahoo quoteSummary JSON 提取 {'pe','pb'}（ETF 的 priceToBook 常为空→pb=None）。"""
+    import json
+
+    try:
+        d = json.loads(body)
+    except Exception:
+        return None
+    res = (((d or {}).get("quoteSummary") or {}).get("result") or [{}])[0]
+    pe = (((res or {}).get("summaryDetail") or {}).get("trailingPE") or {}).get("raw")
+    pb = (((res or {}).get("defaultKeyStatistics") or {}).get("priceToBook") or {}).get("raw")
+    return {"pe": pe, "pb": pb}
 
 
 def _fetch_us_pe_pb(symbol: str) -> dict | None:
