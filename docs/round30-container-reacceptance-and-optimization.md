@@ -48,6 +48,7 @@ round29 的 R68-R84 已全部实施（commits `e251928`+`3e342c6`+`bc0c70f`+`d4f
 - **P2（治理/呈现）**
   6. **R90 — 资讯分类欠分类 + 摘要缺口**：`广州新房五连涨`→level1 other（应利好/市场）；`Iran attacks US targets`→level2 neutral（应风险≥4）；`经济学家评特朗普政策"致命组合拳"`→level4 positive（语义反，应为利空）。ai_summary 仍有 null（macro 1/3、global 1/3 高重要性条目）——R65 rule 兜底未覆盖全部。
   7. **R91 — A股个股中文名搜索 0 结果**：`茅台/A`=0、`腾讯/A`=0、`苹果/A`=0（R76 pinyin 兜底盘后未生效，levistock 空结果）；ETF 名正常（银=30、半导体=15）。
+  8. **R92 — watchlist realtime 三形态并存（前端假兼容，估徽标漏显）**：两条 enrich 路径各自拼装 realtime，同一「T-1 收盘估值」语义两种编码（`estimate_source` vs `is_estimated`）；前端只读 `is_estimated` → 形态①（`estimate_source="last_close_cache"`）不显示「估」徽标。属 API 契约不一致（P2 治理）。
 
 ### 0.4 验证窗口标注（D3）
 本轮执行于 2026-08-19 19:13–19:40（周三盘后）。以下结论含盘后/数据源冷却成分，属「待交易时段复测」：R88（个股 K 线源盘后可用性）、R91（levistock 盘后空）。但 R85（因子缓存两域断裂）、R86（落盘路径错误）、R87（口径三值并存）、R89 冷路径（首次 akshare 全量拉取）均为**代码级结构事实，不受窗口影响**。
@@ -171,7 +172,7 @@ round29 的 R68-R84 已全部实施（commits `e251928`+`3e342c6`+`bc0c70f`+`d4f
 
 - **热点 ✅**：`hot-plates` 煤炭（宝泰隆/美锦能源/大有能源/陕西黑猫，reason 焦炭提涨+原煤产量新低）；`stock-hot-rank` 50 条（宇树科技 +460% 上市首日、金风科技、京东方A -7.11%、金螳螂 -10.05%）。数据真实。
 - **自选 ⚠️**：22 条。A 股有真实价（中际旭创 895.6 -9.36% stale、半导体ETF 1.045 -7.69% last_close）；**美股 TSLA realtime=null +「非交易时段无行情（数据源维护中）」**（美股盘前时段，文案「维护中」误导——实为盘前无实时，非源故障）。
-- **watchlist 结构不一致（task 9 断裂）**：3 种 realtime 形态并存——①`{price, change_pct, volume, data_source, as_of, estimate_source}`（id=28）、②`{price, change_pct, is_estimated, estimate_source, as_of}`（id=27，无 volume/data_source）、③`realtime=null + _degraded + data_unavailable`（id=26）。前端需兼容三形态，存在断裂风险。
+- **watchlist 结构不一致（task 9 断裂，R92）**：3 种 realtime 形态并存——①`{price, change_pct, volume, data_source, as_of, estimate_source}`（id=28）、②`{price, change_pct, is_estimated, estimate_source, as_of}`（id=27，无 volume/data_source）、③`realtime=null + _degraded + data_unavailable`（id=26）。根因：`_watchlist_enrich_items`（market.py:762）与 `_watchlist_close_fallback`（market.py:1004）两条路径各自拼装 realtime，同一「T-1 收盘估值」语义被编码成两种形状（`estimate_source` vs `is_estimated`）——**前端只读 `is_estimated`，形态①的「估」徽标漏显**（假兼容：optional chaining 不崩但不正确）。修复设计见 §14.3 R92。
 
 ---
 
@@ -212,8 +213,8 @@ round29 的 R68-R84 已全部实施（commits `e251928`+`3e342c6`+`bc0c70f`+`d4f
 ## 8. 前后端断裂排查（task 9）
 
 - ✅ R62 生效（00700→HK、AAPL→US、600519→A）。
-- ⚠️ **watchlist realtime 结构 3 形态不一致**（§4）——前端需兼容。
-- ⚠️ **R87 口径三值并存**（§2.2）：summary 66.5% / factor_availability 26/39 / composite 33.3%。
+- ⚠️ **R92 watchlist realtime 3 形态不一致**（§4）——已决策：后端字段对齐（§14.3），不做前端兼容止血。
+- ⚠️ **R87 口径三值并存**（§2.2）：summary 66.5% / factor_availability 26/39 / composite 33.3%——已决策：统一为分项覆盖率（§14.1）。
 
 ---
 
@@ -342,6 +343,7 @@ round29 的 R68-R84 已全部实施（commits `e251928`+`3e342c6`+`bc0c70f`+`d4f
 | ID | 级 | 问题 | 修复设计 | 验收 | 文件指向 |
 |---|---|---|---|---|---|
 | R90 | P2 | 资讯分类欠分类 + 摘要缺口 | ①`_CATEGORY_KEYWORDS` 补词：「连涨/提价/超预期」→positive≥3；「袭击/致命/威胁」→risk≥4；「收跌/连跌」→negative；②`_rule_news_summary` 扩展到 macro/global 全部高重要性（level≥3）条目；③`经济学家评特朗普政策"致命组合拳"` 语义反 → 标题情感词「致命」应判 negative，排查分类器是否只读首句/关键词命中顺序 | ①广州新房→positive、伊朗袭击→risk≥4；②负向：macro/global level≥3 条目 ai_summary 非 null | `levistock_fetcher.py:25-145`、`news_fetcher.py:265-277`、`_news.py` |
+| R92 | P2 | watchlist realtime 三形态并存（前端假兼容，估徽标漏显） | **✅ 已决策（2026-08-19 会话）：A' 字段对齐 + 契约固化，不做前端兼容止血**。①**先写契约**：realtime 固定 7 字段 `{price, change_pct, volume, as_of, is_estimated, estimate_source, data_source}`，缺省显式补 `null/false`；②后端两条 enrich 路径统一补字段：close_fallback 缓存命中分支（market.py:1041-1048）补 `is_estimated: true`，enrich 直返分支（market.py:933）补 `is_estimated: false/estimate_source: null/data_source/as_of`；③item 级 `_degraded`/`data_unavailable`/`realtime_unavailable` 标记保留（realtime=null 的顶层语义）；④**否决**：前端归一化（契约仍不一致，只换地方打补丁）、availability 枚举全量重构（改动大 2-3 倍，列软债） | ①三形态统一为「同一字段集不同值」；②负向：形态①（`estimate_source="last_close_cache"`）前端显示「估」徽标（现漏显）；③后端单测断言 realtime 恒含 7 字段；④前端组件测试补「形态①估徽标显示」用例 | `market.py:762-1002`（enrich）、`market.py:1004-1085`（close_fallback）、`frontend/src/components/market/WatchlistPanel.vue:127-164`、`api-contracts/market/` |
 
 ### 14.4 R85/R86 详细设计（P0，级联根因 + 两缓存域断裂）
 
@@ -379,8 +381,9 @@ round29 的 R68-R84 已全部实施（commits `e251928`+`3e342c6`+`bc0c70f`+`d4f
 
 ## 15. 分两批实施建议（不实施，等待指令）
 
-- **批1（P0/P1 正确性）**：R85（因子路径接 Hub 缓存 + 缺数据填 None）、R86（落盘路径修正）、R87（口径统一）、R88（个股 K 线缓存扩展 + 个股历史源排查）。
-- **批2（P1/P2 性能/治理）**：R89（冷路径预热 + ETF_FAST_JSON）、R90（分类词表 + 摘要缺口）、R91（个股中文搜索 + instruments 个股段同步）。
+- **批1（P0/P1 正确性）**：R85（因子路径接 Hub 缓存 + 缺数据填 None）、R86（落盘路径修正）、R87（口径统一，已决策）、R88（个股 K 线缓存扩展 + 个股历史源排查）。
+- **批2（P1/P2 性能/治理）**：R89（冷路径预热 + ETF_FAST_JSON）、R90（分类词表 + 摘要缺口）、R91（个股中文搜索 + instruments 个股段同步）、R92（watchlist realtime 字段对齐，已决策）。
+- **测试增强随批1**：patrol 负向断言（§12.7 ①valid_rate>0 ②跨缓存一致性 ③落盘路径 ④冷路径基准）——其中①②③与批1 修复强耦合（修完才有非占位因子/正确落盘可断言），④冷路径基准随批2 R89。
 
 > **当前状态：等待「开始实施」指令，不写任何修复代码。**
 
@@ -394,5 +397,6 @@ round29 的 R68-R84 已全部实施（commits `e251928`+`3e342c6`+`bc0c70f`+`d4f
 - **Round 4（验收口径 + 测试清单补全）**：为每项补「正/负向断言」（防假完成：R85 负向「因子全空不得产占位 RSI 50.0 冒充」、R86 负向「容器内不得再写 /app/app/data」、R87 负向「禁止 66.5% 与 33.3% 并存」）。R89 冷路径阈值明确（concept ≤10s、watchlist ≤6s）。
 - **Round 5（用户提问驱动的归因补充，2026-08-19 会话）**：补「为什么标的少」「什么时候引入」「patrol 能否覆盖」三个问题的实证回答（§2.1.1 机制链 + DB 设计历史回归定位、§7 因子类别拆分、§12.7 patrol 覆盖分析）。回归定位结论：非渐进劣化，是「进程重启清空因子模块缓存 + 盘后 live fetch 空」的间歇触发；架构缺陷自 commit `7ac4a54`（round1/2 时代）即存在，首次暴露 08-18 15:52（100% 现金）、本轮 08-19 19:19（3-4 只静态兜底）。另评估 strategy-check 报告判断质量（§2.2.1）：三条提示事实基础准确，但「港股相关性较高」无实证（实测 513120×512890 相关仅 +0.120）、「红利/恒科偏弱」缺因子支撑、报告内部「13/13 无兜底」与 composite「33.3%」自相矛盾（R87 第 4 口径）。
 - **Round 6（R87 口径决策，2026-08-19 会话）**：用户采纳「统一为分项覆盖率」（Option A）——summary/factor_availability/composite.reason 三处同底 + report_text 去掉持仓级「13/13 无兜底」+ 呈现增强列具体缺哪个分项（§14.1 R87 行已定稿）。否决键级 66.5%（与决策脱钩，复现「填充率高但综合信号不可用」矛盾）与双指标并存（复杂度高且不符「统一」目标）。
+- **Round 7（R92 watchlist 三形态决策 + 全文档一致性 review，2026-08-19 会话）**：用户采纳「A' 字段对齐 + 契约固化」——realtime 固定 7 字段、后端两条 enrich 路径统一补字段、不做前端归一化止血（§0.3/§4/§8/§14.3 R92 已定稿）。否决前端归一化（契约仍不一致）与 availability 枚举全量重构（改动大，列软债）。同步 review：§15 分批并入 R92 + patrol 负向断言随批分派（①②③随批1、④随批2）。
 
-> **当前状态（Round 1-6 完成）**：R85-R91 均达实施标准（精确 file:line + 根因 + 验收 + 负向断言）；R85/R86 已展开为实施级详细设计（§14.4）；R87 口径已决策（§14.1）。本文档除设计外**不写任何修复代码**，等待「开始实施」指令。
+> **当前状态（Round 1-7 完成）**：R85-R92 均达实施标准（精确 file:line + 根因 + 验收 + 负向断言）；R85/R86 已展开为实施级详细设计（§14.4）；R87/R92 口径已决策（§14.1/§14.3）；R88/R89 修复方案含「待交易时段复测」验证窗口标注（§0.4）。本文档除设计外**不写任何修复代码**，等待「开始实施」指令。
