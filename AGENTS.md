@@ -42,6 +42,10 @@ docker-compose up --build --profile prod
 
 新增功能遵循「先写失败单测 → 实现 → 补单测 → build + 功能链路验证」。
 
+> **巡检编排（patrol）**：`cd backend && python scripts/patrol.py --diff` 作为日常开发循环入口
+> （把 pytest / verify_e2e / data_health_check / verify_perf / 静态门禁 / npm test+build 串成一条命令）；
+> 交付前跑 `python scripts/patrol.py --full` 全量巡检。详见 `docs/patrol-orchestration-plan.md`。
+
 ### E2E 链路验证（每次改完必做）
 后端启动后运行，确保核心链路可用：
 
