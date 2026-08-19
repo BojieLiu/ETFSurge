@@ -1200,8 +1200,12 @@ def section_admin():
             alive = pool_stats.get("alive_threads", 0)
             pending = pool_stats.get("pending_tasks", 0)
             utilisation = alive / max_w if max_w > 0 else 0
-            check("shared_executor 未过载", utilisation < 0.8,
-                  f"active={alive}/{max_w} ({utilisation:.0%})")
+            # round30 修复: ThreadPoolExecutor 空闲线程不回收——alive_threads 一旦池曾
+            # 饱和即恒为 max_workers（100%），用它判「未过载」永久误报（round30 patrol
+            # L2-e2e 实测 active=64/64）。过载真信号是待执行队列深度 pending_tasks
+            # （排队 > 阈值 = 池忙不过来）；存活率仅作信息展示。
+            check("shared_executor 未过载", pending < 16,
+                  f"pending={pending}（alive={alive}/{max_w} 常驻线程，非实时占用）")
             check("shared_executor 队列深度正常", pending < 16,
                   f"pending_tasks={pending}")
     except requests.Timeout:

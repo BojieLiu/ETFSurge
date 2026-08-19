@@ -1,9 +1,10 @@
+import re
 import socket
 from pathlib import Path
 from typing import List
 
 from pydantic_settings import BaseSettings
-from pydantic import Field
+from pydantic import Field, model_validator
 
 # 解析 .env 为绝对路径, 避免依赖进程工作目录
 _BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -67,6 +68,12 @@ class Settings(BaseSettings):
     # 绝对路径, 不依赖进程 CWD (之前相对 ./data 会因启动目录不同指向不同文件, 导致数据"丢失")
     database_url: str = f"sqlite+aiosqlite:///{_DATA_DIR / 'portfolio.db'}"
     redis_url: str = "redis://localhost:6379/0"
+
+    # R86 (round30): 数据目录（磁盘缓存落盘点，如 kline_cache.json / indices_cache.json）。
+    # 由 `DATA_DIR` env 显式指定（容器挂载卷 /app/data）；未设置时在 validator 中从
+    # database_url 解析（容器 `DATABASE_URL=sqlite+aiosqlite:////app/data/portfolio.db` →
+    # `/app/data`），保证「缓存写到挂载卷」而非 os.path.dirname(__file__)×3 的源码目录。
+    data_dir: str = ""
     
     # CORS：env 里用逗号分隔字符串，避免 pydantic_settings 误当 JSON 解析报错
     # 支持 CORS_ORIGINS (旧名) 和 CORS_ORIGINS_STR (新名)
@@ -126,6 +133,26 @@ class Settings(BaseSettings):
         # 忽略未声明的环境变量（如 PROFILE_WARMUP / LOG_LEVEL 等进程级变量），
         # 避免容器环境中出现无关变量时 Settings 实例化崩溃（extra_forbidden）
         extra = "ignore"
+
+    @model_validator(mode="after")
+    def _resolve_data_dir(self) -> "Settings":
+        """R86: 解析 data_dir（DATA_DIR env → database_url 路径 → 项目默认）。
+
+        容器内 database_url 为 `sqlite+aiosqlite:////app/data/portfolio.db`，
+        本地为 `sqlite+aiosqlite:///E:/ETF_Surge/data/portfolio.db`——解析出
+        路径目录即为缓存落盘点（与 DB 同目录，天然是挂载卷内）。
+        """
+        if self.data_dir:
+            # 已由 DATA_DIR env 显式指定
+            return self
+        _m = re.match(r"^sqlite(?:\+\w+)?:///+(.*)", self.database_url)
+        if _m:
+            _db_path = _m.group(1).split("?")[0]
+            if _db_path:
+                self.data_dir = str(Path(_db_path).parent)
+                return self
+        self.data_dir = str(_DATA_DIR)
+        return self
 
 
 settings = Settings()

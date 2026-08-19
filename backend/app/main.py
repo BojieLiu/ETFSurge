@@ -42,6 +42,18 @@ _SKIP_WARMUP = os.environ.get("ETF_SURGE_SKIP_WARMUP", "").lower() in ("1", "tru
 
 _profiler: WarmupProfiler | None = None
 warmup_timer = _noop_timer  # default: no-op
+
+
+def _fast_json_enabled() -> bool:
+    """R89 (round30): ETF_FAST_JSON 默认启用——akshare 的 demjson 纯 Python JSON
+    解析是预热 CPU 热点（cProfile 21.6s，round30 §1 实证），fast_json shim
+    （orjson/json strict-first）可安全消灭该热点。默认 on；显式
+    `ETF_FAST_JSON=0|false|no|off` 关闭（保留 env 显式关闭，兼容旧 opt-in 语义）。
+    """
+    _v = os.environ.get("ETF_FAST_JSON", "").strip().lower()
+    return _v not in ("0", "false", "no", "off")
+
+
 if _PROFILE_WARMUP:
     from .profiling.warmup_profiler import (
         WarmupProfiler,
@@ -123,14 +135,87 @@ async def _wait_for_pool_symbols(
     return []
 
 
+# R88 (round30): 个股 K 线缓存扩展——从 DB 持仓读取非 ETF 个股（A 股 600519 / HK
+# 00700 / US AAPL），补入 K 线预热符号集（方案 A：复用 hub 缓存域，不新增第二缓存域）。
+async def _kline_warmup_holdings_symbols() -> list[str]:
+    """返回持仓中 asset_type 非 ETF 的个股代码（A/HK/US 混合）。
+
+    design-data warmup 只预热 pool 内 ETF（round30 §14.5 实证个股 600519/AAPL
+    不在 hub._kline_cache_rows → symbol-analysis R60 兜底取空 → 盘后 indicators
+    data_available=false）。DB 不可用/空 → 返回 []（不影响 pool 预热）。
+    """
+    try:
+        from app.models.portfolio import PortfolioETF
+        from sqlalchemy import select
+        from app.database import async_session
+
+        async with async_session() as session:
+            rows = (await session.execute(
+                select(PortfolioETF.symbol, PortfolioETF.asset_type)
+                .where(PortfolioETF.is_active == True)  # noqa: E712
+            )).all()
+        out: list[str] = []
+        for sym, at in rows:
+            if not sym:
+                continue
+            _at = str(at or "A").upper()
+            if _at in ("ETF",):
+                continue  # 个股段（A/HK/US/stock）才需补；ETF 已在 pool 内
+            out.append(str(sym))
+        return out
+    except Exception as _e:
+        logger.debug("[warmup] holdings symbols query failed (non-fatal): %s", _e)
+        return []
+
+
+async def _kline_warmup_symbols(pool_syms: list[str]) -> list[str]:
+    """R88: K 线预热符号集 = pool ETF + 持仓个股（去重保序）。
+
+    仅扩展「需要 K 线的非 ETF 个股」；持仓查询失败/空退化为纯 pool 集合（不回归）。
+    """
+    try:
+        holdings = await _kline_warmup_holdings_symbols() or []
+    except Exception as _e:
+        logger.debug("[warmup] holdings symbols unavailable — using pool only: %s", _e)
+        holdings = []
+    merged = list(pool_syms) + [s for s in holdings if s not in pool_syms]
+    return merged
+
+
+# R89 (round30): concept/industry 全量列表后台预拉（模块级，可单测）。
+async def _warmup_sector_lists() -> None:
+    """预热概念/行业板块全量列表缓存（冷首呼 38.9s → 命中缓存）。
+
+    不占 startup 关键路径（warmup 30s 预算外，§14.6 原则：就绪后后台异步预拉）。
+    失败静默（首呼回源兜底）；run_sync_long 走长任务线程池（不阻塞事件循环）。
+    """
+    try:
+        from .fetchers.sector_fetcher import (
+            fetch_concept_sectors,
+            fetch_industry_sectors,
+        )
+        from .core.async_utils import run_sync_long
+        await asyncio.gather(
+            run_sync_long(fetch_concept_sectors, 150, timeout=40),
+            run_sync_long(fetch_industry_sectors, 80, timeout=40),
+            return_exceptions=True,
+        )
+        logger.info("[warmup] sector list prefetch done (concept/industry, R89)")
+    except Exception as _e:
+        logger.debug("[warmup] sector list prefetch failed (non-fatal): %s", _e)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
     logger.info("应用启动中…")
 
-    # F11: opt-in fast JSON shim for akshare's demjson decoder. Only active when
-    # ETF_FAST_JSON=1; never affects the default path (full fallback to demjson).
-    if os.environ.get("ETF_FAST_JSON", "").lower() in ("1", "true", "yes"):
+    # F11: fast JSON shim for akshare's demjson decoder.
+    # R89 (round30): 默认启用（ETF_FAST_JSON 未设置/1/true/yes 均 on；仅显式
+    # 0/false/no/off 关闭）——demjson 纯 Python 解析是预热 CPU 热点（round30 §1
+    # cProfile 21.6s），shim 用 orjson/json strict-first 消灭该热点，安全降级原
+    # demjson（非 strict 输入自动回退）。
+    if _fast_json_enabled():
         from .core.fast_json import install_demjson_shim
         try:
             install_demjson_shim()
@@ -291,10 +376,15 @@ async def lifespan(app: FastAPI):
                 )
                 # R5-2-3: 缓存命中即跳过（与 R4-26 失败缓存模式一致）——磁盘 last_ok
                 # 缓存 24h 内有效时直接复用，不触网（旧逻辑仅 1h 内跳过 → 冷拉 1.09s 热点）。
-                _persist_path = os.path.join(
-                    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-                    "data", "indices_cache.json",
-                )
+                # R86 (round30): 落盘到 settings.data_dir（挂载卷），替代 dirname×3 的
+                # 源码目录（容器内 `__file__×3` = `/` → `/data/indices_cache.json` 非挂载卷）。
+                from app.config import settings as _st
+                _persist_path = os.path.join(str(getattr(_st, "data_dir", "")), "indices_cache.json")
+                if not os.path.isfile(_persist_path):
+                    _persist_path = os.path.join(
+                        os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                        "data", "indices_cache.json",
+                    )
                 _cache_hit = False
                 if os.path.isfile(_persist_path):
                     _mtime = os.path.getmtime(_persist_path)
@@ -427,7 +517,10 @@ async def lifespan(app: FastAPI):
                         _mark["success"] = False
                         return
                     # 3. K 线缓存（磁盘缓存命中时秒级返回；miss 时 Semaphore(5) 并发拉取）
-                    await asyncio.wait_for(market_data_hub.refresh_kline(_syms[:30]), timeout=25)
+                    # R88 (round30): 符号集 = pool ETF + 持仓个股（600519 等 A 股 / AAPL 等
+                    # US / 00700 等 HK）——个股不在 pool 内，不扩展则盘后 K 线空（§14.5）。
+                    _warm_syms = await _kline_warmup_symbols(_syms[:30])
+                    await asyncio.wait_for(market_data_hub.refresh_kline(_warm_syms), timeout=25)
                     # 4. 因子矩阵预计算（factor_scores 随 pool 项挂载，无需单独预热——
                     #    refresh_kline 已使 get_factor_matrix 首个调用命中缓存）
                     _mark["done"] = True
@@ -480,6 +573,21 @@ async def lifespan(app: FastAPI):
             else:
                 logger.info("[warmup-budget] 预热总耗时 %.1fs（阈值 %.1fs，达标）",
                             _seq_elapsed, _WARMUP_BUDGET_S)
+
+    # R89 (round30): concept/industry 全量列表后台预拉（不占 warmup 30s 预算）。
+    # 冷首呼 38.9s 根因 = akshare 全量拉取（round30 §11 实证）；就绪后异步预拉填充
+    # sector_concept / sector_industry 缓存（ttl_key），首呼直接命中缓存。失败静默
+    # （首呼回源兜底），与 _warmup_sector_cache 的「后台填充安全」同模式（F17/R44）。
+    # 实现为模块级函数 `_warmup_sector_lists`（可单测），此处仅延迟调度。
+    async def _delayed_sector_list_prefetch():
+        try:
+            await asyncio.sleep(30)
+            await _warmup_sector_lists()
+        except (Exception, asyncio.CancelledError):
+            logger.debug("[warmup] delayed sector list prefetch skipped (non-fatal)")
+
+    asyncio.create_task(_delayed_sector_list_prefetch())
+    logger.info("[lifespan] 板块列表后台预拉已注册（延迟 30s，R89）")
 
     if _SKIP_WARMUP:
         logger.info("[lifespan] ETF_SURGE_SKIP_WARMUP=1, 跳过后台预热任务（快速启动模式）")

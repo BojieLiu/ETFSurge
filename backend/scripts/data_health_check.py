@@ -14,7 +14,10 @@ import sys
 import os
 import time
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+# round30 修复: 旧 `..\..` 解析到项目根（app 包在 backend/ 下）→ ModuleNotFoundError。
+# 单层 `..` 在两种调用方式下均指向 backend：脚本 `python scripts/...`（cwd=backend）
+# 与模块 `python -m backend.scripts...`（cwd=项目根）都得到 backend 目录。
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 PASS = 0
 FAIL = 0
@@ -42,11 +45,12 @@ def test_sina_realtime():
     """检查 Sina 实时行情可访问。"""
     import urllib.request, json
     try:
-        r = urllib.request.urlopen(
+        # round30 修复: urlopen 无 headers kwarg（Python3 API），须用 Request 携带
+        req = urllib.request.Request(
             "https://hq.sinajs.cn/list=sh510300",
             headers={"Referer": "https://finance.sina.com.cn"},
-            timeout=10,
         )
+        r = urllib.request.urlopen(req, timeout=10)
         data = r.read().decode("gbk")
         check("Sina 实时行情可访问", len(data) > 50)
         return data
@@ -75,7 +79,6 @@ def test_sina_kline():
 
 def test_factor_differentiation():
     """检查 FactorRegistry 对常见 ETF 的因子分方差。"""
-    sys.path.insert(0, "backend")
     from app.factors.factor_registry import FactorRegistry
 
     symbols = ["510300", "518880", "511090", "512480"]
@@ -103,13 +106,14 @@ def test_factor_differentiation():
 
 def test_pool_candidate_counts():
     """检查 market_data_hub 各层候选数。"""
-    sys.path.insert(0, "backend")
     try:
         from app.services.market_data_hub import MarketDataHub
         import asyncio
 
         pm = MarketDataHub()
-        pool = asyncio.run(pm.refresh())
+        # round30 修复: refresh() 返回 PoolDiff 对象（无 .get）——候选池读 get_pool()
+        asyncio.run(pm.refresh())
+        pool = pm.get_pool()
 
         core = pool.get("core", [])
         satellite = pool.get("satellite", [])
@@ -125,11 +129,19 @@ def test_pool_candidate_counts():
 def test_db_writable():
     """检查 SQLite 数据库可读写。"""
     try:
-        from app.database import get_db
-        db = get_db()
-        cursor = db.cursor()
-        cursor.execute("SELECT COUNT(*) FROM portfolios")
-        count = cursor.fetchone()[0]
+        import asyncio
+        from sqlalchemy import select, func
+        from app.database import async_session, init_db
+
+        async def _count():
+            await init_db()
+            from app.models.portfolio import PortfolioETF
+            async with async_session() as session:
+                n = (await session.execute(select(func.count(PortfolioETF.id)))).scalar() or 0
+                return n
+
+        # round30 修复: get_db() 是 async generator（无 .cursor）——改用 async_session
+        count = asyncio.run(_count())
         check("SQLite 数据库可访问", True, f"{count} portfolios")
     except Exception as e:
         check("SQLite 数据库可访问", False, str(e)[:80])
@@ -138,7 +150,8 @@ def test_db_writable():
 def test_source_registry():
     """检查数据源熔断器状态。"""
     try:
-        from app.fetchers.source_registry import registry
+        # round30 修复: source_registry 已移至 app.core（round29 迁移后旧路径失效）
+        from app.core.source_registry import registry
         status = registry.circuit_breaker_status()
         check(f"熔断器状态: {len(status)} 个源", len(status) > 0)
         for s in status:

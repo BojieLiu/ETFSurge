@@ -112,14 +112,23 @@ class KlineMixin:
 
 
     def _kline_cache_path(self) -> str:
-        """磁盘缓存文件路径（data/kline_cache.json）。"""
+        """磁盘缓存文件路径（data/kline_cache.json，R86 修正为挂载卷 data_dir）。"""
         if self._KLINE_CACHE_PERSIST_PATH:
             return self._KLINE_CACHE_PERSIST_PATH
         try:
             from ...config import settings
-            _data_dir = getattr(settings, "data_dir", None) or os.path.join(
-                os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data"
-            )
+            _data_dir = getattr(settings, "data_dir", None)
+            if not _data_dir:
+                # R86 (round30): Settings.data_dir 属性缺失 → 退回旧 fallback（源码目录），
+                # 必须 WARNING——容器内写到非挂载卷意味着重启即丢（R86 根因）。
+                _data_dir = os.path.join(
+                    os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data"
+                )
+                logger.warning(
+                    "[hub] settings.data_dir missing — kline cache falls back to %s "
+                    "(container restart will lose it, R86)",
+                    _data_dir,
+                )
         except Exception:
             _data_dir = os.path.join(
                 os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data"

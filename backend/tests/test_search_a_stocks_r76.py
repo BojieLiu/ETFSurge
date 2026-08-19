@@ -51,20 +51,24 @@ def patch_hub(monkeypatch):
 class TestLeviStockSilentEmptyR76:
     @pytest.mark.asyncio
     async def test_empty_levistock_logs_warning(self, patch_db, patch_hub, caplog):
-        """R76 负向：levistock 空结果不得静默——必须有 WARNING 日志线索。"""
+        """R76 负向：levistock 空结果不得静默——必须有 WARNING 日志线索。
+
+        R91 (round30)：levistock 空 → 静态基座兜底（「茅台」→600519），WARNING 保留。
+        """
         from app.routers import market
 
         with caplog.at_level(logging.WARNING, logger="app.routers.market"):
             out = await market._search_a_stocks("茅台")
-        assert out == []
         assert any(
             "get_all_stocks" in r.message and "empty" in r.message
             for r in caplog.records
         ), f"空结果未打 WARNING: {[r.message for r in caplog.records]}"
+        # R91: 静态基座兜底命中 600519（不再返回空）
+        assert any(s["symbol"] == "600519" for s in out), f"静态基座未命中: {out}"
 
     @pytest.mark.asyncio
     async def test_exception_levistock_still_warns(self, patch_db, monkeypatch):
-        """异常路径原有 WARNING 不回归。"""
+        """异常路径原有 WARNING 不回归；静态基座兜底仍可用。"""
         from app.routers import market
         from app.services.market_data_hub import market_data_hub
 
@@ -73,7 +77,8 @@ class TestLeviStockSilentEmptyR76:
 
         monkeypatch.setattr(market_data_hub, "get_all_stocks", _boom)
         out = await market._search_a_stocks("茅台")
-        assert out == []
+        # R91: 异常路径同样落到静态基座
+        assert any(s["symbol"] == "600519" for s in out)
 
 
 class TestPinyinFallbackR76:

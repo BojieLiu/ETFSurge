@@ -244,3 +244,32 @@ describe('WatchlistPanel — R20 美股/HK 实时降级显式标注', () => {
     expect(unavailableCount).toBeGreaterThanOrEqual(2)
   })
 })
+
+describe('WatchlistPanel — R92 (round30) realtime 7 字段契约「估」徽标', () => {
+  it('形态①（estimate_source=last_close_cache + is_estimated=true）→ 显示「估」徽标', async () => {
+    // round30 R92：后端已统一 realtime 7 字段，前端只读 is_estimated 渲染「估」
+    const wrapper = await mountWithItems([
+      { id: 9, symbol: '512890', name: '红利低波ETF', asset_type: 'A',
+        realtime: {
+          price: 1.045, change_pct: -7.69, volume: 8888,
+          as_of: '2026-08-19', is_estimated: true,
+          estimate_source: 'last_close_cache', data_source: 'stale',
+        }, notes: '' },
+    ], 'A')
+    await flushPromises()
+    const row = wrapper.findAll('tbody tr').find(r => r.text().includes('512890'))
+    expect(row.text()).toContain('估')
+    expect(row.text()).toContain('1.04') // 1.045.toFixed(2) → 1.04 价格展示
+  })
+
+  it('realtime 无 is_estimated 键（历史形态）→ 不渲染「估」也不崩', async () => {
+    // 负向兼容：即便后端漏发 is_estimated，optional chaining 不崩、不误显「估」
+    const wrapper = await mountWithItems([
+      { id: 10, symbol: '510300', name: '沪深300ETF', asset_type: 'A',
+        realtime: { price: 3.987, change_pct: 0.23, volume: 123 }, notes: '' },
+    ], 'A')
+    await flushPromises()
+    const row = wrapper.findAll('tbody tr').find(r => r.text().includes('510300'))
+    expect(row.text()).not.toContain('估')
+  })
+})

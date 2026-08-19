@@ -193,7 +193,7 @@ class ICTracker:
 
     def compute_periodic_ic(
         self,
-        factor_values: dict[str, dict[str, float]],
+        factor_values: dict[str, dict[str, float | None]],
         market_data: dict[str, dict[str, Any]],
         window: int = 1,
     ) -> dict[str, float]:
@@ -408,7 +408,7 @@ class ICTracker:
         self,
         session: AsyncSession,
         kline: dict[str, dict[str, Any]],
-        factor_scores_by_index: dict[int, dict[str, dict[str, float]]],
+        factor_scores_by_index: dict[int, dict[str, dict[str, float | None]]],
         max_days: int = 400,
     ) -> int:
         """R55 (round27): 一次性批量回填历史截面 IC（非请求驱动，startup-once）。

@@ -403,7 +403,14 @@ def _build_command(name, plan, args):
     if name == "L1-unit":
         cmd = [sys.executable, "-m", "pytest", "-x"]
         if _has_xdist():
-            cmd.append("-n auto")
+            # round30 修复1: `-n auto` 作为单 token 传给 argparse 会被解析为值
+            # `' auto'`（前导空格）→ "invalid parse_numprocesses value: ' auto'"。
+            # 必须拆成两个独立 arg（-n 与 auto）。
+            # round30 修复2: `-n auto` 按 cpu_count（本机 20 核）启动 20 个 worker，
+            # Windows 资源/句柄上限 → execnet gateway bootstrap EOFError（INTERNALERROR）。
+            # 封顶默认 4（env PYTEST_XDIST_WORKERS 可调），仍享并行加速。
+            _workers = os.environ.get("PYTEST_XDIST_WORKERS", "4")
+            cmd += ["-n", _workers]
         if plan["pytest_subset"]:
             cmd.extend(plan["pytest_subset"])
         return cmd, BACKEND_DIR, {}
@@ -492,6 +499,20 @@ def run_layer(name, plan, args, online):
     res = {"status": status, "duration_s": dur, "detail": _detail_for(name, out, err)}
     res.update(_extra_fields(name, out))
     res["_output"] = out + "\n" + err
+
+    # round30 方案 B：L1-unit 全量通过 → 写全量测试凭据，供 pre-commit 复用
+    # （消除「验收全量 + patrol L1 + pre-commit 全量」三重重复）。仅在全量
+    # （无 pytest_subset）时写；子集/失败不写。
+    if (name == "L1-unit" and status == "PASS"
+            and not plan.get("pytest_subset")):
+        try:
+            import subprocess as _sp
+            _sp.run(
+                [sys.executable, os.path.join(os.path.dirname(__file__), "tests_ok_marker.py"), "--mark"],
+                cwd=BACKEND_DIR, timeout=30,
+            )
+        except Exception as _me:  # noqa: BLE001 — 凭据写失败不阻断巡检
+            print(f"[patrol] ⚠️ 全量测试凭据写失败（非阻断）: {_me}")
     return res
 
 

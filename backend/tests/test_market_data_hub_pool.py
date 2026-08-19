@@ -629,7 +629,13 @@ def test_r17_three_bucket_summary_coverage():
 
 
 def test_r17_cost_cap_respected():
-    """R17: cap 截断生效，控制 LLM 成本。"""
+    """R17/R90: cap 截断生效，控制 LLM 成本；rule 兜底覆盖配额外 level≥3 条目。
+
+    round30 R90：cap 只约束 LLM 调用次数（避免打满配额）——配额外 level≥3
+    条目由 `_rule_news_summary` 兜底填充（ai_summary_source="rule"），保证
+    高重要性条目摘要非 null。故 `n`（LLM+rule 合计）> cap 是预期行为，
+    **LLM 调用次数 ≤ cap** 才是 R17 的约束断言。
+    """
     from app.services.market_data_hub import market_data_hub as hub_inst
 
     items = [
@@ -638,7 +644,10 @@ def test_r17_cost_cap_respected():
     ]
     monkeypatch_bucket = patch.object(hub_inst, "_news_bucket", return_value=items)
 
+    llm_calls = []
+
     async def _fake_summary(title, content):
+        llm_calls.append(title)
         return f"AI:{title}"
 
     with monkeypatch_bucket, patch(
@@ -646,7 +655,12 @@ def test_r17_cost_cap_respected():
     ):
         n = asyncio.run(hub_inst.enrich_news_summaries(cap=4))
 
-    assert n == 4, f"cap=4 应仅生成 4 条，实际 {n}"
+    # R17: LLM 调用次数 ≤ cap（成本约束）——旧断言 `n == 4` 已过时（R90 新增
+    # 配额外 rule 兜底 pass，n 含 rule 摘要，不再等于 LLM 调用数）。
+    assert len(llm_calls) <= 4, f"LLM 调用次数 {len(llm_calls)} 超过 cap=4"
+    assert len(llm_calls) > 0, "LLM 应至少生成 1 条摘要"
+    # R90: 全部 level≥3 条目 ai_summary 非 null（rule 兜底覆盖配额外）
+    assert all(it.get("ai_summary") for it in items), "配额外 level>=3 条目应有 rule 兜底"
 
 
 # ── R65 (round28): LLM 失败/配额空窗 → 规则摘要兜底非 null ──────────────

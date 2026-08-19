@@ -72,9 +72,10 @@ class TestSMAFunctions:
 
     def test_short_data(self):
         data = {"close": [100.0] * 3}
-        assert _compute_sma_5(data) == 0.0
-        assert _compute_sma_10(data) == 0.0
-        assert _compute_sma_20(data) == 0.0
+        # R85 (round30): 缺数据改填 None（区分「真实 0」与「无数据」）
+        assert _compute_sma_5(data) is None
+        assert _compute_sma_10(data) is None
+        assert _compute_sma_20(data) is None
 
 
 # ── RSI ────────────────────────────────────────────────────────────
@@ -85,7 +86,7 @@ class TestRSI:
         assert 0 <= val <= 100
 
     def test_rsi_short_data(self):
-        assert _compute_rsi_14({"close": [100.0] * 5}) == 50.0
+        assert _compute_rsi_14({"close": [100.0] * 5}) is None
 
 
 # ── MACD ───────────────────────────────────────────────────────────
@@ -95,7 +96,7 @@ class TestMACD:
         assert isinstance(val, float)
 
     def test_macd_short_data(self):
-        assert _compute_macd({"close": [100.0] * 10}) == 0.0
+        assert _compute_macd({"close": [100.0] * 10}) is None
 
 
 # ── Bollinger Bandwidth ────────────────────────────────────────────
@@ -106,7 +107,7 @@ class TestBollingerBandwidth:
         assert val >= 0  # Bandwidth is non-negative
 
     def test_bollinger_short_data(self):
-        assert _compute_bollinger_bandwidth({"close": [100.0] * 5}) == 0.0
+        assert _compute_bollinger_bandwidth({"close": [100.0] * 5}) is None
 
 
 # ── ATR ────────────────────────────────────────────────────────────
@@ -118,7 +119,7 @@ class TestATR:
 
     def test_atr_short_data(self):
         data = {"high": [100.0], "low": [99.0], "close": [99.5]}
-        assert _compute_atr_14(data) == 0.0
+        assert _compute_atr_14(data) is None
 
 
 # ── KDJ ────────────────────────────────────────────────────────────
@@ -138,9 +139,9 @@ class TestKDJ:
 
     def test_kdj_short_data(self):
         data = {"high": [100.0], "low": [99.0], "close": [99.5]}
-        assert _compute_kdj_k(data) == 50.0
-        assert _compute_kdj_d(data) == 50.0
-        assert _compute_kdj_j(data) == 50.0
+        assert _compute_kdj_k(data) is None
+        assert _compute_kdj_d(data) is None
+        assert _compute_kdj_j(data) is None
 
 
 # ── Volume Ratio (unchanged, verify still works) ──────────────────
@@ -150,7 +151,7 @@ class TestVolumeRatio:
         assert isinstance(val, float)
 
     def test_short_data(self):
-        assert _compute_volume_ratio({"volume": [100.0] * 3}) == 1.0
+        assert _compute_volume_ratio({"volume": [100.0] * 3}) is None
 
 
 # ── VWAP (unchanged, verify still works) ──────────────────────────

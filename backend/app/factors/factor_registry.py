@@ -11,7 +11,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, ClassVar
+from typing import Any, Callable, ClassVar, cast
 from pathlib import Path
 
 import yaml
@@ -138,125 +138,127 @@ def _standardize(series: pd.Series, method: str) -> pd.Series:
 
 # ── Built-in computation functions for S1 core factors ──────────────
 
-def _compute_ln_mcap(data: dict[str, Any]) -> float:
+def _compute_ln_mcap(data: dict[str, Any]) -> float | None:
     """style.size.ln_mcap: 对数总市值"""
     mv = data.get("total_mv", 0)
-    return math.log(mv) if mv > 0 else 0.0
+    # R85 (round30): 缺数据返回 None（下游区分「真实 0」与「无数据」）——
+    # 旧 0.0 占位使全标的同值 → z-score std≈0 恒常量，无法区分「市值真 0」与「缺失」。
+    return math.log(mv) if mv > 0 else None
 
 
-def _compute_sma(data: dict[str, Any], window: int) -> float:
+def _compute_sma(data: dict[str, Any], window: int) -> float | None:
     """Shared SMA computation via pandas-ta."""
     close = data.get("close", [])
     if len(close) < window:
-        return 0.0
+        return None
     result = ta.sma(pd.Series(close), length=window)
     if result is None or result.empty:
-        return 0.0
+        return None
     val = result.iloc[-1]
-    return float(val) if not np.isnan(val) else 0.0
+    return float(val) if not np.isnan(val) else None
 
 
-def _compute_sma_5(data: dict[str, Any]) -> float:
+def _compute_sma_5(data: dict[str, Any]) -> float | None:
     """technical.ma.sma_5: 5日均线"""
     return _compute_sma(data, 5)
 
 
-def _compute_sma_10(data: dict[str, Any]) -> float:
+def _compute_sma_10(data: dict[str, Any]) -> float | None:
     """technical.ma.sma_10: 10日均线"""
     return _compute_sma(data, 10)
 
 
-def _compute_sma_20(data: dict[str, Any]) -> float:
+def _compute_sma_20(data: dict[str, Any]) -> float | None:
     """technical.ma.sma_20: 20日均线"""
     return _compute_sma(data, 20)
 
 
-def _compute_sma_60(data: dict[str, Any]) -> float:
+def _compute_sma_60(data: dict[str, Any]) -> float | None:
     """technical.ma.sma_60: 60日均线"""
     return _compute_sma(data, 60)
 
 
-def _compute_rsi_14(data: dict[str, Any]) -> float:
+def _compute_rsi_14(data: dict[str, Any]) -> float | None:
     """technical.rsi.rsi_14: 14日RSI (via pandas-ta)"""
     close = data.get("close", [])
     if len(close) < 15:
-        return 50.0
+        return None
     result = ta.rsi(pd.Series(close), length=14)
     if result is None or result.empty:
-        return 50.0
+        return None
     val = result.iloc[-1]
-    return float(val) if not np.isnan(val) else 50.0
+    return float(val) if not np.isnan(val) else None
 
 
-def _compute_macd(data: dict[str, Any]) -> float:
+def _compute_macd(data: dict[str, Any]) -> float | None:
     """technical.macd.macd: MACD DIF值 (via pandas-ta)"""
     close = data.get("close", [])
     if len(close) < 26:
-        return 0.0
+        return None
     result = ta.macd(pd.Series(close), fast=12, slow=26, signal=9)
     if result is None or result.empty:
-        return 0.0
+        return None
     dif_col = "MACD_12_26_9"
     val = result[dif_col].iloc[-1]
-    return float(val) if not np.isnan(val) else 0.0
+    return float(val) if not np.isnan(val) else None
 
 
-def _compute_bollinger_bandwidth(data: dict[str, Any]) -> float:
+def _compute_bollinger_bandwidth(data: dict[str, Any]) -> float | None:
     """technical.bollinger.bandwidth: 布林带宽% (via pandas-ta)"""
     close = data.get("close", [])
     if len(close) < 20:
-        return 0.0
+        return None
     result = ta.bbands(pd.Series(close), length=20, std=2)  # type: ignore[arg-type]
     if result is None or result.empty:
-        return 0.0
+        return None
     bbb_col = "BBB_20_2.0_2.0"
     val = result[bbb_col].iloc[-1]
-    return float(val) if not np.isnan(val) else 0.0
+    return float(val) if not np.isnan(val) else None
 
 
-def _compute_volume_ratio(data: dict[str, Any]) -> float:
+def _compute_volume_ratio(data: dict[str, Any]) -> float | None:
     """technical.volume.vol_ratio: 量比 (近5日均量/近20日均量)"""
     volume = data.get("volume", [])
     if len(volume) < 20:
-        return 1.0
+        return None
     vol5 = np.mean(volume[-5:])
     vol20 = np.mean(volume[-20:])
-    return float(vol5 / vol20) if vol20 > 0 else 1.0
+    return float(vol5 / vol20) if vol20 > 0 else None
 
 
-def _compute_atr_14(data: dict[str, Any]) -> float:
+def _compute_atr_14(data: dict[str, Any]) -> float | None:
     """technical.atr.atr_14: 14日ATR (via pandas-ta)"""
     high = data.get("high", [])
     low = data.get("low", [])
     close = data.get("close", [])
     if len(close) < 15:
-        return 0.0
+        return None
     result = ta.atr(
         high=pd.Series(high), low=pd.Series(low), close=pd.Series(close), length=14
     )
     if result is None or result.empty:
-        return 0.0
+        return None
     val = result.iloc[-1]
-    return float(val) if not np.isnan(val) else 0.0
+    return float(val) if not np.isnan(val) else None
 
 
-def _compute_vwap(data: dict[str, Any]) -> float:
+def _compute_vwap(data: dict[str, Any]) -> float | None:
     """technical.volume.vwap: 成交量加权平均价"""
     close = data.get("close", [])
     volume = data.get("volume", [])
     if not close or not volume or len(close) != len(volume):
-        return float(close[-1]) if close else 0.0
+        return None
     c = np.array(close)
     v = np.array(volume)
     total_vol = v.sum()
-    return float(np.sum(c * v) / total_vol) if total_vol > 0 else float(c[-1])
+    return float(np.sum(c * v) / total_vol) if total_vol > 0 else None
 
 
-def _compute_amount_stability(data: dict) -> float:
+def _compute_amount_stability(data: dict) -> float | None:
     """Amount stability: 20-day CV of turnover amount, negated so stable = high score."""
     amounts = data.get("amount") or data.get("volume") or []
     if len(amounts) < 5:
-        return 0.0
+        return None
     import statistics
     mean_a = statistics.mean(amounts)
     if mean_a < 1e-6:
@@ -265,12 +267,12 @@ def _compute_amount_stability(data: dict) -> float:
     return -min(cv, 10.0)
 
 
-def _compute_panic_greed_diff(data: dict) -> float:
+def _compute_panic_greed_diff(data: dict) -> float | None:
     """Panic-greed diff: current sentiment index minus 20-day mean."""
     idx = data.get("sentiment_index")
     hist = data.get("sentiment_history", [])
     if idx is None or len(hist) < 5:
-        return 0.0
+        return None
     import statistics
     return idx - statistics.mean(hist[-20:])
 
@@ -304,60 +306,60 @@ def _compute_news_heat(data: dict) -> float:
     return total
 
 
-def _compute_news_direction(data: dict) -> float:
+def _compute_news_direction(data: dict) -> float | None:
     """News sentiment direction: ratio of positive news in recent items."""
     items = data.get("news_items", [])
     if len(items) < 3:
-        return 0.0
+        return None
     positive = sum(1 for it in items if it.get("level") in ("利好", "重大"))
     total = len(items)
     return positive / max(total, 1)
 
 
 # ── KDJ 指标 (via pandas-ta) ─────────────────────────────────────
-def _compute_kdj_k(data: dict) -> float:
+def _compute_kdj_k(data: dict) -> float | None:
     """technical.kdj.k_value: KDJ K 值 (via pandas-ta)"""
     high = data.get("high", [])
     low = data.get("low", [])
     close = data.get("close", [])
     if len(close) < 9:
-        return 50.0
+        return None
     result = ta.kdj(high=pd.Series(high), low=pd.Series(low), close=pd.Series(close), k=9, d=3)  # type: ignore[arg-type]
     if result is None or result.empty:
-        return 50.0
+        return None
     k_col = "K_9_3"
     val = result[k_col].iloc[-1]
-    return float(val) if not pd.isna(val) else 50.0
+    return float(val) if not pd.isna(val) else None
 
 
-def _compute_kdj_d(data: dict) -> float:
+def _compute_kdj_d(data: dict) -> float | None:
     """technical.kdj.d_value: KDJ D 值 (via pandas-ta)"""
     high = data.get("high", [])
     low = data.get("low", [])
     close = data.get("close", [])
     if len(close) < 9:
-        return 50.0
+        return None
     result = ta.kdj(high=pd.Series(high), low=pd.Series(low), close=pd.Series(close), k=9, d=3)  # type: ignore[arg-type]
     if result is None or result.empty:
-        return 50.0
+        return None
     d_col = "D_9_3"
     val = result[d_col].iloc[-1]
-    return float(val) if not pd.isna(val) else 50.0
+    return float(val) if not pd.isna(val) else None
 
 
-def _compute_kdj_j(data: dict) -> float:
+def _compute_kdj_j(data: dict) -> float | None:
     """technical.kdj.j_value: KDJ J 值 (via pandas-ta)"""
     high = data.get("high", [])
     low = data.get("low", [])
     close = data.get("close", [])
     if len(close) < 9:
-        return 50.0
+        return None
     result = ta.kdj(high=pd.Series(high), low=pd.Series(low), close=pd.Series(close), k=9, d=3)  # type: ignore[arg-type]
     if result is None or result.empty:
-        return 50.0
+        return None
     j_col = "J_9_3"
     val = result[j_col].iloc[-1]
-    return float(val) if not pd.isna(val) else 50.0
+    return float(val) if not pd.isna(val) else None
 
 
 # ── 综合信号（从 signal.py 迁移，2026-07-20） ─────────────────────
@@ -414,35 +416,35 @@ def _compute_industry_diversification(data: dict) -> float:
     return round(hhi, 4)
 
 
-def _compute_change_pct(data: dict) -> float:
+def _compute_change_pct(data: dict) -> float | None:
     """日涨跌幅：(close[-1] - close[-2]) / close[-2]。来源：Sina K-line 数据。"""
     closes = data.get("close", [])
     if len(closes) >= 2:
         return round((closes[-1] - closes[-2]) / closes[-2], 4)
-    return 0.0
+    return None
 
 
-def _compute_return_1m(data: dict) -> float:
+def _compute_return_1m(data: dict) -> float | None:
     """近1月收益率：(close[-1] - close[-21]) / close[-21]，约20个交易日。"""
     closes = data.get("close", [])
     if len(closes) >= 21:
         return round((closes[-1] - closes[-21]) / closes[-21], 4)
     if len(closes) >= 2:
         return round((closes[-1] - closes[0]) / closes[0], 4)
-    return 0.0
+    return None
 
 
-def _compute_return_3m(data: dict) -> float:
+def _compute_return_3m(data: dict) -> float | None:
     """近3月收益率：(close[-1] - close[-61]) / close[-61]，约60个交易日。"""
     closes = data.get("close", [])
     if len(closes) >= 61:
         return round((closes[-1] - closes[-61]) / closes[-61], 4)
     if len(closes) >= 2:
         return round((closes[-1] - closes[0]) / closes[0], 4)
-    return 0.0
+    return None
 
 
-def _compute_price(data: dict) -> float:
+def _compute_price(data: dict) -> float | None:
     """最新价格：优先使用实时价格，fallback到K线最新收盘价。来源：Sina实时 / K-line。"""
     price = data.get("price")
     if price is not None and price > 0:
@@ -450,7 +452,7 @@ def _compute_price(data: dict) -> float:
     closes = data.get("close", [])
     if closes and closes[-1] > 0:
         return closes[-1]
-    return 0.0
+    return None
 
 
 # --- 已注册在用（round11 P2-7 复核：下列函数均在 _FACTOR_FUNCTIONS 注册并参与计算） ---
@@ -670,7 +672,7 @@ def _compute_stock_divergence(data: dict) -> float:
 
 # ── Mapping of factor code → compute function ─────────────────────
 
-_BUILTIN_COMPUTERS: dict[str, Callable[[dict], float]] = {
+_BUILTIN_COMPUTERS: dict[str, Callable[[dict], float | None]] = {
     "style.size.ln_mcap": _compute_ln_mcap,
     "style.size.ln_float_mcap": _compute_ln_mcap,  # Same logic with float_mv
     "technical.ma.sma_5": _compute_sma_5,
@@ -1025,7 +1027,7 @@ class FactorRegistry:
 
     def __init__(self):
         self._factors: dict[str, FactorDefinition] = {}
-        self._computers: dict[str, Callable[[dict], float]] = dict(_BUILTIN_COMPUTERS)
+        self._computers: dict[str, Callable[[dict], float | None]] = dict(_BUILTIN_COMPUTERS)
         self._last_ic_batch: dict[str, float] = {}
         # Z03: 因子健康度元数据（sample_count / 最后计算时间）
         self._sample_counts: dict[str, int] = {}
@@ -1113,7 +1115,7 @@ class FactorRegistry:
         """Get a single factor definition by code."""
         return self._factors.get(code)
 
-    def register_computer(self, code: str, fn: Callable[[dict], float]) -> None:
+    def register_computer(self, code: str, fn: Callable[[dict], float | None]) -> None:
         """Register a custom computation function for a factor."""
         self._computers[code] = fn
 
@@ -1184,10 +1186,16 @@ class FactorRegistry:
             async with sem:
                 try:
                     from ..core.async_utils import run_sync
-                    rows = await asyncio.wait_for(
-                        run_sync(market_data_hub.get_history, sym, "A", "daily", timeout=20),
-                        timeout=25,
-                    )
+                    # R85 (round30): 先读 hub 已热身 K 线缓存（design-data warmup 填
+                    # hub._kline_cache_rows，R59④）——消除「两缓存域断裂」：因子模块
+                    # _kline_cache 冷（从未被预热）时不再直接 live fetch（盘后空），
+                    # 而是命中 hub 缓存拿到真实 K 线（技术信号路径同款数据源）。
+                    rows = market_data_hub.get_kline_rows_any(sym)
+                    if not rows:
+                        rows = await asyncio.wait_for(
+                            run_sync(market_data_hub.get_history, sym, "A", "daily", timeout=20),
+                            timeout=25,
+                        )
                     if not rows:
                         raise ValueError("empty data")
                     closes = [r.get("close", 0) for r in rows if r.get("close")]
@@ -1411,7 +1419,7 @@ class FactorRegistry:
         codes: list[str] | None = None,
         market_data: dict[str, dict[str, Any]] | None = None,
         symbol_extra: dict[str, dict] | None = None,
-    ) -> dict[str, dict[str, float]]:
+    ) -> dict[str, dict[str, float | None]]:
         """Compute factor values for given symbols.
 
         Args:
@@ -1463,10 +1471,10 @@ class FactorRegistry:
                     len(empty_symbols), len(symbols), empty_symbols[:5],
                 )
 
-        result: dict[str, dict[str, float]] = {}
+        result: dict[str, dict[str, float | None]] = {}
         _data_sources: dict[str, str] = {}
         for sym in symbols:
-            row: dict[str, float] = {}
+            row: dict[str, float | None] = {}
             data = market_data.get(sym, {}) if market_data else {}
 
             # Phase 2.7.4: 缓存降级 (P0-C round10) — data 为空或采集失败
@@ -1500,10 +1508,12 @@ class FactorRegistry:
                 try:
                     raw_value = computer(data)
                     definition = self._factors.get(code)
-                    row[code] = raw_value if raw_value is not None else 0.0
+                    # R85 (round30): 缺数据 None 保留（不再转 0.0 占位冒充「真实 0」）——
+                    # 下游 z-score 跳过 None、展示层 _factor_value_real 判 False 标缺失。
+                    row[code] = raw_value
                 except Exception as e:
                     logger.debug("Factor %s failed for %s: %s", code, sym, e)
-                    row[code] = 0.0
+                    row[code] = None
 
             result[sym] = row
 
@@ -1518,20 +1528,22 @@ class FactorRegistry:
         # R6-F4 (round6 §十 R6-05): 报告展示用因子保留原始值（RSI 0-100 / MACD DIF），
         # 供 rationale 展示真实指标——zscore 值被当原始 RSI 展示是数值失真根因（§十八-7）。
         _RAW_KEEP = {"technical.macd.macd"}  # R6-F4: macd 为 zscore，需保留真实 DIF；rsi_14 已是 raw
-        _raw: dict[str, list[tuple[str, float]]] = {}
+        _raw: dict[str, list[tuple[str, float | None]]] = {}
         for code in codes:
             definition = self._factors.get(code)
             if not definition or definition.standardization not in ("zscore", "zscore_large"):
                 continue
             _raw[code] = []
             for sym in symbols:
-                val = result.get(sym, {}).get(code, 0.0)
+                val = result.get(sym, {}).get(code)
                 _raw[code].append((sym, val))
             # R6-F4: 原始值保留与样本数无关（单符号等场景标准化被跳过时 raw 仍可用）
             if code in _RAW_KEEP:
                 for _sym, _val in _raw[code]:
                     result[_sym][f"{code}_raw"] = _val
-            all_v = [v for _, v in _raw[code]]
+            # R85 (round30): 跳过 None/非数值（缺数据）参与均值/方差——None 值符号
+            # 保持 None（展示层标缺失），不再因 None 参与统计导致 std 计算崩溃。
+            all_v = [v for _, v in _raw[code] if isinstance(v, (int, float))]
             if len(all_v) < 2:
                 continue
             mean_v = statistics.mean(all_v)
@@ -1544,11 +1556,13 @@ class FactorRegistry:
             # ── 混合归一化（Solution Design S2） ──
             # z-score（统计异常度）* 0.7 + min-max（相对排名）* 0.3
             # 保证即使 z-score 全负，顶部标的仍得正分
-            all_vals = [v for _, v in _raw[code]]
+            all_vals = [v for v in all_v if v == v]  # 排除 NaN
             min_v = min(all_vals)
             max_v = max(all_vals)
             mm_range = max_v - min_v
             for sym, val in _raw[code]:
+                if not isinstance(val, (int, float)):
+                    continue  # None/非数值符号保持 None（R85 缺数据诚实标注）
                 z = (val - mean_v) / std_v
                 # min-max 归一化到 [-1, 1]
                 if mm_range > 1e-10:
@@ -1559,11 +1573,17 @@ class FactorRegistry:
                 result[sym][code] = combined * 5.0 if definition.standardization != "zscore_large" else combined
             # zscore_large: 二次映射到 (0~1)
             if definition.standardization == "zscore_large":
-                z_vals = [result[sym][code] for sym, _ in _raw[code]]
+                z_vals_raw = [result[sym][code] for sym, _ in _raw[code]
+                              if isinstance(result[sym][code], (int, float))]
+                z_vals: list[float] = cast("list[float]", z_vals_raw)
+                if len(z_vals) < 2:
+                    continue
                 min_z, max_z = min(z_vals), max(z_vals)
                 if max_z - min_z > 1e-10:
                     for sym, _ in _raw[code]:
-                        result[sym][code] = (result[sym][code] - min_z) / (max_z - min_z)
+                        _v = result[sym].get(code)
+                        if isinstance(_v, (int, float)):
+                            result[sym][code] = (_v - min_z) / (max_z - min_z)
 
         # ── 后处理：从已计算因子推导综合信号 ──
         signal_code = "technical.signal.overall"
@@ -1587,7 +1607,8 @@ class FactorRegistry:
                 if macd_val is not None and isinstance(macd_val, (int, float)) \
                         and abs(macd_val) > 0.001:
                     enriched["macd"] = macd_val
-                if sma20 != 0 and last_close and last_close > 0:
+                # R85 (round30): sma20 缺数据为 None——isinstance 守卫防 TypeError
+                if isinstance(sma20, (int, float)) and sma20 != 0 and last_close and last_close > 0:
                     enriched["ma_bias_20"] = (last_close - sma20) / sma20
                 try:
                     sig = self._computers[signal_code](enriched)

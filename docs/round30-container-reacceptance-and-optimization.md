@@ -1,7 +1,7 @@
 # round30 容器重建全量验收 — 修复与优化方案（2026-08-19）
 
 > 本文档为 round29 R68-R84 全部落地后的**新一轮 Docker 重建 + 16 项动作全量验收**结论与剩余问题修复设计。
-> **本文档仅设计修复方案，不实施**。依据 AGENTS.md「反假完成机制」「性能软门禁」「设计流程」撰写。
+> **本文档设计修复方案 + 2026-08-19 实施轮已全部落地**（见文末状态段）。依据 AGENTS.md「反假完成机制」「性能软门禁」「设计流程」撰写。
 > 验证环境：Docker Engine 29.7.2 / Compose v5.4.0，prod profile 重建，后端 `787e58ffe5e4` / 前端 `eae3f8142b20`；`PROFILE_WARMUP=1`。
 > 验证窗口：2026-08-19 19:13–19:40（**周三盘后**，A 股收盘后；美股盘前）。盘后/数据源冷却成分见 §0.4。
 
@@ -454,4 +454,15 @@ warmup 30s 预算已超（实测 53.8s），**不能往 startup 关键路径内�
 - **Round 7（R92 watchlist 三形态决策 + 全文档一致性 review，2026-08-19 会话）**：用户采纳「A' 字段对齐 + 契约固化」——realtime 固定 7 字段、后端两条 enrich 路径统一补字段、不做前端归一化止血（§0.3/§4/§8/§14.3 R92 已定稿）。否决前端归一化（契约仍不一致）与 availability 枚举全量重构（改动大，列软债）。同步 review：§15 分批并入 R92 + patrol 负向断言随批分派（①②③随批1、④随批2）。
 - **Round 8（实施标准补齐 + 锚点复核，2026-08-19 会话）**：①R88/R89 补实施级详细设计（§14.5 个股 K 线缓存扩展：D1 探针前置 + 方案 A 复用 hub 缓存域/方案 B 独立 stock cache 二选一；§14.6 冷路径预热：就绪后后台异步预拉原则规避 30s 预算冲突 + ETF_FAST_JSON 默认启用）；②全文档一致性修正：R87「三值」→「四值」（§0.3/§0.4）、§12.7 覆盖分析并入 R92、§0.2/§14 标题 R85-R92；③锚点批量复核：factor_registry.py:144/183-186/324-357（占位默认值 0.0/50.0）、_kline.py:215-222（get_history live fetch）、analysis.py:688-699（R60 兜底）、sector_fetcher.py:240-268（concept 冷路径）、market.py:379（_search_a_stocks）、news_fetcher.py:265-277（分类）、fetch_history 源链（A 股个股 mootdx→Sina、US akshare→TickFlow→alphavantage→新浪，fetch_history:1566/1627/1718）——全部核实无误；④R88 D1 探针源链修正为代码实际顺序（原写 stooq/yahoo 有误）。
 
-> **当前状态（Round 1-8 完成）**：R85-R92 均达实施标准（精确 file:line + 根因 + 验收 + 负向断言）；R85/R86/R88/R89 已展开为实施级详细设计（§14.4-14.6）；R87/R92 口径已决策（§14.1/§14.3）；R88/R91 含「待交易时段复测」验证窗口标注（§0.4/§14.5.1）。本文档除设计外**不写任何修复代码**，等待「开始实施」指令。
+> **当前状态（Round 1-8 完成 + 2026-08-19 实施轮）**：R85-R92 均达实施标准（精确 file:line + 根因 + 验收 + 负向断言）；R85/R86/R88/R89 已展开为实施级详细设计（§14.4-14.6）；R87/R92 口径已决策（§14.1/§14.3）；R88/R91 含「待交易时段复测」验证窗口标注（§0.4/§14.5.1）。
+>
+> **2026-08-19 实施轮（已实施，commit 见 git log）**：
+> - R85：`factor_registry._fetch_market_data` live fetch 前先读 `hub.get_kline_rows_any`（两缓存域打通）；`_compute_*` 缺数据改填 None（RSI/KDJ 50.0、MACD/SMA 0.0、ln_mcap 0.0 等占位消除）；`compute()` z-score 跳过 None、signal/sma20 isinstance 守卫；LLM/engine 消费方（reports.py abs、composite_signal sum、_is_failed_result）补 None 防护。
+> - R86：`config.Settings.data_dir` 从 DATA_DIR env / database_url 解析；`_kline_cache_path` 优先读之（容器落 `/app/data` 挂载卷）；global indices cache 同路径。
+> - R87：`_component_coverage_stats` 统一分项覆盖率；summary「因子覆盖 X%」/ factor_availability `{filled,total:3,ratio,components}` / composite.reason 三处同底；report_text 删除「N/N 无兜底」。
+> - R88：`_kline_warmup_symbols` 预热符号集 = pool ETF + 持仓个股（600519 等 A 股/AAPL 等 US）。
+> - R89：`ETF_FAST_JSON` 默认启用（`_fast_json_enabled`）；`_warmup_sector_lists` 就绪后后台预拉 concept/industry（不占 30s 预算）。
+> - R90：`_CATEGORY_KEYWORDS` 补「连涨/提价」positive、「威胁/致命」risk、英文 attack(s)/threat risk；`enrich_news_summaries` 配额外 level≥3 全量 rule 兜底。
+> - R91：`_STATIC_A_STOCK_BASE` 静态个股基座兜底（instruments+levistock 双空时「茅台」→600519）；同步缺口已由 instruments 启动同步补齐（本地实测 A 股 5546 条）。
+> - R92：`_normalize_watchlist_realtime` 归一化 realtime 恒 7 字段；两条 enrich 路径统一；契约 watchlist.md §2.1 固化。
+> - 运行时验收（本地 2026-08-19 盘后）：factors no_data 由「数据源未接入」→「IC 积累中（239/250 交易日）」；strategy check summary「因子覆盖 33.3%」三处一致 + LLM full 报告；search 茅台→600519/gzmt→600519；watchlist realtime 恒 7 字段；concept 500 条 0.03s（R89 预拉命中）；level≥3 资讯 ai_summary 非 null。

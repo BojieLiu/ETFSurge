@@ -205,9 +205,13 @@ async def strategy_check(
         if not _has_real_factor_values(fb.get("factor_scores") or {})
     )
     total_factor_count = len(factor_breakdowns)
+    # R87 (round30): 组合级分项覆盖率（technical/valuation/momentum 三分项）——
+    # summary / factor_availability / composite.reason 三处同底的数据源。
+    # 替代 R74 的键级「因子填充率」：键级 66.5% 与 composite「分项覆盖 33.3%」
+    # 底不同并存互斥（round30 §8 实证，§14.1 已决策统一为分项覆盖率）。
+    _coverage_stats = _component_coverage_stats(factor_breakdowns)
     # R74 (round29): 组合级「因子键填充率」——与逐标的 factor_availability 同口径
-    # （键级、排除兑底默认值）聚合，供摘要「因子填充率 X%」使用。旧摘要
-    # 「因子数据 N/M 正常」是持仓级口径，与 composite_decision「覆盖率不足」互斥矛盾。
+    # （键级、排除兑底默认值）聚合。保留供外部契约兼容，但摘要不再使用（R87 统一为分项覆盖）。
     _keys_total = 0
     _keys_filled = 0
     for fb in factor_breakdowns.values():
@@ -228,8 +232,13 @@ async def strategy_check(
         "total_count": total_factor_count,
         "all_empty": filled_factor_count == 0,
         "partial": 0 < filled_factor_count < total_factor_count,
-        # R74 (round29): 组合级因子键填充率（%），摘要与前端「因子填充率」展示同源
+        # R74 (round29): 组合级因子键填充率（%）（deprecated——R87 统一为分项覆盖）
         "factor_fill_pct": factor_fill_pct,
+        # R87 (round30): 组合级分项覆盖率（%），摘要/报告正文同源
+        "factor_coverage_pct": _coverage_stats["coverage_pct"],
+        "coverage_components": _coverage_stats["per_holding"],
+        "coverage_agg": {"filled": _coverage_stats["agg_filled"],
+                         "total": _coverage_stats["agg_total"]},
         # P1-15: 兑底占比（全中性默认值的标的）——报告明示真实数据覆盖率
         "fallback_count": fallback_factor_count,
         "fallback_ratio": round(fallback_factor_count / total_factor_count, 4) if total_factor_count else 0.0,
@@ -310,7 +319,7 @@ async def strategy_check(
             }
         except Exception as e:
             _llm_failed = True
-            logger.warning("[strategy_check] LLM analysis failed: %s", e)
+            logger.warning("[strategy_check] LLM analysis failed: %s", e, exc_info=True)
             llm_result = {
                 "summary": f"LLM 分析暂不可用（{e}），返回因子数据摘要",
                 "suggestions": [],
@@ -443,11 +452,20 @@ async def strategy_check(
             h["factor_summary"] = format_factor_summary(
                 real_fs, tech_ind=fb.get("technical_indicators") if isinstance(fb, dict) else None
             )
-            # Phase 2.7.7: 注入因子级可用性详情（P1-15: 排除兑底默认值）
-            filled = sum(1 for k, v in real_fs.items()
-                         if isinstance(v, (int, float)) and _factor_value_real(k, v))
-            total = len(real_fs)
-            h["factor_availability"] = {"filled": filled, "total": total, "ratio": f"{filled}/{total}"}
+            # R87 (round30): factor_availability 改报分项覆盖（total=3，如 1/3）——
+            # 与 composite.reason「分项覆盖 X%」同底（旧键级 filled/total 如 26/39
+            # 底不同，与 composite 33.3% 并存互斥）。
+            _ph = (_coverage_stats.get("per_holding") or {}).get(sym)
+            if _ph:
+                h["factor_availability"] = {
+                    "filled": _ph["filled"], "total": _ph["total"],
+                    "ratio": _ph["ratio"], "components": _ph["components"],
+                }
+            else:
+                h["factor_availability"] = {"filled": 0, "total": 3, "ratio": "0/3",
+                                            "components": {"technical": False,
+                                                           "valuation": False,
+                                                           "momentum": False}}
         elif data_quality and data_quality.get("all_empty"):
             h["factor_availability"] = {"filled": 0, "total": 0, "ratio": "0/0"}
         # P1-13② (round9 §4.4-1): 无论有无真实信号都写 tech_signal（无则「数据不可用」标注，
@@ -508,13 +526,14 @@ async def strategy_check(
 
     filled_count = data_quality.get("filled_count", 0) if data_quality else 0
     total_count = data_quality.get("total_count", 0) if data_quality else 0
-    # R74 (round29): 摘要不再用「因子数据 N/M 正常」（持仓级口径 + "正常"断言）——
-    # 与 composite_decision「覆盖率不足」矛盾。改报组合级因子键填充率（%），
-    # 与逐标的 factor_availability（键级）同口径；填充率低时摘要自然不"正常"。
-    if data_quality and data_quality.get("factor_fill_pct") is not None:
-        quality_summary = f"；因子填充率 {data_quality['factor_fill_pct']}%"
+    # R87 (round30): 摘要改报组合级分项覆盖（_quality_summary_text），与 composite
+    # 「分项覆盖 X%」同底——删除 R74 键级「因子填充率」（66.5% 与 33.3% 并存互斥）。
+    # round27 R52 已确立该口径，本轮仅把展示侧对齐到决策侧。
+    _quality_s = _quality_summary_text(_coverage_stats)
+    if _quality_s:
+        quality_summary = _quality_s
     elif total_count > 0:
-        quality_summary = f"；因子填充率 {round(filled_count * 100.0 / total_count, 1)}%"
+        quality_summary = f"；因子覆盖 {round(filled_count * 100.0 / total_count, 1)}%"
     else:
         quality_summary = ""
 
@@ -619,11 +638,17 @@ async def strategy_check(
 
 
 def _is_failed_result(factor_scores: dict) -> bool:
-    """P0-4: 判断因子结果是否为失败（全部为空或全零）。"""
+    """P0-4: 判断因子结果是否为失败（全部为空或全零）。
+
+    R85 (round30): None 值（缺数据诚实标注）不算真实值——仅当存在非 0 数值因子
+    才视为「非失败」；全 None/全 0/空 → 失败（数据不可用）。
+    """
     if not factor_scores:
         return True
     for sym, scores in factor_scores.items():
-        if scores and isinstance(scores, dict) and any(v != 0 for v in scores.values()):
+        if scores and isinstance(scores, dict) and any(
+            isinstance(v, (int, float)) and v != 0 for v in scores.values()
+        ):
             return False
     return True
 
@@ -742,6 +767,83 @@ async def _empty_portfolio_diagnosis(db: AsyncSession, portfolio_type: str | Non
         return {"portfolio_type": portfolio_type, "diagnosis_error": str(e)}
 
 
+def _holding_component_coverage(fb: dict) -> tuple[int, int, dict[str, bool]]:
+    """R87 (round30): 单持仓分项覆盖率（technical/valuation/momentum 三分项）。
+
+    technical 以 technical_signal.score 是否有值计（技术信号路径独立）；valuation/
+    momentum 以 factor_scores 中对应前缀键是否有真实值计（_COMPOSITE_FACTOR_MAP）。
+    返回 (real_count, total=3, {comp: bool})——与 composite_decision 的 valid_rate
+    同底（round27 R52 已确立该口径，本轮把展示侧对齐）。
+    """
+    if not isinstance(fb, dict):
+        return (0, 3, {"technical": False, "valuation": False, "momentum": False})
+    fs = fb.get("factor_scores") or {}
+    fs = fs if isinstance(fs, dict) else {}
+    tech_sig = fb.get("technical_signal") or {}
+    tech_score = tech_sig.get("score")
+    tech_real = isinstance(tech_score, (int, float))
+    comp_real: dict[str, bool] = {}
+    for comp, keys in _COMPOSITE_FACTOR_MAP.items():
+        real_vals = [fs[k] for k in keys
+                     if isinstance(fs.get(k), (int, float)) and fs.get(k) != 0]
+        comp_real[comp] = bool(real_vals)
+    flags = {
+        "technical": tech_real,
+        "valuation": comp_real.get("valuation", False),
+        "momentum": comp_real.get("momentum", False),
+    }
+    return (sum(1 for f in flags.values() if f), 3, flags)
+
+
+def _component_coverage_stats(factor_breakdowns: dict) -> dict:
+    """R87 (round30): 组合级分项覆盖率聚合——summary / factor_availability /
+    composite.reason 三处口径统一的数据源（三处同底，禁止 66.5% 与 33.3% 并存）。
+    """
+    per_holding: dict[str, dict] = {}
+    agg_filled = 0
+    agg_total = 0
+    for sym, fb in factor_breakdowns.items():
+        filled, total, flags = _holding_component_coverage(fb)
+        per_holding[sym] = {
+            "filled": filled, "total": total, "ratio": f"{filled}/{total}",
+            "components": flags,
+        }
+        agg_filled += filled
+        agg_total += total
+    coverage_pct = round(agg_filled * 100.0 / agg_total, 1) if agg_total else 0.0
+    return {
+        "per_holding": per_holding,
+        "agg_filled": agg_filled,
+        "agg_total": agg_total,
+        "coverage_pct": coverage_pct,
+    }
+
+
+def _quality_summary_text(coverage_stats: dict) -> str:
+    """R87: 摘要文案「因子覆盖 X%」（组合级分项覆盖，与 composite.reason 同底）。
+
+    替代 R74 的键级「因子填充率」——键级 66.5% 与 composite「分项覆盖 33.3%」
+    底不同会并存互斥（round30 §8 实证）。分项覆盖 = 决策门禁输入（展示值=决策值）。
+    """
+    if not coverage_stats or coverage_stats.get("agg_total", 0) <= 0:
+        return ""
+    return f"；因子覆盖 {coverage_stats['coverage_pct']}%"
+
+
+def _rule_fallback_quality_line(coverage_stats: dict, fallback_count: int = 0) -> str:
+    """R87: report_text 因子数据质量行——组合级分项覆盖，删除「N/N 无兜底」持仓级口径。
+
+    round30 §8 实证：正文「13/13 无兜底」与 composite「分项覆盖 33.3%」自相矛盾。
+    统一为分项覆盖，并可列出兜底占比（fallback_count 语义保留）。
+    """
+    if not coverage_stats or coverage_stats.get("agg_total", 0) <= 0:
+        return "**因子数据质量**：无可计算持仓。"
+    pct = coverage_stats["coverage_pct"]
+    suffix = (f"（其中 {fallback_count} 只技术因子缺数据兜底）"
+              if fallback_count else "")
+    return f"**因子数据质量**：分项覆盖 {pct:g}%（技术/估值/动量三分项）{suffix}"
+
+
 def _attach_composite_decisions(
     factor_breakdowns: dict[str, dict],
     data_quality: dict | None = None,
@@ -757,6 +859,9 @@ def _attach_composite_decisions(
     valid_rate=1/3<0.6 → degraded=True、signal=None（诚实「综合信号不可用」）。
     ≥2 分项可用时**权重归一**（缺失分项权重置 0、其余归一化到和 1），避免缺失分项
     静默稀释分数。技术信号（technical_signal.score 有值即视为可用）独立计入。
+
+    R87 (round30): 分项覆盖率改用 `_holding_component_coverage`（与 data_quality /
+    factor_availability / summary 同底），保证三处数值一致。
     """
     from ...analysis.signal import composite_signal_with_gate
 
@@ -784,8 +889,9 @@ def _attach_composite_decisions(
             comp_vals[comp] = round(sum(real_vals) / len(real_vals), 3) if real_vals else 0.0
 
         # 分项覆盖率：technical 以 technical_signal 是否有 score 计；valuation/momentum
-        # 以因子键是否真实计（3 分项）
-        _tech_real = isinstance(tech_sig.get("score"), (int, float))
+        # 以因子键是否真实计（3 分项）——R87: 与 _holding_component_coverage 同底
+        _filled, _total, _flags = _holding_component_coverage(fb)
+        _tech_real = _flags["technical"]
         _real_flags = [_tech_real, comp_real["valuation"], comp_real["momentum"]]
         _num_real = sum(1 for r in _real_flags if r)
         valid_rate = (_num_real / 3.0) if _num_real else 0.0
@@ -1187,17 +1293,23 @@ def _build_rule_fallback_report(
     fallback_count = (data_quality or {}).get("fallback_count", 0)
     fallback_ratio = (data_quality or {}).get("fallback_ratio", 0.0)
     lines.append("")
-    # P0-B (round10 §3.2-2): 标题必须如实反映真实覆盖率——`N/M 可用` 不再只在
-    # LLM 失败时才区分，而是把 fallback_count/ratio 也拼入（全兜底时明示），
-    # 避免「标题 10/10 可用、逐项 factor_availability 6/34」的假正常矛盾。
-    if fallback_count and total:
+    # R87 (round30): 标题改报组合级分项覆盖（_rule_fallback_quality_line）——
+    # 删除「N/N 无兜底」持仓级口径（与 composite「分项覆盖 33.3%」自相矛盾）。
+    # fallback_count 语义保留（兜底占比明示，P0-B 延续）。
+    _cov = data_quality.get("coverage_agg") if isinstance(data_quality, dict) else None
+    if isinstance(_cov, dict) and (_cov.get("total") or 0) > 0:
+        lines.append(_rule_fallback_quality_line(
+            {"agg_total": _cov["total"], "coverage_pct": data_quality.get("factor_coverage_pct", 0.0)},
+            fallback_count=fallback_count,
+        ))
+    elif fallback_count and total:
         _ratio_pct = f"{fallback_ratio*100:.0f}%"
         lines.append(
             f"**因子数据质量**：{filled}/{total} 只持仓因子数据可用"
             f"（其中 {fallback_count} 只技术因子缺数据兜底，占比 {_ratio_pct}）。"
         )
     elif total:
-        lines.append(f"**因子数据质量**：{filled}/{total} 只持仓因子数据可用（无兜底）。")
+        lines.append(f"**因子数据质量**：{filled}/{total} 只持仓因子数据可用。")
     else:
         lines.append("**因子数据质量**：无可计算持仓。")
     lines.append("")

@@ -517,9 +517,12 @@ async def generate_strategy_check_report(
         sig = fb.get("technical_signal", {})
         drift = fb.get("weight_drift", {})
 
+        # R85 (round30): factor_scores 可能含 None（缺数据诚实标注）——过滤非数值，
+        # 避免 abs(None)/f"{None:.2f}" 崩溃（LLM 报告生成路径「bad operand type」）。
+        _numeric_fs = [(k, v) for k, v in fs.items() if isinstance(v, (int, float))]
         factor_text = "；".join(
-            f"{k}: {v:.2f}" for k, v in sorted(fs.items(), key=lambda x: -abs(x[1]))[:5]
-        ) if fs else "无因子数据"
+            f"{k}: {v:.2f}" for k, v in sorted(_numeric_fs, key=lambda x: -abs(x[1]))[:5]
+        ) if _numeric_fs else "无因子数据"
         signal_text = sig.get("signal", "hold")
         drift_text = f"偏离 {drift.get('drift_pct', 0):.1f}%" if drift else "—"
 
@@ -694,8 +697,10 @@ async def generate_sector_analysis(
             name = fs.get("name", fs.get("symbol", "?"))
             scores = fs.get("factor_scores", fs.get("scores", {}))
             if scores and isinstance(scores, dict):
+                # R85 (round30): 过滤 None/非数值因子值（abs(None) 崩溃防护）
+                _numeric = [(k, v) for k, v in scores.items() if isinstance(v, (int, float))]
                 score_items = ", ".join(
-                    f"{k}: {v:.2f}" for k, v in sorted(scores.items(), key=lambda x: -abs(x[1]))[:5]
+                    f"{k}: {v:.2f}" for k, v in sorted(_numeric, key=lambda x: -abs(x[1]))[:5]
                 )
                 prompt += f"- {name}: {score_items}\n"
             else:
@@ -1093,7 +1098,10 @@ def _build_design_report_prompt(
                     # 取 top-3 factor_scores 子项（如有 breakdown）
                     fs_detail = e.get("factor_scores", {})
                     if isinstance(fs_detail, dict) and fs_detail:
-                        top_3 = sorted(fs_detail.items(), key=lambda x: abs(x[1]), reverse=True)[:3]
+                        # R85 (round30): 过滤 None 因子值（abs(None) 崩溃防护）
+                        _numeric_detail = [(k, v) for k, v in fs_detail.items()
+                                           if isinstance(v, (int, float))]
+                        top_3 = sorted(_numeric_detail, key=lambda x: abs(x[1]), reverse=True)[:3]
                         for f_code, f_val in top_3:
                             lines.append(f"    {f_code}: {f_val:.2f}")
         lines.append("")

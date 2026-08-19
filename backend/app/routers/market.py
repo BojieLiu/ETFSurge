@@ -376,6 +376,47 @@ async def _search_indices_akshare_fallback(
 
     return results[:20]
 
+# R91 (round30): 静态 A 股个股基座——instruments 表空（同步缺口）+ levistock 盘后
+# 空结果时仍可搜到高频个股（「茅台」→600519）。仅收录确定性代码/名称映射，宁缺毋滥。
+_STATIC_A_STOCK_BASE: list[dict[str, str]] = [
+    {"symbol": "600519", "name": "贵州茅台"},
+    {"symbol": "601318", "name": "中国平安"},
+    {"symbol": "600036", "name": "招商银行"},
+    {"symbol": "601398", "name": "工商银行"},
+    {"symbol": "600030", "name": "中信证券"},
+    {"symbol": "000858", "name": "五粮液"},
+    {"symbol": "000333", "name": "美的集团"},
+    {"symbol": "300750", "name": "宁德时代"},
+    {"symbol": "002594", "name": "比亚迪"},
+    {"symbol": "601899", "name": "紫金矿业"},
+    {"symbol": "600900", "name": "长江电力"},
+    {"symbol": "601988", "name": "中国银行"},
+    {"symbol": "601288", "name": "农业银行"},
+    {"symbol": "601166", "name": "兴业银行"},
+    {"symbol": "600276", "name": "恒瑞医药"},
+    {"symbol": "600887", "name": "伊利股份"},
+    {"symbol": "000651", "name": "格力电器"},
+    {"symbol": "000001", "name": "平安银行"},
+    {"symbol": "601012", "name": "隆基绿能"},
+    {"symbol": "603259", "name": "药明康德"},
+]
+
+
+def _match_static_a_stock_base(keyword: str) -> list[dict[str, Any]]:
+    """R91: 静态基座匹配（代码/名称/拼音首字）。空关键词 → 空列表（不导出全量）。"""
+    if not keyword:
+        return []
+    kw = keyword.lower()
+    out = []
+    for s in _STATIC_A_STOCK_BASE:
+        if kw in s["symbol"].lower() or kw in s["name"].lower():
+            out.append({
+                "symbol": s["symbol"], "name": s["name"],
+                "market": "A", "asset_type": "stock", "type": "stock",
+            })
+    return out
+
+
 async def _search_a_stocks(keyword: str) -> list[dict[str, Any]]:
     """A 股个股搜索：instruments 表（market=A, asset_type=stock）→ 空则 levistock 降级。
 
@@ -454,13 +495,17 @@ async def _search_a_stocks(keyword: str) -> list[dict[str, Any]]:
                 continue
             if _pinyin is not None and kw in _pinyin(s):
                 matched.append(s)
-        return [{
-            "symbol": s["symbol"], "name": s["name"],
-            "market": "A", "asset_type": "stock", "type": "stock",
-        } for s in matched][:10]
+        if matched:
+            return [{
+                "symbol": s["symbol"], "name": s["name"],
+                "market": "A", "asset_type": "stock", "type": "stock",
+            } for s in matched][:10]
+        # R91 (round30): levistock 空结果/未命中 → 静态个股基座兜底（盘后也能搜到
+        # 高频个股；未收录词返回空，不编造）。
+        return _match_static_a_stock_base(keyword)
     except Exception as e:
         logger.warning("[search] _search_a_stocks levistock fallback failed: %s", e)
-        return []
+        return _match_static_a_stock_base(keyword)
 
 # TODO: 未接入前端
 @router.get("/indices/meta")
@@ -759,6 +804,41 @@ def _norm_watchlist_symbol(symbol: str) -> str:
             break
     return s
 
+# R92 (round30): realtime 固定 7 字段契约（api-contracts/market/watchlist.md §2.1）——
+# 两条 enrich 路径统一经本函数归一化，消除「形态①estimate_source / 形态②is_estimated」
+# 三形态并存（前端只读 is_estimated 时形态①「估」徽标漏显）。
+_REALTIME_7_FIELDS = ("price", "change_pct", "volume", "as_of",
+                      "is_estimated", "estimate_source", "data_source")
+
+
+def _normalize_watchlist_realtime(rt: dict | None) -> dict | None:
+    """R92: realtime 恒含 7 字段（缺省显式补 null/false）。
+
+    同一「T-1 收盘估值」语义只编码为 `is_estimated=true + estimate_source`：
+    - 旧形状①（只有 estimate_source 无 is_estimated）→ 自动补 is_estimated=true；
+    - 估值形状 data_source 缺失 → 补 "stale"（估=非实时，按陈旧标注）；
+    - 纯实时形状（price/change_pct/volume 有值，无 estimate_source）→ is_estimated=false。
+    realtime=None 返回 None（item 级 realtime_unavailable/_degraded 语义保留）。
+    """
+    if not isinstance(rt, dict):
+        return None
+    est_src = rt.get("estimate_source")
+    is_est = bool(rt.get("is_estimated"))
+    if not is_est and est_src is not None:
+        # 形态①旧形状：estimate_source 有值但无 is_estimated → 判定为估值
+        is_est = True
+    out = {
+        "price": rt.get("price"),
+        "change_pct": rt.get("change_pct"),
+        "volume": rt.get("volume"),
+        "as_of": rt.get("as_of"),
+        "is_estimated": is_est,
+        "estimate_source": est_src,
+        "data_source": rt.get("data_source") or ("stale" if is_est else None),
+    }
+    return out
+
+
 async def _watchlist_enrich_items(items: list) -> list[dict]:
     """P0-4 (round9 §10): watchlist 实时行情 enrich（批量 + per-item 降级 + auto-heal）。
 
@@ -945,11 +1025,11 @@ async def _watchlist_enrich_items(items: list) -> list[dict]:
             "updated_at": item.updated_at.isoformat() if item.updated_at else None,
         }
         if resolved_realtime:
-            item_dict["realtime"] = {
+            item_dict["realtime"] = _normalize_watchlist_realtime({
                 "price": resolved_realtime.get("price"),
                 "change_pct": resolved_realtime.get("change_pct"),
                 "volume": resolved_realtime.get("volume"),
-            }
+            })
         else:
             # P0-E (round10 §5.2): 实时 enrich 失败/超时 → 降级到单标的轻量快照
             # （5s TTL quote 缓存）。命中则回填 realtime 并标注 data_source=stale，
@@ -959,12 +1039,12 @@ async def _watchlist_enrich_items(items: list) -> list[dict]:
                 from ..services.cache_service import cache_get as _cache_get
                 _q = await _cache_get(_quote_key(resolved_symbol, item.asset_type or "A"))
                 if _q and _q.get("price") is not None:
-                    item_dict["realtime"] = {
+                    item_dict["realtime"] = _normalize_watchlist_realtime({
                         "price": _q.get("price"),
                         "change_pct": _q.get("change_pct"),
                         "volume": _q.get("volume"),
                         "data_source": "stale",
-                    }
+                    })
             except Exception as _e:
                 logger.debug("[watchlist] quote-cache fallback failed for %s: %s", resolved_symbol, _e)
             # round14 P0-D/P2-AF: 降级注入显式标记——realtime 显式置 null + _degraded=true
@@ -983,7 +1063,7 @@ async def _watchlist_enrich_items(items: list) -> list[dict]:
                     from ..services.market_service import _last_close_fallback
                     _lc = await _last_close_fallback(resolved_symbol, _at)
                     if _lc:
-                        item_dict["realtime"] = _lc
+                        item_dict["realtime"] = _normalize_watchlist_realtime(_lc)
                 except Exception:
                     pass
                 if item_dict.get("realtime") is None:
@@ -1034,14 +1114,14 @@ async def _watchlist_close_fallback(items: list) -> list[dict]:
             _lg = await _cg(_qk(item.symbol, _at))
             if (_lg and _lg.get("price") is not None
                     and _lg.get("estimate_source") == "last_close"):
-                row["realtime"] = {
+                row["realtime"] = _normalize_watchlist_realtime({
                     "price": _lg.get("price"),
                     "change_pct": _lg.get("change_pct"),
                     "volume": _lg.get("volume"),
                     "data_source": "stale",
                     "as_of": _lg.get("as_of") or "",
                     "estimate_source": "last_close_cache",
-                }
+                })
                 return row
         except Exception:
             pass
@@ -1055,7 +1135,7 @@ async def _watchlist_close_fallback(items: list) -> list[dict]:
             except BaseException:
                 _lc = None
         if _lc:
-            row["realtime"] = _lc  # is_estimated=True + as_of=T-1 收盘（「估」徽标）
+            row["realtime"] = _normalize_watchlist_realtime(_lc)  # is_estimated=True + as_of=T-1 收盘（「估」徽标）
             # R78 (round29): 成功收盘行写 quote 缓存（24h）——下次直接读缓存
             try:
                 await _cs(_qk(item.symbol, _at), _lc, _LAST_GOOD_TTL)
@@ -1073,14 +1153,14 @@ async def _watchlist_close_fallback(items: list) -> list[dict]:
                 from ..services.cache_service import cache_get as _cg
                 _lg = await _cg(_qk2(item.symbol, _at))
                 if _lg and _lg.get("price") is not None:
-                    row["realtime"] = {
+                    row["realtime"] = _normalize_watchlist_realtime({
                         "price": _lg.get("price"),
                         "change_pct": _lg.get("change_pct"),
                         "volume": _lg.get("volume"),
                         "data_source": "stale",
                         "as_of": _lg.get("as_of") or "",
                         "estimate_source": "last_good",
-                    }
+                    })
             except Exception as _e:
                 logger.debug("[watchlist] last-good fallback failed for %s: %s", item.symbol, _e)
         # 三层全失败（realtime 缺 + 收盘兜底 None + last-good None）→ 诚实标注

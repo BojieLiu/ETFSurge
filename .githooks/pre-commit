@@ -327,18 +327,17 @@ else
     OTHER_BACKEND=$(git diff --cached --name-only --diff-filter=ACM \
         -- 'backend/*' ':!backend/app/*' ':!backend/scripts/*' ':!backend/tests/*.py' 2>/dev/null || true)
 
-    if [ -n "$CONFTEST_STAGED" ] || [ -n "$LOGIC_STAGED" ] || [ -n "$OTHER_BACKEND" ]; then
-        echo "[pre-commit] 检测到后端逻辑变更，执行 pytest 全量（xdist 并行）..."
+    if [ -n "$CONFTEST_STAGED" ]; then
+        # 档 0：conftest/fixtures 变更 → 恒全量（影响所有测试场景；conftest 变更也会使
+        # 全量测试凭据的 files_hash 失效，走不到复用分支，此处为显式兜底）
+        echo "[pre-commit] 检测到 conftest/fixtures 变更，执行 pytest 全量（xdist 并行）..."
         cd backend
-        # F23 (round6 §17.2): 外层 timeout 兜底——pytest 进程级超时（30min），
-        # 配合 pytest.ini 全局 --timeout=180（单测试级），任何一层挂起都会
-        # 报 FAIL 而非无限挂起（commit 曾卡死 ~1 小时）。
-        # 2026-08-09: -n auto 并行（pytest-xdist）全量 220s → 90s；测试间隔离
-        # 已验证（临时 DB + autouse 缓存清理 fixture）。xdist 缺失时回退串行。
-        # ⚠️ 检测用 import 而非 `pytest --version | grep`——version 输出不含 plugins 列表。
         XDIST_ARGS=""
         if python -c "import xdist" 2>/dev/null; then
-            XDIST_ARGS="-n auto"
+            # round30 修复: `-n auto` 按 cpu_count（本机 20 核）启动 20 个 worker 进程，
+            # Windows 资源/句柄上限导致 execnet gateway bootstrap EOFError（INTERNALERROR）。
+            # 封顶默认 4（env PYTEST_XDIST_WORKERS 可调），仍享并行加速且不炸机器。
+            XDIST_ARGS="-n ${PYTEST_XDIST_WORKERS:-4}"
         else
             echo "[pre-commit] ⚠️ pytest-xdist 未安装，回退单进程（建议 pip install -r requirements.txt）"
         fi
@@ -346,6 +345,49 @@ else
             echo "[pre-commit] ✅ pytest 全量通过"; cd ..
         else
             cd ..; echo "🚫 pytest 失败或超时"; exit 1
+        fi
+    elif [ -n "$LOGIC_STAGED" ] || [ -n "$OTHER_BACKEND" ]; then
+        # 档 1：逻辑变更 → 默认全量 pytest。
+        # round30 方案 B（2026-08-19）：patrol L1-unit 全量通过时已写全量测试凭据
+        # （logs/patrol/tests_ok.json，含代码面指纹）。凭据有效（指纹一致 + HEAD 一致 +
+        # 未过期）→ 复用该次全量结果，跳过重复全量，只跑变更的受影响测试（秒级）。
+        # 凭据失效（任何代码变更/过期）→ 恢复全量，安全网不失效。
+        if [ -z "$SKIP_TESTS_MARKER" ] && python backend/scripts/tests_ok_marker.py check 2>&1; then
+            echo "[pre-commit] ✅ 全量测试凭据有效（patrol 已全量验证），跳过重复全量"
+            if [ -n "$TEST_STAGED" ]; then
+                # 仍跑变更的受影响测试作为冒烟（秒级）
+                echo "[pre-commit] 执行受影响测试（凭据复用模式）..."
+                cd backend
+                TESTS_TO_RUN=$(printf '%s\n' "$TEST_STAGED" | sed 's#^backend/##' | tr '\n' ' ')
+                if timeout 600 python -m pytest -x $TESTS_TO_RUN 2>&1; then
+                    echo "[pre-commit] ✅ affected tests 通过"; cd ..
+                else
+                    cd ..; echo "🚨 affected tests 失败（见上）"; exit 1
+                fi
+            fi
+        else
+            echo "[pre-commit] 检测到后端逻辑变更，执行 pytest 全量（xdist 并行）..."
+            cd backend
+            # F23 (round6 §17.2): 外层 timeout 兜底——pytest 进程级超时（30min），
+            # 配合 pytest.ini 全局 --timeout=180（单测试级），任何一层挂起都会
+            # 报 FAIL 而非无限挂起（commit 曾卡死 ~1 小时）。
+            # 2026-08-09: -n auto 并行（pytest-xdist）全量 220s → 90s；测试间隔离
+            # 已验证（临时 DB + autouse 缓存清理 fixture）。xdist 缺失时回退串行。
+            # ⚠️ 检测用 import 而非 `pytest --version | grep`——version 输出不含 plugins 列表。
+            XDIST_ARGS=""
+            if python -c "import xdist" 2>/dev/null; then
+                # round30 修复: `-n auto` 按 cpu_count（本机 20 核）启动 20 个 worker 进程，
+                # Windows 资源/句柄上限导致 execnet gateway bootstrap EOFError（INTERNALERROR）。
+                # 封顶默认 4（env PYTEST_XDIST_WORKERS 可调），仍享并行加速且不炸机器。
+                XDIST_ARGS="-n ${PYTEST_XDIST_WORKERS:-4}"
+            else
+                echo "[pre-commit] ⚠️ pytest-xdist 未安装，回退单进程（建议 pip install -r requirements.txt）"
+            fi
+            if timeout 1800 python -m pytest -x $XDIST_ARGS 2>&1; then
+                echo "[pre-commit] ✅ pytest 全量通过"; cd ..
+            else
+                cd ..; echo "🚫 pytest 失败或超时"; exit 1
+            fi
         fi
     elif [ -n "$TEST_STAGED" ]; then
         # 纯测试文件 .py 变更（docstring/新增用例）→ 只跑变更的测试文件

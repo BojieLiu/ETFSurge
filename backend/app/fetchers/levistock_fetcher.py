@@ -42,6 +42,8 @@ _CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
         "边境", "军演", "国防", "地缘", "导弹", "演习", "博弈",
         # R72 (round29): 地缘扣留/扣押类——「俄方：瑞典扣留涉俄货船」应判 risk≥4
         "扣留", "扣押", "截扣", "扣押货船",
+        # R90 (round30): 威胁/致命类——「美方威胁升级关税」「致命组合拳」应判 risk≥4
+        "威胁", "致命", "恐吓",
     ),
     "positive": (  # 利好/重要正面 — 政策宽松、大涨、超预期
         "利好", "上调", "降准", "降息", "positive", "超预期",
@@ -57,6 +59,8 @@ _CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
         "协议", "合作",
         # O7 (round7 §7 P9): 国际重磅宏观事件——利率决议/非农/OPEC
         "利率决议", "非农", "OPEC",
+        # R90 (round30): 「广州新房五连涨」等量价走强词——旧未覆盖 → level1 other
+        "连涨", "提价", "量价齐升", "景气上行",
         # 英文利好词
         "surge", "partnership", "breakthrough", "soar",
     ),
@@ -141,7 +145,10 @@ _ENGLISH_CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
     "risk": ("war", "conflict", "sanction", "tariff", "recession", "crash", "selloff",
              "plunge", "crisis", "default", "geopolitical", "bankruptcy", "layoffs",
              "hormuz", "strait", "missile", "invasion", "attacked", "struck",
-             "warship", "embargo", "blockade", "ceasefire", "deploy"),
+             "warship", "embargo", "blockade", "ceasefire", "deploy",
+             # R90 (round30): "Iran attacks US targets" 旧未命中（只有 attacked）→ level2
+             "attack", "attacks", "strike", "strikes", "threat", "threaten",
+             "escalat", "retaliate", "retaliation"),
     "positive": ("rally", "surge", "gain", "beats", "record high", "recovery", "boom",
                  "upgrade", "soar", "jumps", "rises", "advance"),
     "negative": ("falls", "drop", "loss", "miss", "downgrade", "slump", "decline",

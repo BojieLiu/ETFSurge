@@ -40,7 +40,11 @@ GET /api/v1/market/watchlist
       "realtime": {
         "price": 2.56,
         "change_pct": 1.25,
-        "volume": 123456789
+        "volume": 123456789,
+        "as_of": "2026-08-19 15:30:00",
+        "is_estimated": false,
+        "estimate_source": null,
+        "data_source": "realtime"
       }
     },
     {
@@ -62,17 +66,39 @@ GET /api/v1/market/watchlist
         "price": 189.5,
         "change_pct": -0.42,
         "volume": 54321098,
-        "is_estimated": true
+        "as_of": "2026-08-19",
+        "is_estimated": true,
+        "estimate_source": "last_close",
+        "data_source": "stale"
       },
       "realtime_unavailable": true,
       "realtime_note": "该市场数据源暂不可用（无实时行情）"
     }
   ],
-  "total": 1,
+  "total": 3,
   "limit": 100,
   "offset": 0
 }
 ```
+
+> **R92 (round30) — realtime 固定 7 字段契约**（2026-08-19 会话决策：A' 字段对齐 + 契约固化，
+> 不做前端归一化止血）：当 `realtime` 非 null 时，**恒含以下 7 个键**（缺省显式补
+> `null`/`false`，禁止出现只含部分键的「形态①/②」异构）：
+
+| Field | Type | Description |
+|-------|------|-------------|
+| price | number \| null | 最新价（估值时为最近收盘价） |
+| change_pct | number \| null | 涨跌幅 % |
+| volume | number \| null | 成交量 |
+| as_of | string \| null | 数据时间（实时=行情时间；估值=T-1 收盘日期） |
+| is_estimated | boolean | true=估值（非实时），false=实时 |
+| estimate_source | string \| null | 估值来源：`last_close` \| `last_close_cache` \| `last_good` \| `nav` \| `tracked_index` \| null（实时时） |
+| data_source | string \| null | 数据源：`realtime` \| `stale` \| null |
+
+**语义约束**：
+- `is_estimated=true` 时 `estimate_source` 必有值（last_close/last_close_cache/last_good/nav/tracked_index）；
+- 前端只读 `is_estimated` 渲染「估」徽标（不再出现 `estimate_source` 有值但 `is_estimated` 缺失的形态）；
+- `realtime=null` 时 item 级 `realtime_unavailable` / `_degraded` / `data_unavailable` 标记仍适用（顶层语义不变）。
 
 #### 行为契约 / Behavioral Contract (Z22 脏数据修复，合并自 watchlist-v2.md)
 
@@ -90,6 +116,7 @@ GET /api/v1/market/watchlist
    - **三层全失败**（realtime 缺 + 收盘兜底 None + last-good 无）→ 置 `_degraded: true` + `data_unavailable: true` + `realtime_note: "非交易时段无行情（数据源维护中）"` + `data_unavailable_since: <ISO 时间戳>`，诚实区分「没波动」vs「没数据」，杜绝空白冒充「行情加载中」。
    - last-good 报价写入：每次 `get_asset_realtime` 成功取到真实价即写入 `quote_key(symbol, asset_type)`（TTL 24h），使其在周末（无交易日）仍存活。
 7. **round27 R53 — 美股/港股指数实时路由接通**：`get_asset_realtime(symbol, "index")` 对 `asset_type=index` 且 `_lookup_index_market` 返回 `US`/`HK` 的标的，不再返回 `{"unsupported_market", "error"}`（round16 P0-22④ 过防护），改为路由到 `get_global_indices()`（经 `_GLOBAL_INDEX_DEFS` 的 ^GSPC/^IXIC/^DJI/^HSI），符号映射 `SPX→^GSPC / IXIC→^IXIC / DJI→^DJI / HSI→^HSI`。成功返回标准实时对象 `{symbol, name, price, change_pct, change_amount, asset_type:"index", market, available}`；仅当 global indices 中确实无该标的时才返回 `unsupported_market`。
+8. **round30 R92 — realtime 恒含 7 字段**：两条 enrich 路径（`_watchlist_enrich_items` / `_watchlist_close_fallback`）拼装 realtime 时统一经 `_normalize_watchlist_realtime()` 归一化——补全 `{price, change_pct, volume, as_of, is_estimated, estimate_source, data_source}` 七键（缺省 `null`/`false`），同一「T-1 收盘估值」语义只编码为 `is_estimated=true + estimate_source`，禁止再出现只有 `estimate_source` 而无 `is_estimated` 的形态①（前端「估」徽标漏显）。
 
 **合法代码形态判断**:
 
@@ -237,7 +264,7 @@ DELETE /api/v1/market/watchlist
 | asset_type | string | `A` \| `HK` \| `US` \| `index` \| `commodity` |
 | added_at | string (ISO datetime) | 添加时间 |
 | notes | string \| null | 用户备注 |
-| realtime | object \| null | 实时行情快照（可选，含 price, change_pct, volume；T-1 兜底时含 `is_estimated: true`；last-good 兜底时含 `data_source: "stale"` + `as_of`） |
+| realtime | object \| null | 实时行情快照（可选；**非 null 时恒含 R92 固定 7 字段** price/change_pct/volume/as_of/is_estimated/estimate_source/data_source，缺省显式补 null/false） |
 | realtime_unavailable | boolean \| null | round24 R20：美股/HK 实时源不可用显式标记（true=暂无实时，非静默 null） |
 | realtime_note | string \| null | round24 R20：无实时源说明文案；round27 R45 三层全失败时升级为「非交易时段无行情（数据源维护中）」 |
 | _degraded | boolean \| null | A 股等无实时源时的兼容降级标记 |

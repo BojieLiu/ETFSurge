@@ -116,6 +116,21 @@ class NewsMixin:
                         bucket_count += 1
             logger.debug("[hub] enrich_news_summaries bucket=%s quota=%d done=%d",
                          bucket, q, bucket_count)
+        # R90 (round30): 配额外 level≥3 高重要性条目 rule 兜底全量覆盖——分桶配额
+        # （cap=6 → macro=2/global=1）使配额外条目 ai_summary 恒 null（round30 §6
+        # 实证 macro/global 高重要性条目摘要缺口）。本 pass 对 level>=3 且 ai_summary
+        # 为 null 的条目直接填 rule 摘要（非 LLM，来源标注 rule；下轮 LLM 恢复仍重试）。
+        for bucket in ("headlines", "macro", "global"):
+            for n in self._news_bucket(bucket):
+                if n.get("ai_summary"):
+                    continue
+                if int(n.get("level", 0) or 0) < 3:
+                    continue
+                _rule = _rule_news_summary(n)
+                if _rule:
+                    n["ai_summary"] = _rule
+                    n["ai_summary_source"] = "rule"
+                    enriched += 1
         return enriched
 
 

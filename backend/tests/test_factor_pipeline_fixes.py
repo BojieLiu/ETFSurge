@@ -80,10 +80,11 @@ class TestR70FakeMarketValueRemoved:
         assert "fund_scale/total_mv" in GAP_FIELD_MAP["style.size.ln_mcap"]
 
     def test_ln_mcap_zero_guard(self):
-        """R70: _compute_ln_mcap 对 0 市值返回 0 不崩溃（mv>0 守卫）。"""
+        """R70/R85: _compute_ln_mcap 对 0 市值返回 None 不崩溃（mv>0 守卫，
+        R85 改缺数据填 None——区分「真实 0」与「无数据」）。"""
         from app.factors.factor_registry import _compute_ln_mcap
-        assert _compute_ln_mcap({"total_mv": 0}) == 0.0
-        assert _compute_ln_mcap({}) == 0.0
+        assert _compute_ln_mcap({"total_mv": 0}) is None
+        assert _compute_ln_mcap({}) is None
 
 
 class TestR71FailureCache:

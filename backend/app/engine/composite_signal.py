@@ -98,7 +98,9 @@ def compute_composite(
     factor_scores = item.get("factor_scores", {})
     # P0-4: 仅聚合顶层键求和（避免原始点分键双倍计数 + RSI=50 主导排序）
     AGGREGATE_KEYS = {"technical", "momentum", "valuation", "sentiment"}
-    factor_sum = sum(v for k, v in factor_scores.items() if k in AGGREGATE_KEYS) if factor_scores else 0
+    # R85 (round30): None/非数值跳过（缺数据诚实标注），防 sum(None) 崩溃
+    factor_sum = sum(v for k, v in factor_scores.items()
+                     if k in AGGREGATE_KEYS and isinstance(v, (int, float))) if factor_scores else 0
     amount = float(item.get("amount", 0) or 0)
     scale = float(item.get("fund_scale", 0) or 0)
     opp_score = float(item.get("composite_score", 0.5))
