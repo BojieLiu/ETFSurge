@@ -273,15 +273,20 @@ class KlineMixin:
         """
         if not symbols:
             return
-        from ...fetchers.china_market import fetch_history
-        from ...core.async_utils import run_sync
+        from ...fetchers import china_market
+        from ...core import async_utils
 
         sem = asyncio.Semaphore(5)  # R3: 并发控制
 
         async def _fetch_one(sym: str) -> tuple[str, list[dict] | None]:
             async with sem:
                 try:
-                    rows = await run_sync(fetch_history, sym, "A", "daily", timeout=20)
+                    # R68 (round29): 走 long 池——默认池被 watchlist/design 打满时
+                    # refresh_kline 会被饿死（round29 §14.4.0 池饱和实证），
+                    # 冷缓存永不建立 → 四路下游级联失效。
+                    rows = await async_utils.run_sync_long(
+                        china_market.fetch_history, sym, "A", "daily", timeout=20
+                    )
                     return sym, rows
                 except Exception as e:
                     logger.debug("[pool] refresh_kline fetch_history(%s) failed: %s", sym, e)
@@ -297,16 +302,33 @@ class KlineMixin:
                     sym, rows = r
                     if isinstance(rows, list) and rows:
                         self._kline_cache_rows[sym] = rows
+                        self.mark_kline_stale(sym, False)
                         updated += 1
+                    else:
+                        # R68 (round29): 失败/空 → 保留 last-good 旧值并标 stale，
+                        # 不清空（旧值可用比无数据强，且消费方能看到 stale 标记）。
+                        if self._kline_cache_rows.get(sym):
+                            self.mark_kline_stale(sym, True)
+                            logger.debug(
+                                "[pool] refresh_kline(%s) failed — keeping last-good rows (R68)", sym
+                            )
             if updated > 0:
                 self._kline_cache_ts = __import__('time').time()
                 self._kline_cache_symbols = list(set(self._kline_cache_symbols + symbols))
                 # 同步更新列式缓存（向后兼容 get_kline 旧调用方）
                 self._sync_columnar_cache()
-                # R59③ (round28): 更新后落盘——重启后首呼 design 直接加载磁盘缓存，
-                # 消除 42-75s 冷建库（round28 §14.4 冷启动超时根因）。失败静默。
-                self._persist_kline_cache_sync()
                 logger.debug("[pool] refresh_kline updated %d/%d symbols", updated, len(symbols))
+            # R59③ (round28): 更新后落盘——重启后首呼 design 直接加载磁盘缓存，
+            # 消除 42-75s 冷建库（round28 §14.4 冷启动超时根因）。失败静默。
+            # R68 (round29): 落盘条件从 `updated > 0` 放宽到「缓存非空」——全失败
+            # 轮次也刷新磁盘 mtime，否则 _load_kline_cache_sync 的 24h TTL 会把
+            # 仍然可用的旧缓存判过期丢弃（冷启动循环放大，§14.4.1 ①）。
+            # 落盘频率提高后改走线程池（JSON 可达 MB 级，勿阻塞事件循环）。
+            if self._kline_cache_rows:
+                try:
+                    await async_utils.run_sync(self._persist_kline_cache_sync, timeout=15)
+                except Exception as _pe:
+                    logger.debug("[hub] kline persist submit failed (non-fatal): %s", _pe)
 
 
     def _sync_columnar_cache(self):

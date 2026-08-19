@@ -25,6 +25,9 @@ import time
 # O10 (round8 §7): DATA 预算弹性化——冷缓存首次全量建 K 线缓存实测 42-75s，
 # 45s 硬预算恒被截断；默认 90s（可用 DESIGN_DATA_TIMEOUT env 覆盖）。
 DESIGN_DATA_TIMEOUT = float(os.environ.get("DESIGN_DATA_TIMEOUT", "90"))
+# R69 (round29): skip_refresh 降级重试的预算（旧为硬编码 30s）。二次超时后不再
+# failed「方案生成超时」，转纯静态池降级方案（见 design_pipeline）。
+DESIGN_DEGRADE_RETRY_TIMEOUT = float(os.environ.get("DESIGN_DEGRADE_RETRY_TIMEOUT", "30"))
 import json
 import logging
 import warnings
@@ -312,14 +315,34 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
                                   stage="数据源超时，降级重试（使用缓存快照）")
             await _notify(task_id, "running", progress=15,
                           stage="数据源超时，降级重试（使用缓存快照）")
-            result = await asyncio.wait_for(
-                generate_enhanced_design(
-                    capital=capital,
-                    constraints=constraints,
-                    skip_refresh=True,
-                ),
-                timeout=30,
-            )
+            # R69 (round29): 降级重试**也**超时时不再抛给外层 → failed「方案生成超时」，
+            # 改用零网络静态池产出 degradation.mode=degraded 方案（诚实标降级，
+            # 盘后/冷启动首呼永远拿到可执行方案）。
+            try:
+                result = await asyncio.wait_for(
+                    generate_enhanced_design(
+                        capital=capital,
+                        constraints=constraints,
+                        skip_refresh=True,
+                    ),
+                    timeout=DESIGN_DEGRADE_RETRY_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                from ..services.strategy_design import build_static_degraded_design
+                logger.warning(
+                    "[design_pipeline] task %d degrade retry also timed out after %.0fs — "
+                    "falling back to offline static degraded design (R69)",
+                    task_id, DESIGN_DEGRADE_RETRY_TIMEOUT,
+                )
+                await mgr.update_task(task_id, progress=20,
+                                      stage="数据源持续超时，输出静态降级方案")
+                await _notify(task_id, "running", progress=20,
+                              stage="数据源持续超时，输出静态降级方案")
+                result = build_static_degraded_design(
+                    capital,
+                    reason=f"数据采集连续超时（{DESIGN_DATA_TIMEOUT:.0f}s + "
+                           f"{DESIGN_DEGRADE_RETRY_TIMEOUT:.0f}s），使用静态核心池降级方案",
+                )
 
         strategies = result.get("strategies", [])
         market_context = result.get("market_context", {})

@@ -104,7 +104,11 @@ def _build_market_overview(
     for idx in indices:
         if idx.get("name") in a_stock_names:
             # R4-27b: 保留代码但去除内部 ^ 前缀
-            prompt += f"- {idx.get('name')}({str(idx.get('symbol','')).lstrip('^')}): {idx.get('price','N/A')}, 涨跌幅{idx.get('change_pct','N/A')}%\n"
+            # R80 (round29): 不可用时标注「数据源暂不可用」而非静默旧值/None
+            if idx.get("available") is False:
+                prompt += f"- {idx.get('name')}({str(idx.get('symbol','')).lstrip('^')}): （数据源暂不可用）\n"
+            else:
+                prompt += f"- {idx.get('name')}({str(idx.get('symbol','')).lstrip('^')}): {idx.get('price','N/A')}, 涨跌幅{idx.get('change_pct','N/A')}%\n"
     if not any(idx.get("name") in a_stock_names for idx in indices):
         prompt += _format_indices(indices) or "（暂无数据）\n"
 
@@ -112,7 +116,10 @@ def _build_market_overview(
     us_stock_names = {"标普500", "纳斯达克", "道琼斯"}
     for s in major_stocks + indices:
         if s.get("name") in us_stock_names:
-            prompt += f"- {s.get('name')}({str(s.get('symbol','')).lstrip('^')}): {s.get('price','N/A')}, 涨跌幅{s.get('change_pct','N/A')}%\n"
+            if s.get("available") is False:
+                prompt += f"- {s.get('name')}({str(s.get('symbol','')).lstrip('^')}): （数据源暂不可用）\n"
+            else:
+                prompt += f"- {s.get('name')}({str(s.get('symbol','')).lstrip('^')}): {s.get('price','N/A')}, 涨跌幅{s.get('change_pct','N/A')}%\n"
     if not any(s.get("name") in us_stock_names for s in major_stocks + indices):
         prompt += "（暂无数据）\n"
 
@@ -122,7 +129,11 @@ def _build_market_overview(
     if major_stocks:
         prompt += "\n\n### 主要标的行情\n"
         for item in major_stocks[:15]:
-            prompt += f"- {item.get('name', '')}({item.get('symbol', '')}): ¥{item.get('price', 'N/A')}, 涨跌幅{item.get('change_pct', 'N/A')}%\n"
+            # R80 (round29): 不可用时标注「数据源暂不可用」而非静默旧值
+            if item.get("available") is False:
+                prompt += f"- {item.get('name', '')}({item.get('symbol', '')}): （数据源暂不可用）\n"
+            else:
+                prompt += f"- {item.get('name', '')}({item.get('symbol', '')}): ¥{item.get('price', 'N/A')}, 涨跌幅{item.get('change_pct', 'N/A')}%\n"
 
     if news:
         prompt += "\n\n### 财经资讯\n"
@@ -137,6 +148,55 @@ def _build_market_overview(
             prompt += f"- {title[:120]}\n"
 
     return prompt
+def _format_domestic_macro(macro: dict | None) -> str | None:
+    """R79 (round29): 国内宏观/流动性数据段格式化（LPR/中美国债/M0-M2/CPI-PPI/PMI）。
+
+    返回「### 国内流动性」段内容（多行）；数据源不可用 → 占位文本
+    （LLM 写「数据源暂不可用」而非「未提供国内利率信号」）。
+    """
+    if not macro:
+        return None
+    if macro.get("unavailable"):
+        return "（国内宏观数据源暂不可用）"
+    lines: list[str] = []
+    lpr = macro.get("lpr") or {}
+    if isinstance(lpr, dict):
+        if lpr.get("lpr_1y") is not None:
+            lines.append(f"- LPR 1年期: {lpr['lpr_1y']}%")
+        if lpr.get("lpr_5y") is not None:
+            lines.append(f"- LPR 5年期: {lpr['lpr_5y']}%")
+    bond = macro.get("bond_yields") or {}
+    if isinstance(bond, dict):
+        if bond.get("cn_10y") is not None:
+            lines.append(f"- 中国10年期国债收益率: {bond['cn_10y']}%")
+        if bond.get("us_10y") is not None:
+            lines.append(f"- 美国10年期国债收益率: {bond['us_10y']}%")
+        if bond.get("spread_bp") is not None:
+            lines.append(f"- 中美10Y利差: {bond['spread_bp']} bp")
+    money = macro.get("money_supply") or {}
+    if isinstance(money, dict):
+        for _k in ("m0_yoy", "m1_yoy", "m2_yoy"):
+            if money.get(_k) is not None:
+                lines.append(f"- {_k.upper().replace('_YOY', ' 同比')}: {money[_k]}%")
+    cpi = macro.get("cpi_ppi") or {}
+    if isinstance(cpi, dict):
+        if cpi.get("cpi_yoy") is not None:
+            lines.append(f"- CPI 同比: {cpi['cpi_yoy']}%")
+        if cpi.get("ppi_yoy") is not None:
+            lines.append(f"- PPI 同比: {cpi['ppi_yoy']}%")
+    pmi_gdp = macro.get("pmi_gdp") or {}
+    if isinstance(pmi_gdp, dict):
+        _pmi = (pmi_gdp.get("pmi") or {}).get("value") if isinstance(pmi_gdp.get("pmi"), dict) else None
+        if _pmi is not None:
+            lines.append(f"- PMI: {_pmi}")
+        _gdp = (pmi_gdp.get("gdp") or {}).get("value") if isinstance(pmi_gdp.get("gdp"), dict) else None
+        if _gdp is not None:
+            lines.append(f"- GDP 同比: {_gdp}%")
+    if not lines:
+        return "（国内宏观数据暂不可用）"
+    return "\n".join(lines)
+
+
 def _build_report_prompt(
     indices: list[dict],
     commodities: list[dict],
@@ -146,8 +206,17 @@ def _build_report_prompt(
     macro_news: list[dict],
     market: str = "A",
     global_liquidity: dict | None = None,
+    domestic_macro: dict | None = None,
+    as_of: str | None = None,
 ) -> str:
     overview = _build_market_overview(indices, commodities, market_data, news, macro_news, market=market)
+
+    # R79 (round29): 国内流动性数据段——此前 domestic_macro 采集了却从未注入 prompt，
+    # 导致 LLM 写「未提供国内利率信号」。现注入真实 LPR/国债/货币/CPI/PMI（不可用时占位）。
+    if domestic_macro is not None:
+        _dm = _format_domestic_macro(domestic_macro)
+        if _dm:
+            overview += "\n\n### 国内流动性\n" + _dm
 
     # P1-5 (R4-23): 海外流动性数据段——FRED 美债10Y/VIX/联邦基金利率。
     # 仅当至少一项可用时注入；全失败（None）时不出现该段，不影响主报告。
@@ -164,6 +233,10 @@ def _build_report_prompt(
             gl_lines.append(f"- 联邦基金利率: {_fed}%")
         if gl_lines:
             overview += "\n\n### 海外流动性\n" + "\n".join(gl_lines)
+
+    # R80 (round29): 数据时效标注——报告声明数据截至时间，避免与页面实时值对不上。
+    if as_of:
+        overview += f"\n\n> 报告引用数据截至 {as_of}（行情快照，可能与页面实时推送存在时差）。"
 
     prompt = f"""{overview}
 
@@ -545,6 +618,7 @@ async def generate_strategy_check_report(
         duration_s = time.monotonic() - _start_ms
         # R5-1-6: 追加最后 LLM 错误诊断（区分限流/超时/其他），供用户/日志定位
         _diag = ""
+        _last_err: str | None = None
         try:
             from app.analysis.llm.gates import get_last_llm_error
             _last_err = get_last_llm_error()
@@ -556,10 +630,18 @@ async def generate_strategy_check_report(
             "[strategy_check] LLM analysis interrupted after %.1fs (timed out or cancelled: %s) — rule fallback%s",
             duration_s, type(e).__name__, _diag,
         )
+        # R70 (round29): 诚实降级文案——旧实现统一「LLM 分析超时」掩盖真实原因
+        # （429 配额耗尽 / JSONDecodeError），专业投资者误以为只是慢。按最后错误
+        # 诊断区分三类原因，配额/解析失败不再伪装成「超时」。
+        _low = (_last_err or "").lower() if _last_err else ""
+        if "429" in _low or "rate-limited" in _low or "quota" in _low:
+            _cause = f"LLM 分析配额耗尽（429 限流，{duration_s:.0f}s 未完成，已用规则引擎兜底）"
+        elif "json" in _low or "expecting value" in _low or "parse" in _low:
+            _cause = f"LLM 分析结果解析失败（{duration_s:.0f}s，已用规则引擎兜底）"
+        else:
+            _cause = f"LLM 分析超时（{duration_s:.0f}s 未返回，已用规则引擎兜底）"
         return {
-            "summary": (
-                f"LLM 分析超时（{duration_s:.0f}s 未返回，已用规则引擎兜底）{_diag}"
-            ),
+            "summary": _cause + _diag,
             "suggestions": [],
             "holdings_analysis": [],
             "risk_warnings": [],
@@ -741,13 +823,16 @@ async def generate_design_report(
     # round23 遗留修复（2026-08-14）：必须传 read 长超时——默认 provider.timeout=45s
     # 对 deepseek 完整设计报告（9613 字，实测 >46s 才生成完）不够 → ReadTimeout →
     # 引擎兜底 + task_manager 误标 full。connect 15s 防 429/挂起，read 120s 容纳长生成。
+    # R70b (round29): connect 15s→60s 对齐策略检查路径（R57）——DeepSeek 慢连接/慢
+    # 首字节实测 34-78s，设计报告路径同样会先于 read 120s 触发 CancelledError；
+    # read 保持 120s 容纳长生成。
     import httpx
     try:
         # 使用"symbol_analysis" agent 的通用上下文，但传入设计报告 prompt
         result = await get_agent("symbol_analysis").run(
             prompt,
             system_override=load_prompt("design_report.md"),
-            request_timeout=httpx.Timeout(connect=15.0, read=120.0, write=15.0, pool=15.0),
+            request_timeout=httpx.Timeout(connect=60.0, read=120.0, write=15.0, pool=15.0),
         )
         return result or "报告生成失败"
     except Exception as e:

@@ -79,11 +79,13 @@
                 :class="`news-level-badge--${categoryColorClass(item.category, item.level)}`"
                 :style="{ color: levelColor(item) }"
               >
-                <!-- P2-3 (round20 §五 P2-3): 星数显示后端 stars（新鲜度维度，round9 P2-1）——
-                     与 level 解耦：5★=<1h / 4★=<6h / 3★=<24h / 2★=<72h / 1★=更旧；
-                     旧实现用 level 映射星数（与 level 同分布，无独立信息量）。 -->
-                <span class="news-stars" aria-hidden="true" :title="`新鲜度 ${item.stars ?? '-'} 星（<1h=5★）`">{{ item.stars ?? mapNewsLevel(item.level).stars }}</span>
-                <span class="news-level-label">{{ mapNewsCategory(item.category, item.level).label }}</span>
+                <!-- R83 (round29): 移除抽象数字星——新鲜度即时间，meta 行已显示
+                     相对时间（刚刚/3小时前），数字星是重复二次编码且易误读为重要度。
+                     other 类不渲染文字标签（灰边灰标题已表意）。 -->
+                <span
+                  v-if="item.category !== 'other'"
+                  class="news-level-label"
+                >{{ mapNewsCategory(item.category, item.level).label }}</span>
               </span>
               <h3 class="news-title" :style="{ color: levelColor(item) }">{{ item.title }}</h3>
             </div>
@@ -98,7 +100,7 @@
 
             <div class="news-meta">
              <span v-if="item.source" class="news-source">{{ item.source }}</span>
-             <span v-if="item.time" class="news-time">{{ item.time }}</span>
+             <span v-if="item.time" class="news-time" :title="item.time">{{ formatRelativeTime(item.time) }}</span>
              <a v-if="item.url" :href="item.url" target="_blank" rel="noopener" class="news-source-link">查看原文</a>
              <button class="news-ai-btn" :class="{ 'news-ai-btn--active': impactTarget === item.id }" @click="analyze(item)" :disabled="analyzing">
                <span aria-hidden="true">🤖</span> AI 智能分析
@@ -193,6 +195,24 @@ const LEVEL_COLORS = {
 // F22: 着色改用 category（极性），level 仅表重要性。category 缺省时回退 level 语义。
 function levelColor(item) {
   return categoryColor(item.category, item.level)
+}
+
+// R83 (round29): 相对时间格式化——新鲜度即时间，用「刚刚/3小时前/2天前」自然语言
+// 替代绝对时刻，悬浮 title 仍显示精确时间。无法解析（如纯 "10:00"）则原样返回。
+function formatRelativeTime(t) {
+  if (!t) return ''
+  const d = new Date(String(t).includes(' ') && !String(t).includes('T') ? String(t).replace(' ', 'T') : t)
+  if (isNaN(d.getTime())) return t
+  const diff = Date.now() - d.getTime()
+  if (diff < 0) return t
+  const min = Math.floor(diff / 60000)
+  if (min < 1) return '刚刚'
+  if (min < 60) return `${min}分钟前`
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return `${hr}小时前`
+  const day = Math.floor(hr / 24)
+  if (day < 30) return `${day}天前`
+  return t
 }
 
 const filteredNews = computed(() => {

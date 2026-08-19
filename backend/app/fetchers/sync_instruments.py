@@ -273,12 +273,21 @@ async def _fetch_us_list() -> list[dict]:
             )
             req = _ur.Request(url, headers={"User-Agent": "Mozilla/5.0"})
             raw = _ur.urlopen(req, timeout=8).read().decode("utf-8", errors="replace")
-            # 返回 JSONP：callback(["a","b",...]) 或 [{"symbol":...}, ...]
-            start = raw.find("[")
-            end = raw.rfind("]")
+            # 新浪实际返回 JSONP **对象**：CallbackList[]({"count":"17993","data":[...]})
+            # 旧实现按数组假设 raw.find("[") 取到 `CallbackList[]` 的空 [] → JSONDecodeError，
+            # 降级链从未生效（每轮直落 RuntimeError）。改为取对象：首个 '{' 到最后一个 '}'，
+            # 再读 .data 数组（R84 附带修复，round29）。
+            start = raw.find("{")
+            end = raw.rfind("}")
             if start == -1 or end == -1 or end <= start:
                 continue
-            items = _json.loads(raw[start:end + 1])
+            try:
+                obj = _json.loads(raw[start:end + 1])
+            except _json.JSONDecodeError:
+                continue
+            items = obj.get("data") if isinstance(obj, dict) else None
+            if not isinstance(items, list):
+                continue
             for it in items or []:
                 if isinstance(it, str):
                     sym = it.split(",")[0].strip() if "," in it else it.strip()

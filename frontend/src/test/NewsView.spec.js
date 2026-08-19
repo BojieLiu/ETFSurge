@@ -136,13 +136,14 @@ describe('NewsView', () => {
     expect(wrapper.findAll('.news-item').length).toBe(1)
   })
 
-  it('renders star rating characters for levels', async () => {
+  it('R83: removes abstract numeric stars, keeps category/level label', async () => {
     apiMock.headlines.mockResolvedValue({ data: SAMPLE })
     const wrapper = mount(NewsView, { global: { stubs: { VChart: true } } })
     await flushPromises()
-    // level 5 -> 4 stars, level 2 -> 2 stars
-    expect(wrapper.text()).toContain('★★★★')
-    expect(wrapper.text()).toContain('★★')
+    // R83: 数字星已移除
+    expect(wrapper.findAll('.news-stars').length).toBe(0)
+    // item 无 category 但 level=5 → 重要度标签仍渲染（无数字星）
+    expect(wrapper.text()).toContain('重要')
   })
 
   it('handles news_batch with multiple items in correct order', async () => {
@@ -521,8 +522,8 @@ describe('NewsView — P2-3 stars 新鲜度 + P1-4 ai_summary（round20）', () 
     apiMock.newsImpact.mockReset()
   })
 
-  it('P2-3: 显示后端 stars 新鲜度（5★=<1h），与 level 徽章并存', async () => {
-    // 后端 _compute_stars：<1h→5★；items 携带真实 stars 字段
+  it('R83: 后端 stars 数字星不再渲染（新鲜度改由 meta 相对时间表达）', async () => {
+    // 后端 _compute_stars：<1h→5★；R83 后前端不再显示该数字星
     apiMock.headlines.mockResolvedValue({
       data: [
         { id: 1, title: '突发', content: 'c', level: 4, stars: 5, source: 'X', time: '10:00', ai_summary: null },
@@ -532,12 +533,10 @@ describe('NewsView — P2-3 stars 新鲜度 + P1-4 ai_summary（round20）', () 
     const wrapper = mount(NewsView, { global: { stubs: { VChart: true } } })
     await flushPromises()
 
-    const stars = wrapper.findAll('.news-stars')
-    expect(stars.length).toBeGreaterThanOrEqual(2)
-    // 第 1 条 level=4 但新鲜度 5★ → 显示 5（消费后端 stars，非 level 映射的 4）
-    expect(stars[0].text()).toContain('5')
-    // 第 2 条 stars=1 → 显示 1
-    expect(stars[1].text()).toContain('1')
+    // R83: 无 news-stars 数字星 DOM
+    expect(wrapper.findAll('.news-stars').length).toBe(0)
+    // 分类/重要度标签仍渲染
+    expect(wrapper.findAll('.news-level-label').length).toBeGreaterThanOrEqual(2)
   })
 
   it('P1-4: ai_summary 非空时内联展示（消费后端预生成摘要）', async () => {

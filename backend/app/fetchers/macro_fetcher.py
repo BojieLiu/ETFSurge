@@ -24,6 +24,10 @@ logger = logging.getLogger(__name__)
 _SUCCESS_TTL = 86400
 _FAIL_TTL = 3600
 
+# R79 (round29): fetch_all_domestic_macro 单源超时（秒）。整包上游超时 20s，
+# 单源必须显著更短，否则一个慢源即耗尽整包预算 → 全部 unavailable。
+_MACRO_SOURCE_TIMEOUT = 8.0
+
 
 def _stale_note(date_str: str, source: str, months: int = 3) -> tuple[bool, str]:
     """判断数据是否滞后 >3 个月 → (stale, note)。兼容 YYYY-MM-DD 与 YYYY-MM。"""
@@ -450,16 +454,26 @@ async def fetch_all_domestic_macro() -> dict:
     """六源并行拉取；全失败 → {"unavailable": true}（LLM 显式写不可用，不编造）。
 
     round13: 并入 PMI/GDP（fetch_pmi_gdp）与 macro_snapshot（方向标注）。
+    R79 (round29): 每源独立短超时（_MACRO_SOURCE_TIMEOUT）——旧实现 asyncio.gather
+    无单源超时，一个慢源拖死整包 20s → 全部 unavailable。现单源超时仅该源返回 None，
+    其余照常。
     """
     import asyncio
-    lpr, bond, money, cpi, pmi_gdp = await asyncio.gather(
-        asyncio.to_thread(fetch_lpr),
-        asyncio.to_thread(fetch_bond_yields),
-        asyncio.to_thread(fetch_money_supply),
-        asyncio.to_thread(fetch_cpi_ppi),
-        asyncio.to_thread(fetch_pmi_gdp),
+
+    async def _safe(fn):
+        try:
+            return await asyncio.wait_for(asyncio.to_thread(fn), timeout=_MACRO_SOURCE_TIMEOUT)
+        except Exception:
+            return None
+
+    lpr, bond, money, cpi, pmi_gdp, snapshot = await asyncio.gather(
+        _safe(fetch_lpr),
+        _safe(fetch_bond_yields),
+        _safe(fetch_money_supply),
+        _safe(fetch_cpi_ppi),
+        _safe(fetch_pmi_gdp),
+        _safe(fetch_macro_snapshot),
     )
-    snapshot = await asyncio.to_thread(fetch_macro_snapshot)
     if lpr is None and bond is None and money is None and cpi is None and pmi_gdp is None:
         return {"unavailable": True}
     return {

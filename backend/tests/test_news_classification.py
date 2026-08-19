@@ -616,6 +616,30 @@ def test_r16_english_positive_and_negative():
     assert neg == "negative"
 
 
+# ── R72 (round29): 自然灾难/市场连跌/地缘扣留 不再落入 other ──────────────
+
+
+def test_r72_major_natural_disaster():
+    """「哥伦比亚强震已致304人死亡」应判 major=5，而非 other/level1。"""
+    cat, level = classify_news("哥伦比亚强震已致304人死亡")
+    assert cat == "major", f"强震应归 major，实得 {cat}"
+    assert level == 5, f"强震 level 应=5，实得 {level}"
+
+
+def test_r72_negative_market_decline():
+    """「欧洲股市录得去年末以来最长连跌」应判 negative≥3，而非 other。"""
+    cat, level = classify_news("欧洲股市录得去年末以来最长连跌")
+    assert cat == "negative", f"连跌应归 negative，实得 {cat}"
+    assert level >= 3, f"连跌 level 应≥3，实得 {level}"
+
+
+def test_r72_risk_geopolitical_detention():
+    """「俄方：瑞典扣留涉俄货船」应判 risk≥4，而非 other。"""
+    cat, level = classify_news("俄方：瑞典扣留涉俄货船")
+    assert cat == "risk", f"扣留应归 risk，实得 {cat}"
+    assert level >= 4, f"扣留 level 应≥4，实得 {level}"
+
+
 def test_r16_chinese_no_regression():
     """R16: 中文标题分类不受影响（英文兜底仅对英文标题生效）。"""
     cat = classify_news_category("央行降准释放流动性")

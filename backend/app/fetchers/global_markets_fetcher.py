@@ -594,11 +594,28 @@ def _get_apikey() -> str | None:
     return key
 
 
+# R82 (round29): finnhub 免费层 60 次/分钟——本地滑动窗口配额护栏。达阈值直接跳过
+# finnhub（诚实降级到 tickflow/兜底），避免 429 烧穿配额（round29 §14.1 R82 配额盘点：
+# 4 只 × 12 次刷新/min ≈ 48/min，finnhub 前置会撞 60/min）。
+_FINNHUB_CALLS: list[float] = []
+_FINNHUB_MINUTE_BUDGET = 50
+
+
+def _finnhub_quota_available() -> bool:
+    """距当前 60s 窗口内的 finnhub 调用数 < 预算（50/min）。"""
+    import time as _t
+    now = _t.time()
+    _FINNHUB_CALLS[:] = [c for c in _FINNHUB_CALLS if now - c < 60]
+    return len(_FINNHUB_CALLS) < _FINNHUB_MINUTE_BUDGET
+
+
 def _request(path: str, params: dict[str, str] | None = None) -> dict[str, Any] | None:
     """Make a Finnhub API request with timeout, return parsed JSON or None."""
+    import time as _t
     key = _get_apikey()
     if not key:
         return None
+    _FINNHUB_CALLS.append(_t.time())  # R82: 配额计数
     url = f"{_API_BASE}{path}?token={key}"
     if params:
         url += "&" + "&".join(f"{k}={v}" for k, v in params.items())
@@ -617,6 +634,15 @@ def fetch_realtime(symbol: str) -> dict[str, Any] | None:
     Returns:
         Normalized dict or None.
     """
+    # R82 (round29): 配额护栏——预算耗尽直接诚实降级（返回 None 走 tickflow 尾环），
+    # 不得继续烧 finnhub 60/min 配额。
+    if not _finnhub_quota_available():
+        import logging as _log
+        _log.getLogger(__name__).warning(
+            "[global_markets_fetcher] finnhub quota budget exhausted (50/min) — skipping finnhub (R82 guard)"
+        )
+        return None
+
     def _p():
         data = _request("/quote", {"symbol": symbol})
         if not data or data.get("c") is None:

@@ -36,6 +36,43 @@ async def test_empty_candidate_pool_returns_error():
     assert len(result["strategies"]) == 3, f"Expected 3 strategies, got {len(result.get('strategies', []))}"
 
 
+@pytest.mark.asyncio
+async def test_inner_empty_factor_matrix_triggers_static_pool_fallback():
+    """R77 (round29): factor_matrix 外层非空、内层全空（{"510300":{}}）应视为因子数据
+    不可用，触发静态池兜底（degradation.mode='static_pool'），而非产出 100% 现金。"""
+    from app.services.strategy_design import generate_enhanced_design
+
+    async def mock_refresh(*args, **kwargs):
+        pass
+
+    with patch("app.services.market_data_hub.market_data_hub.refresh",
+               side_effect=mock_refresh):
+        with patch("app.services.market_data_hub.market_data_hub.get_pool",
+                   side_effect=lambda layer=None: {"core": [{"symbol": "510300", "name": "300ETF", "layer": "core"}],
+                                                    "satellite": [], "defense": []} if layer is None else [{"symbol": "510300", "name": "300ETF", "layer": "core"}]):
+            with patch("app.services.market_data_hub.market_data_hub.get_factor_matrix",
+                       return_value={"510300": {}, "518880": {}}):
+                with patch("app.services.market_data_hub.market_data_hub.get_market_regime",
+                           return_value="range_bound"):
+                    with patch("app.services.market_data_hub.market_data_hub.get_market_sentiment",
+                               return_value={"sentiment_index": 50, "sentiment_label": "中性"}):
+                        with patch("app.services.market_data_hub.market_data_hub.get_index_realtime",
+                                   return_value=[]):
+                            with patch("app.services.market_data_hub.market_data_hub.get_sector_momentum",
+                                       return_value=[]):
+                                result = await generate_enhanced_design(capital=500000)
+
+    # R77: 内层全空矩阵应被判为 factor_matrix_empty（触发静态池兜底，而非产出 100% 现金失败）
+    assert result.get("degradation", {}).get("factor_matrix_empty") is True, (
+        f"Expected factor_matrix_empty=True for inner-empty matrix, got: {result.get('degradation')}"
+    )
+    # 兜底应产出有效方案（非 error/空），杜绝「所有方案均为100%现金」假失败
+    assert "error" not in result, f"Inner-empty factor matrix must not fail design: {result.get('error')}"
+    assert len(result["strategies"]) == 3, f"Expected 3 strategies, got {len(result.get('strategies', []))}"
+    # 兜底路径的降级标记应暴露因子矩阵不可用
+    assert result.get("degradation", {}).get("factor_matrix_empty") is True
+
+
 # ===== folded from test_round22_e5_correlation_unchecked.py =====
 from unittest.mock import patch
 from contextlib import ExitStack

@@ -319,6 +319,7 @@ async def llm_report_stream(req: LLMReportRequest):
             include_portfolio=False,
             include_fund_flow=False,
             include_commodities=True,
+            include_macro=True,  # R79 (round29): 采集国内宏观/流动性（仅 A 市场）
         )
 
         regime = ctx.get("market_regime", "")
@@ -383,8 +384,15 @@ async def llm_report_stream(req: LLMReportRequest):
             _gl = await _fetch_global_liquidity()
         except Exception:
             _gl = None
-        prompt = _build_report_prompt(indices, commodities, market_data, indicators,
-                                      enriched_news, [], global_liquidity=_gl)
+        # R79 (round29): 国内宏观/流动性注入 prompt（此前采集了未接线，LLM 写「未提供」）
+        _domestic = ctx.get("domestic_macro")
+        # R80 (round29): 数据时效标注——取指数快照真实刷新时间（未刷新 → None，不标注）
+        _as_of = market_data_hub.get_index_realtime_as_of()
+        prompt = _build_report_prompt(
+            indices, commodities, market_data, indicators,
+            enriched_news, [], global_liquidity=_gl,
+            domestic_macro=_domestic, as_of=_as_of,
+        )
         agent = get_agent("market_report")
         return run_stream_with_cache(agent, prompt, query="market_report", data_as_of=None)
 

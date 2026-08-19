@@ -415,6 +415,13 @@ async def _search_a_stocks(keyword: str) -> list[dict[str, Any]]:
     # 降级：levistock 全量（与 /search/stocks 同链）
     try:
         full = await asyncio.to_thread(market_data_hub.get_all_stocks)
+        # R76 (round29): 空结果不得静默——旧实现仅异常打 WARNING、返回空不打，
+        # 「茅台」搜不到 600519 无任何日志线索（instruments 表 0 条时全链路静默）。
+        if not full:
+            logger.warning(
+                "[search] _search_a_stocks levistock get_all_stocks returned empty — "
+                "A 股个股搜索无结果（数据源不可用）"
+            )
         normalised = [
             {"symbol": s.get("stock_code") or s.get("symbol", ""),
              "name": s.get("stock_name") or s.get("name", "")}
@@ -426,11 +433,31 @@ async def _search_a_stocks(keyword: str) -> list[dict[str, Any]]:
                 "market": "A", "asset_type": "stock", "type": "stock",
             } for s in normalised][:10]
         kw = keyword.lower()
+        # R76 (round29): 拼音兜底——instruments 表 0 条（同步缺口）且 levistock 仅
+        # 代码/名称无拼音字段时，「gzmt」类拼音关键词仍可命中。pypinyin 缺失则退化为
+        # 仅代码/名称匹配（不抛错）。
+        try:
+            from pypinyin import lazy_pinyin
+
+            def _pinyin_key(s: dict) -> str:
+                full_py = "".join(lazy_pinyin(s["name"]))
+                initials = "".join((p[0] if p else "") for p in lazy_pinyin(s["name"]))
+                return full_py.lower() + initials.lower()
+            _pinyin = _pinyin_key
+        except Exception:
+            _pinyin = None
+
+        matched = []
+        for s in normalised:
+            if kw in s["symbol"].lower() or kw in s["name"].lower():
+                matched.append(s)
+                continue
+            if _pinyin is not None and kw in _pinyin(s):
+                matched.append(s)
         return [{
             "symbol": s["symbol"], "name": s["name"],
             "market": "A", "asset_type": "stock", "type": "stock",
-        } for s in normalised
-            if kw in s["symbol"].lower() or kw in s["name"].lower()][:10]
+        } for s in matched][:10]
     except Exception as e:
         logger.warning("[search] _search_a_stocks levistock fallback failed: %s", e)
         return []
@@ -796,7 +823,11 @@ async def _watchlist_enrich_items(items: list) -> list[dict]:
     if _hk_items:
         _batch_tasks.append(("HK", _batch_for(_hk_items, "HK")))
     if _us_items:
-        _batch_tasks.append(("US", _batch_for(_us_items, "US")))
+        # R82 (round29): US 批量窗口 2s→7s——twelvedata 实测建连→响应 2-6s/次，
+        # 2s 窗口必超时 → 批量取消 → 全 US 标的被 _skip_markets 跳过 per-item 兜底
+        # （round29 §14.1 R82 实证「暂无实时」）。7s 容纳实测延迟，保持 twelvedata
+        # 主源（配额优先：finnhub 60/min 不得前置）。
+        _batch_tasks.append(("US", _batch_for(_us_items, "US", timeout=7)))
     if _batch_tasks:
         _batch_results = await asyncio.gather(
             *(t[1] for t in _batch_tasks), return_exceptions=True
@@ -972,6 +1003,14 @@ async def _watchlist_enrich_items(items: list) -> list[dict]:
 # 而非「行情加载中」永不翻回。失败/无历史 → 诚实降级标记。
 async def _watchlist_close_fallback(items: list) -> list[dict]:
     from ..services.market_service import _last_close_fallback
+    from ..services.market_service import quote_key as _qk
+    from ..services.cache_service import cache_set as _cs
+    from ..services.market_service import _LAST_GOOD_TTL
+
+    # R78 (round29): 收盘兜底并发收敛——旧实现 asyncio.gather 全量 22 路并行洪泛
+    # Sina（round29 §14.1 R78 实证），Sina 并发限流 200 → 部分标的兜底也失败。
+    # 改为 Semaphore(3)，单条 wait_for 0.8s→3s（收盘兜底是最终层，值得多等）。
+    _sem = asyncio.Semaphore(3)
 
     async def _one(item) -> dict:
         row = {
@@ -985,23 +1024,54 @@ async def _watchlist_close_fallback(items: list) -> list[dict]:
             "realtime": None,
         }
         _at = item.asset_type or "A"
+        # R78 (round29): 首拉写 quote 缓存（24h last-good）——后续请求直接读缓存，
+        # 根治「每次实时拉 N 次 K 线」的洪泛；缓存 miss 才回源。
+        # 仅当缓存是**收盘快照**（本函数写入的 estimate_source="last_close"）才短路——
+        # 普通实时 last-good（R45，estimate_source="last_good"/无）不得压过新鲜的
+        # 收盘兜底（test_last_close_hit_still_wins 契约：fresh close > stale realtime）。
         try:
-            _lc = await asyncio.wait_for(
-                # 0.8s 单条兜底：5s enrich 超时 + 0.8s 收盘兜底 ≈ 5.8s < 6s 门禁
-                _last_close_fallback(item.symbol, _at), timeout=0.8
-            )
-        except BaseException:
-            _lc = None
+            from ..services.cache_service import cache_get as _cg
+            _lg = await _cg(_qk(item.symbol, _at))
+            if (_lg and _lg.get("price") is not None
+                    and _lg.get("estimate_source") == "last_close"):
+                row["realtime"] = {
+                    "price": _lg.get("price"),
+                    "change_pct": _lg.get("change_pct"),
+                    "volume": _lg.get("volume"),
+                    "data_source": "stale",
+                    "as_of": _lg.get("as_of") or "",
+                    "estimate_source": "last_close_cache",
+                }
+                return row
+        except Exception:
+            pass
+        async with _sem:
+            try:
+                _lc = await asyncio.wait_for(
+                    # R78 (round29): 0.8s→3s——收盘兜底是最后防线，0.8s 常截断
+                    # 导致整列「维护中」（实测 K 线源 0.06s/240 行，3s 充裕）。
+                    _last_close_fallback(item.symbol, _at), timeout=3
+                )
+            except BaseException:
+                _lc = None
         if _lc:
             row["realtime"] = _lc  # is_estimated=True + as_of=T-1 收盘（「估」徽标）
+            # R78 (round29): 成功收盘行写 quote 缓存（24h）——下次直接读缓存
+            try:
+                await _cs(_qk(item.symbol, _at), _lc, _LAST_GOOD_TTL)
+            except Exception:
+                pass
         else:
             # R45 (round27): 第二层兜底——Redis last-good 报价（quote_key，24h TTL）。
             # _last_close_fallback 周末/源冷却自身也返 None（R29 根因）时，从最近
             # 交易日的 last-good 真实收盘价回退，避免整行 realtime=None。
             try:
-                from ..services.market_service import quote_key as _qk
+                # 注意：本分支的 quote_key 局部导入须用独立名（_qk2）——
+                # 外层 _one 的 _qk 是函数局部，同函数内再赋值会遮蔽外层绑定
+                # → if 分支引用 _qk 时 UnboundLocalError。
+                from ..services.market_service import quote_key as _qk2
                 from ..services.cache_service import cache_get as _cg
-                _lg = await _cg(_qk(item.symbol, _at))
+                _lg = await _cg(_qk2(item.symbol, _at))
                 if _lg and _lg.get("price") is not None:
                     row["realtime"] = {
                         "price": _lg.get("price"),
@@ -1068,10 +1138,14 @@ async def watchlist_list(
         # 2.5s×N + resolve 2s，慢源短路后再整体截断。
         # round25 R29: 超时回退不再返裸 DB 行（前端「行情加载中」永不翻回）——
         # 改走 T-1 收盘快照兜底（realtime.is_estimated=True + as_of），前端「估」徽标。
+        # R82 (round29): 外层联动——存在 US 标的分组时放宽到 8s（US 批量已放宽至 7s，
+        # 外层 5s 会在批量返回前截断）；无 US 组维持 5s 不回归。
+        _has_us = any((it.asset_type or "A") == "US" for it in items)
+        _enrich_timeout = 8 if _has_us else 5
         try:
-            enriched = await asyncio.wait_for(_watchlist_enrich_items(items), timeout=5)
+            enriched = await asyncio.wait_for(_watchlist_enrich_items(items), timeout=_enrich_timeout)
         except asyncio.TimeoutError:
-            logger.warning("[watchlist] realtime enrich timed out after 5s — returning T-1 close fallback rows (R29)")
+            logger.warning("[watchlist] realtime enrich timed out after %ds — returning T-1 close fallback rows (R29)", _enrich_timeout)
             try:
                 enriched = await _watchlist_close_fallback(items)
             except Exception as _e:

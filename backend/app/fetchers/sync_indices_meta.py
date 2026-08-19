@@ -38,8 +38,9 @@ async def _fetch_sina_a_indices():
     """
     import asyncio
     import akshare as ak
+    from ..core.async_utils import run_sync_long
     try:
-        df = await asyncio.to_thread(ak.stock_zh_index_spot_sina)
+        df = await run_sync_long(ak.stock_zh_index_spot_sina)
     except Exception as e:
         print(f"  [WARN] stock_zh_index_spot_sina failed: {e}")
         return []
@@ -71,8 +72,9 @@ async def _fetch_sina_hk_indices():
     """抓取新浪港股指数。"""
     import asyncio
     import akshare as ak
+    from ..core.async_utils import run_sync_long
     try:
-        df = await asyncio.to_thread(ak.stock_hk_index_spot_sina)
+        df = await run_sync_long(ak.stock_hk_index_spot_sina)
     except Exception as e:
         print(f"  [WARN] stock_hk_index_spot_sina failed: {e}")
         return []
@@ -98,8 +100,9 @@ async def _fetch_ths_industry_indices():
     """抓取同花顺行业指数。"""
     import asyncio
     import akshare as ak
+    from ..core.async_utils import run_sync_long
     try:
-        df = await asyncio.to_thread(ak.stock_board_industry_index_ths)
+        df = await run_sync_long(ak.stock_board_industry_index_ths)
     except Exception as e:
         print(f"  [WARN] stock_board_industry_index_ths failed: {e}")
         return []
@@ -125,8 +128,9 @@ async def _fetch_ths_concept_indices():
     """抓取同花顺概念指数。"""
     import asyncio
     import akshare as ak
+    from ..core.async_utils import run_sync_long
     try:
-        df = await asyncio.to_thread(ak.stock_board_concept_index_ths)
+        df = await run_sync_long(ak.stock_board_concept_index_ths)
     except Exception as e:
         print(f"  [WARN] stock_board_concept_index_ths failed: {e}")
         return []

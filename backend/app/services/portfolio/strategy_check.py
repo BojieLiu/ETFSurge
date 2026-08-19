@@ -205,11 +205,31 @@ async def strategy_check(
         if not _has_real_factor_values(fb.get("factor_scores") or {})
     )
     total_factor_count = len(factor_breakdowns)
+    # R74 (round29): 组合级「因子键填充率」——与逐标的 factor_availability 同口径
+    # （键级、排除兑底默认值）聚合，供摘要「因子填充率 X%」使用。旧摘要
+    # 「因子数据 N/M 正常」是持仓级口径，与 composite_decision「覆盖率不足」互斥矛盾。
+    _keys_total = 0
+    _keys_filled = 0
+    for fb in factor_breakdowns.values():
+        if not isinstance(fb, dict):
+            continue
+        fs = fb.get("factor_scores")
+        if not isinstance(fs, dict) or not fs:
+            continue
+        _keys_total += len(fs)
+        _keys_filled += sum(
+            1 for k, v in fs.items()
+            if isinstance(v, (int, float)) and _factor_value_real(k, v)
+        )
+    factor_fill_pct = (round(_keys_filled * 100.0 / _keys_total, 1)
+                       if _keys_total else None)
     data_quality = {
         "filled_count": filled_factor_count,
         "total_count": total_factor_count,
         "all_empty": filled_factor_count == 0,
         "partial": 0 < filled_factor_count < total_factor_count,
+        # R74 (round29): 组合级因子键填充率（%），摘要与前端「因子填充率」展示同源
+        "factor_fill_pct": factor_fill_pct,
         # P1-15: 兑底占比（全中性默认值的标的）——报告明示真实数据覆盖率
         "fallback_count": fallback_factor_count,
         "fallback_ratio": round(fallback_factor_count / total_factor_count, 4) if total_factor_count else 0.0,
@@ -299,8 +319,15 @@ async def strategy_check(
             }
 
         # F1-9 兜底识别：llm.py 内部捕获 CancelledError 返回兜底结构（wait_for 不抛异常），
-        # 此时 summary 以"LLM 分析超时"开头——同样视为 LLM 失败（风险兜底诚实化）
-        if not _llm_failed and str(llm_result.get("summary", "")).startswith("LLM 分析超时"):
+        # 此时 summary 以"LLM 分析…"开头——同样视为 LLM 失败（风险兜底诚实化）。
+        # R70 (round29): 兜底文案新增「配额耗尽」「解析失败」两类，需一并识别——
+        # 否则 429/JSONDecodeError 的兜底结果会被当作成功缓存复用。
+        _llm_sum = str(llm_result.get("summary", ""))
+        if not _llm_failed and (
+            _llm_sum.startswith("LLM 分析超时")
+            or _llm_sum.startswith("LLM 分析配额耗尽")
+            or _llm_sum.startswith("LLM 分析结果解析失败")
+        ):
             _llm_failed = True
 
         # P2-F: 仅缓存成功的 LLM 报告（失败/兜底不写——避免把降级结果当成功复用）
@@ -481,7 +508,15 @@ async def strategy_check(
 
     filled_count = data_quality.get("filled_count", 0) if data_quality else 0
     total_count = data_quality.get("total_count", 0) if data_quality else 0
-    quality_summary = f"；因子数据{filled_count}/{total_count}正常" if total_count > 0 else ""
+    # R74 (round29): 摘要不再用「因子数据 N/M 正常」（持仓级口径 + "正常"断言）——
+    # 与 composite_decision「覆盖率不足」矛盾。改报组合级因子键填充率（%），
+    # 与逐标的 factor_availability（键级）同口径；填充率低时摘要自然不"正常"。
+    if data_quality and data_quality.get("factor_fill_pct") is not None:
+        quality_summary = f"；因子填充率 {data_quality['factor_fill_pct']}%"
+    elif total_count > 0:
+        quality_summary = f"；因子填充率 {round(filled_count * 100.0 / total_count, 1)}%"
+    else:
+        quality_summary = ""
 
     llm_summary = llm_result.get("summary", "")
     data_confidence = _compute_confidence(filled_count, total_count)

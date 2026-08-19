@@ -303,11 +303,15 @@ watch(() => props.selectedSymbol, (val) => {
 })
 
 // F2-7 步骤E: 外部触发（sector 模式快速入口）——activeMode + query + doAnalyze
+// Q6 (round29 复验): 必须写回 activeSearch.searchQuery——doAnalyze 读该值（:384），
+// 旧实现只写 search.searchQuery（symbol 实例）→ sector/index 外部触发时
+// activeSearch=sectorSearch/indexSearch 仍为空 → 命中「请输入标的代码或名称」
+// （同 round26 Q5 quickSelect 缺陷类，此处漏修）。
 watch(() => props.externalTrigger, (trig) => {
   if (trig && trig.query) {
     activeMode.value = (trig.mode === 'sector' || trig.mode === 'index') ? trig.mode : 'symbol'
     query.value = trig.query
-    if (search.searchQuery) search.searchQuery.value = trig.query
+    if (activeSearch.value.searchQuery) activeSearch.value.searchQuery.value = trig.query
     symbol.value = trig.query
     result.value = ''
     error.value = ''

@@ -191,7 +191,7 @@ class TestCompositeSignalWithGate:
         )
         assert out["degraded"] is True
         assert out["signal"] is None
-        assert "因子数据缺失" in out["reason"]
+        assert "覆盖率不足" in out["reason"]  # R74: 口径自描述（分项覆盖 X% < 60%）
 
     def test_below_threshold_refuse_composite(self):
         """valid_rate=0.4 < 0.6 → degraded。"""
@@ -267,7 +267,7 @@ class TestStrategyCheckCompositeDecision:
         cd = fbs["159338"]["composite_decision"]
         assert cd["degraded"] is True
         assert cd["signal"] is None
-        assert "因子数据缺失" in cd["reason"]
+        assert "覆盖率不足" in cd["reason"]  # R74: 口径自描述
 
 
 class TestSignalPanelNeutralZoneInfo:

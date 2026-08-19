@@ -95,6 +95,39 @@ class TestStaleCandidates:
         assert any(a['symbol'] == 'CASH' for a in result[0]['allocations'])
 
 
+class TestStaleCandidatesR77:
+    """R77 (round29): remove_stale_candidates 全删保护。
+
+    当某策略内**全部**非 CASH 标的均缺 price/return 数据（因子源不可用）时，
+    不得把所有标的删空伪装成「无合格标的」，应保留分配并 WARNING。
+    """
+
+    def test_keeps_all_when_every_non_cash_is_stale(self):
+        etfs = [
+            _etf('510300', weight=0.3, price=None, return_1m=None),
+            _etf('518880', weight=0.3, price=None, return_1m=None),
+            _etf('159338', weight=0.3, price=None, return_1m=None),
+        ]
+        result = remove_stale_candidates([_strategy(etfs)], {})
+        symbols = {a['symbol'] for a in result[0]['allocations']}
+        assert symbols == {'510300', '518880', '159338'}
+
+    def test_keeps_all_when_factor_matrix_outer_nonempty_inner_empty(self):
+        etfs = [_etf('510300', weight=0.3), _etf('518880', weight=0.3)]
+        fm = {'510300': {}, '518880': {}}
+        result = remove_stale_candidates([_strategy(etfs)], fm)
+        symbols = {a['symbol'] for a in result[0]['allocations']}
+        assert symbols == {'510300', '518880'}
+
+    def test_still_removes_partial_stale(self):
+        etfs = [_etf('510300', weight=0.3, price=None, return_1m=None), _etf('518880', weight=0.3, price=10.0, return_1m=0.01)]
+        fm = {'510300': {}, '518880': {'price': 10.0, 'return_1m': 0.01}}
+        result = remove_stale_candidates([_strategy(etfs)], fm)
+        symbols = {a['symbol'] for a in result[0]['allocations']}
+        assert '510300' not in symbols
+        assert '518880' in symbols
+
+
 class TestConsolidateMinnows:
     """_consolidate_minnows: small defense positions merged into largest one."""
 

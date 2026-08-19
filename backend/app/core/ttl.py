@@ -23,7 +23,10 @@ CACHE_TTL = {
 
     # ── 板块 ────────────────────────────────────────────────────
     "sector_industry": 60,    # 行业板块行情
-    "sector_concept": 60,    # 概念板块行情
+    # R71 (round29): 概念板块 60s→1h——/sectors/concept 热路径主源每次请求都重拉，
+    # 板块列表属低变数据（行情在详情/成分股接口实时取），1h 缓存消除热态 17s 拉取。
+    "sector_concept": 3600,   # 概念板块行情（1h）
+    "sector_concept_v2": 3600,  # R71: 概念补充分支（名称全列表）1h
     "sector_stocks": 60,     # 板块成分股
     "sector_history": 120,   # 板块历史数据
     "sector_hot_plates": 60, # 热门板块

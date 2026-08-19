@@ -93,6 +93,9 @@ class MarketDataHub(
         self._hot_plates_cache: list[dict] | None = None       # Phase 2: 热点板块
         self._sector_heat_cache: list[dict] | None = None      # Phase 2: 板块热度排行
         self._index_realtime_cache: list[dict] | None = None
+        # R80 (round29): 指数快照刷新时间——报告 as_of 时效标注数据源，
+        # 缺此字段则 as_of 恒 None（假实现）。
+        self._index_realtime_cache_ts: float = 0.0
         # S5: MarketDataHub K 线缓存（统一数据管道，R3: 单行式缓存 + 锁）
         self._kline_cache_rows: dict[str, list[dict]] = {}  # 行式: {symbol: [{date,open,...}]}
         self._kline_cache_ts: float = 0.0
@@ -611,6 +614,7 @@ class MarketDataHub(
                     for item in flat:
                         item["region"] = "A"
                 self._index_realtime_cache = flat
+                self._index_realtime_cache_ts = time.time()  # R80: 快照时效
                 logger.info("[pool] refreshed %d index realtime entries", len(flat))
             except Exception as e:
                 logger.warning("[pool] _refresh_market_snapshot indices failed: %s", e)
@@ -649,6 +653,7 @@ class MarketDataHub(
                 for item in flat:
                     item["region"] = "A"
             self._index_realtime_cache = flat
+            self._index_realtime_cache_ts = time.time()  # R80: 快照时效
             logger.info("[pool] refreshed %d index realtime entries", len(flat))
         except Exception as e:
             logger.warning("[pool] indices refresh failed: %s", e)

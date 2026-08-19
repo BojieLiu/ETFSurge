@@ -742,6 +742,72 @@ def _sort_search_results(items: list[dict], keyword: str) -> list[dict]:
     return sorted(items, key=_rank)
 
 
+# ---------------------------------------------------------------------------
+# R84 (round29): 新浪美股/ETF 联想兜底（type=41）
+# ---------------------------------------------------------------------------
+def _fetch_us_suggest_sync(keyword: str) -> list[dict[str, Any]]:
+    """新浪美股/ETF 联想（suggest type=41），GBK 编码、天然前缀匹配。
+
+    EM 美股 spot（fs=m:105,m:106,m:107）是纯股票列表、**不含 ETF**，
+    instruments US 段同步常失败 → TQQQ 类杠杆 ETF 在既有三级源全断。
+    新浪 suggest type=41 返回含 ETF 的美股联想（TQQQ/SOXL/QQQ 全中），
+    是本场景唯一可达的兜底源。毫秒级、失败静默降级（返回 []）。
+    """
+    import urllib.request
+    import urllib.parse
+    try:
+        url = "http://suggest3.sinajs.cn/suggest/type=41&key=" + urllib.parse.quote(keyword)
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            raw = resp.read().decode("gb18030", errors="ignore")
+    except Exception as _e:  # noqa: BLE001
+        logger.debug("[search_hk_us] sina US suggest failed for %r: %s", keyword, _e)
+        return []
+    out: list[dict[str, Any]] = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split(",")
+        if len(parts) < 5:
+            continue
+        sym = parts[0].strip()
+        if not sym:
+            continue
+        name = parts[4].strip() or (parts[6].strip() if len(parts) > 6 else "") or sym
+        _n = name.lower()
+        _is_etf = ("etf" in _n or "基金" in name or "三倍" in name
+                   or "指数" in name or "proshares" in _n or "ishares" in _n)
+        out.append({
+            "symbol": sym, "name": name,
+            "market": "US", "asset_type": "US",
+            "type": "etf" if _is_etf else "stock",
+        })
+    return out
+
+
+async def _us_suggest_fallback(keyword: str) -> list[dict[str, Any]]:
+    """R84: async 包装 + 60s 负缓存（失败/空结果短时间内不重复打源）。"""
+    cache_key = f"sina_us_suggest:{keyword.lower()}"
+    try:
+        cached = await cache_get(cache_key)
+    except Exception:  # noqa: BLE001
+        cached = None
+    if cached is not None:
+        return cached if isinstance(cached, list) else []
+    try:
+        rows = await run_sync(_fetch_us_suggest_sync, keyword, timeout=3)
+    except Exception:  # noqa: BLE001
+        rows = []
+    rows = rows or []
+    try:
+        await cache_set(cache_key, rows, ttl=60)
+    except Exception:  # noqa: BLE001
+        pass
+    return rows
+
+
+
 async def search_hk_us(keyword: str = "", enrich: bool = True,
                        include_stocks: bool = False,
                        market: str | None = None) -> list[dict[str, Any]]:
@@ -871,6 +937,17 @@ async def search_hk_us(keyword: str = "", enrich: bool = True,
                         })
             except Exception as _e:
                 logger.warning("[search_hk_us] local US instruments fallback failed: %s", _e)
+
+        # R84 (round29): 新浪 suggest type=41 兜底——EM 美股 spot 纯股票不含 ETF、
+        # instruments US 段同步常失败，导致 TQQQ 类杠杆 ETF 在三级源全断。
+        # 当 US 段尚未命中任何结果时，用 sina 联想兜底（毫秒级、失败静默降级）。
+        if include_stocks and kw and (market is None or market == "US") \
+                and not any(it.get("market") == "US" for it in spot):
+            try:
+                sina_rows = await _us_suggest_fallback(kw)
+                spot.extend(sina_rows)
+            except Exception as _e:
+                logger.debug("[search_hk_us] sina US suggest fallback failed: %s", _e)
 
     # 去重（key 归一化处理 .HK/.US 后缀不一致；base 在前 → 基座优先天然成立）
     seen: set[tuple[str, str]] = set()
@@ -1026,7 +1103,9 @@ async def get_realtime_batch(
         results = list(hits.values())
         if misses:
             fetched = await _call(fetch_a_stock_batch, misses, timeout=10)
-            ttl = _QUOTE_TTL.get("A", 5)
+            # R78 (round29): quote TTL 5s→24h——一次成功实时价持久化，盘后/冷却期
+            # 直接可作 last-good stale 兜底（根治「每次实时拉 N 次 K 线」洪泛）。
+            ttl = _LAST_GOOD_TTL
             for item in fetched or []:
                 await cache_set(quote_key(item["symbol"], "A"), item, ttl)
                 results.append(item)
@@ -1238,6 +1317,27 @@ async def _lookup_instrument_type(symbol: str) -> str | None:
     return None
 
 
+async def _write_us_last_good_later(route_task: asyncio.Task, symbol: str) -> None:
+    """R82 (round29): 批量取消/超时后，后台等 _route_us 线程返回结果并写 last-good。
+
+    shield 保护下 route_task 不被取消——线程继续跑，成功后由本任务把报价写入
+    quote_key（24h），使下次请求直接读缓存（AAPL 不再每次重复退化到降级链）。
+    """
+    try:
+        data = await route_task
+        if data and isinstance(data, dict) and data.get("price") is not None:
+            _lg = dict(data)
+            from datetime import datetime, timezone
+            _lg["as_of"] = datetime.now(timezone.utc).isoformat()
+            await cache_set(quote_key(symbol, "US"), _lg, _LAST_GOOD_TTL)
+            logger.info(
+                "[market_service] US %s batch-cancel last-good written in background (price=%s, R82)",
+                symbol, _lg.get("price"),
+            )
+    except Exception:
+        pass
+
+
 async def get_asset_realtime(symbol: str, asset_type: str) -> dict | None:
     from ..fetchers.china_market import fetch_a_stock_realtime, fetch_hk_stock_realtime, fetch_index_realtime
 
@@ -1256,7 +1356,15 @@ async def get_asset_realtime(symbol: str, asset_type: str) -> dict | None:
         if asset_type == "US":
             # P0-11② (round16 3.12): _route_us 已改线程池执行，补 wait_for 硬限时
             # 兜底——避免线程池繁忙时单个请求无限等待（TD 免费层正常 0.5s）。
-            data = await asyncio.wait_for(_route_us(symbol), timeout=8)
+            # R82 (round29): shield 保护——批量窗口（market.py 2s/7s）取消只取消
+            # await、底层线程照常跑；结果成功时由后台任务写 last-good（24h），
+            # 消除「批量取消后 AAPL 每次请求重复退化」（round29 §14.6.4 改动点 3）。
+            _us_task = asyncio.ensure_future(_route_us(symbol))
+            try:
+                data = await asyncio.wait_for(asyncio.shield(_us_task), timeout=8)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                asyncio.ensure_future(_write_us_last_good_later(_us_task, symbol))
+                raise
             # F3-7: 美股实时数据源（TwelveData/Finnhub）可能无 name →
             # 用静态基座映射补全（自选 SPY 显示 "SPDR S&P 500 ETF"）
             if data and not data.get("name"):
@@ -1458,12 +1566,29 @@ async def _last_close_fallback(symbol: str, asset_type: str) -> dict | None:
         close = last.get("close") or last.get("收盘")
         if close is None:
             return None
+        # R78 (round29): 补 change_pct（前收差分）与 volume（末根）——旧实现恒 None，
+        # 收盘兜底行前端涨跌幅/成交量列空白（round29 §14.6.1 改动点 5）。
+        _prev_close = None
+        if len(rows) >= 2:
+            _prev = rows[-2]
+            _prev_close = _prev.get("close") or _prev.get("收盘")
+        change_pct = None
+        if _prev_close is not None:
+            try:
+                change_pct = round((float(close) - float(_prev_close)) / float(_prev_close) * 100, 2)
+            except (ValueError, TypeError, ZeroDivisionError):
+                change_pct = None
+        volume = last.get("volume") or last.get("成交量")
+        try:
+            volume = int(float(volume)) if volume is not None else None
+        except (ValueError, TypeError):
+            volume = None
         return {
             "symbol": symbol,
             "price": float(close),
-            "change_pct": None,
+            "change_pct": change_pct,
             "change_amount": None,
-            "volume": None,
+            "volume": volume,
             "asset_type": asset_type,
             "is_estimated": True,
             "estimate_source": "last_close",

@@ -283,6 +283,40 @@ describe('UnifiedAnalysis F18 (交互一致性 + 错误态)', () => {
     expect(startMock).not.toHaveBeenCalled()
   })
 
+  // round29 Q6: externalTrigger（热点行「AI 分析」）必须写回 activeSearch.searchQuery——
+  // doAnalyze 读该值（UnifiedAnalysis.vue:384），旧实现只写 search.searchQuery（symbol
+  // 实例）→ sector 外部触发时 activeSearch=sectorSearch 为空 → 报「请输入标的代码或名称」
+  // （Q5 quickSelect 同类缺陷，externalTrigger 路径漏修）。
+  it('Q6: externalTrigger sector 模式写回 sectorSearch 并触发分析（不再报空输入）', async () => {
+    startMock.mockResolvedValue({ fullText: '## 板块分析' })
+    const wrapper = mounted()
+    await wrapper.setProps({ externalTrigger: { mode: 'sector', query: 'BK1318', name: '半导体' } })
+    await nextTick()
+    await nextTick()
+    expect(wrapper.vm.activeMode).toBe('sector')
+    expect(wrapper.vm.activeSearch.searchQuery.value).toBe('BK1318')
+    expect(wrapper.vm.error).not.toContain('请输入标的代码或名称')
+    expect(startMock).toHaveBeenCalled()
+    const body = startMock.mock.calls[0][1]
+    expect(body.sector_code).toBe('BK1318')
+    expect(body.sector_type).toBe('industry')
+  })
+
+  it('Q6: externalTrigger index 模式写回 indexSearch 并触发分析', async () => {
+    startMock.mockResolvedValue({ fullText: '## 指数分析' })
+    const wrapper = mounted()
+    await wrapper.setProps({ externalTrigger: { mode: 'index', query: 'SPX', name: '标普500' } })
+    await nextTick()
+    await nextTick()
+    expect(wrapper.vm.activeMode).toBe('index')
+    expect(wrapper.vm.activeSearch.searchQuery.value).toBe('SPX')
+    expect(wrapper.vm.error).not.toContain('请输入标的代码或名称')
+    expect(startMock).toHaveBeenCalled()
+    const body = startMock.mock.calls[0][1]
+    expect(body.asset_type).toBe('index')
+    expect(body.symbol).toBe('SPX')
+  })
+
   it('F18: 键盘 Enter（选中下拉项）统一触发 doAnalyze', async () => {
     const wrapper = mounted()
     wrapper.vm.activeMode = 'symbol'

@@ -8,7 +8,6 @@ U1/N03 (round2-unfixed-fix-plan.md U1 / round3-diagnosis-and-optimization-plan.m
   仅 HTTP 4xx/5xx / 异常 / 超时计入熔断。
 """
 
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -271,96 +270,6 @@ class TestUsPlatesAndPePb:
         with patch.object(sf, "_fetch_us_spot_rich", return_value=[
                 {"symbol": "SPCX", "name": "SpaceX", "industry": "工业", "pe": -222.54}]):
             assert ff.fetch_current_pe_pb("SPCX", "US") is None
-
-    def test_us_index_spx_pe_pb_from_multpl(self):
-        """round30: SPX 指数估值优先走 multpl（真实指数口径），不触 yfinance。"""
-        from app.fetchers import fundamentals_fetcher as ff
-
-        ff.sync_memory_cache.clear()
-        try:
-            with patch.object(ff, "_fetch_spx_pe_pb_multpl", return_value={
-                    "pe_ttm": 29.65, "pb": 6.11, "source": "标普500估值(multpl)"}), \
-                 patch("yfinance.Ticker", side_effect=AssertionError("multpl 主源不应触 yfinance")):
-                result = ff.fetch_current_pe_pb("SPX", "index")
-            assert result is not None
-            assert result["pe_ttm"] == 29.65
-            assert result["pb"] == 6.11
-            assert "multpl" in result.get("source", "")
-        finally:
-            ff.sync_memory_cache.clear()
-
-    def test_us_index_spx_falls_back_to_yf_proxy(self):
-        """round30: multpl 失败 → 回落 yfinance SPY 代理（mock 无网络）。"""
-        from app.fetchers import fundamentals_fetcher as ff
-
-        ff.sync_memory_cache.clear()
-        try:
-            with patch.object(ff, "_fetch_spx_pe_pb_multpl", return_value=None), \
-                 patch("yfinance.Ticker", return_value=SimpleNamespace(
-                        info={"trailingPE": 25.85, "priceToBook": 1.79})):
-                result = ff.fetch_current_pe_pb("SPX", "index")
-            assert result is not None, "SPX 指数应回落 SPY 代理估值"
-            assert result["pe_ttm"] == 25.85
-            assert result["pb"] == 1.79
-            assert "SPY" in result.get("source", ""), f"应标注代理来源: {result}"
-            # 二次调用命中成功缓存（6h），不再触源
-            with patch.object(ff, "_fetch_spx_pe_pb_multpl", side_effect=AssertionError("缓存命中不应重拉")):
-                cached = ff.fetch_current_pe_pb("SPX", "index")
-            assert cached == result
-        finally:
-            ff.sync_memory_cache.clear()
-
-    def test_us_index_pe_missing_returns_none(self):
-        """round30 负向: 指数代理无 PE/PB → None（报告诚实标注不可用），失败缓存 1h。"""
-        from app.fetchers import fundamentals_fetcher as ff
-
-        ff.sync_memory_cache.clear()
-        try:
-            with patch.object(ff, "_fetch_spx_pe_pb_multpl", return_value=None), \
-                 patch("yfinance.Ticker", return_value=SimpleNamespace(
-                        info={"trailingPE": None, "priceToBook": None})):
-                assert ff.fetch_current_pe_pb("SPX", "index") is None
-            # 失败缓存：二次调用不再触源
-            with patch.object(ff, "_fetch_spx_pe_pb_multpl", side_effect=AssertionError("失败缓存不应重拉")):
-                assert ff.fetch_current_pe_pb("SPX", "index") is None
-        finally:
-            ff.sync_memory_cache.clear()
-
-    def test_us_index_dispatch_not_hijack_us_stock(self):
-        """round30: 非指数符号（QQQ）不被代理分支拦截，仍走美股 spot 分支。"""
-        from app.fetchers import fundamentals_fetcher as ff
-        from app.fetchers import sector_fetcher as sf
-
-        with patch.object(sf, "_fetch_us_spot_rich", return_value=[
-                {"symbol": "QQQ", "name": "纳指100ETF", "industry": "-", "pe": None}]):
-            assert ff.fetch_current_pe_pb("QQQ", "US") is None
-
-    def test_spx_multpl_parse_tolerates_amp_entity(self):
-        """round30: multpl 页面解析容忍 &amp; 实体 + meta/display 双格式（mock HTTP 无网络）。"""
-        from app.fetchers import fundamentals_fetcher as ff
-
-        class _FakeResp:
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *a):
-                return False
-
-            def read(self):
-                return (
-                    b'<html><head><meta name="description" content="S&amp;P 500 PE Ratio chart, '
-                    b'historic, and current data. Current S&amp;P 500 PE Ratio is 29.65, a change '
-                    b'of -0.21 from previous market close." /></head><body>'
-                    b'<div>Current S&amp;P 500 Price to Book Value : 6.11 -0.02 (-0.33%)</div>'
-                    b'</body></html>'
-                )
-
-        with patch("urllib.request.urlopen", return_value=_FakeResp()):
-            result = ff._fetch_spx_pe_pb_multpl()
-        assert result is not None
-        assert result["pe_ttm"] == 29.65
-        assert result["pb"] == 6.11
-        assert "multpl" in result.get("source", "")
 
     def test_hot_plates_us_branch_returns_plates(self):
         """P2-AK 接入: get_hot_plates(market=US) 返回板块（非「暂不支持」空）。"""

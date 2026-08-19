@@ -132,8 +132,10 @@ async def test_watchlist_realtime_parallel_slow_source_not_blocking():
         await engine.dispose()
 
     assert resp.status_code == 200, f"status {resp.status_code}"
-    # 3 个慢源并行 + 3s 截断 → 总耗时 < 7s（含 app 首次启动开销；串行会 12s）
-    assert _dur < 7.0, f"watchlist 3 标的并行耗时 {_dur:.2f}s ≥ 7s（串行化退化）"
+    # 3 个慢源并行 + 3s 截断 + R78 收盘兜底（Semaphore(3) × 单条 3s）→ 总耗时 < 10s。
+    # R78 (round29) 把收盘兜底单条 wait_for 0.8s→3s（最终防线多等），enrich 5s 超时后
+    # 兜底最多再 3s → 8s 级；串行实现会 12s。阈值 7→10 校准 R78 兜底预算，并行性断言不变。
+    assert _dur < 10.0, f"watchlist 3 标的并行耗时 {_dur:.2f}s ≥ 10s（串行化退化）"
 
 
 def _get_app():

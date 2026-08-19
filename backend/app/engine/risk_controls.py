@@ -167,6 +167,29 @@ def remove_stale_candidates(
     factor_matrix = factor_matrix or {}
     for strategy in strategies:
         etfs = strategy.get("allocations", [])
+        non_cash = [e for e in etfs if e.get("symbol") != "CASH"]
+        if not non_cash:
+            continue
+        # R77 修复（round29）：全删保护。
+        # 当某策略内**全部**非 CASH 标的都无 price/return 数据时，视为数据源不可用
+        # （非真实无合格标的），跳过整段删除并 WARNING，保留分配。
+        # 否则「因子全空 → 所有标的判 stale → 分配被清空为 100% 现金」会把
+        # 数据源故障伪装成「没有合格标的」，触发 design_pipeline 假失败。
+        all_stale = True
+        for etf in non_cash:
+            fs = factor_matrix.get(etf.get("symbol", ""), {})
+            has_price = fs.get("price", 0) > 0 or abs(fs.get("etf.price", 0)) > 0.0001
+            has_return = abs(fs.get("return_1m", 0)) > 0.0001 or abs(fs.get("etf.return_1m", 0)) > 0.0001
+            if has_price or has_return:
+                all_stale = False
+                break
+        if all_stale:
+            logger.warning(
+                "[risk] all non-CASH candidates lack price/return data (factor source unavailable) "
+                "— skipping stale removal to avoid 100%% cash (profile=%s)",
+                strategy.get("profile", "?"),
+            )
+            continue
         filtered = []
         removed_weight = 0.0
         for etf in etfs:

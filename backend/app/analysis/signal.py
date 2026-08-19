@@ -83,13 +83,16 @@ def composite_signal_with_gate(
          "reason": str, "components": {...}}
     """
     if factor_valid_rate is not None and factor_valid_rate < _COMPOSITE_VALID_RATE_FLOOR:
-        missing_pct = round((1.0 - max(0.0, min(1.0, float(factor_valid_rate)))) * 100, 1)
+        cov_pct = round(max(0.0, min(1.0, float(factor_valid_rate))) * 100, 1)
         return {
             "signal": None,
             "score": None,
             "degraded": True,
+            # R74 (round29): 口径自描述——原「因子数据缺失 X%」与摘要「因子填充率 Y%」
+            # 互斥矛盾（两处百分数底不同）。改为明示「分项覆盖率」基底 + 阈值，避免
+            # 专业投资者把不同口径的百分比误读为同一数字。
             "reason": (
-                f"因子数据缺失 {missing_pct:g}%：综合信号不可用"
+                f"因子数据覆盖率不足（分项覆盖 {cov_pct:g}%，低于 60% 阈值）：综合信号不可用"
                 "（退化为纯技术信号，不合成因子/基本面结论）"
             ),
             "components": {

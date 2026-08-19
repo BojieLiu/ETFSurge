@@ -254,9 +254,14 @@ def fetch_concept_sectors(limit: int = 150) -> list[dict[str, Any]]:
     rows = cached(key, lambda: _try_two("concept_lv", _lv, "concept_ak", _ak), "sector_concept")
 
     # If the two-source attempt returned few results, try third source as supplement
+    # R71 (round29): 补充分支入缓存（1h TTL）——旧实现 _ak_concept_sectors_v2() 在
+    # cached 外每请求必跑（热态 17s，round29 §14.1 R71 实证）。失败返回 [] 同样缓存
+    # 1h（不反复重跑慢源）；缓存空列表不制造假数据（主源下次轮询仍可命中补充）。
     if len(rows) < 60:
         _logger.info("[sector_fetcher] only got %d concepts from primary sources, trying _ak_concept_sectors_v2", len(rows))
-        extra = _ak_concept_sectors_v2()
+        extra = cached("concept_sectors_v2",
+                       lambda: _ak_concept_sectors_v2() or [],
+                       "sector_concept_v2") or []
         if extra:
             existing_codes = {r["sector_code"] for r in rows if r.get("sector_code")}
             for e in extra:

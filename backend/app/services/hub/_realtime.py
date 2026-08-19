@@ -10,6 +10,18 @@ class RealtimeMixin:
         return self._index_realtime_cache or []
 
 
+    def get_index_realtime_as_of(self) -> str | None:
+        """R80 (round29): 指数快照的真实刷新时间（"YYYY-MM-DD HH:MM"）。
+
+        未刷新过 → None（诚实返回，调用方不加时效标注），不得伪造 now()。
+        """
+        ts = getattr(self, "_index_realtime_cache_ts", 0.0) or 0.0
+        if ts <= 0:
+            return None
+        import datetime
+        return datetime.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
+
+
     async def get_realtime(self, symbols: list[str], asset_type: str = "A") -> list[dict]:
         """批量实时行情（委托 market_service.get_realtime_batch）。"""
         from ...services.market_service import get_realtime_batch

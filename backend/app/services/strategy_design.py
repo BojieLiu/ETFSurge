@@ -224,6 +224,36 @@ def _build_static_pool_strategies(capital: float) -> list[dict]:
     return strategies
 
 
+def build_static_degraded_design(capital: float, reason: str) -> dict:
+    """R69 (round29): 零网络的降级方案（数据采集连续超时后的最后一层兜底）。
+
+    旧行为：`design_pipeline` 二次采集也超时 → `status=failed, error="方案生成超时"`，
+    盘后/冷启动首呼拿不到任何方案。本函数用静态核心池（纯 CPU、无 I/O）产出 3 套
+    可执行方案 + `degradation.mode="degraded"`，诚实标注数据源降级而非伪装正常。
+    """
+    strategies = _build_static_pool_strategies(capital)
+    _now_iso = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    return {
+        "strategies": strategies,
+        "market_context": {"degradation_note": reason},
+        "generated_at": _now_iso,
+        "design_metadata": {
+            "version": "v5-engine-static-degraded",
+            "elapsed_seconds": 0.0,
+            "fallback": True,
+        },
+        "degradation": {
+            "mode": "degraded",
+            "reason": reason,
+            "factor_matrix_empty": True,
+            "pool_empty": True,
+            "pool_degraded": True,
+            "static_pool_used": [str(e.get("symbol", "")) for e in STATIC_CORE_POOL if e.get("symbol")],
+            "timestamp": _now_iso,
+        },
+    }
+
+
 async def generate_enhanced_design(
     capital: float = 500000,
     constraints: dict | None = None,
@@ -300,13 +330,17 @@ async def generate_enhanced_design(
         "defense": market_data_hub.get_pool("defense") or [],
     }
 
-    # 2b. 检查候选池是否为空（Z11: 空池 → 静态池兜底 + degradation 标记）
+    # 2b. 检查候选池 / 因子矩阵是否为空（Z11: 空池或因子矩阵全空 → 静态池兜底 + degradation 标记）
+    # R77 修复（round29）：factor_matrix_empty 改判内层——
+    # {"510300":{}} 等「外层非空、内层全空」的矩阵视为因子数据不可用，触发静态池兜底，
+    # 从源头避免进入 allocate 产出现金（100% 现金假失败）。
     total_candidates = sum(len(v) for v in candidates.values())
-    factor_matrix_empty = not bool(factor_matrix)
+    factor_matrix_empty = not any(v for v in factor_matrix.values())
     pool_empty = total_candidates == 0
     static_pool_used: list[str] = []
-    if total_candidates == 0:
-        logger.warning("[strategy_design] empty candidate pool, falling back to static pool")
+    if total_candidates == 0 or factor_matrix_empty:
+        reason = "empty candidate pool" if total_candidates == 0 else "factor matrix empty (data source unavailable)"
+        logger.warning("[strategy_design] %s — falling back to static pool", reason)
         pool_attr = getattr(market_data_hub, 'etf_pool', None)
         static_etfs: list[dict] = pool_attr if isinstance(pool_attr, list) else STATIC_CORE_POOL
         candidates = {
@@ -361,7 +395,8 @@ async def generate_enhanced_design(
             },
             "degradation": _degradation(
                 "static_pool",
-                "非交易时段/数据管道为空：候选池为空，使用静态核心池兜底",
+                "非交易时段/数据管道为空：候选池为空，使用静态核心池兜底" if pool_empty
+                else "因子数据源不可用（因子矩阵全空），使用静态核心池兜底",
             ),
         }
 
@@ -609,6 +644,38 @@ async def generate_enhanced_design(
                 if sym and sym not in (factor_matrix or {}):
                     missing_symbols.append(str(sym))
         partial_data = bool(missing_symbols) and not pool_empty
+
+        # R77 收口 (round29): 因子矩阵全空时 allocate 无评分可算，产出往往是
+        # 「100% 现金」空壳（task_manager 判 valid_count==0 → failed）。此处后置
+        # 守卫：确认全现金后改用静态等权方案（诚实可执行），并标 static_pool。
+        # 注：仅当策略确为全现金才替换——E5 类测试 stub 出的非现金方案不受影响。
+        if factor_matrix_empty and strategies:
+            _all_cash = all(
+                not [e for e in (s.get("etfs") or []) if e.get("symbol") != "CASH"]
+                for s in strategies
+            )
+            if _all_cash:
+                logger.warning(
+                    "[strategy_design] factor matrix empty + allocate produced 100%% cash — "
+                    "replacing with static pool strategies (R77 guard)"
+                )
+                strategies = _build_static_pool_strategies(capital)
+                return {
+                    "strategies": strategies,
+                    "market_context": market_context,
+                    "generated_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "design_metadata": {
+                        "version": "v5-engine-static-pool",
+                        "elapsed_seconds": round(time.monotonic() - start_time, 1),
+                        "regime": market_regime,
+                        "fallback": True,
+                    },
+                    "degradation": _degradation(
+                        "static_pool",
+                        "因子数据源不可用（因子矩阵全空且引擎产出全现金），使用静态核心池兜底",
+                    ),
+                }
+
         return {
             "strategies": strategies,
             "market_context": market_context,

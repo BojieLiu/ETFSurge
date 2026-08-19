@@ -583,3 +583,63 @@ async def test_us_realtime_keeps_existing_name(monkeypatch):
     monkeypatch.setattr(ms, "_route_us", fake_route_us)
     data = await ms.get_asset_realtime("AAPL", "US")
     assert data["name"] == "Apple Inc."
+
+
+# ===== R84 (round29): 美股搜索 TQQQ 经新浪 suggest type=41 兜底 =====
+class TestSearchUsSinaSuggestR84:
+    """R84: EM 美股 spot 纯股票不含 ETF、instruments US 段常失败 →
+    TQQQ 类杠杆 ETF 经 sina suggest type=41 兜底补搜。"""
+
+    @pytest.mark.asyncio
+    async def test_tqqq_suggested_when_spot_and_instruments_empty(self, monkeypatch):
+        from app.services.market_service import search_hk_us
+
+        # ① spot 双源空 ② instruments US 段空 → 三级源全断
+        monkeypatch.setattr(ms, "_call", AsyncMock(return_value=[]))
+        monkeypatch.setattr(ms, "async_session", _fake_session_rows([]))
+        # ④ sina suggest 兜底返回 TQQQ
+        tqqq = {"symbol": "TQQQ", "name": "纳斯达克指数ETF-ProShares三倍做多",
+                "market": "US", "asset_type": "US", "type": "etf"}
+        monkeypatch.setattr(ms, "_us_suggest_fallback", AsyncMock(return_value=[tqqq]))
+
+        results = await search_hk_us("TQQ", include_stocks=True, market="US")
+        hits = [r for r in results if r["symbol"] == "TQQQ"]
+        assert hits, "TQQQ 应经 sina suggest 兜底命中（R84 回归）"
+        assert hits[0]["market"] == "US"
+
+    @pytest.mark.asyncio
+    async def test_sina_suggest_never_blocks_search_on_failure(self, monkeypatch):
+        """sina suggest 失败（异常/超时）时搜索不得阻塞，仍正常返回（毫秒级降级）。"""
+        from app.services.market_service import search_hk_us
+
+        monkeypatch.setattr(ms, "_call", AsyncMock(return_value=[]))
+        monkeypatch.setattr(ms, "async_session", _fake_session_rows([]))
+        monkeypatch.setattr(ms, "_us_suggest_fallback", AsyncMock(side_effect=RuntimeError("net down")))
+
+        # 不应抛异常，应安全返回（可能为空，但不阻塞）
+        results = await search_hk_us("TQQ", include_stocks=True, market="US")
+        assert isinstance(results, list)
+
+    def test_fetch_us_suggest_fallback_parses_line(self, monkeypatch):
+        """_fetch_us_suggest_sync 解析 sina GBK 行 → 含 ETF 标记。"""
+        from app.services import market_service as _ms
+        import urllib.request as _ur_req
+
+        fake_line = ("TQQQ,41,tqqq,tqqq,纳斯达克指数ETF-ProShares三倍做多,,"
+                     "纳斯达克指数ETF-ProShares三倍做多,99,1,,,")
+
+        class _Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return fake_line.encode("gb18030")
+
+        monkeypatch.setattr(_ur_req, "urlopen", lambda *a, **k: _Resp())
+
+        rows = _ms._fetch_us_suggest_sync("TQQ")
+        assert any(r["symbol"] == "TQQQ" and r["type"] == "etf" for r in rows), rows
+
