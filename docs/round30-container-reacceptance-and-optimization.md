@@ -42,7 +42,7 @@ round29 的 R68-R84 已全部实施（commits `e251928`+`3e342c6`+`bc0c70f`+`d4f
   1. **R85 — 因子数据全空，设计用占位因子冒充真实评分（R68 目标未达成）**：因子模型页 `valid=0/no_data=27`，设计 factor_data_quality `valid=0/no_data=182`，但设计仍产出 3 方案且 rationale 用 `RSI 50.0`（无数据默认）、`动量因子 +0.300`、`综合信号 -0.34`（**全标的同值**）冒充真实因子。根因（本轮代码级定位）：`factor_registry._fetch_market_data`（`factor_registry.py:1148`）的数据获取顺序是 ①因子模块自身 `_kline_cache`（`_get_cached_kline`，**从未被预热填充**）→ ②SourceRegistry 电路检查 → ③实时 `market_data_hub.get_history()`（`_kline.py:215`，**live fetch 绕过 hub 已热身的 `_kline_cache_rows`**）。而 design-data warmup（R59④，`main.py:430`）只调用 `market_data_hub.refresh_kline()` 填充 **hub 的 `_kline_cache_rows`**，因子计算路径**不读它**。盘后 live fetch 空 → 因子全空 → 缺数据填 0.0/默认值（`factor_registry.py` 占位逻辑）→ 下游无法区分「真实 0」与「无数据」。**这是「两个缓存域断裂」：hub 缓存热、因子模块缓存冷，同一批 K 线数据两条路径一热一冷。** 佐证：技术信号路径（`signal.py`，读 hub `get_kline`）有真实值（components.technical=0.75/-1.0），因子路径无值。
   2. **R86 — R68 kline_cache.json 落盘路径错误（写到源码目录，非挂载卷）**：容器内实测 `/app/app/data/kline_cache.json` 存在（1.09MB），`/app/data/kline_cache.json`（挂载卷 `./data:/app/data`）不存在。根因：`_kline.py:114-127 _kline_cache_path()` 用 `getattr(settings, "data_dir", None)`，但 `Settings`（`config.py:66`）**无 `data_dir` 属性**（只有 `database_url`）→ 落到 fallback `os.path.dirname(__file__)×3 + "data"` = `/app/app/data`（源码目录，非挂载卷）。后果：R68 落盘「重启后加载磁盘缓存」目标在 Docker 仍未达成——文件写到镜像层，`docker compose down/up` 即丢。
 - **P1（正确性/性能）**
-  3. **R87 — R74 口径仍未统一（66.5% vs 33.3% vs 26/39 三值并存）**：策略检查 summary=`因子填充率 66.5%`（键级），factor_availability=`26/39`（键级 66.7%），composite_decision.reason=`分项覆盖 33.3% < 60% 阈值`（类别级 technical/valuation/momentum 1/3）。三者底不同，虽已加标签仍易混——专业投资者无法一眼判断因子数据到底「66% 可用」还是「33% 可用」。13 只持仓 composite_decision 全 `degraded=true, signal=null`。
+  3. **R87 — R74 口径仍未统一（66.5% vs 33.3% vs 26/39 三值并存）**：策略检查 summary=`因子填充率 66.5%`（键级），factor_availability=`26/39`（键级 66.7%），composite_decision.reason=`分项覆盖 33.3% < 60% 阈值`（类别级 technical/valuation/momentum 1/3），**report_text 正文又写「13/13 只持仓因子数据可用（无兜底）」（第 4 值）**。三者底不同，虽已加标签仍易混——专业投资者无法一眼判断因子数据到底「66% 可用」还是「33% 可用」。13 只持仓 composite_decision 全 `degraded=true, signal=null`。
   4. **R88 — A股个股/美股 K 线盘后不可用（R60 兜底不覆盖个股）**：600519 realtime 有价（1307.88 +0.76%）但 indicators/signal `data_available=false`（K线<30）；AAPL realtime=null + K线空（美股整链盘后空）；00700 K线完整但 realtime=null。根因：R60 的 Hub 缓存兜底（`analysis.py:688-699` `get_kline_rows_any`）只对 **ETF** 有效（design-data warmup 仅缓存池内 ETF），**个股（600519/AAPL）不在 Hub K 线缓存** → 兜底取空。个股历史源（stock history）盘后可用性需独立排查。
   5. **R89 — 冷路径性能仍慢（热路径已全修复）**：sectors/concept 冷 38.9s、sectors/industry 冷 20s、watchlist 冷 18.3s、indicators/AAPL 冷 35s、indicators/600519 冷 23s、realtime/00700·AAPL 8s、stock-hot-rank 7.5s。热态全部达标（concept 8-26ms、watchlist 22ms、industry 6ms）。冷路径 = 首次 akshare 全量拉取 + 冷 K 线建库，重启后首呼体验差。
 - **P2（治理/呈现）**
@@ -98,12 +98,59 @@ round29 的 R68-R84 已全部实施（commits `e251928`+`3e342c6`+`bc0c70f`+`d4f
 - 全部 ETF 为静态宽基（红利低波/上证50/沪深300/创业板/中证500/科创50/30年国债/黄金），**无卫星层、无强势板块标的**（strong_sector_coverage=[]），现金 39-60%。
 - **结构告警自曝**：`inv3_satellite_not_monotonic`（satellite_counts 全 0）、`inv5_total_not_monotonic`、`inv6_aggressive_cash_over`（cash 1.0）。
 
+#### 2.1.1 为什么标的这么少（机制链 + 历史回归定位）
+
+直接原因不是设计算法变差，而是**上游因子数据没进来（R85 同根因）→ 引擎「盲选」，只能退回静态宽基核心池 + 大比例现金**。
+
+**机制链**：
+```
+因子数据全空（R85 两缓存域断裂，valid=0）
+  → 因子矩阵 valid=0、所有 factor_score 同值占位（RSI 50.0、动量 +0.300、综合信号 -0.34 全标的同值）
+  → 引擎无法区分优劣，行业/主题择优不可能
+  → 走 Z11 静态池兜底（factor_matrix_empty 触发）
+  → 静态池 = 宽基核心 + 黄金/国债（无卫星层）
+  → 层预算塞不满 → 39-60% 现金
+```
+日志佐证：`all non-CASH candidates lack price/return data — skipping stale removal to avoid 100% cash`——R77 守卫生效避免了「100% 现金失败」，但**兜底保住的是「能出方案」，不是「方案质量」**。
+
+**历史回归定位（DB `portfolio_designs`，created_at 为 UTC，+8 = 北京时间；策略内 `etfs` 数组统计非 CASH 数）**：
+
+| 设计 | 时间（北京） | 结果 | 非现金 ETF |
+|---|---|---|---|
+| 619-623 | 08-18 21:52–22:07 | full/partial，8-10 只 | 510050/512890/512880 证券/513180 恒生科技/159928 消费/159570/159755/511090/518880 等 |
+| 626-630 | 08-19 14:01–14:35（**盘中**） | full，8 只 | 同上 + 513050 中概互联/513120 港股创新药/159516 半导体设备 |
+| **631** | **08-19 19:19（盘后）** | full/**3-4 只** | 只剩静态：512890/510050/511090/518880（防御）、510300/159915/510500（平衡）、510300/588000（进攻） |
+| 611-618 | 08-18 15:52–16:08 | **failed 100% 现金** | 空（round29 R77 修复前） |
+
+**结论：不是渐进劣化，是「进程重启清空因子模块缓存 + 盘后 live fetch 空」的间歇触发**：
+1. 因子模块自身 `_kline_cache`（`factor_registry.py:799`，`KLINE_CACHE_TTL=300s`，`:801`）是**进程内存缓存**——只要进程不重启、或 TTL 内有人成功 live fetch 过，因子就有数据 → 能选出行业/主题 ETF。
+2. 本轮 `docker compose down/up` 重启容器 → 因子模块缓存清空。
+3. 预热（R59④）只填 **hub** 的 `_kline_cache_rows`，**不填因子模块缓存**（两缓存域断裂，R85）。
+4. 盘后 live fetch 空 → 因子全空 → 静态宽基兜底 → 3-4 只 + 39-60% 现金。
+而 08-18 21:52、08-19 14:35 能恢复 8 只，是因为进程内存缓存还活着（未重启）或盘中 live fetch 成功重新填充。
+
+**「引入时间」的精确回答**：
+- **架构缺陷一直存在**：因子模块自建缓存（commit `7ac4a54`，round1/2 时代）起，就从未让因子计算读 hub 缓存——「双缓存域」是历史遗留，平时被「盘中 live fetch 成功 + 进程常驻」掩盖。
+- **首次暴露**：**08-18 15:52**（round29 task 571，进程反复重启 + 盘后），表现是 100% 现金失败。
+- **本轮再次暴露**：**08-19 19:19**（重启容器 + 盘后首呼），表现是 3-4 只静态兜底。
+- 因此 **R85 修复（让因子路径读 hub 缓存）不仅解决「占位因子」，也直接解决「标的少」**——因子数据恢复后，卫星层/行业标的会像 630 之前一样被选出来。
+
 ### 2.2 场内策略检查（task 615，✅ full）
 `POST /strategy-check-async {"total_capital":500000,"portfolio_type":"on_exchange"}` → 完成，**llm_layer_ok=True、is_fallback=False、report_quality=full、coverage=13/13**（round29 为 0/13）。
 
 - **R57/R70 ✅**：summary 为真实 LLM 输出（含 RSI 44.02、量比 4.17、溢价 7.06%、KDJ J=6.90 等真实值）。
 - **❌ R87**：summary=`因子填充率 66.5%` vs factor_availability=`26/39` vs composite.reason=`分项覆盖 33.3%`（§8）。
 - **❌ R85 下游**：13 只持仓 composite_decision 全 `degraded=true, signal=null`，components `{technical: 有值, valuation: 0.0, momentum: 0.0}`——因子/基本面组件全空，综合信号退化为纯技术。
+
+#### 2.2.1 报告判断质量评估（record 754，用户提问驱动）
+
+对「中证A500 20% 集中度」「港股 13% 相关性」「红利/恒科偏弱」三条提示的实证核验：
+
+- **① 20% 集中度 ✅ 合理**：`portfolio_etfs` 中 159338 目标权重 0.20 确为最大单一持仓（次大 518880 黄金 10%）；宽基跌 10% → 组合拖累约 2%。但措辞略偏——中证A500 是 500 只大盘股的宽基，「成分股集体现回落」= A 股整体下行，本质是市场级系统性风险而非单一个股集中风险。
+- **② 港股 13%「相关性较高」⚠️ 半合理**：权重计算准确（159545 5% + 513120 5% + 513010 3% = 13%），「同一市场系统性风险」成立（美元利率/全球风险偏好/南向资金）。但「相关性较高」**未经实证且以偏概全**——用缓存 K 线 239 个交易日日收益实测：港股创新药(513120) × 红利低波(512890) = **+0.120**（低）、× 中证A500 = +0.428；红利低波 × 中证A500 = **-0.061**（不相关）。恒生红利（高股息低波，防御）与恒生科技（成长）风格相反，历史相关性本就低；真正常见风险因子是「港股市场 beta」而非 pairwise 高相关，且 13% 总权重不构成高集中度。
+- **③ 红利类/恒生科技「偏弱」⚠️ 依据真实但口径自相矛盾**：512890/159545/513010 的 `tech_signal=SELL` 是真实信号（signal 路径读 hub K 线有真值），判断方向合理；**但只有技术面支撑**——valuation/momentum 组件全 0.0（R85），无因子/基本面背书。且报告内部矛盾：正文写「因子数据质量：13/13 只持仓因子数据可用（无兜底）」，每只 composite_decision 却写「分项覆盖 33.3% < 60% 阈值」（R87 口径）。**159545 内部 KDJ J 值矛盾**：`factor_summary` 写 `KDJ.J 90.11（超买区）`，建议理由写 `KDJ J值6.90偏弱`——同一指标两个数据路径给出相反结论，恰是 R85 两缓存域断裂的症状。
+
+**改进方向**（并入 R85/R87 验收）：相关性提示改为「港股市场 beta 敞口」或补真实相关性计算；「因子数据可用 13/13」与 composite degraded 必须统一口径；修复 159545 类跨路径指标矛盾。
 
 ---
 
@@ -146,6 +193,17 @@ round29 的 R68-R84 已全部实施（commits `e251928`+`3e342c6`+`bc0c70f`+`d4f
 ## 7. 因子模型
 
 - ❌ **R85**：`/factors/active` `total=38, static=11, no_data=27, valid=0`——与 round29 相同。etf_specific 10 no_data、technical 14 no_data、style 2 no_data、sentiment 1 no_data。
+  - **no_data=27 恰好 = 全部「需要行情数据」的因子，无一是「不需要却报缺失」**：
+
+| 类别 | 数量 | 状态 | 原因 |
+|---|---|---|---|
+| technical（RSI/MACD/KDJ/ATR 等） | 14 | no_data | 需要 close/high/low 数组 |
+| etf_specific（折溢价/资金流等） | 10 | no_data | 需要实时价格/净值 |
+| style（成长/价值） | 2 | no_data | 需要收益率序列 |
+| sentiment | 1 | no_data | 需要涨跌家数等 |
+| static（政策对齐 3 + 宏观 5 + 情绪 3） | 11 | static | 不依赖行情数据，恒可用 |
+
+  - 即「哪些因子没数据」的答案是：**所有依赖市场数据的因子都缺**，证明是数据通路（两缓存域断裂）问题而非个别因子 bug。
 - 根因链见 §0.3 R85：**因子模块自身缓存冷 + live fetch 空，与 Hub 已热身缓存两域断裂**。
 - factor_ic_records 未新增（IC 回填日志 `已回填（242 交易日），跳过`）。
 
@@ -244,6 +302,11 @@ round29 的 R68-R84 已全部实施（commits `e251928`+`3e342c6`+`bc0c70f`+`d4f
 4. **R88（个股 K 线）**：R60 测试验「Hub 缓存兜底」，但兜底源是 **ETF** kline cache，不覆盖「个股 symbol 不在 ETF cache + 盘后 stock history 空」。
 5. **R89（冷路径性能）**：无性能基准覆盖 sectors/concept、watchlist 冷态首呼（Lighthouse/verify_perf 只测热态与前端）。
 6. **共性**：与 round27/28/29 一脉相承——**测试验「方法已应用」非「目标已达成」，mock 快乐路径，不测「前置条件未满足」的级联场景与「跨缓存/跨字段一致性」的结构事实**。本轮新增教训：**R68 修了 hub 缓存持久化，但因子计算走的是另一条缓存域——两条缓存域的一致性从未被测试覆盖**。
+7. **patrol.py 编排覆盖分析（R85-R91 均无法由 patrol 新增识别）**：patrol 是「编排器」不新增断言，覆盖 = 底层检查覆盖（§12 逐项对照）：
+   - **能覆盖（症状层）**：R69/R77（L2-e2e `design-quality` 断言非空方案）、R71/R78/R82 热路径（L3-perf `verify_perf`）、R85 症状（`test_factor_differentiation` 方差 >0.01，`data_health_check.py:76`）——但该测试在**独立子进程**跑，不读容器内已热身的 hub 缓存，盘后因子路径空时同样可能拿到空数据 → 方差 0 FAIL，报告只写 `variance=0.0000`，会被误当成「数据源问题」而非「双缓存断裂」；交易时段 live fetch 成功又假绿。
+   - **覆盖不到（根因层 + 本轮全部新增问题）**：R85 双缓存一致性（无测试断言「hub 已热身 + factor 模块缓存空 → 因子全空但设计仍产 full 报告」）；R86 落盘路径（单测在本地 `data/` 恰好存在→绿，容器 `/app/app/data` vs 挂载卷 `/app/data` 差异无覆盖）；R87 三值同底（verify_e2e P3-B 只查「逐项 filled 合计 ≥ 标题」，不查 summary/composite/factor_availability 三处数值一致）；R89 冷路径（`verify_perf.py:12` 明确「冷缓存首请求为已知」，只测热路径）；R88/R91 盘后环境相关（断言非空则盘后必 FAIL 误报）。
+   - **要让 patrol 真正覆盖需补的负向断言**（当前均不存在）：① `/factors/active` `valid_rate > 0`（盘后/冷启动也不得为 0）；② 跨缓存一致性回归测试：`hub._kline_cache_rows` 已热身时 `factor_registry.compute()` 必须产出非占位因子（R85）；③ kline_cache.json 必须落在 `settings.data_dir`（挂载卷）而非源码目录（R86）；④ verify_perf 加冷路径基准（重启后首呼 concept ≤10s / watchlist ≤6s，R89）。
+   - **根本局限**：patrol 退出码 0 只代表「现有检查全绿」，而 R85 恰恰是「现有检查全绿、单测全过、但运行时因子全空、设计用占位值冒充」——patrol 继承了这一盲区，不会新增断言，只重跑已有断言。
 
 ---
 
@@ -329,5 +392,6 @@ round29 的 R68-R84 已全部实施（commits `e251928`+`3e342c6`+`bc0c70f`+`d4f
 - **Round 2（file:line 复核）**：确认 `_kline.py:114-127`（落盘路径 fallback）、`_kline.py:215-222`（get_history live fetch）、`factor_registry.py:1148-1237`（数据获取顺序）、`config.py:66-68`（无 data_dir 属性）、`main.py:430`（refresh_kline 只填 hub 缓存）、`analysis.py:688-699`（R60 兜底只覆盖 ETF 缓存）、`signal.py:91-95` + `strategy_check.py:208-232/512-517`（R74 三值源头）。全部锚点核实无误。
 - **Round 3（归因修正：R82 自选「维护中」实为盘前非源故障）**：TSLA realtime=null 的「数据源维护中」文案，经时段判断（19:30 北京 = 美股盘前）修正为「盘前无实时，文案误导」，非 R82 修复失效——R82 的 7s 窗口已在盘中验证（memory 载 TSLA 3.88s→stale 全值）。R82 判定从「❌」修正为「⚠️ 部分（盘前文案误导）」，补入 §4。
 - **Round 4（验收口径 + 测试清单补全）**：为每项补「正/负向断言」（防假完成：R85 负向「因子全空不得产占位 RSI 50.0 冒充」、R86 负向「容器内不得再写 /app/app/data」、R87 负向「禁止 66.5% 与 33.3% 并存」）。R89 冷路径阈值明确（concept ≤10s、watchlist ≤6s）。
+- **Round 5（用户提问驱动的归因补充，2026-08-19 会话）**：补「为什么标的少」「什么时候引入」「patrol 能否覆盖」三个问题的实证回答（§2.1.1 机制链 + DB 设计历史回归定位、§7 因子类别拆分、§12.7 patrol 覆盖分析）。回归定位结论：非渐进劣化，是「进程重启清空因子模块缓存 + 盘后 live fetch 空」的间歇触发；架构缺陷自 commit `7ac4a54`（round1/2 时代）即存在，首次暴露 08-18 15:52（100% 现金）、本轮 08-19 19:19（3-4 只静态兜底）。另评估 strategy-check 报告判断质量（§2.2.1）：三条提示事实基础准确，但「港股相关性较高」无实证（实测 513120×512890 相关仅 +0.120）、「红利/恒科偏弱」缺因子支撑、报告内部「13/13 无兜底」与 composite「33.3%」自相矛盾（R87 第 4 口径）。
 
-> **当前状态（Round 1-4 完成）**：R85-R91 均达实施标准（精确 file:line + 根因 + 验收 + 负向断言）；R85/R86 已展开为实施级详细设计（§14.4）。本文档除设计外**不写任何修复代码**，等待「开始实施」指令。
+> **当前状态（Round 1-5 完成）**：R85-R91 均达实施标准（精确 file:line + 根因 + 验收 + 负向断言）；R85/R86 已展开为实施级详细设计（§14.4）。本文档除设计外**不写任何修复代码**，等待「开始实施」指令。
