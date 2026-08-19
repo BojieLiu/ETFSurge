@@ -173,7 +173,7 @@ class TestFactorRegistry:
         """默认路径应加载 YAML 文件中的全部 167 个因子"""
         from app.factors.factor_registry import FactorRegistry
         from pathlib import Path
-        default = Path(__file__).parent.parent.parent / "app" / "factors" / "factor_definitions.yaml"
+        default = Path(__file__).parent.parent / "app" / "factors" / "factor_definitions.yaml"
         if not default.exists():
             pytest.skip("factor_definitions.yaml not found")
         reg = FactorRegistry()
