@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import logging
+import os
 import time as _time
 from datetime import datetime, timedelta
 from typing import Any
@@ -11,6 +12,7 @@ from ..services.cache_service import sync_memory_cache  # R5-2-8: 失败缓存 1
 from ..config import settings
 from ..core.source_registry import registry as _source_registry
 from ..core.logging import get_logger
+from ..utils.proxy import no_proxy
 
 logger = get_logger(__name__)
 
@@ -21,6 +23,19 @@ from ..core.market_context import EM_PUSH_HOST
 from ..utils.decode import decode_df as _decode_df
 _PUSH2_SOURCE = EM_PUSH_HOST
 _AKSHARE_SOURCE = "akshare"
+
+# round30: 美股指数估值——指数自身（^GSPC/^IXIC/^DJI 等）在数据源无 PE/PB 字段，
+# 用对应指数 ETF 的估值作代理（SPY/QQQ/DIA 的 trailingPE/priceToBook 即指数组合口径）。
+_US_INDEX_ETF_PROXY = {
+    "SPX": "SPY", "^GSPC": "SPY",
+    "IXIC": "QQQ", "^IXIC": "QQQ", "NDX": "QQQ", "^NDX": "QQQ",
+    "DJI": "DIA", "^DJI": "DIA", "DJIA": "DIA",
+}
+_US_INDEX_ETF_NAME = {
+    "SPX": "标普500", "^GSPC": "标普500",
+    "IXIC": "纳斯达克", "^IXIC": "纳斯达克", "NDX": "纳斯达克100", "^NDX": "纳斯达克100",
+    "DJI": "道琼斯", "^DJI": "道琼斯", "DJIA": "道琼斯",
+}
 
 # 熔断器健康句柄（registry._health 返回稳定单例，供涨跌家数采集记录成功/失败）
 _push2_h = _source_registry.health(_PUSH2_SOURCE)
@@ -280,9 +295,15 @@ def fetch_current_pe_pb(symbol: str, market: str = "A") -> dict | None:
     标注"数据源不可用"，不伪造值）。HK 分支数据源待实测（akshare stock_hk_hist
     估值列或东财港股估值），当前仍返回 None。
 
+    round30: 美股指数（SPX/IXIC/DJI 等）符号优先走指数估值分支——SPX 用 multpl
+    （真实指数口径），其余用 yfinance ETF 代理；成功缓存 6h / 失败缓存 1h
+    （R4-26 模式），防 yfinance 限流反复触发。
+
     返回:
       {"pe_ttm": float, "pb": float} | None
     """
+    if str(symbol).upper() in _US_INDEX_ETF_PROXY:
+        return _fetch_us_index_pe_pb_cached(symbol)
     if market and market.upper() == "US":
         return _fetch_us_pe_pb(symbol)
     if not _is_a_stock(symbol):
@@ -305,6 +326,159 @@ def fetch_current_pe_pb(symbol: str, market: str = "A") -> dict | None:
             sync_memory_cache.set(_FAIL_KEY, True, 3600)
         except Exception:
             pass
+    return result
+
+
+def _fetch_us_index_pe_pb_cached(symbol: str) -> dict | None:
+    """round30: 美股指数估值（multpl / yfinance ETF 代理）+ 缓存——成功 6h / 失败 1h（R4-26）。
+
+    估值变化慢 + yfinance 境内有被限流风险：成功结果缓存 6h，失败缓存 1h，
+    避免 symbol-analysis 每次请求都触发慢源/限流。
+    """
+    norm = str(symbol).upper()
+    _ok_key = f"_pe_pb_us_index:{norm}"
+    _fail_key = f"_pe_pb_us_index_fail:{norm}"
+    try:
+        cached = sync_memory_cache.get(_ok_key)
+        if cached is not None:
+            return cached
+        if sync_memory_cache.get(_fail_key) is not None:
+            return None
+    except Exception:
+        pass
+    result = _fetch_us_index_pe_pb(symbol)
+    try:
+        if result:
+            sync_memory_cache.set(_ok_key, result, 6 * 3600)
+        else:
+            sync_memory_cache.set(_fail_key, True, 3600)
+    except Exception:
+        pass
+    return result
+
+
+def _fetch_us_index_pe_pb(symbol: str) -> dict | None:
+    """round30: 美股指数 PE/PB——SPX 走 multpl（指数官方口径），其余指数 yfinance ETF 代理。
+
+    探针（2026-08-19）：
+    - multpl s-p-500-pe-ratio / s-p-500-price-to-book：S&P 500 自身 trailing PE=29.65 /
+      PB=6.11（真实指数口径，非 ETF 代理；multpl 仅覆盖标普500）；
+    - yfinance ^GSPC.info 无 trailingPE（指数不披露估值），SPY/QQQ/DIA.info 有
+      trailingPE/priceToBook（SPY=25.85/1.79），作为 IXIC/DJI 的指数组合口径代理。
+    全部失败/无有效值返回 None（报告诚实降级为「数据源不可用」，不伪造值）。
+    """
+    norm = str(symbol).upper()
+    if norm in ("SPX", "^GSPC"):
+        result = _fetch_spx_pe_pb_multpl()
+        if result:
+            return result
+        # multpl 失败时回落到 yfinance SPY 代理（保证 SPX 报告仍可出估值）
+        return _fetch_us_etf_proxy_pe_pb(norm)
+    return _fetch_us_etf_proxy_pe_pb(norm)
+
+
+_MULT_PL_URLS = {
+    "pe": "https://www.multpl.com/s-p-500-pe-ratio",
+    "pb": "https://www.multpl.com/s-p-500-price-to-book",
+}
+
+
+def _fetch_spx_pe_pb_multpl() -> dict | None:
+    """SPX 官方口径估值：multpl（S&P 500 trailing PE / Price-to-Book）。
+
+    解析 meta description（'...Current S&P 500 PE Ratio is 29.65, a change...'）
+    与页面显示（'Current S&P 500 PE Ratio : 29.65 -0.21 ...'）双兜底。
+    任一请求失败返回 None（调用方回落到 yfinance ETF 代理）。
+    """
+    def _load():
+        import re as _re
+        import urllib.request
+
+        def _get(url: str) -> str:
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+            with urllib.request.urlopen(req, timeout=12) as r:
+                body = r.read().decode("utf-8", "ignore")
+            # HTML 实体归一：'S&amp;P 500' → 'S&P 500'，保证与正则匹配
+            return body.replace("&amp;", "&")
+
+        def _val(body: str, key: str):
+            m = _re.search(key + r" is ([\d.]+)", body)
+            if not m:
+                m = _re.search(key + r" : ([\d.]+)", body)
+            return float(m.group(1)) if m else None
+
+        pe_body = _get(_MULT_PL_URLS["pe"])
+        pb_body = _get(_MULT_PL_URLS["pb"])
+        return {
+            "pe": _val(pe_body, r"S&P 500 PE Ratio"),
+            "pb": _val(pb_body, r"S&P 500 Price to Book Value"),
+        }
+
+    try:
+        data = run_in_thread(_load, timeout=25, executor="long")
+    except Exception:
+        return None
+    if not data:
+        return None
+    result = {}
+    try:
+        if data.get("pe") is not None and float(data["pe"]) > 0:
+            result["pe_ttm"] = round(float(data["pe"]), 2)
+    except (TypeError, ValueError):
+        pass
+    try:
+        if data.get("pb") is not None and float(data["pb"]) > 0:
+            result["pb"] = round(float(data["pb"]), 2)
+    except (TypeError, ValueError):
+        pass
+    if not result:
+        return None
+    result["source"] = "标普500估值(multpl)"
+    return result
+
+
+def _fetch_us_etf_proxy_pe_pb(norm: str) -> dict | None:
+    """round30: 美股指数估值备用源——yfinance ETF 代理（指数自身 info 无估值字段）。
+
+    SPY/QQQ/DIA（对应指数基金）.info 的 trailingPE/priceToBook 即指数组合口径估值；
+    yfinance 失败/无有效值返回 None（报告诚实降级，不伪造值）。
+    """
+    etf = _US_INDEX_ETF_PROXY.get(norm)
+    if not etf:
+        return None
+
+    def _load(etf=etf):
+        proxy = os.environ.get("YFINANCE_PROXY", "")
+        if proxy:
+            import yfinance as yf
+            return yf.Ticker(etf).info or {}
+        with no_proxy():
+            import yfinance as yf
+            return yf.Ticker(etf).info or {}
+
+    try:
+        info = run_in_thread(_load, timeout=15, executor="long")
+    except Exception:
+        return None
+    if not isinstance(info, dict):
+        return None
+    result = {}
+    try:
+        pe = info.get("trailingPE")
+        if pe is not None and float(pe) > 0:
+            result["pe_ttm"] = round(float(pe), 2)
+    except (TypeError, ValueError):
+        pass
+    try:
+        pb = info.get("priceToBook")
+        if pb is not None and float(pb) > 0:
+            result["pb"] = round(float(pb), 2)
+    except (TypeError, ValueError):
+        pass
+    if not result:
+        return None
+    result["source"] = f"{_US_INDEX_ETF_NAME.get(norm, norm)}估值取{etf}ETF代理(yfinance)"
     return result
 
 
