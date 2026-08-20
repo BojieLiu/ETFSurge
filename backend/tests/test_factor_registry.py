@@ -527,10 +527,13 @@ def test_v3_aggregate_factor_scores():
     expected_valuation = 0.6
     assert abs(aggregated["valuation"] - expected_valuation) < 0.001
 
-    # Momentum should include etf.* and china.policy.* values
+    # Momentum should include etf.* values; R99 (round32): china.policy.* 静态政策因子
+    # 已从 momentum 聚合剔除（盘后动量数据缺失时不再被 0.3 占位污染）。
     assert "momentum" in aggregated
-    expected_momentum = (0.4 + 0.3) / 2
+    expected_momentum = 0.4  # 仅 etf.return_1m
     assert abs(aggregated["momentum"] - expected_momentum) < 0.001
+    # R99 负向：china.policy.five_year_plan=0.3 不再进入 momentum 聚合（仍保留原始键）
+    assert "china.policy.five_year_plan" in aggregated
 
     # All original keys preserved
     for key in raw_scores:

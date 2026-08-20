@@ -238,6 +238,8 @@ class TestP1_9FactorDataQuality:
         monkeypatch.setattr(freg.registry, "_data_source_gaps", gaps)
         monkeypatch.setattr(freg.registry, "_constant_factor_codes", set())
         monkeypatch.setattr(freg.registry, "_sample_counts", {})
+        # R100: compute() 未跑过 → 回退定义就位率（防残留 produced 状态污染断言）
+        monkeypatch.setattr(freg.registry, "_last_compute_produced", {})
 
         report = sd._factor_data_quality_report()
         assert report["data_available"] == 8, f"可用因子应为 8，实际 {report}"
@@ -265,6 +267,8 @@ class TestP1_9FactorDataQuality:
         # F25②: 样本 ≥ MIN_TRADING_DAYS(250) + 序列统计显著 → valid
         monkeypatch.setattr(freg.registry, "_sample_counts",
                             {f"test.factor_{i}": 260 for i in range(8)})
+        # R100: compute() 未跑过 → 回退定义就位率（防残留 produced 状态污染断言）
+        monkeypatch.setattr(freg.registry, "_last_compute_produced", {})
 
         report = sd._factor_data_quality_report()
         assert report["valid"] >= 8, f"显著因子数应 ≥8，实际 {report}"

@@ -173,14 +173,19 @@ def _is_growth_wide_basis(c: dict[str, Any]) -> bool:
     return any(k in text for k in _GROWTH_WIDE_BASIS_KEYWORDS)
 
 
-# O16 (round7 §7 P18): 大盘/超大盘宽基识别——核心层「大盘宽基族互斥」约束用。
+# O16 (round7 §7 P18) + R101 (round32): 大盘/超大盘宽基识别——核心层「宽基数量上限」约束用。
 # 沪深300/中证A500/中证A50/中证A100/上证50/上证180/深证100/中证100/中证800/MSCI中国
 # 相关性 ~0.95+，核心层同时押注多只 = 同一「大盘 beta」，分散失效。
-# 与 _is_wide_basis 的区别：_is_wide_basis 含中盘（中证500）与成长（科创50/创业板），
-# 大盘宽基族仅限大盘/超大盘市值风格（中证500 属中盘、科创50 属成长，均不在此列）。
+# R101 (用户决策 2026-08-20)：不同宽基指数可并存（「同一指数才合并，不同指数不互斥」），
+# 但数量设上限 ≤4（含强制锚）；**中证500 纳入宽基识别**——实测中证500×沪深300=0.857、
+# 中证500×中证A500=0.935，中盘与大 A 联动显著强于旧注释假设，需纳入上限计数。
+# 与 _is_wide_basis 的区别：_is_wide_basis 含中盘与成长（科创50/创业板），
+# 宽基族含大盘/超大盘 + 中证500（中盘，R101 边界漏洞修复）。
 _LARGE_CAP_WIDE_BASIS_KEYWORDS = (
     "沪深300", "中证A500", "中证A50", "中证A100",
     "上证50", "上证180", "深证100", "中证100", "中证800", "MSCI中国",
+    # R101: 中证500 纳入宽基识别（含 中证500价值/成长/增强 等细分——"中证500" 子串命中）
+    "中证500",
     # round19 P1-②: 裸 A500/A50——「A500ETF华泰柏瑞」无「中证」前缀漏判 → 不触发互斥
     "A500", "A50",
 )
@@ -193,16 +198,70 @@ _LARGE_CAP_EXCLUDE_KEYWORDS = (
 
 
 def _is_large_cap_wide_basis(c: dict[str, Any]) -> bool:
-    """O16: 判断候选是否属于大盘/超大盘宽基族。
+    """O16 + R101: 判断候选是否属于宽基族（大盘/超大盘 + 中证500）。
 
     名称/指数文本匹配关键词（子串语义与 _is_wide_basis 同模式）——
     「中证A500」不子串命中「中证500」（中盘），「科创50/创业板」不命中（成长）。
-    排除词优先：中证1000/中证2000 含「中证100」子串但属中盘/小盘，不算大盘。
+    排除词优先：中证1000/中证2000 含「中证100」子串但属中盘/小盘，不算宽基。
+    R101：中证500 已纳入（中盘高相关组合进入上限计数，边界漏洞修复）。
     """
     text = f"{c.get('name', '') or ''}{c.get('tracked_index', '') or ''}"
     if any(k in text for k in _LARGE_CAP_EXCLUDE_KEYWORDS):
         return False
     return any(k in text for k in _LARGE_CAP_WIDE_BASIS_KEYWORDS)
+
+
+# R101 (round32): 核心层宽基 >0.95 高相关配对 → correlation_warnings 提示（软约束，
+# 非硬剔除）。替代旧 O16「一刀切互斥剔除」：不同宽基指数可并存（用户决策），但高相关
+# 配对显式提示「分散有限」，不静默。纯函数，无 I/O。
+WIDE_BASIS_HIGH_CORR_THRESHOLD = 0.95
+
+
+def wide_basis_high_corr_warnings(
+    allocs: list[dict[str, Any]],
+    correlation_matrix: dict[tuple[str, str], float | None],
+    threshold: float = WIDE_BASIS_HIGH_CORR_THRESHOLD,
+) -> list[dict[str, Any]]:
+    """round32 R101: 核心层宽基 >0.95 高相关配对 → 提示告警（不剔除）。
+
+    仅对同属核心层、且双方均命中 `_is_large_cap_wide_basis` 的配对生成提示；
+    相关性缺失（r=None / 矩阵空）跳过（诚实：无数据不误报）。返回告警条目列表，
+    由调用方（strategy_design）并入 risk_metrics.correlation_warnings。
+    """
+    warnings: list[dict[str, Any]] = []
+    non_cash = [
+        a for a in allocs
+        if a.get("symbol") not in (None, "CASH") and a.get("layer") == "core"
+    ]
+    if len(non_cash) < 2:
+        return warnings
+    seen: set[tuple[str, str]] = set()
+    for i in range(len(non_cash)):
+        for j in range(i + 1, len(non_cash)):
+            a, b = non_cash[i], non_cash[j]
+            if not (_is_large_cap_wide_basis(a) and _is_large_cap_wide_basis(b)):
+                continue
+            sa, sb = str(a.get("symbol")), str(b.get("symbol"))
+            r = correlation_matrix.get((sa, sb))
+            if r is None:
+                r = correlation_matrix.get((sb, sa))
+            if r is None or r <= threshold:
+                continue
+            key: tuple[str, str] = (sa, sb) if sa < sb else (sb, sa)
+            if key in seen:
+                continue
+            seen.add(key)
+            warnings.append({
+                "type": "wide_basis_high_corr",
+                "pair": [sa, sb],
+                "correlation": round(float(r), 3),
+                "note": (
+                    f"核心层宽基高相关（r={float(r):.3f}）："
+                    f"{a.get('name') or sa} × {b.get('name') or sb} "
+                    "不同宽基指数分散有限，注意组合整体市场 beta（软提示，不强制互斥）"
+                ),
+            })
+    return warnings
 
 
 # O24 (round7 §7 P24): 主驱动因子——composite 中加权贡献最大的因子类别。
@@ -1189,33 +1248,29 @@ def allocate(
             factor_definitions=factor_definitions,
             ic_series=ic_series,
         )
-        # O16 (round7 §7 P18): 核心层大盘宽基族互斥——非强制大盘宽基数量 ≤1
-        # （强制锚 510300/159338 已占 2 个名额；balanced/aggressive 建议 ≤0，
-        # defensive 允许 ≤1 上证50 场景）。超出按 factor_score 降序剔除低分者，
-        # 权重按其余核心权重占比回补；剔除后核心层 <3 只时放宽保留 ≤1 只。
-        _core_non_anchor_large = [
-            a for a in core_alloc
-            if a.get("symbol") not in MANDATORY_CODES and _is_large_cap_wide_basis(a)
-        ]
-        _large_cap_limit = 1 if profile_key == "defensive" else 0
-        if len(_core_non_anchor_large) > _large_cap_limit:
+        # O16 (round7 §7 P18) + R101 (round32): 核心层宽基数量上限——互斥剔除 → 软约束。
+        # R101 用户决策（2026-08-20）：不同宽基指数可并存（「同一指数才合并（M3 归一化
+        # 该留），不同宽基指数没必要合并」）——旧 O16「非强制大盘宽基 ≤1」与强制锚
+        # CORE_ANCHORS={510300,159338}（2 只不同宽基被强制并存）自相矛盾，且把核心层
+        # 候选剔到只剩强制锚 → M7 core=2 长期失败。改为**数量上限 ≤4（含强制锚）**：
+        #   · 中证500 已纳入宽基识别（R101 边界漏洞：实测中证500×沪深300=0.857、
+        #     中证500×中证A500=0.935，中盘高相关组合进入上限计数）；
+        #   · 超出按 factor_score 降序剔除低分非锚者（强制锚永不剔除），权重按其余
+        #     核心标的比例回补；>0.95 配对的高相关提示由 strategy_design 的
+        #     wide_basis_high_corr_warnings 层给出（不静默）。
+        _core_large = [a for a in core_alloc if _is_large_cap_wide_basis(a)]
+        _LARGE_CAP_WIDE_BASIS_LIMIT = 4  # 含强制锚（510300/159338 占 2 名额）
+        if len(_core_large) > _LARGE_CAP_WIDE_BASIS_LIMIT:
+            _anchor_in_core = {a.get("symbol") for a in _core_large} & MANDATORY_CODES
+            _keep_non_anchor = _LARGE_CAP_WIDE_BASIS_LIMIT - len(_anchor_in_core)
             _excess = sorted(
-                _core_non_anchor_large,
+                [a for a in _core_large if a.get("symbol") not in MANDATORY_CODES],
                 key=lambda a: a.get("factor_score", 0.0) or 0.0,
                 reverse=True,
-            )[_large_cap_limit:]
+            )[max(_keep_non_anchor, 0):]
             _excess_syms = {a.get("symbol", "") for a in _excess}
             _excess_w = sum(a.get("weight", 0.0) or 0.0 for a in _excess)
             _kept_core = [a for a in core_alloc if a.get("symbol") not in _excess_syms]
-            # 兜底：剔除后核心层 <3 只 → 回补最高分 1 只（保证数量下限 [3,5]）
-            if len(_kept_core) < 3 and _excess:
-                _top = sorted(
-                    _excess, key=lambda a: a.get("factor_score", 0.0) or 0.0,
-                    reverse=True,
-                )[0]
-                _kept_core.append(_top)
-                _excess_w -= _top.get("weight", 0.0) or 0.0
-                _excess = [a for a in _excess if a.get("symbol") != _top.get("symbol")]
             if _excess_w > 1e-9 and _kept_core:
                 _kept_w_total = sum(a.get("weight", 0.0) or 0.0 for a in _kept_core)
                 if _kept_w_total > 0:
@@ -1226,9 +1281,10 @@ def allocate(
                             4,
                         )
             logger.info(
-                "[allocation] O16 core large-cap wide-basis exclusion: removed %s "
-                "(limit=%d, weight %.3f reclaimed across %d core holdings, strategy=%s)",
-                sorted(_excess_syms), _large_cap_limit, _excess_w, len(_kept_core), profile_key,
+                "[allocation] R101 core wide-basis cap: removed %s "
+                "(limit=%d incl. anchors, weight %.3f reclaimed across %d core holdings, strategy=%s)",
+                sorted(_excess_syms), _LARGE_CAP_WIDE_BASIS_LIMIT, _excess_w,
+                len(_kept_core), profile_key,
             )
             core_alloc = _kept_core
         # O16 补充: 预算补足——剔除/兜底后 MAX_WEIGHT(0.30) 钳制可能使核心层权重

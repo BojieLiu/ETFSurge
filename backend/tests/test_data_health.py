@@ -80,7 +80,8 @@ async def check_factor_data_health():
     all_keys = set()
     for sym, scores in result.items():
         all_keys.update(k for k, v in scores.items() if isinstance(v, (int, float)))
-    categories = {"technical": ["technical."], "momentum": ["etf.", "china.policy.", "technical.signal."],
+    # R99 (round32): china.policy.* 静态政策因子已从 momentum 聚合剔除，归入 other
+    categories = {"technical": ["technical."], "momentum": ["etf.", "technical.signal."],
                   "valuation": ["style."], "sentiment": ["sentiment."], "other": []}
     cat_factors = {c: [] for c in categories}
     for k in sorted(all_keys):

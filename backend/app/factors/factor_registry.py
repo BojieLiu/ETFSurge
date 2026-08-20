@@ -1035,6 +1035,10 @@ class FactorRegistry:
         # F3-4 步骤D: 最近一次 _fetch_market_data 的 etf_specific 数据源缺口
         # （factor_code -> [缺失字段的 symbol 列表]；供 factors/active no_data reason 区分）
         self._data_source_gaps: dict[str, list[str]] = {}
+        # R100 (round32): 最近一次 compute() 实际产出（非 None 数值）的因子键数——
+        # factor_code -> 产出的 symbol 数。factor_data_quality 的「数据可用性」统计
+        # 以此为准（对齐 factor_breakdown 真实值），而非定义层 _data_source_gaps。
+        self._last_compute_produced: dict[str, int] = {}
         # O20: 常量因子 code 集合（截面 std=0 → IC 无法计算）——
         # factors/active reason 独立标注「截面无差异（常量输出）」，
         # 与「数据源未接入」「IC 未累积」三分
@@ -1691,6 +1695,26 @@ class FactorRegistry:
                         )
         except Exception as exc:
             logger.debug("[factor] IC batch compute failed: %s", exc)
+
+        # R100 (round32): 记录 compute() 实际产出（非 None 数值）的因子键数——
+        # factor_data_quality「数据可用性」统计以此为准（对齐 factor_breakdown 真实值）。
+        # 背景：盘后 etf.return_* 未产出（None）但 _data_source_gaps 未标注 → 旧口径
+        # 报「97% 可用」掩盖占位退化（设计 697 实证）。此处逐 code 统计非 None 数值的
+        # symbol 数，供 _factor_data_quality_report 计算实际产出率。
+        try:
+            _produced_codes = set(codes or [])
+            if signal_code in self._computers:
+                _produced_codes.add(signal_code)
+            self._last_compute_produced = {
+                _code: sum(
+                    1 for _sym in symbols
+                    if isinstance((result.get(_sym) or {}).get(_code), (int, float))
+                )
+                for _code in _produced_codes
+            }
+        except Exception as _exc:
+            logger.debug("[factor] produced-key tracking failed (non-fatal): %s", _exc)
+            self._last_compute_produced = {}
 
         return result
 

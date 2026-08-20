@@ -15,7 +15,7 @@ import pytest
 
 
 def _make_report(monkeypatch, factors=None, ic_series=None, samples=None,
-                 gaps=None, constants=None):
+                 gaps=None, constants=None, produced=None):
     """构造 _factor_data_quality_report 的 registry 状态并返回报告。"""
     from app.services import strategy_design as sd
     from app.factors import factor_registry as freg
@@ -25,6 +25,10 @@ def _make_report(monkeypatch, factors=None, ic_series=None, samples=None,
     monkeypatch.setattr(freg.registry, "_data_source_gaps", gaps or {})
     monkeypatch.setattr(freg.registry, "_constant_factor_codes", constants or set())
     monkeypatch.setattr(freg.registry, "_sample_counts", samples or {})
+    # R100: produced 状态显式注入——默认 {} 表示 compute() 未跑过（回退定义就位率），
+    # 保证既有 R96 用例确定性（不依赖测试套件中其它 compute() 调用的残留状态）。
+    monkeypatch.setattr(freg.registry, "_last_compute_produced",
+                        {} if produced is None else produced)
     return sd._factor_data_quality_report()
 
 
@@ -80,3 +84,72 @@ class TestR96DataAvailabilityDimension:
                               samples=samples, gaps={})
         assert report["valid"] >= 8
         assert report["ic_accumulation"]["median_samples"] == 260
+
+
+class TestR100ActualOutputRate:
+    """round32 R100: 数据可用性口径对齐 compute() 实际产出（guard S2）。
+
+    根因：`_factor_data_quality_report` 的「数据可用性」= 定义层 `_data_source_gaps`
+    （字段无缺口即「可用」），而 factor_breakdown 实际值 = compute() 产出。盘后
+    etf.return_* 未产出（None）但无 gap 标注 → 旧口径报「97% 可用」掩盖占位退化
+    （设计 697 实证）。
+
+    修复：data_available/valid_rate 改用 `_last_compute_produced`（compute() 非 None
+    数值的因子键数）；新增 definition_ready_pct（定义就位率）与 actual_output_rate
+    （实际产出率）并列，口径脱节显性化。
+    """
+
+    def test_data_available_matches_produced_keys(self, monkeypatch):
+        """R100 ①: compute() 产出的键数即 data_available（对齐 factor_breakdown）。"""
+        factors = {f"test.factor_{i}": {"name": f"F{i}"} for i in range(10)}
+        # 只有 5/10 因子在 compute() 中产出非 None 数值（如盘后 etf.return_* no_data）
+        produced = {f"test.factor_{i}": 1 for i in range(5)}
+        report = _make_report(monkeypatch, factors=factors, gaps={}, produced=produced)
+        assert report["data_available"] == 5, (
+            f"data_available 应对齐 compute() 实际产出 5，实际 {report['data_available']}"
+        )
+        assert report["data_available_pct"] == pytest.approx(0.5, abs=1e-4)
+        assert report["actual_output_rate"] == pytest.approx(0.5, abs=1e-4)
+        # 定义就位率仍反映字段缺口口径（gaps 全空 → 100%）
+        assert report["definition_ready_pct"] == pytest.approx(1.0, abs=1e-4)
+        assert report["degraded"] is True, "实际产出率 50% < 60% 应降级"
+
+    def test_negative_degraded_output_not_reported_97pct(self, monkeypatch):
+        """负向：factor_breakdown 退化为占位值时 data_available 不得报 97%（掩盖退化）。"""
+        factors = {f"test.factor_{i}": {"name": f"F{i}"} for i in range(50)}
+        # 场景复刻设计 697：定义 193 只，但盘后大量因子未产出——仅 20 键产出
+        produced = {f"test.factor_{i}": 1 for i in range(20)}
+        report = _make_report(monkeypatch, factors=factors, gaps={}, produced=produced)
+        assert report["data_available"] == 20
+        assert report["data_available_pct"] < 0.5, (
+            f"占位退化时 data_available_pct 不得报 97%，实际 {report['data_available_pct']}"
+        )
+        assert "97%" not in report["note"]
+        # 口径脱节显性化：定义就位率 100%（无 gap）vs 实际产出率 40%
+        assert report["definition_ready_pct"] == pytest.approx(1.0, abs=1e-4)
+        assert report["actual_output_rate"] == pytest.approx(0.4, abs=1e-4)
+        assert report["degraded"] is True
+
+    def test_fallback_when_no_compute_ran(self, monkeypatch):
+        """compute() 未跑过（produced 空）→ 回退定义就位率（不误报降级）。"""
+        factors = {f"test.factor_{i}": {"name": f"F{i}"} for i in range(10)}
+        report = _make_report(monkeypatch, factors=factors, gaps={})
+        assert report["data_available"] == 10
+        assert report["data_available_pct"] == pytest.approx(1.0, abs=1e-4)
+        # 回退时实际产出率无从统计 → None（诚实「未知」，非假 0%）
+        assert report["actual_output_rate"] is None
+        assert report["degraded"] is False
+
+    def test_definition_ready_tracks_gaps_independent(self, monkeypatch):
+        """定义就位率独立跟踪 _data_source_gaps——与实际产出口径可分离。"""
+        factors = {f"test.factor_{i}": {"name": f"F{i}"} for i in range(10)}
+        # 3 因子字段缺口（定义未就位），但 compute() 产出了 8 个（gap 与产出可并存）
+        gaps = {f"test.factor_{i}": ["510300"] for i in range(3)}
+        produced = {f"test.factor_{i}": 1 for i in range(8)}
+        report = _make_report(monkeypatch, factors=factors, gaps=gaps, produced=produced)
+        assert report["definition_ready"] == 7
+        assert report["definition_ready_pct"] == pytest.approx(0.7, abs=1e-4)
+        assert report["data_available"] == 8
+        assert report["actual_output_rate"] == pytest.approx(0.8, abs=1e-4)
+        # 脱节显性化：定义 70% vs 实际 80%——两维并列可查
+        assert report["definition_ready_pct"] != report["actual_output_rate"]

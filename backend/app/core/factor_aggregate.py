@@ -76,9 +76,13 @@ def aggregate_factor_scores(
     # F1-5/§9.7 R1: 纯价格键 etf.price 不再是 valuation 分量——价格≠估值，
     # 否则黄金/债券等无估值概念的资产也会产生「估值分」（字段错位假信号 +3.9）。
     # 但 etf.price.* 子键（如 etf.price.dividend_yield 股息率）是真实估值维度，保留。
+    # R99 (round32): momentum 聚合剔除 china.policy.*——五年规划/战略新兴/双循环是
+    # 静态政策契合度，非动量因子；盘后 etf.return_* 全 no_data 时静态政策因子 0.3
+    # 独占 momentum 聚合 → 18/18 全同占位污染（设计 697 实证）。剔除后动量缺失时
+    # 下方 `if not values: continue` 使 momentum 键不设置（消费方显式「动量不可用」）。
     CATEGORY_PREFIXES = {
         "technical": ["technical."],
-        "momentum": ["etf.return_", "etf.change_pct", "china.policy.", "technical.signal."],
+        "momentum": ["etf.return_", "etf.change_pct", "technical.signal."],
         "valuation": ["style.", "etf.price."],
         "sentiment": ["sentiment."],
     }

@@ -17,6 +17,7 @@ from ..engine.allocation_engine import (
     enforce_max_correlation,
     apply_near_substitute_warnings,
     check_structure_reasonableness,
+    wide_basis_high_corr_warnings,
 )
 from ..engine.budgets import STRATEGY_META
 from ..engine.rationale import build_rationale
@@ -496,6 +497,21 @@ async def generate_enhanced_design(
                 apply_near_substitute_warnings([_strat_proxy], corr_matrix or {})
             except Exception as _e:
                 logger.debug("[strategy_design] near-substitute warnings skipped: %s", _e)
+
+            # R101 (round32): 核心层宽基 >0.95 高相关配对提示（软约束，非硬剔除）——
+            # 与 enforce_max_correlation 的高相关权重削减正交：即使合计权重未超阈值，
+            # 沪深300×中证A500 等不同宽基指数并存也显式提示「分散有限」（不静默）。
+            # corr_matrix 为空（盘后无相关性数据）→ 无提示（诚实，不误报）。
+            try:
+                _wb_warnings = wide_basis_high_corr_warnings(allocs, corr_matrix or {})
+                if _wb_warnings:
+                    _strat_proxy.setdefault("risk_metrics", {})
+                    _strat_proxy["risk_metrics"]["correlation_warnings"] = (
+                        _strat_proxy["risk_metrics"].get("correlation_warnings", [])
+                        + _wb_warnings
+                    )
+            except Exception as _e:
+                logger.debug("[strategy_design] wide-basis high-corr warnings skipped: %s", _e)
 
             # round20 P2-5: 结构合理性检查——负信号防御层/进攻现金/防御层 median_r 标注
             try:
@@ -1007,8 +1023,14 @@ def _factor_data_quality_report() -> dict:
         不再误导；
       - IC 积累：独立标注「样本 N/250 交易日」（`_status_of` 判定，随运行逐步翻绿）。
 
+    R100 (round32): 数据可用性口径从「定义层 _data_source_gaps」改为「compute()
+    实际产出」（`_last_compute_produced`）——盘后 etf.return_* 未产出但无 gap 标注，
+    旧口径报「97% 可用」掩盖 factor_breakdown 占位退化（设计 697 实证）。新增
+    `definition_ready_pct`（定义就位率）与 `actual_output_rate`（实际产出率）并列，
+    口径脱节显性化。
+
     保留 total/valid/warn/static/no_data 键（向后兼容）；新增 data_available /
-    data_available_pct / ic_accumulation。
+    data_available_pct / ic_accumulation / definition_ready* / actual_output_rate。
     纯计算，无 I/O（IC 值从 registry 内存/DB 读）。
     """
     try:
@@ -1026,8 +1048,13 @@ def _factor_data_quality_report() -> dict:
         _sample_counts = getattr(_freg, "_sample_counts", {}) or {}
         _gaps = getattr(_freg, "_data_source_gaps", {}) or {}
         _constant: set[str] = set(getattr(_freg, "_constant_factor_codes", set()) or set())
+        # R100 (round32): compute() 实际产出（非 None 数值）的因子键数——
+        # 数据可用性统计以此为准（对齐 factor_breakdown 真实值），而非定义层
+        # _data_source_gaps（盘后 etf.return_* 未产出但无 gap 标注 → 97% 掩盖占位）。
+        _produced = getattr(_freg, "_last_compute_produced", None) or {}
+        _have_produced = bool(_produced)
         counts = {"valid": 0, "warn": 0, "static": 0, "no_data": 0}
-        available = 0
+        definition_ready = 0
         _ic_samples: list[int] = []
         for _code in _factors:
             _ic = _ic_series.get(_code)
@@ -1056,12 +1083,28 @@ def _factor_data_quality_report() -> dict:
             if _n > 0:
                 _ic_samples.append(_n)
             # R96: 数据可用性判定——所需字段无缺口（非 _data_source_gaps）且非常量
-            # （截面有区分度，非 O20 常量占位）
+            # （截面有区分度，非 O20 常量占位）——R100 起此口径为「定义就位率」
             if _code not in _gaps and _code not in _constant:
-                available += 1
+                definition_ready += 1
         _non_static = counts["valid"] + counts["warn"] + counts["no_data"]
-        # R96: valid_rate 用数据可用性口径（非 IC 门禁）——字段就位即视为数据可用
-        _availability_rate = round(available / _non_static, 4) if _non_static else 0.0
+        # R100: 实际产出率 = compute() 产出（非 None 数值）的因子键数 / 定义键数。
+        # compute() 未跑过（_produced 空）→ 回退定义就位率（旧行为，不误报降级）。
+        _produced_count = 0
+        if _have_produced:
+            _produced_count = sum(
+                1 for _code in _factors
+                if int(_produced.get(_code, 0) or 0) > 0
+            )
+        if _have_produced:
+            _actual_output_rate = round(_produced_count / _non_static, 4) if _non_static else 0.0
+        else:
+            # compute() 未跑过：产出率无从统计——None（诚实「未知」而非假 0%）
+            _actual_output_rate = None
+        _definition_ready_rate = round(definition_ready / _non_static, 4) if _non_static else 0.0
+        # 数据可用性（valid_rate 口径）：R100 A——优先用实际产出口径；compute() 未跑时
+        # 回退定义就位率（保持既有测试/无 compute 场景行为）。
+        _availability = _produced_count if _have_produced else definition_ready
+        _availability_rate = round(_availability / _non_static, 4) if _non_static else 0.0
         _degraded = _non_static > 0 and _availability_rate < 0.6
         _median_samples = int(statistics.median(_ic_samples)) if _ic_samples else 0
         _max_samples = max(_ic_samples) if _ic_samples else 0
@@ -1073,9 +1116,16 @@ def _factor_data_quality_report() -> dict:
             "no_data": counts["no_data"],
             "valid_rate": _availability_rate,
             "degraded": _degraded,
-            # R96: 数据可用性维度（字段就位率）
-            "data_available": available,
+            # R96/R100: 数据可用性维度——R100 A 起以 compute() 实际产出口径为准
+            #（对齐 factor_breakdown 真实值）；compute() 未跑时回退定义就位率
+            "data_available": _availability,
             "data_available_pct": _availability_rate,
+            # R100 B: 「定义就位率」（字段无缺口/非常量）与「实际产出率」并列——
+            # 口径脱节显性化：factor_breakdown 退化为占位值时 actual_output_rate 骤降，
+            # 不再被 definition_ready_pct 的 97% 掩盖。
+            "definition_ready": definition_ready,
+            "definition_ready_pct": _definition_ready_rate,
+            "actual_output_rate": _actual_output_rate,
             # R96: IC 积累维度独立标注（样本 N/250 交易日）
             "ic_accumulation": {
                 "median_samples": _median_samples,

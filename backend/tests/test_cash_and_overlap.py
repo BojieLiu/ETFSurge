@@ -239,7 +239,14 @@ def _total_count(s):
     return sum(1 for a in s.get("allocations", []) if a.get("symbol") != "CASH")
 class TestTotalInstrumentMonotonic:
     def test_total_count_def_lt_bal_lt_agg(self):
-        """#12 / INV-5：总标的数 防御 < 平衡 < 进攻。"""
+        """#12 / INV-5：总标的数 防御 < 平衡 < 进攻。
+
+        R101 (round32) 修正：O16 互斥剔除改为宽基数量上限（≤4 含锚）后，balanced
+        核心层可并存更多不同宽基（510050/510500 等），总标的数不再保证严格
+        防御 < 平衡 < 进攻（本池 balanced 12 = aggressive 12）。保留原 #12 核心
+        意图：防御最精简（< 平衡 且 < 进攻）、进攻不瘦于防御。卫星/防御层严格单调
+        由 INV-3/#13 独立覆盖（本测试不重复）。
+        """
         cands = _candidate_pool()
         strategies = allocate(
             risk_profile="all", regime="range_bound",
@@ -247,8 +254,22 @@ class TestTotalInstrumentMonotonic:
         )
         by = _allocs_by_id(strategies)
         tot = {p: _total_count(by[p]) for p in ("defensive", "balanced", "aggressive")}
-        assert tot["defensive"] < tot["balanced"] < tot["aggressive"], (
-            f"总标的数未单调: {tot}"
+        # 防御最精简（R101 后仍是有效不变量）
+        assert tot["defensive"] < tot["balanced"], (
+            f"防御应比平衡精简: {tot}"
+        )
+        assert tot["defensive"] < tot["aggressive"], (
+            f"防御应比进攻精简: {tot}"
         )
         # 进攻 ≥ 防御（文档 #12 直接要求）
         assert tot["aggressive"] >= tot["defensive"]
+        # R101：balanced 可并存不同宽基 → 核心层数量上限 4 生效（本池 balanced 5 只核心）
+        core_bal = [a for a in by["balanced"]["allocations"]
+                    if a.get("layer") == "core" and a.get("symbol") != "CASH"]
+        assert len(core_bal) <= 5, f"balanced 核心层 {len(core_bal)} 只超上限 5"
+        wide_bal = [a for a in core_bal
+                    if any(k in f"{a.get('name', '') or ''}{a.get('tracked_index', '') or ''}"
+                           for k in ("沪深300", "中证A500", "中证A50", "中证A100", "上证50",
+                                     "上证180", "深证100", "中证100", "中证800", "中证500",
+                                     "MSCI", "A500", "A50"))]
+        assert len(wide_bal) <= 4, f"balanced 核心层宽基 {len(wide_bal)} 只超上限 4"
