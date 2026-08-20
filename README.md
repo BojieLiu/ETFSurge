@@ -14,7 +14,7 @@ The starting point was a human problem: nobody can watch the whole market. Manua
 
 The obvious shortcut — just ask an AI chatbot — fixes the coverage problem but creates five new ones:
 
-1. **Data latency.** The model's knowledge ends at its training cutoff. Ask it about today's market and it has no idea — real-time quotes, live sentiment, and fresh news aren't in its context.
+1. **Data latency.** Knowledge bases and web search can give a model some awareness of current events, but never real-time — quotes move by the second, and whatever it retrieves is already minutes to hours old by the time it's used. Live prices, intraday sentiment, and today's news are exactly what a chat tool is worst at.
 2. **Hallucination.** LLMs confidently invent numbers, tickers, and "trends" that don't exist. In investment decisions, a fabricated figure is worse than no figure.
 3. **Style drift.** Ask the same question twice and the answer comes back differently — different structure, different emphasis. You can't build a repeatable process on answers that change shape every time.
 4. **Non-reproducible.** The same inputs should produce the same portfolio. A chat model won't.
