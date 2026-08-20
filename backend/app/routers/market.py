@@ -378,6 +378,8 @@ async def _search_indices_akshare_fallback(
 
 # R91 (round30): 静态 A 股个股基座——instruments 表空（同步缺口）+ levistock 盘后
 # 空结果时仍可搜到高频个股（「茅台」→600519）。仅收录确定性代码/名称映射，宁缺毋滥。
+# R97 (round31): 新增 _LEVISTOCK_SEARCH_TIMEOUT——levistock 全量拉取挂起不再拖垮搜索。
+_LEVISTOCK_SEARCH_TIMEOUT = 8.0
 _STATIC_A_STOCK_BASE: list[dict[str, str]] = [
     {"symbol": "600519", "name": "贵州茅台"},
     {"symbol": "601318", "name": "中国平安"},
@@ -455,7 +457,13 @@ async def _search_a_stocks(keyword: str) -> list[dict[str, Any]]:
 
     # 降级：levistock 全量（与 /search/stocks 同链）
     try:
-        full = await asyncio.to_thread(market_data_hub.get_all_stocks)
+        # R97 (round31): levistock 全量拉取加超时保护——get_all_stocks 内部多源
+        # 降级可能挂起（容器网络黑洞），无超时则搜索请求无限等待、静态基座永远
+        # 到不了（§4.5 实证「茅台→0」）。超时/空/异常统一回落静态基座。
+        full = await asyncio.wait_for(
+            asyncio.to_thread(market_data_hub.get_all_stocks),
+            timeout=_LEVISTOCK_SEARCH_TIMEOUT,
+        )
         # R76 (round29): 空结果不得静默——旧实现仅异常打 WARNING、返回空不打，
         # 「茅台」搜不到 600519 无任何日志线索（instruments 表 0 条时全链路静默）。
         if not full:

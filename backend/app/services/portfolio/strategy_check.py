@@ -40,7 +40,13 @@ _strategy_check_cache: dict[str, tuple[float, dict]] = {}
 _COMPOSITE_FACTOR_MAP = {
     "technical": ("technical", "technical.momentum", "technical.rsi"),
     "valuation": ("valuation", "valuation.pe", "valuation.pb"),
-    "momentum": ("momentum", "momentum.recent_return", "momentum.vol_ratio"),
+    # R94 (round31): momentum 组件补真实因子键——旧键（momentum.recent_return /
+    # momentum.vol_ratio）在真实因子分中不存在 → 策略检查 composite momentum 恒 0、
+    # 13/13 全 degraded，而设计 rationale 有真实动量（§4.2 实证）。真实动量键为
+    # etf.return_1m / etf.return_3m（raw 收益 %）+ technical.volume.vol_ratio。
+    # 保留旧键向后兼容存量 mock 用例（round24 R25 语义：任一键有值即视为动量覆盖）。
+    "momentum": ("momentum", "momentum.recent_return", "momentum.vol_ratio",
+                 "etf.return_1m", "etf.return_3m", "technical.volume.vol_ratio"),
 }
 
 
@@ -597,6 +603,58 @@ async def strategy_check(
         data_all_empty=bool((data_quality or {}).get("all_empty")),
     )
 
+    # R95 (round31): 报告正文数值一致性校验——summary / risk_warnings / holdings
+    # reason / report_text 逐持仓比对 KDJ/RSI/SMA/量比 vs technical_indicators 结构化
+    # 值 + 「合计权重 N%」聚合校验（§4.3 实证：正文 KDJ J=6.16 vs 结构化 84.49、
+    # 港股类合计 10% vs 结构化权重和 13%）。不一致用结构化值覆盖 + 修正脚注。
+    _r95_warnings: list[str] = []
+    try:
+        llm_summary, _r95w = _reconcile_report_numbers(
+            str(llm_summary or ""), factor_breakdowns, weight_map)
+        _r95_warnings.extend(_r95w)
+        for _rw in risk_warnings:
+            if not isinstance(_rw, dict):
+                continue
+            _desc = str(_rw.get("description") or "")
+            _fixed, _w = _reconcile_report_numbers(_desc, factor_breakdowns, weight_map)
+            if _fixed != _desc:
+                _rw["description"] = _fixed
+                _r95_warnings.extend(_w)
+        for _h in holdings_analysis:
+            if not isinstance(_h, dict):
+                continue
+            _reason = str(_h.get("reason") or "")
+            if not _reason:
+                continue
+            _fixed, _w = _reconcile_report_numbers(_reason, factor_breakdowns, weight_map)
+            if _fixed != _reason:
+                _h["reason"] = _fixed
+                _r95_warnings.extend(_w)
+    except Exception as _r95e:
+        logger.debug("[strategy_check] R95 number reconciliation skipped (non-fatal): %s", _r95e)
+
+    _report_text = _build_rule_fallback_report(
+        market_data=market_data,
+        factor_breakdowns=factor_breakdowns,
+        merged_suggestions=merged_suggestions,
+        regime=regime,
+        data_quality=data_quality,
+        llm_failed=_llm_failed,
+        risk_warnings=risk_warnings,
+    )
+    try:
+        _report_text, _r95w = _reconcile_report_numbers(
+            _report_text, factor_breakdowns, weight_map)
+        _r95_warnings.extend(_r95w)
+    except Exception as _r95e:
+        logger.debug("[strategy_check] R95 report_text reconciliation skipped (non-fatal): %s", _r95e)
+    if _r95_warnings:
+        _footnote = (
+            "\n\n> ⚠️ **数值一致性校验（R95）**：报告正文部分数值与结构化数据不一致，"
+            f"已自动修正：{'；'.join(dict.fromkeys(_r95_warnings))[:400]}"
+        )
+        llm_summary = f"{llm_summary}{_footnote}"
+
     result = {
         "summary": f"{llm_summary}（市态：{regime_label}{sector_text}{quality_summary}）" if llm_summary else f"市态：{regime_label}，{filled_count}/{total_count}只正常{quality_summary}",
         "suggestions": merged_suggestions,
@@ -604,15 +662,7 @@ async def strategy_check(
         "risk_warnings": risk_warnings,
         # U2 R1: 兜底正文——rule/LLM 建议一律渲染为完整 Markdown 报告
         # （旧实现无 report_text 键 → task 结果 report_text len=0）
-        "report_text": _build_rule_fallback_report(
-            market_data=market_data,
-            factor_breakdowns=factor_breakdowns,
-            merged_suggestions=merged_suggestions,
-            regime=regime,
-            data_quality=data_quality,
-            llm_failed=_llm_failed,
-            risk_warnings=risk_warnings,
-        ),
+        "report_text": _report_text,
         "market_regime": regime,
         "data_quality": {
             "filled_count": filled_count,
@@ -727,7 +777,21 @@ async def _collect_strategy_data(
             return {}
 
     indicators_task = _facade()._compute_indicators(symbols)
-    factor_task = factor_registry.compute(symbols)
+    # R94 (round31): 因子计算对齐设计路径——设计 `_refresh_impl:330-342` 喂
+    # `hub._kline_cache`（列式）给 factor_registry.compute；策略检查此前裸调
+    # compute(symbols) 走 `_fetch_market_data`（另一缓存域），同一 ETF 两条路径
+    # 动量数据一有一无（§4.2 实证）。改为优先喂 hub kline 列式缓存——与设计同源，
+    # 且省去重复 live fetch；hub 缓存为空时回落原路径（_fetch_market_data 内部
+    # 仍有 hub 行缓存 + live 兜底，行为不回退）。
+    try:
+        from ...services.market_data_hub import market_data_hub as _hub
+        _hub_kline = getattr(_hub, "_kline_cache", None) or {}
+        if _hub_kline:
+            factor_task = factor_registry.compute(symbols, market_data=_hub_kline)
+        else:
+            factor_task = factor_registry.compute(symbols)
+    except Exception:
+        factor_task = factor_registry.compute(symbols)
     indicators, factor_scores = await asyncio.gather(
         _guarded(indicators_task, indicators_timeout, "indicators"),
         _guarded(factor_task, factor_timeout, "factors"),
@@ -1358,6 +1422,172 @@ def _build_rule_fallback_report(
     else:
         lines.append("- 无可操作标的（组合为空）。")
     return "\n".join(lines)
+
+
+def _reconcile_indicator_window(window: str, canon: dict[str, float]) -> tuple[str, list[str]]:
+    """R95: 在持仓 symbol 上下文窗口内校正指标数值（纯函数，无 I/O）。
+
+    canon: {"kdj_j": float, "kdj_k": ..., "kdj_d": ..., "rsi": ..., "ma5": ...,
+            "ma10": ...}（technical_indicators 原始值，与 /market/indicators 对齐）。
+    偏差 >1.0 才覆盖（避免浮点舍入误改）；量比负值（真实量比应≥0，负值是 z-score
+    冒充）→ 标「数据待核」。
+    """
+    import re
+
+    out = window
+    warns: list[str] = []
+
+    def _patch(pattern: str, key: str, label: str) -> None:
+        nonlocal out
+        def _sub(m: "re.Match") -> str:
+            try:
+                cur = float(m.group("val"))
+            except (ValueError, IndexError):
+                return m.group(0)
+            target = canon.get(key)
+            if target is None or abs(cur - target) < 1.0:
+                return m.group(0)
+            warns.append(f"{label} {cur:.2f}→{target:.2f}")
+            rel_s = m.start("val") - m.start()
+            rel_e = m.end("val") - m.start()
+            return f"{m.group(0)[:rel_s]}{target:.2f}{m.group(0)[rel_e:]}"
+        out = re.sub(pattern, _sub, out)
+
+    # KDJ.K / KDJ.D / KDJ.J（正文常见「KDJ J=6.16」/「KDJ.J 84.49」）
+    _patch(r"KDJ\s*\.?\s*J\s*[=:：]\s*(?P<val>\d+(?:\.\d+)?)", "kdj_j", "KDJ J")
+    _patch(r"KDJ\s*\.?\s*K\s*[=:：]\s*(?P<val>\d+(?:\.\d+)?)", "kdj_k", "KDJ K")
+    _patch(r"KDJ\s*\.?\s*D\s*[=:：]\s*(?P<val>\d+(?:\.\d+)?)", "kdj_d", "KDJ D")
+    # RSI（须带 =/:，避免误匹配「RSI(14)」标识）
+    _patch(r"RSI\s*[=:：]\s*(?P<val>\d+(?:\.\d+)?)", "rsi", "RSI")
+    # SMA5/10 成对（如「SMA5/10(3.07/13.06)」）
+    if "ma5" in canon and "ma10" in canon:
+        _pair = re.compile(
+            r"SMA5\s*/\s*10\s*[=:：]?\s*[（(]?(?P<a>\d+(?:\.\d+)?)"
+            r"\s*/\s*(?P<b>\d+(?:\.\d+)?)[）)]?"
+        )
+        def _sub_pair(m: "re.Match") -> str:
+            try:
+                a, b = float(m.group("a")), float(m.group("b"))
+            except ValueError:
+                return m.group(0)
+            if abs(a - canon["ma5"]) < 1.0 and abs(b - canon["ma10"]) < 1.0:
+                return m.group(0)
+            warns.append(f"SMA5/10 {a:.2f}/{b:.2f}→{canon['ma5']:.2f}/{canon['ma10']:.2f}")
+            rel_a = m.start("a") - m.start()
+            rel_b = m.end("b") - m.start()
+            return (f"{m.group(0)[:rel_a]}{canon['ma5']:.2f}"
+                    f"/{canon['ma10']:.2f}{m.group(0)[rel_b:]}")
+        out = _pair.sub(_sub_pair, out)
+    # SMA5 / SMA10 单独（须带 =/:）
+    _patch(r"SMA5\s*[=:：]\s*(?P<val>\d+(?:\.\d+)?)", "ma5", "SMA5")
+    _patch(r"SMA10\s*[=:：]\s*(?P<val>\d+(?:\.\d+)?)", "ma10", "SMA10")
+    # 量比负值（真实量比应≥0；z-score 可负 → 标数据待核，不冒充）
+    _vr = re.compile(r"量比\s*[=:：]?\s*(?P<val>-?\d+(?:\.\d+)?)")
+
+    def _sub_vr(m: "re.Match") -> str:
+        try:
+            cur = float(m.group("val"))
+        except ValueError:
+            return m.group(0)
+        if cur >= 0:
+            return m.group(0)
+        warns.append(f"量比 {cur:g}（负值异常，真实量比应≥0）")
+        rel_s = m.start("val") - m.start()
+        rel_e = m.end("val") - m.start()
+        return f"{m.group(0)[:rel_s]}数据待核{m.group(0)[rel_e:]}"
+    out = _vr.sub(_sub_vr, out)
+    return out, warns
+
+
+def _reconcile_aggregate_weights(text: str, weight_map: dict[str, float]) -> tuple[str, list[str]]:
+    """R95: 正文「合计权重 N%」聚合表述与结构化权重和一致性校验（纯函数）。
+
+    取 claim 前 120 字符窗口内出现的全部持仓 symbol → 求 weight_map 权重和 →
+    与声明值偏差 >1% 用权重和覆盖 + WARNING。窗口无 symbol（无法校验）→ 不误改。
+    """
+    import re
+    warnings: list[str] = []
+    out = text
+    pattern = re.compile(r"合计权重\s*[=:：]?\s*(?P<val>\d+(?:\.\d+)?)\s*%")
+    # 从右往左替换——多个 claim 时左侧替换不影响右侧已处理位置（避免偏移错位）
+    for m in reversed(list(pattern.finditer(text))):
+        try:
+            claimed = float(m.group("val"))
+        except ValueError:
+            continue
+        ctx = text[max(0, m.start() - 120):m.end()]
+        syms = re.findall(r"\b(\d{6})\b", ctx)
+        if not syms:
+            continue
+        total = sum(weight_map.get(s, 0.0) for s in set(syms))
+        if total <= 0:
+            continue
+        structured_pct = round(total * 100, 1)
+        if abs(structured_pct - claimed) < 1.0:
+            continue
+        warnings.append(f"「合计权重」聚合 {claimed:g}%→{structured_pct:g}%")
+        out = out[:m.start("val")] + f"{structured_pct:g}" + out[m.end("val"):]
+    return out, warnings
+
+
+def _reconcile_report_numbers(
+    text: str,
+    factor_breakdowns: dict | None = None,
+    weight_map: dict | None = None,
+) -> tuple[str, list[str]]:
+    """R95 (round31): 报告正文数值一致性校验（纯函数，无 I/O）。
+
+    背景（§4.3）：报告正文（LLM/rule 文本层）与结构化层数值源不一致——同一标的
+    同一指标，structured（factor_summary / technical_indicators）与正文数值不同
+    （512890 KDJ J：84.49 vs 6.16；518880 SMA 3.07/13.06 vs 实测 9.02/8.99；
+    量比 -9.86 负值；「港股类合计权重 10%」 vs holdings_json 权重和 13%）。
+
+    处理（仿 _validate_report_consistency 修正脚注模式）：
+      ① 按持仓 symbol 上下文窗口校正 KDJ.K/D/J、RSI、SMA(5/10) 数值
+         （与 technical_indicators 原始值比对，偏差 >1 用结构化值覆盖）；
+      ② 量比负值（真实量比应≥0）→ 标「数据待核」；
+      ③ 正文「合计权重 N%」类聚合表述与 weight_map 结构化权重和一致性校验。
+
+    返回 (修正后文本, warnings)。warnings 非空时调用方追加修正脚注。
+    """
+    if not text:
+        return text, []
+    factor_breakdowns = factor_breakdowns or {}
+    weight_map = weight_map or {}
+    warnings: list[str] = []
+    out = text
+
+    for sym, fb in factor_breakdowns.items():
+        if not isinstance(fb, dict):
+            continue
+        ind = fb.get("technical_indicators") or {}
+        if not isinstance(ind, dict):
+            continue
+        kdj = ind.get("kdj") or {}
+        if not isinstance(kdj, dict):
+            kdj = {}
+        canon: dict[str, float] = {}
+        for _k, _v in (("kdj_j", kdj.get("j")), ("kdj_k", kdj.get("k")),
+                       ("kdj_d", kdj.get("d")), ("rsi", ind.get("rsi")),
+                       ("ma5", ind.get("ma5")), ("ma10", ind.get("ma10"))):
+            if isinstance(_v, (int, float)) and not isinstance(_v, bool):
+                canon[_k] = float(_v)
+        if not canon:
+            continue
+        _pos = out.find(sym)
+        if _pos < 0:
+            continue
+        _end = min(len(out), _pos + 160)
+        _window = out[_pos:_end]
+        _fixed, _warns = _reconcile_indicator_window(_window, canon)
+        if _fixed != _window:
+            out = out[:_pos] + _fixed + out[_end:]
+            warnings.extend(_warns)
+
+    if weight_map:
+        out, _aw = _reconcile_aggregate_weights(out, weight_map)
+        warnings.extend(_aw)
+    return out, warnings
 
 
 def _combine_risk_warnings(

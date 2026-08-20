@@ -1,3 +1,5 @@
+import logging
+import os
 import re
 import socket
 from pathlib import Path
@@ -5,6 +7,8 @@ from typing import List
 
 from pydantic_settings import BaseSettings
 from pydantic import Field, model_validator
+
+logger = logging.getLogger(__name__)
 
 # 解析 .env 为绝对路径, 避免依赖进程工作目录
 _BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -136,21 +140,35 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _resolve_data_dir(self) -> "Settings":
-        """R86: 解析 data_dir（DATA_DIR env → database_url 路径 → 项目默认）。
+        """R86/R93: 解析 data_dir（DATA_DIR env → database_url 路径 → 项目默认）。
 
         容器内 database_url 为 `sqlite+aiosqlite:////app/data/portfolio.db`，
         本地为 `sqlite+aiosqlite:///E:/ETF_Surge/data/portfolio.db`——解析出
         路径目录即为缓存落盘点（与 DB 同目录，天然是挂载卷内）。
+
+        R93 (round31): 旧正则 `:///+(.*)` 对容器 4 斜杠 URL 贪婪吃掉第 4 个前导
+        斜杠 → 捕获 `app/data/portfolio.db`（丢 `/`）→ 相对路径 `app/data` →
+        容器 CWD=/app 下解析为 /app/app/data（镜像层，重启即丢）。本地恰绿是
+        Windows 盘符使相对值仍为绝对。改为 `:///?(.*)` 保留第 4 斜杠，并后置
+        断言 data_dir 为绝对路径——非绝对（解析仍丢前导斜杠的怪 URL）WARNING +
+        回退项目默认 `_DATA_DIR`。
         """
         if self.data_dir:
             # 已由 DATA_DIR env 显式指定
             return self
-        _m = re.match(r"^sqlite(?:\+\w+)?:///+(.*)", self.database_url)
+        _m = re.match(r"^sqlite(?:\+\w+)?:///?(.*)", self.database_url)
         if _m:
             _db_path = _m.group(1).split("?")[0]
             if _db_path:
-                self.data_dir = str(Path(_db_path).parent)
-                return self
+                _candidate = str(Path(_db_path).parent)
+                if os.path.isabs(_candidate):
+                    self.data_dir = _candidate
+                    return self
+                logger.warning(
+                    "[config] database_url 解析出非绝对 data_dir=%r（URL=%r）"
+                    " — 回退项目默认 %s（容器内写到非挂载卷会在重启后丢失，R93）",
+                    _candidate, self.database_url, _DATA_DIR,
+                )
         self.data_dir = str(_DATA_DIR)
         return self
 

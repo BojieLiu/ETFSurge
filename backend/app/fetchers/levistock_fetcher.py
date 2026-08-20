@@ -152,11 +152,19 @@ _ENGLISH_CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
     "positive": ("rally", "surge", "gain", "beats", "record high", "recovery", "boom",
                  "upgrade", "soar", "jumps", "rises", "advance"),
     "negative": ("falls", "drop", "loss", "miss", "downgrade", "slump", "decline",
-                 "slides", "tumbles", "sinks", "cut jobs"),
+                 "slides", "tumbles", "sinks", "cut jobs",
+                 # R98 (round31): 出口/贸易限制类（「curb rare-earth exports」→
+                 # 限制即利空，不再 other 掉）
+                 "curb", "curbs", "restrict", "restriction"),
     "neutral": ("inflation", "cpi", "ppi", "pmi", "gdp", "jobs", "nonfarm", "earnings",
                 "economy", "market", "oil", "crude", "yield", "treasury", "bond",
                 "stocks", "shares", "rate", "trade", "growth", "index", "bank",
-                "election", "elections", "reform", "charter", "crypto", "currency"),
+                "election", "elections", "reform", "charter", "crypto", "currency",
+                # R98 (round31): 宏观数据/贸易/财政类英文词——「Japan exports」、
+                # 「US budget deficit」不再落入 other（level 1 欠分类，且不被 R90
+                # rule 兜底覆盖）
+                "export", "exports", "budget", "deficit", "fiscal", "spending",
+                "import", "imports", "trade balance"),
 }
 
 

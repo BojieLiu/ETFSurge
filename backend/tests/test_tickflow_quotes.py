@@ -219,23 +219,29 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 class TestP1_9FactorDataQuality:
     def test_degraded_when_valid_rate_low(self, monkeypatch):
-        """P1-9: valid 率 <60% → factor_data_quality.degraded=True + 降级说明。
-        负向断言：valid 率低仍报「正常」→ FAIL。"""
+        """P1-9/R96: 数据可用率 <60% → factor_data_quality.degraded=True + 降级说明。
+
+        R96 (round31): valid_rate 口径改为「数据可用性」（字段就位率）——IC 未累积
+        不再算数据缺失。本用例构造**字段缺口**（_data_source_gaps）使 30/38 因子
+        数据不可用 → 可用率 <60% → 降级（负向：数据不可用仍报正常 → FAIL）。
+        """
         from app.services import strategy_design as sd
         from app.factors import factor_registry as freg
 
-        # 构造低 valid 率场景：38 因子，多数 no_data（IC 未累积）
+        # 构造低可用率场景：38 因子，其中 30 个缺 nav 字段（数据源未接入）
         fake_factors = {f"test.factor_{i}": {"name": f"F{i}"} for i in range(38)}
         fake_ic = {f"test.factor_{i}": None for i in range(38)}  # 全无 IC → no_data
+        gaps = {f"test.factor_{i}": ["510300"] for i in range(30)}  # 30/38 字段缺口
 
         monkeypatch.setattr(freg.registry, "_factors", fake_factors)
         monkeypatch.setattr(freg.registry, "_ic_series_cache", fake_ic)
-        monkeypatch.setattr(freg.registry, "_data_source_gaps", {})
+        monkeypatch.setattr(freg.registry, "_data_source_gaps", gaps)
         monkeypatch.setattr(freg.registry, "_constant_factor_codes", set())
         monkeypatch.setattr(freg.registry, "_sample_counts", {})
 
         report = sd._factor_data_quality_report()
-        assert report["degraded"] is True, f"valid 率低应降级，实际 {report}"
+        assert report["data_available"] == 8, f"可用因子应为 8，实际 {report}"
+        assert report["degraded"] is True, f"数据可用率低应降级，实际 {report}"
         assert "降级" in report["note"], "降级时应含降级说明"
 
     def test_not_degraded_when_valid_high(self, monkeypatch):

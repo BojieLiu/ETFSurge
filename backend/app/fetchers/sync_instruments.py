@@ -26,6 +26,13 @@ _SEGMENT_TIMEOUTS = {
     "美股": 30.0,
 }
 
+# R97 (round31): 段内**每源独立超时**——A股个股/港股段主源（EM）在容器内黑洞
+# 占满整段 30s 预算 → 新浪降级链没机会执行 → 该段被 `_guarded` 整体判 FAILED
+# → instruments 表无 A股个股/港股（茅台/腾讯搜不到）。主源 12s 掐断 + 新浪 15s
+# = 27s < 段预算 30s，单源超时不再弃全段（降级链仍执行）。
+_A_STOCK_SOURCE_TIMEOUTS = {"em": 12.0, "sina": 15.0}
+_HK_SOURCE_TIMEOUTS = {"em": 12.0, "sina": 15.0}
+
 
 def _sync_disabled() -> bool:
     """O1: 环境开关 INSTRUMENTS_SYNC_DISABLED=1 跳过 instruments 同步。"""
@@ -148,15 +155,24 @@ async def _fetch_a_stock_list() -> list[dict]:
     东财 stock_zh_a_spot_em 熔断时（2026-08-02 实测 ConnectionError）回退新浪
     stock_zh_a_spot（列：代码/名称），保证个股仍能灌入 instruments 本地表，
     消除「个股搜索走 levistock 全量外部拉取、冷启动 5-6s」的体验。
+
+    R97 (round31): 每源独立超时（EM 12s / Sina 15s）——容器内 EM 黑洞不再占满
+    整段 30s 预算导致新浪降级链没机会执行（单源超时不弃全段）。
     """
     try:
-        rows = await _fetch_akshare_list("stock_zh_a_spot_em", "代码", "名称", "A", "stock")
+        rows = await asyncio.wait_for(
+            _fetch_akshare_list("stock_zh_a_spot_em", "代码", "名称", "A", "stock"),
+            timeout=_A_STOCK_SOURCE_TIMEOUTS["em"],
+        )
         if rows:
             return rows
     except Exception as e:
         print(f"  [WARN] A股个股 stock_zh_a_spot_em failed: {e}")
     try:
-        rows = await _fetch_akshare_list("stock_zh_a_spot", "代码", "名称", "A", "stock")
+        rows = await asyncio.wait_for(
+            _fetch_akshare_list("stock_zh_a_spot", "代码", "名称", "A", "stock"),
+            timeout=_A_STOCK_SOURCE_TIMEOUTS["sina"],
+        )
         if rows:
             print("  [INFO] A股个股: 新浪降级链生效（东财不可用）")
             return rows
@@ -191,15 +207,25 @@ async def _fetch_etf_list() -> list[dict]:
 
 
 async def _fetch_hk_list() -> list[dict]:
-    """P1-2 (round9 §5/C4): 港股段——东财主源 + 新浪降级链（容器 EM 被拦时不空）。"""
+    """P1-2 (round9 §5/C4): 港股段——东财主源 + 新浪降级链（容器 EM 被拦时不空）。
+
+    R97 (round31): 每源独立超时（EM 12s / Sina 15s）——容器港股段 EM 黑洞占满
+    30s 预算 → 新浪降级链没机会执行 → 表内港股 FAILED（腾讯搜不到 00700）。
+    """
     try:
-        rows = await _fetch_akshare_list("stock_hk_main_board_spot_em", "代码", "名称", "HK", "stock")
+        rows = await asyncio.wait_for(
+            _fetch_akshare_list("stock_hk_main_board_spot_em", "代码", "名称", "HK", "stock"),
+            timeout=_HK_SOURCE_TIMEOUTS["em"],
+        )
         if rows:
             return rows
     except Exception as e:
         print(f"  [WARN] 港股 stock_hk_main_board_spot_em failed: {e}")
     try:
-        rows = await _fetch_akshare_list("stock_hk_spot", "代码", "名称", "HK", "stock")
+        rows = await asyncio.wait_for(
+            _fetch_akshare_list("stock_hk_spot", "代码", "名称", "HK", "stock"),
+            timeout=_HK_SOURCE_TIMEOUTS["sina"],
+        )
         if rows:
             print("  [INFO] 港股: 新浪降级链生效（东财不可用）")
             return rows

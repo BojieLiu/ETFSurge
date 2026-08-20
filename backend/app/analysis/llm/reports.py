@@ -517,12 +517,16 @@ async def generate_strategy_check_report(
         sig = fb.get("technical_signal", {})
         drift = fb.get("weight_drift", {})
 
-        # R85 (round30): factor_scores 可能含 None（缺数据诚实标注）——过滤非数值，
-        # 避免 abs(None)/f"{None:.2f}" 崩溃（LLM 报告生成路径「bad operand type」）。
-        _numeric_fs = [(k, v) for k, v in fs.items() if isinstance(v, (int, float))]
-        factor_text = "；".join(
-            f"{k}: {v:.2f}" for k, v in sorted(_numeric_fs, key=lambda x: -abs(x[1]))[:5]
-        ) if _numeric_fs else "无因子数据"
+        # R95 (round31): 喂 LLM 结构化同源因子文本（format_factor_summary，原始值，
+        # KDJ/RSI 对齐 /market/indicators），不再喂裸 z-score 键——旧实现 LLM 看到
+        # `technical.kdj.j_value: -1.24` 等归一化键后把 z-score 当原始指标写进正文
+        # （512890 正文「KDJ J=6.16」vs 结构化 84.49，§4.3 实证）。format_factor_summary
+        # 输出的数值与结构化 factor_summary 同底，LLM 引用即一致。
+        from ...services.portfolio.formatting import format_factor_summary
+        factor_text = format_factor_summary(
+            fs,
+            tech_ind=fb.get("technical_indicators") if isinstance(fb, dict) else None,
+        ) or "无因子数据"
         signal_text = sig.get("signal", "hold")
         drift_text = f"偏离 {drift.get('drift_pct', 0):.1f}%" if drift else "—"
 

@@ -996,27 +996,39 @@ def _data_precision_report(factor_quality: dict | None) -> dict:
 
 
 def _factor_data_quality_report() -> dict:
-    """P1-9 (round20 §五 P1-9): 因子 valid 率统计 + 完整性降级标注。
+    """P1-9 (round20 §五 P1-9): 因子数据质量统计 + 完整性降级标注。
 
-    复用 factors router 的 _status_of 判定（权威状态来源），统计 valid/warn/
-    static/no_data 分布；valid 率 = valid / 非 static 因子数（static 为「设计为
-    静态」，不参与有效性评估）。valid 率 < 60% → degraded=True + 降级说明。
+    R96 (round31): 拆「数据可用性」与「IC 积累」两维——旧实现复用 F25② `_status_of`
+    IC 样本门禁（样本<250 交易日 → no_data），数据积累期 valid_rate 恒 0%、报
+    「缺失 100%」，而 rationale 已引用真实 RSI/动量 → meta 与正文自相矛盾（§4.4
+    实证）。R85 修复后**数据可用性 ≠ IC 积累**：
+      - 数据可用性（valid_rate 口径）：所需数据字段是否就位（无 `_data_source_gaps`
+        缺口、非 `_constant_factor_codes` 常量）。R85 后技术因子有值 → 可用率 >0，
+        不再误导；
+      - IC 积累：独立标注「样本 N/250 交易日」（`_status_of` 判定，随运行逐步翻绿）。
+
+    保留 total/valid/warn/static/no_data 键（向后兼容）；新增 data_available /
+    data_available_pct / ic_accumulation。
     纯计算，无 I/O（IC 值从 registry 内存/DB 读）。
-
-    F25② (round23 §8): _status_of 判定改用「交易日数 + t/IR」——样本 <60 天
-    全部 no_data（积累中），故数据积累期 valid_rate=0 → 恒 degraded（诚实的
-    降级：方案仅供参考），随运行满 250 交易日且 t≥2/|IR|≥0.5 逐步翻绿。
     """
     try:
+        import statistics
         from ..factors.factor_registry import registry as _freg
-        from ..routers.factors import _status_of, STATIC_FACTOR_CODES, MARKET_LEVEL_FACTOR_CODES
+        from ..routers.factors import (
+            _status_of, STATIC_FACTOR_CODES, MARKET_LEVEL_FACTOR_CODES,
+            MIN_TRADING_DAYS,
+        )
         from ..factors.ic_tracker import compute_series_stats
 
         _factors = getattr(_freg, "_factors", {}) or {}
         _design_static = STATIC_FACTOR_CODES | MARKET_LEVEL_FACTOR_CODES
         _ic_series = getattr(_freg, "_ic_series_cache", {}) or {}
         _sample_counts = getattr(_freg, "_sample_counts", {}) or {}
+        _gaps = getattr(_freg, "_data_source_gaps", {}) or {}
+        _constant: set[str] = set(getattr(_freg, "_constant_factor_codes", set()) or set())
         counts = {"valid": 0, "warn": 0, "static": 0, "no_data": 0}
+        available = 0
+        _ic_samples: list[int] = []
         for _code in _factors:
             _ic = _ic_series.get(_code)
             _icv = None
@@ -1030,7 +1042,6 @@ def _factor_data_quality_report() -> dict:
                         _icv = float(_v)
                         break
                 _ser = compute_series_stats([float(v) for v in _ic if v is not None])
-            # F25②: samples 取内存 IC 周期计数（无 DB 时降级标注用），t/IR 从序列估算
             _st, _ = _status_of(
                 _code,
                 samples=int(_sample_counts.get(_code, 0)),
@@ -1039,21 +1050,48 @@ def _factor_data_quality_report() -> dict:
                 ic_val=_icv,
             )
             counts[_st] = counts.get(_st, 0) + 1
+            if _st == "static":
+                continue
+            _n = int(_sample_counts.get(_code, 0) or 0)
+            if _n > 0:
+                _ic_samples.append(_n)
+            # R96: 数据可用性判定——所需字段无缺口（非 _data_source_gaps）且非常量
+            # （截面有区分度，非 O20 常量占位）
+            if _code not in _gaps and _code not in _constant:
+                available += 1
         _non_static = counts["valid"] + counts["warn"] + counts["no_data"]
-        _valid_rate = round(counts["valid"] / _non_static, 4) if _non_static else 0.0
-        _degraded = _non_static > 0 and _valid_rate < 0.6
+        # R96: valid_rate 用数据可用性口径（非 IC 门禁）——字段就位即视为数据可用
+        _availability_rate = round(available / _non_static, 4) if _non_static else 0.0
+        _degraded = _non_static > 0 and _availability_rate < 0.6
+        _median_samples = int(statistics.median(_ic_samples)) if _ic_samples else 0
+        _max_samples = max(_ic_samples) if _ic_samples else 0
         return {
             "total": len(_factors),
             "valid": counts["valid"],
             "warn": counts["warn"],
             "static": counts["static"],
             "no_data": counts["no_data"],
-            "valid_rate": _valid_rate,
+            "valid_rate": _availability_rate,
             "degraded": _degraded,
+            # R96: 数据可用性维度（字段就位率）
+            "data_available": available,
+            "data_available_pct": _availability_rate,
+            # R96: IC 积累维度独立标注（样本 N/250 交易日）
+            "ic_accumulation": {
+                "median_samples": _median_samples,
+                "max_samples": _max_samples,
+                "target_days": MIN_TRADING_DAYS,
+                "note": (
+                    f"IC 积累中（中位 {_median_samples}/{MIN_TRADING_DAYS} 交易日，"
+                    f"最高 {_max_samples}）；t/IR 达标后逐因子翻绿"
+                    if _max_samples < MIN_TRADING_DAYS
+                    else f"IC 样本充足（中位 {_median_samples} 交易日），待 t/IR 显著"
+                ),
+            },
             "note": (
-                f"因子数据完整性降级：valid 率 {_valid_rate:.0%} < 60%，方案仅供参考"
+                f"因子数据完整性降级：数据可用率 {_availability_rate:.0%} < 60%，方案仅供参考"
                 if _degraded else
-                f"因子数据完整性正常（valid 率 {_valid_rate:.0%}）"
+                f"因子数据完整性正常（数据可用率 {_availability_rate:.0%}）"
             ),
         }
     except Exception as _e:
