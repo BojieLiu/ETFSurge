@@ -2,7 +2,7 @@
 
 > 中文版：[README_CN.md](./README_CN.md)
 
-A multi-asset real-time market analysis and ETF portfolio management platform covering **A-shares, Hong Kong, US stocks, gold, crude oil, and silver**. It combines an AI portfolio designer, a live factor model, and LLM-powered market analysis — with the entire market-data layer running on free sources.
+A multi-asset real-time market analysis and ETF portfolio management platform covering **A-shares, Hong Kong, US stocks, gold, crude oil, and silver**. It was built to make AI-assisted investing fast, reliable, and auditable — combining an AI portfolio designer, a live factor model, and LLM-powered market analysis, with the entire market-data layer running on free sources.
 
 FastAPI (async) backend + Vue 3 (Pinia + ECharts) frontend. Data moves over REST, WebSocket, and SSE. Quotes are cached at 5–15s per market, sector boards refresh every 60s, regime/sentiment/news every 120s.
 
@@ -10,16 +10,26 @@ FastAPI (async) backend + Vue 3 (Pinia + ECharts) frontend. Data moves over REST
 
 ## Why this exists
 
-Free market data is unreliable. akshare, Sina, Tencent, EastMoney, levistock, mootdx — each works most of the time, and each fails in its own way: rate limits, cooldown windows, dropped connections, missing tickers. ETF Surge treats that as the problem to solve, not a footnote.
+The starting point was a human problem: nobody can watch the whole market. Manually tracking every asset class, every sector, and the day's news is slow, subjective, and inevitably narrow — analysis bends toward what you already believe, misses what you aren't looking at, and arrives late. This system exists to fill that gap: it collects the data and runs the analysis across the full market, at a speed and breadth no person can match.
 
-That makes resilience the engineering priority:
+The obvious shortcut — just ask an AI chatbot — fixes the coverage problem but creates five new ones:
 
-- Every asset class has its own **fallback chain**, routed through a circuit breaker with exponential backoff (60s → 600s cooldown).
-- Sources in cooldown are skipped; the first source returning valid data wins.
-- **Empty results count as misses, not failures** — a healthy source is never polluted by a ticker it doesn't cover.
-- When every source is down, the API says so explicitly — degraded precision, estimated NAV, or `data source unavailable` — never stale or fabricated numbers.
+1. **Data latency.** The model's knowledge ends at its training cutoff. Ask it about today's market and it has no idea — real-time quotes, live sentiment, and fresh news aren't in its context.
+2. **Hallucination.** LLMs confidently invent numbers, tickers, and "trends" that don't exist. In investment decisions, a fabricated figure is worse than no figure.
+3. **Style drift.** Ask the same question twice and the answer comes back differently — different structure, different emphasis. You can't build a repeatable process on answers that change shape every time.
+4. **Non-reproducible.** The same inputs should produce the same portfolio. A chat model won't.
+5. **Non-auditable.** When a decision goes wrong, you need to know why: which factor, which data source, which assumption. A chat log can't tell you.
 
-On top of that sits a strategy engine that is the opposite of the data layer: **pure functions, zero I/O, fully deterministic**. The same engine that runs in production runs in the unit tests.
+ETF Surge exists to answer those five problems head-on, not to be "another AI tool". The engineering choices in this repo all flow from them:
+
+- **Ground the LLM in live data.** Every analysis runs against a real-time data layer — quotes, K-lines, indicators, factor scores — fetched at request time. The model writes prose about data it can actually see, instead of inventing.
+- **Deterministic where it matters.** Portfolio allocation is computed by a pure-function engine with zero I/O: same inputs, same outputs, every time. LLM prose is decoration on top of engine output, never the source of truth.
+- **A factor model with statistical checks.** 38 live factors with daily IC tracking give analysis a factual backbone; whether a factor is significant is a statistical question, not a model's assertion.
+- **Everything is auditable.** Designs are persisted, factor scores stored, token usage logged, data-source health monitored. You can reconstruct why a portfolio looks the way it does.
+
+And because the whole thing runs on free data sources, there's a hard constraint underneath: **the data layer has to survive flaky providers**. akshare, Sina, Tencent, EastMoney, levistock, mootdx — each works most of the time and fails in its own way. So every asset class gets a fallback chain behind a circuit breaker; empty results count as misses, not failures; and when every source is down, the API says so instead of serving stale or fabricated numbers. A system that helps you invest must never quietly hand you bad data.
+
+That resilience work is most of this repo — not because it's glamorous, but because it's the difference between a demo and a tool you'd actually trust with a decision.
 
 ---
 
