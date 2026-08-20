@@ -74,8 +74,35 @@
 - [ ] 定时刷新：缓存任务是否按 60s/120s 周期执行（日志）
 - [ ] WS 链路：/ws/market、/ws/news 连接与推送
 - [ ] 前端页面四态：首页/Dashboard/组合/资讯 的 loading/空/错误/慢
+- [ ] **前端 Lighthouse 评分（软门禁）**：首页 + /dashboard 四类别分 + 核心 Web Vitals（LCP/CLS/TBT），与 F18 基线对比
 - [ ] 回归基线：`python scripts/verify_e2e.py` 全 PASS；后端 pytest / 前端 npm test 跑一轮
 - [ ] patrol.py 巡检：`python scripts/patrol.py --full`
+
+# 前端 Lighthouse 评分（性能/可访问性，软门禁）
+在「前端页面四态」之外补量化指标——对容器内生产前端（nginx :80）跑 Lighthouse 评分：
+
+1. **URL**：`http://localhost/`（首页）+ `http://localhost/dashboard`（Dashboard）。
+   容器 prod profile 前端在 :80（根目录 `.lighthouserc.js` 里的 `localhost:3000` 是本地
+   preview 端口，容器诊断以 :80 为准，**不得用 dev server :5173 冒充生产评分**）。
+2. **方法**：每页 2 次采样（对齐 R4-19 口径：lighthouse + headless-shell），
+   取中位数或次优值；环境未装 lhci 时用
+   `npx lighthouse <url> --only-categories=performance,accessibility,best-practices,seo --output=json --output-path=data/lighthouse_report.json --chrome-flags="--headless --no-sandbox"`；
+   已装 lhci 则 `lhci autorun --config=.lighthouserc.js`（注意其 URL 默认指向 :3000，需按上条覆盖）。
+3. **基线（F18 / `.lighthouserc.js` / 上轮实测）**：
+   | 类别 | 阈值 | 性质 |
+   |---|---|---|
+   | Performance | ≥ 60 | 硬门禁（error 断言） |
+   | CLS | < 0.1 | 硬门禁（error 断言） |
+   | Accessibility | ≥ 80 | 软门禁（warn；round29 R64 实测 86→100） |
+   | Best Practices / SEO | ≥ 80 | 软门禁（warn） |
+   | LCP / TBT | ≤ 8s / ≤ 500ms | 参考 warn |
+   - **软门禁语义**（AGENTS.md「性能验收」）：超阈值**不阻断诊断 DONE**，记入 round 文档
+     「已知性能债」清单（路径 + 实测值 + 阈值）后续排期；`.lighthouserc.js` 内 error 断言
+     是 lhci 跑分时的门禁，与「round 验收软门禁」两级口径并存。
+4. **产物**：`data/lighthouse_report.json`（覆盖上一份）+ round 文档记录
+   四类别分 + 核心 Web Vitals（LCP/CLS/TBT/SI）+ 与上轮/基线对比，逐项标 PASS/WARN/FAIL。
+5. **负向**：采样 < 2 次不得作为结论；容器内抓不到页面（nginx 未起 / JS 报错）记为
+   「待复测」而非评分 FAIL。
 
 # 分析结果质量审查（四问法，逐句不整体）
 对组合设计 / 策略检查 / 各分析报告的每一条结论，走四问并输出判断质量矩阵：
