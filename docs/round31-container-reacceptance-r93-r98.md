@@ -249,7 +249,7 @@ _resolve_data_dir 正则 ^sqlite(?:\+\w+)?:///+(.*)
 - **R88 个股入 Hub 缓存**：组合持仓全为 ETF（13 场内+13 场外），无个股持仓 → warmup 符号集实际不含个股——实施前提偏差，需在设计侧确认是否纳入自选/关注个股。
 
 > **当前状态：已按 §5 方案实施（round31 实施轮）**——R93-R98 全部落地（commit
-> `1441b19` feat(round31): implement R93-R98 ...）；后端全量 2515 passed / 前端 499 passed；
+> `842826c` feat(round31): implement R93-R98 ...）；后端全量 2515 passed / 前端 499 passed；
 > 运行时验证（2026-08-20 13:49–14:07 周四盘中）：R97 茅台→sh600519/腾讯→00700
 > （A股个股段 5547 条已同步）、R98 /news/global level≥3 摘要 5/5 非 null；
 > R93-R96 为代码级结构事实（R93 data_dir 绝对路径单测+本地实测、R94 composite
