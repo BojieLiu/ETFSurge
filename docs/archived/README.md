@@ -2,6 +2,14 @@
 
 本目录存放**已完成使命**的历史文档（诊断计划、评审产物、交接、根因分析），保留审计价值但不再作为活跃依据。
 
+## 最近一次归档（2026-08-21，round33 容器复验完成 + round32 R99-R101 实施并容器内复验生效后）
+并入本目录（均已完成使命，无活跃实施依据身份）：
+- `round30-container-reacceptance-and-optimization.md`（round30 容器复验+优化：R85-R92 诊断/实施，已被 round31 R93-R98 与 round32 R99-R101 承接并实证）
+- `round31-container-reacceptance-r93-r98.md`（round31 R93-R98 复验：data_dir 绝对路径/动量跨路径/报告数值一致性/valid_rate 拆分/个股搜索兜底/资讯摘要；已被 round32 实施承接）
+- `round32-container-reacceptance-r99-r100.md`（round32 R99-R101 修复设计：momentum 剔静态政策因子/因子质量产出率口径两维/宽基软上限≤4；已由 commit `a60f173` 实施、round33 全新镜像容器内复验全 PASS）
+> 归档后引用统一指向 `docs/archived/...`。同步更新：**无**（全仓无 `docs/round3[0-2]*.md` 硬路径引用；模板示例 `round31-xxx.md` 为占位符，保留于 AGENTS.md / prompt-templates/container-fullchain-diagnosis.md 不需改）。
+> 不归档保留于 `docs/` 顶层：`round33-container-reacceptance-r99-r101.md`（当前活跃，R99-R101 复验结论 + 待复测项 R95/E1/E2/E3）、`design-checklist.md`（常驻设计清单）、`patrol-orchestration-plan.md`（常驻流程）、`prompt-templates/`（常驻模板）、`api-contracts/`（活跃契约）、README/AGENTS（项目说明）。
+
 ## 最近一次归档（2026-08-16，round25 验收完成 + round23/24 被 round25 承接后）
 并入本目录（均已完成使命，无活跃实施依据身份）：
 - `round23-system-audit-optimization.md`（round23 系统审计设计文档：P0 正确性 12 项 F7-F28 + 架构 6 项已在 round23/24 落地并实证；残余 F1/F2/F3/F13/F21/E1/F11/T3 已由 round24 R1-R26 与 round25 R27-R39 承接）
