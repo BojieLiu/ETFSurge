@@ -212,6 +212,10 @@ R99/R100/R101 复验全 PASS，未暴露新 bug。round32 §4 的三项修复在
 **未引入回归**（verify_e2e 11 FAIL 全为环境性/历史已知；Lighthouse 无回归；R94 复合动量
 真实值未被 R99 改动破坏）。
 
+> **后续修正（2026-08-22 追问）**：本轮复验完成后，用户追问「IC 因子为何仍在积累中」，
+> 溯源发现新问题 R102（IC 因子积累卡 245/250，根因新浪 `datalen=240` 主动上限）。
+> 属**本轮诊断后新发现**，非本轮容器诊断范畴，详见 §8（方案已细化至实施标准，待实施）。
+
 ### 4.2 环境性观察（非 R 系列，待源恢复复测）
 
 - **E1（HK/US 中文名搜索空）**：港股 instruments 同步失败致中文名索引空；符号搜索 00700/AAPL/SPY 仍 PASS。根因 = `stock_hk_spot` 连接中断（外部源）。**修复建议**：R97 已含 A股静态基座；HK/US 中文名搜索可考虑同类静态基座兜底（非本轮必须，记待办）。
@@ -271,3 +275,224 @@ E1 若升格为守卫：新增 `test_market_search.py` 用例——HK/US 中文�
 > **当前状态**：容器全链路复验完成，R99-R101 实施全部在容器内真实生效，无新增代码级 R 发现。
 > 仅诊断 + 复验，**未写修复代码、未 merge、未 push**（本轮无新修复需求）。等待用户决策：
 > ① 资源回收（docker compose down）；② 旧轮文档归档（round32 及更早已关闭轮次移入 docs/archived/）。
+> **附录 R102（2026-08-22 复验后追问新发现）**：见 §8——IC 因子积累卡 245/250 根因新浪
+> `datalen=240` 主动上限，方案已细化至实施标准（4 处改动含代码 sketch + 测试断言 + 边界），
+> **未实施、待用户「开始实施」指令**。
+
+---
+
+## 8. 新增发现（2026-08-22 追问）— R102：IC 因子积累卡 245/250，根因新浪 datalen=240
+
+> 本节为 round33 复验完成后、用户追问「IC 因子数据很多在积累中，获取历史数据能否让积累
+> 马上完成」时溯源产生的新发现与方案。**仅方案，未实施**（等待「开始实施」指令）。
+
+### 8.1 现象与根因（证据链）
+
+用户观察：`/factors/active` 大量因子 status 为「积累中（可观察）」。DB 实测：
+
+```
+factor_ic_records:
+  COUNT(DISTINCT trade_date) = 245（2025-08-22 .. 2026-08-22，整 1 年）
+  总行数 3355（≈14 因子 × 245 天）
+```
+
+状态门槛（`routers/factors.py:34-35`）：`MIN_OBSERVABLE_DAYS=60` →「积累中（可观察）」；
+`MIN_TRADING_DAYS=250` → 才进入显著性判定（t≥2 且 |IR|≥0.5）。**245 距 250 仅差 5 个交易日。**
+
+根因链（**是代码主动取 240，非新浪硬限制**）：
+
+1. IC 历史回填（R55，`factors/ic_tracker.py:407` `backfill_ic_history`）已在启动时跑过
+   （`main.py:796` `_backfill_ic_history_task`），把 distinct trade_date 从 3 拉到 ~245；
+2. 回填标的 = ETF 池（`main.py:834` `_wait_for_pool_symbols`），而 `fetch_history` 的
+   `_is_etf_code` 分支（`fetchers/china_market.py:1586`）**只走新浪 `_sina_history_cb`**；
+3. `_sina_history_cb` 硬编码 `datalen=240`（`china_market.py:539`）= 约 1 年（240 根），
+   正好压在 250 门槛下。对照：非 ETF A 股走 mootdx 已是 `count=500`（`china_market.py:175`），
+   故只有 ETF 被卡在 245。
+
+**可行性探针（D1，实测新浪接口）**：`datalen` 参数给多少返回多少，无 240 上限——
+
+| datalen | 实际返回 | 时间范围 |
+|---|---|---|
+| 240 | 240 根 | 2025-08-26 .. 2026-08-21 |
+| 320 | 320 根 | 2025-04-30 .. 2026-08-21 |
+| 500 | 500 根 | 2024-07-31 .. 2026-08-21 |
+| 1023 | 1023 根 | 2022-06-08 .. 2026-08-21 |
+| 1500 | 1500 根 | 2020-06-17 .. 2026-08-21 |
+
+唯一上限 = 标的上市日期。`scale=240`（日线粒度，240 分钟=1 天）与 `datalen=240`（窗口根数）
+是两个不同含义的 `240`，前者正确勿动，后者是卡点。
+
+**核心 ETF 历史深度复核（D1 补，2026-08-22）**— 取候选池核心宽基实测 `datalen=500`：
+
+| 标的 | 返回 | 时间范围 |
+|---|---|---|
+| sh510300 沪深300 | 500 根 | 2024-07-31 .. 2026-08-21 |
+| sh510050 上证50 | 500 根 | 2024-07-31 .. 2026-08-21 |
+| sh510500 中证500 | 500 根 | 2024-07-31 .. 2026-08-21 |
+| sh588000 科创50 | 500 根 | 2024-07-31 .. 2026-08-21 |
+| sz159915 创业板 | 500 根 | 2024-07-31 .. 2026-08-21 |
+| **sh159338 中证A500** | **0 根** | 源缺（round33 §2.9 E2「环境性缺锚」同源） |
+
+→ 5/5 核心宽基均稳定返回 500 根（≥2 年），回填 distinct trade_date 跨 250 具备数据基础；
+159338 等个别上市晚/源缺标的返回 0 根，由 backfill「截面 <3 标的跳过」逻辑自然处理，不阻断其他因子。
+
+### 8.2 实施方案（4 处改动，TDD：先补单测 → 改 → 全量验收 1 次）
+
+> 设计原则：**最小改动 + 单点修复**。IC 验证路径只消费**日线** K 线（`backfill_ic_history`
+> 用 `window=60` 日频、`compute_periodic_ic` 截面 IC），weekly/monthly/intraday 不参与因子计算，
+> 故只扩 `daily` 的 `datalen`，不碰其它周期（防无谓大 payload）。
+
+#### ① `china_market.py:539` — `datalen` 仅日线扩至 500（weekly/monthly/intraday 保持 240）
+
+当前（`_sina_history_cb`）：
+```python
+scale = {"daily": "240", "weekly": "1200", "monthly": "7200",
+         "15m": "15", "30m": "30", "1h": "60"}.get(period, "240")
+pref = _exchange(symbol)
+...
+url = (f"...CN_MarketData.getKLineData?symbol={pref}{symbol}&scale={scale}&datalen=240")
+```
+
+改为（按周期区分 datalen，日线 500 其余 240）：
+```python
+scale = {"daily": "240", "weekly": "1200", "monthly": "7200",
+         "15m": "15", "30m": "30", "1h": "60"}.get(period, "240")
+# R102（2026-08-22）：ETF 日线历史窗口 240→500（~2 年），仅日线需要（IC 回填走日频）；
+# weekly/monthly/intraday 不参与因子计算，保持 240 避免无谓大 payload。
+_datalen = "500" if period == "daily" else "240"
+pref = _exchange(symbol)
+...
+url = (f"...CN_MarketData.getKLineData?symbol={pref}{symbol}&scale={scale}&datalen={_datalen}")
+```
+- **为什么只动 daily**：factor compute / backfill 全程用日线 close（60 日回溯窗口），weekly/monthly
+  K 线无任何消费方；扩它们只增网络/内存，不增 IC 样本。
+- **风险**：`scale=240`（日线粒度）勿误改；仅 `_datalen` 变量。
+
+#### ② `main.py:897` — 回填显式传 `max_days=n`（单点修隐藏坑，不改 `ic_tracker.py` 默认值）
+
+当前（`_backfill_ic_history_task` 末尾）：
+```python
+n = max(len(k["close"]) for k in kline.values())          # main.py:859 已算
+...
+cnt = await ic_tracker.backfill_ic_history(db, kline, factor_scores_by_index)  # :897 默认 max_days=400
+```
+`backfill_ic_history` 循环 `range(1, min(n, max_days) + 1)` 且 `dates[i]` 升序 → 处理的是
+**最旧**的 `min(n, max_days)` 天。若 `datalen=500` 但 `max_days` 仍 400，fresh 库只回填
+最旧 400 天、**漏最近 ~100 天**（distinct 仍 ~400，虽过 250 但近期历史缺失）。
+
+改为（调用处传 `max_days=n`，让回填覆盖全部可用天，与既有 `factor_scores_by_index` 全量对齐）：
+```python
+cnt = await ic_tracker.backfill_ic_history(db, kline, factor_scores_by_index, max_days=n)
+```
+- `ic_tracker.py:412` 默认值 `max_days=400` **保留不动**（作为安全上限；调用处 `n≈500` 覆盖之）。
+- 效果：fresh 部署回填 i=1..n（全 ~500 天），distinct trade_date 直冲 ~490，无近期缺口。
+
+#### ③ `main.py:827-828` — 跳过阈值改为「按 kline 深度动态判」（防重跑死循环 + 触发一次性重填）
+
+当前：
+```python
+async with async_session() as db:
+    _existing = await ic_tracker.count_distinct_trade_dates(db)
+if _existing >= 200:                       # :828 旧阈值
+    logger.info("[ic_backfill] 已回填（%d 交易日），跳过", _existing)
+    return
+```
+问题：现有库 245 ≥ 200 → 永不重跑；且固定 200 在「实际可达 ~490」下余量过大，在「池含大量
+新 ETF 时实际仅 ~300」下又可能误触发每启重跑。
+
+改为（先算 kline 深度，跳过得看「已接近可用上限」）：
+```python
+async with async_session() as db:
+    _existing = await ic_tracker.count_distinct_trade_dates(db)
+# R102: 跳过判据按 kline 实际深度（最长标的历史根数）动态定，余量 30 天。
+# 现有 245 < 深度-30 → 触发一次性重填；重填至 ~490 ≥ 深度-30 → 跳过（不每启重跑）。
+kline_depth = max(
+    (len(rws) for rws in rows.values() if isinstance(rws, list) and rws),
+    default=0,
+)
+if _existing >= max(kline_depth - 30, 200):
+    logger.info("[ic_backfill] 已回填（%d 交易日 ≥ 可用 %d），跳过", _existing, kline_depth)
+    return
+```
+- `rows` 为 `_wait_for_kline_rows` 返回值（行式，在 :827 之前已就绪），可直接算 `kline_depth`。
+- **幂等保证**：`save_ic_batch_to_db` 有 `(factor_code, trade_date)` 唯一约束 + `on_conflict_do_update`
+  （`ic_tracker.py:328`），同历日重填不重复、不丢数据；旧 245 天记录被新算值 upsert 覆盖。
+
+#### ④ `scripts/data_health_check.py:68` — 健康检查探针 URL 同步
+
+`data_health_check.py:68` 硬编码同一新浪 URL（`...datalen=240`），与 ① 不同步会让健康检查
+仍按旧窗口探测。改为 `datalen=500`（或提取常量，二选一）。一致性改动，无逻辑变化。
+
+### 8.3 效果预期
+
+- distinct trade_date：245 → ~490（核心宽基 5/5 稳定 500 根，受个别上市晚/源缺标的如 159338
+  影响极小——它们由 backfill「<3 标的跳过」排除，不拉低整体）。
+- **受益因子范围（诚实口径）**：当前 `_ic_persistence_loop` 每日落 IC 的因子约 **14 个**（DB 总行
+  3355 ÷ 245 ≈ 13.7），即这些因子已能产出 IC、只是样本不足；其余 ~13 个 computed 因子每日返回
+  None（常量/样本<3/全零，如 tracking_error 缺 benchmark_close、shares_change 源缺）→ 它们卡在
+  no_data 是**数据源问题，非窗口问题**，R102 不解决（属独立数据接入债，与因子模型扩容评估同源）。
+  R102 让这 ~14 个因子从「积累中」跨 250。
+- 跨 250 后逐因子按 `t≥2 且 |IR|≥0.5` 判 `valid`/`warn`。**关键提醒**：跨 250 仅代表「有样本」，
+  不保证 valid——弱因子（如 vol_ratio，代码注释记载 IC≈0.001）落 `warn`（有样本但统计不显著），
+  是诚实结果，非 bug。
+
+### 8.4 成本与边界
+
+- 回填循环（`main.py:865` `range(n-1,0,-1)`）≈500 次 `_reg.compute()`，每次
+  `wait_for(timeout=10)`，实测 ~0.3-0.5s/次 → 启动后台约 4-5 分钟 CPU（startup-once 异步，
+  不阻塞就绪，但占用启动初期 CPU）。
+- `kline_cache.json` 从 ~240 根/标的 → ~500 根/标的（~66 标的 ≈ 33k 行，几 MB），persist
+  `timeout=15` 仍够。
+- **日常 `_ic_persistence_loop` 不受影响**：该循环用列式缓存 `_hub._kline_cache`（经
+  `_rows_to_columns` `days=60` 固定 60 天，`_kline.py:83`），只需近期数据算截面 IC；`datalen`
+  扩大只影响行式 `_kline_cache_rows`（回填读取源），列式 60 天窗口不变 → 周期 IC 语义零变化。
+- **边界（已知近似，非回归）**：
+  1. 日索引对齐近似：backfill 用 `dates_ref[i]`（首个含 dates 标的之日期）作整批 trade_date 标签；
+     核心宽基交易日历一致，近似可忽略；上市晚标的（159338 等）其自身 day-i 与参考日期不同，
+     但 compute 只纳入「有数据」标的，跨截面 IC 仍正确，仅该标的 IC 被并入参考日——属既有近似。
+  2. 个别标的源缺（159338 sina 0 根）→ 不参与回填，不阻断。
+- **不做**：不动 `MIN_TRADING_DAYS=250`（诚实门槛）；不动 `_rows_to_columns` 的 `days=60`
+  （列式缓存仍 60 天，回填读行式 `rows`，不受影响）；不改 weekly/monthly/intraday 的 `datalen`。
+
+### 8.5 验证方式
+
+1. **单测（TDD 先写）**：`tests/test_ic_tracker.py` 现有 `test_backfill_lifts_distinct_trade_dates_and_status`
+   用注入 kline（`n_days=240`），不依赖新浪 `datalen`，不受影响。新增镜像用例
+   `test_backfill_500d_crosses_validity_threshold`：
+   - 构造 `_make_kline_and_scores(n_days=500, n_symbols=10)`（复用 :388 工厂，仅改 n_days）；
+   - `backfill_ic_history(db, kline, scores, max_days=500)` →
+     `distinct = count_distinct_trade_dates` 断言 `distinct >= 250`（过有效门槛）；
+   - `status, _ = _status_of(codes[0], distinct, t_stat, ir)` 断言 `status in ("valid", "warn")`
+     （即不再 `no_data`「积累中」；注入随机因子值 t 通常 <2 → 预期 `warn`，故断言取两档任一，
+     **不**断言特定 `valid`，防过拟合测试）；
+   - 保持既有 `test_backfill_does_not_falsely_report_valid`（n_days=240 <250 → 仍不 valid）不退化。
+2. **运行时**：重启 → 看日志 `[ic_backfill] 历史回填完成：N 个交易日`（预期 N≈490）→ 查 DB
+   `COUNT(DISTINCT trade_date)` ≥ 250 → `curl /factors/active` 确认 ~14 个因子 status 从
+   「积累中（可观察）」变为 `valid`/`warn`，其余 no_data 因子原因仍为「数据源未接入」而非「IC 未累积」。
+
+### 8.6 设计清单对照（design-checklist.md）
+
+- **D1 可行性探针**：✅ §8.1 新浪 datalen 探针（240→1500 全返）。
+- **D2 证据链**：✅ DB 245 天 + `file:line` 根因链 + 探针实测。
+- **复杂度审计**：✅ §8.4 回填 CPU/磁盘成本量化（~4-5min 后台、不阻塞就绪）；无新增无超时外部
+  调用（扩窗口仍是同一 sina `getKLineData`，超时机制不变）；仅扩日线 `datalen`，weekly/monthly/
+  intraday 不变 → 无新增大 payload。
+- **验证窗口（D3）**：IC 历史回填读的是历史 K 线，**无交易时段依赖**，任意时段可验证。
+- **四态 UI / 真实调用点**：本改动纯后端数据窗口，无 UI、无新端点（沿用既有 `/factors/active` 展示）。
+
+### 8.7 多轮 review 记录（R102 细化到实施标准，Round 1-2）
+
+- **Round 1（初稿 → 审查）**：① 原方案「daily/weekly/monthly 都扩 500」过宽 → 收窄为**仅 daily**
+  （IC 路径只用日线，weekly/monthly 无消费方）；② 原方案「max_days 400→≥500 或调用处传 n」二选一
+  模糊 → 定为**调用处 `main.py:897` 显式 `max_days=n`**（单点修、不动 `ic_tracker.py` 默认）；
+  ③ 原固定阈值 `>=200` 在「实际可达 ~490」下余量过大、在「池含大量新 ETF」下可能误触发每启重跑
+  → 改为**按 `kline_depth-30` 动态判**（防重跑死循环 + 触发一次性重填）；④ 缺核心 ETF 深度实证
+  → 补探针（5/5 核心宽基 500 根、159338=0 根，§8.1）；⑤ 效果预期「27 因子全跨 250」虚高 → 修正为
+  「~14 个因子」（仅每日能产 IC 者受益，另 ~13 个为数据源债）；⑥ 测试断言含糊 → 收敛为
+  `distinct>=250` 且 `status in ("valid","warn")`（不锁特定 valid，防过拟合）。
+- **Round 2（复验 + 补边界）**：核对调用点血缘——`_ic_persistence_loop` 用列式 60 天缓存、不受
+  `datalen` 影响（§8.4 补）；backfill 日索引对齐近似、159338 源缺边界确认（既有近似，非回归）；
+  设计清单 §8.6 补复杂度审计项。确认四改动均带 `file:line` 与代码 sketch，达到 TDD 实施标准。
+
+> **当前状态（R102）**：方案已细化至**实施标准**（4 处改动均含精确代码 sketch + 测试断言 + 边界），
+> **未实施、未写代码、未 commit**。等待用户「开始实施」指令后按 TDD 落地。

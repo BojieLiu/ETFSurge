@@ -461,6 +461,45 @@ class TestR55BackfillObservable:
         assert status != "valid", "MIN_TRADING_DAYS 门槛不变：<250 天不得标 valid（诚实）"
 
 
+class TestR102BackfillCrossesValidityThreshold:
+    """R102 (round33 §8.2)：日线窗口扩至 500 后，回填样本可跨 MIN_TRADING_DAYS=250。
+
+    根因镜像：生产 ETF 日线原被新浪 datalen=240 卡在 ~245 个 distinct trade_date
+    （差 5 天跨 250）。本用例注入 500 日 K 线 + max_days=500（与修复后 main.py
+    调用处 `max_days=n` 同形），断言回填跨过 250 门槛、状态离开「积累中」进入
+    显著性判定档位。既有 test_backfill_does_not_falsely_report_valid（240<250 不谎报
+    valid）必须保持不退化——两用例合起来锁住「样本够才翻档，门槛本身不变」。
+    """
+
+    @pytest.mark.asyncio
+    async def test_backfill_500d_crosses_validity_threshold(self, ic_db):
+        tracker = ICTracker()
+        kline, scores, symbols, codes = _make_kline_and_scores(n_days=500, n_symbols=10)
+
+        async with ic_db() as db:
+            processed = await tracker.backfill_ic_history(db, kline, scores, max_days=500)
+            distinct = await tracker.count_distinct_trade_dates(db)
+
+        assert processed >= MIN_TRADING_DAYS, f"回填交易日数应 ≥{MIN_TRADING_DAYS}，实际 {processed}"
+        assert distinct >= MIN_TRADING_DAYS, (
+            f"distinct trade_date 应跨 {MIN_TRADING_DAYS}，实际 {distinct}"
+        )
+
+        # 状态翻档：samples ≥250 且 t/IR 可用 → 不再是「积累中」no_data。
+        # 注入随机因子值的真实分布下 t 通常 <2 → 预期 warn（诚实：有样本但不显著），
+        # 故只断言进入 valid/warn 两档之一，不断言特定 valid（防测试过拟合）。
+        status, reason = _status_of(codes[0], distinct, 1.2, 0.3)
+        assert status in ("valid", "warn"), (
+            f"跨 250 后应进显著性判定档（valid/warn），实际 {status}：{reason}"
+        )
+        assert "积累中" not in reason, f"不得再停留「积累中」，实际：{reason}"
+
+        # 负向配对：同一份样本，强统计（t≥2 且 |IR|≥0.5）下才翻 valid——
+        # 锁住「跨 250 仅代表有样本，是否 valid 仍由统计决定」的语义。
+        strong_status, _ = _status_of(codes[0], distinct, 2.5, 0.8)
+        assert strong_status == "valid", f"t=2.5/IR=0.8 应判 valid，实际 {strong_status}"
+
+
 class TestR55HonestNoBackfill:
     """无回填时状态必须诚实（不得谎报 valid）。"""
 

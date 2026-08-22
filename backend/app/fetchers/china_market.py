@@ -529,6 +529,11 @@ def _sina_history_cb(symbol: str, period: str = "daily") -> list[dict[str, Any]]
     from ..core.source_registry import registry
     scale = {"daily": "240", "weekly": "1200", "monthly": "7200",
              "15m": "15", "30m": "30", "1h": "60"}.get(period, "240")
+    # R102 (round33 §8.2): 日线历史窗口 240→500（~2 年）——IC 历史回填走日频，
+    # 需 ≥250 交易日样本跨 MIN_TRADING_DAYS；weekly/monthly/intraday 不参与因子
+    # 计算，保持 240 避免无谓大 payload。注意 scale=240 是「日线粒度」语义，
+    # 与 datalen（窗口根数）是两个不同的 240，勿动 scale。
+    _datalen = "500" if period == "daily" else "240"
     pref = _exchange(symbol)
 
     def _sina_call():
@@ -536,7 +541,7 @@ def _sina_history_cb(symbol: str, period: str = "daily") -> list[dict[str, Any]]
         s = _session()
         s.headers.update({"Referer": "https://finance.sina.com.cn"})
         url = (f"https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/"
-               f"CN_MarketData.getKLineData?symbol={pref}{symbol}&scale={scale}&datalen=240")
+               f"CN_MarketData.getKLineData?symbol={pref}{symbol}&scale={scale}&datalen={_datalen}")
         r = s.get(url, timeout=15)
         data = json.loads(r.text)
         if isinstance(data, list) and data:

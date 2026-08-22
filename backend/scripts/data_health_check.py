@@ -60,12 +60,12 @@ def test_sina_realtime():
 
 
 def test_sina_kline():
-    """检查 Sina K-line 返回 240 条数据。"""
+    """检查 Sina K-line 返回 500 条数据（R102: 日线窗口与 china_market._sina_history_cb 同步 240→500）。"""
     import urllib.request, json
     try:
         r = urllib.request.urlopen(
             "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/"
-            "CN_MarketData.getKLineData?symbol=sh510300&scale=240&datalen=240",
+            "CN_MarketData.getKLineData?symbol=sh510300&scale=240&datalen=500",
             timeout=10,
         )
         data = json.loads(r.read().decode("utf-8"))

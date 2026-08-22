@@ -822,11 +822,23 @@ async def lifespan(app: FastAPI):
                     _IC_BACKFILL_MAX_RETRIES,
                 )
                 return
-            # 防重复回填：已回填（≥200 交易日）则跳过
+            # 防重复回填：已回填（接近可用上限）则跳过。
+            # R102 (round33 §8.2): 跳过判据按 K 线实际深度（最长标的历史根数）动态定，
+            # 余量 30 天——固定 ≥200 在「日线扩至 500、实际可达 ~490」下余量过大永不
+            # 重跑（现有 245 恒跳过），在「池含大量新 ETF」下又可能误触发每启重跑。
+            # 幂等：save_ic_batch_to_db 有 (factor_code, trade_date) 唯一约束 + upsert，
+            # 同历日重填不重复不丢数据。
+            kline_depth = max(
+                (len(rws) for rws in rows.values() if isinstance(rws, list) and rws),
+                default=0,
+            )
             async with async_session() as db:
                 _existing = await ic_tracker.count_distinct_trade_dates(db)
-            if _existing >= 200:
-                logger.info("[ic_backfill] 已回填（%d 交易日），跳过", _existing)
+            if _existing >= max(kline_depth - 30, 200):
+                logger.info(
+                    "[ic_backfill] 已回填（%d 交易日 ≥ 可用 %d-30），跳过",
+                    _existing, kline_depth,
+                )
                 return
             # 取池内 symbol（与持久化循环一致）——R58 延伸：磁盘 K 线缓存使 kline 门
             # 秒过，但启动时组合池尚未由设计数据预热填充（refresh() 60-90s），旧实现
@@ -894,7 +906,11 @@ async def lifespan(app: FastAPI):
                 _reg._last_computed_at = _snap_at
             # 批量落库
             async with async_session() as db:
-                cnt = await ic_tracker.backfill_ic_history(db, kline, factor_scores_by_index)
+                # R102 (round33 §8.2): 显式 max_days=n——默认 400 在 datalen=500 下
+                # 只回填最旧 400 天、漏最近 ~100 天；传 n 让回填覆盖全部可用历史。
+                cnt = await ic_tracker.backfill_ic_history(
+                    db, kline, factor_scores_by_index, max_days=n
+                )
             logger.info("[ic_backfill] 历史回填完成：%d 个交易日", cnt)
             # 回填后刷新 IC 序列缓存（供 /factors/active 加权聚合）
             try:
