@@ -167,14 +167,14 @@ cd backend && python -m pytest
 按目录定位代码，函数签名级细节用符号索引/LSP 查：
 
 - `backend/app/main.py` — FastAPI 入口 + lifespan：启动预热 `refresh_market_cache()`（**25s** 超时）；后台异步循环刷新板块缓存（60s）、市态+情绪（120s）；挂载 `market` / `portfolio` / `analysis` / `news` / `ws` / `admin` 路由（统一前缀 `/api/v1/...`）。
-- `backend/app/tasks/` — 后台任务：`market_refresh.py` 行情/资讯缓存调度；`task_manager.py` 通用 TaskManager（design/check/report 三型）+ `design_pipeline()`（design worker 主体）；`report_worker.py` / `strategy_check_worker.py` 异步 worker（WS 进度 + 最终报告）；`design_report.py` LLM 报告管道（WS 推送 + DB 持久化 + 90s 超时 + 一致性校验）。
+- `backend/app/tasks/` — 后台任务：`market_refresh.py` 行情缓存预热（round35 §12.7-B 后无定时调度，请求驱动 TTL 回源）；`task_manager.py` 通用 TaskManager（design/check/report 三型）+ `design_pipeline()`（design worker 主体）；`report_worker.py` / `strategy_check_worker.py` 异步 worker（WS 进度 + 最终报告）；`design_report.py` LLM 报告管道（WS 推送 + DB 持久化 + 90s 超时 + 一致性校验）。
 - `backend/app/routers/ws.py` — WebSocket 路由 + `ConnectionManager.broadcast(channel, msg)`。路径见 §conventions。
 - `backend/app/engine/` — **纯函数策略引擎包**，无 I/O 无外部依赖：`budgets.py` 层预算、`allocation_engine.py` 核心分配器、`rationale.py` 入选理由、`risk_controls.py` 风控（单只 ≤30%、行业集中度 <40%、层预算不超标）。
 - `backend/app/services/` — 编排层：`strategy_design.py` 轻量编排器 `generate_enhanced_design()`（market_data_hub → engine/ 分配器 → 风控 → 三套方案）；`market_data_hub.py` 统一数据管道（`get_factor_matrix` / `get_pool` / `get_market_regime` / `get_market_sentiment` / `get_news`）；`market_service.py` 实时行情 / 全球指数；`portfolio_service.py` 组合与日盈亏计算；`llm_context.py` LLM 上下文管道 `build_full_context()`。
 - `backend/app/factors/factor_registry.py` — FactorRegistry（33 维核心因子，含 KDJ / 综合信号 / premium_discount，无假数据 fallback，带熔断）。
 - `backend/app/fetchers/` — 数据源：`china_market.py` A/港/商品行情资讯主力（mootdx/Sina 多源降级链）；`news_fetcher.py` 资讯抓取（财新头条 / 宏观 / 国际，打 `level` / `stars`）。
 - `backend/app/analysis/llm.py` — DeepSeek LLM 集成（prompt 构建 + `generate_design_report()`）。
-- `frontend/src/` — `main.js` 入口 + pinia + router；`api/index.js` axios `baseURL: '/api/v1'`（`marketApi`/`portfolioApi`/`analysisApi`/`newsApi`）；`stores/` 组合与任务状态；`components/` DashboardAiTools / PortfolioAnalysis / NewsView；`composables/useMarketWS.js`、`useNewsWS.js`。
+- `frontend/src/` — `main.js` 入口 + pinia + router；`api/index.js` axios `baseURL: '/api/v1'`（`marketApi`/`portfolioApi`/`analysisApi`/`newsApi`）；`stores/` 组合与任务状态；`components/` DashboardAiTools / PortfolioAnalysis / NewsView；`composables/useNewsWS.js`。（round35 FE4/RC-B4：原记载的 `useMarketWS.js` 不存在——行情 WS 逻辑在 `stores/market.js`，连接 `/ws/portfolio`。）
 - `backend/scripts/` — `verify_e2e.py` 端到端验证（见「测试」）；`encoding_diagnosis.py` 数据库编码诊断；`data_health_check.py` 数据管道健康检查。
 
 ## LLM 配置
@@ -191,7 +191,7 @@ DEEPSEEK_API_KEY=sk-xxx
 - 组合数据持久化在 SQLite (`data/portfolio.db`)，Docker 部署时通过 volume 挂载。
 - 前端 Vite 代理 `/api` → `localhost:8000`，开发时后端必须在 8000 端口；axios `baseURL` 为 `/api/v1`。
   - **Vite 代理规则顺序重要**：`/api/v1/ws` 必须排在 `/api` 之前，否则 WS 握手会被 HTTP 代理吞掉（见 `vite.config.js`）。
-- WebSocket 路径: `/ws/market/{symbol}`, `/ws/news`, `/ws/portfolio`, `/ws/task-notifications`, `/ws/design-report/{session_id}`。
+- WebSocket 路径: `/ws/news`, `/ws/portfolio`, `/ws/task-notifications`, `/ws/design-report/{session_id}`。（round35 FE4/RC-B4：`/ws/market/{symbol}` 后端端点存在但前端零消费，实际行情 WS 逻辑走 `/ws/portfolio`；design-report 前端亦走 REST 轮询，处置挂 RC-D3。）
 - 资讯分级：`level`（文字）+ `stars`（1-5 数字）；前端按 `level` 着色、按 `stars` 显示星数。
 - 涨跌颜色：**红涨绿跌**（国内习惯）— 涨/盈用 `.text-up`（红），跌/亏用 `.text-down`（绿），定义在 `src/styles/theme.css`。勿套用西方绿涨红跌。
 - **权重不归一化**：`calculate_allocation` 中 `target_amount = total_capital * target_weight`（不按权重和归一化）；现金 = `total_capital * (1 - Σtarget_weight)`。改时勿加归一化。

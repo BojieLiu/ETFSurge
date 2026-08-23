@@ -573,12 +573,8 @@ class TestP0_1_StrategyCheckLLMImport:
         result = await _generate_check_llm_comment({})
         assert result is None
 
-    async def test_generate_check_llm_report_empty_positions(self):
-        """_generate_check_llm_report should return None for empty positions."""
-        from app.tasks.strategy_check_worker import _generate_check_llm_report
-
-        result = await _generate_check_llm_report({"positions": []}, capital=500000)
-        assert result is None
+    # round35 §11-P1-6: test_generate_check_llm_report_empty_positions 已随死函数
+    # `_generate_check_llm_report` 一并删除（生产零调用，测试尸体不保留）。
 
     def test_no_llm_provider_import_error(self):
         """strategy_check_worker should NOT import llm_provider anymore."""

@@ -521,7 +521,7 @@ async def _search_a_stocks(keyword: str) -> list[dict[str, Any]]:
         logger.warning("[search] _search_a_stocks levistock fallback failed: %s", e)
         return _match_static_a_stock_base(keyword)
 
-# TODO: 未接入前端
+# 接入点：UnifiedAnalysis.vue:460 经 marketApi.indicesMeta() 调用（round35 RC-B1：原「TODO 未接入前端」与事实不符）
 @router.get("/indices/meta")
 async def indices_meta() -> list[dict[str, Any]]:
     """获取所有指数元数据（用于下拉/分组展示）。"""
@@ -631,7 +631,7 @@ def _empty_chart_response() -> dict:
         "macd": {"dif": [], "dea": [], "histogram": []},
     }
 
-# TODO: 未接入前端
+# 活端点：verify_e2e.py:2446 覆盖（round35 RC-B1：原「TODO 未接入前端」与事实不符）
 @router.get("/fundamentals/{symbol}")
 async def fundamentals(symbol: str) -> dict:
     """Tushare 增强数据(日线 + 主力资金流)。免费 token 积分有限,已长缓存。"""
@@ -695,8 +695,7 @@ async def concept_sectors(limit: int = Query(500)) -> list[dict[str, Any]]:
         return local[:limit]
     return []
 
-# TODO: 未接入前端
-# Z17: Add sector rotation endpoint（round23 §6.2c：非死代码，verify_e2e/tests 覆盖，保留）
+# Z17 (round23 §6.2c): sector rotation——活端点，verify_e2e/tests 覆盖；round35 RC-B1 删除自相矛盾的「TODO 未接入前端」
 @router.get("/sectors/rotation")
 async def sector_rotation(limit: int = Query(20)) -> list[dict[str, Any]]:
     """板块轮动数据 — 行业板块实时行情(财联社)，含涨跌幅、主力资金、涨跌家数。"""

@@ -26,8 +26,8 @@ logger = logging.getLogger(__name__)
 # （旧实现硬编码 300s 与 CACHE_TTL 声明不一致；缓存机制本身已由 sync_memory_cache 接管。）
 from ..core.ttl import CACHE_TTL as _CACHE_TTL
 
-_etf_list_cache = {}
-ETF_CACHE_TTL = _CACHE_TTL["etf_list"]
+# round35 RC-B2: `_etf_list_cache`/`ETF_CACHE_TTL` 死符号对已删除——round11 TTL 归一后的
+# 遗留容器与兼容别名，生产代码零读写（仅一个空心存在性测试引用，已同批删除）。
 
 # ── Last-good 缓存兜底 ───────────────────────────────────────
 _last_good_etfs: list[dict] | None = None

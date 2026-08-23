@@ -85,20 +85,9 @@ def test_s05_fund_fetcher_exports():
 
 # ─── FIX-P02: ETF scan warmup cache ───────────────────────────
 
-
-def test_p02_etf_cache_defined():
-    """P02: etf_scanner should have ETF cache dict."""
-    try:
-        from app.fetchers.etf_scanner import _etf_list_cache, ETF_CACHE_TTL
-        assert isinstance(_etf_list_cache, dict)
-        assert ETF_CACHE_TTL >= 60
-    except ImportError:
-        try:
-            from app.fetchers.china_market import _etf_list_cache, ETF_CACHE_TTL
-            assert isinstance(_etf_list_cache, dict)
-            assert ETF_CACHE_TTL >= 60
-        except ImportError:
-            pytest.skip("ETF scanner cache not found in either module")
+# round35 RC-B2: test_p02_etf_cache_defined 已整段删除——它断言的
+# `_etf_list_cache`/`ETF_CACHE_TTL` 是 round11 TTL 归一后的死符号对（生产零读写），
+# 该测试本身是空心存在性断言（§16.6 同类），符号删除后恒走 skip 分支，无保留价值。
 
 
 def test_p02_sanity_checks():

@@ -15,51 +15,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-
-async def _generate_check_llm_report(result: dict, capital: float) -> str | None:
-    """S7: 生成策略检查的 LLM 分析报告。
-
-    基于持仓分析结果，调用 LLM 生成简短的市场研判和建议。
-    """
-    try:
-        import asyncio
-
-        from ..analysis.llm import llm_complete
-
-        positions = result.get("positions", [])
-        if not positions:
-            return None
-
-        # Build a compact summary for LLM
-        total_value = sum(p.get("market_value", 0) for p in positions)
-        total_change = sum(p.get("change_pct", 0) for p in positions)
-        top_holdings = [p for p in positions if p.get("weight", 0) > 0.05][:5]
-
-        summary = (
-            f"当前持仓 {len(positions)} 只ETF，总市值 {total_value:.2f}，"
-            f"平均涨跌幅 {total_change/len(positions):.2f}%。\n"
-        )
-        if top_holdings:
-            summary += "主要持仓：\n"
-            for h in top_holdings:
-                if h.get("symbol"):
-                    summary += f"- {h.get('name','')}({h.get('symbol')}): "
-                    summary += f"权重 {h.get('weight',0)*100:.1f}%, "
-                    summary += f"涨跌 {h.get('change_pct',0):.2f}%\n"
-
-        prompt = (
-            "请根据以下ETF组合持仓信息，给出简短的市场研判和调仓建议（200字以内）：\n\n"
-            + summary
-        )
-
-        response = await asyncio.wait_for(llm_complete(prompt), timeout=30)
-        if response and response.strip():
-            return response.strip()
-        return None
-    except Exception as e:
-        logger.warning("[strategy_check] LLM report generation failed: %s", e)
-        return None
-
+# round35 §11-P1-6 卫生批: `_generate_check_llm_report` 死函数已删除——
+# 与 _generate_check_llm_comment 功能重复，生产代码零调用点（脚手架零容忍）。
 
 async def strategy_check_pipeline(mgr, task_id: int) -> None:
     """顺序 Pipeline：DATA → LLM → DB SAVE → NOTIFY

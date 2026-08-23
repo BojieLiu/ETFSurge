@@ -62,3 +62,11 @@ diag/out/logs_container/
 
 # coverage artifacts
 .coverage
+
+# round35 RC-A4: 防再繁殖（2026-08-23 清台批）
+frontend/coverage/
+.opencode/
+audit-*.png
+backend/mypy_errors.txt
+/backend/E*/
+reasonix.toml

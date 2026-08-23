@@ -441,13 +441,8 @@ class TestP4_4_TaskTimeoutMonitor:
             f"Old completed task should be pruned, got: {remaining}"
         )
 
-    async def test_all_task_types_have_ttl(self):
-        """All TASK_TYPES entries should have a TTL defined."""
-        from app.tasks.task_manager import TASK_TYPES
-
-        for task_type, config in TASK_TYPES.items():
-            assert "ttl" in config, f"Task type {task_type} missing ttl"
-            assert config["ttl"] > 0, f"Task type {task_type} has non-positive ttl"
+    # round35 §11-P1-6/RC-B3: test_all_task_types_have_ttl 已随 TASK_TYPES 的死
+    # ttl 字段一并删除（该字段运行时零读取，淘汰语义由 prune_tasks retention 承担）。
 
     async def test_prune_respects_max_count(self, task_mgr, task_db):
         """prune_tasks 保留集（max_count）内任务不被删除；保留集外超期删除。"""
