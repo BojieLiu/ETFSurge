@@ -17,7 +17,11 @@ from app.analysis.llm.gates import (
     llm_quota_gate,
 )
 from app.analysis.llm.prompts import SYSTEM_PROMPT, strip_internal_leak
-from app.analysis.provider import get_configured_providers, has_any_api_key
+from app.analysis.provider import (
+    ProviderConfig,
+    get_configured_providers,
+    has_any_api_key,
+)
 from app.core.logging import get_logger
 from app.monitor.token_usage import UsageRecord, token_store
 
@@ -29,6 +33,18 @@ logger = get_logger(__name__)
 LLM_MAX_RETRIES = 2
 LLM_RETRY_DELAY = 3.0
 _LLM_RATE_LIMIT_CAP = 30.0
+
+
+def _apply_provider_body(body: dict, provider: ProviderConfig) -> None:
+    """round35 feed-fix: 强制思考模型（opencode zen 的 deepseek-V4 / x-preview
+    免费档等）必须显式声明 reasoning_effort（low/high/max），缺失会被网关 400
+    「This model always engages in thinking and cannot be disabled」。
+    此类模型也不支持 temperature——一并移除，避免被拒或静默忽略。
+    """
+    if getattr(provider, "reasoning_effort", None):
+        body["reasoning_effort"] = provider.reasoning_effort
+        body.pop("temperature", None)
+
 
 async def llm_complete(
     prompt: str,
@@ -65,6 +81,7 @@ async def llm_complete(
                 "temperature": 0.3,
                 "max_tokens": 12288,
             }
+            _apply_provider_body(body, provider)
             if response_format:
                 body["response_format"] = response_format
 
@@ -210,6 +227,7 @@ async def llm_complete_stream(
                 "max_tokens": max_tokens or 12288,
                 "stream": True,
             }
+            _apply_provider_body(body, provider)
             if response_format:
                 body["response_format"] = response_format
 
@@ -427,6 +445,7 @@ async def llm_complete_with_system(
                 "temperature": 0.3,
                 "max_tokens": 12288,
             }
+            _apply_provider_body(body, provider)
             if response_format:
                 body["response_format"] = response_format
             elif force_json:

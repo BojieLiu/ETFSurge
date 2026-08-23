@@ -134,6 +134,27 @@ class TestPrimarySuccess:
             patcher.stop()
 
 
+    # round35 feed-fix: 强制思考模型请求体必须显式携带 reasoning_effort、
+    # 且移除 temperature（opencode zen 对 deepseek-V4/x-preview 免费档缺 effort 回 400）。
+    async def test_opencode_zen_forces_reasoning_effort(self):
+        """x-preview-f-free 等强制思考模型 → body 带 reasoning_effort=high 且无 temperature。"""
+        from app.analysis.llm import llm_complete_with_system
+
+        resp = _make_response("ok", model="deepseek-v4-flash-free")
+        patcher = patch("httpx.AsyncClient")
+        mock_cls = patcher.start()
+        mock_instance = mock_cls.return_value.__aenter__.return_value
+        mock_instance.post = AsyncMock(return_value=resp)
+        try:
+            await llm_complete_with_system("system", "prompt")
+            _, kwargs = mock_instance.post.call_args
+            body = kwargs["json"]
+            assert body["reasoning_effort"] == "high", body
+            assert "temperature" not in body, f"temperature must be dropped: {body}"
+        finally:
+            patcher.stop()
+
+
 # ─── P1: Primary timeout → fallback succeeds ─────────────────────
 
 class TestPrimaryTimeout:
@@ -169,6 +190,27 @@ class TestPrimaryTimeout:
             "Provider opencode_zen failed" in rec.message
             for rec in caplog.records
         ), "Expected a WARNING log about provider failure"
+
+    # round35 feed-fix: DeepSeek 官方 fallback（V4 强制思考）同样须带 reasoning_effort。
+    async def test_fallback_deepseek_forces_reasoning_effort(self):
+        """主 provider 超时 → fallback 请求体带 reasoning_effort 且无 temperature。"""
+        from app.analysis.llm import llm_complete_with_system
+
+        primary_err = httpx.TimeoutException("timed out", request=MagicMock())
+        fallback_resp = _make_response("ok", model="deepseek-v4-flash")
+        patcher = patch("httpx.AsyncClient")
+        mock_cls = patcher.start()
+        mock_instance = mock_cls.return_value.__aenter__.return_value
+        mock_instance.post = AsyncMock(side_effect=[primary_err, fallback_resp])
+        try:
+            await llm_complete_with_system("system", "prompt")
+        finally:
+            patcher.stop()
+        # 第二次调用 = fallback（deepseek），其 body 应带 effort
+        fb_body = mock_instance.post.call_args_list[1].kwargs["json"]
+        assert fb_body["model"].endswith("deepseek-v4-flash"), fb_body
+        assert fb_body.get("reasoning_effort") == "high", fb_body
+        assert "temperature" not in fb_body, f"temperature must be dropped: {fb_body}"
 
 
 # ─── P2: Primary HTTP error → fallback succeeds ──────────────────

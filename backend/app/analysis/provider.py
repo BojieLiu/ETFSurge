@@ -34,6 +34,21 @@ class ProviderConfig:
     api_key: str                   # Bearer token
     model: str                     # model identifier sent in request body
     timeout: int = 120             # request timeout in seconds
+    # round35 feed-fix: 强制思考模型必须显式声明 reasoning_effort（low/high/max），
+    # 且此类模型不支持 temperature。非 None 时请求体携带该字段并省略 temperature。
+    reasoning_effort: str | None = None
+
+
+# round35 feed-fix: opencode zen 把 V4 免费档 / x-preview 系列路由为
+# 强制思考（cannot be disabled）——缺 reasoning_effort 会被网关 400。
+# flash/-free/x-preview 系 → high，pro 系 → max（见 opencode/DeepSeek 官方契约）。
+def _reasoning_effort_for_model(model: str) -> str | None:
+    m = (model or "").lower()
+    if m.endswith("-free") or "flash" in m or "x-preview" in m or m.startswith("x-"):
+        return "high"
+    if "pro" in m:
+        return "max"
+    return None
 
 
 def get_configured_providers() -> list[ProviderConfig]:
@@ -59,6 +74,8 @@ def get_configured_providers() -> list[ProviderConfig]:
                 api_key=settings.opencode_zen_api_key,
                 model=settings.opencode_zen_model or "deepseek-v4-flash-free",
                 timeout=settings.llm_primary_timeout,
+                reasoning_effort=_reasoning_effort_for_model(
+                    (settings.opencode_zen_model or "deepseek-v4-flash-free")),
             ))
         else:
             logger.info("[provider] Primary provider 'opencode_zen' skipped "
@@ -86,6 +103,8 @@ def get_configured_providers() -> list[ProviderConfig]:
             api_key=settings.deepseek_api_key,
             model=models,
             timeout=settings.llm_fallback_timeout,
+            # round35 feed-fix: DeepSeek V4 强制思考，官方 API 亦需 reasoning_effort
+            reasoning_effort=_reasoning_effort_for_model(models),
         ))
     else:
         logger.info("[provider] Fallback provider 'deepseek' skipped "
