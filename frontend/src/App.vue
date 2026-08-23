@@ -90,14 +90,6 @@
         </div>
       </TransitionGroup>
     </div>
-
-    <!-- Global Loading Overlay -->
-    <Transition name="fade">
-      <div v-if="loadingStore.active" class="loading-overlay" role="status" aria-live="polite" aria-busy="true">
-        <div class="loading-spinner" aria-hidden="true"></div>
-        <p class="loading-text">{{ loadingStore.message }}</p>
-      </div>
-    </Transition>
   </div>
 </template>
 
@@ -105,7 +97,6 @@
 import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useToastStore } from './stores/toast'
-import { useLoadingStore } from './stores/loading'
 import { useTaskStore } from './stores/task'
 import { useMarketStore } from './stores/market'
 import { useWarmupStatus } from './composables/useWarmupStatus'
@@ -115,7 +106,6 @@ import TaskIndicator from './components/TaskIndicator.vue'
 const router = useRouter()
 const route = useRoute()
 const toastStore = useToastStore()
-const loadingStore = useLoadingStore()
 const marketStore = useMarketStore()
 
 // Warmup status (global — used in nav-bar indicator)
@@ -630,49 +620,6 @@ onUnmounted(() => {
 .toast-close:focus-visible {
   outline: none;
   box-shadow: var(--shadow-focus);
-}
-
-/* ==========================================
-   Loading Overlay
-   ========================================== */
-.loading-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: var(--z-index-modal);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(15, 23, 42, 0.4);
-  backdrop-filter: blur(4px);
-  animation: fade-in var(--duration-fast) var(--ease-out);
-}
-
-@keyframes fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-.fade-leave-active { animation: fade-out var(--duration-fast) var(--ease-in) forwards; }
-@keyframes fade-out { to { opacity: 0; } }
-
-.loading-spinner {
-  width: 40px;
-  height: 40px;
-  border: 3px solid var(--color-border-light);
-  border-top-color: var(--color-brand-600);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-.loading-text {
-  margin-top: var(--space-4);
-  font: var(--text-body);
-  color: var(--color-text-primary);
-  text-align: center;
 }
 
 /* ==========================================

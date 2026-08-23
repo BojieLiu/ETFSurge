@@ -56,7 +56,12 @@
       <div class="news-partial-banner" :class="{ 'news-partial-banner--show': partial && !loading }" role="status">
         ⚠️ 数据刷新中（当前仅部分数据，稍后自动补全）
       </div>
-      <div v-if="loading && !filteredNews.length" class="news-skeleton" role="status" aria-label="加载中">
+      <!-- round35 FE2 (R127): 错误态——加载失败不再静默清列表冒充「无资讯」 -->
+      <div v-if="loadError && !filteredNews.length" class="news-load-error" role="alert">
+        <p>⚠️ 资讯加载失败，请检查后端服务或稍后重试。</p>
+        <button class="news-retry-btn" @click="loadNews()">重试</button>
+      </div>
+      <div v-else-if="loading && !filteredNews.length" class="news-skeleton" role="status" aria-label="加载中">
         <!-- R63 (round28): 骨架屏占位——旧实现单个「加载中...」文本 div 在数据到达后
              被整列表替换，高度从 1 行跳到 N 项 → CLS 0.198 回归（round27 为 0.001）。
              改用固定高度骨架项（与真实 news-item 同高），加载→数据切换不再位移。 -->
@@ -158,6 +163,7 @@ const store = usePortfolioStore()
 
 const news = ref([])
 const loading = ref(false)
+const loadError = ref(false)  // round35 FE2 (R127): 失败提示（空态冒充错误态修复）
 const seenIds = ref(new Set())
 const impactTarget = ref(null) // F2-8: 当前展开分析的新闻 id
 const impactPanel = ref(null)  // F2-8: 最近一次分析结果
@@ -237,6 +243,7 @@ async function loadNews() {
       res = await newsApi.research(stockSymbol.value.trim() || '600519')
     }
     const items = (res && res.data) || []
+    loadError.value = false  // round35 FE2: 成功即清除错误态
     // F31 (round23 §2.4 A4): 冷启动/数据源熔断时后端以 X-News-Partial 标记不完整，
     // 前端显示「数据刷新中（部分数据）」而非静默上屏残缺列表。
     partial.value = !!(res && res.headers && String(res.headers['x-news-partial']).toLowerCase() === 'true')
@@ -249,7 +256,8 @@ async function loadNews() {
       })
     }
   } catch {
-    news.value = []
+    // round35 FE2: 失败置错误态；保留旧列表内容（不清空冒充无资讯）
+    loadError.value = true
     partial.value = false
   } finally {
     loading.value = false
@@ -392,6 +400,27 @@ const filteredAffectedHoldings = computed(() => {
 .news-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-3); }
 /* R63 (round28): 骨架屏（加载态占位）——与真实 news-item 同高，加载→数据切换无位移（CLS） */
 .news-skeleton { display: flex; flex-direction: column; gap: var(--space-3); }
+
+/* round35 FE2 (R127): 加载失败错误态 */
+.news-load-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-8);
+  color: var(--color-text-tertiary);
+}
+.news-retry-btn {
+  padding: var(--space-2) var(--space-5);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+.news-retry-btn:hover {
+  background: var(--color-bg-subtle, rgba(0, 0, 0, 0.04));
+}
 .news-skeleton-item {
   border: 1px solid var(--color-border-light);
   border-left-width: 4px;

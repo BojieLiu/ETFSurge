@@ -11,9 +11,6 @@ const WS_BASE = (() => {
 
 export const useMarketStore = defineStore('market', () => {
   const realtimeData = ref([])
-  const indicators = ref(null)
-  const signal = ref(null)
-  const history = ref([])
   const wsConnected = ref(false)
   const wsData = ref(null)
   // round19 P6-② (2026-08-12): 状态机细分——'idle'|'connecting'|'connected'|
@@ -85,23 +82,8 @@ export const useMarketStore = defineStore('market', () => {
         const msg = JSON.parse(ev.data)
         if (msg.type === 'pong') return
         wsData.value = msg
-        // P1-1 (round16 3.9 B4): 行情 WS 推送消费——market_refresh 广播
-        // {type:'realtime', data:[{symbol,price,change_pct},...]}，旧实现只处理
-        // 顶层 msg.symbol → 推送不消费、行情更新受 TTL 缓存节流。
-        if (msg.type === 'realtime' && Array.isArray(msg.data)) {
-          for (const quote of msg.data) {
-            if (!quote || !quote.symbol) continue
-            const idx = realtimeData.value.findIndex(item => item.symbol === quote.symbol)
-            if (idx >= 0) {
-              realtimeData.value[idx] = {
-                ...realtimeData.value[idx],
-                price: quote.price ?? realtimeData.value[idx].price,
-                change_pct: quote.change_pct ?? realtimeData.value[idx].change_pct,
-              }
-              realtimeData.value = [...realtimeData.value]
-            }
-          }
-        }
+        // round35 §12.7-B 第一步: 删除 {type:'realtime'} 死分支——后端定时行情推送
+        // 链路已删（调度器决策 B），该格式一个月无生产消息；行情更新走 REST TTL 轮询。
         // round19 P2-②: 组合结构变更广播——任一标签页/页面增删改标的，
         // 其它已挂载页面与多标签页自动刷新（防抖 1s 合并批量操作）。
         if (msg.type === 'portfolio_changed') {
@@ -169,27 +151,10 @@ export const useMarketStore = defineStore('market', () => {
     }
   }
 
-  async function fetchRealtime() {
-    const res = await marketApi.realtimePortfolio()
-    realtimeData.value = res.data
-  }
-
-  async function fetchIndicators(symbol, assetType = 'A') {
-    const res = await marketApi.indicators(symbol, assetType)
-    indicators.value = res.data
-  }
-
-  async function fetchSignal(symbol, assetType = 'A') {
-    const res = await marketApi.signal(symbol, assetType)
-    signal.value = res.data
-  }
-
-  async function fetchHistory(symbol, assetType = 'A', period = 'daily') {
-    const res = await marketApi.history(symbol, assetType, period)
-    history.value = res.data
-  }
-
   // Watchlist actions
+  // round35 FE1 (§14.4-R123): fetchRealtime/fetchIndicators/fetchSignal/fetchHistory/
+  // getQuote 五个 REST action 已删——生产代码零调用者（同域端点由组件直调替代），
+  // indicators/signal/history refs 从未被写入属死状态。
   async function fetchWatchlist(limit = 100, offset = 0) {
     watchlistLoading.value = true
     try {
@@ -208,40 +173,33 @@ export const useMarketStore = defineStore('market', () => {
     // R28: 携带前端搜索到的真实名称——后端 realtime 失败时用 name 入库（不 422）
     const res = await marketApi.addWatchlist({ symbol, asset_type: assetType, notes, name })
     const added = res.data
-    // R5: 乐观插入——POST 响应已带 realtime（后端优化），立即显示价格，不等慢速全量 GET
+    // R5: 乐观插入——POST 响应已带 realtime（后端优化），立即显示价格，不等慢速全量 GET。
+    // round35 FE1 (§14.5): 删除此处的后台全量刷新兜底 GET——唯一消费者
+    // WatchlistPanel 用组件本地副本并在 mutation 后自行 fetchItems，
+    // store 内再 refetch 造成每次 mutation 双倍 GET。
     if (added?.symbol) {
       watchlist.value = [{ ...added, realtime: added.realtime || null }, ...watchlist.value]
       watchlistTotal.value += 1
     }
-    // 后台全量刷新兜底（GET 已并行化，不阻塞 UI）
-    fetchWatchlist().catch(() => {})
     return added
   }
 
   async function updateWatchlist(id, data) {
     const res = await marketApi.updateWatchlist(id, data)
-    await fetchWatchlist()
     return res.data
   }
 
   async function removeWatchlist(id) {
     await marketApi.removeWatchlist(id)
-    await fetchWatchlist()
   }
 
   async function batchRemoveWatchlist(ids) {
     await marketApi.batchRemoveWatchlist(ids)
-    await fetchWatchlist()
-  }
-
-  function getQuote(symbol) {
-    return realtimeData.value.find(item => item.symbol === symbol)
   }
 
   return { 
-    realtimeData, indicators, signal, history, wsConnected, wsStatus, wsData, 
+    realtimeData, wsConnected, wsStatus, wsData, 
     connectWS, disconnectWS, onWSMessage, offWSMessage,
-    fetchRealtime, fetchIndicators, fetchSignal, fetchHistory, getQuote,
     // Watchlist
     watchlist, watchlistLoading, watchlistTotal,
     fetchWatchlist, addWatchlist, updateWatchlist, removeWatchlist, batchRemoveWatchlist,

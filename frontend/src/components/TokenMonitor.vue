@@ -6,6 +6,13 @@
       <p>加载中...</p>
     </div>
 
+    <!-- round35 FE2 (R127): 错误态——API 失败时不再渲染空统计冒充正常 -->
+    <div v-else-if="loadError" class="loading-state" role="alert">
+      <p class="error-title">⚠️ Token 用量加载失败</p>
+      <p class="error-hint">监控端点不可达，请检查后端服务状态。</p>
+      <button class="retry-btn" @click="fetchData">重试</button>
+    </div>
+
     <template v-else>
       <!-- Stats Cards -->
       <section class="stats-grid" aria-label="概览统计">
@@ -155,6 +162,7 @@ import { calcCost, modelCostFromBuckets } from '../utils/pricing'
 use([CanvasRenderer, LineChart, BarChart, TitleComponent, TooltipComponent, GridComponent, LegendComponent])
 
 const loading = ref(true)
+const loadError = ref(false)  // round35 FE2 (R127)
 const summary = ref({ total: {}, hourly: {}, daily: {}, by_function: {} })
 const timeseries = ref([])
 // R59: timeseries 窗口 total（与图表同一窗口/同一数据源）
@@ -169,6 +177,7 @@ const failures = ref([])
 
 async function fetchData() {
   loading.value = true
+  loadError.value = false
   try {
     const tsParams = { granularity: granularity.value, days: 30, months: 12, hours: 48 }
     const [sumRes, tsRes, failRes] = await Promise.all([
@@ -182,6 +191,7 @@ async function fetchData() {
     failures.value = failRes.data.failures || []
   } catch (e) {
     logger.error('Failed to fetch token usage', e)
+    loadError.value = true  // round35 FE2: 错误态而非空统计冒充
   } finally {
     loading.value = false
   }
@@ -516,6 +526,26 @@ onMounted(fetchData)
   border-top-color: var(--color-brand-500);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
+}
+
+/* round35 FE2 (R127): 错误态 */
+.error-title {
+  font: var(--text-body-strong);
+  color: var(--color-text-primary);
+}
+.error-hint {
+  color: var(--color-text-tertiary);
+}
+.retry-btn {
+  padding: var(--space-2) var(--space-5);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+.retry-btn:hover {
+  background: var(--color-bg-subtle, rgba(0, 0, 0, 0.04));
 }
 
 @keyframes spin {

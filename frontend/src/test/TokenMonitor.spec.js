@@ -22,6 +22,18 @@ vi.mock('echarts/renderers', () => ({ CanvasRenderer: {} }))
 import TokenMonitor from '../components/TokenMonitor.vue'
 import { calcCost, modelCostFromBuckets } from '../utils/pricing'
 
+// round35 FE2: adminApi（axios）补 mock——此前未 mock 时请求失败被旧实现吞掉、
+// 渲染空统计冒充正常（R127 空态冒充错误态），tabs 用例的绿是假绿。
+// 现在组件正确渲染错误态，本文件 mount 类用例需要成功路径数据。
+const { tokenUsageMock } = vi.hoisted(() => ({ tokenUsageMock: vi.fn() }))
+vi.mock('../api', () => ({
+  adminApi: {
+    tokenUsage: (...a) => tokenUsageMock(...a),
+    tokenTimeseries: vi.fn().mockResolvedValue({ data: { series: [], total: {} } }),
+    tokenFailures: vi.fn().mockResolvedValue({ data: { failures: [] } }),
+  },
+}))
+
 // Mock fetch to avoid actual API calls — axios 风格 { data }
 const mockSeries = [
   {
@@ -106,6 +118,17 @@ describe('TokenMonitor calcCost 纯函数 (R57/R59)', () => {
 describe('TokenMonitor.vue — Granularity Tabs', () => {
   beforeEach(() => {
     makeFetchData()
+    // round35 FE2: 组件走 adminApi（axios）——补成功路径且形状与真实响应一致
+    // （模板读 summary.total/daily/hourly .calls，缺键会渲染崩溃）
+    tokenUsageMock.mockResolvedValue({
+      data: {
+        total: { calls: 100, prompt_tokens: 0, completion_tokens: 0 },
+        hourly: { calls: 0 },
+        daily: { calls: 0 },
+        by_function: {},
+        by_model: {},
+      },
+    })
   })
 
   it('renders granularity tab labels', async () => {

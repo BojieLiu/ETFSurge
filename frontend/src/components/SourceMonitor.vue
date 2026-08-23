@@ -6,6 +6,13 @@
       <p>加载中...</p>
     </div>
 
+    <!-- round35 FE2 (R127): 错误态——API 全挂时不再冒充「暂无数据源记录」空态 -->
+    <div v-else-if="loadError" class="error-state" role="alert">
+      <p class="error-title">⚠️ 数据源监控加载失败</p>
+      <p class="error-hint">后端监控端点不可达或返回异常，请检查服务状态。</p>
+      <button class="retry-btn" @click="fetchData">重试</button>
+    </div>
+
     <template v-else>
       <!-- Stats Cards -->
       <section class="stats-grid" aria-label="数据源概览">
@@ -198,6 +205,7 @@ import logger from '../utils/logger'
 use([CanvasRenderer, LineChart, BarChart, TitleComponent, TooltipComponent, GridComponent, LegendComponent])
 
 const loading = ref(true)
+const loadError = ref(false)
 const sources = ref([])
 const circuitBreakers = ref([])
 const timeline = ref([])
@@ -206,12 +214,18 @@ const timelineHours = ref(1)
 
 async function fetchData() {
   loading.value = true
-  // 分步请求，每个独立 try/catch，防止单个端点挂起阻塞全部页面
+  loadError.value = false
+  // 分步请求，每个独立 try/catch，防止单个端点挂起阻塞全部页面。
+  // round35 FE2 (R127): 主端点失败 → 错误态（空态冒充错误态修复）；
+  // 次要端点失败仍仅降级（对应 section 显示为空）。
   try {
     const healthRes = await adminApi.sourcesHealth()
     sources.value = healthRes.data || []
   } catch (e) {
     logger.error('sourcesHealth failed', e)
+    loadError.value = true
+    loading.value = false
+    return
   }
   try {
     const cbRes = await adminApi.sourcesCircuitBreakers()
@@ -586,6 +600,26 @@ onMounted(fetchData)
   border-top-color: var(--color-brand-500);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
+}
+
+/* round35 FE2 (R127): 错误态（空态冒充错误态修复） */
+.error-title {
+  font: var(--text-body-strong);
+  color: var(--color-text-primary);
+}
+.error-hint {
+  color: var(--color-text-tertiary);
+}
+.retry-btn {
+  padding: var(--space-2) var(--space-5);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+.retry-btn:hover {
+  background: var(--color-bg-subtle, rgba(0, 0, 0, 0.04));
 }
 
 @keyframes spin {

@@ -220,7 +220,12 @@
         :aria-labelledby="`tab-${activeTab}`"
       >
       <!-- Empty State -->
-      <div v-if="!currentEtfs.length" class="empty-state">
+      <!-- round35 FE2 (R127): 首拉期间显示骨架而非「还没有 ETF」空态（初载闪空态修复） -->
+      <div v-if="store.loading && !currentEtfs.length" class="empty-state" role="status">
+        <div class="loading-spinner" aria-hidden="true"></div>
+        <h3 class="empty-title">加载中...</h3>
+      </div>
+      <div v-else-if="!currentEtfs.length" class="empty-state">
         <div class="empty-icon" aria-hidden="true">📦</div>
         <h3 class="empty-title">还没有 ETF</h3>
         <p class="empty-description">在上方搜索并添加 ETF 到组合</p>
@@ -905,6 +910,19 @@ onMounted(loadTab)
   display: flex;
   flex-direction: column;
   gap: var(--space-6);
+}
+
+/* round35 FE2 (R127): 首拉 loading 骨架 */
+.empty-state .loading-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--color-border-light);
+  border-top-color: var(--color-brand-500);
+  border-radius: 50%;
+  animation: pm-spin 0.7s linear infinite;
+}
+@keyframes pm-spin {
+  to { transform: rotate(360deg); }
 }
 
 /* Page Header */
