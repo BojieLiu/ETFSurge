@@ -41,6 +41,23 @@ round实施 <round文档路径>
      `nohup ... & disown`（Git Bash）或 `start.ps1 -Silent -NoOpen` 且**之后别再
      TaskStop 它的父任务**（TaskStop 会连坐杀整个进程树，曾误诊为「后端崩溃」）。
      撞外部源限流时接受降级并标注「待交易时段复测」，不要无限重试。
+   - **启动命令钉死（round34 实施轮教训，勿现场实验）**：
+     `python -m uvicorn app.main:app --host :: --port 8000`（start.ps1 同款）。
+     ⚠️ Windows 上 `::` 为 v6only——只监听 ::1，不覆盖 127.0.0.1；verify_e2e 的
+     `BASE=http://localhost` 依赖本机 ::1 优先解析，改绑 127.0.0.1 会制造
+     「后端挂死」假象（两个模块误报 FAIL）。长任务等待用「detached 启动 +
+     单次短状态查询」（每次 shell 调用 ≤60s），不要单次 sleep>120s 长轮询。
+   - **特殊批次前置程序**：
+     * *回填内容变更*（扩列/扩窗等）与 skip 门禁同批时：skip 判据是「总 distinct
+       交易日」，感知不到 per-factor 覆盖缺口——须一次性强制重放
+       `ETF_SURGE_FORCE_IC_BACKFILL=1` 启动（upsert 幂等，重放完即关）；若该开关
+       不存在，用 rename 表法并注意 SQLite RENAME **保留索引名**，须先 DROP 该表
+       全部索引再启动（否则 create_all 撞名崩溃），验证通过后 DROP 备份表。
+     * *存活类修复*（锚/标的不得被移除）：实施前先普查**全部剥除点**
+       （`rg -n "remove|filter|pop|dedup|merge" engine/ services/<域>/` 逐点确认豁免）
+       ——只修 doc 列出的 top-N 嫌疑不够（round34 实证第三层剥除器在前两层修复后才
+       显形）；守卫必须覆盖到 generate_enhanced_design 端到端，不能只测 allocate 层
+       （剥除器多在其后的管线中）。
    - **verify_e2e**：提交前跑一次（AGENTS.md 要求），结果对照 round 文档既有基线
      （如 round32 264/280，16 FAIL 为环境性），**归类确认无新回归**即可，不要求全 PASS。
    - **commit 时**：若刚跑过全量（凭据有效），pre-commit 会自动跳过重复全量、
