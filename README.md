@@ -165,7 +165,7 @@ Every chain goes through `SourceRegistry.route()` — sources in cooldown are sk
 | Backend | Python 3.12 · FastAPI · SQLAlchemy 2.0 (async) · httpx · asyncio background loops |
 | Data sources | mootdx · Sina · Tencent · akshare · NetEase · EastMoney · TickFlow · BaoStock · levistock (CLS) · TwelveData · Finnhub · AlphaVantage · multpl · Yahoo (US index PE/PB) |
 | Cache | In-process MemoryCache (default) + optional Redis (auto-degrade) |
-| Database | SQLite via aiosqlite (`portfolio.db` + `token_usage.db` + `source.db`), data layer abstracted |
+| Database | SQLite via aiosqlite (`portfolio.db` + `token_usage.db` + `source.db`), data layer abstracted. `portfolio.db` runs in WAL mode (round35 A1) — to back it up, copy all three files (`portfolio.db` + `-wal` + `-shm`) together, or use `sqlite3 portfolio.db "VACUUM INTO 'backup.db'"` |
 | LLM | OpenCode Zen (primary) · DeepSeek (fallback) — OpenAI-compatible |
 | Frontend | Vue 3.5 · Vite 5 · Vue Router · Pinia · ECharts (vue-echarts) · axios · marked |
 | Testing | pytest (async) · vitest + jsdom · @vue/test-utils · Playwright (E2E) |

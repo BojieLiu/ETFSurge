@@ -31,6 +31,22 @@ engine = create_async_engine(
     echo=False,
     connect_args={"timeout": 30},
 )
+
+# round35 A1 (docs/round35-architecture-review.md §13.9 T-A1): portfolio.db 双写者
+# （async engine + hub/_common.py 裸 sqlite3 快照）此前无 WAL——读写互斥时裸连接
+# 直接撞 "database is locked"。journal_mode=WAL 对既有 DB 为在线操作免迁移，且持久化
+# 到 DB 文件（设一次全局生效）；busy_timeout 是 per-connection 属性，须每次 connect 设。
+from sqlalchemy import event
+
+
+@event.listens_for(engine.sync_engine, "connect")
+def _set_sqlite_pragma(dbapi_conn, _rec):  # noqa: ANN001
+    cur = dbapi_conn.cursor()
+    cur.execute("PRAGMA journal_mode=WAL")
+    cur.execute("PRAGMA busy_timeout=30000")
+    cur.close()
+
+
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
