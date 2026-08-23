@@ -195,6 +195,159 @@ class TestR105MergeSubstituteKeepsAnchors:
         )
 
 
+class TestR105EndToEndPipelineGuard:
+    """round34 实施轮收口守卫：强制锚必须在 generate_enhanced_design **全管线**存活。
+
+    动机：剥除器分布在 allocate 之后的管线各处（remove_stale/P1-5 gate/
+    _merge_substitute_family 同族合并），只测 allocate 层抓不到后置剥除——本轮
+    三层洋葱实证。本用例用离线 FakeHub 走完整设计管线（周末降级态形态），
+    断言 M7/P1-1 门禁语义在最终 etfs 上成立。
+    """
+
+    def _build(self, monkeypatch):
+        import asyncio
+
+        from app.services import strategy_design as sd
+
+        # 周末降级态形态：核心层含双锚（无任何行情）+ 有数据标的 +
+        # 无数据非锚（P1-5 应清零它而非锚——负向防豁免扩大化）
+        def _core(sym, name, tidx):
+            return {"symbol": sym, "name": name, "tracked_index": tidx,
+                    "layer": "core", "industry": "宽基指数"}
+
+        pool = {
+            "core": [
+                _core("510300", "沪深300ETF", "沪深300"),
+                _core("159338", "中证A500ETF", "中证A500"),
+                _core("510050", "上证50ETF", "上证50"),
+                _core("512890", "红利低波ETF", "红利低波"),
+                _core("510500", "中证500ETF", "中证500"),
+                _core("512010", "医药ETF", "医药"),
+            ],
+            "satellite": [{"symbol": "588200", "name": "科创芯片ETF",
+                           "tracked_index": "科创芯片", "layer": "satellite"}],
+            "defense": [{"symbol": "518880", "name": "黄金ETF",
+                         "tracked_index": "黄金", "layer": "defense"}],
+        }
+        anchors = {"510300", "159338"}
+        zero_target = "512010"   # 有 price/return（活过 remove_stale）但无涨跌数据
+        fm = {}
+        for layer in pool.values():
+            for it in layer:
+                sym = it["symbol"]
+                if sym in anchors:
+                    fm[sym] = {}
+                elif sym == zero_target:
+                    # 高技术分保证入选核心层；无涨跌数据 → P1-5 应清零它（非锚不豁免）
+                    fm[sym] = {
+                        "price": 1.0, "etf.price": 1.0,
+                        "return_1m": 0.01, "etf.return_1m": 0.01,
+                        "technical.rsi.rsi_14": 3.0, "momentum.return_20d": 2.0,
+                    }
+                else:
+                    fm[sym] = {
+                        "price": 1.0, "etf.price": 1.0,
+                        "return_1m": 0.01, "etf.return_1m": 0.01,
+                        "technical.rsi.rsi_14": 0.4,
+                    }
+
+        class _FakeHub:
+            _degraded = False
+
+            def _is_market_hours(self):
+                return False
+
+            async def refresh(self):
+                return None
+
+            def get_pool(self, layer=None):
+                return pool if layer is None else pool.get(layer, [])
+
+            def get_factor_matrix(self):
+                return fm
+
+            def get_market_regime(self):
+                return "range_bound"
+
+            def get_market_sentiment(self):
+                return {"sentiment_index": 50}
+
+            def get_index_realtime(self):
+                return []
+
+            async def get_global_indices(self):
+                return {}
+
+            def get_sector_momentum(self):
+                return []
+
+            def get_sector_stocks(self, code):
+                return []
+
+            def get_by_code(self, code):
+                # 无涨跌数据标的拿不到涨跌/价格（触发 A'-2 与 P1-5 分支）
+                if code in anchors or code == zero_target:
+                    return {}
+                return {"change_pct": 1.0, "price": 1.0}
+
+            async def get_asset_realtime(self, code, market):
+                if code in anchors or code == zero_target:
+                    return None
+                return {"price": 1.0}
+
+        monkey_targets = {
+            "market_data_hub": _FakeHub(),
+            "market_session": lambda dt=None: "after_hours",
+            "_compute_fund_flow": None,      # 下面替换为 async stub
+            "_kline_change_pct": lambda hub, code: None,
+            "_snapshot_change_pct": lambda code: None,
+            "_correlation_medians_for": lambda allocs, cands: {},
+            "_correlation_matrix_for": lambda allocs, cands: {},
+        }
+        for attr, val in monkey_targets.items():
+            if attr == "_compute_fund_flow":
+                async def _ff(hub):
+                    return {}
+                monkeypatch.setattr(sd, attr, _ff, raising=False)
+            else:
+                monkeypatch.setattr(sd, attr, val, raising=False)
+        # 函数内懒加载 `from ..services.market_data_hub import market_data_hub`
+        # 拿的是真实单例——两处命名空间都要替换（r69 先例）
+        import app.services.market_data_hub as mh_mod
+        monkeypatch.setattr(mh_mod, "market_data_hub", _FakeHub(), raising=False)
+
+        async def _run():
+            return await sd.generate_enhanced_design(capital=100000)
+
+        return asyncio.run(_run())
+
+    def test_anchors_survive_full_pipeline_all_profiles(self, monkeypatch):
+        out = self._build(monkeypatch)
+        strategies = out.get("strategies") or []
+        assert len(strategies) == 3
+        a500_seen = False
+        for s in strategies:
+            prof = s.get("id") or s.get("profile")
+            core = [e for e in (s.get("etfs") or []) if e.get("layer") == "core"]
+            syms = {e.get("symbol") for e in core}
+            assert syms & {"510300", "159338"}, (
+                f"{prof} 核心层缺宽基锚（管线内被剥除），实际 {sorted(syms)}"
+            )
+            if "159338" in syms:
+                a500_seen = True
+            # 数量下限语义（M7）：核心层条目数 ∈ [3,5]
+            assert 3 <= len(core) <= 5, f"{prof} 核心层数 {len(core)} ∉ [3,5]"
+            # 合并标记不得落在锚上
+            for e in core:
+                if e.get("symbol") in ("510300", "159338"):
+                    assert not e.get("merged"), f"锚被打上 merged（同族合并未豁免）"
+        assert a500_seen, "P1-1：至少一方案核心层须含中证A500(159338)"
+
+    # 注：P1-5「清零非锚」的负向防扩大化由 TestR105RemoveStaleKeepsAnchors 与
+    # scanner 用例覆盖；管线层无法复现该场景——双锚无数据时核心命中率必 <50%，
+    # gate 整体关闭（产品行为：降级态跳过清零，锚与非锚一并保留）。
+
+
 def filter_etfs_wrapper(raw):
     from app.fetchers.etf_scanner import filter_etfs
 

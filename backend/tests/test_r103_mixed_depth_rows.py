@@ -107,3 +107,23 @@ class TestR108BackfillKlineCarriesOhlcv:
         """closes <5 的短序列不进回填 kline（与原实现一致）。"""
         rows = {"510300": _kline_rows(3)}
         assert _build_backfill_kline(rows, syms={"510300"}) == {}
+
+
+class TestForceIcBackfillOverride:
+    """round34 实施轮：一次性强制重放开关（回填内容变更后 skip 门禁会拦住
+    必要的全量重放——总 distinct 交易日信号感知不到 per-factor 覆盖缺口）。"""
+
+    def test_force_env_bypasses_skip_gate(self, monkeypatch):
+        from app.main import _ic_backfill_should_skip
+
+        monkeypatch.setenv("ETF_SURGE_FORCE_IC_BACKFILL", "1")
+        # 503 ≥ 470 本应 skip；force 旁路后返回 False（执行重放）
+        assert _ic_backfill_should_skip(503, 500) is False
+
+    def test_gate_active_without_force(self, monkeypatch):
+        from app.main import _ic_backfill_should_skip
+
+        monkeypatch.delenv("ETF_SURGE_FORCE_IC_BACKFILL", raising=False)
+        assert _ic_backfill_should_skip(503, 500) is True, "无开关时门禁语义不变"
+        assert _ic_backfill_should_skip(100, 500) is False
+        assert _ic_backfill_should_skip(470, 500) is True, "阈值边界 = max(depth-30, 200)"

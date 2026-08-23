@@ -1057,6 +1057,44 @@ def check_data_quality():
         check("数据质量检查", False, str(e))
 
 
+def _probe_dual_stack() -> str:
+    """round34 实施轮: 挂死判定的地址族取证（尽力而为，永不抛）。
+
+    分别直连 ::1 与 127.0.0.1 的 /health 并转储 8000 监听套接字——区分
+    「真挂死」（双栈都超时/异常但 LISTENING 存在 → 循环停摆类）与
+    「地址族假象」（单栈 refused 而另一栈正常 → Windows v6only/解析顺序问题，
+    round34 实施轮实证：--host 127.0.0.1 启动会让 ::1 探测全灭，制造假挂死）。
+    """
+    results = []
+    try:
+        port = int(BASE.rsplit(":", 1)[1])
+    except Exception:
+        port = 8000
+    for host, fam in (("::1", socket.AF_INET6), ("127.0.0.1", socket.AF_INET)):
+        try:
+            s = socket.socket(fam, socket.SOCK_STREAM)
+            s.settimeout(3)
+            s.connect((host, port))
+            s.sendall(b"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+            data = s.recv(64)
+            results.append(f"{host}={'http-ok' if data else 'empty-reply'}")
+            s.close()
+        except Exception as e:
+            results.append(f"{host}={type(e).__name__}")
+    try:
+        import subprocess
+
+        out = subprocess.run(["netstat", "-ano"], capture_output=True, text=True,
+                             timeout=10).stdout
+        listens = [ln.strip() for ln in out.splitlines()
+                   if f":{port}" in ln and "LISTENING" in ln.upper()]
+        if listens:
+            results.append("listen=" + " ; ".join(listens[:2]))
+    except Exception:
+        pass
+    return " [diag: " + ", ".join(results) + "]"
+
+
 def section_async_resilience():
     """异步任务提交后验证后端持续存活——测试护城河缺失的关键一环。"""
     section("异步任务弹性（后端存活）")
@@ -1087,7 +1125,11 @@ def section_async_resilience():
                     else:
                         check(f"  [{label}] /health 状态异常", False, f"HTTP {hr.status_code}")
                 except requests.Timeout:
-                    check(f"  [{label}] 后端挂死!", False, f"/health 超时 (第{health_total}次检查)")
+                    # round34 实施轮: 超时=请求已发出但响应未归（真嫌疑：循环被长
+                    # 同步计算阻塞）；补双栈取证区分地址族假象，并留监听态证据。
+                    _fam = _probe_dual_stack()
+                    check(f"  [{label}] 后端挂死!", False,
+                          f"/health 超时 (第{health_total}次检查){_fam}")
                     return
                 except Exception as e:
                     check(f"  [{label}] /health 异常", False, str(e))
