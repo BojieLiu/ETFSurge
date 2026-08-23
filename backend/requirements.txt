@@ -29,3 +29,14 @@ mypy>=2.0.0
 pyinstrument>=5.0.0
 baostock>=0.8.9
 tickflow>=0.1.17  # python 3.14 (container) has no 0.2.x wheel; 0.1.x same api_key/klines API
+
+# ──── Dev / CI tools II (round36 工具链升级, 2026-08-23) ────────
+# 测试基建补强：属性测试 / httpx mock / VCR 录制回放 / 时间冻结 / 覆盖率 / 快照。
+# ruff 配置 backend/ruff.toml；coverage 配置 backend/.coveragerc（--cov 显式启用）。
+ruff>=0.16
+pytest-cov>=7.0
+hypothesis>=6.160
+respx>=0.23
+pytest-recording>=0.13
+time-machine>=3.4
+syrupy>=6.0

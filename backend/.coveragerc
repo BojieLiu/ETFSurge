@@ -1,0 +1,24 @@
+# Coverage 配置 —— round36 工具链升级（2026-08-23）
+# 默认 pytest 行为不变（pytest.ini 未加 --cov，避免拖慢 patrol/pre-commit 热循环）。
+# 需要覆盖率时显式运行：
+#   python -m pytest --cov --cov-report=term-missing
+#   python -m pytest --cov --cov-report=html    # 输出到 htmlcov/
+# round35 §16 结论「coverage 未开」由此补齐工具侧能力；是否进门禁另行决策。
+
+[run]
+source = app
+branch = True
+omit =
+    */__main__.py
+
+[report]
+precision = 1
+show_missing = False
+exclude_lines =
+    pragma: no cover
+    if TYPE_CHECKING:
+    raise NotImplementedError
+    if __name__ == .__main__.:
+
+[html]
+directory = htmlcov

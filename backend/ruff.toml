@@ -1,0 +1,45 @@
+# Ruff 配置 —— round36 工具链升级（2026-08-23）
+#
+# 定位：与既有门禁**互补不重复**——
+#   · audit_async_blocking.py（自研 AST）是「async def 内同步 I/O 必须 run_sync/to_thread」的
+#     权威强制门禁；ruff ASYNC 规则族提供同类问题的第二道网（如 ASYNC210 阻塞 HTTP、
+#     ASYNC220 子进程），当前仅作基线报告、未接入 pre-commit——接入前须按 AGENTS.md
+#     门禁治理约定补差异化价值声明。
+#   · check_engine_purity.py 负责 engine/ 纯度，ruff 不重复该职责。
+#
+# 基线策略：存量不回溯清洗（strangler 模式），只防新增。新代码不应新增违规。
+
+target-version = "py312"
+line-length = 120
+
+extend-exclude = [
+    "data",
+    "logs",
+    "scripts/archive",
+    "htmlcov",
+]
+
+[lint]
+select = [
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "F",     # pyflakes（未用导入/未定义名）
+    "I",     # isort 导入排序
+    "B",     # flake8-bugbear 常见 bug 模式
+    "ASYNC", # flake8-async 异步反模式（与 audit_async_blocking 互补）
+]
+ignore = [
+    "E501",  # 行超长：存量巨型文件 + 中文注释普遍超长，格式化另行决策
+    "E741",  # 歧义单字符变量：金融数学代码 l/I/O 常见，误报多
+    "B008",  # 函数调用作默认参数：FastAPI Depends()/Query() 官方惯用法
+    "E731",  # lambda 赋值：存量风格，不强制
+    "E402",  # import 不在顶部：存量 73 处多为循环依赖规避的刻意模式（带注释），不回溯
+    "ASYNC109", # async 函数带 timeout 参数：与本项目 run_sync(..., timeout=N) 惯用法冲突
+]
+
+[lint.isort]
+known-first-party = ["app"]
+
+[lint.per-file-ignores]
+# 一次性诊断脚本放宽 bugbear（可读性优先级低）
+"scripts/*" = ["B"]
