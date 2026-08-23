@@ -93,7 +93,7 @@ That resilience work is most of this repo — not because it's glamorous, but be
  │ tasks (async workers)                          │
  │ task_manager · design_pipeline (quick_ready)   │
  │ strategy_check_worker · design_report          │
- │ market_refresh · news_refresh · sector_refresh │
+ │ news_refresh · sector_refresh                  │
  └───────────────┬───────────────────────────────┘
                  │
  ┌───────────────▼───────────────────────────────┐
@@ -335,7 +335,7 @@ docker-compose up --build --profile prod
 |---|---|
 | `WS /api/v1/ws/market/{symbol}` | Realtime quote streaming |
 | `WS /api/v1/ws/news` | News push (snapshot on connect) |
-| `WS /api/v1/ws/portfolio` | Portfolio change / realtime broadcasts |
+| `WS /api/v1/ws/portfolio` | Portfolio change broadcasts (`portfolio_changed`) |
 | `WS /api/v1/ws/task-notifications` | Background task progress |
 | `WS /api/v1/ws/design-report/{session_id}` | Streaming design report |
 

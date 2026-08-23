@@ -1,13 +1,23 @@
 /**
- * P1-1 (round16 3.9 B4): 行情 WS 推送消费——market_refresh 广播
- * {type:'realtime', data:[{symbol,price,change_pct},...]} 应更新 realtimeData
- * （负向：推送不消费 → realtimeData 不更新 → FAIL）。
+ * round35 §12.7-B 第一步：定时行情推送链路删除后的 WS 消费契约守卫。
+ *
+ * 背景：APScheduler 定时推送 {type:'realtime'} 已删（调度决策 B，一个月无生产
+ * 消息），market.js 的消费分支同批移除，行情更新走 REST TTL 轮询。
+ * 本 spec 钉死删除后的行为：
+ * - 负向：{type:'realtime'} 死格式必须被忽略——若分支复活/残留半截逻辑导致
+ *   数据变异，本断言红（防「删了一半」）；
+ * - 正向：portfolio_changed 防抖联动仍工作（红线：决策 B 绝不碰它）。
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
 vi.mock('../api', () => ({ marketApi: {} }))
 vi.mock('../utils/logger', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } }))
+
+const fetchEtfs = vi.fn().mockResolvedValue([])
+vi.mock('../stores/portfolio', () => ({
+  usePortfolioStore: () => ({ fetchEtfs }),
+}))
 
 let wsInstance = null
 class FakeWebSocket {
@@ -21,53 +31,41 @@ class FakeWebSocket {
   close() { this.onclose && this.onclose() }
 }
 
-describe('market store — P1-1 行情 WS 推送消费', () => {
+describe('market store — §12.7-B 删除定时行情推送后的 WS 契约', () => {
   beforeEach(() => {
+    vi.useFakeTimers()
     setActivePinia(createPinia())
     wsInstance = null
+    fetchEtfs.mockClear()
     globalThis.WebSocket = FakeWebSocket
   })
-
-  it('realtime 推送数组 → realtimeData 按 symbol 更新价格/涨跌幅', async () => {
-    const { useMarketStore } = await import('../stores/market')
-    const store = useMarketStore()
-    store.realtimeData = [
-      { symbol: '510300', price: 4.0, change_pct: 0.1 },
-      { symbol: '00700', price: 470, change_pct: -0.5 },
-    ]
-    store.connectWS()
-    // 模拟后端 market_refresh 广播 {type:'realtime', data:[...]}
-    wsInstance.onmessage({ data: JSON.stringify({
-      type: 'realtime',
-      data: [
-        { symbol: '510300', price: 4.05, change_pct: 0.35 },
-        { symbol: '00700', price: 468, change_pct: -0.8 },
-      ],
-    }) })
-    const updated = store.realtimeData
-    expect(updated.find(i => i.symbol === '510300')).toMatchObject({ price: 4.05, change_pct: 0.35 })
-    expect(updated.find(i => i.symbol === '00700')).toMatchObject({ price: 468, change_pct: -0.8 })
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
-  it('realtime 推送未包含的 symbol 不崩溃', async () => {
-    // 负向：推送符号不在列表中 → 不抛错、列表不变（round35 §16.6 空心测试修复：
-    // 原为恒绿空测试体；store 语义 = 未持仓 symbol 不入列，仅更新已有行）
+  it('{type:"realtime"} 死格式被忽略——realtimeData 不被变异（防分支复活/删一半）', async () => {
     const { useMarketStore } = await import('../stores/market')
     const store = useMarketStore()
-    store.realtimeData = [
-      { symbol: '510300', price: 4.05, change_pct: 0.35 },
+    const before = [
+      { symbol: '510300', price: 4.0, change_pct: 0.1 },
     ]
-    store.connectWS() // 本用例自建 WS 连接（beforeEach 重置 wsInstance=null）
+    store.realtimeData = JSON.parse(JSON.stringify(before))
+    store.connectWS()
     wsInstance.onmessage({ data: JSON.stringify({
       type: 'realtime',
-      data: [
-        { symbol: '999999', price: 9.99, change_pct: +1.0 },  // 不在列表
-        { symbol: '510300', price: 4.06, change_pct: 0.5 },   // 已有行正常更新
-      ],
+      data: [{ symbol: '510300', price: 9.99, change_pct: 8.88 }],
     }) })
-    const updated = store.realtimeData
-    expect(updated.find(i => i.symbol === '999999')).toBeUndefined()
-    expect(updated.find(i => i.symbol === '510300')).toMatchObject({ price: 4.06, change_pct: 0.5 })
-    expect(updated.filter(i => i.symbol === '510300')).toHaveLength(1)
+    expect(store.realtimeData[0]).toEqual(before[0])
+  })
+
+  it('portfolio_changed 广播仍触发防抖联动刷新（红线语义保持）', async () => {
+    const { useMarketStore } = await import('../stores/market')
+    const store = useMarketStore()
+    store.connectWS()
+    wsInstance.onmessage({ data: JSON.stringify({ type: 'portfolio_changed' }) })
+    expect(fetchEtfs).not.toHaveBeenCalled() // 1s 防抖窗口内未触发
+    await vi.advanceTimersByTimeAsync(1100)
+    expect(fetchEtfs).toHaveBeenCalledWith('on_exchange')
+    expect(fetchEtfs).toHaveBeenCalledWith('off_exchange')
   })
 })

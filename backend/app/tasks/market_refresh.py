@@ -1,24 +1,24 @@
-"""后台定时刷新行情缓存（APScheduler 任务）。
+"""行情缓存预热（warmup 一次 + 请求驱动 TTL 回源）。
 
-交易时段每 3 秒批量拉取一次关注列表（组合持仓 + 主流指数）的实时行情，
-写入 Redis + 内存缓存，并通过 WebSocket 推送给订阅的客户端。
+round35 §12.7 决策 B（2026-08-23）：APScheduler 定时推送链路已删除——调度器自
+design-check-pipeline-redesign 危机期禁用一个月无人回切，请求驱动（REST TTL 轮询）
+被实证接受；恢复只会复活「空闲空转打免费源」的原始问题（封禁风险）。
+
+本模块现仅保留 warmup 预热入口：调 hub.get_portfolio_realtime() 填充行情缓存，
+使启动后首个请求直接命中。不再向 WS 广播 ``{type:'realtime'}``——前端消费分支
+已同批删除（market.js），portfolio 频道的 portfolio_changed 广播独立存活于
+routers/portfolio.py，与本决策无关。
 """
 
-from ..core.logging import get_logger
-from ..routers.ws import manager
 from ..services.market_data_hub import market_data_hub
+from ..core.logging import get_logger
 
 logger = get_logger(__name__)
 
 
 async def refresh_market_cache() -> None:
+    """预热组合行情缓存（无 WS 推送；失败由调用方按预热语义处理）。"""
     try:
-        quotes = await market_data_hub.get_portfolio_realtime()
+        await market_data_hub.get_portfolio_realtime()
     except Exception:
-        logger.exception("刷新行情缓存失败：hub.get_portfolio_realtime 异常")
-        return
-    if quotes:
-        try:
-            await manager.broadcast("portfolio", {"type": "realtime", "data": quotes})
-        except Exception:
-            logger.exception("行情缓存广播失败")
+        logger.exception("预热行情缓存失败：hub.get_portfolio_realtime 异常")
