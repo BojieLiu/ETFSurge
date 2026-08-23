@@ -417,7 +417,11 @@ async def portfolio_design_async(
     constraints = task.get("constraints")
     params = {"capital": capital, "constraints": constraints, "market": market}
     t = await task_manager.create_task(task_type="design", params=params)
-    asyncio.create_task(design_worker(task_manager, t["task_id"]))
+    # round35 §11-T-①: 用户长任务（全程 ~6min）必须强引用——裸 create_task 丢弃
+    # 返回值后事件循环只持弱引用，存在被 GC 中途回收的风险窗口。
+    from ..core.background_tasks import spawn as _spawn
+
+    _spawn(design_worker(task_manager, t["task_id"]), name=f"task-{t['task_id']}")
     return JSONResponse(
         status_code=202,
         content={
@@ -447,7 +451,9 @@ async def strategy_check_async(task: dict):
         total_capital = task.get("total_capital", 500000)
         portfolio_type = task.get("portfolio_type")
         t = await task_manager.create_task(task_type="check", params={"capital": total_capital, "portfolio_type": portfolio_type})
-        asyncio.create_task(strategy_check_worker(task_manager, t["task_id"]))
+        from ..core.background_tasks import spawn as _spawn
+
+        _spawn(strategy_check_worker(task_manager, t["task_id"]), name=f"task-{t['task_id']}")
         return JSONResponse(
             status_code=202,
             content={"task_id": t["task_id"], "status": "pending", "created_at": t["created_at"]},

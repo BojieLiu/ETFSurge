@@ -644,10 +644,14 @@ async def lifespan(app: FastAPI):
         try:
             await asyncio.sleep(30)
             await _warmup_sector_lists()
-        except (Exception, asyncio.CancelledError):
+        except Exception:
+            # round35 §11-T-①: 只捕 Exception——CancelledError 自然传播（任务已入
+            # 容器，关停时必须可被取消），失败静默语义不变。
             logger.debug("[warmup] delayed sector list prefetch skipped (non-fatal)")
 
-    asyncio.create_task(_delayed_sector_list_prefetch())
+    from .core.background_tasks import spawn as _spawn_prefetch
+
+    _spawn_prefetch(_delayed_sector_list_prefetch(), name="warmup-sector-lists")
     logger.info("[lifespan] 板块列表后台预拉已注册（延迟 30s，R89）")
 
     if _SKIP_WARMUP:
@@ -655,29 +659,16 @@ async def lifespan(app: FastAPI):
     else:
         _warmup_tasks.append(asyncio.create_task(_warmup_sequence_task()))
 
-    # Scheduler temporarily disabled for diagnostics (design-check-pipeline-redesign)
-    # try:
-    #     async def _scheduler_wrapper():
-    #         try:
-    #             await asyncio.wait_for(refresh_market_cache(), timeout=25)
-    #         except (Exception, asyncio.CancelledError):
-    #             logger.exception("定时刷新行情缓存失败")
-    #
-    #     async def _news_scheduler_wrapper():
-    #         try:
-    #             await asyncio.wait_for(refresh_news_cache(), timeout=30)
-    #         except (Exception, asyncio.CancelledError):
-    #             logger.exception("定时刷新资讯缓存失败")
-    #
-    #     from apscheduler.schedulers.asyncio import AsyncIOScheduler
-    #     scheduler = AsyncIOScheduler()
-    #     scheduler.add_job(_scheduler_wrapper, "interval", seconds=15, id="refresh_market_cache", max_instances=1, coalesce=True)
-    #     scheduler.add_job(_news_scheduler_wrapper, "interval", seconds=30, id="refresh_news_cache", max_instances=1, coalesce=True)
-    #     scheduler.start()
-    #     app.state.scheduler = scheduler
+    # round35 §12.7-B 第一步（2026-08-23 决策）: APScheduler 定时推送链路已删除。
+    # 调度器自 design-check-pipeline-redesign 危机期禁用一个月无人回切——请求驱动
+    # （REST TTL 轮询 + warmup 一次预热）已被实证接受；恢复只会复活「空闲空转打源」
+    # 的原始问题。行情缓存仍由 warmup 预热 + 15s TTL 惰性回源维护；portfolio 频道
+    # 的 portfolio_changed 广播独立存活于 routers/portfolio.py，不受本决策影响。
 
     # Start health probe loop
-    asyncio.create_task(health_loop(interval=120.0))
+    from .core.background_tasks import spawn as _spawn
+
+    _spawn(health_loop(interval=120.0), name="loop-health")
 
     # Start sector cache refresh loop (60s, Phase 2)
     async def _sector_refresh_loop():
@@ -686,10 +677,10 @@ async def lifespan(app: FastAPI):
         while True:
             try:
                 await asyncio.wait_for(refresh_sector_cache(), timeout=20)
-            except (Exception, asyncio.CancelledError):
+            except Exception:  # round35 §11-T-①: CancelledError 自然传播，取消才真正生效
                 logger.warning("[lifespan] sector refresh cycle failed, will retry")
             await asyncio.sleep(60)
-    asyncio.create_task(_sector_refresh_loop())
+    _spawn(_sector_refresh_loop(), name="loop-sector")
     logger.info("板块缓存刷新循环已启动（60s）")
 
     # Start regime + sentiment refresh loop (120s, Phase 2.7.9)
@@ -699,10 +690,10 @@ async def lifespan(app: FastAPI):
                 from .services.market_data_hub import market_data_hub
                 await asyncio.wait_for(market_data_hub.update_market_regime(), timeout=15)
                 await asyncio.wait_for(market_data_hub.refresh_sentiment_cache(), timeout=15)
-            except (Exception, asyncio.CancelledError):
+            except Exception:
                 logger.warning("[lifespan] regime/sentiment refresh cycle failed, will retry")
             await asyncio.sleep(120)
-    asyncio.create_task(_regime_sentiment_refresh_loop())
+    _spawn(_regime_sentiment_refresh_loop(), name="loop-regime-sentiment")
     logger.info("市态+情绪缓存刷新循环已启动（120s）")
 
     # Start news refresh loop (120s, v6 Phase 1: news aggregation cache)
@@ -718,17 +709,16 @@ async def lifespan(app: FastAPI):
                     v.get("done") for v in getattr(app.state, "warmup", {}).values()
                 )
                 if _warmup_done:
-                    # Z18: 后台为重要新闻生成 AI 摘要（不阻塞刷新循环，失败静默）
-                    asyncio.create_task(market_data_hub.enrich_news_summaries())
+                    # Z18: 后台为重要新闻生成 AI 摘要（不阻塞刷新循环，失败静默）；
+                    # round35 §11-T-①: 并入任务容器（强引用 + 完成自动摘除）。
+                    _spawn(market_data_hub.enrich_news_summaries(), name="news-enrich")
                 else:
                     logger.info("[lifespan] warmup in progress — skipping LLM news summaries (R5-1-1)")
-            except (Exception, asyncio.CancelledError):
+            except Exception:
                 logger.warning("[lifespan] news refresh cycle failed, will retry")
             await asyncio.sleep(120)
-    asyncio.create_task(_news_refresh_loop())
+    _spawn(_news_refresh_loop(), name="loop-news")
     logger.info("资讯缓存刷新循环已启动（120s）")
-
-    app.state.scheduler = None  # Scheduler disabled for diagnostics
 
     # 崩溃恢复：扫描 report_quality="pending" 且创建 >5min 的记录，标记为 fallback
     try:
@@ -839,17 +829,17 @@ async def lifespan(app: FastAPI):
                             _hub._enrich_symbol_extra(_syms, {}),
                             timeout=15,
                         )
-                    except (Exception, asyncio.CancelledError) as _exc:
+                    except Exception as _exc:
                         logger.debug("[ic_persistence] symbol_extra enrich skipped: %s", _exc)
                     await asyncio.wait_for(
                         _reg.compute(_syms, market_data=_kline, symbol_extra=_symbol_extra),
                         timeout=30,
                     )
-            except (Exception, asyncio.CancelledError) as exc:
+            except Exception as exc:  # round35 §11-T-①: CancelledError 自然传播
                 logger.debug("[ic_persistence] periodic compute skipped: %s", exc)
             await asyncio.sleep(120)
 
-    asyncio.create_task(_ic_persistence_loop())
+    _spawn(_ic_persistence_loop(), name="loop-ic-persistence")
     logger.info("IC 持久化循环已启动（120s）")
 
     # R55 (round27): 一次性 IC 历史回填（startup-once，非阻塞）。
@@ -922,7 +912,9 @@ async def lifespan(app: FastAPI):
                 _symbol_extra = await asyncio.wait_for(
                     _hub._enrich_symbol_extra(_syms, {}), timeout=15
                 )
-            except (Exception, asyncio.CancelledError) as _e:
+            except Exception as _e:
+                # round35 §11-T-①: 本任务已入容器（task-ic-backfill），关停时
+                # cancel 必须能穿透到此处——CancelledError 不再吞。
                 logger.debug("[ic_backfill] symbol_extra enrich skipped: %s", _e)
             # 时光回溯：逐历史交易日重放因子分
             n = max(len(k["close"]) for k in kline.values())
@@ -955,7 +947,9 @@ async def lifespan(app: FastAPI):
                             _reg.compute(_syms, market_data=truncated, symbol_extra=_symbol_extra),
                             timeout=10,
                         )
-                    except (Exception, asyncio.CancelledError):
+                    except Exception:
+                        # round35 §11-T-①: 同上——CancelledError 自然传播，
+                        # 关停时回填循环可被立即取消（不再逐迭代吞掉取消）。
                         continue
                     factor_scores_by_index[i] = {s: fs[s] for s in truncated}
             finally:
@@ -978,7 +972,7 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             logger.warning("[ic_backfill] 历史回填失败（非致命）：%s", exc)
 
-    asyncio.create_task(_backfill_ic_history_task())
+    _spawn(_backfill_ic_history_task(), name="task-ic-backfill")
     logger.info("IC 历史回填任务已启动（startup-once，非阻塞，R55）")
 
     # R5-1-5: 启动时从 DB 恢复 _last_ic_batch（IC 非请求驱动——重启后
@@ -1032,9 +1026,27 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    scheduler = getattr(app.state, "scheduler", None)
-    if scheduler:
-        scheduler.shutdown(wait=False)
+    # round35 §12.7-B: APScheduler 已删除（决策 B），无调度器需关停。
+    # round35 §11-T-①: 先优雅关停全部在册后台任务（cancel + gather 收尾，
+    # CancelledError 正常路径），再关存储——避免循环的 DB 写入被拦腰截断。
+    from .core.background_tasks import shutdown_all as _shutdown_all
+
+    _bg_errs = await _shutdown_all(timeout=10.0)
+    for _bg_err in _bg_errs:
+        logger.error("[lifespan] background task failed during shutdown: %r", _bg_err)
+    # §12-P0-3 管线侧要求：shutdown 时 kline 缓存 flush（内存行落盘后存储再关）。
+    try:
+        from .services.market_data_hub import market_data_hub as _hub_shutdown
+
+        _flush = getattr(_hub_shutdown, "flush_kline_cache", None)
+        if callable(_flush):
+            await asyncio.wait_for(
+                _flush() if asyncio.iscoroutinefunction(_flush) else asyncio.to_thread(_flush),
+                timeout=10,
+            )
+            logger.info("[lifespan] kline cache flushed on shutdown")
+    except Exception as _e:
+        logger.warning("[lifespan] kline cache flush skipped: %s", _e)
     await token_store.shutdown()
     await source_event_store.shutdown()
     logger.info("应用已关闭")

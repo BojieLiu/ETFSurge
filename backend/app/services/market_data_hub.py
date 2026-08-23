@@ -532,9 +532,11 @@ class MarketDataHub(
         # 9. 审计日志
         pool_audit.log_refresh(diff)
 
-        # 9b. A3: 写入市场快照缓存（fire-and-forget 不阻塞主流程）
-        import asyncio as _asyncio2
-        _asyncio2.create_task(self._refresh_market_snapshot())
+        # 9b. A3: 写入市场快照缓存（fire-and-forget 不阻塞主流程）；
+        # round35 §11-T-①/C5: 并入任务容器并正名（原 `import asyncio as _asyncio2` 别名怪味）
+        from ..core.background_tasks import spawn as _spawn
+
+        _spawn(self._refresh_market_snapshot(), name="hub-market-snapshot")
 
         _elapsed = _time.time() - _start_ts
         logger.info("MarketDataHub: refresh complete (v%d, %d total) in %.1fs",

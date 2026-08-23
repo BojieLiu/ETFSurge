@@ -48,9 +48,11 @@ logger = logging.getLogger(__name__)
 _design_semaphore = asyncio.Semaphore(1)
 
 TASK_TYPES = {
-    "design": {"label": "组合设计", "ttl": 600},
-    "check":  {"label": "策略检查", "ttl": 600},
-    "report": {"label": "市场研判", "ttl": 600},
+    # round35 §11-P1-6/RC-B3（二选一裁决：②删）——ttl=600 为 Z27 JSON→DB 迁移后
+    # 遗留死配置，运行时零读取（淘汰走 prune_tasks 的 days 级 retention），删除。
+    "design": {"label": "组合设计"},
+    "check":  {"label": "策略检查"},
+    "report": {"label": "市场研判"},
 }
 
 # Z27: 终态任务保留策略（替代原 1h TTL JSON 剪枝）
@@ -195,7 +197,10 @@ class TaskNotifyManager:
         dead = []
         for ws in self._connections:
             try:
-                await ws.send_text(payload)
+                # round35 §11-T-② (P0-3): 背压统一——TCP 缓冲僵死的客户端会让裸
+                # send_text 永久挂起并阻塞广播循环（进而阻塞 design_pipeline 的
+                # stage 推进与终态落库）。模式照抄 routers/ws.py:64 的 5s wait_for。
+                await asyncio.wait_for(ws.send_text(payload), timeout=5.0)
             except Exception:
                 dead.append(ws)
         for ws in dead:

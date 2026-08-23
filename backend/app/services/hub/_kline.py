@@ -192,6 +192,24 @@ class KlineMixin:
             logger.debug("[hub] kline cache persist failed (non-fatal): %s", _e)
 
 
+    async def flush_kline_cache(self) -> None:
+        """round35 §12-P0-3: 关停前落盘 K 线缓存（lifespan shutdown 调用）。
+
+        此前 main.py 关停段以 ``getattr(hub, "flush_kline_cache", None)`` 防御性
+        调用，但本方法不存在 → 永久静默 no-op（假完成）。落盘走线程池（JSON 可达
+        MB 级，勿阻塞事件循环）；失败静默——与 _persist_kline_cache_sync 同语义，
+        关停路径不因缓存落盘失败而中断。
+        """
+        try:
+            from ...core.async_utils import run_sync
+
+            await run_sync(self._persist_kline_cache_sync, timeout=15)
+            if self._kline_cache_rows:
+                logger.info("[hub] kline cache flushed on shutdown (%d symbols)",
+                            len(self._kline_cache_rows))
+        except Exception as _e:
+            logger.debug("[hub] kline flush on shutdown failed (non-fatal): %s", _e)
+
     def get_kline(self, symbol: str, max_age: int = 300) -> dict[str, Any] | None:
         """R3: 从行式缓存懒转换返回列式 K 线数据。
 

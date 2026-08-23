@@ -35,7 +35,9 @@ class DesignReportManager:
         dead = []
         for ws in self._sessions[session_id]:
             try:
-                await ws.send_text(payload)
+                # round35 §11-T-② (P0-3): 背压统一（同 task_manager.broadcast，
+                # 模式照抄 routers/ws.py:64）——僵死客户端 5s 超时即摘除。
+                await asyncio.wait_for(ws.send_text(payload), timeout=5.0)
             except Exception:
                 dead.append(ws)
         for ws in dead:
