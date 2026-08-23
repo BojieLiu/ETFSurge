@@ -5,23 +5,23 @@ import logging
 import os
 import sys as _sys
 import time as _time
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Any
 
 from app.models.portfolio import PortfolioETF
-from app.services.portfolio.formatting import (
-    _CONFIDENCE_ZH,
-    _has_real_factor_values,
-    _factor_value_real,
-)
 from app.services.portfolio._facade_refs import (
-    list_etfs,
+    _compute_confidence,
+    _normalize_confidence,
     build_price_map,
     format_factor_summary,
-    _normalize_confidence,
-    _compute_confidence,
+    list_etfs,
+)
+from app.services.portfolio.formatting import (
+    _CONFIDENCE_ZH,
+    _factor_value_real,
+    _has_real_factor_values,
 )
 
 logger = logging.getLogger(__name__)
@@ -58,10 +58,9 @@ async def strategy_check(
 ) -> dict[str, Any]:
     """v2: 因子评分 + regime 感知 + 结构化输出（60s LRU 缓存避免重复采集）。"""
     from ...analysis.llm import generate_strategy_check_report
-    from ...factors.factor_registry import registry as factor_registry
-    
+
     # Use design_data if provided, otherwise fall back to DB ETFs
-    use_design = False
+    # （round36 F841：use_design 标志从未被消费，两处赋值删除）
     if design_data and design_data.get("plans"):
         plan = design_data["plans"][0] if design_data["plans"] else None
         if plan and plan.get("allocations"):
@@ -75,12 +74,11 @@ async def strategy_check(
                     "portfolio_type": "on_exchange",
                     "target_weight": alloc.get("target_weight", 0),
                 })
-            use_design = True
         else:
             etfs = await list_etfs(db, portfolio_type)
     else:
         etfs = await list_etfs(db, portfolio_type)
-    
+
     if not etfs:
         # P1-16 (round9 §4.5): 空组合附诊断——记录查询条件/行数/过滤明细，
         # 区分「真空组合」与「查询条件异常」（旧裸文案无任何诊断信息）
@@ -90,13 +88,13 @@ async def strategy_check(
             "suggestions": [],
             "empty_diagnosis": diag,
         }
-    
+
     # Build price map - handle both SQLAlchemy objects and dicts
     def _get_attr(e, attr, default=None):
         if isinstance(e, dict):
             return e.get(attr, default)
         return getattr(e, attr, default)
-    
+
     # 组合持仓计算缓存 key（按 symbol 列表 + capital 去重）
     symbols = [_get_attr(e, "symbol") for e in etfs if _get_attr(e, "symbol") != "CASH"]
     cache_key = "_".join(sorted(symbols) if symbols else ["empty"])
@@ -108,7 +106,7 @@ async def strategy_check(
             return cached[1]
         else:
             logger.debug("[strategy_check] cache hit but result is failed/stale, re-fetching")
-    
+
     # O25① (round7 §7 P25): 并行采集（各自独立超时，任一失败保留另一部分——
     # 旧 wait_for(gather) 超时会取消全部，部分完成结果被丢弃）
     indicators, factor_scores = await _collect_strategy_data(symbols)
@@ -122,9 +120,7 @@ async def strategy_check(
         regime = market_data_hub.get_market_regime() or "range_bound"
     except Exception:
         regime = "range_bound"
-    trends = {}
-    index_realtime = []
-    
+
     # 构建 market_data with allocation info
     price_map = await build_price_map(etfs)
     market_data = []
@@ -142,7 +138,7 @@ async def strategy_check(
             "target_weight": target_w,
             "target_amount": round(total_capital * target_w, 2),
         })
-        
+
         if symbol != "CASH":
             fb = factor_scores.get(symbol, {}) if isinstance(factor_scores, dict) else {}
             ind = indicators.get(symbol, {})
@@ -198,7 +194,7 @@ async def strategy_check(
                     logger.info("[strategy_check] P0-2 resolved ghost name %s -> %s", g["symbol"], _real)
     except Exception as _pe:
         logger.debug("[strategy_check] ghost name resolution skipped (non-fatal): %s", _pe)
-    
+
     # 统计因子数据质量
     # P1-15 (round9 §4.4-3): filled 判定排除兑底默认值——RSI/KDJ 恰为 50、ATR 恰为 0、
     # vol_ratio 恰为 1 等中性默认值是「缺数据兑底」而非真实值，计入 filled 会报「N/M 正常」假正常
@@ -303,7 +299,7 @@ async def strategy_check(
             )
             # F1-9: 失败留痕 — 写 usage 失败记录（成功路径由 llm.py 写入）
             try:
-                from ...monitor.token_usage import token_store, UsageRecord
+                from ...monitor.token_usage import UsageRecord, token_store
                 await token_store.record(UsageRecord(
                     function_name="generate_strategy_check_report",
                     prompt_tokens=0, completion_tokens=0, total_tokens=0,
@@ -348,7 +344,7 @@ async def strategy_check(
         # P2-F: 仅缓存成功的 LLM 报告（失败/兜底不写——避免把降级结果当成功复用）
         if _llm_cache_key and not _llm_failed:
             _strategy_check_cache[_llm_cache_key] = (_time.monotonic(), llm_result)
-    
+
     # P2-1+P2-2+P2-4: 后处理 — 回填 weight + 真实因子分 + factor_summary
     weight_map: dict[str, float] = {}
     for e in etfs:
@@ -695,7 +691,7 @@ def _is_failed_result(factor_scores: dict) -> bool:
     """
     if not factor_scores:
         return True
-    for sym, scores in factor_scores.items():
+    for _sym, scores in factor_scores.items():
         if scores and isinstance(scores, dict) and any(
             isinstance(v, (int, float)) and v != 0 for v in scores.values()
         ):
@@ -933,7 +929,7 @@ def _attach_composite_decisions(
     _BASE_W = (0.4, 0.4, 0.2)
     _ORDER = ("technical", "valuation", "momentum")
 
-    for sym, fb in factor_breakdowns.items():
+    for _sym, fb in factor_breakdowns.items():
         if not isinstance(fb, dict):
             continue
         fs = fb.get("factor_scores") or {}
@@ -1000,6 +996,7 @@ def _within_symbol_factor_composite(fs: dict) -> float | None:
         return None
     try:
         from app.core.factor_aggregate import aggregate_factor_scores
+
         from ...factors.factor_registry import registry as factor_registry
         # R66 (round28): 与设计屏共用同一复合函数——传 ic_series（IC 加权聚合）。
         # 旧实现不传 ic_series → 等权回退，而 allocation_engine 传 ic_series
@@ -1634,7 +1631,7 @@ def _compute_risk_warnings(
     regime: str,
 ) -> list[dict]:
     """基于因子数据和持仓分析计算组合风险警告。
-    
+
     独立于 LLM 输出，确保风险 section 不会为空。
     """
     warnings: list[dict] = []
@@ -1722,7 +1719,7 @@ async def _compute_indicators(symbols: list[str]) -> dict:
         *[market_data_hub.get_market_history(sym, "A") for sym in symbols],
         return_exceptions=True,
     )
-    for sym, hist in zip(symbols, hist_data):
+    for sym, hist in zip(symbols, hist_data, strict=False):
         if isinstance(hist, list) and hist:
             try:
                 # R6-F5 (round6 §十 R6-06): 不传 factor_scores——factor_matrix 的

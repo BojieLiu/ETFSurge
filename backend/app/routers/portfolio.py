@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 import time
-from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,14 +16,23 @@ _TIMELINE_TTL = 30.0
 
 from ..database import get_db
 from ..models.schemas import (
-    PortfolioETFCreate, PortfolioETFUpdate, PortfolioETFResponse,
     CalculateRequest,
+    PortfolioETFCreate,
+    PortfolioETFResponse,
+    PortfolioETFUpdate,
 )
 from ..services.portfolio_service import (
-    list_etfs, add_etf, update_etf, remove_etf,
-    calculate_allocation, calculate_daily_pnl, calculate_cumulative_pnl,
-    export_portfolio, import_portfolio, calculate_weight_drift,
+    add_etf,
     apply_portfolio_design,
+    calculate_allocation,
+    calculate_cumulative_pnl,
+    calculate_daily_pnl,
+    calculate_weight_drift,
+    export_portfolio,
+    import_portfolio,
+    list_etfs,
+    remove_etf,
+    update_etf,
 )
 
 logger = logging.getLogger(__name__)
@@ -182,6 +191,7 @@ async def export_portfolio_endpoint(
 # Proper import endpoint with file upload
 from fastapi import File, UploadFile
 
+
 @router.post("/import", response_model=dict)
 async def import_portfolio_file(
     file: UploadFile = File(...),
@@ -221,8 +231,9 @@ async def list_designs(
     db: AsyncSession = Depends(get_db),
 ):
     """列出历史方案记录"""
-    from sqlalchemy import select, desc
+    from sqlalchemy import desc, select
     from sqlalchemy.orm import load_only
+
     from ..models.portfolio_design import PortfolioDesign
 
     # P0-8 (round16 2.3): designs_list 热态 660-890ms 不降——DB 查询无缓存。
@@ -283,6 +294,7 @@ async def get_design(
 ):
     """查看某次设计的完整详情"""
     from sqlalchemy import select
+
     from ..models.portfolio_design import PortfolioDesign
 
     stmt = select(PortfolioDesign).where(PortfolioDesign.id == design_id)
@@ -384,8 +396,9 @@ async def portfolio_design_async(
     请求体: {capital: 500000, constraints: {...}, market: "A"}
     Phase 5.1: 非 A 市场返回 unsupported 友好提示。
     """
-    from ..core.market_context import resolve_market_context
     from fastapi.responses import JSONResponse
+
+    from ..core.market_context import resolve_market_context
 
     market = task.get("market", "A")
     market_ctx = resolve_market_context(market)
@@ -399,7 +412,7 @@ async def portfolio_design_async(
             },
         )
 
-    from ..tasks.task_manager import task_manager, design_worker
+    from ..tasks.task_manager import design_worker, task_manager
     capital = task.get("capital", 500000)
     constraints = task.get("constraints")
     params = {"capital": capital, "constraints": constraints, "market": market}
@@ -427,8 +440,9 @@ async def strategy_check_async(task: dict):
     """
     try:
         from fastapi.responses import JSONResponse
-        from ..tasks.task_manager import task_manager
+
         from ..tasks.strategy_check_worker import strategy_check_worker
+        from ..tasks.task_manager import task_manager
 
         total_capital = task.get("total_capital", 500000)
         portfolio_type = task.get("portfolio_type")
@@ -445,13 +459,14 @@ async def strategy_check_async(task: dict):
 @router.get("/strategy-check-result/{task_id}")
 async def get_strategy_check_result(task_id: int):
     """查询异步策略检查任务的结果。"""
-    from ..tasks.task_manager import task_manager
     from fastapi.responses import JSONResponse
+
+    from ..tasks.task_manager import task_manager
 
     task = await task_manager.get_task(task_id)
     if not task:
         return JSONResponse(status_code=404, content={"error": "task not found"})
-    
+
     if task["status"] != "completed":
         return {
             "task_id": task_id,
@@ -484,8 +499,8 @@ async def get_strategy_check_result(task_id: int):
 async def list_strategy_checks(limit: int = 10, offset: int = 0):
     """列出历史策略检查记录。"""
     try:
-        from sqlalchemy import select, desc
-        from sqlalchemy.ext.asyncio import AsyncSession
+        from sqlalchemy import desc, select
+
         from ..database import async_session
         from ..models.strategy_check import StrategyCheckRecord
 
@@ -507,6 +522,7 @@ async def list_strategy_checks(limit: int = 10, offset: int = 0):
 async def get_strategy_check(check_id: int):
     """获取单条策略检查记录详情。"""
     from sqlalchemy import select
+
     from ..database import async_session
     from ..models.strategy_check import StrategyCheckRecord
 
@@ -529,11 +545,12 @@ async def get_timeline(
     Get merged timeline of portfolio designs and strategy checks.
     Queries both tables, merges by created_at DESC, supports pagination.
     """
+
+    from sqlalchemy import select
+
     from ..models.portfolio_design import PortfolioDesign
     from ..models.strategy_check import StrategyCheckRecord
     from ..models.task import TaskRecord
-    from sqlalchemy import select
-    import json
 
     # P0-1 (round20 §五 P0-1): 30s TTL 缓存命中——热态不再重复全表查询。
     # 对齐 _DESIGNS_LIST_CACHE / admin._METRICS_CACHE 模式，按 (limit, offset) 键控。

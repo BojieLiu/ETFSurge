@@ -13,12 +13,14 @@ from typing import Any
 
 from ..core.market_calendar import market_session
 from ..engine.allocation_engine import (
-    allocate as engine_allocate,
-    enforce_max_correlation,
+    MANDATORY_CODES,
     apply_near_substitute_warnings,
     check_structure_reasonableness,
+    enforce_max_correlation,
     wide_basis_high_corr_warnings,
-    MANDATORY_CODES,
+)
+from ..engine.allocation_engine import (
+    allocate as engine_allocate,
 )
 from ..engine.budgets import STRATEGY_META
 from ..engine.rationale import build_rationale
@@ -751,7 +753,7 @@ async def generate_enhanced_design(
                     f"设计管线异常（{type(e).__name__}），使用静态核心池兜底",
                 ),
             }
-        except Exception as fallback_e:
+        except Exception:
             logger.exception("[strategy_design] fallback also failed")
             return {
                 "strategies": [],
@@ -780,9 +782,10 @@ async def _compute_fund_flow(market_data_hub) -> dict:
     # OPT-02: 熔断器检查——F17 R62: fund_flow 走 market_data_hub.get_fund_flow（akshare），
     # 旧 gate 查 push2delay 健康是语义错位（fund_flow 被涨跌家数路径熔断 gate 误伤），
     # 改为检查 akshare 源健康；push2delay gate 仅适用于直接走 HTTP 的路径
-    from ..core.source_registry import registry as _source_registry
     import time
+
     from ..core.market_context import EM_PUSH_HOST
+    from ..core.source_registry import registry as _source_registry
     _ = EM_PUSH_HOST  # 域名集中常量引用（避免散落）
     akshare_h = _source_registry.health("akshare")
     if not akshare_h.available(time.time()):
@@ -803,7 +806,7 @@ async def _compute_fund_flow(market_data_hub) -> dict:
 
     # 收集所有 symbol
     all_symbols = []
-    for layer, items in pool.items():
+    for _layer, items in pool.items():
         for item in items:
             sym = item.get("symbol", "")
             if sym:
@@ -1063,12 +1066,15 @@ def _factor_data_quality_report(db_sample_counts: dict | None = None) -> dict:
     """
     try:
         import statistics
+
         from ..factors.factor_registry import registry as _freg
-        from ..routers.factors import (
-            _status_of, STATIC_FACTOR_CODES, MARKET_LEVEL_FACTOR_CODES,
-            MIN_TRADING_DAYS,
-        )
         from ..factors.ic_tracker import compute_series_stats
+        from ..routers.factors import (
+            MARKET_LEVEL_FACTOR_CODES,
+            MIN_TRADING_DAYS,
+            STATIC_FACTOR_CODES,
+            _status_of,
+        )
 
         _factors = getattr(_freg, "_factors", {}) or {}
         _design_static = STATIC_FACTOR_CODES | MARKET_LEVEL_FACTOR_CODES
@@ -1257,10 +1263,11 @@ def _correlation_medians_for(allocs: list[dict], candidates: dict) -> dict[str, 
     性能控制：会话内缓存 closes（5min）+ 4 并发拉取（design 冷态不逐标的串行 5s），
     失败跳过（缺失标的不参与，返回空 dict → correlation_median=None 不影响）。
     """
+    import concurrent.futures
+
     from ..engine.correlation import correlation_matrix, median_correlation_for
     from ..fetchers.china_market import run_in_thread
     from ..services.market_data_hub import market_data_hub
-    import concurrent.futures
 
     codes: list[str] = [
         str(a.get("symbol"))

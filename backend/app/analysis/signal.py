@@ -276,7 +276,6 @@ def compute_td_sequential(close: pd.Series) -> dict:
         }
     """
     import pandas as pd
-    import numpy as np
 
     if not isinstance(close, pd.Series):
         try:

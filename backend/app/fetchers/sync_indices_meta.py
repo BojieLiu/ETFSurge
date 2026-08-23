@@ -36,8 +36,8 @@ async def _fetch_sina_a_indices():
     round25 R30 附带: akshare 为同步调用——经 asyncio.to_thread 提交线程池，
     避免阻塞事件循环（audit_async_blocking 门禁，async def ≠ 非阻塞铁律）。
     """
-    import asyncio
     import akshare as ak
+
     from ..core.async_utils import run_sync_long
     try:
         df = await run_sync_long(ak.stock_zh_index_spot_sina)
@@ -70,8 +70,8 @@ async def _fetch_sina_a_indices():
 
 async def _fetch_sina_hk_indices():
     """抓取新浪港股指数。"""
-    import asyncio
     import akshare as ak
+
     from ..core.async_utils import run_sync_long
     try:
         df = await run_sync_long(ak.stock_hk_index_spot_sina)
@@ -98,8 +98,8 @@ async def _fetch_sina_hk_indices():
 
 async def _fetch_ths_industry_indices():
     """抓取同花顺行业指数。"""
-    import asyncio
     import akshare as ak
+
     from ..core.async_utils import run_sync_long
     try:
         df = await run_sync_long(ak.stock_board_industry_index_ths)
@@ -126,8 +126,8 @@ async def _fetch_ths_industry_indices():
 
 async def _fetch_ths_concept_indices():
     """抓取同花顺概念指数。"""
-    import asyncio
     import akshare as ak
+
     from ..core.async_utils import run_sync_long
     try:
         df = await run_sync_long(ak.stock_board_concept_index_ths)
@@ -219,7 +219,7 @@ async def collect_all() -> list[dict]:
         _fetch_ths_concept_indices(),
     ]
     results = await asyncio.gather(*tasks, return_exceptions=True)
-    
+
     merged = []
     seen = set()
     for res in results:
@@ -248,9 +248,10 @@ async def collect_all() -> list[dict]:
 
 
 async def sync():
+    from sqlalchemy import delete
+
     from app.database import async_session, init_db
     from app.models.search import IndexMeta
-    from sqlalchemy import delete
 
     rows = await collect_all()
     if not rows:

@@ -8,27 +8,27 @@
 import hashlib
 import logging
 import re
-import time
-from datetime import datetime, timedelta, timezone, tzinfo
+from datetime import datetime, timedelta, timezone
 
 # F24 (round23 P0-A): 统一资讯时间戳为北京时间（Asia/Shanghai, UTC+8）。
 # 东财/新浪等源返回 Unix epoch（UTC 绝对时），旧实现按 UTC 直显 → 比北京时间慢 8h，
 # 且与财联社（已为北京字符串）两套时区并存。统一在此转北京，sort_time 保留原始 epoch
 # （排序与时区无关，且存储安全）。
 _SHA_TZ = timezone(timedelta(hours=8))
+import concurrent.futures
 from email.utils import parsedate_to_datetime
+from typing import Any
+
 import feedparser
 import requests
-import concurrent.futures
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
-from ..utils.proxy import no_proxy
-from ..utils.decode import decode_df as _decode_df
+from ..core.async_utils import safe_call
 from ..services.cache_service import cached
-from ..core.async_utils import run_in_thread, safe_call
-from .levistock_fetcher import classify_news, classify_news_category, classify_news_level, fetch_cailian_telegraph
+from ..utils.decode import decode_df as _decode_df
+from ..utils.proxy import no_proxy
+from .levistock_fetcher import classify_news, classify_news_category, fetch_cailian_telegraph
 
 # HTTP session reuse: avoid SSL handshake overhead on every request
 _http_session = requests.Session()
@@ -206,8 +206,8 @@ def _normalize_title(title: str) -> str:
     t = re.sub(r'^(快讯|最新|速报|播报|早报|晚报|盘前|盘中|盘后)[:：\s]*', '', t)
     # 统一空格
     t = re.sub(r'\s+', ' ', t)
-    # 去除尾部标点
-    t = t.rstrip('，。,。！？…:：;；')
+    # 去除尾部标点（rstrip 字符集语义正是所需——B005 的「前缀误解」场景不适用）
+    t = t.rstrip('，。,。！？…:：;；')  # noqa: B005
     return t.lower()
 
 
@@ -440,7 +440,8 @@ def fetch_global_news() -> list[dict[str, Any]]:
             "https://www.cnbc.com/id/100003114/device/rss/rss.html",
         ]
         for f in feeds:
-            d = safe_call(lambda: feedparser.parse(f), timeout=8)
+            # B023: 默认参数绑定当前迭代的 f，消除闭包晚绑定隐患
+            d = safe_call(lambda url=f: feedparser.parse(url), timeout=8)
             if d:
                 for e in (d.entries or [])[:8]:
                     _src = getattr(e, "source", None)

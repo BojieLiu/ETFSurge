@@ -1,17 +1,17 @@
 """Global Markets Fetcher -- consolidated module."""
 
 from __future__ import annotations
+
 import logging
-import time
 from datetime import datetime
 from typing import Any
 
 import httpx
 
-from ..core.async_utils import run_in_thread
-from ..utils.proxy import no_proxy
 from ..config import settings
+from ..core.async_utils import run_in_thread
 from ..core.logging import get_logger
+from ..utils.proxy import no_proxy
 
 logger = get_logger(__name__)
 
@@ -194,13 +194,11 @@ def _fetch_tencent_hk_indices() -> dict[str, dict[str, Any]]:
             continue
 
         price_str = parts[3].strip()
-        prev_close_str = parts[4].strip()
         change_str = parts[31].strip()
         change_pct_str = parts[32].strip()
 
         try:
             price = float(price_str) if price_str else None
-            prev_close = float(prev_close_str) if prev_close_str else None
             change_amt = float(change_str) if change_str else None
             change_pct = float(change_pct_str) if change_pct_str else None
         except (ValueError, TypeError):
@@ -290,6 +288,8 @@ def fetch_hk_indices() -> dict[str, dict[str, Any]]:
 # --- yfinance_fetcher.py: yfinance (DEPRECATED) ---
 
 import os
+
+
 def fetch_us_etf_realtime(symbol: str) -> dict[str, Any] | None:
     try:
         proxy = os.environ.get("YFINANCE_PROXY", "")

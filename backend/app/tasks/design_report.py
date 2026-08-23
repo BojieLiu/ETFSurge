@@ -6,7 +6,6 @@ import json
 import logging
 import time
 from datetime import datetime
-from typing import Any
 
 from ..analysis.llm import generate_design_report
 
@@ -357,11 +356,11 @@ def _validate_report_consistency(report_text: str, strategies: list[dict]) -> st
     """校验 LLM 报告中的 ETF 代码是否与引擎策略数据一致。
     如 LLM 引入了引擎方案以外的标的，追加修正脚注。
     如 LLM 遗漏了三个方案中的某个，追加提醒段落。
-    
+
     Q04 增强:
     - 检查所有方案是否均为 CASH（无真实 ETF），追加明确警告
     - 若策略 ETF 数为 0，在报告中追加修正脚注
-    
+
     P1 增强 (system-diagnosis):
     - 检测重复章节标题，追加修正脚注
     - 折叠 3+ 连续空行为最多 2 行
@@ -585,7 +584,8 @@ async def compose_and_push_report(
                 fallback_parts.append(f"\n## {label}\n")
                 fallback_parts.append(f"核心 {lb.get('core',0)*100:.0f}% · 卫星 {lb.get('satellite',0)*100:.0f}% · 防御 {lb.get('defense',0)*100:.0f}%\n\n")
                 for e in (s.get("allocations") or s.get("etfs") or []):
-                    if e.get("symbol") == "CASH": continue
+                    if e.get("symbol") == "CASH":
+                        continue
                     w = (e.get("weight") or e.get("target_weight") or 0) * 100
                     fallback_parts.append(f"- {e.get('name','')} ({e.get('symbol')}) {w:.0f}% — {e.get('selection_rationale','')[:80]}\n")
             report_text = "".join(fallback_parts)

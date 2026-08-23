@@ -6,10 +6,11 @@
 - indices_meta: 所有指数元数据（A股/港股/行业/概念/宽基/策略等），供搜索/下拉/分析入口
 """
 
-from sqlalchemy import Column, String, Boolean, DateTime, Integer, Text
-from ..database import Base
-
 from datetime import datetime
+
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text
+
+from ..database import Base
 
 
 class Instrument(Base):

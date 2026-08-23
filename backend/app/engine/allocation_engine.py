@@ -583,12 +583,12 @@ def _select_and_weight(
         tech_cap = budget * tech_cap_ratio
         TECH_MAX_COUNT = 2  # O17: 科创系数量上限（与 F7「卫星 ≥4 且 ≥2 非科技」呼应）
         tech_items = [
-            (item, w) for (item, w) in zip(selected, weights)
+            (item, w) for (item, w) in zip(selected, weights, strict=False)
             if _is_tech_theme(item[1].get("name", ""))
         ]
         tech_alloc_total = sum(w for _, w in tech_items)
         non_tech_items = [
-            (item, w) for (item, w) in zip(selected, weights)
+            (item, w) for (item, w) in zip(selected, weights, strict=False)
             if not _is_tech_theme(item[1].get("name", ""))
         ]
         if tech_alloc_total > tech_cap + 1e-9 or len(tech_items) > TECH_MAX_COUNT:
@@ -652,7 +652,7 @@ def _select_and_weight(
             weights = [w for _, w in kept]
 
     results: list[dict[str, Any]] = []
-    for (composite, cand, factor_scores), w in zip(selected, weights):
+    for (composite, cand, factor_scores), w in zip(selected, weights, strict=False):
         sym = cand.get("symbol", "")
         name = cand.get("name", sym)
         # O24 (round7 §7 P24): 归因链——层内候选池排名 + 主驱动因子
@@ -992,7 +992,7 @@ def _dedup_same_index(allocations: list[dict[str, Any]]) -> list[dict[str, Any]]
         groups.setdefault(key, []).append(a)
 
     removed_syms: set[str] = set()
-    for key, members in groups.items():
+    for _key, members in groups.items():
         if len(members) < 2:
             continue
         anchors = [m for m in members if m.get("symbol") in MANDATORY_CODES]
@@ -1193,9 +1193,11 @@ def allocate(
             seg = a.get("segment", "") or ""
             if not seg:
                 return True
-            if seg in selected_segments:
+            # B023 安全性：selected_segments 在每个 profile 迭代内重建，
+            # 本函数仅在同轮迭代内定义并调用，不存在跨轮晚绑定（round36 审计注记）
+            if seg in selected_segments:  # noqa: B023
                 return False
-            selected_segments.add(seg)
+            selected_segments.add(seg)  # noqa: B023
             return True
 
         # ── Core layer ──

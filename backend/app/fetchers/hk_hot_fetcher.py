@@ -59,8 +59,9 @@ _HK_FS = "m:128+t:3"
 
 def _fetch_from_host(host: str) -> list[dict]:
     """单 host 拉取港股全量 spot；空 diff 视为失败（计入熔断阈值）。"""
-    from ..utils.proxy import no_proxy
     import requests as _req
+
+    from ..utils.proxy import no_proxy
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "Referer": "https://quote.eastmoney.com/",

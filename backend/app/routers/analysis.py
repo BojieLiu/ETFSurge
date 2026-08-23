@@ -1,32 +1,27 @@
 import asyncio
-import asyncio
 import json
-import time
-from fastapi import APIRouter, Query, Depends
+
+from fastapi import APIRouter
 
 from ..core.logging import get_logger
 
 logger = get_logger(__name__)
-from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Any
 
-from ..analysis.llm import (
-    generate_market_report, generate_advice, analyze_news_impact,
-    generate_sector_analysis, generate_symbol_analysis,
-    _build_report_prompt, run_stream_with_cache,
-)
-from ..analysis.registry import get_agent
-from ..services.market_data_hub import market_data_hub
-from ..services.llm_context import build_full_context
-from ..services.market_service import get_history
-
-from ..analysis.indicators import compute_all_indicators
-from ..services.market_data_hub import market_data_hub
-from ..services.market_data_hub import market_data_hub
-from ..database import get_db
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+
+from ..analysis.indicators import compute_all_indicators
+from ..analysis.llm import (
+    _build_report_prompt,
+    analyze_news_impact,
+    run_stream_with_cache,
+)
+from ..analysis.registry import get_agent
+from ..services.llm_context import build_full_context
+from ..services.market_data_hub import market_data_hub
+from ..services.market_service import get_history
 
 router = APIRouter(prefix="/api/v1/analysis", tags=["analysis"])
 
@@ -303,8 +298,8 @@ async def llm_report_stream(req: LLMReportRequest):
     R49: 上下文采集 / 历史 K 线 / 指标计算等重 I/O 全部延后到流式首字节
     （event: progress）之后，在 _build 工厂内完成，确保首字节即时可见进度。
     """
-    from ..services.market_data_hub import market_data_hub
     from ..services.llm_context import build_full_context
+    from ..services.market_data_hub import market_data_hub
 
     async def _build():
         # 使用统一上下文管道采集数据
@@ -405,9 +400,9 @@ async def llm_advice_stream(req: LLMAdviceRequest):
     Phase D(1): 新增 market 参数，传递给 build_full_context() 按市场获取数据。
     R49: 上下文采集等重 I/O 延后到首字节（progress）之后在 _build 内完成。
     """
-    from ..services.market_data_hub import market_data_hub
-    from ..services.llm_context import build_full_context
     from ..analysis.llm import _build_advice_stream_prompt
+    from ..services.llm_context import build_full_context
+    from ..services.market_data_hub import market_data_hub
 
     async def _build():
         # 使用统一上下文管道（按市场获取数据）

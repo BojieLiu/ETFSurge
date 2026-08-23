@@ -80,7 +80,6 @@ class PoolMixin:
         factor_definitions.yaml 声明）跳过截面 z-score，保留真实 0-100 值——
         rationale「RSI<30 超卖」等判断需要真实值而非相对分。
         """
-        import statistics
         symbols = list(matrix.keys())
         if not symbols:
             return matrix

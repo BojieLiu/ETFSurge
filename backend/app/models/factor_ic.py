@@ -1,7 +1,7 @@
 """FactorICRecord model — persisted IC values for factor effectiveness tracking."""
 
-from datetime import datetime
-from sqlalchemy import Column, String, Integer, Float, DateTime, Boolean, Date, func, UniqueConstraint
+from sqlalchemy import Boolean, Column, Date, DateTime, Float, Integer, String, UniqueConstraint, func
+
 from ..database import Base
 
 

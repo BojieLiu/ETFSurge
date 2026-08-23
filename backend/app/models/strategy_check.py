@@ -3,7 +3,9 @@
 Strategy check history model
 """
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Float, DateTime, Text
+
+from sqlalchemy import Column, DateTime, Float, Integer, String, Text
+
 from ..database import Base
 
 

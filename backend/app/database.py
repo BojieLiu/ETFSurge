@@ -1,5 +1,6 @@
 import os
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
 from .config import settings
@@ -44,14 +45,6 @@ async def get_db():
 
 async def init_db():
     async with engine.begin() as conn:
-        from .models.portfolio import PortfolioETF
-        from .models.search import Instrument, Sector, Index
-        from .models.portfolio_design import PortfolioDesign
-        from .models.strategy_check import StrategyCheckRecord
-        from .models.app_config import AppConfig
-        from .models.factor_ic import FactorICRecord
-        from .models.task import TaskRecord
-        from .models.market_snapshot import MarketSnapshot
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_migrate)
     # Phase 6.1.3: initialize ConfigManager with DB session factory

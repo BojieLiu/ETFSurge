@@ -1,6 +1,5 @@
 """Portfolio ETF CRUD — split from portfolio_service (Batch 1)."""
 
-import asyncio
 import logging
 import sys as _sys
 
@@ -31,7 +30,7 @@ def _facade():
 
 
 async def list_etfs(db: AsyncSession, portfolio_type: str | None = None) -> list[PortfolioETF]:
-    q = select(PortfolioETF).where(PortfolioETF.is_active == True)
+    q = select(PortfolioETF).where(PortfolioETF.is_active.is_(True))
     if portfolio_type:
         q = q.where(PortfolioETF.portfolio_type == portfolio_type)
     result = await db.execute(q)
@@ -71,7 +70,7 @@ async def add_etf(db: AsyncSession, data: PortfolioETFCreate) -> PortfolioETF:
 
 async def update_etf(db: AsyncSession, symbol: str, data: PortfolioETFUpdate) -> PortfolioETF | None:
     result = await db.execute(select(PortfolioETF).where(
-        PortfolioETF.symbol == symbol, PortfolioETF.is_active == True
+        PortfolioETF.symbol == symbol, PortfolioETF.is_active.is_(True)
     ))
     etf = result.scalar_one_or_none()
     if not etf:
@@ -139,13 +138,13 @@ async def update_etf(db: AsyncSession, symbol: str, data: PortfolioETFUpdate) ->
     await db.refresh(etf)
     if _adjust_meta is not None:
         # 路由层读取注入响应（realized_pnl/trade 不属于 ORM 列）
-        setattr(etf, "_adjust_meta", _adjust_meta)
+        etf._adjust_meta = _adjust_meta
     return etf
 
 
 async def remove_etf(db: AsyncSession, symbol: str) -> bool:
     result = await db.execute(select(PortfolioETF).where(
-        PortfolioETF.symbol == symbol, PortfolioETF.is_active == True
+        PortfolioETF.symbol == symbol, PortfolioETF.is_active.is_(True)
     ))
     etf = result.scalar_one_or_none()
     if not etf:
@@ -167,8 +166,8 @@ def _resolve_tracked_index(symbol: str) -> str | None:
         pass
     try:
         from ...fetchers.etf_scanner import (
-            _load_tracked_index_cache,
             _extract_index_keyword,
+            _load_tracked_index_cache,
         )
         _tidx_map = _load_tracked_index_cache() or {}
         if symbol in _tidx_map and _tidx_map[symbol]:

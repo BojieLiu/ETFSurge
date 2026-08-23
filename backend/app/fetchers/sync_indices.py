@@ -13,10 +13,11 @@ import asyncio
 
 
 async def sync() -> None:
+    from sqlalchemy import select
+
     from app.database import async_session, init_db
     from app.models.search import Index
     from app.services.market_service import _GLOBAL_INDEX_DEFS
-    from sqlalchemy import select
 
     # (symbol, name, region) -> 推断 source
     def _source(symbol: str) -> str:

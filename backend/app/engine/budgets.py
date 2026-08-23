@@ -9,7 +9,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-
 # ── Strategy metadata ───────────────────────────────────────────────
 # 「单一可校验真相源」：budgets 配置是引擎消费的唯一真相源（非动态涌现）。
 # round22 重构（docs/archived/design-portfolio-engine-redesign.md）新增字段：

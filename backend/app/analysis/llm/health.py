@@ -1,11 +1,10 @@
 """LLM health check & global liquidity — split from analysis/llm.py (Batch 2)."""
 
 import asyncio
-import json
 import time
 
+from app.analysis.provider import ProviderConfig, get_configured_providers, has_any_api_key
 from app.core.logging import get_logger
-from app.analysis.provider import get_configured_providers, has_any_api_key, ProviderConfig
 
 logger = get_logger(__name__)
 
@@ -111,12 +110,13 @@ async def _fetch_global_liquidity() -> dict | None:
     首期仅 3 个指标（CPI/非农暂不接入，控制 prompt 长度）。
     """
     try:
+        import asyncio as _asyncio
+
         from ...fetchers.global_markets_fetcher import (
             fetch_fed_rate,
             fetch_us_10y,
             fetch_vix,
         )
-        import asyncio as _asyncio
         _us10, _vix, _fed = await _asyncio.wait_for(
             _asyncio.gather(
                 fetch_us_10y(), fetch_vix(), fetch_fed_rate(),

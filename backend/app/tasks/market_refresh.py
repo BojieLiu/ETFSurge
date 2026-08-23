@@ -3,11 +3,10 @@
 交易时段每 3 秒批量拉取一次关注列表（组合持仓 + 主流指数）的实时行情，
 写入 Redis + 内存缓存，并通过 WebSocket 推送给订阅的客户端。
 """
-import json
 
 from ..core.logging import get_logger
-from ..services.market_data_hub import market_data_hub
 from ..routers.ws import manager
+from ..services.market_data_hub import market_data_hub
 
 logger = get_logger(__name__)
 

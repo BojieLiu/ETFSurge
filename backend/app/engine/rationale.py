@@ -4,7 +4,6 @@ rationale.py — 基于因子分的入选理由生成（纯函数，P2 改进 #5
 from __future__ import annotations
 
 import hashlib
-from typing import Any
 
 # ── 层角色短语池（P2 改进 #5：模板多样化） ────────────────────────────
 # F1-8/§9.7 R3: 短语池按标的风格（_style_probe）选择，不再按 layer 固定套用。

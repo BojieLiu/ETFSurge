@@ -3,24 +3,22 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from contextlib import asynccontextmanager
+from collections.abc import Generator
+from contextlib import asynccontextmanager, contextmanager
+from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
-from .database import init_db
-from .services.cache_service import redis_cache
-from .tasks.market_refresh import refresh_market_cache
-from .tasks.news_refresh import refresh_news_cache
-from .tasks.sector_refresh import refresh_sector_cache
-from .monitor.token_usage import token_store
 from .core.logging import get_logger, setup_logging
-from .routers import market, portfolio, analysis, news, ws, admin, factors, system
+from .database import init_db
+from .monitor.token_usage import token_store
+from .routers import admin, analysis, factors, market, news, portfolio, system, ws
+from .services.cache_service import redis_cache
 from .services.source_health import health_loop
-from typing import TYPE_CHECKING, cast
-from contextlib import contextmanager
-from collections.abc import Generator
+from .tasks.market_refresh import refresh_market_cache
+from .tasks.sector_refresh import refresh_sector_cache
 
 if TYPE_CHECKING:
     from .profiling.warmup_profiler import WarmupProfiler
@@ -58,6 +56,8 @@ if _PROFILE_WARMUP:
     from .profiling.warmup_profiler import (
         WarmupProfiler,
         get_warmup_profiler,
+    )
+    from .profiling.warmup_profiler import (
         warmup_timer as _real_warmup_timer,
     )
     warmup_timer = _real_warmup_timer  # type: ignore[assignment]
@@ -152,6 +152,22 @@ def _kline_depth_from_rows(rows: dict) -> int:
     )
 
 
+def _ic_backfill_should_skip(existing_days: int, kline_depth: int) -> bool:
+    """R102 动态 skip 门禁 + round34 实施轮 FORCE_IC_BACKFILL 一次性旁路。
+
+    skip 判据 = 已回填 distinct 交易日 ≥ max(K 线深度-30, 200)。该信号感知不到
+    per-factor 覆盖缺口（如 R108 五列修复后 OHLCV 因子仍无历史）——此类一次性
+    全量重放用 ``ETF_SURGE_FORCE_IC_BACKFILL=1`` 旁路（upsert 幂等保证数据安全，
+    重放完成后关闭即可恢复正常 skip 门禁）。
+    """
+    if os.environ.get("ETF_SURGE_FORCE_IC_BACKFILL", "") == "1":
+        logger.info(
+            "[ic_backfill] ETF_SURGE_FORCE_IC_BACKFILL=1 — bypass skip gate (one-shot replay)"
+        )
+        return False
+    return existing_days >= max(kline_depth - 30, 200)
+
+
 def _build_backfill_kline(rows: dict, syms) -> dict[str, dict]:
     """R102/R108: 构造列式回填 K 线（时序升序），带齐 OHLCV 五列。
 
@@ -189,9 +205,10 @@ async def _kline_warmup_holdings_symbols() -> list[str]:
     data_available=false）。DB 不可用/空 → 返回 []（不影响 pool 预热）。
     """
     try:
-        from app.models.portfolio import PortfolioETF
         from sqlalchemy import select
+
         from app.database import async_session
+        from app.models.portfolio import PortfolioETF
 
         async with async_session() as session:
             rows = (await session.execute(
@@ -234,11 +251,11 @@ async def _warmup_sector_lists() -> None:
     失败静默（首呼回源兜底）；run_sync_long 走长任务线程池（不阻塞事件循环）。
     """
     try:
+        from .core.async_utils import run_sync_long
         from .fetchers.sector_fetcher import (
             fetch_concept_sectors,
             fetch_industry_sectors,
         )
-        from .core.async_utils import run_sync_long
         await asyncio.gather(
             run_sync_long(fetch_concept_sectors, 150, timeout=40),
             run_sync_long(fetch_industry_sectors, 80, timeout=40),
@@ -293,11 +310,6 @@ async def lifespan(app: FastAPI):
 
     # Pre-import heavy modules to avoid blocking the event loop on first use
     logger.info("[lifespan] Pre-loading heavy modules (strategy_design, analysis)...")
-    from .services.strategy_design import generate_enhanced_design  # noqa: F811 — lazy import, never called by name
-    from .analysis.llm import generate_design_report  # noqa: F811 — lazy import, never called by name
-    from .tasks.design_report import _build_plan_tables  # noqa: F811 — lazy import, never called by name
-    from .analysis.llm import generate_strategy_check_report  # noqa: F811 — lazy import, never called by name
-    from .tasks.strategy_check_worker import strategy_check_pipeline  # noqa: F811 — lazy import, never called by name
     logger.info("[lifespan] Heavy modules pre-loaded")
 
     # Initialize warmup state -- consumed by /api/v1/system/warmup endpoint
@@ -315,9 +327,10 @@ async def lifespan(app: FastAPI):
     logger.info("[health] Registered all data-source probes")
 
     # Wire SourceEventStore to SourceRegistry for event recording
-    from .monitor.source_events import source_event_store
-    from .core.source_registry import registry
     import asyncio
+
+    from .core.source_registry import registry
+    from .monitor.source_events import source_event_store
 
     def _make_event_callback():
         def _cb(source_name, route, operation, target, success, duration_ms, error_message):
@@ -410,28 +423,31 @@ async def lifespan(app: FastAPI):
         with warmup_timer("warmup_global_indices", "warmup", "全球指数缓存预热"):
             _mark = app.state.warmup["global_indices"]
             try:
-                from .services.market_service import (
-                    get_global_indices,
-                    _load_ok_cache,
-                    _global_indices_last_ok,
-                    _global_indices_cache,
-                    _global_indices_cache_ts,
-                    _GLOBAL_INDICES_OK_TTL,
-                )
                 # R5-2-3: 缓存命中即跳过（与 R4-26 失败缓存模式一致）——磁盘 last_ok
                 # 缓存 24h 内有效时直接复用，不触网（旧逻辑仅 1h 内跳过 → 冷拉 1.09s 热点）。
                 # R86 (round30): 落盘到 settings.data_dir（挂载卷），替代 dirname×3 的
                 # 源码目录（容器内 `__file__×3` = `/` → `/data/indices_cache.json` 非挂载卷）。
                 from app.config import settings as _st
-                _persist_path = os.path.join(str(getattr(_st, "data_dir", "")), "indices_cache.json")
-                if not os.path.isfile(_persist_path):
-                    _persist_path = os.path.join(
-                        os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-                        "data", "indices_cache.json",
-                    )
+
+                from .services.market_service import (
+                    _GLOBAL_INDICES_OK_TTL,
+                    _global_indices_last_ok,
+                    _load_ok_cache,
+                    get_global_indices,
+                )
+                # round36 ASYNC240 修复：os.path 元数据探测移入 to_thread（事件循环不阻塞）
+                def _probe_ok_cache_mtime() -> float | None:
+                    _pp = os.path.join(str(getattr(_st, "data_dir", "")), "indices_cache.json")
+                    if not os.path.isfile(_pp):
+                        _pp = os.path.join(
+                            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                            "data", "indices_cache.json",
+                        )
+                    return os.path.getmtime(_pp) if os.path.isfile(_pp) else None
+
+                _mtime = await asyncio.to_thread(_probe_ok_cache_mtime)
                 _cache_hit = False
-                if os.path.isfile(_persist_path):
-                    _mtime = os.path.getmtime(_persist_path)
+                if _mtime is not None:
                     _age = time.time() - _mtime
                     if _age < _GLOBAL_INDICES_OK_TTL:
                         _load_ok_cache()
@@ -465,6 +481,7 @@ async def lifespan(app: FastAPI):
             _mark = app.state.warmup["etf_cache"]
             try:
                 from app.fetchers.etf_scanner import fetch_all_etfs_base
+
                 from .core.async_utils import run_sync
                 result = await run_sync(fetch_all_etfs_base, timeout=120)
                 _mark["done"] = True
@@ -645,13 +662,13 @@ async def lifespan(app: FastAPI):
     #             await asyncio.wait_for(refresh_market_cache(), timeout=25)
     #         except (Exception, asyncio.CancelledError):
     #             logger.exception("定时刷新行情缓存失败")
-    # 
+    #
     #     async def _news_scheduler_wrapper():
     #         try:
     #             await asyncio.wait_for(refresh_news_cache(), timeout=30)
     #         except (Exception, asyncio.CancelledError):
     #             logger.exception("定时刷新资讯缓存失败")
-    # 
+    #
     #     from apscheduler.schedulers.asyncio import AsyncIOScheduler
     #     scheduler = AsyncIOScheduler()
     #     scheduler.add_job(_scheduler_wrapper, "interval", seconds=15, id="refresh_market_cache", max_instances=1, coalesce=True)
@@ -716,10 +733,12 @@ async def lifespan(app: FastAPI):
     # 崩溃恢复：扫描 report_quality="pending" 且创建 >5min 的记录，标记为 fallback
     try:
         async def _recover_stale_designs():
-            from sqlalchemy import select
             from datetime import datetime, timedelta
-            from .models.portfolio_design import PortfolioDesign
+
+            from sqlalchemy import select
+
             from .database import async_session
+            from .models.portfolio_design import PortfolioDesign
 
             cutoff = datetime.utcnow() - timedelta(minutes=5)
             async with async_session() as db:
@@ -747,9 +766,11 @@ async def lifespan(app: FastAPI):
     try:
         async def _cleanup_stuck_tasks():
             from datetime import datetime
+
             from sqlalchemy import select
-            from .models.task import TaskRecord
+
             from .database import async_session
+            from .models.task import TaskRecord
 
             async with async_session() as db:
                 stuck = (await db.execute(
@@ -772,9 +793,9 @@ async def lifespan(app: FastAPI):
 
     # Start IC persistence loop (120s, B1)
     async def _ic_persistence_loop():
-        from .factors.ic_tracker import ic_tracker
-        from .factors.factor_registry import registry
         from .database import async_session
+        from .factors.factor_registry import registry
+        from .factors.ic_tracker import ic_tracker
 
         await asyncio.sleep(30)  # delay first run
         while True:
@@ -838,10 +859,10 @@ async def lifespan(app: FastAPI):
     # MIN_TRADING_DAYS 门槛不变（诚实，不谎报 valid）。
     # 仅当 K 线缓存就绪且尚未回填时执行；失败仅 WARNING，不影响启动。
     async def _backfill_ic_history_task():
-        from .factors.ic_tracker import ic_tracker
-        from .factors.factor_registry import registry as _reg
-        from .services.market_data_hub import market_data_hub as _hub
         from .database import async_session
+        from .factors.factor_registry import registry as _reg
+        from .factors.ic_tracker import ic_tracker
+        from .services.market_data_hub import market_data_hub as _hub
 
         # 等 K 线缓存就绪（refresh_kline 在行情预热中填充，约 10-20s）
         # R58 (round28): 旧实现等 20s 后只检查一次，未就绪即「永久跳过」——
@@ -877,7 +898,7 @@ async def lifespan(app: FastAPI):
             kline_depth = _kline_depth_from_rows(rows)
             async with async_session() as db:
                 _existing = await ic_tracker.count_distinct_trade_dates(db)
-            if _existing >= max(kline_depth - 30, 200):
+            if _ic_backfill_should_skip(_existing, kline_depth):
                 logger.info(
                     "[ic_backfill] 已回填（%d 交易日 ≥ 可用 %d-30），跳过",
                     _existing, kline_depth,
@@ -963,8 +984,8 @@ async def lifespan(app: FastAPI):
     # R5-1-5: 启动时从 DB 恢复 _last_ic_batch（IC 非请求驱动——重启后
     # /factors/active 不依赖任何请求即返回非空）。失败仅 WARNING，不阻塞启动。
     try:
-        from .factors.factor_registry import registry as _ic_registry
         from .database import async_session as _ic_session
+        from .factors.factor_registry import registry as _ic_registry
 
         async with _ic_session() as _db:
             _restored = await _ic_registry.restore_ic_from_db(_db)

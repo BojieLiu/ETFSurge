@@ -6,8 +6,8 @@ import time
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.portfolio import PortfolioETF
 from app.core.async_utils import run_sync
+from app.models.portfolio import PortfolioETF
 from app.services.market_data_hub import market_data_hub
 
 logger = logging.getLogger(__name__)

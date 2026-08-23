@@ -1,7 +1,7 @@
 import os
-import requests
 from contextlib import contextmanager
 
+import requests
 
 # Patch requests.Session to bypass Windows system proxy
 _orig_session_init = requests.Session.__init__

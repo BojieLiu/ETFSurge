@@ -5,8 +5,8 @@ import socket
 from pathlib import Path
 from typing import List
 
-from pydantic_settings import BaseSettings
 from pydantic import Field, model_validator
+from pydantic_settings import BaseSettings
 
 logger = logging.getLogger(__name__)
 
@@ -78,27 +78,27 @@ class Settings(BaseSettings):
     # database_url 解析（容器 `DATABASE_URL=sqlite+aiosqlite:////app/data/portfolio.db` →
     # `/app/data`），保证「缓存写到挂载卷」而非 os.path.dirname(__file__)×3 的源码目录。
     data_dir: str = ""
-    
+
     # CORS：env 里用逗号分隔字符串，避免 pydantic_settings 误当 JSON 解析报错
     # 支持 CORS_ORIGINS (旧名) 和 CORS_ORIGINS_STR (新名)
     cors_origins_str: str = Field(
         default="http://localhost:5173,http://127.0.0.1:5173",
         alias="CORS_ORIGINS"
     )
-    
+
     @property
     def cors_origins(self) -> List[str]:
         return _parse_cors_origins(self.cors_origins_str)
-    
+
     deepseek_api_key: str = ""
     tushare_token: str = ""
     fred_api_key: str = ""
-    
+
     # ── Market Data API Keys (free tiers, no proxy needed) ──
     alphavantage_api_key: str = ""
     finnhub_api_key: str = ""
     twelvedata_api_key: str = ""
-    
+
     # ── LLM Provider 配置 ──────────────────────────────────────
     llm_provider: str = "deepseek"
     llm_model: str = "deepseek-v4-flash"

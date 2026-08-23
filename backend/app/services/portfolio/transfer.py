@@ -1,6 +1,5 @@
 """Portfolio export / import — split from portfolio_service (Batch 1)."""
 
-import asyncio
 import logging
 from typing import Any
 
@@ -23,7 +22,7 @@ async def export_portfolio(
     Export portfolio holdings to CSV or JSON format.
     """
     etfs = await list_etfs(db, portfolio_type)
-    
+
     if format == "json":
         return [
             {
@@ -42,20 +41,20 @@ async def export_portfolio(
             }
             for e in etfs
         ]
-    
+
     # CSV format
     import csv
     import io
     output = io.StringIO()
     writer = csv.writer(output)
-    
+
     # Header
     writer.writerow([
         "symbol", "name", "short_name", "asset_type", "portfolio_type",
         "target_weight", "tracked_index", "avg_cost", "shares_held",
         "cost_basis", "first_buy_date", "last_trade_date"
     ])
-    
+
     for e in etfs:
         writer.writerow([
             e.symbol,
@@ -71,7 +70,7 @@ async def export_portfolio(
             e.first_buy_date.isoformat() if e.first_buy_date else "",
             e.last_trade_date.isoformat() if e.last_trade_date else "",
         ])
-    
+
     return output.getvalue()
 
 
@@ -88,34 +87,34 @@ async def import_portfolio(
     import csv
     import io
     from datetime import date
-    
+
     reader = csv.DictReader(io.StringIO(csv_content))
     required_fields = {"symbol", "name", "asset_type", "portfolio_type"}
-    
+
     # Check headers
     headers = reader.fieldnames or []
     missing = required_fields - set(headers)
     if missing:
         raise ValueError(f"Missing required columns: {missing}")
-    
+
     imported = 0
     skipped = 0
     errors = []
     holdings = []
-    
+
     for row_num, row in enumerate(reader, start=2):  # 1-based, +1 for header
         try:
             # Validate required fields
             if not row.get("symbol") or not row.get("name"):
                 raise ValueError("Missing required field: symbol or name")
-            
+
             symbol = row["symbol"].strip()
             name = row["name"].strip()
             asset_type = row.get("asset_type", "ETF").strip()
             pt = row.get("portfolio_type", portfolio_type).strip()
             short_name = row.get("short_name") or name
             tracked_index = row.get("tracked_index") or None
-            
+
             # Parse numeric fields
             target_weight = float(row["target_weight"]) if row.get("target_weight") else 0.1
             avg_cost = float(row["avg_cost"]) if row.get("avg_cost") else None
@@ -126,7 +125,7 @@ async def import_portfolio(
                 avg_cost = None
             first_buy_date = None
             last_trade_date = None
-            
+
             if row.get("first_buy_date"):
                 try:
                     first_buy_date = date.fromisoformat(row["first_buy_date"])
@@ -137,17 +136,17 @@ async def import_portfolio(
                     last_trade_date = date.fromisoformat(row["last_trade_date"])
                 except ValueError:
                     pass
-            
+
             if mode == "replace" and imported == 0:
                 # Soft delete all existing of this type
                 existing = await list_etfs(db, pt)
                 for e in existing:
                     e.is_active = False
-            
+
             # Upsert
             existing_etfs = await list_etfs(db, pt)
             existing_dict = {e.symbol: e for e in existing_etfs}
-            
+
             if symbol in existing_dict:
                 e = existing_dict[symbol]
                 e.name = name
@@ -176,9 +175,9 @@ async def import_portfolio(
                     is_active=True,
                 )
                 db.add(e)
-            
+
             await db.flush()
-            
+
             holdings.append({
                 "id": e.id,
                 "symbol": e.symbol,
@@ -195,7 +194,7 @@ async def import_portfolio(
                 "is_active": e.is_active,
             })
             imported += 1
-            
+
         except Exception as exc:
             skipped += 1
             errors.append({
@@ -206,9 +205,9 @@ async def import_portfolio(
             if not skip_invalid:
                 await db.rollback()
                 raise
-    
+
     await db.commit()
-    
+
     return {
         "imported": imported,
         "skipped": skipped,

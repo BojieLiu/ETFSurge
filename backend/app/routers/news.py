@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Query
 from typing import Any
 
+from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from ..core.async_utils import run_sync

@@ -1,6 +1,7 @@
 """System routes — warmup status, startup diagnostics, etc."""
 
 import time
+
 from fastapi import APIRouter, Request
 
 router = APIRouter(prefix="/api/v1/system", tags=["system"])

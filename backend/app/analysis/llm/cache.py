@@ -3,7 +3,6 @@
 import hashlib
 import threading
 import time
-from typing import Any, AsyncGenerator
 
 _REPORT_CACHE_LOCK = threading.Lock()
 

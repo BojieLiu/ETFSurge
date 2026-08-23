@@ -6,14 +6,6 @@ import os
 import time
 from typing import Any
 
-from app.config import settings
-from app.factors.factor_registry import registry as factor_registry
-from app.services.hub._common import (
-    _load_latest_snapshot_sync,
-    _persist_snapshot_sync,
-    PoolDiff,
-)
-
 logger = logging.getLogger(__name__)
 
 class KlineMixin:
@@ -143,8 +135,8 @@ class KlineMixin:
         仅填充行式缓存 + 时间戳；列式缓存由 _sync_columnar_cache 懒重建（避免
         __init__ 阶段重复计算——refresh_kline/首个 get_kline 都会触发）。
         """
-        import time as _t
         import json as _json
+        import time as _t
         try:
             _path = self._kline_cache_path()
             if not os.path.isfile(_path):
@@ -241,7 +233,6 @@ class KlineMixin:
         Returns:
             行式 K 线 [{date, open, high, low, close, volume}, ...]，或 None。
         """
-        import time
         rows = self._kline_cache_rows.get(symbol)
         if rows and (time.time() - self._kline_cache_ts) < max_age:
             return rows
@@ -255,7 +246,6 @@ class KlineMixin:
 
     def get_kline_age_seconds(self, symbol: str) -> float | None:
         """F0-4: 缓存数据龄（秒），无缓存返回 None。"""
-        import time
         if symbol in self._kline_cache_rows:
             return max(0.0, time.time() - self._kline_cache_ts)
         return None
@@ -282,8 +272,8 @@ class KlineMixin:
         """
         if not symbols:
             return
-        from ...fetchers import china_market
         from ...core import async_utils
+        from ...fetchers import china_market
 
         sem = asyncio.Semaphore(5)  # R3: 并发控制
 
@@ -375,7 +365,6 @@ class KlineMixin:
         - shares_change_20d → shares_change 直接生效 + institutional_holdings_change ×0.5 折扣代理
         - 任一失败静默（不阻塞主流程），份额数据 24h 缓存
         """
-        import time
         from ...fetchers.china_market import fetch_etf_shares_outstanding
 
         out = {s: dict(base_extra.get(s) or {}) for s in symbols}

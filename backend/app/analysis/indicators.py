@@ -20,7 +20,7 @@ import pandas_ta as ta
 
 def compute_ma(close, window: int):
     """Simple moving average.
-    
+
     Returns empty Series (same index, NaN values) when data is insufficient,
     matching the old close.rolling(window).mean() behavior.
     """
@@ -32,7 +32,7 @@ def compute_ma(close, window: int):
 
 def compute_ema(close, window: int):
     """Exponential moving average (uses pandas_ta, adjust=True).
-    
+
     Returns empty Series (same index, NaN values) when data is insufficient.
     """
     result = ta.ema(close, length=window)

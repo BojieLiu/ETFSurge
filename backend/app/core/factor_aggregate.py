@@ -44,7 +44,7 @@ def _ic_decay_mean(series: list[float], lam: float) -> float:
     total = sum(weights)
     if total <= 0:
         return float(sum(series)) / n
-    return sum(w * v for w, v in zip(weights, series)) / total
+    return sum(w * v for w, v in zip(weights, series, strict=False)) / total
 
 
 def aggregate_factor_scores(
@@ -159,7 +159,7 @@ def aggregate_factor_scores(
                 weights.append(1.0)
         total_w = sum(weights)
         if total_w > 1e-12:
-            result[top_key] = sum(w * v for w, v in zip(weights, directed)) / total_w
+            result[top_key] = sum(w * v for w, v in zip(weights, directed, strict=False)) / total_w
         else:  # Σw == 0（全部 IC≈0）→ 回退等权
             result[top_key] = sum(directed) / len(directed)
 

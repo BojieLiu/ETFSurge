@@ -8,10 +8,10 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.async_utils import run_sync
-from app.services.market_data_hub import market_data_hub
 from app.models.portfolio import PortfolioETF
+from app.services.market_data_hub import market_data_hub
+from app.services.portfolio._facade_refs import build_price_map, list_etfs
 from app.services.portfolio.pricing import _FUNDAMENTALS_CACHE, _PRICE_MAP_TTL
-from app.services.portfolio._facade_refs import list_etfs, build_price_map
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +103,7 @@ async def calculate_allocation(
                                 return {}
 
                     results = await asyncio.gather(*[_one(sym) for _, sym in symbols])
-                    sym_task_map = {sym: res for (_, sym), res in zip(symbols, results)}
+                    sym_task_map = {sym: res for (_, sym), res in zip(symbols, results, strict=False)}
                 try:
                     await asyncio.wait_for(_fetch_all_fundamentals(), timeout=5.0)
                 except Exception:
@@ -179,9 +179,9 @@ async def calculate_weight_drift(
     etfs = await list_etfs(db, portfolio_type)
     if not etfs:
         return {"items": [], "alerts": []}
-    
+
     price_map = await build_price_map(etfs)
-    
+
     # Calculate total portfolio value
     total_value = 0.0
     for e in etfs:
@@ -191,10 +191,10 @@ async def calculate_weight_drift(
         else:
             # Use target_amount as fallback
             total_value += total_value * e.target_weight if total_value > 0 else 0
-    
+
     items = []
     alerts = []
-    
+
     for e in etfs:
         price, change_pct = price_map.get(e.symbol, (0.0, 0.0))
         shares = e.shares_held or 0
@@ -203,7 +203,7 @@ async def calculate_weight_drift(
         target_weight = e.target_weight
         deviation = actual_weight - target_weight
         deviation_pct = (deviation / target_weight * 100) if target_weight > 0 else 0
-        
+
         item = {
             "symbol": e.symbol,
             "name": e.name,
@@ -215,7 +215,7 @@ async def calculate_weight_drift(
             "needs_rebalance": abs(deviation_pct) > 20,  # Alert threshold: 20%
         }
         items.append(item)
-        
+
         if abs(deviation_pct) > 20:
             alerts.append({
                 "symbol": e.symbol,
@@ -223,5 +223,5 @@ async def calculate_weight_drift(
                 "message": f"权重偏离 {deviation_pct:.1f}% (目标 {target_weight:.1%}, 实际 {actual_weight:.1%})",
                 "severity": "warning" if abs(deviation_pct) < 50 else "critical",
             })
-    
+
     return {"items": items, "alerts": alerts}

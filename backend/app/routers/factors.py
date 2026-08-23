@@ -12,9 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.logging import get_logger
 from ..database import get_db
-from ..factors.factor_registry import registry, ET_SPECIFIC_GAP_CODES
-from ..factors.ic_tracker import ic_tracker as _ic_tracker
+from ..factors.factor_registry import ET_SPECIFIC_GAP_CODES, registry
 from ..factors.ic_tracker import compute_series_stats
+from ..factors.ic_tracker import ic_tracker as _ic_tracker
 
 # F19 R70: code → 缺失字段名映射（泛化：ln_mcap 等非 etf_specific 因子也有缺口标注）
 GAP_FIELD_MAP = {
@@ -164,8 +164,9 @@ async def _db_ic_series_stats(db) -> dict[str, dict[str, float]]:
     序列（F25③「参与有效天数统计但 IC 计 0」，修复生存者偏差）。DB 不可用返回 {}。
     """
     try:
-        from ..models.factor_ic import FactorICRecord
         from sqlalchemy import select
+
+        from ..models.factor_ic import FactorICRecord
         rows = (await db.execute(
             select(FactorICRecord.factor_code, FactorICRecord.ic_value)
             .order_by(FactorICRecord.factor_code, FactorICRecord.trade_date)
@@ -223,7 +224,6 @@ def _build_health_summary(sample_counts: dict[str, int] | None = None,
     total_valid = total_warn = total_no_data = total_static = 0
     total_observable = 0
     for code in registry._computers:
-        definition = registry.get_factor(code)
         ic_val = ic_batch.get(code)
         if code in STATIC_FACTOR_CODES or code in MARKET_LEVEL_FACTOR_CODES:
             # P1-10: 市场级因子与政策静态因子一样不参与截面 IC 计数/平均

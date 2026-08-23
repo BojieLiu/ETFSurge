@@ -15,7 +15,6 @@ from datetime import datetime
 from typing import Any, Optional
 
 from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..core.logging import get_logger
@@ -95,8 +94,9 @@ class ConfigManager:
 
         try:
             async with self._db_session_factory() as session:
-                from ..models.app_config import AppConfig
                 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+                from ..models.app_config import AppConfig
 
                 upsert = sqlite_insert(AppConfig).values(
                     key=key, value=value, updated_at=datetime.utcnow()
@@ -118,9 +118,8 @@ class ConfigManager:
 
         try:
             async with self._db_session_factory() as session:
-                from ..models.app_config import AppConfig
                 await session.execute(
-                    text(f"DELETE FROM app_config WHERE key = :key"),
+                    text("DELETE FROM app_config WHERE key = :key"),
                     {"key": key},
                 )
                 await session.commit()

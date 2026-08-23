@@ -4,21 +4,19 @@
 提供统一的异步行情接口（实时 / 历史 / 搜索 / 全球指数）。
 """
 
+import asyncio
 import time
 from typing import Any
 
-import asyncio
-
 from sqlalchemy import select
 
-from ..database import async_session
 from ..core.async_utils import run_sync, safe_call_async
-from ..core.market_calendar import is_trading_time
-from ..core.ttl import CACHE_TTL
-from ..core.source_registry import registry
-from ..models.search import Index
-from .cache_service import cache_get, cache_mget, cache_set
 from ..core.logging import get_logger
+from ..core.market_calendar import is_trading_time
+from ..core.source_registry import registry
+from ..core.ttl import CACHE_TTL
+from ..database import async_session
+from .cache_service import cache_get, cache_mget, cache_set
 
 logger = get_logger(__name__)
 
@@ -200,7 +198,8 @@ def _get_cache_db_path() -> str:
 def _load_ok_cache() -> bool:
     """从磁盘加载缓存到内存。启动时调用一次。"""
     global _global_indices_last_ok_ts
-    import json, os
+    import json
+    import os
     try:
         path = _get_cache_db_path()
         if not os.path.exists(path):
@@ -541,8 +540,9 @@ async def _global_index_defs() -> list[tuple[str, str, str]]:
 
 
 async def get_sectors_local(sector_type: str) -> list[dict[str, Any]]:
-    from ..models.search import Sector
     from sqlalchemy import select
+
+    from ..models.search import Sector
 
     try:
         async with async_session() as session:
@@ -558,8 +558,9 @@ async def get_sectors_local(sector_type: str) -> list[dict[str, Any]]:
 
 
 async def search_etf(keyword: str) -> list[dict[str, Any]]:
+    from sqlalchemy import or_, select
+
     from ..models.search import Instrument
-    from sqlalchemy import select, or_
 
     try:
         async with async_session() as session:
@@ -753,8 +754,8 @@ def _fetch_us_suggest_sync(keyword: str) -> list[dict[str, Any]]:
     新浪 suggest type=41 返回含 ETF 的美股联想（TQQQ/SOXL/QQQ 全中），
     是本场景唯一可达的兜底源。毫秒级、失败静默降级（返回 []）。
     """
-    import urllib.request
     import urllib.parse
+    import urllib.request
     try:
         url = "http://suggest3.sinajs.cn/suggest/type=41&key=" + urllib.parse.quote(keyword)
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
@@ -868,7 +869,7 @@ async def search_hk_us(keyword: str = "", enrich: bool = True,
             _call(fetch_us_spot_list, timeout=4),
             return_exceptions=True,
         )
-        for mk, rows in zip(("HK", "US"), spot_rows):
+        for mk, rows in zip(("HK", "US"), spot_rows, strict=False):
             if not rows or not isinstance(rows, list):
                 continue
             for r in rows:
@@ -887,8 +888,9 @@ async def search_hk_us(keyword: str = "", enrich: bool = True,
         # 导致 00700 等港股代码/名称在 spot 源不可用时搜索 0 条。
         if include_stocks and not (isinstance(spot_rows[0], list) and spot_rows[0]):
             try:
+                from sqlalchemy import or_, select
+
                 from ..models.search import Instrument
-                from sqlalchemy import select, or_
                 async with async_session() as session:
                     stmt = select(Instrument).where(
                         Instrument.is_active == True,  # noqa: E712
@@ -920,8 +922,9 @@ async def search_hk_us(keyword: str = "", enrich: bool = True,
         # apple 0 条（代码 AAPL 可搜但名称不可）。
         if include_stocks and not (isinstance(spot_rows[1], list) and spot_rows[1]):
             try:
+                from sqlalchemy import or_, select
+
                 from ..models.search import Instrument
-                from sqlalchemy import select, or_
                 # async_session 已模块级导入（market_service 头部）
                 async with async_session() as session:
                     stmt = select(Instrument).where(
@@ -995,7 +998,7 @@ async def search_hk_us(keyword: str = "", enrich: bool = True,
         # gather 保持顺序，与 etf_results 一一对应；_enrich 返回新 dict，不能用 id() 映射
         enriched_map = {
             (orig["symbol"], orig["market"]): new
-            for orig, new in zip(etf_results, enriched) if isinstance(new, dict)
+            for orig, new in zip(etf_results, enriched, strict=False) if isinstance(new, dict)
         }
         results = [enriched_map.get((it["symbol"], it["market"]), it)
                    if it["type"] == "etf" else it for it in results]
@@ -1008,8 +1011,9 @@ _HKUS_ETF_SYMBOLS = {e["symbol"] for e in HKUS_ETF_MAP}
 
 
 async def get_indices_meta() -> list[dict[str, Any]]:
-    from ..models.search import IndexMeta
     from sqlalchemy import select
+
+    from ..models.search import IndexMeta
 
     try:
         async with async_session() as session:
@@ -1035,8 +1039,9 @@ async def get_indices_meta() -> list[dict[str, Any]]:
 
 
 async def search_indices(keyword: str) -> list[dict[str, Any]]:
+    from sqlalchemy import or_, select
+
     from ..models.search import IndexMeta
-    from sqlalchemy import select, or_
 
     try:
         async with async_session() as session:
@@ -1100,7 +1105,7 @@ async def get_realtime_batch(
         cached = await cache_mget(keys)
         hits: dict[str, dict] = {}
         misses: list[str] = []
-        for sym, val in zip(symbols, cached):
+        for sym, val in zip(symbols, cached, strict=False):
             if val is not None:
                 hits[sym] = val
             else:
@@ -1122,7 +1127,7 @@ async def get_realtime_batch(
         *[get_asset_realtime(sym, asset_type) for sym in symbols],
         return_exceptions=True,
     )
-    for _sym, item in zip(symbols, _batch):
+    for _sym, item in zip(symbols, _batch, strict=False):
         if isinstance(item, dict) and item:
             results.append(item)
     return results
@@ -1152,7 +1157,6 @@ async def get_portfolio_realtime() -> list[dict[str, Any]]:
     all_etfs = on_exchange + off_exchange
     name_map = {etf.symbol: etf.name for etf in all_etfs}
     short_name_map = {etf.symbol: (etf.short_name or etf.name) for etf in all_etfs}
-    tracked_index_map = {etf.symbol: etf.tracked_index for etf in all_etfs}
 
     symbols = list({str(etf.symbol) for etf in all_etfs})
     if not symbols:
@@ -1310,8 +1314,9 @@ async def _lookup_instrument_type(symbol: str) -> str | None:
     """round10 P2-O②: 查 instruments 表 asset_type（'etf'/'stock'）——港股 ETF 独立段
     sync 后 asset_type='etf'；查不到返回 None（调用方按名称兜底）。"""
     try:
-        from ..models.search import Instrument
         from sqlalchemy import select
+
+        from ..models.search import Instrument
         async with async_session() as session:
             stmt = select(Instrument).where(Instrument.symbol == str(symbol)).limit(1)
             row = (await session.execute(stmt)).scalars().first()
@@ -1639,8 +1644,9 @@ async def _lookup_index_market(symbol: str) -> str:
 async def _load_index_meta_rows() -> list[tuple[str, str]]:
     """从 indices_meta 表读 (symbol, market) 列表。失败返回 []。"""
     try:
-        from ..models.search import IndexMeta
         from sqlalchemy import select
+
+        from ..models.search import IndexMeta
         async with async_session() as session:
             rows = (await session.execute(
                 select(IndexMeta.symbol, IndexMeta.market)
@@ -1697,7 +1703,7 @@ async def get_history(
     except Exception:
         pass
 
-    from ..fetchers.china_market import fetch_history, get_k_data, fetch_hk_stock_realtime
+    from ..fetchers.china_market import fetch_history, fetch_hk_stock_realtime, get_k_data
 
     # P0-19② (round16 3.20 R1): HK/US 链 4 源串行（akshare+finnhub+alphavantage+腾讯）
     # 最坏 ~20s——旧默认 8s 截断在腾讯 fallback 前 → chart 空。HK/US 放宽到 20s。
@@ -1800,8 +1806,8 @@ async def resolve_symbol_to_code(symbol: str, asset_type: str = "A") -> str | No
 
     返回解析出的真实代码，失败返回 None。
     """
+
     from ..models.search import Instrument
-    from sqlalchemy import or_
 
     kw = (symbol or "").strip()
     if not kw:
@@ -1881,8 +1887,9 @@ async def resolve_symbol_to_code(symbol: str, asset_type: str = "A") -> str | No
 
 
 async def add_watchlist(symbol: str, asset_type: str, notes: str | None = None) -> dict[str, Any]:
-    from ..models.search import Watchlist
     from sqlalchemy import select
+
+    from ..models.search import Watchlist
 
     # round19 P7-③ (2026-08-12): 入库统一归一化——手动输入带 sh/sz/bj 前缀（如
     # sz301308）原样入库会导致 fetch_history 0 行、技术分析空数据。搜索/热点等
@@ -1931,8 +1938,9 @@ async def add_watchlist(symbol: str, asset_type: str, notes: str | None = None) 
 
 
 async def update_watchlist(item_id: int, notes: str | None = None, asset_type: str | None = None) -> dict[str, Any] | None:
-    from ..models.search import Watchlist
     from sqlalchemy import select
+
+    from ..models.search import Watchlist
 
     async with async_session() as session:
         result = await session.execute(select(Watchlist).where(Watchlist.id == item_id))
@@ -1962,8 +1970,9 @@ async def update_watchlist(item_id: int, notes: str | None = None, asset_type: s
 
 
 async def remove_watchlist(item_id: int) -> bool:
-    from ..models.search import Watchlist
     from sqlalchemy import select
+
+    from ..models.search import Watchlist
 
     async with async_session() as session:
         result = await session.execute(select(Watchlist).where(Watchlist.id == item_id))
@@ -1977,8 +1986,9 @@ async def remove_watchlist(item_id: int) -> bool:
 
 
 async def batch_remove_watchlist(ids: list[int]) -> int:
-    from ..models.search import Watchlist
     from sqlalchemy import select
+
+    from ..models.search import Watchlist
 
     async with async_session() as session:
         result = await session.execute(select(Watchlist).where(Watchlist.id.in_(ids)))

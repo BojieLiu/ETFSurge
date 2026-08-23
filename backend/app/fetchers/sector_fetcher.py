@@ -2,14 +2,13 @@
 
 每个对外函数都有两条数据链路,一条挂起另一条自动接管,绝不阻塞接口。
 """
-from typing import Any
-
 import logging
+from typing import Any
 
 import levistock as lv
 
-from ..services.cache_service import cached
 from ..core.source_registry import registry
+from ..services.cache_service import cached
 
 _logger = logging.getLogger(__name__)
 
@@ -158,7 +157,6 @@ def _ak_sector_stocks(sector_code: str):
     """
     try:
         import akshare as ak
-        import pandas as pd
 
         # F1-6: 板块代码 → 名称映射（行业 + 概念）
         name_by_code: dict[str, str] = {}
@@ -443,6 +441,7 @@ def fetch_em_industry_sectors(limit: int | None = None) -> list[dict[str, Any]] 
     def _p():
         import json as _json
         import urllib.request
+
         from ..core.market_context import EM_PUSH_HOST as _EM_HOST
         rows: list[dict[str, Any]] = []
         pn = 1
@@ -494,6 +493,7 @@ def fetch_em_concept_sectors(limit: int | None = None) -> list[dict[str, Any]] |
     def _p():
         import json as _json
         import urllib.request
+
         from ..core.market_context import EM_PUSH_HOST as _EM_HOST
         rows: list[dict[str, Any]] = []
         pn = 1

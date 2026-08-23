@@ -1,25 +1,27 @@
 import asyncio
 
 from fastapi import APIRouter, Query
+
 from ..core.logging import get_logger
 from ..services.cache_service import sync_memory_cache  # P0-4: watchlist 端级 3s 缓存
 
 logger = get_logger(__name__)
 from typing import Any
 
-from ..database import async_session
-from ..services.market_service import (
-    add_watchlist, update_watchlist, remove_watchlist, batch_remove_watchlist, search_hk_us,
-    _sort_search_results,
-    infer_market_from_symbol,  # R62 (round28): indicators/signal asset_type 按 symbol 推断
-)
+from fastapi import HTTPException
+from sqlalchemy import func, select  # P1-7: func.upper 用于补名 market 大小写不敏感匹配
+
 from ..analysis.indicators import compute_all_indicators, compute_chart_data
 from ..analysis.signal import generate_signal
-from ..services.market_data_hub import market_data_hub
+from ..database import async_session
+from ..models.schemas import WatchlistCreate, WatchlistUpdate
 from ..models.search import Watchlist
-from ..models.schemas import WatchlistCreate, WatchlistUpdate, WatchlistResponse
-from sqlalchemy import func, select  # P1-7: func.upper 用于补名 market 大小写不敏感匹配
-from fastapi import HTTPException
+from ..services.market_data_hub import market_data_hub
+from ..services.market_service import (
+    _sort_search_results,
+    infer_market_from_symbol,  # R62 (round28): indicators/signal asset_type 按 symbol 推断
+    search_hk_us,
+)
 
 router = APIRouter(prefix="/api/v1/market", tags=["market"])
 
@@ -83,8 +85,9 @@ async def search(
       index → indices_meta 表（name/pinyin/first_letter ilike）；all（默认）→
       现有 symbol 段 + 尾部追加 sector/index 段（向后兼容，旧调用方不受影响）。
     """
+    from sqlalchemy import or_, select
+
     from ..models.search import Instrument
-    from sqlalchemy import select, or_
 
     mkt = str(market or "").upper() or None
     kind = str(kind or "all").lower()
@@ -207,8 +210,9 @@ async def _search_sectors(keyword: str, market: str | None = None) -> list[dict[
     """
     if market and market.upper() in ("US", "HK"):
         return []  # 美股/港股暂无板块数据源（round6 F16）
-    from ..models.search import Sector
     from sqlalchemy import select
+
+    from ..models.search import Sector
 
     kw = (keyword or "").strip()
     if not kw:
@@ -235,8 +239,9 @@ async def _search_indices(keyword: str, market: str | None = None) -> list[dict[
     低波动变体缺失）时加 **akshare 运行时兜底**（仿 symbol 模式 search_etf 兜底）——
     本地表 0 命中时回退实时指数列表（指数代码/名称搜不到不再恒空）。
     """
+    from sqlalchemy import or_, select
+
     from ..models.search import IndexMeta
-    from sqlalchemy import select, or_
 
     kw = (keyword or "").strip()
     if not kw:
@@ -294,7 +299,7 @@ async def _search_indices_akshare_fallback(
     时经此兜底可搜到。失败返回 []（诚实降级，不编造）。
     """
     import asyncio as _aio
-    from ..core.async_utils import run_sync
+
 
     kw = (keyword or "").strip().lower()
     mkt = str(market or "").upper()
@@ -424,8 +429,9 @@ async def _search_a_stocks(keyword: str) -> list[dict[str, Any]]:
 
     仅供默认分支 include_stocks=true 使用；market=A 分支保持既有行为不动。
     """
+    from sqlalchemy import or_, select
+
     from ..models.search import Instrument
-    from sqlalchemy import select, or_
 
     try:
         async with async_session() as session:
@@ -796,6 +802,7 @@ async def stock_hot_rank(limit: int = Query(50), market: str = "A") -> list[dict
 # ── Watchlist / 自选列表 ──────────────────────────────────────────────
 
 import re
+
 from ..services.market_service import resolve_symbol_to_code
 
 CODE_PATTERN = re.compile(r"^[0-9A-Za-z.\-]+$")
@@ -920,7 +927,7 @@ async def _watchlist_enrich_items(items: list) -> list[dict]:
         _batch_results = await asyncio.gather(
             *(t[1] for t in _batch_tasks), return_exceptions=True
         )
-        for (mkt, _t), res in zip(_batch_tasks, _batch_results):
+        for (_mkt, _t), res in zip(_batch_tasks, _batch_results, strict=False):
             if isinstance(res, dict) and res:
                 _batch_map.update(res)
 
@@ -954,7 +961,7 @@ async def _watchlist_enrich_items(items: list) -> list[dict]:
     )
 
     enriched = []
-    for item, realtime in zip(items, _realtimes):
+    for item, realtime in zip(items, _realtimes, strict=False):
         if isinstance(realtime, BaseException):
             realtime = None
 
@@ -1043,8 +1050,8 @@ async def _watchlist_enrich_items(items: list) -> list[dict]:
             # （5s TTL quote 缓存）。命中则回填 realtime 并标注 data_source=stale，
             # 列表不再整体变空三列；缓存 miss 才保持 DB-only。
             try:
-                from ..services.market_service import quote_key as _quote_key
                 from ..services.cache_service import cache_get as _cache_get
+                from ..services.market_service import quote_key as _quote_key
                 _q = await _cache_get(_quote_key(resolved_symbol, item.asset_type or "A"))
                 if _q and _q.get("price") is not None:
                     item_dict["realtime"] = _normalize_watchlist_realtime({
@@ -1090,10 +1097,9 @@ async def _watchlist_enrich_items(items: list) -> list[dict]:
 # 资产类型无关，复用 market_service._last_close_fallback），前端显示「估」徽标
 # 而非「行情加载中」永不翻回。失败/无历史 → 诚实降级标记。
 async def _watchlist_close_fallback(items: list) -> list[dict]:
-    from ..services.market_service import _last_close_fallback
-    from ..services.market_service import quote_key as _qk
     from ..services.cache_service import cache_set as _cs
-    from ..services.market_service import _LAST_GOOD_TTL
+    from ..services.market_service import _LAST_GOOD_TTL, _last_close_fallback
+    from ..services.market_service import quote_key as _qk
 
     # R78 (round29): 收盘兜底并发收敛——旧实现 asyncio.gather 全量 22 路并行洪泛
     # Sina（round29 §14.1 R78 实证），Sina 并发限流 200 → 部分标的兜底也失败。
@@ -1157,8 +1163,8 @@ async def _watchlist_close_fallback(items: list) -> list[dict]:
                 # 注意：本分支的 quote_key 局部导入须用独立名（_qk2）——
                 # 外层 _one 的 _qk 是函数局部，同函数内再赋值会遮蔽外层绑定
                 # → if 分支引用 _qk 时 UnboundLocalError。
-                from ..services.market_service import quote_key as _qk2
                 from ..services.cache_service import cache_get as _cg
+                from ..services.market_service import quote_key as _qk2
                 _lg = await _cg(_qk2(item.symbol, _at))
                 if _lg and _lg.get("price") is not None:
                     row["realtime"] = _normalize_watchlist_realtime({
@@ -1269,7 +1275,7 @@ async def watchlist_add(data: WatchlistCreate) -> dict[str, Any]:
     _s = str(data.symbol).lower()
     if _at == "A" and _s.startswith(("sh", "sz", "bj")) and len(_s) > 2:
         data.symbol = _s[2:]
-    
+
     async with async_session() as session:
         # Check if already exists
         stmt = select(Watchlist).where(Watchlist.symbol == data.symbol)
@@ -1302,8 +1308,9 @@ async def watchlist_add(data: WatchlistCreate) -> dict[str, Any]:
         _instrument_name = ""
         if not realtime:
             try:
-                from ..models.search import Instrument
                 from sqlalchemy import select as _sel
+
+                from ..models.search import Instrument
                 # P1-7 (round9 §6.2): instruments 补名查询放宽 market 匹配——旧实现严格等值
                 # （Instrument.market == data.asset_type），asset_type='A' 与 instruments 表
                 # market 大小写/映射差异（etf→A 等）导致补名失效 → 新增条目 name=代码。

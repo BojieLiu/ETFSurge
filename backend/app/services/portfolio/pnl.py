@@ -1,6 +1,5 @@
 """Daily / cumulative P&L — split from portfolio_service (Batch 1)."""
 
-import asyncio
 import logging
 from typing import Any
 
@@ -8,9 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.portfolio import PortfolioETF
 from app.services.portfolio._facade_refs import (
-    list_etfs,
     build_price_map,
     calculate_allocation,
+    list_etfs,
 )
 
 logger = logging.getLogger(__name__)
@@ -28,15 +27,12 @@ async def calculate_daily_pnl(
     if etfs is None:
         etfs = await list_etfs(db, portfolio_type)
     allocation = await calculate_allocation(db, total_capital, portfolio_type, etfs, skip_fundamentals=True)
-    etf_map = {e.symbol: e for e in etfs}
-    etf_map = {e.symbol: e for e in etfs}
     pnl_items = []
     total_pnl = 0.0
     total_amount = 0.0
     weighted_change_sum = 0.0
 
     for a in allocation["allocations"]:
-        e = etf_map.get(a["symbol"])
         price = a["current_price"]
         change_pct = a["change_pct"]
         target_amount = a["target_amount"]
@@ -88,9 +84,9 @@ async def calculate_cumulative_pnl(
     etfs = await list_etfs(db, portfolio_type)
     if not etfs:
         return {"summary": {}, "holdings": [], "daily_series": []}
-    
+
     price_map = await build_price_map(etfs)
-    
+
     holdings_pnl = []
     total_cost_basis = 0.0
     total_market_value = 0.0
@@ -98,10 +94,10 @@ async def calculate_cumulative_pnl(
     # R65: 估算成本累计（估算占比 = estimated_cost_basis / total_cost_basis）
     estimated_cost_basis = 0.0
     est_cost_by_type = {"on_exchange": 0.0, "off_exchange": 0.0}
-    
+
     for e in etfs:
         price, _ = price_map.get(e.symbol, (0.0, 0.0))
-        
+
         # Only calculate if we have cost basis data
         if e.avg_cost is not None and e.shares_held is not None and e.shares_held > 0:
             cost_basis = e.cost_basis or (e.avg_cost * e.shares_held)
@@ -109,10 +105,10 @@ async def calculate_cumulative_pnl(
             cumulative_pnl = market_value - cost_basis
             cumulative_pnl_pct = (cumulative_pnl / cost_basis * 100) if cost_basis > 0 else 0.0
             has_real_data = True
-            
+
             total_cost_basis += cost_basis
             total_market_value += market_value
-            
+
             holdings_pnl.append({
                 "symbol": e.symbol,
                 "name": e.name,
@@ -233,10 +229,10 @@ async def calculate_cumulative_pnl(
             # R67⑤: 有 avg_cost 但无法估算（capital/price/weight 任一为 0）→
             # 跳过估算但仍计入 has_real_data（前端据此显示盈亏区而非"需输入成本"）
             has_real_data = True
-    
+
     total_cumulative_pnl = total_market_value - total_cost_basis
     total_cumulative_pnl_pct = (total_cumulative_pnl / total_cost_basis * 100) if total_cost_basis > 0 else 0.0
-    
+
         # Build by_type summary: aggregate PnL by portfolio_type
     by_type = {"on_exchange": {"cumulative_pnl": 0.0, "cumulative_pnl_pct": 0.0,
                                 "estimated_cost_basis": 0.0, "estimated_ratio": 0.0},
@@ -263,7 +259,7 @@ async def calculate_cumulative_pnl(
     by_type["off_exchange"]["estimated_ratio"] = round(est_cost_by_type["off_exchange"] / off_cost, 4) if off_cost > 0 else 0.0
 
     daily_series = []
-    
+
     return {
         "summary": {
             "total_cost_basis": round(total_cost_basis, 2),

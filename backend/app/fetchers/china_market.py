@@ -13,19 +13,18 @@
   历史K线:   mootdx/Sina (A) / akshare (HK/US)
 """
 
-from typing import Any
 import time  # U7/N08: fetch_fund_nav 24h 缓存时间戳
 from pathlib import Path
-from ..core.logging import get_logger
-from ..utils.proxy import no_proxy
-from ..utils.decode import decode_df as _decode_df
-from ..core.ttl import CACHE_TTL
-from ..services.cache_service import sync_memory_cache
-from ..core.source_registry import registry
+from typing import Any
+
 from ..core.async_utils import run_in_thread
-from ..fetchers import global_markets_fetcher
-from ..fetchers import global_markets_fetcher
-from ..fetchers import fund_fetcher
+from ..core.logging import get_logger
+from ..core.source_registry import registry
+from ..core.ttl import CACHE_TTL
+from ..fetchers import fund_fetcher, global_markets_fetcher
+from ..services.cache_service import sync_memory_cache
+from ..utils.decode import decode_df as _decode_df
+from ..utils.proxy import no_proxy
 
 logger = get_logger(__name__)
 
@@ -68,6 +67,15 @@ def _session():
 # ── mootdx helper ────────────────────────────────────────────────
 
 import concurrent.futures as _cf
+
+# round36 F821 修复：Quotes / requests 仅出现在字符串注解中，运行时由
+# _session() / _get_nav_session() / _get_mootdx_client() 惰性 import 提供；
+# TYPE_CHECKING 块只供类型检查器消费，运行时零开销。
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover
+    import requests
+    from mootdx.quotes import Quotes
 
 # mootdx 连接超时（Quotes.factory 的 TCP 连接超时）
 _MOOTDX_TIMEOUT = 6
@@ -232,7 +240,6 @@ def _baostock_history(symbol: str, period: str = "daily", bs_code: str | None = 
     bs_code: 显式通达信代码（sh.000001 等），指数/特殊标的用（自动规则判不了）。
     """
     try:
-        import pandas as pd
         if bs_code is None:
             code = symbol[2:] if symbol.startswith(("sh", "sz", "bj")) else symbol
             pref = "sh" if code.startswith(("5", "6")) else "sz"
@@ -240,7 +247,7 @@ def _baostock_history(symbol: str, period: str = "daily", bs_code: str | None = 
         freq = {"daily": "d", "weekly": "w", "monthly": "m"}.get(period, "d")
         def _p():
             import baostock as bs
-            lg = bs.login()
+            bs.login()  # 副作用调用（会话建立）；返回值历史未消费（round36 F841）
             try:
                 rs = bs.query_history_k_data_plus(
                     bs_code,
@@ -578,8 +585,9 @@ def _resample_4h(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def _akshare_intraday_history(symbol: str, period_min: int = 60) -> list[dict[str, Any]]:
     try:
         def _p():
-            import akshare as ak
             from datetime import datetime, timedelta
+
+            import akshare as ak
             end = datetime.now().strftime("%Y%m%d")
             start = (datetime.now() - timedelta(days=40)).strftime("%Y%m%d")
             return ak.stock_zh_a_hist_min_em(symbol=symbol, period=str(period_min), start_date=start, end_date=end, adjust="")
@@ -625,7 +633,6 @@ def _tencent_realtime(symbols: list[str], asset_type: str) -> list[dict[str, Any
                 continue
             code = parts[2]
             price = float(parts[3]) if parts[3] else 0
-            prev_close = float(parts[4]) if parts[4] else 0
             # F1-1: 返回符号归一化 — 以调用方传入的原始符号为准（含 .HK 后缀），
             # 保证 _filtered() 的调用者拿到一致的 symbol（组合/自选存的是 00700.HK）。
             out_sym = code
@@ -787,8 +794,7 @@ def fetch_history_netease(symbol: str, market: str = "A", period: str = "daily")
     """
     try:
         import urllib.request
-        import time
-        
+
         # 网易财经历史数据 API
         # 上海: 0{symbol}, 深圳: 1{symbol}
         prefix = "0" if symbol.startswith("5") or symbol.startswith("6") else "1"
@@ -799,11 +805,11 @@ def fetch_history_netease(symbol: str, market: str = "A", period: str = "daily")
         })
         resp = urllib.request.urlopen(req, timeout=10)
         raw = resp.read().decode("gbk")
-        
+
         lines = raw.strip().split("\n")
         if len(lines) < 2:
             return None
-        
+
         result = []
         for line in lines[1:]:  # Skip header
             cols = line.split(",")
@@ -820,7 +826,7 @@ def fetch_history_netease(symbol: str, market: str = "A", period: str = "daily")
                 })
             except (ValueError, IndexError):
                 continue
-        
+
         if not result:
             return None
         logger.debug("[netease] Fetched %d k-lines for %s", len(result), symbol)
@@ -1053,6 +1059,19 @@ def fetch_us_spot_list() -> list[dict[str, Any]]:
         return cached
     # R27: single-flight——缓存 miss 时同 key 并发只 fetch 一次
     return _spot_single_flight(cache_key, _fetch_us_spot)
+
+
+def _to_float(v) -> float:
+    """宽松转 float（None/空串/非法值 → 0.0）——与 hk_hot_fetcher._to_float 同语义。
+
+    round36 F821 修复（真实 bug）：本模块此前未定义该函数，
+    fetch_us_spot 的行解析一旦执行即 NameError，且被 except Exception
+    吞掉后伪装成「空列表 + 缓存 1h」（假完成形态）。
+    """
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _fetch_us_spot() -> list[dict[str, Any]]:
@@ -1448,7 +1467,7 @@ def fetch_fund_nav(symbol: str, limit: int | None = None) -> dict[str, Any] | No
     # Fallback 2: 天天基金 API (uses connection-pooled session, Z05)
     if result is None:
         try:
-            session = _get_nav_session()
+            _get_nav_session()  # 确保连接池会话已建立（round36 F841：绑定改裸调用）
             fb = run_in_thread(lambda: fund_fetcher.fetch_fund_nav(symbol), timeout=8, executor="long")
             if fb and fb.get("nav"):
                 result = {
@@ -1488,7 +1507,6 @@ def fetch_index_history(symbol: str, period: str = "daily") -> list[dict[str, An
         tx_rows = _fetch_tencent_hk_history(symbol)
         return tx_rows  # 空 = 腾讯不覆盖（HSAHC 等），调用方标注「暂无行情」
     try:
-        import pandas as pd
         # 处理已带前缀的 symbol（如 sh000001、sz399001）
         code = symbol[2:] if symbol.startswith(("sh", "sz", "bj")) else symbol
         def _p():
@@ -1532,7 +1550,6 @@ def _fetch_us_index_history(symbol: str, period: str = "daily") -> list[dict[str
     if not sina_code:
         return []
     try:
-        import pandas as pd
 
         def _p():
             import akshare as ak
@@ -1693,7 +1710,6 @@ def _fetch_sina_us_daily(symbol: str) -> list[dict[str, Any]]:
     需纯代码（带 105. 前缀会 IndexError——新浪按纯 ticker）。失败返回 []。
     """
     try:
-        import pandas as pd
 
         def _p():
             import akshare as ak

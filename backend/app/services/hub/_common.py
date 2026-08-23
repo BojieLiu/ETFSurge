@@ -14,17 +14,19 @@ logger = logging.getLogger(__name__)
 
 # Layer/pool constants live in the pure engine modules (single source of truth,
 # dependency direction engine/ <- hub/ <- facade); re-exported here.
-from app.engine.pool_balancing import (  # noqa: E402
+# ⚠️ round36：ALL_LAYERS/MANDATORY_CODES/_LAYER_WEIGHTS/_BASE_WEIGHTS 虽在本文件无
+# 直接消费，但经 market_data_hub → hub/__init__ 门面链被跨模块消费——ruff F401 曾误删，
+# noqa = 有意保留的 re-export 面。
+from app.engine.composite_signal import _BASE_WEIGHTS, _LAYER_WEIGHTS  # noqa: E402, F401
+from app.engine.pool_balancing import (  # noqa: E402, F401
     ALL_LAYERS,
     LAYER_CORE,
-    LAYER_SATELLITE,
     LAYER_DEFENSE,
     LAYER_OPPORTUNISTIC,
     LAYER_RESEARCH,
+    LAYER_SATELLITE,
     MANDATORY_CODES,
 )
-from app.engine.composite_signal import _LAYER_WEIGHTS, _BASE_WEIGHTS  # noqa: E402
-
 
 SECTOR_ETF_MAP: dict[str, dict] = {
     "半导体": {"symbol": "512480", "name": "半导体ETF", "layer": "satellite", "tracked_index": "半导体"},
@@ -121,8 +123,6 @@ def _snapshot_as_of_for(dt: datetime | None = None) -> str | None:
 
 def _persist_snapshot_sync(kind: str, payload: Any, as_of: str) -> None:
     """落盘快照（同步 raw sqlite）。同一 kind 仅保留最近 2 条。"""
-    import json
-    import sqlite3
     try:
         db_path = _snapshot_db_path()
         payload_json = json.dumps(payload, ensure_ascii=False)
@@ -144,8 +144,6 @@ def _persist_snapshot_sync(kind: str, payload: Any, as_of: str) -> None:
 
 def _load_latest_snapshot_sync(kind: str) -> dict | None:
     """读最近一条同 kind 快照 payload（同步 raw sqlite）。失败返回 None。"""
-    import json
-    import sqlite3
     try:
         db_path = _snapshot_db_path()
         with sqlite3.connect(db_path, timeout=10) as conn:

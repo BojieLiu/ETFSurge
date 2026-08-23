@@ -53,7 +53,7 @@ async def compute_etf_trends(
             *[_fetch_single_trend(sym) for sym in batch],
             return_exceptions=True,
         )
-        for sym, res in zip(batch, batch_results):
+        for sym, res in zip(batch, batch_results, strict=False):
             if isinstance(res, dict) and res:
                 results[sym] = res
             else:
@@ -85,8 +85,9 @@ async def _compute_industry_momentum(top_n: int = 15) -> list[dict[str, Any]]:
     if not rows:
         try:
             import akshare as ak
-            from ..utils.decode import decode_df
+
             from ..core.async_utils import run_sync
+            from ..utils.decode import decode_df
             df = await run_sync(ak.stock_board_industry_name_em)
             if df is not None and not df.empty:
                 decode_df(df)
@@ -144,8 +145,9 @@ async def _compute_concept_momentum(top_n: int = 15) -> list[dict[str, Any]]:
     if not rows:
         try:
             import akshare as ak
-            from ..utils.decode import decode_df
+
             from ..core.async_utils import run_sync
+            from ..utils.decode import decode_df
             df = await run_sync(ak.stock_board_concept_name_em)
             if df is not None and not df.empty:
                 decode_df(df)
@@ -188,7 +190,7 @@ async def compute_sector_momentum(top_n: int = 15) -> list[dict[str, Any]]:
     """计算行业+概念板块动量（各取 top_n/2）。
 
     返回:
-      [{sector, sector_code, type:"industry"|"concept", 
+      [{sector, sector_code, type:"industry"|"concept",
         rank_current, change_pct, main_inflow, up_count, down_count}]
     """
     half = max(1, top_n // 2)
@@ -380,7 +382,6 @@ def _compute_trend_from_prices(
 
     Pure function - no I/O. Returns same fields as _fetch_single_trend.
     """
-    import math
 
     volumes = volumes or []
     n = len(prices)
@@ -450,15 +451,14 @@ def _compute_trend_from_prices(
 
 async def _fetch_single_trend(symbol: str) -> dict[str, float]:
     """获取单只ETF的趋势数据。
-    
+
     数据源：china_market.fetch_history() → mootdx → Sina 两级降级，
     比直接调 akshare.fund_etf_hist_em 更稳定。
     """
     try:
-        from ..services.market_data_hub import market_data_hub
-
         # 拉取历史日线（经 hub 委托 china_market 的 mootdx → Sina 降级链）
         from ..core.async_utils import run_sync
+        from ..services.market_data_hub import market_data_hub
         rows = await run_sync(market_data_hub.get_history, symbol, "A", "daily", timeout=30)
         if not rows:
             return {}

@@ -2,7 +2,6 @@
 
 import logging
 
-from app.fetchers import sector_fetcher
 from app.services.hub._common import _parse_concept_tags
 
 logger = logging.getLogger(__name__)

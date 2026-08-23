@@ -11,9 +11,9 @@ Supports a primary → fallback failover chain:
 
 from __future__ import annotations
 
-import time
 import logging
-from dataclasses import dataclass, field
+import time
+from dataclasses import dataclass
 from typing import Callable
 
 from ..config import settings

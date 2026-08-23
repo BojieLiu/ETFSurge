@@ -6,7 +6,9 @@ Z27 (task-persistence-redesign): 任务生命周期全部落 DB（替代进程�
 任务完成时 record_id 回写任务行，前端可从任务直达业务记录（设计 / 策略检查）。
 """
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, Text
+
+from sqlalchemy import Column, DateTime, Integer, String, Text
+
 from ..database import Base
 
 

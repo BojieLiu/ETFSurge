@@ -1,7 +1,6 @@
 """Sector / hot-plate mixin — split from market_data_hub (Batch 3)."""
 
 import logging
-import os
 import time
 
 from app.core.market_calendar import market_session
@@ -22,7 +21,6 @@ class SectorMixin:
         after_refresh` 已有）；盘中缓存失效**不**用快照（避免昨日收盘冒充盘中实时），
         保持 `[]` 触发既有降级。旧实现只返内存缓存或 `[]`，从不读快照（「写了不读」）。
         """
-        import time
         now = time.time()
         if self._sector_momentum_cache and (now - self._sector_momentum_cache_ts) < 120:
             return self._sector_momentum_cache
@@ -82,7 +80,7 @@ class SectorMixin:
             if market.upper() == "HK":
                 plates = get_hk_hot_plates(limit or 20)
                 return [{"rank": i + 1, "name": p["name"], "heat_index": round(p["amount"] / 1e6, 1),
-                         "change_pct": p["change_pct"], "plate_code": "HK"} 
+                         "change_pct": p["change_pct"], "plate_code": "HK"}
                         for i, p in enumerate(plates)]
             return []
         if limit is not None:

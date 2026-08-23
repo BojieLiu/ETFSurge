@@ -1,17 +1,16 @@
 """Fundamentals Fetcher -- consolidated module."""
 
 from __future__ import annotations
+
 import logging
 import os
 import time as _time
-from datetime import datetime, timedelta
 from typing import Any
 
 from ..core.async_utils import run_in_thread, run_sync
-from ..services.cache_service import sync_memory_cache  # R5-2-8: 失败缓存 1h（R4-26 模式）
-from ..config import settings
-from ..core.source_registry import registry as _source_registry
 from ..core.logging import get_logger
+from ..core.source_registry import registry as _source_registry
+from ..services.cache_service import sync_memory_cache  # R5-2-8: 失败缓存 1h（R4-26 模式）
 
 logger = get_logger(__name__)
 
@@ -20,6 +19,7 @@ logger = get_logger(__name__)
 # F17 R61: 域名集中常量（实测 push2 502/HTTPS 连接关闭，保留 push2delay）
 from ..core.market_context import EM_PUSH_HOST
 from ..utils.decode import decode_df as _decode_df
+
 _PUSH2_SOURCE = EM_PUSH_HOST
 _AKSHARE_SOURCE = "akshare"
 
@@ -237,7 +237,6 @@ def fetch_hist_avg_volume(symbol: str, days: int = 20) -> dict | None:
     if not _is_a_stock(symbol):
         return None
     try:
-        market = _get_market(symbol)
         def _p(sym=symbol):
             import akshare as ak
             return ak.stock_zh_a_hist(symbol=sym, period="daily", start_date="19900101", adjust="")
@@ -391,7 +390,6 @@ def _fetch_spx_pe_pb_multpl() -> dict | None:
     """
     def _load():
         import re as _re
-        import urllib.request
 
         def _get(url: str) -> str:
             req = urllib.request.Request(
@@ -481,11 +479,9 @@ def _fetch_yahoo_quote_summary(etf: str) -> dict | None:
     新会话取 crumb 再请求 quoteSummary（summaryDetail→trailingPE，
     defaultKeyStatistics→priceToBook），探针验证稳定。
     """
-    import json as _json
+    import http.cookiejar
     import urllib.parse
     import urllib.request
-
-    import http.cookiejar
 
     cj = http.cookiejar.CookieJar()
     opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
@@ -672,8 +668,8 @@ def fetch_fundamentals(symbol: str) -> dict:
 # --- margin_fetcher.py: Margin balance ---
 
 import json
-import os
 import urllib.request
+
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = 8
@@ -814,7 +810,7 @@ def _load_sentiment_history(file_path: str) -> list[float]:
 def _momentum_correction(current: float) -> float:
     """
     Apply inertia correction based on recent sentiment trajectory.
-    
+
     A sharp drop (e.g., 75→55 in one period) indicates actual sentiment
     is worse than the current value suggests. Adds a penalty proportional
     to the rate of change.
@@ -825,18 +821,18 @@ def _momentum_correction(current: float) -> float:
     # Keep last 3 entries
     if len(_sentiment_history) > 3:
         _sentiment_history.pop(0)
-    
+
     if len(_sentiment_history) < 2:
         return current
-    
+
     prev_val = _sentiment_history[-2][0]
     delta = current - prev_val
-    
+
     # Sharp drop (-15+ points in one period): penalize
     # Sharp rise (+15+ points in one period): boost
     correction = delta * 0.3  # Dampened momentum factor
     corrected = current + correction
-    
+
     # Clamp to [0, 100]
     return max(0.0, min(100.0, corrected))
 
@@ -926,8 +922,8 @@ def fetch_advance_decline_ratio() -> float:
 
     # 1. push2delay.eastmoney.com (实测可用，替代被拒的 push2)
     try:
-        import urllib.request
         import json
+        import urllib.request
         url = "https://push2delay.eastmoney.com/api/qt/clist/get"
         params = "?pn=1&pz=5000&po=1&np=1&fields=f2,f3,f4&fs=m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"
         req = urllib.request.Request(url + params, headers={"User-Agent": "Mozilla/5.0"})

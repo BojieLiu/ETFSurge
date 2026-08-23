@@ -11,51 +11,53 @@ Public API and the ``market_data_hub`` singleton are unchanged.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
-from dataclasses import dataclass, field
-from typing import Any
 from datetime import datetime
+from typing import Any
 
-from ..fetchers import etf_scanner
-from ..fetchers import sector_fetcher
-from ..factors.factor_registry import registry as factor_registry
-from .etf_classifier import classifier as etf_classifier
-from .pool_audit import pool_audit
-from ..core.market_calendar import market_session
-
-from app.services.hub._common import (
-    MANDATORY_CODES,
-    SECTOR_ETF_MAP,
+# ⚠️ round36 教训：下列名字虽在本文件内无直接消费，但经由本模块被
+# hub/__init__ 门面与 strategy_design 等跨模块以属性/再导出方式消费——
+# ruff F401 曾误删导致 mypy attr-defined 回归。noqa = 有意保留的 re-export 面。
+from app.services.hub._common import (  # noqa: F401
+    _BASE_WEIGHTS,
+    _LAYER_WEIGHTS,
+    ALL_LAYERS,
     LAYER_CORE,
-    LAYER_SATELLITE,
     LAYER_DEFENSE,
     LAYER_OPPORTUNISTIC,
     LAYER_RESEARCH,
-    ALL_LAYERS,
-    _LAYER_WEIGHTS,
-    _BASE_WEIGHTS,
+    LAYER_SATELLITE,
+    MANDATORY_CODES,
     MAX_PER_LAYER,
-    _snapshot_db_path,
-    _snapshot_as_of_for,
-    _persist_snapshot_sync,
-    _load_latest_snapshot_sync,
-    _parse_stock_list,
-    _parse_concept_tags,
-    _normalize_hot_plate,
-    _strong_sector_etfs,
-    _rule_news_summary,
+    SECTOR_ETF_MAP,
     PoolDiff,
+    _load_latest_snapshot_sync,
+    _normalize_hot_plate,
+    _parse_concept_tags,
+    _parse_stock_list,
+    _persist_snapshot_sync,
+    _rule_news_summary,
+    _snapshot_as_of_for,
+    _snapshot_db_path,
+    _strong_sector_etfs,
 )
-from app.services.hub._snapshot import SnapshotMixin
-from app.services.hub._kline import KlineMixin
-from app.services.hub._realtime import RealtimeMixin
-from app.services.hub._sector import SectorMixin
-from app.services.hub._news import NewsMixin
-from app.services.hub._regime_sentiment import RegimeSentimentMixin
-from app.services.hub._pool import PoolMixin
 from app.services.hub._fundamentals import FundamentalsMixin
+from app.services.hub._kline import KlineMixin
+from app.services.hub._news import NewsMixin
+from app.services.hub._pool import PoolMixin
+from app.services.hub._realtime import RealtimeMixin
+from app.services.hub._regime_sentiment import RegimeSentimentMixin
+from app.services.hub._sector import SectorMixin
+from app.services.hub._snapshot import SnapshotMixin
+
+from ..factors.factor_registry import registry as factor_registry
+
+# round36 恢复：test_sector_heat 以 market_data_hub.sector_fetcher 属性访问——
+# ruff F401 曾误删（字符串/属性引用不可见），noqa = 有意保留。
+from ..fetchers import etf_scanner, sector_fetcher  # noqa: F401
+from .etf_classifier import classifier as etf_classifier
+from .pool_audit import pool_audit
 
 logger = logging.getLogger(__name__)
 
@@ -177,8 +179,8 @@ class MarketDataHub(
 
     async def _refresh_impl(self) -> PoolDiff:
         """实际刷新逻辑（被 refresh() 的锁保护）。"""
-        import time as _time
         import asyncio
+        import time as _time
         _start_ts = _time.time()
         old_by_code = dict(self._by_code)
         # 缓存上次成功刷新的 pool，供 refresh 失败时兜底
@@ -191,7 +193,7 @@ class MarketDataHub(
         # 后台预热 last-good 池的 K 线（扫描完成时缓存已就绪，factor compute 不再触发
         # 42-75s 冷建库）。单源失败立即降级（return_exceptions + 各自短超时）。
         try:
-            from ..core.async_utils import run_sync_long, run_sync
+            from ..core.async_utils import run_sync, run_sync_long
 
             async def _scan_pipeline():
                 return await asyncio.wait_for(
@@ -560,6 +562,7 @@ class MarketDataHub(
         """
         import asyncio
         import time
+
         from .market_trends import compute_sector_momentum
 
         try:
@@ -572,8 +575,8 @@ class MarketDataHub(
 
             # 2. 热点板块（异步，失败不影响主流程）
             try:
-                from ..fetchers.sector_fetcher import fetch_hot_plates
                 from ..core.async_utils import run_sync
+                from ..fetchers.sector_fetcher import fetch_hot_plates
                 hot = await run_sync(fetch_hot_plates, 15, timeout=20)
                 if hot:
                     self._hot_plates_cache = hot
@@ -583,8 +586,8 @@ class MarketDataHub(
 
             # 3. 板块热度排行
             try:
-                from ..fetchers.sector_fetcher import fetch_sector_heat
                 from ..core.async_utils import run_sync
+                from ..fetchers.sector_fetcher import fetch_sector_heat
                 heat = await run_sync(fetch_sector_heat, timeout=20)
                 if heat:
                     self._sector_heat_cache = heat
@@ -672,9 +675,10 @@ class MarketDataHub(
 
         get_global_indices 空（东财 push2 限流）时的兜底源。push2delay 实测稳定。
         """
+        import requests as _req
+
         from ..core.market_context import EM_PUSH_HOST
         from ..utils.proxy import no_proxy
-        import requests as _req
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Referer": "https://quote.eastmoney.com/",

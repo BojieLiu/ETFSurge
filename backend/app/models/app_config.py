@@ -1,7 +1,7 @@
 """AppConfig model — runtime key-value configuration persisted to SQLite."""
 
-from datetime import datetime
-from sqlalchemy import Column, String, DateTime, func
+from sqlalchemy import Column, DateTime, String, func
+
 from ..database import Base
 
 

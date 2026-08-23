@@ -6,30 +6,32 @@ async computation for 30 core factors (S1 scope).
 """
 from __future__ import annotations
 
-import math
 import logging
+import math
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, ClassVar, cast
 from pathlib import Path
+from typing import Any, Callable, cast
 
-import yaml
-import pandas as pd
 import numpy as np
+import pandas as pd
 import pandas_ta as ta
+import yaml
 
-from ..factors.ic_tracker import ic_tracker
-from ..core.source_registry import registry as _source_registry
 # A1 (round23 §10.1): 分类聚合逻辑下沉 core/factor_aggregate（engine 可依赖 core 纯函数）——
 # 本模块 re-export 保持旧引用（CATEGORY_AGG / IC_* / _ic_decay_mean）兼容，单一真相源在 core。
-from ..core.factor_aggregate import (
+# ⚠️ round36：此块为有意 re-export（tests 等外部经本模块导入 IC_FLIP_THRESHOLD 等），
+# ruff F401 曾误删导致 ImportError——noqa = 有意保留。
+from ..core.factor_aggregate import (  # noqa: F401
     CATEGORY_AGG,
-    IC_MIN_BATCHES,
     IC_FLIP_THRESHOLD,
     IC_HALF_LIFE,
+    IC_MIN_BATCHES,
     _ic_decay_mean,
 )
+from ..core.source_registry import registry as _source_registry
+from ..factors.ic_tracker import ic_tracker
 
 logger = logging.getLogger(__name__)
 
@@ -482,7 +484,8 @@ def _compute_tracking_error(data: dict) -> float:
         diff.append((etf_ret - bench_ret) ** 2)
     if len(diff) < 4:
         return 0.0
-    import statistics, math
+    import math
+    import statistics
     return math.sqrt(statistics.mean(diff))
 
 
@@ -1050,7 +1053,7 @@ class FactorRegistry:
 
     def load_definitions(self, yaml_path: str | None = None) -> None:
         """Load factor definitions from YAML file.
-        
+
         If yaml_path is explicitly provided, clear the existing factor dict
         so the caller can load a clean test YAML (used in unit tests).
         """
@@ -1133,8 +1136,11 @@ class FactorRegistry:
         数据不可用 → 注入 None/[] → compute 输出 0（诚实降级，不编造）。
         """
         import asyncio
+
         from ..fetchers.macro_fetcher import (
-            fetch_macro_snapshot, fetch_gdp_series, fetch_margin_leverage_snapshot,
+            fetch_gdp_series,
+            fetch_macro_snapshot,
+            fetch_margin_leverage_snapshot,
         )
         snap = await asyncio.to_thread(fetch_macro_snapshot)
         gdp_series = await asyncio.to_thread(fetch_gdp_series, 8)
@@ -1155,7 +1161,7 @@ class FactorRegistry:
         """[DEPRECATED] S5: 仅在 Hub 缓存无数据时作为 fallback 使用。
 
         新代码应通过 MarketDataHub.get_kline() 获取 K 线数据。
-        
+
         .. deprecated::
             Use MarketDataHub.get_kline() or get_kline_rows() instead.
             Will be removed in Phase 20.
@@ -1181,8 +1187,9 @@ class FactorRegistry:
             logger.warning("[factor] SourceRegistry circuit open for factor.history — returning empty data for %s", symbols)
             return {sym: {} for sym in symbols}
 
-        from ..services.market_data_hub import market_data_hub
         import asyncio
+
+        from ..services.market_data_hub import market_data_hub
 
         sem = asyncio.Semaphore(8)
 
@@ -1251,7 +1258,7 @@ class FactorRegistry:
         # 2. 批量获取 IOPV 数据（Sina + QQ + 东财 https 三级降级链，O18）
         # 用于 premium_discount 因子计算 (S8: 腾讯QQ降级链; O18: 东财 https 源)
         try:
-            from .factor_registry import _iopv_sina_symbols, _fetch_iopv_chain
+            from .factor_registry import _fetch_iopv_chain, _iopv_sina_symbols
             sina_list = _iopv_sina_symbols(symbols)
             # O18: Sina → QQ → 东财 https 降级链（模块级实现，可单测）；
             # 全失败时 iopv_data={} → 下方走 TTJ 日净值兜底
@@ -1265,14 +1272,6 @@ class FactorRegistry:
                     data[sym]['nav'] = values.get('nav', 0)
         except Exception as e:
             logger.warning('[factor] batch NAV fetch failed: %s (proxy? — non-fatal)', e)
-
-
-            for sym, values in iopv_data.items():
-                if sym in data and values.get("nav", 0) > 0:
-                    data[sym].setdefault("price", values.get("price", 0))
-                    data[sym]["nav"] = values.get("nav", 0)
-        except Exception as e:
-            logger.warning("[factor] batch NAV fetch failed: %s (proxy? — non-fatal)", e)
 
         # F3-4 步骤A: IOPV 命中率不足 → 天天基金日频净值降级（收盘折溢价口径，不回退 0.0 假数据）
         _missing_nav = [s for s in symbols if not (data.get(s) or {}).get("nav")]
@@ -1669,7 +1668,8 @@ class FactorRegistry:
                     if has_signal:
                         self._last_ic_batch = valid_entries
                         # Z03: 记录样本数与最后计算时间（供 /factors/active 健康度展示）
-                        from datetime import datetime, timezone as _tz
+                        from datetime import datetime
+                        from datetime import timezone as _tz
                         self._last_computed_at = datetime.now(_tz.utc).isoformat()
                         self._sample_counts = {
                             code: sum(
@@ -1726,6 +1726,7 @@ class FactorRegistry:
         遵循 U3/N06 覆盖保护：仅 abs(val)>0.001 才写入（否则保留空/旧值）。
         """
         from sqlalchemy import select
+
         from ..models.factor_ic import FactorICRecord
 
         try:
@@ -1773,6 +1774,7 @@ class FactorRegistry:
         失败仅 WARNING，不阻塞（回退等权 = 方案三未启用时的既有行为）。
         """
         from sqlalchemy import select
+
         from ..models.factor_ic import FactorICRecord
 
         try:

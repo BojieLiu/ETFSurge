@@ -10,11 +10,12 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
-from typing import Any
 
 import pandas as pd
 
-from ..core.async_utils import run_in_thread
+# round36 恢复：tests 经 mock.patch("app.fetchers.macro_fetcher.run_in_thread") 打补丁，
+# 字符串引用对 ruff F401 不可见——noqa = 有意保留的 patch 面。
+from ..core.async_utils import run_in_thread  # noqa: F401
 from ..services.cache_service import cached
 from ..utils.decode import decode_df as _decode_df
 
@@ -326,15 +327,15 @@ def fetch_margin_leverage_snapshot(n_days: int = 20) -> dict | None:
         df = _decode_df(df)
         dates = pd.to_datetime(df["日期"], errors="coerce")
         bal = pd.to_numeric(df["融资余额"], errors="coerce")
-        pairs = sorted((d, b) for d, b in zip(dates, bal)
+        pairs = sorted((d, b) for d, b in zip(dates, bal, strict=False)
                        if d is not None and pd.notna(d) and pd.notna(b))
         return [d for d, _ in pairs], [float(b) for _, b in pairs]
 
     sh_dates, sh_bal = _balance_series(sh_df)
     sz_dates, sz_bal = _balance_series(sz_df)
     # 按日期交集合并（沪深交易日对齐）
-    sh_map = {d: b for d, b in zip(sh_dates, sh_bal)}
-    sz_map = {d: b for d, b in zip(sz_dates, sz_bal)}
+    sh_map = {d: b for d, b in zip(sh_dates, sh_bal, strict=False)}
+    sz_map = {d: b for d, b in zip(sz_dates, sz_bal, strict=False)}
     common = sorted(set(sh_map) & set(sz_map))
     if len(common) < 2:
         return None

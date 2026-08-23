@@ -24,7 +24,6 @@ class NewsMixin:
 
     def get_news(self) -> list[dict]:
         """获取缓存新闻（合并视图），120s TTL。"""
-        import time
         now = time.time()
         if self._news_cache is not None and (now - self._news_cache_ts) < self.NEWS_TTL:
             return self._news_cache
@@ -38,7 +37,6 @@ class NewsMixin:
         且刷新失败/空桶时回退上次非空桶，杜绝高负载下 headlines/macro/global
         瞬态返 0。
         """
-        import time
         now = time.time()
         if self._news_buckets is None or (now - self._news_cache_ts) > self.NEWS_TTL:
             self._refresh_news_buckets_safe()
@@ -66,7 +64,6 @@ class NewsMixin:
         except Exception:
             return 0
         # R31: 分桶配额——headlines 最多一半，macro/global 保底
-        import math
         _head_q = max(1, math.ceil(cap * 0.5))
         _macro_q = max(1, math.ceil(cap * 0.33)) if cap >= 3 else 0
         _global_q = max(0, cap - _head_q - _macro_q)
@@ -171,8 +168,6 @@ class NewsMixin:
         - 失败时：若历史上无任何桶，则保留上次（可能为空的）桶并刷新时间戳，
           避免立即重试风暴。
         """
-        import time
-        import threading
 
         lock = getattr(self, "_news_refresh_lock", None)
         if lock is None:
@@ -185,9 +180,9 @@ class NewsMixin:
             prev = self._news_buckets or {}
             try:
                 from ...fetchers.news_fetcher import (
-                    fetch_news_headlines,
-                    fetch_macro_news,
                     fetch_global_news,
+                    fetch_macro_news,
+                    fetch_news_headlines,
                 )
                 headlines = fetch_news_headlines() or []
                 macro = fetch_macro_news() or []

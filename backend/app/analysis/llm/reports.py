@@ -4,11 +4,13 @@ import json
 import time
 from typing import Any
 
-from app.core.logging import get_logger
-from app.analysis.registry import get_agent
-from app.analysis.llm.gates import get_last_llm_error
-from app.analysis.llm.prompts import load_prompt
+# round36 恢复：tests 经 mock.patch("app.analysis.llm.reports.get_last_llm_error") 打补丁，
+# ruff F401 对字符串引用不可见——noqa = 有意保留的 patch 面。
+from app.analysis.llm.gates import get_last_llm_error  # noqa: F401
 from app.analysis.llm.health import _fetch_global_liquidity
+from app.analysis.llm.prompts import load_prompt
+from app.analysis.registry import get_agent
+from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -586,8 +588,9 @@ async def generate_strategy_check_report(
 {quality_note}
 请按 strategy_check.md 要求的 JSON 格式输出分析报告。
 """
-    from ...analysis.registry import get_agent
     import httpx  # round23 遗留修复: request_timeout 用 httpx.Timeout(connect/read 分离)
+
+    from ...analysis.registry import get_agent
     _start_ms = time.monotonic()
     try:
         # round14 P0-B（方案 b）: 策略检查 LLM 超时根因 = provider 35s 无响应 + 预算-重试
@@ -664,11 +667,9 @@ async def generate_sector_analysis(
 ) -> str:
     """行业/概念板块 AI 分析 — 包含成分股、大盘环境、资金流向、近期行情。"""
     idx_map = {idx.get("name", ""): idx for idx in indices}
-    comm_map = {c.get("name", ""): c for c in commodities}
 
     # Extract market regime/sentiment from market_data if injected
     regime = ""
-    sentiment = ""
     news_items = []
     for item in market_data:
         title = item.get("title", "")
@@ -712,7 +713,7 @@ async def generate_sector_analysis(
                 if chg != "":
                     prompt += f"- {name}: 涨跌幅 {chg}%\n"
 
-    prompt += f"""
+    prompt += """
 **分析要求：**
 - 针对中国市场 A 股进行专业分析，不要错误分析港股或美股数据
 - **重点分析近 1-5 个交易日的板块走势、量价变化**
@@ -930,15 +931,16 @@ def _build_design_report_prompt(
     hot_plates = market_context.get("hot_plates") or []
 
     # 数据日期标签：非交易日的行情来自上一交易日
-    from ...core.market_calendar import is_trading_time as _is_trading
     from datetime import timedelta as _td
+
+    from ...core.market_calendar import is_trading_time as _is_trading
     _now = __import__('datetime', fromlist=['datetime']).datetime.now()
     if _is_trading(_now):
         data_date_label = "今日"
     else:
         _d = _now - _td(days=1)
         _d -= _td(days=(_d.weekday() - 4)) if _d.weekday() >= 5 else _td(days=0)  # 跳到周五
-        data_date_label = f"{_d.month}月{_d.day}日"
+        data_date_label = f"{_d.month}月{_d.day}日"  # noqa: F841 — 保留分支结构（下游暂未消费）
 
     def _fmt_pct(v, as_percent: bool = False):
         """N02: 显式单位参数，不再用 abs>1 启发式（round3 N02：指数 0.72 被误判为小数
@@ -963,7 +965,7 @@ def _build_design_report_prompt(
         lines = [
             "## 注意：报告撰写范围说明",
             "",
-            f"以下为引擎算法直接生成的方案详解表格，与前端「方案卡片」的数据来源完全一致。",
+            "以下为引擎算法直接生成的方案详解表格，与前端「方案卡片」的数据来源完全一致。",
             "你**不需要**在报告正文中重新描述各方案的 ETF 标的、权重和入选理由。",
             "你的任务是：",
             "1. 基于「市场行情快照」「行业板块动量」「市场情绪」等输入数据，撰写「市场环境分析」；",
@@ -1218,7 +1220,7 @@ def _build_advice_stream_prompt(query: str, ctx: dict) -> str:
         neg = fund_flow.get("negative_flow_count", 0)
         direction = "净流入" if total > 0 else "净流出"
         intensity = "显著" if abs(total) > 1000 else "温和" if abs(total) > 100 else "微弱"
-        lines.append(f"### 资金流向")
+        lines.append("### 资金流向")
         lines.append(f"- 全市场主力{intensity}{direction}：{total/10000:.1f}亿元（净流入{pos}只/净流出{neg}只）")
         lines.append("")
 

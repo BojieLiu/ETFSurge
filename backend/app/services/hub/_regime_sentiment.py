@@ -57,7 +57,6 @@ class RegimeSentimentMixin:
 
     def get_market_regime(self, market: str = "A") -> str:
         """获取市场状态，60s 缓存。支持多市场（Phase 5.1）。"""
-        import time
         now = time.time()
         cached = self._regime_cache.get(market)
         if cached and (now - self._regime_cache_ts) < self.REGIME_TTL:
@@ -72,7 +71,6 @@ class RegimeSentimentMixin:
         Phase 5.1: 支持按市场刷新。
         C2: 同步更新 self.current_regime 以便 _compute_composite 使用最新市态。
         """
-        import time
         try:
             from ..market_trends import detect_market_regime
             broad_index = {"A": "000001", "HK": "^HSI", "US": "^GSPC"}.get(market, "000001")
@@ -98,9 +96,6 @@ class RegimeSentimentMixin:
 
     async def refresh_sentiment_cache(self) -> None:
         """异步刷新市场情绪缓存（2.7.9）。"""
-        import time
-        import json
-        import os
         try:
             from ...fetchers.fundamentals_fetcher import fetch_market_sentiment
             sentiment = await fetch_market_sentiment()
@@ -108,11 +103,16 @@ class RegimeSentimentMixin:
                 self._sentiment_cache = sentiment
                 self._sentiment_cache_ts = time.time()
                 # A02: Persist sentiment cache to file for crash recovery
+                # round36 ASYNC230/240 修复：文件 IO 移入 to_thread（事件循环不阻塞）
                 _cache_dir = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data")
-                os.makedirs(_cache_dir, exist_ok=True)
                 _cache_file = os.path.join(_cache_dir, "sentiment_cache.json")
-                with open(_cache_file, "w", encoding="utf-8") as f:
-                    json.dump({"sentiment": sentiment, "ts": time.time()}, f, ensure_ascii=False)
+
+                def _persist() -> None:
+                    os.makedirs(_cache_dir, exist_ok=True)
+                    with open(_cache_file, "w", encoding="utf-8") as f:
+                        json.dump({"sentiment": sentiment, "ts": time.time()}, f, ensure_ascii=False)
+
+                await asyncio.to_thread(_persist)
                 logger.info("[pool] sentiment cache refreshed and persisted")
         except Exception as e:
             logger.warning("[pool] refresh_sentiment_cache failed: %s", e)
@@ -120,10 +120,15 @@ class RegimeSentimentMixin:
             try:
                 _cache_dir = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data")
                 _cache_file = os.path.join(_cache_dir, "sentiment_cache.json")
-                if os.path.exists(_cache_file):
+
+                def _read_persisted():
+                    if not os.path.exists(_cache_file):
+                        return None
                     with open(_cache_file, "r", encoding="utf-8") as f:
-                        cached = json.load(f)
-                    if isinstance(cached, dict) and "sentiment" in cached:
+                        return json.load(f)
+
+                cached = await asyncio.to_thread(_read_persisted)
+                if isinstance(cached, dict) and "sentiment" in cached:
                         self._sentiment_cache = cached["sentiment"]
                         self._sentiment_cache_ts = cached.get("ts", 0)
                         logger.info("[pool] restored sentiment from persisted cache file")
@@ -133,12 +138,10 @@ class RegimeSentimentMixin:
 
     def get_market_sentiment(self) -> dict:
         """获取市场情绪，120s 缓存。"""
-        import time
         now = time.time()
         if self._sentiment_cache and (now - self._sentiment_cache_ts) < self.SENTIMENT_TTL:
             return self._sentiment_cache
         try:
-            from ...fetchers.fundamentals_fetcher import fetch_market_sentiment
             # Can't directly await here — cache miss just returns default
             pass
         except Exception:

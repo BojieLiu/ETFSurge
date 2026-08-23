@@ -131,7 +131,7 @@ def deduplicate_by_index(
                         name_seen[concept] = item
 
         result[layer].extend(seen_indices.values())
-        for concept, item in name_seen.items():
+        for _concept, item in name_seen.items():
             code = item.get("symbol", item.get("code", ""))
             already_in = any(
                 e.get("symbol") == code or e.get("code") == code
@@ -258,7 +258,7 @@ def balance_by_industry(
 
     selected: list[dict] = []
     selected_codes: set[str] = set()
-    for seg, group in groups.items():
+    for _seg, group in groups.items():
         group_sorted = sorted(group, key=lambda x: x.get("composite_score", 0), reverse=True)
         top = group_sorted[0]
         selected.append(top)

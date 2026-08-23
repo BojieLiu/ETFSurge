@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -19,22 +18,23 @@ logger = logging.getLogger(__name__)
 
 async def _generate_check_llm_report(result: dict, capital: float) -> str | None:
     """S7: 生成策略检查的 LLM 分析报告。
-    
+
     基于持仓分析结果，调用 LLM 生成简短的市场研判和建议。
     """
     try:
         import asyncio
+
         from ..analysis.llm import llm_complete
-        
+
         positions = result.get("positions", [])
         if not positions:
             return None
-            
+
         # Build a compact summary for LLM
         total_value = sum(p.get("market_value", 0) for p in positions)
         total_change = sum(p.get("change_pct", 0) for p in positions)
         top_holdings = [p for p in positions if p.get("weight", 0) > 0.05][:5]
-        
+
         summary = (
             f"当前持仓 {len(positions)} 只ETF，总市值 {total_value:.2f}，"
             f"平均涨跌幅 {total_change/len(positions):.2f}%。\n"
@@ -46,12 +46,12 @@ async def _generate_check_llm_report(result: dict, capital: float) -> str | None
                     summary += f"- {h.get('name','')}({h.get('symbol')}): "
                     summary += f"权重 {h.get('weight',0)*100:.1f}%, "
                     summary += f"涨跌 {h.get('change_pct',0):.2f}%\n"
-        
+
         prompt = (
             "请根据以下ETF组合持仓信息，给出简短的市场研判和调仓建议（200字以内）：\n\n"
             + summary
         )
-        
+
         response = await asyncio.wait_for(llm_complete(prompt), timeout=30)
         if response and response.strip():
             return response.strip()
@@ -76,8 +76,6 @@ async def strategy_check_pipeline(mgr, task_id: int) -> None:
 
 async def _strategy_check_pipeline_guarded(mgr, task_id: int) -> None:
     """实际管线（被 _design_semaphore 保护）。"""
-    from ..services.portfolio_service import strategy_check
-    from app.database import async_session
 
     task = await mgr.get_task(task_id)
     if not task:
@@ -115,8 +113,9 @@ async def _strategy_check_pipeline_guarded(mgr, task_id: int) -> None:
 
 async def _pipeline_body(mgr, task_id: int) -> dict:
     """FIX-21: Pipeline 主体逻辑，被外层 asyncio.wait_for 保护。"""
-    from ..services.portfolio_service import strategy_check
     from app.database import async_session
+
+    from ..services.portfolio_service import strategy_check
 
     task = await mgr.get_task(task_id)
     if not task:
@@ -133,7 +132,6 @@ async def _pipeline_body(mgr, task_id: int) -> dict:
     await mgr.update_task(task_id, progress=10, stage="加载持仓数据")
     await _notify(task_id, "running", progress=10, stage="加载持仓数据")
 
-    from app.database import async_session
     async with async_session() as db:
         result = await strategy_check(db, capital, portfolio_type=portfolio_type)
 
@@ -249,6 +247,7 @@ async def _generate_check_llm_comment(result: dict) -> str | None:
     """
     try:
         import asyncio
+
         from ..analysis.llm import llm_complete
 
         positions = result.get("positions", [])

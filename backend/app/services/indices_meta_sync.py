@@ -51,9 +51,10 @@ async def sync_indices_meta_table() -> int:
                     "[indices-meta-sync] all segments failed — keeping existing table"
                 )
                 return 0
+            from sqlalchemy import delete
+
             from app.database import async_session, init_db
             from app.models.search import IndexMeta
-            from sqlalchemy import delete
 
             await init_db()
             async with async_session() as session:

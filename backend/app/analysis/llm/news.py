@@ -1,10 +1,9 @@
 """News summary & impact analysis — split from analysis/llm.py (Batch 2)."""
 
-import json
 
-from app.core.logging import get_logger
-from app.analysis.registry import get_agent
 from app.analysis.llm.client import llm_complete
+from app.analysis.registry import get_agent
+from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 

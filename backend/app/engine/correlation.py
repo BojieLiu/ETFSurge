@@ -13,8 +13,6 @@ correlation.py — 收益相关性纯函数引擎（round19 P1-①，2026-08-12�
 """
 from __future__ import annotations
 
-from typing import Any
-
 MIN_SAMPLES = 30
 
 
@@ -25,7 +23,7 @@ def _pearson(a: list[float], b: list[float]) -> float:
         return 0.0
     ma = sum(a) / n
     mb = sum(b) / n
-    cov = sum((x - ma) * (y - mb) for x, y in zip(a, b))
+    cov = sum((x - ma) * (y - mb) for x, y in zip(a, b, strict=False))
     va = sum((x - ma) ** 2 for x in a)
     vb = sum((y - mb) ** 2 for y in b)
     if va <= 0 or vb <= 0:

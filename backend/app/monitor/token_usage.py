@@ -1,11 +1,10 @@
 """DeepSeek token 用量监控 — 进程内存 + SQLite 持久化。"""
 
-import time
 import asyncio
 import sqlite3
-import json
-from datetime import datetime, timedelta
+import time
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from ..config import settings

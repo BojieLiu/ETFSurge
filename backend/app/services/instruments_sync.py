@@ -54,9 +54,10 @@ async def sync_instruments_table() -> int:
                     "[instruments-sync] all segments failed — keeping existing table"
                 )
                 return 0
+            from sqlalchemy import delete
+
             from app.database import async_session, init_db
             from app.models.search import Instrument
-            from sqlalchemy import delete
 
             await init_db()
             async with async_session() as session:

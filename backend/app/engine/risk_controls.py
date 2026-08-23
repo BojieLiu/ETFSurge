@@ -8,7 +8,7 @@ Constraints can be customized by importing and reassigning the settings object:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 # F6 (round6 §14.4): 核心层成长风格集中度判定复用 allocation_engine 的

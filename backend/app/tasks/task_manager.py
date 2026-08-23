@@ -32,7 +32,6 @@ import json
 import logging
 import warnings
 from datetime import datetime
-from typing import Any
 
 from sqlalchemy import delete, select
 
@@ -269,9 +268,9 @@ async def design_pipeline(mgr: TaskManager, task_id: int) -> None:
 async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> None:
     """实际的设计管线逻辑，被 _design_semaphore 保护。"""
     # Lazy imports moved here from design_pipeline to be in the correct scope
+    from ..analysis.llm import generate_design_report
     from ..services.strategy_design import generate_enhanced_design
     from ..tasks.design_report import _build_plan_tables
-    from ..analysis.llm import generate_design_report
 
     design_id = None
     strategies = []

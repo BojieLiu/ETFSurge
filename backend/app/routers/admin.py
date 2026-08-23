@@ -1,13 +1,13 @@
 """Admin 工具路由 — token 用量监控 / 数据源健康 / 事件记录等。"""
 
-from fastapi import APIRouter, Query
 import asyncio
 import time
-from typing import Any
 
-from ..monitor.token_usage import token_store
-from ..monitor.source_events import source_event_store
+from fastapi import APIRouter, Query
+
 from ..core.source_registry import registry
+from ..monitor.source_events import source_event_store
+from ..monitor.token_usage import token_store
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
@@ -62,7 +62,6 @@ async def get_sources_health():
         # 探测与告警，但不作为"数据源"展示在前端数据源页
         if name.startswith("threadpool_"):
             continue
-        import threading
         # Access health state via thread-safe snapshot
         with h._lock:
             result.append({
@@ -200,8 +199,7 @@ async def update_config(payload: dict[str, str]):
     请求体: {"DEEPSEEK_API_KEY": "sk-xxx", "TUSHARE_TOKEN": "...", ...}
     只处理 CONFIG_ITEMS 中定义的 key，忽略未知 key。
     """
-    from ..core.config_manager import config_manager
-    from ..core.config_manager import CONFIG_ITEMS
+    from ..core.config_manager import CONFIG_ITEMS, config_manager
     valid_keys = {item["key"] for item in CONFIG_ITEMS}
     results = {}
     for key, value in payload.items():
@@ -216,8 +214,7 @@ async def update_config(payload: dict[str, str]):
 @router.delete("/config/{key}")
 async def delete_config_override(key: str):
     """删除配置项的 DB override，恢复为 .env 值。"""
-    from ..core.config_manager import config_manager
-    from ..core.config_manager import CONFIG_ITEMS
+    from ..core.config_manager import CONFIG_ITEMS, config_manager
     valid_keys = {item["key"] for item in CONFIG_ITEMS}
     if key not in valid_keys:
         return {"status": "skipped", "reason": "unknown key"}
@@ -241,10 +238,11 @@ async def get_system_metrics():
 
     供 verify_e2e 和运维监控使用，无需认证。
     """
-    from ..services.market_data_hub import market_data_hub
+    from sqlalchemy import func, select
+
     from ..database import async_session
     from ..models.portfolio_design import PortfolioDesign
-    from sqlalchemy import select, func
+    from ..services.market_data_hub import market_data_hub
 
     # P0-2: 30s TTL 缓存——DB 统计结果短时不变，热态命中缓存（负向：每次都重查 → FAIL）
     _now = time.monotonic()
@@ -320,4 +318,5 @@ async def get_system_metrics():
 
 
 import logging
+
 logger = logging.getLogger(__name__)

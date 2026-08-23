@@ -25,78 +25,94 @@ import threading
 import time
 from typing import Any, AsyncGenerator
 
-from app.config import settings  # noqa: F401 — preserved module surface
-from app.monitor.token_usage import token_store, UsageRecord
-from app.core.logging import get_logger
+from app.analysis.provider import ProviderConfig, get_configured_providers, has_any_api_key
 from app.analysis.registry import get_agent
-from app.analysis.provider import get_configured_providers, has_any_api_key, ProviderConfig
+from app.config import settings
+from app.core.logging import get_logger
+from app.monitor.token_usage import UsageRecord, token_store
 
 logger = get_logger(__name__)
 
-from app.analysis.llm.prompts import (
-    _PROMPT_DIR,
-    _LEAK_PATTERNS,
-    SYSTEM_PROMPT,
-    load_prompt,
-    strip_internal_leak,
-)
-from app.analysis.llm.gates import (
-    _last_llm_error,
-    _CIRCUIT_TTL,
-    _CIRCUIT_FAIL_THRESHOLD,
-    _circuit,
-    llm_quota_gate,
-    LLMQuotaGate,
-    get_last_llm_error,
-    _record_llm_error,
-    _clear_llm_error,
-    _circuit_state,
-    _circuit_allow,
-    _circuit_record_failure,
-    _circuit_record_success,
-    reset_circuit,
-)
 from app.analysis.llm.cache import (
-    _REPORT_CACHE_LOCK,
     _REPORT_CACHE,
+    _REPORT_CACHE_LOCK,
     _REPORT_CACHE_TTL,
     _report_cache_key,
     get_cached_report,
     put_cached_report,
 )
 from app.analysis.llm.client import (
+    _LLM_RATE_LIMIT_CAP,
     LLM_MAX_RETRIES,
     LLM_RETRY_DELAY,
-    _LLM_RATE_LIMIT_CAP,
+    _check_key,
+    _rate_limit_wait,
     llm_complete,
     llm_complete_stream,
     llm_complete_with_system,
-    _check_key,
-    _rate_limit_wait,
     run_stream_with_cache,
 )
-from app.analysis.llm.health import llm_health_check, _fetch_global_liquidity
-from app.analysis.llm.news import generate_news_summary, _news_body_text, analyze_news_impact
+from app.analysis.llm.gates import (
+    _CIRCUIT_FAIL_THRESHOLD,
+    _CIRCUIT_TTL,
+    LLMQuotaGate,
+    _circuit,
+    _circuit_allow,
+    _circuit_record_failure,
+    _circuit_record_success,
+    _circuit_state,
+    _clear_llm_error,
+    _last_llm_error,
+    _record_llm_error,
+    get_last_llm_error,
+    llm_quota_gate,
+    reset_circuit,
+)
+from app.analysis.llm.health import _fetch_global_liquidity, llm_health_check
+from app.analysis.llm.news import _news_body_text, analyze_news_impact, generate_news_summary
+from app.analysis.llm.prompts import (
+    _LEAK_PATTERNS,
+    _PROMPT_DIR,
+    SYSTEM_PROMPT,
+    load_prompt,
+    strip_internal_leak,
+)
 from app.analysis.llm.reports import (
+    _build_advice_stream_prompt,
+    _build_design_report_prompt,
     _build_engine_fallback,
-    _format_indices,
-    _format_commodities,
+    _build_factor_breakdown_table,
     _build_market_overview,
     _build_report_prompt,
     _empty_portfolio_response,
-    generate_market_report,
+    _format_commodities,
+    _format_indices,
     generate_advice,
-    generate_strategy_suggestions,
-    generate_strategy_check_report,
-    generate_sector_analysis,
-    generate_symbol_analysis,
     generate_design_report,
-    _build_factor_breakdown_table,
-    _build_design_report_prompt,
-    _build_advice_stream_prompt,
+    generate_market_report,
+    generate_sector_analysis,
+    generate_strategy_check_report,
+    generate_strategy_suggestions,
+    generate_symbol_analysis,
 )
 
 __all__ = [
+    # patch surface —— docstring 所述：绑定到包命名空间供 mock.patch("app.analysis.llm.<dep>") 使用
+    "asyncio",
+    "hashlib",
+    "json",
+    "sys",
+    "threading",
+    "time",
+    "Any",
+    "AsyncGenerator",
+    "ProviderConfig",
+    "get_configured_providers",
+    "has_any_api_key",
+    "get_agent",
+    "settings",
+    "UsageRecord",
+    "token_store",
     # state / constants
     "LLM_MAX_RETRIES",
     "LLM_RETRY_DELAY",

@@ -6,8 +6,8 @@
 """
 from ..core.async_utils import run_sync
 from ..core.logging import get_logger
-from ..services.market_data_hub import market_data_hub
 from ..routers.ws import manager
+from ..services.market_data_hub import market_data_hub
 
 logger = get_logger(__name__)
 

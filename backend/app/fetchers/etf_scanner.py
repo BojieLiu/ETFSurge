@@ -12,16 +12,20 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..core.async_utils import run_in_thread
 from ..services.cache_service import sync_memory_cache
+
+if TYPE_CHECKING:  # pragma: no cover
+    import pandas as pd
 
 logger = logging.getLogger(__name__)
 
 # round11 P1-5: TTL 归一——不再散落本地常量，统一读 core/ttl.py 的 CACHE_TTL["etf_list"]（3600s）。
 # （旧实现硬编码 300s 与 CACHE_TTL 声明不一致；缓存机制本身已由 sync_memory_cache 接管。）
 from ..core.ttl import CACHE_TTL as _CACHE_TTL
+
 _etf_list_cache = {}
 ETF_CACHE_TTL = _CACHE_TTL["etf_list"]
 
@@ -353,8 +357,9 @@ def _fetch_em_etf_list(host: str | None = None) -> list[dict] | None:
     R5-2-6: host 参数化（push2 优先 → push2delay 兜底，双源路由）；两域名
     响应结构一致，解析层零改动。
     """
-    from ..utils.proxy import no_proxy
     import requests as _req
+
+    from ..utils.proxy import no_proxy
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "Referer": "https://quote.eastmoney.com/",
@@ -436,7 +441,9 @@ def fetch_all_etfs_base() -> list[dict[str, Any]]:
     # 旧实现要求 ts < 14400s（4h）：容器重建/挂载卷时间戳跨阈值 → 每次启动
     # 全量 1618 只扫描（预热 128s 根因之一）。现在旧快照直接命中启动，
     # 数据新鲜度由 60s 周期刷新循环保证（内存缓存 TTL 过期后自然重扫）。
-    import os, json, time
+    import json
+    import os
+    import time
     _cache_file = _etf_cache_file()
     if os.path.exists(_cache_file):
         try:
@@ -633,8 +640,7 @@ def filter_etfs(raw_list: list[dict] | Any) -> list[dict[str, Any]]:
                 name = str(v).strip()
                 break
 
-        # 过滤: 排除纯债/货币 ETF
-        name_lower = name.lower()
+        # 过滤: 排除纯债/货币 ETF（关键词对中文名大小写不敏感，name_lower 从未消费）
         skip_keywords = ["国债", "国开", "城投债", "可转债", "信用债", "货币", "短融", "同业存单"]
         if any(kw in name for kw in skip_keywords):
             # 只排除"纯"债/货币，保留黄金/跨境/商品等防御型
@@ -811,11 +817,12 @@ def layer_ranking(
 
 
 # ── F10 tracked_index enrichment ──────────────────────────────────────────
-import requests as _requests
-import re as _re
+import concurrent.futures as _cf
 import json as _json
 import os as _os
-import concurrent.futures as _cf
+import re as _re
+
+import requests as _requests
 
 _TRACKED_INDEX_CACHE = _os.path.join(
     _os.path.dirname(_os.path.dirname(_os.path.dirname(__file__))),

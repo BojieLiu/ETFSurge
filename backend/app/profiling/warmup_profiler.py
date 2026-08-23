@@ -16,17 +16,15 @@ Usage:
     profiler.write_report("warmup_report.json")
 """
 
-import asyncio
 import cProfile
 import io
 import json
 import logging
+import os
 import pstats
 import time
-import os
 from contextlib import contextmanager
-from dataclasses import dataclass, field, asdict
-from typing import Any
+from dataclasses import dataclass
 
 logger = logging.getLogger("profiler.warmup")
 

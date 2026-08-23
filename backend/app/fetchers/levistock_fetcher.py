@@ -6,8 +6,8 @@ from typing import Any
 
 import levistock as lv
 
-from ..core.logging import get_logger
 from ..core.async_utils import safe_call
+from ..core.logging import get_logger
 from ..services.cache_service import cached
 
 logger = get_logger(__name__)

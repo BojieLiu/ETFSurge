@@ -8,7 +8,10 @@ No new Python function is needed. The runtime (``runtime.py``) drives every
 agent uniformly, centralizing the LLM call, retry/backoff, and JSON parsing.
 """
 from dataclasses import dataclass
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:  # pragma: no cover
+    from .runtime import AgentRuntime
 
 
 @dataclass
@@ -42,7 +45,7 @@ AGENTS: dict[str, AgentConfig] = {
 }
 
 
-def get_agent(name: str) -> "AgentRuntime":  # type: ignore[name-defined]
+def get_agent(name: str) -> "AgentRuntime":
     """Return an ``AgentRuntime`` for the named agent config."""
     from .runtime import AgentRuntime
 

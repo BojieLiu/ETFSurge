@@ -116,7 +116,7 @@ async def collect_all() -> list[dict]:
          else _fetch_hk_etf_list() if fn == "fund_hk_etf_spot_em"
          else _fetch_us_list() if fn == "stock_us_spot_em"
          else _fetch_akshare_list(fn, "代码", "名称", mkt, at))
-        for (_, fn), (mkt, at) in zip(segments, [("A", "stock"), ("A", "etf"), ("HK", "stock"), ("HK", "etf"), ("US", "US")])
+        for (_, fn), (mkt, at) in zip(segments, [("A", "stock"), ("A", "etf"), ("HK", "stock"), ("HK", "etf"), ("US", "US")], strict=False)
     ]
     # O1 (round8 §7 P0-新): 每段 asyncio.wait_for 超时（美股 20s / 其他 30s）——
     # 黑洞段在超时窗口内必然结束，不占用事件循环；失败段仅降级（跳过），整体继续。
@@ -129,12 +129,12 @@ async def collect_all() -> list[dict]:
             raise
 
     results = await asyncio.gather(
-        *[_guarded(seg_name, coro) for (seg_name, _fn), coro in zip(segments, tasks)],
+        *[_guarded(seg_name, coro) for (seg_name, _fn), coro in zip(segments, tasks, strict=False)],
         return_exceptions=True,
     )
     merged: list[dict] = []
     seen = set()
-    for (seg_name, _fn), res in zip(segments, results):
+    for (seg_name, _fn), res in zip(segments, results, strict=False):
         # mypy 收窄：BaseException 而非 Exception（CancelledError 继承 BaseException）
         if isinstance(res, BaseException):
             logger.error("[sync_instruments] segment %s FAILED: %s", seg_name, res)
@@ -298,7 +298,13 @@ async def _fetch_us_list() -> list[dict]:
                 f"page={_page}&num=20&sort=&asc=0&market=&id="
             )
             req = _ur.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            raw = _ur.urlopen(req, timeout=8).read().decode("utf-8", errors="replace")
+
+            def _fetch_page(_req=req) -> str:
+                # B023 默认参数绑定当前迭代请求；ASYNC210 阻塞 urlopen 移入 to_thread
+                with _ur.urlopen(_req, timeout=8) as _resp:
+                    return _resp.read().decode("utf-8", errors="replace")
+
+            raw = await asyncio.to_thread(_fetch_page)
             # 新浪实际返回 JSONP **对象**：CallbackList[]({"count":"17993","data":[...]})
             # 旧实现按数组假设 raw.find("[") 取到 `CallbackList[]` 的空 [] → JSONDecodeError，
             # 降级链从未生效（每轮直落 RuntimeError）。改为取对象：首个 '{' 到最后一个 '}'，
@@ -339,9 +345,10 @@ async def _fetch_us_list() -> list[dict]:
 
 
 async def sync():
+    from sqlalchemy import delete
+
     from app.database import async_session, init_db
     from app.models.search import Instrument
-    from sqlalchemy import select, delete
 
     # O1 (round8 §7): 环境开关——INSTRUMENTS_SYNC_DISABLED=1 跳过同步
     if _sync_disabled():
