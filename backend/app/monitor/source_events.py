@@ -218,19 +218,23 @@ class SourceEventStore:
 
     async def _cleanup_worker(self) -> None:
         """Daily cleanup: DELETE events older than 7 days."""
+        def _delete_old() -> None:
+            # round35 A5 (§13.9 T-A5): 同步 sqlite 移入线程池——原直接跑在 async
+            # 体内阻塞事件循环（audit_async_blocking P-b pattern 实锤点）。
+            try:
+                cutoff = time.time() - 7 * 86400
+                with sqlite3.connect(self._db_path) as conn:
+                    conn.execute(
+                        "DELETE FROM source_events WHERE timestamp < ?",
+                        (cutoff,)
+                    )
+                    conn.commit()
+            except Exception:
+                pass
         try:
             while True:
                 await asyncio.sleep(86400)  # once per day
-                try:
-                    cutoff = time.time() - 7 * 86400
-                    with sqlite3.connect(self._db_path) as conn:
-                        conn.execute(
-                            "DELETE FROM source_events WHERE timestamp < ?",
-                            (cutoff,)
-                        )
-                        conn.commit()
-                except Exception:
-                    pass
+                await asyncio.to_thread(_delete_old)
         except asyncio.CancelledError:
             pass
 

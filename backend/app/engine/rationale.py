@@ -234,7 +234,7 @@ def build_rationale(
     # 4. 综合信号 — F1-8/§9.7 R5: 改用三因子加权聚合（0.4技术+0.4估值+0.2动量），
     # 含「双弱不判多」硬约束与单因子极端值封顶（纯函数，无 I/O）。
     try:
-        from ..analysis.signal import composite_signal
+        from .signal import composite_signal  # round35 B1-F1b: 下沉后同包引用
         _t = factor_scores.get("technical", 0.0) or 0.0
         _v = factor_scores.get("valuation", 0.0) or 0.0
         _m = factor_scores.get("momentum", 0.0) or 0.0

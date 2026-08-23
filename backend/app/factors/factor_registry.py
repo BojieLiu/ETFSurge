@@ -1805,13 +1805,20 @@ class FactorRegistry:
         allowed = set(_ts_order)
 
         by_code: dict[str, list[float]] = {}
-        # rows 已按 computed_at 降序 → 序列顺序即最新在前
+        # rows 按 computed_at 降序（最新在前）迭代 append；round35 FM1 (§15.3)
+        # 构建完成后统一反转为【旧→新】升序——缓存契约 = 旧→新：
+        #   · core/factor_aggregate._ic_decay_mean 末位=最新批权重 1.0（此前方向
+        #     反转：最旧批拿最大权重，「近因衰减」实为「反近因衰减」）；
+        #   · strategy_design fdq `for _v in reversed(_ic)` 首个=最新非 None 值。
+        # 两个消费方同时回归各自注释声明的语义。
         for code, val, ts in rows:
             if ts not in allowed:
                 continue
             if val is None:
                 continue
             by_code.setdefault(code, []).append(float(val))
+        for _seq in by_code.values():
+            _seq.reverse()
         self._ic_series_cache = by_code
         logger.debug("[factor] refreshed IC series for %d factors (%d batches)", len(by_code), len(_ts_order))
         return len(by_code)

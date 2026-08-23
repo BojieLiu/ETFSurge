@@ -52,11 +52,16 @@ class TestCollectAllSegments:
 
     @pytest.mark.asyncio
     async def test_all_segments_fail_returns_empty(self):
-        """N09: 全部段失败 → 返回空（sync 据此保留旧表）。"""
+        """N09: 全部段失败 → 返回空（sync 据此保留旧表）。
+
+        round35 校准：US 段入口已独立为 _fetch_us_list()（内含新浪降级+静态
+        兜底 120 只），N09 原意「所有真实源全挂 → 不写入垃圾」需把该段一并
+        mock 失败，否则静态兜底混入使断言失真。"""
         async def _fail(*a, **kw):
             raise ConnectionError("all down")
 
-        with patch.object(si, "_fetch_akshare_list", side_effect=_fail):
+        with patch.object(si, "_fetch_akshare_list", side_effect=_fail), \
+             patch.object(si, "_fetch_us_list", side_effect=_fail):
             rows = await si.collect_all()
         assert rows == []
 

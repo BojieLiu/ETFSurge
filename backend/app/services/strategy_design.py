@@ -466,6 +466,9 @@ async def generate_enhanced_design(
                     continue
                 code = a["symbol"]
                 sym_meta = _find_candidate_meta(code, candidates)
+                # round35 B1-F5 (§4.5 D5): 转发引擎侧 rank_info（层内排名 N/M +
+                # 主驱动因子）——恢复 O24 归因链；pop 防内部键泄漏到 API 输出。
+                _rank_info = a.pop("_rank_info", None)
                 a["selection_rationale"] = build_rationale(
                     code=code,
                     layer=a.get("layer", "satellite"),
@@ -475,6 +478,7 @@ async def generate_enhanced_design(
                     regime=market_regime,
                     industry=sym_meta.get("industry", "") if sym_meta else None,
                     correlation_median=corr_medians.get(code),
+                    rank_info=_rank_info,
                 )
 
             # round20 P1-1: 高相关对（r>=0.9）合计权重约束——削减低因子分标的并回补。
@@ -1068,13 +1072,13 @@ def _factor_data_quality_report(db_sample_counts: dict | None = None) -> dict:
         import statistics
 
         from ..factors.factor_registry import registry as _freg
-        from ..factors.ic_tracker import compute_series_stats
-        from ..routers.factors import (
+        from ..factors.factor_status import (  # round35 B1-C3: 单源（原 routers 反向 import）
             MARKET_LEVEL_FACTOR_CODES,
             MIN_TRADING_DAYS,
             STATIC_FACTOR_CODES,
-            _status_of,
+            status_of,
         )
+        from ..factors.ic_tracker import compute_series_stats
 
         _factors = getattr(_freg, "_factors", {}) or {}
         _design_static = STATIC_FACTOR_CODES | MARKET_LEVEL_FACTOR_CODES
@@ -1103,13 +1107,14 @@ def _factor_data_quality_report(db_sample_counts: dict | None = None) -> dict:
             if isinstance(_ic, dict):
                 _icv = _ic.get("ic")
             elif isinstance(_ic, (list, tuple)) and _ic:
-                # 真实结构：{code: [ic_float, ...]}（最新在前）；取最近一个非 None
+                # 真实结构：{code: [ic_float, ...]}；round35 FM1 起缓存契约=旧→新，
+                # reversed 后从新到旧遍历 → 首个非 None = 最新非 None 值
                 for _v in reversed(_ic):
                     if _v is not None:
                         _icv = float(_v)
                         break
                 _ser = compute_series_stats([float(v) for v in _ic if v is not None])
-            _st, _ = _status_of(
+            _st, _ = status_of(
                 _code,
                 samples=int(_sample_counts.get(_code, 0)),
                 t_stat=_ser.get("t_stat") if _ser else None,

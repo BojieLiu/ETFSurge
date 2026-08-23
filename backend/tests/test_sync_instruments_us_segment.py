@@ -43,19 +43,21 @@ async def test_collect_all_includes_us_segment():
 
 
 async def test_us_segment_failure_isolated():
-    """US 段失败 → 只丢 US，A/HK 段不受影响（gather return_exceptions）。"""
+    """US 段失败 → 只丢 US，A/HK 段不受影响（gather return_exceptions）。
+
+    round35 校准：US 段入口已独立为 _fetch_us_list()（内含新浪降级+静态兜底），
+    隔离性测试直接对该段整体注入失败（原 patch _fetch_akshare_list 会被
+    降级链+静态兜底吸收，无法构造「US 段失败」前提）。"""
     a_rows = [{"symbol": "600519", "name": "贵州茅台", "market": "A", "asset_type": "stock"}]
 
     async def fake_fetch_a():
         return a_rows
 
-    async def fake_fetch_akshare(fn_name, symbol_col, name_col, market, asset_type):
-        if fn_name == "stock_us_spot_em":
-            raise RuntimeError("us source down")
-        return []
+    async def _us_down(*a, **kw):
+        raise RuntimeError("us source down")
 
     with patch("app.fetchers.sync_instruments._fetch_a_stock_list", new=fake_fetch_a), \
-         patch("app.fetchers.sync_instruments._fetch_akshare_list", new=fake_fetch_akshare):
+         patch("app.fetchers.sync_instruments._fetch_us_list", new=_us_down):
         merged = await collect_all()
 
     assert any(r["market"] == "A" for r in merged), "A 段应保留"

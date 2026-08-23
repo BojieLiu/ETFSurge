@@ -22,7 +22,9 @@ LAYER_RESEARCH = "research"
 ALL_LAYERS = [LAYER_CORE, LAYER_SATELLITE, LAYER_DEFENSE, LAYER_OPPORTUNISTIC, LAYER_RESEARCH]
 
 # Force-kept pool codes (truncation / balancing must never evict these)
-MANDATORY_CODES = {"510300", "159338", "518880", "511090"}
+# round35 B1-F2 (§4.2 D2): 本地字面量副本已删——MANDATORY_CODES 单一真相源在
+# budgets.py。使用点函数内 lazy from-import（对齐 risk_controls:63 先例），
+# 保证 budgets 真相源变更（如未来换锚）即时生效、无第二副本可漂移。
 
 # R105 B' (round34): 核心双锚静态元数据——扫描 flat 缺锚时的兜底注入源（段一缺陷：
 # found=None 曾静默跳过，降级态下锚从未进池）。名称/指数与 etf_scanner.WIDE_BASIS_STATIC
@@ -72,20 +74,13 @@ def deduplicate_by_index(
     _LINK_FUND_SUFFIXES = ("联接", "联", "LOF", "C")
 
     def _extract_index_concept(name: str) -> str:
-        """从 ETF 名提取指数概念（去除基金公司名和联接/ETF 后缀）。"""
-        _COMPANY_NAMES = [
-            "华夏", "易方达", "汇添富", "嘉实", "富国", "招商", "博时", "南方",
-            "广发", "华安", "国泰", "鹏华", "天弘", "工银", "建信", "中欧",
-            "景顺", "长城", "泰康", "海富通", "光大", "兴全", "东证", "华宝",
-            "银华", "大成", "长信", "国联", "申万", "上投", "中信", "华泰",
-            "万家", "兴业", "民生", "浦银", "方正", "太平", "前海", "创金",
-            "银河", "诺安", "交银", "融通", "泓德", "中加", "永赢", "西部",
-            "浙商", "新华", "红土", "安信", "国寿", "英大", "汇丰", "恒生",
-            "中银", "国投", "德邦", "华富", "金元", "国金", "九泰", "东方",
-            "中泰", "湘财", "国融", "江信", "蜂巢", "东海", "中邮", "华融",
-            "金鹰", "长城", "同泰", "红塔", "华润", "格林", "瑞达", "明亚",
-            "惠升", "华宸", "富荣", "易米", "长江", "渤海",
-        ]
+        """从 ETF 名提取指数概念（去除基金公司名和联接/ETF 后缀）。
+
+        round35 B1-F3 (§4.3 D3): 局部 ~80 条副本已删——与 allocation_engine
+        共用单一名单（并集，含华泰柏瑞/天弘基金等长名）；替换统一 len 降序。
+        """
+        from .allocation_engine import _COMPANY_NAMES
+
         for company in sorted(_COMPANY_NAMES, key=len, reverse=True):
             name = name.replace(company, "")
         for suffix in ("ETF", "联接", "联", "LOF"):
@@ -154,6 +149,8 @@ def ensure_mandatory(
     """
     if not flat:
         return  # 扫描失败，不强行注入（直接报错）
+    from .budgets import MANDATORY_CODES  # lazy: 单一真相源 budgets（B1-F2）
+
     for code in MANDATORY_CODES:
         in_pool = any(
             e["symbol"] == code for layer in pool.values() for e in layer
@@ -202,6 +199,8 @@ def truncate_with_mandatory_protection(
     max_n: int,
 ) -> list[dict[str, Any]]:
     """R5-0-1: MAX_PER_LAYER 截断时保护强制标的。"""
+    from .budgets import MANDATORY_CODES  # lazy: 单一真相源 budgets（B1-F2）
+
     mandatory = [e for e in balanced if e.get("symbol") in MANDATORY_CODES]
     rest = [e for e in balanced if e.get("symbol") not in MANDATORY_CODES]
     return mandatory + rest[:max_n]
@@ -219,6 +218,8 @@ def recheck_mandatory_after_truncate(
     """
     if not flat:
         return  # 扫描失败，不强行注入（与 ensure_mandatory 语义一致）
+    from .budgets import MANDATORY_CODES  # lazy: 单一真相源 budgets（B1-F2）
+
     required = required_codes or MANDATORY_CODES
     for code in sorted(required):
         in_pool = any(

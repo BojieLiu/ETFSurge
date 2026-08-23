@@ -18,6 +18,17 @@ from typing import Any
 #     目标非递减（4/5/6），防御目标反向（2/1/1）——满足 INV-3。
 #   - 进攻型 layer_budget 改为 core 0.60 / sat 0.30 / def 0.05（cash 0.05），
 #     满足 INV-6（进攻防御 ≤0.05、现金 ≤0.10）。
+# ── Mandatory anchor codes (round35 B1-F2, §4.2 D2 单一真相源上移) ─────
+# 强制锚集合原为 allocation_engine.py 与 pool_balancing.py 两处字面量副本
+# （历史 560600→159338 换锚事件证明该集合会变，双份漂移只是时间问题）。
+# budgets.py 已是策略元数据单一真相源——锚常量随之上移；allocation_engine
+# 模块级 re-export 保兼容（risk_controls 函数内 lazy import 零改动）。
+CORE_ANCHORS = {"510300", "159338"}       # 核心层强制锚（沪深300/中证A500）
+DEFENSE_ANCHORS = {"518880", "511090"}    # 防御层强制锚（黄金/30年国债），按 defense_count 注入
+MANDATORY_CODES = CORE_ANCHORS | DEFENSE_ANCHORS
+MANDATORY_MIN_WEIGHT = 0.03
+MANDATORY_FLOOR = 0.05
+
 STRATEGY_META: dict[str, dict[str, Any]] = {
     "defensive": {
         "id": "defensive",

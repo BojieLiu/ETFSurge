@@ -13,7 +13,15 @@ import logging
 import math
 from typing import Any
 
-from .budgets import STRATEGY_META, dynamic_layer_budget
+from .budgets import (
+    CORE_ANCHORS,  # noqa: F401  round35 B1-F2: re-export（真相源 budgets）
+    DEFENSE_ANCHORS,  # noqa: F401
+    MANDATORY_CODES,  # noqa: F401
+    MANDATORY_FLOOR,
+    MANDATORY_MIN_WEIGHT,
+    STRATEGY_META,
+    dynamic_layer_budget,
+)
 from .rationale import build_rationale
 
 logger = logging.getLogger(__name__)
@@ -56,7 +64,10 @@ def _extract_index_concept(name: str) -> str:
         "黄金ETF"          → "黄金"
     """
     clean = name
-    for cn in _COMPANY_NAMES:
+    # round35 B1-F3 (§4.3 D3): 长公司名优先（len 降序）——根治 round19 P1-② 类
+    # 子串剥除 bug（「华泰柏瑞」被子串「华泰」先剥成「A500ETF柏瑞」→ 概念提取失败），
+    # 不再依赖手工把长名排前的列表顺序约定；pool_balancing 同款语义共用本名单。
+    for cn in sorted(_COMPANY_NAMES, key=len, reverse=True):
         clean = clean.replace(cn, "")
     for sfx in ["ETF", "联接", "LOF", "发起式", "发起", "场内", "场外"]:
         clean = clean.replace(sfx, "")
@@ -291,16 +302,11 @@ def _dominant_factor(factor_scores: dict[str, float], profile_weights: dict[str,
 #   ③验收层：verify_e2e P0-8 断言（方案无幽灵锚 560600）。
 # round22 (#13): 强制标的拆分为「核心锚」与「防御锚」——防御锚受 layer_count.defense 门控，
 # 杜绝进攻型防御层被债/金撑爆（round21 #13 实证 进攻防御 19%）。
-CORE_ANCHORS = {"510300", "159338"}       # 核心层强制锚（沪深300/中证A500）
-DEFENSE_ANCHORS = {"518880", "511090"}     # 防御层强制锚（黄金/30年国债），按 defense_count 注入
-MANDATORY_CODES = CORE_ANCHORS | DEFENSE_ANCHORS
-# R5-0-2: 公共底仓「宽基锚」——跨方案核心层重叠豁免仅限这些标的 + 强制标的
-#（与 verify_e2e M7/P1-1 口径一致：510300/159338 为沪深300/中证A500 锚）。
+# round35 B1-F2 (§4.2 D2): CORE_ANCHORS / DEFENSE_ANCHORS / MANDATORY_CODES /
+# MANDATORY_MIN_WEIGHT / MANDATORY_FLOOR 单一真相源上移 budgets.py，本模块经
+# from-import re-export（上方）——历史双份字面量（此处 vs pool_balancing:25）
+# 在锚点增删时必然漂移。_COMMON_ANCHOR_SYMBOLS 为宽基锚子集（语义不同，保留本处）。
 _COMMON_ANCHOR_SYMBOLS = {"510300", "159338"}
-MANDATORY_MIN_WEIGHT = 0.03
-# round24 R2/R24⑤: 强制锚（沪深300/中证A500/黄金/国债）关联度削减地板——永不被
-# enforce_max_correlation 削减到该值以下（与 allocate 内 ≥5% 后处理地板一致，M7 达标）。
-MANDATORY_FLOOR = 0.05
 
 
 def _defense_anchors_for(profile_key: str) -> set[str]:
@@ -652,13 +658,17 @@ def _select_and_weight(
             weights = [w for _, w in kept]
 
     results: list[dict[str, Any]] = []
-    for (composite, cand, factor_scores), w in zip(selected, weights, strict=False):
+    # O24 (round7 §7 P24) / round35 B1-F5 (§4.5 D5): 归因链——层内候选池排名 +
+    # 主驱动因子。enumerate 直取下标（消 selected.index(...) 的 O(n²) 与元组相等
+    # 匹配脆弱性）；rank_info 存入内部键 "_rank_info"，由编排层 strategy_design
+    # 转发进生产 rationale（此前双写覆盖导致排名归因在生产输出中丢失）。
+    for _idx, ((composite, cand, factor_scores), w) in enumerate(
+        zip(selected, weights, strict=False)
+    ):
         sym = cand.get("symbol", "")
         name = cand.get("name", sym)
-        # O24 (round7 §7 P24): 归因链——层内候选池排名 + 主驱动因子
-        # （scored 为裁剪前参与评分的候选总数，selected 按 composite 降序）
         rank_info = {
-            "rank": selected.index((composite, cand, factor_scores)) + 1,
+            "rank": _idx + 1,
             "total_candidates": len(scored),
             "dominant_factor": _dominant_factor(factor_scores, _PROFILE_WEIGHTS.get(strategy, _PROFILE_WEIGHTS["balanced"])),
         }
@@ -679,6 +689,7 @@ def _select_and_weight(
             "tracked_index": tidx,
             "industry": cand.get("industry", ""),
             "selection_rationale": rationale,
+            "_rank_info": rank_info,
             "factor_score": round(composite, 3),
             "factor_breakdown": {
                 k: round(v, 3)
@@ -1548,12 +1559,12 @@ def allocate(
                                 x["weight"] = round(x["weight"] - cut, 4)
                             a["weight"] = round(a["weight"] + needed, 4)
 
-        # ── Compute risk metrics (sector concentration as HHI) ──
-        sector_weights: dict[str, float] = {}
-        for a in allocations:
-            sec = a.get("layer", "其他")
-            sector_weights[sec] = sector_weights.get(sec, 0.0) + a.get("weight", 0.0)
-        hhi = sum(w ** 2 for w in sector_weights.values())
+        # round35 B1-F4 (§4.4 D4): 删除基于 layer 名的 HHI 死计算——以 layer 名当
+        # 「行业」算出的集中度恒为「层预算平方和」（同一 profile+regime 下近似常量），
+        # 对持仓内容完全不敏感；编排层紧随其后的 apply_risk_controls 用真实 industry
+        # 字段重算并整体覆盖 strategy["risk_metrics"]（risk_controls.py 行业 HHI 段），
+        # 本侧数值从未被生产输出消费。sector_concentration 单点产出 =
+        # apply_risk_controls（industry 缺失时才 fallback layer 名，有且仅有一处）。
 
         # U6 R1: 预算用满——层内分配不满（候选不足/配额裁剪）时剩余预算按
         # factor_score 回补已选标的（旧逻辑：权重和 < 层预算和 → 剩余转 CASH，
@@ -1575,12 +1586,10 @@ def allocate(
                     # 单只 ≤30% 风控（RISK_SETTINGS.max_single_weight 会在 apply_risk_controls 兜底）
                     _a["weight"] = round(min(_a.get("weight", 0.0) + _per, 0.30), 4)
 
-        risk_metrics = {
-            "sector_concentration": round(hhi, 4),
-            "sector_breakdown": {
-                k: round(v, 4) for k, v in sector_weights.items()
-            },
-        }
+        # round35 B1-F4: 不再写入 sector_concentration/sector_breakdown（见上）；
+        # risk_metrics 键保留空 dict 以兼容直接消费 allocate 返回值的调用点，
+        # apply_risk_controls 后由风控层整体覆盖为真实行业口径。
+        risk_metrics: dict[str, Any] = {}
 
         # ── Regime description ──
         regime_desc_map: dict[str, str] = {

@@ -1,55 +1,10 @@
 from typing import Any
 
-
-def _cap(v: float) -> float:
-    """round24 R25: 单因子极端值封顶 |score| ≤ 1.0（原 composite_signal 内嵌实现
-    提升为模块级——composite_signal_with_gate 降级分支也需复用，防单项拉平）。"""
-    try:
-        f = float(v or 0.0)
-    except (TypeError, ValueError):
-        f = 0.0
-    return max(-1.0, min(1.0, f))
-
-
-def composite_signal(
-    technical: float = 0.0,
-    valuation: float = 0.0,
-    momentum: float = 0.0,
-    weights: tuple[float, float, float] | None = None,
-) -> dict[str, Any]:
-    """F1-8/§9.7 R5: 三因子加权聚合综合信号（纯函数，无 I/O）。
-
-    规则：
-      - 聚合公式：0.4*技术 + 0.4*估值 + 0.2*动量（权重可覆盖）
-      - 单因子极端值封顶 |score| ≤ 1.0，防单项拉平（如动量 +9 拉平技术/估值双弱）
-      - 硬约束「技术<0 且 估值<0 → 综合信号不得为 buy/偏多，至多 hold」
-        （589720 实测：技术 -0.408 / 估值 -0.462 曾因动量 +1.047 被误判偏多）
-
-    Returns:
-        {"signal": "buy"|"hold"|"sell", "score": float,
-         "components": {"technical": t, "valuation": v, "momentum": m}}
-    """
-    t, v, m = _cap(technical), _cap(valuation), _cap(momentum)
-    w = weights or (0.4, 0.4, 0.2)
-    score = w[0] * t + w[1] * v + w[2] * m
-
-    # 双弱不判多：技术/估值同时为负 → 至多 hold（动量不能拉平方向）
-    if t < 0 and v < 0:
-        score = min(score, 0.0)
-
-    if score >= 0.5:
-        signal = "buy"
-    elif score <= -0.5:
-        signal = "sell"
-    else:
-        signal = "hold"
-
-    return {
-        "signal": signal,
-        "score": round(score, 3),
-        "components": {"technical": t, "valuation": v, "momentum": m},
-    }
-
+# round35 B1-F1b (docs/round35-architecture-review.md §4.1 D1): 纯函数下沉至
+# engine/signal.py——engine/rationale.py 此前经相对导入引用本模块（绕过纯度门禁）。
+# 此处 re-export 保持既有调用点兼容（上层→下层为合法依赖方向）；
+# composite_signal_with_gate 留在本模块（业务门禁语义属上层）。
+from ..engine.signal import _cap, composite_signal  # noqa: F401  re-export 下沉兼容
 
 # round24 R25: 综合信号降级门禁阈值（与 R3 data_precision 的 0.6 同源）
 _COMPOSITE_VALID_RATE_FLOOR = 0.6

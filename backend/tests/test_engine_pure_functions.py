@@ -15,6 +15,7 @@ from app.engine.composite_signal import (
     pct_rank,
     compute_composite,
 )
+from app.engine.budgets import MANDATORY_CODES  # round35 B1-F2: 真相源 budgets
 from app.engine.pool_balancing import (
     ALL_LAYERS,
     LAYER_CORE,
@@ -22,7 +23,6 @@ from app.engine.pool_balancing import (
     LAYER_DEFENSE,
     LAYER_OPPORTUNISTIC,
     LAYER_RESEARCH,
-    MANDATORY_CODES,
     assign_layer,
     normalize_tracked_index,
     deduplicate_by_index,

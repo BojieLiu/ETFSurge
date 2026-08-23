@@ -38,10 +38,26 @@ _BLOCKING_PATTERNS = [
     "run_in_thread",        # 同步等待，非线程池
 ]
 
+# round35 A5 (docs/round35-architecture-review.md §13.9 T-A5) 补盲 pattern——
+# 与 D1 同性质的「扫描器看不见」盲区（对抗式扫描发现的第二实例）：
+#   P-a: open() 直接出现在 async def 体（实锤 hub/_regime_sentiment，round36 已修）
+#   P-b: sqlite3.* 家族直接出现在 async def 体（实锤 monitor/source_events:226）
+# 两者在 async 体内直接出现 = 真实事件循环阻塞，FAIL 级。
+_ASYNC_DIRECT_IO_PATTERNS = ("open", "sqlite3.")
+
 # 允许的白名单模式（这些调用即使匹配也被视为安全）
 _ALLOWED_PATTERNS = [
     # 已经通过 run_sync 或 asyncio.to_thread 包装的
 ]
+
+
+def _safe_rel(path: str) -> str:
+    """round35 A5: 跨盘符（Windows C:/E:）时 os.path.relpath 抛 ValueError——
+    门禁自测 fixture 在 tmp_path 构造伪文件时暴露。回退显示原路径。"""
+    try:
+        return os.path.relpath(path, _APP_PATH)
+    except ValueError:
+        return path
 
 
 def _extract_call_name(node: ast.Call) -> str:
@@ -131,13 +147,19 @@ class _CallScanner(ast.NodeVisitor):
                 call_name.startswith(p) or call_name == p.rstrip('.')
                 for p in _BLOCKING_PATTERNS
             )
+            # round35 A5 P-a/P-b: async def 体内的直接文件 IO / 同步 sqlite
+            if not is_blocking and (
+                call_name in _ASYNC_DIRECT_IO_PATTERNS
+                or any(call_name.startswith(p) for p in _ASYNC_DIRECT_IO_PATTERNS)
+            ):
+                is_blocking = True
             if is_blocking:
                 is_allowed = any(
                     call_name.startswith(p) or call_name == p.rstrip('.')
                     for p in _ALLOWED_PATTERNS
                 )
                 if not is_allowed:
-                    rel = os.path.relpath(self.file_path, _APP_PATH)
+                    rel = _safe_rel(self.file_path)
                     self.violations.append(
                         f"{rel}:{node.lineno}: async def '{self.func_node.name}' "
                         f"contains direct sync call '{call_name}'"
@@ -163,7 +185,7 @@ def _scan_to_thread_misuse(tree: ast.AST, file_path: str) -> list[str]:
     检查仅在参数是同一文件内定义的简单名称时有效。
     """
     violations = []
-    rel = os.path.relpath(file_path, _APP_PATH)
+    rel = _safe_rel(file_path)
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
@@ -199,7 +221,7 @@ def _scan_default_executor_usage(tree: ast.AST, file_path: str) -> list[str]:
     应该改用 run_sync() 来统一走 _shared_executor。
     """
     violations = []
-    rel = os.path.relpath(file_path, _APP_PATH)
+    rel = _safe_rel(file_path)
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
@@ -213,6 +235,53 @@ def _scan_default_executor_usage(tree: ast.AST, file_path: str) -> list[str]:
                     f" — use 'await run_sync(fn, args, timeout=X)' instead"
                 )
     return violations
+
+
+def _scan_unwrapped_nested_sync(tree: ast.AST, file_path: str) -> list[str]:
+    """round35 A5 P-c（WARN 级，人工复核不阻断）：async def 内嵌套 sync def 含
+    阻塞调用、且该 sync 函数名未被 to_thread/run_sync/wait_for 包装调用。
+
+    合法用法存在（token_usage._query 经 asyncio.to_thread 包裹即合法）——自动
+    区分「定义处」与「调用处包装方式」的 AST 判定复杂度高，先 WARN 观察误报率
+    再考虑升级 FAIL。"""
+    rel = _safe_rel(file_path)
+
+    def _is_blocking_call(cn: str) -> bool:
+        if any(cn.startswith(p) or cn == p.rstrip('.') for p in _BLOCKING_PATTERNS):
+            return True
+        return cn in _ASYNC_DIRECT_IO_PATTERNS or any(
+            cn.startswith(p) for p in _ASYNC_DIRECT_IO_PATTERNS
+        )
+
+    wrapped_names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            cn = _extract_call_name(node)
+            if cn in ("asyncio.to_thread", "to_thread", "run_sync") or cn.endswith("run_in_executor"):
+                if node.args:
+                    first = node.args[0]
+                    if isinstance(first, ast.Name):
+                        wrapped_names.add(first.id)
+                    elif isinstance(first, ast.Attribute):
+                        wrapped_names.add(first.attr)
+
+    warns: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.AsyncFunctionDef):
+            continue
+        for sub in ast.walk(node):
+            if not isinstance(sub, ast.FunctionDef) or sub is node:
+                continue
+            has_blocking = any(
+                isinstance(call, ast.Call) and _is_blocking_call(_extract_call_name(call))
+                for call in ast.walk(sub)
+            )
+            if has_blocking and sub.name not in wrapped_names:
+                warns.append(
+                    f"{rel}:{sub.lineno}: [WARN] async def '{node.name}' 内嵌套 sync def "
+                    f"'{sub.name}' 含阻塞调用且未见 to_thread/run_sync 包装——人工复核"
+                )
+    return warns
 
 
 def scan_file(file_path: str) -> list[str]:
@@ -236,8 +305,9 @@ def scan_file(file_path: str) -> list[str]:
 
 
 def main() -> int:
-    """主函数。返回 0 = 无违规, 1 = 发现违规。"""
+    """主函数。返回 0 = 无违规, 1 = 发现违规（WARN 级不阻断）。"""
     all_violations: list[str] = []
+    all_warnings: list[str] = []
     scanned = 0
     skipped = 0
 
@@ -248,10 +318,25 @@ def main() -> int:
                 continue
             path = os.path.join(root, f)
             scanned += 1
+            try:
+                with open(path, encoding="utf-8-sig") as fh:
+                    tree = ast.parse(fh.read())
+            except (SyntaxError, UnicodeDecodeError) as e:
+                all_violations.append(f"Skipping unparseable file {path}: {e}")
+                skipped += 1
+                continue
             errs = scan_file(path)
             if any(e.startswith("Skipping") for e in errs):
                 skipped += 1
             all_violations.extend(errs)
+            # round35 A5 P-c: WARN 级单独收集（不阻断 exit code）
+            all_warnings.extend(_scan_unwrapped_nested_sync(tree, path))
+
+    if all_warnings:
+        print(f"[WARN] {len(all_warnings)} potential nested-sync blocking call(s) "
+              f"(manual review, not blocking):", file=sys.stderr)
+        for w in all_warnings:
+            print(f"  ? {w}", file=sys.stderr)
 
     if all_violations:
         print(f"[FAIL] Found {len(all_violations)} async-blocking violation(s):", file=sys.stderr)

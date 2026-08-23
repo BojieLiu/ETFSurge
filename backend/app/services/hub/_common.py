@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 # ⚠️ round36：ALL_LAYERS/MANDATORY_CODES/_LAYER_WEIGHTS/_BASE_WEIGHTS 虽在本文件无
 # 直接消费，但经 market_data_hub → hub/__init__ 门面链被跨模块消费——ruff F401 曾误删，
 # noqa = 有意保留的 re-export 面。
+# round35 B1-F2: MANDATORY_CODES 真相源上移 budgets——re-export 链同步改源
+from app.engine.budgets import MANDATORY_CODES  # noqa: E402, F401
 from app.engine.composite_signal import _BASE_WEIGHTS, _LAYER_WEIGHTS  # noqa: E402, F401
 from app.engine.pool_balancing import (  # noqa: E402, F401
     ALL_LAYERS,
@@ -25,7 +27,6 @@ from app.engine.pool_balancing import (  # noqa: E402, F401
     LAYER_OPPORTUNISTIC,
     LAYER_RESEARCH,
     LAYER_SATELLITE,
-    MANDATORY_CODES,
 )
 
 SECTOR_ETF_MAP: dict[str, dict] = {
@@ -122,11 +123,16 @@ def _snapshot_as_of_for(dt: datetime | None = None) -> str | None:
 
 
 def _persist_snapshot_sync(kind: str, payload: Any, as_of: str) -> None:
-    """落盘快照（同步 raw sqlite）。同一 kind 仅保留最近 2 条。"""
+    """落盘快照（同步 raw sqlite）。同一 kind 仅保留最近 2 条。
+
+    round35 A1 (§13.9 T-A1): busy_timeout 为 per-connection 属性——journal_mode=WAL
+    已随 portfolio.db 文件持久化（database.py connect 钩子设过一次），此处只补等待。
+    """
     try:
         db_path = _snapshot_db_path()
         payload_json = json.dumps(payload, ensure_ascii=False)
         with sqlite3.connect(db_path, timeout=10) as conn:
+            conn.execute("PRAGMA busy_timeout=30000")
             conn.execute(
                 "INSERT INTO market_snapshots (kind, payload, as_of, created_at) "
                 "VALUES (?, ?, ?, ?)",
@@ -147,6 +153,7 @@ def _load_latest_snapshot_sync(kind: str) -> dict | None:
     try:
         db_path = _snapshot_db_path()
         with sqlite3.connect(db_path, timeout=10) as conn:
+            conn.execute("PRAGMA busy_timeout=30000")  # round35 A1: per-connection 属性
             row = conn.execute(
                 "SELECT payload FROM market_snapshots WHERE kind=? "
                 "ORDER BY id DESC LIMIT 1",
