@@ -2,6 +2,12 @@
 
 本目录存放**已完成使命**的历史文档（诊断计划、评审产物、交接、根因分析），保留审计价值但不再作为活跃依据。
 
+## 最近一次归档（2026-08-22，round34 容器复验完成 + round33 §8 R102 已实施并容器内首验通过后）
+并入本目录（均已完成使命，无活跃实施依据身份）：
+- `round33-container-reacceptance-r99-r101.md`（round33 R99-R101 复验全 PASS + §8 R102 方案；R102 已由 commit `38a194d` 实施、round34 全新镜像容器内首验 PASS——distinct trade_date 245→502、census warn=12/no_data=15 与本地一致、重启幂等）
+> 归档后引用统一指向 `docs/archived/...`。同步更新：**无**（全仓无 `docs/round33-*.md` 硬路径引用；代码注释中「round33 §8」为语义指针，移动后仍可读）。
+> 不归档保留于 `docs/` 顶层：`round34-container-reacceptance-r102-r108.md`（当前活跃，R102 首验结论 + 新发现 R103-R108 修复方案 + T-A/S-A/M-A 讨论级设计待实施）、`design-checklist.md`（常驻设计清单）、`patrol-orchestration-plan.md`（常驻流程）、`prompt-templates/`（常驻模板）、`api-contracts/`（活跃契约）、README/AGENTS（项目说明）。
+
 ## 最近一次归档（2026-08-21，round33 容器复验完成 + round32 R99-R101 实施并容器内复验生效后）
 并入本目录（均已完成使命，无活跃实施依据身份）：
 - `round30-container-reacceptance-and-optimization.md`（round30 容器复验+优化：R85-R92 诊断/实施，已被 round31 R93-R98 与 round32 R99-R101 承接并实证）
