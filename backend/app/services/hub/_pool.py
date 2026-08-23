@@ -139,7 +139,15 @@ class PoolMixin:
 
 
     def get_factor_matrix(self) -> dict[str, dict[str, float]]:
-        """从候选池提取因子分矩阵，并做 z-score 归一化（raw 因子除外）。"""
+        """从候选池提取因子分矩阵，并做 z-score 归一化（raw 因子除外）。
+
+        round35 §12-P0-4: 输入键去重——剔除 ``{code}_raw`` 孪生保留键
+        （compute() 为聚合方向化保护而写，factor_registry:1546）。池内 factor_scores
+        同时携带「点分主键 + _raw 孪生 + 顶层聚合键」，旧实现数值即收导致同一信号
+        三重进入矩阵，全键迭代类消费（覆盖率统计/LLM 上下文）被系统性放大。
+        剥离仅作用于矩阵视图：池内原样不动；rationale 对 _raw 的偏好读取有主键
+        fallback（rsi 主键经 O4 保真），决策路径（composite 只读顶层键）零影响。
+        """
         result: dict[str, dict[str, float]] = {}
         for layer_items in self._pool.values():
             for item in layer_items:
@@ -147,7 +155,10 @@ class PoolMixin:
                 if not sym:
                     continue
                 fs = item.get("factor_scores", {})
-                result[sym] = {k: v for k, v in fs.items() if isinstance(v, (int, float))}
+                result[sym] = {
+                    k: v for k, v in fs.items()
+                    if isinstance(v, (int, float)) and not k.endswith("_raw")
+                }
         if not result:
             logger.warning("[market_data_hub] get_factor_matrix() returned empty — pool may be empty or missing factor_scores")
             return result
