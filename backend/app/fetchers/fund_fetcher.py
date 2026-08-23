@@ -84,5 +84,12 @@ def fetch_fund_nav(symbol: str) -> dict[str, Any] | None:
         or ``None`` on any error/timeout.
 
     All calls run through ``run_in_thread`` with 8s timeout.
+
+    R106 (round34): 入口形态守卫——非纯 6 位数字（如映射脏值「黄金9999」、None、
+    7 位码）直接返回 None，fail-fast 不发无效请求。旧实现 URL 含原始中文 → ascii
+    编码异常 → WARNING 每 60-120s 周期重放（round34 §4.4）。
     """
+    if not (isinstance(symbol, str) and symbol.isdigit() and len(symbol) == 6):
+        logger.debug("[fund_fetcher] skip non-code symbol %r", symbol)
+        return None
     return run_in_thread(_fetch_nav, symbol, timeout=_TIMEOUT, executor="long")

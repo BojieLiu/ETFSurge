@@ -1208,7 +1208,9 @@ class TestStrategyDesignIntegration:
         monkeypatch.setattr(sd, "apply_near_substitute_warnings", _spy)
         monkeypatch.setattr(sd, "_correlation_matrix_for", lambda allocs, cands: {})
         monkeypatch.setattr(sd, "_correlation_medians_for", lambda allocs, cands: {})
-        monkeypatch.setattr(sd, "_factor_data_quality_report", lambda: {"valid_rate": 1.0})
+        # R104 (round34): 签名兼容 shim——生产调用点现传 db_sample_counts kwarg
+        monkeypatch.setattr(sd, "_factor_data_quality_report",
+                            lambda db_sample_counts=None: {"valid_rate": 1.0})
         monkeypatch.setattr(sd, "_data_precision_report", lambda fq: {"mode": "full"})
         import app.services.market_data_hub as mh_mod
         monkeypatch.setattr(mh_mod, "market_data_hub", _FakeHub())

@@ -53,6 +53,12 @@ DEFENSE_KEYWORDS = [
 MIN_FUND_SCALE = 1.0          # 亿元
 MIN_AVG_AMOUNT = 10_000_000   # 元 (1000万)
 
+# R105 C' (round34): 核心强制锚门禁白名单——降级态扫描源行情缺失时，幽灵锚防线
+# （P2-10）不得把真锚当「零成交/低成交幽灵」剔除（round34 §4.3 段一：容器降级态
+# 下 510300/159338 从未进扫描 flat）。常量本地复制（与 allocation_engine.CORE_ANCHORS
+# 同步义务），防 engine 反向依赖 fetcher。
+CORE_ANCHOR_WHITELIST = {"510300", "159338"}
+
 # 强制保留的标的（即使不在 TOP N）
 # round9 P0-8: 560600（幽灵锚）→ 159338（真实中证A500ETF）
 CORE_REQUIRED = ["510300", "159338"]   # 沪深300ETF, 中证A500ETF
@@ -643,13 +649,16 @@ def filter_etfs(raw_list: list[dict] | Any) -> list[dict[str, Any]]:
         amount = _get_col(row, *AMOUNT_NAMES)
         # 降级模式：当 amount=0（新浪源无此字段）时跳过金额过滤
         # P0-23①: amount>0 且 <MIN_AVG_AMOUNT → 存疑，收集后实时补查（不直接过滤）
-        if amount > 0 and amount < MIN_AVG_AMOUNT:
+        # R105 C': 核心锚白名单豁免（真锚不得因降级态快照成交额被剔）
+        if (amount > 0 and amount < MIN_AVG_AMOUNT
+                and code not in CORE_ANCHOR_WHITELIST):
             _suspicious.append((code, row))
             continue
 
         scale = _get_col(row, *SCALE_NAMES)
         # 降级模式：当 scale=0（新浪源无此字段）时跳过规模过滤
-        if scale > 0 and scale < MIN_FUND_SCALE:
+        # R105 C': 核心锚白名单豁免规模门禁（同上，防误杀真锚）
+        if scale > 0 and scale < MIN_FUND_SCALE and code not in CORE_ANCHOR_WHITELIST:
             continue
 
         results.append({

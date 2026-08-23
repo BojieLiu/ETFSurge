@@ -163,7 +163,15 @@ def remove_stale_candidates(
 ) -> list[dict[str, Any]]:
     """
     剔除缺失行情数据的标的（price/return 全为空）（P1 改进 #4）。
+
+    R105 (round34 §4.3): 强制锚（MANDATORY_CODES）豁免本段删除——降级态（周末/
+    盘后/源冷却）factor_matrix 缺列时，已注入 allocs 的锚曾被本函数剥除 →
+    防御型方案核心层无宽基锚，verify_e2e M7/P1-1 四连 FAIL。对齐既有
+    MANDATORY_FLOOR 哲学：「强制锚永不被削减」——缺数据时保留 + WARNING 标注
+    degraded，而非静默清仓。普通标的缺数据仍照常剔除（防豁免扩大化）。
     """
+    from .allocation_engine import MANDATORY_CODES
+
     factor_matrix = factor_matrix or {}
     for strategy in strategies:
         etfs = strategy.get("allocations", [])
@@ -201,6 +209,15 @@ def remove_stale_candidates(
             has_price = fs.get("price", 0) > 0 or abs(fs.get("etf.price", 0)) > 0.0001
             has_return = abs(fs.get("return_1m", 0)) > 0.0001 or abs(fs.get("etf.return_1m", 0)) > 0.0001
             if not has_price and not has_return:
+                # R105 A'-1 (round34): 强制锚豁免降级态剥除——保留权重 + WARNING，
+                # 不参与 removed_weight 重分配（其权重语义由 allocate 注入档保证）。
+                if etf.get("symbol") in MANDATORY_CODES:
+                    logger.warning(
+                        "[risk] mandatory anchor %s lacks price/return — kept (degraded)",
+                        etf.get("symbol"),
+                    )
+                    filtered.append(etf)
+                    continue
                 removed_weight += etf.get("weight", 0.0)
                 logger.info("[risk] removed stale %s (no price/return data)", etf["symbol"])
                 continue

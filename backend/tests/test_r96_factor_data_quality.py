@@ -15,8 +15,12 @@ import pytest
 
 
 def _make_report(monkeypatch, factors=None, ic_series=None, samples=None,
-                 gaps=None, constants=None, produced=None):
-    """构造 _factor_data_quality_report 的 registry 状态并返回报告。"""
+                 gaps=None, constants=None, produced=None, db_counts=None):
+    """构造 _factor_data_quality_report 的 registry 状态并返回报告。
+
+    R104 (round34): db_counts 参数注入 DB 口径样本数（count distinct trade_date）；
+    None = 调用方未注入（回退内存 `_sample_counts` 旧行为）。
+    """
     from app.services import strategy_design as sd
     from app.factors import factor_registry as freg
 
@@ -29,7 +33,7 @@ def _make_report(monkeypatch, factors=None, ic_series=None, samples=None,
     # 保证既有 R96 用例确定性（不依赖测试套件中其它 compute() 调用的残留状态）。
     monkeypatch.setattr(freg.registry, "_last_compute_produced",
                         {} if produced is None else produced)
-    return sd._factor_data_quality_report()
+    return sd._factor_data_quality_report(db_sample_counts=db_counts)
 
 
 class TestR96DataAvailabilityDimension:
@@ -153,3 +157,65 @@ class TestR100ActualOutputRate:
         assert report["actual_output_rate"] == pytest.approx(0.8, abs=1e-4)
         # 脱节显性化：定义 70% vs 实际 80%——两维并列可查
         assert report["definition_ready_pct"] != report["actual_output_rate"]
+
+
+class TestR104DbSampleCountsSource:
+    """round34 R104: fdq.ic_accumulation 样本口径错位（截面计数冒充交易日累计）。
+
+    根因（round34 §4.2）：`_factor_data_quality_report` 读 registry 内存
+    `_sample_counts`——该值每次 compute() 被整体覆盖为「本批截面中该因子有非零值的
+    symbol 数」（≤池规模 ~15），**不是**累计交易日数；而 `/factors/active` 读 DB
+    count(distinct trade_date)（444-502）→ 双路径 30×+ 分裂，且 note 分支
+    `max_samples < MIN_TRADING_DAYS` 恒真 → 文案永远报「积累中」。
+
+    修复：调用点注入 DB 口径（ic_tracker.get_sample_counts_by_code 单一事实源，
+    与 /factors/active 同源）；db_sample_counts=None 回退内存旧行为。
+    """
+
+    def test_ic_accumulation_prefers_db_over_memory(self, monkeypatch):
+        """注入 DB counts {X:300} 且篡改内存计数为 5 → max_samples==300 且 X 非 no_data。"""
+        from app.routers.factors import MIN_TRADING_DAYS
+
+        factors = {"x.mom": {"name": "动量"}, "y.tech": {"name": "技术"}}
+        # 非常量 IC 序列（t/IR 可算）——samples=300 时进显著性判定档（valid/warn）
+        ic = {
+            "x.mom": [0.05 + (i % 7) * 0.003 for i in range(260)],
+            "y.tech": [0.02 + (i % 5) * 0.002 for i in range(260)],
+        }
+        # 内存计数被 compute() 污染为截面计数（5 ≤池规模）；DB 真实累计 300/280
+        report = _make_report(
+            monkeypatch, factors=factors, ic_series=ic,
+            samples={"x.mom": 5, "y.tech": 5},
+            db_counts={"x.mom": 300, "y.tech": 280},
+        )
+        acc = report["ic_accumulation"]
+        assert acc["max_samples"] == 300, (
+            f"应取 DB 口径 300（非内存截面计数 5），实际 {acc}"
+        )
+        assert acc["median_samples"] == 290
+        # note 翻转：max≥250 不再恒「积累中」
+        assert acc["max_samples"] >= MIN_TRADING_DAYS
+        assert "样本充足" in acc["note"], f"DB 口径跨门槛后 note 应翻转，实际 {acc['note']}"
+        # 分类同源：samples=300 时 x.moy/y.tech 均不得落 no_data（warn=0 vs active 分裂修复）
+        assert report["no_data"] == 0, (
+            f"DB 口径下有样本因子不得分类 no_data，实际 {report}"
+        )
+
+    def test_none_override_keeps_legacy(self, monkeypatch):
+        """负向：db_sample_counts=None（未注入/DB 不可用）→ 回退内存行为不变。"""
+        factors = {"x.mom": {"name": "动量"}}
+        report = _make_report(monkeypatch, factors=factors, ic_series={},
+                              samples={"x.mom": 14}, db_counts=None)
+        acc = report["ic_accumulation"]
+        assert acc["median_samples"] == 14 and acc["max_samples"] == 14
+        assert "积累中" in acc["note"], "回退内存时旧「积累中」文案必须保留"
+
+    def test_empty_db_counts_beats_memory(self, monkeypatch):
+        """负向：DB 可达但空表（{}）→ 视为显式空口径（fresh 库 median=0 报积累中），
+        不得静默回退内存截面计数冒充有样本。"""
+        factors = {"x.mom": {"name": "动量"}}
+        report = _make_report(monkeypatch, factors=factors, ic_series={},
+                              samples={"x.mom": 15}, db_counts={})
+        acc = report["ic_accumulation"]
+        assert acc["max_samples"] == 0 and acc["median_samples"] == 0
+        assert "积累中" in acc["note"]

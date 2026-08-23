@@ -18,6 +18,7 @@ from ..engine.allocation_engine import (
     apply_near_substitute_warnings,
     check_structure_reasonableness,
     wide_basis_high_corr_warnings,
+    MANDATORY_CODES,
 )
 from ..engine.budgets import STRATEGY_META
 from ..engine.rationale import build_rationale
@@ -606,6 +607,16 @@ async def generate_enhanced_design(
                         if a.get("symbol") == "CASH" or a.get("layer") != "core":
                             continue
                         if a.get("daily_change_pct") is None:
+                            # R105 A'-2 (round34): 强制锚豁免清零——三源拿不到涨跌时锚
+                            # 保留权重 + WARNING（degraded），否则防御型方案核心层宽基
+                            # 锚被剥除 → M7/P1-1 四连 FAIL（round34 §4.3 段二备选嫌疑）。
+                            if a.get("symbol") in MANDATORY_CODES:
+                                logger.warning(
+                                    "[design] mandatory anchor %s lacks daily change — "
+                                    "core weight kept (degraded)",
+                                    a.get("symbol"),
+                                )
+                                continue
                             a["weight"] = 0.0
                             a["data_unavailable"] = True
                             a["selection_rationale"] = (
@@ -921,7 +932,20 @@ async def _build_market_context(market_data_hub) -> dict:
     except Exception as _e:
         logger.debug("[strategy_design] pool coverage report failed (non-fatal): %s", _e)
 
-    _fdq = _factor_data_quality_report()
+    # R104 (round34): fdq 样本数改读 DB 口径（count distinct trade_date）——旧实现读
+    # registry 内存 `_sample_counts`（compute 截面计数 ≤池规模 ~15），与 /factors/active
+    # 的 DB 口径（444-502 交易日）分裂 30×+，note 恒「积累中」永不翻转。DB 不可用回退
+    # 内存（db_sample_counts=None → 旧行为），不阻断设计主链路。
+    _db_counts: dict | None = None
+    try:
+        from ..database import async_session
+        from ..factors.ic_tracker import ic_tracker as _ic_tracker
+
+        async with async_session() as _db:
+            _db_counts = await _ic_tracker.get_sample_counts_by_code(_db)
+    except Exception as _e:  # noqa: BLE001 - 元数据查询失败不阻断设计
+        logger.debug("[strategy_design] db sample counts unavailable: %s", _e)
+    _fdq = _factor_data_quality_report(db_sample_counts=_db_counts)
     # round24 R26③: 显式盘后模式 + 数据时效——透传 session 与 data_as_of（反 R3 假实时）。
     # 盘后/熔断设计必须标注「数据截至 T-1（15:30）」，避免精确数字冒充实时。
     try:
@@ -1011,13 +1035,13 @@ def _data_precision_report(factor_quality: dict | None) -> dict:
     }
 
 
-def _factor_data_quality_report() -> dict:
+def _factor_data_quality_report(db_sample_counts: dict | None = None) -> dict:
     """P1-9 (round20 §五 P1-9): 因子数据质量统计 + 完整性降级标注。
 
     R96 (round31): 拆「数据可用性」与「IC 积累」两维——旧实现复用 F25② `_status_of`
     IC 样本门禁（样本<250 交易日 → no_data），数据积累期 valid_rate 恒 0%、报
     「缺失 100%」，而 rationale 已引用真实 RSI/动量 → meta 与正文自相矛盾（§4.4
-    实证）。R85 修复后**数据可用性 ≠ IC 积累**：
+    实证）。R85 修复后**数据可用 ≠ IC 积累**，指标未拆两维。
       - 数据可用性（valid_rate 口径）：所需数据字段是否就位（无 `_data_source_gaps`
         缺口、非 `_constant_factor_codes` 常量）。R85 后技术因子有值 → 可用率 >0，
         不再误导；
@@ -1028,6 +1052,10 @@ def _factor_data_quality_report() -> dict:
     旧口径报「97% 可用」掩盖 factor_breakdown 占位退化（设计 697 实证）。新增
     `definition_ready_pct`（定义就位率）与 `actual_output_rate`（实际产出率）并列，
     口径脱节显性化。
+
+    R104 (round34): 样本数单一事实源=DB——调用方（_build_market_context）注入 DB
+    口径 counts（ic_tracker.get_sample_counts_by_code，与 /factors/active 同源）；
+    None（未注入/DB 不可用）回退 registry 内存 `_sample_counts`（旧行为兼容）。
 
     保留 total/valid/warn/static/no_data 键（向后兼容）；新增 data_available /
     data_available_pct / ic_accumulation / definition_ready* / actual_output_rate。
@@ -1045,7 +1073,13 @@ def _factor_data_quality_report() -> dict:
         _factors = getattr(_freg, "_factors", {}) or {}
         _design_static = STATIC_FACTOR_CODES | MARKET_LEVEL_FACTOR_CODES
         _ic_series = getattr(_freg, "_ic_series_cache", {}) or {}
-        _sample_counts = getattr(_freg, "_sample_counts", {}) or {}
+        # R104 (round34): 样本数单一事实源=DB（count distinct trade_date）；调用方未注入
+        # （None）时回退 registry 内存 `_sample_counts`（旧行为，兼容单测/无 DB 场景）。
+        # 内存值语义是「compute 截面计数」（≤池规模），非累计交易日——不得与 DB 口径混用。
+        _sample_counts = (
+            dict(db_sample_counts) if db_sample_counts is not None
+            else getattr(_freg, "_sample_counts", {}) or {}
+        )
         _gaps = getattr(_freg, "_data_source_gaps", {}) or {}
         _constant: set[str] = set(getattr(_freg, "_constant_factor_codes", set()) or set())
         # R100 (round32): compute() 实际产出（非 None 数值）的因子键数——

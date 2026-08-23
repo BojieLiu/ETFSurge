@@ -439,7 +439,8 @@ class TestStrategyDesignSessionPropagation:
 
         async def _fake_ff(hub): return {}
         monkeypatch.setattr(sd, "_compute_fund_flow", _fake_ff)
-        monkeypatch.setattr(sd, "_factor_data_quality_report", lambda: {"valid_rate": 1.0})
+        monkeypatch.setattr(sd, "_factor_data_quality_report",
+                            lambda db_sample_counts=None: {"valid_rate": 1.0})
         monkeypatch.setattr(sd, "_data_precision_report", lambda fq: {"mode": "full"})
 
         ctx = sd._build_market_context.__wrapped__ if hasattr(sd._build_market_context, "__wrapped__") else sd._build_market_context

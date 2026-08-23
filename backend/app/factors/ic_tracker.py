@@ -366,6 +366,27 @@ class ICTracker:
             logger.warning("[ic_tracker] count distinct trade_date failed: %s", e)
             return 0
 
+    async def get_sample_counts_by_code(self, session: AsyncSession) -> dict[str, int]:
+        """R104 (round34): 全因子 IC 累计交易日数一次查询（单一事实源）。
+
+        F25① sample_count 语义 = count(distinct trade_date)（日频 1 行/因子）。
+        routers/factors 的 `_db_ic_sample_counts`（/factors/active 路径）与设计
+        fdq.ic_accumulation（strategy_design 路径）共用本查询——修复「同一业务量
+        多路径不同源」（R94/R95/R104 同族根因）：fdq 曾读 registry 内存
+        `_sample_counts`（compute 截面计数 ≤池规模），与 DB 口径分裂 30×+。
+
+        查询失败不在此兜底（抛给调用方决定回退策略：router 回退空 dict、
+        strategy_design 回退内存计数）。
+        """
+        from ..models.factor_ic import FactorICRecord  # lazy import 防循环依赖
+
+        stmt = select(
+            FactorICRecord.factor_code,
+            func.count(func.distinct(FactorICRecord.trade_date)),
+        ).group_by(FactorICRecord.factor_code)
+        rows = (await session.execute(stmt)).all()
+        return {r[0]: int(r[1]) for r in rows}
+
     @staticmethod
     def _slice_market_data_day(kline: dict[str, dict[str, Any]], i: int, window: int = 60) -> dict[str, dict[str, Any]]:
         """R55: 从列式 K 线缓存截取「截至第 i 个交易日」的截面 K 线。

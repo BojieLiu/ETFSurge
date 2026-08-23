@@ -136,8 +136,12 @@ class TestEnsureMandatory:
         assert {"518880", "511090"} <= defense_codes
 
     def test_skips_when_already_in_pool(self):
-        pool = {LAYER_CORE: [{"symbol": "510300"}], LAYER_SATELLITE: [], LAYER_DEFENSE: [],
-                LAYER_OPPORTUNISTIC: [], LAYER_RESEARCH: []}
+        # R105 B' (round34): 缺锚时 ensure_mandatory 会静态注入（不再静默跳过）——
+        # 本用例改为「全部强制锚已在池」场景，断言不重复注入
+        # （原意图保留：in-pool 成员不重复 enforce）。
+        pool = {LAYER_CORE: [{"symbol": "510300"}, {"symbol": "159338"}],
+                LAYER_DEFENSE: [{"symbol": "518880"}, {"symbol": "511090"}],
+                LAYER_SATELLITE: [], LAYER_OPPORTUNISTIC: [], LAYER_RESEARCH: []}
         before = len(pool[LAYER_CORE])
         ensure_mandatory(pool, [{"symbol": "510300"}])
         assert len(pool[LAYER_CORE]) == before

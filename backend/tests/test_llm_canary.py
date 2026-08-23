@@ -33,6 +33,15 @@ async def _try_llm(prompt: str) -> str:
         if "限流" in str(e):
             pytest.skip(f"LLM 限流（429）：{e}")
         raise
+    except Exception as e:
+        # R34 实施轮 (2026-08-23): 提供方配额耗尽/宕机（402/5xx/连接失败）→
+        # 诚实降级 skip——跳过在报告中可见，非伪装通过。金丝雀断言价值在 LLM
+        # 可用时兑现；提供方宕机日硬红会淹没真回归（对齐上方 429 skip 先例）。
+        import httpx
+
+        if isinstance(e, httpx.HTTPError):
+            pytest.skip(f"LLM 提供方不可达（环境性）：{e}")
+        raise
 
 
 @pytest.mark.asyncio

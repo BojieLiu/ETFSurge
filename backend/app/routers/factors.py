@@ -144,15 +144,14 @@ def _status_of(code: str, samples: int, t_stat: float | None, ir: float | None,
 
 async def _db_ic_sample_counts(db) -> dict[str, int]:
     """F25①: 一次查询取全因子 IC 累计交易日数（factor_ic_records 按 code 分组
-    `count(distinct trade_date)`——日频 1 行语义）。DB 不可用回退空 dict（调用方回退内存）。"""
+    `count(distinct trade_date)`——日频 1 行语义）。DB 不可用回退空 dict（调用方回退内存）。
+
+    R104 (round34): SQL 实现迁移至 `ic_tracker.get_sample_counts_by_code`（单一事实源，
+    设计 fdq.ic_accumulation 同源复用，防多路径口径分裂），此处保留转发 + 失败兜底。"""
     try:
-        from ..models.factor_ic import FactorICRecord
-        from sqlalchemy import select, func
-        rows = (await db.execute(
-            select(FactorICRecord.factor_code, func.count(func.distinct(FactorICRecord.trade_date)))
-            .group_by(FactorICRecord.factor_code)
-        )).all()
-        return {r[0]: int(r[1]) for r in rows}
+        from ..factors.ic_tracker import ic_tracker
+
+        return await ic_tracker.get_sample_counts_by_code(db)
     except Exception as e:  # noqa: BLE001 - DB 查询失败不阻断端点
         logger.warning("[factors] DB IC sample counts failed: %s", e)
         return {}

@@ -24,6 +24,16 @@ ALL_LAYERS = [LAYER_CORE, LAYER_SATELLITE, LAYER_DEFENSE, LAYER_OPPORTUNISTIC, L
 # Force-kept pool codes (truncation / balancing must never evict these)
 MANDATORY_CODES = {"510300", "159338", "518880", "511090"}
 
+# R105 B' (round34): 核心双锚静态元数据——扫描 flat 缺锚时的兜底注入源（段一缺陷：
+# found=None 曾静默跳过，降级态下锚从未进池）。名称/指数与 etf_scanner.WIDE_BASIS_STATIC
+# 同步义务（不从引擎反向导入 fetcher，保持 engine 零依赖）；防御锚（518880/511090）
+# 无静态条目——缺锚只 WARNING 不伪造注入。K 线由后续 refresh_kline 补齐；若 K 线持续
+# 缺失，设计层豁免（risk_controls.remove_stale_candidates A'-1）保证不被剥除。
+_STATIC_ANCHOR_META = {
+    "510300": {"name": "沪深300ETF", "tracked_index": "沪深300"},
+    "159338": {"name": "中证A500ETF", "tracked_index": "中证A500"},
+}
+
 
 def assign_layer(base_layer: str, industry: str) -> str:
     """行业→层映射（P1-2 防御层分类修复，R5 pool 归层）。"""
@@ -137,27 +147,54 @@ def ensure_mandatory(
     pool: dict[str, list[dict[str, Any]]],
     flat: list[dict[str, Any]],
 ) -> None:
-    """确保 MANDATORY_CODES 在池中（如果全市场扫描有结果）。原地修改 pool。"""
+    """确保 MANDATORY_CODES 在池中（如果全市场扫描有结果）。原地修改 pool。
+
+    R105 B' (round34): flat 缺锚时不再静默跳过——WARNING + 静态元数据兜底注入
+    （仅核心双锚 510300/159338 有静态条目）；防御锚缺锚只 WARNING 可观测。
+    """
     if not flat:
         return  # 扫描失败，不强行注入（直接报错）
     for code in MANDATORY_CODES:
         in_pool = any(
             e["symbol"] == code for layer in pool.values() for e in layer
         )
-        if not in_pool:
-            found = next((e for e in flat if e["symbol"] == code), None)
-            if found:
-                if code in ("510300", "159338"):
-                    target = LAYER_CORE
-                elif code in ("518880",):
-                    target = LAYER_DEFENSE
-                elif code == "511090":
-                    target = LAYER_DEFENSE
-                else:
-                    target = LAYER_SATELLITE
-                found["layer"] = target
-                pool[target].append(found)
-                logger.info("MarketDataHub: enforced mandatory %s -> %s", code, target)
+        if in_pool:
+            continue
+        found = next((e for e in flat if e["symbol"] == code), None)
+        if found:
+            if code in ("510300", "159338"):
+                target = LAYER_CORE
+            elif code in ("518880",):
+                target = LAYER_DEFENSE
+            elif code == "511090":
+                target = LAYER_DEFENSE
+            else:
+                target = LAYER_SATELLITE
+            found["layer"] = target
+            pool[target].append(found)
+            logger.info("MarketDataHub: enforced mandatory %s -> %s", code, target)
+        else:
+            # R105 B' (round34): 段一缺陷修复——降级态扫描缺锚必须可观测。
+            meta = _STATIC_ANCHOR_META.get(code)
+            target = (LAYER_CORE if code in ("510300", "159338")
+                      else LAYER_DEFENSE if code in ("518880", "511090")
+                      else LAYER_SATELLITE)
+            if meta:
+                pool.setdefault(target, []).append({
+                    "symbol": code,
+                    "name": meta["name"],
+                    "tracked_index": meta["tracked_index"],
+                    "layer": target,
+                })
+                logger.warning(
+                    "[pool] mandatory %s missing from scan — injecting static entry -> %s",
+                    code, target,
+                )
+            else:
+                logger.warning(
+                    "[pool] mandatory %s missing from scan (no static meta — not fabricated)",
+                    code,
+                )
 
 
 def truncate_with_mandatory_protection(

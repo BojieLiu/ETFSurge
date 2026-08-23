@@ -81,16 +81,33 @@ class TestDefenseEffectiveness:
 
 
 class TestStaleCandidates:
-    """remove_stale_candidates: ETFs without price/return data are removed."""
+    """remove_stale_candidates: ETFs without price/return data are removed.
+
+    R105 (round34): 强制锚（510300/159338/518880/511090）豁免本段删除（degraded
+    保留）——本类改用非锚标的 512800 断言「普通缺数据标的照常剔除」语义。
+    """
 
     def test_removes_etf_without_data(self):
-        etfs = [_etf('510300', weight=0.1, price=None, return_1m=None), _etf('518880', weight=0.1, price=10.0, return_1m=0.01)]
-        fm = {'510300': {}, '518880': {'price': 10.0, 'return_1m': 0.01}}
+        etfs = [_etf('512800', weight=0.1, price=None, return_1m=None), _etf('518880', weight=0.1, price=10.0, return_1m=0.01)]
+        fm = {'512800': {}, '518880': {'price': 10.0, 'return_1m': 0.01}}
         result = remove_stale_candidates([_strategy(etfs)], fm)
-        assert '510300' not in {a['symbol'] for a in result[0]['allocations']}
+        assert '512800' not in {a['symbol'] for a in result[0]['allocations']}
+
+    def test_mandatory_anchor_without_data_kept_degraded(self):
+        """R105 A'-1: 锚缺数据保留 + WARNING（对齐 MANDATORY_FLOOR 哲学）。
+
+        注：需含至少一个有数据标的，否则 R77 全删保护优先（整段跳过）。
+        """
+        etfs = [_etf('510300', weight=0.1), _etf('512800', weight=0.1),
+                _etf('159915', weight=0.1, price=3.5)]
+        fm = {'510300': {}, '512800': {}, '159915': {'price': 3.5}}
+        result = remove_stale_candidates([_strategy(etfs)], fm)
+        symbols = {a['symbol'] for a in result[0]['allocations']}
+        assert '510300' in symbols, "强制锚缺数据不得被剥除（R105 豁免）"
+        assert '512800' not in symbols, "普通缺数据标的仍应剔除"
 
     def test_preserves_cash(self):
-        etfs = [{'symbol': 'CASH', 'weight': 0.1}, _etf('510300', weight=0.2, price=None, return_1m=None)]
+        etfs = [{'symbol': 'CASH', 'weight': 0.1}, _etf('512800', weight=0.2, price=None, return_1m=None)]
         result = remove_stale_candidates([_strategy(etfs)], {})
         assert any(a['symbol'] == 'CASH' for a in result[0]['allocations'])
 
@@ -120,11 +137,11 @@ class TestStaleCandidatesR77:
         assert symbols == {'510300', '518880'}
 
     def test_still_removes_partial_stale(self):
-        etfs = [_etf('510300', weight=0.3, price=None, return_1m=None), _etf('518880', weight=0.3, price=10.0, return_1m=0.01)]
-        fm = {'510300': {}, '518880': {'price': 10.0, 'return_1m': 0.01}}
+        etfs = [_etf('512800', weight=0.3, price=None, return_1m=None), _etf('518880', weight=0.3, price=10.0, return_1m=0.01)]
+        fm = {'512800': {}, '518880': {'price': 10.0, 'return_1m': 0.01}}
         result = remove_stale_candidates([_strategy(etfs)], fm)
         symbols = {a['symbol'] for a in result[0]['allocations']}
-        assert '510300' not in symbols
+        assert '512800' not in symbols
         assert '518880' in symbols
 
 

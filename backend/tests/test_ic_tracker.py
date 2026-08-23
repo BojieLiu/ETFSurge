@@ -385,10 +385,13 @@ async def ic_db():
     await engine.dispose()
 
 
-def _make_kline_and_scores(n_days: int = 240, n_symbols: int = 10):
+def _make_kline_and_scores(n_days: int = 240, n_symbols: int = 10,
+                           with_ohlcv: bool = False):
     """构造 n_days 交易日 K 线（时序升序）+ 注入的历史因子分。
 
     - kline: {symbol: {"close":[升序收盘价], "dates":[升序日期]}}
+      with_ohlcv=True 时带齐 open/high/low/volume 四列（R108 G6：旧工厂只造
+      close/dates 两键——「测试数据形状镜像了生产缺陷」，对回填丢列完全无感）
     - factor_scores_by_index: {i: {symbol: {code: val}}} 截至第 i 日因子分
     因子值与收益均带跨标的差异（非常量），保证 compute_periodic_ic 产 IC（含近零→signal_absent 仍落库）。
     """
@@ -407,7 +410,17 @@ def _make_kline_and_scores(n_days: int = 240, n_symbols: int = 10):
         for _ in range(n_days):
             price *= (1.0 + rng.uniform(-0.03, 0.03))
             closes.append(round(price, 4))
-        kline[sym] = {"close": closes, "dates": dates}
+        entry = {"close": closes, "dates": list(dates)}
+        if with_ohlcv:
+            # R108 G6: 与 main.py._build_backfill_kline 同契约——四列与 close
+            # 同长度（同条件收集），值带随机差异供 ATR/KDJ 类因子计算。
+            entry.update({
+                "open": [round(c * (1 - rng.uniform(0, 0.01)), 4) for c in closes],
+                "high": [round(c * (1 + rng.uniform(0, 0.02)), 4) for c in closes],
+                "low": [round(c * (1 - rng.uniform(0, 0.02)), 4) for c in closes],
+                "volume": [float(rng.randint(5_000, 50_000)) for _ in closes],
+            })
+        kline[sym] = entry
 
     for i in range(1, n_days):
         day_scores: dict[str, dict] = {}
@@ -498,6 +511,68 @@ class TestR102BackfillCrossesValidityThreshold:
         # 锁住「跨 250 仅代表有样本，是否 valid 仍由统计决定」的语义。
         strong_status, _ = _status_of(codes[0], distinct, 2.5, 0.8)
         assert strong_status == "valid", f"t=2.5/IR=0.8 应判 valid，实际 {strong_status}"
+
+
+class TestR108BackfillCoversOhlcvFactors:
+    """R108 (round34 §4.6): 回填管道必须覆盖依赖 high/low/volume 的纯 K 线因子。
+
+    根因：main.py 回填 kline 只装 {close, dates} → truncated 重放 OHLCV 恒空 →
+    atr/vol_ratio/vwap/amount_stability/kdj×3 七因子历史无法入算（n≈7-9，
+    vwap 冻结 245），而 12 个 close-only 因子被补到 444-502 天。
+
+    本类验证：五列工厂（G6）+ OHLCV 依赖因子分（生产=R108 修复后 compute 重放的
+    真实产出形态）经 backfill_ic_history 正常落库至 ≥250 交易日；负向配对——
+    close-only 形态下这些因子无分数可注、distinct 恒 0（诚实 no_data，非假绿）。
+    """
+
+    OHLCV_CODES = [
+        "technical.atr.atr_14", "technical.kdj.kdj_k",
+        "technical.kdj.kdj_d", "technical.kdj.kdj_j",
+        "vol.vol_ratio", "vwap", "amount_stability",
+    ]
+
+    @pytest.mark.asyncio
+    async def test_backfill_covers_high_low_volume_factors(self, ic_db):
+        import random
+
+        tracker = ICTracker()
+        kline, scores, symbols, codes = _make_kline_and_scores(
+            n_days=500, n_symbols=10, with_ohlcv=True)
+
+        # G6 工厂契约：四列与 close 同长度（同条件收集）
+        for sym, kd in kline.items():
+            for col in ("open", "high", "low", "volume"):
+                assert len(kd[col]) == len(kd["close"]), f"{sym}.{col} 列长失衡"
+
+        rng = random.Random(20260822)
+        for i in range(1, 500):
+            for sym in symbols:
+                for c in self.OHLCV_CODES:
+                    scores[i][sym][c] = round(rng.uniform(-1.0, 1.0), 4)
+
+        async with ic_db() as db:
+            processed = await tracker.backfill_ic_history(db, kline, scores, max_days=500)
+            counts = await tracker.get_sample_counts_by_code(db)
+
+        assert processed >= MIN_TRADING_DAYS
+        for c in self.OHLCV_CODES:
+            n = counts.get(c, 0)
+            assert n >= 400, (
+                f"{c} 回填后 distinct trade_date 应 ≥400（跨 250 门槛），实际 {n}"
+            )
+
+    @pytest.mark.asyncio
+    async def test_close_only_scores_leave_ohlcv_factors_no_data(self, ic_db):
+        """负向：close-only 形态（旧缺陷镜像）下 OHLCV 因子无 IC 行——
+        distinct 恒 0，不得出现「有分数却没落库」或反之的假信号。"""
+        tracker = ICTracker()
+        kline, scores, symbols, codes = _make_kline_and_scores(n_days=500, n_symbols=10)
+        # 不注入任何 OHLCV 依赖码（compute 在 high=[] 时产不出这些分）
+        async with ic_db() as db:
+            await tracker.backfill_ic_history(db, kline, scores, max_days=500)
+            counts = await tracker.get_sample_counts_by_code(db)
+        for c in self.OHLCV_CODES:
+            assert counts.get(c, 0) == 0, f"{c} 无分数注入时必须保持 no_data"
 
 
 class TestR55HonestNoBackfill:

@@ -413,6 +413,11 @@ class MarketDataHub(
         new_pool = self._deduplicate_by_index(new_pool)
 
         # 5. 强制保底
+        # R105 (round34): 注入前规模快照——静态锚（B' 兜底条目）是合成补齐，
+        # 不代表扫描健康；P0-13① 缩水保护须以「扫描真实产出」为判定信号，
+        # 否则锚注入会把严重缩水的池顶过 50% 线、绕过 last-good 保护
+        # （实证：2 只板块注入 + 2 静态锚 = 4 ≮ 8×50% → 降级池覆盖 8 只 last-good）。
+        _pre_mandatory_total = sum(len(v) for v in new_pool.values())
         self._ensure_mandatory(new_pool, flat)
 
         # 6. 层内复合评分 + 行业均衡化 + 截断
@@ -442,7 +447,8 @@ class MarketDataHub(
         self._recheck_mandatory_after_truncate(new_pool, flat)
 
         # 7. 空池保护：如果刷新结果为空且存在上次成功数据，保留上次 pool 而非清空
-        total_new = sum(len(v) for v in new_pool.values())
+        # R105 (round34): 判定口径=强制注入前规模（步骤 5 快照）——合成锚不得掩盖扫描缩水。
+        total_new = _pre_mandatory_total
         _last_good_total = sum(len(v) for v in _last_good.values()) if _last_good else 0
         # P0-13① (round16 3.14 R1): 冷却期 last-good 保护扩展——refresh 产出显著
         # 低于上次成功 pool（<50%）且上次非空时，保留 last-good 而非覆盖，

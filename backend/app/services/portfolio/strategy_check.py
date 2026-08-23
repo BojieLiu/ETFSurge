@@ -1324,6 +1324,11 @@ def _rule_based_suggestion(
         "suggested_weight": round(float(suggested), 4),
         "reason": reason,
         "confidence": _confidence,
+        # R107 (round34): composite 分显式出参——报告表格「因子分」列与 reason 引用
+        # 同源单义（_score 即 composite 复合分）。旧表格列自算原始因子非零均值
+        # （RSI/KDJ 0-100 与 z-score 混杂量纲 + 剔零漂移），与理由同页打架
+        #（实测 159992 表格 +1.63 vs 理由 -2.43，round34 §4.5）。
+        "composite_score": round(float(_score), 4),
         "source": "rule",
     }
 
@@ -1383,9 +1388,11 @@ def _build_rule_fallback_report(
     for s in merged_suggestions or []:
         sym = s.get("symbol", "")
         fb = factor_breakdowns.get(sym, {}) or {}
-        fs = fb.get("factor_scores", {}) or {}
-        fs_vals = [v for v in fs.values() if isinstance(v, (int, float)) and v != 0]
-        avg = sum(fs_vals) / len(fs_vals) if fs_vals else 0.0
+        # R107 (round34): 「因子分」列改读与理由同源的 composite_score——旧实现
+        # fs_vals 对原始因子非零值简单平均（RSI(0-100)/KDJ/动量 z-score 混杂量纲，
+        # 剔零再漂移），与同行 reason「因子分 X.XX」（composite 口径）同页矛盾。
+        comp = s.get("composite_score")
+        avg = comp if isinstance(comp, (int, float)) else 0.0
         sig = ((fb.get("technical_signal") or {}).get("signal") or "hold")
         action = s.get("action", "hold")
         reason = (s.get("reason", "") or "").replace("|", "｜")

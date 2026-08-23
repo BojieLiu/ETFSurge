@@ -57,6 +57,9 @@ LAYER_DEFAULTS = {
     "L2-e2e": {"timeout": 900, "backend_dependent": True},
     "L2-health": {"timeout": 120, "backend_dependent": False},
     "L2-smoke": {"timeout": 120, "backend_dependent": False},
+    # §12 P0-1 (round34): 启动行为审计——消费 backend.log 自最近启动标记起的窗口
+    # （R103 回填重跑 / R105 段一静默缺锚 / R106 WARNING 周期重放）
+    "L2-startup": {"timeout": 60, "backend_dependent": False},
     "L3-perf": {"timeout": 120, "backend_dependent": True},
     "L4-routes": {"timeout": 60, "backend_dependent": False},
     "L4-purity": {"timeout": 60, "backend_dependent": False},
@@ -65,7 +68,7 @@ LAYER_DEFAULTS = {
 }
 
 LAYER_ORDER = [
-    "L1-unit", "L2-e2e", "L2-health", "L2-smoke", "L3-perf",
+    "L1-unit", "L2-e2e", "L2-health", "L2-smoke", "L2-startup", "L3-perf",
     "L4-routes", "L4-purity", "L4-async", "L5-frontend",
 ]
 
@@ -226,6 +229,11 @@ def plan_layers(mode, changed_files, explicit_layers=None, explicit_modules=None
             layers += ["L1-unit", "L2-e2e", "L2-health"]
         if 1 in tiers:
             layers += ["L3-perf", "L2-smoke", "L4-async"]
+            # §12 P0-1 (round34): main.py（启动路径）或审计脚本自身变更 → 启动行为审计
+            if any(f.replace("\\", "/") == "backend/app/main.py"
+                   or f.replace("\\", "/") == "backend/scripts/check_startup_behavior.py"
+                   for f in c["logic_files"]):
+                layers.append("L2-startup")
         if "1e" in tiers:
             layers.append("L4-purity")
         if "1r" in tiers:
@@ -427,6 +435,9 @@ def _build_command(name, plan, args):
         return [sys.executable, "scripts/data_health_check.py"], BACKEND_DIR, {}
     if name == "L2-smoke":
         return [sys.executable, "scripts/smoke_startup.py"], BACKEND_DIR, {"SMOKE_FAST": "1"}
+    if name == "L2-startup":
+        # §12 P0-1 (round34): 启动行为审计（读日志+pool 快照，零网络零后端依赖）
+        return [sys.executable, "scripts/check_startup_behavior.py"], BACKEND_DIR, {}
     if name == "L3-perf":
         return [sys.executable, "scripts/verify_perf.py", "--base", f"http://{host}:{port}"], BACKEND_DIR, {}
     if name == "L4-routes":

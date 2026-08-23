@@ -150,7 +150,8 @@ class TestGenerateEnhancedDesignCoarseBuckets:
         monkeypatch.setattr(sd, "apply_risk_controls", lambda strat_list, fm, regime=None: strat_list)
         monkeypatch.setattr(sd, "_correlation_matrix_for", lambda allocs, cands: {})
         monkeypatch.setattr(sd, "_correlation_medians_for", lambda allocs, cands: {})
-        monkeypatch.setattr(sd, "_factor_data_quality_report", lambda: {"valid_rate": 0.0, "degraded": True})
+        monkeypatch.setattr(sd, "_factor_data_quality_report",
+                            lambda db_sample_counts=None: {"valid_rate": 0.0, "degraded": True})
         monkeypatch.setattr(sd, "_data_precision_report", lambda fq: precision_report)
         # hermetic：直接注入受控 data_precision，避免全量套件中其它测试污染
         # _data_precision_report / market_data_hub 全局导致 exact 态误判 coarse

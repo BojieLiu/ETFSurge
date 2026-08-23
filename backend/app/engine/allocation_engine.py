@@ -873,12 +873,26 @@ def _merge_substitute_family(allocs: list[dict[str, Any]]) -> list[dict[str, Any
     for fam, group in by_family.items():
         if len(group) < 2:
             continue
+        # R105 (round34 §4.3 实施轮发现): 强制锚豁免同族合并——本函数曾把
+        # {510300, 159338, 510050}（大盘宽基族）合并留一、保留最高权重的
+        # 510050 并将双锚**从列表移除** → 防御型方案核心层缺锚，M7/P1-1 四连
+        # FAIL（remove_stale/P1-5 修复后的第三层剥除源）。对齐 MANDATORY_FLOOR
+        # 「强制锚永不被削减」哲学与 _dedup_same_index 锚豁免先例：
+        #   · 锚永不进入 removed；
+        #   · 全锚同族（如 510300+159338 双锚）→ 整组豁免（R101 用户决策：
+        #     不同宽基指数可并存），冗余提示由 near_substitute_pairs 告警承担。
+        anchor_members = [a for a in group if a.get("symbol") in MANDATORY_CODES]
+        if anchor_members and len(anchor_members) == len(group):
+            continue
         # 保留方：流动性(规模)优先 → 原始权重优先 → 出现序（max 稳定）
         keep = max(
             group,
             key=lambda a: (a.get("market_cap") or 0.0, a.get("weight") or 0.0),
         )
-        removed = [a for a in group if a is not keep]
+        removed = [
+            a for a in group
+            if a is not keep and a.get("symbol") not in MANDATORY_CODES
+        ]
         merged_symbols: list[str] = []
         for a in removed:
             sym = a.get("symbol")

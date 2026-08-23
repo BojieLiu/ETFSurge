@@ -163,6 +163,96 @@ def test_source_registry():
         check("熔断器可查询", False, str(e)[:80])
 
 
+# §12 P0-2 (round34): 因子样本增长率快照——时间维度盲区补位。
+# R108 七因子 n=7-9 停滞 9 天、vwap 冻结 n=245 一整年，快照型巡检结构性看不见；
+# 本项对 per-factor distinct trade_date 做跨巡检对比：连续 ≥2 次无增长且 n<250
+# → 列「输入缺失观察名单」（WARN 起步纪律 §12.5，不 FAIL 阻断）。
+GROWTH_SNAPSHOT_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "data", "patrol_factor_growth.json",
+)
+
+
+def test_factor_sample_growth():
+    """检查因子 IC 样本增长率（vs 上次巡检快照）。"""
+    try:
+        import asyncio
+        import json as _json
+        from app.database import async_session
+        from app.factors.ic_tracker import ic_tracker
+
+        async def _counts():
+            async with async_session() as session:
+                return await ic_tracker.get_sample_counts_by_code(session)
+
+        counts = asyncio.run(_counts())
+        if not counts:
+            check("因子样本可查询", False, "get_sample_counts_by_code 空（DB 未初始化?）")
+            return
+
+        MIN_TRADING_DAYS = 250
+        try:
+            with open(GROWTH_SNAPSHOT_PATH, encoding="utf-8") as f:
+                prev = _json.load(f)
+        except Exception:
+            prev = None
+
+        if not prev or not isinstance(prev.get("counts"), dict):
+            # 首跑建基线并记 PASS（§12.4 P0 规格）
+            _save_growth_snapshot(counts, stale_runs={})
+            check(f"因子样本增长率基线建立: {len(counts)} 因子", True,
+                  f"快照={GROWTH_SNAPSHOT_PATH}")
+            return
+
+        prev_counts = prev.get("counts", {})
+        stale_runs = dict(prev.get("stale_runs", {}))
+        watchlist = []
+        regressed = []
+        for code, n in counts.items():
+            p = int(prev_counts.get(code, 0) or 0)
+            if int(n) < int(p):
+                regressed.append(f"{code} {p}->{n}")
+            if int(n) < MIN_TRADING_DAYS and int(n) <= int(p):
+                runs = int(stale_runs.get(code, 0)) + 1
+                stale_runs[code] = runs
+                if runs >= 2:
+                    watchlist.append((code, n, runs))
+            else:
+                stale_runs[code] = 0
+        # 已消失的因子清理计数
+        for code in list(stale_runs):
+            if code not in counts:
+                del stale_runs[code]
+        _save_growth_snapshot(counts, stale_runs)
+
+        detail = f"{len(counts)} 因子；停滞≥2次观察名单 {len(watchlist)} 只"
+        if watchlist:
+            print("    [WARN] 输入缺失观察名单（n<250 且连续 ≥2 次巡检无增长）：")
+            for code, n, runs in sorted(watchlist, key=lambda x: x[1])[:10]:
+                print(f"      - {code}: n={n}（停滞 {runs} 次巡检）")
+            top = ",".join(c for c, _, _ in watchlist[:5])
+            check(f"因子样本增长率: 观察名单 {len(watchlist)} 只（{top}…）",
+                  True, "WARN 起步不阻断；核对输入字段是否缺失（R108/vwap 冻结同型）")
+        else:
+            check("因子样本增长率: 无停滞观察名单", True, detail)
+        if regressed:
+            print(f"    [WARN] 样本数回退 {len(regressed)} 只（异常信号）: {regressed[:3]}")
+    except Exception as e:
+        check("因子样本增长率可查询", False, str(e)[:100])
+
+
+def _save_growth_snapshot(counts: dict, stale_runs: dict):
+    import json as _json
+    os.makedirs(os.path.dirname(GROWTH_SNAPSHOT_PATH), exist_ok=True)
+    with open(GROWTH_SNAPSHOT_PATH, "w", encoding="utf-8") as f:
+        _json.dump({
+            "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "min_trading_days": 250,
+            "counts": {k: int(v) for k, v in counts.items()},
+            "stale_runs": {k: int(v) for k, v in stale_runs.items()},
+        }, f, ensure_ascii=False, indent=2)
+
+
 if __name__ == "__main__":
     print(f"\n{'#'*60}")
     print(f"#  数据管道健康检查 (P3-4)")
@@ -184,6 +274,9 @@ if __name__ == "__main__":
 
     section("5. 熔断器")
     test_source_registry()
+
+    section("6. 因子样本增长率 (§12 P0-2)")
+    test_factor_sample_growth()
 
     section("评估结果")
     print(f"  PASS: {PASS}/{PASS+FAIL}")

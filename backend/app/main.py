@@ -135,6 +135,50 @@ async def _wait_for_pool_symbols(
     return []
 
 
+def _kline_depth_from_rows(rows: dict) -> int:
+    """R103 (round34): K 线深度只统计「K 线行」——首行含非空 ``date`` 键的序列。
+
+    场外联接基金净值序列（如 019633 联接 C，658 点、行无 date 键）不得计入：
+    否则动态 skip 阈值 ``max(depth - 30, 200)`` 被 658 顶高至 628，DB 已回填的
+    502 恒 < 628 → 每次启动重跑完整回填（~56s CPU 白跑）。判据与回填日期轴
+    消费语义一致（本文件回填构造同取 ``r.get("date")``）；sina/baostock/netease
+    路径行统一规整为 date 键（china_market._sina_history_cb 等），净值序列不受影响。
+    """
+    return max(
+        (len(rws) for rws in rows.values()
+         if isinstance(rws, list) and rws
+         and str(rws[0].get("date") or "").strip()),
+        default=0,
+    )
+
+
+def _build_backfill_kline(rows: dict, syms) -> dict[str, dict]:
+    """R102/R108: 构造列式回填 K 线（时序升序），带齐 OHLCV 五列。
+
+    R108 (round34)：旧实现只装 {close, dates} 两键——缓存行内的 open/high/low/
+    volume 被丢弃 → truncated 重放展开恒空数组 → atr/vol_ratio/vwap/
+    amount_stability/kdj×3 七个纯 K 线因子历史恒无法入算。四列与 close **同条件**
+    收集（``r.get("close") is not None``），列长恒等；sina 行五列齐全，
+    truncated 展开（``kd["open"][:i+1] if kd.get("open")``）自此自然生效。
+    """
+    kline: dict[str, dict] = {}
+    for sym, rws in rows.items():
+        if sym not in syms or not isinstance(rws, list) or not rws:
+            continue
+        closes = [r.get("close") for r in rws if r.get("close") is not None]
+        if len(closes) >= 5:
+            kline[sym] = {
+                "close": closes,
+                "dates": [r.get("date") for r in rws if r.get("close") is not None],
+                # R108: 四列与 close 同条件收集（列长恒等）
+                "open": [r.get("open") for r in rws if r.get("close") is not None],
+                "high": [r.get("high") for r in rws if r.get("close") is not None],
+                "low": [r.get("low") for r in rws if r.get("close") is not None],
+                "volume": [r.get("volume") for r in rws if r.get("close") is not None],
+            }
+    return kline
+
+
 # R88 (round30): 个股 K 线缓存扩展——从 DB 持仓读取非 ETF 个股（A 股 600519 / HK
 # 00700 / US AAPL），补入 K 线预热符号集（方案 A：复用 hub 缓存域，不新增第二缓存域）。
 async def _kline_warmup_holdings_symbols() -> list[str]:
@@ -826,12 +870,11 @@ async def lifespan(app: FastAPI):
             # R102 (round33 §8.2): 跳过判据按 K 线实际深度（最长标的历史根数）动态定，
             # 余量 30 天——固定 ≥200 在「日线扩至 500、实际可达 ~490」下余量过大永不
             # 重跑（现有 245 恒跳过），在「池含大量新 ETF」下又可能误触发每启重跑。
+            # R103 (round34): 深度只统计 K 线行（含 date 键）——场外净值序列
+            # （019633 len=658 无 date 键）不得顶高阈值击穿 skip 判据。
             # 幂等：save_ic_batch_to_db 有 (factor_code, trade_date) 唯一约束 + upsert，
             # 同历日重填不重复不丢数据。
-            kline_depth = max(
-                (len(rws) for rws in rows.values() if isinstance(rws, list) and rws),
-                default=0,
-            )
+            kline_depth = _kline_depth_from_rows(rows)
             async with async_session() as db:
                 _existing = await ic_tracker.count_distinct_trade_dates(db)
             if _existing >= max(kline_depth - 30, 200):
@@ -847,15 +890,8 @@ async def lifespan(app: FastAPI):
             if not _syms:
                 logger.info("[ic_backfill] 组合池长时间为空（等待后放弃），跳过")
                 return
-            # 构造列式 K 线（时序升序）+ dates
-            kline: dict[str, dict] = {}
-            for sym, rws in rows.items():
-                if sym not in _syms or not isinstance(rws, list) or not rws:
-                    continue
-                closes = [r.get("close") for r in rws if r.get("close") is not None]
-                dates = [r.get("date") for r in rws if r.get("close") is not None]
-                if len(closes) >= 5:
-                    kline[sym] = {"close": closes, "dates": dates}
+            # 构造列式 K 线（时序升序）+ dates + OHLCV 五列（R108）
+            kline: dict[str, dict] = _build_backfill_kline(rows, _syms)
             if len(kline) < 3:
                 logger.info("[ic_backfill] K 线标的不足 3 只，跳过")
                 return
