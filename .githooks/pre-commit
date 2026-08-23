@@ -8,7 +8,7 @@
 # 跳过构建: SKIP_FRONTEND_BUILD=1 git commit ...
 #
 # ── 门禁治理约定（2026-08-09）────────────────────────────────────────
-# ① 新增门禁必须先说明与现有 13 段的差异化价值，否则不加入（防单调膨胀）；
+# ① 新增门禁必须先说明与现有 15 段的差异化价值，否则不加入（防单调膨胀）；
 # ② 死代码/未引用审计共 3 个（check_api_usage 前端 API / audit_unused_symbols
 #    后端 AST / check_unused_styles CSS 类），对象互不相同，评估后保留各自脚本、
 #    不再新增同类审计；③ P3-6 测试文件基线已降级为提示（不阻断提交）。
@@ -264,6 +264,10 @@ if command -v mypy &> /dev/null; then
             fi
         fi
     fi
+else
+    # §13 微调① (round34): 对齐 xdist 先例——mypy 未安装不得静默空转（类型检查
+    # 可能长期未生效而不自知）。提示不阻断（与 SKIP 语义一致）。
+    echo "[pre-commit] ⚠️ mypy 未安装，类型检查跳过（建议 pip install -r backend/requirements.txt）"
 fi
 
 # ── Docker 构建冒烟门禁（R6-F16） ────────────────────────────────
@@ -407,7 +411,7 @@ fi
 # ════ 性能软门禁（P2-2，2026-08-09/round16 落地）════════════════════════════
 # verify_perf.py（round15 基线 E）接入 pre-commit：后端在线时跑热点路径耗时，
 # 超阈值仅 WARNING 登记台账不阻断（软门禁，AGENTS.md 性能验收）；后端不在线跳过。
-# 差异化价值（门禁治理约定①）：现有 13 段无任何性能段，本段补「性能债不消失」的
+# 差异化价值（门禁治理约定①）：现有 15 段无任何性能段，本段补「性能债不消失」的
 # 登记机制；仅 backend/scripts/verify_perf.py 或本脚本变更时触发（不随每次提交跑）。
 PERF_STAGED=$(git diff --cached --name-only --diff-filter=ACM \
     -- 'backend/scripts/verify_perf.py' '.githooks/pre-commit' 2>/dev/null || true)
@@ -465,7 +469,7 @@ else
 fi
 
 # ════ engine 纯度门禁（round23 §10.5 A2，2026-08-14）══════════════════════════
-# 差异化价值（门禁治理约定①）：现有 13 段无任何「分层/纯度」守护——check_routes
+# 差异化价值（门禁治理约定①）：现有 15 段无任何「分层/纯度」守护——check_routes
 # （路由↔契约）/audit_unused_symbols（符号）/check_unused_styles（样式）对象互不相同，
 # 本段对象为「engine 层 import 边界 + 零 I/O」：把 AGENTS.md 文档声明的
 # 「engine 无 I/O 纯函数」变成可执行硬约束（实测泄漏 1 处，A1 已参数化修复）。

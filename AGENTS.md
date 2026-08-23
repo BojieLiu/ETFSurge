@@ -90,7 +90,7 @@ cd backend && python -m pytest
   - **smoke_startup 用 `SMOKE_FAST=1` 快速模式**：子进程设 `ETF_SURGE_SKIP_WARMUP=1` 跳过后台预热任务及其等待，并跳过 `/calculate` 懒加载（由 `verify_e2e.py` 覆盖）；完整模式 `python scripts/smoke_startup.py` 行为不变。
   - 前端 build 仅当 `frontend/src/*`、`index.html`、`vite.config.js`、`package.json` 变更时触发（`frontend/public/` 静态资源不触发）。
   - docker build 冒烟在 Docker daemon 不可用（Docker Desktop 未启动）时视为环境跳过，真实构建失败仍拦截。
-  - **门禁治理约定（2026-08-09）**：新增门禁须说明与现有 13 段的差异化价值；死代码审计保留 3 个（check_api_usage / audit_unused_symbols / check_unused_styles，对象互不相同）不再新增同类；P3-6 测试文件基线为**提示不阻断**。
+  - **门禁治理约定（2026-08-09，2026-08-23 数字同步）**：新增门禁须说明与现有 15 段的差异化价值（15 段清单：①密钥扫描 ②check_routes 契约 ③纯文档短路 ④前端 build ⑤check_api_usage ⑥audit_async_blocking ⑦未引用符号审计 ⑧死样式审计 ⑨mypy ⑩docker build 冒烟 ⑪pytest 三档分派 ⑫verify_perf 软门禁 ⑬P3-6 测试数基线 ⑭smoke_startup ⑮engine 纯度 AST）；死代码审计保留 3 个（check_api_usage / audit_unused_symbols / check_unused_styles，对象互不相同）不再新增同类；P3-6 测试文件基线为**提示不阻断**。
   - 跳过构建：`SKIP_FRONTEND_BUILD=1 git commit`。
 
 ## 会话记忆惯例（每轮结束必做，强制）
