@@ -7,8 +7,8 @@
 # 如果 frontend/ 下有文件变更，自动运行 npm run build 拦截 Vue 编译错误。
 # 跳过构建: SKIP_FRONTEND_BUILD=1 git commit ...
 #
-# ── 门禁治理约定（2026-08-09）────────────────────────────────────────
-# ① 新增门禁必须先说明与现有 15 段的差异化价值，否则不加入（防单调膨胀）；
+# ── 门禁治理约定（2026-08-09；round36 加⑯，2026-08-23 数字同步）──────
+# ① 新增门禁必须先说明与现有 16 段的差异化价值，否则不加入（防单调膨胀）；
 # ② 死代码/未引用审计共 3 个（check_api_usage 前端 API / audit_unused_symbols
 #    后端 AST / check_unused_styles CSS 类），对象互不相同，评估后保留各自脚本、
 #    不再新增同类审计；③ P3-6 测试文件基线已降级为提示（不阻断提交）。
@@ -111,6 +111,37 @@ NON_DOCS_STAGED=$(git diff --cached --name-only --diff-filter=ACM -- \
 if [ -n "$DOCS_ONLY_STAGED" ] && [ -z "$NON_DOCS_STAGED" ]; then
     echo "[pre-commit] 纯文档/元数据提交（docs/diag/api-contracts），跳过编译与测试门禁（secret 已检查）"
     exit 0
+fi
+
+# ── 前端行为测试门禁（round36，2026-08-23）──────────────────────────
+# 差异化价值（门禁治理约定①）：段④ build 只验「能编译」（语法/导入/模板合法），
+# 本段验「行为正确」——vitest ~500 用例此前不在任何提交门禁内（round35 §16 认定的
+# 最大门禁漏洞），改坏 store/composable 逻辑 build 照绿。与后端段⑪ pytest 形成对称：
+# 同侧风险、同级防护。触发面复用 build 同款；SKIP_FRONTEND_TESTS 独立变量（不与
+# SKIP_FRONTEND_BUILD 连坐）；全量跑不用 --changed（vitest 无稳定受影响映射，
+# 实测全量 ~10s 可接受）。置于 build 之前：更便宜、fail-fast。
+if [ "${SKIP_FRONTEND_TESTS}" = "1" ]; then
+    echo "[pre-commit] SKIP_FRONTEND_TESTS=1, 跳过前端行为测试"
+else
+    FRONTEND_TEST_STAGED=$(git diff --cached --name-only --diff-filter=ACM \
+        -- 'frontend/src/*' 'frontend/index.html' 'frontend/vite.config.js' 'frontend/package.json' 2>/dev/null || true)
+    if [ -n "$FRONTEND_TEST_STAGED" ]; then
+        echo "[pre-commit] 检测到前端源码变更，正在执行 npm run test ..."
+        cd frontend
+        # Windows (Git Bash) 必须经 cmd /c 执行 npm（同 build 段惯例）
+        if cmd /c "npm run test" 2>&1; then
+            echo "[pre-commit] ✅ vitest 通过"; cd ..
+        else
+            cd ..
+            echo ""
+            echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+            echo "!  🚫 vitest 失败 — 前端行为回归                               !"
+            echo "!  请修复失败用例后重试。                                      !"
+            echo "!  如需跳过: SKIP_FRONTEND_TESTS=1 git commit ...             !"
+            echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+            exit 1
+        fi
+    fi
 fi
 
 # ── 前端构建检查 ──────────────────────────────────────────────────────

@@ -64,19 +64,22 @@ LAYER_DEFAULTS = {
     "L4-routes": {"timeout": 60, "backend_dependent": False},
     "L4-purity": {"timeout": 60, "backend_dependent": False},
     "L4-async": {"timeout": 60, "backend_dependent": False},
+    # round36 (2026-08-23): ruff 软门禁——存量冻结后只观测新增速率（WARN 不阻断），
+    # 硬化进 pre-commit 另行决策。--exit-zero 恒退出 0，分类见 _classify。
+    "L4-ruff": {"timeout": 120, "backend_dependent": False},
     "L5-frontend": {"timeout": 600, "backend_dependent": False},
 }
 
 LAYER_ORDER = [
     "L1-unit", "L2-e2e", "L2-health", "L2-smoke", "L2-startup", "L3-perf",
-    "L4-routes", "L4-purity", "L4-async", "L5-frontend",
+    "L4-routes", "L4-purity", "L4-async", "L4-ruff", "L5-frontend",
 ]
 
 # --full 层集（§3: 不含 L2-smoke —— 后端在线时启动能力已被证明，且双实例
 # 共享 SQLite 有写锁风险，§8-6）
 FULL_LAYERS = [
     "L1-unit", "L2-e2e", "L2-health", "L3-perf",
-    "L4-routes", "L4-purity", "L4-async", "L5-frontend",
+    "L4-routes", "L4-purity", "L4-async", "L4-ruff", "L5-frontend",
 ]
 
 # 依赖后端的必需层：后端离线时打 SKIP + 退出码 2（§3）
@@ -228,7 +231,7 @@ def plan_layers(mode, changed_files, explicit_layers=None, explicit_modules=None
         if 0 in tiers or 1 in tiers:
             layers += ["L1-unit", "L2-e2e", "L2-health"]
         if 1 in tiers:
-            layers += ["L3-perf", "L2-smoke", "L4-async"]
+            layers += ["L3-perf", "L2-smoke", "L4-async", "L4-ruff"]
             # §12 P0-1 (round34): main.py（启动路径）或审计脚本自身变更 → 启动行为审计
             if any(f.replace("\\", "/") == "backend/app/main.py"
                    or f.replace("\\", "/") == "backend/scripts/check_startup_behavior.py"
@@ -299,11 +302,18 @@ def _clean_layer(result):
 
 
 def _classify(name, returncode, out, err):
-    """层状态分类：默认 exit 0=PASS / 非 0=FAIL；L3-perf 特殊（WARN 软门禁）。"""
+    """层状态分类：默认 exit 0=PASS / 非 0=FAIL；L3-perf/L4-ruff 特殊（WARN 软门禁）。"""
     if name == "L3-perf":
         if returncode != 0:
             return "FAIL"
         if "[WARN]" in out:
+            return "WARN"
+        return "PASS"
+    if name == "L4-ruff":
+        # round36 软门禁：命令 --exit-zero 恒退出 0；有违规计数即 WARN（不阻断）。
+        if returncode != 0:
+            return "FAIL"
+        if re.search(r"Found \d+ error", out):
             return "WARN"
         return "PASS"
     return "PASS" if returncode == 0 else "FAIL"
@@ -446,6 +456,10 @@ def _build_command(name, plan, args):
         return [sys.executable, "scripts/check_engine_purity.py"], BACKEND_DIR, {}
     if name == "L4-async":
         return [sys.executable, "scripts/audit_async_blocking.py"], BACKEND_DIR, {}
+    if name == "L4-ruff":
+        # round36 软门禁：--exit-zero 恒退出 0，WARN 语义由 _classify 判定
+        return [sys.executable, "-m", "ruff", "check", "app",
+                "--statistics", "--exit-zero"], BACKEND_DIR, {}
 
     raise ValueError(f"no command builder for layer {name}")
 
