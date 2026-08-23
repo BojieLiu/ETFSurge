@@ -96,7 +96,15 @@ vi.mock('../components/design/DesignLoading.vue', () => ({
 vi.mock('../components/design/DesignResult.vue', () => ({ default: { template: '<div data-testid="design-result" />' } }))
 vi.mock('../components/design/DesignHistory.vue', () => ({ default: { template: '<div data-testid="design-history" />' } }))
 vi.mock('../components/design/StrategyCheckModal.vue', () => ({ default: { template: '<div />' } }))
-vi.mock('../components/design/StrategyCheckResult.vue', () => ({ default: { template: '<div />' } }))
+// round35 §16.6: 保留 stub 但渲染 error 态文本——timer cleanup describe 需断言
+// 「5 连错 → 错误文案可见」的真实行为（原纯空 div 使任何错误态断言恒空）
+vi.mock('../components/design/StrategyCheckResult.vue', () => ({
+  default: {
+    name: 'StrategyCheckResult',
+    props: ['result', 'loading', 'error', 'taskStatus', 'taskProgress', 'taskStage'],
+    template: '<div class="strategy-check-result-stub"><p v-if="error && !result" class="error-text">{{ error }}</p><slot /></div>',
+  },
+}))
 vi.mock('../components/ui/AppModal.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('../utils/formatDate', () => ({ formatDate: (d) => String(d) || '' }))
 
@@ -300,7 +308,7 @@ describe('DashboardAiTools - Design Report Tab', () => {
 // 来源: DashboardAiTools.timer.spec.js（轮询清理 + 连错停止）
 // =========================================================================
 
-describe('DashboardAiTools — timer cleanup guards', () => {
+describe('DashboardAiTools — timer cleanup guards (round35 §16.6 空心测试修复)', () => {
   beforeEach(() => {
     vi.useFakeTimers()
   })
@@ -310,27 +318,56 @@ describe('DashboardAiTools — timer cleanup guards', () => {
     vi.restoreAllMocks()
   })
 
-  it('should clean up previous strategy timers before starting new check', async () => {
-    // We can't easily instantiate the component; instead, test that
-    // the module compiles and exports a render function.
-    expect(typeof DashboardAiTools).toBe('object')
+  async function mountWithModalStub() {
+    return mount(DashboardAiTools, {
+      attachTo: document.body,
+      global: {
+        stubs: {
+          StrategyCheckModal: {
+            template: '<div class="strategy-modal-stub" />',
+            emits: ['select-type', 'close'],
+          },
+        },
+      },
+    })
+  }
+
+  /** 点「策略检查」按钮 → 从 modal stub 发出 select-type → 触发真实 checkStrategy() */
+  async function startStrategyCheck(wrapper) {
+    const api = await import('../api')
+    api.portfolioApi.strategyCheck.mockResolvedValue({ data: { task_id: 't-timer' } })
+    const buttons = wrapper.findAll('.core-action-btn')
+    await buttons[1].trigger('click') // 设计 / 策略检查 / 任务列表 中第 2 个
+    await flushPromises()
+    wrapper.findComponent('.strategy-modal-stub').vm.$emit('select-type', 'on_exchange')
+    await flushPromises()
+  }
+
+  it('启动策略检查即挂轮询定时器，unmount 后全部清理（真实行为断言，替代恒真 typeof 占位）', async () => {
+    const wrapper = await mountWithModalStub()
+    await startStrategyCheck(wrapper)
+    // 3s 轮询 interval（+180s timeout 兜底）至少一个已在册
+    expect(vi.getTimerCount()).toBeGreaterThanOrEqual(1)
+    wrapper.unmount()
+    // onBeforeUnmount → clearStrategyTimers：不残留任何 timer
+    expect(vi.getTimerCount()).toBe(0)
   })
 
-  it('strategy check polling should stop after 5 consecutive errors', async () => {
+  it('轮询连续 5 次失败后停止并渲染「后端服务异常」错误态（负向：能抓静默吞错回归）', async () => {
     const api = await import('../api')
     api.portfolioApi.getTask.mockRejectedValue(new Error('NetworkError'))
-
-    // Verify the mock is set up correctly
-    await expect(api.portfolioApi.getTask(1)).rejects.toThrow('NetworkError')
+    const wrapper = await mountWithModalStub()
+    await startStrategyCheck(wrapper)
+    await vi.advanceTimersByTimeAsync(3000 * 5 + 1) // 5 个轮询周期全部失败
+    await flushPromises()
+    // 轮询必须停（timer 清零）且错误文案可见——两条断言任一缺失即为假防护
+    expect(vi.getTimerCount()).toBe(0)
+    expect(wrapper.find('.error-text').text()).toContain('后端服务异常')
+    wrapper.unmount()
   })
 
-  it('designAsync failure triggers error state (submit fails)', async () => {
-    const api = await import('../api')
-    api.portfolioApi.designAsync.mockRejectedValue(new Error('timeout of 60000ms exceeded'))
-
-    // Verify catch path exists in compiled code
-    await expect(api.portfolioApi.designAsync({ capital: 500000 })).rejects.toThrow('timeout')
-  })
+  // 原 designAsync 占位用例（只验 mock 本身 rejects，未挂载组件）已删除：
+  // design 失败/重试路径由下方「任务状态机 (O11)」describe 的真实组件行为用例覆盖。
 })
 
 // =========================================================================

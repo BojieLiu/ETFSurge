@@ -388,7 +388,10 @@ else
         # 未过期）→ 复用该次全量结果，跳过重复全量，只跑变更的受影响测试（秒级）。
         # 凭据失效（任何代码变更/过期）→ 恢复全量，安全网不失效。
         if [ -z "$SKIP_TESTS_MARKER" ] && python backend/scripts/tests_ok_marker.py check 2>&1; then
-            echo "[pre-commit] ✅ 全量测试凭据有效（patrol 已全量验证），跳过重复全量"
+            # round35 §16-T-P0-4 (docs/round35-architecture-review.md): 措辞修正——
+            # 凭据只认证 L1-unit（全量 pytest）；patrol 整体 exit≠0（如 L2-e2e FAIL）
+            # 时凭据仍有效，不得宣称「patrol 已全量验证」。
+            echo "[pre-commit] ✅ 全量测试凭据有效（patrol L1-unit 全量通过），跳过重复全量"
             if [ -n "$TEST_STAGED" ]; then
                 # 仍跑变更的受影响测试作为冒烟（秒级）
                 echo "[pre-commit] 执行受影响测试（凭据复用模式）..."
@@ -440,6 +443,9 @@ else
 fi
 
 # ════ 性能软门禁（P2-2，2026-08-09/round16 落地）════════════════════════════
+# ⚠️ 移交标注（round34 §13.3-5 → round35 §16-T-P0-5 落实）：本段自指触发（仅 perf
+# 脚本/本钩子自身变更才跑）形同停摆——日常性能门禁实际由 patrol L3-perf 承担，
+# 本段仅保留作「改动性能工具时顺手自测」的提示位，`|| true` 恒不阻断。
 # verify_perf.py（round15 基线 E）接入 pre-commit：后端在线时跑热点路径耗时，
 # 超阈值仅 WARNING 登记台账不阻断（软门禁，AGENTS.md 性能验收）；后端不在线跳过。
 # 差异化价值（门禁治理约定①）：现有 15 段无任何性能段，本段补「性能债不消失」的

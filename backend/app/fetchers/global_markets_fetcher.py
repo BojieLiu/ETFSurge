@@ -18,6 +18,11 @@ logger = get_logger(__name__)
 # --- Z05: 共享 httpx.Client（连接池复用，减少 SSL 握手） ---
 _shared_client: "httpx.Client | None" = None
 
+# round35 §12-P0-2: 每源超时常量——旧实现四个数据源段各自定义模块级 _TIMEOUT，
+# import 时 FRED 段的 15s 覆盖前面所有 10s，AV/TwelveData/Finnhub/共享 client
+# 运行时读到全是 15s。拆为每源常量，消除遮蔽歧义。
+_SHARED_CLIENT_TIMEOUT = 10
+
 
 def _get_shared_client() -> httpx.Client:
     """Z05: 模块级共享 httpx.Client 单例（keepalive 连接复用）。
@@ -28,7 +33,7 @@ def _get_shared_client() -> httpx.Client:
     if _shared_client is None or _shared_client.is_closed:
         _shared_client = httpx.Client(
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=5),
-            timeout=httpx.Timeout(_TIMEOUT, connect=5.0),
+            timeout=httpx.Timeout(_SHARED_CLIENT_TIMEOUT, connect=5.0),
             trust_env=False,
             follow_redirects=True,
         )
@@ -377,7 +382,7 @@ def fetch_index_realtime(symbol: str) -> dict[str, Any] | None:
 # --- alphavantage_fetcher.py: Alpha Vantage API ---
 
 _AV_API_BASE = "https://www.alphavantage.co/query"
-_TIMEOUT = 10
+_AV_TIMEOUT = 10  # round35 §12-P0-2: 原 _TIMEOUT（被 FRED 段 import 时覆盖）
 
 
 def _get_av_apikey() -> str | None:
@@ -433,7 +438,7 @@ def fetch_realtime_alphavantage(symbol: str) -> dict[str, Any] | None:
             }
         except (ValueError, TypeError, KeyError):
             return None
-    return run_in_thread(_p, timeout=_TIMEOUT, executor="long")
+    return run_in_thread(_p, timeout=_AV_TIMEOUT, executor="long")
 
 
 def fetch_daily_alphavantage(symbol: str, outputsize: str = "compact") -> list[dict[str, Any]] | None:
@@ -473,12 +478,12 @@ def fetch_daily_alphavantage(symbol: str, outputsize: str = "compact") -> list[d
             except (ValueError, TypeError, KeyError):
                 continue
         return result
-    return run_in_thread(_p, timeout=_TIMEOUT, executor="long")
+    return run_in_thread(_p, timeout=_AV_TIMEOUT, executor="long")
 
 # --- twelvedata_fetcher.py: Twelve Data API ---
 
 _TD_API_BASE = "https://api.twelvedata.com"
-_TIMEOUT = 10
+_TD_TIMEOUT = 10  # round35 §12-P0-2: 原 _TIMEOUT（被 FRED 段 import 时覆盖）
 
 
 def _get_td_apikey() -> str | None:
@@ -539,7 +544,7 @@ def fetch_realtime_twelvedata(symbol: str) -> dict[str, Any] | None:
             }
         except (ValueError, TypeError, KeyError):
             return None
-    return run_in_thread(_p, timeout=_TIMEOUT, executor="long")
+    return run_in_thread(_p, timeout=_TD_TIMEOUT, executor="long")
 
 
 def fetch_history(symbol: str, days: int = 60) -> list[dict[str, Any]] | None:
@@ -579,12 +584,12 @@ def fetch_history(symbol: str, days: int = 60) -> list[dict[str, Any]] | None:
             except (ValueError, TypeError, KeyError):
                 continue
         return result
-    return run_in_thread(_p, timeout=_TIMEOUT, executor="long")
+    return run_in_thread(_p, timeout=_TD_TIMEOUT, executor="long")
 
 # --- finnhub_fetcher.py: Finnhub API ---
 
 _API_BASE = "https://finnhub.io/api/v1"
-_TIMEOUT = 10
+_FINNHUB_TIMEOUT = 10  # round35 §12-P0-2: 原 _TIMEOUT（被 FRED 段 import 时覆盖）
 
 
 def _get_apikey() -> str | None:
@@ -662,7 +667,7 @@ def fetch_realtime(symbol: str) -> dict[str, Any] | None:
             }
         except (ValueError, TypeError, KeyError):
             return None
-    return run_in_thread(_p, timeout=_TIMEOUT, executor="long")
+    return run_in_thread(_p, timeout=_FINNHUB_TIMEOUT, executor="long")
 
 
 def fetch_candles(symbol: str, resolution: str = "D") -> list[dict[str, Any]] | None:
@@ -710,7 +715,7 @@ def fetch_candles(symbol: str, resolution: str = "D") -> list[dict[str, Any]] | 
             except (ValueError, TypeError, IndexError):
                 continue
         return result
-    return run_in_thread(_p, timeout=_TIMEOUT, executor="long")
+    return run_in_thread(_p, timeout=_FINNHUB_TIMEOUT, executor="long")
 
 # --- tushare_fetcher.py: Tushare Pro ---
 
@@ -839,7 +844,7 @@ logger = logging.getLogger(__name__)
 _FRED_API_BASE = "https://api.stlouisfed.org/fred/series/observations"
 _API_KEY = settings.fred_api_key
 
-_TIMEOUT = 15
+_FRED_TIMEOUT = 15  # round35 §12-P0-2: 原 _TIMEOUT=15 曾在 import 时覆盖全部前段
 
 
 async def _fetch_series(series_id: str) -> float | None:
@@ -851,7 +856,7 @@ async def _fetch_series(series_id: str) -> float | None:
         logger.warning("FRED_API_KEY not configured")
         return None
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT, trust_env=False) as client:
+        async with httpx.AsyncClient(timeout=_FRED_TIMEOUT, trust_env=False) as client:
             resp = await client.get(
                 _FRED_API_BASE,
                 params={
