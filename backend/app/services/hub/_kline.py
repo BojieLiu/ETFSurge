@@ -400,7 +400,20 @@ class KlineMixin:
                     return
                 try:
                     hist = await self.get_market_history(idx_code, "index", "daily")
-                    closes = [float(r.get("close", 0)) for r in (hist or []) if r.get("close")]
+                    # FM3 探针修复（round35 §15.5）：行键双方言容错——fetchers 层
+                    # 「系统格式」是中文键（日期/收盘/...，akshare 主源路径），但
+                    # BaoStock/Tencent 分支可能给英文键。此前只读英文键 "close"，
+                    # akshare 源胜出时 closes 恒空 → benchmark_close 静默饿死、
+                    # tracking_error no_data。对齐 market_service T-1 兜底的
+                    # `close or 收盘` 双读模式。
+                    closes = []
+                    for r in (hist or []):
+                        c = r.get("close") or r.get("收盘")
+                        if c:
+                            try:
+                                closes.append(float(c))
+                            except (TypeError, ValueError):
+                                continue
                     if len(closes) >= 5:
                         out.setdefault(sym, {})["benchmark_close"] = closes[-20:]
                 except Exception as e:

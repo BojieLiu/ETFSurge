@@ -72,6 +72,36 @@ async def test_symbol_extra_injects_benchmark_and_shares(monkeypatch):
     assert out["512480"]["shares_change_20d"] == 0.03
 
 
+# ── 5b: FM3 探针修复（round35 §15.5）——中文键行双方言容错 ──────────────
+@pytest.mark.asyncio
+async def test_benchmark_close_survives_chinese_keyed_rows(monkeypatch):
+    """负向回归（能抓假）：akshare 主源返回**系统格式中文键**行（日期/收盘/...）时，
+    benchmark_close 仍必须注入。旧实现只读英文键 "close" → closes 恒空 → 静默
+    饿死 tracking_error（既有测试全用英文键 mock，掩盖了该断粮）。"""
+    async def fake_get_market_history(symbol, asset_type="A", period="daily"):
+        return [
+            {"日期": f"2026-07-{d:02d}", "开盘": 2990.0, "最高": 3010.0,
+             "最低": 2980.0, "收盘": 3000.0 + d, "成交量": 1e9}
+            for d in range(1, 21)
+        ]
+
+    def fake_fetch_etf_shares_outstanding(symbol):
+        return {"total_shares": 1e8, "shares_change_20d": None, "reason": "份额历史源不可用"}
+
+    monkeypatch.setattr(market_data_hub, "get_market_history", fake_get_market_history)
+    import app.fetchers.china_market as cm
+    monkeypatch.setattr(cm, "fetch_etf_shares_outstanding", fake_fetch_etf_shares_outstanding)
+    market_data_hub._FUND_SHARES_CACHE.clear()
+
+    out = await market_data_hub._enrich_symbol_extra(
+        ["510300"], {"510300": {"fund_scale": 100}},
+    )
+    bench = out["510300"].get("benchmark_close")
+    assert bench is not None, "中文键（系统格式）行也必须注入 benchmark_close"
+    assert len(bench) == 20
+    assert all(b > 0 for b in bench), "close 列应取到 收盘 数值而非空/0"
+
+
 # ── 6: no_data reason 区分（数据源缺失 vs IC 不足） ───────────────────────
 def test_no_data_reason_specifics():
     """_data_source_gaps 记录后，factors/active reason 区分「数据源未接入」。"""

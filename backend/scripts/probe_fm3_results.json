@@ -1,0 +1,71 @@
+{
+  "as_of": "2026-08-24T16:19:15",
+  "window": "off-hours(16:19)",
+  "in_window": false,
+  "A": {
+    "probe": "A_iopv_chain",
+    "source": "qq",
+    "hit": 8,
+    "total": 8,
+    "missing": [],
+    "premiums": {
+      "510300": -0.011979,
+      "510500": -0.016593,
+      "159338": -0.013475,
+      "512890": 0.011657,
+      "512100": -0.013403,
+      "513050": -0.051373,
+      "518880": 0.021817,
+      "512480": -0.03164
+    },
+    "pstdev": 0.021373,
+    "nonzero_ratio": 1.0,
+    "distinct_enough": true
+  },
+  "B": {
+    "probe": "B_benchmark_close",
+    "mapping_size": 33,
+    "covered": [
+      "510300",
+      "510500",
+      "159338",
+      "512890",
+      "513050",
+      "512480"
+    ],
+    "uncovered": [
+      "512100",
+      "518880"
+    ],
+    "coverage_ratio": 0.75,
+    "sampled": {
+      "510300": {
+        "index": "sh000300",
+        "closes_len": 5976,
+        "usable": true,
+        "last_close": 4618.895
+      },
+      "510500": {
+        "index": "sh000905",
+        "closes_len": 5255,
+        "usable": true,
+        "last_close": 7854.334
+      }
+    },
+    "usable": true,
+    "note": "修复中文键饿死回归后复测（双方言容错 close|收盘）"
+  },
+  "C": {
+    "probe": "C_shares_change",
+    "results": {
+      "510300": null,
+      "510500": null
+    },
+    "history_available": false
+  },
+  "verdict": {
+    "A_premium_discount": "GO",
+    "B_benchmark_close": "GO_after_fix",
+    "C_shares_change": "NO_GO"
+  }
+}

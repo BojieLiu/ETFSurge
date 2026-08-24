@@ -1441,6 +1441,20 @@ policy/macro 二选一——显式标注「仅展示」从核心叙事分离，�
 **前置探针**：premium_discount（IOPV 链区分度）/ shares_change（衔接 round34 S-A
 FundShareSnapshot）/ benchmark_close（round34 T-A）的数据可用性达标后才进实施清单（D1 纪律）。
 
+**探针结果（2026-08-24 16:19 盘后，`backend/scripts/probe_fm3_data_availability.py`
++ `probe_fm3_results.json`；IOPV/折溢价数值待交易时段复测一次，QQ pos81=日净值口径盘后亦可用）**：
+
+| 探针 | 实测 | 判定 |
+|---|---|---|
+| A premium_discount / IOPV | QQ 源 8/8 命中（样本=8 只代表池）；折溢价 -5.14%（513050）~ +2.18%（518880），pstdev=0.0214、非零比 100%——区分度充足 | ✅ GO |
+| B benchmark_close | 映射覆盖 6/8=75%（512100 可补映射；518880 商品无基准属合理「宁缺毋滥」）。**探针挖出真回归**：fetch_index_history 输出系统格式中文键行（日期/收盘/...），而 `_bench()` 只读英文键 `close` → closes 恒空 → benchmark_close 注入静默饿死、tracking_error 断粮（既有单测全用英文键 mock 掩盖）。已修：双方言容错 `close or 收盘`（hub/_kline.py）+ 中文键负向回归用例；修复后实测 sh000300=5976 / sh000905=5255 closes | ✅ GO（修复后） |
+| C shares_change_20d | fund_etf_hist_em 无份额列（round9 P1-9 结论持续成立）；spot 降级仅当前份额（change=None）；本次两样本连 spot 也 None | ❌ NO-GO |
+
+**实施清单修订（据探针）**：etf_quality 第五顶层键首批只接
+**premium_discount + tracking_error**（B 回归修复为其前置，已满足）；shares_change
+移入「待新源」观察项（衔接 round34 S-A 的 FundShareSnapshot 若落地可重启）；
+policy/macro 维持「仅展示」标注方案。FM4 的 valuation 槽复活随首批接入自然达成。
+
 ### 15.6 FS 系（🟡 结构性问题）
 
 | # | 问题 | 实证 | 归宿 |

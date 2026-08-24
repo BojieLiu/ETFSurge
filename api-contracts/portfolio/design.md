@@ -53,6 +53,13 @@ POST /api/v1/portfolio/design-async（原 /design 已迁移，T11 校准）
       "expected_return": 0.08,
       "max_drawdown": -0.12,
       "sharpe_ratio": 1.2,
+      "volatility_estimate": 0.105,
+      "estimate_sources": {                            
+        "expected_return": "reference_static",
+        "max_drawdown": "reference_static",
+        "sharpe_ratio": "reference_static",
+        "volatility_estimate": "model_estimate"
+      },
       "expected_characteristics": "预期年化波动10-12%，最大回撤区间10-12%",
       "layer_budget": {
         "core": 0.55,
@@ -392,6 +399,8 @@ alanced/aggressive`
 - [ ] Response: 核心层含 510300/560600
 - [ ] Response: 权重在 1%~30% 区间
 - [ ] Response: 标的数量在 8~15 之间
+- [ ] Response: `strategies[].estimate_sources` 逐指标标注来源（B6）
+- [ ] Response: `volatility_estimate` 仅在模型推导可行时出现（source=model_estimate）；缺失时字段整体省略，不得用静态值冒充模型估算
 - [ ] `GET /api/v1/portfolio/designs/{id}（原 /status 已移除，T11 校准）` implemented and tested
 
 <!-- 路由登记（P3-5 check_routes 门禁） -->
@@ -426,3 +435,26 @@ GET /api/v1/portfolio/designs/{design_id}
   `combined_weight` / `note`（「已合并留一」）。
 
 前端 `DesignResult.vue` 的近替代品告警据此从「仅提示」升级为「已合并」标注。
+
+### 6.3 收益指标来源标注（B6 / round35 §6.6 契约先行草案）
+
+> 状态：**契约先行**——本节先于实现定义字段语义；后端实现（wᵀ(σ⊙ρ⊙σ)w 持仓推导）
+> 与前端徽标按本节对照落地。关联：STRATEGY_META 静态参考值（`engine/budgets.py`）。
+
+`strategies[]` 新增字段：
+
+| 字段 | 类型 | 语义 |
+|---|---|---|
+| `volatility_estimate` | number（可缺省） | 年化组合波动估计（小数，0.105=10.5%）。由实际持仓推导：`wᵀ(σ⊙ρ⊙σ)w`，σ=分层历史波动近似、ρ=编排层 correlation_matrix。**仅模型推导可行时出现**——ρ 或 σ 缺失 → 字段整体省略，不得回退静态值冒充 |
+| `estimate_sources` | object | 逐指标来源标注。键 = 指标名（expected_return / max_drawdown / sharpe_ratio / volatility_estimate），值 = `"model_estimate"`（由持仓推导，随持仓/市况变化）\| `"reference_static"`（STRATEGY_META 静态参考，与持仓无关） |
+
+语义约束：
+
+1. `estimate_sources.volatility_estimate == "model_estimate"` **当且仅当**
+   `volatility_estimate` 字段存在；
+2. 静态三指标（expected_return / max_drawdown / sharpe_ratio）首批保持
+   `reference_static`；后续逐项升级 model_estimate 时**只改来源标注、不改字段名**
+   （旧前端不受影响）；
+3. 前端渲染：`model_estimate` → 「模型估算」徽标 + tooltip 注明推导口径；
+   `reference_static` → 「参考值」弱标注。禁止无来源混排展示；
+4. 兼容性：两字段均为新增可选，旧消费方忽略即可；`designs/{id}` 详情接口透传同构。
