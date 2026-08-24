@@ -1,0 +1,82 @@
+{
+  "probed_at": "2026-08-24T17:58:04+0800",
+  "p1_models_list": {
+    "status": 200,
+    "total_models": 64,
+    "free_models": [
+      "deepseek-v4-flash-free",
+      "hy3-free",
+      "laguna-s-2.1-free",
+      "mimo-v2.5-free",
+      "muse-spark-1.2-contributor-free",
+      "nemotron-3-ultra-free",
+      "nemotron-3.5-lightning-free",
+      "x-preview-f-free"
+    ],
+    "eligible_free_chat": [
+      "deepseek-v4-flash-free",
+      "hy3-free",
+      "laguna-s-2.1-free",
+      "mimo-v2.5-free",
+      "nemotron-3-ultra-free",
+      "nemotron-3.5-lightning-free",
+      "x-preview-f-free"
+    ],
+    "excluded_responses_api": [
+      "muse-spark-1.2-contributor-free"
+    ],
+    "attempts": [
+      {
+        "trust_env": false,
+        "ok": true,
+        "status": 200,
+        "elapsed_ms": 847
+      }
+    ]
+  },
+  "p2_chat_call": {
+    "tried": [
+      {
+        "model": "deepseek-v4-flash-free",
+        "attempts": [
+          {
+            "trust_env": false,
+            "ok": true,
+            "status": 400,
+            "elapsed_ms": 885
+          }
+        ],
+        "status": 400,
+        "content_nonempty": false,
+        "content_head": "",
+        "usage_present": false,
+        "echoed_model": null,
+        "error_body_head": "{\"error\":{\"type\":\"server_error\",\"message\":\"Error from provider (Console): Upstream request failed: Model is unavailable.\"}}"
+      },
+      {
+        "model": "hy3-free",
+        "attempts": [
+          {
+            "trust_env": false,
+            "ok": true,
+            "status": 200,
+            "elapsed_ms": 3614
+          }
+        ],
+        "status": 200,
+        "content_nonempty": true,
+        "content_head": "OK",
+        "usage_present": true,
+        "echoed_model": "hy3-free",
+        "error_body_head": null
+      }
+    ],
+    "succeeded_model": "hy3-free",
+    "content_nonempty": true,
+    "usage_present_on_success": true
+  },
+  "verdict": "GO",
+  "reasons": [],
+  "zen_key_present": true,
+  "zen_key_masked": "sk-NNh..."
+}

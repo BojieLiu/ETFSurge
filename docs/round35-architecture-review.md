@@ -2239,3 +2239,225 @@ C5 危害段「容器内被 /app/data 优先级掩盖」系张冠李戴（那是
 （C1/C4/C6 实施细化、D3 三选项裁决）已给到可执行粒度；验收口径含负向断言与反假完成自查；
 实施顺序依赖闭环（C2/C3 硬前置收敛项）。遗留开口均为显式登记的「实施时定夺」项
 （B3 二选一、D3 三选项、C6 迁移与否），不阻塞开工。
+
+---
+
+## 19. 双层 LLM Provider 动态免费模型列表（2026-08-24 追加 · 探针 GO · 待实施）
+
+> 需求：LLM provider 分两层——第一层 OpenCode Zen **免费模型动态发现**（列表运行时拉取 +
+> 周期刷新），第二层 DeepSeek `deepseek-v4-flash` 付费兜底；请求全程走熔断。
+> 结论：**可行（探针 GO）**，且双层 failover / 熔断 / 按 provider 记账在 round35 feed-fix
+> 已存在——本节是 **delta 方案**，唯一真正新增的是「免费模型目录的动态获取 + 候选重选 +
+> 熔断粒度下沉到 model 级」。
+
+### 19.1 可行性探针（D1 前置，2026-08-24 实测）
+
+脚本 `backend/scripts/probe_zen_model_list.py`，结果 `backend/scripts/probe_zen_results.json`
+（生产同款参数：httpx + `trust_env=False` 直连；body 对齐 `analysis/llm/client.py:_apply_provider_body`
+对 `-free` 模型行为——`reasoning_effort="high"`、去 `temperature`）。
+
+| 探针 | 结果 | 证据 |
+|---|---|---|
+| P1 列表端点 | ✅ 200 / 847ms（免鉴权直连可达） | `GET https://opencode.ai/zen/v1/models` 返回 OpenAI 格式 `{"object":"list","data":[...]}` 共 64 模型 |
+| P1 免费候选池 | ✅ 8 个 `-free`，7 个可用（chat/completions 格式） | `deepseek-v4-flash-free / hy3-free / laguna-s-2.1-free / mimo-v2.5-free / nemotron-3-ultra-free / nemotron-3.5-lightning-free / x-preview-f-free`；`muse-spark-1.2-contributor-free` 走 Responses API 格式被排除 |
+| P2 首选模型调用 | ❌ `deepseek-v4-flash-free` HTTP 400（885ms） | `{"error":{"type":"server_error","message":"Error from provider (Console): Upstream request failed: Model is unavailable."}}` |
+| P2 按序重选下一候选 | ✅ `hy3-free` 200 / 3.6s / content="OK" 非空 / usage 字段齐全 | **方案核心假设（首选不可用→自动重选）被探针直接验证** |
+| 判定 | **GO** | P1 池非空 ∧ P2 重选后内容非空 |
+
+探针附带两条重要实证：
+
+1. **单免费模型不可用是常态而非异常**——当前生产主力模型 `deepseek-v4-flash-free`
+   （`OPENCODE_ZEN_MODEL` 默认值）当日即 400「Model is unavailable」，静态配置下单点故障；
+   动态候选池 + 重选是刚需。
+2. **免费列表同日两次实测相差 1 个模型**（调研会话早间快照含 `big-pickle`，傍晚探针无）——
+   「列表必须动态取、硬编码必腐化」的直接证据。
+
+> ⚠️ 验证窗口标注：免费列表内容随时间漂移，19.1 快照仅代表 2026-08-24 实测；
+> 实施验收不得硬编码当日列表内容，只可断言「结构合法 + 过滤逻辑正确」。
+
+### 19.2 现状盘点（已有能力，不重复建设）
+
+| 能力 | 位置 | 状态 |
+|---|---|---|
+| Provider 抽象（Zen 主 + DeepSeek 兜底优先级链） | `analysis/provider.py:27-39`(ProviderConfig) / `:54-113`(get_configured_providers，空 key 自动跳过) | ✅ 现成 |
+| 模型名映射（`-free` 仅 Zen 合法，官方 API 自动改写 `deepseek-v4-flash`） | `provider.py:94-98` | ✅ 现成 |
+| 传输层三入口 + 内联 provider failover 循环 | `analysis/llm/client.py:49/:180/:405`（llm_complete / _stream / _with_system，全 async httpx，`trust_env=False`） | ✅ 现成 |
+| 生产 body 规则（`reasoning_effort` 自动档位 + 强制思考模型去 temperature，否则 Zen 网关 400） | `client.py:38-46` | ✅ 现成 |
+| 熔断（per-provider：429/quota 立即 OPEN；其它累计 2 次 OPEN；TTL 300s 后 HALF_OPEN 重探） | `analysis/llm/gates.py`（`_CIRCUIT_FAIL_THRESHOLD=2` / `_CIRCUIT_TTL=300`） | ✅ 现成，粒度待下沉（Gap B） |
+| 全局配额闸（跨请求 8s 冷却 + 配额耗尽全局暂停 60s） | `gates.py` LLMQuotaGate | ✅ 现成 |
+| 429 处理（Retry-After / 指数退避 cap 30s） | `client.py:_rate_limit_wait` | ✅ 现成 |
+| Token 用量按 provider 维度记录（成功与失败均记） | `monitor/token_usage.py`（UsageRecord.provider）+ `client.py:114-124/:140-151` 等 | ✅ 现成 |
+| 双层 failover 行为契约测试 | `tests/test_llm_provider_failover.py` / `tests/test_llm_circuit_state.py` | ✅ 行为锚，改造须保绿 |
+
+消费方全景（改动影响面）：8 个 agent 经 `analysis/registry.py:get_agent()` 统一走上述链路——
+SSE 四端点（routers/analysis.py:391/:450/:630/:772）、资讯影响（llm/news.py:126）、设计报告
+（tasks/task_manager.py:499 与 tasks/design_report.py:525 均 240s wait_for）、策略检查
+（services/portfolio/strategy_check.py:276-286 分层 15/30/60s + reports.py:604-621 max_retries=0）、
+S7 点评（strategy_check_worker.py:232，20s）、新闻摘要（services/hub/_news.py:94，warmup 跳过）。
+**全部消费方无需改动**——动态化收口在 provider/client 层内部。
+
+### 19.3 Gap 分析（需求 vs 现状）
+
+| # | Gap | 性质 | 说明 |
+|---|---|---|---|
+| A | **免费模型目录动态获取 + TTL 缓存 + 周期刷新 + last-known-good 持久兜底** | 🆕 核心新增 | 现状模型名为静态 env 字符串（config.py:108）；插入点 = `get_configured_providers()` 改造为读目录缓存 |
+| B | **熔断粒度下沉到 model 级** | 🔧 改造 | gates.py `_circuit` 以 provider id 为 key——单个免费模型 400 ≠ Zen 整层不可用（19.1 实锤此场景当日发生）；key 改 `f"{provider}:{model}"` |
+| C | 候选重选语义 | 🆕 随 A | `OPENCODE_ZEN_MODEL` 语义从「唯一模型」放宽为「首选」（env 未设时取池内确定性首选）；首选 400/从列表消失 → 按序试下一候选（同请求内 failover 循环已有，扩展候选源即可） |
+| D | admin DB 配置覆盖不通 LLM 层 | ⚠️ 既有缺陷顺带修 | `core/config_manager.py` 的 key override 只写 DB，provider 读启动期 settings 单例——UI 改 key 需重启才生效；本轮接线或显式登记 restart-only |
+| E | 清理项搭车 | 🧹 | `provider.call_with_failover`(:121) 死代码（仅 test 引用）、`config.llm_provider`(:103) 零读取、超时常量三处分散（config.py:119-120 / reports.py:845 / reports.py:621） |
+
+### 19.4 方案轮廓（待实施，独立小轮估 1–1.5 天）
+
+```
+启动: fetch GET {ZEN}/v1/models ──► 过滤(-free 后缀 ∧ 非 Responses-API 家族*) ──► 候选池
+      （复用 config.opencode_zen_api_url 推导 base；列表端点免鉴权，仍带 key 以防未来收紧）
+后台: lifespan 周期刷新（对齐既有 60s/120s 循环模式；TTL 建议 10min）
+      刷新失败 ──► 用 last-known-good 目录继续服务，诚实记 WARN（不静默、不造假数据）
+选择: env 首选(OPENCODE_ZEN_MODEL) ∈ 池 ? 首选 : 池内确定性首位（排序稳定保证可复现）
+调用: 首选 ──熔断(model级)──► 400"unavailable"/5xx/超时 ──► 同请求内按序重选下一候选
+      ──► 池全熔断/耗尽 ──► DeepSeek 官方付费层（现状兜底链不动）
+```
+
+\* Responses-API 排除清单以模型 id 前缀维护（当前仅 `muse-spark*`，见 19.1）；新增格式家族时
+在此扩表而非改调用代码。
+
+关键实现约束：
+
+- **不引入 openai SDK**——现有 httpx 直连对 chat/completions 兼容已实证（19.1 P2 200），
+  新增依赖无差异化价值；
+- **gates.py 契约不变量保持**：429 立即 OPEN / 阈值 2 / TTL 300s HALF_OPEN / OPEN 零探测，
+  `test_llm_provider_failover.py` + `test_llm_circuit_state.py` 全程保绿作为行为锚；
+- **复杂度审计**：目录刷新为低频后台循环 + 单 HTTP GET（带 15s 级超时），不在任何请求热路径上
+  新增网络调用；`get_configured_providers()` 改读内存缓存，仍是纯内存操作。
+
+### 19.5 外部事实与风险登记（2026-08-24 调研）
+
+| # | 事实 | 影响 |
+|---|---|---|
+| 1 | `/v1/models` 端点存在、OpenAI 格式、**免鉴权**（当日两次独立实测一致） | Gap A 可行性成立 |
+| 2 | 免费模型为限时促销，官方弃用表显示几乎每月轮换（grok-code/qwen3-coder 已弃用） | 动态列表是刚需；不可对具体模型名做长期假设 |
+| 3 | 免费层已知 500-bug 类（社区 issue #14795/#11757/#17411：上游省略 usage 字段致网关崩） | 免费层 500 视为预期噪声由熔断吸收；usage 字段缺失时记账侧需容错（现状 record 已 try 包裹） |
+| 4 | DeepSeek 旧模型名 deepseek-chat/reasoner 已于 2026-07-24 退役；V4 系列 thinking **默认开启** | 本项目默认已是 `deepseek-v4-flash`（config.py:104）无需迁移；但若某路径依赖快速非思考响应需显式 `"thinking":{"type":"disabled"}`——**实施时逐 agent 核对延迟敏感度，暂不改** |
+| 5 | 多数免费模型会记录/训练数据（零保留例外极少） | 敏感场景（持仓 prompt）长期应支持「隐私严格模式」跳过会训练的免费模型——**本批只登记不实施** |
+| 6 | Zen 无公开限流数字，429 由社区实践证实存在 | 现有 Retry-After + 退避 cap 30s 已覆盖 |
+
+### 19.6 不做的事（防过度工程）
+
+- ❌ 不做多 Zen 账号/key 池轮换（单账号免费额度未构成瓶颈前不做）；
+- ❌ 不做 Responses API / Anthropic 格式适配（排除法足够，格式家族出现再议）;
+- ❌ 不改 SSE 流式协议与前端消费方式（failover 在首 token 前完成，前端无感）；
+- ❌ 不做模型质量评分/自动择优（确定性顺序 + 首选项足够，评分引入不可复现性）；
+- ❌ 本批不做隐私严格模式（19.5#5 仅登记）。
+
+### 19.7 验收口径
+
+1. **单测**（外部调用全 mock）：列表新增/消失触发重选；首选 400 → 按序重选成功；全池熔断 →
+   落 DeepSeek 付费层；刷新失败 → last-known-good 降级且日志含 WARN；负向断言（如「全候选
+   不可用时不得返回免费层假成功」）能在旧实现下变红；
+2. **行为锚**：`test_llm_provider_failover.py` / `test_llm_circuit_state.py` 零修改通过
+   （熔断契约不变的证明）；
+3. **reality check**：client.py 三入口真实经目录选路（rg 调用点确认）；运行日志可见实际命中
+   模型名（echoed_model 非空）；token_usage 记录的 model 字段与实际一致；
+4. **巡检**：`python scripts/patrol.py --diff` 全绿；交付跑一次 `--full`。
+
+### 19.8 四问法自查（核心结论逐条）
+
+| 结论 | 事实/推断 | 支撑 | 反例检查 | 分级 |
+|---|---|---|---|---|
+| 双层架构已存在 | 事实 | provider.py:54-113 + client.py 内联循环 + README「Provider failover」节 | tests 行为锚佐证 | 合理 |
+| 首选模型会不可用、重选必要 | 事实 | 19.1 P2 400 实录 + 弃用表 | 当日即发生，非臆断场景 | 合理 |
+| 列表必须动态取 | 事实 | 同日两次快照差 1 模型 + 文档页落后 live 端点（7 vs 8） | 无反例 | 合理 |
+| 熔断需 model 粒度 | 强推断 | gates.py key 结构（provider 级）+ 19.1 单模型故障而列表其余 7 个存活 | 若整层同挂则粒度无差异——但该场景由付费层兜底覆盖，推断仍成立 | 合理（标注推断依据） |
+| 免费层 500 为预期噪声 | 事实+推断 | 社区 issue 实录 + 熔断阈值设计 | 无 | 合理 |
+
+### 19.9 OpenRouter 中间层探针（2026-08-24 追加 · 探针 GO · 三层链修订）
+
+> 需求追加：在 Zen 与 DeepSeek 之间插入 **OpenRouter 免费模型中间层**
+> （Zen 免费 → OpenRouter 免费 → DeepSeek 付费），且两个免费池均「大参数模型优先」。
+> 脚本 `backend/scripts/probe_openrouter_free_models.py`，结果
+> `backend/scripts/probe_openrouter_results.json`（生产同款 httpx 直连；标准 OpenAI 格式，
+> 无需 Zen 式 reasoning_effort 特判）。key 已入 `backend/.env` 的 `OPENROUTER_API_KEY`
+> （不入库、不入文档；建议用后轮换——曾在会话明文出现）。
+
+#### 探针证据链
+
+| 探针 | 结果 | 证据 |
+|---|---|---|
+| P0 key 配额 | ✅ 200 / 1.2s | `GET /api/v1/auth/key` → `is_free_tier=true`、usage=0.153、limit=null（**免费档确认，具体日额度未返回，见风险#4**） |
+| P1 模型列表 | ✅ 200 / 977ms | 公开端点共 **419 模型**，pricing 双零过滤得 **22 个免费** |
+| P1 大参启发式覆盖 | **17/22（77%）** | `数字+B` 正则扫 id+name+description 取最大值；Top5：inkling 975B / nemotron-3-ultra 550B(A55B) / dots-3-note 280B / inkling-small 276B / nemotron-3-super 120B |
+| P2 候选#1（975B） | ❌ HTTP 403 | `"thinkingmachines/inkling:free is only available on agentic harnesses"`——**客户端类型门禁**，服务端直调被拒 |
+| P2 候选#2（550B） | ⚠️ 200 但 **content 空且无 usage**（1.8s） | 疑似 reasoning 型烧尽 max_tokens=1024 未产出正文——**200-空内容假完成形态，被 content_nonempty 断言当场抓住** |
+| P2 候选#3（280B） | ✅ 200 / 2.2s / content="OK" / usage 齐全 / echoed_model 一致 | `dots-studio/dots-3-note-preview:free` |
+| 判定 | **GO** | 池非空 ∧ 重选后内容非空（重选机制再次实证必要） |
+
+#### 「双免费池大参优先」可行性裁决（2026-08-24 v2 修订：Zen 层改随机选择）
+
+| 层 | 数值排序可行性 | 最终策略 |
+|---|---|---|
+| OpenRouter | ✅ **可行**（启发式覆盖 77%，元数据含 description/context_length/pricing） | 目录刷新时对免费池跑同一正则启发式得 `param_estimate_b`；**层内按参数量降序**、未命中归「未知」档排尾 |
+| Zen | ❌ **不可行（放弃排序）** | `/v1/models` 仅回 id/object/created/owned_by（19.1 实测），当前 7 个免费 id **均不含参数数字**（ultra/lightning 只是档位词）；强排 = 伪精度，静态参考表随月度轮换持续腐化（新 id 无参数信息退化为未知档）→ **层内改随机选择**（见下） |
+
+**选择策略裁决 v2（原 A 案修订 / B 案维持否决）**：
+
+- **层间顺序不变**：Zen → OpenRouter → DeepSeek 付费。理由保留：①既有架构语义与熔断爆炸半径；
+  ②隔离 OpenRouter 免费日额度消耗（风险#4）——中间层只在 Zen 整层熔断后才承流。
+- **Zen 层内 = 随机选择**（替代原「静态参考表排序」，评估结论：更务实且自洽——元数据可得性
+  不对称下，OR 排序有意义、Zen 强排是伪精度）。附加论据：
+  - 负载摊铺：19.1 实锤确定性首选的弱点（当日全部流量先撞一次 `deepseek-v4-flash-free`
+    的 400 再 failover，纯浪费首试）；随机摊铺后单模型劣化的系统性损耗消失，与 model 级
+    熔断互补（熔断剔除死模型，随机负责活模型间分摊）；
+  - 质量波动可容忍的项目依据：README 架构哲学「LLM prose is decoration on top of engine
+    output, never the source of truth」——组合权重来自纯函数引擎，命中模型只影响文风不影响
+    决策正确性；
+  - 免去 Zen 静态参考表的持续维护负担（列表月度轮换，参考表必腐化）。
+- **OpenRouter 层内 = 参数量降序**（`param_estimate_b` desc，「未知」档排尾，同值按
+  context_length desc）。
+- **B 案（否决，维持）**：全局跨池混排——流量前置到日额度最紧的 OpenRouter、破坏层间配额
+  隔离，且 MoE 总参 vs 激活参跨池不可比。
+
+**Zen 随机选择的四个强制护栏**：
+
+| # | 护栏 | 说明 |
+|---|---|---|
+| 1 | 无放回随机 + 跳过熔断中模型 | 每请求从「候选池 − 已 OPEN 熔断」`random.sample` 生成一次性尝试序列，失败顺位取下一个，绝不重复试同一模型 |
+| 2 | 可观测性补偿可复现性损失 | 「昨日报告差=命中弱模型」的事后归因依赖 token_usage 按 provider+model 记录（已有 by_model 聚合先例 test_token_usage_by_model.py）；实施时确认 admin 页暴露按模型维度视图即可定位劣化源 |
+| 3 | 排除表替代排序表 | 只维护小型黑名单（实测不可用/质量差模型，如 agentic-gate 类）长冷却跳过——这是随机的必要补充，否则在坏模型上反复浪费首试（熔断阈值触发前那几次） |
+| 4 | JSON 路径慎随机 | 策略检查等结构化输出路径对指令跟随敏感，随机到弱模型=解析失败烧额度；此类 agent 支持 env 配置「限定子集」（默认仍随机，出问题再收紧） |
+
+诚实 trade-off 登记：同一 prompt 短时重问文风漂移变大（8h 报告缓存已部分缓解），与项目
+「反风格漂移」目标有张力——因引擎输出才是 source of truth，判定可接受。
+
+#### 新发现的生产级约束（实施必须吸收）
+
+| # | 约束 | 处置要求 |
+|---|---|---|
+| 1 | OpenRouter 存在**客户端类型门禁**（403 agentic-harness-only），列表可见 ≠ 服务端可调 | 候选失败分类新增：403 且 message 含 `agentic harness` → 该模型记**长冷却**（等效永久跳过，TTL 至当日目录刷新）；不可计入普通熔断阈值 |
+| 2 | **200 + 空 content + 无 usage** 假完成形态真实存在（550B reasoning 型实测复现） | 选择循环的成功判据必须是「status==200 ∧ content 非空」（与反假完成口径一致）；空内容按候选失败处理触发重选；实施时核对 client.py 现有 failover 是否已把空 content 计为失败，未计则补负向用例 |
+| 3 | reasoning 型免费模型会在 thinking 上静默烧掉 max_tokens | 生产调用需保底 max_tokens 下限或按 supported_parameters 显式关思考；策略检查等 JSON 路径尤其敏感（解析失败即浪费一次额度） |
+| 4 | OpenRouter 免费档公开政策为 RPM 20 + 日额度（充值 <$10 约 50 次/日，≥$10 约 1000 次/日；P0 未返回具体值） | **中间层定位 = Zen 故障溢出层，不是高频路径承载者**；新闻摘要等后台低价值 LLM 调用在中间层激活时应显式跳过或降级，防止烧穿日额度挤占交互路径 |
+
+#### 三层链最终形态（修订 19.4 图）
+
+```
+候选池构建（lifespan 后台周期刷新，各自独立 TTL + last-known-good）：
+  Zen 池        GET {ZEN}/v1/models        → -free ∧ 非 Responses-API ∧ 不在排除表
+  OpenRouter 池 GET {OR}/api/v1/models     → pricing 双零 → +启发式参数估计（降序，未知排尾）
+调用期选择（层策略不对称：Zen 随机 / OR 按参）：
+  Zen 池：random.sample(池 − 熔断中) 无放回逐试 ──model级熔断──► 全耗尽
+    ──► OpenRouter 池：按 param_estimate_b 降序逐试
+        （403门禁长冷却 + 空content重选 + 保底max_tokens）
+      ──► 全熔断/耗尽 ──► deepseek-v4-flash 付费层（现状兜底不动）
+```
+
+#### 验收口径增补（叠加 19.7 之上）
+
+5. OpenRouter 目录过滤与参数启发式单测：免费判定（pricing 双零）、403 门禁长冷却、
+   空 content 触发重选的**负向断言**（旧逻辑下必红）；
+6. 配额保护：中间层激活时后台型调用（hub/_news.py 新闻摘要等）跳过的行为有测试锚定；
+7. reality check：token_usage 的 provider 字段出现第三态 `openrouter`，admin 页聚合正确；
+8. Zen 随机选择性质测试（固定种子的属性断言）：尝试序列无放回、跳过已 OPEN 熔断模型、
+   排除表成员不进序列；JSON 路径「限定子集」配置生效时随机域收缩为子集。
+
+> ⚠️ 验证窗口标注：本节列表快照与排名仅代表 2026-08-24 实测（22 免费/覆盖率 77%/Top3
+> 结果），实施验收不得硬编码当日内容；OpenRouter 日额度具体数值待控制台人工确认后回填本节。

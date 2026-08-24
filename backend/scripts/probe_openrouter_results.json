@@ -1,0 +1,221 @@
+{
+  "probed_at": "2026-08-24T18:05:50+0800",
+  "p0_key_info": {
+    "attempts": [
+      {
+        "trust_env": false,
+        "ok": true,
+        "status": 200,
+        "elapsed_ms": 1160
+      }
+    ],
+    "status": 200,
+    "is_free_tier": true,
+    "limit": null,
+    "usage": 0.153414283,
+    "limit_remaining": null,
+    "rate_limit": {
+      "requests": -1,
+      "interval": "10s",
+      "note": "This field is deprecated and safe to ignore."
+    }
+  },
+  "p1_free_pool": {
+    "status": 200,
+    "total_models": 419,
+    "free_count": 22,
+    "size_heuristic_coverage": "17/22",
+    "ranked_top15": [
+      {
+        "id": "thinkingmachines/inkling:free",
+        "name": "Thinking Machines: Inkling (free)",
+        "context_length": 262144,
+        "param_estimate_b": 975.0,
+        "param_hit_token": "975B",
+        "supported_parameters_count": 11
+      },
+      {
+        "id": "nvidia/nemotron-3-ultra-550b-a55b:free",
+        "name": "NVIDIA: Nemotron 3 Ultra (free)",
+        "context_length": 1000000,
+        "param_estimate_b": 550.0,
+        "param_hit_token": "550b",
+        "supported_parameters_count": 9
+      },
+      {
+        "id": "dots-studio/dots-3-note-preview:free",
+        "name": "Dots Studio: Dots3-Note Preview (free)",
+        "context_length": 512000,
+        "param_estimate_b": 280.0,
+        "param_hit_token": "280B",
+        "supported_parameters_count": 9
+      },
+      {
+        "id": "thinkingmachines/inkling-small:free",
+        "name": "Thinking Machines: Inkling Small (free)",
+        "context_length": 262144,
+        "param_estimate_b": 276.0,
+        "param_hit_token": "276B",
+        "supported_parameters_count": 11
+      },
+      {
+        "id": "nvidia/nemotron-3-super-120b-a12b:free",
+        "name": "NVIDIA: Nemotron 3 Super (free)",
+        "context_length": 262144,
+        "param_estimate_b": 120.0,
+        "param_hit_token": "120b",
+        "supported_parameters_count": 11
+      },
+      {
+        "id": "poolside/laguna-s-2.1:free",
+        "name": "Poolside: Laguna S 2.1 (free)",
+        "context_length": 262144,
+        "param_estimate_b": 118.0,
+        "param_hit_token": "118B",
+        "supported_parameters_count": 6
+      },
+      {
+        "id": "poolside/laguna-xs-2.1:free",
+        "name": "Poolside: Laguna XS 2.1 (free)",
+        "context_length": 262144,
+        "param_estimate_b": 33.0,
+        "param_hit_token": "33B",
+        "supported_parameters_count": 6
+      },
+      {
+        "id": "google/gemma-4-26b-a4b-it:free",
+        "name": "Google: Gemma 4 26B A4B  (free)",
+        "context_length": 262144,
+        "param_estimate_b": 31.0,
+        "param_hit_token": "31B",
+        "supported_parameters_count": 9
+      },
+      {
+        "id": "google/gemma-4-31b-it:free",
+        "name": "Google: Gemma 4 31B (free)",
+        "context_length": 262144,
+        "param_estimate_b": 31.0,
+        "param_hit_token": "31b",
+        "supported_parameters_count": 9
+      },
+      {
+        "id": "nvidia/nemotron-3.5-lightning:free",
+        "name": "NVIDIA: Nemotron 3.5 Lightning (free)",
+        "context_length": 1000000,
+        "param_estimate_b": 30.0,
+        "param_hit_token": "30B",
+        "supported_parameters_count": 8
+      },
+      {
+        "id": "cohere/north-mini-code:free",
+        "name": "Cohere: North Mini Code (free)",
+        "context_length": 256000,
+        "param_estimate_b": 30.0,
+        "param_hit_token": "30B",
+        "supported_parameters_count": 12
+      },
+      {
+        "id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+        "name": "NVIDIA: Nemotron 3 Nano Omni (free)",
+        "context_length": 256000,
+        "param_estimate_b": 30.0,
+        "param_hit_token": "30b",
+        "supported_parameters_count": 8
+      },
+      {
+        "id": "nvidia/nemotron-3-nano-30b-a3b:free",
+        "name": "NVIDIA: Nemotron 3 Nano 30B A3B (free)",
+        "context_length": 256000,
+        "param_estimate_b": 30.0,
+        "param_hit_token": "30b",
+        "supported_parameters_count": 8
+      },
+      {
+        "id": "nvidia/nemotron-nano-12b-v2-vl:free",
+        "name": "NVIDIA: Nemotron Nano 12B 2 VL (free)",
+        "context_length": 128000,
+        "param_estimate_b": 12.0,
+        "param_hit_token": "12b",
+        "supported_parameters_count": 8
+      },
+      {
+        "id": "nvidia/nemotron-nano-9b-v2:free",
+        "name": "NVIDIA: Nemotron Nano 9B V2 (free)",
+        "context_length": 128000,
+        "param_estimate_b": 9.0,
+        "param_hit_token": "9b",
+        "supported_parameters_count": 10
+      }
+    ],
+    "attempts": [
+      {
+        "trust_env": false,
+        "ok": true,
+        "status": 200,
+        "elapsed_ms": 977
+      }
+    ]
+  },
+  "p2_chat_calls": {
+    "tried": [
+      {
+        "model": "thinkingmachines/inkling:free",
+        "attempts": [
+          {
+            "trust_env": false,
+            "ok": true,
+            "status": 403,
+            "elapsed_ms": 936
+          }
+        ],
+        "status": 403,
+        "content_nonempty": false,
+        "content_head": "",
+        "usage_present": false,
+        "echoed_model": null,
+        "error_body_head": "{\"error\":{\"message\":\"thinkingmachines/inkling:free is only available on agentic harnesses. Try plugging it into a coding agent or productivity app listed on https://openrouter.ai/apps\",\"code\":403}}"
+      },
+      {
+        "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+        "attempts": [
+          {
+            "trust_env": false,
+            "ok": true,
+            "status": 200,
+            "elapsed_ms": 1775
+          }
+        ],
+        "status": 200,
+        "content_nonempty": false,
+        "content_head": "",
+        "usage_present": false,
+        "echoed_model": null,
+        "error_body_head": null
+      },
+      {
+        "model": "dots-studio/dots-3-note-preview:free",
+        "attempts": [
+          {
+            "trust_env": false,
+            "ok": true,
+            "status": 200,
+            "elapsed_ms": 2192
+          }
+        ],
+        "status": 200,
+        "content_nonempty": true,
+        "content_head": "OK",
+        "usage_present": true,
+        "echoed_model": "dots-studio/dots-3-note-preview:free",
+        "error_body_head": null
+      }
+    ],
+    "succeeded_model": "dots-studio/dots-3-note-preview:free",
+    "content_nonempty": true,
+    "latency_note": 2192
+  },
+  "verdict": "GO",
+  "reasons": [],
+  "or_key_present": true,
+  "or_key_masked": "sk-or-v1-..."
+}
