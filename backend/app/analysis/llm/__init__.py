@@ -65,7 +65,9 @@ from app.analysis.llm.gates import (
     _last_llm_error,
     _record_llm_error,
     get_last_llm_error,
+    is_middle_layer_active,
     llm_quota_gate,
+    mark_middle_layer_active,
     reset_circuit,
 )
 from app.analysis.llm.health import _fetch_global_liquidity, llm_health_check
@@ -141,6 +143,8 @@ __all__ = [
     "_circuit_record_failure",
     "_circuit_record_success",
     "reset_circuit",
+    "mark_middle_layer_active",
+    "is_middle_layer_active",
     # cache
     "_report_cache_key",
     "get_cached_report",

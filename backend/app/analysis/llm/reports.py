@@ -10,6 +10,12 @@ from app.analysis.llm.gates import get_last_llm_error  # noqa: F401
 from app.analysis.llm.health import _fetch_global_liquidity
 from app.analysis.llm.prompts import load_prompt
 from app.analysis.registry import get_agent
+# round35 §19 GapE: LLM 超时常量唯一事实源（原两处 httpx.Timeout 字面量收敛）
+from app.core.llm_timeouts import (
+    DESIGN_REPORT_READ_S,
+    STRATEGY_CHECK_READ_S,
+    llm_http_timeout,
+)
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -588,8 +594,8 @@ async def generate_strategy_check_report(
 {quality_note}
 请按 strategy_check.md 要求的 JSON 格式输出分析报告。
 """
-    import httpx  # round23 遗留修复: request_timeout 用 httpx.Timeout(connect/read 分离)
-
+    # round23 遗留修复: request_timeout 用 httpx.Timeout(connect/read 分离)——
+    # §19 GapE 后四元组字面量收敛至 core/llm_timeouts.llm_http_timeout()
     from ...analysis.registry import get_agent
     _start_ms = time.monotonic()
     try:
@@ -618,7 +624,7 @@ async def generate_strategy_check_report(
             # 对齐实测上沿 60s；read 保持 90s 容纳长生成；max_retries=0 最坏 2×connect60=120s
             # ≤ 外层完整档 180s（partial 30s / all_empty 15s 分级不受影响——connect 只在
             # 数据完整档才有机会跑满，低档本就该快速兜底）。
-            request_timeout=httpx.Timeout(connect=60.0, read=90.0, write=15.0, pool=15.0),
+            request_timeout=llm_http_timeout(read_s=STRATEGY_CHECK_READ_S),
         )
     except BaseException as e:  # noqa: BLE001 — F1-9: 必须捕获 CancelledError（BaseException）
         # F1-9: asyncio.wait_for(20s) 超时取消内部任务时抛 CancelledError，
@@ -836,13 +842,13 @@ async def generate_design_report(
     # R70b (round29): connect 15s→60s 对齐策略检查路径（R57）——DeepSeek 慢连接/慢
     # 首字节实测 34-78s，设计报告路径同样会先于 read 120s 触发 CancelledError；
     # read 保持 120s 容纳长生成。
-    import httpx
     try:
         # 使用"symbol_analysis" agent 的通用上下文，但传入设计报告 prompt
         result = await get_agent("symbol_analysis").run(
             prompt,
             system_override=load_prompt("design_report.md"),
-            request_timeout=httpx.Timeout(connect=60.0, read=120.0, write=15.0, pool=15.0),
+            # §19 GapE: 四元组字面量收敛至 core/llm_timeouts（connect=60/write=15/pool=15 共享）
+            request_timeout=llm_http_timeout(read_s=DESIGN_REPORT_READ_S),
         )
         return result or "报告生成失败"
     except Exception as e:

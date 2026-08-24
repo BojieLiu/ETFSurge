@@ -71,6 +71,16 @@ class NewsMixin:
 
         enriched = 0
         seen_ids: set = set()
+        # §19.9 约束#4/验收#6（配额保护）: 中间层（OpenRouter 免费层）激活期间
+        # 跳过后台低价值 LLM 摘要调用——免费日额度紧，防烧穿额度挤占交互路径；
+        # 直接落规则摘要降级，下轮 enrich（标记过期后）仍会重试 LLM（R65 语义不变）。
+        skip_llm = False
+        try:
+            from ...analysis.llm.gates import is_middle_layer_active
+
+            skip_llm = is_middle_layer_active()
+        except Exception:
+            pass
         for bucket in ("headlines", "macro", "global"):
             q = quotas.get(bucket, 0)
             if q <= 0:
@@ -90,16 +100,17 @@ class NewsMixin:
                     if nid in seen_ids:
                         continue
                     seen_ids.add(nid)
-                    try:
-                        summary = await generate_news_summary(n.get("title", ""), n.get("content", ""))
-                        if summary:
-                            n["ai_summary"] = summary
-                            n["ai_summary_source"] = "llm"
-                            enriched += 1
-                            bucket_count += 1
-                            continue
-                    except Exception:
-                        pass
+                    if not skip_llm:
+                        try:
+                            summary = await generate_news_summary(n.get("title", ""), n.get("content", ""))
+                            if summary:
+                                n["ai_summary"] = summary
+                                n["ai_summary_source"] = "llm"
+                                enriched += 1
+                                bucket_count += 1
+                                continue
+                        except Exception:
+                            pass
                     # R65 (round28): LLM 失败/配额空窗 → 规则摘要兜底（非 null）。
                     # 旧实现 except 后直接 continue → 重要条目 ai_summary 恒 null
                     # （LLM 配额门禁让位主链路 + 无回填，round28 §6 R65）。

@@ -8,6 +8,13 @@ from typing import List
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings
 
+# round35 §19 GapE: LLM 超时默认值单点收敛（core/llm_timeouts.py 只依赖 httpx，
+# 无循环导入）。
+from .core.llm_timeouts import (
+    LLM_PROVIDER_FALLBACK_TIMEOUT_S,
+    LLM_PROVIDER_PRIMARY_TIMEOUT_S,
+)
+
 logger = logging.getLogger(__name__)
 
 # 解析 .env 为绝对路径, 避免依赖进程工作目录
@@ -127,8 +134,10 @@ class Settings(BaseSettings):
     # 旧值 240s 远超策略检查 15/30/75s 分级预算，zen 持久 429 时每次白等 240s）。
     llm_primary_provider: str = "opencode_zen"
     llm_fallback_provider: str = "deepseek"
-    llm_primary_timeout: int = 20
-    llm_fallback_timeout: int = 45
+    # round35 §19 GapE: 默认值单点收敛于 core/llm_timeouts.py（与 reports.py 两处
+    # httpx.Timeout 同源）；env 仍可覆盖运行值。
+    llm_primary_timeout: int = LLM_PROVIDER_PRIMARY_TIMEOUT_S
+    llm_fallback_timeout: int = LLM_PROVIDER_FALLBACK_TIMEOUT_S
 
     # 日志：级别（DEBUG/INFO/WARNING/ERROR）与可选日志文件路径
     log_level: str = "INFO"

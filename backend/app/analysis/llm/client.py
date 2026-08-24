@@ -15,6 +15,7 @@ from app.analysis.llm.gates import (
     _clear_llm_error,
     _record_llm_error,
     llm_quota_gate,
+    mark_middle_layer_active,
 )
 from app.analysis.llm.prompts import SYSTEM_PROMPT, strip_internal_leak
 from app.analysis.provider import (
@@ -73,6 +74,10 @@ async def llm_complete(
             if not _circuit_allow(provider.id, provider.model):
                 continue
             _attempted_any = True
+            if provider.id == "openrouter":
+                # §19.9 约束#4/验收#6: 中间层承流即打标——后台低价值调用（新闻摘要等）
+                # 据此跳过，防烧穿免费日额度；TTL 过期视为 Zen 已恢复。
+                mark_middle_layer_active()
             body = {
                 "model": provider.model,
                 "messages": [
@@ -231,6 +236,9 @@ async def llm_complete_stream(
             if not _circuit_allow(provider.id, provider.model):
                 continue
             _attempted_any = True
+            if provider.id == "openrouter":
+                # §19.9 约束#4/验收#6: 中间层承流即打标（同 llm_complete）
+                mark_middle_layer_active()
             body = {
                 "model": provider.model,
                 "messages": [
@@ -456,6 +464,9 @@ async def llm_complete_with_system(
             if not _circuit_allow(provider.id, provider.model):
                 continue
             _attempted_any = True
+            if provider.id == "openrouter":
+                # §19.9 约束#4/验收#6: 中间层承流即打标（同 llm_complete）
+                mark_middle_layer_active()
             body = {
                 "model": provider.model,
                 "messages": [

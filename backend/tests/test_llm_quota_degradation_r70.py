@@ -93,10 +93,24 @@ class TestR70QuotaHonestDegradation:
 
 class TestR70bDesignReportConnectAligned:
     def test_generate_design_report_uses_connect_60(self):
-        """设计报告路径 connect 必须对齐 60s（R57 只改了策略检查路径）。"""
+        """设计报告路径 connect 必须对齐 60s（R57 只改了策略检查路径）。
+
+        round35 §19 GapE 收敛后：connect/read/write/pool 四元组字面量上移至
+        core/llm_timeouts 单源——本钉定改为验证「路径走收敛 helper + 预算
+        常量」且合成 Timeout 的 connect 行为不变量仍为 60s（防回潮）。
+        """
         import inspect
+
         from app.analysis.llm import reports
+        from app.core.llm_timeouts import (
+            DESIGN_REPORT_READ_S,
+            LLM_HTTP_CONNECT_S,
+            llm_http_timeout,
+        )
 
         src = inspect.getsource(reports.generate_design_report)
-        assert "connect=60.0" in src, "generate_design_report 仍 connect=15.0（R70b 未修）"
-        assert "connect=15.0" not in src
+        assert "llm_http_timeout(read_s=DESIGN_REPORT_READ_S)" in src, \
+            "generate_design_report 未走 §19 GapE 收敛超时 helper"
+        assert "httpx.Timeout(" not in src, "四元组字面量不得回潮（应走 llm_http_timeout）"
+        # 行为不变量保持：该路径合成 Timeout 的 connect 必须仍是 60s
+        assert llm_http_timeout(DESIGN_REPORT_READ_S).connect == LLM_HTTP_CONNECT_S == 60.0

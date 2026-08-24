@@ -163,13 +163,39 @@ def _circuit_record_success(provider_id: str, model: str | None = None) -> None:
     entry["fail_count"] = 0
 
 
+# ── round35 §19.9 约束#4/验收#6: 中间层激活运行时标记（配额保护）────
+# OpenRouter 免费档日额度紧（RPM 20 + 约 50 次/日），仅作 Zen 故障溢出层。
+# client failover 循环真实尝试 openrouter 候选时打标；后台低价值 LLM 调用
+# （hub/_news.py enrich_news_summaries 新闻摘要等）查询该标记决定跳过/降级，
+# 防烧穿免费日额度挤占交互路径。TTL 对齐目录刷新周期——过期视为 Zen 已恢复。
+
+_MIDDLE_LAYER_ACTIVE_TTL = 600.0
+
+_middle_layer_active_until: float = 0.0
+
+
+def mark_middle_layer_active(ttl: float | None = None) -> None:
+    """client 循环尝试 openrouter 候选时调用：打标中间层已承流（TTL 内有效）。"""
+    global _middle_layer_active_until
+    _middle_layer_active_until = time.monotonic() + (
+        ttl if ttl is not None else _MIDDLE_LAYER_ACTIVE_TTL
+    )
+
+
+def is_middle_layer_active() -> bool:
+    """中间层是否处于激活窗口（近期有 openrouter 候选被真实尝试）。"""
+    return time.monotonic() < _middle_layer_active_until
+
+
 def reset_circuit() -> None:
     """测试/运维用：清空熔断状态。"""
+    global _middle_layer_active_until
     _circuit.clear()
     _long_cooldown.clear()
     # round25 R39: 同步复位跨任务配额门禁（单例 _last 跨测试持久，避免冷却污染）
     llm_quota_gate._last = 0.0
     llm_quota_gate._exhausted_until = 0.0
+    _middle_layer_active_until = 0.0
 
 
 class LLMQuotaGate:
