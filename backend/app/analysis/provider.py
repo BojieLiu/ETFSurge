@@ -93,6 +93,11 @@ def get_configured_providers() -> list[ProviderConfig]:
       - LLM_FALLBACK_PROVIDER  — which provider is fallback ("deepseek" by default)
       - OPENCODE_ZEN_API_KEY   — if empty, primary is skipped
       - DEEPSEEK_API_KEY       — if empty, fallback is skipped
+
+    round35 §19 Gap D 处置（2026-08-24 登记）：admin UI 经 ``core/config_manager``
+    写入 DB 的 key 覆盖**不经此函数生效**——provider 配置在启动期从 settings 单例
+    读取，运行时改 key 需重启。UI 改 key 后请重启后端（restart-only，显式登记
+    而非静默失效）；如需热生效须把本函数改为经 ConfigManager 读值（另立项）。
     """
     providers: list[ProviderConfig] = []
     primary_id = (settings.llm_primary_provider or "").strip().lower()

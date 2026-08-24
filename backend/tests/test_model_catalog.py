@@ -237,3 +237,18 @@ def test_zen_allowed_subset_shrinks_candidates(monkeypatch):
     prov = _patch_settings(monkeypatch, llm_zen_allowed_models="a-free")
     ps = prov.get_configured_providers()
     assert {p.model for p in ps} == {"a-free"}
+
+
+def test_zen_sequence_skips_open_circuit_models(monkeypatch):
+    """§19.9-8：真实 gates 联动——复合键已 OPEN 的 model 分支不进尝试序列。"""
+    from app.analysis import provider as prov
+    c = ModelCatalog(ttl_seconds=9999)
+    c._zen = ["x-free", "y-free"]
+    monkeypatch.setattr("app.analysis.llm.model_catalog.model_catalog", c)
+    prov = _patch_settings(monkeypatch)
+    gates.reset_circuit()
+    # x-free 连续两次失败 → 复合键 opencode_zen:x-free 达阈值 OPEN
+    gates._circuit_record_failure("opencode_zen", False, model="x-free")
+    gates._circuit_record_failure("opencode_zen", False, model="x-free")
+    ps = prov.get_configured_providers()
+    assert [p.model for p in ps] == ["y-free"], "OPEN 分支不得进入尝试序列"
