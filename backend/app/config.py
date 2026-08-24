@@ -108,6 +108,16 @@ class Settings(BaseSettings):
     opencode_zen_model: str = "deepseek-v4-flash-free"
     opencode_zen_api_url: str = "https://opencode.ai/zen/v1/chat/completions"
 
+    # ── round35 §19: 三层 LLM 免费模型动态链（Zen 随机 → OpenRouter 按参 → DeepSeek 付费）──
+    # OpenRouter 中间层（Zen 整层熔断后才承流的溢出层；key 入 .env 不入库）
+    openrouter_api_key: str = ""
+    openrouter_api_url: str = "https://openrouter.ai/api/v1/chat/completions"
+    # 免费目录刷新 TTL 秒（lifespan 周期刷新 + last-known-good 兜底）
+    llm_catalog_refresh_ttl: int = 600
+    # Zen 层 JSON 路径限定子集（护栏 4）：逗号分隔模型白名单；空=全池随机。
+    # 策略检查等结构化输出路径对指令跟随敏感，劣化时用此收紧随机域。
+    llm_zen_allowed_models: str = ""
+
     # connnection pool 配置
     pool_connections: int = 30
     pool_maxsize: int = 60
