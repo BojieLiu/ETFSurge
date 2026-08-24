@@ -6,6 +6,9 @@ from typing import Any, Optional
 
 from ..config import settings
 
+# A4②: Redis 不可用降级累计 N 次后触发一次后台重探
+_REPROBE_EVERY = 50
+
 
 class MemoryCache:
     """进程内 TTL 缓存（L1），无外部依赖，始终可用。"""
@@ -63,11 +66,19 @@ memory_cache = MemoryCache()
 
 
 class RedisCache:
-    """Redis 缓存（L2），跨进程共享；不可用时自动降级。"""
+    """Redis 缓存（L2），跨进程共享；不可用时自动降级。
+
+    round35 A4② (§13.4-A4)：旧实现仅在启动 lifespan 探测一次——若当时
+    Redis 宕机则整个进程生命周期内永不重试。现在不可用状态下的每次降级
+    都计数，累计达 ``_REPROBE_EVERY`` 触发一次**后台**重探（create_task，
+    不阻塞当前调用），恢复连接后自动回到 L2 正常路径。
+    """
 
     def __init__(self) -> None:
         self._client = None
         self._available = False
+        self._skip_count = 0
+        self._reprobe_scheduled = False
 
     async def init(self) -> None:
         """FIX-03: 初始化 Redis 客户端；若已连接则跳过。"""
@@ -93,8 +104,29 @@ class RedisCache:
     def available(self) -> bool:
         return self._available and self._client is not None
 
+    def _schedule_reprobe(self) -> None:
+        """不可用降级累计达阈值 → 后台重探一次（非阻塞）。"""
+        self._skip_count += 1
+        if self._skip_count < _REPROBE_EVERY or self._reprobe_scheduled:
+            return
+        self._skip_count = 0
+        self._reprobe_scheduled = True
+
+        async def _probe():
+            try:
+                await self.init()
+            finally:
+                self._reprobe_scheduled = False
+
+        try:
+            asyncio.get_running_loop().create_task(_probe())
+        except RuntimeError:
+            # 无运行中的事件循环（同步上下文调用）——放弃本轮，下次计数再试
+            self._reprobe_scheduled = False
+
     async def get(self, key: str) -> Optional[Any]:
         if not self.available:
+            self._schedule_reprobe()
             return None
         try:
             raw = await self._client.get(key)  # type: ignore[attr-defined]
@@ -104,6 +136,7 @@ class RedisCache:
 
     async def set(self, key: str, value: Any, ttl: int) -> None:
         if not self.available:
+            self._schedule_reprobe()
             return
         try:
             await self._client.set(key, json.dumps(value, ensure_ascii=False), ex=ttl)  # type: ignore[attr-defined]
@@ -111,7 +144,10 @@ class RedisCache:
             pass
 
     async def mget(self, keys: list[str]) -> list[Optional[Any]]:
-        if not self.available or not keys:
+        if not keys:
+            return []
+        if not self.available:
+            self._schedule_reprobe()
             return [None] * len(keys)
         try:
             raws = await self._client.mget(keys)  # type: ignore[attr-defined]
@@ -120,7 +156,10 @@ class RedisCache:
             return [None] * len(keys)
 
     async def mset(self, mapping: dict[str, Any], ttl: int) -> None:
-        if not self.available or not mapping:
+        if not mapping:
+            return
+        if not self.available:
+            self._schedule_reprobe()
             return
         try:
             async with self._client.pipeline() as pipe:  # type: ignore[attr-defined]
@@ -166,10 +205,13 @@ async def cache_mset(mapping: dict[str, Any], ttl: int) -> None:
 
 
 class SyncMemoryCache:
-    """同步版 MemoryCache，底层与 ``memory_cache`` 共享同一进程空间。
+    """同步版 TTL 缓存（fetcher 层专用），**独立 store**。
 
-    Fetcher 层为同步函数，无法直接使用 async 的 ``memory_cache.get/set``，
-    此包装器提供等效的线程安全同步接口，行为一致。
+    round35 A4① (§13.4-A4) 更正：旧 docstring 声称"与 ``memory_cache``
+    共享同一进程空间"——不实。本类拥有自己的 ``_store``，与 async 的
+    ``memory_cache`` **互不可见**（同步 fetcher 写入的条目，async 侧读不到，
+    反之亦然）。这是有意的边界隔离：fetcher 层为同步函数，无法持有
+    asyncio.Lock；两侧各自线程安全，但缓存不互通。
     """
 
     def __init__(self) -> None:

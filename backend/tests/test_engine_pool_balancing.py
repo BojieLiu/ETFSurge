@@ -1,36 +1,32 @@
-"""Pure-function tests for the engine/ extraction (Batch 4, plan A Step 2).
+"""Pure-function tests for engine/pool_balancing.py.
 
-Functions moved from MarketDataHub to engine/ (composite_signal + pool_balancing)
-are pure: deterministic inputs -> deterministic outputs. These tests give them
-standalone coverage (target >=90%) and pin the behavior extracted from the facade.
+round35 T-P2/B-3 (§16.4-B-3): split out of the oversized
+``test_engine_pure_functions.py`` (now deleted) into per-module files, plus
+new edge cases (static-anchor injection without scan hit, cross-layer dedup
+isolation, missing fund_scale handling, mandatory-exceeds-max truncation).
 """
 
-import pytest
-
-from app.engine.composite_signal import (
-    _LAYER_WEIGHTS,
-    _BASE_WEIGHTS,
-    normalize_regime,
-    is_market_hours,
-    pct_rank,
-    compute_composite,
-)
 from app.engine.budgets import MANDATORY_CODES  # round35 B1-F2: 真相源 budgets
 from app.engine.pool_balancing import (
     ALL_LAYERS,
     LAYER_CORE,
-    LAYER_SATELLITE,
     LAYER_DEFENSE,
     LAYER_OPPORTUNISTIC,
     LAYER_RESEARCH,
+    LAYER_SATELLITE,
     assign_layer,
-    normalize_tracked_index,
+    balance_by_industry,
     deduplicate_by_index,
     ensure_mandatory,
-    truncate_with_mandatory_protection,
+    normalize_tracked_index,
     recheck_mandatory_after_truncate,
-    balance_by_industry,
+    truncate_with_mandatory_protection,
 )
+
+
+def _empty_pool():
+    return {LAYER_CORE: [], LAYER_SATELLITE: [], LAYER_DEFENSE: [],
+            LAYER_OPPORTUNISTIC: [], LAYER_RESEARCH: []}
 
 
 class TestAssignLayer:
@@ -50,6 +46,10 @@ class TestAssignLayer:
         assert assign_layer("", "unknown") == LAYER_RESEARCH
         assert assign_layer("opportunistic", "whatever") == LAYER_SATELLITE
 
+    def test_both_empty_falls_to_research(self):
+        # base→satellite、industry→unknown；unknown 分支先于 satellite 兜底命中
+        assert assign_layer("", "") == LAYER_RESEARCH
+
 
 class TestNormalizeTrackedIndex:
     def test_family_slices(self):
@@ -62,6 +62,10 @@ class TestNormalizeTrackedIndex:
     def test_base_untouched_and_empty(self):
         assert normalize_tracked_index("中证500") == "中证500"
         assert normalize_tracked_index("") == ""
+
+    def test_unrelated_indices_untouched(self):
+        assert normalize_tracked_index("科创50") == "科创50"
+        assert normalize_tracked_index("中证A500") == "中证A500"
 
 
 class TestDeduplicateByIndex:
@@ -117,19 +121,38 @@ class TestDeduplicateByIndex:
     def test_empty(self):
         assert deduplicate_by_index({}) == {layer: [] for layer in ALL_LAYERS}
 
+    # ── 新增边界 ──────────────────────────────────────────────
+
+    def test_missing_fund_scale_treated_as_zero(self):
+        """缺 scale 的条目 vs 有 scale 的同指数条目 → 后者胜（None/0 容错）。"""
+        pool = {"core": [
+            {"symbol": "A", "tracked_index": "沪深300"},              # no scale
+            {"symbol": "B", "tracked_index": "沪深300", "fund_scale": 88},
+        ]}
+        result = deduplicate_by_index(pool)
+        assert [e["symbol"] for e in result["core"]] == ["B"]
+
+    def test_same_index_in_different_layers_both_kept(self):
+        """去重是**层内**截面：跨层同名指数互不挤占。"""
+        pool = {
+            "core": [{"symbol": "A", "tracked_index": "沪深300", "fund_scale": 100}],
+            "satellite": [{"symbol": "B", "tracked_index": "沪深300", "fund_scale": 50}],
+        }
+        result = deduplicate_by_index(pool)
+        assert [e["symbol"] for e in result["core"]] == ["A"]
+        assert [e["symbol"] for e in result["satellite"]] == ["B"]
+
 
 class TestEnsureMandatory:
     def test_injects_missing_from_flat(self):
-        pool = {LAYER_CORE: [], LAYER_SATELLITE: [], LAYER_DEFENSE: [],
-                LAYER_OPPORTUNISTIC: [], LAYER_RESEARCH: []}
+        pool = _empty_pool()
         flat = [{"symbol": "510300", "layer": "satellite"}]
         ensure_mandatory(pool, flat)
         core_codes = [e["symbol"] for e in pool[LAYER_CORE]]
         assert "510300" in core_codes
 
     def test_defense_codes_inject_to_defense(self):
-        pool = {LAYER_CORE: [], LAYER_SATELLITE: [], LAYER_DEFENSE: [],
-                LAYER_OPPORTUNISTIC: [], LAYER_RESEARCH: []}
+        pool = _empty_pool()
         flat = [{"symbol": "518880"}, {"symbol": "511090"}]
         ensure_mandatory(pool, flat)
         defense_codes = {e["symbol"] for e in pool[LAYER_DEFENSE]}
@@ -151,6 +174,31 @@ class TestEnsureMandatory:
         ensure_mandatory(pool, [])
         assert pool == {}
 
+    # ── 新增边界 ──────────────────────────────────────────────
+
+    def test_static_anchor_injection_when_scan_misses_core_anchor(self):
+        """R105 B'：扫描缺核心锚 → 静态元数据注入（带 name/tracked_index）。"""
+        pool = _empty_pool()
+        flat = [{"symbol": "510300"}]  # 159338 缺席
+        ensure_mandatory(pool, flat)
+        injected = next(e for e in pool[LAYER_CORE] if e["symbol"] == "159338")
+        assert injected["name"] == "中证A500ETF"
+        assert injected["tracked_index"] == "中证A500"
+        assert injected["layer"] == LAYER_CORE
+
+    def test_defense_anchor_missing_and_no_meta_not_fabricated(self):
+        """防御锚缺扫且无静态元数据 → 只 WARNING，不伪造入池。"""
+        pool = _empty_pool()
+        flat = [{"symbol": "510300"}, {"symbol": "159338"}]  # 防御双锚缺席
+        ensure_mandatory(pool, flat)
+        assert all(len(layer) == 0 or all(
+            e["symbol"] in ("510300", "159338") for e in layer
+        ) for layer in pool.values())
+        assert not any(
+            e["symbol"] in ("518880", "511090")
+            for layer in pool.values() for e in layer
+        ), "无静态元数据的防御锚不得伪造注入"
+
 
 class TestTruncateWithMandatoryProtection:
     def _items(self, symbols):
@@ -168,11 +216,17 @@ class TestTruncateWithMandatoryProtection:
         result = truncate_with_mandatory_protection(balanced, max_n=2)
         assert [e["symbol"] for e in result] == ["a", "b"]
 
+    def test_all_mandatory_still_kept_even_if_exceeds_max(self):
+        """强制标的数 > max_n 时一个不丢（保护优先于配额）。"""
+        balanced = self._items(list(MANDATORY_CODES) + ["x1", "x2"])
+        result = truncate_with_mandatory_protection(balanced, max_n=1)
+        kept = {e["symbol"] for e in result}
+        assert set(MANDATORY_CODES) <= kept
+
 
 class TestRecheckMandatoryAfterTruncate:
     def test_reinjects_missing(self):
-        pool = {LAYER_CORE: [], LAYER_SATELLITE: [], LAYER_DEFENSE: [],
-                LAYER_OPPORTUNISTIC: [], LAYER_RESEARCH: []}
+        pool = _empty_pool()
         flat = [{"symbol": "159338"}]
         recheck_mandatory_after_truncate(pool, flat, required_codes={"159338"})
         assert any(e["symbol"] == "159338" for layer in pool.values() for e in layer)
@@ -184,15 +238,13 @@ class TestRecheckMandatoryAfterTruncate:
         assert len(pool[LAYER_CORE]) == 1
 
     def test_missing_code_not_in_flat_skipped(self):
-        pool = {LAYER_CORE: [], LAYER_SATELLITE: [], LAYER_DEFENSE: [],
-                LAYER_OPPORTUNISTIC: [], LAYER_RESEARCH: []}
+        pool = _empty_pool()
         # 510300 not in flat -> silently skipped (no crash)
         recheck_mandatory_after_truncate(pool, [{"symbol": "159338"}], required_codes={"510300"})
         assert all(len(layer) == 0 for layer in pool.values())
 
     def test_defense_reinject(self):
-        pool = {LAYER_CORE: [], LAYER_SATELLITE: [], LAYER_DEFENSE: [],
-                LAYER_OPPORTUNISTIC: [], LAYER_RESEARCH: []}
+        pool = _empty_pool()
         recheck_mandatory_after_truncate(pool, [{"symbol": "518880"}], required_codes={"518880"})
         assert any(e["symbol"] == "518880" for e in pool[LAYER_DEFENSE])
 
@@ -236,89 +288,42 @@ class TestBalanceByIndustry:
         # one per segment (a2, b1) then fill with next-highest (a1)
         assert set(symbols) == {"a2", "b1", "a1"}
 
+    # ── 新增边界 ──────────────────────────────────────────────
 
-class TestPctRank:
-    def test_ties(self):
-        assert pct_rank(30.0, [10.0, 30.0, 50.0]) == pytest.approx(0.5)
-        assert pct_rank(50.0, [10.0, 30.0, 50.0]) == pytest.approx((2 + 0.5) / 3)
-        assert pct_rank(100.0, [10.0, 30.0, 50.0]) == pytest.approx(1.0)
-        assert pct_rank(1.0, []) == 0.0
+    def test_max_n_smaller_than_segment_count_truncates(self):
+        """段落数超过 max_n：每段先各出一人，再按插入序截到 max_n（确定性）。"""
+        items = [
+            self._item("s1", "半导体", 9.0),
+            self._item("s2", "银行", 8.0),
+            self._item("s3", "医药", 7.0),
+        ]
+        result = balance_by_industry(items, max_n=2)
+        assert len(result) == 2
+        segments = {e["segment"] for e in result}
+        assert len(segments) == 2, "截断结果仍应保持段落多样性"
 
+    def test_missing_composite_score_defaults_to_zero(self):
+        # 4 items > max_n=3：绕过 len<=max_n 直通短路，真正走进排序路径
+        items = [
+            {"symbol": "low", "segment": "银行"},                      # score 缺省 0
+            self._item("high", "银行", 3.0),
+            self._item("pad1", "医药", 1.0),
+            self._item("pad2", "证券", 0.5),
+        ]
+        result = balance_by_industry(items, max_n=3)
+        assert result[0]["symbol"] == "high", "缺 composite_score 视为 0 参与排序"
+        assert "low" not in [e["symbol"] for e in result[:2]], (
+            "同段内 low(0) 不应排到 high(3) 前面"
+        )
 
-class TestNormalizeRegime:
-    def test_maps_variants_to_table_keys(self):
-        # delegates to core/regime.normalize_regime
-        assert normalize_regime("neutral") in ("neutral",)
-        assert callable(normalize_regime)
-
-
-class TestIsMarketHours:
-    def test_returns_bool(self):
-        assert isinstance(is_market_hours(), bool)
-
-
-class TestComputeComposite:
-    def _item(self, amount=1e9, scale=2000.0, factor_sum=0.0):
-        return {
-            "amount": amount,
-            "fund_scale": scale,
-            "factor_scores": {"technical": factor_sum, "momentum": 0.0,
-                              "valuation": 0.0, "sentiment": 0.0},
-        }
-
-    def test_scale_discrimination_restored(self):
-        """2000 亿 vs 30 亿（factor_sum 均 0）→ composite 可区分。"""
-        big = self._item(amount=1e9, scale=2000.0)
-        small = self._item(amount=1e9, scale=30.0)
-        amounts = [1e9, 1e9]
-        scales = [2000.0, 30.0]
-        s_big = compute_composite(big, "core", "neutral", amounts, scales,
-                                  is_market_hours=lambda: True)
-        s_small = compute_composite(small, "core", "neutral", amounts, scales,
-                                    is_market_hours=lambda: True)
-        assert s_big > s_small
-
-    def test_factor_dominance_kept(self):
-        hi = self._item(amount=1e9, scale=2000.0, factor_sum=9.0)
-        lo = self._item(amount=1e9, scale=2000.0, factor_sum=0.0)
-        amounts = [1e9, 1e9]
-        scales = [2000.0, 2000.0]
-        s_hi = compute_composite(hi, "core", "neutral", amounts, scales,
-                                 is_market_hours=lambda: True)
-        s_lo = compute_composite(lo, "core", "neutral", amounts, scales,
-                                 is_market_hours=lambda: True)
-        assert s_hi > s_lo
-
-    def test_off_hours_liquidity_halved(self):
-        item = self._item(amount=1e8, scale=10.0, factor_sum=0.0)
-        on = compute_composite(item, "satellite", "neutral", None, None,
-                               is_market_hours=lambda: True)
-        off = compute_composite(item, "satellite", "neutral", None, None,
-                                is_market_hours=lambda: False)
-        assert off < on, "非交易时段流动性权重减半应降低 composite"
-
-    def test_legacy_path_backward_compat(self):
-        item = self._item(amount=4.47e9, scale=1193.85, factor_sum=1.0)
-        s = compute_composite(item, "core", "neutral", None, None,
-                              is_market_hours=lambda: True)
-        assert s == pytest.approx(0.50 * 1.0 + 0.25 * 4.47e9 * 1e-9 + 0.25 * 1193.85 * 1e-9)
-
-    def test_opportunistic_keeps_legacy(self):
-        item = self._item(amount=1e8, scale=10.0, factor_sum=0.0)
-        item["composite_score"] = 0.6
-        s = compute_composite(item, "opportunistic", "neutral", None, None,
-                              is_market_hours=lambda: True)
-        assert s == pytest.approx(0.15 * 1e8 * 1e-9 + 0.35 * 0.6, abs=1e-9)
-
-    def test_default_helpers_used_when_not_injected(self):
-        item = self._item(amount=1e8, scale=10.0, factor_sum=0.0)
-        # no injection -> uses built-in is_market_hours/pct_rank/normalize_regime
-        s = compute_composite(item, "satellite", "neutral")
-        assert isinstance(s, float)
-
-    def test_weights_tables_present(self):
-        assert "core" in _LAYER_WEIGHTS
-        assert "factor" in _BASE_WEIGHTS
+    def test_missing_segment_falls_to_industry_field(self):
+        items = [
+            self._item("a", "半导体", 5.0),
+            self._item("b", "", 4.0),
+        ]
+        items[1]["industry"] = "银行"
+        result = balance_by_industry(items, max_n=3)
+        assert {e["symbol"] for e in result} == {"a", "b"}
 
 
 def test_constants():

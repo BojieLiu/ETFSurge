@@ -372,18 +372,10 @@ class TestP4_3_RedisCache:
         assert settings.redis_url.startswith("redis://")
 
     def test_database_has_redis_import(self):
-        """database.py should have Redis/cache support."""
-        probes_path = os.path.join(
-            os.path.dirname(__file__), "..", "app", "database.py"
-        )
-        with open(probes_path, "r", encoding="utf-8") as f:
-            content = f.read()
-
-        redis_ref = "redis" in content.lower()
-        cache_ref = "cache" in content.lower()
-        assert redis_ref or cache_ref, (
-            "database.py should have Redis or cache support"
-        )
+        """Removed (round35 A4③): probed for the P4.3 dead cache block deleted from
+        database.py (_memory_cache/_set_cache/_clear_cache, zero callers). Real
+        Redis-cache behavior is covered via services/cache_service.py tests
+        (tests/test_a4_cache_hygiene.py, tests/test_optimization.py)."""
 
     def test_pool_manager_has_cache_abstraction(self):
         """market_data_hub should use cache-backed state."""

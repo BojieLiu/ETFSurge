@@ -19,6 +19,56 @@ DEFAULT_SYNC_TIMEOUT = 8
 # 若未来数据管道扩展导致再次饱和，再评估 64→128。
 _shared_executor = concurrent.futures.ThreadPoolExecutor(max_workers=64)
 
+# ── round35 A3 (§13.4-A3): 有界提交守卫 ──────────────────────
+# 共享池队列原本无上限：饱和时新提交无限排队，延迟级联而非快速失败；
+# wait_for 超时只是调用方放弃等待，线程还在跑。此处给"在途提交总数"
+# （运行中 + 排队中）设 128 上限：满则立即拒绝（PoolSaturatedError），
+# 让调用方走既有 except 结构化降级路径，而不是默默排队放大延迟。
+# 槽位由工作线程执行完毕时归还（finally）——调用方超时弃等不影响归还，
+# 与"底层线程继续运行但完成后自动归还线程池"的既有语义一致。
+_POOL_BOUND = 128
+_submit_slots = threading.BoundedSemaphore(_POOL_BOUND)
+
+
+class PoolSaturatedError(RuntimeError):
+    """共享线程池在途提交已达上限（>128），本次提交被快速拒绝。
+
+    调用方应捕获并做结构化降级（返回缓存值/空结果/显式降级标注），
+    严禁静默吞掉后重试提交（会加剧饱和）。
+    """
+
+
+def _release_slot_on_done(fn):
+    """包装 callable：线程执行完毕（含异常）时归还提交槽位。
+
+    functools.wraps 保留 __name__，供队列深度日志识别函数名。
+    """
+    import functools
+
+    @functools.wraps(fn)
+    def _wrapped(*args):
+        try:
+            return fn(*args)
+        finally:
+            _submit_slots.release()
+
+    return _wrapped
+
+
+def _try_acquire_slot() -> bool:
+    """非阻塞获取一个提交槽位；满则记 ERROR + 尖峰计数并拒绝。"""
+    if _submit_slots.acquire(blocking=False):
+        return True
+    _logger = logging.getLogger(__name__)
+    _logger.error(
+        "[async_utils] submit rejected: %d/%d slots exhausted — POOL SATURATED (fast-reject)",
+        _POOL_BOUND, _POOL_BOUND,
+    )
+    with _queue_depth_spike_lock:
+        global _queue_depth_spike_count
+        _queue_depth_spike_count += 1
+    return False
+
 # 长任务专用线程池（设计、检查、报告），与快速 API 请求隔离
 # 8 workers 防止长任务占满 API 用的共享线程池
 _long_running_executor = concurrent.futures.ThreadPoolExecutor(max_workers=8)
@@ -56,10 +106,13 @@ def run_in_thread(fn, *args, timeout: int = DEFAULT_SYNC_TIMEOUT,
             "long" (>5s 任务) — 使用 _long_running_executor (8 workers)
 
     Returns:
-        fn(*args) 的返回值，或 None（超时/异常时）。
+        fn(*args) 的返回值，或 None（超时/异常/池饱和快速拒绝时）。
     """
     pool = _long_running_executor if executor == "long" else _shared_executor
-    future = pool.submit(fn, *args)
+    if pool is _shared_executor and not _try_acquire_slot():
+        return None  # A3: 满则结构化降级（本函数契约：绝不挂起，失败 → None）
+    future = pool.submit(fn, *args) if pool is not _shared_executor \
+        else pool.submit(_release_slot_on_done(fn), *args)
     try:
         return future.result(timeout=timeout)
     except concurrent.futures.TimeoutError:
@@ -95,26 +148,21 @@ async def run_sync(call, *args, timeout: int = DEFAULT_SYNC_TIMEOUT):
 
     Raises:
         asyncio.TimeoutError: 超时未完成。
+        PoolSaturatedError: 在途提交已达 128 上限（A3 快速拒绝）。
         call 抛出的原始异常。
 
     Note:
         当线程池队列深度超过阈值时自动打 WARNING 日志，便于排查级联超时。
     """
-    _pending = _shared_executor._work_queue.qsize() if hasattr(_shared_executor, '_work_queue') else 0
-    if _pending > 16:
-        _logger = logging.getLogger(__name__)
-        _logger.error("[async_utils] run_sync queue depth=%d (fn=%s, timeout=%ds) — POOL SATURATION!",
-                     _pending, getattr(call, '__name__', str(call)), timeout)
-        with _queue_depth_spike_lock:
-            global _queue_depth_spike_count
-            _queue_depth_spike_count += 1
-    elif _pending > 8:
-        _logger = logging.getLogger(__name__)
-        _logger.warning("[async_utils] run_sync queue depth=%d (fn=%s, timeout=%ds) — pool may be saturated",
-                       _pending, getattr(call, '__name__', str(call)), timeout)
+    if not _try_acquire_slot():
+        raise PoolSaturatedError(
+            f"shared pool at {_POOL_BOUND} in-flight submissions; "
+            "caller should degrade (cache/empty/annotated fallback)"
+        )
     loop = asyncio.get_event_loop()
     return await asyncio.wait_for(
-        loop.run_in_executor(_shared_executor, call, *args), timeout=timeout,
+        loop.run_in_executor(_shared_executor, _release_slot_on_done(call), *args),
+        timeout=timeout,
     )
 
 
