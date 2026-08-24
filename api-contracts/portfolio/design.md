@@ -250,24 +250,7 @@ WS /api/v1/ws/task-notifications
 
 status 变化时推送一次，前端不需要轮询。
 
-### 2.7 WebSocket 异步报告推送
-
-```
-WS /api/v1/ws/design-report/{session_id}
-```
-
-**服务端推送消息格式：**
-
-```json
-{
-  "type": "design_report",
-  "session_id": "uuid",
-  "status": "generating",
-  "progress": 75,
-  "report": "部分或完整的 Markdown 报告文本"
-}
-```
-
+<!-- round35 RC-D3③-b: 原 §2.7 WebSocket 异步报告推送已随 /ws/design-report 端点删除 -->
 ### 2.8 前端报告 Tab 行为（无硬编码 fallback）
 
 **原则：** 前端 **不允许** 在 `design_text` 为空时硬编码生成假报告。LLM 报告唯一来源是 WS 推送。
@@ -409,8 +392,6 @@ alanced/aggressive`
 - [ ] Response: 核心层含 510300/560600
 - [ ] Response: 权重在 1%~30% 区间
 - [ ] Response: 标的数量在 8~15 之间
-- [ ] WS: `/api/v1/ws/design-report/{session_id}` 可连接
-- [ ] WS: 推送的 design_report 包含完整 Markdown
 - [ ] `GET /api/v1/portfolio/designs/{id}（原 /status 已移除，T11 校准）` implemented and tested
 
 <!-- 路由登记（P3-5 check_routes 门禁） -->

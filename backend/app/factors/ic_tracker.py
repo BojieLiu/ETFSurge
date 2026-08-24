@@ -19,6 +19,8 @@ from sqlalchemy import func, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..core.factor_values import is_meaningful_value  # FS1: 零值判定单点
+
 logger = logging.getLogger(__name__)
 
 
@@ -224,13 +226,16 @@ class ICTracker:
             for code, val in factors.items():
                 st = _stats.setdefault(code, [0, 0])
                 st[1] += 1
-                # round14 P2-Z 修复 3: tracking_error 合法值 0.001~0.02（_compute_tracking_error
-                # 注释 0~0.05）——abs<0.001 会把合法跟踪误差全判零（§2.11：有效样本<3 → 永不产 IC）；
-                # 按因子区分：tracking_error 仅排除真 0（1e-6），其余因子维持 0.001。
-                _zero_tol = 1e-6 if code == "etf.tracking_error" else 0.001
+                # round14 P2-Z 修复 3: tracking_error 合法值 0.001~0.02——abs<0.001 会把
+                # 合法跟踪误差全判零；round35 FS1: 零值口径收敛单点
+                # core.factor_values.is_meaningful_value（tracking_error 容差 1e-6，
+                # 其余因子默认 0.001，canonical 判定为严格大于）。
                 # R58（round28 延伸）: 数据源异常时 factor value 可能为 str，
                 # abs(str) → TypeError 使整批 IC 计算失败。非数值视为零分跳过。
-                if not isinstance(val, (int, float)) or abs(val) < _zero_tol:
+                # R58（round28 延伸）: 数据源异常时 factor value 可能为 str，
+                # abs(str) → TypeError 使整批 IC 计算失败。非数值视为零分跳过。
+                # （isinstance 显式前置供 mypy 窄化；容差判定走 FS1 单点。）
+                if not isinstance(val, (int, float)) or not is_meaningful_value(code, val):
                     st[0] += 1
                     continue
                 if code not in factor_by_code:

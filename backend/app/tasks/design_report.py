@@ -11,37 +11,14 @@ from ..analysis.llm import generate_design_report
 
 logger = logging.getLogger(__name__)
 
-# In-memory connection manager for design report sessions
+# round35 RC-D3③-b (docs/round35-architecture-review.md §18.5)：design-report
+# WS 推送链已断（前端走 REST 轮询，DashboardAiTools 已闭环）；本管理器仅保留
+# LLM 运行态标记供防重复启动使用（generate_design_report 入口）。
 class DesignReportManager:
+    """LLM 报告运行态标记（原 WS 会话管理已随 RC-D3③-b 删除）。"""
+
     def __init__(self):
-        self._sessions: dict[str, set] = {}  # session_id -> set of ws references
-        self._running: dict[str, bool] = {}   # session_id -> is LLM already running?
-
-    def register(self, session_id: str, websocket) -> None:
-        if session_id not in self._sessions:
-            self._sessions[session_id] = set()
-        self._sessions[session_id].add(websocket)
-
-    def unregister(self, session_id: str, websocket) -> None:
-        if session_id in self._sessions:
-            self._sessions[session_id].discard(websocket)
-            if not self._sessions[session_id]:
-                del self._sessions[session_id]
-
-    async def broadcast(self, session_id: str, message: dict) -> None:
-        if session_id not in self._sessions:
-            return
-        payload = json.dumps(message, ensure_ascii=False)
-        dead = []
-        for ws in self._sessions[session_id]:
-            try:
-                # round35 §11-T-② (P0-3): 背压统一（同 task_manager.broadcast，
-                # 模式照抄 routers/ws.py:64）——僵死客户端 5s 超时即摘除。
-                await asyncio.wait_for(ws.send_text(payload), timeout=5.0)
-            except Exception:
-                dead.append(ws)
-        for ws in dead:
-            self.unregister(session_id, ws)
+        self._running: dict[str, bool] = {}  # session_id -> is LLM already running?
 
     def is_running(self, session_id: str) -> bool:
         return self._running.get(session_id, False)
@@ -523,13 +500,6 @@ async def compose_and_push_report(
     report_manager.mark_running(session_id, True)
     try:
         # 推送进度: 开始
-        await report_manager.broadcast(session_id, {
-            "type": "design_report",
-            "session_id": session_id,
-            "status": "generating",
-            "progress": 10,
-            "stage": "正在分析市场环境...",
-        })
 
         # P5-a: 先生成策略表格（引擎直接渲染，确保与方案卡片一致）
         # P0-9: 行情采集时刻取自 market_data_hub._last_refresh_ts（刷新完成时刻），
@@ -591,12 +561,6 @@ async def compose_and_push_report(
                     w = (e.get("weight") or e.get("target_weight") or 0) * 100
                     fallback_parts.append(f"- {e.get('name','')} ({e.get('symbol')}) {w:.0f}% — {e.get('selection_rationale','')[:80]}\n")
             report_text = "".join(fallback_parts)
-            await report_manager.broadcast(session_id, {
-                "type": "design_report",
-                "session_id": session_id,
-                "status": "complete",
-                "report_text": report_text,
-            })
             # 写库
             if design_id is not None:
                 try:
@@ -612,31 +576,11 @@ async def compose_and_push_report(
             return
 
         # 推送进度: 撰写完成
-        await report_manager.broadcast(session_id, {
-            "type": "design_report",
-            "session_id": session_id,
-            "status": "generating",
-            "progress": 60,
-            "stage": "报告撰写完成，正在格式化...",
-        })
 
         # 按段落推送 chunks（模拟流式）
         paragraphs = report_text.split("\n\n")
         for i, para in enumerate(paragraphs):
-            await report_manager.broadcast(session_id, {
-                "type": "design_report",
-                "session_id": session_id,
-                "status": "streaming",
-                "chunk": para + "\n\n",
-            })
             progress = 60 + int(40 * (i + 1) / max(len(paragraphs), 1))
-            await report_manager.broadcast(session_id, {
-                "type": "design_report",
-                "session_id": session_id,
-                "status": "generating",
-                "progress": min(progress, 95),
-                "stage": "传输中...",
-            })
             await asyncio.sleep(0.05)  # 模拟流式延时
 
         # 一致性校验：对比 LLM 报告的 ETF 代码与引擎策略数据
@@ -646,12 +590,6 @@ async def compose_and_push_report(
             logger.warning("[design_report] consistency check failed (non-blocking): %s", ve)
 
         # 推送完成
-        await report_manager.broadcast(session_id, {
-            "type": "design_report",
-            "session_id": session_id,
-            "status": "complete",
-            "report_text": report_text,
-        })
 
         # 持久化：将报告文本写入数据库（如果传了 design_id）
         if design_id is not None and report_text:
@@ -704,19 +642,9 @@ async def compose_and_push_report(
                         logger.info("[design_report] saved fallback for design %s", design_id)
             except Exception as pe:
                 logger.error("[design_report] fallback persist failed: %s", pe)
-        await report_manager.broadcast(session_id, {
-            "type": "design_report", "session_id": session_id,
-            "status": "complete", "report_text": _fallback,
-        })
         return
 
     except Exception as e:
         logger.error("[design_report] error for session %s: %s", session_id, e, exc_info=True)
-        await report_manager.broadcast(session_id, {
-            "type": "design_report",
-            "session_id": session_id,
-            "status": "error",
-            "message": f"报告生成异常: {e}",
-        })
     finally:
         report_manager.mark_running(session_id, False)

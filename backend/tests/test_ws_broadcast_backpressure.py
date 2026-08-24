@@ -3,13 +3,15 @@ WS 推送背压统一验证：僵死客户端 5s 超时摘除，不阻塞广播�
 
 负向用例对旧实现必红：裸 ``await send_text()`` 遇到永挂起的客户端会永久阻塞，
 正常端收不到消息、广播不返回。
+
+（round35 RC-D3③-b: DesignReportManager 的 WS 会话/broadcast 已随
+/ws/design-report 端点删除，其用例同步移除；TaskNotifyManager 背压契约保留。）
 """
 import asyncio
 import time
 
 import pytest
 
-from app.tasks.design_report import DesignReportManager
 from app.tasks.task_manager import TaskNotifyManager
 
 
@@ -45,22 +47,6 @@ async def test_task_notify_slow_client_does_not_block_broadcast():
     assert any('"n": 1' in s or '"n":1' in s for s in healthy.sent), "健康客户端必须收到消息"
     assert stuck not in mgr._connections, "僵死客户端必须被摘除"
     assert 4.0 <= elapsed < 8.0, f"广播应被 5s 背压封顶，实际 {elapsed:.2f}s"
-
-
-@pytest.mark.asyncio
-async def test_design_report_slow_client_removed_session_kept():
-    """DesignReportManager 同款背压：僵死连接被摘除，session 本体保留。"""
-    mgr = DesignReportManager()
-    healthy = FakeWS("ok")
-    stuck = FakeWS("hang")
-    mgr.register("sess-1", stuck)
-    mgr.register("sess-1", healthy)
-
-    await asyncio.wait_for(mgr.broadcast("sess-1", {"type": "report"}), timeout=15.0)
-
-    assert healthy.sent, "正常客户端必须收到报告消息"
-    assert stuck not in mgr._sessions["sess-1"], "僵死连接必须从 session 摘除"
-    assert "sess-1" in mgr._sessions, "session 本体不应因单个僵死连接被删除"
 
 
 @pytest.mark.asyncio

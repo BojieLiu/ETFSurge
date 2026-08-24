@@ -125,24 +125,9 @@ async def portfolio_ws(websocket: WebSocket):
         await manager.disconnect(websocket, "portfolio")
 
 
-@router.websocket("/api/v1/ws/design-report/{session_id}")
-async def design_report_ws(websocket: WebSocket, session_id: str):
-    """被动监听 WebSocket: 前端连接后，后端通过 report_manager 推送 LLM 报告。"""
-    from ..tasks.design_report import report_manager
-
-    await websocket.accept()
-    report_manager.register(session_id, websocket)
-
-    try:
-        # 保持连接，等待后端推送 LLM 报告（由 REST API 后台任务触发）
-        await _ws_loop(websocket)
-    except WebSocketDisconnect:
-        pass
-    except Exception as e:
-        logger = __import__("logging").getLogger(__name__)
-        logger.warning("[design_report_ws] error: %s", e)
-    finally:
-        report_manager.unregister(session_id, websocket)
+# round35 RC-D3③-b: /ws/design-report/{session_id} 端点已删除——
+# 前端零消费（DashboardAiTools 走 REST 轮询），推送链发向虚空；
+# 契约条目同步移除（api-contracts/portfolio/design.md §2.7）。
 
 @router.websocket("/api/v1/ws/task-notifications")
 async def task_notifications_ws(websocket: WebSocket):

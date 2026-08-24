@@ -31,6 +31,7 @@ from ..core.factor_aggregate import (  # noqa: F401
     _ic_decay_mean,
 )
 from ..core.source_registry import registry as _source_registry
+from ..core.factor_values import is_meaningful_value  # FS1: 零值判定单点
 from ..factors.ic_tracker import ic_tracker
 
 logger = logging.getLogger(__name__)
@@ -1642,7 +1643,9 @@ class FactorRegistry:
                     for code, value in result[sym].items():
                         # R58（round28 延伸）: 数据源异常时 value 可能为 str，
                         # abs(str) → TypeError。非数值跳过（不记录 IC）。
-                        if isinstance(value, (int, float)) and abs(value) > 0.001:
+                        # FS1 (round35 §15.6): 阈值判定收敛单点 core.factor_values。
+                        # （isinstance 显式前置供 mypy 窄化。）
+                        if isinstance(value, (int, float)) and is_meaningful_value(code, value):
                             ic_tracker.record(sym, code, value)
         except Exception as e:
             # P0 fix-plan-master: bare except was silently swallowing errors

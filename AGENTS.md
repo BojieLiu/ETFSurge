@@ -191,7 +191,7 @@ DEEPSEEK_API_KEY=sk-xxx
 - 组合数据持久化在 SQLite (`data/portfolio.db`)，Docker 部署时通过 volume 挂载。
 - 前端 Vite 代理 `/api` → `localhost:8000`，开发时后端必须在 8000 端口；axios `baseURL` 为 `/api/v1`。
   - **Vite 代理规则顺序重要**：`/api/v1/ws` 必须排在 `/api` 之前，否则 WS 握手会被 HTTP 代理吞掉（见 `vite.config.js`）。
-- WebSocket 路径: `/ws/news`, `/ws/portfolio`, `/ws/task-notifications`, `/ws/design-report/{session_id}`。（round35 FE4/RC-B4：`/ws/market/{symbol}` 后端端点存在但前端零消费，实际行情 WS 逻辑走 `/ws/portfolio`；design-report 前端亦走 REST 轮询，处置挂 RC-D3。）
+- WebSocket 路径: `/ws/news`, `/ws/portfolio`, `/ws/task-notifications`。（round35 FE4/RC-B4/RC-D3：`/ws/market/{symbol}` 后端端点存在但前端零消费，实际行情 WS 逻辑走 `/ws/portfolio`；`/ws/design-report/{session_id}` 已随 RC-D3③-b 删除——前端走 REST 轮询，推送链发向虚空已断。）
 - 资讯分级：`level`（文字）+ `stars`（1-5 数字）；前端按 `level` 着色、按 `stars` 显示星数。
 - 涨跌颜色：**红涨绿跌**（国内习惯）— 涨/盈用 `.text-up`（红），跌/亏用 `.text-down`（绿），定义在 `src/styles/theme.css`。勿套用西方绿涨红跌。
 - **权重不归一化**：`calculate_allocation` 中 `target_amount = total_capital * target_weight`（不按权重和归一化）；现金 = `total_capital * (1 - Σtarget_weight)`。改时勿加归一化。
