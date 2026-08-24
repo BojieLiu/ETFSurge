@@ -481,6 +481,21 @@ def _select_draft(
     )
 
 
+def _size_allocations(
+    draft: SelectionDraft,
+) -> tuple[list[tuple[float, dict[str, Any], dict[str, float]]], list[float]]:
+    """round36 B5-S2: size 段纯函数——幂律配权 + 权重钳制一次性完成。
+
+    ``_power_law_weights`` 内部即完整 size 语义（softmax 温度幂律 →
+    MIN_WEIGHT 地板 → 预算归一 → MAX_WEIGHT 0.30 帽），本函数将其定名为
+    五段管道的第二段：输入 select 段产物，输出 (selected, weights) 平行结构。
+    行为直通、无新增判定；S3 起 constrain 段以独立数据结构接续。
+    """
+    scores = [s[0] for s in draft.selected]
+    weights = _power_law_weights(scores, draft.budget_after_mandatory)
+    return draft.selected, weights
+
+
 def _select_and_weight(
     candidates: list[dict[str, Any]],
     factor_matrix: dict[str, dict[str, float]],
@@ -525,13 +540,12 @@ def _select_and_weight(
     if draft is None:
         return []
     mandatory_assignments = draft.mandatory_assignments
-    selected = draft.selected
-    budget = draft.budget_after_mandatory
+    # B5-S2: size 段（幂律 + MIN/MAX 钳制一次性完成）
+    selected, weights = _size_allocations(draft)
     if not selected:
         return mandatory_assignments
-
-    scores = [s[0] for s in selected]
-    weights = _power_law_weights(scores, budget)
+    # 卫星科创配额段（F0-5/O17）仍以「强制标的扣减后预算」为基准
+    budget = draft.budget_after_mandatory
 
     # F0-5 步骤 C: 卫星层科创系配额 — 名称含 科创/半导体/芯片/AI 的候选
     # 合计权重 ≤ 卫星预算的配额比例（防御型 40% 收紧至验收线 10% 以内，
