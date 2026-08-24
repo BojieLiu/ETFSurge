@@ -142,37 +142,21 @@ def aggregate_factor_scores(
             continue
         # round15 方案三阶段一: IC 衰减加权聚合（冷启动回退等权）
         _lam = math.log(2) / IC_HALF_LIFE
-        # FM2 (round35 §15.4): 权重相对化——先收集 warm 因子（≥IC_MIN_BATCHES）
-        # 的衰减均值 IC，以本次池内中位 |mean_ic| 为参照 ref；warm 权重 =
-        # |mean_ic|/ref 且保底不低于等权 1.0（治「毕业即降权 ~30×」：ETF 截面
-        # 典型 |IC| 仅 0.02~0.05，直接作权重会输给冷启动的 1.0）。负 IC 翻转
-        # 分支沿用同尺度。ref≈0（全零/极小 IC）回落全等权，不除零。
-        entries: list[tuple[str, float]] = []
-        warm_ic: dict[str, float] = {}
+        weights: list[float] = []
+        directed: list[float] = []
         for key, v in values:
-            entries.append((key, v))
             series = (ic_series or {}).get(key)
             if series and len(series) >= IC_MIN_BATCHES:
-                warm_ic[key] = _ic_decay_mean(series, _lam)
-        ref = 0.0
-        if warm_ic:
-            meds = sorted(abs(m) for m in warm_ic.values())
-            mid = len(meds) // 2
-            ref = meds[mid] if len(meds) % 2 else (meds[mid - 1] + meds[mid]) / 2.0
-        directed: list[float] = []
-        weights: list[float] = []
-        for key, v in entries:
-            mean_ic = warm_ic.get(key)
-            if mean_ic is None:
-                directed.append(v)
-                weights.append(1.0)
-                continue
-            w = max(abs(mean_ic) / ref, 1.0) if ref > 1e-12 else 1.0
-            if mean_ic < 0 and abs(mean_ic) > IC_FLIP_THRESHOLD:
-                directed.append(-v)
+                mean_ic = _ic_decay_mean(series, _lam)
+                if mean_ic < 0 and abs(mean_ic) > IC_FLIP_THRESHOLD:
+                    directed.append(-v)
+                    weights.append(abs(mean_ic))
+                else:
+                    directed.append(v)
+                    weights.append(max(mean_ic, 0.0))
             else:
                 directed.append(v)
-            weights.append(w)
+                weights.append(1.0)
         total_w = sum(weights)
         if total_w > 1e-12:
             result[top_key] = sum(w * v for w, v in zip(weights, directed, strict=False)) / total_w
