@@ -12,9 +12,7 @@ Supports a primary → fallback failover chain:
 from __future__ import annotations
 
 import logging
-import time
 from dataclasses import dataclass
-from typing import Callable
 
 from ..config import settings
 
@@ -165,54 +163,5 @@ def has_any_api_key() -> bool:
     """Check if at least one provider has an API key configured."""
     return bool(settings.opencode_zen_api_key or settings.deepseek_api_key)
 
-
-async def call_with_failover(
-    request_fn: Callable,
-    providers: list[ProviderConfig],
-    **kwargs,
-) -> tuple:
-    """Iterate providers in priority order, calling request_fn for each.
-
-    Args:
-        request_fn: Async callable that takes (provider, **kwargs) and
-                    returns (response_body_str, usage_dict).
-        providers: Priority-ordered list of ProviderConfig.
-
-    Returns:
-        (response_body_str, used_provider)
-
-    Raises:
-        The last exception if all providers fail.
-    """
-    if not providers:
-        raise ValueError("No LLM providers configured")
-
-    last_error: Exception | None = None
-    for idx, provider in enumerate(providers):
-        start = time.monotonic()
-        try:
-            result = await request_fn(provider, **kwargs)
-            elapsed = time.monotonic() - start
-            logger.info(
-                "[LLM] Provider %s succeeded in %.1fs (model=%s)",
-                provider.id, elapsed, provider.model,
-            )
-            return result
-        except Exception as exc:
-            elapsed = time.monotonic() - start
-            logger.warning(
-                "[LLM] Provider %s failed after %.1fs: %s",
-                provider.id, elapsed, exc,
-            )
-            last_error = exc
-            # Log fallback intent if there are more providers
-            if idx < len(providers) - 1:
-                logger.warning(
-                    "[LLM] Falling back to %s", providers[idx + 1].id,
-                )
-            continue
-
-    # All providers exhausted
-    if last_error is None:
-        raise RuntimeError("No LLM providers available")
-    raise last_error
+# round35 §19 GapE: 死代码 call_with_failover 已删——全后端零生产引用（failover
+# 循环内联在 analysis/llm/client.py 三入口），仅历史测试引用（已随删）。

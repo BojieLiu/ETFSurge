@@ -384,12 +384,9 @@ class TestP4_1_LLMProviderStrategy:
         providers = get_configured_providers()
         assert isinstance(providers, list)
 
-    def test_call_with_failover_raises_on_empty_providers(self):
-        """call_with_failover should raise ValueError for empty provider list."""
-        from app.analysis.provider import call_with_failover
-
-        with pytest.raises(ValueError, match="No LLM providers configured"):
-            asyncio.run(call_with_failover(lambda p, **kw: "resp", []))
+    # round35 §19 GapE: test_call_with_failover_raises_on_empty_providers 已随
+    # 死代码 call_with_failover 一并删除（全后端零生产引用，仅本文件与已不存在的
+    # phase5 架构文件引用）。
 
     def test_llm_complete_accepts_prompt(self):
         """llm_complete should accept a prompt string (smoke test)."""
