@@ -91,14 +91,24 @@ def _norm_strategy(s: dict) -> dict:
 def run_pipeline(scenario: dict) -> list[dict]:
     """固定顺序跑引擎纯层管道，返回归一化输出。"""
     corr_raw = scenario.get("correlation_matrix") or {}
+    # round35 FM2 重做前置①（修正版）：复现生产两段式数据流——
+    # hub.refresh_pool 先用 ic_series 做 aggregate_factor_scores 再存池，
+    # 引擎 composite 直读预聚合顶层键。故 harness 必须先聚合再喂 allocate，
+    # 否则 warm 分支依旧不可达（首版仅透传 ic_series 的修复被证不足）。
+    from app.core.factor_aggregate import aggregate_factor_scores
+
+    ics = scenario.get("ic_series") or None
+    raw_matrix = scenario.get("factor_matrix") or {}
+    factor_matrix = (
+        {sym: aggregate_factor_scores(row, ic_series=ics) for sym, row in raw_matrix.items()}
+        if ics else raw_matrix
+    )
     strategies = allocate(
         risk_profile=scenario["risk_profile"],
         regime=scenario["regime"],
-        factor_matrix=scenario.get("factor_matrix") or {},
+        factor_matrix=factor_matrix,
         candidates=scenario.get("candidates"),
-        # round35 FM2 重做前置①: 透传 ic_series——此前 harness 不注入，
-        # warm 分支（≥IC_MIN_BATCHES）恒不可达，构成 FM2 类改动的验收盲区。
-        ic_series=scenario.get("ic_series") or None,
+        ic_series=ics,
     )
     strategies = apply_risk_controls(strategies, scenario.get("factor_matrix") or {},
                                      regime=scenario["regime"])
