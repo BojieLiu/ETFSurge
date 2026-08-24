@@ -3,11 +3,7 @@ import { ref } from 'vue'
 import { marketApi } from '../api'
 import { usePortfolioStore } from './portfolio'
 import logger from '../utils/logger'
-
-const WS_BASE = (() => {
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-  return `${proto}://${location.host}/api/v1/ws`
-})()
+import { WS_BASE } from '../utils/wsBase' // round35 FE3: 单点构造
 
 export const useMarketStore = defineStore('market', () => {
   const realtimeData = ref([])

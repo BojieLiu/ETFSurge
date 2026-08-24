@@ -16,10 +16,20 @@ api.interceptors.response.use(
     const method = (cfg.method || 'get').toUpperCase()
     const status = error.response?.status
     if (status) {
-      logger.error(`API ← ${method} ${url} 失败 [${status}]`, error.response?.data)
+      logger.error(`API ✗ ${method} ${url} 失败 [${status}]`, error.response?.data)
     } else {
-      logger.error(`API ← ${method} ${url} 网络/请求异常: ${error.message}`)
+      logger.error(`API ✗ ${method} ${url} 网络/连接异常: ${error.message}`)
     }
+    // round35 FE3 (§14.11/R126-1): 统一错误规范化——调用方可用
+    // err.normalized.message 直接 toast；弹不弹的决定权仍留在调用方，
+    // 本层不弹 toast、不重定向（既有 ~15 处 catch→toast 手工接线不受影响）。
+    // 注：message 用属性赋值而非对象字面量，避免被 check_api_usage 的
+    // 方法定义解析器误判（round35 实测教训）。
+    const detail = error.response?.data?.detail ?? error.response?.data?.message
+    error.normalized = { status: status || null, url, method }
+    error.normalized.message =
+      (typeof detail === 'string' && detail) ||
+      (status ? `请求失败 [${status}]` : '网络异常，请检查后端服务')
     return Promise.reject(error)
   }
 )
@@ -27,8 +37,9 @@ api.interceptors.response.use(
 export const marketApi = {
   // O28 (round7 §7 P28②): 单标的资金流端点封装（热点股票技术分析弹窗资金流区块）
   fundFlow: (symbol) => api.get(`/market/fund-flow/${symbol}`),
-  realtimePortfolio: () => api.get('/market/realtime/portfolio'),
-  history: (symbol, assetType = 'A', period = 'daily') => api.get(`/market/history/${symbol}`, { params: { asset_type: assetType, period } }),
+  // round35 FE1/RC-D 复核（2026-08-24）：realtimePortfolio/history 死方法已删——
+  // 生产代码零调用者（FE1 删除 store fetchRealtime 后无消费；图表类由组件直调
+  // marketApi.chart），check_api_usage 门禁拦截确认。后端端点不受影响。
   search: (keyword, options = {}, config = {}) => api.get('/market/search', { params: { keyword, ...options }, ...config }),
   indicesMeta: () => api.get('/market/indices/meta'),
   indicators: (symbol, assetType = 'A', period = 'daily') => api.get(`/market/indicators/${symbol}`, { params: { asset_type: assetType, period } }),

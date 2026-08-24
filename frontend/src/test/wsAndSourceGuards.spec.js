@@ -19,20 +19,16 @@ const srcRoot = path.resolve(__dirname, '..')
 vi.mock('../api', () => ({ marketApi: {}, portfolioApi: { list: vi.fn() } }))
 vi.mock('../utils/logger', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } }))
 
+import { FakeWebSocket } from './helpers/fakeWebSocket' // round35 T-P1#8: 共享基建
+
 let wsInstance = null
-class FakeWebSocket {
-  static OPEN = 1
-  static CONNECTING = 0
-  static CLOSING = 2
-  static CLOSED = 3
+class WS extends FakeWebSocket {
   constructor(url) {
-    this.url = url
-    this.readyState = FakeWebSocket.OPEN
+    super(url)
     wsInstance = this
   }
-  send() {}
-  close() { this.onclose && this.onclose() }
 }
+
 
 // ── round19 P7-②: MarketAnalysis @analyze 绑定 ──
 
@@ -80,7 +76,7 @@ describe('market store — wsStatus 五态状态机（round19 P6-②）', () => 
   beforeEach(() => {
     setActivePinia(createPinia())
     wsInstance = null
-    globalThis.WebSocket = FakeWebSocket
+    globalThis.WebSocket = WS
   })
 
   it('初始 idle → connectWS 后 connecting → onopen 后 connected', async () => {
@@ -122,7 +118,7 @@ describe('market store — portfolio_changed 广播消费（round19 P2-②）', 
     vi.useFakeTimers()
     setActivePinia(createPinia())
     wsInstance = null
-    globalThis.WebSocket = FakeWebSocket
+    globalThis.WebSocket = WS
     vi.clearAllMocks()
   })
   afterEach(() => {

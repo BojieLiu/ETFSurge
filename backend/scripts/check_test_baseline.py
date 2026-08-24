@@ -42,7 +42,11 @@ TESTS_DIR = pathlib.Path(__file__).resolve().parent.parent / "tests"
 # 2026-08-18 (S3.3 round 命名测试迁移): 228 -> 210. -18 = 全部 test_round*.py 按被测单元
 #   并入业务模块测试文件（round24_batch3 拆 news/hub/factor、round28_fixes 拆 12 类到
 #   10 个目标、r20_watchlist_us 并入 watchlist_close_fallback 等），round 命名清零。
-BASELINE = 210
+# 2026-08-24 (round35 T-P1#9, §16.4-B-4): 210 -> 259. +49 = round34/35 新增业务域
+#   测试文件（background_tasks 容器/WS 背压/kline flush/矩阵去重/数据落点收敛/
+#   分类快照+边界/engine config/factor_values 等）——全部为按 §11 业务域命名规范的
+#   新域文件，非冗余拆分；round34-T2 归位重组落地时应净减并回退此基线。
+BASELINE = 259
 
 
 def count_test_files() -> int:

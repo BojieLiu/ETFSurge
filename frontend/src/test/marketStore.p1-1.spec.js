@@ -10,6 +10,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import { FakeWebSocket } from './helpers/fakeWebSocket' // round35 T-P1#8: 共享基建
 
 vi.mock('../api', () => ({ marketApi: {} }))
 vi.mock('../utils/logger', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } }))
@@ -20,15 +21,12 @@ vi.mock('../stores/portfolio', () => ({
 }))
 
 let wsInstance = null
-class FakeWebSocket {
-  static OPEN = 1
+// 构造捕获子类：保持既有 wsInstance 用法不变（实现体已收敛到共享 helper）
+class WS extends FakeWebSocket {
   constructor(url) {
-    this.url = url
-    this.readyState = 1
+    super(url)
     wsInstance = this
   }
-  send() {}
-  close() { this.onclose && this.onclose() }
 }
 
 describe('market store — §12.7-B 删除定时行情推送后的 WS 契约', () => {
@@ -37,7 +35,7 @@ describe('market store — §12.7-B 删除定时行情推送后的 WS 契约', (
     setActivePinia(createPinia())
     wsInstance = null
     fetchEtfs.mockClear()
-    globalThis.WebSocket = FakeWebSocket
+    globalThis.WebSocket = WS
   })
   afterEach(() => {
     vi.useRealTimers()

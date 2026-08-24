@@ -1,16 +1,15 @@
 import { onUnmounted } from 'vue'
 import { useTaskStore } from '../stores/task'
 import logger from '../utils/logger'
-
-const WS_BASE = (() => {
-  const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
-  return `${proto}://${window.location.host}/api/v1/ws`
-})()
+import { WS_BASE } from '../utils/wsBase' // round35 FE3: 单点构造
 
 // 节流：progress 更新每秒最多处理一次，减少主线程抖动
 const PROGRESS_THROTTLE_MS = 1000
 const RECONNECT_BASE_MS = 1000
 const RECONNECT_MAX_MS = 15000
+// round35 FE3 (R126-2): 补齐心跳——market/news 均有 30s ping，task 缺失；
+// 后端 _ws_loop 对 ping/heartbeat 统一回 pong。
+const HEARTBEAT_INTERVAL_MS = 30000
 
 /**
  * useTaskWS (P2-4) — 全局 task-notification WebSocket（对齐 useNewsWS 模式）。
@@ -30,6 +29,7 @@ export function useTaskWS() {
   let ws = null
   let reconnectTimer = null
   let reconnectDelay = RECONNECT_BASE_MS
+  let heartbeatTimer = null // round35 FE3: 30s 心跳（R126-2）
   let stopped = false
   let closedByUs = false
   let lastProgressTime = 0
@@ -47,6 +47,12 @@ export function useTaskWS() {
 
     ws.onopen = () => {
       reconnectDelay = RECONNECT_BASE_MS
+      // round35 FE3 (R126-2): 30s 心跳——与 market/news WS 对齐，
+      // 后端 _ws_loop 对 ping/heartbeat 回 {type:'pong'}。
+      if (heartbeatTimer) clearInterval(heartbeatTimer)
+      heartbeatTimer = setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) ws.send('ping')
+      }, HEARTBEAT_INTERVAL_MS)
       // Backfill: on (re)connect, fetch any tasks created while disconnected
       taskStore.fetchAndMergeTasks()
     }
@@ -54,6 +60,7 @@ export function useTaskWS() {
     ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data)
+        if (msg.type === 'pong') return
         if (msg.type !== 'task_update') return
         const taskId = msg.task_id
 
@@ -101,6 +108,8 @@ export function useTaskWS() {
     }
 
     ws.onclose = () => {
+      if (heartbeatTimer) clearInterval(heartbeatTimer)
+      heartbeatTimer = null
       ws = null
       if (!closedByUs) scheduleReconnect()
     }
@@ -126,6 +135,8 @@ export function useTaskWS() {
     closedByUs = true
     if (reconnectTimer) clearTimeout(reconnectTimer)
     reconnectTimer = null
+    if (heartbeatTimer) clearInterval(heartbeatTimer)
+    heartbeatTimer = null
     if (ws) ws.close()
     ws = null
   }

@@ -1,25 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { useNewsWS } from '../composables/useNewsWS'
-
-// Fake WebSocket that captures handlers and lets tests drive lifecycle events.
-class FakeWebSocket {
-  static instances = []
-  constructor(url) {
-    this.url = url
-    this.readyState = 0
-    this.sent = []
-    FakeWebSocket.instances.push(this)
-  }
-  get OPEN() { return 1 }
-  send(data) { this.sent.push(data) }
-  close() {
-    this.readyState = 3
-    if (this.onclose) this.onclose()
-  }
-  // test helpers
-  _open() { this.readyState = 1; if (this.onopen) this.onopen() }
-  _message(data) { if (this.onmessage) this.onmessage({ data }) }
-}
+import { FakeWebSocket } from './helpers/fakeWebSocket' // round35 T-P1#8: 共享基建
 
 describe('useNewsWS', () => {
   beforeEach(() => {

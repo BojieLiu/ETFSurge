@@ -1,11 +1,6 @@
 import { ref, onUnmounted } from 'vue'
 import logger from '../utils/logger'
-
-const WS_BASE = (() => {
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-  const host = location.host
-  return `${proto}://${host}/api/v1/ws`
-})()
+import { WS_BASE } from '../utils/wsBase' // round35 FE3: 单点构造
 
 // Connects to the `/ws/news` WebSocket stream and forwards incoming news
 // messages to the supplied handler. Auto-reconnect with
