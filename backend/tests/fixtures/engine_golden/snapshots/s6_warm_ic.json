@@ -1,0 +1,693 @@
+[
+ {
+  "id": "defensive",
+  "allocations": [
+   {
+    "symbol": "159338",
+    "name": "中证A500ETF",
+    "layer": "core",
+    "weight": 0.1,
+    "factor_score": 0.35,
+    "factor_breakdown": {
+     "etf.return_1m": 1.6,
+     "etf.return_3m": 0.8,
+     "momentum": 0.8,
+     "price": 1.0,
+     "sentiment": 0.05,
+     "technical": 0.35,
+     "technical.macd.macd": -0.2,
+     "valuation": 0.1
+    }
+   },
+   {
+    "symbol": "510300",
+    "name": "沪深300ETF",
+    "layer": "core",
+    "weight": 0.1,
+    "factor_score": 0.3,
+    "factor_breakdown": {
+     "etf.return_1m": 2.4,
+     "etf.return_3m": 1.2,
+     "momentum": 1.2,
+     "price": 1.0,
+     "sentiment": 0.05,
+     "technical": 0.3,
+     "technical.macd.macd": -0.6,
+     "valuation": -0.05
+    }
+   },
+   {
+    "symbol": "511090",
+    "name": "30年国债ETF",
+    "layer": "core",
+    "tracked_index": "",
+    "industry": "国债",
+    "weight": 0.3,
+    "factor_score": 0.983,
+    "factor_breakdown": {
+     "etf.return_1m": -0.4,
+     "etf.return_3m": -0.2,
+     "momentum": -0.2,
+     "price": 1.0,
+     "sentiment": 0.05,
+     "technical": 0.45,
+     "technical.macd.macd": 0.6,
+     "valuation": 0.1
+    },
+    "_rank_info": {
+     "dominant_factor": "技术面",
+     "rank": 1,
+     "total_candidates": 2
+    }
+   },
+   {
+    "symbol": "512010",
+    "name": "医药ETF",
+    "layer": "satellite",
+    "tracked_index": "",
+    "industry": "医药",
+    "weight": 0.0499,
+    "factor_score": 0.338,
+    "factor_breakdown": {
+     "etf.return_1m": 1.8,
+     "etf.return_3m": 0.9,
+     "momentum": 0.9,
+     "price": 1.0,
+     "sentiment": 0.05,
+     "technical": 0.5,
+     "technical.macd.macd": 1.0,
+     "valuation": -0.05
+    },
+    "_rank_info": {
+     "dominant_factor": "技术面",
+     "rank": 4,
+     "total_candidates": 6
+    }
+   },
+   {
+    "symbol": "512660",
+    "name": "军工ETF",
+    "layer": "satellite",
+    "tracked_index": "",
+    "industry": "军工",
+    "weight": 0.05,
+    "factor_score": 0.348,
+    "factor_breakdown": {
+     "etf.return_1m": 0.2,
+     "etf.return_3m": 0.1,
+     "momentum": 0.1,
+     "price": 1.0,
+     "sentiment": 0.05,
+     "technical": 0.75,
+     "technical.macd.macd": 3.0,
+     "valuation": 0.1
+    },
+    "_rank_info": {
+     "dominant_factor": "技术面",
+     "rank": 3,
+     "total_candidates": 6
+    }
+   },
+   {
+    "symbol": "512880",
+    "name": "证券ETF",
+    "layer": "satellite",
+    "tracked_index": "",
+    "industry": "券商",
+    "weight": 0.05,
+    "factor_score": 0.358,
+    "factor_breakdown": {
+     "etf.return_1m": 1.4,
+     "etf.return_3m": 0.7,
+     "momentum": 0.7,
+     "price": 1.0,
+     "sentiment": 0.05,
+     "technical": 0.55,
+     "technical.macd.macd": 1.4,
+     "valuation": 0.1
+    },
+    "_rank_info": {
+     "dominant_factor": "技术面",
+     "rank": 2,
+     "total_candidates": 6
+    }
+   },
+   {
+    "symbol": "515030",
+    "name": "新能源ETF",
+    "layer": "satellite",
+    "tracked_index": "",
+    "industry": "新能源",
+    "weight": 0.0501,
+    "factor_score": 0.383,
+    "factor_breakdown": {
+     "etf.return_1m": 1.2,
+     "etf.return_3m": 0.6,
+     "momentum": 0.6,
+     "price": 1.0,
+     "sentiment": 0.05,
+     "technical": 0.65,
+     "technical.macd.macd": 2.2,
+     "valuation": 0.1
+    },
+    "_rank_info": {
+     "dominant_factor": "技术面",
+     "rank": 1,
+     "total_candidates": 6
+    }
+   }
+  ],
+  "risk_metrics": {
+   "sector_concentration": 0.14,
+   "sector_breakdown": {
+    "core": 0.2,
+    "国债": 0.3,
+    "新能源": 0.0501,
+    "券商": 0.05,
+    "军工": 0.05,
+    "医药": 0.0499
+   },
+   "correlation_warnings": [
+    {
+     "type": "near_substitute",
+     "pair": [
+      "510300",
+      "159338"
+     ],
+     "family": "大盘宽基",
+     "combined_weight": 0.2,
+     "note": "同主题近替代品（大盘宽基族）：不同发行商同一板块，关联度约束不依赖 K 线相关系数",
+     "correlation": 0.93
+    }
+   ]
+  },
+  "layer_budget": {
+   "core": 0.5,
+   "defense": 0.15,
+   "satellite": 0.2
+  }
+ },
+ {
+  "id": "balanced",
+  "allocations": [
+   {
+    "symbol": "159338",
+    "name": "中证A500ETF",
+    "layer": "core",
+    "weight": 0.05,
+    "factor_score": 0.35,
+    "factor_breakdown": {
+     "etf.return_1m": 1.6,
+     "etf.return_3m": 0.8,
+     "momentum": 0.8,
+     "price": 1.0,
+     "sentiment": 0.05,
+     "technical": 0.35,
+     "technical.macd.macd": -0.2,
+     "valuation": 0.1
+    }
+   },
+   {
+    "symbol": "510300",
+    "name": "沪深300ETF",
+    "layer": "core",
+    "weight": 0.05,
+    "factor_score": 0.3,
+    "factor_breakdown": {
+     "etf.return_1m": 2.4,
+     "etf.return_3m": 1.2,
+     "momentum": 1.2,
+     "price": 1.0,
+     "sentiment": 0.05,
+     "technical": 0.3,
+     "technical.macd.macd": -0.6,
+     "valuation": -0.05
+    }
+   },
+   {
+    "symbol": "511090",
+    "name": "30年国债ETF",
+    "layer": "core",
+    "tracked_index": "",
+    "industry": "国债",
+    "weight": 0.2054,
+    "factor_score": -1.395,
+    "factor_breakdown": {
+     "etf.return_1m": -0.4,
+     "etf.return_3m": -0.2,
+     "momentum": -0.2,
+     "price": 1.0,
+     "sentiment": 0.05,
+     "technical": 0.45,
+     "technical.macd.macd": 0.6,
+     "valuation": 0.1
+    },
+    "_rank_info": {
+     "dominant_factor": "技术面",
+     "rank": 2,
+     "total_candidates": 2
+    }
+   },
+   {
+    "symbol": "512010",
+    "name": "医药ETF",
+    "layer": "satellite",
+    "tracked_index": "",
+    "industry": "医药",
+    "weight": 0.0434,
+    "factor_score": -1.08,
+    "factor_breakdown": {
+     "etf.return_1m": 1.8,
+     "etf.return_3m": 0.9,
+     "momentum": 0.9,
+     "price": 1.0,
+     "sentiment": 0.05,
+     "technical": 0.5,
+     "technical.macd.macd": 1.0,
+     "valuation": -0.05
+    },
+    "_rank_info": {
+     "dominant_factor": "动量",
+     "rank": 3,
+     "total_candidates": 6
+    }
+   },
+   {
+    "symbol": "512480",
+    "name": "半导体ETF",
+    "layer": "satellite",
+    "tracked_index": "",
+    "industry": "半导体",
+    "weight": 0.0467,
+    "factor_score": 0.3,
+    "factor_breakdown": {
+     "etf.return_1m": 0.8,
+     "etf.return_3m": 0.4,
+     "momentum": 0.4,
+     "price": 1.0,
+     "sentiment": 0.05,
+     "technical": 0.6,
+     "technical.macd.macd": 1.8,
+     "valuation": -0.05
+    },
+    "_rank_info": {
+     "dominant_factor": "技术面",
+     "rank": 1,
+     "total_candidates": 6
+    }
+   },
+   {
+    "symbol": "512660",
+    "name": "军工ETF",
+    "layer": "satellite",
+    "tracked_index": "",
+    "industry": "军工",
+    "weight": 0.0432,
+    "factor_score": -1.215,
+    "factor_breakdown": {
+     "etf.return_1m": 0.2,
+     "etf.return_3m": 0.1,
+     "momentum": 0.1,
+     "price": 1.0,
+     "sentiment": 0.05,
+     "technical": 0.75,
+     "technical.macd.macd": 3.0,
+     "valuation": 0.1
+    },
+    "_rank_info": {
+     "dominant_factor": "技术面",
+     "rank": 6,
+     "total_candidates": 6
+    }
+   },
+   {
+    "symbol": "512880",
+    "name": "证券ETF",
+    "layer": "satellite",
+    "tracked_index": "",
+    "industry": "券商",
+    "weight": 0.0433,
+    "factor_score": -1.095,
+    "factor_breakdown": {
+     "etf.return_1m": 1.4,
+     "etf.return_3m": 0.7,
+     "momentum": 0.7,
+     "price": 1.0,
+     "sentiment": 0.05,
+     "technical": 0.55,
+     "technical.macd.macd": 1.4,
+     "valuation": 0.1
+    },
+    "_rank_info": {
+     "dominant_factor": "动量",
+     "rank": 4,
+     "total_candidates": 6
+    }
+   },
+   {
+    "symbol": "512890",
+    "name": "红利低波ETF",
+    "layer": "core",
+    "tracked_index": "",
+    "industry": "红利",
+    "weight": 0.1214,
+    "factor_score": 0.27,
+    "factor_breakdown": {
+     "etf.return_1m": 1.0,
+     "etf.return_3m": 0.5,
+     "momentum": 0.5,
+     "price": 1.0,
+     "sentiment": 0.05,
+     "technical": 0.4,
+     "technical.macd.macd": 0.2,
+     "valuation": -0.05
+    },
+    "_rank_info": {
+     "dominant_factor": "动量",
+     "rank": 1,
+     "total_candidates": 2
+    }
+   },
+   {
+    "symbol": "515030",
+    "name": "新能源ETF",
+    "layer": "satellite",
+    "tracked_index": "",
+    "industry": "新能源",
+    "weight": 0.0433,
+    "factor_score": -1.095,
+    "factor_breakdown": {
+     "etf.return_1m": 1.2,
+     "etf.return_3m": 0.6,
+     "momentum": 0.6,
+     "price": 1.0,
+     "sentiment": 0.05,
+     "technical": 0.65,
+     "technical.macd.macd": 2.2,
+     "valuation": 0.1
+    },
+    "_rank_info": {
+     "dominant_factor": "技术面",
+     "rank": 5,
+     "total_candidates": 6
+    }
+   }
+  ],
+  "risk_metrics": {
+   "sector_concentration": 0.0766,
+   "sector_breakdown": {
+    "core": 0.1,
+    "红利": 0.1214,
+    "国债": 0.2054,
+    "半导体": 0.0467,
+    "医药": 0.0434,
+    "券商": 0.0433,
+    "新能源": 0.0433,
+    "军工": 0.0432
+   },
+   "correlation_warnings": [
+    {
+     "type": "near_substitute",
+     "pair": [
+      "510300",
+      "159338"
+     ],
+     "family": "大盘宽基",
+     "combined_weight": 0.1,
+     "note": "同主题近替代品（大盘宽基族）：不同发行商同一板块，关联度约束不依赖 K 线相关系数",
+     "correlation": 0.93
+    }
+   ]
+  },
+  "layer_budget": {
+   "core": 0.5,
+   "defense": 0.13,
+   "satellite": 0.22
+  }
+ },
+ {
+  "id": "aggressive",
+  "allocations": [
+   {
+    "symbol": "159338",
+    "name": "中证A500ETF",
+    "layer": "core",
+    "weight": 0.05,
+    "factor_score": 0.35,
+    "factor_breakdown": {
+     "etf.return_1m": 1.6,
+     "etf.return_3m": 0.8,
+     "momentum": 0.8,
+     "price": 1.0,
+     "sentiment": 0.05,
+     "technical": 0.35,
+     "technical.macd.macd": -0.2,
+     "valuation": 0.1
+    }
+   },
+   {
+    "symbol": "510300",
+    "name": "沪深300ETF",
+    "layer": "core",
+    "weight": 0.05,
+    "factor_score": 0.3,
+    "factor_breakdown": {
+     "etf.return_1m": 2.4,
+     "etf.return_3m": 1.2,
+     "momentum": 1.2,
+     "price": 1.0,
+     "sentiment": 0.05,
+     "technical": 0.3,
+     "technical.macd.macd": -0.6,
+     "valuation": -0.05
+    }
+   },
+   {
+    "symbol": "511090",
+    "name": "30年国债ETF",
+    "layer": "core",
+    "tracked_index": "",
+    "industry": "国债",
+    "weight": 0.2638,
+    "factor_score": -1.772,
+    "factor_breakdown": {
+     "etf.return_1m": -0.4,
+     "etf.return_3m": -0.2,
+     "momentum": -0.2,
+     "price": 1.0,
+     "sentiment": 0.05,
+     "technical": 0.45,
+     "technical.macd.macd": 0.6,
+     "valuation": 0.1
+    },
+    "_rank_info": {
+     "dominant_factor": "技术面",
+     "rank": 2,
+     "total_candidates": 2
+    }
+   },
+   {
+    "symbol": "512010",
+    "name": "医药ETF",
+    "layer": "satellite",
+    "tracked_index": "",
+    "industry": "医药",
+    "weight": 0.0541,
+    "factor_score": -0.998,
+    "factor_breakdown": {
+     "etf.return_1m": 1.8,
+     "etf.return_3m": 0.9,
+     "momentum": 0.9,
+     "price": 1.0,
+     "sentiment": 0.05,
+     "technical": 0.5,
+     "technical.macd.macd": 1.0,
+     "valuation": -0.05
+    },
+    "_rank_info": {
+     "dominant_factor": "动量",
+     "rank": 1,
+     "total_candidates": 6
+    }
+   },
+   {
+    "symbol": "512480",
+    "name": "半导体ETF",
+    "layer": "satellite",
+    "tracked_index": "",
+    "industry": "半导体",
+    "weight": 0.0534,
+    "factor_score": -1.202,
+    "factor_breakdown": {
+     "etf.return_1m": 0.8,
+     "etf.return_3m": 0.4,
+     "momentum": 0.4,
+     "price": 1.0,
+     "sentiment": 0.05,
+     "technical": 0.6,
+     "technical.macd.macd": 1.8,
+     "valuation": -0.05
+    },
+    "_rank_info": {
+     "dominant_factor": "动量",
+     "rank": 4,
+     "total_candidates": 6
+    }
+   },
+   {
+    "symbol": "512660",
+    "name": "军工ETF",
+    "layer": "satellite",
+    "tracked_index": "",
+    "industry": "军工",
+    "weight": 0.0531,
+    "factor_score": -1.277,
+    "factor_breakdown": {
+     "etf.return_1m": 0.2,
+     "etf.return_3m": 0.1,
+     "momentum": 0.1,
+     "price": 1.0,
+     "sentiment": 0.05,
+     "technical": 0.75,
+     "technical.macd.macd": 3.0,
+     "valuation": 0.1
+    },
+    "_rank_info": {
+     "dominant_factor": "技术面",
+     "rank": 6,
+     "total_candidates": 6
+    }
+   },
+   {
+    "symbol": "512880",
+    "name": "证券ETF",
+    "layer": "satellite",
+    "tracked_index": "",
+    "industry": "券商",
+    "weight": 0.054,
+    "factor_score": -1.047,
+    "factor_breakdown": {
+     "etf.return_1m": 1.4,
+     "etf.return_3m": 0.7,
+     "momentum": 0.7,
+     "price": 1.0,
+     "sentiment": 0.05,
+     "technical": 0.55,
+     "technical.macd.macd": 1.4,
+     "valuation": 0.1
+    },
+    "_rank_info": {
+     "dominant_factor": "动量",
+     "rank": 2,
+     "total_candidates": 6
+    }
+   },
+   {
+    "symbol": "512890",
+    "name": "红利低波ETF",
+    "layer": "core",
+    "tracked_index": "",
+    "industry": "红利",
+    "weight": 0.1248,
+    "factor_score": -1.198,
+    "factor_breakdown": {
+     "etf.return_1m": 1.0,
+     "etf.return_3m": 0.5,
+     "momentum": 0.5,
+     "price": 1.0,
+     "sentiment": 0.05,
+     "technical": 0.4,
+     "technical.macd.macd": 0.2,
+     "valuation": -0.05
+    },
+    "_rank_info": {
+     "dominant_factor": "动量",
+     "rank": 1,
+     "total_candidates": 2
+    }
+   },
+   {
+    "symbol": "515030",
+    "name": "新能源ETF",
+    "layer": "satellite",
+    "tracked_index": "",
+    "industry": "新能源",
+    "weight": 0.054,
+    "factor_score": -1.073,
+    "factor_breakdown": {
+     "etf.return_1m": 1.2,
+     "etf.return_3m": 0.6,
+     "momentum": 0.6,
+     "price": 1.0,
+     "sentiment": 0.05,
+     "technical": 0.65,
+     "technical.macd.macd": 2.2,
+     "valuation": 0.1
+    },
+    "_rank_info": {
+     "dominant_factor": "动量",
+     "rank": 3,
+     "total_candidates": 6
+    }
+   }
+  ],
+  "risk_metrics": {
+   "sector_concentration": 0.1096,
+   "sector_breakdown": {
+    "core": 0.1,
+    "红利": 0.1248,
+    "国债": 0.2638,
+    "医药": 0.0541,
+    "券商": 0.054,
+    "新能源": 0.054,
+    "半导体": 0.0534,
+    "军工": 0.0531
+   },
+   "correlation_warnings": [
+    {
+     "type": "near_substitute",
+     "pair": [
+      "510300",
+      "159338"
+     ],
+     "family": "大盘宽基",
+     "combined_weight": 0.1,
+     "note": "同主题近替代品（大盘宽基族）：不同发行商同一板块，关联度约束不依赖 K 线相关系数",
+     "correlation": 0.93
+    }
+   ],
+   "structure_warnings": [
+    {
+     "type": "aggressive_cash_over_20pct",
+     "cash": 0.2428
+    },
+    {
+     "type": "inv3_satellite_not_monotonic",
+     "satellite_counts": {
+      "defensive": 4,
+      "balanced": 5,
+      "aggressive": 5
+     }
+    },
+    {
+     "type": "inv5_total_not_monotonic",
+     "total_counts": {
+      "defensive": 7,
+      "balanced": 9,
+      "aggressive": 9
+     }
+    },
+    {
+     "type": "inv6_aggressive_cash_over",
+     "cash": 0.2428,
+     "clamp": 0.1
+    }
+   ]
+  },
+  "layer_budget": {
+   "core": 0.6,
+   "defense": 0.05,
+   "satellite": 0.3
+  }
+ }
+]

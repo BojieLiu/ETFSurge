@@ -96,6 +96,9 @@ def run_pipeline(scenario: dict) -> list[dict]:
         regime=scenario["regime"],
         factor_matrix=scenario.get("factor_matrix") or {},
         candidates=scenario.get("candidates"),
+        # round35 FM2 重做前置①: 透传 ic_series——此前 harness 不注入，
+        # warm 分支（≥IC_MIN_BATCHES）恒不可达，构成 FM2 类改动的验收盲区。
+        ic_series=scenario.get("ic_series") or None,
     )
     strategies = apply_risk_controls(strategies, scenario.get("factor_matrix") or {},
                                      regime=scenario["regime"])

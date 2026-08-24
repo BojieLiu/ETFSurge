@@ -1,0 +1,251 @@
+{
+ "description": "warm-IC 场景：ic_series 注入 >=IC_MIN_BATCHES 序列（强/弱/翻转三态），锁定 FM2 相对化权重路径；pre-FM2 基线捕获「毕业即降权」旧行为。",
+ "risk_profile": "balanced",
+ "regime": "range_bound",
+ "factor_matrix": {
+  "510300": {
+   "technical": 0.3,
+   "momentum": 1.2,
+   "valuation": -0.05,
+   "sentiment": 0.05,
+   "etf.return_1m": 2.4,
+   "etf.return_3m": 1.2,
+   "technical.macd.macd": -0.6,
+   "price": 1.0
+  },
+  "159338": {
+   "technical": 0.35,
+   "momentum": 0.8,
+   "valuation": 0.1,
+   "sentiment": 0.05,
+   "etf.return_1m": 1.6,
+   "etf.return_3m": 0.8,
+   "technical.macd.macd": -0.2,
+   "price": 1.0
+  },
+  "512890": {
+   "technical": 0.4,
+   "momentum": 0.5,
+   "valuation": -0.05,
+   "sentiment": 0.05,
+   "etf.return_1m": 1.0,
+   "etf.return_3m": 0.5,
+   "technical.macd.macd": 0.2,
+   "price": 1.0
+  },
+  "511090": {
+   "technical": 0.45,
+   "momentum": -0.2,
+   "valuation": 0.1,
+   "sentiment": 0.05,
+   "etf.return_1m": -0.4,
+   "etf.return_3m": -0.2,
+   "technical.macd.macd": 0.6,
+   "price": 1.0
+  },
+  "512010": {
+   "technical": 0.5,
+   "momentum": 0.9,
+   "valuation": -0.05,
+   "sentiment": 0.05,
+   "etf.return_1m": 1.8,
+   "etf.return_3m": 0.9,
+   "technical.macd.macd": 1.0,
+   "price": 1.0
+  },
+  "512880": {
+   "technical": 0.55,
+   "momentum": 0.7,
+   "valuation": 0.1,
+   "sentiment": 0.05,
+   "etf.return_1m": 1.4,
+   "etf.return_3m": 0.7,
+   "technical.macd.macd": 1.4,
+   "price": 1.0
+  },
+  "512480": {
+   "technical": 0.6000000000000001,
+   "momentum": 0.4,
+   "valuation": -0.05,
+   "sentiment": 0.05,
+   "etf.return_1m": 0.8,
+   "etf.return_3m": 0.4,
+   "technical.macd.macd": 1.8,
+   "price": 1.0
+  },
+  "515030": {
+   "technical": 0.65,
+   "momentum": 0.6,
+   "valuation": 0.1,
+   "sentiment": 0.05,
+   "etf.return_1m": 1.2,
+   "etf.return_3m": 0.6,
+   "technical.macd.macd": 2.2,
+   "price": 1.0
+  },
+  "515080": {
+   "technical": 0.7,
+   "momentum": 0.3,
+   "valuation": -0.05,
+   "sentiment": 0.05,
+   "etf.return_1m": 0.6,
+   "etf.return_3m": 0.3,
+   "technical.macd.macd": 2.6,
+   "price": 1.0
+  },
+  "512660": {
+   "technical": 0.75,
+   "momentum": 0.1,
+   "valuation": 0.1,
+   "sentiment": 0.05,
+   "etf.return_1m": 0.2,
+   "etf.return_3m": 0.1,
+   "technical.macd.macd": 3.0,
+   "price": 1.0
+  }
+ },
+ "candidates": [
+  {
+   "symbol": "510300",
+   "name": "沪深300ETF",
+   "layer": "core",
+   "industry": "宽基指数",
+   "tracked_index": "沪深300"
+  },
+  {
+   "symbol": "159338",
+   "name": "中证A500ETF",
+   "layer": "core",
+   "industry": "宽基指数",
+   "tracked_index": "中证A500"
+  },
+  {
+   "symbol": "512890",
+   "name": "红利低波ETF",
+   "layer": "core",
+   "industry": "红利",
+   "tracked_index": ""
+  },
+  {
+   "symbol": "511090",
+   "name": "30年国债ETF",
+   "layer": "core",
+   "industry": "国债",
+   "tracked_index": ""
+  },
+  {
+   "symbol": "512010",
+   "name": "医药ETF",
+   "layer": "satellite",
+   "industry": "医药",
+   "tracked_index": ""
+  },
+  {
+   "symbol": "512880",
+   "name": "证券ETF",
+   "layer": "satellite",
+   "industry": "券商",
+   "tracked_index": ""
+  },
+  {
+   "symbol": "512480",
+   "name": "半导体ETF",
+   "layer": "satellite",
+   "industry": "半导体",
+   "tracked_index": ""
+  },
+  {
+   "symbol": "515030",
+   "name": "新能源ETF",
+   "layer": "satellite",
+   "industry": "新能源",
+   "tracked_index": ""
+  },
+  {
+   "symbol": "515080",
+   "name": "中证红利ETF",
+   "layer": "satellite",
+   "industry": "红利",
+   "tracked_index": ""
+  },
+  {
+   "symbol": "512660",
+   "name": "军工ETF",
+   "layer": "satellite",
+   "industry": "军工",
+   "tracked_index": ""
+  }
+ ],
+ "correlation_matrix": {
+  "510300|159338": 0.93,
+  "512010|512880": 0.55
+ },
+ "ic_series": {
+  "etf.return_1m": [
+   0.08,
+   0.08,
+   0.08,
+   0.08,
+   0.08,
+   0.08,
+   0.08,
+   0.08,
+   0.08,
+   0.08,
+   0.08,
+   0.08,
+   0.08,
+   0.08,
+   0.08,
+   0.08,
+   0.08,
+   0.08,
+   0.08,
+   0.08
+  ],
+  "etf.return_3m": [
+   0.02,
+   0.02,
+   0.02,
+   0.02,
+   0.02,
+   0.02,
+   0.02,
+   0.02,
+   0.02,
+   0.02,
+   0.02,
+   0.02,
+   0.02,
+   0.02,
+   0.02,
+   0.02,
+   0.02,
+   0.02,
+   0.02,
+   0.02
+  ],
+  "technical.macd.macd": [
+   -0.05,
+   -0.05,
+   -0.05,
+   -0.05,
+   -0.05,
+   -0.05,
+   -0.05,
+   -0.05,
+   -0.05,
+   -0.05,
+   -0.05,
+   -0.05,
+   -0.05,
+   -0.05,
+   -0.05,
+   -0.05,
+   -0.05,
+   -0.05,
+   -0.05,
+   -0.05
+  ]
+ }
+}
