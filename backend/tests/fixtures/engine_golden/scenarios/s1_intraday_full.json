@@ -1,0 +1,257 @@
+{
+ "description": "正常盘中：满因子 + 满相关矩阵（含高相关对触发 enforce_max_correlation）",
+ "risk_profile": "balanced",
+ "regime": "range_bound",
+ "factor_matrix": {
+  "510300": {
+   "technical": 0.31,
+   "momentum": 0.18,
+   "valuation": -0.14,
+   "sentiment": 0.05,
+   "price": 4.0,
+   "return_1m": 0.04,
+   "return_3m": 0.09,
+   "fund_flow": 0.02,
+   "premium_discount": 0.003,
+   "technical.signal.overall": 0.25
+  },
+  "159338": {
+   "technical": 0.33,
+   "momentum": 0.2,
+   "valuation": -0.12,
+   "sentiment": 0.05,
+   "price": 4.0,
+   "return_1m": 0.04,
+   "return_3m": 0.09,
+   "fund_flow": 0.02,
+   "premium_discount": 0.003,
+   "technical.signal.overall": 0.25
+  },
+  "512890": {
+   "technical": 0.35,
+   "momentum": 0.22,
+   "valuation": -0.1,
+   "sentiment": 0.05,
+   "price": 4.0,
+   "return_1m": 0.04,
+   "return_3m": 0.09,
+   "fund_flow": 0.02,
+   "premium_discount": 0.003,
+   "technical.signal.overall": 0.25
+  },
+  "510500": {
+   "technical": 0.37,
+   "momentum": 0.24,
+   "valuation": -0.08,
+   "sentiment": 0.05,
+   "price": 4.0,
+   "return_1m": 0.04,
+   "return_3m": 0.09,
+   "fund_flow": 0.02,
+   "premium_discount": 0.003,
+   "technical.signal.overall": 0.25
+  },
+  "512480": {
+   "technical": 0.39,
+   "momentum": 0.26,
+   "valuation": -0.06,
+   "sentiment": 0.05,
+   "price": 4.0,
+   "return_1m": 0.04,
+   "return_3m": 0.09,
+   "fund_flow": 0.02,
+   "premium_discount": 0.003,
+   "technical.signal.overall": 0.25
+  },
+  "159915": {
+   "technical": 0.31,
+   "momentum": 0.18,
+   "valuation": -0.14,
+   "sentiment": 0.05,
+   "price": 4.0,
+   "return_1m": 0.04,
+   "return_3m": 0.09,
+   "fund_flow": 0.02,
+   "premium_discount": 0.003,
+   "technical.signal.overall": 0.25
+  },
+  "513100": {
+   "technical": 0.33,
+   "momentum": 0.2,
+   "valuation": -0.12,
+   "sentiment": 0.05,
+   "price": 4.0,
+   "return_1m": 0.04,
+   "return_3m": 0.09,
+   "fund_flow": 0.02,
+   "premium_discount": 0.003,
+   "technical.signal.overall": 0.25
+  },
+  "561560": {
+   "technical": 0.35,
+   "momentum": 0.22,
+   "valuation": -0.1,
+   "sentiment": 0.05,
+   "price": 4.0,
+   "return_1m": 0.04,
+   "return_3m": 0.09,
+   "fund_flow": 0.02,
+   "premium_discount": 0.003,
+   "technical.signal.overall": 0.25
+  },
+  "588000": {
+   "technical": 0.37,
+   "momentum": 0.24,
+   "valuation": -0.08,
+   "sentiment": 0.05,
+   "price": 4.0,
+   "return_1m": 0.04,
+   "return_3m": 0.09,
+   "fund_flow": 0.02,
+   "premium_discount": 0.003,
+   "technical.signal.overall": 0.25
+  },
+  "515030": {
+   "technical": 0.39,
+   "momentum": 0.26,
+   "valuation": -0.06,
+   "sentiment": 0.05,
+   "price": 4.0,
+   "return_1m": 0.04,
+   "return_3m": 0.09,
+   "fund_flow": 0.02,
+   "premium_discount": 0.003,
+   "technical.signal.overall": 0.25
+  },
+  "518880": {
+   "technical": 0.31,
+   "momentum": 0.18,
+   "valuation": -0.14,
+   "sentiment": 0.05,
+   "price": 4.0,
+   "return_1m": 0.04,
+   "return_3m": 0.09,
+   "fund_flow": 0.02,
+   "premium_discount": 0.003,
+   "technical.signal.overall": 0.25
+  },
+  "511010": {
+   "technical": 0.33,
+   "momentum": 0.2,
+   "valuation": -0.12,
+   "sentiment": 0.05,
+   "price": 4.0,
+   "return_1m": 0.04,
+   "return_3m": 0.09,
+   "fund_flow": 0.02,
+   "premium_discount": 0.003,
+   "technical.signal.overall": 0.25
+  }
+ },
+ "candidates": [
+  {
+   "symbol": "510300",
+   "name": "沪深300ETF",
+   "layer": "core",
+   "industry": "宽基指数",
+   "tracked_index": "沪深300",
+   "segment": "hs300"
+  },
+  {
+   "symbol": "159338",
+   "name": "中证A500ETF",
+   "layer": "core",
+   "industry": "宽基指数",
+   "tracked_index": "中证A500",
+   "segment": "a500"
+  },
+  {
+   "symbol": "512890",
+   "name": "红利低波ETF",
+   "layer": "core",
+   "industry": "红利",
+   "tracked_index": "红利低波",
+   "segment": "dividend"
+  },
+  {
+   "symbol": "510500",
+   "name": "中证500ETF",
+   "layer": "core",
+   "industry": "宽基指数",
+   "tracked_index": "中证500",
+   "segment": "zz500"
+  },
+  {
+   "symbol": "512480",
+   "name": "半导体ETF",
+   "layer": "satellite",
+   "industry": "半导体",
+   "tracked_index": "半导体",
+   "segment": "semi"
+  },
+  {
+   "symbol": "159915",
+   "name": "创业板ETF",
+   "layer": "satellite",
+   "industry": "成长",
+   "tracked_index": "创业板",
+   "segment": "cyb"
+  },
+  {
+   "symbol": "513100",
+   "name": "纳指ETF",
+   "layer": "satellite",
+   "industry": "跨境",
+   "tracked_index": "纳指",
+   "segment": "nsdq"
+  },
+  {
+   "symbol": "561560",
+   "name": "碳中和ETF",
+   "layer": "satellite",
+   "industry": "环保",
+   "tracked_index": "碳中和",
+   "segment": "carbon"
+  },
+  {
+   "symbol": "588000",
+   "name": "科创50ETF",
+   "layer": "core",
+   "industry": "科创",
+   "tracked_index": "科创50",
+   "segment": "kc50"
+  },
+  {
+   "symbol": "515030",
+   "name": "新能源车ETF",
+   "layer": "satellite",
+   "industry": "新能源",
+   "tracked_index": "新能源车",
+   "segment": "nev"
+  },
+  {
+   "symbol": "518880",
+   "name": "黄金ETF",
+   "layer": "defense",
+   "industry": "商品",
+   "tracked_index": "黄金",
+   "segment": "gold"
+  },
+  {
+   "symbol": "511010",
+   "name": "国债ETF",
+   "layer": "defense",
+   "industry": "固收",
+   "tracked_index": "国债",
+   "segment": "bond"
+  }
+ ],
+ "correlation_matrix": {
+  "510300|159338": 0.94,
+  "510300|510500": 0.62,
+  "512480|588000": 0.91,
+  "159915|515030": 0.88,
+  "513100|510300": 0.21,
+  "518880|511010": 0.05
+ }
+}

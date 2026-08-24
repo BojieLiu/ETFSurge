@@ -1,0 +1,356 @@
+[
+ {
+  "id": "defensive",
+  "allocations": [
+   {
+    "symbol": "510300",
+    "name": "沪深300ETF",
+    "layer": "core",
+    "weight": 0.175,
+    "factor_score": 0.25,
+    "factor_breakdown": {
+     "fund_flow": 0.02,
+     "momentum": 0.12,
+     "premium_discount": 0.003,
+     "price": 4.0,
+     "return_1m": 0.04,
+     "return_3m": 0.09,
+     "sentiment": 0.05,
+     "technical": 0.25,
+     "technical.signal.overall": 0.25,
+     "valuation": -0.2
+    }
+   },
+   {
+    "symbol": "512480",
+    "name": "半导体ETF",
+    "layer": "satellite",
+    "tracked_index": "半导体",
+    "industry": "半导体",
+    "weight": 0.2225,
+    "factor_score": -1.26,
+    "factor_breakdown": {
+     "fund_flow": 0.02,
+     "momentum": 0.32,
+     "premium_discount": 0.003,
+     "price": 4.0,
+     "return_1m": 0.04,
+     "return_3m": 0.09,
+     "sentiment": 0.05,
+     "technical": 0.45,
+     "technical.signal.overall": 0.25,
+     "valuation": 0.0
+    },
+    "_rank_info": {
+     "dominant_factor": "技术面",
+     "rank": 1,
+     "total_candidates": 1
+    }
+   },
+   {
+    "symbol": "512890",
+    "name": "红利低波ETF",
+    "layer": "core",
+    "tracked_index": "红利低波",
+    "industry": "红利",
+    "weight": 0.15,
+    "factor_score": 0.165,
+    "factor_breakdown": {
+     "fund_flow": 0.02,
+     "momentum": 0.22,
+     "premium_discount": 0.003,
+     "price": 4.0,
+     "return_1m": 0.04,
+     "return_3m": 0.09,
+     "sentiment": 0.05,
+     "technical": 0.35,
+     "technical.signal.overall": 0.25,
+     "valuation": -0.1
+    },
+    "_rank_info": {
+     "dominant_factor": "技术面",
+     "rank": 1,
+     "total_candidates": 1
+    }
+   },
+   {
+    "symbol": "518880",
+    "name": "黄金ETF",
+    "layer": "defense",
+    "weight": 0.05,
+    "factor_score": 0.25,
+    "factor_breakdown": {
+     "fund_flow": 0.02,
+     "momentum": 0.12,
+     "premium_discount": 0.003,
+     "price": 4.0,
+     "return_1m": 0.04,
+     "return_3m": 0.09,
+     "sentiment": 0.05,
+     "technical": 0.25,
+     "technical.signal.overall": 0.25,
+     "valuation": -0.2
+    }
+   }
+  ],
+  "risk_metrics": {
+   "sector_concentration": 0.1051,
+   "sector_breakdown": {
+    "core": 0.175,
+    "红利": 0.15,
+    "半导体": 0.2225,
+    "defense": 0.05
+   }
+  },
+  "layer_budget": {
+   "core": 0.475,
+   "defense": 0.135,
+   "satellite": 0.25
+  }
+ },
+ {
+  "id": "balanced",
+  "allocations": [
+   {
+    "symbol": "510300",
+    "name": "沪深300ETF",
+    "layer": "core",
+    "weight": 0.16,
+    "factor_score": 0.25,
+    "factor_breakdown": {
+     "fund_flow": 0.02,
+     "momentum": 0.12,
+     "premium_discount": 0.003,
+     "price": 4.0,
+     "return_1m": 0.04,
+     "return_3m": 0.09,
+     "sentiment": 0.05,
+     "technical": 0.25,
+     "technical.signal.overall": 0.25,
+     "valuation": -0.2
+    }
+   },
+   {
+    "symbol": "512480",
+    "name": "半导体ETF",
+    "layer": "satellite",
+    "tracked_index": "半导体",
+    "industry": "半导体",
+    "weight": 0.2516,
+    "factor_score": -1.259,
+    "factor_breakdown": {
+     "fund_flow": 0.02,
+     "momentum": 0.32,
+     "premium_discount": 0.003,
+     "price": 4.0,
+     "return_1m": 0.04,
+     "return_3m": 0.09,
+     "sentiment": 0.05,
+     "technical": 0.45,
+     "technical.signal.overall": 0.25,
+     "valuation": 0.0
+    },
+    "_rank_info": {
+     "dominant_factor": "技术面",
+     "rank": 1,
+     "total_candidates": 1
+    }
+   },
+   {
+    "symbol": "512890",
+    "name": "红利低波ETF",
+    "layer": "core",
+    "tracked_index": "红利低波",
+    "industry": "红利",
+    "weight": 0.15,
+    "factor_score": -1.339,
+    "factor_breakdown": {
+     "fund_flow": 0.02,
+     "momentum": 0.22,
+     "premium_discount": 0.003,
+     "price": 4.0,
+     "return_1m": 0.04,
+     "return_3m": 0.09,
+     "sentiment": 0.05,
+     "technical": 0.35,
+     "technical.signal.overall": 0.25,
+     "valuation": -0.1
+    },
+    "_rank_info": {
+     "dominant_factor": "技术面",
+     "rank": 1,
+     "total_candidates": 1
+    }
+   },
+   {
+    "symbol": "518880",
+    "name": "黄金ETF",
+    "layer": "defense",
+    "weight": 0.05,
+    "factor_score": 0.25,
+    "factor_breakdown": {
+     "fund_flow": 0.02,
+     "momentum": 0.12,
+     "premium_discount": 0.003,
+     "price": 4.0,
+     "return_1m": 0.04,
+     "return_3m": 0.09,
+     "sentiment": 0.05,
+     "technical": 0.25,
+     "technical.signal.overall": 0.25,
+     "valuation": -0.2
+    }
+   }
+  ],
+  "risk_metrics": {
+   "sector_concentration": 0.1139,
+   "sector_breakdown": {
+    "core": 0.16,
+    "红利": 0.15,
+    "半导体": 0.2516,
+    "defense": 0.05
+   }
+  },
+  "layer_budget": {
+   "core": 0.46,
+   "defense": 0.126,
+   "satellite": 0.28
+  }
+ },
+ {
+  "id": "aggressive",
+  "allocations": [
+   {
+    "symbol": "510300",
+    "name": "沪深300ETF",
+    "layer": "core",
+    "weight": 0.25,
+    "factor_score": 0.25,
+    "factor_breakdown": {
+     "fund_flow": 0.02,
+     "momentum": 0.12,
+     "premium_discount": 0.003,
+     "price": 4.0,
+     "return_1m": 0.04,
+     "return_3m": 0.09,
+     "sentiment": 0.05,
+     "technical": 0.25,
+     "technical.signal.overall": 0.25,
+     "valuation": -0.2
+    }
+   },
+   {
+    "symbol": "512480",
+    "name": "半导体ETF",
+    "layer": "satellite",
+    "tracked_index": "半导体",
+    "industry": "半导体",
+    "weight": 0.292,
+    "factor_score": 0.242,
+    "factor_breakdown": {
+     "fund_flow": 0.02,
+     "momentum": 0.32,
+     "premium_discount": 0.003,
+     "price": 4.0,
+     "return_1m": 0.04,
+     "return_3m": 0.09,
+     "sentiment": 0.05,
+     "technical": 0.45,
+     "technical.signal.overall": 0.25,
+     "valuation": 0.0
+    },
+    "_rank_info": {
+     "dominant_factor": "动量",
+     "rank": 1,
+     "total_candidates": 1
+    }
+   },
+   {
+    "symbol": "512890",
+    "name": "红利低波ETF",
+    "layer": "core",
+    "tracked_index": "红利低波",
+    "industry": "红利",
+    "weight": 0.15,
+    "factor_score": -1.344,
+    "factor_breakdown": {
+     "fund_flow": 0.02,
+     "momentum": 0.22,
+     "premium_discount": 0.003,
+     "price": 4.0,
+     "return_1m": 0.04,
+     "return_3m": 0.09,
+     "sentiment": 0.05,
+     "technical": 0.35,
+     "technical.signal.overall": 0.25,
+     "valuation": -0.1
+    },
+    "_rank_info": {
+     "dominant_factor": "动量",
+     "rank": 1,
+     "total_candidates": 1
+    }
+   },
+   {
+    "symbol": "518880",
+    "name": "黄金ETF",
+    "layer": "defense",
+    "weight": 0.05,
+    "factor_score": 0.25,
+    "factor_breakdown": {
+     "fund_flow": 0.02,
+     "momentum": 0.12,
+     "premium_discount": 0.003,
+     "price": 4.0,
+     "return_1m": 0.04,
+     "return_3m": 0.09,
+     "sentiment": 0.05,
+     "technical": 0.25,
+     "technical.signal.overall": 0.25,
+     "valuation": -0.2
+    }
+   }
+  ],
+  "risk_metrics": {
+   "sector_concentration": 0.1712,
+   "sector_breakdown": {
+    "core": 0.25,
+    "红利": 0.15,
+    "半导体": 0.292,
+    "defense": 0.03
+   },
+   "structure_warnings": [
+    {
+     "type": "aggressive_cash_over_20pct",
+     "cash": 0.258
+    },
+    {
+     "type": "inv3_satellite_not_monotonic",
+     "satellite_counts": {
+      "defensive": 1,
+      "balanced": 1,
+      "aggressive": 1
+     }
+    },
+    {
+     "type": "inv5_total_not_monotonic",
+     "total_counts": {
+      "defensive": 4,
+      "balanced": 4,
+      "aggressive": 4
+     }
+    },
+    {
+     "type": "inv6_aggressive_cash_over",
+     "cash": 0.258,
+     "clamp": 0.1
+    }
+   ]
+  },
+  "layer_budget": {
+   "core": 0.55,
+   "defense": 0.03,
+   "satellite": 0.4
+  }
+ }
+]

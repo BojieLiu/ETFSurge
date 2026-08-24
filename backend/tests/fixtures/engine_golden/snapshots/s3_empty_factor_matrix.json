@@ -1,0 +1,479 @@
+[
+ {
+  "id": "defensive",
+  "allocations": [
+   {
+    "symbol": "159338",
+    "name": "中证A500ETF",
+    "layer": "core",
+    "weight": 0.05,
+    "factor_score": 0.0,
+    "factor_breakdown": {}
+   },
+   {
+    "symbol": "510300",
+    "name": "沪深300ETF",
+    "layer": "core",
+    "weight": 0.05,
+    "factor_score": 0.0,
+    "factor_breakdown": {}
+   },
+   {
+    "symbol": "510500",
+    "name": "中证500ETF",
+    "layer": "core",
+    "tracked_index": "中证500",
+    "industry": "宽基指数",
+    "weight": 0.2128,
+    "factor_score": 0.0,
+    "factor_breakdown": {},
+    "_rank_info": {
+     "dominant_factor": null,
+     "rank": 2,
+     "total_candidates": 3
+    }
+   },
+   {
+    "symbol": "512480",
+    "name": "半导体ETF",
+    "layer": "satellite",
+    "tracked_index": "半导体",
+    "industry": "半导体",
+    "weight": 0.0474,
+    "factor_score": -1.5,
+    "factor_breakdown": {},
+    "_rank_info": {
+     "dominant_factor": null,
+     "rank": 3,
+     "total_candidates": 4
+    }
+   },
+   {
+    "symbol": "512890",
+    "name": "红利低波ETF",
+    "layer": "core",
+    "tracked_index": "红利低波",
+    "industry": "红利",
+    "weight": 0.15,
+    "factor_score": 0.8,
+    "factor_breakdown": {},
+    "_rank_info": {
+     "dominant_factor": null,
+     "rank": 1,
+     "total_candidates": 3
+    }
+   },
+   {
+    "symbol": "513100",
+    "name": "纳指ETF",
+    "layer": "satellite",
+    "tracked_index": "纳指",
+    "industry": "跨境",
+    "weight": 0.0538,
+    "factor_score": 0.8,
+    "factor_breakdown": {},
+    "_rank_info": {
+     "dominant_factor": null,
+     "rank": 1,
+     "total_candidates": 4
+    }
+   },
+   {
+    "symbol": "515030",
+    "name": "新能源车ETF",
+    "layer": "satellite",
+    "tracked_index": "新能源车",
+    "industry": "新能源",
+    "weight": 0.0474,
+    "factor_score": -1.5,
+    "factor_breakdown": {},
+    "_rank_info": {
+     "dominant_factor": null,
+     "rank": 4,
+     "total_candidates": 4
+    }
+   },
+   {
+    "symbol": "518880",
+    "name": "黄金ETF",
+    "layer": "defense",
+    "weight": 0.05,
+    "factor_score": 0.0,
+    "factor_breakdown": {}
+   },
+   {
+    "symbol": "561560",
+    "name": "碳中和ETF",
+    "layer": "satellite",
+    "tracked_index": "碳中和",
+    "industry": "环保",
+    "weight": 0.0514,
+    "factor_score": 0.0,
+    "factor_breakdown": {},
+    "_rank_info": {
+     "dominant_factor": null,
+     "rank": 2,
+     "total_candidates": 4
+    }
+   }
+  ],
+  "risk_metrics": {
+   "sector_concentration": 0.0903,
+   "sector_breakdown": {
+    "core": 0.1,
+    "红利": 0.15,
+    "宽基指数": 0.2128,
+    "跨境": 0.0538,
+    "环保": 0.0514,
+    "半导体": 0.0474,
+    "新能源": 0.0474,
+    "defense": 0.05
+   },
+   "correlation_warnings": [
+    {
+     "type": "near_substitute",
+     "pair": [
+      "510300",
+      "159338"
+     ],
+     "family": "大盘宽基",
+     "combined_weight": 0.1,
+     "note": "同主题近替代品（大盘宽基族）：不同发行商同一板块，关联度约束不依赖 K 线相关系数",
+     "correlation": 0.94
+    }
+   ]
+  },
+  "layer_budget": {
+   "core": 0.5,
+   "defense": 0.15,
+   "satellite": 0.2
+  }
+ },
+ {
+  "id": "balanced",
+  "allocations": [
+   {
+    "symbol": "159338",
+    "name": "中证A500ETF",
+    "layer": "core",
+    "weight": 0.0536,
+    "factor_score": 0.0,
+    "factor_breakdown": {}
+   },
+   {
+    "symbol": "510300",
+    "name": "沪深300ETF",
+    "layer": "core",
+    "weight": 0.0536,
+    "factor_score": 0.0,
+    "factor_breakdown": {}
+   },
+   {
+    "symbol": "512480",
+    "name": "半导体ETF",
+    "layer": "satellite",
+    "tracked_index": "半导体",
+    "industry": "半导体",
+    "weight": 0.0213,
+    "factor_score": -1.5,
+    "factor_breakdown": {},
+    "_rank_info": {
+     "dominant_factor": null,
+     "rank": 1,
+     "total_candidates": 4
+    }
+   },
+   {
+    "symbol": "512890",
+    "name": "红利低波ETF",
+    "layer": "core",
+    "tracked_index": "红利低波",
+    "industry": "红利",
+    "weight": 0.1609,
+    "factor_score": -1.5,
+    "factor_breakdown": {},
+    "_rank_info": {
+     "dominant_factor": null,
+     "rank": 2,
+     "total_candidates": 2
+    }
+   },
+   {
+    "symbol": "513100",
+    "name": "纳指ETF",
+    "layer": "satellite",
+    "tracked_index": "纳指",
+    "industry": "跨境",
+    "weight": 0.059,
+    "factor_score": -1.5,
+    "factor_breakdown": {},
+    "_rank_info": {
+     "dominant_factor": null,
+     "rank": 2,
+     "total_candidates": 4
+    }
+   },
+   {
+    "symbol": "515030",
+    "name": "新能源车ETF",
+    "layer": "satellite",
+    "tracked_index": "新能源车",
+    "industry": "新能源",
+    "weight": 0.059,
+    "factor_score": -1.5,
+    "factor_breakdown": {},
+    "_rank_info": {
+     "dominant_factor": null,
+     "rank": 4,
+     "total_candidates": 4
+    }
+   },
+   {
+    "symbol": "518880",
+    "name": "黄金ETF",
+    "layer": "defense",
+    "weight": 0.0536,
+    "factor_score": 0.0,
+    "factor_breakdown": {}
+   },
+   {
+    "symbol": "561560",
+    "name": "碳中和ETF",
+    "layer": "satellite",
+    "tracked_index": "碳中和",
+    "industry": "环保",
+    "weight": 0.059,
+    "factor_score": -1.5,
+    "factor_breakdown": {},
+    "_rank_info": {
+     "dominant_factor": null,
+     "rank": 3,
+     "total_candidates": 4
+    }
+   },
+   {
+    "symbol": "588000",
+    "name": "科创50ETF",
+    "layer": "core",
+    "tracked_index": "科创50",
+    "industry": "科创",
+    "weight": 0.2287,
+    "factor_score": 0.0,
+    "factor_breakdown": {},
+    "_rank_info": {
+     "dominant_factor": null,
+     "rank": 1,
+     "total_candidates": 2
+    }
+   }
+  ],
+  "risk_metrics": {
+   "sector_concentration": 0.0994,
+   "sector_breakdown": {
+    "core": 0.1,
+    "科创": 0.2287,
+    "红利": 0.15,
+    "半导体": 0.055,
+    "跨境": 0.055,
+    "环保": 0.055,
+    "新能源": 0.055,
+    "defense": 0.05
+   },
+   "correlation_warnings": [
+    {
+     "pair": [
+      "588000",
+      "512480"
+     ],
+     "correlation": 0.91,
+     "combined_weight": 0.2837,
+     "reduced_symbol": "512480",
+     "note": "高相关对合计权重超阈值，已削减低因子分标的（关联度提示，强制锚豁免不削减）"
+    },
+    {
+     "type": "near_substitute",
+     "pair": [
+      "510300",
+      "159338"
+     ],
+     "family": "大盘宽基",
+     "combined_weight": 0.1072,
+     "note": "同主题近替代品（大盘宽基族）：不同发行商同一板块，关联度约束不依赖 K 线相关系数",
+     "correlation": 0.94
+    }
+   ]
+  },
+  "layer_budget": {
+   "core": 0.5,
+   "defense": 0.13,
+   "satellite": 0.22
+  }
+ },
+ {
+  "id": "aggressive",
+  "allocations": [
+   {
+    "symbol": "159338",
+    "name": "中证A500ETF",
+    "layer": "core",
+    "weight": 0.15,
+    "factor_score": 0.0,
+    "factor_breakdown": {}
+   },
+   {
+    "symbol": "510300",
+    "name": "沪深300ETF",
+    "layer": "core",
+    "weight": 0.15,
+    "factor_score": 0.0,
+    "factor_breakdown": {}
+   },
+   {
+    "symbol": "512480",
+    "name": "半导体ETF",
+    "layer": "satellite",
+    "tracked_index": "半导体",
+    "industry": "半导体",
+    "weight": 0.0797,
+    "factor_score": 0.0,
+    "factor_breakdown": {},
+    "_rank_info": {
+     "dominant_factor": null,
+     "rank": 1,
+     "total_candidates": 4
+    }
+   },
+   {
+    "symbol": "512890",
+    "name": "红利低波ETF",
+    "layer": "core",
+    "tracked_index": "红利低波",
+    "industry": "红利",
+    "weight": 0.15,
+    "factor_score": -1.8,
+    "factor_breakdown": {},
+    "_rank_info": {
+     "dominant_factor": null,
+     "rank": 1,
+     "total_candidates": 1
+    }
+   },
+   {
+    "symbol": "513100",
+    "name": "纳指ETF",
+    "layer": "satellite",
+    "tracked_index": "纳指",
+    "industry": "跨境",
+    "weight": 0.0696,
+    "factor_score": -1.8,
+    "factor_breakdown": {},
+    "_rank_info": {
+     "dominant_factor": null,
+     "rank": 4,
+     "total_candidates": 4
+    }
+   },
+   {
+    "symbol": "515030",
+    "name": "新能源车ETF",
+    "layer": "satellite",
+    "tracked_index": "新能源车",
+    "industry": "新能源",
+    "weight": 0.0797,
+    "factor_score": 0.0,
+    "factor_breakdown": {},
+    "_rank_info": {
+     "dominant_factor": null,
+     "rank": 2,
+     "total_candidates": 4
+    }
+   },
+   {
+    "symbol": "518880",
+    "name": "黄金ETF",
+    "layer": "defense",
+    "weight": 0.05,
+    "factor_score": 0.0,
+    "factor_breakdown": {}
+   },
+   {
+    "symbol": "561560",
+    "name": "碳中和ETF",
+    "layer": "satellite",
+    "tracked_index": "碳中和",
+    "industry": "环保",
+    "weight": 0.0711,
+    "factor_score": -1.5,
+    "factor_breakdown": {},
+    "_rank_info": {
+     "dominant_factor": null,
+     "rank": 3,
+     "total_candidates": 4
+    }
+   }
+  ],
+  "risk_metrics": {
+   "sector_concentration": 0.1376,
+   "sector_breakdown": {
+    "core": 0.3,
+    "红利": 0.15,
+    "半导体": 0.0797,
+    "新能源": 0.0797,
+    "环保": 0.0711,
+    "跨境": 0.0696,
+    "defense": 0.05
+   },
+   "correlation_warnings": [
+    {
+     "pair": [
+      "510300",
+      "159338"
+     ],
+     "correlation": 0.94,
+     "combined_weight": 0.3,
+     "reduced_symbol": null,
+     "note": "双方均为强制锚（沪深300/中证A500/黄金/国债），关联度超阈但按豁免不削减"
+    },
+    {
+     "type": "near_substitute",
+     "pair": [
+      "510300",
+      "159338"
+     ],
+     "family": "大盘宽基",
+     "combined_weight": 0.3,
+     "note": "同主题近替代品（大盘宽基族）：不同发行商同一板块，关联度约束不依赖 K 线相关系数",
+     "correlation": 0.94
+    }
+   ],
+   "structure_warnings": [
+    {
+     "type": "inv3_satellite_not_monotonic",
+     "satellite_counts": {
+      "defensive": 4,
+      "balanced": 4,
+      "aggressive": 4
+     }
+    },
+    {
+     "type": "inv5_total_not_monotonic",
+     "total_counts": {
+      "defensive": 9,
+      "balanced": 9,
+      "aggressive": 8
+     }
+    },
+    {
+     "type": "inv6_aggressive_cash_over",
+     "cash": 0.1999,
+     "clamp": 0.1
+    }
+   ]
+  },
+  "layer_budget": {
+   "core": 0.6,
+   "defense": 0.05,
+   "satellite": 0.3
+  }
+ }
+]

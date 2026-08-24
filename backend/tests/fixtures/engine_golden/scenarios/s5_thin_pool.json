@@ -1,0 +1,196 @@
+{
+ "description": "稀薄池：候选不足触发 U11 强制引入 + 预算回补路径",
+ "risk_profile": "aggressive",
+ "regime": "bull_strong",
+ "factor_matrix": {
+  "510300": {
+   "technical": 0.25,
+   "momentum": 0.12,
+   "valuation": -0.2,
+   "sentiment": 0.05,
+   "price": 4.0,
+   "return_1m": 0.04,
+   "return_3m": 0.09,
+   "fund_flow": 0.02,
+   "premium_discount": 0.003,
+   "technical.signal.overall": 0.25
+  },
+  "159338": {
+   "technical": 0.3,
+   "momentum": 0.17,
+   "valuation": -0.15,
+   "sentiment": 0.05,
+   "price": 4.0,
+   "return_1m": 0.04,
+   "return_3m": 0.09,
+   "fund_flow": 0.02,
+   "premium_discount": 0.003,
+   "technical.signal.overall": 0.25
+  },
+  "512890": {
+   "technical": 0.35,
+   "momentum": 0.22,
+   "valuation": -0.1,
+   "sentiment": 0.05,
+   "price": 4.0,
+   "return_1m": 0.04,
+   "return_3m": 0.09,
+   "fund_flow": 0.02,
+   "premium_discount": 0.003,
+   "technical.signal.overall": 0.25
+  },
+  "510500": {
+   "technical": 0.4,
+   "momentum": 0.27,
+   "valuation": -0.05,
+   "sentiment": 0.05,
+   "price": 4.0,
+   "return_1m": 0.04,
+   "return_3m": 0.09,
+   "fund_flow": 0.02,
+   "premium_discount": 0.003,
+   "technical.signal.overall": 0.25
+  },
+  "512480": {
+   "technical": 0.45,
+   "momentum": 0.32,
+   "valuation": 0.0,
+   "sentiment": 0.05,
+   "price": 4.0,
+   "return_1m": 0.04,
+   "return_3m": 0.09,
+   "fund_flow": 0.02,
+   "premium_discount": 0.003,
+   "technical.signal.overall": 0.25
+  },
+  "159915": {
+   "technical": 0.25,
+   "momentum": 0.12,
+   "valuation": -0.2,
+   "sentiment": 0.05,
+   "price": 4.0,
+   "return_1m": 0.04,
+   "return_3m": 0.09,
+   "fund_flow": 0.02,
+   "premium_discount": 0.003,
+   "technical.signal.overall": 0.25
+  },
+  "513100": {
+   "technical": 0.3,
+   "momentum": 0.17,
+   "valuation": -0.15,
+   "sentiment": 0.05,
+   "price": 4.0,
+   "return_1m": 0.04,
+   "return_3m": 0.09,
+   "fund_flow": 0.02,
+   "premium_discount": 0.003,
+   "technical.signal.overall": 0.25
+  },
+  "561560": {
+   "technical": 0.35,
+   "momentum": 0.22,
+   "valuation": -0.1,
+   "sentiment": 0.05,
+   "price": 4.0,
+   "return_1m": 0.04,
+   "return_3m": 0.09,
+   "fund_flow": 0.02,
+   "premium_discount": 0.003,
+   "technical.signal.overall": 0.25
+  },
+  "588000": {
+   "technical": 0.4,
+   "momentum": 0.27,
+   "valuation": -0.05,
+   "sentiment": 0.05,
+   "price": 4.0,
+   "return_1m": 0.04,
+   "return_3m": 0.09,
+   "fund_flow": 0.02,
+   "premium_discount": 0.003,
+   "technical.signal.overall": 0.25
+  },
+  "515030": {
+   "technical": 0.45,
+   "momentum": 0.32,
+   "valuation": 0.0,
+   "sentiment": 0.05,
+   "price": 4.0,
+   "return_1m": 0.04,
+   "return_3m": 0.09,
+   "fund_flow": 0.02,
+   "premium_discount": 0.003,
+   "technical.signal.overall": 0.25
+  },
+  "518880": {
+   "technical": 0.25,
+   "momentum": 0.12,
+   "valuation": -0.2,
+   "sentiment": 0.05,
+   "price": 4.0,
+   "return_1m": 0.04,
+   "return_3m": 0.09,
+   "fund_flow": 0.02,
+   "premium_discount": 0.003,
+   "technical.signal.overall": 0.25
+  },
+  "511010": {
+   "technical": 0.3,
+   "momentum": 0.17,
+   "valuation": -0.15,
+   "sentiment": 0.05,
+   "price": 4.0,
+   "return_1m": 0.04,
+   "return_3m": 0.09,
+   "fund_flow": 0.02,
+   "premium_discount": 0.003,
+   "technical.signal.overall": 0.25
+  }
+ },
+ "candidates": [
+  {
+   "symbol": "510300",
+   "name": "沪深300ETF",
+   "layer": "core",
+   "industry": "宽基指数",
+   "tracked_index": "沪深300",
+   "segment": "hs300"
+  },
+  {
+   "symbol": "512890",
+   "name": "红利低波ETF",
+   "layer": "core",
+   "industry": "红利",
+   "tracked_index": "红利低波",
+   "segment": "dividend"
+  },
+  {
+   "symbol": "512480",
+   "name": "半导体ETF",
+   "layer": "satellite",
+   "industry": "半导体",
+   "tracked_index": "半导体",
+   "segment": "semi"
+  },
+  {
+   "symbol": "159915",
+   "name": "创业板ETF",
+   "layer": "satellite",
+   "industry": "成长",
+   "tracked_index": "创业板",
+   "segment": "cyb"
+  },
+  {
+   "symbol": "518880",
+   "name": "黄金ETF",
+   "layer": "defense",
+   "industry": "商品",
+   "tracked_index": "黄金",
+   "segment": "gold"
+  }
+ ],
+ "correlation_matrix": {
+  "510300|512480": 0.55
+ }
+}

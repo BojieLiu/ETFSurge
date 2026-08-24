@@ -67,12 +67,15 @@ LAYER_DEFAULTS = {
     # round36 (2026-08-23): ruff 软门禁——存量冻结后只观测新增速率（WARN 不阻断），
     # 硬化进 pre-commit 另行决策。--exit-zero 恒退出 0，分类见 _classify。
     "L4-ruff": {"timeout": 120, "backend_dependent": False},
+    # round35 §6-B4: 引擎黄金快照回放（可选段，仅 --golden 显式启用）——
+    # B5/B6/FM2 引擎深改的安全网：纯层管道输出与快照 diff，漂移即 FAIL。
+    "L-golden": {"timeout": 120, "backend_dependent": False},
     "L5-frontend": {"timeout": 600, "backend_dependent": False},
 }
 
 LAYER_ORDER = [
     "L1-unit", "L2-e2e", "L2-health", "L2-smoke", "L2-startup", "L3-perf",
-    "L4-routes", "L4-purity", "L4-async", "L4-ruff", "L5-frontend",
+    "L4-routes", "L4-purity", "L4-async", "L4-ruff", "L-golden", "L5-frontend",
 ]
 
 # --full 层集（§3: 不含 L2-smoke —— 后端在线时启动能力已被证明，且双实例
@@ -210,7 +213,8 @@ def select_e2e_modules(logic_files, explicit_modules=None):
     return sorted(modules)
 
 
-def plan_layers(mode, changed_files, explicit_layers=None, explicit_modules=None):
+def plan_layers(mode, changed_files, explicit_layers=None, explicit_modules=None,
+                include_golden=False):
     """根据模式 + 改动档位（+ 显式覆盖）计算要执行的层集与 e2e 参数。"""
     tiers = set()
     e2e_modules = None
@@ -258,6 +262,10 @@ def plan_layers(mode, changed_files, explicit_layers=None, explicit_modules=None
     # --module 显式覆盖映射（仅 L2-e2e 层生效）
     if explicit_modules:
         e2e_modules = list(explicit_modules)
+
+    # round35 §6-B4: --golden 追加引擎黄金快照层（可选段，不进 FULL_LAYERS 默认集）
+    if include_golden and "L-golden" not in layers:
+        layers.append("L-golden")
 
     return {
         "layers": layers,
@@ -460,6 +468,9 @@ def _build_command(name, plan, args):
         # round36 软门禁：--exit-zero 恒退出 0，WARN 语义由 _classify 判定
         return [sys.executable, "-m", "ruff", "check", "app",
                 "--statistics", "--exit-zero"], BACKEND_DIR, {}
+    if name == "L-golden":
+        # round35 §6-B4: 引擎黄金快照回放（可选段，--golden 启用）
+        return [sys.executable, "scripts/engine_golden_replay.py"], BACKEND_DIR, {}
 
     raise ValueError(f"no command builder for layer {name}")
 
@@ -644,6 +655,9 @@ def _parse_args(argv):
                         help="增量模式跳过 npm run build（只跑 npm test）")
     parser.add_argument("--start-backend", action="store_true",
                         help="后端不在线时尝试直接拉起 uvicorn")
+    # round35 §6-B4: 可选引擎黄金快照层（默认不跑；B5/B6/FM2 引擎深改批次显式启用）
+    parser.add_argument("--golden", action="store_true",
+                        help="追加 L-golden 引擎黄金快照回放段（engine 纯层安全网）")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="打印各层完整输出")
 
@@ -667,7 +681,8 @@ def run_patrol(args):
     start = time.monotonic()
 
     changed_files = get_changed_files() if args.mode == "diff" else []
-    plan = plan_layers(args.mode, changed_files, args.explicit_layers, args.explicit_modules)
+    plan = plan_layers(args.mode, changed_files, args.explicit_layers, args.explicit_modules,
+                       include_golden=args.golden)
 
     # 环境预检 → 退出码 3
     err = precheck(args, plan)
