@@ -8,10 +8,10 @@ from typing import AsyncGenerator
 
 from app.analysis.llm.cache import get_cached_report, put_cached_report
 from app.analysis.llm.gates import (
-    _circuit,
     _circuit_allow,
     _circuit_record_failure,
     _circuit_record_success,
+    _circuit_state,
     _clear_llm_error,
     _record_llm_error,
     llm_quota_gate,
@@ -60,6 +60,7 @@ async def llm_complete(
     _caller = sys._getframe(1).f_code.co_name
     providers = get_configured_providers()
     last_exc: Exception | None = None
+    _saw_empty = False
     _any_429 = False
     _last_429_headers = None
     _any_429 = False
@@ -69,7 +70,7 @@ async def llm_complete(
         _attempted_any = False
         for provider in providers:
             # F8: 熔断 OPEN 态直接跳过（零探测）
-            if not _circuit_allow(provider.id):
+            if not _circuit_allow(provider.id, provider.model):
                 continue
             _attempted_any = True
             body = {
@@ -105,9 +106,17 @@ async def llm_complete(
                     # F1-7: 推理模型可能把 system prompt 复述进 content/reasoning，
                     # 统一做泄漏过滤后再返回。
                     content = strip_internal_leak(content)
+                    if not (content or "").strip():
+                        # §19.9 约束#2: 200-空内容=假完成（reasoning 型烧尽 max_tokens 实测）
+                        # → 计失败触发按序重选，不得返回空串冒充成功。
+                        _saw_empty = True
+                        _circuit_record_failure(provider.id, False, model=provider.model)
+                        logger.warning("[LLM] %s 200-empty content -> next candidate", provider.model)
+                        last_exc = RuntimeError(f"{provider.model}: empty content")
+                        continue
 
                     # F8: 成功 → 熔断恢复
-                    _circuit_record_success(provider.id)
+                    _circuit_record_success(provider.id, provider.model)
 
                     usage = data.get("usage", {})
                     _duration = (time.monotonic() - _start) * 1000
@@ -136,7 +145,7 @@ async def llm_complete(
                     _any_429 = True
                     _last_429_headers = getattr(_resp, "headers", None)
                 # F8/F9: 429→立即 OPEN；其它异常→累计失败
-                _circuit_record_failure(provider.id, _is_429)
+                _circuit_record_failure(provider.id, _is_429, model=provider.model)
                 await token_store.record(UsageRecord(
                     function_name=_caller,
                     prompt_tokens=0,
@@ -160,7 +169,7 @@ async def llm_complete(
         if not _attempted_any:
             break
         # 所有 provider 均已 OPEN（熔断）→ 下一轮也全跳过，避免白等退避
-        if all(_circuit.get(p.id, {}).get("state") == "OPEN" for p in providers):
+        if all(_circuit_state(p.id, p.model) == "OPEN" for p in providers):
             break
         # All providers failed this attempt -> retry after a short delay
         if attempt < max_retries:
@@ -174,6 +183,11 @@ async def llm_complete(
     if _any_429:
         logger.warning("[LLM] LLM 限流，已降级（重试 %d 轮后仍 429）", max_retries)
         raise RuntimeError(f"LLM 限流，已降级：{last_exc}")
+    if _saw_empty and not _any_429:
+        # F5 契约保留（§19.9#2 折中）：按序重选已在链内完成，全链仅空内容时
+        # 诚实返回空串而非抛新异常类型——调用方既有 falsy 处理不受影响。
+        logger.warning("[LLM] all candidates returned empty content — returning empty (honest)")
+        return ""
     if last_exc is None:
         raise RuntimeError("No LLM providers available")
     raise last_exc
@@ -214,7 +228,7 @@ async def llm_complete_stream(
         _attempted_any = False
         for provider in providers:
             # F8: 熔断 OPEN 态直接跳过（零探测）
-            if not _circuit_allow(provider.id):
+            if not _circuit_allow(provider.id, provider.model):
                 continue
             _attempted_any = True
             body = {
@@ -295,7 +309,7 @@ async def llm_complete_stream(
                     _any_429 = True
                     _last_429_headers = getattr(_resp, "headers", None)
                 # F8/F9: 429→立即 OPEN；其它异常→累计失败
-                _circuit_record_failure(provider.id, _is_429)
+                _circuit_record_failure(provider.id, _is_429, model=provider.model)
                 await token_store.record(UsageRecord(
                     function_name=_caller,
                     prompt_tokens=0,
@@ -320,10 +334,16 @@ async def llm_complete_stream(
                 # Otherwise try next provider
                 continue
 
+            # §19.9 约束#2: 流式全空 = 假完成 → 计失败换下一候选（不 yield done）
+            if not (full_text or "").strip():
+                _circuit_record_failure(provider.id, False, model=provider.model)
+                logger.warning("[LLM] Stream %s 200-empty stream -> next candidate", provider.model)
+                last_exc = RuntimeError(f"{provider.model}: empty stream")
+                continue
             # Success: record and yield done
             _duration = (time.monotonic() - _start) * 1000
             # F8: 成功 → 熔断恢复
-            _circuit_record_success(provider.id)
+            _circuit_record_success(provider.id, provider.model)
             await token_store.record(UsageRecord(
                 function_name=_caller,
                 prompt_tokens=prompt_tokens,
@@ -383,7 +403,7 @@ async def llm_complete_stream(
         if not _attempted_any:
             break
         # 所有 provider 均已 OPEN（熔断）→ 下一轮也全跳过，避免白等退避
-        if all(_circuit.get(p.id, {}).get("state") == "OPEN" for p in providers):
+        if all(_circuit_state(p.id, p.model) == "OPEN" for p in providers):
             break
         # 本轮所有 provider 失败 → 退避后重试（F3-6）
         if attempt < max_retries:
@@ -433,7 +453,7 @@ async def llm_complete_with_system(
         _attempted_any = False
         for provider in providers:
             # F8: 模块级 TTL 熔断——OPEN 态直接跳过该 provider（零探测零过路费）。
-            if not _circuit_allow(provider.id):
+            if not _circuit_allow(provider.id, provider.model):
                 continue
             _attempted_any = True
             body = {
@@ -471,11 +491,17 @@ async def llm_complete_with_system(
                     # F1-7: 推理模型可能把 system prompt 复述进 content/reasoning，
                     # 统一做泄漏过滤后再返回。
                     content = strip_internal_leak(content)
+                    if not (content or "").strip():
+                        # §19.9 约束#2: 200-空内容=假完成 → 计失败换下一候选
+                        _circuit_record_failure(provider.id, False, model=provider.model)
+                        logger.warning("[LLM] %s 200-empty content -> next candidate", provider.model)
+                        last_exc = RuntimeError(f"{provider.model}: empty content")
+                        continue
 
                     # R5-1-6: 成功 → 清空错误诊断
                     _clear_llm_error()
                     # F8: 成功 → 熔断恢复（OPEN/HALF_OPEN → CLOSED）
-                    _circuit_record_success(provider.id)
+                    _circuit_record_success(provider.id, provider.model)
 
                     usage = data.get("usage", {})
                     _duration = (time.monotonic() - _start) * 1000
@@ -507,9 +533,9 @@ async def llm_complete_with_system(
                     and getattr(_resp, "status_code", None) == 429
                 )
                 if _is_429:
-                    _circuit_record_failure(provider.id, True)
+                    _circuit_record_failure(provider.id, True, model=provider.model)
                 else:
-                    _circuit_record_failure(provider.id, False)
+                    _circuit_record_failure(provider.id, False, model=provider.model)
                 await token_store.record(UsageRecord(
                     function_name=_caller,
                     prompt_tokens=0,
@@ -533,7 +559,7 @@ async def llm_complete_with_system(
         if not _attempted_any:
             break
         # 所有 provider 均已 OPEN（熔断）→ 下一轮也全跳过，避免白等退避
-        if all(_circuit.get(p.id, {}).get("state") == "OPEN" for p in providers):
+        if all(_circuit_state(p.id, p.model) == "OPEN" for p in providers):
             break
         # All providers failed this attempt -> retry after a short delay
         if attempt < max_retries:

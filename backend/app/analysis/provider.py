@@ -51,6 +51,40 @@ def _reasoning_effort_for_model(model: str) -> str | None:
     return None
 
 
+def _zen_candidates() -> list[ProviderConfig]:
+    """§19/§19.9: 目录池可用 → Zen 层随机尝试序列（护栏 1 无放回跳过被阻 /
+    护栏 4 allowed_subset 收缩随机域）；目录不可用（未刷新/空池）→ 现状静态
+    单候选，诚实降级到旧行为。"""
+    from .llm.gates import _circuit_allow
+    from .llm.model_catalog import model_catalog, zen_attempt_sequence
+
+    base_url = settings.opencode_zen_api_url or "https://opencode.ai/zen/v1/chat/completions"
+    pool = model_catalog.zen_pool()
+    if not pool:
+        m = settings.opencode_zen_model or "deepseek-v4-flash-free"
+        return [ProviderConfig(
+            id="opencode_zen", name="OpenCode Zen",
+            api_url=base_url, api_key=settings.opencode_zen_api_key,
+            model=m, timeout=settings.llm_primary_timeout,
+            reasoning_effort=_reasoning_effort_for_model(m),
+        )]
+    allowed = [s.strip() for s in (settings.llm_zen_allowed_models or "").split(",") if s.strip()]
+    seq = zen_attempt_sequence(
+        pool,
+        is_blocked=lambda m: not _circuit_allow("opencode_zen", m),
+        allowed_subset=allowed or None,
+    )
+    out: list[ProviderConfig] = []
+    for i, m in enumerate(seq, 1):
+        out.append(ProviderConfig(
+            id="opencode_zen", name=f"OpenCode Zen#{i}",
+            api_url=base_url, api_key=settings.opencode_zen_api_key,
+            model=m, timeout=settings.llm_primary_timeout,
+            reasoning_effort=_reasoning_effort_for_model(m),
+        ))
+    return out
+
+
 def get_configured_providers() -> list[ProviderConfig]:
     """Return providers in priority order (primary first, fallback last).
 
@@ -66,20 +100,29 @@ def get_configured_providers() -> list[ProviderConfig]:
     # ── Primary: OpenCode Zen ──────────────────────────────────
     if primary_id == "opencode_zen":
         if settings.opencode_zen_api_key:
-            providers.append(ProviderConfig(
-                id="opencode_zen",
-                name="OpenCode Zen",
-                api_url=settings.opencode_zen_api_url
-                           or "https://opencode.ai/zen/v1/chat/completions",
-                api_key=settings.opencode_zen_api_key,
-                model=settings.opencode_zen_model or "deepseek-v4-flash-free",
-                timeout=settings.llm_primary_timeout,
-                reasoning_effort=_reasoning_effort_for_model(
-                    (settings.opencode_zen_model or "deepseek-v4-flash-free")),
-            ))
+            # §19: 目录池可用 → 随机候选序列；空池回退静态单候选（_zen_candidates）
+            providers.extend(_zen_candidates())
         else:
             logger.info("[provider] Primary provider 'opencode_zen' skipped "
                         "(OPENCODE_ZEN_API_KEY not configured)")
+
+    # ── 中间层: OpenRouter 免费池（§19.9：Zen 整层耗尽后的溢出层，参数量降序）──
+    # 目录空（未刷新/无 key/全过滤）→ 本层不挂载，链路退回双层现状。
+    if primary_id == "opencode_zen" and settings.openrouter_api_key:
+        from .llm.model_catalog import model_catalog as _catalog
+
+        or_url = settings.openrouter_api_url or "https://openrouter.ai/api/v1/chat/completions"
+        for e in _catalog.openrouter_pool():
+            providers.append(ProviderConfig(
+                id="openrouter",
+                name="OpenRouter Free",
+                api_url=or_url,
+                api_key=settings.openrouter_api_key,
+                model=e.model,
+                timeout=settings.llm_primary_timeout,
+                # §19.1 探针实证：OR 标准 OpenAI 格式，无需 Zen 式 reasoning_effort 特判
+                reasoning_effort=None,
+            ))
 
     # ── Fallback: DeepSeek Official ────────────────────────────
     # F7b: LLM_FALLBACK_PROVIDER 必须真正生效（旧代码从不读取，属死配置）。

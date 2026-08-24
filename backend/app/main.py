@@ -717,6 +717,24 @@ async def lifespan(app: FastAPI):
     _spawn(_news_refresh_loop(), name="loop-news")
     logger.info("资讯缓存刷新循环已启动（120s）")
 
+    # round35 §19: 三层免费模型目录周期刷新（Zen+OpenRouter 池；LKG 兜底在模块内，
+    # 刷新失败保旧池并 WARN，不造假数据）。目录空时 provider 层自动回退静态单候选。
+    async def _model_catalog_refresh_loop():
+        from .analysis.llm.model_catalog import model_catalog
+        while True:
+            try:
+                await model_catalog.refresh(
+                    (settings.opencode_zen_api_url or "").replace("/chat/completions", ""),
+                    settings.opencode_zen_api_key,
+                    (settings.openrouter_api_url or "").replace("/chat/completions", ""),
+                    settings.openrouter_api_key,
+                )
+            except Exception:
+                logger.warning("[lifespan] model catalog refresh failed, keep last-known-good")
+            await asyncio.sleep(max(60, settings.llm_catalog_refresh_ttl))
+    _spawn(_model_catalog_refresh_loop(), name="loop-model-catalog")
+    logger.info("免费模型目录刷新循环已启动（%ds）", max(60, settings.llm_catalog_refresh_ttl))
+
     # 崩溃恢复：扫描 report_quality="pending" 且创建 >5min 的记录，标记为 fallback
     try:
         async def _recover_stale_designs():

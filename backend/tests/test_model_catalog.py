@@ -15,6 +15,7 @@ import random
 
 from app.analysis.llm import gates
 from app.analysis.llm.model_catalog import (
+    CatalogEntry,
     ModelCatalog,
     estimate_params_b,
     zen_attempt_sequence,
@@ -139,15 +140,23 @@ def setup_function() -> None:
 
 
 def test_model_level_key_isolated_from_provider_key():
-    """provider:model 熔断不影响同 provider 其它模型，也不影响裸 provider 键。"""
+    """provider:model 熔断不影响同 provider 其它模型的尝试路径。
+
+    注：裸键 ``_circuit_state(provider)`` 是聚合视图（任一分支 OPEN 即 OPEN，
+    行为锚语义）；隔离契约体现在 **allow 尝试路径**——死模型被拒、活模型放行。
+    """
     gates._circuit_record_failure("opencode_zen", False, model="dead-free")
     gates._circuit_record_failure("opencode_zen", False, model="dead-free")
     assert gates._circuit_state("opencode_zen", "dead-free") == "OPEN"
     assert gates._circuit_state("opencode_zen", "alive-free") == "CLOSED"
-    assert gates._circuit_state("opencode_zen") == "CLOSED"
-    # 裸 provider 键的旧用法不受复合键污染（行为锚兼容）
-    gates._circuit_record_failure("deepseek", True)
+    # 聚合视图：存在 OPEN 分支 → provider 级查询报 OPEN
+    assert gates._circuit_state("opencode_zen") == "OPEN"
+    # 隔离的关键在尝试路径：死分支拒绝、活分支与裸键旧用法不受牵连
+    assert gates._circuit_allow("opencode_zen", "dead-free") is False
+    assert gates._circuit_allow("opencode_zen", "alive-free") is True
+    gates._circuit_record_failure("deepseek", True)   # 裸键旧用法（行为锚形态）
     assert gates._circuit_state("deepseek") == "OPEN"
+    assert gates._circuit_allow("deepseek") is False
 
 
 def test_long_cooldown_blocks_but_not_via_fail_threshold():
@@ -165,3 +174,66 @@ def test_reset_clears_long_cooldown():
     gates.mark_long_cooldown("openrouter", "gated:free")
     gates.reset_circuit()
     assert gates.is_long_cooldown("openrouter", "gated:free") is False
+
+
+# ── §19 切片 2: get_configured_providers 目录扩展 ────────────────
+
+def _patch_settings(monkeypatch, **overrides):
+    from app.analysis import provider as prov
+    defaults = {
+        "llm_primary_provider": "opencode_zen",
+        "opencode_zen_api_key": "kz",
+        "opencode_zen_model": "deepseek-v4-flash-free",
+        "openrouter_api_key": "",
+        "deepseek_api_key": "",
+        "llm_zen_allowed_models": "",
+    }
+    defaults.update(overrides)
+    for k, v in defaults.items():
+        monkeypatch.setattr(prov.settings, k, v)
+    return prov
+
+
+def test_providers_expand_with_catalog(monkeypatch):
+    """目录池可用：Zen 随机序列在前、OpenRouter 中间层、DeepSeek 付费殿后。"""
+    from app.analysis import provider as prov
+    c = ModelCatalog(ttl_seconds=9999)
+    c._zen = ["b-free", "a-free"]
+    c._openrouter = [CatalogEntry(model="or/big:free", provider="openrouter",
+                                   param_estimate_b=550.0)]
+    monkeypatch.setattr("app.analysis.llm.model_catalog.model_catalog", c)
+    prov = _patch_settings(monkeypatch,
+                           openrouter_api_key="kor",
+                           deepseek_api_key="kd")
+    random.seed(1234)
+    ps = prov.get_configured_providers()
+    ids = [p.id for p in ps]
+    assert ids[0] == "opencode_zen" and ids[-1] == "deepseek"
+    assert ids.index("openrouter") < ids.index("deepseek"), "中间层在付费层之前"
+    zen_models = [p.model for p in ps if p.id == "opencode_zen"]
+    assert set(zen_models) == {"a-free", "b-free"}   # 池内无放回全试
+    assert len(zen_models) == len(set(zen_models))
+    or_p = next(p for p in ps if p.id == "openrouter")
+    assert or_p.model == "or/big:free" and or_p.reasoning_effort is None
+
+
+def test_providers_fallback_static_when_catalog_empty(monkeypatch):
+    """目录空（未刷新）→ 现状静态单候选，诚实降级到旧行为。"""
+    from app.analysis import provider as prov
+    monkeypatch.setattr("app.analysis.llm.model_catalog.model_catalog",
+                        ModelCatalog(ttl_seconds=9999))
+    prov = _patch_settings(monkeypatch)
+    ps = prov.get_configured_providers()
+    assert [p.id for p in ps] == ["opencode_zen"]
+    assert ps[0].model == prov.settings.opencode_zen_model
+
+
+def test_zen_allowed_subset_shrinks_candidates(monkeypatch):
+    """护栏 4：JSON 路径限定子集收缩随机域。"""
+    from app.analysis import provider as prov
+    c = ModelCatalog(ttl_seconds=9999)
+    c._zen = ["a-free", "b-free", "c-free"]
+    monkeypatch.setattr("app.analysis.llm.model_catalog.model_catalog", c)
+    prov = _patch_settings(monkeypatch, llm_zen_allowed_models="a-free")
+    ps = prov.get_configured_providers()
+    assert {p.model for p in ps} == {"a-free"}

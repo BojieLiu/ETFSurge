@@ -84,8 +84,26 @@ def is_long_cooldown(provider_id: str, model: str | None = None) -> bool:
 
 
 def _circuit_state(provider_id: str, model: str | None = None) -> str:
-    """返回 provider(或 provider:model) 当前熔断态（未登记即 CLOSED）。"""
-    return _circuit.get(_ckey(provider_id, model), {}).get("state", "CLOSED")
+    """熔断态查询。
+
+    - model 给定 → 精确复合键 ``provider:model`` 的状态；
+    - 缺省 → **聚合视图**：该 provider 名下（裸键 + 全部 model 分支）任一
+      OPEN 即 OPEN，其次 HALF_OPEN，否则 CLOSED。行为锚以裸键断言
+      provider 级语义，生产路径一律传 model 走精确粒度（Gap B 隔离）。
+    """
+    if model is not None:
+        return _circuit.get(_ckey(provider_id, model), {}).get("state", "CLOSED")
+    worst = "CLOSED"
+    prefix = f"{provider_id}:"
+    for key, entry in _circuit.items():
+        if key != provider_id and not key.startswith(prefix):
+            continue
+        st = entry.get("state", "CLOSED")
+        if st == "OPEN":
+            return "OPEN"
+        if st == "HALF_OPEN":
+            worst = "HALF_OPEN"
+    return worst
 
 
 def _circuit_allow(provider_id: str, model: str | None = None) -> bool:
