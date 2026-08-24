@@ -437,12 +437,9 @@ async def lifespan(app: FastAPI):
                 )
                 # round36 ASYNC240 修复：os.path 元数据探测移入 to_thread（事件循环不阻塞）
                 def _probe_ok_cache_mtime() -> float | None:
+                    # round35 RC-C6: 落点单点收敛至 settings.data_dir——删除 dirname×3
+                    # fallback（与 market_service.indices_cache 同源漂移，一并收口）。
                     _pp = os.path.join(str(getattr(_st, "data_dir", "")), "indices_cache.json")
-                    if not os.path.isfile(_pp):
-                        _pp = os.path.join(
-                            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-                            "data", "indices_cache.json",
-                        )
                     return os.path.getmtime(_pp) if os.path.isfile(_pp) else None
 
                 _mtime = await asyncio.to_thread(_probe_ok_cache_mtime)

@@ -186,10 +186,21 @@ _CACHE_DB_PATH: str | None = None
 
 
 def _get_cache_db_path() -> str:
+    """全局指数 OK 缓存落点。
+
+    round35 RC-C6 (docs/round35-architecture-review.md §18.4): 原 dirname×2 把
+    indices_cache.json 写进包内 backend/app/data——容器内落在镜像层（重建必丢+
+    镜像膨胀），宿主机错位持久，两环境皆错；收敛到 settings.data_dir（容器=
+    挂载卷 /app/data）。main.py 的 mtime 探测 fallback 与本函数同源漂移，
+    随本提交一并收口。
+    """
     global _CACHE_DB_PATH
     if _CACHE_DB_PATH is None:
         import os
-        data_dir = os.path.join(os.path.dirname(__file__), "..", "..", "data")
+
+        from ..config import settings, _DATA_DIR
+
+        data_dir = str(getattr(settings, "data_dir", "") or _DATA_DIR)
         os.makedirs(data_dir, exist_ok=True)
         _CACHE_DB_PATH = os.path.join(data_dir, "indices_cache.json")
     return _CACHE_DB_PATH

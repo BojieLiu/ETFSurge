@@ -129,20 +129,21 @@ def _inject_static_wide_basis(
 def _etf_cache_file() -> str:
     """ETF 列表文件缓存路径（R6-F7, round6 §十 R6-08）。
 
-    优先级：①DATA_DIR 环境变量显式指定；②容器内 /app/data 挂载卷（与
-    portfolio.db 同卷，容器重建不丢——旧实现在镜像层 /app/app/data 必丢）；
-    ③宿主机开发回落 backend/data（现状路径）。
+    round35 RC-C4 (docs/round35-architecture-review.md §18.4 方案A): 删除手拼
+    相对路径分支——P1-11 的 `../../data` 实际解析到 backend/data（少一级 ../，
+    与其注释声称的「项目根 data/」相反，docstring 自相矛盾实证见 §18.4）。
+    统一：DATA_DIR env 显式指定优先；否则 settings.data_dir（R93 保证非空绝对，
+    容器内解析为挂载卷 /app/data，原 exists 探测属冗余防御一并删除）
+    → 回退 config._DATA_DIR 双保险。
     """
     import os
+
     data_dir = os.environ.get("DATA_DIR")
     if data_dir:
         return os.path.join(data_dir, "etf_list_cache.json")
-    if os.path.exists("/app/data"):
-        return os.path.join("/app/data", "etf_list_cache.json")
-    # P1-11 (round9 §4.3-B 附带①): 宿主分支路径修正 `../../data`——旧实现
-    # `os.path.dirname(__file__)/../data` 解析到 backend/app/data/（多带一层 app/，
-    # 文件不存在）→ 宿主环境 _snapshot_change_pct 永远 None；正确为项目根 data/。
-    return os.path.join(os.path.dirname(__file__), "..", "..", "data", "etf_list_cache.json")
+    from ..config import settings, _DATA_DIR
+
+    return os.path.join(str(getattr(settings, "data_dir", "") or _DATA_DIR), "etf_list_cache.json")
 
 
 def _log_missing_required(layer: str, required: list[str], pool_items: list[dict[str, Any]]) -> None:
@@ -824,15 +825,24 @@ import re as _re
 
 import requests as _requests
 
-_TRACKED_INDEX_CACHE = _os.path.join(
-    _os.path.dirname(_os.path.dirname(_os.path.dirname(__file__))),
-    "data", "etf_index_mapping.json"
-)
+def _tracked_index_cache_path() -> str:
+    """F10 tracked_index 映射缓存路径。
+
+    round35 RC-C4-R3 扩容（docs/round35-architecture-review.md §18.4）：原
+    dirname×3 解析到 backend/data（第三家写入方；round34 曾因该文件脏值出
+    「518880 → 黄金9999」映射 bug），与 _etf_cache_file 同批收口至
+    settings.data_dir；惰性求值供测试跟随。
+    """
+    from ..config import settings, _DATA_DIR
+
+    data_dir = str(getattr(settings, "data_dir", "") or _DATA_DIR)
+    return _os.path.join(data_dir, "etf_index_mapping.json")
 
 def _load_tracked_index_cache() -> dict[str, str]:
     try:
-        if _os.path.exists(_TRACKED_INDEX_CACHE):
-            with open(_TRACKED_INDEX_CACHE, "r", encoding="utf-8") as f:
+        _path = _tracked_index_cache_path()
+        if _os.path.exists(_path):
+            with open(_path, "r", encoding="utf-8") as f:
                 return _json.load(f)
     except Exception:
         return {}
@@ -840,10 +850,11 @@ def _load_tracked_index_cache() -> dict[str, str]:
 
 def _save_tracked_index_cache(mapping: dict[str, str]) -> None:
     try:
-        _dir = _os.path.dirname(_TRACKED_INDEX_CACHE)
+        _path = _tracked_index_cache_path()
+        _dir = _os.path.dirname(_path)
         if not _os.path.exists(_dir):
             _os.makedirs(_dir, exist_ok=True)
-        with open(_TRACKED_INDEX_CACHE, "w", encoding="utf-8") as f:
+        with open(_path, "w", encoding="utf-8") as f:
             _json.dump(mapping, f, ensure_ascii=False, indent=2)
     except Exception:
         pass

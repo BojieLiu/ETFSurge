@@ -8,6 +8,21 @@ import time
 
 logger = logging.getLogger(__name__)
 
+
+def _sentiment_cache_file() -> str:
+    """A02 crash-recovery 情绪缓存落点单点。
+
+    round35 RC-C5 (docs/round35-architecture-review.md §18.4): 原 dirname×3 把
+    sentiment_cache.json 写到 backend/data（容器内碰巧正确、宿主机错位），收敛到
+    settings.data_dir（正牌挂载卷）；写（刷新成功持久化）与读（失败回读恢复）
+    两处共用本函数，杜绝双拷贝漂移。
+    """
+    from ...config import settings, _DATA_DIR
+
+    data_dir = str(getattr(settings, "data_dir", "") or _DATA_DIR)
+    return os.path.join(data_dir, "sentiment_cache.json")
+
+
 class RegimeSentimentMixin:
     _regime_cache: dict[str, str] = {}
 
@@ -103,12 +118,12 @@ class RegimeSentimentMixin:
                 self._sentiment_cache = sentiment
                 self._sentiment_cache_ts = time.time()
                 # A02: Persist sentiment cache to file for crash recovery
-                # round36 ASYNC230/240 修复：文件 IO 移入 to_thread（事件循环不阻塞）
-                _cache_dir = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data")
-                _cache_file = os.path.join(_cache_dir, "sentiment_cache.json")
+                # round36 ASYNC230/240 修复：文件 IO 移入 to_thread（事件循环不阻塞）；
+                # round35 RC-C5: 落点随 settings.data_dir 收敛（原 dirname×3 → backend/data）
+                _cache_file = _sentiment_cache_file()
 
                 def _persist() -> None:
-                    os.makedirs(_cache_dir, exist_ok=True)
+                    os.makedirs(os.path.dirname(_cache_file), exist_ok=True)
                     with open(_cache_file, "w", encoding="utf-8") as f:
                         json.dump({"sentiment": sentiment, "ts": time.time()}, f, ensure_ascii=False)
 
@@ -118,8 +133,8 @@ class RegimeSentimentMixin:
             logger.warning("[pool] refresh_sentiment_cache failed: %s", e)
             # A02: On failure, try to restore from persisted file
             try:
-                _cache_dir = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data")
-                _cache_file = os.path.join(_cache_dir, "sentiment_cache.json")
+                # round35 RC-C5: 读路径同款收敛（与写共用 _sentiment_cache_file 单点）
+                _cache_file = _sentiment_cache_file()
 
                 def _read_persisted():
                     if not os.path.exists(_cache_file):

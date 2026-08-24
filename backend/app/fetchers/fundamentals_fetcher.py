@@ -778,9 +778,18 @@ _sentiment_history: list[tuple[float, float]] = []
 # 该因子要求 sentiment_history 且 len >= 5，旧实现从不生成该字段 → 永远 no_data）
 _sentiment_rolling: list[float] = []
 
-_SENTIMENT_HISTORY_FILE = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "sentiment_history.json"
-)
+def _sentiment_history_path() -> str:
+    """F19 R68 sentiment_index 滚动数组落盘路径。
+
+    round35 RC-C1 (docs/round35-architecture-review.md §18.4): 从包内
+    backend/app/data 收敛到 settings.data_dir（正牌挂载卷；包内/镜像层落点
+    容器重启即丢，R86 同族教训）。惰性求值使测试可 monkeypatch；
+    `or _DATA_DIR` 双保险（R93 validator 保证 data_dir 非空绝对）。
+    """
+    from ..config import settings, _DATA_DIR
+
+    data_dir = str(getattr(settings, "data_dir", "") or _DATA_DIR)
+    return os.path.join(data_dir, "sentiment_history.json")
 
 
 def _persist_sentiment_history(file_path: str, sentiment: dict) -> None:
@@ -1089,7 +1098,7 @@ async def fetch_market_sentiment() -> dict[str, Any]:
     global _sentiment_rolling
     if not _sentiment_rolling:
         # 冷启动：从持久化文件恢复历史（跨进程保留，避免重启后需 20 日才累积样本）
-        _sentiment_rolling = _load_sentiment_history(_SENTIMENT_HISTORY_FILE)
+        _sentiment_rolling = _load_sentiment_history(_sentiment_history_path())
     _sentiment_rolling.append(float(index))
     if len(_sentiment_rolling) > 20:
         _sentiment_rolling = _sentiment_rolling[-20:]
@@ -1107,5 +1116,5 @@ async def fetch_market_sentiment() -> dict[str, Any]:
     if not (advance_ok and vr_ok and margin_ok):
         result["_degraded"] = True
     # F19 R68: 落盘（进程重启后仍保留历史）
-    _persist_sentiment_history(_SENTIMENT_HISTORY_FILE, result)
+    _persist_sentiment_history(_sentiment_history_path(), result)
     return result
