@@ -43,7 +43,7 @@
     "tracked_index": "",
     "industry": "国债",
     "weight": 0.3,
-    "factor_score": 0.544,
+    "factor_score": 0.529,
     "factor_breakdown": {
      "etf.return_1m": -0.4,
      "etf.return_3m": -0.2,
@@ -66,8 +66,8 @@
     "layer": "satellite",
     "tracked_index": "",
     "industry": "医药",
-    "weight": 0.0506,
-    "factor_score": -0.179,
+    "weight": 0.0507,
+    "factor_score": -0.172,
     "factor_breakdown": {
      "etf.return_1m": 1.8,
      "etf.return_3m": 0.9,
@@ -91,7 +91,7 @@
     "tracked_index": "",
     "industry": "半导体",
     "weight": 0.0497,
-    "factor_score": -0.621,
+    "factor_score": -0.613,
     "factor_breakdown": {
      "etf.return_1m": 0.8,
      "etf.return_3m": 0.4,
@@ -115,7 +115,7 @@
     "tracked_index": "",
     "industry": "券商",
     "weight": 0.0502,
-    "factor_score": -0.358,
+    "factor_score": -0.373,
     "factor_breakdown": {
      "etf.return_1m": 1.4,
      "etf.return_3m": 0.7,
@@ -138,8 +138,8 @@
     "layer": "satellite",
     "tracked_index": "",
     "industry": "新能源",
-    "weight": 0.0495,
-    "factor_score": -0.702,
+    "weight": 0.0494,
+    "factor_score": -0.717,
     "factor_breakdown": {
      "etf.return_1m": 1.2,
      "etf.return_3m": 0.6,
@@ -162,10 +162,10 @@
    "sector_breakdown": {
     "core": 0.2,
     "国债": 0.3,
-    "医药": 0.0506,
+    "医药": 0.0507,
     "券商": 0.0502,
     "半导体": 0.0497,
-    "新能源": 0.0495
+    "新能源": 0.0494
    },
    "correlation_warnings": [
     {
@@ -230,8 +230,8 @@
     "layer": "core",
     "tracked_index": "",
     "industry": "国债",
-    "weight": 0.2031,
-    "factor_score": -1.747,
+    "weight": 0.2029,
+    "factor_score": -1.762,
     "factor_breakdown": {
      "etf.return_1m": -0.4,
      "etf.return_3m": -0.2,
@@ -255,7 +255,7 @@
     "tracked_index": "",
     "industry": "医药",
     "weight": 0.0443,
-    "factor_score": -1.364,
+    "factor_score": -1.356,
     "factor_breakdown": {
      "etf.return_1m": 1.8,
      "etf.return_3m": 0.9,
@@ -279,7 +279,7 @@
     "tracked_index": "",
     "industry": "半导体",
     "weight": 0.0433,
-    "factor_score": -1.846,
+    "factor_score": -1.839,
     "factor_breakdown": {
      "etf.return_1m": 0.8,
      "etf.return_3m": 0.4,
@@ -292,7 +292,7 @@
     },
     "_rank_info": {
      "dominant_factor": "技术面",
-     "rank": 6,
+     "rank": 5,
      "total_candidates": 6
     }
    },
@@ -303,7 +303,7 @@
     "tracked_index": "",
     "industry": "军工",
     "weight": 0.0455,
-    "factor_score": -0.822,
+    "factor_score": -0.837,
     "factor_breakdown": {
      "etf.return_1m": 0.2,
      "etf.return_3m": 0.1,
@@ -327,7 +327,7 @@
     "tracked_index": "",
     "industry": "券商",
     "weight": 0.0438,
-    "factor_score": -1.551,
+    "factor_score": -1.566,
     "factor_breakdown": {
      "etf.return_1m": 1.4,
      "etf.return_3m": 0.7,
@@ -350,8 +350,8 @@
     "layer": "core",
     "tracked_index": "",
     "industry": "红利",
-    "weight": 0.1219,
-    "factor_score": 0.182,
+    "weight": 0.122,
+    "factor_score": 0.19,
     "factor_breakdown": {
      "etf.return_1m": 1.0,
      "etf.return_3m": 0.5,
@@ -375,7 +375,7 @@
     "tracked_index": "",
     "industry": "新能源",
     "weight": 0.0433,
-    "factor_score": -1.839,
+    "factor_score": -1.854,
     "factor_breakdown": {
      "etf.return_1m": 1.2,
      "etf.return_3m": 0.6,
@@ -388,7 +388,7 @@
     },
     "_rank_info": {
      "dominant_factor": "技术面",
-     "rank": 5,
+     "rank": 6,
      "total_candidates": 6
     }
    }
@@ -397,13 +397,13 @@
    "sector_concentration": 0.0758,
    "sector_breakdown": {
     "core": 0.1,
-    "红利": 0.1219,
-    "国债": 0.2031,
+    "红利": 0.122,
+    "国债": 0.2029,
     "军工": 0.0455,
     "医药": 0.0443,
     "券商": 0.0438,
-    "新能源": 0.0433,
-    "半导体": 0.0433
+    "半导体": 0.0433,
+    "新能源": 0.0433
    },
    "correlation_warnings": [
     {
@@ -468,8 +468,8 @@
     "layer": "core",
     "tracked_index": "",
     "industry": "国债",
-    "weight": 0.2607,
-    "factor_score": -2.038,
+    "weight": 0.2605,
+    "factor_score": -2.053,
     "factor_breakdown": {
      "etf.return_1m": -0.4,
      "etf.return_3m": -0.2,
@@ -492,8 +492,8 @@
     "layer": "satellite",
     "tracked_index": "",
     "industry": "医药",
-    "weight": 0.0554,
-    "factor_score": -1.048,
+    "weight": 0.066,
+    "factor_score": -1.041,
     "factor_breakdown": {
      "etf.return_1m": 1.8,
      "etf.return_3m": 0.9,
@@ -507,7 +507,7 @@
     "_rank_info": {
      "dominant_factor": "动量",
      "rank": 1,
-     "total_candidates": 6
+     "total_candidates": 5
     }
    },
    {
@@ -516,8 +516,8 @@
     "layer": "satellite",
     "tracked_index": "",
     "industry": "半导体",
-    "weight": 0.0535,
-    "factor_score": -1.572,
+    "weight": 0.0636,
+    "factor_score": -1.564,
     "factor_breakdown": {
      "etf.return_1m": 0.8,
      "etf.return_3m": 0.4,
@@ -531,31 +531,7 @@
     "_rank_info": {
      "dominant_factor": "技术面",
      "rank": 4,
-     "total_candidates": 6
-    }
-   },
-   {
-    "symbol": "512660",
-    "name": "军工ETF",
-    "layer": "satellite",
-    "tracked_index": "",
-    "industry": "军工",
-    "weight": 0.0518,
-    "factor_score": -2.0,
-    "factor_breakdown": {
-     "etf.return_1m": 0.2,
-     "etf.return_3m": 0.1,
-     "momentum": 0.162,
-     "price": 1.0,
-     "sentiment": 0.05,
-     "technical": -3.0,
-     "technical.macd.macd": 3.0,
-     "valuation": 0.1
-    },
-    "_rank_info": {
-     "dominant_factor": "技术面",
-     "rank": 6,
-     "total_candidates": 6
+     "total_candidates": 5
     }
    },
    {
@@ -564,8 +540,8 @@
     "layer": "satellite",
     "tracked_index": "",
     "industry": "券商",
-    "weight": 0.0546,
-    "factor_score": -1.244,
+    "weight": 0.0649,
+    "factor_score": -1.259,
     "factor_breakdown": {
      "etf.return_1m": 1.4,
      "etf.return_3m": 0.7,
@@ -579,7 +555,7 @@
     "_rank_info": {
      "dominant_factor": "动量",
      "rank": 2,
-     "total_candidates": 6
+     "total_candidates": 5
     }
    },
    {
@@ -588,8 +564,8 @@
     "layer": "core",
     "tracked_index": "",
     "industry": "红利",
-    "weight": 0.1253,
-    "factor_score": -1.179,
+    "weight": 0.1216,
+    "factor_score": -1.172,
     "factor_breakdown": {
      "etf.return_1m": 1.0,
      "etf.return_3m": 0.5,
@@ -612,8 +588,8 @@
     "layer": "satellite",
     "tracked_index": "",
     "industry": "新能源",
-    "weight": 0.0539,
-    "factor_score": -1.476,
+    "weight": 0.0638,
+    "factor_score": -1.491,
     "factor_breakdown": {
      "etf.return_1m": 1.2,
      "etf.return_3m": 0.6,
@@ -627,21 +603,20 @@
     "_rank_info": {
      "dominant_factor": "技术面",
      "rank": 3,
-     "total_candidates": 6
+     "total_candidates": 5
     }
    }
   ],
   "risk_metrics": {
-   "sector_concentration": 0.1082,
+   "sector_concentration": 0.1093,
    "sector_breakdown": {
     "core": 0.1,
-    "红利": 0.1253,
-    "国债": 0.2607,
-    "医药": 0.0554,
-    "券商": 0.0546,
-    "新能源": 0.0539,
-    "半导体": 0.0535,
-    "军工": 0.0518
+    "红利": 0.1216,
+    "国债": 0.2605,
+    "医药": 0.066,
+    "券商": 0.0649,
+    "新能源": 0.0638,
+    "半导体": 0.0636
    },
    "correlation_warnings": [
     {
@@ -659,14 +634,14 @@
    "structure_warnings": [
     {
      "type": "aggressive_cash_over_20pct",
-     "cash": 0.2448
+     "cash": 0.2596
     },
     {
      "type": "inv3_satellite_not_monotonic",
      "satellite_counts": {
       "defensive": 4,
       "balanced": 5,
-      "aggressive": 5
+      "aggressive": 4
      }
     },
     {
@@ -674,12 +649,12 @@
      "total_counts": {
       "defensive": 7,
       "balanced": 9,
-      "aggressive": 9
+      "aggressive": 8
      }
     },
     {
      "type": "inv6_aggressive_cash_over",
-     "cash": 0.2448,
+     "cash": 0.2596,
      "clamp": 0.1
     }
    ]

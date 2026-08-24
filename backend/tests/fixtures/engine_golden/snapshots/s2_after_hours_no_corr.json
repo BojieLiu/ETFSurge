@@ -47,7 +47,7 @@
     "tracked_index": "中证500",
     "industry": "宽基指数",
     "weight": 0.2036,
-    "factor_score": 0.18,
+    "factor_score": 0.193,
     "factor_breakdown": {
      "fund_flow": 0.02,
      "momentum": 0.24,
@@ -72,8 +72,8 @@
     "layer": "satellite",
     "tracked_index": "半导体",
     "industry": "半导体",
-    "weight": 0.0495,
-    "factor_score": 0.196,
+    "weight": 0.0494,
+    "factor_score": 0.205,
     "factor_breakdown": {
      "fund_flow": 0.02,
      "momentum": 0.26,
@@ -98,8 +98,8 @@
     "layer": "satellite",
     "tracked_index": "纳指",
     "industry": "跨境",
-    "weight": 0.0516,
-    "factor_score": 0.951,
+    "weight": 0.0517,
+    "factor_score": 0.969,
     "factor_breakdown": {
      "fund_flow": 0.02,
      "momentum": 0.2,
@@ -124,8 +124,8 @@
     "layer": "satellite",
     "tracked_index": "新能源车",
     "industry": "新能源",
-    "weight": 0.0495,
-    "factor_score": 0.196,
+    "weight": 0.0494,
+    "factor_score": 0.205,
     "factor_breakdown": {
      "fund_flow": 0.02,
      "momentum": 0.26,
@@ -170,7 +170,7 @@
     "tracked_index": "碳中和",
     "industry": "环保",
     "weight": 0.0494,
-    "factor_score": 0.165,
+    "factor_score": 0.18,
     "factor_breakdown": {
      "fund_flow": 0.02,
      "momentum": 0.22,
@@ -196,7 +196,7 @@
     "tracked_index": "科创50",
     "industry": "科创",
     "weight": 0.2036,
-    "factor_score": 0.18,
+    "factor_score": 0.193,
     "factor_breakdown": {
      "fund_flow": 0.02,
      "momentum": 0.24,
@@ -222,9 +222,9 @@
     "core": 0.0928,
     "宽基指数": 0.2036,
     "科创": 0.2036,
-    "跨境": 0.0516,
-    "半导体": 0.0495,
-    "新能源": 0.0495,
+    "跨境": 0.0517,
+    "半导体": 0.0494,
+    "新能源": 0.0494,
     "环保": 0.0494,
     "defense": 0.05
    },
@@ -295,8 +295,8 @@
     "layer": "core",
     "tracked_index": "中证500",
     "industry": "宽基指数",
-    "weight": 0.2049,
-    "factor_score": -1.323,
+    "weight": 0.2047,
+    "factor_score": -1.311,
     "factor_breakdown": {
      "fund_flow": 0.02,
      "momentum": 0.24,
@@ -322,7 +322,7 @@
     "tracked_index": "半导体",
     "industry": "半导体",
     "weight": 0.0551,
-    "factor_score": -1.307,
+    "factor_score": -1.298,
     "factor_breakdown": {
      "fund_flow": 0.02,
      "momentum": 0.26,
@@ -348,7 +348,7 @@
     "tracked_index": "红利低波",
     "industry": "红利",
     "weight": 0.15,
-    "factor_score": 0.161,
+    "factor_score": 0.176,
     "factor_breakdown": {
      "fund_flow": 0.02,
      "momentum": 0.22,
@@ -374,7 +374,7 @@
     "tracked_index": "纳指",
     "industry": "跨境",
     "weight": 0.0549,
-    "factor_score": -1.355,
+    "factor_score": -1.337,
     "factor_breakdown": {
      "fund_flow": 0.02,
      "momentum": 0.2,
@@ -400,7 +400,7 @@
     "tracked_index": "新能源车",
     "industry": "新能源",
     "weight": 0.0551,
-    "factor_score": -1.307,
+    "factor_score": -1.298,
     "factor_breakdown": {
      "fund_flow": 0.02,
      "momentum": 0.26,
@@ -444,8 +444,8 @@
     "layer": "satellite",
     "tracked_index": "碳中和",
     "industry": "环保",
-    "weight": 0.0549,
-    "factor_score": -1.339,
+    "weight": 0.055,
+    "factor_score": -1.324,
     "factor_breakdown": {
      "fund_flow": 0.02,
      "momentum": 0.22,
@@ -466,14 +466,14 @@
    }
   ],
   "risk_metrics": {
-   "sector_concentration": 0.0891,
+   "sector_concentration": 0.089,
    "sector_breakdown": {
     "core": 0.1,
     "红利": 0.15,
-    "宽基指数": 0.2049,
+    "宽基指数": 0.2047,
     "半导体": 0.0551,
     "新能源": 0.0551,
-    "环保": 0.0549,
+    "环保": 0.055,
     "跨境": 0.0549,
     "defense": 0.05
    },
@@ -545,7 +545,7 @@
     "tracked_index": "中证500",
     "industry": "宽基指数",
     "weight": 0.294,
-    "factor_score": -1.327,
+    "factor_score": -1.315,
     "factor_breakdown": {
      "fund_flow": 0.02,
      "momentum": 0.24,
@@ -571,7 +571,7 @@
     "tracked_index": "半导体",
     "industry": "半导体",
     "weight": 0.0755,
-    "factor_score": -1.309,
+    "factor_score": -1.3,
     "factor_breakdown": {
      "fund_flow": 0.02,
      "momentum": 0.26,
@@ -597,7 +597,7 @@
     "tracked_index": "纳指",
     "industry": "跨境",
     "weight": 0.0736,
-    "factor_score": -1.661,
+    "factor_score": -1.643,
     "factor_breakdown": {
      "fund_flow": 0.02,
      "momentum": 0.2,
@@ -623,7 +623,7 @@
     "tracked_index": "新能源车",
     "industry": "新能源",
     "weight": 0.0755,
-    "factor_score": -1.309,
+    "factor_score": -1.3,
     "factor_breakdown": {
      "fund_flow": 0.02,
      "momentum": 0.26,
@@ -668,7 +668,7 @@
     "tracked_index": "碳中和",
     "industry": "环保",
     "weight": 0.0753,
-    "factor_score": -1.344,
+    "factor_score": -1.329,
     "factor_breakdown": {
      "fund_flow": 0.02,
      "momentum": 0.22,

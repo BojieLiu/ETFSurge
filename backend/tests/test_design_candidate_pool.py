@@ -192,10 +192,13 @@ def test_c2_penalty_defensive_kcb():
     """防御型 + 估值错位值（黄金 +3.9 类假信号）→ 视为缺失 → 科创候选 c2_bonus=-1.5 生效。"""
     from app.engine import allocation_engine as ae
 
-    # 黄金 ETF 估值错位 +3.9（假信号），科创候选估值也为错位高值
+    # 黄金 ETF 估值错位 +3.9（假信号）；科创候选**无估值键**——生产现实
+    # （F0-5：科创系通常无 style.* 估值数据），且这是 c2 防御惩罚分支的前提
+    # （valuation_missing=True 才触发）。旧版给科创造了合成估值键导致惩罚
+    # 永不触发、断言靠舍入巧合假绿（FM3 再平衡时曝光，已修）。
     factor_matrix = {
         "518880": {"technical": 2.833, "valuation": 3.926, "momentum": -0.5, "sentiment": 0.0},
-        "589720": {"technical": -0.408, "valuation": -0.462, "momentum": 1.047, "sentiment": 0.0},
+        "589720": {"technical": -0.408, "momentum": 1.047, "sentiment": 0.0},
         "510300": {"technical": 0.5, "valuation": 0.2, "momentum": 0.3, "sentiment": 0.1},
     }
     candidates = [
@@ -211,10 +214,19 @@ def test_c2_penalty_defensive_kcb():
         if s["id"] == "defensive":
             kcb = [a for a in s["allocations"] if a.get("symbol") == "589720"]
             if kcb:
-                # 惩罚生效的验证：589720 的 factor_score（含 -1.5）应低于其原始 composite
+                # 惩罚生效的验证（强断言，能抓假）：fs 必须含 -1.5 惩罚项——
+                # 即 fs ≈ raw_composite + c2_defensive_risky_penalty（容差覆盖
+                # factor_score 的 3 位小数舍入）。旧版 `fs <= raw` 在惩罚未触发、
+                # 舍入巧合时也恒绿，抓不住假。
                 fs = kcb[0].get("factor_score", 0)
-                raw_composite = (-0.408 * 0.4 + 1.047 * 0.15 + (-0.462) * 0.2 + 0.0 * 0.25)
-                assert fs <= raw_composite, f"c2_bonus 未生效: fs={fs} raw={raw_composite}"
+                # FM3 后权重表引用模块级 _PROFILE_WEIGHTS（不再硬编码，防再平衡漂移）
+                w = ae._PROFILE_WEIGHTS["defensive"]
+                raw_composite = (-0.408 * w["technical"] + 1.047 * w["momentum"]
+                                 + 0.0 * w["sentiment"])
+                expected = raw_composite + ae.ENGINE_CONFIG.c2_defensive_risky_penalty
+                assert abs(fs - expected) < 5e-3, (
+                    f"c2 惩罚未按预期生效: fs={fs} expected≈{expected}"
+                )
 
 
 # ── 集成：设计方案 core 含主流宽基 ─────────────────────────────

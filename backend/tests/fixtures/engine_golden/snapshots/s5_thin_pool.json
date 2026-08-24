@@ -54,7 +54,7 @@
     "tracked_index": "红利低波",
     "industry": "红利",
     "weight": 0.15,
-    "factor_score": 0.165,
+    "factor_score": 0.18,
     "factor_breakdown": {
      "fund_flow": 0.02,
      "momentum": 0.22,
@@ -163,7 +163,7 @@
     "tracked_index": "红利低波",
     "industry": "红利",
     "weight": 0.15,
-    "factor_score": -1.339,
+    "factor_score": -1.324,
     "factor_breakdown": {
      "fund_flow": 0.02,
      "momentum": 0.22,
@@ -272,7 +272,7 @@
     "tracked_index": "红利低波",
     "industry": "红利",
     "weight": 0.15,
-    "factor_score": -1.344,
+    "factor_score": -1.329,
     "factor_breakdown": {
      "fund_flow": 0.02,
      "momentum": 0.22,

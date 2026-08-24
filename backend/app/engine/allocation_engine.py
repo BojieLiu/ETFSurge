@@ -42,6 +42,18 @@ MAX_WEIGHT = 0.30
 
 
 
+# FM3 (round35 §15.5): 风偏差异化因子权重表（原为打分函数内局部变量，提升模块级
+# 供单测断言）。etf_quality 第五顶层键接入：权重全部从**结构性恒零的 valuation 槽**
+# 划出（FM4 实证：38 因子集下 valuation 顶层键永不产出，0.2 名义槽位空转）——
+# technical/sentiment/momentum 三键逐字不动，保证存量 composite 行为不变
+# （黄金 s1-s5 可回归）。
+_PROFILE_WEIGHTS = {
+    "defensive": {"technical": 0.40, "sentiment": 0.25, "momentum": 0.15, "valuation": 0.05, "etf_quality": 0.15},
+    "balanced":  {"technical": 0.30, "sentiment": 0.20, "momentum": 0.30, "valuation": 0.05, "etf_quality": 0.15},
+    "aggressive":{"technical": 0.20, "sentiment": 0.15, "momentum": 0.45, "valuation": 0.05, "etf_quality": 0.15},
+}
+
+
 def _is_tech_theme(name: str) -> bool:
     """F0-5 步骤 C: 科创系主题判定（关键词表单点 taxonomy.TECH_THEMES）。"""
     return classify_etf({"name": name}).tech_theme
@@ -321,18 +333,15 @@ def _select_and_weight(
                 definitions=factor_definitions,
                 ic_series=ic_series,
             )
-        # B: 风偏差异化因子权重 — 按策略调整
-        _PROFILE_WEIGHTS = {
-            "defensive": {"technical": 0.4, "sentiment": 0.25, "momentum": 0.15, "valuation": 0.2},
-            "balanced":  {"technical": 0.3, "sentiment": 0.2,  "momentum": 0.3,  "valuation": 0.2},
-            "aggressive":{"technical": 0.2, "sentiment": 0.15, "momentum": 0.45, "valuation": 0.2},
-        }
+        # B: 风偏差异化因子权重 — 按策略调整（表已提升模块级 _PROFILE_WEIGHTS，
+        # FM3 etf_quality 接入说明见该处注释）
         pw = _PROFILE_WEIGHTS.get(strategy, _PROFILE_WEIGHTS["balanced"])
         composite = (
             factor_scores.get("technical", 0.0) * pw["technical"]
             + factor_scores.get("momentum", 0.0) * pw["momentum"]
             + factor_scores.get("valuation", 0.0) * pw["valuation"]
             + factor_scores.get("sentiment", 0.0) * pw["sentiment"]
+            + factor_scores.get("etf_quality", 0.0) * pw["etf_quality"]
         )
         # C2: 风偏差异化修正 — 当 valuation/sentiment 缺乏有效区分度时，
         # 根据 ETF 名称关键字对 composite 做 +/- 调整，使防御/进攻方案真正差异化。

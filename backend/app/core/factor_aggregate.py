@@ -87,6 +87,12 @@ def aggregate_factor_scores(
         "momentum": ["etf.return_", "etf.change_pct", "technical.signal."],
         "valuation": ["style.", "etf.price."],
         "sentiment": ["sentiment."],
+        # FM3 (round35 §15.5): etf_quality 第五顶层键——ETF 特有质量因子接入
+        # composite（探针 GO：premium_discount 区分度 pstdev 2.14%、tracking_error
+        # 依赖的 benchmark_close 中文键饿死回归已修）。方向语义（YAML 单源）：
+        # 两因子均 -1——高溢价=过热扣分（YAML 自述「大幅溢价(>3%)扣分」）、
+        # 高跟踪误差=管理质量差扣分。shares_change 探针 NO-GO 不在本批。
+        "etf_quality": ["etf.premium_discount", "etf.tracking_error"],
     }
 
     # 排除 ln_mcap/ln_float_mcap 从 valuation 聚合：市值维度不等于估值维度

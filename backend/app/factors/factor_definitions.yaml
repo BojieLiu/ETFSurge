@@ -2358,6 +2358,7 @@ factor_definitions:
   subcategory: "etf"
   frequency: "daily"
   standardization: "zscore"
+  direction: -1
   lookback_window: 1
   description: "(ETF价格-NAV)/NAV，大幅溢价(>3%)扣分"
   tags: ["etf", "pricing"]
@@ -2371,6 +2372,7 @@ factor_definitions:
   subcategory: "etf"
   frequency: "daily"
   standardization: "zscore_large"
+  direction: -1
   lookback_window: 20
   description: "ETF与基准日收益差的标准差(20日)，越大越差"
   tags: ["etf", "quality"]
