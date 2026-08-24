@@ -16,11 +16,18 @@ from typing import Any
 from .budgets import (
     CORE_ANCHORS,  # noqa: F401  round35 B1-F2: re-export（真相源 budgets）
     DEFENSE_ANCHORS,  # noqa: F401
+    ENGINE_CONFIG,  # round35 B3-F6: S4 魔法数字单一真相源
     MANDATORY_CODES,  # noqa: F401
     MANDATORY_FLOOR,
     MANDATORY_MIN_WEIGHT,
     STRATEGY_META,
     dynamic_layer_budget,
+)
+from .taxonomy import (  # round35 B3-F7: 分类语义单点（§6.3）
+    COMPANY_NAMES as _COMPANY_NAMES,  # noqa: F401  re-export（pool_balancing 兼容）
+    classify_etf,
+    extract_index_concept as _extract_index_concept,
+    normalize_segment as _normalize_segment,
 )
 from .rationale import build_rationale
 
@@ -30,89 +37,15 @@ logger = logging.getLogger(__name__)
 MIN_WEIGHT = 0.01
 MAX_WEIGHT = 0.30
 
-# B3b: ETF 名称 → 指数概念兜底提取（当 external tracked_index 为空时）
-# 去除基金公司名 + ETF/联接 后缀 → 余下字符串即为指数概念
-# 示例："科创100ETF汇添富" → "科创100"，"沪深300ETF华夏" → "沪深300"
-_COMPANY_NAMES = [
-    # round19 P1-②: 长公司名优先（先剥「华泰柏瑞」整体，避免子串「华泰」误剥成
-    # 「A500ETF柏瑞」→ 指数概念提取失败 → 同指数双持有漏判）
-    "华泰柏瑞", "柏瑞", "天弘基金", "广发基金",
-    "华夏", "易方达", "汇添富", "嘉实", "富国", "招商", "博时", "南方",
-    "广发", "华安", "国泰", "鹏华", "天弘", "工银", "建信", "中欧",
-    "景顺", "长城", "泰康", "海富通", "光大", "兴全", "东证", "华宝",
-    "银华", "大成", "长信", "国联", "申万", "上投", "中信", "华泰",
-    "万家", "兴业", "民生", "浦银", "方正", "太平", "前海", "创金",
-    "银河", "诺安", "交银", "融通", "泓德", "中加", "永赢", "西部",
-    "浙商", "新华", "红土", "安信", "国寿", "英大", "汇丰", "恒生",
-    "中银", "国投", "德邦", "华富", "金元", "国金", "九泰", "东方",
-    "中泰", "湘财", "国融", "江信", "蜂巢", "东海", "中邮", "华融",
-    "金鹰", "长城", "同泰", "红塔", "华润", "格林", "瑞达", "明亚",
-    "惠升", "华宸", "富荣", "易米", "长江", "渤海", "爱建", "金元顺安",
-]
+# round35 B3-F7 (§6.3): ETF 名称语义（公司名名单/概念提取/归一化）与分类
+# 关键词表已迁 engine/taxonomy.py 单点维护；本模块经顶部导入保留原函数名。
 
-
-def _extract_index_concept(name: str) -> str:
-    """从 ETF 名称提取指数概念（兜底，仅当外部 tracked_index 不可用时）。
-
-    策略：顺次去除基金公司名 → 去除 ETF/联接/发起 后缀 → 剩余字符串即为指数概念。
-    极端兜底：若清理后为空则返回原名的前 6 个字符。
-
-    Examples:
-        "科创100ETF汇添富" → "科创100"
-        "科创100ETF"      → "科创100"
-        "沪深300ETF华夏"  → "沪深300"
-        "黄金ETF"          → "黄金"
-    """
-    clean = name
-    # round35 B1-F3 (§4.3 D3): 长公司名优先（len 降序）——根治 round19 P1-② 类
-    # 子串剥除 bug（「华泰柏瑞」被子串「华泰」先剥成「A500ETF柏瑞」→ 概念提取失败），
-    # 不再依赖手工把长名排前的列表顺序约定；pool_balancing 同款语义共用本名单。
-    for cn in sorted(_COMPANY_NAMES, key=len, reverse=True):
-        clean = clean.replace(cn, "")
-    for sfx in ["ETF", "联接", "LOF", "发起式", "发起", "场内", "场外"]:
-        clean = clean.replace(sfx, "")
-    clean = clean.strip()
-    if not clean or len(clean) < 2:
-        return name[:6] if len(name) >= 6 else name
-    return clean
-
-
-def _normalize_segment(concept: str) -> str:
-    """将指数概念归一化为板块级标识，用于跨层板块集中度控制。
-
-    同一板块内的高度相关指数（科创50/科创100/科创新能源等）被归为同一板块，
-    避免分配器在同板块内重复配置造成虚假分散化。
-
-    Examples:
-        "科创50" → "科创"
-        "科创100" → "科创"
-        "科创新能源" → "科创"
-        "沪深300" → "沪深300"
-        "中证A500" → "中证A500"
-        # M3: 同一指数家族归一化（风格/增强切片 → 基准指数）
-        "中证500价值" → "中证500"
-        "中证500成长" → "中证500"
-        "中证500增强" → "中证500"
-        "沪深300增强" → "沪深300"
-    """
-    for prefix in ["科创", "半导体", "芯片", "军工", "新能源"]:
-        if concept.startswith(prefix):
-            return prefix
-    # M3: 中证500/沪深300 家族归一化——同指数不同风格切片视为同一板块，
-    # 否则 _balance_by_industry 按 segment 分组无法合并 → 家族霸榜/伪分散
-    for base in ("中证500", "沪深300"):
-        if concept.startswith(base) and concept != base:
-            return base
-    return concept
-
-
-# F0-5 步骤 C: 科创系主题词（名称含这些词的候选合计权重受卫星预算 50% 配额约束）
-_TECH_THEMES = ("科创", "半导体", "芯片", "AI", "人工智能")
 
 
 def _is_tech_theme(name: str) -> bool:
-    """判断 ETF 名称是否属于科创系主题（用于卫星层配额裁剪）。"""
-    return any(t in (name or "") for t in _TECH_THEMES)
+    """F0-5 步骤 C: 科创系主题判定（关键词表单点 taxonomy.TECH_THEMES）。"""
+    return classify_etf({"name": name}).tech_theme
+
 
 
 # F0-5 步骤 E: 无估值概念的资产类别（黄金/债券/商品/跨境固收等）。
@@ -138,94 +71,26 @@ def _valuation_is_meaningful(factor_scores: dict[str, float], name: str = "") ->
     return abs(factor_scores.get("valuation", 0.0)) > 0.001
 
 
-# M5 (P1-1 子步骤 3): A 股宽基语义关键词——卫星 backup 补足时排除，
-# 防止 core 属性宽基混入卫星层。industry 字段缺失/为 unknown 时按名称与
-# tracked_index 语义补判（A100 562000 industry=unknown 曾漏网，R4-15 验收4 FAIL）。
-_A_WIDE_BASIS_KEYWORDS = (
-    "中证A100", "A100", "中证A500", "中证A50", "中证500", "中证800",
-    "沪深300", "上证50", "上证180", "上证综指", "科创50", "创业板",
-    "中证100", "深证100", "MSCI中国",
-    # round19 P1-②: 裸 A500/A50——「A500ETF华泰柏瑞」等无「中证」前缀漏判
-    "A500", "A50",
-)
-
-
 def _is_wide_basis(c: dict[str, Any]) -> bool:
-    """M5: 判断候选是否为 A 股宽基（core 属性）——industry 字段优先，名称/指数语义补判。"""
-    ind = (c.get("industry") or "").strip()
-    if ind == "宽基指数" or "宽基" in ind:
-        return True
-    text = f"{c.get('name', '') or ''}{c.get('tracked_index', '') or ''}"
-    return any(k in text for k in _A_WIDE_BASIS_KEYWORDS)
-
-
-# F6 (round6 §14.4): 高 beta 成长宽基识别——核心层风格集中度约束用。
-# 科创50/创业板/科创100 等同受成长/科技风格驱动、相关性高，核心层合计
-# 不得超过核心预算 40%（与 F4 科技裁剪口径一致：budget × 40%）。
-# 注意与 _is_wide_basis 的区别：宽基指全部 A 股宽基，成长宽基仅指高 beta
-# 成长风格子集（沪深300/中证A500 等价值/均衡宽基不在此列）。
-_GROWTH_WIDE_BASIS_KEYWORDS = (
-    "科创50", "科创100", "科创200", "创业板50", "创业板",
-    "双创50", "双创", "科创创业",
-)
+    """M5: 是否 A 股宽基——薄包装，语义单点 engine/taxonomy（B3-F7）。"""
+    return classify_etf(c).wide_basis
 
 
 def _is_growth_wide_basis(c: dict[str, Any]) -> bool:
-    """F6: 判断候选是否为高 beta 成长宽基（科创50/创业板/科创100 等）。
-
-    industry 字段能区分时（如"半导体"）直接判否——科创芯片 ETF 是主题 ETF
-    非宽基；名称/指数语义匹配关键词。
-    """
-    ind = (c.get("industry") or "").strip()
-    if ind and ind != "宽基指数" and "宽基" not in ind:
-        # 明确非宽基行业（半导体/医药等主题行业）→ 不是宽基
-        return False
-    text = f"{c.get('name', '') or ''}{c.get('tracked_index', '') or ''}"
-    return any(k in text for k in _GROWTH_WIDE_BASIS_KEYWORDS)
-
-
-# O16 (round7 §7 P18) + R101 (round32): 大盘/超大盘宽基识别——核心层「宽基数量上限」约束用。
-# 沪深300/中证A500/中证A50/中证A100/上证50/上证180/深证100/中证100/中证800/MSCI中国
-# 相关性 ~0.95+，核心层同时押注多只 = 同一「大盘 beta」，分散失效。
-# R101 (用户决策 2026-08-20)：不同宽基指数可并存（「同一指数才合并，不同指数不互斥」），
-# 但数量设上限 ≤4（含强制锚）；**中证500 纳入宽基识别**——实测中证500×沪深300=0.857、
-# 中证500×中证A500=0.935，中盘与大 A 联动显著强于旧注释假设，需纳入上限计数。
-# 与 _is_wide_basis 的区别：_is_wide_basis 含中盘与成长（科创50/创业板），
-# 宽基族含大盘/超大盘 + 中证500（中盘，R101 边界漏洞修复）。
-_LARGE_CAP_WIDE_BASIS_KEYWORDS = (
-    "沪深300", "中证A500", "中证A50", "中证A100",
-    "上证50", "上证180", "深证100", "中证100", "中证800", "MSCI中国",
-    # R101: 中证500 纳入宽基识别（含 中证500价值/成长/增强 等细分——"中证500" 子串命中）
-    "中证500",
-    # round19 P1-②: 裸 A500/A50——「A500ETF华泰柏瑞」无「中证」前缀漏判 → 不触发互斥
-    "A500", "A50",
-)
-
-# 大盘宽基排除词——「中证1000」（中盘小盘指数）含 "中证100" 子串会被误判，
-# 先检查排除词（长度优先），命中则不算大盘宽基
-_LARGE_CAP_EXCLUDE_KEYWORDS = (
-    "中证1000", "中证1000增强", "国证2000", "中证2000",
-)
+    """F6: 是否高 beta 成长宽基——薄包装（taxonomy.growth_style_of）。"""
+    return classify_etf(c).growth_style
 
 
 def _is_large_cap_wide_basis(c: dict[str, Any]) -> bool:
-    """O16 + R101: 判断候选是否属于宽基族（大盘/超大盘 + 中证500）。
+    """O16 + R101: 是否大盘宽基族（含中证500、排除词优先）——薄包装。"""
+    return classify_etf(c).large_cap_family
 
-    名称/指数文本匹配关键词（子串语义与 _is_wide_basis 同模式）——
-    「中证A500」不子串命中「中证500」（中盘），「科创50/创业板」不命中（成长）。
-    排除词优先：中证1000/中证2000 含「中证100」子串但属中盘/小盘，不算宽基。
-    R101：中证500 已纳入（中盘高相关组合进入上限计数，边界漏洞修复）。
-    """
-    text = f"{c.get('name', '') or ''}{c.get('tracked_index', '') or ''}"
-    if any(k in text for k in _LARGE_CAP_EXCLUDE_KEYWORDS):
-        return False
-    return any(k in text for k in _LARGE_CAP_WIDE_BASIS_KEYWORDS)
 
 
 # R101 (round32): 核心层宽基 >0.95 高相关配对 → correlation_warnings 提示（软约束，
 # 非硬剔除）。替代旧 O16「一刀切互斥剔除」：不同宽基指数可并存（用户决策），但高相关
 # 配对显式提示「分散有限」，不静默。纯函数，无 I/O。
-WIDE_BASIS_HIGH_CORR_THRESHOLD = 0.95
+WIDE_BASIS_HIGH_CORR_THRESHOLD = ENGINE_CONFIG.wide_basis_warn
 
 
 def wide_basis_high_corr_warnings(
@@ -351,7 +216,7 @@ def _power_law_weights(scores: list[float], budget: float) -> list[float]:
     if not scores:
         return []
     max_s = max(scores)
-    exps = [math.exp((s - max_s) * 0.08) for s in scores]
+    exps = [math.exp((s - max_s) * ENGINE_CONFIG.softmax_temperature) for s in scores]
     total_exp = sum(exps)
     if total_exp <= 0:
         return []
@@ -495,9 +360,9 @@ def _select_and_weight(
             if strategy == "defensive":
                 # 防御型：偏好安全主题，惩罚高风险主题
                 if any(t in name for t in _SAFE_THEMES):
-                    c2_bonus = 0.8
+                    c2_bonus = ENGINE_CONFIG.c2_defensive_safe_bonus
                 elif any(t in name for t in _RISKY_THEMES):
-                    c2_bonus = -1.5
+                    c2_bonus = ENGINE_CONFIG.c2_defensive_risky_penalty
             elif strategy == "aggressive":
                 # P1-7 (round20): 当日强势板块动态奖励——涨幅前 3 板块对应 ETF +1.5
                 # （医药/CRO 等非科技板块当日 +7% 也获奖励；替代 _RISKY_THEMES 静态列表
@@ -526,20 +391,20 @@ def _select_and_weight(
                             _sn and _has_shared_ngram(_sn, _cand_text)
                             for _sn in _strong_names
                         ):
-                            _strong_bonus = 1.5
+                            _strong_bonus = ENGINE_CONFIG.c2_strong_sector_bonus
                             logger.debug(
-                                "[allocation] P1-7 %s %s 命中当日强势板块 %s → +1.5",
-                                strategy, sym, _strong_names[:3],
+                                "[allocation] P1-7 %s %s 命中当日强势板块 %s → %+.2f",
+                                strategy, sym, _strong_names[:3], _strong_bonus,
                             )
                 if _strong_bonus:
                     c2_bonus = _strong_bonus
                 elif any(t in name for t in _RISKY_THEMES):
-                    c2_bonus = 1.5
+                    c2_bonus = ENGINE_CONFIG.c2_aggressive_risky_bonus
                 elif any(t in name for t in _SAFE_THEMES):
-                    c2_bonus = -0.3
+                    c2_bonus = ENGINE_CONFIG.c2_aggressive_safe_penalty
         # P1: Penalize symbols already used in prior strategies
         if penalize_symbols and sym in penalize_symbols:
-            composite -= 1.5  # Reduce score to disadvantage overlap
+            composite += ENGINE_CONFIG.overlap_penalty  # round35 B3-F6: 数值入配置
         composite += c2_bonus
         scored.append((composite, cand, factor_scores))
 
@@ -568,7 +433,7 @@ def _select_and_weight(
     # 负分仅作排序降级、不绝对清空（与防御/平衡同机制）。回退阶梯质量地板（factor_score
     # 显著为负）在候选池不足时由 _select_and_weight 的 max_count 自然约束，不引入劣质标的。
     if layer == "satellite":
-        scored = [item for item in scored if item[0] > -2.0]
+        scored = [item for item in scored if item[0] > ENGINE_CONFIG.satellite_score_floor]
 
     # Keep top *max_count*
     selected = scored[:max_count]
@@ -585,9 +450,12 @@ def _select_and_weight(
     # O17 (round7 §7 P19): 增加数量维度——科创系标的数量 ≤ 2 只，与权重配额
     # 取更严（先权重裁剪、再数量裁剪），防止「权重不超配额但 4 只科创同现」。
     if layer == "satellite" and budget > 0:
-        tech_cap_ratio = 0.4 if strategy == "defensive" else 0.5
+        tech_cap_ratio = (
+            ENGINE_CONFIG.tech_quota_defensive if strategy == "defensive"
+            else ENGINE_CONFIG.tech_quota_default
+        )
         tech_cap = budget * tech_cap_ratio
-        TECH_MAX_COUNT = 2  # O17: 科创系数量上限（与 F7「卫星 ≥4 且 ≥2 非科技」呼应）
+        TECH_MAX_COUNT = ENGINE_CONFIG.tech_max_count  # O17: 科创系数量上限（与 F7「卫星 ≥4 且 ≥2 非科技」呼应）
         tech_items = [
             (item, w) for (item, w) in zip(selected, weights, strict=False)
             if _is_tech_theme(item[1].get("name", ""))
@@ -781,36 +649,10 @@ def _filter_satellite_by_profile(
     return kept
 
 
-# round24 R24②: 近替代品「主题族」识别——同主题不同发行商的 ETF 判定为近替代品。
-# 独立于 K 线相关系数（降级盲时 r=None 也能识别）；关键词语义 + 归一化概念双路。
-_SUBSTITUTE_FAMILIES: list[tuple[str, tuple[str, ...]]] = [
-    # (族名, 触发关键词)——顺序优先：先匹配更具体的族
-    ("半导体", ("科创半导体", "科创芯片", "芯片", "半导体")),
-    ("医药生物", ("创新药", "生物科技", "生物医药", "医药")),
-    ("券商", ("证券", "券商")),
-    ("大盘宽基", ("沪深300", "上证50", "中证A500", "中证100", "上证180")),
-    ("科创成长", ("科创50", "科创100", "创业板", "双创")),
-    ("黄金", ("黄金",)),
-    ("国债", ("国债", "利率债", "政金债")),
-]
-
-
 def _substitute_family(c: dict[str, Any]) -> str | None:
-    """round24 R24②: 判定标的是否属于某「近替代品族」（纯函数，无 I/O）。
+    """round24 R24②: 近替代品族判定——薄包装（族表 taxonomy.SUBSTITUTE_FAMILIES）。"""
+    return classify_etf(c).substitute_family
 
-    双路判定：① 名称/行业/tracked_index 文本匹配 _SUBSTITUTE_FAMILIES 关键词族；
-    ② 归一化概念兜底（_normalize_segment 科创/半导体/芯片/军工/新能源 前缀族）。
-    返回族名或 None（无主题可归——黄金 vs 科创 不误报）。
-    """
-    text = f"{c.get('name', '') or ''} {c.get('industry', '') or ''} {c.get('tracked_index', '') or ''}"
-    for fam, keywords in _SUBSTITUTE_FAMILIES:
-        if any(k in text for k in keywords):
-            return fam
-    # 兜底：科创/半导体/芯片/军工/新能源 归一化概念族（_normalize_segment 同源）
-    seg = _normalize_segment(_extract_index_concept(c.get("name") or ""))
-    if seg in ("科创", "半导体", "芯片", "军工", "新能源"):
-        return seg
-    return None
 
 
 def near_substitute_pairs(allocs: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -942,7 +784,7 @@ def _merge_substitute_family(allocs: list[dict[str, Any]]) -> list[dict[str, Any
 def portfolio_concentration_check(
     allocs: list[dict[str, Any]],
     correlation_matrix: dict[tuple[str, str], float | None],
-    avg_threshold: float = 0.8,
+    avg_threshold: float = ENGINE_CONFIG.concentration_avg,
     min_symbols: int = 3,
 ) -> dict[str, Any] | None:
     """round24 R24⑥: 组合级分散约束——平均 pairwise r 过高且标的够多 → concentration。
@@ -1286,7 +1128,7 @@ def allocate(
         #     核心标的比例回补；>0.95 配对的高相关提示由 strategy_design 的
         #     wide_basis_high_corr_warnings 层给出（不静默）。
         _core_large = [a for a in core_alloc if _is_large_cap_wide_basis(a)]
-        _LARGE_CAP_WIDE_BASIS_LIMIT = 4  # 含强制锚（510300/159338 占 2 名额）
+        _LARGE_CAP_WIDE_BASIS_LIMIT = ENGINE_CONFIG.large_cap_wide_basis_limit  # 含强制锚（510300/159338 占 2 名额）
         if len(_core_large) > _LARGE_CAP_WIDE_BASIS_LIMIT:
             _anchor_in_core = {a.get("symbol") for a in _core_large} & MANDATORY_CODES
             _keep_non_anchor = _LARGE_CAP_WIDE_BASIS_LIMIT - len(_anchor_in_core)
@@ -1347,7 +1189,9 @@ def allocate(
         # round22 (#10 INV-4): 核心层高 beta 成长宽基占比上限——核心选完后校验，
         # 超出 core_growth_cap 按 factor_score 逐个移除最低分成长宽基并回补权重。
         # 平衡型核心成长占比压到 ≤40%（round21 #10 实证 67% → ≤40%）。
-        _core_growth_cap = STRATEGY_META.get(profile_key, {}).get("core_growth_cap", 0.40)
+        _core_growth_cap = STRATEGY_META.get(profile_key, {}).get(
+            "core_growth_cap", ENGINE_CONFIG.core_growth_cap_fallback
+        )
         core_alloc = _cap_core_growth_wide_basis(core_alloc, _core_growth_cap)
         allocations.extend(core_alloc)
         # P1-2: 记录本方案核心层非强制标的（供后续方案去重）
@@ -1705,8 +1549,8 @@ def apply_near_substitute_warnings(
 def enforce_max_correlation(
     strategies: list[dict[str, Any]],
     correlation_matrix: dict[tuple[str, str], float | None],
-    threshold: float = 0.9,
-    max_combined_weight: float = 0.25,
+    threshold: float = ENGINE_CONFIG.corr_cap,
+    max_combined_weight: float = ENGINE_CONFIG.corr_combined_weight_cap,
 ) -> list[dict[str, Any]]:
     """P1-1 (round20) + round24 R2/R24⑤: 方案内高相关对（r >= threshold）合计权重不得超 max_combined_weight。
 
@@ -1893,7 +1737,7 @@ def check_structure_reasonableness(
                 if lay == "defense":
                     med = correlation_medians.get(sym)
                     rat = a.get("selection_rationale") or ""
-                    if med is not None and med >= 0.35 and ("避险" in rat or "低相关" in rat):
+                    if med is not None and med >= ENGINE_CONFIG.defensive_wording_median_r and ("避险" in rat or "低相关" in rat):
                         note = f"【结构提示：该防御层标的与组合 median r={med:.2f} 偏高，非低相关对冲资产】"
                         a["selection_rationale"] = rat + note
                         warnings.append({"type": "defense_high_median_r", "symbol": sym, "median_r": med})
@@ -1904,7 +1748,10 @@ def check_structure_reasonableness(
                 if cash > 0.20 + 1e-9:
                     warnings.append({"type": "aggressive_cash_over_20pct", "cash": cash})
             # round22 INV-4: 核心层成长宽基占比上限（占核心预算）
-            _cap = STRATEGY_META.get(sid, {}).get("core_growth_cap", 0.40) if sid else 0.40
+            _cap = (
+                STRATEGY_META.get(sid, {}).get("core_growth_cap", ENGINE_CONFIG.core_growth_cap_fallback)
+                if sid else ENGINE_CONFIG.core_growth_cap_fallback
+            )
             _core = [a for a in allocs if a.get("layer") == "core" and a.get("symbol") != "CASH"]
             _core_w = sum(a.get("weight", 0.0) or 0.0 for a in _core)
             if _core_w > 0:

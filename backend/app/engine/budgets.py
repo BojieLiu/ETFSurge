@@ -191,9 +191,74 @@ def validate_profile_specs(specs: dict[str, ProfileSpec]) -> None:
         )
 
 
+@dataclass(frozen=True)
+class EngineConfig:
+    """round35 B3-F6 (docs/round35-architecture-review.md §6.3): S4 散落魔法数字单一真相源。
+
+    纯搬家——§5-S4 清单逐项收纳，每个字段默认值与原内联字面量逐一相等（不改任何
+    行为）；沿用 ProfileSpec 模式做加载期校验（INV-7 阈值序合理性，见
+    :func:`validate_engine_config`）。消费点：allocation_engine 各内联字面量改读
+    :data:`ENGINE_CONFIG` 单例。
+    """
+
+    # ── 打分 → 权重 ──
+    #: _power_law_weights softmax 温度（原 allocation_engine 内联 ``* 0.08``）
+    softmax_temperature: float = 0.08
+    #: 跨方案重叠惩罚——前序方案已选 symbol 在后续方案 composite 上的减分（round20 P1）
+    overlap_penalty: float = -1.5
+    #: 卫星层负分质量地板：composite ≤ 此值的卫星候选剔除（round22 #11 回退口径）
+    satellite_score_floor: float = -2.0
+
+    # ── C2 关键词修正（F0-5 步骤 E / P1-7 强势板块）──
+    c2_defensive_safe_bonus: float = 0.8        # 防御型安全主题奖励
+    c2_defensive_risky_penalty: float = -1.5    # 防御型高风险主题惩罚
+    c2_aggressive_risky_bonus: float = 1.5      # 进攻型高风险主题奖励
+    c2_aggressive_safe_penalty: float = -0.3    # 进攻型安全主题惩罚
+    c2_strong_sector_bonus: float = 1.5         # 进攻型当日强势板块动态奖励
+
+    # ── 卫星层科创系配额（F0-5 步骤 C / O17）──
+    tech_quota_defensive: float = 0.40          # 防御型权重配额（占卫星预算）
+    tech_quota_default: float = 0.50            # 平衡/进攻共用配额
+    tech_max_count: int = 2                     # 科创系数量上限
+
+    # ── 核心层结构约束 ──
+    #: 核心层大盘宽基数量上限（含强制锚；O16→R101 数量软约束）
+    large_cap_wide_basis_limit: int = 4
+    #: STRATEGY_META.core_growth_cap 缺失时的兜底（主值仍以 meta 为单源）
+    core_growth_cap_fallback: float = 0.40
+
+    # ── 相关性阈值族（INV-7 序：warn ≥ cap ≥ concentration）──
+    wide_basis_warn: float = 0.95               # 原 WIDE_BASIS_HIGH_CORR_THRESHOLD（R101 软提示）
+    corr_cap: float = 0.9                       # enforce_max_correlation threshold 默认
+    corr_combined_weight_cap: float = 0.25      # enforce_max_correlation 合计权重上限
+    concentration_avg: float = 0.8              # portfolio_concentration_check avg_threshold 默认
+    defensive_wording_median_r: float = 0.35    # rationale 措辞守卫「避险/低相关」允许线
+
+
+ENGINE_CONFIG = EngineConfig()
+
+
+def validate_engine_config(cfg: EngineConfig) -> None:
+    """round35 B3-F6 INV-7：阈值序与配额方向合理性（加载期 fail-fast）。"""
+    if not (cfg.wide_basis_warn >= cfg.corr_cap >= cfg.concentration_avg):
+        raise ValueError(
+            f"INV-7 violated: correlation threshold order broken "
+            f"(wide_basis_warn={cfg.wide_basis_warn}, corr_cap={cfg.corr_cap}, "
+            f"concentration_avg={cfg.concentration_avg})"
+        )
+    if cfg.tech_quota_defensive > cfg.tech_quota_default + 1e-9:
+        raise ValueError(
+            f"INV-7 violated: defensive tech quota {cfg.tech_quota_defensive} "
+            f"> default quota {cfg.tech_quota_default}"
+        )
+    if not (0.0 < cfg.softmax_temperature <= 1.0):
+        raise ValueError(f"INV-7 violated: softmax_temperature={cfg.softmax_temperature} out of (0,1]")
+
+
 # 加载期构造 + 校验（fail-fast）。导入 budgets 模块即触发，违反不变量直接崩溃。
 PROFILE_SPECS: dict[str, ProfileSpec] = build_profile_specs()
 validate_profile_specs(PROFILE_SPECS)
+validate_engine_config(ENGINE_CONFIG)
 
 
 def dynamic_layer_budget(risk_profile: str, regime: str) -> dict[str, float]:

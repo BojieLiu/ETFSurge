@@ -1,0 +1,396 @@
+[
+ {
+  "meta": {
+   "symbol": "510300",
+   "name": "沪深300ETF",
+   "tracked_index": "沪深300"
+  },
+  "wide_basis": true,
+  "growth_style": false,
+  "large_cap_family": true,
+  "tech_theme": false,
+  "substitute_family": "大盘宽基",
+  "index_concept": "沪深300",
+  "segment": "沪深300"
+ },
+ {
+  "meta": {
+   "symbol": "159338",
+   "name": "中证A500ETF",
+   "tracked_index": "中证A500"
+  },
+  "wide_basis": true,
+  "growth_style": false,
+  "large_cap_family": true,
+  "tech_theme": false,
+  "substitute_family": "大盘宽基",
+  "index_concept": "中证A500",
+  "segment": "中证A500"
+ },
+ {
+  "meta": {
+   "symbol": "563360",
+   "name": "A500ETF华泰柏瑞",
+   "tracked_index": ""
+  },
+  "wide_basis": true,
+  "growth_style": false,
+  "large_cap_family": true,
+  "tech_theme": false,
+  "substitute_family": null,
+  "index_concept": "A500",
+  "segment": "A500"
+ },
+ {
+  "meta": {
+   "symbol": "159107",
+   "name": "A50ETF",
+   "tracked_index": ""
+  },
+  "wide_basis": true,
+  "growth_style": false,
+  "large_cap_family": true,
+  "tech_theme": false,
+  "substitute_family": null,
+  "index_concept": "A50",
+  "segment": "A50"
+ },
+ {
+  "meta": {
+   "symbol": "512100",
+   "name": "中证1000ETF",
+   "tracked_index": "中证1000"
+  },
+  "wide_basis": true,
+  "growth_style": false,
+  "large_cap_family": false,
+  "tech_theme": false,
+  "substitute_family": "大盘宽基",
+  "index_concept": "中证1000",
+  "segment": "中证1000"
+ },
+ {
+  "meta": {
+   "symbol": "159511",
+   "name": "国证2000ETF",
+   "tracked_index": "国证2000"
+  },
+  "wide_basis": false,
+  "growth_style": false,
+  "large_cap_family": false,
+  "tech_theme": false,
+  "substitute_family": null,
+  "index_concept": "国证2000",
+  "segment": "国证2000"
+ },
+ {
+  "meta": {
+   "symbol": "562500",
+   "name": "中证2000ETF",
+   "tracked_index": "中证2000"
+  },
+  "wide_basis": false,
+  "growth_style": false,
+  "large_cap_family": false,
+  "tech_theme": false,
+  "substitute_family": null,
+  "index_concept": "中证2000",
+  "segment": "中证2000"
+ },
+ {
+  "meta": {
+   "symbol": "588000",
+   "name": "科创50ETF",
+   "tracked_index": "科创50"
+  },
+  "wide_basis": true,
+  "growth_style": true,
+  "large_cap_family": false,
+  "tech_theme": true,
+  "substitute_family": "科创成长",
+  "index_concept": "科创50",
+  "segment": "科创"
+ },
+ {
+  "meta": {
+   "symbol": "159915",
+   "name": "创业板ETF",
+   "tracked_index": "创业板"
+  },
+  "wide_basis": true,
+  "growth_style": true,
+  "large_cap_family": false,
+  "tech_theme": false,
+  "substitute_family": "科创成长",
+  "index_concept": "创业板",
+  "segment": "创业板"
+ },
+ {
+  "meta": {
+   "symbol": "589000",
+   "name": "双创50ETF",
+   "tracked_index": "双创50"
+  },
+  "wide_basis": false,
+  "growth_style": true,
+  "large_cap_family": false,
+  "tech_theme": false,
+  "substitute_family": "科创成长",
+  "index_concept": "双创50",
+  "segment": "双创50"
+ },
+ {
+  "meta": {
+   "symbol": "588290",
+   "name": "科创芯片ETF",
+   "tracked_index": "科创芯片",
+   "industry": "半导体"
+  },
+  "wide_basis": false,
+  "growth_style": false,
+  "large_cap_family": false,
+  "tech_theme": true,
+  "substitute_family": "半导体",
+  "index_concept": "科创芯片",
+  "segment": "科创"
+ },
+ {
+  "meta": {
+   "symbol": "512480",
+   "name": "半导体ETF",
+   "tracked_index": "",
+   "industry": "半导体"
+  },
+  "wide_basis": false,
+  "growth_style": false,
+  "large_cap_family": false,
+  "tech_theme": true,
+  "substitute_family": "半导体",
+  "index_concept": "半导体",
+  "segment": "半导体"
+ },
+ {
+  "meta": {
+   "symbol": "518880",
+   "name": "黄金ETF",
+   "tracked_index": ""
+  },
+  "wide_basis": false,
+  "growth_style": false,
+  "large_cap_family": false,
+  "tech_theme": false,
+  "substitute_family": "黄金",
+  "index_concept": "黄金",
+  "segment": "黄金"
+ },
+ {
+  "meta": {
+   "symbol": "511090",
+   "name": "30年国债ETF",
+   "tracked_index": ""
+  },
+  "wide_basis": false,
+  "growth_style": false,
+  "large_cap_family": false,
+  "tech_theme": false,
+  "substitute_family": "国债",
+  "index_concept": "30年国债",
+  "segment": "30年国债"
+ },
+ {
+  "meta": {
+   "symbol": "512890",
+   "name": "红利低波ETF",
+   "tracked_index": ""
+  },
+  "wide_basis": false,
+  "growth_style": false,
+  "large_cap_family": false,
+  "tech_theme": false,
+  "substitute_family": null,
+  "index_concept": "红利低波",
+  "segment": "红利低波"
+ },
+ {
+  "meta": {
+   "symbol": "512010",
+   "name": "医药ETF",
+   "tracked_index": ""
+  },
+  "wide_basis": false,
+  "growth_style": false,
+  "large_cap_family": false,
+  "tech_theme": false,
+  "substitute_family": "医药生物",
+  "index_concept": "医药",
+  "segment": "医药"
+ },
+ {
+  "meta": {
+   "symbol": "560500",
+   "name": "中证500ETF",
+   "tracked_index": "中证500"
+  },
+  "wide_basis": true,
+  "growth_style": false,
+  "large_cap_family": true,
+  "tech_theme": false,
+  "substitute_family": null,
+  "index_concept": "中证500",
+  "segment": "中证500"
+ },
+ {
+  "meta": {
+   "symbol": "562500v",
+   "name": "中证500价值ETF",
+   "tracked_index": "中证500价值"
+  },
+  "wide_basis": true,
+  "growth_style": false,
+  "large_cap_family": true,
+  "tech_theme": false,
+  "substitute_family": null,
+  "index_concept": "中证500价值",
+  "segment": "中证500"
+ },
+ {
+  "meta": {
+   "symbol": "517300",
+   "name": "MSCI中国A50ETF",
+   "tracked_index": ""
+  },
+  "wide_basis": true,
+  "growth_style": false,
+  "large_cap_family": true,
+  "tech_theme": false,
+  "substitute_family": null,
+  "index_concept": "MSCI中国A50",
+  "segment": "MSCI中国A50"
+ },
+ {
+  "meta": {
+   "symbol": "561300",
+   "name": "AI人工智能ETF",
+   "tracked_index": ""
+  },
+  "wide_basis": false,
+  "growth_style": false,
+  "large_cap_family": false,
+  "tech_theme": true,
+  "substitute_family": null,
+  "index_concept": "AI人工智能",
+  "segment": "AI人工智能"
+ },
+ {
+  "meta": {
+   "symbol": "510180",
+   "name": "上证180ETF",
+   "tracked_index": "上证180"
+  },
+  "wide_basis": true,
+  "growth_style": false,
+  "large_cap_family": true,
+  "tech_theme": false,
+  "substitute_family": "大盘宽基",
+  "index_concept": "上证180",
+  "segment": "上证180"
+ },
+ {
+  "meta": {
+   "symbol": "159659",
+   "name": "深证100ETF",
+   "tracked_index": "深证100"
+  },
+  "wide_basis": true,
+  "growth_style": false,
+  "large_cap_family": true,
+  "tech_theme": false,
+  "substitute_family": null,
+  "index_concept": "深证100",
+  "segment": "深证100"
+ },
+ {
+  "meta": {
+   "symbol": "560050",
+   "name": "中证800ETF",
+   "tracked_index": "中证800"
+  },
+  "wide_basis": true,
+  "growth_style": false,
+  "large_cap_family": true,
+  "tech_theme": false,
+  "substitute_family": null,
+  "index_concept": "中证800",
+  "segment": "中证800"
+ },
+ {
+  "meta": {
+   "symbol": "513100",
+   "name": "纳指ETF",
+   "tracked_index": "纳斯达克100"
+  },
+  "wide_basis": false,
+  "growth_style": false,
+  "large_cap_family": false,
+  "tech_theme": false,
+  "substitute_family": null,
+  "index_concept": "纳指",
+  "segment": "纳指"
+ },
+ {
+  "meta": {
+   "symbol": "513330",
+   "name": "恒生科技ETF",
+   "tracked_index": "恒生科技"
+  },
+  "wide_basis": false,
+  "growth_style": false,
+  "large_cap_family": false,
+  "tech_theme": false,
+  "substitute_family": null,
+  "index_concept": "科技",
+  "segment": "科技"
+ },
+ {
+  "meta": {
+   "symbol": "511620",
+   "name": "城投债ETF",
+   "tracked_index": ""
+  },
+  "wide_basis": false,
+  "growth_style": false,
+  "large_cap_family": false,
+  "tech_theme": false,
+  "substitute_family": null,
+  "index_concept": "城投债",
+  "segment": "城投债"
+ },
+ {
+  "meta": {
+   "symbol": "589520",
+   "name": "科创100ETF汇添富",
+   "tracked_index": ""
+  },
+  "wide_basis": false,
+  "growth_style": true,
+  "large_cap_family": false,
+  "tech_theme": true,
+  "substitute_family": "科创成长",
+  "index_concept": "科创100",
+  "segment": "科创"
+ },
+ {
+  "meta": {
+   "symbol": "510310",
+   "name": "沪深300ETF华夏",
+   "tracked_index": ""
+  },
+  "wide_basis": true,
+  "growth_style": false,
+  "large_cap_family": true,
+  "tech_theme": false,
+  "substitute_family": "大盘宽基",
+  "index_concept": "沪深300",
+  "segment": "沪深300"
+ }
+]

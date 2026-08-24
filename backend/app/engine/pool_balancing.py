@@ -79,7 +79,7 @@ def deduplicate_by_index(
         round35 B1-F3 (§4.3 D3): 局部 ~80 条副本已删——与 allocation_engine
         共用单一名单（并集，含华泰柏瑞/天弘基金等长名）；替换统一 len 降序。
         """
-        from .allocation_engine import _COMPANY_NAMES
+        from .taxonomy import COMPANY_NAMES as _COMPANY_NAMES  # round35 B3-F7: 名单单点迁 taxonomy
 
         for company in sorted(_COMPANY_NAMES, key=len, reverse=True):
             name = name.replace(company, "")
