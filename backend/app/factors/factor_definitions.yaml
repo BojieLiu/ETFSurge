@@ -645,7 +645,7 @@ factor_definitions:
   standardization: "zscore"
   lookback_window: 1
   description: "业务与国家五年规划契合度(0-1)"
-  tags: ["china_specific", "policy", "five_year_plan"]
+  tags: ["china_specific", "policy", "five_year_plan", 'display_only']
   dependencies: ["policy_alignment_score"]
   ic_threshold: 0.02
   ic_ir_threshold: 0.5
@@ -658,7 +658,7 @@ factor_definitions:
   standardization: "zscore"
   lookback_window: 1
   description: "属于战略新兴产业目录标识"
-  tags: ["china_specific", "policy", "strategic_emerging"]
+  tags: ["china_specific", "policy", "strategic_emerging", 'display_only']
   dependencies: ["is_strategic_emerging"]
   ic_threshold: 0.02
   ic_ir_threshold: 0.5
@@ -671,7 +671,7 @@ factor_definitions:
   standardization: "zscore"
   lookback_window: 1
   description: "受益于国内大循环/双循环格局"
-  tags: ["china_specific", "policy", "dual_circulation"]
+  tags: ["china_specific", "policy", "dual_circulation", 'display_only']
   dependencies: ["dual_circulation_score"]
   ic_threshold: 0.02
   ic_ir_threshold: 0.5
@@ -2552,7 +2552,7 @@ factor_definitions:
   standardization: "none"
   lookback_window: 1
   description: "M2 同比 3 月斜率方向（-1/0/+1）：货币收紧-1 / 平稳 0 / 宽松+1；市场级因子不参与截面 IC，仅作市态/组合层输入"
-  tags: ["macro", "regime"]
+  tags: ["macro", "regime", 'display_only']
   dependencies: ["macro_snapshot"]
   ic_threshold: 0.02
   ic_ir_threshold: 0.5
@@ -2565,7 +2565,7 @@ factor_definitions:
   standardization: "none"
   lookback_window: 1
   description: "制造业 PMI ≥50 → 1（荣枯线上方），<50 → 0；市场级因子不参与截面 IC，仅作市态/组合层输入"
-  tags: ["macro", "regime"]
+  tags: ["macro", "regime", 'display_only']
   dependencies: ["macro_snapshot"]
   ic_threshold: 0.02
   ic_ir_threshold: 0.5
@@ -2578,7 +2578,7 @@ factor_definitions:
   standardization: "none"
   lookback_window: 1
   description: "LPR 1Y 同比（12 月窗口）：降息周期 +1 / 持平 0 / 加息 -1；市场级因子不参与截面 IC，仅作市态/组合层输入"
-  tags: ["macro", "regime"]
+  tags: ["macro", "regime", 'display_only']
   dependencies: ["macro_snapshot"]
   ic_threshold: 0.02
   ic_ir_threshold: 0.5
@@ -2591,7 +2591,7 @@ factor_definitions:
   standardization: "none"
   lookback_window: 8
   description: "GDP 同比增速近 8 期分位：>75 分位 +1（经济强劲）/ <25 分位 -1（走弱）/ 中间 0；季频，仅用已发布值（前视偏差红线）；市场级因子不参与截面 IC"
-  tags: ["macro", "regime"]
+  tags: ["macro", "regime", 'display_only']
   dependencies: ["macro_gdp_series"]
   ic_threshold: 0.02
   ic_ir_threshold: 0.5
@@ -2604,7 +2604,7 @@ factor_definitions:
   standardization: "none"
   lookback_window: 20
   description: "沪深融资余额合计 20 日变化率：>+5% +1（杠杆流入）/ <-5% -1（杠杆流出）/ 中间 0；日频数据但作环境维度（非盘中决策），杠杆资金情绪与 sentiment 互补；市场级因子不参与截面 IC"
-  tags: ["macro", "regime", "sentiment"]
+  tags: ["macro", "regime", "sentiment", 'display_only']
   dependencies: ["margin_leverage_change"]
   ic_threshold: 0.02
   ic_ir_threshold: 0.5
