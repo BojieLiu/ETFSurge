@@ -12,6 +12,8 @@ engine 仍需要 aggregate_factor_scores 的静态逻辑——将其下沉到 co
 """
 from __future__ import annotations
 
+from .factor_values import is_meaningful_value  # FS1: 零值判定单点
+
 import math
 from typing import Any
 
@@ -122,7 +124,8 @@ def aggregate_factor_scores(
     for top_key, prefixes in CATEGORY_PREFIXES.items():
         values: list[tuple[str, float]] = []  # (原始键, 方向化后值)
         for key, val in factor_scores.items():
-            if isinstance(val, (int, float)) and abs(val) > 0.001:
+            # FS1 (round35 §15.6): 零值判定收敛单点 core.factor_values（容差表按因子覆盖）
+            if is_meaningful_value(key, val):
                 # R6-F4: 排除 _raw 保留键（原始 RSI/MACD）——避免真实值污染分类均值
                 if key.endswith("_raw"):
                     continue
