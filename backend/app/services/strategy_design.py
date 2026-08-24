@@ -641,6 +641,15 @@ async def generate_enhanced_design(
                 })
 
             s["etfs"] = allocs
+
+            # B6 (round35 §6.6 / 契约 design.md §6.3): 收益指标来源标注 + 组合波动
+            # 模型估算。权重此处已终态（enforce/核心清零后、桶化前）。
+            # ρ=方案内相关矩阵，σ=_CORR_CLOSES_CACHE 同源日K（无新增拉取）；
+            # 任一数据缺失 → volatility_estimate 整体省略（契约约束 1，
+            # 不得用静态值冒充模型估算）。estimate_sources 恒标注静态三指标。
+            _attach_estimate_sources(s, allocs, corr_matrix)
+
+
             # round27 R47: coarse 态结构化字段桶化（与 data_precision 一致）；
             # exact 态原值不变。此后按桶后权重重算 target_amount 保持内部一致。
             _prec = market_context.get("data_precision") or {}
@@ -1257,6 +1266,43 @@ def _find_candidate_meta(symbol: str, candidates: dict) -> dict | None:
             if c.get("symbol") == symbol:
                 return c
     return None
+
+
+def _attach_estimate_sources(
+    s: dict,
+    allocs: list[dict],
+    corr_matrix: dict[tuple[str, str], float | None],
+) -> None:
+    """B6 (round35 §6.6): 写入 s["estimate_sources"]，可行时附 volatility_estimate。
+
+    契约（api-contracts/portfolio/design.md §6.3）：
+    - estimate_sources 恒存在，静态三指标标 reference_static；
+    - volatility_estimate 仅当模型推导可行（ρ 全对可用 + 各持仓 σ 可得 +
+      有效持仓 ≥2）时出现并标 model_estimate；否则整体省略该键。
+    任何异常静默跳过波动估算（标注仍写入）——不阻塞主设计链路。
+    """
+    sources: dict[str, str] = {
+        "expected_return": "reference_static",
+        "max_drawdown": "reference_static",
+        "sharpe_ratio": "reference_static",
+    }
+    try:
+        weights = {
+            str(a["symbol"]): float(a.get("weight") or 0)
+            for a in allocs
+            if a.get("symbol") not in (None, "CASH")
+        }
+        closes = {c: _CORR_CLOSES_CACHE[c] for c in weights if c in _CORR_CLOSES_CACHE}
+        if len(weights) >= 2 and len(closes) == len(weights) and corr_matrix:
+            from ..engine.correlation import portfolio_volatility
+
+            vol = portfolio_volatility(closes, weights, corr_matrix)
+            if vol is not None:
+                s["volatility_estimate"] = vol
+                sources["volatility_estimate"] = "model_estimate"
+    except Exception as e:
+        logger.debug("[strategy_design] volatility estimate skipped: %s", e)
+    s["estimate_sources"] = sources
 
 
 def _correlation_medians_for(allocs: list[dict], candidates: dict) -> dict[str, float | None]:

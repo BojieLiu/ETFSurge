@@ -19,6 +19,15 @@ def test_tracking_error_special_case() -> None:
     assert is_meaningful_value("etf.tracking_error", 9e-7) is False  # 真 0（数值噪声）
 
 
+def test_premium_discount_tolerance_fs1_recheck() -> None:
+    """FS1 复核（round35 §15.6）：±0.1% 级合法折溢价不得吞零，占位真 0 仍滤。"""
+    assert FACTOR_ZERO_TOLERANCE["etf.premium_discount"] == 2e-4
+    assert is_meaningful_value("etf.premium_discount", 5e-4) is True   # 0.05% 合法定价偏差（旧默认误杀）
+    assert is_meaningful_value("etf.premium_discount", -3e-4) is True  # -0.03% 负溢价同样入样
+    assert is_meaningful_value("etf.premium_discount", 1e-4) is False  # ≤2bp 视为数值噪声
+    assert is_meaningful_value("etf.premium_discount", 0.0) is False   # 占位零恒滤
+
+
 def test_boundary_is_strict_greater() -> None:
     """canonical 判定为严格大于——恰好等于容差的值视为占位零。"""
     tol = DEFAULT_ZERO_TOLERANCE

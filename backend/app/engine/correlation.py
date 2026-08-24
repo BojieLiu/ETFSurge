@@ -13,7 +13,10 @@ correlation.py — 收益相关性纯函数引擎（round19 P1-①，2026-08-12�
 """
 from __future__ import annotations
 
+import math
+
 MIN_SAMPLES = 30
+TRADING_DAYS = 250  # 年化因子（A 股年度交易日近似）
 
 
 def _pearson(a: list[float], b: list[float]) -> float:
@@ -158,3 +161,63 @@ def median_correlation_for(
     if n % 2 == 1:
         return vals[n // 2]
     return (vals[n // 2 - 1] + vals[n // 2]) / 2
+
+
+# ── B6 (round35 §6.6 / 契约 design.md §6.3): 收益指标持仓推导 ──────────
+
+
+def annualized_vol(closes: list[float], window: int = 60) -> float | None:
+    """标的年化波动率：日收益率样本 std × √TRADING_DAYS。
+
+    历史 < MIN_SAMPLES+1 根（无法产出足够收益率样本）→ None（诚实缺数据，
+    调用方据此整体省略 volatility_estimate，不得静态值冒充）。
+    """
+    closes = list(closes)
+    if len(closes) < MIN_SAMPLES + 1:
+        return None
+    rets = _daily_returns(closes[-(window + 1):])
+    n = len(rets)
+    if n < MIN_SAMPLES:
+        return None
+    mean = sum(rets) / n
+    var = sum((r - mean) ** 2 for r in rets) / (n - 1)
+    return math.sqrt(var) * math.sqrt(TRADING_DAYS)
+
+
+def portfolio_volatility(
+    closes_by_symbol: dict[str, list[float]],
+    weights: dict[str, float],
+    corr_matrix: dict[tuple[str, str], float | None],
+) -> float | None:
+    """组合年化波动 σ_p = sqrt(wᵀ(σ⊙ρ⊙σ)w)。
+
+    - σ_i：annualized_vol（同一 closes 源与相关矩阵共享，无新增拉取）；
+    - ρ_ij：corr_matrix（correlation_matrix 输出，None=数据不足）。
+    契约语义（design.md §6.3 约束 1）：任一持仓 σ 缺失、或其与任一其它持仓的
+    ρ 为 None、或有效持仓 < 2 → 返回 None，调用方整体省略字段。
+    权重取实际配置权重；现金不参与（隐含 0 波动资产，未投出部分天然摊薄）。
+    """
+    syms = sorted(s for s, w in weights.items() if isinstance(w, (int, float)) and w > 0)
+    if len(syms) < 2:
+        return None
+    vols: dict[str, float] = {}
+    for s in syms:
+        v = annualized_vol(closes_by_symbol.get(s, []))
+        if v is None:
+            return None
+        vols[s] = v
+    total = 0.0
+    for i, a in enumerate(syms):
+        for b in syms[i:]:
+            r = 1.0 if a == b else corr_matrix.get((a, b))
+            if r is None:
+                return None
+            term = weights[a] * weights[b] * vols[a] * vols[b] * r
+            total += term if a == b else 2 * term
+    # 完全对冲（ρ=-1、等权等波动）的解析零在浮点下可能是 ~-1e-17 的噪声负值——
+    # 夹到 0.0（合法结果），显著负值才视为输入不一致返回 None。
+    if total < 0:
+        if total > -1e-12:
+            return 0.0
+        return None
+    return round(math.sqrt(total), 4)

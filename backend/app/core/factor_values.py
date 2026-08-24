@@ -18,6 +18,11 @@ FACTOR_ZERO_TOLERANCE: dict[str, float] = {
     # round14 P2-Z: tracking_error 合法区间 0.001~0.02——按 0.001 容差会把
     # 合法跟踪误差整段判零（有效样本 <3 → 永不产 IC），仅排除真 0。
     "etf.tracking_error": 1e-6,
+    # FS1 复核（round35 §15.6 风险项落地，2026-08-24）：premium_discount 日常
+    # ±0.1%（0.001）量级的合法折溢价曾被默认容差整体吞成「占位零」→ IC 样本
+    # 系统性偏少。收紧到 2bp：占位 0.0 仍被滤（0.0 > 正容差不成立），≥3bp 的
+    # 真实定价偏差进入样本；FM3 探针实测分布 pstdev≈2.1%，2bp 远低于信号尺度。
+    "etf.premium_discount": 2e-4,
 }
 
 DEFAULT_ZERO_TOLERANCE = 0.001
