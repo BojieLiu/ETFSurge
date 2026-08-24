@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import math
+from dataclasses import dataclass, field
 from typing import Any
 
 from .budgets import (
@@ -241,7 +242,29 @@ def _power_law_weights(scores: list[float], budget: float) -> list[float]:
     return result
 
 
-def _select_and_weight(
+@dataclass
+class SelectionDraft:
+    """round36 B5-S1: select 段产物——打分（聚合+pw+C2）/概念去重/初选完成，**未定权重**。
+
+    五段管道（docs/round36-B5-allocate-pipeline.md）第一段的输出结构：
+    后续 size()（幂律+钳制）/ constrain() / reconcile() 以此为输入，
+    段间不再共享可变 dict 就地改。
+    """
+
+    layer: str
+    strategy: str
+    regime: str
+    # 强制标的注入结果（MANDATORY_MIN_WEIGHT 占用预算后单独携带）
+    mandatory_assignments: list[dict[str, Any]] = field(default_factory=list)
+    # 初选结果：(composite, cand, factor_scores) 三元组，按 composite 降序
+    selected: list[tuple[float, dict[str, Any], dict[str, float]]] = field(default_factory=list)
+    # 去重+地板过滤后的候选总数（O24 rank_info.total_candidates 口径）
+    total_scored: int = 0
+    # 强制标的扣减后的可分配预算
+    budget_after_mandatory: float = 0.0
+
+
+def _select_draft(
     candidates: list[dict[str, Any]],
     factor_matrix: dict[str, dict[str, float]],
     budget: float,
@@ -256,21 +279,15 @@ def _select_and_weight(
     # A1 (round23 §10.1): 引擎纯度参数（allocate 透传，None = 跳过分类聚合）
     factor_definitions: dict | None = None,
     ic_series: dict | None = None,
-) -> list[dict[str, Any]]:
-    """
-    Internal helper: score candidates, keep top *max_count*,
-    distribute *budget* via power-law, attach rationale.
+) -> SelectionDraft | None:
+    """B5-S1: select 段纯函数——打分/概念去重/初选，不改权重。
 
-    Each returned dict has symbol, name, layer, weight, selection_rationale,
-    factor_score, and factor_breakdown.
-
-    B3: exclude_tracked_indices — 跳过已选指数的标的，防止同指数多头持仓.
-    P1-7 (round20): sector_momentum — 当日板块涨幅榜；aggressive 对强势板块
-    对应 ETF 给动态 c2_bonus（替代 _RISKY_THEMES 静态科技关键词判定）。
+    返回 None 表示「无候选或预算 ≤0」（调用方应返回空列表）；
+    ``draft.selected`` 为空且 ``mandatory_assignments`` 非空表示仅强制标的中选。
     """
     exclude_indices = exclude_tracked_indices or set()
     if not candidates or budget <= 0:
-        return []
+        return None
 
     # P1-3: 强制标的从候选池中注入（确保进入分配结果）
     # round22 (#13): mandatory_codes 由调用方按层传入（核心锚 / 防御锚），
@@ -294,9 +311,17 @@ def _select_and_weight(
         else:
             remaining_candidates.append(c)
 
+    def _only_mandatory() -> SelectionDraft:
+        return SelectionDraft(
+            layer=layer, strategy=strategy, regime=regime,
+            mandatory_assignments=mandatory_assignments,
+            selected=[], total_scored=0,
+            budget_after_mandatory=budget,
+        )
+
     # 如果预算被强制标的耗尽，直接返回
     if budget <= 0:
-        return mandatory_assignments
+        return _only_mandatory()
     candidates = remaining_candidates
 
     # B3: 过滤已选指数的候选（归一化到板块级后再比较）
@@ -312,7 +337,7 @@ def _select_and_weight(
     candidates = filtered
 
     if not candidates:
-        return mandatory_assignments
+        return _only_mandatory()
 
     # Build (composite_score, candidate, factor_scores) triples
     scored: list[tuple[float, dict[str, Any], dict[str, float]]] = []
@@ -446,6 +471,62 @@ def _select_and_weight(
 
     # Keep top *max_count*
     selected = scored[:max_count]
+
+    return SelectionDraft(
+        layer=layer, strategy=strategy, regime=regime,
+        mandatory_assignments=mandatory_assignments,
+        selected=selected,
+        total_scored=len(scored),
+        budget_after_mandatory=budget,
+    )
+
+
+def _select_and_weight(
+    candidates: list[dict[str, Any]],
+    factor_matrix: dict[str, dict[str, float]],
+    budget: float,
+    layer: str,
+    regime: str,
+    strategy: str = "balanced",
+    max_count: int = 5,
+    exclude_tracked_indices: set[str] | None = None,
+    penalize_symbols: set[str] | None = None,
+    sector_momentum: list[dict] | None = None,
+    mandatory_codes: set[str] | None = None,
+    # A1 (round23 §10.1): 引擎纯度参数（allocate 透传，None = 跳过分类聚合）
+    factor_definitions: dict | None = None,
+    ic_series: dict | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Internal helper: score candidates, keep top *max_count*,
+    distribute *budget* via power-law, attach rationale.
+
+    Each returned dict has symbol, name, layer, weight, selection_rationale,
+    factor_score, and factor_breakdown.
+
+    B3: exclude_tracked_indices — 跳过已选指数的标的，防止同指数多头持仓.
+    P1-7 (round20): sector_momentum — 当日板块涨幅榜；aggressive 对强势板块
+    对应 ETF 给动态 c2_bonus（替代 _RISKY_THEMES 静态科技关键词判定）。
+
+    round36 B5-S1: select 段已提取为 :func:`_select_draft`（SelectionDraft 纯函数）；
+    本函数保留 size 及其后段（幂律配权 → 科创配额裁剪 → 组装 → 合并强制标的），
+    行为等价搬迁、外壳签名不变。
+    """
+    draft = _select_draft(
+        candidates, factor_matrix, budget, layer, regime,
+        strategy=strategy, max_count=max_count,
+        exclude_tracked_indices=exclude_tracked_indices,
+        penalize_symbols=penalize_symbols,
+        sector_momentum=sector_momentum,
+        mandatory_codes=mandatory_codes,
+        factor_definitions=factor_definitions,
+        ic_series=ic_series,
+    )
+    if draft is None:
+        return []
+    mandatory_assignments = draft.mandatory_assignments
+    selected = draft.selected
+    budget = draft.budget_after_mandatory
     if not selected:
         return mandatory_assignments
 
@@ -546,7 +627,7 @@ def _select_and_weight(
         name = cand.get("name", sym)
         rank_info = {
             "rank": _idx + 1,
-            "total_candidates": len(scored),
+            "total_candidates": draft.total_scored,
             "dominant_factor": _dominant_factor(factor_scores, _PROFILE_WEIGHTS.get(strategy, _PROFILE_WEIGHTS["balanced"])),
         }
         rationale = build_rationale(
