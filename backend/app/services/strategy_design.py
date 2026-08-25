@@ -25,6 +25,9 @@ from ..engine.allocation_engine import (
 from ..engine.budgets import STRATEGY_META
 from ..engine.rationale import build_rationale
 from ..engine.risk_controls import apply_risk_controls
+# round36 §8-A: 设计管线重计算段下放长任务线程池（D1 探针实证：相关性阶段是
+# 唯一显著循环阻塞段——健康日 2.67s×3，降级日内部 5s 超时网络拉取可放大到分钟级）。
+from ..core.async_utils import run_sync_long
 
 logger = logging.getLogger(__name__)
 
@@ -454,11 +457,18 @@ async def generate_enhanced_design(
 
             # round19 P1-② (2026-08-12): 方案内标的与同方案其它持仓的中位数相关性
             # （低相关措辞数据源，缺失/失败时为空 dict → correlation_median=None 不影响）
-            corr_medians = _correlation_medians_for(allocs, candidates)
-
             # round20 P1-1: 方案内两两相关性矩阵（复用 _correlation_medians_for 预热缓存，
-            # 不重复拉 K 线）——供 enforce_max_correlation 高相关对权重约束
-            corr_matrix = _correlation_matrix_for(allocs, candidates)
+            # 不重复拉 K 线）——供 enforce_max_correlation 高相关对权重约束。
+            # round36 §8-A: 两阶段合并后经 run_sync_long 下放长任务线程池——
+            # 内部 get_history 为同步网络（每标的 5s 超时），循环上直跑会在
+            # 降级日冻结事件循环分钟级（D1 探针 + 2026-08-25 挂死实录）。
+            def _compute_corr() -> tuple[dict, dict]:
+                return (
+                    _correlation_medians_for(allocs, candidates),
+                    _correlation_matrix_for(allocs, candidates),
+                )
+
+            corr_medians, corr_matrix = await run_sync_long(_compute_corr)
 
             # enrich rationale using engine/rationale.py
             for a in allocs:
@@ -539,6 +549,7 @@ async def generate_enhanced_design(
                     )
 
             # S6: Inject daily_change_pct and price from market_data_hub market data
+            _kline_needed: list[str] = []  # round36 §8-A: 缺口标的批量收集
             for a in allocs:
                 if a.get("symbol") == "CASH":
                     continue
@@ -567,8 +578,23 @@ async def generate_enhanced_design(
                 # ② K 线 close 序列 (close[-1]-close[-2])/close[-2]（×100 转百分比）。
                 # round10 P2-G: K 线差分（实时 K 线序列）优先于文件快照——快照可能滞后
                 # 多个交易日（非交易日/缓存 TTL 内），K 线总是拉最近交易日，更「新」。
-                if a.get("daily_change_pct") is None:
-                    kcp = _kline_change_pct(market_data_hub, code)
+                if a.get("daily_change_pct") is None and code not in _kline_needed:
+                    _kline_needed.append(code)
+
+            # round36 §8-A: K 线兜底批量下放长任务线程池——_kline_change_pct 内部为
+            # 同步网络（fallback 链各带超时），降级日逐标的串行直跑会冻结事件循环。
+            _kline_map: dict[str, float | None] = {}
+            if _kline_needed:
+                def _batch_kline(syms: tuple[str, ...] = tuple(_kline_needed)) -> dict:
+                    return {s: _kline_change_pct(market_data_hub, s) for s in syms}
+
+                _kline_map = await run_sync_long(_batch_kline)
+            for a in allocs:
+                if a.get("symbol") == "CASH":
+                    continue
+                code = a["symbol"]
+                if a.get("daily_change_pct") is None and code in _kline_map:
+                    kcp = _kline_map[code]
                     if kcp is not None:
                         a["daily_change_pct"] = sanitize_change_pct(code, round(kcp * 100, 4))
                 if a.get("daily_change_pct") is None:
@@ -896,7 +922,12 @@ async def _build_market_context(market_data_hub) -> dict:
             if not code:
                 continue
             try:
-                stocks = market_data_hub.get_sector_stocks(code) or []
+                # round36 §8-A3: get_sector_stocks 内部为同步网络（levistock/akshare
+                # 多级 fallback，py-spy 冻结窗实测 future.result() 阻塞循环 64-66s/
+                # 板块）——经 run_sync_long 下放，循环保持响应。
+                stocks = await run_sync_long(
+                    lambda _code=code: market_data_hub.get_sector_stocks(_code) or []
+                ) or []
                 for st in stocks[:3]:
                     benchmark_stocks.append({
                         "symbol": st.get("stock_code") or st.get("code", ""),

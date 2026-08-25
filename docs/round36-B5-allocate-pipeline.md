@@ -169,3 +169,41 @@ mypy 零新增、engine 纯度门禁持续通过（pre-commit 每阶段实跑确
 - ❌ 不改 Windows 事件循环策略（Proactor 为 uvicorn Windows 默认，换 Selector
   影响子进程支持，收益不明）；
 - ❌ 本批不做 verify_perf 阈值调整（性能软门禁口径不变）。
+
+## 9. §8 实施结果（2026-08-25 · 同日追凶四轮 · A/B/C 全落地 + 残余登记）
+
+**结论一句话**：§8 三层全部交付并实弹验证生效；冻结幅度 64-66s×N → 单次 9.6s、
+外部拒连 12 次 → 0 次；残余 9.6s 级间歇停滞特征指向主机内存压力（§1.6 环境），
+代码侧四个阻塞点已全部消灭。
+
+### 9.1 落地清单（commit 见 git log）
+
+| 项 | 内容 | 实弹证据 |
+|---|---|---|
+| D1 探针 | `scripts/probe_design_pipeline_profile.py` 分段画像（健康日 corr.medians 2.67s×3 为唯一显著段） | results json 入档 scripts/ |
+| B 看门狗 | `core/loop_watchdog.py`（lag>5s → WARNING+全任务栈转储 logs/loop_lag_*.log，max_dumps 封顶）+ lifespan 接线 | **三次实弹抓获**：39.8s / 64.7s / 66.5s 冻结现场 |
+| C e2e 快跳 | verify_e2e 装请求守卫：连续 8 次拒连判风暴 → 剩余检查快速跳过归 SKIP-STORM 桶（不计 FAIL 不静默），汇总显式披露 | 三轮风暴期 e2e 从烧 10min → ~2min 完成 |
+| A1 相关性/K线段下放 | strategy_design corr 两阶段合并 + kline 兜底批量化经 `run_sync_long` 下放；负向测试「慢段期间心跳<0.35s」旧实现必红 | test_design_loop_offload.py ×4 绿 |
+| A2 共享 SSL 上下文 | client.py 三入口 `verify=_shared_ssl_context()`——py-spy 抓到每客户端 `create_default_context` 主线程 active 帧 | 身份缓存钉定测试绿；行为锚零修改 |
+| A3 板块成分股下放 | `_build_market_context` 的 `get_sector_stocks` 直呼（py-spy 冻结窗实测 future.result() 阻塞 64-66s/板块）→ `run_sync_long` | 心跳负向用例绿 |
+
+### 9.2 追凶方法沉淀（可复用）
+
+1. 看门狗转储定位「何时」（解冻后取栈只见受害者，不能点名阻塞者）；
+2. 后端日志时间窗对齐定位「哪段业务」；
+3. **py-spy 定时采样主线程帧**（暂停式 dump，0.6-1s 间隔）在冻结窗口内直接
+   抓到阻塞调用链 `generate_enhanced_design:362 → _build_market_context:925 →
+   get_sector_stocks → safe_call/run_in_thread → future.result()` ——三件套
+   组合两轮即闭环。⚠️ `--nonblocking` 的 active 标记不可靠，勿用。
+
+### 9.3 残余与登记
+
+- **残余 9.6s 级间歇停滞**：末轮探针 2568 次 **零拒连**、最大时延 1.92s，
+  但看门狗仍录得单次 9.6s 内部滞后 + e2e 撞到 8 连拒。内外信号分裂特征与
+  主机 commit charge 高位（~51/59GB，§1.6 页面文件紧张）的调度饥饿一致——
+  归环境债；扩页面文件/错峰复测后若消失即可闭案。
+- **语义陷阱登记**：`core/async_utils.run_in_thread/safe_call` 名字像异步安全，
+  实为**同步阻塞等待线程池结果**——任何 `async def` 直呼都会冻结循环
+  （本次真凶形态）。新代码一律 `await run_sync/run_sync_long`；
+  audit_async_blocking 门禁不覆盖此类（它只查 I/O 函数直呼）。
+- e2e 其余 FAIL（ETF 记录数稀疏等）＝ §1.3 既有环境归类，非本轮引入。

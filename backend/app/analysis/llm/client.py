@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import ssl
 import sys
 import time
 from typing import AsyncGenerator
@@ -45,6 +46,21 @@ def _apply_provider_body(body: dict, provider: ProviderConfig) -> None:
     if getattr(provider, "reasoning_effort", None):
         body["reasoning_effort"] = provider.reasoning_effort
         body.pop("temperature", None)
+
+
+# ── round36 §8-A2: 共享 SSL 上下文（py-spy 现行取证）──────────────────
+# 三个入口此前每次调用每候选都 `httpx.AsyncClient(...)` 新建 → httpx 内部
+# create_default_context() 在事件循环上同步执行（ssl.py:707 py-spy 实录，
+# Windows 证书加载可达百 ms 级）× failover 链 × 重试 × 并发调用叠加成可感冻结。
+# 进程级缓存一个 SSLContext 传入 verify= → httpx 直接复用，零行为差异。
+_SSL_CONTEXT: ssl.SSLContext | None = None
+
+
+def _shared_ssl_context() -> ssl.SSLContext:
+    global _SSL_CONTEXT
+    if _SSL_CONTEXT is None:
+        _SSL_CONTEXT = ssl.create_default_context()
+    return _SSL_CONTEXT
 
 
 async def llm_complete(
@@ -94,7 +110,7 @@ async def llm_complete(
             _start = time.monotonic()
             try:
                 async with httpx.AsyncClient(
-                    timeout=provider.timeout, trust_env=False
+                    timeout=provider.timeout, trust_env=False, verify=_shared_ssl_context()
                 ) as client:
                     resp = await client.post(
                         provider.api_url,
@@ -264,7 +280,7 @@ async def llm_complete_stream(
 
             try:
                 async with httpx.AsyncClient(
-                    timeout=provider.timeout, trust_env=False
+                    timeout=provider.timeout, trust_env=False, verify=_shared_ssl_context()
                 ) as client:
                     async with client.stream(
                         "POST",
@@ -485,7 +501,8 @@ async def llm_complete_with_system(
             _start = time.monotonic()
             try:
                 async with httpx.AsyncClient(
-                    timeout=(request_timeout if request_timeout is not None else provider.timeout), trust_env=False
+                    timeout=(request_timeout if request_timeout is not None else provider.timeout),
+                    trust_env=False, verify=_shared_ssl_context()
                 ) as client:
                     resp = await client.post(
                         provider.api_url,

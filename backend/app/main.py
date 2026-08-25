@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+from pathlib import Path
 from collections.abc import Generator
 from contextlib import asynccontextmanager, contextmanager
 from typing import TYPE_CHECKING
@@ -666,6 +667,13 @@ async def lifespan(app: FastAPI):
     from .core.background_tasks import spawn as _spawn
 
     _spawn(health_loop(interval=120.0), name="loop-health")
+
+    # round36 §8-B: 事件循环滞后看门狗——同步重段冻结循环时产出带栈告警转储
+    # （known-env-issues §1.1「静默挂死」诊断成本收敛；shutdown_all 统一取消）
+    from .core.loop_watchdog import start_loop_watchdog
+
+    start_loop_watchdog(interval=1.0, threshold=5.0, dump_dir=str(Path(__file__).resolve().parent.parent.parent / "logs"))
+    logger.info("[lifespan] 事件循环滞后看门狗已启动（threshold=5s）")
 
     # Start sector cache refresh loop (60s, Phase 2)
     async def _sector_refresh_loop():

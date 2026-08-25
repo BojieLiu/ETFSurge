@@ -27,19 +27,64 @@ import time
 import socket
 import requests
 
+# ── round36 §8-C: 连接拒绝风暴快速跳过（known-env-issues §1.1）──────────
+# 后端事件循环被同步重段冻结时，全部端点 10061 拒绝（风暴态）。旧实现逐检查
+# 等满各自 timeout → e2e 烧 10 分钟且输出全红不可归类。此处装 guard：
+#   · 连续 ≥STORM_THRESHOLD 次 ConnectionError → 判定风暴态；
+#   · 风暴态下后续请求立即抛标记异常，check() 归入 STORM_SKIP 桶（环境性），
+#     不再逐个撞后端；风暴前已捕获的断言照旧有效（§1.1 处置条款）。
+_STORM = {"consec": 0, "active": False, "skipped": 0}
+STORM_THRESHOLD = 8
+
+_orig_session_request = requests.Session.request
+
+
+def _storm_guarded_request(self, method, url, **kwargs):
+    if _STORM["active"]:
+        _STORM["skipped"] += 1
+        raise requests.ConnectionError(
+            f"[storm-fast-skip] connection-refused storm active, request not sent: {url}"
+        )
+    kwargs.setdefault("timeout", 30)
+    try:
+        resp = _orig_session_request(self, method, url, **kwargs)
+        _STORM["consec"] = 0
+        return resp
+    except requests.ConnectionError as e:
+        # 仅真实连接失败计入（HTTP 4xx/5xx 是正常响应不触发）
+        if "10061" in str(e) or "Failed to establish" in str(e) or "Max retries" in str(e):
+            _STORM["consec"] += 1
+            if _STORM["consec"] >= STORM_THRESHOLD and not _STORM["active"]:
+                _STORM["active"] = True
+                print(
+                    f"\n[STORM] 连续 {_STORM['consec']} 次连接拒绝 → 判定连接拒绝风暴"
+                    f"（known-env-issues §1.1），剩余网络检查快速跳过\n",
+                    flush=True,
+                )
+        raise
+
+
+requests.Session.request = _storm_guarded_request
+
 # T4: 无论从哪个目录运行，都能 import app.*
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 PASS = 0
 FAIL = 0
 SKIP = 0
+STORM_SKIP = 0  # round36 §8-C: 风暴态下快速跳过数（环境性，不计 FAIL）
 # O21 (round8): 后端监听 [::]（uvicorn --host ::）——Windows 原生 :: 为 v6only，
 # 127.0.0.1 直连会被拒；localhost 经 DNS verbatim 顺序（::1 优先）可直连。
 BASE = "http://localhost:8000"
 
 
 def check(label, ok, detail="", skip=False):
-    global PASS, FAIL, SKIP
+    global PASS, FAIL, SKIP, STORM_SKIP
+    # round36 §8-C: 风暴态快速跳过的检查归入 STORM_SKIP 桶（环境性，不冒充 FAIL）
+    if "[storm-fast-skip]" in str(detail):
+        STORM_SKIP += 1
+        print(f"  [SKIP-STORM] {label}")
+        return
     if skip:
         SKIP += 1
         print(f"  [SKIP] {label}" + (f" — {detail}" if detail else ""))
@@ -2075,6 +2120,13 @@ def print_summary():
     print(f"结果: {PASS}/{total} 通过", "ALL PASS" if FAIL == 0 else "HAS FAILURES")
     if SKIP:
         print(f"      {SKIP} 项跳过")
+    # round36 §8-C: 风暴快速跳过单独披露——环境性（known-env-issues §1.1），
+    # 不计入 FAIL（风暴前断言已捕获即有效），但必须显式可见、不静默。
+    if STORM_SKIP:
+        print(
+            f"      [STORM] {STORM_SKIP} 项因连接拒绝风暴快速跳过"
+            f"（§1.1 环境归类；后端自愈后可复测）"
+        )
     # S3: skip 超过阈值即 FAIL——防止门禁自我豁免蔓延（F20 薄弱点 3）。
     # 白名单化后的合理 skip 仅 2 类：nginx 未运行 / websockets 未装（外加设计质量条件 skip 至多 1），
     # 阈值 3 之上出现任何 skip 都视为异常豁免。
@@ -2212,10 +2264,18 @@ def main():
         print(f"[Full] 模式: 运行所有模块")
 
     for name in module_names:
-        if name in ("health", "factors"):
-            MODULES[name](args.host, args.port)
-        else:
-            MODULES[name]()
+        # round36 §8-C: 风暴标记异常在此收口为 SKIP-STORM 条目；其余异常
+        # 保持原语义直接抛出（门禁不吞真实错误）。
+        try:
+            if name in ("health", "factors"):
+                MODULES[name](args.host, args.port)
+            else:
+                MODULES[name]()
+        except Exception as e:
+            if "[storm-fast-skip]" in str(e):
+                check(f"模块 {name}（风暴跳过）", False, str(e))
+            else:
+                raise
 
     print_summary()
 

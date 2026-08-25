@@ -26,6 +26,14 @@
   （循环被占满而非 ~20s 短阻塞）。③修复方案已入档
   `docs/round36-B5-allocate-pipeline.md` §8（A 重计算 run_sync 下放 / B 循环滞后
   看门狗 / C e2e 风暴快速跳过），待「开始实施」。
+- **2026-08-25 §8 实施后更新**：三层全部落地（见 round36 文档 §9）——py-spy
+  采样抓到三个真凶并修复：①`_build_market_context` 循环上直呼同步
+  `get_sector_stocks`（future.result() 阻塞 64-66s/板块，最大真凶）；②设计管线
+  相关性/K 线兜底段；③每客户端重建 SSL 上下文。冻结 64-66s×N → 单次 9.6s、
+  外部拒连 12 → 0。**残余**：单次 ~10s 内外信号分裂停滞（外部零拒连但内部
+  调度滞后），特征与主机 commit charge 高位的调度饥饿一致 → 归 §1.6 环境债，
+  扩页面文件后复测闭案。语义陷阱：`run_in_thread/safe_call` 为同步阻塞等待，
+  async def 直呼即冻结循环（audit_async_blocking 不查此类）。
 
 ### 1.2 LLM 提供方不可用（402 配额耗尽 / 400 / 节流刷屏）
 
