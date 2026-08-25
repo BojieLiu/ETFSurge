@@ -216,6 +216,7 @@ DEEPSEEK_API_KEY=sk-xxx
 - **前端 dev server 启动方式**：见「启动命令」中的 Windows 坑。
 - **LLM prompt 规则 1 必须硬约束**：`design_report.md` 的规则 1 禁止 LLM 篡改 ETF 标的。若 LLM 仍引入候选池外代码，一致性校验 `_validate_report_consistency` 会在后处理中追加修正脚注 + 写 ERROR 日志。
 - **`async def` ≠ 非阻塞**：`async def` 只改了函数签名，不改变调用链底层的行为。任何 `async def` 函数内部若直接调用同步 I/O（akshare/requests/urllib/pandas），会阻塞整个事件循环。正确做法：用 `await run_sync(call, *args)` 提交到线程池。判断标准——函数体内出现 `.get(`、`ak.`、`urllib.request` 等调用时，必须检查是否经过 `run_sync`/`asyncio.to_thread` 包裹。
+- **`run_in_thread`/`safe_call` 是同步阻塞等待，不是异步安全**（round36 §8 追凶定罪）：这两个 helper 在当前线程 `future.result()` 等线程池结果——`async def` 直呼即冻结事件循环（实测单板块慢源 64-66s，audit_async_blocking 不查此类）。async 语境一律 `await run_sync/run_sync_long`。纯 CPU 长计算同理（门禁只查 I/O 直呼）——设计管线曾因 ~20s 级纯 CPU 段 + 此模式叠加触发全服拒绝风暴（known-env-issues §1.1 / round36 §9）。
 
 ## API 契约流程（强制 / Mandatory）
 
