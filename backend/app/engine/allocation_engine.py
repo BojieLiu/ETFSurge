@@ -496,6 +496,179 @@ def _size_allocations(
     return draft.selected, weights
 
 
+# ── round36 B5-S3: constrain 段——约束族显式化 ──────────────────────────
+# 四族约束（宽基上限 / core_growth_cap / 卫星科创配额 / 锚地板）从
+# allocate()/_select_and_weight 内联块提取为纯函数；行为等价搬迁，
+# 简化不在本批承诺内（round36 铁律 3）。
+
+
+def _constrain_core_wide_basis_cap(
+    core_alloc: list[dict[str, Any]], profile_key: str
+) -> list[dict[str, Any]]:
+    """R101 (round32): 核心层大盘宽基数量上限（含强制锚占名额），超出剔除低分非锚。
+
+    原 allocate 内联块原样搬迁：强制锚永不剔除；被剔权重按其余核心标的比例回补。
+    """
+    _core_large = [a for a in core_alloc if _is_large_cap_wide_basis(a)]
+    _LARGE_CAP_WIDE_BASIS_LIMIT = ENGINE_CONFIG.large_cap_wide_basis_limit  # 含强制锚（510300/159338 占 2 名额）
+    if len(_core_large) > _LARGE_CAP_WIDE_BASIS_LIMIT:
+        _anchor_in_core = {a.get("symbol") for a in _core_large} & MANDATORY_CODES
+        _keep_non_anchor = _LARGE_CAP_WIDE_BASIS_LIMIT - len(_anchor_in_core)
+        _excess = sorted(
+            [a for a in _core_large if a.get("symbol") not in MANDATORY_CODES],
+            key=lambda a: a.get("factor_score", 0.0) or 0.0,
+            reverse=True,
+        )[max(_keep_non_anchor, 0):]
+        _excess_syms = {a.get("symbol", "") for a in _excess}
+        _excess_w = sum(a.get("weight", 0.0) or 0.0 for a in _excess)
+        _kept_core = [a for a in core_alloc if a.get("symbol") not in _excess_syms]
+        if _excess_w > 1e-9 and _kept_core:
+            _kept_w_total = sum(a.get("weight", 0.0) or 0.0 for a in _kept_core)
+            if _kept_w_total > 0:
+                for a in _kept_core:
+                    a["weight"] = round(
+                        (a.get("weight", 0.0) or 0.0)
+                        + _excess_w * (a.get("weight", 0.0) or 0.0) / _kept_w_total,
+                        4,
+                    )
+        logger.info(
+            "[allocation] R101 core wide-basis cap: removed %s "
+            "(limit=%d incl. anchors, weight %.3f reclaimed across %d core holdings, strategy=%s)",
+            sorted(_excess_syms), _LARGE_CAP_WIDE_BASIS_LIMIT, _excess_w,
+            len(_kept_core), profile_key,
+        )
+        return _kept_core
+    return core_alloc
+
+
+def _enforce_mandatory_floor(allocations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """C: 强制标的权重下限后处理 — 低于 5% 的强制标的上调到 5%。
+
+    原.allocate 内联块原样搬迁：优先扣总现金仓；现金不足则从非强制标的中等比例扣减
+    （M4 联动：现金不足时旧逻辑的 ``if cash_weight < 0`` 是死代码，强制标的永远停在
+    3%，不满足验收「核心层单只权重 ≥5%」）。
+    """
+    cash_allocs = [a for a in allocations if a.get("symbol") == "CASH"]
+    cash_weight = sum(a.get("weight", 0) for a in cash_allocs)
+    for a in allocations:
+        sym = a.get("symbol", "")
+        if sym in MANDATORY_CODES and a.get("weight", 0) < 0.05:
+            needed = 0.05 - a["weight"]
+            if cash_weight >= needed:
+                a["weight"] = 0.05
+                cash_weight -= needed
+            else:
+                if cash_weight > 1e-9:
+                    a["weight"] = round(a["weight"] + cash_weight, 4)
+                    needed -= cash_weight
+                    cash_weight = 0.0
+                if needed > 1e-9:
+                    non_mandatory = [
+                        x for x in allocations
+                        if x.get("symbol") not in MANDATORY_CODES
+                        and x.get("symbol") != "CASH"
+                        and x.get("weight", 0) > 0.01
+                    ]
+                    total_non = sum(x.get("weight", 0) for x in non_mandatory)
+                    if total_non > 0:
+                        for x in non_mandatory:
+                            cut = needed * x.get("weight", 0) / total_non
+                            x["weight"] = round(x["weight"] - cut, 4)
+                        a["weight"] = round(a["weight"] + needed, 4)
+    return allocations
+
+
+def _constrain_satellite_tech_quota(
+    selected: list[tuple[float, dict[str, Any], dict[str, float]]],
+    weights: list[float],
+    budget: float,
+    strategy: str,
+    layer: str,
+) -> tuple[list[tuple[float, dict[str, Any], dict[str, float]]], list[float]]:
+    """F0-5 步骤 C + O17: 卫星层科创系配额（权重 ≤ 配额比例 ∧ 数量 ≤ 上限）。
+
+    原 _select_and_weight 内联块原样搬迁：超出部分按 composite 降序裁剪、权重回补
+    其余卫星，防止科创系包场（同主题不同概念名绕过去重）；数量维度与权重配额取更严。
+    """
+    if layer != "satellite" or budget <= 0:
+        return selected, weights
+    tech_cap_ratio = (
+        ENGINE_CONFIG.tech_quota_defensive if strategy == "defensive"
+        else ENGINE_CONFIG.tech_quota_default
+    )
+    tech_cap = budget * tech_cap_ratio
+    TECH_MAX_COUNT = ENGINE_CONFIG.tech_max_count  # O17: 科创系数量上限（与 F7「卫星 ≥4 且 ≥2 非科技」呼应）
+    tech_items = [
+        (item, w) for (item, w) in zip(selected, weights, strict=False)
+        if _is_tech_theme(item[1].get("name", ""))
+    ]
+    tech_alloc_total = sum(w for _, w in tech_items)
+    non_tech_items = [
+        (item, w) for (item, w) in zip(selected, weights, strict=False)
+        if not _is_tech_theme(item[1].get("name", ""))
+    ]
+    if tech_alloc_total > tech_cap + 1e-9 or len(tech_items) > TECH_MAX_COUNT:
+        # F4-前置 (round6 §14.6): 裁剪日志——触发/裁剪量/回补结果，
+        # 供验收复核「科创合计 ≤ budget×40%/50%」与 task 158 版本差异定位。
+        logger.info(
+            "[allocation] satellite tech trim triggered: tech_alloc=%.3f > cap=%.3f "
+            "or tech_count=%d > %d (budget=%.3f, ratio=%.2f, strategy=%s)",
+            tech_alloc_total, tech_cap, len(tech_items), TECH_MAX_COUNT,
+            budget, tech_cap_ratio, strategy,
+        )
+        # 科技候选按 composite 降序，同时受权重配额 + 数量上限约束
+        kept: list[tuple] = []
+        dropped: list[tuple] = []
+        acc = 0.0
+        for item, w in sorted(tech_items, key=lambda x: x[0][0], reverse=True):
+            if len(kept) >= TECH_MAX_COUNT:
+                dropped.append((item, w))
+                continue
+            if acc + w <= tech_cap:
+                kept.append((item, w))
+                acc += w
+            else:
+                room = tech_cap - acc
+                if room > 1e-9:
+                    kept.append((item, room))
+                    acc = tech_cap
+                dropped.append((item, w - room if room > 1e-9 else w))
+        kept = non_tech_items + kept
+        # 回收被裁剪的权重，按 composite 降序回补其余卫星（不引入 CASH 膨胀）
+        reclaimed = sum(w for _, w in dropped)
+        logger.info(
+            "[allocation] satellite tech trim dropped %.3f weight across %d tech "
+            "candidates (kept tech=%.3f, count=%d)",
+            reclaimed, len(dropped), acc, len([i for i, _ in kept if _is_tech_theme(i[1].get("name", ""))]),
+        )
+        non_tech_kept = [(i, w) for i, w in kept if not _is_tech_theme(i[1].get("name", ""))]
+        if reclaimed > 0 and non_tech_kept:
+            total_non_tech = sum(w for _, w in non_tech_kept)
+            if total_non_tech > 0:
+                new_kept = []
+                for i, w in kept:
+                    if _is_tech_theme(i[1].get("name", "")):
+                        new_kept.append((i, w))
+                    else:
+                        new_kept.append((i, w + reclaimed * w / total_non_tech))
+                kept = new_kept
+            logger.info(
+                "[allocation] satellite tech trim reclaimed %.3f redistributed across "
+                "%d non-tech candidates",
+                reclaimed, len(non_tech_kept),
+            )
+        else:
+            logger.warning(
+                "[allocation] satellite tech trim: no non-tech candidates to reclaim "
+                "%.3f trimmed weight — weight converts to CASH (satellite budget "
+                "underfill, %.3f of %.3f used)",
+                reclaimed, sum(w for _, w in kept), budget,
+            )
+        selected = [i for i, _ in kept]
+        weights = [w for _, w in kept]
+    return selected, weights
+
+
 def _select_and_weight(
     candidates: list[dict[str, Any]],
     factor_matrix: dict[str, dict[str, float]],
@@ -547,87 +720,11 @@ def _select_and_weight(
     # 卫星科创配额段（F0-5/O17）仍以「强制标的扣减后预算」为基准
     budget = draft.budget_after_mandatory
 
-    # F0-5 步骤 C: 卫星层科创系配额 — 名称含 科创/半导体/芯片/AI 的候选
-    # 合计权重 ≤ 卫星预算的配额比例（防御型 40% 收紧至验收线 10% 以内，
-    # 平衡/进攻 50%），超出部分按 composite 降序裁剪、权重回补其余卫星，
-    # 防止科创系包场（同主题不同概念名绕过去重）。
-    # O17 (round7 §7 P19): 增加数量维度——科创系标的数量 ≤ 2 只，与权重配额
-    # 取更严（先权重裁剪、再数量裁剪），防止「权重不超配额但 4 只科创同现」。
-    if layer == "satellite" and budget > 0:
-        tech_cap_ratio = (
-            ENGINE_CONFIG.tech_quota_defensive if strategy == "defensive"
-            else ENGINE_CONFIG.tech_quota_default
-        )
-        tech_cap = budget * tech_cap_ratio
-        TECH_MAX_COUNT = ENGINE_CONFIG.tech_max_count  # O17: 科创系数量上限（与 F7「卫星 ≥4 且 ≥2 非科技」呼应）
-        tech_items = [
-            (item, w) for (item, w) in zip(selected, weights, strict=False)
-            if _is_tech_theme(item[1].get("name", ""))
-        ]
-        tech_alloc_total = sum(w for _, w in tech_items)
-        non_tech_items = [
-            (item, w) for (item, w) in zip(selected, weights, strict=False)
-            if not _is_tech_theme(item[1].get("name", ""))
-        ]
-        if tech_alloc_total > tech_cap + 1e-9 or len(tech_items) > TECH_MAX_COUNT:
-            # F4-前置 (round6 §14.6): 裁剪日志——触发/裁剪量/回补结果，
-            # 供验收复核「科创合计 ≤ budget×40%/50%」与 task 158 版本差异定位。
-            logger.info(
-                "[allocation] satellite tech trim triggered: tech_alloc=%.3f > cap=%.3f "
-                "or tech_count=%d > %d (budget=%.3f, ratio=%.2f, strategy=%s)",
-                tech_alloc_total, tech_cap, len(tech_items), TECH_MAX_COUNT,
-                budget, tech_cap_ratio, strategy,
-            )
-            # 科技候选按 composite 降序，同时受权重配额 + 数量上限约束
-            kept: list[tuple] = []
-            dropped: list[tuple] = []
-            acc = 0.0
-            for item, w in sorted(tech_items, key=lambda x: x[0][0], reverse=True):
-                if len(kept) >= TECH_MAX_COUNT:
-                    dropped.append((item, w))
-                    continue
-                if acc + w <= tech_cap:
-                    kept.append((item, w))
-                    acc += w
-                else:
-                    room = tech_cap - acc
-                    if room > 1e-9:
-                        kept.append((item, room))
-                        acc = tech_cap
-                    dropped.append((item, w - room if room > 1e-9 else w))
-            kept = non_tech_items + kept
-            # 回收被裁剪的权重，按 composite 降序回补其余卫星（不引入 CASH 膨胀）
-            reclaimed = sum(w for _, w in dropped)
-            logger.info(
-                "[allocation] satellite tech trim dropped %.3f weight across %d tech "
-                "candidates (kept tech=%.3f, count=%d)",
-                reclaimed, len(dropped), acc, len([i for i, _ in kept if _is_tech_theme(i[1].get("name", ""))]),
-            )
-            non_tech_kept = [(i, w) for i, w in kept if not _is_tech_theme(i[1].get("name", ""))]
-            if reclaimed > 0 and non_tech_kept:
-                total_non_tech = sum(w for _, w in non_tech_kept)
-                if total_non_tech > 0:
-                    new_kept = []
-                    for i, w in kept:
-                        if _is_tech_theme(i[1].get("name", "")):
-                            new_kept.append((i, w))
-                        else:
-                            new_kept.append((i, w + reclaimed * w / total_non_tech))
-                    kept = new_kept
-                logger.info(
-                    "[allocation] satellite tech trim reclaimed %.3f redistributed across "
-                    "%d non-tech candidates",
-                    reclaimed, len(non_tech_kept),
-                )
-            else:
-                logger.warning(
-                    "[allocation] satellite tech trim: no non-tech candidates to reclaim "
-                    "%.3f trimmed weight — weight converts to CASH (satellite budget "
-                    "underfill, %.3f of %.3f used)",
-                    reclaimed, sum(w for _, w in kept), budget,
-                )
-            selected = [i for i, _ in kept]
-            weights = [w for _, w in kept]
+    # B5-S3: constrain 段——卫星科创配额（F0-5 权重配额 + O17 数量上限）
+    selected, weights = _constrain_satellite_tech_quota(
+        selected, weights, budget, strategy, layer,
+    )
+
 
     results: list[dict[str, Any]] = []
     # O24 (round7 §7 P24) / round35 B1-F5 (§4.5 D5): 归因链——层内候选池排名 +
@@ -1231,35 +1328,8 @@ def allocate(
         #   · 超出按 factor_score 降序剔除低分非锚者（强制锚永不剔除），权重按其余
         #     核心标的比例回补；>0.95 配对的高相关提示由 strategy_design 的
         #     wide_basis_high_corr_warnings 层给出（不静默）。
-        _core_large = [a for a in core_alloc if _is_large_cap_wide_basis(a)]
-        _LARGE_CAP_WIDE_BASIS_LIMIT = ENGINE_CONFIG.large_cap_wide_basis_limit  # 含强制锚（510300/159338 占 2 名额）
-        if len(_core_large) > _LARGE_CAP_WIDE_BASIS_LIMIT:
-            _anchor_in_core = {a.get("symbol") for a in _core_large} & MANDATORY_CODES
-            _keep_non_anchor = _LARGE_CAP_WIDE_BASIS_LIMIT - len(_anchor_in_core)
-            _excess = sorted(
-                [a for a in _core_large if a.get("symbol") not in MANDATORY_CODES],
-                key=lambda a: a.get("factor_score", 0.0) or 0.0,
-                reverse=True,
-            )[max(_keep_non_anchor, 0):]
-            _excess_syms = {a.get("symbol", "") for a in _excess}
-            _excess_w = sum(a.get("weight", 0.0) or 0.0 for a in _excess)
-            _kept_core = [a for a in core_alloc if a.get("symbol") not in _excess_syms]
-            if _excess_w > 1e-9 and _kept_core:
-                _kept_w_total = sum(a.get("weight", 0.0) or 0.0 for a in _kept_core)
-                if _kept_w_total > 0:
-                    for a in _kept_core:
-                        a["weight"] = round(
-                            (a.get("weight", 0.0) or 0.0)
-                            + _excess_w * (a.get("weight", 0.0) or 0.0) / _kept_w_total,
-                            4,
-                        )
-            logger.info(
-                "[allocation] R101 core wide-basis cap: removed %s "
-                "(limit=%d incl. anchors, weight %.3f reclaimed across %d core holdings, strategy=%s)",
-                sorted(_excess_syms), _LARGE_CAP_WIDE_BASIS_LIMIT, _excess_w,
-                len(_kept_core), profile_key,
-            )
-            core_alloc = _kept_core
+        # B5-S3: constrain 段——R101 核心层大盘宽基数量上限
+        core_alloc = _constrain_core_wide_basis_cap(core_alloc, profile_key)
         # O16 补充: 预算补足——剔除/兜底后 MAX_WEIGHT(0.30) 钳制可能使核心层权重
         # < core budget（U6 R1「预算用满现金收敛」断言回归：aggressive 核心候选
         # 不足时兜底回补 1 只被钳制 0.3 → 核心预算缺口丢失）。缺口按剩余容量
@@ -1479,33 +1549,8 @@ def allocate(
         # 优先从总现金仓扣减；现金不足则从非强制标的中等比例扣减
         # （M4 联动：现金不足时旧逻辑的 `if cash_weight < 0` 是死代码，强制标的
         #   永远停在 3%，不满足验收「核心层单只权重 ≥5%」）。
-        cash_allocs = [a for a in allocations if a.get("symbol") == "CASH"]
-        cash_weight = sum(a.get("weight", 0) for a in cash_allocs)
-        for a in allocations:
-            sym = a.get("symbol", "")
-            if sym in MANDATORY_CODES and a.get("weight", 0) < 0.05:
-                needed = 0.05 - a["weight"]
-                if cash_weight >= needed:
-                    a["weight"] = 0.05
-                    cash_weight -= needed
-                else:
-                    if cash_weight > 1e-9:
-                        a["weight"] = round(a["weight"] + cash_weight, 4)
-                        needed -= cash_weight
-                        cash_weight = 0.0
-                    if needed > 1e-9:
-                        non_mandatory = [
-                            x for x in allocations
-                            if x.get("symbol") not in MANDATORY_CODES
-                            and x.get("symbol") != "CASH"
-                            and x.get("weight", 0) > 0.01
-                        ]
-                        total_non = sum(x.get("weight", 0) for x in non_mandatory)
-                        if total_non > 0:
-                            for x in non_mandatory:
-                                cut = needed * x.get("weight", 0) / total_non
-                                x["weight"] = round(x["weight"] - cut, 4)
-                            a["weight"] = round(a["weight"] + needed, 4)
+        # B5-S3: constrain 段——锚地板（MANDATORY_FLOOR 语义，5% 下限）
+        allocations = _enforce_mandatory_floor(allocations)
 
         # round35 B1-F4 (§4.4 D4): 删除基于 layer 名的 HHI 死计算——以 layer 名当
         # 「行业」算出的集中度恒为「层预算平方和」（同一 profile+regime 下近似常量），
