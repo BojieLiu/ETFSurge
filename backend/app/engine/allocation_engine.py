@@ -249,6 +249,23 @@ class SelectionDraft:
     五段管道（docs/round36-B5-allocate-pipeline.md）第一段的输出结构：
     后续 size()（幂律+钳制）/ constrain() / reconcile() 以此为输入，
     段间不再共享可变 dict 就地改。
+
+    B5 五段函数映射（S0-S5 落地后收口）：
+      1. select   → :func:`_select_draft`（打分/去重/初选，不改权重）
+      2. size     → :func:`_size_allocations`（幂律 + MIN/MAX 钳制一次性完成）
+      3. constrain→ :func:`_constrain_core_wide_basis_cap`（R101 宽基上限）/
+                    ``_cap_core_growth_wide_basis``（INV-4 成长帽）/
+                    :func:`_constrain_satellite_tech_quota`（F0-5/O17 科创配额）/
+                    :func:`_enforce_mandatory_floor`（锚地板 5%）
+      4. reconcile→ :func:`_reconcile_core_budget_topup`（O16 层预算缺口）/
+                    :func:`_reconcile_budget_shortfall`（U6-R1 总预算缺口，残差显式）
+      5. validate → :func:`check_structure_reasonableness`
+                    （P2-5 结构提示 + INV-3/5/6 经
+                    :func:`_validate_cross_profile_invariants` 收口）
+
+    段落调用点现状：1-4 在 ``allocate``/``_select_and_weight`` 原位接线；
+    5 由编排层 strategy_design 与黄金回放 harness 调用——外壳签名不变
+    （49 个调用方零感知，round36 迁移铁律 1）。
     """
 
     layer: str
@@ -1887,6 +1904,10 @@ def check_structure_reasonableness(
 ) -> list[dict[str, Any]]:
     """P2-5 (round20) + round22 INV-3/4/5/6: 方案结构合理性检查。
 
+    **round36 B5-S5**: 本函数即五段分配管道（select → size → constrain →
+    reconcile → validate）的第五段 ``validate``——INV 校验收口；跨方案
+    INV-3/5/6 已收口至 :func:`_validate_cross_profile_invariants`。
+
     纯函数，无 I/O。
 
     逐方案（cross_profile_only=False 时）：
@@ -1961,56 +1982,67 @@ def check_structure_reasonableness(
                 s["risk_metrics"]["structure_warnings"].extend(warnings)
 
     # round22 INV-3/5/6 cross-profile（仅当三方案齐全时校验；单方案调用不做跨方案比较）
+    # B5-S5: validate 段收口——跨方案 INV 校验提取为命名函数
     if _have_all:
-        _by = {s.get("id"): s for s in strategies}
-        _d, _b, _a = _by.get("defensive"), _by.get("balanced"), _by.get("aggressive")
-
-        def _layer_count(s, layer):
-            return sum(
-                1 for a in s.get("allocations", [])
-                if a.get("layer") == layer and a.get("symbol") != "CASH"
-            )
-
-        def _total_count(s):
-            return sum(1 for a in s.get("allocations", []) if a.get("symbol") != "CASH")
-
-        _xwarnings: list[dict[str, Any]] = []
-        # INV-3: 卫星数单调 防御<平衡<进攻
-        _sat = {p: _layer_count(_by[p], "satellite") for p in ("defensive", "balanced", "aggressive")}
-        if not (_sat["defensive"] < _sat["balanced"] < _sat["aggressive"]):
-            _xwarnings.append({"type": "inv3_satellite_not_monotonic",
-                               "satellite_counts": _sat})
-        # INV-3: 防御数反向 防御>=平衡>=进攻
-        _def = {p: _layer_count(_by[p], "defense") for p in ("defensive", "balanced", "aggressive")}
-        if not (_def["defensive"] >= _def["balanced"] >= _def["aggressive"]):
-            _xwarnings.append({"type": "inv3_defense_not_reverse_monotonic",
-                               "defense_counts": _def})
-        # INV-5: 总标的数单调 防御<平衡<进攻
-        _tot = {p: _total_count(_by[p]) for p in ("defensive", "balanced", "aggressive")}
-        if not (_tot["defensive"] < _tot["balanced"] < _tot["aggressive"]):
-            _xwarnings.append({"type": "inv5_total_not_monotonic",
-                               "total_counts": _tot})
-        # INV-6: 进攻压舱——现金 <=0.10（bear <=0.15）、防御权重 <=0.05
-        if _a is None:
-            logger.warning("[allocation] INV-3/5/6: aggressive 方案缺失，跳过 INV-6 校验")
-        else:
-            _a_allocs = _a.get("allocations", [])
-            _a_non_cash = sum(a.get("weight", 0.0) for a in _a_allocs if a.get("symbol") != "CASH")
-            _a_cash = round(1.0 - _a_non_cash, 4)
-            _a_def_w = sum(a.get("weight", 0.0) for a in _a_allocs if a.get("layer") == "defense")
-            if _a_cash > 0.10 + 1e-9:
-                _xwarnings.append({"type": "inv6_aggressive_cash_over", "cash": _a_cash,
-                                   "clamp": 0.10})
-            if _a_def_w > 0.05 + 1e-9:
-                _xwarnings.append({"type": "inv6_aggressive_defense_over", "defense_weight": _a_def_w,
-                                   "clamp": 0.05})
-            if _xwarnings:
-                _a.setdefault("risk_metrics", {})
-                _a["risk_metrics"].setdefault("structure_warnings", [])
-                _a["risk_metrics"]["structure_warnings"].extend(_xwarnings)
-                logger.warning(
-                    "[allocation] INV-3/5/6 cross-profile violations: %s",
-                    [w["type"] for w in _xwarnings],
-                )
+        _validate_cross_profile_invariants(strategies)
     return strategies
+
+
+def _validate_cross_profile_invariants(strategies: list[dict[str, Any]]) -> None:
+    """round36 B5-S5: validate 段——跨方案 INV-3/5/6 校验收口（原内联块原样搬迁）。
+
+    INV-3 卫星数单调 + 防御数反向单调；INV-5 总标的数单调；INV-6 进攻压舱
+    （现金 ≤0.10 / 防御权重 ≤0.05）。违规写入 aggressive 的
+    ``risk_metrics.structure_warnings`` 并记 WARNING 日志（就地变异，无返回值）。
+    """
+    _by = {s.get("id"): s for s in strategies}
+    _d, _b, _a = _by.get("defensive"), _by.get("balanced"), _by.get("aggressive")
+
+    def _layer_count(s, layer):
+        return sum(
+            1 for a in s.get("allocations", [])
+            if a.get("layer") == layer and a.get("symbol") != "CASH"
+        )
+
+    def _total_count(s):
+        return sum(1 for a in s.get("allocations", []) if a.get("symbol") != "CASH")
+
+    _xwarnings: list[dict[str, Any]] = []
+    # INV-3: 卫星数单调 防御<平衡<进攻
+    _sat = {p: _layer_count(_by[p], "satellite") for p in ("defensive", "balanced", "aggressive")}
+    if not (_sat["defensive"] < _sat["balanced"] < _sat["aggressive"]):
+        _xwarnings.append({"type": "inv3_satellite_not_monotonic",
+                           "satellite_counts": _sat})
+    # INV-3: 防御数反向 防御>=平衡>=进攻
+    _def = {p: _layer_count(_by[p], "defense") for p in ("defensive", "balanced", "aggressive")}
+    if not (_def["defensive"] >= _def["balanced"] >= _def["aggressive"]):
+        _xwarnings.append({"type": "inv3_defense_not_reverse_monotonic",
+                           "defense_counts": _def})
+    # INV-5: 总标的数单调 防御<平衡<进攻
+    _tot = {p: _total_count(_by[p]) for p in ("defensive", "balanced", "aggressive")}
+    if not (_tot["defensive"] < _tot["balanced"] < _tot["aggressive"]):
+        _xwarnings.append({"type": "inv5_total_not_monotonic",
+                           "total_counts": _tot})
+    # INV-6: 进攻压舱——现金 <=0.10（bear <=0.15）、防御权重 <=0.05
+    if _a is None:
+        logger.warning("[allocation] INV-3/5/6: aggressive 方案缺失，跳过 INV-6 校验")
+        return
+    _a_allocs = _a.get("allocations", [])
+    _a_non_cash = sum(a.get("weight", 0.0) for a in _a_allocs if a.get("symbol") != "CASH")
+    _a_cash = round(1.0 - _a_non_cash, 4)
+    _a_def_w = sum(a.get("weight", 0.0) for a in _a_allocs if a.get("layer") == "defense")
+    if _a_cash > 0.10 + 1e-9:
+        _xwarnings.append({"type": "inv6_aggressive_cash_over", "cash": _a_cash,
+                           "clamp": 0.10})
+    if _a_def_w > 0.05 + 1e-9:
+        _xwarnings.append({"type": "inv6_aggressive_defense_over", "defense_weight": _a_def_w,
+                           "clamp": 0.05})
+    if _xwarnings:
+        _a.setdefault("risk_metrics", {})
+        _a["risk_metrics"].setdefault("structure_warnings", [])
+        _a["risk_metrics"]["structure_warnings"].extend(_xwarnings)
+        logger.warning(
+            "[allocation] INV-3/5/6 cross-profile violations: %s",
+            [w["type"] for w in _xwarnings],
+        )
 
