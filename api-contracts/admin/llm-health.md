@@ -23,6 +23,14 @@ GET /api/v1/admin/llm/health
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | timeout | float | No | 15.0 | 单供应商探测超时（秒），用于约束探针整体耗时 |
+| refresh | bool | No | false | 强制实时探测（绕过 60s 结果缓存） |
+
+> **缓存语义（2026-08-25 增补，降级日连接风暴治理）**：默认 60s TTL 返回缓存
+> 结果（`checked_at` 为实际探测时刻）。背景：供应商全死日（如 Zen 持续 503）
+> 单次探针持连 9-19s，e2e/监控连环调用形成长持连请求簇，尾部触发内核
+> backlog 瞬时溢出 → WinError 10061 连发（round36 §9 四路仪器取证）。缓存后
+> 重复调用毫秒级返回；需要强实时时传 `refresh=true`。与 `factor-health`
+> 60s 缓存同款模式。
 
 **成功响应 — `200 OK`:**
 

@@ -131,14 +131,34 @@ async def get_thread_pool():
 @router.get("/llm/health")
 async def get_llm_health(
     timeout: float = Query(15.0, description="单供应商探测超时(秒)", ge=1.0, le=60.0),
+    refresh: bool = Query(False, description="绕过 60s 缓存强制实时探测"),
 ):
-    """F7: LLM 供应商健康探针 — 实时探测每个已配置供应商的连通性。
+    """F7: LLM 响应探针探测 —— 实时探测每个配置供应商的连通性。
 
-    不调用完整业务链路，不写入 token_store。探测失败返回结构化结果而非 500。
-    供 verify_e2e F17 连通性测试与运维监控使用。
+    结果不进入业务链路，也不写入 token_store；探测失败返回结构化降级而非 500。
+    供 verify_e2e F17 连通性测试与运维使用。
+
+    round36 §9 (2026-08-25): 60s TTL 缓存 + refresh 旁路——供应商全死日单次
+    探针持连 9-19s（真探针等超时），e2e/监控连环调用形成长持连请求簇，实测
+    触发内核 accept backlog 瞬时溢出 → WinError 10061 连发（四路仪器取证：
+    看门狗零转储/哨兵零卡顿/探针窗口零拒连，拒连全部落在无监控尾部）。
+    缓存后重复调用毫秒级返回；与 get_factor_health 同款双重检查锁模式。
     """
     from ..analysis.llm import llm_health_check
-    return await llm_health_check(timeout=timeout)
+
+    if not hasattr(get_llm_health, "_lock"):
+        get_llm_health._lock = asyncio.Lock()
+    _cache = getattr(get_llm_health, "_cache", None)
+    if not refresh and _cache and time.time() - _cache["ts"] < 60:
+        return _cache["data"]
+    async with get_llm_health._lock:
+        # 双重检查：等锁期间可能已被其他请求填充
+        _cache2 = getattr(get_llm_health, "_cache", None)
+        if not refresh and _cache2 and time.time() - _cache2["ts"] < 60:
+            return _cache2["data"]
+        result = await llm_health_check(timeout=timeout)
+        get_llm_health._cache = {"ts": time.time(), "data": result}
+        return result
 
 
 @router.get("/factor-health")
