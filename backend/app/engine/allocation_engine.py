@@ -669,6 +669,82 @@ def _constrain_satellite_tech_quota(
     return selected, weights
 
 
+# ── round36 B5-S4: reconcile 段——终态预算求解（残差显式报告）──────────
+
+
+def _reconcile_core_budget_topup(
+    core_alloc: list[dict[str, Any]], core_budget: float, profile_key: str
+) -> list[dict[str, Any]]:
+    """O16 补充: 核心层预算补足（原 allocate 内联块原样搬迁）。
+
+    剔除/兜底后 MAX_WEIGHT(0.30) 钳制可能使核心层权重 < core budget（U6 R1
+    「预算用满现金收敛」断言回归）。缺口按剩余容量占比补足，单只不超 30%；
+    容量耗尽时残差显式保留（日志报告 filled/gap），不削既有持仓、不造假补满。
+    """
+    _core_w_now = sum(a.get("weight", 0.0) or 0.0 for a in core_alloc)
+    if 0 < _core_w_now < core_budget - 1e-9:
+        _gap = core_budget - _core_w_now
+        _guard = 0
+        while _gap > 1e-9 and _guard < 50:
+            _guard += 1
+            _capacity = [
+                (a, max(0.0, MAX_WEIGHT - (a.get("weight", 0.0) or 0.0)))
+                for a in core_alloc
+            ]
+            _total_cap = sum(cap for _, cap in _capacity)
+            if _total_cap <= 1e-9:
+                break
+            _add = min(_gap, _total_cap)
+            for a, cap in _capacity:
+                a["weight"] = round(
+                    (a.get("weight", 0.0) or 0.0) + _add * (cap / _total_cap), 4,
+                )
+            _gap -= _add
+        logger.info(
+            "[allocation] O16 core budget top-up: filled %.3f of %.3f gap "
+            "(strategy=%s, core holdings=%d)",
+            core_budget - _core_w_now - _gap, core_budget - _core_w_now, profile_key,
+            len(core_alloc),
+        )
+    return core_alloc
+
+
+def _reconcile_budget_shortfall(
+    allocations: list[dict[str, Any]], total_budget: float
+) -> list[dict[str, Any]]:
+    """U6 R1: 总预算缺口回补（原 allocate 内联块原样搬迁 + 残差显式报告）。
+
+    层内分配不满（候选不足/配额裁剪）时剩余预算按 factor_score 序均摊至非现金、
+    非强制标的，单只 ≤0.30；帽约束导致无法填满时残差显式留存并记日志——
+    不削减既有持仓凑 Σ、不突破单只上限伪造收敛。
+    """
+    _alloc_total = sum(a.get("weight", 0.0) for a in allocations if a.get("symbol") != "CASH")
+    _shortfall = max(0.0, total_budget - _alloc_total)
+    if _shortfall > 0.001:
+        # round22 (#13): 强制锚（黄金/国债等）已按后处理抬到 5% 目标，不必再参与
+        # 预算回补——否则会被 top-up 推过 0.05（如进攻黄金 0.052 > INV-6 钳制）。
+        _topup = sorted(
+            [a for a in allocations
+             if a.get("symbol") != "CASH" and a.get("symbol") not in MANDATORY_CODES],
+            key=lambda a: -float(a.get("factor_score", 0) or 0),
+        )
+        if _topup:
+            _per = _shortfall / len(_topup)
+            _filled = 0.0
+            for _a in _topup:
+                # 单只 ≤30% 风控（RISK_SETTINGS.max_single_weight 会在 apply_risk_controls 兜底）
+                _before = float(_a.get("weight", 0.0) or 0.0)
+                _a["weight"] = round(min(_before + _per, 0.30), 4)
+                _filled += _a["weight"] - _before
+            if _shortfall - _filled > 1e-9:
+                logger.info(
+                    "[allocation] U6-R1 budget reconcile residual %.3f unfillable "
+                    "(single-weight cap %.2f bound across %d candidates)",
+                    _shortfall - _filled, MAX_WEIGHT, len(_topup),
+                )
+    return allocations
+
+
 def _select_and_weight(
     candidates: list[dict[str, Any]],
     factor_matrix: dict[str, dict[str, float]],
@@ -1334,32 +1410,10 @@ def allocate(
         # < core budget（U6 R1「预算用满现金收敛」断言回归：aggressive 核心候选
         # 不足时兜底回补 1 只被钳制 0.3 → 核心预算缺口丢失）。缺口按剩余容量
         # （MAX_WEIGHT - 当前权重）占比补足，单只不超 30%。
-        _core_budget = budgets.get("core", 0.0)
-        _core_w_now = sum(a.get("weight", 0.0) or 0.0 for a in core_alloc)
-        if 0 < _core_w_now < _core_budget - 1e-9:
-            _gap = _core_budget - _core_w_now
-            _guard = 0
-            while _gap > 1e-9 and _guard < 50:
-                _guard += 1
-                _capacity = [
-                    (a, max(0.0, MAX_WEIGHT - (a.get("weight", 0.0) or 0.0)))
-                    for a in core_alloc
-                ]
-                _total_cap = sum(cap for _, cap in _capacity)
-                if _total_cap <= 1e-9:
-                    break
-                _add = min(_gap, _total_cap)
-                for a, cap in _capacity:
-                    a["weight"] = round(
-                        (a.get("weight", 0.0) or 0.0) + _add * (cap / _total_cap), 4,
-                    )
-                _gap -= _add
-            logger.info(
-                "[allocation] O16 core budget top-up: filled %.3f of %.3f gap "
-                "(strategy=%s, core holdings=%d)",
-                _core_budget - _core_w_now - _gap, _core_budget - _core_w_now, profile_key,
-                len(core_alloc),
-            )
+        # B5-S4: reconcile 段——核心层预算缺口求解（残差显式）
+        core_alloc = _reconcile_core_budget_topup(
+            core_alloc, budgets.get("core", 0.0), profile_key,
+        )
         # round22 (#10 INV-4): 核心层高 beta 成长宽基占比上限——核心选完后校验，
         # 超出 core_growth_cap 按 factor_score 逐个移除最低分成长宽基并回补权重。
         # 平衡型核心成长占比压到 ≤40%（round21 #10 实证 67% → ≤40%）。
@@ -1561,23 +1615,9 @@ def allocate(
 
         # U6 R1: 预算用满——层内分配不满（候选不足/配额裁剪）时剩余预算按
         # factor_score 回补已选标的（旧逻辑：权重和 < 层预算和 → 剩余转 CASH，
-        # 实测 balanced 现金 19% > 理论 15%）
-        _total_budget = sum(budgets.values())
-        _alloc_total = sum(a.get("weight", 0.0) for a in allocations if a.get("symbol") != "CASH")
-        _shortfall = max(0.0, _total_budget - _alloc_total)
-        if _shortfall > 0.001:
-            # round22 (#13): 强制锚（黄金/国债等）已按后处理抬到 5% 目标，不必再参与
-            # 预算回补——否则会被 top-up 推过 0.05（如进攻黄金 0.052 > INV-6 钳制）。
-            _topup = sorted(
-                [a for a in allocations
-                 if a.get("symbol") != "CASH" and a.get("symbol") not in MANDATORY_CODES],
-                key=lambda a: -float(a.get("factor_score", 0) or 0),
-            )
-            if _topup:
-                _per = _shortfall / len(_topup)
-                for _a in _topup:
-                    # 单只 ≤30% 风控（RISK_SETTINGS.max_single_weight 会在 apply_risk_controls 兜底）
-                    _a["weight"] = round(min(_a.get("weight", 0.0) + _per, 0.30), 4)
+        # 实测 balanced 现金 19% > 理论 15%）。
+        # B5-S4: reconcile 段——总预算缺口求解（帽约束残差显式报告）
+        allocations = _reconcile_budget_shortfall(allocations, sum(budgets.values()))
 
         # round35 B1-F4: 不再写入 sector_concentration/sector_breakdown（见上）；
         # risk_metrics 键保留空 dict 以兼容直接消费 allocate 返回值的调用点，
