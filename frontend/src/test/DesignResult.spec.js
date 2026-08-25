@@ -373,3 +373,71 @@ describe('DesignResult R3 降级态精度治理', () => {
     expect(row.text()).toContain('-0.96')
   })
 })
+
+// ── 来源: DesignResult.b6metrics.spec.js（B6-FE round35 §6.6 指标来源徽标）──
+// 契约 api-contracts/portfolio/design.md §6.3：
+// 约束1 model_estimate 徽标 ⇔ volatility_estimate 字段存在（双条件校验）；
+// 缺失时不得编造数值；静态三指标恒标「参考值」防数据源混淆。
+
+describe('DesignResult B6-FE 指标来源徽标', () => {
+  const MODEL_PLAN = () => makePlan({
+    volatility_estimate: 0.105,
+    estimate_sources: {
+      expected_return: 'reference_static',
+      max_drawdown: 'reference_static',
+      sharpe_ratio: 'reference_static',
+      volatility_estimate: 'model_estimate',
+    },
+  })
+
+  it('model_estimate 时渲染波动率数值 + 「模型推算」徽标 + 推导口径 tooltip', async () => {
+    const wrapper = await mountResult(MODEL_PLAN())
+    const chip = wrapper.find('.metric-chip--model')
+    expect(chip.exists()).toBe(true)
+    expect(chip.text()).toContain('组合波动率')
+    expect(chip.text()).toContain('~10.5%')
+    const badge = wrapper.find('.src-badge--model')
+    expect(badge.exists()).toBe(true)
+    expect(badge.text()).toBe('模型推算')
+    expect(badge.attributes('title')).toContain('相关性矩阵')
+  })
+
+  it('字段缺失时不编造数值：显示参考值口径（负向：出现数字 → FAIL）', async () => {
+    const wrapper = await mountResult(makePlan())
+    const chips = wrapper.findAll('.metric-chip')
+    const volChip = chips.find(c => c.text().includes('波动率'))
+    expect(volChip).toBeTruthy()
+    expect(volChip.text()).not.toMatch(/~\d/)
+    expect(volChip.text()).toContain('暂无法推算')
+    expect(wrapper.find('.src-badge--static').exists()).toBe(true)
+  })
+
+  it('契约约束1：字段存在但来源缺失/非 model_estimate → 不渲染模型徽标', async () => {
+    // 字段在、来源缺 → 双条件不满足
+    const wrapperA = await mountResult(makePlan({ volatility_estimate: 0.105 }))
+    expect(wrapperA.find('.metric-chip--model').exists()).toBe(false)
+    expect(wrapperA.find('.src-badge--model').exists()).toBe(false)
+    // 来源标了 reference_static → 同样不算模型推算
+    const wrapperB = await mountResult(makePlan({
+      volatility_estimate: 0.105,
+      estimate_sources: { volatility_estimate: 'reference_static' },
+    }))
+    expect(wrapperB.find('.metric-chip--model').exists()).toBe(false)
+  })
+
+  it('静态三指标恒标「参考值」（防止与模型推算混淆）', async () => {
+    const wrapper = await mountResult(MODEL_PLAN())
+    const chips = wrapper.findAll('.metric-chip')
+    const staticChip = chips.find(c => c.text().includes('预期收益'))
+    expect(staticChip).toBeTruthy()
+    expect(staticChip.text()).toContain('回撤')
+    expect(staticChip.text()).toContain('夏普')
+    expect(staticChip.find('.src-badge--static').text()).toBe('参考值')
+  })
+
+  it('estimate_sources 为 null（旧记录经路由缺省 {}）不崩且走静态分支', async () => {
+    const wrapper = await mountResult(makePlan({ volatility_estimate: 0.105, estimate_sources: null }))
+    expect(wrapper.find('.metric-chip--model').exists()).toBe(false)
+    expect(wrapper.find('.metrics-sources').exists()).toBe(true)
+  })
+})

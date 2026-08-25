@@ -399,8 +399,8 @@ alanced/aggressive`
 - [ ] Response: 核心层含 510300/560600
 - [ ] Response: 权重在 1%~30% 区间
 - [ ] Response: 标的数量在 8~15 之间
-- [ ] Response: `strategies[].estimate_sources` 逐指标标注来源（B6）
-- [ ] Response: `volatility_estimate` 仅在模型推导可行时出现（source=model_estimate）；缺失时字段整体省略，不得用静态值冒充模型估算
+- [x] Response: `strategies[].estimate_sources` 逐指标标注来源（B6，2026-08-25 落地验证：test_get_design_plans_pass_b6_estimate_fields）
+- [x] Response: `volatility_estimate` 仅在模型推导可行时出现（source=model_estimate）；缺失时字段整体省略，不得用静态值冒充模型估算（同上测试 + FE 双条件徽标）
 - [ ] `GET /api/v1/portfolio/designs/{id}（原 /status 已移除，T11 校准）` implemented and tested
 
 <!-- 路由登记（P3-5 check_routes 门禁） -->
@@ -458,3 +458,9 @@ GET /api/v1/portfolio/designs/{design_id}
 3. 前端渲染：`model_estimate` → 「模型估算」徽标 + tooltip 注明推导口径；
    `reference_static` → 「参考值」弱标注。禁止无来源混排展示；
 4. 兼容性：两字段均为新增可选，旧消费方忽略即可；`designs/{id}` 详情接口透传同构。
+
+> **落地记录（2026-08-25，B6-FE 收口）**：①后端 `designs/{id}` plans 白名单补
+> `volatility_estimate`/`estimate_sources` 透传（旧实现缺键 → 前端永无数据源）；
+> ②前端 `DesignResult.vue` 展开区「模型推算」（绿）+「参考值」（灰）双态徽标，
+> 双条件校验（字段存在 ∧ source=model_estimate），缺失不编造数值；
+> ③测试：test_portfolio_list.py ×2 + DesignResult.spec.js ×5（含约束1负向）。

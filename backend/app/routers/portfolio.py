@@ -318,6 +318,10 @@ async def get_design(
             "expected_return": s.get("expected_return"),
             "max_drawdown": s.get("max_drawdown"),
             "sharpe_ratio": s.get("sharpe_ratio"),
+            # B6 (round35 §6.6 / 契约 design.md §6.3): 波动率模型估算 + 各指标
+            # 来源标注透传——旧白名单缺这两个键 → 前端徽标永无数据源（B6-FE 根因）。
+            "volatility_estimate": s.get("volatility_estimate"),
+            "estimate_sources": s.get("estimate_sources") or {},
             "risk_factors": s.get("risk_factors") or [],
             # round22 E5: 透传 risk_metrics（含 correlation_unchecked）供方案卡片消费
             # 「关联度未校验」提示，与 strategies[].risk_metrics 同结构。

@@ -102,6 +102,25 @@
                   <span class="corr-unchecked-icon">🧩</span>
                   <span class="corr-substitute-text">{{ substituteText(cw) }}</span>
                 </div>
+                <!-- B6-FE (round35 §6.6 / 契约 design.md §6.3): 收益指标来源标注——
+                     model_estimate 徽标双条件 = volatility_estimate 字段存在 且
+                     estimate_sources.volatility_estimate === 'model_estimate'
+                     （契约约束1）；缺失时不编造数值，静态三指标恒标「参考值」 -->
+                <div class="metrics-sources" role="status">
+                  <span v-if="hasModelVol(pf)" class="metric-chip metric-chip--model">
+                    组合波动率 ~{{ (pf.volatility_estimate * 100).toFixed(1) }}%
+                    <span class="src-badge src-badge--model"
+                      title="基于近60日持仓历史波动与相关性矩阵推导（wᵀ(σ⊙ρ⊙σ)w），非静态参考值">模型推算</span>
+                  </span>
+                  <span v-else class="metric-chip">
+                    波动率暂无法推算
+                    <span class="src-badge src-badge--static" title="行情历史不足，诚实省略模型估算，不编造数值">参考值口径</span>
+                  </span>
+                  <span class="metric-chip">
+                    预期收益 / 回撤 / 夏普
+                    <span class="src-badge src-badge--static" title="策略定位参考值，非当前持仓实时推导">参考值</span>
+                  </span>
+                </div>
                 <div class="plan-allocation">
                   <table class="alloc-table">
                     <thead>
@@ -251,6 +270,13 @@ const missingPctText = computed(() => {
   return typeof p === 'number' ? `${p}%` : '未知比例'
 })
 
+// B6 (round35 §6.6 / 契约 design.md §6.3 约束1): 徽标双条件——volatility_estimate
+// 字段存在 且 来源显式为 model_estimate；任一不满足按参考口径渲染（不编造数值）。
+function hasModelVol(pf) {
+  return typeof pf?.volatility_estimate === 'number'
+    && pf?.estimate_sources?.volatility_estimate === 'model_estimate'
+}
+
 function weightText(a) {
   const pct = (a.target_weight || 0) * 100
   if (!coarseWeight.value) return `${pct.toFixed(1)}%`
@@ -385,6 +411,14 @@ function substituteText(cw) {
    强调「同主题双持有」主题集中风险 */
 .corr-substitute-note { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); margin-bottom: var(--space-3); background: #f3e5f5; border: 1px solid #ce93d8; border-radius: var(--radius-md); font-size: var(--font-size-sm); color: #6a1b9a; }
 .corr-substitute-text { font-weight: var(--font-weight-medium); }
+/* B6-FE (round35 §6.6 / 契约 design.md §6.3): 指标来源标注——模型推算（绿系，
+   区别于相关性提示的蓝/紫）与参考值口径（灰系，弱视觉权重）双态 */
+.metrics-sources { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-bottom: var(--space-3); }
+.metric-chip { display: inline-flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-3); border-radius: var(--radius-md); font-size: var(--font-size-sm); background: #f5f5f5; border: 1px solid #e0e0e0; color: #616161; }
+.metric-chip--model { background: #e8f5e9; border-color: #a5d6a7; color: #2e7d32; font-weight: var(--font-weight-medium); }
+.src-badge { display: inline-flex; align-items: center; padding: 0 var(--space-2); border-radius: var(--radius-sm); font-size: var(--font-size-xs); line-height: var(--space-4); cursor: help; }
+.src-badge--model { background: #2e7d32; color: #fff; }
+.src-badge--static { background: #bdbdbd; color: #fff; }
 .alloc-table { width: 100%; border-collapse: collapse; font-size: var(--font-size-xs); }
 .alloc-table th, .alloc-table td { padding: var(--space-2) var(--space-3); text-align: left; border-bottom: 1px solid var(--color-border-light); }
 .alloc-table th { font-weight: var(--font-weight-semibold); color: var(--color-text-secondary); background: var(--color-surface-secondary); white-space: nowrap; }

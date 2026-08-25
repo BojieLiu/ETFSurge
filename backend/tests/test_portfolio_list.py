@@ -289,6 +289,96 @@ async def test_get_design_allocations_include_market_fields():
     assert alloc["factor_score"] == 0.75
 
 
+@pytest.mark.asyncio
+async def test_get_design_plans_pass_b6_estimate_fields():
+    """B6-FE (round35 §6.6 / 契约 design.md §6.3): plans 白名单必须透传
+    volatility_estimate + estimate_sources——旧实现丢弃 → 前端来源徽标永无
+    数据源（负向：键缺失即 FAIL）。同时校验契约约束1：model_estimate 当且仅当
+    字段存在；旧持久化记录（无这两个键）不崩、按缺省渲染。"""
+    import sqlalchemy.ext.asyncio
+    from unittest.mock import AsyncMock
+
+    class MockRecord:
+        id = 507
+        created_at = datetime(2026, 8, 25, 19, 0, 0)
+        capital = 500000.0
+        risk_profile = "balanced"
+        design_text = "## 一、方案概览"
+        status = "completed"
+        error_message = None
+        report_quality = "full"
+        report_generated_at = None
+        # 新记录：B6 后端已挂载 volatility_estimate + estimate_sources
+        strategies_json = ('[{"label": "平衡型", "portfolio_name": "平衡", "positioning": "均衡", '
+                           '"expected_return": 0.12, "max_drawdown": 0.15, "sharpe_ratio": 1.2, '
+                           '"volatility_estimate": 0.105, '
+                           '"estimate_sources": {"expected_return": "reference_static", '
+                           '"max_drawdown": "reference_static", "sharpe_ratio": "reference_static", '
+                           '"volatility_estimate": "model_estimate"}, '
+                           '"etfs": [{"symbol": "510300", "name": "沪深300ETF", "layer": "core", '
+                           '"weight": 0.3}]}]')
+        market_snapshot_json = '{"market_regime": "range_bound"}'
+
+    class MockResult:
+        def scalar_one_or_none(self):
+            return MockRecord()
+
+    mock_execute = AsyncMock()
+    mock_execute.return_value = MockResult()
+    session = AsyncMock(spec=sqlalchemy.ext.asyncio.AsyncSession)
+    session.execute = mock_execute
+
+    from app.routers.portfolio import get_design
+
+    result = await get_design(design_id=507, db=session)
+    plan = result["plans"][0]
+    assert plan["volatility_estimate"] == 0.105, "volatility_estimate 被转换层丢弃"
+    sources = plan["estimate_sources"]
+    assert sources.get("volatility_estimate") == "model_estimate"
+    # 契约约束1：徽标条件 = 字段存在 且 来源=model_estimate（前端双条件同款）
+    assert (sources.get("volatility_estimate") == "model_estimate") == (
+        isinstance(plan["volatility_estimate"], (int, float))
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_design_plans_b6_fields_absent_legacy_record():
+    """旧持久化记录（strategies_json 无 B6 键）→ 缺省透传不崩：
+    volatility_estimate=None + estimate_sources={}（前端按参考口径渲染）。"""
+    import sqlalchemy.ext.asyncio
+    from unittest.mock import AsyncMock
+
+    class MockRecord:
+        id = 508
+        created_at = datetime(2026, 7, 1, 9, 0, 0)
+        capital = 100000.0
+        risk_profile = "defensive"
+        design_text = ""
+        status = "completed"
+        error_message = None
+        report_quality = "none"
+        report_generated_at = None
+        strategies_json = ('[{"label": "防御型", "expected_return": 0.08, '
+                           '"etfs": [{"symbol": "511010", "weight": 0.5}]}]')
+        market_snapshot_json = None
+
+    class MockResult:
+        def scalar_one_or_none(self):
+            return MockRecord()
+
+    mock_execute = AsyncMock()
+    mock_execute.return_value = MockResult()
+    session = AsyncMock(spec=sqlalchemy.ext.asyncio.AsyncSession)
+    session.execute = mock_execute
+
+    from app.routers.portfolio import get_design
+
+    result = await get_design(design_id=508, db=session)
+    plan = result["plans"][0]
+    assert plan["volatility_estimate"] is None
+    assert plan["estimate_sources"] == {}
+
+
 # ── P2-9 B2/B6 (round16 3.9, 自 test_p29_contract_bias.py 拆入) ────────────────
 # 契约偏差收口：B2（design-async 响应含 design_id）入 portfolio 域；
 # B6（WatchlistPanel change_pct=null 不标红，前端源码级断言）随 B2 并入本文件
