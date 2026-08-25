@@ -24,13 +24,19 @@ from .budgets import (
     STRATEGY_META,
     dynamic_layer_budget,
 )
+from .rationale import build_rationale
 from .taxonomy import (  # round35 B3-F7: 分类语义单点（§6.3）
     COMPANY_NAMES as _COMPANY_NAMES,  # noqa: F401  re-export（pool_balancing 兼容）
+)
+from .taxonomy import (
     classify_etf,
+)
+from .taxonomy import (
     extract_index_concept as _extract_index_concept,
+)
+from .taxonomy import (
     normalize_segment as _normalize_segment,
 )
-from .rationale import build_rationale
 
 logger = logging.getLogger(__name__)
 

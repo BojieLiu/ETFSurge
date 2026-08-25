@@ -24,7 +24,6 @@ logger = logging.getLogger(__name__)
 
 # round11 P1-5: TTL 归一——不再散落本地常量，统一读 core/ttl.py 的 CACHE_TTL["etf_list"]（3600s）。
 # （旧实现硬编码 300s 与 CACHE_TTL 声明不一致；缓存机制本身已由 sync_memory_cache 接管。）
-from ..core.ttl import CACHE_TTL as _CACHE_TTL
 
 # round35 RC-B2: `_etf_list_cache`/`ETF_CACHE_TTL` 死符号对已删除——round11 TTL 归一后的
 # 遗留容器与兼容别名，生产代码零读写（仅一个空心存在性测试引用，已同批删除）。
@@ -141,7 +140,7 @@ def _etf_cache_file() -> str:
     data_dir = os.environ.get("DATA_DIR")
     if data_dir:
         return os.path.join(data_dir, "etf_list_cache.json")
-    from ..config import settings, _DATA_DIR
+    from ..config import _DATA_DIR, settings
 
     return os.path.join(str(getattr(settings, "data_dir", "") or _DATA_DIR), "etf_list_cache.json")
 
@@ -825,6 +824,7 @@ import re as _re
 
 import requests as _requests
 
+
 def _tracked_index_cache_path() -> str:
     """F10 tracked_index 映射缓存路径。
 
@@ -833,7 +833,7 @@ def _tracked_index_cache_path() -> str:
     「518880 → 黄金9999」映射 bug），与 _etf_cache_file 同批收口至
     settings.data_dir；惰性求值供测试跟随。
     """
-    from ..config import settings, _DATA_DIR
+    from ..config import _DATA_DIR, settings
 
     data_dir = str(getattr(settings, "data_dir", "") or _DATA_DIR)
     return _os.path.join(data_dir, "etf_index_mapping.json")

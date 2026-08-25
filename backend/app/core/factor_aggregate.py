@@ -12,10 +12,10 @@ engine 仍需要 aggregate_factor_scores 的静态逻辑——将其下沉到 co
 """
 from __future__ import annotations
 
-from .factor_values import is_meaningful_value  # FS1: 零值判定单点
-
 import math
 from typing import Any
+
+from .factor_values import is_meaningful_value  # FS1: 零值判定单点
 
 # 顶层分类到点分前缀映射 + 方向规则（原 factor_registry.CATEGORY_AGG）
 CATEGORY_AGG: dict[str, list[tuple[str, int, str | None]]] = {

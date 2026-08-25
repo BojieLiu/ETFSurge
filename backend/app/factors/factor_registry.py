@@ -30,8 +30,8 @@ from ..core.factor_aggregate import (  # noqa: F401
     IC_MIN_BATCHES,
     _ic_decay_mean,
 )
-from ..core.source_registry import registry as _source_registry
 from ..core.factor_values import is_meaningful_value  # FS1: 零值判定单点
+from ..core.source_registry import registry as _source_registry
 from ..factors.ic_tracker import ic_tracker
 
 logger = logging.getLogger(__name__)

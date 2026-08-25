@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
 from datetime import datetime
@@ -577,11 +576,9 @@ async def compose_and_push_report(
 
         # 推送进度: 撰写完成
 
-        # 按段落推送 chunks（模拟流式）
-        paragraphs = report_text.split("\n\n")
-        for i, para in enumerate(paragraphs):
-            progress = 60 + int(40 * (i + 1) / max(len(paragraphs), 1))
-            await asyncio.sleep(0.05)  # 模拟流式延时
+        # （2026-08-25 ruff 债务清理）原「模拟流式」循环已删——它仅计算一个从不
+        # 发送的 progress 变量并空睡 0.05s×段数（F841+B007），对长报告白增数秒
+        # 时延；进度推送实际由 task_manager 状态机负责。
 
         # 一致性校验：对比 LLM 报告的 ETF 代码与引擎策略数据
         try:

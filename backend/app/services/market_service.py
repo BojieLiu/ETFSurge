@@ -198,7 +198,7 @@ def _get_cache_db_path() -> str:
     if _CACHE_DB_PATH is None:
         import os
 
-        from ..config import settings, _DATA_DIR
+        from ..config import _DATA_DIR, settings
 
         data_dir = str(getattr(settings, "data_dir", "") or _DATA_DIR)
         os.makedirs(data_dir, exist_ok=True)

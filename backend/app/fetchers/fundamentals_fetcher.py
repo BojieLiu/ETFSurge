@@ -786,7 +786,7 @@ def _sentiment_history_path() -> str:
     容器重启即丢，R86 同族教训）。惰性求值使测试可 monkeypatch；
     `or _DATA_DIR` 双保险（R93 validator 保证 data_dir 非空绝对）。
     """
-    from ..config import settings, _DATA_DIR
+    from ..config import _DATA_DIR, settings
 
     data_dir = str(getattr(settings, "data_dir", "") or _DATA_DIR)
     return os.path.join(data_dir, "sentiment_history.json")

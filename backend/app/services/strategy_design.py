@@ -11,6 +11,9 @@ import time
 from datetime import datetime
 from typing import Any
 
+# round36 §8-A: 设计管线重计算段下放长任务线程池（D1 探针实证：相关性阶段是
+# 唯一显著循环阻塞段——健康日 2.67s×3，降级日内部 5s 超时网络拉取可放大到分钟级）。
+from ..core.async_utils import run_sync_long
 from ..core.market_calendar import market_session
 from ..engine.allocation_engine import (
     MANDATORY_CODES,
@@ -25,9 +28,6 @@ from ..engine.allocation_engine import (
 from ..engine.budgets import STRATEGY_META
 from ..engine.rationale import build_rationale
 from ..engine.risk_controls import apply_risk_controls
-# round36 §8-A: 设计管线重计算段下放长任务线程池（D1 探针实证：相关性阶段是
-# 唯一显著循环阻塞段——健康日 2.67s×3，降级日内部 5s 超时网络拉取可放大到分钟级）。
-from ..core.async_utils import run_sync_long
 
 logger = logging.getLogger(__name__)
 
@@ -462,13 +462,15 @@ async def generate_enhanced_design(
             # round36 §8-A: 两阶段合并后经 run_sync_long 下放长任务线程池——
             # 内部 get_history 为同步网络（每标的 5s 超时），循环上直跑会在
             # 降级日冻结事件循环分钟级（D1 探针 + 2026-08-25 挂死实录）。
-            def _compute_corr() -> tuple[dict, dict]:
+            # 参数化闭包（B023/B006 清零：值经 run_sync_long *args 调用时绑定，
+            # 函数体不捕获任何循环变量）
+            def _compute_corr(allocs_: list[dict], candidates_: dict) -> tuple[dict, dict]:
                 return (
-                    _correlation_medians_for(allocs, candidates),
-                    _correlation_matrix_for(allocs, candidates),
+                    _correlation_medians_for(allocs_, candidates_),
+                    _correlation_matrix_for(allocs_, candidates_),
                 )
 
-            corr_medians, corr_matrix = await run_sync_long(_compute_corr)
+            corr_medians, corr_matrix = await run_sync_long(_compute_corr, list(allocs), candidates)
 
             # enrich rationale using engine/rationale.py
             for a in allocs:

@@ -17,7 +17,7 @@ def _sentiment_cache_file() -> str:
     settings.data_dir（正牌挂载卷）；写（刷新成功持久化）与读（失败回读恢复）
     两处共用本函数，杜绝双拷贝漂移。
     """
-    from ...config import settings, _DATA_DIR
+    from ...config import _DATA_DIR, settings
 
     data_dir = str(getattr(settings, "data_dir", "") or _DATA_DIR)
     return os.path.join(data_dir, "sentiment_cache.json")

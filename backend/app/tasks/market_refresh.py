@@ -10,8 +10,8 @@ design-check-pipeline-redesign 危机期禁用一个月无人回切，请求驱�
 routers/portfolio.py，与本决策无关。
 """
 
-from ..services.market_data_hub import market_data_hub
 from ..core.logging import get_logger
+from ..services.market_data_hub import market_data_hub
 
 logger = get_logger(__name__)
 

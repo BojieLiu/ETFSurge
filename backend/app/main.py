@@ -3,9 +3,13 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from pathlib import Path
 from collections.abc import Generator
 from contextlib import asynccontextmanager, contextmanager
+from pathlib import Path
+
+# round36 §8-B: 看门狗转储目录——模块级计算（ASYNC240：避免在 async lifespan
+# 内做同步 Path.resolve；导入期一次性求值，运行期零开销）
+_LOOP_WATCHDOG_DUMP_DIR = str(Path(__file__).resolve().parent.parent.parent / "logs")
 from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, Request
@@ -672,7 +676,7 @@ async def lifespan(app: FastAPI):
     # （known-env-issues §1.1「静默挂死」诊断成本收敛；shutdown_all 统一取消）
     from .core.loop_watchdog import start_loop_watchdog
 
-    start_loop_watchdog(interval=1.0, threshold=5.0, dump_dir=str(Path(__file__).resolve().parent.parent.parent / "logs"))
+    start_loop_watchdog(interval=1.0, threshold=5.0, dump_dir=_LOOP_WATCHDOG_DUMP_DIR)
     logger.info("[lifespan] 事件循环滞后看门狗已启动（threshold=5s）")
 
     # Start sector cache refresh loop (60s, Phase 2)
