@@ -67,3 +67,57 @@ describe('market store — §12.7-B 删除定时行情推送后的 WS 契约', (
     expect(fetchEtfs).toHaveBeenCalledWith('off_exchange')
   })
 })
+
+// ── Round34 B4 / R119: 批量行情合并刷新（循环外一次性赋值）─────────────
+
+describe('market store — R119 批量行情合并刷新', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    wsInstance = null
+    globalThis.WebSocket = WS
+  })
+
+  it('同一微任务内 N 条 symbol 消息只做一次数组替换，且全部生效', async () => {
+    const { useMarketStore } = await import('../stores/market')
+    const store = useMarketStore()
+    store.realtimeData = [
+      { symbol: '510300', price: 4.0, change_pct: 0.1 },
+      { symbol: '518880', price: 7.0, change_pct: -0.2 },
+      { symbol: '511010', price: 100.0, change_pct: 0.0 },
+    ]
+    const replacements = []
+    // 以「引用变化」计数数组替换次数（响应式赋值即换引用）
+    let lastRef = store.realtimeData
+    store.$subscribe(() => {
+      if (store.realtimeData !== lastRef) {
+        replacements.push(1)
+        lastRef = store.realtimeData
+      }
+    })
+    store.connectWS()
+    // 模拟 50 条批量推送（同微任务窗口内）
+    for (let i = 0; i < 50; i++) {
+      wsInstance.onmessage({ data: JSON.stringify({ symbol: '510300', price: 4.5, change_pct: 1.2 }) })
+      wsInstance.onmessage({ data: JSON.stringify({ symbol: '518880', price: 7.5, change_pct: -1.0 }) })
+    }
+    await Promise.resolve() // 微任务 flush
+    await Promise.resolve()
+    expect(replacements.length).toBeLessThanOrEqual(2) // ≤2 次（旧实现 100 次）
+    const row = store.realtimeData.find((x) => x.symbol === '510300')
+    expect(row.price).toBe(4.5)
+    expect(row.change_pct).toBe(1.2)
+    expect(store.realtimeData.find((x) => x.symbol === '511010').price).toBe(100.0) // 未涉及行不动
+  })
+
+  it('未知 symbol 的消息不触发数组替换（changed 守卫）', async () => {
+    const { useMarketStore } = await import('../stores/market')
+    const store = useMarketStore()
+    store.realtimeData = [{ symbol: '510300', price: 4.0, change_pct: 0.1 }]
+    const before = store.realtimeData
+    store.connectWS()
+    wsInstance.onmessage({ data: JSON.stringify({ symbol: 'UNKNOWN', price: 1.0, change_pct: 0 }) })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(store.realtimeData).toBe(before) // 引用未变 → 零替换
+  })
+})

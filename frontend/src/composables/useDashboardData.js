@@ -1,7 +1,8 @@
 import { ref, computed } from 'vue'
-import { portfolioApi, marketApi } from '../api'
+import { portfolioApi } from '../api'
 import logger from '../utils/logger'
 import { useToastStore } from '../stores/toast'
+import { useMarketStore } from '../stores/market' // Round34 B4/R110
 
 export function useDashboardData(capitalOn, capitalOff, activeTab) {
   const { show: toast } = useToastStore()
@@ -62,10 +63,14 @@ export function useDashboardData(capitalOn, capitalOff, activeTab) {
 
   // ECharts options
   // Methods – data fetching
+  // Round34 B4 / R110: 经 marketStore 单飞通道取全球指数——
+  // Dashboard 多面板/未来 gauge 消费方共享一次请求（30s TTL）
+  const marketStore = useMarketStore()
+
   async function fetchGlobalIndices() {
     try {
-      const res = await marketApi.indicesGlobal()
-      globalIndices.value = res.data?.indices || res.data || {}
+      const data = await marketStore.fetchIndicesGlobal()
+      globalIndices.value = data?.indices || data || {}
     } catch (e) {
       logger.warn('[Dashboard] fetchGlobalIndices failed:', e)
       globalIndices.value = {}

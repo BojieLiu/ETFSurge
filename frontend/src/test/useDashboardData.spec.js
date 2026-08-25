@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ref, nextTick } from 'vue'
+import { createPinia, setActivePinia } from 'pinia'
 import { useDashboardData } from '../composables/useDashboardData'
 
 // ── Mock API modules ───────────────────────────────────────
@@ -37,6 +38,8 @@ describe('useDashboardData', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    // Round34 B4/R110: useDashboardData 内部经 useMarketStore 单飞取指数 → 需活跃 Pinia
+    setActivePinia(createPinia())
     capitalOn = ref(100000)
     capitalOff = ref(50000)
     activeTab = ref('combined')

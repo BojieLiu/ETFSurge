@@ -4,6 +4,7 @@ import { marketApi } from '../api'
 import { usePortfolioStore } from './portfolio'
 import logger from '../utils/logger'
 import { WS_BASE } from '../utils/wsBase' // round35 FE3: 单点构造
+import { createSingleFlight } from '../utils/singleFlight' // Round34 B4/R110
 
 export const useMarketStore = defineStore('market', () => {
   const realtimeData = ref([])
@@ -28,6 +29,33 @@ export const useMarketStore = defineStore('market', () => {
   const onMessageCallbacks = []
   // round19 P2-②: portfolio_changed 广播消费防抖（批量操作触发多次广播 → 1s 合并刷新）
   let portfolioChangedTimer = null
+
+  // Round34 B4 / R119: 批量行情合并刷新——N 条快速 symbol 消息在同一微任务内
+  // 只做一次 map+替换（旧实现每条消息全量替换数组 → 50 条批量推送产生 50 次
+  // 响应式更新，可触发 >16ms 长任务）。验收：50 条 batch 推送无 >16ms 长任务。
+  let _pendingQuotes = null // Map<symbol, {price, change_pct}>
+  let _quoteFlushScheduled = false
+
+  function queueQuoteUpdate(msg) {
+    if (!_pendingQuotes) _pendingQuotes = new Map()
+    _pendingQuotes.set(msg.symbol, { price: msg.price, change_pct: msg.change_pct })
+    if (_quoteFlushScheduled) return
+    _quoteFlushScheduled = true
+    Promise.resolve().then(() => {
+      _quoteFlushScheduled = false
+      const updates = _pendingQuotes
+      _pendingQuotes = null
+      if (!updates || !updates.size || !realtimeData.value.length) return
+      let changed = false
+      const next = realtimeData.value.map((item) => {
+        const u = updates.get(item.symbol)
+        if (!u) return item
+        changed = true
+        return { ...item, price: u.price, change_pct: u.change_pct }
+      })
+      if (changed) realtimeData.value = next // 循环外一次性赋值（R119 核心）
+    })
+  }
 
   function connectWS(onMsg) {
     if (typeof onMsg === 'function') {
@@ -90,11 +118,7 @@ export const useMarketStore = defineStore('market', () => {
           }, 1000)
         }
         if (msg.symbol) {
-          const idx = realtimeData.value.findIndex(item => item.symbol === msg.symbol)
-          if (idx >= 0) {
-            realtimeData.value[idx] = { ...realtimeData.value[idx], price: msg.price, change_pct: msg.change_pct }
-            realtimeData.value = [...realtimeData.value]
-          }
+          queueQuoteUpdate(msg)
         }
         for (const cb of onMessageCallbacks) {
           try { cb(msg) } catch (e) { logger.error('Market WS 消费回调失败:', e) }
@@ -193,11 +217,21 @@ export const useMarketStore = defineStore('market', () => {
     await marketApi.batchRemoveWatchlist(ids)
   }
 
+  // ── Round34 B4 / R110: indices/global 单飞 + 30s TTL（共享 util）────────
+  // Dashboard 单次加载请求数 ==1（基线 ×3）；FE1+FE2 gauge 新增消费方时自动护栏。
+  const _indicesSF = createSingleFlight({ ttlMs: 30_000 })
+
+  async function fetchIndicesGlobal() {
+    return _indicesSF.run('indices:global', () => marketApi.indicesGlobal())
+  }
+
   return { 
     realtimeData, wsConnected, wsStatus, wsData, 
     connectWS, disconnectWS, onWSMessage, offWSMessage,
     // Watchlist
     watchlist, watchlistLoading, watchlistTotal,
     fetchWatchlist, addWatchlist, updateWatchlist, removeWatchlist, batchRemoveWatchlist,
+    // Round34 B4 R110
+    fetchIndicesGlobal,
   }
 })

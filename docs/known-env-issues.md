@@ -83,6 +83,18 @@
 | SQLite `ALTER TABLE RENAME` | 索引名保留 → create_all 撞名崩溃 | rename 表前先 DROP 其全部索引 |
 | `rg -rln` | `-r` 是 --replace，输出被字面替换 | 用 `rg -ln` |
 
+## 3. 已知性能债登记（round34-B4 定位，2026-08-26 深夜降级窗实测）
+
+> 口径：软门禁（AGENTS.md 性能验收节）；修复排期不阻塞功能交付。
+> 测量环境：01:00 非交易时段、Zen 503 降级日——即最坏路径读数。
+
+| 路径 | 实测 | 阈值 | 归因（file:line） | 状态 |
+|---|---|---|---|---|
+| `POST /portfolio/calculate` | 6.1s / 8.1s（两轮） | 登记制 | pricing.py 结构性两波等待：第一波 `asyncio.gather` 取最慢分支（各 ≤3s wait_for 截断，pricing.py:121）+ NAV 兜底波 ≤3s（:148）+ DB/序列化 | **已定位，排期**；并行化已到位，属死源日结构性下限 |
+| `GET /market/watchlist` | **16.4s / 14.5s** ⚠️ | ≤3s | enrich 主波被外层 wait_for 截断（5-8s，market.py:1239，设计内）→ 超时走 `_watchlist_close_fallback`：`Semaphore(3)` + 每项 `wait_for(..., 3)`（market.py:1106/:1146），死源日每项烧满 3s → **ceil(N/3)×3s ≈ N=15 时 ~15s**，且兜底段**无总预算**（外层超时只罩 enrich 不罩 fallback） | **已定位，修复候选**：给兜底段加共享截止线（超线项诚实落「维护中」行）；交易日盘中复测后定档 |
+
+- 复测命令：起后端后 `Measure-Command { Invoke-WebRequest http://localhost:8000/api/v1/market/watchlist?limit=100 ... }` 两轮取均值；交易日盘中复测为 D3 必做项（本轮为非交易窗读数，仅作归因证据）。
+
 ## 回填纪律
 
 - 新条目必须附出处（round 文档 §节 或 commit hash）与「确认非回归」的证据命令。
