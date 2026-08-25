@@ -63,3 +63,109 @@ validate(final) -> warnings                            # 现 check_structure_rea
 - ❌ 不动 S5 profile 顺序耦合（有意设计）；
 - ❌ 本轮不简化补丁段语义（等价搬迁优先，简化另立项）；
 - ❌ 不改 API 契约字段（B6 字段已另行契约先行）。
+
+## 7. 实施结果（2026-08-25，单会话 S0-S5 全量交付）
+
+**结论**：五段纯函数管道迁移完成，`allocate()` 外壳签名与返回结构全程不变；
+每阶段黄金回放 **6/6 diff 空**、全量 pytest 绿（2768→2774→2778，+10 为新增段单测）、
+mypy 零新增、engine 纯度门禁持续通过（pre-commit 每阶段实跑确认）。
+
+| Stage | Commit | 内容 | 护航结果 |
+|---|---|---|---|
+| S0 | （基线，无提交） | 黄金快照 6/6 冻结 + allocate/_select_and_weight 段落地图 | 快照无变更 |
+| S1 | f162adc | `SelectionDraft` + `_select_draft()`：守卫/强制标的拆分/指数排除/打分(聚合+pw+C2 含 P1-7)/概念去重/卫星地板/初选；`_select_and_weight` 变薄壳保留幂律后段 | golden 空 + 不变量全家桶 156 绿 |
+| S2 | eb776aa | `_size_allocations()`：幂律+MIN/MAX 钳制定名为显式 size 段 | 同上 |
+| S3 | 6497ab5 | constrain 段四族：`_constrain_core_wide_basis_cap`(R101)/`_enforce_mandatory_floor`(锚地板)/`_constrain_satellite_tech_quota`(F0-5/O17) 原样搬迁 + INV-4 成长帽既有函数归位 | golden 空 + 129 绿 |
+| S4 | 167104f | reconcile 段：`_reconcile_core_budget_topup`(O16)/`_reconcile_budget_shortfall`(U6-R1，**新增帽约束残差显式日志**)；新增 test_b5_reconcile_stage.py ×6（含容量不足诚实留残负向断言） | golden 空 + 全量 2774 |
+| S5 | （本提交） | validate 段：`_validate_cross_profile_invariants()` 收口 INV-3/5/6；check_structure_reasonableness 文档化为第五段；SelectionDraft docstring 载五段函数映射总图；test_b5_validate_stage.py ×4 | golden 空 + 全量 2778 |
+
+**验收口径对照（§5）**：
+1. 每阶段受影响单测绿 + 黄金 6/6 diff 空 + mypy 零新增 ✅；
+2. 全量 pytest 每阶段一次（凭据纪律：mark 后 pre-commit 三档分派跳过重复全量）✅；
+3. 测试用例数 2768→2778 **不减**（+10 新增）；行为锚测试零修改 ✅；
+4. reality check：五段均为 engine 内纯函数被 allocate/编排层真实调用（无脚手架），
+   生产输出经黄金回放逐字节一致（六场景 harness 即逐字段比对）✅；
+5. 引擎纯度门禁每阶段 commit 实跑通过 ✅。
+
+**环境备注**：本机页面文件偏小（commit charge ~51/59GB），xdist `-n auto` 4 worker
+偶发 `can't start new thread` / `WinError 1455`——全量改用 `-n 2` 执行后稳定全绿，
+属环境资源问题非回归（待回填 known-env-issues）。
+
+---
+
+## 8. 附：事件循环挂死 + 拒绝风暴修复方案（2026-08-25 登记 · 独立批次 · 待「开始实施」）
+
+> 背景：B5 交付期 verify_e2e 两轮实测复现 known-env-issues §1.1 挂死+拒绝风暴，
+> 且观测到比既有登记更深的一层（后台周期日志同停）。本节为修复方案入档，
+> **只方案未实施**；与 B5 无因果（黄金回放逐字节一致 + 引擎纯函数不可能阻塞循环）。
+
+### 8.1 今日实测证据链（2026-08-25，交易时段午盘）
+
+| # | 观测 | 数据 | 定性 |
+|---|---|---|---|
+| E1 | 首轮 e2e 10min 零输出超时 | 后端进程活（pid 16628, CPU 1399s）+ 端口 LISTEN，但 stdout 日志 11:28:20 后完全静默——**120s 周期 source_health 探针也停** | 事实：循环冻结深于既有登记的 ~20s 段 |
+| E2 | 次轮 e2e 224/260 / 三轮 203/261 | 全部 FAIL 均为 `WinError 10061` 连接拒绝；**核心链在风暴前全过**（/health 0.0s、design_text 6933 字、3 套方案、market_regime 正确、数据健康 healthy=True candidates=39） | 事实：§1.1「风暴前断言已捕获即有效」再证实 |
+| E3 | 风暴起点锁定 | `POST /design-async → 202 PASS`、task_id=808 受理后 **180s 轮询未完成**，随后所有检查转 10061 | 事实：冻结窗口与设计管线执行期重合 |
+| E4 | 放大因子 | 当日 OpenCode Zen 全程 **503 Service Unavailable**（backend log 11:10:03 实录）→ LLM 链走 DeepSeek 兜底慢路径（read 120s + 重试退避） | 推断：LLM 降级拉长管线同步段/占用循环时长，非根因 |
+| E5 | strategy0vs1 diff=0 FAIL | task pending 态下比对历史 design 所致（report_quality=pending 同帧） | 推断：管线卡死的结果性症状，非引擎回归（golden 6/6 反证） |
+
+### 8.2 根因分层
+
+| 层 | 机制 | 定性 | 修复归属 |
+|---|---|---|---|
+| R1 | 设计管线在 `async def` 内 **~20s 级连续纯 CPU 计算**（嫌疑段：`get_factor_matrix` 聚合 ×39 候选 / `allocate()` 三方案 / `enforce_max_correlation` / risk_controls 行业 HHI），期间循环不 accept 不出日志 | 已实证（round34 登记「真实性能缺陷」）；今日 E1 表明叠加 LLM 慢路径后可放大到分钟级 | 方案 A |
+| R2 | 循环解冻瞬间 backlog 积压连接集中处理，已超时客户端的 RST 成片到达 → 「拒绝风暴」 | 强推断（①的共生物） | 随 A 消失 |
+| R3 | 冻结静默无告警——诊断只能 netstat/进程取证 | 今日实测 | 方案 B |
+
+> 四问自查：R1 为事实（round34 三次复现 + 今日 E1/E3）；R2 为推断（机制闭合待
+> A 落地后观察验证——若风暴随 A 消失即闭环确认）；R3 为事实。
+> ⚠️ 可行性探针前置（D1）：实施 A 前先以 cProfile 单任务实测
+> `generate_enhanced_design` 分段耗时，锁定 ≥5s 的纯 CPU 段清单——探针不过不进实施。
+
+### 8.3 修复方案（三层，A 治本 / B 护栏 / C e2e 韧性）
+
+**A. 重计算段下放线程池（治本，~0.5 天）**
+
+- 现有 `audit_async_blocking.py` AST 门禁只抓 **I/O 型阻塞**（`.get(`/`requests`/
+  `urllib` 等），**纯 CPU 长计算不在射程**——这是漏网根因；
+- 做法：对 D1 探针锁定的每段，`await run_sync(fn, ...)` 包裹（项目既有
+  `core/async_utils.run_sync` 惯例），保持入参/返回不可变边界（引擎已是纯函数，
+  直接可搬）；禁止把共享 dict 传线程池后再在循环侧读写；
+- 负向验收：构造 factor_matrix ≥79 候选的设计请求期间，`/health` 响应必须全程
+  <1s（旧实现下必红——即本方案的「抓假」断言）。
+
+**B. 事件循环滞后看门狗（护栏，~2h）**
+
+- lifespan 启动 watchdog 任务：每 1s 打点，检测到 loop lag >5s → WARNING +
+  `asyncio.all_tasks()` 栈摘要落盘 `logs/loop_lag_*.log`；
+- 把「静默挂死」变为「带现场证据的告警」，直接消除 R3 诊断成本；
+- 负向验收：单测注入 `time.sleep(6)` 到一个 handler，watchdog 必须产出含栈的
+  lag 事件（旧实现无此能力，必红）。
+
+**C. verify_e2e 韧性（~1h）**
+
+- 每检查项独立 timeout（现全局串行，一个挂死端点吃光预算）；10061 连续 N 次
+  判定「风暴态」→ 快速跳过剩余网络检查并汇总标注，不再逐个等 requests 重试耗尽；
+- 与 §1.1 处置条款兼容：「风暴前断言已捕获即有效」升级为机器可执行。
+
+### 8.4 验收口径
+
+1. D1 探针报告入档（分段耗时表 + 锁定段落 file:line）；
+2. A 落地后：e2e 设计链路期间 `/health` 最大响应时延 <1s（负向断言见上）；
+   连续 3 个交易日 e2e 无 10061 风暴；
+3. B 落地后：人为注入 6s 阻塞能收到带栈 lag 告警；
+4. 行为锚零修改：test_allocation_engine_fixes / golden 回放 6/6 保持；
+5. 引擎输出不变量：run_sync 包裹为执行位置变更，黄金 diff 必须仍为空。
+
+### 8.5 验证窗口
+
+交易日 9:30-11:30 / 13:00-15:00 真实环境复测（设计链路依赖实时行情）;
+非窗口内结果标注「待交易时段复测」。Zen 503 类外部降级日不作失败依据，
+但需记录 LLM 链耗时占比以校准 A 的段落清单优先级。
+
+### 8.6 不做的事
+
+- ❌ 不调 listen backlog / 不引入 nginx 反代吸收连接（推迟不治愈）；
+- ❌ 不改 Windows 事件循环策略（Proactor 为 uvicorn Windows 默认，换 Selector
+  影响子进程支持，收益不明）；
+- ❌ 本批不做 verify_perf 阈值调整（性能软门禁口径不变）。

@@ -19,6 +19,13 @@
 - **处置**：归类继续（关键断言在风暴前已捕获即有效）；verify_e2e 挂死分支已带
   `_probe_dual_stack()` 双栈取证 + netstat 监听转储（r35 落地），复现时收集输出
   升级专项。非本轮代码引入（round34 §5 容器轮已记载同类 /health 超时谜题）。
+- **2026-08-25 更新（B5 交付期实测，3/3 复现）**：①风暴起点进一步锚定——
+  `POST /design-async → 202` 受理后 **180s 轮询未完成**，随后全部检查转 10061；
+  核心链（/health、design_text 持久化、3 套方案、market_regime）在风暴前全 PASS。
+  ②冻结深度可放大至分钟级：Zen 全程 503 日，后台 120s 周期探针日志同停
+  （循环被占满而非 ~20s 短阻塞）。③修复方案已入档
+  `docs/round36-B5-allocate-pipeline.md` §8（A 重计算 run_sync 下放 / B 循环滞后
+  看门狗 / C e2e 风暴快速跳过），待「开始实施」。
 
 ### 1.2 LLM 提供方不可用（402 配额耗尽 / 400 / 节流刷屏）
 
@@ -46,6 +53,17 @@
   shares_change/industry_diversification）、`sentiment no_data ≤0 实际 1`（news_heat）。
 - **归类**：T-A/S-A 数据源债 + 快照类因子前向积累（设计使然，非回归）。
 - **处置**：等 T-A/S-A 实施与自然积累；census 门禁阈值随数据面演进再校准。
+
+### 1.6 pre-commit 全量 pytest xdist worker 崩溃（页面文件不足）
+
+- **症状指纹**：`pytest -n auto`（4 worker）全量中途 `INTERNALERROR RuntimeError:
+  can't start new thread` 或 worker `OSError [WinError 1455] 页面文件太小`；
+  崩溃前已过用例全部 PASS、无断言失败；重跑偶发复现（2026-08-25 B5 交付期）。
+- **归类**：本机 commit charge 逼近上限（实测 ~51/59GB），4 worker 各自加载完整
+  FastAPI app 的峰值内存超限——环境资源问题，非代码回归。
+- **处置**：全量改 `python -m pytest -n 2` 执行后稳定全绿 → `tests_ok_marker.py
+  --mark` 后 pre-commit 凭据有效自动跳过重复全量。根治需扩页面文件（系统设置，
+  非仓库范畴）；若换机/扩页后 `-n auto` 稳定可删除本条。
 
 ## 2. 工具链陷阱（Windows）
 

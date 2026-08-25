@@ -10,6 +10,7 @@ from app.analysis.llm.gates import get_last_llm_error  # noqa: F401
 from app.analysis.llm.health import _fetch_global_liquidity
 from app.analysis.llm.prompts import load_prompt
 from app.analysis.registry import get_agent
+
 # round35 §19 GapE: LLM 超时常量唯一事实源（原两处 httpx.Timeout 字面量收敛）
 from app.core.llm_timeouts import (
     DESIGN_REPORT_READ_S,
