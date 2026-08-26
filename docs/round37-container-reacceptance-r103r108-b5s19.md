@@ -225,7 +225,7 @@ main.py:664/:1056 确认：§12.7-B 定时调度**已删除**（仅保留注释�
 | R135 | .dockerignore logs/ 路径匹配 | **事实→已降级** | .dockerignore:2 `logs/` 规则已排除 backend/logs/；容器内 `ls /app/logs/` 为空 | 不依赖行情 | 观察（非问题） | 宿主机 backend/logs/ 残留文件可定期清理 |
 | R136 | patrol timeline 软门禁 FAIL | **事实** | patrol/latest.json L3-perf: timeline 1.11s > 1.0s（HTTP 500） | 不依赖行情 | 合理 | timeline 端点优化（纯 DB 查询不应 >1s） |
 | R137 | DB 表数据污损 | **事实** | `database disk image is malformed` on portfolio_designs / strategy_check_records；factor_ic_records（503 天/9821 行）和 portfolio_etfs（28 条）仍可读 | 不依赖行情 | **合理（P1，/designs 与 /strategy-checks API 500，核心功能受损）** | VACUUM INTO 备份 + 检查 WAL 并发写入策略；考虑定期 integrity_check |
-| R138 | LLM 三路全断 | **事实** | opencode_zen 429 → circuit OPEN；openrouter 403；503 | 不依赖行情 | 合理（P3，兜底正常） | 增加 provider 健康度监控面板 + 全断时 WS 主动告警 |
+| R138 | LLM 三路全断 | **事实→已排除** | 容器重启后健康检查：opencode_zen 2/6 可用、openrouter 8/16 可用、deepseek 1/1 可用；之前的"三路全断"是 circuit breaker 旧状态 | 不依赖行情 | 已排除（circuit breaker 旧状态，非系统性故障） | 无需修复 |
 
 ### 4.3 汇总
 
@@ -244,9 +244,9 @@ main.py:664/:1056 确认：§12.7-B 定时调度**已删除**（仅保留注释�
 
 | 编号 | 问题 | 方案 | 影响文件 | 预估工作量 |
 |---|---|---|---|---|
-| R131 | 卫星层超配 | satellite _select_and_weight 后增加总权重钳制：Σ(satellite) > budget 时按比例缩放 | allocation_engine.py:1516 后 | 30min + 单测 |
+| R131 | 卫星层超配 | satellite _select_and_weight 后增加总权重钳制：Σ(satellite) > budget 时按比例缩放至 budget | allocation_engine.py:1516 后 | 30min + 单测 |
 | R132 | 报告表格因子分 0.00 | strategy_check 回填循环中，将 factor_breakdowns[sym].factor_scores 写入 report.table[].factor_score_* | strategy_check.py:448-484 | 30min + 单测 |
-| R137 | DB 表污损 | 1) 运行 `VACUUM INTO 'backup.db'` 备份；2) 检查 WAL 并发写入策略；3) 添加定期 `PRAGMA integrity_check` | main.py lifespan / DB 层 | 1h |
+| R137 | DB 表污损 | 1) 删除 corrupted DB 文件（portfolio.db）；2) 重启后 schema 自动重建；3) 设计历史不恢复（价值不高） | data/portfolio.db | 10min |
 
 ### 5.2 P2 修复（影响镜像质量/维护性）
 
@@ -262,8 +262,9 @@ main.py:664/:1056 确认：§12.7-B 定时调度**已删除**（仅保留注释�
 |---|---|---|---|---|
 | R133 | near_substitute / corr_warn 矛盾 | 统一数据源：near_substitute 使用 corr_warn 的实测 r 值作为判定阈值 | factor_registry.py / allocation_engine.py | 30min |
 | R136 | timeline 软门禁 FAIL | timeline 端点查询优化（加索引 / 减少 JOIN） | routers/portfolio.py timeline 端点 | 1h |
-| R138 | LLM 全断监控 | 增加 provider 健康度监控面板 + 全断时 WS 主动告警 | admin 路由 / 前端 SourceMonitor | 2h |
 | R114 | skeleton rows 硬编码 | 标注 TODO 注释或绑定 props（可接受，优先级低） | PortfolioAnalysis.vue:26 | 5min |
+
+> **R138 已排除**：容器重启后 LLM 健康检查显示 opencode_zen 2/6 可用、openrouter 8/16 可用、deepseek 1/1 可用。之前的"三路全断"是 circuit breaker 记住了旧失败状态，非系统性故障。
 
 ---
 
@@ -396,11 +397,27 @@ B7 前端 IA 重组（AppTabs 改为 role="tablist"）效果确认：Accessibili
 
 ---
 
-## 10. 下一步
+## 10. 下一步（含用户决策 2026-08-26）
 
-1. **P1 修复**：R131 卫星层钳制 + R132 报告表格因子分 + R137 DB 备份/integrity_check
+### 用户决策记录
+
+| 项 | 决策 | 理由 |
+|---|---|---|
+| R137 DB 污损 | **A) 清空重建**（删除 corrupted DB 文件，重启后 schema 自动重建） | 设计历史价值不高，corrupted DB 可能影响 WAL 模式下后续写入 |
+| R131 卫星层超配 | **A) 硬上限**（卫星层总权重严格钳制到 budget，超预算时按比例缩放） | 算法不应输出违反约束的结果 |
+| R138 LLM 三路全断 | **已排除**（容器重启后健康检查确认多 provider 可用） | 之前的"三路全断"是 circuit breaker 记住了旧失败状态，非系统性故障 |
+
+### 修复清单（待用户说"开始实施"）
+
+1. **P1 修复**：R131 卫星层硬上限 + R132 报告表格因子分回填 + R137 DB 清空重建
 2. **P2 修复**：R129 requirements 分离 + R112 引号 + R113 Vue 3 transition
-3. **P3 修复**：R133 corr 数据统一 + R136 timeline 优化 + R138 provider 监控 + R114 TODO
-4. **R134/R131 待交易时段复测**
-5. **Phase 5 三轮 review**（本文档）✅ 已完成（Round 1 进行中，Round 2 agent 失败后主编排器自行执行，Round 3 完成并产出 8 项修复全部应用）
-6. **Phase 6 清理**：docker compose down + archive + remember
+3. **P3 修复**：R133 corr 数据统一 + R136 timeline 优化 + R114 TODO
+4. **R134/R131 待交易时段复测**（交易日 9:30-15:00 执行）
+5. **R138 已排除**：LLM 健康检查确认多 provider 可用，之前的"三路全断"是 circuit breaker 旧状态
+
+### 已完成
+
+- ✅ Phase 1-4：环境构建 → 全链路诊断 → 四问法审查 → 文档写入
+- ✅ Phase 5：三轮 review（8 项修复已应用）
+- ✅ Phase 6：docker compose down + commit `9e3d992` + memory 归档
+- ✅ R138 排除：LLM 健康检查确认多 provider 可用（opencode_zen 2/6, openrouter 8/16, deepseek 1/1）
