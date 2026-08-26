@@ -75,7 +75,10 @@ SKIP = 0
 STORM_SKIP = 0  # round36 §8-C: 风暴态下快速跳过数（环境性，不计 FAIL）
 # O21 (round8): 后端监听 [::]（uvicorn --host ::）——Windows 原生 :: 为 v6only，
 # 127.0.0.1 直连会被拒；localhost 经 DNS verbatim 顺序（::1 优先）可直连。
-BASE = "http://localhost:8000"
+# 2026-08-26: 本机 getaddrinfo 顺序翻转为 v4-first（伴随代理客户端常驻），localhost
+# 解析到 127.0.0.1 → requests 全量假性 ConnectionRefused（§1.1 风暴误报源）。钉死
+# [::1] 字面量对齐「::1 监听标准」，不再依赖解析顺序。
+BASE = "http://[::1]:8000"
 
 
 def check(label, ok, detail="", skip=False):
@@ -2237,9 +2240,10 @@ def main():
     global BASE
     parser = argparse.ArgumentParser(description="端到端链路验证")
     parser.add_argument("--port", type=int, default=8000)
-    # O21 (round8): 默认 host 用 localhost（后端监听 [::]，Windows 原生 v6only，
-    # 127.0.0.1 直连会被拒；localhost 经 getaddrinfo ::1 优先可直连）
-    parser.add_argument("--host", default="localhost")
+    # O21 (round8): 默认 host 用 ::1 字面量（后端监听 [::]，Windows 原生 v6only，
+    # 127.0.0.1 直连会被拒）。2026-08-26: localhost 的 getaddrinfo 顺序翻转为
+    # v4-first → requests 全量假性拒绝；钉死字面量不再依赖解析顺序。
+    parser.add_argument("--host", default="[::1]")
     parser.add_argument("--module", default=None,
                         help="运行指定模块组 (health,market,portfolio,news,admin,ws)，逗号分隔")
     parser.add_argument("--smoke", action="store_true",

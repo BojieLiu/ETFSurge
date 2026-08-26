@@ -77,11 +77,12 @@ class TestP3FrontendSource:
 
     def _src(self):
         import os
+        # round34-B7 C1: PortfolioManager 迁入 components/portfolio/ 子分组
         p = os.path.join(os.path.dirname(__file__), "..", "frontend", "src",
-                         "components", "PortfolioManager.vue")
+                         "components", "portfolio", "PortfolioManager.vue")
         if not os.path.exists(p):
             p = os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "src",
-                             "components", "PortfolioManager.vue")
+                             "components", "portfolio", "PortfolioManager.vue")
         return open(p, encoding="utf-8").read()
 
     def test_select_search_fills_avg_cost_from_realtime(self):
