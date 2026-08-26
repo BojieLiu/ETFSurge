@@ -34,6 +34,15 @@
             <span class="action-desc">查看历史组合设计与策略检查记录</span>
           </div>
         </button>
+
+        <!-- B7 批复③A：因子模型独立路由 /system/factors（原内嵌概览移至系统分组） -->
+        <router-link class="core-action-btn" to="/system/factors" aria-label="打开因子模型页面">
+          <span class="action-icon" aria-hidden="true">🧮</span>
+          <div class="action-content">
+            <span class="action-title">因子模型</span>
+            <span class="action-desc">38 维实盘因子与 IC 显著性追踪（已移至系统分组）</span>
+          </div>
+        </router-link>
       </div>
 
       <!-- Strategy Type Selection Modal -->
@@ -46,7 +55,6 @@
       <!-- History Panel -->
       <DesignHistory
         v-if="activeCoreFeature === 'history'"
-        :key="historyKey"
         :items="designHistoryList"
         :loading="historyLoading"
         :loaded="historyLoaded"
@@ -114,14 +122,11 @@
       </AppModal>
     </div>
   </section>
-
-  <!-- F3 (round6 §13.3): 仅工具列表/初始态显示因子模型概览；具体工具打开后隐藏 -->
-  <FactorModelView v-if="!activeCoreFeature" />
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { portfolioApi } from '../api'
 import { usePortfolioStore } from '../stores/portfolio'
 import { useTaskStore } from '../stores/task'
@@ -134,44 +139,10 @@ import DesignHistory from '../components/design/DesignHistory.vue'
 import StrategyCheckModal from '../components/design/StrategyCheckModal.vue'
 import StrategyCheckResult from '../components/design/StrategyCheckResult.vue'
 import AppModal from '../components/ui/AppModal.vue'
-import FactorModelView from '../components/FactorModelView.vue'
 
-const props = defineProps({
-  // O15 (round7 §7 P17): 父级（PortfolioAnalysis）告知本组件是否处于激活 tab——
-  // 重新进入「AI工具」时复位到工具列表（activeCoreFeature=null），
-  // 消除 AppTabs :hidden 常驻导致的状态残留（历史方案/上次界面）。
-  active: { type: Boolean, default: false },
-})
-const emit = defineEmits(['applied'])
-
-// O15: DesignHistory 强制重挂载 key（复位其内部 statusFilter='all'）
-const historyKey = ref(0)
-
-function resetToTools() {
-  // O15: 重新进入 AI 工具 → 默认展示工具列表（智能设计/策略检查/任务列表三入口）
-  activeCoreFeature.value = null
-  designStep.value = 'wizard'
-  designTab.value = 'cards'
-  expandedPlan.value = null
-  showHistory.value = false
-  historyKey.value += 1
-  // O11 (round8 §7 + interaction-redesign): 复位失败态——失败不入 localStorage、
-  // 再次进入回到 idle（不残留失败卡）。
-  designFailed.value = ''
-}
-
-watch(
-  () => props.active,
-  (now, prev) => {
-    if (now && !prev) {
-      // 运行中 design 任务例外：有 running 任务保留现有恢复 loading 逻辑（任务不丢）
-      const runningTask = taskStore.tasks.find((t) => t.type === 'design' && t.status === 'running')
-      if (runningTask) return
-      resetToTools()
-    }
-  },
-)
-
+// round34-B7 C3：本组件由 PortfolioAnalysis tools-tab 升级为独立路由页 /ai。
+// - active prop 与 O15 复位逻辑删除（路由重挂载天然复位状态）
+// - applied emit 删除——应用方案后直调 portfolioStore 刷新三仓
 const store = usePortfolioStore()
 const toast = useToastStore()
 const taskStore = useTaskStore()
@@ -717,7 +688,10 @@ async function applyPlan(plan) {
     const applied = (resp.data && resp.data.applied) || []
     if (applied.length > 0) {
       toast(`已应用 ${plan.style} 方案`, 'success')
-      emit('applied')
+      // B7 C3：路由态下无父组件回调——直调 store 刷新三仓列表
+      store.fetchEtfs()
+      store.fetchEtfs('on_exchange')
+      store.fetchEtfs('off_exchange')
     } else {
       // 后端 400 时走 catch；这里兜底 200 但 applied 为空（不应发生）→ 失败提示
       toast((resp.data && resp.data.message) || '组合设计中没有指定持仓', 'error')

@@ -59,11 +59,6 @@
       <template #analysis>
         <AnalysisView :selected-symbol="selectedHolding" />
       </template>
-      <template #tools>
-        <!-- O15 (round7 §7 P17): active 传参——重新进入 AI 工具 tab 时复位工具列表。
-             round34-B7 C3 将把本 tab 迁出为独立路由 /ai。 -->
-        <AiDesign @applied="refreshData" :active="activeTab === 'tools'" />
-      </template>
     </AppTabs>
   </div>
 </template>
@@ -76,7 +71,6 @@ import { CanvasRenderer } from 'echarts/renderers'
 import { PieChart, BarChart } from 'echarts/charts'
 import { TitleComponent, TooltipComponent, LegendComponent, GridComponent } from 'echarts/components'
 import { storeToRefs } from 'pinia'
-import AiDesign from './AiDesign.vue'
 import PortfolioManager from '../components/portfolio/PortfolioManager.vue'
 import AnalysisView from '../components/portfolio/AnalysisView.vue'
 import CapitalInputBar from '../components/dashboard/CapitalInputBar.vue'
@@ -97,7 +91,6 @@ const selectedHolding = ref('')
 const activeTab = ref('holdings')
 
 const tabs = [
-  { value: 'tools', label: 'AI工具', icon: '⚡' },
   { value: 'holdings', label: '持仓', icon: '📋' },
   { value: 'pnl', label: '盈亏', icon: '💰' },
   { value: 'analysis', label: '技术分析', icon: '📊' },

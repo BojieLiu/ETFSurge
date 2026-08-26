@@ -111,15 +111,17 @@ const marketStore = useMarketStore()
 // Warmup status (global — used in nav-bar indicator)
 const { isWarmingUp, startPolling, stopPolling } = useWarmupStatus()
 
-// Navigation items
+// Navigation items（round34-B7 C3：AI 设计升一级导航；系统组挂 /system/*）
 const navItems = [
-  { path: '/', label: 'Dashboard', icon: '📊' },
-  { path: '/portfolio-analysis', label: '组合与分析', icon: '📁' },
+  { path: '/', label: '市场概览', icon: '📊' },
+  { path: '/portfolio-analysis', label: '组合', icon: '📁' },
   { path: '/market-analysis', label: '行情分析', icon: '📰' },
+  { path: '/ai', label: 'AI 设计', icon: '✨' },
   { path: '/news', label: '资讯', icon: '🗞️' },
   { path: '/system/token', label: 'Token 监控', icon: '🔑' },
-  { path: '/system/sources', label: '数据源', icon: '📡' },
-  { path: '/system/config', label: '配置', icon: '⚙️' }
+  { path: '/system/sources', label: '数据源监控', icon: '📡' },
+  { path: '/system/factors', label: '因子模型', icon: '🧮' },
+  { path: '/system/config', label: '系统配置', icon: '⚙️' }
 ]
 
 const isActiveRoute = (path) => {
@@ -129,13 +131,16 @@ const isActiveRoute = (path) => {
 
 // F21 (round6 §16.9): 页头品牌图标——按路由 title 映射（回退 📈）
 const PAGE_ICONS = {
-  Dashboard: '📊',
-  '组合与分析': '📁',
+  '市场概览': '📊',
+  '组合分析': '📁',
   '行情分析': '📰',
-  '资讯': '🗞️',
-  'Token 监控': '🔑',
-  '数据源': '📡',
-  '配置': '⚙️',
+  'AI 设计': '✨',
+  '资讯监控': '🗞️',
+  'Token 用量监控': '🔑',
+  '数据源监控': '📡',
+  '因子模型': '🧮',
+  '系统配置': '⚙️',
+  '页面不存在': '🚫',
 }
 const routeMetaIcon = computed(() => {
   const t = route.meta?.title

@@ -5,9 +5,11 @@ const stub = (name) => ({ default: { name, template: '<div/>' } })
 vi.mock('../views/Dashboard.vue', () => stub('Dashboard'))
 vi.mock('../views/PortfolioAnalysis.vue', () => stub('PortfolioAnalysis'))
 vi.mock('../views/MarketAnalysis.vue', () => stub('MarketAnalysis'))
+vi.mock('../views/AiDesign.vue', () => stub('AiDesign'))
 vi.mock('../views/NewsView.vue', () => stub('NewsView'))
 vi.mock('../views/system/TokenMonitor.vue', () => stub('TokenMonitor'))
 vi.mock('../views/system/SourceMonitor.vue', () => stub('SourceMonitor'))
+vi.mock('../views/system/FactorModelView.vue', () => stub('FactorModelView'))
 vi.mock('../views/system/ConfigView.vue', () => stub('ConfigView'))
 vi.mock('../views/NotFound.vue', () => stub('NotFound'))
 
@@ -23,6 +25,20 @@ describe('router structure (round34-B7 C1)', () => {
     expect(paths).toContain('/news')
     expect(paths).toContain('/portfolio-analysis')
     expect(paths).toContain('/market-analysis')
+  })
+
+  it('B7-C3: AI 设计独立一级路由 /ai', () => {
+    const ai = routes.find((r) => r.path === '/ai')
+    expect(ai).toBeTruthy()
+    expect(ai.name).toBe('ai-design')
+    expect(ai.meta?.title).toBe('AI 设计')
+  })
+
+  it('B7-C3 批复③A: 因子模型独立路由 /system/factors', () => {
+    const factors = routes.find((r) => r.path === '/system/factors')
+    expect(factors).toBeTruthy()
+    expect(factors.name).toBe('system-factors')
+    expect(factors.meta?.title).toBe('因子模型')
   })
 
   it('does NOT have the old separate /portfolio and /analysis routes', () => {

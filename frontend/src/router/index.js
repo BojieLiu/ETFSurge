@@ -1,10 +1,10 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
-// round34-B7 全域 IA 重组（C1 结构归位）：
+// round34-B7 全域 IA 重组（C3 完成态）：
 // - 页面组件统一收敛到 views/（页面）与 components/portfolio/（组合页分区件）
 // - 系统组四页挂 /system/*，旧路径 301 式重定向保书签
+// - AI 设计独立路由 /ai；因子模型独立路由 /system/factors
 // - catch-all 404 兜底；所有路由补齐非空 meta.title
-// 注：/ai（AI 设计独立路由）在 C3 提交引入——本表暂不含。
 const routes = [
   {
     path: '/',
@@ -25,6 +25,13 @@ const routes = [
     meta: { title: '行情分析', description: '市场宏观研判、板块轮动分析与标的深度解读' },
   },
   {
+    // round34-B7 C3：AI 设计独立一级路由（原 PortfolioAnalysis tools tab）
+    path: '/ai',
+    name: 'ai-design',
+    component: () => import('../views/AiDesign.vue'),
+    meta: { title: 'AI 设计', description: 'AI 组合设计、历史方案与策略检查' },
+  },
+  {
     path: '/news',
     name: 'news',
     component: () => import('../views/NewsView.vue'),
@@ -41,6 +48,13 @@ const routes = [
     name: 'system-sources',
     component: () => import('../views/system/SourceMonitor.vue'),
     meta: { title: '数据源监控', description: '数据源健康状态、事件趋势与失败记录' },
+  },
+  {
+    // round34-B7 C3 批复③A：因子模型独立可达（原 AiDesign 内嵌默认首屏）
+    path: '/system/factors',
+    name: 'system-factors',
+    component: () => import('../views/system/FactorModelView.vue'),
+    meta: { title: '因子模型', description: '38 维实盘因子、IC 统计与显著性追踪' },
   },
   {
     path: '/system/config',

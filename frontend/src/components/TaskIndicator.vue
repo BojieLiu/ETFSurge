@@ -67,12 +67,14 @@ function statusText(status) {
 }
 
 function onClickTask(t) {
-  // Z27: check 任务经 recordId 跳组合分析页；design 任务经 designId 直达方案
+  // Z27: check 任务经 recordId 跳组合分析页；design 任务直达 AI 设计页。
+  // round34-B7 C3：旧实现 push('/?designId=') 的 query 全库无消费者（死深链），
+  // AI 设计已升独立路由 /ai，任务详情经 taskStore 状态恢复。
   if (t.status === 'completed' || t.status === 'completed_with_errors') {
     if (t.type === 'check' && t.recordId) {
       router.push('/portfolio-analysis')
     } else if (t.designId) {
-      router.push({ path: '/', query: { designId: String(t.designId) } })
+      router.push('/ai')
     }
   }
   open.value = false

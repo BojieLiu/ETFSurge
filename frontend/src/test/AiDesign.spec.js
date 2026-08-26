@@ -1,13 +1,15 @@
 /**
- * DashboardAiTools 测试矩阵（§7.2 归位合并，2026-08-18）。
+ * AiDesign 测试矩阵（§7.2 归位合并，2026-08-18；round34-B7 C3 升独立路由 /ai）。
  *
  * - Z27 §7.4：历史列表 loadHistoryList（design+check 合并、无 ReferenceError）
  * - 设计报告 tab：design_text 非硬编码兜底/等待态/错误态/WS 拼接/enterDesignMode
  * - timer 清理：checkStrategy/startDesign 轮询清理 + 5 连错停止
- * - F3：因子模型概览仅工具列表/初始态显示
  * - P0-9：running check 任务合入历史列表 + 同任务不双显示
- * - O15：重新进入 AI 工具 tab 复位到工具列表
+ * - B7：默认首屏导航卡（含因子模型跳转 /system/factors）；路由重挂载状态复位
  * - O11：设计任务状态机（重试/返回/失败不持久化/finalize 幂等）
+ *
+ * round34-B7 C3 变更：active prop 与 applied emit 已删除（路由态直调 store）；
+ * FactorModelView 内嵌移除（→ /system/factors 独立路由，批复③A）。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
@@ -15,7 +17,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { nextTick } from 'vue'
 
 // ── 统一 mock：共享可变状态全部放 vi.hoisted（工厂与用例体都可引用）──
-const { getTimeline, getStrategyCheckDetail, toastShow, designAsyncMock, persistMock, getTaskMock, mockTasks } = vi.hoisted(() => ({
+const { getTimeline, getStrategyCheckDetail, toastShow, designAsyncMock, persistMock, getTaskMock, mockTasks, storeFetchEtfs } = vi.hoisted(() => ({
   getTimeline: vi.fn(),
   getStrategyCheckDetail: vi.fn(),
   toastShow: vi.fn(),
@@ -23,6 +25,7 @@ const { getTimeline, getStrategyCheckDetail, toastShow, designAsyncMock, persist
   persistMock: vi.fn(),
   getTaskMock: vi.fn().mockResolvedValue({ data: { status: 'running', progress: 50 } }),
   mockTasks: [],
+  storeFetchEtfs: vi.fn().mockResolvedValue(undefined),
 }))
 
 vi.mock('marked', () => ({
@@ -53,12 +56,19 @@ vi.mock('../api', () => ({
 }))
 
 vi.mock('../stores/portfolio', () => ({
-  usePortfolioStore: () => ({ fetchEtfs: vi.fn(), etfs: [], capitalOn: 500000, capitalOff: 0 }),
+  usePortfolioStore: () => ({ fetchEtfs: storeFetchEtfs, etfs: [], capitalOn: 500000, capitalOff: 0 }),
 }))
 
-vi.mock('../stores/toast', () => ({
-  useToastStore: () => ({ show: toastShow, success: vi.fn(), error: vi.fn(), dismiss: vi.fn(), toasts: [] }),
-}))
+vi.mock('../stores/toast', () => {
+  // B7: applyPlan 成功路径直调 toast(...)——store 需可调用且带 show 等成员
+  const t = (...args) => toastShow(...args)
+  t.show = toastShow
+  t.success = vi.fn()
+  t.error = vi.fn()
+  t.dismiss = vi.fn()
+  t.toasts = []
+  return { useToastStore: () => t }
+})
 
 vi.mock('../stores/task', () => ({
   useTaskStore: () => ({
@@ -83,9 +93,6 @@ vi.mock('../stores/task', () => ({
 }))
 
 // 子组件 stub（取各来源超集：data-testid 定位 + DesignLoading 失败态按钮）
-vi.mock('../views/system/FactorModelView.vue', () => ({
-  default: { name: 'FactorModelView', template: '<div data-testid="factor-model-view" />' },
-}))
 vi.mock('../components/design/DesignWizard.vue', () => ({ default: { template: '<div data-testid="design-wizard" />' } }))
 vi.mock('../components/design/DesignLoading.vue', () => ({
   default: {
@@ -108,7 +115,7 @@ vi.mock('../components/design/StrategyCheckResult.vue', () => ({
 vi.mock('../components/ui/AppModal.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('../utils/formatDate', () => ({ formatDate: (d) => String(d) || '' }))
 
-import DashboardAiTools from '../views/AiDesign.vue'
+import AiDesign from '../views/AiDesign.vue'
 
 // 防合并后跨 describe 状态污染：每个用例前重置共享 mock 与数组
 beforeEach(() => {
@@ -125,7 +132,7 @@ beforeEach(() => {
 })
 
 // =========================================================================
-// 来源: DashboardAiTools.history.spec.js（Z27 §7.4 历史列表）
+// 来源: AiDesign.history.spec.js（Z27 §7.4 历史列表）
 // =========================================================================
 
 const DesignHistoryStub = {
@@ -133,7 +140,7 @@ const DesignHistoryStub = {
   props: ['items', 'loading', 'loaded'],
 }
 
-describe('DashboardAiTools — loadHistoryList (Z27 §7.4)', () => {
+describe('AiDesign — loadHistoryList (Z27 §7.4)', () => {
   it('renders timeline items (design + check) without ReferenceError', async () => {
     getTimeline.mockResolvedValue({
       data: {
@@ -144,7 +151,7 @@ describe('DashboardAiTools — loadHistoryList (Z27 §7.4)', () => {
       },
     })
 
-    const wrapper = mount(DashboardAiTools, {
+    const wrapper = mount(AiDesign, {
       global: {
         plugins: [createPinia()],
         stubs: {
@@ -175,7 +182,7 @@ describe('DashboardAiTools — loadHistoryList (Z27 §7.4)', () => {
   it('does not emit error toast when timeline returns empty items', async () => {
     getTimeline.mockResolvedValue({ data: { items: [] } })
 
-    const wrapper = mount(DashboardAiTools, {
+    const wrapper = mount(AiDesign, {
       global: {
         plugins: [createPinia()],
         stubs: {
@@ -195,15 +202,15 @@ describe('DashboardAiTools — loadHistoryList (Z27 §7.4)', () => {
 })
 
 // =========================================================================
-// 来源: DashboardAiTools.report.spec.js（设计报告 tab 行为）
+// 来源: AiDesign.report.spec.js（设计报告 tab 行为）
 // =========================================================================
 
-describe('DashboardAiTools - Design Report Tab', () => {
+describe('AiDesign - Design Report Tab', () => {
   let wrapper
 
   beforeEach(async () => {
     setActivePinia(createPinia())
-    wrapper = mount(DashboardAiTools, {
+    wrapper = mount(AiDesign, {
       global: {
         stubs: {
           AppButton: true,
@@ -272,7 +279,7 @@ describe('DashboardAiTools - Design Report Tab', () => {
     // Inject a running task into the shared mock (with designId and recent createdAt)
     mockTasks.push({ taskId: 'task-running-1', type: 'design', status: 'running', designId: 42, createdAt: Date.now() })
     // Re-mount to pick up the updated mock
-    wrapper = mount(DashboardAiTools, {
+    wrapper = mount(AiDesign, {
       global: {
         stubs: {
           AppButton: true,
@@ -305,10 +312,10 @@ describe('DashboardAiTools - Design Report Tab', () => {
 })
 
 // =========================================================================
-// 来源: DashboardAiTools.timer.spec.js（轮询清理 + 连错停止）
+// 来源: AiDesign.timer.spec.js（轮询清理 + 连错停止）
 // =========================================================================
 
-describe('DashboardAiTools — timer cleanup guards (round35 §16.6 空心测试修复)', () => {
+describe('AiDesign — timer cleanup guards (round35 §16.6 空心测试修复)', () => {
   beforeEach(() => {
     vi.useFakeTimers()
   })
@@ -319,7 +326,7 @@ describe('DashboardAiTools — timer cleanup guards (round35 §16.6 空心测试
   })
 
   async function mountWithModalStub() {
-    return mount(DashboardAiTools, {
+    return mount(AiDesign, {
       attachTo: document.body,
       global: {
         stubs: {
@@ -371,62 +378,73 @@ describe('DashboardAiTools — timer cleanup guards (round35 §16.6 空心测试
 })
 
 // =========================================================================
-// 来源: DashboardAiTools.factorVisibility.spec.js（F3 因子模型概览可见性）
+// round34-B7 C3：默认首屏导航卡（替代原 F3 FactorModelView 内嵌可见性）
 // =========================================================================
 
-describe('DashboardAiTools — FactorModelView 可见性 (F3)', () => {
-  async function mountView() {
-    const wrapper = mount(DashboardAiTools, { attachTo: document.body })
+describe('AiDesign — 默认首屏导航卡 (B7 批复③A)', () => {
+  async function mountDefault() {
+    const wrapper = mount(AiDesign, {
+      attachTo: document.body,
+      global: {
+        stubs: {
+          // router-link（因子模型卡）：把 to 透传到 DOM 供断言
+          'router-link': { template: '<a class="router-link-stub" :data-to="to"><slot /></a>', props: ['to'] },
+        },
+      },
+    })
     await flushPromises()
     return wrapper
   }
 
-  function factorView(wrapper) {
-    return wrapper.find('[data-testid="factor-model-view"]')
-  }
-
-  it('初始（activeCoreFeature=null）时因子模型概览可见', async () => {
-    const wrapper = await mountView()
-    expect(factorView(wrapper).exists()).toBe(true)
+  it('初始态渲染四张入口卡：设计/策略检查/任务列表/因子模型', async () => {
+    const wrapper = await mountDefault()
+    const cards = wrapper.findAll('.core-action-btn')
+    expect(cards.length).toBe(4)
+    const titles = cards.map((c) => c.find('.action-title').text())
+    expect(titles).toContain('智能设计ETF组合方案')
+    expect(titles).toContain('策略检查分析')
+    expect(titles).toContain('任务列表')
+    expect(titles).toContain('因子模型')
     wrapper.unmount()
   })
 
-  it('打开具体工具（strategy/design/history）后因子模型概览卸载', async () => {
-    const wrapper = await mountView()
-    expect(factorView(wrapper).exists()).toBe(true)
+  it('因子模型卡跳转 /system/factors（内嵌概览已移至系统分组）', async () => {
+    const wrapper = await mountDefault()
+    const link = wrapper.findAll('.core-action-btn').find((c) => c.text().includes('因子模型'))
+    expect(link.attributes('data-to')).toBe('/system/factors')
+    // 负向断言：内嵌概览不再存在
+    expect(wrapper.find('[data-testid="factor-model-view"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('打开具体工具后入口卡网格卸载，退出后恢复', async () => {
+    const wrapper = await mountDefault()
+    expect(wrapper.findAll('.core-action-btn').length).toBe(4)
     for (const feature of ['strategy', 'design', 'history']) {
       wrapper.vm.activeCoreFeature = feature
       await flushPromises()
-      expect(factorView(wrapper).exists()).toBe(false)
+      expect(wrapper.findAll('.core-action-btn').length).toBe(0)
     }
-    wrapper.unmount()
-  })
-
-  it('退出工具后因子模型概览恢复显示', async () => {
-    const wrapper = await mountView()
-    wrapper.vm.activeCoreFeature = 'strategy'
-    await flushPromises()
-    expect(factorView(wrapper).exists()).toBe(false)
     wrapper.vm.activeCoreFeature = null
     await flushPromises()
-    expect(factorView(wrapper).exists()).toBe(true)
+    expect(wrapper.findAll('.core-action-btn').length).toBe(4)
     wrapper.unmount()
   })
 })
 
 // =========================================================================
-// 来源: DashboardAiTools.p0-9.spec.js（任务列表双显示修复）
+// 来源: AiDesign.p0-9.spec.js（任务列表双显示修复）
 // =========================================================================
 
 function flush() {
   return new Promise((r) => setTimeout(r, 0))
 }
 
-describe('DashboardAiTools — P0-9 任务列表双显示', () => {
+describe('AiDesign — P0-9 任务列表双显示', () => {
   it('running check 任务合入历史列表（_type=check）', async () => {
     mockTasks.push({ taskId: '388', type: 'check', status: 'running', createdAt: Date.now() })
     getTimeline.mockResolvedValue({ data: { items: [], total: 0 } })
-    const wrapper = mount(DashboardAiTools, { props: { active: false } })
+    const wrapper = mount(AiDesign)
     await wrapper.vm.loadHistoryList()
     await flush()
     const list = wrapper.vm.designHistoryList
@@ -442,7 +460,7 @@ describe('DashboardAiTools — P0-9 任务列表双显示', () => {
     })
     // taskStore 同一 running 任务（taskId='506'）
     mockTasks.push({ taskId: '506', type: 'design', status: 'running', createdAt: Date.now() })
-    const wrapper = mount(DashboardAiTools, { props: { active: false } })
+    const wrapper = mount(AiDesign)
     await wrapper.vm.loadHistoryList()
     await flush()
     const list = wrapper.vm.designHistoryList
@@ -452,47 +470,66 @@ describe('DashboardAiTools — P0-9 任务列表双显示', () => {
 })
 
 // =========================================================================
-// 来源: DashboardAiTools.resetToTools.spec.js（O15 重新进入复位）
+// round34-B7 C3：路由态复位（替代原 O15 active-prop 复位）
 // =========================================================================
 
-describe('DashboardAiTools — 重新进入复位 (O15)', () => {
+describe('AiDesign — 路由重挂载状态复位 (B7，替代 O15)', () => {
   function toolsListVisible(wrapper) {
-    // 工具列表态 = activeCoreFeature=null → FactorModelView 可见 + 无 wizard/result/history
+    // 工具列表态 = 入口卡网格可见 + 无 wizard/result/history
     return (
-      wrapper.find('[data-testid="factor-model-view"]').exists() &&
+      wrapper.findAll('.core-action-btn').length === 4 &&
       !wrapper.find('[data-testid="design-wizard"]').exists() &&
       !wrapper.find('[data-testid="design-result"]').exists() &&
       !wrapper.find('[data-testid="design-history"]').exists()
     )
   }
 
-  it('active false→true 且无任务 → 复位到工具列表', async () => {
-    const wrapper = mount(DashboardAiTools, { props: { active: false } })
+  it('进入 design 后卸载重挂（模拟路由切走再切回）→ 状态复位到工具列表', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    let wrapper = mount(AiDesign, { global: { plugins: [pinia] } })
     await flushPromises()
 
-    // 进入 design wizard（模拟用户操作）
+    // 进入 design wizard
     await wrapper.vm.enterDesignMode()
     await flushPromises()
     expect(wrapper.find('[data-testid="design-wizard"]').exists()).toBe(true)
+    wrapper.unmount()
 
-    // 切走再切回 → active true
-    await wrapper.setProps({ active: true })
+    // 路由重挂载 → 全新组件实例，天然复位
+    wrapper = mount(AiDesign, { global: { plugins: [pinia] } })
     await flushPromises()
     expect(toolsListVisible(wrapper)).toBe(true)
+    wrapper.unmount()
   })
 
-  it('active 初始为 true（默认落工具列表）', async () => {
-    const wrapper = mount(DashboardAiTools, { props: { active: true } })
+  it('运行中 design 任务例外：重挂载后保留恢复 loading（任务不丢）', async () => {
+    mockTasks.push({ taskId: 'task-running-route', type: 'design', status: 'running', designId: 42, createdAt: Date.now() })
+    const wrapper = mount(AiDesign, {})
     await flushPromises()
-    expect(toolsListVisible(wrapper)).toBe(true)
+    await wrapper.vm.enterDesignMode()
+    await flushPromises()
+    expect(wrapper.vm.designStep).toBe('loading')
+    wrapper.unmount()
+  })
+
+  it('B7: 应用方案成功后直调 store 刷新三仓（替代原 applied emit 回调）', async () => {
+    const api = await import('../api')
+    api.portfolioApi.applyPortfolioDesign.mockResolvedValue({ data: { applied: [{ symbol: '510300' }] } })
+    const wrapper = mount(AiDesign, {})
+    await flushPromises()
+
+    await wrapper.vm.applyPlan({ style: 'balanced', allocations: [{ symbol: '510300', target_weight: 1 }] })
+    expect(storeFetchEtfs).toHaveBeenCalledTimes(3) // 无参 + on_exchange + off_exchange
+    wrapper.unmount()
   })
 })
 
 // =========================================================================
-// 来源: DashboardAiTools.stateMachine.spec.js（O11 任务状态机）
+// 来源: AiDesign.stateMachine.spec.js（O11 任务状态机）
 // =========================================================================
 
-describe('DashboardAiTools — 任务状态机 (O11)', () => {
+describe('AiDesign — 任务状态机 (O11)', () => {
   beforeEach(() => {
     persistMock.mockClear()
     designAsyncMock.mockClear()
@@ -500,7 +537,7 @@ describe('DashboardAiTools — 任务状态机 (O11)', () => {
   })
 
   it('O11: 失败态 → 点击重试 → 重新 running（复用参数重新提交）', async () => {
-    const wrapper = mount(DashboardAiTools, { props: { active: false } })
+    const wrapper = mount(AiDesign)
     await flushPromises()
     // 进入 design wizard 并提交（designAsync 立即返回 task_id=101）
     wrapper.vm.activeCoreFeature = 'design'
@@ -521,7 +558,7 @@ describe('DashboardAiTools — 任务状态机 (O11)', () => {
   })
 
   it('O11: 失败态返回 → idle → 再次进入回到 idle（不残留失败卡）', async () => {
-    const wrapper = mount(DashboardAiTools, { props: { active: false } })
+    const wrapper = mount(AiDesign)
     await flushPromises()
     wrapper.vm.activeCoreFeature = 'design'
     wrapper.vm.designStep = 'loading'
@@ -538,7 +575,7 @@ describe('DashboardAiTools — 任务状态机 (O11)', () => {
   })
 
   it('O11: 失败态退出不持久化（exitCoreFeature 不调 persistDesignState）', async () => {
-    const wrapper = mount(DashboardAiTools, { props: { active: false } })
+    const wrapper = mount(AiDesign)
     await flushPromises()
     wrapper.vm.activeCoreFeature = 'design'
     wrapper.vm.designStep = 'loading'
@@ -557,7 +594,7 @@ describe('DashboardAiTools — 任务状态机 (O11)', () => {
   it('O11: WS 完成与轮询幂等——finalizedDesignIds 防重复 finalize', async () => {
     // 源码级断言：WS 回调与轮询 completed 分支都有 finalizedDesignIds.has(did) 守卫
     // （fetchDesignDetail 只调一次——interaction-redesign P3 验收③）
-    const src = DashboardAiTools.__script?.content
+    const src = AiDesign.__script?.content
       || require('fs').readFileSync(require.resolve('../views/AiDesign.vue'), 'utf-8')
     expect(src).toContain('finalizedDesignIds.has(did)')
     expect(src).toContain('finalizedDesignIds.add(did)')

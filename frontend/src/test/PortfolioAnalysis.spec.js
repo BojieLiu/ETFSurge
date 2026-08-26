@@ -16,12 +16,6 @@ vi.mock('../components/portfolio/AnalysisView.vue', () => ({
     template: '<div class="av">{{ selectedSymbol }}</div>',
   },
 }))
-vi.mock('../views/AiDesign.vue', () => ({
-  default: {
-    name: 'DashboardAiTools',
-    template: '<div class="ai-tools"></div>',
-  },
-}))
 vi.mock('../stores/portfolio', () => ({
   usePortfolioStore: () => ({
     onExchange: [],
@@ -65,15 +59,15 @@ describe('PortfolioAnalysis tabbed view', () => {
     useDashboardData.mockImplementation(() => dashInstance())
   })
 
-  it('renders four tab buttons (B7: 新增盈亏 tab)', () => {
+  it('renders three tab buttons (B7-C3: tools tab 移除，AI 设计升独立路由)', () => {
     const wrapper = mount(PortfolioAnalysis, {
       global: { plugins: [createPinia()] },
     })
-    expect(mainTabCount(wrapper)).toBe(4)
-    expect(mainTab(wrapper, 'AI工具')).toBeTruthy()
+    expect(mainTabCount(wrapper)).toBe(3)
     expect(mainTab(wrapper, '持仓')).toBeTruthy()
     expect(mainTab(wrapper, '盈亏')).toBeTruthy()
     expect(mainTab(wrapper, '技术分析')).toBeTruthy()
+    expect(wrapper.find('.ai-tools').exists()).toBe(false)
   })
 
   it('shows holdings tab by default', () => {
@@ -82,9 +76,7 @@ describe('PortfolioAnalysis tabbed view', () => {
     })
     // Holdings panel is visible by default (activeTab = 'holdings')
     expect(wrapper.find('.pm').isVisible()).toBe(true)
-    // Other panels are rendered but not visible (AppTabs uses hidden attr)
-    expect(wrapper.find('.ai-tools').exists()).toBe(true)
-    expect(wrapper.find('.ai-tools').isVisible()).toBe(false)
+    // Analysis panel rendered but hidden (AppTabs uses hidden attr)
     expect(wrapper.find('.av').exists()).toBe(true)
     expect(wrapper.find('.av').isVisible()).toBe(false)
   })
@@ -97,8 +89,6 @@ describe('PortfolioAnalysis tabbed view', () => {
     await wrapper.vm.$nextTick()
     // Analysis panel should now be visible
     expect(wrapper.find('.av').isVisible()).toBe(true)
-    // AI tools should not be visible
-    expect(wrapper.find('.ai-tools').isVisible()).toBe(false)
   })
 
   it('drives AnalysisView selection from the selected holding across tabs', async () => {

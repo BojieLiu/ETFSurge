@@ -3,7 +3,8 @@
  *
  * Covers:
  *   - check task completed + recordId → click navigates to /portfolio-analysis
- *   - design task completed + designId → click navigates to '/' with designId query
+ *   - design task completed + designId → click navigates to /ai（round34-B7 C3：
+ *     旧 '/'+designId query 为死深链，AI 设计已升独立路由）
  *   - completed_with_errors design task with designId is clickable
  *   - quick_ready / completed_with_errors status text rendering
  */
@@ -17,6 +18,7 @@ function makeRouter() {
   const routes = [
     { path: '/', name: 'dashboard', component: { template: '<div />' } },
     { path: '/portfolio-analysis', name: 'portfolio-analysis', component: { template: '<div />' } },
+    { path: '/ai', name: 'ai-design', component: { template: '<div />' } },
   ]
   return createRouter({ history: createMemoryHistory(), routes })
 }
@@ -66,7 +68,7 @@ describe('TaskIndicator (Z27 §7.3)', () => {
     expect(router.currentRoute.value.path).toBe('/portfolio-analysis')
   })
 
-  it('navigates to dashboard with designId query for design task', async () => {
+  it('navigates to /ai for completed design task (B7-C3 死深链修正)', async () => {
     const { useTaskStore } = await import('../stores/task')
     const store = useTaskStore()
     addTask(store, { taskId: '5', type: 'design', status: 'completed', designId: 222 })
@@ -78,8 +80,7 @@ describe('TaskIndicator (Z27 §7.3)', () => {
 
     await item.trigger('click')
     await flushNav()
-    expect(router.currentRoute.value.path).toBe('/')
-    expect(router.currentRoute.value.query.designId).toBe('222')
+    expect(router.currentRoute.value.path).toBe('/ai')
   })
 
   it('completed_with_errors design task with designId is clickable', async () => {
@@ -96,7 +97,8 @@ describe('TaskIndicator (Z27 §7.3)', () => {
 
     await wrapper.find('.task-item').trigger('click')
     await flushNav()
-    expect(router.currentRoute.value.query.designId).toBe('333')
+    // design 任务（非 check）→ 走 designId 分支 → /ai
+    expect(router.currentRoute.value.path).toBe('/ai')
   })
 
   it('renders Chinese status text for quick_ready and completed_with_errors', async () => {
