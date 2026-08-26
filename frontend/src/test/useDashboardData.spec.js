@@ -239,6 +239,25 @@ describe('useDashboardData', () => {
     expect(dash.globalIndices.value).toEqual({})
   })
 
+  it('R110 验收：同一加载窗口内多消费方并发调用，indices/global 请求数 ==1（基线 ×3）', async () => {
+    // Round34 B4/R110 头条口径——多个面板/composable 实例共享 marketStore
+    // 单飞通道（30s TTL），进行中请求复用同一 Promise
+    const dashA = useDashboardData(capitalOn, capitalOff, activeTab)
+    const dashB = useDashboardData(capitalOn, capitalOff, activeTab)
+    await Promise.all([
+      dashA.fetchGlobalIndices(),
+      dashB.fetchGlobalIndices(),
+      dashA.fetchGlobalIndices(),
+    ])
+    expect(marketApi.indicesGlobal).toHaveBeenCalledTimes(1)
+
+    // TTL 内的新实例（模拟路由回切）同样命中缓存，不触发第二次网络
+    const dashC = useDashboardData(capitalOn, capitalOff, activeTab)
+    await dashC.fetchGlobalIndices()
+    expect(marketApi.indicesGlobal).toHaveBeenCalledTimes(1)
+    expect(dashC.globalIndices.value).toEqual({ '000001': '2800' })
+  })
+
   // ── fetchAllocations ────────────────────────────────────
   it('fetchAllocations calls getAllocation for both types', async () => {
     const dash = useDashboardData(capitalOn, capitalOff, activeTab)
