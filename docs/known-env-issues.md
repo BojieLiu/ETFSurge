@@ -83,17 +83,19 @@
 | SQLite `ALTER TABLE RENAME` | 索引名保留 → create_all 撞名崩溃 | rename 表前先 DROP 其全部索引 |
 | `rg -rln` | `-r` 是 --replace，输出被字面替换 | 用 `rg -ln` |
 
-## 3. 已知性能债登记（round34-B4 定位，2026-08-26 深夜降级窗实测）
+## 3. 已知性能债登记（round34-B4 定位；2026-08-26 深夜归因 + 同日盘中 D3 定档）
 
 > 口径：软门禁（AGENTS.md 性能验收节）；修复排期不阻塞功能交付。
-> 测量环境：01:00 非交易时段、Zen 503 降级日——即最坏路径读数。
+> 两组读数：01:00 非交易窗（最坏路径归因用）+ 11:35 交易日盘中（D3 定档用，源健康：熔断全 closed、单标的 realtime 108ms）。
 
-| 路径 | 实测 | 阈值 | 归因（file:line） | 状态 |
+| 路径 | 盘中稳态 | 冷启首击 | 阈值 | D3 定档 |
 |---|---|---|---|---|
-| `POST /portfolio/calculate` | 6.1s / 8.1s（两轮） | 登记制 | pricing.py 结构性两波等待：第一波 `asyncio.gather` 取最慢分支（各 ≤3s wait_for 截断，pricing.py:121）+ NAV 兜底波 ≤3s（:148）+ DB/序列化 | **已定位，排期**；并行化已到位，属死源日结构性下限 |
-| `GET /market/watchlist` | **16.4s / 14.5s** ⚠️ | ≤3s | enrich 主波被外层 wait_for 截断（5-8s，market.py:1239，设计内）→ 超时走 `_watchlist_close_fallback`：`Semaphore(3)` + 每项 `wait_for(..., 3)`（market.py:1106/:1146），死源日每项烧满 3s → **ceil(N/3)×3s ≈ N=15 时 ~15s**，且兜底段**无总预算**（外层超时只罩 enrich 不罩 fallback） | **预算化已落地（2026-08-26）**：`_watchlist_close_fallback` 加 `budget_s=8.0` 共享截止线，耗尽后剩余项跳过网络直接落「维护中」诚实行，单项超时与剩余预算取 min——墙钟 O(N/3)×3s → ≤8s 封顶；测试 ×2（12 只死源 <5s 全行诚实降级 + 健康源零误伤）。**交易日盘中复测仍待（D3）** |
+| `GET /market/watchlist` | **29-71ms** ✅ | 12.4s（有界） | ≤3s | **稳态达标**。冷启尖峰=enrich 截断(8s, 含 US 组)+兜底预算(≤8s)，一次性部署成本且已有界（日志实证走 R29 兜底路径）；可选后续=startup 预热一次 enrich 把尖峰挪出用户首击 |
+| `POST /portfolio/calculate` | **17ms**（PRICE_MAP_CACHE 命中）✅ | 5.9/8.1s | 登记制 | 稳态达标。冷构建=pricing.py 两波 gather 结构性一次性成本（pricing.py:121/:148）；预热建议同上 |
+| `GET /market/search` | 1.8-2.4s ⚠️ | 16.1s（instruments 冷同步） | ≤1s | **稳态仍超 ~2 倍**——新增小债：热缓存后 search 聚合链路待分段画像排期 |
 
-- 复测命令：起后端后 `Measure-Command { Invoke-WebRequest http://localhost:8000/api/v1/market/watchlist?limit=100 ... }` 两轮取均值；交易日盘中复测为 D3 必做项（本轮为非交易窗读数，仅作归因证据）。
+- 归因存档（深夜窗）：watchlist 兜底段原无总预算（Semaphore(3)×每项 3s→ceil(N/3)×3s），已由 `_watchlist_close_fallback(budget_s=8.0)` 修复（共享截止线+超线项落「维护中」诚实行，测试 ×2）。
+- 复测工具：交易日盘中 `python scripts/verify_perf.py`（watchlist 半边，自带阈值判定）；calculate 段用 §3 文档命令两轮取均值。非交易窗读数仅作最坏路径归因，不作验收。
 
 ## 回填纪律
 
