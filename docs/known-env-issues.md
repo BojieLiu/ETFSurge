@@ -34,6 +34,19 @@
   调度滞后），特征与主机 commit charge 高位的调度饥饿一致 → 归 §1.6 环境债，
   扩页面文件后复测闭案。语义陷阱：`run_in_thread/safe_call` 为同步阻塞等待，
   async def 直呼即冻结循环（audit_async_blocking 不查此类）。
+- **2026-08-26 取证升级（B7 e2e 补跑期，3/3 同型）+ 客户端侧两个新陷阱**：
+  ①**getaddrinfo 顺序翻转**——本日午后 `localhost` 解析变为 v4-first（伴随代理客户端
+  常驻；晨间 D3 会话仍 ::1-first），python requests 直连全部落 127.0.0.1 → 假性
+  ConnectionRefused 风暴（§1.1 形态完全复刻但非循环冻结）；指纹鉴别三件套：
+  netstat 显示 LISTENING + `curl --noproxy "*" http://[::1]:8000/health` 返回 200 +
+  requests 报 refused ⇒ 客户端解析问题而非服务端。verify_e2e 已钉死
+  `BASE/--host="[::1]"` 字面量（181c376），不再依赖解析顺序。②**代理客户端劫持**：
+  Clash(7897) 下 urllib/requests 对 `[::1]` 字面量不走 NO_PROXY 旁路（IPv6 字面量
+  匹配缺口）→ 全量 502 Bad Gateway（代理发的，非后端）；e2e 跑法：`NO_PROXY=*`。
+  ③风暴本体的设计管线归因维持 §1.1/round36 §9 结论不变；今日 15 项 FAIL 全数
+  归位既有条目（§1.3 数据集薄 ×4 / §1.4 冷缓存 gate ×1 / §1.5 no_data ×2 /
+  设计管线风暴拒连 ×8），零前端/B7 相关（B7 纯前端批次，后端仅测试路径修复）。
+
 
 ### 1.2 LLM 提供方不可用（402 配额耗尽 / 400 / 节流刷屏）
 
