@@ -19,7 +19,7 @@ vi.mock('echarts/components', () => ({
 }))
 vi.mock('echarts/renderers', () => ({ CanvasRenderer: {} }))
 
-import TokenMonitor from '../components/TokenMonitor.vue'
+import TokenMonitor from '../views/system/TokenMonitor.vue'
 import { calcCost, modelCostFromBuckets } from '../utils/pricing'
 
 // round35 FE2: adminApi（axios）补 mock——此前未 mock 时请求失败被旧实现吞掉、

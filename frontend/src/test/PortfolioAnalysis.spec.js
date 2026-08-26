@@ -2,21 +2,21 @@ import { describe, it, expect, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 
-vi.mock('../components/PortfolioManager.vue', () => ({
+vi.mock('../components/portfolio/PortfolioManager.vue', () => ({
   default: {
     name: 'PortfolioManager',
     props: ['selectedSymbol'],
     template: '<div class="pm"><button class="sel" @click="$emit(\'select\', { symbol: \'510300\' })">sel</button></div>',
   },
 }))
-vi.mock('../components/AnalysisView.vue', () => ({
+vi.mock('../components/portfolio/AnalysisView.vue', () => ({
   default: {
     name: 'AnalysisView',
     props: ['selectedSymbol'],
     template: '<div class="av">{{ selectedSymbol }}</div>',
   },
 }))
-vi.mock('../views/DashboardAiTools.vue', () => ({
+vi.mock('../views/AiDesign.vue', () => ({
   default: {
     name: 'DashboardAiTools',
     template: '<div class="ai-tools"></div>',
@@ -30,7 +30,7 @@ vi.mock('../stores/portfolio', () => ({
 }))
 vi.mock('../stores/toast', () => ({ useToastStore: () => ({ show: vi.fn() }) }))
 
-const PortfolioAnalysis = (await import('../components/PortfolioAnalysis.vue')).default
+const PortfolioAnalysis = (await import('../views/PortfolioAnalysis.vue')).default
 
 describe('PortfolioAnalysis tabbed view', () => {
   it('renders three tab buttons', () => {

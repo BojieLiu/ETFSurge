@@ -34,7 +34,7 @@ vi.mock('../api', () => ({
   marketApi: { search: vi.fn(() => Promise.resolve({ data: [] })) },
 }))
 
-const PortfolioManager = (await import('../components/PortfolioManager.vue')).default
+const PortfolioManager = (await import('../components/portfolio/PortfolioManager.vue')).default
 
 describe('PortfolioManager UX improvements', () => {
   it('shows improved search placeholder with example', async () => {

@@ -25,7 +25,7 @@ vi.mock('../api/index.js', () => ({
 import ErrorOverlay from '../components/dashboard/ErrorOverlay.vue'
 import CapitalInputBar from '../components/dashboard/CapitalInputBar.vue'
 import AllocationTable from '../components/dashboard/AllocationTable.vue'
-import ConfigView from '../views/ConfigView.vue'
+import ConfigView from '../views/system/ConfigView.vue'
 
 describe('ErrorOverlay (T-P2-10 裸奔组件补测)', () => {
   it('hasError=false 时不渲染错误卡', () => {

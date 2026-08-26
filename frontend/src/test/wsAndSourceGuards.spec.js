@@ -191,7 +191,7 @@ describe('App.vue 导航栏状态文案（round19 P6-①/②，源码断言）',
 // ── round19 P2-①: PortfolioManager 快照层移除 ──
 
 describe('PortfolioManager 快照层移除（round19 P2-①，源码断言）', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'components', 'PortfolioManager.vue'), 'utf-8')
+  const src = fs.readFileSync(path.join(__dirname, '..', 'components', 'portfolio', 'PortfolioManager.vue'), 'utf-8')
 
   it('cachedEtfs 快照层已移除（分页由响应式 currentEtfs 派生）', () => {
     // 允许注释提及，但不得有快照声明/同步行

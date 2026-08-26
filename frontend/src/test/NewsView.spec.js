@@ -52,7 +52,7 @@ vi.mock('../api', () => ({
   },
 }))
 
-const NewsView = (await import('../components/NewsView.vue')).default
+const NewsView = (await import('../views/NewsView.vue')).default
 import { newsApi } from '../api'
 
 // ---- shared fixtures from src/components/NewsView.spec.js ----

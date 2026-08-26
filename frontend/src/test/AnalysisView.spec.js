@@ -43,7 +43,7 @@ vi.mock('../stores/portfolio', () => ({
   }),
 }))
 
-import AnalysisView from '../components/AnalysisView.vue'
+import AnalysisView from '../components/portfolio/AnalysisView.vue'
 import AppSelect from '../components/ui/AppSelect.vue'
 
 beforeEach(() => {
@@ -318,7 +318,7 @@ describe('round25 R28-b: compositeDecision 透传 SignalPanel', () => {
  * ② 周期标注 textStyle 非浅灰 #888（字号/对比度足够）；
  * ③ 「今日涨跌」区块存在（分析视图脚本含 changePctInfo 计算 + price-summary-row 模板类）。
  */
-const avSrc = fs.readFileSync(path.resolve(__dirname, '../components/AnalysisView.vue'), 'utf-8')
+const avSrc = fs.readFileSync(path.resolve(__dirname, '../components/portfolio/AnalysisView.vue'), 'utf-8')
 const taSrc = fs.readFileSync(path.resolve(__dirname, '../components/market/TechnicalAnalysisModal.vue'), 'utf-8')
 
 describe('P0-15 持仓 K 线红涨绿跌（源码级断言）', () => {

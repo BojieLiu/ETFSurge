@@ -47,7 +47,7 @@ describe('core-actions buttons', () => {
   let DashboardAiTools
 
   beforeAll(async () => {
-    DashboardAiTools = (await import('../views/DashboardAiTools.vue')).default
+    DashboardAiTools = (await import('../views/AiDesign.vue')).default
   })
   it('renders a concise title plus a separate helper description for each action', () => {
     const wrapper = mount(DashboardAiTools, {

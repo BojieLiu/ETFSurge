@@ -117,9 +117,9 @@ const navItems = [
   { path: '/portfolio-analysis', label: '组合与分析', icon: '📁' },
   { path: '/market-analysis', label: '行情分析', icon: '📰' },
   { path: '/news', label: '资讯', icon: '🗞️' },
-  { path: '/token-monitor', label: 'Token 监控', icon: '🔑' },
-  { path: '/source-monitor', label: '数据源', icon: '📡' },
-  { path: '/admin/config', label: '配置', icon: '⚙️' }
+  { path: '/system/token', label: 'Token 监控', icon: '🔑' },
+  { path: '/system/sources', label: '数据源', icon: '📡' },
+  { path: '/system/config', label: '配置', icon: '⚙️' }
 ]
 
 const isActiveRoute = (path) => {

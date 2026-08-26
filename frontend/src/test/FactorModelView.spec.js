@@ -29,7 +29,7 @@ vi.mock('./ui/AppTooltip.vue', () => ({
   default: { name: 'AppTooltip', template: '<span><slot /><slot name="content" /></span>' },
 }))
 
-import FactorModelView from '../components/FactorModelView.vue'
+import FactorModelView from '../views/system/FactorModelView.vue'
 
 function makeData() {
   const mk = (code, name, status, ic = null) => ({

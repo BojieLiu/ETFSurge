@@ -17,7 +17,7 @@ import SummaryCards from '../components/dashboard/SummaryCards.vue'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const SUMMARY_CARDS_SRC = readFileSync(join(__dirname, '../components/dashboard/SummaryCards.vue'), 'utf-8')
-const FACTOR_VIEW_SRC = readFileSync(join(__dirname, '../components/FactorModelView.vue'), 'utf-8')
+const FACTOR_VIEW_SRC = readFileSync(join(__dirname, '../views/system/FactorModelView.vue'), 'utf-8')
 
 function mountCards(pnlOn, pnlOff) {
   return mount(SummaryCards, {

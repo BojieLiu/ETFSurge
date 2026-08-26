@@ -83,7 +83,7 @@ vi.mock('../stores/task', () => ({
 }))
 
 // 子组件 stub（取各来源超集：data-testid 定位 + DesignLoading 失败态按钮）
-vi.mock('../components/FactorModelView.vue', () => ({
+vi.mock('../views/system/FactorModelView.vue', () => ({
   default: { name: 'FactorModelView', template: '<div data-testid="factor-model-view" />' },
 }))
 vi.mock('../components/design/DesignWizard.vue', () => ({ default: { template: '<div data-testid="design-wizard" />' } }))
@@ -108,7 +108,7 @@ vi.mock('../components/design/StrategyCheckResult.vue', () => ({
 vi.mock('../components/ui/AppModal.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('../utils/formatDate', () => ({ formatDate: (d) => String(d) || '' }))
 
-import DashboardAiTools from '../views/DashboardAiTools.vue'
+import DashboardAiTools from '../views/AiDesign.vue'
 
 // 防合并后跨 describe 状态污染：每个用例前重置共享 mock 与数组
 beforeEach(() => {
@@ -558,7 +558,7 @@ describe('DashboardAiTools — 任务状态机 (O11)', () => {
     // 源码级断言：WS 回调与轮询 completed 分支都有 finalizedDesignIds.has(did) 守卫
     // （fetchDesignDetail 只调一次——interaction-redesign P3 验收③）
     const src = DashboardAiTools.__script?.content
-      || require('fs').readFileSync(require.resolve('../views/DashboardAiTools.vue'), 'utf-8')
+      || require('fs').readFileSync(require.resolve('../views/AiDesign.vue'), 'utf-8')
     expect(src).toContain('finalizedDesignIds.has(did)')
     expect(src).toContain('finalizedDesignIds.add(did)')
   })
