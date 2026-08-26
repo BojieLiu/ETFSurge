@@ -1095,15 +1095,18 @@ async def _watchlist_enrich_items(items: list) -> list[dict]:
 # round25 R29: 5s 超时回退不再返裸 DB 行——改为 T-1 收盘快照兜底（跨 A/HK/US，
 # 资产类型无关，复用 market_service._last_close_fallback），前端显示「估」徽标
 # 而非「行情加载中」永不翻回。失败/无历史 → 诚实降级标记。
-async def _watchlist_close_fallback(items: list) -> list[dict]:
+async def _watchlist_close_fallback(items: list, budget_s: float = 8.0) -> list[dict]:
     from ..services.cache_service import cache_set as _cs
     from ..services.market_service import _LAST_GOOD_TTL, _last_close_fallback
     from ..services.market_service import quote_key as _qk
 
-    # R78 (round29): 收盘兜底并发收敛——旧实现 asyncio.gather 全量 22 路并行洪泛
-    # Sina（round29 §14.1 R78 实证），Sina 并发限流 200 → 部分标的兜底也失败。
-    # 改为 Semaphore(3)，单条 wait_for 0.8s→3s（收盘兜底是最终层，值得多等）。
+    # R78 (round29): 并发兜底曾把 22 路并发打爆 Sina——Semaphore(3) + wait_for 0.8s→3s。
+    # round34-B4 (2026-08-26): 共享截止线（known-env-issues §3）——死源日每项烧满
+    # 3s，旧实现墙钟 = ceil(N/3)×3s 无上限（N=15 实测 ~15s）。预算耗尽后剩余项
+    # 跳过网络等待直接落「维护中」诚实行；快路径缓存读取不受限。
     _sem = asyncio.Semaphore(3)
+    _loop = asyncio.get_running_loop()
+    deadline = _loop.time() + budget_s
 
     async def _one(item) -> dict:
         row = {
@@ -1139,14 +1142,21 @@ async def _watchlist_close_fallback(items: list) -> list[dict]:
         except Exception:
             pass
         async with _sem:
-            try:
-                _lc = await asyncio.wait_for(
-                    # R78 (round29): 0.8s→3s——收盘兜底是最后防线，0.8s 常截断
-                    # 导致整列「维护中」（实测 K 线源 0.06s/240 行，3s 充裕）。
-                    _last_close_fallback(item.symbol, _at), timeout=3
-                )
-            except BaseException:
+            _remaining = deadline - _loop.time()
+            if _remaining <= 0.3:
+                # 预算耗尽：跳过网络等待，直接落「维护中」诚实行（下方统一分支）
+                logger.debug("[watchlist] close-fallback budget exhausted, skipping fetch for %s", item.symbol)
                 _lc = None
+            else:
+                try:
+                    _lc = await asyncio.wait_for(
+                        # R78 (round29): 0.8s→3s——收盘兜底是最后防线，0.8s 常截断
+                        # 导致整列「维护中」（实测 K 线源 0.06s/240 行，3s 充裕）。
+                        # round34-B4: 单项超时再与共享截止线取 min——预算尾部不超线。
+                        _last_close_fallback(item.symbol, _at), timeout=min(3, _remaining)
+                    )
+                except BaseException:
+                    _lc = None
         if _lc:
             row["realtime"] = _normalize_watchlist_realtime(_lc)  # is_estimated=True + as_of=T-1 收盘（「估」徽标）
             # R78 (round29): 成功收盘行写 quote 缓存（24h）——下次直接读缓存

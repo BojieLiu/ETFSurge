@@ -91,7 +91,7 @@
 | 路径 | 实测 | 阈值 | 归因（file:line） | 状态 |
 |---|---|---|---|---|
 | `POST /portfolio/calculate` | 6.1s / 8.1s（两轮） | 登记制 | pricing.py 结构性两波等待：第一波 `asyncio.gather` 取最慢分支（各 ≤3s wait_for 截断，pricing.py:121）+ NAV 兜底波 ≤3s（:148）+ DB/序列化 | **已定位，排期**；并行化已到位，属死源日结构性下限 |
-| `GET /market/watchlist` | **16.4s / 14.5s** ⚠️ | ≤3s | enrich 主波被外层 wait_for 截断（5-8s，market.py:1239，设计内）→ 超时走 `_watchlist_close_fallback`：`Semaphore(3)` + 每项 `wait_for(..., 3)`（market.py:1106/:1146），死源日每项烧满 3s → **ceil(N/3)×3s ≈ N=15 时 ~15s**，且兜底段**无总预算**（外层超时只罩 enrich 不罩 fallback） | **已定位，修复候选**：给兜底段加共享截止线（超线项诚实落「维护中」行）；交易日盘中复测后定档 |
+| `GET /market/watchlist` | **16.4s / 14.5s** ⚠️ | ≤3s | enrich 主波被外层 wait_for 截断（5-8s，market.py:1239，设计内）→ 超时走 `_watchlist_close_fallback`：`Semaphore(3)` + 每项 `wait_for(..., 3)`（market.py:1106/:1146），死源日每项烧满 3s → **ceil(N/3)×3s ≈ N=15 时 ~15s**，且兜底段**无总预算**（外层超时只罩 enrich 不罩 fallback） | **预算化已落地（2026-08-26）**：`_watchlist_close_fallback` 加 `budget_s=8.0` 共享截止线，耗尽后剩余项跳过网络直接落「维护中」诚实行，单项超时与剩余预算取 min——墙钟 O(N/3)×3s → ≤8s 封顶；测试 ×2（12 只死源 <5s 全行诚实降级 + 健康源零误伤）。**交易日盘中复测仍待（D3）** |
 
 - 复测命令：起后端后 `Measure-Command { Invoke-WebRequest http://localhost:8000/api/v1/market/watchlist?limit=100 ... }` 两轮取均值；交易日盘中复测为 D3 必做项（本轮为非交易窗读数，仅作归因证据）。
 
