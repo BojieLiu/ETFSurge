@@ -198,9 +198,9 @@ import { CanvasRenderer } from 'echarts/renderers'
 import { LineChart, BarChart } from 'echarts/charts'
 import { TitleComponent, TooltipComponent, GridComponent, LegendComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
-import { adminApi } from '../api'
-import { useToastStore } from '../stores/toast'
-import logger from '../utils/logger'
+import { adminApi } from '../../api'
+import { useToastStore } from '../../stores/toast'
+import logger from '../../utils/logger'
 
 use([CanvasRenderer, LineChart, BarChart, TitleComponent, TooltipComponent, GridComponent, LegendComponent])
 

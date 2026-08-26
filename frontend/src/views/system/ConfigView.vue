@@ -60,7 +60,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { adminApi } from '../api/index.js'
+import { adminApi } from '../../api/index.js'
 
 const items = ref([])
 const showMap = ref({})

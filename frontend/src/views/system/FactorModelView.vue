@@ -332,8 +332,8 @@
 
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { factorsApi } from '../api'
-import AppTooltip from './ui/AppTooltip.vue'
+import { factorsApi } from '../../api'
+import AppTooltip from '../../components/ui/AppTooltip.vue'
 import * as echarts from 'echarts/core'
 import { BarChart } from 'echarts/charts'
 import { CanvasRenderer } from 'echarts/renderers'

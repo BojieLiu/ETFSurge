@@ -60,15 +60,15 @@ import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { CandlestickChart, BarChart, LineChart } from 'echarts/charts'
 import { TitleComponent, TooltipComponent, GridComponent, LegendComponent, DataZoomComponent } from 'echarts/components'
-import { usePortfolioStore } from '../stores/portfolio'
-import { marketApi } from '../api'
-import AppButton from './ui/AppButton.vue'
-import { chartColor, CHART_COLORS, CANDLE_UP, CANDLE_DOWN, histogramColor } from '../utils/chartColors'
-import { resolveTaTarget } from '../utils/taTarget'
+import { usePortfolioStore } from '../../stores/portfolio'
+import { marketApi } from '../../api'
+import AppButton from '../ui/AppButton.vue'
+import { chartColor, CHART_COLORS, CANDLE_UP, CANDLE_DOWN, histogramColor } from '../../utils/chartColors'
+import { resolveTaTarget } from '../../utils/taTarget'
 
-import ControlPanel from './analysis/ControlPanel.vue'
-import ChartPanel from './analysis/ChartPanel.vue'
-import SignalPanel from './analysis/SignalPanel.vue'
+import ControlPanel from '../analysis/ControlPanel.vue'
+import ChartPanel from '../analysis/ChartPanel.vue'
+import SignalPanel from '../analysis/SignalPanel.vue'
 
 use([CanvasRenderer, CandlestickChart, BarChart, LineChart, TitleComponent, TooltipComponent, GridComponent, LegendComponent, DataZoomComponent])
 
