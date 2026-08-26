@@ -3,6 +3,12 @@
 > **性质**：本文档为**纯工具脚本设计方案**，不实施。目标是把「每次改完代码人工全量重测」升级为「一条命令」，把人工从「测试员」降级为「审查员」。
 > **依据**：AGENTS.md「反假完成机制」「性能软门禁」「设计流程」。本方案不涉及新 API 端点，故不走 api-contracts 流程（patrol.py 是 CLI 脚本，非 HTTP 接口）。
 > **用户决策（2026-08-19）**：**不做定时巡检**（`--scheduled` 已从方案移除）。patrol 定位为开发循环内的手动命令，无人值守场景不在本轮范围。
+>
+> **✅ 实施状态（2026-08-26 核验）**：§6 三步全部落地——`backend/scripts/patrol.py`（751 行，
+> §3 CLI 契约 14 项特征全实现，实际层集超出方案：追加 L-golden / L4-ruff / L2-startup）；
+> 单测 `tests/test_patrol_orchestration.py` 33 passed；AGENTS.md「测试 / Testing」入口已加；
+> `logs/patrol/latest.json` 有真实 `--full` 运行记录（exit=2 = 后端离线必需层 SKIP 语义正确）。
+> 下文复选框为验收时的原始勾选状态。
 
 ---
 
@@ -224,18 +230,18 @@ python scripts/patrol.py [模式] [选项]
 > 本方案只设计不实施；以下为后续实施时的分步计划与验收标准。
 
 ### Step 1：`backend/scripts/patrol.py` 骨架
-- [ ] 参数解析（§3 CLI）+ 层注册表（§2 表格）+ 退出码约定（§3）
-- [ ] `--full` 模式打通：逐层 subprocess，捕获退出码/stdout 尾部/耗时，聚合报告
-- [ ] **验收**：后端在线时 `python scripts/patrol.py --full` 退出码 0；人为制造 pytest 失败 → 退出码 1；`--layer L1-unit` 只跑 L1
+- [x] 参数解析（§3 CLI）+ 层注册表（§2 表格）+ 退出码约定（§3）
+- [x] `--full` 模式打通：逐层 subprocess，捕获退出码/stdout 尾部/耗时，聚合报告
+- [x] **验收**：后端在线时 `python scripts/patrol.py --full` 退出码 0；人为制造 pytest 失败 → 退出码 1；`--layer L1-unit` 只跑 L1
 
 ### Step 2：`--diff` 增量模式
-- [ ] 档位判定（§4.2）+ e2e 子模块映射（§4.3，`E2E_MODULE_MAP` 常量）+ 后端在线探测/拉起（§4.4，含「探测失败直接 SKIP 不调 verify_e2e」分支）
-- [ ] `--start-backend` 拉起逻辑（直接起 uvicorn + `/health` 轮询，见 §4.4）
-- [ ] `--module` 覆盖映射、`--layer` 覆盖档位的优先级逻辑
-- [ ] **验收**：
+- [x] 档位判定（§4.2）+ e2e 子模块映射（§4.3，`E2E_MODULE_MAP` 常量）+ 后端在线探测/拉起（§4.4，含「探测失败直接 SKIP 不调 verify_e2e」分支）
+- [x] `--start-backend` 拉起逻辑（直接起 uvicorn + `/health` 轮询，见 §4.4）
+- [x] `--module` 覆盖映射、`--layer` 覆盖档位的优先级逻辑
+- [x] **验收**：
   - 只改 `docs/patrol-orchestration-plan.md` → 不触发任何层
   - 只改 `backend/tests/xxx.py` → 只跑该文件，不跑 e2e
-  - **新增** `backend/tests/test_new_module.py`（untracked）→ 只跑该新文件（档 2，验证 §4.1 的 `git ls-files --others` 分支）
+  - **新增** `backend/tests/test_new_module.py`(untracked) → 只跑该新文件（档 2，验证 §4.1 的 `git ls-files --others` 分支）
   - 改 `backend/app/routers/market.py` → L1 全量 + e2e（**market 域 12 模块**，见 §4.3 表 A）+ health + routes + async
   - 改 `backend/app/routers/news.py` → e2e 只跑 `news, 5xx, encoding`（非全量）
   - 改 `backend/app/services/market_data_hub.py` → e2e **全量**（表 B 共享层兜底）
@@ -244,10 +250,10 @@ python scripts/patrol.py [模式] [选项]
   - `--diff --module news`（改动为 market.py）→ 跑 news 模块（显式覆盖映射）
 
 ### Step 3：收尾
-- [ ] `verify_e2e.py` 既有结果：确认 patrol 透传 `--module` 无冲突
-- [ ] 在 AGENTS.md「测试 / Testing」节补一行：`python scripts/patrol.py --diff` 作为日常循环入口
-- [ ] 单测：`backend/tests/test_patrol_orchestration.py`（mock subprocess，断言档位判定/退出码聚合/报告结构——**不跑真实 subprocess**）
-- [ ] **验收**：全量 pytest 绿 + `patrol.py --full` 全 PASS + 一次真实 `--diff` 走查
+- [x] `verify_e2e.py` 既有结果：确认 patrol 透传 `--module` 无冲突
+- [x] 在 AGENTS.md「测试 / Testing」节补一行：`python scripts/patrol.py --diff` 作为日常循环入口
+- [x] 单测：`backend/tests/test_patrol_orchestration.py`（mock subprocess，断言档位判定/退出码聚合/报告结构——**不跑真实 subprocess**）
+- [x] **验收**：全量 pytest 绿 + `patrol.py --full` 全 PASS + 一次真实 `--diff` 走查
 
 ---
 
