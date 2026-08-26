@@ -297,6 +297,30 @@ describe('useDashboardData', () => {
     expect(dash.pnlOffData.value.total_pnl).toBe(250)
   })
 
+  // ── pnlError（round34-B7 批复①：摘要条错误态依据）───────
+  it('pnlError stays false on success and exposes ref', async () => {
+    const dash = useDashboardData(capitalOn, capitalOff, activeTab)
+    expect(dash.pnlError.value).toBe(false)
+    await dash.fetchPnl()
+    expect(dash.pnlError.value).toBe(false)
+  })
+
+  it('B7 负向断言：daily-pnl 失败 → pnlError=true（诚实降级，禁 ¥0 冒充成功）', async () => {
+    portfolioApi.dailyPnl.mockRejectedValue(new Error('API error'))
+    const dash = useDashboardData(capitalOn, capitalOff, activeTab)
+    await dash.fetchPnl()
+    expect(dash.pnlError.value).toBe(true)
+  })
+
+  it('pnlError resets to false on retry after a failure', async () => {
+    portfolioApi.dailyPnl.mockRejectedValueOnce(new Error('transient'))
+    const dash = useDashboardData(capitalOn, capitalOff, activeTab)
+    await dash.fetchPnl()
+    expect(dash.pnlError.value).toBe(true)
+    await dash.fetchPnl()
+    expect(dash.pnlError.value).toBe(false)
+  })
+
   // ── fetchPnlHistory ─────────────────────────────────────
   it('fetchPnlHistory calls getPnLHistory with correct params', async () => {
     const dash = useDashboardData(capitalOn, capitalOff, activeTab)

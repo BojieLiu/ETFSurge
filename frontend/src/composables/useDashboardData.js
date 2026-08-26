@@ -58,6 +58,9 @@ export function useDashboardData(capitalOn, capitalOff, activeTab) {
   // This lets the dashboard distinguish "loading" from "empty portfolio".
   const fetchAttempted = ref(false)
 
+  // round34-B7 批复①: daily-pnl 拉取失败标志——组合摘要条错误态依据（诚实降级，禁 ¥0 冒充）
+  const pnlError = ref(false)
+
   // Loading state: true when both allocation arrays are empty
   const loading = computed(() => allocationOn.value.allocations.length === 0 && allocationOff.value.allocations.length === 0)
 
@@ -93,6 +96,7 @@ export function useDashboardData(capitalOn, capitalOff, activeTab) {
   }
 
   async function fetchPnl() {
+    pnlError.value = false
     try {
       const [onRes, offRes] = await Promise.all([
         portfolioApi.dailyPnl(capitalOn.value, 'on_exchange'),
@@ -101,6 +105,7 @@ export function useDashboardData(capitalOn, capitalOff, activeTab) {
       pnlOnData.value = onRes.data || { items: [] }
       pnlOffData.value = offRes.data || { items: [] }
     } catch (e) {
+      pnlError.value = true
       toast('获取盈亏数据失败', 'error')
     }
     // R52: fetchAttempted 由 refreshAll 统一置位
@@ -134,7 +139,7 @@ export function useDashboardData(capitalOn, capitalOff, activeTab) {
 
   return {
     allocationOn, allocationOff, pnlOnData, pnlOffData,
-    pnlHistory, pnlHistoryLoading, loading, fetchAttempted,
+    pnlHistory, pnlHistoryLoading, loading, fetchAttempted, pnlError,
     globalIndices,
     totalAll, pnlOn, pnlOff, pnlItems, pnlTotal, pnlTotalAmount, pnlWeightedChange,
     cashPctOn, cashOn, cashPctOff, cashOff,

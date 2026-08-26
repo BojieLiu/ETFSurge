@@ -17,25 +17,80 @@
       <template #holdings>
         <PortfolioManager :selected-symbol="selectedHolding" @select="onSelect" />
       </template>
+      <!-- round34-B7 批复①②：Dashboard 持仓分配/盈亏明细/累计盈亏迁入本页「盈亏」tab -->
+      <template #pnl>
+        <div class="pa-pnl">
+          <AppTabs :tabs="scopeTabs" v-model="scope" variant="soft" full-width ariaLabel="组合范围" class="pa-scopetabs" />
+          <div v-if="!pnlFetchAttempted || dashLoading" class="content-grid" aria-busy="true">
+            <div class="pa-card skeleton-card"><Skeleton type="chart" height="280" /></div>
+            <div class="pa-card skeleton-card"><Skeleton type="table" rows="6" /></div>
+          </div>
+          <template v-else>
+            <SummaryCards
+              :activeTab="scope"
+              :totalAll="totalAll"
+              :pnlOn="pnlOn"
+              :pnlOff="pnlOff"
+              :pnlTotal="pnlTotal"
+              :pnlHistory="pnlHistory"
+              :pnlHistoryLoading="pnlHistoryLoading"
+              :loading="dashLoading"
+              :lastUpdated="null"
+            />
+            <div v-if="allocationOn?.allocations?.length" class="content-grid">
+              <AllocationPieChart :items="allocationOn.allocations" title="场内分配" />
+              <AllocationTable :items="allocationOn.allocations" :cashPct="cashPctOn" :cashAmount="cashOn" title="场内 ETF 目标分配" />
+            </div>
+            <div v-if="allocationOff?.allocations?.length" class="content-grid">
+              <AllocationPieChart :items="allocationOff.allocations" title="场外分配" />
+              <AllocationTable :items="allocationOff.allocations" :cashPct="cashPctOff" :cashAmount="cashOff" title="场外 ETF 目标分配" />
+            </div>
+            <PnLDetailTable
+              :items="pnlItems"
+              :activeTab="scope"
+              :pnlTotal="pnlTotal"
+              :pnlTotalAmount="pnlTotalAmount"
+              :pnlWeightedChange="pnlWeightedChange"
+            />
+            <PnLBarChart :items="pnlItems" :loading="dashLoading" />
+          </template>
+        </div>
+      </template>
       <template #analysis>
         <AnalysisView :selected-symbol="selectedHolding" />
       </template>
       <template #tools>
-        <!-- O15 (round7 §7 P17): active 传参——重新进入 AI 工具 tab 时复位工具列表 -->
-        <DashboardAiTools @applied="refreshData" :active="activeTab === 'tools'" />
+        <!-- O15 (round7 §7 P17): active 传参——重新进入 AI 工具 tab 时复位工具列表。
+             round34-B7 C3 将把本 tab 迁出为独立路由 /ai。 -->
+        <AiDesign @applied="refreshData" :active="activeTab === 'tools'" />
       </template>
     </AppTabs>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
-import DashboardAiTools from '../views/DashboardAiTools.vue'
-import PortfolioManager from './PortfolioManager.vue'
-import AnalysisView from './AnalysisView.vue'
-import CapitalInputBar from './dashboard/CapitalInputBar.vue'
-import AppTabs from './ui/AppTabs.vue'
+import { ref, watch, onMounted } from 'vue'
+// ECharts 组件注册（盈亏 tab 的图表在本页挂载，须先注册）
+import { use } from 'echarts/core'
+import { CanvasRenderer } from 'echarts/renderers'
+import { PieChart, BarChart } from 'echarts/charts'
+import { TitleComponent, TooltipComponent, LegendComponent, GridComponent } from 'echarts/components'
+import { storeToRefs } from 'pinia'
+import AiDesign from './AiDesign.vue'
+import PortfolioManager from '../components/portfolio/PortfolioManager.vue'
+import AnalysisView from '../components/portfolio/AnalysisView.vue'
+import CapitalInputBar from '../components/dashboard/CapitalInputBar.vue'
+import SummaryCards from '../components/dashboard/SummaryCards.vue'
+import AllocationPieChart from '../components/dashboard/AllocationPieChart.vue'
+import AllocationTable from '../components/dashboard/AllocationTable.vue'
+import PnLBarChart from '../components/dashboard/PnLBarChart.vue'
+import PnLDetailTable from '../components/dashboard/PnLDetailTable.vue'
+import Skeleton from '../components/ui/Skeleton.vue'
+import AppTabs from '../components/ui/AppTabs.vue'
 import { usePortfolioStore } from '../stores/portfolio'
+import { useDashboardData } from '../composables/useDashboardData'
+
+use([CanvasRenderer, PieChart, BarChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent])
 
 const store = usePortfolioStore()
 const selectedHolding = ref('')
@@ -44,6 +99,7 @@ const activeTab = ref('holdings')
 const tabs = [
   { value: 'tools', label: 'AI工具', icon: '⚡' },
   { value: 'holdings', label: '持仓', icon: '📋' },
+  { value: 'pnl', label: '盈亏', icon: '💰' },
   { value: 'analysis', label: '技术分析', icon: '📊' },
 ]
 
@@ -64,6 +120,36 @@ function refreshOn() {
 function refreshOff() {
   store.fetchEtfs('off_exchange')
 }
+
+// ── 盈亏 tab 数据（round34-B7）：自有 useDashboardData 实例，首次进入时拉取 ──
+const scope = ref('combined')
+const scopeTabs = [
+  { value: 'combined', label: '综合' },
+  { value: 'on_exchange', label: '场内' },
+  { value: 'off_exchange', label: '场外' },
+]
+const { capitalOn, capitalOff } = storeToRefs(store)
+const {
+  allocationOn, allocationOff,
+  pnlHistory, pnlHistoryLoading, loading: dashLoading, fetchAttempted: pnlFetchAttempted,
+  totalAll, pnlOn, pnlOff, pnlItems, pnlTotal, pnlTotalAmount, pnlWeightedChange,
+  cashPctOn, cashOn, cashPctOff, cashOff,
+  refreshAll: refreshDash, fetchPnlHistory,
+} = useDashboardData(capitalOn, capitalOff, scope)
+
+const pnlInited = ref(false)
+async function initPnl() {
+  if (pnlInited.value) return
+  pnlInited.value = true
+  await refreshDash()
+  fetchPnlHistory(scope.value)
+}
+watch(activeTab, (t) => {
+  if (t === 'pnl') initPnl()
+})
+watch(scope, () => {
+  if (pnlInited.value) fetchPnlHistory(scope.value)
+})
 
 // Auto-select the first on-exchange holding so the analysis panel is populated
 // when the user switches to the analysis tab.
@@ -97,5 +183,34 @@ onMounted(async () => {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+}
+
+/* 盈亏 tab 布局 */
+.pa-pnl {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding-top: var(--space-2);
+}
+.pa-scopetabs {
+  margin-bottom: 0;
+}
+.content-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-5);
+}
+@media (max-width: 1024px) {
+  .content-grid { grid-template-columns: 1fr; }
+}
+.pa-card {
+  background: var(--color-surface-primary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+.skeleton-card {
+  padding: var(--space-5);
 }
 </style>
