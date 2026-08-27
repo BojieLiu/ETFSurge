@@ -448,6 +448,9 @@ async def strategy_check(
         fb = factor_breakdowns.get(sym, {})
         real_fs = fb.get("factor_scores", {})
         real_sig = fb.get("technical_signal", {})
+        # R132: 始终注入 factor_scores 原始 dict——报告表格 factor_score_* 列
+        # 与 reason 列的 composite_signal 同源，不再异源矛盾。
+        h["factor_scores"] = real_fs if isinstance(real_fs, dict) else {}
         if _has_real_factor_values(real_fs):
             # 用真实因子分覆盖 LLM 编造的因子描述（F11: 中文名+方向解读）；
             # round18 P0-3: KDJ 用 technical_indicators 原始值对齐 /market/indicators

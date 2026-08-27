@@ -57,10 +57,12 @@
           </div>
         </header>
 
-        <!-- Router View with Transition -->
-        <transition name="page" mode="out-in">
-          <router-view />
-        </transition>
+        <!-- Router View with Transition (R113: Vue 3 slot-based transition) -->
+        <router-view v-slot="{ Component }">
+          <transition name="page" mode="out-in">
+            <component :is="Component" />
+          </transition>
+        </router-view>
       </div>
     </main>
 

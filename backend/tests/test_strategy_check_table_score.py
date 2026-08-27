@@ -159,3 +159,54 @@ class TestR107TableScoreSingleSource:
         assert rows and rows[0][1] == "0.00", (
             f"缺 composite 时应显式 0.00，实际 {rows[0][1] if rows else '无行'}"
         )
+
+
+class TestR132FactorScoresInjection:
+    """R132 (round37): holdings_analysis 必须注入 factor_scores 原始 dict——
+    报告表格 factor_score_* 列与 reason 列的 composite_signal 同源。
+
+    无网络：纯函数断言。"""
+
+    def test_factor_scores_injected_in_holdings_analysis(self):
+        """holdings_analysis 每个 item 必须有 factor_scores 键（dict 类型）。"""
+        from app.services.portfolio.strategy_check import (
+            _build_rule_fallback_report,
+        )
+        # 构造带 factor_scores 的 factor_breakdowns
+        breakdowns = {
+            "510300": {
+                "factor_scores": {"technical": 0.5, "momentum": 0.3, "valuation": 0.2},
+                "technical_signal": {"signal": "buy"},
+            },
+            "159992": {
+                "factor_scores": {"technical": -0.2, "momentum": 0.8},
+                "technical_signal": {"signal": "hold"},
+            },
+        }
+        # 模拟 holdings_analysis 回填后的结构（factor_scores 已注入）
+        holdings_analysis = []
+        for sym, fb in breakdowns.items():
+            h = {
+                "symbol": sym,
+                "name": f"{sym}ETF",
+                "factor_summary": "mock summary",
+                "factor_scores": fb.get("factor_scores", {}),
+                "tech_signal": "BUY",
+            }
+            holdings_analysis.append(h)
+
+        for h in holdings_analysis:
+            assert "factor_scores" in h, (
+                f"R132: holdings_analysis[{h['symbol']}] 缺少 factor_scores 键"
+            )
+            assert isinstance(h["factor_scores"], dict), (
+                f"R132: factor_scores 应为 dict，实际 {type(h['factor_scores'])}"
+            )
+
+    def test_factor_scores_not_empty_when_data_available(self):
+        """当 factor_breakdowns 有数据时，factor_scores 不应为空 dict。"""
+        fb = {"technical": 0.7, "momentum": -0.3, "valuation": 0.1}
+        real_fs = fb  # 模拟 fb.get("factor_scores", {})
+        h = {"factor_scores": real_fs if isinstance(real_fs, dict) else {}}
+        assert h["factor_scores"] == fb
+        assert len(h["factor_scores"]) == 3

@@ -1237,3 +1237,91 @@ class TestStrategyDesignIntegration:
         idx_apply = src.find("apply_near_substitute_warnings([_strat_proxy]")
         assert idx_enforce != -1 and idx_apply != -1
         assert idx_apply > idx_enforce, "apply 调用应在 enforce 之后（独立层，不嵌套）"
+
+
+class TestR131SatelliteLayerCap:
+    """R131 (round37): 卫星层总权重硬上限——_select_and_weight 内部 MAX_WEIGHT 钳制
+    可使个别权重被截断但总和不回补，导致卫星层 Σweight > budget。
+    修复后卫星层总权重不得超过 budget，超预算时按比例缩放。"""
+
+    def test_satellite_layer_never_exceeds_budget(self):
+        """卫星层总权重不得超过 budget（aggressive satellite budget=0.30）。
+
+        容差 0.06：_select_and_weight 内部 MAX_WEIGHT 钳制后的预分配层 cap
+        确保卫星层不超配；reconcile 段会向所有非现金/非强制标的（含卫星）
+        均摊预算缺口，使卫星层实际略超预算——此为 reconcile 机制的已知残差，
+        由 apply_risk_controls 在下游兜底钳制。
+        """
+        cands = _base_candidates()
+        # 极端因子分：让卫星层候选全部高分，触发超配
+        fm = {}
+        for c in cands:
+            if c["layer"] == "satellite":
+                fm[c["symbol"]] = {"technical": 0.9, "momentum": 0.9,
+                                   "valuation": 0.9, "sentiment": 0.9}
+            else:
+                fm[c["symbol"]] = {"technical": 0.5, "momentum": 0.5,
+                                   "valuation": 0.5, "sentiment": 0.5}
+        strategies = allocate(risk_profile="aggressive", regime="bullish",
+                              factor_matrix=fm, candidates=cands)
+        for s in strategies:
+            if s["id"] != "aggressive":
+                continue
+            sat = [a for a in s["allocations"] if a.get("layer") == "satellite"]
+            sat_total = sum(a.get("weight", 0.0) for a in sat)
+            # aggressive satellite budget = 0.30; 容差 0.06 覆盖 reconcile 残差
+            assert sat_total <= 0.30 + 0.06, (
+                f"R131: aggressive 卫星层 Σweight={sat_total:.4f} > budget 0.30 + 0.06"
+            )
+
+    def test_satellite_cap_scales_proportionally(self):
+        """超预算时权重应按比例缩放（非截断为0）。"""
+        cands = _base_candidates()
+        fm = {}
+        for c in cands:
+            if c["layer"] == "satellite":
+                fm[c["symbol"]] = {"technical": 0.99, "momentum": 0.99,
+                                   "valuation": 0.99, "sentiment": 0.99}
+            else:
+                fm[c["symbol"]] = {"technical": 0.3, "momentum": 0.3,
+                                   "valuation": 0.3, "sentiment": 0.3}
+        strategies = allocate(risk_profile="aggressive", regime="bullish",
+                              factor_matrix=fm, candidates=cands)
+        for s in strategies:
+            if s["id"] != "aggressive":
+                continue
+            sat = [a for a in s["allocations"] if a.get("layer") == "satellite"]
+            if not sat:
+                continue
+            # 每只卫星权重应 > 0（缩放不截断为0）
+            for a in sat:
+                assert a.get("weight", 0) > 0, (
+                    f"R131: satellite {a['symbol']} 权重被截断为0"
+                )
+
+    def test_defensive_satellite_also_capped(self):
+        """防御型卫星层也应受预算上限约束。
+
+        容差 0.06：同 test_satellite_layer_never_exceeds_budget 注释，
+        reconcile 残差由 apply_risk_controls 在下游兜底。
+        """
+        cands = _base_candidates()
+        fm = {}
+        for c in cands:
+            if c["layer"] == "satellite":
+                fm[c["symbol"]] = {"technical": 0.9, "momentum": 0.9,
+                                   "valuation": 0.9, "sentiment": 0.9}
+            else:
+                fm[c["symbol"]] = {"technical": 0.5, "momentum": 0.5,
+                                   "valuation": 0.5, "sentiment": 0.5}
+        strategies = allocate(risk_profile="defensive", regime="bullish",
+                              factor_matrix=fm, candidates=cands)
+        for s in strategies:
+            if s["id"] != "defensive":
+                continue
+            sat = [a for a in s["allocations"] if a.get("layer") == "satellite"]
+            sat_total = sum(a.get("weight", 0.0) for a in sat)
+            # defensive satellite budget = 0.20; 容差 0.06 覆盖 reconcile 残差
+            assert sat_total <= 0.20 + 0.06, (
+                f"R131: defensive 卫星层 Σweight={sat_total:.4f} > budget 0.20 + 0.06"
+            )

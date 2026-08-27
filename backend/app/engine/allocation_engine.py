@@ -1513,6 +1513,20 @@ def allocate(
             sector_momentum=sector_momentum,
             mandatory_codes=set(),
         )
+        # R131: 卫星层总权重硬上限——_select_and_weight 内部 MAX_WEIGHT 钳制
+        # 可使个别权重被截断但总和不回补，导致卫星层 Σweight > budget
+        # （实测 aggressive satellite Σ=0.40 > budget 0.30）。此处按比例缩放
+        # 至 budget，确保卫星层不超配。
+        _sat_budget = budgets.get("satellite", 0.0)
+        _sat_total = sum(a.get("weight", 0.0) for a in sat_alloc)
+        if _sat_budget > 0 and _sat_total > _sat_budget + 1e-6 and sat_alloc:
+            _scale = _sat_budget / _sat_total
+            for a in sat_alloc:
+                a["weight"] = round(a.get("weight", 0.0) * _scale, 4)
+            logger.info(
+                "[allocation] R131 satellite layer capped: %.3f -> %.3f (budget %.3f, %d holdings, strategy=%s)",
+                _sat_total, _sat_budget, _sat_budget, len(sat_alloc), profile_key,
+            )
         allocations.extend(sat_alloc)
 
         # F0-5 步骤 D: 卫星数量下限 ≥4 — 概念组去重/配额裁剪后实际入选
@@ -1566,6 +1580,12 @@ def allocate(
                     sector_momentum=sector_momentum,
                     mandatory_codes=set(),
                 )
+                # R131: 备选补足同样需要总权重钳制
+                _bak_total = sum(a.get("weight", 0.0) for a in backup_alloc)
+                if _bak_total > remaining + 1e-6 and backup_alloc:
+                    _bak_scale = remaining / _bak_total
+                    for a in backup_alloc:
+                        a["weight"] = round(a.get("weight", 0.0) * _bak_scale, 4)
                 allocations.extend(backup_alloc)
 
         # C2: 如果卫星层科技主题集中度过高，引入科创50作为分散工具

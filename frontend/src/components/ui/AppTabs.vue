@@ -66,7 +66,7 @@
       v-for="tab in tabs"
       :key="tab.value"
       :id="`panel-${tab.value}`"
-      :role="tabpanel"
+      role="tabpanel"
       :aria-labelledby="`tab-${tab.value}`"
       :hidden="modelValue !== tab.value"
       class="tabs__panel"

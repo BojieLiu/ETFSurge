@@ -23,7 +23,7 @@
           <AppTabs :tabs="scopeTabs" v-model="scope" variant="soft" full-width ariaLabel="组合范围" class="pa-scopetabs" />
           <div v-if="!pnlFetchAttempted || dashLoading" class="content-grid" aria-busy="true">
             <div class="pa-card skeleton-card"><Skeleton type="chart" height="280" /></div>
-            <div class="pa-card skeleton-card"><Skeleton type="table" rows="6" /></div>
+            <div class="pa-card skeleton-card"><Skeleton type="table" rows="6" /><!-- TODO(R114): rows 硬编码，应绑定 props 或动态值 --></div>
           </div>
           <template v-else>
             <SummaryCards
