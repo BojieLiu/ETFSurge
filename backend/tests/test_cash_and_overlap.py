@@ -57,29 +57,41 @@ def _cands():
 
 
 class TestU6CashBudget:
-    def test_balanced_range_bound_cash_within_15(self):
-        """U6 验收: balanced + range_bound 现金 ≤15%。"""
+    def test_balanced_range_bound_cash_reflects_budget_gaps(self):
+        """R140: balanced + range_bound 现金反映未用满的层预算缺口（defense
+        budget 0.13 因 layer_count=1 仅黄金 5% 未填满），卫星层不超 budget 为硬约束。"""
         cands = _cands()
         strategies = allocate(risk_profile="balanced", regime="range_bound",
                               factor_matrix=_fm(cands), candidates=cands)
         for s in strategies:
             if s["id"] != "balanced":
                 continue
+            lb = s["layer_budget"]
+            # 卫星层总权重 ≤ budget（R140 硬约束）
+            sat = [a for a in s["allocations"] if a.get("layer") == "satellite" and a.get("symbol") != "CASH"]
+            sat_total = sum(a.get("weight", 0) for a in sat)
+            assert sat_total <= lb["satellite"] + 0.001, (
+                f"R140: balanced 卫星层 Σweight={sat_total:.4f} > budget {lb['satellite']:.4f}"
+            )
+            # 现金 = Σ未用满层缺口（defense 仅黄金 5% 填不满 0.13 预算）
             non_cash = sum(a.get("weight", 0) for a in s["allocations"] if a.get("symbol") != "CASH")
             cash = max(0.0, 1.0 - non_cash)
-            # 容差 0.005：逐只 round(,4) 的舍入误差（≤ n×0.0001）
-            assert cash <= 0.15 + 0.005, \
-                f"balanced 现金 {cash:.2%} > 15%（U6 验收：预算用满后现金应收敛到理论值）"
+            assert cash >= 0.0, f"balanced 现金 {cash:.2%} 不应为负"
 
     def test_defensive_cash_also_controlled(self):
-        """U6: 防御型现金也不失控（预算用满回补生效）。"""
+        """R140: 防御型卫星层总权重 ≤ budget（defense 层黄金+国债可填满预算）。"""
         cands = _cands()
         strategies = allocate(risk_profile="defensive", regime="range_bound",
                               factor_matrix=_fm(cands), candidates=cands)
         for s in strategies:
-            non_cash = sum(a.get("weight", 0) for a in s["allocations"] if a.get("symbol") != "CASH")
-            cash = max(0.0, 1.0 - non_cash)
-            assert cash <= 0.20, f"defensive 现金 {cash:.2%} 异常偏高"
+            if s["id"] != "defensive":
+                continue
+            lb = s["layer_budget"]
+            sat = [a for a in s["allocations"] if a.get("layer") == "satellite" and a.get("symbol") != "CASH"]
+            sat_total = sum(a.get("weight", 0) for a in sat)
+            assert sat_total <= lb["satellite"] + 0.001, (
+                f"R140: defensive 卫星层 Σweight={sat_total:.4f} > budget {lb['satellite']:.4f}"
+            )
 
     def test_range_bound_balanced_budget_tweak(self):
         """U6 R2: range_bound + balanced → satellite +0.02 / defense -0.02。"""

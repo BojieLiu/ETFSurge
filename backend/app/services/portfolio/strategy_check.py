@@ -1393,6 +1393,23 @@ def _build_rule_fallback_report(
         # 剔零再漂移），与同行 reason「因子分 X.XX」（composite 口径）同页矛盾。
         comp = s.get("composite_score")
         avg = comp if isinstance(comp, (int, float)) else 0.0
+        # R141 (round38): composite_score 缺失或为 0 时回退读**聚合因子键**的非零
+        # 均值——规则兜底路径 factor_composite=None → avg_factor=0.0 → 表格「因子分」
+        # 列恒 0.00，与 reason 引用真实因子脱节（round38 实测 strategy_check_records
+        # 3 条报告全 0.00）。仅取 _COMPOSITE_FACTOR_MAP 聚合键（technical/momentum/
+        # valuation/sentiment 族），避免 RSI 0-100 等原始指标混杂量纲冒充
+        # （R107 防御语义保留：非聚合键 → 保持 0.00 诚实降级）。
+        if not (isinstance(avg, (int, float)) and avg != 0.0):
+            _fs = (fb.get("factor_scores") or {})
+            _agg_keys = {k for _keys in _COMPOSITE_FACTOR_MAP.values() for k in _keys}
+            _fs_vals = [
+                v for k, v in _fs.items()
+                if k in _agg_keys and isinstance(v, (int, float)) and v != 0
+            ]
+            if _fs_vals:
+                avg = round(sum(_fs_vals) / len(_fs_vals), 4)
+            else:
+                avg = 0.0
         sig = ((fb.get("technical_signal") or {}).get("signal") or "hold")
         action = s.get("action", "hold")
         reason = (s.get("reason", "") or "").replace("|", "｜")

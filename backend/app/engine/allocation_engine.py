@@ -733,38 +733,97 @@ def _reconcile_core_budget_topup(
 
 
 def _reconcile_budget_shortfall(
-    allocations: list[dict[str, Any]], total_budget: float
+    allocations: list[dict[str, Any]], budgets: dict[str, float]
 ) -> list[dict[str, Any]]:
-    """U6 R1: 总预算缺口回补（原 allocate 内联块原样搬迁 + 残差显式报告）。
+    """U6 R1 + R140 (round38): 层预算缺口**逐层**回补。
 
-    层内分配不满（候选不足/配额裁剪）时剩余预算按 factor_score 序均摊至非现金、
-    非强制标的，单只 ≤0.30；帽约束导致无法填满时残差显式留存并记日志——
-    不削减既有持仓凑 Σ、不突破单只上限伪造收敛。
+    原实现（round35 U6 R1）用总缺口（Σlayer_budget − 已分配）均摊到全部非强制
+    非现金标的——跨层均摊会把 core/defense 缺口推到卫星层（高分标的多的层），
+    推超卫星 budget（round38 R140 实证：balanced 卫星 0.300 > 0.220、aggressive
+    0.350 > 0.300，且非 CASH 总权重 >1.0 使 strategy_design 现金为负）。
+    改为逐层回补：每层仅回补至该层 budget，不跨层推超；层内候选不足/触帽时
+    残差显式留存（不削既有持仓、不突破单只上限）。
     """
-    _alloc_total = sum(a.get("weight", 0.0) for a in allocations if a.get("symbol") != "CASH")
-    _shortfall = max(0.0, total_budget - _alloc_total)
-    if _shortfall > 0.001:
-        # round22 (#13): 强制锚（黄金/国债等）已按后处理抬到 5% 目标，不必再参与
-        # 预算回补——否则会被 top-up 推过 0.05（如进攻黄金 0.052 > INV-6 钳制）。
-        _topup = sorted(
-            [a for a in allocations
-             if a.get("symbol") != "CASH" and a.get("symbol") not in MANDATORY_CODES],
+    for layer in ("core", "satellite", "defense"):
+        budget = budgets.get(layer, 0.0)
+        layer_items = [
+            a for a in allocations
+            if a.get("layer") == layer and a.get("symbol") not in (None, "CASH")
+        ]
+        if not layer_items:
+            continue
+        spent = sum(a.get("weight", 0.0) for a in layer_items)
+        room = max(0.0, budget - spent)
+        if room <= 0.001:
+            continue
+        topup = sorted(
+            [a for a in layer_items if a.get("symbol") not in MANDATORY_CODES],
             key=lambda a: -float(a.get("factor_score", 0) or 0),
         )
-        if _topup:
-            _per = _shortfall / len(_topup)
-            _filled = 0.0
-            for _a in _topup:
-                # 单只 ≤30% 风控（RISK_SETTINGS.max_single_weight 会在 apply_risk_controls 兜底）
-                _before = float(_a.get("weight", 0.0) or 0.0)
-                _a["weight"] = round(min(_before + _per, 0.30), 4)
-                _filled += _a["weight"] - _before
-            if _shortfall - _filled > 1e-9:
-                logger.info(
-                    "[allocation] U6-R1 budget reconcile residual %.3f unfillable "
-                    "(single-weight cap %.2f bound across %d candidates)",
-                    _shortfall - _filled, MAX_WEIGHT, len(_topup),
-                )
+        if not topup:
+            continue
+        _per = room / len(topup)
+        _filled = 0.0
+        for _a in topup:
+            # 单只 ≤30% 风控（RISK_SETTINGS.max_single_weight 会在 apply_risk_controls 兜底）
+            _before = float(_a.get("weight", 0.0) or 0.0)
+            _add = min(_per, room - _filled, MAX_WEIGHT - _before)
+            if _add <= 1e-9:
+                continue
+            _a["weight"] = round(_before + _add, 4)
+            _filled += _a["weight"] - _before
+        if room - _filled > 1e-9:
+            logger.info(
+                "[allocation] U6-R1 budget reconcile residual %.3f unfillable "
+                "in %s (single-weight cap %.2f bound across %d candidates)",
+                room - _filled, layer, MAX_WEIGHT, len(topup),
+            )
+    return allocations
+
+
+def _enforce_layer_budget_final(
+    allocations: list[dict[str, Any]],
+    budgets: dict[str, float],
+) -> list[dict[str, Any]]:
+    """R140 (round38): 最终层预算校验——reconcile 后每层总权重不得超过 budget。
+
+    背景：R131 cap 只覆盖 ``_select_and_weight`` 返回时（``extend`` 前）；
+    ``_dedup_same_index`` 同指数剔除回补、``_enforce_mandatory_floor`` 锚地板
+    等后续步骤可能把单只权重推超 MAX_WEIGHT（round38 实测 510050 0.3914 >
+    0.30）、把层总权重推超 budget（卫星层 0.350 > 0.300，非 CASH 总权重 > 1.0
+    使 strategy_design 现金为负 → 总仓位 > 1.0）。本函数在 reconcile 之后兜底：
+    ① 单只钳制到 MAX_WEIGHT；② 层总权重超预算时按比例缩放（强制锚豁免 5% 地板）。
+    """
+    for layer in ("core", "satellite", "defense"):
+        budget = budgets.get(layer, 0.0)
+        if budget <= 0:
+            continue
+        layer_items = [
+            a for a in allocations
+            if a.get("layer") == layer and a.get("symbol") not in (None, "CASH")
+        ]
+        if not layer_items:
+            continue
+        # ① 单只钳制到 MAX_WEIGHT（dedup 回补/锚地板可能推超 0.30）
+        for a in layer_items:
+            if a.get("weight", 0.0) > MAX_WEIGHT + 1e-9:
+                a["weight"] = round(MAX_WEIGHT, 4)
+        # ② 层总权重超预算时缩放（强制锚豁免，保持 5% 地板）
+        total = sum(a.get("weight", 0.0) for a in layer_items)
+        if total <= budget + 1e-6:
+            continue
+        flexible = [a for a in layer_items if a.get("symbol") not in MANDATORY_CODES]
+        flex_total = sum(a.get("weight", 0.0) for a in flexible)
+        anchor_total = total - flex_total
+        if flexible and flex_total > 1e-9 and budget - anchor_total > 1e-9:
+            scale = (budget - anchor_total) / flex_total
+            for a in flexible:
+                a["weight"] = round(a.get("weight", 0.0) * scale, 4)
+            logger.info(
+                "[allocation] R140 layer budget enforced: %s %.3f -> %.3f "
+                "(budget %.3f, %d flexible items)",
+                layer, total, budget, budget, len(flexible),
+            )
     return allocations
 
 
@@ -1656,11 +1715,15 @@ def allocate(
         # 本侧数值从未被生产输出消费。sector_concentration 单点产出 =
         # apply_risk_controls（industry 缺失时才 fallback layer 名，有且仅有一处）。
 
-        # U6 R1: 预算用满——层内分配不满（候选不足/配额裁剪）时剩余预算按
-        # factor_score 回补已选标的（旧逻辑：权重和 < 层预算和 → 剩余转 CASH，
-        # 实测 balanced 现金 19% > 理论 15%）。
-        # B5-S4: reconcile 段——总预算缺口求解（帽约束残差显式报告）
-        allocations = _reconcile_budget_shortfall(allocations, sum(budgets.values()))
+        # U6 R1 + R140: 预算用满——层内分配不满时剩余预算按 factor_score 回补
+        # 已选标的，**逐层回补**（每层 ≤ 该层 budget，不跨层推超卫星层）。
+        # B5-S4: reconcile 段——层预算缺口求解（帽约束残差显式报告）
+        allocations = _reconcile_budget_shortfall(allocations, budgets)
+        # R140 (round38): reconcile 会把缺口均摊到非强制标的（含卫星层），可能
+        # 推超层预算（round38 实测 balanced 卫星 0.300>0.220、aggressive
+        # 0.350>0.300，且非 CASH 总权重 >1.0 使 strategy_design 现金为负 →
+        # 总仓位 >1.0）。此处最终层预算校验兜底，保证各层 ≤ budget。
+        allocations = _enforce_layer_budget_final(allocations, budgets)
 
         # round35 B1-F4: 不再写入 sector_concentration/sector_breakdown（见上）；
         # risk_metrics 键保留空 dict 以兼容直接消费 allocate 返回值的调用点，

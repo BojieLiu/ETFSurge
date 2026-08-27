@@ -21,14 +21,18 @@ engine = create_async_engine(
 # （async engine + hub/_common.py 裸 sqlite3 快照）此前无 WAL——读写互斥时裸连接
 # 直接撞 "database is locked"。journal_mode=WAL 对既有 DB 为在线操作免迁移，且持久化
 # 到 DB 文件（设一次全局生效）；busy_timeout 是 per-connection 属性，须每次 connect 设。
+# R139 (round38): WAL 模式在并发写入后多次 page corruption（清空重建后 2h 再次
+# malformed），改为 DELETE 模式 + synchronous=FULL 牺牲并发性能换取写入完整性。
+# 若进程内频现 "database is locked" 再考虑切回 WAL + synchronous=FULL 组合。
 from sqlalchemy import event
 
 
 @event.listens_for(engine.sync_engine, "connect")
 def _set_sqlite_pragma(dbapi_conn, _rec):  # noqa: ANN001
     cur = dbapi_conn.cursor()
-    cur.execute("PRAGMA journal_mode=WAL")
+    cur.execute("PRAGMA journal_mode=DELETE")
     cur.execute("PRAGMA busy_timeout=30000")
+    cur.execute("PRAGMA synchronous=FULL")
     cur.close()
 
 

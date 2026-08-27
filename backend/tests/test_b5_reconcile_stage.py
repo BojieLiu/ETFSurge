@@ -55,13 +55,13 @@ class TestReconcileCoreBudgetTopup:
 
 class TestReconcileBudgetShortfall:
     def test_distributes_shortfall_evenly_with_cap(self):
-        """缺口均摊；触及 0.30 帽的持仓不再多拿。"""
+        """缺口按层均摊；触及 0.30 帽的持仓不再多拿。"""
         allocs = [
-            {"symbol": "888888", "weight": 0.28, "factor_score": 2.0},
-            {"symbol": "777777", "weight": 0.12, "factor_score": 1.0},
+            {"symbol": "888888", "weight": 0.28, "factor_score": 2.0, "layer": "satellite"},
+            {"symbol": "777777", "weight": 0.12, "factor_score": 1.0, "layer": "satellite"},
         ]
-        # 总预算 0.60 → 缺口 0.20，均摊 0.10/只：888888→0.30(触帽)、777777→0.22
-        out = _reconcile_budget_shortfall(allocs, 0.60)
+        # 卫星预算 0.60 → 缺口 0.20，均摊 0.10/只：888888→0.30(触帽)、777777→0.22
+        out = _reconcile_budget_shortfall(allocs, {"satellite": 0.60})
         by_sym = {a["symbol"]: a["weight"] for a in out}
         assert by_sym["888888"] == 0.30
         assert math.isclose(by_sym["777777"], 0.22, abs_tol=1e-9)
@@ -69,12 +69,12 @@ class TestReconcileBudgetShortfall:
     def test_excludes_cash_and_mandatory_from_topup(self):
         """CASH 与强制锚不参与回补；帽约束致残差时显式留残。"""
         allocs = [
-            {"symbol": "CASH", "weight": 0.20},
-            {"symbol": "510300", "weight": 0.05, "factor_score": 9.9},
-            {"symbol": "888888", "weight": 0.10, "factor_score": 1.0},
-            {"symbol": "777777", "weight": 0.15, "factor_score": 0.5},
+            {"symbol": "CASH", "weight": 0.20, "layer": "cash"},
+            {"symbol": "510300", "weight": 0.05, "factor_score": 9.9, "layer": "core"},
+            {"symbol": "888888", "weight": 0.10, "factor_score": 1.0, "layer": "satellite"},
+            {"symbol": "777777", "weight": 0.15, "factor_score": 0.5, "layer": "satellite"},
         ]
-        out = _reconcile_budget_shortfall(allocs, 1.0)
+        out = _reconcile_budget_shortfall(allocs, {"satellite": 1.0, "core": 0.50})
         by_sym = {a["symbol"]: a["weight"] for a in out}
         assert by_sym["CASH"] == 0.20, "CASH 权重不得被 top-up 改写"
         assert by_sym["510300"] == 0.05, "强制锚不参与回补（防推过 INV-6 钳制）"
@@ -84,6 +84,6 @@ class TestReconcileBudgetShortfall:
 
     def test_small_shortfall_below_threshold_ignored(self):
         """缺口 ≤0.001 不触发回补（避免浮点噪声扰动）。"""
-        allocs = [{"symbol": "888888", "weight": 0.1998, "factor_score": 1.0}]
-        out = _reconcile_budget_shortfall(allocs, 0.20)
+        allocs = [{"symbol": "888888", "weight": 0.1998, "factor_score": 1.0, "layer": "satellite"}]
+        out = _reconcile_budget_shortfall(allocs, {"satellite": 0.20})
         assert out[0]["weight"] == 0.1998
