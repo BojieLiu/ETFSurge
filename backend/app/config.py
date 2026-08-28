@@ -126,6 +126,20 @@ class Settings(BaseSettings):
     # 策略检查等结构化输出路径对指令跟随敏感，劣化时用此收紧随机域。
     llm_zen_allowed_models: str = ""
 
+    # ── round40: b.ai 第三方聚合层（OpenAI 兼容，需代理）
+    # 选型理由: b.ai 跑聚合分发 (44 模型), 实测 3 个真免费可用 (deepseek-v4-flash /
+    # qwen3.8-flash / glm-5.3-flash); 其余 gpt-5.x / claude / gemini 报 403 需充值。
+    # 与 Zen/OpenRouter 区别: b.ai /models 无 pricing 字段, 无法纯目录筛免费,
+    # 因此走「白名单 + mark_excluded 兜底」模式——key 配全 + 白名单配模型即挂载,
+    # 永久错误 (400/401/403 + 特征文案) 由 round39 熔断三件套自动摘除。
+    b_ai_api_key: str = ""
+    b_ai_api_url: str = "https://api.b.ai/v1/chat/completions"
+    # b.ai 本机直连 ConnectTimeout, 必须经代理 (默认 7897 Clash); 空 = 不传 proxy
+    b_ai_proxy_url: str = "http://127.0.0.1:7897"
+    # 白名单: 逗号分隔 model 列表, 启动期只挂白名单内 (无免费字段筛);
+    # 实测发现新可用模型需手动加白名单; mark_excluded 自动剔除坏模型。
+    b_ai_allowed_models: str = "deepseek-v4-flash,qwen3.8-flash"
+
     # connnection pool 配置
     pool_connections: int = 30
     pool_maxsize: int = 60

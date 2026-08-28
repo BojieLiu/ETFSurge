@@ -111,7 +111,8 @@ async def llm_complete(
             _start = time.monotonic()
             try:
                 async with httpx.AsyncClient(
-                    timeout=provider.timeout, trust_env=False, verify=_shared_ssl_context()
+                    timeout=provider.timeout, trust_env=False, verify=_shared_ssl_context(),
+                    proxy=getattr(provider, "proxy", None),
                 ) as client:
                     resp = await client.post(
                         provider.api_url,
@@ -289,7 +290,8 @@ async def llm_complete_stream(
 
             try:
                 async with httpx.AsyncClient(
-                    timeout=provider.timeout, trust_env=False, verify=_shared_ssl_context()
+                    timeout=provider.timeout, trust_env=False, verify=_shared_ssl_context(),
+                    proxy=getattr(provider, "proxy", None),
                 ) as client:
                     async with client.stream(
                         "POST",
@@ -518,7 +520,8 @@ async def llm_complete_with_system(
             try:
                 async with httpx.AsyncClient(
                     timeout=(request_timeout if request_timeout is not None else provider.timeout),
-                    trust_env=False, verify=_shared_ssl_context()
+                    trust_env=False, verify=_shared_ssl_context(),
+                    proxy=getattr(provider, "proxy", None),
                 ) as client:
                     resp = await client.post(
                         provider.api_url,

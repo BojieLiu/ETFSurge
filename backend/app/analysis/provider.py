@@ -35,6 +35,9 @@ class ProviderConfig:
     # round35 feed-fix: 强制思考模型必须显式声明 reasoning_effort（low/high/max），
     # 且此类模型不支持 temperature。非 None 时请求体携带该字段并省略 temperature。
     reasoning_effort: str | None = None
+    # round40 b.ai: 直连超时需代理 (本机 b.ai 必须经 127.0.0.1:7897);
+    # None = 不传 httpx proxy 参数 (其它 provider 行为不变)。
+    proxy: str | None = None
 
 
 # round35 feed-fix: opencode zen 把 V4 免费档 / x-preview 系列路由为
@@ -83,6 +86,49 @@ def _zen_candidates() -> list[ProviderConfig]:
     return out
 
 
+def _b_ai_candidates() -> list[ProviderConfig]:
+    """round40: b.ai 白名单静态模式候选生成。
+
+    选型理由: b.ai /models 返回 44 个模型但无 pricing 字段, 无法纯目录字段筛
+    免费; 高端模型 (gpt-5.x / claude / gemini / minimax / kimi) 实际需充值, 调
+    用返 403/400。因此采用「白名单 + mark_excluded 兜底」——白名单配置 + key +
+    URL 任一缺失则不挂载; mark_excluded (round39 熔断三件套接通) 自动剔除
+    永久错误模型 (如 model unavailable / not supported / not available in
+    your country / credit insufficient)。
+
+    候选模型挂载顺序按白名单逗号分隔顺序 (与 Zen 的随机序列不同, 确定性
+    顺序便于诊断: 同一次启动期始终尝试第一个未被熔断/排除的模型)。
+    """
+    from .llm.gates import _circuit_allow
+    from .llm.model_catalog import model_catalog
+
+    key = (settings.b_ai_api_key or "").strip()
+    url = (settings.b_ai_api_url or "").strip()
+    proxy = (settings.b_ai_proxy_url or "").strip() or None
+    allowed = [s.strip() for s in (settings.b_ai_allowed_models or "").split(",") if s.strip()]
+
+    if not key or not url or not allowed:
+        return []
+
+    out: list[ProviderConfig] = []
+    for m in allowed:
+        # 永久排除 (mark_excluded) 与熔断 OPEN 态都跳过, 与 zen_attempt_sequence
+        # 同一模式: 由 round39 熔断三件套维护
+        if model_catalog.is_excluded("b_ai", m):
+            continue
+        if not _circuit_allow("b_ai", m):
+            continue
+        out.append(ProviderConfig(
+            id="b_ai", name="b.ai",
+            api_url=url, api_key=key,
+            model=m, timeout=settings.llm_primary_timeout,
+            # b.ai 暂无强制思考模型 (与 Zen V4 不同); 留 None
+            reasoning_effort=None,
+            proxy=proxy,
+        ))
+    return out
+
+
 def get_configured_providers() -> list[ProviderConfig]:
     """Return providers in priority order (primary first, fallback last).
 
@@ -126,6 +172,12 @@ def get_configured_providers() -> list[ProviderConfig]:
                 # §19.1 探针实证：OR 标准 OpenAI 格式，无需 Zen 式 reasoning_effort 特判
                 reasoning_effort=None,
             ))
+
+    # ── 中间层: b.ai 白名单（round40: 第三方聚合, 需代理, 无 pricing 字段）──
+    # 挂载位置: Zen + OpenRouter 之后, DeepSeek 兜底之前.
+    # 不依赖 Zen (Zen 缺 key 时 b_ai 仍能独立工作).
+    if settings.b_ai_api_key and settings.b_ai_allowed_models:
+        providers.extend(_b_ai_candidates())
 
     # ── Fallback: DeepSeek Official ────────────────────────────
     # F7b: LLM_FALLBACK_PROVIDER 必须真正生效（旧代码从不读取，属死配置）。
