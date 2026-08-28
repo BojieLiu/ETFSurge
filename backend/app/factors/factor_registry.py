@@ -143,9 +143,19 @@ def _standardize(series: pd.Series, method: str) -> pd.Series:
 
 def _compute_ln_mcap(data: dict[str, Any]) -> float | None:
     """style.size.ln_mcap: 对数总市值"""
-    mv = data.get("total_mv", 0)
+    # R150: 生产 refresh_pool 注入字段名为 fund_scale（market_data_hub.py:318），
+    # 而本函数原读 total_mv —— 两名字对不上导致恒 None。改为别名读取兼容两条路径。
+    mv = data.get("total_mv") or data.get("fund_scale") or 0
     # R85 (round30): 缺数据返回 None（下游区分「真实 0」与「无数据」）——
     # 旧 0.0 占位使全标的同值 → z-score std≈0 恒常量，无法区分「市值真 0」与「缺失」。
+    return math.log(mv) if mv > 0 else None
+
+
+def _compute_ln_float_mcap(data: dict[str, Any]) -> float | None:
+    """style.size.ln_float_mcap: 对数流通市值"""
+    # R150: 原注册到 _compute_ln_mcap 读 total_mv，从未读 float_mv —— ln_float_mcap
+    # 恒等于 ln_mcap。拆独立函数读 float_mv（无源时返回 None，gap 机制标注缺失）。
+    mv = data.get("float_mv") or 0
     return math.log(mv) if mv > 0 else None
 
 
@@ -678,7 +688,7 @@ def _compute_stock_divergence(data: dict) -> float:
 
 _BUILTIN_COMPUTERS: dict[str, Callable[[dict], float | None]] = {
     "style.size.ln_mcap": _compute_ln_mcap,
-    "style.size.ln_float_mcap": _compute_ln_mcap,  # Same logic with float_mv
+    "style.size.ln_float_mcap": _compute_ln_float_mcap,
     "technical.ma.sma_5": _compute_sma_5,
     "technical.ma.sma_10": _compute_sma_10,
     "technical.ma.sma_20": _compute_sma_20,
@@ -997,6 +1007,55 @@ async def _fetch_iopv_chain(s_list: list[str], symbols: list[str]) -> tuple[dict
     return {}, ""
 
 
+async def _inject_nav(market_data: dict[str, dict[str, Any]], symbols: list[str]) -> dict[str, dict[str, Any]]:
+    """R146: 把 IOPV chain + TTJ 日净值兜底的 nav 注入逻辑提取为公共方法。
+
+    原逻辑只存在于 _fetch_market_data（DEPRECATED fallback），生产链路
+    （refresh_pool → compute(market_data=cached_kline)）走 market_data 分支、
+    跳过该函数 → nav 永不注入 → premium_discount 恒 0.0。提取后在
+    _fetch_market_data 与 compute() market_data 分支两处复用。
+    直接就地把 nav/price 写入 market_data[sym]，并返回 market_data。
+    """
+    try:
+        sina_list = _iopv_sina_symbols(symbols)
+        # O18: Sina → QQ → 东财 https 降级链（模块级实现，可单测）；
+        # 全失败时 iopv_data={} → 下方走 TTJ 日净值兜底
+        iopv_data, _iopv_source = await _fetch_iopv_chain(sina_list, symbols)
+        if not iopv_data:
+            logger.info('[factor] IOPV chain exhausted (sina/qq/em all failed), relying on TTJ daily nav fallback')
+
+        for sym, values in iopv_data.items():
+            if sym in market_data and values.get('nav', 0) > 0:
+                market_data[sym].setdefault('price', values.get('price', 0))
+                market_data[sym]['nav'] = values.get('nav', 0)
+    except Exception as e:
+        logger.warning('[factor] batch NAV fetch failed: %s (proxy? — non-fatal)', e)
+
+    # F3-4 步骤A: IOPV 命中率不足 → 天天基金日频净值降级（收盘折溢价口径，不回退 0.0 假数据）
+    _missing_nav = [s for s in symbols if not (market_data.get(s) or {}).get("nav")]
+    if _missing_nav:
+        import asyncio
+        from ..core.async_utils import run_sync
+        from ..services.market_data_hub import market_data_hub as _hub
+        # U7/N08 R2: NAV 拉取并发（旧串行 for 循环）；fetch_fund_nav 已有
+        # 24h 缓存（U7 R3），并发 + 缓存使预热期累计 7.5s → ~1 次真实请求
+        async def _nav_one(_sym: str) -> None:
+            try:
+                # round9 P0-7: fetch_fund_nav 契约统一为 dict（旧 tuple 被 .get 抛 AttributeError
+                # 吞掉 → 兜底永远静默失败）；此处加 isinstance 守卫兜住历史形态
+                _nav = await run_sync(_hub.get_fund_nav, _sym, timeout=6)
+                if isinstance(_nav, dict) and _nav.get("nav"):
+                    market_data.setdefault(_sym, {})["nav"] = _nav["nav"]
+                elif isinstance(_nav, tuple) and len(_nav) >= 1 and _nav[0]:
+                    market_data.setdefault(_sym, {})["nav"] = _nav[0]
+            except Exception:
+                pass
+
+        await asyncio.gather(*[_nav_one(s) for s in _missing_nav])
+
+    return market_data
+
+
 def _get_cached_kline(symbols: list[str]) -> dict[str, dict[str, Any]] | None:
     """如果缓存有效且包含所有请求的 symbol，返回缓存数据。"""
     global _kline_cache, _kline_cache_ts
@@ -1258,42 +1317,8 @@ class FactorRegistry:
 
         # 2. 批量获取 IOPV 数据（Sina + QQ + 东财 https 三级降级链，O18）
         # 用于 premium_discount 因子计算 (S8: 腾讯QQ降级链; O18: 东财 https 源)
-        try:
-            from .factor_registry import _fetch_iopv_chain, _iopv_sina_symbols
-            sina_list = _iopv_sina_symbols(symbols)
-            # O18: Sina → QQ → 东财 https 降级链（模块级实现，可单测）；
-            # 全失败时 iopv_data={} → 下方走 TTJ 日净值兜底
-            iopv_data, _iopv_source = await _fetch_iopv_chain(sina_list, symbols)
-            if not iopv_data:
-                logger.info('[factor] IOPV chain exhausted (sina/qq/em all failed), relying on TTJ daily nav fallback')
-
-            for sym, values in iopv_data.items():
-                if sym in data and values.get('nav', 0) > 0:
-                    data[sym].setdefault('price', values.get('price', 0))
-                    data[sym]['nav'] = values.get('nav', 0)
-        except Exception as e:
-            logger.warning('[factor] batch NAV fetch failed: %s (proxy? — non-fatal)', e)
-
-        # F3-4 步骤A: IOPV 命中率不足 → 天天基金日频净值降级（收盘折溢价口径，不回退 0.0 假数据）
-        _missing_nav = [s for s in symbols if not (data.get(s) or {}).get("nav")]
-        if _missing_nav:
-            from ..core.async_utils import run_sync
-            from ..services.market_data_hub import market_data_hub as _hub
-            # U7/N08 R2: NAV 拉取并发（旧串行 for 循环）；fetch_fund_nav 已有
-            # 24h 缓存（U7 R3），并发 + 缓存使预热期累计 7.5s → ~1 次真实请求
-            async def _nav_one(_sym: str) -> None:
-                try:
-                    # round9 P0-7: fetch_fund_nav 契约统一为 dict（旧 tuple 被 .get 抛 AttributeError
-                    # 吞掉 → 兜底永远静默失败）；此处加 isinstance 守卫兜住历史形态
-                    _nav = await run_sync(_hub.get_fund_nav, _sym, timeout=6)
-                    if isinstance(_nav, dict) and _nav.get("nav"):
-                        data.setdefault(_sym, {})["nav"] = _nav["nav"]
-                    elif isinstance(_nav, tuple) and len(_nav) >= 1 and _nav[0]:
-                        data.setdefault(_sym, {})["nav"] = _nav[0]
-                except Exception:
-                    pass
-
-            await asyncio.gather(*[_nav_one(s) for s in _missing_nav])
+        # R146: 提取为 _inject_nav 公共方法，与 compute() market_data 分支复用。
+        data = await _inject_nav(data, symbols)
 
         # F3-5: 注入 sentiment 数据字段（panic_greed_diff 用 sentiment_index/history，
         # news_heat / news_direction 用 news_items）——此前只注入到 refresh_pool 的
@@ -1454,6 +1479,10 @@ class FactorRegistry:
                                     "shares_change", "fund_scale"):
                             if key in extra and key not in market_data[sym]:
                                 market_data[sym][key] = extra[key]
+            # R146: market_data 分支（生产 refresh_pool 路径）也注入 nav —— 原 nav
+            # IOPV 链只在 _fetch_market_data（DEPRECATED fallback）里，此处跳过导致
+            # premium_discount 恒 0.0。复用 _inject_nav 公共方法。
+            await _inject_nav(market_data, symbols)
         else:
             market_data = await self._fetch_market_data(symbols, symbol_extra=symbol_extra)
 

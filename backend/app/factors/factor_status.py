@@ -39,6 +39,10 @@ MARKET_LEVEL_FACTOR_CODES = {
     "sentiment.panic_greed_diff",
     "sentiment.stock_divergence",
     "sentiment.news_direction",
+    # R149: news_heat 从全市场新闻缓存计算（market_data_hub.py:360-374），每只 ETF
+    # 同值 → 截面恒等 → 与另 3 个 sentiment 因子同处置（market-level 不参与截面 IC）。
+    # 旧漏判 → 显示 no_data 误导；改为 static 归位（待 ETF 级舆情源接入后恢复截面）。
+    "sentiment.news_heat",
     # round13 §3.1 P2: 宏观环境因子——全市场单一值（M2/PMI/LPR/GDP/两融），截面恒等，
     # 不参与截面 IC，仅作市态/组合层输入（与 sentiment 市场级因子同处置）
     "macro.m2_trend",

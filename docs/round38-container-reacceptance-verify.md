@@ -25,6 +25,7 @@
 | ✅ 修复生效 | R129、R112、R113、R114 |
 | ❌ 修复未生效 | R131（cap 未触发）、R132（表格因子分仍 0.00）、R137（DB 再次损坏） |
 | 🆕 本轮新发现 | R139-R144（详见 §4） |
+| 🆕 专项排查 | 因子无数据 R145-R151（详见 §11） |
 | 🔄 长期存在 | INV-3/5/6 cross-profile violations（未收敛） |
 | Lighthouse | 首页 P99/A95/BP96/SEO91；仪表盘 P73/A99/BP96/SEO91 — 全 PASS |
 
@@ -276,3 +277,139 @@ aggressive: satellite=0.350 budget=0.300 [FAIL]  total=1.065
 已执行：§6 四类缺口（DB 并发写入 / R131 后续放大 / R141 表格一致性）+ 汇总评价。文档结构：执行摘要 → 环境 → 对照矩阵 → Lighthouse → 四问法 → 修复方案 → 测试缺口 → 证据 → 下一步 → review，11 节齐全。
 - 未决项：R143（需按 provider 分解错误类型）、R144（环境性）、R140（交易时段复测）——均在 §5.4/§0.3 标注。
 - 风险点：R139 P0（DB 损坏核心功能受损）、R140 P1（总仓位超配）——优先级与 round37 一致（R137 曾 P1，本轮升级 P0 因复发）。
+
+---
+
+## 11. 专项排查：因子模型中大量因子无数据（R145-R151）
+
+> **背景**：用户反馈「因子模型中还有很多因子没有数据」。本专项在运行中后端
+> （/factors/model + /factors/active 实时响应）与 5 只真实 ETF
+> （510300/518880/159915/512480/511090）实况因子计算探针双重实证下排查。
+> **范围**：只出方案，不写代码（用户明确要求）。
+> **验证窗口**：2026-08-27 周三收盘后非交易时段；实时行情类结论待交易时段复测。
+
+### 11.1 三层结构总览（实证数据）
+
+`/factors/model` 实时响应：
+
+```
+total=193  implemented=38  planned=155
+summary: valid=0  no_data=7  warn=20  static=11
+```
+
+`/factors/active` 按类别（valid/warn/no_data/static）：technical 14/0/0、etf_specific 6/4/0、
+style 0/2/0、sentiment 0/1/3、macro 0/0/5、china_specific 0/0/3。
+
+实况探针（5 只 ETF，`registry.compute()` 直连）：
+
+- 每 symbol 产出 39 键（38 因子 + 1 聚合孪生），non-zero 24-25、zero 11-12；
+- `_data_source_gaps`（F3-4 步骤D 记录）：etf.industry_diversification / institutional_holdings_change /
+  shares_change / tracking_error / sentiment.stock_divergence / style.size.ln_mcap / ln_float_mcap
+  均 **5/5 标的缺字段**；
+- `_constant_factor_codes`（O20 截面常量检测）：china.policy.\*（3）+ etf.industry_diversification /
+  institutional_holdings_change / shares_change / tracking_error + sentiment.news_direction /
+  stock_divergence（9 个）→ 输出全截面同值，被 z-score std≈0 跳过。
+
+### 11.2 发现明细表（R145-R151）
+
+| # | 判定原文 | 事实/推断 | 支撑（file:line + 实证） | 与行情一致? | 结论 | 方案优先级 |
+|---|---|---|---|---|---|---|
+| R145 | 155 个因子已定义未实现，永不产出数据 | **事实** | YAML 定义 193（factor_definitions.yaml），`_BUILTIN_COMPUTERS` 仅 38（factor_registry.py:679-722）；`compute()` 只遍历 `_CORE_FACTORS ∩ _computers`=38（factor_registry.py:1438）；/factors/model `planned=155` | 不依赖行情 | 合理（路线图非缺陷） | 观察项（见 11.3-D） |
+| R146 | etf.premium_discount 恒 0.0（IOPV 链接入断链） | **事实** | IOPV 三级降级链只在 `_fetch_market_data`（factor_registry.py:1259-1296，标记 DEPRECATED 的 fallback 路径）；hub refresh_pool 调 `compute()` 传 `market_data=cached_kline`（market_data_hub.py:334-337）→ 走 market_data 分支（factor_registry.py:1440-1456）只合并 symbol_extra 7 键、**无 nav** → IOPV 链被整条跳过 → `_compute_premium_discount` 恒 return 0.0（factor_registry.py:462-468）；探针/constant 检测 5/5 同值 | 不依赖行情 | 合理（确定性断链） | **P0** |
+| R147 | etf.shares_change / etf.institutional_holdings_change 无数据 | **事实（已实测定案：免费源无份额历史序列，不可修复）** | 依赖 `shares_change_20d`。实测：① `fund_etf_hist_em` 主源经代理 **ProxyError**、no_proxy **ConnectionError RemoteDisconnected**（push2his.eastmoney.com 盘后不可达）；② 降级源 `_fetch_spot_shares()`（fund_etf_spot_em）实测可用（1591 只，510300 最新份额=23481487616.0）；③ **但降级结果 `shares_change_20d=None`（round9 P1-9 已注「份额历史序列无免费公开源」）→ `_enrich_symbol_extra._shares` 因 `shares_change_20d is None` 直接 return 不注入（_kline.py:438-439）→ shares_change 恒 0.0**。免费源只有当前份额、无历史序列 → change_20d 数学上不可算 | 不依赖行情 | 合理（免费源根本无此数据） | **定性：数据源缺失，非代码可修** |
+| R148 | etf.industry_diversification 无数据 | **事实（已实测定案：concepts 数据可用，因子计算设计缺陷）** | 真实 refresh_pool 实证：concepts **各不相同**（510300→['沪深300']、159915→['创业板']、511090→['国债','利率债']、518880→['黄金','贵金属']，confidence 0.7-0.85）→ 数据源**可用**。**但 `_compute_industry_diversification`（factor_registry.py:401-419）读 `industry_holdings`（从未注入）→ 回退 `concepts` → 返回 `1.0/max(len(concepts),1)`——只依赖概念数量、不依赖概念内容** → 概念数相同的 ETF 同分（如 510300 与 159915 均 1 概念→均 1.0）→ 截面区分度不足 → 偶发全同值被 O20 判 constant | 不依赖行情 | 合理（数据源可用，计算设计简陋） | **P2（改因子计算逻辑，非接数据源）** |
+| R149 | sentiment.news_heat 恒 0.0，漏判 MARKET_LEVEL | **事实** | 从**全市场**新闻缓存计算（market_data_hub.py:360-374），每只 ETF 同值 → 截面恒等；另 3 个 sentiment 因子（panic_greed_diff/stock_divergence/news_direction）已在 MARKET_LEVEL_FACTOR_CODES（factor_status.py:38-49），唯独 news_heat 漏判 → 显示 no_data 而非 static | 不依赖行情 | 合理（归类缺陷） | P1 |
+| R150 | style.size.ln_mcap / ln_float_mcap 无数据 | **事实（已实测定案：字段名不匹配确定性 bug）** | `_compute_ln_mcap` 读 `data["total_mv"]`（factor_registry.py:146），**但 refresh_pool 注入的是 `fund_scale`**（market_data_hub.py:317-325）；compute() market_data 分支白名单含 `fund_scale`（factor_registry.py:1454）→ **字段名 `total_mv` vs `fund_scale` 不匹配 → 永远读不到 → 恒 None**。生产路径探针实证：传入 `fund_scale=111688430607.0` 后 ln_mcap 仍 None。且实测 `fetch_fund_scale` 主源 `fund_etf_fund_info_em` 抛 **ValueError: Length mismatch（14 vs 13 列）**（akshare 版本 bug）→ 返回 None；`fund_etf_spot_em` 有 `总市值` 列（510300=111688430607）但无人读取。`ln_float_mcap` 读 `float_mv`（K 线行无此字段）→ 恒 None。**根因=①字段名映射断裂（可修）②akshare 列解析 bug ③float_mv 无源** | 不依赖行情 | 合理（确定性 bug） | **P0（字段映射可修）** |
+| R151 | 20 个 warn 因子有数据但未显著 | **事实** | factor_ic_records DB：技术/etf 类 20 因子已有 442-500 个交易日 IC 记录（2024-08 至今），但 t<2 或 \|IR\|<0.5（F25② 判据 factor_status.py:58-105） | 不依赖行情 | 合理（统计积累中，非故障） | 观察项 |
+
+### 11.3 修复方案（P0/P1/P2 + 观察项）
+
+**P0 — etf.premium_discount IOPV 链接入 hub 主路径（R146）**
+
+- 根因：nav 注入（IOPV 三级链 + TTJ 日净值兜底）只存在于 `_fetch_market_data`（factor_registry.py:1259-1296），而生产链路（refresh_pool → `compute(market_data=cached_kline)`）走 market_data 分支、跳过该函数 → nav 永不注入 → premium_discount 恒 0.0（生产路径探针实证 5/5 = 0.0，constant_factor_codes 含 premium_discount）。
+- 方案（三选一，推荐 A）：
+  - **A（推荐）**：把 nav 注入从 `_fetch_market_data` 提取为独立方法（如 `_inject_nav(market_data, symbols)`），在 `compute()` 的 market_data 分支（factor_registry.py:1448-1456）与 `_fetch_market_data` 两处复用。复杂度低，一处救活。
+  - B：在 refresh_pool 的 `_enrich_symbol_extra`（market_data_hub.py:328）内追加 IOPV/nav 获取（与 benchmark_close/shares_change_20d 同点）。改动在服务层，factor_registry 保持纯。
+  - C：compute() 的 market_data 分支补 nav 字段合并（把 nav 加入 1452-1454 的 7 键白名单），前提是调用方已注入 nav —— 需确认谁注入。
+- 影响文件：factor_registry.py（或 market_data_hub.py）
+- 工作量：30min + 单测
+- 验证：单测 mock `_fetch_iopv_chain` 返回 nav，断言 compute() 产物 premium_discount 非 0；e2e 用真数据断言 /factors/active premium_discount status 由 no_data → warn/valid。
+
+**P0 — style.size.ln_mcap / ln_float_mcap 字段名映射修复（R150，实测定案后升级）**
+
+- 根因：`_compute_ln_mcap` 读 `total_mv`（factor_registry.py:146），refresh_pool 注入 `fund_scale`（market_data_hub.py:317-325），compute() market_data 分支白名单也是 `fund_scale`（factor_registry.py:1454）——**两边字段名对不上，数据永远读不到**。生产路径探针实证：传 `fund_scale=111688430607.0` 后 ln_mcap 仍 None。
+- 方案（推荐 A）：
+  - **A（推荐）**：`_compute_ln_mcap` 增加别名读取：`mv = data.get("total_mv") or data.get("fund_scale") or 0`（一处改动，兼容两条注入路径）。`ln_float_mcap` 同理尝试 `float_mv`。
+  - B：refresh_pool 注入时改键名为 `total_mv`（改 service 层，同步改白名单）——影响面大，不推荐。
+  - C：`fetch_fund_scale` 换 akshare 接口规避 ValueError（fund_etf_fund_info_em 14 vs 13 列 bug）→ 改读 `fund_etf_spot_em` 的 `总市值` 列（实测 510300=111688430607 可用）→ 但需先修 `_fetch_spot_shares` 或新增 `_fetch_total_mv`。可作为 A 之后的补充（拿真实市值而非 0）。
+- 影响文件：factor_registry.py（A）或 fundamentals_fetcher.py + factor_registry.py（C）
+- 工作量：A=5min+单测；C=30min+单测
+- 验证：单测传 `{"fund_scale": 1e9}` 断言 ln_mcap 非 None；生产路径探针断言 ln_mcap 有真实值。
+
+**P1 — 数据源接入（R149）**
+
+| 编号 | 问题 | 方案 | 影响文件 | 工作量 |
+|---|---|---|---|---|
+| R149 | news_heat 归类 | 将 `sentiment.news_heat` 加入 `MARKET_LEVEL_FACTOR_CODES`（factor_status.py:38-49），与另 3 个 sentiment 因子一致 → 前端显示 static 而非 no_data（待 ETF 级舆情数据源接入后再恢复截面计算） | factor_status.py | 5min + 单测 |
+
+**P1 — 定性结论（R147，已实测定案：免费源无此数据，非代码可修）**
+
+- `shares_change_20d` 需要份额历史序列——`fund_etf_hist_em` 无份额列且盘后不可达（ProxyError/ConnectionError），`fund_etf_spot_em` 仅当前份额（510300=23481487616.0）。免费源**根本没有份额历史**，change_20d 数学上不可算。
+- 处置：维持诚实降级（gap 标注「缺 shares_change_20d」），列入「数据源未接入」观察清单。**不强行造数**。若后续接入付费/其他源（如天天基金份额历史）再恢复。
+
+**R147 数据源调研结论（2026-08-27 补充：有免费源，建议接入）**
+
+- **调研结果：两个交易所官方 API 提供免费日频份额序列，可算 20 日变化率**（akshare 1.18.81 内置 + 原始接口均实测）：
+  1. **深交所 `ak.fund_scale_daily_szse`**（`www.szse.cn/api/report/ShowReport?CATALOGID=scsj_fund_jjgm`）：一次请求返回一个窗口（≤6 个月）内**全部**深市 ETF 的日频份额（实测 5 日 3599 行，159915 连续 5 天值 1.816e10→1.872e10 份）；覆盖 ETF/LOF/REITS；历史 ≥2019-09；**akshare 封装直接可用**。
+  2. **上交所 `fund_etf_scale_sse`**（`query.sse.com.cn/commonQuery.do?sqlId=COMMON_SSE_ZQPZ_ETFZL_XXPL_ETFGM_SEARCH_L`）：按统计日期快照全量沪市 ETF 份额（实测 897 只，含 510300/518880/511090/588000 等）；历史 ≥2019-09；**akshare 封装在本地报 KeyError（列名编码 bug）但原始接口完全可用**——自写 requests 实测 T/T-20 两次请求算出真实 20 日变化率（510300 -5.85%、518880 +7.78%、511090 +0.18%）。
+  - 覆盖说明：5xxxxx→沪市、1xxxxx→深市按代码前缀合并；**LOF 型（501xxx）沪市 ETF scale 列表不含**（需单独查 SSE LOF sqlId，边际缺口，候选池影响低）。
+  - 成本：免费无认证、官方披露基础设施稳定；每次刷新 SZSE 1 请求 + SSE 2 请求。
+  - **建议**：接入（见 P1 新增方案 R147-FIX）。tushare fund_share（¥200/年积分门槛）与天天基金 F10（接口已死 404 + 季度粒度）均不选。
+
+**P2 — industry_diversification 计算逻辑修复（R148，已实测定案：数据源可用，计算简陋）**
+
+- 根因：concepts 数据真实可用（510300→['沪深300'] 等），但 `_compute_industry_diversification` 回退逻辑返回 `1.0/max(len(concepts),1)`——**只依赖概念数量、不依赖内容** → 概念数相同即同分 → 截面区分度不足。
+- 方案（推荐 A）：
+  - **A（推荐）**：改用 `1.0 / (1 + len(concepts))` 做**单调递减归一**（概念越多越分散），并**优先读 `industry_holdings`**（若 ETF 持仓行业分布数据可接入）；无 holdings 时维持 concepts 长度倒数，但改为 `len(concepts)` 不同即区分——实际上真实池 4 只 concepts 数量是 1/1/2/2，截面区分度仍弱 → 需接受该因子在候选池规模下的天然弱区分度，或在 /factors/active 标注「弱区分因子」。
+  - B：接入 ETF 前十大持仓 → 行业聚合 → 真实 HHI（需新数据源，成本高）。
+- 影响文件：factor_registry.py（A，改计算函数）
+- 工作量：A=15min+单测；B=1-2h+新数据源
+
+**P1 新增 — R147-FIX 接入交易所份额源（2026-08-27 调研定案后补充）**
+
+- 背景：R147 原定性「免费源无数据不可修」已被调研推翻——上交所/深交所官方 API 提供免费日频份额，实测可用。
+- 方案：
+  - 新增 fetcher（建议 `backend/app/fetchers/fund_share_fetcher.py`）：
+    - `fetch_szse_daily_shares(start, end)` → 调 `ak.fund_scale_daily_szse`（akshare 封装可用），输出 {symbol: {date: shares}}；
+    - `fetch_sse_shares(date)` → **自写 requests** 调 `query.sse.com.cn`（绕过 akshare 封装 KeyError bug），输出 {symbol: shares}；T 与 T-20 两次请求算 change_20d；
+    - 按代码前缀合并（5xxxxx→SSE、1xxxxx→SZSE），统一输出 `shares_change_20d`。
+  - 接入点：`_kline.py:_enrich_symbol_extra._shares`（market_data_hub.py:328 调用链）——替换/并行走 `fetch_etf_shares_outstanding`；成功时注入 `shares_change_20d`（现 None-skip 逻辑自动放行）。
+  - 缓存：每日份额快照落 SQLite（append-only 日任务，自建份额历史，避免重复回填）；`asyncio.wait_for` ~15-20s + 失败诚实降级（保持 None 不造数）。
+- 影响文件：新增 fetchers/fund_share_fetcher.py；修改 _kline.py（_shares 注入点）、market_data_hub.py（可选）
+- 工作量：30-60min + 单测（mock akshare/requests）
+- 验证：单测 mock SZSE/SSE 返回 → 断言 change_20d 正确；e2e 用真数据断言 510300/518880 shares_change 由 no_data → warn。
+- 已知注意：绝对份额值 EM spot 与交易所官方差 ~1.5%（口径/as-of 差异），change_rate 因子对此鲁棒；LOF（501xxx）沪市缺口挂观察清单。
+
+**观察项 / 待决策（R145/R151）**
+
+- R145（155 planned）：**路线图而非缺陷**——/factors/model 已如实标 planned。若要提覆盖，优先 theme.\*（29）/ style 单类，但需上游基本面数据支撑（当前免费源大多无个股财务/ESG/专利数据），成本高、收益低，建议暂缓并保持 honest planned 标注。
+- R151（20 warn）：统计积累中（已有 442-500 交易日），按 F25② 需 t≥2 且 |IR|≥0.5，属正常收敛过程，无修复动作。
+
+### 11.4 测试防护缺口
+
+| 缺口 | 现状 | 建议 |
+|---|---|---|
+| IOPV/nav 注入覆盖 | 仅 `_fetch_market_data` 路径有 nav（无单测覆盖 market_data 分支的 nav 注入） | 新增单测：`compute(market_data=...)` 时 nav 被注入 → premium_discount 非 0（R146 验证） |
+| news_heat 归类 | 无测试断言 news_heat 与 MARKET_LEVEL 因子同档 | 新增断言：news_heat 在 MARKET_LEVEL_FACTOR_CODES 中（R149） |
+| 因子数据源缺口 | `_data_source_gaps` 有记录但无巡检断言 | data_health_check 增项：assert 关键因子（premium_discount/ln_mcap）gap 数不为全量，捕获「全断链」回归 |
+
+### 11.5 决策记录（2026-08-27 用户确认 + 排查定案）
+
+| 项 | 决策 | 备注 |
+|---|---|---|
+| R146 IOPV 链接入 | **A（提取 `_inject_nav` 公共方法，两处复用）** | 方案已定，待实施 |
+| 修复实施 | **暂不实施** | 方案入档，后续需要时按 round 流程：先失败单测 → 实现 → 补单测 → verify_e2e → commit |
+| R145/R151 维持现状 | **采纳建议，不强行填数** | 155 planned 保持 honest 标注，20 warn 正常积累 |
+| R147/R148/R150 排查 | **已完成**（2026-08-27 实测定案） | 结论：R147 免费源无份额历史→**不可修**；R148 concepts 数据可用→**因子计算设计缺陷（P2 改逻辑）**；R150 **字段名不匹配确定性 bug（P0 可修）** |
+| R147 数据源调研 | **有免费源，建议接入**（2026-08-27 补充调研） | 上交所/深交所官方 API 免费日频份额实测可用（详见 R147-FIX 方案）；tushare 付费不选；待用户确认后并入实施批次 |
+| R149 news_heat 归类 | **随 P0 一起做** | 5min 改动，无争议 |

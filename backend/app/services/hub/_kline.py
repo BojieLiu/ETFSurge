@@ -429,13 +429,22 @@ class KlineMixin:
                     cached = self._FUND_SHARES_CACHE.get(sym)
                     if cached and (time.time() - cached[0]) < self._FUND_SHARES_TTL:
                         shares_data = cached[1]
+                        _have_change = shares_data is not None and shares_data.get("shares_change_20d") is not None
                     else:
                         from ...core.async_utils import run_sync
-                        shares_data = await run_sync(fetch_etf_shares_outstanding, sym, timeout=10)
+                        # R147-FIX: 优先交易所官方份额源（SSE/SZSE，免费无认证），可算
+                        # 20 日变化率；失败回退旧 EM 源（仅当前份额，change_20d=None）。
+                        from ...fetchers.fund_share_fetcher import fetch_share_change_20d
+                        shares_data = await run_sync(fetch_share_change_20d, sym, timeout=10)
+                        _have_change = shares_data is not None and shares_data.get("shares_change_20d") is not None
+                        if not _have_change:
+                            # 回退旧源（EM spot 当前份额；change_20d 可能仍 None）
+                            shares_data = await run_sync(fetch_etf_shares_outstanding, sym, timeout=10)
+                            _have_change = shares_data is not None and shares_data.get("shares_change_20d") is not None
                         # F19 R71: 失败/空结果不写 24h 成功缓存——旧代码 `or {}` 把失败变成
                         # {} 写进缓存 → 后续 24h 命中 {} → gap 持续；akshare 恢复后还要再等
                         # 24h 才重试（熔断恢复后自动补齐被缓存破绽阻断）
-                        if not shares_data or shares_data.get("shares_change_20d") is None:
+                        if not shares_data or not _have_change:
                             return
                         self._FUND_SHARES_CACHE[sym] = (time.time(), shares_data)
                     if shares_data.get("shares_change_20d") is not None:

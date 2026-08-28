@@ -270,7 +270,7 @@ def test_each_factor_returns_nonzero_with_mock_data():
         "sentiment.panic_greed_diff": {"sentiment_index": 60, "sentiment_history": [50] * 20},
         "sentiment.stock_divergence": {"advance_decline": 1.8},
         "style.size.ln_mcap": {"total_mv": 1e10},
-        "style.size.ln_float_mcap": {"total_mv": 8e9},
+        "style.size.ln_float_mcap": {"float_mv": 8e9},
         "technical.ma.sma_5": {"close": [4.0] * 60},
         "technical.ma.sma_10": {"close": [4.0] * 60},
         "technical.ma.sma_20": {"close": [4.0] * 60},
