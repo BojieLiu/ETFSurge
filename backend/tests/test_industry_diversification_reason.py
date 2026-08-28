@@ -1,13 +1,17 @@
 """
-O20 (docs/archived/round7-rediagnosis.md §7 P20-③): industry_diversification 数据语义 + no_data reason 修正。
+O20 (docs/archived/round7-rediagnosis.md §7 P20-③) + R148 (round38 §11.3): industry_diversification 数据语义。
 
 P20-③ 根因: etf.industry_diversification 的 concepts fallback（1/n）上游 concepts 为空 →
 恒 0.0 常量 → IC 因零方差无法计算 → ic_val=None；且该因子不在 ET_SPECIFIC_GAP_CODES →
 reason 误报「IC 未累积（样本 <3）」而非「数据源未接入」。
 
+R148 (round38 §11.3): 旧公式 1/max(n,1) 改 1/(1+n) 单调递减归一——n=1,2 时二元分布
+（1.0 vs 0.5）候选池 1/1/2/2 时 O20 判 constant。新公式 n=1→0.5, n=2→0.333, n=3→0.25
+平滑单调，5 标的池 3 个不同截面值不再判 constant。n=0 保留 0.0 兼容 O20 契约。
+
 修复:
 1. concepts 空 → 因子常量 0.0 → /factors/active reason 独立标注「截面无差异（常量输出）」
-2. concepts 非空 → 1/n fallback 生效（industry_diversification 有值）
+2. concepts 非空 → 1/(1+n) fallback 生效（industry_diversification 有值）
 3. ET_SPECIFIC_GAP_CODES 含 industry_diversification → reason 走「数据源未接入（缺 concepts）」
 """
 
@@ -23,9 +27,11 @@ class TestIndustryDiversificationCompute:
         assert _compute_industry_diversification({"concepts": None}) == 0.0
 
     def test_concepts_non_empty_uses_1n(self):
-        """concepts 非空 → 1/n fallback 生效（有区分度，非恒 0）。"""
-        assert _compute_industry_diversification({"concepts": ["半导体", "芯片"]}) == 0.5
-        assert _compute_industry_diversification({"concepts": ["A", "B", "C", "D"]}) == 0.25
+        """concepts 非空 → 1/(1+n) fallback 生效（R148: 旧 1/n 改 1/(1+n)，单调递减归一）。
+        区分度更平滑：n=2 → 0.333（旧 1/2=0.5），n=4 → 0.2（旧 1/4=0.25）。
+        """
+        assert _compute_industry_diversification({"concepts": ["半导体", "芯片"]}) == round(1/3, 4)
+        assert _compute_industry_diversification({"concepts": ["A", "B", "C", "D"]}) == 0.2
         # industry_holdings 优先（HHI）
         val = _compute_industry_diversification({"industry_holdings": {"银行": 0.6, "券商": 0.4}})
         assert abs(val - (0.36 + 0.16)) < 1e-6

@@ -415,12 +415,15 @@ def _compute_industry_diversification(data: dict) -> float:
     industry_holdings = data.get("industry_holdings", {})
     if not industry_holdings:
         # 无行业分布数据时尝试从概念板块推断
-        concepts = data.get("concepts", [])
-        if concepts:
-            # 概念越多越分散
-            n = len(concepts)
-            return round(1.0 / max(n, 1), 4)
-        return 0.0  # 默认中性
+        # R148: 改用 1.0/(1+len(concepts)) 单调递减归一（旧 1.0/max(n,1) 在 n=1,2
+        # 时返 1.0/0.5 二元分布，候选池 1/1/2/2 时 O20 判 constant）。
+        # n=0 保持返 0.0（兼容 round7 O20 P20-③ 契约：空 concepts 是"无信息中性"
+        # 而非"极不分散"，避免 N 个空 concepts 标的返 N 个 1.0 仍判 constant）。
+        concepts = data.get("concepts") or []
+        if not concepts:
+            return 0.0
+        n = len(concepts)
+        return round(1.0 / (1 + n), 4)
 
     total = sum(industry_holdings.values())
     if total <= 0:
