@@ -174,8 +174,9 @@ async def test_half_open_recovers_after_ttl(monkeypatch):
     assert llm._circuit_state("opencode_zen") == "OPEN"
     assert client._by_provider.get("zen", 0) == 1  # 首次 429 触发 OPEN
 
+    # round39: 429 TTL 改为 _CIRCUIT_TTL_QUOTA (30min) 而非 _CIRCUIT_TTL (5min)
     base = time.monotonic()
-    monkeypatch.setattr(time, "monotonic", lambda: base + llm._CIRCUIT_TTL + 1)
+    monkeypatch.setattr(time, "monotonic", lambda: base + llm._CIRCUIT_TTL_QUOTA + 1)
 
     r2 = await llm.llm_complete("prompt")
     assert r2 == "fb2"

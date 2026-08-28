@@ -11,6 +11,7 @@ from app.analysis.llm.cache import get_cached_report, put_cached_report
 from app.analysis.llm.gates import (
     _circuit_allow,
     _circuit_record_failure,
+    _circuit_record_failure_all_models_quota,
     _circuit_record_success,
     _circuit_state,
     _clear_llm_error,
@@ -165,8 +166,8 @@ async def llm_complete(
                 if _is_429:
                     _any_429 = True
                     _last_429_headers = getattr(_resp, "headers", None)
-                # F8/F9: 429→立即 OPEN；其它异常→累计失败
-                _circuit_record_failure(provider.id, _is_429, model=provider.model)
+                # F8/F9: 429→立即 OPEN；其它异常→累计失败；round39 永久错误检测需要 exc
+                _circuit_record_failure(provider.id, _is_429, model=provider.model, exc=_exc)
                 await token_store.record(UsageRecord(
                     function_name=_caller,
                     prompt_tokens=0,
@@ -189,8 +190,16 @@ async def llm_complete(
         # 本轮所有 provider 均被熔断跳过 → 直接跳出
         if not _attempted_any:
             break
-        # 所有 provider 均已 OPEN（熔断）→ 下一轮也全跳过，避免白等退避
+        # 所有 provider 均已 OPEN（熔断）→ 下一轮也全跳过，避免白等退避。
+        # round39 改进: 若某 provider 名下所有 model 都 OPEN（429 quota 累计），触发
+        # _circuit_record_failure_all_models_quota → 全局 llm_quota_gate 兜底暂停，
+        # 防热循环继续撞墙（单模型 429 已不触发全局暂停，避免其它可用模型被连坐）。
         if all(_circuit_state(p.id, p.model) == "OPEN" for p in providers):
+            _by_pid: dict[str, list[str]] = {}
+            for _p in providers:
+                _by_pid.setdefault(_p.id, []).append(_p.model)
+            for _pid, _models in _by_pid.items():
+                _circuit_record_failure_all_models_quota(_pid, _models)
             break
         # All providers failed this attempt -> retry after a short delay
         if attempt < max_retries:
@@ -332,8 +341,8 @@ async def llm_complete_stream(
                 if _is_429:
                     _any_429 = True
                     _last_429_headers = getattr(_resp, "headers", None)
-                # F8/F9: 429→立即 OPEN；其它异常→累计失败
-                _circuit_record_failure(provider.id, _is_429, model=provider.model)
+                # F8/F9: 429→立即 OPEN；其它异常→累计失败；round39 永久错误检测需要 exc
+                _circuit_record_failure(provider.id, _is_429, model=provider.model, exc=_exc)
                 await token_store.record(UsageRecord(
                     function_name=_caller,
                     prompt_tokens=0,
@@ -426,8 +435,15 @@ async def llm_complete_stream(
         # 本轮所有 provider 均被熔断跳过 → 直接跳出
         if not _attempted_any:
             break
-        # 所有 provider 均已 OPEN（熔断）→ 下一轮也全跳过，避免白等退避
+        # 所有 provider 均已 OPEN（熔断）→ 下一轮也全跳过，避免白等退避。
+        # round39 改进: 全 provider OPEN 触发 _circuit_record_failure_all_models_quota
+        # → 全局 llm_quota_gate 兜底暂停（防热循环撞墙）。
         if all(_circuit_state(p.id, p.model) == "OPEN" for p in providers):
+            _by_pid: dict[str, list[str]] = {}
+            for _p in providers:
+                _by_pid.setdefault(_p.id, []).append(_p.model)
+            for _pid, _models in _by_pid.items():
+                _circuit_record_failure_all_models_quota(_pid, _models)
             break
         # 本轮所有 provider 失败 → 退避后重试（F3-6）
         if attempt < max_retries:
@@ -561,9 +577,9 @@ async def llm_complete_with_system(
                     and getattr(_resp, "status_code", None) == 429
                 )
                 if _is_429:
-                    _circuit_record_failure(provider.id, True, model=provider.model)
+                    _circuit_record_failure(provider.id, True, model=provider.model, exc=_exc)
                 else:
-                    _circuit_record_failure(provider.id, False, model=provider.model)
+                    _circuit_record_failure(provider.id, False, model=provider.model, exc=_exc)
                 await token_store.record(UsageRecord(
                     function_name=_caller,
                     prompt_tokens=0,
@@ -586,8 +602,15 @@ async def llm_complete_with_system(
         # 本轮所有 provider 均被熔断跳过（如全部 OPEN）→ 无重试意义，直接跳出
         if not _attempted_any:
             break
-        # 所有 provider 均已 OPEN（熔断）→ 下一轮也全跳过，避免白等退避
+        # 所有 provider 均已 OPEN（熔断）→ 下一轮也全跳过，避免白等退避。
+        # round39 改进: 全 provider OPEN 触发 _circuit_record_failure_all_models_quota
+        # → 全局 llm_quota_gate 兜底暂停（防热循环撞墙）。
         if all(_circuit_state(p.id, p.model) == "OPEN" for p in providers):
+            _by_pid: dict[str, list[str]] = {}
+            for _p in providers:
+                _by_pid.setdefault(_p.id, []).append(_p.model)
+            for _pid, _models in _by_pid.items():
+                _circuit_record_failure_all_models_quota(_pid, _models)
             break
         # All providers failed this attempt -> retry after a short delay
         if attempt < max_retries:

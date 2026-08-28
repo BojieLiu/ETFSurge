@@ -313,7 +313,10 @@ async def test_mark_exhausted_pauses_subsequent_acquire():
 
 @pytest.mark.asyncio
 async def test_circuit_429_triggers_quota_exhausted():
-    """_circuit_record_failure(is_quota_error=True) 必须联动 mark_exhausted（集中覆盖三调用点）。"""
+    """round39 改进: 单 429 不再联动 mark_exhausted（避免其它可用模型被连坐）。
+    仅「整 provider 全 model 都 429」时由 _circuit_record_failure_all_models_quota
+    显式触发全局暂停。
+    """
     from app.analysis import llm as llm_mod
 
     fake = {"t": 1000.0}
@@ -323,6 +326,13 @@ async def test_circuit_429_triggers_quota_exhausted():
 
     with patch("app.analysis.llm.time.monotonic", side_effect=fake_monotonic):
         llm_mod.llm_quota_gate._exhausted_until = 0.0
-        llm_mod._circuit_record_failure("deepseek", is_quota_error=True)
-        # mark_exhausted 将 exhausted_until 设为 now + quota_cooldown
+        # 单 429：熔断该 (provider, model) 但**不**触发全局 mark_exhausted
+        llm_mod._circuit_record_failure("deepseek", is_quota_error=True, model="ds-v1")
+        assert llm_mod._circuit_state("deepseek", "ds-v1") == "OPEN"
+        # 关键断言：exhausted_until 应仍为 0（未触发全局暂停）
+        assert llm_mod.llm_quota_gate._exhausted_until == 0.0, (
+            "单模型 429 不应触发全局 mark_exhausted，否则其它模型被连坐"
+        )
+        # 兜底路径：整 provider 全 model 都 429 → 触发全局暂停
+        llm_mod._circuit_record_failure_all_models_quota("deepseek", models=["ds-v1"])
         assert llm_mod.llm_quota_gate._exhausted_until > 0.0

@@ -10,8 +10,19 @@ logger = get_logger(__name__)
 _last_llm_error: str | None = None
 
 _CIRCUIT_TTL = 300.0
+# round39 改进 (R143 改进): 429 (quota 类) TTL 30min 而非 5min，与免费模型配额窗口
+# (小时级) 对齐——避免锯齿复探反复撞 429；瞬态 5xx/timeout 仍 5min（短重试以恢复）。
+_CIRCUIT_TTL_QUOTA = 1800.0
 
 _CIRCUIT_FAIL_THRESHOLD = 2
+
+# round39 改进: 永久性错误特征文案 (供 _classify_permanent_error 用)
+_PERMANENT_ERROR_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("400", r"Model (?:is unavailable|does not exist|is not supported)"),
+    ("400", r"Upstream request failed"),
+    ("401", r"is not supported|Authorization"),
+    ("403", r"not available in your country|Access restricted|Deposit required|credit insufficient balance"),
+)
 
 _circuit: dict[str, dict] = {}
 
@@ -108,7 +119,12 @@ def _circuit_state(provider_id: str, model: str | None = None) -> str:
 
 def _circuit_allow(provider_id: str, model: str | None = None) -> bool:
     """本次是否允许尝试；长冷却成员直接拒绝。OPEN 且未到 TTL → 跳过；
-    HALF_OPEN 允许复探。"""
+    HALF_OPEN 允许复探。
+
+    round39 改进 (R143 改进): TTL 按错误类别分级 (entry.is_quota)
+    - quota (429): _CIRCUIT_TTL_QUOTA (30min) — 与免费模型配额窗口对齐，避免锯齿复探
+    - 其它 (5xx/timeout): _CIRCUIT_TTL (5min) — 短重试以恢复
+    """
     if model and is_long_cooldown(provider_id, model):
         return False
     entry = _circuit.get(_ckey(provider_id, model))
@@ -116,7 +132,8 @@ def _circuit_allow(provider_id: str, model: str | None = None) -> bool:
         return True  # CLOSED
     now = time.monotonic()
     if entry["state"] == "OPEN":
-        if now - entry["opened_at"] >= _CIRCUIT_TTL:
+        ttl = _CIRCUIT_TTL_QUOTA if entry.get("is_quota") else _CIRCUIT_TTL
+        if now - entry["opened_at"] >= ttl:
             entry["state"] = "HALF_OPEN"
             entry["opened_at"] = now
             return True
@@ -125,12 +142,71 @@ def _circuit_allow(provider_id: str, model: str | None = None) -> bool:
     return True
 
 
+def _classify_permanent_error(exc: BaseException) -> bool:
+    """round39 改进 (R143 改进): 检测永久性错误（不该熔断-复探-再撞-再熔断的循环）。
+
+    永久性错误特征: HTTP 4xx + 特征文案 (model unavailable / not supported /
+    not available in your country / credit insufficient)。这些错误复探无意义，
+    应直接长冷却 + 摘除 catalog 候选。
+    """
+    if exc is None:
+        return False
+    resp = getattr(exc, "response", None)
+    if resp is None:
+        return False
+    status = getattr(resp, "status_code", None)
+    if status is None or status not in (400, 401, 403):
+        return False
+    body = ""
+    try:
+        body = (resp.text or "")[:2000]
+    except Exception:
+        pass
+    if not body:
+        return False
+    for _code, pat in _PERMANENT_ERROR_PATTERNS:
+        if _code != str(status):
+            continue
+        if __import__("re").search(pat, body, __import__("re").IGNORECASE):
+            return True
+    return False
+
+
 def _circuit_record_failure(provider_id: str, is_quota_error: bool,
-                            model: str | None = None) -> None:
+                            model: str | None = None,
+                            exc: BaseException | None = None) -> None:
     """记录一次失败。
     - 429/FreeUsageLimitError（额度类，持久）→ 立即 OPEN，零复试（F9c）。
+      TTL 30min (round39 改进；旧 5min 导致锯齿复探)。
     - 5xx/timeout（瞬态）→ 累计达阈值才 OPEN，保留有限重试。
+    - 永久性错误（400/401/403 特征文案，如 "Model is unavailable"）→ 长冷却 +
+      catalog 排除 (mark_excluded)；与 429 路径**不联动** llm_quota_gate.mark_exhausted()，
+      避免单 provider 下某坏模型拖累其它可用模型 (round39 改进)。
     """
+    # round39 改进: 永久性错误优先处理（不走普通熔断累计逻辑）
+    if exc is not None and not is_quota_error and _classify_permanent_error(exc):
+        mark_long_cooldown(provider_id, model or "", ttl=_LONG_COOLDOWN_TTL)
+        try:
+            from .model_catalog import model_catalog as _catalog
+            _catalog.mark_excluded(provider_id, model or "")
+        except Exception as _e:
+            logger.warning("[circuit] mark_excluded failed for %s:%s: %s",
+                           provider_id, model, _e)
+        # 同时开普通熔断 OPEN 防止 TTL 后复探
+        key = _ckey(provider_id, model)
+        now = time.monotonic()
+        entry = _circuit.get(key)
+        if entry is None:
+            entry = {"state": "CLOSED", "fail_count": 0, "opened_at": 0.0}
+            _circuit[key] = entry
+        entry["state"] = "OPEN"
+        entry["opened_at"] = now
+        entry["fail_count"] = 0
+        entry["is_quota"] = True  # round39: 永久错误用 quota TTL
+        logger.warning("[circuit] %s:%s permanent error → long-cooldown + excluded + OPEN",
+                       provider_id, model or "<no-model>")
+        return
+
     key = _ckey(provider_id, model)
     now = time.monotonic()
     entry = _circuit.get(key)
@@ -141,14 +217,18 @@ def _circuit_record_failure(provider_id: str, is_quota_error: bool,
         entry["state"] = "OPEN"
         entry["opened_at"] = now
         entry["fail_count"] = 0
+        entry["is_quota"] = True  # round39: TTL 分级标记
         logger.warning("[circuit] provider %s quota-exhausted → OPEN (skip until HALF_OPEN)", provider_id)
-        # round25 R39: 额度耗尽 → 跨任务配额门禁全局暂停（后续 LLM 调用直落兜底不硬撞）
-        llm_quota_gate.mark_exhausted()
+        # round39 改进: 单 provider/model 429 **不再**触发全局 llm_quota_gate.mark_exhausted()，
+        # 避免整 provider 下的其它可用模型被连坐。原行为令 provider 内多模型轮换失效
+        # (只有 quota 耗尽的模型需要冷却，其它模型仍可用)。全局暂停仅在
+        # _circuit_record_failure_all_models_quota() 中由 caller 显式触发。
         return
     entry["fail_count"] = entry.get("fail_count", 0) + 1
     if entry["fail_count"] >= _CIRCUIT_FAIL_THRESHOLD:
         entry["state"] = "OPEN"
         entry["opened_at"] = now
+        entry["is_quota"] = False  # 5xx 累计 OPEN，按 5min TTL 复探
 
 
 def _circuit_record_success(provider_id: str, model: str | None = None) -> None:
@@ -185,6 +265,26 @@ def mark_middle_layer_active(ttl: float | None = None) -> None:
 def is_middle_layer_active() -> bool:
     """中间层是否处于激活窗口（近期有 openrouter 候选被真实尝试）。"""
     return time.monotonic() < _middle_layer_active_until
+
+
+def _circuit_record_failure_all_models_quota(provider_id: str, models: list[str]) -> None:
+    """round39 改进: 整 provider 下所有 model 都 429 → 触发全局 llm_quota_gate.mark_exhausted()。
+
+    供 client failover 循环在「provider 全 model OPEN」时显式调用——单模型 429
+    不应再触发全局暂停，但「provider 整层不可用」时仍需兜底暂停避免热循环。
+    """
+    if not models:
+        return
+    all_open = all(
+        _circuit.get(_ckey(provider_id, m), {}).get("state") == "OPEN"
+        for m in models
+    )
+    if all_open:
+        llm_quota_gate.mark_exhausted()
+        logger.warning(
+            "[circuit] provider %s ALL %d models quota-exhausted → global pause",
+            provider_id, len(models),
+        )
 
 
 def reset_circuit() -> None:
