@@ -2097,19 +2097,23 @@ def _validate_cross_profile_invariants(strategies: list[dict[str, Any]]) -> None
         return sum(1 for a in s.get("allocations", []) if a.get("symbol") != "CASH")
 
     _xwarnings: list[dict[str, Any]] = []
-    # INV-3: 卫星数单调 防御<平衡<进攻
+    # R142 (round38 §11.2 P2 选 A 实施): INV-3/5 严格单调 (<) 放宽为非严格单调
+    # (<=)——R140 修复后逐层预算钳制让 aggressive 标的数被压缩，与"严格单调"
+    # 假设产生约束冲突（持续报警但实际是 R140 修复的预期行为）。相等不算违
+    # 规；倒挂（> 反向）仍报警。INV-6 现金压舱/防御限制保留（真约束）。
+    # INV-3: 卫星数非严格单调 防御<=平衡<=进攻（相等不算违规）
     _sat = {p: _layer_count(_by[p], "satellite") for p in ("defensive", "balanced", "aggressive")}
-    if not (_sat["defensive"] < _sat["balanced"] < _sat["aggressive"]):
+    if not (_sat["defensive"] <= _sat["balanced"] <= _sat["aggressive"]):
         _xwarnings.append({"type": "inv3_satellite_not_monotonic",
                            "satellite_counts": _sat})
-    # INV-3: 防御数反向 防御>=平衡>=进攻
+    # INV-3: 防御数非严格反向 防御>=平衡>=进攻
     _def = {p: _layer_count(_by[p], "defense") for p in ("defensive", "balanced", "aggressive")}
     if not (_def["defensive"] >= _def["balanced"] >= _def["aggressive"]):
         _xwarnings.append({"type": "inv3_defense_not_reverse_monotonic",
                            "defense_counts": _def})
-    # INV-5: 总标的数单调 防御<平衡<进攻
+    # INV-5: 总标的数非严格单调 防御<=平衡<=进攻
     _tot = {p: _total_count(_by[p]) for p in ("defensive", "balanced", "aggressive")}
-    if not (_tot["defensive"] < _tot["balanced"] < _tot["aggressive"]):
+    if not (_tot["defensive"] <= _tot["balanced"] <= _tot["aggressive"]):
         _xwarnings.append({"type": "inv5_total_not_monotonic",
                            "total_counts": _tot})
     # INV-6: 进攻压舱——现金 <=0.10（bear <=0.15）、防御权重 <=0.05
