@@ -1038,15 +1038,24 @@ async def _inject_nav(market_data: dict[str, dict[str, Any]], symbols: list[str]
     _missing_nav = [s for s in symbols if not (market_data.get(s) or {}).get("nav")]
     if _missing_nav:
         import asyncio
-        from ..core.async_utils import run_sync
+        from ..core.async_utils import run_sync_long
         from ..services.market_data_hub import market_data_hub as _hub
         # U7/N08 R2: NAV 拉取并发（旧串行 for 循环）；fetch_fund_nav 已有
         # 24h 缓存（U7 R3），并发 + 缓存使预热期累计 7.5s → ~1 次真实请求
+        #
+        # round42 A+B (lifespan 5.62s lag 根因修复): 把 NAV 兜底从 _shared_executor
+        # (64 worker, 主请求共用) 切到 _long_running_executor (8 worker, 隔离池)——
+        # 1618 任务不再侵占主线程池, 事件循环 lag 峰值从 5.6s 降至 < 1s。
+        # 同时加 Semaphore(8) 限制在飞任务数（防止 1618 任务同时在飞爆内存/连接）。
+        # timeout 6→3s（NAV 兜底是 best-effort, 与设计请求 15/30/75s 预算不冲突）。
+        _nav_sem = asyncio.Semaphore(8)
+
         async def _nav_one(_sym: str) -> None:
             try:
-                # round9 P0-7: fetch_fund_nav 契约统一为 dict（旧 tuple 被 .get 抛 AttributeError
-                # 吞掉 → 兜底永远静默失败）；此处加 isinstance 守卫兜住历史形态
-                _nav = await run_sync(_hub.get_fund_nav, _sym, timeout=6)
+                async with _nav_sem:
+                    # round9 P0-7: fetch_fund_nav 契约统一为 dict（旧 tuple 被 .get 抛 AttributeError
+                    # 吞掉 → 兜底永远静默失败）；此处加 isinstance 守卫兜住历史形态
+                    _nav = await run_sync_long(_hub.get_fund_nav, _sym, timeout=3)
                 if isinstance(_nav, dict) and _nav.get("nav"):
                     market_data.setdefault(_sym, {})["nav"] = _nav["nav"]
                 elif isinstance(_nav, tuple) and len(_nav) >= 1 and _nav[0]:

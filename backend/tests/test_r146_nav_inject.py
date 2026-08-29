@@ -54,18 +54,18 @@ class TestInjectNav:
     async def test_tjj_fallback_when_iopv_empty(self, mock_iopv_chain, monkeypatch):
         """IOPV chain 全空 → TTJ 兜底（patch market_data_hub.get_fund_nav）→ nav 注入。"""
         mock_iopv_chain(nav=0, price=0, symbols=["510300"])
-        # run_sync 是模块级函数（app.core.async_utils），被 _inject_nav 局部导入。
-        # patch 其模块属性使 _hub.get_fund_nav 短路返回 dict。
+        # round42: run_sync_long 是 _inject_nav 块内局部导入，patch 其模块属性使
+        # _hub.get_fund_nav 短路返回 dict（不再 patch run_sync，那是 IOPV 链的）。
         import app.core.async_utils as au
 
         class FakeHub:
             async def get_fund_nav(self, sym, timeout=6):
                 return {"nav": 4.2}
 
-        async def fake_run_sync(fn, *args, **kwargs):
+        async def fake_run_sync_long(fn, *args, **kwargs):
             return await fn(*args, **kwargs)
 
-        monkeypatch.setattr(au, "run_sync", fake_run_sync)
+        monkeypatch.setattr(au, "run_sync_long", fake_run_sync_long)
         import app.services.market_data_hub as mdh
 
         monkeypatch.setattr(mdh, "market_data_hub", FakeHub())
