@@ -162,6 +162,31 @@ cd backend && python -m pytest
 - **证据链必填**（D2）：方案文档每个结论自带计算式（数字代入）+ `file:line` + 实测命令与输出，review 职责从「找矛盾」降为「查证」。
 - **验证窗口标注**（D3）：涉及外部行情源的功能，计划必须标注「验证窗口：交易日 9:30-11:30/13:00-15:00 + 真实环境」；非窗口内验证结果打标「待交易时段复测」，不得作为「失败/成功」依据。
 
+## Commit message 规范（强制 / Mandatory, 2026-08-29 落地）
+
+**所有 commit message 必须全部英文**（标题 + 正文）——**commit-msg 钩子硬拦截**：
+`.githooks/commit-msg` 扫描中文字符（CJK Unified Ideographs `0x4E00-0x9FFF` +
+扩展 A `0x3400-0x4DBF` + 兼容 `0xF900-0xFAFF`），命中即 reject。
+
+- **标题（title）**：≤72 字符，`<模块>: <动词> <对象>` 结构
+  - 模块前缀示例：`Round50 B2:` / `fix:` / `docs:` / `refactor:` / `test:`
+  - 必含**主动动词**（add/fix/parallelize/cure/integrate/wire 等）
+  - 不允许"Round50 C3：SourceMonitor 集成 xxx"这类中英混合
+- **正文（body）**：分段推荐结构（4-7 段为宜）
+  - `## Implementation` — 改了什么（file:line + 关键函数/类名）
+  - `## Verification` — 怎么验的（pytest 行号 + 实测数据）
+  - `## Risk` — 风险/副作用（Semaphore(8) 限流 / 向后兼容 / DB 变更等）
+  - `## Out of scope` — 不在本轮的事（避免后人误解）
+  - `Refs: R45 xxx (commit)` / `Refs: <doc path>` — 交叉引用
+- **例外**：纯 ASCII 标点（`:`, `->`, `[]`, `()`），数字，链接（`file:line`），模块标识符允许
+- **绝不**：中文字符、中英混合、emoji 注释（除非 commit 主题需要）
+- **跳过钩子**（极少量理由 + 必须写明原因）：`SKIP_COMMIT_MSG_EN_CHECK=1 git commit ...`
+- **生效原理**：`git config core.hooksPath = .githooks`（已设），`.githooks/commit-msg` 在 git commit 时自动触发
+- **验证**：本地 `echo "test commit" | .githooks/commit-msg /dev/stdin` -> `[commit-msg] ✓ ... 通过`
+- **历史改写**：旧 commit 中英混合 -> 用 `git filter-repo --commit-callback` 改写（见 `project/git-commit-message-重写-...` memory），**仅在 user 明确要求时执行**
+
+> ⚠️ **2026-08-29 教训**：今日发现 7 commit 出现中英混合（Round49 B3/A4/A4-C + Round50 B2/off_exchange/C3），事后 filter-repo 改写是**破坏性操作**（force push + SHA 全变）。commit-msg 钩子是**治本**——以后新 commit 不再混。
+
 ## 关键路径
 
 按目录定位代码，函数签名级细节用符号索引/LSP 查：

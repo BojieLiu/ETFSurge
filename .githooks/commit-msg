@@ -1,0 +1,64 @@
+#!/bin/sh
+#
+# commit-msg — 强制 commit message 全部英文 (含标题 + 正文)
+# 规则见 AGENTS.md "commit message 规范" 段.
+#
+# 跳过: SKIP_COMMIT_MSG_EN_CHECK=1 git commit ...
+
+MSG_FILE="$1"
+MSG=$(cat "$MSG_FILE" 2>/dev/null || echo "")
+
+if [ "${SKIP_COMMIT_MSG_EN_CHECK}" = "1" ]; then
+    echo "[commit-msg] SKIP_COMMIT_MSG_EN_CHECK=1, 跳过英文检查"
+    exit 0
+fi
+
+if [ -z "$MSG" ]; then
+    echo "[commit-msg] ERROR: empty commit message"
+    exit 1
+fi
+
+# 检测中文字符 (CJK Unified Ideographs + 扩展 A + 兼容)
+# 范围: 0x4E00-0x9FFF / 0x3400-0x4DBF / 0xF900-0xFAFF
+HAS_CN=$(echo "$MSG" | python -c "
+import sys
+t = sys.stdin.buffer.read().decode('utf-8', errors='ignore')
+hits = []
+for i, c in enumerate(t):
+    o = ord(c)
+    if (0x4E00 <= o <= 0x9FFF) or (0x3400 <= o <= 0x4DBF) or (0xF900 <= o <= 0xFAFF):
+        hits.append((i, c, hex(o)))
+if hits:
+    print('FAIL: found %d Chinese character(s):' % len(hits))
+    for i, c, h in hits[:5]:
+        # 提取行号 (从 t 重新数)
+        line = t[:i].count('\n') + 1
+        # 找到行起始
+        line_start = t.rfind('\n', 0, i) + 1
+        line_end = t.find('\n', i)
+        if line_end == -1: line_end = len(t)
+        line_text = t[line_start:line_end]
+        print('  line %d: %r (U+%s)' % (line, c, h[2:].upper().lstrip('0X')))
+        print('    > %s' % line_text[:80])
+    sys.exit(1)
+sys.exit(0)
+" 2>&1)
+
+RC=$?
+if [ $RC -ne 0 ]; then
+    echo ""
+    echo "[commit-msg] ❌ commit message 包含中文字符, 已被拒绝"
+    echo ""
+    echo "$HAS_CN" | sed 's/^/  /'
+    echo ""
+    echo "规范: commit message 必须全部英文 (标题 + 正文)."
+    echo "  标题: 不超过 72 字符, 模块前缀 (如 'Round50 B2: ...')"
+    echo "  正文: ## Implementation / ## Verification / ## Risk / Refs: 等段落"
+    echo "例外: 纯 ASCII 标点 / 数字 / 链接允许"
+    echo "跳过: SKIP_COMMIT_MSG_EN_CHECK=1 git commit ..."
+    echo ""
+    exit 1
+fi
+
+echo "[commit-msg] ✓ commit message 全英文, 通过"
+exit 0
