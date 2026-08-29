@@ -74,6 +74,13 @@ def _patch_provider_settings(**kwargs):
         llm_fallback_timeout=120,
         deepseek_api_key="sk-ds-test-key",
         llm_model="deepseek-v4-flash",
+        # round47: 显式禁用 b_ai + openrouter 以稳定 provider 列表 (本机 .env 配
+        # 了 B_AI_API_KEY 会让 b_ai 进 list, 干扰 "[zen, deepseek]" 两 provider
+        # 假设). 测试 4 provider 列表 (zen/b_ai/b_ai/deepseek) 需 side_effects
+        # 4 个, 易脆. 显式置空 → list=[zen, deepseek] 干净.
+        b_ai_api_key="",
+        b_ai_allowed_models="",
+        openrouter_api_key="",
     )
     defaults.update(kwargs)
 
