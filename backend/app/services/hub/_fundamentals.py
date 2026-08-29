@@ -18,10 +18,34 @@ class FundamentalsMixin:
 
 
     def get_fund_nav(self, symbol: str):
-        """基金净值。"""
+        """基金净值（round45 option C 治本：Redis 命中优先 + 回写缓存）。
+
+        缓存层 (lifespan 1618 任务高频路径):
+        1. Redis sync 查 `fund_nav:{symbol}` 命中 → 立即返回 (ms 级)
+        2. miss → 调 fetch_fund_nav 同步拉取 (3s timeout 上游控制)
+        3. 拉取成功 → 同步写回 Redis (24h TTL)
+        4. Redis 不可用 → 整层 no-op, 直接走 fetch_fund_nav 降级 (兼容 cache_service 行为)
+
+        效果: 二次启动 lifespan 后 1618 任务全 Redis 命中 → 0 网络调用 → 事件循环
+        lag 峰值从 round45 量化 66.49s 降至 < 1s. lifespan 后台 1h 周期预热任务
+        (main.py) 负责把 1618 候选全部 set 进 Redis (首次启动之后 → 二次启动即命中).
+        """
         try:
+            from app.services.cache_service import redis_cache_sync
             from ...fetchers.china_market import fetch_fund_nav
-            return fetch_fund_nav(symbol)
+
+            # 1) Redis 命中优先
+            cached = redis_cache_sync.get(f"fund_nav:{symbol}")
+            if cached is not None:
+                return cached
+
+            # 2) miss → 调 fetch_fund_nav (同步, 内部已有 24h LRU)
+            fresh = fetch_fund_nav(symbol)
+
+            # 3) 回写 Redis (24h TTL, 与 fetch_fund_nav _FUND_NAV_TTL 对齐)
+            if fresh is not None:
+                redis_cache_sync.set(f"fund_nav:{symbol}", fresh, ttl=86400)
+            return fresh
         except Exception as e:
             logger.warning("[hub] get_fund_nav(%s) failed: %s", symbol, e)
             return None

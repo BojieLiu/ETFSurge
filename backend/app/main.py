@@ -761,6 +761,78 @@ async def lifespan(app: FastAPI):
     _spawn(_model_catalog_refresh_loop(), name="loop-model-catalog")
     logger.info("免费模型目录刷新循环已启动（%ds）", max(60, settings.llm_catalog_refresh_ttl))
 
+    # round45 option C: NAV Redis 缓存预热循环 (lifespan 1618 任务治本)
+    # 目的: 首次启动后 1h 内拉满 Redis 1618 候选; 二次启动 _inject_nav 全
+    # Redis 命中 → 0 网络调用 → 事件循环 lag 峰值从 round45 量化 66.49s
+    # 降至 < 1s. 设计:
+    #   - 启动 60s 后首轮 (给 init_db / 预热 / 启动期 _inject_nav 先跑完)
+    #   - 周期 1h (与 fetch_fund_nav 内部 _FUND_NAV_TTL 24h 错峰; 长短配合)
+    #   - Semaphore(8) 并发限流 (与 _inject_nav 配额一致)
+    #   - 调 get_fund_nav 走 Redis-first (本轮已改), 同步路径
+    #   - Redis 不可用时降级 (cache_service._ensure_client 返 False)
+    async def _nav_warmup_loop():
+        from .services.market_data_hub import market_data_hub as _hub
+        from .services.cache_service import redis_cache_sync
+        import time as _time
+
+        await asyncio.sleep(60)  # 延迟 60s 避开启动期 _inject_nav 抢资源
+        _cycle = 0
+        while True:
+            _cycle += 1
+            _t0 = _time.monotonic()
+            try:
+                if not redis_cache_sync.ping():
+                    logger.debug("[lifespan/nav-warmup] Redis 不可用, 跳过本轮")
+                else:
+                    _pool = _hub.get_pool()
+                    _syms: list[str] = []
+                    for layer in _pool.values() if isinstance(_pool, dict) else []:
+                        for it in layer:
+                            s = it.get("symbol")
+                            if s and s != "CASH":
+                                _syms.append(s)
+                    if not _syms:
+                        logger.debug("[lifespan/nav-warmup] pool 空, 跳过本轮")
+                    else:
+                        # 调 get_fund_nav 走 Redis-first (本轮 §2.1 已改)
+                        # 并发限流 Semaphore(8), 与 _inject_nav 配额一致
+                        _sem = asyncio.Semaphore(8)
+                        _ok = 0
+                        _skip = 0
+                        _err = 0
+
+                        async def _warm_one(_s: str) -> None:
+                            nonlocal _ok, _skip, _err
+                            async with _sem:
+                                try:
+                                    # Redis 命中 → 立即返 (skip 走 fetch_fund_nav)
+                                    _cached = redis_cache_sync.get(f"fund_nav:{_s}")
+                                    if _cached is not None:
+                                        _skip += 1
+                                        return
+                                    # miss → 调 get_fund_nav (内部 fetch + 回写)
+                                    await asyncio.to_thread(
+                                        _hub.get_fund_nav, _s,
+                                    )
+                                    _ok += 1
+                                except Exception as _e:
+                                    _err += 1
+                                    logger.debug(
+                                        "[lifespan/nav-warmup] %s failed: %s", _s, _e,
+                                    )
+
+                        await asyncio.gather(*[_warm_one(s) for s in _syms])
+                        _dt = _time.monotonic() - _t0
+                        logger.info(
+                            "[lifespan/nav-warmup] cycle=%d n=%d ok=%d skip=%d err=%d dur=%.2fs",
+                            _cycle, len(_syms), _ok, _skip, _err, _dt,
+                        )
+            except Exception as _e:
+                logger.warning("[lifespan/nav-warmup] cycle failed: %s", _e)
+            await asyncio.sleep(3600)  # 1h 周期
+    _spawn(_nav_warmup_loop(), name="loop-nav-warmup")
+    logger.info("NAV Redis 缓存预热循环已启动（1h 周期, 60s 延迟首轮）")
+
     # 崩溃恢复：扫描 report_quality="pending" 且创建 >5min 的记录，标记为 fallback
     try:
         async def _recover_stale_designs():

@@ -170,7 +170,105 @@ class RedisCache:
             pass
 
 
+class RedisCacheSync:
+    """同步 Redis 客户端包装 (round45 option C).
+
+    用途: lifespan 1618 任务 _inject_nav 在 async 上下文里调同步 get_fund_nav,
+    需要 sync Redis 读以避免 asyncio.run 阻塞. 短超时 + 失败 no-op 降级.
+
+    行为契约:
+    - 初始化 lazy (首次 get/set 才连), 不阻塞 import 期
+    - 短超时 (connect 2s / op 2s), 失败返 None / 静默 set 失败
+    - 与 async redis_cache 共享 URL 但不共享 client (sync redis 用 blocking socket)
+    - value 序列化与 async client 一致 (json.dumps ensure_ascii=False)
+
+    不做 (与 async 行为对齐):
+    - 不做 mget / mset (lifespan 单 symbol 粒度足够)
+    - 不做分布式锁 / pubsub (不在本轮 scope)
+    - 不做 health check 周期 (依赖 on-demand ping)
+    """
+
+    def __init__(self) -> None:
+        self._client: Any = None
+        self._available: bool = False
+        self._init_lock = threading.Lock()
+        self._init_done: bool = False
+
+    def _ensure_client(self) -> None:
+        """Lazy 初始化 sync client. 用 lock 防止并发初始化, 已初始化则跳过."""
+        if self._init_done:
+            return
+        with self._init_lock:
+            if self._init_done:
+                return
+            try:
+                import redis  # sync client
+                self._client = redis.Redis.from_url(
+                    settings.redis_url,
+                    decode_responses=True,
+                    socket_connect_timeout=2,
+                    socket_timeout=2,
+                )
+                # ping 检查连通
+                self._client.ping()
+                self._available = True
+            except Exception:
+                self._client = None
+                self._available = False
+            finally:
+                self._init_done = True  # 失败也算 done, 避免反复重试拖死调用方
+
+    @property
+    def available(self) -> bool:
+        if not self._init_done:
+            # 未初始化, 不主动连 (供 is_available 检查用)
+            return False
+        return self._available and self._client is not None
+
+    def get(self, key: str) -> Any | None:
+        """同步读. 命中返 decoded value, miss / 失败返 None.
+
+        注: 失败时仅返 None, 不抛 (caller 走 fetch_fund_nav 降级).
+        """
+        try:
+            self._ensure_client()
+            if not self.available:
+                return None
+            raw = self._client.get(key)
+            if raw is None:
+                return None
+            return json.loads(raw)
+        except Exception:
+            return None
+
+    def set(self, key: str, value: Any, ttl: int = 86400) -> bool:
+        """同步写. 返 True 成功 / False 失败 (含不可用). 失败静默.
+
+        注: 不抛, 防止 caller 在 best-effort 路径上 crash.
+        """
+        try:
+            self._ensure_client()
+            if not self.available:
+                return False
+            payload = json.dumps(value, ensure_ascii=False)
+            self._client.set(key, payload, ex=ttl)
+            return True
+        except Exception:
+            return False
+
+    def ping(self) -> bool:
+        """健康检查 (用于 lifespan 后台预热任务前置 ping)."""
+        try:
+            self._ensure_client()
+            if not self.available:
+                return False
+            return bool(self._client.ping())
+        except Exception:
+            return False
+
+
 redis_cache = RedisCache()
+redis_cache_sync = RedisCacheSync()
 
 
 async def cache_get(key: str) -> Optional[Any]:
