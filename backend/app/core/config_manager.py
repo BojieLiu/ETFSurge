@@ -146,6 +146,65 @@ class ConfigManager:
             })
         return {"items": items, "total": len(items)}
 
+    async def list_keys_with_prefix(self, prefix: str) -> list[str]:
+        """列出 DB 中所有以 prefix 开头的 key. 用于 round46 mark_excluded 启动加载.
+
+        不走 CONFIG_ITEMS (固定清单), 直接 raw SELECT. 返 list[str] (空 DB / 未
+        初始化返 []). 失败 WARN 后返 [] (降级为内存默认空).
+        """
+        if self._db_session_factory is None:
+            return []
+        try:
+            async with self._db_session_factory() as session:
+                from sqlalchemy import select
+                from ..models.app_config import AppConfig
+                result = await session.execute(
+                    select(AppConfig.key).where(AppConfig.key.like(f"{prefix}%"))
+                )
+                return [row[0] for row in result.all()]
+        except Exception as e:
+            logger.warning("[config] list_keys_with_prefix(%s) failed: %s", prefix, e)
+            return []
+
+    async def set_kv(self, key: str, value: str) -> bool:
+        """通用 KV 写入 (与 set_override 等价, 命名通用化). 返 True 成功 / False 失败."""
+        if self._db_session_factory is None:
+            return False
+        try:
+            async with self._db_session_factory() as session:
+                from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+                from ..models.app_config import AppConfig
+                upsert = sqlite_insert(AppConfig).values(
+                    key=key, value=value, updated_at=datetime.utcnow()
+                )
+                upsert = upsert.on_conflict_do_update(
+                    index_elements=["key"],
+                    set_=dict(value=value, updated_at=datetime.utcnow()),
+                )
+                await session.execute(upsert)
+                await session.commit()
+                return True
+        except Exception as e:
+            logger.exception("[config] set_kv(%s) failed: %s", key, e)
+            return False
+
+    async def delete_kv(self, key: str) -> bool:
+        """通用 KV 删除. 返 True 删了行 / False 未删 (行不存在或失败)."""
+        if self._db_session_factory is None:
+            return False
+        try:
+            async with self._db_session_factory() as session:
+                from sqlalchemy import delete
+                from ..models.app_config import AppConfig
+                result = await session.execute(
+                    delete(AppConfig).where(AppConfig.key == key)
+                )
+                await session.commit()
+                return result.rowcount > 0
+        except Exception as e:
+            logger.exception("[config] delete_kv(%s) failed: %s", key, e)
+            return False
+
     @staticmethod
     def _get_env(key: str) -> Optional[str]:
         """从 pydantic settings 读取 .env 值。"""

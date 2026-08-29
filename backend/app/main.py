@@ -313,6 +313,20 @@ async def lifespan(app: FastAPI):
     with warmup_timer("redis_init", "cache", "Redis cache initialization"):
         await redis_cache.init()
 
+    # round46 §1: 启动期加载 LLM 排除项 (DB -> in-memory model_catalog._exclusions)
+    # 持久化键格式 llm_excluded:<provider>:<model> (AppConfig 表); 由 admin
+    # POST /api/v1/admin/llm-excluded 写入, DELETE 移除. 启动期灌回确保
+    # 重启后熔断三件套护栏 3 仍生效 (R143 R&D 此前仅 in-memory, 重启清零).
+    with warmup_timer("load_llm_excluded", "init", "Load LLM exclusions from DB"):
+        from .core.config_manager import config_manager as _cm
+        from .analysis.llm.model_catalog import model_catalog as _mc
+        _db_keys = await _cm.list_keys_with_prefix("llm_excluded:")
+        _loaded = _mc.load_excluded_from_keys(_db_keys)
+        logger.info(
+            "[lifespan] LLM exclusions loaded: %d/%d (DB keys scanned=%d)",
+            _loaded, _loaded, len(_db_keys),
+        )
+
     # Pre-import heavy modules to avoid blocking the event loop on first use
     logger.info("[lifespan] Pre-loading heavy modules (strategy_design, analysis)...")
     logger.info("[lifespan] Heavy modules pre-loaded")

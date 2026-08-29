@@ -1,15 +1,19 @@
 """Admin 工具路由 — token 用量监控 / 数据源健康 / 事件记录等。"""
 
 import asyncio
+import logging
 import time
 
 from fastapi import APIRouter, Query
+from pydantic import BaseModel, Field
 
 from ..core.source_registry import registry
 from ..monitor.source_events import source_event_store
 from ..monitor.token_usage import token_store
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
+
+logger = logging.getLogger(__name__)
 
 
 # ── Token Usage (existing) ──────────────────────────────────────
@@ -337,6 +341,105 @@ async def get_system_metrics():
     return result
 
 
-import logging
+# ── LLM mark_excluded (round46 admin endpoint) ─────────────────────
+# R143 熔断三件套的护栏 3 (排除表): 之前仅 in-memory _exclusions set, 重启清零.
+# 落地路径:
+# - GET /api/v1/admin/llm-excluded 列出 (provider, model) 列表
+# - POST /api/v1/admin/llm-excluded  添加 (provider, model, reason?)
+# - DELETE /api/v1/admin/llm-excluded/{provider}/{model}  取消排除
+# 持久化: AppConfig 表 (与 config_manager.set_override 模式一致), key 格式
+# `llm_excluded:<provider>:<model>`, value="1" (存在即排除).
+# 启动期加载: main.py lifespan 调 model_catalog.load_excluded_from_keys().
 
-logger = logging.getLogger(__name__)
+
+from pydantic import BaseModel, Field
+
+
+class LLMExcludedCreate(BaseModel):
+    provider: str = Field(..., min_length=1, max_length=64,
+                          description="provider id, e.g. 'opencode_zen' / 'openrouter' / 'b_ai' / 'deepseek'")
+    model: str = Field(..., min_length=1, max_length=128,
+                       description="模型 id, e.g. 'deepseek-v4-flash-free'")
+    reason: str | None = Field(default=None, max_length=256,
+                               description="可选: 排除原因 (仅记录到日志)")
+
+
+def _excluded_key(provider: str, model: str) -> str:
+    return f"llm_excluded:{provider}:{model}"
+
+
+@router.get("/llm-excluded")
+async def list_llm_excluded():
+    """列出所有 LLM 排除项 (跨重启持久化)."""
+    from ..analysis.llm.model_catalog import model_catalog
+    return {
+        "items": model_catalog.list_excluded(),
+        "total": len(model_catalog._exclusions),
+    }
+
+
+@router.post("/llm-excluded")
+async def add_llm_excluded(body: LLMExcludedCreate):
+    """添加 LLM 排除项 (持久化到 AppConfig 表 + 立即生效 in-memory).
+
+    返回:
+      - 201-like: {status: "added", provider, model}
+      - 200-like: {status: "already_excluded", ...} 重复添加
+      - 5xx: 持久化失败 (内存已加, 但 DB 失败 → 下次启动会丢)
+    """
+    from ..analysis.llm.model_catalog import model_catalog
+    from ..core.config_manager import config_manager
+
+    provider, model = body.provider.strip(), body.model.strip()
+    if not provider or not model:
+        return {"status": "error", "reason": "provider/model 不能为空"}, 400
+
+    key = _excluded_key(provider, model)
+    if f"{provider}:{model}" in model_catalog._exclusions:
+        return {
+            "status": "already_excluded",
+            "provider": provider,
+            "model": model,
+        }
+
+    # 1) 内存立即生效
+    model_catalog.mark_excluded(provider, model)
+
+    # 2) 持久化
+    persisted = await config_manager.set_kv(key, "1")
+
+    logger.info(
+        "[admin/llm-excluded] +%s:%s reason=%r persisted=%s",
+        provider, model, body.reason, persisted,
+    )
+
+    return {
+        "status": "added",
+        "provider": provider,
+        "model": model,
+        "persisted": persisted,
+    }
+
+
+@router.delete("/llm-excluded/{provider}/{model}")
+async def remove_llm_excluded(provider: str, model: str):
+    """取消 LLM 排除 (删除 DB key + in-memory set)."""
+    from ..analysis.llm.model_catalog import model_catalog
+    from ..core.config_manager import config_manager
+
+    key = _excluded_key(provider, model)
+    in_mem = model_catalog.unmark_excluded(provider, model)
+    db_deleted = await config_manager.delete_kv(key)
+
+    logger.info(
+        "[admin/llm-excluded] -%s:%s in_mem=%s db_deleted=%s",
+        provider, model, in_mem, db_deleted,
+    )
+
+    return {
+        "status": "removed" if (in_mem or db_deleted) else "not_found",
+        "provider": provider,
+        "model": model,
+        "in_mem_removed": in_mem,
+        "db_deleted": db_deleted,
+    }

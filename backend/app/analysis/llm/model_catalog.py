@@ -175,8 +175,44 @@ class ModelCatalog:
         """实测不可用/质量差黑名单（护栏 3：排除表替代排序表）。"""
         self._exclusions.add(f"{provider}:{model}")
 
+    def unmark_excluded(self, provider: str, model: str) -> bool:
+        """取消排除。返回是否真删除了成员（用于 admin endpoint 反馈）。"""
+        key = f"{provider}:{model}"
+        if key in self._exclusions:
+            self._exclusions.remove(key)
+            return True
+        return False
+
     def is_excluded(self, provider: str, model: str) -> bool:
         return f"{provider}:{model}" in self._exclusions
+
+    def list_excluded(self) -> list[dict[str, str]]:
+        """列出全部排除项. 格式: [{provider, model}] 排序稳定."""
+        out: list[dict[str, str]] = []
+        for key in sorted(self._exclusions):
+            if ":" in key:
+                p, m = key.split(":", 1)
+                out.append({"provider": p, "model": m})
+        return out
+
+    def load_excluded_from_keys(self, keys: list[str]) -> int:
+        """从持久化层加载 (key 形如 'llm_excluded:<provider>:<model>') 到内存 set.
+
+        round46: admin POST / DELETE 走 AppConfig 表持久化, 启动期调本方法
+        把 DB 里的排除项灌回 in-memory set. 返加载条数 (供 lifespan 日志).
+        """
+        loaded = 0
+        for k in keys:
+            # k 形如 'llm_excluded:opencode_zen:deepseek-v4-flash-free'
+            if not k.startswith("llm_excluded:"):
+                continue
+            rest = k[len("llm_excluded:"):]
+            if ":" not in rest:
+                continue
+            provider, model = rest.split(":", 1)
+            self._exclusions.add(f"{provider}:{model}")
+            loaded += 1
+        return loaded
 
 
 # ── 选择序列（纯函数，可种子化） ──────────────────────────────────
