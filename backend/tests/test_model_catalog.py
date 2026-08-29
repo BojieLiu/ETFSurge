@@ -187,6 +187,9 @@ def _patch_settings(monkeypatch, **overrides):
         "openrouter_api_key": "",
         "deepseek_api_key": "",
         "llm_zen_allowed_models": "",
+        # b.ai 默认空 (R40 + R45 测试隔离: 不让 .env 配 key 漏到 model_catalog 测试)
+        "b_ai_api_key": "",
+        "b_ai_allowed_models": "",
     }
     defaults.update(overrides)
     for k, v in defaults.items():
