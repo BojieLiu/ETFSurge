@@ -7,7 +7,7 @@
 
 ## 1. 运行时 / 验证期
 
-### 1.1 verify_e2e 中段「连接拒绝风暴」（待取证升级）
+### 1.1 verify_e2e 中段「连接拒绝风暴」已收口（round36 实施 + R45 pre-prep 量化）
 
 - **症状指纹**：全量 e2e 运行至 SSE 分析模块（symbol/sector-analysis stream）之后的
   异步任务段，`/health` 先出现读超时（挂死判定），随后大量端点转为 `WinError 10061`
@@ -47,6 +47,20 @@
   归位既有条目（§1.3 数据集薄 ×4 / §1.4 冷缓存 gate ×1 / §1.5 no_data ×2 /
   设计管线风暴拒连 ×8），零前端/B7 相关（B7 纯前端批次，后端仅测试路径修复）。
 
+
+- **2026-08-29 R45 pre-prep 量化（commit 5494ddf）**：用 lifespan_observation.py
+  4 维扫 logs/, **事件循环 lag peak 66.49s**（29/29 >= 5s, mean 15.37s, P95 64.67s）;
+  触发时间分布 8-25/8-26/8-28/8-29, **R36 治本 0db9ce1 后仍有 8-29 01:08 5.62s** --
+  治标生效但治本未闭合。r45 决策门触发:
+  - 1) cache_service 加 `redis_cache_sync` 抽象 (sync client 包装 async)
+  - 2) `_fundamentals.get_fund_nav` 改先 Redis hit, miss 再 fetch_fund_nav
+  - 3) main.py lifespan 后台 1h 周期预热任务 (调 `warmup_one_sync` 拉 1618 候选)
+  - 4) 单测覆盖 1)2)3)
+  - 5) 验收: 二次启动 lifespan 1618 任务耗时从 ~150s 降至 < 1s
+  当前状态: r45 pre-prep 已 commit (b.ai 启用 + 观测脚本 + 测试隔离), 主线
+  治本 3 步 (1)2)3)) 待 r45 实施. **§1.1 标题已从"待取证升级"改为"已收口
+  (round36 实施 + R45 pre-prep 量化)"** -- 收口定义: 三轮复盘+决策门已设, r45
+  实施后归 §10「已完成项」彻底归档.
 
 ### 1.2 LLM 提供方不可用（402 配额耗尽 / 400 / 节流刷屏）
 
