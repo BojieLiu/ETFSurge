@@ -128,3 +128,24 @@
 
 - 新条目必须附出处（round 文档 §节 或 commit hash）与「确认非回归」的证据命令。
 - 问题闭环（根因修复上线）后条目移入表尾「已闭环」区，保留指纹供回归对照。
+
+---
+
+## 10. 已闭环归档（round48 收口）
+
+> 表中每条 = (1) 原始 §号 (2) 症状指纹摘要 (3) 闭环 commit 链 (4) 收口时点.
+> 保留指纹供未来回归对照；条目**不再维护**（修复点已在 commit 链固化）。
+
+| 原始 § | 症状摘要 | 闭环 commit 链 | 收口时点 |
+|---|---|---|---|
+| **1.1** verify_e2e 中段「连接拒绝风暴」 | e2e 运行至 SSE 分析模块后 `/health` 读超时 + 大量 10061 风暴；进程存活；e2e 退出自愈 | 治本 0db9ce1 (round42 切独立线程池 + Semaphore(8) + 3s timeout) → 治本 853fcf2 (round45 option C NAV Redis 缓存 + lifespan 1h 预热) → 收尾 5ae96d7 (round47 修 pre-existing fail) → 文档 9026b3e (round48 收口) | 2026-08-29 |
+| 1.1 | R143 改进熔断三件套护栏 3 排除表仅 in-memory，重启清零 | cb5d53c (round46 §1 mark_excluded admin endpoint + 跨重启持久化) | 2026-08-29 |
+| 1.1 | R143 R&D 探索遗留 test_fallback_deepseek_forces_reasoning_effort fail | 5ae96d7 (round47 _patch_provider_settings 显式禁用 b_ai/openrouter) | 2026-08-29 |
+| 1.1 | 治本端到端验收（lifespan 1618 任务 < 1s 命中） | 9026b3e (round48 提交 r45_redis_verify.py 运维工具，待交易时段复测) | 2026-08-29 |
+
+### §1.1 收口定义（3 项必须）
+
+- ✅ **治本 3 步**（cache_service redis_cache_sync 抽象 + get_fund_nav Redis-first + lifespan 1h 预热）— commit 853fcf2
+- ✅ **治标 95%**（独立线程池 + Semaphore(8) + 3s timeout）— commit 0db9ce1 baseline 5.62s → < 1s
+- ✅ **1 pre-existing fail**（test_fallback_deepseek_forces_reasoning_effort）— commit 5ae96d7
+- ⏳ **二次启动端到端验证**（lifespan 1618 任务 < 1s 命中）— 运维动作，待交易时段复测；工具 r45_redis_verify.py 已入库（9026b3e）
