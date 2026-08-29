@@ -419,9 +419,12 @@ async def lifespan(app: FastAPI):
         try:
             async def _do_market_warmup():
                 _mark = app.state.warmup["market_cache"]
+                # round49 A4: timeout 10s → 25s. R45 量化实测 10.57s, 旧 10s
+                # 经常超时导致 success=False 静默吞. 25s 给慢源(US 组)留余量,
+                # 但仍受 lifespan 整体 60s 预热窗口约束. 单测可验证.
                 with warmup_timer("warmup_market_cache", "warmup", "行情缓存预热"):
                     try:
-                        await asyncio.wait_for(refresh_market_cache(), timeout=10)
+                        await asyncio.wait_for(refresh_market_cache(), timeout=25)
                         _mark["done"] = True
                         _mark["success"] = True
                         logger.info("行情缓存预热完成（后台）")
@@ -770,18 +773,39 @@ async def lifespan(app: FastAPI):
     #   - Semaphore(8) 并发限流 (与 _inject_nav 配额一致)
     #   - 调 get_fund_nav 走 Redis-first (本轮已改), 同步路径
     #   - Redis 不可用时降级 (cache_service._ensure_client 返 False)
+    # round49 B3: 每次循环写 app.state.nav_warmup 共享 dict, 供 /admin/lifespan-warmup 端点查询.
     async def _nav_warmup_loop():
         from .services.market_data_hub import market_data_hub as _hub
         from .services.cache_service import redis_cache_sync
         import time as _time
+
+        # 共享状态 (供 /admin/lifespan-warmup 端点查询)
+        app.state.nav_warmup = {
+            "enabled": True,
+            "started_at": _time.time(),
+            "warmup_period_s": 3600,
+            "first_run_delay_s": 60,
+            "last_cycle": None,         # {ts, total, ok, skip, err, duration_s, reason?}
+            "last_cycle_start_ts": None,
+            "next_run_eta_s": 60,        # 距下轮启动秒数
+            "redis_available": False,    # 最近一次 ping 状态
+        }
 
         await asyncio.sleep(60)  # 延迟 60s 避开启动期 _inject_nav 抢资源
         _cycle = 0
         while True:
             _cycle += 1
             _t0 = _time.monotonic()
+            _cycle_start_ts = _time.time()
+            app.state.nav_warmup["last_cycle_start_ts"] = _cycle_start_ts
+            _redis_ok = redis_cache_sync.ping()
+            app.state.nav_warmup["redis_available"] = _redis_ok
+            _skip_reason: str | None = None
+            _ok = _skip = _err = 0
+            _n = 0
             try:
-                if not redis_cache_sync.ping():
+                if not _redis_ok:
+                    _skip_reason = "redis_unavailable"
                     logger.debug("[lifespan/nav-warmup] Redis 不可用, 跳过本轮")
                 else:
                     _pool = _hub.get_pool()
@@ -792,14 +816,13 @@ async def lifespan(app: FastAPI):
                             if s and s != "CASH":
                                 _syms.append(s)
                     if not _syms:
+                        _skip_reason = "pool_empty"
                         logger.debug("[lifespan/nav-warmup] pool 空, 跳过本轮")
                     else:
+                        _n = len(_syms)
                         # 调 get_fund_nav 走 Redis-first (本轮 §2.1 已改)
                         # 并发限流 Semaphore(8), 与 _inject_nav 配额一致
                         _sem = asyncio.Semaphore(8)
-                        _ok = 0
-                        _skip = 0
-                        _err = 0
 
                         async def _warm_one(_s: str) -> None:
                             nonlocal _ok, _skip, _err
@@ -822,14 +845,30 @@ async def lifespan(app: FastAPI):
                                     )
 
                         await asyncio.gather(*[_warm_one(s) for s in _syms])
-                        _dt = _time.monotonic() - _t0
-                        logger.info(
-                            "[lifespan/nav-warmup] cycle=%d n=%d ok=%d skip=%d err=%d dur=%.2fs",
-                            _cycle, len(_syms), _ok, _skip, _err, _dt,
-                        )
             except Exception as _e:
+                _skip_reason = f"exception: {type(_e).__name__}"
                 logger.warning("[lifespan/nav-warmup] cycle failed: %s", _e)
+            _dt = _time.monotonic() - _t0
+            logger.info(
+                "[lifespan/nav-warmup] cycle=%d n=%d ok=%d skip=%d err=%d dur=%.2fs reason=%s",
+                _cycle, _n, _ok, _skip, _err, _dt, _skip_reason,
+            )
+            # 写共享状态
+            from datetime import datetime as _dt_mod
+            app.state.nav_warmup["last_cycle"] = {
+                "ts": _dt_mod.utcfromtimestamp(_cycle_start_ts).isoformat() + "Z",
+                "cycle": _cycle,
+                "total": _n,
+                "ok": _ok,
+                "skip": _skip,
+                "err": _err,
+                "duration_s": round(_dt, 2),
+                "reason": _skip_reason,
+            }
+            app.state.nav_warmup["next_run_eta_s"] = 3600  # 刚跑完, 距下轮 1h
             await asyncio.sleep(3600)  # 1h 周期
+            # 距下轮启动 (供下次轮询端点读)
+            # (next_run_eta_s 在 sleep 末尾更新 -> 实际接近 0; 端点读时再按 1h 重置)
     _spawn(_nav_warmup_loop(), name="loop-nav-warmup")
     logger.info("NAV Redis 缓存预热循环已启动（1h 周期, 60s 延迟首轮）")
 

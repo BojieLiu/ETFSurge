@@ -4,7 +4,7 @@ import asyncio
 import logging
 import time
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
 
 from ..core.source_registry import registry
@@ -443,3 +443,68 @@ async def remove_llm_excluded(provider: str, model: str):
         "in_mem_removed": in_mem,
         "db_deleted": db_deleted,
     }
+
+
+# ── Lifespan NAV 预热健康度 (round49 B3) ─────────────────────────
+# 暴露 _nav_warmup_loop 共享状态, 供运维监控. 与 R45 option C 853fcf2
+# 配套; 拉数据不触网, 只读 app.state.nav_warmup dict.
+
+
+@router.get("/lifespan-warmup")
+async def get_lifespan_warmup(request: Request):
+    """Lifespan NAV Redis 预热任务健康度.
+
+    返回最近一轮 _nav_warmup_loop 的指标 (ok/skip/err/duration_s) + 整体状态
+    (enabled/redis_available/started_at). 供运维确认后台预热是否真在跑
+    (不是卡死 / 错误退出).
+
+    返回示例:
+    {
+      "enabled": true,
+      "redis_available": true,
+      "started_at": "2026-08-29T10:00:00Z",
+      "warmup_period_s": 3600,
+      "first_run_delay_s": 60,
+      "last_cycle": {
+        "ts": "2026-08-29T10:01:00Z",
+        "cycle": 1,
+        "total": 1618,
+        "ok": 1500,
+        "skip": 100,
+        "err": 18,
+        "duration_s": 412.5,
+        "reason": null
+      },
+      "next_run_eta_s": 3540
+    }
+
+    注: 启动 60s 之前 last_cycle 必为 null (首轮未跑完). reason 字段取值:
+    - null = 正常拉取
+    - "redis_unavailable" = Redis ping 失败跳过
+    - "pool_empty" = 候选池空跳过
+    - "exception: <Name>" = 整体 cycle 异常
+    """
+    import time
+    state = getattr(request.app.state, "nav_warmup", None)
+    if state is None:
+        # lifespan 还没初始化 _nav_warmup_loop (启动 60s 内 / 异常退出)
+        return {
+            "enabled": True,
+            "redis_available": False,
+            "started_at": None,
+            "warmup_period_s": 3600,
+            "first_run_delay_s": 60,
+            "last_cycle": None,
+            "next_run_eta_s": None,
+            "_state_uninitialized": True,  # 客户端可识别
+        }
+    # 复制 state (避免引用泄露), 算 next_run_eta_s
+    out = {k: v for k, v in state.items() if k != "started_at"}
+    if state.get("last_cycle_start_ts") and state.get("next_run_eta_s") is not None:
+        # next_run_eta_s 写于 sleep 前, 客户端读取时按 elapsed 调整
+        _elapsed = time.time() - state["last_cycle_start_ts"]
+        out["next_run_eta_s"] = max(0, int(state.get("next_run_eta_s", 3600) - _elapsed))
+    if state.get("started_at"):
+        from datetime import datetime as _dt_mod
+        out["started_at"] = _dt_mod.utcfromtimestamp(state["started_at"]).isoformat() + "Z"
+    return out
