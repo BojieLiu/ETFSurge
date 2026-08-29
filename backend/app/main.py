@@ -419,19 +419,38 @@ async def lifespan(app: FastAPI):
         try:
             async def _do_market_warmup():
                 _mark = app.state.warmup["market_cache"]
-                # round49 A4: timeout 10s → 25s. R45 量化实测 10.57s, 旧 10s
-                # 经常超时导致 success=False 静默吞. 25s 给慢源(US 组)留余量,
-                # 但仍受 lifespan 整体 60s 预热窗口约束. 单测可验证.
-                with warmup_timer("warmup_market_cache", "warmup", "行情缓存预热"):
+                # round49 A4 (2e7f680) + A4-C: 拆两阶段预热, 治本 warmup 10.57s
+                # 根因 (off_exchange 串行 fetch_fund_nav 拉长整体).
+                #   - fast 阶段 (5s timeout): A 股+指数, 写 cache, 用户首击命中
+                #   - slow 阶段 (25s timeout): off_exchange 补全, 后台写 cache 覆盖
+                # 旧 10s timeout 走 "all" 完整 → 必超时 → 静默失败.
+                with warmup_timer("warmup_market_cache", "warmup", "行情缓存预热 (两阶段)"):
                     try:
-                        await asyncio.wait_for(refresh_market_cache(), timeout=25)
+                        # fast 阶段: 5s 内拿快源, 写 cache
+                        await asyncio.wait_for(
+                            refresh_market_cache(phase="fast"),
+                            timeout=5,
+                        )
                         _mark["done"] = True
                         _mark["success"] = True
-                        logger.info("行情缓存预热完成（后台）")
+                        _mark["phase"] = "fast"
+                        logger.info("行情缓存预热 fast 阶段完成 (后台 slow 续传)")
+                        # slow 阶段: 后台续传, 不 await 阻塞 startup
+                        async def _slow_warmup():
+                            try:
+                                await asyncio.wait_for(
+                                    refresh_market_cache(phase="slow"),
+                                    timeout=25,
+                                )
+                                logger.info("行情缓存预热 slow 阶段完成")
+                            except (Exception, asyncio.CancelledError) as exc:
+                                logger.debug("行情缓存预热 slow 阶段失败 (非阻塞): %s", exc)
+                        asyncio.create_task(_slow_warmup())
                     except (Exception, asyncio.CancelledError) as exc:
                         _mark["done"] = True
                         _mark["success"] = False
-                        logger.debug("行情缓存预热失败（后台，非阻塞）：%s", exc)
+                        _mark["phase"] = "fast_failed"
+                        logger.debug("行情缓存预热 fast 阶段失败 (非阻塞): %s", exc)
 
             # 不 await：立即返回让 startup 就绪；实际刷新在后台进行
             task = asyncio.create_task(_do_market_warmup())

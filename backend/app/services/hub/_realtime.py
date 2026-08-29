@@ -40,10 +40,13 @@ class RealtimeMixin:
         return await get_asset_realtime(symbol, asset_type)
 
 
-    async def get_portfolio_realtime(self) -> list[dict]:
-        """组合实时行情（委托 market_service.get_portfolio_realtime）。"""
+    async def get_portfolio_realtime(self, phase: str = "all") -> list[dict]:
+        """组合实时行情（委托 market_service.get_portfolio_realtime）。
+
+        round49 A4-C: phase 参数支持两阶段预热 (fast/slow/all).
+        """
         from ...services.market_service import get_portfolio_realtime
-        return await get_portfolio_realtime()
+        return await get_portfolio_realtime(phase=phase)
 
 
     async def get_indices(self) -> list[dict]:

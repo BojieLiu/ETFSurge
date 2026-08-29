@@ -1148,11 +1148,18 @@ _PORTFOLIO_REALTIME_CACHE_KEY = "portfolio:realtime"
 _PORTFOLIO_REALTIME_TTL = 15  # 7.6a: 15s app-level cache
 
 
-async def get_portfolio_realtime() -> list[dict[str, Any]]:
+async def get_portfolio_realtime(phase: str = "all") -> list[dict[str, Any]]:
     """获取组合实时行情（带 15s 应用级缓存）。
 
     场内 ETF → 实时价
     场外 ETF → 盘中估算（tracked_index）/ 盘后净值
+
+    round49 A4-C: phase 参数支持两阶段预热, 治本 warmup_market_cache 10.57s
+    根因 (off_exchange 串行 fetch_fund_nav 拉长整体):
+      - phase="all"  (默认): 完整流程 (A 股 + 指数 + off_exchange, 25s 预算)
+      - phase="fast" (5s): 跳过 off_exchange fetch_fund_nav 段, 仅 A 股+指数
+      - phase="slow" (25s): 仅 off_exchange fetch_fund_nav 段, 复用 A 股+指数 cache
+    快慢源两次写同一 cache key, 后写覆盖前写 (竞态可接受, 15s TTL 自动续期).
     """
     # 7.6a: 15s app-level cache to reduce API response time
     from .cache_service import cache_get, cache_set
@@ -1205,6 +1212,15 @@ async def get_portfolio_realtime() -> list[dict[str, Any]]:
     # 场外 ETF：填充 is_estimated 信息
     now_trading = is_trading_time()
     from ..fetchers.china_market import fetch_fund_nav
+
+    # round49 A4-C: phase="fast" 跳过 off_exchange fetch_fund_nav 段, 缩短首击时间.
+    # phase="slow" 仍跑 off_exchange (后台补全, 后写 cache 覆盖 fast 结果).
+    if phase == "fast":
+        # fast 阶段跳过 off_exchange 处理, 返回的 quotes 不含场外 ETF 估值.
+        # 注: slow 阶段会重写 cache, fast 写一次只是占位让用户首击命中.
+        from .cache_service import cache_set as _cs
+        await _cs(_PORTFOLIO_REALTIME_CACHE_KEY, quotes, _PORTFOLIO_REALTIME_TTL)
+        return quotes
 
     for etf in off_exchange:
         sym = etf.symbol

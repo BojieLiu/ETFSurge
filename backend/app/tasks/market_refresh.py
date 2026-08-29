@@ -16,9 +16,21 @@ from ..services.market_data_hub import market_data_hub
 logger = get_logger(__name__)
 
 
-async def refresh_market_cache() -> None:
-    """预热组合行情缓存（无 WS 推送；失败由调用方按预热语义处理）。"""
+async def refresh_market_cache(phase: str = "all") -> None:
+    """预热组合行情缓存（无 WS 推送；失败由调用方按预热语义处理）。
+
+    round49 A4-C: phase 参数支持两阶段预热, 治本 warmup_market_cache 10.57s
+    根因 (off_exchange 串行 fetch_fund_nav 拉长整体). 设计:
+      - phase="all"  (默认, 兼容旧调用方): 走完整 get_portfolio_realtime
+      - phase="fast" (A 股+指数, 5s 内返回, 写 cache): 跑快源子集
+      - phase="slow" (off_exchange 场外 fetch_fund_nav, 25s 预算, 写 cache): 跑慢源子集
+    快慢源两次写同一 cache key, 后写覆盖前写 (竞态可接受, 15s TTL 自动续期).
+
+    warmup 调用方: _do_market_warmup 先 await phase="fast" (5s) 拿快源, 立刻
+    background spawn phase="slow" 补慢源. 用户首击命中 fast cache, 后台续
+    补 slow (完成后下次首击命中完整 cache).
+    """
     try:
-        await market_data_hub.get_portfolio_realtime()
+        await market_data_hub.get_portfolio_realtime(phase=phase)
     except Exception:
-        logger.exception("预热行情缓存失败：hub.get_portfolio_realtime 异常")
+        logger.exception("预热行情缓存失败 (phase=%s): hub exception", phase)
