@@ -1222,6 +1222,14 @@ async def get_portfolio_realtime(phase: str = "all") -> list[dict[str, Any]]:
         await _cs(_PORTFOLIO_REALTIME_CACHE_KEY, quotes, _PORTFOLIO_REALTIME_TTL)
         return quotes
 
+    # round50: off_exchange 串行改并发 (R49 A4-C 慢阶段耗时 ~15-25s 根因).
+    # 设计:
+    #   - 收集"需要拉 fetch_fund_nav"的 etf 列表 (existing 跳过, tracked_index 命中跳过)
+    #   - asyncio.gather + Semaphore(8) 限流并发拉 (与启动期 _inject_nav 一致)
+    #   - 8 并发: 单只 2s × N/8 ≈ 几十秒降到 2-3s 量级
+    #   - 单只仍走原 8s timeout, 全局受 25s slow 阶段 timeout 兜底
+    #   - 限流 8 避免触发 fetch_fund_nav 源限流 (未实测, 保守值)
+    _off_fundnav_tasks: list[tuple] = []  # [(etf, sym, ti, idx_or_none), ...]
     for etf in off_exchange:
         sym = etf.symbol
         ti = etf.tracked_index
@@ -1251,24 +1259,39 @@ async def get_portfolio_realtime(phase: str = "all") -> list[dict[str, Any]]:
                 "estimate_source": "tracked_index",
             })
         else:
-            # 盘后：尝试净值（round9 P0-7: fetch_fund_nav 契约统一为 dict）
-            nav_data = await _call(fetch_fund_nav, sym, timeout=8)
-            nav_price = None
-            if nav_data and isinstance(nav_data, dict) and nav_data.get("nav"):
-                nav_price = float(nav_data["nav"])
-            quotes.append({
-                "symbol": sym,
-                "name": name_map.get(sym, sym),
-                "short_name": short_name_map.get(sym, name_map.get(sym, sym)),
-                "price": nav_price or (index_price_map.get(ti, {}).get("price")),
-                "change_pct": 0,
-                "change_amount": 0,
-                "volume": 0,
-                "asset_type": "A",
-                "portfolio_type": "off_exchange",
-                "is_estimated": True,
-                "estimate_source": "nav" if nav_data else "last_close",
-            })
+            # 盘后或无 index: 需 fetch_fund_nav, 加入并发任务
+            _off_fundnav_tasks.append((etf, sym, ti))
+
+    # 并发拉 fetch_fund_nav (Semaphore 限流 8)
+    if _off_fundnav_tasks:
+        import asyncio as _asyncio
+        _off_sem = _asyncio.Semaphore(8)
+
+        async def _fetch_one(_entry: tuple) -> None:
+            etf, sym, ti = _entry
+            async with _off_sem:
+                try:
+                    nav_data = await _call(fetch_fund_nav, sym, timeout=8)
+                except Exception:
+                    nav_data = None
+                nav_price = None
+                if nav_data and isinstance(nav_data, dict) and nav_data.get("nav"):
+                    nav_price = float(nav_data["nav"])
+                quotes.append({
+                    "symbol": sym,
+                    "name": name_map.get(sym, sym),
+                    "short_name": short_name_map.get(sym, name_map.get(sym, sym)),
+                    "price": nav_price or (index_price_map.get(ti, {}).get("price")),
+                    "change_pct": 0,
+                    "change_amount": 0,
+                    "volume": 0,
+                    "asset_type": "A",
+                    "portfolio_type": "off_exchange",
+                    "is_estimated": True,
+                    "estimate_source": "nav" if nav_data else "last_close",
+                })
+
+        await _asyncio.gather(*[_fetch_one(t) for t in _off_fundnav_tasks])
 
     # 补全名称
     for q in quotes:
