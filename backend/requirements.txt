@@ -9,6 +9,10 @@ apscheduler>=3.10
 feedparser>=6.0
 httpx>=0.27
 pydantic-settings>=2.0
+# v7 P0 (etfsurge-agentic-upgrade-v7.md §3.5): MCP 工具层官方 SDK，stdio 传输。
+# 锁 <2.0：2.x 大版本重构移除了 lowlevel Server 装饰器 API（list_tools/call_tool），
+# v7 §3.6 四个 server 均按 1.x 装饰器 API 实现（mcp 1.29.1 实测）。
+mcp>=1.0,<2.0
 pytest>=8.0
 pytest-timeout>=2.3
 pytest-xdist>=3.0
