@@ -60,6 +60,14 @@ LAYER_DEFAULTS = {
     # §12 P0-1 (round34): 启动行为审计——消费 backend.log 自最近启动标记起的窗口
     # （R103 回填重跑 / R105 段一静默缺锚 / R106 WARNING 周期重放）
     "L2-startup": {"timeout": 60, "backend_dependent": False},
+    # round44 (round39 §4.4.4 方案 A): 端到端不变量校验——拉 /portfolio/designs
+    # 详情, 对每 strategy 验 Σ(layer_weight) ≤ budget + 0.01 ∧ Σtotal ≤ 1.0。
+    # 后端依赖: 需要正在跑的后端.
+    "L2-alloc-invariants": {"timeout": 60, "backend_dependent": True},
+    # round44 (round39 §4.4.4 方案 C): mark_excluded 端到端断言——拉
+    # /admin/llm-excluded + /admin/token-usage, 断言 excluded model
+    # by_model.calls == 0 (mark_excluded 真正生效). 后端依赖.
+    "L2-llm-exclusion": {"timeout": 60, "backend_dependent": True},
     "L3-perf": {"timeout": 120, "backend_dependent": True},
     "L4-routes": {"timeout": 60, "backend_dependent": False},
     "L4-purity": {"timeout": 60, "backend_dependent": False},
@@ -74,19 +82,20 @@ LAYER_DEFAULTS = {
 }
 
 LAYER_ORDER = [
-    "L1-unit", "L2-e2e", "L2-health", "L2-smoke", "L2-startup", "L3-perf",
+    "L1-unit", "L2-e2e", "L2-health", "L2-alloc-invariants", "L2-llm-exclusion",
+    "L2-smoke", "L2-startup", "L3-perf",
     "L4-routes", "L4-purity", "L4-async", "L4-ruff", "L-golden", "L5-frontend",
 ]
 
 # --full 层集（§3: 不含 L2-smoke —— 后端在线时启动能力已被证明，且双实例
 # 共享 SQLite 有写锁风险，§8-6）
 FULL_LAYERS = [
-    "L1-unit", "L2-e2e", "L2-health", "L3-perf",
-    "L4-routes", "L4-purity", "L4-async", "L4-ruff", "L5-frontend",
+    "L1-unit", "L2-e2e", "L2-health", "L2-alloc-invariants", "L2-llm-exclusion",
+    "L3-perf", "L4-routes", "L4-purity", "L4-async", "L4-ruff", "L5-frontend",
 ]
 
 # 依赖后端的必需层：后端离线时打 SKIP + 退出码 2（§3）
-BACKEND_DEPENDENT_LAYERS = ("L2-e2e", "L3-perf")
+BACKEND_DEPENDENT_LAYERS = ("L2-e2e", "L2-alloc-invariants", "L2-llm-exclusion", "L3-perf")
 
 # ── §4.3 e2e 子模块映射（模块级常量，新增 router/section 需同步维护） ──
 # 值为 None 表示「全量」（不传 --module）。匹配按序，精确优先，兜底全量。
@@ -456,6 +465,14 @@ def _build_command(name, plan, args):
     if name == "L2-startup":
         # §12 P0-1 (round34): 启动行为审计（读日志+pool 快照，零网络零后端依赖）
         return [sys.executable, "scripts/check_startup_behavior.py"], BACKEND_DIR, {}
+    if name == "L2-alloc-invariants":
+        # round44 (round39 §4.4.4 方案 A): 端到端不变量校验
+        return [sys.executable, "scripts/verify_allocation_invariants.py",
+                "--base", f"http://{host}:{port}"], BACKEND_DIR, {}
+    if name == "L2-llm-exclusion":
+        # round44 (round39 §4.4.4 方案 C): mark_excluded 端到端断言
+        return [sys.executable, "scripts/verify_llm_exclusion.py",
+                "--base", f"http://{host}:{port}"], BACKEND_DIR, {}
     if name == "L3-perf":
         return [sys.executable, "scripts/verify_perf.py", "--base", f"http://{host}:{port}"], BACKEND_DIR, {}
     if name == "L4-routes":
