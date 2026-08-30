@@ -47,7 +47,9 @@ async def _list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "task_id": {"type": "string"},
+                    # task_manager.get_task(task_id: int)——int 非 string（v7 P0
+                    # schema 笔误，strategy_check 集成验证时实测发现）
+                    "task_id": {"type": "integer"},
                 },
                 "required": ["task_id"],
             },

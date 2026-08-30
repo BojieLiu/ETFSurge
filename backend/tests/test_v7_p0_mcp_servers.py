@@ -137,12 +137,12 @@ class TestPortfolioServer:
 
     def test_task_status_polls(self):
         mod = _load("portfolio_server")
-        fake_status = {"task_id": "t-123", "status": "running", "progress": 0.5}
+        fake_status = {"task_id": 42, "status": "running", "progress": 0.5}
         with patch.object(mod.task_manager, "get_task",
                           new=AsyncMock(return_value=fake_status)):
             call_cls = CallToolRequest
             result = _call(mod.server, call_cls,
-                           {"name": "task_status", "arguments": {"task_id": "t-123"}})
+                           {"name": "task_status", "arguments": {"task_id": 42}})
         text = result.root.content[0].text
         assert "running" in text
 
