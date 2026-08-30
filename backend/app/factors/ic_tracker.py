@@ -232,8 +232,6 @@ class ICTracker:
                 # 其余因子默认 0.001，canonical 判定为严格大于）。
                 # R58（round28 延伸）: 数据源异常时 factor value 可能为 str，
                 # abs(str) → TypeError 使整批 IC 计算失败。非数值视为零分跳过。
-                # R58（round28 延伸）: 数据源异常时 factor value 可能为 str，
-                # abs(str) → TypeError 使整批 IC 计算失败。非数值视为零分跳过。
                 # （isinstance 显式前置供 mypy 窄化；容差判定走 FS1 单点。）
                 if not isinstance(val, (int, float)) or not is_meaningful_value(code, val):
                     st[0] += 1

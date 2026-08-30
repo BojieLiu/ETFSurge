@@ -175,9 +175,10 @@ def _dominant_factor(factor_scores: dict[str, float], profile_weights: dict[str,
     top = max(contribs, key=lambda k: abs(contribs[k]))
     return _FACTOR_LABELS.get(top, top)
 
-# P1-3: 强制保留标的（权重不低于 3%，确保进入分配）# 5% ×4=20% 占用过多预算导致总持仓不足 8 只，调整为 3% ×4=12%
-# round9 P0-8: 560600（历史写错的中证A500锚：实际为医药白酒ETF/零成交/全源无此证券）
-# → 159338（真实中证A500ETF，行情可用），并补 159338 归核心层的定层分支（market_data_hub）
+# P1-3: 强制保留标的（权重不低于 3%，确保进入分配——5%×4=20% 会挤占预算致
+# 总持仓不足 8 只，3%×4=12%）。
+# round9 P0-8: 强制锚须为真实可成交标的（幽灵锚 560600 教训：医药白酒ETF/零成交/
+# 全源无此证券 → 已换 159338 真实中证A500ETF），并补 159338 归核心层的定层分支（market_data_hub）。
 # P2-10 (round9 §4.3-B): 候选池身份校验——强制锚在池层/设计层双防线：
 #   ①池层：etf_scanner filter 依赖真实行情成交额/规模（MIN_AVG_AMOUNT），幽灵锚（零成交/
 #     无此证券）过不了 filter 进不了候选池；静态兜底 WIDE_BASIS_STATIC 条目经 P0-8 清点后

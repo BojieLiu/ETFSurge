@@ -691,14 +691,11 @@ async def generate_enhanced_design(
         # 5. target_amount 一致性校验
         _validate_target_amount_consistency(strategies, capital)
 
-        # R140 (round39 §5 方案 A 收口): apply_risk_controls / _consolidate_minnows /
-        # _apply_precision_bucketing 之后再次调 _enforce_layer_budget_final 兜底。
-        # round38 首次实施时只挂在 _select_and_weight 返回时（_enforce_layer_budget_final
-        # 在 allocation_engine.py:784）；_dedup_same_index 同指数剔除回补、
-        # _consolidate_minnows 小仓位合并、_apply_precision_bucketing 桶化等后续
-        # 步骤可能再把单只/层总权重推超（round39 容器复验 design 12 sat=0.300
-        # >budget=0.220 + 总仓位 1.030>1.0 实证）。此处在 orchestrator 末尾二次
-        # 强制 enforce，确保最终输出 sat ≤ budget ∧ Σweight ≤ 1.0。
+        # R140 (round39): orchestrator 末尾二次强制 enforce 层预算——仅
+        # _select_and_weight 返回时的单次 enforce 不够：_dedup_same_index
+        # 同指数剔除回补、_consolidate_minnows 小仓位合并、
+        # _apply_precision_bucketing 桶化等后续步骤可能再把单只/层总权重推超。
+        # 确保最终输出 sat ≤ budget ∧ Σweight ≤ 1.0。
         # 设计：仅对有 allocations 的方案做强制；防御层 cap=0 时跳过（_enforce_layer_budget_final 内部已 guard）。
         try:
             from app.engine.allocation_engine import _enforce_layer_budget_final
@@ -1189,13 +1186,13 @@ def _factor_data_quality_report(db_sample_counts: dict | None = None) -> dict:
             _n = int(_sample_counts.get(_code, 0) or 0)
             if _n > 0:
                 _ic_samples.append(_n)
-            # R96: 数据可用性判定——所需字段无缺口（非 _data_source_gaps）且非常量
-            # （截面有区分度，非 O20 常量占位）——R100 起此口径为「定义就位率」
+            # R100: 数据可用性口径——所需字段无缺口（非 _data_source_gaps）且非常量
+            # （截面有区分度，非 O20 常量占位）。
             if _code not in _gaps and _code not in _constant:
                 definition_ready += 1
         _non_static = counts["valid"] + counts["warn"] + counts["no_data"]
         # R100: 实际产出率 = compute() 产出（非 None 数值）的因子键数 / 定义键数。
-        # compute() 未跑过（_produced 空）→ 回退定义就位率（旧行为，不误报降级）。
+        # compute() 未跑过（_produced 空）→ 回退定义就位率（不误报降级）。
         _produced_count = 0
         if _have_produced:
             _produced_count = sum(
@@ -1223,13 +1220,13 @@ def _factor_data_quality_report(db_sample_counts: dict | None = None) -> dict:
             "no_data": counts["no_data"],
             "valid_rate": _availability_rate,
             "degraded": _degraded,
-            # R96/R100: 数据可用性维度——R100 A 起以 compute() 实际产出口径为准
+            # R100: 数据可用性维度——以 compute() 实际产出口径为准
             #（对齐 factor_breakdown 真实值）；compute() 未跑时回退定义就位率
             "data_available": _availability,
             "data_available_pct": _availability_rate,
-            # R100 B: 「定义就位率」（字段无缺口/非常量）与「实际产出率」并列——
+            # R100: 「定义就位率」（字段无缺口/非常量）与「实际产出率」并列——
             # 口径脱节显性化：factor_breakdown 退化为占位值时 actual_output_rate 骤降，
-            # 不再被 definition_ready_pct 的 97% 掩盖。
+            # 不再被 definition_ready_pct 的高值掩盖。
             "definition_ready": definition_ready,
             "definition_ready_pct": _definition_ready_rate,
             "actual_output_rate": _actual_output_rate,

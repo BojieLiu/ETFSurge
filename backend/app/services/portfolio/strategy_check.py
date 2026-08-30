@@ -20,7 +20,6 @@ from app.services.portfolio._facade_refs import (
 )
 from app.services.portfolio.formatting import (
     _CONFIDENCE_ZH,
-    _factor_value_real,
     _has_real_factor_values,
 )
 
@@ -212,30 +211,11 @@ async def strategy_check(
     # 替代 R74 的键级「因子填充率」：键级 66.5% 与 composite「分项覆盖 33.3%」
     # 底不同并存互斥（round30 §8 实证，§14.1 已决策统一为分项覆盖率）。
     _coverage_stats = _component_coverage_stats(factor_breakdowns)
-    # R74 (round29): 组合级「因子键填充率」——与逐标的 factor_availability 同口径
-    # （键级、排除兑底默认值）聚合。保留供外部契约兼容，但摘要不再使用（R87 统一为分项覆盖）。
-    _keys_total = 0
-    _keys_filled = 0
-    for fb in factor_breakdowns.values():
-        if not isinstance(fb, dict):
-            continue
-        fs = fb.get("factor_scores")
-        if not isinstance(fs, dict) or not fs:
-            continue
-        _keys_total += len(fs)
-        _keys_filled += sum(
-            1 for k, v in fs.items()
-            if isinstance(v, (int, float)) and _factor_value_real(k, v)
-        )
-    factor_fill_pct = (round(_keys_filled * 100.0 / _keys_total, 1)
-                       if _keys_total else None)
     data_quality = {
         "filled_count": filled_factor_count,
         "total_count": total_factor_count,
         "all_empty": filled_factor_count == 0,
         "partial": 0 < filled_factor_count < total_factor_count,
-        # R74 (round29): 组合级因子键填充率（%）（deprecated——R87 统一为分项覆盖）
-        "factor_fill_pct": factor_fill_pct,
         # R87 (round30): 组合级分项覆盖率（%），摘要/报告正文同源
         "factor_coverage_pct": _coverage_stats["coverage_pct"],
         "coverage_components": _coverage_stats["per_holding"],
@@ -531,9 +511,8 @@ async def strategy_check(
 
     filled_count = data_quality.get("filled_count", 0) if data_quality else 0
     total_count = data_quality.get("total_count", 0) if data_quality else 0
-    # R87 (round30): 摘要改报组合级分项覆盖（_quality_summary_text），与 composite
-    # 「分项覆盖 X%」同底——删除 R74 键级「因子填充率」（66.5% 与 33.3% 并存互斥）。
-    # round27 R52 已确立该口径，本轮仅把展示侧对齐到决策侧。
+    # 摘要报组合级分项覆盖（_quality_summary_text），与 composite「分项覆盖 X%」
+    # 同底——键级填充率与 composite 的 33.3% 底不同，同页并存互斥（round30 §8 实证）。
     _quality_s = _quality_summary_text(_coverage_stats)
     if _quality_s:
         quality_summary = _quality_s

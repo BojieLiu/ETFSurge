@@ -17,13 +17,11 @@ engine = create_async_engine(
     connect_args={"timeout": 30},
 )
 
-# round35 A1 (docs/round35-architecture-review.md §13.9 T-A1): portfolio.db 双写者
-# （async engine + hub/_common.py 裸 sqlite3 快照）此前无 WAL——读写互斥时裸连接
-# 直接撞 "database is locked"。journal_mode=WAL 对既有 DB 为在线操作免迁移，且持久化
-# 到 DB 文件（设一次全局生效）；busy_timeout 是 per-connection 属性，须每次 connect 设。
-# R139 (round38): WAL 模式在并发写入后多次 page corruption（清空重建后 2h 再次
-# malformed），改为 DELETE 模式 + synchronous=FULL 牺牲并发性能换取写入完整性。
-# 若进程内频现 "database is locked" 再考虑切回 WAL + synchronous=FULL 组合。
+# portfolio.db 双写者（async engine + hub/_common.py 裸 sqlite3 快照），并发写入下
+# WAL 模式多次 page corruption（round38 R139 实证：清空重建后 2h 再次 malformed），
+# 故固定 DELETE 模式 + synchronous=FULL 牺牲并发性能换取写入完整性；busy_timeout 是
+# per-connection 属性，须每次 connect 设。若进程内频现 "database is locked"，先评估
+# 写入路径合并，勿直接切回 WAL。
 from sqlalchemy import event
 
 

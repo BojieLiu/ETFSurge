@@ -612,19 +612,11 @@ async def generate_strategy_check_report(
             prompt,
             max_retries=0,
             rate_limit_cap=10.0,
-            # round20 P0-5: 单次 provider 调用 connect 超时 35s→15s（对齐 round15 P2
-            # 超时保护）——task 417 ReadTimeout 38s = 35s 调用 + 429 退避等待。
-            # round23 遗留修复（2026-08-14）：read 超时与 connect 分离——deepseek
-            # 长报告生成实测 21.8s（4004 SSE chunks），统一 float 15s 的 read 侧
-            # ReadTimeout → LLM 报告永远走规则兜底。connect 15s 防 429/连接挂起，
-            # read 90s 容纳长生成；max_retries=0 最坏 2×connect15 = 30s ≤ 外层
-            # 分级预算（partial 30s / all_empty 15s 亦覆盖 connect 侧）。
-            # R57 (round28): 内层 connect 15s→60s——round27 R43 只改外层 _llm_timeout_for
-            # (75s→180s)，内层 httpx.Timeout(connect=15.0) 仍先于外层触发 CancelledError
-            # （DeepSeek 慢连接/慢首字节实测 34-78s），专业投资者永远看不到真 LLM 报告。
-            # 对齐实测上沿 60s；read 保持 90s 容纳长生成；max_retries=0 最坏 2×connect60=120s
-            # ≤ 外层完整档 180s（partial 30s / all_empty 15s 分级不受影响——connect 只在
-            # 数据完整档才有机会跑满，低档本就该快速兜底）。
+            # httpx.Timeout: connect 60s / read 90s——connect 容纳 DeepSeek 慢连接/
+            # 慢首字节（实测 34-78s），read 容纳长报告生成（实测 21.8s / 4004 SSE
+            # chunks）。max_retries=0 最坏 2×connect60=120s ≤ 外层完整档 180s；
+            # partial 30s / all_empty 15s 分级档 connect 只在数据完整档才有机会跑满，
+            # 低档本就该快速兜底。
             request_timeout=llm_http_timeout(read_s=STRATEGY_CHECK_READ_S),
         )
     except BaseException as e:  # noqa: BLE001 — F1-9: 必须捕获 CancelledError（BaseException）
