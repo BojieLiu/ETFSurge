@@ -213,6 +213,10 @@ class TokenUsageStore:
         by_func: dict[str, dict] = {}
         # R56 ①: 按 model 分桶
         by_model: dict[str, dict] = {}
+        # round46: 按 provider 分桶——by_model 只按 model 名聚合（deepseek-v4-flash-free
+        # 在 by_model 中无法区分 opencode_zen 与 b_ai 来源），provider 维度补齐后
+        # verify_llm_exclusion 等端到端守卫可定位具体调用源。
+        by_provider: dict[str, dict] = {}
 
         for r in records:
             total["calls"] += 1
@@ -258,6 +262,21 @@ class TokenUsageStore:
             if not r.success:
                 bm["errors"] += 1
 
+            # round46: provider 分桶（与 by_model 同结构；空 provider 归 "unknown"）
+            p = r.provider or "unknown"
+            if p not in by_provider:
+                by_provider[p] = {"calls": 0, "errors": 0, "prompt_tokens": 0,
+                                  "completion_tokens": 0, "total_tokens": 0,
+                                  "total_duration_ms": 0.0}
+            bp = by_provider[p]
+            bp["calls"] += 1
+            bp["prompt_tokens"] += r.prompt_tokens
+            bp["completion_tokens"] += r.completion_tokens
+            bp["total_tokens"] += r.total_tokens
+            bp["total_duration_ms"] += r.duration_ms
+            if not r.success:
+                bp["errors"] += 1
+
         def _finalize(d: dict) -> dict:
             if d["calls"] > 0:
                 d["avg_duration_ms"] = round(
@@ -275,6 +294,7 @@ class TokenUsageStore:
         )
         by_func = {k: _finalize(v) for k, v in sorted(by_func.items())}
         by_model = {k: _finalize(v) for k, v in sorted(by_model.items())}
+        by_provider = {k: _finalize(v) for k, v in sorted(by_provider.items())}
 
         return {
             "total": total,
@@ -283,6 +303,8 @@ class TokenUsageStore:
             "by_function": by_func,
             # R56 ①: 前端据此按 model 计算费用（R57）
             "by_model": by_model,
+            # round46: provider 维度——verify_llm_exclusion 等守卫定位调用源
+            "by_provider": by_provider,
         }
 
     async def timeseries(self, days: int = 30, granularity: str = "day", hours: int = 24) -> dict:
