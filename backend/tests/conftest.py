@@ -38,6 +38,25 @@ def _disable_amount_override_network():
     yield
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _isolate_token_usage_db(tmp_path_factory):
+    """round45 R160 诊断: 测试环境把 token_usage.db 切到 tmp 目录——
+    防测试写真实 data/token_usage.db 污染 by_model 统计（round44 C 方案
+    verify_llm_exclusion 实测 +9 delta 中 1051 条为 test_ 前缀污染）。
+    TokenUsageStore._get_db_path 读 settings.database_url 派生路径；测试期
+    monkeypatch _db_path 实例属性（单例已实例化，不能重建，改属性最稳）。
+    """
+    from app.monitor.token_usage import token_store
+    tmp_db = tmp_path_factory.mktemp("token_usage") / "token_usage.db"
+    orig_path = token_store._db_path
+    token_store._db_path = tmp_db
+    # 已实例化的单例在 session 开始时可能已完成 _init_db（指向真实 DB）——
+    # 切路径后需在新位置重新初始化表结构，否则 flush_worker 写入报 no such table。
+    token_store._init_db()
+    yield
+    token_store._db_path = orig_path
+
+
 def _make_hist_df():
     """与 akshare fund_etf_hist_em 真实列对齐的固定 DataFrame。"""
     return pd.DataFrame({
