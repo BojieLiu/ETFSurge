@@ -75,3 +75,26 @@ class TestTraceStore:
     def test_tail_empty_when_missing_file(self, tmp_path):
         store = TraceStore(path=tmp_path / "absent.jsonl")
         assert store.tail() == []
+
+    def test_sqlite_cost_row_recorded(self, tmp_path):
+        """§6.5: 单次 run cost 落 SQLite trace 行（agentic_runs 表）。"""
+        import sqlite3
+        store = TraceStore(path=tmp_path / "t.jsonl",
+                           sqlite_path=tmp_path / "t.db")
+        store.record(_report(), cost_usd=0.0078)
+        with sqlite3.connect(tmp_path / "t.db") as conn:
+            rows = conn.execute(
+                "SELECT trace_id, cost_usd, steps, degraded FROM agentic_runs"
+            ).fetchall()
+        assert len(rows) == 1
+        assert rows[0][0] == "t" * 16
+        assert abs(rows[0][1] - 0.0078) < 1e-9
+        assert rows[0][2] == 1
+
+    def test_sqlite_failure_does_not_break_jsonl(self, tmp_path):
+        """SQLite 失败不阻断 JSONL（观测设施分层降级）。"""
+        store = TraceStore(path=tmp_path / "t.jsonl",
+                           sqlite_path=tmp_path)  # 目录当 DB 文件 -> sqlite 失败
+        assert store.record(_report()) is True  # JSONL 已落
+        lines = (tmp_path / "t.jsonl").read_text(encoding="utf-8").splitlines()
+        assert len(lines) == 1

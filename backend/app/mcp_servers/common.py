@@ -39,6 +39,9 @@ def serialize_result(payload: Any) -> list[TextContent]:
 
 
 def error_result(message: str, *, source: str | None = None) -> list[TextContent]:
-    """失败语义：如实返回错误信封（degraded=true, data=None），不编造数据。"""
-    return serialize_result(envelope(data=None, source=source, degraded=True,
-                                     as_of=_now_iso()) | {"error": message})
+    """失败语义：如实返回错误信封（degraded=true, data=None），不编造数据。
+    source 缺省 "mcp_server"——错误信封也必须可溯源（v7 P2 evals m001 实测：
+    无 source 的错误信封会炸 StepOutput 校验）。"""
+    return serialize_result(envelope(data=None, source=source or "mcp_server",
+                                     degraded=True,
+                                     as_of=None) | {"error": message})

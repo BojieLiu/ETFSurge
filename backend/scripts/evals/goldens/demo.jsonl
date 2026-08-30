@@ -1,0 +1,13 @@
+// v7 P0 阶段 demo 金标集：10 条（5 类各 >=2）。
+// 注意：非交易时段行情题可能 degraded——quote 题断言「字段存在/信封完整」
+// 而非具体价格；approx 数值题放 P2 扩展（需交易时段验证窗口）。
+{"id": "q001", "type": "quote", "question": "510300 实时快照信封完整", "tool": "get_realtime_quote", "arguments": {"symbols": ["510300"]}, "expect": {"field_path": "data", "op": "present"}, "notes": "字段存在性断言（非交易时段降级也应有结构）"}
+{"id": "q002", "type": "quote", "question": "512890 实时快照 source 标注", "tool": "get_realtime_quote", "arguments": {"symbols": ["512890"]}, "expect": {"field_path": "source", "op": "present"}, "notes": ""}
+{"id": "f001", "type": "format", "question": "get_history_bars 信封四字段", "tool": "get_history_bars", "arguments": {"symbol": "510300"}, "expect": {"fields": ["data", "as_of", "source", "degraded"]}, "notes": ""}
+{"id": "f002", "type": "format", "question": "get_factor_snapshot 信封四字段", "tool": "get_factor_snapshot", "arguments": {"symbols": ["510300"]}, "expect": {"fields": ["data", "as_of", "source", "degraded"]}, "notes": "非交易时段可能 degraded=true，但四字段必须在"}
+{"id": "r001", "type": "refusal", "question": "无缓存 K 线诚实降级", "tool": "get_history_bars", "arguments": {"symbol": "999999"}, "expect": {"must_refuse": true}, "notes": "无效代码 -> data=None + degraded=true（不编造）"}
+{"id": "r002", "type": "refusal", "question": "未知工具护栏拒绝", "tool": "no_such_tool", "arguments": {}, "expect": {"must_refuse": true}, "notes": "白名单外 -> error 信封 degraded=true"}
+{"id": "m001", "type": "multi_step", "question": "行情->K线 两步拆分", "steps": [{"tool": "get_realtime_quote", "arguments": {"symbols": ["510300"]}, "reason": "拉快照"}, {"tool": "get_history_bars", "arguments": {"symbol": "510300"}, "reason": "拉历史"}], "expect": {"min_steps": 2}, "profile": "strategy_check", "notes": ""}
+{"id": "m002", "type": "multi_step", "question": "资讯->因子 两步拆分", "steps": [{"tool": "search_financial_news", "arguments": {"limit": 3}, "reason": "拉资讯"}, {"tool": "get_factor_snapshot", "arguments": {"symbols": ["510300"]}, "reason": "因子快照"}], "expect": {"min_steps": 2}, "profile": "strategy_check", "notes": "步可能 degraded（数据缺失诚实标注），多步完成率看无 error"}
+{"id": "q003", "type": "quote", "question": "多标的批量快照 data 为列表", "tool": "get_realtime_quote", "arguments": {"symbols": ["510300", "512890"]}, "expect": {"field_path": "data", "op": "present"}, "notes": ""}
+{"id": "f003", "type": "format", "question": "资讯工具信封四字段", "tool": "search_financial_news", "arguments": {"limit": 3}, "expect": {"fields": ["data", "as_of", "source", "degraded"]}, "notes": ""}

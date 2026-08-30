@@ -62,10 +62,15 @@ async def _call_tool(name: str, arguments: dict):
                 asset_type=arguments.get("asset_type", "A"),
             )
             degraded = any(q.get("degraded") for q in quotes if isinstance(q, dict))
-            source = next((q.get("source") for q in quotes if isinstance(q, dict)), None)
+            # hub 返回的单条 quote 不带 source（v7 P2 evals q002 实测）——
+            # 信封 source 用真实链路名兜底（调用确实经过 market_data_hub）
+            source = next((q.get("source") for q in quotes
+                           if isinstance(q, dict) and q.get("source")), None) \
+                or "market_data_hub"
             return serialize_result({
                 "data": quotes,
-                "as_of": next((q.get("as_of") for q in quotes if isinstance(q, dict)), None),
+                "as_of": next((q.get("as_of") for q in quotes
+                               if isinstance(q, dict) and q.get("as_of")), None),
                 "source": source,
                 "degraded": degraded,
             })

@@ -157,7 +157,8 @@ class Executor:
 
         handler = await self._resolve_handler(tool)
         if handler is None:
-            return {"data": None, "as_of": None, "source": None, "degraded": True,
+            return {"data": None, "as_of": None, "source": "executor",
+                    "degraded": True,
                     "error": f"no handler registered for tool {tool!r}"}
 
         req = CallToolRequest.model_validate(
@@ -172,5 +173,6 @@ class Executor:
             return payload if isinstance(payload, dict) else {"data": payload}
         except Exception as exc:  # noqa: BLE001 - 失败语义：结构化错误，不编造
             logger.warning("[agentic] tool %s failed: %s", tool, exc)
-            return {"data": None, "as_of": None, "source": None, "degraded": True,
+            return {"data": None, "as_of": None, "source": f"executor:{tool}",
+                    "degraded": True,
                     "error": f"{type(exc).__name__}: {exc}"}
