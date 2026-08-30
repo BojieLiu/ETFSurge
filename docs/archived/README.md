@@ -2,6 +2,17 @@
 
 本目录存放**已完成使命**的历史文档（诊断计划、评审产物、交接、根因分析），保留审计价值但不再作为活跃依据。
 
+
+## 最近一次归档（2026-08-30，round39 容器全链路复验完成 + 五份旧 round 文档承接映射收敛后）
+
+并入本目录（均已完成使命，无活跃实施依据身份）：
+- `round34-b7-ia-reorg-subplan.md`（round34 B7 全域 IA 重组子方案 v2 ——"待最终批准"状态已 12+ 天无新引用；其方案内容已被 round35 架构评估 / round49 FE5 / round38 实证实施结果取代）
+- `round34-container-reacceptance-r102-r108.md`（round34 R102 容器内首验 + 新发现 R103-R108 修复方案 + T-A/S-A/M-A 讨论级设计；R103-R108 已由 round37 三小时长稳实证 + round38 R139/R146/R147-FIX/R148/R149/R150 实施并承接）
+- `round37-container-reacceptance-r103r108-b5s19.md`（round37 R103-R108 长稳态 + R129-R138 新发现；已被 round38 三小时长稳验证 + round39 跨文档对照承接）
+- `round38-container-reacceptance-verify.md`（round38 R139-R151 + R143/R146/R147-FIX 复验；已被 round39 §0-§9 全面验证矩阵 / §10 测试合并方案承接）
+
+> 归档后引用统一指向 `docs/archived/...`。**同步更新**：`docs/round35-architecture-review.md` 第 404 行一处硬路径引用 `docs/round34-container-reacceptance-r102-r108.md` → `docs/archived/round34-container-reacceptance-r102-r108.md`（加"2026-08-30 归档"标注）。代码侧、测试 docstring、其他文档无硬路径引用（"round34 §X"语义指针移动后仍可读）。
+> 不归档保留于 `docs/` 顶层：`round39-container-reacceptance-r34-r38.md`（当前活跃轮文档，§0-§10 完整方案入档）、`design-checklist.md`（常驻设计清单）、`engine-dedup-layers.md`（round35 B3-S3 契约文档，仍被业务引用）、`known-env-issues.md`（常驻环境问题档案，引用 round36 §1.1）、`patrol-orchestration-plan.md`（常驻流程）、`prompt-templates/`（常驻模板）、`api-contracts/`（活跃契约）、README/AGENTS（项目说明）。
 ## 最近一次归档（2026-08-22，round34 容器复验完成 + round33 §8 R102 已实施并容器内首验通过后）
 并入本目录（均已完成使命，无活跃实施依据身份）：
 - `round33-container-reacceptance-r99-r101.md`（round33 R99-R101 复验全 PASS + §8 R102 方案；R102 已由 commit `38a194d` 实施、round34 全新镜像容器内首验 PASS——distinct trade_date 245→502、census warn=12/no_data=15 与本地一致、重启幂等）

@@ -401,7 +401,7 @@ patrol --diff 全绿；verify_e2e 不低于基线（M7 四连 FAIL 属 R105 已�
 
 ### 6.2 B2 —— R104/R105（引用 round34，不重复）
 
-按 `docs/round34-container-reacceptance-r102-r108.md` 既定细化执行：
+按 `docs/archived/round34-container-reacceptance-r102-r108.md` 既定细化执行（2026-08-30 归档）：
 R104 ic_tracker.get_sample_counts_by_code 聚合查询 + _factor_data_quality_report 参数化 +
 strategy_design:924 调用点切换；R105 remove_stale_candidates 循环 MANDATORY_CODES 豁免
 （先例 risk_controls:71）+ removed 日志。验收含 M7 e2e 四连 FAIL 转绿。

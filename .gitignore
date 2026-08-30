@@ -59,6 +59,7 @@ opencode.json
 # Round10+ diagnostic artifacts (whole diag/ tree)
 diag/
 diag/out/logs_container/
+tmp_diag/
 
 # coverage artifacts
 .coverage
