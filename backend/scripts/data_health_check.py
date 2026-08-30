@@ -273,7 +273,10 @@ CRITICAL_FACTOR_CODES: tuple[str, ...] = (
     "etf.shares_change",
     "etf.institutional_holdings_change",
     "sentiment.news_heat",
-    "factor.industry_diversification",
+    # R148 收口 (round41): factor registry 注册的 key 是 "etf.industry_diversification"
+    # (factor_registry.py:713), round40 B 方案误写 "factor.industry_diversification"
+    # 导致 zero_ratio 永远查不到——修正 key 让断言真生效.
+    "etf.industry_diversification",
 )
 
 _CHAIN_PROBE_SYMBOLS: tuple[str, ...] = ("510300", "518880", "511090", "512480")

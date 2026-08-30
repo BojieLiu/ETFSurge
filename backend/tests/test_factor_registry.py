@@ -428,7 +428,11 @@ class TestSourceRegistryFactorSource:
             fn = _BUILTIN_COMPUTERS[code]
             try:
                 val = fn(data)
-                assert isinstance(val, (int, float)), f"{code} returned {type(val)}"
+                # R147-FIX 收口 (round41): shares_change 缺 shares_change_20d 时返 None
+                # (R85 教训: 缺数据不返 0.0 占位). 这里接受 (int, float, None) 三种返回值.
+                assert val is None or isinstance(val, (int, float)), (
+                    f"{code} returned {type(val)}"
+                )
             except Exception as e:
                 raise AssertionError(f"{code} compute raised: {e}") from e
 

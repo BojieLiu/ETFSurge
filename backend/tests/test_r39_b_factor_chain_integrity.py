@@ -18,7 +18,9 @@ from pathlib import Path
 
 import pytest
 
-# CRITICAL_FACTOR_CODES：与 data_health_check.py 内共享（同一份常量，避免漂移）
+# CRITICAL_FACTOR_CODES: 与 data_health_check.py 内共享（同一份常量，避免漂移）
+# R148 收口 (round41): key 必须是 "etf.industry_diversification"（factor_registry.py:713
+# 的注册名), 不是 "factor.industry_diversification"——后者是 B 方案 round40 误写.
 CRITICAL_FACTOR_CODES: tuple[str, ...] = (
     "etf.premium_discount",     # R146 修复目标
     "style.size.ln_mcap",       # R150 修复目标
@@ -26,7 +28,7 @@ CRITICAL_FACTOR_CODES: tuple[str, ...] = (
     "etf.shares_change",        # R147-FIX 修复目标
     "etf.institutional_holdings_change",  # R147-FIX 关联
     "sentiment.news_heat",      # R149 修复目标
-    "factor.industry_diversification",  # R148 修复目标
+    "etf.industry_diversification",  # R148 修复目标（注意是 etf.* 不是 factor.*）
 )
 
 SCRIPTS_PATH = Path(__file__).resolve().parent.parent / "scripts"
@@ -87,11 +89,11 @@ def test_factor_chain_integrity_passes_when_critical_factors_have_values(monkeyp
             "etf.shares_change": 0.05,
             "etf.institutional_holdings_change": 0.02,
             "sentiment.news_heat": 3.5,
-            "factor.industry_diversification": 0.4,
+            "etf.industry_diversification": 0.4,  # R148 修正 key (factor.* → etf.*)
         },
         "518880": {"etf.premium_discount": 0.001},
         "511090": {"style.size.ln_mcap": 11.0},
-        "512480": {"factor.industry_diversification": 0.5},
+        "512480": {"etf.industry_diversification": 0.5},  # R148 修正
     }
     mod = _load_module()
     mod.PASS = 0
@@ -165,7 +167,7 @@ def test_factor_chain_integrity_partial_break_acceptable(monkeypatch):
             "etf.shares_change": 0.05,
             "etf.institutional_holdings_change": 0.02,
             "sentiment.news_heat": 3.5,
-            "factor.industry_diversification": 0.4,
+            "etf.industry_diversification": 0.4,  # R148 修正
         },
     }
     mod = _load_module()

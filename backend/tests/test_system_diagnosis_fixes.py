@@ -419,10 +419,15 @@ async def test_Z04_tracking_error_uses_benchmark_close():
 
 @pytest.mark.asyncio
 async def test_Z04_shares_change_existing_field():
-    """Verify shares_change reads shares_change_20d when present."""
+    """Verify shares_change reads shares_change_20d when present.
+
+    R147-FIX 收口 (round41): 缺数据时返 None (R85 教训), 不再 0.0 占位 (避免
+    全断链污染有效样本). 原 0.0 断言已删.
+    """
     from app.factors.factor_registry import _compute_shares_change
     assert _compute_shares_change({"shares_change_20d": 0.15}) == 0.15
-    assert _compute_shares_change({}) == 0.0
+    # R147-FIX 修复后: 缺 shares_change_20d 返 None (非 0.0 占位)
+    assert _compute_shares_change({}) is None
 
 
 # ─── Z10: Signal threshold relaxation ──────────────────────────────

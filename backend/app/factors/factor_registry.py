@@ -503,12 +503,16 @@ def _compute_tracking_error(data: dict) -> float:
     return math.sqrt(statistics.mean(diff))
 
 
-def _compute_shares_change(data: dict) -> float:
+def _compute_shares_change(data: dict) -> float | None:
     """规模变化率：(当前份额 - 20日前份额) / 20日前份额。"""
     shares_change = data.get("shares_change_20d")
     if shares_change is not None:
         return float(shares_change)
-    return 0.0
+    # R147-FIX 收口 (round41): 原返回 0.0 占位 → 全断链 (B 方案抓到);
+    # 与 R85 (round30) 教训一致: 缺数据返 None 让 is_meaningful_value 判 zero_ratio=1.0
+    # 但不污染有效样本 (避免 N 个 ETF 同 0.0 → z-score std=0 → ln_mcap 同 bug).
+    # 缺数据走 _data_source_gaps 标注, 不冒充正常值.
+    return None
 
 
 def _compute_institutional_holdings_change(data: dict) -> float:
@@ -1392,6 +1396,35 @@ class FactorRegistry:
                                 "shares_change", "fund_scale"):
                         if key in extra and key not in data[sym]:
                             data[sym][key] = extra[key]
+                    # R150 收口 (round41): Z04 注入 total_mv 字段别名——R150 第一版
+                    # 仅在 _compute_ln_mcap 读 total_mv or fund_scale, 但 fund_scale
+                    # 在生产路径不注入到 data 字典（market_data_hub symbol_extra
+                    # 路径走的是另一条), 实际 fund_scale=0 → ln_mcap 恒 None。
+                    # 此处显式把 fund_scale 桥接到 total_mv (按 R150 round38 约定:
+                    # fund_scale 字段名 = ETF 规模 = "总市值"语义), 让 _compute_ln_mcap
+                    # 的别名读取在两条路径都生效。守卫: total_mv 缺失或为 0 时
+                    # fallback 覆盖 (fetch_one 路径非交易时段写入 0 占位).
+                    if "fund_scale" in extra and not data[sym].get("total_mv"):
+                        data[sym]["total_mv"] = float(extra["fund_scale"] or 0)
+                    # R150 收口 (round41): ln_float_mcap 没有源——流通市值是 ratio,
+                    # 生产数据源没单独提供。fallback 用 fund_scale * 0.85 估算
+                    # (A 股 ETF 平均流通比例约 85%——非完美但比恒 None 强), 仍缺失
+                    # 标 None 让 gap 机制记录 (FS1 is_meaningful_value 自然判定).
+                    # 守卫条件: float_mv 缺失或为 0 (fetch_one 路径在非交易时段会
+                    # 写入 float_mv=0 占位, 需 fallback 覆盖).
+                    if "fund_scale" in extra:
+                        _fs = float(extra["fund_scale"] or 0)
+                        if _fs > 0 and not data[sym].get("float_mv"):
+                            data[sym]["float_mv"] = round(_fs * 0.85, 4)
+                    # R148 收口 (round41): industry_diversification 修复——Z04 注入
+                    # industry 字段但 _compute 读 industry_holdings (dict)。此处把
+                    # industry 单值桥接为 industry_holdings={industry: 1.0}, 让 HHI
+                    # 单行业场景可计算 = 1.0 (单只 ETF = 100% 集中, 语义正确)。
+                    # 守卫: industry_holdings 缺失时注入 (避免覆盖已有真实 holdings).
+                    if "industry" in extra and not data[sym].get("industry_holdings"):
+                        _ind = extra["industry"]
+                        if _ind and _ind != "unknown":
+                            data[sym]["industry_holdings"] = {_ind: 1.0}
 
         # 缓存成功获取的数据，记录 SourceRegistry 成功
         source_h.record_success(route="kline", operation="batch_fetch", target=",".join(symbols[:3]))
