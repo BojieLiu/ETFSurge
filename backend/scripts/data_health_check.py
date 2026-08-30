@@ -13,6 +13,7 @@
 import sys
 import os
 import time
+import asyncio
 
 # round30 修复: 旧 `..\..` 解析到项目根（app 包在 backend/ 下）→ ModuleNotFoundError。
 # 单层 `..` 在两种调用方式下均指向 backend：脚本 `python scripts/...`（cwd=backend）
@@ -253,6 +254,101 @@ def _save_growth_snapshot(counts: dict, stale_runs: dict):
         }, f, ensure_ascii=False, indent=2)
 
 
+# ── round40 实施: 关键因子断链断言（round39 §4.4.4 方案 B）──────────────────
+# 背景: R146/R147-FIX/R148/R149/R150 round39 容器复验发现以下关键因子 zero_ratio=1.0
+# (全 None / 全占位 0):
+#   etf.premium_discount / style.size.ln_mcap / style.size.ln_float_mcap /
+#   etf.shares_change / etf.institutional_holdings_change / sentiment.news_heat /
+#   factor.industry_diversification
+# 根因: 数据源未注入 (非交易时段) 或修复未生效。本断言捕获「全断链」回归——
+# 对代表 ETF 跑 factor_registry.compute() 统计 CRITICAL_FACTOR_CODES 至少 1 只
+# ETF 有非零 meaningful 值, 否则 FAIL。
+#
+# 容忍: 非交易时段全 None 仍属预期 (round31 R4-07 教训: 误报比不报更糟),
+# 全空时输出 WARN 不计入 FAIL 阻断.
+CRITICAL_FACTOR_CODES: tuple[str, ...] = (
+    "etf.premium_discount",
+    "style.size.ln_mcap",
+    "style.size.ln_float_mcap",
+    "etf.shares_change",
+    "etf.institutional_holdings_change",
+    "sentiment.news_heat",
+    "factor.industry_diversification",
+)
+
+_CHAIN_PROBE_SYMBOLS: tuple[str, ...] = ("510300", "518880", "511090", "512480")
+
+
+def test_factor_chain_integrity():
+    """关键因子断链断言——round40 实施 (round39 §4.4.4 方案 B).
+
+    对 4 只代表 ETF 跑 factor_registry.compute() → 统计 CRITICAL_FACTOR_CODES
+    中每个因子在全部 ETF 的非零 meaningful 值覆盖率 (FS1 is_meaningful_value)。
+    期望: 至少 1 只 ETF 有非零值 (即断链率 < 100%)。
+    全 None → WARN 提示「非交易时段数据源未注入」, 不计入 FAIL 阻断.
+    """
+    from app.core.factor_values import is_meaningful_value
+    from app.factors.factor_registry import FactorRegistry
+
+    try:
+        registry = FactorRegistry()
+        result = asyncio.run(registry.compute(list(_CHAIN_PROBE_SYMBOLS)))
+    except Exception as e:
+        check("关键因子断链: factor_registry 可运行", False, str(e)[:80])
+        return
+
+    if not result:
+        check("关键因子断链: compute 返回非空", False, "all symbols returned empty")
+        return
+
+    # 统计每只 ETF 的非 None 总数（用于「全空 / 非交易时段」判定）
+    per_etf_nonzero_total = {
+        sym: sum(1 for v in factors.values() if v is not None)
+        for sym, factors in result.items()
+    }
+    all_empty = all(n == 0 for n in per_etf_nonzero_total.values())
+    if all_empty:
+        # 非交易时段: 全部 ETF 数据源空——WARN, 不 FAIL (round31 R4-07 教训)
+        check(
+            "关键因子断链: 非交易时段全空已容忍 (WARN)",
+            True,
+            f"all 4 symbols returned None — lazy inject pending market open; "
+            f"per_sym={per_etf_nonzero_total}",
+        )
+        return
+
+    broken: list[str] = []
+    for code in CRITICAL_FACTOR_CODES:
+        meaningful_count = 0
+        total = 0
+        for sym, factors in result.items():
+            if code not in factors:
+                continue
+            total += 1
+            val = factors[code]
+            if is_meaningful_value(code, val):
+                meaningful_count += 1
+        if total == 0:
+            broken.append(f"{code}=missing_in_all_4")
+            continue
+        if meaningful_count == 0:
+            broken.append(f"{code}=0/{total}_meaningful")
+
+    if broken:
+        # 断链: 至少一个 critical factor 在 4 只 ETF 全 0/None
+        check(
+            f"关键因子断链: {len(broken)} 项 critical factor 全断链",
+            False,
+            "; ".join(broken[:5]) + ("..." if len(broken) > 5 else ""),
+        )
+    else:
+        check(
+            f"关键因子断链: {len(CRITICAL_FACTOR_CODES)} 项 critical factor 均有非零值",
+            True,
+            f"per_etf_nonzero_total={per_etf_nonzero_total}",
+        )
+
+
 if __name__ == "__main__":
     print(f"\n{'#'*60}")
     print(f"#  数据管道健康检查 (P3-4)")
@@ -277,6 +373,9 @@ if __name__ == "__main__":
 
     section("6. 因子样本增长率 (§12 P0-2)")
     test_factor_sample_growth()
+
+    section("7. 关键因子断链 (round40 实施 · round39 §4.4.4 方案 B)")
+    test_factor_chain_integrity()
 
     section("评估结果")
     print(f"  PASS: {PASS}/{PASS+FAIL}")

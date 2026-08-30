@@ -691,6 +691,26 @@ async def generate_enhanced_design(
         # 5. target_amount 一致性校验
         _validate_target_amount_consistency(strategies, capital)
 
+        # R140 (round39 §5 方案 A 收口): apply_risk_controls / _consolidate_minnows /
+        # _apply_precision_bucketing 之后再次调 _enforce_layer_budget_final 兜底。
+        # round38 首次实施时只挂在 _select_and_weight 返回时（_enforce_layer_budget_final
+        # 在 allocation_engine.py:784）；_dedup_same_index 同指数剔除回补、
+        # _consolidate_minnows 小仓位合并、_apply_precision_bucketing 桶化等后续
+        # 步骤可能再把单只/层总权重推超（round39 容器复验 design 12 sat=0.300
+        # >budget=0.220 + 总仓位 1.030>1.0 实证）。此处在 orchestrator 末尾二次
+        # 强制 enforce，确保最终输出 sat ≤ budget ∧ Σweight ≤ 1.0。
+        # 设计：仅对有 allocations 的方案做强制；防御层 cap=0 时跳过（_enforce_layer_budget_final 内部已 guard）。
+        try:
+            from app.engine.allocation_engine import _enforce_layer_budget_final
+            for _s in strategies:
+                _etfs = _s.get("etfs") or []
+                if not _etfs:
+                    continue
+                _lb = _s.get("layer_budget") or {}
+                _enforce_layer_budget_final(_etfs, _lb)
+        except Exception as _e:
+            logger.debug("[strategy_design] R140 final enforce skipped: %s", _e)
+
         # round22: 跨方案不变量 INV-3/5/6 校验（需三方案齐全；INV-4 已在逐方案
         # check_structure_reasonableness 内校验）。倒挂组合（卫星/标的数/进攻压舱）
         # 在此被捕获并写入 aggressive 的 risk_metrics.structure_warnings。

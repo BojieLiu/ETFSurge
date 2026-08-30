@@ -208,6 +208,18 @@ def get_configured_providers() -> list[ProviderConfig]:
         logger.info("[provider] Fallback provider 'deepseek' skipped "
                     "(DEEPSEEK_API_KEY not configured)")
 
+    # R160 (round39 §5 方案 B): call-site 守卫前置——所有 provider 在挂载前统一
+    # 查 model_catalog.is_excluded() 兜底。Zen / OpenRouter 在 catalog 池刷新时
+    # 已过滤（model_catalog._filter_zen/_filter_openrouter），b_ai 在 _b_ai_candidates
+    # 内部过滤（line 117），但 deepseek 官方直挂 + 未来新增 provider 容易漏掉——
+    # 此处一次性兜底：任何 mark_excluded 命中的 (provider, model) 都不挂载，
+    # 真正排除生效。实施前 round39 复验发现 deepseek-v4-flash-free 已 mark
+    # excluded 但仍累计 22037 calls（catalog 过滤与 is_excluded 状态没联动）。
+    from .llm.model_catalog import model_catalog as _catalog_guard
+    providers = [
+        p for p in providers
+        if not _catalog_guard.is_excluded(p.id, p.model)
+    ]
     return providers
 
 
