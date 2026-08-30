@@ -71,6 +71,17 @@ That resilience work is most of this repo — not because it's glamorous, but be
 - **Runtime config editor** — change API keys in the UI without a restart (DB overrides on top of `.env`).
 - **Warmup status** endpoint and health probes on every data source every 120s.
 
+### Agentic layer (v7 upgrade)
+
+The LLM module is upgraded from "single prompt → report" to a production agent stack:
+
+- **MCP tool layer** — 4 stdio MCP servers (`quote` / `factor` / `portfolio` / `news`) wrap the real production chains (multi-source failover, 53-factor pure-function engine, async strategy-check pipeline, news buckets). Every tool output carries a traceable envelope `{data, as_of, source, degraded}`; failures degrade honestly instead of fabricating data. Callable from any MCP host (`python -m app.mcp_servers.quote_server`) or in-process by the agent loop.
+- **Plan-and-Execute loop with guardrails** — step budget (10, truncation → partial results), tiered time budgets sourced from one module (strategy check 90s / design report 120s), loop detection (same tool + same args twice → terminate), tool whitelist (PermissionError on unregistered tools), write-confirmation gate (order/trade actions require explicit confirm), and output schema validation (every step output must carry a `source` — numbers must be traceable).
+- **Evals with CI gates** — golden sets in 5 categories (quotes / factors / format compliance / refusal anti-hallucination / multi-step). Blocking gates: overall ≥95%, refusal zero-hallucination 100%, format 100%. `python -m scripts.evals.ci_gate`.
+- **Trace + cost accounting** — every run lands a structured trace (JSONL + SQLite `agentic_runs` with per-run cost); model price table with a $0.5 per-run budget circuit-breaker (`agentic_budget_exceeded` warning).
+
+> STAR one-liner: "I hardened a live portfolio system's LLM module into a production agent stack — MCP tool layer over real failover chains, a guardrailed Plan-and-Execute loop where every number is source-traceable, golden-set evals gating CI at 95%+, and per-run cost tracing."
+
 ---
 
 ## Architecture
@@ -94,6 +105,23 @@ That resilience work is most of this repo — not because it's glamorous, but be
  │ task_manager · design_pipeline (quick_ready)   │
  │ strategy_check_worker · design_report          │
  │ news_refresh · sector_refresh                  │
+ └───────────────┬───────────────────────────────┘
+                 │
+ ┌───────────────▼───────────────────────────────┐
+ │ agentic/ (v7 upgrade · Plan-and-Execute)       │
+ │ AgentLoop (step/time budgets · write-confirm   │
+ │   gate · output schema validation)             │
+ │ Executor (tool whitelist · loop detection)     │
+ │ trace_store (JSONL + SQLite cost rows)         │
+ │ cost (model price table · $0.5 run budget)     │
+ └───────────────┬───────────────────────────────┘
+                 │ in-process MCP handlers
+ ┌───────────────▼───────────────────────────────┐
+ │ mcp_servers/ (4 stdio servers · MCP SDK 1.x)   │
+ │ quote (realtime/bars) · factor (snapshot)      │
+ │ portfolio (strategy_check 2-phase)             │
+ │ news (financial search)                        │
+ │ every envelope: {data, as_of, source, degraded}│
  └───────────────┬───────────────────────────────┘
                  │
  ┌───────────────▼───────────────────────────────┐
