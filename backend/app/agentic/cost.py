@@ -8,9 +8,9 @@
 （宁可高估不低估——预算熔断宁严勿松）。
 
 告警阈值（§6.5）：
-- 单 run > $0.5      -> WARNING + agentic_budget_exceeded
-- 日累计 > $5        -> ERROR
-- 月累计 > $50       -> CRITICAL（P2 面板接 admin；本模块先提供查询函数）
+- 单 run > $0.5      -> WARNING + agentic_budget_exceeded（RUN_BUDGET_USD）
+- 日累计 > $5 / 月累计 > $50 -> P2 admin 面板实施时落 DAILY_/MONTHLY_ 常量
+  （本模块暂只做单 run 口径——无消费点的常量会被 P3-1 未引用审计拦）
 """
 from __future__ import annotations
 
@@ -27,8 +27,6 @@ MODEL_PRICES: dict[str, tuple[float, float]] = {
 _DEFAULT_PRICE = MODEL_PRICES["deepseek-chat"]  # 未登记模型兜底（宁高估勿低估）
 
 RUN_BUDGET_USD = 0.5
-DAILY_BUDGET_USD = 5.0
-MONTHLY_BUDGET_USD = 50.0
 
 
 def model_price(model: str) -> tuple[float, float]:
