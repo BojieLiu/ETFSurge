@@ -47,7 +47,7 @@ def fetch_share_change_20d(symbol: str, today: date | None = None) -> dict | Non
     if cached and (time.time() - cached[0]) < _TTL:
         return cached[1]
 
-    as_of = today or (date.today() - timedelta(days=1))
+    as_of = today or _last_trading_day_hint()
     try:
         if _is_sse(symbol):
             data = _fetch_sse_change(symbol, as_of)
@@ -58,6 +58,25 @@ def fetch_share_change_20d(symbol: str, today: date | None = None) -> dict | Non
 
     _cache[symbol] = (time.time(), data)
     return data
+
+
+def _last_trading_day_hint() -> date:
+    """默认 as_of 回退到最近交易日（周末向前找）。
+
+    原 `date.today() - timedelta(days=1)` 在周一执行时落到上周日
+    （非交易日）→ 交易所接口无该日数据 → shares_change 恒 None，是
+    R147-FIX 交易时段复测 0/4 的根因之一。周内语义：周一用当天、
+    周二~五用前一天、周六日用上周五（精确节假日需 market_calendar，
+    此为免费接口足够的最小回退）。
+    """
+    d = date.today()
+    if d.weekday() == 0:   # Mon -> 当天（周一开盘有当日数据）
+        return d
+    if d.weekday() == 5:   # Sat -> 上周五
+        return d - timedelta(days=1)
+    if d.weekday() == 6:   # Sun -> 上周五
+        return d - timedelta(days=2)
+    return d - timedelta(days=1)  # Tue-Fri -> 前一天
 
 
 def _fetch_sse_change(symbol: str, as_of: date) -> dict | None:
