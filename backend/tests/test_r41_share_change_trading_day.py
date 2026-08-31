@@ -38,11 +38,13 @@ def test_saturday_dates_shift_to_friday():
     assert d - __import__("datetime").timedelta(days=1) == date(2026, 8, 28)
 
 
-def test_monday_uses_today():
-    """周一（开盘日）-> 用当天，不回退到上周日（原 bug 根因）。"""
+def test_monday_uses_last_friday():
+    """周一 -> 上周五（份额数据 T+1，查当天为空，需回退到已发布日）。"""
     d = date(2026, 8, 31)
     assert d.weekday() == 0
-    # 语义：_last_trading_day_hint 周一返回当天（不回退）
+    # 语义：_last_trading_day_hint 周一返回上周五（T+1 边界）
+    # 实例验证（2026-8-31 周一，上周五 8-28 有 898 条 SSE 数据）
+    assert d - __import__("datetime").timedelta(days=3) == date(2026, 8, 28)
 
 
 def test_as_of_call_uses_hint():

@@ -61,17 +61,18 @@ def fetch_share_change_20d(symbol: str, today: date | None = None) -> dict | Non
 
 
 def _last_trading_day_hint() -> date:
-    """默认 as_of 回退到最近交易日（周末向前找）。
+    """默认 as_of 回退到最近有份额数据的交易日。
 
-    原 `date.today() - timedelta(days=1)` 在周一执行时落到上周日
-    （非交易日）→ 交易所接口无该日数据 → shares_change 恒 None，是
-    R147-FIX 交易时段复测 0/4 的根因之一。周内语义：周一用当天、
-    周二~五用前一天、周六日用上周五（精确节假日需 market_calendar，
-    此为免费接口足够的最小回退）。
+    上交所份额接口（fund_etf_scale_sse）数据 T+1 才可用——盘中查当天
+    （如周一查 20260831）返回空 result（实测 0 条），查 T-1（上周五
+    20260828）返回 898 条。故 as_of 需比"今天减一"再往前到最近
+    已发布份额交易日。周内语义：周一用上周五（T+1 边界）、周二~五用
+    前一天、周六日用上周五（精确节假日需 market_calendar，此为免费
+    接口足够的最小回退）。
     """
     d = date.today()
-    if d.weekday() == 0:   # Mon -> 当天（周一开盘有当日数据）
-        return d
+    if d.weekday() == 0:   # Mon -> 上周五（份额数据 T+1，查当天为空）
+        return d - timedelta(days=3)
     if d.weekday() == 5:   # Sat -> 上周五
         return d - timedelta(days=1)
     if d.weekday() == 6:   # Sun -> 上周五
