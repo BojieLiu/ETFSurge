@@ -33,7 +33,12 @@ def get_last_llm_error() -> str | None:
 
 
 def _record_llm_error(exc: BaseException) -> None:
-    """R5-1-6: 记录 provider 失败诊断，429 → [rate-limited]，连接超时 → [timeout]。"""
+    """R5-1-6: 记录 provider 失败诊断，429 → [rate-limited]，连接超时 → [timeout]。
+
+    round51 方案 D (R164/R167): ProviderEnvelopeError → [envelope] 前缀——
+    openrouter 200+error-body 形态此前落 else 只留 str(exc)，下游分类
+    （reports.py）无法区分「网关信封错误」与「超时」。
+    """
     global _last_llm_error
     try:
         status = getattr(getattr(exc, "response", None), "status_code", None)
@@ -43,6 +48,8 @@ def _record_llm_error(exc: BaseException) -> None:
             _last_llm_error = "[timeout] connection timed out"
         elif "timed out" in str(exc).lower() or "timeout" in str(exc).lower():
             _last_llm_error = f"[timeout] {exc}"
+        elif type(exc).__name__ == "ProviderEnvelopeError" or "[envelope]" in str(exc):
+            _last_llm_error = str(exc) or "[envelope] provider error envelope"
         else:
             _last_llm_error = str(exc) or type(exc).__name__
     except Exception:

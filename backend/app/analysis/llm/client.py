@@ -64,6 +64,21 @@ def _shared_ssl_context() -> ssl.SSLContext:
     return _SSL_CONTEXT
 
 
+# ── round51 方案 D (R167): openrouter error-envelope 结构化错误 ──────────────
+# openrouter 部分失败形态返 HTTP 200 + {"error": {...}} 信封（无 choices）。
+# 旧实现 data["choices"] 直取 → KeyError 被外层 except Exception 吞为 WARNING
+# （日志仅 "failed after 2.8s: 'choices'"），且下游失败分类（reports.py）将其
+# 伪装成「LLM 分析超时」。前置检查把 envelope 转为结构化异常进正常失败链：
+# 熔断计数 / usage 记录 / gates 诊断（[envelope] 前缀供分类）。
+class ProviderEnvelopeError(RuntimeError):
+    """Provider 返回 200-with-error-envelope（OpenAI shape 缺 choices）。"""
+
+
+def _is_error_envelope(data: object) -> bool:
+    """200 响应体为 error 信封判定: dict 且有 'error' 键且无 'choices' 键。"""
+    return isinstance(data, dict) and "error" in data and "choices" not in data
+
+
 async def llm_complete(
     prompt: str,
     response_format: dict | None = None,
@@ -124,6 +139,19 @@ async def llm_complete(
                     )
                     resp.raise_for_status()
                     data = resp.json()
+                    # R167 (round51 方案 D): 200+error-envelope → 结构化错误
+                    # （进正常失败链: 熔断计数 + usage 记录 + gates 诊断），
+                    # 不再让 KeyError('choices') 被外层吞为无上下文 WARNING。
+                    if _is_error_envelope(data):
+                        _err = data.get("error") or {}
+                        _msg = (_err.get("message") if isinstance(_err, dict)
+                                else str(_err)) or "unknown error"
+                        _code = (_err.get("code") if isinstance(_err, dict)
+                                 else None)
+                        _code_s = f" (code={_code})" if _code is not None else ""
+                        raise ProviderEnvelopeError(
+                            f"[envelope] {provider.id}/{provider.model}: "
+                            f"{_msg}{_code_s}")
                     message = data["choices"][0]["message"]
                     content = message.get("content", "")
                     # F1-7: 推理模型可能把 system prompt 复述进 content/reasoning，
@@ -533,6 +561,17 @@ async def llm_complete_with_system(
                     )
                     resp.raise_for_status()
                     data = resp.json()
+                    # R167: 200+error-envelope → 结构化错误（进正常失败链）
+                    if _is_error_envelope(data):
+                        _err = data.get("error") or {}
+                        _msg = (_err.get("message") if isinstance(_err, dict)
+                                else str(_err)) or "unknown error"
+                        _code = (_err.get("code") if isinstance(_err, dict)
+                                 else None)
+                        _code_s = f" (code={_code})" if _code is not None else ""
+                        raise ProviderEnvelopeError(
+                            f"[envelope] {provider.id}/{provider.model}: "
+                            f"{_msg}{_code_s}")
                     message = data["choices"][0]["message"]
                     content = message.get("content", "")
                     # F1-7: 推理模型可能把 system prompt 复述进 content/reasoning，

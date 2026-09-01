@@ -20,9 +20,11 @@ GOLDEN_DIR = Path(__file__).resolve().parents[1] / "scripts" / "evals" / "golden
 
 
 class TestLoadGoldens:
-    def test_loads_10_demo_cases(self):
+    def test_loads_50_cases(self):
+        # round51 方案 F (R168): 金标补量 15 -> 50（v7 §5.5 P1 目标 50 条）。
+        # 原 P0 断言 10 条在 20caa57（quotes 5 条）后已 stale（pre-existing fail）。
         cases = load_goldens(GOLDEN_DIR)
-        assert len(cases) == 10, f"P0 demo 金标应 10 条: {len(cases)}"
+        assert len(cases) == 50, f"P1 金标应 50 条: {len(cases)}"
 
     def test_five_types_covered(self):
         cases = load_goldens(GOLDEN_DIR)

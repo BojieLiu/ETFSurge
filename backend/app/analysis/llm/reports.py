@@ -21,6 +21,26 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
+def _classify_llm_failure_cause(last_err_lower: str, duration_s: float) -> str:
+    """LLM 失败原因分类（round51 方案 D / R164 收敛点，原 reports.py:646-651 内联）。
+
+    输入为 get_last_llm_error() 的小写文本。分支顺序即优先级：
+    1. envelope —— openrouter 200+error-body（gates 记 [envelope] 前缀）；
+       旧实现 KeyError('choices') 落 else 被伪装成「超时」（strategy_check 62 实证）。
+    2. 429/quota —— 配额限流（R70 原分支）。
+    3. json/parse —— 解析失败（R70 原分支）。
+    4. else —— 保守归「超时」（R70 原行为，仅在无其它证据时）。
+    """
+    _low = last_err_lower or ""
+    if "[envelope]" in _low or "error envelope" in _low:
+        return (f"LLM 网关返回错误信封（{duration_s:.0f}s，已用规则引擎兜底）")
+    if "429" in _low or "rate-limited" in _low or "quota" in _low:
+        return f"LLM 分析配额耗尽（429 限流，{duration_s:.0f}s 未完成，已用规则引擎兜底）"
+    if "json" in _low or "expecting value" in _low or "parse" in _low:
+        return f"LLM 分析结果解析失败（{duration_s:.0f}s，已用规则引擎兜底）"
+    return f"LLM 分析超时（{duration_s:.0f}s 未返回，已用规则引擎兜底）"
+
+
 def _build_engine_fallback(strategies: list[dict], regime: str = "unknown") -> str:
     """Generate a meaningful engine-based fallback report when LLM is unavailable.
 
@@ -642,13 +662,11 @@ async def generate_strategy_check_report(
         # R70 (round29): 诚实降级文案——旧实现统一「LLM 分析超时」掩盖真实原因
         # （429 配额耗尽 / JSONDecodeError），专业投资者误以为只是慢。按最后错误
         # 诊断区分三类原因，配额/解析失败不再伪装成「超时」。
+        # round51 方案 D (R164): 分类逻辑抽 _classify_llm_failure_cause 并新增
+        # envelope 分支——openrouter 200+error-body（R167）此前 KeyError 落 else
+        # 被伪装成「超时」，strategy_check 62 实证文案失真。
         _low = (_last_err or "").lower() if _last_err else ""
-        if "429" in _low or "rate-limited" in _low or "quota" in _low:
-            _cause = f"LLM 分析配额耗尽（429 限流，{duration_s:.0f}s 未完成，已用规则引擎兜底）"
-        elif "json" in _low or "expecting value" in _low or "parse" in _low:
-            _cause = f"LLM 分析结果解析失败（{duration_s:.0f}s，已用规则引擎兜底）"
-        else:
-            _cause = f"LLM 分析超时（{duration_s:.0f}s 未返回，已用规则引擎兜底）"
+        _cause = _classify_llm_failure_cause(_low, duration_s)
         return {
             "summary": _cause + _diag,
             "suggestions": [],

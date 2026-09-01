@@ -71,12 +71,47 @@ def _check_design(design: dict) -> list[str]:
                     f"Σ={total:.4f} > budget={budget:.4f} (tol={TOLERANCE})"
                 )
 
-        # 总仓位校验
+        # 总仓位校验 (仅 non_cash)
         if non_cash_total > 1.0 + TOLERANCE:
             violations.append(
                 f"design {design.get('id')} {sid} "
                 f"Σnon_cash={non_cash_total:.4f} > 1.0 (tol={TOLERANCE})"
             )
+
+        # round51 方案 A (R162/R163): 一致性/完整性断言——R140 enforce 缩放后
+        # cash 行不回补 (R162 悬空) / target_amount 未随缩放重算 (R163 脱节)
+        # 都是「上限方向」断言抓不到的形态 (design15 balanced total=0.95 实证)。
+        capital = float(s.get("capital", 0) or 0)
+        cash_rows = [a for a in etfs if a.get("symbol") == "CASH"]
+        if cash_rows:
+            cash_w = float(cash_rows[0].get("weight", 0) or 0)
+            expected_cash = 1.0 - non_cash_total
+            # ① cash 一致性: |cash_row − (1−Σnon_cash)| ≤ 0.005 (R162)
+            if abs(cash_w - expected_cash) > 0.005:
+                violations.append(
+                    f"design {design.get('id')} {sid} "
+                    f"cash={cash_w:.4f} != 1−Σnon_cash={expected_cash:.4f} "
+                    f"(gap={abs(cash_w - expected_cash):.4f}, tol=0.005)"
+                )
+            # ③ Σtotal(含 cash) ≤ 1.0 + tol (R162 另一侧: cash 不允许溢出)
+            if non_cash_total + cash_w > 1.0 + TOLERANCE:
+                violations.append(
+                    f"design {design.get('id')} {sid} "
+                    f"Σtotal={non_cash_total + cash_w:.4f} > 1.0 (tol={TOLERANCE})"
+                )
+        # ② target_amount 同步: |target_amount − capital×weight| ≤ 1 (R163)
+        if capital > 0:
+            for a in etfs:
+                w = a.get("weight", 0)
+                ta = a.get("target_amount")
+                if ta is None or not isinstance(w, (int, float)):
+                    continue
+                if abs(float(ta) - capital * float(w)) > 1.0:
+                    violations.append(
+                        f"design {design.get('id')} {sid}/{a.get('symbol')} "
+                        f"target_amount={float(ta):.0f} != capital×weight="
+                        f"{capital * float(w):.0f} (weight={float(w):.4f})"
+                    )
 
     return violations
 

@@ -422,7 +422,16 @@ async def get_active_factors(db: AsyncSession = Depends(get_db)) -> JSONResponse
         # 1.0 = 全部样本为 0 → 数据源未接入；区分「数据缺失」与「IC 无效」）
         # F27: zero_ratio 实际挂在 ic_tracker 实例上（ic_tracker.py:179），
         # 旧代码误读 registry → 恒 {}，使「区分数据缺失 vs IC 无效」能力永久失效。
+        # R166 (round51 方案 E): 显式声明口径——zero_ratio 为「IC 计算批次内
+        # 非有意义值占比」（样本=IC 窗口内交易日），**不是**当前因子矩阵零值
+        # 占比，两者不可互替。round39 诊断轮因缺口径标注把它当矩阵口径使用，
+        # 导致 R146/R149 误判（news_heat 实际已生效却被判断链）。
         "zero_ratio": getattr(_ic_tracker, "_zero_ratio", {}) or {},
+        "zero_ratio_scope": "ic_batch",
+        "zero_ratio_note": (
+            "ic_batch = 参与 IC 计算批次的样本口径, 非当前因子矩阵零值占比; "
+            "矩阵口径请直接抽样 factor_registry.compute() 输出, 两口径不可互替"
+        ),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     etag = f"\"{hash(str(body))}\""

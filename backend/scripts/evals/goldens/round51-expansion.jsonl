@@ -1,0 +1,46 @@
+// round51 方案 F (R168): 金标集阶段化补量 15 -> 50（v7 §5.5 P1 目标）。
+// 每条形态均经 2026-08-31 盘后单轮探针验证（probe1/probe2，会话级临时目录）：
+// - quote 题仅用 present 存在性断言（行情值随盘波动不进金标）；data[0].price
+//   只用于探针实证过非空的标的；未验证标的只断 data present（空列表也算信封完整）。
+// - refusal 题必须 100% pass（ci_gate 阻断项），只收 kline_cache 诚实降级 /
+//   未知工具 / 缺失任务三类已验证形态。
+// - format 题四字段信封（data/as_of/source/degraded），工具形态全部探针验证。
+// - factor 题 field_path 只到 data（data 为 {symbol: {...}} dict，scorer 的
+//   [n] 索引仅支持 list，无法穿透 dict 键——码值断言留 P2 approx 扩展）。
+// - strategy_check 提交在 harness 直调下报 unknown task type（工具域 bug），
+//   不收金标（R168 遗留登记）。
+{"id": "r51-q01", "type": "quote", "question": "510300 沪深300ETF price 存在（盘后快照）", "tool": "get_realtime_quote", "arguments": {"symbols": ["510300"]}, "expect": {"field_path": "data[0].price", "op": "present"}, "notes": "probe1 2026-08-31: data=list[3] degraded=false"}
+{"id": "r51-q02", "type": "quote", "question": "512890 红利低波ETF price 存在", "tool": "get_realtime_quote", "arguments": {"symbols": ["512890"]}, "expect": {"field_path": "data[0].price", "op": "present"}, "notes": "probe1: data=list[3]"}
+{"id": "r51-q03", "type": "quote", "question": "518880 黄金ETF price 存在", "tool": "get_realtime_quote", "arguments": {"symbols": ["518880"]}, "expect": {"field_path": "data[0].price", "op": "present"}, "notes": "probe1: data=list[3]"}
+{"id": "r51-q04", "type": "quote", "question": "00700 腾讯控股 HK 快照 price 存在", "tool": "get_realtime_quote", "arguments": {"symbols": ["00700"], "asset_type": "HK"}, "expect": {"field_path": "data[0].price", "op": "present"}, "notes": "probe1: HK data=list[1] degraded=false"}
+{"id": "r51-q05", "type": "quote", "question": "00700 HK 信封 data 存在", "tool": "get_realtime_quote", "arguments": {"symbols": ["00700"], "asset_type": "HK"}, "expect": {"field_path": "data", "op": "present"}, "notes": "probe1"}
+{"id": "r51-q06", "type": "quote", "question": "SPY US 快照信封完整（盘后美股休市可能空列表，断信封非空值）", "tool": "get_realtime_quote", "arguments": {"symbols": ["SPY"], "asset_type": "US"}, "expect": {"field_path": "data", "op": "present"}, "notes": "probe2: data=list[0] degraded=false（空列表也 pass——诚实空）"}
+{"id": "r51-q07", "type": "quote", "question": "三标的批量快照 data 存在", "tool": "get_realtime_quote", "arguments": {"symbols": ["510300", "511090", "518880"]}, "expect": {"field_path": "data", "op": "present"}, "notes": "probe1: 批量 data=list[3]"}
+{"id": "r51-q08", "type": "quote", "question": "511090 可转债ETF 信封 data 存在", "tool": "get_realtime_quote", "arguments": {"symbols": ["511090"]}, "expect": {"field_path": "data", "op": "present"}, "notes": ""}
+{"id": "r51-q09", "type": "quote", "question": "512480 半导体ETF 信封 data 存在", "tool": "get_realtime_quote", "arguments": {"symbols": ["512480"]}, "expect": {"field_path": "data", "op": "present"}, "notes": ""}
+{"id": "r51-q10", "type": "quote", "question": "513100 纳指ETF 信封 data 存在", "tool": "get_realtime_quote", "arguments": {"symbols": ["513100"]}, "expect": {"field_path": "data", "op": "present"}, "notes": ""}
+{"id": "r51-q11", "type": "quote", "question": "159915 创业板ETF 信封 data 存在", "tool": "get_realtime_quote", "arguments": {"symbols": ["159915"]}, "expect": {"field_path": "data", "op": "present"}, "notes": ""}
+{"id": "r51-q12", "type": "quote", "question": "510500 中证500ETF 信封 data 存在", "tool": "get_realtime_quote", "arguments": {"symbols": ["510500"]}, "expect": {"field_path": "data", "op": "present"}, "notes": ""}
+{"id": "r51-f01", "type": "format", "question": "K 线 510300 信封四字段（盘后无缓存 degraded=true 也须四字段齐）", "tool": "get_history_bars", "arguments": {"symbol": "510300"}, "expect": {"fields": ["data", "as_of", "source", "degraded"]}, "notes": "probe1: data=None degraded=true source=kline_cache"}
+{"id": "r51-f02", "type": "format", "question": "K 线 512890 信封四字段", "tool": "get_history_bars", "arguments": {"symbol": "512890"}, "expect": {"fields": ["data", "as_of", "source", "degraded"]}, "notes": ""}
+{"id": "r51-f03", "type": "format", "question": "因子快照批量信封四字段", "tool": "get_factor_snapshot", "arguments": {"symbols": ["510300", "512890"]}, "expect": {"fields": ["data", "as_of", "source", "degraded"]}, "notes": "probe1: dict 形态 + missing_symbols 附加键"}
+{"id": "r51-f04", "type": "format", "question": "资讯 macro 桶信封四字段", "tool": "search_financial_news", "arguments": {"bucket": "macro", "limit": 2}, "expect": {"fields": ["data", "as_of", "source", "degraded"]}, "notes": "probe2: data=list[2]"}
+{"id": "r51-f05", "type": "format", "question": "资讯 global 桶信封四字段", "tool": "search_financial_news", "arguments": {"bucket": "global", "limit": 2}, "expect": {"fields": ["data", "as_of", "source", "degraded"]}, "notes": "probe2: data=list[2]"}
+{"id": "r51-f06", "type": "format", "question": "HK 行情信封四字段", "tool": "get_realtime_quote", "arguments": {"symbols": ["00700"], "asset_type": "HK"}, "expect": {"fields": ["data", "as_of", "source", "degraded"]}, "notes": "probe1"}
+{"id": "r51-f07", "type": "format", "question": "US 行情信封四字段", "tool": "get_realtime_quote", "arguments": {"symbols": ["SPY"], "asset_type": "US"}, "expect": {"fields": ["data", "as_of", "source", "degraded"]}, "notes": "probe2"}
+{"id": "r51-f08", "type": "format", "question": "codes 过滤因子快照信封四字段", "tool": "get_factor_snapshot", "arguments": {"symbols": ["510300"], "codes": ["etf.premium_discount", "sentiment.news_heat"]}, "expect": {"fields": ["data", "as_of", "source", "degraded"]}, "notes": "probe2 补验: data={'510300': {...}} 盘后有真值 premium_discount=-0.0014"}
+{"id": "r51-f09", "type": "format", "question": "max_age 放宽 K 线信封四字段", "tool": "get_history_bars", "arguments": {"symbol": "510300", "max_age": 99999}, "expect": {"fields": ["data", "as_of", "source", "degraded"]}, "notes": "probe2: data=list[500] degraded=false"}
+{"id": "r51-r01", "type": "refusal", "question": "无效代码 000000 K 线诚实降级", "tool": "get_history_bars", "arguments": {"symbol": "000000"}, "expect": {"must_refuse": true}, "notes": "与 demo r001 同构: kline_cache 查无 data=None + degraded=true 不编造"}
+{"id": "r51-r02", "type": "refusal", "question": "非数字代码 ABCDEF K 线诚实降级", "tool": "get_history_bars", "arguments": {"symbol": "ABCDEF"}, "expect": {"must_refuse": true}, "notes": ""}
+{"id": "r51-r03", "type": "refusal", "question": "未知工具 no_such_tool_v2 护栏拒绝", "tool": "no_such_tool_v2", "arguments": {}, "expect": {"must_refuse": true}, "notes": "与 demo r002 同构: 白名单外 error 信封 degraded=true"}
+{"id": "r51-r04", "type": "refusal", "question": "不存在任务 99999999 轮询诚实降级", "tool": "task_status", "arguments": {"task_id": 99999999}, "expect": {"must_refuse": true}, "notes": "probe2: data=None degraded=true source=task_manager error=None"}
+{"id": "r51-r05", "type": "refusal", "question": "负数 task_id 轮询诚实降级", "tool": "task_status", "arguments": {"task_id": -1}, "expect": {"must_refuse": true}, "notes": "与 r04 同构"}
+{"id": "r51-r06", "type": "refusal", "question": "无效代码 999998 K 线诚实降级", "tool": "get_history_bars", "arguments": {"symbol": "999998"}, "expect": {"must_refuse": true}, "notes": "与 demo r001 同构"}
+{"id": "r51-m01", "type": "multi_step", "question": "行情->因子 两步拆分（510300）", "steps": [{"tool": "get_realtime_quote", "arguments": {"symbols": ["510300"]}, "reason": "拉快照"}, {"tool": "get_factor_snapshot", "arguments": {"symbols": ["510300"]}, "reason": "拉因子"}], "expect": {"min_steps": 2}, "profile": "strategy_check", "notes": ""}
+{"id": "r51-m02", "type": "multi_step", "question": "资讯->行情 两步拆分", "steps": [{"tool": "search_financial_news", "arguments": {"limit": 2}, "reason": "拉资讯"}, {"tool": "get_realtime_quote", "arguments": {"symbols": ["510300"]}, "reason": "拉快照"}], "expect": {"min_steps": 2}, "profile": "strategy_check", "notes": ""}
+{"id": "r51-m03", "type": "multi_step", "question": "HK 行情->HK K线 两步拆分", "steps": [{"tool": "get_realtime_quote", "arguments": {"symbols": ["00700"], "asset_type": "HK"}, "reason": "HK 快照"}, {"tool": "get_history_bars", "arguments": {"symbol": "00700"}, "reason": "HK 历史"}], "expect": {"min_steps": 2}, "profile": "strategy_check", "notes": "history 步盘后可能 degraded（诚实标注不阻断，无 error 即 pass）"}
+{"id": "r51-fs01", "type": "factor", "question": "510300 因子快照 data 存在（盘后实证 53 维注册表可算）", "tool": "get_factor_snapshot", "arguments": {"symbols": ["510300"]}, "expect": {"field_path": "data", "op": "present"}, "notes": "probe1: data=dict degraded=false source=factor_registry"}
+{"id": "r51-fs02", "type": "factor", "question": "512890 因子快照 data 存在", "tool": "get_factor_snapshot", "arguments": {"symbols": ["512890"]}, "expect": {"field_path": "data", "op": "present"}, "notes": ""}
+{"id": "r51-fs03", "type": "factor", "question": "518880 因子快照 data 存在", "tool": "get_factor_snapshot", "arguments": {"symbols": ["518880"]}, "expect": {"field_path": "data", "op": "present"}, "notes": ""}
+{"id": "r51-fs04", "type": "factor", "question": "codes 过滤因子快照 data 存在", "tool": "get_factor_snapshot", "arguments": {"symbols": ["510300"], "codes": ["etf.premium_discount", "sentiment.news_heat"]}, "expect": {"field_path": "data", "op": "present"}, "notes": "probe2 补验: premium_discount=-0.0014 news_heat=12.0（R146 盘后有真值佐证）"}
+{"id": "r51-fs05", "type": "factor", "question": "批量因子快照 data 存在", "tool": "get_factor_snapshot", "arguments": {"symbols": ["510300", "512890", "518880"]}, "expect": {"field_path": "data", "op": "present"}, "notes": ""}

@@ -708,6 +708,15 @@ async def generate_enhanced_design(
         except Exception as _e:
             logger.debug("[strategy_design] R140 final enforce skipped: %s", _e)
 
+        # round51 方案 B (R162/R163): enforce 缩放层权重后回补 cash 行 + 重算
+        # target_amount, 再跑第二次一致性校验。R140 enforce 缩掉的是「非现金权重」,
+        # 缩掉部分必须回流 cash 行（1−Σnon_cash, 与 :663 同一公式）, 否则出现
+        # 「既不在持仓也不在现金」的悬空资金（design15 balanced GAP +0.05 实证）;
+        # 同时 target_amount 若仍按缩放前旧权重, 与 weight 脱节（+36% 实证）。
+        # 约束: 只回补 cash 行, 不归一化各层权重（AGENTS.md「权重不归一化」约定）。
+        _reconcile_after_enforce(strategies, capital)
+        _validate_target_amount_consistency(strategies, capital)
+
         # round22: 跨方案不变量 INV-3/5/6 校验（需三方案齐全；INV-4 已在逐方案
         # check_structure_reasonableness 内校验）。倒挂组合（卫星/标的数/进攻压舱）
         # 在此被捕获并写入 aggressive 的 risk_metrics.structure_warnings。
@@ -1285,6 +1294,49 @@ def _apply_precision_bucketing(etfs: list[dict], precision: dict) -> None:
         fs = a.get("factor_score")
         if isinstance(fs, (int, float)):
             a["factor_score"] = _bucket_factor_score_label(fs)
+
+
+def _reconcile_after_enforce(strategies: list[dict], capital: float) -> None:
+    """round51 方案 B (R162/R163): enforce 后回补 cash 行 + 重算 target_amount。
+
+    R140 enforce 按比例缩放层权重后, 原先按缩放前权重算出的 cash 行会偏小
+    （缩掉的权重既不在持仓也不在现金 → R162 悬空）, 且 target_amount 仍按旧
+    权重 → 与 weight 脱节（R163）。本函数在 enforce 之后原地修复:
+
+    1. 每标的 target_amount = round(capital × weight, 2)（与 :692 同一公式）;
+    2. cash 行重算 = round(1 − Σnon_cash, 4)（与上方 cash 计算同一公式）;
+       缩放后 Σnon_cash < 1 而 cash 行缺失/为 0 时重建 cash 行。
+    约束: 不归一化各层权重（AGENTS.md「权重不归一化」）; Σnon_cash ≥ 1 时不造
+    负 cash 行（与 :663 cash_weight > 0 守卫一致）。
+    """
+    for s in strategies:
+        etfs = s.get("etfs") or []
+        if not etfs:
+            continue
+        # R163: target_amount 按当前（可能被 enforce 缩放过的）weight 重算
+        for a in etfs:
+            w = a.get("weight", 0)
+            if isinstance(w, (int, float)):
+                a["target_amount"] = round(capital * w, 2)
+        # R162: cash 行对齐 1 − Σnon_cash
+        total_weight = sum(a.get("weight", 0) for a in etfs
+                          if a.get("symbol") != "CASH")
+        cash_weight = round(1.0 - total_weight, 4)
+        cash_row = next((a for a in etfs if a.get("symbol") == "CASH"), None)
+        if cash_weight > 0:
+            if cash_row is None:
+                etfs.append({
+                    "symbol": "CASH", "name": "现金", "layer": "cash",
+                    "weight": cash_weight, "selection_rationale": "流动性管理",
+                    "target_amount": round(capital * cash_weight, 2),
+                })
+            else:
+                cash_row["weight"] = cash_weight
+                cash_row["target_amount"] = round(capital * cash_weight, 2)
+        elif cash_row is not None and cash_row.get("weight", 0) > 0:
+            # Σnon_cash ≥ 1: 旧 cash 行权重清零（不得保留悬空正权重）
+            cash_row["weight"] = 0.0
+            cash_row["target_amount"] = 0.0
 
 
 def _validate_target_amount_consistency(strategies: list[dict], capital: float) -> list[str]:

@@ -266,6 +266,12 @@ def _save_growth_snapshot(counts: dict, stale_runs: dict):
 #
 # 容忍: 非交易时段全 None 仍属预期 (round31 R4-07 教训: 误报比不报更糟),
 # 全空时输出 WARN 不计入 FAIL 阻断.
+#
+# R166 (round51 方案 E) 口径注记: 本断言用 factor_registry.compute() 实算输出
+# （矩阵口径）判定断链, **不得**改用 /factors/active 的 zero_ratio——后者是
+# IC 计算批次样本口径（ic_tracker._zero_ratio）, 与矩阵口径不可互替。
+# round39 诊断轮口径误用导致 R146/R149 误判（round51 §2.3 已修正结论）;
+# critical 清单因此特意补入 news_heat（round39 漏项, 否则误用会被断言拦截）。
 CRITICAL_FACTOR_CODES: tuple[str, ...] = (
     "etf.premium_discount",
     "style.size.ln_mcap",

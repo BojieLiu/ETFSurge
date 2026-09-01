@@ -243,6 +243,10 @@ class ICTracker:
             c: (st[0] / st[1]) if st[1] else 0.0
             for c, st in _stats.items()
         }
+        # R166 (round51 方案 E): 口径声明——本 dict 语义为「IC 计算批次内非
+        # 有意义值占比」（样本=IC 窗口内交易日，no_data 因子可能仅数日），
+        # **不是**当前因子矩阵零值占比。消费方（/factors/active 透出、诊断轮
+        # 引用）必须带 ic_batch scope 标注，不得据此判定因子矩阵断链。
 
         # P2-9 (round9 §6.5.1-D): IC 口径核对（2026-08-07）——Spearman 秩相关横截面 IC
         # （单期全体标的截面相关），forward return window=1，常量输入/样本<3 返回 None

@@ -193,9 +193,25 @@ class RedisCacheSync:
         self._available: bool = False
         self._init_lock = threading.Lock()
         self._init_done: bool = False
+        # round51 方案 C (R165): 失败缓存 TTL 自愈——原实现失败也置 _init_done=True
+        # 永不重试, warmup 首轮 ping 时 redis 未就绪 → 失败永久缓存（round51 实测
+        # /admin/lifespan-warmup 3 周期 0 ok vs 容器内手动 ping=True）。
+        # _init_failed_at 记录失败时刻: 60s 内复用失败状态（保留 round45「不反复
+        # 重试拖死调用方」意图）, 超过 TTL 允许重试; 成功后清空。
+        self._init_failed_at: float | None = None
+
+    _RETRY_TTL_S: float = 60.0
 
     def _ensure_client(self) -> None:
         """Lazy 初始化 sync client. 用 lock 防止并发初始化, 已初始化则跳过."""
+        # R165: 失败缓存 TTL 检查必须在 _init_done 提前返回之前——失败后
+        # _init_done=True, 若顺序颠倒 TTL 自愈分支永远走不到。
+        if self._init_failed_at is not None:
+            if time.monotonic() - self._init_failed_at < self._RETRY_TTL_S:
+                return
+            # TTL 过期: 重置失败态, 允许重新初始化
+            self._init_failed_at = None
+            self._init_done = False
         if self._init_done:
             return
         with self._init_lock:
@@ -212,11 +228,13 @@ class RedisCacheSync:
                 # ping 检查连通
                 self._client.ping()
                 self._available = True
+                self._init_failed_at = None  # 成功清空失败态
             except Exception:
                 self._client = None
                 self._available = False
+                self._init_failed_at = time.monotonic()  # R165: 记录失败时刻
             finally:
-                self._init_done = True  # 失败也算 done, 避免反复重试拖死调用方
+                self._init_done = True  # 失败也算 done, TTL 内避免反复重试拖死调用方
 
     @property
     def available(self) -> bool:
@@ -257,14 +275,31 @@ class RedisCacheSync:
             return False
 
     def ping(self) -> bool:
-        """健康检查 (用于 lifespan 后台预热任务前置 ping)."""
+        """健康检查 (用于 lifespan 后台预热任务前置 ping).
+
+        R165: client 已就绪但 ping 失败（连接中断）时同样记录失败时刻并复位
+        初始化态, 使 60s TTL 后能重试自愈, 而非永远返回 False。
+        """
         try:
             self._ensure_client()
             if not self.available:
                 return False
-            return bool(self._client.ping())
+            ok = bool(self._client.ping())
+            if not ok:
+                self._mark_failed()
+            return ok
         except Exception:
+            # 就绪后连接中断: 复位让 TTL 后重试（R165 自愈闭环）
+            if self._available:
+                self._mark_failed()
             return False
+
+    def _mark_failed(self) -> None:
+        """R165: 记录失败时刻并复位初始化态, 60s TTL 后允许重试。"""
+        self._available = False
+        self._client = None
+        self._init_done = False
+        self._init_failed_at = time.monotonic()
 
 
 redis_cache = RedisCache()
