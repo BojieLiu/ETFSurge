@@ -1,0 +1,16 @@
+symbol,name,short_name,asset_type,portfolio_type,target_weight,tracked_index,avg_cost,shares_held,first_buy_date
+159338,中证A500ETF,中证A500ETF,ETF,on_exchange,0.14,,1.205,58000,2026-08-27
+588000,科创50ETF华夏,科创50ETF华夏,ETF,on_exchange,0.065,,1.728,18800,2026-08-27
+510880,红利ETF,红利ETF,ETF,on_exchange,0.065,,3.304,9800,2026-08-27
+159545,恒生红利低波ETF,恒生红利低波ETF,ETF,on_exchange,0.04,,1.351,14800,2026-08-27
+159516,半导体设备ETF国泰,半导体设备ETF国泰,ETF,on_exchange,0.025,,0.67,18600,2026-08-27
+159992,创新药ETF银华,创新药ETF银华,ETF,on_exchange,0.04,,0.843,23700,2026-08-27
+588130,科创医药ETF华夏,科创医药ETF华夏,ETF,on_exchange,0.015,,0.981,7600,2026-08-27
+513120,港股创新药ETF广发,港股创新药ETF广发,ETF,on_exchange,0.025,,1.155,10800,2026-08-27
+512000,券商ETF华宝,券商ETF华宝,ETF,on_exchange,0.065,,0.529,61400,2026-08-27
+159876,有色ETF华宝,有色ETF华宝,ETF,on_exchange,0.025,,0.925,13500,2026-08-27
+159865,养殖ETF国泰,养殖ETF国泰,ETF,on_exchange,0.025,,0.535,23300,2026-08-27
+159611,电力ETF广发,电力ETF广发,ETF,on_exchange,0.035,,1.072,16300,2026-08-27
+159326,电网设备ETF华夏,电网设备ETF华夏,ETF,on_exchange,0.025,,1.587,7800,2026-08-27
+512660,军工ETF国泰,军工ETF国泰,ETF,on_exchange,0.025,,1.093,11400,2026-08-27
+518880,黄金ETF,黄金ETF,ETF,on_exchange,0.09,,8.433,5300,2026-08-27

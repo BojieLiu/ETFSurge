@@ -10,7 +10,8 @@ node_modules/
 dist/
 
 # Data
-data/
+data/*
+!data/seed/
 *.db
 
 # Env
