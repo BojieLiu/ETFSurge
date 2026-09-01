@@ -146,6 +146,17 @@ def _mootdx():
 def _mootdx_realtime(symbols: list[str]) -> list[dict[str, Any]]:
     if not symbols:
         return []
+    # R169 (round51): tdxpy get_security_type 两位前缀分类表无 '58' 段（科创板 ETF
+    # 588xxx）→ NotImplementedError 被 get_security_coefficient 吞掉 → 系数回退
+    # 0.01（正确 0.001，3 位小数报价品种）→ 实时报价 ×10（实测 588000=17.40 vs
+    # tencent/sina=1.74，51x/512/513/518 均 ×1.00 正常）。tdxpy 0.2.7（最新）
+    # 仍如此；price 与 last_close 同源同错无法单源自检 → 在 provider 层对 588
+    # 前缀返回空，降级链自动落 tencent/sina（_filtered 空→route 继续下一源）。
+    # 只过滤 realtime（client.quotes 协议）；kline（client.bars）系数路径不同
+    # 且实测 588000 历史价正确，不受影响。
+    symbols = [s for s in symbols if not str(s).startswith("588")]
+    if not symbols:
+        return []
     try:
         client = _mootdx()
         df = _run_mootdx_with_timeout(lambda: client.quotes(symbol=symbols))
