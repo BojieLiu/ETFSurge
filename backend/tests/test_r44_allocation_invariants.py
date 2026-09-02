@@ -161,10 +161,22 @@ def test_check_design_cash_etf_excluded_from_total():
 # ── _run 网络错误处理 ──
 
 def test_run_urllib_error_returns_exit_2():
-    """后端不可达 → _run 返回 2 (ERROR)."""
+    """后端不可达 → _run 返回 2 (ERROR).
+
+    mock _get_json 抛 URLError（而非真实 urlopen）：F23 socket 守卫只放行
+    localhost，真实请求 `http://invalid:9999` 在全量 xdist 下撞
+    NetworkBlockedError（单跑借道系统代理 127.0.0.1 白名单侥幸通过）。
+    exit-2 契约本就只关心 URLError 的 except 分支，mock 即可确定性覆盖。
+    """
+    import urllib.error
+
     mod = _load_module()
     args = type("Args", (), {"base": "http://invalid:9999", "limit": 5, "design_id": None})()
-    rc = mod._run(args)
+    with patch.object(
+        mod, "_get_json",
+        side_effect=urllib.error.URLError("mocked: backend unreachable"),
+    ):
+        rc = mod._run(args)
     assert rc == 2, f"后端不可达应返 ERROR 退出码 2; 实际={rc}"
 
 

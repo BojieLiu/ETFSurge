@@ -1,8 +1,13 @@
-﻿FROM python:3.14-slim
+FROM python:3.14-slim
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Apt mirror pinned to TUNA: deb.debian.org (Fastly) intermittently degrades on this
+# network (2026-09-02 measured 695 B/s + trixie Packages 404 -> build exit 100, while an
+# 08-31 build passed). Package integrity is unaffected (apt GPG signature check still
+# enforced). Swap to another mirror (ustc/aliyun) with the same sed if TUNA ever slows.
+RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g; s|security.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/debian.sources && \
+    apt-get update && apt-get install -y --no-install-recommends \
     gcc libffi-dev && \
     rm -rf /var/lib/apt/lists/*
 

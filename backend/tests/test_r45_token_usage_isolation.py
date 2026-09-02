@@ -59,6 +59,13 @@ def test_token_store_record_goes_to_isolated_db(tmp_path):
         ))
 
     asyncio.run(_record())
+    # 确定性落库：record() 只入内存+队列，持久化靠后台 _flush_worker（绑定创建
+    # 时的 event loop）。跨 asyncio.run / xdist worker 时队列无人消费 → 立即断言
+    # 为时序性 flake（全量实测 2 次偶发 FAIL）。token_usage.py 无同步 flush API，
+    # 此处直接调 _flush_batch 等价驱动落库路径（纯 sqlite3 写入，无 loop 依赖）；
+    # 关键不变量 = 落库目标 _db_path 隔离 + 真实 DB 行数不变，均已覆盖。
+    batch = list(token_store._records)
+    token_store._flush_batch(batch)
 
     # 隔离 DB (token_store._db_path) 应含这条记录
     isolated_db = Path(token_store._db_path)

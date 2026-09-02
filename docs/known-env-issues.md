@@ -109,6 +109,7 @@
 | `uvicorn --host ::` 于 Windows | v6only，127.0.0.1 不监听 | 保持默认；verify_e2e BASE=localhost 即可，勿改绑 127.0.0.1 实验 |
 | SQLite `ALTER TABLE RENAME` | 索引名保留 → create_all 撞名崩溃 | rename 表前先 DROP 其全部索引 |
 | `rg -rln` | `-r` 是 --replace，输出被字面替换 | 用 `rg -ln` |
+| Docker 构建 apt 层 exit 100（2026-09-02，round52 §1） | `deb.debian.org`（Fastly）对本网络间歇劣化：实测 695 B/s（7min15s 仅 303 kB）+ `trixie/main/binary-amd64/Packages` 404 → `apt-get update/install` 失败，整镜像构建阻断；44h 前构建可成功（间歇性，非永久） | `backend/Dockerfile` 已固定 TUNA 镜像（sed 替换，GPG 验签不受影响，实测 1789 kB/s）；若 TUNA 再劣化同法换 ustc/aliyun。指纹：`Fetched xx kB in x min` + `E: Failed to fetch .../Packages 404` |
 
 ## 3. 已知性能债登记（round34-B4 定位；2026-08-26 深夜归因 + 同日盘中 D3 定档）
 
