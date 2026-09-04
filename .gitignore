@@ -72,3 +72,7 @@ audit-*.png
 backend/mypy_errors.txt
 /backend/E*/
 reasonix.toml
+
+# Runtime artifacts (patrol L3 growth baseline / local cache dumps) - never commit
+backend/data/patrol_factor_growth.json
+backend/scripts/data/
