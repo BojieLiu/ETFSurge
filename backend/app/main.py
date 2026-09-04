@@ -70,6 +70,67 @@ if _PROFILE_WARMUP:
     logger.info("[profiler] Warmup profiling ENABLED (PROFILE_WARMUP=1)")
 
 
+# R170 (round52 §4.3 方案A): 预热 sequence 分段计时——budget 告警与 timing json 同口径。
+# round52 §4.1: budget 按 _seq_elapsed 全序计时报 39.8s，warmup_timing.json 只记
+# 6 records（init_db/redis_init/load_llm_excluded/warmup_market_cache/warmup_global_indices/
+# warmup_etf_cache）合计 7.46s——instruments/design_data/sector 三段未入账，~32s 差额
+# 无归属、告警无法归因。此处为每个 sequence 任务记录实测分段，告警直接点名最慢段
+# 与未入账段。分段**不并入** profiler.records 之和（那会改动 A01 门禁判据口径）。
+_WARMUP_SEQUENCE_LABELS: tuple[str, ...] = (
+    "market_cache",
+    "etf_cache",
+    "global_indices",
+    "sector_cache",
+    "instruments_sync",
+    "indices_meta_sync",
+    "design_data",
+)
+_WARMUP_SEGMENTS: list[dict[str, object]] = []
+
+
+def _record_warmup_segment(label: str, duration_s: float) -> None:
+    """记录一个预热 sequence 分段的实测耗时（供 budget 告警归因）。"""
+    _WARMUP_SEGMENTS.append({"label": label, "duration_ms": round(duration_s * 1000.0, 2)})
+
+
+def _warmup_uncovered_segments(
+    expected: tuple[str, ...] | list[str] | None = None,
+) -> list[str]:
+    """返回「在 sequence 中但未留下分段计时」的段名（归属缺口自曝）。"""
+    _expected = tuple(expected) if expected is not None else _WARMUP_SEQUENCE_LABELS
+    _covered = {str(s["label"]) for s in _WARMUP_SEGMENTS}
+    return [lb for lb in _expected if lb not in _covered]
+
+
+def _format_warmup_budget_warning(
+    elapsed: float,
+    budget: float,
+    segments: list[dict[str, object]],
+    uncovered: list[str],
+) -> str:
+    """生成带归因信息的预热预算日志文案（纯函数，可单测）。"""
+    def _ms(s: dict[str, object]) -> float:
+        v = s.get("duration_ms")
+        return float(v) if isinstance(v, (int, float)) else 0.0
+
+    _top = sorted(segments, key=_ms, reverse=True)[:3]
+    _parts: list[str] = []
+    if _top:
+        _parts.append(
+            "分段 top3: "
+            + "/".join(f"{s.get('label', '?')} {_ms(s) / 1000.0:.1f}s" for s in _top)
+        )
+    if uncovered:
+        _parts.append("未入 timing 段: " + ",".join(uncovered))
+    _attr = f"（{'; '.join(_parts)}）" if _parts else "（无分段计时数据）"
+    if elapsed > budget:
+        return (
+            f"[warmup-budget] 预热总耗时 {elapsed:.1f}s 超过预算阈值 {budget:.1f}s，"
+            f"可能存在回归{_attr}——见 logs/warmup_timing.json（PROFILE_WARMUP=1）"
+        )
+    return f"[warmup-budget] 预热总耗时 {elapsed:.1f}s（阈值 {budget:.1f}s，达标）"
+
+
 async def _run_warmup_sequence(tasks: list) -> None:
     """O2 (round7 §7 P2): 预热任务串行执行——控并发峰值。
 
@@ -77,12 +138,20 @@ async def _run_warmup_sequence(tasks: list) -> None:
     扫描 + akshare 分页叠加 → 预热高峰 shared_executor 64/64 饱和（P2 复现）。
     串行执行（前一个完成后启动下一个），内部并发上限不变；单个任务异常
     不阻断后续任务（预热失败静默，启动不阻塞）。
+
+    R170 (round52): tasks 元素可为裸协程（向后兼容）或 `(label, coro)`；带 label
+    时记录分段耗时（无论任务成功/失败/超时——失败段同样要可归因）。
     """
-    for _t in tasks:
+    for _item in tasks:
+        _label, _t = _item if isinstance(_item, tuple) else ("", _item)
+        _t0 = time.time()
         try:
             await _t
         except Exception as e:  # noqa: BLE001
             logger.warning("[lifespan] warmup sequence step failed (non-fatal): %s", e)
+        finally:
+            if _label:
+                _record_warmup_segment(_label, time.time() - _t0)
 
 
 # R58 (round28): IC 回填「K 线缓存未就绪」重试逻辑——提取为模块级可测函数。
@@ -645,33 +714,35 @@ async def lifespan(app: FastAPI):
         # 阈值 30s：给 etf/instruments 冷拉（各自 90-120s 超时上限）留余量，
         # 同时能抓到「24s 快照 + 12.8s 空转」这类异常膨胀（34.5s 必触发）。
         _seq_start = time.time()
+        _WARMUP_SEGMENTS.clear()
         try:
+            # R170 (round52): 每个任务带 label → 分段耗时入 _WARMUP_SEGMENTS，
+            # budget 告警与 warmup_timing.json 同口径（差额可归因到具体段）。
             await _run_warmup_sequence([
-                _warmup_market_cache(),
-                _warmup_etf_cache(),
-                _warmup_global_indices(),
-                _warmup_sector_cache(),
-                _background_instruments_sync(),
-                _background_indices_meta_sync(),
+                ("market_cache", _warmup_market_cache()),
+                ("etf_cache", _warmup_etf_cache()),
+                ("global_indices", _warmup_global_indices()),
+                ("sector_cache", _warmup_sector_cache()),
+                ("instruments_sync", _background_instruments_sync()),
+                ("indices_meta_sync", _background_indices_meta_sync()),
                 # R59④ (round28): 设计链路数据预热——候选池 K 线缓存 + 因子矩阵。
                 # 旧实现 design 首呼撞冷 K 线缓存（refresh_kline 42-75s 全量建库）
                 # + 预热未完成时数据源冷却 → 90s 硬预算被吃光（task 559 超时失败）。
                 # 预热 sequence 末尾执行（此刻 pool 已由 _warmup_market_cache 填充），
                 # 后台 + 短预算（不阻塞 startup 就绪，失败仅 WARNING）。
-                _warmup_design_data(),
+                ("design_data", _warmup_design_data()),
             ])
         finally:
             _seq_elapsed = time.time() - _seq_start
             _WARMUP_BUDGET_S = float(os.environ.get("WARMUP_BUDGET_S", "30"))
+            _msg = _format_warmup_budget_warning(
+                _seq_elapsed, _WARMUP_BUDGET_S,
+                list(_WARMUP_SEGMENTS), _warmup_uncovered_segments(),
+            )
             if _seq_elapsed > _WARMUP_BUDGET_S:
-                logger.warning(
-                    "[warmup-budget] 预热总耗时 %.1fs 超过预算阈值 %.1fs，可能存在回归"
-                    "（盘后/源冷却或某数据源空转）——见 logs/warmup_timing.json（PROFILE_WARMUP=1）",
-                    _seq_elapsed, _WARMUP_BUDGET_S,
-                )
+                logger.warning(_msg)
             else:
-                logger.info("[warmup-budget] 预热总耗时 %.1fs（阈值 %.1fs，达标）",
-                            _seq_elapsed, _WARMUP_BUDGET_S)
+                logger.info(_msg)
 
     # R89 (round30): concept/industry 全量列表后台预拉（不占 warmup 30s 预算）。
     # 冷首呼 38.9s 根因 = akshare 全量拉取（round30 §11 实证）；就绪后异步预拉填充
@@ -1176,7 +1247,15 @@ async def lifespan(app: FastAPI):
         _profiler.disable_pyinstrument()
         _profiler.disable_cprofile()
         _profiler.print_summary()
-        _profiler.write_report("warmup_timing.json")
+        # R170: sequence 分段入 json（告警指向的 json 可归因），但不并入
+        # total_duration_ms（A01 门禁判据口径不变）。
+        _segments = [dict(s) for s in _WARMUP_SEGMENTS if isinstance(s, dict)]
+        _seg_ms = [float(str(s.get("duration_ms") or 0.0)) for s in _segments]
+        _profiler.write_report("warmup_timing.json", extra={
+            "sequence_segments": _segments,
+            "sequence_total_ms": round(sum(_seg_ms), 2),
+            "sequence_uncovered": _warmup_uncovered_segments(),
+        })
         logger.info("[profiler] Warmup profiling complete — reports saved to logs/")
 
     # ── Warmup degradation alert (7.5 P2) ────────────────────────────

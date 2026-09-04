@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.portfolio import PortfolioETF
 from app.services.portfolio._facade_refs import list_etfs
+from app.services.portfolio.pricing import normalize_asset_type
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,10 @@ async def apply_portfolio_design(db: AsyncSession, design: dict) -> dict[str, An
                     name = f"{symbol} ETF"
                     short_name = symbol
                     _degraded = True
-                new_etf = PortfolioETF(symbol=symbol, name=name, short_name=short_name, asset_type="ETF",
+                # R176 (round52 §7.3 方案E-1): asset_type 写 'A'（pricing/_split_symbols
+                # 既定口径）——旧值 'ETF' 会导致带 portfolio_type 过滤的请求现价恒 0。
+                new_etf = PortfolioETF(symbol=symbol, name=name, short_name=short_name,
+                    asset_type=normalize_asset_type("ETF"),
                     target_weight=w, portfolio_type=portfolio_type, tracked_index=None, is_active=True)
                 db.add(new_etf)
                 applied.append({"symbol": symbol, "name": new_etf.name, "target_weight": w, "portfolio_type": portfolio_type, "action": "added", "_degraded": _degraded})

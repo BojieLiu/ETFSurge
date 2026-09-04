@@ -152,6 +152,36 @@ class NewsMixin:
         return self._news_bucket("global")
 
 
+    def get_news_all(self) -> list[dict]:
+        """R178 (round52 §9.2 方案A): 三桶合并视图（「全部」tab 数据源）。
+
+        - 合并 headlines/macro/global（同 `_news_bucket` 源；stock/research 为
+          按标的查询型，不参与——全量拉取无意义且拖慢首屏）；
+        - 跨桶按 `id` 去重（time+title MD5，F29 实测桶间有重复史）；
+        - `sort_time` 降序 + 上限 60（首屏渲染软上限）；
+        - 桶空非异常（R23 回退后仍空时如实合并其余桶），partial 由路由层标注。
+        """
+        _CAP = 60
+        headlines = self._news_bucket("headlines") or []
+        macro = self._news_bucket("macro") or []
+        global_news = self._news_bucket("global") or []
+        merged: list[dict] = []
+        seen: set = set()
+        for it in headlines + macro + global_news:
+            if not isinstance(it, dict):
+                continue
+            nid = it.get("id")
+            if nid is None:
+                # 兜底：无 id 的条目按 title 生成（与 WS 推送端同规则）
+                nid = f"{it.get('time', '')}_{it.get('title', '')}"
+            if nid in seen:
+                continue
+            seen.add(nid)
+            merged.append(it)
+        merged.sort(key=lambda x: x.get("sort_time") or 0, reverse=True)
+        return merged[:_CAP]
+
+
     def get_news_stock(self, symbol: str) -> list[dict]:
         """个股新闻（实时取数，无缓存）。"""
         try:

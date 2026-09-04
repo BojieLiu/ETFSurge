@@ -36,10 +36,12 @@ async def calculate_daily_pnl(
         price = a["current_price"]
         change_pct = a["change_pct"]
         target_amount = a["target_amount"]
-        daily_pnl = target_amount * change_pct / 100.0
-        total_pnl += daily_pnl
+        # R175 (round52 §7.3 方案C): 行情不可用（change_pct=None）→ daily_pnl=None
+        # 诚实空值——不参与 total_pnl/weighted 汇总（不可用 ≠ 盈亏为 0）。
+        daily_pnl = (target_amount * change_pct / 100.0) if change_pct is not None else None
+        total_pnl += daily_pnl or 0.0
         total_amount += target_amount
-        if target_amount:
+        if target_amount and change_pct is not None:
             weighted_change_sum += change_pct * target_amount
         pnl_items.append({
             "symbol": a["symbol"],
@@ -50,7 +52,7 @@ async def calculate_daily_pnl(
             "target_amount": target_amount,
             "current_price": price,
             "change_pct": change_pct,
-            "daily_pnl": round(daily_pnl, 2),
+            "daily_pnl": round(daily_pnl, 2) if daily_pnl is not None else None,
             "tracked_index": a.get("tracked_index"),
             "is_estimated": a.get("is_estimated", False),
             "estimate_source": a.get("estimate_source"),

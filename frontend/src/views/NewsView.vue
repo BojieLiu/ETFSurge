@@ -45,6 +45,15 @@
         >
           {{ mapNewsLevel(lvl).stars }} {{ mapNewsLevel(lvl).label }}
         </button>
+        <!-- R178 (round52 §9.2 方案C): 排序切换——时间 ↓（默认）/ 重要性 ↓；
+             纯前端 sort，无后端改动。全部 tab 条数多时按 level 排序更有用。 -->
+        <button
+          type="button"
+          class="filter-btn sort-toggle"
+          :aria-pressed="sortBy === 'level'"
+          :title="sortBy === 'level' ? '切回按时间排序' : '按重要等级排序'"
+          @click="sortBy = sortBy === 'level' ? 'time' : 'level'"
+        >{{ sortBy === 'level' ? '★ 重要性' : '🕐 时间' }}</button>
       </div>
     </div>
 
@@ -92,6 +101,9 @@
                   class="news-level-label"
                 >{{ mapNewsCategory(item.category, item.level).label }}</span>
               </span>
+              <!-- R178 (round52 §9.2 方案B-1): 重要等级星级——编码 level（重要度），
+                   与旧星（编码 stars 新鲜度）语义不同；全量显示，灰色小字不与 category 抢色。 -->
+              <span class="news-importance-stars" :title="`重要等级 ${item.level || 1}/5`" aria-hidden="true">{{ mapLevelStars(item.level) }}</span>
               <h3 class="news-title" :style="{ color: levelColor(item) }">{{ item.title }}</h3>
             </div>
 
@@ -156,7 +168,7 @@ import { newsApi } from '../api'
 import { useNewsWS } from '../composables/useNewsWS'
 import { useToastStore } from '../stores/toast'
 import { usePortfolioStore } from '../stores/portfolio'
-import { mapNewsLevel, mapNewsCategory, categoryColor, categoryColorClass, isImportant } from '../utils/newsLevel'
+import { mapNewsLevel, mapNewsCategory, categoryColor, categoryColorClass, isImportant, mapLevelStars } from '../utils/newsLevel'
 
 const { show: toast } = useToastStore()
 const store = usePortfolioStore()
@@ -172,16 +184,21 @@ const impactError = ref(false) // F2-8: 行内失败状态（展示重试）
 const requestHoldings = ref(new Set())
 const analyzing = ref(false)
 const minLevel = ref(1) // 1-5, minimum importance level to show
+// R178 (round52 §9.2 方案C): 排序切换——'time'（sort_time 降序，默认）| 'level'（level 降序 + sort_time 次序）
+const sortBy = ref('time')
 
-// F29 (round23 §2.4 A4): 资讯分类 tab（headlines/macro/global/stock/research）
+// F29 (round23 §2.4 A4): 资讯分类 tab（all/headlines/macro/global/stock/research）。
+// R178 (round52 §9.2 方案A): 新增「全部」tab（三桶去重合并）并设为默认——用户诉求
+// 一屏总览；tab 描述：all 不含个股/研报（按 symbol 查询型，全量拉取无意义）。
 const tabs = [
+  { value: 'all', label: '全部' },
   { value: 'headlines', label: '头条' },
   { value: 'macro', label: '宏观' },
   { value: 'global', label: '国际' },
   { value: 'stock', label: '个股' },
   { value: 'research', label: '研报' },
 ]
-const activeTab = ref('headlines')
+const activeTab = ref('all')
 const stockSymbol = ref('600519')
 const partial = ref(false) // F31: 冷启动/数据源熔断 partial 标识
 
@@ -222,16 +239,29 @@ function formatRelativeTime(t) {
 }
 
 const filteredNews = computed(() => {
-  return news.value.filter((it) => (Number(it.level) || 1) >= minLevel.value)
+  const filtered = news.value.filter((it) => (Number(it.level) || 1) >= minLevel.value)
+  if (sortBy.value === 'level') {
+    // R178 方案C: level 降序（同分按 sort_time 降序），纯前端排序
+    return filtered.slice().sort((a, b) => {
+      const la = Number(a.level) || 1
+      const lb = Number(b.level) || 1
+      if (la !== lb) return lb - la
+      return (Number(b.sort_time) || 0) - (Number(a.sort_time) || 0)
+    })
+  }
+  return filtered
 })
 
 async function loadNews() {
   loading.value = true
   try {
     // F29: 按当前 tab 加载对应端点（旧实现仅 headlines）
+    // R178: all tab → /news/all（三桶去重合并）
     const t = activeTab.value
     let res = null
-    if (t === 'headlines') {
+    if (t === 'all') {
+      res = await newsApi.all()
+    } else if (t === 'headlines') {
       res = await newsApi.headlines()
     } else if (t === 'macro') {
       res = await newsApi.macro()
@@ -250,7 +280,8 @@ async function loadNews() {
     news.value = items
     items.forEach((it) => { if (it.id != null) seenIds.value.add(it.id) })
     // Toast reminder for important items when entering the news page from elsewhere.
-    if (t === 'headlines') {
+    // R178: all tab 合并视图含头条桶，重要资讯提醒同等生效。
+    if (t === 'headlines' || t === 'all') {
       items.filter((it) => isImportant(it.level)).forEach((it) => {
         toast(`重要资讯：${it.title}`, 'warning')
       })
@@ -276,7 +307,8 @@ function sortNews(arr) {
 function handleNews(msg) {
   // F29: WS 实时推送仅作用于头条 tab——其它 tab（宏观/国际/个股/研报）为
   // 独立数据源视图，混入 WS 快讯会污染列表（切 tab 即重载，无需合并）。
-  if (activeTab.value !== 'headlines') return
+  // R178: all tab 为三桶合并视图且含头条桶——与 headlines 同等消费推送。
+  if (activeTab.value !== 'headlines' && activeTab.value !== 'all') return
   // news_batch: array of pre-sorted items
   if (msg && msg.type === 'news_batch' && Array.isArray(msg.data)) {
     let added = 0
@@ -468,6 +500,8 @@ const filteredAffectedHoldings = computed(() => {
 .news-item--important { box-shadow: 0 0 0 1px rgba(229, 72, 77, 0.25); background: rgba(229, 72, 77, 0.04); }
 .news-item-head { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 .news-level-badge { display: inline-flex; align-items: center; gap: 4px; font-size: var(--font-size-xs); font-weight: 600; }
+/* R178 (round52 §9.2 方案B-1): 重要等级星级——灰色小字，不与 category 徽章抢色 */
+.news-importance-stars { font-size: var(--font-size-xs); color: var(--color-text-tertiary, #8a8f98); letter-spacing: 1px; white-space: nowrap; }
 .news-stars { letter-spacing: 1px; }
 .news-title { margin: 0; font-size: var(--font-size-base); font-weight: 600; }
 .news-content { margin: var(--space-2) 0 0; color: var(--color-text-secondary); font-size: var(--font-size-sm); line-height: 1.6; }

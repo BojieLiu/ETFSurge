@@ -104,6 +104,8 @@ GET /api/v1/portfolio/tasks/{task_id}
 | result.suggestions[].reason | string | **丰富化（R4-22）**：2-3 句完整逻辑，按「触发依据；操作节奏；风险纪律」三段式组织，用「；」分隔；规则引擎与 LLM 均须遵守 |
 | result.coverage | object | **新增** 覆盖率统计，确保 100% |
 | result.coverage.coverage_pct | number | 必须为 1.0（100%） |
+| result.holdings_analysis[].shares_held | number \| null | **R171 (round52 §4.3 方案B)**：持仓份额（源 `portfolio_etfs.shares_held`）；未灌录 → `null`。**不得**省略该键（省略会让「持仓市值列」复测路径不存在） |
+| result.holdings_analysis[].market_value | number \| null | **R171**：市值 = `shares_held × 现价`（现价取 check 采集的 `price_map`）；份额缺失或现价 ≤0 → `null`（诚实标注），**禁止**填 `0` 冒充真实市值 |
 | coverage（顶层透传） | object | **round28 R57**：`GET /strategy-check-result/{task_id}` 顶层透传 `coverage`（含 `covered_by_llm`/`covered_by_rule`/`coverage_pct`，与 `result.coverage` 同源）；另透传 `llm_layer_ok`（LLM 层是否成功）/`is_fallback`（是否规则兜底）/`report_quality`（`full`/`partial`/`fallback`）——前端可展示「AI 参与度」而非仅有规则兜底 |
 
 ---
@@ -207,6 +209,7 @@ GET /api/v1/portfolio/strategy-checks
 | coverage.coverage_pct = 1.0 | ☐ | ☐ | 100% 覆盖强制 |
 | 任务总耗时 ≤ 90s (预留 30s buffer) | N/A | ☐ | 超时预算修正 |
 | LLM 超时/失败时规则兜底生效 | N/A | ☐ | 单测 mock 验证 |
+| holdings_analysis[] 含 shares_held / market_value（缺失为 null，非 0） | ☐ | ☐ | R171：持仓市值列验证路径 |
 
 ---
 

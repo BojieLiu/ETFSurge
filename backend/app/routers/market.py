@@ -203,7 +203,12 @@ async def search(
     return _sort_search_results(dedup[:30], keyword)
 
 async def _search_sectors(keyword: str, market: str | None = None) -> list[dict[str, Any]]:
-    """O30: 板块搜索——sectors 表 name ilike %kw%（type='sector'，BK 码）。
+    """O30: 板块搜索——优先内存缓存（sector_fetcher 行业+概念列表），表查询兜底。
+
+    R177 (round52 §8.4 方案A, 2026-09-03): sectors 表自 O30 设计起**无写入者**
+    （§8.3-① 实测 0 行）→ 板块搜索恒空。板块实时数据实际存在于 sector_fetcher
+    缓存（行业 ~90/496 + 概念 ~375/500，key=sector_name）——缓存即真理源。
+    sectors 表查询保留为兜底（未来有写入者时自然生效）。
 
     round10 P2-T: market 参数——US/HK 传入时返回空（美股/港股无板块数据源，
     防美股 tab 展示 A 股板块）；A/None 行为不变。
@@ -217,17 +222,57 @@ async def _search_sectors(keyword: str, market: str | None = None) -> list[dict[
     kw = (keyword or "").strip()
     if not kw:
         return []
+
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    # ① 内存缓存段（行业+概念列表，缓存即真理源——R177 方案A）
+    try:
+        from ..fetchers.sector_fetcher import fetch_concept_sectors, fetch_industry_sectors
+        from ..core.async_utils import run_sync
+
+        def _collect():
+            rows: list[dict] = []
+            rows.extend(fetch_industry_sectors(200) or [])
+            rows.extend(fetch_concept_sectors(600) or [])
+            return rows
+
+        all_sectors = await run_sync(_collect, timeout=10) or []
+        for r in all_sectors:
+            name = str(r.get("sector_name", "") or "").strip()
+            code = str(r.get("sector_code", "") or "").strip()
+            if not name or not code:
+                continue
+            if kw.lower() not in name.lower():
+                continue
+            if code in seen:
+                continue
+            seen.add(code)
+            out.append({
+                "symbol": code, "name": name,
+                "type": "sector", "market": "A", "asset_type": "sector",
+            })
+            if len(out) >= 10:
+                return out
+    except Exception as e:
+        logger.warning("[search] sector memory-cache segment failed: %s", e)
+
+    # ② 表查询兜底（sectors 表，未来有写入者时生效）
     try:
         async with async_session() as session:
             stmt = select(Sector).where(Sector.name.ilike(f"%{kw}%")).limit(10)
             rows = (await session.execute(stmt)).scalars().all()
-            return [{
-                "symbol": r.code, "name": r.name,
-                "type": "sector", "market": "A", "asset_type": "sector",
-            } for r in rows]
+            for r in rows:
+                if r.code in seen:
+                    continue
+                seen.add(r.code)
+                out.append({
+                    "symbol": r.code, "name": r.name,
+                    "type": "sector", "market": "A", "asset_type": "sector",
+                })
     except Exception as e:
         logger.warning("[search] sector search failed: %s", e)
-        return []
+    return out[:10]
 
 async def _search_indices(keyword: str, market: str | None = None) -> list[dict[str, Any]]:
     """O30: 指数搜索——indices_meta 表 name/pinyin/first_letter ilike（type='index'）。
@@ -283,9 +328,16 @@ async def _search_indices(keyword: str, market: str | None = None) -> list[dict[
     # 仅当本地 0 命中才触发（避免每次都触网）；失败静默（保持空结果，诚实降级）。
     if not out:
         try:
-            out = await _search_indices_akshare_fallback(kw, market)
+            # R177 (round52 §8.4 方案D): 兜底链加 10s 超时——lifespan 同步后 akshare
+            # 会话/代理状态可能劣化（§8.2 实测 HTTP 层 0 条 vs 直调 13 条），裸调
+            # asyncio.wait_for 无包裹会拖住搜索请求。
+            out = await asyncio.wait_for(
+                _search_indices_akshare_fallback(kw, market), timeout=10.0)
+        except asyncio.TimeoutError:
+            logger.warning("[search] index akshare fallback timed out after 10s (kw=%s)", kw)
         except Exception as e:
-            logger.debug("[search] index akshare fallback failed (non-fatal): %s", e)
+            # R177 方案D: debug → warning（原级别不可见，HTTP 0 条 vs 直调 13 条难定位）
+            logger.warning("[search] index akshare fallback failed (non-fatal): %s", e)
     return out
 
 

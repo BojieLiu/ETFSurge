@@ -22,6 +22,7 @@ from app.services.portfolio.formatting import (
     _CONFIDENCE_ZH,
     _has_real_factor_values,
 )
+from app.services.portfolio.pricing import normalize_asset_type
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +70,8 @@ async def strategy_check(
                     "symbol": alloc.get("symbol"),
                     "name": alloc.get("name", alloc.get("symbol")),
                     "short_name": alloc.get("short_name", alloc.get("symbol")),
-                    "asset_type": "ETF",
+                    # R176 (round52): 'A' 为 pricing 消费口径（'ETF' 不入 _split_symbols）
+                    "asset_type": "A",
                     "portfolio_type": "on_exchange",
                     "target_weight": alloc.get("target_weight", 0),
                 })
@@ -132,7 +134,8 @@ async def strategy_check(
             "symbol": symbol, "name": _get_attr(e, "name", symbol),
             "short_name": _get_attr(e, "short_name", symbol),
             "price": price, "change_pct": change_pct,
-            "asset_type": _get_attr(e, "asset_type", "ETF"),
+            # R176 (round52): 缺省口径统一为 'A'（旧缺省 'ETF' 会带偏下游消费）
+            "asset_type": normalize_asset_type(_get_attr(e, "asset_type", "A")),
             "portfolio_type": _get_attr(e, "portfolio_type", "on_exchange"),
             "target_weight": target_w,
             "target_amount": round(total_capital * target_w, 2),
@@ -350,6 +353,10 @@ async def strategy_check(
             regime=regime,
         )
 
+    # R171 (round52 §4.3 方案B): 份额/市值映射——LLM 路径与规则兜底路径同源
+    # （holdings_analysis 无市值键 → 持仓市值列验证路径不存在，见 round52 §4.1）
+    _mv_map = _holding_shares_and_value(etfs, market_data)
+
     # P0-1 (R4-01): 行业注入——从 market_data_hub 候选池构建 symbol→industry 映射
     # （与设计任务同一来源；候选池条目含 ETFClassifier 产出的 industry 字段）。
     # 仅作数据回填，不参与因子计算；失败时静默（risk_warnings 有空行业保护兜底）。
@@ -424,6 +431,10 @@ async def strategy_check(
         # P2-4: weight 回填
         if sym and h.get("weight") is None:
             h["weight"] = weight_map.get(sym, 0.0)
+        # R171 (round52 §4.3 方案B): shares_held / market_value 入 holdings——
+        # 份额未灌录或现价缺失时写 None（诚实），不写 0（0 会被前端当真实市值）。
+        h["shares_held"] = (_mv_map.get(sym) or {}).get("shares_held")
+        h["market_value"] = (_mv_map.get(sym) or {}).get("market_value")
         # P2-1: 注入真实因子分到 holdings_analysis
         fb = factor_breakdowns.get(sym, {})
         real_fs = fb.get("factor_scores", {})
@@ -1044,6 +1055,60 @@ def _full_pool_factor_composite(factor_breakdowns: dict[str, dict]) -> dict[str,
     return out
 
 
+def _holding_market_value(shares_held: float | int | None, price: float | int | None) -> float | None:
+    """R171 (round52 §4.3 方案B): 持仓市值 = 份额 × 现价。
+
+    份额未灌录（None/0）或现价缺失（None/0，行情断链）→ 返回 **None**（诚实标注），
+    **禁止**填 0 冒充真实市值——round52 §4.1 实测 check 67 的 holdings 无市值字段，
+    市值总和恒 0，「R141 持仓市值列」复测路径因此不存在。
+    """
+    try:
+        _shares = float(shares_held)  # type: ignore[arg-type]
+        _price = float(price)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if _shares <= 0 or _price <= 0:
+        return None
+    return round(_shares * _price, 2)
+
+
+def _holding_shares_and_value(
+    etfs: list,
+    market_data: list[dict],
+) -> dict[str, dict[str, float | None]]:
+    """R171: 构建 {symbol: {"shares_held": ..., "market_value": ...}}。
+
+    份额源 = portfolio_etfs.shares_held（9-1 重灌后 30/31 只已灌）；
+    现价源 = check 采集的 market_data[].price（与报告表格同源）。
+    """
+    _price_by_sym: dict[str, float | None] = {}
+    for m in market_data:
+        if isinstance(m, dict) and m.get("symbol"):
+            _price_by_sym[str(m["symbol"])] = m.get("price")
+
+    def _attr(e, attr, default=None):
+        # 与 strategy_check() 内 _get_attr 同语义（SQLAlchemy 对象 / dict 双形态）
+        if isinstance(e, dict):
+            return e.get(attr, default)
+        return getattr(e, attr, default)
+
+    out: dict[str, dict[str, float | None]] = {}
+    for e in etfs:
+        sym = _attr(e, "symbol", "")
+        if not sym or sym == "CASH":
+            continue
+        _shares_raw = _attr(e, "shares_held", None)
+        try:
+            _shares: float | None = float(_shares_raw) if _shares_raw else None
+        except (TypeError, ValueError):
+            _shares = None
+        out[str(sym)] = {
+            "shares_held": _shares,
+            "market_value": _holding_market_value(_shares, _price_by_sym.get(str(sym))),
+        }
+    return out
+
+
 def _build_rule_fallback_holdings_analysis(
     etfs: list,
     market_data: list[dict],
@@ -1059,6 +1124,8 @@ def _build_rule_fallback_holdings_analysis(
     后续 P0-1 行业注入 + P2-4 权重回填会统一覆盖/补全字段。
     """
     result: list[dict] = []
+    # R171 (round52): 份额/市值映射（与 LLM 主路径同源，缺侧 → None）
+    _mv_map = _holding_shares_and_value(etfs, market_data)
     # round27 R42: 骨架路径同样复用全池截面 z 复合分（与设计/主路径同方向）
     _factor_composites: dict[str, dict] = {}
     try:
@@ -1110,6 +1177,10 @@ def _build_rule_fallback_holdings_analysis(
             "symbol": sym,
             "name": name or sym,
             "weight": weight_map.get(sym),
+            # R171 (round52 §4.3 方案B): 份额/市值入 holdings——契约
+            # api-contracts/portfolio/strategy-check-v2.md 已列明（缺侧为 None）
+            "shares_held": (_mv_map.get(sym) or {}).get("shares_held"),
+            "market_value": (_mv_map.get(sym) or {}).get("market_value"),
             "factor_summary": factor_str,
             "industry": ind,
             "tech_signal": _tech_sig,

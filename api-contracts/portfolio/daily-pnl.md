@@ -69,9 +69,9 @@ POST /api/v1/portfolio/daily-pnl
 | Field | Type | Description |
 |-------|------|-------------|
 | items | array | Per-ETF P&L details |
-| items[].daily_pnl | float | `target_amount * change_pct / 100` |
+| items[].daily_pnl | float \| null | `target_amount * change_pct / 100`; **R175 (round52 §7.3 方案C)**: `null` = 行情暂不可用（不计入汇总，不冒充盈亏 0） |
 | items[].is_estimated | bool | Off-exchange fund price estimated via tracked index |
-| items[].estimate_source | string \| null | `tracked_index` \| `nav` \| `null` |
+| items[].estimate_source | string \| null | `tracked_index` \| `unavailable` \| `null` — **R175**: 涨跌源缺失时标 `unavailable` |
 | items[].shares_outstanding | float \| null | Latest total shares outstanding |
 | items[].fund_scale | float \| null | Latest fund AUM in CNY |
 | items[].pe_ttm | float \| null | TTM P/E ratio |

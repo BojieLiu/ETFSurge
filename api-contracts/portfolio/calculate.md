@@ -88,11 +88,11 @@ POST /api/v1/portfolio/calculate
 | total_capital | float | Input total capital |
 | allocations | array | Per-ETF allocation details |
 | allocations[].target_amount | float | `total_capital * target_weight` (not normalized) |
-| allocations[].current_price | float | Real-time price (0 if unavailable) |
-| allocations[].change_pct | float | Real-time change % (0 if unavailable) |
+| allocations[].current_price | float \| null | Real-time price; **R175 (round52 §7.3 方案C)**: `null` = 行情暂不可用（批量截断/源失败），不再用 `0` 冒充 |
+| allocations[].change_pct | float \| null | Real-time change %; **R175**: `null` = 行情暂不可用，不再用 `0` 冒充真实涨跌 |
 | allocations[].shares | float | `target_amount / current_price` |
 | allocations[].is_estimated | bool | Off-exchange fund price estimated via tracked index |
-| allocations[].estimate_source | string \| null | `tracked_index` \| `nav` \| `null` |
+| allocations[].estimate_source | string \| null | `tracked_index` \| `unavailable` \| `null` — **R175**: 涨跌源缺失（ti 不在 price_map 或场内现价缺失）时标 `unavailable`，前端以「—」中性渲染 |
 | allocations[].shares_outstanding | float \| null | Latest total shares outstanding |
 | allocations[].fund_scale | float \| null | Latest fund AUM in CNY |
 | allocations[].pe_ttm | float \| null | TTM P/E ratio |

@@ -37,11 +37,13 @@
               :loading="dashLoading"
               :lastUpdated="null"
             />
-            <div v-if="allocationOn?.allocations?.length" class="content-grid">
+            <!-- R174 (round52 §7.3 方案D): 分配饼图/表随 scope tab 过滤——
+                 combined 显示双份，单选只显示对应侧（旧渲染只看数据非空，切 tab 后另一侧仍驻留）。 -->
+            <div v-if="scope !== 'off_exchange' && allocationOn?.allocations?.length" class="content-grid">
               <AllocationPieChart :items="allocationOn.allocations" title="场内分配" />
               <AllocationTable :items="allocationOn.allocations" :cashPct="cashPctOn" :cashAmount="cashOn" title="场内 ETF 目标分配" />
             </div>
-            <div v-if="allocationOff?.allocations?.length" class="content-grid">
+            <div v-if="scope !== 'on_exchange' && allocationOff?.allocations?.length" class="content-grid">
               <AllocationPieChart :items="allocationOff.allocations" title="场外分配" />
               <AllocationTable :items="allocationOff.allocations" :cashPct="cashPctOff" :cashAmount="cashOff" title="场外 ETF 目标分配" />
             </div>

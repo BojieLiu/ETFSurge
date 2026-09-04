@@ -58,6 +58,116 @@ class TestWarmupSequence:
 
 
 # ===================================================================
+# R170 (round52 §4.3 方案A): warmup 分段计时与 budget 告警同口径
+#
+# round52 §4.1: budget 告警按 _seq_elapsed 全序计时（7 任务）报 39.8s，
+# warmup_timing.json 只有 6 records 合计 7.46s——~32s 无归属，告警无法归因。
+# 负向断言：慢段必须出现在分段记录里、未覆盖段必须被点名，否则抓不住该回归。
+# ===================================================================
+import asyncio
+import time
+
+import pytest
+
+import app.main as _main
+
+
+@pytest.fixture(autouse=True)
+def _reset_segments():
+    _main._WARMUP_SEGMENTS.clear()
+    yield
+    _main._WARMUP_SEGMENTS.clear()
+
+
+class TestR170WarmupSegmentTiming:
+    @pytest.mark.asyncio
+    async def test_labeled_task_records_segment(self):
+        """(label, coro) 形态 → 每个任务都留下分段计时（含耗时值）。"""
+        async def slow():
+            await asyncio.sleep(0.05)
+
+        await _main._run_warmup_sequence([("design_data", slow())])
+        segs = {str(s["label"]): float(s["duration_ms"]) for s in _main._WARMUP_SEGMENTS}
+        assert "design_data" in segs, f"慢段必须入账，实际 {segs}"
+        assert segs["design_data"] >= 50, f"分段耗时应为实测值（≥50ms），实际 {segs}"
+
+    @pytest.mark.asyncio
+    async def test_bare_coroutine_does_not_fake_record(self):
+        """负向：裸协程（无 label）不得伪造分段记录（保持旧调用兼容）。"""
+        async def noop():
+            return None
+
+        await _main._run_warmup_sequence([noop()])
+        assert _main._WARMUP_SEGMENTS == [], "无 label 的任务不得产生分段记录"
+
+    @pytest.mark.asyncio
+    async def test_all_sequence_labels_covered_when_all_run(self):
+        """7 段全跑 → 无未覆盖段（budget 告警不再指向无归属差额）。"""
+        async def noop():
+            return None
+
+        await _main._run_warmup_sequence([(lb, noop()) for lb in _main._WARMUP_SEQUENCE_LABELS])
+        assert _main._warmup_uncovered_segments() == [], \
+            f"7 段全跑后不应有未覆盖段，实际 {_main._warmup_uncovered_segments()}"
+        assert len(_main._WARMUP_SEGMENTS) == len(_main._WARMUP_SEQUENCE_LABELS)
+
+    @pytest.mark.asyncio
+    async def test_uncovered_segments_named(self):
+        """负向：漏跑的段必须被点名（否则 39.8s vs 7.46s 缺口无人报错）。"""
+        async def noop():
+            return None
+
+        await _main._run_warmup_sequence([("market_cache", noop()), ("etf_cache", noop())])
+        uncovered = _main._warmup_uncovered_segments()
+        assert "instruments_sync" in uncovered, f"未跑的段必须出现在未覆盖清单，实际 {uncovered}"
+        assert "design_data" in uncovered
+        assert len(uncovered) == len(_main._WARMUP_SEQUENCE_LABELS) - 2
+
+    def test_budget_warning_attributes_slow_segment(self):
+        """验收口径（round52 §4.3 方案A）: 慢段 35s → 告警必须点名该段。"""
+        segments = [
+            {"label": "design_data", "duration_ms": 35000.0},
+            {"label": "market_cache", "duration_ms": 2100.0},
+        ]
+        msg = _main._format_warmup_budget_warning(39.8, 30.0, segments, [])
+        assert "design_data" in msg, f"告警必须含最慢段名，实际: {msg}"
+        assert "35.0s" in msg, f"告警必须含该段耗时，实际: {msg}"
+        assert "39.8s" in msg
+
+    def test_budget_warning_lists_uncovered_segments(self):
+        """负向：存在未入 timing 的段时，告警必须列出（归因缺口自曝）。"""
+        msg = _main._format_warmup_budget_warning(39.8, 30.0, [], ["design_data", "sector_cache"])
+        assert "design_data" in msg and "sector_cache" in msg, \
+            f"未覆盖段必须在告警中列出，实际: {msg}"
+
+    def test_budget_ok_message_has_no_attribution_noise(self):
+        """达标时输出简洁信息（不虚构分段归因）。"""
+        msg = _main._format_warmup_budget_warning(7.5, 30.0, [], [])
+        assert "7.5s" in msg and "设计" not in msg
+
+
+def test_warmup_timing_json_carries_sequence_segments(tmp_path):
+    """warmup_timing.json 必须携带 sequence 分段（告警指向的 json 可归因）。"""
+    from app.profiling.warmup_profiler import WarmupProfiler
+
+    p = WarmupProfiler(output_dir=str(tmp_path))
+    p.record("init_db", 100.0, "db")
+    path = p.write_report("warmup_timing.json", extra={
+        "sequence_segments": [{"label": "design_data", "duration_ms": 35000.0}],
+        "sequence_total_ms": 35000.0,
+        "sequence_uncovered": ["sector_cache"],
+    })
+    import json
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    assert data["sequence_segments"][0]["label"] == "design_data"
+    assert data["sequence_uncovered"] == ["sector_cache"]
+    # 分段不计入 total_duration_ms——避免 A01 门禁（20s 失败线）被口径变更误伤
+    assert data["total_duration_ms"] == 100.0, \
+        f"sequence 分段不得并入 total_duration_ms，实际 {data['total_duration_ms']}"
+
+
+# ===================================================================
 # merged from test_round28_fixes.py::TestR56WarmupGlobalIndicesCardinality (S3.3 de-round, 2026-08-18)
 # ===================================================================
 import asyncio
@@ -84,11 +194,11 @@ class TestR56WarmupGlobalIndicesCardinality:
             "独立 create_task(_warmup_global_indices()) 应已删除（R56）"
 
     def test_sequence_contains_global_indices_once(self):
-        """sequence 内 `_warmup_global_indices(),` 恰好出现一次（基数断言）。"""
+        """sequence 内 `_warmup_global_indices()` 恰好调用一次（基数断言）。"""
         src = open(main_mod.__file__, encoding="utf-8").read()
-        # 定义行是 `async def _warmup_global_indices():`（无逗号），
-        # sequence 内调用是 `_warmup_global_indices(),`（带逗号）——精确匹配调用点。
-        count = src.count("_warmup_global_indices(),")
+        # R170 (round52): sequence 元素改为 `(label, coro)` 形态，调用点不再带裸逗号；
+        # 口径改为「调用次数 = 总出现次数 − 定义行」，仍可抓双重执行回归。
+        count = src.count("_warmup_global_indices()") - src.count("async def _warmup_global_indices()")
         assert count == 1, f"sequence 内 _warmup_global_indices() 应为 1 次，实际 {count}（双重执行回归）"
 
     def test_warmup_sequence_has_design_data_step(self):

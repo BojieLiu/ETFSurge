@@ -1180,11 +1180,21 @@ async def get_portfolio_realtime(phase: str = "all") -> list[dict[str, Any]]:
     if not symbols:
         return []
 
-    a_symbols = [
+    # R173 (round52 §7.3 方案A): 场外联接的 tracked_index（场内 ETF 代码）显式并入
+    # A 股批量——估值源报价必须在本响应内可查，不能依赖「场内恰好持有该标的」的
+    # 隐式前提（纯场外组合时 ti 缺席 → 盘中估值仍断链）。仅并入 A 股形态
+    # （纯数字且 5/1/6 开头），指数代码（000300 等）不在此列（走 index_price_map 兼容分支）。
+    _tracked_symbols = {
+        str(etf.tracked_index)
+        for etf in off_exchange
+        if etf.tracked_index and str(etf.tracked_index).isdigit()
+        and str(etf.tracked_index).startswith(("5", "1", "6"))
+    }
+    a_symbols = sorted({
         s
         for s in symbols
         if s.isdigit() and (s.startswith("5") or s.startswith("1") or s.startswith("6"))
-    ]
+    } | _tracked_symbols)
     quotes: list[dict[str, Any]] = []
     if a_symbols:
         quotes.extend(await get_realtime_batch(a_symbols, "A"))
@@ -1229,6 +1239,12 @@ async def get_portfolio_realtime(phase: str = "all") -> list[dict[str, Any]]:
     #   - 8 并发: 单只 2s × N/8 ≈ 几十秒降到 2-3s 量级
     #   - 单只仍走原 8s timeout, 全局受 25s slow 阶段 timeout 兜底
     #   - 限流 8 避免触发 fetch_fund_nav 源限流 (未实测, 保守值)
+    # R173 (round52 §7.3 方案A): 盘中估值优先查 quotes 内 ti（场内 ETF 代码）实时报价
+    # ——a_symbols 已把场内代码的 ti 纳入 get_realtime_batch 批量，估值源就在本响应内。
+    # 旧条件 `ti in index_price_map` 的键集只有 8 个指数代码，而场外联接 tracked_index
+    # 存的是场内 ETF 代码（022449→159338）→ 恒 False → 全部落入 nav 分支假 0（§7.1 实测
+    # 盘中 15/15 change_pct=0）。`index_price_map` 分支保留为 ti=指数代码形态的兼容。
+    _quote_by_symbol: dict[str, dict] = {q.get("symbol"): q for q in quotes if q.get("symbol")}
     _off_fundnav_tasks: list[tuple] = []  # [(etf, sym, ti, idx_or_none), ...]
     for etf in off_exchange:
         sym = etf.symbol
@@ -1243,7 +1259,22 @@ async def get_portfolio_realtime(phase: str = "all") -> list[dict[str, Any]]:
             existing["estimate_source"] = "tracked_index" if now_trading else "nav"
             continue
 
-        if now_trading and ti in index_price_map:
+        _ti_quote = _quote_by_symbol.get(ti)
+        if now_trading and _ti_quote and _ti_quote.get("change_pct") is not None:
+            quotes.append({
+                "symbol": sym,
+                "name": name_map.get(sym, sym),
+                "short_name": short_name_map.get(sym, name_map.get(sym, sym)),
+                "price": _ti_quote.get("price"),
+                "change_pct": _ti_quote.get("change_pct"),
+                "change_amount": _ti_quote.get("change_amount", 0),
+                "volume": 0,
+                "asset_type": "A",
+                "portfolio_type": "off_exchange",
+                "is_estimated": True,
+                "estimate_source": "tracked_index",
+            })
+        elif now_trading and ti in index_price_map:
             idx = index_price_map[ti]
             quotes.append({
                 "symbol": sym,
@@ -1275,14 +1306,22 @@ async def get_portfolio_realtime(phase: str = "all") -> list[dict[str, Any]]:
                 except Exception:
                     nav_data = None
                 nav_price = None
+                _nav_change_pct: float = 0.0
                 if nav_data and isinstance(nav_data, dict) and nav_data.get("nav"):
                     nav_price = float(nav_data["nav"])
+                    # R173 (round52 §7.3 方案B): nav 分支不再硬编码假 0——
+                    # fetch_fund_nav 契约含 daily_change_pct（T-1 净值涨跌，实测 -1.42），
+                    # 缺失/非法时诚实回 0.0。
+                    try:
+                        _nav_change_pct = float(nav_data.get("daily_change_pct") or 0.0)
+                    except (TypeError, ValueError):
+                        _nav_change_pct = 0.0
                 quotes.append({
                     "symbol": sym,
                     "name": name_map.get(sym, sym),
                     "short_name": short_name_map.get(sym, name_map.get(sym, sym)),
                     "price": nav_price or (index_price_map.get(ti, {}).get("price")),
-                    "change_pct": 0,
+                    "change_pct": _nav_change_pct,
                     "change_amount": 0,
                     "volume": 0,
                     "asset_type": "A",

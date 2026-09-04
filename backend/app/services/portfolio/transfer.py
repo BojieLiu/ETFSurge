@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.portfolio import PortfolioETF
 from app.services.portfolio._facade_refs import list_etfs
+from app.services.portfolio.pricing import normalize_asset_type
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +111,9 @@ async def import_portfolio(
 
             symbol = row["symbol"].strip()
             name = row["name"].strip()
-            asset_type = row.get("asset_type", "ETF").strip()
+            # R176 (round52 §7.3 方案E-1): 口径归一——seed CSV（9-1 重灌）第 4 列写
+            # 'ETF'，消费侧只认 'A' → 导入即漂移。统一走 normalize_asset_type。
+            asset_type = normalize_asset_type(row.get("asset_type") or "ETF")
             pt = row.get("portfolio_type", portfolio_type).strip()
             short_name = row.get("short_name") or name
             tracked_index = row.get("tracked_index") or None

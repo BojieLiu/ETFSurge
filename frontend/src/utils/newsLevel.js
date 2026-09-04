@@ -57,6 +57,14 @@ export function categoryColor(category, level) {
   return LEVEL_COLORS_FALLBACK[mapNewsLevel(level).color] || '#9ca3af'
 }
 
+// R178 (round52 §9.2 方案B-1): 重要等级星级——新星编码 level（重要度，1-5），
+// 与 R83 移除的旧星区分：旧星编码 stars（新鲜度，与相对时间重复）。语义不重复。
+// 全量显示（other 类也显示——用户诉求「每条都有地方体现」）。
+export function mapLevelStars(level) {
+  const n = Math.min(5, Math.max(1, Math.round(Number(level) || 1)))
+  return '★'.repeat(n) + '☆'.repeat(5 - n)
+}
+
 export function categoryColorClass(category, level) {
   if (CATEGORY_CLASS[category]) return CATEGORY_CLASS[category]
   const lv = mapNewsLevel(level).color

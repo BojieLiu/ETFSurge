@@ -39,13 +39,22 @@ async def calculate_allocation(
     for e in etfs:
         target_amount = total_capital * e.target_weight
         total_amount += target_amount
-        price, change_pct = price_map.get(e.symbol, (0, 0))
+        # R175 (round52 §7.3 方案C): price_map 缺失（A 股批量 3s 截断/NAV 不可达）→
+        # (None, None) 诚实空值——旧默认 (0, 0) 让「行情暂不可用」伪装成真实 0 涨跌。
+        price, change_pct = price_map.get(e.symbol, (None, None))
         is_estimated = False
         estimate_source = None
         if e.portfolio_type == "off_exchange" and e.tracked_index:
-            _, change_pct = price_map.get(e.tracked_index, (0, 0))
             is_estimated = True
-            estimate_source = "tracked_index"
+            if e.tracked_index in price_map:
+                _, change_pct = price_map[e.tracked_index]
+                estimate_source = "tracked_index"
+            else:
+                # ti 报价也缺失（批量截断/NAV 源失败）→ unavailable，不标 tracked_index
+                estimate_source = "unavailable"
+        elif price is None:
+            # 场内条目现价缺失 → 同样诚实标注（区别于正常实时条目）
+            estimate_source = "unavailable"
 
         avg_cost = getattr(e, 'avg_cost', None)
         shares_held = getattr(e, 'shares_held', None)

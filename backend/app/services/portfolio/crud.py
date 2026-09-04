@@ -14,6 +14,7 @@ from app.services.portfolio._facade_refs import (
     build_price_map,
     recompute_cost_after_trade,
 )
+from app.services.portfolio.pricing import normalize_asset_type
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +52,9 @@ async def add_etf(db: AsyncSession, data: PortfolioETFCreate) -> PortfolioETF:
         symbol=data.symbol,
         name=data.name,
         short_name=data.short_name or data.name,
-        asset_type=data.asset_type,
+        # R176 (round52 §7.3 方案E-1): 写入归一（'ETF'/'A-SHARE' → 'A'）——
+        # 与消费侧 _split_symbols / allocation 基本面分支口径一致。
+        asset_type=normalize_asset_type(data.asset_type),
         target_weight=data.target_weight,
         portfolio_type=data.portfolio_type,
         tracked_index=_tidx,

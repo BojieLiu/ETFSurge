@@ -228,3 +228,52 @@ def test_default_limit_is_one():
     assert any("limit=1" in c for c in calls), (
         f"默认应调 /designs?limit=1; 实际 calls={calls}"
     )
+
+
+# ── R172 (round52 §4.3 方案C): base 默认值 [::1] → localhost 回退 ──
+#
+# round52 §4.1: 裸跑 `python scripts/verify_allocation_invariants.py` 在容器场景
+# （0.0.0.0 v4 端口映射 + 宿主代理劫持 [::1]）挂死/超时，必须显式 --base 才能 PASS。
+# 负向断言：[::1] 不可达时必须落到 localhost，而不是继续挂在不可达地址上。
+
+def test_resolve_base_explicit_skips_probe():
+    """显式 --base 原样使用（patrol 传参路径不受影响，且不做网络探测）。"""
+    mod = _load_module()
+    with patch.object(mod, "_probe_health", side_effect=AssertionError("不应探测")):
+        assert mod._resolve_base("http://127.0.0.1:9000/") == "http://127.0.0.1:9000"
+
+
+def test_resolve_base_falls_back_to_localhost():
+    """负向核心：[::1] 不可达 → 必须回退 localhost（否则容器裸跑挂死）。"""
+    mod = _load_module()
+    with patch.object(mod, "_probe_health", side_effect=[False, True]) as probe:
+        base = mod._resolve_base(None)
+    assert base == mod.FALLBACK_BASE, f"[::1] 不可达时应回退 localhost，实际 {base}"
+    assert probe.call_count == 2
+
+
+def test_resolve_base_prefers_ipv6_when_reachable():
+    """[::1] 可达时保持原默认（本地 --host :: 场景行为不变）。"""
+    mod = _load_module()
+    with patch.object(mod, "_probe_health", return_value=True) as probe:
+        base = mod._resolve_base(None)
+    assert base == mod.DEFAULT_BASE
+    assert probe.call_count == 1, "可达时不应再探测回退地址"
+
+
+def test_resolve_base_keeps_default_when_both_down():
+    """两个都不可达 → 回落默认值（随后由 _run 报 ERROR 退出码 2）。"""
+    mod = _load_module()
+    with patch.object(mod, "_probe_health", return_value=False):
+        assert mod._resolve_base(None) == mod.DEFAULT_BASE
+
+
+def test_probe_health_returns_false_on_any_error():
+    """探测：urlopen 抛 URLError/HTTPError(502)/超时 → False，不向上抛。"""
+    mod = _load_module()
+
+    def boom(url, timeout=15):
+        raise urllib.error.HTTPError(url, 502, "Bad Gateway", None, None)
+
+    with patch.object(mod, "_get_json", side_effect=boom):
+        assert mod._probe_health("http://[::1]:8000") is False

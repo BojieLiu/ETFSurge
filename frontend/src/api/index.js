@@ -95,6 +95,8 @@ export const portfolioApi = {
 
 export const newsApi = {
   headlines: () => api.get('/news/headlines'),
+  // R178 (round52 §9.2 方案A): 「全部」tab 数据源——三桶去重合并（契约 api-contracts/news/all.md）
+  all: () => api.get('/news/all'),
   // F29 (round23 §2.4 A4): 资讯页接入 macro/global/stock/research 四端点——
   // 旧实现仅 headlines 可达，其余 4 端点 UI 不可达（事实死功能）。
   macro: () => api.get('/news/macro'),

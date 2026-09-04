@@ -122,8 +122,12 @@ class WarmupProfiler:
         except Exception as e:
             logger.warning("[profiler] pyinstrument text save failed: %s", e)
 
-    def write_report(self, filename: str = "warmup_timing.json") -> str:
-        """Write structured timing report JSON."""
+    def write_report(self, filename: str = "warmup_timing.json", extra: dict | None = None) -> str:
+        """Write structured timing report JSON.
+
+        R170 (round52 §4.3 方案A): `extra` 供调用方注入 sequence 分段等补充口径——
+        不计入 total_duration_ms（该值是 A01 预热门禁的判据，口径变更会误伤门禁）。
+        """
         path = os.path.join(self._output_dir, filename)
         report = {
             "total_duration_ms": sum(r.duration_ms for r in self.records),
@@ -137,6 +141,8 @@ class WarmupProfiler:
                 for r in self.records
             ],
         }
+        if extra:
+            report.update(extra)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(report, f, ensure_ascii=False, indent=2)
         logger.info("[profiler] timing report -> %s", path)

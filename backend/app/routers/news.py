@@ -28,6 +28,14 @@ async def headlines() -> JSONResponse:
     return _with_partial_flag(items or [])
 
 
+@router.get("/all")
+async def all_news() -> JSONResponse:
+    """R178 (round52 §9.2 方案A): 三桶合并视图（「全部」tab）——跨桶 id 去重 +
+    sort_time 降序 + 上限 60；partial 复用 _with_partial_flag。"""
+    items = await run_sync(market_data_hub.get_news_all, timeout=30)
+    return _with_partial_flag(items or [])
+
+
 @router.get("/macro")
 async def macro() -> JSONResponse:
     items = await run_sync(market_data_hub.get_news_macro)

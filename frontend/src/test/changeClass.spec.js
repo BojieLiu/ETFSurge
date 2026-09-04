@@ -22,6 +22,13 @@ describe('changeClass (红涨绿跌)', () => {
   it('maps a large negative value to text-down (green)', () => {
     expect(changeClass(-99.99)).toBe('text-down')
   })
+
+  // R175 (round52 §7.3 方案C): 行情不可用（null）→ 中性色，不冒充涨/跌
+  it('maps null/undefined/NaN to neutral (empty class)', () => {
+    expect(changeClass(null)).toBe('')
+    expect(changeClass(undefined)).toBe('')
+    expect(changeClass(Number.NaN)).toBe('')
+  })
 })
 
 // --- Issue 2: AI tool buttons (moved to DashboardAiTools) ---

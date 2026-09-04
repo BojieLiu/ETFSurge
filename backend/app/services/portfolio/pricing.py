@@ -16,6 +16,28 @@ _PRICE_MAP_CACHE: dict[tuple, tuple[float, dict]] = {}
 
 _PRICE_MAP_TTL = 15.0
 
+# R176 (round52 §7.3 方案E-1): asset_type 写入口径归一。
+# round52 §7.1: 9-1 持仓重灌（3fb66b1）的 seed CSV 把场内 ETF 写成 asset_type='ETF'，
+# 而消费侧（本文件 _split_symbols / allocation.py 基本面分支 / hub.get_asset_realtime）
+# 只认 'A' → 带 portfolio_type 过滤的请求四个分支全空 → 现价/涨跌幅恒 0。
+# 'A' 是 pricing 全链路既定口径（场内 A 股/ETF 统一），'ETF' 属重灌引入的漂移值。
+_ASSET_TYPE_ALIASES: dict[str, str] = {
+    "A": "A",
+    "ETF": "A",
+    "A-SHARE": "A",
+    "HK": "HK",
+    "US": "US",
+}
+
+
+def normalize_asset_type(raw: str | None) -> str:
+    """持仓 asset_type 写入/读取口径归一：'ETF'/'A-SHARE' → 'A'（R176）。
+
+    未知值（如 'BOND'）原样返回（不做臆断归一）；空值 → 'A'（持仓主体是 A 股场内标的）。
+    """
+    _key = str(raw or "").strip().upper()
+    return _ASSET_TYPE_ALIASES.get(_key, _key or "A")
+
 _FUNDAMENTALS_CACHE: dict[tuple, tuple[float, dict]] = {}
 
 

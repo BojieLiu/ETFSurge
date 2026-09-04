@@ -29,13 +29,39 @@ import urllib.request
 
 # round36 §8-C 同款: 端口选择 (v6only 实际只 ::1 可连)
 DEFAULT_BASE = "http://[::1]:8000"
+# R172 (round52 §4.3 方案C): 容器场景 (0.0.0.0 v4 端口映射 + 宿主代理劫持 [::1] → 502/超时)
+# 裸跑挂死; [::1] 探测失败时回落 localhost。显式 --base 不受影响 (patrol.py 传参路径)。
+FALLBACK_BASE = "http://localhost:8000"
 TIMEOUT = 15
+PROBE_TIMEOUT = 3.0
 TOLERANCE = 0.01  # 浮点累加容差
 
 
 def _get_json(url, timeout=TIMEOUT):
     with urllib.request.urlopen(url, timeout=timeout) as r:
         return json.loads(r.read())
+
+
+def _probe_health(base: str, timeout: float = PROBE_TIMEOUT) -> bool:
+    """探测某 base 的 /health 是否可达（短超时，避免挂死）。"""
+    try:
+        _get_json(f"{base.rstrip('/')}/health", timeout=timeout)
+    except Exception:
+        return False
+    return True
+
+
+def _resolve_base(explicit: str | None) -> str:
+    """解析后端 base：显式 --base 直接用；否则 [::1] 优先、失败回落 localhost。"""
+    if explicit:
+        return explicit.rstrip("/")
+    if _probe_health(DEFAULT_BASE):
+        return DEFAULT_BASE.rstrip("/")
+    if _probe_health(FALLBACK_BASE):
+        print(f"  [INFO] {DEFAULT_BASE} 不可达，已回退 {FALLBACK_BASE}"
+              f"（R172：容器 v4 端口映射 / 宿主代理劫持 [::1] 场景）")
+        return FALLBACK_BASE.rstrip("/")
+    return DEFAULT_BASE.rstrip("/")
 
 
 def _check_design(design: dict) -> list[str]:
@@ -180,11 +206,13 @@ def main(argv=None):
     parser = argparse.ArgumentParser(
         description="端到端业务不变量校验: 拉 designs 拉 strategies 验 Σlayer ≤ budget + Σtotal ≤ 1.0"
     )
-    parser.add_argument("--base", default=DEFAULT_BASE, help="后端 base URL")
+    parser.add_argument("--base", default=None,
+                        help=f"后端 base URL（默认先试 {DEFAULT_BASE}，不可达回退 {FALLBACK_BASE}）")
     parser.add_argument("--limit", type=int, default=1, help="检查最近 N 个 design (默认 1: 仅最新 design; 防止历史 design 10-12 的 R140 修复前数据持续 FAIL; 传 --limit 5 看历史)")
     parser.add_argument("--design-id", type=int, default=None,
                         help="检查指定 design_id (单 design 模式, 跳过 --limit)")
     args = parser.parse_args(argv)
+    args.base = _resolve_base(args.base)
     return _run(args)
 
 

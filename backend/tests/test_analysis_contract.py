@@ -27,63 +27,94 @@ CANNED_LLM_JSON = '{"action": "继续持有", "rationale": "组合结构合理",
 def client():
     """TestClient with LLM + all data fetchers mocked.
 
-    Patches only functions that actually exist in the current router module.
-    Removed deprecated patches (_fetch_all_market, _collect_news) and
-    functions that moved to other modules (list_etfs → portfolio_service,
-    build_price_map → portfolio_service).
+    R52 (2026-09-04): 改用 contextlib.ExitStack 逐项挂 patch——原 20 项
+    with-item 单链撞 CPython compile 静态嵌套块上限（cannot add more than
+    20），且 symbol-analysis stream 取证挂起后新增 6 个外部源 mock。
     """
-    with patch(
-        "app.analysis.runtime.llm_complete_with_system",
-        new=AsyncMock(return_value=CANNED_LLM_JSON),
-    # Market data functions imported into router from market_service
-    ), patch(
-        "app.services.market_data_hub.market_data_hub.get_all_realtime",
-        new=AsyncMock(return_value=[]),
-    ), patch(
-        "app.services.market_data_hub.market_data_hub.get_indices",
-        new=AsyncMock(return_value=[]),
-    ), patch(
-        "app.services.market_data_hub.market_data_hub.get_commodities",
-        new=AsyncMock(return_value=[]),
-    ), patch(
-        "app.services.market_data_hub.market_data_hub.get_market_history",
-        new=AsyncMock(return_value=[]),
-    ), patch(
-        "app.services.market_data_hub.market_data_hub.get_asset_realtime",
-        new=AsyncMock(return_value={"symbol": "600519", "name": "贵州茅台", "price": 1700, "change_pct": 0.5}),
-    # News fetchers
-    ), patch(
-        "app.services.market_data_hub.market_data_hub.get_news_headlines",
-        return_value=[],
-    ), patch(
-        "app.services.market_data_hub.market_data_hub.get_news_macro",
-        return_value=[],
-    # Sector fetchers
-    ), patch(
-        "app.services.market_data_hub.market_data_hub.get_sector_industry",
-        return_value=[{"sector_code": "BK0001", "sector_name": "银行"}],
-    ), patch(
-        "app.services.market_data_hub.market_data_hub.get_sector_concept",
-        return_value=[],
-    ), patch(
-        "app.services.market_data_hub.market_data_hub.get_sector_stocks",
-        return_value=[{"symbol": "600036", "name": "招商银行", "price": 35.0, "change_pct": 1.0}],
-    ), patch(
-        "app.services.market_data_hub.market_data_hub.get_hot_plates",
-        return_value=[],
-    ), patch(
-        "app.services.market_data_hub.market_data_hub.get_sector_heat",
-        return_value=[],
-    # Fundamental fetchers
-    ), patch(
-        "app.services.market_data_hub.market_data_hub.get_fund_flow",
-        return_value=None,
-    ), patch(
-        "app.services.market_data_hub.market_data_hub.get_hist_avg_volume",
-        return_value=None,
-    ):
-        yield TestClient(app)
+    from contextlib import ExitStack
 
+    with ExitStack() as stack:
+        stack.enter_context(patch(
+            "app.analysis.runtime.llm_complete_with_system",
+            new=AsyncMock(return_value=CANNED_LLM_JSON),
+        ))
+        stack.enter_context(patch(
+            "app.services.market_data_hub.market_data_hub.get_all_realtime",
+            new=AsyncMock(return_value=[]),
+        ))
+        stack.enter_context(patch(
+            "app.services.market_data_hub.market_data_hub.get_indices",
+            new=AsyncMock(return_value=[]),
+        ))
+        stack.enter_context(patch(
+            "app.services.market_data_hub.market_data_hub.get_commodities",
+            new=AsyncMock(return_value=[]),
+        ))
+        stack.enter_context(patch(
+            "app.services.market_data_hub.market_data_hub.get_market_history",
+            new=AsyncMock(return_value=[]),
+        ))
+        stack.enter_context(patch(
+            "app.services.market_data_hub.market_data_hub.get_asset_realtime",
+            new=AsyncMock(return_value={"symbol": "600519", "name": "贵州茅台", "price": 1700, "change_pct": 0.5}),
+        ))
+        stack.enter_context(patch(
+            "app.services.market_data_hub.market_data_hub.get_news_headlines",
+            return_value=[],
+        ))
+        stack.enter_context(patch(
+            "app.services.market_data_hub.market_data_hub.get_news_macro",
+            return_value=[],
+        ))
+        stack.enter_context(patch(
+            "app.services.market_data_hub.market_data_hub.get_sector_industry",
+            return_value=[{"sector_code": "BK0001", "sector_name": "银行"}],
+        ))
+        stack.enter_context(patch(
+            "app.services.market_data_hub.market_data_hub.get_sector_concept",
+            return_value=[],
+        ))
+        stack.enter_context(patch(
+            "app.services.market_data_hub.market_data_hub.get_sector_stocks",
+            return_value=[{"symbol": "600036", "name": "招商银行", "price": 35.0, "change_pct": 1.0}],
+        ))
+        stack.enter_context(patch(
+            "app.services.market_data_hub.market_data_hub.get_hot_plates",
+            return_value=[],
+        ))
+        stack.enter_context(patch(
+            "app.services.market_data_hub.market_data_hub.get_sector_heat",
+            return_value=[],
+        ))
+        stack.enter_context(patch(
+            "app.services.market_data_hub.market_data_hub.get_fund_flow",
+            return_value=None,
+        ))
+        stack.enter_context(patch(
+            "app.services.market_data_hub.market_data_hub.get_hist_avg_volume",
+            return_value=None,
+        ))
+        stack.enter_context(patch(
+            "app.routers.analysis.get_history",
+            new=AsyncMock(return_value=[]),
+        ))
+        stack.enter_context(patch(
+            "app.services.market_service.get_history",
+            new=AsyncMock(return_value=[]),
+        ))
+        stack.enter_context(patch(
+            "app.fetchers.news_fetcher.fetch_stock_news",
+            return_value=[],
+        ))
+        stack.enter_context(patch(
+            "app.fetchers.fundamentals_fetcher.fetch_current_pe_pb",
+            return_value=None,
+        ))
+        stack.enter_context(patch(
+            "app.fetchers.sector_fetcher.get_stock_industry_map",
+            return_value={},
+        ))
+        yield TestClient(app)
 
 def test_news_impact(client):
     r = client.post(

@@ -97,21 +97,28 @@ async def _fetch_sina_hk_indices():
 
 
 async def _fetch_ths_industry_indices():
-    """抓取同花顺行业指数。"""
+    """抓取同花顺行业指数列表。
+
+    R177 (round52 §8.4 方案B, 2026-09-03): akshare 1.18.x 实测
+    `stock_board_industry_index_ths(symbol=板块名, start_date, end_date)` 语义已
+    漂移为**单板块历史 K 线**（无参调用不报错但返回 K 线 df，按「指数代码/指数名称」
+    列解析 → 恒 0 行）。换 `stock_board_industry_name_ths()`——板块列表语义
+    （name/code 两列，实测 90 行），与设计意图一致。
+    """
     import akshare as ak
 
     from ..core.async_utils import run_sync_long
     try:
-        df = await run_sync_long(ak.stock_board_industry_index_ths)
+        df = await run_sync_long(ak.stock_board_industry_name_ths)
     except Exception as e:
-        print(f"  [WARN] stock_board_industry_index_ths failed: {e}")
+        print(f"  [WARN] stock_board_industry_name_ths failed: {e}")
         return []
     if df is None or getattr(df, "empty", True):
         return []
     out = []
     for _, r in df.iterrows():
-        code = str(r.get("指数代码", "") or r.get("代码", "") or r.get("symbol", "")).strip()
-        name = str(r.get("指数名称", "") or r.get("名称", "") or r.get("name", "")).strip()
+        code = str(r.get("code", "") or r.get("指数代码", "") or r.get("代码", "")).strip()
+        name = str(r.get("name", "") or r.get("指数名称", "") or r.get("名称", "")).strip()
         if code and name:
             out.append({
                 "symbol": code,
@@ -124,32 +131,46 @@ async def _fetch_ths_industry_indices():
     return out
 
 
-async def _fetch_ths_concept_indices():
-    """抓取同花顺概念指数。"""
-    import akshare as ak
+def _parse_ths_name_df(df, category: str) -> list[dict]:
+    """R177: _name_ths df（name/code 两列）→ indices_meta 条目列表。
 
-    from ..core.async_utils import run_sync_long
-    try:
-        df = await run_sync_long(ak.stock_board_concept_index_ths)
-    except Exception as e:
-        print(f"  [WARN] stock_board_concept_index_ths failed: {e}")
-        return []
+    列名兼容序：name/code（_name_ths 形态）→ 指数代码/指数名称（旧形态，防御
+    akshare 再漂移）；code+name 双空行丢弃。
+    """
     if df is None or getattr(df, "empty", True):
         return []
     out = []
     for _, r in df.iterrows():
-        code = str(r.get("指数代码", "") or r.get("代码", "") or r.get("symbol", "")).strip()
-        name = str(r.get("指数名称", "") or r.get("名称", "") or r.get("name", "")).strip()
+        code = str(r.get("code", "") or r.get("指数代码", "") or r.get("代码", "") or "").strip()
+        name = str(r.get("name", "") or r.get("指数名称", "") or r.get("名称", "") or "").strip()
         if code and name:
             out.append({
                 "symbol": code,
                 "name": name,
                 "market": "A",
-                "category": "concept",
+                "category": category,
                 "index_type": "price",
                 "source": "ths",
             })
     return out
+
+
+async def _fetch_ths_concept_indices():
+    """抓取同花顺概念指数列表。
+
+    R177 (round52 §8.4 方案B): `stock_board_concept_index_ths` 语义漂移同
+    行业段——换 `stock_board_concept_name_ths()`（列表语义，实测 ~375 行，
+    「创新药」=308014 命中）。
+    """
+    import akshare as ak
+
+    from ..core.async_utils import run_sync_long
+    try:
+        df = await run_sync_long(ak.stock_board_concept_name_ths)
+    except Exception as e:
+        print(f"  [WARN] stock_board_concept_name_ths failed: {e}")
+        return []
+    return _parse_ths_name_df(df, category="concept")
 
 
 # P0-20/P0-22 (round16 3.21/3.24): 静态兜底指数段——「恒生港股通」系列 + 主流
@@ -207,6 +228,18 @@ _STATIC_EXTRA_INDICES: list[dict] = [
     {"symbol": "H11148", "name": "恒生港股通高股息低波动指数", "market": "HK", "category": "broad", "index_type": "price", "source": "static"},
     {"symbol": "H11149", "name": "恒生港股通高股息低波动指数(HKD)", "market": "HK", "category": "broad", "index_type": "price", "source": "static"},
     {"symbol": "HSHLDI", "name": "恒生港股通低波幅指数", "market": "HK", "category": "theme", "index_type": "price", "source": "static"},
+    # ── R177 (round52 §8.4 方案C): 中证/上证红利系静态增补——中证 custom 指数
+    # 不在新浪指数 spot 列表（实测「红利低波」0 命中），akshare 兜底同源无效；
+    # instruments 表有 33 只「红利低波ETF」（512890/560150/515480）但其跟踪指数
+    # 搜不到。收录高频使用的红利系指数（中证官网列表真实存在），symbol 裸码 +
+    # market='A'（sh 前缀形态先例为 _fetch_sina_a_indices 的 sh000015，表内统一
+    # 裸码——见 collect_all 的 (symbol, market) 去重键）。
+    {"symbol": "H30269", "name": "中证红利低波动指数", "market": "A", "category": "theme", "index_type": "price", "source": "static"},
+    {"symbol": "H20269", "name": "中证红利低波动100指数", "market": "A", "category": "theme", "index_type": "price", "source": "static"},
+    {"symbol": "000922", "name": "中证红利指数", "market": "A", "category": "theme", "index_type": "price", "source": "static"},
+    {"symbol": "000015", "name": "上证红利指数", "market": "A", "category": "theme", "index_type": "price", "source": "static"},
+    {"symbol": "921465", "name": "中证红利质量指数", "market": "A", "category": "theme", "index_type": "price", "source": "static"},
+    {"symbol": "931446", "name": "中证东方红红利低波动指数", "market": "A", "category": "theme", "index_type": "price", "source": "static"},
 ]
 
 

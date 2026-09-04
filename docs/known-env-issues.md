@@ -99,6 +99,16 @@
 - **处置**：全量改 `python -m pytest -n 2` 执行后稳定全绿 → `tests_ok_marker.py
   --mark` 后 pre-commit 凭据有效自动跳过重复全量。根治需扩页面文件（系统设置，
   非仓库范畴）；若换机/扩页后 `-n auto` 稳定可删除本条。
+- **症状指纹 1.2**：`test_symbol_analysis_stream` 单跑挂起（>100s 无输出，超时杀无
+  断言失败）；clean HEAD（stash 全部改动后）同样挂起 → **pre-existing 环境性**，
+  非代码回归。该测试经 TestClient POST SSE 端点，`_build` 内 `get_history`/
+  `fetch_stock_news`/`fetch_current_pe_pb`/`get_stock_industry_map` 等外部源调用
+  在宿主代理状态异常时阻塞（R177 §8.3-③ 同族：akshare 会话/代理状态劣化）。
+- **归类**：环境性（外部访问未 mock）；「外部访问必须 mock」门禁治理对象。
+- **处置（2026-09-04 round52 实施轮已修复）**：test_analysis_contract.py client
+  fixture 改 contextlib.ExitStack 逐项挂 patch（原 20 项 with-item 单链撞
+  CPython compile 静态嵌套块上限 20，无法再加 patch）+ 补 6 个外部源 mock。
+  修复后单跑 82s PASS、全文件 6 passed。
 
 ## 2. 工具链陷阱（Windows）
 

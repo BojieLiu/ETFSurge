@@ -40,9 +40,10 @@ vi.mock('../stores/portfolio', () => ({
   }),
 }))
 
-const apiMock = vi.hoisted(() => ({ headlines: vi.fn(), newsImpact: vi.fn(), macro: vi.fn(), globalNews: vi.fn(), stockNews: vi.fn(), research: vi.fn() }))
+const apiMock = vi.hoisted(() => ({ all: vi.fn(), headlines: vi.fn(), newsImpact: vi.fn(), macro: vi.fn(), globalNews: vi.fn(), stockNews: vi.fn(), research: vi.fn() }))
 vi.mock('../api', () => ({
   newsApi: {
+    all: apiMock.all,
     headlines: apiMock.headlines,
     macro: apiMock.macro,
     globalNews: apiMock.globalNews,
@@ -92,11 +93,12 @@ describe('NewsView', () => {
     h.reset()
     toastSpy.mockClear()
     apiMock.headlines.mockReset()
+    apiMock.all.mockReset()
     apiMock.newsImpact.mockReset()
   })
 
   it('shows a toast for important items on enter', async () => {
-    apiMock.headlines.mockResolvedValue({ data: SAMPLE })
+    apiMock.all.mockResolvedValue({ data: SAMPLE })
     mount(NewsView, { global: { stubs: { VChart: true } } })
     await flushPromises()
 
@@ -104,14 +106,14 @@ describe('NewsView', () => {
   })
 
   it('does NOT toast for non-important-only batches', async () => {
-    apiMock.headlines.mockResolvedValue({ data: [{ id: 9, title: '普通', level: 1 }] })
+    apiMock.all.mockResolvedValue({ data: [{ id: 9, title: '普通', level: 1 }] })
     mount(NewsView, { global: { stubs: { VChart: true } } })
     await flushPromises()
     expect(toastSpy).not.toHaveBeenCalled()
   })
 
   it('prepends a WS-pushed important item to the top of the list', async () => {
-    apiMock.headlines.mockResolvedValue({ data: SAMPLE })
+    apiMock.all.mockResolvedValue({ data: SAMPLE })
     const wrapper = mount(NewsView, { global: { stubs: { VChart: true } } })
     await flushPromises()
 
@@ -124,7 +126,7 @@ describe('NewsView', () => {
   })
 
   it('guards against duplicate WS items by id', async () => {
-    apiMock.headlines.mockResolvedValue({ data: [] })
+    apiMock.all.mockResolvedValue({ data: [] })
     const wrapper = mount(NewsView, { global: { stubs: { VChart: true } } })
     await flushPromises()
 
@@ -137,7 +139,7 @@ describe('NewsView', () => {
   })
 
   it('R83: removes abstract numeric stars, keeps category/level label', async () => {
-    apiMock.headlines.mockResolvedValue({ data: SAMPLE })
+    apiMock.all.mockResolvedValue({ data: SAMPLE })
     const wrapper = mount(NewsView, { global: { stubs: { VChart: true } } })
     await flushPromises()
     // R83: 数字星已移除
@@ -147,7 +149,7 @@ describe('NewsView', () => {
   })
 
   it('handles news_batch with multiple items in correct order', async () => {
-    apiMock.headlines.mockResolvedValue({ data: [] })
+    apiMock.all.mockResolvedValue({ data: [] })
     const wrapper = mount(NewsView, { global: { stubs: { VChart: true } } })
     await flushPromises()
 
@@ -170,7 +172,7 @@ describe('NewsView', () => {
   })
 
   it('news_batch deduplicates by id', async () => {
-    apiMock.headlines.mockResolvedValue({ data: [{ id: 1, title: '已有新闻', time: '10:00', level: 2 }] })
+    apiMock.all.mockResolvedValue({ data: [{ id: 1, title: '已有新闻', time: '10:00', level: 2 }] })
     const wrapper = mount(NewsView, { global: { stubs: { VChart: true } } })
     await flushPromises()
 
@@ -190,7 +192,7 @@ describe('NewsView', () => {
   })
 
   it('news_batch with same sort_time preserves server order', async () => {
-    apiMock.headlines.mockResolvedValue({ data: [] })
+    apiMock.all.mockResolvedValue({ data: [] })
     const wrapper = mount(NewsView, { global: { stubs: { VChart: true } } })
     await flushPromises()
 
@@ -210,7 +212,7 @@ describe('NewsView', () => {
   })
 
   it('re-sorts after multiple legacy single-item WS pushes (prepend-reversal guard)', async () => {
-    apiMock.headlines.mockResolvedValue({ data: [] })
+    apiMock.all.mockResolvedValue({ data: [] })
     const wrapper = mount(NewsView, { global: { stubs: { VChart: true } } })
     await flushPromises()
 
@@ -231,7 +233,7 @@ describe('NewsView', () => {
 
   it('re-sorts after mixed REST + WS merge', async () => {
     // REST loads old items
-    apiMock.headlines.mockResolvedValue({ data: [
+    apiMock.all.mockResolvedValue({ data: [
       { id: 1, title: 'REST旧', time: '2026-07-26 10:00', sort_time: 1000, level: 2 },
       { id: 2, title: 'REST更旧', time: '2026-07-26 09:00', sort_time: 900, level: 1 },
     ] })
@@ -258,7 +260,7 @@ describe('NewsView', () => {
   })
 
   it('sorts by time string when sort_time is missing', async () => {
-    apiMock.headlines.mockResolvedValue({ data: [] })
+    apiMock.all.mockResolvedValue({ data: [] })
     const wrapper = mount(NewsView, { global: { stubs: { VChart: true } } })
     await flushPromises()
 
@@ -281,7 +283,7 @@ describe('NewsView', () => {
   })
 
   it('calls newsApi.newsImpact and shows the impact inline (F2-8)', async () => {
-    apiMock.headlines.mockResolvedValue({ data: SAMPLE })
+    apiMock.all.mockResolvedValue({ data: SAMPLE })
     apiMock.newsImpact.mockResolvedValue({
       data: {
         impact_scope: '全市场',
@@ -304,22 +306,24 @@ describe('NewsView', () => {
   })
 
   // ── F29 (round23 §2.4 A4): 资讯分类 tab ──
-  it('renders five news category tabs (F29)', async () => {
-    apiMock.headlines.mockResolvedValue({ data: SAMPLE })
+  it('renders six news category tabs (F29 + R178 all tab)', async () => {
+    apiMock.all.mockResolvedValue({ data: SAMPLE })
     const wrapper = mount(NewsView, { global: { stubs: { VChart: true } } })
     await flushPromises()
 
     const tabs = wrapper.findAll('.news-tab')
-    expect(tabs.map(t => t.text())).toEqual(['头条', '宏观', '国际', '个股', '研报'])
+    expect(tabs.map(t => t.text())).toEqual(['全部', '头条', '宏观', '国际', '个股', '研报'])
+    // R178: all 为默认 tab
+    expect(tabs[0].classes()).toContain('active')
   })
 
   it('switches to macro tab and loads macro endpoint (F29)', async () => {
-    apiMock.headlines.mockResolvedValue({ data: SAMPLE })
+    apiMock.all.mockResolvedValue({ data: SAMPLE })
     apiMock.macro.mockResolvedValue({ data: [{ id: 'm1', title: '央行降准', level: 4, time: '11:00' }] })
     const wrapper = mount(NewsView, { global: { stubs: { VChart: true } } })
     await flushPromises()
 
-    await wrapper.findAll('.news-tab')[1].trigger('click')
+    await wrapper.findAll('.news-tab')[2].trigger('click')
     await flushPromises()
 
     expect(apiMock.macro).toHaveBeenCalled()
@@ -328,12 +332,12 @@ describe('NewsView', () => {
   })
 
   it('switches to research tab with symbol input (F29)', async () => {
-    apiMock.headlines.mockResolvedValue({ data: [] })
+    apiMock.all.mockResolvedValue({ data: [] })
     apiMock.research.mockResolvedValue({ data: [{ id: 'r1', title: '研报：维持买入', level: 3, time: '09:00' }] })
     const wrapper = mount(NewsView, { global: { stubs: { VChart: true } } })
     await flushPromises()
 
-    await wrapper.findAll('.news-tab')[4].trigger('click')
+    await wrapper.findAll('.news-tab')[5].trigger('click')
     await flushPromises()
 
     expect(apiMock.research).toHaveBeenCalledWith('600519')
@@ -341,13 +345,13 @@ describe('NewsView', () => {
   })
 
   it('WS push ignored outside headlines tab (F29)', async () => {
-    apiMock.headlines.mockResolvedValue({ data: [] })
+    apiMock.all.mockResolvedValue({ data: [] })
     apiMock.macro.mockResolvedValue({ data: [{ id: 'm1', title: '宏观新闻', level: 4, time: '11:00' }] })
     const wrapper = mount(NewsView, { global: { stubs: { VChart: true } } })
     await flushPromises()
 
     // 切到宏观 tab
-    await wrapper.findAll('.news-tab')[1].trigger('click')
+    await wrapper.findAll('.news-tab')[2].trigger('click')
     await flushPromises()
 
     // WS 推送不应混入宏观列表
@@ -364,7 +368,7 @@ describe('NewsView', () => {
   // R8: banner div 常驻 DOM（absolute + display:none）避免显隐造成布局偏移（CLS），
   // 断言类切换 `--show`（jsdom 不计算 scoped CSS 的 display，不能用 isVisible）。
   it('shows partial banner when X-News-Partial header is true (F31)', async () => {
-    apiMock.headlines.mockResolvedValue({
+    apiMock.all.mockResolvedValue({
       data: [{ id: 'p1', title: '仅一条', level: 3, time: '11:00' }],
       headers: { 'x-news-partial': 'true' },
     })
@@ -376,7 +380,7 @@ describe('NewsView', () => {
   })
 
   it('no partial banner when header absent (F31)', async () => {
-    apiMock.headlines.mockResolvedValue({ data: SAMPLE, headers: {} })
+    apiMock.all.mockResolvedValue({ data: SAMPLE, headers: {} })
     const wrapper = mount(NewsView, { global: { stubs: { VChart: true } } })
     await flushPromises()
 
@@ -519,12 +523,13 @@ describe('NewsView — P2-3 stars 新鲜度 + P1-4 ai_summary（round20）', () 
     h.reset()
     toastSpy.mockClear()
     apiMock.headlines.mockReset()
+    apiMock.all.mockReset()
     apiMock.newsImpact.mockReset()
   })
 
   it('R83: 后端 stars 数字星不再渲染（新鲜度改由 meta 相对时间表达）', async () => {
     // 后端 _compute_stars：<1h→5★；R83 后前端不再显示该数字星
-    apiMock.headlines.mockResolvedValue({
+    apiMock.all.mockResolvedValue({
       data: [
         { id: 1, title: '突发', content: 'c', level: 4, stars: 5, source: 'X', time: '10:00', ai_summary: null },
         { id: 2, title: '旧闻', content: 'c', level: 4, stars: 1, source: 'Y', time: '10:01', ai_summary: null },
@@ -540,7 +545,7 @@ describe('NewsView — P2-3 stars 新鲜度 + P1-4 ai_summary（round20）', () 
   })
 
   it('P1-4: ai_summary 非空时内联展示（消费后端预生成摘要）', async () => {
-    apiMock.headlines.mockResolvedValue({
+    apiMock.all.mockResolvedValue({
       data: [
         { id: 1, title: '突发', content: 'c', level: 5, stars: 5, source: 'X', time: '10:00',
           ai_summary: 'AI 生成的简要解读：政策利好推动板块上行。' },
@@ -552,5 +557,68 @@ describe('NewsView — P2-3 stars 新鲜度 + P1-4 ai_summary（round20）', () 
 
     const text = wrapper.text()
     expect(text).toContain('AI 生成的简要解读：政策利好推动板块上行。')
+  })
+})
+
+// ── R178 (round52 §9.2): 全部 tab + 重要等级星级 + 排序 toggle ──
+describe('NewsView — R178 all tab / importance stars / sort toggle', () => {
+  beforeEach(() => {
+    h.reset()
+    toastSpy.mockClear()
+    apiMock.all.mockReset()
+  })
+
+  it('R178-A: 默认 tab=all 且加载 /news/all', async () => {
+    apiMock.all.mockResolvedValue({ data: SAMPLE })
+    const wrapper = mount(NewsView, { global: { stubs: { VChart: true } } })
+    await flushPromises()
+    expect(apiMock.all).toHaveBeenCalled()
+    // SAMPLE 两条全部渲染
+    expect(wrapper.findAll('.news-item').length).toBe(2)
+  })
+
+  it('R178-B1: 每张卡片渲染重要等级星级（含 other 类）', async () => {
+    apiMock.all.mockResolvedValue({ data: [
+      { id: 1, title: '五级', level: 5, time: '10:00' },
+      { id: 2, title: '三级', level: 3, time: '10:01' },
+      { id: 3, title: '一级', level: 1, category: 'other', time: '10:02' },
+    ] })
+    const wrapper = mount(NewsView, { global: { stubs: { VChart: true } } })
+    await flushPromises()
+
+    const stars = wrapper.findAll('.news-importance-stars')
+    expect(stars.length).toBe(3)
+    expect(stars[0].text()).toBe('★★★★★')
+    expect(stars[1].text()).toBe('★★★☆☆')
+    expect(stars[2].text()).toBe('★☆☆☆☆')  // other 类也显示（全量显性化）
+  })
+
+  it('R178-C: 排序 toggle——时间默认，level 模式按重要度降序', async () => {
+    // 契约：后端 sort_time 降序返回——mock 同序
+    apiMock.all.mockResolvedValue({ data: [
+      { id: 2, title: '新低级', level: 1, sort_time: 400, time: '09:00' },
+      { id: 1, title: '旧低级', level: 2, sort_time: 300, time: '08:00' },
+      { id: 3, title: '高级', level: 5, sort_time: 200, time: '07:00' },
+    ] })
+    const wrapper = mount(NewsView, { global: { stubs: { VChart: true } } })
+    await flushPromises()
+
+    // 默认时间排序（后端 sort_time 降序已保证）：新低级(400) → 旧低级(300) → 高级(200)
+    const titles = () => wrapper.findAll('.news-title').map(n => n.text())
+    expect(titles()).toEqual(['新低级', '旧低级', '高级'])
+
+    // 切换到重要性排序：高级(5) → 旧低级(2) → 新低级(1)
+    await wrapper.find('.sort-toggle').trigger('click')
+    await wrapper.vm.$nextTick()
+    expect(titles()).toEqual(['高级', '旧低级', '新低级'])
+  })
+
+  it('R178-A: all tab 消费 WS 推送（与 headlines 同等）', async () => {
+    apiMock.all.mockResolvedValue({ data: [] })
+    const wrapper = mount(NewsView, { global: { stubs: { VChart: true } } })
+    await flushPromises()
+    h.getHandler()({ type: 'news', data: { id: 99, title: 'all tab 突发', level: 5 } })
+    await wrapper.vm.$nextTick()
+    expect(wrapper.text()).toContain('all tab 突发')
   })
 })

@@ -269,4 +269,185 @@
 
 ---
 
-*诊断产物：C:/Users/Public/etf_probe/（probe20-33.out + openapi.json + build52.log + apt_probe*.out，会话级临时目录）；容器于诊断完成后回收。收尾 commit：192b8c9（2026-09-02 push）。*
+## 7. 用户反馈复核（2026-09-03 11:31 盘中，本地后端 `2cd9e1d`，交易时段内）
+
+> 复核窗口：2026-09-03 11:31-12:00（**交易时段**，`is_trading_time()=True / session=open` 实测）；
+> 本地后端 `--host ::`（PID 27048）+ 同一 `data/portfolio.db`（31 只持仓：场内 15 + 场外 15 联接 C）。
+> 12:00 更新：据用户页面截图（场内 15 只现价 ¥0.00/涨跌幅 +0.00%、场外全部正常且现价=ti 场内标的）二次定位，
+> 新增 **R176**（asset_type 口径漂移）为反馈①的直接根因，R175 降级为伴随观察项——详见 §7.1 定性修正。
+
+### 7.1 反馈①「场内 ETF 涨跌幅都是 0」→ 定位 R173（场外估值断链，静态）+ R176（asset_type='ETF' 未入 A 股批量，页面所显直接根因）
+
+**实测复现**（11:31-11:35 三接口对照）：
+
+| 接口 | 场内 15 只 | 场外 15 只 | 备注 |
+|---|---|---|---|
+| `POST /portfolio/daily-pnl`（组合页盈亏 tab 数据源） | ✅ 全非零（0.42/-1.8/0.64…） | ✅ 全非零（estimate_source=tracked_index） | 无类型查询路径 |
+| `POST /portfolio/calculate`（pricing 链路，无类型） | ✅ 全非零 | ✅ 全非零（tracked_index） | 无类型查询路径 |
+| `GET /market/realtime/portfolio`（market_service 链路） | ✅ 全非零 | ❌ **15/15 change_pct=0**，`is_estimated=true, estimate_source='nav'` | 静态断链 |
+
+**R176（本轮 11:48 用户截图所指直接根因，9-3 12:00 定位）**：前端 `getAllocation(type)` 带 `portfolio_type` 过滤调用 `/calculate`，**场内 15 只 100% 涨跌幅=现价=0**，场外正常——与截图形态完全一致（场内有值列 ¥0.00/+0.00%，场外全部正常）。
+
+机制链（证据齐全）：
+1. `list_etfs(db, "on_exchange")` 返回的 15 只 `asset_type` 全部 = **`'ETF'`**（9-1 持仓重灌 seed CSV `r51l1_inner.csv` 第 4 列即 `'ETF'`，commit 3fb66b1）；
+2. `pricing.py:_split_symbols:172-174` A 股批量白名单只认 `asset_type == "A"`（HK/US 同理）→ 15 只 **四个分支全部为空**（实测 `a_symbols=0/hk=0/us=0/tracked_a=0`）→ `price_map` = 空 dict；
+3. `allocation.py:39` `price_map.get(e.symbol, (0, 0))` → 现价/涨跌幅全 0；77 行基本面分支 `asset_type == "A"` 同样跳过；
+4. **无类型查询为何正常**：31 只混查时 off_exchange 15 只 `asset_type='A'` 入 a_symbols，其 tracked_a（场内代码）一并入批量 → 返回的 batch 报价按 symbol 建 map → **场内 15 只意外被 ti 的批量捎带覆盖** → 看起来正常（round34-B7 起 8-27 灌录口径 asset_type='A' 时代该缺陷被掩盖）；
+5. cache_key 含 symbol 列表（:37-42），`on(15 空列表)` 与 `all(30)` 键不同 → 场内过滤请求独立走空批量 → 全 0（实测 0.0s 命中空结果缓存、TTL 15s 内稳定复现）。
+
+> **定性修正**：§7.1 早期版本把「场内全 0」归因 R175（A 股批量 3s 截断时序性静默 0）——R175 机制存在且仍是性能/语义债，但**页面截图的直接根因是 R176 数据口径**（带类型过滤 100% 复现、无类型不复现，时序解释无法涵盖此确定性）。R175 降级为伴随观察项。
+
+**R173 根因机制链**（`market_service.py:1213-1286`，静态必现，维持原判定）：
+
+1. 场外联接基金的 `tracked_index` 存的是**场内 ETF 代码**（022449→159338、011613→588000…，2026-08-27 灌录口径）；
+2. `get_portfolio_realtime:1246` 盘中分支条件 `now_trading and ti in index_price_map`——`index_price_map` 键集 = **8 个指数代码** `{000001,399001,399006,000688,000300,000016,000905,000852}`（:1196），ti 是 ETF 代码 → **条件恒 False**；
+3. 15 只全部落入 else → `_off_fundnav_tasks` 并发 `fetch_fund_nav`（:1268-1281）→ 该分支硬编码 `"change_pct": 0`（:1278）；
+4. 结果：**盘中也不走 tracked_index 估值，永远输出 0%**——实测 11:35（盘中）15 只 estimate_source 全集 = `{'nav'}`，佐证分支从未命中。
+5. 佐证二：逐只对照「场外接口值 vs 其 tracked_index 场内标的实时涨跌」——159338=+0.5% 而 022449=0、518880=+2.33% 而 000217=0……**估值源数据就在同一响应的 quotes 里（a_symbols 已含 ti），只是没被查**。
+6. 佐证三：`fetch_fund_nav("022449")` 实测返回 `{"nav": 1.1751, "daily_change_pct": -1.42, "nav_date": "2026-09-02"}`——nav 分支连 T-1 涨跌都没用上，硬编码 0。
+
+**与 daily-pnl 链路对照**：`pricing.py:_split_symbols:177-178` 把 `tracked_a`（场内 ETF 代码）并入 A 股批量 → `allocation.py:45-48` 用 `price_map.get(e.tracked_index)` 取到真实涨跌——**同一份 tracked_index 在 pricing 链路语义正确，在 market_service 链路被当指数代码比对 → 断链**。两链路口径不一致。
+
+**R175 时序性缺陷**（用户「场内全 0」最可能的所见形态）：`pricing.py:49-58` `_a_batch` 对 A 股批量行情 **3s 整批截断**（R4-16）——超时即整批降级为空 → `price_map` 无该批 symbol → `allocation.py:39` `price_map.get(e.symbol, (0, 0))` → **场内+场外全部 change_pct=0 且 daily_pnl=0**，15s `_PRICE_MAP_CACHE` 后自愈。早盘数据源高峰/本地冷启动时必现数秒。违反「不静默降级」：0 与「行情暂不可用」语义被混淆（前端把 0 当真实涨跌渲染）。
+
+### 7.2 反馈②「tab 选场内/场外，页面同时出现场内和场外的饼图」→ R174（scope 过滤缺口）
+
+**根因**（`frontend/src/views/PortfolioAnalysis.vue:40-47`，盈亏 tab）：`SummaryCards`/`PnLDetailTable`/`PnLBarChart` 均响应 scope（`:activeTab="scope"` / `pnlItems` 按 scope 过滤，useDashboardData.js:24-28），**唯独两个 `AllocationPieChart`/`AllocationTable` 的渲染条件只看数据非空**：
+
+```vue
+<div v-if="allocationOn?.allocations?.length">…场内分配饼图+表…</div>
+<div v-if="allocationOff?.allocations?.length">…场外分配饼图+表…</div>
+```
+
+→ scope 切「场内」时场外饼图仍在（反之亦然）——round34-B7 迁移时硬编码了「综合视图」的并排双饼图，未随 scope tab 收敛。**属 UI 一致性缺口，非数据错误**。
+
+### 7.3 修复方案（只写方案，未实施——待拍板）
+
+- **方案 A（P1，R173 治本）**：`get_portfolio_realtime` 盘中估值改查 quotes 内 ti 实时行情——`a_symbols` 构建时已把场内代码（5/1/6 开头）的 ti 纳入批量，quotes 里必有 ti 报价：
+  ```python
+  ti_quote = next((q for q in quotes if q.get("symbol") == ti), None)
+  if now_trading and ti_quote and ti_quote.get("change_pct") is not None:
+      quotes.append({..., "price": ti_quote["price"], "change_pct": ti_quote["change_pct"],
+                     "estimate_source": "tracked_index"})
+  ```
+  原 `ti in index_price_map` 分支保留为 ti=指数代码形态的兼容；影响 `market_service.py:1224-1262`。验收：盘中 off 15 只 change_pct 与其 ti 场内标的逐只一致（±0）。
+- **方案 B（P2，R173 兜底）**：`_fetch_one` nav 分支 `"change_pct": 0` 改为 `float(nav_data.get("daily_change_pct") or 0.0)`（fetch_fund_nav 契约已含该字段，实测 -1.42）——盘后/估值源缺失时诚实显示 T-1 净值涨跌而非假 0。
+- **方案 E（P1，R176 治本，二选一）**：
+  - **E-1 数据侧（推荐，最小）**：UPDATE `portfolio_etfs SET asset_type='A' WHERE asset_type='ETF' AND portfolio_type='on_exchange'`（15 只）+ 修 `r51l1_inner.csv` 第 4 列防再灌错 + `design.py:61`/`transfer.py:113` 等写 `'ETF'` 的写入点同步改 `'A'`（写入口径统一）。依据：`'A'` 是 pricing/基本面/`_split_symbols` 全链路的既定口径（hub `get_asset_realtime(symbol, "A")` 语义），DB 存 `'ETF'` 属 9-1 重灌引入的口径漂移（8-27 灌录为 'A'）。
+  - **E-2 代码侧（兼容广）**：`_split_symbols` 白名单扩为 `in ("A", "ETF")`（ETF 语义上就是 A 股场内基金）——不改数据，兼容历史 DB；风险：语义上 'ETF' 未区分港/美 ETF（当前项目无此形态，实际等价）。
+  - 验收（共同）：`POST /calculate?portfolio_type=on_exchange` 场内 15 只现价/涨跌幅与无类型查询逐只一致；截图中 ¥0.00/+0.00% 消失。
+- **方案 C（P2，R175）**：pricing `_a_batch` 截断后 price_map 缺失的标的在 `allocation.py` 输出 `estimate_source="unavailable"`（或 `change_pct=None`），前端 `change-cell` 对 None 显示「—」（复用「行情数据暂不可用」态），**0 值不再冒充真实涨跌**；可选叠加：A股批量失败后 5s 内带退避重试一次。
+- **方案 D（P3，R174 前端 2 行）**：`PortfolioAnalysis.vue:40/44` 渲染条件补 scope：`v-if="scope !== 'off_exchange' && allocationOn…"` / `v-if="scope !== 'on_exchange' && allocationOff…"`（combined 显示双饼图，单选只显示对应侧）。
+- **契约注记**：方案 A/B 改 `/market/realtime/portfolio` 响应字段语义（off_exchange 条目 change_pct 可为估值值），需在 api-contracts/market 补记 off_exchange 估值口径说明；方案 C 改 daily-pnl 空值语义，需同步 api-contracts/portfolio + 前端空值渲染；方案 E-1 属 DB 数据订正（无 API 契约变化，但需在 8-27/9-1 灌录 memory 与 seed CSV 同步口径）。
+
+### 7.4 与 §0-§6 结论的关系
+
+- 本节发现均为**新发现**（R173/R174/R175/R176），不改变 §0 复验结论（R162-R168 修复确认均以 design/check 链路为对象，与本节 market_service/portfolio/pricing 前端链路无交集）。
+- R173 与 round51 R165（NAV Redis）修复后的行为无冲突：R165 治理的是 nav 缓存预热，R173 是估值分支的**代码级条件恒假**，属 round52 §2.4 realtime/portfolio 好转归因之外的遗留估值口径问题。
+- R176 为 9-1 持仓重灌（3fb66b1）引入的数据口径回归：8-27 灌录 asset_type='A' 时代 pricing 全链路正常，重灌后 seed CSV 用 'ETF' 且 pricing 白名单未覆盖 → 带类型过滤全 0。归并「数据口径漂移无 schema 级守卫」根因类（与 R163 同型：写入口径与消费口径无一致性断言）。
+- R175 呼应 §4.1 R164 同型教训：**失败路径的静默值（0）冒充真实值**，归并「单侧断言/静默降级」系统性根因类。
+
+---
+
+## 8. 用户反馈复核②（2026-09-03 12:10 盘中）：标的分析自动补全缺失（板块搜「创新药」/ 指数搜「红利低波」无结果）→ R177
+
+### 8.1 现象与链路
+
+用户在标的分析（`UnifiedAnalysis.vue`）切换 **板块/指数 tab** 输入关键词，补全下拉无结果。
+
+前端链路（代码在位，无缺陷）：`UnifiedAnalysis.vue:132-138` 三模式各建 `useMarketSearch` 实例（kind: all/sector/index）→ `doSearch()` 透传 `kind` + `market` → `GET /market/search`。**问题全在后端数据层**。
+
+### 8.2 后端实测（三类缺口，全部实锤）
+
+| 搜索 | 后端返回 | 直接原因 |
+|---|---|---|
+| `kind=sector&q=创新药` | **0 条** | `sectors` 表 **0 行**（`_search_sectors` name ilike 恒空） |
+| `kind=index&q=红利低波` | **0 条** | `indices_meta` 635 行中**无任何「红利低波」系指数**（红利低波 H30269 为中证 custom 指数，不在新浪指数 spot 列表） |
+| `kind=index&q=红利`（对照） | **0 条（HTTP 层）** | 本地表 13 命中 + akshare 兜底失败 → 异常被 `except` 静默（:287-288）→ 0；直调函数实测 13 条——**HTTP 层与直调结果不一致待查**（疑似 lifespan 内 sync 源超时后 akshare 冷却/代理状态差；见 §8.3-③） |
+| `kind=all&q=创新药`（对照） | 30 条（但全是 bj 股票） | symbol 模式不受影响（instruments 表 7192 行健康） |
+
+### 8.3 根因机制链（三个独立缺口）
+
+**① sectors 表从未有写入者（板块补全恒空，静态）**
+- `models/search.py:31` 定义了 Sector 表（BK 码），`_search_sectors`（market.py:205）查询它——但**全代码库无任何任务/脚本写入该表**；
+- 板块实时数据实际存在于**内存缓存**（`update_sector_cache` 60s 刷新，`/sectors/concept` 实测 500 只含「创新药」（BK1027 系）、`/sectors/industry` 496 只），**key = sector_name，与 sectors 表完全脱节**；
+- 结论：O30（round7 §7 P30①）设计时只建了表和查询，写入链从未落地——板块补全自设计起恒空。
+
+**② indices_meta 同步源 akshare 语义漂移（行业/概念指数段收集恒 0，静态）**
+- `sync_indices_meta.py:6-7` 声称「同花顺行业/概念指数 → ~600 个」：调用 `ak.stock_board_industry_index_ths` / `stock_board_concept_index_ths`；
+- **akshare 1.18.x 实测该两接口语义已变**：签名 `stock_board_industry_index_ths(symbol='元件', start_date, end_date)` = **单板块历史 K 线**（返回日期/开高低收 7 列，实测默认参数返回单一元件板块 2020 起日线）——**不再返回板块列表**；
+- 无参调用「不报错但收集 0 行」（返回 K 线 df 被按 `指数代码/指数名称` 列解析 → 无此列 → `code and name` 过滤全弃）→ `_fetch_ths_*` 两段恒空 → indices_meta 只剩新浪 spot + 静态段（635 行）；
+- **可用替代接口（实测）**：`stock_board_industry_name_ths()` = 90 行、`stock_board_concept_name_ths()` = ~500 行（name+code 两列，概念表实测「创新药」= 308014 命中）——正是设计者当年想要的列表数据，接口名换成了 `_name_ths`。
+
+**③ 红利低波系指数数据源缺位（结构性覆盖缺口）**
+- 中证 custom 指数（红利低波 H30269/H20269、红利低波100 等）**不在新浪 spot 列表**（实测 sina spot「红利」11 条、「红利低波」0 条），静态兜底段也未收录；
+- akshare 兜底 `_search_indices_akshare_fallback` 用的仍是同一 sina spot 源 → 兜底无效；
+- 讽刺的是 `instruments` 表里有 33 只「红利低波ETF」（512890/560150/515480…）——**搜索 ETF 能搜到，搜其跟踪指数搜不到**。
+
+### 8.4 修复方案（只写方案，未实施——待拍板）
+
+- **方案 A（P1，缺口①）**：板块搜索改走内存缓存——`_search_sectors` 优先查 `market_data_hub.get_sector_concept()/get_sector_industry()` 的缓存列表（500+496 只，key=sector_name）按 `sector_name` contains 过滤，sectors 表查询保留为兜底（未来有写入者时自然生效）；**或**补一个与 `refresh_sector_cache` 同周期的 sectors 表 upsert（6-60s 频率低但结构更正规，还需处理 BK 码与 type 归属）。推荐前者（零写入链、缓存即真理源）。验收：板块 tab 输「创新药」出 BK 码板块 ≥1 条。
+- **方案 B（P1，缺口②）**：`sync_indices_meta._fetch_ths_*` 换用 `ak.stock_board_industry_name_ths()`（90）/ `stock_board_concept_name_ths()`（~500）——列表语义与设计意图一致，且**顺带修复缺口③的 A 股行业/概念指数覆盖**（同花顺指数含医药/红利等细分主题）；symbol 列格式化时统一加交易所前缀或保留裸码（与现有 635 行去重合并）。
+- **方案 C（P2，缺口③）**：静态兜底段 `_STATIC_EXTRA_INDICES` 增补中证红利系（H30269 红利低波/H20269 红利低波100/000922 中证红利/000015 上证红利等高频使用指数，symbol 用 `sh000015` 形态已有先例）；或同步源增 `ak.index_value_hist_funddb`/中证官网列表接口（成本高，静态段优先）。
+- **方案 D（P2，§8.2 观察项）**：排查 `_search_indices` HTTP 层 0 vs 直调 13 的不一致——`_search_indices_akshare_fallback` 内 akshare 调用无超时包裹（`_aio.to_thread` 裸调），本地进程内实测耗时 8 段进度条 ~1s 正常，但 lifespan 同步后 akshare 会话/代理状态可能劣化；修复=兜底链加 `asyncio.wait_for`（10s）+ 失败 logger.warning 升级（现 debug 级别不可见）。
+- **契约注记**：方案 A/B 均不改响应 schema（仍是 symbol/name/type/market 条目），仅数据源变化；`type: "sector"` 条目若来自缓存需补 `sector_code`（BK 码）映射——消费方（sector-analysis stream）已按 `query=name` 语义工作（`sector_fetcher.py:154` 明示「板块名称而非板块代码」），无破坏。
+
+### 8.5 与 §0-§7 结论的关系
+
+- R177 为**存量设计缺口**（O30 只设计查询未设计写入 + akshare 接口语义漂移双重叠加），非本轮/上轮实施引入的回归；akshare 1.18.x 语义漂移与 `shares_change` 日期修复（a8bf0d3 memory）同族——**外部源接口漂移无 schema 断言拦截**，归并同一系统性根因类。
+- 与 R173/R176（§7）同为「数据链路断」，但层级不同：§7 是资金分配链（pricing/market_service），本节是搜索/分析入口链（instruments/sectors/indices_meta 三表 vs 内存缓存）。
+
+---
+
+## 9. 用户需求复核③（2026-09-03 12:40 盘中）：资讯页「全部」tab + 新闻卡片重要等级显式标注 → R178 方案设计
+
+### 9.1 现状盘点（实测 + 代码链）
+
+**分类架构**（F29，round23 §2.4 A4）：资讯页 5 tab（头条/宏观/国际/个股/研报），**桶间互斥、非包含关系**：
+- 后端三桶缓存 `_news_buckets`（headlines/macro/global，`_news.py:202-208`，120s TTL，R23 空桶回退）+ 两类按标的查询（stock/research）；
+- 头条 = 财联社电报(15) + 东财头条，**刻意不含宏观/国际**（F29：旧实现混入后与 macro tab 实测 3 条全重复）；
+- 已有但**无 HTTP 端点**的合并视图：`hub.get_news()`（`_news.py:25-30`，= 三桶 headline+macro+global 顺序拼接，仅 mcp news_server 消费）。
+
+**重要等级数据侧（已完备，零新增计算）**：
+- 每条新闻双维度：`level`（1-5 重要性，`classify_news` 关键词法 + 弱化词降级 + R16 英文兜底 + F3-1 双轨校验）+ `category`（major/positive/negative/risk/neutral/other 极性）+ `stars`（P2-1 后为**新鲜度**维度，非重要度）；
+- 实测 level 覆盖：headlines 15/15、macro 9/9、global 8/8、stock 10/10 **全部非空**——「全部」tab 与等级标注的数据条件现成。
+
+**前端等级展示（现状不对称）**：
+- 筛选器（`:34` minLevel 1-5）与推送（isImportant=level≥4）已按 level 工作；
+- 但卡片上 **level 无数字/星级显式标注**——R83（round29）已移除「数字星」，理由：数字星当时编码的是新鲜度（stars），与 meta 行相对时间重复；仅剩 category 文字徽章（重大/利好/利空/风险/提醒）+ 左边框色 + 标题色。
+- **用户诉求映射**：卡片上要的是 **level（重要等级）** 的显式视觉锚点——现有徽章显示的是 category（极性/类型），level≥4 仅通过「重要」徽章 + 红色间接可感知，level 2/3/1 之间完全不可区分。
+
+### 9.2 方案设计（只写方案，未实施——待拍板）
+
+**方案 A（P1，新增「全部」tab）**：
+- 后端：`news.py` 增 `GET /news/all`——复用 `_news_bucket` 三桶 + `stock/research` 不参与（按标的查询型）；合并时**跨桶去重**（复用 `_dedupe` 标题归一化，F29 实测桶间有重复史）+ 按 `sort_time` 降序 + 上限 60；复用 `_with_partial_flag`（三桶任一空 → partial 诚实标注）；
+- 前端：`NewsView.vue:178` tabs 头部插入 `{ value: 'all', label: '全部' }` 并设为默认 tab；`loadNews()` 增 `newsApi.all()` 分支；WS 实时推送分流扩展到 all tab（`:279` 现仅 headlines——`_news_cache` 合并视图含三桶，推送条件 `t !== 'headlines'` 改为 `t not in ('headlines','all')` 之外的判断需反向：all/headlines 均消费推送）；
+- 关键决策点：全部 tab 是否含个股/研报？**建议不含**（这两个是按 symbol 查询型，全量拉取无意义且拖慢首屏），tab 描述文案注明。
+- 验收：all tab 条数 ≈ headlines+macro+global 去重后之和；空桶时 X-News-Partial 生效；WS 推送在 all tab 实时插入。
+
+**方案 B（P2，卡片重要等级显式标注）**：
+- 展示形态（两选一或组合）：
+  - **B-1 星级**：恢复数字星但**改编码 level**（★★★★☆ = level 4）——与 R83 移除的旧星区分：旧星编码 stars（新鲜度，与时间重复）；新星编码 level（重要度，现在无处显示），语义不重复。位置：category 徽章右侧，灰色小字，other 类也显示（与 R83「other 不渲染」决策不冲突——那是 category 徽章）；
+  - **B-2 分档徽章**：level 4-5「重要」/3「关注」/1-2 不标注（噪音最小化）——更克制但 1/2 不可分。
+  - **推荐 B-1**（用户明确要「每条都有地方体现」→ 全量显示星级最贴合）。
+- 与现有维度的布局关系：`[category徽章(色)] [level星级★] 标题` ——category 管颜色语义（红涨绿跌），level 星管重要度排序感知，meta 行相对时间管新鲜度——三维度各得其所；
+- `newsLevel.js` 增 `mapLevelStars(level)` 纯函数（1-5 → ★/★★/★★★/★★★★/★★★★★）+ 单测；`NewsView.vue:83` 徽章处插入渲染。
+- 验收：任意 tab 卡片可见星级且与 level 字段一致；minLevel 筛选与星级视觉联动（筛 level≥4 时仅 4-5 星卡片留存）。
+
+**方案 C（P3，配套）**：level 排序切换（时间 ↓ / 重要性 ↓ toggle）——「全部」tab 条数多时按 level 排序更有用；实现为前端 sort（`sort_time` vs `level*权重+sort_time`），无后端改动。
+
+### 9.3 影响面与契约
+
+- 契约先行：`api-contracts/news/` 增 `all.md`（响应 schema 与 headlines 一致 + partial 语义），方案 B 无契约变化（纯前端展示，level 字段已在响应中）；
+- 测试：后端 `test_news_*` 增 /news/all 合并去重/partial 用例；前端 `NewsView` 组件测试增 tab 切换与星级渲染断言；
+- 复杂度审计：/news/all 为三桶内存拼接 + 去重（O(n)，n≤~40），无新增外部调用——符合性能约定，无超时风险（复用 30s run_sync 上限）。
+
+### 9.4 与 §0-§8 的关系
+
+- R178（本节）为**功能增强需求**（非缺陷），与 R173-R177 缺陷修复互不阻塞；数据侧 level/stars 管线（round9 P2-1/round23 F22/F23/round24 R17-R31/round29 R83）演进清晰，本方案是在其上的展示层补全——**无新数据源、无新计算，纯聚合与展示**。
+
+---
+
+*诊断产物：C:/Users/Public/etf_probe/（probe20-33.out + openapi.json + build52.log + apt_probe*.out，会话级临时目录）；容器于诊断完成后回收。收尾 commit：192b8c9 / 2cd9e1d（2026-09-02 push）；§7-§9 复核 2026-09-03 追加（R173-R178），方案全部待拍板，未收到「round实施」不写代码。*
+
+

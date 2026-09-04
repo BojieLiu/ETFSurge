@@ -63,6 +63,11 @@ GET /api/v1/market/realtime/{symbol}?asset_type=A
 | is_estimated | bool | `false` | Whether price is estimated (off-exchange during trading hours) |
 | estimate_source | string | `null` | `tracked_index` \| `nav` \| `last_close` — source of the estimate |
 
+**R173 (round52 §7.3 方案A+B) 估值口径：**
+- 盘中（trading hours）：`tracked_index` 条目的 `price`/`change_pct` = 其 `tracked_index`（场内 ETF 代码）的**实时批量报价**（ti 已显式并入 A 股批量），与该场内标的逐只一致；ti 为指数代码时仍走指数行情映射（兼容）。
+- 盘后：`nav` 条目的 `change_pct` = 净值源的 `daily_change_pct`（T-1 净值涨跌），**不再是硬编码 0**；`daily_change_pct` 缺失/非法时为 `0.0`（诚实兜底）。
+- 前端红涨绿跌渲染无需改动（字段语义为估值涨跌，非真实成交涨跌）。
+
 Batch returns array, single returns object, realtime/portfolio returns array of portfolio ETFs.
 
 ---

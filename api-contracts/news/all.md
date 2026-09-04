@@ -6,12 +6,34 @@
 
 | Method | Path | Description |
 |--------|------|-------------|
+| GET | `/api/v1/news/all` | **R178 (round52 §9.2 方案A)**: All-tab merged view (three buckets deduped) |
 | GET | `/api/v1/news/headlines` | Latest financial news headlines |
 | GET | `/api/v1/news/macro` | Macroeconomic news |
 | GET | `/api/v1/news/global` | Global market news |
 | GET | `/api/v1/news/stock/{symbol}` | Stock/ETF-specific news |
 | GET | `/api/v1/news/research/{symbol}` | Research reports for a symbol |
 | WS | `/api/v1/ws/news` | WebSocket news push (single + batch) |
+
+---
+
+## 1.1 All (merged view) / 全部合并视图（R178 新增）
+
+```
+GET /api/v1/news/all
+```
+
+**成功响应 — `200 OK`:** 条目 schema 与 headlines 一致（含 `level`/`category`/`stars`）。
+
+**语义约定：**
+
+| 项 | 约定 |
+|---|---|
+| 合并范围 | headlines + macro + global 三桶（`_news_bucket` 同源）；stock/research 为按标的查询型，不参与 |
+| 去重 | 按 `id`（`time+title` MD5）跨桶去重（F29 实测桶间有重复史） |
+| 排序 | `sort_time` 降序 |
+| 上限 | 60 条（首屏渲染软上限） |
+| Partial | 复用 `_with_partial_flag`：< 5 条 → `X-News-Partial: true` |
+| 前端 | 「全部」为资讯页默认 tab；WS `news_batch` 推送与 headlines 同等消费；卡片星级用 `mapLevelStars(level)`（编码重要度，与 stars 新鲜度维度不同） |
 
 ---
 

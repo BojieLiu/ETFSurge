@@ -101,7 +101,10 @@ async def test_r71_ths_fetch_runs_on_long_pool(monkeypatch):
     def _fake_ths(*a, **k):
         return df
 
-    monkeypatch.setattr("akshare.stock_board_industry_index_ths", _fake_ths)
+    # R177 (round52 §8.4 方案B): 收集源换 stock_board_industry_name_ths——旧
+    # stock_board_industry_index_ths 在 akshare 1.18.x 语义已漂移为单板块 K 线。
+    # 守卫语义不变：THS fetch 必须经 run_sync_long（long pool）执行。
+    monkeypatch.setattr("akshare.stock_board_industry_name_ths", _fake_ths)
 
     out = await sim._fetch_ths_industry_indices()
     assert used["long"] == 1
