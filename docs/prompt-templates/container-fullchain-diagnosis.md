@@ -16,22 +16,36 @@
 新文档承载「本轮实测 + 对照验证矩阵 + 新问题 R 系列 + 修复方案 + review」，与被诊断轮次清晰分离（round31 实践：round30 只含 R85-R92，R93-R98 独立成 round31）。
 
 # 阶段与边界（强制）
-按五个阶段推进，每阶段结束汇报，等待指令后才进入下一阶段：
+按五个阶段推进。**默认连续执行**（阶段 1-4 连贯推进，阶段 5 review 后统一汇报决策点）；
+预算受限或遇阻塞时按阶段断点汇报，用户可随时打断指定阶段或聚焦：
 1. 环境构建与启动
 2. 全链路诊断 + 对照 round 文档验证（只诊断、不写代码）
 3. 分析结果质量审查（组合设计 / 策略检查 / 各分析报告）
 4. 问题分析与修复方案 + **测试防护体系缺口分析**（只写方案文档，不写修复代码）
 5. 方案 review（三轮结构化）
 
+> 实操口径（2026-09-04 模板 review 修正）：round52/53 实际均为连续推进 + 结尾统一拍板，
+> 旧文案「每阶段结束汇报并等待指令」从未执行——本节以实际模式为准。
+> 拍板后固定收尾两件事：① 拍板结果回填 round 文档决策节；② 同步更新 memory
+> （同 name 覆盖、revision 递增，勿新建重复条目）。
+
 未收到明确指令，不得进入实施/写修复代码/commit/push。
 
 # 环境步骤
-1. 停止上一轮遗留容器（若在运行）：`docker-compose down`（防旧容器占端口/资源）
-2. 构建并启动生产态镜像：`docker-compose up --build --profile prod`（迭代验证可用 dev profile）
-3. 记录：镜像构建耗时、容器启动耗时、后端就绪时间（warmup 需 60s+，看 backend.log）
-4. 确认前后端存活：`docker-compose ps` + 浏览器访问 http://localhost
-5. **回收老版本镜像**：`docker image prune -f`（构建完成后上一轮镜像层变 dangling，清掉；只清 dangling，不动其他项目镜像）
-6. 全程只起这一次容器，所有诊断在这一实例内完成，不反复重启
+1. 停止上一轮遗留容器（若在运行）：`docker compose -f docker-compose.yml -f docker-compose.diag.yml --profile prod down`
+2. **前置检查**：`backend/.env` 存在且含 `DEEPSEEK_API_KEY`（缺失则 prod 容器 LLM 链路全挂）
+3. 构建并启动生产态 + diag overlay（注入 PROFILE_WARMUP=1 预热画像，历轮诊断标配）：
+   `docker compose -f docker-compose.yml -f docker-compose.diag.yml --profile prod up -d --build`
+   （构建日志重定向到诊断产物目录留证，如 `buildNN.log`；已知告警形态：pip resolver ERROR
+   ×3=pandas_ta/mootdx --no-deps 拆分安装、npm deprecated glob——出现即按已知归类，不算新问题）
+4. 记录：镜像构建耗时、容器启动耗时、后端就绪时间（warmup 实测 35-40s，round49 两阶段预热后；
+   超 30s 预算会打 `[warmup-budget]` 告警，含分段归因为正常形态，看 backend.log）
+5. 确认前后端存活：`docker compose ps` + `curl --noproxy '*' http://localhost/`（前端）与 `/health`（后端根路径，**不在 /api/v1 下**）
+6. **宿主代理坑（探针必读）**：宿主常见系统代理（HTTP_PROXY=127.0.0.1:7897 类）会让
+   urllib/requests 探针耗时失真 50 倍（round53 实测 21s vs curl 0.23s）——**接口探针统一
+   `curl --noproxy '*'`**（或 NO_PROXY=localhost），禁止用裸 urllib 计时
+7. **回收老版本镜像**：`docker image prune -f`（构建完成后上一轮镜像层变 dangling，清掉；只清 dangling，不动其他项目镜像）
+8. 全程只起这一次容器，所有诊断在这一实例内完成，不反复重启
 
 # 资源回收（诊断分析完成后，收尾）
 在阶段 4 完成后、且确认本轮无需再进容器复测时执行；最迟在最终汇报前：
@@ -51,6 +65,9 @@
 2. **不归档**：当前轮 round 文档、`docs/design-checklist.md`（常驻设计清单）、
    `docs/patrol-orchestration-plan.md`（常驻流程）、`docs/prompt-templates/`（常驻模板）、
    `api-contracts/`（活跃契约）、README / AGENTS（项目说明）
+   ⚠️ **roundN-1 惯例上仍承载下轮复测项**（R146 类「待交易时段复测」、方案拍板状态）——
+   归档前逐项核对 §验证矩阵与遗留清单，有活跃引用即保留（round51/52 均因此不归档）；
+   机械按「轮次过期」归档会斩断下轮诊断的对照基准。
 3. **执行归档**：`git mv docs/roundXX-xxx.md docs/archived/`（保留 git 历史，勿用普通 mv）
 4. **同步引用**：`rg "roundXX"` 全仓排查旧路径引用（docstring / 注释 / 测试 / 前端），
    统一改指 `docs/archived/...`；有活跃语义的引用方（如 README Known Issues 指针）改指
@@ -64,19 +81,42 @@
    > 按正常逻辑变更走门禁。确认无需复测时再执行资源回收
 
 # 全链路诊断清单（逐项打点，不许遗漏）
-- [ ] 后端存活：/health 及 /api/v1 核心路由
+- [ ] 后端存活：/health（根路径）及 /api/v1 核心路由
 - [ ] 预热任务：基金净值同步 / 板块缓存 / 市态+情绪（backend.log 逐项核）
 - [ ] 关键链路首呼耗时（fresh 容器 = 天然冷缓存窗口）：
       watchlist / search / design / factor-health / symbol-analysis
       记录实测值，与上轮基线对比（已知基线参考：concept 38.9s / watchlist 18.3s / warmup 53.8s 超 30s 预算）
 - [ ] 因子填充率快照：factor_availability / 分项覆盖率，与上轮基线对比（R85 检查）
 - [ ] 数据源健康：`python scripts/data_health_check.py` 全项
+      ⚠️ **检查器结论须交叉验证（R148/R150 教训，2026-09-04 追加）**：检查器 FAIL ≠ 生产断链——
+      round51-53 连续 3 轮「5 critical factor 全空」实为检查器裸 compute() 缺 symbol_extra 注入的
+      口径误报（生产路径 hub.refresh→get_pool 实测 7/7 OK）。检查器结论写入 round 文档前，
+      必须与生产口径（或注入补齐路径）交叉验证；不一致时以生产为准、检查器记为缺陷。
+- [ ] 搜索链路：`/api/v1/market/search?keyword=<词>&kind=sector|index|all`（**实参是 keyword**；
+      历史 round 文档中 `?q=` 为简写，照抄会 0 条误判——R177 教训，2026-09-04）
+- [ ] **WS 链路：完整路径 `/api/v1/ws/news` / `/api/v1/ws/portfolio` / `/api/v1/ws/task-notifications`，
+      直连 8000 与经 nginx :80 各测一次**。⚠️ 裸 `/ws/news`（无 /api/v1 前缀）会 403——
+      握手 403 先查路径前缀再怀疑鉴权（R53 探针教训）；`/ws/market/{symbol}` 后端存在但前端零消费，非必测
+- [ ] **主动触发新数据验证（round52/53 发现 R162/R163/R171 的方法来源，必做）**：
+      `POST /portfolio/design-async`（balanced, 500000, enhanced）+ `POST /portfolio/strategy-check-async`
+      各触发一次 → 新 design/check 记录入库 → 用新记录做 §四问法与层预算复验（旧记录可能产自旧代码）
 - [ ] 定时刷新：缓存任务是否按 60s/120s 周期执行（日志）
-- [ ] WS 链路：/ws/market、/ws/news 连接与推送
 - [ ] 前端页面四态：首页/Dashboard/组合/资讯 的 loading/空/错误/慢
+- [ ] **设计结果结构合理性断言（R181 教训，2026-09-04 追加）**：
+      触发新 design 后，除资金守恒/层预算/单只上限外，必查**组合结构层面**：
+      ① 同方案内 `normalize_segment(tracked_index)` 无重复（同指数重复配置 → FAIL；
+        taxonomy 同族表即为准，A50/A500/沪深300/中证A500/A100 归一后互斥）；
+      ② 抽查核心层各标的 tracked_index 与名称提取值（extract_index_concept）交叉一致，
+         不一致 = 映射脏值（如名称 A500ETF 而 tracked_index="A50"）→ 单独记 R 条目；
+      ③ 硬风控 PASS ≠ 组合合理——「数字全合规」与「结构不荒谬」是两层断言，
+         后者缺位曾多轮漏检（同指数 25% 集中在 Σ=1/预算/上限全绿下潜行）
 - [ ] **前端 Lighthouse 评分（软门禁）**：首页 + /dashboard 四类别分 + 核心 Web Vitals（LCP/CLS/TBT），与 F18 基线对比
+      （依赖宿主 Chrome/headless-shell；预算或环境受限时**明确标注「未执行」并登记遗留**，不得静默跳过）
 - [ ] 回归基线：`python scripts/verify_e2e.py` 全 PASS；后端 pytest / 前端 npm test 跑一轮
-- [ ] patrol.py 巡检：`python scripts/patrol.py --full`
+- [ ] patrol.py 巡检：`python scripts/patrol.py --full`（连续多轮未跑时在遗留清单显式登记，勿复读）
+
+**探针产物落盘惯例**：会话级临时目录 `C:/Users/Public/etf_probe/`（probe 脚本+输出、build 日志、
+抓取的 json 快照；**不入仓**），round 文档引用产物文件名即可。
 
 # 前端 Lighthouse 评分（性能/可访问性，软门禁）
 在「前端页面四态」之外补量化指标——对容器内生产前端（nginx :80）跑 Lighthouse 评分：
@@ -113,7 +153,15 @@
 4. 与当下行情一致吗？——跨数据源核对；陈旧/占位数据下的判断 = 失效
    （示例：红利/恒科偏弱仅技术面信号无因子支撑，且 KDJ J 90.11 vs 6.90 冲突）
 
-结论分级：合理 / 部分合理（缺支撑）/ 臆断（无支撑）/ 失效（陈旧或占位数据）
+**组合设计必加「结构合理性五问」（R181 教训，2026-09-04 追加）**：在四问之外，对每个方案追加检查——
+5. **同一方案内有无同指数/同主题标的并存？**——按 `normalize_segment(tracked_index)` 分组
+   查重（taxonomy 同族表为准）；存在即 FAIL 级发现（不是「分散」而是重复敞口），
+   核对 tracked_index 与名称提取值交叉验证定位脏数据侧；
+   硬风控（单只≤30%/层预算/Σ=1）全 PASS **不能**推出结构合理——两层断言缺一不可。
+
+结论分级：合理 / 部分合理（缺支撑）/ 臆断（无支撑）/ 失效（陈旧或占位数据）；
+**结构缺陷类发现（五问命中）不定级为「不合理」了事——必须落 R 条目 + 机制链 + 修复方案**
+（分级枚举之外的结构问题走 R 系列流程，防「评完即丢」）。
 
 输出判断质量矩阵：
 | 判断原文 | 事实/推断 | 数据支撑（file:line+数值） | 与当下行情一致? | 结论（合理/部分合理/臆断/失效） | 修复建议 |
