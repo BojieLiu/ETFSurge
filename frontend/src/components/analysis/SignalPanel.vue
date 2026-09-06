@@ -109,13 +109,37 @@ const indicatorItems = computed(() => {
 .card-title-icon { font-size: var(--font-size-xl); line-height: 1; }
 .signal-caption { margin: 0; padding: 0 var(--space-5); font-size: var(--font-size-xs); color: var(--color-text-tertiary); text-align: center; }
 .indicators-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--space-3); padding: var(--space-4); }
-.indicator-item { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-3); background: var(--color-surface-secondary); border: 1px solid var(--color-border-light); border-radius: var(--radius-lg); }
+.indicator-item {
+  display: flex; flex-direction: column; gap: var(--space-1);
+  padding: var(--space-3);
+  background: var(--color-surface-secondary);
+  border: 1px solid var(--color-border-light);
+  border-left: 3px solid var(--color-border-medium); /* 美化轮: 语义左边条（跟随数值态） */
+  border-radius: var(--radius-lg);
+  transition: var(--transition-fast);
+}
+.indicator-item:hover { box-shadow: var(--shadow-sm); }
+/* 美化轮: RSI 超买/超卖与 MACD 多空的左边条语义（text-danger/text-success 挂在同卡） */
+.indicator-item:has(.text-danger) { border-left-color: var(--color-text-up); }
+.indicator-item:has(.text-success) { border-left-color: var(--color-text-down); }
 .indicator-label { font-size: var(--font-size-xs); font-weight: var(--font-weight-medium); color: var(--color-text-tertiary); text-transform: uppercase; }
 .indicator-value { font-family: var(--font-family-mono); font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
 .text-success { color: var(--color-text-success); }
 .text-danger { color: var(--color-text-danger); }
 .signal-content { display: flex; flex-direction: column; align-items: center; gap: var(--space-4); padding: var(--space-5); text-align: center; }
-.signal-badge { display: inline-flex; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-6); font-size: var(--font-size-xl); font-weight: var(--font-weight-bold); border-radius: var(--radius-full); }
+.signal-badge {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-3) var(--space-6);
+  font-size: var(--font-size-xl); font-weight: var(--font-weight-bold);
+  border-radius: var(--radius-full);
+  box-shadow: var(--shadow-sm); /* 美化轮: 徽章轻浮起 */
+}
+.signal-badge .signal-icon {
+  /* 美化轮: 信号图标 chip 化（与因子页状态 chip 同语言） */
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.65); font-size: var(--font-size-lg); line-height: 1;
+}
 .signal-badge.buy { color: var(--color-success-700); background: var(--color-bg-success-subtle); border: 2px solid var(--color-success-300); }
 .signal-badge.sell { color: var(--color-danger-700); background: var(--color-bg-danger-subtle); border: 2px solid var(--color-danger-300); }
 .signal-badge.hold { color: var(--color-warning-700); background: var(--color-bg-warning-subtle); border: 2px solid var(--color-warning-300); }

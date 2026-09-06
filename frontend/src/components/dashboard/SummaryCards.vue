@@ -208,20 +208,36 @@ function estimatedRatio(type) {
      （数字 + 估算提示）高度一致，消除首屏数据到达时的布局偏移（CLS）。 */
   min-height: 110px;
   transition: var(--transition-fast);
+  /* 美化轮（2026-09-06）: 语义色左边条——与因子模型页同款视觉语言 */
+  border-left: 3px solid var(--color-border-light);
 }
 
-/* 总仓位卡独占一行（突出主数字） */
+/* 总仓位卡：品牌色主卡（左侧粗条 + 轻渐变底） */
 .summary-card--total {
   grid-column: 1 / -1;
+  border-left: 3px solid var(--color-brand-500);
+  background: linear-gradient(135deg, var(--color-brand-50), var(--color-surface-primary) 65%);
 }
+/* 盈亏卡左边条跟随红涨绿跌（icon 色由模板 style 注入，此处用 attr 选择器跟随） */
+.summary-card:has(.text-up) { border-left-color: var(--color-text-up); }
+.summary-card:has(.text-down) { border-left-color: var(--color-text-down); }
 
-/* 逻辑分组标签（当日盈亏 / 累计盈亏） */
+/* 逻辑分组标签（当日盈亏 / 累计盈亏）——美化轮：小横线引导 + 更清晰的分组节奏 */
 .summary-group-label {
   grid-column: 1 / -1;
   margin: var(--space-2) 0 0;
   font: var(--text-body-sm);
   font-weight: var(--font-weight-semibold);
   color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.summary-group-label::before {
+  content: '';
+  width: 12px; height: 3px;
+  border-radius: var(--radius-full);
+  background: var(--color-brand-500);
 }
 
 .summary-content {
@@ -313,6 +329,14 @@ function estimatedRatio(type) {
   font: var(--text-body-xs);
   color: var(--color-text-tertiary);
   text-align: right;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.3rem;
+}
+.summary-updated::before {
+  content: '·';
+  color: var(--color-text-tertiary);
 }
 
 

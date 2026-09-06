@@ -1007,7 +1007,17 @@ onMounted(loadTab)
 .capital-inputs .input-group { display: inline-flex; align-items: center; gap: var(--space-2); flex: 1; min-width: 200px; }
 .input-label { font-size: var(--font-size-sm); font-weight: var(--font-weight-medium); color: var(--color-text-secondary); white-space: nowrap; }
 
-.pnl-summary { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); background: var(--color-surface-secondary); border-radius: var(--radius-lg); }
+/* 美化轮（2026-09-06）: 合计条从均质灰 → 语义强调条（跟随涨跌色，与因子页左边条同语言） */
+.pnl-summary {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-surface-secondary);
+  border-radius: var(--radius-lg);
+  border-left: 3px solid var(--color-border-medium);
+}
+.pnl-summary:has(.text-up) { border-left-color: var(--color-text-up); background: var(--color-bg-danger-subtle, var(--color-surface-secondary)); }
+.pnl-summary:has(.text-down) { border-left-color: var(--color-text-down); background: var(--color-bg-success-subtle, var(--color-surface-secondary)); }
+.pnl-summary--unavailable { border-left-color: var(--color-border-medium); }
 .pnl-label { font-size: var(--font-size-sm); font-weight: var(--font-weight-medium); color: var(--color-text-secondary); }
 .pnl-amount { font-family: var(--font-family-mono); font-size: var(--font-size-lg); font-weight: var(--font-weight-bold); }
 .pnl-pct { font-family: var(--font-family-mono); font-size: var(--font-size-base); font-weight: var(--font-weight-semibold); }

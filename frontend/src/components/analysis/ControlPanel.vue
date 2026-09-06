@@ -24,7 +24,8 @@
       </div>
       <div class="control-group control-group--info" v-if="chartData">
         <div class="control-field">
-          <span class="data-count">{{ chartData.dates?.length || 0 }} 条数据</span>
+          <!-- 美化轮: 数据量从裸文本 → chip 徽章（与全站状态 chip 同语言） -->
+          <span class="data-count-chip">📊 {{ chartData.dates?.length || 0 }} 条数据</span>
         </div>
       </div>
     </div>
@@ -91,4 +92,38 @@ defineEmits(['update:selected', 'update:period', 'update:chartMode', 'update:act
 .toggle-item { display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--font-size-sm); cursor: pointer; }
 .toggle-name { color: var(--color-text-secondary); }
 .data-count { font-size: var(--font-size-xs); color: var(--color-text-tertiary); }
+/* 美化轮（2026-09-06）: 数据量 chip + 指标 toggle 药丸化——控制面板从「表单感」到「仪表感」 */
+.data-count-chip {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--font-size-xs); font-family: var(--font-family-mono);
+  color: var(--color-brand-700); background: var(--color-bg-brand-subtle);
+  border: 1px solid var(--color-brand-200);
+  border-radius: var(--radius-full);
+}
+/* 叠加指标 checkbox → 药丸 toggle（原生 checkbox 藏起，选中态品牌底） */
+.toggles-grid .toggle-item, .indicator-radio-group .toggle-item {
+  padding: var(--space-1) var(--space-3);
+  background: var(--color-surface-secondary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-full);
+  transition: var(--transition-fast);
+  user-select: none;
+}
+.toggles-grid .toggle-item:hover, .indicator-radio-group .toggle-item:hover {
+  border-color: var(--color-brand-300);
+  background: var(--color-surface-hover);
+}
+.toggles-grid .toggle-item input, .indicator-radio-group .toggle-item input {
+  accent-color: var(--color-brand-600);
+  margin: 0;
+}
+.toggles-grid .toggle-item:has(input:checked), .indicator-radio-group .toggle-item:has(input:checked) {
+  background: var(--color-bg-brand-subtle);
+  border-color: var(--color-brand-500);
+}
+.toggles-grid .toggle-item:has(input:checked) .toggle-name,
+.indicator-radio-group .toggle-item:has(input:checked) .toggle-name {
+  color: var(--color-brand-700); font-weight: var(--font-weight-semibold);
+}
 </style>

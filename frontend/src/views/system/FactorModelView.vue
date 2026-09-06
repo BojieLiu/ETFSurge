@@ -33,8 +33,8 @@
             <span class="stat-num stat-num-brand">{{ data?.total ?? 0 }}</span>
             <span class="stat-lbl">已接入</span>
           </div>
-          <div class="stat-item">
-            <span class="stat-num text-up">{{ summary?.valid ?? 0 }}</span>
+          <div class="stat-item" :class="{ 'stat-zero': !(summary?.valid ?? 0) }">
+            <span class="stat-num" :class="!(summary?.valid ?? 0) ? 'text-muted' : 'text-up'">{{ summary?.valid ?? 0 }}</span>
             <span class="stat-lbl">
               <AppTooltip placement="top">
                 <span class="stat-icon stat-icon-valid" aria-hidden="true">✓</span>
@@ -45,8 +45,8 @@
               </AppTooltip>
             </span>
           </div>
-          <div class="stat-item">
-            <span class="stat-num text-warn">{{ summary?.warn ?? 0 }}</span>
+          <div class="stat-item" :class="{ 'stat-zero': !(summary?.warn ?? 0) }">
+            <span class="stat-num" :class="!(summary?.warn ?? 0) ? 'text-muted' : 'text-warn'">{{ summary?.warn ?? 0 }}</span>
             <span class="stat-lbl">
               <AppTooltip placement="top">
                 <span class="stat-icon stat-icon-warn" aria-hidden="true">⚠</span>
@@ -57,9 +57,17 @@
               </AppTooltip>
             </span>
           </div>
-          <div class="stat-item">
+          <div class="stat-item stat-item-accum">
             <span class="stat-num text-muted">{{ summary?.no_data ?? 0 }}</span>
-            <span class="stat-lbl">无数据</span>
+            <span class="stat-lbl">
+              <AppTooltip placement="top">
+                <span class="stat-icon stat-icon-accum" aria-hidden="true">🕒</span>
+                积累中
+                <template #content>
+                  <div class="tooltip-rich">IC 样本未达 60 交易日可观察下限（reason 含 n/250 进度）——非因子失效</div>
+                </template>
+              </AppTooltip>
+            </span>
           </div>
           <div class="stat-item">
             <span class="stat-num stat-num-static">{{ summary?.static ?? 0 }}</span>
@@ -87,8 +95,20 @@
             <strong>数据积累中</strong>
             <span>
               因子 IC 需累积 {{ summary?.min_samples ?? 250 }} 个交易日且 t≥2、|IR|≥0.5 才发布「统计显著」结论。
-              当前「无数据」多为积累未满（{{ summary?.no_data ?? 0 }} 个），非因子失效；静态标识因子不参与 IC 统计。
+              当前「积累中」多为样本未满（{{ summary?.no_data ?? 0 }} 个），非因子失效；静态标识因子不参与 IC 统计。
             </span>
+            <div class="accumulate-bar" aria-hidden="true">
+              <span class="ab-seg ab-valid" :style="{ width: abSeg.valid + '%' }" :title="`统计显著 ${abSeg.validPct}%`"></span>
+              <span class="ab-seg ab-warn" :style="{ width: abSeg.warn + '%' }" :title="`不显著 ${abSeg.warnPct}%`"></span>
+              <span class="ab-seg ab-accum" :style="{ width: abSeg.accum + '%' }" :title="`积累中 ${abSeg.accumPct}%`"></span>
+              <span class="ab-seg ab-static" :style="{ width: abSeg.static + '%' }" :title="`静态 ${abSeg.staticPct}%`"></span>
+            </div>
+            <div class="ab-legend">
+              <span class="ab-key"><i class="ab-dot ab-dot-valid"></i>显著 {{ summary?.valid ?? 0 }}</span>
+              <span class="ab-key"><i class="ab-dot ab-dot-warn"></i>不显著 {{ summary?.warn ?? 0 }}</span>
+              <span class="ab-key"><i class="ab-dot ab-dot-accum"></i>积累中 {{ summary?.no_data ?? 0 }}</span>
+              <span class="ab-key"><i class="ab-dot ab-dot-static"></i>静态 {{ summary?.static ?? 0 }}</span>
+            </div>
           </div>
         </div>
 
@@ -371,6 +391,21 @@ const isAccumulating = computed(() => {
   if (!s) return false
   const totalNoData = (s.no_data ?? 0) + (s.static ?? 0)
   return (s.valid ?? 0) === 0 && (s.no_data ?? 0) > 0 && totalNoData > 0
+})
+
+// 美化轮（2026-09-06）: 积累横幅构成条——四状态占比（R182 语義统一的可视化延伸）。
+const abSeg = computed(() => {
+  const s = summary.value
+  const valid = s?.valid ?? 0
+  const warn = s?.warn ?? 0
+  const accum = s?.no_data ?? 0
+  const stat = s?.static ?? 0
+  const total = valid + warn + accum + stat || 1
+  const pct = (n) => Math.round((n / total) * 1000) / 10
+  return {
+    valid: pct(valid), warn: pct(warn), accum: pct(accum), static: pct(stat),
+    validPct: pct(valid), warnPct: pct(warn), accumPct: pct(accum), staticPct: pct(stat),
+  }
 })
 
 const formattedAvgIc = computed(() => {
@@ -715,6 +750,25 @@ onBeforeUnmount(() => {
 .accumulate-text { display: flex; flex-direction: column; gap: var(--space-1); }
 .accumulate-text strong { color: var(--color-brand-700); font-weight: var(--font-weight-semibold); }
 
+/* 美化轮（2026-09-06）: 四状态构成条——把「积累中」从一行字变成一眼可见的进度故事 */
+.accumulate-bar {
+  display: flex; height: 6px; border-radius: var(--radius-full);
+  overflow: hidden; background: var(--color-surface-tertiary);
+  margin-top: var(--space-1);
+}
+.ab-seg { height: 100%; transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
+.ab-valid { background: var(--color-success-500); }
+.ab-warn { background: var(--color-warning-500); }
+.ab-accum { background: var(--color-brand-400, #60a5fa); }
+.ab-static { background: var(--color-neutral-400); }
+.ab-legend { display: flex; gap: var(--space-3); flex-wrap: wrap; font-size: var(--font-size-xs); color: var(--color-text-secondary); }
+.ab-key { display: inline-flex; align-items: center; gap: 0.3rem; }
+.ab-dot { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+.ab-dot-valid { background: var(--color-success-500); }
+.ab-dot-warn { background: var(--color-warning-500); }
+.ab-dot-accum { background: var(--color-brand-400, #60a5fa); }
+.ab-dot-static { background: var(--color-neutral-400); }
+
 /* ── Section Divider ── */
 .section-divider {
   display: flex;
@@ -767,12 +821,21 @@ onBeforeUnmount(() => {
   background: var(--color-surface-secondary);
   border-radius: var(--radius-lg);
   border: 1px solid var(--color-border-light);
+  border-left: 3px solid var(--color-border-medium); /* 美化轮: 语义色左边条（见下） */
   transition: box-shadow 0.2s ease, transform 0.2s ease;
 }
 .stat-item:hover {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  box-shadow: var(--shadow-md);
   transform: translateY(-1px);
 }
+/* 美化轮（2026-09-06）: 六卡语义色左边条——扫一眼分层轻重，替代均质灰 */
+.stat-item-primary { border-left-color: var(--color-brand-500); }
+.stat-item:has(.stat-icon-valid), .stat-item:has(.text-up) { border-left-color: var(--color-success-500); }
+.stat-item:has(.stat-icon-warn) { border-left-color: var(--color-warning-500); }
+.stat-item-accum, .stat-item:has(.text-muted):not(.stat-item-primary) { border-left-color: var(--color-text-tertiary); }
+.stat-item:has(.stat-icon-static), .stat-item:has(.stat-num-static) { border-left-color: var(--color-neutral-400); }
+/* 零值柔和化：计数为 0 的卡片数字降为中性灰（非零保持红涨/琥珀语义），消除「红色 0」报错感 */
+.stat-zero .stat-num { color: var(--color-text-tertiary) !important; opacity: 0.75; }
 .stat-item-primary {
   background: linear-gradient(135deg, var(--color-brand-50), var(--color-neutral-0));
   border-color: var(--color-brand-200);
@@ -803,10 +866,17 @@ onBeforeUnmount(() => {
   gap: 0.25rem;
 }
 .stat-icon {
+  /* 美化轮: 裸字符 → 16px 圆角色块 chip，撑起卡片信息锚点 */
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px;
+  border-radius: var(--radius-sm);
   font-size: 0.625rem /* O17 */;
+  line-height: 1;
 }
-.stat-icon-valid { color: var(--color-success-600); }
-.stat-icon-warn { color: var(--color-warning-600); }
+.stat-icon-valid { color: var(--color-success-700); background: var(--color-success-100); }
+.stat-icon-warn { color: var(--color-warning-700); background: var(--color-warning-100); }
+.stat-icon-accum { color: var(--color-text-secondary); background: var(--color-surface-tertiary); }
+.stat-icon-static { color: var(--color-text-secondary); background: var(--color-surface-tertiary); }
 
 /* ── Category Card ── */
 .category-card {
@@ -964,7 +1034,7 @@ onBeforeUnmount(() => {
   position: relative;
 }
 .ic-bar-fill {
-  height: 8px;
+  height: 10px; /* 美化轮: 8→10px，长列表中提升存在感 */
   border-radius: var(--radius-full);
   transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1), background 0.3s ease;
   min-width: 6px;

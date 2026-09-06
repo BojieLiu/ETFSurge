@@ -36,7 +36,9 @@ const chartOption = computed(() => ({
       name: `${a.name} (${(a.target_weight * 100).toFixed(1)}%)`
     }))
   }],
-  color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#eab308']
+  /* 美化轮（2026-09-06）: 色板对齐 theme chart tokens——不再混入 #ef4444/#22c55e
+     （红/绿在本系统有涨跌语义，作分类色易误读），改用 chart-1..8 中性序列 */
+  color: ['#3b82f6', '#8b5cf6', '#f59e0b', '#06b6d4', '#ec4899', '#14b8a6', '#f97316', '#6366f1']
 }))
 </script>
 

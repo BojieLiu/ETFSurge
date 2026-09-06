@@ -25,7 +25,9 @@ const chartOption = computed(() => ({
     type: 'bar',
     data: props.items.map(i => i.daily_pnl || 0),
     itemStyle: {
-      color: (params) => params.value >= 0 ? '#ef4444' : '#22c55e'
+      /* 美化轮: 红涨绿跌对齐 theme 语义色（#ef4444→danger-500 系，#22c55e→success-500 系）——
+         与页面 text-up/text-down 数字同色系，硬编码色值不再漂移 */
+      color: (params) => params.value >= 0 ? '#dc2626' : '#16a34a'
     },
     emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.3)' } }
   }]

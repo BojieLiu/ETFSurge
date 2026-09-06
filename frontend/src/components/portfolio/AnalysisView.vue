@@ -599,7 +599,8 @@ onMounted(async () => {
 .empty-title { margin: 0 0 var(--space-2); font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
 .empty-description { margin: 0 0 var(--space-6); font-size: var(--font-size-base); color: var(--color-text-secondary); }
 
-/* P0-15 R3: 今日涨跌区块样式 */
+/* P0-15 R3: 今日涨跌区块样式——美化轮（2026-09-06）：语义左边条 + 涨跌底色跟随，
+   与因子页/组合页同款视觉语言 */
 .price-summary-row {
   display: flex;
   align-items: baseline;
@@ -608,7 +609,16 @@ onMounted(async () => {
   padding: var(--space-3) var(--space-4);
   background: var(--color-surface-secondary);
   border: 1px solid var(--color-border-light);
+  border-left: 3px solid var(--color-border-medium);
   border-radius: var(--radius-md);
+}
+.price-summary-row:has(.text-up) {
+  border-left-color: var(--color-text-up);
+  background: var(--color-bg-danger-subtle, var(--color-surface-secondary));
+}
+.price-summary-row:has(.text-down) {
+  border-left-color: var(--color-text-down);
+  background: var(--color-bg-success-subtle, var(--color-surface-secondary));
 }
 .price-summary-label { font-size: var(--font-size-sm); color: var(--color-text-secondary); white-space: nowrap; }
 .price-change { font-size: var(--font-size-2xl); font-weight: var(--font-weight-bold); font-family: var(--font-family-mono); }
