@@ -227,14 +227,14 @@
                 <span class="stat-dot stat-dot-warn"></span>
                 {{ cat.warn_count }} 待关注
               </span>
-              <span v-if="cat.no_data_count > 0" class="cat-stat no-data">{{ cat.no_data_count }} 无数据</span>
+              <span v-if="cat.no_data_count > 0" class="cat-stat cat-stat-accum">{{ cat.no_data_count }} 积累中</span>
               <span v-if="cat.static_count > 0 && cat.valid_count > 0" class="cat-stat static">
                 <span class="stat-dot stat-dot-static"></span>
                 {{ cat.static_count }} 静态
               </span>
             </span>
-            <span v-if="cat.avg_ic !== null" class="cat-avg-ic" :class="avgIcColor(cat.avg_ic)">
-              IC {{ cat.avg_ic.toFixed(4) }}
+            <span v-if="cat.avg_ic !== null" class="cat-avg-ic" :class="avgIcColor(cat.avg_ic)" :title="`平均 |IC|`">
+              |IC| {{ cat.avg_ic.toFixed(4) }}
             </span>
           </div>
 

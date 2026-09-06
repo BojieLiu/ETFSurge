@@ -308,4 +308,90 @@
 
 ---
 
+## 9. 用户需求追加：行情分析 LLM 对话支持追问与多轮（2026-09-06 晚）
+
+### 9.1 需求合理性与可行性
+
+**判定：合理，且高 ROI**——项目已有完整流式/护栏基础设施（`useLLMStream` composable、SSE 协议、OpenAI 兼容多 provider 故障转移、agentic 护栏 v7、$0.5/run 预算熔断），**不是在零基础上搭多轮，是在现有 stream 端点上叠一层会话管理**。
+
+**痛点对照**：
+- 当前 `AiAdvisor.vue` 是单轮（`response: ref('')` 覆盖式），投资人看完报告想追问"为什么这么说？换成 510300 呢？"得手动重发、AI 每次从零读数据、体验断；
+- `llm-advice/stream` 接收单 `{query, market}`，无会话历史注入——是设计漏，不是技术难。
+
+**风险点**：
+- token 累积爆炸 → 必须轮数截断 + 上下文窗口管理；
+- 上下文采集 5s+ 每次重跑成本高 → 必须缓存本会话市场快照；
+- 越权改持仓/调组合风险 → 沿用 v7 写确认门 + 工具白名单。
+
+### 9.2 实现方案（4 阶段可分批）
+
+#### 阶段 1+2：会话级最小实现 + SQLite 持久化（**拍板：一起落地**）
+
+**会话模型**：内存 `ChatSession`（LRU 上限 100，TTL 30min 无活动过期）+ SQLite `chat_sessions` 表（24h TTL 落盘，启动时加载到内存作 L1 缓存）。两层结构：内存层是热路径（每次追问先查），SQLite 层负责重启恢复与跨设备访问。
+
+**会话级接口**：
+1. **后端**（`backend/app/services/chat_session.py` 新增 + `backend/app/routers/analysis.py` 改）：
+   - `ChatSessionStore`（内存 LRU + SQLite 持久化双层）：`session_id → List[{role, content, ts, tool_calls?}]`，LRU 100 会话防内存爆，TTL 30min 无活动过期；
+   - SQLite `chat_sessions` 表（`session_id` PK / `user_id` nullable / `created_at` / `updated_at` / `messages_json`（压缩存的 messages 数组）），24h 自动归档清理（参考 round33 P-cleanup 机制）；
+   - `LLMAdviceRequest` 加 `session_id: str | None`（None=开新会话，后端在 `done` 事件 metadata 返回新建 id）；
+   - 上下文构建把历史消息拼进 messages（prompt 模板新增 `{{ chat_history }}` 槽），**只注入最近 10 轮 + 总 token ≤ 8K**（超出截断），其余保留在持久层不丢；
+   - 上下文缓存：本会话的 `index_realtime / sector_momentum` 在 chat_session 内复用，**避免追问时 5s 数据采集重跑**——首次轮完整采集，后续轮在缓存基础上更新（行情+板块快照 60s 内复用）。
+2. **前端**（`AiAdvisor.vue` + `useLLMStream.js` 微调）：
+   - `messages: ref<Array<{role, content, ts, tool_calls?}>>` 替代 `response: ref('')`，渲染消息气泡列表（用户右对齐灰底 / 助手左对齐 brand 蓝左条），跟随流式 token 追加到最后一条；
+   - 现有 `useLLMStream` 接口加 `sessionId: ''` 参数；新会话（null）触发后端开新会话，`done` 事件回传 `session_id` 保存到 `ref` 用于追问；
+   - **多会话支持**：本地维护 `sessions: ref<Array<{id, title, lastTs}>>` 侧边栏（轻量），点切换会加载该会话历史；
+   - 输入框置底，loading 时 disable 但历史消息照常可读。
+3. **护栏继承 v7**：
+   - 单会话步数 ≤ 8、轮数 ≤ 10、历史 token 上限 8K（超出截断最旧轮）；
+   - 单次成本仍按 $0.5 截断整会话非单轮；
+   - 追问里的工具调用走 v7 MCP 白名单（quote/factor/portfolio/news）；
+   - 写操作（改组合/下单）必须显式 confirm——v7 写确认门直接复用。
+4. **测试覆盖**：
+   - 多会话并发：模拟两个 session_id 并行问答，结果互不污染；
+   - 上下文截断：注入 12 轮历史验证只保留最近 10 轮；
+   - 持久化恢复：写入后重启进程（或切换新实例）应能读到原会话；
+   - TTL 过期：会话 24h 后自动归档清理（用 monkeypatch 时间）；
+   - 预算熔断：累计成本超 $0.5 必须截断。
+
+#### 阶段 2：SQLite 持久化（P3，**非必须**）
+- `chat_sessions` 表：session_id / created_at / updated_at / message_count（content JSON 压缩存）；
+- TTL 24h 过期归档（参考 round33 P-cleanup 机制）；
+- 页面刷新/重启可恢复上下文。
+
+#### 阶段 3：UI 增强（P3）
+- markdown 渲染气泡（代码块、表格）+ 复制/重新生成按钮；
+- 「导出对话」按钮（剪贴板 / .md 文件）；
+- 快捷键：`Cmd+K` 清空 / `↑` 翻上一题。
+
+#### 阶段 4：智能特性（P4）
+- 自动会话标题（前两轮 LLM 抽 5 词内标题）；
+- sqlite-vec 跨会话语义检索；
+- 自动场景化引导（持仓变动时主动问"是否重评估"）。
+
+### 9.3 待拍板取舍（2026-09-06 晚 用户拍板：完整 B）
+
+| 项 | 拍板 |
+|---|---|
+| 实施范围 | **阶段 1+2**（最小闭环 + SQLite 持久化） |
+| 上下文窗口 | **最近 10 轮 + 8K token**（更连贯） |
+| 持久化 | **SQLite 24h TTL** |
+| 并发 | **多会话 + session_id**（直接做，避免 v2 返工） |
+
+**结论**：阶段 1 + 2 同步实施（会话管理与持久化一并落地，避免分两批返工 + 测试联调成本），上下文窗口取 8K/10 轮的「连贯优先」档（与 GPT/DeepSeek 上下文窗口充裕度匹配），SQLite 24h TTL 走消息压缩 JSON + 启动加载。背景估时 5-8 人工时。
+
+### 9.4 实施排期（更新版小批清单）
+
+| # | 项 | 级别 | 来源 |
+|---|---|---|---|
+| 1 | data_health_check 口径修复 | P2 | round53 §7 |
+| 2 | R181 同指数重复配置（方案 C） | P2 | round53 §4.1 |
+| 3 | R182 因子页 no_data 文案统一「积累中」+ 分流 | P3 | round53 §8 |
+| 4 | R183 ic_tracker 交易日历校验 | P3 | round53 §8 |
+| 5 | R179 双告警退役 / R180 空 keyword 收口 | P3 | 暂缓登记，解禁后同批 |
+| 6 | **LLM 对话多轮追问（阶段 1）** | **P2** | **本节 §9.2** |
+
+排入下轮「round实施」按 P2 优先序执行：1 → 2 → 6。
+
+---
+
 *诊断产物：C:/Users/Public/etf_probe/（build53.log + probe53_*.py/.out + newsall.json + dhc53.out + caliber.out/caliber2.out，会话级临时目录）；容器于诊断完成后回收。未收到「round实施」不写修复代码。*

@@ -393,23 +393,29 @@ const filteredAffectedHoldings = computed(() => {
 
 <style scoped>
 .news-view { display: flex; flex-direction: column; gap: var(--space-6); }
-/* F29: 资讯分类 tab 条 */
+/* F29: 资讯分类 tab 条（美化轮 2026-09-06：药丸化） */
 .news-tabs {
   display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2);
-  padding: var(--space-2); background: var(--color-surface-secondary);
-  border-radius: var(--radius-lg); border: 1px solid var(--color-border-light);
+  padding: var(--space-2);
+  background: var(--color-surface-tertiary);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-border-light);
 }
 .news-tab {
-  padding: var(--space-2) var(--space-4);
-  border: 1px solid var(--color-border-light); border-radius: var(--radius-md);
+  padding: var(--space-1.5) var(--space-3);
+  border: none; border-radius: var(--radius-full);
   background: transparent; color: var(--color-text-secondary);
   cursor: pointer; font-size: var(--font-size-sm);
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: var(--transition-fast);
 }
-.news-tab:hover { background: var(--color-surface-tertiary); }
+.news-tab:hover {
+  color: var(--color-text-primary);
+  background: var(--color-surface-hover);
+}
 .news-tab.active {
-  background: var(--color-brand-500); border-color: var(--color-brand-500);
-  color: #fff; font-weight: 600;
+  background: var(--color-brand-500);
+  color: #fff; font-weight: var(--font-weight-semibold);
+  box-shadow: var(--shadow-xs);
 }
 .symbol-input {
   margin-left: auto; padding: var(--space-2) var(--space-3);
@@ -418,16 +424,51 @@ const filteredAffectedHoldings = computed(() => {
   font-size: var(--font-size-sm); width: 180px;
 }
 .symbol-input:focus { outline: none; border-color: var(--color-brand-500); }
-.news-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-3); padding: var(--space-3); background: var(--color-surface-secondary); border-radius: var(--radius-lg); border: 1px solid var(--color-border-light); }
+/* 美化轮（2026-09-06）: 工具栏加 brand 语义左条 + 重要性按钮药丸化 + 连接点走 token 化 */
+.news-toolbar {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
+  gap: var(--space-3); padding: var(--space-3) var(--space-4);
+  background: var(--color-surface-primary);
+  border: 1px solid var(--color-border-light);
+  border-left: 3px solid var(--color-brand-500);
+  border-radius: var(--radius-lg);
+}
 .news-status { display: flex; align-items: center; gap: var(--space-2); color: var(--color-text-secondary); font-size: var(--font-size-sm); }
-.status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-text-muted); }
-.status-dot--on { background: #2ecc71; box-shadow: 0 0 0 3px rgba(46, 204, 113, 0.2); }
+.status-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--color-neutral-400); /* 离线：中性灰 */
+  transition: var(--transition-fast);
+}
+.status-dot--on {
+  background: var(--color-success-500); /* 在线：token 化绿色 */
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.2);
+  animation: pulseDot 1.6s ease-in-out infinite;
+}
+@keyframes pulseDot { 0%,100% { box-shadow: 0 0 0 3px rgba(34,197,94,0.2); } 50% { box-shadow: 0 0 0 6px rgba(34,197,94,0.05); } }
 .level-filter { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 .filter-label { font-size: var(--font-size-sm); color: var(--color-text-secondary); }
-.filter-btn { display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; border: 1px solid var(--color-border); background: var(--color-surface-primary); border-radius: var(--radius-md); font-size: var(--font-size-xs); cursor: pointer; transition: all 0.15s ease; white-space: nowrap; }
-.filter-btn:hover { border-color: var(--color-primary); color: var(--color-primary); }
-.filter-btn.active { background: var(--color-primary); border-color: var(--color-primary); color: white; }
-.filter-btn.active:hover { background: var(--color-primary-dark); }
+/* 美化轮: 重要性按钮 → 药丸 toggle（与 ControlPanel 同款品牌语义） */
+.filter-btn {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-border-light);
+  background: var(--color-surface-secondary);
+  border-radius: var(--radius-full);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs); cursor: pointer;
+  transition: var(--transition-fast); white-space: nowrap;
+}
+.filter-btn:hover {
+  border-color: var(--color-brand-300);
+  color: var(--color-brand-700);
+  background: var(--color-bg-brand-subtle);
+}
+.filter-btn.active {
+  background: var(--color-bg-brand-subtle);
+  border-color: var(--color-brand-500);
+  color: var(--color-brand-700);
+  font-weight: var(--font-weight-semibold);
+}
 .news-card { position: relative; padding: var(--space-4); min-height: 320px; }
 .news-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-3); }
 /* R63 (round28): 骨架屏（加载态占位）——与真实 news-item 同高，加载→数据切换无位移（CLS） */

@@ -109,6 +109,7 @@ function onSelectSymbol(symbol) {
 }
 
 /* ── Top bar ── */
+/* 美化轮（2026-09-06）: tab 段药丸化 + quick bar 段 chip 化，撤掉 hardcoded 2px 边 */
 .ma-top-bar {
   position: sticky;
   top: 0;
@@ -122,75 +123,66 @@ function onSelectSymbol(symbol) {
 
 .market-tabs {
   display: flex;
-  gap: 0;
-  background: var(--color-surface-secondary);
-  border-bottom: 2px solid var(--color-border-light);
+  gap: var(--space-1);
+  padding: var(--space-1);
+  background: var(--color-surface-tertiary);
+  border-radius: var(--radius-full);
+  margin: var(--space-2);
 }
 
 .market-tab {
   flex: 1;
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-1.5) var(--space-3);
   font: var(--text-body-sm);
   color: var(--color-text-secondary);
   border: none;
-  background: none;
+  background: transparent;
+  border-radius: var(--radius-full);
   cursor: pointer;
   transition: var(--transition-fast);
-  letter-spacing: var(--letter-spacing-wide);
   text-align: center;
 }
 
 .market-tab:hover {
   color: var(--color-text-primary);
-  background: var(--color-bg-secondary);
+  background: var(--color-surface-hover);
 }
 
 .market-tab.active {
-  color: var(--color-brand-600);
+  color: var(--color-brand-700);
   font-weight: var(--font-weight-semibold);
   background: var(--color-bg-brand-subtle);
+  box-shadow: var(--shadow-xs);
 }
 
-.market-tab.active::after {
-  content: '';
-  position: absolute;
-  bottom: -2px;
-  left: 0;
-  right: 0;
-  height: 3px;
-  background: var(--color-brand-600);
-  border-radius: var(--radius-full);
-}
-
-/* ── Quick Action Bar ── */
+/* ── Quick Action Bar（美化轮: chip 化，与全站状态 chip 同语言） ── */
 .quick-bar {
   display: flex;
-  gap: 2px;
-  padding: var(--space-1) var(--space-2);
-  background: var(--color-surface-primary);
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  flex: 1;
+  justify-content: flex-end;
 }
 
 .qb-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  padding: var(--space-1.5) var(--space-2.5);
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  padding: var(--space-1) var(--space-3);
   font: var(--text-body-sm);
   color: var(--color-text-secondary);
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--radius-lg);
+  background: var(--color-surface-secondary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-full);
   cursor: pointer;
   transition: var(--transition-fast);
   white-space: nowrap;
 }
 
 .qb-btn:hover {
-  color: var(--color-text-primary);
-  background: var(--color-surface-hover);
-  border-color: var(--color-border-light);
+  color: var(--color-brand-700);
+  background: var(--color-bg-brand-subtle);
+  border-color: var(--color-brand-200);
 }
 
 .qb-icon { font-size: var(--font-size-base); line-height: 1; }

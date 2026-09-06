@@ -79,12 +79,45 @@ watch(() => props.marketTab, () => {
 </script>
 
 <style scoped>
-.section-card { margin-bottom: var(--space-4); }
-.section-header { margin-bottom: var(--space-3); }
-.section-title { font-size: var(--font-size-xl); font-weight: var(--font-weight-semibold); margin: 0 0 var(--space-1); color: var(--color-text-primary); }
+/* 美化轮（2026-09-06）: section-card 圆角卡 + 品牌左边条；title 加大 + 副标；card 沉底嵌入 */
+.section-card {
+  margin-bottom: var(--space-4);
+  background: var(--color-surface-primary);
+  border: 1px solid var(--color-border-light);
+  border-left: 3px solid var(--color-brand-500);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+.section-header {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  background: var(--color-surface-secondary);
+  border-bottom: 1px solid var(--color-border-light);
+  margin-bottom: 0;
+}
+.section-title {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
+  margin: 0;
+  color: var(--color-text-primary);
+  display: flex; align-items: center; gap: var(--space-2);
+}
+.section-title::before {
+  content: '';
+  width: 4px; height: 18px;
+  background: var(--color-brand-500);
+  border-radius: var(--radius-full);
+}
 .section-desc { font-size: var(--font-size-sm); color: var(--color-text-secondary); margin: 0; }
-.card { background: var(--color-surface-primary); border: 1px solid var(--color-border-light); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); }
-.card-body { padding: var(--space-6); }
+.card {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  border-radius: 0;
+}
+.card-body { padding: var(--space-5); }
 
 .action-area {
   display: flex;
@@ -137,9 +170,13 @@ watch(() => props.marketTab, () => {
 
 .action-hint {
   margin: 0;
+  padding: var(--space-2) var(--space-3);
   font-size: var(--font-size-sm);
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
   text-align: center;
+  background: var(--color-surface-secondary);
+  border: 1px dashed var(--color-border-medium);
+  border-radius: var(--radius-md);
 }
 
 .loading-bar {
