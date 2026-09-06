@@ -10,11 +10,11 @@ FastAPI (async) backend + Vue 3 (Pinia + ECharts) frontend. Data moves over REST
 
 ## Why this exists
 
-The starting point was a human problem: nobody can watch the whole market. Manually tracking every asset class, every sector, and the day's news is slow, subjective, and inevitably narrow — analysis bends toward what you already believe, misses what you aren't looking at, and arrives late. This system exists to fill that gap: it collects the data and runs the analysis across the full market, at a speed and breadth no person can match.
+The starting point was a human problem: **nobody can watch the whole market**. Manually tracking every asset class, every sector, and the day's news is slow, subjective, and inevitably narrow — analysis bends toward what you already believe, misses what you aren't looking at, and arrives late. This system exists to fill that gap: it collects the data and runs the first-pass analysis across the full market, at a speed and breadth no person can match.
 
 The obvious shortcut — just ask an AI chatbot — fixes the coverage problem but creates five new ones:
 
-1. **Data latency.** Knowledge bases and web search give a model some awareness of current events, but the retrieved data is typically hours or even days stale — and the model can't tell you it's stale. It may misstate the date, or confidently analyze "market data" for a point in time that hasn't happened yet. Real-time prices, intraday sentiment, and today's news are exactly what a chat tool is worst at.
+1. **Data latency.** Knowledge bases and web search give a model a "present" that is hours or even days stale — and the model won't tell you it's stale. It may misstate the date, or confidently analyze "market data" for a point in time that hasn't happened yet. Real-time prices, intraday sentiment, and today's news are exactly what a chat tool is worst at.
 2. **Hallucination.** LLMs confidently invent numbers, tickers, and "trends" that don't exist. In investment decisions, a fabricated figure is worse than no figure.
 3. **Style drift.** Ask the same question twice and the answer comes back differently — different structure, different emphasis. You can't build a repeatable process on answers that change shape every time.
 4. **Non-reproducible.** The same inputs should produce the same portfolio. A chat model won't.
@@ -24,10 +24,10 @@ ETF Surge exists to answer those five problems head-on, not to be "another AI to
 
 - **Ground the LLM in live data.** Every analysis runs against a real-time data layer — quotes, K-lines, indicators, factor scores — fetched at request time. The model writes prose about data it can actually see, instead of inventing.
 - **Deterministic where it matters.** Portfolio allocation is computed by a pure-function engine with zero I/O: same inputs, same outputs, every time. LLM prose is decoration on top of engine output, never the source of truth.
-- **A factor model with statistical checks.** 38 live factors with daily IC tracking give analysis a factual backbone; whether a factor is significant is a statistical question, not a model's assertion.
+- **A factor model with statistical checks.** 38 live factors with daily IC tracking give analysis a factual backbone — whether a factor works is a statistical question, not a model's assertion.
 - **Everything is auditable.** Designs are persisted, factor scores stored, token usage logged, data-source health monitored. You can reconstruct why a portfolio looks the way it does.
 
-And because the whole thing runs on free data sources, there's a hard constraint underneath: **the data layer has to survive flaky providers**. akshare, Sina, Tencent, EastMoney, levistock, mootdx — each works most of the time and fails in its own way. So every asset class gets a fallback chain behind a circuit breaker; empty results count as misses, not failures; and when every source is down, the API says so instead of serving stale or fabricated numbers. A system that helps you invest must never quietly hand you bad data.
+And because the whole thing runs on free data sources, there's a hard constraint underneath: **the data layer has to survive flaky providers**. akshare, Sina, Tencent, EastMoney, levistock, mootdx — each works most of the time and fails in its own way. So every data chain carries a fallback chain behind a circuit breaker; empty results count as misses, not failures; and when every source is down, the API says so instead of serving stale or fabricated numbers. A system that helps you invest must never quietly hand you bad data.
 
 That resilience work is most of this repo — not because it's glamorous, but because it's the difference between a demo and a tool you'd actually trust with a decision.
 
@@ -40,21 +40,21 @@ That resilience work is most of this repo — not because it's glamorous, but be
 - **Six asset classes** — A-shares, HK stocks, US stocks, gold, crude oil, silver: realtime quotes, K-line history, technical indicators (MA / MACD / RSI / KDJ / BOLL / ATR / VWAP), and composite buy / sell signals.
 - **Watchlist** with live enrichment: per-item fallback, T-1 close snapshot fallback off-hours, and a normalized 7-field realtime contract (`price / change_pct / volume / as_of / is_estimated / estimate_source / data_source`) so the UI never guesses what a field means.
 - **Sector & concept boards** with rotation, heat ranking, hot plates (A / HK), and hot-stock ranking — all market-scoped per tab.
-- **Unified search** across symbols, sectors, and indices, with a multi-level fallback (instruments table → levistock → static A-stock base → ETF list).
+- **Unified search** across symbols, sectors, and indices, with multi-level fallback (instruments table → levistock → static A-stock base → ETF list); the sector/index modes hit the in-memory sector cache and the `indices_meta` table directly (post round52 R177 this covers CSI custom indices such as dividend-low-volatility).
 - **Fund NAV** for OTC funds; **fundamentals** (PE / PB, fund flow) for A-shares and US indices.
 
 ### AI portfolio design
 
 - `POST /portfolio/design-async` generates **three risk-profile ETF portfolios** (Defensive / Balanced / Aggressive) from live factor scores.
-- The **strategy engine** (`app/engine/`) is a pure-function package: allocation, layer budgets, rationale, risk controls, composite signal, correlation, pool balancing — zero I/O, with purity enforced by an AST gate in CI.
-- Three layers per strategy, per-profile budget tables, and risk constraints (single holding ≤ 30%, sector concentration < 40%, correlation cap).
+- The **strategy engine** (`app/engine/`) is a pure-function package: allocation, layer budgets, rationale, risk controls, composite signal, correlation, pool balancing — zero I/O, with purity enforced by an AST gate in CI. **Determinism in practice**: given the same market snapshot, the three plans are identical every single run — that is what "reproducible" means in engineering terms.
+- Three layers per strategy, per-profile budget tables, and hard risk constraints (single holding ≤ 30%, sector concentration < 40%, correlation cap). Same-index / same-theme candidates are deduplicated via the taxonomy family table, preventing duplicate exposure like "two CSI-A500 ETFs at 20% and 5%".
 - Async pipeline: data + engine first → `quick_ready` (plans pushed before the LLM report finishes) → LLM report → notification. If data is degraded, it falls back to a **static degraded design** instead of fabricating one.
 - **Consistency validation**: the LLM cannot introduce ETFs outside the candidate pool — violations get a correction footnote, not silent acceptance.
 
 ### Factor model
 
 - **193 factors defined** in `factor_definitions.yaml`; **38 with live compute functions** across 9 categories (technical, style, sentiment, alternative, theme, microstructure, etf_specific, china_specific, macro).
-- **Daily IC tracking** — Spearman rank IC with Newey–West standard errors; a factor is "significant" only after ≥ 250 trading days of IC history with a t-statistic ≥ 2 and |IR| ≥ 0.5.
+- **Daily IC tracking** — IC (information coefficient) measures how well "yesterday's factor score" correlates with "today's actual move": recorded daily as Spearman rank correlation with Newey–West standard errors. A factor only "graduates" after ≥ 250 trading days of IC history with a t-statistic ≥ 2 and |IR| ≥ 0.5 — **statistics decide, not vibes**.
 - IC history is backfilled at startup, persisted to SQLite, and exposed per-factor via `/factors/active` (mean IC, IR, t-stat, zero-ratio, status).
 
 ### LLM analysis suite
@@ -75,7 +75,7 @@ That resilience work is most of this repo — not because it's glamorous, but be
 
 The LLM module is upgraded from "single prompt → report" to a production agent stack:
 
-- **MCP tool layer** — 4 stdio MCP servers (`quote` / `factor` / `portfolio` / `news`) wrap the real production chains (multi-source failover, 53-factor pure-function engine, async strategy-check pipeline, news buckets). Every tool output carries a traceable envelope `{data, as_of, source, degraded}`; failures degrade honestly instead of fabricating data. Callable from any MCP host (`python -m app.mcp_servers.quote_server`) or in-process by the agent loop.
+- **MCP tool layer** — 4 stdio MCP servers (`quote` / `factor` / `portfolio` / `news`) wrap the real production chains (multi-source failover, the 38-factor pure-function engine, async strategy-check pipeline, news buckets). Every tool output carries a traceable envelope `{data, as_of, source, degraded}`; failures degrade honestly instead of fabricating data. Callable from any MCP host (`python -m app.mcp_servers.quote_server`) or in-process by the agent loop.
 - **Plan-and-Execute loop with guardrails** — step budget (10, truncation → partial results), tiered time budgets sourced from one module (strategy check 90s / design report 120s), loop detection (same tool + same args twice → terminate), tool whitelist (PermissionError on unregistered tools), write-confirmation gate (order/trade actions require explicit confirm), and output schema validation (every step output must carry a `source` — numbers must be traceable).
 - **Evals with CI gates** — golden sets in 5 categories (quotes / factors / format compliance / refusal anti-hallucination / multi-step). Blocking gates: overall ≥95%, refusal zero-hallucination 100%, format 100%. `python -m scripts.evals.ci_gate`.
 - **Trace + cost accounting** — every run lands a structured trace (JSONL + SQLite `agentic_runs` with per-run cost); model price table with a $0.5 per-run budget circuit-breaker (`agentic_budget_exceeded` warning).
@@ -93,9 +93,10 @@ The LLM module is upgraded from "single prompt → report" to a production agent
         ▼
  ┌───────────────────────────────────────────────┐
  │ FastAPI (async)                                │
- │ lifespan: warmup sequence · background loops   │
- │   sector 60s · regime+sentiment 120s · news    │
- │   120s · IC persistence 120s · health 120s     │
+ │ lifespan: warmup sequence (7 staged tasks) ·   │
+ │   background loops: sector 60s · regime+sent.  │
+ │   120s · news 120s · IC persistence 120s ·     │
+ │   health 120s                                  │
  │ routers: market portfolio analysis news        │
  │          factors admin system ws               │
  └───────────────┬───────────────────────────────┘
@@ -148,11 +149,11 @@ The LLM module is upgraded from "single prompt → report" to a production agent
  └───────┬──────────────────┬──────────────┬──────┘
          │                  │              │
  ┌───────▼──────┐  ┌────────▼───────┐  ┌────▼────────────┐
- │ L1 Memory    │  │ L2 Redis       │  │ SQLite          │
- │ Cache (TTL)  │◄►│ (optional,     │  │ portfolio.db    │
- │ always avail │  │ auto-degrade)  │  │ token_usage.db  │
- └──────────────┘  └────────────────┘  │ source.db       │
-                                       └─────────────────┘
+ │ L1 in-process│  │ L2 Redis       │  │ SQLite          │
+ │ MemoryCache  │◄►│ (default in    │  │ portfolio.db    │
+ │ (TTL, always │  │  Docker, auto- │  │ token_usage.db  │
+ │  available)  │  │  degrade)      │  │ source.db       │
+ └──────────────┘  └────────────────┘  └─────────────────┘
 ```
 
 ### Data source fallback chains
@@ -175,9 +176,9 @@ Every chain goes through `SourceRegistry.route()` — sources in cooldown are sk
 
 ### Key design decisions
 
-1. **Circuit breaker with a "miss ≠ failure" rule** — `SourceRegistry` keeps a failure counter and cooldown per source. Consecutive failures (≥ 3, any HTTP 4xx/5xx, or a < 500ms fast-fail) put a source into cooldown with exponential backoff capped at 600s. Empty results are recorded as *misses*, so a source stays healthy even when individual tickers don't exist.
-2. **Pure-function strategy engine** — `engine/` has zero I/O and zero dependencies outside itself, enforced by `scripts/check_engine_purity.py`. Deterministic allocation means the engine is unit-testable without mocking anything.
-3. **Two-level cache with graceful degradation** — L1 in-process `MemoryCache` (always available) + L2 `RedisCache` (cross-process, auto-degrades to no-op when unreachable). The system runs fully without Redis.
+1. **Circuit breaker with a "miss ≠ failure" rule** — `SourceRegistry` keeps a failure counter and cooldown per source. Consecutive failures (≥ 3, any HTTP 4xx/5xx, or a < 500ms fast-fail) put a source into cooldown with exponential backoff capped at 600s. Empty results are recorded as *misses*, so a source stays healthy even when individual tickers don't exist. **Analogy: the circuit breaker is the breaker panel in your home — it trips to protect the wiring; but "this one light is off" doesn't mean a blackout, which is exactly why we separate "no data" from "source is down".**
+2. **Pure-function strategy engine** — `engine/` has zero I/O and zero dependencies outside itself, enforced statically by `scripts/check_engine_purity.py` (AST). Deterministic allocation means the engine is unit-testable without mocking anything. **Like a calculator: press the same keys, get the same number — allocation has no "inspiration", only arithmetic.**
+3. **Two-level cache with graceful degradation** — L1 in-process `MemoryCache` (always available) + L2 `RedisCache` (cross-process, auto-degrades to no-op when unreachable). The system runs fully without Redis; Docker prod ships one by default.
 4. **LLM failover + consistency guard** — OpenCode Zen primary / DeepSeek fallback; `_validate_report_consistency()` rewrites out-of-pool ETF picks with correction footnotes instead of accepting them.
 5. **Async task pipeline with partial results** — design tasks write plans to the DB (`quick_ready`) *before* the slow LLM report finishes, so users see strategy results in seconds rather than after a 60s+ report.
 6. **Market calendar** — `market_calendar.py` knows A-share / HK / US sessions. Off-hours return estimated NAV or last close instead of stale "live" prices, and the field `estimate_source` tells the UI what it's looking at.
@@ -193,7 +194,7 @@ Every chain goes through `SourceRegistry.route()` — sources in cooldown are sk
 | Backend | Python 3.12 · FastAPI · SQLAlchemy 2.0 (async) · httpx · asyncio background loops |
 | Data sources | mootdx · Sina · Tencent · akshare · NetEase · EastMoney · TickFlow · BaoStock · levistock (CLS) · TwelveData · Finnhub · AlphaVantage · multpl · Yahoo (US index PE/PB) |
 | Cache | In-process MemoryCache (default) + optional Redis (auto-degrade) |
-| Database | SQLite via aiosqlite (`portfolio.db` + `token_usage.db` + `source.db`), data layer abstracted. `portfolio.db` runs in WAL mode (round35 A1) — to back it up, copy all three files (`portfolio.db` + `-wal` + `-shm`) together, or use `sqlite3 portfolio.db "VACUUM INTO 'backup.db'"` |
+| Database | SQLite via aiosqlite (`portfolio.db` + `token_usage.db` + `source.db`), data layer abstracted. `portfolio.db` runs a fixed **DELETE journal mode + synchronous=FULL** (round38 R139: WAL suffered repeated page corruption under concurrent dual writers) — back up with `sqlite3 portfolio.db "VACUUM INTO 'backup.db'"`, or copy the whole file while writes are paused |
 | LLM | OpenCode Zen (primary) · DeepSeek (fallback) — OpenAI-compatible |
 | Frontend | Vue 3.5 · Vite 5 · Vue Router · Pinia · ECharts (vue-echarts) · axios · marked |
 | Testing | pytest (async) · vitest + jsdom · @vue/test-utils · Playwright (E2E) |
@@ -207,9 +208,9 @@ Every chain goes through `SourceRegistry.route()` — sources in cooldown are sk
 ETF_Surge/
 ├── backend/
 │   ├── app/
-│   │   ├── main.py              # FastAPI entry + lifespan (warmup + background loops)
+│   │   ├── main.py              # FastAPI entry + lifespan (warmup sequence + background loops)
 │   │   ├── config.py            # pydantic-settings (.env)
-│   │   ├── database.py          # async SQLAlchemy / SQLite
+│   │   ├── database.py          # async SQLAlchemy / SQLite (DELETE journal + busy_timeout)
 │   │   ├── models/              # ORM models + Pydantic schemas
 │   │   ├── fetchers/            # data source modules (each with its own fallback chain)
 │   │   │   ├── china_market.py      # A/HK quotes, K-lines, indices
@@ -233,21 +234,25 @@ ETF_Surge/
 │   │   │   ├── factor_definitions.yaml
 │   │   │   └── ic_tracker.py          # Spearman IC · Newey-West
 │   │   ├── analysis/            # indicators · signal · llm · provider failover · text pipeline
-│   │   ├── tasks/               # task_manager · design_pipeline · design_report
-│   │   │   ├── strategy_check_worker.py · market_refresh.py · news_refresh.py · sector_refresh.py
+│   │   ├── tasks/               # task_manager · design_report · strategy_check_worker
+│   │   │   ├── market_refresh.py · news_refresh.py · sector_refresh.py
 │   │   ├── routers/             # market portfolio analysis news factors admin system ws
 │   │   ├── monitor/             # token_usage · source_events · probes
+│   │   ├── agentic/             # v7: agent_loop · executor · trace_store · cost · lg_agent
+│   │   ├── mcp_servers/         # 4 stdio MCP servers (quote/factor/portfolio/news)
 │   │   └── core/                # source_registry · cache_service · ttl · async_utils
 │   │                            # market_calendar · regime · factor_aggregate · fast_json
-│   ├── tests/                   # 2,400+ pytest cases (external calls mocked)
+│   ├── scripts/evals/           # golden sets (64 jsonl cases) + ci_gate + harness + scorers (v7 evals)
+│   ├── tests/                   # 3,100+ pytest cases (external calls mocked)
 │   ├── scripts/                 # patrol.py · verify_e2e.py · data_health_check.py
 │   │                            # smoke_startup.py · verify_perf.py · check_routes.py
 │   │                            # check_engine_purity.py · audit_async_blocking.py · ...
 │   ├── requirements.txt · Dockerfile · .env.example
 ├── frontend/
 │   ├── src/
-│   │   ├── views/               # Dashboard · MarketAnalysis · ConfigView
-│   │   ├── components/          # 40+ components (dashboard / design / market / analysis / ui)
+│   │   ├── views/               # Dashboard · MarketAnalysis · PortfolioAnalysis
+│   │   │                        # NewsView · AiDesign · ConfigView · system
+│   │   ├── components/          # 36 components (dashboard / design / market / analysis / ui)
 │   │   │   ├── PortfolioAnalysis.vue · NewsView.vue · TokenMonitor.vue
 │   │   │   ├── SourceMonitor.vue · FactorModelView.vue · GlobalIndicesStrip.vue
 │   │   ├── stores/              # Pinia: market · portfolio · task · warmup · toast · loading
@@ -255,16 +260,16 @@ ETF_Surge/
 │   │   ├── api/                 # axios clients (/api/v1 base)
 │   │   ├── router/              # Vue Router config
 │   │   └── styles/              # theme.css (design tokens · dark mode · red-up/green-down)
-│   ├── src/test/                # ~500 vitest cases · 16 Playwright E2E specs
+│   ├── *.spec.js under src/     # vitest cases (components & utils)
+│   ├── e2e/                     # 16 Playwright E2E specs
 │   ├── nginx.conf · Dockerfile  # multi-stage (dev / prod)
 │   └── package.json
-├── api-contracts/               # 57 bilingual API contract files (frontend-backend alignment)
-├── docker-compose.yml           # profiles: dev (hot-reload) / prod (baked + nginx)
-├── docs/                        # design docs · optimization plans · round reviews
-├── prompt_eval/                 # LLM prompt evaluation framework
+├── api-contracts/               # 59 bilingual API contract files (frontend-backend alignment)
+├── docker-compose.yml           # profiles: dev (hot-reload) / prod (baked + nginx) + diag overlay
+├── docs/                        # design docs · optimization plans · round reviews (archived/ = closed rounds)
 ├── data/                        # SQLite DBs (volume-mounted in Docker)
-├── start.ps1 · stop.ps1 · restart.bat
-└── AGENTS.md                    # engineering conventions (TDD · anti-fake-completion · etc.)
+├── start.ps1 · stop.ps1 · start.bat · stop.bat · restart.bat
+└── AGENTS.md                    # engineering conventions (TDD · anti-fake-completion · commit rules · ...)
 ```
 
 ---
@@ -278,6 +283,7 @@ ETF_Surge/
 cd backend
 pip install -r requirements.txt
 cp .env.example .env        # fill in API keys (see below)
+
 uvicorn app.main:app --reload
 
 # 2. Frontend (separate terminal — Windows must use shell)
@@ -302,6 +308,7 @@ docker-compose up --build --profile prod
 - `dev` mounts `./backend` and `./frontend`; backend runs `uvicorn --reload`, frontend runs the Vite dev server. Edits apply instantly.
 - `prod` packages backend + Redis + nginx (built frontend); `/api` and `/ws` are reverse-proxied to the backend.
 - `dev` requires `backend/.env` to exist. Vite's `/api` and `/ws` proxies point at `backend-dev` inside the container and fall back to `localhost:8000` locally.
+- For diagnostics there is a `docker-compose.diag.yml` overlay (injects PROFILE_WARMUP=1 warmup profiling).
 
 ---
 
@@ -333,7 +340,7 @@ docker-compose up --build --profile prod
 | GET | `/api/v1/market/realtime/portfolio` | Portfolio realtime |
 | GET | `/api/v1/market/history/{symbol}` · `/chart/{symbol}` | K-line history · chart series |
 | GET | `/api/v1/market/indicators/{symbol}` · `/signal/{symbol}` | Technical indicators · composite signal |
-| GET | `/api/v1/market/search` | Unified symbol/sector/index search |
+| GET | `/api/v1/market/search` | Unified symbol/sector/index search (params: `keyword` + `kind`) |
 | GET | `/api/v1/market/indices/global` | Global indices (region-grouped) |
 | GET | `/api/v1/market/sectors/industry` · `/concept` · `/rotation` · `/heat` | Sector boards |
 | GET | `/api/v1/market/hot-plates` · `/stock-hot-rank` | Hot plates / hot stocks (A/HK) |
@@ -348,7 +355,7 @@ docker-compose up --build --profile prod
 | POST | `/api/v1/analysis/llm-report/stream` · `/llm-advice/stream` | SSE: market report · advisor Q&A |
 | POST | `/api/v1/analysis/symbol-analysis/stream` · `/sector-analysis/stream` | SSE: symbol/sector deep-dive |
 | POST | `/api/v1/analysis/news-impact` | News impact on holdings |
-| GET | `/api/v1/news/headlines` · `/macro` · `/global` · `/stock/{symbol}` · `/research/{symbol}` | News feeds |
+| GET | `/api/v1/news/headlines` · `/all` · `/macro` · `/global` · `/stock/{symbol}` · `/research/{symbol}` | News feeds (`/all` = three-bucket aggregate, round52 R178) |
 | GET | `/api/v1/factors/model` · `/active` | Factor model overview · active factors w/ IC |
 | GET | `/api/v1/admin/token-usage*` | LLM token usage (summary / timeseries / failures) |
 | GET | `/api/v1/admin/sources/*` | Data-source health / events / circuit breakers |
@@ -361,11 +368,12 @@ docker-compose up --build --profile prod
 
 | Path | Description |
 |---|---|
-| `WS /api/v1/ws/market/{symbol}` | Realtime quote streaming |
+| `WS /api/v1/ws/market/{symbol}` | Realtime quote streaming (backend in place; frontend mainly consumes the portfolio channel) |
 | `WS /api/v1/ws/news` | News push (snapshot on connect) |
 | `WS /api/v1/ws/portfolio` | Portfolio change broadcasts (`portfolio_changed`) |
 | `WS /api/v1/ws/task-notifications` | Background task progress |
-| `WS /api/v1/ws/design-report/{session_id}` | Streaming design report |
+
+> Paths carry the `/api/v1` prefix; on a 403 handshake check the prefix first.
 
 ---
 
@@ -393,7 +401,7 @@ cd frontend && npm run build
 cd frontend && npm run test:e2e:smoke
 ```
 
-**Scale**: ~2,400 backend pytest cases · ~500 frontend vitest cases · 16 Playwright E2E specs · 57 API contract files.
+**Scale**: ~3,100 backend pytest cases · frontend vitest component/util cases + 16 Playwright E2E specs · 59 API contract files.
 
 **Engineering gates** (all enforced by `.githooks/pre-commit` or `patrol.py`):
 - `check_engine_purity.py` — AST gate: `engine/` must not import services/fetchers/tasks or use I/O.
@@ -402,6 +410,7 @@ cd frontend && npm run test:e2e:smoke
 - `audit_unused_symbols.py` — dead-code audit with a frozen baseline (fails only on *new* dead symbols).
 - `check_api_usage.py` — no frontend API methods defined but never called.
 - `data_health_check.py` — data-pipeline health (source reachability, factor variance, layer depth).
+  ⚠️ Checker verdicts need cross-verification against the production path (round53 lesson: a bare compute() missing injections caused 3 rounds of false alarms).
 - `verify_perf.py` — soft performance gate (watchlist ≤ 3s, search ≤ 1s, factor-health ≤ 2s).
 
 **Testing principles**: external network / LLM calls must be mocked in unit tests; `verify_e2e.py` asserts real values (not just HTTP 200 / non-empty); performance checks are a soft gate that records known debt instead of blocking delivery.
@@ -415,7 +424,8 @@ cd frontend && npm run test:e2e:smoke
 - **Red up, green down** — UI follows Chinese convention; tokens live in `theme.css`.
 - **Weights are decimals** (`0.3` = 30%), never renormalized — `target_amount = total_capital × target_weight`, cash is the remainder.
 - **akshare encoding** — latin1 mojibake in column names is normalized by `_decode_df()`.
-- **`async def` ≠ non-blocking** — synchronous I/O inside async functions must go through `run_sync` / `run_in_thread`.
+- **`async def` ≠ non-blocking** — synchronous I/O inside async functions must go through `run_sync` / `to_thread`.
+- **Commit messages in English only** (a commit-msg hook hard-rejects CJK), format in AGENTS.md; commits go through Git Bash.
 
 ---
 
