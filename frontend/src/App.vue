@@ -28,6 +28,33 @@
           </router-link>
         </div>
 
+        <!-- R54 (round54-frontend-polish): 移动端汉堡菜单——
+             ≤767px 时替代 nav-links，提供全部 9 路由可达。
+             a11y：aria-haspopup/expanded/controls + role=menu + 焦点陷阱 + Esc + body scroll lock。 -->
+        <button
+          v-if="isMobileNav"
+          ref="burgerRef"
+          class="nav-burger"
+          :class="{ 'nav-burger--open': mobileMenuOpen }"
+          aria-label="打开导航"
+          aria-haspopup="menu"
+          :aria-expanded="mobileMenuOpen"
+          aria-controls="nav-menu"
+          @click="toggleMobileMenu"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            <template v-if="!mobileMenuOpen">
+              <line x1="3" y1="6" x2="21" y2="6"/>
+              <line x1="3" y1="12" x2="21" y2="12"/>
+              <line x1="3" y1="18" x2="21" y2="18"/>
+            </template>
+            <template v-else>
+              <line x1="18" y1="6" x2="6" y2="18"/>
+              <line x1="6" y1="6" x2="18" y2="18"/>
+            </template>
+          </svg>
+        </button>
+
         <!-- Connection Status -->
         <div class="nav-status" aria-live="polite" aria-atomic="true">
           <span class="status-indicator" :class="connectionStatus" aria-hidden="true"></span>
@@ -44,6 +71,31 @@
         <TaskIndicator />
       </nav>
     </header>
+
+    <!-- R54: 移动端导航抽屉（header 外、app 根内） -->
+    <Transition name="drawer">
+      <nav
+        v-if="isMobileNav && mobileMenuOpen"
+        id="nav-menu"
+        class="nav-drawer"
+        role="menu"
+        aria-label="移动端导航"
+        @focusin="trapFocus"
+      >
+        <router-link
+          v-for="item in navItems"
+          :key="item.path"
+          :to="item.path"
+          class="nav-drawer-link"
+          :class="{ 'nav-drawer-link--active': isActiveRoute(item.path) }"
+          role="menuitem"
+          @click="closeMobileMenu"
+        >
+          <span class="nav-link-icon" aria-hidden="true">{{ item.icon }}</span>
+          <span>{{ item.label }}</span>
+        </router-link>
+      </nav>
+    </Transition>
 
     <!-- Main Content -->
     <main id="main-content" class="main" role="main">
@@ -130,6 +182,89 @@ const isActiveRoute = (path) => {
   if (path === '/') return route.path === '/'
   return route.path.startsWith(path)
 }
+
+// ── R54: 移动端汉堡菜单（≤767px）─────────────────────────
+const isMobileNav = ref(false)
+const mobileMenuOpen = ref(false)
+const burgerRef = ref(null)
+const drawerRef = ref(null)
+
+function checkMobileNav() {
+  isMobileNav.value = window.innerWidth < 768
+  // 从移动端切回桌面时收起菜单
+  if (!isMobileNav.value && mobileMenuOpen.value) {
+    closeMobileMenu()
+  }
+}
+
+function toggleMobileMenu() {
+  mobileMenuOpen.value = !mobileMenuOpen.value
+}
+
+function closeMobileMenu() {
+  mobileMenuOpen.value = false
+  // 焦点回汉堡（按钮常驻 header 不随路由重挂载）
+  if (burgerRef.value) burgerRef.value.focus()
+}
+
+// Esc 关闭 + body scroll lock + 路由切换自动关闭
+function onKeydown(e) {
+  if (e.key === 'Escape' && mobileMenuOpen.value) {
+    closeMobileMenu()
+  }
+}
+
+// 点击 drawer 外部关闭（mousedown 阶段判定，避免误吞链接点击）
+function onDocMousedown(e) {
+  if (!mobileMenuOpen.value) return
+  const drawer = document.getElementById('nav-menu')
+  const burger = burgerRef.value
+  if (drawer && !drawer.contains(e.target) && burger && !burger.contains(e.target)) {
+    mobileMenuOpen.value = false
+  }
+}
+
+// 焦点陷阱：焦点离开 drawer 即拉回第一个 menuitem（onFocusin 兜底 Shift+Tab）
+function trapFocus(e) {
+  const drawer = document.getElementById('nav-menu')
+  if (!drawer) return
+  if (!drawer.contains(e.target)) {
+    const first = drawer.querySelector('.nav-drawer-link')
+    if (first) first.focus()
+  }
+}
+
+watch(isMobileNav, (v) => {
+  document.body.style.overflow = v && mobileMenuOpen.value ? 'hidden' : ''
+})
+watch(mobileMenuOpen, (v) => {
+  document.body.style.overflow = isMobileNav.value && v ? 'hidden' : ''
+  // 打开时焦点到第一个链接
+  if (v) {
+    requestAnimationFrame(() => {
+      const first = document.querySelector('#nav-menu .nav-drawer-link')
+      if (first) first.focus()
+    })
+  }
+})
+
+watch(() => route.path, () => {
+  if (mobileMenuOpen.value) mobileMenuOpen.value = false
+})
+
+onMounted(() => {
+  checkMobileNav()
+  window.addEventListener('resize', checkMobileNav)
+  document.addEventListener('keydown', onKeydown)
+  document.addEventListener('mousedown', onDocMousedown)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', checkMobileNav)
+  document.removeEventListener('keydown', onKeydown)
+  document.removeEventListener('mousedown', onDocMousedown)
+  document.body.style.overflow = ''
+})
 
 // F21 (round6 §16.9): 页头品牌图标——按路由 title 映射（回退 📈）
 const PAGE_ICONS = {
@@ -630,12 +765,99 @@ onUnmounted(() => {
 }
 
 /* ==========================================
+   R54: Mobile Nav Burger + Drawer
+   ========================================== */
+.nav-burger {
+  display: none; /* 桌面隐藏 */
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: var(--transition-fast);
+  flex-shrink: 0;
+}
+.nav-burger:hover {
+  color: var(--color-text-primary);
+  background: var(--color-surface-hover);
+}
+.nav-burger:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+.nav-burger svg { width: 20px; height: 20px; }
+
+.nav-drawer {
+  position: fixed;
+  top: 60px; /* header 高度 */
+  left: 0;
+  right: 0;
+  z-index: var(--z-index-fixed);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4) var(--space-5);
+  background: var(--color-surface-primary);
+  border-bottom: 1px solid var(--color-border-light);
+  box-shadow: var(--shadow-lg);
+  max-height: calc(100vh - 60px);
+  overflow-y: auto;
+}
+.nav-drawer-link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  font: var(--text-body);
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-md);
+  text-decoration: none;
+  transition: var(--transition-fast);
+}
+.nav-drawer-link:hover {
+  color: var(--color-text-primary);
+  background: var(--color-surface-hover);
+}
+.nav-drawer-link--active {
+  color: var(--color-brand-600);
+  background: var(--color-bg-brand-subtle);
+}
+.nav-drawer-link:focus-visible {
+  outline: 2px solid var(--color-brand-500);
+  outline-offset: -2px;
+}
+
+/* Drawer transition（reduced-motion 禁用） */
+.drawer-enter-active,
+.drawer-leave-active {
+  transition: opacity var(--duration-normal) var(--ease-out),
+              transform var(--duration-normal) var(--ease-out);
+}
+.drawer-enter-from,
+.drawer-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .drawer-enter-active,
+  .drawer-leave-active { transition: none; }
+}
+
+/* ==========================================
    Responsive
    ========================================== */
 @media (max-width: 768px) {
   .nav-links {
     display: none;
   }
+
+  /* R54: 汉堡仅在移动端显示 */
+  .nav-burger { display: inline-flex; }
 
   .nav-status .status-text {
     display: none;

@@ -234,4 +234,73 @@ describe('App.vue', () => {
     expect(wrapper.find('.page-title').text()).toContain('Dashboard')
     expect(wrapper.find('.page-description').exists()).toBe(true)
   })
+
+  // ── R54 (round54-frontend-polish): 移动端汉堡菜单 ─────────────────
+  // 负向断言：桌面态（isMobileNav=false）汉堡按钮不渲染、drawer 不存在
+  it('R54: 桌面态不渲染汉堡按钮（默认 jsdom 视口 1024px）', async () => {
+    router.push('/')
+    await router.isReady()
+
+    const wrapper = mount(App, {
+      global: {
+        plugins: [router],
+        stubs: {
+          Teleport: { template: '<div><slot /></div>' },
+          TaskIndicator: { template: '<div />' },
+        },
+      },
+    })
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('.nav-burger').exists()).toBe(false)
+    expect(wrapper.find('.nav-drawer').exists()).toBe(false)
+  })
+
+  // 正向断言：模拟窄视口 → 汉堡出现 → 点击展开 drawer → a11y 属性齐备 → Esc 关闭
+  it('R54: 移动态汉堡展开 drawer（a11y 属性 + Esc 关闭）', async () => {
+    router.push('/')
+    await router.isReady()
+
+    // jsdom 视口默认 1024px，先缩到 767px 触发 isMobileNav
+    Object.defineProperty(window, 'innerWidth', { value: 767, configurable: true })
+    window.dispatchEvent(new Event('resize'))
+    await new Promise((r) => setTimeout(r, 0))
+
+    const wrapper = mount(App, {
+      global: {
+        plugins: [router],
+        stubs: {
+          Teleport: { template: '<div><slot /></div>' },
+          TaskIndicator: { template: '<div />' },
+        },
+      },
+    })
+    // onMounted 内 checkMobileNav 读取 767px
+    await wrapper.vm.$nextTick()
+
+    const burger = wrapper.find('.nav-burger')
+    expect(burger.exists()).toBe(true)
+    expect(burger.attributes('aria-haspopup')).toBe('menu')
+    expect(burger.attributes('aria-controls')).toBe('nav-menu')
+    expect(burger.attributes('aria-expanded')).toBe('false')
+
+    await burger.trigger('click')
+    await wrapper.vm.$nextTick()
+
+    const drawer = wrapper.find('.nav-drawer')
+    expect(drawer.exists()).toBe(true)
+    expect(drawer.attributes('role')).toBe('menu')
+    expect(drawer.attributes('aria-label')).toBe('移动端导航')
+    expect(wrapper.findAll('.nav-drawer-link').length).toBe(9)
+    expect(burger.attributes('aria-expanded')).toBe('true')
+
+    // Esc 关闭
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.nav-drawer').exists()).toBe(false)
+
+    // 恢复视口
+    Object.defineProperty(window, 'innerWidth', { value: 1024, configurable: true })
+    window.dispatchEvent(new Event('resize'))
+  })
 })

@@ -30,6 +30,19 @@
         @retry="onStripRetry"
       />
 
+      <!-- R54 (round54-frontend-polish): Dashboard 信息密度扩充——
+           自选快表 / 热点板块 / 重要资讯 三区块，复用现有组件 + compact 模式。
+           懒加载：warmup 结束后再挂载（v-if="!isWarmingUp"），避免与预热争抢。 -->
+      <div class="digest-grid">
+        <section class="digest-section">
+          <WatchlistPanel compact :compactLimit="5" />
+        </section>
+        <section class="digest-section">
+          <SectorHeatMap compact :compactLimit="10" />
+        </section>
+      </div>
+      <NewsDigestList :limit="3" />
+
       <p v-if="!fetchAttempted" class="loading-hint" aria-busy="true">正在加载组合数据…</p>
     </template>
   </div>
@@ -47,6 +60,9 @@ import { useWarmupStatus } from '../composables/useWarmupStatus'
 import GlobalIndicesStrip from '../components/GlobalIndicesStrip.vue'
 import PortfolioSummaryStrip from '../components/dashboard/PortfolioSummaryStrip.vue'
 import ErrorOverlay from '../components/dashboard/ErrorOverlay.vue'
+import WatchlistPanel from '../components/market/WatchlistPanel.vue'
+import SectorHeatMap from '../components/market/SectorHeatMap.vue'
+import NewsDigestList from '../components/dashboard/NewsDigestList.vue'
 
 // UI state
 const renderError = ref(false)
@@ -136,6 +152,19 @@ function onStripRetry() {
   display: flex;
   flex-direction: column;
   gap: var(--space-6);
+}
+/* R54: 三区块网格——自选/板块两列，资讯整行 */
+.digest-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-5);
+  align-items: start;
+}
+.digest-section {
+  min-width: 0;
+}
+@media (max-width: 1024px) {
+  .digest-grid { grid-template-columns: 1fr; }
 }
 .loading-hint {
   margin: 0;

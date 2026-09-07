@@ -1,14 +1,14 @@
 ﻿<template>
   <div class="config-page">
-    <div class="page-header">
-      <h1>系统配置</h1>
-      <p class="subtitle">管理 API 密钥与服务配置 — 保存后即时生效，无需重启服务</p>
-    </div>
+    <AppCard class="config-header-card">
+      <template #header-title>系统配置</template>
+      <template #header-description>管理 API 密钥与服务配置 — 保存后即时生效，无需重启服务</template>
+    </AppCard>
 
     <div v-if="loading" class="loading">加载配置中...</div>
 
     <div v-else>
-      <div v-if="saved" class="alert alert-success">配置已保存</div>
+      <div v-if="saved" class="alert alert-success" role="status">配置已保存</div>
       <div v-if="saveError" class="alert alert-danger">{{ saveError }}</div>
 
       <div v-for="(group, gidx) in groupedItems" :key="gidx" class="config-group">
@@ -61,6 +61,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { adminApi } from '../../api/index.js'
+import AppCard from '../../components/ui/AppCard.vue'
 
 const items = ref([])
 const showMap = ref({})
@@ -166,11 +167,8 @@ onMounted(loadConfig)
   margin: 0 auto;
   padding: 24px 16px;
 }
-.page-header h1 {
-  margin: 0 0 4px;
-  font-size: 1.5rem;
-  color: #e0e0e0;
-}
+/* R54: 内嵌 page-header 已删（App.vue 全局页头已渲染，AppCard 提供卡内标题）。
+   .subtitle 保留以备后续引用，后续确认无用再清。 */
 .subtitle {
   color: #999;
   margin: 0 0 24px;

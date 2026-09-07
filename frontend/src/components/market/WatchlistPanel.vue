@@ -8,7 +8,8 @@
     <div class="card">
       <div class="card-header">
         <h3 class="card-title">📋 自选标的</h3>
-        <button class="btn-ghost" @click="showAddModal = true">➕ 添加自选</button>
+        <button v-if="!compact" class="btn-ghost" @click="showAddModal = true">➕ 添加自选</button>
+        <router-link v-else to="/market-analysis" class="btn-ghost">行情分析页管理 ›</router-link>
       </div>
 
       <div class="card-body">
@@ -86,8 +87,8 @@
           </div>
         </div>
 
-        <!-- Filter -->
-        <div v-if="!loading && displayList.length" class="filter-bar">
+        <!-- Filter (compact 模式隐藏) -->
+        <div v-if="!compact && !loading && displayList.length" class="filter-bar">
           <input
             type="text"
             v-model="filterQuery"
@@ -107,23 +108,25 @@
         <div v-else-if="!displayList.length" class="empty-state">
           <div class="empty-icon">⭐</div>
           <p class="empty-title">暂无自选标的</p>
-          <p class="empty-desc">点击"添加自选"开始关注</p>
-          <button class="btn-primary" @click="showAddModal = true">➕ 添加第一个自选</button>
+          <p class="empty-desc" v-if="compact">去行情分析页添加关注</p>
+          <p class="empty-desc" v-else>点击"添加自选"开始关注</p>
+          <router-link v-if="compact" to="/market-analysis" class="btn-primary" style="text-decoration: none">去添加 ›</router-link>
+          <button v-else class="btn-primary" @click="showAddModal = true">➕ 添加第一个自选</button>
         </div>
 
         <!-- Table -->
         <div v-else class="table-wrap">
-          <table class="data-table">
+          <table class="data-table" :class="{ 'data-table--compact': compact }">
             <thead>
               <tr>
-                <th>代码</th><th>名称</th><th>类型</th><th>最新价</th><th>涨跌幅</th><th>成交量</th><th>备注</th><th>操作</th>
+                <th>代码</th><th>名称</th><th v-if="!compact">类型</th><th>最新价</th><th>涨跌幅</th><th v-if="!compact">成交量</th><th v-if="!compact">备注</th><th v-if="!compact">操作</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="item in filtered" :key="item.id" class="watch-row" @click="selectItem(item)">
+              <tr v-for="item in (compact ? filtered.slice(0, compactLimit) : filtered)" :key="item.id" class="watch-row" @click="selectItem(item)">
                 <td><code>{{ item.symbol }}</code></td>
                 <td><strong>{{ item.name }}</strong></td>
-                <td><span class="type-badge" :class="item.asset_type.toLowerCase()">{{ item.asset_type }}</span></td>
+                <td v-if="!compact"><span class="type-badge" :class="item.asset_type.toLowerCase()">{{ item.asset_type }}</span></td>
                 <td v-if="item.realtime?.price != null" class="mono">
                   {{ item.realtime.price.toFixed(2) }}
                   <!-- round24 R20: 实时不可用时的 T-1 收盘兜底（is_estimated）——显式
@@ -154,20 +157,20 @@
                 <td v-else-if="item.data_unavailable_since" class="muted" :title="'数据源维护中，最后可用时间：' + item.data_unavailable_since"><span class="maintenance-text">非交易时段无行情（数据源维护中）</span></td>
                 <td v-else-if="item._degraded" class="muted" title="行情暂不可用（数据源弱）"><span class="degraded-text">行情暂不可用</span></td>
                 <td v-else class="muted" title="行情加载中（数据源弱）"><span class="loading-text">行情加载中</span></td>
-                <td v-if="item.realtime?.volume != null" class="mono small">{{ formatVol(item.realtime.volume) }}</td>
-                <td v-else-if="item.realtime?.is_estimated" class="muted small">—</td>
-                <td v-else-if="item.realtime_unavailable" class="muted small" :title="item.realtime_note || '该市场暂无实时行情'"><span class="unavailable-text">暂无实时</span></td>
+                <td v-if="!compact && item.realtime?.volume != null" class="mono small">{{ formatVol(item.realtime.volume) }}</td>
+                <td v-else-if="!compact && item.realtime?.is_estimated" class="muted small">—</td>
+                <td v-else-if="!compact && item.realtime_unavailable" class="muted small" :title="item.realtime_note || '该市场暂无实时行情'"><span class="unavailable-text">暂无实时</span></td>
                 <!-- R45 (round27): 三层全失败（realtime+收盘兜底+last-good 全无）→
                      诚实标注「维护中」+ 显式时间戳，区分「没波动」vs「没数据」，
                      杜绝空白冒充「行情加载中」。 -->
-                <td v-else-if="item.data_unavailable_since" class="muted" :title="'数据源维护中，最后可用时间：' + item.data_unavailable_since"><span class="maintenance-text">非交易时段无行情（数据源维护中）</span></td>
-                <td v-else-if="item._degraded" class="muted" title="行情暂不可用（数据源弱）"><span class="degraded-text">行情暂不可用</span></td>
-                <td v-else class="muted" title="行情加载中（数据源弱）"><span class="loading-text">行情加载中</span></td>
-                <td class="notes-cell">
+                <td v-else-if="!compact && item.data_unavailable_since" class="muted" :title="'数据源维护中，最后可用时间：' + item.data_unavailable_since"><span class="maintenance-text">非交易时段无行情（数据源维护中）</span></td>
+                <td v-else-if="!compact && item._degraded" class="muted" title="行情暂不可用（数据源弱）"><span class="degraded-text">行情暂不可用</span></td>
+                <td v-else-if="!compact" class="muted" title="行情加载中（数据源弱）"><span class="loading-text">行情加载中</span></td>
+                <td v-if="!compact" class="notes-cell">
                   <span v-if="item.notes" class="notes-text">{{ item.notes }}</span>
                   <span v-else class="muted">—</span>
                 </td>
-                <td>
+                <td v-if="!compact">
                   <div class="row-actions">
                     <!-- P1-6 (round16 3.17): 行内技术分析 + AI 分析按钮——复用
                          SectorHeatMap 双按钮模式（assetType 按 item.asset_type 推断，
@@ -203,7 +206,13 @@ import { marketApi } from '../../api'
 import { useMarketStore } from '../../stores/market'
 import TechnicalAnalysisModal from './TechnicalAnalysisModal.vue'
 
-const props = defineProps({ marketTab: { type: String, default: 'A' } })
+const props = defineProps({
+  marketTab: { type: String, default: 'A' },
+  // R54 (round54-frontend-polish): Dashboard 紧凑只读视图——隐藏添加/过滤/操作列，
+  // 仅展示前 N 行行情快照；点击行仍 emit select-symbol（Dashboard 侧无消费者，无害）
+  compact: { type: Boolean, default: false },
+  compactLimit: { type: Number, default: 5 },
+})
 const emit = defineEmits(['select-symbol', 'analyze'])
 
 const store = useMarketStore()

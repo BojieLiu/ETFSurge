@@ -1,11 +1,5 @@
 <template>
   <div class="analysis">
-    <!-- Page Header -->
-    <header class="page-header">
-      <h1 class="page-title">技术分析</h1>
-      <p class="page-description">多周期 K 线、分时图、技术指标与综合买卖信号</p>
-    </header>
-
     <!-- Control Panel -->
     <ControlPanel
       :selected="selected"
@@ -585,10 +579,8 @@ onMounted(async () => {
   gap: var(--space-6);
 }
 
-/* Page Header */
-.page-header { margin-bottom: var(--space-2); }
-.page-title { font-size: var(--font-size-2xl); font-weight: var(--font-weight-bold); line-height: var(--line-height-tight); color: var(--color-text-primary); letter-spacing: var(--letter-spacing-tight); }
-.page-description { margin-top: var(--space-1); font-size: var(--font-size-base); color: var(--color-text-secondary); line-height: var(--line-height-relaxed); }
+/* R54 (round54-frontend-polish): 内嵌 page-header 已删（App.vue 全局页头已渲染）。
+   保留 .page-title/.page-description 以防其它地方引用，后续确认无用再清。 */
 
 /* Card (empty state) */
 .card { background: var(--color-surface-primary); border: 1px solid var(--color-border-light); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); overflow: hidden; }

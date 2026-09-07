@@ -1,11 +1,5 @@
 <template>
   <div class="portfolio-manager">
-    <!-- Page Header -->
-    <header class="page-header">
-      <h1 class="page-title">组合管理</h1>
-      <p class="page-description">管理场内/场外 ETF 组合，设置目标权重，实时监控收益</p>
-    </header>
-
     <!-- Tabs -->
     <div class="tabs" role="tablist" aria-label="组合类型">
       <button
@@ -41,16 +35,33 @@
                 placeholder="输入ETF代码或名称（如：510300）"
                 :loading="searchLoading"
                 :clearable="true"
+                role="combobox"
+                :aria-expanded="showDropdown && searchResults.length ? 'true' : 'false'"
+                aria-controls="search-listbox"
+                :aria-activedescendant="searchIndex >= 0 && searchResults[searchIndex] ? `search-opt-${searchResults[searchIndex].symbol}` : undefined"
+                aria-label="搜索 ETF"
                 @input="onSearch"
                 @keydown="onSearchKeydown"
                 @focus="showDropdown = true"
                 @blur="onSearchBlur"
               />
               <Transition name="dropdown">
-                <ul v-if="showDropdown && searchResults.length" class="search-dropdown" @mousedown.prevent>
+                <!-- R54: ARIA Combobox 模式——input role=combobox + aria-activedescendant，
+                     ul role=listbox，li role=option + aria-selected，方向键/Enter/Esc 键盘可达 -->
+                <ul
+                  v-if="showDropdown && searchResults.length"
+                  id="search-listbox"
+                  class="search-dropdown"
+                  role="listbox"
+                  aria-label="ETF 搜索结果"
+                  @mousedown.prevent
+                >
                   <li
                     v-for="(r, i) in searchResults"
                     :key="r.symbol"
+                    :id="`search-opt-${r.symbol}`"
+                    role="option"
+                    :aria-selected="i === searchIndex"
                     :class="{ active: i === searchIndex }"
                     @click="selectSearch(r)"
                     @mouseenter="searchIndex = i"
@@ -135,7 +146,7 @@
         </div>
 
         <div class="form-actions">
-          <div v-if="formError" class="form-error">{{ formError }}</div>
+          <div v-if="formError" class="form-error" aria-live="polite">{{ formError }}</div>
           <AppButton type="submit" variant="primary" :disabled="!form.symbol" :loading="adding">
             <span class="btn-icon" aria-hidden="true">➕</span>
             {{ adding ? '添加中...' : '添加' }}
@@ -925,10 +936,8 @@ onMounted(loadTab)
   to { transform: rotate(360deg); }
 }
 
-/* Page Header */
-.page-header { margin-bottom: var(--space-2); }
-.page-title { font-size: var(--font-size-2xl); font-weight: var(--font-weight-bold); line-height: var(--line-height-tight); color: var(--color-text-primary); letter-spacing: var(--letter-spacing-tight); }
-.page-description { margin-top: var(--space-1); font-size: var(--font-size-base); color: var(--color-text-secondary); line-height: var(--line-height-relaxed); }
+/* R54 (round54-frontend-polish): 内嵌 page-header 已删（App.vue 全局页头已渲染）。
+   保留 .page-title/.page-description 以防其它地方引用，后续确认无用再清。 */
 
 /* Tabs */
 .tabs {
@@ -978,6 +987,8 @@ onMounted(loadTab)
 .search-dropdown { position: absolute; top: calc(100% + var(--space-1)); left: 0; right: 0; max-height: 280px; overflow-y: auto; background: var(--color-surface-primary); border: 1px solid var(--color-border-medium); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); z-index: var(--z-index-dropdown); list-style: none; padding: var(--space-1); }
 .search-dropdown li { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); cursor: pointer; transition: var(--transition-fast); }
 .search-dropdown li:hover, .search-dropdown li.active { background: var(--color-surface-hover); }
+/* R54: 键盘高亮项（.active）与 hover 同背景，补 outline 供键盘用户辨识 */
+.search-dropdown li.active { outline: 1px solid var(--color-brand-300); }
 .result-symbol { font-family: var(--font-family-mono); font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); min-width: 80px; }
 .result-name { flex: 1; font-size: var(--font-size-sm); color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .result-tag { font-size: var(--font-size-xs); font-weight: var(--font-weight-medium); padding: var(--space-0.5) var(--space-1.5); border-radius: var(--radius-full); background: var(--color-surface-tertiary); color: var(--color-text-tertiary); }

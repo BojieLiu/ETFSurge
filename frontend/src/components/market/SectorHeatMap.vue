@@ -6,7 +6,7 @@
     </div>
 
     <div class="card">
-      <div class="tab-bar">
+      <div class="tab-bar" v-if="!compact">
         <button
           v-for="tab in tabs"
           :key="tab.key"
@@ -39,14 +39,14 @@
         <!-- Data Table: Hot Plates -->
         <div v-else-if="activeTab === 'hot'" class="data-list">
           <div
-            v-for="(item, i) in dataList"
+            v-for="(item, i) in (compact ? dataList.slice(0, compactLimit) : dataList)"
             :key="i"
             class="data-row"
           >
             <span class="row-rank">{{ i + 1 }}</span>
             <div class="row-main">
               <span class="row-name">{{ item.plate_name || item.name }}</span>
-              <span class="row-desc" v-if="item.reason || item.hot_reason">
+              <span class="row-desc" v-if="!compact && (item.reason || item.hot_reason)">
                 {{ item.reason || item.hot_reason }}
               </span>
               <span class="row-stocks" v-if="item.lead_stocks || item.stocks">
@@ -160,6 +160,10 @@ const emit = defineEmits(['analyze'])
 // Z31: Accept marketTab prop from parent for market-scoped data
 const props = defineProps({
   marketTab: { type: String, default: 'A' },
+  // R54 (round54-frontend-polish): Dashboard 紧凑视图——隐藏 tab 切换与详情描述，
+  // 只显示 hot tab Top N 板块名 + 领涨股，点击行 emit analyze
+  compact: { type: Boolean, default: false },
+  compactLimit: { type: Number, default: 10 },
 })
 
 const tabs = [
