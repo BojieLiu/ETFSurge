@@ -1014,6 +1014,50 @@ async def _fetch_iopv_chain(s_list: list[str], symbols: list[str]) -> tuple[dict
     return {}, ""
 
 
+def _bridge_symbol_extra_fields(
+    data: dict[str, dict[str, Any]],
+    symbols: list[str],
+    symbol_extra: dict[str, dict],
+) -> None:
+    """Z04 + R150/R148 桥接（P1-2 从 _fetch_market_data DEPRECATED 函数体抽出）。
+
+    与 compute() market_data 分支共用——消除「桥接逻辑只活在名义 deprecated
+    函数里」的脚手架风险（冗余评审 R2）。就地写入 data[sym]，无返回值。
+
+    桥接三件：
+    1. Z04 基础字段注入（industry/concepts/benchmark_close/shares_change_20d/
+       institutional_holdings_change/shares_change/fund_scale，不覆盖已有）；
+    2. R150 收口 (round41)：fund_scale → total_mv / float_mv*0.85 估算别名
+       （守卫：total_mv/float_mv 缺失或 0 时才覆盖）；
+    3. R148 收口 (round41)：industry 单值 → industry_holdings={industry: 1.0}
+       （守卫：industry_holdings 缺失且 industry 非 unknown）。
+    """
+    for sym in symbols:
+        if sym in data and sym in symbol_extra:
+            extra = symbol_extra[sym]
+            # 只注入 etf_specific 相关字段，不覆盖已有字段
+            for key in ("industry", "concepts", "benchmark_close",
+                        "shares_change_20d", "institutional_holdings_change",
+                        "shares_change", "fund_scale"):
+                if key in extra and key not in data[sym]:
+                    data[sym][key] = extra[key]
+            # R150 收口 (round41): fund_scale → total_mv 别名桥接（守卫: 缺失/0 占位才覆盖）
+            if "fund_scale" in extra and not data[sym].get("total_mv"):
+                data[sym]["total_mv"] = float(extra["fund_scale"] or 0)
+            # R150 收口 (round41): float_mv 无源 → fund_scale*0.85 估算
+            # （A 股 ETF 平均流通比例约 85%；仍缺失标 None 让 gap 机制记录）
+            if "fund_scale" in extra:
+                _fs = float(extra["fund_scale"] or 0)
+                if _fs > 0 and not data[sym].get("float_mv"):
+                    data[sym]["float_mv"] = round(_fs * 0.85, 4)
+            # R148 收口 (round41): industry 单值 → industry_holdings={industry: 1.0}
+            # （守卫: industry_holdings 缺失时注入，不覆盖真实 holdings）
+            if "industry" in extra and not data[sym].get("industry_holdings"):
+                _ind = extra["industry"]
+                if _ind and _ind != "unknown":
+                    data[sym]["industry_holdings"] = {_ind: 1.0}
+
+
 async def _inject_nav(market_data: dict[str, dict[str, Any]], symbols: list[str]) -> dict[str, dict[str, Any]]:
     """R146: 把 IOPV chain + TTJ 日净值兜底的 nav 注入逻辑提取为公共方法。
 
@@ -1383,48 +1427,10 @@ class FactorRegistry:
         except Exception as _e:
             logger.warning("[factor] macro data inject failed: %s", _e)
 
-        # Z04: 注入 symbol_extra 中的 etf_specific 字段
-        # 这些字段用于：industry/concepts → industry_diversification,
-        # benchmark_close → tracking_error, shares_change_20d → shares_change
+        # Z04: 注入 symbol_extra 中的 etf_specific 字段（公共方法，与 compute()
+        # market_data 分支共用——P1-2 从本 DEPRECATED 函数体抽出）
         if symbol_extra:
-            for sym in symbols:
-                if sym in data and sym in symbol_extra:
-                    extra = symbol_extra[sym]
-                    # 只注入 etf_specific 相关字段，不覆盖已有字段
-                    for key in ("industry", "concepts", "benchmark_close",
-                                "shares_change_20d", "institutional_holdings_change",
-                                "shares_change", "fund_scale"):
-                        if key in extra and key not in data[sym]:
-                            data[sym][key] = extra[key]
-                    # R150 收口 (round41): Z04 注入 total_mv 字段别名——R150 第一版
-                    # 仅在 _compute_ln_mcap 读 total_mv or fund_scale, 但 fund_scale
-                    # 在生产路径不注入到 data 字典（market_data_hub symbol_extra
-                    # 路径走的是另一条), 实际 fund_scale=0 → ln_mcap 恒 None。
-                    # 此处显式把 fund_scale 桥接到 total_mv (按 R150 round38 约定:
-                    # fund_scale 字段名 = ETF 规模 = "总市值"语义), 让 _compute_ln_mcap
-                    # 的别名读取在两条路径都生效。守卫: total_mv 缺失或为 0 时
-                    # fallback 覆盖 (fetch_one 路径非交易时段写入 0 占位).
-                    if "fund_scale" in extra and not data[sym].get("total_mv"):
-                        data[sym]["total_mv"] = float(extra["fund_scale"] or 0)
-                    # R150 收口 (round41): ln_float_mcap 没有源——流通市值是 ratio,
-                    # 生产数据源没单独提供。fallback 用 fund_scale * 0.85 估算
-                    # (A 股 ETF 平均流通比例约 85%——非完美但比恒 None 强), 仍缺失
-                    # 标 None 让 gap 机制记录 (FS1 is_meaningful_value 自然判定).
-                    # 守卫条件: float_mv 缺失或为 0 (fetch_one 路径在非交易时段会
-                    # 写入 float_mv=0 占位, 需 fallback 覆盖).
-                    if "fund_scale" in extra:
-                        _fs = float(extra["fund_scale"] or 0)
-                        if _fs > 0 and not data[sym].get("float_mv"):
-                            data[sym]["float_mv"] = round(_fs * 0.85, 4)
-                    # R148 收口 (round41): industry_diversification 修复——Z04 注入
-                    # industry 字段但 _compute 读 industry_holdings (dict)。此处把
-                    # industry 单值桥接为 industry_holdings={industry: 1.0}, 让 HHI
-                    # 单行业场景可计算 = 1.0 (单只 ETF = 100% 集中, 语义正确)。
-                    # 守卫: industry_holdings 缺失时注入 (避免覆盖已有真实 holdings).
-                    if "industry" in extra and not data[sym].get("industry_holdings"):
-                        _ind = extra["industry"]
-                        if _ind and _ind != "unknown":
-                            data[sym]["industry_holdings"] = {_ind: 1.0}
+            _bridge_symbol_extra_fields(data, symbols, symbol_extra)
 
         # 缓存成功获取的数据，记录 SourceRegistry 成功
         source_h.record_success(route="kline", operation="batch_fetch", target=",".join(symbols[:3]))
@@ -1524,6 +1530,9 @@ class FactorRegistry:
                                     "shares_change", "fund_scale"):
                             if key in extra and key not in market_data[sym]:
                                 market_data[sym][key] = extra[key]
+                # P1-2: R150/R148 桥接也走公共方法——生产 refresh_pool 路径与
+                # fallback 路径语义完全一致（此前桥接只活在 DEPRECATED 函数里）
+                _bridge_symbol_extra_fields(market_data, symbols, symbol_extra)
             # R146: market_data 分支（生产 refresh_pool 路径）也注入 nav —— 原 nav
             # IOPV 链只在 _fetch_market_data（DEPRECATED fallback）里，此处跳过导致
             # premium_discount 恒 0.0。复用 _inject_nav 公共方法。

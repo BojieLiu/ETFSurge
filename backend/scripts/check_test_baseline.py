@@ -46,7 +46,15 @@ TESTS_DIR = pathlib.Path(__file__).resolve().parent.parent / "tests"
 #   测试文件（background_tasks 容器/WS 背压/kline flush/矩阵去重/数据落点收敛/
 #   分类快照+边界/engine config/factor_values 等）——全部为按 §11 业务域命名规范的
 #   新域文件，非冗余拆分；round34-T2 归位重组落地时应净减并回退此基线。
-BASELINE = 259
+# 2026-09-09 (round53 实施批 P2-4 基线校准): 259 -> 320. 校准依据: HEAD 实测 317
+#   （round35/36 起多批次 bump 未回退，P3-6 为提示不阻断故漂移未暴露）+ 本批净 +3
+#   （P1-4 合并 -7: commodity_signature/concept_tags_flat/etf_cache_persist/
+#   index_realtime_fallback/kline_cache_path/report_format_prompt/sector_prompt_annotation
+#   → 3 聚合文件；新 +10: chat_session×2/r185a/r185b/e2e_sink_batch1/market_service_
+#   boundaries/bridge_symbol_extra_fields/cache_persistence/prompt_annotation/
+#   source_adapter_edge）。T4 约定（redundant-review §4.2）自此生效: 新 round 用例
+#   必须归入主题文件，不再开 test_roundXX_* 新文件。
+BASELINE = 320
 
 
 def count_test_files() -> int:

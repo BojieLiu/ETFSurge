@@ -1,5 +1,13 @@
 """
 verify_e2e.py — 端到端链路验证（针对运行中的后端服务）
+
+⚠️ P1-3 冻结规则（docs/redundant-review.md §4.2 T1，round53 实施批落地）:
+本文件**只减不增**——新链路断言一律写 pytest（首批载体 backend/tests/
+test_e2e_sink_batch1.py，已承接 section_encoding/section_fundamentals/
+section_task_status 三个纯 HTTP 契约模块），本文件存量按批下沉 pytest 后
+删除对应模块。目标: 2685 → ≤800 行（分 2-3 批）。
+验收: 每批 e2e 全 PASS + 被迁移断言在 pytest 中存在。
+
 用法:
   python scripts/verify_e2e.py                    # 运行所有模块
   python scripts/verify_e2e.py --smoke            # 仅运行 smoke 测试（health + 核心端点）

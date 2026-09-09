@@ -24,7 +24,7 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-from ..core.async_utils import safe_call
+from ..core.async_utils import run_in_thread
 from ..services.cache_service import cached
 from ..utils.decode import decode_df as _decode_df
 from ..utils.proxy import no_proxy
@@ -441,7 +441,9 @@ def fetch_global_news() -> list[dict[str, Any]]:
         ]
         for f in feeds:
             # B023: 默认参数绑定当前迭代的 f，消除闭包晚绑定隐患
-            d = safe_call(lambda url=f: feedparser.parse(url), timeout=8)
+            # P1-1: safe_call→run_in_thread 替换后补 executor='long'（Opt10 守卫：
+            # timeout>5 必须显式选池；feedparser RSS 解析为重解析任务，long 池）
+            d = run_in_thread(lambda url=f: feedparser.parse(url), timeout=8, executor="long")
             if d:
                 for e in (d.entries or [])[:8]:
                     _src = getattr(e, "source", None)

@@ -72,6 +72,9 @@ LAYER_DEFAULTS = {
     "L4-routes": {"timeout": 60, "backend_dependent": False},
     "L4-purity": {"timeout": 60, "backend_dependent": False},
     "L4-async": {"timeout": 60, "backend_dependent": False},
+    # P2-4 (round53 实施批): P3-6 测试文件基线并入 patrol（凭据机制收敛第一步）——
+    # pre-commit 入口保留（钩子契约不断），日常开发循环走本层。
+    "L4-baseline": {"timeout": 60, "backend_dependent": False},
     # round36 (2026-08-23): ruff 软门禁——存量冻结后只观测新增速率（WARN 不阻断），
     # 硬化进 pre-commit 另行决策。--exit-zero 恒退出 0，分类见 _classify。
     "L4-ruff": {"timeout": 120, "backend_dependent": False},
@@ -84,14 +87,14 @@ LAYER_DEFAULTS = {
 LAYER_ORDER = [
     "L1-unit", "L2-e2e", "L2-health", "L2-alloc-invariants", "L2-llm-exclusion",
     "L2-smoke", "L2-startup", "L3-perf",
-    "L4-routes", "L4-purity", "L4-async", "L4-ruff", "L-golden", "L5-frontend",
+    "L4-routes", "L4-purity", "L4-async", "L4-baseline", "L4-ruff", "L-golden", "L5-frontend",
 ]
 
 # --full 层集（§3: 不含 L2-smoke —— 后端在线时启动能力已被证明，且双实例
 # 共享 SQLite 有写锁风险，§8-6）
 FULL_LAYERS = [
     "L1-unit", "L2-e2e", "L2-health", "L2-alloc-invariants", "L2-llm-exclusion",
-    "L3-perf", "L4-routes", "L4-purity", "L4-async", "L4-ruff", "L5-frontend",
+    "L3-perf", "L4-routes", "L4-purity", "L4-async", "L4-baseline", "L4-ruff", "L5-frontend",
 ]
 
 # 依赖后端的必需层：后端离线时打 SKIP + 退出码 2（§3）
@@ -481,6 +484,10 @@ def _build_command(name, plan, args):
         return [sys.executable, "scripts/check_engine_purity.py"], BACKEND_DIR, {}
     if name == "L4-async":
         return [sys.executable, "scripts/audit_async_blocking.py"], BACKEND_DIR, {}
+    if name == "L4-baseline":
+        # P2-4: P3-6 测试文件基线（提示语义保持——脚本超基线仍 exit 1，
+        # patrol _classify 按 FAIL 计；收敛为纯 WARN 属后续决策）
+        return [sys.executable, "scripts/check_test_baseline.py"], BACKEND_DIR, {}
     if name == "L4-ruff":
         # round36 软门禁：--exit-zero 恒退出 0，WARN 语义由 _classify 判定
         return [sys.executable, "-m", "ruff", "check", "app",

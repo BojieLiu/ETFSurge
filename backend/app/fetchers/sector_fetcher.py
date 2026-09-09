@@ -20,9 +20,9 @@ _TIMEOUT = 10
 # ---------------------------------------------------------------------------
 
 def _exec(fn, timeout: int = _TIMEOUT):
-    """在线程中执行 fn, 超时 / 异常返回 None（P1-2：统一走 safe_call, long 池）。"""
-    from ..core.async_utils import safe_call
-    return safe_call(fn, timeout=timeout, executor="long")
+    """在线程中执行 fn, 超时 / 异常返回 None（P1-2：统一走 run_in_thread, long 池）。"""
+    from ..core.async_utils import run_in_thread
+    return run_in_thread(fn, timeout=timeout, executor="long")
 
 
 

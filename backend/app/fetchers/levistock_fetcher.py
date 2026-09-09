@@ -6,7 +6,7 @@ from typing import Any
 
 import levistock as lv
 
-from ..core.async_utils import safe_call
+from ..core.async_utils import run_in_thread
 from ..core.logging import get_logger
 from ..services.cache_service import cached
 
@@ -14,9 +14,7 @@ logger = get_logger(__name__)
 _TIMEOUT = 8
 
 # round23 §10.2 D1: 原 _safe 二次包装（safe_call 的零逻辑透传）已删——调用点直接
-# 调 core.async_utils.safe_call(fn, timeout=..., executor="long")。
-
-
+# 调 core.async_utils.run_in_thread(fn, timeout=..., executor="long")。
 
 # F22/F23 (round23 P0-A): 将「level 既表重要性又表分类」拆分为两个正交维度——
 # category（极性/类型）+ level（重要性 1-5，单调）。旧实现 level=4 同时是「利好」与
@@ -273,7 +271,7 @@ def fetch_cailian_telegraph(limit: int = 30) -> list[dict[str, Any]]:
 
     def _p() -> list[dict[str, Any]]:
         # 第一优先级: important 分类（编辑筛选）+1 level boost
-        important_rows = safe_call(lambda: lv.news_telegraph_cls(category="important"), timeout=6, executor="long") or []
+        important_rows = run_in_thread(lambda: lv.news_telegraph_cls(category="important"), timeout=6, executor="long") or []
         result: list[dict[str, Any]] = []
         seen: set[str] = set()
         for r in important_rows:
@@ -284,7 +282,7 @@ def fetch_cailian_telegraph(limit: int = 30) -> list[dict[str, Any]]:
 
         # 第二优先级: all 分类补充（无 boost, 去重）
         if len(result) < limit:
-            all_rows = safe_call(lambda: lv.news_telegraph_cls(category="all"), timeout=6, executor="long") or []
+            all_rows = run_in_thread(lambda: lv.news_telegraph_cls(category="all"), timeout=6, executor="long") or []
             for r in all_rows:
                 if len(result) >= limit:
                     break
@@ -307,7 +305,7 @@ def fetch_market_emotion() -> dict[str, Any]:
     """
 
     def _p() -> dict[str, Any]:
-        data = safe_call(lv.market_emotion_cls, timeout=8, executor="long") or {}
+        data = run_in_thread(lv.market_emotion_cls, timeout=8, executor="long") or {}
         if data and "up_ratio" in data and "limit_up_seal_rate" not in data:
             data["limit_up_seal_rate"] = data["up_ratio"]
             data["limit_up_seal_rate_note"] = "涨停封板率 = 涨停家数/(涨停家数+开板家数)，非上涨占比"
@@ -320,7 +318,7 @@ def fetch_sector_heat(limit: int = 20) -> list[dict[str, Any]]:
     """板块热度排行(财联社)。"""
 
     def _p() -> list[dict[str, Any]]:
-        rows = safe_call(lv.get_sector_heat, timeout=8, executor="long") or []
+        rows = run_in_thread(lv.get_sector_heat, timeout=8, executor="long") or []
         return rows[:limit]
 
     return cached("sectors", _p, ttl_key="sector_heat")
@@ -330,6 +328,6 @@ def fetch_market_wind() -> list[dict[str, Any]]:
     """今日风口/主线板块(财联社)。"""
 
     def _p() -> list[dict[str, Any]]:
-        return safe_call(lv.market_wind_cls, timeout=8, executor="long") or []
+        return run_in_thread(lv.market_wind_cls, timeout=8, executor="long") or []
 
     return cached("wind", _p, ttl_key="news_wind")

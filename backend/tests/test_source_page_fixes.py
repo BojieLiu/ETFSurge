@@ -154,7 +154,7 @@ class TestBaselineAFetchHistory:
         from app.services import market_service
 
         rows = [{"date": "2026-08-01", "close": 100.0} for _ in range(20)]
-        # fetch_history/get_k_data 是同步函数（_call → safe_call_async → run_sync 包装）
+        # fetch_history/get_k_data 是同步函数（_call → run_sync 包装）
         with patch("app.fetchers.china_market.fetch_history", return_value=[]), \
              patch("app.fetchers.china_market.get_k_data", return_value=rows):
             result = await market_service.get_history("AAPL", "US", "daily")
