@@ -25,7 +25,7 @@ import threading
 import time
 from typing import Any, AsyncGenerator
 
-from app.analysis.provider import ProviderConfig, get_configured_providers, has_any_api_key
+from app.analysis.provider import ProviderConfig, get_configured_providers, has_any_api_key, refresh_provider_chain
 from app.analysis.registry import get_agent
 from app.config import settings
 from app.core.logging import get_logger
@@ -113,6 +113,7 @@ __all__ = [
     "ProviderConfig",
     "get_configured_providers",
     "has_any_api_key",
+    "refresh_provider_chain",
     "get_agent",
     "settings",
     "UsageRecord",

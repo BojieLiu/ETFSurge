@@ -298,6 +298,12 @@
 
 ### 8.4 下轮实施小批清单（更新版，全部待「round实施」触发）
 
+> **2026-09-09 实施回写（round53 实施批，随冗余评审 docs/redundant-review.md 合批执行）**：
+> R183 已实施（`is_a_share_trading_day` 周末判定 + `save_ic_batch_to_db` 默认路径拒落库，
+> 法定节假日待外部日历——免费源方案后续轮；8 用例并入 `test_f25_ic_daily_pipeline.py`）；
+> R182 余量随 R184 一并落地（「无数据」字样全页清零）。
+> 修复文档笔误：2026-09-06 实为**周日**（本节写作「周六」），非交易日实质不变。
+
 | # | 项 | 级别 | 来源 |
 |---|---|---|---|
 | 1 | data_health_check 口径修复（§7.5） | P2 | round53 §7 |
@@ -381,6 +387,15 @@
 
 ### 9.4 实施排期（更新版小批清单）
 
+> **2026-09-09 实施回写**：#3 LLM 对话多轮追问（阶段 1+2）已实施——契约
+> `api-contracts/analysis/llm-chat-session.md` 先行；后端 `ChatSessionStore`
+> （LRU100 + TTL 30min + 快照 60s 复用 + SQLite 24h）+ `models/chat_session.py` +
+> lifespan 启动恢复 + `/llm-advice/stream` 会话集成（历史 10 轮/8K 截断注入
+> 「## 对话历史」槽 + done.metadata.session_id + assistant 回复落库）；
+> 前端 `AiAdvisor.vue` 气泡多轮 UI + `useLLMStream` sessionId 透出。
+> 验收：后端 21 用例（store 18 + 端到端 3）+ 前端 14 用例全绿；
+> R179/R180 维持暂缓登记（未越权实施）。
+
 | # | 项 | 级别 | 来源 |
 |---|---|---|---|
 | 1 | data_health_check 口径修复 | P2 | round53 §7 |
@@ -394,4 +409,203 @@
 
 ---
 
-*诊断产物：C:/Users/Public/etf_probe/（build53.log + probe53_*.py/.out + newsall.json + dhc53.out + caliber.out/caliber2.out，会话级临时目录）；容器于诊断完成后回收。未收到「round实施」不写修复代码。*
+## 10. 用户追问 7：因子页 no_data 区分「积累中」与「真没数据」（2026-09-06 晚，R184 拍板）
+
+### 10.1 现状
+
+后端 `factor_status.py:92-104` 已能区分 5 个 `no_data` 子类（reason 变体）：
+
+| 后端 `reason` 关键词 | 真实含义 | 当前 R182 UI |
+|---|---|---|
+| `数据源未接入（X 只样本缺 Y）` | 因子代码注册但没数据源（eg `etf.sentiment.news_direction` 未接 ETF 级舆情） | 「积累中」❌ 误导 |
+| `截面无差异（常量输出）` | 因子实现有问题（数据全是同一值，无区分度） | 「积累中」❌ 误导 |
+| `IC 未累积（0 个交易日）` | 因子的 compute() 跑了但 IC 全 NaN/被过滤（eg `macro` 字段全部 None 时） | 「积累中」❌ 误导 |
+| **`IC 积累中（n/250，未达可观察下限 60）`** | **真在积累**（合 round41 Z04 等修复自然走完就好） | 「积累中」✓ 准确 |
+| `IC 序列不可用（X 交易日但无 t/IR 统计）` | IC 值有但样本全 0/null 跑不出 t 统计（数据异常） | 「积累中」❌ 误导 |
+
+**结论**：R182 的 UI 简化反向把这种语义区别抹平了——所有 `no_data` 都被标成「积累中」，对"未接入"和"数据异常"是误导。
+
+### 10.2 拍板（2026-09-06 晚，用户）
+
+按 reason 区分 2 分类（**决策 dec-0c9b5e1cce1bcc3f**）：
+- 真正的 `IC 积累中（n/250）` → 展示「积累中」+ n/250 进度
+- 其余 4 种 reason（数据源未接入/常量/未累积/序列不可用）→ 展示「待接入」+ reason 提示
+
+### 10.3 实现方案（纯前端，约 5 行）
+
+`FactorModelView.vue` 第 184 行的徽章判定 + 第 252/261 行的提示文案，路由逻辑：
+
+```js
+function isRealAccumulating(reason) {
+  return /IC 积累中（\d+\/250/.test(reason || '')
+}
+```
+
+`<span v-if="f.status === 'no_data'" class="valid-badge no-data" :title="f.reason">`
+
+→
+
+```vue
+<span v-if="f.status === 'no_data'"
+      :class="['valid-badge', isRealAccumulating(f.reason) ? 'cat-stat-accum' : 'cat-stat-pending']"
+      :title="f.reason">
+  {{ isRealAccumulating(f.reason) ? '积累中' : '待接入' }}
+</span>
+```
+
+样式新增 `.cat-stat-pending`（琥珀底色，与 stat-accum 同语言但语义色不同——「待接入」是能力问题，「积累中」是时间问题）。
+
+子视图第 230 行同步：
+- 实时聚合 4 个 reason → 显示「N 待接入」；`IC 积累中` 聚合 → 「N 积累中」。
+
+### 10.4 拍板后小批清单（更新）
+
+> **2026-09-09 实施回写**：R184 已实施（`FactorModelView.vue` no_data 按 reason
+> 分流——`/IC 积累中（\d+\/250/` → 「积累中」brand 蓝；其余 4 种 → 「待接入」琥珀
+> `.cat-stat-pending`；徽章/IC 列/tooltip/警示 5 处 + 分类行聚合拆分
+> `catAccumCount`/`catPendingCount`）；R182 余量闭环（「无数据」字样全页清零，
+> vitest 5 用例含负向断言全绿）。
+
+| # | 项 | 级别 | 来源 |
+|---|---|---|---|
+| 1 | data_health_check 口径修复 | P2 | round53 §7 |
+| 2 | R181 同指数重复配置（方案 C） | P2 | round53 §4.1 |
+| 3 | **R184 no_data 细分积累中 vs 待接入** | **P3** | **本节 §10** |
+| 4 | R182 因子页 no_data 文案统一 | P3 | round53 §8（部分落地，子视图已同步） |
+| 5 | R183 ic_tracker 交易日历校验 | P3 | round53 §8 |
+| 6 | LLM 对话多轮追问（阶段 1+2） | P2 | round53 §9 |
+| 7 | R179 双告警退役 / R180 空 keyword 收口 | P3 | 暂缓登记，解禁后同批 |
+
+下轮「round实施」P2 优先序：1 → 2 → 6。
+
+---
+
+## 11. 用户追问 8：配置管理页与系统配置脱节（2026-09-06 晚，R185）
+
+### 11.1 四方对照实锤（UI 可编辑清单 × settings 消费 × .env 实存 × .env.example）
+
+| # | 脱节 | 证据（file:line） |
+|---|---|---|
+| ① | **三个活跃 key 不在 UI 可编辑清单**：`OPENROUTER_API_KEY`（round35 三层 LLM 链中间层）、`B_AI_API_KEY` + `B_AI_ALLOWED_MODELS`/`B_AI_PROXY_URL`（round40 聚合层三件套）、`TICKFLOW_API_KEY`（日 K 降级链） | `.env` 实存 25 keys；消费点 provider.py:160/105、china_market.py:304/397；`config_manager.py:26` CONFIG_ITEMS 仅 7 项、0 命中 |
+| ② | **「保存后即时生效，无需重启」为假**：LLM provider 链在启动期从 settings 单例构建（provider.py:182-186 显式登记「运行时改 key 需重启」）；UI 保存写 DB override 后，LLM 实际调用仍用启动期旧值 | config_manager.get 消费点仅 admin 路由回读（rg 全库实证），LLM/数据源消费方全走 settings 单例 |
+| ③ | **DB override 覆盖面名不副实**：`config_manager.get`（DB > .env 优先级）未被任何 LLM/数据源消费方调用——override 机制对「最想让用户改的 key」无效 | 同上 |
+| ④ | **`.env.example` 漂移**：缺 `OPENROUTER_API_KEY`/`B_AI_*`×4/`TICKFLOW_API_KEY`/`ALPHAVANTAGE_API_KEY`；仍保留零消费的 `LLM_PROVIDER`（round35 GapE 已删字段，strategy_check.py 用的是 `LLM_PRIMARY_PROVIDER`） | 三方对照（.env 25 keys vs example 18 keys） |
+
+### 11.2 修复方案（只写方案，待拍板）
+
+- **方案 B（P1，低门槛先行，推荐先做）**：CONFIG_ITEMS 增补 ①的 6 个 key（OPENROUTER_API_KEY、B_AI_API_KEY、B_AI_ALLOWED_MODELS、B_AI_PROXY_URL、TICKFLOW_API_KEY、ALPHAVANTAGE_API_KEY 补录），UI 覆盖面先对齐；`.env.example` 补缺 + 删 `LLM_PROVIDER` 死项；页面 header 文案改诚实版「保存后需重启生效（LLM 供应商链在启动期构建）」。验收：UI 分组出现全部活跃 key（LLM 服务 5 项 / 数据源 7 项）；新环境照 example 可配齐全部数据源。
+- **方案 A（P2，治本②③）**：`_build_providers` 改经 ConfigManager 读 key + key 变化置脏重建 provider 链；数据源 key（tickflow 等）同法；完成后 header 回「即时生效」。验收负向：UI 改 OPENCODE_ZEN_API_KEY → 不重启触发 LLM 调用 → 日志显示新 key 生效。
+- **方案 C（P3，体验）**：每项配置显示「生效状态」徽章（已生效/需重启），A 落地后全绿。
+
+### 11.3 实施排期（更新版小批清单，v3）
+
+> **2026-09-09 实施回写**：#4 R185-B 已实施（CONFIG_ITEMS 补 OPENROUTER_API_KEY/
+> B_AI 三件套/TICKFLOW_API_KEY + `_get_env` 同步读新键 + .env.example 补缺删
+> `LLM_PROVIDER` 死项 + ConfigView 文案诚实化「保存后需重启生效」）；
+> #8 R185-A 已实施（`provider.refresh_provider_chain()`——DB override → settings
+> 单例 patch，provider 链构建逻辑零改动热生效；admin PUT /config 保存 LLM key
+> 后自动触发）。方案 C（生效状态徽章，P3）维持暂缓。
+> #1 data_health_check 口径修复已实施（§7.5：`test_factor_chain_integrity` 改走
+> hub 生产口径注入 + 降级口径 WARN 守卫防同源误报复读）；
+> #2 R181 方案 C 已实施（INDEX_KEYWORDS 补「A500」独立键 + `_dedup_same_index`
+> 双键并集交叉验证；实施偏差：方案原文「取名称提取值」会拆散写入层有意归一组，
+> 实测 `test_same_layer_weight_reclaim` 回归后落地为并集）。
+
+| # | 项 | 级别 | 来源 |
+|---|---|---|---|
+| 1 | data_health_check 口径修复 | P2 | round53 §7 |
+| 2 | R181 同指数重复配置（方案 C） | P2 | round53 §4.1 |
+| 3 | LLM 对话多轮追问（阶段 1+2） | P2 | round53 §9 |
+| 4 | **R185-B 配置页 key 清单补齐 + example 修正 + 文案诚实化** | **P1** | **本节** |
+| 5 | R184 no_data 细分积累中 vs 待接入 | P3 | round53 §10 |
+| 6 | R182 因子页 no_data 文案统一（余量） | P3 | round53 §8 |
+| 7 | R183 ic_tracker 交易日历校验 | P3 | round53 §8 |
+| 8 | R185-A 配置热生效（provider 链重建） | P2 | 本节 |
+| 9 | R179 双告警退役 / R180 空 keyword 收口 | P3 | 暂缓登记，解禁后同批 |
+
+下轮「round实施」优先序建议：4（P1）→ 1 → 2 → 3 → 8。
+
+---
+
+## 12. 交易时段复测完成（2026-09-08 周二 13:46，round51/52 两大遗留闭环）
+
+> 周一上午曾因后端启动静默退出无法复测（见 §13）；本轮后端 13:44 拉起（startup ~90s 正常），13:46 交易时段内完成全部复测。
+
+### 12.1 R173-A 盘中 ti 实时估值链：✅ 15/15（round52 方案 A 盘中分支终验证）
+
+`GET /market/realtime/portfolio`（盘中 13:46）：38 条，**15 只场外全部 `estimate_source=tracked_index`（非 nav）**。15 对场外↔场内逐对照（022449↔159338 … 000217↔518880）：**change_pct 15/15 精确一致**（011613=-0.88 ↔ 588000=-0.88、012762=+1.42 ↔ 510880=+1.42 …）。round52 §0.1#4 标注的「盘中 ti 路径待交易时段复测」**转已验证生效**；round52 时代 round51 §7.1「15 只全部 nav、永远 0%」的现象已彻底消除。
+
+### 12.2 R146 premium_discount 盘中非零：✅ 31/31
+
+盘中触发 `design-async`（task 42，quick_ready ~45s → completed）→ **design 26**：`etf.premium_discount` **31/31 非零**（510300 -0.260、159338 -0.211、513090 -0.898、512890 +0.077…）。round51 §2.3「盘后 31/31=0 系 nav 未发布的时间问题」判断终获盘中实证——premium_discount 链路完全健康。
+
+### 12.3 R183 关联再证 + 积累健康
+
+- 今日（9-08 交易日）IC 正常落 29 行；
+- 6 个「积累中」因子今日 IC **全部有真实值**：premium_discount +0.0871、industry_diversification -0.3226、shares_change -0.1445、ln_mcap -0.1338、institutional_holdings_change -0.1026（ln_float_mcap 今日未产出，隔日）——「积累中」是真实的每日积累，非空转；
+- 对照：周日 9-07 非交易日仍落 31 行（R183 问题持续存在，修复依据加固）。
+
+### 12.4 复测后遗留清零确认
+
+round51/52 遗留清单中所有「待交易时段复测」项（R146、R173-A）**全部闭环**；§0.2 遗留清单同步更新。剩余未复测项仅剩「off_exchange 策略检查触发」（低优先，LLM 层成功后价值有限）与 R174 浏览器四态走查（下轮 UI 专项）。
+
+下轮「round实施」优先序建议：4（P1）→ 1 → 2 → 3 → 8。
+
+---
+
+## 14. 实施记录（2026-09-09 round实施 批，R 系 + 冗余评审合批）
+
+> **触发**：`round实施，文档 = docs\round53-container-reacceptance-round52-plans.md，docs\redundant-review.md`。
+> **实施范围（已拍板项）**：R185-B → data_health_check 口径 → R183 → R184/R182余量 → R181 方案C →
+> LLM 多轮阶段 1+2 → R185-A（优先序 4→1→2→3→8）；冗余评审 P1-1/P1-2/P1-3/P1-4/P2-1/P2-2/P2-3/P2-4。
+> **跳过（维持拍板）**：R179/R180（§6 拍板 #1/#2 暂缓登记，未越权实施）；P1-5 allocation_engine
+> 拆分（redundant-review 明示单独 round）。
+
+| # | 项 | 实施要点 | 验收 |
+|---|---|---|---|
+| 1 | R185-B | CONFIG_ITEMS +6 key、`_get_env` 新键、.env.example 补缺删死项、文案诚实化 | 12 用例绿 |
+| 2 | data_health_check 口径 | 检查器改 hub 生产口径注入 + 降级口径 WARN 守卫（防 round51/52/53 同源误报复读） | 8 用例绿 |
+| 3 | R183 | `is_a_share_trading_day`（周末判定，节假日待外部日历）+ 默认路径周末拒落库（回填不校验） | 8 用例并入主题文件 |
+| 4 | R184/R182 余量 | no_data 按 reason 分流「积累中/待接入」5 处 + 分类行聚合拆分；「无数据」清零 | vitest 5 用例绿 |
+| 5 | R181 方案C | INDEX_KEYWORDS 补 A500 键 + `_dedup_same_index` 双键并集交叉验证（实施偏差：方案原文「取名称提取值」会拆散写入层有意归一组——`test_same_layer_weight_reclaim` 回归实证，故落地为并集非替换） | 6 用例 + 不变量全家桶 205 绿 |
+| 6 | LLM 多轮 1+2 | 契约先行 `api-contracts/analysis/llm-chat-session.md` + ChatSessionStore（LRU100/TTL30min/快照60s/SQLite 24h）+ lifespan 启动恢复 + 端点集成 + 前端气泡 UI | 后端 21 + 前端 14 绿 |
+| 7 | R185-A | `refresh_provider_chain()`（override → settings patch 热生效，provider 链构建零改动）+ admin PUT /config 接线 | 6 用例绿 |
+| 8 | P1-1 | 删 `safe_call/safe_call_async` 别名，全仓收敛 run_sync/run_in_thread/run_sync_long 3 入口 | 37 绿 + grep 零残留 |
+| 9 | P1-2 | R150/R148 桥接抽 `_bridge_symbol_extra_fields`（compute() market_data 分支复用，消除「桥接只活在 DEPRECATED 函数」脚手架风险） | 8 守卫用例绿 |
+| 10 | P1-3 | verify_e2e 冻结规则（只减不增，目标 ≤800 行）+ 首批 3 模块断言下沉 pytest | 5 用例绿 |
+| 11 | P1-4 | 8 小测试文件 → 3 聚合文件（用例名/类名零丢失，原 docstring 转注释溯源） | 20 用例绿 |
+| 12 | P2-1/P2-2 | mocks/probe json/pycache 实证后有引用保留不硬删；`/ws/market/{symbol}` deprecated 契约 `api-contracts/common/ws-endpoints.md` | 实证记录 |
+| 13 | P2-3 | main.py 抽 `tasks/startup.py`（1358→1289 行，re-export 保持测试导入面）+ market_service 归属审计定级（合理）并固化 4 条结构守卫 | 54 用例绿 |
+| 14 | P2-4 | 基线校准 259→320（HEAD 实测 317 + 本批净 +3）+ `L4-baseline` 并入 patrol + AGENTS.md 门禁替换制（16 段硬上限） | 校准 PASS |
+
+**验收（全量只跑 1 次）**：pytest **3210 passed / 11 skipped**（999.65s；唯一 FAIL =
+Opt10 守卫 news_fetcher timeout=8 缺 executor——P1-1 替换暴露既有守卫，补
+`executor="long"` 后 43 绿；凭据已 mark）；mypy 145 文件零错误；前端 vitest **550**
++ `npm run build` 成功；verify_e2e **239/254**（15 FAIL 全部环境性归因：①design/
+strategy 任务真实耗时 153s/305s 超 e2e 120s 轮询窗口——后端日志 task 50/51 均
+completed quality=full ②后端进程 18:30:20 后被宿主后台 job 生命周期收割
+（NameResolution×8 + STORM×17，日志无 shutdown 痕迹，模板已知「连坐杀树」同型）
+③数据质量 5 项在进程死后读降级数据；另首轮大面积 502 系本机系统代理 7897 注入
+Bad Gateway（round53 §2.1 同型教训，清代理复跑确认）。
+
+**file:line 漂移核对**：文档锚点 config_manager/ic_tracker 实际分别在 `core/`、
+`factors/`（非 services/），按实际路径实施并在此注明；R183 日期笔误修正（9-06 为
+周日非周六，非交易日实质不变）。
+
+**已知遗留**：verify_e2e 存量模块删除（第二批下沉）、lifespan 协程族迁移、
+allocation_engine 拆分（P1-5，单独 round）、R185 方案 C 徽章（P3）、
+is_a_share_trading_day 节假日外部日历接入。
+
+---
+
+## 13. 事件插曲：周一盘中启动静默退出（2026-09-07 10:59，待下轮诊断）
+
+10:59 交易时段尝试启动后端，进程卡在 lifespan 数据源同步中段后**静默消失**（无 startup complete、无 Traceback；日志止于 cls/eastmoney 拉取中段）。同日晚间 18:18 盘后启动**成功**（63s，31.2s warmup）。差异指向「盘中启动撞数据源高峰 → lifespan 同步阶段超时路径」，非确定性代码 bug——已列下轮容器诊断观察项（对比盘中/盘后 startup）。known-env-issues §1.1 候选补充条目。
+
+---
+
+*诊断产物：C:/Users/Public/etf_probe/（rt_tue.json / t42.json / t42b.json + 前序全部产物，会话级临时目录）。后端保持运行中。未收到「round实施」不写修复代码。*
+
+---
+
+*诊断产物：C:/Users/Public/etf_probe/（build53.log + probe53_*.py/.out + newsall.json + dhc53.out + caliber.out/caliber2.out + fmodel.json/factive.json，会话级临时目录）；容器于诊断完成后回收。未收到「round实施」不写修复代码。*
