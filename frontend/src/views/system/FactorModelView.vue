@@ -181,7 +181,12 @@
                   <td>
                     <!-- F25②: 显著性列直接映射后端 status（valid=统计显著 / warn=不显著 /
                          no_data=无数据/积累中 / static=静态）——与分类视图同源，消除双视图口径差 -->
-                    <span v-if="f.status === 'no_data'" class="valid-badge no-data" :title="f.reason">积累中</span>
+                    <!-- R184 (dec-0c9b5e1cce1bcc3f): no_data 按 reason 分流——「IC 积累中（n/250）」
+                         = 时间问题显示「积累中」；其余（数据源未接入/常量/未累积/序列不可用）
+                         = 能力问题显示「待接入」（琥珀色），tooltip 仍带完整 reason -->
+                    <span v-if="f.status === 'no_data'"
+                          :class="['valid-badge', isRealAccumulating(f.reason) ? 'cat-stat-accum' : 'cat-stat-pending']"
+                          :title="f.reason">{{ isRealAccumulating(f.reason) ? '积累中' : '待接入' }}</span>
                     <span v-else-if="f.status === 'static'" class="valid-badge no-data">静态</span>
                     <span v-else-if="f.status === 'valid'" class="valid-badge valid">显著</span>
                     <span v-else class="valid-badge invalid">不显著</span>
@@ -227,7 +232,11 @@
                 <span class="stat-dot stat-dot-warn"></span>
                 {{ cat.warn_count }} 待关注
               </span>
-              <span v-if="cat.no_data_count > 0" class="cat-stat cat-stat-accum">{{ cat.no_data_count }} 积累中</span>
+              <!-- R184: no_data 聚合拆分——「IC 积累中」与「待接入」分开计数 -->
+              <template v-if="cat.no_data_count > 0">
+                <span v-if="catAccumCount(cat) > 0" class="cat-stat cat-stat-accum">{{ catAccumCount(cat) }} 积累中</span>
+                <span v-if="catPendingCount(cat) > 0" class="cat-stat cat-stat-pending">{{ catPendingCount(cat) }} 待接入</span>
+              </template>
               <span v-if="cat.static_count > 0 && cat.valid_count > 0" class="cat-stat static">
                 <span class="stat-dot stat-dot-static"></span>
                 {{ cat.static_count }} 静态
@@ -270,7 +279,7 @@
                           当前 IC:
                           <strong :class="icColorClass(f.ic_value)">
                             <!-- P2-8: no_data 显示 reason（数据源缺失原因）而非笼统「无数据」 -->
-                            {{ f.ic_value !== null ? f.ic_value.toFixed(4) : (f.status === 'no_data' ? '无数据' : '--') }}
+                            {{ f.ic_value !== null ? f.ic_value.toFixed(4) : (f.status === 'no_data' ? (isRealAccumulating(f.reason) ? '积累中' : '待接入') : '--') }}
                           </strong>
                           <span v-if="f.ic_value !== null" class="tip-status" :class="icStatusClass(f)">
                             {{ abs(f.ic_value) >= (f.ic_threshold || 0.02) ? '✅ 有效' : '⚠️ 低于阈值' }}
@@ -278,7 +287,7 @@
                           <!-- P2-8: no_data/warn 的 reason（数据源缺失 / 弱 IC 阈值说明）tooltip -->
                           <span v-else-if="f.reason" class="tip-status status-no-data">
                             <AppTooltip placement="top">
-                              ⚠️ {{ f.status === 'no_data' ? '无数据' : '待关注' }}
+                              ⚠️ {{ f.status === 'no_data' ? (isRealAccumulating(f.reason) ? '积累中' : '待接入') : '待关注' }}
                               <template #content>
                                 <div class="tooltip-rich">{{ f.reason }}</div>
                               </template>
@@ -324,7 +333,7 @@
                   <!-- P2-8 (round9 §6.5.1 触发): 区分 no_data 与 warn——null → 「无数据」+ reason
                        tooltip（数据源缺失原因）；warn（弱 IC，ic_value 非 null）→ 显示数值+阈值 -->
                   <AppTooltip v-if="f.ic_value === null" placement="top" :disabled="!f.reason">
-                    <span class="factor-ic-no-data">{{ f.status === 'no_data' ? '无数据' : '--' }}</span>
+                    <span class="factor-ic-no-data">{{ f.status === 'no_data' ? (isRealAccumulating(f.reason) ? '积累中' : '待接入') : '--' }}</span>
                     <template #content>
                       <div class="tooltip-rich">{{ f.reason }}</div>
                     </template>
@@ -566,6 +575,19 @@ function handleResize() {
 /* ── IC Sort Table (P2-1: merged from FactorICView.vue) ── */
 const icSortBy = ref('abs_ic')
 const icCategoryFilter = ref('')
+
+// R184 (dec-0c9b5e1cce1bcc3f): no_data 细分——「IC 积累中（n/250…）」= 时间问题（真积累），
+// 其余 4 种 reason（数据源未接入/常量输出/IC 未累积/序列不可用）= 能力问题（待接入）。
+// 正则对齐后端 factor_status.py reason 模板（「IC 积累中（9/250 交易日…）」）。
+function isRealAccumulating(reason) {
+  return /IC 积累中（\d+\/250/.test(reason || '')
+}
+function catAccumCount(cat) {
+  return (cat.factors || []).filter(f => f.status === 'no_data' && isRealAccumulating(f.reason)).length
+}
+function catPendingCount(cat) {
+  return (cat.no_data_count || 0) - catAccumCount(cat)
+}
 
 const icSortedFactors = computed(() => {
   const all = categories.value.flatMap(c => (c.factors || []))
@@ -938,6 +960,9 @@ onBeforeUnmount(() => {
 .cat-stat.valid { color: var(--color-success-600); }
 .cat-stat.warn { color: var(--color-warning-600); }
 .cat-stat.no-data { color: var(--color-text-tertiary); }
+/* R184: 「待接入」= 能力问题（数据源/常量/序列异常），琥珀色与「待关注」同语言；
+   「积累中」沿用 brand 蓝（时间问题）。 */
+.cat-stat-pending { color: var(--color-warning-600); }
 .stat-dot {
   width: 6px; height: 6px;
   border-radius: 50%;

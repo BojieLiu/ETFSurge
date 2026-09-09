@@ -2,7 +2,7 @@
 
 集中的交易时间判定函数，基于各交易所夏令时规则。
 """
-from datetime import datetime, time
+from datetime import date, datetime, time, timedelta, timezone
 
 # ── 市场作息（北京时间，夏令时） ──────────────────────────────────
 # 字段: (开盘, 收盘)
@@ -32,6 +32,26 @@ def is_trading_time(dt: datetime | None = None) -> bool:
     不视为「盘中」（价格语义不变，仅成交量在窗口内累加）。
     """
     return get_market_status("A股", dt) == "open"
+
+
+def is_a_share_trading_day(dt: datetime | date | None = None) -> bool:
+    """判断 A 股交易日（R183, docs/round53-container-reacceptance-round52-plans.md §8.3）。
+
+    ⚠️ 免费实现边界：只判周末（weekday>=5 → False）。法定节假日（春节/国庆等）
+    需外部交易日历（akshare tool_trade_date_hist_sync），待后续轮接入——届时本
+    函数补节假日分支，调用方接口不变。
+
+    Args:
+        dt: date / datetime，缺省为北京时间今天。
+
+    Returns:
+        True = 交易日（工作日），False = 休市日（周末；节假日接入后含法定节假日）。
+    """
+    if dt is None:
+        dt = (datetime.now(timezone.utc) + timedelta(hours=8)).date()  # 北京时间今天
+    if isinstance(dt, datetime):
+        dt = dt.date()
+    return dt.weekday() < 5
 
 
 def market_session(dt: datetime | None = None) -> str:

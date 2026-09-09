@@ -1201,8 +1201,22 @@ def _dedup_same_index(allocations: list[dict[str, Any]]) -> list[dict[str, Any]]
             continue
         tidx = _norm(a.get("tracked_index") or "")
         concept = _norm(_extract_index_concept(a.get("name") or ""))
-        key = tidx or concept or str(a.get("symbol", ""))
-        groups.setdefault(key, []).append(a)
+        # R181 C-2 (round53 §4.1): 分组键 = tracked_index ⊕ 名称提取**双键并集**。
+        # 动机：tracked_index 脏值（563360 被记 "A50"，应为 "A500"）使单键去重失效
+        # → design19 同指数 25% 双持有。双键并集下脏值候选经名称提取键仍与真同
+        # 指数候选相遇（守卫）；「写入层有意归一」（tracked_index 为 segment 板块词，
+        # 如 科创50→科创 / 芯片）经 tracked_index 键保持既有合并语义——若按方案
+        # 原文「不一致一律取名称提取值」，科创/芯片等有意归一组会被更具体的名称
+        # 拆散（test_same_layer_weight_reclaim 回归），故落地为并集而非替换。
+        # 实施偏差已在 round53 §10.4 实施记录注明。
+        keys: list[str] = []
+        for _k in (tidx, concept):
+            if _k and _k not in keys:
+                keys.append(_k)
+        if not keys:
+            keys = [str(a.get("symbol", ""))]
+        for _k in keys:
+            groups.setdefault(_k, []).append(a)
 
     removed_syms: set[str] = set()
     for _key, members in groups.items():

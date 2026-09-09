@@ -2,7 +2,7 @@
   <div class="config-page">
     <AppCard class="config-header-card">
       <template #header-title>系统配置</template>
-      <template #header-description>管理 API 密钥与服务配置 — 保存后即时生效，无需重启服务</template>
+      <template #header-description>管理 API 密钥与服务配置 — 保存后需重启后端生效（LLM 供应商链在启动期构建，R185）</template>
     </AppCard>
 
     <div v-if="loading" class="loading">加载配置中...</div>

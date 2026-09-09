@@ -48,19 +48,34 @@ def _load_module():
 
 
 def _patch_compute(monkeypatch, fake_output):
-    """monkeypatch 脚本里的 FactorRegistry.compute 返回 fake_output."""
-    import asyncio
+    """monkeypatch 脚本里的 FactorRegistry.compute 返回 fake_output.
 
-    async def _fake_compute(symbols):
-        return {s: dict(fake_output.get(s, {})) for s in symbols}
-
+    round53 §7.5: 检查器改生产口径后 compute 带 symbol_extra kwarg——fake 需兼容。
+    """
     def _fake_run(coro):
-        # 取得 coro 的 symbols 然后调 fake_compute
         coro.close()
-        # 简单兜底: 对固定 4 只 ETF 返回 fake_output 全集
         return {s: dict(fake_output.get(s, {})) for s in ("510300", "518880", "511090", "512480")}
 
     monkeypatch.setattr("asyncio.run", _fake_run)
+
+
+def _patch_caliber_production(monkeypatch):
+    """round53 §7.5: 默认把注入链路 stub 成「生产口径成功」——单测不触网。
+
+    hub._build_symbol_extra/_enrich_symbol_extra 被 patch 为返回固定结构，
+    使被测函数走 caliber=production 分支（负向断链 FAIL 只在生产口径生效）。
+    """
+    import types
+
+    fake_hub = types.SimpleNamespace(
+        _build_symbol_extra=lambda syms: {s: {"fund_scale": 1.0} for s in syms},
+        _enrich_symbol_extra=_async_ok_enrich,
+    )
+    monkeypatch.setitem(sys.modules, "app.services.market_data_hub", types.SimpleNamespace(hub=fake_hub))
+
+
+async def _async_ok_enrich(symbols, base_extra):
+    return dict(base_extra)
 
 
 def test_critical_factor_constant_is_nonempty():
@@ -100,6 +115,7 @@ def test_factor_chain_integrity_passes_when_critical_factors_have_values(monkeyp
     mod.FAIL = 0
     mod.ERRORS = []
     _patch_compute(monkeypatch, fake_output)
+    _patch_caliber_production(monkeypatch)
     mod.test_factor_chain_integrity()
     assert mod.FAIL == 0, f"误报 FAIL: ERRORS={mod.ERRORS}"
     assert mod.PASS >= 1
@@ -118,6 +134,7 @@ def test_factor_chain_integrity_fails_when_critical_factor_totally_zero(monkeypa
     mod.FAIL = 0
     mod.ERRORS = []
     _patch_compute(monkeypatch, fake_output)
+    _patch_caliber_production(monkeypatch)
     mod.test_factor_chain_integrity()
     # 至少 1 条 FAIL（断链的 critical factor）
     assert mod.FAIL >= 1, "未捕获全断链: 期望 FAIL 但全 PASS"
@@ -146,6 +163,7 @@ def test_factor_chain_integrity_tolerates_off_hours_when_all_none(monkeypatch):
     mod.FAIL = 0
     mod.ERRORS = []
     _patch_compute(monkeypatch, fake_output)
+    _patch_caliber_production(monkeypatch)
     mod.test_factor_chain_integrity()
     # 全空 → 容忍, mod.FAIL == 0
     assert mod.FAIL == 0, (
@@ -175,7 +193,51 @@ def test_factor_chain_integrity_partial_break_acceptable(monkeypatch):
     mod.FAIL = 0
     mod.ERRORS = []
     _patch_compute(monkeypatch, fake_output)
+    _patch_caliber_production(monkeypatch)
     mod.test_factor_chain_integrity()
     # 部分缺失但每个 factor 至少 1 只有值 → PASS
     assert mod.FAIL == 0, f"部分缺失应仍 PASS, 误报 FAIL: {mod.ERRORS}"
     assert mod.PASS >= 1
+
+
+def test_factor_chain_integrity_degraded_caliber_warns_not_fails(monkeypatch, capfd):
+    """round53 §7.5 负向: 注入链路失败（降级裸 compute）时，Z04 类因子占位 0
+    不得报 FAIL——连续 3 轮同源误判（round51/52/53）的根因即口径不等效。
+    降级口径必须 WARN 不阻断。"""
+    fake_output = {
+        "510300": {"etf.premium_discount": 0.003, "style.size.ln_mcap": 0.0},
+        "518880": {"etf.premium_discount": 0.001, "style.size.ln_mcap": 0.0},
+        "511090": {"etf.premium_discount": None, "style.size.ln_mcap": 0.0},
+        "512480": {"etf.premium_discount": 0.002, "style.size.ln_mcap": 0.0},
+    }
+    mod = _load_module()
+    mod.PASS = 0
+    mod.FAIL = 0
+    mod.ERRORS = []
+    _patch_compute(monkeypatch, fake_output)
+    # 不注入 _patch_caliber_production —— import hub 失败 → 走降级分支
+    mod.test_factor_chain_integrity()
+    assert mod.FAIL == 0, f"降级口径不得 FAIL（口径守卫），实际 {mod.ERRORS}"
+    out, _ = capfd.readouterr()
+    assert "降级" in out or "WARN" in out, "降级路径应输出 WARN 标注"
+
+
+def test_factor_chain_integrity_production_caliber_still_fails_on_real_break(monkeypatch, capfd):
+    """round53 §7.5 对照: 生产口径（注入成功）下真断链仍必须 FAIL——守卫不得
+    把真断链也吞掉（负向断言能失败才算测试有效）。"""
+    fake_output = {
+        "510300": {"etf.premium_discount": 0.0, "style.size.ln_mcap": 0.0},
+        "518880": {"etf.premium_discount": 0.0, "style.size.ln_mcap": 0.0},
+        "511090": {"etf.premium_discount": None, "style.size.ln_mcap": None},
+        "512480": {"etf.premium_discount": 0.0, "style.size.ln_mcap": 0.0},
+    }
+    mod = _load_module()
+    mod.PASS = 0
+    mod.FAIL = 0
+    mod.ERRORS = []
+    _patch_compute(monkeypatch, fake_output)
+    _patch_caliber_production(monkeypatch)
+    mod.test_factor_chain_integrity()
+    assert mod.FAIL >= 1, "生产口径下真断链必须 FAIL（守卫不得放水）"
+    out, _ = capfd.readouterr()
+    assert "premium_discount" in out or "ln_mcap" in out

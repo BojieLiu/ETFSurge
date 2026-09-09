@@ -227,5 +227,60 @@ def has_any_api_key() -> bool:
     """Check if at least one provider has an API key configured."""
     return bool(settings.opencode_zen_api_key or settings.deepseek_api_key)
 
+
+# ── R185-A (round53 §11.2 方案 A): 配置热生效 ──────────────────────────
+# §11.1 脱节②③: provider 链启动期从 settings 单例构建，UI 保存 DB override 后
+# 不生效（须重启）。方案 A: admin 保存后把 CONFIG_ITEMS 内 LLM/数据源 key 的
+# DB override 值 patch 回 settings 单例 → 下次 get_configured_providers() 即用
+# 新值（provider 链构建逻辑零改动，天然读到新 settings）。R160 语义保留: 熔断/
+# mark_excluded 状态不因 key 变更重置（模型级黑名单与 key 无关）。
+
+# CONFIG_ITEMS key → settings 字段（R185-B 补齐后的活跃 LLM key 集合）
+_HOT_RELOAD_KEYS: dict[str, str] = {
+    "OPENCODE_ZEN_API_KEY": "opencode_zen_api_key",
+    "DEEPSEEK_API_KEY": "deepseek_api_key",
+    "OPENROUTER_API_KEY": "openrouter_api_key",
+    "B_AI_API_KEY": "b_ai_api_key",
+    "B_AI_ALLOWED_MODELS": "b_ai_allowed_models",
+    "B_AI_PROXY_URL": "b_ai_proxy_url",
+}
+
+
+def refresh_provider_chain(config_manager=None) -> list[str]:
+    """把 ConfigManager DB override 同步到 settings 单例（热生效）。
+
+    admin PUT /config 保存后调用。返回实际 patch 的 key 列表（无 override 的
+    key 不动 .env 值）。失败逐 key 捕获（日志 + 跳过），不阻塞保存响应。
+    """
+    if config_manager is None:
+        from ..core.config_manager import config_manager as _default_mgr
+        config_manager = _default_mgr
+    applied: list[str] = []
+    import asyncio as _asyncio
+
+    for cfg_key, settings_attr in _HOT_RELOAD_KEYS.items():
+        try:
+            # get() 是 async——运行中事件循环内嵌套跑单次查询（admin handler 上下文）
+            try:
+                loop = _asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+            if loop is not None:
+                value = loop.run_until_complete(config_manager.get(cfg_key))
+            else:
+                value = _asyncio.run(config_manager.get(cfg_key))
+        except Exception as e:
+            logger.warning("[provider] hot-reload read %s failed: %s", cfg_key, e)
+            continue
+        if value:
+            try:
+                setattr(settings, settings_attr, str(value))
+                applied.append(cfg_key)
+                logger.info("[provider] hot-reload applied %s (settings.%s updated)",
+                            cfg_key, settings_attr)
+            except Exception as e:
+                logger.warning("[provider] hot-reload set %s failed: %s", cfg_key, e)
+    return applied
+
 # round35 §19 GapE: 死代码 call_with_failover 已删——全后端零生产引用（failover
 # 循环内联在 analysis/llm/client.py 三入口），仅历史测试引用（已随删）。

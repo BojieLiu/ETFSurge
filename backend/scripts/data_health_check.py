@@ -289,19 +289,49 @@ _CHAIN_PROBE_SYMBOLS: tuple[str, ...] = ("510300", "518880", "511090", "512480")
 
 
 def test_factor_chain_integrity():
-    """关键因子断链断言——round40 实施 (round39 §4.4.4 方案 B).
+    """关键因子断链断言——round40 实施 (round39 §4.4.4 方案 B)，round53 §7.5 口径修复。
 
-    对 4 只代表 ETF 跑 factor_registry.compute() → 统计 CRITICAL_FACTOR_CODES
-    中每个因子在全部 ETF 的非零 meaningful 值覆盖率 (FS1 is_meaningful_value)。
-    期望: 至少 1 只 ETF 有非零值 (即断链率 < 100%)。
-    全 None → WARN 提示「非交易时段数据源未注入」, 不计入 FAIL 阻断.
+    round53 口径对齐诊断（§7.2 双路径对照实验）：本检查器旧实现对 4 只代表 ETF
+    **裸 compute()**（无 symbol_extra），与生产路径（hub.get_factor_matrix 链路经
+    _build_symbol_extra + _enrich_symbol_extra 注入 fund_scale/industry/
+    shares_change_20d 等）不等效——5 因子「断链」FAIL 系检查器口径误报
+    （生产实测 7/7 critical 因子 35/35~37/37 有值，round53 §7.3 推翻定性）。
+
+    修复（§7.5 拍板）：
+    1. 改走生产口径——hub._build_symbol_extra 注入基础字段后，经
+       _enrich_symbol_extra 补 benchmark_close/shares_change_20d（与 design 管线
+       同源），再 compute(symbols, symbol_extra=...)；
+    2. docstring「非交易时段全空 WARN 不计 FAIL」兑现：all_empty 分支已有（round31
+       R4-07），另有部分因子空但注入失败（enrich 异常）时按 WARN 提示不阻断；
+    3. enrich 链路失败（外部源不可达）→ 降级裸 compute + WARN 标注口径降级，不假报。
     """
     from app.core.factor_values import is_meaningful_value
     from app.factors.factor_registry import FactorRegistry
 
+    registry = FactorRegistry()
+    symbol_extra: dict = {}
+    caliber = "production(symbol_extra injected)"
     try:
-        registry = FactorRegistry()
-        result = asyncio.run(registry.compute(list(_CHAIN_PROBE_SYMBOLS)))
+        from app.services.market_data_hub import hub
+        base_extra = hub._build_symbol_extra(list(_CHAIN_PROBE_SYMBOLS))
+        symbol_extra = asyncio.run(
+            asyncio.wait_for(hub._enrich_symbol_extra(list(_CHAIN_PROBE_SYMBOLS), base_extra), 60)
+        )
+    except Exception as e:
+        # 注入链路失败（外部份额源/指数源不可达）→ 降级裸 compute，但必须标注口径
+        symbol_extra = {}
+        caliber = f"degraded(bare compute, inject failed: {type(e).__name__})"
+        check(
+            "关键因子断链: 生产口径注入降级 (WARN)",
+            True,
+            f"symbol_extra enrich failed — bare-compute caliber, non-critical factors "
+            f"(ln_mcap/shares_change 等) 会显示占位 0，不作为断链判定依据: {str(e)[:80]}",
+        )
+
+    try:
+        result = asyncio.run(
+            registry.compute(list(_CHAIN_PROBE_SYMBOLS), symbol_extra=symbol_extra or None)
+        )
     except Exception as e:
         check("关键因子断链: factor_registry 可运行", False, str(e)[:80])
         return
@@ -344,7 +374,19 @@ def test_factor_chain_integrity():
             broken.append(f"{code}=0/{total}_meaningful")
 
     if broken:
-        # 断链: 至少一个 critical factor 在 4 只 ETF 全 0/None
+        # 断链: 至少一个 critical factor 在 4 只 ETF 全 0/None。
+        # 口径守卫（round53 §7.5）：降级裸 compute 时 Z04 注入缺失类因子
+        # （shares_change/ln_mcap 等占位 0）不作为断链判定——只对生产口径
+        # （symbol_extra 注入成功）报 FAIL，降级口径输出 WARN 防误报复读
+        # （round51/52/53 连续 3 轮同源误判教训）。
+        if caliber.startswith("degraded"):
+            check(
+                f"关键因子断链: 降级口径下 {len(broken)} 项疑似断链 (WARN 不阻断)",
+                True,
+                "; ".join(broken[:5]) + " — bare-compute caliber, "
+                "production caliber requires symbol_extra injection (R183 §7.5)",
+            )
+            return
         check(
             f"关键因子断链: {len(broken)} 项 critical factor 全断链",
             False,
@@ -352,7 +394,7 @@ def test_factor_chain_integrity():
         )
     else:
         check(
-            f"关键因子断链: {len(CRITICAL_FACTOR_CODES)} 项 critical factor 均有非零值",
+            f"关键因子断链: {len(CRITICAL_FACTOR_CODES)} 项 critical factor 均有非零值 [{caliber}]",
             True,
             f"per_etf_nonzero_total={per_etf_nonzero_total}",
         )

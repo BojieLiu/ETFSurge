@@ -330,6 +330,7 @@ from app.engine.rationale import build_rationale
 from app.engine.allocation_engine import (
     _dedup_same_index, _is_large_cap_wide_basis, MANDATORY_CODES,
 )
+from app.fetchers.etf_scanner import INDEX_KEYWORDS, _extract_index_keyword
 class TestDedupSameIndex:
     """round19 P1-②: 同指数双持有硬约束。"""
 
@@ -475,3 +476,68 @@ class TestLayerCountMonotonic:
         by = _allocs_by_id(strategies)
         d = {p: _layer_counts(by[p])["defense"] for p in ("defensive", "balanced", "aggressive")}
         assert d["defensive"] >= d["balanced"] >= d["aggressive"], f"防御数未反向单调: {d}"
+
+
+class TestR181DedupCrossValidation:
+    """R181 (docs/round53-container-reacceptance-round52-plans.md §4.1 方案C):
+    tracked_index 脏值 "A50"（应为 "A500"）→ 去重键失效 → 159338+563360 并存 25% 同指数敞口。
+
+    C-1 数据侧: INDEX_KEYWORDS 补 "A500" 键（最长匹配优先下 "A500ETF…" 命中 A500 而非 A50）。
+    C-2 守卫侧: _dedup_same_index 分组键 = tracked_index ⊕ 名称提取交叉验证——
+    两者不一致时取名称提取值 + WARNING（防映射表再漂移）。
+    """
+
+    def test_index_keywords_has_a500(self):
+        """C-1 负向: INDEX_KEYWORDS 必须含 A500 精确键（round53 design19 脏值根因）。"""
+        assert INDEX_KEYWORDS.get("A500") == "A500", "A500 键缺失 → 563360 落 'A50' 脏值"
+
+    def test_extract_keyword_a500_etf_not_truncated_to_a50(self):
+        """C-1: _extract_index_keyword('A500ETF华泰柏瑞') 必须返回 'A500'（不得截成 A50）。"""
+        assert _extract_index_keyword("A500ETF华泰柏瑞") == "A500"
+
+    def test_extract_keyword_a50_etf_still_a50(self):
+        """C-1 对照: 真 A50 ETF（563080 中证A50ETF）不得被 A500 键误吃。"""
+        assert _extract_index_keyword("中证A50ETF") == "A50"
+
+    def test_dedup_merges_dirty_a50_with_clean_a500(self):
+        """C-2 核心负向: tracked_index="A50"（脏）与 "中证A500"（净）两候选必须被合并。
+
+        旧实现 key = tracked_index 原值 → "A50" ≠ "中证A500" → 去重失效（design19 复现）。
+        新实现以名称提取交叉验证兜底 → A500ETF华泰柏瑞 名称提取 = "A500" → 归并同组。
+        """
+        allocs = [
+            {"symbol": "159338", "name": "中证A500ETF国泰", "layer": "core",
+             "weight": 0.05, "factor_score": 0.8, "tracked_index": "中证A500"},
+            {"symbol": "563360", "name": "A500ETF华泰柏瑞", "layer": "satellite",
+             "weight": 0.20, "factor_score": 0.3, "tracked_index": "A50"},
+            {"symbol": "510300", "name": "沪深300ETF", "layer": "core",
+             "weight": 0.10, "factor_score": 0.7, "tracked_index": "沪深300"},
+        ]
+        out = _dedup_same_index(allocs)
+        syms = {a["symbol"] for a in out}
+        assert "563360" not in syms, "脏值 A50 与净值 A500 必须被交叉验证合并（R181 主断言）"
+        assert "159338" in syms and "510300" in syms
+
+    def test_dedup_keeps_distinct_indices(self):
+        """C-2 对照: 真不同指数（A50 vs 中证A500 vs 沪深300）不得被误合并。"""
+        allocs = [
+            {"symbol": "563080", "name": "中证A50ETF", "layer": "core",
+             "weight": 0.08, "factor_score": 0.6, "tracked_index": "A50"},
+            {"symbol": "159338", "name": "中证A500ETF国泰", "layer": "core",
+             "weight": 0.05, "factor_score": 0.8, "tracked_index": "中证A500"},
+            {"symbol": "510300", "name": "沪深300ETF", "layer": "core",
+             "weight": 0.10, "factor_score": 0.7, "tracked_index": "沪深300"},
+        ]
+        out = _dedup_same_index(allocs)
+        assert len(out) == 3, "不同指数不得误合并"
+
+    def test_dedup_name_extraction_alone_merges(self):
+        """C-2 兜底: tracked_index 全空时名称提取仍去重（既有行为回归保护）。"""
+        allocs = [
+            {"symbol": "159338", "name": "中证A500ETF国泰", "layer": "core",
+             "weight": 0.05, "factor_score": 0.8, "tracked_index": ""},
+            {"symbol": "563360", "name": "A500ETF华泰柏瑞", "layer": "satellite",
+             "weight": 0.20, "factor_score": 0.3, "tracked_index": ""},
+        ]
+        out = _dedup_same_index(allocs)
+        assert len(out) == 1

@@ -32,8 +32,8 @@ vi.mock('./ui/AppTooltip.vue', () => ({
 import FactorModelView from '../views/system/FactorModelView.vue'
 
 function makeData() {
-  const mk = (code, name, status, ic = null) => ({
-    code, name, status, ic_value: ic, ic_threshold: 0.02,
+  const mk = (code, name, status, ic = null, reason = '') => ({
+    code, name, status, ic_value: ic, ic_threshold: 0.02, reason,
     description: `${name}描述`, standardization: 'zscore', category: 'china_specific',
   })
   return {
@@ -193,6 +193,113 @@ describe('FactorModelView — F12 因子数据完整性降级横幅', () => {
     const wrapper = mount(FactorModelView, { attachTo: document.body })
     await flushPromises()
     expect(wrapper.find('.factor-degraded-banner').exists()).toBe(false)
+    wrapper.unmount()
+  })
+})
+
+// ── R184 (docs/round53-container-reacceptance-round52-plans.md §10): no_data 细分
+// 「积累中」（IC 积累中 n/250）vs「待接入」（数据源未接入/常量/未累积/序列不可用）。
+// 决策 dec-0c9b5e1cce1bcc3f：按 reason 关键词分流，负向断言=积累因子不得显示「无数据」。
+describe('FactorModelView — R184 no_data 分流（积累中 vs 待接入）', () => {
+  const REASON_ACCUM = 'IC 积累中（9/250 交易日，未达可观察下限 60）'
+  const REASON_NO_SRC = '数据源未接入（250 只样本缺 news_score）'
+  const REASON_CONST = '截面无差异（常量输出），检查底层数据'
+  const REASON_UNAVAIL = 'IC 序列不可用（120 交易日但无 t/IR 统计）'
+
+  function makeNoDataData(reasons) {
+    const d = makeData()
+    const factors = reasons.map(([code, name, reason]) => ({
+      code, name, status: 'no_data', ic_value: null, ic_threshold: 0.02, reason,
+      description: `${name}描述`, standardization: 'zscore', category: 'style',
+    }))
+    d.categories.unshift({
+      name: 'style', count: factors.length, valid_count: 0, warn_count: 0,
+      no_data_count: factors.length, static_count: 0, avg_ic: null, factors,
+    })
+    d.summary = { valid: 10, warn: 0, no_data: factors.length, static: 3, avg_ic: null }
+    return d
+  }
+
+  beforeEach(() => {
+    capturedOptions.length = 0
+  })
+
+  it('真积累 reason → 徽章显示「积累中」', async () => {
+    getActiveMock.mockReset().mockResolvedValue({ data: makeNoDataData([['style.size.ln_mcap', '市值', REASON_ACCUM]]) })
+    const wrapper = mount(FactorModelView, { attachTo: document.body })
+    await flushPromises()
+    const style = wrapper.findAll('.cat-header').find((h) => h.text().includes('风格'))
+    style.trigger('click')
+    await flushPromises()
+    const badges = wrapper.findAll('.valid-badge').filter(b => ['积累中', '待接入'].includes(b.text()))
+    expect(badges.length).toBeGreaterThanOrEqual(1)
+    expect(badges[0].text()).toBe('积累中')
+    wrapper.unmount()
+  })
+
+  it('非积累 3 种 reason → 徽章显示「待接入」（琥珀语义色）', async () => {
+    getActiveMock.mockReset().mockResolvedValue({
+      data: makeNoDataData([
+        ['china.sentiment.news_direction', '舆情', REASON_NO_SRC],
+        ['china.x.const', '常量因子', REASON_CONST],
+        ['china.y.unavail', '序列因子', REASON_UNAVAIL],
+      ]),
+    })
+    const wrapper = mount(FactorModelView, { attachTo: document.body })
+    await flushPromises()
+    const style = wrapper.findAll('.cat-header').find((h) => h.text().includes('风格'))
+    style.trigger('click')
+    await flushPromises()
+    const badges = wrapper.findAll('.valid-badge').filter(b => ['积累中', '待接入'].includes(b.text()))
+    expect(badges.length).toBe(3)
+    badges.forEach((b) => {
+      expect(b.text()).toBe('待接入')
+      expect(b.classes()).toContain('cat-stat-pending')
+    })
+    wrapper.unmount()
+  })
+
+  it('分类行聚合拆分：「N 积累中」+「M 待接入」分开计数', async () => {
+    getActiveMock.mockReset().mockResolvedValue({
+      data: makeNoDataData([
+        ['style.size.ln_mcap', '市值', REASON_ACCUM],
+        ['style.size.ln_float_mcap', '流通市值', REASON_ACCUM],
+        ['china.sentiment.news_direction', '舆情', REASON_NO_SRC],
+      ]),
+    })
+    const wrapper = mount(FactorModelView, { attachTo: document.body })
+    await flushPromises()
+    const style = wrapper.findAll('.cat-header').find((h) => h.text().includes('风格'))
+    const text = style.text()
+    expect(text).toContain('2 积累中')
+    expect(text).toContain('1 待接入')
+    wrapper.unmount()
+  })
+
+  it('负向：积累因子的 IC 列/警示区不得出现「无数据」字样', async () => {
+    getActiveMock.mockReset().mockResolvedValue({
+      data: makeNoDataData([['style.size.ln_mcap', '市值', REASON_ACCUM]]),
+    })
+    const wrapper = mount(FactorModelView, { attachTo: document.body })
+    await flushPromises()
+    const style = wrapper.findAll('.cat-header').find((h) => h.text().includes('风格'))
+    style.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('无数据')
+    wrapper.unmount()
+  })
+
+  it('待接入因子的 IC 列显示「待接入」而非「无数据」', async () => {
+    getActiveMock.mockReset().mockResolvedValue({
+      data: makeNoDataData([['china.sentiment.news_direction', '舆情', REASON_NO_SRC]]),
+    })
+    const wrapper = mount(FactorModelView, { attachTo: document.body })
+    await flushPromises()
+    const style = wrapper.findAll('.cat-header').find((h) => h.text().includes('风格'))
+    style.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('待接入')
+    expect(wrapper.text()).not.toContain('无数据')
     wrapper.unmount()
   })
 })

@@ -224,14 +224,23 @@ async def update_config(payload: dict[str, str]):
     只处理 CONFIG_ITEMS 中定义的 key，忽略未知 key。
     """
     from ..core.config_manager import CONFIG_ITEMS, config_manager
+    from ..analysis import provider as _provider_mod
+    from ..analysis.provider import refresh_provider_chain
     valid_keys = {item["key"] for item in CONFIG_ITEMS}
     results = {}
+    _touched_llm_key = False
     for key, value in payload.items():
         if key not in valid_keys:
             results[key] = "skipped (unknown key)"
             continue
         await config_manager.set_override(key, str(value))
         results[key] = "updated"
+        if key in _provider_mod._HOT_RELOAD_KEYS:
+            _touched_llm_key = True
+    # R185-A: LLM key 变更 → 热生效（settings patch，不重启）
+    if _touched_llm_key:
+        _applied = refresh_provider_chain(config_manager)
+        results["_hot_reloaded"] = _applied
     return {"results": results}
 
 

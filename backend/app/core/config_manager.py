@@ -30,6 +30,20 @@ CONFIG_ITEMS: list[dict] = [
     {"key": "OPENCODE_ZEN_API_KEY",   "label": "OpenCode Zen API Key",  "group": "LLM 服务",
      "description": "OpenCode Zen 平台 API 密钥，用于 LLM 分析和报告生成（主力线路）",
      "placeholder": "sk-..."},
+    # R185-B (round53 §11.2): 以下 5 key 为活跃消费方（provider.py:160/105、
+    # strategy_check.py:248 等），此前不在 UI 可编辑清单——保存面板与实际生效面脱节。
+    {"key": "OPENROUTER_API_KEY",     "label": "OpenRouter API Key",    "group": "LLM 服务",
+     "description": "OpenRouter 免费池 API 密钥（Zen 整层耗尽后的中间溢出层）",
+     "placeholder": "sk-or-..."},
+    {"key": "B_AI_API_KEY",           "label": "b.ai API Key",          "group": "LLM 服务",
+     "description": "b.ai 聚合层 API 密钥（白名单模型池，需代理；round40 接入）",
+     "placeholder": "sk-..."},
+    {"key": "B_AI_ALLOWED_MODELS",    "label": "b.ai 白名单模型",       "group": "LLM 服务",
+     "description": "b.ai 允许的模型列表，逗号分隔（如 deepseek-v4-flash,qwen3.8-flash）",
+     "placeholder": "deepseek-v4-flash,qwen3.8-flash"},
+    {"key": "B_AI_PROXY_URL",         "label": "b.ai 代理 URL",         "group": "LLM 服务",
+     "description": "b.ai 请求代理地址（如 http://127.0.0.1:7897）",
+     "placeholder": "http://127.0.0.1:7897"},
     {"key": "TUSHARE_TOKEN",          "label": "Tushare Token",         "group": "数据源",
      "description": "Tushare Pro 接口 Token，用于 A 股行情数据",
      "placeholder": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},
@@ -45,6 +59,9 @@ CONFIG_ITEMS: list[dict] = [
     {"key": "FRED_API_KEY",           "label": "FRED API Key",          "group": "数据源",
      "description": "FRED 经济指标 API 密钥，用于宏观数据",
      "placeholder": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},
+    {"key": "TICKFLOW_API_KEY",       "label": "TickFlow API Key",      "group": "数据源",
+     "description": "TickFlow API 密钥，用于日 K 降级链（round36 接入）",
+     "placeholder": "xxxxxxxxxx"},
 ]
 
 
@@ -212,11 +229,16 @@ class ConfigManager:
         env_map = {
             "deepseek_api_key": settings.deepseek_api_key,
             "opencode_zen_api_key": settings.opencode_zen_api_key,
+            "openrouter_api_key": settings.openrouter_api_key,
+            "b_ai_api_key": settings.b_ai_api_key,
+            "b_ai_allowed_models": settings.b_ai_allowed_models,
+            "b_ai_proxy_url": settings.b_ai_proxy_url,
             "tushare_token": settings.tushare_token,
             "alphavantage_api_key": settings.alphavantage_api_key,
             "finnhub_api_key": settings.finnhub_api_key,
             "twelvedata_api_key": settings.twelvedata_api_key,
             "fred_api_key": settings.fred_api_key,
+            "tickflow_api_key": settings.tickflow_api_key,
         }
         val = env_map.get(env_key)
         if val and not val.startswith("your_"):

@@ -24,10 +24,15 @@ from ..core.factor_values import is_meaningful_value  # FS1: 零值判定单点
 logger = logging.getLogger(__name__)
 
 
-def _beijing_today() -> Any:
+def _beijing_today(now: datetime | None = None) -> Any:
     """F25①: 交易日取北京时间（UTC+8）——容器 TZ 未设时进程为 UTC，直接 utcnow()
-    会把交易日算成前一天，且与 news 时间戳时区修复（F24）口径不一致。"""
-    return (datetime.now(timezone.utc) + timedelta(hours=8)).date()
+    会把交易日算成前一天，且与 news 时间戳时区修复（F24）口径不一致。
+
+    R183: 支持注入 now（测试时区边界用例）；生产默认北京时间当天。
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+    return (now + timedelta(hours=8)).date()
 
 
 def _newey_west_se(values: np.ndarray, lag: int = 1) -> float:
@@ -308,7 +313,19 @@ class ICTracker:
 
         if not ic_batch:
             return 0
-        trade_date = trade_date or _beijing_today()
+        if trade_date is None:
+            # R183 (round53 §8.3): 默认交易日路径（生产 _ic_persistence_loop）加交易日
+            # 校验——周末触发 compute 不落库，防「n/250 交易日」口径被非交易日灌水。
+            # 显式注入 trade_date（历史回填，K 线日期序列本身即交易日）不校验。
+            from ..core.market_calendar import is_a_share_trading_day
+            today = _beijing_today()
+            if not is_a_share_trading_day(today):
+                logger.info(
+                    "[ic_tracker] skip save: %s is not a trading day (R183 guard)",
+                    today,
+                )
+                return 0
+            trade_date = today
         now = datetime.now(timezone.utc)
         count = 0
         for code, ic_val in ic_batch.items():

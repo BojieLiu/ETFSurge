@@ -22,7 +22,7 @@ F25 设计要点（契约 api-contracts/factors/active.md）:
 - 同屏不存在两个相差 5× 的平均|IC|（由既有 T10 测试覆盖）。
 """
 import random
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -30,8 +30,11 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
+from unittest.mock import patch
+
+from app.core.market_calendar import is_a_share_trading_day
 from app.database import Base
-from app.factors.ic_tracker import ICTracker, compute_series_stats
+from app.factors.ic_tracker import ICTracker, _beijing_today, compute_series_stats
 from app.models.factor_ic import FactorICRecord
 
 
@@ -113,6 +116,86 @@ class TestF25SignalAbsent:
         assert len(rows) == 1, "近零 IC 批次不得丢弃"
         assert rows[0].signal_absent is True
         assert rows[0].ic_value == 0.0
+
+
+class TestMarketCalendarTradingDay:
+    """is_a_share_trading_day：周末 False，工作日 True（节假日不在本层能力内）。"""
+
+    def test_saturday_is_not_trading_day(self):
+        assert is_a_share_trading_day(date(2026, 9, 5)) is False
+
+    def test_sunday_is_not_trading_day(self):
+        # 2026-09-06 周日（round53 §8.3 实测 IC 灌水日；文档写作「周六」系笔误，
+        # 9-08=周二 → 9-06=周日，非交易日实质不变）
+        assert is_a_share_trading_day(date(2026, 9, 6)) is False
+
+    def test_weekday_is_trading_day(self):
+        # 2026-09-08 周二（round53 §12 复测日）
+        assert is_a_share_trading_day(date(2026, 9, 8)) is True
+
+    def test_accepts_datetime(self):
+        assert is_a_share_trading_day(datetime(2026, 9, 5, 10, 0)) is False  # 周六
+        assert is_a_share_trading_day(datetime(2026, 9, 9, 10, 0)) is True   # 周三
+
+
+class TestR183NonTradingDaySkip:
+    """R183 负向断言：非交易日（周末）触发落库不产生新 factor_ic_records 行。"""
+
+    @pytest.mark.asyncio
+    async def test_weekend_default_date_skips(self, ic_db):
+        """默认交易日路径（生产 _ic_persistence_loop）：周末 → 0 行落库。"""
+        tracker = ICTracker()
+        batch = {"technical.ma.sma_5": 0.0321, "technical.rsi.rsi_14": -0.0210}
+        async with ic_db() as db:
+            with patch(
+                "app.factors.ic_tracker._beijing_today",
+                return_value=date(2026, 9, 6),  # 周日
+            ):
+                count = await tracker.save_ic_batch_to_db(db, batch)
+            rows = (await db.execute(select(FactorICRecord))).scalars().all()
+        assert count == 0, "周末默认交易日必须 0 行落库"
+        assert len(rows) == 0, f"周末不得产生 factor_ic_records 行，实际 {len(rows)}"
+
+    @pytest.mark.asyncio
+    async def test_trading_day_default_date_persists(self, ic_db):
+        """对照：交易日默认路径正常落库（校验不误杀生产路径）。"""
+        tracker = ICTracker()
+        batch = {"technical.ma.sma_5": 0.0321}
+        async with ic_db() as db:
+            with patch(
+                "app.factors.ic_tracker._beijing_today",
+                return_value=date(2026, 9, 8),  # 周二交易日
+            ):
+                count = await tracker.save_ic_batch_to_db(db, batch)
+            rows = (await db.execute(select(FactorICRecord))).scalars().all()
+        assert count == 1 and len(rows) == 1
+
+    @pytest.mark.asyncio
+    async def test_explicit_trade_date_not_validated(self, ic_db):
+        """显式注入 trade_date 不校验——历史回填按 K 线日期序列（本身即交易日）落库。"""
+        tracker = ICTracker()
+        async with ic_db() as db:
+            # 周六 2026-09-06 显式注入：仍落库（回填兼容）
+            count = await tracker.save_ic_batch_to_db(
+                db, {"technical.ma.sma_5": 0.0321}, trade_date=date(2026, 9, 6))
+            rows = (await db.execute(select(FactorICRecord))).scalars().all()
+        assert count == 1 and len(rows) == 1
+
+    @pytest.mark.asyncio
+    async def test_monday_after_midnight_utc_offset(self, ic_db):
+        """时区边界：北京时间周一 07:00 = UTC 周日 23:00 —— 北京日期应为周一（交易日）。"""
+        tracker = ICTracker()
+        utc_sun_23 = datetime(2026, 9, 6, 23, 0, tzinfo=timezone.utc)  # UTC 周日 23:00 = 北京周一 07:00
+        assert _beijing_today(utc_sun_23) == date(2026, 9, 7)
+        async with ic_db() as db:
+            with patch(
+                "app.factors.ic_tracker._beijing_today",
+                return_value=date(2026, 9, 7),
+            ):
+                count = await tracker.save_ic_batch_to_db(
+                    db, {"technical.ma.sma_5": 0.0321})
+            rows = (await db.execute(select(FactorICRecord))).scalars().all()
+        assert count == 1 and len(rows) == 1
 
 
 class TestF25SeriesStats:
