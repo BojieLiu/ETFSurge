@@ -13,6 +13,8 @@ export function useLLMStream() {
   const disclaimer = ref('')
   // R49: 首字节前的可见进度事件（phase=calling_model / cache_hit）
   const progress = ref(null)
+  // round53 §9: 多轮会话 id（done.metadata.session_id 透出，组件追问时回传）
+  const sessionId = ref('')
 
   let abortController = null
 
@@ -76,6 +78,8 @@ export function useLLMStream() {
               fullText.value = parsed.full_text || fullText.value
               metadata.value = parsed.metadata || {}
               disclaimer.value = parsed.disclaimer || ''
+              // round53 §9: 会话 id 透出（新会话=新 id / 追问=原 id），组件据此回传
+              sessionId.value = metadata.value.session_id || ''
               streaming.value = false
               return { fullText: fullText.value, metadata: metadata.value, disclaimer: disclaimer.value }
             } else if (event === 'error') {
@@ -115,6 +119,7 @@ export function useLLMStream() {
     metadata,
     disclaimer,
     progress,
+    sessionId,
     start,
     stop,
   }

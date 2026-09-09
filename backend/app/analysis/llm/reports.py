@@ -1146,8 +1146,18 @@ def _build_design_report_prompt(
 
     return "\n".join(lines)
 def _build_advice_stream_prompt(query: str, ctx: dict) -> str:
-    """构建流式投资建议 prompt — 注入市场数据。"""
+    """构建流式投资建议 prompt — 注入市场数据。
+
+    round53 §9: 多轮会话——ctx["chat_history"]（ChatSessionStore.render_history 产物）
+    非空时注入「## 对话历史」槽，当前 query 不重复进历史；空历史不注入。
+    """
     lines = [f"用户提问: {query}", ""]
+
+    # round53 §9: 对话历史槽（多轮追问上下文）
+    chat_history = ctx.get("chat_history") or ""
+    if chat_history:
+        lines.append(chat_history)
+        lines.append("")
 
     regime = ctx.get("market_regime", "")
     if regime:

@@ -87,7 +87,11 @@ def _sse_stream(agent_gen_factory):
                 # Append disclaimer to the final response
                 disclaimer = "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
                 full_text_with_disclaimer = f"{full_text}\n\n---\n*{disclaimer}*"
-                yield f"event: done\ndata: {json.dumps({'full_text': full_text_with_disclaimer, 'metadata': data.get('usage', {}), 'disclaimer': disclaimer})}\n\n"
+                # round53 §9: metadata 透传 session_id（多轮会话契约）
+                metadata = dict(data.get('usage', {}))
+                if data.get('session_id'):
+                    metadata['session_id'] = data['session_id']
+                yield f"event: done\ndata: {json.dumps({'full_text': full_text_with_disclaimer, 'metadata': metadata, 'disclaimer': disclaimer})}\n\n"
             elif event == "error":
                 yield f"event: error\ndata: {json.dumps({'code': 'STREAM_ERROR', 'message': data})}\n\n"
             elif event == "progress":
@@ -259,6 +263,8 @@ class LLMAdviceRequest(BaseModel):
     query: str
     market: str = "A"
     context: dict | None = None
+    # round53 §9: LLM 对话多轮——None=开新会话；追问带上轮 done.metadata.session_id
+    session_id: str | None = None
 
 @router.post("/news-impact")
 async def news_impact(req: NewsImpactRequest):
@@ -399,25 +405,43 @@ async def llm_advice_stream(req: LLMAdviceRequest):
 
     Phase D(1): 新增 market 参数，传递给 build_full_context() 按市场获取数据。
     R49: 上下文采集等重 I/O 延后到首字节（progress）之后在 _build 内完成。
+    round53 §9: 多轮会话——session_id None=新会话；done.metadata 回传 session_id；
+    历史注入 prompt「## 对话历史」槽（最近 10 轮 + 8K token 截断）；
+    本会话市场快照 60s 复用（省 5s+/轮重采集）。
     """
     from ..analysis.llm import _build_advice_stream_prompt
+    from ..services.chat_session import get_chat_store
     from ..services.llm_context import build_full_context
     from ..services.market_data_hub import market_data_hub
 
+    store = get_chat_store()
+
     async def _build():
-        # 使用统一上下文管道（按市场获取数据）
-        ctx = await build_full_context(
-            market_data_hub,
-            market=req.market,
-            include_regime=True,
-            include_sentiment=True,
-            include_indices=True,
-            include_sectors=True,
-            include_news=True,
-            include_portfolio=False,
-            include_fund_flow=True,
-            include_commodities=False,
-        )
+        # ── 会话解析（新会话 / 无效 id 自动重建） ──
+        session_id, history = store.start_or_get(req.session_id)
+        if history:
+            store.append(session_id, {
+                "role": "user", "content": req.query,
+            })
+
+        # 使用统一上下文管道（按市场获取数据）；60s 内同会话复用快照
+        async def _fetch_context():            return await build_full_context(
+                market_data_hub,
+                market=req.market,
+                include_regime=True,
+                include_sentiment=True,
+                include_indices=True,
+                include_sectors=True,
+                include_news=True,
+                include_portfolio=False,
+                include_fund_flow=True,
+                include_commodities=False,
+            )
+
+        if history:
+            ctx = await store.get_market_snapshot(session_id, _fetch_context)
+        else:
+            ctx = await _fetch_context()
 
         # Merge with user-provided context
         user_ctx = dict(req.context or {})
@@ -445,10 +469,39 @@ async def llm_advice_stream(req: LLMAdviceRequest):
         # Sector Phase 5: 注入市场上下文
         user_ctx = _inject_market_context(req.query, user_ctx)
 
+        # round53 §9: 会话历史注入 prompt（空历史不注入槽）
+        user_ctx["chat_history"] = store.render_history(session_id)
+
         prompt = _build_advice_stream_prompt(req.query, user_ctx)
         from ..analysis.registry import get_agent
         agent = get_agent("advice")
-        return run_stream_with_cache(agent, prompt, query=f"advice:{req.query}", data_as_of=None)
+
+        # round53 §9: done 后把 assistant 回复落会话（内存 + SQLite upsert，失败不阻塞）
+        async def _record_reply(full_text: str) -> None:
+            try:
+                store.append(session_id, {"role": "assistant", "content": full_text})
+                from ..database import async_session
+                async with async_session() as db:
+                    await store.persist_session(db, session_id)
+            except Exception as e:
+                logger.warning("[llm-advice] session persist failed: %s", e)
+
+        wrapped = run_stream_with_cache(agent, prompt, query=f"advice:{req.query}", data_as_of=None)
+
+        async def _session_stream():
+            reply = []
+            async for ev in wrapped:
+                if ev.get("event") == "token":
+                    reply.append(ev.get("data", {}).get("token", ""))
+                if ev.get("event") == "done":
+                    full = "".join(reply)
+                    if full:
+                        await _record_reply(full)
+                    # done.data 塞 session_id（_sse_stream 会透传进 metadata）
+                    ev.setdefault("data", {})["session_id"] = session_id
+                yield ev
+
+        return _session_stream()
 
     return _sse_stream(_build)
 

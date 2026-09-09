@@ -73,85 +73,16 @@ if _PROFILE_WARMUP:
 # R170 (round52 §4.3 方案A): 预热 sequence 分段计时——budget 告警与 timing json 同口径。
 # round52 §4.1: budget 按 _seq_elapsed 全序计时报 39.8s，warmup_timing.json 只记
 # 6 records（init_db/redis_init/load_llm_excluded/warmup_market_cache/warmup_global_indices/
-# warmup_etf_cache）合计 7.46s——instruments/design_data/sector 三段未入账，~32s 差额
-# 无归属、告警无法归因。此处为每个 sequence 任务记录实测分段，告警直接点名最慢段
-# 与未入账段。分段**不并入** profiler.records 之和（那会改动 A01 门禁判据口径）。
-_WARMUP_SEQUENCE_LABELS: tuple[str, ...] = (
-    "market_cache",
-    "etf_cache",
-    "global_indices",
-    "sector_cache",
-    "instruments_sync",
-    "indices_meta_sync",
-    "design_data",
+# R170 (round52): warmup 分段/预算告警纯函数已迁 app/tasks/startup.py（P2-3 D6），
+# 此处 re-export 保持既有测试导入面（from app.main import _run_warmup_sequence 等）。
+from .tasks.startup import (  # noqa: F401
+    _WARMUP_SEGMENTS,
+    _WARMUP_SEQUENCE_LABELS,
+    _format_warmup_budget_warning,
+    _record_warmup_segment,
+    _run_warmup_sequence,
+    _warmup_uncovered_segments,
 )
-_WARMUP_SEGMENTS: list[dict[str, object]] = []
-
-
-def _record_warmup_segment(label: str, duration_s: float) -> None:
-    """记录一个预热 sequence 分段的实测耗时（供 budget 告警归因）。"""
-    _WARMUP_SEGMENTS.append({"label": label, "duration_ms": round(duration_s * 1000.0, 2)})
-
-
-def _warmup_uncovered_segments(
-    expected: tuple[str, ...] | list[str] | None = None,
-) -> list[str]:
-    """返回「在 sequence 中但未留下分段计时」的段名（归属缺口自曝）。"""
-    _expected = tuple(expected) if expected is not None else _WARMUP_SEQUENCE_LABELS
-    _covered = {str(s["label"]) for s in _WARMUP_SEGMENTS}
-    return [lb for lb in _expected if lb not in _covered]
-
-
-def _format_warmup_budget_warning(
-    elapsed: float,
-    budget: float,
-    segments: list[dict[str, object]],
-    uncovered: list[str],
-) -> str:
-    """生成带归因信息的预热预算日志文案（纯函数，可单测）。"""
-    def _ms(s: dict[str, object]) -> float:
-        v = s.get("duration_ms")
-        return float(v) if isinstance(v, (int, float)) else 0.0
-
-    _top = sorted(segments, key=_ms, reverse=True)[:3]
-    _parts: list[str] = []
-    if _top:
-        _parts.append(
-            "分段 top3: "
-            + "/".join(f"{s.get('label', '?')} {_ms(s) / 1000.0:.1f}s" for s in _top)
-        )
-    if uncovered:
-        _parts.append("未入 timing 段: " + ",".join(uncovered))
-    _attr = f"（{'; '.join(_parts)}）" if _parts else "（无分段计时数据）"
-    if elapsed > budget:
-        return (
-            f"[warmup-budget] 预热总耗时 {elapsed:.1f}s 超过预算阈值 {budget:.1f}s，"
-            f"可能存在回归{_attr}——见 logs/warmup_timing.json（PROFILE_WARMUP=1）"
-        )
-    return f"[warmup-budget] 预热总耗时 {elapsed:.1f}s（阈值 {budget:.1f}s，达标）"
-
-
-async def _run_warmup_sequence(tasks: list) -> None:
-    """O2 (round7 §7 P2): 预热任务串行执行——控并发峰值。
-
-    旧实现 4 个重 IO 预热任务同时 create_task，各自内部并发 run_sync + 全量
-    扫描 + akshare 分页叠加 → 预热高峰 shared_executor 64/64 饱和（P2 复现）。
-    串行执行（前一个完成后启动下一个），内部并发上限不变；单个任务异常
-    不阻断后续任务（预热失败静默，启动不阻塞）。
-
-    R170 (round52): tasks 元素可为裸协程（向后兼容）或 `(label, coro)`；带 label
-    时记录分段耗时（无论任务成功/失败/超时——失败段同样要可归因）。
-    """
-    for _item in tasks:
-        _label, _t = _item if isinstance(_item, tuple) else ("", _item)
-        _t0 = time.time()
-        try:
-            await _t
-        except Exception as e:  # noqa: BLE001
-            logger.warning("[lifespan] warmup sequence step failed (non-fatal): %s", e)
-        finally:
-            if _label:
-                _record_warmup_segment(_label, time.time() - _t0)
 
 
 # R58 (round28): IC 回填「K 线缓存未就绪」重试逻辑——提取为模块级可测函数。
@@ -395,6 +326,14 @@ async def lifespan(app: FastAPI):
             "[lifespan] LLM exclusions loaded: %d/%d (DB keys scanned=%d)",
             _loaded, _loaded, len(_db_keys),
         )
+
+    # round53 §9 阶段2: 启动恢复 24h 内 LLM 对话会话到内存 L1（惰性过期删旧行）
+    with warmup_timer("load_chat_sessions", "init", "Restore LLM chat sessions"):
+        from .database import async_session as _chat_async_session
+        from .services.chat_session import get_chat_store as _get_chat_store
+        async with _chat_async_session() as _cs_db:
+            _chat_restored = await _get_chat_store().load_persisted(_cs_db, max_age_hours=24)
+        logger.info("[lifespan] chat sessions restored: %d", len(_chat_restored))
 
     # Pre-import heavy modules to avoid blocking the event loop on first use
     logger.info("[lifespan] Pre-loading heavy modules (strategy_design, analysis)...")

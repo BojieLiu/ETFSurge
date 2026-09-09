@@ -2,32 +2,46 @@
   <section class="section-card">
     <div class="section-header">
       <h2 class="section-title">💬 AI 投资顾问</h2>
-      <p class="section-desc">向 AI 提问获取投资建议，结合实时行情与组合上下文</p>
+      <p class="section-desc">向 AI 提问获取投资建议，结合实时行情与组合上下文，支持多轮追问</p>
     </div>
 
     <div class="card">
       <div class="card-body">
+        <div class="chat-scroll" ref="chatScrollRef">
+          <!-- round53 §9: 消息气泡列表（用户右灰底 / 助手左 brand 左条） -->
+          <div v-for="(m, i) in messages" :key="i" class="chat-row" :class="m.role">
+            <div class="chat-bubble" :class="m.role" v-html="renderMarkdown(m.content)"></div>
+          </div>
+          <!-- 流式中的助手消息（跟随 token 追加） -->
+          <div v-if="loading && streamingText" class="chat-row assistant">
+            <div class="chat-bubble assistant streaming" v-html="renderMarkdown(streamingText)"></div>
+          </div>
+        </div>
+
         <div class="input-row">
           <input
             type="text"
             v-model="query"
             placeholder="输入您的投资问题，如：当前市场风格偏向成长还是价值？是否该调仓？"
             class="text-input"
+            :disabled="loading"
             @keydown.enter="send"
           />
-          <button class="btn-primary" @click="send" :disabled="loading">
-            {{ loading ? '思考中...' : '🤖 发送提问' }}
+          <button class="btn-primary" @click="send" :disabled="loading || !query.trim()">
+            {{ loading ? '思考中...' : (sessionId ? '追加提问' : '🤖 发送提问') }}
+          </button>
+          <button v-if="sessionId" class="btn-new-chat" @click="resetChat" :disabled="loading" title="开始新会话">
+            新会话
           </button>
         </div>
 
         <div v-if="error" class="error">{{ error }}</div>
-        <div v-if="progress && !response" class="stream-progress">
+        <div v-if="progress && !loading" class="stream-progress">
           <div class="progress-bar"><div class="progress-fill"></div></div>
           <span class="progress-text">{{ progress.message }}</span>
         </div>
-        <div v-if="response" class="response" v-html="renderMarkdown(response)"></div>
-        <div v-if="!response && !loading && !error && !progress" class="hint">
-          💡 输入上方问题，AI 将结合实时行情与您的组合给出建议
+        <div v-if="!messages.length && !loading && !error && !progress" class="hint">
+          💡 输入上方问题，AI 将结合实时行情与您的组合给出建议；回答后可继续追问
         </div>
       </div>
     </div>
@@ -35,42 +49,68 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { ref, watch, nextTick } from 'vue'
 import { renderMarkdown } from '../../utils/markdown'
 import { useLLMStream } from '../../composables/useLLMStream'
 
 const props = defineProps({ marketTab: { type: String, default: 'A' } })
 
 const query = ref('')
-const response = ref('')
+const messages = ref([])          // [{role: 'user'|'assistant', content}]
+const streamingText = ref('')
 const loading = ref(false)
 const error = ref('')
-const { start: startStream, stop: stopStream, progress } = useLLMStream()
+const chatScrollRef = ref(null)
+const { start: startStream, stop: stopStream, progress, sessionId } = useLLMStream()
+
+function _scrollBottom() {
+  nextTick(() => {
+    if (chatScrollRef.value) chatScrollRef.value.scrollTop = chatScrollRef.value.scrollHeight
+  })
+}
 
 async function send() {
   const q = query.value.trim()
   if (!q || loading.value) return
   loading.value = true
-  response.value = ''
   error.value = ''
+  streamingText.value = ''
+  messages.value.push({ role: 'user', content: q })
+  query.value = ''
+  _scrollBottom()
   try {
-    await startStream('/llm-advice/stream', { query: q, market: props.marketTab }, (token) => {
-      response.value += token
+    // round53 §9: session_id 透传——首轮 ''（后端开新会话），追问带上轮 id
+    const body = { query: q, market: props.marketTab }
+    if (sessionId.value) body.session_id = sessionId.value
+    await startStream('/llm-advice/stream', body, (token) => {
+      streamingText.value += token
+      _scrollBottom()
     })
+    // done 后固化助手消息（metadata.session_id 在 onDone 由 composable 保存）
+    if (streamingText.value) {
+      messages.value.push({ role: 'assistant', content: streamingText.value })
+      streamingText.value = ''
+    }
   } catch (e) {
     error.value = '提问失败：' + (e?.message || '网络错误')
   } finally {
     loading.value = false
+    _scrollBottom()
   }
 }
-// R5: 市场切换重置——A→US 后旧市场的投顾回答/输入不应残留（交互优化）
-// O29 (round7 §7 P29): 补 query 清空——旧实现只清回答/错误，输入框残留
-// A 股问题切到美股后语义错乱（注释意图 vs 实现缺失）。
-watch(() => props.marketTab, () => {
+
+function resetChat() {
   stopStream()
-  response.value = ''
+  messages.value = []
+  streamingText.value = ''
+  sessionId.value = ''
   error.value = ''
-  loading.value = false
+}
+// R5: 市场切换重置——A→US 后旧市场的投顾回答/输入不应残留（交互优化）
+// O29 (round7 §7 P29): 补 query 清空。
+// round53 §9: 市场切换同时开新会话（跨市场上下文不复用）。
+watch(() => props.marketTab, () => {
+  resetChat()
   query.value = ''
 })
 
@@ -118,4 +158,52 @@ watch(() => props.marketTab, () => {
 @keyframes progress-indeterminate { 0% { margin-left: -40%; } 100% { margin-left: 100%; } }
 .response { margin-top: var(--space-4); line-height: 1.8; }
 .hint { margin-top: var(--space-4); padding: var(--space-4); text-align: center; color: var(--color-text-secondary); font-size: var(--font-size-sm); }
+
+/* ── round53 §9: 多轮对话气泡 ── */
+.chat-scroll {
+  max-height: 420px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  padding-right: var(--space-1);
+}
+.chat-row { display: flex; }
+.chat-row.user { justify-content: flex-end; }
+.chat-row.assistant { justify-content: flex-start; }
+.chat-bubble {
+  max-width: 85%;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-lg);
+  font-size: var(--font-size-sm);
+  line-height: 1.75;
+  word-break: break-word;
+}
+.chat-bubble.user {
+  background: var(--color-surface-tertiary);
+  color: var(--color-text-primary);
+  border-bottom-right-radius: var(--radius-sm);
+}
+.chat-bubble.assistant {
+  background: var(--color-surface-primary);
+  border: 1px solid var(--color-border-light);
+  border-left: 3px solid var(--color-brand-500);
+  color: var(--color-text-primary);
+  border-bottom-left-radius: var(--radius-sm);
+}
+.chat-bubble.streaming { opacity: 0.85; }
+.btn-new-chat {
+  padding: var(--space-2) var(--space-3);
+  font: var(--text-body);
+  color: var(--color-text-secondary);
+  background: var(--color-surface-tertiary);
+  border: 1px solid var(--color-border-medium);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--transition-fast);
+}
+.btn-new-chat:hover { background: var(--color-surface-hover); }
+.btn-new-chat:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>
