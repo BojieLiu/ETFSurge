@@ -59,17 +59,21 @@ class TestClassifyChanges:
 
 class TestSelectE2eModules:
     def test_news_router_narrow(self):
-        """改 routers/news.py → 只跑 news, 5xx, encoding（非全量）。"""
+        """改 routers/news.py → 只跑 news, 5xx（非全量）。
+
+        P1-3 第二批下沉: encoding/fundamentals/task 模块已迁 pytest
+        （test_e2e_sink_batch1.py），E2E_MODULE_MAP 同步移除引用。
+        """
         assert patrol.select_e2e_modules(["backend/app/routers/news.py"]) == [
-            "5xx", "encoding", "news",
+            "5xx", "news",
         ]
 
     def test_market_router_domain(self):
-        """改 routers/market.py → market 域 12 模块。"""
+        """改 routers/market.py → market 域 10 模块（P1-3 下沉后）。"""
         mods = patrol.select_e2e_modules(["backend/app/routers/market.py"])
         assert set(mods) == {
-            "market", "search", "sectors", "indicator-quality", "fundamentals",
-            "db-integrity", "encoding", "hk-market", "us-market", "5xx",
+            "market", "search", "sectors", "indicator-quality",
+            "db-integrity", "hk-market", "us-market", "5xx",
             "round19-boundary", "quality",
         }
 
@@ -124,8 +128,8 @@ class TestPlanLayers:
             assert expected in layers, f"missing {expected}"
         assert "L4-purity" not in layers
         assert set(plan["e2e_modules"]) == {
-            "market", "search", "sectors", "indicator-quality", "fundamentals",
-            "db-integrity", "encoding", "hk-market", "us-market", "5xx",
+            "market", "search", "sectors", "indicator-quality",
+            "db-integrity", "hk-market", "us-market", "5xx",
             "round19-boundary", "quality",
         }
 

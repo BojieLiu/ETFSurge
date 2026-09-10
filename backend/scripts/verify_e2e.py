@@ -2335,27 +2335,6 @@ def section_llm_import():
         check("LLM 健康端点连通性", False, f"Error: {e}")
 
 
-def section_task_status():
-    """P3.2: Task status assertion."""
-    section("任务状态检查")
-    try:
-        # /portfolio/designs/history 端点不存在（被 /designs?limit= 取代，旧路径
-        # 会落入 /designs/{design_id} 路由 → 422）——修正为真实端点
-        r = requests.get(f"{BASE}/api/v1/portfolio/designs", params={"limit": 5}, timeout=10)
-        if r.status_code == 200:
-            data = r.json()
-            if isinstance(data, list):
-                completed = [d for d in data if isinstance(d, dict) and d.get("status") in ("completed", "success")]
-                check("设计列表有 completed 记录", len(completed) > 0,
-                      f"{len(completed)}/{len(data)} completed" if data else "empty")
-            else:
-                check("设计历史端点", True, "response OK")
-        else:
-            check("设计历史端点", False, f"HTTP {r.status_code}")
-    except Exception as e:
-        check("任务状态检查", False, f"Error: {e}")
-
-
 def section_task_persistence():
     """Z27: 任务持久化 — POST /design-async → 轮询至终态 → 断言契约字段 + record_id 可关联 /designs/{id}。"""
     section("任务持久化 (Z27)")
@@ -2511,42 +2490,6 @@ def section_us_market():
             check(label, False, str(e))
 
 
-def section_fundamentals():
-    """Z16/Z15/C5: Fundamentals — 200 + symbol 存在 + daily 为 list；500/异常一律 FAIL。"""
-    section("基本面数据")
-    try:
-        r = requests.get(f"{BASE}/api/v1/market/fundamentals/510300", timeout=10)
-        if r.status_code != 200:
-            check("基本面端点 (510300)", False, f"HTTP {r.status_code}")
-            return
-        check("基本面端点 (510300)", True, f"HTTP {r.status_code}")
-        data = r.json()
-        check("基本面 symbol 字段存在",
-              isinstance(data, dict) and bool(data.get("symbol")),
-              f"symbol={data.get('symbol') if isinstance(data, dict) else 'non-dict'}")
-        check("基本面 daily 为列表",
-              isinstance(data, dict) and isinstance(data.get("daily"), list),
-              f"daily type={type(data.get('daily')).__name__ if isinstance(data, dict) else 'N/A'}")
-    except Exception as e:
-        check("基本面端点 (510300)", False, str(e))
-
-
-def section_encoding():
-    """P3.5: Encoding validation."""
-    section("编码验证")
-    try:
-        for path, label in [("/api/v1/market/realtime/510050", "A股行情"),
-                              ("/api/v1/portfolio/etfs", "组合 ETF 列表")]:
-            r = requests.get(f"{BASE}{path}", timeout=10)
-            if r.status_code == 200:
-                has_bad = "ufffd" in r.text[:2000]
-                check(f"编码验证 ({label})", not has_bad, "UTF-8 正常" if not has_bad else "含乱码")
-            else:
-                check(f"编码验证 ({label})", True, f"HTTP {r.status_code}")
-    except Exception as e:
-        check("编码验证", False, f"Error: {e}")
-
-
 def section_factor_ic():
     """P3.7: Factor IC data quality check."""
     section("因子 IC 检查")
@@ -2575,12 +2518,9 @@ def section_factor_ic():
 
 # Register Phase 4 modules
 MODULES["llm"] = section_llm_import
-MODULES["task"] = section_task_status
 MODULES["task-persistence"] = section_task_persistence
 MODULES["search"] = section_search
-MODULES["encoding"] = section_encoding
 MODULES["factor_ic"] = section_factor_ic
-MODULES["fundamentals"] = section_fundamentals
 MODULES["hk-market"] = section_hk_market
 MODULES["us-market"] = section_us_market
 

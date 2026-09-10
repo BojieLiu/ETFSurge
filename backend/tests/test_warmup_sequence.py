@@ -194,17 +194,35 @@ class TestR56WarmupGlobalIndicesCardinality:
             "独立 create_task(_warmup_global_indices()) 应已删除（R56）"
 
     def test_sequence_contains_global_indices_once(self):
-        """sequence 内 `_warmup_global_indices()` 恰好调用一次（基数断言）。"""
-        src = open(main_mod.__file__, encoding="utf-8").read()
-        # R170 (round52): sequence 元素改为 `(label, coro)` 形态，调用点不再带裸逗号；
-        # 口径改为「调用次数 = 总出现次数 − 定义行」，仍可抓双重执行回归。
-        count = src.count("_warmup_global_indices()") - src.count("async def _warmup_global_indices()")
-        assert count == 1, f"sequence 内 _warmup_global_indices() 应为 1 次，实际 {count}（双重执行回归）"
+        """sequence 内 `_warmup_global_indices()` 恰好调用一次（基数断言）。
+
+        P2-3 第二批: 守卫指向 tasks/startup.py（warmup 协程族新家）。
+        """
+        import os
+        import app.tasks.startup as startup_mod
+        src = open(
+            os.path.join(os.path.dirname(main_mod.__file__), "tasks", "startup.py"),
+            encoding="utf-8",
+        ).read()
+        # R170 (round52): sequence 元素改为 `(label, coro)` 形态；P2-3 第二批迁移后
+        # 调用点带 state 参数——口径 = 「带 state 出现次数 − 定义行次数」
+        # （定义行签名同为 `_warmup_global_indices(state)`，需扣除）。
+        total = src.count("_warmup_global_indices(state)")
+        defs = src.count("async def _warmup_global_indices(state)")
+        count = total - defs
+        assert count == 1, f"sequence 内 _warmup_global_indices(state) 调用应为 1 次，实际 {count}（双重执行回归）"
 
     def test_warmup_sequence_has_design_data_step(self):
-        """R59④: 预热 sequence 包含设计数据预热步骤（K 线缓存预热）。"""
-        src = open(main_mod.__file__, encoding="utf-8").read()
-        assert "_warmup_design_data()" in src, "预热 sequence 应含设计数据预热（R59④）"
+        """R59④: 预热 sequence 包含设计数据预热步骤（K 线缓存预热）。
+
+        P2-3 第二批: 守卫指向 tasks/startup.py。
+        """
+        import os
+        src = open(
+            os.path.join(os.path.dirname(main_mod.__file__), "tasks", "startup.py"),
+            encoding="utf-8",
+        ).read()
+        assert "_warmup_design_data(state)" in src, "预热 sequence 应含设计数据预热（R59④）"
 
     def test_design_warmup_awaits_market_warmup(self):
         """R59④ 修复: 设计数据预热必须先等行情缓存预热任务完成（防 pool-empty 竞态跳过）。
@@ -213,8 +231,14 @@ class TestR56WarmupGlobalIndicesCardinality:
         旧 _warmup_design_data 直接读 pool → 必然先于 pool 填充执行 → 跳过
         （日志「design-data warmup skipped: pool empty」）→ R58 IC 回填拿不到
         K 线、R59③ 永不落盘。修复须 await _market_warmup_task + 轮询 pool。
+
+        P2-3 第二批: 守卫指向 tasks/startup.py（_do_design_warmup 新家）。
         """
-        src = open(main_mod.__file__, encoding="utf-8").read()
+        import os
+        src = open(
+            os.path.join(os.path.dirname(main_mod.__file__), "tasks", "startup.py"),
+            encoding="utf-8",
+        ).read()
         assert "_market_warmup_task" in src, \
             "设计数据预热必须等待行情预热任务（R59④ 防竞态）"
         assert "asyncio.shield(_mkt_task)" in src, \

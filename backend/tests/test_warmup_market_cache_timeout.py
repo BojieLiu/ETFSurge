@@ -76,7 +76,9 @@ def test_warmup_market_cache_timeout_value_in_main():
     source-of-truth 测试验证两阶段 timeout 均符合设计 (防后人改回 10s 或省略 slow 阶段).
     """
     from pathlib import Path
-    main_py = Path(__file__).resolve().parent.parent / "app" / "main.py"
+    # P2-3 第二批（round53 遗留批）: _warmup_market_cache 迁 tasks/startup.py——
+    # 源码守卫目标同步指向新文件。
+    main_py = Path(__file__).resolve().parent.parent / "app" / "tasks" / "startup.py"
     text = main_py.read_text(encoding="utf-8", errors="replace")
     import re
     # fast 阶段: phase="fast" + timeout=5

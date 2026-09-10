@@ -104,12 +104,14 @@ BACKEND_DEPENDENT_LAYERS = ("L2-e2e", "L2-alloc-invariants", "L2-llm-exclusion",
 # 值为 None 表示「全量」（不传 --module）。匹配按序，精确优先，兜底全量。
 E2E_MODULE_MAP = [
     # 表 A：路由层（精确）
+    # P1-3 第二批下沉: fundamentals/encoding 模块已迁 pytest（test_e2e_sink_batch1.py），
+    # verify_e2e MODULES 不再注册——此处同步移除引用。
     ("backend/app/routers/market.py", ("market", "search", "sectors", "indicator-quality",
-                                       "fundamentals", "db-integrity", "encoding", "hk-market",
+                                       "db-integrity", "hk-market",
                                        "us-market", "5xx", "round19-boundary", "quality")),
-    ("backend/app/routers/portfolio.py", ("portfolio", "resilience", "task", "task-persistence",
+    ("backend/app/routers/portfolio.py", ("portfolio", "resilience", "task-persistence",
                                           "design-quality", "diversity", "round19-boundary")),
-    ("backend/app/routers/news.py", ("news", "5xx", "encoding")),
+    ("backend/app/routers/news.py", ("news", "5xx")),
     ("backend/app/routers/analysis.py", ("analysis", "llm")),
     ("backend/app/routers/factors.py", ("factors", "factor-integrity", "factor-thresholds",
                                         "factor_ic", "zscore")),
@@ -117,13 +119,13 @@ E2E_MODULE_MAP = [
     ("backend/app/routers/system.py", ("health",)),
     ("backend/app/routers/ws.py", ("ws", "nginx-proxy")),
     # 表 B：共享层（宽集/全量）
-    ("backend/app/services/portfolio_service.py", ("portfolio", "resilience", "task",
-                                                   "task-persistence", "design-quality",
+    ("backend/app/services/portfolio_service.py", ("portfolio", "resilience", "task-persistence",
+                                                   "design-quality",
                                                    "diversity", "round19-boundary")),
-    ("backend/app/services/portfolio/*", ("portfolio", "resilience", "task", "task-persistence",
+    ("backend/app/services/portfolio/*", ("portfolio", "resilience", "task-persistence",
                                           "design-quality", "diversity", "round19-boundary")),
     ("backend/app/services/strategy_design.py", ("portfolio", "design-quality", "diversity",
-                                                 "task", "task-persistence", "resilience")),
+                                                 "task-persistence", "resilience")),
     ("backend/app/services/llm_context.py", ("analysis", "llm")),
     ("backend/app/services/market_service.py", None),
     ("backend/app/services/market_data_hub.py", None),

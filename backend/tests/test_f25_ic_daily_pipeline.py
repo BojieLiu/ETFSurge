@@ -22,6 +22,7 @@ F25 设计要点（契约 api-contracts/factors/active.md）:
 - 同屏不存在两个相差 5× 的平均|IC|（由既有 T10 测试覆盖）。
 """
 import random
+import time as _time
 from datetime import date, datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -331,3 +332,108 @@ class TestF25Migration:
                 text("SELECT COUNT(*) FROM factor_ic_records WHERE trade_date IS NULL")
             )).scalar_one()
         assert n == 1
+
+
+# ═══ 节假日交易日历（round53 遗留批：从 test_market_calendar_holiday.py 并入，T4 约定）═══
+class TestHolidayCalendar:
+    @pytest.fixture(autouse=True)
+    def _fresh_cal_cache(self):
+        """每个用例独立日历缓存（防模块级缓存跨用例互涉——xdist 同 worker 下
+        前一用例的拉取结果污染后一用例的 mock 假设）。"""
+        import app.core.market_calendar as mc
+        saved = mc._HOLIDAY_CAL_CACHE
+        mc._HOLIDAY_CAL_CACHE = None
+        yield
+        mc._HOLIDAY_CAL_CACHE = saved
+
+    def test_fetch_trade_dates_parses_dates(self):
+        """_fetch_trade_dates 解析 date 元组（mock akshare，不触网——
+        AGENTS.md「外部网络必须 mock」；真实拉取行为由生产代码路径覆盖）。"""
+        import datetime as _dt
+        import app.core.market_calendar as mc
+
+        class _FakeDF:
+            empty = False
+            columns = ["trade_date"]
+
+            def __getitem__(self, key):
+                assert key == "trade_date"
+                return [date(2026, 10, 8), "2026-10-09"]
+
+        with patch("akshare.tool_trade_date_hist_sina", return_value=_FakeDF()):
+            cal = mc._fetch_trade_dates()
+        assert cal is not None
+        assert date(2026, 10, 8) in cal
+        assert date(2026, 10, 9) in cal  # str 路径解析
+
+    def test_fetch_failure_returns_none(self):
+        """负向：akshare 拉取抛异常 → _fetch_trade_dates 返 None（不炸调用方）。"""
+        import app.core.market_calendar as mc
+        with patch("akshare.tool_trade_date_hist_sina", side_effect=RuntimeError("net down")):
+            assert mc._fetch_trade_dates() is None
+
+    def test_national_day_is_not_trading_day(self):
+        """2026-10-01 国庆 → False（mock 日历：不在集合）。"""
+        fake = (date(2026, 9, 30), date(2026, 10, 8))
+        with patch("app.core.market_calendar._holiday_calendar", return_value=fake):
+            assert is_a_share_trading_day(date(2026, 10, 1)) is False
+
+    def test_calendar_open_day_after_holiday_is_trading_day(self):
+        """日历内真实开市日 2026-10-08（节后首日，周四）→ True（对照）。"""
+        fake = (date(2026, 10, 8), date(2026, 10, 9))
+        with patch("app.core.market_calendar._holiday_calendar", return_value=fake):
+            assert is_a_share_trading_day(date(2026, 10, 8)) is True
+
+    def test_calendar_is_authoritative_exchange_days(self):
+        """日历口径 = 交易所实际开市日（含未来真实调休开市日——若某周六开市，
+        日历是唯一能答对的机制；纯周末判定在调休场景会误杀 IC 落库）。
+
+        mock 日历对齐实测数据（2026-09-09 tool_trade_date_hist_sina：
+        2026-10-01..10-07 国庆休市、10-08 恢复开市）。
+        """
+        fake = (date(2026, 10, 8), date(2026, 10, 9))
+        with patch("app.core.market_calendar._holiday_calendar", return_value=fake):
+            assert is_a_share_trading_day(date(2026, 10, 1)) is False
+            assert is_a_share_trading_day(date(2026, 10, 8)) is True
+
+    def test_regular_saturday_still_false(self):
+        """普通周六 2026-10-17 → False（日历不含 → 仍正确）。"""
+        fake = (date(2026, 10, 8), date(2026, 10, 9))
+        with patch("app.core.market_calendar._holiday_calendar", return_value=fake):
+            assert is_a_share_trading_day(date(2026, 10, 17)) is False
+
+    def test_calendar_failure_degrades_to_weekend(self):
+        """负向：日历拉取失败 → 降级周末判定，不抛异常。
+
+        降级模式下周六 → False（可接受的诚实降级——误杀一天 IC 比让 IC 落库
+        链路崩溃危害小）；普通工作日照常 True。
+        """
+        with patch("app.core.market_calendar._holiday_calendar", return_value=None):
+            assert is_a_share_trading_day(date(2026, 10, 10)) is False  # 周六
+            assert is_a_share_trading_day(date(2026, 10, 12)) is True   # 周一
+
+    def test_calendar_cached_second_call_no_refetch(self):
+        """缓存生效：日历已加载时二次调用不重拉（mock 计数）。"""
+        import app.core.market_calendar as mc
+        mc._HOLIDAY_CAL_CACHE = (_time.time(), (date(2026, 10, 8),))
+        calls = {"n": 0}
+
+        def _counting_fetch():
+            calls["n"] += 1
+            return (date(2026, 10, 9),)
+
+        with patch.object(mc, "_fetch_trade_dates", _counting_fetch):
+            mc._holiday_calendar()
+            mc._holiday_calendar()
+        assert calls["n"] == 0, "缓存有效期内二次调用不得重拉"
+
+    def test_weekday_beyond_calendar_horizon_uses_weekend_fallback(self):
+        """日历覆盖范围外（如 2027 年底之后）的工作日：日历不含 → 回落周末判定。
+
+        语义：日历覆盖期有限（如至 2026-12-31）；超出覆盖期的日期不能因为
+        「不在日历里」被误判 False——必须在日历最晚日期之后回落周末判定。
+        """
+        fake = (date(2026, 10, 8), date(2026, 12, 31))
+        with patch("app.core.market_calendar._holiday_calendar", return_value=fake):
+            assert is_a_share_trading_day(date(2027, 6, 15)) is True   # 周二
+            assert is_a_share_trading_day(date(2027, 6, 19)) is False  # 周六
