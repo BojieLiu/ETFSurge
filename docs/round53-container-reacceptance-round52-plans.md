@@ -596,6 +596,17 @@ Bad Gateway（round53 §2.1 同型教训，清代理复跑确认）。
 allocation_engine 拆分（P1-5，单独 round）、R185 方案 C 徽章（P3）、
 is_a_share_trading_day 节假日外部日历接入。
 
+**遗留批实施记录（2026-09-09，commit d976508 已 push）**：上述 5 项中 3 项闭环——
+① P1-3 第二批下沉（verify_e2e 2693→2633 行，删 task_status/fundamentals/encoding
+三 section + patrol E2E_MODULE_MAP 同步 + 3 断言更新）；② 节假日外部日历接入
+（`market_calendar.is_a_share_trading_day` 三级判定：akshare tool_trade_date_hist_sina
+24h 缓存 → 失败降级周末 WARN → 覆盖期外回落周末；9 用例 mock 化并入
+test_f25_ic_daily_pipeline.py，T4 约定基线守恒 320）；③ P2-3 lifespan 协程族迁移
+（10 个协程迁 tasks/startup.py 参数化 state，main.py 1289→980 行；R56/R59④/R88
+源码级守卫同步指向新文件）。全量复验 3216 passed / 4 环境性 FAIL（同基线归类）；
+mypy 145 files clean；tests_ok_marker files_hash=feb831651dc5。
+仍未闭环：P1-5 allocation_engine 拆分（单独 round）、R185 方案 C 徽章（P3 暂缓）。
+
 ---
 
 ## 13. 事件插曲：周一盘中启动静默退出（2026-09-07 10:59，待下轮诊断）
