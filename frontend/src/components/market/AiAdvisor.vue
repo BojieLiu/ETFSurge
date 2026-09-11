@@ -193,6 +193,83 @@ watch(() => props.marketTab, () => {
   border-bottom-left-radius: var(--radius-sm);
 }
 .chat-bubble.streaming { opacity: 0.85; }
+/* ── 气泡内 markdown 子元素排版（round53 §9 复盘）──
+   全局 markdown 样式（theme.css）只覆盖 .result/.response/.report/.markdown-body，
+   chat 气泡（.chat-bubble）不在清单 → LLM 输出的 table、标题、列表、代码块裸奔：
+   表格无边框撑爆气泡、标题突兀、段距过大、气泡底部大空隙。
+   v-html 注入的 DOM 无 scoped 属性，必须 :deep() 穿透；紧凑参数适配 sm 字号气泡。 */
+.chat-bubble :deep(p) { margin: 0 0 0.5em; }
+.chat-bubble :deep(p:last-child) { margin-bottom: 0; }
+.chat-bubble :deep(h1),
+.chat-bubble :deep(h2),
+.chat-bubble :deep(h3),
+.chat-bubble :deep(h4) {
+  margin: 0.9em 0 0.4em;
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.4;
+}
+.chat-bubble :deep(h1) { font-size: 1.15em; }
+.chat-bubble :deep(h2) { font-size: 1.1em; }
+.chat-bubble :deep(h3),
+.chat-bubble :deep(h4) { font-size: 1.05em; }
+.chat-bubble :deep(h1:first-child),
+.chat-bubble :deep(h2:first-child),
+.chat-bubble :deep(h3:first-child),
+.chat-bubble :deep(h4:first-child) { margin-top: 0; }
+.chat-bubble :deep(ul),
+.chat-bubble :deep(ol) { margin: 0.3em 0 0.5em; padding-left: 1.4em; }
+.chat-bubble :deep(li) { margin: 0.15em 0; }
+.chat-bubble :deep(li > p) { margin: 0; }
+.chat-bubble :deep(ul:last-child),
+.chat-bubble :deep(ol:last-child) { margin-bottom: 0; }
+.chat-bubble :deep(table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  font-size: 0.95em;
+  display: block;
+  overflow-x: auto;
+}
+.chat-bubble :deep(th),
+.chat-bubble :deep(td) {
+  padding: 4px 8px;
+  border: 1px solid var(--color-border-light);
+  text-align: left;
+  vertical-align: top;
+  word-break: break-word;
+}
+.chat-bubble :deep(th) {
+  background: var(--color-surface-secondary);
+  font-weight: var(--font-weight-semibold);
+  white-space: nowrap;
+}
+.chat-bubble :deep(tr:nth-child(even) td) { background: rgba(0, 0, 0, 0.02); }
+.chat-bubble :deep(code) {
+  background: var(--color-surface-tertiary);
+  padding: 0.1em 0.35em;
+  border-radius: var(--radius-sm);
+  font-size: 0.92em;
+}
+.chat-bubble :deep(pre) {
+  background: var(--color-surface-tertiary);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  margin: 0.5em 0;
+}
+.chat-bubble :deep(pre code) { background: transparent; padding: 0; }
+.chat-bubble :deep(hr) {
+  border: none;
+  border-top: 1px solid var(--color-border-light);
+  margin: 0.8em 0;
+}
+.chat-bubble :deep(blockquote) {
+  margin: 0.5em 0;
+  padding: 0.2em 0.8em;
+  border-left: 3px solid var(--color-border-medium);
+  color: var(--color-text-secondary);
+}
+.chat-bubble :deep(strong) { font-weight: var(--font-weight-semibold); }
 .btn-new-chat {
   padding: var(--space-2) var(--space-3);
   font: var(--text-body);
