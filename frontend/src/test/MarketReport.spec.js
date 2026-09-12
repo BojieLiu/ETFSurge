@@ -10,7 +10,10 @@ vi.mock('../utils/markdown', () => ({ renderMarkdown: (s) => s }))
 const startMock = vi.fn()
 const stopMock = vi.fn()
 vi.mock('../composables/useLLMStream', () => ({
-  useLLMStream: () => ({ start: startMock, stop: stopMock }),
+  useLLMStream: () => ({
+    start: startMock, stop: stopMock,
+    sessionId: { value: '' }, metadata: { value: null },
+  }),
 }))
 
 import MarketReport from '../components/market/MarketReport.vue'

@@ -36,6 +36,7 @@
         </div>
 
         <div v-if="error" class="error">{{ error }}</div>
+        <div v-if="modelLine && !loading" class="model-line">{{ modelLine }}</div>
         <div v-if="progress && !loading" class="stream-progress">
           <div class="progress-bar"><div class="progress-fill"></div></div>
           <span class="progress-text">{{ progress.message }}</span>
@@ -49,7 +50,7 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { renderMarkdown } from '../../utils/markdown'
 import { useLLMStream } from '../../composables/useLLMStream'
 
@@ -61,7 +62,12 @@ const streamingText = ref('')
 const loading = ref(false)
 const error = ref('')
 const chatScrollRef = ref(null)
-const { start: startStream, stop: stopStream, progress, sessionId } = useLLMStream()
+const { start: startStream, stop: stopStream, progress, sessionId, metadata } = useLLMStream()
+const modelLine = computed(() => {
+  const m = metadata.value
+  if (!m || !m.model) return ''
+  return `模型 · ${m.model}` + (m.cached ? '（缓存）' : '')
+})
 
 function _scrollBottom() {
   nextTick(() => {
@@ -104,6 +110,7 @@ function resetChat() {
   messages.value = []
   streamingText.value = ''
   sessionId.value = ''
+  metadata.value = null
   error.value = ''
 }
 // R5: 市场切换重置——A→US 后旧市场的投顾回答/输入不应残留（交互优化）
@@ -270,6 +277,7 @@ watch(() => props.marketTab, () => {
   color: var(--color-text-secondary);
 }
 .chat-bubble :deep(strong) { font-weight: var(--font-weight-semibold); }
+.model-line { margin-top: var(--space-2); font-size: var(--font-size-xs); color: var(--color-text-tertiary); text-align: right; }
 .btn-new-chat {
   padding: var(--space-2) var(--space-3);
   font: var(--text-body);

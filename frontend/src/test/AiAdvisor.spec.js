@@ -22,6 +22,7 @@ vi.mock('../composables/useLLMStream', () => ({
     stop: stopMock,
     progress: { value: null },
     sessionId: chatSessionRef,
+    metadata: { value: null },
   }),
 }))
 

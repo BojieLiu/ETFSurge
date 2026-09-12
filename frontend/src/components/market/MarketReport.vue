@@ -23,6 +23,7 @@
         <div v-if="error" class="error">{{ error }}</div>
 
         <div v-if="report" class="report" v-html="renderMarkdown(report)"></div>
+        <div v-if="modelLine && !loading" class="model-line">{{ modelLine }}</div>
 
         <div v-if="report && !loading" class="followup">
           <div v-for="(m, i) in followMessages" :key="i" class="chat-row" :class="m.role">
@@ -61,7 +62,13 @@ const error = ref('')
 const marketLabels = { A: 'A股', HK: '港股', US: '美股' }
 const marketLabel = computed(() => marketLabels[props.marketTab] || props.marketTab || '市场')
 
-const { start: startStream, stop: stopStream, sessionId } = useLLMStream()
+const { start: startStream, stop: stopStream, sessionId, metadata } = useLLMStream()
+// 模型归因：done.metadata.model（后端 done.usage.model 透传），缺失回退未知
+const modelLine = computed(() => {
+  const m = metadata.value
+  if (!m || !m.model) return ''
+  return `模型 · ${m.model}` + (m.cached ? '（缓存）' : '')
+})
 
 const followQuery = ref('')
 const followMessages = ref([])
@@ -270,4 +277,5 @@ watch(() => props.marketTab, () => {
 .text-input { flex: 1; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border-medium); border-radius: var(--radius-md); background: var(--color-surface-primary); color: var(--color-text-primary); }
 .btn-follow { padding: var(--space-2) var(--space-5); }
 .btn-new-chat { padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border-medium); border-radius: var(--radius-md); background: transparent; color: var(--color-text-secondary); cursor: pointer; }
+.model-line { margin-top: var(--space-2); font-size: var(--font-size-xs); color: var(--color-text-tertiary); text-align: right; }
 </style>

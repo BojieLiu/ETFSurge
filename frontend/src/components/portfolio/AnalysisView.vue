@@ -64,6 +64,7 @@
           :disabled="aiLoading" @keydown.enter="askFollow" />
         <AppButton variant="secondary" @click="askFollow" :disabled="aiLoading || !aiQuery.trim()">追问</AppButton>
       </div>
+      <div v-if="aiModelLine && !aiLoading" class="model-line">{{ aiModelLine }}</div>
       <div v-if="aiError" class="error">{{ aiError }}</div>
     </section>
   </div>
@@ -549,7 +550,12 @@ const aiStreaming = ref('')
 const aiQuery = ref('')
 const aiLoading = ref(false)
 const aiError = ref('')
-const { start: startAi, stop: stopAi, sessionId: aiSession } = useLLMStream()
+const { start: startAi, stop: stopAi, sessionId: aiSession, metadata: aiMeta } = useLLMStream()
+const aiModelLine = computed(() => {
+  const m = aiMeta.value
+  if (!m || !m.model) return ''
+  return `模型 · ${m.model}` + (m.cached ? '（缓存）' : '')
+})
 
 function resetAi() {
   stopAi()
@@ -709,5 +715,6 @@ onMounted(async () => {
 .chat-bubble.assistant { background: var(--color-surface-secondary); border-left: 3px solid var(--color-brand-500); }
 .input-row { display: flex; gap: var(--space-2); margin-top: var(--space-3); }
 .text-input { flex: 1; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border-medium); border-radius: var(--radius-md); background: var(--color-surface-primary); color: var(--color-text-primary); }
+.model-line { margin-top: var(--space-2); font-size: var(--font-size-xs); color: var(--color-text-tertiary); text-align: right; }
 .error { margin-top: var(--space-3); color: var(--color-danger-700); }
 </style>

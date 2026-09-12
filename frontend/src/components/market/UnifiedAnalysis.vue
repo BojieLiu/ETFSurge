@@ -85,6 +85,7 @@
     </div>
 
     <div v-if="result" class="result" v-html="renderMarkdown(result)"></div>
+    <div v-if="result && modelLine && !loading" class="model-line">{{ modelLine }}</div>
 
     <div v-else-if="symbol && !loading" class="result-area">
       <p>已选择: <strong>{{ symbol }}</strong> ({{ currentModeLabel }})</p>
@@ -101,7 +102,12 @@ import { useLLMStream } from '../../composables/useLLMStream'
 import { useMarketSearch } from '../../composables/useMarketSearch'
 import { marketApi } from '../../api'
 
-const { start: startStream, stop: stopStream, progress } = useLLMStream()
+const { start: startStream, stop: stopStream, progress, metadata } = useLLMStream()
+const modelLine = computed(() => {
+  const m = metadata.value
+  if (!m || !m.model) return ''
+  return `模型 · ${m.model}` + (m.cached ? '（缓存）' : '')
+})
 
 // R5: 输入处理——symbol 模式必须先把值写回 search.searchQuery 再触发 onSearchInput。
 // 旧实现只调 onSearchInput() 不写回：onSearchInput 内部读 searchQuery.value（恒为空）
@@ -600,6 +606,7 @@ async function doAnalyze() {
 .progress-text { font-size: var(--font-size-sm); color: var(--color-text-secondary); white-space: nowrap; }
 @keyframes progress-indeterminate { 0% { margin-left: -40%; } 100% { margin-left: 100%; } }
 .result { margin-top: var(--space-4); line-height: 1.8; }
+.model-line { margin-top: var(--space-2); font-size: var(--font-size-xs); color: var(--color-text-tertiary); text-align: right; }
 .quick-chips { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-3); padding: 0 var(--space-1); }
 .question-chips { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-2); padding: 0 var(--space-1); }
 .question-chips .chip.active { background: var(--color-brand-600, #2563eb); color: #fff; border-color: var(--color-brand-600, #2563eb); }
