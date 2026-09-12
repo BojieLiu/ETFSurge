@@ -325,7 +325,7 @@ docker-compose up --build --profile prod
 | `OPENCODE_ZEN_API_KEY` | OpenCode Zen key (LLM primary) | empty |
 | `FINNHUB_API_KEY` / `TWELVEDATA_API_KEY` / `ALPHAVANTAGE_API_KEY` / `TUSHARE_TOKEN` / `FRED_API_KEY` | Optional data-source keys | empty |
 | `LLM_PRIMARY_PROVIDER` / `LLM_FALLBACK_PROVIDER` | LLM provider failover order | `opencode_zen` / `deepseek` |
-| `LLM_MODEL` | LLM model name | `deepseek-v4-flash` |
+| `LLM_MODEL` | LLM model name | `deepseek-flash` |
 | `WARMUP_BUDGET_S` | Startup warmup budget | `30` |
 | `ETF_FAST_JSON` | demjson shim (akshare hotspot fix), default on | `1` |
 

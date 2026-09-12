@@ -5,8 +5,8 @@ Defines the data model for a single LLM API provider and builds the
 priority-ordered provider list from application settings.
 
 Supports a primary → fallback failover chain:
-  1. OpenCode Zen (deepseek-v4-flash-free)
-  2. DeepSeek Official (deepseek-v4-flash)
+  1. OpenCode Zen (deepseek-v4-flash-free — Zen catalog name, not official)
+  2. DeepSeek Official (deepseek-flash, V4.1 canonical since 2026-09-10)
 """
 
 from __future__ import annotations
@@ -190,10 +190,11 @@ def get_configured_providers() -> list[ProviderConfig]:
         )
     if settings.deepseek_api_key and fallback_id in ("", "deepseek"):
         models = str(settings.llm_model or "")
-        # deepseek-chat/deepseek-reasoner 已于 2026/07/24 废弃，统一使用 deepseek-v4-flash
-        # 'deepseek-v4-flash-free' 仅对 OpenCode Zen 有效，官方 API 用 deepseek-v4-flash
-        if models == "deepseek-v4-flash-free":
-            models = "deepseek-v4-flash"
+        # 官方正名（2026-09-10 V4.1）：deepseek-flash 为 canonical；
+        # deepseek-v4-flash 官方暂收作别名（同模型同计费），此处归一化。
+        # 'deepseek-v4-flash-free' 仅对 OpenCode Zen 有效，官方 API 用 deepseek-flash。
+        if models in ("deepseek-v4-flash", "deepseek-v4-flash-free"):
+            models = "deepseek-flash"
         providers.append(ProviderConfig(
             id="deepseek",
             name="DeepSeek Official",

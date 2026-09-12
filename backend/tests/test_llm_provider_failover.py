@@ -73,7 +73,7 @@ def _patch_provider_settings(**kwargs):
         llm_primary_timeout=120,
         llm_fallback_timeout=120,
         deepseek_api_key="sk-ds-test-key",
-        llm_model="deepseek-v4-flash",
+        llm_model="deepseek-flash",
         # round47: 显式禁用 b_ai + openrouter 以稳定 provider 列表 (本机 .env 配
         # 了 B_AI_API_KEY 会让 b_ai 进 list, 干扰 "[zen, deepseek]" 两 provider
         # 假设). 测试 4 provider 列表 (zen/b_ai/b_ai/deepseek) 需 side_effects
@@ -170,7 +170,7 @@ class TestPrimaryTimeout:
         from app.analysis.llm import llm_complete_with_system
 
         primary_err = httpx.TimeoutException("timed out", request=MagicMock())
-        fallback_resp = _make_response(FALLBACK_CONTENT, model="deepseek-v4-flash")
+        fallback_resp = _make_response(FALLBACK_CONTENT, model="deepseek-flash")
         patcher = _patch_httpx([primary_err, fallback_resp])
         try:
             result = await llm_complete_with_system("system", "prompt")
@@ -204,7 +204,7 @@ class TestPrimaryTimeout:
         from app.analysis.llm import llm_complete_with_system
 
         primary_err = httpx.TimeoutException("timed out", request=MagicMock())
-        fallback_resp = _make_response("ok", model="deepseek-v4-flash")
+        fallback_resp = _make_response("ok", model="deepseek-flash")
         patcher = patch("httpx.AsyncClient")
         mock_cls = patcher.start()
         mock_instance = mock_cls.return_value.__aenter__.return_value
@@ -215,7 +215,7 @@ class TestPrimaryTimeout:
             patcher.stop()
         # 第二次调用 = fallback（deepseek），其 body 应带 effort
         fb_body = mock_instance.post.call_args_list[1].kwargs["json"]
-        assert fb_body["model"].endswith("deepseek-v4-flash"), fb_body
+        assert fb_body["model"].endswith("deepseek-flash"), fb_body
         assert fb_body.get("reasoning_effort") == "high", fb_body
         assert "temperature" not in fb_body, f"temperature must be dropped: {fb_body}"
 
@@ -228,7 +228,7 @@ class TestPrimaryHttpError:
         from app.analysis.llm import llm_complete_with_system
 
         primary_resp = _make_response("error", status=500)
-        fallback_resp = _make_response(FALLBACK_CONTENT, model="deepseek-v4-flash")
+        fallback_resp = _make_response(FALLBACK_CONTENT, model="deepseek-flash")
         patcher = _patch_httpx([primary_resp, fallback_resp])
         try:
             result = await llm_complete_with_system("system", "prompt")
@@ -245,7 +245,7 @@ class TestPrimaryNetworkError:
         from app.analysis.llm import llm_complete_with_system
 
         primary_err = httpx.ConnectError("Connection refused", request=MagicMock())
-        fallback_resp = _make_response(FALLBACK_CONTENT, model="deepseek-v4-flash")
+        fallback_resp = _make_response(FALLBACK_CONTENT, model="deepseek-flash")
         patcher = _patch_httpx([primary_err, fallback_resp])
         try:
             result = await llm_complete_with_system("system", "prompt")
@@ -303,7 +303,7 @@ class TestUsageRecordProvider:
         from app.monitor.token_usage import token_store
 
         primary_err = httpx.TimeoutException("timeout", request=MagicMock())
-        fallback_resp = _make_response("ok", model="deepseek-v4-flash")
+        fallback_resp = _make_response("ok", model="deepseek-flash")
         patcher = _patch_httpx([primary_err, fallback_resp])
         try:
             await llm_complete_with_system("system", "prompt")
@@ -339,7 +339,7 @@ class TestMissingApiKey:
         old = await self._override_keys(opencode_zen_api_key="")
         try:
             from app.analysis.llm import llm_complete_with_system
-            resp = _make_response("direct fallback", model="deepseek-v4-flash")
+            resp = _make_response("direct fallback", model="deepseek-flash")
             patcher = _patch_httpx([resp])
             try:
                 result = await llm_complete_with_system("system", "prompt")

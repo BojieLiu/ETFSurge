@@ -38,7 +38,7 @@ def _stub_settings(
     b_ai_key: str = "",
     b_ai_models: str = "",
     deepseek_key: str = "",
-    model: str = "deepseek-v4-flash",
+    model: str = "deepseek-flash",
     primary: str = "opencode_zen",
     fallback: str = "deepseek",
 ) -> MagicMock:
@@ -62,12 +62,12 @@ def _stub_settings(
 
 def test_get_configured_providers_filters_mark_excluded_deepseek():
     """P0: mark_excluded('deepseek', 'deepseek-v4-flash') 后 deepseek 不挂载."""
-    catalog_mod.model_catalog.mark_excluded("deepseek", "deepseek-v4-flash")
-    s = _stub_settings(deepseek_key="sk-test", model="deepseek-v4-flash")
+    catalog_mod.model_catalog.mark_excluded("deepseek", "deepseek-flash")
+    s = _stub_settings(deepseek_key="sk-test", model="deepseek-flash")
     with patch.object(provider_mod, "settings", s):
         ps = provider_mod.get_configured_providers()
     ids = [(p.id, p.model) for p in ps]
-    assert ("deepseek", "deepseek-v4-flash") not in ids, (
+    assert ("deepseek", "deepseek-flash") not in ids, (
         f"R160 漏: mark_excluded 的 deepseek 仍出现在 provider 列表: {ids}"
     )
 
@@ -99,19 +99,19 @@ def test_get_configured_providers_unrelated_excluded_does_not_filter():
     负向：mark_excluded 只对完全匹配 (provider, model) 起作用。
     """
     catalog_mod.model_catalog.mark_excluded("deepseek", "deepseek-v3")
-    s = _stub_settings(deepseek_key="sk-test", model="deepseek-v4-flash")
+    s = _stub_settings(deepseek_key="sk-test", model="deepseek-flash")
     with patch.object(provider_mod, "settings", s):
         ps = provider_mod.get_configured_providers()
     ids = [(p.id, p.model) for p in ps]
-    assert ("deepseek", "deepseek-v4-flash") in ids, (
+    assert ("deepseek", "deepseek-flash") in ids, (
         f"误伤: 不相关 mark_excluded 拦截了正常 provider: {ids}"
     )
 
 
 def test_get_configured_providers_empty_when_all_excluded():
     """P1: 所有可用 provider 都被 mark_excluded 时返回空列表——不应静默退化."""
-    catalog_mod.model_catalog.mark_excluded("deepseek", "deepseek-v4-flash")
-    s = _stub_settings(deepseek_key="sk-test", model="deepseek-v4-flash")
+    catalog_mod.model_catalog.mark_excluded("deepseek", "deepseek-flash")
+    s = _stub_settings(deepseek_key="sk-test", model="deepseek-flash")
     with patch.object(provider_mod, "settings", s):
         ps = provider_mod.get_configured_providers()
     # 仅有 deepseek 路径被 mark → 应返回空

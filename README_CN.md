@@ -370,7 +370,7 @@ docker-compose up --build --profile prod
 | `OPENCODE_ZEN_API_KEY` | OpenCode Zen key（LLM 主用） | 空 |
 | `FINNHUB_API_KEY` / `TWELVEDATA_API_KEY` / `ALPHAVANTAGE_API_KEY` / `TUSHARE_TOKEN` / `FRED_API_KEY` | 可选数据源 key | 空 |
 | `LLM_PRIMARY_PROVIDER` / `LLM_FALLBACK_PROVIDER` | LLM 供应商故障转移顺序 | `opencode_zen` / `deepseek` |
-| `LLM_MODEL` | LLM 模型名 | `deepseek-v4-flash` |
+| `LLM_MODEL` | LLM 模型名 | `deepseek-flash` |
 | `WARMUP_BUDGET_S` | 启动预热预算 | `30` |
 | `ETF_FAST_JSON` | demjson shim（akshare 热点修复），默认开 | `1` |
 

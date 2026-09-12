@@ -109,7 +109,7 @@ class Settings(BaseSettings):
     # ── LLM Provider 配置 ──────────────────────────────────────
     # round35 §19 GapE: 零读取字段 llm_provider 已删（全后端 0 引用，已被
     # llm_primary/fallback_provider 取代——冗余审计 scripts/_findings_redundant_review.md）
-    llm_model: str = "deepseek-v4-flash"
+    llm_model: str = "deepseek-flash"  # 官方正名（2026-09-10 V4.1 Flash）
 
     # OpenCode Zen (主 provider)
     opencode_zen_api_key: str = ""
