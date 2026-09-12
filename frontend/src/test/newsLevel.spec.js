@@ -30,9 +30,9 @@ describe('newsLevel — F22 category/level 双维度', () => {
 })
 
 describe('mapNewsLevel (level -> {color, stars})', () => {
-  it('maps level >= 4 to red + 4 stars (重要)', () => {
+  it('maps level 4/5 distinctly (重要 vs 非常重要)', () => {
     expect(mapNewsLevel(4)).toEqual({ color: 'red', stars: '★★★★', label: '重要' })
-    expect(mapNewsLevel(5)).toEqual({ color: 'red', stars: '★★★★', label: '重要' })
+    expect(mapNewsLevel(5)).toEqual({ color: 'red', stars: '★★★★★', label: '非常重要' })
   })
 
   it('maps level 3 to orange + 3 stars (关注)', () => {

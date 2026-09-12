@@ -22,11 +22,13 @@ const props = defineProps({
 
 const chartOption = computed(() => ({
   tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-  legend: { orient: 'vertical', left: 'left', top: 'middle', itemWidth: 12, itemHeight: 12 },
+  /* 图例放底部横排：13+ 标的时左侧竖排挤压饼图 */
+  legend: { orient: 'horizontal', left: 'center', bottom: 0, itemWidth: 12, itemHeight: 12, textStyle: { fontSize: 11 } },
   series: [{
     name: '分配',
     type: 'pie',
-    radius: ['40%', '70%'],
+    radius: ['40%', '65%'],
+    center: ['50%', '42%'],
     avoidLabelOverlap: false,
     label: { show: false, position: 'center' },
     emphasis: { label: { show: true, fontSize: '18', fontWeight: 'bold' } },

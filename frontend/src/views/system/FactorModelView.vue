@@ -133,9 +133,9 @@
             </div>
           </div>
           <div class="ic-sort-stats">
-            <span class="ic-stat">统计显著 <b class="text-up">{{ icValidCount }}</b></span>
-            <span class="ic-stat">不显著 <b class="text-down">{{ icInvalidCount }}</b></span>
-            <span class="ic-stat">平均 |IC| <b>{{ icAvgAbsIC.toFixed(4) }}</b></span>
+            <span class="ic-stat">统计显著 <b :class="icValidCount > 0 ? 'text-up' : 'text-muted'">{{ icValidCount }}</b></span>
+            <span class="ic-stat">不显著 <b class="text-muted">{{ icInvalidCount }}</b></span>
+            <span class="ic-stat">平均 |IC| <b>{{ formattedAvgIc }}</b></span>
           </div>
           <div class="ic-sort-table-wrap">
             <table class="data-table ic-sort-table">
@@ -422,9 +422,8 @@ const formattedAvgIc = computed(() => {
   return v !== null && v !== undefined ? v.toFixed(4) : '--'
 })
 const avgIcClass = computed(() => {
-  const v = summary.value?.avg_ic
-  if (v === null || v === undefined) return ''
-  return v >= 0.03 ? 'text-up' : v >= 0.02 ? '' : 'text-warn'
+  // 平均 |IC| 是幅度指标，无涨跌语义——保持中性色，不套红/绿
+  return ''
 })
 
 /* ── Helpers ── */
@@ -446,8 +445,8 @@ function icBarWidth(val) {
 }
 
 function icColorClass(val) {
-  if (val === null || val === undefined) return ''
-  return val >= 0 ? 'text-up' : 'text-down'
+  // IC 正负是方向不是涨跌——表格内保持中性色，强度由行高亮/柱条表达
+  return ''
 }
 
 function icStatusClass(f) {
@@ -456,8 +455,8 @@ function icStatusClass(f) {
 }
 
 function avgIcColor(val) {
-  if (val === null || val === undefined) return ''
-  return val >= 0.03 ? 'text-up' : val >= 0.02 ? '' : 'text-warn'
+  // 同 avgIcClass：幅度指标保持中性
+  return ''
 }
 
 function truncate(s, max) {
@@ -611,11 +610,6 @@ const icSortedFactors = computed(() => {
 
 const icValidCount = computed(() => icSortedFactors.value.filter(f => f.status === 'valid').length)
 const icInvalidCount = computed(() => icSortedFactors.value.filter(f => f.status === 'warn').length)
-const icAvgAbsIC = computed(() => {
-  const list = icSortedFactors.value.filter(f => f.ic_value !== null)
-  if (list.length === 0) return 0
-  return list.reduce((s, f) => s + abs(f.ic_value), 0) / list.length
-})
 const icCategories = computed(() => {
   const set = new Set()
   categories.value.forEach(c => { if (c.name) set.add(c.name) })
@@ -642,9 +636,7 @@ function icRowClass(f) {
 }
 
 function icValueClass(val) {
-  if (val === null || val === undefined) return ''
-  if (val > 0.01) return 'text-up'
-  if (val < -0.01) return 'text-down'
+  // IC 正负是方向不是涨跌——保持中性色
   return ''
 }
 
@@ -744,7 +736,8 @@ onBeforeUnmount(() => {
   font-weight: var(--font-weight-medium);
 }
 .valid-badge.valid { color: var(--color-success-700); background: var(--color-success-50); }
-.valid-badge.invalid { color: var(--color-warning-700); background: var(--color-warning-50); }
+/* 不显著是常态（需 250 天积累），弱化为灰字而非琥珀 pill，减轻"满屏警告"感 */
+.valid-badge.invalid { color: var(--color-text-tertiary); background: var(--color-surface-tertiary); }
 .valid-badge.no-data { color: var(--color-text-tertiary); background: var(--color-surface-tertiary); }
 .category-badge {
   display: inline-block; padding: 0.05rem 0.5rem;

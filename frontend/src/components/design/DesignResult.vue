@@ -467,7 +467,9 @@ function substituteText(cw) {
 .markdown-body table { width: 100%; border-collapse: collapse; margin: var(--space-4) 0; font-size: 0.92em; display: block; overflow-x: auto; }
 .markdown-body thead { background: var(--color-surface-secondary); }
 .markdown-body th { padding: var(--space-2) var(--space-3); text-align: left; font-weight: var(--font-weight-semibold); color: var(--color-text-primary); border-bottom: 2px solid var(--color-primary); white-space: nowrap; }
-.markdown-body td { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-border-light); color: var(--color-text-primary); }
+.markdown-body td { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-border-light); color: var(--color-text-primary); overflow-wrap: normal; }
+/* 前两列多为类别/代码：禁断行（防 510300 断成两行），长文本列仍可换行 */
+.markdown-body td:first-child, .markdown-body td:nth-child(2) { white-space: nowrap; }
 .markdown-body tbody tr:hover { background: var(--color-bg-tertiary); }
 .markdown-body tbody tr:nth-child(even) { background: rgba(0,0,0,0.02); }
 .markdown-body tbody tr:nth-child(even):hover { background: var(--color-bg-tertiary); }

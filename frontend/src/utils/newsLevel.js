@@ -21,7 +21,8 @@ const CATEGORY_META = {
 // Legacy: level-only metadata (kept for importance stars/label fallback).
 export function mapNewsLevel(level) {
   const lvl = Number(level) || 0
-  if (lvl >= 4) return { color: 'red', stars: '★★★★', label: '重要' }
+  if (lvl >= 5) return { color: 'red', stars: '★★★★★', label: '非常重要' }
+  if (lvl === 4) return { color: 'red', stars: '★★★★', label: '重要' }
   if (lvl === 3) return { color: 'orange', stars: '★★★', label: '关注' }
   if (lvl === 2) return { color: 'blue', stars: '★★', label: '一般' }
   return { color: 'gray', stars: '★', label: '普通' }

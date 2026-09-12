@@ -548,7 +548,7 @@ describe('NewsView — P2-3 stars 新鲜度 + P1-4 ai_summary（round20）', () 
     apiMock.all.mockResolvedValue({
       data: [
         { id: 1, title: '突发', content: 'c', level: 5, stars: 5, source: 'X', time: '10:00',
-          ai_summary: 'AI 生成的简要解读：政策利好推动板块上行。' },
+          ai_summary: 'AI 生成的简要解读：政策利好推动板块上行。', ai_summary_source: 'llm' },
         { id: 2, title: '无摘要', content: 'c', level: 2, stars: 3, source: 'Y', time: '10:01', ai_summary: null },
       ],
     })
@@ -557,6 +557,19 @@ describe('NewsView — P2-3 stars 新鲜度 + P1-4 ai_summary（round20）', () 
 
     const text = wrapper.text()
     expect(text).toContain('AI 生成的简要解读：政策利好推动板块上行。')
+  })
+
+  it('rule 规则截取摘要不展示（与正文重复，🤖 框不冒充 AI）', async () => {
+    apiMock.all.mockResolvedValue({
+      data: [
+        { id: 1, title: '突发', content: '正文首句复述。后续内容。', level: 5, stars: 5, source: 'X', time: '10:00',
+          ai_summary: '正文首句复述。', ai_summary_source: 'rule' },
+      ],
+    })
+    const wrapper = mount(NewsView, { global: { stubs: { VChart: true } } })
+    await flushPromises()
+
+    expect(wrapper.findAll('.news-ai-summary').length).toBe(0)
   })
 })
 

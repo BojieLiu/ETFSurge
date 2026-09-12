@@ -131,8 +131,8 @@
       </AppCard>
     </template>
 
-    <!-- 数据刷新指示器（常驻占位，零 CLS：数据加载不新增行） -->
-    <p class="summary-updated">更新于 {{ lastUpdated || '--:--:--' }}</p>
+    <!-- 数据刷新指示器（有值才渲染，无更新时间不挂占位） -->
+    <p v-if="lastUpdated" class="summary-updated">更新于 {{ lastUpdated }}</p>
   </div>
 </template>
 
@@ -207,14 +207,17 @@ function estimatedRatio(type) {
   /* P0-4 (R4-19) + F24: 卡片固定最小高度——加载态（单行骨架 + 估算占位行）与完成态
      （数字 + 估算提示）高度一致，消除首屏数据到达时的布局偏移（CLS）。 */
   min-height: 110px;
+  /* 单卡独占行时不限宽拉伸（场内/场外其一为空时满屏留白） */
+  max-width: 480px;
   transition: var(--transition-fast);
   /* 美化轮（2026-09-06）: 语义色左边条——与因子模型页同款视觉语言 */
   border-left: 3px solid var(--color-border-light);
 }
 
-/* 总仓位卡：品牌色主卡（左侧粗条 + 轻渐变底） */
+/* 总仓位卡：品牌色主卡（左侧粗条 + 轻渐变底），独占整行不限宽 */
 .summary-card--total {
   grid-column: 1 / -1;
+  max-width: none;
   border-left: 3px solid var(--color-brand-500);
   background: linear-gradient(135deg, var(--color-brand-50), var(--color-surface-primary) 65%);
 }

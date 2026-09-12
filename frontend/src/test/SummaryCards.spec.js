@@ -171,11 +171,9 @@ describe('SummaryCards UI 优化 (R5)', () => {
     expect(wrapper.find('.summary-card--total').exists()).toBe(true)
   })
 
-  it('更新时间指示器：常驻占位（零 CLS），有值显示时间', () => {
+  it('更新时间指示器：无值隐藏（不挂占位），有值显示时间', () => {
     const wrapper = mountCards(null)
-    const el = wrapper.find('.summary-updated')
-    expect(el.exists()).toBe(true)
-    expect(el.text()).toContain('更新于 --:--:--')
+    expect(wrapper.find('.summary-updated').exists()).toBe(false)
     const w2 = mount(SummaryCards, {
       props: {
         activeTab: 'combined',

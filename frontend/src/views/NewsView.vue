@@ -104,14 +104,22 @@
               <!-- R178 (round52 §9.2 方案B-1): 重要等级星级——编码 level（重要度），
                    与旧星（编码 stars 新鲜度）语义不同；全量显示，灰色小字不与 category 抢色。 -->
               <span class="news-importance-stars" :title="`重要等级 ${item.level || 1}/5`" aria-hidden="true">{{ mapLevelStars(item.level) }}</span>
-              <h3 class="news-title" :style="{ color: levelColor(item) }">{{ item.title }}</h3>
+              <!-- 标题保持正文色：极性只由徽章/左边条表达，整段标红难读 -->
+              <h3 class="news-title">{{ item.title }}</h3>
             </div>
 
-          <p v-if="item.content" class="news-content">{{ item.content }}</p>
+          <p v-if="item.content" class="news-content" :class="{ 'news-content--collapsed': !expandedIds.has(item.id) }">{{ item.content }}</p>
+          <button
+            v-if="(item.content || '').length > 120"
+            type="button"
+            class="content-toggle"
+            @click="toggleExpand(item.id)"
+          >{{ expandedIds.has(item.id) ? '收起 ▲' : '展开全文 ▼' }}</button>
 
           <!-- P1-4 (round20 §五 P1-4): 消费后端预生成的 ai_summary（列表内联展示，
-               消除「生成但不消费」冗余）——仅当后端已生成摘要时展示 -->
-          <p v-if="item.ai_summary" class="news-ai-summary" :style="{ color: levelColor(item) }">
+               消除「生成但不消费」冗余）——仅 LLM 真摘要展示；rule 规则截取
+               （正文首句原文复述）与上方正文重复，不展示，避免 🤖 框冒充 AI -->
+          <p v-if="item.ai_summary && item.ai_summary_source === 'llm'" class="news-ai-summary">
             <span class="ai-summary-tag" aria-hidden="true">🤖</span> {{ item.ai_summary }}
           </p>
 
@@ -184,6 +192,13 @@ const impactError = ref(false) // F2-8: 行内失败状态（展示重试）
 const requestHoldings = ref(new Set())
 const analyzing = ref(false)
 const minLevel = ref(1) // 1-5, minimum importance level to show
+const expandedIds = ref(new Set()) // 长正文折叠态（默认折叠3行）
+function toggleExpand(id) {
+  const s = new Set(expandedIds.value)
+  if (s.has(id)) s.delete(id)
+  else s.add(id)
+  expandedIds.value = s
+}
 // R178 (round52 §9.2 方案C): 排序切换——'time'（sort_time 降序，默认）| 'level'（level 降序 + sort_time 次序）
 const sortBy = ref('time')
 
@@ -402,7 +417,9 @@ const filteredAffectedHoldings = computed(() => {
   border: 1px solid var(--color-border-light);
 }
 .news-tab {
-  padding: var(--space-1.5) var(--space-3);
+  min-width: 60px;
+  text-align: center;
+  padding: var(--space-2) var(--space-4);
   border: none; border-radius: var(--radius-full);
   background: transparent; color: var(--color-text-secondary);
   cursor: pointer; font-size: var(--font-size-sm);
@@ -546,6 +563,15 @@ const filteredAffectedHoldings = computed(() => {
 .news-stars { letter-spacing: 1px; }
 .news-title { margin: 0; font-size: var(--font-size-base); font-weight: 600; }
 .news-content { margin: var(--space-2) 0 0; color: var(--color-text-secondary); font-size: var(--font-size-sm); line-height: 1.6; }
+/* 长正文默认折叠3行 + 展开，避免新闻联播式全文堆砌 */
+.news-content--collapsed {
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.content-toggle {
+  margin-top: var(--space-1); padding: 0; border: none; background: none;
+  color: var(--color-brand-600); font-size: var(--font-size-xs); cursor: pointer;
+}
 .news-ai-summary { margin: var(--space-1) 0 0; background: var(--color-surface-primary); border: 1px dashed var(--color-border); border-radius: var(--radius-sm); padding: 6px 8px; font-size: var(--font-size-xs); line-height: 1.6; }
 .ai-summary-tag { margin-right: 2px; }
 .news-meta { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-2); font-size: var(--font-size-xs); color: var(--color-text-muted); }

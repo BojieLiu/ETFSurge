@@ -1054,7 +1054,7 @@ onMounted(loadTab)
 .data-table th { font-weight: var(--font-weight-semibold); color: var(--color-text-secondary); background: var(--color-surface-secondary); white-space: nowrap; position: sticky; top: 0; z-index: 1; }
 .data-table tbody tr { transition: var(--transition-fast); }
 .data-table tbody tr:hover { background: var(--color-surface-hover); }
-.data-table td code { font-family: var(--font-family-mono); font-size: var(--font-size-xs); background: var(--color-surface-tertiary); padding: var(--space-0.5) var(--space-1); border-radius: var(--radius-sm); }
+.data-table td code { font-family: var(--font-family-mono); font-size: var(--font-size-xs); background: var(--color-surface-tertiary); padding: var(--space-0.5) var(--space-1); border-radius: var(--radius-sm); white-space: nowrap; }
 
 .type-badge { display: inline-flex; align-items: center; padding: var(--space-0.5) var(--space-2); font-size: var(--font-size-xs); font-weight: var(--font-weight-medium); border-radius: var(--radius-full); text-transform: uppercase; }
 .type-badge.a { color: var(--color-info-700); background: var(--color-bg-info-subtle); }
@@ -1083,7 +1083,7 @@ onMounted(loadTab)
 .slider::-moz-range-thumb { width: 18px; height: 18px; border-radius: var(--radius-full); background: var(--color-brand-600); border: none; box-shadow: var(--shadow-sm); }
 .weight-val { display: inline-block; margin-left: var(--space-2); font-family: var(--font-family-mono); font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); color: var(--color-brand-600); min-width: 48px; text-align: right; }
 
-.price-cell { font-family: var(--font-family-mono); font-weight: var(--font-weight-medium); }
+.price-cell { font-family: var(--font-family-mono); font-weight: var(--font-weight-medium); white-space: nowrap; }
 .change-cell, .pnl-cell { font-family: var(--font-family-mono); font-weight: var(--font-weight-semibold); white-space: nowrap; }
 .change-value { }
 .text-mono-lg { font-family: var(--font-family-mono); font-size: var(--font-size-base); font-weight: var(--font-weight-medium); }
