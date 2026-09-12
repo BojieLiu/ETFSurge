@@ -55,9 +55,11 @@ class ChatSessionStore:
 
     # ── 内存层 ────────────────────────────────────────────────────────
 
-    def start_or_get(self, session_id: str | None) -> tuple[str, list[dict]]:
+    def start_or_get(self, session_id: str | None, expect_type: str | None = None) -> tuple[str, list[dict]]:
         """取会话；session_id 缺失/无效/过期 → 开新会话（不报错）。
 
+        expect_type: 会话类型隔离（advice/report/symbol）——命中但类型不符
+            视为串话，自动开新会话。None=不校验（兼容旧调用）。
         Returns:
             (生效的 session_id, 完整历史消息列表)
         """
@@ -65,19 +67,27 @@ class ChatSessionStore:
         if session_id and session_id in self._sessions:
             entry = self._sessions[session_id]
             if now - entry["last_active"] < timedelta(seconds=CHAT_SESSION_TTL):
-                # LRU touch
-                self._sessions.move_to_end(session_id)
-                entry["last_active"] = now
-                return session_id, list(entry["messages"])
-            # TTL 过期 → 丢弃重建
-            logger.info("[chat_session] %s expired (memory TTL), starting new", session_id)
-            del self._sessions[session_id]
-        return self._create()
+                if expect_type is not None and entry.get("session_type", "advice") != expect_type:
+                    logger.info("[chat_session] %s type mismatch (%s!=%s), starting new",
+                                session_id, entry.get("session_type"), expect_type)
+                else:
+                    # LRU touch
+                    self._sessions.move_to_end(session_id)
+                    entry["last_active"] = now
+                    return session_id, list(entry["messages"])
+            else:
+                # TTL 过期 → 丢弃重建
+                logger.info("[chat_session] %s expired (memory TTL), starting new", session_id)
+                del self._sessions[session_id]
+        return self._create(session_type=expect_type or "advice")
 
-    def _create(self) -> tuple[str, list[dict]]:
+    def _create(self, session_type: str = "advice") -> tuple[str, list[dict]]:
         sid = f"sess-{uuid.uuid4().hex[:16]}"
         self._sessions[sid] = {"messages": [], "last_active": datetime.now(),
-                               "market_snapshot": None, "snapshot_ts": None}
+                               "market_snapshot": None, "snapshot_ts": None,
+                               "session_type": session_type,
+                               "market": None, "symbol": None,
+                               "frozen_snapshot": None}
         self._sessions.move_to_end(sid)
         self._evict_overflow()
         return sid, []
@@ -135,6 +145,27 @@ class ChatSessionStore:
         return "\n".join(lines)
 
     # ── 市场快照复用（60s） ──────────────────────────────────────────
+
+    def set_frozen(self, session_id: str, snapshot: Any, market: str | None = None,
+                   symbol: str | None = None) -> None:
+        """冻结首轮快照（report/symbol 追问链路，会话内只读不采）。"""
+        entry = self._sessions.get(session_id)
+        if entry is None:
+            return
+        entry["frozen_snapshot"] = snapshot
+        if market is not None:
+            entry["market"] = market
+        if symbol is not None:
+            entry["symbol"] = symbol
+        entry["last_active"] = datetime.now()
+        self._sessions.move_to_end(session_id)
+
+    def get_frozen(self, session_id: str) -> Any:
+        """取冻结快照；缺失返回 None（调用方回退重采并重新冻结）。"""
+        entry = self._sessions.get(session_id)
+        if entry is None:
+            return None
+        return entry.get("frozen_snapshot")
 
     def get_market_snapshot(self, session_id: str, collector: Callable[[], Any]) -> Any:
         """TTL 内复用本会话市场快照；过期/缺失时调用 collector 重采。"""

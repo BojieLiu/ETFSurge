@@ -23,6 +23,25 @@
         <div v-if="error" class="error">{{ error }}</div>
 
         <div v-if="report" class="report" v-html="renderMarkdown(report)"></div>
+
+        <div v-if="report && !loading" class="followup">
+          <div v-for="(m, i) in followMessages" :key="i" class="chat-row" :class="m.role">
+            <div class="chat-bubble" :class="m.role" v-html="renderMarkdown(m.content)"></div>
+          </div>
+          <div v-if="followStreaming" class="chat-row assistant">
+            <div class="chat-bubble assistant streaming" v-html="renderMarkdown(followStreaming)"></div>
+          </div>
+          <div class="input-row">
+            <input v-model="followQuery" placeholder="就本报告追问，如：为什么判震荡？" class="text-input"
+              :disabled="followLoading" @keydown.enter="followUp" />
+            <button class="btn-report btn-follow" @click="followUp" :disabled="followLoading || !followQuery.trim()">
+              {{ followLoading ? '思考中...' : '追问' }}
+            </button>
+            <button class="btn-new-chat" @click="refreshReport" :disabled="loading || followLoading" title="基于最新数据重判">
+              重判
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   </section>
@@ -42,7 +61,12 @@ const error = ref('')
 const marketLabels = { A: 'A股', HK: '港股', US: '美股' }
 const marketLabel = computed(() => marketLabels[props.marketTab] || props.marketTab || '市场')
 
-const { start: startStream, stop: stopStream } = useLLMStream()
+const { start: startStream, stop: stopStream, sessionId } = useLLMStream()
+
+const followQuery = ref('')
+const followMessages = ref([])
+const followStreaming = ref('')
+const followLoading = ref(false)
 
 // R4-28: 序号守卫——快速切换 tab 时丢弃过期市场流的 token/状态，
 // 避免旧流回调覆盖新市场报告或错乱 loading 状态
@@ -53,6 +77,9 @@ async function generate() {
   loading.value = true
   report.value = ''
   error.value = ''
+  followMessages.value = []
+  followStreaming.value = ''
+  sessionId.value = ''
   try {
     // Z31: 发送 market 参数，后端按 marketTab 采集对应市场数据
     await startStream('/llm-report/stream', { symbols: null, market: props.marketTab }, (token) => {
@@ -68,6 +95,33 @@ async function generate() {
   }
 }
 
+async function followUp() {
+  const q = followQuery.value.trim()
+  if (!q || followLoading.value || !report.value) return
+  followLoading.value = true
+  error.value = ''
+  followStreaming.value = ''
+  followMessages.value.push({ role: 'user', content: q })
+  followQuery.value = ''
+  try {
+    const body = { symbols: null, market: props.marketTab, query: q }
+    if (sessionId.value) body.session_id = sessionId.value
+    let acc = ''
+    await startStream('/llm-report/stream', body, (token) => { acc += token; followStreaming.value = acc })
+    if (acc) followMessages.value.push({ role: 'assistant', content: acc })
+    followStreaming.value = ''
+  } catch (e) {
+    if (e?.name !== 'AbortError') error.value = '追问失败：' + (e?.message || '网络错误')
+  } finally {
+    followLoading.value = false
+  }
+}
+
+function refreshReport() {
+  sessionId.value = ''
+  generate()
+}
+
 // R5 交互优化：切换市场 tab → 只取消进行中的旧流、清空旧报告（避免残留旧市场内容），
 // **不自动触发 LLM 研判**——LLM 生成耗时且消耗配额，由用户点击按钮主动生成。
 watch(() => props.marketTab, () => {
@@ -75,6 +129,10 @@ watch(() => props.marketTab, () => {
   genSeq++ // 使旧 generate 的后续回调失效
   report.value = ''
   error.value = ''
+  followMessages.value = []
+  followStreaming.value = ''
+  followQuery.value = ''
+  sessionId.value = ''
 })
 </script>
 
@@ -202,4 +260,14 @@ watch(() => props.marketTab, () => {
 
 .error { margin-top: var(--space-3); padding: var(--space-2) var(--space-3); color: var(--color-danger-700); background: var(--color-bg-danger-subtle); border-radius: var(--radius-md); font-size: var(--font-size-sm); }
 .report { margin-top: var(--space-4); line-height: 1.8; }
+.followup { margin-top: var(--space-4); border-top: 1px dashed var(--color-border-medium); padding-top: var(--space-4); }
+.chat-row { display: flex; margin-bottom: var(--space-3); }
+.chat-row.user { justify-content: flex-end; }
+.chat-bubble { max-width: 90%; padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); font-size: var(--font-size-sm); line-height: 1.7; }
+.chat-bubble.user { background: var(--color-surface-tertiary); }
+.chat-bubble.assistant { background: var(--color-surface-secondary); border-left: 3px solid var(--color-brand-500); }
+.input-row { display: flex; gap: var(--space-2); margin-top: var(--space-3); }
+.text-input { flex: 1; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border-medium); border-radius: var(--radius-md); background: var(--color-surface-primary); color: var(--color-text-primary); }
+.btn-follow { padding: var(--space-2) var(--space-5); }
+.btn-new-chat { padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border-medium); border-radius: var(--radius-md); background: transparent; color: var(--color-text-secondary); cursor: pointer; }
 </style>

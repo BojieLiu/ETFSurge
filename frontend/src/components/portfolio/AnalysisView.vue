@@ -45,6 +45,27 @@
       :loading="loading"
       :composite-decision="compositeDecision"
     />
+
+    <!-- AI 解读 + 追问（symbol-analysis/stream 会话） -->
+    <section v-if="selected" class="card ai-chat" aria-label="AI 解读">
+      <div class="ai-chat-head">
+        <span>🤖 AI 解读</span>
+        <button class="link-btn" @click="explain" :disabled="aiLoading">生成解读</button>
+      </div>
+      <div v-if="aiReport" class="ai-report" v-html="renderMarkdown(aiReport)"></div>
+      <div v-for="(m, i) in aiMessages" :key="i" class="chat-row" :class="m.role">
+        <div class="chat-bubble" :class="m.role" v-html="renderMarkdown(m.content)"></div>
+      </div>
+      <div v-if="aiStreaming" class="chat-row assistant">
+        <div class="chat-bubble assistant streaming" v-html="renderMarkdown(aiStreaming)"></div>
+      </div>
+      <div v-if="aiReport && !aiLoading" class="input-row">
+        <input v-model="aiQuery" placeholder="就本标的追问，如：顶背离可信吗？" class="text-input"
+          :disabled="aiLoading" @keydown.enter="askFollow" />
+        <AppButton variant="secondary" @click="askFollow" :disabled="aiLoading || !aiQuery.trim()">追问</AppButton>
+      </div>
+      <div v-if="aiError" class="error">{{ aiError }}</div>
+    </section>
   </div>
 </template>
 
@@ -63,6 +84,8 @@ import { resolveTaTarget } from '../../utils/taTarget'
 import ControlPanel from '../analysis/ControlPanel.vue'
 import ChartPanel from '../analysis/ChartPanel.vue'
 import SignalPanel from '../analysis/SignalPanel.vue'
+import { renderMarkdown } from '../../utils/markdown'
+import { useLLMStream } from '../../composables/useLLMStream'
 
 use([CanvasRenderer, CandlestickChart, BarChart, LineChart, TitleComponent, TooltipComponent, GridComponent, LegendComponent, DataZoomComponent])
 
@@ -519,6 +542,65 @@ async function fetchChart() {
   if (seq === fetchSeq.value) loading.value = false
 }
 
+// ── AI 解读 + 追问 ──
+const aiReport = ref('')
+const aiMessages = ref([])
+const aiStreaming = ref('')
+const aiQuery = ref('')
+const aiLoading = ref(false)
+const aiError = ref('')
+const { start: startAi, stop: stopAi, sessionId: aiSession } = useLLMStream()
+
+function resetAi() {
+  stopAi()
+  aiReport.value = ''
+  aiMessages.value = []
+  aiStreaming.value = ''
+  aiQuery.value = ''
+  aiSession.value = ''
+  aiError.value = ''
+}
+
+async function explain() {
+  if (!selected.value || aiLoading.value) return
+  aiLoading.value = true
+  aiError.value = ''
+  aiReport.value = ''
+  aiMessages.value = []
+  aiSession.value = ''
+  try {
+    await startAi('/symbol-analysis/stream', {
+      symbol: getActiveSymbol(), asset_type: getActiveAssetType(), market: 'A', question: '',
+    }, (t) => { aiReport.value += t })
+  } catch (e) {
+    if (e?.name !== 'AbortError') aiError.value = '解读失败：' + (e?.message || '网络错误')
+  } finally {
+    aiLoading.value = false
+  }
+}
+
+async function askFollow() {
+  const q = aiQuery.value.trim()
+  if (!q || aiLoading.value) return
+  aiLoading.value = true
+  aiError.value = ''
+  aiStreaming.value = ''
+  aiMessages.value.push({ role: 'user', content: q })
+  aiQuery.value = ''
+  try {
+    const body = { symbol: getActiveSymbol(), asset_type: getActiveAssetType(), market: 'A', question: q }
+    if (aiSession.value) body.session_id = aiSession.value
+    let acc = ''
+    await startAi('/symbol-analysis/stream', body, (t) => { acc += t; aiStreaming.value = acc })
+    if (acc) aiMessages.value.push({ role: 'assistant', content: acc })
+    aiStreaming.value = ''
+  } catch (e) {
+    if (e?.name !== 'AbortError') aiError.value = '追问失败：' + (e?.message || '网络错误')
+  } finally {
+    aiLoading.value = false
+  }
+}
+
 // Parent-driven selection (merged view)
 // R5 #3 修复：旧实现要求 etfInfoMap.value[sym] 存在才切换——当父组件点击发生在
 // etfInfoMap 构建完成前（fetchEtfs 异步无去重），守卫失败导致 selected 永不更新，
@@ -529,6 +611,7 @@ watch(
   (sym) => {
     if (sym) {
       selected.value = sym
+      resetAi()
       fetchChart()
     }
   }
@@ -615,4 +698,16 @@ onMounted(async () => {
 .price-summary-label { font-size: var(--font-size-sm); color: var(--color-text-secondary); white-space: nowrap; }
 .price-change { font-size: var(--font-size-2xl); font-weight: var(--font-weight-bold); font-family: var(--font-family-mono); }
 .price-close { font-size: var(--font-size-sm); color: var(--color-text-tertiary); font-family: var(--font-family-mono); }
+.ai-chat { padding: var(--space-5); }
+.ai-chat-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-3); font-weight: var(--font-weight-semibold); }
+.link-btn { border: none; background: transparent; color: var(--color-brand-600); cursor: pointer; }
+.ai-report { line-height: 1.8; margin-bottom: var(--space-3); }
+.chat-row { display: flex; margin-bottom: var(--space-3); }
+.chat-row.user { justify-content: flex-end; }
+.chat-bubble { max-width: 90%; padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); font-size: var(--font-size-sm); line-height: 1.7; }
+.chat-bubble.user { background: var(--color-surface-tertiary); }
+.chat-bubble.assistant { background: var(--color-surface-secondary); border-left: 3px solid var(--color-brand-500); }
+.input-row { display: flex; gap: var(--space-2); margin-top: var(--space-3); }
+.text-input { flex: 1; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border-medium); border-radius: var(--radius-md); background: var(--color-surface-primary); color: var(--color-text-primary); }
+.error { margin-top: var(--space-3); color: var(--color-danger-700); }
 </style>

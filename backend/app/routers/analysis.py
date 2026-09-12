@@ -219,6 +219,8 @@ class SymbolAnalysisRequest(BaseModel):
     market: str = "A"
     # F10 R35: 预设问题模板（技术面/操作建议等）——可选中个股后针对性分析
     question: str = ""
+    # 追问会话（report/symbol 与 advice 同契约）：None=新会话
+    session_id: str | None = None
 
 class NewsImpactRequest(BaseModel):
     news: dict[str, Any]
@@ -227,6 +229,9 @@ class NewsImpactRequest(BaseModel):
 class LLMReportRequest(BaseModel):
     symbols: list[str] | None = None
     market: str = "A"
+    # 追问扩展（llm-report-chat 契约）：空=首报生成；非空=追问
+    query: str | None = None
+    session_id: str | None = None
 
 def _filter_indices_for_market(market_ctx, indices: list[dict]) -> list[dict]:
     """P0-2 (R4-13 / N04 补全): 指数按市场过滤——HK/US 报告不再混入 A 股指数。
@@ -303,15 +308,73 @@ async def llm_report_stream(req: LLMReportRequest):
 
     R49: 上下文采集 / 历史 K 线 / 指标计算等重 I/O 全部延后到流式首字节
     （event: progress）之后，在 _build 工厂内完成，确保首字节即时可见进度。
+
+    追问扩展（llm-report-chat 契约）：query 空=首报（全量采集并冻结快照）；
+    query 非空 + session 命中=追问（读冻结快照，不重采）。
     """
+    from ..services.chat_session import get_chat_store
     from ..services.llm_context import build_full_context
     from ..services.market_data_hub import market_data_hub
 
+    store = get_chat_store()
+
     async def _build():
+        # getattr 防御：旧单测 _FakeReq 无 query/session_id/symbols 字段
+        query = (getattr(req, "query", None) or "").strip()
+        _req_session = getattr(req, "session_id", None)
+        _req_market = getattr(req, "market", "A") or "A"
+        _req_symbols = getattr(req, "symbols", None)
+        session_id, history = store.start_or_get(_req_session, expect_type="report")
+        # 跨 market 自动开新会话（防 A 快照被 HK 追问污染）
+        _entry = store._sessions.get(session_id)
+        if history and _entry is not None and _entry.get("market") not in (None, _req_market):
+            session_id, history = store._create(session_type="report")
+            _entry = store._sessions.get(session_id)
+
+        # ── 追问路径：冻结快照 + 历史，不重采 ──
+        if query and history:
+            frozen = store.get_frozen(session_id)
+            if frozen is not None:
+                store.append(session_id, {"role": "user", "content": query})
+                snap_txt = frozen.get("snapshot_text", "")
+                hist_txt = store.render_history(session_id)
+                prompt = (
+                    "基于以下冻结市场快照回答追问（快照内数据不得更新，"
+                    "只引用快照内数值；超出快照请声明，不得编数）：\n"
+                    f"## 冻结快照（as_of={frozen.get('as_of') or '未知'}，market={frozen.get('market')}）\n"
+                    f"{snap_txt}\n{hist_txt}\n## 本轮问题\n{query}"
+                )
+                agent = get_agent("market_report")
+
+                async def _record_reply(full_text: str) -> None:
+                    try:
+                        store.append(session_id, {"role": "assistant", "content": full_text})
+                        from ..database import async_session
+                        async with async_session() as db:
+                            await store.persist_session(db, session_id)
+                    except Exception as e:
+                        logger.warning("[llm-report] session persist failed: %s", e)
+
+                wrapped = run_stream_with_cache(agent, prompt, query=f"report:{query}", data_as_of=None)
+
+                async def _session_stream():
+                    reply: list[str] = []
+                    async for ev in wrapped:
+                        if ev.get("event") == "token":
+                            reply.append(ev.get("data", {}).get("token", ""))
+                        if ev.get("event") == "done":
+                            full = "".join(reply)
+                            if full:
+                                await _record_reply(full)
+                            ev.setdefault("data", {})["session_id"] = session_id
+                        yield ev
+
+                return _session_stream()
+        # ── 首报路径（既有全量采集，保持不变） ──
         # 使用统一上下文管道采集数据
         ctx = await build_full_context(
             market_data_hub,
-            market=req.market,  # Z31: 按 marketTab 采集对应市场数据
+            market=_req_market,  # Z31: 按 marketTab 采集对应市场数据
             include_regime=True,
             include_sentiment=True,
             include_indices=True,
@@ -333,9 +396,9 @@ async def llm_report_stream(req: LLMReportRequest):
         # Phase 5.1: 使用 MarketContext 按市场过滤主要标的
         from app.core.market_context import resolve_market_context
 
-        market_ctx = resolve_market_context(req.market)
-        if req.symbols:
-            market_data = [m for m in market_data if m.get("symbol") in req.symbols]
+        market_ctx = resolve_market_context(_req_market)
+        if _req_symbols:
+            market_data = [m for m in market_data if m.get("symbol") in _req_symbols]
         else:
             # N04/U9: 只保留本市场 major_symbols + 本市场指数（旧 `asset_type in
             # ("index","futures")` 无差别放行 A 股指数 → HK/US 报告混入 A 股数据）
@@ -395,7 +458,40 @@ async def llm_report_stream(req: LLMReportRequest):
             domestic_macro=_domestic, as_of=_as_of,
         )
         agent = get_agent("market_report")
-        return run_stream_with_cache(agent, prompt, query="market_report", data_as_of=None)
+        # 首报落会话：冻结快照 + done 回填 session_id（追问复用，不重采）
+        _snap_lines = [f"市场状态: {regime or '未知'}"]
+        for _i in (indices or [])[:5]:
+            _snap_lines.append(f"· {_i.get('name', _i.get('symbol', ''))}: {_i.get('price', '—')} ({_i.get('change_pct', '—')})")
+        _snap_text = "\n".join(_snap_lines)[:4000]
+        store.set_frozen(session_id, {"snapshot_text": _snap_text, "as_of": _as_of,
+                                      "market": _req_market}, market=_req_market)
+        if query:
+            store.append(session_id, {"role": "user", "content": query})
+
+        async def _record_first(full_text: str) -> None:
+            try:
+                store.append(session_id, {"role": "assistant", "content": full_text[:4000]})
+                from ..database import async_session
+                async with async_session() as db:
+                    await store.persist_session(db, session_id)
+            except Exception as e:
+                logger.warning("[llm-report] session persist failed: %s", e)
+
+        wrapped = run_stream_with_cache(agent, prompt, query="market_report", data_as_of=None)
+
+        async def _first_stream():
+            reply: list[str] = []
+            async for ev in wrapped:
+                if ev.get("event") == "token":
+                    reply.append(ev.get("data", {}).get("token", ""))
+                if ev.get("event") == "done":
+                    full = "".join(reply)
+                    if full:
+                        await _record_first(full)
+                    ev.setdefault("data", {})["session_id"] = session_id
+                yield ev
+
+        return _first_stream()
 
     return _sse_stream(_build)
 
@@ -692,8 +788,64 @@ async def symbol_analysis_stream(req: SymbolAnalysisRequest):
     R49: 实时行情 / 历史 K 线 / 指标 / 基本面 / 资讯 / 板块快照等重 I/O 全部
     延后到首字节（progress）之后在 _build 内完成；数据全空时不调 LLM，改为
     抛出 _SSEPreError 经 _sse_stream 转为 DATA_UNAVAILABLE error 事件。
+
+    追问扩展（symbol-analysis-chat 契约）：session 命中 + question 非空 →
+    读冻结标的快照，不重拉；换标自动开新会话。
     """
+    from ..services.chat_session import get_chat_store
+
+    _store = get_chat_store()
+
     async def _build():
+        # getattr 防御：旧单测 _FakeReq 无 session_id 字段
+        _raw_session = getattr(req, "session_id", None)
+        _sess_id, _hist = _store.start_or_get(_raw_session, expect_type="symbol")
+        _ent = _store._sessions.get(_sess_id)
+        if _hist and _ent is not None and _ent.get("symbol") not in (None, req.symbol):
+            _sess_id, _hist = _store._create(session_type="symbol")
+            _ent = _store._sessions.get(_sess_id)
+        _question = (getattr(req, "question", None) or "").strip()
+        # 追问路径：冻结快照复用，不重拉 K 线/基本面
+        if _question and _hist:
+            _frozen = _store.get_frozen(_sess_id)
+            if _frozen is not None:
+                _store.append(_sess_id, {"role": "user", "content": _question})
+                _hist_txt = _store.render_history(_sess_id)
+                _prompt = (
+                    "基于以下冻结标的快照回答追问（只引用快照内数值；"
+                    "超出快照请声明，不得编数）：\n"
+                    f"## 冻结标的快照（symbol={_frozen.get('symbol')}）\n"
+                    f"{_frozen.get('snapshot_text', '')}\n{_hist_txt}\n## 本轮问题\n{_question}"
+                )
+                _agent = get_agent("symbol_analysis")
+
+                async def _record_follow(full_text: str) -> None:
+                    try:
+                        _store.append(_sess_id, {"role": "assistant", "content": full_text})
+                        from ..database import async_session
+                        async with async_session() as db:
+                            await _store.persist_session(db, _sess_id)
+                    except Exception as e:
+                        logger.warning("[symbol-analysis] session persist failed: %s", e)
+
+                _wrapped = run_stream_with_cache(
+                    _agent, _prompt, query=f"symbol:{req.symbol}:{_question}",
+                    data_as_of=None, max_retries=1,
+                )
+
+                async def _follow_stream():
+                    _reply: list[str] = []
+                    async for _ev in _wrapped:
+                        if _ev.get("event") == "token":
+                            _reply.append(_ev.get("data", {}).get("token", ""))
+                        if _ev.get("event") == "done":
+                            _full = "".join(_reply)
+                            if _full:
+                                await _record_follow(_full)
+                            _ev.setdefault("data", {})["session_id"] = _sess_id
+                        yield _ev
+
+                return _follow_stream()
         symbol = req.symbol
         name = req.name
         asset_type = req.asset_type
@@ -806,7 +958,8 @@ async def symbol_analysis_stream(req: SymbolAnalysisRequest):
             raise _SSEPreError("DATA_UNAVAILABLE", "数据源暂不可用，请稍后重试")
 
         # F10 R35: 预设问题模板——用户关注点拼入 prompt 做针对性分析
-        focus_line = f"\n用户关注：{req.question}" if (req.question or "").strip() else ""
+        _req_question = getattr(req, "question", None) or ""
+        focus_line = f"\n用户关注：{_req_question}" if _req_question.strip() else ""
         prompt = f"""深度分析标的 {display_name} ({symbol})：
 实时行情：{json.dumps(realtime, ensure_ascii=False)}
 技术指标：{json.dumps(indicators, ensure_ascii=False)}
@@ -827,13 +980,47 @@ async def symbol_analysis_stream(req: SymbolAnalysisRequest):
         # max_retries=1 快速失败（429 退避上限由 llm.py 的 Retry-After 机制处理），
         # 删除旧实现透传的 llm_complete_stream 不存在之参数（该参数名不在其签名内
         # → TypeError → 全部 symbol-analysis/stream 请求 STREAM_ERROR 全挂）。
-        return run_stream_with_cache(
+        # 首报冻结快照 + done 回填 session_id
+        _snap_text = (
+            f"标的 {display_name} ({symbol})；实时行情：{json.dumps(realtime, ensure_ascii=False)[:2000]}\n"
+            f"技术指标：{json.dumps(indicators, ensure_ascii=False)[:2000]}\n"
+            f"基本面：{fundamentals_text[:500]}\n{sector_line[:500]}"
+        )
+        _store.set_frozen(_sess_id, {"snapshot_text": _snap_text, "symbol": symbol},
+                          market=getattr(req, "market", "A"), symbol=symbol)
+        if _question:
+            _store.append(_sess_id, {"role": "user", "content": _question})
+
+        async def _record_first(full_text: str) -> None:
+            try:
+                _store.append(_sess_id, {"role": "assistant", "content": full_text[:4000]})
+                from ..database import async_session
+                async with async_session() as db:
+                    await _store.persist_session(db, _sess_id)
+            except Exception as e:
+                logger.warning("[symbol-analysis] session persist failed: %s", e)
+
+        _first = run_stream_with_cache(
             agent,
             prompt,
-            query=f"symbol:{symbol}:{req.question or ''}",
+            query=f"symbol:{symbol}:{getattr(req, 'question', None) or ''}",
             data_as_of=None,
             max_retries=1,
         )
+
+        async def _first_stream():
+            _reply: list[str] = []
+            async for _ev in _first:
+                if _ev.get("event") == "token":
+                    _reply.append(_ev.get("data", {}).get("token", ""))
+                if _ev.get("event") == "done":
+                    _full = "".join(_reply)
+                    if _full:
+                        await _record_first(_full)
+                    _ev.setdefault("data", {})["session_id"] = _sess_id
+                yield _ev
+
+        return _first_stream()
 
     return _sse_stream(_build)
 
