@@ -215,10 +215,10 @@ watch(() => props.marketTab, () => {
   font-weight: var(--font-weight-semibold);
   line-height: 1.4;
 }
-.chat-bubble :deep(h1) { font-size: 1.15em; }
-.chat-bubble :deep(h2) { font-size: 1.1em; }
+.chat-bubble :deep(h1) { font-size: 1.1em; }
+.chat-bubble :deep(h2) { font-size: 1.05em; }
 .chat-bubble :deep(h3),
-.chat-bubble :deep(h4) { font-size: 1.05em; }
+.chat-bubble :deep(h4) { font-size: 1em; }
 .chat-bubble :deep(h1:first-child),
 .chat-bubble :deep(h2:first-child),
 .chat-bubble :deep(h3:first-child),
@@ -230,7 +230,8 @@ watch(() => props.marketTab, () => {
 .chat-bubble :deep(ul:last-child),
 .chat-bubble :deep(ol:last-child) { margin-bottom: 0; }
 .chat-bubble :deep(table) {
-  width: 100%;
+  width: auto;
+  max-width: 100%;
   border-collapse: collapse;
   margin: 0.5em 0;
   font-size: 0.95em;
@@ -239,12 +240,16 @@ watch(() => props.marketTab, () => {
 }
 .chat-bubble :deep(th),
 .chat-bubble :deep(td) {
-  padding: 4px 8px;
+  padding: 5px 10px;
   border: 1px solid var(--color-border-light);
   text-align: left;
   vertical-align: top;
   word-break: break-word;
 }
+/* LLM 表格首列通常是短维度名（市场阶段/风格特征）：禁折行防竖排字，
+   长内容由 display:block + overflow-x 横向滚动兜底 */
+.chat-bubble :deep(th:first-child),
+.chat-bubble :deep(td:first-child) { white-space: nowrap; }
 .chat-bubble :deep(th) {
   background: var(--color-surface-secondary);
   font-weight: var(--font-weight-semibold);
