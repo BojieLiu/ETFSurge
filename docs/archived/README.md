@@ -13,6 +13,17 @@
 
 > 归档后引用统一指向 `docs/archived/...`。**同步更新**：`docs/round35-architecture-review.md` 第 404 行一处硬路径引用 `docs/round34-container-reacceptance-r102-r108.md` → `docs/archived/round34-container-reacceptance-r102-r108.md`（加"2026-08-30 归档"标注）。代码侧、测试 docstring、其他文档无硬路径引用（"round34 §X"语义指针移动后仍可读）。
 > 不归档保留于 `docs/` 顶层：`round39-container-reacceptance-r34-r38.md`（当前活跃轮文档，§0-§10 完整方案入档）、`design-checklist.md`（常驻设计清单）、`engine-dedup-layers.md`（round35 B3-S3 契约文档，仍被业务引用）、`known-env-issues.md`（常驻环境问题档案，引用 round36 §1.1）、`patrol-orchestration-plan.md`（常驻流程）、`prompt-templates/`（常驻模板）、`api-contracts/`（活跃契约）、README/AGENTS（项目说明）。
+
+## 最近一次归档（2026-09-13，round55 容器全链路复验完成 + round39/51/52 承接映射收敛后）
+
+并入本目录（均已完成使命，无活跃实施依据身份）：
+- `round39-container-reacceptance-r34-r38.md`（round39 全面验证矩阵 + §5 决策 5 项；待复测 R146–R150 已由 round53 §12 闭环，R143 已由 round51 §0.2 实测修正 ✅，遗留 R152/P0 已随 round53 批次落地）
+- `round51-container-reacceptance-r39-v7.md`（round51 方案 A–F 已实施 `a9f704d` 且 round52 §0.2 实测生效；遗留 5 项：R146→§12 关闭、off_exchange→round55 §0.2、patrol→§6#4 规则关闭、R141→R171 落地关闭、R168→64 条关闭）
+- `round52-container-reacceptance-round51-plans.md`（round52 13 项矩阵由 round53 §4.3 全部闭合；方案 A–F 已实施 `a83cd9f` 且 round53 §0.1 实测生效；遗留已迁 round53 §6）
+
+> 归档后引用统一指向 `docs/archived/...`。同步更新：**无**（全仓无 `docs/round39-*.md` / `docs/round51-*.md` / `docs/round52-*.md` 硬路径引用；代码注释中「round51 §x」「round52 §x」为语义指针，移动后仍可读）。
+> 不归档保留于 `docs/` 顶层：`round53-container-reacceptance-round52-plans.md`（当前活跃，§6 决策待拍板 + R186 系列引用）、`round54-frontend-polish.md`（四态走查 pending）、`round55-container-reacceptance-round53-plans.md`（当前轮）、`design-checklist.md`（常驻设计清单）、`engine-dedup-layers.md`（仍被代码引用）、`known-env-issues.md`（常驻环境问题档案）、`patrol-orchestration-plan.md`（常驻流程）、`prompt-templates/`（常驻模板）、`api-contracts/`（活跃契约）、`redundant-review.md`（P1-5 + R185-C 未闭）、`etfsurge-agentic-upgrade-v7.md`（v7 规格仍被代码引用）、`v7-p1.5-langgraph-comparison.md` / `v7-p2-dsh-harness-comparison.md`（现行决策依据）、`evals-report.md`（evals 输出目标）、README/AGENTS（项目说明）。
+
 ## 最近一次归档（2026-08-22，round34 容器复验完成 + round33 §8 R102 已实施并容器内首验通过后）
 并入本目录（均已完成使命，无活跃实施依据身份）：
 - `round33-container-reacceptance-r99-r101.md`（round33 R99-R101 复验全 PASS + §8 R102 方案；R102 已由 commit `38a194d` 实施、round34 全新镜像容器内首验 PASS——distinct trade_date 245→502、census warn=12/no_data=15 与本地一致、重启幂等）
