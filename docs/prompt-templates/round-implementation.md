@@ -31,16 +31,24 @@ round实施 <round文档路径>
    - 先读文档对应章节（问题/根因/方案/验收/负向断言），只实现文档列出的项，不扩大范围
    - 每个改动项：先写能抓住问题的单测（含**能失败的负向断言**）→ 再实现 → 跑该文件测试
    - 实现要求：精确 `file:line` 定位、不改无关代码、不引入脚手架/死代码
-   - **数据契约变更（如因子值可 None）必须 `rg` 全库扫消费方**（abs/sum/f"{v:.2f}"/
-     isinstance 守卫），防止改动只在测试绿、运行期炸
+    - **数据契约变更（如因子值可 None）必须 `rg` 全库扫消费方**（abs/sum/f"{v:.2f}"/
+      isinstance 守卫），防止改动只在测试绿、运行期炸
+    - **字符串口径同步（R186 教训，强制）**：新增枚举分支 / 状态文案 / 错误前缀
+      （如 LLM 兜底新文案）时，必须 `rg` 消费该字符串的**匹配器/识别器**并同步——
+      分类器加分支而识别器漏同步 = 写入口径与消费口径断裂（R163→R177→R186 三现同型）。
+      长治法：前缀常量收敛到一处、两边同引 + 一致性单测（分类器全分支输出 ∈ 常量集）
    - **API 契约先行（AGENTS.md 强制，round52 实操确认）**：接口/字段语义类 R
      （加字段、改响应语义）先改 `api-contracts/` 再实现，契约含字段级断言；
      ⚠️ 域总契约（如 news/all.md 含多端点定义）**只能追加段，不可整文件重写**
      （会丢其它端点定义触发 check_routes FAIL——round52 实测）
-   - **测试基建坑（round52 实操，mock/fixture）**：hub 同步方法经 run_sync 包装 →
-     mock 用 **MagicMock** 非 AsyncMock；同 symbol 集合用例共享 cache_key
-     （_PRICE_MAP_CACHE 类）→ autouse fixture 清缓存；fixture with-item 嵌套
-     ~20 个撞 CPython compile 上限（ExitStack 累加同样撞）→ 拆分 fixture
+    - **测试基建坑（round52 实操，mock/fixture）**：hub 同步方法经 run_sync 包装 →
+      mock 用 **MagicMock** 非 AsyncMock；同 symbol 集合用例共享 cache_key
+      （_PRICE_MAP_CACHE 类）→ autouse fixture 清缓存；fixture with-item 嵌套
+      ~20 个撞 CPython compile 上限（ExitStack 累加同样撞）→ 拆分 fixture
+    - **前端 hook 形状漂移（R187 教训）**：新 computed 若解构 hook 返回（如
+      `metadata.value`），必须 `?.` 防御；spec mock 须补「缺键形态」用例——
+      mock 形状与 hook 实际返回不一致时，错误在渲染后抛、用例照样绿，
+      只剩 Unhandled Rejection 噪音（round55 实测 9 个），门禁可信度被污染
    - **新测试开工 10 秒预检（round53 遗留批复盘，强制——三条违规各致一轮返工）**：
      * *T4 归宿*：新用例先查并入哪个既有主题测试文件（`check_test_baseline.py`
        基线守恒，T4 约定不开 `test_roundXX_*` 新文件）——先建新文件再合并 = 白做
@@ -78,9 +86,11 @@ round实施 <round文档路径>
      `nohup ... & disown`（Git Bash）或 `start.ps1 -Silent -NoOpen` 且**之后别再
      TaskStop 它的父任务**（TaskStop 会连坐杀整个进程树，曾误诊为「后端崩溃」）。
      撞外部源限流时接受降级并标注「待交易时段复测」，不要无限重试。
-     ⚠️ **验证窗口标注（与诊断模板同规）**：涉及外部数据源/盘中行为的验收项
-     （如 off-exchange 盘中 ti 估值）盘后无法真验时，验收口径收口到可测子集，
-     未测项标「待交易时段复测」——不得把窗口外结果当 PASS 证据。
+      ⚠️ **验证窗口标注（与诊断模板同规）**：涉及外部数据源/盘中行为的验收项
+      （如 off-exchange 盘中 ti 估值）盘后无法真验时，验收口径收口到可测子集，
+      未测项标「待交易时段复测」——不得把窗口外结果当 PASS 证据。
+      周末跑 e2e：design/strategy 任务 120s 轮询窗可能不够，超时后查任务最终态
+      （completed 即补证，不记 FAIL，round55 task 61 实测）。
    - **启动命令钉死（round34 实施轮教训，勿现场实验）**：
      `python -m uvicorn app.main:app --host :: --port 8000`（start.ps1 同款）。
      ⚠️ Windows 上 `::` 为 v6only——只监听 ::1，不覆盖 127.0.0.1；verify_e2e 的
@@ -143,7 +153,7 @@ round实施 <round文档路径>
 | 后端生命周期 | 单自包含任务起→验→杀；验证前先 `curl /health`；不杀用户后端 | 反复起停/误诊崩溃 = 过程混乱 |
 | 环境性失败 | 限流/fork/新闻源 0 条等复跑确认非回归，对照既有基线归类 | 直接放过或无限重试 |
 | 环境性快筛（round53） | 失败文件**不在本轮 diff** + 单跑/组合绿 → 直接归档「环境性」，不深挖不逐个验证 | 对改动面外的失败做完整探因链 = 时长失控 |
-| 全量失败止损 | 全量红先分桶：本轮 diff 内 → 修；diff 外且单跑绿 → 归档；diff 外且单跑红 → 存量回归报告用户 | 混在一起逐个修 = 违反「全量只跑一次」 |
+| 全量失败止损 | 全量红先分桶：本轮 diff 内 → 修；diff 外且单跑绿 → 归档；diff 外且单跑红 → 存量回归报告用户；**并行隔离桶（R188）**：`-n auto` 红但单文件绿 = 全局单例（SourceRegistry 熔断等）跨用例污染 → 加 fixture 隔离，不深挖业务 | 混在一起逐个修 = 违反「全量只跑一次」 |
 
 ## 关联
 

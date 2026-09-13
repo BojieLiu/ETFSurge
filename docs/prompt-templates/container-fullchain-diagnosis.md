@@ -32,6 +32,7 @@
 未收到明确指令，不得进入实施/写修复代码/commit/push。
 
 # 环境步骤
+0. **前置预检**：Docker daemon 存活（`docker --version` + `docker compose ps` 能通；Windows 下 `com.docker.service` Stopped 时先拉起——daemon 没起时后续 `down/build` 报误导性错误，round55 实测）
 1. 停止上一轮遗留容器（若在运行）：`docker compose -f docker-compose.yml -f docker-compose.diag.yml --profile prod down`
 2. **前置检查**：`backend/.env` 存在且含 `DEEPSEEK_API_KEY`（缺失则 prod 容器 LLM 链路全挂）
 3. 构建并启动生产态 + diag overlay（注入 PROFILE_WARMUP=1 预热画像，历轮诊断标配）：
@@ -40,10 +41,16 @@
    ×3=pandas_ta/mootdx --no-deps 拆分安装、npm deprecated glob——出现即按已知归类，不算新问题）
 4. 记录：镜像构建耗时、容器启动耗时、后端就绪时间（warmup 实测 35-40s，round49 两阶段预热后；
    超 30s 预算会打 `[warmup-budget]` 告警，含分段归因为正常形态，看 backend.log）
-5. 确认前后端存活：`docker compose ps` + `curl --noproxy '*' http://localhost/`（前端）与 `/health`（后端根路径，**不在 /api/v1 下**）
+5. 确认前后端存活：`docker compose ps` + `curl --noproxy '*' http://localhost/`（前端）与 `/health`（后端根路径，**不在 /api/v1 下**）。
+   容器诊断跑 verify_e2e 统一加 `--host 127.0.0.1 --port 8000`（R189 教训，2026-09-12 追加）：
+   脚本默认 `BASE=http://[::1]:8000`，Docker Desktop Windows NAT 下 `::1` TCP 不可达，
+   不加参数开局即 `[FAIL] TCP 端口 8000 可达 (::1)`——属调用口径错，非产品回归。
 6. **宿主代理坑（探针必读）**：宿主常见系统代理（HTTP_PROXY=127.0.0.1:7897 类）会让
    urllib/requests 探针耗时失真 50 倍（round53 实测 21s vs curl 0.23s）——**接口探针统一
-   `curl --noproxy '*'`**（或 NO_PROXY=localhost），禁止用裸 urllib 计时
+   `curl --noproxy '*'`**（或 NO_PROXY=localhost），禁止用裸 urllib 计时。
+   **WS 探针同坑**：python websockets 同样被代理吞噬致 3/3 握手超时（round55 实测）——
+   连接必须传 `proxy=None`（或进进程前清掉 `*_PROXY` 环境变量），否则误判后端 WS 故障。
+   task-notifications 无快照属正常形态（无事件即无推送），**以握手 101 为准**，不以首消息为断言。
 7. **回收老版本镜像**：`docker image prune -f`（构建完成后上一轮镜像层变 dangling，清掉；只清 dangling，不动其他项目镜像）
 8. 全程只起这一次容器，所有诊断在这一实例内完成，不反复重启
 
@@ -85,9 +92,14 @@
 - [ ] 预热任务：基金净值同步 / 板块缓存 / 市态+情绪（backend.log 逐项核）
 - [ ] 关键链路首呼耗时（fresh 容器 = 天然冷缓存窗口）：
       watchlist / search / design / factor-health / symbol-analysis
-      记录实测值，与上轮基线对比（已知基线参考：concept 38.9s / watchlist 18.3s / warmup 53.8s 超 30s 预算）
+      记录实测值，与上轮基线对比（已知基线参考：concept 38.9s / watchlist 18.3s / warmup 53.8s 超 30s 预算）。
+      ⚠️ **周末口径**：慢源 + 全量计算下 factor-health 可超 2s 阈值（round55 实测 6.22s vs round53 1.41s）——
+      先记性能债 + 标注「待交易时段复测」，不直接定性回归。
 - [ ] 因子填充率快照：factor_availability / 分项覆盖率，与上轮基线对比（R85 检查）
-- [ ] 数据源健康：`python scripts/data_health_check.py` 全项
+- [ ] 数据源健康：`python scripts/data_health_check.py` 全项（宿主跑加超时预算，如 300s）。
+      ⚠️ **检查器先挂口径（round55 教训，2026-09-12 追加）**：周末全源慢时检查器可逐 symbol 卡死、
+      超时无汇总——此时按「检查器未完成（环境性），结论以生产口径（factor-health / realtime）交叉验证为准」记录，
+      不记产品 FAIL；另起 R 条目跟检查器超时熔断（单项 wait_for + 总预算）。
       ⚠️ **检查器结论须交叉验证（R148/R150 教训，2026-09-04 追加）**：检查器 FAIL ≠ 生产断链——
       round51-53 连续 3 轮「5 critical factor 全空」实为检查器裸 compute() 缺 symbol_extra 注入的
       口径误报（生产路径 hub.refresh→get_pool 实测 7/7 OK）。检查器结论写入 round 文档前，
@@ -112,11 +124,19 @@
          后者缺位曾多轮漏检（同指数 25% 集中在 Σ=1/预算/上限全绿下潜行）
 - [ ] **前端 Lighthouse 评分（软门禁）**：首页 + /dashboard 四类别分 + 核心 Web Vitals（LCP/CLS/TBT），与 F18 基线对比
       （依赖宿主 Chrome/headless-shell；预算或环境受限时**明确标注「未执行」并登记遗留**，不得静默跳过）
-- [ ] 回归基线：`python scripts/verify_e2e.py` 全 PASS；后端 pytest / 前端 npm test 跑一轮
+- [ ] 回归基线：`python scripts/verify_e2e.py` 全 PASS；后端 pytest / 前端 npm test 跑一轮。
+      ⚠️ **e2e 时长预算（round55 教训，2026-09-12 追加）**：周末/慢源下 e2e 可超 10min
+      （design/strategy 120s 轮询窗不够用——任务事后 completed 属窗口性假失败）。
+      允许分段跑（`--module`）或接受部分结果 + 事后查任务最终态补证；调用口径见 §环境步骤 5
+      （`--host 127.0.0.1`）。
 - [ ] patrol.py 巡检：`python scripts/patrol.py --full`（连续多轮未跑时在遗留清单显式登记，勿复读）
 
 **探针产物落盘惯例**：会话级临时目录 `C:/Users/Public/etf_probe/`（probe 脚本+输出、build 日志、
 抓取的 json 快照；**不入仓**），round 文档引用产物文件名即可。
+**PowerShell 探针三纪律（round55 实测，2026-09-12 追加）**：
+`head` 不可用 → 用 `Select-Object -First/Last`；curl 传 JSON 必须经文件
+（`--data "@body.json"`，shell 内联引号必炸——先 `json.dump` 写文件再调）；curl 输出
+管道进 python 会 CJK 编码炸 JSON → 一律 `-o file.json` 落盘再解析，禁止管道直解。
 
 # 前端 Lighthouse 评分（性能/可访问性，软门禁）
 在「前端页面四态」之外补量化指标——对容器内生产前端（nginx :80）跑 Lighthouse 评分：
