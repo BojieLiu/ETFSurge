@@ -104,7 +104,7 @@ import { marketApi } from '../../api'
 
 const { start: startStream, stop: stopStream, progress, metadata } = useLLMStream()
 const modelLine = computed(() => {
-  const m = metadata.value
+  const m = metadata?.value // R187: hook 缺键形态守卫（mock/hook 漂移时不得抛）
   if (!m || !m.model) return ''
   return `模型 · ${m.model}` + (m.cached ? '（缓存）' : '')
 })

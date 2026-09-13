@@ -34,6 +34,19 @@ def _patch_hub_quiet(monkeypatch):
     monkeypatch.setattr("app.fetchers.macro_fetcher.fetch_gdp_series", lambda n=8: [])
 
 
+@pytest.fixture(autouse=True)
+def _reset_factor_history_circuit():
+    """R188 (round55 §4.2 方案D): 隔离全局 SourceRegistry 熔断。
+
+    factor.history 熔断器是进程级单例，`-n auto` 同 worker 内先行用例
+    熔断后会污染本文件用例（KeyError: 'close' 偶发 FAIL，单跑绿）。
+    每个用例前后复位，跨用例污染不再发生。
+    """
+    fr._source_registry.reset_source("factor.history")
+    yield
+    fr._source_registry.reset_source("factor.history")
+
+
 def test_fetch_history_budget_bounds():
     """预算下限 30s，并按 25s/8 并发线性增长。"""
     assert fr._fetch_history_budget(1) == 30.0
@@ -96,3 +109,34 @@ async def asyncio_sleep_forever():
     """模块级辅助：永久挂起，便于被 wait_for 取消。"""
     import asyncio
     await asyncio.sleep(3600)
+
+
+async def test_open_circuit_returns_empty_then_reset_restores(monkeypatch):
+    """R188 负向：先强制熔断 factor.history → 成功路径返回空（旧实现必 FAIL）；
+    复位（fixture 同款动作）后同一路径恢复正常。
+
+    锁定「熔断跨用例污染」的因果链：空数据来自熔断器开路，非取数逻辑回归。
+    """
+    from app.core import async_utils
+
+    _patch_hub_quiet(monkeypatch)
+    monkeypatch.setattr(hub, "get_history", _fake_history_rows)
+
+    async def _direct(call, *args, timeout=None, **kwargs):
+        return call(*args, **kwargs)
+
+    monkeypatch.setattr(async_utils, "run_sync", _direct)
+    monkeypatch.setattr(fr, "_get_cached_kline", lambda symbols: None)
+
+    reg = fr.FactorRegistry()
+    # 强制开路：模拟同 worker 先行用例熔断后的污染态
+    fr._source_registry.health("factor.history").record_hard_failure(
+        time.time(), error_message="R188 negative probe")
+    poisoned = await reg._fetch_market_data(["159338"])
+    assert poisoned.get("159338") == {}, \
+        f"开路时应返回空数据，实际: {poisoned.get('159338')}"
+    # 复位后恢复（旧实现无 fixture 时此断言 FAIL）
+    fr._source_registry.reset_source("factor.history")
+    data = await reg._fetch_market_data(["159338"])
+    assert "159338" in data
+    assert data["159338"]["close"]

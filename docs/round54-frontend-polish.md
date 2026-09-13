@@ -1,6 +1,6 @@
 # Round54 — 前端 UI 打磨轮（纯静态、不动业务）
 
-> **状态**：设计稿 / 待 review
+> **状态**：已落地（`7c062b6` round54 前端抛光 + `f59fb17` P0 视觉抛光；实证：PortfolioManager/AnalysisView/ConfigView 内嵌 page-header 已删、Dashboard compact 三区块、App.vue 汉堡+drawer、App.spec 断言在位；vitest 552 绿 + build 绿）——**剩余仅浏览器四态走查**（并入 round55 §6#5，需交易时段 + 真浏览器）。
 > **范围**：纯前端 UI 静态调整，不改业务逻辑、不改 API、不动后端
 > **触发**：上一会话完成对前端的整体审阅，输出 11 条建议（P0×3 / P1×5 / P2×3），本轮选高 ROI 子集落地
 > **设计阶段**：所有改动已在用户浏览器实测截图（既有运行实例）基础上设计；探针命令附 §6

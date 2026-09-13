@@ -65,7 +65,7 @@ const marketLabel = computed(() => marketLabels[props.marketTab] || props.market
 const { start: startStream, stop: stopStream, sessionId, metadata } = useLLMStream()
 // 模型归因：done.metadata.model（后端 done.usage.model 透传），缺失回退未知
 const modelLine = computed(() => {
-  const m = metadata.value
+  const m = metadata?.value // R187 同型加固（UnifiedAnalysis/MarketReport/AiAdvisor 三处同模式）
   if (!m || !m.model) return ''
   return `模型 · ${m.model}` + (m.cached ? '（缓存）' : '')
 })

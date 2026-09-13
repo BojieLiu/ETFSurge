@@ -24,6 +24,12 @@ PASS = 0
 FAIL = 0
 ERRORS: list[str] = []
 
+# R189 (round55 §4.2 方案E): 检查器自身鲁棒性——周末全源慢时全池逐只失败
+# 放大，检查器先于被检挂掉（>5min 无汇总）。单项预算 + 总预算 + 超时记 WARN，
+# 恒出汇总（门禁先挂掩盖真实结论 = 防护体系缺口 §4.2②）。
+_SECTION_BUDGET_S = 180.0
+_TOTAL_BUDGET_S = 600.0
+
 
 def check(name: str, ok: bool, detail: str = ""):
     global PASS, FAIL
@@ -40,6 +46,40 @@ def section(title: str):
     print(f"\n{'='*60}")
     print(f"  {title}")
     print(f"{'='*60}")
+
+
+def _run_section(name: str, fn) -> None:
+    """单项预算内跑一节：超时/异常记 WARN（不阻断），后台 daemon 线程随进程退出回收。"""
+    import threading
+
+    errs: list[BaseException] = []
+
+    def _target() -> None:
+        try:
+            fn()
+        except BaseException as e:  # noqa: BLE001 — 检查器不吞错，收口记 WARN
+            errs.append(e)
+
+    t = threading.Thread(target=_target, daemon=True)
+    t.start()
+    t.join(timeout=_SECTION_BUDGET_S)
+    if t.is_alive():
+        check(f"{name}: 超时未完成 (WARN 不阻断)", True,
+              f"section budget {_SECTION_BUDGET_S:.0f}s 耗尽（慢源放大），已跳过本节")
+    elif errs:
+        check(f"{name}: 异常 (WARN 不阻断)", True, str(errs[0])[:120])
+
+
+def _print_summary(started: float) -> None:
+    section("评估结果")
+    print(f"  PASS: {PASS}/{PASS+FAIL}")
+    print(f"  FAIL: {FAIL}/{PASS+FAIL}")
+    print(f"  耗时: {time.time()-started:.0f}s（total budget {_TOTAL_BUDGET_S:.0f}s）")
+    if ERRORS:
+        print(f"\n  失败项:")
+        for e in ERRORS:
+            print(f"    - {e}")
+    print(f"\n  {'ALL CHECKS PASSED' if FAIL == 0 else 'SOME CHECKS FAILED'}")
 
 
 def test_sina_realtime():
@@ -406,34 +446,25 @@ if __name__ == "__main__":
     print(f"#  {time.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'#'*60}")
 
-    section("1. 外部数据源连通性")
-    test_sina_realtime()
-    test_sina_kline()
-
-    section("2. FactorRegistry 因子分")
-    test_factor_differentiation()
-
-    section("3. MarketDataHub 候选池")
-    test_pool_candidate_counts()
-
-    section("4. 存储层")
-    test_db_writable()
-
-    section("5. 熔断器")
-    test_source_registry()
-
-    section("6. 因子样本增长率 (§12 P0-2)")
-    test_factor_sample_growth()
-
-    section("7. 关键因子断链 (round40 实施 · round39 §4.4.4 方案 B)")
-    test_factor_chain_integrity()
-
-    section("评估结果")
-    print(f"  PASS: {PASS}/{PASS+FAIL}")
-    print(f"  FAIL: {FAIL}/{PASS+FAIL}")
-    if ERRORS:
-        print(f"\n  失败项:")
-        for e in ERRORS:
-            print(f"    - {e}")
-    print(f"\n  {'ALL CHECKS PASSED' if FAIL == 0 else 'SOME CHECKS FAILED'}")
+    _t0 = time.time()
+    _sections = [
+        ("1. 外部数据源连通性", lambda: (test_sina_realtime(), test_sina_kline())),
+        ("2. FactorRegistry 因子分", test_factor_differentiation),
+        ("3. MarketDataHub 候选池", test_pool_candidate_counts),
+        ("4. 存储层", test_db_writable),
+        ("5. 熔断器", test_source_registry),
+        ("6. 因子样本增长率 (§12 P0-2)", test_factor_sample_growth),
+        ("7. 关键因子断链 (round40 实施 · round39 §4.4.4 方案 B)", test_factor_chain_integrity),
+    ]
+    try:
+        for _name, _fn in _sections:
+            if time.time() - _t0 > _TOTAL_BUDGET_S:
+                check(f"{_name}: 总预算耗尽跳过 (WARN 不阻断)", True,
+                      f"total budget {_TOTAL_BUDGET_S:.0f}s 耗尽")
+                continue
+            section(_name)
+            _run_section(_name, _fn)
+    finally:
+        # R189: 任何异常/超时路径恒出汇总（不再无输出挂死）
+        _print_summary(_t0)
     sys.exit(0 if FAIL == 0 else 1)

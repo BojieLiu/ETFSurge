@@ -10,6 +10,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.llm_fallback_prefixes import is_llm_fallback_summary
 from app.models.portfolio import PortfolioETF
 from app.services.portfolio._facade_refs import (
     _compute_confidence,
@@ -316,12 +317,10 @@ async def strategy_check(
         # 此时 summary 以"LLM 分析…"开头——同样视为 LLM 失败（风险兜底诚实化）。
         # R70 (round29): 兜底文案新增「配额耗尽」「解析失败」两类，需一并识别——
         # 否则 429/JSONDecodeError 的兜底结果会被当作成功缓存复用。
+        # round55 R186 方案A+B：走 core/llm_fallback_prefixes 收敛 helper（含
+        # round51 R164 新增的 envelope 前缀；check108 实证漏网已修）。
         _llm_sum = str(llm_result.get("summary", ""))
-        if not _llm_failed and (
-            _llm_sum.startswith("LLM 分析超时")
-            or _llm_sum.startswith("LLM 分析配额耗尽")
-            or _llm_sum.startswith("LLM 分析结果解析失败")
-        ):
+        if not _llm_failed and is_llm_fallback_summary(_llm_sum):
             _llm_failed = True
 
         # P2-F: 仅缓存成功的 LLM 报告（失败/兜底不写——避免把降级结果当成功复用）

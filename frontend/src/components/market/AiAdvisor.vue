@@ -64,7 +64,7 @@ const error = ref('')
 const chatScrollRef = ref(null)
 const { start: startStream, stop: stopStream, progress, sessionId, metadata } = useLLMStream()
 const modelLine = computed(() => {
-  const m = metadata.value
+  const m = metadata?.value // R187 同型加固（UnifiedAnalysis/MarketReport/AiAdvisor 三处同模式）
   if (!m || !m.model) return ''
   return `模型 · ${m.model}` + (m.cached ? '（缓存）' : '')
 })
@@ -110,7 +110,7 @@ function resetChat() {
   messages.value = []
   streamingText.value = ''
   sessionId.value = ''
-  metadata.value = null
+  if (metadata) metadata.value = null // R187: 缺键形态守卫（与 modelLine 同理）
   error.value = ''
 }
 // R5: 市场切换重置——A→US 后旧市场的投顾回答/输入不应残留（交互优化）

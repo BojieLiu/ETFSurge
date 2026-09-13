@@ -12,6 +12,12 @@ from app.analysis.llm.prompts import load_prompt
 from app.analysis.registry import get_agent
 
 # round35 §19 GapE: LLM 超时常量唯一事实源（原两处 httpx.Timeout 字面量收敛）
+from app.core.llm_fallback_prefixes import (
+    ENVELOPE_PREFIX,
+    PARSE_FAIL_PREFIX,
+    QUOTA_PREFIX,
+    TIMEOUT_PREFIX,
+)
 from app.core.llm_timeouts import (
     DESIGN_REPORT_READ_S,
     STRATEGY_CHECK_READ_S,
@@ -32,13 +38,15 @@ def _classify_llm_failure_cause(last_err_lower: str, duration_s: float) -> str:
     4. else —— 保守归「超时」（R70 原行为，仅在无其它证据时）。
     """
     _low = last_err_lower or ""
+    # round55 R186 方案B：文案前缀收敛到 core/llm_fallback_prefixes（与
+    # strategy_check F1-9 识别器同源；一致性单测锁「全分支输出 ∈ FALLBACK_PREFIXES」）
     if "[envelope]" in _low or "error envelope" in _low:
-        return (f"LLM 网关返回错误信封（{duration_s:.0f}s，已用规则引擎兜底）")
+        return (f"{ENVELOPE_PREFIX}（{duration_s:.0f}s，已用规则引擎兜底）")
     if "429" in _low or "rate-limited" in _low or "quota" in _low:
-        return f"LLM 分析配额耗尽（429 限流，{duration_s:.0f}s 未完成，已用规则引擎兜底）"
+        return f"{QUOTA_PREFIX}（429 限流，{duration_s:.0f}s 未完成，已用规则引擎兜底）"
     if "json" in _low or "expecting value" in _low or "parse" in _low:
-        return f"LLM 分析结果解析失败（{duration_s:.0f}s，已用规则引擎兜底）"
-    return f"LLM 分析超时（{duration_s:.0f}s 未返回，已用规则引擎兜底）"
+        return f"{PARSE_FAIL_PREFIX}（{duration_s:.0f}s，已用规则引擎兜底）"
+    return f"{TIMEOUT_PREFIX}（{duration_s:.0f}s 未返回，已用规则引擎兜底）"
 
 
 def _build_engine_fallback(strategies: list[dict], regime: str = "unknown") -> str:

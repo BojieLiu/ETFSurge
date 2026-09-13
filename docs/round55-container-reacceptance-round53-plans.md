@@ -267,10 +267,10 @@
 
 | # | 决策 | 选项 + 推荐 + 影响范围 | 状态 |
 |---|---|---|---|
-| 1 | R186 envelope 兜底识别 | **已拍板：方案 A+B 同批**（A：`strategy_check.py:319-325` 追加 `"LLM 网关返回错误信封"` 前缀 + 2 用例；B：新建 `core/llm_fallback_prefixes.py`，reports.py 分类器与 strategy_check 识别器同引 + 一致性单测）。备选（仅 A）未采纳——省几分钟但留第四次复发口子（三现同型：R163→R177→R186）。影响 `strategy_check.py:319-325`、`reports.py:24-41`、新建 `core/llm_fallback_prefixes.py` + 3 用例 | ✅ 已拍板，待「round实施」 |
-| 2 | R187/R188/R189 + DHC/E2E 鲁棒 | **推荐方案 C+D+E 同批**（均为 P3 小改 + 负向用例）。影响 1 vue + 1 spec + 1 pytest 文件 + 2 脚本 | ⏳ 待拍板 |
+| 1 | R186 envelope 兜底识别 | **已拍板：方案 A+B 同批**（A：`strategy_check.py:319-325` 追加 `"LLM 网关返回错误信封"` 前缀 + 2 用例；B：新建 `core/llm_fallback_prefixes.py`，reports.py 分类器与 strategy_check 识别器同引 + 一致性单测）。备选（仅 A）未采纳——省几分钟但留第四次复发口子（三现同型：R163→R177→R186）。影响 `strategy_check.py:319-325`、`reports.py:24-41`、新建 `core/llm_fallback_prefixes.py` + 3 用例 | ✅ 已实施（本批 commit，见 §8） |
+| 2 | R187/R188/R189 + DHC/E2E 鲁棒 | **已拍板并实施：方案 C′+D′+E′**（本轮 review 修订后定稿：C′ 扩到 3 vue 同型 + 缺键形态锁定；D′ 落 `test_factor_registry_gather_timeout.py` autouse 复位 + 开路负向；E′ 抄 R172 回落 + TCP-INFO + DHC 单项 180s/总量 600s WARN 恒汇总）。影响 3 vue + 1 spec + 1 pytest 文件 + 2 脚本 | ✅ 已实施（本批 commit，见 §8） |
 | 3 | patrol --full | round53 §6#4 规则「下次代码变更交付时跑」——本轮后 HEAD 已含前端抛光 + 对话追问后端变更，**下次实施轮交付时照常跑**，本轮不补跑 | 📋 按规则执行 |
-| 4 | P1-5 allocation 拆分 | 文件 1721→1870（+149），债务扩大。**推荐单独 round**（redundant-review 原定），不与 P2/P3 小批混批 | ⏳ 待拍板（排期） |
+| 4 | P1-5 allocation 拆分 | 文件实测 **2156 行**（文档原记 1870 已过时，+435 vs 1721 基线；顶层 30 def）。**独立 round**（redundant-review 原定），不与 P2/P3 小批混批 | ⏳ 待排期（独立 round，须先出完整迁移图） |
 | 5 | 浏览器四态走查 | R174 + round54 抛光页 + LLM 多轮会话 + R182/R184 文案分流，合并为一次 UI 走查专项（需交易时段 + 真浏览器） | ⏳ 待排期 |
 | 6 | Lighthouse | 本轮未执行（容器内无 Chrome/预算）。明确登记遗留，下轮与 #5 合批或单独跑 | 📋 遗留登记 |
 | 7 | factor-health 6.22s | 交易时段复测：若回落 ≤2s 则销账（周末性）；若维持则按性能债排期优化 | ⏳ 待复测 |
@@ -286,7 +286,11 @@
 ## 7. LLM 链路重设计（R190，设计附录，非诊断发现）
 
 > 来源：资讯 `ai_summary` 全 rule 现象深挖（2026-09-12 夜间，宿主实测）→ 独立于容器诊断的 LLM 可用性专项。
-> 状态：⏳ 方案待拍板（拍板前不动代码；探针克制：Zen 3+2 次、OpenRouter 1 次、b.ai 2 次）。
+> 状态：⏳ 独立 round 待排期（本轮 review：文档锚点 `provider.py:73-77` 已漂移——该文件不存在，
+> 已拆为 `client.py`/`gates.py`/`model_catalog.py`；`zen_attempt_sequence` 实为
+> `model_catalog.py:221`，`_filter_*` 在 `112/122`，`is_middle_layer_active` 在
+> `gates.py:272`，`skip_llm` 在 `hub/_news.py:77-83`。实施前按新锚点重定位 + 分 3 期，
+> 一期复用 R186 的 `core/llm_fallback_prefixes.py` 常量）。
 > 与既有决策关系：R186（envelope 识别）是本节机制 1（DEAD 终态）的特例先行，两者同批实施不冲突。
 
 ### 7.1 实测证据链（宿主，token_usage.db + 直调探针）
@@ -329,3 +333,40 @@
 4. 重启后看 1 小时 `by_provider` 闭环（b.ai+qwen 被走到、Zen 零复探）。
 
 > 拍板后固定收尾：① 本节状态改已拍板；② memory 同 name 覆盖更新。
+
+---
+
+## 8. 本批实施记录（2026-09-13，R186 A+B + C′+D′+E′）
+
+> 范围：§6#1（已拍板）+ §6#2（本轮 review 修订 C′/D′/E′ 后拍板定稿）；P1-5/R190/round54 走查按下述登记不动代码。
+
+### 8.1 改动清单
+
+| 项 | 文件 | 改动 |
+|---|---|---|
+| R186-B | `backend/app/core/llm_fallback_prefixes.py`（新建） | FALLBACK_PREFIXES（4 前缀）+ `is_llm_fallback_summary()`，零依赖 |
+| R186-B | `backend/app/analysis/llm/reports.py:14-18,34-41` | 分类器 4 分支改由常量构造（字符串逐字一致，无行为变化） |
+| R186-A | `backend/app/services/portfolio/strategy_check.py:13,315-325` | F1-9 识别改走 helper（含 envelope）；三旗语（669-671）同源修复 |
+| R186 测试 | `backend/tests/test_round51_llm_envelope.py`（+3 用例） | envelope 识别 + 旧 3 前缀回归 + 分类器输出 ∈ 常量集（含接线守卫） |
+| C′ | `frontend/.../UnifiedAnalysis.vue:107`、`MarketReport.vue:68`、`AiAdvisor.vue:67,113` | `metadata?.value` 三处同型 + resetChat 守卫 |
+| C′测试 | `frontend/src/test/UnifiedAnalysis.spec.js`（+1 用例） | 缺键形态锁定（旧实现必抛 `Cannot read properties of undefined`，已负向实证） |
+| D′ | `backend/tests/test_factor_registry_gather_timeout.py` | autouse 熔断复位 + 开路→空→复位→恢复负向用例 |
+| E′ | `backend/scripts/verify_e2e.py` | `_resolve_e2e_host`（R172 同款回落）+ TCP 未命中记 INFO；显式 `--host` 不受影响 |
+| E′ | `backend/scripts/data_health_check.py` | 单项 180s/总量 600s + 超时记 WARN + try/finally 恒出汇总 |
+
+### 8.2 验证
+
+- 受影响 pytest：164 passed（含 strategy_check 全家桶 4 文件）；mypy 门禁口径 146 文件 clean
+- 全量一次：pytest `-n auto` **3227 passed / 11 skipped / 0 failed**（round55 基线 3222/1 → R188 旧 FAIL 消除 +4 新用例），随后 `tests_ok_marker --mark`
+- vitest 全量：44 文件 **552 passed，0 Unhandled Rejection**（round55 基线 551 + 9 rejection → 噪音消除 +1 新用例）；`npm run build` 绿
+- 运行时：宿主后端 + `verify_e2e --smoke` **21/21 ALL PASS**；DHC 超时路径合成验证（budget=2s 必 WARN 不挂死）；`_resolve_e2e_host` 闭端口回落验证
+- R186 验收口径：check108 同形态 summary → `is_llm_fallback_summary=True`（经 helper 单测 + 接线守卫；生产复现待下次 envelope 触发时观察）
+- R187 验收口径：去 metadata mock 下旧实现复现抛错、新实现 0 rejection ✅
+- R188 验收口径：开路→空→复位→恢复因果链单测 ✅（`-n auto` 全量本轮未复发）
+- R189/E 验收口径：闭端口回落默认/显式 `--host` 直通 ✅；DHC 恒汇总 ✅（周末全池慢源复测待交易时段观察）
+
+### 8.3 登记（不动代码）
+
+- P1-5：独立 round（2156 行现状），须先出完整迁移图
+- R190：独立 round（分 3 期，锚点已订正见 §7）
+- round54：代码已落地（`7c062b6/f59fb17`），文档状态同步见 `docs/round54-frontend-polish.md`；浏览器四态走查（R174+round54+LLM 多轮）待交易时段+真浏览器，见 §6#5

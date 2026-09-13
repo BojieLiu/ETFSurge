@@ -170,6 +170,66 @@ class TestGateRecordsEnvelope:
         assert (gates.get_last_llm_error() or "").startswith("[envelope]")
 
 
+class TestR186EnvelopeFallbackRecognition:
+    """R186 (round55 §4.1 方案A): strategy_check F1-9 兜底识别器必须认出
+    envelope 前缀——check108 实证 summary 明写「已用规则引擎兜底」而
+    is_fallback=False/quality=full（识别器仅匹配旧 3 前缀，漏网）。
+
+    负向断言：旧实现跑本用例必 FAIL（无 envelope 分支）。
+    """
+
+    def test_envelope_summary_recognized_as_fallback(self):
+        import inspect
+
+        from app.core.llm_fallback_prefixes import is_llm_fallback_summary
+        from app.services.portfolio import strategy_check as sc
+
+        # check108 同形态 summary（含网关信封 + 最后错误 + 市态后缀）
+        summary = (
+            "LLM 网关返回错误信封（30s，已用规则引擎兜底）"
+            "（最后错误: [envelope] openrouter/nvidia/nemotron-3-ultra-550b"
+            "-a55b:free: Upstream error from Nvidia (code=502)）"
+            "（市态：震荡；因子覆盖 33.3%）"
+        )
+        assert is_llm_fallback_summary(summary) is True
+        # 接线守卫：识别器必须走收敛 helper（防改 helper 不改调用点）
+        assert "is_llm_fallback_summary" in inspect.getsource(sc)
+
+    def test_legacy_three_prefixes_still_recognized(self):
+        from app.core.llm_fallback_prefixes import is_llm_fallback_summary
+
+        for prefix in ("LLM 分析超时", "LLM 分析配额耗尽", "LLM 分析结果解析失败"):
+            assert is_llm_fallback_summary(prefix + "（30s，已用规则引擎兜底）") is True
+        # 正常报告不得误判
+        assert is_llm_fallback_summary("本组合攻守兼备，建议维持现状。") is False
+        assert is_llm_fallback_summary("") is False
+
+
+class TestR186PrefixConvergence:
+    """R186 (round55 §4.2 方案B): 分类器全分支输出前缀 ∈ FALLBACK_PREFIXES。
+
+    长治断言：任一新增文案分支不同步到常量集必红（R163→R177→R186 第四次复发口子）。
+    """
+
+    def test_classifier_outputs_within_prefix_set(self):
+        from app.analysis.llm.reports import _classify_llm_failure_cause
+        from app.core.llm_fallback_prefixes import FALLBACK_PREFIXES
+
+        cases = [
+            "[envelope] openrouter: Rate limit exceeded",
+            "429 Too Many Requests",
+            "expecting value: line 1 column 1",
+            "connection reset by peer",
+        ]
+        assert len(FALLBACK_PREFIXES) >= 4
+        for raw in cases:
+            out = _classify_llm_failure_cause(raw, 30.0)
+            assert out.startswith(tuple(FALLBACK_PREFIXES)), f"分支输出逃逸常量集: {out}"
+            from app.core.llm_fallback_prefixes import is_llm_fallback_summary
+
+            assert is_llm_fallback_summary(out) is True
+
+
 class TestReportsClassification:
     """R164: envelope 失败 → 「错误信封」文案, 不得报「超时」。"""
 

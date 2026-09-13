@@ -6,6 +6,9 @@ const stopMock = vi.fn()
 const startMock = vi.fn().mockResolvedValue({ fullText: 'ok' })
 
 vi.mock('../composables/useLLMStream', () => ({
+  // R187: 有意保持「缺键形态」（仅 start/stop，无 metadata/progress）——
+  // 组件侧必须以 `?.` 防御 hook 返回漂移；若回退为 `metadata.value` 直取，
+  // 下方 R187 用例必抛（旧实现 9 个 Unhandled Rejection 实证）。
   useLLMStream: () => ({ start: startMock, stop: stopMock }),
 }))
 
@@ -463,5 +466,16 @@ describe('UnifiedAnalysis round14 P2-AD（点「分析」按钮关闭补全下�
     await nextTick()
     // 无结果 → 下拉不显示、不转圈、不崩溃
     expect(wrapper.vm.activeSearch.showDropdown.value).toBe(false)
+  })
+})
+
+describe('UnifiedAnalysis R187（hook 缺键形态守卫）', () => {
+  it('负向：useLLMStream 无 metadata 键 → 有结果时 modelLine 为空且不抛（旧实现必抛 TypeError）', async () => {
+    const wrapper = mounted()
+    wrapper.vm.result = '## 分析报告'
+    await nextTick()
+    await nextTick()
+    expect(wrapper.vm.modelLine).toBe('')
+    expect(wrapper.find('.model-line').exists()).toBe(false)
   })
 })

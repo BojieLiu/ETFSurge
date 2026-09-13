@@ -150,21 +150,25 @@ def section_health(host, port):
 
     # TCP 端口可达 —— O21 (round8): 后端可能监听 [::] 双栈（uvicorn --host ::），
     # 探测先 ::1 后 127.0.0.1（Windows 原生 :: 监听为 v6only，IPv4 探测会误报拒绝）。
+    # R189 (round55 §4.2 方案E): 未命中项记 INFO（环境拓扑差异），不记 FAIL——
+    # 容器 NAT 下 ::1 不可达是预期形态，FAIL 会污染计数掩盖真实回归。
     _probe = None
-    for _h in ("::1", host):
+    _ok_host = None
+    for _h in dict.fromkeys(("::1", host)):
         try:
             _probe = socket.socket(socket.AF_INET6 if ":" in _h else socket.AF_INET)
             _probe.settimeout(3)
             _probe.connect((_h, port))
-            check(f"TCP 端口 {port} 可达 ({_h})", True)
+            _ok_host = _h
             break
         except Exception as e:
-            check(f"TCP 端口 {port} 可达 ({_h})", False, str(e))
+            print(f"  [INFO] TCP 端口 {port} ({_h}) 不可达（环境性，已继续尝试）: {e}")
             _probe = None
-    if _probe is None:
+    if _ok_host is None:
         print(f"\n  [!] 服务未运行，无法继续验证。启动: cd backend && uvicorn app.main:app --port {port}")
         sys.exit(1)
     else:
+        check(f"TCP 端口 {port} 可达 ({_ok_host})", True)
         _probe.close()
 
     # HTTP health with response time gate (7.5b)
@@ -2244,6 +2248,29 @@ MODULES = {
 SMOKE_MODULES = ["health", "market"]
 
 
+def _probe_e2e_health(base: str, timeout: float = 3.0) -> bool:
+    """R189: 短超时探测某 base 的 /health 是否可达（启动段回落判定用，不挂死）。"""
+    try:
+        requests.get(f"{base.rstrip('/')}/health", timeout=timeout)
+    except Exception:
+        return False
+    return True
+
+
+def _resolve_e2e_host(port: int) -> str:
+    """R189 (round55 §4.2 方案E，R172 同款): 默认 host 下 [::1] 优先、
+    不可达自动回落 127.0.0.1 并标注（不记 FAIL）。容器 NAT v6 回环不通时生效；
+    本机直跑（--host :: v6only）保持 ::1 不变。"""
+    _v6 = "[::1]"
+    if _probe_e2e_health(f"http://{_v6}:{port}"):
+        return _v6
+    if _probe_e2e_health(f"http://127.0.0.1:{port}"):
+        print(f"  [INFO] http://{_v6}:{port} 不可达，已回退 http://127.0.0.1:{port}"
+              "（R189：容器 v4 端口映射 / NAT v6 回环不通场景）")
+        return "127.0.0.1"
+    return _v6
+
+
 def main():
     global BASE
     parser = argparse.ArgumentParser(description="端到端链路验证")
@@ -2257,6 +2284,9 @@ def main():
     parser.add_argument("--smoke", action="store_true",
                         help="仅运行 smoke 测试 (health + market)")
     args = parser.parse_args()
+    if args.host == "[::1]":
+        # R189: 未显式指定 host 时先做可达性自检（容器诊断拓扑与本机直跑不同）
+        args.host = _resolve_e2e_host(args.port)
     BASE = f"http://{args.host}:{args.port}"
 
     # 确定运行哪些模块
