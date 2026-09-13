@@ -37,6 +37,10 @@
 
         <div v-if="error" class="error">{{ error }}</div>
         <div v-if="modelLine && !loading" class="model-line">{{ modelLine }}</div>
+        <div v-if="messages.length && !loading" class="share-row">
+          <button class="btn-ghost-sm" @click="copyLLM" :disabled="loading">{{ copyOk ? '已复制 ✓' : '复制' }}</button>
+          <button class="btn-ghost-sm" @click="posterLLM" :disabled="loading">{{ posterOk ? '已生成 ✓' : '生成图片' }}</button>
+        </div>
         <div v-if="progress && !loading" class="stream-progress">
           <div class="progress-bar"><div class="progress-fill"></div></div>
           <span class="progress-text">{{ progress.message }}</span>
@@ -53,6 +57,8 @@
 import { ref, computed, watch, nextTick } from 'vue'
 import { renderMarkdown } from '../../utils/markdown'
 import { useLLMStream } from '../../composables/useLLMStream'
+import { useCopy, buildLLMCopyText } from '../../composables/useCopy'
+import { exportPoster } from '../../composables/useSharePoster'
 
 const props = defineProps({ marketTab: { type: String, default: 'A' } })
 
@@ -62,7 +68,27 @@ const streamingText = ref('')
 const loading = ref(false)
 const error = ref('')
 const chatScrollRef = ref(null)
-const { start: startStream, stop: stopStream, progress, sessionId, metadata } = useLLMStream()
+const { start: startStream, stop: stopStream, progress, sessionId, metadata, disclaimer } = useLLMStream()
+const { copyText } = useCopy()
+const copyOk = ref(false)
+const posterOk = ref(false)
+function advisorText() {
+  return messages.value.map((m) => `${m.role === 'user' ? '问' : '答'}：${m.content}`).join('\n\n')
+}
+async function copyLLM() {
+  copyOk.value = await copyText(buildLLMCopyText(advisorText(), modelLine.value || '模型未知'))
+  if (copyOk.value) setTimeout(() => { copyOk.value = false }, 2000)
+}
+async function posterLLM() {
+  posterOk.value = await exportPoster({
+    title: 'AI 投资顾问',
+    modelLine: modelLine.value || '模型未知',
+    body: advisorText(),
+    disclaimer: (disclaimer && disclaimer.value) || '本工具仅供个人研究，不构成任何投资建议',
+    filename: `etfsurge-llm-${Date.now()}.png`,
+  })
+  if (posterOk.value) setTimeout(() => { posterOk.value = false }, 2000)
+}
 const modelLine = computed(() => {
   const m = metadata?.value // R187 同型加固（UnifiedAnalysis/MarketReport/AiAdvisor 三处同模式）
   if (!m || !m.model) return ''
@@ -283,6 +309,10 @@ watch(() => props.marketTab, () => {
 }
 .chat-bubble :deep(strong) { font-weight: var(--font-weight-semibold); }
 .model-line { margin-top: var(--space-2); font-size: var(--font-size-xs); color: var(--color-text-tertiary); text-align: right; }
+.share-row { display: flex; gap: var(--space-2); justify-content: flex-end; margin-top: var(--space-2); }
+.btn-ghost-sm { padding: 4px 12px; font-size: var(--font-size-xs); color: var(--color-text-secondary); background: transparent; border: 1px solid var(--color-border-light); border-radius: var(--radius-full); cursor: pointer; }
+.btn-ghost-sm:hover:not(:disabled) { background: var(--color-surface-hover); color: var(--color-text-primary); }
+.btn-ghost-sm:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-new-chat {
   padding: var(--space-2) var(--space-3);
   font: var(--text-body);

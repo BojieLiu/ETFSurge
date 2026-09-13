@@ -34,6 +34,8 @@
         <span class="digest-stars" :title="`重要等级 ${item.level || 1}/5`" aria-hidden="true">{{ levelStars(item.level) }}</span>
         <span class="digest-title-text" :title="item.title">{{ item.title }}</span>
         <span v-if="item.time" class="digest-time">{{ relativeTime(item.time) }}</span>
+        <button class="digest-mini-btn" @click.stop="copyItem(item)" title="复制">复制</button>
+        <button class="digest-mini-btn" @click.stop="posterItem(item)" title="生成图片">成图</button>
       </li>
     </ul>
   </section>
@@ -45,6 +47,22 @@
 // 自持一条 useNewsWS 订阅（方案文档 §3.2 权衡：WS 连接 +1 已知可接受）。
 import { ref, computed, onMounted } from 'vue'
 import { useNewsWS } from '../../composables/useNewsWS'
+import { useCopy, buildNewsCopyText } from '../../composables/useCopy'
+import { exportPoster } from '../../composables/useSharePoster'
+
+const { copyText } = useCopy()
+async function copyItem(item) {
+  await copyText(buildNewsCopyText(item))
+}
+async function posterItem(item) {
+  await exportPoster({
+    title: item.title || '资讯分享',
+    modelLine: '资讯卡片',
+    body: String(item.content || item.title || '').slice(0, 600),
+    disclaimer: '内容来自第三方资讯，仅供参考，不构成投资建议 · ETFSurge',
+    filename: `etfsurge-news-${Date.now()}.png`,
+  })
+}
 
 const props = defineProps({
   limit: { type: Number, default: 3 },
@@ -193,6 +211,17 @@ onMounted(() => {
   color: var(--color-text-tertiary);
   white-space: nowrap;
 }
+.digest-mini-btn {
+  flex-shrink: 0;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-full);
+  padding: 1px 8px;
+  cursor: pointer;
+}
+.digest-mini-btn:hover { background: var(--color-surface-hover); color: var(--color-text-primary); }
 
 .digest-skeleton { display: flex; flex-direction: column; gap: var(--space-2); }
 .digest-skeleton-item { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-2) 0; }

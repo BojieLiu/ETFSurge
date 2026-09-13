@@ -24,6 +24,10 @@
 
         <div v-if="report" class="report" v-html="renderMarkdown(report)"></div>
         <div v-if="modelLine && !loading" class="model-line">{{ modelLine }}</div>
+        <div v-if="report && !loading" class="share-row">
+          <button class="btn-ghost-sm" @click="copyLLM" :disabled="loading">{{ copyOk ? '已复制 ✓' : '复制' }}</button>
+          <button class="btn-ghost-sm" @click="posterLLM" :disabled="loading">{{ posterOk ? '已生成 ✓' : '生成图片' }}</button>
+        </div>
 
         <div v-if="report && !loading" class="followup">
           <div v-for="(m, i) in followMessages" :key="i" class="chat-row" :class="m.role">
@@ -52,6 +56,8 @@
 import { ref, computed, watch } from 'vue'
 import { renderMarkdown } from '../../utils/markdown'
 import { useLLMStream } from '../../composables/useLLMStream'
+import { useCopy, buildLLMCopyText } from '../../composables/useCopy'
+import { exportPoster } from '../../composables/useSharePoster'
 
 const props = defineProps({ marketTab: { type: String, default: 'A' } })
 
@@ -62,7 +68,24 @@ const error = ref('')
 const marketLabels = { A: 'A股', HK: '港股', US: '美股' }
 const marketLabel = computed(() => marketLabels[props.marketTab] || props.marketTab || '市场')
 
-const { start: startStream, stop: stopStream, sessionId, metadata } = useLLMStream()
+const { start: startStream, stop: stopStream, sessionId, metadata, disclaimer } = useLLMStream()
+const { copyText } = useCopy()
+const copyOk = ref(false)
+const posterOk = ref(false)
+async function copyLLM() {
+  copyOk.value = await copyText(buildLLMCopyText(report.value, modelLine.value || '模型未知'))
+  if (copyOk.value) setTimeout(() => { copyOk.value = false }, 2000)
+}
+async function posterLLM() {
+  posterOk.value = await exportPoster({
+    title: `市场研判 · ${marketLabel.value}`,
+    modelLine: modelLine.value || '模型未知',
+    body: report.value,
+    disclaimer: (disclaimer && disclaimer.value) || '本工具仅供个人研究，不构成任何投资建议',
+    filename: `etfsurge-llm-${Date.now()}.png`,
+  })
+  if (posterOk.value) setTimeout(() => { posterOk.value = false }, 2000)
+}
 // 模型归因：done.metadata.model（后端 done.usage.model 透传），缺失回退未知
 const modelLine = computed(() => {
   const m = metadata?.value // R187 同型加固（UnifiedAnalysis/MarketReport/AiAdvisor 三处同模式）
@@ -278,4 +301,8 @@ watch(() => props.marketTab, () => {
 .btn-follow { padding: var(--space-2) var(--space-5); }
 .btn-new-chat { padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border-medium); border-radius: var(--radius-md); background: transparent; color: var(--color-text-secondary); cursor: pointer; }
 .model-line { margin-top: var(--space-2); font-size: var(--font-size-xs); color: var(--color-text-tertiary); text-align: right; }
+.share-row { display: flex; gap: var(--space-2); justify-content: flex-end; margin-top: var(--space-2); }
+.btn-ghost-sm { padding: 4px 12px; font-size: var(--font-size-xs); color: var(--color-text-secondary); background: transparent; border: 1px solid var(--color-border-light); border-radius: var(--radius-full); cursor: pointer; }
+.btn-ghost-sm:hover:not(:disabled) { background: var(--color-surface-hover); color: var(--color-text-primary); }
+.btn-ghost-sm:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>

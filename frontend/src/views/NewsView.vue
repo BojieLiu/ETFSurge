@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="news-view">
     <!-- F29 (round23 §2.4 A4): 资讯分类 tab——旧实现仅 headlines 可达，
          macro/global/stock/research 四端点 UI 不可达（事实死功能）。 -->
@@ -127,9 +127,11 @@
              <span v-if="item.source" class="news-source">{{ item.source }}</span>
              <span v-if="item.time" class="news-time" :title="item.time">{{ formatRelativeTime(item.time) }}</span>
              <a v-if="item.url" :href="item.url" target="_blank" rel="noopener" class="news-source-link">查看原文</a>
-             <button class="news-ai-btn" :class="{ 'news-ai-btn--active': impactTarget === item.id }" @click="analyze(item)" :disabled="analyzing">
-               <span aria-hidden="true">🤖</span> AI 智能分析
-             </button>
+              <button class="news-ai-btn" :class="{ 'news-ai-btn--active': impactTarget === item.id }" @click="analyze(item)" :disabled="analyzing">
+                <span aria-hidden="true">🤖</span> AI 智能分析
+              </button>
+              <button class="news-mini-btn" @click.stop="copyNews(item)" title="复制标题+来源+链接">复制</button>
+              <button class="news-mini-btn" @click.stop="posterNews(item)" title="生成带ETFSurge logo的分享图">成图</button>
            </div>
 
            <!-- F2-8: 行内展开分析区（结果出现在该条卡片内，无滚动/跳转） -->
@@ -177,8 +179,26 @@ import { useNewsWS } from '../composables/useNewsWS'
 import { useToastStore } from '../stores/toast'
 import { usePortfolioStore } from '../stores/portfolio'
 import { mapNewsLevel, mapNewsCategory, categoryColor, categoryColorClass, isImportant, mapLevelStars } from '../utils/newsLevel'
+import { useCopy, buildNewsCopyText } from '../composables/useCopy'
+import { exportPoster } from '../composables/useSharePoster'
 
 const { show: toast } = useToastStore()
+const { copyText } = useCopy()
+async function copyNews(item) {
+  const ok = await copyText(buildNewsCopyText(item))
+  toast(ok ? '已复制' : '复制失败', ok ? 'success' : 'error')
+}
+async function posterNews(item) {
+  const body = [item.content || item.ai_summary || '', item.source ? `来源：${item.source}` : '', item.time || ''].filter(Boolean).join('\n')
+  const ok = await exportPoster({
+    title: item.title || '资讯分享',
+    modelLine: '资讯卡片',
+    body: body.slice(0, 600),
+    disclaimer: '内容来自第三方资讯，仅供参考，不构成投资建议 · ETFSurge',
+    filename: `etfsurge-news-${Date.now()}.png`,
+  })
+  toast(ok ? '图片已生成' : '生成失败', ok ? 'success' : 'error')
+}
 const store = usePortfolioStore()
 
 const news = ref([])
@@ -579,6 +599,8 @@ const filteredAffectedHoldings = computed(() => {
 .news-ai-btn:hover { border-color: var(--color-primary); }
 .news-ai-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .news-ai-btn--active { border-color: var(--color-primary); color: var(--color-primary); background: var(--color-bg-brand-subtle); }
+.news-mini-btn { border: 1px solid var(--color-border); background: transparent; border-radius: var(--radius-md); padding: 4px 10px; cursor: pointer; font-size: var(--font-size-xs); color: var(--color-text-secondary); }
+.news-mini-btn:hover { border-color: var(--color-primary); color: var(--color-text-primary); }
 
 /* F2-8: 行内展开区 */
 .impact-inline { margin-top: var(--space-2); padding: var(--space-3); border-radius: var(--radius-md); background: var(--color-bg-brand-subtle); border-top: 2px solid var(--color-primary); animation: impact-fadein 0.2s ease; }

@@ -86,6 +86,10 @@
 
     <div v-if="result" class="result" v-html="renderMarkdown(result)"></div>
     <div v-if="result && modelLine && !loading" class="model-line">{{ modelLine }}</div>
+    <div v-if="result && !loading" class="share-row">
+      <button class="btn-ghost-sm" @click="copyLLM" :disabled="loading">{{ copyOk ? '已复制 ✓' : '复制' }}</button>
+      <button class="btn-ghost-sm" @click="posterLLM" :disabled="loading">{{ posterOk ? '已生成 ✓' : '生成图片' }}</button>
+    </div>
 
     <div v-else-if="symbol && !loading" class="result-area">
       <p>已选择: <strong>{{ symbol }}</strong> ({{ currentModeLabel }})</p>
@@ -100,9 +104,29 @@ import { ref, computed, watch, nextTick, toRef } from 'vue'
 import { renderMarkdown } from '../../utils/markdown'
 import { useLLMStream } from '../../composables/useLLMStream'
 import { useMarketSearch } from '../../composables/useMarketSearch'
+import { useCopy, buildLLMCopyText } from '../../composables/useCopy'
+import { exportPoster, formatPosterTime } from '../../composables/useSharePoster'
 import { marketApi } from '../../api'
 
-const { start: startStream, stop: stopStream, progress, metadata } = useLLMStream()
+const { start: startStream, stop: stopStream, progress, metadata, disclaimer } = useLLMStream()
+const { copyText } = useCopy()
+const copyOk = ref(false)
+const posterOk = ref(false)
+async function copyLLM() {
+  copyOk.value = await copyText(buildLLMCopyText(result.value, modelLine.value || '模型未知'))
+  if (copyOk.value) setTimeout(() => { copyOk.value = false }, 2000)
+}
+async function posterLLM() {
+  posterOk.value = await exportPoster({
+    title: `标的分析 · ${symbol.value || query.value || '报告'}`,
+    modelLine: modelLine.value || '模型未知',
+    body: result.value,
+    disclaimer: (disclaimer && disclaimer.value) || '本工具仅供个人研究，不构成任何投资建议',
+    filename: `etfsurge-llm-${Date.now()}.png`,
+  })
+  void formatPosterTime
+  if (posterOk.value) setTimeout(() => { posterOk.value = false }, 2000)
+}
 const modelLine = computed(() => {
   const m = metadata?.value // R187: hook 缺键形态守卫（mock/hook 漂移时不得抛）
   if (!m || !m.model) return ''
@@ -607,6 +631,10 @@ async function doAnalyze() {
 @keyframes progress-indeterminate { 0% { margin-left: -40%; } 100% { margin-left: 100%; } }
 .result { margin-top: var(--space-4); line-height: 1.8; }
 .model-line { margin-top: var(--space-2); font-size: var(--font-size-xs); color: var(--color-text-tertiary); text-align: right; }
+.share-row { display: flex; gap: var(--space-2); justify-content: flex-end; margin-top: var(--space-2); }
+.btn-ghost-sm { padding: 4px 12px; font-size: var(--font-size-xs); color: var(--color-text-secondary); background: transparent; border: 1px solid var(--color-border-light); border-radius: var(--radius-full); cursor: pointer; }
+.btn-ghost-sm:hover:not(:disabled) { background: var(--color-surface-hover); color: var(--color-text-primary); }
+.btn-ghost-sm:disabled { opacity: 0.5; cursor: not-allowed; }
 .quick-chips { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-3); padding: 0 var(--space-1); }
 .question-chips { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-2); padding: 0 var(--space-1); }
 .question-chips .chip.active { background: var(--color-brand-600, #2563eb); color: #fff; border-color: var(--color-brand-600, #2563eb); }
