@@ -49,6 +49,7 @@
         </div>
       </div>
     </div>
+    <SharePreviewModal :visible="preview.visible.value" :title="preview.title.value" :image-url="preview.imageUrl.value" :generating="preview.generating.value" :copy-state="preview.copyState.value" @close="preview.close()" @copy="preview.copyImage()" @download="preview.downloadImage()" />
   </section>
 </template>
 
@@ -57,7 +58,8 @@ import { ref, computed, watch } from 'vue'
 import { renderMarkdown } from '../../utils/markdown'
 import { useLLMStream } from '../../composables/useLLMStream'
 import { useCopy, buildLLMCopyText } from '../../composables/useCopy'
-import { exportPoster } from '../../composables/useSharePoster'
+import { useSharePreview } from '../../composables/useSharePreview'
+import SharePreviewModal from '../common/SharePreviewModal.vue'
 
 const props = defineProps({ marketTab: { type: String, default: 'A' } })
 
@@ -70,6 +72,7 @@ const marketLabel = computed(() => marketLabels[props.marketTab] || props.market
 
 const { start: startStream, stop: stopStream, sessionId, metadata, disclaimer } = useLLMStream()
 const { copyText } = useCopy()
+const preview = useSharePreview()
 const copyOk = ref(false)
 const posterOk = ref(false)
 async function copyLLM() {
@@ -77,12 +80,11 @@ async function copyLLM() {
   if (copyOk.value) setTimeout(() => { copyOk.value = false }, 2000)
 }
 async function posterLLM() {
-  posterOk.value = await exportPoster({
+  posterOk.value = await preview.openPreview({
     title: `市场研判 · ${marketLabel.value}`,
     modelLine: modelLine.value || '模型未知',
     body: report.value,
     disclaimer: (disclaimer && disclaimer.value) || '本工具仅供个人研究，不构成任何投资建议',
-    filename: `etfsurge-llm-${Date.now()}.png`,
   })
   if (posterOk.value) setTimeout(() => { posterOk.value = false }, 2000)
 }

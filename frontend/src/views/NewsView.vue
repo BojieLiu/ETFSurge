@@ -169,6 +169,7 @@
         </li>
       </ul>
     </section>
+    <SharePreviewModal :visible="preview.visible.value" :title="preview.title.value" :image-url="preview.imageUrl.value" :generating="preview.generating.value" :copy-state="preview.copyState.value" @close="preview.close()" @copy="preview.copyImage()" @download="preview.downloadImage()" />
   </div>
 </template>
 
@@ -180,24 +181,25 @@ import { useToastStore } from '../stores/toast'
 import { usePortfolioStore } from '../stores/portfolio'
 import { mapNewsLevel, mapNewsCategory, categoryColor, categoryColorClass, isImportant, mapLevelStars } from '../utils/newsLevel'
 import { useCopy, buildNewsCopyText } from '../composables/useCopy'
-import { exportPoster } from '../composables/useSharePoster'
+import { useSharePreview } from '../composables/useSharePreview'
+import SharePreviewModal from '../components/common/SharePreviewModal.vue'
 
 const { show: toast } = useToastStore()
 const { copyText } = useCopy()
+const preview = useSharePreview()
 async function copyNews(item) {
   const ok = await copyText(buildNewsCopyText(item))
   toast(ok ? '已复制' : '复制失败', ok ? 'success' : 'error')
 }
 async function posterNews(item) {
   const body = [item.content || item.ai_summary || '', item.source ? `来源：${item.source}` : '', item.time || ''].filter(Boolean).join('\n')
-  const ok = await exportPoster({
+  const ok = await preview.openPreview({
     title: item.title || '资讯分享',
     modelLine: '资讯卡片',
     body: body.slice(0, 600),
     disclaimer: '内容来自第三方资讯，仅供参考，不构成投资建议 · ETFSurge',
-    filename: `etfsurge-news-${Date.now()}.png`,
   })
-  toast(ok ? '图片已生成' : '生成失败', ok ? 'success' : 'error')
+  if (!ok) toast('生成失败', 'error')
 }
 const store = usePortfolioStore()
 

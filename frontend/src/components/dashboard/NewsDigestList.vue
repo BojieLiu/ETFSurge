@@ -38,6 +38,7 @@
         <button class="digest-mini-btn" @click.stop="posterItem(item)" title="生成图片">成图</button>
       </li>
     </ul>
+    <SharePreviewModal :visible="preview.visible.value" :title="preview.title.value" :image-url="preview.imageUrl.value" :generating="preview.generating.value" :copy-state="preview.copyState.value" @close="preview.close()" @copy="preview.copyImage()" @download="preview.downloadImage()" />
   </section>
 </template>
 
@@ -48,19 +49,20 @@
 import { ref, computed, onMounted } from 'vue'
 import { useNewsWS } from '../../composables/useNewsWS'
 import { useCopy, buildNewsCopyText } from '../../composables/useCopy'
-import { exportPoster } from '../../composables/useSharePoster'
+import { useSharePreview } from '../../composables/useSharePreview'
+import SharePreviewModal from '../common/SharePreviewModal.vue'
 
 const { copyText } = useCopy()
+const preview = useSharePreview()
 async function copyItem(item) {
   await copyText(buildNewsCopyText(item))
 }
 async function posterItem(item) {
-  await exportPoster({
+  await preview.openPreview({
     title: item.title || '资讯分享',
     modelLine: '资讯卡片',
     body: String(item.content || item.title || '').slice(0, 600),
     disclaimer: '内容来自第三方资讯，仅供参考，不构成投资建议 · ETFSurge',
-    filename: `etfsurge-news-${Date.now()}.png`,
   })
 }
 

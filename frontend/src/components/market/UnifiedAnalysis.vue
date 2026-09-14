@@ -96,6 +96,7 @@
       <!-- F18 (round6 §16.6): "已选择"态增加"点击分析"引导按钮——明确下一步动作 -->
       <button class="btn-primary" @click="doAnalyze">📊 点击分析</button>
     </div>
+    <SharePreviewModal :visible="preview.visible.value" :title="preview.title.value" :image-url="preview.imageUrl.value" :generating="preview.generating.value" :copy-state="preview.copyState.value" @close="preview.close()" @copy="preview.copyImage()" @download="preview.downloadImage()" />
   </section>
 </template>
 
@@ -105,11 +106,13 @@ import { renderMarkdown } from '../../utils/markdown'
 import { useLLMStream } from '../../composables/useLLMStream'
 import { useMarketSearch } from '../../composables/useMarketSearch'
 import { useCopy, buildLLMCopyText } from '../../composables/useCopy'
-import { exportPoster, formatPosterTime } from '../../composables/useSharePoster'
+import { useSharePreview } from '../../composables/useSharePreview'
+import SharePreviewModal from '../common/SharePreviewModal.vue'
 import { marketApi } from '../../api'
 
 const { start: startStream, stop: stopStream, progress, metadata, disclaimer } = useLLMStream()
 const { copyText } = useCopy()
+const preview = useSharePreview()
 const copyOk = ref(false)
 const posterOk = ref(false)
 async function copyLLM() {
@@ -117,14 +120,12 @@ async function copyLLM() {
   if (copyOk.value) setTimeout(() => { copyOk.value = false }, 2000)
 }
 async function posterLLM() {
-  posterOk.value = await exportPoster({
+  posterOk.value = await preview.openPreview({
     title: `标的分析 · ${symbol.value || query.value || '报告'}`,
     modelLine: modelLine.value || '模型未知',
     body: result.value,
     disclaimer: (disclaimer && disclaimer.value) || '本工具仅供个人研究，不构成任何投资建议',
-    filename: `etfsurge-llm-${Date.now()}.png`,
   })
-  void formatPosterTime
   if (posterOk.value) setTimeout(() => { posterOk.value = false }, 2000)
 }
 const modelLine = computed(() => {
