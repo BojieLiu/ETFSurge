@@ -41,7 +41,12 @@ export function useSharePreview() {
       _revoke()
       _blob = blob
       _canvas = canvas
-      _url = URL.createObjectURL(blob)
+      // Use data URL instead of objectURL to satisfy CSP img-src 'self' data:
+      try {
+        _url = canvas.toDataURL('image/png')
+      } catch {
+        _url = URL.createObjectURL(blob)
+      }
       imageUrl.value = _url
       visible.value = true
       generating.value = false
