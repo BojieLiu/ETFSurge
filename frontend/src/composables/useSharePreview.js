@@ -27,9 +27,17 @@ export function useSharePreview() {
     title.value = (posterOpts && posterOpts.title) || '分享预览'
     try {
       const canvas = renderPosterCanvas(posterOpts || {})
-      if (!canvas) { generating.value = false; return false }
+      if (!canvas) {
+        console.warn('[SharePreview] renderPosterCanvas returned null')
+        generating.value = false
+        return false
+      }
       const blob = await canvasToBlob(canvas)
-      if (!blob) { generating.value = false; return false }
+      if (!blob) {
+        console.warn('[SharePreview] canvasToBlob returned null (canvas size:', canvas.width, 'x', canvas.height, ')')
+        generating.value = false
+        return false
+      }
       _revoke()
       _blob = blob
       _canvas = canvas
@@ -38,7 +46,8 @@ export function useSharePreview() {
       visible.value = true
       generating.value = false
       return true
-    } catch {
+    } catch (err) {
+      console.error('[SharePreview] openPreview error:', err)
       generating.value = false
       return false
     }

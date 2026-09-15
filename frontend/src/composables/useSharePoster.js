@@ -117,7 +117,14 @@ export function canvasToBlob(canvas) {
   return new Promise((resolve) => {
     try {
       if (!canvas || !canvas.toBlob) { resolve(null); return }
-      canvas.toBlob((b) => resolve(b), 'image/png')
+      canvas.toBlob((b) => {
+        if (b) { resolve(b); return }
+        // Fallback: toBlob returned null — use toDataURL + fetch
+        try {
+          const dataUrl = canvas.toDataURL('image/png')
+          fetch(dataUrl).then(r => r.blob()).then(blob => resolve(blob)).catch(() => resolve(null))
+        } catch { resolve(null) }
+      }, 'image/png')
     } catch {
       resolve(null)
     }
