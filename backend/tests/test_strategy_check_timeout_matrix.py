@@ -1460,6 +1460,48 @@ def test_weak_sell_still_holds_with_plain_reason():
     assert "技术面偏空" not in s["reason"]
 
 
+# ── R194-G: 背离结构化原因 divergence_detail（round56 §4.2 方案G）──
+
+
+def test_divergence_detail_p2_sell_vs_positive_factor():
+    """P2（sell + 因子≥0.5）→ divergence_detail 结构化（负向：缺键/方向错 → FAIL）。"""
+    s = _sugg("sell", {"technical": 3.57, "momentum": 1.2, "valuation": 0.5})
+    assert s["action"] == "hold"
+    d = s.get("divergence_detail")
+    assert isinstance(d, dict), f"背离分支必须输出 divergence_detail，实际 {d!r}"
+    assert d["signal_direction"] == "sell"
+    assert d["factor_direction"] == "positive"
+    assert d["factor_score"] >= 0.5
+    assert d["threshold"] == 0.5
+    assert "背离" in d["explanation"] and "因子分" in d["explanation"]
+
+
+def test_divergence_detail_p3_buy_vs_negative_factor():
+    """P3（buy + 因子≤-0.5）→ divergence_detail 对称结构（负向：None → FAIL）。"""
+    s = _sugg("buy", {"technical": -1.0, "momentum": -0.8})
+    assert s["action"] == "hold"
+    d = s.get("divergence_detail")
+    assert isinstance(d, dict), f"背离分支必须输出 divergence_detail，实际 {d!r}"
+    assert d["signal_direction"] == "buy"
+    assert d["factor_direction"] == "negative"
+    assert d["factor_score"] <= -0.5
+    assert "背离" in d["explanation"]
+
+
+def test_divergence_detail_none_when_aligned():
+    """非背离（sell + 因子同向偏弱 → decrease）→ divergence_detail 为 None（不得误标）。"""
+    s = _sugg("sell", {"technical": -0.8, "momentum": -0.6})
+    assert s["action"] == "decrease"
+    assert s.get("divergence_detail") is None
+
+
+def test_divergence_detail_none_for_plain_hold():
+    """普通 hold（无信号冲突）→ divergence_detail 为 None。"""
+    s = _sugg("hold", {"technical": 0.1})
+    assert s["action"] == "hold"
+    assert s.get("divergence_detail") is None
+
+
 # ── P0-1: 行业集中度误导性输出修复（合并自 test_strategy_check_industry.py）──
 
 

@@ -89,15 +89,35 @@ class TaskManager:
         return self._session_factory or async_session
 
     async def create_task(self, task_type: str = "design", params: dict | None = None) -> dict:
-        """创建新任务（INSERT tasks, status=pending），返回契约 dict。"""
+        """创建新任务（INSERT tasks, status=pending），返回契约 dict。
+
+        R192 (round56 §4.2 方案D): 同参连击去重——同 task_type + 序列化参数
+        完全一致且存在非终态任务时，返回既有任务（`deduped=True`）且调用方
+        不再 spawn 新 worker；参数不同或既有任务已终态时正常新建（`deduped=False`）。
+        """
         assert task_type in TASK_TYPES, f"unknown task type: {task_type}"
+        serialized = json.dumps(params or {}, ensure_ascii=False, default=str)
         async with self._sf()() as db:
+            existing = (await db.execute(
+                select(TaskRecord)
+                .where(TaskRecord.task_type == task_type,
+                       TaskRecord.status.in_(ACTIVE_STATUSES),
+                       TaskRecord.params_json == serialized)
+                .order_by(TaskRecord.id.desc())
+                .limit(1)
+            )).scalars().first()
+            if existing is not None:
+                logger.info("[TaskManager] deduped create_task (type=%s) → existing task %d",
+                            task_type, existing.id)
+                out = existing.to_dict()
+                out["deduped"] = True
+                return out
             record = TaskRecord(
                 task_type=task_type,
                 status="pending",
                 progress=0,
                 stage="",
-                params_json=json.dumps(params or {}, ensure_ascii=False, default=str),
+                params_json=serialized,
                 result_json=None,
             )
             db.add(record)
@@ -105,7 +125,9 @@ class TaskManager:
             await db.refresh(record)
             logger.info("[TaskManager] created task %d (type=%s)", record.id, task_type)
             await self.prune_tasks()
-            return record.to_dict()
+            out = record.to_dict()
+            out["deduped"] = False
+            return out
 
     async def get_task(self, task_id: int) -> dict | None:
         """SELECT 任务并返回契约 dict（含 type/stage/params/record_id）。"""

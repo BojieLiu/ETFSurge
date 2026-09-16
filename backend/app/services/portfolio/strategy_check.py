@@ -1247,6 +1247,8 @@ def _rule_based_suggestion(
                   "volatile": "高波动", "unknown": "待定"}.get(regime, regime)
     # 相对偏离度：|current - target| / max(target, eps) > 20% → 向 target 回归
     _eps = 1e-9
+    # R194-G: 背离结构化原因（F10 P2/P3 分支设置，其余为 None）
+    _divergence = None
     if current_weight is not None and abs(current_weight - target_weight) > max(target_weight, _eps) * 0.2:
         if current_weight < target_weight:
             action = "increase"
@@ -1266,6 +1268,8 @@ def _rule_based_suggestion(
             suggested = max(target_weight, 0.0)
     # F10 (round6 §十五, 用户已决策): 信号-因子背离分支——技术面与因子分冲突时
     # hold 并解释，禁止裸"信号 X 维持现状"自相矛盾写法（159992 类：SELL + 强正因子）。
+    # R194-G (round56 §4.2 方案G): 背离原因结构化透出 divergence_detail（前端渲染
+    # explanation；非背离分支为 None；决策表本身不动）。
     elif sig == "sell" and _score >= 0.5:
         action = "hold"
         reason = (
@@ -1273,6 +1277,16 @@ def _rule_based_suggestion(
             f"跌破 MA20 或因子分转负再降仓，市态{_regime_cn}下保持纪律"
         )
         suggested = cur
+        _divergence = {
+            "signal_direction": "sell",
+            "factor_direction": "positive",
+            "factor_score": round(float(_score), 4),
+            "threshold": 0.5,
+            "explanation": (
+                f"技术面偏空（卖出信号）但因子分强正（{_score:.2f}≥0.5），"
+                f"信号与因子背离——因子分主导，暂不追空"
+            ),
+        }
     elif sig == "buy" and _score <= -0.5:
         action = "hold"
         reason = (
@@ -1280,6 +1294,16 @@ def _rule_based_suggestion(
             f"站上 MA20 且因子分转正再加仓，市态{_regime_cn}下保持纪律"
         )
         suggested = cur
+        _divergence = {
+            "signal_direction": "buy",
+            "factor_direction": "negative",
+            "factor_score": round(float(_score), 4),
+            "threshold": 0.5,
+            "explanation": (
+                f"技术面偏多（买入信号）但因子分偏弱（{_score:.2f}≤-0.5），"
+                f"信号与因子背离——因子分主导，不追高"
+            ),
+        }
     elif _score > 0.5 and sig == "buy" and not bearish:
         action = "increase"
         reason = (
@@ -1379,6 +1403,9 @@ def _rule_based_suggestion(
         #（实测 159992 表格 +1.63 vs 理由 -2.43，round34 §4.5）。
         "composite_score": round(float(_score), 4),
         "source": "rule",
+        # R194-G (round56 §4.2 方案G): 背离结构化原因（F10 P2/P3 分支设置，
+        # 其余为 None；契约 api-contracts/portfolio/strategy-check-v2.md）。
+        "divergence_detail": _divergence,
     }
 
 

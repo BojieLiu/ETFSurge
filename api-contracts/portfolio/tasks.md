@@ -79,6 +79,11 @@ POST /api/v1/portfolio/strategy-check-async
 }
 ```
 
+**同参去重（R192，round56 §4.2 方案D）**：`create_task` 同 `task_type` + 序列化参数完全一致
+且存在非终态（`pending`/`running`/`quick_ready`）任务时，返回既有任务（`deduped: true`，
+内部标记，不进 HTTP 响应体）且**不再 spawn 新 worker**——双击/连击只产生一个执行体；
+参数不同或既有任务已终态时正常新建。终态任务永不去重（重试语义不受影响）。
+
 ---
 
 ### 2.3 任务列表 / List Tasks
@@ -427,3 +432,4 @@ GET /api/v1/portfolio/strategy-checks/{id}
 - [ ] 策略检查列表 `GET /strategy-checks` 含 summary/regime
 - [ ] 策略检查详情 `GET /strategy-checks/{id}` 含 `suggestions[]` / `holdings_analysis[]` / `risk_warnings[]`
 - [ ] 异步启动端点 POST 返回 `task_id`
+- [ ] 同参连击去重（R192）：同类型同参数非终态任务存在时返回既有 `task_id` 且不 spawn 新 worker；参数不同/已终态时新建

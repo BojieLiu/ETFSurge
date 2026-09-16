@@ -424,11 +424,13 @@ async def portfolio_design_async(
     # 返回值后事件循环只持弱引用，存在被 GC 中途回收的风险窗口。
     from ..core.background_tasks import spawn as _spawn
 
-    _spawn(design_worker(task_manager, t["task_id"]), name=f"task-{t['task_id']}")
+    # R192 (round56 §4.2 方案D): 去重命中时不 spawn 新 worker（既有执行体仍在跑）。
+    if not t.get("deduped"):
+        _spawn(design_worker(task_manager, t["task_id"]), name=f"task-{t['task_id']}")
     return JSONResponse(
         status_code=202,
         content={
-            "task_id": t["task_id"], "status": "pending", "created_at": t["created_at"],
+            "task_id": t["task_id"], "status": t["status"], "created_at": t["created_at"],
             # P2-9 B2 (round16 3.9): 响应补 design_id（任务刚创建恒 null）——前端
             # DashboardAiTools 读 taskData.design_id 旧实现无此字段（靠 WS/轮询兜底）。
             "design_id": None,
@@ -456,10 +458,12 @@ async def strategy_check_async(task: dict):
         t = await task_manager.create_task(task_type="check", params={"capital": total_capital, "portfolio_type": portfolio_type})
         from ..core.background_tasks import spawn as _spawn
 
-        _spawn(strategy_check_worker(task_manager, t["task_id"]), name=f"task-{t['task_id']}")
+        # R192 (round56 §4.2 方案D): 去重命中时不 spawn 新 worker（既有执行体仍在跑）。
+        if not t.get("deduped"):
+            _spawn(strategy_check_worker(task_manager, t["task_id"]), name=f"task-{t['task_id']}")
         return JSONResponse(
             status_code=202,
-            content={"task_id": t["task_id"], "status": "pending", "created_at": t["created_at"]},
+            content={"task_id": t["task_id"], "status": t["status"], "created_at": t["created_at"]},
         )
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})

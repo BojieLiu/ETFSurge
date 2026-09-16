@@ -8,6 +8,7 @@
  * - round25 R41-b：近替代品/未评估相关性告警渲染
  * - P2-V：现金仓位展示；P2-W：涨跌幅缺失显性化
  * - R3：降级态（coarse）权重 5% 档位/因子分强弱分档，exact 保持精确
+ * - R195：分配表 CASH 行口径（层=防御/理由回落/缺失补行，对齐场内·场外分表现金行）
  */
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
@@ -246,8 +247,11 @@ describe('DesignResult P2-V 现金仓位', () => {
     expect(stats).not.toContain('3 只 ETF')
   })
 
-  it('无 CASH 时不显示现金项', async () => {
-    const plan = makePlanP2VW({ allocations: makePlanP2VW().allocations.filter(a => a.symbol !== 'CASH') })
+  it('满仓（Σ=1）无 CASH 时不显示现金项（R195 修订：原 Σ=0.5 夹具按新语义补合成行，意图迁至满仓）', async () => {
+    const plan = makePlanP2VW({ allocations: [
+      { symbol: '510300', name: '沪深300ETF', layer: 'core', target_weight: 0.6, daily_change_pct: 0.5 },
+      { symbol: '159338', name: '中证A500ETF', layer: 'core', target_weight: 0.4, daily_change_pct: null },
+    ] })
     const wrapper = await mountResultP2VW(plan)
     expect(wrapper.find('.plan-stats').text()).not.toContain('现金')
   })
@@ -439,5 +443,68 @@ describe('DesignResult B6-FE 指标来源徽标', () => {
     const wrapper = await mountResult(makePlan({ volatility_estimate: 0.105, estimate_sources: null }))
     expect(wrapper.find('.metric-chip--model').exists()).toBe(false)
     expect(wrapper.find('.metrics-sources').exists()).toBe(true)
+  })
+})
+
+describe('DesignResult R195 现金行口径（对齐场内·场外分表現金行）', () => {
+  function cashRowOf(wrapper) {
+    const rows = wrapper.findAll('tbody tr')
+    return rows.find(r => r.text().includes('CASH'))
+  }
+
+  it('CASH 行层徽标为「防御」（负向：裸 raw "cash" → FAIL）', async () => {
+    const wrapper = await mountResult(makePlan())
+    const row = cashRowOf(wrapper)
+    expect(row.exists()).toBe(true)
+    expect(row.find('.layer-badge').text()).toBe('防御')
+    expect(row.text()).not.toMatch(/(^|\s)cash(\s|$)/)
+  })
+
+  it('CASH 行无理由时回落「现金缓冲」（不显示空白 —）', async () => {
+    const wrapper = await mountResult(makePlan())
+    const row = cashRowOf(wrapper)
+    expect(row.find('.rationale-cell').text()).toContain('现金缓冲')
+  })
+
+  it('selection_rationale 透传到入选理由列（契约 design.md 口径）', async () => {
+    const plan = makePlan({
+      allocations: [
+        { symbol: '510300', name: '沪深300ETF', layer: 'core', target_weight: 0.5,
+          selection_rationale: '沪深300核心指数，稳健配置首选' },
+        { symbol: 'CASH', name: '现金', layer: 'cash', target_weight: 0.5, selection_rationale: '流动性管理' },
+      ],
+    })
+    const wrapper = await mountResult(plan)
+    const rows = wrapper.findAll('tbody tr')
+    const etfRow = rows.find(r => r.text().includes('510300'))
+    expect(etfRow.find('.rationale-cell').text()).toContain('稳健配置首选')
+    const cashRow = rows.find(r => r.text().includes('CASH'))
+    expect(cashRow.find('.rationale-cell').text()).toContain('流动性管理')
+  })
+
+  it('缺 CASH 行但有残余现金（Σ<1）→ 补合成行（权重=残余，负向：现金凭空消失 → FAIL）', async () => {
+    const plan = makePlan({
+      allocations: [
+        { symbol: '510300', name: '沪深300ETF', layer: 'core', target_weight: 0.6 },
+      ],
+    })
+    const wrapper = await mountResult(plan)
+    const row = cashRowOf(wrapper)
+    expect(row.exists()).toBe(true)
+    expect(row.text()).toContain('40.0%')
+    expect(row.find('.layer-badge').text()).toBe('防御')
+    expect(row.find('.rationale-cell').text()).toContain('现金缓冲')
+  })
+
+  it('满仓（Σ=1）无 CASH → 不补行（不编造现金）', async () => {
+    const plan = makePlan({
+      allocations: [
+        { symbol: '510300', name: '沪深300ETF', layer: 'core', target_weight: 0.6 },
+        { symbol: '159338', name: '中证A500ETF', layer: 'core', target_weight: 0.4 },
+      ],
+    })
+    const wrapper = await mountResult(plan)
+    expect(cashRowOf(wrapper)).toBeUndefined()
+    expect(wrapper.find('.plan-stats').text()).not.toContain('现金')
   })
 })

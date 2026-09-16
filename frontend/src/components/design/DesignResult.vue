@@ -72,16 +72,17 @@
                 <div class="plan-meta">
                   <h3 class="plan-name">{{ pf.style || pf.name }}方案</h3>
                   <div class="plan-stats">
-                    <span class="stat-item">{{ etfCount(pf.allocations) }} 只 ETF</span>
+                    <span class="stat-item">{{ etfCount(displayAllocations(pf)) }} 只 ETF</span>
                     <span class="stat-divider">·</span>
-                    <span class="stat-item">核心 {{ calcLayerWeight(pf.allocations, 'core').toFixed(0) }}%</span>
+                    <span class="stat-item">核心 {{ calcLayerWeight(displayAllocations(pf), 'core').toFixed(0) }}%</span>
                     <span class="stat-divider">·</span>
-                    <span class="stat-item">卫星 {{ calcLayerWeight(pf.allocations, 'satellite').toFixed(0) }}%</span>
+                    <span class="stat-item">卫星 {{ calcLayerWeight(displayAllocations(pf), 'satellite').toFixed(0) }}%</span>
                     <span class="stat-divider">·</span>
-                    <span class="stat-item">防御 {{ calcLayerWeight(pf.allocations, 'defense').toFixed(0) }}%</span>
+                    <span class="stat-item">防御 {{ calcLayerWeight(displayAllocations(pf), 'defense').toFixed(0) }}%</span>
                     <!-- round14 P2-V: 现金仓位显性化（引擎表格已有汇总行，卡片 header 同步展示） -->
-                    <span v-if="cashWeight(pf.allocations) > 0" class="stat-divider">·</span>
-                    <span v-if="cashWeight(pf.allocations) > 0" class="stat-item">现金 {{ cashWeight(pf.allocations).toFixed(0) }}%</span>
+                    <!-- R195 显示源切 displayAllocations：缺 CASH 行但有残余现金时 header 同步显现金 -->
+                    <span v-if="cashWeight(displayAllocations(pf)) > 0" class="stat-divider">·</span>
+                    <span v-if="cashWeight(displayAllocations(pf)) > 0" class="stat-item">现金 {{ cashWeight(displayAllocations(pf)).toFixed(0) }}%</span>
                   </div>
                 </div>
                 <AppButton variant="primary" size="sm" @click.stop="applyPlan(pf)" :loading="applying">应用此方案</AppButton>
@@ -135,14 +136,16 @@
                       </tr>
                     </thead>
                     <tbody>
-                      <tr v-for="a in pf.allocations" :key="a.symbol">
+                      <!-- R195: 显示源切 displayAllocations（缺 CASH 行 + 有残余现金 → 补合成行） -->
+                      <tr v-for="a in displayAllocations(pf)" :key="a.symbol">
                         <td><code>{{ a.symbol }}</code></td>
                         <td>{{ a.name }}</td>
                         <!-- round24 R3: 降级态权重按 5% 档位（≈20%），title 保留精确值供核对 -->
                         <td :title="coarseWeight ? ('精确值 ' + (a.target_weight * 100).toFixed(2) + '%（因子数据降级，仅供核对）') : ''">
                           {{ weightText(a) }}
                         </td>
-                        <td><span class="layer-badge" :class="a.layer || 'satellite'">{{ layerLabel(a.layer) }}</span></td>
+                        <!-- R195: CASH 行层徽标按防御渲染（对齐场内·场外分表現金行口径；聚合 header 防御% 仍排除现金，防与现金项双计） -->
+                        <td><span class="layer-badge" :class="a.symbol === 'CASH' ? 'defense' : (a.layer || 'satellite')">{{ layerLabel(a.layer) }}</span></td>
                         <td>
                           <!-- round14 P2-W: 缺失原因显性化——dcp=null 显示「数据源不可用」
                                而非可能误读为 0% 的「—」；CASH 行无涨跌幅语义，整行跳过 -->
@@ -166,7 +169,7 @@
                           </span>
                           <span v-else class="muted">—</span>
                         </td>
-                        <td class="rationale-cell">{{ a.rationale || '—' }}</td>
+                        <td class="rationale-cell">{{ rationaleText(a) }}</td>
                       </tr>
                     </tbody>
                   </table>
@@ -301,7 +304,34 @@ function planStyleKey(style) {
 }
 const planIcon = (style) => ({ defensive: '\u{1F6E1}\uFE0F', balanced: '\u2696\uFE0F', aggressive: '\u2694\uFE0F' })[planStyleKey(style)] || '\u{1F4CA}'
 const planColor = (style) => ({ defensive: '#43A047', balanced: '#1976D2', aggressive: '#E53935' })[planStyleKey(style)] || '#888'
-const layerLabel = (layer) => ({ core: '核心', satellite: '卫星', defense: '防御' })[layer] || layer
+const layerLabel = (layer) => ({ core: '核心', satellite: '卫星', defense: '防御',
+  // R195: 引擎 CASH 行 layer='cash'——表格层徽标按防御渲染（对齐场内·场外分表現金行口径）
+  cash: '防御' })[layer] || layer
+
+// R195 (round56 §4.2 方案H): 入选理由显示回落链——
+// 后端契约键为 selection_rationale（api-contracts/portfolio/design.md），旧模板误读
+// a.rationale 导致全列恒为「—」；CASH 行无理由时回落「现金缓冲」。
+function rationaleText(a) {
+  if (!a) return '—'
+  return a.rationale || a.selection_rationale || (a.symbol === 'CASH' ? '现金缓冲' : '—')
+}
+
+// R195 (round56 §4.2 方案H): 分配表显示源——
+// allocations 缺 CASH 行但 Σ<1（残余现金>0.5%）时补合成行（权重=残余、层=cash→防御徽标、
+// 理由=现金缓冲），对齐场内·场外分表（AllocationTable tfoot 现金行）口径；
+// 满仓（残余≤0.5%，含浮点噪声）不补行，不编造现金。已有 CASH 行原样返回。
+function displayAllocations(pf) {
+  const allocs = pf?.allocations || []
+  if (allocs.some(a => a && a.symbol === 'CASH')) return allocs
+  const total = allocs.reduce((s, a) => s + (a.target_weight || 0), 0)
+  const residual = 1 - total
+  if (residual <= 0.005) return allocs
+  return [...allocs, {
+    symbol: 'CASH', name: '现金', layer: 'cash',
+    target_weight: Math.round(residual * 10000) / 10000,
+    daily_change_pct: null, factor_score: null, selection_rationale: '现金缓冲',
+  }]
+}
 
 function calcLayerWeight(allocations, layer) {
   if (!allocations) return 0

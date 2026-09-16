@@ -143,8 +143,9 @@ async def test_list_tasks_sorted_desc(task_mgr):
 
 async def test_list_tasks_pagination(task_mgr):
     """limit/offset 分页。"""
-    for _ in range(5):
-        await task_mgr.create_task(task_type="design")
+    # R192 去重语义：同类型同参数连建会去重 → 分页夹具用互异参数建 5 个独立任务。
+    for i in range(5):
+        await task_mgr.create_task(task_type="design", params={"seq": i})
     page1 = await task_mgr.list_tasks(limit=2, offset=0)
     page2 = await task_mgr.list_tasks(limit=2, offset=2)
     assert len(page1) == 2
@@ -202,11 +203,13 @@ async def test_old_terminal_kept_in_top_n(task_mgr, task_db):
 
 async def test_active_tasks_never_pruned(task_mgr):
     """活跃任务（pending/running/quick_ready）永不清理。"""
-    t1 = await task_mgr.create_task(task_type="design")          # pending
+    # R192 去重语义：同类型 tasks 须用互异参数，否则 t3 去重命中 t1。
+    t1 = await task_mgr.create_task(task_type="design", params={"tag": "first"})          # pending
     t2 = await task_mgr.create_task(task_type="check")
     await task_mgr.update_task(t2["task_id"], status="running", progress=10)
-    t3 = await task_mgr.create_task(task_type="design")
+    t3 = await task_mgr.create_task(task_type="design", params={"tag": "third"})
     await task_mgr.update_task(t3["task_id"], status="quick_ready", progress=60, result={})
+    assert t3["task_id"] != t1["task_id"]
 
     await task_mgr.prune_tasks(max_age_days=0)  # 即使 0 天保留期
     assert await task_mgr.get_task(t1["task_id"]) is not None
@@ -285,10 +288,11 @@ async def test_startup_recovery_marks_stuck_failed(task_db):
     from app.tasks.task_manager import TaskManager
 
     mgr = TaskManager(session_factory=task_db)
-    t1 = await mgr.create_task(task_type="design")
+    # R192 去重语义：t1/t3 同类型须用互异参数，否则 t3 去重命中 running 的 t1。
+    t1 = await mgr.create_task(task_type="design", params={"tag": "stuck"})
     await mgr.update_task(t1["task_id"], status="running", progress=50)
     t2 = await mgr.create_task(task_type="check")
-    t3 = await mgr.create_task(task_type="design")
+    t3 = await mgr.create_task(task_type="design", params={"tag": "done"})
     await mgr.update_task(t3["task_id"], status="completed", progress=100, result={})  # 终态不动
 
     # 模拟 main.py 的 _cleanup_stuck_tasks（等价逻辑：非终态 → failed）
@@ -441,8 +445,9 @@ class TestP4_4_TaskTimeoutMonitor:
         from app.models.task import TaskRecord
 
         created_ids = []
-        for _ in range(5):
-            t = await task_mgr.create_task("design", {})
+        # R192 去重语义：循环连建须用互异参数，否则 2-5 号去重命中 1 号。
+        for i in range(5):
+            t = await task_mgr.create_task("design", {"seq": i})
             created_ids.append(t["task_id"])
 
         # Set first 3 to completed with old timestamp
@@ -462,3 +467,42 @@ class TestP4_4_TaskTimeoutMonitor:
         await task_mgr.prune_tasks(max_count=0, max_age_days=0)
         remaining = [tid for tid in created_ids if await task_mgr.get_task(tid)]
         assert len(remaining) == 2, f"Expected 2 active tasks remaining, got {remaining}"
+
+
+# ── R192: 同参连击去重（round56 §4.2 方案D）───────────────────────────
+
+
+async def _check_task_ids(task_mgr, task_type="check"):
+    """同类型任务 id 列表（计数用，不触 prune 语义）。"""
+    return [t["task_id"] for t in await task_mgr.list_tasks(limit=100)
+            if t["type"] == task_type]
+
+
+async def test_create_task_dedups_same_params_while_active(task_mgr):
+    """同类型同参数 + 既有任务非终态 → 返回既有 id，不新增行（负向：无去重时 2 行）。"""
+    params = {"capital": 500000, "portfolio_type": "on_exchange"}
+    first = await task_mgr.create_task(task_type="check", params=params)
+    assert first.get("deduped") is False
+    second = await task_mgr.create_task(task_type="check", params=params)
+    assert second.get("deduped") is True
+    assert second["task_id"] == first["task_id"]
+    assert await _check_task_ids(task_mgr) == [first["task_id"]]
+
+
+async def test_create_task_no_dedup_different_params(task_mgr):
+    """参数不同 → 正常新建（去重不得误伤合法并发）。"""
+    first = await task_mgr.create_task(task_type="check", params={"portfolio_type": "on_exchange"})
+    second = await task_mgr.create_task(task_type="check", params={"portfolio_type": "off_exchange"})
+    assert second.get("deduped") is False
+    assert second["task_id"] != first["task_id"]
+    assert len(await _check_task_ids(task_mgr)) == 2
+
+
+async def test_create_task_no_dedup_after_terminal(task_mgr):
+    """既有任务已终态 → 同参数正常新建（重试语义不受影响）。"""
+    params = {"capital": 500000}
+    first = await task_mgr.create_task(task_type="check", params=params)
+    await task_mgr.update_task(first["task_id"], status="completed", progress=100, result={})
+    second = await task_mgr.create_task(task_type="check", params=params)
+    assert second.get("deduped") is False
+    assert second["task_id"] != first["task_id"]

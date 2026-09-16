@@ -373,6 +373,22 @@ describe('AiDesign — timer cleanup guards (round35 §16.6 空心测试修复)'
     wrapper.unmount()
   })
 
+  it('R192: 连击策略检查只提交一次（防重入守卫，负向：无守卫时提交 2 次）', async () => {
+    const api = await import('../api')
+    api.portfolioApi.strategyCheck.mockResolvedValue({ data: { task_id: 't-r192' } })
+    const wrapper = await mountWithModalStub()
+    const buttons = wrapper.findAll('.core-action-btn')
+    await buttons[1].trigger('click') // 打开 modal
+    await flushPromises()
+    // 模拟双击/连击：同一 tick 内连续发出两次 select-type
+    const stub = wrapper.findComponent('.strategy-modal-stub')
+    stub.vm.$emit('select-type', 'on_exchange')
+    stub.vm.$emit('select-type', 'on_exchange')
+    await flushPromises()
+    expect(api.portfolioApi.strategyCheck).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
   // 原 designAsync 占位用例（只验 mock 本身 rejects，未挂载组件）已删除：
   // design 失败/重试路径由下方「任务状态机 (O11)」describe 的真实组件行为用例覆盖。
 })

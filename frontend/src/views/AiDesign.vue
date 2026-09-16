@@ -290,7 +290,8 @@ async function enterDesignMode() {
 
 function enterStrategyMode() {
   strategyResult.value = null
-  checkingStrategy.value = false
+  // R192 (round56 §4.2 方案D): 运行中重复进入不得复位 checkingStrategy——
+  // 否则防重入守卫被绕过（modal 重开再点 → 第二个任务）。终态回调统一复位。
   strategyTaskStatus.value = ''
   strategyError.value = ''
   strategyPortfolioType.value = ''
@@ -470,6 +471,10 @@ async function startDesign(capital) {
 }
 
 async function checkStrategy() {
+  // R192 (round56 §4.2 方案D): 防重入守卫——连击/重复进入只提交一次。
+  // checkingStrategy 由各终态分支（完成/失败/超时/提交异常）复位，enterStrategyMode
+  // 不再复位（运行中重开 modal 再点仍被拦截）；后端 create_task 同参去重为第二道锁。
+  if (checkingStrategy.value) return
   // Clean up any previous strategy timers before starting new one
   clearStrategyTimers()
 

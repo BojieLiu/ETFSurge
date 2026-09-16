@@ -8,14 +8,14 @@
       <div class="modal-body">
         <p class="modal-desc">请选择需要检查的组合类型：</p>
         <div class="strategy-type-options">
-          <div class="strategy-type-card" @click="$emit('select-type', 'on_exchange')">
+          <div class="strategy-type-card" @click="onSelect('on_exchange')">
             <span class="st-icon">&#127881;</span>
             <div class="st-content">
               <span class="st-title">场内组合分析</span>
               <span class="st-desc">分析交易所上市 ETF 组合（股票、行业 ETF 等）</span>
             </div>
           </div>
-          <div class="strategy-type-card" @click="$emit('select-type', 'off_exchange')">
+          <div class="strategy-type-card" @click="onSelect('off_exchange')">
             <span class="st-icon">&#127974;</span>
             <div class="st-content">
               <span class="st-title">场外组合分析</span>
@@ -32,13 +32,24 @@
 </template>
 
 <script setup>
+import { ref } from 'vue'
 import AppButton from '../ui/AppButton.vue'
 
 defineProps({
   visible: { type: Boolean, default: false }
 })
 
-defineEmits(['select-type', 'close'])
+const emit = defineEmits(['select-type', 'close'])
+
+// R192 (round56 §4.2 方案D): 卡片点选 once 语义——同一次展开内双击只发出一次
+// select-type（根节点 v-if="visible" 随每次展开重挂载，guard 自动复位）。
+// 父侧 checkStrategy() 防重入 + 后端 create_task 去重为后两道锁。
+const selected = ref(false)
+function onSelect(type) {
+  if (selected.value) return
+  selected.value = true
+  emit('select-type', type)
+}
 </script>
 
 <style scoped>

@@ -102,6 +102,7 @@ GET /api/v1/portfolio/tasks/{task_id}
 | result.suggestions[].source | string | `rule`（规则引擎）\| `llm`（大模型） |
 | result.suggestions[].confidence | string | **round24 R4**：置信度语义标签，**必须为** `high` \| `medium` \| `low`（全站统一表示法）。规则路径按因子填充率分档（≥90%→high、≥70%→medium、<70%→low）；LLM 路径数值（0-1）/中文（高/中/低）一律归一化为同一枚举。**禁止**同屏混排「数值 0.7」与「high」两种表示法 |
 | result.suggestions[].reason | string | **丰富化（R4-22）**：2-3 句完整逻辑，按「触发依据；操作节奏；风险纪律」三段式组织，用「；」分隔；规则引擎与 LLM 均须遵守 |
+| result.suggestions[].divergence_detail | object \| null | **R194-G (round56 §4.2 方案G)**：信号-因子背离结构化原因（仅 F10 背离分支 P2/P3 输出，其余为 `null`）。`{signal_direction: "sell" \| "buy", factor_direction: "positive" \| "negative", factor_score: number, threshold: 0.5, explanation: string}`——前端渲染 `explanation`（缺键历史记录回落旧文案「技术信号与建议背离」） |
 | result.coverage | object | **新增** 覆盖率统计，确保 100% |
 | result.coverage.coverage_pct | number | 必须为 1.0（100%） |
 | result.holdings_analysis[].shares_held | number \| null | **R171 (round52 §4.3 方案B)**：持仓份额（源 `portfolio_etfs.shares_held`）；未灌录 → `null`。**不得**省略该键（省略会让「持仓市值列」复测路径不存在） |
@@ -210,6 +211,7 @@ GET /api/v1/portfolio/strategy-checks
 | 任务总耗时 ≤ 90s (预留 30s buffer) | N/A | ☐ | 超时预算修正 |
 | LLM 超时/失败时规则兜底生效 | N/A | ☐ | 单测 mock 验证 |
 | holdings_analysis[] 含 shares_held / market_value（缺失为 null，非 0） | ☐ | ☐ | R171：持仓市值列验证路径 |
+| suggestions[].divergence_detail 背离结构化（非背离为 null，历史记录缺键回落旧文案） | ☐ | ☐ | R194-G：偏离原因结构化展示 |
 
 ---
 

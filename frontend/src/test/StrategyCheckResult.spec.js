@@ -238,5 +238,48 @@ describe('StrategyCheckResult.vue', () => {
       })
       expect(wrapper.find('.suggestion-card').classes()).not.toContain('sc-divergence')
     })
+
+    // R194-G (round56 §4.2 方案G): 后端 divergence_detail 透出结构化偏离原因
+    it('R194-G: 有 divergence_detail → 渲染 explanation（负向：回落旧文案 → FAIL）', () => {
+      const withDetail = {
+        ...mockResult,
+        suggestions: [
+          { symbol: '159992', name: '创新药ETF', action: 'hold', current_weight: 0.1, suggested_weight: 0.1,
+            reason: '技术面偏空但因子分强正', confidence: 'medium',
+            divergence_detail: { signal_direction: 'sell', factor_direction: 'positive', factor_score: 3.57,
+              threshold: 0.5, explanation: '技术面偏空但因子分强正（3.57），信号与因子背离' } },
+        ],
+        holdings_analysis: [
+          { symbol: '159992', name: '创新药', factor_summary: '3.57', tech_signal: 'SELL' },
+        ],
+      }
+      const wrapper = mount(StrategyCheckResult, {
+        props: { result: withDetail },
+        global: { stubs },
+      })
+      const tag = wrapper.find('.divergence-tag')
+      expect(tag.exists()).toBe(true)
+      expect(tag.text()).toContain('信号与因子背离')
+      expect(tag.text()).toContain('3.57')
+    })
+
+    it('R194-G: 缺键历史记录（无 divergence_detail）→ 回落旧文案（不空白）', () => {
+      const divergent = {
+        ...mockResult,
+        suggestions: [
+          { symbol: '159992', name: '创新药ETF', action: 'hold', current_weight: 0.1, suggested_weight: 0.1, reason: '因子分强正', confidence: 'medium' },
+        ],
+        holdings_analysis: [
+          { symbol: '159992', name: '创新药', factor_summary: '3.57', tech_signal: 'SELL' },
+        ],
+      }
+      const wrapper = mount(StrategyCheckResult, {
+        props: { result: divergent },
+        global: { stubs },
+      })
+      const tag = wrapper.find('.divergence-tag')
+      expect(tag.exists()).toBe(true)
+      expect(tag.text()).toContain('技术信号与建议背离')
+    })
   })
 })

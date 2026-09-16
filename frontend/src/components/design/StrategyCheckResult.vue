@@ -63,7 +63,9 @@
           </div>
           <!-- F10 (round6 §十五): 操作建议口径标注——规则引擎基于因子分主导 -->
           <span class="source-tag">因子分主导 · 规则引擎</span>
-          <span v-if="isDiverged(s)" class="divergence-tag">⚠ 技术信号与建议背离</span>
+          <!-- R194-G (round56 §4.2 方案G): 后端 divergence_detail 透出结构化偏离原因则渲染
+               explanation；缺键历史记录回落旧文案（?. 防御，R187 hook 形状教训） -->
+          <span v-if="isDiverged(s)" class="divergence-tag">⚠ {{ s.divergence_detail?.explanation || '技术信号与建议背离' }}</span>
           <p class="sc-reason">{{ s.reason }}</p>
           <span class="confidence-tag" :class="'conf-' + (s.confidence || 'medium')">
             {{ confidenceLabel(s.confidence) }}
