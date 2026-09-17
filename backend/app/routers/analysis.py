@@ -27,6 +27,15 @@ router = APIRouter(prefix="/api/v1/analysis", tags=["analysis"])
 
 FETCH_TIMEOUT = 45
 
+# L1 v2 (advice-valuation): 估值覆盖的宽基指数 symbol→展示名
+_INDEX_NAMES = {
+    "000300": "沪深300",
+    "000905": "中证500",
+    "000852": "中证1000",
+    "000016": "上证50",
+    "399006": "创业板指",
+}
+
 class _SSEPreError(Exception):
     """R49: 预取数/预检失败，在流式首字节之后以 SSE error 事件透传（与 R21 一致）。
 
@@ -562,6 +571,77 @@ async def llm_advice_stream(req: LLMAdviceRequest):
         # 请求显式携带 portfolio 时透传，未带则为空列表（不凭空捏造持仓）。
         user_ctx["portfolio"] = (req.context or {}).get("portfolio", []) or []
 
+        # L1 v2 (advice-valuation): 意图路由 + 估值加采（valuation 意图 only，
+        # 25s 超时降级；小模型第二档 deferred，零命中直接 general）。
+        from ..analysis.intent import classify_all as _classify_all
+        from ..engine.valuation import (
+            classify_valuation as _classify_val,
+            compute_pe_percentile as _pe_pct,
+        )
+        intents = _classify_all(req.query or "")
+        primary_intent = intents[0] if intents else "general"
+        user_ctx["valuation_intent"] = (primary_intent == "valuation")
+        user_ctx["index_valuation"] = []
+        user_ctx["sector_valuation"] = []
+        user_ctx["etf_map"] = []
+        if primary_intent == "valuation":
+            try:
+                async def _fetch_valuation():
+                    idx_rows = []
+                    for _sym in ("000300", "000905", "000852",
+                                 "000016", "399006"):
+                        _hist_rows = await asyncio.to_thread(
+                            market_data_hub.get_index_valuation, _sym)
+                        if not _hist_rows:
+                            continue
+                        _cur = _hist_rows[0]
+                        _pe_hist = await asyncio.to_thread(
+                            market_data_hub.get_valuation_history,
+                            "index", _sym, "pe_1")
+                        _pct = (_pe_pct(_cur.get("pe_1"), _pe_hist)
+                                if len(_pe_hist) >= 5 else None)
+                        idx_rows.append({
+                            "symbol": _sym,
+                            "name": _INDEX_NAMES.get(_sym, _sym),
+                            "pe_1": _cur.get("pe_1"),
+                            "pe_2": _cur.get("pe_2"),
+                            "div_1": _cur.get("div_1"),
+                            "pe_pct": _pct,
+                            "verdict": _classify_val(_pct, None, None),
+                            "as_of": _cur.get("date", "未知"),
+                        })
+                    sec_rows = await asyncio.to_thread(
+                        market_data_hub.get_sector_valuation)
+                    _valid = [s for s in sec_rows
+                              if isinstance(s.get("pe_wavg"), (int, float))]
+                    _sorted = sorted(_valid, key=lambda s: s["pe_wavg"])
+                    picks = (_sorted[:5] + _sorted[-3:]) if _sorted else []
+                    sec_out = [{
+                        "ind_code": s.get("ind_code", "?"),
+                        "ind_name": s.get("ind_name", "?"),
+                        "pe_wavg": s.get("pe_wavg"),
+                        "pe_median": s.get("pe_median"),
+                        "verdict": _classify_val(None, None, None),
+                        "as_of": s.get("as_of", "未知"),
+                    } for s in picks]
+                    return idx_rows, sec_out
+
+                _iv, _sv = await asyncio.wait_for(_fetch_valuation(), timeout=25)
+                user_ctx["index_valuation"] = _iv
+                user_ctx["sector_valuation"] = _sv
+            except Exception:
+                logger.warning("[llm-advice] valuation fetch degraded",
+                               exc_info=True)
+        if "product" in intents:
+            from ..services.hub._common import SECTOR_ETF_MAP as _ETF_MAP
+            _q = req.query or ""
+            user_ctx["etf_map"] = [
+                {"sector_or_index": _k, "symbol": _v.get("symbol"),
+                 "name": _v.get("name")}
+                for _k, _v in _ETF_MAP.items()
+                if _k and _k in _q
+            ][:8]
+
         # Sector Phase 5: 注入市场上下文
         user_ctx = _inject_market_context(req.query, user_ctx)
 
@@ -586,6 +666,11 @@ async def llm_advice_stream(req: LLMAdviceRequest):
 
         async def _session_stream():
             reply = []
+            if primary_intent == "valuation":
+                yield {"event": "progress", "data": {
+                    "phase": "fetching_valuation",
+                    "message": "正在查询估值数据…",
+                }}
             async for ev in wrapped:
                 if ev.get("event") == "token":
                     reply.append(ev.get("data", {}).get("token", ""))

@@ -145,6 +145,16 @@ async def _clear_sync_memory_cache():
     _h._opportunistic_signals = {}
     _h._degraded = False
     _h._consecutive_failures = 0
+    # L2 (advice-valuation): 估值 6h 缓存复位（见 yield 前）
+    _h._index_valuation_cache = {}
+    _h._index_valuation_cache_ts = {}
+    _h._sector_valuation_cache = {}
+    _h._sector_valuation_cache_ts = {}
+    # L2 (advice-valuation): 估值 6h 缓存不清会跨测试串扰（分位读到旧历史）
+    _h._index_valuation_cache = {}
+    _h._index_valuation_cache_ts = {}
+    _h._sector_valuation_cache = {}
+    _h._sector_valuation_cache_ts = {}
     yield
     sync_memory_cache.clear()
     await memory_cache.clear()
@@ -189,6 +199,11 @@ async def _clear_sync_memory_cache():
     _h._opportunistic_signals = {}
     _h._degraded = False
     _h._consecutive_failures = 0
+    # L2 (advice-valuation): 估值 6h 缓存复位（见 yield 前）
+    _h._index_valuation_cache = {}
+    _h._index_valuation_cache_ts = {}
+    _h._sector_valuation_cache = {}
+    _h._sector_valuation_cache_ts = {}
 
 
 @pytest.fixture(autouse=True)
@@ -202,6 +217,27 @@ def _reset_llm_circuit():
     yield
     from app.analysis import llm
     llm.reset_circuit()
+
+
+@pytest.fixture(autouse=True)
+def _reset_source_circuits():
+    """数据源熔断复位（_reset_llm_circuit 同模式，L2 附带修复）.
+
+    背景：沙箱/断网环境下 lifespan 预热与真实源测试累积失败，
+    SourceRegistry 熔断（如 factor.history）打开后跨测试串扰——
+    test_async_boundaries 心跳 0/100、test_factor_hub_cache 读不到 hub 缓存。
+    只在测试后清理，不影响测试内断言熔断行为的用例。
+    """
+    yield
+    try:
+        from app.core import source_registry
+        for _name in list(source_registry.registry._states.keys()):
+            try:
+                source_registry.registry.reset_source(_name)
+            except Exception:
+                pass
+    except Exception:
+        pass
 
 
 @pytest.fixture

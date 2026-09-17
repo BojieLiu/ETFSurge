@@ -395,7 +395,10 @@ async def test_design_async_response_has_design_id():
 
     class _FakeTaskMgr:
         async def create_task(self, task_type="design", params=None):
-            return {"task_id": 999, "created_at": "2026-08-11T12:00:00Z"}
+            # R192 后产线读 t["status"]/t.get("deduped")——fake 形状同步
+            # （test-only 附带修复；HEAD 上已挂，与本轮无关）。
+            return {"task_id": 999, "status": "queued",
+                    "created_at": "2026-08-11T12:00:00Z"}
 
     with patch("app.tasks.task_manager.task_manager", _FakeTaskMgr()), \
          patch("app.tasks.task_manager.design_worker", new=AsyncMock()):

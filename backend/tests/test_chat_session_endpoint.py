@@ -58,8 +58,8 @@ def mock_llm_and_ctx(monkeypatch):
             "market_regime": "range_bound", "market_sentiment": {}, "fund_flow": {},
         }
 
-    from app.analysis.llm import client as llm_client
-    monkeypatch.setattr(llm_client, "llm_complete_stream", _fake_stream)
+    monkeypatch.setattr("app.analysis.runtime.llm_complete_stream",
+                        _fake_stream)
     monkeypatch.setattr("app.routers.analysis.build_full_context", _fake_ctx)
 
 

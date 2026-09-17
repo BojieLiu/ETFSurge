@@ -1259,6 +1259,48 @@ def _build_advice_stream_prompt(query: str, ctx: dict) -> str:
         lines.append(f"- 全市场主力{intensity}{direction}：{total/10000:.1f}亿元（净流入{pos}只/净流出{neg}只）")
         lines.append("")
 
+    # L1 v2 (advice-valuation): 估值槽消费——router 仅 valuation 意图注入；
+    # v1 无 ROE/PB 源，verdict 缺省待验；空槽 + valuation 意图 → 显式禁结论。
+    index_val = ctx.get("index_valuation", []) or []
+    sector_val = ctx.get("sector_valuation", []) or []
+    etf_map = ctx.get("etf_map", []) or []
+
+    def _num(v):
+        return f"{v:.2f}" if isinstance(v, (int, float)) else "—"
+
+    if index_val or sector_val:
+        lines.append("\n### 估值快照（只引用表内数值与 as_of，不得编数）")
+        if index_val:
+            lines.append("| 指数 | PE1 | PE2 | 股息率1 | 近20日PE分位 | 结论 | as_of |")
+            lines.append("|---|---|---|---|---|---|---|")
+            for r in index_val[:6]:
+                pct = r.get("pe_pct")
+                pct_s = f"{pct:.2f}" if isinstance(pct, (int, float)) else "—"
+                lines.append(
+                    f"| {r.get('name', r.get('symbol', '?'))} "
+                    f"| {_num(r.get('pe_1'))} | {_num(r.get('pe_2'))} "
+                    f"| {_num(r.get('div_1'))} | {pct_s} "
+                    f"| {r.get('verdict', '待验')} | {r.get('as_of', '未知')} |")
+        if sector_val:
+            lines.append("| 板块 | 静态PE(加权) | 静态PE(中位数) | 结论 | as_of |")
+            lines.append("|---|---|---|---|---|")
+            for r in sector_val[:8]:
+                lines.append(
+                    f"| {r.get('ind_name', r.get('ind_code', '?'))} "
+                    f"| {_num(r.get('pe_wavg'))} | {_num(r.get('pe_median'))} "
+                    f"| {r.get('verdict', '待验')} | {r.get('as_of', '未知')} |")
+        lines.append("")
+    elif ctx.get("valuation_intent"):
+        lines.append("\n估值数据暂不可用（as_of 缺失），不得下低估/高估结论，"
+                     "只给筛选方法。")
+        lines.append("")
+    if etf_map:
+        lines.append("### ETF 映射（仅限表内代码，禁裸写）")
+        for m in etf_map[:8]:
+            lines.append(f"- {m.get('sector_or_index', '?')}: "
+                         f"{m.get('name', '?')}({m.get('symbol', '?')})")
+        lines.append("")
+
     # F5: industry rotation framework
     lines.append('### 行业轮动分析框架')
     lines.append('- 最强/最弱板块：优先引用行业涨跌幅排名数据')

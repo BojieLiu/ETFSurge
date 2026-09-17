@@ -50,6 +50,7 @@ from app.services.hub._realtime import RealtimeMixin
 from app.services.hub._regime_sentiment import RegimeSentimentMixin
 from app.services.hub._sector import SectorMixin
 from app.services.hub._snapshot import SnapshotMixin
+from app.services.hub._valuation import ValuationMixin
 
 from ..factors.factor_registry import registry as factor_registry
 
@@ -71,6 +72,7 @@ class MarketDataHub(
     PoolMixin,
     FundamentalsMixin,
     SnapshotMixin,
+    ValuationMixin,
 ):
     _last_refresh_ts: float = 0.0
 
@@ -94,6 +96,11 @@ class MarketDataHub(
         self._sector_momentum_cache_ts: float = 0
         self._hot_plates_cache: list[dict] | None = None       # Phase 2: 热点板块
         self._sector_heat_cache: list[dict] | None = None      # Phase 2: 板块热度排行
+        # L2 (advice-valuation): 指数/板块估值 6h 缓存（ValuationMixin 读写）
+        self._index_valuation_cache: dict[str, list[dict]] = {}
+        self._index_valuation_cache_ts: dict[str, float] = {}
+        self._sector_valuation_cache: dict[str, list[dict]] = {}
+        self._sector_valuation_cache_ts: dict[str, float] = {}
         self._index_realtime_cache: list[dict] | None = None
         # R80 (round29): 指数快照刷新时间——报告 as_of 时效标注数据源，
         # 缺此字段则 as_of 恒 None（假实现）。

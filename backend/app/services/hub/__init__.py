@@ -41,6 +41,7 @@ from app.services.hub._realtime import RealtimeMixin
 from app.services.hub._regime_sentiment import RegimeSentimentMixin
 from app.services.hub._sector import SectorMixin
 from app.services.hub._snapshot import SnapshotMixin
+from app.services.hub._valuation import ValuationMixin
 
 __all__ = [
     "MANDATORY_CODES",
@@ -72,4 +73,5 @@ __all__ = [
     "RegimeSentimentMixin",
     "PoolMixin",
     "FundamentalsMixin",
+    "ValuationMixin",
 ]
