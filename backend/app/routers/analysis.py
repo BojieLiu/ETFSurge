@@ -586,30 +586,36 @@ async def llm_advice_stream(req: LLMAdviceRequest):
         user_ctx["etf_map"] = []
         if primary_intent == "valuation":
             try:
+                async def _one_index(_sym):
+                    _hist_rows = await asyncio.to_thread(
+                        market_data_hub.get_index_valuation, _sym)
+                    if not _hist_rows:
+                        return None
+                    _cur = _hist_rows[0]
+                    _pe_hist = await asyncio.to_thread(
+                        market_data_hub.get_valuation_history,
+                        "index", _sym, "pe_1")
+                    _pct = (_pe_pct(_cur.get("pe_1"), _pe_hist)
+                            if len(_pe_hist) >= 5 else None)
+                    return {
+                        "symbol": _sym,
+                        "name": _INDEX_NAMES.get(_sym, _sym),
+                        "pe_1": _cur.get("pe_1"),
+                        "pe_2": _cur.get("pe_2"),
+                        "div_1": _cur.get("div_1"),
+                        "pe_pct": _pct,
+                        "verdict": _classify_val(_pct, None, None),
+                        "as_of": _cur.get("date", "未知"),
+                    }
+
                 async def _fetch_valuation():
-                    idx_rows = []
-                    for _sym in ("000300", "000905", "000852",
-                                 "000016", "399006"):
-                        _hist_rows = await asyncio.to_thread(
-                            market_data_hub.get_index_valuation, _sym)
-                        if not _hist_rows:
-                            continue
-                        _cur = _hist_rows[0]
-                        _pe_hist = await asyncio.to_thread(
-                            market_data_hub.get_valuation_history,
-                            "index", _sym, "pe_1")
-                        _pct = (_pe_pct(_cur.get("pe_1"), _pe_hist)
-                                if len(_pe_hist) >= 5 else None)
-                        idx_rows.append({
-                            "symbol": _sym,
-                            "name": _INDEX_NAMES.get(_sym, _sym),
-                            "pe_1": _cur.get("pe_1"),
-                            "pe_2": _cur.get("pe_2"),
-                            "div_1": _cur.get("div_1"),
-                            "pe_pct": _pct,
-                            "verdict": _classify_val(_pct, None, None),
-                            "as_of": _cur.get("date", "未知"),
-                        })
+                    # 5 指数并发（独立源，gather 保序；串行在 loop 拥堵时
+                    # 排队超时——11:53/11:56 线上实证 TimeoutError）。
+                    _symbols = ("000300", "000905", "000852",
+                                "000016", "399006")
+                    _got = await asyncio.gather(
+                        *(_one_index(_s) for _s in _symbols))
+                    idx_rows = [r for r in _got if r]
                     sec_rows = await asyncio.to_thread(
                         market_data_hub.get_sector_valuation)
                     _valid = [s for s in sec_rows
