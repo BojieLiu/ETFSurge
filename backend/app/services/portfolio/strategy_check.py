@@ -1196,6 +1196,47 @@ def _build_rule_fallback_holdings_analysis(
     return result
 
 
+def _hold_divergence_detail(sig: str, score: float, regime_cn: str) -> dict:
+    """R199 (round57 §4.2 方案E): hold 分支的 divergence_detail 构造器。
+
+    R194-G 只给 P2/P3（sell+≥0.5 / buy+≤-0.5）两条硬背离分支设了键，常见的
+    「信号 + 因子中性 → hold」落在 else 主干，check143 实测 30/30 为 null——
+    前端 tag（``StrategyCheckResult.vue``）回落通用文案拿不到 why。
+
+    本函数把「未翻行动」的结构化理由补齐：因子未达 ±0.5 阈值 + 单侧信号不足，
+    与 P2/P3 同 schema（前端不新增分支即可渲染）。
+    """
+    _dir = "positive" if score >= 0.5 else "negative" if score <= -0.5 else "neutral"
+    if sig == "sell":
+        _sig_cn = "卖出"
+        _sig_dir = "sell"
+    elif sig == "buy":
+        _sig_cn = "买入"
+        _sig_dir = "buy"
+    else:
+        # 无方向（hold/空信号）统一归 "neutral"——契约 signal_direction 域仅
+        # sell|buy|neutral，避免下游把 "hold" 当作第三种方向语义。
+        _sig_cn = "中性"
+        _sig_dir = "neutral"
+    if _dir == "neutral":
+        _expl = (
+            f"因子分 {score:.2f} 处于中性区（未达 ±0.5 背离阈值），"
+            f"技术面{_sig_cn}信号单侧不足以翻转行动——维持现状，跟踪因子与信号变化"
+        )
+    else:
+        _expl = (
+            f"因子分 {score:.2f}（{_dir}）与技术面{_sig_cn}信号未构成强背离"
+            f"（阈值 ±0.5 未破），市态{regime_cn}下维持现状"
+        )
+    return {
+        "signal_direction": _sig_dir,
+        "factor_direction": _dir,
+        "factor_score": round(float(score), 4),
+        "threshold": 0.5,
+        "explanation": _expl,
+    }
+
+
 def _rule_based_suggestion(
     symbol: str,
     name: str,
@@ -1330,6 +1371,9 @@ def _rule_based_suggestion(
             f"止损纪律：跌破 MA20 或买入逻辑破坏即减仓一半"
         )
         suggested = cur
+        # R199 (round57 §4.2 方案E): hold 分支同 emit divergence_detail——否则
+        # check143 实测 30/30 为 null，前端 tag 回落通用文案无 why。
+        _divergence = _hold_divergence_detail(sig, _score, _regime_cn)
     else:
         action = "hold"
         _fcorr = ("偏强" if _score >= 0.5 else
@@ -1348,6 +1392,8 @@ def _rule_based_suggestion(
             f"{_follow_up}，市态{_regime_cn}不追涨杀跌"
         )
         suggested = cur
+        # R199 (round57 §4.2 方案E): 同上——else 主干（最常见形态）也须带 why。
+        _divergence = _hold_divergence_detail(sig, _score, _regime_cn)
 
     # round27 R42: 因子分参考群体标注——设计屏「相对候选池」、策略检查场内持仓
     # 「相对候选池」、场外联接「单标的（场外联接无池内截面）」——两屏口径可比对。
@@ -1403,8 +1449,9 @@ def _rule_based_suggestion(
         #（实测 159992 表格 +1.63 vs 理由 -2.43，round34 §4.5）。
         "composite_score": round(float(_score), 4),
         "source": "rule",
-        # R194-G (round56 §4.2 方案G): 背离结构化原因（F10 P2/P3 分支设置，
-        # 其余为 None；契约 api-contracts/portfolio/strategy-check-v2.md）。
+        # R194-G (round56 §4.2 方案G) + R199 (round57 方案E): 背离/未翻行动的结构化
+        # 原因（F10 全部 hold 分支 + P2/P3 硬背离分支均设置；仅 increase/decrease
+        # 明确行动分支为 None）。契约 api-contracts/portfolio/strategy-check-v2.md。
         "divergence_detail": _divergence,
     }
 

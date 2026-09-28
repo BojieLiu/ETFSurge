@@ -56,7 +56,12 @@ STRATEGY_META: dict[str, dict[str, Any]] = {
         # §5.1C (round8 §7 拍板): 压卫星 ≤20%（0.30→0.20）、防御抬至 15%（0.10→0.15）、
         # core 0.50 保持 85% 仓位（现金 15%，U6 现金收敛验收不变）
         "layer_budget": {"core": 0.50, "satellite": 0.20, "defense": 0.15},
-        "layer_count": {"core": 5, "satellite": 6, "defense": 1},
+        # R03 (round58 Part A): defense 目标数 1→2——平衡型防御层从「只有一只
+        # 偏弱负信号黄金」变为 黄金 + 30 年国债双锚（_defense_anchors_for 的
+        # defense>=2 分支），与「平衡」定位对齐（design 65 实测防御仅 5% 黄金）。
+        # 预算不变（defense 0.15），故现金不因本项塌陷；INV-3 防御数反向仍成立
+        # （def 2 ≥ bal 2 ≥ agg 1）。
+        "layer_count": {"core": 5, "satellite": 6, "defense": 2},
         "core_growth_cap": 0.40,
         "expected_characteristics": "预期年化波动15-18%，最大回撤区间15-18%",
     },
@@ -224,8 +229,14 @@ class EngineConfig:
     # ── 核心层结构约束 ──
     #: 核心层大盘宽基数量上限（含强制锚；O16→R101 数量软约束）
     large_cap_wide_basis_limit: int = 4
-    #: STRATEGY_META.core_growth_cap 缺失时的兜底（主值仍以 meta 为单源）
+    #: STRATEGY_META.core_growth_cap 缺失时的兜底（主值仍 meta 为单源）
     core_growth_cap_fallback: float = 0.40
+    #: R01 (round58 Part A): 平衡型「全方案成长风格」占比软上限（占**非现金**总权重）。
+    #: 与 INV-4 `core_growth_cap`（占 core 层预算）口径互补但不同——INV-4 管核心层
+    #: 内占比，本项管全方案占比，堵住「科创50 20% + 中证500 20%」这类
+    #: 顶着平衡型名号的成长集中（docs/round58-portfolio-design-llm-fix.md §A1）。
+    #: 软约束（只告警不剔除），连续多轮触发再考虑升级为硬约束。
+    balanced_growth_cap: float = 0.30
 
     # ── 相关性阈值族（INV-7 序：warn ≥ cap ≥ concentration）──
     wide_basis_warn: float = 0.95               # 原 WIDE_BASIS_HIGH_CORR_THRESHOLD（R101 软提示）
@@ -253,6 +264,12 @@ def validate_engine_config(cfg: EngineConfig) -> None:
         )
     if not (0.0 < cfg.softmax_temperature <= 1.0):
         raise ValueError(f"INV-7 violated: softmax_temperature={cfg.softmax_temperature} out of (0,1]")
+    # R01 (round58): 平衡型成长风格上限是「占非现金总权重」的占比——必须落在 (0,1)
+    if not (0.0 < cfg.balanced_growth_cap < 1.0):
+        raise ValueError(
+            f"INV-7 violated: balanced_growth_cap={cfg.balanced_growth_cap} "
+            f"out of (0,1)"
+        )
 
 
 # 加载期构造 + 校验（fail-fast）。导入 budgets 模块即触发，违反不变量直接崩溃。

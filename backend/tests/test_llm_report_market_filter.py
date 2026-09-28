@@ -75,3 +75,72 @@ def test_filter_commodities_market():
     assert _filter_commodities_for_market(resolve_market_context("US"), comms) == []
     assert _filter_commodities_for_market(resolve_market_context("A"), comms) == comms
     assert _filter_commodities_for_market(resolve_market_context("GLOBAL"), comms) == comms
+
+# ── R01 (round58 §1 M2): sector 三件套注入报告 prompt ──────────────────────
+# M2 根因：build_full_context 采了 sector_momentum/hot_plates/sector_heat，
+# llm_report_stream 从不取、_build_report_prompt 无参数 → 采完即丢，
+# LLM 写「输入未提供行业涨跌」。本组钉住接线 + 负向（空数据不得编造涨跌幅）。
+
+
+def _prompt(**kw):
+    from app.analysis.llm import _build_report_prompt
+    base = dict(
+        indices=[], commodities=[], market_data=[], indicators={},
+        news=[], macro_news=[],
+    )
+    base.update(kw)
+    return _build_report_prompt(**base)
+
+
+def test_r01_sector_section_injected_with_real_names_and_pct():
+    """R01: sector_momentum 有值 → prompt 含强势/弱势 Top5 + 真实名与涨跌幅。"""
+    p = _prompt(
+        sector_momentum=[
+            {"sector_name": "半导体", "change_pct": 3.21},
+            {"sector_name": "银行", "change_pct": -1.05},
+            {"sector_name": "创新药", "change_pct": 2.10},
+        ],
+        hot_plates=[{"name": "CRO/CMO", "change_pct": 5.72}],
+    )
+    assert "板块与风格" in p
+    assert "强势 Top5" in p and "弱势 Top5" in p
+    assert "半导体" in p and "+3.21%" in p
+    assert "银行" in p and "-1.05%" in p
+    assert "热点板块" in p and "CRO/CMO" in p
+
+
+def test_r01_sector_all_empty_no_fabricated_pct():
+    """R01 负向：sector 全空 → 段出现且只给 R80 占位，**不得**出现任何板块涨跌幅。"""
+    p = _prompt(sector_momentum=[], hot_plates=[])
+    assert "板块与风格" in p
+    assert "（板块涨跌数据源暂不可用）" in p
+    # 负向：不得凭空虚构板块名/百分比
+    assert "强势 Top5" not in p
+    assert "热点板块" not in p
+
+
+def test_r01_sector_rows_without_numeric_pct_are_skipped():
+    """R01 负向：涨跌幅字段缺失/非数值的行必须跳过（不得当 0 渲染）。"""
+    p = _prompt(
+        sector_momentum=[{"sector_name": "半导体"}, {"sector_name": "银行", "change_pct": None}],
+        hot_plates=[],
+    )
+    assert "（板块涨跌数据源暂不可用）" in p
+    assert "半导体" not in p and "银行" not in p
+
+
+def test_r01_router_passes_sector_ctx_into_prompt():
+    """R01 接线守卫：llm_report_stream 必须把 ctx 里的 sector_momentum 透传给
+    _build_report_prompt（M2 断点的真正修复点在 router 侧）。"""
+    import ast
+    from pathlib import Path
+    src = Path(__file__).resolve().parent.parent / "app" / "routers" / "analysis.py"
+    tree = ast.parse(src.read_text(encoding="utf-8"))
+    kw_names: set[str] = set()
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call)
+                and getattr(node.func, "id", None) == "_build_report_prompt"):
+            kw_names |= {k.arg for k in node.keywords if k.arg}
+    assert {"sector_momentum", "hot_plates"} <= kw_names, (
+        f"router 未把板块三件套透传给 prompt：{sorted(kw_names)}"
+    )

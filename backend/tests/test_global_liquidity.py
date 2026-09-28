@@ -162,3 +162,59 @@ async def test_build_full_context_collects_liquidity(monkeypatch):
         include_fund_flow=False, include_commodities=False,
     )
     assert ctx.get("global_liquidity") == {"us_10y": 4.68, "vix": 17.09, "fed_rate": 3.63}
+
+# ── R07 (round58 §1 M6): 商品名别名映射（油价整段丢失修复）──────────────────
+# M6 根因：fetch_futures_realtime 经 akshare 外盘返回英文/代码名（WTI/布伦特/CL…），
+# _format_commodities 旧实现只按中文名过滤 6 品种 → 全部对不上 → 油价缺失。
+
+
+def test_r07_wti_maps_to_crude_line():
+    """R07 核心：WTI 英文名输入 → 渲染为「原油」行（旧实现会整段丢失）。"""
+    from app.analysis.llm.reports import _format_commodities
+    out = _format_commodities([
+        {"name": "WTI", "price": 70.5, "change_pct": 1.2},
+        {"name": "GC", "price": 2650.0, "change_pct": -0.3},
+    ])
+    assert "原油" in out and "70.5" in out
+    assert "黄金" in out and "2650.0" in out
+    assert "WTI" not in out, "英文原始名未归一（下游 LLM 认不出品种）"
+
+
+def test_r07_alias_covers_brent_cl_si_hg():
+    """R07: 布伦特/CL/SI/HG 均须归一到规范中文名。"""
+    from app.analysis.llm.reports import _format_commodities
+    out = _format_commodities([
+        {"name": "布伦特", "price": 74.0, "change_pct": 0.5},
+        {"name": "CL", "price": 71.0, "change_pct": 0.4},
+        {"name": "SI", "price": 31.0, "change_pct": 2.0},
+        {"name": "HG", "price": 4.5, "change_pct": -0.8},
+    ])
+    for canon in ("原油", "白银", "铜"):
+        assert canon in out, f"{canon} 未归一：{out}"
+
+
+def test_r07_unmatched_names_fall_back_to_first_six():
+    """R07 兼容：对不上任何别名时回退前 6 条（旧行为，不丢数据）。"""
+    from app.analysis.llm.reports import _format_commodities
+    rows = [{"name": f"品种{i}", "price": float(i), "change_pct": 0.0} for i in range(9)]
+    out = _format_commodities(rows)
+    assert out.count("- ") == 6
+    assert "品种5" in out and "品种6" not in out
+
+
+def test_r07_empty_commodities_returns_empty_string():
+    """R07 负向：空列表 → 空串（调用方渲染「（暂无数据）」，不抛异常）。"""
+    from app.analysis.llm.reports import _format_commodities
+    assert _format_commodities([]) == ""
+
+
+def test_r07_market_report_not_blocked_when_all_empty():
+    """R07 负向验收：商品全空时主报告 prompt 仍正常生成（不阻断主报告）。"""
+    from app.analysis.llm import _build_report_prompt
+    p = _build_report_prompt(
+        indices=[], commodities=[], market_data=[], indicators={},
+        news=[], macro_news=[],
+    )
+    assert "大宗商品" in p
+    assert "（暂无数据）" in p
+    assert "请生成一份市场环境研判报告" in p

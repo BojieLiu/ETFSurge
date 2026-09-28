@@ -1323,18 +1323,29 @@ async def get_portfolio_realtime(phase: str = "all") -> list[dict[str, Any]]:
                         _nav_change_pct = float(nav_data.get("daily_change_pct") or 0.0)
                     except (TypeError, ValueError):
                         _nav_change_pct = 0.0
+                # R196 (round57 §4.1/方案A): 「有标签必有值」不变量——
+                # nav 失败且 index 回退为空时 price=None，estimate_source 必须标
+                # "unavailable"（R175 已立的语义），不得挂 "last_close" 空标签
+                # （round57 §2.1 实测 15 只场外 price=null + estimate_source=last_close）。
+                _price = nav_price or (index_price_map.get(ti, {}).get("price"))
+                if nav_price is not None:
+                    _src = "nav"
+                elif _price is not None:
+                    _src = "last_close"
+                else:
+                    _src = "unavailable"
                 quotes.append({
                     "symbol": sym,
                     "name": name_map.get(sym, sym),
                     "short_name": short_name_map.get(sym, name_map.get(sym, sym)),
-                    "price": nav_price or (index_price_map.get(ti, {}).get("price")),
+                    "price": _price,
                     "change_pct": _nav_change_pct,
                     "change_amount": 0,
                     "volume": 0,
                     "asset_type": "A",
                     "portfolio_type": "off_exchange",
                     "is_estimated": True,
-                    "estimate_source": "nav" if nav_data else "last_close",
+                    "estimate_source": _src,
                 })
 
         await _asyncio.gather(*[_fetch_one(t) for t in _off_fundnav_tasks])

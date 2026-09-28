@@ -975,6 +975,137 @@ def _advance_decline_fallback() -> float:
 
 
 
+# ── R06 (round58 §3 P1): 全市场宽度（涨跌家数 + 成交额）────────────────────
+# 复用 :func:`fetch_advance_decline_ratio` 的 push2delay clist 同接口（多取
+# f6=成交额 字段），**5min 成功缓存**（报告链每请求生成一次，不能每次拉全市场）。
+# 与 advance_decline 分开成函数而非合并：后者是因子/情绪后台链的热路径
+# （无缓存、circuit breaker 语义不同），合并会给它引入未经评估的缓存层。
+_BREADTH_TTL = 300
+_breadth_cache: tuple[float, dict] | None = None
+
+# clist 字段：f2=最新价 f3=涨跌幅 f4=涨跌额 f6=成交额(元)
+_BREADTH_CLIST_FIELDS = "f2,f3,f6"
+_BREADTH_CLIST_FS = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"
+
+
+def _clist_spot_rows() -> list[dict]:
+    """push2delay clist 全市场快照行（熔断可用时）。失败返回 []。"""
+    if not _push2_h.available(_time.time()):
+        logger.warning("[breadth] push2delay circuit open, skipping direct fetch")
+        return []
+    import json
+    import urllib.request
+    url = "https://push2delay.eastmoney.com/api/qt/clist/get"
+    params = (
+        f"?pn=1&pz=5000&po=1&np=1&fields={_BREADTH_CLIST_FIELDS}"
+        f"&fs={_BREADTH_CLIST_FS}"
+    )
+    req = urllib.request.Request(url + params, headers={"User-Agent": "Mozilla/5.0"})
+    resp = urllib.request.urlopen(req, timeout=10)
+    data = json.loads(resp.read().decode("utf-8"))
+    return list(data.get("data", {}).get("diff", []) or [])
+
+
+def fetch_market_breadth() -> dict[str, Any]:
+    """R06 (round58 §3 P1): 全市场宽度 = 涨跌家数 + 成交额。
+
+    返回::
+
+        {"up": 2130, "down": 2871, "flat": 61, "total": 5062,
+         "advance_ratio": 0.4208, "total_amount": 1.23e12,
+         "amount_unit": "元", "as_of": "2026-09-26"}
+
+    语义纪律（反假完成）：
+      - 源不可用 → 返回 ``{}``（**不是** 0 家/0 元伪值）——调用方必须按
+        「数据源暂不可用」占位渲染（round58 §3 R02 段规范）。
+      - ``_degraded`` 标记：走了 akshare 降级（成交额不可得）→ ``amount_unit``
+        为空且 ``total_amount`` 为 None，只给家数。
+
+    无网络：调用方须 mock；本函数自带 5min 进程内缓存。
+    """
+    global _breadth_cache
+    now = _time.time()
+    if _breadth_cache and (now - _breadth_cache[0]) < _BREADTH_TTL:
+        return dict(_breadth_cache[1])
+
+    out: dict[str, Any] = {}
+    try:
+        rows = _clist_spot_rows()
+    except Exception as e:
+        logger.warning("[breadth] clist fetch failed: %s", e)
+        _push2_h.record_failure(_time.time())
+        rows = []
+    if rows:
+        try:
+            up = down = flat = 0
+            amount = 0.0
+            amount_ok = True
+            for i in rows:
+                try:
+                    chg = float(i.get("f3", 0) or 0)
+                except (TypeError, ValueError):
+                    chg = 0.0
+                if chg > 0:
+                    up += 1
+                elif chg < 0:
+                    down += 1
+                else:
+                    flat += 1
+                try:
+                    amount += float(i.get("f6", 0) or 0)
+                except (TypeError, ValueError):
+                    amount_ok = False
+            total = len(rows)
+            if total:
+                _push2_h.record_success()
+                out = {
+                    "up": up, "down": down, "flat": flat, "total": total,
+                    "advance_ratio": round(up / total, 4),
+                    "total_amount": round(amount, 2) if amount_ok else None,
+                    "amount_unit": "元" if amount_ok else "",
+                    "as_of": _time.strftime("%Y-%m-%d"),
+                }
+        except Exception as e:
+            logger.warning("[breadth] clist aggregate failed: %s", e)
+    if not out:
+        # 降级：akshare 现货全表（成交额列名不稳定，只取家数——诚实标 degraded）
+        try:
+            import pandas as pd
+
+            def _p():
+                import akshare as ak
+                return ak.stock_zh_a_spot_em()
+            df = run_in_thread(_p, timeout=8, executor="long")
+            if df is not None and not df.empty:
+                col = "涨跌幅" if "涨跌幅" in df.columns else df.columns[0]
+                vals = pd.to_numeric(df[col], errors="coerce")
+                total = int(vals.notna().sum())
+                if total:
+                    up = int((vals > 0).sum())
+                    down = int((vals < 0).sum())
+                    _push2_h.record_success()
+                    out = {
+                        "up": up, "down": down,
+                        "flat": max(total - up - down, 0), "total": total,
+                        "advance_ratio": round(up / total, 4),
+                        "total_amount": None, "amount_unit": "",
+                        "as_of": _time.strftime("%Y-%m-%d"),
+                        "_degraded": True,
+                    }
+        except Exception as e2:
+            logger.warning("[breadth] akshare fallback failed: %s", e2)
+
+    if out:
+        _breadth_cache = (now, dict(out))
+    return out
+
+
+def clear_breadth_cache() -> None:
+    """单测/长驻刷新用：清空 5min 宽度缓存（同源失败不入缓存，无需清理）。"""
+    global _breadth_cache
+    _breadth_cache = None
+
+
 def fetch_margin_change() -> float:
     """获取两融余额变化率 (归一化 -1~1)。
 

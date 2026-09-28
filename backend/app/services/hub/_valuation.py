@@ -19,7 +19,7 @@ from ...fetchers.valuation_fetcher import (
     fetch_index_valuation_history,
     fetch_sector_pe_snapshot,
 )
-from ...models.valuation_history import ValuationHistory  # noqa: F401（注册建表用）
+from ...models.valuation_history import ValuationHistory  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -151,7 +151,8 @@ class ValuationMixin:
                 conn.execute("PRAGMA busy_timeout=30000")
                 _ensure_table(conn)
                 cur = conn.execute(
-                    f"SELECT {col} FROM valuation_history "  # noqa: S608（col 已白名单）
+                    # col 已在 _VAL_COLS 白名单内校验（:147），拼串无注入面。
+                    f"SELECT {col} FROM valuation_history "
                     "WHERE kind=? AND key=? AND "
                     f"{col} IS NOT NULL ORDER BY as_of DESC",
                     (kind, key),

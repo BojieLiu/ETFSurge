@@ -38,3 +38,18 @@ def test_config_is_frozen() -> None:
     """frozen dataclass——运行时篡改配置必须失败。"""
     with pytest.raises(Exception):  # noqa: B017,FrozenInstanceError
         ENGINE_CONFIG.softmax_temperature = 0.5  # type: ignore[misc]
+
+
+# ── R01 (round58 Part A): balanced_growth_cap 加载期不变量 ──────────────────
+# 平衡型成长风格上限是「占非现金总权重」的占比——越界/退化值必须 fail-fast，
+# 否则 R01 告警要么永不触发（cap=0）、要么全方案恒告警（cap=1.0）。
+
+
+def test_r01_balanced_growth_cap_default_is_thirty_pct() -> None:
+    assert ENGINE_CONFIG.balanced_growth_cap == pytest.approx(0.30)
+
+
+@pytest.mark.parametrize("bad", [0.0, -0.1, 1.0, 1.5])
+def test_r01_balanced_growth_cap_range_enforced(bad: float) -> None:
+    with pytest.raises(ValueError, match="balanced_growth_cap"):
+        validate_engine_config(replace(ENGINE_CONFIG, balanced_growth_cap=bad))

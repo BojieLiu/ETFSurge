@@ -19,6 +19,7 @@ from ..analysis.llm import (
     run_stream_with_cache,
 )
 from ..analysis.registry import get_agent
+from ..core.async_utils import run_sync
 from ..services.llm_context import build_full_context
 from ..services.market_data_hub import market_data_hub
 from ..services.market_service import get_history
@@ -35,6 +36,33 @@ _INDEX_NAMES = {
     "000016": "上证50",
     "399006": "创业板指",
 }
+
+# R03a (round58 §1 M3): 政策条抽取关键词表（P2-2 探针实证：缓存命中 4 条，
+# 政策关键词命中 1 条）。macro_news 此前恒传 [] → `_build_market_overview` 的
+# 「宏观政策」段永空（死参数）。零命中则该段省略，不在模板里留空话柄。
+_POLICY_KEYWORDS = (
+    "央行", "人民银行", "财政", "国务院", "发改委", "证监会",
+    "LPR", "MLF", "逆回购", "降准", "降息", "政策", "会议",
+    "国常会", "政治局", "专项债", "减税",
+)
+
+
+def _extract_policy_news(news_items: list[dict], limit: int = 5) -> list[dict]:
+    """R03a: 从 enriched_news 抽 ≤limit 条政策类条目（标题/摘要含政策关键词）。
+
+    保留原 dict（含 level/stars/category/source）以便 prompt 标注来源。
+    """
+    out: list[dict] = []
+    for n in news_items or []:
+        if not isinstance(n, dict):
+            continue
+        text = f"{n.get('title', '')} {n.get('summary', '')}"
+        if any(k in text for k in _POLICY_KEYWORDS):
+            out.append(n)
+        if len(out) >= limit:
+            break
+    return out
+
 
 class _SSEPreError(Exception):
     """R49: 预取数/预检失败，在流式首字节之后以 SSE error 事件透传（与 R21 一致）。
@@ -459,18 +487,70 @@ async def llm_report_stream(req: LLMReportRequest):
             _gl = None
         # R79 (round29): 国内宏观/流动性注入 prompt（此前采集了未接线，LLM 写「未提供」）
         _domestic = ctx.get("domestic_macro")
+        # R01/R02/R08 (round58): 板块三件套 + 全市场宽度 + 沪深港通历史接入 prompt。
+        # build_full_context 早采了 sector_momentum/hot_plates/sector_heat（M2 采了
+        # 没接线）——这里取出来透传。宽度/港通为新增采样，均带缓存 + 超时兜底。
+        _sector_momentum = ctx.get("sector_momentum")
+        _hot_plates = ctx.get("hot_plates")
+        _breadth: dict = {}
+        _hsgt: dict | None = None
+        _margin_change: float | None = None
+        try:
+            _breadth = await asyncio.wait_for(
+                run_sync(market_data_hub.get_market_breadth), timeout=15
+            ) or {}
+        except Exception as e:
+            logger.debug("[llm-report] market breadth unavailable: %s", e)
+        try:
+            _hsgt = await asyncio.wait_for(
+                run_sync(market_data_hub.get_hsgt_flow_history, 5), timeout=15
+            )
+        except Exception as e:
+            logger.debug("[llm-report] hsgt history unavailable: %s", e)
+        # 两融变化：fetch_market_sentiment 已算进 margin_change；缺失时单独取
+        if isinstance(sentiment, dict) and sentiment.get("margin_change") is not None:
+            _margin_change = sentiment.get("margin_change")
+        # R03a: macro_news 死参改活——从 enriched_news 抽政策条（零命中则省略该段）
+        _policy_news = _extract_policy_news(enriched_news)
         # R80 (round29): 数据时效标注——取指数快照真实刷新时间（未刷新 → None，不标注）
         _as_of = market_data_hub.get_index_realtime_as_of()
+        # R09 (round58 §3): as_of 扩展到板块/量能/港通三源（无则不标，不伪造）
+        _as_of_parts = [p for p in (
+            _as_of,
+            (ctx.get("sector_momentum") or [{}])[0].get("as_of") if ctx.get("sector_momentum") else None,
+            _breadth.get("as_of") if _breadth else None,
+            (_hsgt or {}).get("as_of"),
+        ) if p]
+        _as_of_full = " / ".join(dict.fromkeys(str(p) for p in _as_of_parts)) or None
         prompt = _build_report_prompt(
             indices, commodities, market_data, indicators,
-            enriched_news, [], global_liquidity=_gl,
-            domestic_macro=_domestic, as_of=_as_of,
+            enriched_news, _policy_news, global_liquidity=_gl,
+            domestic_macro=_domestic, as_of=_as_of_full,
+            sector_momentum=_sector_momentum, hot_plates=_hot_plates,
+            market_breadth=_breadth, sentiment=sentiment,
+            fund_flow=ctx.get("fund_flow"), margin_change=_margin_change,
+            hsgt=_hsgt,
         )
         agent = get_agent("market_report")
         # 首报落会话：冻结快照 + done 回填 session_id（追问复用，不重采）
         _snap_lines = [f"市场状态: {regime or '未知'}"]
         for _i in (indices or [])[:5]:
             _snap_lines.append(f"· {_i.get('name', _i.get('symbol', ''))}: {_i.get('price', '—')} ({_i.get('change_pct', '—')})")
+        # R05 (round58 §3): 冻结快照补板块 Top5 一行 + 量能一行——追问复用
+        # 时不得再采一遍数据，否则同一会话两次回答的数据口径会漂移。
+        _top_sec = sorted(
+            [s for s in (_sector_momentum or [])
+             if isinstance(s.get("change_pct"), (int, float))],
+            key=lambda x: x["change_pct"], reverse=True,
+        )[:5]
+        if _top_sec:
+            _snap_lines.append("· 强势板块: " + "、".join(
+                f"{s.get('sector_name') or s.get('name', '?')} "
+                f"{s['change_pct']:+.2f}%" for s in _top_sec))
+        if _breadth.get("total"):
+            _snap_lines.append(
+                f"· 量能: 上涨{_breadth.get('up', 0)}/下跌{_breadth.get('down', 0)}"
+                f"，上涨占比{float(_breadth.get('advance_ratio', 0)) * 100:.1f}%")
         _snap_text = "\n".join(_snap_lines)[:4000]
         store.set_frozen(session_id, {"snapshot_text": _snap_text, "as_of": _as_of,
                                       "market": _req_market}, market=_req_market)

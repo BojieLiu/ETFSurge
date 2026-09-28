@@ -162,3 +162,27 @@ class RegimeSentimentMixin:
         except Exception:
             pass
         return self._sentiment_cache or {"sentiment_index": 50, "sentiment_label": "中性"}
+
+    def get_market_breadth(self) -> dict:
+        """R06 (round58 §3 P1): 全市场涨跌家数 + 成交额（5min 缓存，源不可用→{}）。
+
+        同步方法——内部 fetcher 自带 5min 缓存，调用方须经 run_sync 包装。
+        """
+        try:
+            from ...fetchers.fundamentals_fetcher import fetch_market_breadth
+            return fetch_market_breadth() or {}
+        except Exception as e:
+            logger.warning("[hub] get_market_breadth failed: %s", e)
+            return {}
+
+    def get_hsgt_flow_history(self, days: int = 5) -> dict | None:
+        """R08 (round58 §3 P1): 北向/南向近 N 日净流入（24h 缓存，None=不可用）。
+
+        同步方法——内部 fetcher 走 24h 成功缓存，调用方须经 run_sync 包装。
+        """
+        try:
+            from ...fetchers.macro_fetcher import fetch_hsgt_history
+            return fetch_hsgt_history(days=days)
+        except Exception as e:
+            logger.warning("[hub] get_hsgt_flow_history failed: %s", e)
+            return None

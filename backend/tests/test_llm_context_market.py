@@ -218,3 +218,122 @@ class TestR513AdviceContextInjection:
         snapshot = _build_snapshot("如何看待定投")
         assert snapshot, "非 stream 版也应无条件注入 market_snapshot"
         assert "上证指数" in snapshot or "市场状态" in snapshot
+
+# ── R06 (round58 §3 P1): 全市场成交额 / 涨跌家数（push2delay clist 求和）─────
+# 负向：clist 失败 → 回退空 + 占位，**不得**报 0 家 / 0 元伪值。
+
+
+class _FakeResp:
+    def __init__(self, payload):
+        self._b = payload
+
+    def read(self):
+        return self._b
+
+
+def _r58_breadth_clear():
+    from app.fetchers import fundamentals_fetcher as ff
+    ff.clear_breadth_cache()
+
+
+def _r58_rows(items):
+    import json as _json
+    body = _json.dumps({"data": {"diff": items}}).encode("utf-8")
+    return _FakeResp(body)
+
+
+def test_r06_breadth_aggregates_up_down_and_amount(monkeypatch):
+    """R06: 一次 clist 调用聚合出涨跌家数 + 成交额（up/down/total/amount）。"""
+    _r58_breadth_clear()
+    from app.fetchers import fundamentals_fetcher as ff
+    import urllib.request
+
+    items = [
+        {"f3": 1.2, "f6": 3.0e8},
+        {"f3": 0.5, "f6": 1.0e8},
+        {"f3": -1.1, "f6": 2.0e8},
+        {"f3": 0.0, "f6": 5.0e7},
+    ]
+    monkeypatch.setattr(ff._push2_h, "available", lambda now: True)
+    monkeypatch.setattr(ff._push2_h, "record_success", lambda *a, **k: None)
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda *a, **k: _r58_rows(items))
+    out = ff.fetch_market_breadth()
+    assert out["up"] == 2 and out["down"] == 1 and out["flat"] == 1
+    assert out["total"] == 4
+    assert out["advance_ratio"] == 0.5
+    assert out["total_amount"] == pytest.approx(6.5e8)
+    _r58_breadth_clear()
+
+
+def test_r06_cached_second_call_zero_network(monkeypatch):
+    """R06: 5min 缓存生效——二次调用零网络（请求链不得每报告拉一次全市场）。"""
+    _r58_breadth_clear()
+    from app.fetchers import fundamentals_fetcher as ff
+    import urllib.request
+
+    calls = {"n": 0}
+
+    def _boom(*a, **k):
+        calls["n"] += 1
+        raise AssertionError("缓存命中时不得触网")
+
+    monkeypatch.setattr(ff._push2_h, "available", lambda now: True)
+    monkeypatch.setattr(ff._push2_h, "record_success", lambda *a, **k: None)
+    monkeypatch.setattr(urllib.request, "urlopen", _boom)
+    # 预热一次（真取数被禁 → 走空结果也不入缓存，这里直接写缓存）
+    ff._breadth_cache = (ff._time.time(), {"up": 1, "down": 2, "total": 3,
+                                           "advance_ratio": 0.3333,
+                                           "total_amount": 1.0e8})
+    out = ff.fetch_market_breadth()
+    assert out["total"] == 3
+    assert calls["n"] == 0
+    _r58_breadth_clear()
+
+
+def test_r06_clist_failure_returns_empty_not_zero_counts(monkeypatch):
+    """R06 负向：clist + akshare 降级全失败 → {}（**不是** 0 家/0 元伪值）。"""
+    _r58_breadth_clear()
+    from app.fetchers import fundamentals_fetcher as ff
+    import urllib.request
+
+    monkeypatch.setattr(ff._push2_h, "available", lambda now: True)
+    monkeypatch.setattr(ff._push2_h, "record_failure", lambda *a, **k: None)
+    monkeypatch.setattr(ff._push2_h, "record_success", lambda *a, **k: None)
+
+    def _raise(*a, **k):
+        raise OSError("network down")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _raise)
+    monkeypatch.setattr(ff, "run_in_thread", lambda fn, timeout=8, executor="long": (_ for _ in ()).throw(OSError("down")))
+    out = ff.fetch_market_breadth()
+    assert out == {}, f"源全挂必须回退空 dict，实际 {out!r}"
+    _r58_breadth_clear()
+
+
+def test_r06_hub_method_degrades_to_empty(monkeypatch):
+    """R06 接线守卫：hub.get_market_breadth 存在且异常时返回 {}（不抛）。"""
+    from app.services.market_data_hub import MarketDataHub
+    assert callable(MarketDataHub().get_market_breadth)
+    from app.fetchers import fundamentals_fetcher as ff
+    monkeypatch.setattr(ff, "fetch_market_breadth",
+                        lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+    assert MarketDataHub().get_market_breadth() == {}
+
+
+def test_r06_breadth_appears_in_report_prompt(monkeypatch):
+    """R06 真实调用点：宽度必须真进报告 prompt（否则新增 hub 方法=脚手架）。"""
+    import ast
+    from pathlib import Path
+    src = Path(__file__).resolve().parent.parent / "app" / "routers" / "analysis.py"
+    tree = ast.parse(src.read_text(encoding="utf-8"))
+    called = any(
+        isinstance(n, ast.Attribute) and n.attr == "get_market_breadth"
+        for n in ast.walk(tree)
+    )
+    assert called, "router 未调用 hub.get_market_breadth（R06 0 引用=脚手架）"
+    kw = set()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "_build_report_prompt":
+            kw |= {k.arg for k in n.keywords if k.arg}
+    assert "market_breadth" in kw, "宽度未透传给 prompt"

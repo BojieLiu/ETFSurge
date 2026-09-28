@@ -37,6 +37,51 @@ LLM_MAX_RETRIES = 2
 LLM_RETRY_DELAY = 3.0
 _LLM_RATE_LIMIT_CAP = 30.0
 
+# ── R05 (round58 Part B): 403 专用熔断 ─────────────────────────────────────
+# 403 = 该 key 对该模型**无访问权**（确定性失败，重试多少次都没用——round58
+# Part B §B2.2）。既有 F8 熔断只按「累计失败数达阈值」开断，403 单次 ~0.8s
+# 快速失败只记 1 次普通失败 → 7 次 403 仍继续重试并烧满 90s 预算
+# （check149 日志 16:26-16:28 实证：真因 403，summary 误标「超时 143s」）。
+#
+# 本熔断独立于 F8：同 provider 连续 403 ≥ 阈值 → 拉黑 R05_403_COOLDOWN_S 秒，
+# 期间零探测直接 failover；非 403 一律清零（瞬态错误不该继承 403 的判断）。
+# 作用域：`llm_complete_with_system`（策略检查 / JSON 模式路径，方案 R05 定位）。
+R05_403_THRESHOLD = 2
+R05_403_COOLDOWN_S = 60.0
+_r05_403_streak: dict[str, int] = {}
+_r05_403_blocked_until: dict[str, float] = {}
+
+
+def _r05_403_allow(provider_id: str) -> bool:
+    """403 拉黑期内直接 False（冷却到期自动解除）。"""
+    until = _r05_403_blocked_until.get(provider_id, 0.0)
+    if not until:
+        return True
+    if time.monotonic() < until:
+        return False
+    _r05_403_blocked_until.pop(provider_id, None)
+    _r05_403_streak.pop(provider_id, None)
+    return True
+
+
+def _r05_403_record(provider_id: str, is_403: bool) -> bool:
+    """记 403 连击；返回「本次是否触发拉黑」。非 403 → 清零。"""
+    if not is_403:
+        _r05_403_streak.pop(provider_id, None)
+        return False
+    n = _r05_403_streak.get(provider_id, 0) + 1
+    _r05_403_streak[provider_id] = n
+    if n >= R05_403_THRESHOLD:
+        _r05_403_blocked_until[provider_id] = time.monotonic() + R05_403_COOLDOWN_S
+        return True
+    return False
+
+
+def _r05_403_reset() -> None:
+    """单测隔离用：清空 403 连击与拉黑表（模块级状态，跨用例污染）。"""
+    _r05_403_streak.clear()
+    _r05_403_blocked_until.clear()
+
 
 def _apply_provider_body(body: dict, provider: ProviderConfig) -> None:
     """round35 feed-fix: 强制思考模型（opencode zen 的 deepseek-V4 / x-preview
@@ -522,6 +567,12 @@ async def llm_complete_with_system(
     for attempt in range(max_retries + 1):
         _attempted_any = False
         for provider in providers:
+            # R05: 403 专用拉黑（连续 403 → 冷却期零探测，见模块级注释）。
+            # 排在 F8 之前——403 拉黑是更确定的信号（权限问题），若 F8 已 OPEN
+            # 会先被 skip 掉，导致「全 provider 因 403 不可用」被误报成
+            # 「无 provider 可用」而丢掉 403 归因。
+            if not _r05_403_allow(provider.id):
+                continue
             # F8: 模块级 TTL 熔断——OPEN 态直接跳过该 provider（零探测零过路费）。
             if not _circuit_allow(provider.id, provider.model):
                 continue
@@ -588,6 +639,8 @@ async def llm_complete_with_system(
                     _clear_llm_error()
                     # F8: 成功 → 熔断恢复（OPEN/HALF_OPEN → CLOSED）
                     _circuit_record_success(provider.id, provider.model)
+                    # R05: 成功即清 403 连击（瞬态成功说明权限正常）
+                    _r05_403_record(provider.id, False)
 
                     usage = data.get("usage", {})
                     _duration = (time.monotonic() - _start) * 1000
@@ -618,6 +671,19 @@ async def llm_complete_with_system(
                     and _resp is not None
                     and getattr(_resp, "status_code", None) == 429
                 )
+                # R05: 403 = key 无该模型权限（确定性失败）→ 连击计数，
+                # 达阈值即拉黑 60s；非 403 走 _r05_403_record(..., False) 清零。
+                _is_403 = (
+                    isinstance(_exc, httpx.HTTPStatusError)
+                    and _resp is not None
+                    and getattr(_resp, "status_code", None) == 403
+                )
+                if _r05_403_record(provider.id, _is_403):
+                    logger.warning(
+                        "[LLM] Provider %s 连续 %d 次 403（无模型访问权），"
+                        "拉黑 %.0fs", provider.id, R05_403_THRESHOLD,
+                        R05_403_COOLDOWN_S,
+                    )
                 if _is_429:
                     _circuit_record_failure(provider.id, True, model=provider.model, exc=_exc)
                 else:
@@ -665,6 +731,18 @@ async def llm_complete_with_system(
             )
             await asyncio.sleep(wait)
 
+    # R05: 退出前归因——若**全部** provider 都因连续 403 被拉黑，错误文案必须
+    # 点明「key 缺模型权限」，而不是把最后一个 HTTPStatusError(403) 原样抛出
+    # 让上层分类器猜（check149 实测：真因 403，summary 误标「超时 143s」，
+    # 且 90s 预算被空转腿烧光）。此检查放在两个 break 路径之后，覆盖 F8
+    # 全 OPEN 提前跳出与 max_retries 耗尽两种情形。
+    if providers and all(not _r05_403_allow(p.id) for p in providers):
+        _blocked = sorted(p.id for p in providers if not _r05_403_allow(p.id))
+        raise RuntimeError(
+            "All LLM providers returned 403 (model access forbidden) and are "
+            f"cooling down for {R05_403_COOLDOWN_S:.0f}s: {_blocked} — "
+            "API key lacks permission for these models"
+        )
     if last_exc is None:
         raise RuntimeError("No LLM providers available")
     raise last_exc

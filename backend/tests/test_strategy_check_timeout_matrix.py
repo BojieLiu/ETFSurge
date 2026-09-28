@@ -1495,11 +1495,60 @@ def test_divergence_detail_none_when_aligned():
     assert s.get("divergence_detail") is None
 
 
-def test_divergence_detail_none_for_plain_hold():
-    """普通 hold（无信号冲突）→ divergence_detail 为 None。"""
+# ── R199 (round57 §4.2 方案E): hold 主干同 emit divergence_detail ──────────
+# round57 §4.1 R199：R194-G 只覆盖 P2/P3，常见「sell/buy + 因子中性 → hold」落在
+# else 主干，check143 实测 30/30 为 null → 前端 tag 回落通用文案无 why。
+
+
+def test_divergence_detail_present_for_plain_hold():
+    """普通 hold（无信号冲突）→ 仍须给 why（负向：R199 前必为 None → FAIL）。"""
     s = _sugg("hold", {"technical": 0.1})
     assert s["action"] == "hold"
-    assert s.get("divergence_detail") is None
+    d = s.get("divergence_detail")
+    assert isinstance(d, dict), f"hold 行必须带 divergence_detail，实际 {d!r}"
+    assert d["signal_direction"] == "neutral"
+    assert d["factor_direction"] == "neutral"
+    assert d["threshold"] == 0.5
+    assert d["explanation"], "explanation 不得为空串（tag 无 why）"
+
+
+def test_divergence_detail_present_for_subthreshold_buy_hold():
+    """子阈值 hold（0.2<因子分<0.5 + buy）→ 同带 detail。"""
+    s = _sugg("buy", {"technical": 0.35, "momentum": 0.3})
+    assert s["action"] == "hold"
+    d = s.get("divergence_detail")
+    assert isinstance(d, dict), f"子阈值 hold 必须带 divergence_detail，实际 {d!r}"
+    assert d["signal_direction"] == "buy"
+    assert d["factor_direction"] == "neutral"
+
+
+def test_divergence_detail_schema_uniform_across_hold_branches():
+    """R199 覆盖完整性：三种 hold 形态的 divergence_detail 键集必须完全一致
+    （前端单一渲染分支的前提——键集漂移会静默落回通用文案）。"""
+    shapes = [
+        _sugg("sell", {"technical": 3.57, "momentum": 1.2, "valuation": 0.5}),   # P2
+        _sugg("buy", {"technical": -1.0, "momentum": -0.8}),                       # P3
+        _sugg("hold", {"technical": 0.1}),                                        # else 主干
+        _sugg("sell", {"technical": 0.05}),                                       # else + sell
+        _sugg("buy", {"technical": 0.35, "momentum": 0.3}),                       # 子阈值 buy
+    ]
+    keysets = set()
+    for s in shapes:
+        assert s["action"] == "hold", f"本组应全为 hold，实际 {s['action']}"
+        d = s["divergence_detail"]
+        assert isinstance(d, dict), f"hold 分支缺 detail: {d!r}"
+        keysets.add(tuple(sorted(d)))
+    assert len(keysets) == 1, f"hold 各分支键集不一致: {keysets}"
+
+
+def test_divergence_detail_not_emitted_for_actionable_branches():
+    """明确行动分支（increase/decrease）不得误挂 hold 语义的 detail。"""
+    up = _sugg("buy", {"technical": 1.2, "momentum": 0.9, "valuation": 0.6})
+    assert up["action"] == "increase"
+    assert up.get("divergence_detail") is None
+    down = _sugg("sell", {"technical": -1.2, "momentum": -0.9, "valuation": -0.6})
+    assert down["action"] == "decrease"
+    assert down.get("divergence_detail") is None
 
 
 # ── P0-1: 行业集中度误导性输出修复（合并自 test_strategy_check_industry.py）──
@@ -2025,3 +2074,212 @@ class TestR66FactorCompositeIcSeries:
         assert "510300" in out
         assert out["510300"].get("reference") in ("相对候选池", "单标的")
 
+
+
+# =========================================================================
+# R04 / R05 (round58 Part B): 403 分类 + 403 专用熔断
+# =========================================================================
+# 现象（docs/round58-portfolio-design-llm-fix.md §B1/B2）：
+#   check149 summary 写「LLM 分析超时（143s 未返回）」，真实原因是 7 次 fast 403
+#   （key 对模型无权限）+ 一条 90s 空转腿。403 掉进分类器 else 分支被误标「超时」，
+#   且既有 F8 熔断只按累计失败计数开断，403 快失败只记 1 次 → 预算照烧。
+
+
+class TestR04ForbiddenClassification:
+    """R04: `_classify_llm_failure_cause` 403 分支（必须早于 429/else）。"""
+
+    def test_403_classified_as_forbidden_not_timeout(self):
+        from app.analysis.llm.reports import _classify_llm_failure_cause
+        out = _classify_llm_failure_cause(
+            "client error '403 forbidden' for url "
+            "'https://openrouter.ai/api/v1/chat/completions'", 143.4)
+        assert "访问被拒绝" in out, f"403 未被识别为访问被拒: {out}"
+        assert "超时" not in out, f"403 被误标超时（R58 B2 根因）: {out}"
+
+    def test_forbidden_prefix_in_constant_set(self):
+        """R186 口径同步：新增前缀必须进 llm_fallback_prefixes 常量集
+        （否则 strategy_check F1-9 识别器认不出 → 状态分裂复发）。"""
+        from app.core.llm_fallback_prefixes import (
+            FORBIDDEN_PREFIX,
+            FALLBACK_PREFIXES,
+            is_llm_fallback_summary,
+        )
+        from app.analysis.llm.reports import _classify_llm_failure_cause
+        out = _classify_llm_failure_cause("403 forbidden", 10.0)
+        assert FORBIDDEN_PREFIX in FALLBACK_PREFIXES
+        assert out.startswith(FORBIDDEN_PREFIX)
+        assert is_llm_fallback_summary(out) is True
+
+    def test_403_branch_precedes_quota(self):
+        """分支序：403 文本若同时含 quota，必须判 403 而非 429 限流
+        （权限问题与限流的处置动作不同：前者要换 key/模型，后者要退避）。"""
+        from app.analysis.llm.reports import _classify_llm_failure_cause
+        out = _classify_llm_failure_cause(
+            "403 forbidden: monthly quota for this model is 0", 12.0)
+        assert "访问被拒绝" in out
+        assert "限流" not in out
+
+    def test_real_429_still_quota(self):
+        """兼容守卫：纯 429 不得被 403 分支截胡。"""
+        from app.analysis.llm.reports import _classify_llm_failure_cause
+        out = _classify_llm_failure_cause("429 too many requests", 8.0)
+        assert "限流" in out
+        assert "访问被拒绝" not in out
+
+    def test_timeout_still_timeout(self):
+        """兼容守卫：无 403 证据的挂起仍归超时。"""
+        from app.analysis.llm.reports import _classify_llm_failure_cause
+        out = _classify_llm_failure_cause("connection reset by peer", 90.0)
+        assert "超时" in out
+
+
+class _R58State:
+    """R05 夹具状态：记录每个 provider 被真实发起的请求次数。"""
+
+    def __init__(self):
+        self.calls: dict[str, int] = {}
+
+
+def _r58_provider(pid: str):
+    return MagicMock(id=pid, model=f"m-{pid}", api_url="http://x",
+                     api_key="k", timeout=15)
+
+
+def _r58_403_client(state, pid):
+    """构造一个恒返 403 的 fake httpx client（按 pid 记账）。"""
+
+    class _FakeResp:
+        status_code = 403
+        headers: dict = {}
+
+        def raise_for_status(self):
+            raise httpx.HTTPStatusError(
+                "HTTP 403", request=MagicMock(), response=self)
+
+        def json(self):
+            return {}
+
+    class _FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, *a, **kw):
+            state.calls[pid] = state.calls.get(pid, 0) + 1
+            return _FakeResp()
+
+    return _FakeClient()
+
+
+class TestR05ForbiddenCircuitBreaker:
+    """R05: 连续 403 -> 拉黑 60s -> 零探测 failover；全拉黑 -> 立即失败。"""
+
+    def setup_method(self):
+        from app.analysis.llm import client as client_mod
+        client_mod._r05_403_reset()
+
+    def teardown_method(self):
+        from app.analysis.llm import client as client_mod
+        client_mod._r05_403_reset()
+
+    def test_threshold_constants(self):
+        from app.analysis.llm import client as m
+        assert m.R05_403_THRESHOLD == 2
+        assert m.R05_403_COOLDOWN_S == 60.0
+
+    def test_streak_counts_and_blocks_at_threshold(self):
+        from app.analysis.llm import client as m
+        assert m._r05_403_record("p", True) is False   # 第 1 次不拉黑
+        assert m._r05_403_allow("p") is True
+        assert m._r05_403_record("p", True) is True    # 第 2 次拉黑
+        assert m._r05_403_allow("p") is False          # 冷却期内跳过
+
+    def test_non_403_resets_streak(self):
+        """负向：非 403 必须清零（瞬态 5xx 不该让 403 计数继承）。"""
+        from app.analysis.llm import client as m
+        m._r05_403_record("p", True)
+        m._r05_403_record("p", False)
+        assert m._r05_403_allow("p") is True
+        assert m._r05_403_record("p", True) is False
+
+    def test_cooldown_expiry_unblocks(self, monkeypatch):
+        from app.analysis.llm import client as m
+        m._r05_403_record("p", True)
+        m._r05_403_record("p", True)
+        assert m._r05_403_allow("p") is False
+        base = m.time.monotonic()
+        monkeypatch.setattr(m.time, "monotonic", lambda: base + 61.0)
+        assert m._r05_403_allow("p") is True
+        assert m._r05_403_streak == {}
+
+    def test_reset_helper_clears_state(self):
+        from app.analysis.llm import client as m
+        m._r05_403_record("p", True)
+        m._r05_403_record("p", True)
+        m._r05_403_reset()
+        assert m._r05_403_streak == {} and m._r05_403_blocked_until == {}
+
+    @pytest.mark.asyncio
+    async def test_second_403_skips_provider_rest_of_task(self):
+        """R05 端到端（负向）：单 provider 连续 2 次 403 -> 第 3 次零探测。
+
+        修复前 max_retries=2 会打满 3 次（check149 实证 7 次 fast 403 + 90s
+        空转腿烧光预算）。
+        """
+        from app.analysis import llm as llm_mod
+        state = _R58State()
+        with patch("httpx.AsyncClient",
+                   side_effect=lambda *a, **k: _r58_403_client(state, "opencode_zen")), \
+             patch("app.analysis.llm.client.get_configured_providers",
+                   return_value=[_r58_provider("opencode_zen")]), \
+             patch("app.analysis.llm.client._check_key", new=AsyncMock()), \
+             patch("app.analysis.llm.client.llm_quota_gate") as gate, \
+             patch("app.analysis.llm.client.token_store") as tok:
+            gate.acquire = AsyncMock()
+            tok.record = AsyncMock()
+            with pytest.raises(Exception):
+                await llm_mod.llm_complete_with_system(
+                    system_prompt="s", prompt="p", max_retries=2,
+                    rate_limit_cap=0.1, request_timeout=5.0,
+                )
+        assert state.calls.get("opencode_zen") == 2, (
+            f"403 breaker did not engage, still probed "
+            f"{state.calls.get('opencode_zen')} times")
+
+    @pytest.mark.asyncio
+    async def test_all_providers_forbidden_fails_fast_with_clear_cause(self):
+        """R05 负向：两 provider 各 403 到阈值后全拉黑 -> **立即**失败，
+        文案含 403/permission（运维一眼可判），不再空耗重试预算。
+        """
+        from app.analysis import llm as llm_mod
+        state = _R58State()
+        providers = [_r58_provider("opencode_zen"), _r58_provider("openrouter")]
+        seq = iter(["opencode_zen", "openrouter",
+                    "opencode_zen", "openrouter"])
+
+        def _factory(*a, **k):
+            try:
+                return _r58_403_client(state, next(seq))
+            except StopIteration:
+                return _r58_403_client(state, "opencode_zen")
+
+        with patch("httpx.AsyncClient", side_effect=_factory), \
+             patch("app.analysis.llm.client.get_configured_providers",
+                   return_value=providers), \
+             patch("app.analysis.llm.client._check_key", new=AsyncMock()), \
+             patch("app.analysis.llm.client.llm_quota_gate") as gate, \
+             patch("app.analysis.llm.client.token_store") as tok:
+            gate.acquire = AsyncMock()
+            tok.record = AsyncMock()
+            with pytest.raises(RuntimeError) as ei:
+                await llm_mod.llm_complete_with_system(
+                    system_prompt="s", prompt="p", max_retries=2,
+                    rate_limit_cap=0.1, request_timeout=5.0,
+                )
+        msg = str(ei.value)
+        assert "403" in msg and "permission" in msg.lower(), (
+            f"all-blocked error must name 403/permission: {msg}")
+        # 4 次请求 = 2 轮 x 2 provider；第 3 轮应零探测
+        assert sum(state.calls.values()) == 4, state.calls

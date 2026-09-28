@@ -2001,6 +2001,45 @@ def enforce_max_correlation(
     return strategies
 
 
+def _growth_concentration_warning(
+    profile: str | None,
+    allocs: list[dict[str, Any]],
+    warnings: list[dict[str, Any]],
+) -> None:
+    """R01 (round58 Part A): 平衡型成长风格集中度**软约束**（告警不剔除）。
+
+    背景（docs/round58-portfolio-design-llm-fix.md §A1）：design 65 平衡型
+    科创50 20% + 中证500 20% = 40% 高弹性成长宽基、科创主题合计 24.4%，而防御
+    仅 5% 偏弱负信号黄金——名实不符。既有控制的缺口：单只 30% 上限不拦、
+    行业 40% 不拦（宽基行业字段为「宽基」）、INV-4 `core_growth_cap` 只管
+    **core 层内**占比，`_merge_substitute_family` 也不认「科创半导体」。
+
+    口径：`_is_growth_wide_basis`（growth_style）标的合计权重 / 非现金总权重
+    > `ENGINE_CONFIG.balanced_growth_cap`（0.30）即告警。
+    与 INV-4 互补：INV-4 = 成长占 core 预算；本项 = 成长占全方案非现金权重。
+    仅对 balanced 生效（defensive/aggressive 的高成长占比是其定位本身）。
+    """
+    if profile != "balanced":
+        return
+    non_cash = [a for a in allocs if a.get("symbol") != "CASH"]
+    total_w = sum(a.get("weight", 0.0) or 0.0 for a in non_cash)
+    if total_w <= 0:
+        return
+    cap = ENGINE_CONFIG.balanced_growth_cap
+    growth_w = sum(
+        a.get("weight", 0.0) or 0.0 for a in non_cash if _is_growth_wide_basis(a)
+    )
+    if growth_w > total_w * cap + 1e-9:
+        warnings.append({
+            "type": "growth_style_concentration_exceeded",
+            "profile": profile,
+            "growth_weight": round(growth_w, 4),
+            "non_cash_weight": round(total_w, 4),
+            "growth_share": round(growth_w / total_w, 4),
+            "cap": cap,
+        })
+
+
 def check_structure_reasonableness(
     strategies: list[dict[str, Any]],
     correlation_medians: dict[str, float | None] | None = None,
@@ -2015,7 +2054,7 @@ def check_structure_reasonableness(
     纯函数，无 I/O。
 
     逐方案（cross_profile_only=False 时）：
-      - 防御层含综合信号明显负面（factor_score <= -0.5）的标的 → rationale 追加提示；
+      - 防御层含因子综合分明显负面（factor_score <= -0.5）的标的 → rationale 追加提示；
       - 防御层标的 median_r >= 0.35 却称「避险/低相关」→ 追加高相关提示；
       - 进攻型现金 > 20% → structure_warning；
       - round22 INV-4: 核心层高 beta 成长宽基占比 > core_growth_cap → structure_warning。
@@ -2044,7 +2083,10 @@ def check_structure_reasonableness(
                 fs = a.get("factor_score", 0.0) or 0.0
                 # P2-5-A: 负信号标的不得静默作防御层
                 if lay == "defense" and fs <= -0.5:
-                    note = f"【结构提示：综合信号 {fs:+.2f} 为负，作防御层配置需谨慎——负信号防御标的】"
+                    # R198 (round57): 脚注标签「因子综合分」——与 rationale 行文的
+                    # 「综合信号」(engine/signal.py 三因子加权聚合, 口径不同) 解耦。
+                    # 同标签异值会让用户误判同一信号有两个数（round57 §4.1 R198）。
+                    note = f"【结构提示：因子综合分 {fs:+.2f} 为负，作防御层配置需谨慎——负信号防御标的】"
                     a["selection_rationale"] = (a.get("selection_rationale") or "") + note
                     warnings.append({"type": "negative_signal_in_defense", "symbol": sym, "factor_score": fs})
                 # P2-5-B: 防御层跨市场高相关成长（median_r>=0.35）不得称「避险/低相关」
@@ -2080,6 +2122,8 @@ def check_structure_reasonableness(
                         "core_weight": round(_core_w, 4),
                         "cap": _cap,
                     })
+            # R01 (round58 Part A): 平衡型「全方案成长风格」集中度软约束
+            _growth_concentration_warning(sid, allocs, warnings)
             if warnings:
                 s.setdefault("risk_metrics", {})
                 s["risk_metrics"].setdefault("structure_warnings", [])

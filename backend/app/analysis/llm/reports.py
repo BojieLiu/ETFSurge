@@ -14,6 +14,7 @@ from app.analysis.registry import get_agent
 # round35 §19 GapE: LLM 超时常量唯一事实源（原两处 httpx.Timeout 字面量收敛）
 from app.core.llm_fallback_prefixes import (
     ENVELOPE_PREFIX,
+    FORBIDDEN_PREFIX,
     PARSE_FAIL_PREFIX,
     QUOTA_PREFIX,
     TIMEOUT_PREFIX,
@@ -33,15 +34,21 @@ def _classify_llm_failure_cause(last_err_lower: str, duration_s: float) -> str:
     输入为 get_last_llm_error() 的小写文本。分支顺序即优先级：
     1. envelope —— openrouter 200+error-body（gates 记 [envelope] 前缀）；
        旧实现 KeyError('choices') 落 else 被伪装成「超时」（strategy_check 62 实证）。
-    2. 429/quota —— 配额限流（R70 原分支）。
-    3. json/parse —— 解析失败（R70 原分支）。
-    4. else —— 保守归「超时」（R70 原行为，仅在无其它证据时）。
+    2. 403/forbidden —— 访问被拒（R04，round58 Part B）。**必须排在 429 之前**：
+       403 文本里可能同时含 "403 Forbidden" 与 "quota" 字样，先判 429 会把
+       权限问题误标成限流（check149 实测 summary 写「超时 143s」，真因 403）。
+    3. 429/quota —— 配额限流（R70 原分支）。
+    4. json/parse —— 解析失败（R70 原分支）。
+    5. else —— 保守归「超时」（R70 原行为，仅在无其它证据时）。
     """
     _low = last_err_lower or ""
     # round55 R186 方案B：文案前缀收敛到 core/llm_fallback_prefixes（与
     # strategy_check F1-9 识别器同源；一致性单测锁「全分支输出 ∈ FALLBACK_PREFIXES」）
     if "[envelope]" in _low or "error envelope" in _low:
         return (f"{ENVELOPE_PREFIX}（{duration_s:.0f}s，已用规则引擎兜底）")
+    # R04 (round58 Part B): 403 = key 对该模型无权限（确定性失败，重试无意义）
+    if "403" in _low or "forbidden" in _low:
+        return f"{FORBIDDEN_PREFIX}（访问被拒绝，{duration_s:.0f}s 未完成，已用规则引擎兜底）"
     if "429" in _low or "rate-limited" in _low or "quota" in _low:
         return f"{QUOTA_PREFIX}（429 限流，{duration_s:.0f}s 未完成，已用规则引擎兜底）"
     if "json" in _low or "expecting value" in _low or "parse" in _low:
@@ -116,10 +123,27 @@ def _format_indices(indices: list[dict]) -> str:
 def _format_commodities(commodities: list[dict]) -> str:
     if not commodities:
         return ""
-    key_names = {"黄金", "白银", "原油", "铜", "铝", "天然气"}
-    items = [c for c in commodities if c.get("name", "") in key_names]
-    if not items:
-        items = commodities[:6]
+    # R07 (round58 §3 P1): 外盘期货源返回的是英文/代码名（WTI/布伦特/CL/GC/SI/HG…），
+    # 旧实现只按中文名过滤 6 个品种 → 油价整段丢失（M6）。先走别名表归一，
+    # 仍对不上才回退前 6 条。
+    alias = {
+        "原油": ("WTI", "布伦特", "BRENT", "CL", "原油", "OIL", "CRUDE"),
+        "黄金": ("GC", "黄金", "GOLD", "XAU"),
+        "白银": ("SI", "白银", "SILVER", "XAG"),
+        "铜": ("HG", "铜", "COPPER"),
+        "铝": ("ALI", "铝", "ALUMINUM", "ALUM"),
+        "天然气": ("NG", "天然气", "NATURAL"),
+    }
+    canon: dict[str, dict] = {}
+    for c in commodities:
+        name = str(c.get("name", "") or "")
+        if not name:
+            continue
+        for canon_name, keys in alias.items():
+            if any(name == k or (len(name) <= 6 and k in name) for k in keys):
+                canon.setdefault(canon_name, {**c, "name": canon_name})
+                break
+    items = list(canon.values()) or commodities[:6]
     lines = [f"- {c.get('name','')}: {c.get('price','N/A')}, 涨跌幅{c.get('change_pct','N/A')}%" for c in items]
     return "\n".join(lines)
 def _build_market_overview(
@@ -206,10 +230,12 @@ def _format_domestic_macro(macro: dict | None) -> str | None:
     if isinstance(bond, dict):
         if bond.get("cn_10y") is not None:
             lines.append(f"- 中国10年期国债收益率: {bond['cn_10y']}%")
-        if bond.get("us_10y") is not None:
-            lines.append(f"- 美国10年期国债收益率: {bond['us_10y']}%")
+        # R03b (round58 §1 M4): `us_10y` 与 global_liquidity.us_10y（FRED）是**同指标
+        # 双源**，并列注入会让 LLM 照抄两个数（用户实测 5.17% vs 5.18% 双口径）。
+        # 此处只保留中美利差（spread_bp 由 FRED 口径在调用方重算，见 _us10y_spread_bp），
+        # 美债 10Y 单一口径以「海外流动性」段的 FRED 值为准。
         if bond.get("spread_bp") is not None:
-            lines.append(f"- 中美10Y利差: {bond['spread_bp']} bp")
+            lines.append(f"- 中美10Y利差(FRED口径): {bond['spread_bp']} bp")
     money = macro.get("money_supply") or {}
     if isinstance(money, dict):
         for _k in ("m0_yoy", "m1_yoy", "m2_yoy"):
@@ -234,6 +260,190 @@ def _format_domestic_macro(macro: dict | None) -> str | None:
     return "\n".join(lines)
 
 
+def _sector_entry(item: dict) -> tuple[str, float] | None:
+    """板块行 → (名称, 涨跌幅%)；字段缺失/非数值 → None（不编造涨跌幅）。"""
+    name = str(item.get("sector_name") or item.get("name") or item.get("sector") or "").strip()
+    if not name:
+        return None
+    raw = item.get("change_pct")
+    if raw is None:
+        return None
+    try:
+        chg = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if chg != chg:  # NaN
+        return None
+    return name, chg
+
+
+def _format_sector_section(
+    sector_momentum: list[dict] | None,
+    hot_plates: list[dict] | None = None,
+) -> str:
+    """R01 (round58 §1 M2): 板块/风格段——强势 Top5 / 弱势 Top5 + 热点板块。
+
+    M2 根因：`build_full_context` 采了 sector_momentum/hot_plates/sector_heat，
+    但 `llm_report_stream` 从不取、`_build_report_prompt` 无参数 → 采完即丢，
+    LLM 写「输入未提供行业涨跌」。此段是那段采样的唯一消费点。
+
+    语义纪律：无可用涨跌幅 → 输出 R80 规范的「（数据源暂不可用）」占位，
+    **禁止**输出编造的板块涨跌幅（round58 §5 R01 负向断言）。
+    """
+    rows: list[tuple[str, float]] = []
+    for it in (sector_momentum or [])[:60]:
+        e = _sector_entry(it)
+        if e:
+            rows.append(e)
+    if not rows:
+        return "（板块涨跌数据源暂不可用）"
+
+    ordered = sorted(rows, key=lambda x: x[1], reverse=True)
+    strong = ordered[:5]
+    weak = list(reversed(ordered[-5:]))
+    lines = ["### 板块与风格"]
+    lines.append("- 强势 Top5: " + "、".join(
+        f"{n} {c:+.2f}%" for n, c in strong))
+    lines.append("- 弱势 Top5: " + "、".join(
+        f"{n} {c:+.2f}%" for n, c in weak))
+    plates = []
+    for it in (hot_plates or [])[:8]:
+        nm = str(it.get("name") or it.get("sector_name") or "").strip()
+        if not nm:
+            continue
+        try:
+            plates.append(f"{nm} {float(it.get('change_pct', 0) or 0):+.2f}%")
+        except (TypeError, ValueError):
+            plates.append(nm)
+    if plates:
+        lines.append("- 热点板块: " + "、".join(plates))
+    else:
+        lines.append("- 热点板块: （数据源暂不可用）")
+    return "\n".join(lines)
+
+
+def _format_breadth_section(
+    market_breadth: dict | None,
+    sentiment: dict | None,
+) -> str:
+    """R02 (round58 §1 M1): 量能与宽度段——涨跌家数 / 成交额 / 量比 / 两融。
+
+    数据源：R06 `market_breadth`（push2delay clist 求和）+ `fetch_market_sentiment`
+    的 volume_ratio / margin_change。缺失一律 R80 规范占位「（数据源暂不可用）」，
+    LLM 不得写「输入未提供」。
+    """
+    lines = ["### 量能与宽度"]
+    b = market_breadth or {}
+    if b.get("total"):
+        parts = [f"上涨 {b.get('up', 0)} 家", f"下跌 {b.get('down', 0)} 家"]
+        if b.get("flat"):
+            parts.append(f"平盘 {b['flat']} 家")
+        lines.append(f"- 涨跌家数: {'、'.join(parts)}（共 {b['total']} 家）")
+        try:
+            lines.append(f"- 上涨占比: {float(b['advance_ratio']) * 100:.1f}%")
+        except (KeyError, TypeError, ValueError):
+            pass
+    else:
+        lines.append("- 涨跌家数: （数据源暂不可用）")
+    amt = b.get("total_amount")
+    if amt:
+        try:
+            lines.append(f"- 全市场成交额: {float(amt) / 1e8:,.0f} 亿元")
+        except (TypeError, ValueError):
+            pass
+    else:
+        lines.append("- 全市场成交额: （数据源暂不可用）")
+
+    s = sentiment or {}
+    _vr = s.get("volume_ratio")
+    if _vr is not None:
+        try:
+            lines.append(f"- 量比（较前 5 日均量）: {float(_vr):.2f}")
+        except (TypeError, ValueError):
+            lines.append("- 量比（较前 5 日均量）: （数据源暂不可用）")
+    else:
+        lines.append("- 量比（较前 5 日均量）: （数据源暂不可用）")
+    _mc = s.get("margin_change")
+    if _mc is not None:
+        try:
+            _d = float(_mc)
+            lines.append(f"- 两融杠杆情绪: {_d:+.2f}（{'加杠杆' if _d > 0.05 else '去杠杆' if _d < -0.05 else '持平'}）")
+        except (TypeError, ValueError):
+            lines.append("- 两融杠杆情绪: （数据源暂不可用）")
+    else:
+        lines.append("- 两融杠杆情绪: （数据源暂不可用）")
+    return "\n".join(lines)
+
+
+def _format_funds_flow_section(
+    margin_change: float | None,
+    fund_flow: dict | None,
+    hsgt: dict | None,
+) -> str:
+    """R08 (round58 §1 M7): 资金行为段——两融变化 / 候选池主力流 / 沪深港通历史。
+
+    口径纪律（必须随行给出，否则等于造谣）：
+      - 北向**实时**自 2024-08 起停止披露；此处只给日频历史净流入，
+        LLM 不得写「今日北向流入 X 亿」；
+      - 候选池主力流是**候选池口径**（非全市场），必须标注。
+    """
+    lines = ["### 资金行为"]
+    if margin_change is not None:
+        try:
+            _d = float(margin_change)
+            lines.append(f"- 两融余额变化（归一化 -1~1）: {_d:+.2f}")
+        except (TypeError, ValueError):
+            lines.append("- 两融余额变化（归一化 -1~1）: （数据源暂不可用）")
+    else:
+        lines.append("- 两融余额变化（归一化 -1~1）: （数据源暂不可用）")
+
+    ff = fund_flow or {}
+    _flows = ff.get("flows") if isinstance(ff, dict) else None
+    if isinstance(_flows, list) and _flows:
+        top = _flows[:3]
+        bits = []
+        for f in top:
+            nm = str(f.get("name") or f.get("symbol") or "").strip()
+            try:
+                bits.append(f"{nm} {float(f.get('main_net_inflow', 0) or 0) / 1e8:+.2f} 亿")
+            except (TypeError, ValueError):
+                continue
+        if bits:
+            lines.append("- 候选池主力净流入 Top3（候选池口径，非全市场）: " + "、".join(bits))
+        else:
+            lines.append("- 候选池主力净流入 Top3（候选池口径，非全市场）: （数据源暂不可用）")
+    else:
+        lines.append("- 候选池主力净流入 Top3（候选池口径，非全市场）: （数据源暂不可用）")
+
+    hs = hsgt or {}
+    rows = hs.get("rows") or []
+    _stop_note = "北向实时自 2024-08 起停止披露，不得索取或编造"
+    if hs.get("stale") and hs.get("last_available"):
+        # R08 实测校正（2026-09-28）：东财 hsgt 历史净额最后可得日 = 2024-08-16，
+        # 停更后接口仍返行但净额为 NaN。给 2 年前的数当「当前资金行为」比不给更糟
+        # ——只报最后可得日期 + 停更时长，不给任何净流入数值。
+        lines.append(
+            f"- 沪深港通日频净额: 自 {hs['last_available']} 起无新数据"
+            f"（已停更 {hs.get('stale_days', '?')} 天，{_stop_note}）"
+        )
+    elif rows:
+        lines.append(
+            f"- 沪深港通日频历史净流入（截至 {hs.get('as_of', '未知日期')}，{_stop_note}）:"
+        )
+        for r in rows[-5:]:
+            n = r.get("north_net")
+            s_ = r.get("south_net")
+            bits = []
+            bits.append("北向 （数据源暂不可用）" if n is None
+                        else f"北向 {float(n) / 1e8:+.2f} 亿")
+            if s_ is not None:
+                bits.append(f"南向 {float(s_) / 1e8:+.2f} 亿")
+            lines.append(f"  · {r.get('date', '?')} " + " / ".join(bits))
+    else:
+        lines.append(f"- 沪深港通日频历史净流入: （数据源暂不可用；{_stop_note}）")
+    return "\n".join(lines)
+
+
 def _build_report_prompt(
     indices: list[dict],
     commodities: list[dict],
@@ -245,8 +455,25 @@ def _build_report_prompt(
     global_liquidity: dict | None = None,
     domestic_macro: dict | None = None,
     as_of: str | None = None,
+    sector_momentum: list[dict] | None = None,
+    hot_plates: list[dict] | None = None,
+    market_breadth: dict | None = None,
+    sentiment: dict | None = None,
+    fund_flow: dict | None = None,
+    margin_change: float | None = None,
+    hsgt: dict | None = None,
 ) -> str:
     overview = _build_market_overview(indices, commodities, market_data, news, macro_news, market=market)
+
+    # R01 (round58 §1 M2): 板块/风格段——sector_momentum 采了不接线（M2 最大断点）。
+    if sector_momentum is not None or hot_plates is not None:
+        overview += "\n\n" + _format_sector_section(sector_momentum, hot_plates)
+    # R02 (round58 §1 M1): 量能与宽度段——advance_ratio/volume_ratio/margin_change
+    # 由 fetch_market_sentiment 早算好，报告链从未取（M1 采了没接线）。
+    if market_breadth is not None or sentiment is not None:
+        overview += "\n\n" + _format_breadth_section(market_breadth, sentiment)
+    # R08 (round58 §1 M7): 资金行为段——北向实时已停更，给日频历史 + 两融 + 候选池流。
+    overview += "\n\n" + _format_funds_flow_section(margin_change, fund_flow, hsgt)
 
     # R79 (round29): 国内流动性数据段——此前 domestic_macro 采集了却从未注入 prompt，
     # 导致 LLM 写「未提供国内利率信号」。现注入真实 LPR/国债/货币/CPI/PMI（不可用时占位）。
@@ -270,6 +497,10 @@ def _build_report_prompt(
             gl_lines.append(f"- 联邦基金利率: {_fed}%")
         if gl_lines:
             overview += "\n\n### 海外流动性\n" + "\n".join(gl_lines)
+            # R03b (round58 §1 M4): 美债 10Y 单一口径声明——「国内流动性」段
+            # 已不再渲染 akshare 的 us_10y（M4 双口径），此处为唯一权威值。
+            if _us10 is not None:
+                overview += "\n> 美债 10 年期收益率以本段 FRED 口径为准（唯一口径）。"
 
     # R80 (round29): 数据时效标注——报告声明数据截至时间，避免与页面实时值对不上。
     if as_of:
@@ -283,19 +514,23 @@ def _build_report_prompt(
 
 ## 1. 市场全景速览
 - 一句话总结当前市场核心状态（趋势延续 / 横盘消化 / 趋势终结）
-- 关键数据速览：主要指数涨跌、成交量变化、涨跌家数比
+- 关键数据速览：主要指数涨跌；成交量与涨跌家数**仅当「量能与宽度」段给出数值时**才引用，
+  该段为「（数据源暂不可用）」时，本项收敛为一句"量能数据缺失，本节不做趋势单边判断"，
+  **禁止**改写成"输入未提供/暂无法验证"并在多章重复同一句免责话术
 - 核心矛盾一句话概括
 
 ## 2. 市场阶段与核心矛盾
 - 市场阶段：趋势延续 / 横盘消化 / 趋势终结（须给出明确判断与依据）
-- 风格特征：单一主线 / 风格扩散 / 均衡
-- 资金行为：增量与存量资金在买什么、卖什么
+- 风格特征：单一主线 / 风格扩散 / 均衡（依据「板块与风格」段的强势/弱势 Top5）
+- 资金行为：增量与存量资金在买什么、卖什么（依据「资金行为」段；北向无实时披露，
+  只能引用日频历史净额，**不得**编造当日北向）
 - 核心矛盾：当前最大的不确定性来源
 
 ## 3. 宏观流动性与政策解读
 - 国内流动性：货币与利率信号
-- 海外流动性与地缘：美债、美元、油价、地缘冲突的传导
-- 政策信号：有无稳增长或行业政策出台
+- 海外流动性与地缘：美债、美元、油价、地缘冲突的传导（美债以 FRED 口径为准）
+- 政策信号：仅当上方输入含政策条目时才写；无条目即视为本轮无新增政策信号，
+  整条略过，**不得**输出"政策信息缺失"这类占位句
 
 ## 4. 板块与风格轮动信号
 - 强势板块 / 弱势板块及幅度

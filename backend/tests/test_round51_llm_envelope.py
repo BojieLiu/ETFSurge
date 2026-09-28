@@ -220,8 +220,10 @@ class TestR186PrefixConvergence:
             "429 Too Many Requests",
             "expecting value: line 1 column 1",
             "connection reset by peer",
+            # R04 (round58 Part B): 403 分支同样必须落在常量集内
+            "client error '403 forbidden' for url 'https://openrouter.ai/api/v1/chat/completions'",
         ]
-        assert len(FALLBACK_PREFIXES) >= 4
+        assert len(FALLBACK_PREFIXES) >= 5
         for raw in cases:
             out = _classify_llm_failure_cause(raw, 30.0)
             assert out.startswith(tuple(FALLBACK_PREFIXES)), f"分支输出逃逸常量集: {out}"

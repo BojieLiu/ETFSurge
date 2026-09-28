@@ -154,11 +154,20 @@ def test_r80_unavailable_index_not_rendered_as_stale_value():
 
 
 def test_r80_available_index_still_renders_value():
-    """available 缺省/True → 正常渲染真实值（不误伤正常路径）。"""
+    """available 缺省/True → 正常渲染真实值（不误伤正常路径）。
+
+    断言范围（R58 起收窄）：本 prompt 新增了「量能与宽度」「资金行为」等独立
+    数据段，各自的 R80 占位（round58 R02/R08）是合法输出；本用例锁的是
+    **指数行本身**不得被标不可用，故按行定位而非全 prompt 搜词——否则其它段
+    的合法占位会把这条守卫稀释成恒真断言。
+    """
     p = _prompt(indices=[{"symbol": "000300", "name": "沪深300", "price": 3800.0,
                           "change_pct": 0.5, "available": True}])
     assert "3800" in p
-    assert "数据源暂不可用" not in p
+    idx_lines = [ln for ln in p.splitlines() if ln.startswith("- ") and "沪深300" in ln]
+    assert idx_lines, "指数行未渲染"
+    assert not any("数据源暂不可用" in ln for ln in idx_lines), \
+        f"可用指数被误标不可用: {idx_lines}"
 
 
 def test_r80_unavailable_major_stock_marked():
@@ -192,3 +201,123 @@ def test_r80_hub_exposes_index_snapshot_as_of():
     as_of = hub.get_index_realtime_as_of()
     assert as_of and len(as_of) >= 16  # "YYYY-MM-DD HH:MM"
     assert as_of[:2] == "20"
+
+# ── R02 (round58 §1 M1): 量能与宽度段 ──────────────────────────────────────
+# M1 根因：fetch_market_sentiment 早算了 advance_ratio/volume_ratio/margin_change，
+# 报告链从未取（R79 同构「采了没接线」）→ LLM 写「成交量/涨跌家数未提供」。
+
+
+def test_r02_breadth_section_with_real_values():
+    """R02: 宽度/量比/两融有值 → prompt 含真实数值（非占位）。"""
+    p = _prompt(
+        market_breadth={"up": 2130, "down": 2871, "flat": 61, "total": 5062,
+                        "advance_ratio": 0.4208, "total_amount": 1.23e12},
+        sentiment={"sentiment_index": 45, "volume_ratio": 1.05, "margin_change": -1.0},
+    )
+    assert "量能与宽度" in p
+    assert "上涨 2130 家" in p and "下跌 2871 家" in p
+    assert "42.1%" in p
+    assert "12,300 亿" in p or "12300 亿" in p
+    assert "1.05" in p
+    assert "去杠杆" in p
+
+
+def test_r02_breadth_missing_uses_r80_placeholder_not_llm_blame():
+    """R02 负向：宽度/情绪缺失 → 统一 R80 占位「（数据源暂不可用）」，
+    且数据段不得出现「输入未提供 / 暂无法验证」话柄（R80 规范 + R04 模板收敛）。
+
+    断言范围：只扫**数据段**（模板指令区在 "请生成一份市场环境研判报告" 之后）——
+    模板里必须**引用**这两个词才能禁止 LLM 用它们（R04 落地方式），全 prompt
+    搜词会把禁令本身判成违规。
+    """
+    p = _prompt(market_breadth={}, sentiment={})
+    data_part = p.split("请生成一份市场环境研判报告")[0]
+    assert "量能与宽度" in p
+    assert data_part.count("（数据源暂不可用）") >= 3, "缺数据字段必须逐项占位"
+    assert "输入未提供" not in data_part
+    assert "暂无法验证" not in data_part
+    # 负向：不得报 0 家伪值
+    assert "上涨 0 家" not in data_part
+    assert "共 0 家" not in data_part
+
+
+def test_r02_partial_breadth_amount_missing():
+    """R02: 家数有值但成交额缺失（akshare 降级）→ 成交额单独占位，家数保留真值。"""
+    p = _prompt(
+        market_breadth={"up": 100, "down": 90, "total": 200,
+                        "advance_ratio": 0.5, "total_amount": None},
+        sentiment={},
+    )
+    assert "上涨 100 家" in p
+    assert "全市场成交额: （数据源暂不可用）" in p
+
+
+# ── R03b (round58 §1 M4): 美债 10Y 双口径去重 ──────────────────────────────
+
+
+def test_r03b_us_10y_single_caliber_only_fred():
+    """R03b 负向核心：akshare(5.18) 与 FRED(5.17) **不得**同时出现在 prompt。"""
+    p = _prompt(
+        global_liquidity={"us_10y": 5.17, "vix": 16.2, "fed_rate": 4.25},
+        domestic_macro={"bond_yields": {"cn_10y": 1.8, "us_10y": 5.18,
+                                        "spread_bp": -338.0}},
+    )
+    assert "5.17" in p, "FRED 口径美债必须保留"
+    assert "5.18" not in p, f"akshare 双口径未去重（用户实测 5.17 vs 5.18）"
+    assert p.count("美债10年期收益率") == 1, "美债 10Y 只能有一个口径行"
+    assert "以本段 FRED 口径为准" in p
+
+
+def test_r03b_spread_bp_kept_after_dedup():
+    """R03b: 去重不得连带丢掉中美利差（spread_bp 保留并标 FRED 口径）。"""
+    p = _prompt(
+        global_liquidity={"us_10y": 5.17},
+        domestic_macro={"bond_yields": {"cn_10y": 1.8, "us_10y": 5.18,
+                                        "spread_bp": -338.0}},
+    )
+    assert "中美10Y利差" in p and "-338.0" in p
+    assert "中国10年期国债收益率" in p
+
+
+# ── R03a (round58 §1 M3): 政策条抽取（macro_news 死参改活）─────────────────
+
+
+def test_r03a_policy_items_rendered_when_extracted():
+    """R03a: router 从 enriched_news 抽到政策条 → 「宏观政策」段非空且带标题。"""
+    from app.routers.analysis import _extract_policy_news
+
+    news = [
+        {"title": "央行开展14天期逆回购操作 利率持平", "level": "重要", "stars": 5},
+        {"title": "某公司发布新品", "level": "普通", "stars": 2},
+        {"title": "国务院常务会议部署稳增长举措", "level": "重要", "stars": 4},
+    ]
+    picked = _extract_policy_news(news)
+    assert len(picked) == 2
+    p = _prompt(macro_news=picked)
+    assert "宏观政策" in p
+    assert "逆回购" in p and "国务院常务会议" in p
+
+
+def test_r03a_zero_hit_omits_macro_policy_section():
+    """R03a 负向：零命中 → 「宏观政策」段**整体省略**（不留空话柄）。"""
+    from app.routers.analysis import _extract_policy_news
+
+    picked = _extract_policy_news([{"title": "某公司发布新品", "summary": "财报"}])
+    assert picked == []
+    p = _prompt(macro_news=picked)
+    assert "宏观政策" not in p, "零命中仍渲染「宏观政策」段 = 留空话柄"
+
+
+def test_r03a_router_passes_policy_news_not_empty_list():
+    """R03a 接线守卫：router 必须把抽取结果作为 macro_news 传入（M3 死参）。"""
+    import ast
+    from pathlib import Path
+    src = Path(__file__).resolve().parent.parent / "app" / "routers" / "analysis.py"
+    tree = ast.parse(src.read_text(encoding="utf-8"))
+    dead = False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "_build_report_prompt":
+            # 第 6 个位置参数 = macro_news；恒 [] 传参即死参未改
+            if len(node.args) >= 6 and isinstance(node.args[5], ast.List) and not node.args[5].elts:
+                dead = True
+    assert not dead, "router 仍以恒空 [] 传 macro_news（M3 死参未改）"

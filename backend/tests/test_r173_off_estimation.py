@@ -22,6 +22,10 @@ ti=指数代码形态的兼容。
 - 盘后 nav daily_change_pct=-1.42 → off 条目 change_pct == -1.42（旧代码恒 0 → FAIL）；
 - ti=指数代码（000300）→ 原指数映射分支行为不变（兼容守卫）。
 
+R196 (round57 §4.2 方案A)：nav 失败 + index 回退为空 → price=None 时
+estimate_source 必须标 "unavailable"（有标签必有值），不得挂 "last_close"
+空标签（round57 §2.1 实测 15 只场外 price=null + last_close）。
+
 无网络：全部 mock（list_etfs / get_realtime_batch / _call / is_trading_time）。
 """
 from __future__ import annotations
@@ -237,8 +241,14 @@ async def test_nav_change_pct_missing_or_bad_is_honest_zero():
 
 
 @pytest.mark.asyncio
-async def test_nav_unavailable_keeps_last_close_source():
-    """nav 拉取失败 → estimate_source='last_close'（既有行为保留）。"""
+async def test_nav_unavailable_no_index_quote_marks_unavailable_not_last_close():
+    """R196 (round57 §4.2 方案A)：nav 失败 + index 回退为空 → price=None，
+    estimate_source 必须为 'unavailable'（R175 已立语义），**不得**挂 'last_close'
+    空标签（round57 §2.1 实测 15 只场外 price=null + estimate_source=last_close）。
+
+    负向断言：旧实现 `"nav" if nav_data else "last_close"` 在此输入下必输出
+    'last_close' → 本用例 FAIL。
+    """
     from app.services import market_service
 
     off = [_FakeEtf("022449", "159338")]
@@ -246,7 +256,7 @@ async def test_nav_unavailable_keeps_last_close_source():
     async def fake_call(fn, *args, **kwargs):
         fn_name = getattr(fn, "__name__", str(fn))
         if fn_name == "fetch_index_realtime":
-            return []
+            return []          # index 回退为空 → price 必为 None
         if fn_name == "fetch_fund_nav":
             raise RuntimeError("source down")
         raise AssertionError(fn_name)
@@ -264,5 +274,46 @@ async def test_nav_unavailable_keeps_last_close_source():
         quotes = await market_service.get_portfolio_realtime(phase="slow")
 
     off_q = next(q for q in quotes if q["symbol"] == "022449")
-    assert off_q["estimate_source"] == "last_close"
+    assert off_q["price"] is None
+    assert off_q["estimate_source"] == "unavailable", (
+        f"无值不得挂 last_close 标签，实际 {off_q['estimate_source']!r}"
+    )
+    # 「有标签必有值」不变量：凡非 unavailable 的估值标签，price 必须有值
+    assert not (off_q["estimate_source"] in ("nav", "last_close")
+                and off_q["price"] is None)
     assert off_q["change_pct"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_nav_unavailable_with_index_quote_keeps_last_close():
+    """R196 兼容守卫：nav 失败但 index 回退**有价** → 仍标 'last_close'
+    （有值有标签，不属 R196 缺陷面）。"""
+    from app.services import market_service
+
+    off = [_FakeEtf("510300联接", "000300")]
+    index_quotes = [{"symbol": "000300", "name": "沪深300", "price": 4000.0,
+                     "change_pct": 1.2, "change_amount": 47.0}]
+
+    async def fake_call(fn, *args, **kwargs):
+        fn_name = getattr(fn, "__name__", str(fn))
+        if fn_name == "fetch_index_realtime":
+            return index_quotes
+        if fn_name == "fetch_fund_nav":
+            raise RuntimeError("source down")
+        raise AssertionError(fn_name)
+
+    with patch.object(market_service, "cache_get", new=AsyncMock(return_value=None)), \
+         patch.object(market_service, "cache_set", new=AsyncMock()), \
+         patch("app.services.portfolio_service.list_etfs",
+               new=AsyncMock(side_effect=[[], off])), \
+         patch.object(market_service, "get_realtime_batch",
+                      new=AsyncMock(return_value=[])), \
+         patch.object(market_service, "_call", new=fake_call), \
+         patch.object(market_service, "is_trading_time", return_value=False), \
+         patch.object(market_service, "async_session",
+                      return_value=_make_fake_session(off)):
+        quotes = await market_service.get_portfolio_realtime(phase="slow")
+
+    off_q = next(q for q in quotes if q["symbol"] == "510300联接")
+    assert off_q["price"] == pytest.approx(4000.0)
+    assert off_q["estimate_source"] == "last_close"

@@ -284,3 +284,43 @@ def test_validate_report_consistency_crash_safe():
 
     # Added assertion to check the crash-safety is proven
     assert "" in result or result == ""
+
+# ── R04 (round58 §3 P0): 模板收敛——量能/宽度条件式，禁重复免责话术 ─────────
+# 用户实测报告 3 处「输入未提供/暂无法验证」，均系模板把量能/宽度写成必答项逼出。
+
+
+def _r58_prompt(**kw):
+    from app.analysis.llm import _build_report_prompt
+    base = dict(indices=[], commodities=[], market_data=[], indicators={},
+                news=[], macro_news=[])
+    base.update(kw)
+    return _build_report_prompt(**base)
+
+
+def test_r04_template_marks_volume_width_conditional():
+    """R04: 第 1 章量能/宽度必须条件式（有数必引数值，无数收敛一句）。"""
+    p = _r58_prompt()
+    assert "量能数据缺失，本节不做趋势单边判断" in p
+    assert "仅当「量能与宽度」段给出数值时" in p
+
+
+def test_r04_forbidden_blame_phrase_appears_at_most_once_in_template():
+    """R04 负向：免责话术「输入未提供/暂无法验证」在模板里**至多出现一次**
+    （R186 教训：匹配器与写入口径同步；多处重复即模板逼出 AI 复读）。"""
+    p = _r58_prompt()
+    for phrase in ("输入未提供", "暂无法验证"):
+        assert p.count(phrase) <= 1, f"免责话术「{phrase}」在模板出现 {p.count(phrase)} 次"
+    # 章节 1 里的量能条目不得再是无条件必答项
+    ch1 = p.split("## 2. 市场阶段与核心矛盾")[0].split("## 1. 市场全景速览")[-1]
+    assert "成交量变化、涨跌家数比" not in ch1, "第 1 章仍把量能/家数写成必答项"
+
+
+def test_r04_breadth_present_still_tells_model_to_cite_numbers():
+    """R04 兼容：数据齐时模板仍要求引用真实数值（不得把条件式写成"可省略"）。"""
+    p = _r58_prompt(
+        market_breadth={"up": 1, "down": 1, "total": 2, "advance_ratio": 0.5,
+                        "total_amount": 1e8},
+        sentiment={"volume_ratio": 1.0},
+    )
+    assert "有数必引数值" in p or "给出数值时" in p
+    assert "量能与宽度" in p

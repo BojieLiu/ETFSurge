@@ -401,6 +401,7 @@ from app.engine.allocation_engine import (
     allocate,
     enforce_max_correlation,
     check_structure_reasonableness,
+    _defense_anchors_for,
 )
 from app.engine.rationale import build_rationale
 from app.analysis.signal import generate_signal
@@ -520,6 +521,40 @@ class TestP2_5StructureChecks:
             correlation_medians={"159915": 0.55})
         a = strategies[0]["allocations"][0]
         assert "非低相关对冲资产" in a["selection_rationale"]
+
+    def test_r198_footnote_label_not_duplicate_composite_signal(self):
+        """R198 (round57): 负信号防御脚注标签必须是「因子综合分」而非「综合信号」。
+
+        负向断言：把 rationale 真实行文与脚注拼成设计报告的一行后，扫描全部
+        「综合信号」标签下的数值——必须恰好 1 个（rationale 自身的三因子聚合分）。
+        脚注若复用该标签，会出现两个不同口径的同名数值（factor_score vs 聚合分），
+        即 round57 §3 实测 design 62 同行 -0.01 / -1.05 / -3.16 三值并存的同型缺陷。
+        """
+        import re as _re
+        from app.engine.rationale import build_rationale
+
+        line = build_rationale(
+            "518880", "defense", "defensive",
+            meta={"name": "黄金ETF华安"},
+            # 技术/估值/动量 三者非零 → rationale 必输出「综合信号偏X（score）」
+            factor_scores={"technical": -0.3, "valuation": 0.1, "momentum": -0.5},
+        )
+        allocs = [
+            {"symbol": "518880", "layer": "defense", "factor_score": -0.62,
+             "selection_rationale": line},
+            {"symbol": "CASH", "weight": 0.5},
+        ]
+        strategies = check_structure_reasonableness(
+            [{"id": "defensive", "allocations": allocs}])
+        rat = strategies[0]["allocations"][0]["selection_rationale"]
+
+        assert "【结构提示：因子综合分 -0.62 为负" in rat
+        # 脚注不得引入第二个「综合信号」标签
+        labelled = _re.findall(r"综合信号[^（(]*[（(]([-+][\d.]+)[）)]", rat)
+        assert len(labelled) == 1, f"同一行出现多个「综合信号」口径: {labelled}"
+        # 脚注的数值以「因子综合分」标签单独出现，与聚合分不同值
+        assert _re.findall(r"因子综合分 ([-+][\d.]+)", rat) == ["-0.62"]
+        assert "-0.62" not in labelled
 
     def test_aggressive_cash_over_20pct_flagged(self):
         """进攻型现金 >20% → structure_warning（自洽校验）。"""
@@ -1325,3 +1360,184 @@ class TestR131SatelliteLayerCap:
             assert sat_total <= 0.20 + 0.06, (
                 f"R131: defensive 卫星层 Σweight={sat_total:.4f} > budget 0.20 + 0.06"
             )
+
+# ── R01/R03 (round58 Part A): 平衡型成长集中度软约束 + 防御锚扩容 ────────────
+# 背景 docs/round58-portfolio-design-llm-fix.md §A1：design 65 平衡型
+# 科创50 20% + 中证500 20%（成长宽基 40%）、科创主题 24.4%，防御仅 5% 偏弱黄金。
+
+
+def _r58_growth_allocs():
+    """成长宽基（_is_growth_wide_basis 口径）占比超 cap 的平衡型形态。
+
+    口径说明（重要，见 test_r01_cap_caliber_excludes_midcap_growth）：
+    科创50/创业板/科创100/双创 属 growth_style；中证500/中证1000 **不属**。
+    """
+    return [
+        {"symbol": "588000", "name": "科创50ETF华夏", "layer": "core",
+         "weight": 0.25, "factor_score": -0.27},
+        {"symbol": "159915", "name": "创业板ETF易方达", "layer": "core",
+         "weight": 0.20, "factor_score": -0.10},
+        {"symbol": "513120", "name": "港股创新药", "layer": "satellite",
+         "weight": 0.088, "factor_score": 0.1},
+        {"symbol": "518880", "name": "黄金ETF华安", "layer": "defense",
+         "weight": 0.05, "factor_score": -0.2},
+        {"symbol": "510300", "name": "沪深300ETF", "layer": "core",
+         "weight": 0.05, "factor_score": 0.0},
+        {"symbol": "159338", "name": "中证A500ETF", "layer": "core",
+         "weight": 0.05, "factor_score": 0.0},
+        {"symbol": "511090", "name": "30年国债ETF", "layer": "defense",
+         "weight": 0.05, "factor_score": 0.0},
+        {"symbol": "CASH", "weight": 0.212},
+    ]
+
+
+def _r58_growth_warnings(strategies, sid="balanced"):
+    """取某方案的 structure_warnings（缺 risk_metrics 时返空列表，不 KeyError）。"""
+    s = next(x for x in strategies
+             if (x.get("id") or x.get("risk_profile")) == sid)
+    return s.get("risk_metrics", {}).get("structure_warnings", [])
+
+
+def test_r01_balanced_growth_over_cap_warns():
+    """R01 负向：平衡型成长占比 45/78.8=57% > cap 30% → 必须告警。"""
+    out = check_structure_reasonableness(
+        [{"id": "balanced", "allocations": _r58_growth_allocs()}])
+    g = [w for w in _r58_growth_warnings(out)
+         if w["type"] == "growth_style_concentration_exceeded"]
+    assert g, f"平衡型成长集中未告警（warnings={_r58_growth_warnings(out)}）"
+    assert g[0]["profile"] == "balanced"
+    assert g[0]["growth_weight"] == pytest.approx(0.45)
+    assert g[0]["cap"] == pytest.approx(0.30)
+    assert g[0]["growth_share"] > 0.30
+
+
+def test_r01_cap_caliber_excludes_midcap_growth():
+    """R01 口径锁定（已知缺口显式登记，防后人误以为 cap 覆盖中盘成长）：
+
+    `taxonomy.growth_style_of` **不含**中证500/中证1000（§A2 缺口表已列）。
+    因此 design 65 的「科创50 20% + 中证500 20%」按本口径只算 20%/74%
+    = 27% < 30% cap，**不触发** R01 告警。方案文档 §A1 结论 ①（中证500
+    降权）本轮无引擎侧强制手段，仅由 LLM 报告层建议。
+
+    本用例把该口径钉死：若将来把中盘成长纳入 growth_style，本用例会失败，
+    提醒同步更新方案文档的验收口径。
+    """
+    allocs = [
+        # design 65 平衡型真实形态：科创50 20% + 中证500 20% + 卫星若干
+        {"symbol": "588000", "name": "科创50ETF华夏", "layer": "core",
+         "weight": 0.20, "factor_score": -0.27},
+        {"symbol": "510500", "name": "中证500ETF南方", "layer": "core",
+         "weight": 0.20, "factor_score": -0.28},
+        {"symbol": "513120", "name": "港股创新药", "layer": "satellite",
+         "weight": 0.088, "factor_score": 0.1},
+        {"symbol": "512880", "name": "证券ETF国泰", "layer": "satellite",
+         "weight": 0.044, "factor_score": -0.2},
+        {"symbol": "159755", "name": "电池ETF广发", "layer": "satellite",
+         "weight": 0.044, "factor_score": -0.3},
+        {"symbol": "588170", "name": "科创半导体", "layer": "satellite",
+         "weight": 0.044, "factor_score": -0.4},
+        {"symbol": "518880", "name": "黄金ETF华安", "layer": "defense",
+         "weight": 0.05, "factor_score": -0.2},
+        {"symbol": "510300", "name": "沪深300ETF", "layer": "core",
+         "weight": 0.05, "factor_score": 0.0},
+        {"symbol": "159338", "name": "中证A500ETF", "layer": "core",
+         "weight": 0.05, "factor_score": 0.0},
+        {"symbol": "CASH", "weight": 0.235},
+    ]
+    non_cash = sum(a["weight"] for a in allocs if a["symbol"] != "CASH")
+    assert 0.20 / non_cash < 0.30, "夹具前提失效：科创50 单项已超 cap"
+    ws = _r58_growth_warnings(check_structure_reasonableness(
+        [{"id": "balanced", "allocations": allocs}]))
+    assert not [w for w in ws
+                if w["type"] == "growth_style_concentration_exceeded"], (
+        "中盘成长（中证500）已纳入 growth_style 口径——R01 文档验收口径需同步更新")
+
+
+def test_r01_balanced_growth_under_cap_no_warning():
+    """R01 反向守卫：成长占比 ≤ cap → 不得告警（防恒真断言）。"""
+    allocs = [
+        {"symbol": "510300", "name": "沪深300ETF", "layer": "core",
+         "weight": 0.30, "factor_score": 0.5},
+        {"symbol": "159338", "name": "中证A500ETF", "layer": "core",
+         "weight": 0.20, "factor_score": 0.4},
+        {"symbol": "518880", "name": "黄金ETF华安", "layer": "defense",
+         "weight": 0.10, "factor_score": 0.1},
+        {"symbol": "511090", "name": "30年国债ETF", "layer": "defense",
+         "weight": 0.10, "factor_score": 0.1},
+        {"symbol": "513120", "name": "港股创新药", "layer": "satellite",
+         "weight": 0.10, "factor_score": 0.2},
+        {"symbol": "CASH", "weight": 0.20},
+    ]
+    ws = _r58_growth_warnings(check_structure_reasonableness(
+        [{"id": "balanced", "allocations": allocs}]))
+    assert not [w for w in ws
+                if w["type"] == "growth_style_concentration_exceeded"], \
+        f"成长占比未超 cap 却告警：{ws}"
+
+
+def test_r01_soft_constraint_does_not_remove_allocs():
+    """R01 软约束语义：告警**不剔除**任何标的（层预算闭合不被破坏）。"""
+    allocs = _r58_growth_allocs()
+    before = len([a for a in allocs if a.get("symbol") != "CASH"])
+    out = check_structure_reasonableness(
+        [{"id": "balanced", "allocations": allocs}])
+    after = len([a for a in out[0]["allocations"] if a.get("symbol") != "CASH"])
+    assert after == before, "软约束不得剔除标的（应升级为硬约束时才动权重）"
+
+
+def test_r01_not_applied_to_defensive_or_aggressive():
+    """R01 范围守卫：高成长占比是防御/进攻的定位本身，不得对二者告警。"""
+    for pid in ("defensive", "aggressive"):
+        ws = _r58_growth_warnings(check_structure_reasonableness(
+            [{"id": pid, "allocations": _r58_growth_allocs()}]), sid=pid)
+        assert not [w for w in ws
+                    if w["type"] == "growth_style_concentration_exceeded"], \
+            f"{pid} 被误判为成长集中（约束只应作用于 balanced）：{ws}"
+
+
+def test_r01_wired_into_design_pipeline_not_only_unit():
+    """R01 接线守卫：产出告警的函数必须真被设计管线调用（round34 教训：
+    剥除器/约束常在其后，只测 allocate 层会漏）。此处断言
+    `strategy_design` 确实 import + 调用 check_structure_reasonableness（非
+    cross_profile_only 那一处——那是跨方案校验，不产本告警）。"""
+    import inspect
+    from app.services import strategy_design as sd
+    src = inspect.getsource(sd)
+    assert "check_structure_reasonableness" in src
+    # 逐方案调用（positional args 形式）必须存在，跨方案那次用关键字参数
+    calls = [ln for ln in src.splitlines()
+             if "check_structure_reasonableness(" in ln]
+    positional = [ln for ln in calls
+                  if "cross_profile_only" not in ln and "import" not in ln]
+    assert positional, f"未找到逐方案结构校验调用点：{calls}"
+    # 告警类型必须能出现在 risk_metrics（前端/报告消费面）
+    from app.engine import allocation_engine as ae
+    assert "growth_style_concentration_exceeded" in inspect.getsource(ae)
+
+
+# ── R03 (round58 Part A): 平衡型防御锚扩容（defense_count 1→2）──────────────
+
+
+def test_r03_balanced_defense_anchors_two():
+    """R03: 平衡型 defense_count=2 → 防御锚 {黄金 518880, 30年国债 511090}。"""
+    anchors = _defense_anchors_for("balanced")
+    assert anchors == {"518880", "511090"}, f"平衡型防御锚未扩容: {anchors}"
+
+
+def test_r03_balanced_meta_defense_count_is_two():
+    from app.engine.budgets import STRATEGY_META
+    assert STRATEGY_META["balanced"]["layer_count"]["defense"] == 2
+
+
+def test_r03_defense_count_monotonic_inv3_still_holds():
+    """R03 副作用守卫：INV-3 防御数反向（def ≥ bal ≥ agg）不得被 R03 破坏。"""
+    from app.engine.budgets import STRATEGY_META
+    d = STRATEGY_META["defensive"]["layer_count"]["defense"]
+    b = STRATEGY_META["balanced"]["layer_count"]["defense"]
+    a = STRATEGY_META["aggressive"]["layer_count"]["defense"]
+    assert d >= b >= a, f"INV-3 防御数反向被破坏: {d}/{b}/{a}"
+
+
+def test_r03_aggressive_anchors_unchanged():
+    """R03 负向：进攻型 defense_count 仍为 1 → 锚集合不得被顺带扩大。"""
+    assert _defense_anchors_for("aggressive") == {"518880"}

@@ -20,7 +20,7 @@ round52 §7.1 R175: `_a_batch` 对 A 股批量行情 3s 整批截断——超时
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -120,3 +120,45 @@ async def test_partial_batch_failure_marks_only_missing():
     assert amap["510300"]["change_pct"] == pytest.approx(0.64)
     assert amap["022449"]["estimate_source"] == "unavailable"
     assert amap["022449"]["change_pct"] is None
+
+
+# ── R196 (round57 §4.2 方案A 附带项): pricing 侧 null 价路径补验 ──────────
+# round57 §4.2 方案A 尾款：「另：calculate/pricing 对 null 价路径补单测
+# （当前未验）」。上述三例只覆盖「批量整体失败」；本段补两条 R175 之后仍未被
+# 单测钉住的 pricing 路径：① build_price_map 公开 wrapper 的整体降级；
+# ② 源返回「有 symbol 无价」的行（R196 同型——标签/值错位）。
+
+
+@pytest.mark.asyncio
+async def test_build_price_map_wrapper_degrades_to_empty_not_raises():
+    """pricing.build_price_map 公开 wrapper：内层异常 → 整表降级为空 dict，
+    不向上抛（R196 附带项①）。负向断言：未包 try 的实现会 RuntimeError。"""
+    from app.services.portfolio import pricing
+
+    with patch.object(pricing, "_build_price_map_async",
+                      new=AsyncMock(side_effect=RuntimeError("boom"))):
+        out = await pricing.build_price_map(_rows())
+    assert out == {}
+
+
+@pytest.mark.asyncio
+async def test_a_batch_row_without_price_flows_through_as_unavailable():
+    """源返回「有 symbol 无价」的行（R196 同型）→ allocation 必须诚实标
+    unavailable 且 price 为 None，禁止把 None 价当真实价算 shares/涨跌。"""
+    batch = [{"symbol": "510300", "price": None, "change_pct": None, "volume": None}]
+    with patch("app.services.market_data_hub.market_data_hub.get_a_stock_batch",
+               new=MagicMock(return_value=batch)), \
+         patch("app.services.market_data_hub.market_data_hub.get_fund_nav",
+               new=MagicMock(return_value=None)), \
+         patch("app.services.market_data_hub.market_data_hub.get_us_etf_realtime",
+               new=MagicMock(return_value=None)), \
+         patch("app.services.market_data_hub.market_data_hub.get_index_realtime",
+               new=MagicMock(return_value=[])):
+        result = await calculate_allocation(etfs=_rows(), total_capital=100000)
+
+    amap = {a["symbol"]: a for a in result["allocations"]}
+    assert amap["510300"]["current_price"] is None
+    assert amap["510300"]["change_pct"] is None
+    assert amap["510300"]["estimate_source"] == "unavailable"
+    # target_amount 独立于行情，仍须按权重算出（不因缺价塌成 0）
+    assert amap["510300"]["target_amount"] == pytest.approx(50000.0)
