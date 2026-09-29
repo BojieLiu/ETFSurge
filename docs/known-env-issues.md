@@ -97,7 +97,7 @@
      （相对 90s 预算可忽略，登记为已知性能债而非缺陷）；
   5. 诊断/实施轮若见 `usage_records` 中 `generate_strategy_check_report` 大量
      `success=0` + 400/403，先跑上述两个探针确认层可用性，**别急着改代码**。
-- **Refs**：`docs/round58-portfolio-design-llm-fix.md` §B3 R06 实施回填（commit `c2e2a4a`）。
+- **Refs**：`docs/round58-portfolio-design-llm-fix.md` §B3 R06 实施回填（commit `688ad45`）。
 
 ### 1.3 周末 ETF 记录稀疏 / 成交额规模缺失
 

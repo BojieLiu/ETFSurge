@@ -82,6 +82,8 @@
 
 ---
 
+---
+
 ## 8. 实施回填（2026-09-28，commit `03ed659`）
 
 ### 8.1 逐项状态
@@ -128,3 +130,75 @@ check_engine_purity、audit_async_blocking、P3-6 基线（320≤320）全过。
 非本轮回归。**实值端到端报告（真实 LLM 生成的 6 章报告）未在本轮验收**——LLM provider
 403（见 round58-portfolio 文档 Part B），故 R01-R09 的 prompt 侧已用真实数据 + 单测双向锁定，
 LLM 产出质量复测标 **待 403 修复后 + 交易时段**。
+
+---
+
+## 9. 交易时段复测（2026-09-29 周二 13:00-15:00 下午盘，commit 待回填）
+
+> 窗口说明：2026-09-29 为**交易日**，13:00 下午盘开盘后开跑。方法：真实源 + 真实
+> LLM，无 mock；HTTP 走进程内 `TestClient`（`::1` 字面量在本机解析不稳，见
+> known-env-issues §1.1），异步任务端点那一轮**开启 lifespan**（否则任务 worker 不存在）。
+
+### 9.1 通过项（实盘实证）
+
+| 项 | 结论 | 证据 |
+|---|---|---|
+| **R04 模板收敛**（用户原始抱怨「3 处输入未提供/暂无法验证」） | ✅ **0 次** | 端到端 `llm-report/stream` 产出 2366-2432 字 / 6 章 / 28.2s / 无 SSE error；全文「未提供」+「暂无法验证」命中 **0** 次 |
+| **组合设计端到端** | ✅ 真 LLM 报告 | task 132：`running(5s) → quick_ready(30s) → completed(110s)`；日志 `[design_pipeline] report saved to design_id=75 (6342 chars, quality=full)` |
+| **R03 平衡型防御锚扩容** | ✅ 生效 | design 75 balanced 防御层 = **2 只**：`30年国债ETF鹏扬` + `黄金ETF华安`（改前仅黄金 1 只） |
+| **R197 三元组克隆** | ✅ 未复现 | 三方案 0 个出现「≥3 标的同 (return_1m, return_3m)」元组 |
+| **R198 信号标签唯一** | ✅ 生效 | design 75 报告正文：`综合信号 x0` / `因子综合分 x1`（脚注改名已在实盘报告可见） |
+| **R199 divergence_detail** | ✅ 生效 | 策略检查兜底行实测 `divergence_detail = {signal_direction: neutral, factor_direction: neutral, factor_score: -0.314, threshold: 0.5, explanation: ...}`——正是 check143 曾 30/30 为 null 的主干 hold 分支 |
+| **R196 「有标签必有值」** | ✅ 盘中 0 例外 | `/market/realtime/portfolio` 38 行、场外 15 只、null 价 0 只、`label_without_value=0`、`priced=38/38` |
+| **R06 端到端**（§D） | ✅ | 直连路径 29.5s / 34.9s、`is_fallback=False`、`usage 10254 tokens` |
+| **性能债：realtime/portfolio** | ✅ 大幅改善 | **0.84s**（round57 周末基线 16.67s，~20×） |
+| **性能债：admin/llm/health** | ✅ 大幅改善 | **1.11s**（周末基线 15.55s，~14×） |
+| **性能债：admin/factor-health** | ⚠️ 仍超阈值 | 6.59s（周末 6.75s；阈值 ≤2s）→ 维持性能债登记 |
+
+### 9.2 未通过 / 环境性（逐项归因，不含糊）
+
+| 项 | 现象 | 归因 |
+|---|---|---|
+| **R06 全市场宽度** | `fetch_market_breadth()` 3 次全返 `{}` | **源不可达**（push2delay；13:00 前曾成功取到 total=100/up=21/down=56/成交额 2.45e10，证明确为间歇性）。设计行为正确：回退 `{}` → prompt 走「（数据源暂不可用）」占位，未报 0 家伪值 |
+| **R01 板块与风格段** | `compute_sector_momentum()` 连续 2 次返 **0 行**（各 ~14s，命中内部 15s 超时） | **源不可达**，非接线缺陷。`update_sector_cache` 只在 `if momentum:` 时写缓存，故空返回即保持空；`get_sector_momentum` 盘中不回退快照（设计如此，诚实降级）。同窗口 `hot_plates` 正常（11 行）→ 佐证是板块动量源单点问题 |
+| **策略检查走异步任务时回落** | task 131：`report_quality=fallback` / `is_fallback=true`，summary `LLM 分析超时（15s 未返回…`，`因子覆盖 16.7%` | **新发现，需用户决策（见 §9.3）**：非本轮回归 |
+
+### 9.3 新发现（超出本轮清单，待决策）
+
+**N1：策略检查「数据空」档预算 15s < 现役 provider 实测延迟 27-31s**
+
+- 链路事实（同一 key、同一 prompt 形态）：`_llm_timeout_for(data_quality)` 对
+  `all_empty` 返 **15s**（`strategy_check.py:735-736`），本轮因子覆盖 16.7% 命中该档；
+  而唯一可用 provider（`deepseek-flash`，强开 reasoning）实测 **27.2s / 29.5s / 31.5s**。
+- 故 15s 档**在物理上不可能成功**——只要 provider 活着就必然超时兜底。
+- 性质：**非本轮回归**。该预算阶梯写于「无 provider 可用」时期（当时恒落兜底，档位无实际影响）；
+  R06 修好链路后该档位才第一次显形。design 报告不受影响（另一档 120s，实测 110s 完成 quality=full）。
+- 建议（需拍板，本轮未实施）：`all_empty` 档 15s → 30s 起（与 `partial` 档对齐），或改为
+  「按 provider 实测 p95 延迟取档」。**未擅自改**：属预算/时延权衡，且有
+  `tests/test_round14_llm_budget_consistency.py` 锁定预算-重试一致性。
+
+**N2：`app/tasks/startup.py:373` 调 `_kline_warmup_symbols()` 但该函数未定义于本模块**
+
+- 实证：warmup 日志 `design-data warmup failed (non-fatal): name '_kline_warmup_symbols' is not defined`。
+- 根因：该函数**只定义在 `app/main.py`**（同文件另有 `_kline_warmup_holdings_symbols`），
+  `startup.py` 未导入；且 `main.py:26` 反向 import `startup.py`，**直接补 import 会成循环依赖**。
+- 影响：design-data warmup 的 K 线预热段**从未执行**，被宽 `except` 吞成 non-fatal，
+  该段 `_mark["success"]=False`（与 warmup 面板 `market_cache: success=false` 一致）。
+  非功能性中断——设计任务按需取 K 线仍 110s 完成 quality=full——但预热收益丢失。
+- 归属：**本轮两批 commit 均未触碰 `app/tasks/startup.py`**（`git diff 1e7a5c3..HEAD` 空），
+  属存量缺陷。修法需把 helper 下沉到共享模块（`tasks/` 或 hub）再双向引用 → 动模块结构，需拍板。
+
+**N3：warmup 30.8s 超 30s 预算阈值**（`instruments_sync 21.8s` / `indices_meta_sync 8.8s`）→ 维持性能债登记。
+
+### 9.4 与「待交易时段复测」清单的对照
+
+| 原清单项 | 本轮结论 |
+|---|---|
+| round57 #6 性能债（realtime / fh / llm-health） | ✅ 两项大幅改善，factor-health 仍超阈 |
+| round58-market R06 实额/家数 | ⚠️ 源间歇不可达（行为正确，取数失败） |
+| round58-market R08 hsgt 近 5 日 | ✅ 早已按「停更」口径落地（最后可得 2024-08-16），无「近 5 日」可取 |
+| round58-market 端到端报告实值引用 | ✅ 报告真产出且 0 免责话术；板块/家数未引用系**源不可达**（非接线问题） |
+| round58-portfolio R01 成长占比告警 | ✅ 口径正确：balanced 22.4% / aggressive 27.8% 均 ≤30% cap → 不告警（符合设计） |
+| round58-portfolio R03 defense ≥2 | ✅ 实证 2 只（黄金+30年国债） |
+| round58-portfolio R04/R05 `report_quality=full` | ⚠️ 直连路径达成；**异步任务路径**因 N1 预算档回落（待决策） |
+| L2-e2e 环境性 FAIL | 本轮以进程内 TestClient 绕开 `::1` 解析问题完成上述实值验收；`verify_e2e.py` 本身仍待干净后端复测 |
