@@ -82,6 +82,8 @@ from .tasks.startup import (  # noqa: F401
     _background_instruments_sync,
     _delayed_sector_list_prefetch,
     _format_warmup_budget_warning,
+    _kline_warmup_holdings_symbols,
+    _kline_warmup_symbols,
     _record_warmup_segment,
     _run_warmup_sequence,
     _warmup_design_data,
@@ -210,52 +212,9 @@ def _build_backfill_kline(rows: dict, syms) -> dict[str, dict]:
     return kline
 
 
-# R88 (round30): 个股 K 线缓存扩展——从 DB 持仓读取非 ETF 个股（A 股 600519 / HK
-# 00700 / US AAPL），补入 K 线预热符号集（方案 A：复用 hub 缓存域，不新增第二缓存域）。
-async def _kline_warmup_holdings_symbols() -> list[str]:
-    """返回持仓中 asset_type 非 ETF 的个股代码（A/HK/US 混合）。
-
-    design-data warmup 只预热 pool 内 ETF（round30 §14.5 实证个股 600519/AAPL
-    不在 hub._kline_cache_rows → symbol-analysis R60 兜底取空 → 盘后 indicators
-    data_available=false）。DB 不可用/空 → 返回 []（不影响 pool 预热）。
-    """
-    try:
-        from sqlalchemy import select
-
-        from app.database import async_session
-        from app.models.portfolio import PortfolioETF
-
-        async with async_session() as session:
-            rows = (await session.execute(
-                select(PortfolioETF.symbol, PortfolioETF.asset_type)
-                .where(PortfolioETF.is_active == True)  # noqa: E712
-            )).all()
-        out: list[str] = []
-        for sym, at in rows:
-            if not sym:
-                continue
-            _at = str(at or "A").upper()
-            if _at in ("ETF",):
-                continue  # 个股段（A/HK/US/stock）才需补；ETF 已在 pool 内
-            out.append(str(sym))
-        return out
-    except Exception as _e:
-        logger.debug("[warmup] holdings symbols query failed (non-fatal): %s", _e)
-        return []
-
-
-async def _kline_warmup_symbols(pool_syms: list[str]) -> list[str]:
-    """R88: K 线预热符号集 = pool ETF + 持仓个股（去重保序）。
-
-    仅扩展「需要 K 线的非 ETF 个股」；持仓查询失败/空退化为纯 pool 集合（不回归）。
-    """
-    try:
-        holdings = await _kline_warmup_holdings_symbols() or []
-    except Exception as _e:
-        logger.debug("[warmup] holdings symbols unavailable — using pool only: %s", _e)
-        holdings = []
-    merged = list(pool_syms) + [s for s in holdings if s not in pool_syms]
-    return merged
+# round58: R88 的 `_kline_warmup_symbols` / `_kline_warmup_holdings_symbols`
+# 已下沉到 app/tasks/startup.py（唯一调用点在本模块，反向 import 会成循环依赖，
+# 且原样留在这里会让 :373 抛 NameError → K 线预热段从未执行）。见下方 re-export。
 
 
 # R89 (round30): concept/industry 全量列表后台预拉（模块级，可单测）。

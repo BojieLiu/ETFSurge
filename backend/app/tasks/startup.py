@@ -22,6 +22,72 @@ from typing import Any, Generator
 
 logger = logging.getLogger(__name__)
 
+# round35 巨文件拆分（Batch 5）遗留：`_warmup_market_cache` 把行情预热实现搬到本模块
+# 后，`_run_warmup_sequence` 仍在调用 `refresh_market_cache(...)`，但该名字只定义在
+# 兄弟模块 `app/tasks/market_refresh.py` 且**从未 import** → 每次启动抛
+# `NameError: name 'refresh_market_cache' is not defined`，被宽 except 吞成
+# 「行情缓存预热 fast 阶段失败 (非阻塞)」，该预热段自 round35 起从未真正执行
+# （warmup 面板恒显 market_cache success=false / phase=fast_failed）。
+# F821 就在 ruff 门禁的 "F" 族里，但 patrol 的 L4-ruff 是软门禁（WARN 不阻断），
+# 故一直未拦住。round58 交易时段复测（2026-09-29）由 warmup 日志抓到并定位。
+# 该模块只 import core.logging / services.market_data_hub，不反向 import 本模块
+# ——补这条 import 无循环依赖风险。
+from .market_refresh import refresh_market_cache  # noqa: F401
+
+
+# R88 (round30): 个股 K 线缓存扩展——从 DB 持仓读取非 ETF 个股（A 股 600519 / HK
+# 00700 / US AAPL），补入 K 线预热符号集（方案 A：复用 hub 缓存域，不新增第二缓存域）。
+# ⚠️ round58：原定义在 `app/main.py`，而唯一调用点 `_warmup_design_data`（本模块
+# :373）从未 import 它 → 同款 NameError，K 线预热段同样从未执行。main.py 反向
+# import 本模块，故不能原地补 import；按本模块既有约定下沉到这里，main.py 侧
+# re-export 保持既有导入面。**注意**：单测必须 patch 本模块的定义处
+# （`app.tasks.startup._kline_warmup_holdings_symbols`），patch main.py 的 re-export
+# 别名会静默失效。
+async def _kline_warmup_holdings_symbols() -> list[str]:
+    """返回持仓中 asset_type 非 ETF 的个股代码（A/HK/US 混合）。
+
+    design-data warmup 只预热 pool 内 ETF（round30 §14.5 实证个股 600519/AAPL
+    不在 hub._kline_cache_rows → symbol-analysis R60 兜底取空 → 盘后 indicators
+    data_available=false）。DB 不可用/空 → 返回 []（不影响 pool 预热）。
+    """
+    try:
+        from sqlalchemy import select
+
+        from app.database import async_session
+        from app.models.portfolio import PortfolioETF
+
+        async with async_session() as session:
+            rows = (await session.execute(
+                select(PortfolioETF.symbol, PortfolioETF.asset_type)
+                .where(PortfolioETF.is_active == True)  # noqa: E712
+            )).all()
+        out: list[str] = []
+        for sym, at in rows:
+            if not sym:
+                continue
+            _at = str(at or "A").upper()
+            if _at in ("ETF",):
+                continue  # 个股段（A/HK/US/stock）才需补；ETF 已在 pool 内
+            out.append(str(sym))
+        return out
+    except Exception as _e:
+        logger.debug("[warmup] holdings symbols query failed (non-fatal): %s", _e)
+        return []
+
+
+async def _kline_warmup_symbols(pool_syms: list[str]) -> list[str]:
+    """R88: K 线预热符号集 = pool ETF + 持仓个股（去重保序）。
+
+    仅扩展「需要 K 线的非 ETF 个股」；持仓查询失败/空退化为纯 pool 集合（不回归）。
+    """
+    try:
+        holdings = await _kline_warmup_holdings_symbols() or []
+    except Exception as _e:
+        logger.debug("[warmup] holdings symbols unavailable — using pool only: %s", _e)
+        holdings = []
+    merged = list(pool_syms) + [s for s in holdings if s not in pool_syms]
+    return merged
+
 
 def _warmup_timer():
     """惰性解析 main 的 warmup_timer（PROFILE_WARMUP 动态装配，避免循环 import）。"""
