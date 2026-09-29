@@ -3,7 +3,8 @@
 > 状态：**已实施（commit `03ed659`，2026-09-28）**——Part A 的 R01/R03、Part B 的 R04/R05
 > 已落地；**R02 经用户拍板暂缓**（与 round27 R48 语义互斥，见 §A3-R02 偏离登记）；
 > Part A §A1 结论 ①（中证500 降权）**无引擎侧强制手段**（R01 cap 口径不含中盘，见 §A4 偏离登记）；
-> R06 属运维动作，待 403 修复后在交易时段实测。
+> **R06 运维排查已完成（commit `c2e2a4a`）——真因是 OpenCode Zen 免费层被服务商策略封锁
+> （非 key 权限），系统已自愈，端到端 `report_quality=full` 验收达成，详见 §D。**
 > 触发：用户反馈「平衡型方案科创50和中证500重仓是否合理」+「策略检查任务报告显示LLM超时」。
 > 编号：round58（与 `round58-market-report-missing-data.md` 同轮不同主题，本文档为组合设计 + LLM 两个修复）。
 > file:line 锚点核对时间：2026-09-28 16:30（北京时间，DB 存 UTC）。
@@ -223,7 +224,7 @@ if "403" in _low or "forbidden" in _low:
 |---|---|---|
 | R04 403 分类 | ✅ | `_classify_llm_failure_cause` 新增 403 分支并**置于 429 之前**（403 文本可能含 quota，先判 429 会误标限流）；`FORBIDDEN_PREFIX` 入 `llm_fallback_prefixes.FALLBACK_PREFIXES`（R186 口径同步，`is_llm_fallback_summary` 自动识别） |
 | R05 403 熔断 | ✅ | `client._r05_403_allow/_r05_403_record`，阈值 2 次、冷却 60s，**排在 F8 熔断之前**（否则 F8 先 OPEN 会把 403 归因吃掉）；全 provider 拉黑 → 抛含 403/permission 的 RuntimeError 立即失败 |
-| R06 运维排查 | 📋 未执行 | 属 repo 外动作（`.env` / key 权限），待用户执行后在交易时段实测 `report_quality=full` |
+| R06 运维排查 | ✅ **已完成（commit `c2e2a4a`）** | 结论见下方 §R06；**无需改代码/配置**，系统已自愈，验收口径已达成 |
 
 **消费方同步核查**：方案提到前端 `StrategyCheckResult.vue` 的 `fallback_reason` 分类需加
 `forbidden` 分支。实查：前端**无 `fallback_reason` 字段消费点**（`rg` 零命中），该字段尚未
@@ -235,3 +236,54 @@ if "403" in _low or "forbidden" in _low:
 - R04/R05 的负向断言含：403 不误标超时、403 优先于 429、单 provider 连 2 次 403 后第 3 次
   零探测、两 provider 全拉黑时立即失败且文案含 403/permission。
 - **未做真机验证**：R06 未执行 → `report_quality=full` 仍待 403 修复后 + 交易时段实测。
+
+### D. R06 实施回填（2026-09-28，commit `c2e2a4a`）
+
+**§B3 四步逐步结论（与文档预期不同的关键点：真因不是 403）**
+
+| 步骤 | 结论 | 证据 |
+|---|---|---|
+| 1. 确认 provider/model 配置 | `LLM_PRIMARY_PROVIDER=opencode_zen`、`LLM_FALLBACK_PROVIDER=deepseek`、`LLM_MODEL=OPENCODE_ZEN_MODEL=deepseek-v4-flash-free` | `backend/.env`（key 全程掩码，未入仓） |
+| 2. 确认 key/模型权限 | **key 有效**（能鉴权到策略层），但 Zen 免费层被**服务商策略**封锁 | 见下表 |
+| 3. 改 model 配置 | **不改**——换名无效，改主提供方反而卸掉可用的 OpenRouter 层 | `provider.py:160` OR 层挂载条件是 `primary_id=="opencode_zen"` |
+| 4. 验证 `report_quality=full` | ✅ **达成**：端到端 29.5s（预算 90s）、`is_fallback=False`、真实 usage 10254 tokens | 见下 |
+
+**Zen 免费层实测（三模型全废，探针判 NO_GO）**
+
+| 模型 | 状态 | 响应体要点 |
+|---|---|---|
+| `deepseek-v4-flash-free`（当前配置） | **400** | `Upstream request failed: Model is unavailable.` |
+| `jev-1.13-free` | **403** | `FreeTierError: OpenCode's free tier can only be used from within OpenCode` |
+| `ling-3.0-flash-fin-free` | **403** | 同上 |
+
+→ **FreeTierError 是服务商策略（免费层仅允许从 OpenCode 客户端内部发起），不是 key 权限问题，
+也不是配置名写错**。这修正了 §B2 的假设——当时把 7 次快 403 归因为「key 对模型无权限」；
+实际是整层被封，403 只是其中一支，配置模型那支是 400。R04/R05 的分类与熔断仍然正确
+（403 归因、403 连击拉黑），只是真因类别比 §B2 描述的更宽。
+
+**可用层实测 + 端到端验收**
+
+- `deepseek / deepseek-flash` → 200；json mode / plain / 8k max_tokens 三形态全通。
+- OpenRouter 免费层 `nvidia/nemotron-3-ultra-550b-a55b:free` → 200、content 非空、2.7s
+  （`probe_openrouter_free_models.py` 判 **GO**）——故 OR 中间层值得保留。
+- **端到端（真实 DB design #74，30 只非现金持仓，去重后 19 标的）**：
+  - 耗时 **29.5s / 34.9s**，`STRATEGY_CHECK_READ_S` 预算 90s → **WITHIN BUDGET**；
+  - `summary` 206 字且引用真实数据（上证50/科创50/中证500/创业板权重、`range_bound`、
+    +0.10σ 未达 0.5σ 阈值）→ 非模板兜底；
+  - `is_fallback(summary) = False` → **report_quality = full** ✅；
+  - `usage_records` 实证：`success=1 / provider=deepseek / model=deepseek-flash /
+    prompt 2370 + completion 7884 = 10254 tokens / 27.2s`（真 LLM 生成，非缓存非兜底）。
+
+**自愈机制实测生效**：Zen 腿 400 属确定性失败，circuit breaker 记 permanent error →
+`[circuit] opencode_zen:deepseek-v4-flash-free permanent error — long-cooldown + excluded + OPEN`，
+单腿 0.8s 快失败不吃预算，随后 DeepSeek 承接。**故本轮不需要任何代码/配置改动**——
+R05 熔断 + 既有 F8 熔断已把「确定性失败重试烧预算」的根因治住（§B2 根因 3）。
+
+**已知残留（登记，不在本轮）**
+1. `model_catalog` 排除/熔断状态**不跨进程**，每次重启首调仍付 ~0.8s Zen 试探（相对 90s
+   预算可忽略，登记为性能债观察项）；
+2. `generate_strategy_check_report` 的 LLM 路径 **不给 suggestions 写 `source` 字段**
+   （实测 `{None: 19}`；规则兜底路径才写 `source="rule"`），也不产 `divergence_detail`
+   ——R199 的 detail 覆盖的是规则兜底路径。属既有形态，本轮未改，已回填 known-env-issues §1.2b。
+
+**Refs**：`docs/known-env-issues.md` §1.2b（新增条目，含「别改模型名 / 别改主提供方」两条禁令）。

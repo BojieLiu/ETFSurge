@@ -70,6 +70,35 @@
 - **处置**：金丝雀已改「提供方不可达→诚实 skip」（skip 可见非伪装通过）；
   R95 类正文一致性验证标注「待 LLM 恢复复测」。
 
+### 1.2b OpenCode Zen 免费层已被服务端封锁（FreeTierError，2026-09-28 R06 实证）
+
+- **症状指纹**：`opencode_zen` 腿两种失败，**都不是 401/鉴权问题**：
+  ① 配置的 `deepseek-v4-flash-free` → **HTTP 400**
+  `{"error":{"type":"server_error","message":"Upstream request failed: Model is unavailable."}}`；
+  ② 换其它免费模型（`jev-1.13-free` / `ling-3.0-flash-fin-free`）→ **HTTP 403**
+  `{"type":"error","error":{"type":"FreeTierError","message":"OpenCode's free tier can only be used from within OpenCode"}}`。
+  Zen 探针 `scripts/probe_zen_model_list.py` 判定 **NO_GO**。
+- **归类**：**外部服务商策略变更（非回归、非配置错误）**——免费层现仅允许从 OpenCode 客户端
+  内部发起，服务端后端调用一律被拒。**换任何模型名都无法解决**。
+- **实测可用层（同一 key 组合，2026-09-28 探针 + 端到端实证）**：
+  - `deepseek / deepseek-flash` → 200，json mode / plain / 8k max_tokens 三种形态全通，
+    端到端 strategy-check **29.5s**（预算 90s）产出真 LLM 报告
+    （`is_fallback=False`、usage 10254 tokens = 2370 prompt + 7884 completion）；
+  - OpenRouter 免费层 `nvidia/nemotron-3-ultra-550b-a55b:free` → 200，content 非空，2.7s
+    （`scripts/probe_openrouter_free_models.py` 判定 **GO**）。
+- **处置**：
+  1. **不要**把「改 Zen 模型名」当解法（403 FreeTierError 换名无效）；
+  2. **不要**把 `LLM_PRIMARY_PROVIDER` 改离 `opencode_zen`——`provider.py` 的 OpenRouter
+     中间层挂载条件是 `primary_id == "opencode_zen"`，改主提供方会**连带卸掉可用的 OR 层**；
+  3. 系统已自愈：Zen 腿 400 属确定性失败，circuit breaker 记 permanent error →
+     long-cooldown + excluded + OPEN（本次实测 `[circuit] opencode_zen:... permanent error`），
+     之后由 DeepSeek 承担（单腿 ~0.8s 快失败，不吃预算）；
+  4. `model_catalog` 的排除/熔断状态**不跨进程持久化**，每次重启首调仍付 ~0.8s 试探
+     （相对 90s 预算可忽略，登记为已知性能债而非缺陷）；
+  5. 诊断/实施轮若见 `usage_records` 中 `generate_strategy_check_report` 大量
+     `success=0` + 400/403，先跑上述两个探针确认层可用性，**别急着改代码**。
+- **Refs**：`docs/round58-portfolio-design-llm-fix.md` §B3 R06 实施回填（commit `c2e2a4a`）。
+
 ### 1.3 周末 ETF 记录稀疏 / 成交额规模缺失
 
 - **症状指纹**：e2e「ETF 记录数 ≥10 实际 1」「有成交额 0/1」「有基金规模 0/1」。
