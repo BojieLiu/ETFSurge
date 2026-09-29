@@ -429,23 +429,49 @@ curl.exe --noproxy "*" -s -X POST http://localhost:8000/api/v1/portfolio/strateg
 
 ### 9.3 新发现（超出本轮清单，待决策）
 
-**N1：策略检查「数据空」档预算 15s < 现役 provider 实测延迟 27-31s**
+**N1：策略检查经异步任务仍回落——根因是「分档预算无 provider 延迟余量」，不是单纯档位太小**
 
-- 链路事实（同一 key、同一 prompt 形态）：`_llm_timeout_for(data_quality)` 对
-  `all_empty` 返 **15s**（`strategy_check.py:735-736`），本轮因子覆盖 16.7% 命中该档；
-  而唯一可用 provider（`deepseek-flash`，强开 reasoning）实测 **27.2s / 29.5s / 31.5s**。
-- 故 15s 档**在物理上不可能成功**——只要 provider 活着就必然超时兜底。
-- 性质：**非本轮回归**。该预算阶梯写于「无 provider 可用」时期（当时恒落兜底，档位无实际影响）；
-  R06 修好链路后该档位才第一次显形。design 报告不受影响（另一档 120s，实测 110s 完成 quality=full）。
-- 建议（需拍板，本轮未实施）：`all_empty` 档 15s → 30s 起（与 `partial` 档对齐），或改为
-  「按 provider 实测 p95 延迟取档」。**未擅自改**：属预算/时延权衡，且有
-  `tests/test_round14_llm_budget_consistency.py` 锁定预算-重试一致性。
+追查过程（三次实测互相修正，故以本条为准）：
+
+| 检查 | 因子覆盖 | 有真实因子值的持仓 | 命中档位 | 结果 |
+|---|---|---|---|---|
+| #161（13:48，design 之前） | 16.7% | **0/30**（`factor_scores` 是空 `{}`，非中性默认） | `all_empty` = **15s** | 超时兜底 |
+| #162（14:01，先 warm 再查） | **33.3%** | **15/30** | `partial` = **30s** | 仍兜底 |
+
+- **更正先前判断**：#161 的 15s 档**触发是准确的**（`all_empty = filled_factor_count == 0`
+  成立），不是误分类——「上下文不足 → 快速兜底」正是该档的设计意图（round7 P25）。
+  先前「15s → 30s 即可」的建议**证据不足，撤回**。
+- **#162 暴露真因**：`partial` 档 30s 与现役 provider 实测 27.2/29.5/31.5s **几乎零余量**，
+  再叠加开局那条必死的 Zen 腿（约 1s）即被砍。summary 记录的即：
+  `LLM 访问被拒绝（访问被拒绝，30s 未完成…403…opencode.ai/zen…）`。
+- **性质**：非本轮回归。分档阶梯与 provider 延迟是两条独立演进的曲线，在「无 provider 可用」
+  期间无法暴露；R06 修好链路后二者才第一次相撞。
+- **建议（需拍板，本轮未实施）**：把「档位」改为**按 provider 实测延迟留余量**（如
+  `partial` 档 ≥ 实测 p95 × 1.5），而非固定 15/30/180；或对确定性失败腿做**首跳前**短路
+  （R05 现只拦 403，Zen 的 400 由 F8 熔断兜住，仍要付一次 ~1s 试探）。
+  **未擅自改**：有 `tests/test_round14_llm_budget_consistency.py` 锁定预算-重试一致性，
+  属显式决策点。
+
+**N1 附带结论：R04 在生产路径实证通过**
+
+#162 的 summary 以 `LLM 访问被拒绝` 开头——即 `03ed659` 新增的 `FORBIDDEN_PREFIX`。
+改前同一 403 会被 else 分支误标 `LLM 分析超时`（§B2 根因）。本次为该修复的**首个实盘证据**，
+且同时证明 R186 口径同步有效：`is_llm_fallback_summary` 仍能识别新前缀（`is_fallback=true`
+与前缀一致，未出现「summary 写兜底而 is_fallback=False」矛盾）。
 
 **N2：`app/tasks/startup.py:373` 调 `_kline_warmup_symbols()` 但该函数未定义于本模块**
 
 - 实证：warmup 日志 `design-data warmup failed (non-fatal): name '_kline_warmup_symbols' is not defined`。
 - 根因：该函数**只定义在 `app/main.py`**（同文件另有 `_kline_warmup_holdings_symbols`），
   `startup.py` 未导入；且 `main.py:26` 反向 import `startup.py`，**直接补 import 会成循环依赖**。
+- **同模块第二处同型 NameError**（13:59 复跑时由 warmup 日志抓到）：
+  `app/tasks/startup.py:182/193` 调 `refresh_market_cache(phase=...)`，该函数定义在
+  `app/tasks/market_refresh.py:19`，`startup.py` 同样未导入 →
+  `行情缓存预热 fast 阶段失败 (非阻塞): name 'refresh_market_cache' is not defined`。
+  与 N2 合计 **2 个预热段从未执行**（行情缓存 fast/fallback、design-data 的 K 线预热），
+  正好解释 warmup 面板 `market_cache: success=false, phase=fast_failed` 与
+  「因子/行情冷 → 策略检查 0/30 真实因子值」的级联。两处同源：round35 巨文件拆分
+  （Batch 5 把 main.py 代码搬进 tasks/）时 import 未同步。
 - 影响：design-data warmup 的 K 线预热段**从未执行**，被宽 `except` 吞成 non-fatal，
   该段 `_mark["success"]=False`（与 warmup 面板 `market_cache: success=false` 一致）。
   非功能性中断——设计任务按需取 K 线仍 110s 完成 quality=full——但预热收益丢失。
