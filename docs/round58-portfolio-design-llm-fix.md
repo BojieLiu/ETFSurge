@@ -398,6 +398,33 @@ R05 熔断 + 既有 F8 熔断已把「确定性失败重试烧预算」的根因
 
 **N3：warmup 30.8s 超 30s 预算阈值**（`instruments_sync 21.8s` / `indices_meta_sync 8.8s`）→ 维持性能债登记。
 
+**N4：`strategy_check_records` 里 108 条「组合为空」记录被判为 `report_quality=full` + `is_fallback=false`**
+
+- 现象：`report_text` 长度 < 200 字符的记录共 108 条，形状完全一致——
+  `summary="组合为空"`（或「组合为空，请先添加ETF或生成组合方案」）、
+  `report_text` 为「## 策略检查报告 … 无可操作标的（组合为空）」、
+  `suggestions_json="[]"`、`holdings_json="[]"`，但
+  `report_quality=full` / `is_fallback=false` / `llm_layer_ok=true`。
+- **曾疑为测试污染（已自我推翻）**：初次观察时这些行的时间戳落在 commit `28bd820`
+  的 pre-commit 全量 pytest 期间，且形状与 `test_remaining_fixes.py` 里
+  `StrategyCheckRecord(capital=500000, ...)` 的夹具相似，故先按「单测写进生产库」立案。
+  **数据否掉了这个假设**：① 108 条横跨 2026-08（58 条）与 2026-09（50 条），
+  覆盖没有任何测试运行的时段；② **108/108 的 `holdings_json` 为空**，
+  与「单测造空记录」无关，而与「当时组合确实为空」一致；
+  ③ 复核 `tests/db_fixtures.py::task_db` 为 session 级独立临时 SQLite
+  （`tmp_path_factory` + `sqlite+aiosqlite:///{tmp}/test_tasks.db`），
+  `test_task_db_persistence.py` 的写库走该 fixture，**不碰生产库**。
+  故定性为：**历史产品运行记录，非测试污染**。
+- 当前状态正常：`portfolio_etfs` 共 31 条 / active 30 条，本轮 #164 实跑取到
+  30 条持仓（15/30 有真实因子值），故「组合为空」是历史时段状态，不是当前缺陷。
+- **遗留问题（口径判定，非功能缺陷，待拍板）**：空组合场景下规则引擎确实产出了一份
+  诚实报告，此时 `llm_layer_ok=true` / `is_fallback=false` / `quality=full` 在字面上
+  成立；但把「无标的可操作」与「有标的且 LLM 成功」记成同一档 `full`，
+  会让 `/portfolio/strategy-checks` 的质量分布失真（108/164 ≈ 66% 的记录是空组合），
+  也与 AGENTS.md「不静默降级 / 诚实标注」的要求相悖——建议空组合单列一档
+  （如 `empty`）或至少在 summary 层面与真 `full` 区分。
+  **未擅自改**：属质量分档口径决策，且会改动既有历史记录的展示语义。
+
 ### 9.4 与「待交易时段复测」清单的对照
 
 | 原清单项 | 本轮结论 |
