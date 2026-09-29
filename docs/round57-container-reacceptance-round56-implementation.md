@@ -459,24 +459,47 @@ curl.exe --noproxy "*" -s -X POST http://localhost:8000/api/v1/portfolio/strateg
 且同时证明 R186 口径同步有效：`is_llm_fallback_summary` 仍能识别新前缀（`is_fallback=true`
 与前缀一致，未出现「summary 写兜底而 is_fallback=False」矛盾）。
 
-**N2：`app/tasks/startup.py:373` 调 `_kline_warmup_symbols()` 但该函数未定义于本模块**
+**N2：`app/tasks/startup.py` 两处 NameError 导致 2 个预热段从未执行 —— ✅ 已修复（commit `28bd820`）**
 
-- 实证：warmup 日志 `design-data warmup failed (non-fatal): name '_kline_warmup_symbols' is not defined`。
-- 根因：该函数**只定义在 `app/main.py`**（同文件另有 `_kline_warmup_holdings_symbols`），
-  `startup.py` 未导入；且 `main.py:26` 反向 import `startup.py`，**直接补 import 会成循环依赖**。
-- **同模块第二处同型 NameError**（13:59 复跑时由 warmup 日志抓到）：
-  `app/tasks/startup.py:182/193` 调 `refresh_market_cache(phase=...)`，该函数定义在
-  `app/tasks/market_refresh.py:19`，`startup.py` 同样未导入 →
-  `行情缓存预热 fast 阶段失败 (非阻塞): name 'refresh_market_cache' is not defined`。
-  与 N2 合计 **2 个预热段从未执行**（行情缓存 fast/fallback、design-data 的 K 线预热），
-  正好解释 warmup 面板 `market_cache: success=false, phase=fast_failed` 与
-  「因子/行情冷 → 策略检查 0/30 真实因子值」的级联。两处同源：round35 巨文件拆分
-  （Batch 5 把 main.py 代码搬进 tasks/）时 import 未同步。
-- 影响：design-data warmup 的 K 线预热段**从未执行**，被宽 `except` 吞成 non-fatal，
-  该段 `_mark["success"]=False`（与 warmup 面板 `market_cache: success=false` 一致）。
-  非功能性中断——设计任务按需取 K 线仍 110s 完成 quality=full——但预热收益丢失。
-- 归属：**本轮两批 commit 均未触碰 `app/tasks/startup.py`**（`git diff 1e7a5c3..HEAD` 空），
-  属存量缺陷。修法需把 helper 下沉到共享模块（`tasks/` 或 hub）再双向引用 → 动模块结构，需拍板。
+- 原始实证：warmup 日志 `design-data warmup failed (non-fatal): name '_kline_warmup_symbols' is not defined`
+  与 `行情缓存预热 fast 阶段失败 (非阻塞): name 'refresh_market_cache' is not defined`。
+- 根因（round35 巨文件拆分 Batch 5 把 main.py 代码搬进 `tasks/` 时 import 未同步）：
+  ① `:182/:193` 调 `refresh_market_cache`，定义在 `app/tasks/market_refresh.py:19`，未导入；
+  ② `:373` 调 `_kline_warmup_symbols`，定义在 `app/main.py:247`，未导入——且 `main.py:78`
+  反向 import `startup.py`，**不能原地补 import**（循环依赖）。
+- **定位方式（客观，非推断）**：`ruff check --select F821 app` 精确列出 3 处 undefined name
+  （`:182`/`:193`/`:373`）。F821 本就在项目 ruff 门禁的 `"F"` 族内之所以长期未暴露，
+  是因为 ruff 只作为 patrol 的 L4-ruff **软门禁（WARN 不阻断）** 运行。
+- 修复（用户拍板 N2a + N2b 一起修）：
+  ① `startup.py` 补 `from .market_refresh import refresh_market_cache`——该模块只 import
+     `core.logging` / `services.market_data_hub`，不反向 import 本模块，**无循环风险**；
+  ② 把 `_kline_warmup_symbols` / `_kline_warmup_holdings_symbols` **下沉**到
+     `app/tasks/startup.py`（按该模块既有约定：定义在 tasks/、main.py re-export 保导入面）。
+- **单测防复发（关键：patch 目标必须改）**：原 `test_stock_kline_warmup.py` 打的是
+  `app.main.*`。下沉后那是 re-export 别名，而函数体在 startup 模块 globals 里查找
+  `_kline_warmup_holdings_symbols` → **monkeypatch 会静默失效**（测试转真库查询仍可能绿）。
+  已全部改指 `app.tasks.startup.*`，并加两条守卫：re-export 必须是同一函数对象、
+  patch 目标字符串必须指向定义模块。
+- **运行时前后对照（同一 7 段 warmup 序列，开 lifespan 实测）**：
+
+  | 项 | 修复前 | 修复后 |
+  |---|---|---|
+  | `market_cache` 段 | `success=false, phase=fast_failed` | `done=true, success=true, phase=fast` |
+  | `design_data` 段 | 未执行（NameError） | `done=true, success=true`（+121s，~30 只标的取 K 线占大头，故需比冒烟更长的观察窗） |
+  | 4 段汇总 | 2 段失败 | **4/4 done 且 success** |
+  | 日志 NameError | 2 处 | 0 处 |
+
+  `ruff --select F821 app` 由 3 处命中变为 **All checks passed**（全 151 文件）。
+- 验收：pre-commit 触发**全量 pytest 3342 passed / 11 skipped**（181.8s）、
+  mypy Success 151 文件、warmup+结构相关 9 文件 109 passed、
+  `test_stock_kline_warmup` 5 passed（3 原有 + 2 新守卫）、
+  audit_async_blocking / check_routes / check_engine_purity 全过。
+- **归属订正**：本轮两批 commit（`03ed659`/`688ad45`）均未触碰 `app/tasks/startup.py`
+  （`git diff 1e7a5c3..HEAD` 空），属 round35 存量缺陷，由本轮复测发现并修复。
+- 残留登记：① 启动成本上升（K 线预热与行情缓存段此前被跳过，现真实执行；
+  warmup 在后台且 30s 预算告警为提示性）；② `main.py`/`startup.py` 的 3 处**存量 F401**
+  （未用 `refresh_market_cache` re-export、`typing.Any`/`Generator`）经比对与 HEAD
+  逐字一致，非本轮引入，未纳入本次改动。
 
 **N3：warmup 30.8s 超 30s 预算阈值**（`instruments_sync 21.8s` / `indices_meta_sync 8.8s`）→ 维持性能债登记。
 
