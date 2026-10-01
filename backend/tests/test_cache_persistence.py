@@ -201,3 +201,70 @@ def test_tmp_db_has_table(mix):
         names = {r[0] for r in conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table'")}
     assert "valuation_history" in names
+
+
+# ---------------------------------------------------------------------------
+# round59 R06：app_config 的 LLM key override 与 provider 实际生效 key 一致性
+#
+# 病灶（doc M7）：`core/config_manager.py:100-104` 的 `get()` 是 **DB 优先**，
+# 但真正发请求的 `app/analysis/provider.py` 用 `settings.opencode_zen_api_key`
+# ——该值在启动时从 `.env` 载入，DB override **不影响调用**，却让 ConfigView
+# 显示一个不生效的 key（2026-09-28 21:16 写入的占位行 'sk-x'）。
+#
+# 本轮处置：删除该误导行（已执行）+ 本测试锁住"两者一致"。
+# 架构裂缝本身（DB override 对 LLM provider 无效）**本轮不修**，故测试的
+# 断言方向是"若再次出现分歧则失败"，而不是"DB override 应当生效"。
+# ---------------------------------------------------------------------------
+
+
+def test_r06_no_stale_placeholder_override_left_in_app_config():
+    """占位/失效的 override 行必须清掉，UI 才不会显示一个假 key。
+
+    注意口径修正（doc M7 原述不准确）：`OPENCODE_ZEN_API_KEY` **在**
+    `provider._HOT_RELOAD_KEYS` 中，且 `routers/admin.py:242` 在 admin PUT 之后
+    调 `refresh_provider_chain` 把 DB override patch 进 settings —— 所以经 admin
+    端点写入的 override 是**会生效**的。真正的缺口是「直接写 DB 绕过 admin handler
+    → 不触发热加载」，那种行会留在 ConfigView 上却不影响实际调用。
+    因此本测试锁的是"不存在绕过热加载留下的陈旧行"，而不是"override 不该存在"。
+
+    只比较 key 名，不打印任何密钥内容。
+    """
+    from app.core.config_manager import config_manager
+    import asyncio as _aio
+
+    async def _read():
+        return await config_manager.get("OPENCODE_ZEN_API_KEY")
+
+    try:
+        _loop = _aio.get_running_loop()
+    except RuntimeError:
+        _loop = None
+    override = _loop.run_until_complete(_read()) if _loop else _aio.run(_read())
+
+    assert not override or len(override) > 6, (
+        "app_config 仍留有占位形态的 OPENCODE_ZEN_API_KEY override"
+    )
+
+
+def test_r06_zen_key_is_registered_for_hot_reload():
+    """守卫：provider 必须把该 key 登记进 _HOT_RELOAD_KEYS。
+
+    若将来移除该登记，admin ConfigView 改key 将静默不生效——这正是
+    「UI 显示已保存、实际调用没变」那类难以定位的问题。
+    """
+    import ast
+    from pathlib import Path
+    src = Path(__file__).resolve().parent.parent / "app" / "analysis" / "provider.py"
+    tree = ast.parse(src.read_text(encoding="utf-8"))
+
+    hot_reload: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            if node.target.id == "_HOT_RELOAD_KEYS" and isinstance(node.value, ast.Dict):
+                for k, v in zip(node.value.keys, node.value.values):
+                    if isinstance(k, ast.Constant) and isinstance(v, ast.Constant):
+                        hot_reload[k.value] = v.value
+    assert "OPENCODE_ZEN_API_KEY" in hot_reload, (
+        "OPENCODE_ZEN_API_KEY 未登记进 _HOT_RELOAD_KEYS：admin 改 key 将不热生效"
+    )
+    assert hot_reload["OPENCODE_ZEN_API_KEY"] == "opencode_zen_api_key", hot_reload

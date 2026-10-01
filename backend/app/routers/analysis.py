@@ -661,6 +661,12 @@ async def llm_advice_stream(req: LLMAdviceRequest):
         intents = _classify_all(req.query or "")
         primary_intent = intents[0] if intents else "general"
         user_ctx["valuation_intent"] = (primary_intent == "valuation")
+        # round59 R08/R09: technical 意图标记。与 valuation_intent 同一模式——
+        # intent.py 只负责分类，「要不要注入技术面段 / 要不要用关键价位表模板」
+        # 由 _build_advice_stream_prompt 读这个标志位决定。
+        # 缺了它：问支撑位会落 general → 无条件追加「行业轮动分析框架」+ 800 字
+        # 上限，正是 sess-008bc66ee5734992「无法确认具体支撑位」的成因（doc M2）。
+        user_ctx["technical_intent"] = (primary_intent == "technical")
         user_ctx["index_valuation"] = []
         user_ctx["sector_valuation"] = []
         user_ctx["etf_map"] = []

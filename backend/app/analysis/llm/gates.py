@@ -1,6 +1,7 @@
 """Circuit breaker / quota gate / error diagnostics — split from analysis/llm.py (Batch 2)."""
 
 import asyncio
+import re
 import time
 
 from app.core.logging import get_logger
@@ -21,7 +22,7 @@ _PERMANENT_ERROR_PATTERNS: tuple[tuple[str, str], ...] = (
     ("400", r"Model (?:is unavailable|does not exist|is not supported)"),
     ("400", r"Upstream request failed"),
     ("401", r"is not supported|Authorization"),
-    ("403", r"not available in your country|Access restricted|Deposit required|credit insufficient balance"),
+    ("403", r"not available in your country|Access restricted|Deposit required|credit insufficient balance|Server: cloudflare|x-opencode-log-id"),
 )
 
 _circuit: dict[str, dict] = {}
@@ -155,6 +156,16 @@ def _classify_permanent_error(exc: BaseException) -> bool:
     永久性错误特征: HTTP 4xx + 特征文案 (model unavailable / not supported /
     not available in your country / credit insufficient)。这些错误复探无意义，
     应直接长冷却 + 摘除 catalog 候选。
+
+    round59 R04 — 响应头也要看。opencode.ai 对被拒的免费模型返回的是**裸 403**：
+    特征串在响应**头**里（``Server: cloudflare`` + ``x-opencode-log-id``，见
+    ``logs/backend_stdout.log`` 2026-09-28 21:57:41），响应体为空或无特征文案。
+    旧实现只扫 body，这类 403 永远漏判 → 死模型一直留在候选池里，每次调用先白等
+    6s（实测 6/7 候选 403，单次 +6s，见 doc §1.3）。
+
+    空体 403 **不**一律判永久：`mark_excluded` 会写进 ``app_config`` 的
+    ``llm_excluded:<provider>:<model>`` 并跨重启生效，误摘除一个可用模型的成本远高于
+    多试一次。因此只认特征串（含响应头里的），命中即摘除；特征串缺失时维持旧行为。
     """
     if exc is None:
         return False
@@ -164,17 +175,28 @@ def _classify_permanent_error(exc: BaseException) -> bool:
     status = getattr(resp, "status_code", None)
     if status is None or status not in (400, 401, 403):
         return False
+
     body = ""
     try:
         body = (resp.text or "")[:2000]
     except Exception:
         pass
-    if not body:
+    headers = ""
+    try:
+        raw_headers = getattr(resp, "headers", None) or {}
+        headers = "\n".join(f"{k}: {v}" for k, v in dict(raw_headers).items())[:2000]
+    except Exception:
+        pass
+
+    # 头 + 体 一起匹配：同一特征串出现在任一处都算命中
+    haystack = f"{headers}\n{body}"
+    if not haystack.strip():
         return False
+
     for _code, pat in _PERMANENT_ERROR_PATTERNS:
         if _code != str(status):
             continue
-        if __import__("re").search(pat, body, __import__("re").IGNORECASE):
+        if re.search(pat, haystack, re.IGNORECASE):
             return True
     return False
 

@@ -324,3 +324,68 @@ def test_r04_breadth_present_still_tells_model_to_cite_numbers():
     )
     assert "有数必引数值" in p or "给出数值时" in p
     assert "量能与宽度" in p
+
+
+# ---------------------------------------------------------------------------
+# round59 R12/R13：字数预算分档 + 诚实拒答三件套
+# 契约: api-contracts/analysis/llm-report-chat.md §5.2.7-§5.2.8
+#
+# 病灶（doc §1.1）：800 字上限 + 缺数 -> 模型输出一句「无法确认」免责了事。
+# R12 给 technical 意图放宽到 1200（价位表 + 依据列放不下 800）；
+# R13 要求缺数时输出「缺哪些数 / 去哪看 / 判断规则」三件套。
+# ---------------------------------------------------------------------------
+
+
+def _r59_quality_prompt(technical: bool, with_data: bool):
+    from app.analysis.llm.reports import _build_advice_stream_prompt
+    ctx = {"market_regime": "range_bound", "technical_intent": technical}
+    if with_data:
+        ctx["index_technical"] = [{
+            "symbol": "000001", "name": "上证指数", "as_of": "2026-09-30",
+            "close": 3842.20, "ma20": 3905.64, "boll_lower": 3821.74,
+            "rsi": 40.35, "kdj_j": 7.59}]
+        ctx["support_levels"] = {"000001": {
+            "symbol": "000001", "name": "上证指数", "as_of": "2026-09-30",
+            "price_now": 3842.20,
+            "dynamic": [{"level": "BOLL下轨", "value": 3821.74, "kind": "support",
+                         "basis": "波动率下沿"}],
+            "structural": [], "fib": {"fib_levels": [], "fib_unavailable_reason": None}}}
+    return _build_advice_stream_prompt("这轮A股下跌的支撑位会是怎么样的？", ctx)
+
+
+def test_r12_technical_intent_gets_1200_word_budget():
+    assert "控制 1200 字以内" in _r59_quality_prompt(True, True)
+    assert "控制 800 字以内" not in _r59_quality_prompt(True, True)
+
+
+def test_r12_non_technical_intent_keeps_800_word_budget():
+    """反向守卫：非 technical 意图不得被顺带放宽（预算收紧本身也是契约）。"""
+    assert "控制 800 字以内" in _r59_quality_prompt(False, True)
+    assert "控制 1200 字以内" not in _r59_quality_prompt(False, True)
+
+
+def test_r13_honest_refusal_requires_three_parts_not_just_cannot_confirm():
+    """R13：缺技术面数据时必须交代「缺哪些数 / 去哪看 / 判断规则」三件套。
+
+    负向点：只断言"不许写无法确认"是不够的——模型仍可能换一种空话。
+    因此逐项断言三个组成部分都在指令里。
+    """
+    p = _r59_quality_prompt(True, with_data=False)
+    assert "缺哪些数" in p
+    assert "去哪里看" in p
+    assert "怎么判断" in p
+    assert "禁止只写" in p
+
+
+def test_r13_refusal_instructions_present_even_without_data():
+    """负向：技术面数据缺失时也必须带三件套指令，而不是干脆不提。"""
+    p = _r59_quality_prompt(True, with_data=False)
+    assert "## 技术面" not in p
+    assert "缺哪些数" in p and "控制 1200 字以内" in p
+
+
+def test_r14_negative_hard_constraints_in_prompt():
+    """R14：负向硬约束必须入 prompt（对冲 doc §2.1 的方向陷阱）。"""
+    p = _r59_quality_prompt(True, True)
+    assert "支撑位与阻力位不得混列" in p
+    assert "禁止编造点位" in p

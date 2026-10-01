@@ -23,6 +23,7 @@ async def build_full_context(
     include_commodities: bool = True,
     include_global_liquidity: bool = True,
     include_macro: bool = True,
+    include_index_technical: bool = True,
 ) -> dict:
     """统一的 LLM 上下文数据采集。
 
@@ -121,6 +122,24 @@ async def build_full_context(
     except Exception as e:
         context["market_data"] = []
         errors.append(f"realtime: {e}")
+
+    # 5b. round59 R01: index technical snapshot + support/resistance levels
+    # A shares only — HK/US indices go through the global path and have no local
+    # daily-bar cache yet. Both slots are cache-only reads: on a miss they return
+    # empty and the prompt omits the section (contract §5.2.2) rather than
+    # fabricating a level. The background refresh is single-flight, so calling
+    # both accessors on a cold cache schedules exactly one fetch.
+    if include_index_technical and market.upper() in ("A", ""):
+        try:
+            context["index_technical"] = market_data_hub.get_index_technical() or []
+        except Exception as e:
+            context["index_technical"] = []
+            errors.append(f"index_technical: {e}")
+        try:
+            context["support_levels"] = market_data_hub.get_index_support_levels() or {}
+        except Exception as e:
+            context["support_levels"] = {}
+            errors.append(f"support_levels: {e}")
 
     # 6. News
     if include_news:

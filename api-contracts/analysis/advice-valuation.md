@@ -24,10 +24,15 @@
 | `allocation` | 怎么配/调仓/加仓/减仓/仓位 | `portfolio`（用户带才用，不捏造） |
 | `risk` | 见 §3 | indicators 摘要（P1 定口径） |
 | `product` | 见 §3 | `etf_map`（`instruments` 白名单） |
+| `technical` | 支撑位/压力位/阻力位/回撤/均线/破位/前低/前高/布林/量能/缺口/抄底/企稳（round59 新增，词表见 §3.3） | `index_technical`（MA/BOLL/RSI/KDJ）+ `support_levels`（支撑/压力位） |
 | `general` | 兜底 | 不加采，直接诚实降级 |
 
-**优先级 Priority**（复合命中时）：`valuation > product > risk > event > rotation > allocation > general`。
+**优先级 Priority**（复合命中时）：`valuation > product > risk > event > rotation > technical > allocation > general`。
+> round59：`technical` 置于 `rotation` 之后、`allocation` 之前——支撑位问题常同时含
+> 「买点/加仓」字样，若排在 `allocation` 之后会被抢走并再次退回泛泛而谈。
+
 例：“低估+基本面+ETF映射”判 `valuation` 主路由 + `product` 子任务（拼 ETF 行），不压扁。
+例（round59）：「这轮A股下跌的支撑位会是怎么样的？能不能买点」判 `technical`（非 `allocation`）。
 
 **分类方法 Classifier**（混合两档）：
 1. 关键词先判（零成本，§3 清单）；零命中直接 `general`（小模型第二档 deferred——v1 关键词覆盖已够，省一次 LLM 调用；后续模糊问复发再加）。
@@ -48,6 +53,22 @@
 * 主：`买哪只/买什么ETF/ETF推荐/选哪只/代码是多少/成分股映射/规模≥/日均成交/流动性不足`
 * 代码形态：6 位数字 + 上下文含 `ETF/买/换成` 才判；裸 6 位板块码（如 `881001`）不判。
 * 排除：裸`买/卖/加仓`归 `allocation`；个股推荐红线（`general_analyst.md:11`）——product 只许 ETF。
+
+### 3.3 `technical`：主+辅两档，禁与技术无关词碰瓷（round59 新增）
+
+* 主（命中即判）：`支撑位/支撑/压力位/压力/阻力位/阻力/均线/破位/前低/前高/布林/BOLL/缺口/量能/抄底/企稳`
+* 回撤族（**必须带位/到，裸「回撤」归 risk**）：`回撤位/回撤到/回踩到/反弹到`
+  > `回撤` 已是 `risk` 主词（§3.1）且 `risk` 在优先级链更前，故 technical 不可再收裸
+  > `回撤`，否则「回撤太大怎么办」会被误判 technical。改用带后缀形态消歧。
+* 排除（**必须不判 `technical`**，防误伤既有意图）：
+  * `最大回撤/回撤太大/止损/止盈/对冲/避险/波动率/杠杆` → `risk`（§3.1）
+  * 「买点到了吗/能不能加仓」**无技术词** → `allocation`
+  * 「风险提示有哪些」→ `general`
+* 正反例（单测锁定）：`这轮A股下跌的支撑位会是怎么样的`→technical；
+  `回撤到多少支撑`→technical；`上证均线在哪`→technical；
+  `支撑位跌破要不要减仓`→technical（技术词胜出，**不得**被 `allocation` 抢走）；
+  反：`回撤太大怎么办`→risk（不因含「回撤」判 technical）；`最大回撤是多少`→risk；
+  `买点到了吗`（无技术词）→allocation。
 
 ---
 
@@ -79,6 +100,57 @@
 ```
 
 > 反例：`515220=煤炭ETF国泰` 不许当银行；`159766=旅游ETF富国` 不许当煤炭（`sess-1ef0` 实证）。
+
+### 4.5 `index_technical: array`（round59，仅 `technical` 意图注入）
+
+```json
+[{ "symbol": "000001", "name": "上证指数", "close": 3823.62,
+   "ma5": 3840.1, "ma10": 3862.4, "ma20": 3880.0, "ma60": 3901.7,
+   "boll_upper": 3955.2, "boll_mid": 3880.0, "boll_lower": 3804.8,
+   "rsi": 41.2, "kdj_j": 22.5, "as_of": "2026-09-28", "data_source": "sina" }]
+```
+
+- **只读缓存**：请求链内禁止同步 `refresh_kline`（冷刷新实测 42-75s）；未命中 → 整段省略 + 异步后台 refresh。
+- **缺 `as_of` 的数值一律以 `（数据源暂不可用）` 占位**，禁止填 0。
+- 缺层整段省略（§2.2 降级纪律），**禁止**用相邻层数值顶替。
+
+### 4.6 `support_levels: object`（round59，engine 纯函数产物）
+
+```json
+{ "as_of": "2026-09-30", "price_now": 3842.2,
+  "indicators": { "ma5":3864.23, "ma10":3890.23, "ma20":3905.64, "ma60":3904.04,
+                  "boll_upper":3989.53, "boll_mid":3905.64, "boll_lower":3821.74 },
+  "dynamic":   [{ "level":"MA20","value":3905.64,"kind":"resist","basis":"20日均线，跌破则趋势转弱" }],
+  "structural":[{ "level":"近60日低点","value":3741.11,"kind":"support","basis":"前低，跌破则打开空间" }],
+  "fib": { "s1":3881.13,"s2":3854.40,"s3":3827.66,
+           "anchor_low":3741.11,"anchor_high":3967.68,
+           "anchor_low_index":68,"anchor_high_index":114,"k_primary":3,
+           "fib_unavailable_reason": null,
+           "fib_levels":[{ "level":"回撤 38.2%","value":3881.13,"kind":"resist","basis":"..." },
+                         { "level":"回撤 61.8%","value":3827.66,"kind":"support","basis":"..." }] } }
+```
+
+- **Fib 只有一族三档，方向由 `kind` 逐档标注**（round59 实施修正）。
+  方案原稿另要求一族「反弹阻力位」`L* + ratio×(H*−L*)`，但它与支撑族**代数恒等**
+  （`L* + r·span ≡ H* − (1−r)·span` ⇒ `R(38.2%)≡S(61.8%)`、`R(50%)≡S(50%)`、
+  `R(61.8%)≡S(38.2%)`）。同时输出会让模型在同一答案里读到
+  「支撑 3827.66」与「阻力 3827.66」两个互斥标签。故取消该族，
+  方向改由每档 `kind` 承担（`kind` 取值仅 `support`/`resist`）。
+- **方向标注规则（本契约最高风险项）**：`value < price_now` → `support`；
+  `value > price_now` → `resist`；`value == price_now` → **不输出**（无法归类）。
+  跌势中位于现价上方的回撤位是阻力，标成支撑是硬错误
+  （实测 000001 现价 3842.20 落在回撤区内部：`S1/S2` 在上方=阻力，`S3` 在下方=支撑）。
+- **恒真不变式**（替代原稿的 `S3<S2<S1<P_now`，后者只在**上涨**趋势成立，
+  而提问场景恰是下跌行情）：标 `support` 的必在现价下方、标 `resist` 的必在上方、
+  两族不得出现在同一列表。跨 `dynamic`+`structural`+`fib_levels` 的价位不得重复。
+- **Fib 锚点选取**：枚举全部 ≥5% 的分形上涨段，取**最近一段其回撤区仍覆盖现价**
+  （`S3 < price_now < S1`）者；若全部不覆盖 → `fib_unavailable_reason =
+  "no_upleg_brackets_price"`，三档全不输出（实测 000300 沪深300 命中此路径）。
+- **锚点稳定性**：`k=3` 与 `k=5` 两组分形若选出不同锚点 → 禁用 Fib，
+  `fib_unavailable_reason = "anchor_unstable_k3_k5"`。
+- **Bollinger 口径**：`ddof=1`（样本标准差），与 `pandas_ta` 一致；
+  用 `ddof=0` 会使同一标的在 `/market/indicators` 与本槽位出现两个不同的下轨值。
+- 日线级口径，盘中 tick 级支撑位不覆盖（`as_of` 缺失即禁引用该值）。
 
 ---
 
@@ -127,10 +199,42 @@ Content-Type: application/json
 ### 成功响应示例 / Success Example
 
 `progress(calling_model)` → `progress(fetching_valuation)` → `token*`（结构表，银行 PB 0.62/分位 20% / ROE 11% / 结论待验…）→ `done{full_text, metadata{session_id}, disclaimer}`。
-
 ### 降级示例 / Degraded Example
-
 估值源全失败 → 表全行 `待验` + “估值源暂不可用（as_of 缺失），已用涨跌+资讯仅做定性，请收盘后重问”，不报 N/M 正常。
+
+### `technical` 意图输出格式（round59）
+
+`done.full_text` 对 `technical` 意图必须为**关键价位表 + 触发/失效条件**，且**不注入**
+「行业轮动分析框架」与「资金流向」段（问支撑位却答板块轮动 = round59 M2 病灶）：
+
+```
+**上证指数 · 支撑位**（as_of 2026-09-30）
+| 档位 | 点位 | 类型 | 依据 |
+|---|---|---|---|
+| 回撤 61.8% | 3827.66 | 支撑 | 上一轮上涨段 [3741.11, 3967.68] 回撤 61.8% |
+| BOLL下轨 | 3821.74 | 支撑 | 布林下轨，波动率下沿，非刚性支撑 |
+| 近60日低点 | 3741.11 | 支撑 | 前低，跌破则打开下方空间 |
+
+**上证指数 · 阻力位**（as_of 2026-09-30）
+| 档位 | 点位 | 类型 | 依据 |
+|---|---|---|---|
+| 回撤 50.0% | 3854.40 | 阻力 | 上一轮上涨段 [3741.11, 3967.68] 回撤 50% |
+| MA5 | 3864.23 | 阻力 | 5日均线，短线强弱分界 |
+| 回撤 38.2% | 3881.13 | 阻力 | 上一轮上涨段 [3741.11, 3967.68] 回撤 38.2% |
+| MA20 | 3905.64 | 阻力 | 20日均线，跌破则趋势转弱 |
+| BOLL上轨 | 3989.53 | 阻力 | 布林上轨，反弹压力参考 |
+```
+
+- 支撑族与阻力族**分行 + 方向标注**（`类型` 列 + 依据文字双重标注）；
+  现价上方的回撤档归阻力、现价下方的归支撑，逐档判定而非整族一刀切。
+- 字数上限 **1200**（非 technical 意图保持 800）。
+- **诚实拒答三件套**（R13）：无技术面数据时输出「缺哪些数 / 去哪看 / 判断规则」，
+  **禁止**只写「无法确认」——`sess-008bc66ee5734992` 的具体病灶。
+- Fib 不可用（无覆盖现价的上涨段 / 锚点不稳）→ Fib 三档不输出 +
+  「未识别到有效上涨段，Fib 回撤位不可用」说明。
+- 负向硬约束入 prompt：支撑位与阻力位不得混列；无数据输出占位，禁止编造点位。
+
+
 
 ---
 
@@ -155,6 +259,9 @@ Content-Type: application/json
 | ETF 码 ⊆ instruments | ☐ | ☐ | 负向单测锁定 |
 | 全空降级不报正常 | ☐ | ☐ | 负向断言 |
 | 加载/空/错误/慢数据四态 | ☐ | N/A | `AiAdvisor.vue` 补缺估值态 |
+| `technical` 意图输出关键价位表 | ☐ | ☐ | round59 R09/R12，1200 字 |
+| 支撑/阻力两族分行 + 方向标注 | N/A | ☐ | round59 R02b 负向 |
+| 诚实拒答三件套（禁只写「无法确认」） | ☐ | ☐ | round59 R13 |
 | disclaimer | ☐ | N/A | 沿用既有 |
 
 ---
@@ -174,3 +281,5 @@ Content-Type: application/json
 
 * 正：`止损线设哪`→risk；`回撤太大怎么办`→risk；`买哪只银行ETF`→product；`512800现在能买吗`→product；`哪些板块低估`→valuation（优先于 product）。
 * 反：`风险提示有哪些`→general；`买点到了吗`（裸买）→allocation；`881001怎么看`（裸板块码）→sector-analysis 既有链路，不判 product。
+* round59 正：`这轮A股下跌的支撑位会是怎么样的`→technical；`回撤到多少支撑`→technical；`上证均线在哪`→technical；`支撑位跌破要不要减仓`→**technical**（技术词胜出，不被 `allocation` 抢走）。
+* round59 反：`回撤太大怎么办`→risk；`最大回撤是多少`→risk（均不因含「回撤」判 technical）；`买点到了吗`（无技术词）→allocation。

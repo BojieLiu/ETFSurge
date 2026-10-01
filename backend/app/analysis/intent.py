@@ -4,7 +4,7 @@
 契约: api-contracts/analysis/advice-valuation.md §2-§3.
 零成本 substring 匹配；零命中/平票（理论上无平票，优先级全序）→ general，
 由调用方决定是否走小模型第二档。本模块只做第一档。
-优先级: valuation > product > risk > event > rotation > allocation > general.
+优先级: valuation > product > risk > event > rotation > technical > allocation > general.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 
 _PRIORITY = ["valuation", "product", "risk", "event",
-             "rotation", "allocation"]
+             "rotation", "technical", "allocation"]
 
 _VALUATION_KWS = ("低估", "高估", "市盈率", "市净率", "分位", "股息",
                   "价值陷阱", "陷阱", "错杀", "便宜",
@@ -33,6 +33,12 @@ _EVENT_KWS = ("政策", "降息", "加息", "关税", "利好", "利空", "监�
 
 _ROTATION_KWS = ("轮动", "风格", "主线", "成长", "价值")
 
+_TECHNICAL_KWS = ("支撑位", "支撑", "压力位", "压力", "阻力位", "阻力",
+                  "均线", "破位", "前低", "前高", "布林", "BOLL",
+                  "缺口", "量能", "抄底", "企稳")
+# 回撤族：必须带后缀（位/到），裸「回撤」归 risk（优先级更前）
+_TECHNICAL_RETRACE_KWS = ("回撤位", "回撤到", "回踩到", "反弹到")
+
 _ALLOCATION_KWS = ("配置", "调仓", "加仓", "减仓", "仓位", "买点", "卖点",
                    "买入", "卖出")
 _ALLOCATION_BARE = ("买", "卖")  # 仅 product 未命中时计入（防复合问误伤）
@@ -47,6 +53,9 @@ def _has_product(query: str) -> bool:
 
 
 def _has_risk(query: str) -> bool:
+    # 技术面回撤族（带后缀）不判 risk，由 technical 处理——防「回撤到多少支撑」误判 risk
+    if any(k in query for k in _TECHNICAL_RETRACE_KWS):
+        return False
     if any(k in query for k in _RISK_PRIMARY):
         return True
     if "风险" in query and any(k in query for k in _RISK_AUX_NEED):
@@ -55,7 +64,16 @@ def _has_risk(query: str) -> bool:
         return True
     if "安全垫" in query:
         return True
-    # “风险提示/风险和适用场景”系固定话术，单出不判 risk
+    # "风险提示/风险和适用场景"系固定话术，单出不判 risk
+    return False
+
+
+def _has_technical(query: str) -> bool:
+    """Technical intent: 主关键词 + 回撤族（必须带后缀，裸回撤归 risk）。"""
+    if any(k in query for k in _TECHNICAL_KWS):
+        return True
+    if any(k in query for k in _TECHNICAL_RETRACE_KWS):
+        return True
     return False
 
 
@@ -73,6 +91,8 @@ def classify_all(query: str) -> list[str]:
         hit.add("event")
     if any(k in q for k in _ROTATION_KWS):
         hit.add("rotation")
+    if _has_technical(q):
+        hit.add("technical")
     if any(k in q for k in _ALLOCATION_KWS):
         hit.add("allocation")
     elif "product" not in hit and any(k in q for k in _ALLOCATION_BARE):

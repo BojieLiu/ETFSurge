@@ -1541,3 +1541,159 @@ def test_r03_defense_count_monotonic_inv3_still_holds():
 def test_r03_aggressive_anchors_unchanged():
     """R03 负向：进攻型 defense_count 仍为 1 → 锚集合不得被顺带扩大。"""
     assert _defense_anchors_for("aggressive") == {"518880"}
+
+
+# ---------------------------------------------------------------------------
+# round59 R02a/R02b: support_levels engine (PURE)
+#
+# 病灶（doc M1）：投顾 prompt 零 K 线数据，问支撑位只能答"无法确认"。
+# 本组用例锁三件事：① 分层可用（动态/结构）② Fib 锚点选取正确 ③ **方向不搞反**。
+#
+# ③ 是本组的重点。doc §2.1 只警告了"从本轮高点往下量 Fib 得到的是反弹阻力"，
+# 但漏了镜像陷阱：价格已跌穿整个回撤区时，S1/S2 在现价上方，此时它们是阻力。
+# doc 那条 S3<S2<S1<P_now 只在上涨趋势成立——而提问场景恰恰是下跌行情。
+# 故此处断言的是恒真不变式：support 必在现价下方、resist 必在上方、两族不混列。
+# ---------------------------------------------------------------------------
+
+
+def _r59_bars(n=140, start=4000.0, step=-1.0, vol=1_000_000.0):
+    """升序日线（最早在前），英文键。"""
+    return [
+        {"date": f"2026-{i // 28 + 1:02d}-{i % 28 + 1:02d}",
+         "open": start + step * i, "high": start + step * i + 5,
+         "low": start + step * i - 5, "close": start + step * i, "volume": vol}
+        for i in range(n)
+    ]
+
+
+def _r59_all_entries(res):
+    fib = res.get("fib") or {}
+    return (list(res["dynamic"]) + list(res["structural"]) + list(fib.get("fib_levels") or []))
+
+
+def _r59_rally_then_pullback():
+    """造一个「先跌 -> 涨 -> 回调且现价落在回撤区内」的三段序列。
+
+    数字是手算的，不是碰运气：
+      段1 8 根 -1/根  : 3600 -> 3592，末根成 Swing Low(L*)=3592（左右各 3/5 根更高）
+      段2 45 根 +25/根: 3592 -> 4717，末根成 Swing High(H*)=4717
+      段3 40 根 -12/根: 4717 -> 4237（现价）
+      span = 1125；S1 = 4717 - 0.382*1125 = 4287.25；S3 = 4717 - 0.618*1125 = 4021.75
+      => S3(4021.75) < 现价(4237) < S1(4287.25)，**落在回撤区内** -> Fib 可用。
+    段1 不可省：上涨段起点若在序列开头，其左侧不足 k 根，配不出分形低点，
+    引擎会（正确地）判定无可用上涨段。
+    """
+    bars = []
+    price = 3600.0
+    for i in range(8):                       # 段1：缓跌，造出分形低点 L*
+        price -= 1.0
+        bars.append({"date": f"2026-01-{i + 1:02d}", "open": price + 8, "high": price + 10,
+                     "low": price - 5, "close": price, "volume": 1e6})
+    for i in range(45):                      # 段2：主升，造出分形高点 H*
+        price += 25.0
+        bars.append({"date": f"2026-02-{i + 1:02d}", "open": price - 10, "high": price + 5,
+                     "low": price - 15, "close": price, "volume": 1e6})
+    for i in range(40):                      # 段3：回调到回撤区内部
+        price -= 12.0
+        bars.append({"date": f"2026-03-{i + 1:02d}", "open": price + 10, "high": price + 15,
+                     "low": price - 5, "close": price, "volume": 1e6})
+    return bars
+
+
+def test_r59_support_levels_direction_invariant_holds_on_rally_pullback():
+    """构造涨后回调：Fib 可用，且三档方向标签与现价位置一致。"""
+    from app.engine.support_levels import compute_support_levels
+    res = compute_support_levels(_r59_rally_then_pullback())
+    price = res["price_now"]
+    assert price is not None
+    assert res["fib"]["fib_unavailable_reason"] is None, res["fib"]["fib_unavailable_reason"]
+
+    entries = _r59_all_entries(res)
+    support = [e for e in entries if e["kind"] == "support"]
+    resist = [e for e in entries if e["kind"] == "resist"]
+    assert support, "回调行情应至少有一档支撑"
+    # 恒真不变式（替代 doc 那条只在上涨趋势成立的 S3<S2<S1<P_now）
+    assert all(e["value"] < price for e in support), [e for e in support if e["value"] >= price]
+    assert all(e["value"] > price for e in resist), [e for e in resist if e["value"] <= price]
+    assert not ({e["value"] for e in support} & {e["value"] for e in resist}), "两族出现同价位"
+    fib = res["fib"]
+    assert fib["s3"] < fib["s2"] < fib["s1"], fib
+    assert len({e["value"] for e in fib["fib_levels"]}) == len(fib["fib_levels"]), "重复价位"
+
+
+def test_r59_no_bracketing_leg_suppresses_fib_instead_of_inventing_levels():
+    """负向：现价已跌穿全部回撤区 -> Fib 三档全不输出 + reason 非空。
+
+    实测 000300 沪深300 命中此路径（现价 4357.62，最近回撤区 S3=4579.74）。
+    """
+    from app.engine.support_levels import compute_support_levels
+    res = compute_support_levels(_r59_bars())          # 单调下行，无任何上涨段
+    fib = res["fib"]
+    assert fib["s1"] is None and fib["s2"] is None and fib["s3"] is None, fib
+    assert fib["fib_unavailable_reason"], "无有效上涨段必须给出 reason"
+    assert fib["fib_levels"] == [], "不得输出任何 fib 价位"
+    # 但动态/结构层仍须可用——不能因为 Fib 不可用就整段放弃
+    assert res["dynamic"], "动态层（MA/BOLL）应仍然产出"
+    assert res["structural"], "结构层（60/120日低点）应仍然产出"
+
+
+def test_r59_bollinger_matches_pandas_ta_ddof1_caliber():
+    """负向：BOLL 口径必须与 /market/indicators 端点一致（ddof=1）。
+
+    实测 000001 窗口：ddof=0 会给 lower=3823.86，而端点给 3821.74。
+    两处口径不一致 = 同一标的在产品里出现两个"BOLL 下轨"。
+    """
+    from app.engine.support_levels import compute_support_levels
+    bars = _r59_bars(n=60, start=4000.0, step=1.0)
+    res = compute_support_levels(bars)
+    closes = [b["close"] for b in bars][-20:]
+    mid = sum(closes) / len(closes)
+    var = sum((c - mid) ** 2 for c in closes) / (len(closes) - 1)   # ddof=1
+    import math
+    stdev = math.sqrt(var)
+    assert abs(res["indicators"]["boll_mid"] - round(mid, 2)) < 0.01
+    assert abs(res["indicators"]["boll_upper"] - round(mid + 2 * stdev, 2)) < 0.01
+    assert abs(res["indicators"]["boll_lower"] - round(mid - 2 * stdev, 2)) < 0.01
+
+
+def test_r59_degenerate_input_returns_none_not_zero():
+    """负向：空/畸形/样本不足 -> None + reason，绝不 0 填充（0 会冒充真实档位）。"""
+    from app.engine.support_levels import compute_support_levels
+    for bad in ([], None, [{}], [{"date": "x", "high": 1, "low": 1, "close": 0}], ["nope"], [1, 2]):
+        res = compute_support_levels(bad)
+        assert res["price_now"] is None, bad
+        assert res["fib"]["fib_unavailable_reason"], bad
+        assert res["dynamic"] == [] and res["structural"] == [], bad
+    short = compute_support_levels(_r59_bars(n=5))
+    assert short["indicators"]["ma20"] is None, "样本不足不得填 0"
+    assert short["fib"]["fib_unavailable_reason"] == "insufficient_bars"
+
+
+def test_r59_no_duplicate_level_across_buckets():
+    """负向：同一价位不得在动态/结构/Fib 重复出现（重复行会被模型当成两条证据）。"""
+    from app.engine.support_levels import compute_support_levels
+    res = compute_support_levels(_r59_rally_then_pullback())
+    values = [e["value"] for e in _r59_all_entries(res)]
+    assert len(values) == len(set(values)), f"重复价位: {values}"
+
+
+def test_r59_engine_has_no_io_and_no_forbidden_imports():
+    """纯度守卫：engine 不得引入 I/O 或上层模块（CI 的 AST 门禁同口径，快照版）。"""
+    import ast
+    from pathlib import Path
+    src = Path(__file__).resolve().parent.parent / "app" / "engine" / "support_levels.py"
+    tree = ast.parse(src.read_text(encoding="utf-8"))
+    banned_pkgs = ("app.services", "app.fetchers", "app.tasks", "app.analysis",
+                   "app.routers", "app.factors")
+    banned_io = ("open(", "urllib", "requests.", "aiohttp", "httpx", "sqlite3", "socket.")
+    body = src.read_text(encoding="utf-8")
+    for node in ast.walk(tree):
+        mods = []
+        if isinstance(node, ast.Import):
+            mods = [a.name for a in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            mods = [node.module or ""]
+        for mod in mods:
+            assert not any(mod.startswith(p) for p in banned_pkgs), f"禁止的 import: {mod}"
+    for token in banned_io:
+        assert token not in body, f"禁止的 I/O token: {token}"

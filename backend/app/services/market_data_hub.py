@@ -50,6 +50,7 @@ from app.services.hub._realtime import RealtimeMixin
 from app.services.hub._regime_sentiment import RegimeSentimentMixin
 from app.services.hub._sector import SectorMixin
 from app.services.hub._snapshot import SnapshotMixin
+from app.services.hub._technical import TechnicalMixin
 from app.services.hub._valuation import ValuationMixin
 
 from ..factors.factor_registry import registry as factor_registry
@@ -73,6 +74,7 @@ class MarketDataHub(
     FundamentalsMixin,
     SnapshotMixin,
     ValuationMixin,
+    TechnicalMixin,
 ):
     _last_refresh_ts: float = 0.0
 
@@ -102,6 +104,13 @@ class MarketDataHub(
         self._sector_valuation_cache: dict[str, list[dict]] = {}
         self._sector_valuation_cache_ts: dict[str, float] = {}
         self._index_realtime_cache: list[dict] | None = None
+        # round59 R01: 指数技术面快照缓存（TechnicalMixin 读写）。与
+        # _kline_cache_rows **必须分开**：K 线缓存的裸 symbol 键在 A 股取数路径
+        # 下 "000001" = 平安银行，而 "000001" 同时是上证指数代码，同键混用会产出
+        # 「上证指数 close=11.57」的静默错数据（探针实测）。
+        self._index_tech_cache: dict[str, dict[str, Any]] = {}
+        # Type declared on TechnicalMixin (asyncio.create_task returns Task | None).
+        self._index_tech_refresh_task = None
         # R80 (round29): 指数快照刷新时间——报告 as_of 时效标注数据源，
         # 缺此字段则 as_of 恒 None（假实现）。
         self._index_realtime_cache_ts: float = 0.0
@@ -209,6 +218,14 @@ class MarketDataHub(
                 )
 
             async def _warm_kline_concurrent():
+                # round59 R01: 指数技术面预热（2 个宽基指数，走 index 取数路径）。
+                # 独立于 K 线预热——不依赖池扫描结果，且体量固定。失败静默：读路径
+                # 本就降级为「省略技术面段」，预热只是让首问就有数据。
+                try:
+                    await asyncio.wait_for(self.refresh_index_technical(), timeout=30)
+                    logger.info("[pool] index technical pre-warm finished (round59 R01)")
+                except (Exception, asyncio.CancelledError) as _e:
+                    logger.debug("[pool] index technical pre-warm skipped/failed (non-fatal): %s", _e)
                 # 用 last-good 池 symbol 预热 K 线（与扫描无依赖）；无 last-good 或
                 # 缓存已就绪则空转。短预算 45s（Semaphore(5)×20s 内部并发），超时
                 # 静默（扫描完成后 factor compute 会按需补齐缺失标的）。

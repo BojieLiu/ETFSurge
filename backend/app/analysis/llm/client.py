@@ -416,6 +416,24 @@ async def llm_complete_stream(
                 if _is_429:
                     _any_429 = True
                     _last_429_headers = getattr(_resp, "headers", None)
+                # round59 R05: 403 记连击。SSE 路径此前只**读**熔断
+                #（:335 的 _r05_403_allow），从不**写**——本函数内零 _r05_403_record
+                # → 连击数永不累计 → 熔断永不触发，每次调用都要把同一批死模型重新
+                # 探一遍（实测 6/7 候选 403，单次白等 ≈6s，doc §1.3）。
+                # 顺序约束（round58 §B 确立）：必须在 _circuit_record_failure **之前**
+                # 记录，否则 403 归因会被通用熔断先吃掉。
+                _is_403 = (
+                    isinstance(_exc, httpx.HTTPStatusError)
+                    and _resp is not None
+                    and getattr(_resp, "status_code", None) == 403
+                )
+                if _r05_403_record(provider.id, _is_403):
+                    logger.warning(
+                        "[LLM] Stream %s: 403 streak=%s -> %s blocked 60s",
+                        provider.model,
+                        _r05_403_streak.get(provider.id, 0),
+                        provider.id,
+                    )
                 # F8/F9: 429→立即 OPEN；其它异常→累计失败；round39 永久错误检测需要 exc
                 _circuit_record_failure(provider.id, _is_429, model=provider.model, exc=_exc)
                 await token_store.record(UsageRecord(
@@ -444,6 +462,9 @@ async def llm_complete_stream(
 
             # §19.9 约束#2: 流式全空 = 假完成 → 计失败换下一候选（不 yield done）
             if not (full_text or "").strip():
+                # round59 R05: 非 403 的失败要清零 403 连击，否则 403 / 成功交替时
+                # 连击会跨调用累积，把一个刚恢复的 provider 再次拉黑。
+                _r05_403_record(provider.id, False)
                 _circuit_record_failure(provider.id, False, model=provider.model)
                 logger.warning("[LLM] Stream %s 200-empty stream -> next candidate", provider.model)
                 last_exc = RuntimeError(f"{provider.model}: empty stream")
@@ -452,6 +473,8 @@ async def llm_complete_stream(
             _duration = (time.monotonic() - _start) * 1000
             # F8: 成功 → 熔断恢复
             _circuit_record_success(provider.id, provider.model)
+            # round59 R05: 成功清零 403 连击（与 llm_complete_with_system:643 同义）
+            _r05_403_record(provider.id, False)
             await token_store.record(UsageRecord(
                 function_name=_caller,
                 prompt_tokens=prompt_tokens,

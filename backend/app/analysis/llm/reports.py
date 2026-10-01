@@ -1388,6 +1388,116 @@ def _build_design_report_prompt(
             lines.append("")
 
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# round59 技术面段（R01/R02）——指数技术指标与支撑/压力位
+#
+# 口径纪律（doc §2.2 + 契约 §5.2）：
+#   * 缺 as_of 的数值一律占位：没有口径的数字不能进 prompt，模型无法判断它多旧；
+#   * 缺层整段省略：禁止用相邻层数值顶替，也禁止 LLM 自己"大致定位"一个点位；
+#   * 支撑/阻力分族渲染且带方向标注：跌势中位于现价上方的回撤位是阻力，
+#     标成支撑是硬错误（probe 实测 399006 与 000300 都命中这个坑）。
+# ---------------------------------------------------------------------------
+
+_TECH_PLACEHOLDER = "（数据源暂不可用）"
+
+_TECH_FIELDS = (
+    ("ma5", "MA5"), ("ma10", "MA10"), ("ma20", "MA20"), ("ma60", "MA60"),
+    ("boll_upper", "BOLL上轨"), ("boll_mid", "BOLL中轨"), ("boll_lower", "BOLL下轨"),
+    ("rsi", "RSI"), ("kdj_j", "KDJ-J"),
+)
+
+# engine/support_levels.py 的 fib_unavailable_reason -> 人话（prompt 里给模型读）
+_FIB_REASON_TEXT = {
+    "no_upleg_brackets_price": "未识别到仍覆盖现价的有效上涨段（价格已跌穿全部回撤区）",
+    "anchor_unstable_k3_k5": "分形锚点 k=3 与 k=5 不一致，锚点不稳",
+    "insufficient_bars": "日线样本不足",
+    "no_usable_bars": "日线数据不可用",
+}
+
+
+def _fmt_num(value: Any, digits: int = 2) -> str:
+    """数值渲染：非有限/缺失一律占位，绝不渲染 0 或空串。"""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return _TECH_PLACEHOLDER
+    if value != value or value in (float("inf"), float("-inf")):  # NaN / inf
+        return _TECH_PLACEHOLDER
+    return f"{value:.{digits}f}"
+
+
+def _format_index_technical(entries: Any) -> list[str]:
+    """指数技术面段（每指数一行，逐值带 as_of）。空槽 -> 整段不出现。"""
+    if not entries or not isinstance(entries, (list, tuple)):
+        return []
+    lines = ["## 技术面"]
+    for entry in entries[:4]:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name") or entry.get("symbol") or "?"
+        as_of = entry.get("as_of")
+        close = entry.get("close")
+        head = f"- {name}" + (f" 收于 {_fmt_num(close)}" if close is not None else "")
+        if not as_of:
+            # 无口径 = 不可引用。与其给一个看起来正常的数字，不如明说不可用。
+            lines.append(f"{head}：{_TECH_PLACEHOLDER}（缺 as_of，本行数值一律不得引用）")
+            continue
+        parts = [f"{label} {_fmt_num(entry.get(key))}" for key, label in _TECH_FIELDS]
+        ratio = entry.get("volume_ratio_5_20")
+        if ratio is not None:
+            parts.append(f"近5/20日均量比 {_fmt_num(ratio)}")
+        lines.append(f"{head}：" + " / ".join(parts) + f"（as_of {as_of}）")
+    return lines if len(lines) > 1 else []
+
+
+def _format_support_levels(levels_by_symbol: Any) -> list[str]:
+    """关键价位表：支撑族与阻力族分行 + 方向标注，两族绝不混列。"""
+    if not isinstance(levels_by_symbol, dict) or not levels_by_symbol:
+        return []
+    lines = [
+        "### 关键价位（支撑与阻力分族列出，不得混列）",
+        "| 指数 | 档位 | 点位 | 类型 | 依据 |",
+        "|---|---|---|---|---|",
+    ]
+    rows = 0
+    notes: list[str] = []
+    for symbol, levels in levels_by_symbol.items():
+        if not isinstance(levels, dict):
+            continue
+        name = levels.get("name") or symbol
+        as_of = levels.get("as_of")
+        entries: list[dict] = []
+        for bucket in ("dynamic", "structural"):
+            entries.extend(e for e in (levels.get(bucket) or []) if isinstance(e, dict))
+        fib = levels.get("fib") or {}
+        entries.extend(e for e in (fib.get("fib_levels") or []) if isinstance(e, dict))
+        # 先整族支撑、再整族阻力：模型一眼看到方向，不会把上方压力当下方支撑
+        for kind, kind_cn in (("support", "支撑"), ("resist", "阻力")):
+            group = [e for e in entries if e.get("kind") == kind]
+            if not group:
+                continue
+            lines.append(f"**{name} · {kind_cn}位**" + (f"（as_of {as_of}）" if as_of else ""))
+            for entry in group:
+                basis = str(entry.get("basis") or "").replace("|", "/")
+                lines.append(
+                    f"| {name} | {entry.get('level', '?')} | {_fmt_num(entry.get('value'))} "
+                    f"| {kind_cn} | {basis}{'' if as_of else '（缺 as_of，不得引用）'} |"
+                )
+                rows += 1
+        reason = fib.get("fib_unavailable_reason")
+        if reason:
+            notes.append(
+                f"- {name}：Fib 回撤位不可用（{_FIB_REASON_TEXT.get(str(reason), str(reason))}）"
+                f"——禁止用任意两点凑一个 Fib"
+            )
+    if not rows:
+        return []
+    lines.extend(notes)
+    lines.append("")
+    lines.append("触发条件：有效跌破任一支撑位且次日收不回去。失效条件：放量站回该阻力位上方。")
+    return lines
+
+
 def _build_advice_stream_prompt(query: str, ctx: dict) -> str:
     """构建流式投资建议 prompt — 注入市场数据。
 
@@ -1415,6 +1525,11 @@ def _build_advice_stream_prompt(query: str, ctx: dict) -> str:
         elif s_lbl:
             lines.append(f"- 市场情绪: {s_lbl}")
 
+    # round59: 技术面段置于「实时行情」之前——实时行情只有现价和涨跌幅，回答
+    # 支撑位问题需要的是均线/波动率通道/前低/回撤位这些"位置"数据。
+    technical_intent = bool(ctx.get("technical_intent"))
+    lines.extend(_format_index_technical(ctx.get("index_technical")))
+
     market_data = ctx.get("market_data", [])
     if market_data:
         lines.append("\n## 实时行情")
@@ -1440,20 +1555,19 @@ def _build_advice_stream_prompt(query: str, ctx: dict) -> str:
             sym = p.get('symbol', '?') or '?'
             lines.append(f"- {name}({sym}): {w*100:.1f}%")
 
-    lines.append('')
-    lines.append('请按以下框架回答：')
-    lines.append('1. 直接回答用户问题，引用具体数据')
-    lines.append('2. 给出判断依据')
-    lines.append('3. 如涉及操作，给出分析和建议（不构成投资指令）')
-    lines.append('')
-    lines.append('使用 Markdown 格式，控制 800 字以内。')
+    # round59 R11: 指令块已从数据段之前移到全文末尾（见函数 return 前）——
+    # 夹在 8 个数据段中间时，模型先读完板块/资金流/估值再看到"按以下框架回答"，
+    # 框架被数据淹没，正是 round59 M2「问支撑位答板块轮动」的成因之一。
 
     # F1: sector momentum data
     sector_data = ctx.get("sector_momentum", [])
     if sector_data:
         lines.append("\n### 行业板块涨跌（当日排名）")
         for item in sector_data[:10]:
-            name = item.get("sector_name") or item.get("name", "?")
+            # round59 R03：market_trends.py 归一化输出的 key 是 "sector"
+            # （{"sector": str(r.get("sector_name","")), ...}），旧链只认
+            # sector_name/name → 10 条板块全渲染成 "- ?: (x.xx%)"。
+            name = item.get("sector_name") or item.get("sector") or item.get("name") or "?"
             chg = item.get("change_pct")
             cht = f"({chg:+.2f}%)" if chg is not None else ""
             lines.append(f"- {name}: {cht}")
@@ -1482,8 +1596,14 @@ def _build_advice_stream_prompt(query: str, ctx: dict) -> str:
             lines.append(f"- {name}: {cht}")
         lines.append("")
 
+    # round59 R09: 关键价位表（支撑/阻力分族）——问支撑位时这是正文，不是补充。
+    # technical 意图下插在实时行情之后，避免被板块/资金流/估值段挤到末尾。
+    if technical_intent:
+        lines.extend(_format_support_levels(ctx.get("support_levels")))
+
     # F2: fund flow data
-    fund_flow = ctx.get("fund_flow", {})
+    # round59 R09: technical 意图跳过——问支撑位时输出资金流=人设错配（doc M2）
+    fund_flow = ctx.get("fund_flow", {}) if not technical_intent else {}
     if fund_flow.get("total_symbols", 0) > 0:
         total = fund_flow.get("total_net_inflow", 0)
         pos = fund_flow.get("positive_flow_count", 0)
@@ -1542,10 +1662,43 @@ def _build_advice_stream_prompt(query: str, ctx: dict) -> str:
         lines.append("")
 
     # F5: industry rotation framework
-    lines.append('### 行业轮动分析框架')
-    lines.append('- 最强/最弱板块：优先引用行业涨跌幅排名数据')
-    lines.append('- 轮动方向：分析资金从一个板块向另一个板块的趋势（短期/中期）')
-    lines.append('- 交叉验证：行业涨跌幅 + 资金流向 + 新闻事件')
+    # round59 R09: technical 意图跳过——「问支撑位、答板块轮动」是本轮首例回答的
+    # 具体病灶：sess-008bc66ee5734992 用户问支撑位，收到的却是"行业轮动分析框架
+    # + 再平衡"（doc M2），因为「支撑位」不在意图词表内 → 落 general → 无条件追加。
+    if not technical_intent:
+        lines.append('### 行业轮动分析框架')
+        lines.append('- 最强/最弱板块：优先引用行业涨跌幅排名数据')
+        lines.append('- 轮动方向：分析资金从一个板块向另一个板块的趋势（短期/中期）')
+        lines.append('- 交叉验证：行业涨跌幅 + 资金流向 + 新闻事件')
+        lines.append('')
+
+    # round59 R11: 指令块移到全文末尾（数据段之后），否则被 8 个数据段淹没。
     lines.append('')
+    if technical_intent:
+        # R12: 价位表 + 依据列放不下 800 字（实测技术面段本身已占约一半预算）
+        lines.append('请按以下框架回答：')
+        lines.append('1. 先给关键价位表（档位 | 点位 | 类型[支撑/阻力] | 依据），再给结论')
+        lines.append('2. 逐档说明触发条件与失效条件')
+        lines.append('3. 如涉及操作，给出分析和建议（不构成投资指令）')
+        lines.append('')
+        # R13: 诚实拒答三件套——「仅凭当前快照无法确认具体支撑位」正是本轮首例
+        # 回答的病灶（sess-008bc66ee5734992）。无数据时必须交代缺哪些数、去哪看、
+        # 判断规则，而不是一句「无法确认」把问题打回。
+        lines.append('若上方技术面/关键价位数据缺失或标注「（数据源暂不可用）」：')
+        lines.append('必须输出三件套——① 缺哪些数（点名具体指标与周期）② 这些数去哪里看'
+                     '（具体页面/接口）③ 拿到数后怎么判断（可复用的规则，而不是结论）')
+        lines.append('禁止只写「无法确认」「暂无数据」这类空转回答。')
+        # R14: 负向硬约束（对冲 doc §2.1 的方向陷阱）
+        lines.append('硬约束：支撑位与阻力位不得混列；落在现价上方的回撤位是阻力不是支撑；'
+                     '无数据的档位输出占位，禁止编造点位。')
+        lines.append('')
+        lines.append('使用 Markdown 格式，控制 1200 字以内。')
+    else:
+        lines.append('请按以下框架回答：')
+        lines.append('1. 直接回答用户问题，引用具体数据')
+        lines.append('2. 给出判断依据')
+        lines.append('3. 如涉及操作，给出分析和建议（不构成投资指令）')
+        lines.append('')
+        lines.append('使用 Markdown 格式，控制 800 字以内。')
 
     return "\n".join(lines)

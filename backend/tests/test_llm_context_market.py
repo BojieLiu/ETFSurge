@@ -80,6 +80,13 @@ class _FakeHub:
     def get_by_code(self, code):
         return None
 
+    def get_index_technical(self):
+        return []
+
+    def get_index_support_levels(self):
+        return {}
+
+
 
 @pytest.mark.asyncio
 async def test_context_market_hk_uses_hk_indices():
@@ -337,3 +344,202 @@ def test_r06_breadth_appears_in_report_prompt(monkeypatch):
         if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "_build_report_prompt":
             kw |= {k.arg for k in n.keywords if k.arg}
     assert "market_breadth" in kw, "宽度未透传给 prompt"
+
+
+# ---------------------------------------------------------------------------
+# round59 R01: index technical slot (A1 namespaced index cache + cache-only read)
+#
+# Regression lock for the measured defect: the existing K-line cache is keyed by
+# bare symbol and refresh_kline fetches with asset_type="A", in which "000001"
+# resolves to Ping An Bank (000001.SZ) — while "000001" is also the Shanghai
+# Composite. The probe got close=11.57 for a symbol the prompt was about to
+# label 「上证指数」, whose real level that day was 3842.
+# ---------------------------------------------------------------------------
+
+
+def _index_bars(n=140, start=4000.0, step=-1.0, volume=1_000_000.0):
+    """Ascending daily bars, oldest first, English keys (post-normalization)."""
+    return [
+        {
+            "date": f"2026-05-{i % 28 + 1:02d}",
+            "open": start + step * i,
+            "high": start + step * i + 5,
+            "low": start + step * i - 5,
+            "close": start + step * i,
+            "volume": volume,
+        }
+        for i in range(n)
+    ]
+
+
+def test_r01_normalize_drops_malformed_rows_instead_of_zero_filling():
+    """负向：坏行必须丢弃，不得填 0——0 价会流入 MA/BOLL 并冒充真实档位。"""
+    from app.services.hub._technical import _normalize_bars
+
+    rows = [
+        {"日期": "2026-09-29", "开盘": "3800", "最高": "3850", "最低": "3790",
+         "收盘": "3842", "成交量": "1000"},
+        {"日期": "2026-09-30", "开盘": "3840", "最高": "3855", "最低": "3830",
+         "收盘": "3842.195", "成交量": "2000"},
+        {"日期": "", "收盘": "1"},                      # no date
+        {"日期": "2026-09-28", "收盘": "3900"},          # no high/low
+        {"日期": "2026-09-27", "最高": "1", "最低": "1", "收盘": "0"},  # close<=0
+        "not-a-dict",
+    ]
+    out = _normalize_bars(rows)
+    assert len(out) == 2, out
+    assert all(b["close"] > 0 for b in out)
+    assert out[-1]["close"] == 3842.195
+    assert {b["date"] for b in out} == {"2026-09-29", "2026-09-30"}
+
+
+def test_r01_index_history_fetched_with_index_asset_type(monkeypatch):
+    """A1 回归锁：指数日线必须走 asset_type='index'，绝不 'A'（否则 000001=平安银行）。"""
+    import asyncio
+
+    from app.fetchers import china_market
+    from app.services.hub._technical import TechnicalMixin
+
+    calls = []
+
+    def _fake_fetch(symbol, asset_type="A", period="daily"):
+        calls.append((symbol, asset_type, period))
+        return [{"日期": f"2026-09-{i + 1:02d}", "开盘": "3800", "最高": "3850",
+                 "最低": "3790", "收盘": str(4000 - i), "成交量": "1000"} for i in range(5)]
+
+    monkeypatch.setattr(china_market, "fetch_history", _fake_fetch)
+
+    class _Hub(TechnicalMixin):
+        def __init__(self):
+            self._index_tech_cache = {}
+            self._index_tech_refresh_task = None
+
+    hub = _Hub()
+    asyncio.run(hub.refresh_index_technical(["000001"]))
+    assert calls, "fetch_history was never called"
+    assert all(c[1] == "index" for c in calls), calls
+    assert calls[0] == ("000001", "index", "daily"), calls
+
+
+def test_r01_snapshot_written_to_separate_cache_never_touching_kline_cache(monkeypatch):
+    """命名空间隔离：指数快照不得写进 _kline_cache_rows（那个键是 A 股取数路径）。"""
+    import asyncio
+
+    from app.fetchers import china_market
+    from app.services.hub._technical import TechnicalMixin
+
+    monkeypatch.setattr(
+        china_market, "fetch_history",
+        lambda symbol, asset_type="A", period="daily": [
+            {"日期": "2026-09-29", "开盘": "3800", "最高": "3850", "最低": "3790",
+             "收盘": "3840", "成交量": "1000"},
+            {"日期": "2026-09-30", "开盘": "3840", "最高": "3851", "最低": "3833",
+             "收盘": "3842.195", "成交量": "2000"},
+        ],
+    )
+
+    class _Hub(TechnicalMixin):
+        def __init__(self):
+            self._index_tech_cache = {}
+            self._index_tech_refresh_task = None
+            self._kline_cache_rows = {"000001": [{"date": "x", "close": 11.57}]}
+
+    hub = _Hub()
+    asyncio.run(hub.refresh_index_technical(["000001"]))
+    assert hub._kline_cache_rows["000001"][0]["close"] == 11.57, "既有 K 线缓存被污染"
+    snap = hub._index_tech_cache["000001"]["snapshot"]
+    # engine 按契约 round(price,2)，故 3842.195 -> 3842.2（不是原样透传）
+    assert abs(snap["close"] - 3842.195) < 0.01, snap
+    assert snap["close"] != 11.57, "指数快照被 A 股路径的平安银行价污染"
+    assert snap["name"] == "上证指数"
+    assert snap["as_of"] == "2026-09-30"
+    assert isinstance(snap["support_levels"], dict)
+
+
+@pytest.mark.asyncio
+async def test_r01_read_is_cache_only_and_never_awaits_fetch(monkeypatch):
+    """负向：读路径不得同步取数——冷缓存读必须立刻返回 []（首字节不等网络）。"""
+    from app.services.hub import _technical as tech_mod
+
+    fetched = []
+
+    async def _never(self, symbols=None):
+        fetched.append(symbols)
+
+    monkeypatch.setattr(tech_mod.TechnicalMixin, "refresh_index_technical", _never)
+
+    class _Hub(tech_mod.TechnicalMixin):
+        def __init__(self):
+            self._index_tech_cache = {}
+            self._index_tech_refresh_task = None
+
+    hub = _Hub()
+    out = hub.get_index_technical()
+    assert out == [], "冷缓存必须返回空（prompt 省略技术面段），不得等待或编造"
+    assert not fetched, "读路径同步执行了取数"
+    await asyncio.sleep(0)
+    assert fetched, "读路径应投递后台 refresh（self-heal）"
+
+
+@pytest.mark.asyncio
+async def test_r01_expired_entry_degrades_instead_of_serving_stale():
+    """负向：TTL 过期 -> 降级为空（doc R01），不得把过期快照当当前值送出。"""
+    import time
+
+    from app.services.hub import _technical as tech_mod
+
+    class _Hub(tech_mod.TechnicalMixin):
+        def __init__(self):
+            self._index_tech_refresh_task = None
+            self._index_tech_cache = {
+                "000001": {
+                    "ts": time.time() - (tech_mod._INDEX_TECH_TTL + 60),
+                    "snapshot": {"symbol": "000001", "close": 3842.195, "as_of": "2026-09-30"},
+                }
+            }
+
+    hub = _Hub()
+    assert hub.get_index_technical() == [], "过期条目必须降级为空"
+    assert hub.get_index_support_levels() == {}
+
+
+@pytest.mark.asyncio
+async def test_r01_ctx_slots_present_for_a_market_and_absent_for_hk():
+    """ctx 契约：A股注入两个槽；HK 不注入 A 股指数技术面。"""
+    from app.services.llm_context import build_full_context
+
+    snap = {"symbol": "000001", "name": "上证指数", "as_of": "2026-09-30", "close": 3842.195,
+            "ma20": 3905.64, "rsi": 40.35, "kdj_j": 7.59,
+            "support_levels": {"as_of": "2026-09-30", "price_now": 3842.195,
+                               "dynamic": [], "structural": [], "fib": {}}}
+
+    class _TechHub(_FakeHub):
+        def get_index_technical(self):
+            return [snap]
+
+        def get_index_support_levels(self):
+            return {"000001": {"symbol": "000001", "as_of": "2026-09-30", "fib": {}}}
+
+    ctx_a = await build_full_context(_TechHub(), market="A")
+    assert ctx_a["index_technical"] == [snap]
+    assert ctx_a["support_levels"]["000001"]["symbol"] == "000001"
+
+    ctx_hk = await build_full_context(_TechHub(), market="HK")
+    assert ctx_hk.get("index_technical") in (None, []), ctx_hk.get("index_technical")
+
+
+@pytest.mark.asyncio
+async def test_r01_ctx_degrades_to_empty_on_hub_error_not_fabricated_numbers():
+    """负向：hub 抛错 -> 槽为空；不得填 0/占位数值冒充正常。"""
+    from app.services.llm_context import build_full_context
+
+    class _BoomHub(_FakeHub):
+        def get_index_technical(self):
+            raise RuntimeError("boom")
+
+        def get_index_support_levels(self):
+            raise RuntimeError("boom")
+
+    ctx = await build_full_context(_BoomHub(), market="A")
+    assert ctx["index_technical"] == []
+    assert ctx["support_levels"] == {}

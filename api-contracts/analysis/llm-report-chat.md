@@ -132,3 +132,84 @@ POST /api/v1/analysis/llm-report/stream   （既有端点扩展，SSE 不变）
   报告首字节延迟理论上界 +15s（串行）；两者均在失败时静默降级，不阻断报告。
 - 范围外：个股级 moneyflow（P2-1 探针判不可行，暂缓立项）；北向**实时**数据
   （监管 2024-08 起停更，非技术问题）；报告 SSE 新增数据段事件（前端无需）。
+
+---
+
+## 5. 投资顾问技术面数据段（round59）
+
+> 状态：2026-09-30 实施落地（范围 P0+P1 = R01-R14）。**接口 schema 不变**
+> （`/analysis/llm-advice/stream` 的请求/响应/SSE 事件均未改），本节锁定的是
+> `_build_advice_stream_prompt` 新增的**技术面槽**与**支撑/压力位口径纪律**。
+> 触发病灶：`sess-008bc66ee5734992`（2026-09-28 21:57）用户问「这轮 A 股下跌的
+> 支撑位会是怎么样的？」，LLM 答「仅凭当前快照，无法确认具体支撑位」——
+> 根因是 prompt 只注入了 regime/sentiment/8 条实时行情/5 条资讯/5 条持仓，
+> **零 K 线、零均线、零 BOLL、零前低**，且「支撑位」不在意图词表内 → 落 `general`
+> → 无条件追加「行业轮动分析框架」，800 字上限把答案压成一句免责。
+
+### 5.1 新增 prompt 数据段
+
+| Section 标题 | 数据源（后端符号） | 缺失时的规范输出 | R |
+|---|---|---|---|
+| `## 技术面`（置于「实时行情」之前） | `build_full_context` 的 `index_technical[]`（`000001`/`000300`，`399006` 视耗时） | 整段不出现（**禁止**写「暂无技术面数据」后继续编点位） | R01 |
+| `### 关键价位`（`technical` 意图专属） | `engine/support_levels.compute_support_levels()` 的 `dynamic`/`structural`/`fib` | 整表省略 + 输出「缺哪些数 / 去哪看 / 判断规则」三件套 | R02a/R02b/R13 |
+| `### 支撑位`（**与阻力位分行**） | `fib.fib_levels` 中 `kind=="support"` 的档 | 「未识别到有效上涨段，Fib 回撤位不可用」 | R02b |
+| `### 阻力位`（**与支撑位分行**） | `fib.fib_levels` 中 `kind=="resist"` 的档 | 同上，三档全部不输出 | R02b |
+
+### 5.2 字段级断言
+
+1. **`ctx.index_technical[]`**：每元素必须含 `symbol` / `name` / `close` / `ma5` /
+   `ma10` / `ma20` / `ma60` / `boll_upper` / `boll_lower` / `boll_mid` / `rsi` /
+   `kdj_j` / `as_of`。**任一数值缺 `as_of` → prompt 中该值必须以
+   `（数据源暂不可用）` 占位，禁止以 0 或空串顶替。**
+2. **缺层整段省略**：`index_technical=[]` 或缺 bars 时，技术面段**不得**出现任何
+   MA/BOLL/RSI 数值（负向：不得出现 `MA20:` 之类的行）。
+3. **只读缓存**：请求链内**禁止**同步 `refresh_kline`（实测冷刷新 42-75s，
+   round28 §14.4 冷启动超时根因之一）。缓存未命中/过期 → 技术面段省略 +
+   异步投递后台 refresh，**SSE 首字节不得等待**。
+4. **Fib 方向纪律（最高风险项，实施期修正）**：上涨段 `[L*, H*]` 的回撤位
+   `S_i = H* − ratio×(H*−L*)` 共三档，**方向逐档由 `kind` 标注**（`value <
+   price_now` → `support`，`> price_now` → `resist`，`== price_now` → 不输出）。
+   负向断言：任一现价上方的回撤档被写进支撑行 → **FAIL**；两族不得出现在同一列表。
+   *原稿的 `S3<S2<S1<P_now` 只在上涨趋势成立（提问场景恰是下跌行情），已替换为
+   「标 support 必在现价下方 / 标 resist 必在上方」这一恒真不变式。*
+   *原稿另设的「反弹阻力位」族 `L*+ratio×(H*−L*)` 与支撑族**代数恒等**
+   （`L*+r·span ≡ H*−(1−r)·span`），同时输出会让模型读到「支撑 3827.66」与
+   「阻力 3827.66」两个互斥标签，故取消该族。*
+5. **Fib 降级**：`fib_unavailable_reason` 非空时（无覆盖现价的上涨段
+   `no_upleg_brackets_price` / 锚点不稳 `anchor_unstable_k3_k5`）**三档全不输出**，
+   且不得用任意两点硬凑——prompt 中必须显式说明原因。
+   *实测 000300 沪深300 走此路径（现价 4357.62，最近回撤区 S3=4579.74 在其上方）。*
+6. **板块名口径**：`market_trends.py` 输出的 key 是 `sector`，prompt 板块段
+   渲染出的板块名**不得出现 `?` 占位**（round59 M3：10 条板块曾全渲染 `- ?: (x.xx%)`）。
+7. **`technical` 意图专属纪律**：`technical` 意图下 prompt **不得**出现
+   「行业轮动分析框架」与「资金流向」段；非 `technical` 意图下二者**必须**出现。
+8. **字数上限**：`technical` 意图 1200 字（价位表 + 依据放不下 800）；
+   其余意图保持 800 字。
+9. **负向硬约束入 prompt**：`technical` 意图的指令块必须显式包含
+   「支撑位与阻力位不得混列」「无数据输出占位，禁止编造点位」。
+
+### 5.3 Frontend-Backend Checklist
+
+| Item | Frontend | Backend | Notes |
+|------|----------|---------|-------|
+| 接口 schema 未变（SSE 事件/字段） | ☐ | ☐ | 本轮只改 prompt 内容 |
+| 技术面段含真实 MA/BOLL/RSI + as_of | N/A | ☐ | R01 负向：缺 bars 不得填 0 |
+| 支撑/阻力两族分行 + 方向标注 | N/A | ☐ | R02b 负向：`S3<S2<S1<close` |
+| Fib 不可用时零 fib 数值 | N/A | ☐ | R02b 负向：reason 非空 |
+| 板块段无 `?` 占位 | N/A | ☐ | R03 负向 |
+| `technical` 意图无轮动框架/资金流段 | N/A | ☐ | R09 负向：非 technical 必须有 |
+| 诚实拒答三件套（缺数/去哪看/规则） | ☐ | ☐ | R13，禁只写「无法确认」 |
+| 加载/空/错误/慢数据四态 | ☐ | N/A | 复用 `AiAdvisor.vue` 既有渲染 |
+
+**实现 / 验证 / 风险 / 范围外**
+- 实现：`app/engine/support_levels.py`（纯函数）、`app/services/hub/_technical.py` +
+  `services/llm_context.py`（`index_technical` 注入）、`app/analysis/intent.py`
+  （`technical` 词表 + 优先级）、`app/analysis/llm/reports.py`（技术面段 + 关键价位表 +
+  指令块后移 + 字数分支）。
+- 验证：pytest 受影响文件全绿；`check_engine_purity` / `audit_async_blocking` 绿；
+  端到端复问原问题须出现**具体点位 + 依据列 + 方向标注**。
+- 风险：Fib 锚点为**日线级**口径，盘中 tick 级支撑位不覆盖；`k=3`/`k=5` 分形
+  不一致时**禁用 Fib**（输出「锚点不稳定」），不猜锚点。
+- 范围外：SSE `done` 回传真实服务模型（`x-zen-model`）、token 面板 403 占比告警
+  （round59 P2 R15/R16，本轮暂缓）；`pivot`/`donchian`/`zigzag` compute 函数
+  （YAML 有定义，本轮不依赖）。
