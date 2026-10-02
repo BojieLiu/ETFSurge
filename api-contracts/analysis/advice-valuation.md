@@ -1,8 +1,15 @@
 # Advice Valuation Extension / 投顾估值扩展（L1 v2 草稿）
 
 > 基于 `agents.md §3 /llm-advice/stream` 的扩展契约，不新增路由。
-> 对应现状：`backend/app/routers/analysis.py:498 llm_advice_stream` → `services/llm_context.py:13 build_full_context` → `analysis/llm/reports.py:1156 _build_advice_stream_prompt`（消费槽见 `tests/test_advice_p0a_slots.py:91` P3-G）。
+> 对应现状：`backend/app/routers/analysis.py:587 llm_advice_stream` → `services/llm_context.py:13 build_full_context` → `analysis/llm/reports.py:1501 _build_advice_stream_prompt`（消费槽见 `tests/test_advice_p0a_slots.py:92` P3-G）。
 > 动机实证：`sess-1ef0958821864c07`（低估+基本面恶化）因无估值槽被迫拒答后编常识，且 ETF 码幻觉（`515220` 复用、`159766=旅游ETF富国` 当煤炭）。
+>
+> **round60 C1 修订（2026-10-02，契约与代码对齐）**
+> - `:4` 的三处行号此前全错（指向 `analysis.py:498` / `reports.py:1156`），已订正为实际位置。
+> - 删 `fetching_etf` phase 承诺（D3）：`etf_map` 取数是 `SECTOR_ETF_MAP` 静态表的
+>   内存遍历 + substring 匹配（`analysis.py:727-735`），**零 I/O、零延迟**，
+>   为瞬时操作发进度阶段是表演而非诚实。见 §6。
+> - §5 标注 v1 未实现（D6），保留设计意图供后续工具化。
 
 ---
 
@@ -76,7 +83,7 @@
 
 ### 4.1 基础槽（每次常驻，复用 60s 会话快照 `chat_session.py:170`）
 
-`market_regime`、`market_sentiment`、`market_data`（指数）、`sector_momentum`、`hot_plates`、`sector_heat`、`fund_flow`、`news`。P3-G 约束不变：router 注入 ⊇ prompt 消费。
+`market_regime`、`market_sentiment`、`market_data`（指数）、`sector_momentum`、`hot_plates`、`sector_heat`、`fund_flow`、`news`、`commodities`（round60 C3 起，此前投顾是唯一不注入商品的链路）。P3-G 约束不变：router 注入 ⊇ prompt 消费。
 
 ### 4.2 `index_valuation: array`
 
@@ -152,9 +159,62 @@
   用 `ddof=0` 会使同一标的在 `/market/indicators` 与本槽位出现两个不同的下轨值。
 - 日线级口径，盘中 tick 级支撑位不覆盖（`as_of` 缺失即禁引用该值）。
 
+### 4.7 `commodities: array`（round60 C3 实施，跨资产问答）
+
+**为什么加**：投顾是**唯一**不注入商品的 LLM 链路（`analysis.py:623`
+`include_commodities=False`），而 README 首段把「黄金/原油/白银」列为产品六大资产类别之一。
+即产品定位覆盖跨资产，投顾链路却对「黄金和原油配哪个」落 `general`（实测，见 gold case E10）。
+故 C3 起按**基础槽**注入（与 `market_regime`/`news` 同款，不加新意图、不做意图触发加采）。
+
+```json
+[ { "name": "黄金", "price": 2380.5, "change_pct": 0.62 },
+  { "name": "原油", "price": 71.34,  "change_pct": -1.15 } ]
+```
+
+- **渲染复用**：`reports.py:123 _format_commodities`，与市场报告链（`llm-report`）同一渲染器，
+  禁止写第二份格式。规范化别名（GC/黄金/GOLD/XAU → 黄金 等）由该函数内 alias 表承担。
+- **行数上限**：规范化后 ≤6 行（`_format_commodities` 自带 `commodities[:6]` 兜底）；
+  上游 `llm_context.py:170-176` 另有 `[:10]` 截断 + 15s 超时。
+- **空槽整段省略**：不得渲染兜底数字。盘后/非交易时段上游允许返回 `[]`
+  （`china_market.fetch_futures_realtime` 8s 超时、失败静默空列表），
+  这是**合法空窗**而非故障，模型应说「商品实时数据暂不可用」，不得用上一交易日数值冒充。
+- **与 scope 守卫的关系**：本槽是**跨资产**数据，不受 §4.8 的 A 股 scope 限制；
+  但反之，query 问 A 股标的时**不得**用商品行情替代（scope 守卫同样适用）。
+
+### 4.8 scope 声明行（round60 C3 实施，D8）
+
+> **问题（D8）**：`_VALUATION_KWS` 含 `贵`/`便宜`（`intent.py:19`），所以「恒生科技贵不贵」
+> 「黄金现在贵吗」「美股和A股哪个估值低」等问句都会命中 `valuation`；但取数硬编码 5 个
+> A 股指数（`analysis.py:700-701`），**给港股/黄金/美股问句端上一张 A 股估值表**。
+> 同根因还命中技术面槽（实测 E08「纳斯达克跌破支撑位了吗」→ `technical`，而技术面仅
+> 覆盖 `000001`/`000300`）与 ETF 映射槽（E07「港股红利ETF推荐」→ 注入 A 股 `510880`）。
+
+**契约**：query 命中非 A 股资产线索（`港股/恒生/H股/纳指/标普/美股/黄金/原油/白银/国债`）
+时，prompt 必须**显式声明覆盖范围**，且被声明不适用的槽降级为「参考背景」：
+
+```
+本产品估值/技术面/板块数据仅覆盖 A 股宽基与行业指数；该问题涉及的标的属非 A 资产，
+以下表格不适用于它，请勿据此下结论。
+```
+
+- **不改词表**：删 `贵`/`便宜` 会砸掉 S4 估值主族（「红利是不是价值陷阱」）。问题不在分类，
+  在**数据 scope 与提问 scope 不匹配**。
+- **不改取数**：推荐方案只加声明行（保留「顺带告知 A 股估值如何」的信息量）；
+  备选方案是按 scope 拦取数（更干净，但少一段有用信息且需新增 scope 判定函数）。
+- **反向要求**：A 股问句**不得**出现该声明行（防过度触发）；gold case 必须含
+  「A股和港股谁更便宜」这类**跨市场比较**反例——此时声明行应出现且 A 股表保留为参考。
+
 ---
 
 ## 5. 受限 2 步 loop / Constrained Loop
+
+> **状态：v1 未实现（round60 C1 标注，D6）**。下列工具与调度规则是**设计意图**，
+> 不是当前行为。实际调度硬编码在 `analysis.py:673-735` 的两个 `if` 分支里
+> （`valuation` 意图才拉估值；`"product" in intents` 才填 `etf_map`），
+> 没有工具注册、没有 `max_steps`、没有模型自主调度。
+> 保留本节是为了给后续工具化一个可执行的规格，而不是让读者以为它已经存在。
+> 判据（round60）：**契约承诺的行为，要么有真实延迟/价值可展示，要么从契约删掉——
+> 不留假承诺**。同理，零 I/O 的操作不配 progress phase（见 §6 `fetching_etf` 的删除理由）。
 
 白名单仅 2 工具，`max_steps=2`，`run_sync` + `wait_for` 包裹，禁循环内裸 IO（AGENTS 陷阱项）：
 
@@ -177,7 +237,14 @@ etf.lookup(sector_or_index: string)
 
 ## 6. 输出格式 / Response
 
-SSE 事件沿用 `agents.md §6.1`，新增 `progress.phase`：`fetching_valuation` / `fetching_etf`（前端仅新增 phase 分支，不改消费逻辑）。
+SSE 事件沿用 `agents.md §6.1`，新增 `progress.phase`：`fetching_valuation`（前端仅新增 phase 分支，不改消费逻辑）。
+
+> **round60 C1 删除（D3）**：原契约还承诺 `fetching_etf`，代码从未实现，且**不应该实现**——
+> `etf_map` 的取数是 `SECTOR_ETF_MAP` 静态字典的内存遍历 + substring 匹配
+> （`analysis.py:727-735`），无网络、无 DB、无重计算，为瞬时操作发「正在查询…」进度阶段
+> 属于对用户的表演。对比 `fetching_valuation`：25s 预算、5 指数并发外呼
+> （`analysis.py:697-721`），那才是真延迟，配 progress 合理。
+> 因此本契约只保留 `fetching_valuation` 一个 phase。
 
 `done.full_text` 对 `valuation` 意图必须为结构表：
 
@@ -234,6 +301,33 @@ Content-Type: application/json
   「未识别到有效上涨段，Fib 回撤位不可用」说明。
 - 负向硬约束入 prompt：支撑位与阻力位不得混列；无数据输出占位，禁止编造点位。
 
+### 6.1 `technical` 意图的**数据可用性三档**（round60 C3 实施，D2）
+
+问题：冷缓存时 prompt 既无价位数据、也无占位标记，却要求「先给关键价位表」
+（实测 311 字 prompt）。R13 三件套挂在「若数据缺失或标注占位」的条件上——
+冷缓存两个条件都不成立，指令自相矛盾，直接邀请模型编点位。
+
+契约：框架第 1 步按**槽位是否非空**分流（三档互斥，不得同时出现）：
+
+| 档 | 判据（`support_levels` / `index_technical`） | 框架第 1 步必须为 |
+|---|---|---|
+| **T-全空** | 两者皆空 | 插一行「（本轮无技术面/关键价位数据：日线源未返回，**禁止输出任何点位**）」+「**禁止输出支撑/阻力档位表与任何点位数字**，改按下方三件套回答」 |
+| **T-仅技术面** | `index_technical` 非空、`support_levels` 空 | 「仅可引用上方技术面段的 MA/BOLL/RSI/KDJ 数值（带 `as_of`）作为参考，**禁止自行推断档位或未列出的点位**」 |
+| **T-完整** | `support_levels` 非空 | 维持现状「先给关键价位表（档位/点位/类型/依据），再给结论」 |
+
+- 字数上限 **1200** 三档一致；R13 三件套三档都在（`technical_intent` 即注入）。
+- 判据只看槽位非空，**不看意图**——三档的意图都是 technical。
+
+### 6.2 跨资产问句的输出（round60 C3，S8）
+
+问「黄金和原油配哪个」时 `primary_intent = general`（**不加新意图**，见 §2 决策），
+但商品段已在 prompt 内，期望回答形态为 `answer` 而非 `degrade`：
+
+- 必须引用 §4.7 商品段内的名称与数值，并标注盘后/空窗（禁止用上一交易日数值冒充）。
+- 允许比较与给倾向性判断；**禁止**给出精确目标权重（那属 `/portfolio/design-async` 的引擎职责，
+  符合 README「LLM prose is decoration on top of engine output」）。
+- 商品段为空时降级为「商品实时数据暂不可用」，并说明可在 `/market` 商品页查看。
+
 
 
 ---
@@ -254,14 +348,20 @@ Content-Type: application/json
 |------|----------|---------|-------|
 | 路由不变 method+path | ☐ | ☐ | 复用 `/llm-advice/stream` |
 | 请求体 query/market/session_id | ☐ | ☐ | 沿用 `llm-chat-session.md` |
-| SSE 新增 phase 可渲染 | ☐ | ☐ | `fetching_valuation/fetching_etf` |
+| 请求体 `context.portfolio` 由前端注入 | ☐ | ☐ | **D1**：契约早已允许 `context` 对象透传，后端 `analysis.py:652` 已在读，此前前端从不发 → 持仓段恒空。字段形状 `{symbol, name, target_weight}`；**不得**外泄 `avg_cost`/`shares_held` |
+| SSE 新增 phase 可渲染 | ☐ | ☐ | 仅 `fetching_valuation`（删除理由见 §6） |
 | valuation 输出为结构表+as_of | ☐ | ☐ | 缺数整行待验 |
 | ETF 码 ⊆ instruments | ☐ | ☐ | 负向单测锁定 |
+| **product 意图空 map 也须出禁码守卫** | N/A | ☐ | **D5**：守卫原挂在 `valuation_intent` 上，纯 product 问句拿不到 = 编码窗口。修后条件为 `product_intent or valuation_intent` |
 | 全空降级不报正常 | ☐ | ☐ | 负向断言 |
 | 加载/空/错误/慢数据四态 | ☐ | N/A | `AiAdvisor.vue` 补缺估值态 |
 | `technical` 意图输出关键价位表 | ☐ | ☐ | round59 R09/R12，1200 字 |
+| **冷缓存 technical 不得要求出价位表** | N/A | ☐ | **D2**：无数据无占位却要求「先给关键价位表」= 编点位邀请函。按槽位可用性三档分流（§6） |
 | 支撑/阻力两族分行 + 方向标注 | N/A | ☐ | round59 R02b 负向 |
 | 诚实拒答三件套（禁只写「无法确认」） | ☐ | ☐ | round59 R13 |
+| **非 A 股标的出 scope 声明行** | N/A | ☐ | **D8**：否则港股/黄金问句端上 A 股表。A 股问句不得出现该行 |
+| **跨资产问句有商品行情支撑** | ☐ | ☐ | **S8**：§4.7。空槽整段省略，盘后空窗为合法非故障 |
+| **缓存命中可见** | ☐ | ☐ | **D4**：`done.metadata.cached` 透传 → `AiAdvisor.vue` 徽标可达（`agents.md §6.1` 早已承诺，此前被 `_sse_stream` 丢弃） |
 | disclaimer | ☐ | N/A | 沿用既有 |
 
 ---
@@ -276,8 +376,15 @@ Content-Type: application/json
 | 4 | 非兜底/真实调用/四态 | §6+§8 已定，验收回查 |
 | 7 | 复杂度审计 | 已定：`wait_for`+`run_sync`+批量+60s 快照复用；loop 封顶 2 步 |
 | 8 | 已知模式 | 已声明：格式断言（分位 None）、mock 理想输入（限流空表）、契约盲区（新槽必进本文件）、降级无门禁（全空断言） |
+| 1b | round60 C1 可行性探针 | §4.7 商品段：复用 `reports.py:123 _format_commodities`（市场报告链已在用），上游 `llm_context.py:170-176` 已封装 15s 超时 + `[:10]`，故本槽**无新取数风险**；唯一新增风险是 prompt 体积（≤6 行）。§4.8 scope 判定为**纯 substring 判定**（无网络），探针成本为零 |
+| 2b | round60 C1 证据链 | D2 三档判据＝槽位非空（`support_levels`/`index_technical`），实测冷缓存 prompt 311 字且要求出表（见设计文档 §15.2）；D8 触发链＝`intent.py:19` 的 `贵`/`便宜` → `analysis.py:673,700-701` 硬编码 5 个 A 股指数，取数与提问 scope 不匹配 |
 
 ## 10. 关键词正反例（单测锁定用）
+
+> **round60 C0 起，正反例的权威载体是 gold set**，不在本文件：
+> `backend/scripts/advice_evals/goldens/l1_intent.jsonl`（143 条，含有序复合列表断言）
+> + `backend/tests/test_advice_goldset_l1.py`。
+> 本节保留为**人读摘要**；新增用例时请改 jsonl（每条带 `source`/`notes`），不要只改这里。
 
 * 正：`止损线设哪`→risk；`回撤太大怎么办`→risk；`买哪只银行ETF`→product；`512800现在能买吗`→product；`哪些板块低估`→valuation（优先于 product）。
 * 反：`风险提示有哪些`→general；`买点到了吗`（裸买）→allocation；`881001怎么看`（裸板块码）→sector-analysis 既有链路，不判 product。
