@@ -54,7 +54,13 @@ TESTS_DIR = pathlib.Path(__file__).resolve().parent.parent / "tests"
 #   boundaries/bridge_symbol_extra_fields/cache_persistence/prompt_annotation/
 #   source_adapter_edge）。T4 约定（redundant-review §4.2）自此生效: 新 round 用例
 #   必须归入主题文件，不再开 test_roundXX_* 新文件。
-BASELINE = 320
+# 2026-10-02 (round60 C0): 320 -> 321. +1 = test_advice_goldset_l1.py（L1 意图金标集
+#   143 条 + 6 条 meta-test）。归类依据：本轮 §16.9 明确 L1 金标集与既有
+#   test_advice_p0a_slots.py:132-198 断言的是**不同函数**（前者 classify_all 有序列表、
+#   后者 classify 主意图单值），且本次不修改 p0a 文件（避免在锁基线的同时动基线），
+#   故按 redundant-review §4.2「新 round 用例归入主题文件」的例外条款开新文件。
+#   回退条件：若后续把 L1 断言迁回 p0a 文件，则应净减并回退此基线。
+BASELINE = 321
 
 
 def count_test_files() -> int:
