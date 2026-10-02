@@ -667,6 +667,13 @@ async def llm_advice_stream(req: LLMAdviceRequest):
         # 缺了它：问支撑位会落 general → 无条件追加「行业轮动分析框架」+ 800 字
         # 上限，正是 sess-008bc66ee5734992「无法确认具体支撑位」的成因（doc M2）。
         user_ctx["technical_intent"] = (primary_intent == "technical")
+        # round60 D5: product 意图标记。判据必须是 "product" in intents 而非
+        # primary_intent == "product" —— 下方 etf_map 的填充门（:727）用的就是
+        # in intents：复合问句「哪些板块低估？买哪只ETF？」主意图是 valuation，
+        # 但 product 子任务仍会跑（契约 §2 的「不压扁」）。若这里按 primary 判，
+        # 复合问句会拿到 ETF 映射表却拿不到「无映射表禁编码」的守卫，
+        # 两个标志位对同一件事给出相反答案。
+        user_ctx["product_intent"] = ("product" in intents)
         user_ctx["index_valuation"] = []
         user_ctx["sector_valuation"] = []
         user_ctx["etf_map"] = []

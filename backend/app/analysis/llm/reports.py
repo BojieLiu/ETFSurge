@@ -1655,9 +1655,13 @@ def _build_advice_stream_prompt(query: str, ctx: dict) -> str:
             lines.append(f"- {m.get('sector_or_index', '?')}: "
                          f"{m.get('name', '?')}({m.get('symbol', '?')})")
         lines.append("")
-    elif ctx.get("valuation_intent"):
+    elif ctx.get("product_intent") or ctx.get("valuation_intent"):
         # 线上实证（2026-09-18）：valuation 问无映射时 LLM 现编代码
         # （515170 当光模块等）——缺表即禁码。
+        # round60 D5：原条件只有 valuation_intent，于是纯 product 问句
+        # （买哪只银行ETF）拿不到这条守卫——同一个「允许编 ETF 码」的窗口，
+        # 只是从另一个门进来。product_intent 由 router 以 "product" in intents
+        # 填（analysis.py:663 附近），与下方 etf_map 填充门同判据。
         lines.append("无 ETF 映射表：不得编造任何 ETF 代码，只给板块/指数名。")
         lines.append("")
 

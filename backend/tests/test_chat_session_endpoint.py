@@ -218,6 +218,45 @@ def test_product_subtask_only_allowlisted_codes(client, valuation_mocks):
     assert "159766" not in valuation_mocks["prompt"]  # 旅游ETF 不许出现
 
 
+# ── round60 D5: product_intent 标志位的接线 ──────────────────────────────
+# L2 gold set (tests/test_advice_goldset_l2.py) 断言的是 prompt 组装层，那里的
+# ctx 是内联的——它证明不了 router 真的把这个 flag 传下去了。以下三条补上这一段：
+# 分类 → 标志位 → 守卫文案，全链路走真实端点。
+
+def test_product_query_sets_product_intent_flag(client, valuation_mocks):
+    """问一个映射表覆盖不到的品类 —— 这才是禁码守卫真正会触发的线上路径。
+
+    注意别用「买哪只银行ETF」：银行是 SECTOR_ETF_MAP 的键，映射表非空，守卫
+    按设计不出现（那是 L2-04 锁的另一条路径）。守卫只在**无表可查**时兜底。
+    """
+    _post_advice(client, "ETF推荐")
+    ctx = valuation_mocks["ctx"]
+    assert ctx["product_intent"] is True
+    assert ctx["etf_map"] == [], "该问句不含任何映射表键，应为空"
+    # D5 的核心：product 意图 + 空映射表 → 禁编造守卫必须出现
+    assert "无 ETF 映射表" in valuation_mocks["prompt"]
+
+
+def test_composite_query_sets_product_intent_flag(client, valuation_mocks):
+    """复合问句里主意图是 valuation，product 仍是子任务。
+
+    守卫与映射表用**同一个判据**（"product" in intents）。若标志位改成
+    primary == "product"，这条问句会拿到 ETF 映射表却拿不到禁码守卫——
+    两个标志对同一件事给出相反答案。
+    """
+    _post_advice(client, "哪些板块低估？买哪只银行ETF？")
+    ctx = valuation_mocks["ctx"]
+    assert ctx["valuation_intent"] is True      # primary = valuation
+    assert ctx["product_intent"] is True        # 子任务仍然成立
+    assert ctx["etf_map"], "product 子任务应产出映射"
+
+
+def test_non_product_query_clears_product_intent_flag(client, valuation_mocks):
+    _post_advice(client, "当前市场风格是成长还是价值？")
+    assert valuation_mocks["ctx"]["product_intent"] is False
+    assert "无 ETF 映射表" not in valuation_mocks["prompt"]  # 防过度触发
+
+
 def test_valuation_prompt_unit_table_and_empty_guard():
     ctx = {"market_regime": "range_bound", "market_sentiment": {},
            "market_data": [], "news": [], "sector_momentum": {},
