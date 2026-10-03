@@ -199,13 +199,19 @@ def test_every_keyword_is_exercised_by_some_case():
     """Every entry of every word list must appear in at least one gold query.
 
     Mutation testing found this gap three times over: deleting ``pb``, ``ROE`` or
-    ``市净率`` from ``_VALUATION_KWS`` left all80 cases green, i.e. those keywords
-    shipped untested. Enumerating keywords by hand does not scale — the next
+    ``市净率`` from ``_VALUATION_KWS`` left all 80 cases green, i.e. those keywords
+    shipped untested. Enumerating keywords by hand does not scale -- the next
     person to add one will forget. This test makes the gold set self-maintaining:
     a keyword added without a case fails the build instead of shipping blind.
 
     ASCII keywords match case-insensitively, because ``PE``/``pe`` and
     ``PB``/``pb`` are listed as separate entries but are one keyword to a reader.
+
+    round60 W3: ``_RISK_AUX_NEED`` was removed -- bare ``风险`` became a primary
+    keyword, which makes the "风险 + 怎么办/如何应对/怎么控" conjunction redundant.
+    The precision it used to buy now comes from the explicit ``_RISK_EXCLUDE``
+    table instead, and ``_RISK_EXCLUDE`` is covered by
+    test_risk_exclusion_phrasings_stay_general.
     """
     from app.analysis import intent as intent_mod
 
@@ -213,7 +219,7 @@ def test_every_keyword_is_exercised_by_some_case():
         "valuation": intent_mod._VALUATION_KWS,
         "product": intent_mod._PRODUCT_PHRASES,
         "risk": intent_mod._RISK_PRIMARY,
-        "risk_aux": intent_mod._RISK_AUX_NEED,
+        "risk_exclude": intent_mod._RISK_EXCLUDE,
         "event": intent_mod._EVENT_KWS,
         "rotation": intent_mod._ROTATION_KWS,
         "technical": intent_mod._TECHNICAL_KWS,
@@ -232,6 +238,68 @@ def test_every_keyword_is_exercised_by_some_case():
         "keywords added to intent.py but never exercised by a gold case (ship blind): "
         + ", ".join(sorted(unexercised))
     )
+
+
+def test_no_structurally_dead_keywords():
+    """No word list entry may be shadowed by a shorter entry in the same group.
+
+    A word is dead when a shorter word in the same matching group is a substring of
+    it: any query that matches the long word necessarily matches the short one, so
+    the long word can never change an outcome. Eight such words shipped in intent.py
+    (价值陷阱, 支撑位, 压力位, 阻力位, 买点, 卖点, 买入, 卖出) and mutation testing had
+    to prove it -- they looked load-bearing and were not.
+
+    This test makes the cleanup permanent and cheap, instead of relying on someone
+    remembering to re-run a mutation matrix. Direction matters: it is the LONG word
+    that dies, so the report names the longer entry.
+
+    Grouping follows which lists are consulted together: allocation matches
+    ``_ALLOCATION_KWS`` and, when product has not matched, the bare verbs too.
+    """
+    from app.analysis import intent as intent_mod
+
+    groups = {
+        "valuation": intent_mod._VALUATION_KWS,
+        "product": intent_mod._PRODUCT_PHRASES,
+        "risk": intent_mod._RISK_PRIMARY,
+        "event": intent_mod._EVENT_KWS,
+        "rotation": intent_mod._ROTATION_KWS,
+        "technical": tuple(intent_mod._TECHNICAL_KWS) + tuple(intent_mod._TECHNICAL_RETRACE_KWS),
+        "allocation": tuple(intent_mod._ALLOCATION_KWS) + tuple(intent_mod._ALLOCATION_BARE),
+    }
+    dead = []
+    for group, words in groups.items():
+        for longer in words:
+            shadowed_by = [s for s in words if s != longer and s in longer]
+            if shadowed_by:
+                dead.append(f"{group}:{longer} (shadowed by {shadowed_by})")
+    assert not dead, (
+        "these words can never change a classification -- a shorter entry in the "
+        f"same group already matches every query they would: {dead}"
+    )
+
+
+def test_risk_exclusion_phrasings_stay_general():
+    """The fixed report boilerplate must not route to risk.
+
+    ``general_analyst.md:3`` tells every answer to include a risks-and-scenarios
+    paragraph, so 「风险提示」 style phrasing is product vocabulary, not a user risk
+    question. Before round60 W3 this precision was a coincidence: the string
+    contained no risk keyword, so the auxiliary-word gate was never consulted.
+    If someone later added 「风险提示」 to _RISK_PRIMARY for an unrelated reason,
+    every report would have routed to risk silently. The explicit exclusion table
+    removes that dependency.
+    """
+    for query in ("风险提示有哪些", "风险提示和适用场景有哪些", "风险和适用场景"):
+        assert classify(query) == "general", (
+            f"boilerplate phrasing routed to risk: {query!r}"
+        )
+
+
+def test_bare_risk_word_now_routes_to_risk():
+    """The coverage that motivated W3: natural risk phrasings used to miss."""
+    for query in ("我的持仓风险有点大", "风险偏高吗", "这只票风险大不大", "风险可控吗"):
+        assert classify(query) == "risk", f"bare 风险 still misses: {query!r}"
 
 
 def test_literal_only_rules_each_have_a_case():
