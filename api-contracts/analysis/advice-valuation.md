@@ -346,23 +346,34 @@ Content-Type: application/json
 
 | Item | Frontend | Backend | Notes |
 |------|----------|---------|-------|
-| 路由不变 method+path | ☐ | ☐ | 复用 `/llm-advice/stream` |
-| 请求体 query/market/session_id | ☐ | ☐ | 沿用 `llm-chat-session.md` |
-| 请求体 `context.portfolio` 由前端注入 | ☐ | ☐ | **D1**：契约早已允许 `context` 对象透传，后端 `analysis.py:652` 已在读，此前前端从不发 → 持仓段恒空。字段形状 `{symbol, name, target_weight}`；**不得**外泄 `avg_cost`/`shares_held` |
-| SSE 新增 phase 可渲染 | ☐ | ☐ | 仅 `fetching_valuation`（删除理由见 §6） |
-| valuation 输出为结构表+as_of | ☐ | ☐ | 缺数整行待验 |
-| ETF 码 ⊆ instruments | ☐ | ☐ | 负向单测锁定 |
-| **product 意图空 map 也须出禁码守卫** | N/A | ☐ | **D5**：守卫原挂在 `valuation_intent` 上，纯 product 问句拿不到 = 编码窗口。修后条件为 `product_intent or valuation_intent` |
-| 全空降级不报正常 | ☐ | ☐ | 负向断言 |
-| 加载/空/错误/慢数据四态 | ☐ | N/A | `AiAdvisor.vue` 补缺估值态 |
-| `technical` 意图输出关键价位表 | ☐ | ☐ | round59 R09/R12，1200 字 |
-| **冷缓存 technical 不得要求出价位表** | N/A | ☐ | **D2**：无数据无占位却要求「先给关键价位表」= 编点位邀请函。按槽位可用性三档分流（§6） |
-| 支撑/阻力两族分行 + 方向标注 | N/A | ☐ | round59 R02b 负向 |
-| 诚实拒答三件套（禁只写「无法确认」） | ☐ | ☐ | round59 R13 |
-| **非 A 股标的出 scope 声明行** | N/A | ☐ | **D8**：否则港股/黄金问句端上 A 股表。A 股问句不得出现该行 |
-| **跨资产问句有商品行情支撑** | ☐ | ☐ | **S8**：§4.7。空槽整段省略，盘后空窗为合法非故障 |
-| **缓存命中可见** | ☐ | ☐ | **D4**：`done.metadata.cached` 透传 → `AiAdvisor.vue` 徽标可达（`agents.md §6.1` 早已承诺，此前被 `_sse_stream` 丢弃） |
-| disclaimer | ☐ | N/A | 沿用既有 |
+| 路由不变 method+path | ☑ | ☑ | 复用 `/llm-advice/stream`；`check_routes` 83 路由一致 |
+| 请求体 query/market/session_id | ☑ | ☑ | 沿用 `llm-chat-session.md` |
+| 请求体 `context.portfolio` 由前端注入 | ☑ | ☑ | **D1 round60 C4**（`9910d51`）：契约早已允许 `context` 对象透传，后端 `analysis.py:652` 一直在读，此前前端从不发 → 持仓段恒空。字段形状 `{symbol, name, target_weight}`；**不得**外泄 `avg_cost`/`shares_held`（前端用例断言整个请求体不含这两个键） |
+| SSE 新增 phase 可渲染 | ☑ | ☑ | 仅 `fetching_valuation`（删除理由见 §6） |
+| valuation 输出为结构表+as_of | ☐ | ☑ | **prompt 侧已具备并有 gold case；answer 侧待 L3 真 LLM 判定**（P1）。缺数整行待验 |
+| ETF 码 ⊆ instruments | ☐ | ☑ | prompt 侧两条守卫齐备（白名单 + 无表禁码）；**answer 侧「模型是否真的没编码」待 L3** |
+| **product 意图空 map 也须出禁码守卫** | N/A | ☑ | **D5 round60 C2**（`1654fc1`）：守卫原挂在 `valuation_intent` 上，纯 product 问句拿不到 = 编码窗口。变异验证：改回旧条件，L2 gold 与 router 用例同时变红 |
+| 全空降级不报正常 | ☐ | ☑ | prompt 侧两条守卫（§6「不得下低估/高估结论」「不得编造任何 ETF 代码」）；**answer 侧待 L3** |
+| 加载/空/错误/慢数据四态 | ☑ | N/A | `AiAdvisor.vue`：loading 禁用 + streaming 气泡 + progress 条 + error 块 + hint 空态 |
+| `technical` 意图输出关键价位表 | ☐ | ☑ | **prompt 侧** round59 R09/R12 具备，按 §6.1 三档分流；**answer 侧待 L3**。1200 字 |
+| **冷缓存 technical 不得要求出价位表** | N/A | ☑ | **D2 round60 C3**（`9aa4229`）：无数据无占位却要求出表 = 编点位邀请函。三档互斥，变异验证 2/2 killed |
+| 支撑/阻力两族分行 + 方向标注 | N/A | ☑ | round59 R02b 负向用例（engine 侧不变式 + prompt 渲染） |
+| 诚实拒答三件套（禁只写「无法确认」） | ☐ | ☑ | **prompt 侧** R13 三件套 + 禁空转措辞已注入；**answer 侧「模型是否照做」待 L3**——这是 round59 病灶所在，目前无任何断言看守 |
+| **非 A 股标的出 scope 声明行** | N/A | ☑ | **D8 round60 C3**（`9aa4229`）：静态探针 4/4 复现（恒生/黄金/美股/标普均被端上 A 股表），修复后 A 股问句不触发、跨市场比较句触发。变异验证 2/2 killed |
+| **跨资产问句有商品行情支撑** | ☑ | ☑ | **S8 round60 C3**（`9aa4229`）：`include_commodities=True` + 显式注入 + 复用 `_format_commodities`。空槽整段省略（盘后空窗为合法非故障）。**注意 flag 本身无用例能看守则功能会无声死掉，故有专门断言采集参数的用例** |
+| **缓存命中可见** | ☑ | ☑ | **D4 round60 C4**（`9910d51`）：`_sse_stream` 丢弃 `cached` → 前端徽标恒不可达。已透传，SSE 边界双向用例（命中带 / 未命中不带） |
+| **端点可达性门禁不得吞异常** | N/A | ☑ | **D7 round60 C4**（`9910d51`）：`verify_e2e` 原把超时与任何异常判 PASS = 运行时门禁不存在。改为重试一次后判 FAIL，并有 meta-test 走 AST 守门禁自身 |
+| disclaimer | ☑ | N/A | 沿用既有 |
+
+**勾选口径（round60 立规，避免把「prompt 写了」当成「功能成了」）**：
+
+- **☑ = 该层的实现存在且有自动化断言看守**（prompt 装配层、或前端请求层、或门禁本身）。
+- **☐ = 只有 prompt 侧具备，answer 侧（模型是否照做）尚无断言** —— 这不是漏勾，是**如实标注 L3 的缺口**。
+  当前 5 行 ☐ 全部指向同一件事：真 LLM 判定（P1，需交易窗口）。这 5 行是 P1 的验收清单，
+  不是待补的实现。
+
+Refs: `docs/advice-goldset-design.md`（gold set 与变异测试记录）、
+`backend/scripts/advice_evals/goldens/`（L1 143 条 / L2 16 条）。
 
 ---
 
