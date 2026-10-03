@@ -620,7 +620,13 @@ async def llm_advice_stream(req: LLMAdviceRequest):
                 include_news=True,
                 include_portfolio=False,
                 include_fund_flow=True,
-                include_commodities=False,
+                # round60 S8: 商品槽。此前 False —— 投顾是唯一不注入商品的 LLM
+                # 链路，而 README 首段把黄金/原油/白银列为产品六大资产类别之一，
+                # 于是「黄金和原油配哪个」这类跨资产问句没有任何数据支撑（实测落
+                # general，gold case L2-06）。上游 llm_context.py:170-176 已封装
+                # 15s 超时 + [:10] 截断，失败静默空列表且被 prompt 整段省略，
+                # 故此项无新增阻塞风险；渲染复用 reports._format_commodities。
+                include_commodities=True,
             )
 
         if history:
@@ -647,6 +653,11 @@ async def llm_advice_stream(req: LLMAdviceRequest):
         user_ctx["sector_momentum"] = sector_data[:10]
         user_ctx["fund_flow"] = ctx.get("fund_flow", {})
         user_ctx["news"] = ctx.get("news", [])
+        # round60 S8: 商品槽显式注入（collect 开关见上方 include_commodities）。
+        # 与其余槽一致走显式赋值而非依赖 update(ctx) 的隐式带出——P3-G 契约门禁
+        # （test_advice_p0a_slots.py:92）按 AST 校验「router 注入 ⊇ prompt 消费」，
+        # 隐式来源不在其扫描范围内；显式赋值也让数据流在代码里可见。
+        user_ctx["commodities"] = ctx.get("commodities", []) or []
         # P3-G (round10 §10 P3-G): portfolio 槽显式注入——prompt 消费该槽；用户
         # 请求显式携带 portfolio 时透传，未带则为空列表（不凭空捏造持仓）。
         user_ctx["portfolio"] = (req.context or {}).get("portfolio", []) or []

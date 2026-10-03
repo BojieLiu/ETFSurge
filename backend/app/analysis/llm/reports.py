@@ -1402,6 +1402,13 @@ def _build_design_report_prompt(
 
 _TECH_PLACEHOLDER = "（数据源暂不可用）"
 
+# round60 D8：非 A 股资产线索。宁窄勿宽——漏判少一句声明，误判干扰 A 股问题。
+_NON_A_ASSET_KWS = (
+    "港股", "恒生", "H股", "港交所",
+    "美股", "纳斯达克", "纳指", "标普", "道琼斯", "美债",
+    "黄金", "金价", "原油", "白银", "铜价", "大宗商品", "商品期货",
+)
+
 _TECH_FIELDS = (
     ("ma5", "MA5"), ("ma10", "MA10"), ("ma20", "MA20"), ("ma60", "MA60"),
     ("boll_upper", "BOLL上轨"), ("boll_mid", "BOLL中轨"), ("boll_lower", "BOLL下轨"),
@@ -1424,6 +1431,17 @@ def _fmt_num(value: Any, digits: int = 2) -> str:
     if value != value or value in (float("inf"), float("-inf")):  # NaN / inf
         return _TECH_PLACEHOLDER
     return f"{value:.{digits}f}"
+
+
+def _mentions_non_a_share_asset(query: str) -> bool:
+    """round60 D8：query 是否涉及非 A 股资产（scope 声明行的触发条件）。
+
+    纯 substring 判定，无网络无 I/O。词表刻意保守：只收**明确指向非 A 股资产**的
+    词，不收「美股大跌影响A股」这类跨市场比较里的次要提及——那种问句 A 股表仍然
+    是答案的一部分（gold case L2-11 锁定了这个方向）。漏判的代价是少一句声明，
+    误判的代价是让本来能答的 A 股问题被声明干扰，故宁窄勿宽。
+    """
+    return any(k in query for k in _NON_A_ASSET_KWS)
 
 
 def _format_index_technical(entries: Any) -> list[str]:
@@ -1528,7 +1546,23 @@ def _build_advice_stream_prompt(query: str, ctx: dict) -> str:
     # round59: 技术面段置于「实时行情」之前——实时行情只有现价和涨跌幅，回答
     # 支撑位问题需要的是均线/波动率通道/前低/回撤位这些"位置"数据。
     technical_intent = bool(ctx.get("technical_intent"))
-    lines.extend(_format_index_technical(ctx.get("index_technical")))
+    # round60 D2: 保留渲染结果而不只是 extend 掉——指令块要按「到底有没有数」
+    # 三档分流，而判据必须是「槽位非空」而非「意图」（见函数末尾 instruction）。
+    tech_lines = _format_index_technical(ctx.get("index_technical"))
+    lines.extend(tech_lines)
+
+    # round60 D8: scope 声明行。取数侧只有 A 股宽基/行业/两个指数技术面
+    # （analysis.py:700-701 硬编码 5 个 A 股指数；hub 技术面槽仅 000001/000300），
+    # 而「贵/便宜」会把港股/黄金/美股问句也送进 valuation 分支（intent.py:19），
+    # 于是这类问句会拿到一张与所问标的无关的 A 股表。实测 4/4 复现（设计文档 §18）。
+    # 这里刻意做成**槽无关**：同根因还命中技术面槽与 ETF 映射槽，只护估值表会漏。
+    # 不改词表——删「贵/便宜」会砸掉 S4 估值主族。
+    if _mentions_non_a_share_asset(query):
+        lines.append(
+            "\n> 覆盖范围声明：本产品的估值/技术面/板块数据仅覆盖 A 股宽基与行业指数。"
+            "该问题涉及的标的属非 A 资产，以下表格不适用于它，请勿据此下结论；"
+            "如需非 A 资产数据请另查对应行情页。")
+        lines.append("")
 
     market_data = ctx.get("market_data", [])
     if market_data:
@@ -1539,6 +1573,18 @@ def _build_advice_stream_prompt(query: str, ctx: dict) -> str:
             chg = item.get("change_pct", "")
             if chg != "":
                 lines.append(f"- {name}: {price} ({chg:+.2f}%)")
+
+    # round60 S8: 商品段。投顾此前是唯一不注入商品的 LLM 链路
+    # （analysis.py:623 include_commodities=False），而 README 首段把黄金/原油/白银
+    # 列为产品六大资产类别之一 → 「黄金和原油配哪个」无任何数据支撑。
+    # 按基础槽无条件注入（与 regime/news 同款），不加新意图。
+    # 渲染复用 _format_commodities（市场报告链已在用），空槽整段省略——盘后/
+    # 非交易时段上游允许返回空列表，那是合法空窗不是故障，不得填兜底数字。
+    commodities = ctx.get("commodities") or []
+    commodity_lines = _format_commodities(commodities).splitlines() if commodities else []
+    if commodity_lines:
+        lines.append("\n### 商品行情")
+        lines.extend(commodity_lines)
 
     news = ctx.get("news", [])
     if news:
@@ -1598,8 +1644,11 @@ def _build_advice_stream_prompt(query: str, ctx: dict) -> str:
 
     # round59 R09: 关键价位表（支撑/阻力分族）——问支撑位时这是正文，不是补充。
     # technical 意图下插在实时行情之后，避免被板块/资金流/估值段挤到末尾。
+    # round60 D2: 保留渲染结果供指令块三档判据使用（空表 → 整段不出现）。
+    level_lines: list[str] = []
     if technical_intent:
-        lines.extend(_format_support_levels(ctx.get("support_levels")))
+        level_lines = _format_support_levels(ctx.get("support_levels"))
+        lines.extend(level_lines)
 
     # F2: fund flow data
     # round59 R09: technical 意图跳过——问支撑位时输出资金流=人设错配（doc M2）
@@ -1679,10 +1728,28 @@ def _build_advice_stream_prompt(query: str, ctx: dict) -> str:
     # round59 R11: 指令块移到全文末尾（数据段之后），否则被 8 个数据段淹没。
     lines.append('')
     if technical_intent:
-        # R12: 价位表 + 依据列放不下 800 字（实测技术面段本身已占约一半预算）
+        # round60 D2: 第 1 步按**数据可用性**三档分流（契约 §6.1），判据是槽位
+        # 非空而非意图——三档的意图都是 technical。修复前无论有没有数都要求
+        # 「先给关键价位表」，而 R13 三件套挂在「若数据缺失或标注占位」的条件上：
+        # 冷缓存时两个条件都不成立，于是「无数据 + 必须出表」直接邀请模型编点位。
+        # 三档互斥，避免模型同时收到「出表」与「禁点位」两条矛盾指令。
+        if level_lines:
+            step1 = '1. 先给关键价位表（档位 | 点位 | 类型[支撑/阻力] | 依据），再给结论'
+        elif tech_lines:
+            step1 = ('1. 仅可引用上方技术面段的 MA/BOLL/RSI/KDJ 数值（带 as_of）作为参考，'
+                     '禁止自行推断档位或未列出的点位，再给结论')
+        else:
+            lines.append(
+                '（本轮无技术面/关键价位数据：日线源未返回，禁止输出任何点位）')
+            step1 = '1. 禁止输出支撑/阻力档位表与任何点位数字，改按下方三件套回答'
         lines.append('请按以下框架回答：')
-        lines.append('1. 先给关键价位表（档位 | 点位 | 类型[支撑/阻力] | 依据），再给结论')
-        lines.append('2. 逐档说明触发条件与失效条件')
+        lines.append(step1)
+        if not level_lines and not tech_lines:
+            # T-全空时把第 2 步也换掉：原「逐档说明触发条件」在没有档位时无对象，
+            # 留着会让模型去找档位——正是 D2 要堵的路径。
+            lines.append('2. 说明缺哪些数、去哪看、拿到数后怎么判断（不要给结论）')
+        else:
+            lines.append('2. 逐档说明触发条件与失效条件')
         lines.append('3. 如涉及操作，给出分析和建议（不构成投资指令）')
         lines.append('')
         # R13: 诚实拒答三件套——「仅凭当前快照无法确认具体支撑位」正是本轮首例

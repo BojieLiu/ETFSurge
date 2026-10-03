@@ -76,7 +76,13 @@ def mock_llm_and_ctx(monkeypatch):
 
     monkeypatch.setattr("app.analysis.runtime.llm_complete_stream",
                         _fake_stream)
-    monkeypatch.setattr("app.routers.analysis.build_full_context", _fake_ctx)
+    # round60: patch 目标必须是 app.services.llm_context，不是 app.routers.analysis。
+    # analysis.py 在模块级 (:23) 和 llm_advice_stream 内部 (:599) 各 import 了一次
+    # build_full_context——函数内的 import 在调用时从 app.services.llm_context 取属性，
+    # **遮蔽**模块级名字，所以 patch router 模块属性对 advice 路径完全无效。
+    # 实测后果：该路径一直在跑真实数据采集（akshare/东财等），这几个用例因此要
+    # 30-120s、依赖网络、且行情源抖动时会假红。修后同一文件 13 passed in 18.9s。
+    monkeypatch.setattr("app.services.llm_context.build_full_context", _fake_ctx)
 
 
 def _post_advice(client, query, session_id=None):
@@ -146,7 +152,13 @@ def valuation_mocks(monkeypatch):
     # patch client 属性拦不住——必须打 runtime 命名空间（旧 fixture 同型问题）。
     monkeypatch.setattr("app.analysis.runtime.llm_complete_stream",
                         _fake_stream)
-    monkeypatch.setattr("app.routers.analysis.build_full_context", _fake_ctx)
+    # round60: patch 目标必须是 app.services.llm_context，不是 app.routers.analysis。
+    # analysis.py 在模块级 (:23) 和 llm_advice_stream 内部 (:599) 各 import 了一次
+    # build_full_context——函数内的 import 在调用时从 app.services.llm_context 取属性，
+    # **遮蔽**模块级名字，所以 patch router 模块属性对 advice 路径完全无效。
+    # 实测后果：该路径一直在跑真实数据采集（akshare/东财等），这几个用例因此要
+    # 30-120s、依赖网络、且行情源抖动时会假红。修后同一文件 13 passed in 18.9s。
+    monkeypatch.setattr("app.services.llm_context.build_full_context", _fake_ctx)
     # router 系函数内 `from ..analysis.llm import _build_advice_stream_prompt`
     # ——调用时才从包属性解析，故 patch 包级属性（router 模块级无此名）。
     monkeypatch.setattr("app.analysis.llm._build_advice_stream_prompt",
@@ -255,6 +267,57 @@ def test_non_product_query_clears_product_intent_flag(client, valuation_mocks):
     _post_advice(client, "当前市场风格是成长还是价值？")
     assert valuation_mocks["ctx"]["product_intent"] is False
     assert "无 ETF 映射表" not in valuation_mocks["prompt"]  # 防过度触发
+
+
+# ── round60 S8: 商品槽接线 ───────────────────────────────────────────────
+# L2 gold set 用内联 ctx，只能证明 prompt 会渲染商品段；证明不了采集侧
+# include_commodities 开关真的打开了（那是 analysis.py 的事，不在 prompt 函数里）。
+# 下面两条走真实端点：一条证明开关已开且数据到得了 prompt，一条锁住空列表时
+# 整段省略。复用 valuation_mocks 的 ctx/prompt 记录器，只覆盖 build_full_context。
+
+def _commodities_ctx(rows, sink=None):
+    async def _ctx(*args, **kwargs):
+        if sink is not None:
+            sink["kwargs"] = dict(kwargs)
+        return {"index_realtime": [], "sector_momentum": [], "news": [],
+                "market_regime": "range_bound", "market_sentiment": {},
+                "fund_flow": {}, "commodities": rows}
+    return _ctx
+
+
+def test_commodities_collect_flag_is_on(client, valuation_mocks, monkeypatch):
+    """断言**采集开关本身**，而不是它的下游效果。
+
+    这条是 mutation 补出来的：把 analysis.py 的 include_commodities 改回 False，
+    原有 6 条测试**全部照绿**——因为每条测试都 mock 了 build_full_context，
+    而 mock 无视 kwargs。商品槽只在这一个参数上死，且死得无声无息：
+    功能消失、测试全绿。因此必须直接断言 router 传下去的参数。
+    """
+    sink = {}
+    monkeypatch.setattr("app.services.llm_context.build_full_context",
+                        _commodities_ctx([], sink))
+    _post_advice(client, "黄金和原油现在配哪个")
+    assert sink.get("kwargs"), "fake collector never saw the kwargs"
+    assert sink["kwargs"].get("include_commodities") is True
+
+
+def test_commodities_reach_the_prompt(client, valuation_mocks, monkeypatch):
+    monkeypatch.setattr("app.services.llm_context.build_full_context", _commodities_ctx([
+        {"name": "COMEX黄金", "price": 2380.5, "change_pct": 0.62},
+        {"name": "NYMEX原油", "price": 71.34, "change_pct": -1.15},
+    ]))
+    _post_advice(client, "黄金和原油现在配哪个")
+    assert "### 商品行情" in valuation_mocks["prompt"]
+    assert "黄金" in valuation_mocks["prompt"]
+    assert "原油" in valuation_mocks["prompt"]
+
+
+def test_empty_commodities_omit_the_section(client, valuation_mocks, monkeypatch):
+    monkeypatch.setattr("app.services.llm_context.build_full_context",
+                        _commodities_ctx([]))
+    _post_advice(client, "黄金和原油现在配哪个")
+    # 盘后/非交易时段上游允许空列表：合法空窗，必须整段省略而非填兜底数字
+    assert "### 商品行情" not in valuation_mocks["prompt"]
 
 
 def test_valuation_prompt_unit_table_and_empty_guard():
