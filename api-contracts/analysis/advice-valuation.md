@@ -25,7 +25,7 @@
 
 ## 1. 概述 / Overview
 
-**功能描述 / Description**: 开放问按六意图路由；`valuation` 必调估值工具、`product` 信号才调 ETF 映射；受限 2 步 loop（白名单 2 工具封顶），缺数显式降级、不编数不编码。
+**功能描述 / Description**: 开放问按七意图路由（`general` 为兜底）；`valuation` 必调估值工具、`product` 信号才调 ETF 映射；**受限 2 步 loop（白名单 2 工具封顶）当前未实现，调度硬编码在 router**（见 §5）；缺数显式降级、不编数不编码。
 
 **触发场景 / Trigger**: `AiAdvisor.vue` 每次提问 `POST /llm-advice/stream {query, market, session_id?}`；分类在首字节 `progress` 之后、LLM 主调用之前完成。
 
@@ -33,23 +33,27 @@
 
 ## 2. 意图分类 / Intent Taxonomy
 
-| 意图 Intent | 示例 Queries | 加采 Extra slots |
-|---|---|---|
-| `valuation` | 低估/贵/PE/PB/分位/股息/ROE/陷阱/错杀 | `index_valuation`、`sector_valuation` |
-| `rotation` | 轮动/风格/成长价值/主线 | —（复用 sector+fund_flow） |
-| `event` | 政策/降息/关税/利好利空/新闻影响 | news 加深（个股新闻链路） |
-| `allocation` | 怎么配/调仓/加仓/减仓/仓位 | `portfolio`（用户带才用，不捏造） |
-| `risk` | 见 §3 | indicators 摘要（P1 定口径） |
-| `product` | 见 §3 | `etf_map`（`instruments` 白名单） |
-| `technical` | 支撑位/压力位/阻力位/回撤/均线/破位/前低/前高/布林/量能/缺口/抄底/企稳（round59 新增，词表见 §3.3） | `index_technical`（MA/BOLL/RSI/KDJ）+ `support_levels`（支撑/压力位） |
-| `general` | 兜底 | 不加采，直接诚实降级 |
+| 意图 Intent | 示例 Queries | 加采 Extra slots | gold set |
+|---|---|---|---|
+| `valuation` | 低估/高估/**估值**/贵/便宜/PE/PB/分位/股息/ROE/陷阱/错杀 | `index_valuation`、`sector_valuation` | A01-A02, K04, K71-K72, E13 |
+| `rotation` | 轮动/风格/成长/价值/主线 | —（复用 sector+fund_flow） | A09-A10, K52-K54 |
+| `event` | 政策/降息/加息/关税/利好利空/监管/新闻/央行/美联储/决议 | news 加深（个股新闻链路） | A07-A08, K19-K24, K50-K51 |
+| `allocation` | 怎么配/调仓/加仓/减仓/仓位/买卖 | `portfolio`（**前端已注入**，§8 D1） | A13-A14, K38-K42 |
+| `risk` | 止损/止盈/回撤/对冲/避险/波动率/杠杆/爆仓/跌穿/平仓/套保/**风险**（排除表见 §3.1） | indicators 摘要（P1 定口径） | A05-A06, B04-B05, K10-K18, K76-K80 |
+| `product` | 买哪只/选哪只/**选哪个**/**买哪个**/买什么ETF/ETF推荐/代码是多少/成分股映射/日均成交/流动性不足（§3.2） | `etf_map`（`instruments` 白名单） | A03-A04, K05-K09, K67, E18 |
+| `technical` | 支撑/压力/阻力/回撤族/均线/破位/前低/前高/布林/BOLL/量能/缺口/抄底/企稳（§3.3） | `index_technical`（MA/BOLL/RSI/KDJ）+ `support_levels` | A11-A12, B06-B09, K25-K37, K56-K57 |
+| `general` | 兜底 | 不加采，直接诚实降级 | D01-D06, E01-E04, gap-* |
 
 **优先级 Priority**（复合命中时）：`valuation > product > risk > event > rotation > technical > allocation > general`。
 > round59：`technical` 置于 `rotation` 之后、`allocation` 之前——支撑位问题常同时含
 > 「买点/加仓」字样，若排在 `allocation` 之后会被抢走并再次退回泛泛而谈。
+> round60 W3：补了 risk×event 配对用例（C09/C10）——此前**没有任何用例同时命中这两族**，
+> 故把两者在链内对调无人发现（变异测试发现）。优先级链每一对相邻/关键配对都需有用例。
 
 例：“低估+基本面+ETF映射”判 `valuation` 主路由 + `product` 子任务（拼 ETF 行），不压扁。
 例（round59）：「这轮A股下跌的支撑位会是怎么样的？能不能买点」判 `technical`（非 `allocation`）。
+例（round60 W3）：「降息对我的持仓有什么风险」判 `risk` 主路由 + `event` 复合（C09）。
+例（round60 W2）：「红利和银行ETF选哪个」判 `product`（此前因缺 `选哪个` 落 `general`，E18）。
 
 **分类方法 Classifier**（混合两档）：
 1. 关键词先判（零成本，§3 清单）；零命中直接 `general`（小模型第二档 deferred——v1 关键词覆盖已够，省一次 LLM 调用；后续模糊问复发再加）。
@@ -87,19 +91,25 @@
 
 ### 3.3 `technical`：主+辅两档，禁与技术无关词碰瓷（round59 新增）
 
-* 主（命中即判）：`支撑位/支撑/压力位/压力/阻力位/阻力/均线/破位/前低/前高/布林/BOLL/缺口/量能/抄底/企稳`
+* 主（命中即判）：`支撑/压力/阻力/均线/破位/前低/前高/布林/BOLL/缺口/量能/抄底/企稳`
+  > round60 W1 删除了 `支撑位`/`压力位`/`阻力位`——它们被同组更短的 `支撑`/`压力`/`阻力`
+  > 吸收（同组内长词被短词遮蔽 ⇒ 永不可能改变结果，81 条探针 0 变化）。**用户仍可输入
+  > 「支撑位」并正确命中**，因为 `支撑` 是它的子串；删除只是不让词表**假装**这三条存在。
+  > 防再犯：`test_no_structurally_dead_keywords`。
 * 回撤族（**必须带位/到，裸「回撤」归 risk**）：`回撤位/回撤到/回踩到/反弹到`
   > `回撤` 已是 `risk` 主词（§3.1）且 `risk` 在优先级链更前，故 technical 不可再收裸
   > `回撤`，否则「回撤太大怎么办」会被误判 technical。改用带后缀形态消歧。
 * 排除（**必须不判 `technical`**，防误伤既有意图）：
   * `最大回撤/回撤太大/止损/止盈/对冲/避险/波动率/杠杆` → `risk`（§3.1）
   * 「买点到了吗/能不能加仓」**无技术词** → `allocation`
-  * 「风险提示有哪些」→ `general`
-* 正反例（单测锁定）：`这轮A股下跌的支撑位会是怎么样的`→technical；
-  `回撤到多少支撑`→technical；`上证均线在哪`→technical；
-  `支撑位跌破要不要减仓`→technical（技术词胜出，**不得**被 `allocation` 抢走）；
-  反：`回撤太大怎么办`→risk（不因含「回撤」判 technical）；`最大回撤是多少`→risk；
-  `买点到了吗`（无技术词）→allocation。
+  * 「风险提示有哪些」→ `general`（靠 §3.1 的**排除表**，非本节规则）
+* 正反例（`backend/scripts/advice_evals/goldens/l1_intent.jsonl` 单测锁定，括号内为 case id）：
+  * 正：`这轮A股下跌的支撑位会是怎么样的`→technical（A11）；`回撤到多少支撑`→technical（B06）；
+    `上证均线在哪`→technical（A12）；`支撑位跌破要不要减仓`→technical（B07，技术词胜出，
+    **不得**被 `allocation` 抢走）
+  * 反：`回撤太大怎么办`→risk（B04）；`最大回撤是多少`→risk（B05）；
+    `买点到了吗`（无技术词）→allocation（B10）
+  * 优先级：`轮动到支撑位`→rotation（B09）；`支撑位在哪，能不能加仓`→technical（B08）
 
 ---
 
@@ -413,6 +423,9 @@ Refs: `docs/advice-goldset-design.md`（gold set 与变异测试记录）、
 | 8 | 已知模式 | 已声明：格式断言（分位 None）、mock 理想输入（限流空表）、契约盲区（新槽必进本文件）、降级无门禁（全空断言） |
 | 1b | round60 C1 可行性探针 | §4.7 商品段：复用 `reports.py:123 _format_commodities`（市场报告链已在用），上游 `llm_context.py:170-176` 已封装 15s 超时 + `[:10]`，故本槽**无新取数风险**；唯一新增风险是 prompt 体积（≤6 行）。§4.8 scope 判定为**纯 substring 判定**（无网络），探针成本为零 |
 | 2b | round60 C1 证据链 | D2 三档判据＝槽位非空（`support_levels`/`index_technical`），实测冷缓存 prompt 311 字且要求出表（见设计文档 §15.2）；D8 触发链＝`intent.py:19` 的 `贵`/`便宜` → `analysis.py:673,700-701` 硬编码 5 个 A 股指数，取数与提问 scope 不匹配 |
+| 3b | round60 W1-W3 验证窗口 | 词表改动**不依赖行情真值**（`classify_all` 是纯函数），故不受 D3 窗口约束；实测 blast radius 用 81 条探针（gold set 全量 + 15 条自拟），**非生产流量**——仓库无真实用户问句语料（238 个 chat session 仅 1 条不同问句）。真 LLM 侧（P1）仍须交易窗口 |
+| 4b | round60 W1-W3 非兜底 | 死词删除为**可证明行为中立**（0/81 变化）；词表新增的每个词都有「唯一触发词」用例，避免删掉该词结果不变而无人发现（这正是 round60 前 44/88 词条零覆盖的成因） |
+| 5b | round60 W1-W3 真实调用点 | `classify_all` 生产调用方仅 `analysis.py:661`（已 grep 确认）；`classify` 仅测试用，meta-test 钉住两者一致而非迁移调用方 |
 
 ## 10. 关键词正反例（单测锁定用）
 
