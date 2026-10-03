@@ -124,10 +124,18 @@ def _sse_stream(agent_gen_factory):
                 # Append disclaimer to the final response
                 disclaimer = "本工具仅供个人研究，不构成任何投资建议，AI 输出可能存在错误，盈亏自负"
                 full_text_with_disclaimer = f"{full_text}\n\n---\n*{disclaimer}*"
-                # round53 §9: metadata 透传 session_id（多轮会话契约）
+                # round53 R9: metadata 透传 session_id（多轮会话契约）
                 metadata = dict(data.get('usage', {}))
                 if data.get('session_id'):
                     metadata['session_id'] = data['session_id']
+                # round60 D4: 透传 cached —— llm/client.py:820 的缓存命中路径发的就是
+                # {"cached": True}，此前在这里被丢弃，于是 agents.md §6.1 承诺的
+                # 「done.cached=true 缓存命中路径前端可感知」从未生效：AiAdvisor.vue 的
+                # 「（缓存）」徽标读的就是 metadata.cached，永远为 undefined。
+                # 缓存是真实存在的路径（llm/cache.py TTL 8h，key 含 prompt sha），
+                # 8h 内重复提问省下的时间用户看不见。契约已写明该字段，属实现缺失。
+                if data.get('cached'):
+                    metadata['cached'] = True
                 yield f"event: done\ndata: {json.dumps({'full_text': full_text_with_disclaimer, 'metadata': metadata, 'disclaimer': disclaimer})}\n\n"
             elif event == "error":
                 yield f"event: error\ndata: {json.dumps({'code': 'STREAM_ERROR', 'message': data})}\n\n"

@@ -149,3 +149,73 @@ async def _collect(gen):
     async for ev in gen:
         out.append(ev)
     return out
+
+
+# ── round60 D4: cached 必须穿过 SSE 边界 ──────────────────────────────────
+# 缺陷在 _sse_stream 这一层：llm/client.py:820 的缓存命中路径发的是
+# {"cached": True}，但 analysis.py 的 _sse_stream 只把 usage 和 session_id 搬进
+# metadata，于是 agents.md §6.1 承诺的「done.cached=true 缓存命中路径前端可感知」
+# 从未生效——AiAdvisor.vue 的「（缓存）」徽标读 metadata.cached，永远是 undefined。
+# 上面那条用例断言的是 run_stream_with_cache 的返回值（cached 在），覆盖不到这一层，
+# 所以这里直接对 _sse_stream 的输出帧做断言。
+
+
+async def _sse_frames(agent_fn):
+    """跑一次 _sse_stream，返回解析后的 (event, data) 列表。
+
+    ``agent_fn`` 是一个**异步生成器函数**（普通 ``async def`` + ``yield``，调用它
+    直接得到异步生成器，不需要 await）。``_sse_stream`` 内部执行的是
+    ``await agent_gen_factory()``，所以外面要包一层 async 工厂；直接把异步生成器
+    当工厂传会得到 "'async_generator' object is not callable"。
+    """
+    import json as _json
+
+    from app.routers.analysis import _sse_stream
+
+    async def _factory():
+        return agent_fn()
+
+    resp = _sse_stream(_factory)
+    out = []
+    async for raw in resp.body_iterator:
+        text = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+        for block in text.split("\n\n"):
+            block = block.strip()
+            if not block:
+                continue
+            ev = {}
+            for line in block.split("\n"):
+                if line.startswith("event: "):
+                    ev["event"] = line[7:].strip()
+                elif line.startswith("data: "):
+                    try:
+                        ev["data"] = _json.loads(line[6:])
+                    except _json.JSONDecodeError:
+                        ev["data"] = line[6:]
+            if ev:
+                out.append(ev)
+    return out
+
+
+async def test_sse_done_carries_cached_flag():
+    async def _agent():
+        yield {"event": "done", "data": {"full_text": "缓存回答",
+                                          "usage": {"total_tokens": 10},
+                                          "cached": True}}
+
+    frames = await _sse_frames(_agent)
+    done = next(f for f in frames if f["event"] == "done")
+    assert done["data"]["metadata"].get("cached") is True, (
+        "缓存命中标记在 SSE 边界被丢弃，前端徽标不可达（D4）"
+    )
+
+
+async def test_sse_done_omits_cached_when_not_a_cache_hit():
+    """非缓存路径不得带 cached=false 之类的噪声字段——徽标只在真命中时出现。"""
+    async def _agent():
+        yield {"event": "done", "data": {"full_text": "实时回答",
+                                          "usage": {"total_tokens": 10}}}
+
+    frames = await _sse_frames(_agent)
+    done = next(f for f in frames if f["event"] == "done")
+    assert "cached" not in done["data"]["metadata"]

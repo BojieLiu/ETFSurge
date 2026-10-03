@@ -887,32 +887,54 @@ def section_analysis():
     # 视为正常（弱源时 LLM 输出仍应引用真实数据或合理降级文案）。
     _advice_tpl_bad = ["暂无实时指数数据", "暂无板块热力数据", "市场状态标记为未知",
                        "暂无实时板块", "市场状态: 未知"]
-    try:
-        _ar = requests.post(f"{BASE}/api/v1/analysis/llm-advice/stream",
-                            json={"query": "当前A股市场怎么配置", "market": "A"},
-                            timeout=45, stream=True)
-        _ok2 = _ar.status_code == 200
-        _collected: list[str] = []
-        if _ok2:
-            try:
-                for _line in _ar.iter_lines(decode_unicode=True):
-                    if not _line:
-                        continue
-                    _collected.append(_line)
-                    if len(_collected) > 400:  # 上限防超长流
-                        break
-            except Exception:
-                pass
-            _ar.close()
-        _text = " ".join(_collected)
-        _tpl_hit = [w for w in _advice_tpl_bad if w in _text]
-        check("llm-advice/stream 内容非空", bool(_text), f"len={len(_text)}")
-        check("llm-advice/stream 无「暂无实时指数数据」模板", not _tpl_hit,
-              f"模板化回退复现: {_tpl_hit[:2]}" if _tpl_hit else "")
-    except requests.Timeout:
-        check("llm-advice/stream 内容", True, "请求超时（45s，LLM 慢——不算模板回归）")
-    except Exception as e:
-        check("llm-advice/stream 内容", True, f"请求异常（环境）: {e}")
+    # round60 D7: 端点死亡 / 持续超时必须判 FAIL。此前 timeout 与任何异常都判 True
+    # （原注释写「LLM 慢——不算模板回归」），于是 advice 运行时门禁等于不存在：
+    # 端点 404 或 45s 打不通，verify_e2e 照样全绿。改为「重试一次 → 仍失败则 FAIL」，
+    # 既压单次网络噪声，又保住信号。重试不是为了让门禁变松，是把「慢」与「死」分开：
+    #   慢 → 第二次成功 → PASS（附耗时说明）；死 → 两次都失败 → FAIL。
+    # 环境性失败的处置走 docs/known-env-issues.md（本症状已登记），不用 skip 通道：
+    # skip 会把刚堵上的洞重新打开（round36 §8-C 已有专用 STORM_SKIP 处理事件循环风暴）。
+    _advice_dead = False
+    _advice_why = ""
+    for _attempt in (1, 2):
+        _t0 = time.monotonic()
+        try:
+            _ar = requests.post(f"{BASE}/api/v1/analysis/llm-advice/stream",
+                                json={"query": "当前A股市场怎么配置", "market": "A"},
+                                timeout=90, stream=True)
+            _ok2 = _ar.status_code == 200
+            _collected: list[str] = []
+            if _ok2:
+                try:
+                    for _line in _ar.iter_lines(decode_unicode=True):
+                        if not _line:
+                            continue
+                        _collected.append(_line)
+                        if len(_collected) > 400:  # 上限防超长流
+                            break
+                except Exception:
+                    pass
+                _ar.close()
+            _text = " ".join(_collected)
+            _tpl_hit = [w for w in _advice_tpl_bad if w in _text]
+            _elapsed = round(time.monotonic() - _t0, 1)
+            check("llm-advice/stream 内容非空", bool(_text), f"len={len(_text)}")
+            check("llm-advice/stream 无「暂无实时指数数据」模板", not _tpl_hit,
+                  f"模板化回退复现: {_tpl_hit[:2]}" if _tpl_hit else "")
+            if _attempt == 2 and _elapsed > 45:
+                check("llm-advice/stream 时延", True,
+                      f"第2次成功但耗时 {_elapsed}s（LLM 偏慢，已记录）")
+            break
+        except requests.Timeout:
+            _advice_dead = True
+            _advice_why = "两次请求均超时（90s）——LLM 侧异常或端点无响应"
+        except Exception as e:
+            _advice_dead = True
+            _advice_why = f"两次请求均异常: {type(e).__name__}: {e}"
+    if _advice_dead:
+        check("llm-advice/stream 端点可达", False, _advice_why)
+    else:
+        print("  [PASS] llm-advice/stream 端点可达（重试后成功）")
 
 
     # P3-1 (round9 §5/O24 回归防线): symbol-analysis/stream SSE 契约门禁——O24 回归

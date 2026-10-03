@@ -55,12 +55,13 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { renderMarkdown } from '../../utils/markdown'
 import { useLLMStream } from '../../composables/useLLMStream'
 import { useCopy, buildLLMCopyText } from '../../composables/useCopy'
 import { useSharePreview } from '../../composables/useSharePreview'
 import SharePreviewModal from '../common/SharePreviewModal.vue'
+import { usePortfolioStore } from '../../stores/portfolio'
 
 const props = defineProps({ marketTab: { type: String, default: 'A' } })
 
@@ -97,6 +98,43 @@ const modelLine = computed(() => {
   return `模型 · ${m.model}` + (m.cached ? '（缓存）' : '')
 })
 
+// round60 D1: 持仓上下文注入。
+// 后端 analysis.py:652 一直支持从 request.context.portfolio 读持仓并渲染
+// 「## 持仓信息」段，但前端此前只发 {query, market}，该段线上恒空——而本组件的
+// 副标题与提示语都写着「结合实时行情与组合上下文」「AI 将结合实时行情与您的组合」。
+// 契约 llm-chat-session.md 的 request body 早已允许 context 对象透传，所以这是
+// 纯前端补线，不动契约。
+//
+// 只送 3 个字段：symbol / name / target_weight。avg_cost 与 shares_held 是用户
+// 成本与仓位隐私，prompt 消费它们没有用途（reports.py:1552 只渲染名称+代码+权重%），
+// 不送。
+const portfolioStore = usePortfolioStore()
+
+function portfolioContext() {
+  const rows = portfolioStore.etfs || []
+  if (!rows.length) return []
+  return rows
+    .filter(r => r && r.symbol)
+    .map(r => ({
+      symbol: r.symbol,
+      name: r.name || r.symbol,
+      target_weight: typeof r.target_weight === 'number' ? r.target_weight : 0,
+    }))
+}
+
+// 本页（MarketAnalysis）不加载组合 store，onExchange/offExchange 也只在组合页拉，
+// 所以这里自行取一次；initialized 标志让同一会话内不重复请求。
+onMounted(async () => {
+  if (!portfolioStore.initialized) {
+    try {
+      await portfolioStore.fetchEtfs()
+    } catch (e) {
+      // 拉不到持仓不等于不能提问：投顾的行情/估值/技术面能力不依赖持仓，
+      // 后端 portfolio 段为空时会整段省略。故静默降级，不打扰用户。
+    }
+  }
+})
+
 function _scrollBottom() {
   nextTick(() => {
     if (chatScrollRef.value) chatScrollRef.value.scrollTop = chatScrollRef.value.scrollHeight
@@ -116,6 +154,9 @@ async function send() {
     // round53 §9: session_id 透传——首轮 ''（后端开新会话），追问带上轮 id
     const body = { query: q, market: props.marketTab }
     if (sessionId.value) body.session_id = sessionId.value
+    // round60 D1: 带上持仓（仅 3 个字段，见 portfolioContext 注释）
+    const pf = portfolioContext()
+    if (pf.length) body.context = { portfolio: pf }
     await startStream('/llm-advice/stream', body, (token) => {
       streamingText.value += token
       _scrollBottom()

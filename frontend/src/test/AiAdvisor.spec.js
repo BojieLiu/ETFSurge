@@ -10,10 +10,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
-const { startMock, stopMock, chatSessionRef } = vi.hoisted(() => ({
+const { startMock, stopMock, chatSessionRef, portfolioState } = vi.hoisted(() => ({
   startMock: vi.fn(),
   stopMock: vi.fn(),
   chatSessionRef: { value: '' },
+  portfolioState: { etfs: [], initialized: false, failNext: false },
 }))
 
 vi.mock('../composables/useLLMStream', () => ({
@@ -26,6 +27,20 @@ vi.mock('../composables/useLLMStream', () => ({
   }),
 }))
 
+// round60 D1: 组件会 onMounted 取一次持仓，测试里必须 mock 掉 store，
+// 否则会去打真实 axios。
+vi.mock('../stores/portfolio', () => ({
+  usePortfolioStore: () => ({
+    get etfs() { return portfolioState.etfs },
+    get initialized() { return portfolioState.initialized },
+    fetchEtfs: async () => {
+      if (portfolioState.failNext) throw new Error('portfolio down')
+      portfolioState.initialized = true
+      return portfolioState.etfs
+    },
+  }),
+}))
+
 vi.mock('../utils/markdown', () => ({ renderMarkdown: (s) => s }))
 
 import AiAdvisor from '../components/market/AiAdvisor.vue'
@@ -33,6 +48,9 @@ import AiAdvisor from '../components/market/AiAdvisor.vue'
 beforeEach(() => {
   startMock.mockReset().mockImplementation(async () => 'ok')
   stopMock.mockReset()
+  portfolioState.etfs = []
+  portfolioState.initialized = false
+  portfolioState.failNext = false
 })
 
 describe('AiAdvisor (R5-3-1)', () => {
@@ -134,5 +152,65 @@ describe('AiAdvisor — round53 §9 多轮追问', () => {
     expect(stopMock).toHaveBeenCalled()
     expect(chatSessionRef.value).toBe('')
     chatSessionRef.value = ''  // 清理
+  })
+})
+
+// ── round60 D1: 持仓上下文注入 ────────────────────────────────────────────
+// 缺陷 D1：后端 analysis.py:652 一直支持 request.context.portfolio，但前端只发
+// {query, market}，该段线上恒空——而组件文案写着「结合实时行情与组合上下文」。
+// 契约 llm-chat-session.md 早已允许 context 透传，故纯前端补线。
+
+describe('AiAdvisor — round60 D1 portfolio context', () => {
+  const HOLDINGS = [
+    { symbol: '510300', name: '沪深300ETF', target_weight: 0.3, avg_cost: 3.85, shares_held: 10000 },
+    { symbol: '518880', name: '黄金ETF', target_weight: 0.15, avg_cost: 2.41, shares_held: 4000 },
+  ]
+
+  async function ask(query = '我的持仓该减仓吗') {
+    const wrapper = mount(AiAdvisor, { props: { marketTab: 'A' } })
+    await nextTick()
+    await wrapper.find('input.text-input').setValue(query)
+    await wrapper.find('button.btn-primary').trigger('click')
+    await nextTick()
+    return startMock.mock.calls[0][1]
+  }
+
+  it('有持仓时 body.context.portfolio 带上 symbol/name/target_weight', async () => {
+    portfolioState.etfs = HOLDINGS
+    const body = await ask()
+    expect(body.context.portfolio).toHaveLength(2)
+    expect(body.context.portfolio[0]).toEqual({
+      symbol: '510300', name: '沪深300ETF', target_weight: 0.3,
+    })
+  })
+
+  it('不外泄成本与份额：avg_cost / shares_held 绝不出现在请求体里', async () => {
+    portfolioState.etfs = HOLDINGS
+    const body = await ask()
+    const serialized = JSON.stringify(body)
+    expect(serialized).not.toContain('avg_cost')
+    expect(serialized).not.toContain('shares_held')
+    expect(Object.keys(body.context.portfolio[0]).sort()).toEqual(
+      ['name', 'symbol', 'target_weight'])
+  })
+
+  it('无持仓时完全不带 context 键（不发空对象）', async () => {
+    portfolioState.etfs = []
+    const body = await ask()
+    expect(body.context).toBeUndefined()
+  })
+
+  it('持仓拉取失败仍可提问（行情/估值能力不依赖持仓，静默降级）', async () => {
+    portfolioState.failNext = true
+    const body = await ask('大盘怎么样')
+    expect(startMock).toHaveBeenCalledTimes(1)
+    expect(body.query).toBe('大盘怎么样')
+    expect(body.context).toBeUndefined()
+  })
+
+  it('target_weight 缺失时归 0，不发 undefined（后端按 0 处理）', async () => {
+    portfolioState.etfs = [{ symbol: '512890', name: '红利低波ETF' }]
+    const body = await ask()
+    expect(body.context.portfolio[0].target_weight).toBe(0)
   })
 })
