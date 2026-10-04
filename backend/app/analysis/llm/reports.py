@@ -10,6 +10,7 @@ from app.analysis.llm.gates import get_last_llm_error  # noqa: F401
 from app.analysis.llm.health import _fetch_global_liquidity
 from app.analysis.llm.prompts import load_prompt
 from app.analysis.registry import get_agent
+from app.core.cash_weight import cash_weight_of
 
 # round35 §19 GapE: LLM 超时常量唯一事实源（原两处 httpx.Timeout 字面量收敛）
 from app.core.llm_fallback_prefixes import (
@@ -78,11 +79,17 @@ def _build_engine_fallback(strategies: list[dict], regime: str = "unknown") -> s
         core_pct = lb.get("core", 0) * 100
         sat_pct = lb.get("satellite", 0) * 100
         def_pct = lb.get("defense", 0) * 100
+        # 现金并入层预算行——旧实现只印三层（合计 <100%）且跳过 CASH 行，缺口无解释。
+        # 取值与 design_report._cash_weight_of 同口径（引擎 CASH 行优先，缺行按 residual 推导）。
+        cash_w = cash_weight_of(s)
+        cash_txt = f" · 现金 {cash_w * 100:.0f}%" if cash_w is not None else ""
         lines.append(f"### {label}")
-        lines.append(f"层预算：核心 {core_pct:.0f}% · 卫星 {sat_pct:.0f}% · 防御 {def_pct:.0f}%")
+        lines.append(f"层预算：核心 {core_pct:.0f}% · 卫星 {sat_pct:.0f}% · 防御 {def_pct:.0f}%{cash_txt}")
         lines.append("")
+        cash_row = None
         for e in s.get("allocations") or s.get("etfs") or []:
             if e.get("symbol") == "CASH":
+                cash_row = e
                 continue
             name = e.get("name", e.get("symbol", ""))
             w = (e.get("weight") or e.get("target_weight") or 0) * 100
@@ -91,17 +98,39 @@ def _build_engine_fallback(strategies: list[dict], regime: str = "unknown") -> s
             fs_str = f"（因子分: {fs:.3f}）" if isinstance(fs, (int, float)) else ""
             rationale_str = f" — {rationale}" if rationale else ""
             lines.append(f"- {name} ({e.get('symbol')}) {w:.0f}%{fs_str}{rationale_str}")
+        if cash_row is not None or cash_w:
+            _cw = cash_w or 0.0
+            _why = (cash_row or {}).get("selection_rationale") or "流动性管理"
+            lines.append(f"- 现金 (CASH) {_cw * 100:.0f}% — {_why}")
         lines.append("")
     lines.append("## 风险提示")
     lines.append("")
-    total_weight = sum(
-        (e.get("weight") or e.get("target_weight") or 0)
-        for s in strategies
-        for e in (s.get("allocations") or s.get("etfs") or [])
-        if e.get("symbol") != "CASH"
+    # 逐方案算总权益仓位，取最高者告警——旧实现把**所有方案**的权重加总
+    # （三方案 × ~75% = 225%），既超 100% 又指不到具体方案（假数据）。
+    # 顺带点名该方案现金，使「总权益 + 现金 = 100%」的缺口可解释。
+    _equity_ranked = sorted(
+        (
+            (
+                sum(
+                    (e.get("weight") or e.get("target_weight") or 0)
+                    for e in (s.get("allocations") or s.get("etfs") or [])
+                    if e.get("symbol") != "CASH"
+                ),
+                s,
+            )
+            for s in strategies
+        ),
+        key=lambda pair: pair[0],
+        reverse=True,
     )
-    if total_weight > 0.9:
-        lines.append(f"- 总权益仓位 {total_weight*100:.0f}%，高于 90% 阈值，注意市场下行风险")
+    if _equity_ranked and _equity_ranked[0][0] > 0.9:
+        _eq, _eq_s = _equity_ranked[0]
+        _eq_cash = cash_weight_of(_eq_s)
+        _cash_txt = f"，现金 {_eq_cash * 100:.0f}%" if _eq_cash else "，无现金仓位"
+        _who = f"（{_eq_s.get('label', '')}）" if len(strategies) > 1 else ""
+        lines.append(
+            f"- 总权益仓位{_who} {_eq*100:.0f}%{_cash_txt}，高于 90% 阈值，注意市场下行风险"
+        )
     # Check single-position concentration
     for s in strategies:
         for e in s.get("allocations") or s.get("etfs") or []:

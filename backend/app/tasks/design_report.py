@@ -7,6 +7,7 @@ import time
 from datetime import datetime
 
 from ..analysis.llm import generate_design_report
+from ..core.cash_weight import cash_row_of, cash_weight_of
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,69 @@ def _pct_num(v):
         return float(v)
     except (TypeError, ValueError):
         return None
+
+
+def _cash_weight_of(strategy: dict) -> float | None:
+    """方案现金仓位（小数口径，如 0.25）——口径唯一事实源见 `app/core/cash_weight.py`。
+
+    本模块保留同名薄封装，使本文件渲染函数不必直接依赖 core 层符号名。
+    """
+    return cash_weight_of(strategy)
+
+
+def _build_engine_summary(strategies: list[dict], market_context: dict | None = None) -> str:
+    """空报告兜底：LLM 返回空且去 AI 腔后仍为空时使用的引擎摘要（纯函数，可测）。
+
+    现金口径与 `_build_plan_tables` 一致（`_cash_weight_of`）——旧内联实现只印三层
+    层预算、且 `continue` 掉 CASH 行，缺口无解释。
+    """
+    mc = market_context or {}
+    parts = [
+        "# ETF 组合设计方案（数据摘要）\n",
+        f"市场状态：{mc.get('market_regime', '—')}\n",
+    ]
+    for s in strategies:
+        label = s.get("label", "")
+        lb = s.get("layer_budget", {})
+        cash_w = _cash_weight_of(s)
+        cash_txt = f" · 现金 {cash_w * 100:.0f}%" if cash_w is not None else ""
+        parts.append(f"\n## {label}\n")
+        parts.append(
+            f"核心 {lb.get('core',0)*100:.0f}% · 卫星 {lb.get('satellite',0)*100:.0f}%"
+            f" · 防御 {lb.get('defense',0)*100:.0f}%{cash_txt}\n\n"
+        )
+        cash_row = cash_row_of(s)
+        for e in (s.get("allocations") or s.get("etfs") or []):
+            if e.get("symbol") == "CASH":
+                continue
+            w = (_pct_num(e.get("weight") or e.get("target_weight") or 0) or 0.0) * 100
+            parts.append(f"- {e.get('name','')} ({e.get('symbol')}) {w:.0f}% — {e.get('selection_rationale','')[:80]}\n")
+        if cash_row is not None or cash_w:
+            _cw = (_pct_num((cash_row or {}).get("weight") or (cash_row or {}).get("target_weight"))
+                   if cash_row is not None else cash_w) or 0.0
+            _why = (cash_row or {}).get("selection_rationale") or "流动性管理"
+            parts.append(f"- 现金 (CASH) {_cw * 100:.0f}% — {_why}\n")
+    return "".join(parts)
+
+
+def _display_weight_drift(strategy: dict) -> bool:
+    """该方案的权重列按整数百分比渲染后，合计是否偏离 100%。
+
+    真实现象（DB design id=85 进攻型）：精确权重 5/5/20/4.29×5/8.57/5/34.98
+    合计恰为 100%，但逐行取整后显示合计为 99%。此时**不得**为凑 100% 篡改
+    现金权重（会与卡片/DB 脱钩），而应在表尾披露取整口径。
+    """
+    allocs = strategy.get("allocations") or strategy.get("etfs") or []
+    rows = [e for e in allocs if isinstance(e, dict)]
+    if not rows:
+        return False
+    shown = 0
+    for e in rows:
+        w = _pct_num(e.get("weight") or e.get("target_weight") or 0)
+        if w is None:
+            return False
+        shown += round(w * 100)
+    return abs(shown - 100) >= 1
 
 
 def _build_plan_tables(
@@ -90,10 +154,11 @@ def _build_plan_tables(
     # 现金 / 预期回报
     cashes, rets, rets_current = [], [], []
     for s in strategies:
-        allocs = s.get("allocations") or s.get("etfs") or []
-        cash = next((e for e in allocs if e.get("symbol") == "CASH"), None)
-        w = (_pct_num(cash.get("weight") or cash.get("target_weight") or 0)) * 100 if cash else 10
-        cashes.append(f"{w:.0f}%")
+        # 现金仓位：引擎 CASH 行优先，缺行按 residual 推导，无从判定渲染「—」。
+        # 旧实现 `... * 100 if cash else 10` —— 无 CASH 行时**编造 10% 现金**，
+        # 与方案卡片（displayAllocations 按 residual 合成）矛盾（反假完成·非兜底数据）。
+        w = _cash_weight_of(s)
+        cashes.append(f"{w * 100:.0f}%" if w is not None else "—")
         r = _pct_num(s.get("expected_return"))
         rets.append(f"{r * 100:.0f}%" if r is not None else "—")
         rc = _pct_num(s.get("expected_return_current"))
@@ -128,7 +193,14 @@ def _build_plan_tables(
         sat_pct = sum(e.get("weight") or e.get("target_weight") or 0 for e in allocs if e.get("layer") in ("satellite", "sat")) * 100
         def_pct = sum(e.get("weight") or e.get("target_weight") or 0 for e in allocs if e.get("layer") in ("defense", "defence")) * 100
         lines.append(f"\n### {label}")
-        lines.append(f"资产结构：核心 {core_pct:.0f}% · 卫星 {sat_pct:.0f}% · 防御 {def_pct:.0f}%\n")
+        # 现金并入资产结构行——旧实现只印三层（核心 45% + 卫星 20% + 防御 10% = 75%），
+        # 缺口无解释，而方案卡片 header 是齐的（核心/卫星/防御/现金，合计 100%）。
+        _cash = _cash_weight_of(s)
+        _struct = (
+            f"资产结构：核心 {core_pct:.0f}% · 卫星 {sat_pct:.0f}% · 防御 {def_pct:.0f}%"
+            + (f" · 现金 {_cash * 100:.0f}%\n" if _cash is not None else "\n")
+        )
+        lines.append(_struct)
         # R6-F15 (round6 §十一 R6-F15): 方案表格加「建仓建议」列——与文字建议对齐，
         # 消除「表格与文字脱节、未标注建仓节奏」问题（§4.3 方案-文字张力）。
         # P0-9: 「今日涨跌」列头带数据采集时刻（截至 HH:MM），盘中值不再被误读为收盘。
@@ -152,21 +224,31 @@ def _build_plan_tables(
         lines.append("|---------|------|------|:----:|:--------:|:-------:|:--------:|---------|")
 
         allocs = s.get("allocations") or s.get("etfs") or []
-        for e in allocs:
-            if e.get("symbol") == "CASH":
-                continue
+        # 现金行入表且排末位：旧实现 `if symbol == "CASH": continue` 把整行丢掉，
+        # 权重列因此加不到 100%（卡片明细表是有 CASH 行的）。
+        _cash_row = cash_row_of(s)
+        _ordered = [e for e in allocs if e.get("symbol") != "CASH"]
+        if _cash_row is not None:
+            _ordered.append(_cash_row)
+        for e in _ordered:
             code = e.get("symbol", "")
+            is_cash = code == "CASH"
             # F3 R5: 名称不截断（旧 [:12] 产生"中证500增强ETF易方"类残句）
-            name = e.get("name", "")
+            name = e.get("name", "") or ("现金" if is_cash else "")
             raw = e.get("selection_rationale") or ""
             # F3 R4 用户决策更新（2026-08-02）：理由不再截断——与 R5 名称处理一致，
             # markdown 表格渲染自动换行；完整理由保留估值/资金流/市态等关键尾部。
             # 竖线转义 + 换行展平：防止 rationale 含 `|`/`\n`（如风控追加文本）拆裂表格行。
             rationale = raw.replace("|", "\\|").replace("\n", " ").replace("\r", "")
+            if is_cash and not rationale:
+                rationale = "现金缓冲"
             layer_en = e.get("layer", "—")
             layer_cn = {"core": "核心", "satellite": "卫星", "sat": "卫星", "defense": "防御", "defence": "防御", "cash": "现金"}.get(layer_en, layer_en)
             # R6-F15: 建仓建议按层语义（分批/等企稳/一次性），与报告文字建议一致
-            if layer_en in ("defense", "defence"):
+            if is_cash:
+                # 现金无「建仓」语义，也不得落到 else 的 ETF 分批话术（layer=cash）
+                advice = "维持目标比例"
+            elif layer_en in ("defense", "defence"):
                 advice = "可一次性配置"
             elif layer_en == "core":
                 advice = "分 2-3 批建仓"
@@ -184,14 +266,18 @@ def _build_plan_tables(
             _coarse = bool(precision and precision.get("mode") == "coarse")
             if _coarse and isinstance(fs, (int, float)):
                 fs_txt = ("偏强" if fs >= 0.5 else "偏弱" if fs <= -0.5 else "中性")
-            w = (e.get("weight") or e.get("target_weight") or 0) * 100
+            w = (_pct_num(e.get("weight") or e.get("target_weight") or 0) or 0.0) * 100
             if _coarse:
                 _step = float((precision or {}).get("weight_step_pct") or 5.0)
                 w_txt = f"≈{max(0.0, round(w / _step) * _step):.0f}%"
             else:
                 w_txt = f"{w:.0f}%"
             dcp = e.get("daily_change_pct")
-            if dcp is not None:
+            if is_cash:
+                # 现金无行情涨跌语义——「—」表示**不适用**，与 ETF 缺数据的
+                # 「数据源不可用」（P1-4）语义不同，故在此分流；口径见表尾脚注。
+                dcp_txt = "—"
+            elif dcp is not None:
                 # O18 (round8 §7): 唯一口径 = 百分比。删除旧 `abs(dcp)<1 → ×100` 分支——
                 # 注入层三源（pool/快照/K线）均为百分比，±1% 内的值曾被放大 100 倍
                 # （-0.234% → -23.40%、0.85% → 85%）。
@@ -212,6 +298,22 @@ def _build_plan_tables(
     # P2-4 (round20 §五 P2-4): 注释与数值范围一致——多因子综合分可负可超 1
     # （实测 511090=-2.31 超旧注释「0~1」），区别于技术信号（0~1）。
     lines.append("\n> 注：多因子综合分（可负可超 1，区别于技术信号）基于资金流、估值、动量、流动性等维度综合计算，非涨跌幅。")
+    # 现金行口径脚注：现金行的「—」若无说明会被读成「数据缺失」（与 P1-4 的
+    # 「数据源不可用」混淆）。仅在确有现金仓位的方案存在时追加。
+    if any((_cash_weight_of(s) or 0) > 0 for s in strategies):
+        lines.append(
+            "\n> 注：现金行（代码 CASH）为未投入 ETF 的流动性管理仓位，"
+            "无行情涨跌与因子评分（表中「—」表示不适用，非数据缺失）；"
+            "其权重 = 1 − Σ各 ETF 权重，与上方「现金仓位」及方案卡片一致。"
+        )
+    # 取整披露脚注：权重列按整数百分比渲染，逐行四舍五入后合计可能为 99%/101%
+    # （实测进攻型含 4.29%×5 + 8.57%，显示合计 99%），而**精确权重之和恒为 100%**。
+    # 不为了「让列加到 100%」去篡改现金权重——那会与卡片/DB 源数据脱钩。
+    if any(_display_weight_drift(s) for s in strategies):
+        lines.append(
+            "\n> 注：权重列按整数百分比显示，逐行四舍五入后合计可能为 99% 或 101%；"
+            "精确权重之和恒为 100%（现金权重为其平衡项），核对请以方案卡片为准。"
+        )
     return "\n".join(lines)
 
 
@@ -545,21 +647,7 @@ async def compose_and_push_report(
 
         if not report_text:
             logger.warning("[design_report] LLM returned empty, generating fallback summary")
-            fallback_parts = [
-                "# ETF 组合设计方案（数据摘要）\n",
-                f"市场状态：{market_context.get('market_regime', '—')}\n",
-            ]
-            for s in strategies:
-                label = s.get("label", "")
-                lb = s.get("layer_budget", {})
-                fallback_parts.append(f"\n## {label}\n")
-                fallback_parts.append(f"核心 {lb.get('core',0)*100:.0f}% · 卫星 {lb.get('satellite',0)*100:.0f}% · 防御 {lb.get('defense',0)*100:.0f}%\n\n")
-                for e in (s.get("allocations") or s.get("etfs") or []):
-                    if e.get("symbol") == "CASH":
-                        continue
-                    w = (e.get("weight") or e.get("target_weight") or 0) * 100
-                    fallback_parts.append(f"- {e.get('name','')} ({e.get('symbol')}) {w:.0f}% — {e.get('selection_rationale','')[:80]}\n")
-            report_text = "".join(fallback_parts)
+            report_text = _build_engine_summary(strategies, market_context)
             # 写库
             if design_id is not None:
                 try:

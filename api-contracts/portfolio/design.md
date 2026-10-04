@@ -401,6 +401,7 @@ alanced/aggressive`
 - [ ] Response: 标的数量在 8~15 之间
 - [x] Response: `strategies[].estimate_sources` 逐指标标注来源（B6，2026-08-25 落地验证：test_get_design_plans_pass_b6_estimate_fields）
 - [x] Response: `volatility_estimate` 仅在模型推导可行时出现（source=model_estimate）；缺失时字段整体省略，不得用静态值冒充模型估算（同上测试 + FE 双条件徽标）
+- [x] Response: `design_text` 现金口径与方案卡片逐位一致——§一 对比表 `现金仓位` 行 / 每方案 `资产结构` 四段齐全 / 明细表含 CASH 行且排末位 / 无权重数据渲染 `—` 不编造（round62 落地验证：`tests/test_design_report_format.py` round62 段 ×35，变异 14/14 killed（`scripts/mutation_check_cash_report.py`），`scripts/probe_cash_report_render.py` 对 DB design id=85 实证 PASS）
 - [ ] `GET /api/v1/portfolio/designs/{id}（原 /status 已移除，T11 校准）` implemented and tested
 
 <!-- 路由登记（P3-5 check_routes 门禁） -->
@@ -464,3 +465,28 @@ GET /api/v1/portfolio/designs/{design_id}
 > ②前端 `DesignResult.vue` 展开区「模型推算」（绿）+「参考值」（灰）双态徽标，
 > 双条件校验（字段存在 ∧ source=model_estimate），缺失不编造数值；
 > ③测试：test_portfolio_list.py ×2 + DesignResult.spec.js ×5（含约束1负向）。
+
+### 6.4 `design_text` 现金仓位口径（round62）
+
+**现金不是一个标量字段**，而是 `strategies[].etfs[]` / `plans[].allocations[]` 内一行
+`symbol == "CASH"` / `layer == "cash"` 的合成行（编排层 `strategy_design.py` 追加），
+权重口径 `cash = 1 − Σ非现金权重`（沿用「权重不归一化」，见本文件 §2.1）。
+
+因该行会被任何「按 layer 过滤」的消费者整体丢弃，`design_text` 的现金呈现须显式约定：
+
+| `design_text` 位置 | 口径 |
+|---|---|
+| §一 方案对比总览 `\| 现金仓位 \|` 行 | 取引擎 CASH 行；无 CASH 行时按 `residual` 推导；方案无任何权重数据时渲染 `—`，**禁止编造默认值**（旧实现 `else 10` 会凭空造出 10% 现金） |
+| §一 每方案 `资产结构：` 行 | 四段齐全「核心 · 卫星 · 防御 · 现金」，避免三项合计 < 100% 的无解释缺口 |
+| §一 每方案明细表 | **含 CASH 行且排末位**（`资产类别=现金`、`建仓建议=维持目标比例`）；涨跌列 `—`（现金无行情语义，区别于 ETF 缺数据的「数据源不可用」）、因子分列留空；`selection_rationale` 缺失回落「现金缓冲」 |
+| 表尾脚注 | 现金行口径（`—` = 不适用，非数据缺失）+ 权重取整披露（整数渲染时合计可能 99%/101%，**精确权重之和恒为 100%**，不得为凑 100% 篡改现金权重） |
+| §二 LLM 叙述 | **仍禁止**复述现金比例（`design_report.md` 规则0/规则5）——现金只在 §一 引擎渲染层呈现，LLM 不碰 |
+
+唯一事实源：`backend/app/core/cash_weight.py::cash_weight_of`（纯函数，被
+`tasks/design_report.py` 与 `analysis/llm/reports.py` 共用）。
+LLM 不可用的兜底写手（`_build_engine_fallback` / `_build_engine_summary`）须同口径显现金；
+其中「总权益仓位 > 90%」告警按**逐方案**取最高者并点名方案与现金——旧实现跨方案加总
+（三方案 × ~75% = 225%）既超 100% 又指不到具体方案。
+
+前端契约不变：`DesignResult.vue` 早已渲染现金（header「现金 X%」+ 明细 CASH 行），
+本节使 `design_text` 与之逐位一致。
