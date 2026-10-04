@@ -3,7 +3,8 @@
 从最近一次 ci_gate 落盘的 logs/evals_last_report.json 生成 Markdown 报告，
 含「简历指标位」（§5 简历指标位：做完填真实数字）。
 
-用法：cd backend && python -m scripts.evals.report [--out docs/evals-report.md]
+用法：cd backend && python -m scripts.evals.report [--out <path.md>]
+（历史快照已归档至 docs/archived/evals-report.md；新报告请显式指定 --out）
 """
 from __future__ import annotations
 

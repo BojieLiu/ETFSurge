@@ -3,6 +3,64 @@
 本目录存放**已完成使命**的历史文档（诊断计划、评审产物、交接、根因分析），保留审计价值但不再作为活跃依据。
 
 
+## 最近一次归档（2026-10-03，round61 容器全链路诊断收尾）
+
+并入本目录（逐项核对「§决策点是否全闭/已转出」+「全仓路径引用数」后判定）：
+- `round56-container-reacceptance-round55-fixes.md`（round56 容器复验 + round55 实施批复）
+  —— **归档依据**：§6 全部 10 个决策点已闭或已转出并记录在 round57 §4.3：
+  #1 R191 → round57 §2.5 维持关闭；#2 DOC-1 → 已实施进常驻模板；#3 patrol → round57 §2.8 已跑；
+  #4 P1-5 → 活跃身份迁至 `round35-architecture-review.md` + `round36-B5-allocate-pipeline.md` +
+  `redundant-review.md`（不再依赖 round56）；#5 四态走查 → round57 §2.8；#6 Lighthouse → round57 §2.8
+  → round61 §2.8 复测；#7 性能债基线 → round57 §2.1 重建 → round61 §2.1 复测；
+  #8 R192/D → round57 §2.2 生产实证关闭；#9 R194-G → round57 §2.4 半生效转 R199 → round61 已实施；
+  #10 R195-H → round57 §2.3 后端就绪 → round61 §2.4 复验 CASH 行三方案齐。
+  **路径引用数 = 0**（16 处「round56 §x」短名引用经逐一核对均为散文/注释语义指针，非 `docs/` 路径）。
+- `v7-p2-dsh-harness-comparison.md`（v7 P2 第三方 Harness `dsh` 探针记录）——一次性调研产物，
+  **全仓外部引用数 = 0**（唯一引用来自同为调研产物的 v7-p1.5，未构成活跃语义）。
+- `evals-report.md`（Agentic Evals 10 用例 100% 快照，2026-08-30）——**可重生成产物**
+  （`python -m scripts.evals.report --out <path>`），数据已过期于 HEAD。
+
+> **引用同步**：`backend/scripts/evals/report.py:6` 的用法示例由 `--out docs/evals-report.md`
+> 改为 `--out <path.md>` 并加注「历史快照已归档至 docs/archived/evals-report.md」
+> （该参数 `default=None`，脚本本身不会写归档路径，故仅改文档字符串）。
+> `docs/round57-*.md` 头部补「归档提示」段，声明其 round56/55 引用指归档件。
+> 代码注释与契约中的「round56 §4.2 方案D/G/H」「round56 §6#n」等**短名引用按既有惯例未改写路径**
+> —— 与 2026-09-18 归档 round53/54/55 时的处理一致（那批同样保留 35/8/9 处短名引用）。
+> 改写它们需触碰 15+ 代码/契约/前端文件并使 pre-commit 文档短路失效，收益仅是路径可点击。
+>
+> **不归档保留于 `docs/` 顶层**（本轮逐份核对引用数后维持）：
+> `round61-container-fullchain-diagnosis.md`（当前轮）、`round57`（12 处引用 + round61 对照基准）、
+> `round58-market-report-missing-data.md`（30 处引用）、`round58-portfolio-design-llm-fix.md`（5 处 `docs/` 路径引用：
+> `backend/app/engine/budgets.py:237`、`allocation_engine.py:2011`、`known-env-issues.md:100` + 2 测试）、
+> `round59-advice-technical-support-level.md`（21 处引用 + round61 对照基准）、
+> `advice-goldset-design.md`（=round60，19 处引用，含 goldens 与 2 个 goldset 测试）、
+> `round35-architecture-review.md`（**40 处引用**，engine/factors/core/pytest.ini/audit_async_blocking + 20 测试）、
+> `round36-B5-allocate-pipeline.md`（4 处：`allocation_engine.py`、`core/loop_watchdog.py`、
+> `probe_design_pipeline_profile.py`、`known-env-issues.md`）、`redundant-review.md`（11 处，含 **AGENTS.md**、
+> `check_test_baseline.py`、`verify_e2e.py`）、`etfsurge-agentic-upgrade-v7.md`（6 处代码/测试引用）、
+> `v7-p1.5-langgraph-comparison.md`（**记录的决策仍生效**：`app/agentic/lg_agent.py` 在生产 + 3 测试在跑，
+> 属「why we did it this way」类内容）、`engine-dedup-layers.md`（round57 引用 + 自身「结论」节 3 项待做未闭）、
+> `design-checklist.md`（常驻设计清单）、`known-env-issues.md`（常驻环境问题档案）、
+> `patrol-orchestration-plan.md`（常驻流程）、`prompt-templates/`（常驻模板）、`api-contracts/`（活跃契约）、
+> README/AGENTS（项目说明）。
+>
+> ⚠️ **本轮附带修复（2026-10-03）**：上一会话对 round53/54/55 的归档处于**半完成态**——
+> 文件已移入本目录且内容逐行一致（383/157/230 行），但 git 未 stage（` D` + `??`）。
+> 若当时执行 `git commit -a`（不含 untracked），会提交删除而不含新增 → **三份文档从仓库消失**。
+> 已 `git add` 修正，git 现识别为 rename（`R`）。**教训**：归档必须用 `git mv` 并确认
+> `git status --porcelain` 显示 `R` 而非 `D`+`??`。
+
+
+## 最近一次归档（2026-09-18，round56 复验完成 + round53/54/55 承接映射收敛后）
+
+并入本目录（均已完成使命，无活跃实施依据身份）：
+- `round53-container-reacceptance-round52-plans.md`（round53 round52 A-F 落地复验：R170/R171/R172/R173/R175/R176/R177/R178 实测生效；遗留 R146/R173-A 由 §12 闭环，其余迁 round55 §0.2；R181/R183/R185-A/B 方案已被代码实施并由测试锁定）
+- `round55-container-reacceptance-round53-plans.md`（round55 round53 实施批 + round54 抛光复验：R181 无复发、R177/R178/R173 维持；新发现 R186/R187/R188 已由 round56 §0 #2-4 生产实证关闭，R189/E′关闭，R191 经 09-14 交易时段复测消散；仅剩 R192/R195 转 round56/新轮跟踪）
+- `round54-frontend-polish.md`（round54 前端 UI 打磨：代码已落地 `7c062b6/f59fb17`，vitest 552 绿 + build 绿；剩余浏览器四态走查已迁 round56 §6 跟踪项 #5，不再以本文档为活跃依据）
+
+> 归档后引用统一指向 `docs/archived/...`。**同步更新**：`backend/tests/test_chat_session.py:2`、`backend/tests/test_large_cap_wide_basis_exclusion.py:482`、`backend/tests/test_r185a_config_hot_reload.py:2`、`backend/tests/test_r185b_config_surface.py:1`、`backend/app/core/market_calendar.py:84/109`、`frontend/src/test/FactorModelView.spec.js:200` 六处硬路径 `docs/round53-*.md` → `docs/archived/round53-*.md`；`round55 §8.3` 内对 `docs/round54-frontend-polish.md` 的引用 → `docs/archived/round54-frontend-polish.md`。代码注释中「round53 §x」「round55 §x」为语义指针，移动后仍可读。
+> 不归档保留于 `docs/` 顶层：`round56-container-reacceptance-round55-fixes.md`（当前活跃，R192/R195 待实施 + R193/R194 设计约束）、`round35-architecture-review.md`（P1-5/B5 拆分依据仍活跃）、`round36-B5-allocate-pipeline.md`（P1-5 独立轮未启动）、`design-checklist.md`（常驻设计清单）、`engine-dedup-layers.md`（仍被代码引用）、`known-env-issues.md`（常驻环境问题档案）、`patrol-orchestration-plan.md`（常驻流程）、`prompt-templates/`（常驻模板）、`api-contracts/`（活跃契约）、`redundant-review.md`（P1-5 + R185-C 未闭）、`etfsurge-agentic-upgrade-v7.md`（v7 规格仍被代码引用）、`v7-p1.5-langgraph-comparison.md` / `v7-p2-dsh-harness-comparison.md`（现行决策依据）、`evals-report.md`（evals 输出目标）、README/AGENTS（项目说明）.
+
 ## 最近一次归档（2026-08-30，round39 容器全链路复验完成 + 五份旧 round 文档承接映射收敛后）
 
 并入本目录（均已完成使命，无活跃实施依据身份）：

@@ -1,6 +1,9 @@
 # round57 容器全链路诊断 — round56 实施批复验（2026-09-19 周六盘后/周末）
 
 > 独立 round57 文档，不改写 round56 / 更早轮次。
+> **归档提示（2026-10-03 round61 收尾）**：本文引用的 round56 已归档至
+> `docs/archived/round56-container-reacceptance-round55-fixes.md`；文中「round56 §2.x/§4.1/§6#n」
+> 均指该归档件。round55 及更早同理（`docs/archived/`），短名引用按既有惯例未改写路径。
 > 诊断对象：HEAD `980a1c5`（含 `c6bce16` round56 R192/D/G/H 落地批 + `95f3c31`/`980a1c5` advice 批 + poster/share 前端批）。
 > 验证环境：Docker Engine 29.7.2，prod profile + diag overlay（PROFILE_WARMUP=1）。
 > 验证窗口：2026-09-19 周六 11:26-12:10（**周末非交易日**：实时类结论标「周末形态」）。
