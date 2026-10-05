@@ -346,6 +346,26 @@ async function retryDesign() {
 // 「derive 完成」——finalizedDesignIds 防重复 finalize（fetchDesignDetail 只调一次）。
 const finalizedDesignIds = new Set()
 
+/**
+ * 把本页自己发起的任务在 store 里置为终态。
+ *
+ * 为什么要本页来收尾（2026-10-05 tasks 162 现场）：`startDesign` 提交后只调
+ * `addTask(..., 'running')`，之后完全依赖全局 WS 把状态推到终态。WS 未送达、
+ * 或 `fetchAndMergeTasks`（WS 重连 / App 挂载）整表替换成**字符串键** taskId 后，
+ * 数字键的 WS 消息匹配不上 → `updateTask` 静默 no-op。本地条目永远 running，
+ * 而 `loadHistoryList` 会把 running 的本地条目合成为一条幻影行，与 timeline 里
+ * 已完成的 design 行并排 —— 一次设计在任务列表出现两条。
+ *
+ * 幂等：已是终态则跳过。否则 WS 与轮询都观察到完成时会二次触发全局 toast
+ * （第一次因已注册完成回调而不弹，第二次回调已注销就弹了）。
+ */
+function markLocalTaskTerminal(taskId, status, extra = {}) {
+  const t = taskStore.getTask(taskId)
+  if (!t) return
+  if (t.status === 'completed' || t.status === 'failed') return
+  taskStore.updateTask(taskId, { status, progress: 100, ...extra })
+}
+
 async function startDesign(capital) {
   designCapital.value = capital
   designStep.value = 'loading'
@@ -401,6 +421,7 @@ async function startDesign(capital) {
           did = taskRes?.data?.result?.design_id
         } catch {}
       }
+      markLocalTaskTerminal(taskData.task_id, 'completed', { designId: did || null })
       if (did) {
         // O11: 幂等——WS 完成与轮询同时到达时只 finalize 一次
         if (finalizedDesignIds.has(did)) return
@@ -434,6 +455,7 @@ async function startDesign(capital) {
         if (task.status === 'completed') {
           clearInterval(designPollTimer); designPollTimer = null
           const did = task?.result?.design_id || taskData.design_id
+          markLocalTaskTerminal(taskData.task_id, 'completed', { designId: did || null })
           if (did) {
             // O11: 幂等——WS 已 finalize 则轮询跳过（fetchDesignDetail 只调一次）
             if (finalizedDesignIds.has(did)) return
@@ -443,6 +465,7 @@ async function startDesign(capital) {
           }
         } else if (task.status === 'failed') {
           clearInterval(designPollTimer); designPollTimer = null
+          markLocalTaskTerminal(taskData.task_id, 'failed')
           designFailed.value = task.error_message || task.error || '方案生成失败，请稍后重试'
         }
       } catch {

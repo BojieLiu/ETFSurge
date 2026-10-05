@@ -17,7 +17,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { nextTick } from 'vue'
 
 // ── 统一 mock：共享可变状态全部放 vi.hoisted（工厂与用例体都可引用）──
-const { getTimeline, getStrategyCheckDetail, toastShow, designAsyncMock, persistMock, getTaskMock, mockTasks, storeFetchEtfs } = vi.hoisted(() => ({
+const { getTimeline, getStrategyCheckDetail, toastShow, designAsyncMock, persistMock, getTaskMock, mockTasks, storeFetchEtfs, updateTaskMock, completionCallbacks } = vi.hoisted(() => ({
   getTimeline: vi.fn(),
   getStrategyCheckDetail: vi.fn(),
   toastShow: vi.fn(),
@@ -26,6 +26,15 @@ const { getTimeline, getStrategyCheckDetail, toastShow, designAsyncMock, persist
   getTaskMock: vi.fn().mockResolvedValue({ data: { status: 'running', progress: 50 } }),
   mockTasks: [],
   storeFetchEtfs: vi.fn().mockResolvedValue(undefined),
+  // 忠实实现真实 store 的 updateTask（真的写回 status）——否则「已是终态不再重复
+  // 设终态」的幂等断言恒真：status 永不变化，去掉守卫也测不出来。
+  updateTaskMock: vi.fn((id, changes = {}) => {
+    const task = mockTasks.find((x) => String(x.taskId) === String(id))
+    if (!task) return
+    Object.assign(task, changes)
+  }),
+  // 捕获注册的完成回调，用于模拟「WS 与轮询同时观察到完成」的真实竞态
+  completionCallbacks: {},
 }))
 
 vi.mock('marked', () => ({
@@ -78,13 +87,26 @@ vi.mock('../stores/task', () => ({
       const r = mockTasks.find(t => t.status === 'running')
       return r ? r.taskId : null
     },
-    getTask: vi.fn(() => null),
+    // 这两个按真实 store 语义实现（四个子测言时 mockTasks 被直接推入）——
+    // 旧版本为 getTask: () => null / addTask: 空实现，供给被测路径的断言恒空（尤其 markLocalTaskTerminal
+    // 的「条目不存在则无事可做」分支永远不可达）。
+    // taskId 比较用 String 归一，与 stores/task.js 的 _tid() 一致。
+    getTask: vi.fn((id) => mockTasks.find((t) => String(t.taskId) === String(id)) || null),
     fetchAndMergeTasks: vi.fn(),
-    addTask: vi.fn(),
-    updateTask: vi.fn(),
+    addTask: vi.fn((id, label = '智能组合设计', type = 'design') => {
+      const ex = mockTasks.find((t) => String(t.taskId) === String(id))
+      if (ex) { ex.status = 'running'; return ex }
+      const nt = { taskId: String(id), type, label, status: 'running', progress: 0, designId: null, createdAt: Date.now() }
+      mockTasks.push(nt)
+      return nt
+    }),
+    updateTask: updateTaskMock,
     removeTask: vi.fn(),
     clearCompleted: vi.fn(),
-    registerTaskCompletion: vi.fn(() => 1),
+    registerTaskCompletion: vi.fn((id, cb) => {
+      completionCallbacks[String(id)] = cb
+      return 1
+    }),
     designState: null,
     getDesignState: vi.fn(() => null),
     clearDesignState: vi.fn(),
@@ -483,6 +505,76 @@ describe('AiDesign — P0-9 任务列表双显示', () => {
     const runningDesigns = list.filter((i) => i._type === 'design' && i.status === 'running')
     expect(runningDesigns.length).toBe(1, `同一 running 任务不得双显示: ${JSON.stringify(list)}`)
   })
+
+
+  // —— 本页必须把自己初始化的任务来收尾（现场 2026-10-05 tasks 162）——
+  // 旧实现只在提交时 addTask(running)，之后完全依赖 WS 送达；WS 未送达（或整表替换成
+  // 不同类型的 id 键）时本地条目永远 running → loadHistoryList 把它合成一条幻影行，
+  // 与 timeline 里已完成的 design 行并列 → “一次设计出现两条”。
+  it('轮询观察到完成时把本地任务置终态（WS 未送达也不残留 running）', async () => {
+    vi.useFakeTimers()
+    getTaskMock.mockResolvedValue({
+      data: { status: 'completed', progress: 100, result: { design_id: 700 } },
+    })
+    const wrapper = mount(AiDesign)
+    await flushPromises()
+    await wrapper.vm.startDesign(500000)
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(6000)
+    await flushPromises()
+    expect(updateTaskMock).toHaveBeenCalledWith(
+      123,
+      expect.objectContaining({ status: 'completed' }),
+    )
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
+  it('轮询观察到失败时也置终态（不残留永久 running）', async () => {
+    vi.useFakeTimers()
+    getTaskMock.mockResolvedValue({
+      data: { status: 'failed', error_message: '报告生成失败' },
+    })
+    const wrapper = mount(AiDesign)
+    await flushPromises()
+    await wrapper.vm.startDesign(500000)
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(6000)
+    await flushPromises()
+    expect(updateTaskMock).toHaveBeenCalledWith(
+      123,
+      expect.objectContaining({ status: 'failed' }),
+    )
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
+  it('WS 与轮询同时观察到完成时只置一次终态（防二次触发全局 toast）', async () => {
+    vi.useFakeTimers()
+    getTaskMock.mockResolvedValue({
+      data: { status: 'completed', progress: 100, result: { design_id: 700 } },
+    })
+    const wrapper = mount(AiDesign)
+    await flushPromises()
+    await wrapper.vm.startDesign(500000)
+    await flushPromises()
+    // 真实竞态：WS 完成回调与轮询都会观察到 completed。轮询在 completed 时会清掉
+    // 定时器，但 WS 回调此刻才送达 —— 两条路径都曾各自把本地任务置终态。
+    const cb = completionCallbacks['123']
+    expect(typeof cb).toBe('function')
+    await cb({ taskId: 123, status: 'completed' })
+    await vi.advanceTimersByTimeAsync(6000)
+    await flushPromises()
+    const terminalCalls = updateTaskMock.mock.calls.filter(
+      ([, p]) => p && (p.status === 'completed' || p.status === 'failed'),
+    )
+    // 负向：守卫缺失时两条路径各置一次 → 2 次（且第二次会弹全局 toast）
+    expect(terminalCalls.length).toBe(1)
+    expect(mockTasks.filter((t) => String(t.taskId) === '123')).toHaveLength(1)
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
 })
 
 // =========================================================================

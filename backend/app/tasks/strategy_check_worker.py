@@ -135,6 +135,10 @@ async def _pipeline_body(mgr, task_id: int) -> dict:
             await db.refresh(record)
             record_id = int(record.id)
             logger.info("[strategy_check_pipeline] record %d saved", record_id)
+            # 记录一落库就回填 record_id（不等 LLM 研判注释 + completed）——
+            # 与 design 侧同一理由：/timeline 去重靠 record_id 关联 task↔record，
+            # 窗口内任务未终态且 record_id 为 NULL 时同一次运行会渲染成两行。
+            await mgr.update_task(task_id, record_id=record_id)
     except Exception as e:
         logger.warning("[strategy_check_pipeline] DB persist failed: %s", e)
 

@@ -503,6 +503,11 @@ async def _design_pipeline_with_semaphore(mgr: "TaskManager", task_id: int) -> N
             return
 
         logger.info("[design_pipeline] design_id=%s saved with data summary (%d chars)", design_id, len(design_text))
+        # design 记录一落库就回填 record_id（不等 LLM 报告结束）。
+        # /timeline 的去重规则靠 record_id 关联 task↔design：LLM 报告窗口内任务仍是
+        # quick_ready，若此时 record_id 还是 NULL，task 行与 design 行会同时进 timeline
+        # → 同一次运行渲染成两行（「✅ 成功 50万」+「⏳ 运行中」）。
+        await mgr.update_task(task_id, record_id=design_id)
         await mgr.update_task(task_id, progress=75, stage="方案已保存")
         await _notify(task_id, "quick_ready", progress=75, stage="方案已保存")
 

@@ -122,6 +122,56 @@ class TestDesignPipeline:
     @patch("app.tasks.task_manager.async_session")
     @patch("app.analysis.llm.generate_design_report", new_callable=AsyncMock)
     @patch("app.services.strategy_design.generate_enhanced_design", new_callable=AsyncMock)
+    async def test_record_id_persisted_before_llm_report_starts(
+        self, mock_gen_design, mock_llm, mock_db_session, task_mgr, task_db
+    ):
+        """record_id 必须在 LLM 报告**开始前**就落进 tasks 表（不等 completed）。
+
+        现场（2026-10-05 tasks 162）：design 记录在 progress 65 落库，而 record_id
+        只在完成时回填 -> LLM 报告窗口内 record_id 为 NULL，/timeline 的去重规则
+        （靠 record_id 关联 task<->design）匹配不上，同一次运行渲染成两行
+        「成功 50万」+「运行中」。
+
+        断言直接读**测试库 tasks 表的列**（task_db fixture），不走 get_task() 的
+        契约 dict —— 后者在本用例里被 Stage-4 的 mock session 污染（MagicMock 会把
+        任意属性变成真值 mock），用它断言必然恒绿：变异实测删掉本实现仍 PASS。
+        """
+        from app.models.task import TaskRecord
+        from app.tasks.task_manager import design_pipeline
+
+        mock_gen_design.return_value = {
+            "strategies": _mock_strategies(),
+            "market_context": _mock_market_context(),
+        }
+        mock_db_session.return_value = _make_mock_session(design_id=1001)
+
+        t = await task_mgr.create_task(task_type="design", params={"capital": 500000})
+        seen = {}
+
+        async def _capture(*_a, **_kw):
+            # generate_design_report 在 progress 80 被调用——此刻即「LLM 报告窗口」
+            async with task_db() as db:
+                row = await db.get(TaskRecord, t["task_id"])
+                seen["db_record_id"] = row.record_id
+                seen["status"] = row.status
+                seen["progress"] = int(row.progress or 0)
+            return "## 市场分析\n报告正文"
+
+        mock_llm.side_effect = _capture
+
+        await design_pipeline(task_mgr, task_id=t["task_id"])
+
+        assert seen, "LLM 调用点未被触达——本用例将恒绿失效"
+        assert seen["db_record_id"] == 1001, (
+            "LLM 报告开始前 tasks.record_id 必须已回填（/timeline 去重依赖它），"
+            f"实得 {seen['db_record_id']!r}"
+        )
+        assert seen["status"] != "completed", f"快照应取自 LLM 报告窗口内，实得 {seen}"
+        assert seen["progress"] == 80, f"快照应取自 LLM 报告窗口内，实得 {seen}"
+
+    @patch("app.tasks.task_manager.async_session")
+    @patch("app.analysis.llm.generate_design_report", new_callable=AsyncMock)
+    @patch("app.services.strategy_design.generate_enhanced_design", new_callable=AsyncMock)
     async def test_pipeline_llm_timeout(self, mock_gen_design, mock_llm, mock_db_session, task_mgr):
         """Scenario: LLM raises exception → report_quality='fallback', data summary still available."""
         from app.tasks.task_manager import design_pipeline

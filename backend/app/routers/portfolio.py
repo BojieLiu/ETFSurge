@@ -625,6 +625,11 @@ async def get_timeline(
 
     design_ids = {d.id for d in designs}
 
+    # record_id → task_id 映射：让 design/check 行回带 task_id。
+    # 前端本地去重（AiDesign.vue 的 timelineTaskIds）只认带 task_id 的行——不带则
+    # 该集合对 design 恒为空、去重恒失效，会从残留的 running store 条目合成幻影行。
+    record_to_task = {t.record_id: t.id for t in task_rows if t.record_id}
+
     # Build items from designs
     design_items = []
     for d in designs:
@@ -635,6 +640,7 @@ async def get_timeline(
             "status": d.status or "completed",
             "capital": d.capital,
             "error_message": d.error_message,
+            "task_id": record_to_task.get(d.id),
         })
 
     # Build items from checks
@@ -647,18 +653,26 @@ async def get_timeline(
             "_type": "check",
             "created_at": c.created_at.isoformat() if c.created_at else "",
             "status": "completed",
-            "summary": c.summary or "\u7b56\u7565\u68c0\u67e5\u5df2\u5b8c\u6210",
+            "summary": c.summary or "策略检查已完成",
             "error_message": None,
             "orphan": c.id not in linked_check_record_ids,
+            "task_id": record_to_task.get(c.id),
         })
 
-    # O12: tasks 表并入（失败/运行中任务可见）
+    # O12 (round8 §7 + interaction-redesign D2): tasks 表并入（失败/运行中任务可见）
     task_items = []
     for t in task_rows:
         _type = t.task_type if t.task_type in ("design", "check") else "design"
-        # 已完成且已有对应落库记录（design/check_items 已覆盖）→ 不重复
-        if t.status in ("completed", "completed_with_errors") and t.record_id:
+        # 已有对应落库记录的任务不再单独出一行（design/check_items 已覆盖）。
+        # 不看状态：设计管线在 progress 65 就落 PortfolioDesign（status='completed'、
+        # report_quality='pending'），LLM 报告窗口内任务仍是 quick_ready——旧规则要求
+        # status ∈ {completed, completed_with_errors}，quick_ready 漏网 →
+        # 同一次运行两行（design 行"✅ 成功"+ task 行"⏳ 运行中"）。
+        # 例外：failed 必须保留，否则失败被"成功"的 design 行掩盖。
+        if t.record_id and t.status != "failed":
             if _type == "design" and t.record_id in design_ids:
+                continue
+            if _type == "check" and t.record_id in check_record_ids:
                 continue
             if _type == "check" and t.record_id in check_record_ids:
                 continue

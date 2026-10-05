@@ -175,6 +175,110 @@ class TestTimelineJoinsTasks:
         assert check_items[0]["id"] == 3
 
 
+class TestNoDuplicateDuringLLMReportWindow:
+    """LLM 报告窗口内同一次 design 运行**不得**在 timeline 出现两行。
+
+    真实现象（2026-10-05 tasks 162 / designs 92）：设计管线在 progress 65 就把
+    PortfolioDesign 写成 status='completed'（report_quality 仍为 'pending'），而
+    任务停在 quick_ready / 'LLM 报告生成中'。旧跳过规则要求
+    `status in ('completed','completed_with_errors')`，quick_ready 不满足 →
+    task 行与 design 行同时进 timeline，前端渲染成
+    「✅ 成功 50万」+「⏳ 运行中」两行（同一次运行看起来像点了两次）。
+    """
+
+    @pytest.mark.asyncio
+    async def test_quick_ready_task_with_record_not_duplicated(self):
+        db = _FakeDB(
+            designs=[_design(52, status="completed")],
+            checks=[],
+            tasks=[_task(162, "quick_ready", record_id=52)],
+        )
+        items = (await get_timeline(limit=20, offset=0, db=db))["items"]
+        rows = [i for i in items if i["_type"] == "design" and i["id"] == 52]
+        assert len(rows) == 1, f"同一次运行出现 {len(rows)} 行（应 1 行）：{rows}"
+
+    @pytest.mark.asyncio
+    async def test_quick_ready_check_task_not_duplicated(self):
+        """check 侧同源缺陷：报告生成中的 check 任务也不得与 check 记录重复。"""
+        db = _FakeDB(
+            designs=[],
+            checks=[_check(41)],
+            tasks=[_task(193, "quick_ready", record_id=41, task_type="check")],
+        )
+        items = (await get_timeline(limit=20, offset=0, db=db))["items"]
+        rows = [i for i in items if i["_type"] == "check" and i["id"] == 41]
+        assert len(rows) == 1, f"同一次运行出现 {len(rows)} 行（应 1 行）：{rows}"
+
+    @pytest.mark.asyncio
+    async def test_pending_task_with_record_not_duplicated(self):
+        """pending（尚未收到首个 progress）同样已落库 → 也不得重复。"""
+        db = _FakeDB(
+            designs=[_design(5)],
+            checks=[],
+            tasks=[_task(300, "pending", record_id=5)],
+        )
+        items = (await get_timeline(limit=20, offset=0, db=db))["items"]
+        assert len([i for i in items if i["_type"] == "design" and i["id"] == 5]) == 1
+
+    @pytest.mark.asyncio
+    async def test_failed_task_with_record_still_visible(self):
+        """失败必须仍然可见——不能被「成功」的 design 行掩盖（旧规则也没跳过它）。"""
+        db = _FakeDB(
+            designs=[_design(7)],
+            checks=[],
+            tasks=[_task(201, "failed", record_id=7, error="报告生成失败")],
+        )
+        items = (await get_timeline(limit=20, offset=0, db=db))["items"]
+        failed = [i for i in items if i["status"] == "failed"]
+        assert failed, "failed 任务行必须保留（否则失败被 design 行掩盖）"
+        assert failed[0]["error_message"] == "报告生成失败"
+
+    @pytest.mark.asyncio
+    async def test_task_without_record_still_visible(self):
+        """无 record_id 的运行中任务仍须出现（尚未落库，设计记录还不存在）。"""
+        db = _FakeDB(
+            designs=[],
+            checks=[],
+            tasks=[_task(400, "quick_ready", record_id=None)],
+        )
+        items = (await get_timeline(limit=20, offset=0, db=db))["items"]
+        assert any(i.get("task_id") == 400 for i in items), \
+            "尚未落库的任务必须可见（用户点了没反应）"
+
+    @pytest.mark.asyncio
+    async def test_design_row_carries_task_id(self):
+        """design/check 行须回带 task_id——前端本地去重（AiDesign.vue timelineTaskIds）
+        只认带 task_id 的行；不带则该集合对 design 永远为空、去重恒失效，
+        会从残留的 running store 条目再合成一行幻影。"""
+        db = _FakeDB(
+            designs=[_design(52)],
+            checks=[],
+            tasks=[_task(162, "quick_ready", record_id=52)],
+        )
+        items = (await get_timeline(limit=20, offset=0, db=db))["items"]
+        row = next(i for i in items if i["_type"] == "design" and i["id"] == 52)
+        assert row.get("task_id") == 162, f"design 行缺 task_id，前端去重将失效：{row}"
+
+    @pytest.mark.asyncio
+    async def test_check_row_carries_task_id(self):
+        db = _FakeDB(
+            designs=[],
+            checks=[_check(41)],
+            tasks=[_task(193, "quick_ready", record_id=41, task_type="check")],
+        )
+        items = (await get_timeline(limit=20, offset=0, db=db))["items"]
+        row = next(i for i in items if i["_type"] == "check" and i["id"] == 41)
+        assert row.get("task_id") == 193, row
+
+    @pytest.mark.asyncio
+    async def test_design_row_task_id_absent_without_task(self):
+        """无关联任务的 design 行不得凭空造 task_id（前端会拿它去匹配不存在的任务）。"""
+        db = _FakeDB(designs=[_design(3)], checks=[], tasks=[])
+        items = (await get_timeline(limit=20, offset=0, db=db))["items"]
+        row = next(i for i in items if i["_type"] == "design" and i["id"] == 3)
+        assert row.get("task_id") is None, row
+
+
 
 class _StmtCapturingDB:
     """捕获 get_timeline 执行的所有 stmt 字符串（用于断言 SQL 形态）。"""

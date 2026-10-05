@@ -74,8 +74,19 @@ export const useTaskStore = defineStore('task', () => {
     _pageTotal += more.length
   }
 
+  /**
+   * taskId 归一化：后端 task_id 是**整数**，而 _normalizeTask 存成字符串
+   * （历史设计），POST 响应与 WS 推送又都送数字。getTask 过去用 `===` 比较，
+   * 于是 fetchAndMergeTasks（WS 重连时整表替换为字符串键）之后，WS 的数字键
+   * 消息永远匹配不上 → updateTask 静默 no-op + WS 分支 addTask 造出孪生条目
+   * → 残留 running 条目被 AiDesign 合成为幻影行，同一次运行在任务列表出现两条。
+   * 统一在读写两端归一化，让 string/number 指向同一条。
+   */
+  const _tid = (v) => (v === null || v === undefined ? v : String(v))
+
   function getTask(taskId) {
-    return tasks.value.find((t) => t.taskId === taskId) || null
+    const key = _tid(taskId)
+    return tasks.value.find((t) => _tid(t.taskId) === key) || null
   }
 
   // Internal callback registry for WS-driven completion notifications
@@ -83,7 +94,7 @@ export const useTaskStore = defineStore('task', () => {
 
   function registerTaskCompletion(taskId, callback) {
     if (typeof callback === 'function') {
-      _completionCallbacks[taskId] = callback
+      _completionCallbacks[_tid(taskId)] = callback
     }
   }
 
@@ -96,7 +107,7 @@ export const useTaskStore = defineStore('task', () => {
       return existing
     }
     tasks.value.push({
-      taskId,
+      taskId: _tid(taskId),
       type: taskType,
       status: 'running',
       progress: 0,
@@ -114,14 +125,15 @@ export const useTaskStore = defineStore('task', () => {
 
     // Side effects on terminal transitions
     const toast = useToastStore()
+    const key = _tid(taskId)
 
     // Invoke completion callback for any terminal state
-    const hasCb = !!_completionCallbacks[taskId]
+    const hasCb = !!_completionCallbacks[key]
     if (changes.status === 'completed' || changes.status === 'failed') {
-      const cb = _completionCallbacks[taskId]
+      const cb = _completionCallbacks[key]
       if (cb) {
-        try { cb({ taskId, ...changes }) } catch (e) { logger.warn('[taskStore] completion callback error:', e) }
-        delete _completionCallbacks[taskId]
+        try { cb({ taskId: key, ...changes }) } catch (e) { logger.warn('[taskStore] completion callback error:', e) }
+        delete _completionCallbacks[key]
       }
     }
 
@@ -144,7 +156,8 @@ export const useTaskStore = defineStore('task', () => {
   }
 
   function removeTask(taskId) {
-    tasks.value = tasks.value.filter((t) => t.taskId !== taskId)
+    const key = _tid(taskId)
+    tasks.value = tasks.value.filter((t) => _tid(t.taskId) !== key)
   }
 
   function clearCompleted(delay = 5000) {
