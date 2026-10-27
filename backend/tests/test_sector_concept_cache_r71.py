@@ -109,3 +109,61 @@ async def test_r71_ths_fetch_runs_on_long_pool(monkeypatch):
     out = await sim._fetch_ths_industry_indices()
     assert used["long"] == 1
     assert out and out[0]["symbol"] == "885001"
+
+
+# ── R203 (round61): 板块搜索不得返回伪造占位行；两源拆独立预算 ──────────────
+def test_concept_sectors_no_placeholder_rows_on_source_failure(monkeypatch):
+    """R203 负向：概念源全部失败时，fetch_concept_sectors 不得返回 sector_code 为空的占位行。
+
+    旧实现遍历 POPULAR_CONCEPTS 对未命中项追加占位行（sector_code=""），
+    40/40 全是伪造。修复后：源失败返回空列表，不制造假数据。
+    """
+    from app.fetchers import sector_fetcher as sf
+    import app.services.cache_service as cs
+
+    cs.sync_memory_cache.clear()
+
+    # 主源 + 补充分支全部失败
+    monkeypatch.setattr(sf, "_try_two", lambda *a, **k: [])
+    monkeypatch.setattr(sf, "_ak_concept_sectors_v2", lambda: [])
+    monkeypatch.setattr(sf, "lv", type("LV", (), {"sector_em": lambda *a, **k: []})())
+
+    rows = sf.fetch_concept_sectors(limit=600)
+    placeholder = [r for r in rows if not r.get("sector_code")]
+    assert len(placeholder) == 0, \
+        f"源失败时不得返回占位行，实际 {len(placeholder)} 个占位: {[r.get('sector_name') for r in placeholder]}"
+    assert rows == [], f"源失败时应返回空列表，实际 {len(rows)} 行"
+
+
+def test_search_sectors_sources_independent_run_sync(monkeypatch):
+    """R203 负向：_search_sectors 将 industry/concept 两源拆为独立 run_sync，
+    避免单源慢（concept 冷 25.9s）拖累另一源（industry 快）。
+
+    旧实现两源共享一个 run_sync(timeout=10)，concept 慢时必超时，
+    回落 sectors 表兜底（O30 起无写入者）→ 板块搜索恒 0。
+    """
+    from app.routers import market as market_router
+
+    call_order = []
+
+    def _fake_industry(limit=80):
+        call_order.append("industry")
+        return [{"sector_code": "BK0001", "sector_name": "银行", "price": 1.0}]
+
+    def _fake_concept(limit=150):
+        call_order.append("concept")
+        import time as _t
+        _t.sleep(0.05)  # 模拟概念源较慢
+        return [{"sector_code": "BK0002", "sector_name": "半导体", "price": 2.0}]
+
+    monkeypatch.setattr("app.fetchers.sector_fetcher.fetch_industry_sectors", _fake_industry)
+    monkeypatch.setattr("app.fetchers.sector_fetcher.fetch_concept_sectors", _fake_concept)
+
+    import asyncio
+    result = asyncio.run(market_router._search_sectors("银行"))
+
+    # 两源都应被调用（独立预算，慢源不拖累快源）
+    assert "industry" in call_order, "industry 源应被调用"
+    assert "concept" in call_order, "concept 源应被调用"
+    # 搜索到「银行」应命中
+    assert any(r["name"] == "银行" for r in result), f"应命中银行板块，实际: {result}"

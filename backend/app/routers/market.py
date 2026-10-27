@@ -233,13 +233,12 @@ async def _search_sectors(keyword: str, market: str | None = None) -> list[dict[
         from ..fetchers.sector_fetcher import fetch_concept_sectors, fetch_industry_sectors
         from ..core.async_utils import run_sync
 
-        def _collect():
-            rows: list[dict] = []
-            rows.extend(fetch_industry_sectors(200) or [])
-            rows.extend(fetch_concept_sectors(600) or [])
-            return rows
-
-        all_sectors = await run_sync(_collect, timeout=10) or []
+        # R203: 行业/概念两源拆为独立 run_sync，各自预算。旧实现共享一个
+        # run_sync(timeout=10)，概念源冷 25.9s 时必超时，拖累行业源并回落
+        # 到 sectors 表兜底（O30 起无写入者）→ 板块搜索恒 0。
+        industry_rows = await run_sync(lambda: fetch_industry_sectors(200) or [], timeout=10) or []
+        concept_rows = await run_sync(lambda: fetch_concept_sectors(600) or [], timeout=10) or []
+        all_sectors = industry_rows + concept_rows
         for r in all_sectors:
             name = str(r.get("sector_name", "") or "").strip()
             code = str(r.get("sector_code", "") or "").strip()

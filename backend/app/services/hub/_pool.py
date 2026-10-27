@@ -110,18 +110,22 @@ class PoolMixin:
             if key in raw:
                 # O4: raw 因子（RSI 0-100 等）跳过截面 z-score——保留真实量纲
                 continue
-            values = [matrix[s].get(key, 0.0) for s in symbols]
-            # 跳过所有值相同的因子（无截面区分度）
+            # R202: 只对实际持有该 key 的 symbol 做 z-score，缺键不补 0.0。
+            # 旧实现 `matrix[s].get(key, 0.0)` 会把缺键标的都填成 0.0，
+            # z-score 后多个缺键标的值完全相同，导致 factor_breakdown 伪影克隆。
+            has_key = [s for s in symbols if key in matrix[s]]
+            if len(has_key) < 3:
+                continue
+            values = [matrix[s][key] for s in has_key]
             if max(values) - min(values) < 0.001:
                 continue
-            # 跳过只有一两个非零值的因子（归一化后噪声膨胀）
             non_zero = sum(1 for v in values if abs(v) > 0.001)
             if non_zero < 3:
                 continue
             mean = statistics.mean(values)
             std = statistics.stdev(values) or 1.0
-            for s in symbols:
-                matrix[s][key] = (matrix[s].get(key, 0.0) - mean) / std
+            for s in has_key:
+                matrix[s][key] = (matrix[s][key] - mean) / std
 
         return matrix
 

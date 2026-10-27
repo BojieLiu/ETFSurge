@@ -269,27 +269,10 @@ def fetch_concept_sectors(limit: int = 150) -> list[dict[str, Any]]:
                          len(extra) - len(existing_codes), len(rows))
 
     # 确保热门概念出现在结果中（通过模糊匹配）
-    POPULAR_CONCEPTS = [
-        "光模块", "CPO", "半导体设备", "半导体", "芯片", "人工智能", "AI",
-        "算力", "数据中心", "液冷", "机器人", "低空经济", "新能源",
-        "光伏", "储能", "锂电池", "新能源汽车", "智能驾驶", "车路云",
-        "央企改革", "国企改革", "中特估", "高股息", "红利",
-        "消费电子", "华为", "5G", "6G", "信创", "国产软件",
-        "创新药", "生物医药", "医疗器械", "军工", "商业航天",
-        "跨境电商", "物业管理", "旅游", "教育", "证券",
-    ]
+    # R203 (round61): 不再对未命中的 POPULAR_CONCEPTS 追加占位行。
+    # 源不可达时返回空而非伪造数据——下游消费方按真实 sector_code 过滤，
+    # 占位行（sector_code=""）只会污染 board/sector 段。
     found_names = {r.get("sector_name", "") for r in rows}
-    for pop in POPULAR_CONCEPTS:
-        if not any(pop in fn for fn in found_names):
-            _logger.info("[sector_fetcher] popular concept '%s' not found in results — appending placeholder", pop)
-            rows.append({
-                "sector_code": "",
-                "sector_name": pop,
-                "price": 0, "change_pct": 0, "change_amt": 0, "volume": 0, "amount": 0,
-                "amplitude": 0, "turnover_rate": 0, "total_market": 0, "main_inflow": 0,
-                "lead_stock_name": "", "lead_stock_code": "", "lead_stock_chg": 0,
-                "up_count": 0, "down_count": 0,
-            })
 
     return rows[:limit]
 

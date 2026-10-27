@@ -94,3 +94,68 @@ class TestFactorMatrixRespectsRaw:
         assert "technical.rsi.rsi_14" in raw_codes
         assert "technical.rsi.rsi_24" in raw_codes
         assert "technical.macd.macd" not in raw_codes  # macd 仍是 zscore
+
+
+# ── R202 (round61): 缺键不补 0.0，避免 factor_breakdown 伪影克隆 ─────────────
+class TestFactorMatrixMissingKeyNotFilled:
+    """R202: _normalize_matrix 缺键不补 0.0。
+
+    旧实现 `matrix[s].get(key, 0.0)` 在缺键时补 0.0，导致多个缺键标的
+    z-score 后值完全相同，factor_breakdown 出现伪影克隆（19 标的塌成 5 块）。
+    修复后：缺键标的不应在 matrix 中包含该 key。
+    """
+
+    def test_missing_key_not_in_matrix(self):
+        """缺键标的不应在 factor_breakdown 中出现该键（不补 0.0 伪值）。"""
+        pool = {
+            "core": [
+                _pool_entry("510300", {"momentum.etf.return_1m": 0.03, "technical.macd.macd": 0.5}),
+                _pool_entry("511090", {"momentum.etf.return_1m": -0.02, "technical.macd.macd": -0.3}),
+                _pool_entry("512890", {"momentum.etf.return_1m": 0.05, "technical.macd.macd": 0.8}),
+                # 缺 momentum.etf.return_1m 的标的（只有 technical.macd.macd）
+                _pool_entry("588000", {"technical.macd.macd": 0.1}),
+                _pool_entry("159338", {"technical.macd.macd": 0.2}),
+                _pool_entry("510050", {"technical.macd.macd": -0.1}),
+                _pool_entry("159915", {"technical.macd.macd": 0.3}),
+                _pool_entry("512480", {"technical.macd.macd": -0.2}),
+                _pool_entry("513120", {"technical.macd.macd": 0.4}),
+                _pool_entry("518880", {"technical.macd.macd": -0.4}),
+            ]
+        }
+        hub = _hub_with_pool(pool)
+        matrix = hub.get_factor_matrix()
+
+        # 有值的 3 个标的应有该因子键
+        for s in ("510300", "511090", "512890"):
+            assert "momentum.etf.return_1m" in matrix[s], \
+                f"{s} 应有该因子键，实际 keys: {list(matrix[s].keys())}"
+
+        # 缺键的 7 个标的不应有该键（不补 0.0 伪值）
+        missing = ("588000", "159338", "510050", "159915", "512480", "513120", "518880")
+        for s in missing:
+            assert "momentum.etf.return_1m" not in matrix[s], \
+                f"{s} 缺键不应补 0.0 伪值，实际 keys: {list(matrix[s].keys())}"
+
+    def test_missing_keys_between_symbols_must_differ_or_absent(self):
+        """R202 负向：缺键标的之间该键必须缺失，不得出现相同的伪值。
+
+        若改回 `get(key, 0.0)`，所有缺键标的 z-score 后值相同 → 克隆复发。
+        本测试在修复后 PASS，旧实现下 FAIL。
+        """
+        pool = {
+            "core": [
+                _pool_entry("510300", {"style.value.pe_ttm": 8.0, "technical.macd.macd": 0.5}),
+                _pool_entry("511090", {"style.value.pe_ttm": 12.0, "technical.macd.macd": -0.3}),
+                _pool_entry("512890", {"style.value.pe_ttm": 15.0, "technical.macd.macd": 0.8}),
+                # 全部缺 style.value.pe_ttm
+                _pool_entry("588000", {"technical.macd.macd": 0.1}),
+                _pool_entry("159338", {"technical.macd.macd": 0.2}),
+            ]
+        }
+        hub = _hub_with_pool(pool)
+        matrix = hub.get_factor_matrix()
+
+        missing = ("588000", "159338")
+        for s in missing:
+            assert "style.value.pe_ttm" not in matrix[s], \
+                f"负向：{s} 缺键不应补 0.0，矩阵中不应出现 style.value.pe_ttm"
