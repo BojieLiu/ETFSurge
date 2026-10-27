@@ -128,7 +128,8 @@ async def _pipeline_body(mgr, task_id: int) -> dict:
                 # round24 R5: 结构化兜底标识持久化
                 llm_layer_ok=str(bool(result.get("llm_layer_ok", True))).lower(),
                 is_fallback=str(bool(result.get("is_fallback", False))).lower(),
-                report_quality=result.get("report_quality", "full") or "full",
+                # R207: 缺键即 empty（空组合分支不返 report_quality 时不得兜底成 full）
+                report_quality=result.get("report_quality") or "empty",
             )
             db.add(record)
             await db.commit()

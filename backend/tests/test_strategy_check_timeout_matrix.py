@@ -555,7 +555,8 @@ def test_has_real_factor_values_partial_below_threshold_false():
     assert _has_real_factor_values(_partial_tech_fs()) is False
 
 
-def test_llm_timeout_for_static_only_30s():
+@pytest.mark.asyncio
+async def test_llm_timeout_for_static_only_30s(monkeypatch):
     """全部标的仅静态因子 → all_empty=True → 15s（old 判 90s 的错已修复）。
 
     注：_llm_timeout_for(data_quality) 按 all_empty/partial 分级——P0-F 的 30s
@@ -564,6 +565,16 @@ def test_llm_timeout_for_static_only_30s():
     文档 P3-H 断言口径是「仅静态因子→partial→30s」——这里验证 all_empty 与
     partial 两分支都不返回 90s。
     """
+    import app.monitor.token_usage as tu_mod
+    from app.services.portfolio_service import _llm_timeout_for
+
+    # 无历史数据 → partial 回退 30s（R206）
+    class _EmptyStore:
+        async def load_all(self, cutoff_ts=None):
+            return []
+
+    monkeypatch.setattr(tu_mod, "token_store", _EmptyStore())
+
     dq_empty = {
         "filled_count": 0, "total_count": 3, "all_empty": True,
         "partial": False, "fallback_count": 3, "fallback_ratio": 1.0,
@@ -572,15 +583,15 @@ def test_llm_timeout_for_static_only_30s():
         "filled_count": 1, "total_count": 3, "all_empty": False,
         "partial": True, "fallback_count": 2, "fallback_ratio": 0.67,
     }
-    assert _llm_timeout_for(dq_empty) == 15
-    assert _llm_timeout_for(dq_partial) == 30
+    assert await _llm_timeout_for(dq_empty) == 15
+    assert await _llm_timeout_for(dq_partial) == 30
     # 完整数据（全部技术因子 real）→ 180s（round27 R43: 75→180，对齐 DeepSeek
     # 流式首字节实测 34-78s + 报告 token 更长，避免恒超时落规则兜底）
     dq_full = {
         "filled_count": 3, "total_count": 3, "all_empty": False,
         "partial": False, "fallback_count": 0, "fallback_ratio": 0.0,
     }
-    assert _llm_timeout_for(dq_full) == 180
+    assert await _llm_timeout_for(dq_full) == 180
 
 
 # ===== folded from test_round20_strategy_check_p05_p18.py =====
@@ -1312,24 +1323,45 @@ class TestP2FLlmReportCache:
 """
 
 
-def test_data_complete_timeout_is_180_not_75():
+@pytest.mark.asyncio
+async def test_data_complete_timeout_is_180_not_75():
     """R43 主修复：数据完整分支必须 180s（负向：仍是 75 → FAIL）。"""
     dq_full = {"all_empty": False, "partial": False}
-    assert _llm_timeout_for(dq_full) == 180, "数据完整分支应为 180s（round27 R43: 75→180）"
+    assert await _llm_timeout_for(dq_full) == 180, "数据完整分支应为 180s（round27 R43: 75→180）"
 
 
-def test_timeout_tiers_unchanged():
+@pytest.mark.asyncio
+async def test_timeout_tiers_unchanged(monkeypatch):
     """分支分级保持：all_empty=15 / partial=30 / full=180。"""
-    assert _llm_timeout_for({"all_empty": True}) == 15
-    assert _llm_timeout_for({"all_empty": False, "partial": True}) == 30
-    assert _llm_timeout_for({"all_empty": False, "partial": False}) == 180
+    import app.monitor.token_usage as tu_mod
+
+    # 无历史数据 → partial 回退 30s（R206）
+    class _EmptyStore:
+        async def load_all(self, cutoff_ts=None):
+            return []
+
+    monkeypatch.setattr(tu_mod, "token_store", _EmptyStore())
+
+    assert await _llm_timeout_for({"all_empty": True}) == 15
+    assert await _llm_timeout_for({"all_empty": False, "partial": True}) == 30
+    assert await _llm_timeout_for({"all_empty": False, "partial": False}) == 180
 
 
-def test_full_budget_absorbs_real_first_byte():
+@pytest.mark.asyncio
+async def test_full_budget_absorbs_real_first_byte(monkeypatch):
     """R43 现实证真：DeepSeek 首字节实测 34-78s、单报告更长，180s 预算可容纳；
     旧 75s 在首字节 60s 时仅剩 15s 生成 → 必超时。
     """
-    budget = _llm_timeout_for({"all_empty": False, "partial": False})
+    import app.monitor.token_usage as tu_mod
+
+    # 无历史数据 → partial 回退 30s（R206）
+    class _EmptyStore:
+        async def load_all(self, cutoff_ts=None):
+            return []
+
+    monkeypatch.setattr(tu_mod, "token_store", _EmptyStore())
+
+    budget = await _llm_timeout_for({"all_empty": False, "partial": False})
     first_byte = 60.0  # 首字节实测上沿附近
     assert budget > first_byte, "180s 预算应大于首字节延迟，留出生成余量"
     assert budget - first_byte >= 60.0, "至少应留 60s 生成余量（否则复现旧 75s 截断）"
@@ -2014,12 +2046,22 @@ class TestR57StrategyCheckInnerTimeout:
         assert rt.connect == 60.0, f"内层 connect 应为 60s（对齐慢首字节实测），实际 {rt.connect}"
         assert rt.read == 90.0, f"read 应保持 90s 容纳长生成，实际 {rt.read}"
 
-    def test_outer_budget_still_dominant(self):
+    @pytest.mark.asyncio
+    async def test_outer_budget_still_dominant(self, monkeypatch):
         """外层 _llm_timeout_for 数据完整档仍为 180s（内外层超时层级不变）。"""
+        import app.monitor.token_usage as tu_mod
         from app.services.portfolio_service import _llm_timeout_for
-        assert _llm_timeout_for({"all_empty": False, "partial": False}) == 180
-        assert _llm_timeout_for({"all_empty": True}) == 15
-        assert _llm_timeout_for({"all_empty": False, "partial": True}) == 30
+
+        # 无历史数据 → partial 回退 30s（R206）
+        class _EmptyStore:
+            async def load_all(self, cutoff_ts=None):
+                return []
+
+        monkeypatch.setattr(tu_mod, "token_store", _EmptyStore())
+
+        assert await _llm_timeout_for({"all_empty": False, "partial": False}) == 180
+        assert await _llm_timeout_for({"all_empty": True}) == 15
+        assert await _llm_timeout_for({"all_empty": False, "partial": True}) == 30
 
 
 # ===================================================================

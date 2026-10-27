@@ -85,10 +85,15 @@ async def strategy_check(
         # P1-16 (round9 §4.5): 空组合附诊断——记录查询条件/行数/过滤明细，
         # 区分「真空组合」与「查询条件异常」（旧裸文案无任何诊断信息）
         diag = await _empty_portfolio_diagnosis(db, portfolio_type)
+        # R207: 显式返回 empty 档，不得被 strategy_check_worker.py:131
+        # 的 or "full" 兜底成 full；LLM 层未参与，is_fallback=False。
         return {
             "summary": "组合为空，请先添加ETF或生成组合方案",
             "suggestions": [],
             "empty_diagnosis": diag,
+            "report_quality": "empty",
+            "is_fallback": False,
+            "llm_layer_ok": False,
         }
 
     # Build price map - handle both SQLAlchemy objects and dicts
@@ -257,7 +262,7 @@ async def strategy_check(
     else:
         _llm_start = _time.monotonic()
         _llm_diag = ""
-        _llm_timeout = _llm_timeout_for(data_quality)
+        _llm_timeout = await _llm_timeout_for(data_quality)
         try:
             llm_result = await asyncio.wait_for(
                 generate_strategy_check_report(
@@ -720,22 +725,36 @@ def _build_llm_fail_summary(duration_s: float, diag: str, data_quality: dict | N
     )
 
 
-def _llm_timeout_for(data_quality: dict) -> int:
+async def _llm_timeout_for(data_quality: dict) -> int:
     """O25② (round7 §7 P25): LLM 超时按数据完整性分级。
 
     - all_empty（上下文不足）→ 15s 快速兜底（快速失败更合理，不必等满）
-    - partial → 30s（有部分数据，多给 LLM 一点时间消化）
+    - partial → 按 provider 24h 实测 duration p95 × 1.5（无历史数据回退 30s）
+      （R206: 旧实现恒 30s 骑在 provider 实测 34.2s 边界 → 外层先砍）
     - 数据完整 → 180s（round27 R43: 75→180，对齐 DeepSeek 流式首字节实测
       34-78s、单报告 token 更长；此前 75s 几乎必然超时 → 恒落规则兜底，用户
       永不见 AI 策略检查报告。180s 留足首字节 + 生成余量，与 design-report 的
       120s 同量级偏宽松。provider 无响应时预算-重试一致性见
-      tests/test_round14_llm_budget_consistency.py）
-    旧实现恒 30s：数据采集也占 30s，LLM 实际剩余不足 → 恒超时（round7 P5）。
+      tests/test_llm_stream_retry.py）
     """
     if data_quality.get("all_empty"):
         return 15
     if data_quality.get("partial"):
-        return 30
+        # R206: 按 provider 实测 p95 × 1.5，避免固定 30s 骑在延迟边界
+        try:
+            from ...monitor.token_usage import token_store
+            records = await token_store.load_all(cutoff_ts=None)
+            durations = sorted(
+                r.duration_ms for r in records
+                if r.function_name == "generate_strategy_check_report" and r.success
+            )
+            if durations:
+                p95_idx = min(len(durations) - 1, max(0, int(len(durations) * 0.95)))
+                p95_ms = durations[p95_idx]
+                return max(30, int(p95_ms / 1000 * 1.5))
+        except Exception:
+            pass
+        return 30  # 无历史数据时回退保守兜底
     return 180
 
 

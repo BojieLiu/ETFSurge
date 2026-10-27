@@ -896,10 +896,10 @@ async def generate_strategy_check_report(
         # 不匹配。max_retries=1 时最坏 (1+1)×2providers×35s=140s > 0.9×90s=81s——
         # 第 1 轮双 provider 失败耗时 71.5s 已耗光预算，第 2 轮开始即被外层截断
         # （CancelledError 兜底）。改为 max_retries=0（1 轮双 provider 失败立即兜底，
-        # 不进入会超预算的重试），外层 _llm_timeout_for 完整档同步 90s→75s
-        # （对齐 71.5s 实测最坏 + 余量）：2×35=70 ≤ 75 通过一致性断言。
-        # 注释修正：旧注释「与 P0-F 的 30s 外层预算配套」过时——外层实际按
-        # _llm_timeout_for(data_quality) 分级（完整 75s / partial 30s / all_empty 15s）。
+        # 不进入会超预算的重试），外层 _llm_timeout_for 按数据完整性分级：
+        # 完整档 180s（对齐 DeepSeek 实测 34-78s 首字节），partial 档按 provider
+        # 24h 实测 p95 × 1.5（无历史数据回退 30s），all_empty 15s。
+        # 连续 2 次双 provider 失败耗时 71.5s 仍在完整档 180s 预算内。
         return await get_agent("strategy_check").run_json(
             prompt,
             max_retries=0,
@@ -907,8 +907,8 @@ async def generate_strategy_check_report(
             # httpx.Timeout: connect 60s / read 90s——connect 容纳 DeepSeek 慢连接/
             # 慢首字节（实测 34-78s），read 容纳长报告生成（实测 21.8s / 4004 SSE
             # chunks）。max_retries=0 最坏 2×connect60=120s ≤ 外层完整档 180s；
-            # partial 30s / all_empty 15s 分级档 connect 只在数据完整档才有机会跑满，
-            # 低档本就该快速兜底。
+            # partial 档按 p95×1.5 计算（无历史数据回退 30s），低档本就该
+            # 快速兜底。
             request_timeout=llm_http_timeout(read_s=STRATEGY_CHECK_READ_S),
         )
     except BaseException as e:  # noqa: BLE001 — F1-9: 必须捕获 CancelledError（BaseException）

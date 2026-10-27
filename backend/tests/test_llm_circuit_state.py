@@ -416,3 +416,38 @@ async def test_r05_stream_success_between_403s_resets_streak(monkeypatch):
     assert any(i.get("type") == "error" for i in out3), out3
     assert fake.probes["zen"] == 6, fake.probes
     assert not llm.client._r05_403_allow("opencode_zen"), "连续 2 次 403 后仍未拉黑"
+
+
+# ── R204 (round61): SSE 路径 R05 读侧守卫 ────────────────────────────────
+@pytest.mark.asyncio
+async def test_r05_stream_read_guard_blocks_probed_when_f8_allows(monkeypatch):
+    """R204 负向：即使 F8 熔断允许探测（_circuit_allow 恒 True），R05 403 拉黑后
+    第 2 次调用对该 provider 仍必须零探测。
+
+    修复前 llm_complete_stream 无 _r05_403_allow 读侧，此测试必 FAIL。
+    """
+    llm.client._r05_403_reset()
+    effects = [
+        _make_403_stream_exc(signature=False), _make_403_stream_exc(signature=False),
+    ]
+    fake = _FakeStreamClient(effects)
+    monkeypatch.setattr(
+        llm.client, "get_configured_providers", lambda: [_prov("opencode_zen")]
+    )
+    monkeypatch.setattr(llm.client, "_check_key", _noop)
+    monkeypatch.setattr(llm.token_store, "record", _noop)
+    monkeypatch.setattr("httpx.AsyncClient", lambda *a, **k: fake)
+    monkeypatch.setattr(asyncio, "sleep", _noop)
+    # F8 放行所有探测，单独验证 R05 读侧
+    monkeypatch.setattr(llm.client, "_circuit_allow", lambda *a, **k: True)
+
+    # 第 1 次调用：两轮 403 → 拉黑
+    out1 = await _drain(llm.llm_complete_stream("sys", "p"))
+    assert any(i.get("type") == "error" for i in out1), out1
+    assert fake.probes["zen"] == 2, fake.probes
+    assert not llm.client._r05_403_allow("opencode_zen"), "2 次 403 后应被拉黑"
+
+    # 第 2 次调用：R05 读侧必须零探测（即使 F8 放行）
+    out2 = await _drain(llm.llm_complete_stream("sys", "p"))
+    assert fake.probes["zen"] == 2, f"R05 读侧未生效，仍探测了 {fake.probes} 次"
+    assert any(i.get("type") == "error" for i in out2), out2

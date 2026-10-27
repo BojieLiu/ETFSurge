@@ -334,6 +334,9 @@ async def llm_complete_stream(
             # F8: 熔断 OPEN 态直接跳过（零探测）
             if not _circuit_allow(provider.id, provider.model):
                 continue
+            # R05: 403 拉黑期内直接跳过（零探测）——与 llm_complete_with_system:597 对齐
+            if not _r05_403_allow(provider.id):
+                continue
             _attempted_any = True
             if provider.id == "openrouter":
                 # §19.9 约束#4/验收#6: 中间层承流即打标（同 llm_complete）
@@ -416,10 +419,10 @@ async def llm_complete_stream(
                 if _is_429:
                     _any_429 = True
                     _last_429_headers = getattr(_resp, "headers", None)
-                # round59 R05: 403 记连击。SSE 路径此前只**读**熔断
-                #（:335 的 _r05_403_allow），从不**写**——本函数内零 _r05_403_record
-                # → 连击数永不累计 → 熔断永不触发，每次调用都要把同一批死模型重新
-                # 探一遍（实测 6/7 候选 403，单次白等 ≈6s，doc §1.3）。
+                # round59 R05: 403 记连击。SSE 路径此前只**写**熔断（:335 的 _r05_403_record）
+                #，现补 **读**侧（:337 的 _r05_403_allow），被 403 拉黑的 provider 零探测；
+                # 顺序约束（round58 §B 确立）：必须在 _circuit_record_failure **之前**
+                # 记录，否则 403 归因会被通用熔断先吃掉。
                 # 顺序约束（round58 §B 确立）：必须在 _circuit_record_failure **之前**
                 # 记录，否则 403 归因会被通用熔断先吃掉。
                 _is_403 = (

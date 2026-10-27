@@ -149,36 +149,53 @@ def _consistency(max_retries: int, budget: int, request_timeout: float = 60.0) -
         return worst <= 0.9 * budget
     return worst <= budget
 class TestBudgetRetryConsistency:
-    def test_full_quality_budget_consistent(self):
+    @pytest.mark.asyncio
+    async def test_full_quality_budget_consistent(self):
         """完整档 180s：max_retries=0 时 2×60=120 ≤ 180 PASS（round28 R57: connect 15→60）。"""
-        budget = _llm_timeout_for({"all_empty": False, "partial": False})
+        from app.services.portfolio_service import _llm_timeout_for
+        budget = await _llm_timeout_for({"all_empty": False, "partial": False})
         assert budget == 180, "完整档预算应为 180s（round27 R43: 75→180）"
         assert _consistency(STRATEGY_CHECK_MAX_RETRIES, budget, STRATEGY_CHECK_REQUEST_TIMEOUT)
 
-    def test_max_retries_regression_flagged(self):
+    @pytest.mark.asyncio
+    async def test_max_retries_regression_flagged(self):
         """防回归：预算 180s + inner connect 60s（R57），max_retries 仍必须保持 0
         （429 退避/慢响应容差纪律，见 llm.py 注释）。max_retries=0 下最坏 2×60=120
         ≤ 180 一致；若改回 1，下面断言 FAIL。"""
-        budget = _llm_timeout_for({"all_empty": False, "partial": False})
+        from app.services.portfolio_service import _llm_timeout_for
+        budget = await _llm_timeout_for({"all_empty": False, "partial": False})
         assert budget == 180, "完整档预算应为 180s（round27 R43: 75→180）"
         # max_retries=0 下预算-重试一致（2×60=120 ≤ 180）
         assert _consistency(STRATEGY_CHECK_MAX_RETRIES, budget, STRATEGY_CHECK_REQUEST_TIMEOUT), \
             "max_retries=0 时预算-重试应一致"
         assert STRATEGY_CHECK_MAX_RETRIES == 0, "max_retries 必须保持 0（429 退避/慢响应容差）"
 
-    def test_low_tiers_outer_cancels_before_inner_connect(self):
+    @pytest.mark.asyncio
+    async def test_low_tiers_outer_cancels_before_inner_connect(self, monkeypatch):
         """R57: partial 30s / all_empty 15s 档——外层 wait_for 预算 < inner connect(60s)，
         外层先取消（诚实快速兜底），无需 inner connect 跑满。断言外层预算恒 < 60s。"""
+        import app.monitor.token_usage as tu_mod
+        from app.services.portfolio_service import _llm_timeout_for
+
+        # 无历史数据 → partial 回退 30s（R206）
+        class _EmptyStore:
+            async def load_all(self, cutoff_ts=None):
+                return []
+
+        monkeypatch.setattr(tu_mod, "token_store", _EmptyStore())
+
         for desc, q in (("partial", {"all_empty": False, "partial": True}),
                         ("all_empty", {"all_empty": True, "partial": False})):
-            budget = _llm_timeout_for(q)
+            budget = await _llm_timeout_for(q)
             assert budget < STRATEGY_CHECK_REQUEST_TIMEOUT, (
                 f"{desc} 档外层预算 {budget}s 应 < inner connect {STRATEGY_CHECK_REQUEST_TIMEOUT}s"
                 f"（外层先取消兜底，R57）"
             )
 
-    def test_all_empty_budget_15(self):
-        assert _llm_timeout_for({"all_empty": True}) == 15
+    @pytest.mark.asyncio
+    async def test_all_empty_budget_15(self):
+        from app.services.portfolio_service import _llm_timeout_for
+        assert await _llm_timeout_for({"all_empty": True}) == 15
 class TestStrategyCheckLlMCallParams:
     def test_run_json_uses_max_retries_zero(self):
         """generate_strategy_check_report 的 run_json 必须 max_retries=0 + connect=60s（round28 R57）。"""

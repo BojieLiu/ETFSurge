@@ -155,6 +155,102 @@ def test_q04_normal_allocation_no_footnote():
     assert "一致" not in result  # No consistency footnote for normal case
 
 
+# ── R207 (round61): empty portfolio must return report_quality="empty" ────
+class _MockExecResult:
+    def scalars(self):
+        return self
+
+    def all(self):
+        return []
+
+
+class _MockDb:
+    async def execute(self, *a, **k):
+        return _MockExecResult()
+
+
+@pytest.mark.asyncio
+async def test_r207_empty_portfolio_report_quality_empty(monkeypatch):
+    """R207 负向：空组合必须返回 report_quality="empty"，不得被 worker
+    的 or "full" 兜底成 "full"。
+
+    旧实现空组合分支不返 report_quality → strategy_check_worker.py:131
+    allow="full"。修复后空组合分支显式返回 empty。
+    """
+    import importlib
+    sc_mod = importlib.import_module("app.services.portfolio.strategy_check")
+
+    async def _empty_etfs(db, portfolio_type=None):
+        return []
+
+    monkeypatch.setattr(sc_mod, "list_etfs", _empty_etfs)
+
+    result = await sc_mod.strategy_check(_MockDb(), 500000.0, None, "on_exchange")
+    assert result.get("report_quality") == "empty", \
+        f"空组合应返回 report_quality='empty', 实际: {result.get('report_quality')}"
+    assert result.get("is_fallback") is False, \
+        f"空组合不应标记为 fallback: {result.get('is_fallback')}"
+    assert result.get("llm_layer_ok") is False, \
+        f"空组合 LLM 层应不可用: {result.get('llm_layer_ok')}"
+
+
+# ── R206 (round61): N1 partial 档按 provider 实测 p95 × 1.5 ───────────────
+class _UR:
+    """UsageRecord 构造简化版。"""
+    def __init__(self, duration_ms: float, function_name: str = "generate_strategy_check_report"):
+        import time as _t
+        self.function_name = function_name
+        self.duration_ms = duration_ms
+        self.success = True
+        self.timestamp = _t.time()
+
+
+class _FakeTokenStore:
+    def __init__(self, records):
+        self._records = records
+
+    async def load_all(self, cutoff_ts=None):
+        import time as _t
+        if cutoff_ts is None:
+            cutoff_ts = _t.time() - 86400
+        return [r for r in self._records if r.timestamp >= cutoff_ts]
+
+
+@pytest.mark.asyncio
+async def test_r206_partial_timeout_uses_provider_p95(monkeypatch):
+    """R206 负向：partial 档按 provider 实测 p95 × 1.5，而非固定 30s。
+
+    修复前 partial 恒 30s，骑在 provider 实测 34.2s 边界 → 外层先砍。
+    本测试 mock token_store 返回 24h 内 5 条记录（duration_ms: 1000, 2000, 3000, 4000, 34200），
+    p95 ≈ 34200ms，×1.5 ≈ 51300ms → 51s。
+    """
+    import importlib
+    sc_mod = importlib.import_module("app.services.portfolio.strategy_check")
+    import app.monitor.token_usage as tu_mod
+
+    records = [_UR(d) for d in [1000, 2000, 3000, 4000, 34200]]
+    fake_store = _FakeTokenStore(records)
+    monkeypatch.setattr(tu_mod, "token_store", fake_store)
+
+    timeout_s = await sc_mod._llm_timeout_for({"partial": True})
+    # p95 of [1000, 2000, 3000, 4000, 34200] = 34200 (index 4), ×1.5 = 51300ms = 51s
+    assert timeout_s == 51, f"partial 档应按 p95×1.5 计算，实际 {timeout_s}s"
+
+
+@pytest.mark.asyncio
+async def test_r206_partial_timeout_no_data_falls_back_to_30s(monkeypatch):
+    """R206：无历史数据时 partial 档回退 30s（保守兜底）。"""
+    import importlib
+    sc_mod = importlib.import_module("app.services.portfolio.strategy_check")
+    import app.monitor.token_usage as tu_mod
+
+    fake_store = _FakeTokenStore([])
+    monkeypatch.setattr(tu_mod, "token_store", fake_store)
+
+    timeout_s = await sc_mod._llm_timeout_for({"partial": True})
+    assert timeout_s == 30, f"无数据时应回退 30s，实际 {timeout_s}s"
+
+
 # ─── verify_e2e quality assertions (test the test logic) ──────
 
 

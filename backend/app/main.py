@@ -402,21 +402,36 @@ async def lifespan(app: FastAPI):
     logger.info("市态+情绪缓存刷新循环已启动（120s）")
 
     # Start news refresh loop (120s, v6 Phase 1: news aggregation cache)
+    # R205: 后台新闻摘要 LLM 扇出冷却——距上次 enrich 调用 < NEWS_ENRICH_COOLDOWN_S
+    # 时跳过 LLM 摘要，避免每 120s 都重试烧配额（原实测 51 次/小时，与交互
+    # 路径争 DeepSeek 配额）。
+    _last_news_enrich_call_ts: float | None = None
+    NEWS_ENRICH_COOLDOWN_S = 10 * 60  # 10 分钟
+
     async def _news_refresh_loop():
+        nonlocal _last_news_enrich_call_ts
         while True:
             try:
                 from .services.market_data_hub import market_data_hub
                 await asyncio.wait_for(asyncio.to_thread(market_data_hub.refresh_news), timeout=20)
                 # R5-1-1: 预热期 LLM 错峰——预热完成前跳过 LLM 附属调用（news 摘要）。
-                # 旧逻辑启动即触发 enrich_news_summaries → 与设计任务并发打满 DeepSeek
-                # 配额 → 429（F3-6 退避在 45s DATA 预算内来不及）。预热完成后才恢复。
                 _warmup_done = all(
                     v.get("done") for v in getattr(app.state, "warmup", {}).values()
                 )
                 if _warmup_done:
-                    # Z18: 后台为重要新闻生成 AI 摘要（不阻塞刷新循环，失败静默）；
-                    # round35 §11-T-①: 并入任务容器（强引用 + 完成自动摘除）。
-                    _spawn(market_data_hub.enrich_news_summaries(), name="news-enrich")
+                    now = time.time()
+                    if (
+                        _last_news_enrich_call_ts is not None
+                        and now - _last_news_enrich_call_ts < NEWS_ENRICH_COOLDOWN_S
+                    ):
+                        logger.debug(
+                            "[lifespan] news enrich cooldown — skipping LLM summaries"
+                        )
+                    else:
+                        # Z18: 后台为重要新闻生成 AI 摘要（不阻塞刷新循环，失败静默）；
+                        # round35 §11-T-①: 并入任务容器（强引用 + 完成自动摘除）。
+                        _last_news_enrich_call_ts = now
+                        _spawn(market_data_hub.enrich_news_summaries(), name="news-enrich")
                 else:
                     logger.info("[lifespan] warmup in progress — skipping LLM news summaries (R5-1-1)")
             except Exception:
