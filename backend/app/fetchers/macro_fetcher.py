@@ -31,20 +31,26 @@ _MACRO_SOURCE_TIMEOUT = 8.0
 
 
 def _stale_note(date_str: str, source: str, months: int = 3) -> tuple[bool, str]:
-    """判断数据是否滞后 >3 个月 → (stale, note)。兼容 YYYY-MM-DD 与 YYYY-MM。"""
+    """判断数据是否滞后 >3 个月 → (stale, note)。兼容 YYYY-MM-DD / YYYY-MM / YYYY年MM月份。
+
+    R201 fail-closed：解析失败（含 `YYYY年MM月份` 等非标准格式）一律 stale=True，
+    不得 fail-open——否则 2008 年的数据会被当成新鲜数据进入 LLM 报告。
+    """
     s = str(date_str or "").strip()
     if not s:
         return False, ""
+    # R201: 先把 `YYYY年MM月份` 归一化成 `YYYY-MM`，再走标准解析；
+    # 归一化失败（非法串）→ fail-closed（stale=True），不吞异常。
+    normalized = s.replace("年", "-").replace("月份", "").replace("月", "").strip()
     try:
-        # 月份格式 YYYY-MM（如 2025-09）→ 补 -01
-        if len(s) == 7 and s[4] == "-":
-            d = datetime.strptime(s + "-01", "%Y-%m-%d")
+        if len(normalized) == 7 and normalized[4] == "-":
+            d = datetime.strptime(normalized + "-01", "%Y-%m-%d")
         else:
-            d = datetime.strptime(s[:10], "%Y-%m-%d")
+            d = datetime.strptime(normalized[:10], "%Y-%m-%d")
         if (datetime.now() - d) > timedelta(days=months * 30):
             return True, f"数据滞后至{s[:7]}（{source}），仅作趋势参考"
     except (ValueError, TypeError):
-        pass
+        return True, f"数据日期格式无法解析（{source}），仅作趋势参考"
     return False, ""
 
 
@@ -117,9 +123,12 @@ def fetch_money_supply() -> dict | None:
     if df is None or df.empty:
         return None
     df = _decode_df(df)
-    row = df.iloc[-1]
-    date_str = str(row.get("月份", "") or row.get("日期", "") or "")
-    stale, note = _stale_note(date_str, "数据源")
+    row = _latest_row(df)  # R201: 取「月份最大」一行，兼容 akshare 升降序
+    _date_raw = str(row.get("月份", "") or row.get("日期", "") or "")
+    # R201: 归一化日期格式（YYYY年MM月份 / YYYY-MM → YYYY-MM），便于下游展示
+    _date_norm = _date_raw.replace("年", "-").replace("月份", "").replace("月", "").strip()
+    date_str = _date_norm[:10] if _date_norm else ""
+    stale, note = _stale_note(_date_raw, "数据源")
 
     def _num(*keys):
         for k in keys:
@@ -563,6 +572,9 @@ def fetch_macro_snapshot() -> dict | None:
         return [float(x) for x in pd.to_numeric(df[col], errors="coerce").dropna().tolist() if float(x) == float(x)]
 
     m2_vals = _series_vals(m2_df, "货币和准货币(M2)")
+    # akshare 宏观接口返回「最新在前」，_series_vals 保持原序；
+    # 反转为「最新在后」再取末值，避免取到历史最早行（R201）。
+    m2_vals = m2_vals[::-1]
     lpr_vals = _series_vals(lpr_df, "LPR1Y")
 
     m2_now = m2_vals[-1] if m2_vals else None

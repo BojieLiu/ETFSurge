@@ -729,7 +729,9 @@ def _sort_search_results(items: list[dict], keyword: str) -> list[dict]:
     def _rank(item: dict):
         sym = str(item.get("symbol", "") or "")
         name = str(item.get("name", "") or "")
-        asset_type = str(item.get("asset_type", "") or "").lower()
+        # R200: 排序契约改读 type——fetch_etf_list 回退路径的 asset_type 是市场码
+        # （"A"），按 asset_type=="etf" 会把 A 股 ETF 排到个股层。
+        item_type = str(item.get("type", "") or "").lower()
         market = str(item.get("market", "") or "")
 
         if sym.lower() == kw_lower:
@@ -751,7 +753,7 @@ def _sort_search_results(items: list[dict], keyword: str) -> list[dict]:
         else:
             tier = 7
 
-        type_rank = 0 if asset_type == "etf" else 1
+        type_rank = 0 if item_type == "etf" else 1
         market_rank = {
             "A": 1, "HK": 2, "US": 3,
             "index": 4, "commodity": 4, "gold": 4, "oil": 4, "silver": 4,

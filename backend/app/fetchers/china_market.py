@@ -1867,7 +1867,7 @@ def search_etf(keyword: str) -> list[dict[str, Any]]:
                 "symbol": row["代码"], "name": row["名称"],
                 "price": float(row.get("最新价", 0) or 0),
                 "change_pct": float(row.get("涨跌幅", 0) or 0),
-                "asset_type": "A",
+                "market": "A", "type": "etf", "asset_type": "A",
             })
         sync_memory_cache.set(cache_key, results, 60)
         return results
@@ -1905,7 +1905,7 @@ def fetch_etf_list() -> list[dict[str, Any]]:
                 "name": str(row[name_col]),
                 "price": price,
                 "change_pct": change_pct,
-                "asset_type": "A",
+                "market": "A", "type": "etf", "asset_type": "A",
             })
         return results
     except Exception:
@@ -1923,7 +1923,7 @@ def fetch_etf_list() -> list[dict[str, Any]]:
                     "name": str(row["名称"]),
                     "price": float(row.get("最新价", 0) or 0),
                     "change_pct": float(row.get("涨跌幅", 0) or 0),
-                    "asset_type": "A",
+                    "market": "A", "type": "etf", "asset_type": "A",
                 }
                 for _, row in df.iterrows()
             ]

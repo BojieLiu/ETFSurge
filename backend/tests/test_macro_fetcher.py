@@ -28,12 +28,63 @@ def _clear():
     sync_memory_cache.clear()
 
 
+# ── R201 (round61): 宏观取数行序 + _stale_note fail-closed ──────────────────
+def test_money_supply_picks_latest_row(monkeypatch):
+    """R201 负向守卫：fetch_money_supply 必须取「月份最大」的一行。
+
+    akshare 宏观接口实测为降序（最新在前），旧实现 `df.iloc[-1]` 取到最老一行
+    （2008年01月份，M1 20.54 / M2 18.88），而真值 M1 4.1 / M2 7.5。
+    本夹具按真实行序构造（最新在前）→ 旧实现必 FAIL。
+    """
+    _clear()
+    df = pd.DataFrame([
+        # 最新在前（真实 akshare 行序）：M1=4.1, M2=7.5
+        ["2026年08月份", 100, 7.5, 0.1, 50, 4.1, 0.0, 20, 3.0, 0.0],
+        ["2026年07月份", 101, 7.3, 0.1, 51, 4.3, 0.0, 21, 3.0, 0.0],
+        ["2008年01月份", 102, 18.88, 0.1, 52, 20.54, 0.0, 22, 3.0, 0.0],  # 最老在后
+    ], columns=[
+        "月份", "货币和准货币(M2)-数量(亿元)", "货币和准货币(M2)-同比增长",
+        "货币和准货币(M2)-环比增长", "货币(M1)-数量(亿元)", "货币(M1)-同比增长",
+        "货币(M1)-环比增长", "流通中的现金(M0)-数量(亿元)", "流通中的现金(M0)-同比增长",
+        "流通中的现金(M0)-环比增长",
+    ])
+
+    def _fake_ak():
+        return df
+
+    with patch("akshare.macro_china_money_supply", side_effect=_fake_ak), \
+         patch.object(macro_fetcher, "run_in_thread", _rt):
+        r = macro_fetcher.fetch_money_supply()
+    assert r is not None
+    assert r["date"] == "2026-08", f"必须取最新行，实际: {r['date']}"
+    assert r["m1_yoy"] == pytest.approx(4.1), f"M1 应为 4.1（最新行），实际: {r['m1_yoy']}"
+    assert r["m2_yoy"] == pytest.approx(7.5), f"M2 应为 7.5（最新行），实际: {r['m2_yoy']}"
+    assert r["stale"] is False, "最新数据不应标 stale"
+
+
+def test_stale_note_fail_closed_on_chinese_date():
+    """R201 负向守卫：_stale_note 对 `YYYY年MM月份` 格式必须 fail-closed。
+
+    旧实现走 else 分支 → strptime 抛 ValueError 被 except 吞掉 → return False, ""（fail-open），
+    导致 2008 年的数据不被标 stale。修复后必须返回 stale=True。
+    """
+    stale, note = macro_fetcher._stale_note("2008年01月份", "数据源")
+    assert stale is True, f"非法日期格式必须 fail-closed，实际 stale={stale}"
+    assert note, "fail-closed 时 note 必须非空"
+
+
+def test_stale_note_fail_closed_on_garbage():
+    """R201 负向守卫：完全非法的日期串同样 fail-closed。"""
+    stale, _ = macro_fetcher._stale_note("not-a-date", "数据源")
+    assert stale is True, f"非法日期串必须 fail-closed，实际 stale={stale}"
+
+
 # ── fetch_lpr ───────────────────────────────────────────────
 def test_lpr_last_row_mapping(monkeypatch):
     _clear()
     df = pd.DataFrame([
-        ["2026-07-20", 3.0, 3.5],
-        ["2026-07-21", 3.0, 3.45],
+        ["2026-10-20", 3.0, 3.5],
+        ["2026-10-21", 3.0, 3.45],
     ], columns=["日期", "LPR1Y", "LPR5Y"])
 
     def _fake_ak():
@@ -44,7 +95,7 @@ def test_lpr_last_row_mapping(monkeypatch):
         r = macro_fetcher.fetch_lpr()
     assert r["lpr_1y"] == 3.0
     assert r["lpr_5y"] == 3.45, "应取最后一行（最新一期）"
-    assert r["date"] == "2026-07-21"
+    assert r["date"] == "2026-10-21"
     assert r["stale"] is False
 
 
@@ -346,11 +397,14 @@ def test_r08_net_col_preferred_over_buy_minus_sell():
     """R08 负向：净额必须取「当日…净…」列，不得把 净+买入+卖出 相加
     （重复计数，实测 1.2e9 会被算成 1.3e9）。"""
     import pandas as pd
+    from datetime import date as _date
     _clear()
-    df = pd.DataFrame([["2026-09-28", 1.2e9, 6.0e8, 5.0e8, 1.0e11, 1.0, 3900.0]],
+    today = _date.today().isoformat()
+    df = pd.DataFrame([[today, 1.2e9, 6.0e8, 5.0e8, 1.0e11, 1.0, 3900.0]],
                       columns=_HSGT_DF_COLS)
     with patch("akshare.stock_hsgt_hist_em", return_value=df):
         out = macro_fetcher.fetch_hsgt_history(days=1)
+    assert out is not None, f"fetch_hsgt_history 返回 None: {out}"
     assert out["rows"][-1]["north_net"] == pytest.approx(1.2e9), \
         "误把买入/卖出或累计列当日净额"
     _clear()

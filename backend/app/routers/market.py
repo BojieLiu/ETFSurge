@@ -165,7 +165,9 @@ async def search(
 
     merged: list[dict[str, Any]] = []
     # A 股 ETF 段：过滤非 ETF 行，避免与 _search_a_stocks 的个股结果重复
-    a_etf = [r for r in (a_etf or []) if r.get("asset_type") == "etf"]
+    # R200: 过滤键从 asset_type 改为 type——fetch_etf_list 回退路径把市场码
+    # 写进 asset_type（"A"），按 asset_type=="etf" 过滤会全丢（已死约 9 周）。
+    a_etf = [r for r in (a_etf or []) if r.get("type") == "etf"]
     merged += a_etf[:10]
     if include_stocks:
         merged += await _search_a_stocks(keyword)

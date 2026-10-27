@@ -585,6 +585,81 @@ async def test_us_realtime_keeps_existing_name(monkeypatch):
     assert data["name"] == "Apple Inc."
 
 
+# ===== R200 (round61): search_etf 降级路径必须含 market / type =====
+@pytest.mark.asyncio
+async def test_search_etf_fallback_has_market_and_type(monkeypatch):
+    """R200 正向守卫：search_etf 降级路径（fetch_etf_list）返回值必须含 market 与 type，
+    否则 router 按 asset_type=='etf' 过滤会全丢 → A 股 ETF 段恒空（已死约 9 周）。
+
+    负向：若 search_etf 内部剥离了 market/type 键，本用例 FAIL。
+    """
+    from app.services import market_service as ms
+
+    class _FakeSessionNoRows:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def execute(self, stmt):
+            return self
+
+        def scalars(self):
+            return self
+
+        def all(self):
+            return []
+
+    monkeypatch.setattr(ms, "async_session", lambda: _FakeSessionNoRows())
+    # 模拟 fetch_etf_list 修复后的形状（含 market / type）
+    monkeypatch.setattr(
+        "app.fetchers.china_market.fetch_etf_list",
+        lambda: [
+            {"symbol": "510300", "name": "沪深300ETF", "price": 4.0,
+             "change_pct": 0.5, "market": "A", "type": "etf", "asset_type": "A"},
+            {"symbol": "518880", "name": "黄金ETF", "price": 5.0,
+             "change_pct": -1.0, "market": "A", "type": "etf", "asset_type": "A"},
+        ],
+    )
+
+    results = await ms.search_etf("510300")
+    assert results, "降级路径应返回结果"
+    for r in results:
+        assert "market" in r, f"search_etf 降级路径缺 market 键: {r}"
+        assert "type" in r, f"search_etf 降级路径缺 type 键: {r}"
+        assert r["market"] == "A", f"market 应为 A: {r}"
+        assert r["type"] == "etf", f"type 应为 etf: {r}"
+
+
+@pytest.mark.asyncio
+async def test_router_keeps_a_etf_after_type_filter(monkeypatch):
+    """R200 负向守卫：router 按 type=='etf' 过滤后 A 股 ETF 段必须非空。
+
+    若过滤键回落到 asset_type（fetch_etf_list 把市场码写进 asset_type="A"），
+    A 股 ETF 段会全空——本用例必 FAIL。
+    """
+    async def _fake_search_etf(kw):
+        return [
+            {"symbol": "510300", "name": "沪深300ETF", "market": "A",
+             "asset_type": "A", "type": "etf"},
+            {"symbol": "600519", "name": "贵州茅台", "market": "A",
+             "asset_type": "stock", "type": "stock"},  # 非 ETF → 应被过滤
+        ]
+
+    async def _fake_search_hk_us(kw, enrich=True, include_stocks=False, market=None):
+        return []
+
+    monkeypatch.setattr(market_data_hub, "search_etf", _fake_search_etf)
+    monkeypatch.setattr(market_router, "search_hk_us", _fake_search_hk_us)
+    monkeypatch.setattr(market_router, "_search_a_stocks", AsyncMock(return_value=[]))
+
+    res = await market_router.search(keyword="510300", market=None)
+    a_etf = [r for r in res if r.get("market") == "A" and r.get("type") == "etf"]
+    assert a_etf, "A 股 ETF 段不得为空（R200）"
+    assert not any(r["symbol"] == "600519" for r in res), "非 ETF 行必须被过滤"
+
+
 # ===== R84 (round29): 美股搜索 TQQQ 经新浪 suggest type=41 兜底 =====
 class TestSearchUsSinaSuggestR84:
     """R84: EM 美股 spot 纯股票不含 ETF、instruments US 段常失败 →
