@@ -2,6 +2,7 @@
 
 import json
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 # round36 恢复：tests 经 mock.patch("app.analysis.llm.reports.get_last_llm_error") 打补丁，
@@ -238,6 +239,34 @@ def _build_market_overview(
             prompt += f"- {title[:120]}\n"
 
     return prompt
+def _stale_suffix(data: dict | None) -> str:
+    """R215: 若数据 stale=true，返回「（数据日期 YYYY-MM，源滞后）」后缀；否则空串。
+    用于在 prompt 中对陈旧值加日期限定，避免 LLM 把旧值当最新值引用。
+    """
+    if not data or not isinstance(data, dict):
+        return ""
+    if not data.get("stale"):
+        return ""
+    date_str = str(data.get("date", "") or "")
+    date_short = date_str[:7] if len(date_str) >= 7 else date_str
+    return f"（数据日期 {date_short}，源滞后）"
+
+
+def _latest_index_as_of(index_realtime: list[dict] | None) -> str | None:
+    """R218: 从 index_realtime 中提取最新的 as_of 时间戳，用于报告数据日期头。
+    无数据则返回 None（不伪造时间戳，遵循 R80）。
+    """
+    dates: list[str] = []
+    for idx in (index_realtime or []):
+        as_of = idx.get("as_of")
+        if as_of:
+            dates.append(str(as_of))
+    if not dates:
+        return None
+    dates.sort(reverse=True)
+    return dates[0]
+
+
 def _format_domestic_macro(macro: dict | None) -> str | None:
     """R79 (round29): 国内宏观/流动性数据段格式化（LPR/中美国债/M0-M2/CPI-PPI/PMI）。
 
@@ -269,21 +298,25 @@ def _format_domestic_macro(macro: dict | None) -> str | None:
     if isinstance(money, dict):
         for _k in ("m0_yoy", "m1_yoy", "m2_yoy"):
             if money.get(_k) is not None:
-                lines.append(f"- {_k.upper().replace('_YOY', ' 同比')}: {money[_k]}%")
+                lines.append(f"- {_k.upper().replace('_YOY', ' 同比')}: {money[_k]}%{_stale_suffix(money)}")
     cpi = macro.get("cpi_ppi") or {}
     if isinstance(cpi, dict):
         if cpi.get("cpi_yoy") is not None:
-            lines.append(f"- CPI 同比: {cpi['cpi_yoy']}%")
+            lines.append(f"- CPI 同比: {cpi['cpi_yoy']}%{_stale_suffix(cpi)}")
         if cpi.get("ppi_yoy") is not None:
-            lines.append(f"- PPI 同比: {cpi['ppi_yoy']}%")
+            lines.append(f"- PPI 同比: {cpi['ppi_yoy']}%{_stale_suffix(cpi)}")
     pmi_gdp = macro.get("pmi_gdp") or {}
     if isinstance(pmi_gdp, dict):
-        _pmi = (pmi_gdp.get("pmi") or {}).get("value") if isinstance(pmi_gdp.get("pmi"), dict) else None
-        if _pmi is not None:
-            lines.append(f"- PMI: {_pmi}")
-        _gdp = (pmi_gdp.get("gdp") or {}).get("value") if isinstance(pmi_gdp.get("gdp"), dict) else None
-        if _gdp is not None:
-            lines.append(f"- GDP 同比: {_gdp}%")
+        _pmi_dict = pmi_gdp.get("pmi") or {}
+        if isinstance(_pmi_dict, dict):
+            _pmi = _pmi_dict.get("value")
+            if _pmi is not None:
+                lines.append(f"- PMI: {_pmi}%{_stale_suffix(_pmi_dict)}")
+        _gdp_dict = pmi_gdp.get("gdp") or {}
+        if isinstance(_gdp_dict, dict):
+            _gdp = _gdp_dict.get("value")
+            if _gdp is not None:
+                lines.append(f"- GDP 同比: {_gdp}%{_stale_suffix(_gdp_dict)}")
     if not lines:
         return "（国内宏观数据暂不可用）"
     return "\n".join(lines)
@@ -1292,6 +1325,12 @@ def _build_design_report_prompt(
     lines.append("")
 
     # ── P1 新增：市场行情快照（实时指数） ──
+    # R218: 报告数据日期头——在快照前插入数据日期，避免用户误判新鲜度
+    _latest_as_of = _latest_index_as_of(index_realtime)
+    if _latest_as_of:
+        _now_iso = datetime.now(timezone.utc).isoformat()
+        lines.append(f"数据日期：{_latest_as_of}（市场最近交易日）· 生成：{_now_iso}")
+        lines.append("")
     if index_realtime:
         lines.append("### 市场行情快照（实时指数）")
         for idx in index_realtime:
@@ -1594,6 +1633,12 @@ def _build_advice_stream_prompt(query: str, ctx: dict) -> str:
         lines.append("")
 
     market_data = ctx.get("market_data", [])
+    # R218: 报告数据日期头——在实时行情前插入数据日期，避免用户误判新鲜度
+    _advice_latest_as_of = _latest_index_as_of(ctx.get("index_realtime") or [])
+    if _advice_latest_as_of:
+        _now_iso = datetime.now(timezone.utc).isoformat()
+        lines.append(f"数据日期：{_advice_latest_as_of}（市场最近交易日）· 生成：{_now_iso}")
+        lines.append("")
     if market_data:
         lines.append("\n## 实时行情")
         for item in market_data[:8]:
@@ -1791,6 +1836,9 @@ def _build_advice_stream_prompt(query: str, ctx: dict) -> str:
         # R14: 负向硬约束（对冲 doc §2.1 的方向陷阱）
         lines.append('硬约束：支撑位与阻力位不得混列；落在现价上方的回撤位是阻力不是支撑；'
                      '无数据的档位输出占位，禁止编造点位。')
+        # R215: stale 值必须在后 10 字内出现其数据日期，防止陈旧值被当最新值引用
+        lines.append('硬约束：标注 stale=true 的数值，必须在其后 10 字内出现其数据日期，'
+                     '如「PMI 49.4%（数据日期 2025-08，源滞后）」；未标日期的陈旧值禁止引用。')
         lines.append('')
         lines.append('使用 Markdown 格式，控制 1200 字以内。')
     else:

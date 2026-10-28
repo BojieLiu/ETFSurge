@@ -185,3 +185,63 @@ class TestP0_2_DesignReportTransition:
 
         updated = await mgr.get_task(task_id)
         assert updated["status"] == "failed"
+
+
+# ── R218 (round61): 报告数据日期头 ───────────────────────────────────────
+class TestR218DataDateHead:
+    """R218: 组合设计报告与 LLM 报告必须插入数据日期头，避免用户误判新鲜度。
+    无 as_of 时不写（R80：不伪造时间戳）。
+    """
+
+    def test_design_report_prompt_has_date_head_with_as_of(self):
+        """_build_design_report_prompt 指数快照前插入数据日期头。"""
+        prompt = _build_design_report_prompt(
+            strategies=[],
+            market_sentiment={},
+            market_context={
+                "index_realtime": [
+                    {"symbol": "000001", "name": "上证指数", "price": 3800.0,
+                     "change_pct": 0.5, "as_of": "2026-09-30 15:30:00"},
+                    {"symbol": "399001", "name": "深证成指", "price": 12000.0,
+                     "change_pct": -0.3, "as_of": "2026-09-30 15:00:00"},
+                ],
+            },
+            benchmark_stocks=[],
+            plan_tables=None,
+        )
+        assert "数据日期：2026-09-30 15:30:00（市场最近交易日）· 生成：" in prompt, \
+            f"prompt 应含最新 as_of 的数据日期头，实际: {prompt[:300]}"
+
+    def test_design_report_prompt_no_date_head_without_as_of(self):
+        """R218 负向：index_realtime 无 as_of -> 不得出现数据日期头（防伪造）。"""
+        prompt = _build_design_report_prompt(
+            strategies=[],
+            market_sentiment={},
+            market_context={
+                "index_realtime": [
+                    {"symbol": "000001", "name": "上证指数", "price": 3800.0,
+                     "change_pct": 0.5},
+                ],
+            },
+            benchmark_stocks=[],
+            plan_tables=None,
+        )
+        assert "数据日期：" not in prompt, \
+            f"无 as_of 时不得写入数据日期头，实际: {prompt[:300]}"
+
+    def test_advice_stream_prompt_has_date_head_with_as_of(self):
+        """_build_advice_stream_prompt 实时行情前插入数据日期头。"""
+        from app.analysis.llm import _build_advice_stream_prompt
+        prompt = _build_advice_stream_prompt(
+            "今天A股行情如何",
+            ctx={
+                "market_regime": "range_bound",
+                "index_realtime": [
+                    {"symbol": "000300", "name": "沪深300", "price": 4300.0,
+                     "change_pct": 0.29, "as_of": "2026-09-30 15:00:00"},
+                ],
+                "market_data": [],
+            },
+        )
+        assert "数据日期：2026-09-30 15:00:00（市场最近交易日）· 生成：" in prompt, \
+            f"advice prompt 应含数据日期头，实际: {prompt[:300]}"

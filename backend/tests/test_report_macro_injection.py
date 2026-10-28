@@ -321,3 +321,60 @@ def test_r03a_router_passes_policy_news_not_empty_list():
             if len(node.args) >= 6 and isinstance(node.args[5], ast.List) and not node.args[5].elts:
                 dead = True
     assert not dead, "router 仍以恒空 [] 传 macro_news（M3 死参未改）"
+
+
+# ── R215 (round61): stale 值必须在正文加日期限定 ──────────────────────────
+def test_r215_stale_pmi_carries_date_suffix():
+    """R215: stale=true 的 PMI 值必须带日期后缀，避免被当最新值引用。"""
+    macro = {
+        "unavailable": False,
+        "lpr": None,
+        "bond_yields": None,
+        "money_supply": None,
+        "cpi_ppi": None,
+        "pmi_gdp": {"pmi": {"value": 49.4, "date": "2025-08-31", "stale": True,
+                            "note": "数据滞后至 2025-08（数据源），仅作趋势参考"},
+                    "gdp": None},
+    }
+    out = _format_domestic_macro(macro)
+    assert out is not None
+    assert "PMI: 49.4%" in out
+    assert "数据日期 2025-08，源滞后" in out, \
+        f"stale PMI 必须带日期后缀，实际: {out}"
+
+
+def test_r215_stale_money_supply_carries_date_suffix():
+    """R215: stale=true 的 M1/M2 值必须带日期后缀。"""
+    macro = {
+        "unavailable": False,
+        "lpr": None,
+        "bond_yields": None,
+        "money_supply": {"m1_yoy": 4.1, "m2_yoy": 7.5, "date": "2008-01-01", "stale": True,
+                         "note": "数据滞后至 2008-01（数据源），仅作趋势参考"},
+        "cpi_ppi": None,
+        "pmi_gdp": None,
+    }
+    out = _format_domestic_macro(macro)
+    assert out is not None
+    assert "M1 同比: 4.1%" in out
+    assert "数据日期 2008-01，源滞后" in out, \
+        f"stale M1 必须带日期后缀，实际: {out}"
+
+
+def test_r215_fresh_value_no_date_suffix():
+    """R215: 非 stale 值不得加日期后缀（避免污染正常数据）。"""
+    macro = {
+        "unavailable": False,
+        "lpr": None,
+        "bond_yields": None,
+        "money_supply": {"m1_yoy": 4.1, "m2_yoy": 7.5, "date": "2026-08-01", "stale": False},
+        "cpi_ppi": None,
+        "pmi_gdp": None,
+    }
+    out = _format_domestic_macro(macro)
+    assert out is not None
+    assert "M1 同比: 4.1%" in out
+    assert "源滞后" not in out, f"非 stale 值不得加源滞后后缀，实际: {out}"
+
+
+# ── verify_e2e quality assertions (test the test logic) ──────

@@ -637,7 +637,20 @@ async def compose_and_push_report(
             llm_analysis = None
 
         if llm_analysis:
-            report_text = plan_tables + "\n\n## 二、市场环境与配置建议\n\n" + llm_analysis
+            # R218: 报告数据日期头——在市场环境章节前插入数据日期，避免用户误判新鲜度
+            _idx_rt = (market_context or {}).get("index_realtime") or []
+            _latest_as_of = None
+            for _idx in _idx_rt:
+                _a = _idx.get("as_of")
+                if _a:
+                    if _latest_as_of is None or str(_a) > str(_latest_as_of):
+                        _latest_as_of = str(_a)
+            if _latest_as_of:
+                _now_iso = datetime.now().isoformat()
+                _date_head = f"数据日期：{_latest_as_of}（市场最近交易日）· 生成：{_now_iso}\n\n"
+            else:
+                _date_head = ""
+            report_text = plan_tables + "\n\n" + _date_head + "## 二、市场环境与配置建议\n\n" + llm_analysis
         else:
             logger.warning("[design_report] LLM empty, using engine tables only")
             report_text = "# ETF 组合设计方案（数据摘要）\n" + plan_tables
