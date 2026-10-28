@@ -140,6 +140,11 @@ def market_session(dt: datetime | None = None) -> str:
         dt = datetime.now()
     if dt.weekday() >= 5:
         return "closed"
+    # R216: 法定节假日（国庆/春节等）非交易日 → closed。
+    # 复用 is_a_share_trading_day 的三级判定（日历精确/降级周末/超覆盖期回落），
+    # 避免国庆等法定假期的工作日被误报 "open"。
+    if not is_a_share_trading_day(dt):
+        return "closed"
     t = dt.time()
     if _A_SHARE_AFTER_HOURS_START <= t <= _A_SHARE_AFTER_HOURS_END:
         return "after_hours"

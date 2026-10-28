@@ -368,6 +368,21 @@ class TestMarketSession:
         sat = datetime(2026, 8, 15, 10, 0)  # 周六
         assert market_session(sat) == "closed"
 
+    def test_holiday_weekday_closed(self, monkeypatch):
+        """R216: 法定节假日的工作日（如国庆 2026-10-05 周一）market_session
+        必须返回 closed，不能误报 open。"""
+        from app.core import market_calendar as mc
+        monkeypatch.setattr(mc, "is_a_share_trading_day", lambda dt: False)
+        assert mc.market_session(datetime(2026, 10, 5, 10, 30)) == "closed", \
+            "国庆假期工作日不得报 open"
+
+    def test_reopen_weekday_open(self, monkeypatch):
+        """R216: 复市日 2026-10-08（周四）market_session 必须仍返回 open。"""
+        from app.core import market_calendar as mc
+        monkeypatch.setattr(mc, "is_a_share_trading_day", lambda dt: True)
+        assert mc.market_session(datetime(2026, 10, 8, 10, 30)) == "open", \
+            "复市日不得误报 closed（防过度修正）"
+
     def test_is_trading_time_semantics_preserved(self):
         """is_trading_time 仍以 15:00 为界——after_hours 不视为盘中（收盘价已定，
         盘后固定价格交易以收盘价成交不产生新价格）。"""
@@ -418,13 +433,15 @@ class TestStrategyDesignSessionPropagation:
 
         # 冻结时间：周五 18:00（盘后）
         frozen = datetime(2026, 8, 14, 18, 0)
-        monkeypatch.setattr(mc, "datetime", _FrozenDatetime(frozen))
+        # 构造一次以设置 _FROZEN_REF，再以类形式 mock 模块级 datetime
+        _FrozenDatetime(frozen)
+        monkeypatch.setattr(mc, "datetime", _FrozenDatetime)
         # _snapshot_as_of_for 现位于 hub/_common.py，使用自身 `from datetime import datetime`
         # 的模块级绑定（非 market_data_hub.datetime），需冻结 _common.datetime 才生效
         from app.services.hub import _common as _common_mod
-        monkeypatch.setattr(_common_mod, "datetime", _FrozenDatetime(frozen))
+        monkeypatch.setattr(_common_mod, "datetime", _FrozenDatetime)
         from app.services import market_data_hub as mh
-        monkeypatch.setattr(mh, "datetime", _FrozenDatetime(frozen))
+        monkeypatch.setattr(mh, "datetime", _FrozenDatetime)
         monkeypatch.setattr(sd, "market_session", lambda dt=None: mc.market_session(dt))
 
         # 轻量 fake hub + 桩掉重 I/O 纯函数，真实调用 _build_market_context 验证透传
@@ -467,12 +484,17 @@ class _FrozenDatetime(datetime):
         if len(args) == 1 and isinstance(args[0], datetime) and not isinstance(args[0], _FrozenDatetime):
             f = args[0]
             obj = datetime.__new__(cls, f.year, f.month, f.day, f.hour, f.minute, f.second)
-            cls._FROZEN_REF = f
+            cls._FROZEN_REF = obj  # 存 _FrozenDatetime 实例，供 isinstance 判定
             return obj
         return datetime.__new__(cls, *args, **kwargs)
 
-    def now(self, tz=None):
-        return self
+    @classmethod
+    def now(cls, tz=None):
+        # Called as class method (mc.datetime.now()): return frozen ref or real now.
+        # Called on instance: return self.
+        if cls._FROZEN_REF is not None:
+            return cls._FROZEN_REF
+        return datetime.now(tz)
 
     @classmethod
     def utcnow(cls):
