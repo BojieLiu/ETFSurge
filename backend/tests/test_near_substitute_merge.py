@@ -111,3 +111,65 @@ class TestApplyNearSubstituteWarningsMarksMerged:
         symbols = {a["symbol"] for a in out[0]["allocations"]}
         assert "588170" not in symbols
         assert "588200" in symbols
+
+
+# ── R208 (round61): combined_weight 结构性过期 ────────────────────────────
+class TestCombinedWeightPostMerge:
+    """R208: apply_near_substitute_warnings 的 combined_weight 必须反映
+    合并后的最终权重，而非合并前的快照。
+
+    旧实现：entry = dict(np) 在 near_substitute_pairs（合并前）计算 combined_weight，
+    合并后 `_merge_substitute_family` 修改权重，但 warnings 中 combined_weight
+    未重算 → 与 etfs[].weight 结构性不一致。
+    """
+
+    def test_combined_weight_equals_keep_weight_after_merge(self):
+        """三成员同家族合并后，merged 告警的 combined_weight 应等于保留方的
+        最终权重（合并后并入），而非合并前两只之和。
+        """
+        strategies = [{
+            "id": "balanced",
+            "allocations": [
+                {"symbol": "588200", "name": "科创芯片ETF", "weight": 0.10,
+                 "market_cap": 200e9},
+                {"symbol": "588170", "name": "科创半导体设备ETF", "weight": 0.08,
+                 "market_cap": 50e9},
+                {"symbol": "588210", "name": "科创半导体ETF", "weight": 0.06,
+                 "market_cap": 30e9},
+                {"symbol": "510300", "name": "沪深300ETF", "weight": 0.5,
+                 "market_cap": 1500e9},
+            ],
+        }]
+        out = apply_near_substitute_warnings(strategies, {})
+        rm = out[0]["risk_metrics"]
+        keep = next(a for a in out[0]["allocations"] if a["symbol"] == "588200")
+        assert keep["weight"] == pytest.approx(0.24, abs=1e-6), \
+            f"保留方应并入全部权重 0.24，实际 {keep['weight']}"
+        # 与 588200 配对的 merged 告警，combined_weight 应等于保留方最终权重 0.24
+        merged = [w for w in rm["correlation_warnings"]
+                  if "588200" in w.get("pair", []) and w.get("status") == "merged"]
+        assert merged, "应存在 merged 状态的近替代品告警"
+        for w in merged:
+            assert w["combined_weight"] == pytest.approx(keep["weight"], abs=1e-6), \
+                f"merged 告警 combined_weight={w['combined_weight']} 应等于保留方最终权重 {keep['weight']}"
+
+    def test_combined_weight_reflects_current_weights_non_merged(self):
+        """未合并的近替代品对，combined_weight 应等于当前两只权重之和。"""
+        strategies = [{
+            "id": "balanced",
+            "allocations": [
+                {"symbol": "588200", "name": "科创芯片ETF", "weight": 0.10,
+                 "market_cap": 200e9},
+                {"symbol": "588170", "name": "科创半导体设备ETF", "weight": 0.08,
+                 "market_cap": 50e9},
+                {"symbol": "510300", "name": "沪深300ETF", "weight": 0.5,
+                 "market_cap": 1500e9},
+            ],
+        }]
+        out = apply_near_substitute_warnings(strategies, {})
+        rm = out[0]["risk_metrics"]
+        pair = [w for w in rm["correlation_warnings"]
+                if set(w.get("pair", [])) == {"588200", "588170"}]
+        assert pair, "应存在 588200+588170 的近替代品告警"
+        assert pair[0]["combined_weight"] == pytest.approx(0.18, abs=1e-6), \
+            f"未合并对 combined_weight 应等于 0.10+0.08=0.18，实际 {pair[0]['combined_weight']}"

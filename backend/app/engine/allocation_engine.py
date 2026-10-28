@@ -1844,10 +1844,17 @@ def apply_near_substitute_warnings(
         # 进攻型不豁免）。合并后把对应 near_substitute 告警升级为「已合并」标注。
         merges = _merge_substitute_family(s.get("allocations", []))
         _merged_families = {m["family"] for m in merges}
+        # R208: 合并后重算 combined_weight，避免与合并后/桶化后最终权重不一致
+        #（旧快照在合并前计算，合并后保留方权重已并入，combined_weight 须反映当前权重）。
+        _wmap = {a.get("symbol"): a.get("weight", 0.0) for a in s.get("allocations", [])
+                 if a.get("symbol")}
         for w in warnings:
             if w.get("family") in _merged_families:
                 w["status"] = "merged"
                 w["note"] = (w.get("note") or "") + "（已合并留一）"
+            pair = w.get("pair") or []
+            w["combined_weight"] = round(
+                sum(_wmap.get(sym, 0.0) for sym in pair), 4)
         if merges:
             s.setdefault("risk_metrics", {})
             s["risk_metrics"]["merged_substitutes"] = (

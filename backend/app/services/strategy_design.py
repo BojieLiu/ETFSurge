@@ -686,6 +686,18 @@ async def generate_enhanced_design(
             # Add target_amount for each allocation
             for a in s["etfs"]:
                 a["target_amount"] = round(capital * a.get("weight", 0), 2)
+
+            # R208: 桶化可能改写权重，刷新 correlation_warnings.combined_weight，
+            # 使其与桶后最终权重一致（避免结构性过期）。
+            _rm = s.get("risk_metrics") or {}
+            _warnings = _rm.get("correlation_warnings") or []
+            if _warnings:
+                _wmap = {a.get("symbol"): a.get("weight", 0.0) for a in s["etfs"]
+                         if a.get("symbol")}
+                for _w in _warnings:
+                    _pair = _w.get("pair") or []
+                    _w["combined_weight"] = round(
+                        sum(_wmap.get(sym, 0.0) for sym in _pair), 4)
             strategies.append(s)
 
         # 5. target_amount 一致性校验

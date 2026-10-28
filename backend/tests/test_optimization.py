@@ -115,6 +115,32 @@ def test_get_portfolio_realtime_empty():
     run(_run())
 
 
+# ── R209 (round61): realtime/portfolio 行必须带 as_of（新鲜度自证） ─────────
+def test_get_portfolio_realtime_has_as_of():
+    """R209 负向：get_portfolio_realtime 返回的每行必须含 as_of（源刷新时间），
+    不得为 null。旧实现全行 as_of=null → 前端无法判断新鲜度。
+    """
+    async def _run():
+        await memory_cache.clear()
+        with patch("app.services.portfolio_service.list_etfs") as mock_list, \
+             patch("app.fetchers.china_market.fetch_a_stock_batch") as mock_batch, \
+             patch("app.fetchers.china_market.fetch_index_realtime") as mock_idx:
+            mock_list.side_effect = [[_FakeETF("510050")], [_FakeETF("510300")]]
+            mock_batch.return_value = [
+                {"symbol": "510050", "price": 1.0, "change_pct": 0.5},
+                {"symbol": "510300", "price": 2.0, "change_pct": -0.3},
+            ]
+            mock_idx.return_value = [{"symbol": "000001", "price": 3000.0}]
+            result = await market_service.get_portfolio_realtime()
+        assert result, "应返回行情行"
+        for q in result:
+            assert q.get("as_of") is not None, \
+                f"行 {q.get('symbol')} as_of 不得为 null，实际: {q}"
+            # as_of 应为合法 ISO 时间戳（包含 T 分隔符）
+            assert "T" in str(q["as_of"]), f"as_of 应为 ISO 格式，实际: {q['as_of']}"
+    run(_run())
+
+
 # ── _resample_4h pure function ─────────────────────────────────────────
 
 def test_resample_4h():

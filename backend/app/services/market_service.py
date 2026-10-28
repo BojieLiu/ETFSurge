@@ -1172,6 +1172,7 @@ async def get_portfolio_realtime(phase: str = "all") -> list[dict[str, Any]]:
     """
     # 7.6a: 15s app-level cache to reduce API response time
     from .cache_service import cache_get, cache_set
+    from datetime import datetime, timezone
     cached = await cache_get(_PORTFOLIO_REALTIME_CACHE_KEY)
     if cached is not None:
         return cached
@@ -1238,6 +1239,11 @@ async def get_portfolio_realtime(phase: str = "all") -> list[dict[str, Any]]:
         # fast 阶段跳过 off_exchange 处理, 返回的 quotes 不含场外 ETF 估值.
         # 注: slow 阶段会重写 cache, fast 写一次只是占位让用户首击命中.
         from .cache_service import cache_set as _cs
+        # R209: 补 as_of（源刷新时间，UTC ISO），不编造——有数据即有抓取时点。
+        _now_iso = datetime.now(timezone.utc).isoformat()
+        for _q in quotes:
+            if "as_of" not in _q or _q.get("as_of") is None:
+                _q["as_of"] = _now_iso
         await _cs(_PORTFOLIO_REALTIME_CACHE_KEY, quotes, _PORTFOLIO_REALTIME_TTL)
         return quotes
 
@@ -1364,6 +1370,12 @@ async def get_portfolio_realtime(phase: str = "all") -> list[dict[str, Any]]:
             q["estimate_source"] = None
 
     # 7.6a: 写入 15s 缓存
+    from .cache_service import cache_set as _cs
+    # R209: 补 as_of（源刷新时间，UTC ISO），不编造——有数据即有抓取时点。
+    _now_iso = datetime.now(timezone.utc).isoformat()
+    for _q in quotes:
+        if "as_of" not in _q or _q.get("as_of") is None:
+            _q["as_of"] = _now_iso
     await cache_set(_PORTFOLIO_REALTIME_CACHE_KEY, quotes, _PORTFOLIO_REALTIME_TTL)
 
     return quotes
