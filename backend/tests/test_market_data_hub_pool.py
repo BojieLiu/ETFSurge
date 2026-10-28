@@ -390,6 +390,26 @@ class TestMarketSession:
         assert is_trading_time(self._dt(14, "15:10")) is False
         assert is_trading_time(self._dt(14, "14:00")) is True
 
+    def test_get_market_status_hk_holiday_closed(self, monkeypatch):
+        """R217 R-1: 港股无独立节假日日历，A股交易时段内不声称 open。
+
+        2026-04-03 耶稣受难节：A股开市，港股休市。
+        旧实现返回 "open"（误判）；修复后返回 "closed"（保守降级）。
+        负向：旧实现必 FAIL。
+        """
+        from app.core import market_calendar as mc
+        # 4-03 是 A股交易日（workday），is_a_share_trading_day 返回 True
+        monkeypatch.setattr(mc, "is_a_share_trading_day", lambda dt: True)
+        assert mc.get_market_status("港股", datetime(2026, 4, 3, 10, 30)) == "closed", \
+            "港股在 A股交易时段内不得声称 open（无港股日历，保守降级）"
+
+    def test_get_market_status_a_share_unaffected(self, monkeypatch):
+        """R217 负向：A股状态不受港股降级影响，4-03 耶稣受难日 A股仍 open。"""
+        from app.core import market_calendar as mc
+        monkeypatch.setattr(mc, "is_a_share_trading_day", lambda dt: True)
+        assert mc.get_market_status("A股", datetime(2026, 4, 3, 10, 30)) == "open", \
+            "A股在耶稣受难日（A股开市）应仍为 open"
+
 
 class TestMarketSnapshotPersistence:
     """R26②: 快照持久化——MarketSnapshot 模型 + 写读兜底。"""

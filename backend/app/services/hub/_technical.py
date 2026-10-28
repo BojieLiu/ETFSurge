@@ -9,8 +9,12 @@ The data was not missing — it was never wired in.
 A1 decision (2026-09-30, probe-measured, not theoretical)
 --------------------------------------------------------
 Index daily bars go through ``fetch_history(sym, "index", "daily")`` ->
-:func:`fetch_index_history`, and are cached under a **namespaced key**
-``idx:<symbol>`` in ``_index_tech_cache``.
+:func:`fetch_index_history`, and are cached under the **bare symbol** (e.g.
+``000001``) as key in ``_index_tech_cache`` — a **dedicated dict** keyed only by
+symbol, **not** an ``idx:<symbol>`` namespaced key. No ``idx:`` prefix is used,
+because ``000001`` already collides between Ping An Bank (stock) and Shanghai
+Composite (index); the dedicated dict removes the whole collision class instead
+of relying on a namespaced key.
 
 The existing K-line cache cannot be reused. ``refresh_kline`` fetches with
 ``asset_type="A"`` (``hub/_kline.py:308-310``), and only ``asset_type="index"``

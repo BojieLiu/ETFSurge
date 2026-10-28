@@ -170,6 +170,11 @@ def get_market_status(
     Returns:
         ``"open"`` — 盘中
         ``"closed"`` — 盘后或休市 (周末/节假日)
+
+    R217 (round61): 港股没有独立交易日历（模块内唯一日历是 A股日历），
+    无 `is_hk_trading_day()`。若香港法定节假日恰逢 A股交易日，按 A股时段
+    会误判港股为 ``"open"``。故「港股」在 A股交易时段内**保守降级为
+    closed**，并由调用方自行判断——诚实降级优于伪 ``open``。
     """
     if dt is None:
         dt = datetime.now()
@@ -178,6 +183,9 @@ def get_market_status(
         return "closed"
     schedule = _MARKET_SCHEDULE.get(market)
     if schedule is None:
+        return "closed"
+    # R217: 港股无独立节假日日历，A股交易时段内不声称 open。
+    if market == "港股" and is_a_share_trading_day(dt):
         return "closed"
     open_t, close_t = schedule
     # 美股跨日：收盘 < 开盘 (如 04:00 < 21:30)
