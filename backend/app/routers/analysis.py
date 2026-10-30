@@ -675,6 +675,8 @@ async def llm_advice_stream(req: LLMAdviceRequest):
         from ..analysis.intent import classify_all as _classify_all
         from ..engine.valuation import (
             classify_valuation as _classify_val,
+        )
+        from ..engine.valuation import (
             compute_pe_percentile as _pe_pct,
         )
         intents = _classify_all(req.query or "")

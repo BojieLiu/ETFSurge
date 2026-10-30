@@ -230,8 +230,8 @@ async def _search_sectors(keyword: str, market: str | None = None) -> list[dict[
 
     # ① 内存缓存段（行业+概念列表，缓存即真理源——R177 方案A）
     try:
-        from ..fetchers.sector_fetcher import fetch_concept_sectors, fetch_industry_sectors
         from ..core.async_utils import run_sync
+        from ..fetchers.sector_fetcher import fetch_concept_sectors, fetch_industry_sectors
 
         # R203: 行业/概念两源拆为独立 run_sync，各自预算。旧实现共享一个
         # run_sync(timeout=10)，概念源冷 25.9s 时必超时，拖累行业源并回落

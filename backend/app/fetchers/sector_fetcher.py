@@ -272,7 +272,6 @@ def fetch_concept_sectors(limit: int = 150) -> list[dict[str, Any]]:
     # R203 (round61): 不再对未命中的 POPULAR_CONCEPTS 追加占位行。
     # 源不可达时返回空而非伪造数据——下游消费方按真实 sector_code 过滤，
     # 占位行（sector_code=""）只会污染 board/sector 段。
-    found_names = {r.get("sector_name", "") for r in rows}
 
     return rows[:limit]
 

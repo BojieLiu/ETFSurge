@@ -22,7 +22,6 @@ from .monitor.token_usage import token_store
 from .routers import admin, analysis, factors, market, news, portfolio, system, ws
 from .services.cache_service import redis_cache
 from .services.source_health import health_loop
-from .tasks.market_refresh import refresh_market_cache
 from .tasks.sector_refresh import refresh_sector_cache
 
 if TYPE_CHECKING:
@@ -266,8 +265,8 @@ async def lifespan(app: FastAPI):
     # POST /api/v1/admin/llm-excluded 写入, DELETE 移除. 启动期灌回确保
     # 重启后熔断三件套护栏 3 仍生效 (R143 R&D 此前仅 in-memory, 重启清零).
     with warmup_timer("load_llm_excluded", "init", "Load LLM exclusions from DB"):
-        from .core.config_manager import config_manager as _cm
         from .analysis.llm.model_catalog import model_catalog as _mc
+        from .core.config_manager import config_manager as _cm
         _db_keys = await _cm.list_keys_with_prefix("llm_excluded:")
         _loaded = _mc.load_excluded_from_keys(_db_keys)
         logger.info(
@@ -469,9 +468,10 @@ async def lifespan(app: FastAPI):
     #   - Redis 不可用时降级 (cache_service._ensure_client 返 False)
     # round49 B3: 每次循环写 app.state.nav_warmup 共享 dict, 供 /admin/lifespan-warmup 端点查询.
     async def _nav_warmup_loop():
-        from .services.market_data_hub import market_data_hub as _hub
-        from .services.cache_service import redis_cache_sync
         import time as _time
+
+        from .services.cache_service import redis_cache_sync
+        from .services.market_data_hub import market_data_hub as _hub
 
         # 共享状态 (供 /admin/lifespan-warmup 端点查询)
         app.state.nav_warmup = {
@@ -487,6 +487,7 @@ async def lifespan(app: FastAPI):
 
         await asyncio.sleep(60)  # 延迟 60s 避开启动期 _inject_nav 抢资源
         _cycle = 0
+        _sem = asyncio.Semaphore(8)  # 移到 while True 循环外，避免 B023 闭包循环变量绑定
         while True:
             _cycle += 1
             _t0 = _time.monotonic()
@@ -516,7 +517,7 @@ async def lifespan(app: FastAPI):
                         _n = len(_syms)
                         # 调 get_fund_nav 走 Redis-first (本轮 §2.1 已改)
                         # 并发限流 Semaphore(8), 与 _inject_nav 配额一致
-                        _sem = asyncio.Semaphore(8)
+                        # (_sem 在 while True 循环外定义，避免 B023 闭包循环变量绑定)
 
                         async def _warm_one(_s: str) -> None:
                             nonlocal _ok, _skip, _err

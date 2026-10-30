@@ -1171,8 +1171,9 @@ async def get_portfolio_realtime(phase: str = "all") -> list[dict[str, Any]]:
     快慢源两次写同一 cache key, 后写覆盖前写 (竞态可接受, 15s TTL 自动续期).
     """
     # 7.6a: 15s app-level cache to reduce API response time
-    from .cache_service import cache_get, cache_set
     from datetime import datetime, timezone
+
+    from .cache_service import cache_get, cache_set
     cached = await cache_get(_PORTFOLIO_REALTIME_CACHE_KEY)
     if cached is not None:
         return cached

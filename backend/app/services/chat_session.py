@@ -14,12 +14,12 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import uuid
-from app.models.chat_session import ChatSessionRecord
 from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
+
+from app.models.chat_session import ChatSessionRecord
 
 logger = logging.getLogger(__name__)
 

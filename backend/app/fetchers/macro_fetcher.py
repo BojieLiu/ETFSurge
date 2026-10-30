@@ -47,7 +47,7 @@ def _stale_note(date_str: str, source: str, months: int = 3) -> tuple[bool, str]
             d = datetime.strptime(normalized + "-01", "%Y-%m-%d")
         else:
             d = datetime.strptime(normalized[:10], "%Y-%m-%d")
-        if (datetime.now() - d) > timedelta(days=months * 30):
+        if (datetime.now().date() - d.date()) > timedelta(days=months * 30):
             return True, f"数据滞后至{s[:7]}（{source}），仅作趋势参考"
     except (ValueError, TypeError):
         return True, f"数据日期格式无法解析（{source}），仅作趋势参考"

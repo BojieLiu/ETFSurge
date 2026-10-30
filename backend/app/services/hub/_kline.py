@@ -432,6 +432,7 @@ class KlineMixin:
                         _have_change = shares_data is not None and shares_data.get("shares_change_20d") is not None
                     else:
                         from ...core.async_utils import run_sync
+
                         # R147-FIX: 优先交易所官方份额源（SSE/SZSE，免费无认证），可算
                         # 20 日变化率；失败回退旧 EM 源（仅当前份额，change_20d=None）。
                         from ...fetchers.fund_share_fetcher import fetch_share_change_20d

@@ -2,9 +2,10 @@
 
 集中的交易时间判定函数，基于各交易所夏令时规则。
 """
-from datetime import date, datetime, time as _dtime, timedelta, timezone
 import logging
 import time as _time
+from datetime import date, datetime, timedelta, timezone
+from datetime import time as _dtime
 
 # ── 市场作息（北京时间，夏令时） ──────────────────────────────────
 # 字段: (开盘, 收盘)

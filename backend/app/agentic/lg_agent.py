@@ -40,8 +40,8 @@ except Exception:  # pragma: no cover - langgraph 未装时容错
 
 from pydantic import ValidationError
 
-from app.core.llm_timeouts import DESIGN_REPORT_READ_S, STRATEGY_CHECK_READ_S
 from app.agentic.agent_loop import PlanStep, RunReport, RunStep, StepOutput
+from app.core.llm_timeouts import DESIGN_REPORT_READ_S, STRATEGY_CHECK_READ_S
 
 
 def _reducer_add(a: list | None, b: list | None) -> list:

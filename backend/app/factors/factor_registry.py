@@ -1086,6 +1086,7 @@ async def _inject_nav(market_data: dict[str, dict[str, Any]], symbols: list[str]
     _missing_nav = [s for s in symbols if not (market_data.get(s) or {}).get("nav")]
     if _missing_nav:
         import asyncio
+
         from ..core.async_utils import run_sync_long
         from ..services.market_data_hub import market_data_hub as _hub
         # U7/N08 R2: NAV 拉取并发（旧串行 for 循环）；fetch_fund_nav 已有

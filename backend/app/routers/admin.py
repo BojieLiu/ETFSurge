@@ -223,9 +223,9 @@ async def update_config(payload: dict[str, str]):
     请求体: {"DEEPSEEK_API_KEY": "sk-xxx", "TUSHARE_TOKEN": "...", ...}
     只处理 CONFIG_ITEMS 中定义的 key，忽略未知 key。
     """
-    from ..core.config_manager import CONFIG_ITEMS, config_manager
     from ..analysis import provider as _provider_mod
     from ..analysis.provider import refresh_provider_chain
+    from ..core.config_manager import CONFIG_ITEMS, config_manager
     valid_keys = {item["key"] for item in CONFIG_ITEMS}
     results = {}
     _touched_llm_key = False
@@ -361,7 +361,6 @@ async def get_system_metrics():
 # 启动期加载: main.py lifespan 调 model_catalog.load_excluded_from_keys().
 
 
-from pydantic import BaseModel, Field
 
 
 class LLMExcludedCreate(BaseModel):

@@ -14,7 +14,6 @@ akshare 熔断记账；列名 latin1 乱码走 decode_df（探针实证必须调
 
 from __future__ import annotations
 
-import logging
 import time as _time
 from datetime import datetime
 from typing import Any

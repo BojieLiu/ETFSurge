@@ -32,6 +32,7 @@ class FundamentalsMixin:
         """
         try:
             from app.services.cache_service import redis_cache_sync
+
             from ...fetchers.china_market import fetch_fund_nav
 
             # 1) Redis 命中优先
