@@ -39,6 +39,11 @@
    `docker compose -f docker-compose.yml -f docker-compose.diag.yml --profile prod up -d --build`
    （构建日志重定向到诊断产物目录留证，如 `buildNN.log`；已知告警形态：pip resolver ERROR
    ×3=pandas_ta/mootdx --no-deps 拆分安装、npm deprecated glob——出现即按已知归类，不算新问题）
+   **⚠️ overlay 副作用（R213，环境/方法层）**：`COPY dist /usr/share/nginx/html` 是**目录合并而非替换**；
+   容器内 `assets/` 会累积残余文件（轮次间不清理），导致容器内 assets 数量 > 宿主 dist 数量，
+   虽不影响功能（index.html 指向新 hash），但会让「assets 数量」类断言失真。建议 overlay
+   Dockerfile 改为 `RUN rm -rf /usr/share/nginx/html/assets` 后再 `COPY dist`，或直接改用
+   可用的 node 基础镜像源。
 4. 记录：镜像构建耗时、容器启动耗时、后端就绪时间（warmup 实测 35-40s，round49 两阶段预热后；
    超 30s 预算会打 `[warmup-budget]` 告警，含分段归因为正常形态，看 backend.log）
 5. 确认前后端存活：`docker compose ps` + `curl --noproxy '*' http://localhost/`（前端）与 `/health`（后端根路径，**不在 /api/v1 下**）。
@@ -59,6 +64,10 @@
 1. **停止并移除当前容器**：`docker-compose down`
 2. 核对：`docker ps` 应无本项目容器
 3. 回收前确认诊断证据已留存（日志 / 接口响应 / DB 快照），防证据随容器消失
+4. **overlay 方案资产核对（R213）**：若本轮用 overlay 方式启动前端，须核对
+   容器内 `/usr/share/nginx/html/assets` 文件数 vs 宿主 `dist/assets` 文件数；
+   二者不一致（容器累积残余）属 overlay 副作用，非产品回归——记入 round 文档
+  「已知问题/环境方法层」而非产品缺陷。
 注意：若 review 阶段发现需在容器内复测的 FAIL 项，先复测再回收
 
 # 文档归档（round 定稿后，收尾）

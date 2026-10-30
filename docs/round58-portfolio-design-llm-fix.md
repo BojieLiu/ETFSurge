@@ -484,13 +484,12 @@ R05 熔断 + 既有 F8 熔断已把「确定性失败重试烧预算」的根因
 
 ### 9.4 与「待交易时段复测」清单的对照
 
-| 原清单项 | 本轮结论 |
+> 本段复测结论引用 **round57-container-reacceptance-round56-implementation.md §9** 完整版；
+> 下列仅列出与 **round58-portfolio 组合设计方案** 主题专属的条目，其余（N2 startup.py NameError、
+# N4 strategy_check 空组合等不属本主题的条目）已从本节移出，详见 round57 §9。
+
+| 原清单项（round57 §9） | round58-portfolio 本轮结论 |
 |---|---|
-| round57 #6 性能债（realtime / fh / llm-health） | ✅ 两项大幅改善，factor-health 仍超阈 |
-| round58-market R06 实额/家数 | ⚠️ 源间歇不可达（行为正确，取数失败） |
-| round58-market R08 hsgt 近 5 日 | ✅ 早已按「停更」口径落地（最后可得 2024-08-16），无「近 5 日」可取 |
-| round58-market 端到端报告实值引用 | ✅ 报告真产出且 0 免责话术；板块/家数未引用系**源不可达**（非接线问题） |
 | round58-portfolio R01 成长占比告警 | ✅ 口径正确：balanced 22.4% / aggressive 27.8% 均 ≤30% cap → 不告警（符合设计） |
 | round58-portfolio R03 defense ≥2 | ✅ 实证 2 只（黄金+30年国债） |
 | round58-portfolio R04/R05 `report_quality=full` | ⚠️ 直连路径达成；**异步任务路径**因 N1 预算档回落（待决策） |
-| L2-e2e 环境性 FAIL | 本轮以进程内 TestClient 绕开 `::1` 解析问题完成上述实值验收；`verify_e2e.py` 本身仍待干净后端复测 |
