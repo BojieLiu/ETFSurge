@@ -37,10 +37,26 @@ def test_money_supply_picks_latest_row(monkeypatch):
     本夹具按真实行序构造（最新在前）→ 旧实现必 FAIL。
     """
     _clear()
+    # 遗留 U (round62 §4.2-U)：夹具月份从写死改 now() 派生——写死「2026年08月」
+    # 的夹具在 2026-10-31 之后距今天 >90 天，按 R201 months=3 规则必判 stale=True，
+    # 断言 stale=False 随日历漂移假失败。动态派生后：最新行恒距 ~30-60 天
+    # （stale=False 稳定），测试不再依赖墙钟时刻。
+    import datetime as _dt
+
+    _today = _dt.date.today()
+
+    def _ym(offset: int) -> str:
+        m = _today.year * 12 + (_today.month - 1) - offset
+        return "%04d年%02d月份" % (m // 12, m % 12 + 1)
+
+    def _ymkey(offset: int) -> str:
+        m = _today.year * 12 + (_today.month - 1) - offset
+        return "%04d-%02d" % (m // 12, m % 12 + 1)
+
     df = pd.DataFrame([
-        # 最新在前（真实 akshare 行序）：M1=4.1, M2=7.5
-        ["2026年08月份", 100, 7.5, 0.1, 50, 4.1, 0.0, 20, 3.0, 0.0],
-        ["2026年07月份", 101, 7.3, 0.1, 51, 4.3, 0.0, 21, 3.0, 0.0],
+        # 最新在前（真实 akshare 行序）：M1=4.1, M2=7.5（最近一个月，恒 within 90 天窗口）
+        [_ym(1), 100, 7.5, 0.1, 50, 4.1, 0.0, 20, 3.0, 0.0],
+        [_ym(2), 101, 7.3, 0.1, 51, 4.3, 0.0, 21, 3.0, 0.0],
         ["2008年01月份", 102, 18.88, 0.1, 52, 20.54, 0.0, 22, 3.0, 0.0],  # 最老在后
     ], columns=[
         "月份", "货币和准货币(M2)-数量(亿元)", "货币和准货币(M2)-同比增长",
@@ -56,10 +72,48 @@ def test_money_supply_picks_latest_row(monkeypatch):
          patch.object(macro_fetcher, "run_in_thread", _rt):
         r = macro_fetcher.fetch_money_supply()
     assert r is not None
-    assert r["date"] == "2026-08", f"必须取最新行，实际: {r['date']}"
+    assert r["date"] == _ymkey(1), f"必须取最新行，实际: {r['date']}"
     assert r["m1_yoy"] == pytest.approx(4.1), f"M1 应为 4.1（最新行），实际: {r['m1_yoy']}"
     assert r["m2_yoy"] == pytest.approx(7.5), f"M2 应为 7.5（最新行），实际: {r['m2_yoy']}"
     assert r["stale"] is False, "最新数据不应标 stale"
+
+
+def test_money_supply_stale_when_older_than_window(monkeypatch):
+    """遗留 U (round62 §4.2-U) 负向守卫：最新行距 >90 天必须 stale=True（R201 fail-closed）。
+
+    与 `test_money_supply_picks_latest_row` 双面互补：那边证明「新鲜行不误判」，
+    本用例证明「陈旧行必被抓」——把最新行改成 now-4 个月（越 90 天窗口），
+    取行逻辑不变（仍取月份最大行）但 stale 必须翻转 True。
+    """
+    import datetime as _dt
+
+    _today = _dt.date.today()
+
+    def _ym(offset: int) -> str:
+        m = _today.year * 12 + (_today.month - 1) - offset
+        return "%04d年%02d月份" % (m // 12, m % 12 + 1)
+
+    _clear()
+    df = pd.DataFrame([
+        [_ym(4), 100, 7.5, 0.1, 50, 4.1, 0.0, 20, 3.0, 0.0],   # now-4 个月 → stale
+        [_ym(11), 101, 18.88, 0.1, 52, 20.54, 0.0, 22, 3.0, 0.0],  # 更老的诱饵行
+    ], columns=[
+        "月份", "货币和准货币(M2)-数量(亿元)", "货币和准货币(M2)-同比增长",
+        "货币和准货币(M2)-环比增长", "货币(M1)-数量(亿元)", "货币(M1)-同比增长",
+        "货币(M1)-环比增长", "流通中的现金(M0)-数量(亿元)", "流通中的现金(M0)-同比增长",
+        "流通中的现金(M0)-环比增长",
+    ])
+
+    def _fake_ak():
+        return df
+
+    with patch("akshare.macro_china_money_supply", side_effect=_fake_ak), \
+         patch.object(macro_fetcher, "run_in_thread", _rt):
+        r = macro_fetcher.fetch_money_supply()
+    assert r is not None
+    # 取的逻辑不变：仍取月份最大行（now-4 个月那行），不是老的诱饵行
+    assert r["m1_yoy"] == pytest.approx(4.1), f"仍应取月份最大行，实际: {r['m1_yoy']}"
+    assert r["stale"] is True, f"距 >90 天必须标 stale（R201 fail-closed），实际: {r['stale']}"
 
 
 def test_stale_note_fail_closed_on_chinese_date():

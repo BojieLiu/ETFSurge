@@ -894,11 +894,20 @@ def _normalize_watchlist_realtime(rt: dict | None) -> dict | None:
     if not is_est and est_src is not None:
         # 形态①旧形状：estimate_source 有值但无 is_estimated → 判定为估值
         is_est = True
+    # 遗留 T (round62 §4.2-T)：watchlist 补 R209 方案 J 同款语义——「不编造，
+    # 有数据即有抓取时点」：as_of 缺失且行情有值（price/change_pct 任一非空）
+    # 时补抓取时点（UTC ISO），与 realtime/portfolio 38/38 有 as_of 对齐；
+    # 全 null（源不可达）不伪造；已有源时间戳（T-1 收盘 / last-good）不覆盖。
+    out_as_of = rt.get("as_of")
+    if out_as_of is None and (rt.get("price") is not None or rt.get("change_pct") is not None):
+        from datetime import datetime as _dt, timezone as _tz
+
+        out_as_of = _dt.now(_tz.utc).isoformat()
     out = {
         "price": rt.get("price"),
         "change_pct": rt.get("change_pct"),
         "volume": rt.get("volume"),
-        "as_of": rt.get("as_of"),
+        "as_of": out_as_of,
         "is_estimated": is_est,
         "estimate_source": est_src,
         "data_source": rt.get("data_source") or ("stale" if is_est else None),

@@ -1871,6 +1871,17 @@ def section_db_integrity():
                 check(f"P3-C watchlist realtime 非空 {len(_items)-len(_rt_missing)}/{len(_items)}",
                       not _rt_missing,
                       f"空价格项: {_rt_missing[:6]}" if _rt_missing else "全部有行情")
+            # 遗留 T (round62 §4.2-T): watchlist realtime「有价必有 as_of」——R209 方案 J
+            # watchlist 补丁（抓取时点；归一化层对有 price/change_pct 行补 now()，不编造）。
+            # realtime=None（降级/超时降级行）不入列表；stale 兜底行恒带 T-1 收盘 as_of。
+            _asof_missing = [
+                it.get("symbol") for it in _items
+                if (it.get("realtime") or {}).get("price") is not None
+                and not (it.get("realtime") or {}).get("as_of")
+            ]
+            check(f"P3-T watchlist as_of {len(_items)-len(_asof_missing)}/{len(_items)} 非空",
+                  not _asof_missing,
+                  f"有价无 as_of: {_asof_missing[:6]}" if _asof_missing else "有价行均带抓取时点")
         else:
             check("P3-C watchlist realtime（无自选项目）", True, "空列表跳过")
     except Exception:

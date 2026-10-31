@@ -21,14 +21,27 @@ _REALTIME_7FIELDS = {
 
 class TestNormalizeRealtimeR92:
     def test_normalize_fills_missing_keys(self):
-        """归一化补全 7 键（缺省 null/false）。"""
+        """归一化补全 7 键（缺省 null/false）。
+
+        遗留 T（round62 §4.2-T，watchlist 补 R209 方案 J 语义）：
+        有行情数据（price/change_pct 有值）时 as_of 必含抓取时点——旧实现恒 None，
+        watchlist 行无法自证数据新鲜度（与 realtime/portfolio 38/38 有 as_of 不一致）。
+        """
         from app.routers.market import _normalize_watchlist_realtime
         rt = _normalize_watchlist_realtime({"price": 1.23, "change_pct": 0.5})
         assert set(rt.keys()) == _REALTIME_7FIELDS
         assert rt["is_estimated"] is False
         assert rt["estimate_source"] is None
         assert rt["data_source"] is None
-        assert rt["as_of"] is None
+        # 翻转（旧断言 as_of is None）：有价必有抓取时点（R209 方案 J，「不编造——有数据即有抓取时点」）
+        assert rt["as_of"], f"有行情数据的行必含 as_of 抓取时点，实际: {rt['as_of']!r}"
+
+    def test_normalize_no_data_keeps_as_of_none(self):
+        """遗留 T 负向守卫：无行情数据（全 null）→ as_of 保持 None，不编造。"""
+        from app.routers.market import _normalize_watchlist_realtime
+        rt = _normalize_watchlist_realtime({"price": None, "change_pct": None})
+        assert set(rt.keys()) == _REALTIME_7FIELDS
+        assert rt["as_of"] is None, "无行情数据不得伪造抓取时点"
 
     def test_normalize_keeps_estimate_shape(self):
         """形态①（estimate_source 有值无 is_estimated）→ 补 is_estimated=true。"""
@@ -43,7 +56,7 @@ class TestNormalizeRealtimeR92:
         assert rt["estimate_source"] == "last_close_cache"
 
     def test_normalize_real_realtime(self):
-        """实时形态 → is_estimated=false + estimate_source=null。"""
+        """实时形态 → is_estimated=false + estimate_source=null + as_of 抓取时点。"""
         from app.routers.market import _normalize_watchlist_realtime
         rt = _normalize_watchlist_realtime({
             "price": 3.1, "change_pct": 0.2, "volume": 9999, "data_source": "sina",
@@ -51,6 +64,16 @@ class TestNormalizeRealtimeR92:
         assert rt["is_estimated"] is False
         assert rt["estimate_source"] is None
         assert rt["data_source"] == "sina"
+        assert rt["as_of"], f"实时形态必含 as_of 抓取时点，实际: {rt['as_of']!r}"
+
+    def test_normalize_keeps_existing_as_of(self):
+        """已有源时间戳（T-1 收盘/last-good）→ 不覆盖，保持原值。"""
+        from app.routers.market import _normalize_watchlist_realtime
+        rt = _normalize_watchlist_realtime({
+            "price": 210.5, "change_pct": -0.3, "volume": 500,
+            "as_of": "2026-08-19", "estimate_source": "last_close",
+        })
+        assert rt["as_of"] == "2026-08-19", "已有源时间戳不得被抓取时点覆盖"
 
     def test_normalize_none_returns_none(self):
         """realtime=None → 返回 None（顶层语义保留）。"""
